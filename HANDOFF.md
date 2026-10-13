@@ -765,6 +765,15 @@ renders eight examples in both and compares block-downsampled output).
   flip of the run's first stop. `puwet` is the identity until L3 has `pkwet`
   publish its pass mix; call it anyway, so L3 changes no preset. `pkfan`
   (L4) and `pkdab` (L5) are next.
+- **Paintkit slices prove byte identity with `scripts/identity_check.sh
+  BASE_WORKTREE [BIN] --control FILE [--gallery-still]`** (issue #263), not
+  by hand. It renders every tracked `examples/`, `gallery/` and
+  `selftest/drivers/` file that loads paintkit from both trees with one
+  binary (PNG only, 72 dpi, gallery at 144 dpi = the committed stills'
+  2x), about a minute. The base worktree must be at the branch's base
+  commit. Exit 1 = a page differs or pscat errored; exit 2 = the negative
+  control rendered identically, so the pages prove nothing. Write the
+  control as a tiny driver using a key only the branch has.
 - **A "collect stops, then draw runs" brush must not call the caller's
   `/Pressure` proc inside its per-lane/per-bristle loop.** A caller's
   proc is arbitrary code and may consume randomness (`{ frnd }` is a

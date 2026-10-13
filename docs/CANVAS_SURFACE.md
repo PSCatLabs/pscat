@@ -514,13 +514,24 @@ catch over the bounding box of all the motion's subpaths:
     rasterizes it back within tolerance (the `tests/pdf.rs` pattern).
 
 **Byte identity across the repo**, in every slice that edits a preset
-(#141's method):
-- With an `origin/main` worktree and the same release binary, render
-  every `examples/`, `gallery/` and `selftest/drivers/` file that loads
-  paintkit (21 files, 30 page renders at #141), and compare md5s. Every
-  file must match.
-- Render `gallery/alpine_lake.ps` at 2x and compare it with the
+(#141's method) is `scripts/identity_check.sh` (#263):
+
+```sh
+git worktree add --detach ../base-wt <the branch's base commit>
+scripts/identity_check.sh ../base-wt --gallery-still --control path/to/control.ps
+```
+
+- With a worktree at the branch's base commit (not a newer `origin/main`)
+  and the same release binary, it renders every `examples/`, `gallery/`
+  and `selftest/drivers/` file that loads paintkit (21 files, 30 page
+  renders at #141) as PNG and compares bytes. Every page must be
+  `identical`.
+- `--gallery-still` compares `gallery/alpine_lake.ps` at 2x with the
   committed `gallery/renders/alpine_lake.png` byte for byte.
+- `--control` takes a driver that uses a key only the branch has (for
+  this surface, `<< >> pkcanvas` with a `/Touch` stroke). It must render
+  differently in the two trees, or the script exits 2: the identical
+  pages would prove nothing.
 - Record the counts in the PR.
 
 ## 7. Slice plan
