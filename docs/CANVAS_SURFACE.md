@@ -297,9 +297,12 @@ the release `pscat`) implemented 3.1 and 3.2 as a stand-alone file:
   are memoized.
 
 **Memo.** `pjmemo` maps `(i + 4096) * 8192 + (j + 4096)` to `height(i,
-j)`. Every key stays below 2^26, safely inside gs's 32-bit integers.
-Cells outside +-4096 (about 10000pt at the default weave) are computed
-but not stored. The memo stops growing at 250000 entries, and later
+j)` for cells in the half-open range `-4096 <= i, j < 4096`. Within
+that range, the encoding is one-to-one, and every key stays below 2^26,
+safely inside gs's 32-bit integers. A closed range would collide: `(0,
+4096)` and `(1, -4096)` would share a key (Codex review, round 2). Cells
+outside the range (about 10000pt from the origin at the default weave)
+are computed but not stored. The memo stops growing at 250000 entries, and later
 cells are computed fresh. A height is a pure function, so the memo
 changes speed only and never output. A self-test pins that.
 

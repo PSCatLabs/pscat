@@ -142,7 +142,7 @@ to `p = (1 - u)/2` (so `u = +1`, the left edge, is `p = 0`, the first
 colour):
 
 ```
-k = floor(p*(N-1)), t = p*(N-1) - k                    (k clamped to N-2)
+k = min(floor(p*(N-1)), N-2), then t = p*(N-1) - k    (so p = 1 gives k = N-2, t = 1)
 t' = ColorMix = 0 ? (t < 0.5 ? 0 : 1)
                   : clamp((t - 0.5)/ColorMix + 0.5, 0, 1)
 c  = mix3(C_k, C_k+1, t')
