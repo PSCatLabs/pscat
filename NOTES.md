@@ -26,7 +26,9 @@ Decisions:
   Proof of the refactor: with every part replayed in its own colour, the
   1× render was md5-identical to main (commit 1a94c73). That commit is
   the evidence that the above-water scene is unchanged by the
-  restructuring.
+  restructuring. Single-part replay was checked separately: logging
+  `rrand` after each part as well, every part replayed alone ends on
+  exactly its recorded state (no mismatches).
 - **Each part is pulled into what is really under it.** Each reflected
   part is pulled into the reflection of whatever sits beneath it: the
   far range into open water, snow and planes into their range, the near
@@ -42,8 +44,8 @@ Decisions:
 - **No nested graze.** #181's specimen pulls and then grazes each part
   with a nested `/Direction 0` `pkwet`. Doing that here (3 graze layers,
   2 on the forest's back row, whose crest is already a pkwet) took the
-  1× render from about 79s to 131s user on a loaded machine, with little
-  visible gain. The graze is the existing horizontal `pkbroad` strokes,
+  1× render from about 64s to 131s user (same pulls, with and without
+  the graze, on a loaded machine), with little visible gain. The graze is the existing horizontal `pkbroad` strokes,
   laid every 8pt now instead of every 11, then the light lines. This is
   a deviation from the issue's "pulled down, then grazed across, element
   by element".
@@ -52,7 +54,9 @@ Decisions:
   ruled horizontal stripes. Two rows of fine spray along the foot,
   lifted 40pt with `/Direction 90 /OneSided true /Layers 14` over a
   thin haze band, read as mist rising off the lake. The far range's
-  foot is entirely behind the near range, so it gets none. The lift is
+  foot is almost entirely behind the near range, so it gets none.
+  Dropping the old fade there changes 169 pixels at 1×, a sliver at the
+  left edge behind the near pines. The lift is
   replayed sharp in the reflection: mirrored, it already runs down the
   water, and pulling it too would nest 14 × 7 passes, past the 64×
   budget.
@@ -63,8 +67,8 @@ Decisions:
   strokes against the old 91). No banding is visible, and coverage is
   more even than the hand-placed strokes'.
 
-Render time (release, 760×560, measured back to back on an idle
-machine): 24s before, 51s after. The pulls are about 26s of that, spread
+Render time (release, 760×560, before and after measured back to
+back): 24s before, 51s after. The pulls are about 26s of that, spread
 evenly over the parts with no single hot spot. The 2× still took about
 64s user under load.
 
