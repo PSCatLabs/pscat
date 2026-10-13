@@ -43,13 +43,22 @@ permissions:
   pull-requests: write
   issues: write
 
-# A commit pushed while a prior run for the same ref is still going (or a
-# manual rerun of an old commit) must not let the older run finish last and
-# overwrite newer test evidence on the PR/issue comment via --edit-last —
-# cancel the superseded run instead of racing it.
+# Pull requests: a commit pushed while a prior run for the same PR is still
+# going (or a manual rerun of an old commit) must not let the older run
+# finish last and overwrite newer test evidence on the PR/issue comment via
+# the upsert script — cancel the superseded run instead of racing it. That
+# is the only reason to cancel, and only `pull_request` runs post comments.
+#
+# Pushes to main: never cancel. Several agents merge to main in quick
+# succession, and cancelling each push run on the next merge left merge
+# commits with no completed result (#273). Pushes post no comments, so
+# nothing can race. The group key is the commit SHA for push events (a
+# shared `main` group would still let GitHub drop a *pending* run when a
+# newer one queues, even with cancel-in-progress off), so every merge
+# commit gets its own group and its own completed run.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:

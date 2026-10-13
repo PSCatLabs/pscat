@@ -113,17 +113,18 @@ Then re-read `$WORKTREE_DIR/.claude/skills/work-issue/SKILL.md` (it may have cha
 
 ## 5. Implement
 
-1. Read every file before you Edit it. Follow AGENTS.md's "Code quality bar"; update NOTES.md/HANDOFF.md/README.md.
+1. Read every file before you Edit it. Follow AGENTS.md's "Code quality bar"; write notes in `notes/<N>-<slug>.md` (never NOTES.md), update HANDOFF.md/README.md.
 2. If a human could look at the result (art, template, chart, font), read
    `.claude/skills/work-issue/references/demo-surfaces.md` now and do what it says.
-3. Commit at checkpoints; heartbeat at each.
-4. Deferred work becomes an issue, not just a NOTES.md line (keep the URLs for the report):
+3. Commit at checkpoints; heartbeat at each. Evidence sweeps, scratch dirs: pitfalls.md "Evidence runs and scratch hygiene".
+4. Deferred work becomes an issue, not just a notes line (keep the URLs for the report):
    `gh issue create --title "<title>" --body "<what and why; found while working #<N>>"`.
    If measurement disproves the premise: comment the data on the issue, say so atop the PR, file a follow-up.
 5. Quality gate. Before the first push: `git -C "$WORKTREE_DIR" fetch origin main && git -C
    "$WORKTREE_DIR" rebase origin/main`, so breakage already on `main` cannot fail this issue
-   (conflicts, or a PR that exists: pitfalls.md "Rebase and merge rules"). Do pitfalls.md "Step 5
-   checklist" (cheap checks first). Heartbeat, then run with `run_in_background: true` (over 120s):
+   (a no-op when up to date; conflicts, or a PR that exists: pitfalls.md "Rebase and merge rules").
+   Do pitfalls.md "Step 5 checklist" (cheap checks first). Heartbeat, then run with
+   `run_in_background: true` (over 120s; run it in the foreground if the last gate took under ~60 s):
    ```sh
    rm -f <SCRATCH>/gate-<N>.log && cd "${WORKTREE_DIR:?}" && { PSCAT_PROFILE=ci ./scripts/selftest.sh && cargo test --profile ci && cargo clippy --all-targets -- -D warnings && cargo fmt --all -- --check; } > <SCRATCH>/gate-<N>.log 2>&1; echo "GATE_EXIT=$?" >> <SCRATCH>/gate-<N>.log
    ```
@@ -135,7 +136,8 @@ Then re-read `$WORKTREE_DIR/.claude/skills/work-issue/SKILL.md` (it may have cha
 1. `git -C "$WORKTREE_DIR" diff --numstat origin/main...HEAD` — measure the size.
 2. Small (step 4): one short self-check or `advisor` call. Otherwise heartbeat, then `advisor`,
    asking it to check state mutated across branches (gsave/dict unwinding on every error
-   path, font/graphics state changed mid-loop), multi-byte/encoding edge cases, hidden side effects.
+   path, font/graphics state changed mid-loop), multi-byte/encoding edge cases, hidden side effects
+   (non-PostScript diff: say "not applicable").
 3. Fix real findings, re-run the gate (5.5), heartbeat. Don't loop on subjective feedback.
 
 ## 7. Open the PR
@@ -168,7 +170,7 @@ Read `.claude/skills/work-issue/references/codex-review.md` now (full policy). T
 3. Find Codex: `CODEX_SCRIPT=$(find "$HOME/.claude/plugins" -path "*/codex/scripts/codex-companion.mjs" 2>/dev/null | head -1)`.
    Empty or unauthenticated (`node "$CODEX_SCRIPT" status --json`): pitfalls.md stale-broker checks, then codex-review.md Fallback.
 4. Run the review as a **foreground blocking** Bash call (timeout 600000), never
-   `run_in_background`, never `ScheduleWakeup` in this turn, never from the main checkout. Start the
+   `run_in_background`, never `ScheduleWakeup` in this turn, never from the main checkout (if the harness backgrounds it anyway: pitfalls.md). Start the
    call with `WORKTREE_DIR=...; BRANCH=...` and item 3's `CODEX_SCRIPT=$(find ...)` line, then:
    ```sh
    rm -f <SCRATCH>/codex-review-<N>.json && \
@@ -180,7 +182,6 @@ Read `.claude/skills/work-issue/references/codex-review.md` now (full policy). T
      --scope branch --base origin/main \
      > <SCRATCH>/codex-review-<N>.json
    ```
-   If the harness backgrounds it anyway, see the polling pitfalls in pitfalls.md.
 5. Check it succeeded; if not, do not post from the file (as in 3):
    `jq -e '.codex.status == 0 and (.codex.stdout // "" | length > 0)' <SCRATCH>/codex-review-<N>.json`
 6. Post it on the PR, even when it is clean:
@@ -196,20 +197,21 @@ Read `.claude/skills/work-issue/references/codex-review.md` now (full policy). T
       the lock as above, keep `in-review` and the worktree, stop (pitfalls.md "Stop without merging").
 11. Write `<SCRATCH>/issue-<N>-summary.md`, starting `## Summary of work (PR #<PR#>)` with the sections
     in codex-review.md, then `gh issue comment <N> --body-file <SCRATCH>/issue-<N>-summary.md`
-12. `gh pr view <PR#> --json mergeable,mergeStateStatus,statusCheckRollup`. `BEHIND` does not block
-    merging (`require_up_to_date: false`): never update the branch for it. `DIRTY` (real conflicts):
-    `gh pr update-branch <PR#>` refuses, so merge locally (pitfalls.md "Rebase and merge rules"). If a
-    check is pending, heartbeat, then run this with `run_in_background: true` (~2-3 min; past 10, check it):
+12. First, in `$WORKTREE_DIR`: `git fetch origin main && git merge-tree --write-tree origin/main HEAD >/dev/null`;
+    non-zero = conflicts: merge `main` locally now (pitfalls.md "Rebase and merge rules"), push, then wait.
+    `gh pr view <PR#> --json mergeable,mergeStateStatus,statusCheckRollup`. `BEHIND` does not block
+    merging (`require_up_to_date: false`): never update the branch for it. `UNKNOWN` is not yet computed,
+    not a failure: re-query up to 5 times, ~10 s apart. `DIRTY`: `gh pr update-branch` refuses, merge
+    locally. If a check is pending, heartbeat, then run this with `run_in_background: true` (~2-3 min):
     ```sh
     gh pr checks <PR#> --watch --fail-fast > <SCRATCH>/ci-<N>.log 2>&1; echo "exit=$?" >> <SCRATCH>/ci-<N>.log
     ```
     Wait for the notification; no `sleep` loops, no `| tail`, no hand-back while it runs. `exit=` is a
-    hint only (it printed 0 on cancelled jobs). Heartbeat after every watch, then merge only if this prints `true`:
-    `gh pr view <PR#> --json mergeStateStatus,statusCheckRollup --jq '(.mergeStateStatus != "DIRTY") and ([.statusCheckRollup[] | (.conclusion // .state)] | (length > 0 and all(. == "SUCCESS")))'`
+    hint only. Heartbeat after every watch, then merge only if this prints `true` (`UNKNOWN` prints `false`):
+    `gh pr view <PR#> --json mergeable,mergeStateStatus,statusCheckRollup --jq '(.mergeable == "MERGEABLE" and .mergeStateStatus != "DIRTY") and ([.statusCheckRollup[] | (.conclusion // .state)] | (length > 0 and all(. == "SUCCESS")))'`
     Otherwise see pitfalls.md "CI wait" (pending, "no checks reported", infra failure: `gh run
     rerun --failed`; a failed step: stop and report). Never merge past a failure or use `--admin`.
-    **Pending CI** (only if you truly cannot wait): keep the lock and `in-review`, skip step 9,
-    report `Merge: pending CI` plus the pitfalls.md "CI wait" checklist.
+    Cannot wait: pitfalls.md "Pending-CI hand-back".
 13. `gh pr merge <PR#> --squash` (no `--delete-branch`: the repo deletes the remote branch; step 9 the local).
 
 ## 9. Post-merge cleanup
@@ -228,8 +230,7 @@ git -C "$(git rev-parse --show-toplevel)" fetch origin --prune
 git -C "$(git rev-parse --show-toplevel)" ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1 && git -C "$(git rev-parse --show-toplevel)" push origin --delete "$BRANCH"   # only if still there
 rm -rf "$(git rev-parse --path-format=absolute --git-common-dir)/work-issue-lock-<N>"
 ```
-Then confirm CI on `main` for your merge commit (pitfalls.md "Main CI after merge"). If it is red, stop,
-report it as the first line of the final report, and start no other work.
+Then confirm main CI for your merge commit (pitfalls.md "Main CI after merge"). Red: stop, report it first, start no other work.
 
 ## 10. Final report
 

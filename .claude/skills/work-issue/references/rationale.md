@@ -141,7 +141,7 @@ the source of truth:
   yet (e.g. one long compile or one big edit in progress) — also
   refresh right before starting the quality-gate build below, and
   again if any single step within it runs long.
-- Update `NOTES.md`/`HANDOFF.md`/`README.md` on the branch as
+- Update the notes fragment (`notes/`), `HANDOFF.md` and `README.md` on the branch as
   capabilities land, per AGENTS.md — not as an afterthought.
 
 Refresh the heartbeat before this build (it's often the single
@@ -258,8 +258,9 @@ scratchpad but harness prompts do. (#208 reversed this: see below.)
   two individually green PRs can break `main` together, so step 9 ends by
   checking the push-to-main `ci` run for the merge commit (red: stop and
   report). The merge queue is the proper fix and needs an org-owned repo.
-  SKILL.md 8.12's pass/fail query adds `mergeStateStatus != "DIRTY"` because
-  a conflicted PR keeps its old green checks.
+  SKILL.md 8.12's pass/fail query adds `mergeable == "MERGEABLE"` and
+  `mergeStateStatus != "DIRTY"` because a conflicted PR keeps its old green
+  checks, and `UNKNOWN` (right after a push) passes `!= "DIRTY"` on its own.
 - **Small hazards recorded as rules:** no `git stash` in a worktree
   (shared `refs/stash`), no `timeout` on macOS, a re-read of SKILL.md after
   step 3 (the worktree copy may be newer than the invoked one), and a short
@@ -269,3 +270,20 @@ scratchpad but harness prompts do. (#208 reversed this: see below.)
   override fought the harness's own instruction; issue-scoped names keep
   concurrent runs apart, and resume decisions use GitHub state because
   a scratchpad does not outlive its session.
+
+## Added in #273: parallel-agent friction
+
+- **Notes fragments.** Every PR prepended a section to `NOTES.md`, so any two
+  open PRs conflicted there (most DIRTY PRs on 2026-10-13 were NOTES-only).
+  New entries go in `notes/<issue>-<slug>.md`. No regenerated index: it would
+  be a shared file again. `NOTES.md` stays as frozen history.
+- **`ci.yml` stops cancelling push runs.** The per-ref `cancel-in-progress`
+  group cancelled each merge commit's run on the next merge, leaving agents
+  to hunt for a later run. PR runs still cancel (their comment race is the
+  reason the setting exists). Push runs are keyed by SHA, because with a shared
+  group and cancel off GitHub still drops a pending run when a newer one
+  queues.
+- **Main-CI wait loop** instead of listing once and guessing; rerun only for a
+  zero-step infrastructure failure with no newer push.
+- **8.12 query** requires `mergeable == "MERGEABLE"`; a `git merge-tree` check
+  runs before the CI wait so a PR that will go DIRTY is caught first.
