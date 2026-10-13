@@ -180,7 +180,11 @@ set and compared.
 above the new `/name ... def`, or `% @internal` if it's a private
 helper — see `build.rs`'s module docs for the exact grammar. `cargo
 build` fails until one of those is done; no `capabilities.rs` edit
-needed at all.
+needed at all. In `lib/paintkit.ps`, start each `@param` description
+with its unit in brackets (`[points]`, `[degrees]`, `[count]`, `[0..1]`,
+`[fraction of /Width]`, `[per /Width]`, ...; issue #141) —
+`tests/capabilities.rs` rejects a parameter without one, and checks
+that `/Spread` and `/Load` keep their one shared meaning.
 
 **In an unmigrated file:**
 

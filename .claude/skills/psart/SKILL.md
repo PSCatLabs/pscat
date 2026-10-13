@@ -105,7 +105,14 @@ prefer it over guessing a name from prose below.
 Every preset takes one dict of artistic controls, paints in whatever
 color you already set (there is no color key anywhere in the file), and
 is deterministic under your own `N srand`. `pscat --capabilities` has
-each one's real parameter list — reach for it rather than guessing.
+each one's real parameter list, with every parameter's unit in brackets
+at the start of its description (`[points]`, `[degrees]`, `[count]`,
+`[0..1]`, `[fraction of /Width]`, `[per /Width]`) — reach for it rather
+than guessing. Two names are shared vocabulary: `/Spread` is always a
+0..1 fraction of `/Width`, and `/Load` is always a contact rate per
+`/Width` of travel. (Older code may pass `pkwet /Spread`, `pktrowel
+/Load`, `pkdab /Spread` or `pkcrisscross /Spread`; those still work as
+deprecated aliases for `/Offset`, `/Cover`, `/Scatter` and `/Lean`.)
 Which tool to pick:
 
 - **`pkribbon`** — the foundation: your path as a centerline, filled as
@@ -132,7 +139,7 @@ Which tool to pick:
   underneath keeps showing through. Choose it over `pkoil` when you
   want the mark to look *placed by a tool* rather than brushed — large
   color masses, architectural planes, cliff faces, water, anything
-  built from flat overlapping shapes. `/Load` widens the deposit,
+  built from flat overlapping shapes. `/Cover` widens the deposit,
   `/Coverage` fills it, `/Viscosity` sets chatter vs chunk, `/Scrape`
   opens streaks, `/Angle` rakes the blade.
 - **`pkfan`** — fan brush: foliage, evergreen branches, grasses, cloud
@@ -161,7 +168,7 @@ Which tool to pick:
   look painted rather than penned.
 - **`pkdab`** — foliage/dab brush: bushes, leafy masses, clumps of
   highlight, any irregular vegetation texture. The path is a **spine**:
-  every stop seeds a cluster of blobby dabs within `/Spread`, at
+  every stop seeds a cluster of blobby dabs within `/Scatter` points, at
   `/Density` per `/Size` of travel (so `/Pitch` doesn't change
   coverage). One set of dab geometry is painted as a darker underlayer
   (`/Shadow`), the body in your current colour, and lighter highlight
@@ -198,7 +205,8 @@ Which tool to pick:
   `/Direction` (degrees) lines the passes up along one axis instead of
   scattering them: a reflection pulled down (`/Direction 270 /OneSided
   true`), a mountain foot lifted into mist (`90`, one-sided), a sky
-  swept across (`0`, both ways); `/Stretch` sets how narrow it stays
+  swept across (`0`, both ways); `/Offset` is how far, in points, the
+  outermost pass travels, and `/Stretch` sets how narrow it stays
   across the axis. Two rules: the wrapped proc must paint in the color
   it *inherits* (wrap a scene element by element, each with the
   `/Under` really beneath it), and the direction is in the user space

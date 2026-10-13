@@ -112,7 +112,7 @@
     grestore
     newpath -10 pdWL 14 add moveto
     -10 4 250 { dup 3.1 mul sin 5 mul 14 add pdWL add lineto } for
-    << /Size 2 /Spread 4 /Density 4 /Shadow 0.3 /Highlight 0.08 /Irregular 1 >> pkdab
+    << /Size 2 /Scatter 4 /Density 4 /Shadow 0.3 /Highlight 0.08 /Irregular 1 >> pkdab
     0 1 9 {
         /pdk exch def
         /pdx pdk 23 mul 9 add 6 jit add def
@@ -177,14 +177,14 @@
 /pdsharp { pop exec } def
 /pdpull {
     /pdu exch def
-    << /Direction 270 /OneSided true /Stretch 10 /Spread 22
+    << /Direction 270 /OneSided true /Stretch 10 /Offset 22
        /Pickup 0.8 /Under pdu >> pkwet
 } def
 /pdpullgraze {
     /pdu2 exch def
     /pdgp exch def
     { /pdgp load pdu2 pdpull }
-    << /Direction 0 /Stretch 6 /Layers 3 /Spread 6 /Pickup 0.5 /Under pdu2 >> pkwet
+    << /Direction 0 /Stretch 6 /Layers 3 /Offset 6 /Pickup 0.5 /Under pdu2 >> pkwet
 } def
 
 20  300 /pdsharp     (reflection left sharp) pdpanel
@@ -227,7 +227,7 @@
 
 /pdmistwet  { << /Soft 1 /Under pdRANGE >> pkwet } def
 /pdmistlift {
-    << /Direction 90 /OneSided true /Stretch 8 /Spread 46 /Pickup 0.9
+    << /Direction 90 /OneSided true /Stretch 8 /Offset 46 /Pickup 0.9
        /Under pdRANGE >> pkwet
 } def
 
@@ -258,7 +258,7 @@ gsave
                 pdhalf 0 eq
                     { pdstroke }
                     { /pdstroke load
-                      << /Direction 0 /Stretch 10 /Spread 30 /Pickup 0.9 /Under pdsc >> pkwet }
+                      << /Direction 0 /Stretch 10 /Offset 30 /Pickup 0.9 /Under pdsc >> pkwet }
                 ifelse
             } for
         grestore
