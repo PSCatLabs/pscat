@@ -86,7 +86,8 @@ truth.
 
 `in-progress` (claimed, being worked), `in-review` (PR open, awaiting
 merge decision) — set by whatever skill drives the issue→PR loop for
-this repo (see `README.md` / `AGENTS.md` for which one).
+this repo (see `README.md` / `AGENTS.md` for which one), and removed by
+it once the merge is verified.
 
 ## Regenerating this file
 
