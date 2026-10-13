@@ -45,6 +45,7 @@ the preset's drawing `gsave`. Unset or 1 takes the old path and no draws.
   base, with the same release binary: 30 of 30 page renders identical across 21
   files, the 2x `alpine_lake` equal to the committed still in both trees, and the
   control (a touched pkbroad, pkfan and pkliner) differing between the trees.
+  Run from a base worktree at the commit the branch was rebased onto (8ec75b4).
 - **pkliner's header** said the tooth "is a property of the paper"; it is now "of
   the tip on the paper", in the header and in the code comment, and the header
   says the shared canvas is `/Touch` (2.4, open question Q4). The mechanism is
