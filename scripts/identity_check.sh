@@ -17,8 +17,8 @@
 #                  merge changed would show up as differences that are not the
 #                  branch's. `git worktree add --detach <path> origin/main` right
 #                  after the step 5.5 rebase is the usual way to make one.
-#   BIN            the pscat binary. Default: `$CARGO_TARGET_DIR/release/pscat`
-#                  (else `<this repo>/target/release/pscat`), built first with
+#   BIN            the pscat binary. Default: the release binary in Cargo's
+#                  target directory (from `cargo metadata`), built first with
 #                  `cargo build --release --bin pscat`. A BIN you pass is used
 #                  as-is and never built. The same binary renders both trees, so
 #                  a difference can only come from the trees' own files.
@@ -54,9 +54,10 @@
 #                         each tree (needs --gallery-dpi 144).
 #   --dpi N               examples and drivers (default 72)
 #   --gallery-dpi N       gallery pieces (default 144)
-#   --out DIR             scratch directory (default: a fresh mktemp -d under
-#                         ${TMPDIR:-/tmp}, removed on success). Never inside
-#                         either tree.
+#   --out DIR             where the scratch directory goes (default
+#                         ${TMPDIR:-/tmp}). The script makes its own fresh
+#                         identity_check.XXXXXX inside it and deletes only
+#                         that, on success. Never inside either tree.
 #   --keep                keep the scratch directory
 #   -j N                  parallel renders (default: CPU count)
 #
@@ -154,9 +155,15 @@ case "$JOBS" in ''|*[!0-9]*|0) die "-j takes a positive number" ;; esac
 
 # ---- binary ------------------------------------------------------------------
 if [ -z "$BIN" ]; then
-    BIN="${CARGO_TARGET_DIR:-$ROOT/target}/release/pscat"
     echo "building the release pscat (cargo build --release --bin pscat)..." >&2
     cargo build --release --bin pscat --manifest-path "$ROOT/Cargo.toml" >&2
+    # Ask Cargo where the binary went (scripts/selftest.sh does the same): a
+    # `build.target-dir` in config.toml would otherwise leave us running a
+    # stale binary from $ROOT/target.
+    TARGET_DIR=$(cargo metadata --format-version 1 --no-deps \
+        --manifest-path "$ROOT/Cargo.toml" 2>/dev/null \
+        | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')
+    BIN="${TARGET_DIR:-${CARGO_TARGET_DIR:-$ROOT/target}}/release/pscat"
 fi
 [ -x "$BIN" ] || die "pscat binary '$BIN' is not executable"
 BIN="$(cd "$(dirname "$BIN")" && pwd -P)/$(basename "$BIN")"
@@ -180,13 +187,18 @@ OUT="$(cd "$OUT" && pwd -P)"
 case "$OUT/" in
     "$ROOT"/*|"$BASE"/*) die "--out '$OUT' is inside one of the trees; use a directory outside the repo" ;;
 esac
-rm -rf "$OUT/base" "$OUT/head"
+# Work in a fresh directory this run owns, never in --out itself: nothing
+# below ever deletes anything it did not create, so --out may safely be a
+# directory that holds other things (even a baseline checkout).
+if [ "$made_out" -eq 0 ]; then
+    OUT=$(mktemp -d "$OUT/identity_check.XXXXXX")
+fi
 mkdir -p "$OUT/base" "$OUT/head"
 
 FAILED=0
 CONTROL_FAILED=0
 cleanup() {
-    if [ "$made_out" -eq 1 ] && [ "$KEEP" -eq 0 ] && [ "$FAILED" -eq 0 ] && [ "$CONTROL_FAILED" -eq 0 ]; then
+    if [ "$KEEP" -eq 0 ] && [ "$FAILED" -eq 0 ] && [ "$CONTROL_FAILED" -eq 0 ]; then
         rm -rf "$OUT"
     else
         echo "scratch renders kept in $OUT" >&2
