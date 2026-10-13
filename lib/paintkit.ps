@@ -1361,6 +1361,23 @@
 % guaranteed-final-stop duplicate (walkpath's sp==0 coincidence case)
 % then naturally deposits nothing extra.
 %
+% Speck sets the grain of a cloud, and the core's solidity follows from
+% how many particles land per unit area. For vapour (cloud, mist, haze)
+% use /Speck about 1 to 1.2: at a small /Nozzle (about 8) and a high
+% /Density (150 to 400) the core overlaps into one solid mass while the
+% falloff stays granular, and a later `pkwet` grades that fine fringe
+% into the layer beneath. Density alone does not get there at a larger
+% speck: at /Speck 2 to 3 the same counts give a solid bar with lumpy,
+% coarse edges, which reads as a paint stroke, not vapour. At /Speck 2
+% to 3 with low or moderate /Density (around 60 per nozzle of travel
+% for a nozzle of 22) the particles stay discrete: visible spatter, not
+% a cloud, and no `pkwet` pass turns it into one. At /Speck 1 to
+% 1.2 the core fuses once /Density is high enough for the nozzle (150
+% gives a loose core, 400 a solid one). Coverage roughly tracks
+% Density * Speck^2 / Nozzle^2, so a larger /Nozzle needs proportionally
+% more /Density for the same fused core.
+% examples/paintkit_spray_demo.ps row 1 shows the same stroke both ways.
+%
 % See the `@param` tags directly above `pkspray`'s own definition below
 % for the full parameter list with defaults. Caveats the terse tags
 % don't carry: /Falloff is implemented as a radial draw r = Nozzle *
@@ -1498,13 +1515,13 @@
 
 % opts pkspray -
 % @kind: Procedure
-% @summary: A spray-paint brush: seeded opaque particles deposited around each sampled centerline stop, thinning outward under a radial falloff, with an optional overspray mist past the nozzle edge and optional start/end trigger-dwell bursts.
+% @summary: A spray-paint brush: seeded opaque particles deposited around each sampled centerline stop, thinning outward under a radial falloff, with an optional overspray mist past the nozzle edge and optional start/end trigger-dwell bursts. For vapour (cloud, mist, haze) use /Speck about 1 to 1.2 with a small /Nozzle (about 8), /Density 150 to 400 and /Falloff near 1: the core fuses solid and only the fringe stays granular (then pkwet it into the sky). At /Speck 2 to 3 high density gives coarse lumpy bars and low density gives discrete spatter; neither reads as vapour.
 % @example: newpath ... << /Nozzle 12 /Density 40 >> pkspray
 % @param: /Nozzle Spray radius around the centerline; must be > 0 (default 8)
 % @param: /Density Mean particles deposited per one nozzle-diameter of travel; must be >= 0 (0 renders nothing); uncapped, bounded by the deposit-budget safety limit instead (default 30)
 % @param: /Falloff 0..1 how quickly density thins outward; three discrete levels (min-of-m-uniforms radial draws, m = 1 + truncate(2*Falloff)) (default 0.5)
 % @param: /Overspray 0..1 probability each particle escapes past the nozzle edge as half-size mist in the band [Nozzle, Nozzle*(1+Overspray)] (default 0.12)
-% @param: /Speck Mean particle diameter; must be > 0 (default 1.4)
+% @param: /Speck Mean particle diameter in points; must be > 0. About 1 to 1.2 with a small /Nozzle and high /Density fuses into vapour (cloud, mist); 2 to 3 gives coarse lumpy bars at high /Density and discrete spatter at low (default 1.4)
 % @param: /Speckle 0..1 per-particle diameter variation, clamped to never go below 10% of Speck (default 0.35)
 % @param: /Pitch walkpath sampling pitch for the shared centerline pass; must be > 0 (default Nozzle*0.5, capped at 6)
 % @param: /StartBurst 0..1 extra particles pooled at each subpath's first stop (trigger dwell) (default 0)
