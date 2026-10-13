@@ -583,7 +583,7 @@ renders eight examples in both and compares block-downsampled output).
    `tests/common/mod.rs::pdf_text`.
 4. Dry media (epic #232): **read `docs/DRYMEDIA.md` and
    `docs/drymedia/REFERENCES.md` before starting #234–#242.** The design
-   (#233) needs the maintainer's approval before #234 or #236 starts.
+   (#233) is approved, with every recommended answer to its Q1–Q9.
    drykit reads paintkit's `@internal` `pj-` surface (`pjheight`,
    `pjrange`, `pjCTM`) without editing paintkit.ps. A change to those names
    breaks drykit, so treat them as a contract.

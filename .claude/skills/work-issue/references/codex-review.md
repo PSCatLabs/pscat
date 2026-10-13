@@ -291,17 +291,12 @@ If eligible, merge:
 gh pr view <PR#> --json mergeable,mergeStateStatus,statusCheckRollup
 ```
 
-If `mergeStateStatus` is `BEHIND` (branch protection's `strict` status
-check requires the tested commit to reflect current `main` — a PR
-opened a while ago, or after another PR merged first, will hit this),
-update and wait for CI before merging (with several agents merging,
-`BEHIND` is the normal case, not an exception, #208):
-
-```sh
-gh pr update-branch <PR#>
-# then wait with SKILL.md step 8.12's background recipe (pitfalls.md "CI wait"); never poll or sleep.
-# Pass/fail comes from the statusCheckRollup query there, not from the watch's exit= line.
-```
+`BEHIND` does not block merging: `SDLC.md` sets `require_up_to_date: false`
+(`strict: false` on GitHub, #257), so a PR behind `main` merges on its last
+green CI run and you do not update the branch or re-run CI for it. Only
+`DIRTY` (real conflicts) needs a local merge of `main` (pitfalls.md "Rebase
+and merge rules"), then a fresh CI wait. The merge decision is SKILL.md step
+8.12's query, which includes `mergeStateStatus != "DIRTY"`.
 
 Then merge using the shape recorded in `SDLC.md`'s `merge_button`
 block (this repo: squash; `delete_branch_on_merge: true` makes GitHub
@@ -316,7 +311,11 @@ and switch the main checkout, which fails while the branch is checked out
 in the worktree, so it printed a harmless error on every run. Step 9
 removes the worktree, then the local branch.
 
-If CI fails on the updated branch, don't force past it — treat that
+After the merge and step 9, check the push-to-main `ci` run for the merge
+commit (pitfalls.md "Main CI after merge"). A red run means stop and
+report; it is the safety net that replaces the up-to-date requirement.
+
+If CI fails on the PR, don't force past it — treat that
 as a blocker the same as a failed review, and report it rather than
 merging anyway. Cancelled or never-started jobs (infrastructure) may be
 re-run once the `pitfalls.md` "CI wait" check shows no step ran; a real

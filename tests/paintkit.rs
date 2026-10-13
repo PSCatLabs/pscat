@@ -9563,3 +9563,405 @@ fn loaded_keys_change_the_render_on_both_presets() {
         );
     }
 }
+
+// ---------------------------------------------------------------------
+// canvas surface S2 (issue #222, slice S2 of #182): `/Touch` on
+// `pktrowel` and `pkdry`. CANVAS_SURFACE.md section 6, tests 1-5 and 7.
+// ---------------------------------------------------------------------
+
+/// The two adopting presets, each with a stroke across a 200pt page.
+const TOUCH_PRESETS: [&str; 2] = ["pktrowel", "pkdry"];
+
+/// Options that make each preset lay its full footprint: no contact
+/// chain, scrape or colour jitter, so the only break-up is the catch.
+fn touch_solid(preset: &str) -> &'static str {
+    match preset {
+        "pktrowel" => "/Width 40 /Coverage 1 /Scrape 0 /EdgeBuildup 0 /ColorJitter 0",
+        _ => "/Width 30 /Bristles 40 /Load 1 /Dropout 0 /ColorJitter 0",
+    }
+}
+
+/// A 200pt page painted black by `src`, after `5 srand`.
+fn touch_page(src: &str) -> Interp {
+    let mut it = fresh(200, 200);
+    it.run_str(&format!("0 0 0 setrgbcolor 5 srand {src}"))
+        .unwrap_or_else(|e| panic!("{src}: {}", it.error_report(&e)));
+    it
+}
+
+fn touch_mask(it: &Interp) -> Vec<bool> {
+    it.gfx()
+        .pixmap
+        .pixels()
+        .iter()
+        .map(|&p| luma(p) < 180.0)
+        .collect()
+}
+
+/// Test 1: with no canvas, with a canvas and no /Touch, and with /Touch
+/// 1, each preset renders the same pixels.
+#[test]
+fn touch_unset_is_byte_identical() {
+    for preset in TOUCH_PRESETS {
+        let stroke = |opts: &str| {
+            format!(
+                "newpath 20 90 moveto 100 130 lineto 180 100 lineto << /Width 30 {opts} >> {preset}"
+            )
+        };
+        let bare = pixels(&touch_page(&stroke("")));
+        let canvas = pixels(&touch_page(&format!(
+            "<< /Seed 3 >> pkcanvas {}",
+            stroke("")
+        )));
+        let one = pixels(&touch_page(&format!(
+            "<< /Seed 3 >> pkcanvas {}",
+            stroke("/Touch 1")
+        )));
+        assert_eq!(canvas, bare, "{preset}: setting a canvas moved the mark");
+        assert_eq!(one, bare, "{preset}: /Touch 1 is not the untouched mark");
+        let half = pixels(&touch_page(&format!(
+            "<< /Seed 3 >> pkcanvas {}",
+            stroke("/Touch 0.5")
+        )));
+        assert_ne!(half, bare, "{preset}: /Touch 0.5 changed nothing");
+    }
+}
+
+/// Test 2: the caller's stream ends in the same place whatever /Touch is,
+/// so a mark drawn after the preset doesn't move.
+#[test]
+fn touch_takes_no_random_draws() {
+    for preset in TOUCH_PRESETS {
+        let stroke = |touch: &str| {
+            format!(
+                "5 srand newpath 20 90 moveto 180 110 lineto << /Width 30 {touch} >> {preset} rand"
+            )
+        };
+        let mut it = fresh(200, 200);
+        it.run_str(&format!(
+            "<< /Seed 3 >> pkcanvas {} /a exch def \
+             {} a ne {{ touch-0.5-moved-the-callers-stream }} if \
+             {} a ne {{ touch-0.2-moved-the-callers-stream }} if",
+            stroke(""),
+            stroke("/Touch 0.5"),
+            stroke("/Touch 0.2")
+        ))
+        .unwrap_or_else(|e| panic!("{preset}: {}", it.error_report(&e)));
+    }
+}
+
+/// Phi correlation of two ink masks over the pixels where `region` holds.
+fn touch_phi(a: &[bool], b: &[bool], region: &[bool]) -> f64 {
+    let (mut n11, mut n10, mut n01, mut n00) = (0f64, 0f64, 0f64, 0f64);
+    for i in 0..a.len() {
+        if !region[i] {
+            continue;
+        }
+        match (a[i], b[i]) {
+            (true, true) => n11 += 1.0,
+            (true, false) => n10 += 1.0,
+            (false, true) => n01 += 1.0,
+            (false, false) => n00 += 1.0,
+        }
+    }
+    let denom = ((n11 + n10) * (n01 + n00) * (n11 + n01) * (n10 + n00)).sqrt();
+    if denom == 0.0 {
+        0.0
+    } else {
+        (n11 * n00 - n10 * n01) / denom
+    }
+}
+
+/// Test 3: a pktrowel stroke and a crossing pkdry stroke, each rendered
+/// alone, catch on the same knuckles. Measured over the intersection of
+/// their untouched footprints, so footprint overlap alone can't raise the
+/// number. The control breaks the same strokes with their own controls
+/// and no surface.
+#[test]
+fn crossing_strokes_catch_on_the_same_weave() {
+    let knife = |seed: u32, extra: &str| {
+        format!(
+            "{seed} srand newpath 20 100 moveto 180 108 lineto \
+             << /Width 50 /Coverage 1 /Scrape 0 /EdgeBuildup 0 /ColorJitter 0 {extra} >> pktrowel"
+        )
+    };
+    let brush = |seed: u32, extra: &str| {
+        format!(
+            "{seed} srand newpath 96 180 moveto 106 20 lineto \
+             << /Width 50 /Bristles 60 /Load 1 /Dropout 0 /ColorJitter 0 {extra} >> pkdry"
+        )
+    };
+    for seed in [3u32, 7, 11] {
+        let foot_k = touch_mask(&touch_page(&knife(seed, "")));
+        let foot_b = touch_mask(&touch_page(&brush(seed, "")));
+        let region: Vec<bool> = foot_k.iter().zip(&foot_b).map(|(a, b)| *a && *b).collect();
+        assert!(
+            region.iter().filter(|&&r| r).count() > 1000,
+            "seed {seed}: the strokes barely overlap"
+        );
+        let canvas = format!("<< /Seed {seed} >> pkcanvas ");
+        let k = touch_mask(&touch_page(&format!(
+            "{canvas}{}",
+            knife(seed, "/Touch 0.55")
+        )));
+        let b = touch_mask(&touch_page(&format!(
+            "{canvas}{}",
+            brush(seed, "/Touch 0.55")
+        )));
+        let phi = touch_phi(&k, &b, &region);
+        let ck = touch_mask(&touch_page(&knife(seed, "/Coverage 0.45")));
+        let cb = touch_mask(&touch_page(&brush(seed, "/Load 0.35 /Dropout 0.4")));
+        let control = touch_phi(&ck, &cb, &region);
+        eprintln!("seed {seed}: phi {phi:.3}, control {control:.3}");
+        assert!(phi > 0.5, "seed {seed}: touched strokes phi {phi:.3}");
+        assert!(
+            control.abs() <= 0.2,
+            "seed {seed}: control phi {control:.3}"
+        );
+    }
+}
+
+/// Test 4: the catch is fixed in canvas space. A stroke moved 7.5pt (3
+/// cells) after `pkcanvas` has exactly the same pixels as the unmoved
+/// one wherever both untouched footprints are fully inked and the catch
+/// is fully in or fully out. (Where a knuckle's edge is antialiased, a
+/// pixel's value depends on how many of the overlapping lanes or
+/// bristles were filled through it, which moves with the mark.)
+#[test]
+fn touch_catch_is_anchored_to_the_canvas() {
+    let catch = pixels(&touch_page(
+        "<< >> pkcanvas gsave 0 0 200 200 0.5 pjcatch 0 0 200 200 rectfill grestore",
+    ));
+    for preset in TOUCH_PRESETS {
+        let solid = touch_solid(preset);
+        let stroke = |touch: &str| {
+            format!("newpath 30 100 moveto 170 104 lineto << {solid} {touch} >> {preset}")
+        };
+        let full = |it: &Interp| -> Vec<bool> {
+            it.gfx()
+                .pixmap
+                .pixels()
+                .iter()
+                .map(|&p| luma(p) == 0.0)
+                .collect()
+        };
+        let foot = full(&touch_page(&stroke("")));
+        let foot_moved = full(&touch_page(&format!("7.5 0 translate {}", stroke(""))));
+        let still = pixels(&touch_page(&format!(
+            "<< >> pkcanvas {}",
+            stroke("/Touch 0.5")
+        )));
+        let moved = pixels(&touch_page(&format!(
+            "<< >> pkcanvas 7.5 0 translate {}",
+            stroke("/Touch 0.5")
+        )));
+        let (mut caught, mut missed, mut differ) = (0, 0, 0);
+        for i in 0..foot.len() {
+            let px = |v: &[u8]| v[i * 4..i * 4 + 4].to_vec();
+            let c = px(&catch);
+            let hard = c == [0, 0, 0, 255] || c == [255, 255, 255, 255];
+            if foot[i] && foot_moved[i] && hard {
+                if c[0] == 0 {
+                    caught += 1;
+                } else {
+                    missed += 1;
+                }
+                differ += usize::from(px(&still) != px(&moved));
+            }
+        }
+        assert!(
+            caught > 200 && missed > 200,
+            "{preset}: too few pixels to compare ({caught} caught, {missed} missed)"
+        );
+        assert_eq!(
+            differ, 0,
+            "{preset}: a moved stroke caught on a different weave"
+        );
+    }
+}
+
+/// Test 4, under pkwet: every pass of a directional pkwet is translated,
+/// but each builds its catch in canvas space, so all the ink lands on the
+/// same knuckles a plain catch at that touch has.
+#[test]
+fn touch_under_pkwet_stays_on_the_canvas() {
+    for preset in TOUCH_PRESETS {
+        let solid = touch_solid(preset);
+        let wet = touch_page(&format!(
+            "<< >> pkcanvas \
+             {{ newpath 30 110 moveto 170 114 lineto << {solid} /Touch 0.5 >> {preset} }} \
+             << /Direction 270 /Offset 8 >> pkwet"
+        ));
+        let catch = touch_page(
+            "<< >> pkcanvas gsave 0 0 200 200 0.5 pjcatch 0 0 200 200 rectfill grestore",
+        );
+        let w = touch_mask(&wet);
+        let inked = w.iter().filter(|&&x| x).count();
+        assert!(
+            inked > 500,
+            "{preset}: the wet stroke barely inked ({inked})"
+        );
+        let off_catch = catch
+            .gfx()
+            .pixmap
+            .pixels()
+            .iter()
+            .zip(&w)
+            .filter(|(p, ink)| **ink && luma(**p) >= 250.0)
+            .count();
+        assert_eq!(off_catch, 0, "{preset}: pkwet passes inked off the catch");
+    }
+}
+
+/// Test 5: ink never falls as /Touch rises, /Touch 0 inks nothing, and
+/// /Touch 0.99 is all but the full mark.
+#[test]
+fn touch_less_touch_less_ink() {
+    for preset in TOUCH_PRESETS {
+        let solid = touch_solid(preset);
+        let ink = |touch: &str| {
+            ink_count(&touch_page(&format!(
+                "<< >> pkcanvas newpath 30 100 moveto 170 104 lineto << {solid} {touch} >> {preset}"
+            )))
+        };
+        let full = ink("");
+        let mut last = 0;
+        for touch in ["0", "0.2", "0.4", "0.6", "0.8", "0.99", "1"] {
+            let n = ink(&format!("/Touch {touch}"));
+            assert!(
+                n >= last,
+                "{preset} /Touch {touch}: {n} inked < {last} before it"
+            );
+            last = n;
+            if touch == "0" {
+                assert_eq!(n, 0, "{preset}: /Touch 0 must ink nothing");
+            }
+            if touch == "0.99" {
+                let frac = n as f64 / full as f64;
+                assert!(frac >= 0.995, "{preset}: /Touch 0.99 keeps only {frac:.4}");
+            }
+        }
+        assert_eq!(last, full, "{preset}: /Touch 1 is not the full mark");
+    }
+}
+
+/// Test 7: each preset's own reach box contains its whole mark. The
+/// catch is a per-cell pure function, so the same touched mark through
+/// a whole-page catch (the test-only `pjWholePage` switch) must be pixel
+/// for pixel the same. One case per emitter in CANVAS_SURFACE.md 3.2's
+/// table, plus a rotated and scaled user space.
+#[test]
+fn touch_box_contains_the_whole_mark() {
+    let line = "newpath 40 100 moveto 160 112 lineto";
+    let cases: [(&str, &str, &str); 27] = [
+        ("pktrowel", line, "/Width 40"),
+        ("pktrowel", "newpath 100 100 moveto", "/Width 60 /Drag 1"),
+        // Shorter than two pitches: the trim leaves the middle stop a
+        // single-stop run.
+        (
+            "pktrowel",
+            "newpath 95 100 moveto 105 100 lineto",
+            "/Width 50 /Pitch 6 /Drag 1",
+        ),
+        ("pktrowel", line, "/Width 40 /Jitter 12"),
+        ("pktrowel", line, "/Width 60 /Drag 1 /Angle 80"),
+        // /Pitch at the stroke's length would leave only the two end stops,
+        // which the trim always removes; half of it leaves one stop between
+        // them, a single-stop run at the coarsest pitch that still inks.
+        ("pktrowel", line, "/Width 60 /Drag 1 /Angle -80 /Pitch 61"),
+        ("pktrowel", line, "/Width 20 /Drag 1 /Pressure { 4 }"),
+        (
+            "pktrowel",
+            line,
+            "/Width 30 /Drag 1 /Pressure { pkbell 3 mul }",
+        ),
+        ("pktrowel", line, "/Width 40 /EdgeBuildup 1 /Jitter 6"),
+        // One term at a time, large against the others' slack, so dropping
+        // any one reach term fails a case (mutation-checked, issue #222).
+        ("pktrowel", line, "/Width 20 /Drag 0 /Jitter 15"),
+        (
+            "pktrowel",
+            "newpath 100 100 moveto",
+            "/Width 10 /Drag 0 /Pitch 40",
+        ),
+        (
+            "pktrowel",
+            "newpath 40 60 moveto 160 70 lineto 60 140 moveto 150 150 lineto 100 100 moveto",
+            "/Width 30 /Drag 1 /Colors [[1 0 0] [0 0 1]] /Light 90",
+        ),
+        (
+            "pktrowel",
+            "100 100 translate 30 rotate 1.5 0.8 scale newpath -50 0 moveto 50 5 lineto",
+            "/Width 40 /Drag 1 /Jitter 4",
+        ),
+        ("pkdry", line, "/Width 40"),
+        (
+            "pkdry",
+            "newpath 100 100 moveto",
+            "/Width 80 /Spread 1 /Load 1 /Bristles 60",
+        ),
+        (
+            "pkdry",
+            "newpath 99 100 moveto 101 100 lineto",
+            "/Width 80 /Spread 1 /Load 1 /Bristles 60 /Pitch 6",
+        ),
+        ("pkdry", line, "/Width 40 /Spread 1 /Jitter 8 /Load 1"),
+        (
+            "pkdry",
+            line,
+            "/Width 40 /Spread 1 /BristleWidth 20 /WidthJitter 1 /Load 1",
+        ),
+        ("pkdry", line, "/Width 40 /Spread 1 /Pitch 121 /Load 1"),
+        ("pkdry", line, "/Width 10 /Spread 1 /Jitter 20 /Load 1"),
+        (
+            "pkdry",
+            line,
+            "/Width 160 /Spread 1 /BristleWidth 2 /WidthJitter 0 /Bristles 100 /Load 1",
+        ),
+        (
+            "pkdry",
+            line,
+            "/Width 4 /Spread 1 /BristleWidth 40 /WidthJitter 1 /Bristles 100 /Load 1",
+        ),
+        (
+            "pkdry",
+            line,
+            "/Width 40 /Spread 1 /Load 1 /Dropout 0 /Bristles 100",
+        ),
+        (
+            "pkdry",
+            "newpath 40 60 moveto 160 70 lineto 60 140 moveto 150 150 lineto 100 100 moveto",
+            "/Width 40 /Spread 1 /Load 1",
+        ),
+        (
+            "pkdry",
+            "newpath 100 100 moveto 60 60 moveto 61 60 lineto",
+            "/Width 60 /Spread 1 /Load 1 /BristleWidth 12 /WidthJitter 1 /Jitter 4",
+        ),
+        (
+            "pkdry",
+            "100 100 translate 30 rotate 1.5 0.8 scale newpath -50 0 moveto 50 5 lineto",
+            "/Width 40 /Spread 1 /Load 1 /Jitter 4",
+        ),
+        (
+            "pkdry",
+            "100 100 translate -20 rotate 0.7 1.4 scale newpath 0 0 moveto",
+            "/Width 70 /Spread 1 /Load 1 /Bristles 60 /BristleWidth 10",
+        ),
+    ];
+    for (preset, path, opts) in cases {
+        let render = |whole: &str| {
+            touch_page(&format!(
+                "<< >> pkcanvas {whole} {path} << {opts} /Touch 0.9 >> {preset}"
+            ))
+        };
+        let own = render("");
+        let whole = render("userdict /pjWholePage true put");
+        assert!(ink_count(&own) > 0, "{preset} {opts}: nothing inked");
+        assert_eq!(
+            pixels(&own),
+            pixels(&whole),
+            "{preset} {opts} on `{path}`: the reach box clipped real paint"
+        );
+    }
+}

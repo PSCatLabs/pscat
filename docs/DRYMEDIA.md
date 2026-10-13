@@ -1,7 +1,8 @@
 # DRYMEDIA.md: drykit design, chalk, crayon and charcoal (issue #233)
 
-This is the design for epic #232. The maintainer approves it before #234 (the
-core engine) or #236 (stroke glyphs) starts. Nothing here is implemented.
+This is the design for epic #232. The maintainer approved it on 2026-10-13
+(PR #265), accepting every recommended answer to Q1–Q9 in section 10.
+Nothing here is implemented yet.
 
 Read these first:
 

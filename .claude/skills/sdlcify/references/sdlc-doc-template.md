@@ -3,6 +3,9 @@
 sdlcify owns this file completely — regenerate it in full on every apply
 that touches policy, filling in the frontmatter from Phase 1's answers
 (or the existing frontmatter, if this is a re-run and nothing changed).
+Policy fields that change the prose (e.g. `require_up_to_date`) have their
+paragraph in the template below; regenerate from the template, never
+re-derive the prose from memory, or the paragraph is lost on the next run.
 Don't hand-edit prose around the frontmatter expecting it to survive; if
 the user wants to change policy, they edit the frontmatter and re-run
 sdlcify, or ask the agent to.
@@ -23,6 +26,7 @@ required_status_checks:
   - <ci job name>
 branch_protection:
   required_approving_review_count: 0
+  require_up_to_date: true   # GitHub's required_status_checks.strict; true when absent
   enforce_admins: true
   allow_force_pushes: false
   allow_deletions: false
@@ -81,6 +85,23 @@ check passing, `<N>` approving review(s), no force-pushes, no deletions.
 Admin bypass is `<on/off>` — see the frontmatter above for the exact
 values currently applied; this prose is a summary, not the source of
 truth.
+
+<!-- Include this paragraph only when require_up_to_date is false. -->
+**Up-to-date branches are not required** (`require_up_to_date: false`,
+GitHub's `required_status_checks.strict`). A PR may merge while it is
+behind `<default_branch>`, so a PR's last green CI run is not re-run
+against a moving `<default_branch>`. Strict mode forces an
+update-branch-and-rerun cycle (one full CI run) on almost every PR when
+several agents merge in parallel. The safety net is CI on every push to
+`<default_branch>`: after merging, the merger checks that the push run for
+its merge commit went green and stops and reports if it did not. The
+intended long-term replacement is a merge queue, which needs an
+organization-owned repo; when this repo moves to one, switch to the queue
+and add a `merge_group:` trigger to the CI workflow.
+
+<!-- When require_up_to_date is true (or absent), say instead: "A PR must
+be up to date with `<default_branch>` before it merges (`strict` status
+checks)." -->
 
 ## Labels
 
