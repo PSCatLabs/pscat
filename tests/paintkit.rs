@@ -8935,7 +8935,10 @@ fn pkcanvas_every_documented_parameter_changes_the_render() {
         "",
         "",
     ));
-    assert_eq!(explicit, baseline, "the documented defaults are not the defaults");
+    assert_eq!(
+        explicit, baseline,
+        "the documented defaults are not the defaults"
+    );
 }
 
 #[test]
@@ -9067,7 +9070,10 @@ fn ghostscript_agrees_on_the_surface() {
 
     let (mean, disjoint) = canvas_mean_block_diff(&pscat_blocks(11), &gs_blocks);
     assert_eq!(disjoint, 0, "blocks inked in one render only");
-    assert!(mean < 6.0, "pscat and gs disagree on the surface: {mean:.2}");
+    assert!(
+        mean < 6.0,
+        "pscat and gs disagree on the surface: {mean:.2}"
+    );
 
     // Negative control: another seed must be far outside that tolerance,
     // or the comparison above proves nothing.
