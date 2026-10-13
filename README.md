@@ -509,7 +509,8 @@ nozzle-diameter of travel) regardless of `/Pitch`, and are bounded by
 a deposit-budget safety limit checked during the counting pass, before
 any drawing. Stencils need no library support: particles are plain
 fills, so any active clip (`charpath` + `clip` included) masks them.
-`examples/paintkit_spray_demo.ps` shows a clean pass, a wide aerosol
+`examples/paintkit_spray_demo.ps` shows the same cloud at `/Speck` 3
+(coarse bar) and `/Speck` 1.2 (fused vapour), a clean pass, a wide aerosol
 pass, heavy overspray, the falloff levels, a word sprayed through a
 charpath stencil, a star sprayed through an arbitrary-path stencil,
 and a tag mark with bursts pooled at both ends.

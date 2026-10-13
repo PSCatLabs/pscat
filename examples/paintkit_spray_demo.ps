@@ -1,20 +1,23 @@
 %!PS-Adobe-3.0
 %%Title: Paintkit — spray-paint deposition brush with seeded particle scatter (issue #44)
-%%BoundingBox: 0 0 620 760
+%%BoundingBox: 0 0 620 860
 %%EndComments
 
 % Specimen for paintkit's pkspray (lib/paintkit.ps): seeded opaque
 % particles deposited around each sampled centerline stop, thinning
 % outward under a radial falloff -- built on artkit's walkpath
-% (issue #40), not on pkribbon. Row 1 is the acceptance criterion's
-% two passes of one gesture: a clean pass and a wide aerosol pass.
-% Row 2 varies /Falloff and /Overspray. Row 3 is stencils: a word
+% (issue #40), not on pkribbon. Row 1 is the same cloud twice: at
+% /Speck 3 it is a coarse, lumpy bar, at /Speck 1.2 the core fuses
+% into vapour with a fine fringe (the regime pkspray's header
+% documents; pkwet grades it into a sky). Row 2 is the acceptance criterion's two passes of one
+% gesture: a clean pass and a wide aerosol pass.
+% Row 3 varies /Falloff and /Overspray. Row 4 is stencils: a word
 % sprayed through a charpath clip, then through an arbitrary path --
 % no library support needed, particles respect whatever clip is set.
-% Row 4 is a short burst/tag mark with trigger-dwell bursts at both
+% Row 5 is a short burst/tag mark with trigger-dwell bursts at both
 % ends.
 %
-%   pscat --page 620x760 examples/paintkit_spray_demo.ps --png paintkit_spray.png
+%   pscat --page 620x860 examples/paintkit_spray_demo.ps --png paintkit_spray.png
 
 (lib/artkit.ps) run
 (lib/paintkit.ps) run
@@ -34,7 +37,22 @@
     grestore
 } def
 
-% --- row 1: one gesture, two nozzles ------------------------------------
+% --- row 1: vapour versus spatter, same cloud --------------------------
+
+% Same stroke, same nozzle, same density; only /Speck changes. Speck 3
+% gives coarse lumps along a solid bar. Speck 1.2 is fine enough that
+% the core fuses into one solid mass with a granular fringe.
+0.42 0.5 0.6 setrgbcolor
+
+20 830 (coarse -- /Speck 3) dzlabel
+newpath 20 795 moveto 280 795 lineto
+<< /Nozzle 8 /Density 400 /Falloff 1 /Speck 3 /Overspray 0.5 >> pkspray
+
+320 830 (vapour -- /Speck 1.2, same density) dzlabel
+newpath 320 795 moveto 580 795 lineto
+<< /Nozzle 8 /Density 400 /Falloff 1 /Speck 1.2 /Overspray 0.5 >> pkspray
+
+% --- row 2: one gesture, two nozzles ------------------------------------
 
 /stone pal 1 get aload pop setrgbcolor
 
@@ -50,7 +68,7 @@ newpath 220 685 moveto 400 685 lineto
 newpath 420 685 moveto 600 685 lineto
 << /Nozzle 12 /Density 30 /Overspray 0.85 /Speckle 0.6 >> pkspray
 
-% --- row 2: falloff levels ------------------------------------------------
+% --- row 3: falloff levels ------------------------------------------------
 
 /tide pal 2 get aload pop setrgbcolor
 
@@ -66,7 +84,7 @@ newpath 220 570 moveto 380 570 lineto
 newpath 420 570 moveto 580 570 lineto
 << /Nozzle 18 /Density 40 /Falloff 1 /Speckle 0.15 >> pkspray
 
-% --- row 3: stencils --------------------------------------------------------
+% --- row 4: stencils --------------------------------------------------------
 
 % A word sprayed through its own charpath'd outline as the clip: the
 % classic stencil. Particles are plain fills, so any active clip works.
@@ -97,7 +115,7 @@ gsave
     } for
 grestore
 
-% --- row 4: a short burst/tag mark ------------------------------------------
+% --- row 5: a short burst/tag mark ------------------------------------------
 
 /carnival pal 0 get aload pop setrgbcolor
 

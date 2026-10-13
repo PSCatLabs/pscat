@@ -118,7 +118,11 @@ Which tool to pick:
   ink/no-ink runs; `/Load` vs `/Dropout` sets how dry.
 - **`pkspray`** — aerosol. Discrete particles with a radial falloff,
   overspray mist, trigger-dwell bursts. Respects an active clip, so
-  `charpath`+`clip` gives you a stencil for free.
+  `charpath`+`clip` gives you a stencil for free. For clouds and mist
+  use a fine speck: `/Speck` about 1–1.2 with a small `/Nozzle` (~8)
+  and `/Density` 150–400 fuses the core into vapour, and a `pkwet` pass
+  grades the fringe. At `/Speck` 2–3 the same counts give coarse lumpy
+  bars that read as paint, not vapour.
 - **`pkoil`** — loaded oil impasto. A solid base ribbon *plus* bristle
   ridges and a highlight/shadow lift. Use it when you want thickness
   and an unbroken mass.
