@@ -300,3 +300,131 @@ fn ordinary_programs_get_no_extgstate() {
         "no gs operator"
     );
 }
+
+// --- consecutive elements with one clip chain share a q/clip/Q group
+// (issue #219, slice S0 of the canvas-surface design) ---
+
+/// Every page content stream's `q`/`Q` operators must pair up: a
+/// group left open (or closed twice) is the way this optimization would
+/// break a document without any single element looking wrong.
+fn assert_q_balanced(pdf: &[u8]) {
+    let text = String::from_utf8_lossy(pdf);
+    let mut streams = 0;
+    for chunk in text.split("stream\n").skip(1) {
+        let body = chunk.split("endstream").next().unwrap_or("");
+        if !body.starts_with("1 0 0 -1") {
+            continue; // an image XObject, not page content
+        }
+        streams += 1;
+        let (mut depth, mut max) = (0i32, 0i32);
+        for tok in body.split_whitespace() {
+            match tok {
+                "q" => {
+                    depth += 1;
+                    max = max.max(depth);
+                }
+                "Q" => depth -= 1,
+                _ => {}
+            }
+            assert!(depth >= 0, "Q without a matching q");
+        }
+        assert_eq!(depth, 0, "page content leaves a q group open");
+        assert!(max <= 2, "clip group nests deeper than group + element");
+    }
+    assert!(streams > 0, "no page content found");
+}
+
+/// The shape the real consumers produce: one `clip`, then many
+/// `gsave ... grestore` marks. The clip path must be written once, not
+/// once per mark, and the file must still pair its q/Q.
+#[test]
+fn a_run_of_elements_under_one_clip_writes_the_clip_once() {
+    let (pdf, _) = pdf_and_canvas(
+        b"newpath 250 250 200 0 360 arc closepath clip
+          0 1 59 { /i exch def gsave
+            i 60 div 0.4 0.7 setrgbcolor
+            newpath i 6 mul 60 add 100 moveto 20 0 rlineto 0 20 rlineto closepath fill
+            0.1 setgray 3 setlinewidth [4 2] 0 setdash
+            newpath i 6 mul 60 add 300 moveto 30 30 rlineto stroke
+          grestore } for",
+    );
+    let text = String::from_utf8_lossy(&pdf);
+    assert_eq!(text.matches(" W n ").count(), 1, "clip path repeated");
+    assert_eq!(text.matches(" f\n").count(), 60, "all fills kept");
+    assert_eq!(text.matches(" S\n").count(), 60, "all strokes kept");
+    assert_q_balanced(&pdf);
+}
+
+/// A program that never clips gets no outer group at all.
+#[test]
+fn unclipped_pages_get_no_outer_group() {
+    let (pdf, _) = pdf_and_canvas(
+        b"1 0 0 setrgbcolor 10 10 50 50 rectfill 0 0 1 setrgbcolor 70 10 50 50 rectfill",
+    );
+    let text = String::from_utf8_lossy(&pdf);
+    assert!(!text.contains(" W n"), "no clip, no W");
+    assert!(!text.contains("\nq \n"), "no group");
+    assert_q_balanced(&pdf);
+}
+
+/// Same raster as the canvas through gs, across everything that has to
+/// open, reuse or close a group: two different clips, a nested clip, an
+/// unclipped element in between, and per-element state (alpha, dash,
+/// line width, colour) that must not leak from one element in a group
+/// to the next.
+#[test]
+fn shared_clip_groups_round_trip_through_gs() {
+    if !gs_available() {
+        eprintln!("skipping pdf test: gs not installed");
+        return;
+    }
+    let src = b"
+        gsave newpath 150 250 120 0 360 arc closepath clip
+          0.5 setalpha 0.9 0.2 0.2 setrgbcolor 20 100 250 150 rectfill
+          1 setalpha 0.1 0.5 0.9 setrgbcolor 100 220 250 80 rectfill
+          12 setlinewidth [10 6] 0 setdash 0 setgray newpath 20 150 moveto 300 150 lineto stroke
+          [] 0 setdash 0.2 0.7 0.3 setrgbcolor 3 setlinewidth newpath 20 200 moveto 300 200 lineto stroke
+          gsave newpath 150 250 60 0 360 arc closepath clip
+            0.95 0.8 0.1 setrgbcolor 0 0 500 500 rectfill
+          grestore
+          0.3 0.3 0.8 setrgbcolor 100 100 100 30 rectfill
+        grestore
+        0.8 0.4 0.1 setrgbcolor 400 40 60 60 rectfill
+        gsave 300 300 150 150 rectclip
+          0.2 0.2 0.2 setrgbcolor newpath 250 250 moveto 500 500 lineto 12 setlinewidth stroke
+        grestore
+        gsave newpath 150 250 120 0 360 arc closepath clip
+          0.6 0.1 0.6 setrgbcolor 130 230 40 40 rectfill
+        grestore";
+    let (pdf, canvas) = pdf_and_canvas(src);
+    assert_q_balanced(&pdf);
+    let theirs = gs_rasterize(&pdf, "clipgroups");
+    let mean = mean_block_diff(&canvas, &theirs);
+    assert!(mean < 6.0, "clip groups diverge through gs: mean {mean:.2}");
+}
+
+/// `copypage` keeps painting into the same content after snapshotting
+/// it, `showpage` snapshots then starts clean, and `erasepage` throws
+/// the stream away: none of them may leave a group open or closed twice,
+/// and the page after a snapshot must not inherit its group.
+#[test]
+fn clip_groups_survive_copypage_showpage_and_erasepage() {
+    let (pdf, _) = pdf_and_canvas(
+        b"newpath 250 250 200 0 360 arc closepath clip
+          1 0 0 setrgbcolor 100 100 100 100 rectfill
+          copypage
+          0 1 0 setrgbcolor 200 200 100 100 rectfill
+          showpage
+          newpath 100 100 300 300 rectclip
+          0 0 1 setrgbcolor 150 150 100 100 rectfill
+          erasepage
+          newpath 250 250 100 0 360 arc closepath clip
+          0.5 setgray 200 200 50 50 rectfill
+          copypage",
+    );
+    assert_q_balanced(&pdf);
+    let text = String::from_utf8_lossy(&pdf);
+    // copypage, showpage, the final copypage, and the art painted after
+    // it (finish() emits that as a trailing page).
+    assert!(text.contains("/Count 4"), "unexpected page count");
+}

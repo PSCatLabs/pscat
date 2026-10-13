@@ -236,6 +236,27 @@ as a hard gate with a `Plan review` line in the final report, and `/tmp`
 as the single scratch location. Detail is in `references/pitfalls.md`
 "CI wait". The first run to use this recipe was #199's own.
 
+Follow-up (#208, round-3 fixes from the #141, #191 and #204 runs):
+- **CI pass/fail now comes from `gh pr view --json statusCheckRollup`**
+  (non-empty and every check `SUCCESS`), not the watch's `exit=` line,
+  which printed `0` on a run whose jobs were cancelled. Timings updated:
+  `test` takes about 2-3 min since #204 (was 11-17).
+- **Merge no longer passes `--delete-branch`.** The repo deletes the remote
+  branch itself, and gh's local half cannot succeed with a worktree
+  holding the branch; step 9 removes the worktree, then the local branch.
+- **The local gate matches CI:** selftest, `cargo test --profile ci`,
+  clippy with `-D warnings`, fmt; the PR template's test plan shows the
+  same line. Step 5 rebases onto `origin/main` once, before the first push.
+- **New written paths** in `references/pitfalls.md`: rerun after an
+  infrastructure failure (`gh run rerun --failed`, only if no step ran),
+  resume of an `in-review` PR (step 1, step 3 reuse, step 8, with a
+  GitHub-state re-entry table), the dispatcher-says-no-merge stop,
+  doc-only merge conflicts skipping the Codex re-review, `BEHIND` as the
+  normal case, heartbeat after every `update-branch`.
+- **Scratch files** go in the harness scratchpad when one is named, else
+  `${TMPDIR:-/tmp}` (reverses #199's `/tmp` pin). `SKILL.md` is still 250
+  lines.
+
 ## `lib/paintkit.ps`: brush motion generators (issue #184, 2026-10-09)
 
 Child of epic #112. paintkit models brush *heads*; this adds the other
@@ -8601,3 +8622,29 @@ about 14x slower unoptimized (`cargo test --test selftest`: 61s debug,
   Rust language profile). It still says `cargo build && cargo test` is
   "the same command CI runs", which is no longer literally true; that
   needs a change at the source, tracked in a follow-up issue.
+
+## PDF export: shared clip groups (issue #219, slice S0 of #182)
+
+- `src/pdf.rs` used to wrap every element in `q <whole clip chain> ... Q`,
+  so N marks under one `clip` wrote the clip path N times. Now consecutive
+  clipped elements whose chain is the same `Rc<ClipNode>` (pointer
+  identity, so any `gsave ... grestore` loop under one `clip` qualifies)
+  share one outer `q <clip>` group; each element keeps its own inner
+  `q ... Q` so colour, width, dash and `ExtGState` can't leak between
+  siblings. Nesting depth is therefore at most 2.
+- Unclipped elements get no outer group: a page with no `clip` is
+  byte-identical to before (59 of the 96 `examples/` and `gallery/` files
+  are; the other 37 render the same pixels through gs).
+- The group closes lazily: on a different chain, on `erase`, and in the
+  snapshot `end_page`/`finish` take (the live stream keeps its group
+  open, which `copypage` needs). `tests/pdf.rs::assert_q_balanced` pins
+  that every page's q/Q pair up.
+- Measured: a 400-segment rosette clip over 1500 `rectfill` + 500 strokes,
+  14.2 MB -> 137 KB. `groovy_faces` 16.2 MB -> 0.65 MB, `lettering` 17.4 MB
+  -> 0.69 MB, `apparel_shirt` 5.8 MB -> 0.87 MB, `alpine_lake` 289 MB ->
+  258 MB.
+- Not done (filed as #244): sharing by structural equality (two separate
+  `clip`s of the same path are still two groups) or by common prefix of
+  nested chains.
+  A clipped run of length one costs a few bytes more than before (`q\n`
+  and `Q\n`; e.g. `gradients` +20 bytes).
