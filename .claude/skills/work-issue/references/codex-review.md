@@ -178,7 +178,7 @@ each round; never edit or replace an earlier round's):
 
 ```sh
 gh issue comment <N> --body-file - <<'EOF'
-## Codex review, round <R> (PR <PR URL>, reviewed head <full sha of `git rev-parse HEAD`>)
+## Codex review, round <R> (PR <PR URL>, reviewed head <sha captured at review time>)
 
 <details><summary>Codex output, verbatim</summary>
 
@@ -192,8 +192,11 @@ gh issue comment <N> --body-file - <<'EOF'
 EOF
 ```
 
-The `reviewed head` in the heading (the commit `--scope branch` actually
-reviewed) is what a resumed run compares the PR head against; without it a
+The `reviewed head` in the heading is the commit `--scope branch` actually
+reviewed: run `git -C "$WORKTREE_DIR" rev-parse HEAD` as soon as the review
+returns, **before any fix commit**, and write that value, never `HEAD` at
+the time you post (fixes are committed first, and would be recorded as
+reviewed). It is what a resumed run compares the PR head against; without it a
 resume cannot tell a current review from a stale one (`pitfalls.md`
 "Resume paths", Codex round 4 on #208). The `## Fallback review, round <R>`
 heading carries it too.
