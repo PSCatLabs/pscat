@@ -251,13 +251,20 @@ already resolved, the reach uses that stored value and never re-runs
 the caller's procedure. A `/Pressure` profile is arbitrary code (the
 HANDOFF gotcha), and it isn't capped at 1 (`/Pressure { 4 }` is valid).
 
-| Preset | Reach of each stop |
+Each reach is the maximum over **every emitter** the preset has, not
+only its ordinary run: strips, single-stop stamps, pressed dots and
+rays, edge ridges, and the isotropic scatter a degenerate subpath gets.
+Rounds 3 and 4 of the Codex review each found a missed emitter, which is
+why the table names them. Each slice writes the same breakdown as a
+comment next to the code.
+
+| Preset | Reach of each stop (max over the emitters listed) |
 |---|---|
-| pktrowel | `abs(h) * (1 + Drag) + Pitch/2 + Jitter`, where `h` is the stop's resolved half-extent in slot 6 (`Width/2 * Pressure(t) * (0.35 + 0.65*Cover)`). Lanes reach `h` across the blade, and runs reach `Drag*h + Pitch/2` along the travel (Codex review, round 3). |
-| pkdry | `Width/2 * Spread * 1.15 + BristleWidth*(1 + WidthJitter) + Jitter` |
-| pkfan | `Width/2 * Spread + BristleWidth*(1 + WidthJitter) + Jitter`, or the ray length `Width/2*Spread*1.15` for a pressed fan |
-| pkbroad | `Width/2 + 0.06*Width*Edge + Pitch/2` (`/Edge` jitters each boundary by up to `Edge * Width * 0.06`) |
-| pkliner | `Width/2 + Waver*Width` |
+| pktrowel | Lane strips and drag: `abs(h) * (1 + Drag) + Pitch/2 + Jitter`, where `h` is the stop's resolved half-extent in slot 6 (`Width/2 * Pressure(t) * (0.35 + 0.65*Cover)`). A pressed knife uses the same emitter. Edge ridges sit inside the blade. |
+| pkdry | Dashes: `1.15 * Width/2 * Spread + BristleWidth*(1 + WidthJitter)/2 + Jitter`. A degenerate subpath scatters each bristle by up to its offset on *both* axes, so the first term becomes `sqrt(2) * 1.15 * Width/2 * Spread` there. Use the larger term everywhere. |
+| pkfan | Runs: `Width/2 * Spread + Jitter`. Pressed rays: `1.15 * Width/2 * Spread`. Then add each bristle mark's half-width, `BristleWidth*(1 + WidthJitter)/2`, to the larger of the two. |
+| pkbroad | Strips: `Width/2 + 0.06*Width*Edge`. A single-stop or degenerate run is a stamp reaching back and forward along the travel turned by `/Angle`, by up to the next stop's gap, which is at most `Pitch`. So: `Width/2 + 0.06*Width*Edge + Pitch`. |
+| pkliner | Ribbon: `Width/2 + Waver*Width` (the three waver sines' weights sum to 1). The pressed dot and the no-extent fallback stay within `Width/2` of the displaced centerline. |
 
 Overestimating only costs cells. Underestimating would clip real
 paint, so each slice adds test 7, which compares a preset's own box
@@ -485,10 +492,16 @@ catch over the bounding box of all the motion's subpaths:
    touched mark once through its own reach box and once with
    `pjcatch` forced to a whole-page box (a test-only override). The
    catch is a per-cell pure function, so the two must be pixel-identical.
-   Any difference means the reach box clipped real paint. The pktrowel
-   case includes an above-1 profile (`/Pressure { 4 }` and `{ pkbell 3
-   mul }`) and a large `/Drag`, and every preset is run at its maximum
-   `/Jitter`, `/Edge` or `/Waver`.
+   Any difference means the reach box clipped real paint. The test runs
+   an extremes matrix per preset, one case for every emitter in 3.2's
+   table:
+   - an ordinary stroke, a degenerate (single-point) subpath, and a
+     subpath shorter than `/Pitch` (single-stop runs);
+   - the maximum `/Jitter`, `/Edge`, `/Waver`, `/Drag` and `/Angle`
+     (80);
+   - a large `/BristleWidth`, and `/Pitch` equal to the stroke length;
+   - for pktrowel, above-1 pressure profiles (`/Pressure { 4 }` and
+     `{ pkbell 3 mul }`).
 8. `ghostscript_agrees_on_the_surface`: the rand-independent band from
    section 5, rendered by pscat and by `gs`, block-compared within the
    tolerance `tests/golden.rs` uses. It skips if gs is absent, like the
