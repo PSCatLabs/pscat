@@ -11,7 +11,7 @@
 %
 % Row 1 is the loaded stroke and the dry/scraped one it turns into.
 % Row 2 rakes the blade. Row 3 separates the four "less paint" controls
-% (Load widens, Coverage fills, Viscosity chatters, Scrape streaks).
+% (Cover widens, Coverage fills, Viscosity chatters, Scrape streaks).
 % Row 4 is the underlayer test — overlapping strokes over a laid-in
 % ground, which is what the missing base pass is for. Row 5 sets the
 % same path in pkoil for contrast, plus pressed dabs.
@@ -42,7 +42,7 @@ newpath 20 700 moveto 290 706 lineto
 
 330 730 (run dry -- scraped, broken, thin) dmlabel
 newpath 330 700 moveto 600 706 lineto
-<< /Width 46 /Angle 12 /Load 0.3 /Coverage 0.45 /Scrape 0.55 /Viscosity 0.15 >> pktrowel
+<< /Width 46 /Angle 12 /Cover 0.3 /Coverage 0.45 /Scrape 0.55 /Viscosity 0.15 >> pktrowel
 
 % --- row 2: blade angle -------------------------------------------------
 /stone pal 3 get aload pop setrgbcolor
@@ -60,11 +60,11 @@ newpath 400 620 moveto 570 624 lineto
 
 % --- row 3: the four "less paint" controls, one axis each ---------------
 /tide pal 2 get aload pop setrgbcolor
-20 570 (Load -- deposit width) dmlabel
+20 570 (Cover -- deposit width) dmlabel
 newpath 20 545 moveto 150 545 lineto
-<< /Width 40 /Load 0.12 /Coverage 1 /Scrape 0 >> pktrowel
+<< /Width 40 /Cover 0.12 /Coverage 1 /Scrape 0 >> pktrowel
 newpath 20 500 moveto 150 500 lineto
-<< /Width 40 /Load 1 /Coverage 1 /Scrape 0 >> pktrowel
+<< /Width 40 /Cover 1 /Coverage 1 /Scrape 0 >> pktrowel
 
 170 570 (Coverage -- fill within it) dmlabel
 newpath 170 545 moveto 300 545 lineto
@@ -91,7 +91,7 @@ newpath 470 500 moveto 600 500 lineto
 
 0.93 0.80 0.42 setrgbcolor
 newpath 20 380 moveto 600 380 lineto
-<< /Width 130 /Coverage 1 /Scrape 0.1 /EdgeBuildup 0 /Load 1 >> pktrowel
+<< /Width 130 /Coverage 1 /Scrape 0.1 /EdgeBuildup 0 /Cover 1 >> pktrowel
 
 0.16 0.30 0.50 setrgbcolor
 newpath 30 420 moveto 200 438 420 392 600 424 curveto

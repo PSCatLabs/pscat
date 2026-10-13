@@ -35,6 +35,12 @@
 //! - `% @summary: <one-line description>` -- per entry
 //! - `% @example: <ps code>` -- per entry
 //! - `% @param: /Name description text (default D)` -- 0+ per entry
+//!   (description text is free-form to this parser. By convention
+//!   (issue #141) it starts with the parameter's unit in brackets,
+//!   `/Offset [points] How far ...`, so `--capabilities` carries units
+//!   without a new tag or a new JSON field; `lib/paintkit.ps` follows it
+//!   for every parameter and `tests/capabilities.rs::every_paintkit_
+//!   parameter_states_its_unit` holds it to a closed vocabulary)
 //! - `% @internal` -- bare marker; mutually exclusive with the above
 //! - `% @requires: (lib/artkit.ps) run` -- file-level, at most once,
 //!   the prerequisite `run` chain before this file's own `run` works

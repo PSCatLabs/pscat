@@ -3,6 +3,64 @@
 Newest first. Per `AGENTS.md`, each stage ends with a summary here: what
 was built, tradeoffs made, what's explicitly deferred.
 
+## `lib/paintkit.ps`: one meaning per key, and units in the catalog (issue #141, 2026-10-13)
+
+`/Spread` and `/Load` each meant different things in different presets,
+and the published `pscat --capabilities` output didn't say which. The
+maintainer's decision on #141 was to rename the outliers, keep the old
+names as deprecated aliases, and make the catalog carry units.
+
+- **Renames.** `pkwet /Spread` (points) is now `/Offset`, and `pktrowel
+  /Load` (deposit width) is now `/Cover`. Two more outliers had appeared
+  on `main` since the issue was filed, and both are renamed under the
+  same rule: `pkdab /Spread` (cluster radius in points) is now
+  `/Scatter`, and `pkcrisscross /Spread` (heading scatter in degrees) is
+  now `/Lean`. The new names match `pktap`'s `/Scatter` and
+  `pktap`/`pkpull`'s `/Lean`, which already meant the same things. The
+  approved decision didn't name these two. They were a judgment call,
+  made because "/Spread always means a fraction of /Width" is false
+  without them. Afterwards `/Spread` is always a 0..1 fraction of
+  `/Width` (`pkdry`, `pkfan`; `pkoil`'s is `/RidgeSpread`), and `/Load`
+  is always a contact rate per `/Width` of travel (`pkdry`, `pkfan`,
+  `pkoil`).
+- **Aliases.** Each preset reads `opts /New opts /Old default pkgetdef
+  pkgetdef`. The inner call resolves the alias, so when both keys are
+  given the new one wins and the old one is never even validated
+  (`<< /Offset 5 /Spread -1 >>` passes). Guard names follow the new key
+  (`pkwet-offset-must-not-be-negative` and so on), whichever name was
+  passed. Internal scratch names (`pqSpread`, `ptLoad`, ...) are
+  unchanged on purpose: `pkliner` shares the `pq-` prefix.
+- **Behaviour-preserving, verified.** `pkgetdef` takes no random draws.
+  Every example, gallery piece and self-test driver that loads paintkit
+  (30 files) rendered byte-identically from `origin/main` and from this
+  branch with renamed callers. `gallery/alpine_lake.ps` still uses
+  `pkdab /Spread`, and its 2× render through the alias matches the
+  committed `gallery/renders/alpine_lake.png` byte for byte.
+- **Units: a convention, not a tag.** Every paintkit `@param` description
+  starts with its unit in brackets: `[points]`, `[degrees]`, `[count]`,
+  `[0..1]`, `[ratio]`, `[proc]`, `[name]`, `[rgb array]`, `[boolean]`,
+  `[integer]`, or a `fraction of …` / `per …` / `multiple of …` /
+  `count per …` form. `build.rs` is untouched, and so are the JSON shape
+  and `find_top_level_defs`. A separate `unit` field would have changed
+  the `Param` struct and every hand-written `ENTRIES` row for no gain an
+  agent can't already read. `tests/capabilities.rs::
+  every_paintkit_parameter_states_its_unit` holds the vocabulary closed.
+  A starts-with-`[` check alone would have accepted `/Under [r g b] …`
+  with no unit added. The same test pins `/Spread` to `[fraction of
+  /Width]` and `/Load` to `[per /Width]`, and fails if a deprecated
+  alias gets its own row, which would put the second meaning back into
+  the catalog.
+- **Tests.** Four `%%SelfTest` blocks cover each alias, each precedence
+  rule, and (for `pkwet`) that the alias value is actually *used*: a
+  one-sided pull's default depth is ceil(Offset/2)+1, counted from the
+  wrapped proc. A mutation run that dropped the aliases failed them.
+  Four Rust tests check that old key, new key, and both together render
+  identically, and that a different value doesn't.
+- **Not done here.** No multi-colour loading: #183 gets its own key
+  (e.g. `/Colours`), not `/Load`. The other tag-migrated libraries
+  don't follow the unit convention yet (#195). `fillkit`'s `/Spread` is
+  GIMP's 0..1 sample jitter, in a different library, and is left as is.
+
 ## `work-issue` skill split into a short core plus reference files (issues #194, #151, 2026-10-13)
 
 `.claude/skills/work-issue/SKILL.md` was about 1,040 lines, most of it
@@ -3271,6 +3329,9 @@ non-derivable behavioral caveats (validation strictness, degenerate
 -case fallbacks) as flowing prose pointing at the `@param` tags for the
 actual values -- matching the coupling doc's own "replacing, not
 adding to" framing for what a migrated file's line count should do.
+(Issue #141 later added a convention *inside* that description text:
+a leading `[unit]`, enforced for `lib/paintkit.ps` by a test, not by
+this parser.)
 
 Added two tests to `tests/capabilities.rs`, replacing the old
 per-file `paintkit_names_match_the_catalog_exactly` (deleted -- fully
