@@ -8460,6 +8460,10 @@ about 14x slower unoptimized (`cargo test --test selftest`: 61s debug,
 - Kept both `scripts/selftest.sh` and `tests/selftest.rs`: optimized, the
   duplicated work is a few seconds (4.4s for the test file), so the
   separate PS-only failure line on the run page is worth keeping.
+- Measured on PR #217 (run 38460655033, same 1392 tests passing): `test`
+  job 117s, against 1004s for run 38450710454 on `main`; the test step
+  went 849s to 57s, the PS-native self-check step 51s to 22s (includes
+  its optimized build), and the dropped debug `cargo build` was 15s.
 - perf-regression is unchanged: it builds `--release` binaries by path
   and never touched the test profile.
 - Left alone: `SDLC.md`'s quality-gate line (generated from sdlcify's
