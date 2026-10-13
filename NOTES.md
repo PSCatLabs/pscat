@@ -8898,14 +8898,17 @@ about 14x slower unoptimized (`cargo test --test selftest`: 61s debug,
   `qlmanage -t` (WebKit) rasterizations against pscat's own PNG, mean
   absolute RGB difference: `lettering` 53.5 old vs 5.5 new, `halftone`
   28.2 vs 6.6, `groovy_faces` 22.2 vs 8.8, `paintkit_motion_demo` 113 vs
-  7.9. Files whose old SVG happened to be consistent across three runs
-  (10 of them) were consistently *wrong* too, with fewer defs than clips.
+  7.9. Ten files whose old SVG happened to be identical across three runs
+  also had fewer defs than clips; of the five rasterized, four were
+  visibly wrong (`testcard`'s aliased clip happened not to show: 3.43 old
+  vs 3.31 new). 68 old-stable files are byte-identical old vs new.
 - Fix: the table now stores `(Rc<ClipNode>, id)`, so the address cannot be
   recycled while the entry lives (cleared with the page in `erase`). Same
   O(1) lookup, no per-element cost. `PdfRecorder::open_clip` already held
   its `Rc` for this reason.
-- 3 runs of every `examples/*.ps` and `gallery/*.ps` (96 files): 16 files
-  varied with the old binary, 0 with the new one.
+- 3 runs of every `examples/*.ps` and `gallery/*.ps` (96 files; the two
+  multi-page ones compared across all their page files): 16 files varied
+  with the old binary, 0 with the new one.
 - Tests: `tests/svg.rs` gained an in-process grestore loop (30 distinct
   clips must yield 30 defs; the old code gave 3) and a byte-identity check
   across three CLI runs of two files that used to vary.

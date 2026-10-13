@@ -576,6 +576,10 @@ renders eight examples in both and compares block-downsampled output).
    target should promote those seams into a neutral display list
    first — the design note in `src/pdf.rs` says why that wasn't
    done at two.
+   An exporter table keyed by clip-node identity must hold the `Rc`
+   (SVG's `clip_ids` stores it, PDF's `open_clip` is one), never a bare
+   `Rc::as_ptr` address: a freed node's address is recycled and aliases a
+   different clip (#258/#261).
    PDF shares one `q <clip>` group across consecutive elements with
    the same clip `Rc` (#219), so a new PDF hook must go through
    `enter_clip` and keep its own inner `q ... Q`. Page content streams
