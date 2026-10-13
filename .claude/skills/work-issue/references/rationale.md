@@ -214,3 +214,19 @@ the size/risk bar), report that explicitly instead — branch name,
 worktree path, and the PR URL, with the worktree left in place since
 there may be follow-up commits before a human merges it.
 
+
+## Added in #199: the CI wait, the pending-CI hand-back, the step 4 gate
+
+Step 8.12 used to say "if any check is pending, `gh pr checks --watch`
+with `run_in_background: true`" and nothing else. The first Haiku run of
+the slimmed skill (#178, PR #198) had no defined way to wait, handed
+back with `test` pending, and CI passed six seconds later. So the step
+now carries the exact command, and pitfalls.md "CI wait" carries the
+reasoning (11-17 min CI, why no `tail`, "no checks reported", the
+pending-CI hand-back checklist). The hand-back rule exists because the
+skill only defined lock release for the human-only and over-the-bar
+stops; a CI-pending stop needs the opposite (keep the lock and
+`in-review`). Step 4.4 became a hard gate, with a report line, because
+the same run skipped the plan review without noticing. Scratch files are
+pinned to `/tmp` in SKILL.md's rules because the skill never named a
+scratchpad but harness prompts do.
