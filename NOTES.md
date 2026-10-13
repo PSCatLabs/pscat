@@ -8437,8 +8437,10 @@ about 14x slower unoptimized (`cargo test --test selftest`: 61s debug,
 - `[profile.ci]` in `Cargo.toml` inherits `release` and keeps
   `debug-assertions` and `overflow-checks`, so a debug_assert or an
   arithmetic overflow still fails the test run. CI runs
-  `cargo test --profile ci`. Verified the profile has `debug_assertions`
-  set (`cargo rustc --profile ci --lib -- --print cfg`).
+  `cargo test --profile ci`. Verified: `cargo build --profile ci -v`
+  passes `-C debug-assertions=on` (cargo omits `-C overflow-checks`
+  because rustc defaults it to the debug-assertions value), and a probe
+  built with those flags at `-O` panics on `i32::MAX + 1`.
 - Binary lookup: every test uses `env!("CARGO_BIN_EXE_*")`, which cargo
   resolves per profile, and `src/paths.rs` walks three levels up from the
   executable, which is the same depth for `target/ci/pscat` as for
@@ -8461,5 +8463,6 @@ about 14x slower unoptimized (`cargo test --test selftest`: 61s debug,
 - perf-regression is unchanged: it builds `--release` binaries by path
   and never touched the test profile.
 - Left alone: `SDLC.md`'s quality-gate line (generated from sdlcify's
-  language-profile template, which still says `cargo build && cargo test`
-  and is correct as a generic local gate).
+  Rust language profile). It still says `cargo build && cargo test` is
+  "the same command CI runs", which is no longer literally true; that
+  needs a change at the source, tracked in a follow-up issue.
