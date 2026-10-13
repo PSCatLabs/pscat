@@ -1,0 +1,195 @@
+%!PS-Adobe-3.0
+%%Title: drykit design prototype -- does the #182 surface carry chalk, and at what cost?
+%%BoundingBox: 0 0 720 480
+%%EndComments
+% Issue #233 prototype, NOT library code (see docs/DRYMEDIA.md section 7).
+% Run from the repo root. Settings are names defined before the file runs;
+% `--sweep` takes only one name, so prepend a line for several:
+%
+%   pscat --page 720x480 --png out.png docs/drymedia/prototypes/surface_cost.ps
+%   { echo "/MODE 3 def /TOUCH 0.82 def /PEN 36 def /GRAIN 0.4 def"; \
+%     cat docs/drymedia/prototypes/surface_cost.ps; } \
+%     | pscat --dpi 216 --page 720x480 --png out.png -
+%   (same prelude) | gs -dNOSAFER -dBATCH -dNOPAUSE -sDEVICE=png16m \
+%     -r216 -g2160x1440 -sOutputFile=out.png -
+%
+% It prints the number of catches, the cells they visited (bounding-box
+% catches, as pjcatch builds them) and an estimate of the cells a swept-band
+% catch would visit (centerline length x reach / Weave^2).
+%
+% A full chalkboard of /HandScript skeletons (lib/handscript.ps's CharDefs and
+% its own `drawstroke`), each glyph stroke drawn as a round-capped centerline
+% in "chalk" through a catch built from the #182 surface (lib/paintkit.ps's
+% pkcanvas + pj- height field, read but not modified):
+%
+%   MODE 0  plain strokes, the gallery/hundred_lines.ps look (the control)
+%   MODE 1  pjcatch as shipped (#220): weave knuckles, isotropic
+%   MODE 2  a prototype emitter (dqcatch.ps) over the SAME pjheight field
+%           whose knuckles are stretched (ELONG) along the stroke's chord,
+%           the streak seen in the reference board (C4, Y1)
+%   MODE 3  MODE 2 plus a dim, wider dust level under each glyph, drawn
+%           level-major (see dqglyph)
+%
+% Each glyph stroke is drawn in two pressure bands: its body at TOUCH, and a
+% landing dab (the first ~12% of the skeleton) at TOUCH + 0.2. Catches nest
+% (a higher touch's catch contains a lower one's), so the bands compose by
+% union. GRAIN sets pkcanvas /Weave in points; PEN is the handscript pen
+% width in glyph units (70 is about 1.8pt at this size, 36 about 0.9pt).
+
+/MODE where { pop } { /MODE 2 def } ifelse
+/GRAIN where { pop } { /GRAIN 0.7 def } ifelse
+/TOUCH where { pop } { /TOUCH 0.72 def } ifelse
+/LINES where { pop } { /LINES 12 def } ifelse
+/RELIEF where { pop } { /RELIEF 0.55 def } ifelse
+/MOTTLE where { pop } { /MOTTLE GRAIN 10 mul def } ifelse
+/ELONG where { pop } { /ELONG 1.8 def } ifelse
+/PEN where { pop } { /PEN 70 def } ifelse
+
+(lib/artkit.ps) run
+(lib/paintkit.ps) run
+(lib/handscript.ps) run
+
+(docs/drymedia/prototypes/dqcatch.ps) run
+
+% ---------------------------------------------------------------- drawing
+/dqcells 0 def        % cells visited, for the cost report
+/dqcatches 0 def
+/dqband 0 def
+
+% touch ang -   (clip the current gsave to the catch over the current path's
+% stroked footprint; the path survives because we rebuild it after)
+/dqclip {
+    /dqca exch def /dqct exch def
+    % stroked footprint: the path's box grown by half the line width
+    % (pscat has no strokepath)
+    pathbbox /dqy1 exch def /dqx1 exch def /dqy0 exch def /dqx0 exch def
+    /dqh currentlinewidth 2 div def
+    dqx0 dqh sub dqy0 dqh sub dqx1 dqh add dqy1 dqh add
+    userdict /dqcatches dqcatches 1 add put
+    % estimate of the cells a swept-band catch (cells within reach of the
+    % centerline only) would visit: length x (width + 2.5 grain) / grain^2,
+    % all in canvas units
+    gsave flattenpath
+      /dqlen 0 def
+      { /dqpy exch def /dqpx exch def }
+      { 2 copy dqpy sub exch dqpx sub dtransform userdict /pjCTM get idtransform
+        dup mul exch dup mul add sqrt dqlen add /dqlen exch def
+        /dqpy exch def /dqpx exch def }
+      { } { } pathforall
+    grestore
+    dqh 2 mul 0 dtransform userdict /pjCTM get idtransform dup mul exch dup mul add sqrt
+    GRAIN 2.5 mul add dqlen mul GRAIN dup mul div dqband add
+    userdict /dqband 3 -1 roll put
+    4 copy pjcells dqcells add userdict /dqcells 3 -1 roll put
+    MODE 1 eq { dqct pjcatch } { dqct dqca ELONG dqcatch } ifelse
+} def
+
+% [x y x y ...] -> angle of chord, degrees (glyph space == user space here)
+/dqchord {
+    /dqp exch def
+    dqp dqp length 1 sub get dqp 1 get sub
+    dqp dqp length 2 sub get dqp 0 get sub
+    2 copy abs exch abs add 0 eq { pop pop 0 } { atan } ifelse
+} def
+
+% gs makes the font dict read-only at definefont, so scratch lives here
+userdict /dqwork 60 dict put
+HandScriptDict begin
+dqwork begin
+
+% one glyph stroke at the current point's glyph transform
+% [x y ...] -> jittered copy  (jitter ONCE into data: the catch's box and the
+% stroked ink must come from the same points; the first draft re-ran
+% drawstroke, re-jittering, and its box missed ink)
+/dqjitter {
+    /dqraw exch def
+    /dqsk dqraw length array def
+    0 1 dqraw length 1 sub { dup dqraw exch get jit add dqsk 3 1 roll put } for
+    dqsk
+} def
+
+% skeleton touch widthmult -   (one deposit level of one stroke; J is 0 here)
+/dqstroke {
+    /dqwm exch def /dqtt exch def /dqsk exch def
+    MODE 0 eq {
+        newpath dqsk drawstroke stroke
+    } {
+        /dqa0 dqsk dqchord def
+        gsave
+            currentlinewidth dqwm mul setlinewidth
+            newpath dqsk drawstroke
+            dqtt dqa0 dqclip
+            newpath dqsk drawstroke stroke
+        grestore
+        % landing dab: the first 12% of the skeleton, pressed harder
+        gsave
+            currentlinewidth 1.3 mul dqwm mul setlinewidth
+            /dqdab {
+                newpath dqsk 0 get dqsk 1 get moveto
+                dqsk 2 get dqsk 0 get sub 0.12 mul dqsk 0 get add
+                dqsk 3 get dqsk 1 get sub 0.12 mul dqsk 1 get add lineto
+            } def
+            dqdab dqtt 0.2 add dqa0 dqclip dqdab stroke
+        grestore
+    } ifelse
+} def
+
+% charcode x y size -> advance
+% MODE 3 deposits in two levels, level-major across the glyph's strokes: a
+% dim, wider dust level (chalk lerped 45% over the board) through a catch at
+% TOUCH + 0.12, then the bright core at TOUCH. Catches nest, so the bright
+% level lands on the highest knuckles and the dim level fills the next band
+% down: a two-step tone ramp out of binary clips, with no alpha.
+/dqglyph {
+    /dqsz exch def /dqy exch def /dqx exch def
+    Encoding exch get CharDefs exch 2 copy known not { pop pop CharDefs /.notdef } if get
+    /dqg exch def
+    gsave
+        dqx dqy translate dqsz 1000 div dup scale
+        [1 0 rand 120 mod 40 sub 1000 div 1 0 rand 33 mod 16 sub] concat
+        W rand 13 mod add setlinewidth 1 setlinecap 1 setlinejoin
+        /J JJ def
+        /dqsks [ 1 1 dqg length 1 sub { dqg exch get dqjitter } for ] def
+        /J 0 def
+        MODE 3 eq {
+            gsave DIM aload pop setrgbcolor
+                dqsks { TOUCH 0.12 add 1.25 dqstroke } forall
+            grestore
+        } if
+        dqsks { TOUCH 1 dqstroke } forall
+    grestore
+    dqg 0 get dqsz mul 1000 div
+} def
+end
+end
+
+% [a] [b] t -> [a + (b - a) t]
+/dqlerp3 { /dqlt exch def /dqlb exch def /dqla exch def
+    [ 0 1 2 { /dqk exch def dqla dqk get dqlb dqk get dqla dqk get sub dqlt mul add } for ] } def
+
+% ---------------------------------------------------------------- the board
+<< /Seed 7 /Weave GRAIN /Mottle MOTTLE /Relief RELIEF >> pkcanvas
+0.16 0.22 0.20 setrgbcolor 0 0 720 480 rectfill
+0.93 0.94 0.90 setrgbcolor
+/DIM [0.16 0.22 0.20] [0.93 0.94 0.90] 0.45 dqlerp3 def
+1985 srand
+HandScriptDict begin dqwork begin
+/JJ 22 def /J JJ def /W PEN def
+/dqtext (the integral of a gaussian over the whole real line is the square root of pi and we show it by squaring) def
+/dqbase 440 def
+0 1 LINES 1 sub {
+    /dqline exch def
+    /dqLx 30 rand 12 mod add def
+    /dqLy dqbase dqline 34 mul sub rand 7 mod add def
+    dqtext {
+        dqLx 680 gt { pop } {
+            dqLx dqLy 26 dqglyph /dqLx exch dqLx add def
+            /dqLy dqLy rand 3 mod 1 sub 0.3 mul add def
+        } ifelse
+    } forall
+} for
+end end
+
+(MODE ) print MODE 20 string cvs print ( GRAIN ) print GRAIN 20 string cvs print
+( catches ) print dqcatches 20 string cvs print ( cells ) print dqcells 20 string cvs print ( band-estimate ) print dqband cvi =
+showpage

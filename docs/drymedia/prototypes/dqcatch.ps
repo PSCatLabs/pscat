@@ -1,0 +1,71 @@
+%!PS-Adobe-3.0
+%%Title: dqcatch -- issue #233 prototype emitter, NOT library code
+%%EndComments
+% Needs lib/artkit.ps and lib/paintkit.ps loaded first (it reads the #182
+% pj- surface state and helpers without changing them).
+
+% ---------------------------------------------------------------- dq- catch
+% llx lly urx ury touch ang elong dqcatch -
+% pjcatch's selection rule and scale law, with each knuckle an ellipse whose
+% long axis lies along `ang` (degrees, user space) and is `elong` times the
+% shipped long semi-axis. Positions and heights are pjheight's, so two strokes
+% still meet the same knuckles; only the knuckle's footprint follows the tool.
+/dqcatch {
+    /dqel exch def /dqang exch def /dqt exch def
+    % reach margin grows with the stretched axis (pjrange assumes 1.25W)
+    pjrange
+    /dqcw userdict /pjW get def
+    /pjp userdict /pjP get def
+    % direction in canvas space
+    dqang cos dqang sin dtransform userdict /pjCTM get idtransform
+    /dquy exch def /dqux exch def
+    /dqlen dqux dup mul dquy dup mul add sqrt def
+    dqlen 0 eq { /dqlen 1 def } if
+    /dqux dqux dqlen div def /dquy dquy dqlen div def
+    % extra cells for the stretched axis
+    /dqextra dqel 1 sub 0.8 mul 1.375 mul ceiling cvi 1 add def
+    /pji0 pji0 dqextra sub def /pji1 pji1 dqextra add def
+    /pjj0 pjj0 dqextra sub def /pjj1 pjj1 dqextra add def
+    /dqgrow dqt 0.8 sub 0.2 div dup 0 lt { pop 0 } if 0.25 mul 1 add def
+    /dqsaved matrix currentmatrix def
+    userdict /pjCTM get setmatrix
+    newpath
+    /dqn 0 def
+    pji0 1 pji1 {
+        /dqi exch def
+        pjj0 1 pjj1 {
+            /dqj exch def
+            /dqd dqi dqj pjheight dqt add 1 sub def
+            dqd 0 gt {
+                /dqs dqd 0.3 div dup 1 gt { pop 1 } if 0.5 mul 0.6 add
+                    dqgrow mul dqcw mul def
+                /dqcx dqi 0.5 add dqi dqj 2 pjhash 0.5 sub 0.3 mul add dqcw mul def
+                /dqcy dqj 0.5 add dqi dqj 3 pjhash 0.5 sub 0.3 mul add dqcw mul def
+                % e1 along travel, e2 across
+                /dqa dqs 0.8 mul dqel mul def
+                /dqb dqs 0.42 mul def
+                /dq1x dqux dqa mul def /dq1y dquy dqa mul def
+                /dq2x dquy neg dqb mul def /dq2y dqux dqb mul def
+                dqcx dq1x add dqcy dq1y add moveto
+                dqcx dq1x add dq2x 0.5523 mul add dqcy dq1y add dq2y 0.5523 mul add
+                dqcx dq1x 0.5523 mul add dq2x add dqcy dq1y 0.5523 mul add dq2y add
+                dqcx dq2x add dqcy dq2y add curveto
+                dqcx dq1x 0.5523 mul sub dq2x add dqcy dq1y 0.5523 mul sub dq2y add
+                dqcx dq1x sub dq2x 0.5523 mul add dqcy dq1y sub dq2y 0.5523 mul add
+                dqcx dq1x sub dqcy dq1y sub curveto
+                dqcx dq1x sub dq2x 0.5523 mul sub dqcy dq1y sub dq2y 0.5523 mul sub
+                dqcx dq1x 0.5523 mul sub dq2x sub dqcy dq1y 0.5523 mul sub dq2y sub
+                dqcx dq2x sub dqcy dq2y sub curveto
+                dqcx dq1x 0.5523 mul add dq2x sub dqcy dq1y 0.5523 mul add dq2y sub
+                dqcx dq1x add dq2x 0.5523 mul sub dqcy dq1y add dq2y 0.5523 mul sub
+                dqcx dq1x add dqcy dq1y add curveto
+                closepath
+                /dqn dqn 1 add def
+            } if
+        } for
+    } for
+    dqn 0 eq { 0 0 moveto 0 0 lineto } if
+    clip newpath
+    dqsaved setmatrix
+} def
+
