@@ -281,6 +281,7 @@ fn paintkit_unit_is_known(unit: &str) -> bool {
         "proc",
         "name",
         "rgb array",
+        "array of rgb arrays",
         "boolean",
         "integer",
     ];
