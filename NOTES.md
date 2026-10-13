@@ -8882,3 +8882,30 @@ about 14x slower unoptimized (`cargo test --test selftest`: 61s debug,
   step 3, NOTES.md conflicts keep both sections (ours first), a
   disproved-premise rule, and a short resume table that defaults to
   re-review. `SKILL.md` stays within 250 lines.
+
+## SVG export: deterministic, and correct, clip defs (issues #258, #261)
+
+- `pscat --svg` of one program differed from run to run (PNG never did).
+  Not a `HashMap` iteration order or a time seed: `SvgRecorder::clip_ids`
+  keyed each clip def by `Rc::as_ptr(&node) as usize` but did not keep the
+  `ClipNode` alive. After a `grestore` freed a node, the allocator could
+  hand its address to a *different* clip later, which then inherited the
+  old clip's `c<id>`, so the later element was grouped under the wrong
+  `<clipPath>` and no new def was written. Which addresses got reused
+  depended on allocator state (and so on the load and run), hence the
+  varying `<clipPath` counts (#261: 3, 2, 4 for `examples/halftone.ps`).
+- It was a correctness bug as well as a determinism one. Measured with
+  `qlmanage -t` (WebKit) rasterizations against pscat's own PNG, mean
+  absolute RGB difference: `lettering` 53.5 old vs 5.5 new, `halftone`
+  28.2 vs 6.6, `groovy_faces` 22.2 vs 8.8, `paintkit_motion_demo` 113 vs
+  7.9. Files whose old SVG happened to be consistent across three runs
+  (10 of them) were consistently *wrong* too, with fewer defs than clips.
+- Fix: the table now stores `(Rc<ClipNode>, id)`, so the address cannot be
+  recycled while the entry lives (cleared with the page in `erase`). Same
+  O(1) lookup, no per-element cost. `PdfRecorder::open_clip` already held
+  its `Rc` for this reason.
+- 3 runs of every `examples/*.ps` and `gallery/*.ps` (96 files): 16 files
+  varied with the old binary, 0 with the new one.
+- Tests: `tests/svg.rs` gained an in-process grestore loop (30 distinct
+  clips must yield 30 defs; the old code gave 3) and a byte-identity check
+  across three CLI runs of two files that used to vary.
