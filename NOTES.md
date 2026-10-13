@@ -8897,9 +8897,10 @@ from the branch and compared by hand. `scripts/identity_check.sh BASE_WORKTREE
   10-page driver is 10 lines. 21 files, 30 pages on `b7a41f5`, the same count
   as L1/S1/L2.
 - **Resolution.** Examples and drivers at `--dpi 72`; gallery pieces at
-  `--dpi 144`, because the committed stills are 2x supersampled (checked
-  against all six: `--page WxH --dpi 144` is the `2 2 scale` + doubled page
-  recipe in `gallery/README.md`, byte for byte for `alpine_lake`). Pages come
+  `--dpi 144`, because the committed stills are 2x supersampled (all six
+  stills are 2x their `%%BoundingBox`; `--page WxH --dpi 144` equals the
+  `2 2 scale` + doubled page recipe in `gallery/README.md`, byte for byte
+  for `alpine_lake`). Pages come
   from each file's own `%%SelfTestPage` or `%%BoundingBox`. Cost is not
   pixels: `alpine_lake` takes about 55 s at either scale, and it is the long
   pole, so the whole run is about a minute with `-j 10`.
