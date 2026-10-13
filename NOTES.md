@@ -3,6 +3,51 @@
 Newest first. Per `AGENTS.md`, each stage ends with a summary here: what
 was built, tradeoffs made, what's explicitly deferred.
 
+## Dry media design: reference board and drykit writeup (issue #233, 2026-10-13)
+
+The first child of epic #232. It is design only, and nothing is
+implemented until the maintainer approves it. Three pieces:
+
+- **The reference board** (`docs/drymedia/REFERENCES.md`, crops in
+  `docs/drymedia/refs/`): 17 free-licence photos and scans of chalk,
+  crayon and charcoal. Each observation is tied to a mechanism, every
+  source and licence is recorded, and #233 traits with no image yet are
+  marked "not yet sourced".
+- **The design** (`docs/DRYMEDIA.md`).
+- **The prototypes** (`docs/drymedia/prototypes/`).
+
+Decisions (each has an open question in DRYMEDIA.md section 10):
+- **Surface.** drykit builds on #182: one `pkcanvas` height field, read
+  through paintkit's `pj-` internals without editing paintkit.ps. drykit
+  adds its own catch emitter, with knuckles stretched along the direction
+  of travel (crayon and chalk gaps are streaks, not pits) and swept-band
+  cells.
+- **Engine.** `dksurface` and `dkstroke` in `lib/drykit.ps`.
+  - `/Touch` keeps #182's meaning, and also takes a `{t -> touch}`
+    profile, quantized into bands (#182's deferred Q6).
+  - Tone comes from deposit levels drawn level-major within a call, since
+    catches nest.
+- **Files.** One file per medium (`lib/drychalk.ps`, `lib/drycrayon.ps`,
+  `lib/drycharcoal.ps`), so #235, #239 and #241 don't conflict. Skeletons go
+  in a new catalog-tagged `lib/strokeglyphs.ps`: `handscript.ps` can't take
+  catalog tags (`Type3Face`), and its glyphs paint instead of returning
+  paths.
+- **Budget.** Full chalkboard ≤ 30s and full portrait ≤ 60s, in pscat and
+  gs.
+
+Measured, and worth knowing beyond drykit:
+- **Ghostscript's fill adjust closes tooth gaps of 1–2 device pixels.**
+  At `/Weave 0.7` and 216 dpi, a catch renders as solid strokes.
+  `0 0 .setfilladjust2`, guarded by `where`, restores the texture.
+  `-dGraphicsAlphaBits` does not.
+- **Cost of the shipped `pjcatch`:** about 11 µs per cell in release pscat,
+  and gs is about 2× faster. An oriented knuckle costs about 2× a plain one.
+- **A shared binary catch alone reads as a perforated screen on chalk
+  writing.** Orientation and two deposit levels are what move it toward
+  chalk. No prototype render passes for real chalk yet; that tuning is
+  #235's job.
+- **pscat has no `strokepath`.** Filed as #264.
+
 ## artkit: operands are checked before they are bound (issue #123, 2026-10-13)
 
 `scatter` used to bind its region and options with `def` and then

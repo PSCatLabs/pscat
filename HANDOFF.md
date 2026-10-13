@@ -581,7 +581,13 @@ renders eight examples in both and compares block-downsampled output).
    `enter_clip` and keep its own inner `q ... Q`. Page content streams
    are Flate-compressed (#244), so tests reading PDF operators use
    `tests/common/mod.rs::pdf_text`.
-4. Watercolor (issue #47, gated on the architecture spike in issue
+4. Dry media (epic #232): **read `docs/DRYMEDIA.md` and
+   `docs/drymedia/REFERENCES.md` before starting #234–#242.** The design
+   (#233) needs the maintainer's approval before #234 or #236 starts.
+   drykit reads paintkit's `@internal` `pj-` surface (`pjheight`,
+   `pjrange`, `pjCTM`) without editing paintkit.ps. A change to those names
+   breaks drykit, so treat them as a contract.
+5. Watercolor (issue #47, gated on the architecture spike in issue
    #46): read `docs/WATERCOLOR.md` before starting — it recommends a
    small `alpha: f32` field on `GraphicsState` (already prototyped as
    `pub(crate)`-only in `src/gfx.rs`'s `tests::
@@ -590,7 +596,7 @@ renders eight examples in both and compares block-downsampled output).
    deliberately left undone, and names a real gs-portability gap (no
    PostScript-callable alpha operator in gs 10.07.1) to document rather
    than paper over.
-5. Shrinking PS-library-only coupling to Rust/CI/gs (architecture
+6. Shrinking PS-library-only coupling to Rust/CI/gs (architecture
    spike in issue #92): **read `docs/PS_LIBRARY_COUPLING.md` in full
    before starting either of its two remaining follow-ups (a phased
    PS-native verification path, CI diff-shape detection) — do not work
@@ -775,6 +781,12 @@ renders eight examples in both and compares block-downsampled output).
   draw in such a loop: keep the *number* of random draws fixed by the
   loop bounds alone, taking them whether or not they're used, or
   turning one artistic control silently re-rolls another's texture.
+- **Ghostscript closes sub-2-pixel gaps in fills and clips** (its fill
+  adjust). A fine texture built as a clip of many small shapes (a `pjcatch`
+  at a small `/Weave`) renders solid in gs while pscat shows it. Guard
+  `/.setfilladjust2 where { pop 0 0 .setfilladjust2 } if` inside the
+  mark's `gsave` (`docs/DRYMEDIA.md` 2.4). `-dGraphicsAlphaBits` doesn't
+  help.
 - tiny-skia `Transform::from_row(sx, ky, kx, sy, tx, ty)` matches the
   PS matrix order `[a b c d tx ty]` — `ops/matrix.rs` documents it;
   don't rediscover this the hard way.
