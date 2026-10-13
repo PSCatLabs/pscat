@@ -275,8 +275,8 @@ file:
 | Eraser swipe (C6) | a wide, low-strength `dkstroke` in haze colour along an arc, `/Streak` about 3, `/Lanes` about 6 |
 | Finger wipe (C5) | a `dkstroke` in board colour over haze (wiping removes dust) |
 | Crayon striation and build-up (Y1, Y3) | `/Lanes` plus `/Streak` about 1.8. A turn raises touch through the motion generator's profile. |
-| Crayon colour layering (Y5, partly sourced) | two calls in different directions: the catches differ in orientation and lanes, so the first colour shows through the second's gaps |
-| Charcoal hatching (H2, H4) | hatch line *paths* inked by `dkstroke`. hatchkit draws lines itself and has no path hook, so #241 adds a `/Mark {path}` hook to `lib/hatchkit.ps` (a small, separate change) rather than copying its geometry. |
+| Crayon colour layering (not yet sourced) | two calls in different directions: the catches differ in orientation and lanes, so the first colour shows through the second's gaps |
+| Charcoal hatching (H2, H4) | hatch line *paths* inked by `dkstroke`, with all the layers of one pigment in one `dkbatch`. hatchkit draws lines itself and has no path hook, so #241 adds a `/Mark {path}` hook to `lib/hatchkit.ps` (a small, separate change) rather than copying its geometry. |
 | Smudge (H1, H5) | a wide `dkstroke` at high touch (fills the valleys), `/Strength` low, `/Under` = the caller's tone, directional `/Streak` |
 | Kneaded-eraser lift (H8) | `dkstroke` in *paper* colour with `/Under` set to the charcoal tone beneath: paper colour through the peaks |
 
