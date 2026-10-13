@@ -209,10 +209,10 @@ Read `.claude/skills/work-issue/references/codex-review.md` now (full policy). T
     and has the sections Delivered / Decisions / Review record / Known
     deviations / open points (see codex-review.md). Then:
     `gh issue comment <N> --body-file /tmp/issue-<N>-summary.md`
-12. `gh pr view <PR#> --json mergeable,mergeStateStatus,statusCheckRollup`.
-    If `BEHIND`: `gh pr update-branch <PR#>`, then `gh pr checks <PR#> --watch`
-    (`run_in_background: true`, then wait for the notification). If CI fails,
-    stop and report. Never merge past it.
+12. `gh pr view <PR#> --json mergeable,mergeStateStatus,statusCheckRollup`. If `BEHIND`:
+    `gh pr update-branch <PR#>`. If any check is pending: `gh pr checks <PR#> --watch` with
+    `run_in_background: true`, wait for the notification, then re-run `gh pr view`. Merge only
+    when `test` is `SUCCESS`. If CI fails, stop and report. Never merge past it or use `--admin`.
 13. `gh pr merge <PR#> --squash --delete-branch`
 
 ## 9. Post-merge cleanup
