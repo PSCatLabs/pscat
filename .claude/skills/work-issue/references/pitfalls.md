@@ -140,6 +140,12 @@ Step numbers ("step 1" ... "step 9") refer to the numbered steps in `../SKILL.md
   as empty/stale, and steals from a run that already believes it won.
   Same reasoning applies to the reclaim path's post-`mv` `mkdir` +
   heartbeat write.
+- **Claim and heartbeat are scripts since #276 (round 6).** Two agents in a row ran only
+  the `mkdir` branch of the pasted claim block. Run `scripts/claim.sh <N>` as one command and
+  never retype its lines; `scripts/heartbeat.sh <N>` is the refresh. After editing
+  `claim.sh`, run `bash .claude/skills/work-issue/scripts/test-claim.sh` (race tests in a
+  throwaway repo). A worktree cut before #276 has no `scripts/`: use the main checkout's
+  copy of the script, or merge `origin/main` into the worktree.
 - **The lock lives in the main repo's shared git dir
   (`work-issue-lock-<N>`), not the worktree's** — this is deliberate
   (a fresh pick has no worktree yet to hang a lock off of), but it
@@ -246,7 +252,21 @@ Cheapest first, before the long gate:
    `ARTKIT_INTERNAL` in `src/capabilities.rs`. Check with
    `PSCAT_PROFILE=ci ./scripts/selftest.sh` and
    `cargo test --profile ci --test capabilities` (about 30 s together).
-3. Then the full gate in step 5.5.
+3. `build.rs` (`find_top_level_defs`) only understands `/key value def` at depth 0, where
+   `value` is ONE object (a number, a name, a string, or a balanced `{}`/`[]`/`<< >>`
+   group). It panics on `/name N dict def` with "`def` with no `/name` two positions back
+   on the depth-0 stack", and that fails every build, not just your test. Write the dict
+   as a `<< >>` literal (`/name << /k v >> def`), or build it first and define it with a
+   probe-first def: make the value in an earlier definition, so the `def` line has one
+   object (`/name mkvalue def`). Run `cargo build` before the long gate to see it in seconds.
+4. Paintkit and other `lib/` slices that promise "unset keys render byte-identically":
+   run `scripts/identity_check.sh BASE_WORKTREE` (see its header: base worktree at the
+   post-5.5-rebase commit, one shared binary, `--control FILE` negative control). The
+   control driver may live in `<SCRATCH>`: pass it by absolute path.
+5. Every pscat probe you run by hand needs `--headless`, or `-e`/`--png`. Without one of
+   them pscat opens a window and the call blocks until it is closed:
+   `pscat --headless -e '3 4 add ='`, `pscat --png <SCRATCH>/probe-<N>.png file.ps`.
+6. Then the full gate in step 5.5.
 
 ## CI wait (#199, from the #178 / PR #198 run; timings and pass/fail rule updated in #208)
 
@@ -423,6 +443,10 @@ maintainer's eye, a human who wants the last look). Run steps 1-8.9 as
 usual, then at 8.10 do step 11 (the summary is posted so the issue carries
 the wrap-up) and stop **before** 8.12:
 
+0. Write the PR body for the maintainer from the start (step 7): what changed and why, what
+   you verified and how, what you did not or could not verify, what to look at first
+   (renders, a risky function), and that merging is theirs to do (`/work-issue <N>` later
+   finishes it). A body drafted for a self-merge ("CI is green, merging") misleads them.
 1. Release the lock: `rm -rf "$(git rev-parse --path-format=absolute --git-common-dir)/work-issue-lock-<N>"`.
 2. Keep the `in-review` label, the worktree and the branch. Do not run
    step 9.
@@ -446,6 +470,15 @@ origin main && git -C "$WORKTREE_DIR" merge origin/main`, resolve, commit,
 plain `git push` (no force). `gh pr update-branch` is only a shortcut for a
 conflict-free merge; if you do use it, `git -C "$WORKTREE_DIR" pull
 --ff-only` before any later local commit.
+
+**Gate after a clean rebase or merge (#276).** If a gate already passed and the
+rebase or merge then brought in only documentation, skill or CI files, that gate result
+stands; do not re-run it. Decide with an allowlist, not a denylist, before the rebase:
+`git -C "$WORKTREE_DIR" fetch origin main && git -C "$WORKTREE_DIR" diff --name-only HEAD...origin/main`
+lists what `main` gained. If every path is `*.md`, under `docs/`, `notes/`, `.claude/` or
+`.github/`, the gate stands. Anything else (`lib/`, `src/`, `tests/`, `selftest/`,
+`examples/`, `gallery/`, `scripts/`, `build.rs`, `Cargo.*`, `site/`) means re-run it.
+Either way, re-read the worktree's `SKILL.md` after a rebase that moved `HEAD`.
 
 **NOTES.md conflicts** should be rare since #273: new notes go in
 `notes/<issue>-<slug>.md`, one file per issue, so two PRs never touch the

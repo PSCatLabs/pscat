@@ -79,8 +79,7 @@ Pitfall below for how to check on it without `ScheduleWakeup`:
 
 ```sh
 rm -f <SCRATCH>/codex-review-<N>.json && \
-  H="$(git rev-parse --path-format=absolute --git-common-dir)/work-issue-lock-<N>/heartbeat" && \
-  date +%s > "$H.tmp" && mv "$H.tmp" "$H" && \
+  bash "$WORKTREE_DIR/.claude/skills/work-issue/scripts/heartbeat.sh" <N> && \
   cd "$WORKTREE_DIR" && git fetch origin main && \
   test "$(git rev-parse --abbrev-ref HEAD)" = "$BRANCH" && \
   node "$CODEX_SCRIPT" review --wait --json --model gpt-6.1-sol \
@@ -264,7 +263,7 @@ via whichever path ran), decide merge eligibility from the policy:
 wrap-up has to already be there — a comment added afterwards lands on a
 closed ticket nobody is watching. Write it from what actually happened,
 not from the plan. Start it with the exact heading
-`## Summary of work (PR #<PR>)` (step 9 greps for it). It has these parts:
+`## Summary of work (PR #<PR>)` (step 9, `finish.md`, greps for it). It has these parts:
 
 - **Delivered** — files/artifacts and the exact render/run commands.
 - **Decisions** — each judgement call and why (including any the user

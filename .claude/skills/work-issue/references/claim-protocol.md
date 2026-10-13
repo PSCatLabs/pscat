@@ -1,10 +1,13 @@
 # Claim protocol and heartbeat: full reference
 
-Read by `SKILL.md` steps 1 and 3. The script in "Claim the issue" below
-is the only copy of the claim command — run it **exactly as written**,
-replacing only `<N>`. Do not edit, shorten, reorder or split it. Everything
-else in this file is the reasoning behind it, kept so a future editor
-does not "simplify" a guard away.
+Read when editing the claim. `SKILL.md` step 1 runs **`../scripts/claim.sh <N>`** as one command
+and step 3 onward runs **`../scripts/heartbeat.sh <N>`**; neither is pasted into the skill any more
+(#276, round 6: two agents in a row ran only the fresh-claim `mkdir` branch of the pasted block,
+which is the abbreviation the script exists to prevent). The scripts are this file's commands moved
+verbatim, `<N>` becoming `$N`; the only added lines are the argument check. Do not edit, shorten,
+reorder or split them without re-running **`../scripts/test-claim.sh`** (below). Everything else
+in this file is the reasoning behind the scripts, kept so a future editor does not "simplify" a
+guard away.
 
 Step numbers ("step 1" ... "step 9") refer to the numbered steps in `../SKILL.md`, which keep their original numbering. "Pitfalls" / "the ... pitfall below" means `pitfalls.md` in this directory; "Claim the issue" means `claim-protocol.md`.
 
@@ -33,67 +36,9 @@ checkout or from inside any worktree (verified) — unlike most paths in
 this doc, this one is immune to the cwd-reset pitfall below, so no
 `-C` or remembered variable is needed:
 
-```sh
-MAINGIT="$(git rev-parse --path-format=absolute --git-common-dir)"
-[ -n "$MAINGIT" ] || { echo "RESULT=error: could not resolve the main .git dir"; exit 1; }
-LOCKDIR="$MAINGIT/work-issue-lock-<N>"
+The commands are in `../scripts/claim.sh` (read it there; it keeps the original inline comments).
+It prints exactly one `RESULT=` line.
 
-if mkdir "$LOCKDIR" 2>/dev/null && date +%s > "$LOCKDIR/heartbeat.tmp" && mv "$LOCKDIR/heartbeat.tmp" "$LOCKDIR/heartbeat"; then
-  echo "RESULT=claimed (fresh)"
-else
-  HB="$LOCKDIR/heartbeat"
-  ORIG_HB_CONTENT=$(cat "$HB" 2>/dev/null)
-  if [ -n "$ORIG_HB_CONTENT" ] && printf '%s' "$ORIG_HB_CONTENT" | grep -qE '^[0-9]+$'; then
-    AGE=$(( $(date +%s) - ORIG_HB_CONTENT ))
-  else
-    # Missing/unreadable heartbeat is ambiguous on its own: it's both a
-    # genuinely crashed claim (died mid-truncation) AND what a *different*
-    # concurrent invocation's own fresh mkdir looks like for the few
-    # milliseconds between its mkdir succeeding and its heartbeat write
-    # landing (verified empirically — treating this as unconditionally
-    # stale let a second racer steal a lock the first racer had just won,
-    # microseconds after winning it). Fall back to the lock dir's own
-    # mtime: only a dir that's *also* been sitting untouched past a small
-    # grace window is a genuine crash, not an in-flight claim.
-    DIR_MTIME=$(stat -f %m "$LOCKDIR" 2>/dev/null || date +%s)
-    DIR_AGE=$(( $(date +%s) - DIR_MTIME ))
-    if [ "$DIR_AGE" -lt 10 ]; then
-      AGE=0
-    else
-      AGE=999999
-    fi
-  fi
-
-  if [ "$AGE" -lt 2700 ]; then
-    echo "RESULT=live (heartbeat $((AGE / 60)) min old) — do not resume/claim"
-  else
-    STEAL="$LOCKDIR.stale.$$.$(date +%s)"
-    if mv "$LOCKDIR" "$STEAL" 2>/dev/null; then
-      MOVED_HB_CONTENT=$(cat "$STEAL/heartbeat" 2>/dev/null)
-      if [ "$MOVED_HB_CONTENT" = "$ORIG_HB_CONTENT" ]; then
-        if mkdir "$LOCKDIR" 2>/dev/null && date +%s > "$LOCKDIR/heartbeat.tmp" && mv "$LOCKDIR/heartbeat.tmp" "$LOCKDIR/heartbeat"; then
-          rm -rf "$STEAL"
-          echo "RESULT=claimed (reclaimed a stale lock)"
-        else
-          rm -rf "$STEAL"
-          echo "RESULT=lost a rare 3-way reclaim race — do not resume/claim"
-        fi
-      else
-        # ABA: the object we just moved isn't the stale one we decided
-        # to steal -- a faster racer already reclaimed and recreated it
-        # between our read and our mv, and we grabbed *their* fresh
-        # claim by name instead (mv/rename has no concept of the
-        # object's identity, only its path). Put it back and back off.
-        mv "$STEAL" "$LOCKDIR" 2>/dev/null
-        rm -rf "$STEAL" 2>/dev/null
-        echo "RESULT=lost the reclaim race (ABA detected, restored) — do not resume/claim"
-      fi
-    else
-      echo "RESULT=lost the reclaim race to a concurrent invocation — do not resume/claim"
-    fi
-  fi
-fi
-```
 
 `RESULT=claimed*`: this invocation owns issue #<N>. Continue (to step
 2 for a genuinely fresh pick — `gh issue edit <N> --add-label
@@ -249,10 +194,7 @@ over the whole read-decide-write span (a token turns the problem into
 shape of gap, just narrower) — tracked as a known residual gap in #72
 rather than fixed here:
 
-```sh
-LOCKDIR="$(git rev-parse --path-format=absolute --git-common-dir)/work-issue-lock-<N>"
-date +%s > "$LOCKDIR/heartbeat.tmp" && mv "$LOCKDIR/heartbeat.tmp" "$LOCKDIR/heartbeat"
-```
+(the two commands are `../scripts/heartbeat.sh <N>`)
 
 (the same "re-derive, don't trust a remembered variable" reasoning
 already applies to `$WORKTREE_DIR`/`$BRANCH` reused across steps 7-9
@@ -271,8 +213,7 @@ out there —
 
 ```sh
 BRANCH="$(git -C "$WORKTREE_DIR" branch --show-current)"
-LOCKDIR="$(git rev-parse --path-format=absolute --git-common-dir)/work-issue-lock-<N>"
-date +%s > "$LOCKDIR/heartbeat.tmp" && mv "$LOCKDIR/heartbeat.tmp" "$LOCKDIR/heartbeat"
+bash "$WORKTREE_DIR/.claude/skills/work-issue/scripts/heartbeat.sh" <N>
 ```
 
 — instead of recomputing a fresh `SLUG`/`BRANCH` from the issue title.
@@ -282,3 +223,23 @@ correctly reused, and every later branch assertion/push/cleanup in
 this skill trusts `$BRANCH` — pointing it at a name that doesn't match
 what's actually checked out silently targets the wrong branch instead
 of erroring (#29).
+
+## Race tests (`../scripts/test-claim.sh`)
+
+Run `bash .claude/skills/work-issue/scripts/test-claim.sh` after any edit to `claim.sh`. It builds a
+throwaway git repo (no real lock is touched) and races `RACERS` (4) copies of the script behind a
+start barrier so they genuinely overlap:
+
+- 30 fresh-claim races (exactly one `claimed (fresh)`, every other racer `live` or `lost`);
+- 20 stale-heartbeat reclaim races (never two winners; losers report `lost` or `live`). Zero winners
+  is an allowed, safe outcome that happens now and then: a racer's ABA restore lands on another's
+  in-flight reclaim, everyone reports `lost`, and the lock stays reclaimable;
+- an empty lock dir under 10 s old reads `live`, one backdated past the grace window is reclaimed by
+  exactly one racer, and a garbage heartbeat on an old dir is reclaimed;
+- a fresh heartbeat makes every racer `live`;
+- the ABA case: one racer delayed (a `sleep 1` injected into a *copy* of the script) past another's
+  full reclaim-and-recreate, which must report `ABA detected, restored`;
+- with `CLAIM_ORIG=<file>` (the original block, from `git show <pre-#276 ref>:...claim-protocol.md`)
+  it diffs the script body against that block with `<N>` replaced by `$N`.
+
+`FRESH_TRIALS`, `STALE_TRIALS` and `RACERS` override the counts.
