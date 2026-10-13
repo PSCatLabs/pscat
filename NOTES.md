@@ -213,6 +213,27 @@ as a hard gate with a `Plan review` line in the final report, and `/tmp`
 as the single scratch location. Detail is in `references/pitfalls.md`
 "CI wait". The first run to use this recipe was #199's own.
 
+Follow-up (#208, round-3 fixes from the #141, #191 and #204 runs):
+- **CI pass/fail now comes from `gh pr view --json statusCheckRollup`**
+  (non-empty and every check `SUCCESS`), not the watch's `exit=` line,
+  which printed `0` on a run whose jobs were cancelled. Timings updated:
+  `test` takes about 2-3 min since #204 (was 11-17).
+- **Merge no longer passes `--delete-branch`.** The repo deletes the remote
+  branch itself, and gh's local half cannot succeed with a worktree
+  holding the branch; step 9 removes the worktree, then the local branch.
+- **The local gate matches CI:** selftest, `cargo test --profile ci`,
+  clippy with `-D warnings`, fmt; the PR template's test plan shows the
+  same line. Step 5 rebases onto `origin/main` once, before the first push.
+- **New written paths** in `references/pitfalls.md`: rerun after an
+  infrastructure failure (`gh run rerun --failed`, only if no step ran),
+  resume of an `in-review` PR (step 1, step 3 reuse, step 8, with a
+  GitHub-state re-entry table), the dispatcher-says-no-merge stop,
+  doc-only merge conflicts skipping the Codex re-review, `BEHIND` as the
+  normal case, heartbeat after every `update-branch`.
+- **Scratch files** go in the harness scratchpad when one is named, else
+  `${TMPDIR:-/tmp}` (reverses #199's `/tmp` pin). `SKILL.md` is still 250
+  lines.
+
 ## `lib/paintkit.ps`: brush motion generators (issue #184, 2026-10-09)
 
 Child of epic #112. paintkit models brush *heads*; this adds the other

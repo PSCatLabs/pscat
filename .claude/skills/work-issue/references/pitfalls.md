@@ -33,9 +33,12 @@ Step numbers ("step 1" ... "step 9") refer to the numbered steps in `../SKILL.md
   likely show `mergeStateStatus: BEHIND`** at step 8, because branch
   protection's `strict` status check requires the tested commit to
   reflect current `main` — the CI run from when the PR was opened no
-  longer counts. This is normal, not a failure: `gh pr update-branch`,
-  wait for CI to re-run on the updated branch, then merge. Confirmed
-  hitting this on the very first agent-merged PR in this repo (#22).
+  longer counts. This is normal, not a failure, and with several agents
+  merging it is the usual case (#208): `gh pr update-branch`, wait for
+  CI to re-run on the updated branch, then merge. If another PR lands
+  during that wait the PR is `BEHIND` again; repeat (heartbeat each
+  time). Confirmed hitting this on the very first agent-merged PR in
+  this repo (#22).
 - **Remove the worktree before deleting the local branch, not after**
   (step 9's order matters) — `git branch -d` fails with "branch used
   by worktree" if the worktree still references it. `git worktree
@@ -121,7 +124,7 @@ Step numbers ("step 1" ... "step 9") refer to the numbered steps in `../SKILL.md
   launches the review with `run_in_background: true`** (#57): on two
   separate occasions this exact pairing — never a plain foreground
   `--wait` call — was followed by the review process either vanishing
-  (task notification said `completed`, but `/tmp/codex-review-<N>.json`
+  (task notification said `completed`, but `<SCRATCH>/codex-review-<N>.json`
   was a 0-byte file and `codex-companion.mjs status --all --json`
   showed no record of the job at all) or being actively terminated
   (task notification said `killed`). Not root-caused against the
@@ -189,8 +192,10 @@ Step numbers ("step 1" ... "step 9") refer to the numbered steps in `../SKILL.md
   delete. Step 9 uses `-D`, but only after `gh pr view <PR#> --json
   state --jq .state` returned `MERGED` (step 9's first line aborts the block otherwise); that check is what makes `-D`
   safe, so never run `-D` without it.
-- **The full quality gate (`cargo build && cargo test && ...`) takes
-  longer than the Bash tool's 120s default foreground timeout.** Run it
+- **The full quality gate (`PSCAT_PROFILE=ci ./scripts/selftest.sh &&
+  cargo test --profile ci && clippy -D warnings && fmt`, the #204 shape,
+  identical to what CI runs) can exceed the Bash tool's 120s default
+  foreground timeout.** Run it
   with `run_in_background: true`, redirecting output to a log file, and
   wait for the background task's completion notification (or a
   `Monitor` on the log file — `Monitor` is a deferred tool: load it with
@@ -210,39 +215,68 @@ Step numbers ("step 1" ... "step 9") refer to the numbered steps in `../SKILL.md
 - **The main checkout does not pick up a merged change to this skill
   until it is pulled.** Skills load from the checkout the session runs
   in; merging updates `origin/main` only.
+- **Quote globs in shell examples** (`grep -r --include='*.md' ...`).
+  zsh, this repo's shell, aborts an unquoted `*.md` that matches nothing
+  with "no matches found" (#208).
+- **`gh pr merge --delete-branch` always printed a harmless local-branch
+  error** while the branch was checked out in a worktree (it tries to
+  switch the main checkout and delete the local branch). The repo's
+  `delete_branch_on_merge` setting already deletes the remote branch, so
+  step 8.13 no longer passes the flag and step 9 deletes the local
+  branch after removing the worktree (#208).
 
-## CI wait (#199, from the #178 / PR #198 run)
+## CI wait (#199, from the #178 / PR #198 run; timings and pass/fail rule updated in #208)
 
 Step 8.12's CI wait is the one place a run is most tempted to hand back
 early. The first Haiku run of the slimmed skill did: it stopped with
-`test` pending, and CI went green six seconds later. CI here takes
-**11-17 minutes** (`test` is the long job, `perf-regression` about 5),
-which is longer than a Monitor window or a foreground Bash timeout, so
-the only wait that works is a background Bash task whose completion
-wakes you:
+`test` pending, and CI went green six seconds later. Since #204 the
+`test` job takes **about 2-3 minutes** (`perf-regression` about 1; with
+runner queueing the whole wait is 2-6 minutes; it was 11-17 minutes
+before #204). That is still longer than a foreground Bash timeout, so the
+wait that works is a background Bash task whose completion wakes you:
 
 ```sh
-gh pr checks <PR#> --watch --fail-fast > /tmp/ci-<N>.log 2>&1; echo "exit=$?" >> /tmp/ci-<N>.log
+gh pr checks <PR#> --watch --fail-fast > <SCRATCH>/ci-<N>.log 2>&1; echo "exit=$?" >> <SCRATCH>/ci-<N>.log
 ```
 
-Run it with `run_in_background: true`, heartbeat first and after.
+Run it with `run_in_background: true`, heartbeat first and after (and
+again after every `gh pr update-branch`, which restarts CI).
 
 - **Do not sleep-poll** (foreground `sleep` is blocked and a poll loop
   burns turns) and **do not pipe through `tail`**: the pipeline's exit
   status becomes `tail`'s, which hides a failed check (#194's run hit this).
-  The redirect plus the trailing `exit=` line is what keeps the status.
-- **~15 minutes is normal.** A task that has run 10 minutes is not hung.
-- **Read the `exit=` line, not just the notification.** `exit=0` means
-  every check passed. Anything else: open the log before deciding. With
-  `--fail-fast` a non-zero exit means a check failed (stop and report) or
-  the command itself failed.
+  The redirect plus the trailing `exit=` line keeps the watch's own status.
+- **2-6 minutes is normal.** A task that has run 10 minutes is worth a
+  look (`gh pr checks <PR#>`), but it is not necessarily hung.
+- **The `exit=` line proves nothing about pass/fail** (#208). It was `0`
+  on a run where both jobs were cancelled ("job was not acquired by
+  Runner of type hosted"). Decide from GitHub's own check state, and merge
+  only when this prints `true`:
+  `gh pr view <PR#> --json statusCheckRollup --jq '[.statusCheckRollup[] | (.conclusion // .state)] | length > 0 and all(. == "SUCCESS")'`
+  The `length > 0` guard matters: jq's `all` is `true` on an empty
+  array, and the rollup is empty for a few seconds after a push. A
+  `CANCELLED`, `SKIPPED`, `NEUTRAL` or still-`IN_PROGRESS` check is not
+  `SUCCESS`. (Branch protection requires only `test`, but a red
+  `perf-regression` is a signal to read, not to merge past.)
 - **"no checks reported"**: seconds after a push or `gh pr update-branch`
   no check runs are registered yet, so `--watch` can exit non-zero with
-  that text. It is not a CI failure. Re-launch the same background
-  command. After `update-branch`, always start a fresh watch: the run
-  from before it no longer counts under the `strict` status check.
-- After a clean exit, re-run `gh pr view <PR#> --json mergeable,mergeStateStatus,statusCheckRollup`
-  and merge only when `test` is `SUCCESS`.
+  that text (or the rollup is empty). It is not a CI failure. Re-launch
+  the same background command. After `update-branch`, always start a
+  fresh watch: the run from before it no longer counts under the
+  `strict` status check.
+- **Rerun after an infrastructure failure only.** `gh run rerun <run-id>
+  --failed` is allowed when the failed job never ran a step: it was
+  `CANCELLED` or "not acquired by Runner" and has no `success`/`failure`
+  step. Check, using the run id from the check's `detailsUrl`
+  (`.../actions/runs/<run-id>/job/...`):
+  `gh run view <run-id> --json headSha,jobs --jq '{headSha, jobs: [.jobs[] | {name, conclusion, ran: ([.steps[]? | select(.conclusion=="success" or .conclusion=="failure")] | length)}]}'`
+  Rerun only when `headSha` is the PR's current head (an older run
+  cancelled by a newer push is superseded, not broken: `concurrency`
+  cancels it on purpose) and every failed job shows `ran: 0`. At most two
+  reruns; then start a fresh watch. Any job with a `failure` step is a real
+  failure (a test, clippy or fmt): stop and report, never rerun it.
+- After a clean `true`, merge. If `mergeStateStatus` has gone `BEHIND`
+  meanwhile, `gh pr update-branch <PR#>` and wait again.
 
 ### Pending-CI hand-back (only if you truly cannot wait)
 
@@ -257,27 +291,115 @@ task, or the user cut the run short), the PR is open but not merged. Do
    remaining steps: the PR number and branch; the worktree path; whether
    step 8.11's `## Summary of work` comment is already posted (do not post
    it twice); then `gh pr checks <PR#> --watch --fail-fast` (recipe
-   above), `gh pr view` to confirm `test` is `SUCCESS`,
-   `gh pr merge <PR#> --squash --delete-branch`, and step 9.
+   above), the statusCheckRollup query (non-empty, every check `SUCCESS`),
+   `gh pr merge <PR#> --squash`, and step 9.
 3. Resuming: the same session just continues from step 8.12 with no
-   re-claim. Step 3 has no automated route to 8.12; a fresh
-   `/work-issue <N>` after the lock is stale would reuse the worktree and
-   land at step 4, so the person resuming it should point the agent at the
-   report's remaining-steps list instead. A re-run inside 45 minutes
-   reports `live` and stops.
+   re-claim. A fresh `/work-issue <N>` after the lock is stale takes the
+   "Resume paths" route below (issue is `in-review` with an open PR, so it
+   claims, reuses the worktree and lands at step 8). A re-run inside 45
+   minutes reports `live` and stops.
+
+### Resume paths (#208)
+
+Entered from step 1 when an explicit `<N>` is `in-review` and an open PR
+claims it: a pending-CI hand-back, a no-merge hand-back (below), or a
+run that died after step 7. Claim as usual, skip step 2 (re-adding
+`in-progress` would make the next invocation read "someone is mid-run" and
+refuse). Then restore the worktree: if `git worktree list` shows one ending
+`-issue-<N>`, take step 3's reuse branch. If it is gone, **do not** take
+step 3's "Otherwise" route (it cuts a new branch from `origin/main` and
+would lose the PR's work, or fail on the existing branch); make one on
+the PR branch: `git fetch origin "$BRANCH" && git worktree add "$WORKTREE_DIR" "$BRANCH"`
+(find `$BRANCH` with `gh pr list --state open --json number,headRefName --jq '.[] | select(.headRefName | test("/<N>-"))'`).
+Find the PR with `gh pr list --state open --head "$BRANCH" --json number,url`.
+**Then sync the worktree with the PR head before choosing a row** (Codex
+round 3 on #208: step 8 reviews local git state, so a stale local branch
+would be reviewed while the newer remote head gets merged):
+`git -C "$WORKTREE_DIR" fetch origin "$BRANCH"`, then compare
+`git -C "$WORKTREE_DIR" rev-parse HEAD` with the PR's `headRefOid`.
+Behind: `git -C "$WORKTREE_DIR" merge --ff-only "origin/$BRANCH"`. Ahead
+(unpushed local commits): run the gate, `git push`, continue. Diverged:
+stop and report, do not guess.
+**Decide the re-entry point from GitHub state, never from scratch files**
+(`<SCRATCH>` is per session; the old gate log, review JSON and summary
+file are gone). First match wins:
+
+| What GitHub shows | Re-enter at |
+|---|---|
+| PR `CLOSED` unmerged | Stop and report. |
+| PR `MERGED` | Step 9 only. |
+| No `## Codex review` (or `## Fallback review`) comment on the PR | 8.1: the review never ran. |
+| The PR head is not the `reviewed head` named in the last `## Codex review, round` or `## Fallback review, round` issue comment, and either `git -C "$WORKTREE_DIR" log --first-parent --no-merges <reviewed-sha>..HEAD` is non-empty (the branch gained its own commits; timestamps are unreliable, a commit made before the review can be pushed after it), or some merge in `git log --first-parent --merges <reviewed-sha>..HEAD` has conflict resolutions that are not plain documentation (`git show --remerge-diff --format= --stat <merge>` (git 2.36+; it redoes the merge and shows what the committed result changed, so it also catches a conflict "resolved" by taking one parent's file, which `--cc` omits) prints nothing for a clean merge of `main`, e.g. from `update-branch`, and the merge must really bring in `main`: `git merge-base --is-ancestor <merge>^2 origin/main` succeeds (a clean merge of another feature branch is unreviewed code); anything it lists must be only plain docs, per "Rebase and merge rules") | 8.3 with R+1: re-review. |
+| The issue has no `## Codex review, round` / `## Fallback review, round` comment with a `reviewed head` (the run died between 8.6 and 8.8, so the reviewed SHA was never recorded) | 8.3 with R+1: the PR comment alone cannot say what was reviewed, so review again. |
+| The last round comment (even if clean merges of `main` have moved the head since) has any row of its table lacks a response ("Fixed in ..." / "Not fixing: ...") | 8.7: read the PR's review comment and disposition every finding. A finding that needs a fix goes through 8.9 (fix, push, gate, re-review with R+1). A review is never "clean" just because it is current (Codex rounds 2 and 8 on #208). |
+| Review current and every finding dispositioned, but no `## Summary of work (PR #<PR#>)` comment on the issue | 8.10, 8.11. |
+| Summary posted | 8.10 (re-read `merge_policy` and whether the dispatcher still says no merge), then 8.12. |
+
+The final report on a resume fills `Plan review` with `done (earlier run)`
+and counts the review rounds from the issue's `## Codex review, round`
+and `## Fallback review, round` comments, not from this session.
+
+### Stop without merging when the dispatcher says so (#208)
+
+Some dispatches say not to merge (a gallery render waiting on the
+maintainer's eye, a human who wants the last look). Run steps 1-8.9 as
+usual, then at 8.10 do step 11 (the summary is posted so the issue carries
+the wrap-up) and stop **before** 8.12:
+
+1. Release the lock: `rm -rf "$(git rev-parse --path-format=absolute --git-common-dir)/work-issue-lock-<N>"`.
+2. Keep the `in-review` label, the worktree and the branch. Do not run
+   step 9.
+3. Report `Merge: awaiting human merge (dispatcher said no merge)` with
+   the PR number, branch and worktree path.
+
+To merge later, `/work-issue <N>` again: the issue is `in-review` with an
+open PR, the lock is free (fresh claim), and the Resume table above lands
+on the summary row (or on re-review if commits were added since). Step 9
+then removes the worktree.
+
+### Rebase and merge rules (#208)
+
+Rebase onto `origin/main` exactly once, at step 5.5 before the **first
+push** (commit first: a rebase refuses a dirty tree), so a break already on `main` (as #189's clippy failure was) does
+not fail an unrelated issue. After the PR exists, history is published:
+never rebase it. Bring `main` in by merging instead: `gh pr update-branch
+<PR#>` (remote merge), then `git -C "$WORKTREE_DIR" pull --ff-only` before
+any later local commit. If `update-branch` refuses because of conflicts,
+merge locally: `git -C "$WORKTREE_DIR" fetch origin main && git -C
+"$WORKTREE_DIR" merge origin/main`, resolve, commit, plain `git push`
+(no force).
+
+**Doc-only conflicts skip the re-review.** If every conflicted file in
+such a rebase or merge was plain documentation (`NOTES.md`, `HANDOFF.md`,
+`README.md`, other `*.md`) and your resolution changed no other file
+(check, while still conflicted: `git diff --name-only --diff-filter=U`
+lists only `*.md` files), re-run the quality gate (5.5) but not
+the Codex review, and say so in the PR/issue comment. Markdown that steers
+agents is not documentation for this rule: anything under `.claude/` (skills
+and their references, which define executable workflow), `AGENTS.md`,
+`CLAUDE.md`, `SDLC.md` (Codex review, #208 round 1). Any conflict in those,
+code, `lib/`, tests or scripts means the review is stale: re-review (8.3, R+1).
+A merge of `main` with no conflicts at all never needs a re-review.
 
 ### Step 4 is a hard gate
 
 The same run skipped the plan-review checkpoint without noticing. Step
 4.4 now says no code before the `advisor` call, and the final report has
 a `Plan review (step 4)` line that must read `done` or `skipped (small)`.
-Skipping is allowed only for a **small** change (step 4's definition),
+Skipping is allowed only for a **small** change (step 4.2 is the one
+definition: 20 changed lines or fewer and no API change),
 and the report must say so; for a full-size change the call is required.
 
 ### One scratch location
 
-All scratch files live in `/tmp` as `<kind>-<N>.*` (`gate-<N>.log`,
-`ci-<N>.log`, `codex-review-<N>.json`, `issue-<N>-summary.md`). Some
-harnesses tell agents to use a session scratchpad instead; the skill's
-`/tmp` paths override that, because `<N>`-keyed names are stable across
-steps and across a resumed run, and a scratchpad path is not.
+All scratch files live in `<SCRATCH>` as `<kind>-<N>.*` (`gate-<N>.log`,
+`ci-<N>.log`, `codex-review-<N>.json`, `issue-<N>-summary.md`).
+`<SCRATCH>` is the session scratchpad directory when the system prompt
+names one (the Claude Code harness tells agents to prefer it, and it needs
+no permission prompts); otherwise `${TMPDIR:-/tmp}`. #205 had pinned `/tmp`
+over the harness default; #208 reversed that. Write the literal path into
+each command (variables do not survive between Bash calls). The `<N>` in
+every name keeps two concurrent issues apart even in a shared directory.
+The cost: a scratchpad is per session, so a resumed run never finds the
+earlier run's files; resume decisions are made from GitHub state
+("Resume paths" above), and a review JSON or summary is regenerated.
