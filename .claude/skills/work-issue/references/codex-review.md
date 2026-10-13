@@ -5,7 +5,9 @@ order to run them; this file is the complete original step 8 — policy,
 rationale, output format, posting templates, fallback path, merge
 eligibility and the pre-merge summary format. Where the two differ,
 `SKILL.md`'s commands win only for the deliberate changes listed in the
-PR that split this skill (#194); every guard below still applies.
+PR that split this skill (#194) and in #208 (no `--delete-branch`, the
+`statusCheckRollup` pass/fail rule, `<SCRATCH>` paths, the no-merge stop);
+every guard below still applies.
 
 Step numbers ("step 1" ... "step 9") refer to the numbered steps in `../SKILL.md`, which keep their original numbering. "Pitfalls" / "the ... pitfall below" means `pitfalls.md` in this directory; "Claim the issue" means `claim-protocol.md`.
 
@@ -68,7 +70,7 @@ make a still-live run look stale to a concurrent invocation.
 `run_in_background: true` on it, and never call `ScheduleWakeup` in
 the same turn that launches it.** That exact pairing has twice
 produced a review that looked like it finished when it hadn't: once a
-0-byte `/tmp/codex-review-<N>.json` behind a task notification that
+0-byte `<SCRATCH>/codex-review-<N>.json` behind a task notification that
 still said `completed`, once the process reported outright `killed`
 (#57, not root-caused — observed only on turns combining the two, not
 on plain foreground runs). Let the call block; if the harness
@@ -76,20 +78,20 @@ auto-backgrounds it anyway past its own timeout, see the matching
 Pitfall below for how to check on it without `ScheduleWakeup`:
 
 ```sh
-rm -f /tmp/codex-review-<N>.json && \
+rm -f <SCRATCH>/codex-review-<N>.json && \
   H="$(git rev-parse --path-format=absolute --git-common-dir)/work-issue-lock-<N>/heartbeat" && \
   date +%s > "$H.tmp" && mv "$H.tmp" "$H" && \
   cd "$WORKTREE_DIR" && git fetch origin main && \
   test "$(git rev-parse --abbrev-ref HEAD)" = "$BRANCH" && \
   node "$CODEX_SCRIPT" review --wait --json --model gpt-6.1-sol \
   --scope branch --base origin/main \
-  > /tmp/codex-review-<N>.json
+  > <SCRATCH>/codex-review-<N>.json
 ```
 
 `rm -f` stays first in the chain, exactly as it originally was — if any
 later step in the chain fails (heartbeat write, branch assert,
 `$WORKTREE_DIR`/`$BRANCH` empty from a cwd/variable reset), the stale
-`/tmp/codex-review-<N>.json` from a *prior* round is already gone, so
+`<SCRATCH>/codex-review-<N>.json` from a *prior* round is already gone, so
 the "before posting anything" check below can't accept and post that
 prior round's output as if it were a review of the current diff — a
 short-circuit that isn't `rm -f`-first would silently do exactly that
@@ -152,7 +154,7 @@ review; treat it the same as "Codex runtime unavailable" below (skip
 straight to the Fallback path, don't post from this file at all).
 
 ```sh
-jq -e '.codex.status == 0 and (.codex.stdout // "" | length > 0)' /tmp/codex-review-<N>.json
+jq -e '.codex.status == 0 and (.codex.stdout // "" | length > 0)' <SCRATCH>/codex-review-<N>.json
 ```
 
 Only once that passes: **post the review on both the PR and the
@@ -162,13 +164,13 @@ record a human can read without re-running anything, not just a
 merge/no-merge gate.
 
 ```sh
-gh pr comment <PR#> --body "$(jq -r '"## Codex review\n\n" + .codex.stdout' /tmp/codex-review-<N>.json)"
+gh pr comment <PR#> --body "$(jq -r '"## Codex review\n\n" + .codex.stdout' <SCRATCH>/codex-review-<N>.json)"
 ```
 
 **The issue gets the findings themselves, not a one-line pointer.**
 The PR comment above is verbatim; the ticket must also carry every
 finding and what was done about it, because the issue is where a human
-reads the history and `/tmp/codex-review-<N>.json` is overwritten by the
+reads the history and `<SCRATCH>/codex-review-<N>.json` is overwritten by the
 next round (#160 — on #147 only the PR held the verbatim text). Once
 you have read the review and decided what to do about each finding,
 post one comment per review round on the **issue** (a fresh comment
@@ -176,7 +178,7 @@ each round; never edit or replace an earlier round's):
 
 ```sh
 gh issue comment <N> --body-file - <<'EOF'
-## Codex review, round <R> (PR <PR URL>)
+## Codex review, round <R> (PR <PR URL>, reviewed head <sha captured at review time>)
 
 <details><summary>Codex output, verbatim</summary>
 
@@ -189,6 +191,15 @@ gh issue comment <N> --body-file - <<'EOF'
 | 1 | ... | yes / no / partly | Fixed in <short sha>: <what changed> — or — Not fixing: <explicit reason> |
 EOF
 ```
+
+The `reviewed head` in the heading is the commit `--scope branch` actually
+reviewed: run `git -C "$WORKTREE_DIR" rev-parse HEAD` as soon as the review
+returns, **before any fix commit**, and write that value, never `HEAD` at
+the time you post (fixes are committed first, and would be recorded as
+reviewed). It is what a resumed run compares the PR head against; without it a
+resume cannot tell a current review from a stale one (`pitfalls.md`
+"Resume paths", Codex round 4 on #208). The `## Fallback review, round <R>`
+heading carries it too.
 
 Every finding gets a row, including ones judged not real (say why) and
 including a clean pass ("no findings", one row or a sentence). "Our
@@ -218,7 +229,7 @@ and what to check (title/body via `gh pr view`, diff via `gh pr diff`
 view of them). Post its review to the PR and issue under the same
 policy as above — unconditionally, including a clean result — but
 via `gh pr comment`/`gh issue comment` with the agent's own report
-text directly as the body; there's no `/tmp/codex-review-<N>.json` in
+text directly as the body; there's no `<SCRATCH>/codex-review-<N>.json` in
 this path, so the `jq` mechanics above don't apply. Note in both
 comments that this was a same-family fallback *and why* (the actual
 error text and what you tried; see the stale-Codex-broker Pitfall
@@ -237,7 +248,12 @@ via whichever path ran), decide merge eligibility from the policy:
   (`/work-issue <N>` re-run after a human closes this PR unmerged and
   leaves the issue open, for instance). Report the PR as open and
   awaiting merge; don't attempt to merge it.
-- `agent-full`: eligible regardless of diff size or files touched.
+- `agent-full`: eligible regardless of diff size or files touched, unless
+  the dispatcher said not to merge: post the summary below, release the
+  lock, keep `in-review`, the worktree and the branch, and report
+  `awaiting human merge (dispatcher said no merge)`. `pitfalls.md`
+  "Stop without merging" and "Resume paths" have the stop and the
+  resume-to-merge route (#208).
 - `size-and-risk-bar`: eligible only if the diff (excluding doc-only
   files) is under `max_changed_lines` and touches none of
   `sensitive_paths`; otherwise stop here (same lock release as the
@@ -262,7 +278,7 @@ not from the plan. Start it with the exact heading
   or the original, and any follow-up worth filing.
 
 ```sh
-gh issue comment <N> --body-file /tmp/issue-<N>-summary.md
+gh issue comment <N> --body-file <SCRATCH>/issue-<N>-summary.md
 ```
 
 Skip this only when the merge policy stops before merging
@@ -278,20 +294,30 @@ gh pr view <PR#> --json mergeable,mergeStateStatus,statusCheckRollup
 If `mergeStateStatus` is `BEHIND` (branch protection's `strict` status
 check requires the tested commit to reflect current `main` — a PR
 opened a while ago, or after another PR merged first, will hit this),
-update and wait for CI before merging:
+update and wait for CI before merging (with several agents merging,
+`BEHIND` is the normal case, not an exception, #208):
 
 ```sh
 gh pr update-branch <PR#>
-# then wait with SKILL.md step 8.12's background recipe (pitfalls.md "CI wait"); never poll or sleep
+# then wait with SKILL.md step 8.12's background recipe (pitfalls.md "CI wait"); never poll or sleep.
+# Pass/fail comes from the statusCheckRollup query there, not from the watch's exit= line.
 ```
 
 Then merge using the shape recorded in `SDLC.md`'s `merge_button`
-block (this repo: squash, delete-branch-on-merge):
+block (this repo: squash; `delete_branch_on_merge: true` makes GitHub
+delete the remote branch itself):
 
 ```sh
-gh pr merge <PR#> --squash --delete-branch
+gh pr merge <PR#> --squash
 ```
+
+No `--delete-branch` (#208): gh also tries to delete the *local* branch
+and switch the main checkout, which fails while the branch is checked out
+in the worktree, so it printed a harmless error on every run. Step 9
+removes the worktree, then the local branch.
 
 If CI fails on the updated branch, don't force past it — treat that
 as a blocker the same as a failed review, and report it rather than
-merging anyway.
+merging anyway. Cancelled or never-started jobs (infrastructure) may be
+re-run once the `pitfalls.md` "CI wait" check shows no step ran; a real
+failed step is a blocker.
