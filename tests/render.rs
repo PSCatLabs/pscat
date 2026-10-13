@@ -2,6 +2,8 @@
 //! Device y is flipped relative to user space, so user (x, y) on a
 //! 100-high page is pixel (x, 100 - y).
 
+mod common;
+
 use pscat::{Interp, PsError};
 
 fn render(src: &str) -> Interp {
@@ -609,7 +611,7 @@ fn shfill_pdf_fallback_weights_by_stop_position_not_a_flat_mean() {
             it.gfx().pixmap.clone(),
         )
     };
-    let text = String::from_utf8_lossy(&pdf);
+    let text = common::pdf_text(&pdf);
     // Parse the "R G B rg" fill color out of the content stream: the
     // three whitespace-separated tokens immediately before the "rg"
     // operator.

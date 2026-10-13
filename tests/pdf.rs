@@ -4,6 +4,9 @@
 
 use std::process::Command;
 
+mod common;
+
+use common::pdf_text;
 use pscat::Interp;
 use tiny_skia::Pixmap;
 
@@ -119,11 +122,34 @@ fn document_structure_is_sane() {
         b"newpath 10 10 moveto 90 10 lineto 50 90 lineto closepath fill showpage
           newpath 20 20 moveto 80 20 lineto 80 80 lineto 20 80 lineto closepath fill showpage",
     );
-    let text = String::from_utf8_lossy(&pdf);
+    let text = pdf_text(&pdf);
     assert!(text.starts_with("%PDF-1.4"));
     assert!(text.contains("/Count 2"), "two pages");
     assert!(text.contains("startxref"));
     assert!(text.ends_with("%%EOF\n"));
+}
+
+/// Page content streams are Flate-compressed (issue #244: alpine_lake
+/// was 258 MB of plain operators, ~74 MB deflated), and inflate to the
+/// `cm` flip followed by the page's operators.
+#[test]
+fn page_content_is_flate_compressed() {
+    let (pdf, _) = pdf_and_canvas(b"1 0 0 setrgbcolor 10 10 50 50 rectfill");
+    let raw = String::from_utf8_lossy(&pdf);
+    assert!(
+        raw.contains("/Length ") && raw.contains("/Filter /FlateDecode >>\nstream\n"),
+        "content stream dict declares FlateDecode"
+    );
+    assert!(
+        !raw.contains(" rg "),
+        "operators are not stored as plain text"
+    );
+    let text = pdf_text(&pdf);
+    assert!(
+        text.contains(&format!("stream\n1 0 0 -1 0 {SIZE} cm\n")),
+        "inflated stream starts with the flip: {text}"
+    );
+    assert!(text.contains("1 0 0 rg"));
 }
 
 #[test]
@@ -132,9 +158,12 @@ fn images_become_xobjects() {
         b"10 10 translate 80 80 scale
           2 2 8 [2 0 0 -2 0 2] {<00ff ff00>} image",
     );
-    let text = String::from_utf8_lossy(&pdf);
+    let text = pdf_text(&pdf);
     assert!(text.contains("/Subtype /Image"), "XObject present");
-    assert!(text.contains("/Filter /FlateDecode"));
+    assert!(
+        text.contains("/Height 2 /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode"),
+        "the image dict itself is Flate-compressed"
+    );
     assert!(text.contains("/Im0 Do"));
 }
 
@@ -150,7 +179,7 @@ fn strokes_appear_in_pdf_only_export() {
         b"0.7 0.7 0.75 setrgbcolor 2 setlinewidth
           newpath 10 50 moveto 90 50 lineto stroke",
     );
-    let text = String::from_utf8_lossy(&pdf);
+    let text = pdf_text(&pdf);
     assert!(text.contains(" S\n") || text.contains(" S\r"), "{text}");
     assert!(
         text.contains("0.7 0.7 0.75 RG"),
@@ -171,7 +200,7 @@ fn shfill_appears_as_an_average_color_fill_in_pdf_only_export() {
         b"<< /ShadingType 2 /ColorSpace /DeviceRGB /Coords [0 0 100 0]
              /Function << /FunctionType 2 /Domain [0 1] /C0 [0 0 0] /C1 [1 1 1] /N 1 >> >> shfill",
     );
-    let text = String::from_utf8_lossy(&pdf);
+    let text = pdf_text(&pdf);
     assert!(text.contains(" f\n") || text.contains(" f\r"), "{text}");
     // Average of a black-to-white ramp lands at mid-gray.
     assert!(text.contains("0.5 0.5 0.5 rg"), "{text}");
@@ -183,7 +212,7 @@ fn imagemasks_are_stencils() {
         b"1 0 0 setrgbcolor 10 40 translate 80 20 scale
           2 1 true [2 0 0 -1 0 1] {<80>} imagemask",
     );
-    let text = String::from_utf8_lossy(&pdf);
+    let text = pdf_text(&pdf);
     assert!(text.contains("/ImageMask true"), "{text}");
     assert!(text.contains("1 0 0 rg"), "painted in current color");
 }
@@ -204,7 +233,7 @@ fn dsc_header_comments_become_pdf_info() {
     it.run_source(src)
         .unwrap_or_else(|e| panic!("run failed: {}", it.error_report(&e)));
     let pdf = it.gfx().pdf_document().expect("recording on");
-    let text = String::from_utf8_lossy(&pdf);
+    let text = pdf_text(&pdf);
     assert!(text.contains("/Producer (pscat)"));
     assert!(text.contains("/Title (Moonlit Poem)"));
     assert!(text.contains("/Author (Jerome)"));
@@ -223,7 +252,7 @@ fn dsc_header_comments_become_pdf_info() {
 #[test]
 fn no_dsc_comments_still_gets_producer_but_no_title() {
     let (pdf, _) = pdf_and_canvas(b"newpath 10 10 moveto 90 10 lineto stroke showpage");
-    let text = String::from_utf8_lossy(&pdf);
+    let text = pdf_text(&pdf);
     assert!(text.contains("/Producer (pscat)"));
     assert!(!text.contains("/Title"));
     assert!(!text.contains("/Author"));
@@ -254,7 +283,7 @@ fn alpha_survives_the_round_trip_through_gs() {
         0 0 0 setrgbcolor 12 setlinewidth
         newpath 60 60 moveto 440 60 lineto stroke";
     let (pdf, canvas) = pdf_and_canvas(src);
-    let text = String::from_utf8_lossy(&pdf);
+    let text = pdf_text(&pdf);
     assert!(text.contains("/ExtGState"), "alpha needs an ExtGState");
     assert!(text.contains("/ca 0.55"), "fill alpha");
     assert!(text.contains("/CA 0.55"), "stroke alpha");
@@ -273,7 +302,7 @@ fn multiply_blending_survives_the_round_trip_through_gs() {
         0.95 0.85 0.25 setrgbcolor newpath 200 300 120 0 360 arc closepath fill
         0.15 0.35 0.75 setrgbcolor newpath 300 300 120 0 360 arc closepath fill";
     let (pdf, canvas) = pdf_and_canvas(src);
-    let text = String::from_utf8_lossy(&pdf);
+    let text = pdf_text(&pdf);
     assert!(
         text.contains("/BM /Multiply"),
         "blend mode in the ExtGState"
@@ -293,7 +322,7 @@ fn ordinary_programs_get_no_extgstate() {
         b"0 0 1 setrgbcolor newpath 10 10 moveto 90 10 lineto 50 90 lineto closepath fill
           1 0 0 setrgbcolor 4 setlinewidth newpath 10 95 moveto 90 95 lineto stroke",
     );
-    let text = String::from_utf8_lossy(&pdf);
+    let text = pdf_text(&pdf);
     assert!(!text.contains("/ExtGState"), "no alpha, no ExtGState");
     assert!(
         !text.contains(" gs\n") && !text.contains(" gs "),
@@ -308,7 +337,7 @@ fn ordinary_programs_get_no_extgstate() {
 /// group left open (or closed twice) is the way this optimization would
 /// break a document without any single element looking wrong.
 fn assert_q_balanced(pdf: &[u8]) {
-    let text = String::from_utf8_lossy(pdf);
+    let text = pdf_text(pdf);
     let mut streams = 0;
     for chunk in text.split("stream\n").skip(1) {
         let body = chunk.split("endstream").next().unwrap_or("");
@@ -348,7 +377,7 @@ fn a_run_of_elements_under_one_clip_writes_the_clip_once() {
             newpath i 6 mul 60 add 300 moveto 30 30 rlineto stroke
           grestore } for",
     );
-    let text = String::from_utf8_lossy(&pdf);
+    let text = pdf_text(&pdf);
     assert_eq!(text.matches(" W n ").count(), 1, "clip path repeated");
     assert_eq!(text.matches(" f\n").count(), 60, "all fills kept");
     assert_eq!(text.matches(" S\n").count(), 60, "all strokes kept");
@@ -361,7 +390,7 @@ fn unclipped_pages_get_no_outer_group() {
     let (pdf, _) = pdf_and_canvas(
         b"1 0 0 setrgbcolor 10 10 50 50 rectfill 0 0 1 setrgbcolor 70 10 50 50 rectfill",
     );
-    let text = String::from_utf8_lossy(&pdf);
+    let text = pdf_text(&pdf);
     assert!(!text.contains(" W n"), "no clip, no W");
     assert!(!text.contains("\nq \n"), "no group");
     assert_q_balanced(&pdf);
@@ -423,7 +452,7 @@ fn clip_groups_survive_copypage_showpage_and_erasepage() {
           copypage",
     );
     assert_q_balanced(&pdf);
-    let text = String::from_utf8_lossy(&pdf);
+    let text = pdf_text(&pdf);
     // copypage, showpage, the final copypage, and the art painted after
     // it (finish() emits that as a trailing page).
     assert!(text.contains("/Count 4"), "unexpected page count");
