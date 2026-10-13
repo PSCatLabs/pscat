@@ -272,6 +272,7 @@ pub const ARTKIT_INTERNAL: &[&str] = &[
     "sqmove",
     "siedge",
     "siscan",
+    "siinside",
     "Palettes",
     "TurtleState",
 ];

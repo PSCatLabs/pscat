@@ -163,6 +163,27 @@
   fill
 } def
 
+%%SelfTest: stipple-never-executes-a-malformed-region
+%   % #123: `stipple` forwards its region to `scatter` untouched, and
+%   % that forwarding must not run a procedure, operator or executable
+%   % name passed in its place. The rejection is scatter's own.
+%   /tgotfn { /tgot true def } def
+%   /tgot false def
+%   { { /tgot true def } << /Count 1 >> stipple }
+%   /scatter-needs-a-region
+%   (a procedure as the region) mustguard
+%   tgot not (a procedure as the region: nothing ran) mustbe
+%   /tgot false def
+%   { /add load << /Count 1 >> stipple }
+%   /scatter-needs-a-region
+%   (an operator as the region) mustguard
+%   /tgot false def
+%   { /tgotfn cvx << /Count 1 >> stipple }
+%   /scatter-needs-a-region
+%   (an executable name as the region) mustguard
+%   tgot not (an executable name as the region: nothing ran) mustbe
+%%EndSelfTest
+%
 % region opts stipple -
 % @kind: Procedure
 % @summary: Places dots (or a caller-supplied point mark) across a region according to a density — a constant number, or a per-point {x y -> w} tone callback for sparse-to-dense stippling. A thin convenience layer over artkit.ps's scatter; every option not listed here (/Count, /MinSpacing, /Seed, /Tries, /Budget, /Scale, /Rotate, /Mark, /Weight) is scatter's own, forwarded unchanged.
@@ -178,7 +199,12 @@
   % then executed by the very next bare reference meant only to
   % type-check it (Codex review, PR #122, round 2).
   1 array astore /spoptsbox exch def
-  /spregion exch def
+  % The region gets the same wrap, for the same reason: it is only
+  % ever forwarded to `scatter`, which owns its validation
+  % (`scatter-needs-a-region`), but a bare `spregion` reference at the
+  % forwarding call below would run a procedure, operator or
+  % executable name passed there before `scatter` ever saw it (#123).
+  1 array astore /spregbox exch def
   spoptsbox 0 get type /dicttype ne { stipple-opts-must-be-a-dict } if
   /spopts spoptsbox 0 get def
 
@@ -262,5 +288,5 @@
     } if
   } if
 
-  spregion spscopts scatter
+  spregbox 0 get spscopts scatter
 } def
