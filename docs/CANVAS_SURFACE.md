@@ -119,7 +119,7 @@ the result is clipped to the catch.
 `pkX-touch-needs-a-canvas`, rather than silently painting the full mark.
 Guards are named after the preset, as everywhere in the file:
 `pktrowel-touch-must-be-0-to-1`, `pktrowel-touch-must-not-be-a-procedure`
-and `pktrowel-touch-area-exceeds-safety-limit` (section 3.4).
+and `pktrowel-touch-area-exceeds-safety-limit` (section 3.3).
 
 ### 2.3 Byte identity when unused
 
@@ -210,10 +210,17 @@ llx lly urx ury touch pjcatch -     % user-space box; clips the current gsave
 1. If `touch >= 1`, do nothing. In practice the preset never calls it
    then (2.3).
 2. Transform the box's four corners `transform` to device space, then
-   `pjCTM itransform` to canvas space, and take their bounding box in
-   cells.
-3. Check the cell count against the budget (3.4) *before* building any
-   path.
+   `pjCTM itransform` to canvas space, and take their bounding box.
+   Grow it by the largest distance a knuckle can reach from its own
+   cell's centre, then convert it to a cell range. That distance is a
+   long semi-axis of `0.8W x 1.375` (the largest `s` below) plus the
+   `0.15W` nudge, or `1.25W`. Without the margin, a knuckle centred in
+   a neighbouring cell that overhangs into the mark would be missing.
+   Two strokes with different boxes would then catch on different
+   pixels where they overlap, and test 7's whole-page comparison would
+   fail (Codex review, round 1).
+3. Check the cell count of the grown range against the budget (3.3)
+   *before* building any path.
 4. Save the CTM, `pjCTM setmatrix`, `newpath`. For each cell, compute
    `d = height(i, j) + touch - 1`. If `d > 0`, append the knuckle
    ellipse (four `curveto`s from explicit corner arithmetic, with no
