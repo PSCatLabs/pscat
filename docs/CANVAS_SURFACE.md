@@ -85,7 +85,13 @@ covers a ground tone).
 
 | Key | Unit | Default | Meaning |
 |---|---|---|---|
-| `/Touch` | `[0..1]` | unset | How hard the tool presses into the canvas. Below 1, the mark lands only on the knuckles of the shared surface that stand proud enough for that pressure to reach; lower is lighter. 1 is full contact, identical to leaving it unset. Needs `pkcanvas` first. |
+| `/Touch` | `[0..1]` | unset | How hard the tool presses into the canvas. Below 1, the mark lands only on the knuckles of the shared surface that stand proud enough for that pressure to reach; lower is lighter, and 0 deposits nothing. 1 is full contact, identical to leaving it unset. Needs `pkcanvas` first. |
+
+Coverage approaches the full mark continuously. Knuckles grow toward
+the top of the range (3.2, step 4), so the prototype's catch covered
+99.9% of a filled rectangle at `/Touch 0.99`. At exactly 1 the clip is
+skipped, so the last 0.1% closes at that point rather than gradually.
+That residual is pinholes at cell corners, too small to read as weave.
 
 First-pass adopters: `pktrowel` (the knife grazing snow), `pkdry` (dry
 brush over a sunlit field), `pkfan` (a tap of highlights), `pkbroad` (a
@@ -155,7 +161,13 @@ existing drawing `gsave`, and no change to any preset's run logic.
 sampler runs inside `pkfan` and `pkdry`, whose nested `pkribbon` calls
 clobber every `pk*` name, so it needs its own prefix.
 
-`pkcanvas` stores:
+`pkcanvas` stores its state in `userdict` explicitly (`userdict /pjCTM
+... put`, read back with `userdict /pjCTM get`), never with a bare
+`def`. `def` writes into whatever dict is current, so an artist who
+calls `pkcanvas` inside their own `begin ... end` would lose the surface
+at `end`. `pkwet` hit exactly this bug, and its `pqdset`/`pqmyframe`
+helpers are the pattern to copy. Presets test `userdict /pjCTM known`
+for "is a surface set". The state is:
 
 - `pjCTM`: `matrix currentmatrix`, which defines canvas space.
 - `pjP`: a 256-entry permutation of 0..255, shuffled by Fisher-Yates
@@ -205,12 +217,22 @@ llx lly urx ury touch pjcatch -     % user-space box; clips the current gsave
 4. Save the CTM, `pjCTM setmatrix`, `newpath`. For each cell, compute
    `d = height(i, j) + touch - 1`. If `d > 0`, append the knuckle
    ellipse (four `curveto`s from explicit corner arithmetic, with no
-   CTM changes per knuckle, as `pvfleck` does) scaled by `0.6 + 0.5 *
-   min(1, d/0.3)`, so a knuckle the paint barely reaches catches a small
-   speck and a well-covered one catches a full knuckle that merges with
-   its neighbours.
-5. If no knuckle passed, use a degenerate one-point path, so the clip is
-   empty rather than unchanged. Then `clip newpath`, and restore the
+   CTM changes per knuckle, as `pvfleck` does) scaled by
+
+   ```
+   s = (0.6 + 0.5 * min(1, d/0.3)) * (1 + 0.25 * max(0, (touch - 0.8)/0.2))
+   ```
+
+   The first factor makes a knuckle the paint barely reaches catch a
+   small speck, and a well-covered one a full knuckle that merges with
+   its neighbours. The second factor grows every knuckle over the top
+   fifth of the range, so coverage reaches the whole mark continuously.
+   Without it the prototype's catch was still only 97.3% solid at
+   `/Touch 0.999`; with it, 99.9% at 0.99.
+5. If no knuckle passed, use a degenerate one-point path (`x y moveto x
+   y lineto`), so the clip is empty rather than unchanged. Verified in
+   both pscat and gs: a rectangle filled through a zero-knuckle catch
+   (`/Touch 0`) inks no pixels in either. Then `clip newpath`, and restore the
    saved CTM with `setmatrix`. The clip is in device space, so it
    survives the matrix change.
 
@@ -246,12 +268,16 @@ the release `pscat`) implemented 3.1 and 3.2 as a stand-alone file:
   the knife. At `/Touch 0.35` only scattered high spots catch, and at
   0.8 the strokes are nearly solid with weave-textured holes. Rendered
   at 1x and 2x, the 2x is the same structure at finer raster.
-- **Shared catch, quantified.** In the crossing region, with each
-  stroke rendered alone at `/Touch 0.55`, the fraction of pixels inked
-  by both was 2.22 times what independent break-up predicts (densities
-  0.23 and 0.23, both 0.12). The control used the same strokes without
-  a surface, broken by their own controls (`/Coverage 0.45` and
-  `/Load 0.35`), and gave 1.17. That ratio is the Rust test in 6.
+- **Shared catch, quantified.** Each stroke was rendered alone, and
+  the region measured was the intersection of the two strokes'
+  untouched footprints, so footprint overlap alone can't inflate the
+  number. Over five seeds (3, 7, 11, 19, 23) at `/Touch 0.55`, the phi
+  correlation between the two strokes' ink was 0.73-0.82. The control
+  used the same strokes without a surface, broken by their own controls
+  (`/Coverage 0.45`, `/Load 0.35`), and gave -0.08 to 0.03. Phi is used
+  rather than a coincidence ratio because the ratio's ceiling falls as
+  ink density rises (it ranged 1.58-2.47 over the same seeds). That
+  measurement is the Rust test in 6.
 - **Speed.** 200 `pkbroad` strokes (80 x 18pt, so a 100 x 50pt box at
   2.5pt cells), inside an outer triangular clip, on a 760 x 560 page:
   - untouched, 0.54s;
@@ -300,6 +326,13 @@ Rust: consecutive elements whose chain is the same `Rc` share one `q
 <clip> W n ... Q` group. That is a change to the PDF recorder only.
 Until it lands, the docs say "touched marks make PDF export large"
 (open question Q7).
+
+SVG has no equivalent fix: its cost is the catch itself. S1 can halve
+it by drawing knuckles as diamonds (four `lineto`s) instead of
+ellipses, which also measured faster: 1.94s against 4.22s for the
+unmemoized benchmark above. At 2.5pt that difference is under two
+device pixels at 2x. S1 decides by rendering the specimen both ways
+(open question Q9).
 
 ### 3.4 Determinism and independence from the caller's stream
 
@@ -419,23 +452,27 @@ catch over the bounding box of all the motion's subpaths:
 2. `touch_takes_no_random_draws`: a mark drawn after the preset from
    the caller's stream doesn't move between `/Touch` unset, 0.5 and 0.2.
 3. `crossing_strokes_catch_on_the_same_weave`: a pktrowel stroke and a
-   crossing pkdry stroke, each rendered alone. In the crossing region,
-   the ink-coincidence ratio must exceed 1.6 with the surface, and stay
-   under 1.3 for the matched-density control without one. The prototype
-   measured 2.22 and 1.17.
+   crossing pkdry stroke, each rendered alone. The region is the
+   intersection of their untouched footprints. The phi correlation of
+   their ink there must exceed 0.5 with the surface and stay within
+   +-0.2 for the control without one, at each of three seeds. The
+   prototype measured 0.73-0.82 and -0.08 to 0.03 over five.
 4. `the_catch_is_anchored_to_the_canvas`: a solid `pkbroad` band at
    `/Touch 0.5`, drawn with `pkcanvas` set before a `7.5 0 translate` (3
    cells), has the same ink pixels as one drawn untranslated over their
    overlap, so the pattern doesn't move with the mark. The same holds
    for each `pkwet` pass.
-5. `less_touch_less_ink`: ink is non-decreasing in `/Touch` over 0.2,
-   0.4, 0.6, 0.8, 1.
+5. `less_touch_less_ink`: ink is non-decreasing in `/Touch` over 0, 0.2,
+   0.4, 0.6, 0.8, 0.99, 1. `/Touch 0` inks nothing, which checks the
+   empty-catch path. A filled rectangle at `/Touch 0.99` is at least
+   99.5% inked.
 6. `the_weave_is_in_canvas_points_at_any_dpi`: 72 and 144 dpi renders,
    the 144 block-downsampled 2x, agree within the golden tolerance.
-7. `touch_box_contains_the_whole_mark`: for each preset, at `/Touch
-   0.999` (every knuckle reached, merged), the touched ink is at least
-   the untouched ink minus the knuckle gaps, measured per preset. It
-   fails if a preset's reach row in 3.2 is too small.
+7. `touch_box_contains_the_whole_mark`: for each preset, render a
+   touched mark once through its own reach box and once with
+   `pjcatch` forced to a whole-page box (a test-only override). The
+   catch is a per-cell pure function, so the two must be pixel-identical.
+   Any difference means the reach box clipped real paint.
 8. `ghostscript_agrees_on_the_surface`: the rand-independent band from
    section 5, rendered by pscat and by `gs`, block-compared within the
    tolerance `tests/golden.rs` uses. It skips if gs is absent, like the
@@ -465,7 +502,7 @@ changes, the byte-identity check.
 | Slice | What | Model | Difficulty |
 |---|---|---|---|
 | S0 | `src/pdf.rs`: consecutive elements with the same clip chain share one `q <clip> ... Q` group. Rust only, verified by gs round trip. Useful on its own for any heavily clipped page. | sonnet | medium |
-| S1 | `pkcanvas`, the `pj-` sampler, memo and `pjcatch`. Self-tests, catalog row, test 8 (driving `pjcatch` from a test driver under a rectangle fill), test 9. No preset changes. | opus | hard |
+| S1 | `pkcanvas`, the `pj-` sampler, memo and `pjcatch`. Self-tests, catalog row, test 8 (driving `pjcatch` from a test driver under a rectangle fill), test 9. No preset changes. Every helper (`pjrand`, `pjhash`, `pjheight`, `pjcatch`, ...) carries `% @internal`, or `every_migrated_file_names_match_the_catalog_exactly` fails. `pkcanvas` carries `@kind`/`@summary`/`@example` and a unit on every `@param`. Any load-time definition that isn't `/name ... def` is written value-first (`... /pjmemo exch def`) to fit build.rs's two-slot window, as `pqframes` is. | opus | hard |
 | S2 | `/Touch` on `pktrowel` and `pkdry`: reach boxes and guards. Tests 1-5 and 7 for both. | opus | medium |
 | S3 | `/Touch` on `pkfan`, `pkbroad` and `pkliner`, and the `pkliner` header wording (2.4). Tests 1, 2 and 7 for each. | sonnet | medium |
 | S4 | Specimen `examples/paintkit_canvas_demo.ps`: the same light knife stroke and dry-brush stroke crossing, with and without the surface, plus a `/Touch` sweep and a touched stroke inside a directional `pkwet`. Catalog check, psart skill, README, a HANDOFF gotcha ("a touched mark is clipped in canvas space; set the canvas first"), NOTES. Test 6. | sonnet | medium |
@@ -528,6 +565,9 @@ Each is phrased as a decision, with a recommendation.
   automatically?** Recommend rejecting, which is the file's convention
   everywhere. Silently coarsening would change the look of a mark based
   on its size, which an artist couldn't predict.
-- **Q9. Defaults: `/Weave 2.5`, `/Mottle 8*Weave`, `/Relief 0.7`?**
-  Recommend these as prototyped, with the specimen slice (S4) allowed to
-  re-tune them before the defaults are pinned by tests.
+- **Q9. Defaults (`/Weave 2.5`, `/Mottle 8*Weave`, `/Relief 0.7`), and
+  ellipse or diamond knuckles?** Recommend the defaults as prototyped,
+  with the specimen slice (S4) allowed to re-tune them before tests pin
+  them. For the knuckle shape, recommend diamonds if S1's side-by-side
+  render can't tell the two apart at 2x, since they halve SVG size and
+  cost less to build.

@@ -461,7 +461,7 @@ test, `selftest.sh`) and the byte-identity check above.
 
 | Slice | What | Model | Difficulty |
 |---|---|---|---|
-| L1 | `pu-` resolver (`puparse`, `puat`, `puwet` as the identity until L3), spelling guard, the `array of rgb arrays` unit, self-tests for the resolver. No preset changes. | sonnet | medium |
+| L1 | `pu-` resolver (`puparse`, `puat`, `puwet` as the identity until L3), spelling guard, the `array of rgb arrays` unit, self-tests for the resolver. No preset changes. Every helper carries `% @internal`, or `every_migrated_file_names_match_the_catalog_exactly` fails, and any load-time definition that isn't `/name ... def` is written value-first to fit build.rs's two-slot window. | sonnet | medium |
 | L2 | `pkbroad` and `pktrowel` adopt `/Colors`, `/ColorMix` and `/Light`, including the per-subpath flip pre-pass and the edge-buildup colours. Rust tests 1-6 for both. | sonnet | medium |
 | L3 | `pkwet` publishes its pass mix (frame slots 4-6), `puwet` applies it, tests 9-10, HANDOFF gotcha reworded. Kept separate because `pkwet`'s frame machinery has been the most-reviewed code in the file. | opus | medium |
 | L4 | `pkfan` adopts the load, with the jitter draw stored per bristle and the colour applied per run (pfrun/pfray). | sonnet | medium |
