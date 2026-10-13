@@ -13,3 +13,4 @@
 # So migrating a library is: add its blocks, add its name here.
 lib/artkit.ps
 lib/paintkit.ps
+lib/stipplekit.ps
