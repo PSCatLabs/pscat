@@ -2190,6 +2190,70 @@
 %   (/Cover 1.4 with an in-range /Load) mustguard
 %%EndSelfTest
 
+%%SelfTest: pktrowel-colors-rejects-malformed-loads
+%   { newpath 0 0 moveto 50 0 lineto << /Colors 5 >> pktrowel }
+%   /pktrowel-colors-must-be-an-array
+%   (a number as /Colors) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors { [ 0 0 0 ] } >> pktrowel }
+%   /pktrowel-colors-must-be-an-array
+%   (a procedure as /Colors) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ ] >> pktrowel }
+%   /pktrowel-colors-must-have-1-to-8-colors
+%   (no colours) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ 9 { [ 0 0 0 ] } repeat ] >> pktrowel }
+%   /pktrowel-colors-must-have-1-to-8-colors
+%   (nine colours) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ [ 0 0 ] ] >> pktrowel }
+%   /pktrowel-colors-entries-must-be-rgb-arrays
+%   (a 2-element entry) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ [ 0 0 1.5 ] ] >> pktrowel }
+%   /pktrowel-colors-components-must-be-0-to-1
+%   (a component of 1.5) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ [ 0 0 0 ] ] /ColorMix 1.5 >> pktrowel }
+%   /pktrowel-colormix-must-be-0-to-1
+%   (/ColorMix 1.5) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ [ 0 0 0 ] ] >> pktrowel }
+%   (1 colour) mustpass
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ [ 0 0 0 ] [ 1 1 1 ] ] >> pktrowel }
+%   (2 colours) mustpass
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ 8 { [ 0.2 0.4 1 ] } repeat ] /ColorMix 0 /Light -45 >> pktrowel }
+%   (8 colours, the cap) mustpass
+%%EndSelfTest
+%
+%%SelfTest: pktrowel-colors-spelling-and-companions
+%   { newpath 0 0 moveto 50 0 lineto << /Colours [ [ 0 0 0 ] ] >> pktrowel }
+%   /pktrowel-colours-is-spelled-colors
+%   (/Colours) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ [ 0 0 0 ] ] /ColourMix 0.5 >> pktrowel }
+%   /pktrowel-colours-is-spelled-colors
+%   (/ColourMix) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /ColorMix 0.5 >> pktrowel }
+%   /pktrowel-colormix-needs-colors
+%   (/ColorMix without /Colors) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Light 90 >> pktrowel }
+%   /pktrowel-light-needs-colors
+%   (/Light without /Colors) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ [ 0 0 0 ] ] /Light { 90 } >> pktrowel }
+%   /pktrowel-light-must-not-be-a-procedure
+%   (a procedure as /Light) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ [ 0 0 0 ] ] /Light 90 >> pktrowel }
+%   (/Light with /Colors) mustpass
+%%EndSelfTest
+
 % @kind: Procedure
 % @summary: A trowel / palette-knife stroke: a rigid flat blade dragging viscous paint, swept along the blade direction rather than the path normal, depositing broken masses with lengthwise scrape streaks, a dragged smear, and built-up ridges at the blade edges. Not built on pkribbon; lays no solid base pass, so the underlayer reads through. Deterministic under the caller's own srand; bounded by Lanes * stops.
 % @example: newpath 40 120 moveto 260 150 lineto << /Width 72 /Angle 18 /Coverage 0.82 >> pktrowel
@@ -3046,6 +3110,70 @@
         ifelse
     } { 1 } ifelse
 } def
+
+%%SelfTest: pkbroad-colors-rejects-malformed-loads
+%   { newpath 0 0 moveto 50 0 lineto << /Colors 5 >> pkbroad }
+%   /pkbroad-colors-must-be-an-array
+%   (a number as /Colors) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors { [ 0 0 0 ] } >> pkbroad }
+%   /pkbroad-colors-must-be-an-array
+%   (a procedure as /Colors) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ ] >> pkbroad }
+%   /pkbroad-colors-must-have-1-to-8-colors
+%   (no colours) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ 9 { [ 0 0 0 ] } repeat ] >> pkbroad }
+%   /pkbroad-colors-must-have-1-to-8-colors
+%   (nine colours) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ [ 0 0 ] ] >> pkbroad }
+%   /pkbroad-colors-entries-must-be-rgb-arrays
+%   (a 2-element entry) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ [ 0 0 1.5 ] ] >> pkbroad }
+%   /pkbroad-colors-components-must-be-0-to-1
+%   (a component of 1.5) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ [ 0 0 0 ] ] /ColorMix 1.5 >> pkbroad }
+%   /pkbroad-colormix-must-be-0-to-1
+%   (/ColorMix 1.5) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ [ 0 0 0 ] ] >> pkbroad }
+%   (1 colour) mustpass
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ [ 0 0 0 ] [ 1 1 1 ] ] >> pkbroad }
+%   (2 colours) mustpass
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ 8 { [ 0.2 0.4 1 ] } repeat ] /ColorMix 0 /Light -45 >> pkbroad }
+%   (8 colours, the cap) mustpass
+%%EndSelfTest
+%
+%%SelfTest: pkbroad-colors-spelling-and-companions
+%   { newpath 0 0 moveto 50 0 lineto << /Colours [ [ 0 0 0 ] ] >> pkbroad }
+%   /pkbroad-colours-is-spelled-colors
+%   (/Colours) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ [ 0 0 0 ] ] /ColourMix 0.5 >> pkbroad }
+%   /pkbroad-colours-is-spelled-colors
+%   (/ColourMix) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /ColorMix 0.5 >> pkbroad }
+%   /pkbroad-colormix-needs-colors
+%   (/ColorMix without /Colors) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Light 90 >> pkbroad }
+%   /pkbroad-light-needs-colors
+%   (/Light without /Colors) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ [ 0 0 0 ] ] /Light { 90 } >> pkbroad }
+%   /pkbroad-light-must-not-be-a-procedure
+%   (a procedure as /Light) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ [ 0 0 0 ] ] /Light 90 >> pkbroad }
+%   (/Light with /Colors) mustpass
+%%EndSelfTest
 
 % @kind: Procedure
 % @summary: A broad flat brush for block-ins, sky and water bands, reflections and broad masses. What separates it from pktrowel's blade and pknib's pmn is that a brush runs out of paint: the band is divided into striations that drop out one by one as the charge falls along the stroke, so the mark fades from solid to broken along its own direction. Square ends, and parallel edges that are crisp at /Edge 0 -- the default /Edge 0.15 roughens them by about a pixel. Deterministic under the caller's own srand; bounded by Grain * stops.
