@@ -2074,6 +2074,19 @@
     ptpy ptpb sin ptpu mul add ptpa sin ptpe mul add
 } def
 
+% i ptcolor -   (set the loaded color for a run that starts at stop i; only
+% called with /Colors set)
+% The head position ptcu and the shade ptcsh are set by the caller: a lane's
+% centre and its jitter, or an edge ridge's +-1 and its darkening. The flip is
+% the run's first stop's, because runs never cross a subpath.
+% @internal
+/ptcolor {
+    /ptcli exch def
+    ptColorRec ptcu
+    ptColorRec 2 get { ptflips ptcli get } { false } ifelse
+    puat puwet 3 array astore ptcsh shade setrgbcolor
+} def
+
 % - ptemit -   (fills the ptk accumulated stops as one strip, resets ptk)
 % Each end gets two extra vertices, carrying half a pitch of contact
 % plus the /Drag smear.
@@ -2101,6 +2114,7 @@
 % @internal
 /ptemit {
     ptk 0 gt {
+        ptColorRec null ne { ptri 0 get ptcolor } if
         /ptlast ptk 1 sub def
         /ptext0 ptDrag ptraw ptri 0 get get 6 get mul ptPitch 0.5 mul add def
         /ptext1 ptDrag ptraw ptri ptlast get get 6 get mul ptPitch 0.5 mul add def
@@ -2176,6 +2190,74 @@
 %   (/Cover 1.4 with an in-range /Load) mustguard
 %%EndSelfTest
 
+%%SelfTest: pktrowel-colors-rejects-malformed-loads
+%   { newpath 0 0 moveto 50 0 lineto << /Colors 5 >> pktrowel }
+%   /pktrowel-colors-must-be-an-array
+%   (a number as /Colors) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors { [ 0 0 0 ] } >> pktrowel }
+%   /pktrowel-colors-must-be-an-array
+%   (a procedure as /Colors) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ ] >> pktrowel }
+%   /pktrowel-colors-must-have-1-to-8-colors
+%   (no colours) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ 9 { [ 0 0 0 ] } repeat ] >> pktrowel }
+%   /pktrowel-colors-must-have-1-to-8-colors
+%   (nine colours) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ [ 0 0 ] ] >> pktrowel }
+%   /pktrowel-colors-entries-must-be-rgb-arrays
+%   (a 2-element entry) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ [ 0 0 1.5 ] ] >> pktrowel }
+%   /pktrowel-colors-components-must-be-0-to-1
+%   (a component of 1.5) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ [ 0 0 0 ] ] /ColorMix 1.5 >> pktrowel }
+%   /pktrowel-colormix-must-be-0-to-1
+%   (/ColorMix 1.5) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ [ 0 0 0 ] ] >> pktrowel }
+%   (1 colour) mustpass
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ [ 0 0 0 ] [ 1 1 1 ] ] >> pktrowel }
+%   (2 colours) mustpass
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ 8 { [ 0.2 0.4 1 ] } repeat ] /ColorMix 0 /Light -45 >> pktrowel }
+%   (8 colours, the cap) mustpass
+%%EndSelfTest
+%
+%%SelfTest: pktrowel-colors-spelling-and-companions
+%   { newpath 0 0 moveto 50 0 lineto << /Colours [ [ 0 0 0 ] ] >> pktrowel }
+%   /pktrowel-colours-is-spelled-colors
+%   (/Colours) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ [ 0 0 0 ] ] /ColourMix 0.5 >> pktrowel }
+%   /pktrowel-colours-is-spelled-colors
+%   (/ColourMix) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /HighlightColour [ 1 1 1 ] >> pktrowel }
+%   /pktrowel-colours-is-spelled-colors
+%   (/HighlightColour) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /ColorMix 0.5 >> pktrowel }
+%   /pktrowel-colormix-needs-colors
+%   (/ColorMix without /Colors) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Light 90 >> pktrowel }
+%   /pktrowel-light-needs-colors
+%   (/Light without /Colors) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ [ 0 0 0 ] ] /Light { 90 } >> pktrowel }
+%   /pktrowel-light-must-not-be-a-procedure
+%   (a procedure as /Light) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ [ 0 0 0 ] ] /Light 90 >> pktrowel }
+%   (/Light with /Colors) mustpass
+%%EndSelfTest
+
 % @kind: Procedure
 % @summary: A trowel / palette-knife stroke: a rigid flat blade dragging viscous paint, swept along the blade direction rather than the path normal, depositing broken masses with lengthwise scrape streaks, a dragged smear, and built-up ridges at the blade edges. Not built on pkribbon; lays no solid base pass, so the underlayer reads through. Deterministic under the caller's own srand; bounded by Lanes * stops.
 % @example: newpath 40 120 moveto 260 150 lineto << /Width 72 /Angle 18 /Coverage 0.82 >> pktrowel
@@ -2192,6 +2274,9 @@
 % @param: /EdgeBuildup [0..1] darker ridges of paint piled at the two blade edges, drawn last (default 0.35)
 % @param: /Jitter [points] Seeded lateral displacement of the lane boundaries, deterministic under the caller's own N srand (default 0)
 % @param: /ColorJitter [0..1] per-lane color variation magnitude around the caller's current color (default 0.06)
+% @param: /Colors [array of rgb arrays] 1 to 8 loaded colors, listed from the blade's left end (looking along the travel) to its right, evenly spaced across it; the edge-buildup ridges take the colors of their own edges; when set, the current color is not used for the mark, though /ColorJitter still varies it (default unset)
+% @param: /ColorMix [0..1] with /Colors, how far neighbouring colors have blended on the blade: 0 is hard bands, 1 a smooth gradient (default 0.3)
+% @param: /Light [degrees] with /Colors, the direction the light comes from, counterclockwise from +x in user space: each subpath puts the first color on the side facing the light, whichever way it travels (default unset: the first color stays on the left of the travel)
 /pktrowel {
     /ptopts exch def
     /ptWidth ptopts /Width 24 pkgetdef def
@@ -2231,6 +2316,10 @@
     /ptColorJitter ptopts /ColorJitter 0.06 pkgetdef def
     /ptColorJitter load xcheck { pktrowel-colorjitter-must-not-be-a-procedure } if
     ptColorJitter 0 lt ptColorJitter 1 gt or { pktrowel-colorjitter-must-be-0-to-1 } if
+    % The load: null when /Colors is unset, so every new branch below is
+    % `ptColorRec null ne` and an unset key never reaches it.
+    ptopts (pktrowel) puparse /ptColorRec exch def
+    ptopts (pktrowel) pulightneedscolors
     /ptPressure ptopts /Pressure { pkflat } pkgetdef def
     /ptPressure load xcheck /ptPressure load type dup /arraytype eq exch dup /operatortype eq exch /packedarraytype eq or or and not { pktrowel-pressure-must-be-a-procedure } if
     % Counting pass with the safety budget checked inside the walk, so
@@ -2283,6 +2372,12 @@
         % parameter: a blade with machined ends is not a blade, and
         % there is no artistic reason to ask for one.
         /ptTrim 0.06 def
+        % One flip per stop, so a whole subpath mirrors together. No draws.
+        ptColorRec null ne {
+            ptColorRec 2 get {
+                /ptflips ptraw ptn ptPitch ptAngle ptColorRec 3 get puflips def
+            } if
+        } if
         /ptri ptn array def
         /ptua ptn array def
         /ptub ptn array def
@@ -2328,6 +2423,9 @@
             /ptt0 frnd ptTrim mul def
             /ptt1 1 frnd ptTrim mul sub def
             ptbasecolor 1 ptcj add shade setrgbcolor
+            % With a load, ptemit sets the color at each fill, from the lane's
+            % head position and this jitter.
+            ptColorRec null ne { /ptcu ptnc def /ptcsh 1 ptcj add def } if
             /ptk 0 def
             /ptstate false def
             0 1 ptn 1 sub {
@@ -2381,7 +2479,11 @@
         ptEdgeBuildup 0 gt {
             ptbasecolor 1 ptEdgeBuildup 0.5 mul sub shade setrgbcolor
         } if
+        % Each ridge takes the color at its own edge (+1 is the left),
+        % darkened by the same shade as today.
+        ptColorRec null ne { /ptcu 1 def /ptcsh 1 ptEdgeBuildup 0.5 mul sub def } if
         1 ptrwn sub 1 ptridge
+        ptColorRec null ne { /ptcu -1 def } if
         -1 ptrwn 1 sub ptridge
         ptbasecolor aload pop setrgbcolor
         grestore
@@ -2849,6 +2951,19 @@
     pmpy pmpb sin pmpu mul add
 } def
 
+% i pmcolor -   (set the loaded color of the current striation for a run
+% that starts at stop i; only called with /Colors set)
+% The head position is the striation's centre pmnc, before any narrowing.
+% Runs never cross a subpath, so the flip of the run's first stop is the
+% run's. /ColorJitter is the striation's own draw, taken up front.
+% @internal
+/pmcolor {
+    /pmcli exch def
+    pmColorRec pmnc
+    pmColorRec 2 get { pmflips pmcli get } { false } ifelse
+    puat puwet 3 array astore 1 pmcj add shade setrgbcolor
+} def
+
 % i na nb back fwd pmstamp -   (the brush's footprint at a single stop)
 %
 % A degenerate subpath -- a bare `moveto`, or a `moveto closepath` --
@@ -2874,6 +2989,7 @@
 /pmstamp {
     /pmsfwd exch def /pmsback exch def
     /pmsnb exch def /pmsna exch def /pmsi exch def
+    pmColorRec null ne { pmsi pmcolor } if
     % The footprint's long axis is the stop's own travel direction
     % turned by /Angle -- the same rotation pmpt applies across the
     % band. walkpath reports angle 0 at a degenerate stop, so there this
@@ -2928,6 +3044,7 @@
     /pmnbv exch def /pmnav exch def /pmend exch def /pmstart exch def
     pmend pmstart gt {
         /pmspan pmend pmstart sub def
+        pmColorRec null ne { pmstart pmcolor } if
         newpath
         pmstart 1 pmend {
             /pmei exch def
@@ -2998,6 +3115,74 @@
     } { 1 } ifelse
 } def
 
+%%SelfTest: pkbroad-colors-rejects-malformed-loads
+%   { newpath 0 0 moveto 50 0 lineto << /Colors 5 >> pkbroad }
+%   /pkbroad-colors-must-be-an-array
+%   (a number as /Colors) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors { [ 0 0 0 ] } >> pkbroad }
+%   /pkbroad-colors-must-be-an-array
+%   (a procedure as /Colors) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ ] >> pkbroad }
+%   /pkbroad-colors-must-have-1-to-8-colors
+%   (no colours) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ 9 { [ 0 0 0 ] } repeat ] >> pkbroad }
+%   /pkbroad-colors-must-have-1-to-8-colors
+%   (nine colours) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ [ 0 0 ] ] >> pkbroad }
+%   /pkbroad-colors-entries-must-be-rgb-arrays
+%   (a 2-element entry) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ [ 0 0 1.5 ] ] >> pkbroad }
+%   /pkbroad-colors-components-must-be-0-to-1
+%   (a component of 1.5) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ [ 0 0 0 ] ] /ColorMix 1.5 >> pkbroad }
+%   /pkbroad-colormix-must-be-0-to-1
+%   (/ColorMix 1.5) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ [ 0 0 0 ] ] >> pkbroad }
+%   (1 colour) mustpass
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ [ 0 0 0 ] [ 1 1 1 ] ] >> pkbroad }
+%   (2 colours) mustpass
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ 8 { [ 0.2 0.4 1 ] } repeat ] /ColorMix 0 /Light -45 >> pkbroad }
+%   (8 colours, the cap) mustpass
+%%EndSelfTest
+%
+%%SelfTest: pkbroad-colors-spelling-and-companions
+%   { newpath 0 0 moveto 50 0 lineto << /Colours [ [ 0 0 0 ] ] >> pkbroad }
+%   /pkbroad-colours-is-spelled-colors
+%   (/Colours) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ [ 0 0 0 ] ] /ColourMix 0.5 >> pkbroad }
+%   /pkbroad-colours-is-spelled-colors
+%   (/ColourMix) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /HighlightColour [ 1 1 1 ] >> pkbroad }
+%   /pkbroad-colours-is-spelled-colors
+%   (/HighlightColour) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /ColorMix 0.5 >> pkbroad }
+%   /pkbroad-colormix-needs-colors
+%   (/ColorMix without /Colors) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Light 90 >> pkbroad }
+%   /pkbroad-light-needs-colors
+%   (/Light without /Colors) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ [ 0 0 0 ] ] /Light { 90 } >> pkbroad }
+%   /pkbroad-light-must-not-be-a-procedure
+%   (a procedure as /Light) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ [ 0 0 0 ] ] /Light 90 >> pkbroad }
+%   (/Light with /Colors) mustpass
+%%EndSelfTest
+
 % @kind: Procedure
 % @summary: A broad flat brush for block-ins, sky and water bands, reflections and broad masses. What separates it from pktrowel's blade and pknib's pmn is that a brush runs out of paint: the band is divided into striations that drop out one by one as the charge falls along the stroke, so the mark fades from solid to broken along its own direction. Square ends, and parallel edges that are crisp at /Edge 0 -- the default /Edge 0.15 roughens them by about a pixel. Deterministic under the caller's own srand; bounded by Grain * stops.
 % @example: newpath 40 120 moveto 300 130 lineto << /Width 46 /Charge 0.95 /Depletion 0.6 >> pkbroad
@@ -3009,6 +3194,9 @@
 % @param: /Edge [0..1] roughness applied to every striation boundary, not only the band's outer sides -- so above about 0.3 it also breaks holes through the band's interior (8% of interior pixels at 0.9); 0 is a crisp flat-brush edge (default 0.15)
 % @param: /Pitch [points] walkpath sampling pitch for the shared centerline pass; must be > 0 (default Width*0.3, capped at 4)
 % @param: /ColorJitter [0..1] per-striation color variation around the caller's current color (default 0.05)
+% @param: /Colors [array of rgb arrays] 1 to 8 loaded colors, listed from the brush's left edge (looking along the travel) to its right, evenly spaced across the band; when set, the current color is not used for the mark, though /ColorJitter still varies it (default unset)
+% @param: /ColorMix [0..1] with /Colors, how far neighbouring colors have blended on the brush: 0 is hard bands, 1 a smooth gradient (default 0.3)
+% @param: /Light [degrees] with /Colors, the direction the light comes from, counterclockwise from +x in user space: each subpath puts the first color on the side facing the light, whichever way it travels (default unset: the first color stays on the left of the travel)
 /pkbroad {
     /pmopts exch def
     /pmWidth pmopts /Width 40 pkgetdef def
@@ -3037,6 +3225,10 @@
     /pmColorJitter pmopts /ColorJitter 0.05 pkgetdef def
     /pmColorJitter load xcheck { pkbroad-colorjitter-must-not-be-a-procedure } if
     pmColorJitter 0 lt pmColorJitter 1 gt or { pkbroad-colorjitter-must-be-0-to-1 } if
+    % The load: null when /Colors is unset, so every new branch below is
+    % `pmColorRec null ne` and an unset key never reaches it.
+    pmopts (pkbroad) puparse /pmColorRec exch def
+    pmopts (pkbroad) pulightneedscolors
     /pmcount 0 def
     pmPitch { pop pop pop pop pop pop /pmcount pmcount 1 add def
               pmGrain pmcount mul 120000 gt
@@ -3069,6 +3261,12 @@
         % was laid down before it -- the same variable consumption the
         % header already declines to make a fixed-draw-count claim
         % about, and re-shaping rather than re-rolling.
+        % One flip per stop, so a whole subpath mirrors together. No draws.
+        pmColorRec null ne {
+            pmColorRec 2 get {
+                /pmflips pmraw pmn pmPitch pmAngle pmColorRec 3 get puflips def
+            } if
+        } if
         pmGrain array /pmaffs exch def
         pmGrain array /pmcjs exch def
         0 1 pmGrain 1 sub {
@@ -5936,6 +6134,94 @@ systemdict /setalpha known /pwhasalpha exch def
 %   << /Soft 0 >> pkwet
 %   putr 0.1 eq putg 0.2 eq and putb 0.3 eq and
 %   (inside /Soft 0) mustbe
+%%EndSelfTest
+
+% raw n pitch angle light puflips -> flips
+% The per-subpath /Light flip of slice L2 (section 2.3 of the design). `raw` is
+% a preset's array of walkpath stops, each starting [x y angle t sp atend ...];
+% `n` is how many; `angle` is the preset's /Angle (0 where it has none). The
+% result is an array of `n` booleans, one per stop, and every stop of a subpath
+% carries that subpath's flip, so a bristle, lane or striation flips whole.
+%
+% A subpath is flipped when the left normal of its chord (first stop to last
+% stop), turned by `angle` the way the preset turns its own blade, points away
+% from the light: cos(normal - light) < 0. The first colour sits on the left, so
+% the left normal facing the light is "lit side is the first colour" and needs
+% no flip. A chord shorter than `pitch` (a closed circle, a pressed point, a
+% stroke barely longer than one step) is left alone. Every entry is written, so
+% a later `get` never meets a null. No random draws.
+% @internal
+/puflips {
+    /pufl exch def /pufa exch def /pufp exch def /pufn exch def /pufr exch def
+    /puff pufn array def
+    0 1 pufn 1 sub { puff exch false put } for
+    /pufs 0 def
+    0 1 pufn 1 sub {
+        /pufi exch def
+        pufr pufi get 5 get dup 1 and 1 eq { /pufs pufi def } if
+        2 and 2 eq {
+            pufr pufs get dup 0 get /pufx0 exch def 1 get /pufy0 exch def
+            pufr pufi get dup 0 get /pufx1 exch def 1 get /pufy1 exch def
+            pufx1 pufx0 sub /pufdx exch def
+            pufy1 pufy0 sub /pufdy exch def
+            pufdx dup mul pufdy dup mul add sqrt pufp ge {
+                pufdy pufdx atan 90 add pufa add pufl sub cos 0 lt {
+                    pufs 1 pufi { puff exch true put } for
+                } if
+            } if
+        } if
+    } for
+    puff
+} def
+
+%%SelfTest: puflips-mirrors-subpaths-facing-away-from-the-light
+%   % Stops are [x y angle t sp atend]: 1 starts a subpath, 2 ends one, 3 is both.
+%   % Light 90 comes from above. Left-to-right has its left normal up: no flip.
+%   [ [ 0 0 0 0 0 1 ] [ 10 0 0 1 10 2 ] ] 2 1 0 90 puflips
+%   dup 0 get false eq exch 1 get false eq and
+%   (left to right, lit from above) mustbe
+%
+%   % Right-to-left has its left normal down: both stops flip together.
+%   [ [ 10 0 180 0 0 1 ] [ 0 0 180 1 10 2 ] ] 2 1 0 90 puflips
+%   dup 0 get true eq exch 1 get true eq and
+%   (right to left, lit from above) mustbe
+%
+%   % Moving the light underneath swaps the two.
+%   [ [ 0 0 0 0 0 1 ] [ 10 0 0 1 10 2 ] ] 2 1 0 270 puflips
+%   dup 0 get true eq exch 1 get true eq and
+%   (left to right, lit from below) mustbe
+%
+%   % Travelling up (+y) has its left normal at -x; light from -x (180) lights it.
+%   [ [ 0 0 90 0 0 1 ] [ 0 10 90 1 10 2 ] ] 2 1 0 180 puflips
+%   dup 0 get false eq exch 1 get false eq and
+%   (travelling up, lit from the west) mustbe
+%   [ [ 0 0 90 0 0 1 ] [ 0 10 90 1 10 2 ] ] 2 1 0 0 puflips
+%   dup 0 get true eq exch 1 get true eq and
+%   (travelling up, lit from the east) mustbe
+%
+%   % The preset's /Angle turns the blade, and the normal with it.
+%   [ [ 0 0 0 0 0 1 ] [ 10 0 0 1 10 2 ] ] 2 1 180 90 puflips
+%   dup 0 get true eq exch 1 get true eq and
+%   (a blade turned 180) mustbe
+%
+%   % A chord shorter than the pitch is not flipped, however the light sits.
+%   [ [ 0 0 0 0 0 1 ] [ 0.5 0 0 1 0.5 2 ] ] 2 1 0 270 puflips
+%   dup 0 get false eq exch 1 get false eq and
+%   (a chord under one pitch) mustbe
+%
+%   % A single-stop subpath (a pressed point) and a closed ring are left alone.
+%   [ [ 5 5 0 0 0 3 ] ] 1 1 0 270 puflips 0 get false eq
+%   (a pressed point) mustbe
+%   [ [ 0 0 0 0 0 1 ] [ 10 5 0 0.5 10 0 ] [ 0 0 0 1 10 2 ] ] 3 1 0 270 puflips
+%   dup 0 get false eq exch dup 1 get false eq exch 2 get false eq and and
+%   (a closed ring) mustbe
+%
+%   % Subpaths are independent, and all entries are booleans.
+%   [ [ 0 0 0 0 0 1 ] [ 10 0 0 1 10 2 ]
+%     [ 10 5 180 0 0 1 ] [ 0 5 180 1 10 2 ] ] 4 1 0 90 puflips
+%   dup 0 get false eq 1 index 1 get false eq and
+%   1 index 2 get true eq and exch 3 get true eq and
+%   (two subpaths flip on their own) mustbe
 %%EndSelfTest
 
 % ============================================================================

@@ -5029,11 +5029,25 @@ fn broad_every_documented_parameter_changes_the_render() {
         ("Edge", "0.9"),
         ("Pitch", "8"),
         ("ColorJitter", "0.9"),
+        ("Colors", "[[1 0 0] [0 0 1]]"),
     ] {
         let varied = pixels(&broad(&format!("/Width 44 /{param} {value}")));
         assert_ne!(
             varied, baseline,
             "/{param} {value} produced an identical render -- it is a no-op"
+        );
+    }
+    // /ColorMix and /Light only modify a load, so they are measured
+    // against one. /Light 270 flips the left-to-right BROAD_PATH; 90 would
+    // leave it as the unlit render.
+    let loaded = pixels(&broad("/Width 44 /Colors [[1 0 0] [0 0 1]]"));
+    for extra in ["/ColorMix 1", "/ColorMix 0", "/Light 270"] {
+        let varied = pixels(&broad(&format!(
+            "/Width 44 /Colors [[1 0 0] [0 0 1]] {extra}"
+        )));
+        assert_ne!(
+            varied, loaded,
+            "{extra} produced an identical render -- it is a no-op"
         );
     }
 }
@@ -5057,9 +5071,12 @@ fn broad_advertises_exactly_the_parameters_it_implements() {
         "Angle",
         "Charge",
         "ColorJitter",
+        "ColorMix",
+        "Colors",
         "Depletion",
         "Edge",
         "Grain",
+        "Light",
         "Pitch",
         "Width",
     ];
@@ -9084,4 +9101,465 @@ fn ghostscript_agrees_on_the_surface() {
         other > 18.0,
         "a different seed is within tolerance ({other:.2} vs {mean:.2}); the check is too weak"
     );
+}
+
+// --- loaded colours (issue #183, slice L2 #221): pkbroad and pktrowel ----
+//
+// `/Colors`, `/ColorMix` and `/Light` on the two presets that read their
+// head position per striation (`pmnc`) or per lane (`ptnc`). The design is
+// docs/PAINT_LOADING.md; the numbers below are its section 6 tests 1-6.
+// Every render goes left to right along y = 100 unless a test says
+// otherwise, so "upper" in user space is the smaller pixel row.
+
+/// FNV-1a over the pixel bytes. Not `DefaultHasher`: its algorithm is not
+/// stable across Rust releases, and these values are pinned.
+fn fnv1a(data: &[u8]) -> u64 {
+    data.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, &b| {
+        (h ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3)
+    })
+}
+
+const LOAD_PRESETS: [(&str, &str); 2] = [
+    (
+        "pkbroad",
+        "/Width 50 /Charge 1 /Depletion 0 /Edge 0 /ColorJitter 0",
+    ),
+    (
+        "pktrowel",
+        "/Width 50 /Coverage 1 /Scrape 0 /EdgeBuildup 0 /Jitter 0 /ColorJitter 0",
+    ),
+];
+
+/// One preset painted over `path` (user-space path construction) after
+/// `colour` (a `setrgbcolor` line) and a fixed seed.
+fn loaded_mark(preset: &str, path: &str, colour: &str, opts: &str) -> Interp {
+    let mut it = fresh(400, 200);
+    it.run_str(&format!("{colour} 29 srand {path} << {opts} >> {preset}"))
+        .unwrap_or_else(|e| panic!("{preset} {opts}: {}", it.error_report(&e)));
+    it
+}
+
+const LTR: &str = "newpath 50 100 moveto 350 100 lineto";
+const RTL: &str = "newpath 350 100 moveto 50 100 lineto";
+
+/// Test 1. Renders that use none of the new keys, pinned against hashes
+/// taken from `origin/main` before the slice. Each scenario leans on a
+/// part of the code the slice touched: the default run, an angled blade,
+/// two subpaths in opposite directions, a pressed point, edge buildup and
+/// a curved path.
+#[test]
+fn loading_unset_is_byte_identical() {
+    let scenarios: [(&str, &str, &str); 12] = [
+        ("pkbroad", LTR, "/Width 50"),
+        ("pkbroad", LTR, "/Width 50 /Angle 35 /Edge 0.6 /Depletion 1"),
+        (
+            "pkbroad",
+            "newpath 50 60 moveto 350 60 lineto 350 140 moveto 50 140 lineto",
+            "/Width 30 /Grain 9",
+        ),
+        ("pkbroad", "newpath 200 100 moveto", "/Width 40"),
+        (
+            "pkbroad",
+            "newpath 50 40 moveto 150 180 250 20 350 160 curveto",
+            "/Width 36 /Angle -20",
+        ),
+        ("pkbroad", RTL, "/Width 50 /Charge 0.5 /ColorJitter 0.4"),
+        ("pktrowel", LTR, "/Width 50"),
+        (
+            "pktrowel",
+            LTR,
+            "/Width 50 /Angle 35 /EdgeBuildup 1 /Drag 1",
+        ),
+        (
+            "pktrowel",
+            "newpath 50 60 moveto 350 60 lineto 350 140 moveto 50 140 lineto",
+            "/Width 30 /Lanes 9 /Jitter 2",
+        ),
+        ("pktrowel", "newpath 200 100 moveto", "/Width 40"),
+        (
+            "pktrowel",
+            "newpath 50 40 moveto 150 180 250 20 350 160 curveto",
+            "/Width 36 /Angle -20 /Scrape 0.5",
+        ),
+        ("pktrowel", RTL, "/Width 50 /Coverage 0.5 /ColorJitter 0.4"),
+    ];
+    // Taken from the pre-slice library (origin/main at cb6ea9a).
+    let pinned: [u64; 12] = [
+        0x73b394f50545ceef,
+        0x5133bbe36c8d4454,
+        0xfecbdd420cd20804,
+        0x433493d736ec9b25,
+        0x4aada6d9a098010b,
+        0xac1243e829b0cc19,
+        0x51070daefd97b15d,
+        0x5e85c7541e2404b4,
+        0x2751217334039e1c,
+        0xf0a2afa46cf62f01,
+        0x4f7a4f6a93cf5c2c,
+        0x4c0f8fadd7cb1985,
+    ];
+    let got: Vec<u64> = scenarios
+        .iter()
+        .map(|(preset, path, opts)| {
+            let it = loaded_mark(preset, path, "0.6 0.3 0.2 setrgbcolor", opts);
+            fnv1a(it.gfx().pixmap.data())
+        })
+        .collect();
+    assert_eq!(got, pinned, "an unset-keys render moved: {got:#x?}");
+}
+
+/// Test 2. A load whose colours all equal the current colour paints
+/// exactly what the plain brush paints, with the jitter draw and the flip
+/// machinery both in play. Dyadic components, so the literal in `/Colors`
+/// and the graphics-state colour agree to the last bit.
+#[test]
+fn a_uniform_load_is_the_plain_brush() {
+    for (preset, base) in LOAD_PRESETS {
+        // The default /ColorJitter is on, so the jitter path is exercised.
+        let base = base.replace("/ColorJitter 0", "/ColorJitter 0.3");
+        let colour = "0.25 0.5 0.75 setrgbcolor";
+        for path in [
+            LTR,
+            RTL,
+            "newpath 50 40 moveto 150 180 250 20 350 160 curveto",
+        ] {
+            let plain = pixels(&loaded_mark(preset, path, colour, &base));
+            for extra in [
+                "/Colors [[0.25 0.5 0.75] [0.25 0.5 0.75]]",
+                "/Colors [[0.25 0.5 0.75]]",
+                "/Colors [[0.25 0.5 0.75] [0.25 0.5 0.75] [0.25 0.5 0.75]] /ColorMix 1",
+                "/Colors [[0.25 0.5 0.75] [0.25 0.5 0.75]] /ColorMix 0 /Light 90",
+                "/Colors [[0.25 0.5 0.75] [0.25 0.5 0.75]] /Light 270",
+            ] {
+                let loaded = pixels(&loaded_mark(
+                    preset,
+                    path,
+                    colour,
+                    &format!("{base} {extra}"),
+                ));
+                assert!(
+                    loaded == plain,
+                    "{preset} {extra} on {path}: a uniform load must paint the plain brush"
+                );
+            }
+        }
+    }
+}
+
+/// Test 3. Turning a load on recolours a mark without moving it, and
+/// takes nothing from the caller's random stream.
+#[test]
+fn loading_takes_no_random_draws() {
+    for (preset, base) in LOAD_PRESETS {
+        let next_draw = |extra: &str| {
+            let mut it = loaded_mark(
+                preset,
+                LTR,
+                "0.6 0.6 0.6 setrgbcolor",
+                &format!("{base} {extra}"),
+            );
+            it.run_str("rand")
+                .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+            it.operand_stack()
+                .last()
+                .expect("a draw")
+                .repr()
+                .to_string()
+        };
+        let plain = next_draw("");
+        for extra in [
+            "/Colors [[1 0 0] [0 0 1]]",
+            "/Colors [[1 0 0] [0 1 0] [0 0 1]] /ColorMix 1 /Light 90",
+            "/Colors [[1 0 0]] /Light 270",
+        ] {
+            assert_eq!(
+                next_draw(extra),
+                plain,
+                "{preset} {extra} changed the caller's random stream"
+            );
+        }
+    }
+}
+
+/// Count solid red and solid blue pixels in the pixel rows `rows`, over
+/// the columns `100..300` (clear of the stroke's ends).
+fn red_and_blue(it: &Interp, rows: std::ops::Range<u32>) -> (usize, usize) {
+    let (mut red, mut blue) = (0, 0);
+    for y in rows {
+        for x in 100..300 {
+            let p = it.gfx().pixmap.pixel(x, y).expect("in bounds");
+            let (r, g, b) = (p.red() as i32, p.green() as i32, p.blue() as i32);
+            if r > 230 && g < 25 && b < 25 {
+                red += 1;
+            }
+            if b > 230 && g < 25 && r < 25 {
+                blue += 1;
+            }
+        }
+    }
+    (red, blue)
+}
+
+/// Test 4. The first colour sits on the left of the direction of travel;
+/// reversing the stroke swaps the sides; `/Light` puts it on the lit side
+/// of either stroke.
+#[test]
+fn double_load_puts_the_first_color_on_the_left() {
+    for (preset, base) in LOAD_PRESETS {
+        let render = |path: &str, extra: &str| {
+            loaded_mark(
+                preset,
+                path,
+                "0 0 0 setrgbcolor",
+                &format!("{base} /Colors [[1 0 0] [0 0 1]] /ColorMix 0 {extra}"),
+            )
+        };
+        // The pixmap is y-down: the stroke is y 75..125 in user space,
+        // pixel rows 75..125, and the upper half is rows 77..98.
+        let upper = 77..98;
+        let lower = 102..123;
+        let ltr = render(LTR, "");
+        let (r, b) = red_and_blue(&ltr, upper.clone());
+        assert!(
+            r > 20 * b.max(1) && r > 3000,
+            "{preset} ltr upper: red {r} blue {b}"
+        );
+        let (r, b) = red_and_blue(&ltr, lower.clone());
+        assert!(
+            b > 20 * r.max(1) && b > 3000,
+            "{preset} ltr lower: red {r} blue {b}"
+        );
+
+        // Reversed: left of the travel is now the lower side.
+        let rtl = render(RTL, "");
+        let (r, b) = red_and_blue(&rtl, upper.clone());
+        assert!(
+            b > 20 * r.max(1) && b > 3000,
+            "{preset} rtl upper: red {r} blue {b}"
+        );
+        let (r, b) = red_and_blue(&rtl, lower.clone());
+        assert!(
+            r > 20 * b.max(1) && r > 3000,
+            "{preset} rtl lower: red {r} blue {b}"
+        );
+
+        // /Light 90 (from +y, i.e. above): red on top for both directions.
+        for path in [LTR, RTL] {
+            let lit = render(path, "/Light 90");
+            let (r, b) = red_and_blue(&lit, upper.clone());
+            assert!(
+                r > 20 * b.max(1) && r > 3000,
+                "{preset} light 90 {path}: red {r} blue {b}"
+            );
+            let (r, b) = red_and_blue(&lit, lower.clone());
+            assert!(
+                b > 20 * r.max(1) && b > 3000,
+                "{preset} light 90 {path}: red {r} blue {b}"
+            );
+        }
+        // /Light 270 (from below): red underneath for both.
+        for path in [LTR, RTL] {
+            let lit = render(path, "/Light 270");
+            let (r, b) = red_and_blue(&lit, upper.clone());
+            assert!(
+                b > 20 * r.max(1) && b > 3000,
+                "{preset} light 270 {path}: red {r} blue {b}"
+            );
+            let (r, b) = red_and_blue(&lit, lower.clone());
+            assert!(
+                r > 20 * b.max(1) && r > 3000,
+                "{preset} light 270 {path}: red {r} blue {b}"
+            );
+        }
+    }
+}
+
+/// `/Light` flips each subpath on its own: one call with a left-to-right
+/// and a right-to-left subpath puts red on top of both.
+#[test]
+fn light_flips_each_subpath_by_its_own_chord() {
+    for (preset, base) in LOAD_PRESETS {
+        let it = loaded_mark(
+            preset,
+            "newpath 50 150 moveto 350 150 lineto 350 50 moveto 50 50 lineto",
+            "0 0 0 setrgbcolor",
+            &format!("{base} /Width 30 /Colors [[1 0 0] [0 0 1]] /ColorMix 0 /Light 90"),
+        );
+        // Stroke A is user y 135..165 (rows 35..65), B is y 35..65 (rows 135..165).
+        for (name, top, bottom) in [("A", 38..48, 52..62), ("B", 138..148, 152..162)] {
+            let (r, b) = red_and_blue(&it, top);
+            assert!(
+                r > 20 * b.max(1) && r > 1000,
+                "{preset} {name} top: red {r} blue {b}"
+            );
+            let (r, b) = red_and_blue(&it, bottom);
+            assert!(
+                b > 20 * r.max(1) && b > 1000,
+                "{preset} {name} bottom: red {r} blue {b}"
+            );
+        }
+    }
+}
+
+/// Blue channel of the pixel column at x = 200, over the interior rows.
+fn blue_column(it: &Interp) -> Vec<i32> {
+    (80..120)
+        .map(|y| it.gfx().pixmap.pixel(200, y).expect("in bounds").blue() as i32)
+        .collect()
+}
+
+/// Test 5. `/ColorMix 0` is one hard step down the band; `/ColorMix 1` is
+/// a monotone ramp of many levels.
+#[test]
+fn colormix_grades_between_bands() {
+    for (preset, base) in LOAD_PRESETS {
+        let column = |mix: &str| {
+            blue_column(&loaded_mark(
+                preset,
+                LTR,
+                "0 0 0 setrgbcolor",
+                &format!("{base} /Colors [[1 0 0] [0 0 1]] /ColorMix {mix}"),
+            ))
+        };
+        let hard = column("0");
+        let steps = hard
+            .windows(2)
+            .filter(|w| (w[0] - w[1]).abs() > 100)
+            .count();
+        let mid = hard.iter().filter(|&&b| b > 30 && b < 225).count();
+        assert_eq!(steps, 1, "{preset} /ColorMix 0 should step once: {hard:?}");
+        assert!(mid <= 2, "{preset} /ColorMix 0 has a gradient: {hard:?}");
+        assert!(
+            hard.first() == Some(&0) && hard.last() == Some(&255),
+            "{preset} /ColorMix 0 runs from the first to the last colour: {hard:?}"
+        );
+
+        let ramp = column("1");
+        assert!(
+            ramp.windows(2).all(|w| w[0] <= w[1]),
+            "{preset} /ColorMix 1 should ramp monotonically: {ramp:?}"
+        );
+        let mut levels = ramp.clone();
+        levels.dedup();
+        assert!(
+            levels.len() >= 10,
+            "{preset} /ColorMix 1 has too few levels: {ramp:?}"
+        );
+        assert!(
+            ramp.first().is_some_and(|&b| b < 40) && ramp.last().is_some_and(|&b| b > 215),
+            "{preset} /ColorMix 1 spans the whole load: {ramp:?}"
+        );
+    }
+}
+
+/// Test 6, pktrowel only (pkbroad has no edge buildup). The two ridges
+/// are the edge colours darkened by the buildup shade: a dark first colour
+/// on the left edge and a dark last colour on the right.
+#[test]
+fn edge_buildup_takes_its_edges_color() {
+    let it = loaded_mark(
+        "pktrowel",
+        LTR,
+        "0 0 0 setrgbcolor",
+        "/Width 50 /Coverage 1 /Scrape 0 /Jitter 0 /ColorJitter 0 /EdgeBuildup 1 \
+         /Colors [[1 0 0] [0 0 1]] /ColorMix 0",
+    );
+    // Ridges are 28% of the half-extent thick, so about 7pt at each edge.
+    // Shade 1 - 1*0.5 darkens (1, 0, 0) to (0.5, 0, 0).
+    let at = |y: u32| {
+        let p = it.gfx().pixmap.pixel(200, y).expect("in bounds");
+        (p.red() as i32, p.green() as i32, p.blue() as i32)
+    };
+    for y in 79..83 {
+        let (r, g, b) = at(y);
+        assert!(
+            (100..160).contains(&r) && g < 10 && b < 10,
+            "upper ridge row {y}: {:?}",
+            (r, g, b)
+        );
+    }
+    for y in 118..122 {
+        let (r, g, b) = at(y);
+        assert!(
+            r < 10 && g < 10 && (100..160).contains(&b),
+            "lower ridge row {y}: {:?}",
+            (r, g, b)
+        );
+    }
+    // The body between the ridges is the full-strength colours.
+    let (r, g, b) = at(90);
+    assert!(r > 230 && g < 10 && b < 10, "upper body: {:?}", (r, g, b));
+    let (r, g, b) = at(110);
+    assert!(b > 230 && g < 10 && r < 10, "lower body: {:?}", (r, g, b));
+}
+
+/// A flipped subpath's ridges flip with it.
+#[test]
+fn edge_buildup_follows_the_light_flip() {
+    let it = loaded_mark(
+        "pktrowel",
+        RTL,
+        "0 0 0 setrgbcolor",
+        "/Width 50 /Coverage 1 /Scrape 0 /Jitter 0 /ColorJitter 0 /EdgeBuildup 1 \
+         /Colors [[1 0 0] [0 0 1]] /ColorMix 0 /Light 90",
+    );
+    let at = |y: u32| {
+        let p = it.gfx().pixmap.pixel(200, y).expect("in bounds");
+        (p.red() as i32, p.green() as i32, p.blue() as i32)
+    };
+    let (r, g, b) = at(81);
+    assert!(
+        (100..160).contains(&r) && g < 10 && b < 10,
+        "upper ridge: {:?}",
+        (r, g, b)
+    );
+    let (r, g, b) = at(119);
+    assert!(
+        r < 10 && g < 10 && (100..160).contains(&b),
+        "lower ridge: {:?}",
+        (r, g, b)
+    );
+}
+
+/// The three new keys each move pixels on both presets (the structural
+/// guard `broad_every_documented_parameter_changes_the_render` is for),
+/// and the same keys are advertised for pktrowel.
+#[test]
+fn loaded_keys_change_the_render_on_both_presets() {
+    for (preset, base) in LOAD_PRESETS {
+        let with = |extra: &str| {
+            pixels(&loaded_mark(
+                preset,
+                LTR,
+                "0 0 0 setrgbcolor",
+                &format!("{base} {extra}"),
+            ))
+        };
+        let plain = with("");
+        let loaded = with("/Colors [[1 0 0] [0 0 1]]");
+        assert_ne!(loaded, plain, "{preset} /Colors is a no-op");
+        for extra in ["/ColorMix 1", "/ColorMix 0", "/Light 270"] {
+            assert_ne!(
+                with(&format!("/Colors [[1 0 0] [0 0 1]] {extra}")),
+                loaded,
+                "{preset} {extra} is a no-op"
+            );
+        }
+    }
+    let src = std::fs::read_to_string("lib/paintkit.ps").expect("read paintkit");
+    let start = src
+        .find("% @example: newpath 40 120 moveto 260 150 lineto << /Width 72")
+        .expect("pktrowel tags");
+    let end = src[start..].find("\n/pktrowel ").expect("pktrowel def") + start;
+    let advertised: Vec<&str> = src[start..end]
+        .lines()
+        .filter_map(|l| l.strip_prefix("% @param: /"))
+        .map(|l| l.split_whitespace().next().unwrap_or(""))
+        .collect();
+    for key in ["Colors", "ColorMix", "Light"] {
+        assert!(
+            advertised.contains(&key),
+            "pktrowel does not advertise /{key}"
+        );
+    }
 }

@@ -3,6 +3,41 @@
 Newest first. Per `AGENTS.md`, each stage ends with a summary here: what
 was built, tradeoffs made, what's explicitly deferred.
 
+## Paint loading L2: pkbroad and pktrowel adopt `/Colors`, `/ColorMix`, `/Light` (issue #221, 2026-10-13)
+
+Slice L2 of #183's design (`docs/PAINT_LOADING.md`, sections 2-3 and 6). The two
+presets that read a head position per striation (`pmnc`) or per lane (`ptnc`)
+now take a double-loaded brush. With the keys unset every render is
+byte-identical: each new branch tests `Rec null ne`, and nothing draws a random
+number (compared against an `origin/main` worktree with the same binary, plus a
+pinned-hash test).
+
+- `/Colors` is 1 to 8 colours from the brush's left edge (looking along the
+  travel); `/ColorMix` (default 0.3) blends neighbours; `/Light` mirrors each
+  subpath so the first colour faces the light whichever way it travels. A
+  `/Light` or `/ColorMix` without `/Colors` is an error
+  (`pkbroad-light-needs-colors`, ...); British spellings raise
+  `<preset>-colours-is-spelled-colors`.
+- The flip is a shared helper, `raw n pitch angle light puflips`, because both
+  presets' stop records start `[x y angle t sp atend]`. A chord under one
+  `/Pitch` (a ring, a pressed point) is not flipped. Every entry is written, so
+  a later `get` never meets a null.
+- pktrowel's two `/EdgeBuildup` ridges take the colour at u = +1 and u = -1,
+  darkened by the same `1 - EdgeBuildup*0.5` shade as before. `ptemit` sets
+  the colour from `ptcu`/`ptcsh`, which the lane loop and the ridge pass set,
+  so the ridge pass keeps drawing its randomness unconditionally.
+- `/ColorJitter` keeps its draw and its meaning: it is applied to the resolved
+  colour (`c 1 j add shade`), so a uniform load paints exactly what the plain
+  brush paints (test 2, with dyadic components so the literal and the
+  graphics-state colour agree to the last bit).
+- Tests: Rust tests 1-6 of the design for both presets (6 is pktrowel only, since
+  only it has edge buildup), plus a per-subpath flip test, a ridge-follows-the-flip
+  test and an "every key moves pixels" test; self-tests for `puflips` and each
+  preset's guards. Mutation-checked: dropping the flip, the ridge sides or the
+  lane head position each fails the tests.
+- Not here: `/Touch` (S2), `pkfan` (L4), `pkdab`/`pkoil` (L5), the specimen
+  (L5b). `puwet` is still the identity (L3).
+
 ## Paint loading L1: the `pu-` colour resolver (issue #218, 2026-10-13)
 
 Slice L1 of #183's design (`docs/PAINT_LOADING.md`, PR #207). It adds the
