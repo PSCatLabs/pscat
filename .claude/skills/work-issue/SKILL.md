@@ -62,8 +62,8 @@ candidates → report "backlog clear" and stop.
 Run its "Claim the issue" script exactly as written, in one Bash call,
 replacing only `<N>`. Then:
 - `RESULT=claimed*` → you own `<N>`. Continue.
-- `RESULT=live*` or `RESULT=lost*` → stop. Report that `<N>` is being worked
-  on. Do not try the next candidate.
+- `RESULT=live*` or `RESULT=lost*` on a resume candidate → claim the next one (then the fresh picker).
+  On an explicit `<N>` or a fresh pick → stop, report `<N>` is being worked on, try nothing else.
 
 ## 2. Mark it in-progress
 
