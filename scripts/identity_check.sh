@@ -198,7 +198,8 @@ mkdir -p "$OUT/base" "$OUT/head"
 FAILED=0
 CONTROL_FAILED=0
 cleanup() {
-    if [ "$KEEP" -eq 0 ] && [ "$FAILED" -eq 0 ] && [ "$CONTROL_FAILED" -eq 0 ]; then
+    local rc=$?   # any nonzero exit (a diff, a bad control, a harness error) keeps the logs
+    if [ "$KEEP" -eq 0 ] && [ "$rc" -eq 0 ]; then
         rm -rf "$OUT"
     else
         echo "scratch renders kept in $OUT" >&2
@@ -368,6 +369,9 @@ if [ -n "$CONTROL" ]; then
         CONTROL_FAILED=1
     elif [ -z "$(pngs_of "$h")" ]; then
         echo "CONTROL BROKEN  the control driver wrote no PNG in the branch tree"
+        CONTROL_FAILED=1
+    elif [ -z "$(pngs_of "$b")" ]; then
+        echo "CONTROL BROKEN  the control driver wrote no PNG in the base tree (exit $(rc_of "$b"), see $b/log); nothing was compared"
         CONTROL_FAILED=1
     elif [ "$(pngs_of "$b")" != "$(pngs_of "$h")" ]; then
         echo "control    differs between the trees, as it must (page count differs)"
