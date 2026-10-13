@@ -740,7 +740,10 @@ renders eight examples in both and compares block-downsampled output).
   line. Its wrapped proc must paint in the color it *inherits* — a proc
   that sets its own color turns every graded pass into a hard echo —
   and the direction is in the caller's user space, so a reflection's
-  mirror goes inside the proc.
+  mirror goes inside the proc. To pull one colour out of a multi-colour
+  self-seeded scene without re-rolling its marks, log `rrand` at each
+  painting step and restore it with `srand` on replay
+  (`gallery/alpine_lake.ps`'s `lkdo`, issue #191).
 - **A "collect stops, then draw runs" brush must not call the caller's
   `/Pressure` proc inside its per-lane/per-bristle loop.** A caller's
   proc is arbitrary code and may consume randomness (`{ frnd }` is a
