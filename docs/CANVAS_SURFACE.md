@@ -245,20 +245,23 @@ llx lly urx ury touch pjcatch -     % user-space box; clips the current gsave
 
 Each preset calls `pjcatch` right after the `gsave` that already opens
 its drawing block (`pkdry`'s `pbn 0 gt { gsave`, and so on). It passes
-the bounding box of its collected stops, grown by its own reach:
+the bounding box of its collected stops, each stop grown by its own
+reach. Where a preset's extent depends on a per-stop quantity it has
+already resolved, the reach uses that stored value and never re-runs
+the caller's procedure. A `/Pressure` profile is arbitrary code (the
+HANDOFF gotcha), and it isn't capped at 1 (`/Pressure { 4 }` is valid).
 
-| Preset | Reach added to the stops' box |
+| Preset | Reach of each stop |
 |---|---|
-| pktrowel | `Width/2 * (1 + Drag) + Pitch/2 + Jitter` (blade, drag, half-pitch run extension) |
+| pktrowel | `abs(h) * (1 + Drag) + Pitch/2 + Jitter`, where `h` is the stop's resolved half-extent in slot 6 (`Width/2 * Pressure(t) * (0.35 + 0.65*Cover)`). Lanes reach `h` across the blade, and runs reach `Drag*h + Pitch/2` along the travel (Codex review, round 3). |
 | pkdry | `Width/2 * Spread * 1.15 + BristleWidth*(1 + WidthJitter) + Jitter` |
 | pkfan | `Width/2 * Spread + BristleWidth*(1 + WidthJitter) + Jitter`, or the ray length `Width/2*Spread*1.15` for a pressed fan |
-| pkbroad | `Width/2 * (1 + 0.06*Edge) + Pitch/2` |
+| pkbroad | `Width/2 + 0.06*Width*Edge + Pitch/2` (`/Edge` jitters each boundary by up to `Edge * Width * 0.06`) |
 | pkliner | `Width/2 + Waver*Width` |
 
-Overestimating only costs cells. Underestimating would clip real paint,
-so each slice adds a test that a `/Touch 0.999` mark has at least as
-much ink as the untouched mark minus the knuckle gaps (a test that fails
-if the box is too small).
+Overestimating only costs cells. Underestimating would clip real
+paint, so each slice adds test 7, which compares a preset's own box
+against a whole-page box pixel for pixel.
 
 The matching `grestore` drops the clip. A caller's own clip (alpine_lake
 clips its knife work to each range's silhouette) intersects with the
@@ -482,7 +485,10 @@ catch over the bounding box of all the motion's subpaths:
    touched mark once through its own reach box and once with
    `pjcatch` forced to a whole-page box (a test-only override). The
    catch is a per-cell pure function, so the two must be pixel-identical.
-   Any difference means the reach box clipped real paint.
+   Any difference means the reach box clipped real paint. The pktrowel
+   case includes an above-1 profile (`/Pressure { 4 }` and `{ pkbell 3
+   mul }`) and a large `/Drag`, and every preset is run at its maximum
+   `/Jitter`, `/Edge` or `/Waver`.
 8. `ghostscript_agrees_on_the_surface`: the rand-independent band from
    section 5, rendered by pscat and by `gs`, block-compared within the
    tolerance `tests/golden.rs` uses. It skips if gs is absent, like the
