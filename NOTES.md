@@ -3,6 +3,43 @@
 Newest first. Per `AGENTS.md`, each stage ends with a summary here: what
 was built, tradeoffs made, what's explicitly deferred.
 
+## `work-issue` skill split into a short core plus reference files (issues #194, #151, 2026-10-13)
+
+`.claude/skills/work-issue/SKILL.md` was about 1,040 lines, most of it
+lock-race analysis and Codex review templates. It is now a 250-line
+numbered procedure that a smaller model (Haiku) can follow literally,
+plus five files in `references/`: `claim-protocol.md` (the claim script,
+verbatim, and all of its race rationale), `codex-review.md` (the
+original step 8 in full), `pitfalls.md`, `demo-surfaces.md`, and
+`rationale.md` (the remaining step prose, with code blocks removed). Steps
+keep their original numbers 1-9, so older references to "step 8" still
+mean the same step. A new step 10 prints a fixed final report.
+
+Decisions:
+- **The claim script lives only in `claim-protocol.md`.** At ~60 lines it
+  would have taken a quarter of the main file. Step 1 tells the reader to
+  open it and run it unchanged. The step 8 Codex command chain, which is
+  shorter, is in both files.
+- **Nothing was rewritten, only moved.** A script checked that every
+  non-blank line of the old file appears in the new set. The only lines
+  missing are the deliberate command changes below.
+- **Command changes:** `git worktree add --no-track` (the branch used to
+  track `origin/main`, so a bare `git push` targeted `main`); the
+  quality gate runs in the background with output to
+  `/tmp/gate-<N>.log`, because it outlasts the 120s foreground timeout;
+  step 9 checks the PR is `MERGED`, then uses `git branch -D` (a squash
+  merge never makes the branch an ancestor of `main`, so `-d` always
+  refused); step 9 removes `in-review`/`in-progress` (#151, decided as
+  "clean up"; `scripts/issue_summary.sh` reads labels only from open
+  issues, so it is unaffected).
+- **Size shortcut:** a change estimated at 20 lines or fewer with no API
+  change gets one short check at steps 4 and 6, confirmed against
+  `git diff --numstat` at step 6. The step 8 cross-model review is
+  still mandatory.
+- Deferred work is filed with `gh issue create`, not just noted here.
+
+Deferred: validation of the slimmed skill by a Haiku run of #178.
+
 ## `lib/paintkit.ps`: brush motion generators (issue #184, 2026-10-09)
 
 Child of epic #112. paintkit models brush *heads*; this adds the other

@@ -71,7 +71,8 @@ protection in an emergency.
 ## Labels
 
 `in-progress` (claimed, being worked), `in-review` (PR open, awaiting
-merge decision) — set by `.claude/skills/work-issue/`.
+merge decision) — set by `.claude/skills/work-issue/`, which removes both
+once the merge is verified, so closed issues carry neither.
 
 ## Regenerating this file
 
