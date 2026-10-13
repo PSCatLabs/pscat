@@ -10590,3 +10590,65 @@ fn every_touch_adopter_advertises_touch_with_a_unit() {
         );
     }
 }
+
+// --- loaded colours on pkdab, highlight and shadow colours (issue #183, slice L5 #226) ---
+//
+// `pkdab` takes `/Colors` (one colour per dab, at the position its existing
+// outline-phase draw gives it on the load), and `pkdab` and `pkoil` take
+// `/HighlightColor` and `/ShadowColor` in place of white and black. The
+// design is docs/PAINT_LOADING.md; the numbers below are its section 6 tests
+// 7 and 8.
+
+/// Scenarios that use none of the new keys, pinned against hashes taken from
+/// `origin/main` (ebebfed) before the slice: `pkdab` and `pkoil` run exactly
+/// the instructions they ran.
+#[test]
+fn dab_and_oil_unset_loading_keys_are_byte_identical() {
+    let scenarios: [(&str, &str, &str); 9] = [
+        ("pkdab", LTR, "/Size 6 /Scatter 20"),
+        (
+            "pkdab",
+            LTR,
+            "/Size 6 /Scatter 20 /Highlight 0.8 /Shadow 0.7 /ColorJitter 0.3",
+        ),
+        ("pkdab", "newpath 200 100 moveto", "/Size 8 /Clump 60"),
+        (
+            "pkdab",
+            "newpath 50 40 moveto 150 180 250 20 350 160 curveto",
+            "/Size 5 /Light 45 /Density 4",
+        ),
+        (
+            "pkdab",
+            "newpath 50 60 moveto 350 60 lineto 350 140 moveto 50 140 lineto",
+            "/Size 7 /Scatter 14 /Light 300 /Charge 0.6",
+        ),
+        ("pkoil", LTR, "/Width 20"),
+        ("pkoil", LTR, "/Width 20 /Highlight 0.6 /Shadow 0.5"),
+        ("pkoil", "newpath 200 100 moveto", "/Width 30"),
+        (
+            "pkoil",
+            "newpath 50 40 moveto 150 180 250 20 350 160 curveto",
+            "/Width 24 /Ridges 20 /ColorJitter 0.3 /Highlight 0.4",
+        ),
+    ];
+    // Taken from the pre-slice library (origin/main at ebebfed).
+    let pinned: [u64; 9] = [
+        0x5898eb949b9a9cc4,
+        0x87591e4410f1fba3,
+        0x7da7b90d0c8b14d9,
+        0x03f0f5f6044c25a2,
+        0xbb7c94385aebe42e,
+        0x46cf174a8c23e026,
+        0x4afeceacd6e421ce,
+        0xe659b4013bfc5106,
+        0x407b12e6fb63aeef,
+    ];
+    let got: Vec<u64> = scenarios
+        .iter()
+        .map(|(preset, path, opts)| {
+            let it = loaded_mark(preset, path, "0.6 0.3 0.2 setrgbcolor", opts);
+            fnv1a(it.gfx().pixmap.data())
+        })
+        .collect();
+    assert_eq!(got, pinned, "an unset-keys render moved: {got:#x?}");
+}
