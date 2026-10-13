@@ -4324,17 +4324,24 @@ fn fan_empty_path_is_a_no_op() {
 
 #[test]
 fn fan_restores_the_callers_color() {
-    let mut it = fresh(200, 200);
-    it.run_str(
-        "0.2 0.4 0.8 setrgbcolor 9 srand newpath 40 100 moveto 160 100 lineto \
-         << /Width 30 /ColorJitter 0.4 >> pkfan",
-    )
-    .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
-    let (r, g, b) = it.gfx().rgb();
-    assert!(
-        (r - 0.2).abs() < 1e-6 && (g - 0.4).abs() < 1e-6 && (b - 0.8).abs() < 1e-6,
-        "pkfan must leave the caller's color alone, got {r} {g} {b}"
-    );
+    // Unloaded, and loaded (which sets a colour per run and must still
+    // hand the caller's own back).
+    for opts in [
+        "/Width 30 /ColorJitter 0.4",
+        "/Width 30 /ColorJitter 0.4 /Colors [[1 0 0] [0 0 1]] /Light 90",
+    ] {
+        let mut it = fresh(200, 200);
+        it.run_str(&format!(
+            "0.2 0.4 0.8 setrgbcolor 9 srand newpath 40 100 moveto 160 100 lineto \
+             200 150 moveto << {opts} >> pkfan"
+        ))
+        .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+        let (r, g, b) = it.gfx().rgb();
+        assert!(
+            (r - 0.2).abs() < 1e-6 && (g - 0.4).abs() < 1e-6 && (b - 0.8).abs() < 1e-6,
+            "pkfan {opts} must leave the caller's color alone, got {r} {g} {b}"
+        );
+    }
 }
 
 #[test]
@@ -9105,9 +9112,11 @@ fn ghostscript_agrees_on_the_surface() {
 
 // --- loaded colours (issue #183, slice L2 #221): pkbroad and pktrowel ----
 //
-// `/Colors`, `/ColorMix` and `/Light` on the two presets that read their
-// head position per striation (`pmnc`) or per lane (`ptnc`). The design is
-// docs/PAINT_LOADING.md; the numbers below are its section 6 tests 1-6.
+// `/Colors`, `/ColorMix` and `/Light` on the presets that read a head
+// position per striation (`pmnc`), per lane (`ptnc`) or, from slice L4
+// (#224), per bristle (`pfub`). The design is docs/PAINT_LOADING.md; the
+// numbers below are its section 6 tests 1-6. `LOAD_PRESETS` lists the
+// presets the shared tests run on.
 // Every render goes left to right along y = 100 unless a test says
 // otherwise, so "upper" in user space is the smaller pixel row.
 
@@ -9530,11 +9539,12 @@ fn edge_buildup_follows_the_light_flip() {
     );
 }
 
-/// The three new keys each move pixels on both presets (the structural
-/// guard `broad_every_documented_parameter_changes_the_render` is for),
-/// and the same keys are advertised for pktrowel.
+/// The three new keys each move pixels on every adopting preset (the
+/// structural guard `broad_every_documented_parameter_changes_the_render`
+/// is for), and the same keys are advertised for pktrowel (pkfan's are
+/// checked by `fan_advertises_the_loaded_color_keys`).
 #[test]
-fn loaded_keys_change_the_render_on_both_presets() {
+fn loaded_keys_change_the_render_on_every_adopter() {
     for (preset, base) in LOAD_PRESETS {
         let with = |extra: &str| {
             pixels(&loaded_mark(
