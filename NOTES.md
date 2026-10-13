@@ -8975,6 +8975,48 @@ about 14x slower unoptimized (`cargo test --test selftest`: 61s debug,
   disproved-premise rule, and a short resume table that defaults to
   re-review. `SKILL.md` stays within 250 lines.
 
+## scripts/identity_check.sh: the shared byte-identity check (issue #263)
+
+L1, S1 and L2 each rendered the paintkit corpus from a baseline worktree and
+from the branch and compared by hand. `scripts/identity_check.sh BASE_WORKTREE
+[BIN]` is that check, once.
+
+- **Method.** One `pscat` binary renders every tracked `examples/`, `gallery/`
+  and `selftest/drivers/` file containing `(lib/paintkit.ps)` from both trees,
+  each run with that tree as the cwd (`run` resolves `lib/` relative to the
+  cwd, which is what makes a tree load its own library). PNG only, since SVG
+  differs run to run (#258). Compared with `cmp`, page by page, so the
+  10-page driver is 10 lines. 21 files, 30 pages on `b7a41f5`, the same count
+  as L1/S1/L2.
+- **Resolution.** Examples and drivers at `--dpi 72`; gallery pieces at
+  `--dpi 144`, because the committed stills are 2x supersampled (all six
+  stills are 2x their `%%BoundingBox`; `--page WxH --dpi 144` equals the
+  `2 2 scale` + doubled page recipe in `gallery/README.md`, byte for byte
+  for `alpine_lake`). Pages come
+  from each file's own `%%SelfTestPage` or `%%BoundingBox`. Cost is not
+  pixels: `alpine_lake` takes about 55 s at either scale, and it is the long
+  pole, so the whole run is about a minute with `-j 10`.
+- **Exit status is a signal.** 0 = all identical and the control differed.
+  1 = a page `DIFFERS` or `ERROR`s. 2 = the negative control rendered
+  identically (or crashed in the branch tree), so an all-identical result
+  proves nothing. A pscat run that exits nonzero in either tree is an `ERROR`
+  even when both trees wrote the same partial canvas, because pscat writes
+  the canvas after an error and a file broken the same way in both trees
+  would otherwise read as identical.
+- **`--gallery-still`** compares the `alpine_lake` render (already made for
+  the loop at 144 dpi) with the committed `gallery/renders/alpine_lake.png`
+  in each tree, so it costs nothing extra.
+- **Things that bit.** `xargs -0` drops empty arguments, so "no page size"
+  travels as `-`. The file list is `git ls-files`, not a glob: the maintainer's
+  checkout carries untracked scratch pieces that must not join. A file absent
+  from the base prints `new` and is skipped. `--out` inside either tree is
+  refused.
+- **Verified.** Against `HEAD`'s own tree: 30/30 identical, both stills
+  identical, control rc 2 (the libraries are the same). Against `aa74e9f~1`
+  (before L2) with a `pkbroad /Colors` control: 30/30 identical, the control
+  differs, rc 0. Mutations in the base tree: an extra rectfill gives
+  `DIFFERS`, a bogus operator gives `ERROR`, a deleted file gives `new`.
+
 ## SVG export: deterministic, and correct, clip defs (issues #258, #261)
 
 - `pscat --svg` of one program differed from run to run (PNG never did).

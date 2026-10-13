@@ -444,13 +444,26 @@ branch.
     `/Load`-is-`[per /Width]` pin is untouched.
 
 **Byte identity across the repo** (#141's method, run in every slice
-that edits a preset or `pkwet`):
-- `git worktree add` an `origin/main` checkout and render every
-  `examples/`, `gallery/` and `selftest/drivers/` file that loads
-  paintkit (21 files, 30 page renders at #141) from both trees with the
-  same release binary, then compare md5s. Every file must match.
-- Render `gallery/alpine_lake.ps` at 2x and compare it with the
-  committed `gallery/renders/alpine_lake.png` byte for byte.
+that edits a preset or `pkwet`) is `scripts/identity_check.sh` (#263):
+
+```sh
+git worktree add --detach ../base-wt-<N> "$(git merge-base HEAD origin/main)"
+scripts/identity_check.sh ../base-wt-<N> --gallery-still --control path/to/control.ps
+git worktree remove --force ../base-wt-<N>
+```
+
+- It renders every `examples/`, `gallery/` and `selftest/drivers/` file
+  that loads paintkit (21 files, 30 page renders at #141) from both
+  trees with the same release binary, as PNG only, and compares the
+  bytes. Every page must be `identical`. The base worktree must be at the
+  branch's base commit (after the step 5.5 rebase), not a newer
+  `origin/main`.
+- `--gallery-still` also compares `gallery/alpine_lake.ps` at 2x with the
+  committed `gallery/renders/alpine_lake.png` byte for byte, in each tree.
+- `--control` is the negative control. For this design it is a driver
+  that uses a key only the branch has (a `pkbroad` with `/Colors`): it
+  must render *differently* in the two trees, or the script exits 2,
+  because otherwise both trees may have loaded the same library.
 - Record the file and render counts in the PR, since the count grows as
   examples are added.
 
