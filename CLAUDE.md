@@ -14,7 +14,7 @@ this repo.
 - **All roadmap stages (1–20) are complete**, plus Stage 21 (standalone
   installability), Stage 22 (Korean/Japanese/Thai fonts), and Stage 23
   (gallery/site catch-up, `.ttc`, a second Korean face), all
-  unplanned/post-roadmap (see `NOTES.md` for what shipped in each).
+  unplanned/post-roadmap (see `NOTES.md`, and `notes/` for newer entries, for what shipped in each).
   **Read `HANDOFF.md` first when picking up new work** — it orients
   you in the architecture, lists the gotchas, and
   orders the remaining open-ended work (Gallery II, leftovers).

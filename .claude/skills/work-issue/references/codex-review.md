@@ -296,7 +296,8 @@ gh pr view <PR#> --json mergeable,mergeStateStatus,statusCheckRollup
 green CI run and you do not update the branch or re-run CI for it. Only
 `DIRTY` (real conflicts) needs a local merge of `main` (pitfalls.md "Rebase
 and merge rules"), then a fresh CI wait. The merge decision is SKILL.md step
-8.12's query, which includes `mergeStateStatus != "DIRTY"`.
+8.12's query, which also requires `mergeable == "MERGEABLE"` (so `UNKNOWN` does
+not pass).
 
 Then merge using the shape recorded in `SDLC.md`'s `merge_button`
 block (this repo: squash; `delete_branch_on_merge: true` makes GitHub

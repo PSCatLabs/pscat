@@ -134,7 +134,7 @@ Try `cargo run -- --page 500x500 examples/sierpinski.ps` and watch the
 triangles appear.
 
 See `INIT.md` for the project vision, `ARCHITECTURE.md` for the design
-writeup, `NOTES.md` for per-stage summaries, and `ROADMAP.md` for the
+writeup, `NOTES.md` and `notes/` for per-stage summaries, and `ROADMAP.md` for the
 full staged plan (all stages complete, with per-task model routing).
 
 ## Building & running

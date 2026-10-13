@@ -275,7 +275,7 @@ again after any push, which restarts CI).
   on a run where both jobs were cancelled ("job was not acquired by
   Runner of type hosted"). Decide from GitHub's own check state, and merge
   only when SKILL.md 8.12's query prints `true` (the one copy; it also
-  requires `mergeStateStatus != "DIRTY"`).
+  requires `mergeable == "MERGEABLE"` and `mergeStateStatus != "DIRTY"`).
   Its `length > 0` guard matters: jq's `all` is `true` on an empty
   array, and the rollup is empty for a few seconds after a push. A
   `CANCELLED`, `SKIPPED`, `NEUTRAL` or still-`IN_PROGRESS` check is not
@@ -293,38 +293,61 @@ again after any push, which restarts CI).
   (`.../actions/runs/<run-id>/job/...`):
   `gh run view <run-id> --json headSha,jobs --jq '{headSha, jobs: [.jobs[] | {name, conclusion, ran: ([.steps[]? | select(.conclusion=="success" or .conclusion=="failure")] | length)}]}'`
   Rerun only when `headSha` is the PR's current head (an older run
-  cancelled by a newer push is superseded, not broken: `concurrency`
-  cancels it on purpose) and every failed job shows `ran: 0`. At most two
+  cancelled by a newer push to the same PR is superseded, not broken: `ci.yml`'s
+  `concurrency` cancels PR runs on purpose; push runs on `main` are never cancelled) and every failed job shows `ran: 0`. At most two
   reruns; then start a fresh watch. Any job with a `failure` step is a real
   failure (a test, clippy or fmt): stop and report, never rerun it.
 - After a clean `true`, merge. `BEHIND` meanwhile is fine (see above).
-- The `true` query also requires `mergeStateStatus != "DIRTY"`: a conflicted
-  PR still shows green checks from its last run. Its `jq` is parenthesised
+- The `true` query also requires `mergeable == "MERGEABLE"` and
+  `mergeStateStatus != "DIRTY"`: a conflicted PR still shows green checks
+  from its last run, and right after a push GitHub reports `UNKNOWN` for both
+  fields while it computes them, which `!= "DIRTY"` alone lets through (#273;
+  the likeliest cause of a `true` printed for a conflicted PR in the #263
+  run). `UNKNOWN` is not a failure: re-query up to 5 times, ~10 s apart
+  (`python3 -c 'import time; time.sleep(10)'` between), and if it never
+  resolves treat the PR as not mergeable and report it. Before the CI wait,
+  `git fetch origin main && git merge-tree --write-tree origin/main HEAD
+  >/dev/null` (git 2.38+; non-zero means conflicts) catches a PR that will go
+  `DIRTY`, so the conflict is fixed before a CI cycle is spent on it. Its `jq` is parenthesised
   on purpose (`|` binds loosest, so `A and B | C` would parse as
   `(A and B) | C`).
 
-### Main CI after merge (#257)
+### Main CI after merge (#257, #273)
 
 With `strict` off, two PRs can each pass alone and break `main` together.
-The push-to-main `ci` run for your merge commit is the net. After step 9's
-cleanup, in a fresh Bash call (`SHA` from `gh pr view <PR#> --json
-mergeCommit --jq .mergeCommit.oid`):
+The push-to-main `ci` run for your merge commit is the net. Since #273
+`ci.yml` never cancels a push run (each push has its own concurrency group
+keyed by the commit SHA), so your merge commit gets its own run to
+completion, even when another agent merges seconds later. After step 9's
+cleanup, in a fresh Bash call, with `SHA` from `gh pr view <PR#> --json
+mergeCommit --jq .mergeCommit.oid`, wait for that run (background, ~3 min
+for `test`, cap about 20 min; `perf-regression` is `pull_request` only):
 
 ```sh
-gh run list --workflow ci --branch main --commit <SHA> --json databaseId,status,conclusion
+SHA=<SHA>; for i in $(seq 1 60); do
+  R=$(gh run list --workflow ci --branch main --commit "$SHA" --json databaseId,status,conclusion --jq '.[0] // empty | "\(.databaseId) \(.status) \(.conclusion)"')
+  case "$R" in *" completed "*) break;; esac
+  python3 -c 'import time; time.sleep(20)'
+done; echo "run=$R"
 ```
 
-- Empty for the first few seconds after the merge: wait (see "Waiting and
-  timeouts") and re-list. Then watch it in the background:
-  `gh run watch <run-id> --exit-status > <SCRATCH>/main-ci-<N>.log 2>&1; echo "exit=$?" >> <SCRATCH>/main-ci-<N>.log`.
-- Decide from `gh run view <run-id> --json conclusion --jq .conclusion`
-  (`success` = green), not from the exit code. Only `test` runs on push
-  (`perf-regression` is `pull_request` only).
-- `ci.yml`'s `concurrency` cancels a run when a newer push to `main` arrives,
-  so another agent's merge right after yours can leave your run `cancelled`.
-  That is not red. Check the newer run instead, provided its head contains
-  your commit (`git merge-base --is-ancestor <SHA> <newer-sha>` after
-  `git fetch origin main`), and repeat if that one is cancelled too.
+`R` is `<run-id> completed <conclusion>`; empty for the first few seconds after
+the merge is normal. Decide from the conclusion, not any exit code: `success`
+is green.
+
+- Never rerun a main run to "get a result" (a rerun of someone else's run
+  races them); a `failure` is a real signal.
+- `cancelled` should not happen any more. If it does: if a newer push to
+  `main` exists, look at the newer run, provided its head contains your commit
+  (`git fetch origin main`, then `git merge-base --is-ancestor <SHA>
+  <newer-sha>`), and repeat if that one is cancelled too (this is also the
+  path for a merge made before #273's `ci.yml` change was on `main`).
+- A `cancelled` run with zero steps run and no newer push is an infrastructure
+  failure, not red. Check it as in "Rerun after an infrastructure failure
+  only" above (`ran: 0` for every job, `headSha` is `SHA`) and rerun with
+  `gh run rerun <run-id> --failed`, at most twice. This is the one case where
+  a main run may be rerun; the push group is keyed by SHA, so the rerun cannot
+  be cancelled by or race another merge's run.
 - Red (`failure`): stop at once. Report it as the first line of the final
   report (`Merge: merged ... but main CI RED`) with the run URL and the failing
   step, and start no other work. Do not revert or push a fix unprompted.
@@ -424,8 +447,12 @@ plain `git push` (no force). `gh pr update-branch` is only a shortcut for a
 conflict-free merge; if you do use it, `git -C "$WORKTREE_DIR" pull
 --ff-only` before any later local commit.
 
-**NOTES.md conflicts** (the usual one, every PR appends a section): keep
-both new sections, ours first, then theirs; never drop either side.
+**NOTES.md conflicts** should be rare since #273: new notes go in
+`notes/<issue>-<slug>.md`, one file per issue, so two PRs never touch the
+same file. If you still conflict in `NOTES.md` (someone edited it, or an old
+PR predates #273), keep both sides; never drop either. Move your own new
+section out of `NOTES.md` into your `notes/` fragment rather than resolving
+it in place.
 
 **Doc-only conflicts skip the re-review.** If every conflicted file in
 such a rebase or merge was plain documentation (`NOTES.md`, `HANDOFF.md`,
@@ -461,3 +488,28 @@ every name keeps two concurrent issues apart even in a shared directory.
 The cost: a scratchpad is per session, so a resumed run never finds the
 earlier run's files; resume decisions are made from GitHub state
 ("Resume paths" above), and a review JSON or summary is regenerated.
+
+### Evidence runs and scratch hygiene (#273)
+
+- **Run long evidence sweeps in the background, in parallel.** Old-binary
+  vs new-binary comparisons across many inputs (a gallery sweep, every
+  example, a perf A/B) belong in `run_in_background: true` Bash tasks,
+  one per binary or per slice, writing to `<SCRATCH>` files, with a heartbeat
+  before launching. Wait for the notifications; do not run them back to back
+  in the foreground.
+- **When a fix corrects previously wrong output, compare against ground
+  truth, not the old output.** "New equals old" proves nothing, and "new
+  differs from old" is expected. Compare with the raster (or gs, or the
+  specification) instead; a diff against the old output only shows what
+  moved.
+- **Use fresh scratch subdirectories, not `rm` globs.** Make
+  `<SCRATCH>/sweep-<N>-<tag>/` per run with `mkdir -p` and write there. Do
+  not clear a shared scratch directory with `rm <dir>/*` or `rm -rf <dir>/*`:
+  it deletes other runs' files, and an unset or wrong variable turns the glob
+  into something far worse. Remove only a directory you created (`rm -rf
+  "<exact dir>"`) once the run is finished.
+- **Step 5.5's `rebase origin/main` is a no-op when the branch is already up
+  to date.** Do not treat "Current branch is up to date" as a problem.
+- **Run the gate in the foreground when the last one took under ~60 s**
+  (a doc-only or tiny change); the background-and-wait routine costs more than
+  it saves there. Anything longer, or unknown, stays in the background.

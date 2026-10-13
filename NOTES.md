@@ -1,7 +1,12 @@
 # NOTES.md — stage summaries
 
-Newest first. Per `AGENTS.md`, each stage ends with a summary here: what
+Newest first. Per `AGENTS.md`, each stage ends with a summary: what
 was built, tradeoffs made, what's explicitly deferred.
+
+**New entries no longer go in this file.** Since 2026-10-13 (#273) each
+issue's notes live in `notes/<issue>-<slug>.md`, so concurrent PRs don't
+conflict here; `notes/` holds the entries newer than this file, and this
+file keeps everything written before that, unchanged. See `notes/README.md`.
 
 ## Dry media design: reference board and drykit writeup (issue #233, 2026-10-13)
 

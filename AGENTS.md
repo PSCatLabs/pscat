@@ -10,12 +10,12 @@ first. This file covers *how* to work, not *what* to build.
 - If this is a fresh session and `INIT.md`'s Stage 1 hasn't been completed
   yet (check for an architecture writeup / commit history), start there.
 - If Stage 1 is done, check for a stage-summary (in commit messages, a
-  `NOTES.md`, or similar — use your judgment on where past summaries were
+  `NOTES.md`, `notes/`, or similar — use your judgment on where past summaries were
   left) before continuing, so you're not re-deciding settled questions.
 - Stages 5 and beyond are planned in `ROADMAP.md`, including which model
   tier each task is suited to and an escalation rule for tasks that turn
   out to touch the object model or execution machine. Follow it unless
-  you have a good reason not to — and record that reason in `NOTES.md`.
+  you have a good reason not to — and record that reason in a `notes/` fragment.
 
 ## Toolchain & commands
 
@@ -84,7 +84,10 @@ predates it.
 - `ARCHITECTURE.md` — the design writeup (object model, execution model,
   rendering-crate leanings, deliberate deferrals). Read before changing
   anything structural.
-- `NOTES.md` — per-stage summaries, newest first.
+- `NOTES.md` — per-stage summaries, newest first, frozen as of 2026-10-13.
+- `notes/` — newer entries, one file per issue (`notes/<issue>-<slug>.md`,
+  format in `notes/README.md`). Write new notes here, not in `NOTES.md`, so
+  concurrent PRs never conflict.
 - `src/lexer.rs` — tokenizer; unit tests in-module.
 - `src/object.rs` — `Object`/`Value`/`Dict`/`Num`.
 - `src/interp.rs` — the execution machine (operand/dict/exec stacks),

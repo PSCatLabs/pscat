@@ -390,7 +390,7 @@ silently lowering either's ceiling).
 Written for whichever model
 picks the project up next — read this after `CLAUDE.md` and before
 touching code. `ROADMAP.md` has the task list with model routing;
-`NOTES.md` has per-stage histories; this file is the *orientation*.
+`NOTES.md` and `notes/` have the per-stage histories (`notes/` is newer); this file is the *orientation*.
 
 ## Where things stand
 
@@ -551,7 +551,11 @@ renders eight examples in both and compares block-downsampled output).
   not error, wherever the PLRM allows latitude — but record every
   such choice in the module docs and NOTES.md.
 - Commit per coherent chunk with stage-prefixed messages; update
-  README/NOTES/ROADMAP in the same or a closing commit.
+  README/ROADMAP and your notes fragment in the same or a closing commit.
+- **Notes go in `notes/<issue>-<slug>.md`, one file per issue, not in
+  `NOTES.md`** (#273): concurrent PRs each prepending to `NOTES.md`
+  conflicted constantly. `NOTES.md` is frozen history up to 2026-10-13;
+  `notes/README.md` has the format and how to list fragments newest first.
 
 ## Next work, in recommended order
 
