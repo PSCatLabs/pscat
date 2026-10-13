@@ -84,11 +84,11 @@ and one at 60°, each rendered alone, compared over their overlap at
 | Catch | phi between the two bands | control (second band, different seed) |
 |---|---|---|
 | `pjcatch` (isotropic) | 1.00 at every seed | 0.05 to 0.33 |
-| `dkcatch`, `/Streak 1.8` | 0.37 to 0.62 | -0.10 to 0.24 |
-| `dkcatch`, `/Streak 1.25` | 0.40 to 0.61 | (same controls) |
+| `dkcatch`, `/Streak 1.8` | 0.37 to 0.60 (mean 0.48) | -0.09 to 0.24 (mean 0.03) |
+| `dkcatch`, `/Streak 1.25` | 0.40 to 0.60 (mean 0.51) | -0.10 to 0.21 (mean 0.03) |
 
 Orientation, not stretch, lowers the correlation: even 1.25 barely moves it.
-The tooth is still clearly shared (about 0.5 against about 0.05), but #182's
+The tooth is still clearly shared (a mean of about 0.5 against about 0.03), but #182's
 bar of phi > 0.5 at *every* seed is too strict for oriented catches. #234's
 "shared surface" acceptance should be: mean phi over five seeds ≥ 0.4, and at
 least 0.25 above the control's mean (open question Q4).
@@ -366,15 +366,15 @@ and a gallery ticket, as the epic already plans.
 `prototypes/surface_cost.ps` renders a full 720 × 480 board: 12 lines of
 handscript skeletons, about 600 glyphs, 1980 glyph strokes, each with a body
 and a landing dab. Times are CPU (`user`) on the release pscat and gs
-10.07.1. Wall time was unreliable under the machine's load average of about
-8:
+10.07.1, as the range over two runs. Wall time was unreliable under the
+machine's load average of about 8:
 
 | Case | Catches | Cells visited | pscat | gs |
 |---|---|---|---|---|
 | plain strokes (no catch) | 0 | 0 | 0.03s | 0.04s |
 | `pjcatch`, `/Weave 0.7` | 1984 | 388k | 4.2s | 2.3s |
-| oriented `dqcatch`, `/Weave 0.7` | 1984 | 388k | 8.5s | 4.0s |
-| oriented, `/Weave 0.4`, thin pen, 2 levels | 3928 | 1.59M | 28.1s | 15.1s |
+| oriented `dqcatch`, `/Weave 0.7` | 1984 | 388k | 8.5s | 4.0–4.9s |
+| oriented, `/Weave 0.4`, thin pen, 2 levels | 3928 | 1.59M | 28.1–35.7s | 15.1–16.7s |
 
 That works out to about 11 µs per cell for the isotropic catch and about
 22 µs per cell oriented. The difference is the rotated-ellipse arithmetic.
@@ -384,7 +384,7 @@ last row is 553k cells, about 2.9× fewer. That suggests about 10s in pscat
 and 5s in gs for the core on a full board.
 
 **That figure is an estimate.** The swept-band catch hasn't been built. The
-measured bounding-box cost (28s) is already at the board budget before any
+measured bounding-box cost (28–36s) is already at the board budget before any
 board dressing, and ghost text is roughly a second board of glyphs at low
 strength. So part of D1's acceptance is to build the swept-band catch,
 measure it on this board, and report the result against 6.2 before D2
@@ -403,7 +403,7 @@ Two things scale beyond that:
 
 | Piece | pscat (release, 2x) | gs | Basis |
 |---|---|---|---|
-| full chalkboard (#238) | ≤ 30s | ≤ 30s | measured 28s with bbox catches; ~10s estimated with swept band; board dressing and ghost text on top |
+| full chalkboard (#238) | ≤ 30s | ≤ 30s | measured 28–36s with bbox catches; ~10s estimated with swept band; board dressing and ghost text on top |
 | full portrait (#242) | ≤ 60s | ≤ 60s | ~3000 hatch strokes × 2 levels, plus smudges; about 2× the board in cells |
 | child's drawing (#240) | ≤ 20s | ≤ 20s | fewer, larger strokes at coarser `/Weave` (0.9) |
 | each specimen in `examples/` | ≤ 10s | ≤ 10s | specimens are smaller than pieces |
@@ -437,7 +437,8 @@ They read paintkit's internals and change nothing in it.
   `chalk_compare.jpg` compares all four with two real chalk crops.
   - The plain stroke reads as a font.
   - `pjcatch` reads as a perforated screen.
-  - Oriented knuckles read as scratchy streaks along each stroke.
+  - Oriented knuckles read as mostly solid strokes, with fine streaks
+    along the travel direction and ragged edges.
   - Thin pen, fine tooth and two levels comes closest. It is still too
     bright, too even and too clean against C1 and C3.
 - **`dqcatch.ps`** is the oriented emitter (2.1), as a stand-alone file.

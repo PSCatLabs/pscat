@@ -18,9 +18,10 @@
     /pjp userdict /pjP get def
     % direction in canvas space
     dqang cos dqang sin dtransform userdict /pjCTM get idtransform
-    2 copy dup mul exch dup mul add sqrt dup 0 eq { pop 1 } if
-    3 1 roll exch 2 index div 3 1 roll exch div exch
     /dquy exch def /dqux exch def
+    /dqlen dqux dup mul dquy dup mul add sqrt def
+    dqlen 0 eq { /dqlen 1 def } if
+    /dqux dqux dqlen div def /dquy dquy dqlen div def
     % extra cells for the stretched axis
     /dqextra dqel 1 sub 0.8 mul 1.375 mul ceiling cvi 1 add def
     /pji0 pji0 dqextra sub def /pji1 pji1 dqextra add def
