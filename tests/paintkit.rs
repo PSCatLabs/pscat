@@ -9119,7 +9119,7 @@ fn fnv1a(data: &[u8]) -> u64 {
     })
 }
 
-const LOAD_PRESETS: [(&str, &str); 2] = [
+const LOAD_PRESETS: [(&str, &str); 3] = [
     (
         "pkbroad",
         "/Width 50 /Charge 1 /Depletion 0 /Edge 0 /ColorJitter 0",
@@ -9127,6 +9127,13 @@ const LOAD_PRESETS: [(&str, &str); 2] = [
     (
         "pktrowel",
         "/Width 50 /Coverage 1 /Scrape 0 /EdgeBuildup 0 /Jitter 0 /ColorJitter 0",
+    ),
+    // Slice L4 (#224). Dense and parallel, so the fan reads as a solid
+    // band: 60 bristles 0.75pt apart, each 2pt wide, none dropped.
+    (
+        "pkfan",
+        "/Width 50 /Spread 1 /Splay 0 /Bristles 60 /BristleWidth 2 /WidthJitter 0 \
+         /Load 1 /Dropout 0 /Ragged 0 /Flick 0 /Jitter 0 /ColorJitter 0",
     ),
 ];
 
@@ -10136,4 +10143,65 @@ fn wet_frame_slots_do_not_change_pkwet() {
         let got = fnv1a(it.gfx().pixmap.data());
         assert_eq!(got, pinned, "{name} moved: {got:#x}");
     }
+}
+
+// --- loaded colours on pkfan (issue #183, slice L4 #224) --------------
+//
+// `pkfan` takes `/Colors`, `/ColorMix` and `/Light` too, with `pfub` as the
+// head position. Its bristles run over every subpath, so the colour is set
+// per run (`pfrun`) and per pressed ray (`pfray`), from the bristle's
+// stored `/ColorJitter` draw. Most of the L2 tests above already run on it
+// through `LOAD_PRESETS`; these are the ones only the fan needs.
+
+/// Scenarios that use none of the new keys, each leaning on a part of the
+/// fan the slice touched. Pinned against hashes taken from `origin/main`
+/// (f1eae7d) before the slice.
+#[test]
+fn fan_loading_unset_is_byte_identical() {
+    let scenarios: [(&str, &str); 9] = [
+        (LTR, "/Width 50"),
+        (RTL, "/Width 50 /ColorJitter 0.4"),
+        (
+            "newpath 50 60 moveto 350 60 lineto 350 140 moveto 50 140 lineto",
+            "/Width 30",
+        ),
+        ("newpath 200 100 moveto", "/Width 60"),
+        (
+            "newpath 50 60 moveto 350 60 lineto 200 150 moveto",
+            "/Width 40 /Bristles 12",
+        ),
+        (
+            "newpath 50 40 moveto 150 180 250 20 350 160 curveto",
+            "/Width 36 /ColorJitter 0.2",
+        ),
+        (LTR, "/Width 50 /Load 0.3 /Dropout 0.9 /Bristles 30"),
+        (
+            LTR,
+            "/Width 50 /Splay 1 /Ragged 1 /Flick 1 /Jitter 1.5 /WidthJitter 1",
+        ),
+        (
+            "newpath 50 100 moveto 100 150 150 50 200 100 curveto 250 150 300 50 350 100 curveto",
+            "/Width 40 /Bristles 40 /Load 0.6 /Dropout 0.3",
+        ),
+    ];
+    // Taken from the pre-slice library (origin/main at f1eae7d).
+    let pinned: [u64; 9] = [
+        0xf7ef80bc0b23ca71,
+        0x7cdfaa0c31a7c794,
+        0x830531bee9375807,
+        0x7fc96f52f0a5684b,
+        0x94e4a48f1eb7c069,
+        0xdae8c82e0bb24eb6,
+        0x31c2b8442b2c8929,
+        0x339352382952a962,
+        0xe1f458abc251262f,
+    ];
+    let got: Vec<u64> = scenarios
+        .iter()
+        .map(|(path, opts)| {
+            let it = loaded_mark("pkfan", path, "0.6 0.3 0.2 setrgbcolor", opts);
+            fnv1a(it.gfx().pixmap.data())
+        })
+        .collect();
+    assert_eq!(got, pinned, "an unset-keys render moved: {got:#x?}");
 }
