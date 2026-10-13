@@ -2921,6 +2921,42 @@
 %   (/Light with /Colors) mustpass
 %%EndSelfTest
 
+%%SelfTest: pkfan-touch-guards
+%   % The no-canvas cases first: nothing in this block has set a surface yet.
+%   { newpath 0 0 moveto 50 0 lineto << /Touch 0.5 >> pkfan }
+%   /pkfan-touch-needs-a-canvas
+%   (/Touch 0.5 before any pkcanvas) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Touch 1 >> pkfan }
+%   /pkfan-touch-needs-a-canvas
+%   (/Touch 1 before any pkcanvas: any /Touch needs a canvas) mustguard
+%
+%   << >> pkcanvas
+%   { newpath 0 0 moveto 50 0 lineto << /Touch 1.5 >> pkfan }
+%   /pkfan-touch-must-be-0-to-1
+%   (/Touch 1.5) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Touch { } >> pkfan }
+%   /pkfan-touch-must-not-be-a-procedure
+%   (/Touch { }) mustguard
+%
+%   % A coarse /Pitch and two bristles keep the deposit budget out of the way.
+%   { newpath 0 0 moveto 100000 0 lineto
+%     << /Touch 0.5 /Pitch 1000 /Bristles 2 >> pkfan }
+%   /pkfan-touch-area-exceeds-safety-limit
+%   (a 1e5pt stroke at /Touch 0.5) mustguard
+%
+%   { gsave newpath 0 0 moveto 50 0 lineto << /Touch 0.5 >> pkfan grestore }
+%   (/Touch 0.5 with a canvas) mustpass
+%
+%   { gsave newpath 0 0 moveto 50 0 lineto
+%     << /Touch 0.5 /Colors [ [ 1 0 0 ] [ 0 0 1 ] ] /Light 90 >> pkfan grestore }
+%   (a touched stroke with a colour load) mustpass
+%
+%   { gsave newpath 0 0 moveto << /Touch 0 >> pkfan grestore }
+%   (/Touch 0 on a pressed point) mustpass
+%%EndSelfTest
+
 % @kind: Procedure
 % @summary: A fan brush: a bundle of bristles that leaves a flattened ferrule and splays apart as the stroke travels, for foliage, evergreen branches, grasses and soft feathering. Distinct from pkdry, whose bristles stay parallel -- /Splay is the whole difference. Many thin bristles at high Load give a soft feathered mark; fewer at low Load give separated bristle marks. A single-point subpath is a pressed fan, its bristles radiating through a 140-degree arc opening toward +y; rotate the space around it to aim it elsewhere. Deterministic under the caller's own srand; bounded by Bristles * stops.
 % @example: newpath 40 120 moveto 100 150 160 160 210 145 curveto << /Width 60 /Splay 0.6 >> pkfan
@@ -2940,6 +2976,7 @@
 % @param: /Colors [array of rgb arrays] 1 to 8 loaded colors, listed from the fan's left edge (looking along the travel) to its right, evenly spaced across the bristles; when set, the current color is not used for the mark, though /ColorJitter still varies it; a pressed fan paints them across its arc, first color on the left of its axis (default unset)
 % @param: /ColorMix [0..1] with /Colors, how far neighbouring colors have blended on the brush: 0 is hard bands, 1 a smooth gradient (default 0.3)
 % @param: /Light [degrees] with /Colors, the direction the light comes from, counterclockwise from +x in user space: each subpath puts the first color on the side facing the light, whichever way it travels; a pressed fan is never flipped (default unset: the first color stays on the left of the travel)
+% @param: /Touch [0..1] How hard the fan presses into the shared canvas set by pkcanvas, which must be called first: below 1 the bristles land only on the weave's knuckles that stand proud enough for that pressure to reach, lower is lighter and 0 deposits nothing; 1 is full contact, identical to leaving it unset. Composes with /Load and /Dropout and takes no rand draws (default unset)
 /pkfan {
     /pfopts exch def
     /pfWidth pfopts /Width 30 pkgetdef def
@@ -2981,6 +3018,16 @@
     /pfColorJitter pfopts /ColorJitter 0.06 pkgetdef def
     /pfColorJitter load xcheck { pkfan-colorjitter-must-not-be-a-procedure } if
     pfColorJitter 0 lt pfColorJitter 1 gt or { pkfan-colorjitter-must-be-0-to-1 } if
+    % /Touch (issue #225, CANVAS_SURFACE.md 2.2): any /Touch, even 1, needs
+    % a canvas. Only a value below 1 builds a catch, so unset and 1 take
+    % exactly the path they took before /Touch existed.
+    /pfTouch pfopts /Touch 1 pkgetdef def
+    /pfTouch load xcheck { pkfan-touch-must-not-be-a-procedure } if
+    pfTouch 0 lt pfTouch 1 gt or { pkfan-touch-must-be-0-to-1 } if
+    pfopts /Touch known {
+        userdict /pjCTM known not { pkfan-touch-needs-a-canvas } if
+    } if
+    /pfTouched pfTouch 1 lt def
     % The load: null when /Colors is unset, so every new branch below is
     % `pfColorRec null ne` and an unset key never reaches it.
     pfopts (pkfan) puparse /pfColorRec exch def
@@ -3012,8 +3059,31 @@
     /pfraw pfn array def
     /pfci 0 def
     pfPitch { 6 array astore pfraw pfci 3 -1 roll put /pfci pfci 1 add def } walkpath
+    % The catch's box (CANVAS_SURFACE.md 3.2): every stop grown by the
+    % farthest any emitter puts paint from it, checked against the cell
+    % budget before anything is drawn. With half = Width/2 * Spread:
+    %   runs   a bristle's centerline sits at |ub| * half * pfopen(t) from
+    %          the stop (|ub| < 1, pfopen <= 1) plus pkjit's |Jitter|;
+    %   rays   a pressed fan's ray is at most 1.15 * half long, from the
+    %          stop, at /Ragged 0 (Ragged only shortens it);
+    % and either way each mark is a pkribbon of half-width at most
+    % BristleWidth * (1 + WidthJitter) / 2 (pkribbon is called without a
+    % /Jitter, its caps are /pointed, and it resamples a polyline, so
+    % nothing sits farther than that half-width from a vertex). The larger
+    % of the two reaches is used for every stop.
+    pfTouched pfn 0 gt and {
+        /pfreach
+            pfWidth 0.5 mul pfSpread mul dup pfJitter abs add
+            exch 1.15 mul 2 copy lt { exch } if pop
+            pfrwbase 1 pfWidthJitter add mul 0.5 mul add
+        def
+        [ pfraw { pop pfreach } pjstopbox ] /pfTouchBox exch def
+        pfTouchBox aload pop pjcells pjbudget gt
+            { pkfan-touch-area-exceeds-safety-limit } if
+    } if
     pfn 0 gt {
         gsave
+        pfTouched { pfTouchBox aload pop pfTouch pjcatch } if
         % One flip per stop, so a whole subpath mirrors together. No draws.
         pfColorRec null ne {
             pfColorRec 2 get {
@@ -3436,6 +3506,42 @@
 %   (/Light with /Colors) mustpass
 %%EndSelfTest
 
+%%SelfTest: pkbroad-touch-guards
+%   % The no-canvas cases first: nothing in this block has set a surface yet.
+%   { newpath 0 0 moveto 50 0 lineto << /Touch 0.5 >> pkbroad }
+%   /pkbroad-touch-needs-a-canvas
+%   (/Touch 0.5 before any pkcanvas) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Touch 1 >> pkbroad }
+%   /pkbroad-touch-needs-a-canvas
+%   (/Touch 1 before any pkcanvas: any /Touch needs a canvas) mustguard
+%
+%   << >> pkcanvas
+%   { newpath 0 0 moveto 50 0 lineto << /Touch 1.5 >> pkbroad }
+%   /pkbroad-touch-must-be-0-to-1
+%   (/Touch 1.5) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Touch { } >> pkbroad }
+%   /pkbroad-touch-must-not-be-a-procedure
+%   (/Touch { }) mustguard
+%
+%   % A coarse /Pitch and one striation keep the deposit budget out of the way.
+%   { newpath 0 0 moveto 100000 0 lineto
+%     << /Touch 0.5 /Pitch 1000 /Grain 1 >> pkbroad }
+%   /pkbroad-touch-area-exceeds-safety-limit
+%   (a 1e5pt stroke at /Touch 0.5) mustguard
+%
+%   { gsave newpath 0 0 moveto 50 0 lineto << /Touch 0.5 >> pkbroad grestore }
+%   (/Touch 0.5 with a canvas) mustpass
+%
+%   { gsave newpath 0 0 moveto 50 0 lineto
+%     << /Touch 0.5 /Colors [ [ 1 0 0 ] [ 0 0 1 ] ] /Light 90 >> pkbroad grestore }
+%   (a touched stroke with a colour load) mustpass
+%
+%   { gsave newpath 0 0 moveto << /Touch 0 >> pkbroad grestore }
+%   (/Touch 0 on a pressed point) mustpass
+%%EndSelfTest
+
 % @kind: Procedure
 % @summary: A broad flat brush for block-ins, sky and water bands, reflections and broad masses. What separates it from pktrowel's blade and pknib's pmn is that a brush runs out of paint: the band is divided into striations that drop out one by one as the charge falls along the stroke, so the mark fades from solid to broken along its own direction. Square ends, and parallel edges that are crisp at /Edge 0 -- the default /Edge 0.15 roughens them by about a pixel. Deterministic under the caller's own srand; bounded by Grain * stops.
 % @example: newpath 40 120 moveto 300 130 lineto << /Width 46 /Charge 0.95 /Depletion 0.6 >> pkbroad
@@ -3450,6 +3556,7 @@
 % @param: /Colors [array of rgb arrays] 1 to 8 loaded colors, listed from the brush's left edge (looking along the travel) to its right, evenly spaced across the band; when set, the current color is not used for the mark, though /ColorJitter still varies it (default unset)
 % @param: /ColorMix [0..1] with /Colors, how far neighbouring colors have blended on the brush: 0 is hard bands, 1 a smooth gradient (default 0.3)
 % @param: /Light [degrees] with /Colors, the direction the light comes from, counterclockwise from +x in user space: each subpath puts the first color on the side facing the light, whichever way it travels (default unset: the first color stays on the left of the travel)
+% @param: /Touch [0..1] How hard the brush presses into the shared canvas set by pkcanvas, which must be called first: below 1 the band lands only on the weave's knuckles that stand proud enough for that pressure to reach, lower is lighter and 0 deposits nothing; 1 is full contact, identical to leaving it unset. Composes with /Charge and /Depletion and takes no rand draws (default unset)
 /pkbroad {
     /pmopts exch def
     /pmWidth pmopts /Width 40 pkgetdef def
@@ -3478,6 +3585,16 @@
     /pmColorJitter pmopts /ColorJitter 0.05 pkgetdef def
     /pmColorJitter load xcheck { pkbroad-colorjitter-must-not-be-a-procedure } if
     pmColorJitter 0 lt pmColorJitter 1 gt or { pkbroad-colorjitter-must-be-0-to-1 } if
+    % /Touch (issue #225, CANVAS_SURFACE.md 2.2): any /Touch, even 1, needs
+    % a canvas. Only a value below 1 builds a catch, so unset and 1 take
+    % exactly the path they took before /Touch existed.
+    /pmTouch pmopts /Touch 1 pkgetdef def
+    /pmTouch load xcheck { pkbroad-touch-must-not-be-a-procedure } if
+    pmTouch 0 lt pmTouch 1 gt or { pkbroad-touch-must-be-0-to-1 } if
+    pmopts /Touch known {
+        userdict /pjCTM known not { pkbroad-touch-needs-a-canvas } if
+    } if
+    /pmTouched pmTouch 1 lt def
     % The load: null when /Colors is unset, so every new branch below is
     % `pmColorRec null ne` and an unset key never reaches it.
     pmopts (pkbroad) puparse /pmColorRec exch def
@@ -3490,8 +3607,28 @@
     /pmraw pmn array def
     /pmci 0 def
     pmPitch { 6 array astore pmraw pmci 3 -1 roll put /pmci pmci 1 add def } walkpath
+    % The catch's box (CANVAS_SURFACE.md 3.2): every stop grown by the
+    % farthest any emitter puts paint from it, checked against the cell
+    % budget before anything is drawn. pmpt puts every boundary point at
+    % |u| across the band from its stop, whatever /Angle is, so:
+    %   strips   |u| <= Width/2 + Edge * 0.06*Width (the taper only pulls
+    %            a boundary toward its striation's centre, and the lane
+    %            overlap is clamped to the band);
+    %   stamps   a single-stop run or a bare moveto is a rectangle whose
+    %            corners are those band points moved along the travel
+    %            (turned by /Angle) by back or fwd, each at most /Pitch
+    %            (pmgap is the next stop's gap, or Pitch/2).
+    % The larger, a stamp's Width/2 + Pitch, is used for every stop, with
+    % the strip's edge roughness added since the two are never combined.
+    pmTouched pmn 0 gt and {
+        /pmreach pmWidth 0.5 mul pmWidth 0.06 mul pmEdge mul add pmPitch add def
+        [ pmraw { pop pmreach } pjstopbox ] /pmTouchBox exch def
+        pmTouchBox aload pop pjcells pjbudget gt
+            { pkbroad-touch-area-exceeds-safety-limit } if
+    } if
     pmn 0 gt {
         gsave
+        pmTouched { pmTouchBox aload pop pmTouch pjcatch } if
         /pmbase [ currentrgbcolor ] def
         /pmhalf pmWidth 0.5 mul def
         /pmedge pmWidth 0.06 mul def
@@ -3670,11 +3807,12 @@
 % the line deposits wherever charge(t) still exceeds the tooth beneath
 % it. Smooth, so the mark breaks into runs and gaps that lengthen as the
 % charge falls, rather than into per-stop speckle. Absolute rather than
-% per-stroke spacing because break-up scale is a property of the paper
-% and the brush, not of how long the stroke happens to be: knots spread
+% per-stroke spacing because break-up scale is a property of the tip on
+% the paper and the brush, not of how long the stroke happens to be: knots spread
 % over each subpath would give a 300pt trunk 19pt teeth and a 20pt twig
 % 1.2pt teeth -- the whole drawing self-similar, and the twigs' gaps
-% sub-pixel.
+% sub-pixel. The tooth is the tip's, drawn fresh for every subpath. Break-up
+% that two strokes share, the canvas itself, is /Touch (see pkcanvas).
 %
 % Determinism: the caller's own `N srand`. Because the pool is fixed and
 % emission consumes no randomness at all, the draw count per subpath is
@@ -3990,6 +4128,38 @@
     pqemit
 } def
 
+%%SelfTest: pkliner-touch-guards
+%   % The no-canvas cases first: nothing in this block has set a surface yet.
+%   { newpath 0 0 moveto 50 0 lineto << /Touch 0.5 >> pkliner }
+%   /pkliner-touch-needs-a-canvas
+%   (/Touch 0.5 before any pkcanvas) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Touch 1 >> pkliner }
+%   /pkliner-touch-needs-a-canvas
+%   (/Touch 1 before any pkcanvas: any /Touch needs a canvas) mustguard
+%
+%   << >> pkcanvas
+%   { newpath 0 0 moveto 50 0 lineto << /Touch 1.5 >> pkliner }
+%   /pkliner-touch-must-be-0-to-1
+%   (/Touch 1.5) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Touch { } >> pkliner }
+%   /pkliner-touch-must-not-be-a-procedure
+%   (/Touch { }) mustguard
+%
+%   % A coarse /Pitch keeps the deposit budget out of the way.
+%   { newpath 0 0 moveto 100000 0 lineto
+%     << /Touch 0.5 /Pitch 1000 >> pkliner }
+%   /pkliner-touch-area-exceeds-safety-limit
+%   (a 1e5pt stroke at /Touch 0.5) mustguard
+%
+%   { gsave newpath 0 0 moveto 50 0 lineto << /Touch 0.5 >> pkliner grestore }
+%   (/Touch 0.5 with a canvas) mustpass
+%
+%   { gsave newpath 0 0 moveto << /Touch 0 >> pkliner grestore }
+%   (/Touch 0 on a pressed point) mustpass
+%%EndSelfTest
+
 % @kind: Procedure
 % @summary: A liner/detail brush: the long soft tip that draws branches, trunks, grass stems and other fine marks. The complement of pknib's rigid nib -- a flexible loaded brush, so the line wanders off the drawn centerline (no other preset here leaves it), whips from full width to a point, and breaks into shortening dashes as the paint runs out. A single-point subpath presses a detail dot. Deterministic under the caller's own srand, with a fixed number of draws per subpath.
 % @example: newpath 60 40 moveto 92 150 118 214 150 300 curveto << /Width 3 /Taper 0.9 /Waver 1.2 >> pkliner
@@ -4000,6 +4170,7 @@
 % @param: /Waver [multiple of /Width] Lateral wander of the loaded tip, in multiples of Width, 0..10; grows toward the tip; 0 is a mechanically straight line, and past about 2 the mark reads as near the caller's path rather than on it (default 0.8)
 % @param: /Pitch [points] walkpath sampling pitch for the centerline pass; must be > 0 (default Width*0.8, capped at 3 and floored at 0.5)
 % @param: /ColorJitter [0..1] one small tint shift per subpath -- one dip of the brush is one tint (default 0.05)
+% @param: /Touch [0..1] How hard the tip presses into the shared canvas set by pkcanvas, which must be called first: below 1 the line lands only on the weave's knuckles that stand proud enough for that pressure to reach, lower is lighter and 0 deposits nothing; 1 is full contact, identical to leaving it unset. Composes with /Charge and /Depletion and takes no rand draws (default unset)
 /pkliner {
     /pqopts exch def
     /pqWidth pqopts /Width 2.4 pkgetdef def
@@ -4035,6 +4206,16 @@
         { pkliner-colorjitter-must-not-be-a-procedure } if
     pqColorJitter 0 lt pqColorJitter 1 gt or
         { pkliner-colorjitter-must-be-0-to-1 } if
+    % /Touch (issue #225, CANVAS_SURFACE.md 2.2): any /Touch, even 1, needs
+    % a canvas. Only a value below 1 builds a catch, so unset and 1 take
+    % exactly the path they took before /Touch existed.
+    /pqTouch pqopts /Touch 1 pkgetdef def
+    /pqTouch load xcheck { pkliner-touch-must-not-be-a-procedure } if
+    pqTouch 0 lt pqTouch 1 gt or { pkliner-touch-must-be-0-to-1 } if
+    pqopts /Touch known {
+        userdict /pjCTM known not { pkliner-touch-needs-a-canvas } if
+    } if
+    /pqTouched pqTouch 1 lt def
 
     % Two walkpath passes over the centerline -- count (checking the
     % budget on every stop, before any drawing starts), then collect --
@@ -4054,14 +4235,35 @@
         /pqci pqci 1 add def
     } walkpath
 
+    % The catch's box (CANVAS_SURFACE.md 3.2): every stop grown by the
+    % farthest any emitter puts paint from it, checked against the cell
+    % budget before anything is drawn. The displaced centerline does not
+    % exist yet, so the bound is a constant:
+    %   ribbon   the tip wanders at most Waver*Width from its stop (the
+    %            three waver sines' weights sum to 1 and the amplitude
+    %            grows from 0.35 to 1 of Waver*Width), and the ribbon's
+    %            half-width is at most Width/2 (taper only narrows it);
+    %   dots     a pressed dot (a degenerate stop) is not displaced and is
+    %            Width/2 in radius, so it takes the smaller reach;
+    %   stamps   the no-extent fallback stays within Width/2 of the
+    %            displaced centerline, so inside the ribbon's reach.
+    pqTouched pqn 0 gt and {
+        /pqreach pqWidth 0.5 mul pqWaver pqWidth mul add def
+        [ pqraw { 5 get 3 and 3 eq { pqWidth 0.5 mul } { pqreach } ifelse }
+          pjstopbox ] /pqTouchBox exch def
+        pqTouchBox aload pop pjcells pjbudget gt
+            { pkliner-touch-area-exceeds-safety-limit } if
+    } if
+
     pqn 0 gt {
         gsave
+        pqTouched { pqTouchBox aload pop pqTouch pjcatch } if
         /pqbase [ currentrgbcolor ] def
         /pqcx pqn array def
         /pqcy pqn array def
         /pqarc pqn array def
         /pqKnots 64 def
-        % Floored: the tooth is a property of the paper, and below half a
+        % Floored: the tooth is a property of the tip on the paper, and below half a
         % point there is nothing left for a tip to catch on. It also
         % keeps the knot coordinate pqaff hands to `cvi` bounded by twice
         % the path length (itself bounded by the deposit budget) rather
@@ -7668,7 +7870,7 @@ systemdict /setalpha known /pwhasalpha exch def
 %%EndSelfTest
 %
 % @kind: Procedure
-% @summary: Sets up the shared canvas surface: a seeded weave of raised knuckles in the current coordinate system, which marks from presets that accept /Touch (pktrowel and pkdry so far, issue #182) catch on at /Touch below 1, so light strokes break up on the same canvas rather than each on its own. Call it once, early, in the space the piece is painted in; calling it again replaces the surface. Paints nothing and takes no rand draws, so adding it to a finished piece moves no mark.
+% @summary: Sets up the shared canvas surface: a seeded weave of raised knuckles in the current coordinate system, which marks from presets that accept /Touch (pktrowel, pkdry, pkfan, pkbroad and pkliner, issue #182) catch on at /Touch below 1, so light strokes break up on the same canvas rather than each on its own. Call it once, early, in the space the piece is painted in; calling it again replaces the surface. Paints nothing and takes no rand draws, so adding it to a finished piece moves no mark.
 % @example: << /Seed 3 /Weave 2.5 >> pkcanvas
 % @param: /Seed [integer] Integer seed for this surface alone, leaving the caller's rand stream untouched (default 1, a constant rather than a draw from the caller's stream)
 % @param: /Weave [points] Thread spacing of the weave in canvas-space points, one knuckle per Weave x Weave cell; must be > 0 (default 2.5)
