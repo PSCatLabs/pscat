@@ -293,9 +293,10 @@ for follow-ups, not fixed here:
   type. Integer j keeps its exact `chance` draws (every seeded integer
   piece renders byte-identically), and real j scales one `frnd` draw.
   The piece's own `lkj` is now redundant but left as is.
-- `pkspray` clouds need a speck of about 1pt. At 2–3pt the particles
-  never fuse, and a cloud or mist reads as static. Worth a line in
-  pkspray's guidance.
+- `pkspray` clouds need a speck of about 1pt. Resolved in #178: the
+  header, `@summary`, `/Speck` @param, the spray specimen and the psart
+  skill now state the regime (speck 1–1.2 with a small nozzle and high
+  density fuses; 2–3 gives lumpy bars or spatter).
 - `pkwet`'s `/Under` must be the colour actually behind the mark. On
   the far forest, declaring plain mist when the half-faded range sat
   behind it left a pale rim. This is already documented, but easy to
