@@ -174,6 +174,14 @@ Decisions:
 
 Deferred: validation of the slimmed skill by a Haiku run of #178.
 
+Follow-up (#199, from that Haiku run, PR #198): step 8.12 now has the
+exact CI-wait recipe (`gh pr checks <PR#> --watch --fail-fast > log 2>&1;
+echo "exit=$?" >> log`, as a background Bash task; CI takes 11-17 min), a
+pending-CI hand-back rule that keeps the lock and `in-review`, step 4.4
+as a hard gate with a `Plan review` line in the final report, and `/tmp`
+as the single scratch location. Detail is in `references/pitfalls.md`
+"CI wait". The first run to use this recipe was #199's own.
+
 ## `lib/paintkit.ps`: brush motion generators (issue #184, 2026-10-09)
 
 Child of epic #112. paintkit models brush *heads*; this adds the other

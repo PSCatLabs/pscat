@@ -11,15 +11,18 @@ root) before running the step's commands.
 
 **Rules for every step:**
 - Replace `<N>`, `<PR#>`, `<PR URL>`, `<R>` with real values. Never type the angle brackets.
-- Every Bash call is a fresh shell. Variables do not survive. Start each
-  Bash call that needs them with `WORKTREE_DIR=<absolute path>; BRANCH=<branch>`.
+- Every Bash call is a fresh shell, so variables do not survive. Start each Bash call
+  that needs them with `WORKTREE_DIR=<absolute path>; BRANCH=<branch>`.
 - After step 3, work only inside `$WORKTREE_DIR`. Never edit the main checkout.
 - **Heartbeat** — run this when a step says "heartbeat", and before any long command:
   ```sh
   H="$(git rev-parse --path-format=absolute --git-common-dir)/work-issue-lock-<N>/heartbeat"; date +%s > "$H.tmp" && mv "$H.tmp" "$H"
   ```
-  If it fails with "No such file or directory": stop. Do not `mkdir`
-  the lock dir. Re-run the claim (step 1) and only continue if it says `claimed`.
+  If it fails with "No such file or directory": stop, never `mkdir` the lock dir.
+  Re-run the claim (step 1); continue only if it says `claimed`.
+- **Scratch files** go in `/tmp`, named `<kind>-<N>.*` (`gate-`, `ci-`, `codex-review-`,
+  `issue-<N>-summary.md`). This overrides any harness default (scratchpad dir); use no other location.
+- Never end a run with CI pending unless step 8.12's "pending CI" rule applies.
 - Read `.claude/skills/work-issue/references/pitfalls.md` once now. (`references/rationale.md`
   explains why each step is shaped as it is; read it before editing this skill.)
 
@@ -33,8 +36,7 @@ gh issue view <N> --json state,title,labels
 gh pr list --state open --json body --jq \
   '[.[].body | scan("(?:Closes|Fixes|Resolves) #([0-9]+)")[][0] | tonumber]'
 ```
-- Closed, or labeled `in-progress` AND in the open-PR list → stop, tell the user.
-- Otherwise → claim `<N>` (below).
+- Closed, or `in-progress` AND in the open-PR list → stop, tell the user. Otherwise claim `<N>` (below).
 
 **If no `<N>` was given:** first look for an abandoned run to resume:
 ```sh
@@ -43,9 +45,8 @@ gh issue list --state open --label in-progress --json number,title
 gh pr list --state open --json body --jq \
   '[.[].body | scan("(?:Closes|Fixes|Resolves) #([0-9]+)")[][0] | tonumber]'
 ```
-For each `in-progress` issue not in the open-PR list, lowest number first,
-claim it. Resume the first one that says `claimed` (step 3 reuses its
-worktree). If none is claimed, pick a fresh one:
+For each `in-progress` issue not in the open-PR list, lowest number first, claim it.
+Resume the first that says `claimed` (step 3 reuses its worktree). If none, pick a fresh one:
 ```sh
 # candidates: open, not in-progress, lowest number first
 gh issue list --state open --search "-label:in-progress" \
@@ -55,12 +56,10 @@ gh issue list --state open --search "-label:in-progress" \
 gh pr list --state open --json body --jq \
   '[.[].body | scan("(?:Closes|Fixes|Resolves) #([0-9]+)")[][0] | tonumber]'
 ```
-Take the first candidate not in the open-PR list and claim it. No
-candidates → report "backlog clear" and stop.
+Claim the first candidate not in the open-PR list. None → report "backlog clear", stop.
 
-**Claim:** Read `.claude/skills/work-issue/references/claim-protocol.md` now.
-Run its "Claim the issue" script exactly as written, in one Bash call,
-replacing only `<N>`. Then:
+**Claim:** Read `.claude/skills/work-issue/references/claim-protocol.md` now. Run its
+"Claim the issue" script exactly as written, in one Bash call, replacing only `<N>`. Then:
 - `RESULT=claimed*` → you own `<N>`. Continue.
 - `RESULT=live*` or `RESULT=lost*` on a resume candidate → claim the next one (then the fresh picker).
   On an explicit `<N>` or a fresh pick → stop, report `<N>` is being worked on, try nothing else.
@@ -68,11 +67,8 @@ replacing only `<N>`. Then:
 ## 2. Mark it in-progress
 
 ```sh
-gh label create in-progress --color FBCA04 \
-  --description "Actively being worked on" 2>/dev/null || true
-gh label create in-review --color 0E8A16 \
-  --description "Implementation done, PR open, awaiting human review" \
-  2>/dev/null || true
+gh label create in-progress --color FBCA04 --description "Actively being worked on" 2>/dev/null || true
+gh label create in-review --color 0E8A16 --description "Implementation done, PR open, awaiting human review" 2>/dev/null || true
 
 gh issue edit <N> --add-label in-progress
 ```
@@ -107,14 +103,13 @@ date +%s > "$LOCKDIR/heartbeat.tmp" && mv "$LOCKDIR/heartbeat.tmp" "$LOCKDIR/hea
 
 ## 4. Plan, then get the plan reviewed
 
-1. Read the issue: `gh issue view <N>`. Make design calls yourself; flag
-   only what is hard to reverse.
-2. Estimate size. **Small** = diff of 20 lines or fewer AND no API change
-   (no new/changed public Rust item, PostScript operator, CLI flag or
-   lib procedure name). Otherwise **full**.
+1. Read the issue: `gh issue view <N>`. Make design calls yourself; flag only what is hard to reverse.
+2. Estimate size. **Small** = diff of 20 lines or fewer AND no API change (no new/changed
+   public Rust item, PostScript operator, CLI flag or lib procedure name). Otherwise **full**.
 3. Write the plan in your reply: files, approach, what you are not doing.
-4. Heartbeat, then call the `advisor` tool (small: one short call is enough).
-   If it objects, revise the plan before writing code. Heartbeat.
+4. **Hard gate, no code before it.** Heartbeat, then call the `advisor` tool (small: one
+   short call is enough, or skip it and say so). If it objects, revise the plan. Heartbeat.
+   The final report's `Plan review` line must say `done` or `skipped (small)`.
 
 ## 5. Implement
 
@@ -123,26 +118,23 @@ date +%s > "$LOCKDIR/heartbeat.tmp" && mv "$LOCKDIR/heartbeat.tmp" "$LOCKDIR/hea
 3. If a human could look at the result (art, template, chart, font), read
    `.claude/skills/work-issue/references/demo-surfaces.md` now and do what it says.
 4. Commit at checkpoints; heartbeat at each.
-5. Deferred work becomes an issue, not just a NOTES.md line:
+5. Deferred work becomes an issue, not just a NOTES.md line (keep the URLs for the report):
    `gh issue create --title "<title>" --body "<what and why; found while working #<N>>"`.
-   Keep the URLs for the report.
-6. Quality gate. It takes longer than 120s, so heartbeat, then run this
-   with `run_in_background: true`:
+6. Quality gate (over 120s): heartbeat, then run with `run_in_background: true`:
    ```sh
    rm -f /tmp/gate-<N>.log && cd "${WORKTREE_DIR:?}" && { cargo build && cargo test && cargo clippy --all-targets && cargo fmt --all -- --check; } > /tmp/gate-<N>.log 2>&1; echo "GATE_EXIT=$?" >> /tmp/gate-<N>.log
    ```
-   Wait for the task's completion notification (or Monitor, loaded via ToolSearch
-   `select:Monitor`). Never `sleep` or `ScheduleWakeup`. Then `tail -40 /tmp/gate-<N>.log`:
-   it must end with `GATE_EXIT=0`. If not, fix and re-run.
+   Wait for the completion notification or a Monitor (`ToolSearch select:Monitor`); never
+   `sleep` or `ScheduleWakeup`. `tail -40 /tmp/gate-<N>.log` must end with `GATE_EXIT=0`; else fix, re-run.
 7. Heartbeat.
 
 ## 6. Review the implementation
 
 1. `git -C "$WORKTREE_DIR" diff --numstat origin/main...HEAD` — measure the size.
-2. Small (step 4's definition): one short self-check or `advisor` call.
-   Otherwise: heartbeat, then `advisor`, asking it to check state mutated across
-   branches (gsave/dict unwinding on every error path, font/graphics state
-   changed mid-loop), multi-byte/encoding edge cases, hidden side effects.
+2. Small (step 4's definition): one short self-check or `advisor` call. Otherwise heartbeat,
+   then `advisor`, asking it to check state mutated across branches (gsave/dict unwinding
+   on every error path, font/graphics state changed mid-loop), multi-byte/encoding edge
+   cases, hidden side effects.
 3. Fix real findings, re-run the step 5 gate, heartbeat. Don't loop on subjective feedback.
 
 ## 7. Open the PR
@@ -161,7 +153,7 @@ Closes #<N>
 EOF
 )"
 ```
-Always push with that explicit refspec. Never run a bare `git push`. Then:
+Always push with that explicit refspec, never a bare `git push`. Then:
 ```sh
 gh issue edit <N> --remove-label in-progress --add-label in-review
 gh issue comment <N> --body "Opened <PR URL>."
@@ -174,12 +166,12 @@ Read `.claude/skills/work-issue/references/codex-review.md` now (full policy). T
 1. Read the `merge_policy` frontmatter in `SDLC.md` fresh.
 2. If the diff touches `.claude/skills/work-issue/`, say so in every review comment.
 3. Find Codex: `CODEX_SCRIPT=$(find "$HOME/.claude/plugins" -path "*/codex/scripts/codex-companion.mjs" 2>/dev/null | head -1)`.
-   If it is empty or `node "$CODEX_SCRIPT" status --json` says not authenticated: do the
-   stale-broker checks in pitfalls.md first; only if they fail, the Fallback path in codex-review.md.
-4. Run the review as a **foreground blocking** Bash call (timeout 600000).
-   Never set `run_in_background`. Never call `ScheduleWakeup` in this turn.
-   Never run it from the main checkout. Start the same Bash call with
-   `WORKTREE_DIR=...; BRANCH=...` and the item 3 `CODEX_SCRIPT=$(find ...)` line, then:
+   If empty, or `node "$CODEX_SCRIPT" status --json` says not authenticated: stale-broker checks
+   in pitfalls.md first; only if they fail, the Fallback path in codex-review.md.
+4. Run the review as a **foreground blocking** Bash call (timeout 600000). Never set
+   `run_in_background`, never `ScheduleWakeup` in this turn, never run it from the main
+   checkout. Start the same Bash call with `WORKTREE_DIR=...; BRANCH=...` and item 3's
+   `CODEX_SCRIPT=$(find ...)` line, then:
    ```sh
    rm -f /tmp/codex-review-<N>.json && \
      H="$(git rev-parse --path-format=absolute --git-common-dir)/work-issue-lock-<N>/heartbeat" && \
@@ -210,20 +202,28 @@ Read `.claude/skills/work-issue/references/codex-review.md` now (full policy). T
     deviations / open points (see codex-review.md). Then:
     `gh issue comment <N> --body-file /tmp/issue-<N>-summary.md`
 12. `gh pr view <PR#> --json mergeable,mergeStateStatus,statusCheckRollup`. If `BEHIND`:
-    `gh pr update-branch <PR#>`. If any check is pending: `gh pr checks <PR#> --watch` with
-    `run_in_background: true`, wait for the notification, then re-run `gh pr view`. Merge only
-    when `test` is `SUCCESS`. If CI fails, stop and report. Never merge past it or use `--admin`.
+    `gh pr update-branch <PR#>`. If any check is pending or you just ran `update-branch`, heartbeat,
+    then run this Bash call with `run_in_background: true` (CI takes 11-17 min; ~15 is normal):
+    ```sh
+    gh pr checks <PR#> --watch --fail-fast > /tmp/ci-<N>.log 2>&1; echo "exit=$?" >> /tmp/ci-<N>.log
+    ```
+    Wait for the notification. No `sleep` loops, no `| tail`, no hand-back while it runs.
+    Read the `exit=` line (`0` = all passed; pitfalls.md "CI wait" covers "no checks
+    reported"), heartbeat, re-run `gh pr view`. Merge only when `test` is `SUCCESS`. CI
+    failed: stop and report. Never merge past it or use `--admin`.
+    **Pending CI** (only if you truly cannot wait): keep the lock and `in-review`, skip
+    step 9, report `Merge: pending CI` plus the pitfalls.md "CI wait" checklist.
 13. `gh pr merge <PR#> --squash --delete-branch`
 
 ## 9. Post-merge cleanup
 
-Run as one Bash call. The first line aborts it unless the PR is `MERGED`.
+One Bash call; the first line aborts it unless the PR is `MERGED`. Never reorder it (worktree before branch).
 ```sh
 test "$(gh pr view <PR#> --json state --jq .state)" = MERGED || { echo "PR not MERGED: stop, no cleanup"; exit 1; }
 gh issue view <N> --json state   # confirm Closes #<N> auto-closed it
 gh issue edit <N> --remove-label in-review --remove-label in-progress
 gh issue view <N> --json labels --jq '[.labels[].name]'   # must list neither in-review nor in-progress
-# both must print >= 1: the pre-merge summary and the per-round review trail are on the ticket
+# both must print >= 1 (pre-merge summary, per-round review trail)
 gh issue view <N> --json comments --jq '[.comments[].body | select(startswith("## Summary of work"))] | length'
 gh issue view <N> --json comments --jq '[.comments[].body | select(test("^## (Codex|Fallback) review, round"))] | length'
 git worktree remove "$WORKTREE_DIR" 2>&1 || true
@@ -231,7 +231,6 @@ git -C "$(git rev-parse --show-toplevel)" branch -D "$BRANCH" 2>&1 || true
 git -C "$(git rev-parse --show-toplevel)" fetch origin --prune
 rm -rf "$(git rev-parse --path-format=absolute --git-common-dir)/work-issue-lock-<N>"
 ```
-Remove the worktree before deleting the branch. Never change that order.
 
 ## 10. Final report
 
@@ -239,7 +238,8 @@ End the run by printing exactly this, filled in (write `none` where empty):
 ```text
 ## work-issue report: #<N> <title>
 - PR: <PR URL>
-- Merge: merged as <merge commit sha> | awaiting human merge (<why>) | blocked (<why>)
+- Merge: merged as <merge commit sha> | awaiting human merge (<why>) | pending CI (<remaining steps>) | blocked (<why>)
+- Plan review (step 4): <done | skipped (small)>
 - Checks: quality gate <pass/fail>; CI <pass/fail>
 - Wall time: <start time from step 1> -> <now> (<minutes> min)
 - Review rounds: <count>, reviewer <Codex | fallback (why)>, findings fixed <n> / declined <n>
