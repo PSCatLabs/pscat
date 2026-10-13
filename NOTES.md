@@ -37,11 +37,16 @@ rejection stays `scatter`'s own `scatter-needs-a-region`.
 - `scatter` calls `siinside` (the unguarded body of `scin`) from its
   placement loop, since it has validated the region once already. With the
   guards inside `scin` itself, `gallery/firefly_census.ps` ran about 7%
-  slower; with the split it is unchanged.
+  slower; with the split it is unchanged. `examples/surfacekit.ps` and
+  `examples/paintkit_motion_demo.ps`, which call the public `scin`, time the
+  same before and after (the perf-regression job's workloads do not cover
+  any of this).
 - Verified: all 72 gallery, example and selftest-driver files (88 PNGs) that load
   artkit or one of its dependants render PNGs byte-identical before and
-  after. Their SVGs are not compared, because `--svg` output is not
-  deterministic run to run (clip path ids), independent of this change.
+  after. Their SVGs are not compared: `--svg` output of
+  `examples/halftone.ps` varies run to run even on unmodified `main`
+  (the number of `<clipPath` elements was 3, 2 and 4 in three runs), filed
+  as #261.
 - Tests: `%%SelfTest` blocks in `lib/artkit.ps` and `lib/stipplekit.ps`
   (each asserts the guard name and that the side effect never ran), and
   four `tests/artkit.rs` plus one `tests/stipplekit.rs` test covering a
