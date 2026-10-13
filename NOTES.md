@@ -52,6 +52,49 @@ Measured, and worth knowing beyond drykit:
   that replays recorded stops level-major.
 - **pscat has no `strokepath`.** Filed as #264.
 
+## Paint loading L3: `pkwet` grades loaded colours (issue #223, 2026-10-13)
+
+Slice L3 of #183's design (`docs/PAINT_LOADING.md` 3.4 and 6). A
+two-colour `pkbroad` or `pktrowel` stroke inside a `pkwet` pull now fades
+toward `/Under` like a one-colour stroke, instead of every pass landing
+at full strength as a hard block.
+
+- **Frames grow from 4 slots to 7.** Slot 4 is the per-pass factor
+  (`f*Pickup`, 0 at the core), filled in the existing plan loop with no
+  draw. Slot 5 is a copy of `/Under`. Slot 6 is the index of the pass
+  about to run, written just before its `gsave`. Slots 0-3 are unchanged,
+  so the pass budget and the nesting machinery read what they always did.
+- **`puwet` mixes `c` toward `Under_d` by `k_d` for each live depth,
+  outermost first**, which is the order nested calls mix an inherited
+  colour. It reads only depths `1 .. pqdnow`, so a frame left by a
+  finished or error-unwound call is never read, and the error path needed
+  no new code. A self-test pins that a caught error leaves `puwet` the
+  identity.
+- **A 0 factor is skipped, not mixed.** The core pass, and all of a
+  `/Soft 0` call, is then the identity to the last bit rather than
+  `c + (U - c) * 0`.
+- **`/Under` is copied into the frame.** The plan bakes `/Under` into each
+  pass's colour when the call starts, so `puwet` must use the same value
+  even if the procedure edits the caller's array (advisor).
+- **Not bit-exact against an inherited colour.** The graphics state keeps
+  colours as f32, so the plain brush reads back a rounded mix and `puwet`'s
+  is f64. A uniform load under a pull, an isotropic `pkwet` and a nest of
+  two matches the plain brush there to within one level per channel. That
+  holds for pkbroad, pktrowel, and a touched pktrowel.
+- Tests: design tests 9 (`wet_pull_grades_loaded_colors`: a red-over-blue
+  load pulled 80pt in two passes; the outer pass sits near
+  `mix3(C, Under, 0.85)`) and 10 (`wet_frame_slots_do_not_change_pkwet`:
+  both wet demos against hashes taken from `origin/main` at 91013c3), the
+  uniform-load comparison above, and a `puwet` self-test (outer pass,
+  core, nesting order, after an unwound call). Mutation-checked: `puwet`
+  as the identity fails test 9 and the uniform-load test; walking the
+  depths innermost first fails the self-test and the nested case.
+- Byte identity: see the PR for the file and render counts.
+- The pull demo adds about 25s to `wet_frame_slots_do_not_change_pkwet` in
+  the CI profile.
+- Not here: `pkfan` (L4), `pkdab`/`pkoil` (L5), the specimen with a loaded
+  stroke inside a pull (L5b).
+
 ## Canvas surface S2: `/Touch` on pktrowel and pkdry (issue #222, 2026-10-13)
 
 Slice S2 of #182's design (`docs/CANVAS_SURFACE.md` 2.2, 3.2 and 6). With a
