@@ -122,7 +122,7 @@ date +%s > "$LOCKDIR/heartbeat.tmp" && mv "$LOCKDIR/heartbeat.tmp" "$LOCKDIR/hea
    `gh issue create --title "<title>" --body "<what and why; found while working #<N>>"`.
 6. Quality gate (over 120s): heartbeat, then run with `run_in_background: true`:
    ```sh
-   rm -f /tmp/gate-<N>.log && cd "${WORKTREE_DIR:?}" && { cargo build && cargo test && cargo clippy --all-targets && cargo fmt --all -- --check; } > /tmp/gate-<N>.log 2>&1; echo "GATE_EXIT=$?" >> /tmp/gate-<N>.log
+   rm -f /tmp/gate-<N>.log && cd "${WORKTREE_DIR:?}" && { cargo test --profile ci && cargo clippy --all-targets && cargo fmt --all -- --check; } > /tmp/gate-<N>.log 2>&1; echo "GATE_EXIT=$?" >> /tmp/gate-<N>.log
    ```
    Wait for the completion notification or a Monitor (`ToolSearch select:Monitor`); never
    `sleep` or `ScheduleWakeup`. `tail -40 /tmp/gate-<N>.log` must end with `GATE_EXIT=0`; else fix, re-run.

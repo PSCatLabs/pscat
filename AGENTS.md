@@ -23,6 +23,11 @@ first. This file covers *how* to work, not *what* to build.
   otherwise (explain why if you do).
 - `cargo build` and `cargo test` should pass before considering any stage
   or sub-step complete.
+- Run the suite as `cargo test --profile ci`, the same command CI runs:
+  optimized (the tests run PostScript through the interpreter, ~14x
+  slower in a debug build) but with `debug-assertions` and
+  `overflow-checks` on (`[profile.ci]` in `Cargo.toml`; output in
+  `target/ci/`). Plain `cargo test` still works, just slowly.
 - `cargo clippy` should be clean (or warnings explicitly justified in a
   comment) before considering a stage complete.
 - `cargo fmt` before committing.

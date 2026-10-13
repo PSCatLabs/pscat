@@ -8425,3 +8425,41 @@ past a 60000-sample allowance (x Bristles), before any drawing. Chosen
 over a runtime counter in `pbdashrun` (fires after drawing started) and
 over the static ratio / blanket multiplier rejected in #43. The issue's
 literal repro is rejected in ~0.2s; the demo's worst case measures ~1000.
+
+### Issue #204 — CI runs `cargo test` under an optimized `ci` profile
+
+CI's `test` job was ~15-17 min, 849s of it the debug `cargo test` step
+(run 38450710454: `selftest` 350s, `paintkit` 154s, `apparel` 126s,
+`cli` 45s). The suite is mostly PostScript run through the interpreter,
+about 14x slower unoptimized (`cargo test --test selftest`: 61s debug,
+4.4s release; full suite 71s release, all passing).
+
+- `[profile.ci]` in `Cargo.toml` inherits `release` and keeps
+  `debug-assertions` and `overflow-checks`, so a debug_assert or an
+  arithmetic overflow still fails the test run. CI runs
+  `cargo test --profile ci`. Verified the profile has `debug_assertions`
+  set (`cargo rustc --profile ci --lib -- --print cfg`).
+- Binary lookup: every test uses `env!("CARGO_BIN_EXE_*")`, which cargo
+  resolves per profile, and `src/paths.rs` walks three levels up from the
+  executable, which is the same depth for `target/ci/pscat` as for
+  `target/{debug,release}/pscat`. Nothing hard-codes a profile directory
+  in `tests/`; the full suite passes under `--profile ci`. The helper
+  scripts that hard-code `target/release` (`handwrite.sh`, `photo_etch.sh`,
+  `build_site.sh`, ...) are release-only tools and are unchanged.
+- `scripts/selftest.sh` takes `PSCAT_PROFILE` (default `release`; `dev`
+  maps to cargo's `debug` dir). CI sets it to `ci` so that step and the
+  test step share one set of compiled dependencies instead of building a
+  second optimized set.
+- Dropped CI's separate debug `cargo build`. Clippy type-checks every
+  target, and the selftest and test steps build and link every binary
+  (`pscat`, and `pscat-mcp` via `CARGO_BIN_EXE_pscat-mcp`), so the debug
+  build was a second slow compile of the same code. Clippy, fmt and the
+  PS-native self-checks stay as separate steps.
+- Kept both `scripts/selftest.sh` and `tests/selftest.rs`: optimized, the
+  duplicated work is a few seconds (4.4s for the test file), so the
+  separate PS-only failure line on the run page is worth keeping.
+- perf-regression is unchanged: it builds `--release` binaries by path
+  and never touched the test profile.
+- Left alone: `SDLC.md`'s quality-gate line (generated from sdlcify's
+  language-profile template, which still says `cargo build && cargo test`
+  and is correct as a generic local gate).
