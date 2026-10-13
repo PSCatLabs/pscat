@@ -29,16 +29,17 @@ Step numbers ("step 1" ... "step 9") refer to the numbered steps in `../SKILL.md
   let "label already exists" abort the run.
 - **If `cargo fmt --all -- --check` or clippy fails**, fix it before
   opening the PR — don't open a PR you know CI will reject.
-- **A PR opened a while ago (or after another PR merged first) will
-  likely show `mergeStateStatus: BEHIND`** at step 8, because branch
-  protection's `strict` status check requires the tested commit to
-  reflect current `main` — the CI run from when the PR was opened no
-  longer counts. This is normal, not a failure, and with several agents
-  merging it is the usual case (#208): `gh pr update-branch`, wait for
-  CI to re-run on the updated branch, then merge. If another PR lands
-  during that wait the PR is `BEHIND` again; repeat (heartbeat each
-  time). Confirmed hitting this on the very first agent-merged PR in
-  this repo (#22).
+- **`BEHIND` is not a blocker and not a reason to `update-branch`** (#257).
+  `main` no longer requires branches to be up to date (`require_up_to_date:
+  false` in SDLC.md, `strict: false` on GitHub), so a PR behind `main`
+  merges on its last green CI run. The old update-and-rerun loop cost one
+  full CI run per PR when several agents merged in parallel. The safety
+  net is "Main CI after merge" below. Only `DIRTY` (real conflicts) needs a
+  branch update, done by merging locally ("Rebase and merge rules").
+- **Never `git stash` in a worktree.** `refs/stash` is shared by every
+  worktree of the repo, so a `git stash pop` can apply (and drop) another
+  session's stash. To compare with `main` use `git show origin/main:path`;
+  to keep a copy use `cp`.
 - **Remove the worktree before deleting the local branch, not after**
   (step 9's order matters) — `git branch -d` fails with "branch used
   by worktree" if the worktree still references it. `git worktree
@@ -225,6 +226,28 @@ Step numbers ("step 1" ... "step 9") refer to the numbered steps in `../SKILL.md
   step 8.13 no longer passes the flag and step 9 deletes the local
   branch after removing the worktree (#208).
 
+## Waiting and timeouts
+
+- macOS has no `timeout`. Use `perl -e 'alarm N; exec @ARGV' cmd args`.
+- Foreground `sleep` may be blocked. Wait with a background Bash task
+  (`run_in_background: true`, you are notified when it exits) or a Python
+  poll, `python3 -c 'import time; time.sleep(60)'`, kept under 115 s per call.
+- Keep scratch output under `<SCRATCH>` as `<kind>-<N>.*`, never a relative
+  path that escapes the worktree (`../x`) and never `/tmp` when the system
+  prompt names a scratchpad.
+
+## Step 5 checklist
+
+Cheapest first, before the long gate:
+
+1. `cargo fmt --all -- --check` (seconds) before everything else.
+2. A new library's first `%%SelfTest` block needs a line in
+   `selftest/libraries.txt`. A new top-level artkit name needs an entry in
+   `ARTKIT_INTERNAL` in `src/capabilities.rs`. Check with
+   `PSCAT_PROFILE=ci ./scripts/selftest.sh` and
+   `cargo test --profile ci --test capabilities` (about 30 s together).
+3. Then the full gate in step 5.5.
+
 ## CI wait (#199, from the #178 / PR #198 run; timings and pass/fail rule updated in #208)
 
 Step 8.12's CI wait is the one place a run is most tempted to hand back
@@ -240,7 +263,7 @@ gh pr checks <PR#> --watch --fail-fast > <SCRATCH>/ci-<N>.log 2>&1; echo "exit=$
 ```
 
 Run it with `run_in_background: true`, heartbeat first and after (and
-again after every `gh pr update-branch`, which restarts CI).
+again after any push, which restarts CI).
 
 - **Do not sleep-poll** (foreground `sleep` is blocked and a poll loop
   burns turns) and **do not pipe through `tail`**: the pipeline's exit
@@ -258,12 +281,11 @@ again after every `gh pr update-branch`, which restarts CI).
   `CANCELLED`, `SKIPPED`, `NEUTRAL` or still-`IN_PROGRESS` check is not
   `SUCCESS`. (Branch protection requires only `test`, but a red
   `perf-regression` is a signal to read, not to merge past.)
-- **"no checks reported"**: seconds after a push or `gh pr update-branch`
+- **"no checks reported"**: seconds after a push
   no check runs are registered yet, so `--watch` can exit non-zero with
   that text (or the rollup is empty). It is not a CI failure. Re-launch
-  the same background command. After `update-branch`, always start a
-  fresh watch: the run from before it no longer counts under the
-  `strict` status check.
+  the same background command. After any push (a local merge for `DIRTY`
+  included), start a fresh watch: the run before it covers an older head.
 - **Rerun after an infrastructure failure only.** `gh run rerun <run-id>
   --failed` is allowed when the failed job never ran a step: it was
   `CANCELLED` or "not acquired by Runner" and has no `success`/`failure`
@@ -275,8 +297,37 @@ again after every `gh pr update-branch`, which restarts CI).
   cancels it on purpose) and every failed job shows `ran: 0`. At most two
   reruns; then start a fresh watch. Any job with a `failure` step is a real
   failure (a test, clippy or fmt): stop and report, never rerun it.
-- After a clean `true`, merge. If `mergeStateStatus` has gone `BEHIND`
-  meanwhile, `gh pr update-branch <PR#>` and wait again.
+- After a clean `true`, merge. `BEHIND` meanwhile is fine (see above).
+- The `true` query also requires `mergeStateStatus != "DIRTY"`: a conflicted
+  PR still shows green checks from its last run. Its `jq` is parenthesised
+  on purpose (`|` binds loosest, so `A and B | C` would parse as
+  `(A and B) | C`).
+
+### Main CI after merge (#257)
+
+With `strict` off, two PRs can each pass alone and break `main` together.
+The push-to-main `ci` run for your merge commit is the net. After step 9's
+cleanup, in a fresh Bash call (`SHA` from `gh pr view <PR#> --json
+mergeCommit --jq .mergeCommit.oid`):
+
+```sh
+gh run list --workflow ci --branch main --commit <SHA> --json databaseId,status,conclusion
+```
+
+- Empty for the first few seconds after the merge: wait (see "Waiting and
+  timeouts") and re-list. Then watch it in the background:
+  `gh run watch <run-id> --exit-status > <SCRATCH>/main-ci-<N>.log 2>&1; echo "exit=$?" >> <SCRATCH>/main-ci-<N>.log`.
+- Decide from `gh run view <run-id> --json conclusion --jq .conclusion`
+  (`success` = green), not from the exit code. Only `test` runs on push
+  (`perf-regression` is `pull_request` only).
+- `ci.yml`'s `concurrency` cancels a run when a newer push to `main` arrives,
+  so another agent's merge right after yours can leave your run `cancelled`.
+  That is not red. Check the newer run instead, provided its head contains
+  your commit (`git merge-base --is-ancestor <SHA> <newer-sha>` after
+  `git fetch origin main`), and repeat if that one is cancelled too.
+- Red (`failure`): stop at once. Report it as the first line of the final
+  report (`Merge: merged ... but main CI RED`) with the run URL and the failing
+  step, and start no other work. Do not revert or push a fix unprompted.
 
 ### Pending-CI hand-back (only if you truly cannot wait)
 
@@ -327,13 +378,14 @@ file are gone). First match wins:
 | What GitHub shows | Re-enter at |
 |---|---|
 | PR `CLOSED` unmerged | Stop and report. |
-| PR `MERGED` | Step 9 only. |
-| No `## Codex review` (or `## Fallback review`) comment on the PR | 8.1: the review never ran. |
-| The PR head is not the `reviewed head` named in the last `## Codex review, round` or `## Fallback review, round` issue comment, and either `git -C "$WORKTREE_DIR" log --first-parent --no-merges <reviewed-sha>..HEAD` is non-empty (the branch gained its own commits; timestamps are unreliable, a commit made before the review can be pushed after it), or some merge in `git log --first-parent --merges <reviewed-sha>..HEAD` has conflict resolutions that are not plain documentation (`git show --remerge-diff --format= --stat <merge>` (git 2.36+; it redoes the merge and shows what the committed result changed, so it also catches a conflict "resolved" by taking one parent's file, which `--cc` omits) prints nothing for a clean merge of `main`, e.g. from `update-branch`, and the merge must really bring in `main`: `git merge-base --is-ancestor <merge>^2 origin/main` succeeds (a clean merge of another feature branch is unreviewed code); anything it lists must be only plain docs, per "Rebase and merge rules") | 8.3 with R+1: re-review. |
-| The issue has no `## Codex review, round` / `## Fallback review, round` comment with a `reviewed head` (the run died between 8.6 and 8.8, so the reviewed SHA was never recorded) | 8.3 with R+1: the PR comment alone cannot say what was reviewed, so review again. |
-| The last round comment (even if clean merges of `main` have moved the head since) has any row of its table lacks a response ("Fixed in ..." / "Not fixing: ...") | 8.7: read the PR's review comment and disposition every finding. A finding that needs a fix goes through 8.9 (fix, push, gate, re-review with R+1). A review is never "clean" just because it is current (Codex rounds 2 and 8 on #208). |
-| Review current and every finding dispositioned, but no `## Summary of work (PR #<PR#>)` comment on the issue | 8.10, 8.11. |
-| Summary posted | 8.10 (re-read `merge_policy` and whether the dispatcher still says no merge), then 8.12. |
+| PR `MERGED` | Step 9 only, then "Main CI after merge". |
+| The PR head equals the `reviewed head` in the last `## Codex review, round` / `## Fallback review, round` issue comment, every row of its table has a response, and a `## Summary of work (PR #<PR#>)` comment exists | 8.10 (re-read `merge_policy` and whether the dispatcher still says no merge), then 8.12. |
+| Same, but no summary comment yet | 8.10, 8.11. |
+| Anything else or ambiguous: no review comment, no recorded `reviewed head`, a finding without a response, or commits since the reviewed head | 8.3 with R+1: re-review. |
+
+A head that only differs by clean merges of `origin/main` (no conflict
+resolutions, `git show --remerge-diff --format= --stat <merge>` empty) still
+counts as equal to the reviewed head. When unsure, re-review.
 
 The final report on a resume fills `Plan review` with `done (earlier run)`
 and counts the review rounds from the issue's `## Codex review, round`
@@ -354,7 +406,8 @@ the wrap-up) and stop **before** 8.12:
 
 To merge later, `/work-issue <N>` again: the issue is `in-review` with an
 open PR, the lock is free (fresh claim), and the Resume table above lands
-on the summary row (or on re-review if commits were added since). Step 9
+on its "review current, summary posted" row (or on re-review if commits were
+added since). Step 9
 then removes the worktree.
 
 ### Rebase and merge rules (#208)
@@ -362,12 +415,15 @@ then removes the worktree.
 Rebase onto `origin/main` exactly once, at step 5.5 before the **first
 push** (commit first: a rebase refuses a dirty tree), so a break already on `main` (as #189's clippy failure was) does
 not fail an unrelated issue. After the PR exists, history is published:
-never rebase it. Bring `main` in by merging instead: `gh pr update-branch
-<PR#>` (remote merge), then `git -C "$WORKTREE_DIR" pull --ff-only` before
-any later local commit. If `update-branch` refuses because of conflicts,
-merge locally: `git -C "$WORKTREE_DIR" fetch origin main && git -C
-"$WORKTREE_DIR" merge origin/main`, resolve, commit, plain `git push`
-(no force).
+never rebase it. Being `BEHIND` needs nothing (#257). Only real conflicts
+(`DIRTY`) bring `main` in, by merging locally: `git -C "$WORKTREE_DIR" fetch
+origin main && git -C "$WORKTREE_DIR" merge origin/main`, resolve, commit,
+plain `git push` (no force). `gh pr update-branch` is only a shortcut for a
+conflict-free merge; if you do use it, `git -C "$WORKTREE_DIR" pull
+--ff-only` before any later local commit.
+
+**NOTES.md conflicts** (the usual one, every PR appends a section): keep
+both new sections, ours first, then theirs; never drop either side.
 
 **Doc-only conflicts skip the re-review.** If every conflicted file in
 such a rebase or merge was plain documentation (`NOTES.md`, `HANDOFF.md`,

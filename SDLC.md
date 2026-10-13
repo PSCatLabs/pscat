@@ -2,13 +2,14 @@
 sdlcify_version: 1
 repo: jeromebanks/postscript_interpreter
 default_branch: main
-generated: 2026-07-31
+generated: 2026-10-13
 merge_policy:
   mode: agent-full
 required_status_checks:
   - test
 branch_protection:
   required_approving_review_count: 0
+  require_up_to_date: false
   enforce_admins: false
   allow_force_pushes: false
   allow_deletions: false
@@ -67,6 +68,18 @@ satisfy self-approval, see the `sdlcify` skill's pitfalls section for
 why), no force-pushes, no deletions. Admin bypass is **on**
 (`enforce_admins: false`) — the repo owner can still push past
 protection in an emergency.
+
+**Up-to-date branches are not required** (`require_up_to_date: false`,
+GitHub's `required_status_checks.strict`). A PR may merge while it is
+behind `main`, so a PR's last green CI run is not re-run against a moving
+`main`. Strict mode forced an update-branch-and-rerun cycle (about 3
+minutes of CI) on almost every PR once several agents merged in
+parallel. The safety net is CI on every push to `main`: after merging, the
+agent checks that the push-to-main run for its merge commit went green and
+stops and reports if it did not (`.claude/skills/work-issue/`). The
+intended long-term replacement is a merge queue, which needs an
+organization-owned repo; when this repo moves to one, switch to the queue
+and add a `merge_group:` trigger to `.github/workflows/ci.yml`.
 
 ## Labels
 

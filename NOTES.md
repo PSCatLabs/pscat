@@ -8792,3 +8792,33 @@ about 14x slower unoptimized (`cargo test --test selftest`: 61s debug,
   zero-length segment) plus four `c`. Trimming it means changes in `lib/`
   or lossy precision; a per-speck Form XObject would change overlap
   darkening under alpha, so it is not a free swap. Filed separately.
+
+## SDLC: require-up-to-date off, BEHIND loop dropped (issue #257)
+
+- On 2026-10-13 the maintainer turned off "Require branches to be up to
+  date before merging" on `main` (`required_status_checks.strict: false`,
+  required check `test`), applied live via the API. With several agents
+  merging in parallel, strict mode forced an update-branch and a full CI
+  rerun on almost every PR. This change only records it; nothing was
+  written to GitHub.
+- `SDLC.md` frontmatter gained `branch_protection.require_up_to_date:
+  false`. sdlcify reads it (Phase 1, default `true` when absent so other
+  repos are unchanged), diffs it against `strict` (Phase 2), and Phase 4's
+  PUT payload now uses it instead of a hardcoded `"strict": true`, which
+  would have turned it back on at the next run. The trade-off paragraph and
+  the merge-queue note live in `references/sdlc-doc-template.md`, because
+  `SDLC.md` is regenerated from the template.
+- The merge queue is the real fix and needs an org-owned repo; when this
+  repo moves to one, add `merge_group:` to `ci.yml`.
+- `work-issue` step 8.12 no longer runs `update-branch` for `BEHIND`
+  (`DIRTY` still merges locally). The pass/fail one-liner also checks
+  `mergeStateStatus != "DIRTY"`. Step 9 now ends with a check that the
+  push-to-main `ci` run for the merge commit went green (a `cancelled` run
+  superseded by a newer main push is not red; `ci.yml` cancels in-progress
+  runs per ref). Red: stop and report.
+- Also folded in: no `git stash` in a worktree (shared `refs/stash`),
+  macOS has no `timeout`, a step 5 checklist (fmt first,
+  `selftest/libraries.txt`, `ARTKIT_INTERNAL`), re-read SKILL.md after
+  step 3, NOTES.md conflicts keep both sections (ours first), a
+  disproved-premise rule, and a short resume table that defaults to
+  re-review. `SKILL.md` stays within 250 lines.
