@@ -129,22 +129,20 @@ date +%s > "$LOCKDIR/heartbeat.tmp" && mv "$LOCKDIR/heartbeat.tmp" "$LOCKDIR/hea
 6. Quality gate. It takes longer than 120s, so heartbeat, then run this
    with `run_in_background: true`:
    ```sh
-   cd "$WORKTREE_DIR" && { cargo build && cargo test && cargo clippy --all-targets && cargo fmt --all -- --check; } > /tmp/gate-<N>.log 2>&1; echo "GATE_EXIT=$?" >> /tmp/gate-<N>.log
+   rm -f /tmp/gate-<N>.log && cd "${WORKTREE_DIR:?}" && { cargo build && cargo test && cargo clippy --all-targets && cargo fmt --all -- --check; } > /tmp/gate-<N>.log 2>&1; echo "GATE_EXIT=$?" >> /tmp/gate-<N>.log
    ```
-   Wait for the background task's completion notification (or Monitor:
-   load it first with ToolSearch `select:Monitor`). Never use `sleep` or
-   `ScheduleWakeup`. Then `tail -40 /tmp/gate-<N>.log`. It must end with
-   `GATE_EXIT=0`. If not, fix and re-run.
+   Wait for the task's completion notification (or Monitor, loaded via ToolSearch
+   `select:Monitor`). Never `sleep` or `ScheduleWakeup`. Then `tail -40 /tmp/gate-<N>.log`:
+   it must end with `GATE_EXIT=0`. If not, fix and re-run.
 7. Heartbeat.
 
 ## 6. Review the implementation
 
-1. `git -C "$WORKTREE_DIR" diff --numstat origin/main...HEAD` — confirm the size.
-2. Small (as defined in step 4, now measured): one short self-check or
-   `advisor` call. Otherwise: heartbeat, then call `advisor` asking it to check
-   state mutated across control-flow branches (gsave/dict unwinding on
-   every error path, font/graphics state changed mid-loop),
-   multi-byte/encoding edge cases, and hidden side effects.
+1. `git -C "$WORKTREE_DIR" diff --numstat origin/main...HEAD` — measure the size.
+2. Small (step 4's definition): one short self-check or `advisor` call.
+   Otherwise: heartbeat, then `advisor`, asking it to check state mutated across
+   branches (gsave/dict unwinding on every error path, font/graphics state
+   changed mid-loop), multi-byte/encoding edge cases, hidden side effects.
 3. Fix real findings, re-run the step 5 gate, heartbeat. Don't loop on subjective feedback.
 
 ## 7. Open the PR
@@ -176,11 +174,12 @@ Read `.claude/skills/work-issue/references/codex-review.md` now (full policy). T
 1. Read the `merge_policy` frontmatter in `SDLC.md` fresh.
 2. If the diff touches `.claude/skills/work-issue/`, say so in every review comment.
 3. Find Codex: `CODEX_SCRIPT=$(find "$HOME/.claude/plugins" -path "*/codex/scripts/codex-companion.mjs" 2>/dev/null | head -1)`.
-   If it is empty or `node "$CODEX_SCRIPT" status --json` shows it is not
-   authenticated, use the Fallback path in codex-review.md.
+   If it is empty or `node "$CODEX_SCRIPT" status --json` says not authenticated: do the
+   stale-broker checks in pitfalls.md first; only if they fail, the Fallback path in codex-review.md.
 4. Run the review as a **foreground blocking** Bash call (timeout 600000).
    Never set `run_in_background`. Never call `ScheduleWakeup` in this turn.
-   Never run it from the main checkout. Set the variables first:
+   Never run it from the main checkout. Start the same Bash call with
+   `WORKTREE_DIR=...; BRANCH=...` and the item 3 `CODEX_SCRIPT=$(find ...)` line, then:
    ```sh
    rm -f /tmp/codex-review-<N>.json && \
      H="$(git rev-parse --path-format=absolute --git-common-dir)/work-issue-lock-<N>/heartbeat" && \
@@ -191,8 +190,8 @@ Read `.claude/skills/work-issue/references/codex-review.md` now (full policy). T
      --scope branch --base origin/main \
      > /tmp/codex-review-<N>.json
    ```
-   If the harness backgrounds it anyway, read the polling pitfalls in pitfalls.md.
-5. Check that it succeeded. If this fails, go to the Fallback path. Do not post from the file:
+   If the harness backgrounds it anyway, follow the polling pitfalls in pitfalls.md.
+5. Check it succeeded. If not: don't post from the file; stale-broker checks, then Fallback (as in 3):
    `jq -e '.codex.status == 0 and (.codex.stdout // "" | length > 0)' /tmp/codex-review-<N>.json`
 6. Post it on the PR, even when it is clean:
    `gh pr comment <PR#> --body "$(jq -r '"## Codex review\n\n" + .codex.stdout' /tmp/codex-review-<N>.json)"`
@@ -222,7 +221,8 @@ Run in order. If the first command does not print `MERGED`, stop.
 ```sh
 gh pr view <PR#> --json state --jq .state   # must print MERGED
 gh issue view <N> --json state   # confirm Closes #<N> auto-closed it
-gh issue edit <N> --remove-label in-review --remove-label in-progress 2>&1 || true
+gh issue edit <N> --remove-label in-review --remove-label in-progress
+gh issue view <N> --json labels --jq '[.labels[].name]'   # must list neither in-review nor in-progress
 # both must print >= 1: the pre-merge summary and the per-round review trail are on the ticket
 gh issue view <N> --json comments --jq '[.comments[].body | select(startswith("## Summary of work"))] | length'
 gh issue view <N> --json comments --jq '[.comments[].body | select(test("^## (Codex|Fallback) review, round"))] | length'
