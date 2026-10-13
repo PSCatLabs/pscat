@@ -187,7 +187,7 @@ Step numbers ("step 1" ... "step 9") refer to the numbered steps in `../SKILL.md
   the squash commit on `main` is a new commit, so the branch's own
   commits are never ancestors of `main` and git refuses the "safe"
   delete. Step 9 uses `-D`, but only after `gh pr view <PR#> --json
-  state --jq .state` printed `MERGED`; that check is what makes `-D`
+  state --jq .state` returned `MERGED` (step 9's first line aborts the block otherwise); that check is what makes `-D`
   safe, so never run `-D` without it.
 - **The full quality gate (`cargo build && cargo test && ...`) takes
   longer than the Bash tool's 120s default foreground timeout.** Run it

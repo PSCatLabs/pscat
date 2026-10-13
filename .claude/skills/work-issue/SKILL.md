@@ -217,9 +217,9 @@ Read `.claude/skills/work-issue/references/codex-review.md` now (full policy). T
 
 ## 9. Post-merge cleanup
 
-Run in order. If the first command does not print `MERGED`, stop.
+Run as one Bash call. The first line aborts it unless the PR is `MERGED`.
 ```sh
-gh pr view <PR#> --json state --jq .state   # must print MERGED
+test "$(gh pr view <PR#> --json state --jq .state)" = MERGED || { echo "PR not MERGED: stop, no cleanup"; exit 1; }
 gh issue view <N> --json state   # confirm Closes #<N> auto-closed it
 gh issue edit <N> --remove-label in-review --remove-label in-progress
 gh issue view <N> --json labels --jq '[.labels[].name]'   # must list neither in-review nor in-progress
