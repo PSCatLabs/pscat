@@ -62,7 +62,8 @@
 #
 # Exit status: 0 all identical (and the control differed); 1 a page DIFFERS or
 # ERRORs; 2 the control did NOT differ (or was unusable), so the pages that
-# looked identical prove nothing.
+# looked identical prove nothing; 64 a usage or harness error (bad arguments,
+# no binary, the render driver itself failed), not a result.
 #
 # Run time on the current corpus is about one minute (alpine_lake is the long
 # pole); the renders run in parallel.
@@ -166,6 +167,13 @@ if [ -z "$OUT" ]; then
     OUT=$(mktemp -d "${TMPDIR:-/tmp}/identity_check.XXXXXX")
     made_out=1
 else
+    # Check before creating anything, so a refused path leaves nothing behind.
+    out_parent="$OUT"
+    while [ ! -d "$out_parent" ]; do out_parent=$(dirname "$out_parent"); done
+    out_real="$(cd "$out_parent" && pwd -P)${OUT#"$out_parent"}"
+    case "$out_real/" in
+        "$ROOT"/*|"$BASE"/*) die "--out '$OUT' is inside one of the trees; use a directory outside the repo" ;;
+    esac
     mkdir -p "$OUT"
 fi
 OUT="$(cd "$OUT" && pwd -P)"
@@ -257,7 +265,8 @@ fi
 START=$(date +%s)
 nfiles=$(wc -l < "$COMPARE" | tr -d ' ')
 echo "rendering $nfiles files x 2 trees with $BIN (-j $JOBS)" >&2
-xargs -0 -n 5 -P "$JOBS" "$SELF" --render-one "$BIN" < "$JOBLIST"
+xargs -0 -n 5 -P "$JOBS" "$SELF" --render-one "$BIN" < "$JOBLIST" \
+    || die "the render driver failed (see $OUT); this is a harness error, not a difference"
 
 # ---- compare -----------------------------------------------------------------
 pngs_of() { # dir: png basenames, one per line

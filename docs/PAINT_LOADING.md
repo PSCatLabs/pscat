@@ -447,8 +447,9 @@ branch.
 that edits a preset or `pkwet`) is `scripts/identity_check.sh` (#263):
 
 ```sh
-git worktree add --detach ../base-wt <the branch's base commit>
-scripts/identity_check.sh ../base-wt --gallery-still --control path/to/control.ps
+git worktree add --detach ../base-wt-<N> "$(git merge-base HEAD origin/main)"
+scripts/identity_check.sh ../base-wt-<N> --gallery-still --control path/to/control.ps
+git worktree remove --force ../base-wt-<N>
 ```
 
 - It renders every `examples/`, `gallery/` and `selftest/drivers/` file

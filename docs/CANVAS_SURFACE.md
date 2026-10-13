@@ -517,8 +517,9 @@ catch over the bounding box of all the motion's subpaths:
 (#141's method) is `scripts/identity_check.sh` (#263):
 
 ```sh
-git worktree add --detach ../base-wt <the branch's base commit>
-scripts/identity_check.sh ../base-wt --gallery-still --control path/to/control.ps
+git worktree add --detach ../base-wt-<N> "$(git merge-base HEAD origin/main)"
+scripts/identity_check.sh ../base-wt-<N> --gallery-still --control path/to/control.ps
+git worktree remove --force ../base-wt-<N>
 ```
 
 - With a worktree at the branch's base commit (not a newer `origin/main`)
@@ -529,7 +530,8 @@ scripts/identity_check.sh ../base-wt --gallery-still --control path/to/control.p
 - `--gallery-still` compares `gallery/alpine_lake.ps` at 2x with the
   committed `gallery/renders/alpine_lake.png` byte for byte.
 - `--control` takes a driver that uses a key only the branch has (for
-  this surface, `<< >> pkcanvas` with a `/Touch` stroke). It must render
+  this surface, `/Touch` on a preset that *this slice* adds it to, since
+  `main` already has the key on the presets earlier slices covered). It must render
   differently in the two trees, or the script exits 2: the identical
   pages would prove nothing.
 - Record the counts in the PR.
