@@ -20,7 +20,21 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
 
-cargo build --release --manifest-path "$ROOT/Cargo.toml" --quiet
+# PSCAT_PROFILE picks the cargo profile (default: release). CI sets it to
+# `ci` (see Cargo.toml) so this step shares compiled dependencies with the
+# `cargo test --profile ci` step instead of building a second optimized
+# set. `dev` is cargo's name for the debug profile; its output dir is
+# `debug`, hence the mapping below.
+PROFILE="${PSCAT_PROFILE:-release}"
+case "$PROFILE" in
+    dev) PROFILE_DIR=debug ;;
+    *) PROFILE_DIR="$PROFILE" ;;
+esac
+if [ "$PROFILE" = release ]; then
+    cargo build --release --manifest-path "$ROOT/Cargo.toml" --quiet
+else
+    cargo build --profile "$PROFILE" --manifest-path "$ROOT/Cargo.toml" --quiet
+fi
 
 # Ask Cargo where it put the binary rather than assuming `$ROOT/target`:
 # with CARGO_TARGET_DIR or a `build.target-dir` in config.toml, the
@@ -30,7 +44,7 @@ cargo build --release --manifest-path "$ROOT/Cargo.toml" --quiet
 TARGET_DIR=$(cargo metadata --format-version 1 --no-deps \
     --manifest-path "$ROOT/Cargo.toml" 2>/dev/null \
     | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')
-BIN="${TARGET_DIR:-${CARGO_TARGET_DIR:-$ROOT/target}}/release/pscat"
+BIN="${TARGET_DIR:-${CARGO_TARGET_DIR:-$ROOT/target}}/$PROFILE_DIR/pscat"
 if [ ! -x "$BIN" ]; then
     echo "selftest.sh: built pscat not found at $BIN" >&2
     exit 1

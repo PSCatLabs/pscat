@@ -282,7 +282,7 @@ update and wait for CI before merging:
 
 ```sh
 gh pr update-branch <PR#>
-gh pr checks <PR#> --watch   # or poll; wait for the re-triggered run
+# then wait with SKILL.md step 8.12's background recipe (pitfalls.md "CI wait"); never poll or sleep
 ```
 
 Then merge using the shape recorded in `SDLC.md`'s `merge_button`
