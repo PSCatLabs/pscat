@@ -723,8 +723,9 @@ it along a line.
 ```
 
 The wrapped procedure has to paint in the color it inherits (grading
-sets the color before each pass), so a scene is wrapped element by
-element, and `/Direction` is measured in the user space pkwet is called
+sets the color before each pass) or in loaded colors (`/Colors` on
+`pkbroad` or `pktrowel`, which pkwet grades by the same mix), so a
+scene is wrapped element by element, and `/Direction` is measured in the user space pkwet is called
 in — keep a reflection's mirror inside the procedure. A directional
 call defaults to enough layers to keep the passes within 2pt of each
 other (up to 16), because identical copies further apart read as
