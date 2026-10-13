@@ -749,6 +749,15 @@ renders eight examples in both and compares block-downsampled output).
   self-seeded scene without re-rolling its marks, log `rrand` at each
   painting step and restore it with `srand` on replay
   (`gallery/alpine_lake.ps`'s `lkdo`, issue #191).
+- **Loaded colours have a resolver but no adopter yet** (issue #183, slice
+  L1; design in `docs/PAINT_LOADING.md`). `lib/paintkit.ps`'s `pu-`
+  section (`puparse`, `puat`, `puwet`, `puspell`, `pulightneedscolors`)
+  turns a head position into a colour; no preset calls it until L2/L4/L5.
+  A preset keeps the record `puparse` returns under *its own* prefix, since
+  nested `pkribbon` calls clobber `pk*` names and `pu` names are scratch.
+  `puwet` is the identity until L3 has `pkwet` publish its pass mix; call it
+  anyway, so L3 changes no preset. `puparse` returns `null` for an unset
+  `/Colors`, and it leaves `/Light` to the preset (`pkdab` owns one).
 - **A "collect stops, then draw runs" brush must not call the caller's
   `/Pressure` proc inside its per-lane/per-bristle loop.** A caller's
   proc is arbitrary code and may consume randomness (`{ frnd }` is a
