@@ -4227,11 +4227,15 @@
 % Three things a directional call needs that an isotropic one gets away
 % without:
 %
-%   * The procedure must paint in the color it inherits. Grading works
-%     by setting a mixed color *before* the procedure runs; one that
-%     sets its own color (as every element of a gallery scene does)
-%     draws every pass at full strength, and a line of full-strength
-%     copies is a hard echo, not a pull. Wrap a multi-colored scene
+%   * The procedure must paint in the color it inherits, *or* in loaded
+%     colors (`/Colors` on a preset that takes them), which pkwet grades
+%     for you. Grading works by setting a mixed color *before* the
+%     procedure runs; one that sets its own color (as every element of
+%     a gallery scene does) draws every pass at full strength, and a
+%     line of full-strength copies is a hard echo, not a pull. A loaded
+%     preset mixes each of its colors by the running pass's factor
+%     instead (`puwet`), so a two-color stroke fades like a one-color
+%     one. Wrap a multi-colored scene
 %     element by element, each with the /Under that is really beneath
 %     it -- under a reflected treeline that is the reflected range, not
 %     the open water.
@@ -4374,7 +4378,7 @@
 % depth pqdset -
 % @internal
 /pqdset { userdict /pqdepth 3 -1 roll put } def
-% -> frame   (this invocation's [plan procedure] pair)
+% -> frame   (this invocation's 7-slot frame; pkwet lists the slots)
 % @internal
 /pqmyframe { userdict /pqframes get pqdnow get } def
 
@@ -4496,7 +4500,7 @@
 % @param: /Pickup [0..1] how far the outermost pass mixes toward Under; lower keeps the mark's own color out to its edge (default 0.85)
 % @param: /Layers [count] Passes to draw, outermost first; must be a whole number, hard cap 1..6, or 1..16 with /Direction (default 1 + round(Soft*5); with /Direction, raised to keep same-side passes at most 2pt apart, up to 16)
 % @param: /Offset [points] How far in points the outermost pass is displaced from the true path; inert at Layers 1, which has only a core pass. Formerly /Spread, still accepted as a deprecated alias; /Offset wins if both are given (default Soft*14)
-% @param: /Direction [degrees] Degrees, in the user space pkwet is called in: lines the passes up along this axis instead of scattering them, for a pulled-down reflection (270), a lifted mist (90) or a swept sky (0). The procedure must paint in the color it inherits. A chain of nested calls containing a directional one may multiply its innermost procedure at most 64 times. Without an explicit /Layers its depth follows /Offset, so pin /Layers while tuning /Offset (default absent: isotropic)
+% @param: /Direction [degrees] Degrees, in the user space pkwet is called in: lines the passes up along this axis instead of scattering them, for a pulled-down reflection (270), a lifted mist (90) or a swept sky (0). The procedure must paint in the color it inherits, or in loaded colors (/Colors), which pkwet grades for you. A chain of nested calls containing a directional one may multiply its innermost procedure at most 64 times. Without an explicit /Layers its depth follows /Offset, so pin /Layers while tuning /Offset (default absent: isotropic)
 % @param: /Stretch [ratio] With /Direction only: along-to-across ratio, at least 1; the cross-axis wobble is the along-axis reach divided by this (default 8)
 % @param: /OneSided [boolean] With /Direction only: true puts every pass on the +Direction side (a pull down, a lift up); false alternates sides, a sweep both ways (default false)
 /pkwet {
@@ -4615,7 +4619,11 @@
     pqLayers mul /pqchain exch def
     pqchaindir pqchain 64 gt and
         { pqdnow 1 sub pqdset pkwet-too-many-passes } if
-    userdict /pqframes get pqdnow 4 array put
+    % Seven slots: 0 the plan, 1 the procedure, 2-3 the pass budget's
+    % running product and flag, and 4-6 the pass mix that loaded colours
+    % read (issue #183 slice L3, below). 4-6 go at the end so 0-3 keep the
+    % meaning the budget and the nesting machinery rely on.
+    userdict /pqframes get pqdnow 7 array put
     pqmyframe 1 /pqproc load put
     pqmyframe 2 pqchain put
     pqmyframe 3 pqchaindir put
@@ -4625,6 +4633,7 @@
     % this mark's halo would shift according to how many draws the
     % caller's brush happens to take.
     /pqplan pqLayers array def
+    /pqks pqLayers array def
     0 1 pqLayers 1 sub {
         /pqi exch def
         % 1.0 at the outermost pass, 0.0 at the core. A single-pass call
@@ -4681,6 +4690,9 @@
             pqf 0 gt { pqbase pqUnder pqf pqPickup mul mix3 } if
         ]
         put
+        % The same factor, published for loaded colours: 0 at the core,
+        % exactly the t the line above hands mix3 elsewhere. No draw.
+        pqks pqi pqf 0 gt { pqf pqPickup mul } { 0 } ifelse put
     } for
     % Outermost pass first, so each subsequent (less displaced, less
     % mixed) pass is laid over it and the caller's own color lands last,
@@ -4694,6 +4706,20 @@
     % overwriting the outer one's plan mid-loop. See the header for why
     % neither plain names nor the operand stack works here.
     pqmyframe 0 pqplan put
+    % The pass mix, for a preset painting in *loaded* colours (`/Colors`,
+    % issue #183 slice L3, docs/PAINT_LOADING.md 3.4). Setting the colour
+    % before a pass grades an inherited colour, but a loaded brush paints
+    % in its own, so every pass would come out at full strength and a pull
+    % would read as a hard block. `puwet` instead mixes each loaded colour
+    % toward slot 5 by slot 4's factor for the pass in slot 6, at every
+    % depth 1..pqdnow, outermost first -- the order nested calls mix an
+    % inherited colour. /Under is copied, so a procedure that edits the
+    % caller's array mid-call can't make puwet disagree with the plan.
+    % Only puwet reads these slots, and only for depths that are live, so
+    % a stale frame left by a finished or unwound call is never read and
+    % the error path needs nothing new. Every existing render is unchanged.
+    pqmyframe 4 pqks put
+    pqmyframe 5 pqUnder aload pop 3 array astore put
     % Each pass runs under `stopped`, which is what makes this wrapper
     % safe to abandon. Three separate review findings were all the same
     % missing unwind-protect: a caught error leaked one graphics-state
@@ -4732,6 +4758,9 @@
     % silently, which is what this did originally, is the one behavior
     % that would not be.
     pqLayers 1 sub -1 0 {
+        % Slot 6 names the pass about to run, written in the same place
+        % its colour is set.
+        dup pqmyframe 6 3 -1 roll put
         pqmyframe 0 get exch get
         gsave
             dup length 2 gt
@@ -5840,7 +5869,7 @@ systemdict /setalpha known /pwhasalpha exch def
 %   opts (pkfan) puspell            -> -            reject the British spellings
 %   opts (pkfan) pulightneedscolors -> -            reject /Light without /Colors
 %   rec u flip puat                 -> r g b        colour at head position u
-%   r g b puwet                     -> r g b        pkwet's grading (identity here)
+%   r g b puwet                     -> r g b        pkwet's grading of the pass
 %
 % Why a prefix of its own. The resolver runs inside `pkfan` and `pkoil`, whose
 % nested `pkribbon` calls clobber every `pk*` name. `pu` names are scratch
@@ -5999,11 +6028,28 @@ systemdict /setalpha known /pwhasalpha exch def
 } def
 
 % r g b puwet -> r g b
-% Where a loaded colour is graded by the `pkwet` pass it is painted in. The
-% identity until slice L3 has `pkwet` publish its pass mix; a preset calls it
-% from the start so L3 changes no preset.
+% A loaded colour graded by the `pkwet` passes it is painted in (slice L3,
+% section 3.4 of the design). `pkwet` grades an inherited colour by setting
+% mix3(base, Under, k) before each pass; a loaded brush ignores the current
+% colour, so it calls this to take the same mix itself. For each live depth
+% d = 1 .. pqdnow, outermost first (the order nested calls mix an inherited
+% colour), the colour becomes mix3(c, Under_d, k_d), where k_d is frame d's
+% slot-4 factor for the pass in slot 6 and Under_d is slot 5. Outside any
+% pkwet it is the identity. A core pass's factor is 0 and is skipped rather
+% than mixed, so the core, and the whole of a /Soft 0 call, is the identity
+% to the last bit. Reads only its operands and the live frames; no draws.
 % @internal
-/puwet { } def
+/puwet {
+    pqdnow 0 gt {
+        3 array astore /puwc exch def
+        1 1 pqdnow {
+            userdict /pqframes get exch get /puwf exch def
+            puwf 4 get puwf 6 get get /puwk exch def
+            puwk 0 ne { /puwc [ puwc puwf 5 get puwk mix3 ] def } if
+        } for
+        puwc aload pop
+    } if
+} def
 
 %%SelfTest: puparse-rejects-malformed-loads
 %   { << /Colors 5 >> (pkfan) puparse }
@@ -6256,7 +6302,7 @@ systemdict /setalpha known /pwhasalpha exch def
 %   (a uniform load is exactly its colour) mustbe
 %%EndSelfTest
 %
-%%SelfTest: puwet-is-the-identity-until-pkwet-publishes-its-mix
+%%SelfTest: puwet-applies-pkwets-pass-mix
 %   0.1 0.2 0.3 puwet
 %   0.3 eq exch 0.2 eq and exch 0.1 eq and
 %   (outside any pkwet) mustbe
@@ -6266,6 +6312,34 @@ systemdict /setalpha known /pwhasalpha exch def
 %   << /Soft 0 >> pkwet
 %   putr 0.1 eq putg 0.2 eq and putb 0.3 eq and
 %   (inside /Soft 0) mustbe
+%
+%   % Two passes, outermost first: the outer pass is mixed all the way to
+%   % /Under (Pickup 1), the core not at all.
+%   userdict /putl [ ] put
+%   { userdict /putl [ putl aload pop 0 0.5 1 puwet ] put }
+%   << /Layers 2 /Offset 0 /Pickup 1 /Under [ 1 0.5 0 ] >> pkwet
+%   putl length 6 eq
+%   putl 0 get 1 eq and putl 1 get 0.5 eq and putl 2 get 0 eq and
+%   putl 3 get 0 eq and putl 4 get 0.5 eq and putl 5 get 1 eq and
+%   (an outer pass goes to /Under, the core stays put) mustbe
+%
+%   % Nested: the outer call's mix first, then the inner's. The outer
+%   % pass of the outer call with the inner core gives [1 1 1]; with the
+%   % inner's outer pass on top, that goes half way to black.
+%   userdict /putl [ ] put
+%   { { userdict /putl [ putl aload pop 0 0 0 puwet ] put }
+%     << /Layers 2 /Offset 0 /Pickup 0.5 /Under [ 0 0 0 ] >> pkwet }
+%   << /Layers 2 /Offset 0 /Pickup 1 /Under [ 1 1 1 ] >> pkwet
+%   putl length 12 eq
+%   putl 0 get 0.5 eq and putl 3 get 1 eq and
+%   putl 6 get 0 eq and putl 9 get 0 eq and
+%   (nested passes mix outermost call first) mustbe
+%
+%   % Errors unwind the depth, so a later top-level call is ungraded.
+%   { { 1 0 0 puwet pop pop pop nosuchname } << /Layers 3 /Offset 0 >> pkwet } stopped pop
+%   0.1 0.2 0.3 puwet
+%   0.3 eq exch 0.2 eq and exch 0.1 eq and
+%   (after an unwound pkwet) mustbe
 %%EndSelfTest
 
 % raw n pitch angle light puflips -> flips

@@ -576,6 +576,10 @@ renders eight examples in both and compares block-downsampled output).
    target should promote those seams into a neutral display list
    first — the design note in `src/pdf.rs` says why that wasn't
    done at two.
+   An exporter table keyed by clip-node identity must hold the `Rc`
+   (SVG's `clip_ids` stores it, PDF's `open_clip` is one), never a bare
+   `Rc::as_ptr` address: a freed node's address is recycled and aliases a
+   different clip (#258/#261).
    PDF shares one `q <clip>` group across consecutive elements with
    the same clip `Rc` (#219), so a new PDF hook must go through
    `enter_clip` and keep its own inner `q ... Q`. Page content streams
@@ -742,15 +746,16 @@ renders eight examples in both and compares block-downsampled output).
   *told* — `pkwet`'s `/Under` is the pattern to copy, not a stopgap.
   Directional blends don't need readback either: `pkwet`'s `/Direction`
   (issue #181) pulls, lifts and sweeps by re-running the mark along a
-  line. Its wrapped proc must paint in the color it *inherits* — a proc
-  that sets its own color turns every graded pass into a hard echo —
-  and the direction is in the caller's user space, so a reflection's
+  line. Its wrapped proc must paint in the color it *inherits*, or in
+  loaded colours (`/Colors`), which `pkwet` grades for you — a proc that
+  sets its own color with `setrgbcolor` turns every graded pass into a
+  hard echo — and the direction is in the caller's user space, so a reflection's
   mirror goes inside the proc. To pull one colour out of a multi-colour
   self-seeded scene without re-rolling its marks, log `rrand` at each
   painting step and restore it with `srand` on replay
   (`gallery/alpine_lake.ps`'s `lkdo`, issue #191).
 - **Loaded colours: `pkbroad` and `pktrowel` adopt them, the rest do not
-  yet** (issue #183, slices L1-L2; design in `docs/PAINT_LOADING.md`).
+  yet** (issue #183, slices L1-L3; design in `docs/PAINT_LOADING.md`).
   `lib/paintkit.ps`'s `pu-` section (`puparse`, `puat`, `puflips`, `puwet`,
   `puspell`, `pulightneedscolors`) turns a head position into a colour.
   A preset keeps the record `puparse` returns under *its own* prefix
@@ -762,9 +767,11 @@ renders eight examples in both and compares block-downsampled output).
   from the stops' `atend` bits, with no random draws. The colour is set
   *inside the fill* (`pmemit`/`pmstamp`/`ptemit`, behind `ptk 0 gt`), from
   the head position (`pmnc`, `ptnc`, or +-1 for pktrowel's ridges) and the
-  flip of the run's first stop. `puwet` is the identity until L3 has `pkwet`
-  publish its pass mix; call it anyway, so L3 changes no preset. `pkfan`
-  (L4) and `pkdab` (L5) are next.
+  flip of the run's first stop, then passed through `puwet`, which grades it
+  by the running `pkwet` pass (L3): frames have 7 slots, and 4-6 are the
+  per-pass factors, a copy of `/Under` and the running pass index. A new
+  adopter must call `puwet` on every loaded colour, or its marks go solid
+  inside a pull. `pkfan` (L4) and `pkdab` (L5) are next.
 - **Paintkit slices prove byte identity with `scripts/identity_check.sh
   BASE_WORKTREE [BIN] --control FILE [--gallery-still]`** (issue #263), not
   by hand. It renders every tracked `examples/`, `gallery/` and

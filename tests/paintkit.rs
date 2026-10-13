@@ -9965,3 +9965,175 @@ fn touch_box_contains_the_whole_mark() {
         );
     }
 }
+
+// --- loaded colours under pkwet (issue #183, slice L3 #223) ----------
+//
+// `pkwet` publishes each pass's mix (frame slots 4-6) and `puwet` applies
+// it to a loaded colour, so a two-colour stroke inside a pull grades
+// toward `/Under` like an inherited-colour one. docs/PAINT_LOADING.md
+// section 3.4; tests 9 and 10 of section 6.
+
+/// `body` (a mark that builds its own path) wrapped as `{ body } << wet >>
+/// pkwet`, painted after `colour` and `29 srand` on a 400x200 page.
+fn wet_loaded(colour: &str, body: &str, wet: &str) -> Interp {
+    let mut it = fresh(400, 200);
+    it.run_str(&format!("{colour} 29 srand {{ {body} }} << {wet} >> pkwet"))
+        .unwrap_or_else(|e| panic!("{body} under {wet}: {}", it.error_report(&e)));
+    it
+}
+
+/// How many pixels in `rows` x `120..280` are within 40 of `want` on
+/// every channel, and how many are inked at all (not white).
+fn near_count(it: &Interp, rows: std::ops::Range<u32>, want: [i32; 3]) -> (usize, usize) {
+    let (mut near, mut inked) = (0, 0);
+    for y in rows {
+        for x in 120..280 {
+            let p = it.gfx().pixmap.pixel(x, y).expect("in bounds");
+            let c = [p.red() as i32, p.green() as i32, p.blue() as i32];
+            if c != [255, 255, 255] {
+                inked += 1;
+            }
+            if c.iter().zip(want).all(|(a, b)| (a - b).abs() <= 40) {
+                near += 1;
+            }
+        }
+    }
+    (near, inked)
+}
+
+/// Test 9. A red-over-blue load pulled down 80pt in two passes. The core
+/// pass keeps the pure load; the outer pass, clear of the core, is each
+/// colour mixed 0.85 of the way to the green `/Under`, so it sits near
+/// green, not near red or blue. With `puwet` as the identity the outer
+/// pass is pure red over pure blue and every outer assertion fails
+/// (mutation-checked).
+#[test]
+fn wet_pull_grades_loaded_colors() {
+    // mix3(C, [0 1 0], 0.85): red -> (38, 217, 0), blue -> (0, 217, 38).
+    let red_wet = [38, 217, 0];
+    let blue_wet = [0, 217, 38];
+    for (preset, base) in LOAD_PRESETS {
+        let it = wet_loaded(
+            "0 0 0 setrgbcolor",
+            &format!(
+                "newpath 50 160 moveto 350 160 lineto \
+                 << {base} /Colors [[1 0 0] [0 0 1]] /ColorMix 0 >> {preset}"
+            ),
+            "/Direction 270 /OneSided true /Layers 2 /Offset 80 /Under [0 1 0]",
+        );
+        // Core: user y 135..185, pixel rows 15..65, red over blue.
+        let (r, b) = red_and_blue(&it, 18..38);
+        assert!(r > 3000 && b == 0, "{preset} core top: red {r} blue {b}");
+        let (r, b) = red_and_blue(&it, 42..62);
+        assert!(b > 3000 && r == 0, "{preset} core bottom: red {r} blue {b}");
+        // Outer pass: user y 55..105, pixel rows 95..145.
+        for (half, rows, want) in [("top", 98..118, red_wet), ("bottom", 122..142, blue_wet)] {
+            let (near, inked) = near_count(&it, rows.clone(), want);
+            assert!(
+                inked > 2000 && near * 10 > inked * 9,
+                "{preset} outer {half}: {near} of {inked} inked pixels near {want:?}"
+            );
+            let (r, b) = red_and_blue(&it, rows);
+            assert_eq!((r, b), (0, 0), "{preset} outer {half}: ungraded load");
+        }
+    }
+}
+
+/// A load whose colours equal the current colour paints, under any pkwet,
+/// what the plain brush paints there: `puwet` grades by the same factor,
+/// toward the same `/Under`, in the same nesting order as pkwet grades an
+/// inherited colour. Not bit-exact: the graphics state keeps colours as
+/// f32, so the plain brush reads back a rounded mix that `puwet`'s f64
+/// one isn't, and a channel may land one level apart.
+#[test]
+fn a_uniform_load_under_pkwet_is_the_plain_brush_under_pkwet() {
+    let colour = "0.25 0.5 0.75 setrgbcolor";
+    let load = "/Colors [[0.25 0.5 0.75] [0.25 0.5 0.75]] /ColorMix 1 /Light 90";
+    let pull = "/Direction 270 /OneSided true /Layers 4 /Offset 30 /Under [0.9 0.8 0.3]";
+    let marks: Vec<(String, String)> = LOAD_PRESETS
+        .iter()
+        .map(|(preset, base)| {
+            let base = base.replace("/ColorJitter 0", "/ColorJitter 0.3");
+            let path = "newpath 50 150 moveto 150 120 250 120 350 150 curveto";
+            (
+                format!("{path} << {base} >> {preset}"),
+                format!("{path} << {base} {load} >> {preset}"),
+            )
+        })
+        .chain(std::iter::once((
+            // A touched knife: graded inside the catch.
+            "newpath 50 150 moveto 350 140 lineto << /Width 40 /Touch 0.6 >> pktrowel".into(),
+            format!(
+                "newpath 50 150 moveto 350 140 lineto << /Width 40 /Touch 0.6 {load} >> pktrowel"
+            ),
+        )))
+        .collect();
+    for (plain, loaded) in &marks {
+        for (name, wrap) in [
+            ("pull", format!("{{ BODY }} << {pull} >> pkwet")),
+            (
+                "isotropic",
+                "{ BODY } << /Soft 0.7 /Under [0.1 0.6 0.2] >> pkwet".into(),
+            ),
+            (
+                "nested",
+                format!(
+                    "{{ {{ BODY }} << /Direction 0 /Layers 3 /Offset 12 /Under [0.2 0.1 0.9] >> pkwet }} \
+                     << {pull} >> pkwet"
+                ),
+            ),
+        ] {
+            let render = |body: &str| {
+                let mut it = fresh(400, 200);
+                let src = format!(
+                    "{colour} << >> pkcanvas 29 srand {}",
+                    wrap.replace("BODY", body)
+                );
+                it.run_str(&src)
+                    .unwrap_or_else(|e| panic!("{name}: {}", it.error_report(&e)));
+                pixels(&it)
+            };
+            let (a, b) = (render(plain), render(loaded));
+            let worst = a
+                .iter()
+                .zip(&b)
+                .map(|(x, y)| (*x as i32 - *y as i32).abs())
+                .max()
+                .unwrap_or(0);
+            assert!(
+                worst <= 1,
+                "{name} `{loaded}`: off by {worst} from the plain brush"
+            );
+            assert_ne!(
+                a,
+                pixels(&fresh(400, 200)),
+                "{name} `{plain}` painted nothing"
+            );
+        }
+    }
+}
+
+/// Test 10. Growing pkwet's frames changes neither specimen: both render
+/// to the hashes they had before the slice (origin/main at 91013c3).
+#[test]
+fn wet_frame_slots_do_not_change_pkwet() {
+    for (name, w, h, pinned) in [
+        ("paintkit_wet_demo.ps", 620, 560, 0x3630377195f88462u64),
+        ("paintkit_wet_pull_demo.ps", 780, 640, 0xa62c781c86c3d4b1u64),
+    ] {
+        let source = std::fs::read(format!("examples/{name}"))
+            .unwrap_or_else(|e| panic!("read {name}: {e}"));
+        let mut it = Interp::with_page(w, h).expect("page");
+        it.run_source(&source)
+            .unwrap_or_else(|e| panic!("{name}: {}", it.error_report(&e)));
+        assert!(it.gfx().page_shown, "{name} never reached showpage");
+        let blank = Interp::with_page(w, h).expect("page");
+        assert_ne!(
+            it.gfx().pixmap.data(),
+            blank.gfx().pixmap.data(),
+            "{name} rendered a blank page"
+        );
+        let got = fnv1a(it.gfx().pixmap.data());
+        assert_eq!(got, pinned, "{name} moved: {got:#x}");
+    }
+}

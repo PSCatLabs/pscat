@@ -323,3 +323,69 @@ fn images_carry_no_blend_mode() {
     assert!(svg.contains("<image"), "{svg}");
     assert!(!svg.contains("mix-blend-mode"), "{svg}");
 }
+
+/// Issue #258/#261: every distinct clip gets its own `<clipPath>` def.
+/// The def table was keyed by the clip node's raw address without
+/// holding the node, so once `grestore` freed one, the allocator could
+/// hand its address to a *different* clip later and the new clip was
+/// silently emitted with the old clip's id (wrong clipping, and a def
+/// count that varied from run to run).
+#[test]
+fn every_distinct_clip_gets_its_own_def_even_after_grestore() {
+    let pages = svg_pages(
+        "0 1 29 {
+           /i exch def
+           gsave
+             newpath i 2 mul 0 moveto i 2 mul 10 add 0 lineto
+             i 2 mul 10 add 99 lineto i 2 mul 99 lineto closepath clip
+             newpath 0 0 100 100 rectfill
+           grestore
+         } for",
+    );
+    let svg = &pages[0];
+    assert_eq!(svg.matches("<clipPath").count(), 30);
+    // ...and each fill group refers to its own def, in order.
+    for i in 0..30 {
+        assert!(
+            svg.contains(&format!("<g clip-path=\"url(#c{i})\">")),
+            "{svg}"
+        );
+    }
+}
+
+fn render_svg(args: &[&str]) -> String {
+    let out = std::env::temp_dir().join(format!(
+        "pscat-svg-det-{}-{}.svg",
+        std::process::id(),
+        args.last().unwrap().replace(['/', '.'], "_")
+    ));
+    let root = env!("CARGO_MANIFEST_DIR");
+    let status = std::process::Command::new(env!("CARGO_BIN_EXE_pscat"))
+        .current_dir(root)
+        .arg("--headless")
+        .arg("--svg")
+        .arg(&out)
+        .args(args)
+        .output()
+        .expect("spawn pscat");
+    assert!(
+        status.status.success(),
+        "{args:?}: {}",
+        String::from_utf8_lossy(&status.stderr)
+    );
+    let svg = std::fs::read_to_string(&out).expect("svg written");
+    let _ = std::fs::remove_file(&out);
+    svg
+}
+
+/// Issue #258/#261: the same program must export byte-identical SVG on
+/// every run (the two files below varied before the fix).
+#[test]
+fn svg_export_is_byte_identical_across_runs() {
+    for file in ["examples/halftone.ps", "examples/paintkit_motion_demo.ps"] {
+        let a = render_svg(&[file]);
+        let b = render_svg(&[file]);
+        let c = render_svg(&[file]);
+        assert!(a == b && b == c, "{file}: SVG differs between runs");
+    }
+}

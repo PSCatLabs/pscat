@@ -3,6 +3,49 @@
 Newest first. Per `AGENTS.md`, each stage ends with a summary here: what
 was built, tradeoffs made, what's explicitly deferred.
 
+## Paint loading L3: `pkwet` grades loaded colours (issue #223, 2026-10-13)
+
+Slice L3 of #183's design (`docs/PAINT_LOADING.md` 3.4 and 6). A
+two-colour `pkbroad` or `pktrowel` stroke inside a `pkwet` pull now fades
+toward `/Under` like a one-colour stroke, instead of every pass landing
+at full strength as a hard block.
+
+- **Frames grow from 4 slots to 7.** Slot 4 is the per-pass factor
+  (`f*Pickup`, 0 at the core), filled in the existing plan loop with no
+  draw. Slot 5 is a copy of `/Under`. Slot 6 is the index of the pass
+  about to run, written just before its `gsave`. Slots 0-3 are unchanged,
+  so the pass budget and the nesting machinery read what they always did.
+- **`puwet` mixes `c` toward `Under_d` by `k_d` for each live depth,
+  outermost first**, which is the order nested calls mix an inherited
+  colour. It reads only depths `1 .. pqdnow`, so a frame left by a
+  finished or error-unwound call is never read, and the error path needed
+  no new code. A self-test pins that a caught error leaves `puwet` the
+  identity.
+- **A 0 factor is skipped, not mixed.** The core pass, and all of a
+  `/Soft 0` call, is then the identity to the last bit rather than
+  `c + (U - c) * 0`.
+- **`/Under` is copied into the frame.** The plan bakes `/Under` into each
+  pass's colour when the call starts, so `puwet` must use the same value
+  even if the procedure edits the caller's array (advisor).
+- **Not bit-exact against an inherited colour.** The graphics state keeps
+  colours as f32, so the plain brush reads back a rounded mix and `puwet`'s
+  is f64. A uniform load under a pull, an isotropic `pkwet` and a nest of
+  two matches the plain brush there to within one level per channel. That
+  holds for pkbroad, pktrowel, and a touched pktrowel.
+- Tests: design tests 9 (`wet_pull_grades_loaded_colors`: a red-over-blue
+  load pulled 80pt in two passes; the outer pass sits near
+  `mix3(C, Under, 0.85)`) and 10 (`wet_frame_slots_do_not_change_pkwet`:
+  both wet demos against hashes taken from `origin/main` at 91013c3), the
+  uniform-load comparison above, and a `puwet` self-test (outer pass,
+  core, nesting order, after an unwound call). Mutation-checked: `puwet`
+  as the identity fails test 9 and the uniform-load test; walking the
+  depths innermost first fails the self-test and the nested case.
+- Byte identity: see the PR for the file and render counts.
+- The pull demo adds about 25s to `wet_frame_slots_do_not_change_pkwet` in
+  the CI profile.
+- Not here: `pkfan` (L4), `pkdab`/`pkoil` (L5), the specimen with a loaded
+  stroke inside a pull (L5b).
+
 ## Canvas surface S2: `/Touch` on pktrowel and pkdry (issue #222, 2026-10-13)
 
 Slice S2 of #182's design (`docs/CANVAS_SURFACE.md` 2.2, 3.2 and 6). With a
@@ -8924,3 +8967,33 @@ from the branch and compared by hand. `scripts/identity_check.sh BASE_WORKTREE
   (before L2) with a `pkbroad /Colors` control: 30/30 identical, the control
   differs, rc 0. Mutations in the base tree: an extra rectfill gives
   `DIFFERS`, a bogus operator gives `ERROR`, a deleted file gives `new`.
+
+## SVG export: deterministic, and correct, clip defs (issues #258, #261)
+
+- `pscat --svg` of one program differed from run to run (PNG never did).
+  Not a `HashMap` iteration order or a time seed: `SvgRecorder::clip_ids`
+  keyed each clip def by `Rc::as_ptr(&node) as usize` but did not keep the
+  `ClipNode` alive. After a `grestore` freed a node, the allocator could
+  hand its address to a *different* clip later, which then inherited the
+  old clip's `c<id>`, so the later element was grouped under the wrong
+  `<clipPath>` and no new def was written. Which addresses got reused
+  depended on allocator state (and so on the load and run), hence the
+  varying `<clipPath` counts (#261: 3, 2, 4 for `examples/halftone.ps`).
+- It was a correctness bug as well as a determinism one. Measured with
+  `qlmanage -t` (WebKit) rasterizations against pscat's own PNG, mean
+  absolute RGB difference: `lettering` 53.5 old vs 5.5 new, `halftone`
+  28.2 vs 6.6, `groovy_faces` 22.2 vs 8.8, `paintkit_motion_demo` 113 vs
+  7.9. Ten files whose old SVG happened to be identical across three runs
+  also had fewer defs than clips; of the five rasterized, four were
+  visibly wrong (`testcard`'s aliased clip happened not to show: 3.43 old
+  vs 3.31 new). 68 old-stable files are byte-identical old vs new.
+- Fix: the table now stores `(Rc<ClipNode>, id)`, so the address cannot be
+  recycled while the entry lives (cleared with the page in `erase`). Same
+  O(1) lookup, no per-element cost. `PdfRecorder::open_clip` already held
+  its `Rc` for this reason.
+- 3 runs of every `examples/*.ps` and `gallery/*.ps` (96 files; the two
+  multi-page ones compared across all their page files): 16 files varied
+  with the old binary, 0 with the new one.
+- Tests: `tests/svg.rs` gained an in-process grestore loop (30 distinct
+  clips must yield 30 defs; the old code gave 3) and a byte-identity check
+  across three CLI runs of two files that used to vary.
