@@ -178,7 +178,7 @@ each round; never edit or replace an earlier round's):
 
 ```sh
 gh issue comment <N> --body-file - <<'EOF'
-## Codex review, round <R> (PR <PR URL>)
+## Codex review, round <R> (PR <PR URL>, reviewed head <full sha of `git rev-parse HEAD`>)
 
 <details><summary>Codex output, verbatim</summary>
 
@@ -191,6 +191,12 @@ gh issue comment <N> --body-file - <<'EOF'
 | 1 | ... | yes / no / partly | Fixed in <short sha>: <what changed> — or — Not fixing: <explicit reason> |
 EOF
 ```
+
+The `reviewed head` in the heading (the commit `--scope branch` actually
+reviewed) is what a resumed run compares the PR head against; without it a
+resume cannot tell a current review from a stale one (`pitfalls.md`
+"Resume paths", Codex round 4 on #208). The `## Fallback review, round <R>`
+heading carries it too.
 
 Every finding gets a row, including ones judged not real (say why) and
 including a clean pass ("no findings", one row or a sentence). "Our

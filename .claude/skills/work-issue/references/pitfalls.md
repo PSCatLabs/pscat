@@ -329,7 +329,7 @@ file are gone). First match wins:
 | PR `CLOSED` unmerged | Stop and report. |
 | PR `MERGED` | Step 9 only. |
 | No `## Codex review` (or `## Fallback review`) comment on the PR | 8.1: the review never ran. |
-| The PR head has commits newer than the last review comment (`gh pr view <PR#> --json commits` `committedDate` vs the comment's `createdAt`), other than `update-branch` merge commits or a doc-only conflict merge (below) | 8.3 with R+1: re-review. |
+| The PR head is not the `reviewed head` named in the last `## Codex review, round` issue comment, and `git -C "$WORKTREE_DIR" log --first-parent --no-merges <reviewed-sha>..HEAD` is non-empty (the branch gained its own commits; merges of `main` alone leave it empty; timestamps are unreliable, a commit made before the review can be pushed after it) | 8.3 with R+1: re-review. |
 | Review current, but the issue has no `## Codex review, round <R>` comment for it, or any row of its table lacks a response ("Fixed in ..." / "Not fixing: ...") | 8.7: read the PR's review comment and disposition every finding. A finding that needs a fix goes through 8.9 (fix, push, gate, re-review with R+1). A review is never "clean" just because it is current (Codex round 2 on #208). |
 | Review current and every finding dispositioned, but no `## Summary of work (PR #<PR#>)` comment on the issue | 8.10, 8.11. |
 | Summary posted | 8.10 (re-read `merge_policy` and whether the dispatcher still says no merge), then 8.12. |
