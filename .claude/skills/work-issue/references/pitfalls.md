@@ -305,7 +305,10 @@ Entered from step 1 when an explicit `<N>` is `in-review` and an open PR
 claims it: a pending-CI hand-back, a no-merge hand-back (below), or a
 run that died after step 7. Claim as usual, skip step 2 (re-adding
 `in-progress` would make the next invocation read "someone is mid-run" and
-refuse), then step 3's reuse branch. If the worktree is gone, make one on
+refuse). Then restore the worktree: if `git worktree list` shows one ending
+`-issue-<N>`, take step 3's reuse branch. If it is gone, **do not** take
+step 3's "Otherwise" route (it cuts a new branch from `origin/main` and
+would lose the PR's work, or fail on the existing branch); make one on
 the PR branch: `git fetch origin "$BRANCH" && git worktree add "$WORKTREE_DIR" "$BRANCH"`
 (find `$BRANCH` with `gh pr list --state open --json number,headRefName --jq '.[] | select(.headRefName | test("/<N>-"))'`).
 Find the PR with `gh pr list --state open --head "$BRANCH" --json number,url`.
@@ -357,12 +360,15 @@ merge locally: `git -C "$WORKTREE_DIR" fetch origin main && git -C
 (no force).
 
 **Doc-only conflicts skip the re-review.** If every conflicted file in
-such a rebase or merge was documentation (`NOTES.md`, `HANDOFF.md`,
+such a rebase or merge was plain documentation (`NOTES.md`, `HANDOFF.md`,
 `README.md`, other `*.md`) and your resolution changed no other file
 (check, while still conflicted: `git diff --name-only --diff-filter=U`
 lists only `*.md` files), re-run the quality gate (5.5) but not
-the Codex review, and say so in the PR/issue comment. Any conflict in code,
-`lib/`, tests or scripts means the review is stale: re-review (8.3, R+1).
+the Codex review, and say so in the PR/issue comment. Markdown that steers
+agents is not documentation for this rule: anything under `.claude/` (skills
+and their references, which define executable workflow), `AGENTS.md`,
+`CLAUDE.md`, `SDLC.md` (Codex review, #208 round 1). Any conflict in those,
+code, `lib/`, tests or scripts means the review is stale: re-review (8.3, R+1).
 A merge of `main` with no conflicts at all never needs a re-review.
 
 ### Step 4 is a hard gate

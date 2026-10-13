@@ -36,11 +36,11 @@ The **open-PR list** (numbers already claimed by an open PR's `Closes #N`) is us
 gh pr list --state open --json body --jq \
   '[.[].body | scan("(?:Closes|Fixes|Resolves) #([0-9]+)")[][0] | tonumber]'
 ```
-
 **If `<N>` was given:** `gh issue view <N> --json state,title,labels`, then the open-PR list.
 - Closed, or `in-progress` AND in the open-PR list → stop, tell the user.
 - `in-review` AND in the open-PR list → a **resume**: claim below, skip step 2 (never re-add
-  `in-progress`), do step 3's reuse branch, then go to step 8 where pitfalls.md "Resume paths" says.
+  `in-progress`), follow pitfalls.md "Resume paths" (restores the PR worktree; step 3's
+  new-branch route would lose the PR's work), then step 8 where it says.
 - Otherwise claim `<N>` (below).
 
 **If no `<N>` was given:** first look for an abandoned run to resume:
@@ -80,7 +80,7 @@ BRANCH="$(git -C "$WORKTREE_DIR" branch --show-current)"
 LOCKDIR="$(git rev-parse --path-format=absolute --git-common-dir)/work-issue-lock-<N>"
 date +%s > "$LOCKDIR/heartbeat.tmp" && mv "$LOCKDIR/heartbeat.tmp" "$LOCKDIR/heartbeat"
 ```
-Do not recompute the branch name from the title. Skip to step 4 (on a resume, to step 8).
+Do not recompute the branch name from the title. Skip to step 4 (resume: step 8).
 
 **Otherwise** run this from the main checkout, filling in `SLUG` and `PREFIX`:
 ```sh
@@ -101,7 +101,7 @@ date +%s > "$LOCKDIR/heartbeat.tmp" && mv "$LOCKDIR/heartbeat.tmp" "$LOCKDIR/hea
 1. Read the issue: `gh issue view <N>`. Make design calls yourself; flag only what is hard to reverse.
 2. Estimate size. **Small** = diff of 20 lines or fewer AND no API change (no new/changed
    public Rust item, PostScript operator, CLI flag or lib procedure name). Otherwise **full**.
-   (The one definition of small; step 6 and the report point here.)
+   This is the only definition of small.
 3. Write the plan in your reply: files, approach, what you are not doing.
 4. **Hard gate, no code before it.** Heartbeat, then call the `advisor` tool (small: one short
    call, or skip and say so). If it objects, revise the plan. Heartbeat. The report's
@@ -183,14 +183,14 @@ Read `.claude/skills/work-issue/references/codex-review.md` now (full policy). T
 6. Post it on the PR, even when it is clean:
    `gh pr comment <PR#> --body "$(jq -r '"## Codex review\n\n" + .codex.stdout' <SCRATCH>/codex-review-<N>.json)"`
 7. Read every finding. Decide for each: fix it, or state why not.
-8. Post the round on the issue using the `## Codex review, round <R>`
-   template in codex-review.md: verbatim output plus one table row per finding.
+8. Post the round on the issue (`## Codex review, round <R>` template in codex-review.md):
+   verbatim output plus one table row per finding.
 9. If you fixed anything: commit, `git push` (no force), re-run the gate (5.5), go back to 4
    with R+1. Exception for a doc-only merge/rebase: pitfalls.md "Rebase and merge rules".
 10. Merge eligibility, from `merge_policy.mode`:
-    - `human-only`, or `size-and-risk-bar` and over the bar: run
-      `rm -rf "$(git rev-parse --path-format=absolute --git-common-dir)/work-issue-lock-<N>"`,
-      then go to step 10 and report the PR as awaiting merge. Stop.
+    - `human-only`, or `size-and-risk-bar` and over the bar: run `rm -rf "$(git rev-parse
+      --path-format=absolute --git-common-dir)/work-issue-lock-<N>"`, then go to step 10 and
+      report the PR as awaiting merge. Stop.
     - `agent-full`, or under the bar: continue, unless the dispatcher said not to merge: do 11, release the lock
       as above, keep `in-review` and the worktree, stop (pitfalls.md "Stop without merging").
 11. Write `<SCRATCH>/issue-<N>-summary.md`. It starts with `## Summary of work (PR #<PR#>)`
