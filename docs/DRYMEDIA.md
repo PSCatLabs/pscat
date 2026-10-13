@@ -93,6 +93,12 @@ bar of phi > 0.5 at *every* seed is too strict for oriented catches. #234's
 "shared surface" acceptance should be: mean phi over five seeds ≥ 0.4, and at
 least 0.25 above the control's mean (open question Q4).
 
+These numbers were measured at 144 dpi with `/Weave 2.5`, about 5 device
+pixels per cell. drykit's surfaces are 0.35–0.9pt, which is 1–2 pixels per
+cell at 144 dpi, so the same measurement there would be dominated by
+antialiasing. #234's test must render at 4 or more device pixels per cell,
+for example 720 dpi for `/Weave 0.4`, over a small region.
+
 ### 2.3 Named surfaces
 
 #234 ships five surfaces. Each is a set of `pkcanvas` options plus a ground
@@ -121,8 +127,13 @@ default fill adjust dilates each fill and clip by part of a pixel, so gaps of
 `-dGraphicsAlphaBits=4` doesn't help. `0 0 .setfilladjust2` does restore
 the texture.
 
-`.setfilladjust2` is a gs-internal operator, not PostScript. drykit calls it
-inside its own `gsave`, guarded so pscat skips it:
+The shipped `pjcatch` has the same problem: MODE 1 at `/Weave 0.7`, 216 dpi,
+comes out almost solid in gs.
+
+`.setfilladjust2` is a gs-internal operator, not PostScript. It is available
+under gs's default `-dSAFER`: a single concatenated file, run as plain
+`gs file.ps`, found it and rendered the texture. drykit calls it inside its
+own `gsave`, guarded so pscat skips it:
 
 ```
 /.setfilladjust2 where { pop 0 0 .setfilladjust2 } if
@@ -144,6 +155,7 @@ That test's unit check is extended from paintkit to drykit's files.
 ```
 opts dksurface -     % names the surface; calls pkcanvas; paints nothing
 opts dkstroke  -     % deposits along every subpath of the current path, in the current colour
+proc dkbatch   -     % runs proc; its dkstroke calls render together, level-major (3.3)
 ```
 
 The pigment is the current colour, as everywhere in paintkit. No key sets it.
@@ -192,6 +204,13 @@ drykit never calls `rand` or `srand`. Its tool-side generator is the
 surface takes no draws at all. `scatter` (fallout) takes a `/Seed` and
 restores the caller's stream itself.
 
+The default `/Seed` hashes the first point's canvas position, quantized to
+0.01pt. A small real-number difference between pscat and gs can cross a
+quantization step and re-roll that stroke's whole tool-side texture, not
+just one knuckle. So any pscat-versus-gs comparison (test 6) pins `/Seed`.
+The two interpreters' `rand` also differ: the prototype board, laid out
+with `rand`, produced 1984 catches in pscat and 1964 in gs.
+
 ### 3.3 Levels, bands, and level-major order
 
 One `dkstroke` call does the following:
@@ -212,8 +231,30 @@ The order is **level-major across all of the call's subpaths**. Opaque
 levels drawn stroke by stroke would let stroke B's dim level overpaint
 stroke A's bright core where they cross. Drawing every dim level first
 avoids that, and keeps the monotone "more chalk is brighter" look without
-alpha. A caller groups what must composite into one call: a glyph or a word
-for writing, one hatch layer for charcoal, one scribble for crayon.
+alpha.
+
+**Across calls, opaque levels lighten crossings.** `prototypes/layering.ps`
+draws two charcoal hatch layers crossing at 90°, each line with a dim level
+and a dark core. Drawn as two calls, the second layer's dim level paints
+over the first layer's dark core, so every crossing gets a grey break where
+it should be darkest (`prototypes/layering.png`, left). Level-major across
+both layers keeps the crossings dark (right). Tone built across calls is
+the normal case: cross-hatching, re-stroked chalk lines (C4, M8), and
+scribble fill. So the core adds a batch:
+
+```
+{ ... dkstroke calls ... } dkbatch -
+```
+
+Inside a batch, `dkstroke` runs step 1 only and appends the resolved stops
+to a record. When the batch ends, all records are rendered level-major, then
+band by band. Step 1 already builds those records, so a batch costs memory,
+not extra catches. Batches don't nest: an inner `dkbatch` raises
+`dkbatch-cannot-nest`.
+
+Each pigment gets its own batch, in drawing order. If colours B and A shared
+a batch, B's dim level would be drawn under A's core. Real wax or charcoal
+in a later colour lies on top.
 
 Ribbon geometry comes from round-capped strokes for constant width, and from
 `pkribbon`'s outline for `/Pressure` and `/Wear`. drykit calls `pkribbon`
@@ -339,8 +380,15 @@ That works out to about 11 µs per cell for the isotropic catch and about
 22 µs per cell oriented. The difference is the rotated-ellipse arithmetic.
 Resolution doesn't matter (216 dpi costs the same, as CS 3.3 found): the cost
 is interpretation. The swept-band estimate printed by the prototype for the
-last row is 553k cells, about 2.9× fewer. That puts the real core at about
-10s in pscat and 5s in gs for a full board.
+last row is 553k cells, about 2.9× fewer. That suggests about 10s in pscat
+and 5s in gs for the core on a full board.
+
+**That figure is an estimate.** The swept-band catch hasn't been built. The
+measured bounding-box cost (28s) is already at the board budget before any
+board dressing, and ghost text is roughly a second board of glyphs at low
+strength. So part of D1's acceptance is to build the swept-band catch,
+measure it on this board, and report the result against 6.2 before D2
+starts.
 
 Two things scale beyond that:
 
@@ -355,7 +403,7 @@ Two things scale beyond that:
 
 | Piece | pscat (release, 2x) | gs | Basis |
 |---|---|---|---|
-| full chalkboard (#238) | ≤ 30s | ≤ 30s | measured ~28s bbox; ~10s banded core; board dressing on top |
+| full chalkboard (#238) | ≤ 30s | ≤ 30s | measured 28s with bbox catches; ~10s estimated with swept band; board dressing and ghost text on top |
 | full portrait (#242) | ≤ 60s | ≤ 60s | ~3000 hatch strokes × 2 levels, plus smudges; about 2× the board in cells |
 | child's drawing (#240) | ≤ 20s | ≤ 20s | fewer, larger strokes at coarser `/Weave` (0.9) |
 | each specimen in `examples/` | ≤ 10s | ≤ 10s | specimens are smaller than pieces |
@@ -364,6 +412,7 @@ Two things scale beyond that:
 
 CI renders no gallery pieces. It runs `scripts/selftest.sh`, `cargo test`
 and a perf bench on `examples/sierpinski.ps` and `gallery/fern.ps`. The
+site build (`scripts/build_site.sh`) renders the gallery to PNG only. The
 budgets above that CI can't see are checked in each gallery PR's test plan.
 A piece over budget raises the cost question in its PR, rather than quietly
 coarsening the tooth (CS Q8's reasoning).
@@ -371,15 +420,16 @@ coarsening the tooth (CS Q8's reasoning).
 ### 6.3 Export size
 
 Every catch is a clip. PDF export shares one clip group across consecutive
-elements with the same clip (#219, CS 3.3's slice S0, landed). SVG pays
+elements with the same clip (#219, CS 3.3's slice S0, landed), and page
+streams are Flate-compressed (#256). SVG pays
 about 380 bytes per knuckle (CS 3.3). A full chalkboard is about 500k
 knuckles, so **SVG export of a drykit piece is about 200 MB**. The docs say
-so, and the gallery publishes PNG only. A cheaper vector form is open
-question Q7.
+so. The site and gallery build PNG only (`scripts/build_site.sh`), so the
+gallery tickets are unaffected. A cheaper vector form is open question Q7.
 
 ## 7. Prototypes
 
-All three are in `docs/drymedia/prototypes/` and run from the repo root.
+All of these are in `docs/drymedia/prototypes/` and run from the repo root.
 They read paintkit's internals and change nothing in it.
 
 - **`surface_cost.ps`** draws the board in section 6, in four modes: plain,
@@ -392,6 +442,8 @@ They read paintkit's internals and change nothing in it.
     bright, too even and too clean against C1 and C3.
 - **`dqcatch.ps`** is the oriented emitter (2.1), as a stand-alone file.
 - **`crossing.ps`** runs the phi and nesting measurements in 2.1 and 2.2.
+- **`layering.ps`** draws two hatch layers as two calls and as one
+  level-major call (`layering.png`), the evidence for `dkbatch` (3.3).
 - **`gs_filladjust.png`** is the Ghostscript result in 2.4.
 
 ## 8. Test plan for #234
@@ -418,10 +470,12 @@ Rust tests (`tests/drykit.rs`):
    - a mark drawn after the stroke from the caller's stream doesn't move
      when any drykit key changes;
    - adding a stroke elsewhere doesn't change this one (position seed).
-5. **Level-major order:** two crossing strokes in one call. The crossing has
-   no dim-level pixels over bright-level pixels.
-6. **gs agreement:** the 2.4 guard is in place, and pixels are compared at
-   288 dpi as in #253's test 8. This runs locally only (CI has no gs).
+5. **Level-major order:** two crossing strokes, once in one call and once
+   as two calls inside a `dkbatch`. In both, no dim-level pixels sit over
+   bright-level pixels at the crossing, and the two renders are
+   pixel-identical.
+6. **gs agreement:** with the 2.4 guard in place and `/Seed` pinned (3.2),
+   pixels are compared at 288 dpi as in #253's test 8. This runs locally only (CI has no gs).
 7. **Every documented parameter changes the render** (the pkbroad pattern),
    and every `@param` has a unit. The capabilities unit check is extended to
    drykit's files.
@@ -432,8 +486,8 @@ Rust tests (`tests/drykit.rs`):
 
 | Slice | Issue | What | Model | Thinking |
 |---|---|---|---|---|
-| D1 | #234 | `dkcatch` (oriented, swept band, reach), private generator, `dksurface`, tests 1–3, the gs guard | opus | xhigh |
-| D2 | #234 | `dkstroke`: walk, bands, levels, `/Pressure`/`/Wear`/`/Tilt`, contact chain and lanes, fallout through `scatter`, tests 4–8, the specimen (three pressures × three tilts × wear × five surfaces) | opus | high |
+| D1 | #234 | `dkcatch` (oriented, swept band, reach), private generator, `dksurface`, tests 1–3, the gs guard. Acceptance includes measuring the swept-band board against 6.2. | opus | xhigh |
+| D2 | #234 | `dkstroke` and `dkbatch`: walk, bands, levels, `/Pressure`/`/Wear`/`/Tilt`, contact chain and lanes, fallout through `scatter`, tests 4–8, the specimen (three pressures × three tilts × wear × five surfaces) | opus | high |
 | G1 | #236 | `lib/strokeglyphs.ps`: format, `sgpath`/`sgwidth`/`sggrow`, imported lowercase; then caps, digits and Greek; then operators and growing symbols | opus | high |
 | H0 | #241 (prep) | a `/Mark` path hook in `lib/hatchkit.ps`, byte-identical when unset | sonnet | medium |
 | — | #235, #237, #239, #241 | as filed, on top of D2 and G1 | as filed | as filed |
@@ -445,8 +499,8 @@ D1 and G1 can start together once this design is approved. D2 depends on D1.
 S-slices. The dependency is on `@internal` names (`pjheight`, `pjrange`,
 `pjhash`, `pjCTM`, `pjP`, `pjW`). D1 pins that contract with a drykit test
 that fails if any of them changes signature. Moving the `pj-` section into a
-shared `lib/toothkit.ps` is filed as a follow-up for after paintkit's
-in-flight slices land (Q1).
+shared `lib/toothkit.ps` should be filed as a follow-up once this design is approved, to run after
+paintkit's in-flight slices land (Q1).
 
 ## 10. Open questions for the maintainer
 
@@ -474,10 +528,12 @@ Each is phrased as a decision, with a recommendation.
   against the same tooth. A `[proc]` form is added here first (3.1), and
   paintkit can adopt it later. `/Pressure` keeps paintkit's width-profile
   meaning.
-- **Q6. Level-major order only within one call?**
-  Recommend yes. Ordering across calls would need a deferred-drawing queue,
-  which is a much bigger change. Writers batch per glyph or word, hatching
-  per layer, crayon per scribble (3.3).
+- **Q6. Level-major order across calls?**
+  Recommend `dkbatch` (3.3), in slice D2. The prototype showed that drawing
+  layers in separate calls lightens every crossing between them. Because
+  `dkstroke` already resolves stops into data, a batch is just a list of
+  records, not a general deferred-drawing queue. Batches hold one pigment
+  each and don't nest.
 - **Q7. SVG size.**
   Recommend documenting it and publishing drykit pieces as PNG. A future
   slice could emit the catch as a single compound path per level, a

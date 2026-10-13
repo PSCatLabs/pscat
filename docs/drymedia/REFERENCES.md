@@ -39,6 +39,8 @@ Rules followed:
 | `charcoal_stick_strokes` | [001 Charcoal 11 x 14 - Tom Bell](https://commons.wikimedia.org/wiki/File:001_Charcoal_11_x_14_-_Tom_Bell.jpg) | Tom Berlangero | CC BY-SA 4.0 |
 | `charcoal_compressed_mass` | [Portrait study in charcoal](https://commons.wikimedia.org/wiki/File:Portrait_study_in_charcoal_by_Mary_MacKinnon.jpg) (a halftone reproduction) | Mary MacKinnon | Public domain |
 
+The comparison panels in `prototypes/` (`chalk_compare.jpg`) contain crops from the cryptography board (CC BY 4.0) and the Einstein board (CC BY-SA 3.0), so those panels are CC BY-SA 3.0 with both attributions.
+
 These sources were viewed but no crop is committed. One is not free to
 reuse; the others add nothing the crops above lack:
 
@@ -103,7 +105,7 @@ reuse; the others add nothing the crops above lack:
 | Y2 | `crayon_fill_ground` | The pink and brown fills are horizontal back-and-forth scribble with ragged band edges and white seams between bands. Heavily pressed black (the feet) is almost solid, with a few specks. | Pressure moves coverage from speckled to solid: the touch threshold. Scribble fill leaves gaps between passes as well as within them. |
 | Y3 | `crayon_dense_fill` | A dense adult fill: fine parallel striations along each curved stroke (the wax edge dragging), darker patches where passes overlap, and paler blotchy islands where the paper's low spots stayed bare. | Two scales at once: fine striation along travel (a tool property) and blotches at the paper's mottle scale (a surface property). Overlap builds up darker. |
 | Y4 | `crayon_child_tadpole_3y` | A 3-year-old's "tadpole" figure: arms and legs grow from the head, with hair as a row of short strokes. Lines are darker where the stroke starts (the left arm's pressed blob at the head) and fade toward the end. | The child-drawing vocabulary and pressure profile for #239/#240: press on landing, fade out. |
-| Y5 | `crayon_child_rhino_6y` | A 6-year-old's whole picture: a sky band at the top (green foliage band), a "sun" behind, the subject in the middle, and a ground band at the bottom. Colours are laid side by side with white seams, and outlines are drawn over the fills. | Composition for #240: bands for sky and ground, outlines last. |
+| Y5 | `crayon_child_rhino_6y` | A 6-year-old's whole picture. A tree trunk on the left, with its canopy as a band of green scribble across the top; a large yellow sun disc behind the subject; the rhino in the middle; ground bands at the bottom. Colours are laid side by side with white seams, and outlines are drawn over the fills. The Commons title says crayon, but the waxy, dense fill could be oil pastel. | Composition for #240: bands at top and bottom, the subject in the middle, outlines last. |
 | Y6 | `crayon_tips` | New crayons have conical tips with a small flat. Worn ones have an oblique flat face. | Tip wear: a point that widens into a flat face, so the contact width grows over use. |
 
 ### #233 crayon traits
@@ -115,6 +117,7 @@ reuse; the others add nothing the crops above lack:
 | one colour layered over another | **Not yet sourced.** Y5 has colours side by side and outlines drawn over fills, but no true colour-over-colour layering. |
 | back-and-forth scribble fill that goes outside the lines | Y2, Y5 |
 | children's wobbly, overshooting lines and typical subjects | Y4, Y5 |
+| the sky as a band at the top (#240) | **Not yet sourced.** Y5's top band is a tree canopy, not sky. |
 
 ## Charcoal
 
@@ -122,9 +125,9 @@ reuse; the others add nothing the crops above lack:
 
 | # | Crop | What it shows | Mechanism for drykit |
 |---|---|---|---|
-| H1 | `charcoal_stumped_tone` | Stumped (blended) tone on laid paper. The grey is never flat: an isotropic felt-like grain over fine **vertical laid lines** from the paper. | The paper's surface has two components: a random grain, plus a directional laid-line pattern in drawing papers such as Ingres. |
+| H1 | `charcoal_stumped_tone` | Stumped (blended) tone. The grey is never flat: an isotropic felt-like grain, and on the right fine **vertical lines** in the paper, consistent with laid paper. The museum record doesn't state the support, so "laid" is inferred from the look. | The paper's surface can have two components: a random grain, plus a directional line pattern, as laid drawing papers such as Ingres have. |
 | H2 | `charcoal_hatching_on_tone` | Light hatching beside the head: thin parallel diagonal lines that break into **rows of dots and dashes** where they cross the tooth. Next to them, dense tone has a granular "fur". | At light touch only the tooth's peaks catch, so a thin line becomes a dotted line. This is the shared catch at low `/Touch`. |
-| H3 | `charcoal_student_portrait_1888` | A third-year student's portrait study: stumped tones, diagonal hatching in the background, white chalk highlights on the beard, a rubbed vignette edge and a pencilled signature. | Portrait structure for #242: block-in tone, smudge, hatch, then highlights. White chalk is used on top, so this is *not* a lifted highlight. |
+| H3 | `charcoal_student_portrait_1888` | A third-year student's portrait study, "signed in charcoal" per the Commons record: stumped tones, diagonal hatching in the background, a rubbed vignette edge, and bright, hard-edged whites on the beard. The record gives no medium line. The whites look applied (white chalk or heightening) rather than lifted, because they are brighter than the bare paper around the head. | Portrait structure for #242: block-in tone, smudge, hatch, then highlights. Applied whites are a pigment stroke on top. A lift (H8) is paper colour through the peaks. |
 | H4 | `charcoal_fine_hatching` | Fine short hatching at about 45° over a stumped base. Paper-white points of tooth survive even in the darks. | Even heavy tone keeps the highest-peak specks, unless it is smudged into the valleys. Smudging is the step that fills them. |
 | H5 | `charcoal_rubbed_ground` | A background rubbed with stump or cloth. Directional swipe marks and darker streaks lie over an evenly speckled tooth. | A smudge is a directional, low-contrast stroke: it spreads tone along its direction and raises valley fill. |
 | H6 | `charcoal_stick_strokes` | Stick-charcoal contour strokes on smooth paper: square-ended dashes from a chisel face, darker landings, and flicked tails that split into bristle-like streaks. A faint grey haze over the page comes from the hand dragging dust. | A stick's flat end gives square caps. Lift-off splits into streaks. Dust haze (fallout and smear) tones the paper itself. |
@@ -149,5 +152,5 @@ These are needed before #238, #240 and #242 compare renders. Each can be
 found by the gallery ticket's own agent:
 
 - a chalk box around a result, and a dust halo under fresh strokes;
-- crayon colour-over-colour layering, and build-up at a turn;
+- crayon colour-over-colour layering, build-up at a turn, and a sky band;
 - charcoal cross-hatching, construction lines, and charcoal on newsprint.
