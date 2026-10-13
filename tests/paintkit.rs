@@ -5044,6 +5044,21 @@ fn broad_every_documented_parameter_changes_the_render() {
             "/{param} {value} produced an identical render -- it is a no-op"
         );
     }
+    // /Touch needs a canvas (issue #225), so it is measured against a
+    // baseline drawn on one.
+    let on_canvas = |opts: &str| {
+        let mut it = fresh(400, 200);
+        it.run_str(&format!(
+            "0 0 0 setrgbcolor << >> pkcanvas 29 srand {BROAD_PATH} << {opts} >> pkbroad"
+        ))
+        .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+        pixels(&it)
+    };
+    assert_ne!(
+        on_canvas("/Width 44 /Touch 0.5"),
+        on_canvas("/Width 44"),
+        "/Touch 0.5 produced an identical render -- it is a no-op"
+    );
     // /ColorMix and /Light only modify a load, so they are measured
     // against one. /Light 270 flips the left-to-right BROAD_PATH; 90 would
     // leave it as the unlit render.
@@ -5085,6 +5100,7 @@ fn broad_advertises_exactly_the_parameters_it_implements() {
         "Grain",
         "Light",
         "Pitch",
+        "Touch",
         "Width",
     ];
     expected.sort();
@@ -5907,6 +5923,20 @@ fn liner_every_documented_parameter_changes_the_render() {
         pixels(&it)
     };
     let baseline = tinted("/Width 5");
+    // /Touch needs a canvas (issue #225).
+    let on_canvas = |opts: &str| {
+        let mut it = fresh(400, 200);
+        it.run_str(&format!(
+            "0.35 0.42 0.58 setrgbcolor << >> pkcanvas 17 srand {LINER_PATH} << {opts} >> pkliner"
+        ))
+        .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+        pixels(&it)
+    };
+    assert_ne!(
+        on_canvas("/Width 5 /Touch 0.5"),
+        baseline,
+        "/Touch 0.5 produced an identical render -- it is a no-op"
+    );
     for (param, value) in [
         ("Width", "12"),
         ("Taper", "0"),
@@ -5944,6 +5974,7 @@ fn liner_advertises_exactly_the_parameters_it_implements() {
         "Depletion",
         "Pitch",
         "Taper",
+        "Touch",
         "Waver",
         "Width",
     ];
@@ -9586,17 +9617,27 @@ fn loaded_keys_change_the_render_on_every_adopter() {
 // ---------------------------------------------------------------------
 // canvas surface S2 (issue #222, slice S2 of #182): `/Touch` on
 // `pktrowel` and `pkdry`. CANVAS_SURFACE.md section 6, tests 1-5 and 7.
+// Slice S3 (issue #225) adds `pkfan`, `pkbroad` and `pkliner` to the same
+// tests, so test 4 also runs on the solid `pkbroad` band the design names.
 // ---------------------------------------------------------------------
 
-/// The two adopting presets, each with a stroke across a 200pt page.
-const TOUCH_PRESETS: [&str; 2] = ["pktrowel", "pkdry"];
+/// The adopting presets, each with a stroke across a 200pt page.
+const TOUCH_PRESETS: [&str; 5] = ["pktrowel", "pkdry", "pkfan", "pkbroad", "pkliner"];
 
 /// Options that make each preset lay its full footprint: no contact
 /// chain, scrape or colour jitter, so the only break-up is the catch.
 fn touch_solid(preset: &str) -> &'static str {
     match preset {
         "pktrowel" => "/Width 40 /Coverage 1 /Scrape 0 /EdgeBuildup 0 /ColorJitter 0",
-        _ => "/Width 30 /Bristles 40 /Load 1 /Dropout 0 /ColorJitter 0",
+        "pkdry" => "/Width 30 /Bristles 40 /Load 1 /Dropout 0 /ColorJitter 0",
+        // Dense and parallel, so the fan reads as a solid band: bristles
+        // 0.75pt apart, each 3pt wide, none dropped.
+        "pkfan" => {
+            "/Width 30 /Spread 1 /Splay 0 /Bristles 40 /BristleWidth 3 /WidthJitter 0 \
+             /Load 1 /Dropout 0 /Ragged 0 /Flick 0 /Jitter 0 /ColorJitter 0"
+        }
+        "pkbroad" => "/Width 40 /Charge 1 /Depletion 0 /Edge 0 /ColorJitter 0",
+        _ => "/Width 40 /Taper 0 /Charge 1 /Depletion 0 /Waver 0 /ColorJitter 0",
     }
 }
 
@@ -9872,7 +9913,7 @@ fn touch_less_touch_less_ink() {
 #[test]
 fn touch_box_contains_the_whole_mark() {
     let line = "newpath 40 100 moveto 160 112 lineto";
-    let cases: [(&str, &str, &str); 27] = [
+    let cases: &[(&str, &str, &str)] = &[
         ("pktrowel", line, "/Width 40"),
         ("pktrowel", "newpath 100 100 moveto", "/Width 60 /Drag 1"),
         // Shorter than two pitches: the trim leaves the middle stop a
@@ -9967,8 +10008,137 @@ fn touch_box_contains_the_whole_mark() {
             "100 100 translate -20 rotate 0.7 1.4 scale newpath 0 0 moveto",
             "/Width 70 /Spread 1 /Load 1 /Bristles 60 /BristleWidth 10",
         ),
+        // --- slice S3 (issue #225). Each case isolates one term of the
+        // reach, large against the others' slack, so that dropping the
+        // term fails it (mutation-checked).
+        // pkfan: runs, the lateral term
+        ("pkfan", line, "/Width 40 /Load 1 /Dropout 0"),
+        (
+            "pkfan",
+            line,
+            "/Width 40 /Spread 1 /Splay 1 /Load 1 /Dropout 0",
+        ),
+        // pkfan: Jitter alone moves a run's centerline
+        (
+            "pkfan",
+            line,
+            "/Width 10 /Spread 0.1 /Jitter 20 /Load 1 /Dropout 0 /BristleWidth 1",
+        ),
+        // pkfan: a bristle mark's half-width, with pointed caps along x
+        (
+            "pkfan",
+            line,
+            "/Width 4 /Spread 1 /BristleWidth 30 /WidthJitter 1 /Ragged 0 /Flick 0 \
+             /Load 1 /Dropout 0 /Bristles 20",
+        ),
+        (
+            "pkfan",
+            line,
+            "/Width 4 /Spread 1 /BristleWidth 30 /WidthJitter 1 /Ragged 0 /Flick 1 \
+             /Load 1 /Dropout 0 /Bristles 20",
+        ),
+        // pkfan: a pressed fan's rays are 1.15 half long at /Ragged 0
+        (
+            "pkfan",
+            "newpath 100 100 moveto",
+            "/Width 80 /Spread 1 /Ragged 0 /Bristles 60 /Load 1 /BristleWidth 1",
+        ),
+        // pkfan: a path shorter than a pitch, and a mix of subpaths with a
+        // bare moveto
+        (
+            "pkfan",
+            "newpath 95 100 moveto 105 100 lineto",
+            "/Width 60 /Pitch 40 /Load 1 /Dropout 0",
+        ),
+        (
+            "pkfan",
+            "newpath 40 60 moveto 160 70 lineto 60 140 moveto 150 150 lineto 100 100 moveto",
+            "/Width 40 /Load 1 /Dropout 0 /Ragged 0 /Colors [[1 0 0] [0 0 1]] /Light 90",
+        ),
+        (
+            "pkfan",
+            "100 100 translate 30 rotate 1.5 0.8 scale newpath -50 0 moveto 50 5 lineto",
+            "/Width 40 /Spread 1 /Load 1 /Dropout 0 /Jitter 4",
+        ),
+        // pkbroad: the half-width, with the edge roughness the only slack
+        ("pkbroad", line, "/Width 40 /Charge 1 /Depletion 0"),
+        (
+            "pkbroad",
+            line,
+            "/Width 120 /Edge 1 /Pitch 0.5 /Charge 1 /Depletion 0 /Grain 40",
+        ),
+        (
+            "pkbroad",
+            line,
+            "/Width 40 /Angle 80 /Edge 1 /Pitch 0.5 /Charge 1 /Depletion 0",
+        ),
+        // pkbroad: a pressed footprint reaches Pitch/2 along the travel
+        (
+            "pkbroad",
+            "newpath 100 100 moveto",
+            "/Width 10 /Pitch 60 /Charge 1 /Depletion 0 /Grain 4",
+        ),
+        (
+            "pkbroad",
+            "newpath 100 100 moveto",
+            "/Width 10 /Pitch 60 /Angle 80 /Charge 1 /Depletion 0 /Grain 4",
+        ),
+        // pkbroad: single-stop runs, the stamp reaching forward by a gap
+        (
+            "pkbroad",
+            "newpath 95 100 moveto 105 100 lineto",
+            "/Width 20 /Pitch 30 /Angle 80 /Charge 1 /Depletion 0",
+        ),
+        (
+            "pkbroad",
+            line,
+            "/Width 20 /Pitch 120 /Charge 1 /Depletion 0",
+        ),
+        (
+            "pkbroad",
+            line,
+            "/Width 30 /Pitch 60 /Angle -80 /Charge 0.6 /Depletion 1 /Colors [[1 0 0] [0 0 1]]",
+        ),
+        (
+            "pkbroad",
+            "newpath 40 60 moveto 160 70 lineto 60 140 moveto 150 150 lineto 100 100 moveto",
+            "/Width 30 /Edge 0.7 /Light 90 /Colors [[1 0 0] [0 0 1]]",
+        ),
+        (
+            "pkbroad",
+            "100 100 translate 30 rotate 1.5 0.8 scale newpath -50 0 moveto 50 5 lineto",
+            "/Width 40 /Edge 1 /Angle 40 /Charge 1 /Depletion 0",
+        ),
+        // pkliner: the tip's wander, the width and a pressed dot
+        ("pkliner", line, "/Width 8"),
+        (
+            "pkliner",
+            line,
+            "/Width 2 /Waver 10 /Taper 0 /Charge 1 /Depletion 0",
+        ),
+        (
+            "pkliner",
+            line,
+            "/Width 30 /Waver 0 /Taper 0 /Charge 1 /Depletion 0",
+        ),
+        ("pkliner", "newpath 100 100 moveto", "/Width 40 /Waver 10"),
+        (
+            "pkliner",
+            "newpath 95 100 moveto 97 100 lineto",
+            "/Width 20 /Pitch 10 /Waver 3",
+        ),
+        (
+            "pkliner",
+            "newpath 40 60 moveto 160 70 lineto 60 140 moveto 150 150 lineto 100 100 moveto",
+            "/Width 6 /Waver 3 /Depletion 1",
+        ),
+        (
+            "pkliner",
+            "100 100 translate 30 rotate 1.5 0.8 scale newpath -50 0 moveto 50 5 lineto",
+            "/Width 4 /Waver 5 /Taper 0.5",
+        ),
     ];
-    for (preset, path, opts) in cases {
+    for &(preset, path, opts) in cases {
         let render = |whole: &str| {
             touch_page(&format!(
                 "<< >> pkcanvas {whole} {path} << {opts} /Touch 0.9 >> {preset}"
@@ -10086,6 +10256,20 @@ fn a_uniform_load_under_pkwet_is_the_plain_brush_under_pkwet() {
                 "newpath 50 150 moveto 350 140 lineto << /Width 40 /Touch 0.6 {load} >> pktrowel"
             ),
         )))
+        // ...and a touched fan and broad brush (issue #225).
+        .chain(
+            LOAD_PRESETS
+                .iter()
+                .filter(|(p, _)| *p != "pktrowel")
+                .map(|(preset, base)| {
+                    let base = base.replace("/ColorJitter 0", "/ColorJitter 0.3");
+                    let path = "newpath 50 150 moveto 350 140 lineto";
+                    (
+                        format!("{path} << {base} /Touch 0.6 >> {preset}"),
+                        format!("{path} << {base} /Touch 0.6 {load} >> {preset}"),
+                    )
+                }),
+        )
         .collect();
     for (plain, loaded) in &marks {
         for (name, wrap) in [
@@ -10378,10 +10562,31 @@ fn fan_advertises_the_loaded_color_keys() {
         .lines()
         .filter_map(|l| l.strip_prefix("% @param: /"))
         .collect();
-    for key in ["Colors", "ColorMix", "Light"] {
+    for key in ["Colors", "ColorMix", "Light", "Touch"] {
         assert!(
             params.iter().any(|l| l.starts_with(&format!("{key} ["))),
             "pkfan does not advertise /{key} with a unit"
+        );
+    }
+}
+
+/// Every adopting preset advertises `/Touch` with its unit, and says it
+/// needs `pkcanvas`.
+#[test]
+fn every_touch_adopter_advertises_touch_with_a_unit() {
+    let src = std::fs::read_to_string("lib/paintkit.ps").expect("read paintkit");
+    for preset in TOUCH_PRESETS {
+        let def = src
+            .find(&format!("\n/{preset} {{"))
+            .unwrap_or_else(|| panic!("{preset} def"));
+        let tags = &src[src[..def].rfind("% @kind").expect("tags")..def];
+        let line = tags
+            .lines()
+            .find_map(|l| l.strip_prefix("% @param: /Touch "))
+            .unwrap_or_else(|| panic!("{preset} does not advertise /Touch"));
+        assert!(
+            line.starts_with("[0..1]") && line.contains("pkcanvas"),
+            "{preset}'s /Touch line: {line}"
         );
     }
 }
