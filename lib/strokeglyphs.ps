@@ -805,6 +805,8 @@
 %   (upright italic correction is 0) mustbe
 %   /f << /Size 1000 /Slant 15 >> sgmetrics /Italic get 0 gt
 %   (a slanted f gets an italic correction) mustbe
+%   /j << /Size 1000 /Slant -60 >> sgmetrics /Italic get 0 gt
+%   (a back-slanted descender gets an italic correction too) mustbe
 %   /equal << >> sgmetrics /Class get /rel eq (= is a relation) mustbe
 %   (∑) << >> sgmetrics /Class get /op eq (∑ is a large operator) mustbe
 %   (Σ) << >> sgmetrics /Class get /ord eq (the letter Sigma is ordinary) mustbe
@@ -911,7 +913,7 @@
     /Advance sgg 0 get sgsc mul
     /BBox [ sgx1 sgsc mul sglly sgsc mul sgx2 sgsc mul sgury sgsc mul ]
     /Class sgclass sgmn known { sgclass sgmn get } { /ord } ifelse
-    /Italic sgurx sgury sgtan mul add sgg 0 get sub 0 max sgsc mul
+    /Italic sgx2 sgg 0 get sub 0 max sgsc mul
   >>
 } def
 %%EOF

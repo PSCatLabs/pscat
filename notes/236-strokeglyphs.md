@@ -36,7 +36,7 @@ path instead of painting them.
   `/bin`. The Greek letters Σ and Π are `/ord`. The n-ary ∑ and ∏ are
   separate glyphs (`/summation`, `/product`), class `/op`.
 - **The italic correction is derived from `/Slant`**, as
-  max(0, urx + ury·tan(slant) − advance), not stored per glyph. Upright
+  max(0, rightmost slanted x − advance), not stored per glyph. Upright
   skeletons give 0, which matches the design's "0 for upright".
 - **`sggrow` draws at the current point**, because the design's
   signature `height depth opts sggrow -> advance` has no x y. With no
