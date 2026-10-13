@@ -103,6 +103,16 @@ first/recommended option, not as unilateral choices:
 Use `AskUserQuestion` for these — they're genuine policy calls, not
 things to infer. Batch them into one call.
 
+**`branch_protection.require_up_to_date`** (GitHub's
+`required_status_checks.strict`, "Require branches to be up to date
+before merging") is a frontmatter field, not a Phase 1 question. Read it
+from `SDLC.md`; **if it is absent, it is `true`**, so repos that never
+set it keep today's behaviour. Don't ask about it on a first run either:
+write `true` and let the user flip it in the frontmatter. This repo sets
+`false` (several agents merging in parallel made strict mode force an
+update-and-rerun cycle on nearly every PR; #257). The merge queue is the
+real fix and needs an org-owned repo.
+
 **Never set `required_approving_review_count` to anything but `0`
 without asking first.** A solo-maintainer repo where the agent opens
 PRs under the owner's own credentials cannot satisfy a ≥1-approval
@@ -156,7 +166,9 @@ diff — don't print anything yet, don't mutate anything yet.
 - **Labels**: `gh label list` — do `in-progress` / `in-review` exist?
 - **Branch protection**: `gh api repos/{o}/{r}/branches/{default}/protection`
   (404 means unprotected — that's a normal "current state," not an
-  error). Diff against the Phase 1 policy.
+  error). Diff against the Phase 1 policy, including
+  `required_status_checks.strict` against `require_up_to_date` (absent
+  means `true`).
 - **Merge button + description**: from the Phase 0 `gh repo view` call
   already made — diff `squashMergeAllowed`/`mergeCommitAllowed`/
   `rebaseMergeAllowed`/`deleteBranchOnMerge` and `description` (only
@@ -219,7 +231,7 @@ Only the items with a nonempty diff, in this order:
      --input - <<EOF
    {
      "required_status_checks": {
-       "strict": true,
+       "strict": <require_up_to_date from SDLC.md; true when absent>,
        "checks": [{"context": "<ci job name>"}]
      },
      "enforce_admins": <true|false per policy>,
@@ -234,6 +246,10 @@ Only the items with a nonempty diff, in this order:
    }
    EOF
    ```
+   This PUT replaces the whole protection object, so every policy field
+   must come from `SDLC.md`: a hardcoded `strict` silently reverts a
+   repo that turned it off (#257). Substitute the field as a JSON
+   boolean (`true`/`false`), never a quoted string.
    **Confirmed working** (`jeromebanks/postscript_interpreter`,
    2026-07-31): this exact payload shape applies cleanly —
    `required_approving_review_count: 0` survives without coercion or
@@ -241,7 +257,8 @@ Only the items with a nonempty diff, in this order:
    admin-bypass-on, and the GET-back matches the PUT byte-for-byte on
    every field. No longer treat this as a guess. **Still always follow
    with a GET on the same endpoint** and diff the result against what
-   was requested before reporting success — a payload confirmed once
+   was requested (including `required_status_checks.strict` against
+   `require_up_to_date`) before reporting success — a payload confirmed once
    doesn't guarantee every GitHub API version/plan combination accepts
    it identically. A live push-rejection test (attempting a real direct
    push to confirm GitHub actually blocks it) was *not* performed during

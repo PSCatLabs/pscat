@@ -247,12 +247,24 @@ scratchpad but harness prompts do. (#208 reversed this: see below.)
   profile from #204), so a PR is not the first place a lint shows up.
 - **Missing paths written down:** rerun after infra failure, resume of an
   `in-review` PR, the dispatcher's no-merge stop, doc-only merge conflicts,
-  one rebase before the first push, `BEHIND` as the normal case. These
-  were improvised by the #141, #191 and #204 runs.
+  one rebase before the first push. These were improvised by the #141,
+  #191 and #204 runs.
 - **Rebase boundary.** Rebase once before the first push; afterwards
-  merge `main` in (via `update-branch` or locally) and never force-push.
-  A rebase after push would drop the remote `update-branch` merge commit
-  and need `--force-with-lease`.
+  merge `main` in locally (only for real conflicts) and never force-push.
+  A rebase after push would need `--force-with-lease`.
+- **No `BEHIND` loop (#257).** Branch protection's "require up to date"
+  (`strict`) was turned off: with several agents merging, it forced an
+  update-branch and a full CI rerun on nearly every PR. The cost is that
+  two individually green PRs can break `main` together, so step 9 ends by
+  checking the push-to-main `ci` run for the merge commit (red: stop and
+  report). The merge queue is the proper fix and needs an org-owned repo.
+  SKILL.md 8.12's pass/fail query adds `mergeStateStatus != "DIRTY"` because
+  a conflicted PR keeps its old green checks.
+- **Small hazards recorded as rules:** no `git stash` in a worktree
+  (shared `refs/stash`), no `timeout` on macOS, a re-read of SKILL.md after
+  step 3 (the worktree copy may be newer than the invoked one), and a short
+  resume table with a conservative default (re-review) after one run spent
+  eight Codex rounds on an over-detailed one.
 - **Scratch = harness scratchpad, else `${TMPDIR:-/tmp}`.** #205's `/tmp`
   override fought the harness's own instruction; issue-scoped names keep
   concurrent runs apart, and resume decisions use GitHub state because
