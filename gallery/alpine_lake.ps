@@ -65,6 +65,8 @@
 /lkFORESTUNDER [ lkMIST lkNEAR 0.55 mix3 ] def   % the near range's foot, half faded
 /lkPINE    [0.06 0.15 0.11] def
 /lkPINELT  [0.26 0.40 0.21] def
+/lkFARPINE   [0.18 0.27 0.28] def                % the far stands: more air
+/lkFARPINELT [0.32 0.42 0.37] def
 /lkBANK    [0.12 0.10 0.07] def
 
 % y -> r g b   the sky's color at height y
@@ -91,16 +93,19 @@
         0 lky lkW 2.5 rectfill
     } for
     % criss-cross block-in: short diagonal strokes a shade off the
-    % sky's own color, so the gradient picks up a brushed surface
+    % sky's own colour, so the gradient picks up a brushed surface.
+    % pkcrisscross lays them out; one call paints one colour, so the sky
+    % is worked in thin bands, each in the gradient's colour at its
+    % middle, twice over with the shade nudged either way.
     1 srand
-    0 1 90 {
-        pop
-        /lkx lkW 40 add chance 20 sub def
-        /lky lkWL 40 add lkH lkWL sub 30 sub chance add def
-        /lkd 1 2 chance 2 mul sub def
-        [ lky lkskyat ] 1.0 4 lkj 100 div add shade setrgbcolor
-        lkx lky lkx 50 add lky 32 lkd mul add lkseg
-        << /Width 30 /Charge 0.7 /Depletion 0.8 /Edge 0.3 >> pkbroad
+    lkWL 40 add 24 lkH 6 add {
+        /lky exch def
+        2 {
+            [ lky 12 add lkskyat ] 1.0 4 lkj 100 div add shade setrgbcolor
+            -20 lky lkW 40 add 24 screct
+            << /Count 3 /Length 58 /Angle 33 /Spread 5 /LengthJitter 0.2 >> pkcrisscross
+            << /Width 30 /Charge 0.7 /Depletion 0.8 /Edge 0.3 >> pkbroad
+        } repeat
     } for
 } def
 
@@ -201,12 +206,11 @@
 % loaded, so overlapping pulls close up into one plane
 /lkknife0 { 12 0.85 lkknife } def
 
-% pts color snowreach seed -
-% One range: the silhouette, a mist fade brushed up from its foot, then
-% the knife. The fade is a stack of broad strokes mixed from the range's
-% color toward the mist, so the foot dissolves rather than ending.
+% pts color snowreach foot seed -
+% One range: the silhouette, the knife, then (if foot) mist lifted up
+% from its foot, so the foot dissolves rather than ending.
 /lkrange {
-    srand /lkreach exch def /lkrc exch def /lkpts exch def
+    srand /lkfoot exch def /lkreach exch def /lkrc exch def /lkpts exch def
     lkrc { lkpts lkrangepath fill } 1 lkdo
     % the knife: on every peak, snow pulled down the lit (left) face and
     % a bluer shadow snow down the right, a little steeper than the
@@ -266,23 +270,30 @@
         } if
     } for
     grestore
-    % last, the mist fade brushed up from the foot over everything,
-    % dissolving the bottoms of the knife work into it
+    % last, the foot: a band of haze, then fine spray tapped along it and
+    % lifted up into the range with a directional pkwet, so the foot
+    % dissolves into mist rising off the lake. (#118 brushed a fade up
+    % with a stack of pkbroad strokes; at 2x it read as ruled stripes.)
+    % Only the near range has one: the far range's foot is behind it.
+    lkfoot {
     gsave
         lkpts lkrangepath clip
-        lkWL 4 add 5 lkWL 84 add {
-            /lky exch def
-            /lkt lky lkWL sub 80 div def            % 0 at the foot
-            % the brush carries less paint the higher it goes, so the top
-            % of the fade breaks up over the knife work instead of
-            % covering it with a flat band
-            [ lkMIST lkrc lkt 0.8 exp mix3 ] {
-                -20 lky 2 lkj add 780 lky 3 lkj add lkseg
-                << /Width 12 /Charge 1 lkt 0.6 mul sub /Depletion 0.25 lkt 0.6 mul add
-                   /Edge 0.4 /Grain 10 /ColorJitter 0.02 >> pkbroad
-            } 5 lkdo
-        } for
+        lkMIST {
+            -20 lkWL 4 sub 800 16 rectfill
+            { 0 1 1 {
+                /lkk exch def
+                newpath -20 lkWL 16 add lkk 7 mul add moveto
+                250 lkWL 22 add lkk 7 mul add 6 lkj add
+                520 lkWL 10 add lkk 7 mul add 6 lkj add
+                780 lkWL 18 add lkk 7 mul add curveto
+                << /Nozzle 10 /Density 90 /Falloff 1 /Speck 1 /Speckle 0.6
+                   /Overspray 0.6 >> pkspray
+              } for }
+            << /Direction 90 /OneSided true /Stretch 8 /Spread 40 /Layers 14
+               /Pickup 0.9 /Under lkrc >> pkwet
+        } 5 lkdo
     grestore
+    } if
 } def
 
 % y under seed -   a band of mist tapped wet into whatever is under it
@@ -386,7 +397,7 @@
 /lkpines {
     % the far stands are paler and bluer: the same tree, more air
     /lkPINE0 lkPINE def /lkPINELT0 lkPINELT def
-    /lkPINE [0.18 0.27 0.28] def /lkPINELT [0.32 0.42 0.37] def
+    /lkPINE lkFARPINE def /lkPINELT lkFARPINELT def
     452 lkWL 40 21 lkpine  468 lkWL 56 22 lkpine  484 lkWL 36 23 lkpine
     150 lkWL 46 24 lkpine  166 lkWL 34 25 lkpine  560 lkWL 30 26 lkpine
     /lkPINE lkPINE0 def /lkPINELT lkPINELT0 def
@@ -412,9 +423,9 @@
 % bank and are painted after the lake.
 /lkscene {
     /lkcur 0 def
-    /lkel 1 def lkFARPTS lkFAR 0.36 2 lkrange
+    /lkel 1 def lkFARPTS lkFAR 0.36 false 2 lkrange
     /lkel 2 def 330 lkFAR 5 lkmist
-    /lkel 3 def lkNEARPTS lkNEAR 0.22 3 lkrange
+    /lkel 3 def lkNEARPTS lkNEAR 0.22 true 3 lkrange
     /lkel 4 def lktreeline
     /lkel 5 def lkpines
 } def
@@ -438,14 +449,55 @@ lkWL -2 0 {
     [ lkWL lky sub lkWL add lkskyat ] 0.84 shade setrgbcolor
     0 lky lkW 2.5 rectfill
 } for
-gsave
-    0 lkWL 2 mul translate 1 -1 scale
-    /lkmode /replay def /lkwant -1 def /lkown true def
-    lkscene
-    /lkmode /record def
-grestore
+% The reflection, part by part: each single-colour part of the scene is
+% replayed mirrored (the mirror inside the procedure, so 270 is down
+% the page) and pulled down with a directional pkwet into the paint
+% that is really beneath it in the water.
+/lkmirror { 0 lkWL 2 mul translate 1 -1 scale } def
+/lkWATER [ [ 330 lkskyat ] 0.84 shade ] def      % the open water, mid-depth
+% rgb under code spread layers graze -
+% graze is how many passes the pulled part is then brushed across with
+% (a nested horizontal pkwet); 1 leaves it as pulled.
+/lkpull {
+    /lkpg exch def /lkpl exch def /lkps exch def /lkwant exch def /lkpu exch def
+    % the reflection carries the scene's colour, a little toward the water
+    lkWATER 0.15 mix3 setrgbcolor
+    lkpg 1 gt {
+        { { gsave lkmirror lkscene grestore }
+          << /Direction 270 /OneSided true /Stretch 5 /Spread lkps /Layers lkpl
+             /Pickup 0.8 /Under lkpu >> pkwet }
+        << /Direction 0 /Stretch 6 /Spread 6 /Layers lkpg /Pickup 0.5 /Under lkpu >> pkwet
+    } {
+        { gsave lkmirror lkscene grestore }
+        << /Direction 270 /OneSided true /Stretch 5 /Spread lkps /Layers lkpl
+           /Pickup 0.8 /Under lkpu >> pkwet
+    } ifelse
+} def
+% code -   one part replayed mirrored and sharp, in its own colours
+/lksharp {
+    /lkwant exch def /lkown true def
+    gsave lkmirror lkscene grestore
+    /lkown false def
+} def
+/lkmode /replay def /lkown false def
+lkFAR                    lkWATER                 11 12 7 1 lkpull
+[ lkFAR 0.84 shade ]     lkFAR                   12 8 5 1 lkpull
+[ lkSNOW 0.9 shade ]      lkFAR                   13 8 5 1 lkpull
+[ lkFAR lkSNOW 0.55 mix3 ] lkFAR                 14 8 5 1 lkpull
+lkMIST                   lkFAR                   21 10 6 1 lkpull
+lkNEAR                   [ lkFAR lkMIST 0.4 mix3 ] 31 12 7 1 lkpull
+[ lkNEAR 0.84 shade ]    lkNEAR                  32 12 7 1 lkpull
+[ lkSNOW 0.9 shade ]      lkNEAR                  33 12 7 1 lkpull
+[ lkNEAR lkSNOW 0.55 mix3 ] lkNEAR               34 12 7 1 lkpull
+35 lksharp
+[ lkLINE lkMIST 0.4 mix3 ] lkFORESTUNDER         41 12 7 1 lkpull
+lkLINE                   [ lkLINE lkMIST 0.4 mix3 ] 42 12 7 1 lkpull
+[ lkFARPINE 0.8 shade ]  lkLINE                  51 12 7 1 lkpull
+lkFARPINE                lkLINE                  52 12 7 1 lkpull
+lkFARPINELT              lkFARPINE               53 12 7 1 lkpull
+/lkmode /record def
 7 srand
-lkWL 4 sub -11 0 {
+lkWL 4 sub -8 0 {
     /lky exch def
     [ lkWL lky sub lkWL add lkskyat ] 0.84 shade setrgbcolor
     /lkx 700 chance 100 sub def
