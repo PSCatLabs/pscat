@@ -36,7 +36,7 @@ Decisions:
   range's misted foot and each other, and the pines into the forest. A
   reflected colour is the part's own mixed 15% toward the water, and
   snow is also dimmed to 0.9, since a bright thing reflects darker.
-- **Spread/(Layers−1) is 2pt everywhere**: 12/7 on the visible parts,
+- **Offset/(Layers−1) is 2pt everywhere** (`/Offset` is #141's name for pkwet's old `/Spread`; the piece uses #141's new key names throughout): 12/7 on the visible parts,
   8/5 on the far range's mostly hidden planes and snow, 10/6 on the
   mist. `/Stretch 5` rather than 10 gives the copies a little
   cross-axis wobble, which breaks the stair-step a pulled diagonal knife

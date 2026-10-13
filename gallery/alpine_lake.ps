@@ -110,7 +110,7 @@
         2 {
             [ lky 12 add lkskyat ] 1.0 4 lkj 100 div add shade setrgbcolor
             -20 lky lkW 40 add 24 screct
-            << /Count 3 /Length 58 /Angle 33 /Spread 5 /LengthJitter 0.2 >> pkcrisscross
+            << /Count 3 /Length 58 /Angle 33 /Lean 5 /LengthJitter 0.2 >> pkcrisscross
             << /Width 30 /Charge 0.7 /Depletion 0.8 /Edge 0.3 >> pkbroad
         } repeat
     } for
@@ -297,7 +297,7 @@
                 << /Nozzle 10 /Density 90 /Falloff 1 /Speck 1 /Speckle 0.6
                    /Overspray 0.6 >> pkspray
               } for }
-            << /Direction 90 /OneSided true /Stretch 8 /Spread 40 /Layers 14
+            << /Direction 90 /OneSided true /Stretch 8 /Offset 40 /Layers 14
                /Pickup 0.9 /Under lkrc >> pkwet
         } 5 lkdo
     grestore
@@ -345,7 +345,7 @@
     % not the mist itself, which would leave a pale rim around the forest
     lkbackc {
         { 0.95 lkcrest
-          << /Size 2.2 /Spread 5 /Density 4 /Shadow 0 /Highlight 0 /Irregular 1 >> pkdab }
+          << /Size 2.2 /Scatter 5 /Density 4 /Shadow 0 /Highlight 0 /Irregular 1 >> pkdab }
         << /Soft 0.6 /Under lkFORESTUNDER >> pkwet
     } 1 lkdo
     % the front row is one colour throughout: the mass, its tapped crest,
@@ -353,7 +353,7 @@
     lkLINE {
         0.55 lkhillmass
         0.55 lkcrest
-        << /Size 2 /Spread 4 /Density 4 /Shadow 0.3 /Highlight 0.08 /Irregular 1 >> pkdab
+        << /Size 2 /Scatter 4 /Density 4 /Shadow 0.3 /Highlight 0.08 /Irregular 1 >> pkdab
         0 1 26 {
             pop
             /lkx 760 chance def
@@ -464,7 +464,7 @@ lkWL -2 0 {
 /lkmirror { 0 lkWL 2 mul translate 1 -1 scale } def
 /lkWATER [ [ 330 lkskyat ] 0.84 shade ] def      % the open water, mid-depth
 % rgb under code spread layers -
-% Pulls one part. Spread over Layers-1 stays at 2pt, so the replayed
+% Pulls one part. Offset over Layers-1 stays at 2pt, so the replayed
 % copies, identical by construction, blend instead of echoing.
 % (A nested horizontal pkwet graze per part, as in #181's specimen, was
 % tried: it more than doubled the reflection's cost for little visible
@@ -474,7 +474,7 @@ lkWL -2 0 {
     % the reflection carries the scene's colour, a little toward the water
     lkWATER 0.15 mix3 setrgbcolor
     { gsave lkmirror lkscene grestore }
-    << /Direction 270 /OneSided true /Stretch 5 /Spread lkps /Layers lkpl
+    << /Direction 270 /OneSided true /Stretch 5 /Offset lkps /Layers lkpl
        /Pickup 0.8 /Under lkpu >> pkwet
 } def
 % code -   one part replayed mirrored and sharp, in its own colours
@@ -559,9 +559,9 @@ lknearpines
 % bushes along the bank
 [0.15 0.25 0.10] lkset
 newpath 30 124 moveto 110 124 180 100 240 90 curveto
-<< /Size 3.4 /Spread 20 /Density 7 /Highlight 0.6 /Shadow 0.5 /Irregular 0.9 >> pkdab
+<< /Size 3.4 /Scatter 20 /Density 7 /Highlight 0.6 /Shadow 0.5 /Irregular 0.9 >> pkdab
 newpath 540 66 moveto 620 82 690 100 750 118 curveto
-<< /Size 3 /Spread 18 /Density 7 /Highlight 0.6 /Shadow 0.5 /Irregular 0.9 >> pkdab
+<< /Size 3 /Scatter 18 /Density 7 /Highlight 0.6 /Shadow 0.5 /Irregular 0.9 >> pkdab
 
 % grass stems, the last marks
 0 1 90 {
