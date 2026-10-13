@@ -3,6 +3,58 @@
 Newest first. Per `AGENTS.md`, each stage ends with a summary here: what
 was built, tradeoffs made, what's explicitly deferred.
 
+## `lib/paintkit.ps`: the canvas surface, `pkcanvas` and `pjcatch` (issue #220, slice S1 of #182, 2026-10-13)
+
+Child of epic #112; design `docs/CANVAS_SURFACE.md` (PR #207), sections
+2.1, 3.1-3.5 and 7 S1. `opts pkcanvas` sets up a seeded weave of raised
+knuckles in the current user space (captured as canvas space), and the
+internal `llx lly urx ury touch pjcatch` clips to every knuckle a given
+touch reaches. **No preset reads it yet**: `/Touch` arrives on pktrowel
+and pkdry in S2 and on pkfan, pkbroad and pkliner in S3, so every
+existing render is unchanged.
+
+- State goes to `userdict` by `put` (`pjCTM pjP pjW pjM pjR pjmemo`), so
+  a call inside the artist's own `begin ... end` survives the `end`. A
+  self-test pins that.
+- The permutation table comes from a private Schrage LCG (`pjrand`,
+  pwrand's generator under its own state); nothing takes `rand`. The
+  default `/Seed` is the constant 1 (Q3). `/Seed` takes any number and
+  truncates it, like `pkwash`'s, because `--sweep NAME=` can feed a real.
+- **Q9, ellipse vs diamond knuckles: ellipses.** Rendered side by side at
+  2x over touch 0.2-0.99, then measured on a 200pt square: at `/Touch
+  0.99` ellipses cover 99.97% / 99.99% (seeds 1 and 3) and diamonds
+  97.5% / 97.9%; at 0.95, 99.7% against 95.3%. A diamond's `|x|/a +
+  |y|/b` misses every cell corner that the ellipse reaches, which is
+  visible at 2x as a regular grid of holes. That misses S2's 99.5% bar
+  (test 5), so the design's "diamonds if indistinguishable" rule picks
+  ellipses.
+- **Budget naming.** The design wants the *preset* to raise
+  `pkX-touch-area-exceeds-safety-limit` before building anything, but
+  `pjcatch`'s operands carry no preset name. So `llx lly urx ury pjcells
+  -> n` returns the cell count, which an adopting preset checks against
+  `pjbudget` (60000) under its own guard name. `pjcatch` repeats the
+  check as a backstop (`pjcatch-area-exceeds-safety-limit`, and
+  `pjcatch-needs-a-canvas`). Both read one range helper (`pjrange`), so
+  the pre-check and the catch never disagree. A box whose cell index
+  passes 1e9 (where `cvi` could overflow) counts as over budget. Every
+  guard runs before `pjcatch` touches the CTM.
+- The mottle lattice index is reduced mod 256 as a real before `cvi`
+  (`pjwrap`). The hash only depends on indices mod 256, so this changes
+  nothing, but a tiny `/Mottle` far from the origin can no longer
+  overflow `cvi`.
+- **Test 8 (gs agrees on the surface) renders both at 288dpi.** At
+  72dpi, the 8pt-weave pattern matched knuckle for knuckle by eye, but
+  the mean block diff was 20 against golden's 6. gs doesn't antialias,
+  and its any-part-of-pixel rule fattens every small ellipse, giving 46%
+  ink against pscat's 38%. At 4x the same blocks (10pt) differ by 4.7. A
+  different seed differs by 74, and the test asserts that negative
+  control, so the comparison can't pass vacuously.
+- Rust tests also cover touch 0 inking nothing, monotone ink in touch,
+  99.5% at 0.99, the catch staying put under a `translate` after
+  `pkcanvas` (and moving when the canvas is set up after it), every
+  documented key changing the catch, and the defaults being what the
+  tags say.
+
 ## Gallery: *Alpine Lake*'s reflection pulled down, sky moved onto `pkcrisscross` (issue #191, 2026-10-13)
 
 Child of epic #112. `gallery/alpine_lake.ps` now pulls its reflection

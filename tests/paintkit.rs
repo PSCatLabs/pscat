@@ -8819,3 +8819,261 @@ fn crisscross_spread_is_a_deprecated_alias_for_lean() {
         "/Lean 0",
     );
 }
+
+// ---------------------------------------------------------------------
+// canvas surface (issue #182, slice S1 #220): `pkcanvas`, the `pj-`
+// weave sampler and `pjcatch`. No preset reads the surface yet, so
+// these drive `pjcatch` directly under a rectangle fill, the way an
+// adopting preset will call it right after its drawing `gsave`.
+// ---------------------------------------------------------------------
+
+/// A 160pt square filled through the catch of a surface set up with
+/// `canvas` (the inside of a `pkcanvas` dict), at `touch`. `pre` runs
+/// before `pkcanvas`, `post` between it and the fill.
+fn caught(canvas: &str, touch: &str, pre: &str, post: &str) -> Interp {
+    let mut it = fresh(200, 200);
+    it.run_str(&format!(
+        "0 0 0 setrgbcolor {pre} << {canvas} >> pkcanvas {post} \
+         gsave 20 20 180 180 {touch} pjcatch 20 20 160 160 rectfill grestore"
+    ))
+    .unwrap_or_else(|e| panic!("{canvas} / {touch}: {}", it.error_report(&e)));
+    it
+}
+
+#[test]
+fn canvas_paints_nothing_and_takes_no_random_draws() {
+    let mut it = fresh(100, 100);
+    it.run_str(
+        "5 srand rand /a exch def \
+         5 srand << /Seed 4 >> pkcanvas \
+         gsave 0 0 0 setrgbcolor 0 0 100 100 0.4 pjcatch grestore \
+         rand a ne { canvas-moved-the-callers-stream } if",
+    )
+    .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+    assert_eq!(ink_count(&it), 0, "pkcanvas or pjcatch painted");
+}
+
+/// CANVAS_SURFACE.md test 5, at the catch itself: ink never falls as
+/// the touch rises, a zero touch catches nothing (the empty-clip path,
+/// not an unchanged clip), 0.99 is all but solid, and 1 is the full
+/// mark.
+#[test]
+fn canvas_less_touch_less_ink() {
+    let full = ink_count(&caught("", "1", "", ""));
+    assert_eq!(full, 160 * 160, "touch 1 should leave the square whole");
+    let mut last = 0;
+    for touch in ["0", "0.2", "0.4", "0.6", "0.8", "0.99", "1"] {
+        let ink = ink_count(&caught("", touch, "", ""));
+        assert!(ink >= last, "touch {touch}: {ink} inked < {last} before it");
+        last = ink;
+        if touch == "0" {
+            assert_eq!(ink, 0, "touch 0 must ink nothing");
+        }
+        if touch == "0.99" {
+            let frac = ink as f64 / full as f64;
+            assert!(frac >= 0.995, "touch 0.99 covers only {frac:.4}");
+        }
+    }
+    let mid = ink_count(&caught("", "0.5", "", ""));
+    assert!(
+        mid > full / 10 && mid < full * 9 / 10,
+        "touch 0.5 should be visibly broken: {mid} of {full}"
+    );
+}
+
+/// CANVAS_SURFACE.md test 4, at the catch itself: the weave is fixed
+/// in canvas space, so a mark moved after `pkcanvas` catches on the
+/// same knuckles over the overlap, while a canvas set up after the
+/// same move is a different (shifted) canvas.
+#[test]
+fn canvas_catch_is_anchored_to_the_canvas() {
+    let still = caught("", "0.5", "", "");
+    let moved = caught("", "0.5", "", "7.5 0 translate");
+    let shifted_canvas = caught("", "0.5", "7.5 0 translate", "");
+    let region = |a: &Interp, b: &Interp| {
+        let mut diff = 0;
+        for y in 22..178 {
+            for x in 30..178 {
+                let pa = luma(a.gfx().pixmap.pixel(x, y).unwrap()) < 180.0;
+                let pb = luma(b.gfx().pixmap.pixel(x, y).unwrap()) < 180.0;
+                diff += usize::from(pa != pb);
+            }
+        }
+        diff
+    };
+    assert_eq!(
+        region(&still, &moved),
+        0,
+        "a mark moved after pkcanvas caught on a different weave"
+    );
+    assert!(
+        region(&still, &shifted_canvas) > 1000,
+        "a canvas set up in a moved space should be a moved canvas"
+    );
+}
+
+/// Test 9: every parameter `pkcanvas` advertises changes the catch.
+#[test]
+fn pkcanvas_every_documented_parameter_changes_the_render() {
+    let baseline = pixels(&caught("", "0.5", "", ""));
+    for (param, value) in [
+        ("Seed", "2"),
+        ("Weave", "4"),
+        ("Mottle", "40"),
+        ("Relief", "0.2"),
+    ] {
+        let varied = pixels(&caught(&format!("/{param} {value}"), "0.5", "", ""));
+        assert_ne!(
+            varied, baseline,
+            "/{param} {value} produced an identical catch -- it is a no-op"
+        );
+    }
+    // The defaults are what the tags say: spelling them out changes nothing.
+    let explicit = pixels(&caught(
+        "/Seed 1 /Weave 2.5 /Mottle 20 /Relief 0.7",
+        "0.5",
+        "",
+        "",
+    ));
+    assert_eq!(explicit, baseline, "the documented defaults are not the defaults");
+}
+
+#[test]
+fn pkcanvas_advertises_exactly_the_parameters_it_implements() {
+    let src = std::fs::read_to_string("lib/paintkit.ps").expect("read paintkit");
+    let start = src
+        .find("% @example: << /Seed 3 /Weave 2.5 >> pkcanvas")
+        .expect("pkcanvas tags");
+    let end = src[start..].find("\n/pkcanvas ").expect("pkcanvas def") + start;
+    let mut advertised: Vec<&str> = src[start..end]
+        .lines()
+        .filter_map(|l| l.strip_prefix("% @param: /"))
+        .map(|l| l.split_whitespace().next().unwrap_or(""))
+        .collect();
+    advertised.sort_unstable();
+    assert_eq!(advertised, ["Mottle", "Relief", "Seed", "Weave"]);
+}
+
+/// Mean RGB per `block` x `block` pixel cell, the `tests/golden.rs`
+/// comparison.
+fn canvas_blocks(rgb: &[[u8; 3]], w: usize, h: usize, block: usize) -> Vec<[f64; 3]> {
+    let bw = w / block;
+    let mut cells = vec![[0f64; 3]; bw * (h / block)];
+    let n = (block * block) as f64;
+    for y in 0..h {
+        for x in 0..w {
+            let c = &mut cells[(y / block) * bw + x / block];
+            for ch in 0..3 {
+                c[ch] += f64::from(rgb[y * w + x][ch]) / n;
+            }
+        }
+    }
+    cells
+}
+
+fn canvas_mean_block_diff(a: &[[f64; 3]], b: &[[f64; 3]]) -> (f64, usize) {
+    let luma3 = |c: &[f64; 3]| (c[0] + c[1] + c[2]) / 3.0;
+    let mut total = 0.0;
+    let mut disjoint = 0;
+    for (p, q) in a.iter().zip(b) {
+        for ch in 0..3 {
+            total += (p[ch] - q[ch]).abs();
+        }
+        let (lp, lq) = (luma3(p), luma3(q));
+        if (lp < 230.0 && lq > 250.0) || (lq < 230.0 && lp > 250.0) {
+            disjoint += 1;
+        }
+    }
+    (total / (a.len() * 3) as f64, disjoint)
+}
+
+/// CANVAS_SURFACE.md test 8: the surface takes no `rand`, so pscat and
+/// Ghostscript must build the same catch from the same /Seed, block for
+/// block -- a stronger check than "gs accepts it". Blocks are 10pt, the
+/// `tests/golden.rs` tolerance. Two choices keep it honest:
+///
+/// * The weave is coarse (8pt) so the pattern lives at block scale; at
+///   the default 2.5pt a block average would look alike for any seed.
+///   The negative control below proves the comparison discriminates.
+/// * Both render at 288dpi (4px per point). gs doesn't antialias, and
+///   its any-part-of-pixel fill rule grows every small knuckle by about
+///   half a pixel all round: at 72dpi that alone put 46% ink against
+///   pscat's 38% (mean block diff 20) over an identical pattern. At 4x
+///   the same rule costs a quarter as much (measured 4.7).
+#[test]
+fn ghostscript_agrees_on_the_surface() {
+    let gs_ok = std::process::Command::new("gs")
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success());
+    if !gs_ok {
+        eprintln!("skipping gs surface check: gs not installed");
+        return;
+    }
+    const SCALE: usize = 4;
+    const PX: usize = 200 * SCALE;
+    let driver = |seed: u32| {
+        format!(
+            "1 1 1 setrgbcolor 0 0 200 200 rectfill 0 0 0 setrgbcolor \
+             << /Seed {seed} /Weave 8 >> pkcanvas \
+             gsave 0 0 200 200 0.5 pjcatch 0 0 200 200 rectfill grestore"
+        )
+    };
+    let pscat_blocks = |seed: u32| {
+        let mut it = Interp::with_page_scaled(200, 200, SCALE as f32).expect("page");
+        load(&mut it);
+        it.run_str(&driver(seed))
+            .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+        let rgb: Vec<[u8; 3]> = it
+            .gfx()
+            .pixmap
+            .pixels()
+            .iter()
+            .map(|p| [p.red(), p.green(), p.blue()])
+            .collect();
+        assert_eq!(rgb.len(), PX * PX, "pscat page size");
+        canvas_blocks(&rgb, PX, PX, 10 * SCALE)
+    };
+
+    let artkit = std::fs::read_to_string("lib/artkit.ps").expect("artkit");
+    let paintkit = std::fs::read_to_string("lib/paintkit.ps").expect("paintkit");
+    let dir = std::env::temp_dir().join(format!("pscat-canvas-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let src = dir.join("canvas_gs.ps");
+    let png = dir.join("canvas_gs.png");
+    std::fs::write(
+        &src,
+        format!("{artkit}\n{paintkit}\n{}\nshowpage\n", driver(11)),
+    )
+    .expect("write");
+    let status = std::process::Command::new("gs")
+        .args(["-dNOPAUSE", "-dBATCH", "-q", "-sDEVICE=png16m"])
+        .arg(format!("-g{PX}x{PX}"))
+        .arg(format!("-r{}", 72 * SCALE))
+        .arg(format!("-o{}", png.display()))
+        .arg(&src)
+        .status()
+        .expect("run gs");
+    assert!(status.success(), "gs rejected the canvas driver");
+    let data = std::fs::read(&png).expect("read gs png");
+    let _ = std::fs::remove_dir_all(&dir);
+    let gs = tiny_skia::Pixmap::decode_png(&data).expect("decode gs png");
+    let gs_rgb: Vec<[u8; 3]> = gs
+        .pixels()
+        .iter()
+        .map(|p| [p.red(), p.green(), p.blue()])
+        .collect();
+    let gs_blocks = canvas_blocks(&gs_rgb, PX, PX, 10 * SCALE);
+
+    let (mean, disjoint) = canvas_mean_block_diff(&pscat_blocks(11), &gs_blocks);
+    assert_eq!(disjoint, 0, "blocks inked in one render only");
+    assert!(mean < 6.0, "pscat and gs disagree on the surface: {mean:.2}");
+
+    // Negative control: another seed must be far outside that tolerance,
+    // or the comparison above proves nothing.
+    let (other, _) = canvas_mean_block_diff(&pscat_blocks(12), &gs_blocks);
+    assert!(
+        other > 18.0,
+        "a different seed is within tolerance ({other:.2} vs {mean:.2}); the check is too weak"
+    );
+}
