@@ -24,7 +24,7 @@ Decisions:
   replayed alone lays exactly its above-water marks. It works under
   Ghostscript too, whose `rrand`/`srand` round-trip the same way.
   Proof of the refactor: with every part replayed in its own colour, the
-  1× render was md5-identical to main (commit 75fa409). That commit is
+  1× render was md5-identical to main (commit 1a94c73). That commit is
   the evidence that the above-water scene is unchanged by the
   restructuring.
 - **Each part is pulled into what is really under it.** Each reflected
