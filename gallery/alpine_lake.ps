@@ -1,6 +1,6 @@
 %!PS-Adobe-3.0
 %%Title: Alpine Lake — a wet-on-wet landscape from paintkit's brushes
-%%Creator: pscat — issue #118, the wet-on-wet epic's (#112) capstone
+%%Creator: pscat — issue #118, the wet-on-wet epic's (#112) capstone; reflection pulled in #191
 %%BoundingBox: 0 0 760 560
 %%EndComments
 
@@ -13,13 +13,16 @@
 % Nothing here is a landscape helper. Every mark is one of the epic's
 % painting tools, and each tool does the job it would on a real easel:
 %
-%   pkbroad  (#115)  the sky's criss-cross block-in, the mist fade up
-%                    each range's foot, the earth of the bank, and the
-%                    horizontal pulls across the lake
+%   pkbroad  (#115)  the sky's criss-cross block-in, the earth of the
+%                    bank, and the horizontal strokes grazed across the
+%                    lake
+%   pkcrisscross (#184)  where the sky's block-in strokes fall
 %   pktrowel (#111)  the knife: snow down the lit faces, shadow snow and
 %                    shadow planes down the dark ones
 %   pkwet    (#113)  clouds, mist and the far forest's crest settled
-%                    into the paint beneath them instead of sitting on it
+%                    into the paint beneath them instead of sitting on it;
+%            (#181)  directional, the near range's foot lifted into mist
+%                    and the whole reflection pulled down
 %   pkfan    (#114)  the evergreens' branch tiers, the spires in the
 %                    far forest
 %   pkdab    (#117)  the far forest's tapped crest, the bushes on the bank
@@ -27,9 +30,13 @@
 %   pkspray / pkoil  cloud vapour and mist; the lit lip of the bank
 %
 % The reflection is not a separate drawing. Each scene element is a
-% procedure that seeds its own randomness first, so the lake re-runs
-% the exact same procedures under a `1 -1 scale` about the waterline
-% and gets the same mountains and trees, mark for mark, upside down.
+% procedure that seeds its own randomness first, and every painting
+% step in it logs the random state as it goes, so the lake can replay
+% the same marks under a `1 -1 scale` about the waterline, upside down,
+% one single-colour part at a time. Each part is pulled straight down
+% with a directional pkwet into the paint really beneath it, the way a
+% dry brush drags a wet reflection, then grazed across with horizontal
+% strokes and cut with light lines.
 %
 % No setalpha anywhere (pkwash/pkpaper are deliberately not used), so
 % Ghostscript renders the same picture without a fallback path -- only
@@ -455,23 +462,19 @@ lkWL -2 0 {
 % that is really beneath it in the water.
 /lkmirror { 0 lkWL 2 mul translate 1 -1 scale } def
 /lkWATER [ [ 330 lkskyat ] 0.84 shade ] def      % the open water, mid-depth
-% rgb under code spread layers graze -
-% graze is how many passes the pulled part is then brushed across with
-% (a nested horizontal pkwet); 1 leaves it as pulled.
+% rgb under code spread layers -
+% Pulls one part. Spread over Layers-1 stays at 2pt, so the replayed
+% copies, identical by construction, blend instead of echoing.
+% (A nested horizontal pkwet graze per part, as in #181's specimen, was
+% tried: it more than doubled the reflection's cost for little visible
+% gain over the pkbroad strokes grazed across afterwards.)
 /lkpull {
-    /lkpg exch def /lkpl exch def /lkps exch def /lkwant exch def /lkpu exch def
+    /lkpl exch def /lkps exch def /lkwant exch def /lkpu exch def
     % the reflection carries the scene's colour, a little toward the water
     lkWATER 0.15 mix3 setrgbcolor
-    lkpg 1 gt {
-        { { gsave lkmirror lkscene grestore }
-          << /Direction 270 /OneSided true /Stretch 5 /Spread lkps /Layers lkpl
-             /Pickup 0.8 /Under lkpu >> pkwet }
-        << /Direction 0 /Stretch 6 /Spread 6 /Layers lkpg /Pickup 0.5 /Under lkpu >> pkwet
-    } {
-        { gsave lkmirror lkscene grestore }
-        << /Direction 270 /OneSided true /Stretch 5 /Spread lkps /Layers lkpl
-           /Pickup 0.8 /Under lkpu >> pkwet
-    } ifelse
+    { gsave lkmirror lkscene grestore }
+    << /Direction 270 /OneSided true /Stretch 5 /Spread lkps /Layers lkpl
+       /Pickup 0.8 /Under lkpu >> pkwet
 } def
 % code -   one part replayed mirrored and sharp, in its own colours
 /lksharp {
@@ -480,21 +483,24 @@ lkWL -2 0 {
     /lkown false def
 } def
 /lkmode /replay def /lkown false def
-lkFAR                    lkWATER                 11 12 7 1 lkpull
-[ lkFAR 0.84 shade ]     lkFAR                   12 8 5 1 lkpull
-[ lkSNOW 0.9 shade ]      lkFAR                   13 8 5 1 lkpull
-[ lkFAR lkSNOW 0.55 mix3 ] lkFAR                 14 8 5 1 lkpull
-lkMIST                   lkFAR                   21 10 6 1 lkpull
-lkNEAR                   [ lkFAR lkMIST 0.4 mix3 ] 31 12 7 1 lkpull
-[ lkNEAR 0.84 shade ]    lkNEAR                  32 12 7 1 lkpull
-[ lkSNOW 0.9 shade ]      lkNEAR                  33 12 7 1 lkpull
-[ lkNEAR lkSNOW 0.55 mix3 ] lkNEAR               34 12 7 1 lkpull
+lkFAR                    lkWATER                 11 12 7 lkpull
+[ lkFAR 0.84 shade ]     lkFAR                   12 8 5 lkpull
+[ lkSNOW 0.9 shade ]      lkFAR                   13 8 5 lkpull
+[ lkFAR lkSNOW 0.55 mix3 ] lkFAR                 14 8 5 lkpull
+lkMIST                   lkFAR                   21 10 6 lkpull
+lkNEAR                   [ lkFAR lkMIST 0.4 mix3 ] 31 12 7 lkpull
+[ lkNEAR 0.84 shade ]    lkNEAR                  32 12 7 lkpull
+[ lkSNOW 0.9 shade ]      lkNEAR                  33 12 7 lkpull
+[ lkNEAR lkSNOW 0.55 mix3 ] lkNEAR               34 12 7 lkpull
+% the near range's lifted foot carries its own directional pkwet, and
+% mirrored that lift already runs down the water; pulling it as well
+% would nest 14 x 7 passes, past pkwet's 64x budget
 35 lksharp
-[ lkLINE lkMIST 0.4 mix3 ] lkFORESTUNDER         41 12 7 1 lkpull
-lkLINE                   [ lkLINE lkMIST 0.4 mix3 ] 42 12 7 1 lkpull
-[ lkFARPINE 0.8 shade ]  lkLINE                  51 12 7 1 lkpull
-lkFARPINE                lkLINE                  52 12 7 1 lkpull
-lkFARPINELT              lkFARPINE               53 12 7 1 lkpull
+[ lkLINE lkMIST 0.4 mix3 ] lkFORESTUNDER         41 12 7 lkpull
+lkLINE                   [ lkLINE lkMIST 0.4 mix3 ] 42 12 7 lkpull
+[ lkFARPINE 0.8 shade ]  lkLINE                  51 12 7 lkpull
+lkFARPINE                lkLINE                  52 12 7 lkpull
+lkFARPINELT              lkFARPINE               53 12 7 lkpull
 /lkmode /record def
 7 srand
 lkWL 4 sub -8 0 {
