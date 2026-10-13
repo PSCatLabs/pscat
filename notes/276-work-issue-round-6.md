@@ -13,10 +13,12 @@ fix is structural: the commands now live in files an agent runs as one command.
   so racers really overlap: 30 fresh and 20 stale-reclaim races, the two `DIR_AGE` cases, garbage
   heartbeat, live heartbeat, a delayed-racer ABA case (a `sleep 1` injected into a copy), and
   `heartbeat.sh`. `CLAIM_ORIG` diffs the script body against the pre-#276 block.
-- **Finding: a stale reclaim race can have zero winners.** One trial in ~100 ended with every
-  racer reporting `lost`: a racer's ABA restore (`mv "$STEAL" "$LOCKDIR"`) landed on another
+- **Finding: a stale reclaim race can have zero winners** (filed as #281). Roughly 6 of ~300
+  stale trials, 4 of 20 in one run and 0 of 100 in a quiet one, ended with every racer reporting
+  `lost`; the rate follows machine load: a racer's ABA restore (`mv "$STEAL" "$LOCKDIR"`) landed on another
   racer's in-flight reclaim, whose heartbeat `mv` then failed. No double claim and the lock stays
-  reclaimable after the 10 s grace window; the harness asserts "never two winners", not "exactly
+  reclaimable after the 10 s grace window; `/work-issue <N>` meanwhile reports the issue as being
+  worked on. The harness asserts "never two winners", not "exactly
   one", for stale races. This is behaviour of the original protocol, not of the move.
 - Other fixes: `Closes #<N>` is mandatory in the PR body, step 9 closes a still-OPEN issue with a
   comment, the worktree SKILL.md is re-read after the 5.5 rebase, step 9 runs from the main

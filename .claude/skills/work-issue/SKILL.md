@@ -151,7 +151,7 @@ gh pr create --title "<summary>" --body "$(cat <<'EOF'
 ## Summary
 <what changed and why, in a few bullets>
 
-Closes #<N>   <- required, even if you write the body without this template
+Closes #<N>
 
 ## Test plan
 - [x] PSCAT_PROFILE=ci ./scripts/selftest.sh && cargo test --profile ci && cargo clippy --all-targets -- -D warnings && cargo fmt --all -- --check
@@ -159,6 +159,7 @@ Closes #<N>   <- required, even if you write the body without this template
 EOF
 )"
 ```
+The body must contain `Closes #<N>` on its own line even when you write it without this template.
 If the dispatcher said up front that this run will not merge, write the body for the maintainer from
 the start (pitfalls.md "Stop without merging"). Always push with that explicit refspec, never a bare `git push`. Then:
 ```sh
@@ -227,6 +228,7 @@ merge"). Red: stop, report it first, start no other work.
 
 ## 10. Final report
 
-End the run by printing the report template in finish.md ("Step 10"), filled in, `none` where
-empty. Its lines: PR, Merge, Plan review, Checks, Wall time, Review rounds, Steps skipped or failed,
+**Read `.claude/skills/work-issue/references/finish.md` now** if you have not (runs that stop at
+8.10, a no-merge dispatch or pending CI skip step 9). End the run by printing its "Step 10" report
+template, filled in, `none` where empty. Its lines: PR, Merge, Plan review, Checks, Wall time, Review rounds, Steps skipped or failed,
 Issues filed, Cleanup, Friction.

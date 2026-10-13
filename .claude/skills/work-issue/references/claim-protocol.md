@@ -232,7 +232,8 @@ start barrier so they genuinely overlap:
 
 - 30 fresh-claim races (exactly one `claimed (fresh)`, every other racer `live` or `lost`);
 - 20 stale-heartbeat reclaim races (never two winners; losers report `lost` or `live`). Zero winners
-  is an allowed, safe outcome that happens now and then: a racer's ABA restore lands on another's
+  is a safe outcome, but a real one: roughly 2% of stale trials, up to 20% on a loaded machine
+  (liveness gap tracked in #281): a racer's ABA restore lands on another's
   in-flight reclaim, everyone reports `lost`, and the lock stays reclaimable;
 - an empty lock dir under 10 s old reads `live`, one backdated past the grace window is reclaimed by
   exactly one racer, and a garbage heartbeat on an old dir is reclaimed;

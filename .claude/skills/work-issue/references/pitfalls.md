@@ -252,13 +252,15 @@ Cheapest first, before the long gate:
    `ARTKIT_INTERNAL` in `src/capabilities.rs`. Check with
    `PSCAT_PROFILE=ci ./scripts/selftest.sh` and
    `cargo test --profile ci --test capabilities` (about 30 s together).
-3. `build.rs` (`find_top_level_defs`) only understands `/key value def` at depth 0, where
-   `value` is ONE object (a number, a name, a string, or a balanced `{}`/`[]`/`<< >>`
-   group). It panics on `/name N dict def` with "`def` with no `/name` two positions back
-   on the depth-0 stack", and that fails every build, not just your test. Write the dict
-   as a `<< >>` literal (`/name << /k v >> def`), or build it first and define it with a
-   probe-first def: make the value in an earlier definition, so the `def` line has one
-   object (`/name mkvalue def`). Run `cargo build` before the long gate to see it in seconds.
+3. In a `lib/` file that opts into the `% @kind` catalog, `build.rs` (`find_top_level_defs`)
+   only understands `/key value def` at depth 0 where `value` is ONE object (a number, a
+   name, a string, or a balanced `{}`/`[]`/`<< >>` group). It panics on `/name N dict def`
+   ("`def` with no `/name` two positions back on the depth-0 stack"), which fails every build,
+   not just your test (untagged `LEGACY_FILES` such as `lib/etching.ps` still use that
+   shape). Use a `<< >>` literal (`/name << /k v >> def`), or a probe-first def whose `def`
+   sits at depth 1, as `lib/lettering.ps` and `lib/drykit.ps` do with `where`:
+   `/name where { pop } { /name N dict def } ifelse`. Run `cargo build` before the long gate to
+   see a panic in seconds.
 4. Paintkit and other `lib/` slices that promise "unset keys render byte-identically":
    run `scripts/identity_check.sh BASE_WORKTREE` (see its header: base worktree at the
    post-5.5-rebase commit, one shared binary, `--control FILE` negative control). The
