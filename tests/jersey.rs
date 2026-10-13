@@ -740,7 +740,7 @@ fn a_big_offset_shadow_is_one_solid_block() {
             let holes = (a..=b)
                 .filter(|&x| {
                     let p = pm.pixels()[y * w + x];
-                    !is_green(y * w + x) && !(p.red() > 200 && p.green() > 200)
+                    !(is_green(y * w + x) || (p.red() > 200 && p.green() > 200))
                 })
                 .count();
             assert!(
