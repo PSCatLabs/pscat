@@ -5646,9 +5646,14 @@ systemdict /setalpha known /pwhasalpha exch def
         dup cvi puac length 2 sub min /puak exch def
         puak sub /puatt exch def
         puar 1 get /puaw exch def
-        puaw 0 eq
-            { puatt 0.5 lt { 0 } { 1 } ifelse }
-            { puatt 0.5 sub puaw div 0.5 add 0 max 1 min }
+        % The ramp is compared before it is divided: a tiny /ColorMix would
+        % otherwise overflow the division (undefinedresult), and under gs's
+        % 32-bit reals that is anything under about 1e-38. Inside the ramp
+        % |d / mix| < 0.5, so the divide is safe. /ColorMix 0 has no ramp,
+        % so both comparisons are the midpoint step.
+        puatt 0.5 sub /puad exch def
+        puad puaw 0.5 mul ge { 1 }
+        { puad puaw -0.5 mul le { 0 } { puad puaw div 0.5 add } ifelse }
         ifelse /puatt exch def
         puatt 0 eq
             { puac puak get aload pop }
@@ -5828,7 +5833,7 @@ systemdict /setalpha known /pwhasalpha exch def
 %%EndSelfTest
 %
 %%SelfTest: puat-resolves-colours-at-head-positions
-%   % All values are dyadic so `eq` is exact, in pscat and under gs alike.
+%   % All values are dyadic so `eq` is exact.
 %   % u = +1 is the left edge and the first colour, u = -1 the last.
 %   << /Colors [ [ 0 0 0 ] [ 1 0.5 0.25 ] ] >> (pkfan) puparse /purec exch def
 %
@@ -5868,6 +5873,15 @@ systemdict /setalpha known /pwhasalpha exch def
 %   purec 0 false puat
 %   1 eq exch 1 eq and exch 1 eq and
 %   (/ColorMix 0 steps up at exactly the midpoint) mustbe
+%
+%   % A tiny /ColorMix is a step, not an overflow in the division.
+%   << /Colors [ [ 0 0 0 ] [ 1 1 1 ] ] /ColorMix 1e-300 >> (pkfan) puparse /purec exch def
+%   purec 0.25 false puat
+%   0 eq exch 0 eq and exch 0 eq and
+%   (a tiny /ColorMix, left of the midpoint) mustbe
+%   purec -0.25 false puat
+%   1 eq exch 1 eq and exch 1 eq and
+%   (a tiny /ColorMix, right of the midpoint) mustbe
 %
 %   % ColorMix 1 is a straight gradient; 0.5 holds the outer quarters.
 %   << /Colors [ [ 0 0 0 ] [ 1 1 1 ] ] /ColorMix 1 >> (pkfan) puparse /purec exch def
