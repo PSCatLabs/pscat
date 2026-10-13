@@ -243,7 +243,8 @@ via whichever path ran), decide merge eligibility from the policy:
   the dispatcher said not to merge: post the summary below, release the
   lock, keep `in-review`, the worktree and the branch, and report
   `awaiting human merge (dispatcher said no merge)`. `pitfalls.md`
-  "Resume paths" has the stop and the resume-to-merge route (#208).
+  "Stop without merging" and "Resume paths" have the stop and the
+  resume-to-merge route (#208).
 - `size-and-risk-bar`: eligible only if the diff (excluding doc-only
   files) is under `max_changed_lines` and touches none of
   `sensitive_paths`; otherwise stop here (same lock release as the

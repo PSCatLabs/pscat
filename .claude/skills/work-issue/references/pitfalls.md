@@ -291,7 +291,7 @@ task, or the user cut the run short), the PR is open but not merged. Do
    remaining steps: the PR number and branch; the worktree path; whether
    step 8.11's `## Summary of work` comment is already posted (do not post
    it twice); then `gh pr checks <PR#> --watch --fail-fast` (recipe
-   above), `gh pr view` to confirm `test` is `SUCCESS`,
+   above), the statusCheckRollup query (non-empty, every check `SUCCESS`),
    `gh pr merge <PR#> --squash`, and step 9.
 3. Resuming: the same session just continues from step 8.12 with no
    re-claim. A fresh `/work-issue <N>` after the lock is stale takes the
@@ -307,7 +307,7 @@ run that died after step 7. Claim as usual, skip step 2 (re-adding
 `in-progress` would make the next invocation read "someone is mid-run" and
 refuse), then step 3's reuse branch. If the worktree is gone, make one on
 the PR branch: `git fetch origin "$BRANCH" && git worktree add "$WORKTREE_DIR" "$BRANCH"`
-(find `$BRANCH` with `gh pr list --state open --search "<N> in:body" --json number,headRefName`).
+(find `$BRANCH` with `gh pr list --state open --json number,headRefName --jq '.[] | select(.headRefName | test("/<N>-"))'`).
 Find the PR with `gh pr list --state open --head "$BRANCH" --json number,url`.
 **Decide the re-entry point from GitHub state, never from scratch files**
 (`<SCRATCH>` is per session; the old gate log, review JSON and summary
@@ -318,7 +318,7 @@ file are gone). First match wins:
 | PR `CLOSED` unmerged | Stop and report. |
 | PR `MERGED` | Step 9 only. |
 | No `## Codex review` (or `## Fallback review`) comment on the PR | 8.1: the review never ran. |
-| The PR head has commits newer than the last review comment, other than `update-branch` merge commits or a doc-only conflict merge (below) | 8.3 with R+1: re-review. |
+| The PR head has commits newer than the last review comment (`gh pr view <PR#> --json commits` `committedDate` vs the comment's `createdAt`), other than `update-branch` merge commits or a doc-only conflict merge (below) | 8.3 with R+1: re-review. |
 | Review current, but no `## Summary of work (PR #<PR#>)` comment on the issue | 8.7: post the missing round comment if absent, then 8.10, 8.11. |
 | Summary posted | 8.10 (re-read `merge_policy` and whether the dispatcher still says no merge), then 8.12. |
 
@@ -347,7 +347,7 @@ then removes the worktree.
 ### Rebase and merge rules (#208)
 
 Rebase onto `origin/main` exactly once, at step 5.5 before the **first
-push**, so a break already on `main` (as #189's clippy failure was) does
+push** (commit first: a rebase refuses a dirty tree), so a break already on `main` (as #189's clippy failure was) does
 not fail an unrelated issue. After the PR exists, history is published:
 never rebase it. Bring `main` in by merging instead: `gh pr update-branch
 <PR#>` (remote merge), then `git -C "$WORKTREE_DIR" pull --ff-only` before

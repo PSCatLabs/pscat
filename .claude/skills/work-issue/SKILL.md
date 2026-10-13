@@ -191,8 +191,8 @@ Read `.claude/skills/work-issue/references/codex-review.md` now (full policy). T
     - `human-only`, or `size-and-risk-bar` and over the bar: run
       `rm -rf "$(git rev-parse --path-format=absolute --git-common-dir)/work-issue-lock-<N>"`,
       then go to step 10 and report the PR as awaiting merge. Stop.
-    - `agent-full`, or under the bar: continue, unless the dispatcher said not to merge
-      (pitfalls.md "Resume paths": do 11, then stop with the worktree kept).
+    - `agent-full`, or under the bar: continue, unless the dispatcher said not to merge: do 11, release the lock
+      as above, keep `in-review` and the worktree, stop (pitfalls.md "Stop without merging").
 11. Write `<SCRATCH>/issue-<N>-summary.md`. It starts with `## Summary of work (PR #<PR#>)`
     and has the sections Delivered / Decisions / Review record / Known
     deviations / open points (see codex-review.md). Then:
