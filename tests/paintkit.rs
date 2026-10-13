@@ -7789,12 +7789,16 @@ fn dab_advertises_exactly_its_tested_parameters() {
         "Charge",
         "Clump",
         "ColorJitter",
+        "ColorMix",
+        "Colors",
         "Density",
         "Highlight",
+        "HighlightColor",
         "Irregular",
         "Light",
         "Pitch",
         "Shadow",
+        "ShadowColor",
         "Size",
         "Scatter",
     ];
@@ -10651,4 +10655,311 @@ fn dab_and_oil_unset_loading_keys_are_byte_identical() {
         })
         .collect();
     assert_eq!(got, pinned, "an unset-keys render moved: {got:#x?}");
+}
+
+/// Pixels of `it` (whole page) satisfying `pred` on (r, g, b).
+fn count_rgb(it: &Interp, pred: impl Fn(i32, i32, i32) -> bool) -> usize {
+    it.gfx()
+        .pixmap
+        .pixels()
+        .iter()
+        .filter(|p| pred(p.red() as i32, p.green() as i32, p.blue() as i32))
+        .count()
+}
+
+fn is_red(r: i32, g: i32, b: i32) -> bool {
+    r > 150 && r > g + 90 && r > b + 90
+}
+
+fn is_blue(r: i32, g: i32, b: i32) -> bool {
+    b > 150 && b > r + 90 && b > g + 90
+}
+
+/// Test 7. `/HighlightColor` and `/ShadowColor` move the lit and shaded
+/// layers toward a hue, not toward white and black. A grey brush has no
+/// red or blue pixel on its own, so any that appear came from the keys.
+#[test]
+fn highlight_color_moves_the_hue() {
+    // pkdab: highlight dabs are `mix3(grey, H, 0.6)`, shadow dabs
+    // `mix3(grey, S, 0.55)`, at full /Highlight and /Shadow.
+    let dab_opts = "/Size 6 /Scatter 20 /ColorJitter 0 /Highlight 1 /Shadow 1";
+    let grey = |extra: &str| dab_with("0.5 0.5 0.5", DAB_PATH, &format!("{dab_opts} {extra}"));
+    let plain = grey("");
+    assert_eq!(
+        count_rgb(&plain, |r, g, b| is_red(r, g, b) || is_blue(r, g, b)),
+        0,
+        "a grey brush must paint no hue by itself"
+    );
+    let hued = grey("/HighlightColor [1 0 0] /ShadowColor [0 0 1]");
+    let red = count_rgb(&hued, is_red);
+    let blue = count_rgb(&hued, is_blue);
+    assert!(
+        red > 150,
+        "pkdab: highlights did not move toward red: {red}"
+    );
+    assert!(
+        blue > 300,
+        "pkdab: shadows did not move toward blue: {blue}"
+    );
+    // Each key moves only its own layer.
+    let only_h = grey("/HighlightColor [1 0 0]");
+    assert!(count_rgb(&only_h, is_red) > 150 && count_rgb(&only_h, is_blue) == 0);
+    let only_s = grey("/ShadowColor [0 0 1]");
+    assert!(count_rgb(&only_s, is_blue) > 300 && count_rgb(&only_s, is_red) == 0);
+    // ...and a key with its layer switched off paints nothing.
+    let off = grey("/Highlight 0 /Shadow 0 /HighlightColor [1 0 0] /ShadowColor [0 0 1]");
+    assert_eq!(
+        count_rgb(&off, |r, g, b| is_red(r, g, b) || is_blue(r, g, b)),
+        0
+    );
+
+    // pkoil: the highlight ridge on the + side and the shadow ridge on the
+    // - side are `mix3(grey, H, 1)` and `mix3(grey, S, 1)` at strength 1.
+    let oil = |extra: &str| {
+        loaded_mark(
+            "pkoil",
+            LTR,
+            "0.5 0.5 0.5 setrgbcolor",
+            &format!("/Width 30 /ColorJitter 0 /EdgePickup 0 /Highlight 1 /Shadow 1 {extra}"),
+        )
+    };
+    let plain = oil("");
+    assert_eq!(
+        count_rgb(&plain, |r, g, b| is_red(r, g, b) || is_blue(r, g, b)),
+        0,
+        "a grey oil brush must paint no hue by itself"
+    );
+    let hued = oil("/HighlightColor [1 0 0] /ShadowColor [0 0 1]");
+    let red = count_rgb(&hued, is_red);
+    let blue = count_rgb(&hued, is_blue);
+    assert!(red > 300, "pkoil: highlight ridge not red: {red}");
+    assert!(blue > 300, "pkoil: shadow ridge not blue: {blue}");
+    let only_h = oil("/HighlightColor [1 0 0]");
+    assert!(count_rgb(&only_h, is_red) > 300 && count_rgb(&only_h, is_blue) == 0);
+    let only_s = oil("/ShadowColor [0 0 1]");
+    assert!(count_rgb(&only_s, is_blue) > 300 && count_rgb(&only_s, is_red) == 0);
+    // The ridges sit on opposite sides: the red one is the upper (+y) side.
+    let mid = 100;
+    let side = |it: &Interp, f: fn(i32, i32, i32) -> bool, upper: bool| {
+        let mut n = 0;
+        for y in 0..200u32 {
+            if (y < mid) != upper {
+                continue;
+            }
+            for x in 0..400u32 {
+                let p = it.gfx().pixmap.pixel(x, y).expect("in bounds");
+                if f(p.red() as i32, p.green() as i32, p.blue() as i32) {
+                    n += 1;
+                }
+            }
+        }
+        n
+    };
+    assert!(side(&hued, is_red, true) > 10 * side(&hued, is_red, false));
+    assert!(side(&hued, is_blue, false) > 10 * side(&hued, is_blue, true));
+}
+
+/// Test 8. With `[A B]` at `/ColorMix 0` every dab is one colour or the
+/// other, so a 400-dab clump's pure pixels split about evenly; at
+/// `/ColorMix 1` the dabs grade between them and the pure pixels thin out.
+#[test]
+fn pkdab_colors_mix_per_dab() {
+    let clump = |mix: &str| {
+        dab_with(
+            "0 0 0",
+            "newpath 200 100 moveto",
+            &format!(
+                "/Size 4 /Scatter 70 /Clump 400 /Charge 1 /Shadow 0 /Highlight 0 \
+                 /ColorJitter 0 /Colors [[1 0 0] [0 0 1]] /ColorMix {mix}"
+            ),
+        )
+    };
+    let hard = clump("0");
+    let red = count_rgb(&hard, |r, g, b| r > 250 && g < 5 && b < 5);
+    let blue = count_rgb(&hard, |r, g, b| b > 250 && r < 5 && g < 5);
+    let share = red as f64 / (red + blue) as f64;
+    assert!(
+        red + blue > 3000 && (0.35..0.65).contains(&share),
+        "[A B] at /ColorMix 0 should split about evenly: red {red}, blue {blue}"
+    );
+    // The page holds nothing but the two colours (and their anti-aliased
+    // fringes), so a hard load paints very few in-between pixels...
+    let between = |it: &Interp| count_rgb(it, |r, g, b| r > 60 && b > 60 && g < 30);
+    let soft = clump("1");
+    let pure_soft = count_rgb(&soft, |r, g, b| {
+        (r > 250 && g < 5 && b < 5) || (b > 250 && r < 5 && g < 5)
+    });
+    // ...and a full gradient paints many, with far fewer pure ones.
+    assert!(
+        between(&soft) > 3 * between(&hard) && between(&soft) > 1000,
+        "/ColorMix 1 should grade: {} vs {}",
+        between(&soft),
+        between(&hard)
+    );
+    assert!(pure_soft * 3 < red + blue, "{pure_soft} vs {}", red + blue);
+}
+
+/// Turning the new keys on recolours a mark without moving it: the
+/// caller's random stream is untouched, and the same pixels are painted.
+#[test]
+fn dab_and_oil_loading_keys_take_no_random_draws() {
+    let knobs = [
+        "/Colors [[1 0 0] [0 0 1]]",
+        "/Colors [[1 0 0] [0 1 0] [0 0 1]] /ColorMix 1 /Light 45",
+        "/Colors [[1 0 0]] /ColorMix 0",
+        "/HighlightColor [1 1 0]",
+        "/ShadowColor [0 0 0.5]",
+        "/Colors [[0 0.5 0] [0.6 0.6 0]] /HighlightColor [1 1 0] /ShadowColor [0 0 0.5]",
+    ];
+    let base = dab_stream_after("/Size 6", DAB_PATH);
+    let base_clump = dab_stream_after("/Size 6", "newpath 100 100 moveto");
+    for knob in knobs {
+        assert_eq!(
+            dab_stream_after(&format!("/Size 6 {knob}"), DAB_PATH),
+            base,
+            "pkdab {knob} changed how many draws it takes"
+        );
+        assert_eq!(
+            dab_stream_after(&format!("/Size 6 {knob}"), "newpath 100 100 moveto"),
+            base_clump,
+            "pkdab {knob} changed how many draws a clump takes"
+        );
+    }
+    // The same dabs land in the same places, just in other colours.
+    let mask = |opts: &str| {
+        let it = dab_with("0 0 0", DAB_PATH, &format!("/Size 6 /Scatter 20 {opts}"));
+        pixels(&it)
+            .chunks(4)
+            .map(|p| p[..3] != [255, 255, 255])
+            .collect::<Vec<_>>()
+    };
+    let plain = mask("");
+    // (/Light is left out: on pkdab it moves the shadow and highlight layers
+    // by design, which is its existing meaning.)
+    for knob in knobs.iter().filter(|k| !k.contains("/Light")) {
+        assert_eq!(mask(knob), plain, "pkdab {knob} moved the dabs");
+    }
+
+    let oil_next = |extra: &str| {
+        let mut it = loaded_mark(
+            "pkoil",
+            LTR,
+            "0.5 0.5 0.5 setrgbcolor",
+            &format!("/Width 30 {extra}"),
+        );
+        it.run_str("rand").expect("rand");
+        it.operand_stack()
+            .last()
+            .expect("a draw")
+            .repr()
+            .to_string()
+    };
+    let plain = oil_next("");
+    for extra in [
+        "/HighlightColor [1 1 0]",
+        "/ShadowColor [0 0 1]",
+        "/HighlightColor [1 1 0] /ShadowColor [0 0 1] /Highlight 1 /Shadow 1",
+    ] {
+        assert_eq!(oil_next(extra), plain, "pkoil {extra} changed the stream");
+    }
+}
+
+/// A load whose colours all equal the current colour paints what the
+/// plain brush paints, with the default layers and jitter in play.
+#[test]
+fn dab_a_uniform_load_is_the_plain_brush() {
+    let colour = "0.25 0.5 0.75 setrgbcolor";
+    for path in [
+        LTR,
+        "newpath 200 100 moveto",
+        "newpath 50 40 moveto 150 180 250 20 350 160 curveto",
+    ] {
+        let base = "/Size 6 /Scatter 20 /Highlight 0.8 /Shadow 0.7 /ColorJitter 0.3";
+        let plain = pixels(&loaded_mark("pkdab", path, colour, base));
+        assert!(ink(&plain) > 500, "the plain clump on `{path}` is blank");
+        for extra in [
+            "/Colors [[0.25 0.5 0.75]]",
+            "/Colors [[0.25 0.5 0.75] [0.25 0.5 0.75]]",
+            "/Colors [[0.25 0.5 0.75] [0.25 0.5 0.75] [0.25 0.5 0.75]] /ColorMix 1",
+            "/Colors [[0.25 0.5 0.75] [0.25 0.5 0.75]] /ColorMix 0",
+        ] {
+            let loaded = pixels(&loaded_mark(
+                "pkdab",
+                path,
+                colour,
+                &format!("{base} {extra}"),
+            ));
+            assert!(
+                loaded == plain,
+                "pkdab {extra} on `{path}` moved the plain brush"
+            );
+        }
+    }
+}
+
+/// Inside a one-sided directional pull the loaded dab colour and both
+/// mix targets are graded toward `/Under` like an inherited colour: the
+/// outer pass, clear of the core, holds no pure red or blue.
+#[test]
+fn wet_pull_grades_dab_colors_and_hue_colors() {
+    let it = wet_loaded(
+        "0 0 0 setrgbcolor",
+        "newpath 50 160 moveto 350 160 lineto \
+         << /Size 6 /Scatter 8 /Charge 1 /ColorJitter 0 /Highlight 1 /Shadow 1 \
+            /Colors [[1 0 0]] /HighlightColor [0 0 1] /ShadowColor [0 0 1] >> pkdab",
+        "/Direction 270 /OneSided true /Layers 2 /Offset 80 /Under [0 1 0]",
+    );
+    // Core: user y ~150..170, pixel rows 30..50. Pure red body, blue layers.
+    let core_red = (30..50u32)
+        .flat_map(|y| (100..300u32).map(move |x| (x, y)))
+        .filter(|&(x, y)| {
+            let p = it.gfx().pixmap.pixel(x, y).unwrap();
+            is_red(p.red() as i32, p.green() as i32, p.blue() as i32)
+        })
+        .count();
+    assert!(core_red > 500, "the core pass lost its red: {core_red}");
+    // Outer pass: user y ~70..90, pixel rows 110..130, mixed 0.85 to green.
+    let (mut inked, mut hue) = (0, 0);
+    for y in 110..130u32 {
+        for x in 100..300u32 {
+            let p = it.gfx().pixmap.pixel(x, y).unwrap();
+            let (r, g, b) = (p.red() as i32, p.green() as i32, p.blue() as i32);
+            if [r, g, b] != [255, 255, 255] {
+                inked += 1;
+            }
+            if is_red(r, g, b) || is_blue(r, g, b) {
+                hue += 1;
+            }
+        }
+    }
+    assert!(inked > 800, "the outer pass is nearly blank: {inked}");
+    assert_eq!(
+        hue, 0,
+        "{hue} of {inked} outer pixels are ungraded red or blue"
+    );
+}
+
+/// `pkdab` and `pkoil` advertise the new keys, each with a unit.
+#[test]
+fn dab_and_oil_advertise_the_loaded_color_keys() {
+    let src = std::fs::read_to_string("lib/paintkit.ps").expect("read paintkit");
+    for (preset, keys) in [
+        (
+            "pkdab",
+            &["Colors", "ColorMix", "HighlightColor", "ShadowColor"][..],
+        ),
+        ("pkoil", &["HighlightColor", "ShadowColor"][..]),
+    ] {
+        let def = src
+            .find(&format!("\n/{preset} {{"))
+            .unwrap_or_else(|| panic!("{preset} def"));
+        let tags = &src[src[..def].rfind("% @kind").expect("tags")..def];
+        for key in keys {
+            assert!(
+                tags.lines()
+                    .any(|l| l.starts_with(&format!("% @param: /{key} ["))),
+                "{preset} does not advertise /{key} with a unit"
+            );
+        }
+    }
 }
