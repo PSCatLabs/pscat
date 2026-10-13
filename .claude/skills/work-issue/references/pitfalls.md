@@ -274,9 +274,9 @@ again after any push, which restarts CI).
 - **The `exit=` line proves nothing about pass/fail** (#208). It was `0`
   on a run where both jobs were cancelled ("job was not acquired by
   Runner of type hosted"). Decide from GitHub's own check state, and merge
-  only when this prints `true`:
-  `gh pr view <PR#> --json statusCheckRollup --jq '[.statusCheckRollup[] | (.conclusion // .state)] | length > 0 and all(. == "SUCCESS")'`
-  The `length > 0` guard matters: jq's `all` is `true` on an empty
+  only when SKILL.md 8.12's query prints `true` (the one copy; it also
+  requires `mergeStateStatus != "DIRTY"`).
+  Its `length > 0` guard matters: jq's `all` is `true` on an empty
   array, and the rollup is empty for a few seconds after a push. A
   `CANCELLED`, `SKIPPED`, `NEUTRAL` or still-`IN_PROGRESS` check is not
   `SUCCESS`. (Branch protection requires only `test`, but a red
@@ -342,8 +342,8 @@ task, or the user cut the run short), the PR is open but not merged. Do
    remaining steps: the PR number and branch; the worktree path; whether
    step 8.11's `## Summary of work` comment is already posted (do not post
    it twice); then `gh pr checks <PR#> --watch --fail-fast` (recipe
-   above), the statusCheckRollup query (non-empty, every check `SUCCESS`),
-   `gh pr merge <PR#> --squash`, and step 9.
+   above), SKILL.md 8.12's pass/fail query (not `DIRTY`, non-empty, every check
+   `SUCCESS`), `gh pr merge <PR#> --squash`, step 9, and "Main CI after merge".
 3. Resuming: the same session just continues from step 8.12 with no
    re-claim. A fresh `/work-issue <N>` after the lock is stale takes the
    "Resume paths" route below (issue is `in-review` with an open PR, so it
@@ -381,11 +381,13 @@ file are gone). First match wins:
 | PR `MERGED` | Step 9 only, then "Main CI after merge". |
 | The PR head equals the `reviewed head` in the last `## Codex review, round` / `## Fallback review, round` issue comment, every row of its table has a response, and a `## Summary of work (PR #<PR#>)` comment exists | 8.10 (re-read `merge_policy` and whether the dispatcher still says no merge), then 8.12. |
 | Same, but no summary comment yet | 8.10, 8.11. |
-| Anything else or ambiguous: no review comment, no recorded `reviewed head`, a finding without a response, or commits since the reviewed head | 8.3 with R+1: re-review. |
+| Anything else or ambiguous: no review comment, no recorded `reviewed head`, a finding without a response, or non-merge commits since the reviewed head | 8.3 with R+1: re-review. |
 
 A head that only differs by clean merges of `origin/main` (no conflict
-resolutions, `git show --remerge-diff --format= --stat <merge>` empty) still
-counts as equal to the reviewed head. When unsure, re-review.
+resolutions: `git show --remerge-diff --format= --stat <merge>` empty, and
+`git merge-base --is-ancestor <merge>^2 origin/main` succeeds, since a clean
+merge of another feature branch is unreviewed code) still counts as equal to
+the reviewed head. When unsure, re-review.
 
 The final report on a resume fills `Plan review` with `done (earlier run)`
 and counts the review rounds from the issue's `## Codex review, round`
