@@ -43,8 +43,8 @@
 % The reach from a segment is the stroke's own half-width plus the
 % farthest a knuckle extends from its cell centre (0.88 grow streak W for
 % the stretched long semi-axis, plus 0.22W for the centre's nudge) plus
-% 1.5 device pixels, because the clip mask is anti-aliased: a knuckle that
-% ends inside an ink edge pixel still changes it.
+% `dkslack` device pixels (0 unless a test asks for pixel identity; see
+% its definition).
 %
 % Ghostscript closes sub-2-pixel gaps in fills and clips (its fill adjust),
 % which turns a fine catch into a solid stroke. dkcatch turns it off with
@@ -64,6 +64,16 @@
 % larger mark splits it into several catches.
 % @internal
 /dkbudget 150000 def
+
+% Extra reach, in device pixels. 0 for rendering. The clip mask is
+% anti-aliased, so a knuckle that ends within a pixel of the ink, without
+% touching it, still shades that edge pixel; a test that wants pixel
+% identity against a whole-page catch sets 1.5 (more than a pixel's
+% diagonal). At 144 dpi 1.5 pixels is 0.75pt of reach on each side, which
+% cost the full board 60% more cells (docs/DRYMEDIA.md 6.1) for a
+% sub-pixel difference at the ink's edge.
+% @internal
+/dkslack 0 def
 
 % any -> bool   (an integer or a real)
 % @internal
@@ -113,7 +123,11 @@
     dup userdict /dkstate 3 -1 roll put
     2147483647 div
 } def
-1 dksrand
+
+% The generator's state, as `1 dksrand` leaves it, so dkrand works before
+% anything seeds it.
+% @internal
+/dkstate 2 def
 
 % The named surfaces (DRYMEDIA.md 2.3): plain pkcanvas keys plus the
 % surface's own colour. These are starting values from the reference board;
@@ -269,12 +283,14 @@
     /dkhs exch def
     1 0 dkcm idtransform 0 1 dkcm idtransform dksvmax
     /dkpx exch def
-    /dkK dkgrow dkcs mul 0.88 mul 0.22 add dkW mul dkpx 1.5 mul add def
+    /dkpad dkpx dkslack mul def
+    /dkK dkgrow dkcs mul 0.88 mul 0.22 add dkW mul dkpad add def
     /dkwhole userdict /pjWholePage known def
 
     % Pre-pass: every stop to canvas space as [x y reach], with the box.
     /dkx0 1e30 def /dky0 1e30 def /dkx1 -1e30 def /dky1 -1e30 def
     /dknseg 0 def
+    /dkrmax 0 def
     /dkcv [
         dkcr {
             /dkrun exch def
@@ -293,14 +309,21 @@
                     dkstop 0 get dkstop 1 get transform dkcm itransform
                     /dksy exch def /dksx exch def
                     /dksr dkstop 2 get dkhs mul dkK add def
-                    dksx dksr sub dksy dksr sub dkgrowbox
-                    dksx dksr add dksy dksr add dkgrowbox
+                    dksr dkrmax gt { /dkrmax dksr def } if
+                    dksx dksy dkgrowbox
                     [ dksx dksy dksr ]
                 } forall
             ]
             dup length 0 eq { pop /dknseg dknseg 1 sub def } if
         } forall
     ] def
+    % A segment reaches as far as its wider end, so the box grows by the
+    % widest reach of any stop, not each stop's own: a thin end next to a
+    % wide one would otherwise leave cells outside the key range.
+    dkx0 dkx1 le {
+        /dkx0 dkx0 dkrmax sub def /dky0 dky0 dkrmax sub def
+        /dkx1 dkx1 dkrmax add def /dky1 dky1 dkrmax add def
+    } if
     % Test-only (CANVAS_SURFACE.md 6, test 7): with userdict /pjWholePage
     % set, every cell under the current clip joins too, so a test can
     % check that the band clipped no paint. No library code sets it.
@@ -378,19 +401,17 @@
 /dkoval {
     /dk1x dkex dkea mul def /dk1y dkey dkea mul def
     /dk2x dkey neg dkeb mul def /dk2y dkex dkeb mul def
-    dkcx dk1x add dkcy dk1y add moveto
-    dkcx dk1x add dk2x 0.5523 mul add dkcy dk1y add dk2y 0.5523 mul add
-    dkcx dk1x 0.5523 mul add dk2x add dkcy dk1y 0.5523 mul add dk2y add
-    dkcx dk2x add dkcy dk2y add curveto
-    dkcx dk1x 0.5523 mul sub dk2x add dkcy dk1y 0.5523 mul sub dk2y add
-    dkcx dk1x sub dk2x 0.5523 mul add dkcy dk1y sub dk2y 0.5523 mul add
-    dkcx dk1x sub dkcy dk1y sub curveto
-    dkcx dk1x sub dk2x 0.5523 mul sub dkcy dk1y sub dk2y 0.5523 mul sub
-    dkcx dk1x 0.5523 mul sub dk2x sub dkcy dk1y 0.5523 mul sub dk2y sub
-    dkcx dk2x sub dkcy dk2y sub curveto
-    dkcx dk1x 0.5523 mul add dk2x sub dkcy dk1y 0.5523 mul add dk2y sub
-    dkcx dk1x add dk2x 0.5523 mul sub dkcy dk1y add dk2y 0.5523 mul sub
-    dkcx dk1x add dkcy dk1y add curveto
+    /dkm1x dk1x 0.5523 mul def /dkm1y dk1y 0.5523 mul def
+    /dkm2x dk2x 0.5523 mul def /dkm2y dk2y 0.5523 mul def
+    /dkX1 dkcx dk1x add def /dkY1 dkcy dk1y add def
+    /dkX2 dkcx dk2x add def /dkY2 dkcy dk2y add def
+    /dkX3 dkcx dk1x sub def /dkY3 dkcy dk1y sub def
+    /dkX4 dkcx dk2x sub def /dkY4 dkcy dk2y sub def
+    dkX1 dkY1 moveto
+    dkX1 dkm2x add dkY1 dkm2y add dkX2 dkm1x add dkY2 dkm1y add dkX2 dkY2 curveto
+    dkX2 dkm1x sub dkY2 dkm1y sub dkX3 dkm2x add dkY3 dkm2y add dkX3 dkY3 curveto
+    dkX3 dkm2x sub dkY3 dkm2y sub dkX4 dkm1x sub dkY4 dkm1y sub dkX4 dkY4 curveto
+    dkX4 dkm1x add dkY4 dkm1y add dkX1 dkm2x sub dkY1 dkm2y sub dkX1 dkY1 curveto
     closepath
 } def
 
@@ -527,7 +548,7 @@
 %   % The budget is lowered for the block, so the band that crosses it is
 %   % cheap to build; the shipped 150000 cells is about 4 s of pscat.
 %   /dkbudget 500 def
-%   { [ [ [0 0 10] [100 0 10] ] ] 0.5 1.4 dkcatch } /dkcatch-area-exceeds-safety-limit
+%   { [ [ [0 0 20] [100 0 20] ] ] 0.5 1.4 dkcatch } /dkcatch-area-exceeds-safety-limit
 %   (a band past the cell budget) mustguard
 %   { gsave [ [ [0 0 1] [10 0 1] ] ] 0.5 1.4 dkcatch grestore } (a band inside it) mustpass
 %
@@ -558,7 +579,7 @@
 %   /dkbudget 500 def
 %   gsave 3 3 scale
 %   matrix currentmatrix /dktm exch def
-%   { [ [ [0 0 10] [100 0 10] ] ] 0.5 1.4 dkcatch } /dkcatch-area-exceeds-safety-limit
+%   { [ [ [0 0 20] [100 0 20] ] ] 0.5 1.4 dkcatch } /dkcatch-area-exceeds-safety-limit
 %   (a band past the budget, scaled) mustguard
 %   matrix currentmatrix /dktn exch def
 %   grestore
