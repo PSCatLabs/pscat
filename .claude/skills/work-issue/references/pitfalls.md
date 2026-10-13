@@ -329,14 +329,14 @@ file are gone). First match wins:
 | PR `CLOSED` unmerged | Stop and report. |
 | PR `MERGED` | Step 9 only. |
 | No `## Codex review` (or `## Fallback review`) comment on the PR | 8.1: the review never ran. |
-| The PR head is not the `reviewed head` named in the last `## Codex review, round` issue comment, and either `git -C "$WORKTREE_DIR" log --first-parent --no-merges <reviewed-sha>..HEAD` is non-empty (the branch gained its own commits; timestamps are unreliable, a commit made before the review can be pushed after it), or some merge in `git log --first-parent --merges <reviewed-sha>..HEAD` has conflict resolutions that are not plain documentation (`git show --cc --format= --stat <merge>` prints nothing for a clean merge of `main`, e.g. from `update-branch`; anything it lists must be only plain docs, per "Rebase and merge rules") | 8.3 with R+1: re-review. |
-| Review current, but the issue has no `## Codex review, round <R>` comment for it, or any row of its table lacks a response ("Fixed in ..." / "Not fixing: ...") | 8.7: read the PR's review comment and disposition every finding. A finding that needs a fix goes through 8.9 (fix, push, gate, re-review with R+1). A review is never "clean" just because it is current (Codex round 2 on #208). |
+| The PR head is not the `reviewed head` named in the last `## Codex review, round` or `## Fallback review, round` issue comment, and either `git -C "$WORKTREE_DIR" log --first-parent --no-merges <reviewed-sha>..HEAD` is non-empty (the branch gained its own commits; timestamps are unreliable, a commit made before the review can be pushed after it), or some merge in `git log --first-parent --merges <reviewed-sha>..HEAD` has conflict resolutions that are not plain documentation (`git show --remerge-diff --format= --stat <merge>` (git 2.36+; it redoes the merge and shows what the committed result changed, so it also catches a conflict "resolved" by taking one parent's file, which `--cc` omits) prints nothing for a clean merge of `main`, e.g. from `update-branch`; anything it lists must be only plain docs, per "Rebase and merge rules") | 8.3 with R+1: re-review. |
+| Review current, but the issue has no `## Codex review, round <R>` (or `## Fallback review, round <R>`) comment for it, or any row of its table lacks a response ("Fixed in ..." / "Not fixing: ...") | 8.7: read the PR's review comment and disposition every finding. A finding that needs a fix goes through 8.9 (fix, push, gate, re-review with R+1). A review is never "clean" just because it is current (Codex round 2 on #208). |
 | Review current and every finding dispositioned, but no `## Summary of work (PR #<PR#>)` comment on the issue | 8.10, 8.11. |
 | Summary posted | 8.10 (re-read `merge_policy` and whether the dispatcher still says no merge), then 8.12. |
 
 The final report on a resume fills `Plan review` with `done (earlier run)`
 and counts the review rounds from the issue's `## Codex review, round`
-comments, not from this session.
+and `## Fallback review, round` comments, not from this session.
 
 ### Stop without merging when the dispatcher says so (#208)
 
