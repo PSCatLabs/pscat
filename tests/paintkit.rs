@@ -4324,17 +4324,24 @@ fn fan_empty_path_is_a_no_op() {
 
 #[test]
 fn fan_restores_the_callers_color() {
-    let mut it = fresh(200, 200);
-    it.run_str(
-        "0.2 0.4 0.8 setrgbcolor 9 srand newpath 40 100 moveto 160 100 lineto \
-         << /Width 30 /ColorJitter 0.4 >> pkfan",
-    )
-    .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
-    let (r, g, b) = it.gfx().rgb();
-    assert!(
-        (r - 0.2).abs() < 1e-6 && (g - 0.4).abs() < 1e-6 && (b - 0.8).abs() < 1e-6,
-        "pkfan must leave the caller's color alone, got {r} {g} {b}"
-    );
+    // Unloaded, and loaded (which sets a colour per run and must still
+    // hand the caller's own back).
+    for opts in [
+        "/Width 30 /ColorJitter 0.4",
+        "/Width 30 /ColorJitter 0.4 /Colors [[1 0 0] [0 0 1]] /Light 90",
+    ] {
+        let mut it = fresh(200, 200);
+        it.run_str(&format!(
+            "0.2 0.4 0.8 setrgbcolor 9 srand newpath 40 100 moveto 160 100 lineto \
+             200 150 moveto << {opts} >> pkfan"
+        ))
+        .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+        let (r, g, b) = it.gfx().rgb();
+        assert!(
+            (r - 0.2).abs() < 1e-6 && (g - 0.4).abs() < 1e-6 && (b - 0.8).abs() < 1e-6,
+            "pkfan {opts} must leave the caller's color alone, got {r} {g} {b}"
+        );
+    }
 }
 
 #[test]
@@ -9105,9 +9112,11 @@ fn ghostscript_agrees_on_the_surface() {
 
 // --- loaded colours (issue #183, slice L2 #221): pkbroad and pktrowel ----
 //
-// `/Colors`, `/ColorMix` and `/Light` on the two presets that read their
-// head position per striation (`pmnc`) or per lane (`ptnc`). The design is
-// docs/PAINT_LOADING.md; the numbers below are its section 6 tests 1-6.
+// `/Colors`, `/ColorMix` and `/Light` on the presets that read a head
+// position per striation (`pmnc`), per lane (`ptnc`) or, from slice L4
+// (#224), per bristle (`pfub`). The design is docs/PAINT_LOADING.md; the
+// numbers below are its section 6 tests 1-6. `LOAD_PRESETS` lists the
+// presets the shared tests run on.
 // Every render goes left to right along y = 100 unless a test says
 // otherwise, so "upper" in user space is the smaller pixel row.
 
@@ -9119,7 +9128,7 @@ fn fnv1a(data: &[u8]) -> u64 {
     })
 }
 
-const LOAD_PRESETS: [(&str, &str); 2] = [
+const LOAD_PRESETS: [(&str, &str); 3] = [
     (
         "pkbroad",
         "/Width 50 /Charge 1 /Depletion 0 /Edge 0 /ColorJitter 0",
@@ -9127,6 +9136,15 @@ const LOAD_PRESETS: [(&str, &str); 2] = [
     (
         "pktrowel",
         "/Width 50 /Coverage 1 /Scrape 0 /EdgeBuildup 0 /Jitter 0 /ColorJitter 0",
+    ),
+    // Slice L4 (#224). Dense and parallel, so the fan reads as a solid
+    // band: 50 bristles 1pt apart, each 1pt wide, none dropped. Pitch and
+    // width are whole pixels, so the middle of the load lands on a pixel
+    // edge and a hard /ColorMix 0 step is one step, not two.
+    (
+        "pkfan",
+        "/Width 50 /Spread 1 /Splay 0 /Bristles 50 /BristleWidth 1 /WidthJitter 0 \
+         /Load 1 /Dropout 0 /Ragged 0 /Flick 0 /Jitter 0 /ColorJitter 0",
     ),
 ];
 
@@ -9521,11 +9539,12 @@ fn edge_buildup_follows_the_light_flip() {
     );
 }
 
-/// The three new keys each move pixels on both presets (the structural
-/// guard `broad_every_documented_parameter_changes_the_render` is for),
-/// and the same keys are advertised for pktrowel.
+/// The three new keys each move pixels on every adopting preset (the
+/// structural guard `broad_every_documented_parameter_changes_the_render`
+/// is for), and the same keys are advertised for pktrowel (pkfan's are
+/// checked by `fan_advertises_the_loaded_color_keys`).
 #[test]
-fn loaded_keys_change_the_render_on_both_presets() {
+fn loaded_keys_change_the_render_on_every_adopter() {
     for (preset, base) in LOAD_PRESETS {
         let with = |extra: &str| {
             pixels(&loaded_mark(
@@ -10135,5 +10154,234 @@ fn wet_frame_slots_do_not_change_pkwet() {
         );
         let got = fnv1a(it.gfx().pixmap.data());
         assert_eq!(got, pinned, "{name} moved: {got:#x}");
+    }
+}
+
+// --- loaded colours on pkfan (issue #183, slice L4 #224) --------------
+//
+// `pkfan` takes `/Colors`, `/ColorMix` and `/Light` too, with `pfub` as the
+// head position. Its bristles run over every subpath, so the colour is set
+// per run (`pfrun`) and per pressed ray (`pfray`), from the bristle's
+// stored `/ColorJitter` draw. Most of the L2 tests above already run on it
+// through `LOAD_PRESETS`; these are the ones only the fan needs.
+
+/// Scenarios that use none of the new keys, each leaning on a part of the
+/// fan the slice touched. Pinned against hashes taken from `origin/main`
+/// (f1eae7d) before the slice.
+#[test]
+fn fan_loading_unset_is_byte_identical() {
+    let scenarios: [(&str, &str); 9] = [
+        (LTR, "/Width 50"),
+        (RTL, "/Width 50 /ColorJitter 0.4"),
+        (
+            "newpath 50 60 moveto 350 60 lineto 350 140 moveto 50 140 lineto",
+            "/Width 30",
+        ),
+        ("newpath 200 100 moveto", "/Width 60"),
+        (
+            "newpath 50 60 moveto 350 60 lineto 200 150 moveto",
+            "/Width 40 /Bristles 12",
+        ),
+        (
+            "newpath 50 40 moveto 150 180 250 20 350 160 curveto",
+            "/Width 36 /ColorJitter 0.2",
+        ),
+        (LTR, "/Width 50 /Load 0.3 /Dropout 0.9 /Bristles 30"),
+        (
+            LTR,
+            "/Width 50 /Splay 1 /Ragged 1 /Flick 1 /Jitter 1.5 /WidthJitter 1",
+        ),
+        (
+            "newpath 50 100 moveto 100 150 150 50 200 100 curveto 250 150 300 50 350 100 curveto",
+            "/Width 40 /Bristles 40 /Load 0.6 /Dropout 0.3",
+        ),
+    ];
+    // Taken from the pre-slice library (origin/main at f1eae7d).
+    let pinned: [u64; 9] = [
+        0xf7ef80bc0b23ca71,
+        0x7cdfaa0c31a7c794,
+        0x830531bee9375807,
+        0x7fc96f52f0a5684b,
+        0x94e4a48f1eb7c069,
+        0xdae8c82e0bb24eb6,
+        0x31c2b8442b2c8929,
+        0x339352382952a962,
+        0xe1f458abc251262f,
+    ];
+    let got: Vec<u64> = scenarios
+        .iter()
+        .map(|(path, opts)| {
+            let it = loaded_mark("pkfan", path, "0.6 0.3 0.2 setrgbcolor", opts);
+            fnv1a(it.gfx().pixmap.data())
+        })
+        .collect();
+    assert_eq!(got, pinned, "an unset-keys render moved: {got:#x?}");
+}
+
+/// A load whose colours equal the current colour paints exactly what the
+/// plain brush paints, however the contact chain breaks each bristle into
+/// runs and whichever subpaths the runs fall in. The plain brush sets its
+/// colour once per bristle; the loaded one sets it per run from the
+/// stored draw, so this is what pins "the jitter is stored, not
+/// re-drawn". Pressed rays beside ordinary subpaths are in the mix.
+#[test]
+fn fan_a_uniform_load_survives_broken_runs_and_pressed_rays() {
+    let colour = "0.25 0.5 0.75 setrgbcolor";
+    let base = "/Width 40 /Bristles 12 /Load 0.4 /Dropout 0.6 /ColorJitter 0.3";
+    for path in [
+        "newpath 50 60 moveto 350 60 lineto 350 140 moveto 50 140 lineto",
+        "newpath 50 60 moveto 150 40 250 80 350 60 curveto 200 150 moveto 300 150 moveto",
+    ] {
+        let plain = pixels(&loaded_mark("pkfan", path, colour, base));
+        assert!(
+            ink(&plain) > 500,
+            "the plain fan on `{path}` is nearly blank"
+        );
+        for extra in [
+            "/Colors [[0.25 0.5 0.75] [0.25 0.5 0.75]]",
+            "/Colors [[0.25 0.5 0.75] [0.25 0.5 0.75] [0.25 0.5 0.75]] /ColorMix 0 /Light 90",
+        ] {
+            let loaded = pixels(&loaded_mark(
+                "pkfan",
+                path,
+                colour,
+                &format!("{base} {extra}"),
+            ));
+            assert!(
+                loaded == plain,
+                "pkfan {extra} on `{path}`: moved the plain brush"
+            );
+        }
+    }
+}
+
+/// Pixels that are not white.
+fn ink(data: &[u8]) -> usize {
+    data.chunks(4).filter(|p| p[..3] != [255, 255, 255]).count()
+}
+
+/// A pressed fan radiates through 140 degrees about +y, so `/Colors` runs
+/// across that arc: the first colour on the left of the axis, the last on
+/// the right. A pressed point is never flipped, so `/Light` leaves it
+/// alone, whichever side the light is on.
+#[test]
+fn fan_a_pressed_fan_paints_the_load_across_its_arc() {
+    let base = "/Width 120 /Bristles 30 /Load 1 /Dropout 0 /Ragged 0 /Flick 0 \
+                /BristleWidth 2 /ColorJitter 0 /Colors [[1 0 0] [0 0 1]] /ColorMix 0";
+    for extra in ["", "/Light 90", "/Light 270"] {
+        let it = loaded_mark(
+            "pkfan",
+            "newpath 200 20 moveto",
+            "0 0 0 setrgbcolor",
+            &format!("{base} {extra}"),
+        );
+        let side = |cols: std::ops::Range<u32>| {
+            let (mut red, mut blue) = (0, 0);
+            for y in 0..200 {
+                for x in cols.clone() {
+                    let p = it.gfx().pixmap.pixel(x, y).expect("in bounds");
+                    let (r, g, b) = (p.red() as i32, p.green() as i32, p.blue() as i32);
+                    if r > 200 && g < 60 && b < 60 {
+                        red += 1;
+                    }
+                    if b > 200 && g < 60 && r < 60 {
+                        blue += 1;
+                    }
+                }
+            }
+            (red, blue)
+        };
+        // The point is user (200, 20): pixel column 200. Left of the axis is smaller x.
+        let (r, b) = side(100..196);
+        assert!(
+            r > 400 && b < r / 10,
+            "`{extra}` left of the axis: red {r} blue {b}"
+        );
+        let (r, b) = side(204..300);
+        assert!(
+            b > 400 && r < b / 10,
+            "`{extra}` right of the axis: red {r} blue {b}"
+        );
+    }
+}
+
+/// A bristle's runs span every subpath, so the flip is per run: a
+/// left-to-right and a right-to-left subpath in one call both put the
+/// first colour on the lit side, with the fan's bristles drawn once each.
+#[test]
+fn fan_light_flips_runs_of_one_bristle_by_subpath() {
+    let it = loaded_mark(
+        "pkfan",
+        "newpath 50 150 moveto 350 150 lineto 350 50 moveto 50 50 lineto",
+        "0 0 0 setrgbcolor",
+        "/Width 30 /Spread 1 /Splay 0 /Bristles 30 /BristleWidth 1 /WidthJitter 0 \
+         /Load 1 /Dropout 0 /Ragged 0 /Flick 0 /Jitter 0 /ColorJitter 0 \
+         /Colors [[1 0 0] [0 0 1]] /ColorMix 0 /Light 90",
+    );
+    for (name, top, bottom) in [("A", 38..48, 52..62), ("B", 138..148, 152..162)] {
+        let (r, b) = red_and_blue(&it, top);
+        assert!(
+            r > 20 * b.max(1) && r > 1000,
+            "{name} top: red {r} blue {b}"
+        );
+        let (r, b) = red_and_blue(&it, bottom);
+        assert!(
+            b > 20 * r.max(1) && b > 1000,
+            "{name} bottom: red {r} blue {b}"
+        );
+    }
+}
+
+/// Loading takes nothing from the caller's random stream even where the
+/// contact chain breaks the bristles into runs and a pressed ray sits
+/// beside them: the load only re-colours a mark that is drawn the same.
+#[test]
+fn fan_loading_takes_no_random_draws_with_broken_runs() {
+    let base = "/Width 40 /Bristles 12 /Load 0.4 /Dropout 0.6 /ColorJitter 0.3";
+    let path = "newpath 50 60 moveto 350 60 lineto 200 150 moveto";
+    let next_draw = |extra: &str| {
+        let mut it = loaded_mark(
+            "pkfan",
+            path,
+            "0.6 0.6 0.6 setrgbcolor",
+            &format!("{base} {extra}"),
+        );
+        it.run_str("rand").expect("rand");
+        it.operand_stack()
+            .last()
+            .expect("a draw")
+            .repr()
+            .to_string()
+    };
+    let plain = next_draw("");
+    for extra in [
+        "/Colors [[1 0 0] [0 0 1]]",
+        "/Colors [[1 0 0] [0 1 0] [0 0 1]] /ColorMix 1 /Light 90",
+    ] {
+        assert_eq!(
+            next_draw(extra),
+            plain,
+            "{extra} changed the caller's random stream"
+        );
+    }
+}
+
+/// The three new keys are advertised for pkfan, each with a unit.
+#[test]
+fn fan_advertises_the_loaded_color_keys() {
+    let src = std::fs::read_to_string("lib/paintkit.ps").expect("read paintkit");
+    let start = src
+        .find("% @example: newpath 40 120 moveto 100 150 160 160 210 145 curveto << /Width 60 /Splay 0.6 >> pkfan")
+        .expect("pkfan tags");
+    let end = src[start..].find("\n/pkfan ").expect("pkfan def") + start;
+    let params: Vec<&str> = src[start..end]
+        .lines()
+        .filter_map(|l| l.strip_prefix("% @param: /"))
+        .collect();
+    for key in ["Colors", "ColorMix", "Light"] {
+        assert!(
+            params.iter().any(|l| l.starts_with(&format!("{key} ["))),
+            "pkfan does not advertise /{key} with a unit"
+        );
     }
 }

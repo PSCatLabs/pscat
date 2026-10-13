@@ -2702,6 +2702,20 @@
 % against 150000 inside the counting walk, before any allocation --
 % pkdry's bound and pkdry's placement argument.
 %
+% Loaded colours (issue #183, slice L4). `/Colors`, `/ColorMix` and `/Light`
+% load the fan with more than one colour, spread across the bristles: a
+% bristle's head position is its `pfub`, so the first colour sits on the left
+% of the travel (the same side the splay's positive offsets go). The jitter
+% draw is still taken once per bristle, where it always was, but with a load
+% it is stored (`pfcj`) rather than applied there, and the colour is set per
+% run (`pfrun`) and per pressed ray (`pfray`), just before their `pkribbon`
+% call. That is what lets `/Light` flip the load per subpath: a bristle's runs
+% span every subpath of the path, so one colour per bristle could not follow
+% two subpaths travelling opposite ways. A pressed fan's rays radiate through
+% 140 degrees and `/Colors` paints across that arc, first colour on the left
+% of the fan's axis; a pressed point is never flipped. Unset, every branch is
+% `pfColorRec null ne` and the render is byte-identical to before.
+%
 % Scratch prefix pf- (pkfan/pfrun/pfopen), distinct from pk-/pn-/pb-/
 % pz-/po-/pt-/pw-/pv- because pkfan calls pkribbon once per dash and
 % pkribbon's body redefines every pk*-prefixed name.
@@ -2740,6 +2754,21 @@
 /pfopen {
     dup 0 le { pop 0 } { 0.6 exp } ifelse
     1 pfferrule sub mul pfferrule add
+} def
+
+% i pfcolor -   (set the loaded color of the current bristle for a run that
+% starts at stop i; only called with /Colors set)
+% The head position is the bristle's pfub (+1 is the left of the travel, the
+% first colour) and the shade is the bristle's own stored /ColorJitter draw
+% pfcj, so every run of a bristle -- across every subpath -- is jittered
+% alike. The flip is the run's first stop's: runs never cross a subpath, and a
+% pressed ray is a degenerate subpath of its own (never flipped).
+% @internal
+/pfcolor {
+    /pfcli exch def
+    pfColorRec pfub
+    pfColorRec 2 get { pfflips pfcli get } { false } ifelse
+    puat puwet 3 array astore 1 pfcj add shade setrgbcolor
 } def
 
 % runstart runend islast pfrun -
@@ -2786,6 +2815,7 @@
     /pfnpts pfrend pfrstart sub 1 add def
     /pfrp pflen 8 pfnpts mul div def
     pfrp pfPitch lt { /pfrp pfPitch def } if
+    pfColorRec null ne { pfrstart pfcolor } if
     << /Width pfrw /Pitch pfrp /StartCap /pointed /EndCap /pointed
        /EndTaper pflast { pfFlick } { 0 } ifelse >> pkribbon
 } def
@@ -2802,7 +2832,8 @@
 % instead (Codex review).
 % @internal
 /pfray {
-    pfraw exch get dup 0 get /pfdx exch def 1 get /pfdy exch def
+    /pfrayi exch def
+    pfraw pfrayi get dup 0 get /pfdx exch def 1 get /pfdy exch def
     /pfda pfub 70 mul 90 add def
     /pfdl pfhalf 1.15 mul 1 pfRagged frnd mul sub mul def
     % The outer safety budget counts source-path stops, and a degenerate
@@ -2817,9 +2848,78 @@
     newpath
     pfdx pfdy moveto
     pfdx pfda cos pfdl mul add  pfdy pfda sin pfdl mul add  lineto
+    pfColorRec null ne { pfrayi pfcolor } if
     << /Width pfrw /Pitch pfrp /StartCap /pointed /EndCap /pointed
        /EndTaper pfFlick >> pkribbon
 } def
+
+%%SelfTest: pkfan-colors-rejects-malformed-loads
+%   { newpath 0 0 moveto 50 0 lineto << /Colors 5 >> pkfan }
+%   /pkfan-colors-must-be-an-array
+%   (a number as /Colors) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors { [ 0 0 0 ] } >> pkfan }
+%   /pkfan-colors-must-be-an-array
+%   (a procedure as /Colors) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ ] >> pkfan }
+%   /pkfan-colors-must-have-1-to-8-colors
+%   (no colours) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ 9 { [ 0 0 0 ] } repeat ] >> pkfan }
+%   /pkfan-colors-must-have-1-to-8-colors
+%   (nine colours) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ [ 0 0 ] ] >> pkfan }
+%   /pkfan-colors-entries-must-be-rgb-arrays
+%   (a 2-element entry) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ [ 0 0 1.5 ] ] >> pkfan }
+%   /pkfan-colors-components-must-be-0-to-1
+%   (a component of 1.5) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ [ 0 0 0 ] ] /ColorMix 1.5 >> pkfan }
+%   /pkfan-colormix-must-be-0-to-1
+%   (/ColorMix 1.5) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ [ 0 0 0 ] ] >> pkfan }
+%   (1 colour) mustpass
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ [ 0 0 0 ] [ 1 1 1 ] ] >> pkfan }
+%   (2 colours) mustpass
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ 8 { [ 0.2 0.4 1 ] } repeat ] /ColorMix 0 /Light -45 >> pkfan }
+%   (8 colours, the cap) mustpass
+%%EndSelfTest
+%
+%%SelfTest: pkfan-colors-spelling-and-companions
+%   { newpath 0 0 moveto 50 0 lineto << /Colours [ [ 0 0 0 ] ] >> pkfan }
+%   /pkfan-colours-is-spelled-colors
+%   (/Colours) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ [ 0 0 0 ] ] /ColourMix 0.5 >> pkfan }
+%   /pkfan-colours-is-spelled-colors
+%   (/ColourMix) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /HighlightColour [ 1 1 1 ] >> pkfan }
+%   /pkfan-colours-is-spelled-colors
+%   (/HighlightColour) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /ColorMix 0.5 >> pkfan }
+%   /pkfan-colormix-needs-colors
+%   (/ColorMix without /Colors) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Light 90 >> pkfan }
+%   /pkfan-light-needs-colors
+%   (/Light without /Colors) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ [ 0 0 0 ] ] /Light { 90 } >> pkfan }
+%   /pkfan-light-must-not-be-a-procedure
+%   (a procedure as /Light) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Colors [ [ 0 0 0 ] ] /Light 90 >> pkfan }
+%   (/Light with /Colors) mustpass
+%%EndSelfTest
 
 % @kind: Procedure
 % @summary: A fan brush: a bundle of bristles that leaves a flattened ferrule and splays apart as the stroke travels, for foliage, evergreen branches, grasses and soft feathering. Distinct from pkdry, whose bristles stay parallel -- /Splay is the whole difference. Many thin bristles at high Load give a soft feathered mark; fewer at low Load give separated bristle marks. A single-point subpath is a pressed fan, its bristles radiating through a 140-degree arc opening toward +y; rotate the space around it to aim it elsewhere. Deterministic under the caller's own srand; bounded by Bristles * stops.
@@ -2837,6 +2937,9 @@
 % @param: /Jitter [points] Seeded lateral displacement of each bristle's trace (default 0)
 % @param: /Pitch [points] walkpath sampling pitch for the shared centerline pass; must be > 0 (default BristleWidth*0.6, capped at 6)
 % @param: /ColorJitter [0..1] per-bristle color variation around the caller's current color (default 0.06)
+% @param: /Colors [array of rgb arrays] 1 to 8 loaded colors, listed from the fan's left edge (looking along the travel) to its right, evenly spaced across the bristles; when set, the current color is not used for the mark, though /ColorJitter still varies it; a pressed fan paints them across its arc, first color on the left of its axis (default unset)
+% @param: /ColorMix [0..1] with /Colors, how far neighbouring colors have blended on the brush: 0 is hard bands, 1 a smooth gradient (default 0.3)
+% @param: /Light [degrees] with /Colors, the direction the light comes from, counterclockwise from +x in user space: each subpath puts the first color on the side facing the light, whichever way it travels; a pressed fan is never flipped (default unset: the first color stays on the left of the travel)
 /pkfan {
     /pfopts exch def
     /pfWidth pfopts /Width 30 pkgetdef def
@@ -2878,6 +2981,10 @@
     /pfColorJitter pfopts /ColorJitter 0.06 pkgetdef def
     /pfColorJitter load xcheck { pkfan-colorjitter-must-not-be-a-procedure } if
     pfColorJitter 0 lt pfColorJitter 1 gt or { pkfan-colorjitter-must-be-0-to-1 } if
+    % The load: null when /Colors is unset, so every new branch below is
+    % `pfColorRec null ne` and an unset key never reaches it.
+    pfopts (pkfan) puparse /pfColorRec exch def
+    pfopts (pkfan) pulightneedscolors
     % Counting pass with the budget checked inside the walk, so a
     % pathological path is rejected before any allocation (pkdry's
     % placement argument).
@@ -2907,6 +3014,12 @@
     pfPitch { 6 array astore pfraw pfci 3 -1 roll put /pfci pfci 1 add def } walkpath
     pfn 0 gt {
         gsave
+        % One flip per stop, so a whole subpath mirrors together. No draws.
+        pfColorRec null ne {
+            pfColorRec 2 get {
+                /pfflips pfraw pfn pfPitch 0 pfColorRec 3 get puflips def
+            } if
+        } if
         /pfbasecolor [ currentrgbcolor ] def
         /pfferrule 1 pfSplay 0.75 mul sub def
         /pfhalf pfWidth 0.5 mul pfSpread mul def
@@ -2918,7 +3031,15 @@
                 % Each bristle keeps its own length, so the tips feather
                 % rather than stopping on one straight edge.
                 /pfstop 1 pfRagged frnd mul sub def
-                pfbasecolor 1 pfColorJitter pkjit add shade setrgbcolor
+                % The jitter draw is taken here either way. Unloaded, it
+                % colours the bristle now; loaded, it is stored and applied
+                % per run (pfcolor), because the load's colour depends on
+                % the run's subpath under /Light.
+                pfColorRec null ne {
+                    /pfcj pfColorJitter pkjit def
+                } {
+                    pfbasecolor 1 pfColorJitter pkjit add shade setrgbcolor
+                } ifelse
                 /pfstate pfLoad pfroll def
                 /pfrunning false def
                 /pfstart 0 def

@@ -764,8 +764,8 @@ renders eight examples in both and compares block-downsampled output).
   self-seeded scene without re-rolling its marks, log `rrand` at each
   painting step and restore it with `srand` on replay
   (`gallery/alpine_lake.ps`'s `lkdo`, issue #191).
-- **Loaded colours: `pkbroad` and `pktrowel` adopt them, the rest do not
-  yet** (issue #183, slices L1-L3; design in `docs/PAINT_LOADING.md`).
+- **Loaded colours: `pkbroad`, `pktrowel` and `pkfan` adopt them, the rest do
+  not yet** (issue #183, slices L1-L3; design in `docs/PAINT_LOADING.md`).
   `lib/paintkit.ps`'s `pu-` section (`puparse`, `puat`, `puflips`, `puwet`,
   `puspell`, `pulightneedscolors`) turns a head position into a colour.
   A preset keeps the record `puparse` returns under *its own* prefix
@@ -781,7 +781,11 @@ renders eight examples in both and compares block-downsampled output).
   by the running `pkwet` pass (L3): frames have 7 slots, and 4-6 are the
   per-pass factors, a copy of `/Under` and the running pass index. A new
   adopter must call `puwet` on every loaded colour, or its marks go solid
-  inside a pull. `pkfan` (L4) and `pkdab` (L5) are next.
+  inside a pull. `pkfan` adopts it too (L4, `pfColorRec`): its colour is set
+  per *run* (`pfrun`) and per pressed ray (`pfray`) by `pfcolor`, from the
+  bristle's `pfub` and the stored `/ColorJitter` draw `pfcj` (taken where it
+  always was, so the stream doesn't move), because a bristle's runs span every
+  subpath and `/Light` flips per subpath. `pkdab` (L5) is next.
 - **Paintkit slices prove byte identity with `scripts/identity_check.sh
   BASE_WORKTREE [BIN] --control FILE [--gallery-still]`** (issue #263), not
   by hand. It renders every tracked `examples/`, `gallery/` and

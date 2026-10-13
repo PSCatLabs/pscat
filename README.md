@@ -604,15 +604,18 @@ the stroke is a different quantity. `/Angle` follows `pktrowel`'s reading —
 brush rotation relative to travel, constant along a curve — not
 `pknib`'s fixed world angle.
 
-`pkbroad` and `pktrowel` can carry more than one colour (issues #183, #221).
+`pkbroad`, `pktrowel` and `pkfan` can carry more than one colour (issues #183,
+#221, #224).
 `/Colors [[r g b] ...]` lists 1 to 8 loaded colours from the brush's left
 edge, looking along the travel, to its right; `/ColorMix` (0 for hard bands,
 1 for a smooth gradient) blends neighbours; and `/Light` (degrees, as in
 `pkdab`) puts the first colour on whichever side of each subpath faces the
 light, so a stroke drawn backwards keeps its lit side. `pktrowel`'s
-`/EdgeBuildup` ridges take their own edges' colours. `/Colors` replaces the
-current colour, but `/ColorJitter` still varies it, and unset keys change
-nothing.
+`/EdgeBuildup` ridges take their own edges' colours. `pkfan` takes the same
+keys (issue #224): the colours run across its bristles, first colour on the
+left of the travel, and a pressed fan paints them across its arc. `/Colors`
+replaces the current colour, but `/ColorJitter` still varies it, and unset
+keys change nothing.
 
 `pkliner` (issue #116) is the liner/detail brush — the fine marks made
 last and over everything else: bare branches, trunks, grass stems,
