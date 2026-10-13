@@ -137,6 +137,9 @@
 % mh-/mx-/mc-/ms-/mt-/mp-/mz- (the brush motion generators: pkcrisscross,
 % pkscumblein, pkscumble, pktap, pkpull, pkzigzag) -- issue #184, see the
 % section at the end of this file. They call no preset.
+% pj- (pkcanvas, the canvas surface's sampler and pjcatch) -- issue #182,
+% see the last section of this file. Distinct from every pk* name because the
+% presets that will call pjcatch (pkdry, pkfan) call pkribbon.
 
 % - [bool0 bool1 ...]   (one flag per subpath, in path order: was it
 % closed with an explicit closepath?)
@@ -6629,4 +6632,449 @@ systemdict /setalpha known /pwhasalpha exch def
             } ifelse
         } ifelse
     } for
+} def
+
+% ============================================================================
+% The canvas surface (issue #182, slice S1 of docs/CANVAS_SURFACE.md)
+% ============================================================================
+%
+% A painter's lightest strokes catch only on the raised weave of the canvas,
+% and every stroke laid over that canvas catches on the same weave. Every
+% other break-up in this file belongs to one stroke (a contact chain, a
+% reservoir, a blade's nicks), so nothing is shared between strokes. This
+% section is the one break-up that belongs to the canvas:
+%
+%   opts pkcanvas -            set up the shared surface (paints nothing)
+%
+% The surface is a seeded height field over *knuckles*, one raised crossing of
+% the weave per /Weave x /Weave cell, defined in *canvas space*: the user space
+% in force when `pkcanvas` was called, captured as a matrix. A later mark is
+% sampled there whatever its own CTM, so a `pkwet` pass, a reflection drawn
+% under `1 -1 scale` and the scene above it all catch on the same knuckles, and
+% `--dpi` changes only raster fineness (CANVAS_SURFACE.md 3.5).
+%
+% A preset that adopts the light-touch key `/Touch` (later slices; no preset
+% reads the surface yet) calls the one internal `pjcatch` right after the
+% `gsave` that opens its drawing block:
+%
+%   llx lly urx ury touch pjcatch -
+%
+% It clips to every knuckle the paint reaches at that touch. Before building
+% anything the preset checks `llx lly urx ury pjcells` against `pjbudget`
+% (60000 cells, about a 600pt square at the default weave once the
+% knuckle margin is added) and raises its own
+% `pkX-touch-area-exceeds-safety-limit`; `pjcatch` repeats the check as a
+% backstop under its own name. Both read one range computation (`pjrange`),
+% so the pre-check and the catch it guards can never disagree.
+%
+% Determinism. The surface takes no `rand` and no `srand`: `pkcanvas` shuffles
+% its permutation table with a private Schrage-form minimal-standard LCG
+% (`pjrand`, the same generator as `pwrand` under its own state), and sampling
+% is table lookups and arithmetic. So `pkcanvas`, `pjcatch` and any /Touch
+% value leave the caller's stream exactly where they found it, and adding
+% `pkcanvas` to a finished piece moves no mark. `--sweep-seed` varies the marks
+% and keeps the canvas. The same /Seed gives the same table under Ghostscript:
+% every intermediate stays inside 32-bit integers.
+%
+% State. `pkcanvas` writes its state into `userdict` explicitly, never with a
+% bare `def`, so a call inside the artist's own `begin ... end` still leaves a
+% surface behind after the `end` (pkwet's `pqdset` learned this). A preset
+% tests `userdict /pjCTM known` for "is a surface set":
+%
+%   pjCTM            canvas space (`matrix currentmatrix` at the call)
+%   pjP              a 256-entry permutation of 0..255, shuffled from /Seed
+%   pjW pjM pjR      /Weave, /Mottle, /Relief
+%   pjmemo           knuckle heights already computed (a speed cache only)
+%
+% The height of the knuckle in cell (i, j) is a pure function of the seed:
+%
+%   hash(i, j, s) = P[(P[(i + s) and 255] + j) and 255] / 255
+%   mottle(x, y)  = smoothstepped bilinear value noise over hash(., ., 101),
+%                   lattice spacing /Mottle
+%   height(i, j)  = (1 - Relief) * hash(i, j, 0) + Relief * mottle(cell centre)
+%
+% `pjmemo` keys a height by (i + 4096) * 8192 + (j + 4096) for the half-open
+% range -4096 <= i, j < 4096 (one-to-one there, and below 2^26); cells outside
+% it are computed but not stored, and the memo stops growing at 250000
+% entries. A height is a pure function, so the memo changes speed, never
+% output.
+%
+% The knuckles are ellipses, not diamonds (CANVAS_SURFACE.md Q9). A diamond's
+% `|x|/a + |y|/b` reaches a cell corner later than an ellipse does, so at
+% /Touch 0.99 the diamonds left a hole at every cell corner, short of the
+% near-solid catch the design promises there (NOTES.md, issue #220).
+%
+% Scratch prefix pj-. Distinct from every pk*-prefixed name because the
+% adopting presets (pkdry, pkfan) call pkribbon, which clobbers those.
+
+% Cells one catch may build. Past it the preset rejects (CANVAS_SURFACE.md 3.3).
+% @internal
+/pjbudget 60000 def
+% Entries the height memo may hold before later cells are computed fresh.
+% @internal
+/pjmemocap 250000 def
+
+% any -> bool   (an integer or a real)
+% @internal
+/pjisnum {
+    type dup /integertype eq exch /realtype eq or
+} def
+
+% seed -   (seeds the surface's own generator)
+% Reduced mod 2147483646 *before* `abs`, and offset to 1..2147483646 because 0
+% is the Lehmer generator's one fixed point; same shape as pwsrand.
+% @internal
+/pjsrand {
+    cvi 2147483646 mod abs 1 add
+    /pjstate exch def
+} def
+
+% -> 0.0..1.0   (exclusive at both ends)
+% Schrage's decomposition of the minimal standard LCG (16807, 2^31-1), so the
+% sequence is identical under Ghostscript's 32-bit integers.
+% @internal
+/pjrand {
+    /pjq pjstate 127773 idiv def
+    /pjstate pjstate 127773 mod 16807 mul pjq 2836 mul sub def
+    pjstate 0 lt { /pjstate pjstate 2147483647 add def } if
+    pjstate 2147483647 div
+} def
+
+% i j s -> 0..1   (reads the permutation table from `pjp`)
+% `and 255` rather than `mod`, so a negative index stays in range. i, j and s
+% must be integers: `and` rejects a real.
+% @internal
+/pjhash {
+    3 -1 roll add 255 and pjp exch get
+    add 255 and pjp exch get 255 div
+} def
+
+% a b t -> a + (b - a) t
+% @internal
+/pjlerp {
+    /pjlt exch def
+    pjlt mul exch 1 pjlt sub mul add
+} def
+
+% real -> integer 0..255   (floor, reduced mod 256 as a real first)
+% The hash depends only on its indices mod 256, so reducing before `cvi`
+% changes nothing, and it means a tiny /Mottle far from the origin can't
+% overflow `cvi`.
+% @internal
+/pjwrap {
+    floor dup 256 div floor 256 mul sub cvi 255 and
+} def
+
+% x y -> 0..1   (the slow mottle at a canvas-space point)
+% @internal
+/pjmottle {
+    userdict /pjM get div dup pjwrap /pjmy exch def dup floor sub /pjfy exch def
+    userdict /pjM get div dup pjwrap /pjmx exch def dup floor sub /pjfx exch def
+    /pjux pjfx dup mul 3 2 pjfx mul sub mul def
+    /pjuy pjfy dup mul 3 2 pjfy mul sub mul def
+    pjmx pjmy 101 pjhash pjmx 1 add pjmy 101 pjhash pjux pjlerp
+    pjmx pjmy 1 add 101 pjhash pjmx 1 add pjmy 1 add 101 pjhash pjux pjlerp
+    pjuy pjlerp
+} def
+
+% i j -> height 0..1   (the knuckle in cell (i, j); i and j integers)
+% @internal
+/pjheight {
+    /pjhj exch def /pjhi exch def
+    /pjp userdict /pjP get def
+    pjhi -4096 ge pjhi 4096 lt and pjhj -4096 ge and pjhj 4096 lt and
+        { /pjhk pjhi 4096 add 8192 mul pjhj 4096 add add def }
+        { /pjhk -1 def }
+    ifelse
+    /pjmd userdict /pjmemo get def
+    pjhk 0 ge { pjmd pjhk known } { false } ifelse
+        { pjmd pjhk get }
+        {
+            /pjhr userdict /pjR get def
+            /pjhw userdict /pjW get def
+            1 pjhr sub pjhi pjhj 0 pjhash mul
+            pjhr pjhi 0.5 add pjhw mul pjhj 0.5 add pjhw mul pjmottle mul
+            add
+            pjhk 0 ge { pjmd length pjmemocap lt { pjmd pjhk 2 index put } if } if
+        }
+    ifelse
+} def
+
+% x y -   (widen the canvas-space box pjbx0..pjby1 to a user-space point)
+% @internal
+/pjrgrow {
+    transform pjrcm itransform
+    dup pjby0 lt { dup /pjby0 exch def } if
+    dup pjby1 gt { dup /pjby1 exch def } if
+    pop
+    dup pjbx0 lt { dup /pjbx0 exch def } if
+    dup pjbx1 gt { dup /pjbx1 exch def } if
+    pop
+} def
+
+% llx lly urx ury -   (sets pji0 pjj0 pji1 pjj1 and pjhuge)
+% The cells whose knuckle can reach a user-space box: its corners taken to
+% canvas space, bounded, and grown by the farthest a knuckle reaches from its
+% own cell's centre -- a long semi-axis of 0.8W at the largest scale 1.375,
+% plus the 0.15W nudge, or 1.25W. Without that margin a knuckle centred in a
+% neighbouring cell and overhanging the mark would be missing, and two marks
+% with different boxes would catch on different pixels where they overlap.
+% pjhuge is true when a cell index is past 1e9, where `cvi` could overflow; the
+% callers count that as over budget.
+% @internal
+/pjrange {
+    /pjry1 exch def /pjrx1 exch def /pjry0 exch def /pjrx0 exch def
+    /pjrcm userdict /pjCTM get def
+    pjrx0 pjry0 transform pjrcm itransform /pjby0 exch def /pjbx0 exch def
+    /pjbx1 pjbx0 def /pjby1 pjby0 def
+    pjrx1 pjry0 pjrgrow
+    pjrx0 pjry1 pjrgrow
+    pjrx1 pjry1 pjrgrow
+    /pjrw userdict /pjW get def
+    /pjrm pjrw 1.25 mul def
+    /pjhuge false def
+    [ pjbx0 pjrm sub pjby0 pjrm sub pjbx1 pjrm add pjby1 pjrm add ] {
+        pjrw div floor
+        dup abs 1e9 gt { pop 0 /pjhuge true def } if
+        cvi
+    } forall
+    /pjj1 exch def /pji1 exch def /pjj0 exch def /pji0 exch def
+} def
+
+% llx lly urx ury -> cells   (how many cells a catch over this box builds)
+% @internal
+/pjcells {
+    pjrange
+    pjhuge
+        { pjbudget 1 add }
+        { pji1 pji0 sub 1 add cvr pjj1 pjj0 sub 1 add cvr mul }
+    ifelse
+} def
+
+% cx cy rx ry -   (appends one axis-aligned ellipse as four curveto's)
+% Explicit corner arithmetic, with no CTM change per knuckle, as pvfleck does.
+% @internal
+/pjoval {
+    /pjey exch def /pjex exch def /pjoy exch def /pjox exch def
+    /pjkx pjex 0.5523 mul def /pjky pjey 0.5523 mul def
+    pjox pjex add pjoy moveto
+    pjox pjex add pjoy pjky add  pjox pjkx add pjoy pjey add  pjox pjoy pjey add curveto
+    pjox pjkx sub pjoy pjey add  pjox pjex sub pjoy pjky add  pjox pjex sub pjoy curveto
+    pjox pjex sub pjoy pjky sub  pjox pjkx sub pjoy pjey sub  pjox pjoy pjey sub curveto
+    pjox pjkx add pjoy pjey sub  pjox pjex add pjoy pjky sub  pjox pjex add pjoy curveto
+    closepath
+} def
+
+% llx lly urx ury touch -   (intersects the clip with the surface's catch)
+% The box is in the current user space. Every knuckle with
+% d = height + touch - 1 > 0 joins the clip, scaled by
+%   (0.6 + 0.5 min(1, d/0.3)) * (1 + 0.25 max(0, (touch - 0.8)/0.2))
+% so a knuckle the paint barely reaches catches a speck, a well-covered one a
+% full knuckle that merges with its neighbours, and every knuckle grows over
+% the top fifth of the range so coverage reaches the whole mark continuously.
+% At touch >= 1 it does nothing. With no knuckle passing, the clip becomes
+% empty (a one-point path), not unchanged. Replaces the current path, and
+% leaves the CTM as it found it: the knuckles are built under pjCTM, and the
+% clip is in device space, so it survives the matrix change. Every guard runs
+% before the matrix is touched.
+% @internal
+/pjcatch {
+    /pjt exch def
+    pjt 1 ge {
+        pop pop pop pop
+    } {
+        userdict /pjCTM known not { pjcatch-needs-a-canvas } if
+        pjcells pjbudget gt { pjcatch-area-exceeds-safety-limit } if
+        /pjcw userdict /pjW get def
+        /pjp userdict /pjP get def
+        /pjgrow pjt 0.8 sub 0.2 div dup 0 lt { pop 0 } if 0.25 mul 1 add def
+        /pjsaved matrix currentmatrix def
+        userdict /pjCTM get setmatrix
+        newpath
+        /pjn 0 def
+        pji0 1 pji1 {
+            /pjci exch def
+            pjj0 1 pjj1 {
+                /pjcj exch def
+                /pjd pjci pjcj pjheight pjt add 1 sub def
+                pjd 0 gt {
+                    /pjs pjd 0.3 div dup 1 gt { pop 1 } if 0.5 mul 0.6 add
+                        pjgrow mul pjcw mul def
+                    pjci 0.5 add pjci pjcj 2 pjhash 0.5 sub 0.3 mul add pjcw mul
+                    pjcj 0.5 add pjci pjcj 3 pjhash 0.5 sub 0.3 mul add pjcw mul
+                    pjci pjcj add 1 and 1 eq
+                        { pjs 0.8 mul pjs 0.42 mul }
+                        { pjs 0.42 mul pjs 0.8 mul }
+                    ifelse
+                    pjoval
+                    /pjn pjn 1 add def
+                } if
+            } for
+        } for
+        pjn 0 eq { 0 0 moveto 0 0 lineto } if
+        clip newpath
+        pjsaved setmatrix
+    } ifelse
+} def
+
+%%SelfTest: pkcanvas-rejects-malformed-options
+%   { << /Weave 0 >> pkcanvas } /pkcanvas-weave-must-be-positive
+%   (/Weave 0) mustguard
+%
+%   { << /Weave { 3 } >> pkcanvas } /pkcanvas-weave-must-not-be-a-procedure
+%   (/Weave { 3 }) mustguard
+%
+%   { << /Mottle -1 >> pkcanvas } /pkcanvas-mottle-must-be-positive
+%   (/Mottle -1) mustguard
+%
+%   { << /Relief 1.5 >> pkcanvas } /pkcanvas-relief-must-be-0-to-1
+%   (/Relief 1.5) mustguard
+%
+%   { << /Seed (x) >> pkcanvas } /pkcanvas-seed-must-be-a-number
+%   (/Seed as a string) mustguard
+%
+%   { << /Seed { 3 } >> pkcanvas } /pkcanvas-seed-must-not-be-a-procedure
+%   (/Seed { 3 }) mustguard
+%
+%   { << /Seed 1e30 >> pkcanvas } /pkcanvas-seed-must-be-within-integer-range
+%   (/Seed 1e30) mustguard
+%
+%   { << >> pkcanvas } (an empty dict) mustpass
+%
+%   % A real seed is accepted (`--sweep NAME=` can feed one) and truncated.
+%   { << /Seed 7.0 >> pkcanvas } (/Seed 7.0) mustpass
+%%EndSelfTest
+%
+%%SelfTest: pkcanvas-takes-no-random-draws
+%   1 srand rand /pjtesta exch def
+%   1 srand << /Seed 9 >> pkcanvas rand pjtesta eq
+%   (pkcanvas leaves the caller's stream untouched) mustbe
+%
+%   << >> pkcanvas
+%   1 srand rand /pjtesta exch def
+%   1 srand newpath 0 0 50 50 0.5 pjcatch rand pjtesta eq
+%   (pjcatch leaves the caller's stream untouched) mustbe
+%%EndSelfTest
+%
+%%SelfTest: pkcanvas-heights-are-pure
+%   << /Seed 5 >> pkcanvas
+%   3 -7 pjheight /pjtestb exch def
+%   3 -7 pjheight pjtestb eq
+%   (the same cell twice, the second from the memo) mustbe
+%
+%   userdict /pjmemo 10 dict put
+%   3 -7 pjheight pjtestb eq
+%   (the same cell again with the memo cleared) mustbe
+%
+%   % The memo covers -4096 <= i, j < 4096 only. In a closed range (1, -4096)
+%   % and (0, 4096) would share a key; (0, 4096) must not be stored at all.
+%   userdict /pjmemo 10 dict put
+%   1 -4096 pjheight pop
+%   0 4096 pjheight /pjtesta exch def
+%   userdict /pjmemo get length 1 eq
+%   (a cell past the memo's range is not stored) mustbe
+%
+%   userdict /pjmemo 10 dict put
+%   0 4096 pjheight pjtesta eq
+%   (and its height does not depend on what was sampled first) mustbe
+%
+%   % Calling pkcanvas again with the same seed rebuilds the same surface.
+%   << /Seed 5 >> pkcanvas
+%   3 -7 pjheight pjtestb eq
+%   (the same /Seed rebuilds the same surface) mustbe
+%%EndSelfTest
+%
+%%SelfTest: pkcanvas-state-survives-the-callers-dict
+%   % State goes to userdict explicitly, so an artist's own begin ... end
+%   % doesn't take the surface with it.
+%   5 dict begin << >> pkcanvas end
+%   userdict /pjCTM known
+%   (a surface set inside begin ... end is still set after end) mustbe
+%%EndSelfTest
+%
+%%SelfTest: pjcatch-guards
+%   % touch >= 1 does nothing, even with no canvas set.
+%   { gsave 0 0 1e30 1e30 1 pjcatch grestore } (touch 1 over any box) mustpass
+%
+%   { 0 0 10 10 0.5 pjcatch } /pjcatch-needs-a-canvas
+%   (a catch before any pkcanvas) mustguard
+%
+%   << >> pkcanvas
+%   { 0 0 100000 100000 0.5 pjcatch } /pjcatch-area-exceeds-safety-limit
+%   (a 1e5pt square) mustguard
+%
+%   { 0 0 1e30 10 0.5 pjcatch } /pjcatch-area-exceeds-safety-limit
+%   (a box past cvi's range) mustguard
+%
+%   0 0 600 600 pjcells pjbudget le
+%   (a 600pt square fits the budget at the default weave) mustbe
+%
+%   { gsave 0 0 600 600 0.5 pjcatch grestore } (a 600pt catch) mustpass
+%%EndSelfTest
+%
+%%SelfTest: pjcatch-leaves-the-ctm-as-it-found-it
+%   % The knuckles are built under pjCTM; every preset draws after the
+%   % catch, so the caller's matrix must come back exactly.
+%   << >> pkcanvas
+%   gsave 7.5 0 translate 2 2 scale 15 rotate
+%   matrix currentmatrix /pjtestm exch def
+%   0 0 40 40 0.5 pjcatch
+%   matrix currentmatrix /pjtestn exch def
+%   grestore
+%   true 0 1 5 { dup pjtestm exch get exch pjtestn exch get eq and } for
+%   (the CTM after pjcatch is the CTM before it) mustbe
+%%EndSelfTest
+%
+% @kind: Procedure
+% @summary: Sets up the shared canvas surface: a seeded weave of raised knuckles in the current coordinate system, which marks from presets that accept /Touch (added in later slices of issue #182; none does yet) catch on at /Touch below 1, so light strokes break up on the same canvas rather than each on its own. Call it once, early, in the space the piece is painted in; calling it again replaces the surface. Paints nothing and takes no rand draws, so adding it to a finished piece moves no mark.
+% @example: << /Seed 3 /Weave 2.5 >> pkcanvas
+% @param: /Seed [integer] Integer seed for this surface alone, leaving the caller's rand stream untouched (default 1, a constant rather than a draw from the caller's stream)
+% @param: /Weave [points] Thread spacing of the weave in canvas-space points, one knuckle per Weave x Weave cell; must be > 0 (default 2.5)
+% @param: /Mottle [points] Scale of the slow variation in how proud the weave stands, in canvas-space points; must be > 0. Larger gives broader patches of catch and miss (default Weave*8)
+% @param: /Relief [0..1] How much the slow mottle, rather than each knuckle's own random height, decides which knuckles stand proud: 0 is an even speckled weave, 1 is all patches (default 0.7)
+/pkcanvas {
+    /pjopts exch def
+
+    % Every guard runs before any state is written, so a rejected call
+    % leaves the previous surface (or none) in place.
+    /pjsseed pjopts /Seed 1 pkgetdef def
+    /pjsseed load xcheck { pkcanvas-seed-must-not-be-a-procedure } if
+    pjsseed pjisnum not { pkcanvas-seed-must-be-a-number } if
+    pjsseed abs 2147483647 ge { pkcanvas-seed-must-be-within-integer-range } if
+
+    /pjsweave pjopts /Weave 2.5 pkgetdef def
+    /pjsweave load xcheck { pkcanvas-weave-must-not-be-a-procedure } if
+    pjsweave pjisnum not { pkcanvas-weave-must-be-a-number } if
+    pjsweave 0 le { pkcanvas-weave-must-be-positive } if
+
+    /pjsmottle pjopts /Mottle pjsweave 8 mul pkgetdef def
+    /pjsmottle load xcheck { pkcanvas-mottle-must-not-be-a-procedure } if
+    pjsmottle pjisnum not { pkcanvas-mottle-must-be-a-number } if
+    pjsmottle 0 le { pkcanvas-mottle-must-be-positive } if
+
+    /pjsrelief pjopts /Relief 0.7 pkgetdef def
+    /pjsrelief load xcheck { pkcanvas-relief-must-not-be-a-procedure } if
+    pjsrelief pjisnum not { pkcanvas-relief-must-be-a-number } if
+    pjsrelief 0 lt pjsrelief 1 gt or { pkcanvas-relief-must-be-0-to-1 } if
+
+    % Fisher-Yates over 0..255 from the private generator.
+    pjsseed pjsrand
+    /pjstab 256 array def
+    0 1 255 { pjstab exch dup put } for
+    255 -1 1 {
+        /pjsk exch def
+        /pjsr pjrand pjsk 1 add mul floor cvi def
+        pjsr pjsk gt { /pjsr pjsk def } if
+        pjstab pjsk get
+        pjstab pjsr get
+        pjstab pjsk 3 -1 roll put
+        pjstab pjsr 3 -1 roll put
+    } for
+
+    userdict /pjCTM matrix currentmatrix put
+    userdict /pjP pjstab put
+    userdict /pjW pjsweave put
+    userdict /pjM pjsmottle put
+    userdict /pjR pjsrelief put
+    userdict /pjmemo 1024 dict put
 } def

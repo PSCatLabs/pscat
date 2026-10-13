@@ -330,6 +330,30 @@ fn every_paintkit_parameter_states_its_unit() {
     }
     assert!(checked > 100, "only {checked} paintkit parameters checked");
 
+    // pkcanvas (issue #182) is a setup procedure, not a preset, but its
+    // four keys are lengths and fractions like any other and carry units.
+    let canvas = paintkit
+        .iter()
+        .find(|c| c.name == "pkcanvas")
+        .expect("pkcanvas in the catalog");
+    let units: Vec<(&str, &str)> = canvas
+        .parameters
+        .iter()
+        .map(|p| {
+            let unit = p.description[1..].split_once("] ").unwrap().0;
+            (p.name, unit)
+        })
+        .collect();
+    assert_eq!(
+        units,
+        [
+            ("Seed", "integer"),
+            ("Weave", "points"),
+            ("Mottle", "points"),
+            ("Relief", "0..1"),
+        ]
+    );
+
     // The deprecated aliases still work but are not advertised: a row for
     // them would put the second meaning back into the catalog.
     for (preset, old, new) in [
