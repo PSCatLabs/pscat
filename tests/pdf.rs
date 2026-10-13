@@ -140,7 +140,10 @@ fn page_content_is_flate_compressed() {
         raw.contains("/Length ") && raw.contains("/Filter /FlateDecode >>\nstream\n"),
         "content stream dict declares FlateDecode"
     );
-    assert!(!raw.contains(" rg "), "operators are not stored as plain text");
+    assert!(
+        !raw.contains(" rg "),
+        "operators are not stored as plain text"
+    );
     let text = pdf_text(&pdf);
     assert!(
         text.contains(&format!("stream\n1 0 0 -1 0 {SIZE} cm\n")),

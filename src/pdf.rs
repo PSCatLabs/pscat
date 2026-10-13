@@ -421,20 +421,16 @@ Q",
             let prefix = format!("1 0 0 -1 0 {} cm\n", self.height);
             let mut stream = match deflate(&[prefix.as_bytes(), content.as_bytes()]) {
                 Some(z) => {
-                    let mut st = format!(
-                        "<< /Length {} /Filter /FlateDecode >>\nstream\n",
-                        z.len()
-                    )
-                    .into_bytes();
+                    let mut st =
+                        format!("<< /Length {} /Filter /FlateDecode >>\nstream\n", z.len())
+                            .into_bytes();
                     st.extend_from_slice(&z);
                     st
                 }
                 None => {
-                    let mut st = format!(
-                        "<< /Length {} >>\nstream\n",
-                        prefix.len() + content.len()
-                    )
-                    .into_bytes();
+                    let mut st =
+                        format!("<< /Length {} >>\nstream\n", prefix.len() + content.len())
+                            .into_bytes();
                     st.extend_from_slice(prefix.as_bytes());
                     st.extend_from_slice(content.as_bytes());
                     st
