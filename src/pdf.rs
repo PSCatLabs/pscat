@@ -16,9 +16,17 @@
 //! Mapping notes:
 //! - Every page's content stream starts with `1 0 0 -1 0 H cm`, so
 //!   the interpreter's y-down device coordinates are used verbatim.
-//! - Each element is wrapped in `q … Q` carrying its own clip chain
-//!   (`W n` per link) — stateless, exactly like the SVG exporter's
-//!   nested groups.
+//! - Each element is wrapped in its own `q … Q`, so the fill/stroke
+//!   state it sets (colour, width, dash, `ExtGState`) can't leak into
+//!   the next one. Consecutive elements that carry the *same* clip
+//!   chain (same `Rc`, i.e. no `clip` between them) additionally share
+//!   one outer `q <clip> … Q` group, so a heavily clipped page writes
+//!   the clip path once per run rather than once per element (issue
+//!   #219: one touched stroke was 36 KB → 39.6 MB before). Unclipped
+//!   elements get no outer group, exactly as before. The group is
+//!   closed lazily: on a different chain, on `erase`, and in the page
+//!   snapshots taken by `end_page`/`finish` (the live stream keeps its
+//!   group open, which `copypage` needs).
 //! - Text arrives as glyph outlines (same as SVG); no fonts are
 //!   embedded.
 //! - Images become Flate-compressed RGB XObjects; imagemasks become
@@ -63,6 +71,10 @@ pub struct PdfRecorder {
     /// DSC header comments via `scan_document_info`, when present.
     title: Option<String>,
     author: Option<String>,
+    /// The clip chain of the currently open shared `q <clip> …` group in
+    /// `content`, if one is open. Compared by `Rc` identity; held here,
+    /// so the address can't be recycled while the group is open.
+    open_clip: Option<Rc<ClipNode>>,
 }
 
 impl PdfRecorder {
@@ -80,6 +92,7 @@ impl PdfRecorder {
             current_gstates: Vec::new(),
             title: None,
             author: None,
+            open_clip: None,
         }
     }
 
@@ -139,6 +152,45 @@ impl PdfRecorder {
         out
     }
 
+    /// Make `content`'s open clip group match `chain` before an element
+    /// is written. A clipped chain identical (by `Rc`) to the open one
+    /// reuses it; otherwise the open group (if any) is closed and, for a
+    /// clipped chain, a new `q <clip>` group opens. Unclipped elements
+    /// are written with no outer group, as before.
+    fn enter_clip(&mut self, chain: &Chain) {
+        let same = match (&self.open_clip, chain) {
+            (Some(open), Some(want)) => Rc::ptr_eq(open, want),
+            (None, None) => true,
+            _ => false,
+        };
+        if same {
+            return;
+        }
+        self.close_clip();
+        if chain.is_some() {
+            let clip = self.clip_prelude(chain);
+            let _ = writeln!(self.content, "q {clip}");
+            self.open_clip = chain.clone();
+        }
+    }
+
+    fn close_clip(&mut self) {
+        if self.open_clip.take().is_some() {
+            self.content.push_str("Q\n");
+        }
+    }
+
+    /// The current page's content with any open clip group closed, for
+    /// a finished-page snapshot. The live `content` is left untouched
+    /// (`copypage` keeps painting into it).
+    fn snapshot(&self) -> String {
+        let mut s = self.content.clone();
+        if self.open_clip.is_some() {
+            s.push_str("Q\n");
+        }
+        s
+    }
+
     pub(crate) fn fill(
         &mut self,
         path: &crate::gfx::PsPath,
@@ -147,11 +199,11 @@ impl PdfRecorder {
         comp: Composite,
         chain: &Chain,
     ) {
-        let clip = self.clip_prelude(chain);
+        self.enter_clip(chain);
         let gs = self.gs_ref(comp);
         let _ = writeln!(
             self.content,
-            "q {clip}{gs}{} {} {} rg {} {}
+            "q {gs}{} {} {} rg {} {}
 Q",
             f(rgb.0),
             f(rgb.1),
@@ -177,7 +229,7 @@ Q",
         comp: Composite,
         chain: &Chain,
     ) {
-        let clip = self.clip_prelude(chain);
+        self.enter_clip(chain);
         let gs = self.gs_ref(comp);
         let cap = match cap {
             tiny_skia::LineCap::Round => 1,
@@ -198,7 +250,7 @@ Q",
         };
         let _ = writeln!(
             self.content,
-            "q {clip}{gs}{} {} {} RG {} w {cap} J {join} j {} M {dash}{} S
+            "q {gs}{} {} {} RG {} w {cap} J {join} j {} M {dash}{} S
 Q",
             f(rgb.0),
             f(rgb.1),
@@ -258,10 +310,10 @@ Q",
         let m = unit.post_concat(tiny_skia::Transform::from_row(
             t[0], t[1], t[2], t[3], t[4], t[5],
         ));
-        let clip = self.clip_prelude(chain);
+        self.enter_clip(chain);
         let _ = writeln!(
             self.content,
-            "q {clip}{} {} {} rg {} {} {} {} {} {} cm /Im{idx} Do
+            "q {} {} {} rg {} {} {} {} {} {} cm /Im{idx} Do
 Q",
             f(fill_rgb.0),
             f(fill_rgb.1),
@@ -277,12 +329,13 @@ Q",
 
     pub(crate) fn erase(&mut self) {
         self.content.clear();
+        self.open_clip = None;
         self.current_images.clear();
         self.current_gstates.clear();
     }
 
     pub(crate) fn end_page(&mut self) {
-        self.pages.push(self.content.clone());
+        self.pages.push(self.snapshot());
         self.page_images.push(self.current_images.clone());
         self.page_gstates.push(self.current_gstates.clone());
     }
@@ -293,7 +346,7 @@ Q",
         let mut page_images = self.page_images.clone();
         let mut page_gstates = self.page_gstates.clone();
         if pages.is_empty() || trailing_art {
-            pages.push(self.content.clone());
+            pages.push(self.snapshot());
             page_images.push(self.current_images.clone());
             page_gstates.push(self.current_gstates.clone());
         }
