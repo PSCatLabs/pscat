@@ -55,7 +55,9 @@
 % Resolved once into data from a private generator (a Schrage LCG, the
 % paintkit `pjrand` pattern, seeded by a hashed /Seed + i). The glyph at
 % index i uses seed + i, so editing later text never re-rolls earlier
-% glyphs, and the caller's `rand` stream is never touched. Each glyph
+% glyphs, and the caller's `rand` stream is never touched. Without a
+% /Seed the base comes from the origin's device-space position, so the
+% same word written in two places differs, and a redraw in place agrees. Each glyph
 % gets a baseline drift and shear, and each point an offset, all
 % bounded by /Jitter. /Jitter 0 gives the exact skeleton.
 %
@@ -563,10 +565,10 @@
             sgb 240 lt { sgb 15 and 2 } { sgb 7 and 3 } ifelse
           } ifelse
           {
-            sgk sgs length lt {
-              6 bitshift sgs sgk get 63 and or
-              /sgk sgk 1 add def
-            } if
+            sgk sgs length ge { exit } if
+            sgs sgk get dup 192 and 128 ne { pop exit } if
+            63 and exch 6 bitshift or
+            /sgk sgk 1 add def
           } repeat
         } ifelse
         sgcp2name
@@ -610,9 +612,19 @@
   dup sgisnum { dup 0 lt } { true } ifelse
     { sg-jitter-must-be-a-non-negative-number } if
   1000 mul /sgJ exch def
-  sgo /Seed 1 sgnumopt
-  dup type /integertype ne { sg-seed-must-be-an-integer } if
+  sgo /Seed known {
+    sgo /Seed get
+    dup type /integertype ne { sg-seed-must-be-an-integer } if
+  } { null } ifelse
   /sgseed0 exch def
+} def
+
+% x y -> int   the default seed: the origin's device-space position,
+% quantized to 0.01 (drykit's rule, DRYMEDIA 3.2). Device space, so a
+% caller that translates per atom and draws at 0 0 still varies.
+% @internal
+/sgposseed {
+  transform 100 mul round cvi exch 100 mul round cvi 1000003 mul add
 } def
 
 % opts -> opts   (or the guard)
@@ -733,6 +745,13 @@
 %   newpath [/space /a] 0 0 << /Seed 4 >> sgpath sgt-flat /sgt-q1 exch def
 %   newpath [/a] 10.8 0 << /Seed 5 >> sgpath sgt-flat /sgt-q2 exch def
 %   sgt-q1 sgt-q2 sgt-same (the glyph at index i is jittered from seed + i) mustbe
+%   % no /Seed: the seed comes from the origin's device position
+%   newpath (x) 0 0 << >> sgpath sgt-flat /sgt-u1 exch def
+%   newpath (x) 0 0 << >> sgpath sgt-flat /sgt-u2 exch def
+%   gsave 100 0 translate newpath (x) 0 0 << >> sgpath sgt-flat grestore
+%   /sgt-u3 exch def
+%   sgt-u1 sgt-u2 sgt-same (unseeded, the same place gives the same path) mustbe
+%   sgt-u1 sgt-u3 sgt-same not (unseeded, another place gives another jitter) mustbe
 %   newpath
 %%EndSelfTest
 %
@@ -789,16 +808,18 @@
 %   /equal << >> sgmetrics /Class get /rel eq (= is a relation) mustbe
 %   (∑) << >> sgmetrics /Class get /op eq (∑ is a large operator) mustbe
 %   (Σ) << >> sgmetrics /Class get /ord eq (the letter Sigma is ordinary) mustbe
+%   <E96162> sgnames dup length 3 eq exch dup 1 get /a eq exch 2 get /b eq and and
+%   (a stray Latin-1 byte does not swallow the ASCII after it) mustbe
 %%EndSelfTest
 %
 % (text) x y opts sgpath -
 % @kind: Procedure
 % @summary: Appends the jittered centerline skeleton of a string (UTF-8: Latin, digits, Greek, math operators) or an array of glyph names to the current path at baseline x y, one subpath per pen stroke, painting nothing. Stroke it with a pen or hand it to a dry medium. Uses its own seeded generator, never the caller's rand.
-% @example: (lib/handscript.ps) run (lib/strokeglyphs.ps) run newpath (A = πr²) 72 600 << /Size 40 /Seed 7 >> sgpath 2 setlinewidth 1 setlinecap 1 setlinejoin stroke
+% @example: (lib/handscript.ps) run (lib/strokeglyphs.ps) run newpath (∀ε>0 ∃δ>0) 72 600 << /Size 40 /Seed 7 >> sgpath 2 setlinewidth 1 setlinecap 1 setlinejoin stroke
 % @param: /Size [points] The em size: cap height is 0.7 of it (default 36)
 % @param: /Slant [degrees] Forward lean applied to every glyph as a shear about the baseline (default 0)
 % @param: /Jitter [fraction of /Size] Bound on each point's wobble and each glyph's baseline drift; 0 draws the exact skeleton (default 0.016)
-% @param: /Seed [integer] The glyph at index i is jittered from seed + i, so editing later text never re-rolls earlier glyphs (default 1)
+% @param: /Seed [integer] The glyph at index i is jittered from seed + i, so editing later text never re-rolls earlier glyphs (default: derived from the origin's device-space position, so text drawn in two places differs)
 /sgpath {
   sgcheckopts
   4 1 roll
@@ -806,6 +827,7 @@
   /sgy0 exch def /sgx0 exch def
   sgnames /sgn exch def
   sgreadopts
+  sgseed0 null eq { /sgseed0 sgx0 sgy0 sgposseed def } if
   0 1 sgn length 1 sub {
     /sgi exch def
     sgseed0 sgi add sgsetseed
@@ -837,7 +859,7 @@
 % @param: /Size [points] The text em size, which sets the jitter scale and the minimum widths (default 36)
 % @param: /Slant [degrees] Shear about the baseline, as for sgpath (default 0)
 % @param: /Jitter [fraction of /Size] As for sgpath (default 0.016)
-% @param: /Seed [integer] Seed for this symbol's jitter (default 1)
+% @param: /Seed [integer] Seed for this symbol's jitter (default: derived from the current point's device-space position)
 /sggrow {
   sgcheckopts
   3 1 roll
@@ -856,6 +878,7 @@
   sgreadopts
   { currentpoint } stopped { sggrow-needs-a-current-point } if
   /sgy0 exch def /sgx0 exch def
+  sgseed0 null eq { /sgseed0 sgx0 sgy0 sgposseed def } if
   sgsym sghh 1000 mul sgSize div sgdd 1000 mul sgSize div
     sgspan 1000 mul sgSize div sgbuild
   sgseed0 sgsetseed

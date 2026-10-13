@@ -47,6 +47,12 @@ path instead of painting them.
   write `[adv stroke ...]`, and the run-time table is the design's
   `[adv [llx lly urx ury] stroke ...]`. It bounds the unjittered
   centerline. Ink reaches past it by half the pen width plus the jitter.
+- **The default `/Seed` comes from position.** With no `/Seed`, the base
+  seed is the origin's device-space position, quantized to 0.01 (for
+  `sggrow`, the current point's). This is drykit's rule from DRYMEDIA 3.2.
+  A fixed default would make every unseeded call identical, and #237
+  will likely call `sgpath` once per atom. An explicit `/Seed` still
+  wins, and pscat-versus-gs comparisons pin it.
 - **No chalk row in the specimen.** #234 (drykit) and #235 (chalk) have
   not landed. The acceptance asks for chalk only "if #235 has landed".
 
@@ -70,6 +76,13 @@ path instead of painting them.
   `every_migrated_file_names_match_the_catalog_exactly` sees only the
   tagged names. `build.rs` reads `/x N dict def` as a three-token `def`
   and rejects it, so the tables are `<< >>` literals.
+
+- **UTF-8 decoding takes only real continuation bytes**, so a stray
+  Latin-1 byte becomes one `.notdef` and doesn't swallow the ASCII after it.
+- **Scratch lives in the current dict**, under `sg` names, as in
+  paintkit. The run time never calls `begin`, so a guard can't leave the
+  dict stack unbalanced. The cost is that `sgpath` can't be called while a
+  read-only dict is current, as inside a gs Type 3 `BuildChar`.
 
 **Deferred**
 
