@@ -65,18 +65,17 @@ fn phi(a: &[bool], b: &[bool], mask: &[bool]) -> f64 {
 }
 
 /// A 12pt-wide, 60pt-long band through the middle of a 40pt page at
-/// `angle`, filled through `dkcatch` at `touch` (1 = no catch). The surface
-/// is the one DRYMEDIA.md 2.2's numbers were measured on (pkcanvas's
-/// default /Relief 0.7 and /Mottle 8 W), at drykit's fine /Weave 0.4.
-fn band(seed: u32, angle: u32, touch: &str) -> Interp {
+/// `angle`, filled through `dkcatch` at `touch` (1 = no catch) on the
+/// surface `surface` (a `dksurface` dict body) at `streak`.
+fn band(surface: &str, seed: u32, angle: u32, touch: &str, streak: &str) -> Interp {
     render(
         40,
         40,
         10.0,
         &format!(
-            "<< /Seed {seed} /Weave 0.4 /Mottle 3.2 /Relief 0.7 >> pkcanvas \
+            "<< {surface} /Seed {seed} >> dksurface \
              gsave 20 20 translate {angle} rotate \
-             [ [ [-30 0 6] [30 0 6] ] ] {touch} 1.8 dkcatch \
+             [ [ [-30 0 6] [30 0 6] ] ] {touch} {streak} dkcatch \
              -30 -6 60 12 rectfill grestore"
         ),
     )
@@ -84,47 +83,60 @@ fn band(seed: u32, angle: u32, touch: &str) -> Interp {
 
 /// Test 1 (DRYMEDIA.md 2.2, Q4): two crossing strokes break up on the same
 /// tooth. Bands at 0 and 60 degrees, each rendered alone, compared over
-/// their overlap, at 10 device pixels per point -- 4 per cell at /Weave 0.4,
-/// so the comparison sees knuckles rather than anti-aliasing. The control
-/// is the second band on another seed's surface.
+/// their overlap, at 10 device pixels per point -- 4 or more per cell, so
+/// the comparison sees knuckles rather than anti-aliasing. The control is
+/// the second band on another seed's surface. Q4's bar: mean phi over five
+/// seeds >= 0.4, and >= 0.25 above the control's mean.
 ///
-/// Measured: mean 0.51 here (control 0.03). Phi falls with /Relief: the
-/// /slate starting value 0.55 gives a mean of 0.38, under Q4's bar, because
-/// each knuckle's own height then outweighs the shared mottle. D2's specimen
-/// re-tunes the surfaces and must re-check this per surface.
+/// Every shipped surface is checked at the streak its medium uses
+/// (DRYMEDIA.md 3.4: chalk on the boards and newsprint, charcoal on drawing
+/// paper at the default 1.4; crayon on construction paper at about 1.8),
+/// plus the surface the design measured on (pkcanvas's Relief 0.7).
+/// Measured means: boards and newsprint 0.42, drawing 0.46, construction
+/// 0.42, the design's surface 0.51; controls -0.16 to 0.03. Phi falls as
+/// /Relief falls or /Streak rises: the boards at /Streak 1.8 give 0.38.
 #[test]
 fn crossing_strokes_share_the_tooth() {
-    let overlap: Vec<bool> = {
-        let a = inked(&band(3, 0, "1"));
-        let b = inked(&band(3, 60, "1"));
-        a.iter().zip(&b).map(|(x, y)| *x && *y).collect()
-    };
-    assert!(
-        overlap.iter().filter(|&&o| o).count() > 10_000,
-        "the bands should overlap"
-    );
-    let mut shared = Vec::new();
-    let mut control = Vec::new();
-    for seed in [3, 7, 11, 19, 23] {
-        let a = inked(&band(seed, 0, "0.6"));
-        let b = inked(&band(seed, 60, "0.6"));
-        let c = inked(&band(seed + 100, 60, "0.6"));
-        shared.push(phi(&a, &b, &overlap));
-        control.push(phi(&a, &c, &overlap));
-    }
     let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len() as f64;
-    eprintln!("phi shared {shared:.2?} control {control:.2?}");
-    assert!(
-        mean(&shared) >= 0.4,
-        "mean phi {:.3} < 0.4: {shared:.2?}",
-        mean(&shared)
-    );
-    assert!(
-        mean(&shared) >= mean(&control) + 0.25,
-        "shared mean {:.3} not 0.25 above the control's {:.3}",
-        mean(&shared),
-        mean(&control)
-    );
+    for (surface, streak) in [
+        ("/Surface /slate", "1.4"),
+        ("/Surface /greenboard", "1.4"),
+        ("/Surface /newsprint", "1.4"),
+        ("/Surface /drawing", "1.4"),
+        ("/Surface /construction", "1.8"),
+        ("/Weave 0.4 /Mottle 3.2 /Relief 0.7", "1.8"),
+    ] {
+        let overlap: Vec<bool> = {
+            let a = inked(&band(surface, 3, 0, "1", streak));
+            let b = inked(&band(surface, 3, 60, "1", streak));
+            a.iter().zip(&b).map(|(x, y)| *x && *y).collect()
+        };
+        assert!(
+            overlap.iter().filter(|&&o| o).count() > 10_000,
+            "the bands should overlap"
+        );
+        let mut shared = Vec::new();
+        let mut control = Vec::new();
+        for seed in [3, 7, 11, 19, 23] {
+            let a = inked(&band(surface, seed, 0, "0.6", streak));
+            let b = inked(&band(surface, seed, 60, "0.6", streak));
+            let c = inked(&band(surface, seed + 100, 60, "0.6", streak));
+            shared.push(phi(&a, &b, &overlap));
+            control.push(phi(&a, &c, &overlap));
+        }
+        eprintln!("{surface} streak {streak}: phi {shared:.2?} control {control:.2?}");
+        assert!(
+            mean(&shared) >= 0.4,
+            "{surface}: mean phi {:.3} < 0.4: {shared:.2?}",
+            mean(&shared)
+        );
+        assert!(
+            mean(&shared) >= mean(&control) + 0.25,
+            "{surface}: shared mean {:.3} not 0.25 above the control's {:.3}",
+            mean(&shared),
+            mean(&control)
+        );
+    }
 }
 
 /// A bent four-segment centerline, as stops `[x y hw]`.
@@ -560,5 +572,472 @@ fn ghostscript_keeps_the_tooth_open() {
         gs_unguarded > gs + 0.1,
         "without the guard gs inked {gs_unguarded:.3}, no more than with it ({gs:.3}): \
          the check cannot see the fill adjust"
+    );
+}
+
+// ---------------------------------------------------------------------
+// Slice D2: `dkstroke` and `dkbatch` (DRYMEDIA.md 3.1, 3.3; tests 3-8).
+// ---------------------------------------------------------------------
+
+/// A greenboard page `w` x `h` at `scale`, chalk colour set, running `body`.
+fn board(w: u32, h: u32, scale: f32, body: &str) -> Interp {
+    render(
+        w,
+        h,
+        scale,
+        &format!(
+            "<< /Surface /greenboard /Seed 3 >> dksurface \
+             userdict /dkGround get aload pop setrgbcolor clippath fill \
+             0.93 0.94 0.90 setrgbcolor {body}"
+        ),
+    )
+}
+
+fn data(it: &Interp) -> Vec<u8> {
+    it.gfx().pixmap.data().to_vec()
+}
+
+/// Test 3, extended to `dkstroke`'s own reach: every key that moves ink away
+/// from the centerline, at its extreme, against the whole-page catch. A
+/// sparse touch keeps a missed knuckle visible. /Fallout is drawn on top,
+/// not through a catch, so its row only shows that fallout and /Drift
+/// leave the catch alone.
+#[test]
+fn dkstroke_reaches_every_knuckle_its_ink_touches() {
+    const PATH: &str = "newpath 6 12 moveto 30 40 lineto 64 18 lineto";
+    let cases = [
+        ("streak 4", "/Width 3 /Touch 0.6 /Streak 4"),
+        (
+            "tilt 90 on a 10pt side",
+            "/Width 3 /Touch 0.6 /Tilt 90 /Side 10",
+        ),
+        ("wear 1", "/Width 3 /Touch 0.6 /Wear 1"),
+        (
+            "pressure above 1",
+            "/Width 3 /Touch 0.6 /Pressure { pop 1.8 }",
+        ),
+        (
+            "lanes with dropout",
+            "/Width 4 /Touch 0.6 /Lanes 4 /Dropout 0.5 /Load 0.5",
+        ),
+        (
+            "a touch profile over bands",
+            "/Width 3 /Touch { 0.4 mul 0.5 add } /Bands 3",
+        ),
+        (
+            "fallout with drift",
+            "/Width 3 /Touch 0.6 /Fallout 2 /Drift 4",
+        ),
+        // A budget this small splits the run into pieces that share an end
+        // stop, each its own catch, and the pieces must still meet.
+        (
+            "a run split under a small budget",
+            "/Width 3 /Touch 0.6 /SPLIT true",
+        ),
+    ];
+    for (name, opts) in cases {
+        let budget = if opts.contains("/SPLIT") {
+            "/dkbudget 1500 def"
+        } else {
+            ""
+        };
+        let src = |whole: bool| {
+            format!(
+                "/dkslack 1.5 def {budget} {} {PATH} << {opts} >> dkstroke \
+                 newpath 50 44 moveto << /Width 4 /Touch 0.6 >> dkstroke",
+                if whole {
+                    "userdict /pjWholePage true put"
+                } else {
+                    ""
+                }
+            )
+        };
+        let t0 = std::time::Instant::now();
+        let paper = |src: &str| {
+            render(
+                70,
+                50,
+                REACH_SCALE,
+                &format!("<< /Surface /drawing /Seed 3 >> dksurface 0 0 0 setrgbcolor {src}"),
+            )
+        };
+        let band = paper(&src(false));
+        let whole = paper(&src(true));
+        eprintln!("{name}: {:.2}s", t0.elapsed().as_secs_f64());
+        let diff = missed(&band, &whole);
+        assert_eq!(
+            diff, 0,
+            "{name}: {diff} pixels differ from the whole-page catch"
+        );
+    }
+}
+
+/// Test 4: determinism. The tool-side randomness (lanes with a contact
+/// chain, fallout) is on in every case, or identity would prove nothing.
+#[test]
+fn dkstroke_is_deterministic_and_leaves_the_callers_marks_alone() {
+    const OPTS: &str = "/Width 5 /Touch 0.7 /Lanes 3 /Dropout 0.4 /Load 0.5 /Fallout 1 /Drift 3";
+    const A: &str = "newpath 10 30 moveto 60 70 lineto 110 40 lineto";
+    // Same input, same pixels.
+    let one = data(&board(140, 100, 2.0, &format!("{A} << {OPTS} >> dkstroke")));
+    let two = data(&board(140, 100, 2.0, &format!("{A} << {OPTS} >> dkstroke")));
+    assert_eq!(one, two, "the same stroke rendered differently twice");
+
+    // A mark placed from the caller's stream after the stroke lands in
+    // the same place whatever drykit was asked to do.
+    let dot = |opts: &str| {
+        let it = board(
+            140,
+            100,
+            2.0,
+            &format!(
+                "5 srand {A} << {opts} >> dkstroke \
+                 1 0 0 setrgbcolor rand 120 mod 10 add rand 80 mod 10 add 3 0 360 arc fill"
+            ),
+        );
+        it.gfx()
+            .pixmap
+            .pixels()
+            .iter()
+            .map(|p| p.red() > 200 && p.green() < 60)
+            .collect::<Vec<bool>>()
+    };
+    let base = dot(OPTS);
+    assert!(base.iter().any(|&r| r), "the caller's mark is missing");
+    for opts in [
+        "/Width 9 /Lanes 5 /Dropout 0.7 /Fallout 4",
+        "/Tilt 60 /Levels 3 /Touch { 0.8 mul } /Bands 5",
+        "/Seed 99 /Pressure { 1 add } /Wear 2",
+    ] {
+        assert_eq!(
+            dot(opts),
+            base,
+            "{opts} moved a mark drawn after the stroke"
+        );
+    }
+
+    // Adding a stroke elsewhere re-rolls nothing in this one: its seed is
+    // its own first point's, not a count of strokes drawn before it.
+    let alone = board(140, 100, 2.0, &format!("{A} << {OPTS} >> dkstroke"));
+    let with = board(
+        140,
+        100,
+        2.0,
+        &format!(
+            "newpath 10 92 moveto 130 92 lineto << {OPTS} >> dkstroke \
+             {A} << {OPTS} >> dkstroke"
+        ),
+    );
+    let w = 280;
+    let rows = |it: &Interp| -> Vec<u8> {
+        // Rows of the page below y = 75pt (pixels 50.. from the top) hold
+        // only stroke A and its fallout.
+        let d = it.gfx().pixmap.data();
+        d[56 * w * 4..].to_vec()
+    };
+    assert_eq!(
+        rows(&alone),
+        rows(&with),
+        "a stroke elsewhere re-rolled this one"
+    );
+}
+
+/// Test 5: level-major order. Two crossing strokes drawn as two subpaths of
+/// one call and as two calls inside a `dkbatch` are pixel-identical (each
+/// subpath is seeded by its own first point), and at the crossing no pixel
+/// of either stroke's bright core is covered by the other's dim level. Two
+/// separate calls, the control, do cover it: that is what the batch is for.
+#[test]
+fn dkbatch_draws_level_major_like_one_call() {
+    const OPTS: &str = "/Width 6 /Touch 0.75 /Halo 1.5 /Dropout 0.3 /Load 0.6 /Lanes 2";
+    const A: &str = "newpath 10 20 moveto 130 80 lineto";
+    const B: &str = "newpath 10 80 moveto 130 20 lineto";
+    let one_call = data(&board(
+        140,
+        100,
+        3.0,
+        &format!("{A} 10 80 moveto 130 20 lineto << {OPTS} >> dkstroke"),
+    ));
+    let batch = data(&board(
+        140,
+        100,
+        3.0,
+        &format!("{{ {A} << {OPTS} >> dkstroke {B} << {OPTS} >> dkstroke }} dkbatch"),
+    ));
+    assert_eq!(
+        one_call, batch,
+        "a batch of two calls differs from one call"
+    );
+
+    // The bright level: the stroke alone at a touch of 1 for its core.
+    let core_of = |path: &str| -> Vec<bool> {
+        let it = board(140, 100, 3.0, &format!("{path} << {OPTS} >> dkstroke"));
+        let bright = it
+            .gfx()
+            .pixmap
+            .pixels()
+            .iter()
+            .map(|p| luma(*p))
+            .collect::<Vec<f32>>();
+        let max = bright.iter().cloned().fold(0f32, f32::max);
+        bright.iter().map(|&l| l > max - 4.0).collect()
+    };
+    let core_a = core_of(A);
+    let separate = board(
+        140,
+        100,
+        3.0,
+        &format!("{A} << {OPTS} >> dkstroke {B} << {OPTS} >> dkstroke"),
+    );
+    let batched = board(
+        140,
+        100,
+        3.0,
+        &format!("{{ {A} << {OPTS} >> dkstroke {B} << {OPTS} >> dkstroke }} dkbatch"),
+    );
+    let max = lumas(&batched).iter().cloned().fold(0f32, f32::max);
+    let dimmed = |it: &Interp| {
+        lumas(it)
+            .iter()
+            .zip(&core_a)
+            .filter(|(l, c)| **c && **l < max - 30.0)
+            .count()
+    };
+    assert_eq!(
+        dimmed(&batched),
+        0,
+        "the batch let B's dim level cover A's core"
+    );
+    assert!(
+        dimmed(&separate) > 20,
+        "separate calls did not dim A's core ({} pixels): the check proves nothing",
+        dimmed(&separate)
+    );
+}
+
+/// A batch keeps each stroke in the space it was given in: strokes drawn
+/// inside their own `gsave ... rotate ... grestore` land where the same
+/// strokes land unbatched. They don't cross, so order can't matter.
+#[test]
+fn dkbatch_keeps_each_strokes_own_space() {
+    const STROKES: &str = "gsave 70 50 translate 30 rotate 1.5 0.8 scale \
+                           newpath -30 0 moveto 30 0 lineto << /Width 3 /Dropout 0.3 >> dkstroke grestore \
+                           gsave 15 75 translate -40 rotate \
+                           newpath 0 0 moveto 0 20 lineto << /Width 2 /Lanes 3 >> dkstroke grestore";
+    let plain = data(&board(140, 100, 2.0, STROKES));
+    let batched = data(&board(140, 100, 2.0, &format!("{{ {STROKES} }} dkbatch")));
+    let diff = plain
+        .chunks(4)
+        .zip(batched.chunks(4))
+        .filter(|(a, b)| a != b)
+        .count();
+    assert_eq!(
+        diff, 0,
+        "a batch moved or re-shaped its strokes: {diff} pixels differ"
+    );
+}
+
+/// Test 2 for strokes, with half-widths that vary (/Pressure): a lighter
+/// touch inside a heavier one. Not guaranteed by construction (a heavier
+/// touch reaches further, which can bring a nearer, thinner segment into a
+/// cell's reach and turn its knuckle), so this measures it: none at these
+/// settings.
+#[test]
+fn dkstroke_nests_under_a_pressure_profile() {
+    let mark = |touch: &str| {
+        lumas(&render(
+            140,
+            100,
+            4.0,
+            &format!(
+                "<< /Surface /drawing /Seed 4 >> dksurface 0 0 0 setrgbcolor \
+                 newpath 10 30 moveto 40 70 lineto 70 25 lineto 100 65 lineto 130 35 lineto \
+                 << /Width 4 /Levels 1 /Strength 1 /Under [1 1 1] /Touch {touch} \
+                    /Pressure {{ 6.28 mul 3 mul sin 0.6 mul 1 add }} >> dkstroke"
+            ),
+        ))
+    };
+    for (t1, t2) in [("0.55", "0.65"), ("0.7", "0.9")] {
+        let lo = mark(t1);
+        let hi = mark(t2);
+        let lighter = lo.iter().zip(&hi).filter(|(l, h)| **h > **l + 1.0).count();
+        eprintln!("touch {t1} -> {t2}: {lighter} pixels lighter at the heavier touch");
+        assert_eq!(
+            lighter, 0,
+            "touch {t1} inked {lighter} pixels that touch {t2} did not"
+        );
+    }
+}
+
+/// Test 7 for `dkstroke`: every parameter it advertises changes the
+/// render. The baseline turns every feature on, so each key is live:
+/// a contact chain (/Seed, /Load, /Dropout), fallout (/Drift), a tilt
+/// (/Side), a touch profile (/Bands) and two levels (/Halo, /Under).
+#[test]
+fn dkstroke_every_documented_parameter_changes_the_render() {
+    const BASE: &str = "/Width 4 /Touch { 0.3 mul 0.55 add } /Bands 4 /Levels 2 \
+                        /Tilt 30 /Side 8 /Dropout 0.3 /Load 0.5 /Fallout 1 /Drift 3 /Seed 5";
+    let stroke = |extra: &str| {
+        data(&board(
+            140,
+            60,
+            2.0,
+            &format!(
+                "newpath 10 30 moveto 70 45 lineto 130 25 lineto << {BASE} {extra} >> dkstroke"
+            ),
+        ))
+    };
+    let baseline = stroke("");
+    let varied = [
+        ("Width", "/Width 7"),
+        ("Touch", "/Touch { 0.3 mul 0.4 add }"),
+        ("Bands", "/Bands 2"),
+        ("Pressure", "/Pressure { 1 add }"),
+        ("Wear", "/Wear 1"),
+        ("Tilt", "/Tilt 70"),
+        ("Side", "/Side 14"),
+        ("Streak", "/Streak 2.5"),
+        ("Levels", "/Levels 3"),
+        ("Strength", "/Strength 0.5"),
+        ("Under", "/Under [0.5 0.1 0.1]"),
+        ("Halo", "/Halo 1"),
+        ("Load", "/Load 0.2"),
+        ("Dropout", "/Dropout 0.7"),
+        ("Lanes", "/Lanes 6"),
+        ("Fallout", "/Fallout 4"),
+        ("Drift", "/Drift 9"),
+        ("Seed", "/Seed 6"),
+    ];
+    for (_, extra) in varied {
+        assert_ne!(
+            stroke(extra),
+            baseline,
+            "{extra} rendered the same as the baseline: a no-op"
+        );
+    }
+    // Every advertised key is in the list above, and nothing else is.
+    let src = std::fs::read_to_string("lib/drykit.ps").expect("read drykit");
+    let start = src
+        .find("% @summary: Draws the current path as a dry stick")
+        .expect("dkstroke tags");
+    let end = src[start..].find("\n/dkstroke ").expect("dkstroke def") + start;
+    let mut advertised: Vec<&str> = src[start..end]
+        .lines()
+        .filter_map(|l| l.strip_prefix("% @param: /"))
+        .map(|l| l.split_whitespace().next().unwrap_or(""))
+        .collect();
+    advertised.sort_unstable();
+    let mut tested: Vec<&str> = varied.iter().map(|(k, _)| *k).collect();
+    tested.sort_unstable();
+    assert_eq!(advertised, tested, "advertised and tested keys differ");
+}
+
+/// Test 8, the CI budget smoke test: a 100-stroke dkstroke render stays
+/// under 2 s under `--profile ci` (DRYMEDIA.md 6.2). Printed so drift is
+/// visible before it fails.
+#[test]
+fn a_hundred_strokes_render_within_the_ci_budget() {
+    let t0 = std::time::Instant::now();
+    let it = render(
+        200,
+        200,
+        1.0,
+        "<< /Surface /drawing /Seed 2 >> dksurface 0.1 0.1 0.12 setrgbcolor \
+         { 0 1 99 { /i exch def newpath i 10 mod 18 mul 12 add i 10 idiv 18 mul 12 add moveto \
+           12 6 rlineto << /Width 1.2 /Touch 0.7 >> dkstroke } for } dkbatch",
+    );
+    let secs = t0.elapsed().as_secs_f64();
+    eprintln!("100 strokes: {secs:.2}s");
+    assert!(inked(&it).iter().any(|&i| i), "nothing drawn");
+    assert!(
+        secs < 2.0,
+        "100 strokes took {secs:.2}s, over the 2s CI budget"
+    );
+}
+
+/// Test 6: Ghostscript agrees with pscat on a stroke, block for block (the
+/// `tests/paintkit.rs` surface check's shape), with /Seed pinned (the
+/// position seed can round differently, DRYMEDIA.md 3.2) and no fallout
+/// (scatter draws from `rand`, which differs). A coarse weave puts the
+/// pattern at block scale, and a different seed is the negative control.
+#[test]
+fn ghostscript_agrees_on_a_stroke() {
+    if !gs_available() {
+        eprintln!("skipping gs stroke check: gs not installed");
+        return;
+    }
+    const SCALE: usize = 4;
+    const PX: usize = 200 * SCALE;
+    let body = |seed: u32| {
+        format!(
+            "<< /Surface /drawing /Seed {seed} /Weave 6 /Mottle 30 >> dksurface \
+             0 0 0 setrgbcolor \
+             newpath 10 40 moveto 100 170 lineto 190 60 lineto 20 120 moveto 180 130 lineto \
+             << /Width 26 /Touch 0.6 /Seed 7 /Lanes 3 /Dropout 0.2 /Load 0.6 /Under [1 1 1] >> dkstroke"
+        )
+    };
+    let blocks = |rgb: &[[u8; 3]]| {
+        let b = 10 * SCALE;
+        let bw = PX / b;
+        let mut cells = vec![0f64; bw * bw];
+        for (i, p) in rgb.iter().enumerate() {
+            let (x, y) = (i % PX, i / PX);
+            cells[(y / b) * bw + x / b] +=
+                (f64::from(p[0]) + f64::from(p[1]) + f64::from(p[2])) / 3.0 / (b * b) as f64;
+        }
+        cells
+    };
+    let pscat = |seed: u32| {
+        let it = render(200, 200, SCALE as f32, &body(seed));
+        let rgb: Vec<[u8; 3]> = it
+            .gfx()
+            .pixmap
+            .pixels()
+            .iter()
+            .map(|p| [p.red(), p.green(), p.blue()])
+            .collect();
+        blocks(&rgb)
+    };
+    let mut src = String::new();
+    for path in ["lib/artkit.ps", "lib/paintkit.ps", "lib/drykit.ps"] {
+        src.push_str(&std::fs::read_to_string(path).expect("read lib"));
+        src.push('\n');
+    }
+    let dir = std::env::temp_dir().join(format!("pscat-drykit-stroke-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let file = dir.join("stroke.ps");
+    let png = dir.join("stroke.png");
+    std::fs::write(
+        &file,
+        format!("{src}\n1 setgray clippath fill {}\nshowpage\n", body(11)),
+    )
+    .expect("write");
+    let status = std::process::Command::new("gs")
+        .args(["-dNOPAUSE", "-dBATCH", "-q", "-sDEVICE=png16m"])
+        .arg(format!("-g{PX}x{PX}"))
+        .arg(format!("-r{}", 72 * SCALE))
+        .arg(format!("-o{}", png.display()))
+        .arg(&file)
+        .status()
+        .expect("run gs");
+    assert!(status.success(), "gs rejected the dkstroke driver");
+    let img = tiny_skia::Pixmap::decode_png(&std::fs::read(&png).expect("png")).expect("decode");
+    let _ = std::fs::remove_dir_all(&dir);
+    let gs_rgb: Vec<[u8; 3]> = img
+        .pixels()
+        .iter()
+        .map(|p| [p.red(), p.green(), p.blue()])
+        .collect();
+    let gs = blocks(&gs_rgb);
+    let diff = |a: &[f64], b: &[f64]| {
+        a.iter().zip(b).map(|(x, y)| (x - y).abs()).sum::<f64>() / a.len() as f64
+    };
+    let same = diff(&pscat(11), &gs);
+    let other = diff(&pscat(12), &gs);
+    eprintln!("pscat vs gs stroke: mean block diff {same:.2}, another seed {other:.2}");
+    assert!(same < 6.0, "pscat and gs disagree on a stroke: {same:.2}");
+    assert!(
+        other > same * 2.0,
+        "another seed is as close ({other:.2}): the check is too weak"
     );
 }
