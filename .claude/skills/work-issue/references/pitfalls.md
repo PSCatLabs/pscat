@@ -210,3 +210,73 @@ Step numbers ("step 1" ... "step 9") refer to the numbered steps in `../SKILL.md
 - **The main checkout does not pick up a merged change to this skill
   until it is pulled.** Skills load from the checkout the session runs
   in; merging updates `origin/main` only.
+
+## CI wait (#199, from the #178 / PR #198 run)
+
+Step 8.12's CI wait is the one place a run is most tempted to hand back
+early. The first Haiku run of the slimmed skill did: it stopped with
+`test` pending, and CI went green six seconds later. CI here takes
+**11-17 minutes** (`test` is the long job, `perf-regression` about 5),
+which is longer than a Monitor window or a foreground Bash timeout, so
+the only wait that works is a background Bash task whose completion
+wakes you:
+
+```sh
+gh pr checks <PR#> --watch --fail-fast > /tmp/ci-<N>.log 2>&1; echo "exit=$?" >> /tmp/ci-<N>.log
+```
+
+Run it with `run_in_background: true`, heartbeat first and after.
+
+- **Do not sleep-poll** (foreground `sleep` is blocked and a poll loop
+  burns turns) and **do not pipe through `tail`**: the pipeline's exit
+  status becomes `tail`'s, which hides a failed check (#194's run hit this).
+  The redirect plus the trailing `exit=` line is what keeps the status.
+- **~15 minutes is normal.** A task that has run 10 minutes is not hung.
+- **Read the `exit=` line, not just the notification.** `exit=0` means
+  every check passed. Anything else: open the log before deciding. With
+  `--fail-fast` a non-zero exit means a check failed (stop and report) or
+  the command itself failed.
+- **"no checks reported"**: seconds after a push or `gh pr update-branch`
+  no check runs are registered yet, so `--watch` can exit non-zero with
+  that text. It is not a CI failure. Re-launch the same background
+  command. After `update-branch`, always start a fresh watch: the run
+  from before it no longer counts under the `strict` status check.
+- After a clean exit, re-run `gh pr view <PR#> --json mergeable,mergeStateStatus,statusCheckRollup`
+  and merge only when `test` is `SUCCESS`.
+
+### Pending-CI hand-back (only if you truly cannot wait)
+
+If you must stop with CI still pending (the harness refuses a background
+task, or the user cut the run short), the PR is open but not merged. Do
+**not** run step 9 and do **not** release the lock. Instead:
+
+1. Keep the `in-review` label and leave `work-issue-lock-<N>` in place.
+   Its heartbeat will go stale after 45 minutes; that is intended, it is
+   what lets a later invocation reclaim the issue.
+2. Make the final report's `Merge:` line `pending CI`, and list the exact
+   remaining steps: the PR number and branch; the worktree path; whether
+   step 8.11's `## Summary of work` comment is already posted (do not post
+   it twice); then `gh pr checks <PR#> --watch --fail-fast` (recipe
+   above), `gh pr view` to confirm `test` is `SUCCESS`,
+   `gh pr merge <PR#> --squash --delete-branch`, and step 9.
+3. Resuming: the same session just continues from step 8.12 with no
+   re-claim. A fresh `/work-issue <N>` after the lock is stale claims it,
+   reuses the worktree (step 3), and must **skip straight to step 8.12**
+   rather than re-planning at step 4; a re-run inside 45 minutes reports
+   `live` and stops.
+
+### Step 4 is a hard gate
+
+The same run skipped the plan-review checkpoint without noticing. Step
+4.4 now says no code before the `advisor` call, and the final report has
+a `Plan review (step 4)` line that must read `done` or `skipped (small)`.
+Skipping is allowed only for a **small** change (step 4's definition),
+and the report must say so; for a full-size change the call is required.
+
+### One scratch location
+
+All scratch files live in `/tmp` as `<kind>-<N>.*` (`gate-<N>.log`,
+`ci-<N>.log`, `codex-review-<N>.json`, `issue-<N>-summary.md`). Some
+harnesses tell agents to use a session scratchpad instead; the skill's
+`/tmp` paths override that, because `<N>`-keyed names are stable across
+steps and across a resumed run, and a scratchpad path is not.
