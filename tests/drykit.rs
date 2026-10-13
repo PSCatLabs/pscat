@@ -190,19 +190,54 @@ fn missed(a: &Interp, b: &Interp) -> usize {
         .count()
 }
 
+/// Device pixels per point for the reach renders: 4.2 pixels per cell at
+/// /Weave 0.6, so a knuckle covers whole pixels and a missed one can't hide
+/// inside anti-aliasing noise (the design's 4-pixels-per-cell rule).
+const REACH_SCALE: f32 = 7.0;
+
+/// One case rendered with the band and with the whole page, with `slack`
+/// device pixels of extra reach (`dkslack`).
+fn reach_pair(
+    slack: f64,
+    pre: &str,
+    post: &str,
+    runs: &str,
+    touch: &str,
+    streak: &str,
+    ink: &str,
+) -> (Interp, Interp) {
+    let src = |whole: bool| {
+        format!(
+            "/dkslack {slack} def {} {pre} \
+             << /Seed 6 /Weave 0.6 /Mottle 6 /Relief 0.65 >> pkcanvas \
+             initmatrix 0 15 140 70 rectclip {post} \
+             gsave {runs} {touch} {streak} dkcatch {ink} grestore",
+            if whole {
+                "userdict /pjWholePage true put"
+            } else {
+                ""
+            }
+        )
+    };
+    (
+        render(140, 100, REACH_SCALE, &src(false)),
+        render(140, 100, REACH_SCALE, &src(true)),
+    )
+}
+
 /// Test 3 (CS 6 test 7): the swept band misses no knuckle that touches the
 /// ink. Each case renders once with the band and once with
 /// `userdict /pjWholePage` set, where every other cell under the clip joins
 /// as a disc as long as the longest knuckle (so it reaches as far as any
 /// orientation could); the two must match pixel for pixel, up to
-/// anti-aliasing noise (`missed`). `/dkslack 1.5`
-/// makes "touches" include sharing an anti-aliased edge pixel.
+/// anti-aliasing noise (`missed`). `/dkslack 1.5` makes "touches" include
+/// sharing an anti-aliased edge pixel.
 #[test]
 fn the_swept_band_misses_no_knuckle_that_touches_the_ink() {
     // (name, space set before the canvas, space set after it, runs, touch,
     // streak, ink). Ink is drawn per segment at the wider stop's width, the
     // reach dkcatch promises.
-    let cases: [(&str, &str, &str, String, &str, &str, &str); 6] = [
+    let cases: [(&str, &str, &str, String, &str, &str, &str); 7] = [
         (
             "longest knuckles: streak 4 at the top of the touch range",
             "",
@@ -210,6 +245,15 @@ fn the_swept_band_misses_no_knuckle_that_touches_the_ink() {
             format!("[ {} ]", zigzag(2.0)),
             "0.99",
             "4",
+            &format!("4 setlinewidth {ZIG_INK}"),
+        ),
+        (
+            "a sparse catch, where a missed knuckle shows",
+            "",
+            "",
+            format!("[ {} ]", zigzag(2.0)),
+            "0.6",
+            "1.8",
             &format!("4 setlinewidth {ZIG_INK}"),
         ),
         (
@@ -265,23 +309,9 @@ fn the_swept_band_misses_no_knuckle_that_touches_the_ink() {
         ),
     ];
     for (name, pre, post, runs, touch, streak, ink) in &cases {
-        let src = |whole: bool| {
-            format!(
-                "/dkslack 1.5 def {} {pre} \
-                 << /Seed 6 /Weave 0.6 /Mottle 6 /Relief 0.65 >> pkcanvas \
-                 initmatrix {post} \
-                 gsave {runs} {touch} {streak} dkcatch {ink} grestore",
-                if whole {
-                    "userdict /pjWholePage true put"
-                } else {
-                    ""
-                }
-            )
-        };
-        let band = render(140, 100, 2.0, &src(false));
-        let whole = render(140, 100, 2.0, &src(true));
+        let (band, whole) = reach_pair(1.5, pre, post, runs, touch, streak, ink);
         let ink = inked(&band).iter().filter(|&&i| i).count();
-        assert!(ink > 100, "{name}: the band caught almost nothing");
+        assert!(ink > 2000, "{name}: the band caught almost nothing");
         let diff = missed(&band, &whole);
         assert_eq!(
             diff, 0,
@@ -290,29 +320,29 @@ fn the_swept_band_misses_no_knuckle_that_touches_the_ink() {
     }
 }
 
-/// The reach test above must be able to fail: with the band cut short (a
-/// half-width of 0 for a stroke that is 4pt wide), it does.
+/// The reach test above must be able to fail on a near miss: with the
+/// band's reach one cell short (a negative `dkslack` of one cell's worth of
+/// pixels), the knuckles it drops at the ink's edge are seen. It needs a
+/// broken catch (touch 0.6, measured 486 pixels): near touch 1 the catch is
+/// all but solid and a dropped edge knuckle covers ink that is already
+/// covered (0 pixels at touch 0.99). So the matrix above has a sparse case.
 #[test]
-fn the_reach_test_detects_a_short_band() {
-    let src = |whole: bool| {
-        format!(
-            "/dkslack 1.5 def {} \
-             << /Seed 6 /Weave 0.6 >> pkcanvas \
-             gsave [ {} ] 0.9 1.8 dkcatch 4 setlinewidth {ZIG_INK} grestore",
-            if whole {
-                "userdict /pjWholePage true put"
-            } else {
-                ""
-            },
-            zigzag(0.0)
-        )
-    };
-    let a = render(140, 100, 2.0, &src(false));
-    let b = render(140, 100, 2.0, &src(true));
-    let diff = missed(&a, &b);
+fn the_reach_test_detects_a_band_one_cell_short() {
+    let cell = -0.6 * f64::from(REACH_SCALE);
+    let (band, whole) = reach_pair(
+        cell,
+        "",
+        "",
+        &format!("[ {} ]", zigzag(2.0)),
+        "0.6",
+        "1.8",
+        &format!("4 setlinewidth {ZIG_INK}"),
+    );
+    let diff = missed(&band, &whole);
+    eprintln!("a band one cell short: {diff} pixels differ");
     assert!(
-        diff > 50,
-        "a band cut for zero width differs in only {diff} pixels: the reach test proves nothing"
+        diff > 100,
+        "a band one cell short differs in only {diff} pixels: the reach test proves nothing"
     );
 }
 

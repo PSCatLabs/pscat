@@ -32,9 +32,14 @@
 %   the direction of travel, stretched by `streak`: skipped valleys read as
 %   streaks along the stroke (reference board M2), not round pits. The
 %   selection rule and the scale law are pjcatch's, unchanged, so a knuckle
-%   is selected at exactly the same touch in both, and catches nest:
-%   catch(t1) is inside catch(t2) for t1 < t2 (a knuckle's orientation is
-%   that of its nearest centerline segment, which no touch changes).
+%   is selected at exactly the same touch in both, and catches over the
+%   same stops nest: catch(t1) is inside catch(t2) for t1 < t2. A knuckle
+%   takes the orientation of the nearest segment among those whose reach
+%   covers its cell. When every stop has the same half-width that is the
+%   nearest segment outright, whatever the touch or a uniform widening. When
+%   half-widths vary along a run, a wider catch can bring a nearer, thinner
+%   segment into reach and turn a knuckle, so nesting is not guaranteed
+%   there (D2 tests it with a /Pressure run).
 % * Swept-band cells. It visits only the cells whose centre lies within
 %   reach of the centerline -- per segment, the exact column-by-column
 %   interval of its capsule -- not every cell of the mark's bounding box.
@@ -327,13 +332,13 @@
     % Test-only (CANVAS_SURFACE.md 6, test 7): with userdict /pjWholePage
     % set, every cell under the current clip joins too, so a test can
     % check that the band clipped no paint. No library code sets it.
+    % The clip's box is taken in canvas space directly, not as a user-space
+    % box's corners, which in a rotated or sheared space bounds far more.
     dkwhole {
-        clippath pathbbox newpath
+        gsave dkcm setmatrix clippath pathbbox grestore
         /dkwy1 exch def /dkwx1 exch def /dkwy0 exch def /dkwx0 exch def
-        dkwx0 dkwy0 transform dkcm itransform dkgrowbox
-        dkwx1 dkwy0 transform dkcm itransform dkgrowbox
-        dkwx0 dkwy1 transform dkcm itransform dkgrowbox
-        dkwx1 dkwy1 transform dkcm itransform dkgrowbox
+        dkwx0 dkwy0 dkgrowbox
+        dkwx1 dkwy1 dkgrowbox
     } if
 
     /dkn 0 def

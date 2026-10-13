@@ -57,11 +57,22 @@ Tests: `tests/drykit.rs` covers DRYMEDIA.md section 8's tests 1–3, plus:
 `tests/capabilities.rs` extends #141's unit check to `lib/dry*.ps`.
 
 Found along the way:
-- **Shared tooth depends on `/Relief`.** On the surface the design's
-  numbers came from (`/Relief 0.7`), at `/Weave 0.4` and 720 dpi, mean phi
-  is 0.51 (control 0.03), which passes Q4. At `/slate`'s starting
-  `/Relief 0.55` it is 0.38, under 0.4. D2's surface re-tune must re-check
-  this per surface.
+- **Shared tooth depends on `/Relief` and `/Streak`.** On the surface the
+  design's numbers came from (`/Relief 0.7`), at `/Weave 0.4` and 720 dpi,
+  mean phi is 0.51 (control 0.03), which passes Q4. Through `dksurface`
+  with the shipped starting values (mean over seeds 3, 7, 11, 19, 23;
+  control means -0.16 to 0.01 throughout):
+
+  | Surface | `/Streak 1.4` | `/Streak 1.8` |
+  |---|---|---|
+  | `/slate`, `/greenboard` (Relief 0.55) | 0.42 pass | 0.38 **fail** |
+  | `/newsprint` (Relief 0.4) | 0.36 **fail** | 0.29 **fail** |
+  | `/drawing` (Relief 0.65) | 0.46 pass | 0.42 pass |
+  | `/construction` (Relief 0.75) | 0.45 pass | 0.42 pass |
+
+  This blocks D2. Its surface re-tune must bring every surface to Q4 at
+  the streaks its media use, or the maintainer revisits Q4 for low-relief
+  paper, since #234 closes on D2.
 - **The reach margin is not paid when rendering.** A pixel-exact reach
   test needs 1.5 device pixels of extra reach, because the clip mask is
   anti-aliased. That costs the board 60% more cells, so the margin is
@@ -69,18 +80,32 @@ Found along the way:
 - **The reach test tolerates anti-aliasing noise.** Even then, a
   whole-page clip path's larger bounds change tiny-skia's fixed-point
   precision, and edge pixels move by up to 16 of 255 in either direction.
-  The test compares luma with a tolerance of 40. A real missed knuckle
-  leaves whole pixels uninked, and the negative control proves the test
-  sees that.
+  The test compares luma with a tolerance of 40, at 4.2 device pixels per
+  cell, so a knuckle covers whole pixels. A near-miss control (the band
+  one cell short) shows 486 pixels at touch 0.6. Near touch 1 the same cut
+  shows nothing, because the catch is all but solid, so the matrix carries
+  a sparse case.
+- **The reach bound is loose beside a straight segment.** A knuckle there
+  lies along the stroke, so it reaches across by its short axis, not the
+  long one the band is cut for. A tighter per-orientation band is a
+  possible speed-up if a gallery piece runs over budget.
+- **The slowest single test render** is 0.76s under `--profile ci` (a
+  whole-page reach render, at load average 8). The file runs in about 7s.
 - **A real bug the reach test caught.** The cell-key range grew by each
   stop's own reach. A segment reaches as far as its *wider* end, so the
   cells beside a thin end fell outside the key range and were mis-decoded.
 - **Dict `forall` order is random per run for integer keys** (HANDOFF
-  gotcha). `dkcatch` emits its cells from a first-seen list, so its clip,
-  and any SVG made from it, is stable.
+  gotcha; filed as #277). `dkcatch` emits its cells from a first-seen
+  list, so its clip, and any SVG made from it, is stable.
 
 Deferred to D2 (same issue):
 - `dkstroke` and `dkbatch`;
 - tests 4–8;
 - test 3's matrix for `/Tilt`, `/Wear`, `/Pressure` and `/Fallout`;
+- nesting with varying half-widths. A `/Pressure` run can turn a knuckle
+  between levels; see the header of `lib/drykit.ps`;
+- the surface re-tune against Q4 above;
+- splitting catches. `dkbudget` is 150000 unique cells per catch, and a
+  level-major `dkbatch` over a portrait's hatching would be about 1M cells
+  per level;
 - the specimen.

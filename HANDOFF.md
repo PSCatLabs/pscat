@@ -820,7 +820,7 @@ renders eight examples in both and compares block-downsampled output).
   non-name keys (integers, reals) in a randomly seeded hash map, so `forall`
   over one visits them in a different order every run, and a clip path built that
   way makes `--svg` output differ run to run (#258's symptom). `dkcatch`
-  records cells in a first-seen list and emits from it.
+  records cells in a first-seen list and emits from it (#277).
 - tiny-skia `Transform::from_row(sx, ky, kx, sy, tx, ty)` matches the
   PS matrix order `[a b c d tx ty]` — `ops/matrix.rs` documents it;
   don't rediscover this the hard way.
