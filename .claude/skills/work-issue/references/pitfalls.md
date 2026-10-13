@@ -312,6 +312,14 @@ would lose the PR's work, or fail on the existing branch); make one on
 the PR branch: `git fetch origin "$BRANCH" && git worktree add "$WORKTREE_DIR" "$BRANCH"`
 (find `$BRANCH` with `gh pr list --state open --json number,headRefName --jq '.[] | select(.headRefName | test("/<N>-"))'`).
 Find the PR with `gh pr list --state open --head "$BRANCH" --json number,url`.
+**Then sync the worktree with the PR head before choosing a row** (Codex
+round 3 on #208: step 8 reviews local git state, so a stale local branch
+would be reviewed while the newer remote head gets merged):
+`git -C "$WORKTREE_DIR" fetch origin "$BRANCH"`, then compare
+`git -C "$WORKTREE_DIR" rev-parse HEAD` with the PR's `headRefOid`.
+Behind: `git -C "$WORKTREE_DIR" merge --ff-only "origin/$BRANCH"`. Ahead
+(unpushed local commits): run the gate, `git push`, continue. Diverged:
+stop and report, do not guess.
 **Decide the re-entry point from GitHub state, never from scratch files**
 (`<SCRATCH>` is per session; the old gate log, review JSON and summary
 file are gone). First match wins:
