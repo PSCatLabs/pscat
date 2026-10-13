@@ -9129,10 +9129,12 @@ const LOAD_PRESETS: [(&str, &str); 3] = [
         "/Width 50 /Coverage 1 /Scrape 0 /EdgeBuildup 0 /Jitter 0 /ColorJitter 0",
     ),
     // Slice L4 (#224). Dense and parallel, so the fan reads as a solid
-    // band: 60 bristles 0.75pt apart, each 2pt wide, none dropped.
+    // band: 50 bristles 1pt apart, each 1pt wide, none dropped. Pitch and
+    // width are whole pixels, so the middle of the load lands on a pixel
+    // edge and a hard /ColorMix 0 step is one step, not two.
     (
         "pkfan",
-        "/Width 50 /Spread 1 /Splay 0 /Bristles 60 /BristleWidth 2 /WidthJitter 0 \
+        "/Width 50 /Spread 1 /Splay 0 /Bristles 50 /BristleWidth 1 /WidthJitter 0 \
          /Load 1 /Dropout 0 /Ragged 0 /Flick 0 /Jitter 0 /ColorJitter 0",
     ),
 ];
@@ -10204,4 +10206,172 @@ fn fan_loading_unset_is_byte_identical() {
         })
         .collect();
     assert_eq!(got, pinned, "an unset-keys render moved: {got:#x?}");
+}
+
+/// A load whose colours equal the current colour paints exactly what the
+/// plain brush paints, however the contact chain breaks each bristle into
+/// runs and whichever subpaths the runs fall in. The plain brush sets its
+/// colour once per bristle; the loaded one sets it per run from the
+/// stored draw, so this is what pins "the jitter is stored, not
+/// re-drawn". Pressed rays beside ordinary subpaths are in the mix.
+#[test]
+fn fan_a_uniform_load_survives_broken_runs_and_pressed_rays() {
+    let colour = "0.25 0.5 0.75 setrgbcolor";
+    let base = "/Width 40 /Bristles 12 /Load 0.4 /Dropout 0.6 /ColorJitter 0.3";
+    for path in [
+        "newpath 50 60 moveto 350 60 lineto 350 140 moveto 50 140 lineto",
+        "newpath 50 60 moveto 150 40 250 80 350 60 curveto 200 150 moveto 300 150 moveto",
+    ] {
+        let plain = pixels(&loaded_mark("pkfan", path, colour, base));
+        assert!(
+            ink(&plain) > 500,
+            "the plain fan on `{path}` is nearly blank"
+        );
+        for extra in [
+            "/Colors [[0.25 0.5 0.75] [0.25 0.5 0.75]]",
+            "/Colors [[0.25 0.5 0.75] [0.25 0.5 0.75] [0.25 0.5 0.75]] /ColorMix 0 /Light 90",
+        ] {
+            let loaded = pixels(&loaded_mark(
+                "pkfan",
+                path,
+                colour,
+                &format!("{base} {extra}"),
+            ));
+            assert!(
+                loaded == plain,
+                "pkfan {extra} on `{path}`: moved the plain brush"
+            );
+        }
+    }
+}
+
+/// Pixels that are not white.
+fn ink(data: &[u8]) -> usize {
+    data.chunks(4).filter(|p| p[..3] != [255, 255, 255]).count()
+}
+
+/// A pressed fan radiates through 140 degrees about +y, so `/Colors` runs
+/// across that arc: the first colour on the left of the axis, the last on
+/// the right. A pressed point is never flipped, so `/Light` leaves it
+/// alone, whichever side the light is on.
+#[test]
+fn fan_a_pressed_fan_paints_the_load_across_its_arc() {
+    let base = "/Width 120 /Bristles 30 /Load 1 /Dropout 0 /Ragged 0 /Flick 0 \
+                /BristleWidth 2 /ColorJitter 0 /Colors [[1 0 0] [0 0 1]] /ColorMix 0";
+    for extra in ["", "/Light 90", "/Light 270"] {
+        let it = loaded_mark(
+            "pkfan",
+            "newpath 200 20 moveto",
+            "0 0 0 setrgbcolor",
+            &format!("{base} {extra}"),
+        );
+        let side = |cols: std::ops::Range<u32>| {
+            let (mut red, mut blue) = (0, 0);
+            for y in 0..200 {
+                for x in cols.clone() {
+                    let p = it.gfx().pixmap.pixel(x, y).expect("in bounds");
+                    let (r, g, b) = (p.red() as i32, p.green() as i32, p.blue() as i32);
+                    if r > 200 && g < 60 && b < 60 {
+                        red += 1;
+                    }
+                    if b > 200 && g < 60 && r < 60 {
+                        blue += 1;
+                    }
+                }
+            }
+            (red, blue)
+        };
+        // The point is user (200, 20): pixel column 200. Left of the axis is smaller x.
+        let (r, b) = side(100..196);
+        assert!(
+            r > 400 && b < r / 10,
+            "`{extra}` left of the axis: red {r} blue {b}"
+        );
+        let (r, b) = side(204..300);
+        assert!(
+            b > 400 && r < b / 10,
+            "`{extra}` right of the axis: red {r} blue {b}"
+        );
+    }
+}
+
+/// A bristle's runs span every subpath, so the flip is per run: a
+/// left-to-right and a right-to-left subpath in one call both put the
+/// first colour on the lit side, with the fan's bristles drawn once each.
+#[test]
+fn fan_light_flips_runs_of_one_bristle_by_subpath() {
+    let it = loaded_mark(
+        "pkfan",
+        "newpath 50 150 moveto 350 150 lineto 350 50 moveto 50 50 lineto",
+        "0 0 0 setrgbcolor",
+        "/Width 30 /Spread 1 /Splay 0 /Bristles 30 /BristleWidth 1 /WidthJitter 0 \
+         /Load 1 /Dropout 0 /Ragged 0 /Flick 0 /Jitter 0 /ColorJitter 0 \
+         /Colors [[1 0 0] [0 0 1]] /ColorMix 0 /Light 90",
+    );
+    for (name, top, bottom) in [("A", 38..48, 52..62), ("B", 138..148, 152..162)] {
+        let (r, b) = red_and_blue(&it, top);
+        assert!(
+            r > 20 * b.max(1) && r > 1000,
+            "{name} top: red {r} blue {b}"
+        );
+        let (r, b) = red_and_blue(&it, bottom);
+        assert!(
+            b > 20 * r.max(1) && b > 1000,
+            "{name} bottom: red {r} blue {b}"
+        );
+    }
+}
+
+/// Loading takes nothing from the caller's random stream even where the
+/// contact chain breaks the bristles into runs and a pressed ray sits
+/// beside them: the load only re-colours a mark that is drawn the same.
+#[test]
+fn fan_loading_takes_no_random_draws_with_broken_runs() {
+    let base = "/Width 40 /Bristles 12 /Load 0.4 /Dropout 0.6 /ColorJitter 0.3";
+    let path = "newpath 50 60 moveto 350 60 lineto 200 150 moveto";
+    let next_draw = |extra: &str| {
+        let mut it = loaded_mark(
+            "pkfan",
+            path,
+            "0.6 0.6 0.6 setrgbcolor",
+            &format!("{base} {extra}"),
+        );
+        it.run_str("rand").expect("rand");
+        it.operand_stack()
+            .last()
+            .expect("a draw")
+            .repr()
+            .to_string()
+    };
+    let plain = next_draw("");
+    for extra in [
+        "/Colors [[1 0 0] [0 0 1]]",
+        "/Colors [[1 0 0] [0 1 0] [0 0 1]] /ColorMix 1 /Light 90",
+    ] {
+        assert_eq!(
+            next_draw(extra),
+            plain,
+            "{extra} changed the caller's random stream"
+        );
+    }
+}
+
+/// The three new keys are advertised for pkfan, each with a unit.
+#[test]
+fn fan_advertises_the_loaded_color_keys() {
+    let src = std::fs::read_to_string("lib/paintkit.ps").expect("read paintkit");
+    let start = src
+        .find("% @example: newpath 40 120 moveto 100 150 160 160 210 145 curveto << /Width 60 /Splay 0.6 >> pkfan")
+        .expect("pkfan tags");
+    let end = src[start..].find("\n/pkfan ").expect("pkfan def") + start;
+    let params: Vec<&str> = src[start..end]
+        .lines()
+        .filter_map(|l| l.strip_prefix("% @param: /"))
+        .collect();
+    for key in ["Colors", "ColorMix", "Light"] {
+        assert!(
+            params.iter().any(|l| l.starts_with(&format!("{key} ["))),
+            "pkfan does not advertise /{key} with a unit"
+        );
+    }
 }
