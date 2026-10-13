@@ -3,6 +3,66 @@
 Newest first. Per `AGENTS.md`, each stage ends with a summary here: what
 was built, tradeoffs made, what's explicitly deferred.
 
+## Canvas surface S2: `/Touch` on pktrowel and pkdry (issue #222, 2026-10-13)
+
+Slice S2 of #182's design (`docs/CANVAS_SURFACE.md` 2.2, 3.2 and 6). With a
+surface set by `pkcanvas`, a `/Touch` below 1 clips a knife or dry-brush
+mark to the weave's knuckles, so light strokes catch on one shared canvas.
+
+- **Guards.**
+  - Four guards: `pkX-touch-must-not-be-a-procedure`,
+    `pkX-touch-must-be-0-to-1`, `pkX-touch-needs-a-canvas` and
+    `pkX-touch-area-exceeds-safety-limit`.
+  - Any `/Touch`, even 1, needs a canvas, as the issue and #182's approval
+    say. Only a value below 1 builds a catch.
+  - The area guard runs after the stop walk, because the box is made from
+    the stops, and before the drawing `gsave`.
+- **Reach boxes.**
+  - A new internal `raw reach pjstopbox` bounds the stops, each grown by a
+    per-stop reach procedure. So pktrowel uses its resolved slot-6
+    half-extent and never re-runs `/Pressure`.
+  - pktrowel's reach is `|h|(1 + Drag) + Pitch/2 + |Jitter|`.
+  - pkdry uses
+    `sqrt(2)*1.15*Width/2*Spread + BristleWidth(1 + WidthJitter)/2 + |Jitter|`
+    at every stop.
+  - The comments next to the code list each emitter.
+- **Unset is byte-identical.**
+  - Unset, or 1, adds only the option parse and a `known` test, and takes
+    no draws.
+  - Checked with the same release binary, run from each tree's root (`run`
+    resolves `lib/` relative to the cwd). Every paintkit-loading file under
+    `examples/`, `gallery/` and `selftest/drivers/` gave the same PNG md5
+    from `origin/main` and from this branch.
+  - The 2x `alpine_lake` matched the committed still byte for byte.
+  - A touched driver, the negative control, differed.
+  - The PR has the counts.
+- **Test 7's whole-page box.**
+  - It's a test-only switch in `pjcatch`: `userdict /pjWholePage true put`
+    replaces the box with `clippath pathbbox`. That covers rotated and
+    scaled user spaces with no extra code.
+  - The extremes matrix was mutation-checked by dropping each reach term in
+    turn. For pktrowel that's Drag, Jitter, Pitch/2 and the resolved
+    pressure. For pkdry it's Jitter, BristleWidth and WidthJitter. Each
+    mutation fails a case.
+  - Dropping pkdry's `sqrt(2)` doesn't fail any case, with or without the
+    1.15. The box is axis-aligned in user space, and the degenerate scatter
+    moves x and y independently by at most the offset. So per axis the
+    scatter never passes `1.15*Width/2*Spread`.
+  - The `sqrt(2)` is the design's Euclidean slack, kept as specified.
+- **Test 4 uses the knife and the dry brush**, not the design's pkbroad
+  band, because pkbroad only adopts `/Touch` in S3.
+  - Where a knuckle edge is antialiased, a pixel's value depends on how
+    many overlapping lanes were filled through it, and that moves with the
+    mark. So the comparison covers only pixels where the catch is fully in
+    or fully out.
+  - Under a directional `pkwet`, every inked pixel lies on the plain catch.
+- Test 3 measured phi 0.80-0.82 (seeds 3, 7 and 11), against controls of
+  -0.01 to 0.07.
+- A touched pktrowel with `/Colors` and `/Light` works. A self-test and a
+  test-7 case cover it. The colour is set inside `ptemit`, under the catch.
+- Not here: S3 (pkfan, pkbroad, pkliner) and S4 (the specimen, the README,
+  HANDOFF and psart docs, and test 6).
+
 ## artkit: operands are checked before they are bound (issue #123, 2026-10-13)
 
 `scatter` used to bind its region and options with `def` and then
