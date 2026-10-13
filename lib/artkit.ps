@@ -1028,11 +1028,18 @@ end
 } def
 
 /scokrange {                                     % v -> bool  ([lo hi]?)
+% A *literal* two-number array. An executable one (`{ 1 2 }`) is a
+% procedure, not a range: it is refused here rather than accepted as a
+% pair of numbers, so check-then-bind callers (scatter's /Scale and
+% /Rotate) never hold a procedure they would later run by reference.
     dup type /arraytype ne
         { pop false }
-        { dup length 2 ne
+        { dup xcheck
             { pop false }
-            { dup 0 get scisnum exch 1 get scisnum and }
+            { dup length 2 ne
+                { pop false }
+                { dup 0 get scisnum exch 1 get scisnum and }
+              ifelse }
           ifelse }
     ifelse
 } def
@@ -1040,9 +1047,15 @@ end
 % --- regions ---------------------------------------------------------
 
 /screct {                                        % x y w h -> region
+% Checked on the operand stack, *before* any `def`: a name bound to a
+% procedure (or an executable name, or an operator) runs on its next
+% bare reference, so binding first and validating through the name
+% would execute a malformed operand instead of rejecting it (#123).
+% An operand still sitting on the stack is only ever inspected.
+    3 index scisnum 3 index scisnum and
+    2 index scisnum and 1 index scisnum and
+        not { screct-needs-four-numbers } if
     /sqrh exch def /sqrw exch def /sqry exch def /sqrx exch def
-    sqrx scisnum sqry scisnum and
-    sqrw scisnum and sqrh scisnum and not { screct-needs-four-numbers } if
     sqrw 0 le sqrh 0 le or { screct-width-and-height-must-be-positive } if
     << /Kind /rect
        /BBox [ sqrx sqry sqrx sqrw add sqry sqrh add ]
@@ -1529,7 +1542,10 @@ end
     ifelse
 } def
 
-/scin {                                          % x y region -> bool
+/siinside {                                       % x y region -> bool
+% scin's containment test with no operand checks: scatter calls it
+% directly from its placement loop, after validating the region once,
+% so the per-candidate cost is unchanged by scin's own guards.
     /sireg exch def /siy exch def /six exch def
     /sibb sireg /BBox get def
     six sibb 0 get lt six sibb 2 get gt or
@@ -1537,6 +1553,15 @@ end
         { false }
         { sireg /Kind get /rect eq { true } { siscan } ifelse }
     ifelse
+} def
+
+/scin {                                          % x y region -> bool
+% Operands are checked on the stack before they are bound -- see
+% screct (#123): all three of them would otherwise be run by name.
+    dup type /dicttype ne { scin-needs-a-region } if
+    1 index scisnum 3 index scisnum and
+        not { scin-needs-two-numbers } if
+    siinside
 } def
 
 % --- scatter ---------------------------------------------------------
@@ -1639,15 +1664,137 @@ end
 %   (a well-formed scatter call) mustpass
 %%EndSelfTest
 %
+%%SelfTest: scatter-never-executes-a-malformed-operand
+%   % #123: a procedure, operator or executable name where an operand
+%   % belongs used to be bound by `def` and then run by the very next
+%   % bare reference meant only to type-check it -- its side effect
+%   % happened, then a raw stackunderflow replaced the named error.
+%   % Every case asserts the *name* and that the side effect never ran.
+%   /tgotfn { /tgot true def } def
+%   /tgot false def
+%   { { /tgot true def } << /Mark { pop pop pop pop } >> scatter }
+%   /scatter-needs-a-region
+%   (a procedure as the region) mustguard
+%   tgot not (a procedure as the region: nothing ran) mustbe
+%   /tgot false def
+%   { /add load << /Mark { pop pop pop pop } >> scatter }
+%   /scatter-needs-a-region
+%   (an operator as the region) mustguard
+%   tgot not (an operator as the region: nothing ran) mustbe
+%   /tgot false def
+%   { /tgotfn cvx << /Mark { pop pop pop pop } >> scatter }
+%   /scatter-needs-a-region
+%   (an executable name as the region) mustguard
+%   tgot not (an executable name as the region: nothing ran) mustbe
+%   /tgot false def
+%   { 0 0 100 100 screct { /tgot true def } scatter }
+%   /scatter-opts-must-be-a-dict
+%   (a procedure as the options) mustguard
+%   tgot not (a procedure as the options: nothing ran) mustbe
+%   /tgot false def
+%   { 0 0 100 100 screct /tgotfn cvx scatter }
+%   /scatter-opts-must-be-a-dict
+%   (an executable name as the options) mustguard
+%   tgot not (an executable name as the options: nothing ran) mustbe
+%   /tgot false def
+%   { 0 0 100 100 screct << /Mark { pop pop pop pop } /MinSpacing { /tgot true def } >> scatter }
+%   /scatter-minspacing-must-be-a-number
+%   (a procedure as /MinSpacing) mustguard
+%   tgot not (a procedure as /MinSpacing: nothing ran) mustbe
+%   /tgot false def
+%   { 0 0 100 100 screct << /Mark { pop pop pop pop } /Tries { /tgot true def } >> scatter }
+%   /scatter-tries-must-be-a-number
+%   (a procedure as /Tries) mustguard
+%   tgot not (a procedure as /Tries: nothing ran) mustbe
+%   /tgot false def
+%   { 0 0 100 100 screct << /Mark { pop pop pop pop } /Budget { /tgot true def } >> scatter }
+%   /scatter-budget-must-be-a-number
+%   (a procedure as /Budget) mustguard
+%   tgot not (a procedure as /Budget: nothing ran) mustbe
+%   /tgot false def
+%   { 0 0 100 100 screct << /Mark { pop pop pop pop } /Count { /tgot true def } >> scatter }
+%   /scatter-count-must-be-a-number
+%   (a procedure as /Count) mustguard
+%   tgot not (a procedure as /Count: nothing ran) mustbe
+%   /tgot false def
+%   { 0 0 100 100 screct << /Mark { pop pop pop pop } /Density { /tgot true def } >> scatter }
+%   /scatter-density-must-be-a-number
+%   (a procedure as /Density) mustguard
+%   tgot not (a procedure as /Density: nothing ran) mustbe
+%   /tgot false def
+%   { 0 0 100 100 screct << /Mark { pop pop pop pop } /Seed { /tgot true def } >> scatter }
+%   /scatter-seed-must-be-a-number
+%   (a procedure as /Seed) mustguard
+%   tgot not (a procedure as /Seed: nothing ran) mustbe
+%   /tgot false def
+%   { 0 0 100 100 screct << /Mark { pop pop pop pop } /Scale { /tgot true def 1 2 } >> scatter }
+%   /scatter-scale-must-be-two-numbers
+%   (a procedure as /Scale) mustguard
+%   tgot not (a procedure as /Scale: nothing ran) mustbe
+%   /tgot false def
+%   { 0 0 100 100 screct << /Mark { pop pop pop pop } /Rotate { /tgot true def 1 2 } >> scatter }
+%   /scatter-rotate-must-be-two-numbers
+%   (a procedure as /Rotate) mustguard
+%   tgot not (a procedure as /Rotate: nothing ran) mustbe
+%%EndSelfTest
+%
+%%SelfTest: screct-and-scin-never-execute-a-malformed-operand
+%   /tgotfn { /tgot true def } def
+%   /tgot false def
+%   { 0 0 { /tgot true def } 100 screct }
+%   /screct-needs-four-numbers
+%   (a procedure as screct's width) mustguard
+%   tgot not (a procedure as screct's width: nothing ran) mustbe
+%   /tgot false def
+%   { { /tgot true def } 0 100 100 screct }
+%   /screct-needs-four-numbers
+%   (a procedure as screct's x) mustguard
+%   tgot not (a procedure as screct's x: nothing ran) mustbe
+%   /tgot false def
+%   { 0 0 /tgotfn cvx 100 screct }
+%   /screct-needs-four-numbers
+%   (an executable name as screct's width) mustguard
+%   tgot not (an executable name as screct's width: nothing ran) mustbe
+%   /tgot false def
+%   { 1 1 { /tgot true def } scin }
+%   /scin-needs-a-region
+%   (a procedure as scin's region) mustguard
+%   tgot not (a procedure as scin's region: nothing ran) mustbe
+%   /tgot false def
+%   { 1 1 /tgotfn cvx scin }
+%   /scin-needs-a-region
+%   (an executable name as scin's region) mustguard
+%   tgot not (an executable name as scin's region: nothing ran) mustbe
+%   /tgot false def
+%   { { /tgot true def } 1 0 0 100 100 screct scin }
+%   /scin-needs-two-numbers
+%   (a procedure as scin's x) mustguard
+%   tgot not (a procedure as scin's x: nothing ran) mustbe
+%   /tgot false def
+%   { 1 { /tgot true def } 0 0 100 100 screct scin }
+%   /scin-needs-two-numbers
+%   (a procedure as scin's y) mustguard
+%   tgot not (a procedure as scin's y: nothing ran) mustbe
+%   1 1 0 0 100 100 screct scin
+%   (a rectangle still contains an interior point) mustbe
+%%EndSelfTest
+%
 /scatter {                                       % region opts -
-    /scopts exch def
-    /screg exch def
-
     % Everything is validated before a single mark is drawn, the way
     % paintkit's presets validate their whole dict up front: a bad
     % option should fail on the empty page, not halfway through one.
-    scopts type /dicttype ne { scatter-opts-must-be-a-dict } if
-    screg type /dicttype ne { scatter-needs-a-region } if
+    %
+    % Each operand -- and, below, each numeric option read out of the
+    % dict -- is checked while it is still on the operand stack and
+    % only then bound with `def`. Binding first and validating through
+    % the name auto-executes a procedure, operator or executable name
+    % passed in the wrong place: its side effects ran and the caller
+    % got a raw `stackunderflow` instead of the named error (#123).
+    % `type`, `scisnum` and `scokrange` on a stack operand only inspect.
+    dup type /dicttype ne { scatter-opts-must-be-a-dict } if
+    /scopts exch def
+    dup type /dicttype ne { scatter-needs-a-region } if
+    /screg exch def
     screg /BBox known screg /Kind known and not
         { scatter-needs-a-region } if
 
@@ -1662,28 +1809,33 @@ end
             { scatter-weight-must-be-a-procedure } if
     } if
 
-    /scmin scopts /MinSpacing 0 scgetdef def
-    scmin scisnum not { scatter-minspacing-must-be-a-number } if
+    scopts /MinSpacing 0 scgetdef
+    dup scisnum not { scatter-minspacing-must-be-a-number } if
+    /scmin exch def
     scmin 0 lt { scatter-minspacing-must-be-non-negative } if
 
-    /sctries scopts /Tries 20 scgetdef def
-    sctries scisnum not { scatter-tries-must-be-a-number } if
+    scopts /Tries 20 scgetdef
+    dup scisnum not { scatter-tries-must-be-a-number } if
+    /sctries exch def
     sctries 1 lt sctries 100 gt or { scatter-tries-must-be-1-to-100 } if
     /sctries sctries truncate cvi def
 
-    /scbudget scopts /Budget 20000 scgetdef def
-    scbudget scisnum not { scatter-budget-must-be-a-number } if
+    scopts /Budget 20000 scgetdef
+    dup scisnum not { scatter-budget-must-be-a-number } if
+    /scbudget exch def
     scbudget 0 lt scbudget 200000 gt or
         { scatter-budget-must-be-0-to-200000 } if
 
-    /scsr scopts /Scale [ 1 1 ] scgetdef def
-    scsr scokrange not { scatter-scale-must-be-two-numbers } if
+    scopts /Scale [ 1 1 ] scgetdef
+    dup scokrange not { scatter-scale-must-be-two-numbers } if
+    /scsr exch def
     /scslo scsr 0 get def
     /scshi scsr 1 get def
     scslo scshi gt { scatter-scale-range-must-be-low-then-high } if
 
-    /scrr scopts /Rotate [ 0 0 ] scgetdef def
-    scrr scokrange not { scatter-rotate-must-be-two-numbers } if
+    scopts /Rotate [ 0 0 ] scgetdef
+    dup scokrange not { scatter-rotate-must-be-two-numbers } if
+    /scrr exch def
     /scrlo scrr 0 get def
     /scrhi scrr 1 get def
     scrlo scrhi gt { scatter-rotate-range-must-be-low-then-high } if
@@ -1691,16 +1843,18 @@ end
     scopts /Count known scopts /Density known and
         { scatter-count-and-density-are-mutually-exclusive } if
     scopts /Density known {
-        /scdens scopts /Density get def
-        scdens scisnum not { scatter-density-must-be-a-number } if
+        scopts /Density get
+        dup scisnum not { scatter-density-must-be-a-number } if
+        /scdens exch def
         scdens 0 lt { scatter-density-must-be-non-negative } if
         /scregarea screg scarea def
         scregarea 0 le
             { scatter-density-needs-a-region-with-positive-area } if
         /scwant scdens scregarea mul def
     } {
-        /scwant scopts /Count 120 scgetdef def
-        scwant scisnum not { scatter-count-must-be-a-number } if
+        scopts /Count 120 scgetdef
+        dup scisnum not { scatter-count-must-be-a-number } if
+        /scwant exch def
         scwant 0 lt { scatter-count-must-be-non-negative } if
     } ifelse
     % Truncate first: the budget is a bound on *marks placed*, and the
@@ -1731,8 +1885,9 @@ end
 
     /scseeded scopts /Seed known def
     scseeded {
-        /scseed scopts /Seed get def
-        scseed scisnum not { scatter-seed-must-be-a-number } if
+        scopts /Seed get
+        dup scisnum not { scatter-seed-must-be-a-number } if
+        /scseed exch def
         scseed abs 2147483647 gt { scatter-seed-out-of-range } if
         /scsaved rrand def
         scseed cvi srand
@@ -1755,7 +1910,7 @@ end
             /scwork scwork sccost add def
             scwork scworkmax gt
                 { scatter-containment-work-exceeds-safety-limit } if
-            scpx scpy screg scin {
+            scpx scpy screg siinside {
                 scfree {
                     scwins { scdeposit exit } if
                 } if

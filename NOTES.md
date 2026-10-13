@@ -3,6 +3,51 @@
 Newest first. Per `AGENTS.md`, each stage ends with a summary here: what
 was built, tradeoffs made, what's explicitly deferred.
 
+## artkit: operands are checked before they are bound (issue #123, 2026-10-13)
+
+`scatter` used to bind its region and options with `def` and then
+type-check them through the name. A name bound to a procedure, an
+operator or an executable name runs on its next bare reference, so a
+malformed operand executed (its side effects happened) and the caller got
+a raw `stackunderflow` from `type` instead of `scatter-needs-a-region`.
+
+Measured first, with one probe per entry point that takes a dict or
+number operand (a side-effecting procedure in each position):
+
+- Executed before the fix: `scatter`'s region and options, all eight of
+  its numeric options (`/MinSpacing /Tries /Budget /Count /Density /Seed
+  /Scale /Rotate`), `screct`'s four numbers, `scin`'s `x`, `y` and region,
+  and `stipple`'s region (forwarded to `scatter` by a bare reference).
+- Already safe: `scarea` (its first action runs on the stack operand, so it
+  raises a raw `typecheck`, not an execution), and the dict operands of
+  `halftone`, `woodcut`, `plasmafill`, `grain` and `weave`.
+- Same bug elsewhere, filed rather than fixed here: `hatch` in
+  `lib/hatchkit.ps` (#259).
+
+The fix checks each operand while it is still on the operand stack and
+only then binds it. `type`, `scisnum` and `scokrange` on a stack operand
+only inspect it. `scokrange` now refuses an executable array, so
+`/Scale { 1 2 }` stays an error rather than becoming a range. `stipple`
+wraps its region in a 1-element array before forwarding it, so the
+rejection stays `scatter`'s own `scatter-needs-a-region`.
+
+- New guard names: `scin-needs-a-region`, `scin-needs-two-numbers`.
+  `screct` keeps `screct-needs-four-numbers`; `scatter` keeps every
+  existing name.
+- `scatter` calls `siinside` (the unguarded body of `scin`) from its
+  placement loop, since it has validated the region once already. With the
+  guards inside `scin` itself, `gallery/firefly_census.ps` ran about 7%
+  slower; with the split it is unchanged.
+- Verified: all 72 gallery, example and selftest-driver files that load
+  artkit or one of its dependants render PNGs byte-identical before and
+  after. Their SVGs are not compared, because `--svg` output is not
+  deterministic run to run (clip path ids), independent of this change.
+- Tests: `%%SelfTest` blocks in `lib/artkit.ps` and `lib/stipplekit.ps`
+  (each asserts the guard name and that the side effect never ran), and
+  four `tests/artkit.rs` plus one `tests/stipplekit.rs` test covering a
+  procedure, an operator and an executable name.
+- Deferred: a hand-built region whose `/BBox` holds a procedure (`screct`
+  and `scpath` never produce one; noted on #259).
 ## Paint loading L2: pkbroad and pktrowel adopt `/Colors`, `/ColorMix`, `/Light` (issue #221, 2026-10-13)
 
 Slice L2 of #183's design (`docs/PAINT_LOADING.md`, sections 2-3 and 6). The two

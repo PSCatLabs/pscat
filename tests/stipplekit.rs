@@ -422,6 +422,33 @@ fn a_malformed_opts_procedure_never_gets_executed() {
 }
 
 #[test]
+fn a_malformed_region_never_gets_executed() {
+    // #123: `stipple` forwards its region to `scatter` untouched; a bare
+    // reference at that call used to run a procedure, operator or
+    // executable name passed there before `scatter` could reject it.
+    // The rejection is `scatter`'s own, not a new stipple-specific name.
+    for region in ["{ /gotexecuted true def }", "/add load", "/gotfn cvx"] {
+        let mut it = Interp::new();
+        load(&mut it);
+        it.run_str("/gotexecuted false def /gotfn { /gotexecuted true def } def")
+            .expect("setup");
+        let err = it
+            .run_str(&format!("{region} << /Count 1 >> stipple"))
+            .unwrap_err();
+        match err {
+            PsError::Undefined(name) => assert_eq!(name, "scatter-needs-a-region"),
+            other => panic!("expected a self-documenting undefined name, got {other}"),
+        }
+        it.run_str("gotexecuted").expect("read the flag");
+        assert_eq!(
+            it.operand_stack().last().map(|o| o.repr()).as_deref(),
+            Some("false"),
+            "the malformed region {region:?} was executed instead of being rejected"
+        );
+    }
+}
+
+#[test]
 fn dotradius_is_ignored_when_a_custom_mark_is_supplied() {
     // Documented contract (this file's own header): /DotRadius only
     // feeds the default /Mark. A malformed /DotRadius alongside a

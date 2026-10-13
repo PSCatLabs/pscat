@@ -3834,6 +3834,115 @@ fn scatter_rejects_a_callback_that_is_executable_but_not_callable() {
     assert_eq!(got, vec!["4"], "and nothing else on the stack");
 }
 
+/// Runs `src` expecting a self-documenting guard `name`, and asserts the
+/// side-effecting procedure it carries (`/gotexecuted true def`) never ran.
+fn assert_rejected_without_running(src: &str, name: &str) {
+    let mut it = Interp::new();
+    load(&mut it);
+    it.run_str("/gotexecuted false def /gotfn { /gotexecuted true def } def")
+        .expect("setup");
+    match it.run_str(src).unwrap_err() {
+        PsError::Undefined(got) => assert_eq!(got, name, "wrong guard for {src:?}"),
+        other => panic!("expected the guard {name} for {src:?}, got {other}"),
+    }
+    it.run_str("gotexecuted").expect("read the flag");
+    let flag = it.operand_stack().last().map(|o| o.repr());
+    assert_eq!(
+        flag.as_deref(),
+        Some("false"),
+        "the malformed operand in {src:?} was executed instead of being rejected"
+    );
+}
+
+#[test]
+fn scatter_never_executes_a_malformed_region_operand() {
+    // #123: `scatter` used to bind its region with `def` and then
+    // type-check it through the name, which auto-executes a procedure,
+    // an operator or an executable name -- the side effect ran, and a raw
+    // `stackunderflow` replaced `scatter-needs-a-region`.
+    let opts = "<< /Count 1 /Mark { pop pop pop pop } >>";
+    for region in ["{ /gotexecuted true def }", "/add load", "/gotfn cvx"] {
+        assert_rejected_without_running(
+            &format!("{region} {opts} scatter"),
+            "scatter-needs-a-region",
+        );
+    }
+}
+
+#[test]
+fn scatter_never_executes_a_malformed_options_operand() {
+    for opts in ["{ /gotexecuted true def }", "/add load", "/gotfn cvx"] {
+        assert_rejected_without_running(
+            &format!("0 0 100 100 screct {opts} scatter"),
+            "scatter-opts-must-be-a-dict",
+        );
+    }
+}
+
+#[test]
+fn scatter_never_executes_a_malformed_numeric_option() {
+    // Same shape one level down: an option value read out of the dict
+    // was bound by name and then referenced bare to type-check it.
+    for (key, guard) in [
+        ("MinSpacing", "scatter-minspacing-must-be-a-number"),
+        ("Tries", "scatter-tries-must-be-a-number"),
+        ("Budget", "scatter-budget-must-be-a-number"),
+        ("Count", "scatter-count-must-be-a-number"),
+        ("Density", "scatter-density-must-be-a-number"),
+        ("Seed", "scatter-seed-must-be-a-number"),
+    ] {
+        for value in ["{ /gotexecuted true def 1 }", "/add load", "/gotfn cvx"] {
+            assert_rejected_without_running(
+                &format!(
+                    "0 0 100 100 screct << /Mark {{ pop pop pop pop }} /{key} {value} >> scatter"
+                ),
+                guard,
+            );
+        }
+    }
+    for (key, guard) in [
+        ("Scale", "scatter-scale-must-be-two-numbers"),
+        ("Rotate", "scatter-rotate-must-be-two-numbers"),
+    ] {
+        // An executable pair is a procedure, not a range -- refused, and
+        // never run.
+        for value in ["{ /gotexecuted true def 1 2 }", "/add load", "/gotfn cvx"] {
+            assert_rejected_without_running(
+                &format!(
+                    "0 0 100 100 screct << /Mark {{ pop pop pop pop }} /{key} {value} >> scatter"
+                ),
+                guard,
+            );
+        }
+    }
+}
+
+#[test]
+fn screct_and_scin_never_execute_a_malformed_operand() {
+    for bad in ["{ /gotexecuted true def }", "/gotfn cvx"] {
+        assert_rejected_without_running(
+            &format!("0 0 {bad} 100 screct"),
+            "screct-needs-four-numbers",
+        );
+        assert_rejected_without_running(
+            &format!("{bad} 0 100 100 screct"),
+            "screct-needs-four-numbers",
+        );
+        assert_rejected_without_running(&format!("1 1 {bad} scin"), "scin-needs-a-region");
+        assert_rejected_without_running(
+            &format!("{bad} 1 0 0 100 100 screct scin"),
+            "scin-needs-two-numbers",
+        );
+        assert_rejected_without_running(
+            &format!("1 {bad} 0 0 100 100 screct scin"),
+            "scin-needs-two-numbers",
+        );
+    }
+    // The well-formed shapes are untouched.
+    assert_eq!(eval("1 1 0 0 100 100 screct scin"), vec!["true"]);
+    assert_eq!(eval("101 1 0 0 100 100 screct scin"), vec!["false"]);
+}
+
 #[test]
 fn scarea_merging_never_swallows_a_whole_component() {
     // Round six: merging coincident boundaries with an epsilon scaled
