@@ -27,3 +27,8 @@ fix is structural: the commands now live in files an agent runs as one command.
   `identity_check.sh`, `--headless`, `build.rs` `/name N dict def` and library-specimen notes.
 - **SKILL.md budget:** step 9's block and step 10's template moved to `references/finish.md`;
   SKILL.md is 232 lines, was 250.
+- **From the S3 run (PR #280), added late:** identity-check ordering (rebase first, then a base
+  worktree from `merge-base HEAD origin/main`, then the check), bounded Python-poll waits and the
+  `ToolSearch select:Monitor` reminder, and a contents table with line ranges at the top of
+  `pitfalls.md` (about 580 lines, truncated by a single `cat`). The ranges drift on edits, so
+  the table says to re-check them.
