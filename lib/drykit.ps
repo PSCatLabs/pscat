@@ -1,0 +1,717 @@
+%!PS-Adobe-3.0
+%%Title: drykit.ps — dry media core: a stick drawn across a toothed surface
+%%Creator: pscat — issue #234 (design: docs/DRYMEDIA.md)
+%%EndComments
+% @requires: (lib/artkit.ps) run (lib/paintkit.ps) run
+
+% The shared engine under chalk, crayon and charcoal (epic #232). A dry
+% stick deposits pigment only where its contact patch meets raised tooth,
+% so drykit builds every mark through a *catch*: a clip made of the
+% knuckles of the surface that the stick reaches at a given touch.
+%
+% The surface is paintkit's (#182, docs/CANVAS_SURFACE.md): one `pkcanvas`
+% height field in canvas space, so a piece that mixes paintkit and drykit
+% marks has one canvas, and two crossing strokes break up on the same
+% tooth whichever library drew them. drykit never edits lib/paintkit.ps.
+% It reads these @internal names, and the `drykit-paintkit-contract`
+% self-test below pins each one (DRYMEDIA.md Q1; #270 moves them to
+% lib/toothkit.ps):
+%
+%   pjheight  i j -> 0..1      the knuckle height of cell (i, j)
+%   pjhash    i j s -> 0..1    the per-cell hash, read through /pjp
+%   pjCTM pjP pjW pjM pjR      canvas space, permutation, /Weave, /Mottle,
+%                              /Relief, as pkcanvas leaves them in userdict
+%   pjmemo                     the height memo pjheight fills
+%
+% Slice D1 (this file so far): `dksurface`, the named surfaces, the private
+% generator, and `dkcatch`. Slice D2 adds `dkstroke` and `dkbatch` on top.
+%
+% `dkcatch` differs from paintkit's `pjcatch` in two ways (DRYMEDIA.md 2.1):
+%
+% * Oriented knuckles. Each knuckle is an ellipse whose long axis follows
+%   the direction of travel, stretched by `streak`: skipped valleys read as
+%   streaks along the stroke (reference board M2), not round pits. The
+%   selection rule and the scale law are pjcatch's, unchanged, so a knuckle
+%   is selected at exactly the same touch in both, and catches over the
+%   same stops nest: catch(t1) is inside catch(t2) for t1 < t2. A knuckle
+%   takes the orientation of the nearest segment among those whose reach
+%   covers its cell. When every stop has the same half-width that is the
+%   nearest segment outright, whatever the touch or a uniform widening. When
+%   half-widths vary along a run, a wider catch can bring a nearer, thinner
+%   segment into reach and turn a knuckle, so nesting is not guaranteed
+%   there (D2 tests it with a /Pressure run).
+% * Swept-band cells. It visits only the cells whose centre lies within
+%   reach of the centerline -- per segment, the exact column-by-column
+%   interval of its capsule -- not every cell of the mark's bounding box.
+%   A cell is visited once per segment that reaches it and built once.
+%
+% The reach from a segment is the stroke's own half-width plus the
+% farthest a knuckle extends from its cell centre (0.88 grow streak W for
+% the stretched long semi-axis, plus 0.22W for the centre's nudge) plus
+% `dkslack` device pixels (0 unless a test asks for pixel identity; see
+% its definition).
+%
+% Ghostscript closes sub-2-pixel gaps in fills and clips (its fill adjust),
+% which turns a fine catch into a solid stroke. dkcatch turns it off with
+% the guarded `/.setfilladjust2 where { pop 0 0 .setfilladjust2 } if` just
+% before its `clip` (DRYMEDIA.md 2.4, Q8); it is a gs internal, absent in
+% pscat, and it lives in the caller's gsave like the clip does.
+%
+% Determinism. drykit never calls `rand` or `srand`. The surface takes no
+% draws at all, and the tool-side generator (`dkrand`, for D2's contact
+% chain, lanes and fallout) is the same Schrage-form minimal standard LCG
+% as paintkit's `pjrand`, under its own state in userdict.
+%
+% Scratch prefix dk-. Every name is distinct from the pk*/pj*/pu* families,
+% because D2 calls pkribbon for geometry and pkribbon clobbers pk* names.
+
+% Unique cells one catch may build. Past it dkcatch rejects; a caller with a
+% larger mark splits it into several catches.
+% @internal
+/dkbudget 150000 def
+
+% Extra reach, in device pixels. 0 for rendering. The clip mask is
+% anti-aliased, so a knuckle that ends within a pixel of the ink, without
+% touching it, still shades that edge pixel; a test that wants pixel
+% identity against a whole-page catch sets 1.5 (more than a pixel's
+% diagonal). At 144 dpi 1.5 pixels is 0.75pt of reach on each side, which
+% cost the full board 60% more cells (docs/DRYMEDIA.md 6.1) for a
+% sub-pixel difference at the ink's edge.
+% @internal
+/dkslack 0 def
+
+% any -> bool   (an integer or a real)
+% @internal
+/dkisnum {
+    type dup /integertype eq exch /realtype eq or
+} def
+
+% dict key default -> value   (the default when the key is absent)
+% @internal
+/dkget {
+    /dkgd exch def
+    2 copy known { get } { pop pop /dkgd load } ifelse
+} def
+
+% a b -> max(a, b)
+% @internal
+/dkmax {
+    2 copy lt { exch } if pop
+} def
+
+% a b -> min(a, b)
+% @internal
+/dkmin {
+    2 copy gt { exch } if pop
+} def
+
+% seed -   (seeds drykit's own generator)
+% Same shape as paintkit's pjsrand: reduced mod 2147483646 before `abs`, and
+% offset to 1..2147483646, because 0 is the Lehmer generator's fixed point.
+% The state lives in userdict, so a `begin ... end` around the caller can't
+% take it away mid-stroke.
+% @internal
+/dksrand {
+    cvi 2147483646 mod abs 1 add
+    userdict /dkstate 3 -1 roll put
+} def
+
+% -> 0.0..1.0   (exclusive at both ends)
+% Schrage's decomposition of (16807, 2^31 - 1), so every intermediate fits
+% in Ghostscript's 32-bit integers and both interpreters draw the same
+% sequence. The caller's `rand` stream is never touched.
+% @internal
+/dkrand {
+    userdict /dkstate get
+    dup 127773 idiv 2836 mul exch 127773 mod 16807 mul exch sub
+    dup 0 lt { 2147483647 add } if
+    dup userdict /dkstate 3 -1 roll put
+    2147483647 div
+} def
+
+% The generator's state, as `1 dksrand` leaves it, so dkrand works before
+% anything seeds it.
+% @internal
+/dkstate 2 def
+
+% The named surfaces (DRYMEDIA.md 2.3): plain pkcanvas keys plus the
+% surface's own colour. These are starting values from the reference board;
+% D2's specimen re-tunes them before any test pins their pixels.
+% @internal
+/dksurfaces <<
+    /slate        << /Weave 0.4  /Relief 0.55 /Mottle 4 /Ground [0.13 0.14 0.16] >>
+    /greenboard   << /Weave 0.4  /Relief 0.55 /Mottle 4 /Ground [0.17 0.23 0.20] >>
+    /newsprint    << /Weave 0.35 /Relief 0.4  /Mottle 3 /Ground [0.86 0.84 0.78] >>
+    /drawing      << /Weave 0.6  /Relief 0.65 /Mottle 6 /Ground [0.95 0.94 0.90] >>
+    /construction << /Weave 0.9  /Relief 0.75 /Mottle 8 /Ground [0.20 0.34 0.62] >>
+>> def
+
+% a b c d -> the largest singular value of the 2x2 map [a b; c d]
+% (how far it can stretch a unit length, whatever the direction)
+% @internal
+/dksvmax {
+    /dkvd exch def /dkvc exch def /dkvb exch def /dkva exch def
+    /dkvt dkva dup mul dkvb dup mul add dkvc dup mul add dkvd dup mul add def
+    /dkvq dkva dkvd mul dkvb dkvc mul sub def
+    dkvt dup mul dkvq dup mul 4 mul sub dup 0 lt { pop 0 } if sqrt
+    dkvt add 2 div sqrt
+} def
+
+% px py -   (widen dklo..dkhi by the reach disc about p, on column dkx)
+% @internal
+/dkdisc {
+    /dkpy exch def /dkpx exch def
+    /dkq dkR2 dkx dkpx sub dup mul sub def
+    dkq 0 ge {
+        /dkq dkq sqrt def
+        dkpy dkq sub dup dklo lt { /dklo exch def } { pop } ifelse
+        dkpy dkq add dup dkhi gt { /dkhi exch def } { pop } ifelse
+    } if
+} def
+
+% ox oy -   (widen dklo..dkhi by the segment offset by (ox, oy), on dkx)
+% The capsule is convex, so its column interval runs between the extremes
+% of the pieces that bound it: the two end discs and the two offset sides.
+% @internal
+/dkside {
+    /dkoy exch def /dkox exch def
+    /dkpax dkax dkox add def
+    /dkpbx dkbx dkox add def
+    dkpbx dkpax sub abs 1e-12 gt {
+        dkx dkpax sub dkpbx dkpax sub div
+        dup 0 ge exch dup 1 le 3 -1 roll and {
+            dkby dkay sub mul dkay add dkoy add
+            dup dklo lt { dup /dklo exch def } if
+            dup dkhi gt { dup /dkhi exch def } if
+            pop
+        } { pop } ifelse
+    } if
+} def
+
+% j -   (offer cell (dkci, j) to the catch from segment dkseg)
+% Records the cell on first sight, and keeps the nearest segment's index for
+% its orientation (ties keep the lower index, since segments come in order).
+% @internal
+/dkcell {
+    /dkcj exch def
+    /dkcyy dkcj 0.5 add dkW mul def
+    dkl2 0 gt {
+        dkx dkax sub dkdx mul dkcyy dkay sub dkdy mul add dkl2 div
+        dup 0 lt { pop 0 } if dup 1 gt { pop 1 } if
+        /dkt0 exch def
+        dkx dkax sub dkdx dkt0 mul sub dup mul
+        dkcyy dkay sub dkdy dkt0 mul sub dup mul add
+    } {
+        dkx dkax sub dup mul dkcyy dkay sub dup mul add
+    } ifelse
+    /dkd2 exch def
+    /dkkey dkci dki0 sub 32768 mul dkcj dkj0 sub add def
+    dkseen dkkey known {
+        dkseen dkkey get /dkslot exch def
+        dkdistbuf dkslot get dkd2 gt {
+            dkdistbuf dkslot dkd2 put
+            dksegbuf dkslot dkseg put
+        } if
+    } {
+        dkn dkcap ge { dkcatch-area-exceeds-safety-limit } if
+        dkseen dkkey dkn put
+        dkkeybuf dkn dkkey put
+        dkdistbuf dkn dkd2 put
+        dksegbuf dkn dkseg put
+        /dkn dkn 1 add def
+    } ifelse
+} def
+
+% a b -   (one centerline segment between canvas stops [x y reach])
+% @internal
+/dkseg1 {
+    /dksb exch def /dksa exch def
+    /dkax dksa 0 get def /dkay dksa 1 get def
+    /dkbx dksb 0 get def /dkby dksb 1 get def
+    /dkR dksa 2 get dksb 2 get dkmax def
+    /dkR2 dkR dup mul def
+    /dkdx dkbx dkax sub def /dkdy dkby dkay sub def
+    /dkl2 dkdx dup mul dkdy dup mul add def
+    dkl2 1e-18 gt {
+        /dkl dkl2 sqrt def
+        /dkux dkdx dkl div def /dkuy dkdy dkl div def
+    } {
+        % a point: the run's previous direction (or +x) orients it
+        /dkl2 0 def
+    } ifelse
+    dkuxs dkseg dkux put
+    dkuys dkseg dkuy put
+    dkax dkbx dkmin dkR sub dkW div 0.5 sub ceiling cvi
+    1
+    dkax dkbx dkmax dkR add dkW div 0.5 sub floor cvi
+    {
+        /dkci exch def
+        /dkx dkci 0.5 add dkW mul def
+        /dklo 1e30 def /dkhi -1e30 def
+        dkax dkay dkdisc
+        dkbx dkby dkdisc
+        dkl2 0 gt {
+            dkuy neg dkR mul dkux dkR mul dkside
+            dkuy dkR mul dkux neg dkR mul dkside
+        } if
+        dklo dkhi le {
+            dklo dkW div 0.5 sub ceiling cvi
+            1
+            dkhi dkW div 0.5 sub floor cvi
+            { dkcell } for
+        } if
+    } for
+    /dkseg dkseg 1 add def
+} def
+
+% x y -   (widen the canvas box dkx0..dky1 by a canvas point)
+% @internal
+/dkgrowbox {
+    dup dky0 lt { dup /dky0 exch def } if
+    dup dky1 gt { dup /dky1 exch def } if
+    pop
+    dup dkx0 lt { dup /dkx0 exch def } if
+    dup dkx1 gt { dup /dkx1 exch def } if
+    pop
+} def
+
+% -   (the band pass: every guard and every cell, with no graphics state
+% changed, so a rejected catch leaves the caller's clip and CTM alone)
+% @internal
+/dkband {
+    /dkW userdict /pjW get def
+    /pjp userdict /pjP get def
+    /dkcm userdict /pjCTM get def
+    /dkgrow dkct 0.8 sub 0.2 div dup 0 lt { pop 0 } if 0.25 mul 1 add def
+    % user-space lengths to canvas lengths, and one device pixel in canvas
+    1 0 dtransform dkcm idtransform 0 1 dtransform dkcm idtransform dksvmax
+    /dkhs exch def
+    1 0 dkcm idtransform 0 1 dkcm idtransform dksvmax
+    /dkpx exch def
+    /dkpad dkpx dkslack mul def
+    /dkK dkgrow dkcs mul 0.88 mul 0.22 add dkW mul dkpad add def
+    /dkwhole userdict /pjWholePage known def
+
+    % Pre-pass: every stop to canvas space as [x y reach], with the box.
+    /dkx0 1e30 def /dky0 1e30 def /dkx1 -1e30 def /dky1 -1e30 def
+    /dknseg 0 def
+    /dkrmax 0 def
+    /dkcv [
+        dkcr {
+            /dkrun exch def
+            /dkrun load type /arraytype ne { dkcatch-run-must-be-an-array } if
+            /dkrun load xcheck { dkcatch-run-must-be-an-array } if
+            /dknseg dknseg dkrun length 1 sub 1 dkmax add def
+            [
+                dkrun {
+                    /dkstop exch def
+                    /dkstop load type /arraytype ne { dkcatch-stop-must-be-x-y-halfwidth } if
+                    /dkstop load xcheck { dkcatch-stop-must-be-x-y-halfwidth } if
+                    dkstop length 3 lt { dkcatch-stop-must-be-x-y-halfwidth } if
+                    dkstop 0 get dkisnum dkstop 1 get dkisnum and dkstop 2 get dkisnum and
+                        not { dkcatch-stop-must-be-x-y-halfwidth } if
+                    dkstop 2 get 0 lt { dkcatch-halfwidth-must-not-be-negative } if
+                    dkstop 0 get dkstop 1 get transform dkcm itransform
+                    /dksy exch def /dksx exch def
+                    /dksr dkstop 2 get dkhs mul dkK add def
+                    dksr dkrmax gt { /dkrmax dksr def } if
+                    dksx dksy dkgrowbox
+                    [ dksx dksy dksr ]
+                } forall
+            ]
+            dup length 0 eq { pop /dknseg dknseg 1 sub def } if
+        } forall
+    ] def
+    % A segment reaches as far as its wider end, so the box grows by the
+    % widest reach of any stop, not each stop's own: a thin end next to a
+    % wide one would otherwise leave cells outside the key range.
+    dkx0 dkx1 le {
+        /dkx0 dkx0 dkrmax sub def /dky0 dky0 dkrmax sub def
+        /dkx1 dkx1 dkrmax add def /dky1 dky1 dkrmax add def
+    } if
+    % Test-only (CANVAS_SURFACE.md 6, test 7): with userdict /pjWholePage
+    % set, every cell under the current clip joins too, so a test can
+    % check that the band clipped no paint. No library code sets it.
+    % The clip's box is taken in canvas space directly, not as a user-space
+    % box's corners, which in a rotated or sheared space bounds far more.
+    dkwhole {
+        gsave dkcm setmatrix clippath pathbbox grestore
+        /dkwy1 exch def /dkwx1 exch def /dkwy0 exch def /dkwx0 exch def
+        dkwx0 dkwy0 dkgrowbox
+        dkwx1 dkwy1 dkgrowbox
+    } if
+
+    /dkn 0 def
+    dkx0 dkx1 le {
+        [ dkx0 dky0 dkx1 dky1 ] {
+            dkW div abs 1e9 gt { dkcatch-area-exceeds-safety-limit } if
+        } forall
+        /dki0 dkx0 dkW div floor cvi 1 sub def
+        /dkj0 dky0 dkW div floor cvi 1 sub def
+        /dki1 dkx1 dkW div floor cvi 1 add def
+        /dkj1 dky1 dkW div floor cvi 1 add def
+        dki1 dki0 sub 32768 ge dkj1 dkj0 sub 32768 ge or
+            { dkcatch-area-exceeds-safety-limit } if
+        dkwhole {
+            /dkcap dki1 dki0 sub 1 add dkj1 dkj0 sub 1 add mul def
+            dkcap 4000000 gt { dkcatch-area-exceeds-safety-limit } if
+        } {
+            /dkcap dkbudget def
+        } ifelse
+        % Scratch buffers are kept between calls: allocating them per catch
+        % costs more than a small catch does.
+        userdict /dkkeybuf known { userdict /dkkeybuf get length dkcap lt } { true } ifelse {
+            userdict /dkkeybuf dkcap array put
+            userdict /dkdistbuf dkcap array put
+            userdict /dksegbuf dkcap array put
+        } if
+        /dkkeybuf userdict /dkkeybuf get def
+        /dkdistbuf userdict /dkdistbuf get def
+        /dksegbuf userdict /dksegbuf get def
+        /dkuxs dknseg 1 dkmax array def
+        /dkuys dknseg 1 dkmax array def
+        /dkseen 1024 dict def
+        /dkseg 0 def
+        dkcv {
+            /dkrv exch def
+            /dkux 1 def /dkuy 0 def
+            dkrv length 1 eq { dkrv 0 get dkrv 0 get dkseg1 } if
+            dkrv length 1 gt {
+                0 1 dkrv length 2 sub {
+                    /dkri exch def
+                    dkrv dkri get dkrv dkri 1 add get dkseg1
+                } for
+            } if
+        } forall
+        dkwhole {
+            dki0 1 dki1 {
+                /dkci exch def
+                dkj0 1 dkj1 {
+                    /dkkey exch dkj0 sub dkci dki0 sub 32768 mul add def
+                    dkseen dkkey known not {
+                        dkseen dkkey dkn put
+                        dkkeybuf dkn dkkey put
+                        dksegbuf dkn -1 put
+                        /dkn dkn 1 add def
+                    } if
+                } for
+            } for
+        } if
+    } if
+} def
+
+% -   (appends the knuckle at dkcx dkcy: semi-axes dkea along (dkex, dkey),
+% dkeb across it, as four curveto's in the current (canvas) space)
+% @internal
+/dkoval {
+    /dk1x dkex dkea mul def /dk1y dkey dkea mul def
+    /dk2x dkey neg dkeb mul def /dk2y dkex dkeb mul def
+    /dkm1x dk1x 0.5523 mul def /dkm1y dk1y 0.5523 mul def
+    /dkm2x dk2x 0.5523 mul def /dkm2y dk2y 0.5523 mul def
+    /dkX1 dkcx dk1x add def /dkY1 dkcy dk1y add def
+    /dkX2 dkcx dk2x add def /dkY2 dkcy dk2y add def
+    /dkX3 dkcx dk1x sub def /dkY3 dkcy dk1y sub def
+    /dkX4 dkcx dk2x sub def /dkY4 dkcy dk2y sub def
+    dkX1 dkY1 moveto
+    dkX1 dkm2x add dkY1 dkm2y add dkX2 dkm1x add dkY2 dkm1y add dkX2 dkY2 curveto
+    dkX2 dkm1x sub dkY2 dkm1y sub dkX3 dkm2x add dkY3 dkm2y add dkX3 dkY3 curveto
+    dkX3 dkm2x sub dkY3 dkm2y sub dkX4 dkm1x sub dkY4 dkm1y sub dkX4 dkY4 curveto
+    dkX4 dkm1x add dkY4 dkm1y add dkX1 dkm2x sub dkY1 dkm2y sub dkX1 dkY1 curveto
+    closepath
+} def
+
+% -   (builds the knuckles the band pass recorded and clips to them)
+% Cells are built in the order they were first seen, never in dict order,
+% so the clip path -- and an SVG or PDF of it -- is the same on every run.
+% @internal
+/dkemit {
+    /dksaved matrix currentmatrix def
+    dkcm setmatrix
+    newpath
+    /dkk 0 def
+    0 1 dkn 1 sub {
+        /dkq exch def
+        /dkkey dkkeybuf dkq get def
+        /dkci dkkey 32768 idiv dki0 add def
+        /dkcj dkkey 32768 mod dkj0 add def
+        /dkd dkci dkcj pjheight dkct add 1 sub def
+        dkd 0 gt {
+            /dks dkd 0.3 div dup 1 gt { pop 1 } if 0.5 mul 0.6 add
+                dkgrow mul dkW mul def
+            /dkcx dkci 0.5 add dkci dkcj 2 pjhash 0.5 sub 0.3 mul add dkW mul def
+            /dkcy dkcj 0.5 add dkci dkcj 3 pjhash 0.5 sub 0.3 mul add dkW mul def
+            /dkea dks 0.8 mul dkcs mul def
+            /dkg dksegbuf dkq get def
+            dkg 0 ge {
+                /dkeb dks 0.42 mul def
+                /dkex dkuxs dkg get def /dkey dkuys dkg get def
+            } {
+                % whole-page test cells: a disc as long as the longest
+                % knuckle, so it reaches as far as any orientation could
+                /dkeb dkea def /dkex 1 def /dkey 0 def
+            } ifelse
+            dkoval
+            /dkk dkk 1 add def
+        } if
+    } for
+    dkk 0 eq { 0 0 moveto 0 0 lineto } if
+    /.setfilladjust2 where { pop 0 0 .setfilladjust2 } if
+    clip newpath
+    dksaved setmatrix
+} def
+
+%%SelfTest: drykit-paintkit-contract
+%   % DRYMEDIA.md Q1: drykit reads these paintkit @internal names. If one is
+%   % renamed or changes shape, this fails here rather than in a render.
+%   << /Seed 5 /Weave 0.5 /Mottle 4 /Relief 0.6 >> pkcanvas
+%   userdict /pjCTM get type /arraytype eq userdict /pjCTM get length 6 eq and
+%   (pjCTM is a 6-element matrix) mustbe
+%   userdict /pjP get type /arraytype eq userdict /pjP get length 256 eq and
+%   (pjP is a 256-entry permutation) mustbe
+%   userdict /pjW get 0.5 eq userdict /pjM get 4 eq and userdict /pjR get 0.6 eq and
+%   (pjW pjM pjR hold /Weave /Mottle /Relief) mustbe
+%   userdict /pjmemo get type /dicttype eq
+%   (pjmemo is a dict) mustbe
+%
+%   count /dktn exch def
+%   3 -7 pjheight
+%   count dktn 1 add eq
+%   (pjheight takes i j and leaves one value) mustbe
+%   dup dkisnum exch dup 0 ge exch 1 le and and
+%   (that value is a number in 0..1) mustbe
+%   3 -7 pjheight 3 -7 pjheight eq
+%   (pjheight is a pure function of the cell) mustbe
+%   userdict /pjmemo get length 0 gt
+%   (pjheight fills pjmemo) mustbe
+%
+%   /pjp userdict /pjP get def
+%   count /dktn exch def
+%   3 -7 2 pjhash
+%   count dktn 1 add eq
+%   (pjhash takes i j s through /pjp and leaves one value) mustbe
+%   dup 0 ge exch 1 le and
+%   (that value is in 0..1) mustbe
+%%EndSelfTest
+%
+%%SelfTest: dkrand-is-private-and-matches-pjrand
+%   1 srand rand /dkta exch def
+%   1 srand 77 dksrand dkrand pop dkrand pop rand dkta eq
+%   (dksrand and dkrand leave the caller's stream untouched) mustbe
+%
+%   77 dksrand dkrand dkrand dkrand /dktc exch def /dktb exch def /dkta exch def
+%   77 pjsrand pjrand dkta eq pjrand dktb eq and pjrand dktc eq and
+%   (dkrand is pjrand's generator under its own state) mustbe
+%
+%   0 dksrand dkrand dup 0 gt exch 1 lt and
+%   (a zero seed is moved off the generator's fixed point) mustbe
+%%EndSelfTest
+%
+%%SelfTest: dkcatch-guards
+%   % touch >= 1 does nothing, even with no canvas set.
+%   { gsave [ [ [0 0 1] ] ] 1 1.4 dkcatch grestore } (touch 1 with no canvas) mustpass
+%
+%   { [ [ [0 0 1] ] ] 0.5 1.4 dkcatch } /dkcatch-needs-a-canvas
+%   (a catch before any pkcanvas) mustguard
+%
+%   << >> pkcanvas
+%   { [ [ [0 0 1] ] ] (x) 1.4 dkcatch } /dkcatch-touch-must-be-a-number
+%   (a string touch) mustguard
+%
+%   { [ [ [0 0 1] ] ] { 0.5 } 1.4 dkcatch } /dkcatch-touch-must-be-a-number
+%   (a procedure touch) mustguard
+%
+%   { [ [ [0 0 1] ] ] 0.5 0.9 dkcatch } /dkcatch-streak-must-be-1-to-4
+%   (/Streak below 1) mustguard
+%
+%   { [ [ [0 0 1] ] ] 0.5 4.5 dkcatch } /dkcatch-streak-must-be-1-to-4
+%   (/Streak above 4) mustguard
+%
+%   { [ [ [0 0 1] ] ] 0.5 /x dkcatch } /dkcatch-streak-must-be-a-number
+%   (a name streak) mustguard
+%
+%   { { } 0.5 1.4 dkcatch } /dkcatch-runs-must-be-an-array
+%   (a procedure for the runs) mustguard
+%
+%   { [ 5 ] 0.5 1.4 dkcatch } /dkcatch-run-must-be-an-array
+%   (a run that is a number) mustguard
+%
+%   { [ [ [0 0] ] ] 0.5 1.4 dkcatch } /dkcatch-stop-must-be-x-y-halfwidth
+%   (a stop with two slots) mustguard
+%
+%   { [ [ [0 (y) 1] ] ] 0.5 1.4 dkcatch } /dkcatch-stop-must-be-x-y-halfwidth
+%   (a stop with a string slot) mustguard
+%
+%   { [ [ [0 0 -1] ] ] 0.5 1.4 dkcatch } /dkcatch-halfwidth-must-not-be-negative
+%   (a negative half-width) mustguard
+%
+%   { [ [ [0 0 1] [1e12 0 1] ] ] 0.5 1.4 dkcatch } /dkcatch-area-exceeds-safety-limit
+%   (a segment past cvi's range) mustguard
+%
+%   { [ [ [0 0 1] [100000 0 1] ] ] 0.5 1.4 dkcatch } /dkcatch-area-exceeds-safety-limit
+%   (a segment longer than the key span) mustguard
+%
+%   % The budget is lowered for the block, so the band that crosses it is
+%   % cheap to build; the shipped 150000 cells is about 4 s of pscat.
+%   /dkbudget 500 def
+%   { [ [ [0 0 20] [100 0 20] ] ] 0.5 1.4 dkcatch } /dkcatch-area-exceeds-safety-limit
+%   (a band past the cell budget) mustguard
+%   { gsave [ [ [0 0 1] [10 0 1] ] ] 0.5 1.4 dkcatch grestore } (a band inside it) mustpass
+%
+%   { gsave [ ] 0.5 1.4 dkcatch grestore } (no runs: an empty clip) mustpass
+%   { gsave [ [ ] ] 0.5 1.4 dkcatch grestore } (an empty run) mustpass
+%   { gsave [ [ [10 10 2] ] ] 0.5 1.4 dkcatch grestore } (a one-stop run) mustpass
+%   { gsave [ [ [10 10 2] [10 10 2] ] ] 0.5 1.4 dkcatch grestore } (a zero-length run) mustpass
+%   { gsave [ [ [10 10 0] [60 30 0] ] ] 0.5 4 dkcatch grestore } (zero width at streak 4) mustpass
+%%EndSelfTest
+%
+%%SelfTest: dkcatch-takes-no-draws-and-keeps-the-ctm
+%   << /Seed 3 >> pkcanvas
+%   1 srand rand /dkta exch def
+%   1 srand gsave [ [ [0 0 2] [50 20 3] [80 0 2] ] ] 0.6 1.4 dkcatch grestore
+%   rand dkta eq
+%   (dkcatch leaves the caller's stream untouched) mustbe
+%
+%   gsave 7.5 0 translate 2 0.5 scale 15 rotate
+%   matrix currentmatrix /dktm exch def
+%   [ [ [0 0 2] [40 10 2] ] ] 0.5 1.8 dkcatch
+%   matrix currentmatrix /dktn exch def
+%   grestore
+%   true 0 1 5 { dup dktm exch get exch dktn exch get eq and } for
+%   (the CTM after dkcatch is the CTM before it) mustbe
+%
+%   % A rejected catch changes nothing: the guard runs before the matrix
+%   % or the clip is touched.
+%   /dkbudget 500 def
+%   gsave 3 3 scale
+%   matrix currentmatrix /dktm exch def
+%   { [ [ [0 0 20] [100 0 20] ] ] 0.5 1.4 dkcatch } /dkcatch-area-exceeds-safety-limit
+%   (a band past the budget, scaled) mustguard
+%   matrix currentmatrix /dktn exch def
+%   grestore
+%   true 0 1 5 { dup dktm exch get exch dktn exch get eq and } for
+%   (a rejected catch leaves the CTM alone) mustbe
+%%EndSelfTest
+
+% runs touch streak dkcatch -   (intersects the clip with the catch)
+% runs is an array of runs, each an array of stops [x y halfwidth ...] in
+% the current user space (slots past the third are ignored, so a stroke's
+% own stop records can be passed as they are). Consecutive stops of a run
+% are one centerline segment; a one-stop run is a dot. halfwidth is how far
+% the mark's ink reaches from its centerline at that stop, in user-space
+% points, and a segment reaches as far as its wider end.
+%
+% Every knuckle with d = height + touch - 1 > 0 within reach joins the clip,
+% at pjcatch's scale (0.6 + 0.5 min(1, d/0.3)) (1 + 0.25 max(0,
+% (touch - 0.8)/0.2)), its long axis 0.8 scale streak along its nearest
+% segment and its short axis 0.42 scale across it. At touch >= 1 it does
+% nothing; with no knuckle passing the clip becomes empty. Replaces the
+% current path and leaves the CTM as it found it. streak is 1..4.
+% @internal
+/dkcatch {
+    /dkcs exch def /dkct exch def /dkcr exch def
+    /dkcr load type /arraytype ne { dkcatch-runs-must-be-an-array } if
+    /dkcr load xcheck { dkcatch-runs-must-be-an-array } if
+    /dkct load dkisnum not { dkcatch-touch-must-be-a-number } if
+    /dkcs load dkisnum not { dkcatch-streak-must-be-a-number } if
+    dkcs 1 lt dkcs 4 gt or { dkcatch-streak-must-be-1-to-4 } if
+    dkct 1 lt {
+        userdict /pjCTM known not { dkcatch-needs-a-canvas } if
+        dkband
+        dkemit
+    } if
+} def
+
+%%SelfTest: dksurface-rejects-malformed-options
+%   { 5 dksurface } /dksurface-options-must-be-a-dict
+%   (a number for the options) mustguard
+%
+%   { << /Surface /marble >> dksurface } /dksurface-unknown-surface
+%   (/Surface /marble) mustguard
+%
+%   { << /Surface (slate) >> dksurface } /dksurface-surface-must-be-a-name
+%   (/Surface as a string) mustguard
+%
+%   { << /Ground [0.1 0.2] >> dksurface } /dksurface-ground-must-be-an-rgb-array
+%   (a two-entry /Ground) mustguard
+%
+%   { << /Ground [0.1 0.2 1.5] >> dksurface } /dksurface-ground-must-be-an-rgb-array
+%   (a /Ground channel above 1) mustguard
+%
+%   { << /Ground { 0.1 0.2 0.3 } >> dksurface } /dksurface-ground-must-be-an-rgb-array
+%   (a procedure /Ground) mustguard
+%
+%   { << /Ground [0.1 (g) 0.3] >> dksurface } /dksurface-ground-must-be-an-rgb-array
+%   (a string channel) mustguard
+%
+%   % pkcanvas's own guards still apply to the keys passed through.
+%   { << /Weave 0 >> dksurface } /pkcanvas-weave-must-be-positive
+%   (/Weave 0) mustguard
+%
+%   { << /Surface /slate /Weave 0.5 >> dksurface } (a surface with an override) mustpass
+%   { << >> dksurface } (an empty dict) mustpass
+%%EndSelfTest
+%
+%%SelfTest: dksurface-sets-the-surface-and-takes-no-draws
+%   1 srand rand /dkta exch def
+%   1 srand << /Surface /slate /Seed 4 >> dksurface rand dkta eq
+%   (dksurface leaves the caller's stream untouched) mustbe
+%
+%   userdict /pjW get 0.4 eq userdict /pjR get 0.55 eq and userdict /pjM get 4 eq and
+%   (/slate sets its weave, relief and mottle) mustbe
+%   userdict /dkSurface get /slate eq
+%   (and records its name) mustbe
+%   userdict /dkGround get aload pop 0.16 eq exch 0.14 eq and exch 0.13 eq and
+%   (and its ground) mustbe
+%
+%   << /Surface /drawing /Ground [0.5 0.6 0.7] /Weave 0.8 >> dksurface
+%   userdict /pjW get 0.8 eq userdict /pjR get 0.65 eq and
+%   (an override replaces one key and keeps the rest) mustbe
+%   userdict /dkGround get 1 get 0.6 eq
+%   (/Ground overrides the surface's colour) mustbe
+%
+%   % A rejected call leaves the previous surface whole.
+%   { << /Surface /slate /Relief 2 >> dksurface } /pkcanvas-relief-must-be-0-to-1
+%   (/Relief 2 on /slate) mustguard
+%   userdict /dkSurface get /drawing eq userdict /pjW get 0.8 eq and
+%   (a rejected dksurface keeps the old surface and ground) mustbe
+%
+%   << >> dksurface
+%   userdict /dkSurface get /drawing eq userdict /pjW get 0.6 eq and
+%   (the default surface is /drawing) mustbe
+%%EndSelfTest
+%
+% @kind: Procedure
+% @summary: Sets up the dry-media surface that drykit marks catch on: one of five named grounds (slate, green board, newsprint, drawing paper, construction paper), each a pkcanvas tooth plus the surface's own colour. Light pressure catches only the highest tooth, so a thin line breaks up, and two crossing strokes break up on the same tooth. Calls pkcanvas (so paintkit marks share the surface) and paints nothing; call it once, early, in the space the piece is drawn in. Takes no rand draws.
+% @example: << /Surface /slate /Seed 3 >> dksurface
+% @param: /Surface [name] Which ground: /slate, /greenboard, /newsprint, /drawing or /construction. It sets the defaults of every key below (default /drawing)
+% @param: /Seed [integer] Seed for this surface alone, passed to pkcanvas; leaves the caller's rand stream untouched (default 1)
+% @param: /Weave [points] Tooth spacing, one knuckle per Weave x Weave cell, passed to pkcanvas (default from /Surface: 0.4 for the boards, 0.35 newsprint, 0.6 drawing paper, 0.9 construction paper)
+% @param: /Mottle [points] Scale of the slow variation in how proud the tooth stands, passed to pkcanvas (default from /Surface: 3 to 8)
+% @param: /Relief [0..1] How much the slow mottle, rather than each knuckle's own height, decides which tooth stands proud, passed to pkcanvas (default from /Surface: 0.4 to 0.75)
+% @param: /Ground [rgb array] The surface's own colour, three numbers 0..1. dksurface does not paint it; drykit marks read it as what lies beneath (default from /Surface: near-black slate, dark green-grey board, warm grey newsprint, off-white drawing paper, a blue construction paper)
+/dksurface {
+    /dkso exch def
+    /dkso load type /dicttype ne { dksurface-options-must-be-a-dict } if
+    /dksn dkso /Surface /drawing dkget def
+    /dksn load type /nametype ne { dksurface-surface-must-be-a-name } if
+    dksurfaces /dksn load known not { dksurface-unknown-surface } if
+    /dksd dksurfaces /dksn load get def
+    /dksg dkso /Ground dksd /Ground get dkget def
+    /dksg load type /arraytype ne { dksurface-ground-must-be-an-rgb-array } if
+    /dksg load xcheck { dksurface-ground-must-be-an-rgb-array } if
+    /dksg load length 3 ne { dksurface-ground-must-be-an-rgb-array } if
+    /dksg load {
+        dup dkisnum not { pop dksurface-ground-must-be-an-rgb-array } if
+        dup 0 lt exch 1 gt or { dksurface-ground-must-be-an-rgb-array } if
+    } forall
+    % pkcanvas runs every one of its guards before it writes anything, so
+    % drykit's own state is written only after it succeeds.
+    <<
+        dkso /Seed known { /Seed dkso /Seed get } if
+        /Weave dkso /Weave dksd /Weave get dkget
+        /Mottle dkso /Mottle dksd /Mottle get dkget
+        /Relief dkso /Relief dksd /Relief get dkget
+    >> pkcanvas
+    userdict /dkSurface /dksn load put
+    userdict /dkGround [ /dksg load aload pop ] put
+} def

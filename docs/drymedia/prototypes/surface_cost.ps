@@ -29,6 +29,10 @@
 %           the streak seen in the reference board (C4, Y1)
 %   MODE 3  MODE 2 plus a dim, wider dust level under each glyph, drawn
 %           level-major (see dqglyph)
+%   MODE 4  MODE 2 through lib/drykit.ps's dkcatch (#234 slice D1): the
+%           same oriented knuckles, built over swept-band cells only
+%   MODE 5  MODE 3 through dkcatch; "cells" then counts the unique cells
+%           dkcatch actually built, not a bounding box
 %
 % Each glyph stroke is drawn in two pressure bands: its body at TOUCH, and a
 % landing dab (the first ~12% of the skeleton) at TOUCH + 0.2. Catches nest
@@ -50,6 +54,7 @@
 (lib/handscript.ps) run
 
 (docs/drymedia/prototypes/dqcatch.ps) run
+(lib/drykit.ps) run
 
 % ---------------------------------------------------------------- drawing
 /dqcells 0 def        % cells visited, for the cost report
@@ -80,8 +85,26 @@
     dqh 2 mul 0 dtransform userdict /pjCTM get idtransform dup mul exch dup mul add sqrt
     GRAIN 2.5 mul add dqlen mul GRAIN dup mul div dqband add
     userdict /dqband 3 -1 roll put
-    4 copy pjcells dqcells add userdict /dqcells 3 -1 roll put
-    MODE 1 eq { dqct pjcatch } { dqct dqca ELONG dqcatch } ifelse
+    MODE 4 lt { 4 copy pjcells dqcells add userdict /dqcells 3 -1 roll put } if
+    MODE 4 ge {
+        % the stroke's own centerline as one run of stops, the half-width
+        % the stroked ink reaches; the box above is unused here
+        pop pop pop pop
+        dqswept
+    } {
+        MODE 1 eq { dqct pjcatch } { dqct dqca ELONG dqcatch } ifelse
+    } ifelse
+} def
+
+% -   (dkcatch over the flattened current path; counts its unique cells)
+/dqswept {
+    /dqhw currentlinewidth 2 div def
+    gsave flattenpath
+        [ { dqhw 3 array astore } { dqhw 3 array astore } { } { } pathforall ]
+    grestore
+    /dqrun exch def
+    [ dqrun ] dqct ELONG dkcatch
+    userdict /dqcells dqcells dkn add put
 } def
 
 % [x y x y ...] -> angle of chord, degrees (glyph space == user space here)
@@ -151,7 +174,7 @@ dqwork begin
         /J JJ def
         /dqsks [ 1 1 dqg length 1 sub { dqg exch get dqjitter } for ] def
         /J 0 def
-        MODE 3 eq {
+        MODE 3 eq MODE 5 eq or {
             gsave DIM aload pop setrgbcolor
                 dqsks { TOUCH 0.12 add 1.25 dqstroke } forall
             grestore

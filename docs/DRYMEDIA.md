@@ -2,7 +2,8 @@
 
 This is the design for epic #232. The maintainer approved it on 2026-10-13
 (PR #265), accepting every recommended answer to Q1–Q9 in section 10.
-Nothing here is implemented yet.
+Slice D1 (#234) is implemented in `lib/drykit.ps`, and its measurements
+are in 6.1; D2 and the rest are not built yet.
 
 Read these first:
 
@@ -390,6 +391,39 @@ board dressing, and ghost text is roughly a second board of glyphs at low
 strength. So part of D1's acceptance is to build the swept-band catch,
 measure it on this board, and report the result against 6.2 before D2
 starts.
+
+**Measured in D1 (#234).** `dkcatch` is built, and `surface_cost.ps`
+gained MODE 4 (one level through `dkcatch`) and MODE 5 (MODE 3's two
+levels and landing dabs through `dkcatch`). The same case as the last row
+above (`/TOUCH 0.82 /PEN 36 /GRAIN 0.4`), CPU `user` time, two runs each,
+at 144 dpi (`--dpi 144`, gs `-r144`), load average about 3.5:
+
+| Case | Catches | Cells | pscat | gs |
+|---|---|---|---|---|
+| oriented, bounding box (MODE 3, re-measured) | 3928 | 1.59M | 28.3s | 16.1s |
+| `dkcatch`, two levels (MODE 5): the core board | 3928 | 1.44M | 14.4–14.5s | 7.2s |
+| `dkcatch`, one level (MODE 4): a ghost-text proxy | 1984 | 0.66M | 7.1–7.2s | 3.5s |
+| `portrait_cost.ps`: 3000 hatch strokes × 2 levels + 6 smudges | 6006 | 2.37M | 34.9–36.9s | 12.7–12.8s |
+
+- **The 2.9× was not there in cells.** The swept band built 1.44M unique
+  cells, 9% fewer than the bounding boxes and 2.6× the 553k estimate. The
+  estimate's band was the stroke width plus 2.5 grain. A stretched
+  knuckle reaches (0.88 grow Streak + 0.22) W from its cell centre, which
+  is 0.74pt at `/Streak 1.8`, against 0.5pt. The estimate also left out
+  the round end of each short glyph stroke, worth πR² apiece.
+- **The time halved anyway.** `dkcatch` costs about 10 µs per cell in
+  pscat, against the prototype's 18: one emission pass over a first-seen
+  list, with each cell's height read once. gs is about 5 µs.
+- **Against 6.2:** the core board plus a one-level ghost-text pass is
+  21.6s in pscat and 10.7s in gs, leaving about 8s of the 30s for board
+  dressing. The portrait proxy is 35–37s in pscat and 13s in gs, under 60s.
+  The proxy uses 40pt strokes at 1.2pt width; it is not #242's portrait,
+  and its 2.37M cells are about 1.6× the core board.
+- **The anti-aliasing margin is not paid when rendering.** A pixel-exact
+  reach test needs 1.5 device pixels more reach (0.75pt each side at 144
+  dpi), because a knuckle that ends inside an edge pixel still shades it.
+  That margin cost the board 60% more cells (2.31M, 24s in pscat), so it
+  is `dkslack`, 0 by default, and only the reach test sets it.
 
 Two things scale beyond that:
 
