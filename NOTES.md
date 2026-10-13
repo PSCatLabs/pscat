@@ -38,7 +38,7 @@ rejection stays `scatter`'s own `scatter-needs-a-region`.
   placement loop, since it has validated the region once already. With the
   guards inside `scin` itself, `gallery/firefly_census.ps` ran about 7%
   slower; with the split it is unchanged.
-- Verified: all 72 gallery, example and selftest-driver files that load
+- Verified: all 72 gallery, example and selftest-driver files (88 PNGs) that load
   artkit or one of its dependants render PNGs byte-identical before and
   after. Their SVGs are not compared, because `--svg` output is not
   deterministic run to run (clip path ids), independent of this change.
