@@ -124,8 +124,8 @@ date +%s > "$LOCKDIR/heartbeat.tmp" && mv "$LOCKDIR/heartbeat.tmp" "$LOCKDIR/hea
    ```sh
    rm -f /tmp/gate-<N>.log && cd "${WORKTREE_DIR:?}" && { cargo build && cargo test && cargo clippy --all-targets && cargo fmt --all -- --check; } > /tmp/gate-<N>.log 2>&1; echo "GATE_EXIT=$?" >> /tmp/gate-<N>.log
    ```
-   Wait for the completion notification (never `sleep` or `ScheduleWakeup`). Then
-   `tail -40 /tmp/gate-<N>.log` must end with `GATE_EXIT=0`. If not, fix and re-run.
+   Wait for the completion notification or a Monitor (`ToolSearch select:Monitor`); never
+   `sleep` or `ScheduleWakeup`. `tail -40 /tmp/gate-<N>.log` must end with `GATE_EXIT=0`; else fix, re-run.
 7. Heartbeat.
 
 ## 6. Review the implementation
@@ -202,8 +202,8 @@ Read `.claude/skills/work-issue/references/codex-review.md` now (full policy). T
     deviations / open points (see codex-review.md). Then:
     `gh issue comment <N> --body-file /tmp/issue-<N>-summary.md`
 12. `gh pr view <PR#> --json mergeable,mergeStateStatus,statusCheckRollup`. If `BEHIND`:
-    `gh pr update-branch <PR#>`. If any check is pending, heartbeat, then run this Bash call with
-    `run_in_background: true` (CI takes 11-17 min; ~15 is normal):
+    `gh pr update-branch <PR#>`. If any check is pending or you just ran `update-branch`, heartbeat,
+    then run this Bash call with `run_in_background: true` (CI takes 11-17 min; ~15 is normal):
     ```sh
     gh pr checks <PR#> --watch --fail-fast > /tmp/ci-<N>.log 2>&1; echo "exit=$?" >> /tmp/ci-<N>.log
     ```

@@ -260,10 +260,11 @@ task, or the user cut the run short), the PR is open but not merged. Do
    above), `gh pr view` to confirm `test` is `SUCCESS`,
    `gh pr merge <PR#> --squash --delete-branch`, and step 9.
 3. Resuming: the same session just continues from step 8.12 with no
-   re-claim. A fresh `/work-issue <N>` after the lock is stale claims it,
-   reuses the worktree (step 3), and must **skip straight to step 8.12**
-   rather than re-planning at step 4; a re-run inside 45 minutes reports
-   `live` and stops.
+   re-claim. Step 3 has no automated route to 8.12; a fresh
+   `/work-issue <N>` after the lock is stale would reuse the worktree and
+   land at step 4, so the person resuming it should point the agent at the
+   report's remaining-steps list instead. A re-run inside 45 minutes
+   reports `live` and stops.
 
 ### Step 4 is a hard gate
 
