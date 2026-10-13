@@ -593,8 +593,13 @@ renders eight examples in both and compares block-downsampled output).
    `docs/drymedia/REFERENCES.md` before starting #234–#242.** The design
    (#233) is approved, with every recommended answer to its Q1–Q9.
    drykit reads paintkit's `@internal` `pj-` surface (`pjheight`,
-   `pjrange`, `pjCTM`) without editing paintkit.ps. A change to those names
-   breaks drykit, so treat them as a contract.
+   `pjhash`, `pjCTM`, `pjP`, `pjW`, `pjM`, `pjR`, `pjmemo`) without editing
+   paintkit.ps. A change to those names breaks drykit: the
+   `drykit-paintkit-contract` self-test in `lib/drykit.ps` pins them (#270
+   moves them to `lib/toothkit.ps`). Slice D1 of #234 has landed
+   `lib/drykit.ps` (`dksurface`, the internal `dkcatch`, `dkrand`); D2 adds
+   `dkstroke` and `dkbatch`. D1's measured cost is in
+   `notes/234-drykit-core.md` and DRYMEDIA.md 6.1.
 5. Watercolor (issue #47, gated on the architecture spike in issue
    #46): read `docs/WATERCOLOR.md` before starting — it recommends a
    small `alpha: f32` field on `GraphicsState` (already prototyped as
@@ -810,7 +815,12 @@ renders eight examples in both and compares block-downsampled output).
   at a small `/Weave`) renders solid in gs while pscat shows it. Guard
   `/.setfilladjust2 where { pop 0 0 .setfilladjust2 } if` inside the
   mark's `gsave` (`docs/DRYMEDIA.md` 2.4). `-dGraphicsAlphaBits` doesn't
-  help.
+  help. `dkcatch` does this itself, just before its `clip`.
+- **Never build a path in dict-iteration order.** A pscat dict keeps
+  non-name keys (integers, reals) in a randomly seeded hash map, so `forall`
+  over one visits them in a different order every run, and a clip path built that
+  way makes `--svg` output differ run to run (#258's symptom). `dkcatch`
+  records cells in a first-seen list and emits from it.
 - tiny-skia `Transform::from_row(sx, ky, kx, sy, tx, ty)` matches the
   PS matrix order `[a b c d tx ty]` — `ops/matrix.rs` documents it;
   don't rediscover this the hard way.
