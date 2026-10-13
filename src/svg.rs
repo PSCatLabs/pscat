@@ -27,8 +27,15 @@ pub struct SvgRecorder {
     height: u32,
     body: String,
     defs: String,
-    /// ClipNode identity → def id, per page (defs reset with the page).
-    clip_ids: HashMap<usize, usize>,
+    /// ClipNode identity (its address) → def id, per page (defs reset
+    /// with the page). The `Rc` is held alongside the id so the node
+    /// stays alive and its address can't be recycled for a *different*
+    /// clip while the entry exists: keyed by a bare address, a freed
+    /// node's id was handed to whichever later clip landed on the same
+    /// address, which clipped the wrong shape and made the output vary
+    /// from run to run (issues #258, #261). `PdfRecorder::open_clip` does
+    /// the same for the same reason.
+    clip_ids: HashMap<usize, (Rc<ClipNode>, usize)>,
     next_clip: usize,
     /// Next `<linearGradient>`/`<radialGradient>` id (issue #20's `shfill`).
     next_grad: usize,
@@ -110,11 +117,11 @@ impl SvgRecorder {
         while let Some(n) = node {
             let key = Rc::as_ptr(&n) as usize;
             let id = match self.clip_ids.get(&key) {
-                Some(&id) => id,
+                Some(&(_, id)) => id,
                 None => {
                     let id = self.next_clip;
                     self.next_clip += 1;
-                    self.clip_ids.insert(key, id);
+                    self.clip_ids.insert(key, (n.clone(), id));
                     let _ = write!(
                         self.defs,
                         "<clipPath id=\"c{id}\" clipPathUnits=\"userSpaceOnUse\">\
