@@ -32,6 +32,10 @@ look at.
     filesystem — and copied into `build_site.sh`'s own source loop, or
     the playground fetches a 404.
 
+  - A library specimen (a `lib/` file's own showcase, e.g. a brush or paper kit): a committed
+    PNG under `docs/` (the specimen render) plus an optional site card in `site/gallery.html`,
+    backed by a PNG in `_site/assets/renders/` per the rules above.
+
   Copy an existing similar entry's pattern rather than guessing which
   of these apply. An `examples/*.ps` file alone is a regression
   fixture, not a demo; it's fine as the *only* artifact when the

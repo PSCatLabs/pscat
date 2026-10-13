@@ -10,6 +10,8 @@ in #194 (`--no-track`, the backgrounded quality gate, `branch -D` after a
 want to know *why* a step does something, or before editing the skill.
 
 Step numbers refer to `../SKILL.md`, which keeps the original numbering.
+The heartbeat one-liners quoted below are the pre-#276 form; they are now
+`scripts/heartbeat.sh <N>`, and the claim script is `scripts/claim.sh <N>`.
 "Pitfalls" means `pitfalls.md`; "Claim the issue" means `claim-protocol.md`.
 
 This is the repo's SDLC automation: take one open GitHub issue from the

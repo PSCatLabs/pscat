@@ -15,10 +15,8 @@ root) before running the step's commands.
   that needs them with `WORKTREE_DIR=<absolute path>; BRANCH=<branch>`.
 - After step 3, work only inside `$WORKTREE_DIR`. Never edit the main checkout. Never `git stash`
   there (`refs/stash` is shared by all worktrees): use `git show origin/main:path` or `cp`.
-- **Heartbeat** — run this when a step says "heartbeat", and before any long command:
-  ```sh
-  H="$(git rev-parse --path-format=absolute --git-common-dir)/work-issue-lock-<N>/heartbeat"; date +%s > "$H.tmp" && mv "$H.tmp" "$H"
-  ```
+- **Heartbeat** (from step 3 on) — run this when a step says "heartbeat", and before any long command:
+  `bash "$WORKTREE_DIR/.claude/skills/work-issue/scripts/heartbeat.sh" <N>`
   If it fails with "No such file or directory": stop, never `mkdir` the lock dir.
   Re-run the claim (step 1); continue only if it says `claimed`.
 - **Scratch files** go in `<SCRATCH>`: the scratchpad directory your system prompt names, else
@@ -27,7 +25,8 @@ root) before running the step's commands.
   with the session: decide a resume from GitHub state.
 - macOS has no `timeout`, and foreground `sleep` may be blocked: pitfalls.md "Waiting and timeouts".
 - Never end a run with CI pending unless step 8.12's "pending CI" rule applies.
-- Read `.claude/skills/work-issue/references/pitfalls.md` once now. (`references/rationale.md`
+- Read the top of `.claude/skills/work-issue/references/pitfalls.md` now (its contents table gives
+  line ranges: read sections with Read `offset`/`limit`; one `cat` truncates). (`references/rationale.md`
   explains why each step is shaped as it is; read it before editing this skill.)
 
 ## 1. Pick and claim the issue
@@ -60,8 +59,12 @@ gh issue list --state open --search "-label:in-progress" \
 ```
 Claim the first candidate not in the open-PR list. None → report "backlog clear", stop.
 
-**Claim:** Read `.claude/skills/work-issue/references/claim-protocol.md` now. Run its
-"Claim the issue" script exactly as written, in one Bash call, replacing only `<N>`. Then:
+**Claim:** run this ONE command with `<N>` filled in. Never paste, retype or abbreviate the
+lock commands: the script is the race-tested protocol, and a partial copy has failed before.
+```sh
+bash "$(git rev-parse --show-toplevel)/.claude/skills/work-issue/scripts/claim.sh" <N>
+```
+(`references/claim-protocol.md` is the rationale; read it only to edit the script.) Then:
 - `RESULT=claimed*` → you own `<N>`. Continue.
 - `RESULT=live*` or `RESULT=lost*` on a resume candidate → claim the next one (then the fresh picker).
   On an explicit `<N>` or a fresh pick → stop, report `<N>` is being worked on, try nothing else.
@@ -80,8 +83,7 @@ gh issue edit <N> --add-label in-progress
 path ending `-issue-<N>`): set `WORKTREE_DIR` to that absolute path and run:
 ```sh
 BRANCH="$(git -C "$WORKTREE_DIR" branch --show-current)"
-LOCKDIR="$(git rev-parse --path-format=absolute --git-common-dir)/work-issue-lock-<N>"
-date +%s > "$LOCKDIR/heartbeat.tmp" && mv "$LOCKDIR/heartbeat.tmp" "$LOCKDIR/heartbeat"
+bash "$WORKTREE_DIR/.claude/skills/work-issue/scripts/heartbeat.sh" <N>
 ```
 Do not recompute the branch name from the title. Skip to step 4 (resume: step 8).
 
@@ -95,8 +97,7 @@ BRANCH="${PREFIX}/<N>-${SLUG}"
 WORKTREE_DIR="../${REPO_DIR}-issue-<N>"
 git worktree add --no-track -b "$BRANCH" "$WORKTREE_DIR" origin/main
 (cd "$WORKTREE_DIR" && pwd)   # note this absolute path: it is WORKTREE_DIR from now on
-LOCKDIR="$(git rev-parse --path-format=absolute --git-common-dir)/work-issue-lock-<N>"
-date +%s > "$LOCKDIR/heartbeat.tmp" && mv "$LOCKDIR/heartbeat.tmp" "$LOCKDIR/heartbeat"
+bash "$WORKTREE_DIR/.claude/skills/work-issue/scripts/heartbeat.sh" <N>
 ```
 Then re-read `$WORKTREE_DIR/.claude/skills/work-issue/SKILL.md` (it may have changed since invocation) and follow that copy.
 
@@ -123,6 +124,9 @@ Then re-read `$WORKTREE_DIR/.claude/skills/work-issue/SKILL.md` (it may have cha
 5. Quality gate. Before the first push: `git -C "$WORKTREE_DIR" fetch origin main && git -C
    "$WORKTREE_DIR" rebase origin/main`, so breakage already on `main` cannot fail this issue
    (a no-op when up to date; conflicts, or a PR that exists: pitfalls.md "Rebase and merge rules").
+   The worktree was cut from an older `origin/main`, so after a rebase that moved `HEAD`, re-read
+   `$WORKTREE_DIR/.claude/skills/work-issue/SKILL.md` and follow that copy. A gate that already
+   passed still stands when the rebase brought in only docs, skill or CI files (same pitfalls entry).
    Do pitfalls.md "Step 5 checklist" (cheap checks first). Heartbeat, then run with
    `run_in_background: true` (over 120s; run it in the foreground if the last gate took under ~60 s):
    ```sh
@@ -156,7 +160,9 @@ Closes #<N>
 EOF
 )"
 ```
-Always push with that explicit refspec, never a bare `git push`. Then:
+The body must contain `Closes #<N>` on its own line even when you write it without this template.
+If the dispatcher said up front that this run will not merge, write the body for the maintainer from
+the start (pitfalls.md "Stop without merging"). Always push with that explicit refspec, never a bare `git push`. Then:
 ```sh
 gh issue edit <N> --remove-label in-progress --add-label in-review
 gh issue comment <N> --body "Opened <PR URL>."
@@ -174,8 +180,7 @@ Read `.claude/skills/work-issue/references/codex-review.md` now (full policy). T
    call with `WORKTREE_DIR=...; BRANCH=...` and item 3's `CODEX_SCRIPT=$(find ...)` line, then:
    ```sh
    rm -f <SCRATCH>/codex-review-<N>.json && \
-     H="$(git rev-parse --path-format=absolute --git-common-dir)/work-issue-lock-<N>/heartbeat" && \
-     date +%s > "$H.tmp" && mv "$H.tmp" "$H" && \
+     bash "$WORKTREE_DIR/.claude/skills/work-issue/scripts/heartbeat.sh" <N> && \
      cd "$WORKTREE_DIR" && git fetch origin main && \
      test "$(git rev-parse --abbrev-ref HEAD)" = "$BRANCH" && \
      node "$CODEX_SCRIPT" review --wait --json --model gpt-6.1-sol \
@@ -216,35 +221,15 @@ Read `.claude/skills/work-issue/references/codex-review.md` now (full policy). T
 
 ## 9. Post-merge cleanup
 
-One Bash call; the first line aborts it unless the PR is `MERGED`. Never reorder it (worktree before branch).
-```sh
-test "$(gh pr view <PR#> --json state --jq .state)" = MERGED || { echo "PR not MERGED: stop, no cleanup"; exit 1; }
-gh issue view <N> --json state   # confirm Closes #<N> auto-closed it
-gh issue edit <N> --remove-label in-review --remove-label in-progress
-gh issue view <N> --json labels --jq '[.labels[].name]'   # must list neither in-review nor in-progress
-gh issue view <N> --json comments --jq '[.comments[].body | select(startswith("## Summary of work"))] | length'   # both counts >= 1
-gh issue view <N> --json comments --jq '[.comments[].body | select(test("^## (Codex|Fallback) review, round"))] | length'
-git worktree remove "$WORKTREE_DIR" 2>&1 || true
-git -C "$(git rev-parse --show-toplevel)" branch -D "$BRANCH" 2>&1 || true
-git -C "$(git rev-parse --show-toplevel)" fetch origin --prune
-git -C "$(git rev-parse --show-toplevel)" ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1 && git -C "$(git rev-parse --show-toplevel)" push origin --delete "$BRANCH"   # only if still there
-rm -rf "$(git rev-parse --path-format=absolute --git-common-dir)/work-issue-lock-<N>"
-```
-Then confirm main CI for your merge commit (pitfalls.md "Main CI after merge"). Red: stop, report it first, start no other work.
+**Read `.claude/skills/work-issue/references/finish.md` now** and run its "Step 9" block as one Bash
+call. It runs from the main checkout (not the worktree) and starts by re-declaring `WORKTREE_DIR`
+and `BRANCH`. It aborts unless the PR is `MERGED`; if the issue is still `OPEN` it closes it with a
+comment linking the PR. Then confirm main CI for your merge commit (pitfalls.md "Main CI after
+merge"). Red: stop, report it first, start no other work.
 
 ## 10. Final report
 
-End the run by printing exactly this, filled in (write `none` where empty):
-```text
-## work-issue report: #<N> <title>
-- PR: <PR URL>
-- Merge: merged as <merge commit sha> | awaiting human merge (<why>) | pending CI (<remaining steps>) | blocked (<why>)
-- Plan review (step 4): <done | skipped (small)>
-- Checks: quality gate <pass/fail>; PR CI <pass/fail>; main CI after merge <pass/fail/n.a.>
-- Wall time: <start time from step 1> -> <now> (<minutes> min)
-- Review rounds: <count>, reviewer <Codex | fallback (why)>, findings fixed <n> / declined <n>
-- Steps skipped or failed: <step: reason>
-- Issues filed: <URLs from gh issue create>
-- Cleanup: worktree <removed/kept at path>, branch <deleted/kept>, lock <released>, labels <cleared>
-- Friction: <anything in this skill that was unclear, wrong or slow>
-```
+**Read `.claude/skills/work-issue/references/finish.md` now** if you have not (runs that stop at
+8.10, a no-merge dispatch or pending CI skip step 9). End the run by printing its "Step 10" report
+template, filled in, `none` where empty. Its lines: PR, Merge, Plan review, Checks, Wall time, Review rounds, Steps skipped or failed,
+Issues filed, Cleanup, Friction.
