@@ -530,7 +530,8 @@ what makes the underlayer keep reading through however many strokes go
 over it.
 
 The four controls that all sound like "less paint" are separated onto
-genuinely different axes: `/Load` scales the deposit's *width* (a
+genuinely different axes: `/Cover` (called `/Load` before issue #141,
+still accepted as a deprecated alias) scales the deposit's *width* (a
 nearly empty blade lays a narrow band), `/Coverage` is the contact
 chain's steady state — holes *within* that width — `/Viscosity` is its
 *rate*, trading many short chattering runs for few long chunky ones,
@@ -597,9 +598,9 @@ Each striation's end tapers away when it runs out but keeps the brush's
 square end when the stroke simply stops.
 
 The controls are called `/Charge` and `/Depletion` rather than `/Load`
-on purpose: this file already uses `/Load` for a contact rate in
-`pkdry`/`pkfan` and for deposit width in `pktrowel`, and a third meaning
-would be actively misleading. `/Angle` follows `pktrowel`'s reading —
+on purpose: `/Load` in this file is a contact rate per `/Width` of
+travel (`pkdry`/`pkfan`/`pkoil`), and a paint reservoir draining along
+the stroke is a different quantity. `/Angle` follows `pktrowel`'s reading —
 brush rotation relative to travel, constant along a curve — not
 `pknib`'s fixed world angle.
 
@@ -635,7 +636,8 @@ tip makes contact by pressure.
 `pkdab` (issue #117) is the foliage brush: clustered, irregular dabs for
 bushes, leafy masses and vegetation texture. It is a pounce, not a drag,
 so the current path is a *spine* — every stop seeds a cluster of blobby
-dabs within `/Spread` — and a single-point subpath is a standalone clump.
+dabs within `/Scatter` points (formerly `/Spread`, still accepted as a
+deprecated alias) — and a single-point subpath is a standalone clump.
 Density is per `/Size` of travel with a per-subpath accumulator (the
 `pkspray` design), so `/Pitch` doesn't change coverage. Each dab is
 generated once and painted in up to three layers from the same geometry:
@@ -667,7 +669,9 @@ beneath:
 Being a wrapper rather than a `/Wet` key bolted onto each preset means
 one implementation serves every stroke family in the file, and anything
 added later. `/Soft` is the only knob that matters — it supplies `/Layers`
-and `/Spread` — and at `/Soft 0` it marks the page exactly as calling the
+and `/Offset`, how far in points the outermost pass is displaced (named
+`/Spread` before issue #141, still accepted as a deprecated alias) — and
+at `/Soft 0` it marks the page exactly as calling the
 procedure directly would, random stream included. Every pass runs inside
 its own `gsave` and its own `stopped`, both of which the multi-pass case
 needs, so a path or graphics state the procedure leaves *behind* does not
@@ -705,7 +709,7 @@ it along a line.
 
 ```postscript
 { gsave 0 2 WL mul translate 1 -1 scale  reflected-range  grestore }
-<< /Direction 270 /OneSided true /Spread 22 /Under [0.44 0.54 0.66] >> pkwet
+<< /Direction 270 /OneSided true /Offset 22 /Under [0.44 0.54 0.66] >> pkwet
 ```
 
 The wrapped procedure has to paint in the color it inherits (grading
@@ -714,7 +718,7 @@ element, and `/Direction` is measured in the user space pkwet is called
 in — keep a reflection's mirror inside the procedure. A directional
 call defaults to enough layers to keep the passes within 2pt of each
 other (up to 16), because identical copies further apart read as
-stepped echoes, so with `/Layers` left to default, `/Spread` also sets
+stepped echoes, so with `/Layers` left to default, `/Offset` also sets
 the depth and re-rolls what follows; pin `/Layers` while tuning. Any
 nest with a directional call in it may multiply its innermost
 procedure at most 64 times — enough to pull a reflection down and then

@@ -707,6 +707,13 @@ renders eight examples in both and compares block-downsampled output).
   still reads a clump). Scratch prefix `mh-` for the helpers and one
   letter per motion (`mx` `mc` `ms` `mt` `mp` `mz`); none calls a preset,
   so none is clobbered by `pkribbon`.
+- **A paintkit key means one thing in every preset** (issue #141).
+  `/Spread` is always a 0..1 fraction of `/Width`; `/Load` is always a
+  contact rate per `/Width` of travel. A new preset that needs a
+  different quantity gets a different name (`/Offset`, `/Cover`,
+  `/Scatter`, `/Lean`, `/Charge` are the precedents). Every `@param`
+  description starts with a bracketed unit, and
+  `tests/capabilities.rs` fails a new parameter that has none.
 - **Abutting filled polygons leave an anti-aliased hairline seam.**
   Two shapes sharing an exact edge do not composite to a solid mass —
   `pktrowel`'s blade lanes had to be given an 18% overlap or a

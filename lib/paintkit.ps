@@ -103,6 +103,19 @@
 % fill's overlap tolerance absorbs the unmitered per-vertex offset
 % cleanly for the shapes this library actually renders.)
 %
+% Shared key names (issue #141). A key means one thing across every
+% preset in this file: /Spread is always a 0..1 fraction of /Width that
+% bristles or ridges occupy, and /Load is always a 0..1 resume-contact
+% rate per /Width of travel. Four keys that used to break this rule were
+% renamed, and each old name still works as a deprecated alias, with the
+% new name winning when both are given: pkwet /Spread (points) -> /Offset,
+% pktrowel /Load (deposit width) -> /Cover, pkdab /Spread (points) ->
+% /Scatter, pkcrisscross /Spread (degrees) -> /Lean. Every `@param` tag
+% starts with its unit in brackets -- [points], [degrees], [count],
+% [0..1], [fraction of /Width], [per /Width], ... -- so `pscat
+% --capabilities` shows a unit for each parameter;
+% tests/capabilities.rs checks the vocabulary.
+%
 % Scratch prefixes: pk- (pkribbon/dispatch), pkbr- (pkbuildrun),
 % pko- (pkopenrun), pkl- (pkloop), pke- (pkedge), pkh- (pkhalfwat),
 % pktf- (pktaperf), pkd- (pkdot), pkg- (pkgetdef), pksc- (pkscanclosed).
@@ -532,14 +545,14 @@
 % @kind: Procedure
 % @summary: Treats the current path as a centerline and fills a variable-width ribbon along it, built on walkpath. Color comes from whatever the caller already set.
 % @example: newpath ... << /Width 10 /Pressure { pktaper } >> pkribbon
-% @param: /Width Base width; must be > 0 (default 6)
-% @param: /Pitch walkpath sampling pitch; must be > 0 (default Width*0.5, capped at 6)
-% @param: /Pressure {t -> mult} proc over normalized path progress; must be a procedure (pkflat/pktaper/pkbell presets ship) (default { pkflat })
-% @param: /StartTaper 0..1 fraction of progress to ramp width in from the start, independent of Pressure (default 0)
-% @param: /EndTaper 0..1 fraction of progress to ramp width out at the end, independent of Pressure (default 0)
-% @param: /StartCap /round, /flat, or /pointed; any other value is rejected (default /round)
-% @param: /EndCap /round, /flat, or /pointed; any other value is rejected (default /round)
-% @param: /Jitter Seeded edge displacement amount, deterministic under the caller's own N srand (default 0)
+% @param: /Width [points] Base width; must be > 0 (default 6)
+% @param: /Pitch [points] walkpath sampling pitch; must be > 0 (default Width*0.5, capped at 6)
+% @param: /Pressure [proc] {t -> mult} proc over normalized path progress; must be a procedure (pkflat/pktaper/pkbell presets ship) (default { pkflat })
+% @param: /StartTaper [fraction of path progress] 0..1 fraction of progress to ramp width in from the start, independent of Pressure (default 0)
+% @param: /EndTaper [fraction of path progress] 0..1 fraction of progress to ramp width out at the end, independent of Pressure (default 0)
+% @param: /StartCap [name] /round, /flat, or /pointed; any other value is rejected (default /round)
+% @param: /EndCap [name] /round, /flat, or /pointed; any other value is rejected (default /round)
+% @param: /Jitter [points] Seeded edge displacement amount, deterministic under the caller's own N srand (default 0)
 /pkribbon {
     /pkopts exch def
     % Value options (/Width here, and /Pitch/StartTaper/EndTaper/Jitter/
@@ -824,16 +837,16 @@
 % @kind: Procedure
 % @summary: An angled-nib calligraphy preset built on pkribbon: mark width is driven by the angle between local path direction and a fixed nib angle, widest perpendicular to it and narrowing toward MinWidth parallel to it. The current path must be exactly one open subpath -- call once per stroke.
 % @example: newpath ... << /Width 16 /Angle 30 >> pknib
-% @param: /Angle Nib angle in degrees; perpendicular to it is widest, parallel narrows toward MinWidth (default 45)
-% @param: /MinWidth 0..1 floor on the nib-angle response itself, before Pressure and the tapers multiply through (default 0.08)
-% @param: /Width Base width, forwarded to pkribbon (default 6)
-% @param: /Pitch walkpath sampling pitch, forwarded to pkribbon (default Width*0.5, capped at 6)
-% @param: /Pressure {t -> mult} proc, multiplies with the nib-angle response rather than replacing it (default { pkflat })
-% @param: /StartTaper 0..1 fraction of progress to ramp width in from the start, forwarded to pkribbon (default 0)
-% @param: /EndTaper 0..1 fraction of progress to ramp width out at the end, forwarded to pkribbon (default 0)
-% @param: /StartCap /round, /flat, or /pointed, forwarded to pkribbon (default /round)
-% @param: /EndCap /round, /flat, or /pointed, forwarded to pkribbon (default /round)
-% @param: /Jitter Seeded edge displacement amount, forwarded to pkribbon (default 0)
+% @param: /Angle [degrees] Nib angle in degrees; perpendicular to it is widest, parallel narrows toward MinWidth (default 45)
+% @param: /MinWidth [fraction of /Width] 0..1 floor on the nib-angle response itself, before Pressure and the tapers multiply through (default 0.08)
+% @param: /Width [points] Base width, forwarded to pkribbon (default 6)
+% @param: /Pitch [points] walkpath sampling pitch, forwarded to pkribbon (default Width*0.5, capped at 6)
+% @param: /Pressure [proc] {t -> mult} proc, multiplies with the nib-angle response rather than replacing it (default { pkflat })
+% @param: /StartTaper [fraction of path progress] 0..1 fraction of progress to ramp width in from the start, forwarded to pkribbon (default 0)
+% @param: /EndTaper [fraction of path progress] 0..1 fraction of progress to ramp width out at the end, forwarded to pkribbon (default 0)
+% @param: /StartCap [name] /round, /flat, or /pointed, forwarded to pkribbon (default /round)
+% @param: /EndCap [name] /round, /flat, or /pointed, forwarded to pkribbon (default /round)
+% @param: /Jitter [points] Seeded edge displacement amount, forwarded to pkribbon (default 0)
 /pknib {
     /pnopts exch def
 
@@ -1028,16 +1041,16 @@
 % @kind: Procedure
 % @summary: A dry-bristle brush built on pkribbon: a bounded family of thin offset bristles scattered across the centerline, each broken into ink/no-ink runs by a seeded two-state Markov chain, ranging from a mostly loaded stroke to visibly broken dry-brush texture with no raster work.
 % @example: newpath ... << /Width 16 /Load 0.9 /Dropout 0.1 >> pkdry
-% @param: /Width Envelope width the bristles scatter across; must be > 0 (default 6)
-% @param: /Bristles Bristle count; must be a whole number, hard safety cap 1..100 (default 18)
-% @param: /Spread 0..1 fraction of Width the bristles scatter across, centered on the centerline (default 0.85)
-% @param: /BristleWidth Base width of each individual bristle's own mark; must be > 0 (default Width*0.12)
-% @param: /WidthJitter 0..1 fraction of BristleWidth each bristle's own width randomly varies by (default 0.4)
-% @param: /Load 0..1 resume-contact rate per one Width of travel along the path (default 0.6)
-% @param: /Dropout 0..1 lose-contact rate per one Width of travel along the path (default 0.4)
-% @param: /Jitter Edge roughness, forwarded verbatim as each dash's own pkribbon Jitter; shares the Markov chain's random stream (default 0)
-% @param: /Pitch walkpath sampling pitch for the shared centerline pass; must be > 0 (default BristleWidth*0.6, capped at 6)
-% @param: /ColorJitter 0..1 magnitude of small per-bristle color variation around the color active when pkdry is called (default 0.06)
+% @param: /Width [points] Envelope width the bristles scatter across; must be > 0 (default 6)
+% @param: /Bristles [count] Bristle count; must be a whole number, hard safety cap 1..100 (default 18)
+% @param: /Spread [fraction of /Width] 0..1 fraction of Width the bristles scatter across, centered on the centerline (default 0.85)
+% @param: /BristleWidth [points] Base width of each individual bristle's own mark; must be > 0 (default Width*0.12)
+% @param: /WidthJitter [fraction of /BristleWidth] 0..1 fraction of BristleWidth each bristle's own width randomly varies by (default 0.4)
+% @param: /Load [per /Width] 0..1 resume-contact rate per one Width of travel along the path (default 0.6)
+% @param: /Dropout [per /Width] 0..1 lose-contact rate per one Width of travel along the path (default 0.4)
+% @param: /Jitter [points] Edge roughness, forwarded verbatim as each dash's own pkribbon Jitter; shares the Markov chain's random stream (default 0)
+% @param: /Pitch [points] walkpath sampling pitch for the shared centerline pass; must be > 0 (default BristleWidth*0.6, capped at 6)
+% @param: /ColorJitter [0..1] magnitude of small per-bristle color variation around the color active when pkdry is called (default 0.06)
 /pkdry {
     /pbopts exch def
 
@@ -1517,15 +1530,15 @@
 % @kind: Procedure
 % @summary: A spray-paint brush: seeded opaque particles deposited around each sampled centerline stop, thinning outward under a radial falloff, with an optional overspray mist past the nozzle edge and optional start/end trigger-dwell bursts. For vapour (cloud, mist, haze) use /Speck about 1 to 1.2 with a small /Nozzle (about 8), /Density 150 to 400 and /Falloff near 1: the core fuses solid and only the fringe stays granular (then pkwet it into the sky). At /Speck 2 to 3 high density gives coarse lumpy bars and low density gives discrete spatter; neither reads as vapour.
 % @example: newpath ... << /Nozzle 12 /Density 40 >> pkspray
-% @param: /Nozzle Spray radius around the centerline; must be > 0 (default 8)
-% @param: /Density Mean particles deposited per one nozzle-diameter of travel; must be >= 0 (0 renders nothing); uncapped, bounded by the deposit-budget safety limit instead (default 30)
-% @param: /Falloff 0..1 how quickly density thins outward; three discrete levels (min-of-m-uniforms radial draws, m = 1 + truncate(2*Falloff)) (default 0.5)
-% @param: /Overspray 0..1 probability each particle escapes past the nozzle edge as half-size mist in the band [Nozzle, Nozzle*(1+Overspray)] (default 0.12)
-% @param: /Speck Mean particle diameter in points; must be > 0. About 1 to 1.2 with a small /Nozzle and high /Density fuses into vapour (cloud, mist); 2 to 3 gives coarse lumpy bars at high /Density and discrete spatter at low (default 1.4)
-% @param: /Speckle 0..1 per-particle diameter variation, clamped to never go below 10% of Speck (default 0.35)
-% @param: /Pitch walkpath sampling pitch for the shared centerline pass; must be > 0 (default Nozzle*0.5, capped at 6)
-% @param: /StartBurst 0..1 extra particles pooled at each subpath's first stop (trigger dwell) (default 0)
-% @param: /EndBurst 0..1 extra particles pooled at each subpath's last stop (trigger dwell) (default 0)
+% @param: /Nozzle [points] Spray radius around the centerline; must be > 0 (default 8)
+% @param: /Density [count per 2*/Nozzle] Mean particles deposited per one nozzle-diameter of travel; must be >= 0 (0 renders nothing); uncapped, bounded by the deposit-budget safety limit instead (default 30)
+% @param: /Falloff [0..1] how quickly density thins outward; three discrete levels (min-of-m-uniforms radial draws, m = 1 + truncate(2*Falloff)) (default 0.5)
+% @param: /Overspray [0..1] probability each particle escapes past the nozzle edge as half-size mist in the band [Nozzle, Nozzle*(1+Overspray)] (default 0.12)
+% @param: /Speck [points] Mean particle diameter in points; must be > 0. About 1 to 1.2 with a small /Nozzle and high /Density fuses into vapour (cloud, mist); 2 to 3 gives coarse lumpy bars at high /Density and discrete spatter at low (default 1.4)
+% @param: /Speckle [fraction of /Speck] 0..1 per-particle diameter variation, clamped to never go below 10% of Speck (default 0.35)
+% @param: /Pitch [points] walkpath sampling pitch for the shared centerline pass; must be > 0 (default Nozzle*0.5, capped at 6)
+% @param: /StartBurst [0..1] extra particles pooled at each subpath's first stop (trigger dwell) (default 0)
+% @param: /EndBurst [0..1] extra particles pooled at each subpath's last stop (trigger dwell) (default 0)
 /pkspray {
     /pzopts exch def
 
@@ -1808,20 +1821,20 @@
 % @kind: Procedure
 % @summary: A stylized oil-paint impasto preset built on pkribbon: layered pressure ribbons and bristle ridges suggesting a loaded brush, with restrained highlight/shadow edge lifts that read as paint thickness without any 3D height map or blending. Deterministic under the caller's own srand; bounded by Ridges * stops; respects clip like every other preset.
 % @example: newpath ... << /Width 16 /Ridges 12 /Load 0.9 >> pkoil
-% @param: /Width Envelope width the ridges scatter across; must be > 0 (default 14)
-% @param: /Pitch walkpath sampling pitch for the shared centerline pass; must be > 0 (default Width*0.35, capped at 4)
-% @param: /Ridges Bristle ridge count; must be a whole number, hard safety cap 1..40 (default 12)
-% @param: /RidgeSpread 0..1 fraction of Width the ridges scatter across, centered on the centerline (default 0.75)
-% @param: /RidgeWidth Base width of each ridge's own mark; must be > 0 (default Width*0.14)
-% @param: /WidthJitter 0..1 fraction of RidgeWidth each ridge's own width randomly varies by (default 0.3)
-% @param: /Load 0..1 resume-contact rate per one Width of travel; high Load stays inked (default 0.85)
-% @param: /Dropout 0..1 lose-contact rate per one Width of travel (default 0.18)
-% @param: /ColorJitter 0..1 per-ridge color variation magnitude around the caller's current color (default 0.08)
-% @param: /EdgePickup 0..1 darker pickup at the envelope edges (default 0.15)
-% @param: /Highlight 0..1 restrained highlight strength on one side (default 0.12)
-% @param: /Shadow 0..1 restrained shadow strength on the opposite side (default 0.10)
-% @param: /Pressure {t -> mult} proc over normalized path progress; shapes the base ribbon, bristle ridges, highlight and shadow alike (default { pkflat })
-% @param: /Jitter Seeded edge displacement amount, forwarded to each dash's pkribbon Jitter (default 0)
+% @param: /Width [points] Envelope width the ridges scatter across; must be > 0 (default 14)
+% @param: /Pitch [points] walkpath sampling pitch for the shared centerline pass; must be > 0 (default Width*0.35, capped at 4)
+% @param: /Ridges [count] Bristle ridge count; must be a whole number, hard safety cap 1..40 (default 12)
+% @param: /RidgeSpread [fraction of /Width] 0..1 fraction of Width the ridges scatter across, centered on the centerline (default 0.75)
+% @param: /RidgeWidth [points] Base width of each ridge's own mark; must be > 0 (default Width*0.14)
+% @param: /WidthJitter [fraction of /RidgeWidth] 0..1 fraction of RidgeWidth each ridge's own width randomly varies by (default 0.3)
+% @param: /Load [per /Width] 0..1 resume-contact rate per one Width of travel; high Load stays inked (default 0.85)
+% @param: /Dropout [per /Width] 0..1 lose-contact rate per one Width of travel (default 0.18)
+% @param: /ColorJitter [0..1] per-ridge color variation magnitude around the caller's current color (default 0.08)
+% @param: /EdgePickup [0..1] darker pickup at the envelope edges (default 0.15)
+% @param: /Highlight [0..1] restrained highlight strength on one side (default 0.12)
+% @param: /Shadow [0..1] restrained shadow strength on the opposite side (default 0.10)
+% @param: /Pressure [proc] {t -> mult} proc over normalized path progress; shapes the base ribbon, bristle ridges, highlight and shadow alike (default { pkflat })
+% @param: /Jitter [points] Seeded edge displacement amount, forwarded to each dash's pkribbon Jitter (default 0)
 /pkoil {
     /poopts exch def
     /poWidth poopts /Width 14 pkgetdef def
@@ -1952,7 +1965,7 @@
 %
 % The blade at each stop is a segment of half-extent
 %
-%     h(t) = Width/2 * Pressure(t) * (0.35 + 0.65*Load)
+%     h(t) = Width/2 * Pressure(t) * (0.35 + 0.65*Cover)
 %
 % laid at `pathAngle + 90 + Angle`, so /Angle 0 is a blade held square
 % across the direction of travel (a straight scrape) and larger angles
@@ -1970,9 +1983,13 @@
 %
 % The four "less paint" controls are separated onto genuinely different
 % axes, so each one can be seen (and tested) on its own:
-%   /Load        how much paint is on the blade -> the *width* of the
+%   /Cover       how much paint is on the blade -> the *width* of the
 %                deposit (a nearly empty knife lays a narrow band; a
-%                loaded one lays the full blade)
+%                loaded one lays the full blade). Named /Load before
+%                issue #141; /Load still works as a deprecated alias,
+%                and /Cover wins when both are given. Renamed because
+%                /Load everywhere else in this file is a contact rate
+%                per /Width of travel, not a width
 %   /Coverage    the Markov chain's steady state -> how much of the
 %                contact area is inked, i.e. holes *within* the band
 %   /Viscosity   the Markov chain's *rate* -> run persistence. High
@@ -2132,22 +2149,46 @@
     ptgemit
 } def
 
+%%SelfTest: pktrowel-cover-and-its-deprecated-load-alias
+%   % /Load is the deprecated name for /Cover (issue #141) and is still
+%   % read, through the same guard, when /Cover is absent.
+%   { newpath 0 0 moveto 50 0 lineto << /Cover 1.4 >> pktrowel }
+%   /pktrowel-cover-must-be-0-to-1
+%   (/Cover 1.4) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Load 1.4 >> pktrowel }
+%   /pktrowel-cover-must-be-0-to-1
+%   (/Load 1.4, the deprecated alias) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Load { 1 } >> pktrowel }
+%   /pktrowel-cover-must-not-be-a-procedure
+%   (/Load { 1 }, the deprecated alias) mustguard
+%
+%   % When both are given /Cover wins, and /Load is not even validated.
+%   { newpath 0 0 moveto 50 0 lineto << /Cover 0.5 /Load 1.4 >> pktrowel }
+%   (/Cover 0.5 with an out-of-range /Load) mustpass
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Cover 1.4 /Load 0.5 >> pktrowel }
+%   /pktrowel-cover-must-be-0-to-1
+%   (/Cover 1.4 with an in-range /Load) mustguard
+%%EndSelfTest
+
 % @kind: Procedure
 % @summary: A trowel / palette-knife stroke: a rigid flat blade dragging viscous paint, swept along the blade direction rather than the path normal, depositing broken masses with lengthwise scrape streaks, a dragged smear, and built-up ridges at the blade edges. Not built on pkribbon; lays no solid base pass, so the underlayer reads through. Deterministic under the caller's own srand; bounded by Lanes * stops.
 % @example: newpath 40 120 moveto 260 150 lineto << /Width 72 /Angle 18 /Coverage 0.82 >> pktrowel
-% @param: /Width Blade length; must be > 0 (default 24)
-% @param: /Pitch walkpath sampling pitch for the shared centerline pass; must be > 0 (default Width*0.35, capped at 4)
-% @param: /Lanes Bands the blade is divided into across its length; must be a whole number, hard safety cap 1..40 (default 14)
-% @param: /Load 0..1 paint on the blade, scaling the deposit's width from 35% of the blade to all of it (default 0.85)
-% @param: /Pressure {t -> mult} proc over normalized path progress, multiplying the blade's half-extent; must be a procedure (default { pkflat })
-% @param: /Angle Blade angle in degrees relative to square-across-travel, -80..80; footprint thickness goes as cos(Angle) (default 0)
-% @param: /Drag 0..1 along-travel smear past where the blade lifted, as a fraction of the blade's half-extent (default 0.35)
-% @param: /Viscosity 0..1 contact-run persistence; high holds paint into long chunky masses, low chatters (default 0.6)
-% @param: /Coverage 0..1 steady-state fraction of the contact area actually depositing (default 0.82)
-% @param: /Scrape 0..1 lengthwise thinning: narrows every lane toward its centre and kills whole lanes, revealing the underlayer (default 0.15)
-% @param: /EdgeBuildup 0..1 darker ridges of paint piled at the two blade edges, drawn last (default 0.35)
-% @param: /Jitter Seeded lateral displacement of the lane boundaries, deterministic under the caller's own N srand (default 0)
-% @param: /ColorJitter 0..1 per-lane color variation magnitude around the caller's current color (default 0.06)
+% @param: /Width [points] Blade length; must be > 0 (default 24)
+% @param: /Pitch [points] walkpath sampling pitch for the shared centerline pass; must be > 0 (default Width*0.35, capped at 4)
+% @param: /Lanes [count] Bands the blade is divided into across its length; must be a whole number, hard safety cap 1..40 (default 14)
+% @param: /Cover [0..1] paint on the blade, scaling the deposit's width from 35% of the blade to all of it. Formerly /Load, still accepted as a deprecated alias; /Cover wins if both are given (default 0.85)
+% @param: /Pressure [proc] {t -> mult} proc over normalized path progress, multiplying the blade's half-extent; must be a procedure (default { pkflat })
+% @param: /Angle [degrees] Blade angle in degrees relative to square-across-travel, -80..80; footprint thickness goes as cos(Angle) (default 0)
+% @param: /Drag [fraction of the blade's half-extent] 0..1 along-travel smear past where the blade lifted, as a fraction of the blade's half-extent (default 0.35)
+% @param: /Viscosity [0..1] contact-run persistence; high holds paint into long chunky masses, low chatters (default 0.6)
+% @param: /Coverage [0..1] steady-state fraction of the contact area actually depositing (default 0.82)
+% @param: /Scrape [0..1] lengthwise thinning: narrows every lane toward its centre and kills whole lanes, revealing the underlayer (default 0.15)
+% @param: /EdgeBuildup [0..1] darker ridges of paint piled at the two blade edges, drawn last (default 0.35)
+% @param: /Jitter [points] Seeded lateral displacement of the lane boundaries, deterministic under the caller's own N srand (default 0)
+% @param: /ColorJitter [0..1] per-lane color variation magnitude around the caller's current color (default 0.06)
 /pktrowel {
     /ptopts exch def
     /ptWidth ptopts /Width 24 pkgetdef def
@@ -2159,9 +2200,11 @@
     /ptLanes ptopts /Lanes 14 pkgetdef def
     /ptLanes load xcheck { pktrowel-lanes-must-not-be-a-procedure } if
     ptLanes 1 lt ptLanes 40 gt or ptLanes truncate ptLanes ne or { pktrowel-lanes-must-be-1-to-40 } if
-    /ptLoad ptopts /Load 0.85 pkgetdef def
-    /ptLoad load xcheck { pktrowel-load-must-not-be-a-procedure } if
-    ptLoad 0 lt ptLoad 1 gt or { pktrowel-load-must-be-0-to-1 } if
+    % /Cover, or the deprecated /Load alias when /Cover is absent (issue
+    % #141). The inner pkgetdef resolves the alias, so /Cover wins.
+    /ptLoad ptopts /Cover ptopts /Load 0.85 pkgetdef pkgetdef def
+    /ptLoad load xcheck { pktrowel-cover-must-not-be-a-procedure } if
+    ptLoad 0 lt ptLoad 1 gt or { pktrowel-cover-must-be-0-to-1 } if
     /ptAngle ptopts /Angle 0 pkgetdef def
     /ptAngle load xcheck { pktrowel-angle-must-not-be-a-procedure } if
     ptAngle -80 lt ptAngle 80 gt or { pktrowel-angle-must-be-minus80-to-80 } if
@@ -2290,7 +2333,7 @@
                 /ptae ptrec 5 get def
                 ptae 1 and 1 eq {
                     % Subpath start: the chain is seeded from
-                    % /Coverage, its steady state -- not from /Load,
+                    % /Coverage, its steady state -- not from /Cover,
                     % which is a width control here and would bias the
                     % first run.
                     /ptstate ptCoverage ptroll def
@@ -2544,19 +2587,19 @@
 % @kind: Procedure
 % @summary: A fan brush: a bundle of bristles that leaves a flattened ferrule and splays apart as the stroke travels, for foliage, evergreen branches, grasses and soft feathering. Distinct from pkdry, whose bristles stay parallel -- /Splay is the whole difference. Many thin bristles at high Load give a soft feathered mark; fewer at low Load give separated bristle marks. A single-point subpath is a pressed fan, its bristles radiating through a 140-degree arc opening toward +y; rotate the space around it to aim it elsewhere. Deterministic under the caller's own srand; bounded by Bristles * stops.
 % @example: newpath 40 120 moveto 100 150 160 160 210 145 curveto << /Width 60 /Splay 0.6 >> pkfan
-% @param: /Width Fan width at full spread; must be > 0 (default 30)
-% @param: /Bristles Bristle count; must be a whole number, hard safety cap 1..60 (default 24)
-% @param: /Spread 0..1 fraction of Width the bristles occupy once fully opened (default 0.9)
-% @param: /Splay 0..1 how much narrower the ferrule is than the tip; 0 is parallel bristles, 1 narrows the start to a quarter of the tip's spread and never further (default 0.6)
-% @param: /BristleWidth Base width of each bristle's own mark; must be > 0 (default Width*0.035)
-% @param: /WidthJitter 0..1 fraction of BristleWidth each bristle's width randomly varies by (default 0.35)
-% @param: /Load 0..1 resume-contact rate per one Width of travel (default 0.92)
-% @param: /Dropout 0..1 lose-contact rate per one Width of travel; raise it with a low Load for separated bristle marks (default 0.08)
-% @param: /Ragged 0..1 how much each bristle's length varies, so the tips feather instead of ending on one straight edge (default 0.25)
-% @param: /Flick 0..1 taper toward each bristle's tip, applied only to the run that reaches it (default 0.5)
-% @param: /Jitter Seeded lateral displacement of each bristle's trace (default 0)
-% @param: /Pitch walkpath sampling pitch for the shared centerline pass; must be > 0 (default BristleWidth*0.6, capped at 6)
-% @param: /ColorJitter 0..1 per-bristle color variation around the caller's current color (default 0.06)
+% @param: /Width [points] Fan width at full spread; must be > 0 (default 30)
+% @param: /Bristles [count] Bristle count; must be a whole number, hard safety cap 1..60 (default 24)
+% @param: /Spread [fraction of /Width] 0..1 fraction of Width the bristles occupy once fully opened (default 0.9)
+% @param: /Splay [0..1] how much narrower the ferrule is than the tip; 0 is parallel bristles, 1 narrows the start to a quarter of the tip's spread and never further (default 0.6)
+% @param: /BristleWidth [points] Base width of each bristle's own mark; must be > 0 (default Width*0.035)
+% @param: /WidthJitter [fraction of /BristleWidth] 0..1 fraction of BristleWidth each bristle's width randomly varies by (default 0.35)
+% @param: /Load [per /Width] 0..1 resume-contact rate per one Width of travel (default 0.92)
+% @param: /Dropout [per /Width] 0..1 lose-contact rate per one Width of travel; raise it with a low Load for separated bristle marks (default 0.08)
+% @param: /Ragged [0..1] how much each bristle's length varies, so the tips feather instead of ending on one straight edge (default 0.25)
+% @param: /Flick [0..1] taper toward each bristle's tip, applied only to the run that reaches it (default 0.5)
+% @param: /Jitter [points] Seeded lateral displacement of each bristle's trace (default 0)
+% @param: /Pitch [points] walkpath sampling pitch for the shared centerline pass; must be > 0 (default BristleWidth*0.6, capped at 6)
+% @param: /ColorJitter [0..1] per-bristle color variation around the caller's current color (default 0.06)
 /pkfan {
     /pfopts exch def
     /pfWidth pfopts /Width 30 pkgetdef def
@@ -2732,11 +2775,12 @@
 % /Depletion 0 turns the fade off entirely and gives an even, fully
 % loaded block-in -- the flat side of the tool's range.
 %
-% Deliberately *not* named /Load. This file already uses /Load for two
-% different things (a contact rate in pkdry and pkfan, deposit width in
-% pktrowel), and a third meaning in a fourth preset would be actively
-% misleading. /Charge is what a brush is charged with; /Depletion is how
-% fast it runs out.
+% Deliberately *not* named /Load. /Load in this file is a contact rate
+% per /Width of travel (pkdry, pkfan, pkoil) -- pktrowel's deposit-width
+% /Load was renamed /Cover in issue #141 to keep it that way -- and a
+% paint reservoir draining along the stroke is a different quantity.
+% /Charge is what a brush is charged with; /Depletion is how fast it
+% runs out.
 %
 % /Angle follows **pktrowel's** reading, not pknib's: it rotates the
 % brush relative to the direction of travel, so it stays constant along
@@ -2954,14 +2998,14 @@
 % @kind: Procedure
 % @summary: A broad flat brush for block-ins, sky and water bands, reflections and broad masses. What separates it from pktrowel's blade and pknib's pmn is that a brush runs out of paint: the band is divided into striations that drop out one by one as the charge falls along the stroke, so the mark fades from solid to broken along its own direction. Square ends, and parallel edges that are crisp at /Edge 0 -- the default /Edge 0.15 roughens them by about a pixel. Deterministic under the caller's own srand; bounded by Grain * stops.
 % @example: newpath 40 120 moveto 300 130 lineto << /Width 46 /Charge 0.95 /Depletion 0.6 >> pkbroad
-% @param: /Width Band width; must be > 0 (default 40)
-% @param: /Angle Brush rotation in degrees relative to the direction of travel, -80..80; constant along a curve, unlike pknib's fixed world angle (default 0)
-% @param: /Charge 0..1 how much paint the brush is loaded with; striations whose affinity exceeds it never deposit, so a low charge skips and gaps (default 0.95)
-% @param: /Depletion 0..1 how fast the charge runs out along each subpath; 0 is an even fully loaded block-in (default 0.5)
-% @param: /Grain Striations across the band; must be a whole number, hard safety cap 1..40 (default 14)
-% @param: /Edge 0..1 roughness applied to every striation boundary, not only the band's outer sides -- so above about 0.3 it also breaks holes through the band's interior (8% of interior pixels at 0.9); 0 is a crisp flat-brush edge (default 0.15)
-% @param: /Pitch walkpath sampling pitch for the shared centerline pass; must be > 0 (default Width*0.3, capped at 4)
-% @param: /ColorJitter 0..1 per-striation color variation around the caller's current color (default 0.05)
+% @param: /Width [points] Band width; must be > 0 (default 40)
+% @param: /Angle [degrees] Brush rotation in degrees relative to the direction of travel, -80..80; constant along a curve, unlike pknib's fixed world angle (default 0)
+% @param: /Charge [0..1] how much paint the brush is loaded with; striations whose affinity exceeds it never deposit, so a low charge skips and gaps (default 0.95)
+% @param: /Depletion [0..1] how fast the charge runs out along each subpath; 0 is an even fully loaded block-in (default 0.5)
+% @param: /Grain [count] Striations across the band; must be a whole number, hard safety cap 1..40 (default 14)
+% @param: /Edge [0..1] roughness applied to every striation boundary, not only the band's outer sides -- so above about 0.3 it also breaks holes through the band's interior (8% of interior pixels at 0.9); 0 is a crisp flat-brush edge (default 0.15)
+% @param: /Pitch [points] walkpath sampling pitch for the shared centerline pass; must be > 0 (default Width*0.3, capped at 4)
+% @param: /ColorJitter [0..1] per-striation color variation around the caller's current color (default 0.05)
 /pkbroad {
     /pmopts exch def
     /pmWidth pmopts /Width 40 pkgetdef def
@@ -3159,9 +3203,9 @@
 % /Taper 0 is a constant-width line. /Depletion 0 never runs out.
 %
 % /Charge and /Depletion mean exactly what they mean in `pkbroad`, and
-% for the reason that preset's header gives: this file already uses /Load
-% for a contact rate (pkdry, pkfan) and for deposit width (pktrowel), and
-% one paint-reservoir vocabulary across the file beats a fourth meaning.
+% for the reason that preset's header gives: /Load in this file is a
+% contact rate (pkdry, pkfan, pkoil), and one paint-reservoir vocabulary
+% across the file beats a second meaning for it.
 % What differs is what running out *looks like* on a mark one bristle
 % wide: `pkbroad` drops striations out across its band, while here there
 % is no band to thin, so the line breaks along its own length instead.
@@ -3495,13 +3539,13 @@
 % @kind: Procedure
 % @summary: A liner/detail brush: the long soft tip that draws branches, trunks, grass stems and other fine marks. The complement of pknib's rigid nib -- a flexible loaded brush, so the line wanders off the drawn centerline (no other preset here leaves it), whips from full width to a point, and breaks into shortening dashes as the paint runs out. A single-point subpath presses a detail dot. Deterministic under the caller's own srand, with a fixed number of draws per subpath.
 % @example: newpath 60 40 moveto 92 150 118 214 150 300 curveto << /Width 3 /Taper 0.9 /Waver 1.2 >> pkliner
-% @param: /Width Width at the loaded end of the stroke, and the diameter of a pressed dot; must be > 0 (default 2.4)
-% @param: /Taper 0..1 how far the line narrows toward the end of each subpath -- the artist's lift, width only; 1 whips to a true point, 0 is constant width (default 0.85)
-% @param: /Charge 0..1 how much paint the brush is loaded with -- coverage only, never width; pkbroad's meaning (default 0.95)
-% @param: /Depletion 0..1 how fast the charge runs out along each subpath; 0 never runs out (default 0.35)
-% @param: /Waver Lateral wander of the loaded tip, in multiples of Width, 0..10; grows toward the tip; 0 is a mechanically straight line, and past about 2 the mark reads as near the caller's path rather than on it (default 0.8)
-% @param: /Pitch walkpath sampling pitch for the centerline pass; must be > 0 (default Width*0.8, capped at 3 and floored at 0.5)
-% @param: /ColorJitter 0..1 one small tint shift per subpath -- one dip of the brush is one tint (default 0.05)
+% @param: /Width [points] Width at the loaded end of the stroke, and the diameter of a pressed dot; must be > 0 (default 2.4)
+% @param: /Taper [0..1] how far the line narrows toward the end of each subpath -- the artist's lift, width only; 1 whips to a true point, 0 is constant width (default 0.85)
+% @param: /Charge [0..1] how much paint the brush is loaded with -- coverage only, never width; pkbroad's meaning (default 0.95)
+% @param: /Depletion [0..1] how fast the charge runs out along each subpath; 0 never runs out (default 0.35)
+% @param: /Waver [multiple of /Width] Lateral wander of the loaded tip, in multiples of Width, 0..10; grows toward the tip; 0 is a mechanically straight line, and past about 2 the mark reads as near the caller's path rather than on it (default 0.8)
+% @param: /Pitch [points] walkpath sampling pitch for the centerline pass; must be > 0 (default Width*0.8, capped at 3 and floored at 0.5)
+% @param: /ColorJitter [0..1] one small tint shift per subpath -- one dip of the brush is one tint (default 0.05)
 /pkliner {
     /pqopts exch def
     /pqWidth pqopts /Width 2.4 pkgetdef def
@@ -3769,11 +3813,17 @@
 %
 % One consequence of the grading being between an outermost pass and a
 % core: a single-layer call has no such span, so at /Layers 1 there is
-% only the core pass, sitting exactly on the path, and /Spread has
+% only the core pass, sitting exactly on the path, and /Offset has
 % nothing to act on and is inert. That is why /Soft 0 (which resolves to
-% Layers 1) lays the same marks as a plain call whatever /Spread says.
+% Layers 1) lays the same marks as a plain call whatever /Offset says.
 %
-% /Soft is the one knob that matters: it supplies /Layers and /Spread,
+% /Offset was named /Spread before issue #141. Everywhere else in this
+% file /Spread is a 0..1 fraction of /Width, and pkwet's is a distance in
+% points, so the same name read as two different quantities. /Spread
+% still works here as a deprecated alias for /Offset; when both are
+% given, /Offset wins and /Spread is ignored without being validated.
+%
+% /Soft is the one knob that matters: it supplies /Layers and /Offset,
 % and every other key is a refinement. At /Soft 0 pkwet draws a single
 % pass, at the caller's exact colour, with no displacement and without
 % touching the random stream, so it *marks the page* exactly as calling
@@ -3818,11 +3868,11 @@
 % sweeps. /Direction (degrees) lines the passes up along that axis
 % instead of scattering them round the mark:
 %
-%   { ... } << /Direction 270 /OneSided true /Spread 22
+%   { ... } << /Direction 270 /OneSided true /Offset 22
 %              /Under [0.44 0.54 0.66] >> pkwet      % pull down
 %
-% Each non-core pass sits f*Spread along the direction -- exactly, so
-% the outermost pass reaches the full /Spread and a pull reads as a
+% Each non-core pass sits f*Offset along the direction -- exactly, so
+% the outermost pass reaches the full /Offset and a pull reads as a
 % pull -- plus a seeded wobble across it, /Stretch times narrower.
 % /OneSided true puts every pass on the +Direction side (down only, up
 % only); otherwise passes alternate sides by depth, outermost on the
@@ -3830,11 +3880,11 @@
 % frames, the unwinding and the draws are exactly the isotropic ones:
 % one draw per non-core pass either way, so *at a fixed /Layers*,
 % switching /Direction on or turning /Direction, /Stretch, /OneSided or
-% /Spread never re-rolls a later mark. With /Layers left to default,
-% though, a directional call's depth follows /Spread (see Depth, below),
+% /Offset never re-rolls a later mark. With /Layers left to default,
+% though, a directional call's depth follows /Offset (see Depth, below),
 % and a different depth is a different number of passes -- of pkwet's
 % draws and of the wrapped brush's own. Pin /Layers while tuning
-% /Spread. A call that never names /Direction takes the old path
+% /Offset. A call that never names /Direction takes the old path
 % unchanged.
 %
 % This is the pull the #118 notes assumed would need pixel readback
@@ -3867,8 +3917,8 @@
 % once they sit more than about 2pt apart (measured: a pulled treeline
 % at 6 layers over 22pt repeated its crest as distinct bands). So a
 % directional call's default /Layers is whatever keeps the step between
-% same-side neighbours at or under 2pt -- ceil(Spread/2)+1 one-sided,
-% ceil(Spread)+1 two-sided, since alternating sides doubles each side's
+% same-side neighbours at or under 2pt -- ceil(Offset/2)+1 one-sided,
+% ceil(Offset)+1 two-sided, since alternating sides doubles each side's
 % step -- capped at 16, and its /Layers cap is 16 rather than 6. An
 % explicit /Layers is honored, and /Soft 0 is still the one plain pass.
 %
@@ -4041,9 +4091,9 @@
 %   { { } << /Direction 270 /Layers 16 >> pkwet }
 %   (/Layers 16 with /Direction) mustpass
 %
-%   % An absurd /Spread clamps the default depth instead of overflowing cvi.
-%   { { } << /Direction 270 /Spread 1e30 >> pkwet }
-%   (/Spread 1e30 with /Direction) mustpass
+%   % An absurd /Offset clamps the default depth instead of overflowing cvi.
+%   { { } << /Direction 270 /Offset 1e30 >> pkwet }
+%   (/Offset 1e30 with /Direction) mustpass
 %%EndSelfTest
 %
 %%SelfTest: pkwet-bounds-a-directional-nest
@@ -4067,17 +4117,55 @@
 %   (a 6x6x6 isotropic nest) mustpass
 %%EndSelfTest
 %
+%%SelfTest: pkwet-offset-and-its-deprecated-spread-alias
+%   % /Spread is the deprecated name for /Offset (issue #141) and is
+%   % still read, through the same guard, when /Offset is absent.
+%   { { } << /Offset -1 >> pkwet }
+%   /pkwet-offset-must-not-be-negative
+%   (/Offset -1) mustguard
+%
+%   { { } << /Spread -1 >> pkwet }
+%   /pkwet-offset-must-not-be-negative
+%   (/Spread -1, the deprecated alias) mustguard
+%
+%   % When both are given /Offset wins, and /Spread is not even validated.
+%   { { } << /Offset 5 /Spread -1 >> pkwet }
+%   (/Offset 5 with a negative /Spread) mustpass
+%
+%   { { } << /Offset -1 /Spread 5 >> pkwet }
+%   /pkwet-offset-must-not-be-negative
+%   (/Offset -1 with a valid /Spread) mustguard
+%
+%   % The value is used, not only validated: a one-sided pull's default
+%   % depth is ceil(Offset/2)+1 passes, and the procedure runs once per
+%   % pass.
+%   userdict /pkwetn 0 put
+%   { userdict /pkwetn pkwetn 1 add put }
+%   << /Direction 270 /OneSided true /Spread 22 >> pkwet
+%   pkwetn 12 eq (/Spread 22 alone draws 12 passes, as /Offset 22 does) mustbe
+%
+%   userdict /pkwetn 0 put
+%   { userdict /pkwetn pkwetn 1 add put }
+%   << /Direction 270 /OneSided true /Offset 22 >> pkwet
+%   pkwetn 12 eq (/Offset 22 draws 12 passes) mustbe
+%
+%   userdict /pkwetn 0 put
+%   { userdict /pkwetn pkwetn 1 add put }
+%   << /Direction 270 /OneSided true /Offset 6 /Spread 22 >> pkwet
+%   pkwetn 4 eq (/Offset 6 wins over /Spread 22: 4 passes) mustbe
+%%EndSelfTest
+%
 % @kind: Procedure
 % @summary: Runs a mark-drawing procedure several times, each pass displaced further and mixed further toward a declared backdrop color, so the mark's core stays solid while its edge grades away into the layer beneath. The wet-on-wet softener for skies, clouds, mist and distant forms; works with every stroke preset in this file. The procedure must build its own path: a path constructed before the call cannot be displaced, because PostScript paths are in device space once built, so every pass would land on the same geometry and nothing would soften. Pair it with a broken or particulate brush (pkspray, pkdry, pktrowel at low Coverage) -- a solid brush keeps its own hard silhouette and only gains a halo. With /Direction the passes line up along one axis instead: a reflection pulled down, a mountain foot lifted into mist, a sky swept across. Uses no alpha, so unlike pkwash it needs no Ghostscript fallback.
 % @example: { newpath 40 120 moveto 260 150 lineto << /Width 40 >> pkribbon } << /Soft 0.7 /Under [0.62 0.72 0.86] >> pkwet
-% @param: /Soft 0..1 master softness; supplies the defaults for Layers and Spread. 0 is a single undisplaced pass that marks the page exactly as calling the proc directly would, random stream included; the procedure still runs inside a gsave, so a path or graphics state it leaves behind does not survive the call (default 0.6)
-% @param: /Under [r g b] the color already on the canvas that this mark settles into; the outermost pass is nearly this color (default [1 1 1])
-% @param: /Pickup 0..1 how far the outermost pass mixes toward Under; lower keeps the mark's own color out to its edge (default 0.85)
-% @param: /Layers Passes to draw, outermost first; must be a whole number, hard cap 1..6, or 1..16 with /Direction (default 1 + round(Soft*5); with /Direction, raised to keep same-side passes at most 2pt apart, up to 16)
-% @param: /Spread How far in points the outermost pass is displaced from the true path; inert at Layers 1, which has only a core pass (default Soft*14)
-% @param: /Direction Degrees, in the user space pkwet is called in: lines the passes up along this axis instead of scattering them, for a pulled-down reflection (270), a lifted mist (90) or a swept sky (0). The procedure must paint in the color it inherits. A chain of nested calls containing a directional one may multiply its innermost procedure at most 64 times. Without an explicit /Layers its depth follows /Spread, so pin /Layers while tuning /Spread (default absent: isotropic)
-% @param: /Stretch With /Direction only: along-to-across ratio, at least 1; the cross-axis wobble is the along-axis reach divided by this (default 8)
-% @param: /OneSided With /Direction only: true puts every pass on the +Direction side (a pull down, a lift up); false alternates sides, a sweep both ways (default false)
+% @param: /Soft [0..1] master softness; supplies the defaults for Layers and Offset. 0 is a single undisplaced pass that marks the page exactly as calling the proc directly would, random stream included; the procedure still runs inside a gsave, so a path or graphics state it leaves behind does not survive the call (default 0.6)
+% @param: /Under [rgb array] the color already on the canvas that this mark settles into; the outermost pass is nearly this color (default [1 1 1])
+% @param: /Pickup [0..1] how far the outermost pass mixes toward Under; lower keeps the mark's own color out to its edge (default 0.85)
+% @param: /Layers [count] Passes to draw, outermost first; must be a whole number, hard cap 1..6, or 1..16 with /Direction (default 1 + round(Soft*5); with /Direction, raised to keep same-side passes at most 2pt apart, up to 16)
+% @param: /Offset [points] How far in points the outermost pass is displaced from the true path; inert at Layers 1, which has only a core pass. Formerly /Spread, still accepted as a deprecated alias; /Offset wins if both are given (default Soft*14)
+% @param: /Direction [degrees] Degrees, in the user space pkwet is called in: lines the passes up along this axis instead of scattering them, for a pulled-down reflection (270), a lifted mist (90) or a swept sky (0). The procedure must paint in the color it inherits. A chain of nested calls containing a directional one may multiply its innermost procedure at most 64 times. Without an explicit /Layers its depth follows /Offset, so pin /Layers while tuning /Offset (default absent: isotropic)
+% @param: /Stretch [ratio] With /Direction only: along-to-across ratio, at least 1; the cross-axis wobble is the along-axis reach divided by this (default 8)
+% @param: /OneSided [boolean] With /Direction only: true puts every pass on the +Direction side (a pull down, a lift up); false alternates sides, a sweep both ways (default false)
 /pkwet {
     /pqopts exch def
     /pqproc exch def
@@ -4104,9 +4192,13 @@
     % contract, so failing later on its representation would be a bug in
     % us, not bad input (Codex review).
     /pqLayers pqLayers cvi def
-    /pqSpread pqopts /Spread pqSoft 14 mul pkgetdef def
-    /pqSpread load xcheck { pkwet-spread-must-not-be-a-procedure } if
-    pqSpread 0 lt { pkwet-spread-must-not-be-negative } if
+    % /Offset, or the deprecated /Spread alias when /Offset is absent
+    % (issue #141: /Spread everywhere else in this file is a fraction of
+    % /Width, not points). The inner pkgetdef resolves the alias, so when
+    % both are given /Offset wins and /Spread is never read.
+    /pqSpread pqopts /Offset pqopts /Spread pqSoft 14 mul pkgetdef pkgetdef def
+    /pqSpread load xcheck { pkwet-offset-must-not-be-a-procedure } if
+    pqSpread 0 lt { pkwet-offset-must-not-be-negative } if
     /pqPickup pqopts /Pickup 0.85 pkgetdef def
     /pqPickup load xcheck { pkwet-pickup-must-not-be-a-procedure } if
     pqPickup 0 lt pqPickup 1 gt or { pkwet-pickup-must-be-0-to-1 } if
@@ -4144,11 +4236,11 @@
         % *default* depth is whatever keeps the step under 2pt, which is
         % why its cap is 16 rather than 6. The step that matters is
         % between neighbours on the *same side*: one-sided, that is
-        % Spread/(L-1); two-sided, passes alternate sides, so each side
+        % Offset/(L-1); two-sided, passes alternate sides, so each side
         % gets every other offset and its step is twice that (Codex
-        % review: /Spread 12 at 7 layers put a sweep's copies 4pt apart).
-        % Past the cap -- a one-sided Spread over 30, a two-sided one over
-        % 15 -- the step grows; pin /Layers lower and /Spread shorter, or
+        % review: /Offset 12 at 7 layers put a sweep's copies 4pt apart).
+        % Past the cap -- a one-sided Offset over 30, a two-sided one over
+        % 15 -- the step grows; pin /Layers lower and /Offset shorter, or
         % accept it. Only the default: an explicit /Layers is honored as
         % given, and a single-layer call (/Soft 0) stays the plain call it
         % is everywhere else.
@@ -4212,9 +4304,9 @@
             % Whether a displacement draw happens is keyed off the pass's
             % position in the stack, *not* off whether the displacement
             % comes out non-zero. Keying it off the magnitude looked
-            % equivalent and wasn't: /Spread 0 with several layers would
+            % equivalent and wasn't: /Offset 0 with several layers would
             % then skip every draw while any positive spread takes one
-            % per non-core pass, so turning /Spread alone re-rolled the
+            % per non-core pass, so turning /Offset alone re-rolled the
             % wrapped brush and everything drawn after it -- exactly the
             % contract this preset documents (Codex review). The core
             % pass is never displaced by definition, so skipping its draw
@@ -4223,7 +4315,7 @@
             pqf 0 gt {
                 pqdir {
                     % Along the direction, deterministically: the
-                    % outermost pass reaches the full /Spread, which is
+                    % outermost pass reaches the full /Offset, which is
                     % what makes a pull read as a pull rather than a
                     % scatter. Across it, a seeded wobble /Stretch times
                     % narrower -- the one draw, so a directional call
@@ -4594,15 +4686,15 @@ systemdict /setalpha known /pwhasalpha exch def
 % @kind: Procedure
 % @summary: Fills the current path as a translucent watercolor wash: layered passes each with their own wobbled wet boundary, an optional darker rim where pigment pools at the drying edge, and optional granulation. Color comes from whatever the caller already set. Needs pscat's setalpha; falls back to flattening against white elsewhere.
 % @example: newpath 200 200 90 0 360 arc closepath << /Alpha 0.3 /Wet 6 /Bloom 0.6 >> pkwash
-% @param: /Alpha Per-layer wash strength, 0..1 (default 0.32)
-% @param: /Layers Translucent passes to build up, hard-capped 1..8 (default 2)
-% @param: /Wet Peak boundary spread in points -- how far the wet edge wanders off the path (default 2.5)
-% @param: /Bloom Edge-pooling strength, 0..1, the darker rim a drying wash leaves (default 0.45)
-% @param: /BloomWidth Rim width in points (default Wet*1.5, at least 2)
-% @param: /Grain Granulation inside the wash, 0..1 -- seeded pigment speckle (default 0)
-% @param: /Blend /Normal (source-over, order-dependent) or /Multiply (commutative, never lightens) (default /Normal)
-% @param: /Pitch Boundary sampling pitch; must be > 0 (default the path's own perimeter/180, clamped to 0.6..4)
-% @param: /Seed Integer seed for this wash alone, leaving the caller's rand stream untouched (default: one rand draw from the caller's stream)
+% @param: /Alpha [0..1] Per-layer wash strength, 0..1 (default 0.32)
+% @param: /Layers [count] Translucent passes to build up, hard-capped 1..8 (default 2)
+% @param: /Wet [points] Peak boundary spread in points -- how far the wet edge wanders off the path (default 2.5)
+% @param: /Bloom [0..1] Edge-pooling strength, 0..1, the darker rim a drying wash leaves (default 0.45)
+% @param: /BloomWidth [points] Rim width in points (default Wet*1.5, at least 2)
+% @param: /Grain [0..1] Granulation inside the wash, 0..1 -- seeded pigment speckle (default 0)
+% @param: /Blend [name] /Normal (source-over, order-dependent) or /Multiply (commutative, never lightens) (default /Normal)
+% @param: /Pitch [points] Boundary sampling pitch; must be > 0 (default the path's own perimeter/180, clamped to 0.6..4)
+% @param: /Seed [integer] Integer seed for this wash alone, leaving the caller's rand stream untouched (default: one rand draw from the caller's stream)
 /pkwash {
     /pwopts exch def
 
@@ -4913,13 +5005,13 @@ systemdict /setalpha known /pwhasalpha exch def
 % @kind: Procedure
 % @summary: Lays a paper ground for watercolor: a tone fill over the given rectangle plus seeded grain speckle and fiber flecks. Paint it first; washes go over it. Uses setalpha where available and falls back to flattened tones elsewhere.
 % @example: 0 0 612 792 << /Tone [0.97 0.955 0.92] /Grain 0.6 >> pkpaper
-% @param: /Tone Paper color as a 3-element [r g b] array (default [0.965 0.95 0.915])
-% @param: /Grain Grain density, 0..1 (default 0.5)
-% @param: /Alpha Strength of each grain mark, 0..1 (default 0.18)
-% @param: /Depth How much darker than the tone a grain mark is, 0..1 (default 0.28)
-% @param: /Fiber Fraction of grain marks drawn as elongated paper fibers rather than specks, 0..1 (default 0.18)
-% @param: /Blend /Normal or /Multiply, for the grain marks (default /Normal)
-% @param: /Seed Integer seed for this ground alone, leaving the caller's rand stream untouched (default: one rand draw from the caller's stream)
+% @param: /Tone [rgb array] Paper color as a 3-element array (default [0.965 0.95 0.915])
+% @param: /Grain [0..1] Grain density, 0..1 (default 0.5)
+% @param: /Alpha [0..1] Strength of each grain mark, 0..1 (default 0.18)
+% @param: /Depth [0..1] How much darker than the tone a grain mark is, 0..1 (default 0.28)
+% @param: /Fiber [0..1] Fraction of grain marks drawn as elongated paper fibers rather than specks, 0..1 (default 0.18)
+% @param: /Blend [name] /Normal or /Multiply, for the grain marks (default /Normal)
+% @param: /Seed [integer] Integer seed for this ground alone, leaving the caller's rand stream untouched (default: one rand draw from the caller's stream)
 /pkpaper {
     /pvopts exch def
     /pvh exch def
@@ -5063,7 +5155,7 @@ systemdict /setalpha known /pwhasalpha exch def
 % highlight, any vegetation-like texture. The tool is a loaded brush
 % pounced onto the canvas rather than dragged, so there is no ribbon:
 % the current path is a *spine*, and every stop along it seeds a cluster
-% of blobby dabs scattered within /Spread of it. A subpath that is a
+% of blobby dabs scattered within /Scatter of it. A subpath that is a
 % single point is a standalone clump (/Clump dabs), the usual way to
 % paint one bush or one highlight patch. Closed subpaths are treated as
 % their outline, not filled -- there is no portable in-fill test, so a
@@ -5134,9 +5226,9 @@ systemdict /setalpha known /pwhasalpha exch def
 %   /pkdab-size-must-not-be-a-procedure
 %   (/Size { 5 }) mustguard
 %
-%   { newpath 0 0 moveto 10 0 lineto << /Spread 0 >> pkdab }
-%   /pkdab-spread-must-be-positive
-%   (/Spread 0) mustguard
+%   { newpath 0 0 moveto 10 0 lineto << /Scatter 0 >> pkdab }
+%   /pkdab-scatter-must-be-positive
+%   (/Scatter 0) mustguard
 %
 %   { newpath 0 0 moveto 10 0 lineto << /Density -1 >> pkdab }
 %   /pkdab-density-must-be-non-negative
@@ -5197,28 +5289,47 @@ systemdict /setalpha known /pwhasalpha exch def
 %   (a full charge) mustpass
 %%EndSelfTest
 %
+%%SelfTest: pkdab-scatter-and-its-deprecated-spread-alias
+%   % /Spread is the deprecated name for /Scatter (issue #141) and is
+%   % still read, through the same guard, when /Scatter is absent.
+%   { newpath 0 0 moveto 10 0 lineto << /Spread 0 >> pkdab }
+%   /pkdab-scatter-must-be-positive
+%   (/Spread 0, the deprecated alias) mustguard
+%
+%   % When both are given /Scatter wins, and /Spread is not even validated.
+%   { newpath 0 0 moveto 10 0 lineto << /Scatter 5 /Spread 0 >> pkdab }
+%   (/Scatter 5 with a zero /Spread) mustpass
+%
+%   { newpath 0 0 moveto 10 0 lineto << /Scatter 0 /Spread 5 >> pkdab }
+%   /pkdab-scatter-must-be-positive
+%   (/Scatter 0 with a valid /Spread) mustguard
+%%EndSelfTest
+%
 % @kind: Procedure
 % @summary: A foliage / dab brush: clustered, irregular blobs of paint pounced along the current path (a spine), for bushes, leafy masses and vegetation texture. Each dab is generated once and painted in up to three layers -- a darker underlayer, the body in the current color, and lighter highlight dabs on the lit side -- so highlights always sit on the mass they light. A single-point subpath is a standalone clump. Deterministic under the caller's own srand; bounded by a dab-count budget; respects clip like every other preset.
-% @example: newpath 80 60 moveto 180 90 280 60 380 70 curveto << /Size 9 /Spread 26 /Highlight 0.6 >> pkdab
-% @param: /Size Mean dab radius in points; must be > 0 (default 6)
-% @param: /Spread Radius in points of the cluster scattered around each stop of the path; must be > 0 (default Size*2.5)
-% @param: /Density Mean dabs per one /Size of travel along the path; must be >= 0 (0 paints nothing along lines); bounded by the dab-count budget (default 3)
-% @param: /Clump Dab count for a single-point subpath, whole number 1..400 (default 18)
-% @param: /Irregular 0..1 how far each dab's outline departs from a circle (default 0.5)
-% @param: /Charge 0..1 how much paint the brush is loaded with -- coverage only: the fraction of dabs that land at all (default 0.9)
-% @param: /Shadow 0..1 strength of the darker underlayer pushed away from the light; 0 paints none (default 0.4)
-% @param: /Highlight 0..1 strength and reach of the lighter dabs on the lit side; 0 paints none (default 0.4)
-% @param: /Light Direction the light comes from, in degrees counterclockwise from +x in user space (default 120, up and to the left)
-% @param: /Pitch walkpath sampling pitch for the spine; must be > 0 (default Size, capped at 6)
-% @param: /ColorJitter 0..1 per-dab tint variation around the current color (default 0.08)
+% @example: newpath 80 60 moveto 180 90 280 60 380 70 curveto << /Size 9 /Scatter 26 /Highlight 0.6 >> pkdab
+% @param: /Size [points] Mean dab radius in points; must be > 0 (default 6)
+% @param: /Scatter [points] Radius in points of the cluster scattered around each stop of the path; must be > 0. Formerly /Spread, still accepted as a deprecated alias; /Scatter wins if both are given (default Size*2.5)
+% @param: /Density [count per /Size] Mean dabs per one /Size of travel along the path; must be >= 0 (0 paints nothing along lines); bounded by the dab-count budget (default 3)
+% @param: /Clump [count] Dab count for a single-point subpath, whole number 1..400 (default 18)
+% @param: /Irregular [0..1] how far each dab's outline departs from a circle (default 0.5)
+% @param: /Charge [0..1] how much paint the brush is loaded with -- coverage only: the fraction of dabs that land at all (default 0.9)
+% @param: /Shadow [0..1] strength of the darker underlayer pushed away from the light; 0 paints none (default 0.4)
+% @param: /Highlight [0..1] strength and reach of the lighter dabs on the lit side; 0 paints none (default 0.4)
+% @param: /Light [degrees] Direction the light comes from, in degrees counterclockwise from +x in user space (default 120, up and to the left)
+% @param: /Pitch [points] walkpath sampling pitch for the spine; must be > 0 (default Size, capped at 6)
+% @param: /ColorJitter [0..1] per-dab tint variation around the current color (default 0.08)
 /pkdab {
     /pdopts exch def
     /pdsize pdopts /Size 6 pkgetdef def
     /pdsize load xcheck { pkdab-size-must-not-be-a-procedure } if
     pdsize 0 le { pkdab-size-must-be-positive } if
-    /pdspread pdopts /Spread pdsize 2.5 mul pkgetdef def
-    /pdspread load xcheck { pkdab-spread-must-not-be-a-procedure } if
-    pdspread 0 le { pkdab-spread-must-be-positive } if
+    % /Scatter, or the deprecated /Spread alias when /Scatter is absent
+    % (issue #141: /Spread elsewhere in this file is a fraction of /Width).
+    % The inner pkgetdef resolves the alias, so /Scatter wins.
+    /pdspread pdopts /Scatter pdopts /Spread pdsize 2.5 mul pkgetdef pkgetdef def
+    /pdspread load xcheck { pkdab-scatter-must-not-be-a-procedure } if
+    pdspread 0 le { pkdab-scatter-must-be-positive } if
     /pddens pdopts /Density 3 pkgetdef def
     /pddens load xcheck { pkdab-density-must-not-be-a-procedure } if
     pddens 0 lt { pkdab-density-must-be-non-negative } if
@@ -5513,9 +5624,9 @@ systemdict /setalpha known /pwhasalpha exch def
 %   /pkcrisscross-angle-must-be-0-to-90
 %   (/Angle 91) mustguard
 %
-%   { 0 0 100 100 screct << /Spread -1 >> pkcrisscross }
-%   /pkcrisscross-spread-must-be-non-negative
-%   (/Spread -1) mustguard
+%   { 0 0 100 100 screct << /Lean -1 >> pkcrisscross }
+%   /pkcrisscross-lean-must-be-non-negative
+%   (/Lean -1) mustguard
 %
 %   { 0 0 100 100 screct << /LengthJitter 2 >> pkcrisscross }
 %   /pkcrisscross-lengthjitter-must-be-0-to-1
@@ -5564,6 +5675,22 @@ systemdict /setalpha known /pwhasalpha exch def
 %   { << >> << >> pkscumblein }
 %   /pkscumblein-needs-a-region
 %   (a dict as the region) mustguard
+%%EndSelfTest
+%
+%%SelfTest: pkcrisscross-lean-and-its-deprecated-spread-alias
+%   % /Spread is the deprecated name for /Lean (issue #141) and is still
+%   % read, through the same guard, when /Lean is absent.
+%   { 0 0 100 100 screct << /Spread -1 >> pkcrisscross }
+%   /pkcrisscross-lean-must-be-non-negative
+%   (/Spread -1, the deprecated alias) mustguard
+%
+%   % When both are given /Lean wins, and /Spread is not even validated.
+%   { 0 0 100 100 screct << /Lean 4 /Spread -1 >> pkcrisscross }
+%   (/Lean 4 with a negative /Spread) mustpass
+%
+%   { 0 0 100 100 screct << /Lean -1 /Spread 4 >> pkcrisscross }
+%   /pkcrisscross-lean-must-be-non-negative
+%   (/Lean -1 with a valid /Spread) mustguard
 %%EndSelfTest
 %
 %%SelfTest: motion-spine-guards
@@ -5651,12 +5778,12 @@ systemdict /setalpha known /pwhasalpha exch def
 % @kind: Procedure
 % @summary: A criss-cross brush motion: short strokes at two crossing headings scattered evenly over a region (artkit's screct or scpath), the sky block-in of wet-on-wet painting. Builds a path of straight or bowed strokes and paints nothing, so it composes with any preset: `region opts pkcrisscross << >> pkbroad`. Replaces the current path. A jittered grid keeps coverage even; deterministic under the caller's own srand with a fixed number of draws per cell.
 % @example: 40 300 520 160 screct << /Count 90 /Length 50 /Angle 25 >> pkcrisscross << /Width 30 /Charge 0.7 >> pkbroad
-% @param: /Count About how many strokes to lay down, whole number 1..5000; a non-rectangular region keeps about this many (default 40)
-% @param: /Length Mean stroke length in points; must be > 0 (default 30)
-% @param: /Angle Half-opening of the X: strokes run at +Angle and -Angle from the x axis, in degrees 0..90 (default 35)
-% @param: /Spread Random scatter of each stroke's heading, in degrees; must be >= 0 (default 6)
-% @param: /LengthJitter 0..1 how far each stroke's length varies around /Length (default 0.3)
-% @param: /Bow 0..0.5 sideways bend of each stroke as a fraction of its length; 0 is straight (default 0)
+% @param: /Count [count] About how many strokes to lay down, whole number 1..5000; a non-rectangular region keeps about this many (default 40)
+% @param: /Length [points] Mean stroke length in points; must be > 0 (default 30)
+% @param: /Angle [degrees] Half-opening of the X: strokes run at +Angle and -Angle from the x axis, in degrees 0..90 (default 35)
+% @param: /Lean [degrees] Random scatter of each stroke's heading, in degrees; must be >= 0. Formerly /Spread, still accepted as a deprecated alias; /Lean wins if both are given (default 6)
+% @param: /LengthJitter [fraction of /Length] 0..1 how far each stroke's length varies around /Length (default 0.3)
+% @param: /Bow [fraction of stroke length] 0..0.5 sideways bend of each stroke as a fraction of its length; 0 is straight (default 0)
 /pkcrisscross {
     /mxopts exch def /mxreg exch def
     mxreg mhisregion not { pkcrisscross-needs-a-region } if
@@ -5670,9 +5797,12 @@ systemdict /setalpha known /pwhasalpha exch def
     /mxangle mxopts /Angle 35 pkgetdef def
     /mxangle load xcheck { pkcrisscross-angle-must-not-be-a-procedure } if
     mxangle 0 lt mxangle 90 gt or { pkcrisscross-angle-must-be-0-to-90 } if
-    /mxspread mxopts /Spread 6 pkgetdef def
-    /mxspread load xcheck { pkcrisscross-spread-must-not-be-a-procedure } if
-    mxspread 0 lt { pkcrisscross-spread-must-be-non-negative } if
+    % /Lean, or the deprecated /Spread alias when /Lean is absent (issue
+    % #141: /Spread elsewhere in this file is a fraction of /Width). The
+    % inner pkgetdef resolves the alias, so /Lean wins.
+    /mxspread mxopts /Lean mxopts /Spread 6 pkgetdef pkgetdef def
+    /mxspread load xcheck { pkcrisscross-lean-must-not-be-a-procedure } if
+    mxspread 0 lt { pkcrisscross-lean-must-be-non-negative } if
     /mxlj mxopts /LengthJitter 0.3 pkgetdef def
     /mxlj load xcheck { pkcrisscross-lengthjitter-must-not-be-a-procedure } if
     mxlj 0 lt mxlj 1 gt or { pkcrisscross-lengthjitter-must-be-0-to-1 } if
@@ -5723,10 +5853,10 @@ systemdict /setalpha known /pwhasalpha exch def
 % @kind: Procedure
 % @summary: A scumbling brush motion in a region (artkit's screct or scpath): many small separate circles scattered evenly, the tiny-circles stroke of clouds and bushes. Builds closed circle (or squashed ellipse) subpaths and paints nothing, so it composes with any preset: `region opts pkscumblein << >> pkoil`. Replaces the current path. For a connected chain of overlapping loops along a line use pkscumble.
 % @example: newpath 200 440 moveto 300 470 400 470 520 430 curveto scpath << /Count 80 /Radius 7 /Squash 0.6 >> pkscumblein << /Width 8 >> pkoil
-% @param: /Count About how many circles to lay down, whole number 1..5000; a non-rectangular region keeps about this many (default 60)
-% @param: /Radius Mean circle radius in points; must be > 0 (default 4)
-% @param: /RadiusJitter 0..1 how far each circle's radius varies around /Radius (default 0.4)
-% @param: /Squash Vertical radius as a fraction of the horizontal one, > 0 and <= 1; 1 is a circle, smaller flattens a cloud's underside (default 1)
+% @param: /Count [count] About how many circles to lay down, whole number 1..5000; a non-rectangular region keeps about this many (default 60)
+% @param: /Radius [points] Mean circle radius in points; must be > 0 (default 4)
+% @param: /RadiusJitter [fraction of /Radius] 0..1 how far each circle's radius varies around /Radius (default 0.4)
+% @param: /Squash [ratio] Vertical radius as a fraction of the horizontal one, > 0 and <= 1; 1 is a circle, smaller flattens a cloud's underside (default 1)
 /pkscumblein {
     /mcopts exch def /mcreg exch def
     mcreg mhisregion not { pkscumblein-needs-a-region } if
@@ -5773,10 +5903,10 @@ systemdict /setalpha known /pwhasalpha exch def
 % @kind: Procedure
 % @summary: A scumbling brush motion along a line: the current path is read as a spine and replaced with one continuous chain of overlapping loops per subpath, the circular scrubbing stroke that builds clouds and bushes. Builds a path and paints nothing, so it composes with any preset: `opts pkscumble << >> pkoil`. A one-point subpath becomes a single circle. Deterministic under the caller's own srand.
 % @example: newpath 120 430 moveto 300 470 480 450 600 430 curveto << /Radius 9 /Squash 0.7 >> pkscumble << /Width 8 >> pkoil
-% @param: /Radius Mean loop radius in points; must be > 0 (default 4)
-% @param: /Step Distance the loop advances along the spine per full turn, in points; must be > 0. Loops overlap while it is under 2*pi*Radius, and open into a wave beyond (default 1.6*Radius)
-% @param: /RadiusJitter 0..1 how far each loop's radius varies around /Radius; blended smoothly between loops (default 0.3)
-% @param: /Squash Radius across the line as a fraction of the radius along it, > 0 and <= 1 (default 1)
+% @param: /Radius [points] Mean loop radius in points; must be > 0 (default 4)
+% @param: /Step [points] Distance the loop advances along the spine per full turn, in points; must be > 0. Loops overlap while it is under 2*pi*Radius, and open into a wave beyond (default 1.6*Radius)
+% @param: /RadiusJitter [fraction of /Radius] 0..1 how far each loop's radius varies around /Radius; blended smoothly between loops (default 0.3)
+% @param: /Squash [ratio] Radius across the line as a fraction of the radius along it, > 0 and <= 1 (default 1)
 /pkscumble {
     /msopts exch def
     /msrad msopts /Radius 4 pkgetdef def
@@ -5843,12 +5973,12 @@ systemdict /setalpha known /pwhasalpha exch def
 % @kind: Procedure
 % @summary: A tapping / pouncing brush motion along a line: the current path is read as a spine and replaced with short stabs scattered along it, the foliage and distant-forest stroke. Each tap is a tiny two-point stroke, so it paints with any preset: `opts pktap << >> pkfan`; at /Length 0 each tap is a zero-length stroke that pkdab reads as one clump. Deterministic under the caller's own srand.
 % @example: newpath 40 300 moveto 200 330 400 300 600 320 curveto << /Spacing 5 /Length 8 /Scatter 4 >> pktap << /Width 5 /Bristles 10 >> pkfan
-% @param: /Spacing Mean distance between taps along the spine, in points; must be > 0 (default 8)
-% @param: /Length Length of each stab in points; must be >= 0 (default 6)
-% @param: /Direction Heading of each stab in degrees counterclockwise from +x, in user space (default 90, straight up)
-% @param: /Lean Random lean of each stab around /Direction, in degrees; must be >= 0 (default 15)
-% @param: /Scatter Random offset of each tap from the spine, in points; must be >= 0 (default 3)
-% @param: /LengthJitter 0..1 how far each stab's length varies around /Length (default 0.5)
+% @param: /Spacing [points] Mean distance between taps along the spine, in points; must be > 0 (default 8)
+% @param: /Length [points] Length of each stab in points; must be >= 0 (default 6)
+% @param: /Direction [degrees] Heading of each stab in degrees counterclockwise from +x, in user space (default 90, straight up)
+% @param: /Lean [degrees] Random lean of each stab around /Direction, in degrees; must be >= 0 (default 15)
+% @param: /Scatter [points] Random offset of each tap from the spine, in points; must be >= 0 (default 3)
+% @param: /LengthJitter [fraction of /Length] 0..1 how far each stab's length varies around /Length (default 0.5)
 /pktap {
     /mtopts exch def
     /mtspacing mtopts /Spacing 8 pkgetdef def
@@ -5892,13 +6022,13 @@ systemdict /setalpha known /pwhasalpha exch def
 % @kind: Procedure
 % @summary: A pull brush motion from a line: the current path is read as a spine and replaced with strokes that start on it and are pulled along a fixed direction -- down from a horizon for reflections, up from a ground line for grass, down a ridge for a knife's "touch and pull" highlights. Builds a path and paints nothing, so it composes with any preset: `opts pkpull << >> pkliner`. Deterministic under the caller's own srand.
 % @example: newpath 0 300 moveto 800 300 lineto << /Direction -90 /Length 60 /Spacing 6 >> pkpull << /Width 5 /Charge 0.6 >> pkbroad
-% @param: /Length Mean stroke length in points; must be > 0 (default 30)
-% @param: /LengthJitter 0..1 how far each stroke's length varies around /Length (default 0.5)
-% @param: /Spacing Mean distance between stroke starts along the spine, in points; must be > 0 (default 4)
-% @param: /Wander 0..1 how far a start slides along the spine from its even slot, as a fraction of /Spacing (default 0.5)
-% @param: /Direction Heading of every pull in degrees counterclockwise from +x, in user space: -90 pulls down, 90 pushes up (default -90)
-% @param: /Lean Random lean of each pull around /Direction, in degrees; must be >= 0 (default 6)
-% @param: /Bow 0..0.5 sideways bend of each pull as a fraction of its length, to either side at random; 0 is straight (default 0)
+% @param: /Length [points] Mean stroke length in points; must be > 0 (default 30)
+% @param: /LengthJitter [fraction of /Length] 0..1 how far each stroke's length varies around /Length (default 0.5)
+% @param: /Spacing [points] Mean distance between stroke starts along the spine, in points; must be > 0 (default 4)
+% @param: /Wander [fraction of /Spacing] 0..1 how far a start slides along the spine from its even slot, as a fraction of /Spacing (default 0.5)
+% @param: /Direction [degrees] Heading of every pull in degrees counterclockwise from +x, in user space: -90 pulls down, 90 pushes up (default -90)
+% @param: /Lean [degrees] Random lean of each pull around /Direction, in degrees; must be >= 0 (default 6)
+% @param: /Bow [fraction of stroke length] 0..0.5 sideways bend of each pull as a fraction of its length, to either side at random; 0 is straight (default 0)
 /pkpull {
     /mpopts exch def
     /mplen mpopts /Length 30 pkgetdef def
@@ -5986,10 +6116,10 @@ systemdict /setalpha known /pwhasalpha exch def
 % @kind: Procedure
 % @summary: A zig-zag brush motion along a line: the current path is read as a spine and replaced with one polyline per subpath that alternates to either side of it, the back-and-forth stroke of water and sweeps. It starts and ends on the spine. Builds a path and paints nothing, so it composes with any preset: `opts pkzigzag << >> pkbroad`. Deterministic under the caller's own srand.
 % @example: newpath 40 200 moveto 760 200 lineto << /Amplitude 5 /Wavelength 24 >> pkzigzag << /Width 3 /Charge 0.8 >> pkliner
-% @param: /Amplitude Distance of each peak from the spine, in points; must be >= 0 (default 6)
-% @param: /Wavelength Distance along the spine for one full back-and-forth, in points; must be > 0 (default 18)
-% @param: /AmpJitter 0..1 how far each peak's height varies around /Amplitude (default 0.3)
-% @param: /WaveJitter 0..1 how far each peak slides along the spine from its even slot (default 0.2)
+% @param: /Amplitude [points] Distance of each peak from the spine, in points; must be >= 0 (default 6)
+% @param: /Wavelength [points] Distance along the spine for one full back-and-forth, in points; must be > 0 (default 18)
+% @param: /AmpJitter [fraction of /Amplitude] 0..1 how far each peak's height varies around /Amplitude (default 0.3)
+% @param: /WaveJitter [0..1] how far each peak slides along the spine from its even slot (default 0.2)
 /pkzigzag {
     /mzopts exch def
     /mzamp mzopts /Amplitude 6 pkgetdef def

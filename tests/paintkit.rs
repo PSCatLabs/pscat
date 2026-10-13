@@ -3447,7 +3447,7 @@ fn an_invalid_explicit_pitch_is_rejected_before_walking() {
 // there is no solid base pass, so broken coverage and the underlayer
 // showing through are load-bearing rather than decorative. The tests
 // below therefore measure each artistic control on its own axis --
-// /Load as deposit *width*, /Coverage as fill *within* that width,
+// /Cover as deposit *width*, /Coverage as fill *within* that width,
 // /Viscosity as run *length*, /Scrape as lengthwise streaking -- since
 // all four would otherwise read as a single "amount of ink" number and
 // a regression in one could hide behind another.
@@ -3560,25 +3560,25 @@ fn trowel_a_different_seed_paints_a_different_mark() {
     assert_ne!(run(11), run(12), "a different seed should differ");
 }
 
-/// /Load is the *width* control: a nearly empty blade deposits a narrow
+/// /Cover is the *width* control: a nearly empty blade deposits a narrow
 /// band, a loaded one the whole blade. Measured as band thickness, not
 /// ink total, so it can't be satisfied by /Coverage's axis.
 #[test]
 fn trowel_load_widens_the_deposit_rather_than_filling_it() {
     let thin = column_height(
-        &trowel("/Width 60 /Load 0.05 /Coverage 1 /Scrape 0 /EdgeBuildup 0"),
+        &trowel("/Width 60 /Cover 0.05 /Coverage 1 /Scrape 0 /EdgeBuildup 0"),
         200,
         200,
     );
     let full = column_height(
-        &trowel("/Width 60 /Load 1 /Coverage 1 /Scrape 0 /EdgeBuildup 0"),
+        &trowel("/Width 60 /Cover 1 /Coverage 1 /Scrape 0 /EdgeBuildup 0"),
         200,
         200,
     );
     assert!(thin > 0, "even a nearly empty blade should mark");
     assert!(
         full > thin * 3 / 2,
-        "Load must widen the deposit: thin {thin} full {full}"
+        "Cover must widen the deposit: thin {thin} full {full}"
     );
 }
 
@@ -3962,7 +3962,7 @@ fn trowel_validation_and_safety() {
         ("/Lanes 0", "pktrowel-lanes-must-be-1-to-40"),
         ("/Lanes 41", "pktrowel-lanes-must-be-1-to-40"),
         ("/Lanes 3.5", "pktrowel-lanes-must-be-1-to-40"),
-        ("/Load 1.4", "pktrowel-load-must-be-0-to-1"),
+        ("/Cover 1.4", "pktrowel-cover-must-be-0-to-1"),
         ("/Angle 90", "pktrowel-angle-must-be-minus80-to-80"),
         ("/Angle -90", "pktrowel-angle-must-be-minus80-to-80"),
         ("/Drag 2", "pktrowel-drag-must-be-0-to-1"),
@@ -6217,19 +6217,19 @@ fn wet_outer_passes_carry_the_declared_under_color() {
     );
 }
 
-/// /Spread is how far the outermost pass is displaced, so it widens the
+/// /Offset is how far the outermost pass is displaced, so it widens the
 /// area the mark affects.
 #[test]
 fn wet_spread_widens_the_affected_area() {
     let ink = |spread: f64| {
-        let it = wet(&format!("/Soft 0.9 /Spread {spread} /Pickup 0.4"));
+        let it = wet(&format!("/Soft 0.9 /Offset {spread} /Pickup 0.4"));
         ink_count(&it)
     };
     let tight = ink(2.0);
     let wide = ink(30.0);
     assert!(
         wide > tight * 5 / 4,
-        "Spread must widen the mark's reach: tight {tight} wide {wide}"
+        "Offset must widen the mark's reach: tight {tight} wide {wide}"
     );
 }
 
@@ -6320,7 +6320,7 @@ fn wet_a_single_layer_does_not_divide_by_zero() {
     it.run_str(
         "0 0 0 setrgbcolor 5 srand \
          { newpath 50 80 moveto 250 80 lineto << /Width 24 >> pkribbon } \
-         << /Layers 1 /Spread 20 >> pkwet",
+         << /Layers 1 /Offset 20 >> pkwet",
     )
     .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
     assert!(
@@ -6343,7 +6343,7 @@ fn wet_validation_guards() {
         ("/Layers 0", "pkwet-layers-must-be-1-to-6"),
         ("/Layers 7", "pkwet-layers-must-be-1-to-6"),
         ("/Layers 2.5", "pkwet-layers-must-be-1-to-6"),
-        ("/Spread -1", "pkwet-spread-must-not-be-negative"),
+        ("/Offset -1", "pkwet-offset-must-not-be-negative"),
         ("/Pickup 2", "pkwet-pickup-must-be-0-to-1"),
         ("/Under 4", "pkwet-under-must-be-a-3-element-array"),
         ("/Under [0 0]", "pkwet-under-must-be-a-3-element-array"),
@@ -6431,7 +6431,7 @@ fn wet_leaves_the_operand_stack_balanced() {
 /// The contract an artist actually needs: turning one knob must not
 /// re-roll the others' texture. /Layers legitimately changes how many
 /// times the proc runs, so it changes consumption -- but /Pickup,
-/// /Under and /Spread must not, and neither must a /Soft that resolves
+/// /Under and /Offset must not, and neither must a /Soft that resolves
 /// to the same /Layers. Same downstream-marker technique as
 /// `trowel_consumes_a_fixed_number_of_random_draws`.
 #[test]
@@ -6452,13 +6452,13 @@ fn wet_consumes_a_fixed_number_of_draws_at_a_fixed_layer_count() {
             })
             .expect("marker drawn")
     };
-    let baseline = downstream_mark("/Spread 10");
+    let baseline = downstream_mark("/Offset 10");
     for opts in [
-        "/Spread 10 /Pickup 0",
-        "/Spread 10 /Pickup 1",
-        "/Spread 10 /Under [0.2 0.4 0.9]",
-        "/Spread 40",
-        "/Spread 10 /Soft 0.9",
+        "/Offset 10 /Pickup 0",
+        "/Offset 10 /Pickup 1",
+        "/Offset 10 /Under [0.2 0.4 0.9]",
+        "/Offset 40",
+        "/Offset 10 /Soft 0.9",
     ] {
         assert_eq!(
             downstream_mark(opts),
@@ -6481,7 +6481,7 @@ fn wet_survives_a_proc_that_defines_its_own_names() {
          { /passes passes 1 add def \
            /myw 20 def \
            newpath 50 100 moveto 250 100 lineto << /Width myw >> pkribbon } \
-         << /Layers 5 /Spread 12 /Under [0.9 0.9 0.9] >> pkwet \
+         << /Layers 5 /Offset 12 /Under [0.9 0.9 0.9] >> pkwet \
          passes",
     )
     .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
@@ -6504,7 +6504,7 @@ fn wet_geometry_does_not_depend_on_the_procs_own_random_appetite() {
             "0 0 0 setrgbcolor 5 srand \
              {{ {extra_draws} newpath 50 100 moveto 250 100 lineto \
                 << /Width 20 >> pkribbon }} \
-             << /Layers 5 /Spread 14 /Pickup 0 >> pkwet"
+             << /Layers 5 /Offset 14 /Pickup 0 >> pkwet"
         ))
         .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
         pixels(&it)
@@ -6562,8 +6562,8 @@ fn wet_can_be_nested_inside_its_own_wrapped_procedure() {
          { /outer outer 1 add def \
            { /inner inner 1 add def \
              newpath 60 110 moveto 240 110 lineto << /Width 16 >> pkribbon } \
-           << /Layers 3 /Spread 6 /Under [0.9 0.9 0.9] >> pkwet } \
-         << /Layers 4 /Spread 14 /Under [0.9 0.9 0.9] >> pkwet \
+           << /Layers 3 /Offset 6 /Under [0.9 0.9 0.9] >> pkwet } \
+         << /Layers 4 /Offset 14 /Under [0.9 0.9 0.9] >> pkwet \
          outer inner",
     )
     .unwrap_or_else(|e| {
@@ -6582,10 +6582,10 @@ fn wet_can_be_nested_inside_its_own_wrapped_procedure() {
 
 /// Codex review of PR #138: whether a displacement draw happens was
 /// keyed off the *magnitude* rather than the pass's position, so
-/// `/Spread 0` with several layers skipped every draw while any
+/// `/Offset 0` with several layers skipped every draw while any
 /// positive spread took one per non-core pass -- meaning turning
-/// /Spread alone re-rolled everything drawn afterwards, which is exactly
-/// what this preset's contract forbids. /Spread 0 is now on the same
+/// /Offset alone re-rolled everything drawn afterwards, which is exactly
+/// what this preset's contract forbids. /Offset 0 is now on the same
 /// stream as any other spread.
 #[test]
 fn wet_zero_spread_stays_on_the_same_random_stream() {
@@ -6606,9 +6606,9 @@ fn wet_zero_spread_stays_on_the_same_random_stream() {
             .expect("marker drawn")
     };
     assert_eq!(
-        downstream_mark("/Spread 0"),
-        downstream_mark("/Spread 18"),
-        "/Spread must not change how much of the caller's stream pkwet consumes"
+        downstream_mark("/Offset 0"),
+        downstream_mark("/Offset 18"),
+        "/Offset must not change how much of the caller's stream pkwet consumes"
     );
 }
 
@@ -6651,7 +6651,7 @@ fn wet_accepts_a_whole_valued_real_layer_count() {
         it.run_str(&format!(
             "0 0 0 setrgbcolor 5 srand \
              {{ newpath 60 100 moveto 240 100 lineto << /Width 20 >> pkribbon }} \
-             << /Layers {layers} /Spread 8 /Under [0.9 0.9 0.9] >> pkwet"
+             << /Layers {layers} /Offset 8 /Under [0.9 0.9 0.9] >> pkwet"
         ))
         .unwrap_or_else(|e| panic!("/Layers {layers} should work: {}", it.error_report(&e)));
         assert!(ink_count(&it) > 100, "/Layers {layers} should paint");
@@ -7030,7 +7030,7 @@ fn pulled(opts: &str) -> Interp {
 /// leaves ink below the mark and none above it, and 90 is its mirror.
 #[test]
 fn wet_one_sided_pull_lands_on_one_side_only() {
-    let opts = "/Spread 40 /Pickup 0.4 /OneSided true";
+    let opts = "/Offset 40 /Pickup 0.4 /OneSided true";
     let down = pulled(&format!("/Direction 270 {opts}"));
     // user y < 90 is device rows > 110; user y > 110 is rows < 90
     let (below, above) = (ink_rows_in(&down, 112..150), ink_rows_in(&down, 50..88));
@@ -7045,7 +7045,7 @@ fn wet_one_sided_pull_lands_on_one_side_only() {
 /// Without /OneSided the passes alternate sides: a sweep goes both ways.
 #[test]
 fn wet_two_sided_direction_sweeps_both_ways() {
-    let it = pulled("/Direction 90 /Spread 40 /Pickup 0.4 /Layers 6");
+    let it = pulled("/Direction 90 /Offset 40 /Pickup 0.4 /Layers 6");
     let (below, above) = (ink_rows_in(&it, 112..150), ink_rows_in(&it, 50..88));
     assert!(
         below > 1000 && above > 1000,
@@ -7054,21 +7054,21 @@ fn wet_two_sided_direction_sweeps_both_ways() {
 }
 
 /// The outermost pass of a two-sided call is on the + side at any depth
-/// parity -- at /Layers 3 it is the only pass at the full /Spread, so
+/// parity -- at /Layers 3 it is the only pass at the full /Offset, so
 /// full reach shows up above the mark and not below it.
 #[test]
 fn wet_two_sided_outermost_pass_is_on_the_plus_side_at_odd_depth() {
-    // Spread 40, Layers 3: outermost at +40 (user y 140, rows ~56..64),
+    // Offset 40, Layers 3: outermost at +40 (user y 140, rows ~56..64),
     // the middle pass at -20 (user y 80, rows ~116..124).
-    let it = pulled("/Direction 90 /Spread 40 /Pickup 0.4 /Layers 3 /Stretch 40");
+    let it = pulled("/Direction 90 /Offset 40 /Pickup 0.4 /Layers 3 /Stretch 40");
     let (plus, minus) = (ink_rows_in(&it, 52..68), ink_rows_in(&it, 132..148));
     assert!(
         plus > 1000,
-        "the outermost pass should reach +Spread: {plus}"
+        "the outermost pass should reach +Offset: {plus}"
     );
     assert_eq!(
         minus, 0,
-        "nothing should reach -Spread at Layers 3: {minus}"
+        "nothing should reach -Offset at Layers 3: {minus}"
     );
 }
 
@@ -7079,7 +7079,7 @@ fn wet_two_sided_outermost_pass_is_on_the_plus_side_at_odd_depth() {
 fn wet_stretch_narrows_the_cross_axis_spread() {
     let off_line = |stretch: u32| {
         let it = pulled(&format!(
-            "/Direction 0 /Stretch {stretch} /Spread 40 /Pickup 0.4 /Layers 6"
+            "/Direction 0 /Stretch {stretch} /Offset 40 /Pickup 0.4 /Layers 6"
         ));
         ink_rows_in(&it, 0..90) + ink_rows_in(&it, 111..200)
     };
@@ -7098,7 +7098,7 @@ fn wet_directional_outer_passes_carry_the_declared_under_color() {
     let mut it = fresh(400, 200);
     it.run_str(&format!(
         "0 0 0 setrgbcolor 11 srand {{ {PULL_MARK} }} \
-         << /Direction 270 /OneSided true /Spread 40 /Pickup 0.9 /Under [1 0 0] >> pkwet"
+         << /Direction 270 /OneSided true /Offset 40 /Pickup 0.9 /Under [1 0 0] >> pkwet"
     ))
     .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
     let reddish = it
@@ -7116,9 +7116,9 @@ fn wet_directional_outer_passes_carry_the_declared_under_color() {
 
 /// A directional call takes exactly one draw per non-core pass, like an
 /// isotropic one, so *at a fixed /Layers* switching /Direction on, or
-/// turning /Direction, /Stretch, /OneSided or /Spread, never re-rolls
+/// turning /Direction, /Stretch, /OneSided or /Offset, never re-rolls
 /// anything drawn afterwards. (With /Layers defaulted, a directional
-/// call's depth follows /Spread, which does change consumption -- see
+/// call's depth follows /Offset, which does change consumption -- see
 /// `wet_directional_default_depth_keeps_the_steps_fine`.)
 #[test]
 fn wet_direction_keys_do_not_change_random_consumption() {
@@ -7127,7 +7127,7 @@ fn wet_direction_keys_do_not_change_random_consumption() {
         it.run_str(&format!(
             "0 0 0 setrgbcolor 11 srand \
              {{ newpath 60 140 moveto 340 140 lineto << /Width 24 >> pkribbon }} \
-             << /Layers 4 /Spread 10 {opts} >> pkwet \
+             << /Layers 4 /Offset 10 {opts} >> pkwet \
              0 0 0 setrgbcolor newpath 20 frnd 340 mul add 20 moveto 0 12 rlineto \
              6 setlinewidth stroke"
         ))
@@ -7143,7 +7143,7 @@ fn wet_direction_keys_do_not_change_random_consumption() {
         "/Direction 270",
         "/Direction 0 /Stretch 1",
         "/Direction 45.5 /Stretch 30 /OneSided true",
-        "/Direction 270 /Spread 40",
+        "/Direction 270 /Offset 40",
     ] {
         assert_eq!(
             downstream_mark(opts),
@@ -7169,20 +7169,20 @@ fn wet_directional_default_depth_keeps_the_steps_fine() {
     };
     // Soft 0.6 alone would give 4; a 22pt one-sided pull needs
     // ceil(22/2)+1 = 12, and a two-sided sweep twice as fine, ceil(12)+1.
-    assert_eq!(passes("/Direction 270 /Spread 22 /OneSided true"), "12");
-    assert_eq!(passes("/Direction 0 /Spread 12"), "13");
-    assert_eq!(passes("/Direction 270 /Spread 80"), "16", "capped at 16");
-    // an absurd /Spread must clamp, not rangecheck in cvi
-    assert_eq!(passes("/Direction 270 /Spread 1e30"), "16");
-    assert_eq!(passes("/Direction 270 /Spread 22 /Layers 3"), "3");
-    assert_eq!(passes("/Direction 270 /Soft 0 /Spread 22"), "1");
+    assert_eq!(passes("/Direction 270 /Offset 22 /OneSided true"), "12");
+    assert_eq!(passes("/Direction 0 /Offset 12"), "13");
+    assert_eq!(passes("/Direction 270 /Offset 80"), "16", "capped at 16");
+    // an absurd /Offset must clamp, not rangecheck in cvi
+    assert_eq!(passes("/Direction 270 /Offset 1e30"), "16");
+    assert_eq!(passes("/Direction 270 /Offset 22 /Layers 3"), "3");
+    assert_eq!(passes("/Direction 270 /Soft 0 /Offset 22"), "1");
     // ...and none of that reaches an isotropic call.
-    assert_eq!(passes("/Spread 22"), "4");
+    assert_eq!(passes("/Offset 22"), "4");
 }
 
 /// The step that reads as an echo is between neighbours on the *same
 /// side*, and a two-sided sweep alternates sides -- so its default depth
-/// has to be twice as fine (Codex review, round 2: /Spread 12 at 7
+/// has to be twice as fine (Codex review, round 2: /Offset 12 at 7
 /// layers put a sweep's copies 4pt apart on each side). Measured from
 /// the passes' actual translations, not their count.
 #[test]
@@ -7200,9 +7200,9 @@ fn wet_directional_default_depth_keeps_same_side_steps_within_2pt() {
             .collect()
     };
     for opts in [
-        "/Direction 0 /Spread 12",
-        "/Direction 0 /Spread 12 /OneSided true",
-        "/Direction 0 /Spread 22 /OneSided true",
+        "/Direction 0 /Offset 12",
+        "/Direction 0 /Offset 12 /OneSided true",
+        "/Direction 0 /Offset 22 /OneSided true",
     ] {
         let xs = offsets(opts);
         for side in [1.0, -1.0] {
@@ -7406,7 +7406,7 @@ fn band_count(it: &Interp, lo: f32, hi: f32) -> usize {
 
 #[test]
 fn dab_paints_clustered_marks_around_the_path() {
-    let it = dab("/Size 6 /Spread 20");
+    let it = dab("/Size 6 /Scatter 20");
     assert!(
         ink_count(&it) > 1500,
         "the dabs must mark: {}",
@@ -7422,8 +7422,8 @@ fn dab_paints_clustered_marks_around_the_path() {
 
 #[test]
 fn dab_ink_stays_within_spread_plus_dab_radius() {
-    let it = dab("/Size 6 /Spread 20");
-    // Spread + the largest dab (Size*1.4 * 1.12 underlayer, irregular
+    let it = dab("/Size 6 /Scatter 20");
+    // Scatter + the largest dab (Size*1.4 * 1.12 underlayer, irregular
     // vertices up to ~1.65x) comfortably bounds this.
     let reach = 20.0 + 6.0 * 1.4 * 1.65 * 1.12 + 4.0;
     let rows: Vec<u32> = (0..200)
@@ -7477,8 +7477,8 @@ fn dab_coverage_follows_the_path_not_the_pitch() {
 
 #[test]
 fn dab_density_scales_coverage() {
-    let sparse = ink_count(&dab("/Size 5 /Spread 5 /Density 0.5"));
-    let dense = ink_count(&dab("/Size 5 /Spread 5 /Density 4"));
+    let sparse = ink_count(&dab("/Size 5 /Scatter 5 /Density 0.5"));
+    let dense = ink_count(&dab("/Size 5 /Scatter 5 /Density 4"));
     assert!(dense > sparse * 2, "density: {sparse} -> {dense}");
     assert_eq!(
         ink_count(&dab("/Density 0")),
@@ -7553,7 +7553,7 @@ fn dab_layout_knobs_leave_the_random_stream_alone() {
         "/Light 45",
         "/ColorJitter 0.9",
         "/Irregular 1",
-        "/Spread 40",
+        "/Scatter 40",
     ] {
         assert_eq!(
             dab_stream_after(&format!("/Size 6 {knob}"), DAB_PATH),
@@ -7610,7 +7610,7 @@ fn dab_single_point_is_a_bounded_clump() {
     let it = dab_with(
         "0 0 0",
         "newpath 200 100 moveto",
-        "/Size 6 /Spread 20 /Clump 20",
+        "/Size 6 /Scatter 20 /Clump 20",
     );
     let ink = ink_count(&it);
     assert!(ink > 300, "a point must paint a clump: {ink}");
@@ -7643,7 +7643,7 @@ fn dab_rejects_malformed_options() {
     let cases = [
         ("/Size 0", "pkdab-size-must-be-positive"),
         ("/Size { 5 }", "pkdab-size-must-not-be-a-procedure"),
-        ("/Spread 0", "pkdab-spread-must-be-positive"),
+        ("/Scatter 0", "pkdab-scatter-must-be-positive"),
         ("/Density -1", "pkdab-density-must-be-non-negative"),
         ("/Clump 0", "pkdab-clump-must-be-1-to-400"),
         ("/Clump 2.5", "pkdab-clump-must-be-1-to-400"),
@@ -7741,7 +7741,7 @@ fn dab_advertises_exactly_its_tested_parameters() {
         "Pitch",
         "Shadow",
         "Size",
-        "Spread",
+        "Scatter",
     ];
     expected.sort();
     assert_eq!(
@@ -7875,7 +7875,7 @@ const SPINE: &str = "newpath 0 100 moveto 100 100 lineto";
 fn crisscross_runs_at_two_mirrored_headings() {
     let segs = motion_segs(
         "5 srand 0 0 200 100 screct \
-         << /Count 60 /Length 20 /LengthJitter 0 /Angle 30 /Spread 0 >> pkcrisscross",
+         << /Count 60 /Length 20 /LengthJitter 0 /Angle 30 /Lean 0 >> pkcrisscross",
     );
     let s = strokes(&segs);
     assert!(s.len() > 40, "got {} strokes", s.len());
@@ -8036,7 +8036,7 @@ fn motion_shaping_knobs_leave_the_random_stream_alone() {
     for knob in [
         "/Length 60",
         "/Angle 70",
-        "/Spread 30",
+        "/Lean 30",
         "/LengthJitter 1",
         "/Bow 0.4",
     ] {
@@ -8272,7 +8272,7 @@ fn tap_at_zero_length_makes_point_strokes_that_pkdab_reads_as_clumps() {
     let mut it = fresh(400, 200);
     it.run_str(&format!(
         "0 0 0 setrgbcolor 5 srand 20 0 translate 0 -60 translate {SPINE} \
-         << /Spacing 25 /Length 0 /Scatter 0 >> pktap << /Size 3 /Spread 9 /Clump 12 >> pkdab"
+         << /Spacing 25 /Length 0 /Scatter 0 >> pktap << /Size 3 /Scatter 9 /Clump 12 >> pkdab"
     ))
     .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
     // five clumps of twelve dabs, not five specks
@@ -8434,7 +8434,7 @@ fn bowed_pulls_do_not_overshoot_their_tip() {
 fn bowed_crisscross_strokes_do_not_overshoot_their_tip() {
     assert_bowed_strokes_stay_within_their_length(
         "5 srand 0 0 200 100 screct \
-         << /Count 20 /Length 20 /LengthJitter 0 /Spread 0 /Bow 0.2 >> pkcrisscross",
+         << /Count 20 /Length 20 /LengthJitter 0 /Lean 0 /Bow 0.2 >> pkcrisscross",
         20.0,
     );
 }
@@ -8624,7 +8624,7 @@ fn motions_advertise_exactly_their_tested_parameters() {
     for (proc_name, expected) in [
         (
             "pkcrisscross",
-            &["Angle", "Bow", "Count", "Length", "LengthJitter", "Spread"][..],
+            &["Angle", "Bow", "Count", "Length", "LengthJitter", "Lean"][..],
         ),
         (
             "pkscumblein",
@@ -8718,5 +8718,104 @@ fn ghostscript_accepts_the_motion_specimen() {
     assert!(
         status.success(),
         "gs rejected examples/paintkit_motion_demo.ps"
+    );
+}
+
+// --- deprecated key aliases (issue #141) ------------------------------
+// Four keys were renamed so that /Spread always means a 0..1 fraction of
+// /Width and /Load always means a contact rate per /Width of travel. Each
+// old name must keep rendering byte-identically to the new one, and when
+// both are given the new name must win. Each check also confirms the two
+// values chosen really render differently, so "the new name wins" can't
+// pass vacuously.
+
+/// Renders the new key, the old key and both together, plus a different
+/// value of the new key, and checks the first three match and the fourth
+/// does not.
+fn assert_alias_renders(
+    render: impl Fn(&str) -> Interp,
+    new_opts: &str,
+    old_opts: &str,
+    both_opts: &str,
+    other_opts: &str,
+) {
+    let new = pixels(&render(new_opts));
+    assert_eq!(
+        pixels(&render(old_opts)),
+        new,
+        "{old_opts} must render exactly like {new_opts}"
+    );
+    assert_eq!(
+        pixels(&render(both_opts)),
+        new,
+        "with both given ({both_opts}) the new key must win"
+    );
+    assert_ne!(
+        pixels(&render(other_opts)),
+        new,
+        "{other_opts} should render differently from {new_opts}, or the \
+         precedence check above proves nothing"
+    );
+}
+
+#[test]
+fn wet_spread_is_a_deprecated_alias_for_offset() {
+    assert_alias_renders(
+        wet,
+        "/Soft 0.9 /Offset 20",
+        "/Soft 0.9 /Spread 20",
+        "/Soft 0.9 /Offset 20 /Spread 4",
+        "/Soft 0.9 /Offset 4",
+    );
+    // Directional calls take the default depth from the same value.
+    assert_alias_renders(
+        pulled,
+        "/Direction 270 /OneSided true /Offset 30",
+        "/Direction 270 /OneSided true /Spread 30",
+        "/Direction 270 /OneSided true /Offset 30 /Spread 8",
+        "/Direction 270 /OneSided true /Offset 8",
+    );
+}
+
+#[test]
+fn trowel_load_is_a_deprecated_alias_for_cover() {
+    assert_alias_renders(
+        trowel,
+        "/Width 60 /Cover 0.2",
+        "/Width 60 /Load 0.2",
+        "/Width 60 /Cover 0.2 /Load 1",
+        "/Width 60 /Cover 1",
+    );
+}
+
+#[test]
+fn dab_spread_is_a_deprecated_alias_for_scatter() {
+    assert_alias_renders(
+        dab,
+        "/Size 6 /Scatter 24",
+        "/Size 6 /Spread 24",
+        "/Size 6 /Scatter 24 /Spread 8",
+        "/Size 6 /Scatter 8",
+    );
+}
+
+#[test]
+fn crisscross_spread_is_a_deprecated_alias_for_lean() {
+    let criss = |opts: &str| {
+        let mut it = fresh(400, 200);
+        it.run_str(&format!(
+            "0 0 0 setrgbcolor 7 srand \
+             0 0 400 200 screct << /Count 40 /Length 60 {opts} >> pkcrisscross \
+             << /Width 3 >> pkribbon"
+        ))
+        .unwrap_or_else(|e| panic!("{opts}: {}", it.error_report(&e)));
+        it
+    };
+    assert_alias_renders(
+        criss,
+        "/Lean 20",
+        "/Spread 20",
+        "/Lean 20 /Spread 0",
+        "/Lean 0",
     );
 }

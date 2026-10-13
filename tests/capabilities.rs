@@ -265,6 +265,91 @@ fn generated_paintkit_entries_have_the_right_fields() {
     ));
 }
 
+/// Issue #141: every paintkit parameter's description starts with its
+/// unit in brackets, so an agent reading `--capabilities` can tell
+/// "Offset 14" (points) from "Spread 0.8" (a fraction of /Width) without
+/// opening the library. The vocabulary is closed on purpose: a check for
+/// a leading `[` alone would accept `/Under [r g b] ...` with no unit
+/// added, and free-form units drift (`pt`, `pts`, `user units`).
+fn paintkit_unit_is_known(unit: &str) -> bool {
+    const FIXED: &[&str] = &[
+        "points",
+        "degrees",
+        "count",
+        "0..1",
+        "ratio",
+        "proc",
+        "name",
+        "rgb array",
+        "boolean",
+        "integer",
+    ];
+    FIXED.contains(&unit)
+        || ["fraction of ", "per ", "multiple of ", "count per "]
+            .iter()
+            .any(|form| unit.strip_prefix(form).is_some_and(|rest| !rest.is_empty()))
+}
+
+#[test]
+fn every_paintkit_parameter_states_its_unit() {
+    let caps = capabilities::catalog();
+    let paintkit: Vec<_> = caps
+        .iter()
+        .filter(|c| c.source == "lib/paintkit.ps")
+        .collect();
+    assert!(!paintkit.is_empty(), "no paintkit entries in the catalog");
+    let mut checked = 0;
+    for cap in &paintkit {
+        for p in &cap.parameters {
+            let unit = p
+                .description
+                .strip_prefix('[')
+                .and_then(|rest| rest.split_once("] "))
+                .map(|(unit, _)| unit)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{} /{}: description must start with a [unit], got {:?}",
+                        cap.name, p.name, p.description
+                    )
+                });
+            assert!(
+                paintkit_unit_is_known(unit),
+                "{} /{}: unknown unit [{unit}]",
+                cap.name,
+                p.name
+            );
+            // The two names #141 was about mean one thing everywhere.
+            match p.name {
+                "Spread" => assert_eq!(unit, "fraction of /Width", "{} /Spread", cap.name),
+                "Load" => assert_eq!(unit, "per /Width", "{} /Load", cap.name),
+                _ => {}
+            }
+            checked += 1;
+        }
+    }
+    assert!(checked > 100, "only {checked} paintkit parameters checked");
+
+    // The deprecated aliases still work but are not advertised: a row for
+    // them would put the second meaning back into the catalog.
+    for (preset, old, new) in [
+        ("pkwet", "Spread", "Offset"),
+        ("pktrowel", "Load", "Cover"),
+        ("pkdab", "Spread", "Scatter"),
+        ("pkcrisscross", "Spread", "Lean"),
+    ] {
+        let cap = paintkit
+            .iter()
+            .find(|c| c.name == preset)
+            .unwrap_or_else(|| panic!("{preset} in the catalog"));
+        let names: Vec<&str> = cap.parameters.iter().map(|p| p.name).collect();
+        assert!(names.contains(&new), "{preset} advertises /{new}");
+        assert!(
+            !names.contains(&old),
+            "{preset} must not advertise its deprecated /{old}"
+        );
+    }
+}
+
 /// `lib/handscript.ps`/`lib/hangul.ps` are standalone (no artkit
 /// dependency, unlike pagekit/the style packs), so each gets its own
 /// fresh `Interp` rather than an artkit-baseline diff.
