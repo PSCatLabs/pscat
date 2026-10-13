@@ -4,6 +4,27 @@ Read by `SKILL.md` before step 1 (skim) and whenever a step says so.
 
 Step numbers ("step 1" ... "step 9") refer to the numbered steps in `../SKILL.md`, which keep their original numbering. "Pitfalls" / "the ... pitfall below" means `pitfalls.md` in this directory; "Claim the issue" means `claim-protocol.md`.
 
+<!-- TOC -->
+Read a section with the Read tool (`offset`/`limit`), not one `cat`: this file is long enough to be truncated.
+The line ranges drift when you edit the file: re-check them (the first and last line of each range) after any edit.
+
+| Section | Lines |
+|---|---|
+| General pitfalls (a flat list of bullets) | 28-206 |
+| Added in #194 (friction from the #189 / PR #193 run, and #151) | 208-254 |
+| Waiting and timeouts | 256-269 |
+| Step 5 checklist | 271-300 |
+| CI wait (#199, from the #178 / PR #198 run; timings and pass/fail rule updated in #208) | 302-364 |
+| Main CI after merge (#257, #273) | 366-404 |
+| Pending-CI hand-back (only if you truly cannot wait) | 406-425 |
+| Resume paths (#208) | 427-468 |
+| Stop without merging when the dispatcher says so (#208) | 470-491 |
+| Rebase and merge rules (#208) | 493-531 |
+| Step 4 is a hard gate | 533-540 |
+| One scratch location | 542-554 |
+| Evidence runs and scratch hygiene (#273) | 556-579 |
+<!-- /TOC -->
+
 - **Don't work in the main checkout.** The whole point of the worktree
   is that the branch's changes are physically separate from wherever
   this skill was invoked from. If you catch yourself editing files
@@ -238,6 +259,11 @@ Step numbers ("step 1" ... "step 9") refer to the numbered steps in `../SKILL.md
 - Foreground `sleep` may be blocked. Wait with a background Bash task
   (`run_in_background: true`, you are notified when it exits) or a Python
   poll, `python3 -c 'import time; time.sleep(60)'`, kept under 115 s per call.
+- A bounded single-call wait on a log file is fine: a Python poll such as
+  `until grep -q GATE_EXIT <log>; do python3 -c 'import time; time.sleep(5)'; done`, kept
+  under 115 s per call (the call is moved to the background past that, and you are notified).
+- `Monitor` is a deferred tool: load its schema first with `ToolSearch` (`select:Monitor`),
+  or calling it fails.
 - Keep scratch output under `<SCRATCH>` as `<kind>-<N>.*`, never a relative
   path that escapes the worktree (`../x`) and never `/tmp` when the system
   prompt names a scratchpad.
@@ -262,9 +288,12 @@ Cheapest first, before the long gate:
    `/name where { pop } { /name N dict def } ifelse`. Run `cargo build` before the long gate to
    see a panic in seconds.
 4. Paintkit and other `lib/` slices that promise "unset keys render byte-identically":
-   run `scripts/identity_check.sh BASE_WORKTREE` (see its header: base worktree at the
-   post-5.5-rebase commit, one shared binary, `--control FILE` negative control). The
-   control driver may live in `<SCRATCH>`: pass it by absolute path.
+   run `scripts/identity_check.sh BASE_WORKTREE` (see its header: one shared binary,
+   `--control FILE` negative control). Order matters: rebase first (step 5.5), then create the
+   base worktree from the rebased branch's base, `git worktree add --detach <path> "$(git -C
+   "$WORKTREE_DIR" merge-base HEAD origin/main)"`, then run the check. A rebase after the
+   check leaves a stale base: re-create the base and re-run. The control driver may live in
+   `<SCRATCH>`: pass it by absolute path.
 5. Every pscat probe you run by hand needs `--headless`, or `-e`/`--png`. Without one of
    them pscat opens a window and the call blocks until it is closed:
    `pscat --headless -e '3 4 add ='`, `pscat --png <SCRATCH>/probe-<N>.png file.ps`.

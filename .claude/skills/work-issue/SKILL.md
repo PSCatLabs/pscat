@@ -25,7 +25,8 @@ root) before running the step's commands.
   with the session: decide a resume from GitHub state.
 - macOS has no `timeout`, and foreground `sleep` may be blocked: pitfalls.md "Waiting and timeouts".
 - Never end a run with CI pending unless step 8.12's "pending CI" rule applies.
-- Read `.claude/skills/work-issue/references/pitfalls.md` once now. (`references/rationale.md`
+- Read the top of `.claude/skills/work-issue/references/pitfalls.md` now (its contents table gives
+  line ranges: read sections with Read `offset`/`limit`; one `cat` truncates). (`references/rationale.md`
   explains why each step is shaped as it is; read it before editing this skill.)
 
 ## 1. Pick and claim the issue
