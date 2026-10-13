@@ -763,7 +763,8 @@ renders eight examples in both and compares block-downsampled output).
 ## Verification checklist before calling any future stage done
 
 ```sh
-cargo test            # all suites, golden included (needs gs installed)
+cargo test --profile ci  # all suites, golden included (needs gs installed);
+                         # optimized + debug-assertions, what CI runs (#204)
 cargo clippy --all-targets
 cargo fmt --check
 ./scripts/selftest.sh                     # PS-native checks (no gs, no Rust)
