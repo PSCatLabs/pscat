@@ -1887,6 +1887,63 @@
     porstate { porbr } if
 } def
 
+%%SelfTest: pkoil-hue-keys
+%   { newpath 0 0 moveto 10 0 lineto << /HighlightColor 5 >> pkoil }
+%   /pkoil-highlightcolor-must-be-an-rgb-array
+%   (/HighlightColor 5) mustguard
+%
+%   { newpath 0 0 moveto 10 0 lineto << /HighlightColor { 0.5 0.5 0.5 } >> pkoil }
+%   /pkoil-highlightcolor-must-be-an-rgb-array
+%   (/HighlightColor as a procedure) mustguard
+%
+%   { newpath 0 0 moveto 10 0 lineto << /HighlightColor [ 0.5 0.5 ] >> pkoil }
+%   /pkoil-highlightcolor-must-be-an-rgb-array
+%   (/HighlightColor with two components) mustguard
+%
+%   { newpath 0 0 moveto 10 0 lineto << /HighlightColor [ 0.5 0.5 1.5 ] >> pkoil }
+%   /pkoil-highlightcolor-components-must-be-0-to-1
+%   (/HighlightColor with a component of 1.5) mustguard
+%
+%   { newpath 0 0 moveto 10 0 lineto << /HighlightColor [ 0.5 (x) 0.5 ] >> pkoil }
+%   /pkoil-highlightcolor-components-must-be-0-to-1
+%   (/HighlightColor with a string component) mustguard
+%
+%   { newpath 0 0 moveto 10 0 lineto << /ShadowColor 5 >> pkoil }
+%   /pkoil-shadowcolor-must-be-an-rgb-array
+%   (/ShadowColor 5) mustguard
+%
+%   { newpath 0 0 moveto 10 0 lineto << /ShadowColor { 0.5 0.5 0.5 } >> pkoil }
+%   /pkoil-shadowcolor-must-be-an-rgb-array
+%   (/ShadowColor as a procedure) mustguard
+%
+%   { newpath 0 0 moveto 10 0 lineto << /ShadowColor [ 0.5 0.5 ] >> pkoil }
+%   /pkoil-shadowcolor-must-be-an-rgb-array
+%   (/ShadowColor with two components) mustguard
+%
+%   { newpath 0 0 moveto 10 0 lineto << /ShadowColor [ 0.5 0.5 1.5 ] >> pkoil }
+%   /pkoil-shadowcolor-components-must-be-0-to-1
+%   (/ShadowColor with a component of 1.5) mustguard
+%
+%   { newpath 0 0 moveto 10 0 lineto << /ShadowColor [ 0.5 (x) 0.5 ] >> pkoil }
+%   /pkoil-shadowcolor-components-must-be-0-to-1
+%   (/ShadowColor with a string component) mustguard
+%
+%   { newpath 0 0 moveto 10 0 lineto << /HighlightColour [ 1 1 0 ] >> pkoil }
+%   /pkoil-colours-is-spelled-colors
+%   (/HighlightColour) mustguard
+%
+%   { newpath 0 0 moveto 10 0 lineto << /ShadowColour [ 0 0 1 ] >> pkoil }
+%   /pkoil-colours-is-spelled-colors
+%   (/ShadowColour) mustguard
+%
+%   { newpath 0 0 moveto 10 0 lineto << /HighlightColor [ 1 1 0 ] /ShadowColor [ 0 0.2 0.6 ] >> pkoil }
+%   (both mix targets) mustpass
+%
+%   { newpath 0 0 moveto 10 0 lineto << /HighlightColor [ 1 0 0 ] /Highlight 0 >> pkoil }
+%   (a mix target with its layer off) mustpass
+%
+%%EndSelfTest
+%
 % @kind: Procedure
 % @summary: A stylized oil-paint impasto preset built on pkribbon: layered pressure ribbons and bristle ridges suggesting a loaded brush, with restrained highlight/shadow edge lifts that read as paint thickness without any 3D height map or blending. Deterministic under the caller's own srand; bounded by Ridges * stops; respects clip like every other preset.
 % @example: newpath ... << /Width 16 /Ridges 12 /Load 0.9 >> pkoil
@@ -1904,6 +1961,8 @@
 % @param: /Shadow [0..1] restrained shadow strength on the opposite side (default 0.10)
 % @param: /Pressure [proc] {t -> mult} proc over normalized path progress; shapes the base ribbon, bristle ridges, highlight and shadow alike (default { pkflat })
 % @param: /Jitter [points] Seeded edge displacement amount, forwarded to each dash's pkribbon Jitter (default 0)
+% @param: /HighlightColor [rgb array] the color the highlight ridge mixes toward, instead of white; /Highlight still sets how far (default unset: toward white)
+% @param: /ShadowColor [rgb array] the color the shadow ridge mixes toward, instead of black; /Shadow still sets how far (default unset: toward black)
 /pkoil {
     /poopts exch def
     /poWidth poopts /Width 14 pkgetdef def
@@ -1946,6 +2005,17 @@
     /poJitter load xcheck { pkoil-jitter-must-not-be-a-procedure } if
     /poPressure poopts /Pressure { pkflat } pkgetdef def
     /poPressure load xcheck /poPressure load type dup /arraytype eq exch dup /operatortype eq exch /packedarraytype eq or or and not { pkoil-pressure-must-be-a-procedure } if
+    % The two colours the highlight and shadow ridges mix toward: null when the
+    % key is unset, so the branch below is `... null ne` and an unset key keeps
+    % the `shade` toward white or black. `puspell` rejects /HighlightColour and
+    % friends (pkgetdef would ignore them). Graded once for the running `pkwet`
+    % pass (`puwet` is affine and the identity outside a pull); kept under po-
+    % names because the nested pkribbon calls clobber pk*.
+    poopts (pkoil) puspell
+    poopts /HighlightColor (pkoil-highlightcolor) puhue
+        dup null ne { aload pop puwet 3 array astore } if /poHighlightColor exch def
+    poopts /ShadowColor (pkoil-shadowcolor) puhue
+        dup null ne { aload pop puwet 3 array astore } if /poShadowColor exch def
     % counting pass with safety budget
     /pocount 0 def
     poPitch { pop pop pop pop pop pop /pocount pocount 1 add def poRidges pocount mul 120000 gt { pkoil-deposit-count-exceeds-safety-limit } if } walkpath
@@ -1986,7 +2056,12 @@
         poHighlight 0 gt {
             /pohoff pohalfspread 0.85 mul def
             /pohpow poRidgeWidth 0.6 mul def
-            pobasecolor poHighlight 1 add shade setrgbcolor
+            poHighlightColor null ne {
+                pobasecolor poHighlightColor poHighlight mix3
+            } {
+                pobasecolor poHighlight 1 add shade
+            } ifelse
+            setrgbcolor
             /posi 0 def /porunstart 0 def
             {
                 posi pon ge { exit } if
@@ -2001,7 +2076,12 @@
         poShadow 0 gt {
             /posoff pohalfspread -0.85 mul def
             /pospow poRidgeWidth 0.6 mul def
-            pobasecolor poShadow neg 1 add shade setrgbcolor
+            poShadowColor null ne {
+                pobasecolor poShadowColor poShadow mix3
+            } {
+                pobasecolor poShadow neg 1 add shade
+            } ifelse
+            setrgbcolor
             /posi 0 def /porunstart 0 def
             {
                 posi pon ge { exit } if
@@ -5990,8 +6070,114 @@ systemdict /setalpha known /pwhasalpha exch def
 %   (/Scatter 0 with a valid /Spread) mustguard
 %%EndSelfTest
 %
+%%SelfTest: pkdab-loaded-colors-and-hue-keys
+%   { newpath 0 0 moveto 10 0 lineto << /HighlightColor 5 >> pkdab }
+%   /pkdab-highlightcolor-must-be-an-rgb-array
+%   (/HighlightColor 5) mustguard
+%
+%   { newpath 0 0 moveto 10 0 lineto << /HighlightColor { 0.5 0.5 0.5 } >> pkdab }
+%   /pkdab-highlightcolor-must-be-an-rgb-array
+%   (/HighlightColor as a procedure) mustguard
+%
+%   { newpath 0 0 moveto 10 0 lineto << /HighlightColor [ 0.5 0.5 ] >> pkdab }
+%   /pkdab-highlightcolor-must-be-an-rgb-array
+%   (/HighlightColor with two components) mustguard
+%
+%   { newpath 0 0 moveto 10 0 lineto << /HighlightColor [ 0.5 0.5 1.5 ] >> pkdab }
+%   /pkdab-highlightcolor-components-must-be-0-to-1
+%   (/HighlightColor with a component of 1.5) mustguard
+%
+%   { newpath 0 0 moveto 10 0 lineto << /HighlightColor [ 0.5 (x) 0.5 ] >> pkdab }
+%   /pkdab-highlightcolor-components-must-be-0-to-1
+%   (/HighlightColor with a string component) mustguard
+%
+%   { newpath 0 0 moveto 10 0 lineto << /ShadowColor 5 >> pkdab }
+%   /pkdab-shadowcolor-must-be-an-rgb-array
+%   (/ShadowColor 5) mustguard
+%
+%   { newpath 0 0 moveto 10 0 lineto << /ShadowColor { 0.5 0.5 0.5 } >> pkdab }
+%   /pkdab-shadowcolor-must-be-an-rgb-array
+%   (/ShadowColor as a procedure) mustguard
+%
+%   { newpath 0 0 moveto 10 0 lineto << /ShadowColor [ 0.5 0.5 ] >> pkdab }
+%   /pkdab-shadowcolor-must-be-an-rgb-array
+%   (/ShadowColor with two components) mustguard
+%
+%   { newpath 0 0 moveto 10 0 lineto << /ShadowColor [ 0.5 0.5 1.5 ] >> pkdab }
+%   /pkdab-shadowcolor-components-must-be-0-to-1
+%   (/ShadowColor with a component of 1.5) mustguard
+%
+%   { newpath 0 0 moveto 10 0 lineto << /ShadowColor [ 0.5 (x) 0.5 ] >> pkdab }
+%   /pkdab-shadowcolor-components-must-be-0-to-1
+%   (/ShadowColor with a string component) mustguard
+%
+%   { newpath 0 0 moveto 10 0 lineto << /HighlightColour [ 1 1 0 ] >> pkdab }
+%   /pkdab-colours-is-spelled-colors
+%   (/HighlightColour) mustguard
+%
+%   { newpath 0 0 moveto 10 0 lineto << /ShadowColour [ 0 0 1 ] >> pkdab }
+%   /pkdab-colours-is-spelled-colors
+%   (/ShadowColour) mustguard
+%
+%   { newpath 0 0 moveto 10 0 lineto << /HighlightColor [ 1 1 0 ] /ShadowColor [ 0 0.2 0.6 ] >> pkdab }
+%   (both mix targets) mustpass
+%
+%   { newpath 0 0 moveto 10 0 lineto << /HighlightColor [ 1 0 0 ] /Highlight 0 >> pkdab }
+%   (a mix target with its layer off) mustpass
+%
+%   { newpath 0 0 moveto 10 0 lineto << /Colours [ [ 1 0 0 ] ] >> pkdab }
+%   /pkdab-colours-is-spelled-colors
+%   (/Colours) mustguard
+%
+%   { newpath 0 0 moveto 10 0 lineto << /Colors 5 >> pkdab }
+%   /pkdab-colors-must-be-an-array
+%   (/Colors 5) mustguard
+%
+%   { newpath 0 0 moveto 10 0 lineto << /Colors { [ 0 0 0 ] } >> pkdab }
+%   /pkdab-colors-must-be-an-array
+%   (/Colors as a procedure) mustguard
+%
+%   { newpath 0 0 moveto 10 0 lineto << /Colors [ ] >> pkdab }
+%   /pkdab-colors-must-have-1-to-8-colors
+%   (/Colors with no colors) mustguard
+%
+%   { newpath 0 0 moveto 10 0 lineto << /Colors [ 9 { [ 0 0 0 ] } repeat ] >> pkdab }
+%   /pkdab-colors-must-have-1-to-8-colors
+%   (/Colors with nine colors) mustguard
+%
+%   { newpath 0 0 moveto 10 0 lineto << /Colors [ [ 0 0 ] ] >> pkdab }
+%   /pkdab-colors-entries-must-be-rgb-arrays
+%   (/Colors with a two-component entry) mustguard
+%
+%   { newpath 0 0 moveto 10 0 lineto << /Colors [ [ 0 0 1.5 ] ] >> pkdab }
+%   /pkdab-colors-components-must-be-0-to-1
+%   (/Colors with a component of 1.5) mustguard
+%
+%   { newpath 0 0 moveto 10 0 lineto << /ColorMix 0.5 >> pkdab }
+%   /pkdab-colormix-needs-colors
+%   (/ColorMix without /Colors) mustguard
+%
+%   { newpath 0 0 moveto 10 0 lineto << /Colors [ [ 0 0 0 ] ] /ColorMix 1.5 >> pkdab }
+%   /pkdab-colormix-must-be-0-to-1
+%   (/ColorMix 1.5) mustguard
+%
+%   % 1, 2 and 8 colors are fine, and /Light is pkdab's own: it never needs /Colors.
+%   { newpath 0 0 moveto 10 0 lineto << /Colors [ [ 1 0 0 ] ] >> pkdab }
+%   (1 color) mustpass
+%
+%   { newpath 0 0 moveto 10 0 lineto << /Colors [ [ 1 0 0 ] [ 0 0 1 ] ] /ColorMix 0 >> pkdab }
+%   (2 colors) mustpass
+%
+%   { newpath 0 0 moveto 10 0 lineto << /Colors [ 8 { [ 0.5 0.5 0.5 ] } repeat ] /ColorMix 1 /Light 45 >> pkdab }
+%   (8 colors with /Light) mustpass
+%
+%   { newpath 0 0 moveto 10 0 lineto << /Light 45 >> pkdab }
+%   (/Light alone) mustpass
+%
+%%EndSelfTest
+%
 % @kind: Procedure
-% @summary: A foliage / dab brush: clustered, irregular blobs of paint pounced along the current path (a spine), for bushes, leafy masses and vegetation texture. Each dab is generated once and painted in up to three layers -- a darker underlayer, the body in the current color, and lighter highlight dabs on the lit side -- so highlights always sit on the mass they light. A single-point subpath is a standalone clump. Deterministic under the caller's own srand; bounded by a dab-count budget; respects clip like every other preset.
+% @summary: A foliage / dab brush: clustered, irregular blobs of paint pounced along the current path (a spine), for bushes, leafy masses and vegetation texture. Each dab is generated once and painted in up to three layers -- a darker underlayer, the body in the current color (or, with /Colors, one loaded color per dab), and lighter highlight dabs on the lit side -- so highlights always sit on the mass they light. /HighlightColor and /ShadowColor mix the lit and shaded layers toward a hue instead of white and black. A single-point subpath is a standalone clump. Deterministic under the caller's own srand; bounded by a dab-count budget; respects clip like every other preset.
 % @example: newpath 80 60 moveto 180 90 280 60 380 70 curveto << /Size 9 /Scatter 26 /Highlight 0.6 >> pkdab
 % @param: /Size [points] Mean dab radius in points; must be > 0 (default 6)
 % @param: /Scatter [points] Radius in points of the cluster scattered around each stop of the path; must be > 0. Formerly /Spread, still accepted as a deprecated alias; /Scatter wins if both are given (default Size*2.5)
@@ -6004,6 +6190,10 @@ systemdict /setalpha known /pwhasalpha exch def
 % @param: /Light [degrees] Direction the light comes from, in degrees counterclockwise from +x in user space (default 120, up and to the left)
 % @param: /Pitch [points] walkpath sampling pitch for the spine; must be > 0 (default Size, capped at 6)
 % @param: /ColorJitter [0..1] per-dab tint variation around the current color (default 0.08)
+% @param: /Colors [array of rgb arrays] 1 to 8 loaded colors, evenly spaced along the load; each dab takes one, at the position its existing outline-phase draw gives it, so a clump mixes the colors in proportion to their share of the list ([dark dark dark yellow] is mostly dark). When set, the current color is not used for the mark, though /ColorJitter still varies it. Takes no random draw, so it recolors a mark without moving it (default unset)
+% @param: /ColorMix [0..1] with /Colors, how far neighbouring colors have blended on the brush: 0 gives each dab one of two neighbouring colors outright, 1 a smooth gradient between them (default 0.3)
+% @param: /HighlightColor [rgb array] the color the lighter dabs on the lit side mix toward, instead of white; /Highlight still sets how far (default unset: toward white)
+% @param: /ShadowColor [rgb array] the color the darker underlayer mixes toward, instead of black; /Shadow still sets how far (default unset: toward black)
 /pkdab {
     /pdopts exch def
     /pdsize pdopts /Size 6 pkgetdef def
@@ -6042,6 +6232,20 @@ systemdict /setalpha known /pwhasalpha exch def
     /pdcj pdopts /ColorJitter 0.08 pkgetdef def
     /pdcj load xcheck { pkdab-colorjitter-must-not-be-a-procedure } if
     pdcj 0 lt pdcj 1 gt or { pkdab-colorjitter-must-be-0-to-1 } if
+    % The load and the two colours the layers mix toward: each null when its key
+    % is unset, so every new branch below is `... null ne` and an unset key never
+    % reaches it. `puparse` is safe on the unset path (it checks the spellings and
+    % /ColorMix without /Colors, and never reads /Light), which is why it is called
+    % always; `pulightneedscolors` is not called, because /Light is pkdab's own.
+    pdopts (pkdab) puparse /pdColorRec exch def
+    % The two mix targets are absolute colours, so they are graded for the running
+    % `pkwet` pass here, once (`puwet` is affine and the identity outside a pull):
+    % mixing a graded body toward an ungraded target would leave the lit and shaded
+    % fractions solid in the outer passes.
+    pdopts /HighlightColor (pkdab-highlightcolor) puhue
+        dup null ne { aload pop puwet 3 array astore } if /pdHighlightColor exch def
+    pdopts /ShadowColor (pkdab-shadowcolor) puhue
+        dup null ne { aload pop puwet 3 array astore } if /pdShadowColor exch def
 
     % Counting pass with the budget check inside the callback. A single
     % point arrives with sp = 0, so it gets its clump added explicitly.
@@ -6106,7 +6310,7 @@ systemdict /setalpha known /pwhasalpha exch def
             } ifelse
             1 1 pdnd {
                 pop
-                /pdd 14 array def
+                /pdd 15 array def
                 frnd 360 mul /pdsa exch def
                 frnd sqrt pdspread mul /pdsr exch def
                 pdd 0 pdx pdsr pdsa cos mul add put
@@ -6126,6 +6330,16 @@ systemdict /setalpha known /pwhasalpha exch def
                 % cluster relative to the light.
                 pdd 13 pdsr pdsa cos mul pdlx mul pdsr pdsa sin mul pdly mul add
                     pdspread div put
+                % This dab's colour, resolved once so all three layers read the same
+                % value: the caller's colour, or the load at the position the outline
+                % phase already drew (slot 5, 0..1 from the first colour to the last;
+                % `puat` takes u = 1 - 2p). No new draw. `puwet` grades it for any
+                % `pkwet` pass it is painted in.
+                pdd 14
+                pdColorRec null ne {
+                    pdColorRec 1 pdd 5 get 2 mul sub false puat puwet 3 array astore
+                } { pdbase } ifelse
+                put
                 pddabs pdn pdd put
                 /pdn pdn 1 add def
             } for
@@ -6139,21 +6353,28 @@ systemdict /setalpha known /pwhasalpha exch def
                     /pdr pdd 2 get 1.12 mul def
                     /pdcx pdd 0 get pdlx pdd 2 get mul 0.35 mul sub def
                     /pdcy pdd 1 get pdly pdd 2 get mul 0.35 mul sub def
-                    pdbase 1 pdshadow 0.55 mul sub pdcj 0.5 mul pdd 4 get 2 mul 1 sub mul add shade
+                    pdShadowColor null ne {
+                        % Toward /ShadowColor by the same strength, then the jitter as
+                        % its own shade, so /ColorJitter keeps its meaning.
+                        pdd 14 get pdShadowColor pdshadow 0.55 mul mix3
+                        3 array astore 1 pdcj 0.5 mul pdd 4 get 2 mul 1 sub mul add shade
+                    } {
+                        pdd 14 get 1 pdshadow 0.55 mul sub pdcj 0.5 mul pdd 4 get 2 mul 1 sub mul add shade
+                    } ifelse
                     setrgbcolor
                     newpath pddab fill
                 } if
             } for
         } if
 
-        % Layer 2: the body, in the caller's colour.
+        % Layer 2: the body, in the dab's colour.
         0 1 pdn 1 sub {
             pddabs exch get /pdd exch def
             pdd 3 get 1 eq {
                 /pdr pdd 2 get def
                 /pdcx pdd 0 get def
                 /pdcy pdd 1 get def
-                pdbase 1 pdcj 0.5 mul pdd 4 get 2 mul 1 sub mul add shade
+                pdd 14 get 1 pdcj 0.5 mul pdd 4 get 2 mul 1 sub mul add shade
                 setrgbcolor
                 newpath pddab fill
             } if
@@ -6168,7 +6389,11 @@ systemdict /setalpha known /pwhasalpha exch def
                     /pdr pdd 2 get 0.55 mul def
                     /pdcx pdd 0 get pdlx pdd 2 get mul 0.3 mul add def
                     /pdcy pdd 1 get pdly pdd 2 get mul 0.3 mul add def
-                    pdbase 1 pdhl 0.6 mul add shade
+                    pdHighlightColor null ne {
+                        pdd 14 get pdHighlightColor pdhl 0.6 mul mix3
+                    } {
+                        pdd 14 get 1 pdhl 0.6 mul add shade
+                    } ifelse
                     setrgbcolor
                     newpath pddab fill
                 } if
@@ -6246,6 +6471,30 @@ systemdict /setalpha known /pwhasalpha exch def
     puso /ShadowColour known or
     puso /TipColour known or
         { pusn (-colours-is-spelled-colors) pugrd } if
+} def
+
+% opts /Key (preset-key) puhue -> [r g b] | null
+% One optional rgb colour key (`/HighlightColor`, `/ShadowColor`): `null` when
+% the key is unset, else the validated array. The second operand is the guard
+% prefix, preset and key together (`pkdab-highlightcolor`), so the guards read
+% `pkdab-highlightcolor-must-be-an-rgb-array` and `...-components-must-be-0-to-1`.
+% `xcheck` comes before any type check, as in `puparse`. The caller keeps the
+% result under its own prefix.
+% @internal
+/puhue {
+    /puhp exch def /puhk exch def /puho exch def
+    puho puhk known not { null } {
+        /puhv puho puhk get def
+        /puhv load xcheck { puhp (-must-be-an-rgb-array) pugrd } if
+        /puhv load type /arraytype ne { puhp (-must-be-an-rgb-array) pugrd } if
+        puhv length 3 ne { puhp (-must-be-an-rgb-array) pugrd } if
+        puhv {
+            dup type dup /integertype eq exch /realtype eq or
+                { dup 0 ge exch 1 le and } { pop false } ifelse
+            not { puhp (-components-must-be-0-to-1) pugrd } if
+        } forall
+        puhv
+    } ifelse
 } def
 
 % opts (preset) pulightneedscolors -   (/Light without /Colors is an error)
