@@ -8589,8 +8589,36 @@ about 14x slower unoptimized (`cargo test --test selftest`: 61s debug,
   14.2 MB -> 137 KB. `groovy_faces` 16.2 MB -> 0.65 MB, `lettering` 17.4 MB
   -> 0.69 MB, `apparel_shirt` 5.8 MB -> 0.87 MB, `alpine_lake` 289 MB ->
   258 MB.
-- Not done (filed as #244): sharing by structural equality (two separate
-  `clip`s of the same path are still two groups) or by common prefix of
-  nested chains.
+- Sharing by structural equality or common prefix was filed as #244 and
+  then measured and dropped; see "PDF export: Flate content streams"
+  below.
   A clipped run of length one costs a few bytes more than before (`q\n`
   and `Q\n`; e.g. `gradients` +20 bytes).
+
+## PDF export: Flate content streams (issue #244)
+
+- #244 asked for clip groups shared across structurally equal or
+  common-prefix chains, on the theory that `gallery/alpine_lake` (258 MB
+  after #219) re-clips per stroke. Measured first, by logging every group
+  the recorder opened over all 96 `examples/` + `gallery/` files:
+  alpine_lake opens 117 groups for ~166k elements, 39 KB of clip preludes
+  in a 258 MB file. Over the 37 files that clip at all, preludes total
+  895 KB of 402 MB, and structural equality would save 44 KB, common-prefix
+  nesting 78 KB. The premise was wrong; none of (a)/(b)/(c) was built.
+- The 258 MB is path data: ~166k fills, 188 of them over 100 KB (up to
+  1.1 MB), which are `pkspray` speck fills of ~2,900 circle subpaths each,
+  in a page content stream that was stored uncompressed (only image
+  XObjects were Flate).
+- Fix: `PdfRecorder::finish` deflates each page's content stream
+  (`/Length n /Filter /FlateDecode`, `cm` flip included). alpine_lake
+  257,921,247 -> 74,372,818 bytes (3.5x), +~13 s of export time on that
+  one file; ordinary pages are a few KB and unaffected. Inflated, the
+  content is byte-identical to the old plain stream for all 96 files, and
+  the gs rasters are identical.
+- Tests that read operators out of the PDF now go through
+  `tests/common/mod.rs::pdf_text`, which inflates content streams in
+  place and leaves image XObjects alone.
+- Remaining size is real geometry: each speck is `m x y l x y` (a
+  zero-length segment) plus four `c`. Trimming it means changes in `lib/`
+  or lossy precision; a per-speck Form XObject would change overlap
+  darkening under alpha, so it is not a free swap. Filed separately.

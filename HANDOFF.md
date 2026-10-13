@@ -578,7 +578,9 @@ renders eight examples in both and compares block-downsampled output).
    done at two.
    PDF shares one `q <clip>` group across consecutive elements with
    the same clip `Rc` (#219), so a new PDF hook must go through
-   `enter_clip` and keep its own inner `q ... Q`.
+   `enter_clip` and keep its own inner `q ... Q`. Page content streams
+   are Flate-compressed (#244), so tests reading PDF operators use
+   `tests/common/mod.rs::pdf_text`.
 4. Watercolor (issue #47, gated on the architecture spike in issue
    #46): read `docs/WATERCOLOR.md` before starting — it recommends a
    small `alpha: f32` field on `GraphicsState` (already prototyped as

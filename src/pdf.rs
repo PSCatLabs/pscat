@@ -27,6 +27,12 @@
 //!   closed lazily: on a different chain, on `erase`, and in the page
 //!   snapshots taken by `end_page`/`finish` (the live stream keeps its
 //!   group open, which `copypage` needs).
+//! - Each page's content stream is Flate-compressed (`/Filter
+//!   /FlateDecode`), like the image XObjects: the operators are very
+//!   repetitive text, and a stroke-heavy piece (`gallery/alpine_lake`:
+//!   ~166k fills, some 1 MB each) shrinks ~3.5x (258 MB → 74 MB, issue
+//!   #244). Anything that greps the raw PDF for operators must inflate
+//!   first (`tests/common/mod.rs::pdf_text`).
 //! - Text arrives as glyph outlines (same as SVG); no fonts are
 //!   embedded.
 //! - Images become Flate-compressed RGB XObjects; imagemasks become
@@ -406,9 +412,34 @@ Q",
                 )
                 .into_bytes(),
             );
-            let body = format!("1 0 0 -1 0 {} cm\n{}", self.height, content);
-            let mut stream = format!("<< /Length {} >>\nstream\n", body.len()).into_bytes();
-            stream.extend_from_slice(body.as_bytes());
+            // The page content is Flate-compressed like the image
+            // XObjects: it is highly repetitive text (a stroke-heavy
+            // gallery piece is hundreds of MB raw, ~3.5x smaller
+            // deflated; issue #244). The `cm` prefix is part of the
+            // compressed stream. If the encoder ever failed (it can't
+            // on a `Vec` sink) the stream is written plain instead.
+            let prefix = format!("1 0 0 -1 0 {} cm\n", self.height);
+            let mut stream = match deflate(&[prefix.as_bytes(), content.as_bytes()]) {
+                Some(z) => {
+                    let mut st = format!(
+                        "<< /Length {} /Filter /FlateDecode >>\nstream\n",
+                        z.len()
+                    )
+                    .into_bytes();
+                    st.extend_from_slice(&z);
+                    st
+                }
+                None => {
+                    let mut st = format!(
+                        "<< /Length {} >>\nstream\n",
+                        prefix.len() + content.len()
+                    )
+                    .into_bytes();
+                    st.extend_from_slice(prefix.as_bytes());
+                    st.extend_from_slice(content.as_bytes());
+                    st
+                }
+            };
             stream.extend_from_slice(b"\nendstream");
             objects.push(stream);
         }
@@ -462,6 +493,17 @@ pub(crate) enum ImageData {
     Rgb(Vec<u8>),
     /// Packed 1-bit rows (byte-aligned), stencil polarity included.
     Mask { bits: Vec<u8>, paint_ones: bool },
+}
+
+/// Zlib-compress the concatenation of `parts` (PDF `FlateDecode`).
+fn deflate(parts: &[&[u8]]) -> Option<Vec<u8>> {
+    use flate2::{Compression, write::ZlibEncoder};
+    use std::io::Write as _;
+    let mut enc = ZlibEncoder::new(Vec::new(), Compression::default());
+    for part in parts {
+        enc.write_all(part).ok()?;
+    }
+    enc.finish().ok()
 }
 
 /// PDF path-construction operators for a device-space path.
