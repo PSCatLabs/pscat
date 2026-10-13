@@ -222,11 +222,38 @@ with `run_in_background: true`" and nothing else. The first Haiku run of
 the slimmed skill (#178, PR #198) had no defined way to wait, handed
 back with `test` pending, and CI passed six seconds later. So the step
 now carries the exact command, and pitfalls.md "CI wait" carries the
-reasoning (11-17 min CI, why no `tail`, "no checks reported", the
+reasoning (11-17 min CI then, about 2-3 min for `test` since #204; why no `tail`, "no checks reported", the
 pending-CI hand-back checklist). The hand-back rule exists because the
 skill only defined lock release for the human-only and over-the-bar
 stops; a CI-pending stop needs the opposite (keep the lock and
 `in-review`). Step 4.4 became a hard gate, with a report line, because
 the same run skipped the plan review without noticing. Scratch files are
 pinned to `/tmp` in SKILL.md's rules because the skill never named a
-scratchpad but harness prompts do.
+scratchpad but harness prompts do. (#208 reversed this: see below.)
+
+## Added in #208: round-3 fixes
+
+- **CI pass/fail from `statusCheckRollup`, not `exit=`.** `gh pr checks
+  --watch --fail-fast` wrote `exit=0` on a run where both jobs were
+  cancelled, so the exit code cannot be trusted. The rollup query guards
+  `length > 0` (jq's `all` is true on `[]`, and the rollup is empty right
+  after a push) and reads `.conclusion // .state` (CheckRun vs
+  StatusContext).
+- **`--delete-branch` dropped.** The repo already deletes the remote
+  branch on merge (`delete_branch_on_merge`), and gh's local-branch half
+  can never succeed while a worktree holds the branch, so it only
+  produced an error. Step 9 removes the worktree, then the local branch.
+- **The local gate is CI's gate** (`-D warnings`, selftest, the `ci`
+  profile from #204), so a PR is not the first place a lint shows up.
+- **Missing paths written down:** rerun after infra failure, resume of an
+  `in-review` PR, the dispatcher's no-merge stop, doc-only merge conflicts,
+  one rebase before the first push, `BEHIND` as the normal case. These
+  were improvised by the #141, #191 and #204 runs.
+- **Rebase boundary.** Rebase once before the first push; afterwards
+  merge `main` in (via `update-branch` or locally) and never force-push.
+  A rebase after push would drop the remote `update-branch` merge commit
+  and need `--force-with-lease`.
+- **Scratch = harness scratchpad, else `${TMPDIR:-/tmp}`.** #205's `/tmp`
+  override fought the harness's own instruction; issue-scoped names keep
+  concurrent runs apart, and resume decisions use GitHub state because
+  a scratchpad does not outlive its session.
