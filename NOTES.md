@@ -32,8 +32,8 @@ names as deprecated aliases, and make the catalog carry units.
   unchanged on purpose: `pkliner` shares the `pq-` prefix.
 - **Behaviour-preserving, verified.** `pkgetdef` takes no random draws.
   Every example, gallery piece and self-test driver that loads paintkit
-  (30 files) rendered byte-identically from `origin/main` and from this
-  branch with renamed callers. `gallery/alpine_lake.ps` still uses
+  (21 files, 30 page renders) rendered byte-identically from
+  `origin/main` and from this branch with renamed callers. `gallery/alpine_lake.ps` still uses
   `pkdab /Spread`, and its 2× render through the alias matches the
   committed `gallery/renders/alpine_lake.png` byte for byte.
 - **Units: a convention, not a tag.** Every paintkit `@param` description
