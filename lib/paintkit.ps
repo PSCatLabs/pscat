@@ -6219,7 +6219,8 @@ systemdict /setalpha known /pwhasalpha exch def
 %
 % It clips to every knuckle the paint reaches at that touch. Before building
 % anything the preset checks `llx lly urx ury pjcells` against `pjbudget`
-% (60000 cells, a 610pt square at the default weave) and raises its own
+% (60000 cells, about a 600pt square at the default weave once the
+% knuckle margin is added) and raises its own
 % `pkX-touch-area-exceeds-safety-limit`; `pjcatch` repeats the check as a
 % backstop under its own name. Both read one range computation (`pjrange`),
 % so the pre-check and the catch it guards can never disagree.
@@ -6550,6 +6551,9 @@ systemdict /setalpha known /pwhasalpha exch def
 %%EndSelfTest
 %
 %%SelfTest: pjcatch-guards
+%   % touch >= 1 does nothing, even with no canvas set.
+%   { gsave 0 0 1e30 1e30 1 pjcatch grestore } (touch 1 over any box) mustpass
+%
 %   { 0 0 10 10 0.5 pjcatch } /pjcatch-needs-a-canvas
 %   (a catch before any pkcanvas) mustguard
 %
@@ -6564,13 +6568,23 @@ systemdict /setalpha known /pwhasalpha exch def
 %   (a 600pt square fits the budget at the default weave) mustbe
 %
 %   { gsave 0 0 600 600 0.5 pjcatch grestore } (a 600pt catch) mustpass
+%%EndSelfTest
 %
-%   % touch >= 1 does nothing, even with no canvas set.
-%   { gsave 0 0 1e30 1e30 1 pjcatch grestore } (touch 1 over any box) mustpass
+%%SelfTest: pjcatch-leaves-the-ctm-as-it-found-it
+%   % The knuckles are built under pjCTM; every preset draws after the
+%   % catch, so the caller's matrix must come back exactly.
+%   << >> pkcanvas
+%   gsave 7.5 0 translate 2 2 scale 15 rotate
+%   matrix currentmatrix /pjtestm exch def
+%   0 0 40 40 0.5 pjcatch
+%   matrix currentmatrix /pjtestn exch def
+%   grestore
+%   true 0 1 5 { dup pjtestm exch get exch pjtestn exch get eq and } for
+%   (the CTM after pjcatch is the CTM before it) mustbe
 %%EndSelfTest
 %
 % @kind: Procedure
-% @summary: Sets up the shared canvas surface: a seeded weave of raised knuckles in the current coordinate system, which every mark painted with /Touch below 1 catches on, so light strokes break up on the same canvas rather than each on its own. Call it once, early, in the space the piece is painted in; calling it again replaces the surface. Paints nothing and takes no rand draws, so adding it to a finished piece moves no mark.
+% @summary: Sets up the shared canvas surface: a seeded weave of raised knuckles in the current coordinate system, which marks from presets that accept /Touch (added in later slices of issue #182; none does yet) catch on at /Touch below 1, so light strokes break up on the same canvas rather than each on its own. Call it once, early, in the space the piece is painted in; calling it again replaces the surface. Paints nothing and takes no rand draws, so adding it to a finished piece moves no mark.
 % @example: << /Seed 3 /Weave 2.5 >> pkcanvas
 % @param: /Seed [integer] Integer seed for this surface alone, leaving the caller's rand stream untouched (default 1, a constant rather than a draw from the caller's stream)
 % @param: /Weave [points] Thread spacing of the weave in canvas-space points, one knuckle per Weave x Weave cell; must be > 0 (default 2.5)

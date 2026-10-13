@@ -49,6 +49,8 @@ existing render is unchanged.
   ink against pscat's 38%. At 4x the same blocks (10pt) differ by 4.7. A
   different seed differs by 74, and the test asserts that negative
   control, so the comparison can't pass vacuously.
+  CI installs no Ghostscript, so like the other gs tests it skips
+  there and runs locally only.
 - Rust tests also cover touch 0 inking nothing, monotone ink in touch,
   99.5% at 0.99, the catch staying put under a `translate` after
   `pkcanvas` (and moving when the canvas is set up after it), every

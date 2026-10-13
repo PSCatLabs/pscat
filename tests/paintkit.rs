@@ -9069,6 +9069,8 @@ fn ghostscript_agrees_on_the_surface() {
     let gs_blocks = canvas_blocks(&gs_rgb, PX, PX, 10 * SCALE);
 
     let (mean, disjoint) = canvas_mean_block_diff(&pscat_blocks(11), &gs_blocks);
+    // Measured 4.7 under gs 10.07.1; printed so a future flake is diagnosable.
+    eprintln!("pscat vs gs surface: mean block diff {mean:.2}");
     assert_eq!(disjoint, 0, "blocks inked in one render only");
     assert!(
         mean < 6.0,
