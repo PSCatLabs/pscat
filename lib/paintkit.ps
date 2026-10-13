@@ -5494,6 +5494,434 @@ systemdict /setalpha known /pwhasalpha exch def
 } def
 
 % ============================================================================
+% Loaded colours: the `pu-` resolver (issue #183, slice L1 of
+% docs/PAINT_LOADING.md)
+% ============================================================================
+%
+% A brush loaded with more than one colour (`/Colors`, adopted by the presets
+% in later slices) has to turn "where on the head am I" into a colour. That is
+% this section: the shared, preset-independent half. No preset reads any of it
+% yet, so nothing here changes a render.
+%
+%   opts (pkfan) puparse            -> rec | null   validate, build the load
+%   opts (pkfan) puspell            -> -            reject the British spellings
+%   opts (pkfan) pulightneedscolors -> -            reject /Light without /Colors
+%   rec u flip puat                 -> r g b        colour at head position u
+%   r g b puwet                     -> r g b        pkwet's grading (identity here)
+%
+% Why a prefix of its own. The resolver runs inside `pkfan` and `pkoil`, whose
+% nested `pkribbon` calls clobber every `pk*` name. `pu` names are scratch
+% only: `puparse` returns a record the preset keeps under *its own* prefix, and
+% nothing afterwards depends on a `pu` global surviving.
+%
+% The record is `[colors mix lightset light]`: the validated /Colors array, the
+% /ColorMix (default 0.3), whether /Light was given, and /Light (0 when not).
+% `puparse` returns `null` when /Colors is unset, so a preset's branch is
+% `rec null ne` and an unset key never reaches the new code (the #181
+% /Direction rule: branch on presence, never on a default that happens to
+% compute the same thing).
+%
+% Errors are named after the *calling preset* (`pkfan-colors-must-be-an-
+% array`), so the preset's name is an operand and `pugrd` builds the guard name
+% from it. The one exception to "one name per rule" is the spelling guard: all
+% five British spellings raise `<preset>-colours-is-spelled-colors`, which
+% says what to do and is all an artist needs.
+%
+% `/Light` is split from `puparse` on purpose. A preset that already owns
+% /Light (`pkdab`) must not be told it needs /Colors, so `pulightneedscolors`
+% is a separate call for the presets that don't (`pkfan`, `pktrowel`,
+% `pkbroad`). `puparse` still validates a /Light that comes with /Colors.
+%
+% Head position `u` is -1 at the right edge and +1 at the left, the same as
+% every preset's own head position, so the first colour sits at +1. `flip`
+% mirrors it (the per-subpath `/Light` flip of slice L2).
+
+% (preset) (suffix) pugrd -   (raise the guard named preset+suffix)
+% The suffix carries its own leading hyphen. Built from a concatenated string
+% so the one helper serves every preset; the self-tests match the resulting
+% names exactly, so a concatenation bug fails them.
+% @internal
+/pugrd {
+    /pugs exch def /pugp exch def
+    pugp length pugs length add string
+    dup 0 pugp putinterval
+    dup pugp length pugs putinterval
+    cvn cvx exec
+} def
+
+% opts (preset) puspell -   (/Colours and friends are errors, not ignored)
+% `pkgetdef` ignores keys it doesn't know, so without this a British spelling
+% would render a plain single-colour mark and say nothing.
+% @internal
+/puspell {
+    /pusn exch def /puso exch def
+    puso /Colours known
+    puso /ColourMix known or
+    puso /HighlightColour known or
+    puso /ShadowColour known or
+    puso /TipColour known or
+        { pusn (-colours-is-spelled-colors) pugrd } if
+} def
+
+% opts (preset) pulightneedscolors -   (/Light without /Colors is an error)
+% For presets that don't already have a /Light of their own: an artist who
+% wrote it expected an effect (#181's /Stretch-without-/Direction rule).
+% @internal
+/pulightneedscolors {
+    /pulnn exch def /pulno exch def
+    pulno /Light known pulno /Colors known not and
+        { pulnn (-light-needs-colors) pugrd } if
+} def
+
+% opts (preset) puparse -> rec | null
+% See the section header for the record. Checks run in a fixed order, the
+% spelling guard first, so a misspelled key is reported as that and not as
+% whatever its absence causes.
+% @internal
+/puparse {
+    /pupn exch def /pupo exch def
+    pupo pupn puspell
+    pupo /Colors known not {
+        pupo /ColorMix known { pupn (-colormix-needs-colors) pugrd } if
+        null
+    } {
+        /pupc pupo /Colors get def
+        % `xcheck` before any type check: a procedure is an `arraytype` too.
+        /pupc load xcheck { pupn (-colors-must-be-an-array) pugrd } if
+        /pupc load type /arraytype ne { pupn (-colors-must-be-an-array) pugrd } if
+        pupc length dup 1 lt exch 8 gt or
+            { pupn (-colors-must-have-1-to-8-colors) pugrd } if
+        % Each entry is a literal 3-element array, not a procedure that
+        % happens to hold three items.
+        pupc {
+            dup xcheck { pop false } {
+                dup type /arraytype eq { length 3 eq } { pop false } ifelse
+            } ifelse
+            not { pupn (-colors-entries-must-be-rgb-arrays) pugrd } if
+        } forall
+        pupc {
+            {
+                dup type dup /integertype eq exch /realtype eq or
+                    { dup 0 ge exch 1 le and } { pop false } ifelse
+                not { pupn (-colors-components-must-be-0-to-1) pugrd } if
+            } forall
+        } forall
+        /pupm pupo /ColorMix 0.3 pkgetdef def
+        /pupm load xcheck { pupn (-colormix-must-not-be-a-procedure) pugrd } if
+        /pupm load type dup /integertype ne exch /realtype ne and
+            { pupn (-colormix-must-be-a-number) pugrd } if
+        pupm 0 lt pupm 1 gt or { pupn (-colormix-must-be-0-to-1) pugrd } if
+        pupo /Light known {
+            /pupl pupo /Light get def
+            /pupl load xcheck { pupn (-light-must-not-be-a-procedure) pugrd } if
+            /pupl load type dup /integertype ne exch /realtype ne and
+                { pupn (-light-must-be-a-number) pugrd } if
+            /pupls true def
+        } {
+            /pupl 0 def /pupls false def
+        } ifelse
+        [ pupc pupm pupls pupl ]
+    } ifelse
+} def
+
+% rec u flip puat -> r g b
+% The colour at head position u (section 2.4 of the design). N colours sit at
+% p = k/(N-1) with p = (1-u)/2, so u = +1 is the first colour. `k` is clamped
+% before the fraction is taken, so p = 1 is the last colour with t = 1 and not
+% the second-to-last with t = 0. A blend that comes out at exactly 0 or 1
+% returns that colour itself rather than mix3(a, b, 1), which need not equal
+% b to the last bit: a load whose colours all equal the current colour then
+% paints byte for byte what the plain brush paints (slice L2 pins that).
+% N = 1 is the colour. u is clamped, so a head position a hair past +-1 from
+% float rounding can't index outside the array.
+% @internal
+/puat {
+    /puaf exch def /puau exch def /puar exch def
+    /puac puar 0 get def
+    puac length 1 eq {
+        puac 0 get aload pop
+    } {
+        1 puau puaf { neg } if sub 2 div 0 max 1 min
+        puac length 1 sub mul
+        dup cvi puac length 2 sub min /puak exch def
+        puak sub /puatt exch def
+        puar 1 get /puaw exch def
+        puaw 0 eq
+            { puatt 0.5 lt { 0 } { 1 } ifelse }
+            { puatt 0.5 sub puaw div 0.5 add 0 max 1 min }
+        ifelse /puatt exch def
+        puatt 0 eq
+            { puac puak get aload pop }
+            { puatt 1 eq
+                { puac puak 1 add get aload pop }
+                { puac puak get puac puak 1 add get puatt mix3 }
+              ifelse }
+        ifelse
+    } ifelse
+} def
+
+% r g b puwet -> r g b
+% Where a loaded colour is graded by the `pkwet` pass it is painted in. The
+% identity until slice L3 has `pkwet` publish its pass mix; a preset calls it
+% from the start so L3 changes no preset.
+% @internal
+/puwet { } def
+
+%%SelfTest: puparse-rejects-malformed-loads
+%   { << /Colors 5 >> (pkfan) puparse }
+%   /pkfan-colors-must-be-an-array
+%   (a number as /Colors) mustguard
+%
+%   { << /Colors (red) >> (pkfan) puparse }
+%   /pkfan-colors-must-be-an-array
+%   (a string as /Colors) mustguard
+%
+%   % A procedure is an arraytype too: xcheck has to come first.
+%   { << /Colors { [ 0 0 0 ] } >> (pkfan) puparse }
+%   /pkfan-colors-must-be-an-array
+%   (a procedure as /Colors) mustguard
+%
+%   { << /Colors [ ] >> (pkfan) puparse }
+%   /pkfan-colors-must-have-1-to-8-colors
+%   (no colours) mustguard
+%
+%   { << /Colors [ 9 { [ 0 0 0 ] } repeat ] >> (pkfan) puparse }
+%   /pkfan-colors-must-have-1-to-8-colors
+%   (nine colours) mustguard
+%
+%   { << /Colors [ [ 0 0 ] ] >> (pkfan) puparse }
+%   /pkfan-colors-entries-must-be-rgb-arrays
+%   (a 2-element entry) mustguard
+%
+%   { << /Colors [ [ 0 0 0 0 ] ] >> (pkfan) puparse }
+%   /pkfan-colors-entries-must-be-rgb-arrays
+%   (a 4-element entry) mustguard
+%
+%   { << /Colors [ 0.5 ] >> (pkfan) puparse }
+%   /pkfan-colors-entries-must-be-rgb-arrays
+%   (a number as an entry) mustguard
+%
+%   % An executable entry of three items is not an rgb array.
+%   { << /Colors [ { 0 0 0 } ] >> (pkfan) puparse }
+%   /pkfan-colors-entries-must-be-rgb-arrays
+%   (a procedure as an entry) mustguard
+%
+%   { << /Colors [ [ 0 0 1.5 ] ] >> (pkfan) puparse }
+%   /pkfan-colors-components-must-be-0-to-1
+%   (a component of 1.5) mustguard
+%
+%   { << /Colors [ [ 0 0 0 ] [ -0.1 0 0 ] ] >> (pkfan) puparse }
+%   /pkfan-colors-components-must-be-0-to-1
+%   (a negative component) mustguard
+%
+%   { << /Colors [ [ 0 (x) 0 ] ] >> (pkfan) puparse }
+%   /pkfan-colors-components-must-be-0-to-1
+%   (a string component) mustguard
+%
+%   % The guard is named after the calling preset.
+%   { << /Colors 5 >> (pktrowel) puparse }
+%   /pktrowel-colors-must-be-an-array
+%   (the preset name comes from the operand) mustguard
+%
+%   { << /Colors [ [ 0 0 0 ] ] /ColorMix 1.5 >> (pkfan) puparse }
+%   /pkfan-colormix-must-be-0-to-1
+%   (/ColorMix 1.5) mustguard
+%
+%   { << /Colors [ [ 0 0 0 ] ] /ColorMix -0.1 >> (pkfan) puparse }
+%   /pkfan-colormix-must-be-0-to-1
+%   (a negative /ColorMix) mustguard
+%
+%   { << /Colors [ [ 0 0 0 ] ] /ColorMix (a lot) >> (pkfan) puparse }
+%   /pkfan-colormix-must-be-a-number
+%   (a string as /ColorMix) mustguard
+%
+%   { << /Colors [ [ 0 0 0 ] ] /ColorMix { 0.5 } >> (pkfan) puparse }
+%   /pkfan-colormix-must-not-be-a-procedure
+%   (a procedure as /ColorMix) mustguard
+%
+%   { << /Colors [ [ 0 0 0 ] ] /Light (north) >> (pkfan) puparse }
+%   /pkfan-light-must-be-a-number
+%   (a string as /Light) mustguard
+%
+%   { << /Colors [ [ 0 0 0 ] ] /Light { 90 } >> (pkfan) puparse }
+%   /pkfan-light-must-not-be-a-procedure
+%   (a procedure as /Light) mustguard
+%
+%   { << /Colors [ [ 0 0 0 ] ] >> (pkfan) puparse pop }
+%   (1 colour) mustpass
+%
+%   { << /Colors [ [ 0 0 0 ] [ 1 1 1 ] ] >> (pkfan) puparse pop }
+%   (2 colours) mustpass
+%
+%   { << /Colors [ 8 { [ 0.2 0.4 1 ] } repeat ] >> (pkfan) puparse pop }
+%   (8 colours, the cap) mustpass
+%
+%   { << /Colors [ [ 0 1 0 ] ] /ColorMix 0 /Light -45 >> (pkfan) puparse pop }
+%   (/ColorMix 0 and a negative /Light) mustpass
+%%EndSelfTest
+%
+%%SelfTest: puparse-rejects-the-british-spellings
+%   { << /Colours [ [ 0 0 0 ] ] >> (pkfan) puparse }
+%   /pkfan-colours-is-spelled-colors
+%   (/Colours) mustguard
+%
+%   { << /Colors [ [ 0 0 0 ] ] /ColourMix 0.5 >> (pkfan) puparse }
+%   /pkfan-colours-is-spelled-colors
+%   (/ColourMix) mustguard
+%
+%   { << /HighlightColour [ 1 1 1 ] >> (pkoil) puspell }
+%   /pkoil-colours-is-spelled-colors
+%   (/HighlightColour) mustguard
+%
+%   { << /ShadowColour [ 0 0 0 ] >> (pkdab) puspell }
+%   /pkdab-colours-is-spelled-colors
+%   (/ShadowColour) mustguard
+%
+%   { << /Colors [ [ 0 0 0 ] ] /TipColour [ 1 1 1 ] >> (pkbroad) puparse }
+%   /pkbroad-colours-is-spelled-colors
+%   (/TipColour) mustguard
+%
+%   % Reported as the misspelling, not as the /Colors the artist meant.
+%   { << /Colours 5 >> (pkfan) puparse }
+%   /pkfan-colours-is-spelled-colors
+%   (a bad value behind a misspelled key) mustguard
+%
+%   { << /Colors [ [ 0 0 0 ] ] /HighlightColor [ 1 1 1 ] >> (pkoil) puspell }
+%   (the American spellings) mustpass
+%%EndSelfTest
+%
+%%SelfTest: puparse-rejects-keys-that-modify-nothing
+%   { << /ColorMix 0.5 >> (pkfan) puparse }
+%   /pkfan-colormix-needs-colors
+%   (/ColorMix without /Colors) mustguard
+%
+%   { << /Light 90 >> (pkbroad) pulightneedscolors }
+%   /pkbroad-light-needs-colors
+%   (/Light without /Colors) mustguard
+%
+%   % puparse leaves /Light to the preset: pkdab has its own.
+%   { << /Light 90 >> (pkdab) puparse pop }
+%   (puparse alone does not reject /Light) mustpass
+%
+%   { << /Colors [ [ 0 0 0 ] ] /Light 90 >> (pkbroad) pulightneedscolors }
+%   (/Light with /Colors) mustpass
+%
+%   << >> (pkfan) puparse type /nulltype eq
+%   (no keys at all gives null) mustbe
+%
+%   << /Light 90 >> (pkdab) puparse type /nulltype eq
+%   (unset /Colors gives null) mustbe
+%
+%   % The record is [colors mix lightset light].
+%   << /Colors [ [ 0 0 0 ] [ 1 1 1 ] ] >> (pkfan) puparse
+%   dup length 4 eq
+%   1 index 1 get 0.3 eq and
+%   1 index 2 get false eq and
+%   exch 3 get 0 eq and
+%   (the default record) mustbe
+%
+%   << /Colors [ [ 0 0 0 ] ] /ColorMix 1 /Light 90 >> (pkfan) puparse
+%   dup 1 get 1 eq
+%   1 index 2 get true eq and
+%   exch 3 get 90 eq and
+%   (a given /ColorMix and /Light) mustbe
+%%EndSelfTest
+%
+%%SelfTest: puat-resolves-colours-at-head-positions
+%   % All values are dyadic so `eq` is exact, in pscat and under gs alike.
+%   % u = +1 is the left edge and the first colour, u = -1 the last.
+%   << /Colors [ [ 0 0 0 ] [ 1 0.5 0.25 ] ] >> (pkfan) puparse /purec exch def
+%
+%   purec 1 false puat
+%   0 eq exch 0 eq and exch 0 eq and
+%   (u = +1 is the first colour) mustbe
+%
+%   purec -1 false puat
+%   0.25 eq exch 0.5 eq and exch 1 eq and
+%   (u = -1 is the last colour, not the one before it) mustbe
+%
+%   purec 1 true puat
+%   0.25 eq exch 0.5 eq and exch 1 eq and
+%   (flip mirrors the head) mustbe
+%
+%   purec -1 true puat
+%   0 eq exch 0 eq and exch 0 eq and
+%   (flip at u = -1 is the first colour) mustbe
+%
+%   % A head position a hair past the edge is clamped, not a rangecheck.
+%   purec 1.0000001 false puat
+%   0 eq exch 0 eq and exch 0 eq and
+%   (u just past +1) mustbe
+%
+%   purec -1.5 false puat
+%   0.25 eq exch 0.5 eq and exch 1 eq and
+%   (u well past -1) mustbe
+%
+%   % ColorMix 0 is hard bands, stepping at the midpoint.
+%   << /Colors [ [ 0 0 0 ] [ 1 1 1 ] ] /ColorMix 0 >> (pkfan) puparse /purec exch def
+%   purec 0.25 false puat
+%   0 eq exch 0 eq and exch 0 eq and
+%   (/ColorMix 0 just left of the midpoint) mustbe
+%   purec -0.25 false puat
+%   1 eq exch 1 eq and exch 1 eq and
+%   (/ColorMix 0 just right of the midpoint) mustbe
+%   purec 0 false puat
+%   1 eq exch 1 eq and exch 1 eq and
+%   (/ColorMix 0 steps up at exactly the midpoint) mustbe
+%
+%   % ColorMix 1 is a straight gradient; 0.5 holds the outer quarters.
+%   << /Colors [ [ 0 0 0 ] [ 1 1 1 ] ] /ColorMix 1 >> (pkfan) puparse /purec exch def
+%   purec 0 false puat
+%   0.5 eq exch 0.5 eq and exch 0.5 eq and
+%   (/ColorMix 1 at the middle) mustbe
+%   << /Colors [ [ 0 0 0 ] [ 1 1 1 ] ] /ColorMix 0.5 >> (pkfan) puparse /purec exch def
+%   purec 0.25 false puat
+%   0.25 eq exch 0.25 eq and exch 0.25 eq and
+%   (/ColorMix 0.5 a quarter of the way) mustbe
+%
+%   % Three colours: the middle one at the middle, the last at the far edge.
+%   << /Colors [ [ 0 0 0 ] [ 0.5 0.5 0.5 ] [ 1 1 1 ] ] /ColorMix 0 >> (pkfan) puparse
+%   /purec exch def
+%   purec 0 false puat
+%   0.5 eq exch 0.5 eq and exch 0.5 eq and
+%   (the middle of three) mustbe
+%   purec -1 false puat
+%   1 eq exch 1 eq and exch 1 eq and
+%   (the last of three is at the far edge) mustbe
+%   purec 1 false puat
+%   0 eq exch 0 eq and exch 0 eq and
+%   (the first of three is at the near edge) mustbe
+%
+%   % One colour is that colour wherever you ask.
+%   << /Colors [ [ 0.25 0.5 0.75 ] ] >> (pkfan) puparse /purec exch def
+%   purec 1 false puat
+%   0.75 eq exch 0.5 eq and exch 0.25 eq and
+%   (one colour, u = +1) mustbe
+%   purec -1 true puat
+%   0.75 eq exch 0.5 eq and exch 0.25 eq and
+%   (one colour, u = -1 flipped) mustbe
+%
+%   % A load of identical colours resolves to exactly that colour at any
+%   % blend, which is what lets a uniform load paint the plain brush.
+%   << /Colors [ [ 0.1 0.2 0.3 ] [ 0.1 0.2 0.3 ] ] >> (pkfan) puparse /purec exch def
+%   purec 0.3 false puat
+%   0.3 eq exch 0.2 eq and exch 0.1 eq and
+%   (a uniform load is exactly its colour) mustbe
+%%EndSelfTest
+%
+%%SelfTest: puwet-is-the-identity-until-pkwet-publishes-its-mix
+%   0.1 0.2 0.3 puwet
+%   0.3 eq exch 0.2 eq and exch 0.1 eq and
+%   (outside any pkwet) mustbe
+%
+%   % /Soft 0 is the plain call, so a loaded colour is not graded there.
+%   { 0.1 0.2 0.3 puwet /putb exch def /putg exch def /putr exch def }
+%   << /Soft 0 >> pkwet
+%   putr 0.1 eq putg 0.2 eq and putb 0.3 eq and
+%   (inside /Soft 0) mustbe
+%%EndSelfTest
+
+% ============================================================================
 % Brush motions (issue #184)
 % ============================================================================
 %

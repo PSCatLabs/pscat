@@ -3,6 +3,37 @@
 Newest first. Per `AGENTS.md`, each stage ends with a summary here: what
 was built, tradeoffs made, what's explicitly deferred.
 
+## Paint loading L1: the `pu-` colour resolver (issue #218, 2026-10-13)
+
+Slice L1 of #183's design (`docs/PAINT_LOADING.md`, PR #207). It adds the
+shared half of a double-loaded brush to `lib/paintkit.ps` and changes no
+preset, so every existing render is byte-identical.
+
+- `opts (preset) puparse` validates `/Colors` (1 to 8 literal rgb arrays,
+  components 0..1; `xcheck` before the type check, so a procedure is
+  rejected), `/ColorMix` (0..1, default 0.3) and `/Light`, and returns
+  `[colors mix lightset light]`, or `null` when `/Colors` is unset.
+- `rec u flip puat` returns the colour at head position `u` (+1 is the
+  first colour). `puwet` is the identity until slice L3.
+- Guards are named after the calling preset (`pkfan-colors-must-be-an-array`),
+  built by `pugrd` with `cvn cvx exec`. The five British spellings
+  (`/Colours`, `/ColourMix`, `/HighlightColour`, `/ShadowColour`,
+  `/TipColour`) all raise `<preset>-colours-is-spelled-colors`
+  (`puspell`, so `pkoil` can use it without `/Colors`).
+- `tests/capabilities.rs` gains the unit `array of rgb arrays`.
+
+Decisions:
+- **`/Light` is not checked by `puparse`.** `pkdab` already owns a `/Light`
+  and must not be told it needs `/Colors`, so `pulightneedscolors` is a
+  separate call for `pkfan`, `pktrowel` and `pkbroad`.
+- **A blend that comes out at 0 or 1 returns the colour itself.**
+  `mix3(a, b, 1)` need not equal `b` to the last bit, and the design wants
+  a uniform load to paint what the plain brush paints exactly.
+- **The section sits before the brush motions, not at the end of the
+  file**, so it does not collide with the canvas-surface slice (S1), which
+  appends there.
+- Nothing is deferred beyond the design's own slice plan (L2 to L5b).
+
 ## Gallery: *Alpine Lake*'s reflection pulled down, sky moved onto `pkcrisscross` (issue #191, 2026-10-13)
 
 Child of epic #112. `gallery/alpine_lake.ps` now pulls its reflection
