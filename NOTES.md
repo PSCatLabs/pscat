@@ -3,6 +3,82 @@
 Newest first. Per `AGENTS.md`, each stage ends with a summary here: what
 was built, tradeoffs made, what's explicitly deferred.
 
+## Gallery: *Alpine Lake*'s reflection pulled down, sky moved onto `pkcrisscross` (issue #191, 2026-10-13)
+
+Child of epic #112. `gallery/alpine_lake.ps` now pulls its reflection
+straight down with #181's directional `pkwet` (`/Direction 270
+/OneSided true`). Its sky's criss-cross is laid out by #184's
+`pkcrisscross`, and the near range's foot is mist lifted with
+`/Direction 90`. No library code changed. The 2× still is re-rendered.
+
+Decisions:
+- **Record and replay instead of rewriting the elements.** A directional
+  pass must paint in the colour it inherits, so the reflection needs each
+  single-colour part on its own. The parts are interleaved, though.
+  Snow, shadow snow and knife planes alternate peak by peak, and each
+  part draws from its element's random stream, so a part pulled out
+  alone would re-roll its marks. Every painting step is now a checkpoint
+  (`lkdo`). Above the water it logs `rrand`, sets its colour and paints.
+  In the lake, the whole scene runs again and only the requested part
+  paints, after restoring its logged state with `srand`. So one part
+  replayed alone lays exactly its above-water marks. It works under
+  Ghostscript too, whose `rrand`/`srand` round-trip the same way.
+  Proof of the refactor: with every part replayed in its own colour, the
+  1× render was md5-identical to main (commit 1a94c73). That commit is
+  the evidence that the above-water scene is unchanged by the
+  restructuring. Single-part replay was checked separately: logging
+  `rrand` after each part as well, every part replayed alone ends on
+  exactly its recorded state (no mismatches).
+- **Each part is pulled into what is really under it.** Each reflected
+  part is pulled into the reflection of whatever sits beneath it: the
+  far range into open water, snow and planes into their range, the near
+  range into the far range half-misted, the forest rows into the near
+  range's misted foot and each other, and the pines into the forest. A
+  reflected colour is the part's own mixed 15% toward the water, and
+  snow is also dimmed to 0.9, since a bright thing reflects darker.
+- **Offset/(Layers−1) is 2pt everywhere** (`/Offset` is #141's name for pkwet's old `/Spread`; the piece uses #141's new key names throughout): 12/7 on the visible parts,
+  8/5 on the far range's mostly hidden planes and snow, 10/6 on the
+  mist. `/Stretch 5` rather than 10 gives the copies a little
+  cross-axis wobble, which breaks the stair-step a pulled diagonal knife
+  stroke otherwise makes.
+- **No nested graze.** #181's specimen pulls and then grazes each part
+  with a nested `/Direction 0` `pkwet`. Doing that here (3 graze layers,
+  2 on the forest's back row, whose crest is already a pkwet) took the
+  1× render from about 64s to 131s user (same pulls, with and without
+  the graze, on a loaded machine), with little visible gain. The graze is the existing horizontal `pkbroad` strokes,
+  laid every 8pt now instead of every 11, then the light lines. This is
+  a deviation from the issue's "pulled down, then grazed across, element
+  by element".
+- **The lift replaces the fade on the near range only.** At 2× the
+  #118 fade (a stack of `pkbroad` strokes mixed toward mist) read as
+  ruled horizontal stripes. Two rows of fine spray along the foot,
+  lifted 40pt with `/Direction 90 /OneSided true /Layers 14` over a
+  thin haze band, read as mist rising off the lake. The far range's
+  foot is almost entirely behind the near range, so it gets none.
+  Dropping the old fade there changes 169 pixels at 1×, a sliver at the
+  left edge behind the near pines. The lift is
+  replayed sharp in the reflection: mirrored, it already runs down the
+  water, and pulling it too would nest 14 × 7 passes, past the 64×
+  budget.
+- **The sky is worked in 24pt bands.** One `pkcrisscross` + `pkbroad`
+  call paints one colour, while the old loop coloured each stroke by its
+  height. So each band is painted twice, in the gradient's colour at
+  its middle with the shade nudged ±4%, `/Count 3` each (about 84
+  strokes against the old 91). No banding is visible, and coverage is
+  more even than the hand-placed strokes'.
+
+Render time (release, 760×560, before and after measured back to
+back): 24s before, 51s after. The pulls are about 26s of that, spread
+evenly over the parts with no single hot spot. The 2× still took about
+64s user under load.
+
+Known limits:
+- `pscat --seed` forces every `srand` to one value. That breaks the
+  replay: each checkpoint would restore the forced seed, not its logged
+  state. A seed sweep of this piece is not meaningful anyway, since every
+  element reseeds itself.
+- `/Under` is still one colour per part, but the water's colour changes
+  with depth. That is #179's territory.
 ## `lib/paintkit.ps`: one meaning per key, and units in the catalog (issue #141, 2026-10-13)
 
 `/Spread` and `/Load` each meant different things in different presets,
@@ -199,7 +275,8 @@ Decisions:
   with a motion.
 
 Deferred: `gallery/alpine_lake.ps` still hand-writes its criss-cross sky,
-tapped crest, pulled branches and lake pulls. Moving it onto the motions
+tapped crest, pulled branches and lake pulls. (The sky moved onto
+`pkcrisscross` in #191; the rest is still hand-written.) Moving it onto the motions
 would change a committed render for no new capability, so it is left
 for a follow-up. A scumbled cloud with a lit top over a flatter, greyer
 underside is now possible to build (scumble plus `pkwet`) but is not part
@@ -286,6 +363,7 @@ Gotchas, documented in the header and README:
   came out as horizontal stripes, and a lifted fine `pkspray` dissolves.
 
 Not done: `gallery/alpine_lake.ps` still gets horizontal pulls only.
+(Done in #191; see that entry.)
 Applying this means rewriting its scene elements so they inherit their
 colour, which is the rule above. Its reflection is about half the
 piece's 24s render, and a pull multiplies that. Worth a follow-up issue
@@ -373,8 +451,7 @@ for follow-ups, not fixed here:
   before the horizontal strokes) needs canvas pickup. That is #134's
   territory, so the lake gets horizontal `pkbroad` pulls only.
   (Superseded: #181's directional `pkwet` does the pull without
-  readback, for procedural scenes. The piece itself isn't converted
-  yet; see that entry.)
+  readback, for procedural scenes, and #191 converted the piece.)
 
 Render time is about 35s at 760×560 in a release build, about half of
 it the reflection. The piece is linted clean by hand. It is
