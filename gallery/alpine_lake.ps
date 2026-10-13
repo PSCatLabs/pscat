@@ -62,6 +62,7 @@
 /lkSNOW    [0.99 0.98 0.96] def
 /lkMIST    [0.86 0.86 0.88] def
 /lkLINE    [0.20 0.30 0.32] def                  % far tree line
+/lkFORESTUNDER [ lkMIST lkNEAR 0.55 mix3 ] def   % the near range's foot, half faded
 /lkPINE    [0.06 0.15 0.11] def
 /lkPINELT  [0.26 0.40 0.21] def
 /lkBANK    [0.12 0.10 0.07] def
@@ -124,6 +125,47 @@
     << /Soft 1 /Under lkcunder >> pkwet
 } def
 
+% ---- record and replay ---------------------------------------------
+
+% The lake pulls each part of the reflection down with a directional
+% pkwet, which grades a pass by setting a mixed colour *before* the
+% procedure runs. So the reflection needs every single-colour part of
+% the scene on its own (the snow without the range, the trees without
+% the hill), painting in whatever colour it inherits. But the parts are
+% interleaved (snow, shadow and knife planes alternate peak by peak)
+% and each draws from the element's own random stream, so pulling one
+% part out on its own would re-roll its marks.
+%
+% So every painting step is a checkpoint. Above the water (record mode)
+% a checkpoint logs the random state with rrand, sets its colour and
+% paints. In the lake (replay mode) the whole scene runs again, but a
+% checkpoint only paints when its code is the one asked for, after
+% restoring the logged state with srand. A part replayed alone lays
+% exactly the marks it laid above, wherever it sits in the sequence.
+% Geometry and clips run in both modes, since they draw nothing.
+
+/lkLOG 400 array def
+/lkmode /record def
+/lkwant -1 def                                   % -1 replays every part
+/lkown true def                                  % replay in the part's own colour?
+
+% rgb proc code -   one checkpoint: code is the part's number within the
+% current element (lkel), so the scene-wide part is lkel*10+code
+/lkdo {
+    lkel 10 mul add /lkpc exch def /lkpp exch def /lkprgb exch def
+    lkmode /record eq {
+        lkLOG lkcur rrand put
+        lkprgb lkset lkpp
+    } {
+        lkwant -1 eq lkpc lkwant eq or {
+            lkLOG lkcur get srand
+            lkown { lkprgb lkset } if
+            lkpp
+        } if
+    } ifelse
+    /lkcur lkcur 1 add def
+} def
+
 % ---- the ranges ------------------------------------------------------
 
 /lkFARPTS [
@@ -165,7 +207,7 @@
 % color toward the mist, so the foot dissolves rather than ending.
 /lkrange {
     srand /lkreach exch def /lkrc exch def /lkpts exch def
-    lkrc lkset lkpts lkrangepath fill
+    lkrc { lkpts lkrangepath fill } 1 lkdo
     % the knife: on every peak, snow pulled down the lit (left) face and
     % a bluer shadow snow down the right, a little steeper than the
     % slope so it bites into the face. Clipped to the silhouette, which
@@ -196,28 +238,31 @@
                 newpath lkpx lkpy moveto lkrx2 lkpy lkd sub lineto
                 lkpx lkrx2 lkpx sub 0.15 mul add lkpy lkd 1.7 mul sub lineto
                 closepath clip
-                [ lkrc 0.84 shade ] lkset
-                lkpx 6 sub 7 lkrx2 6 add {
-                    /lkx exch def
-                    lkx lkpy 2 add lkx 3 lkj add lkpy lkd 2 mul sub lkknife0
-                } for
+                [ lkrc 0.84 shade ] {
+                    lkpx 6 sub 7 lkrx2 6 add {
+                        /lkx exch def
+                        lkx lkpy 2 add lkx 3 lkj add lkpy lkd 2 mul sub lkknife0
+                    } for
+                } 2 lkdo
             grestore
-            lkSNOW lkset
-            0 1 4 {
-                /lkk exch def
-                /lkd lkh 0.45 lkk 0.14 mul add mul def
-                lkpx lkk 4 mul sub 2 lkj add  lkpy 2 sub lkk 7 mul sub
-                lkpx lkk 4 mul sub lkd lkls mul 0.7 mul sub  lkpy lkd sub 6 lkj add
-                24 lkk 3 mul sub 0.82 lkk 0.08 mul sub lkknife
-            } for
-            [ lkrc lkSNOW 0.55 mix3 ] lkset
-            0 1 3 {
-                /lkk exch def
-                /lkd lkh 0.4 lkk 0.12 mul add mul def
-                lkpx lkk 3 mul add 3 add  lkpy 3 sub lkk 6 mul sub
-                lkpx lkk 3 mul add lkd lkrs mul 0.7 mul add  lkpy lkd sub 6 lkj add
-                20 0.6 lkknife
-            } for
+            lkSNOW {
+                0 1 4 {
+                    /lkk exch def
+                    /lkd lkh 0.45 lkk 0.14 mul add mul def
+                    lkpx lkk 4 mul sub 2 lkj add  lkpy 2 sub lkk 7 mul sub
+                    lkpx lkk 4 mul sub lkd lkls mul 0.7 mul sub  lkpy lkd sub 6 lkj add
+                    24 lkk 3 mul sub 0.82 lkk 0.08 mul sub lkknife
+                } for
+            } 3 lkdo
+            [ lkrc lkSNOW 0.55 mix3 ] {
+                0 1 3 {
+                    /lkk exch def
+                    /lkd lkh 0.4 lkk 0.12 mul add mul def
+                    lkpx lkk 3 mul add 3 add  lkpy 3 sub lkk 6 mul sub
+                    lkpx lkk 3 mul add lkd lkrs mul 0.7 mul add  lkpy lkd sub 6 lkj add
+                    20 0.6 lkknife
+                } for
+            } 4 lkdo
         } if
     } for
     grestore
@@ -228,13 +273,14 @@
         lkWL 4 add 5 lkWL 84 add {
             /lky exch def
             /lkt lky lkWL sub 80 div def            % 0 at the foot
-            lkMIST lkrc lkt 0.8 exp mix3 setrgbcolor
-            -20 lky 2 lkj add 780 lky 3 lkj add lkseg
             % the brush carries less paint the higher it goes, so the top
             % of the fade breaks up over the knife work instead of
             % covering it with a flat band
-            << /Width 12 /Charge 1 lkt 0.6 mul sub /Depletion 0.25 lkt 0.6 mul add
-               /Edge 0.4 /Grain 10 /ColorJitter 0.02 >> pkbroad
+            [ lkMIST lkrc lkt 0.8 exp mix3 ] {
+                -20 lky 2 lkj add 780 lky 3 lkj add lkseg
+                << /Width 12 /Charge 1 lkt 0.6 mul sub /Depletion 0.25 lkt 0.6 mul add
+                   /Edge 0.4 /Grain 10 /ColorJitter 0.02 >> pkbroad
+            } 5 lkdo
         } for
     grestore
 } def
@@ -242,11 +288,12 @@
 % y under seed -   a band of mist tapped wet into whatever is under it
 /lkmist {
     srand /lkmu exch def /lkmy exch def
-    lkMIST lkset
     /lkmd lkmy 300 gt { 150 } { 60 } ifelse def
-    { newpath -20 lkmy moveto 250 lkmy 8 sub 520 lkmy 8 add 780 lkmy 2 sub curveto
-      << /Nozzle 12 /Density lkmd /Falloff 1 /Speck 1 /Speckle 0.6 /Overspray 0.6 >> pkspray }
-    << /Soft 1 /Under lkmu >> pkwet
+    lkMIST {
+        { newpath -20 lkmy moveto 250 lkmy 8 sub 520 lkmy 8 add 780 lkmy 2 sub curveto
+          << /Nozzle 12 /Density lkmd /Falloff 1 /Speck 1 /Speckle 0.6 /Overspray 0.6 >> pkspray }
+        << /Soft 1 /Under lkmu >> pkwet
+    } 1 lkdo
 } def
 
 % ---- the far tree line ----------------------------------------------
@@ -274,24 +321,30 @@
 /lktreeline {
     4 srand
     /lkbackc [ lkLINE lkMIST 0.4 mix3 ] def
-    lkbackc lkset 0.95 lkhillmass
-    { 0.95 lkcrest
-      % behind this crest is the near range's foot, half faded into mist --
+    lkbackc { 0.95 lkhillmass } 1 lkdo
+    % behind this crest is the near range's foot, half faded into mist --
     % not the mist itself, which would leave a pale rim around the forest
-    << /Size 2.2 /Spread 5 /Density 4 /Shadow 0 /Highlight 0 /Irregular 1 >> pkdab }
-    << /Soft 0.6 /Under [ lkMIST lkNEAR 0.55 mix3 ] >> pkwet
-    lkLINE lkset 0.55 lkhillmass
-    0.55 lkcrest
-    << /Size 2 /Spread 4 /Density 4 /Shadow 0.3 /Highlight 0.08 /Irregular 1 >> pkdab
-    0 1 26 {
-        pop
-        /lkx 760 chance def
-        /lkt lkx lkfoothill 0.55 mul lkWL add def
-        lkx lkt 2 sub lkx lkt 8 add 10 chance add lkseg
-        << /Width 5 /Bristles 10 /Splay 0.9 /Load 0.9 /Ragged 0.5 /Flick 0.9 >> pkfan
-    } for
-    -10 lkWL 2 add 770 lkWL 2 add lkseg
-    << /Width 7 /Charge 0.95 /Depletion 0 /Edge 0.5 >> pkbroad
+    lkbackc {
+        { 0.95 lkcrest
+          << /Size 2.2 /Spread 5 /Density 4 /Shadow 0 /Highlight 0 /Irregular 1 >> pkdab }
+        << /Soft 0.6 /Under lkFORESTUNDER >> pkwet
+    } 1 lkdo
+    % the front row is one colour throughout: the mass, its tapped crest,
+    % the spires standing out of it and the band along the shore
+    lkLINE {
+        0.55 lkhillmass
+        0.55 lkcrest
+        << /Size 2 /Spread 4 /Density 4 /Shadow 0.3 /Highlight 0.08 /Irregular 1 >> pkdab
+        0 1 26 {
+            pop
+            /lkx 760 chance def
+            /lkt lkx lkfoothill 0.55 mul lkWL add def
+            lkx lkt 2 sub lkx lkt 8 add 10 chance add lkseg
+            << /Width 5 /Bristles 10 /Splay 0.9 /Load 0.9 /Ragged 0.5 /Flick 0.9 >> pkfan
+        } for
+        -10 lkWL 2 add 770 lkWL 2 add lkseg
+        << /Width 7 /Charge 0.95 /Depletion 0 /Edge 0.5 >> pkbroad
+    } 2 lkdo
 } def
 
 % ---- evergreens ------------------------------------------------------
@@ -300,12 +353,12 @@
 % pulled out and down from the trunk, widening toward the base
 /lkpine {
     srand /lkph exch def /lkpy exch def /lkpx exch def
-    [ lkPINE 0.8 shade ] lkset
-    lkpx lkpy lkpx lkpy lkph add lkseg
-    << /Width lkph 0.03 mul 1 max /Taper 0.95 /Waver 0.3 >> pkliner
-    lkPINE lkset
+    [ lkPINE 0.8 shade ] {
+        lkpx lkpy lkpx lkpy lkph add lkseg
+        << /Width lkph 0.03 mul 1 max /Taper 0.95 /Waver 0.3 >> pkliner
+    } 1 lkdo
     /lkn lkph 7 div cvi 3 max def
-    0 1 lkn {
+    lkPINE { 0 1 lkn {
         /lkk exch def
         /lkf lkk lkn div def                     % 0 at the top
         /lkty lkpy lkph add lkph 0.9 mul lkf mul sub def
@@ -317,10 +370,9 @@
             << /Width lkph 0.09 mul 3 max /Bristles 18 /Splay 0.8 /Load 0.88
                /Dropout 0.12 /Ragged 0.45 /Flick 0.7 >> pkfan
         } forall
-    } for
+    } for } 2 lkdo
     % highlights only on the lit (left) side, and only sparingly
-    lkPINELT lkset
-    1 2 lkn {
+    lkPINELT { 1 2 lkn {
         /lkk exch def
         /lkf lkk lkn div def
         /lkty lkpy lkph add lkph 0.9 mul lkf mul sub 2 add def
@@ -328,7 +380,7 @@
         lkpx 2 sub lkty  lkpx lkspan sub lkty lkspan 0.4 mul sub lkseg
         << /Width lkph 0.05 mul 2 max /Bristles 10 /Splay 0.7 /Load 0.5
            /Dropout 0.4 /Ragged 0.6 >> pkfan
-    } for
+    } for } 3 lkdo
 } def
 
 /lkpines {
@@ -346,6 +398,7 @@
 % shoreline instead made them read as giants on the far shore, and their
 % lowest tier met its own mirror image at the waterline as a chevron.
 /lknearpines {
+    /lkcur 0 def /lkel 6 def
     44 112 250 34 lkpine
     92 112 180 35 lkpine
     616 68 190 31 lkpine
@@ -354,12 +407,16 @@
 } def
 
 % everything above the waterline, which the lake reflects
+% Elements are numbered for the checkpoints: part p of element e is
+% e*10+p. The near pines are not here: they stand on the foreground
+% bank and are painted after the lake.
 /lkscene {
-    lkFARPTS lkFAR 0.36 2 lkrange
-    330 lkFAR 5 lkmist
-    lkNEARPTS lkNEAR 0.22 3 lkrange
-    lktreeline
-    lkpines
+    /lkcur 0 def
+    /lkel 1 def lkFARPTS lkFAR 0.36 2 lkrange
+    /lkel 2 def 330 lkFAR 5 lkmist
+    /lkel 3 def lkNEARPTS lkNEAR 0.22 3 lkrange
+    /lkel 4 def lktreeline
+    /lkel 5 def lkpines
 } def
 
 % ---- paint -----------------------------------------------------------
@@ -383,7 +440,9 @@ lkWL -2 0 {
 } for
 gsave
     0 lkWL 2 mul translate 1 -1 scale
+    /lkmode /replay def /lkwant -1 def /lkown true def
     lkscene
+    /lkmode /record def
 grestore
 7 srand
 lkWL 4 sub -11 0 {
