@@ -189,8 +189,10 @@ Which tool to pick:
   degrees` (the direction the light comes from, as `pkdab`'s) and each
   subpath puts the first colour on whichever side faces it. Branches must be
   real strokes out from the trunk (`moveto`/`lineto`): a pressed fan or a dab
-  is never flipped. Make the dark half narrow at a low `/ColorMix` (0.1 or so)
-  or it blends to one hue at page size. `/HighlightColor` and `/ShadowColor`
+  is never flipped. A low `/ColorMix` (around 0.1)
+  keeps the seam crisp, the stroke needs enough `/Width` to show both colours
+  at page size, and the entries are evenly spaced, so repeating one
+  (`[lit dark dark]`) gives it more of the head. `/HighlightColor` and `/ShadowColor`
   on `pkdab` and `pkoil` are the hues the lit and shaded layers mix toward
   instead of white and black (a warm yellow and a cool blue make a sunlit
   bush; `/Highlight` and `/Shadow` still say how far). A loaded mark goes

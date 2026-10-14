@@ -49,9 +49,17 @@ that uses a key only the branch has, and this branch adds none, so it was not ru
   are graded. It passed on the first run, so no `lib/` text needed editing. The
   `@summary` lines of `pkfan`, `pkbroad` and `pktrowel` do not mention the load (only
   `pkdab`'s does); their `@param` rows do, which is where `--capabilities` shows it.
+  Filed as #291 rather than edited here, so this PR stays free of `lib/` changes.
 - **Docs.** A README paragraph with the render, a psart bullet (brush-relative load,
   `/Light` and real strokes, narrow dark half, hue keys, no `setrgbcolor` inside
   pkwet) and HANDOFF's "specimen is next" reworded.
-- Not here: `/TipColor` and `/TipReach` (L6), `pkdry` and `pkoil` ridges (L7), and
-  converting `gallery/alpine_lake.ps` to loaded brushes (#187 or its own issue). No
-  site card: the render is committed under `docs/`.
+- **The reflection is the same tree.** The sharp tree and the pkwet procedure seed once
+  and draw the trunk then the branches, in the same order as `ldtree`, so the reflection
+  mirrors the tree's bristles instead of being a second random tree; `/ldlight` is set
+  explicitly in the shore panel rather than inherited from the previous panel. The fade
+  assertion was mutation-checked too: `/Pickup 0` on the pull makes it fail, so it
+  measures `pkwet` grading the loaded colours and not just the reflection's geometry.
+- Not here: `/TipColor` and `/TipReach` (L6, #229), `pkdry` and `pkoil` ridges (L7,
+  #230), the `@summary` lines (#291), and converting `gallery/alpine_lake.ps` to
+  loaded brushes (the second specimen, #187). No site card: the render is committed
+  under `docs/`.
