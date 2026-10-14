@@ -327,6 +327,99 @@ fn pigcolor_feeds_the_highlight_and_shadow_keys() {
     .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
 }
 
+/// Bare names in the colour keys (#356) paint the same pixels as the
+/// `pigcolor`/`pigcolors` forms they stand for.
+#[test]
+fn bare_names_in_colors_paint_the_same_pixels_as_pigcolors() {
+    let render = |colors: &str| -> Vec<u8> {
+        let mut it = loaded();
+        it.run_str(&format!(
+            "1 1 1 setrgbcolor clippath fill 5 srand newpath 20 100 moveto 180 100 lineto \
+             << /Width 40 /Bristles 30 /Colors {colors} >> pkfan"
+        ))
+        .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+        it.gfx().pixmap.data().to_vec()
+    };
+    let bare = render("[ /sapgreen /cadmiumyellow ]");
+    assert_eq!(bare, render("[ /sapgreen /cadmiumyellow ] pigcolors"));
+    assert_ne!(
+        bare,
+        render("[ [ 0 0 0 ] [ 1 0 0 ] ]"),
+        "and not the control"
+    );
+    // Names and rgb arrays mix in one list.
+    assert_eq!(
+        render("[ /sapgreen [ 0.2 0.4 1 ] ]"),
+        render("[ /sapgreen pigcolor [ 0.2 0.4 1 ] ]")
+    );
+}
+
+#[test]
+fn bare_names_in_the_highlight_and_shadow_keys_match_pigcolor() {
+    let render = |keys: &str, preset: &str| -> Vec<u8> {
+        let mut it = loaded();
+        it.run_str(&format!(
+            "1 1 1 setrgbcolor clippath fill 0.4 0.3 0.2 setrgbcolor 5 srand newpath \
+             20 60 moveto 180 60 lineto << /Size 8 /Highlight 1 /Shadow 1 {keys} >> {preset}"
+        ))
+        .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+        it.gfx().pixmap.data().to_vec()
+    };
+    for preset in ["pkoil", "pkdab"] {
+        let bare = render(
+            "/HighlightColor /cadmiumyellow /ShadowColor /prussianblue",
+            preset,
+        );
+        let wrapped = render(
+            "/HighlightColor /cadmiumyellow pigcolor /ShadowColor /prussianblue pigcolor",
+            preset,
+        );
+        assert_eq!(bare, wrapped, "{preset}: a bare name is its pigcolor");
+        let plain = render("/HighlightColor [ 0 0 0 ] /ShadowColor [ 1 1 1 ]", preset);
+        assert_ne!(bare, plain, "{preset}: and not the control");
+    }
+}
+
+#[test]
+fn the_colour_keys_name_the_fix_for_an_unknown_name_or_a_spec() {
+    let guard = |opts: &str, preset: &str| -> String {
+        let mut it = loaded();
+        let e = it
+            .run_str(&format!("newpath 0 0 moveto 50 0 lineto {opts} {preset}"))
+            .expect_err("must refuse");
+        it.error_report(&e)
+    };
+    let r = guard("<< /Colors [ /nothue ] >>", "pkfan");
+    assert!(
+        r.contains("pkfan-colors-unknown-pigment-see-PigmentNames"),
+        "{r}"
+    );
+    let r = guard(
+        "<< /Colors [ [ /sapgreen 1 /cadmiumyellow 1 ] ] >>",
+        "pktrowel",
+    );
+    assert!(
+        r.contains("pktrowel-colors-pigmix-spec-needs-pigcolors"),
+        "{r}"
+    );
+    let r = guard("<< /HighlightColor /nothue >>", "pkoil");
+    assert!(
+        r.contains("pkoil-highlightcolor-unknown-pigment-see-PigmentNames"),
+        "{r}"
+    );
+    let r = guard("<< /ShadowColor [ /alizarin 1 ] >>", "pkdab");
+    assert!(
+        r.contains("pkdab-shadowcolor-pigmix-spec-needs-pigcolors"),
+        "{r}"
+    );
+    // A name that is not a pigment but is an artkit palette: still an unknown pigment.
+    let r = guard("<< /Colors [ /dusk ] >>", "pkbroad");
+    assert!(
+        r.contains("pkbroad-colors-unknown-pigment-see-PigmentNames"),
+        "{r}"
+    );
+}
+
 #[test]
 fn the_catalog_lists_the_pigment_entries() {
     let caps = capabilities::catalog();

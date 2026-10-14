@@ -1973,8 +1973,8 @@
 % @param: /Shadow [0..1] restrained shadow strength on the opposite side (default 0.10)
 % @param: /Pressure [proc] {t -> mult} proc over normalized path progress; shapes the base ribbon, bristle ridges, highlight and shadow alike (default { pkflat })
 % @param: /Jitter [points] Seeded edge displacement amount, forwarded to each dash's pkribbon Jitter (default 0)
-% @param: /HighlightColor [rgb array] the color the highlight ridge mixes toward, instead of white; /Highlight still sets how far (default unset: toward white)
-% @param: /ShadowColor [rgb array] the color the shadow ridge mixes toward, instead of black; /Shadow still sets how far (default unset: toward black)
+% @param: /HighlightColor [rgb array] the color the highlight ridge mixes toward, instead of white; /Highlight still sets how far; a bare pigment name such as /titaniumwhite stands for that pigment, and a pigmix spec goes through pigcolor (default unset: toward white)
+% @param: /ShadowColor [rgb array] the color the shadow ridge mixes toward, instead of black; /Shadow still sets how far; a bare pigment name such as /titaniumwhite stands for that pigment, and a pigmix spec goes through pigcolor (default unset: toward black)
 /pkoil {
     /poopts exch def
     /poWidth poopts /Width 14 pkgetdef def
@@ -2468,7 +2468,7 @@
 % @param: /EdgeBuildup [0..1] darker ridges of paint piled at the two blade edges, drawn last (default 0.35)
 % @param: /Jitter [points] Seeded lateral displacement of the lane boundaries, deterministic under the caller's own N srand (default 0)
 % @param: /ColorJitter [0..1] per-lane color variation magnitude around the caller's current color (default 0.06)
-% @param: /Colors [array of rgb arrays] 1 to 8 loaded colors, listed from the blade's left end (looking along the travel) to its right, evenly spaced across it; the edge-buildup ridges take the colors of their own edges; when set, the current color is not used for the mark, though /ColorJitter still varies it (default unset)
+% @param: /Colors [array of rgb arrays] 1 to 8 loaded colors, listed from the blade's left end (looking along the travel) to its right, evenly spaced across it; the edge-buildup ridges take the colors of their own edges; when set, the current color is not used for the mark, though /ColorJitter still varies it. An entry may be a bare pigment name such as /sapgreen (see PigmentNames), which stands for that pigment; a pigmix spec goes through pigcolors (default unset)
 % @param: /ColorMix [0..1] with /Colors, how far neighbouring colors have blended on the blade: 0 is hard bands, 1 a smooth gradient (default 0.3)
 % @param: /Light [degrees] with /Colors, the direction the light comes from, counterclockwise from +x in user space: each subpath puts the first color on the side facing the light, whichever way it travels (default unset: the first color stays on the left of the travel)
 % @param: /Touch [0..1] How hard the blade presses into the shared canvas set by pkcanvas, which must be called first: below 1 the mark lands only on the weave's knuckles that stand proud enough for that pressure to reach, lower is lighter and 0 deposits nothing; 1 is full contact, identical to leaving it unset. Takes no rand draws (default unset)
@@ -3381,7 +3381,7 @@
 % @param: /Jitter [points] Seeded lateral displacement of each bristle's trace (default 0)
 % @param: /Pitch [points] walkpath sampling pitch for the shared centerline pass; must be > 0 (default BristleWidth*0.6, capped at 6)
 % @param: /ColorJitter [0..1] per-bristle color variation around the caller's current color (default 0.06)
-% @param: /Colors [array of rgb arrays] 1 to 8 loaded colors, listed from the fan's left edge (looking along the travel) to its right, evenly spaced across the bristles; when set, the current color is not used for the mark, though /ColorJitter still varies it; a pressed fan paints them across its arc, first color on the left of its axis (default unset)
+% @param: /Colors [array of rgb arrays] 1 to 8 loaded colors, listed from the fan's left edge (looking along the travel) to its right, evenly spaced across the bristles; when set, the current color is not used for the mark, though /ColorJitter still varies it; a pressed fan paints them across its arc, first color on the left of its axis. An entry may be a bare pigment name such as /sapgreen (see PigmentNames), which stands for that pigment; a pigmix spec goes through pigcolors (default unset)
 % @param: /ColorMix [0..1] with /Colors, how far neighbouring colors have blended on the brush: 0 is hard bands, 1 a smooth gradient (default 0.3)
 % @param: /Light [degrees] with /Colors, the direction the light comes from, counterclockwise from +x in user space: each subpath puts the first color on the side facing the light, whichever way it travels; a pressed fan is never flipped (default unset: the first color stays on the left of the travel)
 % @param: /Touch [0..1] How hard the fan presses into the shared canvas set by pkcanvas, which must be called first: below 1 the bristles land only on the weave's knuckles that stand proud enough for that pressure to reach, lower is lighter and 0 deposits nothing; 1 is full contact, identical to leaving it unset. Composes with /Load and /Dropout and takes no rand draws (default unset)
@@ -3961,7 +3961,7 @@
 % @param: /Edge [0..1] roughness applied to every striation boundary, not only the band's outer sides -- so above about 0.3 it also breaks holes through the band's interior (8% of interior pixels at 0.9); 0 is a crisp flat-brush edge (default 0.15)
 % @param: /Pitch [points] walkpath sampling pitch for the shared centerline pass; must be > 0 (default Width*0.3, capped at 4)
 % @param: /ColorJitter [0..1] per-striation color variation around the caller's current color (default 0.05)
-% @param: /Colors [array of rgb arrays] 1 to 8 loaded colors, listed from the brush's left edge (looking along the travel) to its right, evenly spaced across the band; when set, the current color is not used for the mark, though /ColorJitter still varies it (default unset)
+% @param: /Colors [array of rgb arrays] 1 to 8 loaded colors, listed from the brush's left edge (looking along the travel) to its right, evenly spaced across the band; when set, the current color is not used for the mark, though /ColorJitter still varies it. An entry may be a bare pigment name such as /sapgreen (see PigmentNames), which stands for that pigment; a pigmix spec goes through pigcolors (default unset)
 % @param: /ColorMix [0..1] with /Colors, how far neighbouring colors have blended on the brush: 0 is hard bands, 1 a smooth gradient (default 0.3)
 % @param: /Light [degrees] with /Colors, the direction the light comes from, counterclockwise from +x in user space: each subpath puts the first color on the side facing the light, whichever way it travels (default unset: the first color stays on the left of the travel)
 % @param: /Touch [0..1] How hard the brush presses into the shared canvas set by pkcanvas, which must be called first: below 1 the band lands only on the weave's knuckles that stand proud enough for that pressure to reach, lower is lighter and 0 deposits nothing; 1 is full contact, identical to leaving it unset. Composes with /Charge and /Depletion and takes no rand draws (default unset)
@@ -6709,10 +6709,10 @@ systemdict /setalpha known /pwhasalpha exch def
 % @param: /Light [degrees] Direction the light comes from, in degrees counterclockwise from +x in user space (default 120, up and to the left)
 % @param: /Pitch [points] walkpath sampling pitch for the spine; must be > 0 (default Size, capped at 6)
 % @param: /ColorJitter [0..1] per-dab tint variation around the current color (default 0.08)
-% @param: /Colors [array of rgb arrays] 1 to 8 loaded colors, evenly spaced along the load; each dab takes one, at the position its existing outline-phase draw gives it, so a clump mixes the colors in proportion to their share of the list ([dark dark dark yellow] is mostly dark). When set, the current color is not used for the mark, though /ColorJitter still varies it. Takes no random draw, so it recolors a mark without moving it (default unset)
+% @param: /Colors [array of rgb arrays] 1 to 8 loaded colors, evenly spaced along the load; each dab takes one, at the position its existing outline-phase draw gives it, so a clump mixes the colors in proportion to their share of the list ([dark dark dark yellow] is mostly dark). When set, the current color is not used for the mark, though /ColorJitter still varies it. Takes no random draw, so it recolors a mark without moving it. An entry may be a bare pigment name such as /sapgreen (see PigmentNames), which stands for that pigment; a pigmix spec goes through pigcolors (default unset)
 % @param: /ColorMix [0..1] with /Colors, how far neighbouring colors have blended on the brush: 0 gives each dab one of two neighbouring colors outright, 1 a smooth gradient between them (default 0.3)
-% @param: /HighlightColor [rgb array] the color the lighter dabs on the lit side mix toward, instead of white; /Highlight still sets how far (default unset: toward white)
-% @param: /ShadowColor [rgb array] the color the darker underlayer mixes toward, instead of black; /Shadow still sets how far (default unset: toward black)
+% @param: /HighlightColor [rgb array] the color the lighter dabs on the lit side mix toward, instead of white; /Highlight still sets how far; a bare pigment name such as /titaniumwhite stands for that pigment, and a pigmix spec goes through pigcolor (default unset: toward white)
+% @param: /ShadowColor [rgb array] the color the darker underlayer mixes toward, instead of black; /Shadow still sets how far; a bare pigment name such as /titaniumwhite stands for that pigment, and a pigmix spec goes through pigcolor (default unset: toward black)
 /pkdab {
     /pdopts exch def
     /pdsize pdopts /Size 6 pkgetdef def
@@ -6930,7 +6930,8 @@ systemdict /setalpha known /pwhasalpha exch def
 % matter: blue and yellow lerp to grey, white only lightens, and a dark mix
 % never goes rich. This section is the paint answer. It touches no preset and
 % changes no existing render; the presets take its colours through the keys
-% they already have (`/Colors`, `/HighlightColor`, `/ShadowColor`).
+% they already have (`/Colors`, `/HighlightColor`, `/ShadowColor`), which since
+% #356 also accept a bare pigment name (the resolver, `pupig`, reads `Pigments`).
 %
 %   /name pigment            -> r g b       a pigment as it comes from the tube
 %   [ /name w /name w ... ] pigmix -> r g b mix by weight, like paint
@@ -7119,7 +7120,7 @@ systemdict /setalpha known /pwhasalpha exch def
 } bind def
 
 % @kind: Procedure
-% @summary: A whole /Colors list from pigments. Takes an array whose entries are pigment names, pigmix specs or plain [r g b] arrays, and returns the array of rgb arrays a preset's /Colors wants.
+% @summary: A whole /Colors list from pigments. Takes an array whose entries are pigment names, pigmix specs or plain [r g b] arrays, and returns the array of rgb arrays a preset's /Colors wants. A list of bare names needs no wrapper (/Colors takes names itself); pigcolors is for lists that include pigmix specs.
 % @example: << /Colors [ /sapgreen [ /sapgreen 1 /cadmiumyellow 1 ] ] pigcolors >> pkfan
 /pigcolors {
     /pgmsrc exch def
@@ -7311,6 +7312,43 @@ systemdict /setalpha known /pwhasalpha exch def
         { pusn (-colours-is-spelled-colors) pugrd } if
 } bind def
 
+% (a) (b) pucat -> (ab)   (concatenate two strings; builds a guard prefix)
+% @internal
+/pucat {
+    /pucb exch def /puca exch def
+    puca length pucb length add string
+    dup 0 puca putinterval
+    dup puca length pucb putinterval
+} bind def
+
+% obj pujspec -> bool   (a literal array whose first element is a name)
+% That is the shape of a `pigmix` spec ([ /sapgreen 1 /cadmiumyellow 1 ]). It
+% never fits a colour key, which takes an [r g b] of numbers, so a key that sees
+% one says to wrap it in `pigcolors` instead of "not an rgb array". The length
+% is tested before the element is read: `[ ]` is not a spec.
+% @internal
+/pujspec {
+    dup type /arraytype eq {
+        dup xcheck { pop false } {
+            dup length 0 gt { 0 get type /nametype eq } { pop false } ifelse
+        } ifelse
+    } { pop false } ifelse
+} bind def
+
+% (prefix) /name pupig -> [r g b]
+% A bare pigment name in a colour key (#356): the same colour `pigcolor` gives,
+% read straight from `Pigments` so the resolver does not call into pigmix and
+% its `pgm` scratch. A lone pigment is returned as stored, so a name and its
+% `pigcolor` are the same bits. The array is a fresh one: it must not alias the
+% palette's own entry. An unknown name raises `<prefix>-unknown-pigment-see-
+% PigmentNames`, which says where the valid names are listed.
+% @internal
+/pupig {
+    /pujn exch def /pujp exch def
+    Pigments pujn known not { pujp (-unknown-pigment-see-PigmentNames) pugrd } if
+    Pigments pujn get aload pop pop 3 array astore
+} bind def
+
 % opts /Key (preset-key) puhue -> [r g b] | null
 % One optional rgb colour key (`/HighlightColor`, `/ShadowColor`): `null` when
 % the key is unset, else the validated array. The second operand is the guard
@@ -7324,7 +7362,11 @@ systemdict /setalpha known /pwhasalpha exch def
     puho puhk known not { null } {
         /puhv puho puhk get def
         /puhv load xcheck { puhp (-must-be-an-rgb-array) pugrd } if
+        % A literal name is a pigment: resolve it once, then it is checked like
+        % any [r g b].
+        /puhv load type /nametype eq { /puhv puhp /puhv load pupig def } if
         /puhv load type /arraytype ne { puhp (-must-be-an-rgb-array) pugrd } if
+        puhv pujspec { puhp (-pigmix-spec-needs-pigcolors) pugrd } if
         puhv length 3 ne { puhp (-must-be-an-rgb-array) pugrd } if
         puhv {
             dup type dup /integertype eq exch /realtype eq or
@@ -7363,9 +7405,27 @@ systemdict /setalpha known /pwhasalpha exch def
         /pupc load type /arraytype ne { pupn (-colors-must-be-an-array) pugrd } if
         pupc length dup 1 lt exch 8 gt or
             { pupn (-colors-must-have-1-to-8-colors) pugrd } if
+        % A bare pigment name stands for its colour: resolve each one here, once,
+        % so the rest of the checks and the record see only [r g b] arrays. The
+        % copy is made only when a name is present, so a load without one is the
+        % caller's own array, exactly as before.
+        /pujany false def
+        pupc { dup xcheck not exch type /nametype eq and { /pujany true def } if } forall
+        pujany {
+            /pujr pupc length array def
+            0 1 pupc length 1 sub {
+                /pujk exch def
+                pupc pujk get
+                dup xcheck not 1 index type /nametype eq and
+                    { /pujv exch def pupn (-colors) pucat pujv pupig } if
+                pujr exch pujk exch put
+            } for
+            /pupc pujr def
+        } if
         % Each entry is a literal 3-element array, not a procedure that
-        % happens to hold three items.
+        % happens to hold three items. A pigmix spec gets its own guard.
         pupc {
+            dup pujspec { pupn (-colors-pigmix-spec-needs-pigcolors) pugrd } if
             dup xcheck { pop false } {
                 dup type /arraytype eq { length 3 eq } { pop false } ifelse
             } ifelse
@@ -7624,6 +7684,81 @@ systemdict /setalpha known /pwhasalpha exch def
 %   1 index 2 get true eq and
 %   exch 3 get 90 eq and
 %   (a given /ColorMix and /Light) mustbe
+%%EndSelfTest
+%
+%%SelfTest: colour-keys-take-bare-pigment-names
+%   % #356: a literal pigment name in /Colors, /HighlightColor or /ShadowColor
+%   % stands for the colour `pigcolor` gives, bit for bit.
+%   /pgeq { /pgqb exch def /pgqa exch def
+%       true 0 1 2 { /pgqi exch def pgqa pgqi get pgqb pgqi get eq and } for } bind def
+%   << /Colors [ /sapgreen /cadmiumyellow ] >> (pkfan) puparse 0 get /pgcols exch def
+%   pgcols length 2 eq
+%   pgcols 0 get /sapgreen pigcolor pgeq and
+%   pgcols 1 get /cadmiumyellow pigcolor pgeq and
+%   (bare names in /Colors are the pigments pigcolor gives) mustbe
+%
+%   % Names and rgb arrays mix; the caller's array is left alone.
+%   /pgin [ /alizarin [ 0 0 1 ] ] def
+%   << /Colors pgin >> (pkfan) puparse 0 get /pgcols exch def
+%   pgcols 0 get /alizarin pigcolor pgeq
+%   pgcols 1 get [ 0 0 1 ] pgeq and
+%   pgin 0 get type /nametype eq and
+%   (names and rgb arrays mix, and the options array is not changed) mustbe
+%
+%   % No name: the caller's own array comes back, as before.
+%   /pgl [ [ 0 0 0 ] [ 1 1 1 ] ] def
+%   << /Colors pgl >> (pkfan) puparse 0 get pgl eq
+%   (a load without names is the same array) mustbe
+%
+%   % The resolved colour is its own array, not the palette's entry.
+%   << /Colors [ /sapgreen ] >> (pkfan) puparse 0 get 0 get 0 0.5 put
+%   Pigments /sapgreen get 0 get 0.16 eq
+%   (a resolved colour does not alias the palette) mustbe
+%
+%   << /HighlightColor /titaniumwhite >> /HighlightColor (pkdab-highlightcolor) puhue
+%   /titaniumwhite pigcolor pgeq
+%   (a bare name as /HighlightColor) mustbe
+%   << /ShadowColor /midnightblack >> /ShadowColor (pkoil-shadowcolor) puhue
+%   /midnightblack pigcolor pgeq
+%   (a bare name as /ShadowColor) mustbe
+%
+%   { << /Colors [ /sapgreen /nothue ] >> (pkfan) puparse }
+%   /pkfan-colors-unknown-pigment-see-PigmentNames
+%   (an unknown name in /Colors) mustguard
+%   { << /HighlightColor /nothue >> /HighlightColor (pkdab-highlightcolor) puhue }
+%   /pkdab-highlightcolor-unknown-pigment-see-PigmentNames
+%   (an unknown name as /HighlightColor) mustguard
+%   { << /ShadowColor /nothue >> /ShadowColor (pkoil-shadowcolor) puhue }
+%   /pkoil-shadowcolor-unknown-pigment-see-PigmentNames
+%   (an unknown name as /ShadowColor) mustguard
+%   % A single name is a pigment, not a /Colors list.
+%   { << /Colors /sapgreen >> (pkfan) puparse }
+%   /pkfan-colors-must-be-an-array
+%   (a name as the whole /Colors) mustguard
+%   % The length rule still comes first.
+%   { << /Colors [ 9 { /sapgreen } repeat ] >> (pkfan) puparse }
+%   /pkfan-colors-must-have-1-to-8-colors
+%   (nine names) mustguard
+%   % A pigmix spec belongs in pigcolors, and the guard says so.
+%   { << /Colors [ [ /sapgreen 1 /cadmiumyellow 1 ] ] >> (pkfan) puparse }
+%   /pkfan-colors-pigmix-spec-needs-pigcolors
+%   (a pigmix spec in /Colors) mustguard
+%   { << /Colors [ [ /sapgreen 1 /nothue ] ] >> (pkfan) puparse }
+%   /pkfan-colors-pigmix-spec-needs-pigcolors
+%   (a three-element spec in /Colors) mustguard
+%   { << /HighlightColor [ /sapgreen 1 ] >> /HighlightColor (pkdab-highlightcolor) puhue }
+%   /pkdab-highlightcolor-pigmix-spec-needs-pigcolors
+%   (a pigmix spec as /HighlightColor) mustguard
+%   % The old guards are unchanged for what is not a name.
+%   { << /Colors [ [ ] ] >> (pkfan) puparse }
+%   /pkfan-colors-entries-must-be-rgb-arrays
+%   (an empty array entry) mustguard
+%   { << /Colors [ { /sapgreen } ] >> (pkfan) puparse }
+%   /pkfan-colors-entries-must-be-rgb-arrays
+%   (a procedure entry) mustguard
+%   { << /HighlightColor [ ] >> /HighlightColor (pkdab-highlightcolor) puhue }
+%   /pkdab-highlightcolor-must-be-an-rgb-array
+%   (an empty array as /HighlightColor) mustguard
 %%EndSelfTest
 %
 %%SelfTest: puat-resolves-colours-at-head-positions

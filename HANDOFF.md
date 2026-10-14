@@ -909,8 +909,12 @@ renders eight examples in both and compares block-downsampled output).
   weight 0; one live entry is returned as stored; no random draws. The
   presets get pigments through `pigcolor`/`pigcolors`, which produce the
   `[r g b]` arrays `/Colors`, `/HighlightColor` and `/ShadowColor` already
-  validate, so `puparse` and `puhue` are untouched (a /Colors entry that is a
-  bare pigment name is not accepted: wrap the list in `pigcolors`). Tests are
+  validate. Since #356 `puparse` and `puhue` also accept a literal pigment name
+  (`/Colors [ /sapgreen /cadmiumyellow ]`, `/HighlightColor /titaniumwhite`),
+  resolved once by `pupig` straight from `Pigments`; a pigmix spec in a colour
+  key raises `<preset>-colors-pigmix-spec-needs-pigcolors` (or
+  `<prefix>-pigmix-spec-needs-pigcolors`), an unknown name
+  `...-unknown-pigment-see-PigmentNames`. Tests are
   `tests/pigment.rs` plus two `%%SelfTest` blocks; the specimen is
   `examples/paintkit_pigment_demo.ps` (render at
   `docs/paintkit_pigment_demo.png`). Retuning a pigment moves the pinned

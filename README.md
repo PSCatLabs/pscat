@@ -684,12 +684,17 @@ multiplies and three square roots per mix. Its limits are documented in
 to a very dark neutral; mixed in encoded rather than linear rgb; a pot of paint,
 not a glaze.
 
-The presets take pigments through the colour keys they already have.
-`pigcolor` turns a pigment name or a `pigmix` spec into the `[r g b]` those
-keys want, and `pigcolors` does a whole `/Colors` list:
+The presets take pigments through the colour keys they already have. A bare
+pigment name works in `/Colors`, `/HighlightColor` and `/ShadowColor` as it
+stands; `pigcolor` turns a pigment name or a `pigmix` spec into the `[r g b]`
+those keys want, and `pigcolors` does a whole `/Colors` list that includes
+specs (a spec written straight into a colour key is refused with a guard that
+says to wrap it in `pigcolors`):
 
 ```postscript
+<< /Colors [ /sapgreen /cadmiumyellow ] >> pkfan
 << /Colors [ /sapgreen [ /sapgreen 1 /cadmiumyellow 1 ] ] pigcolors >> pkfan
+<< /HighlightColor /titaniumwhite /ShadowColor /prussianblue >> pkdab
 << /HighlightColor [ /cadmiumyellow 2 /sapgreen 1 ] pigcolor
    /ShadowColor /prussianblue pigcolor >> pkdab
 ```

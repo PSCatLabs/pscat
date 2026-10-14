@@ -215,7 +215,10 @@ r g b puwet           ->  r g b        % applies pkwet's active passes (3.4)
   The guards are `pkfan-colors-must-be-an-array`,
   `pkfan-colors-must-have-1-to-8-colors`,
   `pkfan-colors-entries-must-be-rgb-arrays` and
-  `pkfan-colors-components-must-be-0-to-1`.
+  `pkfan-colors-components-must-be-0-to-1`. An entry may also be a bare
+  pigment name (`/sapgreen`, issue #356), resolved once through `Pigments`;
+  an unknown name is `pkfan-colors-unknown-pigment-see-PigmentNames` and a
+  `pigmix` spec is `pkfan-colors-pigmix-spec-needs-pigcolors`.
 
 ### 3.2 Per preset, in PostScript terms
 
