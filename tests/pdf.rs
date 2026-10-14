@@ -272,7 +272,7 @@ fn rounding_collapsed_linetos_are_dropped_in_strokes_unless_alone() {
         pdf_text(&pdf)
     };
     // trailing collapsed l after real geometry, square caps
-    let t = stroke(b"1 setlinecap 4 setlinewidth newpath 10 10 moveto 50 10 lineto 50.002 10.002 lineto stroke");
+    let t = stroke(b"2 setlinecap 4 setlinewidth newpath 10 10 moveto 50 10 lineto 50.002 10.002 lineto stroke");
     assert_eq!(t.matches(" l ").count(), 1, "{t}");
     // collapsed in the middle
     let t = stroke(

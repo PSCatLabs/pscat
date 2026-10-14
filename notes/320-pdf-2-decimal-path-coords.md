@@ -21,11 +21,11 @@ content streams with two decimals instead of three. #254 measured the lever
 | colours (`rg`/`RG`), alpha (`ca`/`CA`) | 3 | a channel step is 1/255 = 0.004; two decimals would band |
 | line width (`w`), miter limit | 3 | hairlines (0.125, 0.25 are common) lose up to 4% at two decimals; 0.004 would vanish |
 | dash array and phase | 3 | same reasoning, and dash lengths are often under 1 pt |
-| image `cm` (`sx ky kx sy tx ty`) | 3 | the entries are the image's scale (sample count times scale): a 0.005 error there is multiplied across the whole image and shifts its far edge visibly. Few images, so no size win to chase |
+| image `cm` (`sx ky kx sy tx ty`) | 3 | `sx`/`sy` are the image's full device extent, so a 0.005 error moves its far edge by 0.005 pt at most; but there is one `cm` per image, so two decimals would save nothing and three costs nothing |
 | page flip `1 0 0 -1 0 H cm` | integer | `H` is an integer |
 
 Path coordinates are device-space points at the page's own scale, so a
-0.005 pt rounding error is at most about 0.07 px at 144 dpi. Rounding is a
+0.005 pt rounding error is at most 0.01 px at 144 dpi. Rounding is a
 pure function of the coordinate, so two shapes that share an edge still print
 the same text for it, and a fill and the clip around it stay consistent.
 
@@ -46,6 +46,10 @@ point, reset to the subpath start by `closepath`.
   program never had. Kept only when it is all there is of its subpath
   (`m` + `l`, or `m` + `l` + `h`), so a tiny dash still prints as a dot with
   round caps. Of a run of collapsed linetos exactly one remains.
+- Known effect of rounding itself (not of the drop rule): the PDF spec paints
+  a degenerate subpath (all points coincident) only with round caps. A lone
+  dash shorter than about 0.005 pt with butt or square caps used to print as a
+  tiny rectangle and now prints nothing.
 - `c` is never dropped: a speck's quarter-circle control points stay distinct
   at two decimals (radius 0.17 pt), and a curve whose endpoints coincide is a
   legitimate loop.
@@ -79,6 +83,13 @@ equal page counts.
   pixels: median 70, worst alpine_lake 4,942.
 - Mean block difference (golden metric, bar 6.0): **worst 0.197
   (examples/printkit.ps), median 0.012**.
+- Why 0.197 here against the 0.10 quoted in #254: a variant with only
+  `{v:.3}` -> `{v:.2}` in `to_pdf_ops` (no collapsed-`l` rule), run on
+  printkit, template_poster, fern and drychalk_specimen, gives the same pixel
+  counts and block diffs to four digits (printkit 0.1972 both ways). So the
+  stroke drop rule moves nothing measurable; the difference from #254's figure
+  is the metric or corpus (this run uses the tests/golden.rs mean over all
+  blocks, per file, worst over pages).
 - Largest single 10x10 block-mean channel difference: worst 23.2
   (examples/template_poster.ps), median 4.7. That is one row of ten pixels
   flipping between ink and paper in an unantialiased raster (10% of 255), not
