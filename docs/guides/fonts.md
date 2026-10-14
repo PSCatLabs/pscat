@@ -85,7 +85,69 @@ voids show in the letter, the edge feathers, clogged keys fill their counters,
 and density follows pressure and `/Ribbon` (wetness). `/InkModel false` gives
 flat ink. `docs/typewriter/ink_vs_real.png` sets it beside the reference scans.
 
-The ribbon weave, clogged counters and one-side-heavy keys come with
+### Typing a page: `tw-type`
+
+`tw-type` takes one options dict and types a whole text the way a typist would,
+the same `/Machine`, `/Seed`, `/Wear`, `/Pitch`, `/Ink` and other `tw-setup`
+keys alongside its layout keys:
+
+```postscript
+(lib/typewriter_outlines.ps) run (lib/typewriter.ps) run
+<< /Text (Dear Sir,\n\nI enclose the <u>specimens</u> you asked for.)
+   /Margin 72 /Spacing 1.5 /Machine 7 /Seed 3 >> tw-type
+showpage
+```
+
+- **Page:** `/Width` and `/Height` (612 x 792), `/Margin` (72) or a side at
+  a time (`/MarginLeft` ...). Pica gives 10 characters to the inch, `/Pitch 12`
+  elite. Text wraps by word at the margins; a word wider than a line is split.
+- **Spacing and tabs:** `/Spacing` 1, 1.5 or 2 (single is 12pt, and the platen
+  steps in half-lines). The font gives each line its own carriage-return
+  offset, advance error and baseline drift. `/Tabs` is a stop every N columns
+  (5), or an array of columns. `/Indent` indents each paragraph's first line.
+- **Markup in `/Text`** (nothing to escape; any other `<` is literal):
+  `<u>underlined</u>` (backspace and type underscores), `<x>crossed out</x>`
+  (x struck over each letter) and `<o>old|new</o>` (new typed over old, one
+  unbreakable token as wide as the longer side). Each pass strikes at its own
+  strike index, so an x over an `x` is a second blow, not a copy of the first.
+- **Memo:** `/Memo << /To (...) /From (...) /Subject (...) /Date (...) >>`
+  types a centred, underlined MEMORANDUM title, the TO / FROM / SUBJECT / DATE
+  block with long fields hung under their text, and an underscore rule. Also
+  `/Cc`, `/Title` and `/Rule`.
+- **Pages:** text that runs past the bottom margin continues after a `showpage`;
+  `/PageNumbers /bottom` types "- 2 -" and `/top` types "2" from page 2.
+  `/PageStart { ... }` runs before every page, the first included, inside a
+  `gsave`: paint the paper there, so a page you composed is not cleared. Pages
+  after the first follow a `showpage`, so they are typed in the default
+  graphics state, not a rotated or scaled one. The caller does the
+  last `showpage`, as with `hs-write`. `tw-type` leaves the carriage at the start
+  of the next line, so `show` can carry on.
+- **Measuring:** `<< ... >> tw-linecount` returns the number of lines and
+  `tw-pageheight` the page height that holds them, drawing nothing and
+  changing no option. They share the layout with `tw-type`, so they always
+  agree on the line breaks.
+- Bytes above 126 are not on the machine: each is a blank cell. The text is
+  one PostScript string, so Ghostscript's 65,535-byte string limit caps it at
+  about 30 pages.
+
+`scripts/typewrite.sh` does the same from a text file, to PNG or PDF:
+
+```sh
+./scripts/typewrite.sh --reflow --memo-to "All Third Floor Staff" \
+    --memo-from "R. M. Albright, Office Manager" \
+    --memo-subject "Daily visitor log, beginning Monday" \
+    --memo-date "March 6, 1964" --machine 6 --seed 21 --page-numbers bottom \
+    --dpi 200 -o memo.png examples/typewriter_memo.txt
+```
+
+<p><img src="../typewriter_memo.png" width="50%" alt="A typed memo, rendered by scripts/typewrite.sh"/></p>
+
+`--height fit` sizes the page to its text, `--ps PATH` writes the driver for
+Ghostscript (`gs -dNOSAFER`; the render above beside the same page in
+[gs](../typewriter_memo_gs.png)), `--reflow` joins each paragraph's lines.
+Typographic quotes and dashes become ASCII; any other non-ASCII letter becomes
+`?`, since the machine has no such key. `--help` lists every option.
+
 ## The font catalog
 
 `fonts/catalog/` — 61 libre outline faces loaded from disk at

@@ -2,6 +2,7 @@
 # package_release.sh — build pscat + pscat-mcp and assemble a
 # standalone, installable bundle: the binaries plus the runtime
 # assets they need (lib/, fonts/catalog/, scripts/handwrite.sh,
+# scripts/typewrite.sh,
 # scripts/photo_etch.sh), with no git checkout or cargo required to
 # use it afterward.
 #
@@ -39,6 +40,8 @@ cp -R "$ROOT/fonts/catalog" "$BUNDLE/fonts/catalog" # wholesale, license .txt fi
 mkdir -p "$BUNDLE/scripts"
 cp "$ROOT/scripts/handwrite.sh" "$BUNDLE/scripts/handwrite.sh"
 chmod +x "$BUNDLE/scripts/handwrite.sh"
+cp "$ROOT/scripts/typewrite.sh" "$BUNDLE/scripts/typewrite.sh"
+chmod +x "$BUNDLE/scripts/typewrite.sh"
 cp "$ROOT/scripts/photo_etch.sh" "$BUNDLE/scripts/photo_etch.sh"
 chmod +x "$BUNDLE/scripts/photo_etch.sh"
 
@@ -54,8 +57,8 @@ Add this directory to your \`PATH\`, then run \`pscat\` from anywhere:
     export PATH="\$PWD:\$PATH"
     pscat --png out.png some_file.ps
 
-\`lib/\`, \`fonts/catalog/\`, \`scripts/handwrite.sh\`, and
-\`scripts/photo_etch.sh\` are found automatically as long as they stay
+\`lib/\`, \`fonts/catalog/\`, \`scripts/handwrite.sh\`,
+\`scripts/typewrite.sh\`, and \`scripts/photo_etch.sh\` are found automatically as long as they stay
 next to the \`pscat\` binary (this directory). If you move the binary
 elsewhere, set \`PSCAT_ROOT\` to this directory instead.
 
@@ -65,6 +68,7 @@ elsewhere, set \`PSCAT_ROOT\` to this directory instead.
 - \`lib/\` — artkit.ps, handscript.ps, etching.ps, the Type 3 font programs, style packs
 - \`fonts/catalog/\` — the bundled TrueType/OpenType font catalog
 - \`scripts/handwrite.sh\` — the handwritten-note tool
+- \`scripts/typewrite.sh\` — the typewritten-page tool
 - \`scripts/photo_etch.sh\` — the photo-to-line-etching tool
 
 Full docs, source, and the \`examples/\`/\`gallery/\` demo material:

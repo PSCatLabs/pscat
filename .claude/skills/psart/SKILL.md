@@ -545,6 +545,16 @@ reuse them in your own procs.
   — /Neon, /Marquee, /Constellation, /Lapidary, /Circuitry,
   /Stitchwork, /Confetti — take dials through their scratch dicts
   (each file's header documents them).
+- /Typewriter (`(lib/typewriter_outlines.ps) run (lib/typewriter.ps) run`)
+  types like a real machine, for memos, letters and "found document" pieces.
+  `<< /Text (...) /Width .. /Height .. /Margin .. /Spacing 1.5 /Machine 7 /Seed 3
+  /PageStart { paint the paper } >> tw-type showpage` wraps, tabs, underlines
+  (`<u>..</u>`), strikes over (`<x>..</x>`, `<o>old|new</o>`) and can type a
+  `/Memo << /To .. /From .. /Subject .. /Date .. >>` header and
+  `/PageNumbers /bottom`. It leaves the carriage on the next line. `tw-linecount`
+  and `tw-pageheight` size a page to its text without drawing. It is a Type 3
+  face, so `charpath` gives nothing: use `/CourierPrime-Regular` for outlines.
+  From a file: `scripts/typewrite.sh`.
 - Text as geometry: `(word) true charpath` then fill/stroke/clip
   it — or walk it with `alongpath`.
 
