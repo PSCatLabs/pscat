@@ -376,7 +376,7 @@ Supported TeX:
 | Scripts | `x^2`, `x_i`, `x_i^2`, `f'` |
 | Fractions and roots | `\frac`, `\dfrac`, `\tfrac`, `\binom`, `\sqrt{x}`, `\sqrt[n]{x}` |
 | Large operators and names | `\sum`, `\prod`, `\int` (limits under/over in display style, `\limits` / `\nolimits`); `\lim`, `\max`, `\min`, `\sup`, `\inf`, `\det` (limits under); `\sin`, `\cos`, `\log`, `\ln`, `\exp` and others; `\operatorname{...}` |
-| Delimiters | `\left( ... \right)` with `( ) [ ] \{ \} \|` and `.`; `\big` `\Big` `\bigg` `\Bigg` and their `l`/`r` forms |
+| Delimiters | `\left( ... \right)` with `( ) [ ] \{ \} \| \langle \rangle` (the characters `⟨ ⟩ ‖ ∥` typed directly work too) and `.`; `\big` `\Big` `\bigg` `\Bigg` and their `l`/`r` forms |
 | Environments | `matrix`, `pmatrix`, `bmatrix`, `Bmatrix`, `vmatrix`, `cases` (rows `\\`, cells `&`) |
 | Accents and frames | `\vec`, `\hat`, `\bar`, `\dot`, `\ddot`, `\tilde`, `\overline`, `\underline`, `\boxed` |
 | Text | `\text{...}`, `\mathrm{...}` |
