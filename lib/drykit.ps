@@ -2,6 +2,18 @@
 %%Title: drykit.ps — dry media core: a stick drawn across a toothed surface
 %%Creator: pscat — issue #234 (design: docs/DRYMEDIA.md)
 %%EndComments
+%
+% Every procedure here is defined `} bind def` (issue #307). Ghostscript
+% looks up each executable name in a procedure body at run time, and
+% those lookups are slow once userdict holds the libraries' several
+% hundred names; `bind` resolves the operators once, when the library
+% loads. The cost: an operator redefined *after* this file loads (a
+% caller's own `/show`, `/rand`, `/fill`) no longer reaches these
+% procedures, and one redefined *before* it loads is left alone, since
+% `bind` only replaces names that are operators at that moment. Names
+% that are not operators (every library procedure, and tunables such as
+% drykit's `dkbudget`) stay late-bound, so overriding those works as
+% before. tests/libbind.rs fails for any procedure added without `bind`.
 % @requires: (lib/artkit.ps) run (lib/paintkit.ps) run
 
 % The shared engine under chalk, crayon and charcoal (epic #232). A dry
@@ -91,26 +103,26 @@
 % @internal
 /dkisnum {
     type dup /integertype eq exch /realtype eq or
-} def
+} bind def
 
 % dict key default -> value   (the default when the key is absent)
 % @internal
 /dkget {
     /dkgd exch def
     2 copy known { get } { pop pop /dkgd load } ifelse
-} def
+} bind def
 
 % a b -> max(a, b)
 % @internal
 /dkmax {
     2 copy lt { exch } if pop
-} def
+} bind def
 
 % a b -> min(a, b)
 % @internal
 /dkmin {
     2 copy gt { exch } if pop
-} def
+} bind def
 
 % seed -   (seeds drykit's own generator)
 % Same shape as paintkit's pjsrand: reduced mod 2147483646 before `abs`, and
@@ -121,7 +133,7 @@
 /dksrand {
     cvi 2147483646 mod abs 1 add
     userdict /dkstate 3 -1 roll put
-} def
+} bind def
 
 % -> 0.0..1.0   (exclusive at both ends)
 % Schrage's decomposition of (16807, 2^31 - 1), so every intermediate fits
@@ -134,7 +146,7 @@
     dup 0 lt { 2147483647 add } if
     dup userdict /dkstate 3 -1 roll put
     2147483647 div
-} def
+} bind def
 
 % The generator's state, as `1 dksrand` leaves it, so dkrand works before
 % anything seeds it.
@@ -164,7 +176,7 @@
     /dkvq dkva dkvd mul dkvb dkvc mul sub def
     dkvt dup mul dkvq dup mul 4 mul sub dup 0 lt { pop 0 } if sqrt
     dkvt add 2 div sqrt
-} def
+} bind def
 
 % px py -   (widen dklo..dkhi by the reach disc about p, on column dkx)
 % @internal
@@ -176,7 +188,7 @@
         dkey0 dkq sub dup dklo lt { /dklo exch def } { pop } ifelse
         dkey0 dkq add dup dkhi gt { /dkhi exch def } { pop } ifelse
     } if
-} def
+} bind def
 
 % ox oy -   (widen dklo..dkhi by the segment offset by (ox, oy), on dkx)
 % The capsule is convex, so its column interval runs between the extremes
@@ -195,7 +207,7 @@
             pop
         } { pop } ifelse
     } if
-} def
+} bind def
 
 % j -   (offer cell (dkci, j) to the catch from segment dkseg)
 % Records the cell on first sight, and keeps the nearest segment's index for
@@ -229,7 +241,7 @@
         dksegbuf dkn dkseg put
         /dkn dkn 1 add def
     } ifelse
-} def
+} bind def
 
 % a b -   (one centerline segment between canvas stops [x y reach])
 % @internal
@@ -271,7 +283,7 @@
         } if
     } for
     /dkseg dkseg 1 add def
-} def
+} bind def
 
 % x y -   (widen the canvas box dkx0..dky1 by a canvas point)
 % @internal
@@ -282,7 +294,7 @@
     dup dkx0 lt { dup /dkx0 exch def } if
     dup dkx1 gt { dup /dkx1 exch def } if
     pop
-} def
+} bind def
 
 % -   (the band pass: every guard and every cell, with no graphics state
 % changed, so a rejected catch leaves the caller's clip and CTM alone)
@@ -407,7 +419,7 @@
             } for
         } if
     } if
-} def
+} bind def
 
 % -   (appends the knuckle at dkcx dkcy: semi-axes dkea along (dkex, dkey),
 % dkeb across it, as four curveto's in the current (canvas) space)
@@ -427,7 +439,7 @@
     dkX3 dkm2x sub dkY3 dkm2y sub dkX4 dkm1x sub dkY4 dkm1y sub dkX4 dkY4 curveto
     dkX4 dkm1x add dkY4 dkm1y add dkX1 dkm2x sub dkY1 dkm2y sub dkX1 dkY1 curveto
     closepath
-} def
+} bind def
 
 % -   (builds the knuckles the band pass recorded and clips to them)
 % Cells are built in the order they were first seen, never in dict order,
@@ -472,7 +484,7 @@
     /.setfilladjust2 where { pop 0 0 .setfilladjust2 } if
     clip newpath
     dksaved setmatrix
-} def
+} bind def
 
 %%SelfTest: drykit-paintkit-contract
 %   % DRYMEDIA.md Q1: drykit reads these paintkit @internal names. If one is
@@ -633,7 +645,7 @@
         dkband
         dkemit
     } if
-} def
+} bind def
 
 % ---------------------------------------------------------------- dkstroke
 %
@@ -668,25 +680,25 @@
 % @internal
 /dktomark {
     counttomark array astore exch pop
-} def
+} bind def
 
 % n -> real   (a lane's or a piece's sub-seed from a subpath seed)
 % @internal
 /dksubseed {
     7919 mul dkSseed 1073741823 mod abs add dksrand dkrand pop
-} def
+} bind def
 
 % canvas coordinate -> 0..46336   (to 0.01pt, folded for a 31-bit seed)
 % @internal
 /dkSquant {
     100 mul round dup abs 2e9 gt { pop 0 } if cvi 46337 mod abs
-} def
+} bind def
 
 % proc-or-not -> bool   (an executable array: what drykit calls a procedure)
 % @internal
 /dkisproc {
     dup xcheck exch type dup /arraytype eq exch /packedarraytype eq or and
-} def
+} bind def
 
 % dict key default lo hi /error -> number   (a number option in lo..hi)
 % The error is raised by executing its name, so it reads as itself.
@@ -696,7 +708,7 @@
     dkget
     dup dkisnum not { pop dkoe cvx exec } if
     dup dkol lt 1 index dkoh gt or { pop dkoe cvx exec } if
-} def
+} bind def
 
 % value /error -> value   (an rgb array of three numbers 0..1)
 % @internal
@@ -710,7 +722,7 @@
         dup 0 lt exch 1 gt or { dkoe cvx exec } if
     } forall
     aload pop 3 array astore
-} def
+} bind def
 
 % a b t -> [a + (b - a) t]   (rgb arrays)
 % @internal
@@ -718,7 +730,7 @@
     /dklt exch def /dklb exch def /dkla exch def
     [ 0 1 2 { /dklk exch def
         dkla dklk get dklb dklk get dkla dklk get sub dklt mul add } for ]
-} def
+} bind def
 
 % -   (resolves one subpath, stops dkSall[dkSa .. dkSb], into runs on the
 % operand stack, each `[key run]`; called inside the record's `[ ... ]`)
@@ -817,7 +829,7 @@
         } for
         dkSopen { dktomark dkSkey exch 2 array astore } if
     } for
-} def
+} bind def
 
 % opts -   (validates every key, then walks and resolves the current path
 % into a record; renders it, or adds it to the open dkbatch)
@@ -940,14 +952,14 @@
     } {
         [ dkSrec ] dkrender
     } ifelse
-} def
+} bind def
 
 % e1 e2 -> bool   (same touch, streak and colour: may share one catch)
 % @internal
 /dkZsame {
     /dkZe2 exch def /dkZe1 exch def
     true 0 1 4 { dup dkZe1 exch get exch dkZe2 exch get eq and } for
-} def
+} bind def
 
 % run R -> estimated cells   (what a catch over the run visits)
 % The run and R are in the run's own user space; dkZsvE is its stretch to
@@ -966,7 +978,7 @@
     } for
     dkZR 2 mul mul dkZR dup mul 3.1416 mul add
     userdict /pjW get dkZsvE div dup mul div
-} def
+} bind def
 
 % entries -   (one catch over the entries' runs, then their ink through it)
 % Entry: [touch streak r g b rec run hwadd].
@@ -1002,7 +1014,7 @@
             dkZde 6 get dkZink
         } forall
     grestore
-} def
+} bind def
 
 % canvas-run -> canvas-run   (fewer stops for the catch, same reach)
 % walkpath's pitch is set for the ink, and is far finer than the catch
@@ -1070,7 +1082,7 @@
             ]
         } ifelse
     } ifelse
-} def
+} bind def
 
 % run -   (paints one run's ink, in the current (the run's own) space)
 % A run of one stop is a dot. Otherwise a constant-width run is a
@@ -1117,7 +1129,7 @@
             stroke
         } { pop } ifelse
     } ifelse
-} def
+} bind def
 
 % entries -   (dkZdraw in chunks whose estimated cells fit dkbudget)
 % @internal
@@ -1169,7 +1181,7 @@
         } ifelse
     } forall
     counttomark 0 gt { dktomark dkZdraw } { pop } ifelse
-} def
+} bind def
 
 % records -   (draws records level-major, then their fallout)
 % @internal
@@ -1215,7 +1227,7 @@
         } for
     } for
     dkZrecs { dkZfallout } forall
-} def
+} bind def
 
 % rec -   (the record's loose particles, through artkit's scatter)
 % Each ~20pt piece of each subpath's centerline gets round(Fallout x its
@@ -1280,7 +1292,7 @@
             } if
         } forall
     } if
-} def
+} bind def
 
 %%SelfTest: dkstroke-rejects-malformed-options
 %   << /Surface /drawing >> dksurface
@@ -1389,7 +1401,7 @@
 % @param: /Seed [integer] Seed for the tool-side randomness (contact chains, fallout); subpath i uses Seed + i. Leaves the caller's rand stream untouched (default from each subpath's first point on the canvas, so adding a stroke elsewhere never re-rolls this one)
 /dkstroke {
     dkSrecord
-} def
+} bind def
 
 % @kind: Procedure
 % @summary: Runs a procedure whose dkstroke calls are drawn together, level-major: every stroke's faint level first, then every bright one, so crossing layers of hatching or re-stroked lines stay dark where they cross instead of the second layer's faint level greying the first's core. One pigment per batch (a second colour gets its own batch, drawn after); batches don't nest. Each stroke keeps the coordinate system it was given in; the clip used is the one in force when the batch ends.
@@ -1402,7 +1414,7 @@
     userdict /dkBatch get /dkBb exch def
     userdict /dkBatch undef
     [ 0 1 dkBb /n get 1 sub { dkBb exch get } for ] dkrender
-} def
+} bind def
 
 %%SelfTest: dksurface-rejects-malformed-options
 %   { 5 dksurface } /dksurface-options-must-be-a-dict
@@ -1497,4 +1509,4 @@
     >> pkcanvas
     userdict /dkSurface /dksn load put
     userdict /dkGround [ /dksg load aload pop ] put
-} def
+} bind def
