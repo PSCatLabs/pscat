@@ -279,6 +279,43 @@ Which tool to pick:
 (A fuller paintkit tour, and an audit of the parameter docs, is issue
 #99 — this section is the short orientation, not that sweep.)
 
+## Dry media: chalk (`lib/drychalk.ps`, after artkit, paintkit and drykit)
+
+For a chalkboard, use `lib/drychalk.ps`, not a pen stroke in a chalk
+colour (that is `gallery/hundred_lines.ps`'s flat look). Load
+`lib/handscript.ps` and `lib/strokeglyphs.ps` too for handwriting: `sgpath`
+gives skeleton paths, and `dcchalk` inks them.
+
+```postscript
+(lib/artkit.ps) run (lib/paintkit.ps) run (lib/drykit.ps) run
+(lib/handscript.ps) run (lib/strokeglyphs.ps) run (lib/drychalk.ps) run
+40 40 520 300 << /Surface /greenboard /Tray 12
+    /Ghost { (last lecture) 60 250 << /Size 30 >> sgpath } >> dcboard
+/white dcchalkcolor
+newpath (fresh notes) 60 180 << /Size 32 >> sgpath << /Width 1.8 >> dcchalk
+newpath 58 170 moveto 260 172 lineto << /Tilt 85 /Side 5 >> dcchalk
+```
+
+- **`dcboard`** (`x y w h opts`) paints the board and makes it the
+  surface. It draws:
+  - a dust haze that is never flat;
+  - `/Ghost`, a path procedure for the last lecture's writing, drawn
+    erased;
+  - eraser `/Swipes`, darker `/Wipes`, lighter `/Smudges`;
+  - `/Ledge` dust and an optional `/Tray`.
+
+  Call it once per board, before the chalk.
+- **`dcchalk`** treats each subpath as one stroke. It lands heavy, tires in
+  the middle, lifts thin, sheds dust and differs a little from its
+  neighbours. `/Tilt` 80-90 with `/Side` gives broad side-of-chalk
+  underlines and shading.
+- **`/name dcchalkcolor`** picks the chalk: `/white /yellow /pink /blue
+  /green /orange`.
+- Real chalk is grey, not white: the defaults (`/Strength 0.55`) were
+  measured against photographs. Raising it gives the fake-font look.
+- Cost: a 42pt line is about 0.7s at 2x, so keep a board to about a dozen
+  lines. `examples/drychalk_specimen.ps` shows everything.
+
 ## Style packs (`lib/styles/`, load after artkit)
 
 Four motif libraries, one per aesthetic — each registers three

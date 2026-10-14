@@ -24,15 +24,19 @@
 % * Landing and lifting (C2, C3). A stroke lands heavy (higher touch,
 %   slightly wider), tires in the middle, and lifts thin and faint. The
 %   lift tapers the width to a floor, never to a point.
-% * Each stroke differs. The body touch of every stroke moves by up to
-%   one touch band, from a private generator seeded by the stroke's own
-%   position, so a word never reads as one stamped weight. Touch is
-%   quantized to drykit's 16 bands so strokes still share catches.
+% * Each stroke differs. Every stroke's body touch moves by up to one
+%   touch band, its width by up to a tenth, and its strength takes one of
+%   three values, from a private generator seeded by the stroke's own
+%   position. A word never reads as one stamped weight: measured on the
+%   cryptography crop, stroke brightness spreads by about 0.06 of the
+%   board-to-white range, and here by 0.05. Touch is quantized to drykit's
+%   16 bands and strength to three steps, so strokes still share catches.
 % * Dots are pressed (C3): a subpath shorter than about one and a half
 %   widths is a dot, drawn wider and harder.
-% * Dust (C5, C9): loose fallout beside each stroke, drifting down the
+% * Dust (C5, C9): loose specks beside each stroke, drifting down the
 %   board, and a narrow halo. A wide halo reads as a grey outline, not
-%   dust, so the dusting comes mostly from fallout.
+%   dust, so the dusting comes from the specks (`dcdust`, one fill per
+%   call, not drykit's /Fallout: see #308).
 % * Side of the stick (C3, C6). With /Tilt the stick lies on its side:
 %   the mark is drawn as parallel lanes across the stick's contact, each
 %   its own drykit stroke. The edge lanes press harder than the worn face
@@ -302,7 +306,7 @@
     % the stroke's own variation: body touch moves by a band either way
     dcpts 0 get dcpts 1 get dcposseed dcSeedOn { pop dcSeed dcSi 7919 mul add } if
     dcsrand dcrand pop
-    /dcr1 dcrand def /dcr2 dcrand def
+    /dcr1 dcrand def /dcr2 dcrand def /dcr3 dcrand def
     /dcTb dcTouch dcr1 dcVary mul 0.5 dcVary mul sub 2 mul dcband mul add def
     /dcTland dcLanding def
     /dcTlandL dcdot { 2 } { 2.4 dcw mul dcL 1e-6 dcmax div 0.06 dcmax 0.3 dcmin } ifelse def
@@ -312,6 +316,12 @@
     /dcww dcw 1 dcr2 0.5 sub dcVary mul 0.24 mul add mul
         dcdot { 1.2 mul } if def
     dcSo /Width dcww put
+    % brightness differs from stroke to stroke as much as within one (C1:
+    % peaks on the photographed board spread by about a twelfth): one of
+    % three strengths, so strokes still share catches
+    dcSo /Strength dcStrength
+        dcr3 0.5 sub dcVary mul 3 mul round -1 dcmax 1 dcmin 0.15 mul 1 add mul
+        1 dcmin put
     dcSo /Touch { dctouchat } put
     dcSo /Pressure { dcpressat } put
     dcSeedOn { dcSo /Seed dcSeed dcSi 7919 mul add 2147483 mod put } if
@@ -445,7 +455,7 @@
     /dcDust dcO /Dust 0.5 0 1 /dcchalk-dust-must-be-0-to-1 dcoptnum def
     /dcTilt dcO /Tilt 0 0 90 /dcchalk-tilt-must-be-0-to-90 dcoptnum def
     /dcSide dcO /Side 10 1e-6 1e6 /dcchalk-side-must-be-positive dcoptnum def
-    /dcStrength dcO /Strength 0.58 0 1 /dcchalk-strength-must-be-0-to-1 dcoptnum def
+    /dcStrength dcO /Strength 0.55 0 1 /dcchalk-strength-must-be-0-to-1 dcoptnum def
     /dcStreak dcO /Streak 1.6 1 4 /dcchalk-streak-must-be-1-to-4 dcoptnum def
     dcO /Under known {
         dcO /Under get /dcchalk-under-must-be-an-rgb-array dcrgb
@@ -580,7 +590,7 @@
 % @param: /Dust [0..1] Loose chalk dust beside each stroke, falling down the board, plus a narrow halo (default 0.5)
 % @param: /Tilt [degrees] 0 writes with the tip; toward 90 the stick lies on its side and the mark widens toward /Side as parallel lanes, the edges pressing harder than the face (default 0)
 % @param: /Side [points] Length of the stick in contact when it lies on its side at /Tilt 90; must be > 0 (default 10)
-% @param: /Strength [0..1] How far the brightest deposit reads from the board toward the chalk's colour; measured on a photographed board, real chalk's brightest strokes sit about halfway (default 0.58)
+% @param: /Strength [0..1] How far the brightest deposit reads from the board toward the chalk's colour; measured on a photographed board, real chalk's brightest strokes sit about halfway (default 0.55)
 % @param: /Streak [ratio] How much each tooth knuckle is stretched along the stroke, 1..4: skipped valleys streak with the travel (default 1.6)
 % @param: /Under [rgb array] What lies beneath (default the board tone dcboard set, else the dksurface ground)
 % @param: /Seed [integer] Seed for every stroke's variation and texture; subpath i uses Seed + 7919 i. Leaves the caller's rand stream untouched (default from each stroke's position on the board)
@@ -644,10 +654,13 @@
     /greenboard << /Ground [0.16 0.27 0.21] >>
 >> def
 
-% How far toward white the densest dust film reads. A fully hazed board
-% is still a dark board.
+% How far toward white a film of 1 reads: dchazek + dchazeq Haze^2. A
+% lightly dusted board is still a dark board; a heavily erased one goes
+% the milky grey-green of the eraser-swipe crop (C6).
 % @internal
-/dchazek 0.16 def
+/dchazek 0.12 def
+% @internal
+/dchazeq 0.35 def
 
 % The haze field's sample pitch, in device pixels (3 points at 2x). The
 % field is smooth: a block of this size differs from its neighbour by
@@ -686,6 +699,7 @@
     dcfx dcCs1 mul dcfy dcCs1 mul dcnoise 0.65 mul
     dcfx dcCs2 mul 17.3 add dcfy dcCs2 mul 5.1 add dcnoise 0.35 mul add
     dup mul 1.6 mul dcHaze mul 0.25 dcHaze mul add
+    dcHaze dup dup mul mul 0.6 mul add
     % eraser swipes: bands of dust along arcs
     dcSw { dup dcinbox not { pop } {
         0 6 getinterval aload pop /dcsb exch def /dcsa1 exch def /dcsa0 exch def
@@ -698,7 +712,7 @@
             dcsa1 dcsa0 sub dcdeg 2 copy lt {
                 % fade over the last fifth of the arc at either end
                 div dup 0.2 lt { 0.2 div } { dup 0.8 gt { 1 exch sub 0.2 div } { pop 1 } ifelse } ifelse
-                mul 0.5 dcHaze 0.5 mul add mul add
+                mul 0.55 dcHaze 0.25 mul sub mul add
             } { pop pop pop } ifelse
         } { pop } ifelse
     } ifelse } forall
@@ -733,7 +747,7 @@
 % f -> r g b   (the board colour under a dust film f)
 % @internal
 /dcfcolor {
-    dchazek mul /dcfk exch def
+    dchk mul /dcfk exch def
     0 1 2 { dup dcG exch get exch dcWhite exch get dcfk dclerp } for
 } def
 
@@ -783,7 +797,7 @@
     } for
     % bytes are g + d f per channel
     /dcbg [ 0 1 2 { dcG exch get 255 mul } for ] def
-    /dcbd [ 0 1 2 { dup dcWhite exch get exch dcG exch get sub dchazek mul 255 mul } for ] def
+    /dcbd [ 0 1 2 { dup dcWhite exch get exch dcG exch get sub dchk mul 255 mul } for ] def
     /dcbg0 dcbg 0 get def /dcbg1 dcbg 1 get def /dcbg2 dcbg 2 get def
     /dcbd0 dcbd 0 get def /dcbd1 dcbd 1 get def /dcbd2 dcbd 2 get def
     /dcFsum 0 def
@@ -835,7 +849,7 @@
                 % the streak's tone: the band's own, a little lighter or darker
                 dcscx dcsr dcso add dcsa0 dcsf0 dcsf1 add 2 div dcspan mul add
                     2 copy cos mul 3 1 roll sin mul dcscy add exch 3 -1 roll add exch
-                dcfield dcrand 0.5 sub 0.35 mul add dcfcolor setrgbcolor
+                dcfield dcrand 0.5 sub 0.25 mul add dcfcolor setrgbcolor
                 dcrand 0.3 mul 0.15 add setlinewidth
                 newpath
                 dcscx dcscy dcsr dcso add 0.5 dcmax
@@ -855,7 +869,7 @@
         /.setfilladjust2 where { pop 0 0 .setfilladjust2 } if
         dcBx dcBy translate
         /dcgn dcBw dcBh mul dcgrainK mul dcHaze 0.3 add mul cvi def
-        dcFmean 0.9 add dcfcolor setrgbcolor
+        dcFmean 0.6 add dcfcolor setrgbcolor
         newpath
         dcgn {
             /dcpx dcrand dcBw mul def /dcpy dcrand dcBh mul def
@@ -993,6 +1007,7 @@
     /dcBseed dcO /Seed 1 -2147483646 2147483646 /dcboard-seed-must-be-a-number dcoptnum cvi def
     /dcWeave dcO /Weave 0.7 1e-3 100 /dcboard-weave-must-be-positive dcoptnum def
     /dcHaze dcO /Haze 0.4 0 1 /dcboard-haze-must-be-0-to-1 dcoptnum def
+    /dchk dchazeq dcHaze dup mul mul dchazek add def
     /dcErased dcO /Erased 0.8 0 1 /dcboard-erased-must-be-0-to-1 dcoptnum def
     /dcNsw dcO /Swipes 6 0 40 /dcboard-swipes-must-be-0-to-40 dcoptnum cvi def
     /dcNwp dcO /Wipes 2 0 20 /dcboard-wipes-must-be-0-to-20 dcoptnum cvi def
