@@ -5044,6 +5044,21 @@ fn broad_every_documented_parameter_changes_the_render() {
             "/{param} {value} produced an identical render -- it is a no-op"
         );
     }
+    // /Touch needs a canvas (issue #225), so it is measured against a
+    // baseline drawn on one.
+    let on_canvas = |opts: &str| {
+        let mut it = fresh(400, 200);
+        it.run_str(&format!(
+            "0 0 0 setrgbcolor << >> pkcanvas 29 srand {BROAD_PATH} << {opts} >> pkbroad"
+        ))
+        .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+        pixels(&it)
+    };
+    assert_ne!(
+        on_canvas("/Width 44 /Touch 0.5"),
+        on_canvas("/Width 44"),
+        "/Touch 0.5 produced an identical render -- it is a no-op"
+    );
     // /ColorMix and /Light only modify a load, so they are measured
     // against one. /Light 270 flips the left-to-right BROAD_PATH; 90 would
     // leave it as the unlit render.
@@ -5085,6 +5100,7 @@ fn broad_advertises_exactly_the_parameters_it_implements() {
         "Grain",
         "Light",
         "Pitch",
+        "Touch",
         "Width",
     ];
     expected.sort();
@@ -5907,6 +5923,20 @@ fn liner_every_documented_parameter_changes_the_render() {
         pixels(&it)
     };
     let baseline = tinted("/Width 5");
+    // /Touch needs a canvas (issue #225).
+    let on_canvas = |opts: &str| {
+        let mut it = fresh(400, 200);
+        it.run_str(&format!(
+            "0.35 0.42 0.58 setrgbcolor << >> pkcanvas 17 srand {LINER_PATH} << {opts} >> pkliner"
+        ))
+        .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+        pixels(&it)
+    };
+    assert_ne!(
+        on_canvas("/Width 5 /Touch 0.5"),
+        baseline,
+        "/Touch 0.5 produced an identical render -- it is a no-op"
+    );
     for (param, value) in [
         ("Width", "12"),
         ("Taper", "0"),
@@ -5944,6 +5974,7 @@ fn liner_advertises_exactly_the_parameters_it_implements() {
         "Depletion",
         "Pitch",
         "Taper",
+        "Touch",
         "Waver",
         "Width",
     ];
@@ -7758,12 +7789,16 @@ fn dab_advertises_exactly_its_tested_parameters() {
         "Charge",
         "Clump",
         "ColorJitter",
+        "ColorMix",
+        "Colors",
         "Density",
         "Highlight",
+        "HighlightColor",
         "Irregular",
         "Light",
         "Pitch",
         "Shadow",
+        "ShadowColor",
         "Size",
         "Scatter",
     ];
@@ -9586,17 +9621,27 @@ fn loaded_keys_change_the_render_on_every_adopter() {
 // ---------------------------------------------------------------------
 // canvas surface S2 (issue #222, slice S2 of #182): `/Touch` on
 // `pktrowel` and `pkdry`. CANVAS_SURFACE.md section 6, tests 1-5 and 7.
+// Slice S3 (issue #225) adds `pkfan`, `pkbroad` and `pkliner` to the same
+// tests, so test 4 also runs on the solid `pkbroad` band the design names.
 // ---------------------------------------------------------------------
 
-/// The two adopting presets, each with a stroke across a 200pt page.
-const TOUCH_PRESETS: [&str; 2] = ["pktrowel", "pkdry"];
+/// The adopting presets, each with a stroke across a 200pt page.
+const TOUCH_PRESETS: [&str; 5] = ["pktrowel", "pkdry", "pkfan", "pkbroad", "pkliner"];
 
 /// Options that make each preset lay its full footprint: no contact
 /// chain, scrape or colour jitter, so the only break-up is the catch.
 fn touch_solid(preset: &str) -> &'static str {
     match preset {
         "pktrowel" => "/Width 40 /Coverage 1 /Scrape 0 /EdgeBuildup 0 /ColorJitter 0",
-        _ => "/Width 30 /Bristles 40 /Load 1 /Dropout 0 /ColorJitter 0",
+        "pkdry" => "/Width 30 /Bristles 40 /Load 1 /Dropout 0 /ColorJitter 0",
+        // Dense and parallel, so the fan reads as a solid band: bristles
+        // 0.75pt apart, each 3pt wide, none dropped.
+        "pkfan" => {
+            "/Width 30 /Spread 1 /Splay 0 /Bristles 40 /BristleWidth 3 /WidthJitter 0 \
+             /Load 1 /Dropout 0 /Ragged 0 /Flick 0 /Jitter 0 /ColorJitter 0"
+        }
+        "pkbroad" => "/Width 40 /Charge 1 /Depletion 0 /Edge 0 /ColorJitter 0",
+        _ => "/Width 40 /Taper 0 /Charge 1 /Depletion 0 /Waver 0 /ColorJitter 0",
     }
 }
 
@@ -9872,7 +9917,7 @@ fn touch_less_touch_less_ink() {
 #[test]
 fn touch_box_contains_the_whole_mark() {
     let line = "newpath 40 100 moveto 160 112 lineto";
-    let cases: [(&str, &str, &str); 27] = [
+    let cases: &[(&str, &str, &str)] = &[
         ("pktrowel", line, "/Width 40"),
         ("pktrowel", "newpath 100 100 moveto", "/Width 60 /Drag 1"),
         // Shorter than two pitches: the trim leaves the middle stop a
@@ -9967,8 +10012,137 @@ fn touch_box_contains_the_whole_mark() {
             "100 100 translate -20 rotate 0.7 1.4 scale newpath 0 0 moveto",
             "/Width 70 /Spread 1 /Load 1 /Bristles 60 /BristleWidth 10",
         ),
+        // --- slice S3 (issue #225). Each case isolates one term of the
+        // reach, large against the others' slack, so that dropping the
+        // term fails it (mutation-checked).
+        // pkfan: runs, the lateral term
+        ("pkfan", line, "/Width 40 /Load 1 /Dropout 0"),
+        (
+            "pkfan",
+            line,
+            "/Width 40 /Spread 1 /Splay 1 /Load 1 /Dropout 0",
+        ),
+        // pkfan: Jitter alone moves a run's centerline
+        (
+            "pkfan",
+            line,
+            "/Width 10 /Spread 0.1 /Jitter 20 /Load 1 /Dropout 0 /BristleWidth 1",
+        ),
+        // pkfan: a bristle mark's half-width, with pointed caps along x
+        (
+            "pkfan",
+            line,
+            "/Width 4 /Spread 1 /BristleWidth 30 /WidthJitter 1 /Ragged 0 /Flick 0 \
+             /Load 1 /Dropout 0 /Bristles 20",
+        ),
+        (
+            "pkfan",
+            line,
+            "/Width 4 /Spread 1 /BristleWidth 30 /WidthJitter 1 /Ragged 0 /Flick 1 \
+             /Load 1 /Dropout 0 /Bristles 20",
+        ),
+        // pkfan: a pressed fan's rays are 1.15 half long at /Ragged 0
+        (
+            "pkfan",
+            "newpath 100 100 moveto",
+            "/Width 80 /Spread 1 /Ragged 0 /Bristles 60 /Load 1 /BristleWidth 1",
+        ),
+        // pkfan: a path shorter than a pitch, and a mix of subpaths with a
+        // bare moveto
+        (
+            "pkfan",
+            "newpath 95 100 moveto 105 100 lineto",
+            "/Width 60 /Pitch 40 /Load 1 /Dropout 0",
+        ),
+        (
+            "pkfan",
+            "newpath 40 60 moveto 160 70 lineto 60 140 moveto 150 150 lineto 100 100 moveto",
+            "/Width 40 /Load 1 /Dropout 0 /Ragged 0 /Colors [[1 0 0] [0 0 1]] /Light 90",
+        ),
+        (
+            "pkfan",
+            "100 100 translate 30 rotate 1.5 0.8 scale newpath -50 0 moveto 50 5 lineto",
+            "/Width 40 /Spread 1 /Load 1 /Dropout 0 /Jitter 4",
+        ),
+        // pkbroad: the half-width, with the edge roughness the only slack
+        ("pkbroad", line, "/Width 40 /Charge 1 /Depletion 0"),
+        (
+            "pkbroad",
+            line,
+            "/Width 120 /Edge 1 /Pitch 0.5 /Charge 1 /Depletion 0 /Grain 40",
+        ),
+        (
+            "pkbroad",
+            line,
+            "/Width 40 /Angle 80 /Edge 1 /Pitch 0.5 /Charge 1 /Depletion 0",
+        ),
+        // pkbroad: a pressed footprint reaches Pitch/2 along the travel
+        (
+            "pkbroad",
+            "newpath 100 100 moveto",
+            "/Width 10 /Pitch 60 /Charge 1 /Depletion 0 /Grain 4",
+        ),
+        (
+            "pkbroad",
+            "newpath 100 100 moveto",
+            "/Width 10 /Pitch 60 /Angle 80 /Charge 1 /Depletion 0 /Grain 4",
+        ),
+        // pkbroad: single-stop runs, the stamp reaching forward by a gap
+        (
+            "pkbroad",
+            "newpath 95 100 moveto 105 100 lineto",
+            "/Width 20 /Pitch 30 /Angle 80 /Charge 1 /Depletion 0",
+        ),
+        (
+            "pkbroad",
+            line,
+            "/Width 20 /Pitch 120 /Charge 1 /Depletion 0",
+        ),
+        (
+            "pkbroad",
+            line,
+            "/Width 30 /Pitch 60 /Angle -80 /Charge 0.6 /Depletion 1 /Colors [[1 0 0] [0 0 1]]",
+        ),
+        (
+            "pkbroad",
+            "newpath 40 60 moveto 160 70 lineto 60 140 moveto 150 150 lineto 100 100 moveto",
+            "/Width 30 /Edge 0.7 /Light 90 /Colors [[1 0 0] [0 0 1]]",
+        ),
+        (
+            "pkbroad",
+            "100 100 translate 30 rotate 1.5 0.8 scale newpath -50 0 moveto 50 5 lineto",
+            "/Width 40 /Edge 1 /Angle 40 /Charge 1 /Depletion 0",
+        ),
+        // pkliner: the tip's wander, the width and a pressed dot
+        ("pkliner", line, "/Width 8"),
+        (
+            "pkliner",
+            line,
+            "/Width 2 /Waver 10 /Taper 0 /Charge 1 /Depletion 0",
+        ),
+        (
+            "pkliner",
+            line,
+            "/Width 30 /Waver 0 /Taper 0 /Charge 1 /Depletion 0",
+        ),
+        ("pkliner", "newpath 100 100 moveto", "/Width 40 /Waver 10"),
+        (
+            "pkliner",
+            "newpath 95 100 moveto 97 100 lineto",
+            "/Width 20 /Pitch 10 /Waver 3",
+        ),
+        (
+            "pkliner",
+            "newpath 40 60 moveto 160 70 lineto 60 140 moveto 150 150 lineto 100 100 moveto",
+            "/Width 6 /Waver 3 /Depletion 1",
+        ),
+        (
+            "pkliner",
+            "100 100 translate 30 rotate 1.5 0.8 scale newpath -50 0 moveto 50 5 lineto",
+            "/Width 4 /Waver 5 /Taper 0.5",
+        ),
     ];
-    for (preset, path, opts) in cases {
+    for &(preset, path, opts) in cases {
         let render = |whole: &str| {
             touch_page(&format!(
                 "<< >> pkcanvas {whole} {path} << {opts} /Touch 0.9 >> {preset}"
@@ -10086,6 +10260,20 @@ fn a_uniform_load_under_pkwet_is_the_plain_brush_under_pkwet() {
                 "newpath 50 150 moveto 350 140 lineto << /Width 40 /Touch 0.6 {load} >> pktrowel"
             ),
         )))
+        // ...and a touched fan and broad brush (issue #225).
+        .chain(
+            LOAD_PRESETS
+                .iter()
+                .filter(|(p, _)| *p != "pktrowel")
+                .map(|(preset, base)| {
+                    let base = base.replace("/ColorJitter 0", "/ColorJitter 0.3");
+                    let path = "newpath 50 150 moveto 350 140 lineto";
+                    (
+                        format!("{path} << {base} /Touch 0.6 >> {preset}"),
+                        format!("{path} << {base} /Touch 0.6 {load} >> {preset}"),
+                    )
+                }),
+        )
         .collect();
     for (plain, loaded) in &marks {
         for (name, wrap) in [
@@ -10378,10 +10566,423 @@ fn fan_advertises_the_loaded_color_keys() {
         .lines()
         .filter_map(|l| l.strip_prefix("% @param: /"))
         .collect();
-    for key in ["Colors", "ColorMix", "Light"] {
+    for key in ["Colors", "ColorMix", "Light", "Touch"] {
         assert!(
             params.iter().any(|l| l.starts_with(&format!("{key} ["))),
             "pkfan does not advertise /{key} with a unit"
         );
+    }
+}
+
+/// Every adopting preset advertises `/Touch` with its unit, and says it
+/// needs `pkcanvas`.
+#[test]
+fn every_touch_adopter_advertises_touch_with_a_unit() {
+    let src = std::fs::read_to_string("lib/paintkit.ps").expect("read paintkit");
+    for preset in TOUCH_PRESETS {
+        let def = src
+            .find(&format!("\n/{preset} {{"))
+            .unwrap_or_else(|| panic!("{preset} def"));
+        let tags = &src[src[..def].rfind("% @kind").expect("tags")..def];
+        let line = tags
+            .lines()
+            .find_map(|l| l.strip_prefix("% @param: /Touch "))
+            .unwrap_or_else(|| panic!("{preset} does not advertise /Touch"));
+        assert!(
+            line.starts_with("[0..1]") && line.contains("pkcanvas"),
+            "{preset}'s /Touch line: {line}"
+        );
+    }
+}
+
+// --- loaded colours on pkdab, highlight and shadow colours (issue #183, slice L5 #226) ---
+//
+// `pkdab` takes `/Colors` (one colour per dab, at the position its existing
+// outline-phase draw gives it on the load), and `pkdab` and `pkoil` take
+// `/HighlightColor` and `/ShadowColor` in place of white and black. The
+// design is docs/PAINT_LOADING.md; the numbers below are its section 6 tests
+// 7 and 8.
+
+/// Scenarios that use none of the new keys, pinned against hashes taken from
+/// `origin/main` (ebebfed) before the slice: `pkdab` and `pkoil` run exactly
+/// the instructions they ran.
+#[test]
+fn dab_and_oil_unset_loading_keys_are_byte_identical() {
+    let scenarios: [(&str, &str, &str); 9] = [
+        ("pkdab", LTR, "/Size 6 /Scatter 20"),
+        (
+            "pkdab",
+            LTR,
+            "/Size 6 /Scatter 20 /Highlight 0.8 /Shadow 0.7 /ColorJitter 0.3",
+        ),
+        ("pkdab", "newpath 200 100 moveto", "/Size 8 /Clump 60"),
+        (
+            "pkdab",
+            "newpath 50 40 moveto 150 180 250 20 350 160 curveto",
+            "/Size 5 /Light 45 /Density 4",
+        ),
+        (
+            "pkdab",
+            "newpath 50 60 moveto 350 60 lineto 350 140 moveto 50 140 lineto",
+            "/Size 7 /Scatter 14 /Light 300 /Charge 0.6",
+        ),
+        ("pkoil", LTR, "/Width 20"),
+        ("pkoil", LTR, "/Width 20 /Highlight 0.6 /Shadow 0.5"),
+        ("pkoil", "newpath 200 100 moveto", "/Width 30"),
+        (
+            "pkoil",
+            "newpath 50 40 moveto 150 180 250 20 350 160 curveto",
+            "/Width 24 /Ridges 20 /ColorJitter 0.3 /Highlight 0.4",
+        ),
+    ];
+    // Taken from the pre-slice library (origin/main at ebebfed).
+    let pinned: [u64; 9] = [
+        0x5898eb949b9a9cc4,
+        0x87591e4410f1fba3,
+        0x7da7b90d0c8b14d9,
+        0x03f0f5f6044c25a2,
+        0xbb7c94385aebe42e,
+        0x46cf174a8c23e026,
+        0x4afeceacd6e421ce,
+        0xe659b4013bfc5106,
+        0x407b12e6fb63aeef,
+    ];
+    let got: Vec<u64> = scenarios
+        .iter()
+        .map(|(preset, path, opts)| {
+            let it = loaded_mark(preset, path, "0.6 0.3 0.2 setrgbcolor", opts);
+            fnv1a(it.gfx().pixmap.data())
+        })
+        .collect();
+    assert_eq!(got, pinned, "an unset-keys render moved: {got:#x?}");
+}
+
+/// Pixels of `it` (whole page) satisfying `pred` on (r, g, b).
+fn count_rgb(it: &Interp, pred: impl Fn(i32, i32, i32) -> bool) -> usize {
+    it.gfx()
+        .pixmap
+        .pixels()
+        .iter()
+        .filter(|p| pred(p.red() as i32, p.green() as i32, p.blue() as i32))
+        .count()
+}
+
+fn is_red(r: i32, g: i32, b: i32) -> bool {
+    r > 150 && r > g + 90 && r > b + 90
+}
+
+fn is_blue(r: i32, g: i32, b: i32) -> bool {
+    b > 150 && b > r + 90 && b > g + 90
+}
+
+/// Test 7. `/HighlightColor` and `/ShadowColor` move the lit and shaded
+/// layers toward a hue, not toward white and black. A grey brush has no
+/// red or blue pixel on its own, so any that appear came from the keys.
+#[test]
+fn highlight_color_moves_the_hue() {
+    // pkdab: highlight dabs are `mix3(grey, H, 0.6)`, shadow dabs
+    // `mix3(grey, S, 0.55)`, at full /Highlight and /Shadow.
+    let dab_opts = "/Size 6 /Scatter 20 /ColorJitter 0 /Highlight 1 /Shadow 1";
+    let grey = |extra: &str| dab_with("0.5 0.5 0.5", DAB_PATH, &format!("{dab_opts} {extra}"));
+    let plain = grey("");
+    assert_eq!(
+        count_rgb(&plain, |r, g, b| is_red(r, g, b) || is_blue(r, g, b)),
+        0,
+        "a grey brush must paint no hue by itself"
+    );
+    let hued = grey("/HighlightColor [1 0 0] /ShadowColor [0 0 1]");
+    let red = count_rgb(&hued, is_red);
+    let blue = count_rgb(&hued, is_blue);
+    assert!(
+        red > 150,
+        "pkdab: highlights did not move toward red: {red}"
+    );
+    assert!(
+        blue > 300,
+        "pkdab: shadows did not move toward blue: {blue}"
+    );
+    // Each key moves only its own layer.
+    let only_h = grey("/HighlightColor [1 0 0]");
+    assert!(count_rgb(&only_h, is_red) > 150 && count_rgb(&only_h, is_blue) == 0);
+    let only_s = grey("/ShadowColor [0 0 1]");
+    assert!(count_rgb(&only_s, is_blue) > 300 && count_rgb(&only_s, is_red) == 0);
+    // ...and a key with its layer switched off paints nothing.
+    let off = grey("/Highlight 0 /Shadow 0 /HighlightColor [1 0 0] /ShadowColor [0 0 1]");
+    assert_eq!(
+        count_rgb(&off, |r, g, b| is_red(r, g, b) || is_blue(r, g, b)),
+        0
+    );
+
+    // pkoil: the highlight ridge on the + side and the shadow ridge on the
+    // - side are `mix3(grey, H, 1)` and `mix3(grey, S, 1)` at strength 1.
+    let oil = |extra: &str| {
+        loaded_mark(
+            "pkoil",
+            LTR,
+            "0.5 0.5 0.5 setrgbcolor",
+            &format!("/Width 30 /ColorJitter 0 /EdgePickup 0 /Highlight 1 /Shadow 1 {extra}"),
+        )
+    };
+    let plain = oil("");
+    assert_eq!(
+        count_rgb(&plain, |r, g, b| is_red(r, g, b) || is_blue(r, g, b)),
+        0,
+        "a grey oil brush must paint no hue by itself"
+    );
+    let hued = oil("/HighlightColor [1 0 0] /ShadowColor [0 0 1]");
+    let red = count_rgb(&hued, is_red);
+    let blue = count_rgb(&hued, is_blue);
+    assert!(red > 300, "pkoil: highlight ridge not red: {red}");
+    assert!(blue > 300, "pkoil: shadow ridge not blue: {blue}");
+    let only_h = oil("/HighlightColor [1 0 0]");
+    assert!(count_rgb(&only_h, is_red) > 300 && count_rgb(&only_h, is_blue) == 0);
+    let only_s = oil("/ShadowColor [0 0 1]");
+    assert!(count_rgb(&only_s, is_blue) > 300 && count_rgb(&only_s, is_red) == 0);
+    // The ridges sit on opposite sides: the red one is the upper (+y) side.
+    let mid = 100;
+    let side = |it: &Interp, f: fn(i32, i32, i32) -> bool, upper: bool| {
+        let mut n = 0;
+        for y in 0..200u32 {
+            if (y < mid) != upper {
+                continue;
+            }
+            for x in 0..400u32 {
+                let p = it.gfx().pixmap.pixel(x, y).expect("in bounds");
+                if f(p.red() as i32, p.green() as i32, p.blue() as i32) {
+                    n += 1;
+                }
+            }
+        }
+        n
+    };
+    assert!(side(&hued, is_red, true) > 10 * side(&hued, is_red, false));
+    assert!(side(&hued, is_blue, false) > 10 * side(&hued, is_blue, true));
+}
+
+/// Test 8. With `[A B]` at `/ColorMix 0` every dab is one colour or the
+/// other, so a 400-dab clump's pure pixels split about evenly; at
+/// `/ColorMix 1` the dabs grade between them and the pure pixels thin out.
+#[test]
+fn pkdab_colors_mix_per_dab() {
+    let clump = |mix: &str| {
+        dab_with(
+            "0 0 0",
+            "newpath 200 100 moveto",
+            &format!(
+                "/Size 4 /Scatter 70 /Clump 400 /Charge 1 /Shadow 0 /Highlight 0 \
+                 /ColorJitter 0 /Colors [[1 0 0] [0 0 1]] /ColorMix {mix}"
+            ),
+        )
+    };
+    let hard = clump("0");
+    let red = count_rgb(&hard, |r, g, b| r > 250 && g < 5 && b < 5);
+    let blue = count_rgb(&hard, |r, g, b| b > 250 && r < 5 && g < 5);
+    let share = red as f64 / (red + blue) as f64;
+    assert!(
+        red + blue > 3000 && (0.35..0.65).contains(&share),
+        "[A B] at /ColorMix 0 should split about evenly: red {red}, blue {blue}"
+    );
+    // The page holds nothing but the two colours (and their anti-aliased
+    // fringes), so a hard load paints very few in-between pixels...
+    let between = |it: &Interp| count_rgb(it, |r, g, b| r > 60 && b > 60 && g < 30);
+    let soft = clump("1");
+    let pure_soft = count_rgb(&soft, |r, g, b| {
+        (r > 250 && g < 5 && b < 5) || (b > 250 && r < 5 && g < 5)
+    });
+    // ...and a full gradient paints many, with far fewer pure ones.
+    assert!(
+        between(&soft) > 3 * between(&hard) && between(&soft) > 1000,
+        "/ColorMix 1 should grade: {} vs {}",
+        between(&soft),
+        between(&hard)
+    );
+    assert!(pure_soft * 3 < red + blue, "{pure_soft} vs {}", red + blue);
+}
+
+/// Turning the new keys on recolours a mark without moving it: the
+/// caller's random stream is untouched, and the same pixels are painted.
+#[test]
+fn dab_and_oil_loading_keys_take_no_random_draws() {
+    let knobs = [
+        "/Colors [[1 0 0] [0 0 1]]",
+        "/Colors [[1 0 0] [0 1 0] [0 0 1]] /ColorMix 1 /Light 45",
+        "/Colors [[1 0 0]] /ColorMix 0",
+        "/HighlightColor [1 1 0]",
+        "/ShadowColor [0 0 0.5]",
+        "/Colors [[0 0.5 0] [0.6 0.6 0]] /HighlightColor [1 1 0] /ShadowColor [0 0 0.5]",
+    ];
+    let base = dab_stream_after("/Size 6", DAB_PATH);
+    let base_clump = dab_stream_after("/Size 6", "newpath 100 100 moveto");
+    for knob in knobs {
+        assert_eq!(
+            dab_stream_after(&format!("/Size 6 {knob}"), DAB_PATH),
+            base,
+            "pkdab {knob} changed how many draws it takes"
+        );
+        assert_eq!(
+            dab_stream_after(&format!("/Size 6 {knob}"), "newpath 100 100 moveto"),
+            base_clump,
+            "pkdab {knob} changed how many draws a clump takes"
+        );
+    }
+    // The same dabs land in the same places, just in other colours.
+    let mask = |opts: &str| {
+        let it = dab_with("0 0 0", DAB_PATH, &format!("/Size 6 /Scatter 20 {opts}"));
+        pixels(&it)
+            .chunks(4)
+            .map(|p| p[..3] != [255, 255, 255])
+            .collect::<Vec<_>>()
+    };
+    let plain = mask("");
+    // (/Light is left out: on pkdab it moves the shadow and highlight layers
+    // by design, which is its existing meaning.)
+    for knob in knobs.iter().filter(|k| !k.contains("/Light")) {
+        assert_eq!(mask(knob), plain, "pkdab {knob} moved the dabs");
+    }
+
+    let oil_next = |extra: &str| {
+        let mut it = loaded_mark(
+            "pkoil",
+            LTR,
+            "0.5 0.5 0.5 setrgbcolor",
+            &format!("/Width 30 {extra}"),
+        );
+        it.run_str("rand").expect("rand");
+        it.operand_stack()
+            .last()
+            .expect("a draw")
+            .repr()
+            .to_string()
+    };
+    let plain = oil_next("");
+    for extra in [
+        "/HighlightColor [1 1 0]",
+        "/ShadowColor [0 0 1]",
+        "/HighlightColor [1 1 0] /ShadowColor [0 0 1] /Highlight 1 /Shadow 1",
+    ] {
+        assert_eq!(oil_next(extra), plain, "pkoil {extra} changed the stream");
+    }
+}
+
+/// A load whose colours all equal the current colour paints what the
+/// plain brush paints, with the default layers and jitter in play.
+#[test]
+fn dab_a_uniform_load_is_the_plain_brush() {
+    let colour = "0.25 0.5 0.75 setrgbcolor";
+    for path in [
+        LTR,
+        "newpath 200 100 moveto",
+        "newpath 50 40 moveto 150 180 250 20 350 160 curveto",
+    ] {
+        let base = "/Size 6 /Scatter 20 /Highlight 0.8 /Shadow 0.7 /ColorJitter 0.3";
+        let plain = pixels(&loaded_mark("pkdab", path, colour, base));
+        assert!(ink(&plain) > 500, "the plain clump on `{path}` is blank");
+        for extra in [
+            "/Colors [[0.25 0.5 0.75]]",
+            "/Colors [[0.25 0.5 0.75] [0.25 0.5 0.75]]",
+            "/Colors [[0.25 0.5 0.75] [0.25 0.5 0.75] [0.25 0.5 0.75]] /ColorMix 1",
+            "/Colors [[0.25 0.5 0.75] [0.25 0.5 0.75]] /ColorMix 0",
+        ] {
+            let loaded = pixels(&loaded_mark(
+                "pkdab",
+                path,
+                colour,
+                &format!("{base} {extra}"),
+            ));
+            assert!(
+                loaded == plain,
+                "pkdab {extra} on `{path}` moved the plain brush"
+            );
+        }
+    }
+}
+
+/// Inside a one-sided directional pull the loaded dab colour and both
+/// mix targets are graded toward `/Under` like an inherited colour: the
+/// outer pass, clear of the core, holds nothing but green.
+#[test]
+fn wet_pull_grades_dab_colors_and_hue_colors() {
+    let it = wet_loaded(
+        "0 0 0 setrgbcolor",
+        "newpath 50 160 moveto 350 160 lineto \
+         << /Size 6 /Scatter 8 /Charge 1 /ColorJitter 0 /Highlight 1 /Shadow 1 \
+            /Colors [[1 0 0]] /HighlightColor [0 0 1] /ShadowColor [0 0 1] >> pkdab",
+        "/Direction 270 /OneSided true /Layers 2 /Offset 80 /Under [0 1 0]",
+    );
+    // Core: user y ~150..170, pixel rows 30..50. Pure red body, blue layers.
+    let core_red = (30..50u32)
+        .flat_map(|y| (100..300u32).map(move |x| (x, y)))
+        .filter(|&(x, y)| {
+            let p = it.gfx().pixmap.pixel(x, y).unwrap();
+            is_red(p.red() as i32, p.green() as i32, p.blue() as i32)
+        })
+        .count();
+    assert!(core_red > 500, "the core pass lost its red: {core_red}");
+    // Outer pass: user y ~70..90, pixel rows 110..130, mixed 0.85 to green.
+    let (mut inked, mut hue) = (0, 0);
+    for y in 110..130u32 {
+        for x in 100..300u32 {
+            let p = it.gfx().pixmap.pixel(x, y).unwrap();
+            let (r, g, b) = (p.red() as i32, p.green() as i32, p.blue() as i32);
+            if [r, g, b] != [255, 255, 255] {
+                inked += 1;
+            }
+            // Graded, the outer pass is green, white at its fringe: red or blue
+            // never beats green.
+            if r > g + 20 || b > g + 20 {
+                hue += 1;
+            }
+        }
+    }
+    assert!(inked > 800, "the outer pass is nearly blank: {inked}");
+    assert_eq!(hue, 0, "{hue} of {inked} outer pixels are ungraded");
+
+    // pkoil's ridges mix toward the same graded targets.
+    let it = wet_loaded(
+        "1 0 0 setrgbcolor",
+        "newpath 50 160 moveto 350 160 lineto \
+         << /Width 30 /ColorJitter 0 /Highlight 1 /Shadow 1 \
+            /HighlightColor [0 0 1] /ShadowColor [0 0 1] >> pkoil",
+        "/Direction 270 /OneSided true /Layers 2 /Offset 80 /Under [0 1 0]",
+    );
+    let (mut inked, mut hue) = (0, 0);
+    for y in 102..140u32 {
+        for x in 100..300u32 {
+            let p = it.gfx().pixmap.pixel(x, y).unwrap();
+            let (r, g, b) = (p.red() as i32, p.green() as i32, p.blue() as i32);
+            if [r, g, b] != [255, 255, 255] {
+                inked += 1;
+            }
+            if r > g + 20 || b > g + 20 {
+                hue += 1;
+            }
+        }
+    }
+    assert!(inked > 800, "the outer oil pass is nearly blank: {inked}");
+    assert_eq!(hue, 0, "{hue} of {inked} outer oil pixels are ungraded");
+}
+
+/// `pkdab` and `pkoil` advertise the new keys, each with a unit.
+#[test]
+fn dab_and_oil_advertise_the_loaded_color_keys() {
+    let src = std::fs::read_to_string("lib/paintkit.ps").expect("read paintkit");
+    for (preset, keys) in [
+        (
+            "pkdab",
+            &["Colors", "ColorMix", "HighlightColor", "ShadowColor"][..],
+        ),
+        ("pkoil", &["HighlightColor", "ShadowColor"][..]),
+    ] {
+        let def = src
+            .find(&format!("\n/{preset} {{"))
+            .unwrap_or_else(|| panic!("{preset} def"));
+        let tags = &src[src[..def].rfind("% @kind").expect("tags")..def];
+        for key in keys {
+            assert!(
+                tags.lines()
+                    .any(|l| l.starts_with(&format!("% @param: /{key} ["))),
+                "{preset} does not advertise /{key} with a unit"
+            );
+        }
     }
 }

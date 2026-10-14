@@ -4,6 +4,27 @@ Read by `SKILL.md` before step 1 (skim) and whenever a step says so.
 
 Step numbers ("step 1" ... "step 9") refer to the numbered steps in `../SKILL.md`, which keep their original numbering. "Pitfalls" / "the ... pitfall below" means `pitfalls.md` in this directory; "Claim the issue" means `claim-protocol.md`.
 
+<!-- TOC -->
+Read a section with the Read tool (`offset`/`limit`), not one `cat`: this file is long enough to be truncated.
+The line ranges drift when you edit the file: re-check them (the first and last line of each range) after any edit.
+
+| Section | Lines |
+|---|---|
+| General pitfalls (a flat list of bullets) | 28-206 |
+| Added in #194 (friction from the #189 / PR #193 run, and #151) | 208-254 |
+| Waiting and timeouts | 256-269 |
+| Step 5 checklist | 271-300 |
+| CI wait (#199, from the #178 / PR #198 run; timings and pass/fail rule updated in #208) | 302-364 |
+| Main CI after merge (#257, #273) | 366-404 |
+| Pending-CI hand-back (only if you truly cannot wait) | 406-425 |
+| Resume paths (#208) | 427-468 |
+| Stop without merging when the dispatcher says so (#208) | 470-491 |
+| Rebase and merge rules (#208) | 493-531 |
+| Step 4 is a hard gate | 533-540 |
+| One scratch location | 542-554 |
+| Evidence runs and scratch hygiene (#273) | 556-579 |
+<!-- /TOC -->
+
 - **Don't work in the main checkout.** The whole point of the worktree
   is that the branch's changes are physically separate from wherever
   this skill was invoked from. If you catch yourself editing files
@@ -140,6 +161,12 @@ Step numbers ("step 1" ... "step 9") refer to the numbered steps in `../SKILL.md
   as empty/stale, and steals from a run that already believes it won.
   Same reasoning applies to the reclaim path's post-`mv` `mkdir` +
   heartbeat write.
+- **Claim and heartbeat are scripts since #276 (round 6).** Two agents in a row ran only
+  the `mkdir` branch of the pasted claim block. Run `scripts/claim.sh <N>` as one command and
+  never retype its lines; `scripts/heartbeat.sh <N>` is the refresh. After editing
+  `claim.sh`, run `bash .claude/skills/work-issue/scripts/test-claim.sh` (race tests in a
+  throwaway repo). A worktree cut before #276 has no `scripts/`: use the main checkout's
+  copy of the script, or merge `origin/main` into the worktree.
 - **The lock lives in the main repo's shared git dir
   (`work-issue-lock-<N>`), not the worktree's** — this is deliberate
   (a fresh pick has no worktree yet to hang a lock off of), but it
@@ -232,6 +259,11 @@ Step numbers ("step 1" ... "step 9") refer to the numbered steps in `../SKILL.md
 - Foreground `sleep` may be blocked. Wait with a background Bash task
   (`run_in_background: true`, you are notified when it exits) or a Python
   poll, `python3 -c 'import time; time.sleep(60)'`, kept under 115 s per call.
+- A bounded single-call wait on a log file is fine: a Python poll such as
+  `until grep -q GATE_EXIT <log>; do python3 -c 'import time; time.sleep(5)'; done`, kept
+  under 115 s per call (the call is moved to the background past that, and you are notified).
+- `Monitor` is a deferred tool: load its schema first with `ToolSearch` (`select:Monitor`),
+  or calling it fails.
 - Keep scratch output under `<SCRATCH>` as `<kind>-<N>.*`, never a relative
   path that escapes the worktree (`../x`) and never `/tmp` when the system
   prompt names a scratchpad.
@@ -246,7 +278,26 @@ Cheapest first, before the long gate:
    `ARTKIT_INTERNAL` in `src/capabilities.rs`. Check with
    `PSCAT_PROFILE=ci ./scripts/selftest.sh` and
    `cargo test --profile ci --test capabilities` (about 30 s together).
-3. Then the full gate in step 5.5.
+3. In a `lib/` file that opts into the `% @kind` catalog, `build.rs` (`find_top_level_defs`)
+   only understands `/key value def` at depth 0 where `value` is ONE object (a number, a
+   name, a string, or a balanced `{}`/`[]`/`<< >>` group). It panics on `/name N dict def`
+   ("`def` with no `/name` two positions back on the depth-0 stack"), which fails every build,
+   not just your test (untagged `LEGACY_FILES` such as `lib/etching.ps` still use that
+   shape). Use a `<< >>` literal (`/name << /k v >> def`), or a probe-first def whose `def`
+   sits at depth 1, as `lib/lettering.ps` and `lib/drykit.ps` do with `where`:
+   `/name where { pop } { /name N dict def } ifelse`. Run `cargo build` before the long gate to
+   see a panic in seconds.
+4. Paintkit and other `lib/` slices that promise "unset keys render byte-identically":
+   run `scripts/identity_check.sh BASE_WORKTREE` (see its header: one shared binary,
+   `--control FILE` negative control). Order matters: rebase first (step 5.5), then create the
+   base worktree from the rebased branch's base, `git worktree add --detach <path> "$(git -C
+   "$WORKTREE_DIR" merge-base HEAD origin/main)"`, then run the check. A rebase after the
+   check leaves a stale base: re-create the base and re-run. The control driver may live in
+   `<SCRATCH>`: pass it by absolute path.
+5. Every pscat probe you run by hand needs `--headless`, or `-e`/`--png`. Without one of
+   them pscat opens a window and the call blocks until it is closed:
+   `pscat --headless -e '3 4 add ='`, `pscat --png <SCRATCH>/probe-<N>.png file.ps`.
+6. Then the full gate in step 5.5.
 
 ## CI wait (#199, from the #178 / PR #198 run; timings and pass/fail rule updated in #208)
 
@@ -423,6 +474,10 @@ maintainer's eye, a human who wants the last look). Run steps 1-8.9 as
 usual, then at 8.10 do step 11 (the summary is posted so the issue carries
 the wrap-up) and stop **before** 8.12:
 
+0. Write the PR body for the maintainer from the start (step 7): what changed and why, what
+   you verified and how, what you did not or could not verify, what to look at first
+   (renders, a risky function), and that merging is theirs to do (`/work-issue <N>` later
+   finishes it). A body drafted for a self-merge ("CI is green, merging") misleads them.
 1. Release the lock: `rm -rf "$(git rev-parse --path-format=absolute --git-common-dir)/work-issue-lock-<N>"`.
 2. Keep the `in-review` label, the worktree and the branch. Do not run
    step 9.
@@ -446,6 +501,15 @@ origin main && git -C "$WORKTREE_DIR" merge origin/main`, resolve, commit,
 plain `git push` (no force). `gh pr update-branch` is only a shortcut for a
 conflict-free merge; if you do use it, `git -C "$WORKTREE_DIR" pull
 --ff-only` before any later local commit.
+
+**Gate after a clean rebase or merge (#276).** If a gate already passed and the
+rebase or merge then brought in only documentation, skill or CI files, that gate result
+stands; do not re-run it. Decide with an allowlist, not a denylist, before the rebase:
+`git -C "$WORKTREE_DIR" fetch origin main && git -C "$WORKTREE_DIR" diff --name-only HEAD...origin/main`
+lists what `main` gained. If every path is `*.md`, under `docs/`, `notes/`, `.claude/` or
+`.github/`, the gate stands. Anything else (`lib/`, `src/`, `tests/`, `selftest/`,
+`examples/`, `gallery/`, `scripts/`, `build.rs`, `Cargo.*`, `site/`) means re-run it.
+Either way, re-read the worktree's `SKILL.md` after a rebase that moved `HEAD`.
 
 **NOTES.md conflicts** should be rare since #273: new notes go in
 `notes/<issue>-<slug>.md`, one file per issue, so two PRs never touch the

@@ -634,6 +634,183 @@ fn bbox_must_have_exactly_four_elements() {
     );
 }
 
+/// Runs `src` expecting the self-documenting guard `name`, and asserts the
+/// side-effecting procedure it carries (`/gotexecuted true def`) never ran.
+/// Same shape as tests/artkit.rs's helper of that name (#123).
+fn assert_rejected_without_running(src: &str, name: &str) {
+    let mut it = with_lib(100, 100);
+    it.run_str("/gotexecuted false def /gotfn { /gotexecuted true def } def")
+        .expect("setup");
+    match it.run_str(src).unwrap_err() {
+        PsError::Undefined(got) => assert_eq!(got, name, "wrong guard for {src:?}"),
+        other => panic!("expected the guard {name} for {src:?}, got {other}"),
+    }
+    it.run_str("gotexecuted").expect("read the flag");
+    let flag = it.operand_stack().last().map(|o| o.repr());
+    assert_eq!(
+        flag.as_deref(),
+        Some("false"),
+        "the malformed operand in {src:?} was executed instead of being rejected"
+    );
+}
+
+/// A procedure that leaves a number (the worst case: before #259 it was
+/// accepted and re-run on every bare reference), an operator, and an
+/// executable name.
+const MALFORMED: [&str; 3] = ["{ /gotexecuted true def 1 }", "/add load", "/gotfn cvx"];
+
+#[test]
+fn hatch_never_executes_a_malformed_options_operand() {
+    // #259: `hatch` bound its options with `def` and then type-checked them
+    // through the name, which runs a procedure, operator or executable
+    // name -- the side effect happened, then a raw `stackunderflow`
+    // replaced the named error.
+    for opts in MALFORMED.iter().chain(&["5", "(opts)", "[ 1 2 ]"]) {
+        assert_rejected_without_running(
+            &format!("0 0 50 50 rectclip {opts} hatch"),
+            "hatch-opts-must-be-a-dict",
+        );
+    }
+}
+
+#[test]
+fn hatch_never_executes_a_malformed_numeric_option() {
+    for (key, guard) in [
+        ("Angle", "hatch-angle-must-be-a-number"),
+        ("Spacing", "hatch-spacing-must-be-a-number"),
+        ("Wobble", "hatch-wobble-must-be-a-number"),
+        ("Dropout", "hatch-dropout-must-be-a-number"),
+        (
+            "DensityThreshold",
+            "hatch-density-threshold-must-be-a-number",
+        ),
+        ("Seed", "hatch-seed-must-be-a-number"),
+        ("MaxLines", "hatch-maxlines-must-be-a-number"),
+        ("MaxSamples", "hatch-maxsamples-must-be-a-number"),
+    ] {
+        for value in MALFORMED.iter().chain(&["(text)", "[ 1 ]"]) {
+            assert_rejected_without_running(
+                &format!("<< /BBox [0 0 50 50] /{key} {value} >> hatch"),
+                guard,
+            );
+        }
+    }
+}
+
+#[test]
+fn hatch_never_executes_a_malformed_array_option() {
+    let bbox = "/BBox [0 0 50 50]";
+    // /BBox: the array itself, and each of its four elements. An executable
+    // array is a procedure, so it is refused rather than read as numbers.
+    for bad in MALFORMED {
+        assert_rejected_without_running(
+            &format!("<< /BBox {bad} >> hatch"),
+            "hatch-bbox-must-be-four-numbers",
+        );
+        for i in 0..4 {
+            let mut parts = ["0", "0", "50", "50"];
+            parts[i] = bad;
+            assert_rejected_without_running(
+                &format!("<< /BBox [ {} ] >> hatch", parts.join(" ")),
+                "hatch-bbox-must-be-four-numbers",
+            );
+        }
+    }
+    assert_rejected_without_running(
+        "<< /BBox { /gotexecuted true def 0 0 50 50 } >> hatch",
+        "hatch-bbox-must-be-four-numbers",
+    );
+    // The existing length guard keeps its name.
+    assert_rejected_without_running(
+        "<< /BBox [ 0 0 50 50 60 ] >> hatch",
+        "hatch-bbox-must-have-four-elements",
+    );
+    for bad in MALFORMED {
+        assert_rejected_without_running(
+            &format!("<< {bbox} /Angles {bad} >> hatch"),
+            "hatch-angles-must-be-an-array-of-numbers",
+        );
+        assert_rejected_without_running(
+            &format!("<< {bbox} /Angles [ 0 {bad} ] >> hatch"),
+            "hatch-angles-must-be-an-array-of-numbers",
+        );
+        assert_rejected_without_running(
+            &format!("<< {bbox} /Width {bad} >> hatch"),
+            "hatch-width-must-be-a-number-or-a-pair",
+        );
+        for pair in [format!("[ {bad} 2 ]"), format!("[ 1 {bad} ]")] {
+            assert_rejected_without_running(
+                &format!("<< {bbox} /Width {pair} >> hatch"),
+                "hatch-width-must-be-a-number-or-a-pair",
+            );
+        }
+        assert_rejected_without_running(
+            &format!("<< {bbox} /Trim {bad} >> hatch"),
+            "hatch-trim-must-be-two-numbers",
+        );
+        for pair in [format!("[ {bad} 0.5 ]"), format!("[ 0 {bad} ]")] {
+            assert_rejected_without_running(
+                &format!("<< {bbox} /Trim {pair} >> hatch"),
+                "hatch-trim-must-be-two-numbers",
+            );
+        }
+    }
+    // An executable *array* in each of the pair slots is a procedure too.
+    for (key, guard) in [
+        ("Angles", "hatch-angles-must-be-an-array-of-numbers"),
+        ("Width", "hatch-width-must-be-a-number-or-a-pair"),
+        ("Trim", "hatch-trim-must-be-two-numbers"),
+    ] {
+        assert_rejected_without_running(
+            &format!("<< {bbox} /{key} {{ /gotexecuted true def 0 0.1 }} >> hatch"),
+            guard,
+        );
+    }
+    // A wrong-length pair is named, not a raw rangecheck.
+    assert_rejected_without_running(
+        &format!("<< {bbox} /Width [ 1 2 3 ] >> hatch"),
+        "hatch-width-must-be-a-number-or-a-pair",
+    );
+    assert_rejected_without_running(
+        &format!("<< {bbox} /Trim [ 0.1 ] >> hatch"),
+        "hatch-trim-must-be-two-numbers",
+    );
+}
+
+#[test]
+fn a_rejected_hatch_leaves_the_random_stream_and_graphics_state_alone() {
+    // Every operand check runs before `srand` and `gsave`: a rejected
+    // call must not have reseeded the caller's stream, or left a `gsave`
+    // behind (checked through the line width a drawing pass would set).
+    let mut it = with_lib(100, 100);
+    it.run_str("5 srand rand /first exch def 5 srand 7 setlinewidth")
+        .expect("setup");
+    let err = it
+        .run_str("<< /BBox [0 0 50 50] /Seed 9 /Spacing { 1 } >> hatch")
+        .unwrap_err();
+    assert!(matches!(err, PsError::Undefined(ref n) if n == "hatch-spacing-must-be-a-number"));
+    it.run_str("rand first eq currentlinewidth 7 eq")
+        .expect("compare");
+    let top: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
+    assert!(
+        top.ends_with(&["true".to_string(), "true".to_string()]),
+        "the caller's seed-5 stream or line width was disturbed by a rejected call: {top:?}"
+    );
+}
+
+#[test]
+fn well_formed_options_are_untouched_by_the_operand_checks() {
+    let mut it = with_lib(100, 100);
+    run(
+        &mut it,
+        "newpath 0 0 moveto 90 0 lineto 90 90 lineto closepath clip \
+         << /Angles [ 0 90 ] /Spacing 5 /Width [ 1 2 ] /Wobble 0.5 /Dropout 0.1 \
+            /Trim [ 0 0.2 ] /DensityThreshold 0.1 /Seed 4 /MaxLines 5000 \
+            /MaxSamples 100000 /Density { pop pop 0.8 } >> hatch",
+    );
+    assert!(ink_count(&it) > 0);
+}
+
 // The next two tests are round-4 regressions from a fourth Codex
 // review of PR #121, after rounds 1-3's fixes landed. Both are
 // non-adversarial: an ordinary caller hits either with no /Density

@@ -53,8 +53,8 @@ path instead of painting them.
   A fixed default would make every unseeded call identical, and #237
   will likely call `sgpath` once per atom. An explicit `/Seed` still
   wins, and pscat-versus-gs comparisons pin it.
-- **No chalk row in the specimen.** #234 (drykit) and #235 (chalk) have
-  not landed. The acceptance asks for chalk only "if #235 has landed".
+- **No chalk row in the specimen.** Neither drykit's `dkstroke` (#234,
+  slice D2) nor chalk (#235) had landed. The acceptance asks for chalk only "if #235 has landed".
 
 **Design choices worth knowing**
 

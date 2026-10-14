@@ -375,6 +375,54 @@ fn every_paintkit_parameter_states_its_unit() {
     }
 }
 
+/// drykit (issue #234) and the dry-media files built on it (`lib/dry*.ps`)
+/// follow paintkit's #141 rules (docs/DRYMEDIA.md 3): every parameter
+/// states a unit from the same closed list, and neither `/Spread` nor
+/// `/Density` appears, since paintkit and stipplekit already gave those
+/// names other meanings.
+#[test]
+fn every_drykit_parameter_states_its_unit() {
+    let caps = capabilities::catalog();
+    let dry: Vec<_> = caps
+        .iter()
+        .filter(|c| c.source.starts_with("lib/dry") && c.source.ends_with(".ps"))
+        .collect();
+    assert!(
+        dry.iter().any(|c| c.name == "dksurface"),
+        "dksurface missing from the catalog"
+    );
+    let mut checked = 0;
+    for cap in &dry {
+        for p in &cap.parameters {
+            let unit = p
+                .description
+                .strip_prefix('[')
+                .and_then(|rest| rest.split_once("] "))
+                .map(|(unit, _)| unit)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{} /{}: description must start with a [unit], got {:?}",
+                        cap.name, p.name, p.description
+                    )
+                });
+            assert!(
+                paintkit_unit_is_known(unit),
+                "{} /{}: unknown unit [{unit}]",
+                cap.name,
+                p.name
+            );
+            assert!(
+                !matches!(p.name, "Spread" | "Density"),
+                "{} advertises /{}, which drykit must not use (#141)",
+                cap.name,
+                p.name
+            );
+            checked += 1;
+        }
+    }
+    assert!(checked >= 6, "only {checked} drykit parameters checked");
+}
+
 /// `lib/handscript.ps`/`lib/hangul.ps` are standalone (no artkit
 /// dependency, unlike pagekit/the style packs), so each gets its own
 /// fresh `Interp` rather than an artkit-baseline diff.

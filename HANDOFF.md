@@ -472,7 +472,8 @@ renders eight examples in both and compares block-downsampled output).
   Adobe inverted-CMYK JPEGs untested.
 - errordict handlers not consulted; error-time operand-stack
   restoration not done (PLRM handlers see pre-error operands).
-- Stroke width ≈ √|det CTM| (anisotropic pens wrong); `showpage`
+- Stroke width ≈ √|det CTM| (anisotropic pens wrong; `strokepath`
+  inherits it, since it shares `stroke`'s parameters); `showpage`
   doesn't erase; ints are i64; `flattenpath` uses a fixed
   quarter-pixel tolerance (`setflat` not modeled — chord counts
   differ from gs, shapes agree).
@@ -593,8 +594,13 @@ renders eight examples in both and compares block-downsampled output).
    `docs/drymedia/REFERENCES.md` before starting #234–#242.** The design
    (#233) is approved, with every recommended answer to its Q1–Q9.
    drykit reads paintkit's `@internal` `pj-` surface (`pjheight`,
-   `pjrange`, `pjCTM`) without editing paintkit.ps. A change to those names
-   breaks drykit, so treat them as a contract.
+   `pjhash`, `pjCTM`, `pjP`, `pjW`, `pjM`, `pjR`, `pjmemo`) without editing
+   paintkit.ps. A change to those names breaks drykit: the
+   `drykit-paintkit-contract` self-test in `lib/drykit.ps` pins them (#270
+   moves them to `lib/toothkit.ps`). Slice D1 of #234 has landed
+   `lib/drykit.ps` (`dksurface`, the internal `dkcatch`, `dkrand`); D2 adds
+   `dkstroke` and `dkbatch`. D1's measured cost is in
+   `notes/234-drykit-core.md` and DRYMEDIA.md 6.1.
    Slice G1 (#236) shipped `lib/strokeglyphs.ps`: skeleton glyphs as paths
    (`sgpath`, `sgwidth`, `sggrow`, `sgmetrics`). In its glyph data a point
    written twice is a sharp corner, and the midpoint rule never passes
@@ -769,8 +775,8 @@ renders eight examples in both and compares block-downsampled output).
   self-seeded scene without re-rolling its marks, log `rrand` at each
   painting step and restore it with `srand` on replay
   (`gallery/alpine_lake.ps`'s `lkdo`, issue #191).
-- **Loaded colours: `pkbroad`, `pktrowel` and `pkfan` adopt them, the rest do
-  not yet** (issue #183, slices L1-L3; design in `docs/PAINT_LOADING.md`).
+- **Loaded colours: `pkbroad`, `pktrowel`, `pkfan` and `pkdab` adopt them, the rest do
+  not yet** (issue #183, slices L1-L5; design in `docs/PAINT_LOADING.md`).
   `lib/paintkit.ps`'s `pu-` section (`puparse`, `puat`, `puflips`, `puwet`,
   `puspell`, `pulightneedscolors`) turns a head position into a colour.
   A preset keeps the record `puparse` returns under *its own* prefix
@@ -790,7 +796,16 @@ renders eight examples in both and compares block-downsampled output).
   per *run* (`pfrun`) and per pressed ray (`pfray`) by `pfcolor`, from the
   bristle's `pfub` and the stored `/ColorJitter` draw `pfcj` (taken where it
   always was, so the stream doesn't move), because a bristle's runs span every
-  subpath and `/Light` flips per subpath. `pkdab` (L5) is next.
+  subpath and `/Light` flips per subpath. `pkdab` (L5, #226) takes `/Colors` per dab: `pdColorRec`, resolved once
+  per dab into slot 14 of the dab array from the slot-5 draw it already had
+  (`puat` at `u = 1 - 2*pdd5`, flip false, then `puwet`), so all three layers
+  read one colour and no draw is added. `puparse` is called unconditionally
+  (its unset branch is the spelling and `/ColorMix`-needs-`/Colors` guards, and
+  never reads `/Light`); `pulightneedscolors` is not, because `/Light` is
+  pkdab's own. `/HighlightColor` and `/ShadowColor` (`puhue`, on `pkdab` and
+  `pkoil`) are mix targets graded once through `puwet` at the top of the call,
+  and `pkoil` keeps them as `poHighlightColor`/`poShadowColor`. L5b (the
+  specimen) is next.
 - **Paintkit slices prove byte identity with `scripts/identity_check.sh
   BASE_WORKTREE [BIN] --control FILE [--gallery-still]`** (issue #263), not
   by hand. It renders every tracked `examples/`, `gallery/` and
@@ -815,7 +830,17 @@ renders eight examples in both and compares block-downsampled output).
   at a small `/Weave`) renders solid in gs while pscat shows it. Guard
   `/.setfilladjust2 where { pop 0 0 .setfilladjust2 } if` inside the
   mark's `gsave` (`docs/DRYMEDIA.md` 2.4). `-dGraphicsAlphaBits` doesn't
-  help.
+  help. `dkcatch` does this itself, just before its `clip`.
+- **Dict `forall` order is stable, but it is not insertion order for
+  names.** Non-name keys (integers, reals, booleans, array and dict keys)
+  come back in insertion order (#277: each exotic entry carries a sequence
+  number and `Dict::pairs` sorts by it; redefining keeps the slot,
+  `undef` then `put` moves it to the end). Name keys come first, in the
+  interned-id hash order: deterministic for a given program but not
+  insertion order, because name lookups are the hot path and carry no
+  sequence number. Before #277 the non-name half used a randomly seeded
+  hash map and changed on every run (#258's symptom). `dkcatch` still
+  keeps its own first-seen list (it predates the fix).
 - tiny-skia `Transform::from_row(sx, ky, kx, sy, tx, ty)` matches the
   PS matrix order `[a b c d tx ty]` — `ops/matrix.rs` documents it;
   don't rediscover this the hard way.
