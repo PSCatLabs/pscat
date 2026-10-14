@@ -39,7 +39,8 @@
 %   \lim \max \min \sup \inf \det \gcd \Pr     limits under in display
 %   \sin \cos \tan \log \ln \exp ... \operatorname{...}   upright names
 %   \left( ... \right)            ( ) [ ] \{ \} | \| \langle \rangle
-%                                 \lVert \rVert and . grow to fit
+%                                 \lVert \rVert and . grow to fit; ⟨ ⟩ ‖ ∥
+%                                 typed directly work too (\left⟨ ... \right⟩)
 %   \big( \Big( \bigg( \Bigg(     fixed sizes, with l and r forms
 %   \begin{matrix} pmatrix bmatrix Bmatrix vmatrix cases
 %   \vec \hat \bar \dot \ddot \tilde \overline \underline \boxed
@@ -630,14 +631,27 @@
   { (mk-bare-word-needs-a-backslash:) mkbw mkfail } if
 } bind def
 
-% lead-byte -> atom   one UTF-8 character, named by strokeglyphs
+% lead-byte -> (char)   the whole UTF-8 character that starts with it,
+% consumed (cut short at the end of the source, so an error can name it)
 % @internal
-/mkutf8 {
+/mkutf8str {
   dup 224 lt { pop 2 } { 240 lt { 3 } { 4 } ifelse } ifelse
   mklen mkpos sub min
   mksrc mkpos 3 -1 roll getinterval
   /mkpos mkpos 2 index length add mkset
-  dup mkscratch begin << /Size 1000 >> sgmetrics end /Name get
+} bind def
+
+% (char) -> name   strokeglyphs' name for it, /.notdef for a stranger
+% @internal
+/mkutf8name {
+  mkscratch begin << /Size 1000 >> sgmetrics end /Name get
+} bind def
+
+% lead-byte -> atom   one UTF-8 character, named by strokeglyphs
+% @internal
+/mkutf8 {
+  mkutf8str
+  dup mkutf8name
   dup /.notdef eq { pop (mk-unsupported-character:) exch mkfail } if
   exch pop
   dup /summation eq 1 index /product eq or { /auto mkopatom } {
@@ -745,15 +759,38 @@
           } { (mk-unsupported-delimiter:\\) exch mkfail } ifelse
         } {
           mkpeek 0 lt { (mk-unsupported-delimiter:\\) () mkfail } if
-          mkadv 1 string dup 0 mksrc mkpos 1 sub get put
+          mkpeek 128 ge { mkpeek mkutf8str } {
+            mkadv 1 string dup 0 mksrc mkpos 1 sub get put
+          } ifelse
           (mk-unsupported-delimiter:\\) exch mkfail
         } ifelse } ifelse
       } ifelse
     } ifelse
   } {
-    mkadv 1 string dup 0 4 -1 roll put (mk-unsupported-delimiter:) exch mkfail
+    dup 128 ge { mkdelimutf8 } {
+      mkadv 1 string dup 0 4 -1 roll put (mk-unsupported-delimiter:) exch mkfail
+    } ifelse
   } ifelse } ifelse } ifelse } ifelse } ifelse } ifelse } ifelse
 } bind def
+
+% lead-byte -> delimiter name   a delimiter typed as a UTF-8 character
+% (⟨ ⟩ ‖ ∥ ...): strokeglyphs' name for it, if it is one of the symbols
+% that grow; otherwise the error names the whole character
+% @internal
+/mkdelimutf8 {
+  mkutf8str dup mkutf8name
+  mkdelimglyphs 1 index known { exch pop } {
+    pop (mk-unsupported-delimiter:) exch mkfail
+  } ifelse
+} bind def
+
+% The symbols that grow as delimiters
+% @internal
+/mkdelimglyphs <<
+  /parenleft true /parenright true /bracketleft true /bracketright true
+  /braceleft true /braceright true /bar true
+  /angleleft true /angleright true /dblbar true
+>> def
 
 % Delimiter control words -> the growing symbol
 % @internal
@@ -2074,6 +2111,11 @@
 %   /mkt-sentinel eq (the operand stack is cut back to the call, no further) mustbe
 %   countdictstack mkt-d0 eq (the dictionary stack is unwound) mustbe
 %   /mkt-sentinel
+%   { (\\left∮ x \\right.) 0 0 << >> mkpath } stopped
+%   (an error on a typed delimiter is raised) mustbe
+%   /mkt-sentinel eq (and cuts the operand stack back to the call) mustbe
+%   countdictstack mkt-d0 eq (and unwinds the dictionary stack) mustbe
+%   /mkt-sentinel
 %   [ (a) (b) ] 0 0 << /Ink { pop newpath } >> mkalign
 %   length 2 eq (mkalign returns a record per line) mustbe
 %   /mkt-sentinel eq (and consumes only its operands) mustbe
@@ -2189,6 +2231,35 @@
 %   (\\left\\langle \\frac{a}{b} \\right\\rangle) << /Size 60 /Irregular 0 >>
 %   mkmetrics dup /Height get exch /Depth get add 60 gt
 %   (a grown angle bracket spans its fraction) mustbe
+%%EndSelfTest
+%
+%%SelfTest: delimiters-typed-as-unicode
+%   % issue #365: \left⟨ went to the ASCII branch, which took one byte, so
+%   % the error name held a raw lead byte and the real forms were refused
+%   /mkt-w { << /Size 60 /Irregular 0 >> mkmetrics /Width get } def
+%   (\\left⟨ \\frac{a}{b} \\right⟩) mkt-w
+%   (\\left\\langle \\frac{a}{b} \\right\\rangle) mkt-w eq
+%   (typed angle brackets are \langle and \rangle) mustbe
+%   (\\left‖ x \\right‖) mkt-w (\\left\\Vert x \\right\\Vert) mkt-w eq
+%   (a typed double bar is \Vert) mustbe
+%   (\\left∥ x \\right∥) mkt-w (\\left\\Vert x \\right\\Vert) mkt-w eq
+%   (the parallel sign is the same double bar) mustbe
+%   (\\bigl⟨ x \\bigr⟩) mkt-w (\\bigl\\langle x \\bigr\\rangle) mkt-w eq
+%   (\big takes them too) mustbe
+%   (\\left⟨ x \\right.) mkt-w (\\left\\langle x \\right.) mkt-w eq
+%   (a typed delimiter may pair with a dot) mustbe
+%   { (\\left∮ x \\right.) 0 0 << >> mkpath } /mk-unsupported-delimiter:∮
+%   (a contour integral is no delimiter) mustguard
+%   { (\\left∑ x \\right.) 0 0 << >> mkpath } /mk-unsupported-delimiter:∑
+%   (a grower that is no delimiter: a summation) mustguard
+%   { (\\left. x \\right⌋) 0 0 << >> mkpath } /mk-unsupported-delimiter:⌋
+%   (a floor bracket on the right) mustguard
+%   { (\\bigl⌈ x) 0 0 << >> mkpath } /mk-unsupported-delimiter:⌈
+%   (a ceiling bracket after \bigl) mustguard
+%   { (\\left\\⟨ x \\right.) 0 0 << >> mkpath } /mk-unsupported-delimiter:\⟨
+%   (a backslash before a typed character names both) mustguard
+%   { (\\left\342) 0 0 << >> mkpath } (mk-unsupported-delimiter:\342) cvn
+%   (a cut-off character at the end of the source) mustguard
 %%EndSelfTest
 %
 %%SelfTest: variant-greek-is-its-own-glyph

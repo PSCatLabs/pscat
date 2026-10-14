@@ -1296,7 +1296,7 @@ skeletons with TeX's box model. The subset covers:
 - scripts, `\frac`, `\sqrt[n]{}`;
 - `\sum`, `\prod`, `\int`, `\iint`, `\iiint` and `\oint` with limits, and `\lim`;
 - `\left( \right)` delimiters that grow to fit, including `\langle \rangle`
-  and `\|`;
+  and `\|`, or the characters `⟨ ⟩ ‖ ∥` typed directly;
 - relations and operators such as `\equiv \sim \subseteq \mapsto \perp
   \therefore \circ \ast`, and `\hbar \ell`;
 - matrices and `cases`, accents and `\boxed`;
