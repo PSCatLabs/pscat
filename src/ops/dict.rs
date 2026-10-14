@@ -40,7 +40,7 @@ fn pop_key(it: &mut Interp) -> Result<crate::name::PsName, PsError> {
 fn def(it: &mut Interp) -> Result<(), PsError> {
     let value = it.pop()?;
     let key = pop_key(it)?;
-    it.define(&key, value);
+    it.define_name(&key, value);
     Ok(())
 }
 
@@ -75,7 +75,7 @@ fn end(it: &mut Interp) -> Result<(), PsError> {
 fn load(it: &mut Interp) -> Result<(), PsError> {
     let key = pop_key(it)?;
     let obj = it
-        .load(&key)
+        .load_id(key.id())
         .ok_or_else(|| PsError::Undefined(key.to_string()))?;
     it.push(obj);
     Ok(())

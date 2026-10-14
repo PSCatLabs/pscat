@@ -1135,6 +1135,17 @@ impl Interp {
         }
     }
 
+    /// [`define`](Self::define) for a name that is already interned —
+    /// what `def` uses. Going through `&str` would allocate an
+    /// `Rc<str>` and re-intern it (a SipHash probe and a free) on every
+    /// `def`, which profiled at ~15% of a bound drykit run (#323).
+    pub(crate) fn define_name(&mut self, name: &crate::name::PsName, obj: Object) {
+        if let Some(top) = self.dstack.last().cloned() {
+            self.journal_dict(&top);
+            top.borrow_mut().put_name(name, obj);
+        }
+    }
+
     // --- save/restore (design: VM.md) -----------------------------------
 
     /// Copy-on-write barrier: call *before* mutating an array's contents.
