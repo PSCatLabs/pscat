@@ -63,6 +63,13 @@
 %   /Under the tone beneath: a kneaded-eraser lift is grey, soft-edged and
 %   speckled, never back to paper white (H8); a hard eraser cuts a narrow,
 %   crisper line.
+% * Inside a dkbatch (#393), a smudge or a lift is a dkstroke /After
+%   stroke: it is drawn on its own once the batch has rendered, in call
+%   order, with its colour, coordinate system and dkclip region kept. So
+%   it lands on everything the batch lays, including strokes the batch's
+%   procedure makes after it. To hatch over a lift, hatch in a later
+%   batch. (Splitting the batch at the smudge would keep call order but
+%   break the level-major crossings the batch is for.)
 % * dhsketch draws the path faintly, several times, each pass shifted and
 %   turned a little, as an artist's layout lines are; later strokes cover
 %   it where they cross.
@@ -120,12 +127,6 @@
         dup 0 lt exch 1 gt or { dhnp dhns dherr } if
     } forall
     aload pop 3 array astore
-} bind def
-
-% (prefix) -   (raises prefix-cannot-run-inside-a-dkbatch when one is open)
-% @internal
-/dhnobatch {
-    userdict /dkBatch known { (cannot-run-inside-a-dkbatch) dherr } { pop } ifelse
 } bind def
 
 % Each medium's default /Grade.
@@ -524,12 +525,10 @@
 %   { 5 dhsmudge } /dhsmudge-options-must-be-a-dict (a number for smudge options) mustguard
 %   { << /Value 2 >> dhsmudge } /dhsmudge-value-must-be-0-to-1 (/Value 2) mustguard
 %   { << /Under [1 1] >> dhsmudge } /dhsmudge-under-must-be-an-rgb-array (a two-entry /Under) mustguard
-%   { { << >> dhsmudge } dkbatch } /dhsmudge-cannot-run-inside-a-dkbatch (a smudge in a batch) mustguard
 %   { 5 dhlift } /dhlift-options-must-be-a-dict (a number for lift options) mustguard
 %   { << /Eraser /putty >> dhlift } /dhlift-unknown-eraser (/Eraser /putty) mustguard
 %   { << /Ground [2 0 0] >> dhlift } /dhlift-ground-must-be-an-rgb-array (a /Ground above 1) mustguard
 %   { << /Under 0.5 >> dhlift } /dhlift-under-must-be-an-rgb-array (a number /Under) mustguard
-%   { { << >> dhlift } dkbatch } /dhlift-cannot-run-inside-a-dkbatch (a lift in a batch) mustguard
 %   { 5 dhsketch } /dhsketch-options-must-be-a-dict (a number for sketch options) mustguard
 %   { << /Passes 0 >> dhsketch } /dhsketch-passes-must-be-1-to-6 (/Passes 0) mustguard
 %   { << /Shift -1 >> dhsketch } /dhsketch-shift-must-be-0-to-20 (/Shift -1) mustguard
@@ -545,6 +544,17 @@
 %   userdict /dkBatch known not (the failed sketch closed its batch) mustbe
 %   { gsave newpath 0 0 moveto 50 0 lineto << >> dhsmudge grestore } (a smudge) mustpass
 %   { gsave newpath 0 0 moveto 50 0 lineto << /Eraser /hard >> dhlift grestore } (a hard lift) mustpass
+%   % In a charcoal batch (#393) a smudge or lift, in paper or a mid tone,
+%   % does not raise dkbatch-mixes-pigments, before or after the hatching
+%   { gsave { newpath 0 0 moveto 50 0 lineto << >> dhlift
+%       newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath << >> dhhatch
+%       newpath 0 0 moveto 50 0 lineto << >> dhsmudge } dkbatch grestore }
+%   (a lift and a smudge in a charcoal batch) mustpass
+%   { gsave { newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath
+%       { newpath 0 0 moveto 50 50 lineto << /Eraser /hard >> dhlift } dkclip } dkbatch grestore }
+%   (a lift inside a dkclip in a batch) mustpass
+%   userdict /dkBatch known not userdict /dkClip known not and
+%   (and neither a batch nor a region is left open) mustbe
 %   { gsave newpath 0 0 moveto 50 0 lineto { << >> dhsketch } dkbatch grestore } (a sketch in a batch) mustpass
 %%EndSelfTest
 %
@@ -559,7 +569,7 @@
 %%EndSelfTest
 %
 % @kind: Procedure
-% @summary: Smudges along the current path as a paper stump or finger would: a wide, soft-edged stroke at high pressure that fills the tooth's valleys with a tone between the paper and the current colour (/Value), over what lies beneath (/Under), with faint streaks along the direction of travel. drykit cannot read the page back, so the smudge is told the tone beneath and the tone to leave; at moderate /Touch over hatching, the hatch's darkest specks still show. Consumes the path; cannot run inside a dkbatch. Other dkstroke keys pass through. Takes no rand draws from the caller's stream.
+% @summary: Smudges along the current path as a paper stump or finger would: a wide, soft-edged stroke at high pressure that fills the tooth's valleys with a tone between the paper and the current colour (/Value), over what lies beneath (/Under), with faint streaks along the direction of travel. drykit cannot read the page back, so the smudge is told the tone beneath and the tone to leave; at moderate /Touch over hatching, the hatch's darkest specks still show. Consumes the path. Inside a dkbatch it is drawn after the batch's strokes have rendered (in call order), over all of them, so to hatch over a smudge use a later batch. Other dkstroke keys pass through. Takes no rand draws from the caller's stream.
 % @example: << /Surface /drawing >> dksurface 0.11 0.1 0.1 setrgbcolor newpath 40 60 moveto 220 70 lineto << /Value 0.4 /Width 18 >> dhsmudge
 % @param: /Value [0..1] The tone the smudge leaves, from the paper (0) to the current colour (1): smudging spreads charcoal, so over a dark mass it is lighter than the mass (default 0.4)
 % @param: /Width [points] Width of the stump's contact (default 14)
@@ -568,7 +578,6 @@
 /dhsmudge {
     dup type /dicttype ne { pop dhsmudge-options-must-be-a-dict } if
     /dhmo exch def
-    (dhsmudge) dhnobatch
     /dhmv dhmo /Value 0.4 0 1 (dhsmudge) (value-must-be-0-to-1) dhnum def
     /dhmg userdict /dkGround known { userdict /dkGround get } { [ 1 1 1 ] } ifelse def
     /dhmu dhmo /Under dhmg dhget (dhsmudge) (under-must-be-an-rgb-array) dhrgb def
@@ -577,6 +586,7 @@
         /Pressure { dhsoft }
     >> dhmo [ /Value /Under ] dhmerge
     dup /Under dhmu put
+    dup /After true put
     gsave
     dhmg [ currentrgbcolor ] dhmv dhlerp3 aload pop setrgbcolor
     { dkstroke } stopped { grestore newpath stop } if
@@ -585,7 +595,7 @@
 } bind def
 
 % @kind: Procedure
-% @summary: Lifts charcoal along the current path with an eraser: paper colour drawn through the tooth's peaks first, over the tone beneath (/Under, by default the current colour). A kneaded eraser leaves a soft, speckled grey highlight that never gets back to paper white; a hard eraser cuts a narrow, crisper line. Consumes the path; cannot run inside a dkbatch. Other dkstroke keys pass through. Takes no rand draws from the caller's stream.
+% @summary: Lifts charcoal along the current path with an eraser: paper colour drawn through the tooth's peaks first, over the tone beneath (/Under, by default the current colour). A kneaded eraser leaves a soft, speckled grey highlight that never gets back to paper white; a hard eraser cuts a narrow, crisper line. Consumes the path. Inside a dkbatch it is drawn after the batch's strokes have rendered (in call order), over all of them, so to hatch over a lift use a later batch. Other dkstroke keys pass through. Takes no rand draws from the caller's stream.
 % @example: << /Surface /drawing >> dksurface 0.11 0.1 0.1 setrgbcolor newpath 40 40 220 60 rectfill newpath 60 70 moveto 200 70 lineto << /Eraser /kneaded >> dhlift
 % @param: /Eraser [name] /kneaded (soft, grey, speckled) or /hard (narrow, crisp) (default /kneaded)
 % @param: /Ground [rgb array] The paper colour the eraser uncovers (default the surface's /Ground)
@@ -595,7 +605,6 @@
 /dhlift {
     dup type /dicttype ne { pop dhlift-options-must-be-a-dict } if
     /dhlo exch def
-    (dhlift) dhnobatch
     /dhle dhlo /Eraser /kneaded dhget def
     /dhle load type /nametype ne { dhlift-eraser-must-be-a-name } if
     /dhle load /kneaded ne /dhle load /hard ne and { dhlift-unknown-eraser } if
@@ -610,6 +619,7 @@
     } ifelse
     dhlo [ /Eraser /Ground /Under ] dhmerge
     dup /Under dhlu put
+    dup /After true put
     gsave
     dhlg aload pop setrgbcolor
     { dkstroke } stopped { grestore newpath stop } if

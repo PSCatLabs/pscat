@@ -262,6 +262,75 @@ fn a_lift_is_grey_and_a_hard_eraser_cuts_lighter() {
     assert!(h > k, "the hard eraser is not lighter along its line");
 }
 
+/// #393: a smudge and a lift made inside a dkbatch are drawn after the
+/// batch renders, in call order, exactly as if made just after it closed,
+/// even when hatching follows them in the batch's procedure. A lift inside
+/// a dkclip keeps that region. Controls: the same calls with the batch
+/// split at the smudge (call order) differ, and so does the lift unclipped.
+#[test]
+fn a_smudge_and_a_lift_in_a_batch_draw_after_it() {
+    let h1 = format!(
+        "{} << /Value 0.8 /Levels 2 /Seed 2 >> dhhatch",
+        cell(6, 6, 60)
+    );
+    let h2 = format!(
+        "{} << /Value 0.8 /Levels 2 /Seed 3 >> dhhatch",
+        cell(30, 30, 44)
+    );
+    const SMUDGE: &str = "newpath 10 40 moveto 70 46 lineto << /Width 10 /Value 0.5 >> dhsmudge";
+    const LIFT: &str = "newpath 12 20 moveto 66 66 lineto << /Width 8 /Seed 4 >> dhlift";
+    let inside = render(
+        80,
+        80,
+        3.0,
+        &format!("{{ {h1} {SMUDGE} {LIFT} {h2} }} dkbatch"),
+    );
+    let after = render(
+        80,
+        80,
+        3.0,
+        &format!("{{ {h1} {h2} }} dkbatch {SMUDGE} {LIFT}"),
+    );
+    assert!(
+        data(&inside) == data(&after),
+        "a smudge and a lift in a batch differ from the same drawn after it"
+    );
+    let split = render(
+        80,
+        80,
+        3.0,
+        &format!("{{ {h1} }} dkbatch {SMUDGE} {LIFT} {{ {h2} }} dkbatch"),
+    );
+    assert!(
+        data(&split) != data(&after),
+        "control: hatching after the lift should cover it"
+    );
+
+    // A lift inside a dkclip region in the batch keeps the region.
+    const REGION: &str = "newpath 8 8 moveto 72 20 lineto 30 72 lineto closepath";
+    let clipped = render(
+        80,
+        80,
+        3.0,
+        &format!("{{ {h1} {REGION} {{ {LIFT} }} dkclip {h2} }} dkbatch"),
+    );
+    let at_once = render(
+        80,
+        80,
+        3.0,
+        &format!("{{ {h1} {h2} }} dkbatch gsave {REGION} clip {LIFT} grestore"),
+    );
+    assert!(
+        data(&clipped) == data(&at_once),
+        "a lift inside a dkclip in a batch differs from the same lift clipped after it"
+    );
+    let unclipped = render(80, 80, 3.0, &format!("{{ {h1} {h2} }} dkbatch {LIFT}"));
+    assert!(
+        data(&unclipped) != data(&at_once),
+        "control: the region should clip the lift"
+    );
+}
+
 /// Grades: a softer grade of each medium inks more.
 #[test]
 fn a_softer_grade_inks_more() {
