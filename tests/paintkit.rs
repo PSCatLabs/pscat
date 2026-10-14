@@ -9144,7 +9144,15 @@ fn motions_advertise_exactly_their_tested_parameters() {
         ),
         (
             "pkscumblein",
-            &["Count", "Radius", "RadiusJitter", "Squash"][..],
+            &[
+                "Count",
+                "Feather",
+                "Light",
+                "Radius",
+                "RadiusJitter",
+                "Reach",
+                "Squash",
+            ][..],
         ),
         (
             "pkscumble",

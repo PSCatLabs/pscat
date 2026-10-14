@@ -935,9 +935,12 @@ with the light turned round. Unset, the motion is unchanged. With the same
 seed the lit circles are a subset of the unlit ones.
 
 ```postscript
-region << /Count 300 /Radius 4 >> pkscumblein << ... body ... >> pkdab
-region << /Count 300 /Radius 4 /Light 135 /Reach 0.3 >> pkscumblein
-<< ... lit load ... >> pkdab                              % a bush lit from the upper left
+/bush { newpath 40 40 moveto 60 110 140 120 200 40 curveto closepath scpath } def
+0.20 0.30 0.12 setrgbcolor                                % the body, over the whole bush
+bush << /Count 200 /Radius 4 >> pkscumblein << /Size 5 /Scatter 6 >> pkdab
+0.42 0.52 0.18 setrgbcolor                                % its lit side, upper left
+bush << /Count 300 /Radius 3 /Light 135 /Reach 0.3 >> pkscumblein
+<< /Size 4 /Scatter 5 >> pkdab
 ```
 
 ![Light-aware massing: before and after](docs/paintkit_massing_demo.png)

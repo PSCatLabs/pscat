@@ -90,6 +90,14 @@ form a proper subset of the unlit call under the same seed). A gs check
 for the specimen. `scripts/identity_check.sh --loader lib/paintkit.ps`
 proves existing renders are byte-identical.
 
-**Deferred.** The far wood's crest (recipe 5) could use the same pass, but
-#347 is reworking that recipe's edge, so it is left to whoever picks up the
-recipe after #347.
+**Deferred.**
+
+- The far wood's crest (recipe 5) could use the same pass. #347 is reworking
+  that recipe's edge, so it is left for after #347: #383.
+- Evening Stream (#348) still uses the shifted-copy trick, so the cookbook's
+  recipe 2 no longer matches its source piece: #384.
+- `/Count` caps the lit passes. Because it counts circles over the whole
+  region and stops at 5000, a dense core pass on a large mass hits the cap
+  before the band is dense (the specimen already asks for 1000 to 1200 on a
+  180-pt lump). A band-relative count would lift that. No issue filed:
+  nothing has hit the cap yet.
