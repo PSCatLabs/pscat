@@ -1,0 +1,92 @@
+%!PS-Adobe-3.0
+%%Title: Subscripts and variant Greek -- the glyphs issue #366 added to strokeglyphs.ps
+%%BoundingBox: 0 0 900 600
+%%EndComments
+
+% Specimen for the subscript digits and letters and the variant Greek
+% letters added to lib/strokeglyphs.ps and lib/mathkit.ps in issue #366.
+% Each new glyph three times (seeds s, s+1, s+2), the variants beside the
+% plain letters they differ from, sgpath text, and mathkit formulas. A
+% plain pen throughout, as in examples/strokeglyphs_board_math.ps. Run
+% from the repo root:
+%
+%   pscat --page 900x600 examples/strokeglyphs_subscripts_greek.ps
+%
+% The committed render, docs/drymedia/strokeglyphs_subscripts_greek_specimen.png:
+%
+%   pscat --page 900x600 --dpi 144 --png docs/drymedia/strokeglyphs_subscripts_greek_specimen.png \
+%     examples/strokeglyphs_subscripts_greek.ps
+%
+% In a PostScript string every TeX backslash is written twice.
+
+(lib/handscript.ps) run
+(lib/strokeglyphs.ps) run
+(lib/mathkit.ps) run
+
+/ink { 0.10 0.12 0.30 setrgbcolor } def
+/pen { ink 1.5 setlinewidth 1 setlinecap 1 setlinejoin stroke } def
+/label { /Helvetica findfont exch scalefont setfont 0.45 setgray } def
+
+1 1 0.985 setrgbcolor clippath fill
+
+/size 26 def
+/left 40 def
+/right 860 def
+/cx left def
+/cy 536 def
+/seed 1 def
+
+% (title) heading -   a section heading on its own line
+/heading {
+  /cy cy 40 sub def
+  11 label left cy moveto show
+  /cy cy 42 sub def
+  /cx left def
+} def
+
+% /name triple -   the glyph three times, its name beneath
+/triple {
+  /nm exch def
+  /w [nm nm nm] << /Size size >> sgwidth def
+  cx w add right gt { /cx left def /cy cy 58 sub def } if
+  newpath [nm nm nm] cx cy << /Size size /Seed seed >> sgpath pen
+  5.5 label cx cy 14 sub moveto nm 40 string cvs show
+  /seed seed 3 add def
+  /cx cx w add 14 add def
+} def
+
+22 label left 574 moveto (strokeglyphs.ps and mathkit.ps: subscripts and variant Greek) show
+9 label left 556 moveto
+(Each glyph three times, seeds s, s+1, s+2, plain pen. Size 26, default /Jitter.) show
+
+(SUBSCRIPT DIGITS, SIGNS AND LETTERS) heading
+[ /zeroinferior /oneinferior /twoinferior /threeinferior /fourinferior
+  /fiveinferior /sixinferior /seveninferior /eightinferior /nineinferior
+  /plusinferior /minusinferior /equalinferior /ninferior /xinferior
+  /iinferior ] { triple } forall
+
+(VARIANT GREEK, EACH BESIDE THE PLAIN LETTER) heading
+[ /phi /phi.loopy /theta /theta1 /epsilon /lunateepsilon /kappa /kappa1
+  /rho /rho1 /pi /omega1 /sigma /sigma1 ] { triple } forall
+
+% ---- sgpath text
+/cy cy 20 sub def
+(SGPATH TEXT, FROM A UTF-8 STRING) heading
+newpath (H₂O,  CO₂,  x₀ + x₁ = xₙ,  Σᵢ₌₀ aᵢ,  a₁₂ − b₋₃) left cy
+  << /Size 30 /Seed 700 >> sgpath pen
+/cy cy 46 sub def
+newpath (ϑ ϰ ϱ ϖ ς ϵ ϕ,  x² vs x₂,  ⁿ vs ₙ) left cy
+  << /Size 30 /Seed 710 >> sgpath pen
+
+% ---- mathkit formulas
+(MATHKIT: \\varphi \\vartheta \\varkappa \\varrho \\varpi \\varsigma \\epsilon) heading
+/formula {
+  /fdy exch def /fseed exch def /ftex exch def
+  /cy cy fdy sub def
+  newpath ftex left cy << /Size 34 /Seed fseed >> mkpath pen
+} def
+(\\phi \\ne \\varphi \\qquad \\theta \\ne \\vartheta \\qquad \\epsilon \\ne \\varepsilon \\qquad \\pi \\ne \\varpi) 21 34 formula
+(\\vartheta_n = \\varkappa \\varrho^2 \\qquad \\varsigma_i + \\varphi_{ij}) 22 70 formula
+
+showpage
+%%EOF

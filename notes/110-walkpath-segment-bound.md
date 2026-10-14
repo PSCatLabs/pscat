@@ -73,7 +73,7 @@ release build): `pkribbon` 0.094 s at 400,000 zero-length segments and 0.261 s a
 same; `pkdry`, `pkwash` flat (0.07 s and 0.07 s, the start-up cost of those presets). That is linear in
 segment count at about 0.16 microseconds per segment, roughly 17x cheaper than a `walkpath` pass (2.7
 microseconds), and the caller has already paid O(n) to build such a path. So the claim here is that
-`walkpath`'s own traversal is bounded, not that every preset is bounded end to end. Filed as a follow-up.
+`walkpath`'s own traversal is bounded, not that every preset is bounded end to end. Filed as a follow-up (fixed in #299).
 (Whether a preset opens a `gsave`/`begin` before its first `walkpath` call and so leaves it open when the
 guard fires is the same exposure the existing deposit-count guards already have, since they too raise from
 inside a `walkpath` proc; this change does not alter it.)

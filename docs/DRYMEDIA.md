@@ -161,6 +161,7 @@ That test's unit check is extended from paintkit to drykit's files.
 opts dksurface -     % names the surface; calls pkcanvas; paints nothing
 opts dkstroke  -     % deposits along every subpath of the current path, in the current colour
 proc dkbatch   -     % runs proc; its dkstroke calls render together, level-major (3.3)
+proc dkclip    -     % clips to the current path while proc runs; its strokes keep it in a batch (3.3, #312)
 ```
 
 The pigment is the current colour, as everywhere in paintkit. No key sets it.
@@ -240,7 +241,9 @@ alpha.
 
 **As built**, a batch record also keeps the CTM its stroke was given in,
 so strokes drawn inside their own `gsave ... rotate ... grestore` render
-in place when the batch ends (the clip used is the one in force then).
+in place when the batch ends. A record keeps its clip only through
+`dkclip` (#312, below); otherwise the clip used is the one in force when
+the batch ends.
 Each subpath is seeded from its own first point, so one call with two
 subpaths and two calls in a batch draw identically. A second pigment in
 one batch raises `dkbatch-mixes-pigments`. Within a pass, runs with the
@@ -267,6 +270,23 @@ to a record. When the batch ends, all records are rendered level-major, then
 band by band. Step 1 already builds those records, so a batch costs memory,
 not extra catches. Batches don't nest: an inner `dkbatch` raises
 `dkbatch-cannot-nest`.
+
+**Per-record clip (#312, as built).** `proc dkclip` clips to the current
+path while `proc` runs, like `gsave clip newpath proc grestore`, and
+captures the region once, as a device-space path (`pathforall` under an
+identity CTM, into operator objects). A `dkstroke` made inside it, in an
+open batch, records that region, and `dkrender` replays it for its record:
+once per catch chunk and once for its fallout. Nested `dkclip` calls chain,
+and the replay stops at the region the batch itself was opened in, which is
+still in force then. Records under different regions never share a catch
+(`dkZsame` compares the region by identity), but records under one region
+still do. A record made outside any `dkclip` stores no region and renders
+exactly as before. A plain `clip` inside a batch is still not kept: pscat's
+`clippath` gives back only the newest of nested clips, or a rectangle or a
+mask trace of their intersection, and drops the eoclip rule, so a generic
+capture would not be exact. A stroke under a `dkclip` region in a batch
+renders byte-identically to the same stroke drawn at once under that clip
+(`tests/drykit.rs`).
 
 Each pigment gets its own batch, in drawing order. If colours B and A shared
 a batch, B's dim level would be drawn under A's core. Real wax or charcoal
@@ -329,8 +349,10 @@ Crayon paper (`dypaper`) is `/construction` at `/Weave 1.4 /Relief 0.65
 
 **As built (#241, `lib/drycharcoal.ps`):** hatching, smudge and lift follow
 this table. `dhhatch` calls `hatch` with `/Mark` and no rolls of its own, and
-draws all hand variation from `dkrand`. It closes its batch inside its own
-region clip, so separate regions can't share a batch yet (#312). The smudge
+draws all hand variation from `dkrand`. With no batch open it closes its
+batch inside its own region clip. Inside a caller's batch it joins that
+batch through `dkclip` (#312), so overlapping regions hatched in one batch
+stay level-major. The smudge
 is told the tone it leaves (`/Value`, from paper to pigment) as well as
 `/Under`. Measurements and the reference comparison are in
 `notes/241-drycharcoal.md`.

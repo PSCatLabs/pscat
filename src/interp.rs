@@ -219,6 +219,12 @@ pub struct Interp {
     /// nowhere to keep — `syntaxerror`'s detail — and only when the two
     /// still agree on the error's name.
     caught_error: Option<PsError>,
+    /// The offending object an `errordict` handler was run on (issue
+    /// #372), waiting for `recover`/`record_error` to put it in
+    /// `$error /command` as is. Ghostscript keeps the object itself
+    /// (`(abc)`, `/foo`, `2`), not a name. Consumed by the next error,
+    /// caught or not, so a REPL cannot carry it into an unrelated one.
+    error_command: Option<Object>,
     /// The line most recently scanned directly from the main program
     /// source (issue #17) — `None` when no line is known, or the most
     /// recent scanning happened in a `run`-loaded file, eexec stream, or
@@ -234,7 +240,10 @@ pub struct Interp {
     /// When set, every `srand` call ignores its operand and reseeds
     /// with this value instead (issue #21's `--sweep-seed`) — lets a
     /// sweep drive the RNG on found art that hardcodes its own
-    /// `N srand` line, with no source edit needed. `seed_override_fired`
+    /// `N srand` line, with no source edit needed. The exception is an
+    /// `srand` of a value `rrand` handed out under the override (a
+    /// saved stream coming back, issue #202), which restores it exactly.
+    /// `seed_override_fired`
     /// records whether an override actually intercepted a call, so a
     /// sweep over a script that never calls `srand` can be flagged
     /// instead of silently producing identical frames.
@@ -277,11 +286,15 @@ impl Interp {
         let mut system = Dict::new();
         ops::install_all(&mut system);
         // Error machinery: $error is where recovered errors are recorded;
-        // errordict exists for programs that expect it (custom handlers
-        // in it are not yet consulted — see NOTES.md).
+        // errordict holds a handler per error name, so a program can
+        // re-raise a caught error with `errordict /name get exec` (issue
+        // #372). A handler installed over one of them is not yet
+        // consulted when an error happens — see NOTES.md.
+        let mut errordict = Dict::new();
+        ops::misc::install_errordict(&mut errordict);
         system.put(
             "errordict".into(),
-            Object::lit(Value::Dict(Rc::new(RefCell::new(Dict::new())))),
+            Object::lit(Value::Dict(Rc::new(RefCell::new(errordict)))),
         );
         let mut error_state = Dict::new();
         error_state.put("newerror".into(), Object::bool(false));
@@ -312,6 +325,7 @@ impl Interp {
             quit_requested: false,
             last_name: None,
             caught_error: None,
+            error_command: None,
             last_line: None,
             rand_state: 1,
             seed_override: None,
@@ -437,10 +451,11 @@ impl Interp {
     /// unwind to the context, and push `true` — errors are catchable.
     /// Otherwise propagate; the front end reports it.
     fn recover(&mut self, e: PsError) -> Result<(), PsError> {
+        let command = self.error_command.take();
         if !self.estack.iter().any(|f| matches!(f, Frame::StopMark)) {
             return Err(e);
         }
-        self.record_error(&e);
+        self.record_error(&e, command);
         self.caught_error = Some(e);
         self.do_stop();
         self.push(Object::bool(true));
@@ -492,10 +507,9 @@ impl Interp {
                         Some(Value::Name(n)) => Some(n.to_string()),
                         _ => None,
                     };
-                    let cmd = match d.get("command").map(|o| o.value.clone()) {
-                        Some(Value::Name(n)) => Some(n.to_string()),
-                        _ => None,
-                    };
+                    // Any object can be there: an errordict handler
+                    // stores the one it was run on (issue #372).
+                    let cmd = d.get("command").map(|o| o.text());
                     (flag, name, cmd)
                 }
                 _ => (false, None, None),
@@ -522,10 +536,23 @@ impl Interp {
         Some(err)
     }
 
-    fn record_error(&mut self, e: &PsError) {
-        let command = match e {
-            PsError::Undefined(n) => Some(Rc::from(n.as_str())),
-            _ => self.last_name.map(|id| crate::name::resolve(id).text_rc()),
+    /// Called by an `errordict` handler (issue #372): the object it was
+    /// run on is the offending command, for `$error /command` and for
+    /// the report of an error nothing catches.
+    pub(crate) fn set_error_command(&mut self, obj: Object) {
+        self.last_name = Some(crate::name::intern(&obj.text()).id());
+        self.error_command = Some(obj);
+    }
+
+    fn record_error(&mut self, e: &PsError, command: Option<Object>) {
+        let command = match command {
+            Some(obj) => Some(obj),
+            None => match e {
+                PsError::Undefined(n) => Some(Object::exec(Value::Name(crate::name::intern(n)))),
+                _ => self
+                    .last_name
+                    .map(|id| Object::exec(Value::Name(crate::name::resolve(id)))),
+            },
         };
         let error_dict = match self.load("$error") {
             Some(obj) => match &obj.value {
@@ -544,10 +571,7 @@ impl Interp {
                 Object::lit(Value::Name(e.name().into())),
             );
             if let Some(c) = command {
-                d.put(
-                    "command".into(),
-                    Object::exec(Value::Name(crate::name::intern_rc(c))),
-                );
+                d.put("command".into(), c);
             }
         }
     }
@@ -1349,8 +1373,9 @@ impl Interp {
     }
 
     /// Force every `srand` call to reseed with `seed` instead of its
-    /// operand (issue #21's `--sweep-seed`). `None` (the default)
-    /// leaves `srand` alone. Also clears the fired flag, so a caller
+    /// operand (issue #21's `--sweep-seed`), except one that restores a
+    /// value saved with `rrand` (issue #202). `None` (the default)
+    /// leaves `srand` and `rrand` alone. Also clears the fired flag, so a caller
     /// re-arming this on a fresh `Interp` starts from a clean read of
     /// [`seed_override_fired`](Self::seed_override_fired).
     pub fn set_seed_override(&mut self, seed: Option<i64>) {

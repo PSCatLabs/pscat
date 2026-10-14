@@ -16,6 +16,7 @@ sdlcify_version: 1
 repo: <owner>/<name>
 default_branch: <branch>
 generated: <ISO date of last apply>
+quality_gate: <optional; the gate command, exactly as CI runs it. Omit to use the language default>
 merge_policy:
   mode: size-and-risk-bar   # or: human-only | agent-full
   max_changed_lines: 150     # excluded: doc-only files (README/NOTES/HANDOFF/CHANGELOG)
@@ -56,9 +57,10 @@ it to GitHub.
    before writing code — catch a bad approach while it's still cheap to
    change.
 4. **Implement**, commit at coherent checkpoints, not one giant commit.
-5. **Quality gate clean before opening a PR**: `<quality-gate command
-   for this repo's language>` — the same command CI runs, so the PR
-   isn't the first place a break shows up.
+5. **Quality gate clean before opening a PR**: `<quality_gate, or the
+   language default>` — the same checks CI runs, so the PR isn't the
+   first place a break shows up. (CI runs them as separate steps, in its
+   own order; the string is what to run locally, with the same result.)
 6. **Diff reviewed** before the PR is called done — a second look at the
    actual changes, not just the plan.
 7. **Open the PR**, referencing the issue (`Closes #N`), with a summary

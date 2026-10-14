@@ -103,6 +103,55 @@ fn lint_is_clean_when_nothing_is_wrong() {
     assert!(stderr.contains("pscat: lint: clean"), "stderr: {stderr}");
 }
 
+// --- issue #369: an errored run is never "clean" ---------------------
+
+#[test]
+fn lint_does_not_call_an_errored_run_clean() {
+    // `pop` on an empty stack: the report said stackunderflow and the
+    // very next line said `lint: clean`, which agents trust.
+    for args in [
+        vec!["--lint", "-e", "pop"],
+        vec!["--lint", "-"],
+        vec!["--lint-strict", "-e", "pop"],
+    ] {
+        let (ok, _out, stderr) = run(&args, "pop");
+        assert!(!ok, "{args:?}: an errored run exits non-zero: {stderr}");
+        assert!(stderr.contains("stackunderflow"), "{args:?}: {stderr}");
+        assert!(
+            stderr.contains("pscat: lint: [run-error]"),
+            "{args:?}: {stderr}"
+        );
+        assert!(
+            !stderr.contains("pscat: lint: clean"),
+            "{args:?}: must not say clean: {stderr}"
+        );
+    }
+}
+
+#[test]
+fn lint_strict_footer_counts_real_findings_not_the_run_error() {
+    // Error only: no real finding, so no "failing because --lint-strict".
+    let (ok, _out, stderr) = run(&["--lint-strict", "-e", "pop"], "");
+    assert!(!ok);
+    assert!(!stderr.contains("because --lint-strict"), "{stderr}");
+    // Error plus a real finding (the blank page): footer says 1, not 2.
+    let (ok, _out, stderr) = run(&["--lint-strict", "-"], "pop\nshowpage");
+    assert!(!ok);
+    assert!(stderr.contains("pscat: lint: [blank-page]"), "{stderr}");
+    assert!(
+        stderr.contains("pscat: lint: 1 finding(s) \u{2014} failing because --lint-strict"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn lint_after_a_successful_run_is_still_clean_and_exits_zero() {
+    let (ok, _out, stderr) = run(&["--lint", "-e", "3 4 add pop"], "");
+    assert!(ok, "{stderr}");
+    assert!(stderr.contains("pscat: lint: clean"), "{stderr}");
+    assert!(!stderr.contains("[run-error]"), "{stderr}");
+}
+
 #[test]
 fn lint_skips_the_blank_page_check_for_eval_style_usage() {
     // -e is the "leave a result on the stack, don't necessarily draw
@@ -290,6 +339,44 @@ fn sweep_seed_warns_when_source_never_calls_srand() {
     );
     assert!(ok, "a missing srand call isn't a program failure: {stderr}");
     assert!(stderr.contains("never called srand"), "stderr: {stderr}");
+}
+
+/// Issue #202: a seeded library call saves the caller's stream with
+/// `rrand` and restores it with `srand`. A sweep forces every ordinary
+/// `srand`, but the restore must put the saved stream back, or a piece
+/// that replays its own random draws (Alpine Lake's reflection) stops
+/// matching itself. Here the "replay" after a restore must draw the same
+/// colour as the original, for every swept seed.
+#[test]
+fn sweep_seed_leaves_an_rrand_restore_alone() {
+    let out = tmp("sweep-restore.png");
+    let source = "7 srand rand pop /saved rrand def \
+         rand 255 mod 255 div rand 255 mod 255 div rand 255 mod 255 div setrgbcolor \
+         0 0 10 20 rectfill \
+         saved srand \
+         rand 255 mod 255 div rand 255 mod 255 div rand 255 mod 255 div setrgbcolor \
+         10 0 10 20 rectfill";
+    let (ok, _out_text, stderr) = run(
+        &[
+            "--page",
+            "20x20",
+            "--sweep-seed",
+            "1,2",
+            "--png",
+            out.to_str().unwrap(),
+            "-",
+        ],
+        source,
+    );
+    assert!(ok, "stderr: {stderr}");
+    for frame in ["sweep-restore-001.png", "sweep-restore-002.png"] {
+        let pixmap = Pixmap::load_png(out.with_file_name(frame)).expect("decode frame");
+        let px = |x: u32| -> [u8; 4] {
+            let i = ((10 * pixmap.width() + x) * 4) as usize;
+            pixmap.data()[i..i + 4].try_into().unwrap()
+        };
+        assert_eq!(px(5), px(15), "{frame}: the restored stream must replay");
+    }
 }
 
 /// The generic named-parameter sweep, and that a contact sheet lays

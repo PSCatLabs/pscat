@@ -96,7 +96,8 @@ hand; `examples/gradients.ps` is the specimen sheet.
 sweep instead of once, so exploring seeds or a parameter is one
 invocation instead of N hand-edits: `--sweep-seed` overrides every
 `srand` call transparently (found art with a hardcoded `N srand` line
-sweeps unmodified), `--sweep NAME=` predefines `/NAME` in userdict for
+sweeps unmodified) except a restore of a value saved with `rrand`, which
+puts the saved stream back (issue #202), `--sweep NAME=` predefines `/NAME` in userdict for
 a source that opts in to read it. `--png` writes numbered per-frame
 files; `--contact-sheet PATH` composites every frame into one grid PNG
 instead (`--grid COLSxROWS` overrides the default layout) — either or
@@ -153,6 +154,8 @@ cargo run -- --halftone file.ps           # classic 45° halftone dots, like a
 cargo run -- --lint --png out.png file.ps # self-check: blank page? unbalanced
                                           # gsave? stuff left on the stack?
 cargo run -- --lint-strict file.ps        # ...and exit non-zero on any finding
+                                          # (a run that errored is never "clean":
+                                          # lint prints [run-error] and exits 1)
 cargo run -- --selftest lib/paintkit.ps   # run a library's %%SelfTest blocks
 ./scripts/selftest.sh                     # every library's blocks, plus strict
                                           # lint over every rendering driver
@@ -432,6 +435,9 @@ interpreter already had every building block this needed. Draws with ordinary
 alike. `scripts/photo_etch.sh` wraps it end to end (photo path in, PNG/
 SVG/PDF out — no PostScript required); `examples/etching_demo.ps` is a
 specimen sheet.
+`et-tonemap` (issue #242) returns the photo's tones as data instead: a
+grid of box-averaged darkness, row 0 at the top. The charcoal portrait
+`gallery/lincoln_charcoal.ps` hatches to such a grid.
 
 ```postscript
 (lib/etching.ps) run
@@ -548,6 +554,51 @@ so turning one control doesn't re-roll another's texture; bounded by
 the same path set twice, once in `pktrowel` and once in `pkoil`, for
 the contrast.
 
+`pktrowelplane` (issue #180) is the palette knife's other job: laying a
+*plane*, an area of a mountain face or a rock covered with overlapping blade
+pulls so it reads as one flat facet that carries the blade's texture. The
+current path is the area; `pktrowelplane` runs `pktrowel` along parallel
+rows across it, in `/Direction` degrees, with every `pktrowel` key passed
+straight through (`/Width`, `/Angle`, `/Coverage`, `/Scrape`, `/EdgeBuildup`,
+`/Colors`, `/Light`, `/Touch`, ...). The edge is crisp because the path is the
+clip, not because of the blade's geometry; each row overruns the area so the
+blade's trim, drag and skew fall outside it. Rows are `Width * cos(Angle) *
+(0.35 + 0.65 * Cover) * (1 - Overlap)` apart, and `/Overlap` unset follows
+`/Coverage` (a patchier blade overlaps more); a tapering `/Pressure` narrows
+the band, so the rows are spaced for the thinnest it gets inside the area
+(read at 17 points, capped at 1, floored at 0.25) and a taper leaves no gaps
+between rows (issue #362); `/RowJitter` and `/AngleJitter`
+keep the rows from being machine-parallel. Above about `/Overlap 0.5` the rows
+also cover each other's `/Scrape` nicks. Deterministic under the caller's own
+`srand`, at most 4000 rows, the path left as the caller had it. It works
+under any CTM and in Ghostscript. `examples/paintkit_plane_demo.ps`
+(`docs/paintkit_plane_demo.png`) builds a mountain from planes in pigment
+colours and sets out the direction and overlap.
+
+`pkbrushedge` (issue #347) brushes the edge of a filled mass. A meadow, a
+bank or a pond starts as a filled path, and a filled path has a ruled vector
+edge that paint never has; `pkbrushedge` feathers it the way a painter does,
+with short strokes dragged across the boundary: the current colour (the
+mass's) pulled out over what is behind it, and the colour behind (`/Under`:
+a colour, a pigment name, or a procedure `x y -> r g b` for a graded sky)
+cut back in, sparser, so the two interlock. The current path is the edge.
+A subpath closed with `closepath` is a mass outline, and the mass itself
+(the path filled nonzero, as `fill` would) decides which side is out, so a
+hole is brushed into the hole and a mirrored reflection needs nothing
+special; an open subpath is a bare crest whose out side is `/Outward`
+(default up). `/Slant` tilts the strokes, `/Crisp` leaves stretches of the
+edge untouched (lost and found edges), `/Brush` picks the brush (a small
+pkbroad that runs dry by default). The strokes come from `pkfeather`, a
+brush motion in the family above that paints nothing, for anyone who wants
+to pair it with another preset by hand. The caller's path and graphics state
+survive; it works in Ghostscript. A mass built from several overlapping closed
+blobs (a cloud bank, a bush of ellipses) goes in as one path: an edge lying
+inside the others is hidden, so it is not brushed (issue #381).
+`examples/paintkit_brushedge_demo.ps`
+(`docs/paintkit_brushedge_demo.png`) shows each case before and after.
+
+![Brushed edges, before and after](docs/paintkit_brushedge_demo.png)
+
 `pkfan` (issue #114) is the fan brush: foliage, evergreen branches,
 grasses, cloud feathering, soft texture. Its nearest relative is
 `pkdry`, and exactly one term separates them. `pkdry` holds each bristle
@@ -639,6 +690,54 @@ real stroke out from the trunk when you want `/Light` to flip it: a chord
 shorter than `/Pitch` (a pressed fan, a dab) is never flipped.
 
 ![The loading specimen](docs/paintkit_loading_demo.png)
+
+**Pigments** (issue #185) give a brush a palette that mixes like paint instead
+of like a lerp. `Pigments` is a named oil palette of thirteen colours
+(`PigmentNames` lists them in tube order: `titaniumwhite`, `midnightblack`,
+`phthaloblue`, `prussianblue`, `alizarin`, `sapgreen`, `cadmiumyellow`,
+`indianyellow`, `yellowochre`, `vandykebrown`, `darksienna`, `burntumber`,
+`brightred`), and `pigmix` takes name-and-weight pairs and returns `r g b` like
+`mix3`:
+
+```postscript
+[ /phthaloblue 1 /cadmiumyellow 1 ] pigmix setrgbcolor   % green, not grey
+[ /phthaloblue 1 /alizarin 1 ] pigmix setrgbcolor        % violet
+[ /phthaloblue 1 /alizarin 1 /titaniumwhite 6 ] pigmix setrgbcolor  % lavender
+/phthaloblue 0.25 pigtint setrgbcolor                    % 1 part white to 3
+/sapgreen 0.1 pigshade setrgbcolor                       % a little black
+```
+
+Weights are parts, so `[ /a 3 /b 1 ]` and `[ /a 30 /b 10 ]` are the same
+paint, and an entry may be a literal `[r g b]` array for any colour that is not
+a pigment. The model is Kubelka-Munk's two-constant theory, run per r/g/b
+channel (absorption over scatter, added by weight, then converted back to a
+reflectance), with each pigment's tinting strength as its weight: a few
+multiplies and three square roots per mix. Its limits are documented in
+`lib/paintkit.ps` ("Pigments"): three bands, not a spectrum, so complements go
+to a very dark neutral; mixed in encoded rather than linear rgb; a pot of paint,
+not a glaze.
+
+The presets take pigments through the colour keys they already have. A bare
+pigment name works in `/Colors`, `/HighlightColor` and `/ShadowColor` as it
+stands; `pigcolor` turns a pigment name or a `pigmix` spec into the `[r g b]`
+those keys want, and `pigcolors` does a whole `/Colors` list that includes
+specs (a spec written straight into a colour key is refused with a guard that
+says to wrap it in `pigcolors`):
+
+```postscript
+<< /Colors [ /sapgreen /cadmiumyellow ] >> pkfan
+<< /Colors [ /sapgreen [ /sapgreen 1 /cadmiumyellow 1 ] ] pigcolors >> pkfan
+<< /HighlightColor /titaniumwhite /ShadowColor /prussianblue >> pkdab
+<< /HighlightColor [ /cadmiumyellow 2 /sapgreen 1 ] pigcolor
+   /ShadowColor /prussianblue pigcolor >> pkdab
+```
+
+`examples/paintkit_pigment_demo.ps` is the specimen: every pigment with six
+tints beside the RGB lerp of the same recipe, three ramps (blue to yellow,
+blue to alizarin, blue to white), eight classic landscape mixes, and the
+palette driving a loaded broad brush, a bush and a fan-brush evergreen.
+
+![The pigment specimen](docs/paintkit_pigment_demo.png)
 
 `pkliner` (issue #116) is the liner/detail brush — the fine marks made
 last and over everything else: bare branches, trunks, grass stems,
@@ -763,6 +862,32 @@ graze it across. `examples/paintkit_wet_pull_demo.ps` shows a
 reflection sharp, pulled and pulled-then-grazed, a mountain foot under
 plain wet mist and under a lift, and a sky before and after a sweep.
 
+`/Under` may also be a procedure `x y -> r g b` (issue #179) for a backdrop
+that changes across the mark: a cloud over a graded sky, mist over a range
+that fades into it. With one colour the outer passes are right at one end and
+leave a pale or dark rim at the other. Give `/At [x y]` (where the mark sits,
+in the user space you call pkwet in) and each softening pass asks the
+procedure for the backdrop at `/At` plus its own displacement:
+
+```postscript
+{ ... cloud ... }
+<< /Soft 1 /Offset 34 /At [135 70] /Under { exch pop skyat } >> pkwet
+```
+
+The procedure runs inside pkwet's frame, so it must be a pure function: no
+painting, no `pkwet`, no reliance on the operand stack, and exactly three
+numbers in 0..1 out (anything else is a named error). The question is per
+pass, not per pixel. A mark tall against the gradient wants it per band
+(issue #359): `/Box [x y w h]` and `/Bands [cols rows]` in place of `/At`
+ask the procedure once per cell of a grid over the mark and paint each
+softening pass once per cell, clipped to it, with the random stream replayed
+so every cell lays the same marks. A literal `[r g b]` behaves exactly
+as before. `examples/paintkit_wet_under_demo.ps` sets one cloud over a strong
+sky gradient with a constant and a procedural `/Under`
+(`docs/paintkit_wet_under_demo.png`);
+`examples/paintkit_wet_bands_demo.ps` sets a tall plume over one, per pass
+against per band (`docs/paintkit_wet_bands_demo.png`).
+
 `pkcanvas` and `/Touch` (issue #182) give light strokes one canvas to
 catch on. Every other "less paint" key in paintkit (`/Load`, `/Charge`,
 `/Coverage`) models the tool, so two strokes that cross each break up on
@@ -808,7 +933,7 @@ ordinary path, so they feed any preset.
 | `pkscumblein` | region | many small separate circles | `pkoil` (clouds) |
 | `pkscumble` | the current path | a chain of overlapping loops | `pkdry` (a scrubbed edge) |
 | `pktap` | the current path | short stabs along it | `pkfan`, or `/Length 0` for `pkdab` clumps |
-| `pkpull` | the current path | strokes pulled from it along a direction | `pkbroad` down (reflection), `pkliner` up (grass) |
+| `pkpull` | the current path | strokes pulled from it along a direction (`/Scatter` starts them off the line, so a fall or grass is not a picket fence) | `pkbroad` down (reflection), `pkliner` up (grass) |
 | `pkzigzag` | the current path | a zig-zag about it | `pkliner` (water) |
 
 ```postscript
@@ -831,6 +956,28 @@ motion lays a jittered grid sized from the region's area, so even
 coverage is kept and `/Count` stays about right for a non-rectangular
 region. `examples/paintkit_motion_demo.ps` shows each beside its brush.
 
+**Light-aware massing** (issue #345). A scumbled mass painted in one load
+is flat. Give `pkscumblein` a `/Light` (the direction the light comes
+from, in degrees, as elsewhere in paintkit) and it keeps only the circles
+on the side of the region that faces the light, in a band that follows
+every lump of the outline: `/Reach` is how deep (a fraction of the
+region's depth along the light, default 0.3) and `/Feather` grades its
+inner border. Paint the body over the whole region, then the same region
+again with `/Light` in a lighter load; the shadow side is the same call
+with the light turned round. Unset, the motion is unchanged. With the same
+seed the lit circles are a subset of the unlit ones.
+
+```postscript
+/bush { newpath 40 40 moveto 60 110 140 120 200 40 curveto closepath scpath } def
+0.20 0.30 0.12 setrgbcolor                                % the body, over the whole bush
+bush << /Count 200 /Radius 4 >> pkscumblein << /Size 5 /Scatter 6 >> pkdab
+0.42 0.52 0.18 setrgbcolor                                % its lit side, upper left
+bush << /Count 300 /Radius 3 /Light 135 /Reach 0.3 >> pkscumblein
+<< /Size 4 /Scatter 5 >> pkdab
+```
+
+![Light-aware massing: before and after](docs/paintkit_massing_demo.png)
+
 All of these come together in the gallery piece *Alpine Lake*
 (`gallery/alpine_lake.ps`, issue #118), a full wet-on-wet landscape
 painted from paintkit's brushes alone. It has a `pkcrisscross` sky
@@ -842,6 +989,14 @@ The reflection is not a second drawing: every scene element seeds its
 own randomness and logs it as it paints, so the lake replays the same
 marks under `1 -1 scale`, one single-colour part at a time, each
 pulled down with directional `pkwet` (issue #191).
+
+How to paint each element of a landscape with these tools is written up as
+a cookbook, [`docs/guides/landscape-cookbook.md`](docs/guides/landscape-cookbook.md)
+(issue #186): eleven short recipes (sky, clouds, mountains, mist, far forest,
+evergreens, bushes, water, reflections, foreground bank, grass), each with the
+tools, the order, the settings that matter, the usual failure with its fix, a
+complete snippet and a rendered thumbnail. `tests/landscape_cookbook.rs` runs
+every snippet, so they keep rendering.
 
 *Evening Stream* (`gallery/evening_stream.ps`, issue #187) is the second
 landscape, painted with the round-2 tools on one shared `pkcanvas`: a
@@ -1120,6 +1275,10 @@ the stick's contact patch meets raised tooth.
   - Tone builds in deposit levels, drawn faint-first.
 - **`{ ... } dkbatch`** draws several `dkstroke` calls level-major, so
   crossing hatch layers stay dark where they cross.
+- **`{ ... } dkclip`** clips to the current path while the procedure
+  runs, and the strokes it makes keep that region inside a batch. So
+  differently clipped strokes, such as overlapping hatched regions, can
+  share one batch (#312).
 
 drykit takes no draws from the caller's `rand` stream. Its surface and
 tool-side randomness come from private seeded generators, and fallout goes
@@ -1179,7 +1338,20 @@ advances, `sggrow` builds a sum, product, integral, radical, paren,
 bracket, brace or bar sized to a height and depth, and `sgmetrics` gives
 the advance, box, italic correction and TeX math class. Jitter comes from
 its own seeded generator, never the caller's `rand`, and
-`examples/strokeglyphs.ps` is the specimen sheet.
+`examples/strokeglyphs.ps` is the specimen sheet. A character or glyph name
+with no glyph raises `sg-missing-glyph:<char>` from `sgpath` and `sgwidth`
+before anything is drawn (issue #350); `/Strict false` restores the old
+advance-300-and-draw-nothing behaviour. Issue #339 added the board-math
+symbols a lecture needs: `≡ ∼ ≃ ⊆ ⊃ ⊇ ↦ ⊥ ∝ ∴ ∘ ∗ ⋆ ∖ ⟨ ⟩ ‖ ℏ ℓ ι υ Υ`, the
+double, triple and contour integrals `∬ ∭ ∮` (also `sggrow` symbols), and
+superscript digits (`i²`, `x⁻¹`); `examples/strokeglyphs_board_math.ps`
+is their specimen.
+Issue #366 added subscript digits, signs and letters (`H₂O`, `xₙ`, `Σᵢ₌₀`,
+derived from the digit skeletons the way the superscripts are) and the
+variant Greek letters `ϑ ϰ ϱ ϖ ς ϵ ϕ`; `examples/strokeglyphs_subscripts_greek.ps`
+is their specimen. In mathkit `\varphi \vartheta \varkappa \varrho \varpi
+\varsigma` now draw the variants, and `\epsilon` is the lunate ϵ while
+`\varepsilon` stays the three-shaped ε, as in TeX.
 
 ```postscript
 (lib/handscript.ps) run
@@ -1191,8 +1363,15 @@ newpath (∀ε>0 ∃δ>0) 40 300 << /Size 40 /Seed 7 >> sgpath
 `lib/mathkit.ps` (issue #237) lays out a subset of TeX math as those
 skeletons with TeX's box model. The subset covers:
 - scripts, `\frac`, `\sqrt[n]{}`;
-- `\sum`, `\prod` and `\int` with limits, and `\lim`;
-- `\left( \right)` delimiters that grow to fit;
+- `\sum`, `\prod`, `\int`, `\iint`, `\iiint` and `\oint` with limits, and `\lim`;
+- `\left( \right)` delimiters that grow to fit, including `\langle \rangle`
+  and `\|`, or the characters `⟨ ⟩ ‖ ∥` typed directly;
+- relations and operators such as `\equiv \sim \subseteq \mapsto \perp
+  \therefore \circ \ast`, and `\hbar \ell`;
+- `*` is `\ast`, as in TeX: a binary operator between terms, and `z^*` or
+  `A_*` a raised or lowered asterisk for a conjugate or an adjoint;
+  inside `\text{}`, `\mathrm{}` and `\operatorname{}` it is a raised text
+  asterisk (strokeglyphs' `/asterisk`), as TeX sets it in text;
 - matrices and `cases`, accents and `\boxed`;
 - Greek and operator names.
 
@@ -1208,6 +1387,9 @@ baseline slopes and drifts (`/Irregular`, where 0 is clean TeX).
 Every TeX backslash is written twice in a PostScript string.
 `examples/mathkit_specimen.ps` is the specimen: the fixed test set, from
 the quadratic formula to Maxwell's equations, and a derivation in chalk.
+The gallery piece `gallery/chalkboard_lecture.ps` (issue #238) fills a
+whole board with it: Euler's formula derived across three drychalk
+panels.
 
 ```postscript
 (lib/handscript.ps) run (lib/strokeglyphs.ps) run (lib/mathkit.ps) run
@@ -1339,6 +1521,7 @@ tree or fern grows.
 | `ring_of_type.ps` | (Stage 6) one sentence circling eleven shrinking rings, set glyph by glyph around a charpath ampersand |
 | `hundred_lines.ps` | (Stage 10) the Stage 12 /HandScript dynamic font writing punishment lines on a chalkboard — same sentence nine times, no two letters alike |
 | `hortus.ps` | (Stage 19) a herbarium plate: three L-system plants grown by turtle, blossoms stamped along each plant's own path with `pathforall` |
+| `chalkboard_lecture.ps` | (issue #238) a professor's slate board after deriving Euler's formula: mathkit's TeX layout written in drychalk chalk over the last lecture's erased ghost writing |
 
 View them one at a time:
 
@@ -1359,6 +1542,7 @@ View them one at a time:
 </p>
 <p>
   <img src="gallery/renders/hundred_lines.png" width="30%" alt="Hundred Lines"/>
+  <img src="gallery/renders/chalkboard_lecture.png" width="60%" alt="Lecture 14, a chalkboard derivation of Euler's formula"/>
 </p>
 
 Details, page sizes, and re-render instructions live in

@@ -255,9 +255,9 @@ via whichever path ran), decide merge eligibility from the policy:
   leaves the issue open, for instance). Report the PR as open and
   awaiting merge; don't attempt to merge it.
 - `agent-full`: eligible regardless of diff size or files touched, unless
-  the dispatcher said not to merge: post the summary below, release the
-  lock, keep `in-review`, the worktree and the branch, and report
-  `awaiting human merge (dispatcher said no merge)`. `pitfalls.md`
+  the dispatcher said not to merge: post the summary below, wait for CI green (8.12, #331), skip
+  8.13, release the lock, keep `in-review`, the worktree and the branch, and report
+  `awaiting human merge (dispatcher said no merge; CI green)`. `pitfalls.md`
   "Stop without merging" and "Resume paths" have the stop and the
   resume-to-merge route (#208).
 - `size-and-risk-bar`: eligible only if the diff (excluding doc-only
