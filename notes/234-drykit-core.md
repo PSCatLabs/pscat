@@ -109,3 +109,112 @@ Deferred to D2 (same issue):
   level-major `dkbatch` over a portrait's hatching would be about 1M cells
   per level;
 - the specimen.
+
+## drykit core, slice D2: dkstroke and dkbatch (issue #234, 2026-10-13)
+
+The second half of #234. It adds two public procedures to `lib/drykit.ps`:
+
+- **`dkstroke`** treats every subpath of the current path as a stick's
+  centerline and paints in the current colour. It walks the path with
+  `walkpath`, then resolves each stop once: touch (a number, or a
+  `{t -> touch}` profile quantized to `/Bands`), `/Pressure`, `/Wear` and
+  `/Tilt` (blended toward `/Side`).
+  - **Lanes.** A tilted stick gets at least three, and its edge lanes press
+    0.06·sin(Tilt) harder than the face. Each lane has its own `/Load` and
+    `/Dropout` contact chain, drawn from `dkrand`, one draw per stop.
+  - **Seeds.** Each subpath is seeded from its own first point on the
+    canvas, or from `/Seed + i` when a seed is given.
+  - **Records.** The stops become a record of runs keyed by touch band,
+    plus the CTM the stroke was given in.
+- **`dkbatch`** collects the records of the `dkstroke` calls inside it and
+  renders them together, level-major. It allows one pigment per batch and
+  no nesting. An error inside the batch closes it and re-raises.
+
+**Rendering (`dkrender`).**
+- **Levels.** Faintest first, aligned so each record's brightest level
+  lands last. A level's colour is lerp(`/Under`, pigment,
+  `/Strength`·j/L), its touch is the band's + (L − j)·0.12, and the faintest
+  level is widened by `/Halo` when L ≥ 2.
+- **Shared catches.** Runs with equal touch, streak and colour share one
+  `dkcatch`, chunked by estimated cells under `dkbudget`. A run too long
+  for one catch is split into pieces that share an end stop.
+- **Thinned centerline.** The catch takes a thinned centerline. Walking at
+  the ink's pitch made every short capsule revisit each cell up to 6
+  times (19 µs per cell, against 3.5).
+- **Ink.** Constant width is a round-capped stroke. Varying width is a
+  union of a disc at every stop and a counter-clockwise quad along every
+  segment, so the ink stays inside the reach the catch was cut for.
+- **Fallout.** Fallout is drawn last, through artkit `scatter`: one
+  rectangle per ~20pt piece, thinned away from the line by `/Weight`,
+  drifted down canvas y by up to `/Drift`, with `/Seed` from the
+  subpath's seed.
+
+**Decisions:**
+- **Ink geometry without `pkribbon`.** A union of discs and quads is exact
+  against the catch's reach. pkribbon's outline isn't, and it clobbers
+  `pk*` names.
+- **Records keep their CTM.** The advisor's plan review found that a
+  record holding user-space stops would land wrongly when rendered under
+  the batch's CTM. Hatching is written as `gsave rotate … dkstroke
+  grestore`. Tested: a batch of rotated, scaled strokes is pixel-identical
+  to the same strokes drawn unbatched.
+- **One pigment per batch.** This is the design's Q6. A second colour
+  raises `dkbatch-mixes-pigments` rather than being grouped, because
+  grouping would put B's dim level under A's core.
+- **`/Touch` keeps its `[0..1]` unit.** The procedure form is described
+  in the text, since the unit vocabulary is closed.
+- **Newsprint `/Relief` went from 0.4 to 0.55.** At 0.4 it failed Q4
+  (mean phi 0.36). Test 1 now checks all five surfaces at their media's
+  streak: the boards, newsprint and drawing paper at 1.4, construction
+  paper at 1.8. Means are 0.42, 0.42, 0.46 and 0.42.
+- **Walk pitch is 0.75·Width, clamped to 1..4pt.** That costs no visible
+  change and saves walk and catch time.
+
+**Measured** (DRYMEDIA.md 6.1, D2 table), CPU time at 144 dpi:
+
+| Piece | pscat | gs | Budget | Status |
+|---|---|---|---|---|
+| Specimen | 9.0–9.4s | 3.6–4.2s | 10s | inside |
+| Portrait proxy, through one `dkbatch` | 40–42s | 27–28s | 60s | inside |
+| Board core + one-level ghost pass | 31.2–32.8s | 16.1–16.9s | 30s | gs inside, pscat ~7% over |
+
+The board overrun is filed as #283, with a cost breakdown. The main lever
+is a reach band cut per orientation: beside a straight segment the knuckle
+needs only its short axis.
+
+**Tests** (`tests/drykit.rs`, 17 total; about 15s for the file):
+- **Test 1**, per surface.
+- **Test 3, extended to `dkstroke`.** It covers `/Streak` 4, `/Tilt` 90,
+  `/Wear` 1, `/Pressure` above 1, lanes with dropout, a banded touch
+  profile, fallout with `/Drift`, and a run split under a tiny budget,
+  each against a whole-page catch. Fallout is drawn unclipped, so its row
+  only shows it leaves the catch alone.
+- **Test 4.** The same input gives the same pixels. A caller's later mark
+  doesn't move under any key. A stroke elsewhere re-rolls nothing.
+- **Test 5.** One call with two subpaths is pixel-identical to a batch of
+  two calls. No dim pixel lands over the other stroke's core. The
+  control: separate calls do dim it.
+- **A batch keeps each stroke's own space.**
+- **Nesting under a `/Pressure` profile.** 0 violating pixels were
+  measured.
+- **Test 6**, gs block agreement: 0.43 against 18.5 for another seed.
+- **Test 7.** All 18 `dkstroke` keys are live, and the advertised and
+  tested sets are equal.
+- **Test 8.** 100 strokes render in about 0.6s alone and under 2s under
+  load.
+
+New self-tests cover `dkstroke`'s guards, the missing-surface error, no
+caller draws with every random feature on, and `dkbatch`'s guards.
+
+**Demo:**
+- `examples/drykit_specimen.ps`: five surfaces × three pressures × three
+  tilts, plus a wearing, landing-and-lift stroke and a crossing pair in
+  one batch;
+- a render line in `scripts/build_site.sh`;
+- a card in `site/gallery.html`.
+
+**Open, for the maintainer's eye on the specimen:**
+- The tilt lanes' round caps show as three bumps at a tilted stroke's ends.
+- The `/Pressure` lift on the wear stroke ends in a sharp point.
+
+Both are presets' business (#235, #239, #241), not the core's.

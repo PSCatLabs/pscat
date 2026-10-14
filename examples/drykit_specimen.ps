@@ -1,0 +1,96 @@
+%!PS-Adobe-3.0
+%%Title: drykit specimen -- one dry stick at three pressures, three tilts and a wearing tip, on five surfaces (issue #234)
+%%BoundingBox: 0 0 840 1000
+%%EndComments
+
+% Specimen for lib/drykit.ps (docs/DRYMEDIA.md): `dkstroke` with the
+% engine's own defaults, on each of the five `dksurface` grounds, top to
+% bottom: slate and green board in chalk, newsprint and drawing paper in
+% charcoal, construction paper in crayon. Every key not named below is
+% the default, so the rows differ by surface and pigment alone (plus
+% /Streak 1.8 for crayon, DRYMEDIA.md 3.4).
+%
+%   pressure  /Touch 0.55, 0.7, 0.85: light pressure catches only the
+%             tooth's peaks, heavy pressure fills the valleys
+%   tilt      /Tilt 0, 45, 90 at /Touch 0.72: from the tip to the side of
+%             the stick (/Side 10), the edges of the patch pressing harder
+%   wear      one long stroke with /Wear 1.5, a landing-and-lift /Touch
+%             profile and a lifting /Pressure taper
+%   crossing  two strokes crossing in one dkbatch, breaking up on the
+%             same tooth and staying bright where they cross
+%
+%   pscat --page 840x1000 --png drykit_specimen.png examples/drykit_specimen.ps
+
+(lib/artkit.ps) run
+(lib/paintkit.ps) run
+(lib/drykit.ps) run
+
+0.97 0.96 0.93 setrgbcolor clippath fill
+
+% sp- prefix: specimen-local, distinct from drykit's dk-.
+/spfont { /Helvetica findfont exch scalefont setfont } def
+
+% (text) x y -
+/splabel { moveto show } def
+
+% A gentle S across w points from (x, y): the long-stroke path.
+/spcurve {
+    /spcw exch def /spcy exch def /spcx exch def
+    newpath spcx spcy moveto
+    spcx spcw 0.33 mul add spcy 22 add
+    spcx spcw 0.66 mul add spcy 22 sub
+    spcx spcw add spcy curveto
+} def
+
+% surface pigment label ink streak y -   (one row)
+/sprow {
+    /spy exch def /spst exch def /spink exch def /splab exch def
+    /sppig exch def /spsurf exch def
+    << /Surface spsurf /Seed 11 >> dksurface
+    userdict /dkGround get aload pop setrgbcolor
+    20 spy 800 170 rectfill
+    spink aload pop setrgbcolor
+    13 spfont splab 30 spy 152 add splabel
+    9 spfont
+    (pressure 0.55  0.7  0.85) 30 spy 132 add splabel
+    (tilt 0  45  90) 300 spy 132 add splabel
+    (wear, landing and lift) 540 spy 132 add splabel
+    (crossing, one batch) 540 spy 58 add splabel
+    sppig aload pop setrgbcolor
+    % three pressures, short upward strokes
+    [ 0.55 0.7 0.85 ] {
+        /spt exch def
+        /spi spt 0.55 sub 0.15 div def
+        newpath 50 spi 75 mul add spy 20 add moveto 30 90 rlineto
+        << /Width 5 /Touch spt /Streak spst >> dkstroke
+    } forall
+    % three tilts
+    [ 0 45 90 ] {
+        /spa exch def
+        newpath 320 spa 1.25 mul add spy 20 add moveto 30 90 rlineto
+        << /Width 5 /Touch 0.72 /Tilt spa /Side 10 /Streak spst >> dkstroke
+    } forall
+    % the wearing stroke: a heavy landing, a tired middle, a fading lift
+    550 spy 95 add 250 spcurve
+    << /Width 3.5 /Wear 1.5 /Streak spst
+       /Touch { dup 0.08 lt { pop 0.92 } { 0.08 sub 0.92 div 0.3 mul 0.86 exch sub } ifelse }
+       /Bands 6
+       /Pressure { dup 0.85 gt { 1 exch sub 6.67 mul } { pop 1 } ifelse } >> dkstroke
+    % a crossing pair, level-major in one batch
+    {
+        newpath 560 spy 15 add moveto 790 spy 45 add lineto
+        << /Width 4 /Touch 0.7 /Streak spst >> dkstroke
+        newpath 560 spy 45 add moveto 790 spy 15 add lineto
+        << /Width 4 /Touch 0.7 /Streak spst >> dkstroke
+    } dkbatch
+} def
+
+/slate      [0.93 0.94 0.90] (slate, chalk)                 [0.62 0.64 0.66] 1.4 820 sprow
+/greenboard [0.93 0.94 0.90] (green board, chalk)           [0.62 0.68 0.64] 1.4 630 sprow
+/newsprint  [0.13 0.12 0.12] (newsprint, charcoal)          [0.35 0.34 0.32] 1.4 440 sprow
+/drawing    [0.13 0.12 0.12] (drawing paper, charcoal)      [0.40 0.39 0.37] 1.4 250 sprow
+/construction [0.98 0.84 0.20] (construction paper, crayon) [0.80 0.84 0.92] 1.8 60 sprow
+
+0.3 0.3 0.3 setrgbcolor 9 spfont
+(drykit: lib/drykit.ps, dkstroke on dksurface; every row uses the engine defaults except pigment and streak) 20 30 splabel
+showpage

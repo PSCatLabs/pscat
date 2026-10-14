@@ -23,8 +23,9 @@
 %                              /Relief, as pkcanvas leaves them in userdict
 %   pjmemo                     the height memo pjheight fills
 %
-% Slice D1 (this file so far): `dksurface`, the named surfaces, the private
-% generator, and `dkcatch`. Slice D2 adds `dkstroke` and `dkbatch` on top.
+% Public: `dksurface` (the named surfaces), `dkstroke` (a stroke) and
+% `dkbatch` (strokes drawn level-major together). Internal: `dkcatch`, the
+% catch every stroke is drawn through, and `dkrand`, the private generator.
 %
 % `dkcatch` differs from paintkit's `pjcatch` in two ways (DRYMEDIA.md 2.1):
 %
@@ -39,7 +40,7 @@
 %   nearest segment outright, whatever the touch or a uniform widening. When
 %   half-widths vary along a run, a wider catch can bring a nearer, thinner
 %   segment into reach and turn a knuckle, so nesting is not guaranteed
-%   there (D2 tests it with a /Pressure run).
+%   there (tests/drykit.rs measures it under a /Pressure run: none seen).
 % * Swept-band cells. It visits only the cells whose centre lies within
 %   reach of the centerline -- per segment, the exact column-by-column
 %   interval of its capsule -- not every cell of the mark's bounding box.
@@ -57,13 +58,19 @@
 % before its `clip` (DRYMEDIA.md 2.4, Q8); it is a gs internal, absent in
 % pscat, and it lives in the caller's gsave like the clip does.
 %
-% Determinism. drykit never calls `rand` or `srand`. The surface takes no
-% draws at all, and the tool-side generator (`dkrand`, for D2's contact
-% chain, lanes and fallout) is the same Schrage-form minimal standard LCG
-% as paintkit's `pjrand`, under its own state in userdict.
+% Determinism. drykit takes no draws from the caller's `rand` stream. The
+% surface takes no draws at all; the tool-side generator (`dkrand`, for
+% the contact chains and fallout seeds) is the same Schrage-form minimal
+% standard LCG as paintkit's `pjrand`, under its own state in userdict;
+% and fallout goes through artkit's `scatter` with a /Seed, which seeds
+% `rand` and restores the caller's stream afterwards.
 %
 % Scratch prefix dk-. Every name is distinct from the pk*/pj*/pu* families,
-% because D2 calls pkribbon for geometry and pkribbon clobbers pk* names.
+% so nothing paintkit runs (pjheight's own scratch, a preset drawn in the
+% same piece, pkribbon's habit of clobbering pk* names) can reach it.
+% dkstroke builds its own ink geometry and does not call pkribbon
+% (DRYMEDIA.md 3.3 allowed for it; a union of discs and quads keeps the ink
+% exactly within the reach the catch is cut for).
 
 % Unique cells one catch may build. Past it dkcatch rejects; a caller with a
 % larger mark splits it into several catches.
@@ -135,8 +142,10 @@
 /dkstate 2 def
 
 % The named surfaces (DRYMEDIA.md 2.3): plain pkcanvas keys plus the
-% surface's own colour. These are starting values from the reference board;
-% D2's specimen re-tunes them before any test pins their pixels.
+% surface's own colour. Starting values from the reference board, with
+% /Relief raised where the shared-tooth test needed it: Q4 (mean phi >= 0.4
+% between crossing strokes) failed on newsprint at 0.4 and passes at 0.55,
+% the boards' value (tests/drykit.rs test 1 checks every surface).
 % @internal
 /dksurfaces <<
     /slate        << /Weave 0.4  /Relief 0.55 /Mottle 4 /Ground [0.13 0.14 0.16] >>
@@ -865,7 +874,12 @@
     % Walk: count, then fill a preallocated array (artkit's walkpath warns
     % that a proc which leaves anything on the stack breaks multi-subpath
     % paths, so the stops are not collected with `[ ... ]` around it).
-    /dkSpitch dkSw 0.5 mul dup 0.5 lt { pop 0.5 } if dup 3 gt { pop 3 } if def
+    % The pitch sets how finely touch, pressure and the contact chain vary
+    % along the stroke, not the ink's smoothness (the ink is the walked
+    % centerline, which follows the flattened path's own corners closely
+    % enough at this spacing). 1pt is fine for glyph-sized strokes; a finer
+    % one costs walk and catch time for no visible change.
+    /dkSpitch dkSw 0.75 mul dup 1 lt { pop 1 } if dup 4 gt { pop 4 } if def
     /dkSn 0 def
     dkSpitch { pop pop pop pop pop pop /dkSn dkSn 1 add def } walkpath
     /dkSall dkSn array def
