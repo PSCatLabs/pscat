@@ -1035,8 +1035,10 @@ clouds scrubbed in with `pkscumblein` and lit from below, a backlit wood
 whose reflection is pulled down whole by one directional `pkwet` (it
 paints only in loaded colours, which `pkwet` grades), autumn trees on a
 loaded `pkdab` with warm highlight and cool shadow hues, evergreens on a
-fan loaded dark and lit with `/Light`, a `pkpull` fall, and
-`pkzigzag` light lines that catch on the canvas weave.
+fan loaded dark and lit with `/Light`, a `pkpull` fall, `pkzigzag`
+light lines that catch on the canvas weave, and `pkbrushedge` on the stream
+banks, the far shore and the near banks, so no big mass has a ruled edge
+(issue #382).
 
 `pkwash` (issue #47) is the watercolor medium, and the one preset here
 that needs something from the interpreter rather than only from
