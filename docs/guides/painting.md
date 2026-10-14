@@ -598,7 +598,9 @@ whose reflection is pulled down whole by one directional `pkwet` (it
 paints only in loaded colours, which `pkwet` grades), autumn trees on a
 loaded `pkdab` with warm highlight and cool shadow hues, evergreens on a
 fan loaded dark and lit with `/Light`, a `pkpull` fall, and
-`pkzigzag` light lines that catch on the canvas weave.
+`pkzigzag` light lines that catch on the canvas weave, and `pkbrushedge`
+on the stream banks, the far shore and the near banks, so no big mass has a
+ruled edge (issue #382).
 
 ## Watercolor: pkwash and pkpaper
 

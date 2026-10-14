@@ -38,6 +38,13 @@
 %   (#182)           (water lines, foam, meadow, grass tips) catches on
 %                    the same weave via /Touch
 %
+%   brushed edges    pkbrushedge (#347, applied in #382) on the stream's
+%   (#382)           banks, the stream's head, the far shore and the near
+%                    banks' rims: the mass colour pulled out over what is
+%                    behind it and that colour cut back in, so no big
+%                    mass keeps a ruled vector edge. The bushes and grass
+%                    that stay are things growing there.
+%
 % Not used: a named pigment palette with subtractive mixing (#185 has
 % not landed), so colours are mixed with artkit's mix3 and shade.
 %
@@ -401,7 +408,7 @@
 % spine-proc seed -   bushes along a stream bank
 /evbushes {
     srand exec
-    << /Size 4 /Scatter 16 /Density 1.6 /Irregular 0.9 /Shadow 0.6 /Highlight 0.55
+    << /Size 4 /Scatter 14 /Density 0.8 /Irregular 0.9 /Shadow 0.6 /Highlight 0.55
        /Light 70 /Colors [ [0.05 0.07 0.03] [0.12 0.14 0.05] [0.22 0.20 0.06] ]
        /HighlightColor [0.80 0.62 0.24] /ShadowColor [0.04 0.03 0.06] >> pkdab
 } def
@@ -485,8 +492,12 @@
             << /Width 14 /Charge 0.6 /Depletion 0.9 /Edge 0.2 >> pkbroad
         } for
     grestore
+    % the bank's rim, brushed over the meadow (or the stream) behind it
+    evBANK evset evnr
+    << /Under /evunderbank load /Outward 90 /Length 11 /Spacing 3 /Crisp 0.15
+       /Brush { << /Width 5 /Charge 0.8 /Depletion 0.9 /Edge 0.5 /Touch 0.8 >> pkbroad } >> pkbrushedge
     evnr
-    << /Size 6 /Scatter 18 /Density 2.5 /Irregular 0.9 /Shadow 0.6 /Highlight 0.45
+    << /Size 6 /Scatter 14 /Density 1.2 /Irregular 0.9 /Shadow 0.6 /Highlight 0.45
        /Light 70 /Colors [ [0.03 0.05 0.02] [0.08 0.10 0.04] ]
        /HighlightColor [0.50 0.42 0.14] /ShadowColor [0.02 0.02 0.04] >> pkdab
     % a few tufts across the bank, dimmer than the rim's
@@ -526,6 +537,67 @@
     } for
 } def
 
+% ---- brushed edges (#382) ---------------------------------------------
+%
+% The banks, meadows and stream are filled masses, so their edges are ruled
+% vector lines. pkbrushedge (#347) pulls each mass's colour out over what is
+% behind it and cuts that colour back in, so the edge reads as brushed. What
+% stays on the banks (the bushes, the grass) is there because something
+% grows there, not to hide a ruled line.
+
+% x y -> r g b   what the stream shows in the upper reach next to a bank,
+% where the water is the dark pulled reflection of the far wood, and below
+% the fall, where it is the sky-and-dusk gradient
+/evunderstream {
+    /evuy exch def /evux exch def
+    evuy evFALLY gt
+    { [ evux evuy evwaterat ] evWOOD 0.9 mix3 }
+    { evux evuy evwaterat } ifelse
+} bind def
+% x y -> r g b   what lies behind a near bank's rim: the meadow, except in
+% the lower corners, where the stream runs behind it
+/evunderbank {
+    /evuy exch def /evux exch def
+    evux 240 evuy 10 add 0.78 mul add 340 min gt
+    evux 650 evuy 10 add 1.3 mul sub 450 max lt and
+    { evux evuy evwaterat }
+    { evMEADOW aload pop } ifelse
+} bind def
+
+% The meadows' banks along the stream, brushed after the water and the fall
+% are down: the meadow's colour out over the water, the water cut back in.
+/evbankedges {
+    19 srand
+    [ evMEADOWLT evMEADOW 0.9 mix3 ] evset
+    newpath 456 evHZ moveto evleftedge
+    << /Under /evunderstream load /Outward 0 /Length 9 /Spacing 3 /Crisp 0.2
+       /Brush { << /Width 4 /Charge 0.8 /Depletion 0.9 /Edge 0.5 /Touch 0.8 >> pkbroad } >> pkbrushedge
+    newpath 490 evHZ moveto evrightedge
+    << /Under /evunderstream load /Outward 180 /Length 9 /Spacing 3 /Crisp 0.2
+       /Brush { << /Width 4 /Charge 0.8 /Depletion 0.9 /Edge 0.5 /Touch 0.8 >> pkbroad } >> pkbrushedge
+} bind def
+% the meadows' far edge against the wood's foot, in the meadow colour a
+% little lit
+% the head of the stream, where it meets the far shore: the water's own
+% light pulled up a little over the wood's foot
+/evstreamhead {
+    21 srand
+    [ 470 evHZ 2 add evwaterat ] evset
+    newpath 456 evHZ 2 add moveto 490 evHZ 2 add lineto
+    << /Under evWOOD /Outward 90 /Length 5 /Spacing 2 /Crisp 0.25
+       /Brush { << /Width 2.5 /Charge 0.8 /Depletion 0.9 /Edge 0.5 /Touch 0.8 >> pkbroad } >> pkbrushedge
+} bind def
+/evfaredges {
+    17 srand
+    [ evMEADOWLT evMEADOW 0.8 mix3 ] evset
+    newpath -10 evHZ 1 sub moveto 450 evHZ 1 sub lineto
+    << /Under evWOOD /Outward 90 /Length 6 /Spacing 2.5 /Crisp 0.2
+       /Brush { << /Width 3 /Charge 0.8 /Depletion 0.9 /Edge 0.5 /Touch 0.8 >> pkbroad } >> pkbrushedge
+    newpath 496 evHZ 1 sub moveto 770 evHZ 1 sub lineto
+    << /Under evWOOD /Outward 90 /Length 6 /Spacing 2.5 /Crisp 0.2
+       /Brush { << /Width 3 /Charge 0.8 /Depletion 0.9 /Edge 0.5 /Touch 0.8 >> pkbroad } >> pkbrushedge
+} bind def
+
 % ---- paint -----------------------------------------------------------
 
 evsky
@@ -537,18 +609,11 @@ evridge
 evWOOD evset evwood
 { evleftbank } 13 evmeadow
 { evrightbank } 14 evmeadow
-% the meadows' far edge, tapped along the shore so it is not a ruled line
-17 srand
-newpath -10 evHZ 1 sub moveto 450 evHZ 1 sub lineto
-<< /Spacing 4 /Length 0 /Scatter 2 >> pktap
-<< /Size 2.2 /Scatter 2.5 /Density 3 /Irregular 0.9 /Shadow 0.3 /Highlight 0.4 /Light 90
-   /Colors [ evMEADOW [ evMEADOW evWOOD 0.5 mix3 ] ] /HighlightColor evMEADOWLT >> pkdab
-newpath 496 evHZ 1 sub moveto 770 evHZ 1 sub lineto
-<< /Spacing 4 /Length 0 /Scatter 2 >> pktap
-<< /Size 2.2 /Scatter 2.5 /Density 3 /Irregular 0.9 /Shadow 0.3 /Highlight 0.4 /Light 90
-   /Colors [ evMEADOW [ evMEADOW evWOOD 0.5 mix3 ] ] /HighlightColor evMEADOWLT >> pkdab
+evfaredges
 evstream
 evfall
+evbankedges
+evstreamhead
 evcabin
 % bushes along both banks of the stream
 { newpath 240 214 moveto 330 196 lineto 336 170 lineto 320 120 lineto } 15 evbushes
