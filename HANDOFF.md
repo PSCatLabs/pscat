@@ -643,8 +643,10 @@ renders eight examples in both and compares block-downsampled output).
    #238 is the chalk gallery piece, `gallery/chalkboard_lecture.ps`: Euler's
    formula on three `dcboard` panels. Draw each panel's chalk right after
    its own `dcboard`, because `dcchalk` takes the last board as its
-   surface. A `/Ghost` proc that passes a procedure must `load` it, and a
-   piece's names belong in its own dict (`notes/238-chalkboard-lecture.md`).
+   surface. A `/Ghost` proc that passes a procedure must `load` it. Never
+   `def` an operator's name (`loop`, `lt`) in a piece: handscript and
+   strokeglyphs aren't bound and will pick it up
+   (`notes/238-chalkboard-lecture.md`).
    #239 shipped `lib/drycrayon.ps` (`dy-`): `dycrayon` (a core and a rim
    `dkstroke` per subpath, one wax level each), `dypaper`, the crayon box
    (`dybox`, `dycolors`, `dycolor`) and six child motions with paintkit's

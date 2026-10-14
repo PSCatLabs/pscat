@@ -38,12 +38,14 @@ from mathkit (#237), and the chalk and board from drychalk (#235).
     afterwards.
   - No stroke crosses a joint, because the next panel's board would cover it.
   - Each panel's `/Tray` segment meets the next with no gap.
-- **The piece's names live in `lectdict`.** That keeps gs's userdict lookups
-  fast (notes/235), and every name carries an `lc` prefix. Two collisions
-  happened before the prefix:
-  - a helper named `loop`;
-  - a variable named `lt`, which shadowed the operator for the rest of the
-    page.
+- **The piece's names live in `lectdict`,** which keeps gs's userdict
+  lookups fast (notes/235). The procedures and globals carry an `lc` prefix;
+  short locals do not.
+- **Never `def` an operator's name in a piece.** handscript and strokeglyphs
+  are not bound (rule 5's list covers artkit, paintkit, drykit, drychalk and
+  mathkit), so they look operators up at run time through whatever dict is
+  on top, and a private dict doesn't protect them. A helper named `loop` and
+  a local named `lt` each broke the page that way.
 - **A `/Ghost` procedure passed through a helper must be `load`ed**
   (`/Ghost /bgh load`). Otherwise building the dict runs it.
 - **`mkframe` takes `llx lly urx ury`,** not `x y w h`.
@@ -52,15 +54,19 @@ from mathkit (#237), and the chalk and board from drychalk (#235).
   the layout's irregularity rather than fixed coordinates.
 - **Size against the reference numbers.** The stroke width is 1/16 to 1/18
   of cap height, inside C1–C7's range. The cap height is about 1/30 of the
-  board, smaller than C7's 1/11 of a panel: a whole derivation has to fit on
-  one board.
+  board, against about 1/12 to 1/22 in C1 and C7. A whole derivation has to
+  fit on one board, and a bigger hand means fewer terms per line and fewer
+  lines. That trade-off is left to the maintainer's eye.
 
 **Cost** (CPU `user`, release build, 144 dpi, a shared machine):
 
 | | pscat | gs 10 |
 |---|---|---|
-| the 2x gallery still (`2 2 scale`, `--page 2880x1800`) | 7.2s | |
-| `--dpi 144` / `-r144` | 7.2s | 3.4s |
+| the 2x gallery still (`2 2 scale`, `--page 2880x1700`) | 7.2–8.5s | |
+| `--dpi 144` / `-r144` | 7.2s | 3.4–4.0s |
+
+The gs render matches pscat's by eye. The mean luma difference is 1.1/255,
+measured against no control.
 
 This is well under DRYMEDIA.md 6.2's 30 s board budget. The piece lints
 clean (`--lint`). It isn't in the CI lint list, so it adds no CI time.

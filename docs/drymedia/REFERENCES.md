@@ -51,7 +51,7 @@ The comparison panels in `prototypes/` (`chalk_compare.jpg`) contain crops from 
 
 It is CC BY-SA 4.0, with all five attributions.
 
-`lecture_compare_238.png` (#238) puts the `gallery/chalkboard_lecture.ps` still above C7, C1, C11 (Fermi), C5 and C3, with 1:1 details of the render. It contains the C3 crop, so it is CC BY-SA 3.0, with every attribution. It is built by `prototypes/lecture_compare.py`.
+`lecture_compare_238.png` (#238) puts the `gallery/chalkboard_lecture.ps` still above C7, C1, C11 (Fermi), C5 and C3, with 1:1 details of the render. It contains the C3 crop (CC BY-SA 3.0), so like `chalk_compare_235.jpg` it is CC BY-SA 4.0, with every attribution. It is built by `prototypes/lecture_compare.py`.
 
 The crayon comparison panels (#239) are built by `prototypes/crayon_compare.py`. `crayon_compare.png` uses only the CC0 crops from MrAlanKoh's rhino drawing, so it stays CC0 apart from pscat's own renders. `crayon_compare_figure.png` contains `crayon_child_tadpole_3y`, so it is CC BY-SA 3.0, with the source's attribution.
 
@@ -84,8 +84,8 @@ reuse; the others add nothing the crops above lack:
 | C7 | `chalk_full_board` | A full lecture board in two sliding panels. Lines are about 1.6–2× cap height apart. Text is roughly upright with drifting baselines, plus double underlines, arrows, small diagrams and vertical dividers. Two felt erasers sit on the ledge. | Board layout data for #237/#238. Cap height is about 1/11 of a panel's height. Stroke/cap is about 1/13 here, with a thicker stick than C1. |
 | C8 | `chalk_double_underline` | A "double underline" is two separate strokes, not parallel. The second is shorter and converges on the first. | An underline is two strokes with independent jitter. Never offset copies. |
 | C9 | `chalk_ledge_erasers` | Erasers on the tray sit in a light halo of fallen dust. The tray lip reads lighter than the wall below it. | Ledge dust is a fallout deposit concentrated at the tray, densest around erasers. |
-| C11 | `chalk_fermi_circle` | Fermi's board (1940s press photo): a diagram drawn freehand at lecture scale. The circles are slightly out of round and their strokes are heavy and even. The formulas above it are written larger than the diagram's labels. | Diagrams are drawn bigger and bolder than the writing. A freehand circle is one long stroke whose closure overshoots. Used for #238's unit circle. |
 | C10 | `chalk_FAKE_font_composite` | **What a fake looks like:** a TeX font pasted onto a board photo. Strokes are uniform, perfectly white and perfectly smooth, with typeset spacing and identical repeated glyphs. | The negative example for #238. Every trait above is missing here. |
+| C11 | `chalk_fermi_circle` | Fermi's board (1940s press photo): a diagram drawn freehand at lecture scale. The circles are slightly out of round and their strokes are heavy and even. The formulas above it are written larger than the diagram's labels. | Diagrams are drawn bigger and bolder than the writing. A freehand circle is one long stroke whose closure overshoots. Used for #238's unit circle. |
 
 ### Board numbers (for #236, #237, #238)
 

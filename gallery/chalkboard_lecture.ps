@@ -1,7 +1,7 @@
 %!PS-Adobe-3.0
 %%Title: Lecture 14 (a chalkboard after the lecture)
 %%Creator: pscat gallery (issue #238)
-%%BoundingBox: 0 0 1440 900
+%%BoundingBox: 0 0 1440 850
 %%EndComments
 
 % A slate chalkboard as a professor left it after the lecture: Euler's
@@ -24,8 +24,8 @@
 % the formulas laid out by lib/mathkit.ps and the words written with
 % lib/strokeglyphs.ps. No alpha, so Ghostscript renders it too.
 %
-%   pscat --page 1440x900 --png chalkboard_lecture.png gallery/chalkboard_lecture.ps
-%   gs -dSAFER --permit-file-read=lib/ -sDEVICE=png16m -r72 -g1440x900 \
+%   pscat --page 1440x850 --png chalkboard_lecture.png gallery/chalkboard_lecture.ps
+%   gs -dSAFER --permit-file-read=lib/ -sDEVICE=png16m -r72 -g1440x850 \
 %      -o chalkboard_lecture.png gallery/chalkboard_lecture.ps
 
 (lib/artkit.ps) run
@@ -40,6 +40,10 @@
 % userdict (a fuller userdict slows every lookup in gs, notes/235).
 /lectdict 200 dict def
 lectdict begin
+
+% The board was laid out on a 900pt page; drop it 50pt so the wall shows
+% evenly above and below the frame.
+0 -50 translate
 
 % ------------------------------------------------------------ helpers
 

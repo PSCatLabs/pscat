@@ -9,7 +9,7 @@ repo root:
         gallery/renders/chalkboard_lecture.png docs/drymedia/lecture_compare_238.png
 
 Needs Pillow. The detail boxes are pixel boxes in the 2x still
-(2880x1800).
+(2880x1700).
 """
 import sys
 from PIL import Image, ImageDraw, ImageFont
@@ -55,7 +55,7 @@ row3 = [
 ]
 row4 = [
     ('render 1:1: the boxed result, yellow chalk pressed hard', render.crop((1000, 1180, 1760, 1440))),
-    ('render 1:1: the freehand unit circle', render.crop((1960, 280, 2700, 1020)).resize((360, 360), Image.LANCZOS)),
+    ('render 1:2: the freehand unit circle', render.crop((1960, 280, 2700, 1020)).resize((360, 360), Image.LANCZOS)),
     ('C3 Einstein board fraction bars (decltype, CC BY-SA 3.0)', fit_h(ref('chalk_einstein_fraction_bars'), 260)),
 ]
 
@@ -81,5 +81,5 @@ for row in (row2, row3, row4):
         canvas.paste(im, (x, y + lab - 8))
         x += im.width + pad
     y += row_height(row) + pad
-d.text((pad, y), 'Licence: the panel is CC BY-SA 3.0 (it contains the C3 crop), with every attribution above; the render is pscat output.', font=small, fill=ink)
+d.text((pad, y), 'Licence: the panel is CC BY-SA 4.0 (it contains the CC BY-SA 3.0 C3 crop; as chalk_compare_235.jpg), with every attribution above; the render is pscat output.', font=small, fill=ink)
 canvas.save(out, optimize=True)
