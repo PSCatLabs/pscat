@@ -671,6 +671,8 @@ renders eight examples in both and compares block-downsampled output).
    `userdict /dkBatch` (pinned by `drycrayon-drykit-contract`). Passes and
    layering are declared (`/Pass`, `/Over`), because drykit can't read the
    page. `notes/239-drycrayon.md` has the tuning numbers against the crops.
+   #240 is the gallery piece on it, `gallery/crayon_drawing.ps` (a child's
+   house, family, sun and name); `notes/240-crayon-drawing.md`.
    Typewriter (epic #209): **read `docs/TYPEWRITER.md` and
    `docs/typewriter/REFERENCES.md` before starting #211–#215.** The
    #210 design (Courier Prime outlines embedded in a Type 3 `/Typewriter`,
