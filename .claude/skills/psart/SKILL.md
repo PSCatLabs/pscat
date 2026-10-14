@@ -285,6 +285,14 @@ Which tool to pick:
   `frnd`, so they are deterministic under your `srand`.
   `examples/paintkit_motion_demo.ps` shows each beside its brush.
 
+**Painting a landscape?** Read `docs/guides/landscape-cookbook.md` first: one
+recipe per element (sky, clouds, mountains, mist, far forest, evergreens,
+bushes, water, reflection, foreground bank, grass), each with the tools, the
+order, the settings that matter, the usual failure with its fix and a complete
+snippet that renders as it stands (360x240 pt: `pscat --page 360x240 --dpi 144
+--png out.png recipe.ps`), plus the order a wet-on-wet landscape is painted in.
+Copy a recipe and change the numbers rather than re-deriving the technique.
+
 (A fuller paintkit tour, and an audit of the parameter docs, is issue
 #99 — this section is the short orientation, not that sweep.)
 
