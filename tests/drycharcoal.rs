@@ -18,7 +18,7 @@ const LIBS: [&str; 5] = [
 ];
 
 /// A `w` x `h` point page at `scale` device pixels per point, on drawing
-/// paper (seed 3, the specimen's lower relief), in charcoal, with `src` run.
+/// paper (seed 3, drykit's defaults), in charcoal, with `src` run.
 fn render(w: u32, h: u32, scale: f32, src: &str) -> Interp {
     let mut it = Interp::with_page_scaled(w, h, scale).expect("page");
     for path in LIBS {
@@ -27,7 +27,7 @@ fn render(w: u32, h: u32, scale: f32, src: &str) -> Interp {
             .unwrap_or_else(|e| panic!("{path} failed to load: {}", it.error_report(&e)));
     }
     it.run_str(&format!(
-        "<< /Surface /drawing /Relief 0.35 /Seed 3 >> dksurface \
+        "<< /Surface /drawing /Seed 3 >> dksurface \
          userdict /dkGround get aload pop setrgbcolor clippath fill \
          0.11 0.1 0.1 setrgbcolor {src}"
     ))
