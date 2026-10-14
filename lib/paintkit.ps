@@ -9357,8 +9357,9 @@ systemdict /setalpha known /pwhasalpha exch def
 %
 %   opts pkfeather     the motion: strokes across the current path's edge,
 %                      along its local normal (paints nothing)
-%   opts pkbrushedge   the one-call edge: the mass colour pulled out, then
-%                      the backdrop (/Under) cut back in, each through a brush
+%   opts pkbrushedge   the one-call edge: the backdrop (/Under) cut back in,
+%                      then the mass colour (the current colour, or /Mass)
+%                      pulled out, each through a brush
 %
 % `pkfeather` follows the motion family's contract (see "Brush motions"
 % above): it replaces the current path with the strokes, paints nothing, and
@@ -9641,6 +9642,74 @@ systemdict /setalpha known /pwhasalpha exch def
 %   << /Under { pop pop 0.5 0.5 0.5 } >> pkbrushedge
 %   count 1 sub eq currentpoint 0 eq exch 0 eq and and newpath
 %   (the caller's path and operand stack survive) mustbe
+%
+%   % /Mass (issue #426): the pulled-out colour, in /Under's three forms.
+%   { newpath 0 0 moveto 50 0 lineto << /Mass [ 0 0 ] >> pkbrushedge }
+%   /pkbrushedge-mass-must-be-a-3-element-array
+%   (/Mass [ 0 0 ]) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Mass [ 0 2 0 ] >> pkbrushedge }
+%   /pkbrushedge-mass-components-must-be-0-to-1
+%   (/Mass [ 0 2 0 ]) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Mass [ 0 (a) 0 ] >> pkbrushedge }
+%   /pkbrushedge-mass-components-must-be-numbers
+%   (/Mass [ 0 (a) 0 ]) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Mass /nosuchpaint >> pkbrushedge }
+%   /pkbrushedge-mass-unknown-pigment-see-PigmentNames
+%   (/Mass /nosuchpaint) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Mass { pop pop 1 2 } >> pkbrushedge }
+%   /pkbrushedge-mass-procedure-must-return-3-numbers
+%   (/Mass returning two numbers) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Mass { pop pop 0 0 5 } >> pkbrushedge }
+%   /pkbrushedge-mass-procedure-results-must-be-0-to-1
+%   (/Mass returning 5) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Mass { pop pop 0 (a) 0 } >> pkbrushedge }
+%   /pkbrushedge-mass-procedure-results-must-be-numbers
+%   (/Mass returning a string) mustguard
+%
+%   % A bad /Mass answer mid-call, after a good one has set a stroke's
+%   % colour, leaves no gsave open: the caller's colour is back.
+%   gsave 0.125 0 0 setrgbcolor /zzq 0 def mark
+%   { newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath
+%     << /Mass { pop pop /zzq zzq 1 add def zzq 1 eq { 1 1 1 } { 1 2 } ifelse } >>
+%     pkbrushedge } stopped /zzst exch def cleartomark
+%   zzst currentrgbcolor pop pop 0.125 sub abs 0.01 lt and zzq 2 eq and grestore
+%   (a bad /Mass answer mid-call unwinds every gsave) mustbe
+%
+%   { newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath
+%     << /Mass [ 0.2 0.3 0.1 ] >> pkbrushedge
+%     << /Mass /sapgreen /Under /titaniumwhite >> pkbrushedge
+%     << /Mass { pop pop 0.2 0.3 0.1 } /Under { pop pop 1 1 1 } >> pkbrushedge }
+%   (pkbrushedge with each form of /Mass) mustpass
+%
+%   % An array /Mass is the colour the outward strokes are painted in.
+%   /zzmok true def
+%   newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath
+%   << /Mass [ 0.2 0.4 0.6 ] /Brush { currentrgbcolor 0.6 sub abs 0.01 gt
+%        exch 0.4 sub abs 0.01 gt or exch 0.2 sub abs 0.01 gt or
+%        { /zzmok false def } if newpath } >> pkbrushedge
+%   newpath zzmok (an array /Mass colours the outward strokes) mustbe
+%
+%   % A procedural /Mass is asked once per outward stroke, at its start:
+%   % each /Brush call paints one stroke, in the colour the procedure gives
+%   % at that stroke's first point (a gradient along x here).
+%   /zzmf { 100 div 0 max 1 min } def
+%   /zzmc 0 def /zzmb 0 def /zzmok true def
+%   newpath 0 0 moveto 100 0 lineto 100 40 lineto 0 40 lineto closepath
+%   << /Mass { /zzmc zzmc 1 add def pop zzmf 0 0.5 }
+%      /Brush { /zzmb zzmb 1 add def /zzm1 null def /zzmm 0 def
+%        { /zzmm zzmm 1 add def zzm1 null eq { 2 array astore /zzm1 exch def } { pop pop } ifelse }
+%        { pop pop } { 6 { pop } repeat } { } pathforall
+%        zzmm 1 ne { /zzmok false def } if
+%        currentrgbcolor pop pop zzm1 0 get zzmf sub abs 0.01 gt { /zzmok false def } if
+%        newpath } >> pkbrushedge
+%   newpath zzmok zzmb 20 gt and zzmc zzmb eq and
+%   (a procedural /Mass colours each outward stroke where it starts) mustbe
 %%EndSelfTest
 
 % x y -> bool   is the point inside the mass (mfreg)?
@@ -9937,25 +10006,86 @@ systemdict /setalpha known /pwhasalpha exch def
     } for
 } bind def
 
-% x y -> -   (procedural /Under: ask it for the backdrop at x y, check the
-% answer, and set it as the colour). The procedure runs with nothing of
-% pkbrushedge's on the operand stack.
+% x y -> -   (a colour procedure, /Under or /Mass: ask pecolp for the colour
+% at x y, check the answer, and set it as the colour). The procedure runs
+% with nothing of pkbrushedge's on the operand stack; a bad answer is named
+% under the key's guard prefix pecolx, such as (pkbrushedge-under).
 % @internal
-/peunderat {
+/pecolat {
     count 2 sub /pec0 exch def
-    peUnderProc
+    pecolp
     count pec0 sub 3 ne {
         count pec0 sub dup 0 gt { { pop } repeat } { pop } ifelse
-        pkbrushedge-under-procedure-must-return-3-numbers
+        pecolx (-procedure-must-return-3-numbers) pugrd
     } if
     3 array astore /peur exch def
     0 1 2 {
         peur exch get dup type dup /integertype ne exch /realtype ne and
-            { pop pkbrushedge-under-procedure-results-must-be-numbers } if
+            { pop pecolx (-procedure-results-must-be-numbers) pugrd } if
         dup 0 lt exch 1 gt or
-            { pkbrushedge-under-procedure-results-must-be-0-to-1 } if
+            { pecolx (-procedure-results-must-be-0-to-1) pugrd } if
     } for
     peur aload pop setrgbcolor
+} bind def
+
+% opts /Key (prefix) -> value mode   (one colour key, /Under or /Mass:
+% mode 0 unset (value null), 1 an [r g b] array (a pigment name resolved),
+% 2 a procedure x y -> r g b. Guards are named with the prefix, such as
+% pkbrushedge-under-must-be-a-3-element-array.)
+% @internal
+/pecolkey {
+    /pekp exch def /pekk exch def /peko exch def
+    peko pekk known not { null 0 } {
+        /pekv peko pekk get def
+        /pekv load xcheck {
+            /pekv load type dup /arraytype eq exch /packedarraytype eq or not
+                { pekp (-must-be-a-3-element-array) pugrd } if
+            /pekv load 2
+        } {
+            /pekv load type /nametype eq { /pekv pekp pekv pupig def } if
+            /pekv load type /arraytype ne { pekp (-must-be-a-3-element-array) pugrd } if
+            pekv length 3 ne { pekp (-must-be-a-3-element-array) pugrd } if
+            0 1 2 {
+                pekv exch get dup type dup /integertype ne exch /realtype ne and
+                    { pekp (-components-must-be-numbers) pugrd } if
+                dup 0 lt exch 1 gt or { pekp (-components-must-be-0-to-1) pugrd } if
+            } for
+            pekv 1
+        } ifelse
+    } ifelse
+} bind def
+
+% -> -   (the current path is pkfeather's strokes: paint each with one
+% /Brush call, in the colour pecolp gives at the stroke's start; see pecolat)
+% The strokes are read back from the path first:
+% [ /m x y /l x y ] or [ /m x y /c x1 y1 x2 y2 x3 y3 ] each.
+% @internal
+/pestrokes {
+    [ { /m 3 1 roll } { /l 3 1 roll } { /c 7 1 roll } { } pathforall ]
+    /pesegs exch def
+    /pei 0 def
+    {
+        pei pesegs length ge { exit } if
+        pesegs pei get /m eq {
+            pesegs pei 1 add get pesegs pei 2 add get pecolat
+            newpath pesegs pei 1 add get pesegs pei 2 add get moveto
+            /pei pei 3 add def
+            pei pesegs length lt {
+                pesegs pei get /l eq {
+                    pesegs pei 1 add get pesegs pei 2 add get lineto
+                    /pei pei 3 add def
+                } {
+                    pesegs pei get /c eq {
+                        pesegs pei 1 add 6 getinterval aload pop curveto
+                        /pei pei 7 add def
+                    } if
+                } ifelse
+            } if
+            pebrush
+        } {
+            /pei pei 1 add def
+        } ifelse
+    } loop
 } bind def
 
 % any -> bool   an integer or a real?
@@ -9997,9 +10127,10 @@ systemdict /setalpha known /pwhasalpha exch def
 /pegrestore { grestore /pedepth pedepth 1 sub def } bind def
 
 % @kind: Procedure
-% @summary: Brushes the edge of a filled mass in one call: short strokes in the current colour pulled out across the current path's edge, then, with /Under, strokes in the backdrop colour cut back into the mass, so the two interlock and the ruled vector edge reads as painted. Fill the mass first; the path is the mass's outline (closed with closepath: holes and mirrored spaces work) or just the visible edge left open, whose out side is /Outward. Every pkfeather key is accepted and passed on (except /Toward, which this sets), and each pass is painted by /Brush. /Under takes what pkwet's /Under takes, plus a pigment name; a procedural /Under is asked once per inward stroke, at the stroke's start, so a graded sky or water cuts back in its own colour all along. The caller's path, colour and graphics state survive. A mass built from several overlapping closed blobs (a cloud bank, a bush of ellipses) can go in as one path: an edge lying inside the others is hidden, and is not brushed. Deterministic under the caller's own srand.
+% @summary: Brushes the edge of a filled mass in one call: short strokes in the mass's colour (the current colour, or /Mass) pulled out across the current path's edge, then, with /Under, strokes in the backdrop colour cut back into the mass, so the two interlock and the ruled vector edge reads as painted. Fill the mass first; the path is the mass's outline (closed with closepath: holes and mirrored spaces work) or just the visible edge left open, whose out side is /Outward. Every pkfeather key is accepted and passed on (except /Toward, which this sets), and each pass is painted by /Brush. /Under takes what pkwet's /Under takes, plus a pigment name; a procedural /Under is asked once per inward stroke, at the stroke's start, so a graded sky or water cuts back in its own colour all along. /Mass takes the same forms for the pulled-out colour, so a mass lit along its length (a meadow brighter toward the glow) carries its own gradient to its edge. The caller's path, colour and graphics state survive. A mass built from several overlapping closed blobs (a cloud bank, a bush of ellipses) can go in as one path: an edge lying inside the others is hidden, and is not brushed. Deterministic under the caller's own srand.
 % @example: newpath 0 120 moveto 120 150 240 110 360 135 curveto 360 0 lineto 0 0 lineto closepath gsave 0.18 0.30 0.12 setrgbcolor fill grestore 0.18 0.30 0.12 setrgbcolor << /Under [ 0.62 0.72 0.86 ] /Slant 10 >> pkbrushedge
 % @param: /Under [rgb array or name] the colour behind the mass, cut back into it by the inward strokes; an [r g b] array, a pigment name such as /titaniumwhite (see PigmentNames), or a procedure `x y -> r g b` (three numbers in 0..1, user space; a pure function, as pkwet's) asked at each inward stroke's start. Unset paints the outward strokes only (default unset)
+% @param: /Mass [rgb array or name] the mass's colour, pulled out over the backdrop by the outward strokes; an [r g b] array, a pigment name, or a procedure `x y -> r g b` (three numbers in 0..1, user space; a pure function) asked at each outward stroke's start, so a graded mass keeps its gradient along the edge. A procedure costs one /Brush call per outward stroke, so even a constant one paints differently from the array form. Unset uses the current colour (default unset)
 % @param: /Brush [proc] the brush both passes are painted with: a procedure that paints the current path in the current colour, normally a preset with its options, such as `{ << /Width 2 >> pkdry }` (default `{ << /Width 5 /Charge 0.8 /Depletion 0.9 /Edge 0.6 /Grain 10 >> pkbroad }`, a small flat brush that runs dry as it crosses, so each stroke breaks up at its far end)
 % @param: /InLength [fraction of /Length] the inward strokes' length as a fraction of the outward ones'; must be > 0. Each inward stroke covers the stretch of the normal an outward one does (its /Overlap is mirrored), so most of it lies outside the mass and only its tip cuts in (default 1)
 % @param: /InSpacing [multiple of /Spacing] the inward strokes' spacing as a multiple of the outward ones'; must be > 0. Sparser cuts nick the edge; as dense as the outward strokes, they rule a pale band just inside it (default 2)
@@ -10017,29 +10148,10 @@ systemdict /setalpha known /pwhasalpha exch def
     /peinspace peopts0 /InSpacing 2 pkgetdef def
     /peinspace load xcheck { pkbrushedge-inspacing-must-not-be-a-procedure } if
     peinspace 0 le { pkbrushedge-inspacing-must-be-positive } if
-    % /Under: none, a colour (array or pigment name), or a backdrop procedure.
-    /pemode 0 def
-    peopts0 /Under known {
-        /peUnder peopts0 /Under get def
-        /peUnder load xcheck {
-            /peUnder load type dup /arraytype eq exch /packedarraytype eq or not
-                { pkbrushedge-under-must-be-a-3-element-array } if
-            /peUnderProc /peUnder load def
-            /pemode 2 def
-        } {
-            /peUnder load type /nametype eq {
-                /peUnder (pkbrushedge-under) peUnder pupig def
-            } if
-            /peUnder load type /arraytype ne { pkbrushedge-under-must-be-a-3-element-array } if
-            peUnder length 3 ne { pkbrushedge-under-must-be-a-3-element-array } if
-            0 1 2 {
-                peUnder exch get dup type dup /integertype ne exch /realtype ne and
-                    { pkbrushedge-under-components-must-be-numbers } if
-                dup 0 lt exch 1 gt or { pkbrushedge-under-components-must-be-0-to-1 } if
-            } for
-            /pemode 1 def
-        } ifelse
-    } if
+    % /Under (the backdrop) and /Mass (the pulled-out colour): each none, a
+    % colour (array or pigment name), or a procedure x y -> r g b.
+    peopts0 /Under (pkbrushedge-under) pecolkey /pemode exch def /peUnder exch def
+    peopts0 /Mass (pkbrushedge-mass) pecolkey /pemmode exch def /peMass exch def
 
     % Every gsave below goes through pegsave, which counts it, so an error
     % raised in the middle (a bad pkfeather key, a backdrop procedure's bad
@@ -10055,40 +10167,26 @@ systemdict /setalpha known /pwhasalpha exch def
         } if
         pemode 2 eq {
             % One brush call per stroke, each in the backdrop where it
-            % starts. The strokes are read back from the path first:
-            % [ /m x y /l x y ] or [ /m x y /c x1 y1 x2 y2 x3 y3 ] each.
+            % starts.
             pegsave
-                /in peopts pkfeather
-                [ { /m 3 1 roll } { /l 3 1 roll } { /c 7 1 roll } { } pathforall ]
-                /pesegs exch def
-                /pei 0 def
-                {
-                    pei pesegs length ge { exit } if
-                    pesegs pei get /m eq {
-                        pesegs pei 1 add get pesegs pei 2 add get peunderat
-                        newpath pesegs pei 1 add get pesegs pei 2 add get moveto
-                        /pei pei 3 add def
-                        pei pesegs length lt {
-                            pesegs pei get /l eq {
-                                pesegs pei 1 add get pesegs pei 2 add get lineto
-                                /pei pei 3 add def
-                            } {
-                                pesegs pei get /c eq {
-                                    pesegs pei 1 add 6 getinterval aload pop curveto
-                                    /pei pei 7 add def
-                                } if
-                            } ifelse
-                        } if
-                        pebrush
-                    } {
-                        /pei pei 1 add def
-                    } ifelse
-                } loop
+                /pecolp /peUnder load def /pecolx (pkbrushedge-under) def
+                /in peopts pkfeather pestrokes
             pegrestore
         } if
         % Out, last: the mass's own colour pulled over what is behind it, on
-        % top of the nicks, so the two interlock.
-        pegsave /out peopts pkfeather pebrush pegrestore
+        % top of the nicks, so the two interlock. That is the current colour,
+        % or /Mass: one colour, or (a procedure) one brush call per stroke,
+        % each in the mass's colour where it starts (issue #426).
+        pemmode 0 eq { pegsave /out peopts pkfeather pebrush pegrestore } if
+        pemmode 1 eq {
+            pegsave peMass aload pop setrgbcolor /out peopts pkfeather pebrush pegrestore
+        } if
+        pemmode 2 eq {
+            pegsave
+                /pecolp /peMass load def /pecolx (pkbrushedge-mass) def
+                /out peopts pkfeather pestrokes
+            pegrestore
+        } if
     pegrestore
     } stopped { pedepth { grestore } repeat stop } if
 } bind def
