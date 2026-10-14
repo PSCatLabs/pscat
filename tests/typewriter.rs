@@ -52,7 +52,9 @@ fn ink(it: &Interp) -> Vec<u8> {
         .pixmap
         .pixels()
         .iter()
-        .map(|p| 255 - ((u32::from(p.red()) + u32::from(p.green()) + u32::from(p.blue())) / 3) as u8)
+        .map(|p| {
+            255 - ((u32::from(p.red()) + u32::from(p.green()) + u32::from(p.blue())) / 3) as u8
+        })
         .collect()
 }
 
@@ -96,7 +98,11 @@ fn the_same_seeds_type_the_same_page_byte_for_byte() {
     let a = page("/Machine 7 /Seed 3");
     assert_eq!(a, page("/Machine 7 /Seed 3"), "same seeds, another page");
     assert_ne!(a, page("/Machine 7 /Seed 4"), "a new /Seed changed nothing");
-    assert_ne!(a, page("/Machine 8 /Seed 3"), "a new /Machine changed nothing");
+    assert_ne!(
+        a,
+        page("/Machine 8 /Seed 3"),
+        "a new /Machine changed nothing"
+    );
     // Plain use, without tw-setup: the load-time defaults and frame.
     let plain = || {
         ink(&render(&format!(
@@ -127,10 +133,16 @@ fn repeated_strikes_differ_but_a_machines_quirks_hold() {
     // every document, and another machine's `e` is a different one.
     let quirks = "/Machine 2 /LineWear 0 /StrikeWear 0";
     let only = cells(&three_lines(&format!("{quirks} /Seed 5"), text));
-    assert!(only.iter().all(|c| *c == only[0]), "a machine quirk moved within a page");
+    assert!(
+        only.iter().all(|c| *c == only[0]),
+        "a machine quirk moved within a page"
+    );
     assert!(only[0].iter().any(|&p| p > 128), "the box missed the glyph");
     let other_doc = cells(&three_lines(&format!("{quirks} /Seed 6"), text));
-    assert_eq!(only[0], other_doc[0], "a new /Seed re-rolled the machine's quirks");
+    assert_eq!(
+        only[0], other_doc[0],
+        "a new /Seed re-rolled the machine's quirks"
+    );
     let other_machine = cells(&three_lines(
         "/Machine 3 /LineWear 0 /StrikeWear 0 /Seed 5",
         text,
@@ -150,7 +162,11 @@ fn a_second_strike_at_a_cell_differs_from_the_first() {
         )
     };
     assert_eq!(strike(0), strike(0));
-    assert_ne!(strike(0), strike(1), "strike index 1 retyped strike 0 exactly");
+    assert_ne!(
+        strike(0),
+        strike(1),
+        "strike index 1 retyped strike 0 exactly"
+    );
     assert_ne!(strike(1), strike(2));
 }
 
@@ -167,7 +183,10 @@ fn stringwidth_and_charpath_change_nothing_a_later_show_draws() {
     let blank = ink(&render(&format!(
         "{setup} ({PARAGRAPH}) stringwidth pop pop newpath 36 84 moveto ({PARAGRAPH}) false charpath newpath"
     )));
-    assert!(blank.iter().all(|&p| p == 0), "stringwidth or charpath painted");
+    assert!(
+        blank.iter().all(|&p| p == 0),
+        "stringwidth or charpath painted"
+    );
     // The advance is the pitch, whatever the glyph's variation.
     let mut it = render(&format!("{setup} (abc) stringwidth"));
     let stack: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
@@ -221,8 +240,14 @@ fn zero_variation_is_the_plain_courier_prime_face() {
     let spread = mean_diff(&worn, &ttf);
     eprintln!("zero variation vs the TTF: {same:.4}; with the ink spread: {spread:.4}");
     assert!(ttf.iter().any(|&p| p > 128), "the TTF did not render");
-    assert!(same < 0.05, "zero variation is not the plain face: {same:.4}");
-    assert!(spread > 20.0 * same.max(0.01), "the comparison cannot tell a spread stroke");
+    assert!(
+        same < 0.05,
+        "zero variation is not the plain face: {same:.4}"
+    );
+    assert!(
+        spread > 20.0 * same.max(0.01),
+        "the comparison cannot tell a spread stroke"
+    );
     // And with no variation, the seeds have nothing to vary.
     let seeded = ink(&render(&format!(
         "36 84 moveto << /Wear 0 /Ribbon 0 /Machine 9 /Seed 9 >> tw-setup ({PARAGRAPH}) show"
@@ -277,7 +302,9 @@ fn gs_ink(tag: &str, body: &str) -> Vec<u8> {
     let _ = std::fs::remove_dir_all(&dir);
     img.pixels()
         .iter()
-        .map(|p| 255 - ((u32::from(p.red()) + u32::from(p.green()) + u32::from(p.blue())) / 3) as u8)
+        .map(|p| {
+            255 - ((u32::from(p.red()) + u32::from(p.green()) + u32::from(p.blue())) / 3) as u8
+        })
         .collect()
 }
 
@@ -308,14 +335,20 @@ fn ghostscript_types_the_same_page_and_caches_no_glyph() {
     let strikes = cells(&gs_full);
     for i in 0..strikes.len() {
         for j in i + 1..strikes.len() {
-            assert_ne!(strikes[i], strikes[j], "gs replayed strike {i} as strike {j}");
+            assert_ne!(
+                strikes[i], strikes[j],
+                "gs replayed strike {i} as strike {j}"
+            );
         }
     }
     let quirks = cells(&gs_ink(
         "quirks",
         &driver("/Machine 2 /Seed 5 /LineWear 0 /StrikeWear 0"),
     ));
-    assert!(quirks.iter().all(|c| *c == quirks[0]), "gs moved a machine quirk");
+    assert!(
+        quirks.iter().all(|c| *c == quirks[0]),
+        "gs moved a machine quirk"
+    );
 
     // The same draws as pscat: compare cell by cell, by ink mass and
     // centroid, which do not depend on the two rasterizers' edges.
@@ -347,6 +380,12 @@ fn ghostscript_types_the_same_page_and_caches_no_glyph() {
     let same = centroid_gap(&gs, &ours);
     let differ = centroid_gap(&gs, &other);
     eprintln!("gs vs pscat: mean centroid gap {same:.3} px; another seed {differ:.3} px");
-    assert!(same < 0.25, "gs and pscat place the strikes differently: {same:.3} px");
-    assert!(differ > 2.0 * same, "another seed is as close ({differ:.3}): the check is too weak");
+    assert!(
+        same < 0.25,
+        "gs and pscat place the strikes differently: {same:.3} px"
+    );
+    assert!(
+        differ > 2.0 * same,
+        "another seed is as close ({differ:.3}): the check is too weak"
+    );
 }
