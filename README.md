@@ -548,6 +548,24 @@ so turning one control doesn't re-roll another's texture; bounded by
 the same path set twice, once in `pktrowel` and once in `pkoil`, for
 the contrast.
 
+`pktrowelplane` (issue #180) is the palette knife's other job: laying a
+*plane*, an area of a mountain face or a rock covered with overlapping blade
+pulls so it reads as one flat facet that carries the blade's texture. The
+current path is the area; `pktrowelplane` runs `pktrowel` along parallel
+rows across it, in `/Direction` degrees, with every `pktrowel` key passed
+straight through (`/Width`, `/Angle`, `/Coverage`, `/Scrape`, `/EdgeBuildup`,
+`/Colors`, `/Light`, `/Touch`, ...). The edge is crisp because the path is the
+clip, not because of the blade's geometry; each row overruns the area so the
+blade's trim, drag and skew fall outside it. Rows are `Width * cos(Angle) *
+(0.35 + 0.65 * Cover) * (1 - Overlap)` apart, and `/Overlap` unset follows
+`/Coverage` (a patchier blade overlaps more); `/RowJitter` and `/AngleJitter`
+keep the rows from being machine-parallel. Above about `/Overlap 0.5` the rows
+also cover each other's `/Scrape` nicks. Deterministic under the caller's own
+`srand`, at most 4000 rows, the path left as the caller had it. It works
+under any CTM and in Ghostscript. `examples/paintkit_plane_demo.ps`
+(`docs/paintkit_plane_demo.png`) builds a mountain from planes in pigment
+colours and sets out the direction and overlap.
+
 `pkfan` (issue #114) is the fan brush: foliage, evergreen branches,
 grasses, cloud feathering, soft texture. Its nearest relative is
 `pkdry`, and exactly one term separates them. `pkdry` holds each bristle

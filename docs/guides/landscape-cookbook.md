@@ -185,23 +185,23 @@ Two kinds. **Vapour** is spray, soft all through; use it for haze and wispy cirr
 
 ![Three peaks with knife snow and shadow planes](landscape/mountains.png)
 
-**Tools.** `pktrowel`, the palette knife (issue #111), and `clip`.
+**Tools.** `pktrowel`, the palette knife (issue #111), `pktrowelplane` (issue #180) for an area, and `clip`.
 
 **Order.** The silhouette in the range's colour. Then, with the silhouette set as the clip, a shadow plane and snow on every peak.
 
 **The key rules.**
 - **Clip the knife work to the silhouette.** A knife edge on a real ridge stops dead against the sky, and clipping is what gives your ridge the same crisp line. An unclipped pull overshoots into the sky.
-- **Shadow planes are clipped areas filled with pulls, never pulls along a shallow ridge.** A knife pull along a ridge just becomes a bar across the range. Hang a triangle off the right ridge (the peak, a point down the ridge, a point low inside the face), clip to it, and fill it with short vertical pulls; the blade's texture makes it read as a plane.
+- **Shadow planes are areas filled with pulls, never pulls along a shallow ridge.** A knife pull along a ridge just becomes a bar across the range. Hang a triangle off the right ridge (the peak, a point down the ridge, a point low inside the face) and fill it with `pktrowelplane`: one call lays overlapping vertical pulls clipped to the path, and the blade's texture makes it read as a plane.
 - **Snow goes down the lit face**, pulled a little steeper than the slope so it bites into the face, in several pulls that fall short by different amounts; the snow's lower edge is then ragged, as it is on a mountain.
 - Order each peak: shadow plane first, then snow, so the snow's edge overlaps the plane's.
 
-**Settings.** `/Width` is the blade length, in points; a narrow, loaded blade (`/Coverage 0.85`) closes overlapping pulls into one plane. `/Scrape` and `/Viscosity` set the streaks and chatter; leave `/Angle` near 12 degrees. The knife lays no base pass, so whatever is under it shows through the gaps; that is why the range is filled first.
+**Settings.** `/Width` is the blade length, in points; a narrow, loaded blade (`/Coverage 0.85`) with `/Overlap 0.5` closes overlapping pulls into one plane. `/Scrape` and `/Viscosity` set the streaks and chatter; leave `/Angle` near 12 degrees. The knife lays no base pass, so whatever is under it shows through the gaps; that is why the range is filled first.
 
 **Failures.**
 - *Snow bars across the range.* A pull along the ridge; pull down the face.
 - *Ragged, floating snow on the sky.* No clip.
 
-Hand-built planes are an area-fill workaround. A native plane mode, `pktrowel` filling an area with blade pulls, is [#180](https://github.com/jeromebanks/postscript_interpreter/issues/180) (in progress); when it lands, this recipe's shadow plane becomes one call.
+`pktrowelplane` takes `/Direction` (the way the pulls run), `/Overlap` and every `pktrowel` key, and clips to the path it is given, so the plane's edge is crisp with no clip of your own. `examples/paintkit_plane_demo.ps` builds a whole peak from planes.
 
 ```postscript
 % recipe: mountains
@@ -233,16 +233,14 @@ Hand-built planes are an area-fill workaround. A native plane mode, `pktrowel` f
   /mt_ls mt_px mt_lx sub mt_py mt_ly sub div def       % left face: x per unit of drop
   /mt_rs mt_rx mt_px sub mt_py mt_ry sub div def       % right face
   % the shaded face first: a triangle hung off the right ridge, filled with
-  % vertical pulls. (A pull along a shallow ridge just becomes a bar.)
+  % vertical pulls by pktrowelplane. (A pull along a shallow ridge just becomes a bar.)
   /mt_d mt_py 60 sub 0.35 mul def
   /mt_x2 mt_px mt_d mt_rs 1.4 min mul add def
-  gsave
-    newpath mt_px mt_py moveto mt_x2 mt_py mt_d sub lineto
-    mt_px mt_x2 mt_px sub 0.15 mul add mt_py mt_d 1.7 mul sub lineto closepath clip
-    [ RANGE 0.78 shade ] aload pop setrgbcolor
-    mt_px 6 sub 6 mt_x2 6 add { /mt_x exch def
-      mt_x mt_py 2 add mt_x mt_py mt_d 2 mul sub 12 0.85 pull } for
-  grestore
+  [ RANGE 0.78 shade ] aload pop setrgbcolor
+  newpath mt_px mt_py moveto mt_x2 mt_py mt_d sub lineto
+  mt_px mt_x2 mt_px sub 0.15 mul add mt_py mt_d 1.7 mul sub lineto closepath
+  << /Width 12 /Direction -90 /Angle 12 /Coverage 0.85 /Overlap 0.5 /Viscosity 0.7
+     /Scrape 0.35 /Drag 0.5 /EdgeBuildup 0.15 /ColorJitter 0.03 >> pktrowelplane
   % snow, pulled down the lit face a little steeper than the slope
   SNOW aload pop setrgbcolor
   0 1 4 { /mt_k exch def
@@ -756,7 +754,6 @@ A recipe is a workaround where one of these would be one call. When one lands, u
 
 | Issue | What it adds | Recipe it changes |
 |---|---|---|
-| [#180](https://github.com/jeromebanks/postscript_interpreter/issues/180) (in progress) | `pktrowel` plane mode: fill an area with blade pulls | 3 Mountains (shadow planes) |
 | [#229](https://github.com/jeromebanks/postscript_interpreter/issues/229) | `/TipColor` and `/TipReach`: a lit tip on a dark stem | 6 Evergreens, 11 Grass |
 | [#230](https://github.com/jeromebanks/postscript_interpreter/issues/230) | `/Colors` on `pkdry` and `pkoil`'s ridges | 4 Mist, 10 Bank, foam on water |
 | [#345](https://github.com/jeromebanks/postscript_interpreter/issues/345) | light-aware massing for clouds and bushes | 2 Clouds, 7 Bushes |

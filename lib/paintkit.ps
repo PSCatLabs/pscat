@@ -2714,6 +2714,322 @@
     } if
 } bind def
 
+% --- palette-knife plane (issue #180) ---------------------------------
+% opts pktrowelplane -
+%
+% A palette knife's other main job, after cutting a highlight edge, is
+% laying a *plane*: covering a mountain face or a rock with overlapping
+% blade pulls so it reads as one flat facet that carries the blade's own
+% texture. `pktrowel` only walks a centerline, and faking a plane with it
+% failed twice in gallery/alpine_lake.ps (#118): a pull along a shallow
+% ridge draws a bar across the range, and pulls stepped down the ridge
+% make stripes. What worked was a hand-built triangle, a clip and
+% vertical pulls at a fixed spacing; this is that pattern as a procedure.
+%
+% The current path is the area. It is left exactly as the caller had it
+% (the whole procedure runs inside one gsave).
+%
+%   newpath x0 y0 moveto x1 y1 lineto x2 y2 lineto closepath
+%   << /Width 14 /Direction -80 /Colors [ [ .3 .3 .4 ] [ .5 .5 .6 ] ] >> pktrowelplane
+%
+% How it works. The path is flattened and projected on the pull direction
+% to find its extent (not `pathbbox`, whose box under a rotated matrix is
+% a loose one that differs between interpreters). The CTM is then rotated
+% so the pull direction is +x, and one `pktrowel` stroke is run along a
+% straight row for each lateral step across the area, every row overrunning
+% the area at both ends so that the blade's entry/exit trim, its /Drag and
+% its skew all fall outside it. Every key `pktrowel` knows is passed
+% straight through, so the plane takes its blade, texture and colour keys
+% (/Width, /Angle, /Cover, /Coverage, /Viscosity, /Scrape, /EdgeBuildup,
+% /Drag, /Colors, /Light, /Touch, ...) with their meanings and defaults
+% unchanged. /Angle is the blade's angle to the pulls, as in `pktrowel`.
+%
+% Edge: crisp, and it comes from CLIPPING, not from blade geometry. The
+% path is made the clip before the first pull, so every pull ends dead
+% against the facet's boundary -- the same crisp ridge #118's clip gave.
+% (A blade cannot be steered along an arbitrary boundary, and an unclipped
+% plane would be a rectangle.) The clip nests inside whatever clip the
+% caller already has.
+%
+% Spacing and overlap. A blade of width W at angle A carrying /Cover C
+% deposits a band
+%
+%     F = W * cos(A) * (0.35 + 0.65*C)
+%
+% across the direction of travel (the same width `pktrowel` uses), and
+% rows are placed F * (1 - Overlap) apart, so /Overlap is the fraction of
+% each pull that the next one covers. Unset, it follows the blade's
+% coverage: 0.15 + 0.6 * (1 - Coverage), so a patchy blade (low /Coverage)
+% overlaps more and the pulls still close up into one plane while a full
+% blade (/Coverage 1) overlaps only enough to hide the seam. Spacing uses
+% the *nominal* width: a /Pressure profile that tapers each pull narrows
+% it below F and opens gaps between rows, which is a real knife effect;
+% lower /Overlap's effective value (raise it) to compensate.
+%
+% Texture. /RowJitter shifts each row sideways by up to that many points
+% and /AngleJitter tilts it by up to that many degrees, so the rows are
+% not machine-parallel. Two neighbouring rows can move toward each other
+% or apart, so the default shift is 0.4 of the overlap (F * Overlap * 0.4,
+% at most 0.8 of it between neighbours): a larger one opens a bare seam
+% between rows (seen in the first render, as a full-height white line). A
+% /RowJitter above half the overlap can do so, and so can an /AngleJitter
+% on a long row. Each pull also gets `pktrowel`'s own lane texture,
+% scrape and per-lane colour jitter.
+%
+% Determinism: the caller's own `N srand`, same doctrine as `pktrowel`.
+% The stream is two draws per row, then the row's `pktrowel` draws. So it is
+% fixed by what decides the number of rows, their length and the stops in
+% each: the area, /Direction, /Width, /Angle, /Cover, /Overlap (and /Coverage
+% when /Overlap is unset), /Drag and /Pitch (the overrun), /Lanes. Turning
+% any of those re-rolls the plane; turning a pure texture key (/Scrape,
+% /Viscosity, /EdgeBuildup, /ColorJitter, /Colors, ...) does not. That is
+% weaker than `pktrowel`'s own one-control-at-a-time promise.
+%
+% Safety: at most 4000 rows, checked before anything is drawn; each row is
+% also bounded by `pktrowel`'s own deposit budget.
+%
+% Scratch prefix tpl- (unused elsewhere), so the many `pt*` names the
+% `pktrowel` call overwrites on every row cannot clobber the loop's state.
+
+% x y tplpt -   (widens the s/t extent by one path point)
+% s is the coordinate along the pull direction, t across it (left of travel).
+% @internal
+/tplpt {
+    /tply exch def /tplpx exch def
+    tplpx tplcd mul tply tplsd mul add
+    dup tplsmin lt { dup /tplsmin exch def } if
+    dup tplsmax gt { /tplsmax exch def } { pop } ifelse
+    tplpx tplsd mul neg tply tplcd mul add
+    dup tpltmin lt { dup /tpltmin exch def } if
+    dup tpltmax gt { /tpltmax exch def } { pop } ifelse
+    /tplany true def
+} bind def
+
+% @kind: Procedure
+% @summary: A palette-knife plane: fills the current path's area with overlapping, parallel pktrowel pulls in one direction, so the area reads as a single flat facet carrying the blade's texture (a mountain face, a rock). The edge is crisp because the path is the clip. Takes every pktrowel key (Width, Angle, Cover, Coverage, Viscosity, Scrape, EdgeBuildup, Drag, Colors, ColorMix, Light, Touch, ...) unchanged, plus Direction, Overlap, RowJitter and AngleJitter. Row spacing follows the blade footprint and its overlap; deterministic under the caller's own srand; at most 4000 rows. Leaves the caller's path as it was.
+% @example: newpath 40 40 moveto 200 40 lineto 120 180 lineto closepath << /Width 16 /Direction -80 /Angle 12 >> pktrowelplane
+% @param: /Width [points] Blade length, passed to pktrowel; must be > 0 (default 24)
+% @param: /Direction [degrees] Direction the pulls travel, counterclockwise from +x in user space; -90 pulls straight down (default -90)
+% @param: /Overlap [fraction of a pull's band] How much of each pull the next one covers, 0 up to but not including 0.95; unset, 0.15 + 0.6*(1 - Coverage) (default unset)
+% @param: /RowJitter [points] Largest sideways shift of a row from its even position, deterministic under the caller's srand; more than half the overlap can open a seam (default 0.4 * the overlap width)
+% @param: /AngleJitter [degrees] Largest tilt of a row from the pull direction, deterministic under the caller's srand, 0 to 20 (default: the tilt that moves a row's far end 0.15 of the overlap, at most 1.5)
+% @param: /Angle [degrees] Blade angle to the pulls as in pktrowel, -80..80; footprint thickness goes as cos(Angle) (default 0)
+% @param: /Cover [0..1] Paint on the blade as in pktrowel; scales the band each pull deposits and so the row spacing (default 0.85)
+% @param: /Coverage [0..1] Fraction of each pull's contact area that deposits, as in pktrowel; also sets the default /Overlap (default 0.82)
+% @param: /Scrape [0..1] Lengthwise thinning of each pull, as in pktrowel (default 0.15)
+% @param: /EdgeBuildup [0..1] Darker ridges at the two blade edges of each pull, as in pktrowel (default 0.35)
+% @param: /Colors [array of rgb arrays] 1 to 8 loaded colors across the blade, as in pktrowel (default unset)
+% @param: /Touch [0..1] How hard the blade presses into the canvas set by pkcanvas, as in pktrowel (default unset)
+/pktrowelplane {
+    /tplopts exch def
+    /tplWidth tplopts /Width 24 pkgetdef def
+    /tplWidth load xcheck { pktrowelplane-width-must-not-be-a-procedure } if
+    tplWidth 0 le { pktrowelplane-width-must-be-positive } if
+    /tplDir tplopts /Direction -90 pkgetdef def
+    /tplDir load xcheck { pktrowelplane-direction-must-not-be-a-procedure } if
+    /tplLanes tplopts /Lanes 14 pkgetdef def
+    /tplAngle tplopts /Angle 0 pkgetdef def
+    /tplAngle load xcheck { pktrowelplane-angle-must-not-be-a-procedure } if
+    tplAngle -80 lt tplAngle 80 gt or { pktrowelplane-angle-must-be-minus80-to-80 } if
+    /tplCover tplopts /Cover tplopts /Load 0.85 pkgetdef pkgetdef def
+    /tplCover load xcheck { pktrowelplane-cover-must-not-be-a-procedure } if
+    tplCover 0 lt tplCover 1 gt or { pktrowelplane-cover-must-be-0-to-1 } if
+    /tplCoverage tplopts /Coverage 0.82 pkgetdef def
+    /tplCoverage load xcheck { pktrowelplane-coverage-must-not-be-a-procedure } if
+    tplCoverage 0 lt tplCoverage 1 gt or { pktrowelplane-coverage-must-be-0-to-1 } if
+    /tplDrag tplopts /Drag 0.35 pkgetdef def
+    /tplDrag load xcheck { pktrowelplane-drag-must-not-be-a-procedure } if
+    tplDrag 0 lt tplDrag 1 gt or { pktrowelplane-drag-must-be-0-to-1 } if
+    /tplPitch tplopts /Pitch tplWidth 0.35 mul dup 4 gt { pop 4 } if pkgetdef def
+    /tplPitch load xcheck { pktrowelplane-pitch-must-not-be-a-procedure } if
+    tplPitch 0 le { pktrowelplane-pitch-must-be-positive } if
+    /tplOverlap tplopts /Overlap 0.15 0.6 1 tplCoverage sub mul add pkgetdef def
+    /tplOverlap load xcheck { pktrowelplane-overlap-must-not-be-a-procedure } if
+    tplOverlap 0 lt tplOverlap 0.95 ge or { pktrowelplane-overlap-must-be-0-to-under-0.95 } if
+    /tplAJit tplopts /AngleJitter 0 pkgetdef def
+    /tplAJitSet tplopts /AngleJitter known def
+    /tplAJit load xcheck { pktrowelplane-anglejitter-must-not-be-a-procedure } if
+    tplAJit 0 lt tplAJit 20 gt or { pktrowelplane-anglejitter-must-be-0-to-20 } if
+    % the band one pull deposits across its direction of travel
+    /tplF tplWidth tplAngle cos abs mul 0.35 0.65 tplCover mul add mul def
+    /tplStep tplF 1 tplOverlap sub mul def
+    /tplRJit tplopts /RowJitter tplF tplOverlap mul 0.4 mul pkgetdef def
+    /tplRJit load xcheck { pktrowelplane-rowjitter-must-not-be-a-procedure } if
+    tplRJit 0 lt { pktrowelplane-rowjitter-must-not-be-negative } if
+    % Every key `pktrowel` checks is checked here, on an empty path: it runs all
+    % its guards, draws nothing and takes no random draw. So a bad /Lanes,
+    % /Colors, /Touch (no canvas) or /Pressure raises before the clip or the
+    % rotation below is in force. If it does, the gsave is undone and the same
+    % call is made again on the caller's own path: every guard sits before
+    % `pktrowel` draws or changes state, so it raises the same error again,
+    % from a clean graphics state and with the error reported as `pktrowel`'s.
+    { gsave newpath tplopts pktrowel grestore } stopped { grestore tplopts pktrowel } if
+    /tplcd tplDir cos def /tplsd tplDir sin def
+    /tplsmin 1e30 def /tplsmax -1e30 def /tpltmin 1e30 def /tpltmax -1e30 def
+    /tplany false def
+    gsave
+        flattenpath
+        { tplpt } { tplpt } { } { } pathforall
+    grestore
+    tplany {
+        % rows run from a third of a band outside the near edge to the far one
+        /tplt0 tpltmin tplF 0.3 mul sub def
+        % compared as a real: `cvi` of a huge extent would raise rangecheck
+        % instead of the guard
+        /tplrows tpltmax tplF 0.3 mul add tplt0 sub tplStep div ceiling 1 add def
+        tplrows 4000 gt { pktrowelplane-row-count-exceeds-safety-limit } if
+        /tplrows tplrows cvi def
+        % How far a row must overrun the area so the blade's entry/exit trim
+        % (up to 6% of the row), its drag and its skew all land outside it.
+        /tplspan tplsmax tplsmin sub def
+        /tplm tplspan 0.07 mul tplWidth 0.5 mul tplAngle sin abs tplDrag add mul add
+              tplPitch add 0.85 div def
+        /tplsc tplsmin tplsmax add 0.5 mul def
+        /tplhl tplspan 0.5 mul tplm add def
+        % Unset, the tilt is what moves a row's far end by 0.15 of the overlap,
+        % at most 1.5 degrees, so the tilt cannot open a seam on a long row.
+        tplAJitSet not {
+            /tplAJit 0.15 tplF tplOverlap mul mul tplhl div 1 min
+                dup dup mul 1 exch sub sqrt atan 1.5 min def
+        } if
+        % /Light is a direction in the caller's user space; the rows are drawn
+        % in a space rotated by /Direction, where the same light is /Light -
+        % /Direction. The caller's own dict is left alone.
+        /tplrowopts tplopts def
+        tplopts /Light known {
+            /tplrowopts tplopts dup length 1 add dict copy def
+            tplrowopts /Light tplopts /Light get tplDir sub put
+        } if
+        % A row can still raise a guard the empty-path call could not (the deposit
+        % budget, or /Touch's area limit, both of which depend on the row's
+        % length). The rows run under the clip and the rotation, so an error
+        % must not leave them behind: it is caught, the gsave undone, and the
+        % error raised again from here. Every `pktrowel` guard is an undefined
+        % name, so naming it again is the same error; anything else is raised
+        % through errordict. A caller's /Pressure may also just `stop`, which
+        % raises no error: newerror tells the two apart, and a plain stop is
+        % passed on as a plain stop.
+        $error /newerror false put
+        {
+        gsave
+            clip
+            newpath
+            tplDir rotate
+            0 1 tplrows 1 sub {
+                /tpli exch def
+                % both draws are unconditional: a fixed stream
+                /tplrt tplt0 tpli tplStep mul add tplRJit pkjit add def
+                /tplra tplAJit pkjit def
+                newpath
+                tplsc tplhl tplra cos mul sub  tplrt tplhl tplra sin mul sub moveto
+                tplsc tplhl tplra cos mul add  tplrt tplhl tplra sin mul add lineto
+                tplrowopts pktrowel
+            } for
+        grestore
+        } stopped {
+            grestore
+            $error /newerror get {
+                $error /errorname get /undefined eq
+                    { $error /command get cvx exec }
+                    { errordict $error /errorname get 2 copy known { get exec } { pop pop stop } ifelse }
+                ifelse
+            } { stop } ifelse
+        } if
+    } if
+} bind def
+
+%%SelfTest: pktrowelplane-guards
+%   % a triangle path, set up per case (the procedure reads the current path)
+%   { newpath 0 0 moveto 50 0 lineto 25 40 lineto closepath << /Width 0 >> pktrowelplane }
+%   /pktrowelplane-width-must-be-positive
+%   (/Width 0) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto 25 40 lineto closepath << /Width { 5 } >> pktrowelplane }
+%   /pktrowelplane-width-must-not-be-a-procedure
+%   (/Width { 5 }) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto 25 40 lineto closepath << /Direction { 5 } >> pktrowelplane }
+%   /pktrowelplane-direction-must-not-be-a-procedure
+%   (/Direction { 5 }) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto 25 40 lineto closepath << /Angle 90 >> pktrowelplane }
+%   /pktrowelplane-angle-must-be-minus80-to-80
+%   (/Angle 90) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto 25 40 lineto closepath << /Cover 1.5 >> pktrowelplane }
+%   /pktrowelplane-cover-must-be-0-to-1
+%   (/Cover 1.5) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto 25 40 lineto closepath << /Coverage -1 >> pktrowelplane }
+%   /pktrowelplane-coverage-must-be-0-to-1
+%   (/Coverage -1) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto 25 40 lineto closepath << /Overlap 1 >> pktrowelplane }
+%   /pktrowelplane-overlap-must-be-0-to-under-0.95
+%   (/Overlap 1: zero spacing, unbounded rows) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto 25 40 lineto closepath << /Overlap -0.1 >> pktrowelplane }
+%   /pktrowelplane-overlap-must-be-0-to-under-0.95
+%   (/Overlap -0.1) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto 25 40 lineto closepath << /RowJitter -1 >> pktrowelplane }
+%   /pktrowelplane-rowjitter-must-not-be-negative
+%   (/RowJitter -1) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto 25 40 lineto closepath << /AngleJitter 30 >> pktrowelplane }
+%   /pktrowelplane-anglejitter-must-be-0-to-20
+%   (/AngleJitter 30) mustguard
+%
+%   % rows are counted before anything is drawn: a 1000pt area under a 0.1pt blade
+%   { newpath 0 0 moveto 1000 0 lineto 1000 1000 lineto closepath
+%     << /Width 0.1 >> pktrowelplane }
+%   /pktrowelplane-row-count-exceeds-safety-limit
+%   (a tiny blade on a big area) mustguard
+%
+%   % a key only pktrowel checks still raises before the clip and rotation
+%   { newpath 0 0 moveto 50 0 lineto 25 40 lineto closepath << /Lanes 50 >> pktrowelplane }
+%   /pktrowel-lanes-must-be-1-to-40
+%   (/Lanes 50, caught by pktrowel's own guard) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto 25 40 lineto closepath << /Touch 0.5 >> pktrowelplane }
+%   /pktrowel-touch-needs-a-canvas
+%   (/Touch with no canvas) mustguard
+%
+%   % a row past pktrowel's deposit budget raises with the state still unwound
+%   % (this block also fails on a gsave left open)
+%   { newpath 0 0 moveto 100000 0 lineto 100000 10 lineto 0 10 lineto closepath
+%     << /Width 12 /Direction 0 >> pktrowelplane }
+%   /pktrowel-deposit-count-exceeds-safety-limit
+%   (a 100000pt row) mustguard
+%
+%   { gsave newpath 0 0 moveto 50 0 lineto 25 40 lineto closepath
+%     << /Width 10 >> pktrowelplane grestore }
+%   (a triangle) mustpass
+%
+%   { gsave newpath << /Width 10 >> pktrowelplane grestore }
+%   (an empty path is nothing to fill) mustpass
+%
+%   { gsave newpath 5 5 moveto << /Width 10 >> pktrowelplane grestore }
+%   (a bare moveto, no area) mustpass
+%
+%   { gsave newpath 0 0 moveto 50 0 lineto 25 40 lineto closepath
+%     << /Width 10 /Direction 35 /Colors [ [ 1 0 0 ] [ 0 0 1 ] ] /Light 90 >> pktrowelplane
+%     grestore }
+%   (a loaded, directed plane) mustpass
+%
+%   % a huge extent still raises the row guard, not rangecheck
+%   { newpath 0 0 moveto 1e12 0 lineto 1e12 1e12 lineto closepath
+%     << /Width 10 >> pktrowelplane }
+%   /pktrowelplane-row-count-exceeds-safety-limit
+%   (an area far past cvi's range) mustguard
+%
+%   % the caller's path survives
+%   { gsave newpath 0 0 moveto 50 0 lineto 25 40 lineto closepath
+%     << /Width 10 >> pktrowelplane
+%     pathbbox pop exch pop exch pop 50 eq grestore } stopped { false } if
+%   (the path is left as it was) mustbe
+%%EndSelfTest
+
 % --- fan brush (issue #114) -------------------------------------------
 % opts pkfan -
 %
