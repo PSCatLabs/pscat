@@ -432,6 +432,11 @@
 % -   (builds the knuckles the band pass recorded and clips to them)
 % Cells are built in the order they were first seen, never in dict order,
 % so the clip path -- and an SVG or PDF of it -- is the same on every run.
+% Keep the list even though pscat's dict forall is insertion-ordered now
+% (#277): drykit also runs in Ghostscript, whose forall over integer keys is
+% hash order. Raster output matches either way; Ghostscript's pdfwrite
+% output does not, and the order would stop being the algorithm's own
+% (notes/287-dkcatch-first-seen-list-kept.md).
 % @internal
 /dkemit {
     /dksaved matrix currentmatrix def
