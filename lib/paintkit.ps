@@ -2457,7 +2457,7 @@
 %%EndSelfTest
 
 % @kind: Procedure
-% @summary: A trowel / palette-knife stroke: a rigid flat blade dragging viscous paint, swept along the blade direction rather than the path normal, depositing broken masses with lengthwise scrape streaks, a dragged smear, and built-up ridges at the blade edges. Not built on pkribbon; lays no solid base pass, so the underlayer reads through. Deterministic under the caller's own srand; bounded by Lanes * stops.
+% @summary: A trowel / palette-knife stroke: a rigid flat blade dragging viscous paint, swept along the blade direction rather than the path normal, depositing broken masses with lengthwise scrape streaks, a dragged smear, and built-up ridges at the blade edges. With /Colors it runs up to eight loaded colours across the blade, blended by /ColorMix and lit from /Light. Not built on pkribbon; lays no solid base pass, so the underlayer reads through. Deterministic under the caller's own srand; bounded by Lanes * stops.
 % @example: newpath 40 120 moveto 260 150 lineto << /Width 72 /Angle 18 /Coverage 0.82 >> pktrowel
 % @param: /Width [points] Blade length; must be > 0 (default 24)
 % @param: /Pitch [points] walkpath sampling pitch for the shared centerline pass; must be > 0 (default Width*0.35, capped at 4)
@@ -3413,7 +3413,7 @@
 %%EndSelfTest
 
 % @kind: Procedure
-% @summary: A fan brush: a bundle of bristles that leaves a flattened ferrule and splays apart as the stroke travels, for foliage, evergreen branches, grasses and soft feathering. Distinct from pkdry, whose bristles stay parallel -- /Splay is the whole difference. Many thin bristles at high Load give a soft feathered mark; fewer at low Load give separated bristle marks. A single-point subpath is a pressed fan, its bristles radiating through a 140-degree arc opening toward +y; rotate the space around it to aim it elsewhere. Deterministic under the caller's own srand; bounded by Bristles * stops.
+% @summary: A fan brush: a bundle of bristles that leaves a flattened ferrule and splays apart as the stroke travels, for foliage, evergreen branches, grasses and soft feathering. Distinct from pkdry, whose bristles stay parallel -- /Splay is the whole difference. With /Colors it spreads up to eight loaded colours across the bristles, blended by /ColorMix and lit from /Light. Many thin bristles at high Load give a soft feathered mark; fewer at low Load give separated bristle marks. A single-point subpath is a pressed fan, its bristles radiating through a 140-degree arc opening toward +y; rotate the space around it to aim it elsewhere. Deterministic under the caller's own srand; bounded by Bristles * stops.
 % @example: newpath 40 120 moveto 100 150 160 160 210 145 curveto << /Width 60 /Splay 0.6 >> pkfan
 % @param: /Width [points] Fan width at full spread; must be > 0 (default 30)
 % @param: /Bristles [count] Bristle count; must be a whole number, hard safety cap 1..60 (default 24)
@@ -3998,7 +3998,7 @@
 %%EndSelfTest
 
 % @kind: Procedure
-% @summary: A broad flat brush for block-ins, sky and water bands, reflections and broad masses. What separates it from pktrowel's blade and pknib's pmn is that a brush runs out of paint: the band is divided into striations that drop out one by one as the charge falls along the stroke, so the mark fades from solid to broken along its own direction. Square ends, and parallel edges that are crisp at /Edge 0 -- the default /Edge 0.15 roughens them by about a pixel. Deterministic under the caller's own srand; bounded by Grain * stops.
+% @summary: A broad flat brush for block-ins, sky and water bands, reflections and broad masses. What separates it from pktrowel's blade and pknib's pmn is that a brush runs out of paint: the band is divided into striations that drop out one by one as the charge falls along the stroke, so the mark fades from solid to broken along its own direction. With /Colors it lays up to eight loaded colours across the band, blended by /ColorMix and lit from /Light. Square ends, and parallel edges that are crisp at /Edge 0 -- the default /Edge 0.15 roughens them by about a pixel. Deterministic under the caller's own srand; bounded by Grain * stops.
 % @example: newpath 40 120 moveto 300 130 lineto << /Width 46 /Charge 0.95 /Depletion 0.6 >> pkbroad
 % @param: /Width [points] Band width; must be > 0 (default 40)
 % @param: /Angle [degrees] Brush rotation in degrees relative to the direction of travel, -80..80; constant along a curve, unlike pknib's fixed world angle (default 0)
