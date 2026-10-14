@@ -68,8 +68,14 @@
 % drykit's names, slows every lookup that misses it (every operator)
 % once it is nearly full, and a board's names were enough to double the
 % cost of the chalk drawn after it.
+%
+% Re-measured with every procedure bound (#318): the dictionary still
+% pays. Taking it out (userdict in its place) made the specimen run
+% 2.7 to 3.1 s in gs against 2.2 s with it, so it stays even though a
+% non-userdict dictionary on top makes every unbound lookup dearer
+% (notes/307-bind-library-procedures.md).
 % @internal
-/dcnewscratch { 1200 dict } def
+/dcnewscratch { 1200 dict } bind def
 % @internal
 /dcscratch dcnewscratch def
 
@@ -80,7 +86,7 @@
 /dcsrand {
     cvi 2147483646 mod abs 1 add
     userdict /dcstate 3 -1 roll put
-} def
+} bind def
 
 % -> 0.0..1.0   (exclusive at both ends; Schrage's form, 32-bit safe)
 % @internal
@@ -90,7 +96,7 @@
     dup 0 lt { 2147483647 add } if
     dup userdict /dcstate 3 -1 roll put
     2147483647 div
-} def
+} bind def
 
 % @internal
 /dcstate 2 def
@@ -101,20 +107,20 @@
 % @internal
 /dcisnum {
     type dup /integertype eq exch /realtype eq or
-} def
+} bind def
 
 % any -> bool   (an executable array or packed array: a procedure)
 % @internal
 /dcisproc {
     dup xcheck exch type dup /arraytype eq exch /packedarraytype eq or and
-} def
+} bind def
 
 % dict key default -> value
 % @internal
 /dcget {
     /dcgd exch def
     2 copy known { get } { pop pop /dcgd load } ifelse
-} def
+} bind def
 
 % dict key default lo hi /error -> number   (a number option in lo..hi)
 % @internal
@@ -123,7 +129,7 @@
     dcget
     dup dcisnum not { pop dcoe cvx exec } if
     dup dcol lt 1 index dcoh gt or { pop dcoe cvx exec } if
-} def
+} bind def
 
 % value /error -> [r g b]   (an rgb array of three numbers 0..1)
 % @internal
@@ -137,19 +143,19 @@
         dup 0 lt exch 1 gt or { dcoe cvx exec } if
     } forall
     aload pop 3 array astore
-} def
+} bind def
 
 % mark x1 .. xn -> [x1 .. xn]
 % @internal
 /dctomark {
     counttomark array astore exch pop
-} def
+} bind def
 
 % a b t -> a + (b - a) t   (numbers)
 % @internal
 /dclerp {
     /dclt exch def 1 index sub dclt mul add
-} def
+} bind def
 
 % [a] [b] t -> [a + (b - a) t]   (rgb arrays)
 % @internal
@@ -157,7 +163,7 @@
     /dclu exch def /dclb exch def /dcla exch def
     [ 0 1 2 { /dclk exch def
         dcla dclk get dclb dclk get dcla dclk get sub dclu mul add } for ]
-} def
+} bind def
 
 % x y -> seed   (a user-space point's canvas position, to 0.01pt, folded
 % into a 31-bit seed: the same point gives the same seed in any CTM)
@@ -168,7 +174,7 @@
     exch
     100 mul round dup abs 2e9 gt { pop 0 } if cvi 46337 mod abs
     46337 mul add
-} def
+} bind def
 
 % - -> [ [x0 y0 x1 y1 ...] ... ]   (the current path, flattened, one
 % point array per subpath; a closed subpath repeats its first point)
@@ -200,7 +206,7 @@
     dcSopen { dctomark } if
     dctomark
     newpath
-} def
+} bind def
 
 % [x0 y0 ...] -> length   (the polyline's length)
 % @internal
@@ -212,7 +218,7 @@
         dcpp dcpi get dcpp dcpi 2 sub get sub dup mul
         dcpp dcpi 1 add get dcpp dcpi 1 sub get sub dup mul add sqrt add
     } for
-} def
+} bind def
 
 % [x0 y0 ...] -   (the polyline as a new path)
 % @internal
@@ -226,7 +232,7 @@
         % a single point: a zero-length segment, so drykit sees a dot
         dcpp 0 get dcpp 1 get lineto
     } ifelse
-} def
+} bind def
 
 % ----------------------------------------------------------------- chalk
 
@@ -259,7 +265,7 @@
     dctt 0.3 gt dctt 0.75 lt and { dcband 0.5 mul sub } if
     dctt 0.75 ge { dctt 0.75 sub 0.25 div dcTlift mul sub } if
     dup 0.02 lt { pop 0.02 } if dup 1 gt { pop 1 } if
-} def
+} bind def
 
 % t -> width multiplier   (landing slightly wide, the lift thinning to a
 % floor, so a stroke never ends in a point)
@@ -274,7 +280,7 @@
             1 dcTfloor sub mul 1 exch sub
         } { 1 } ifelse
     } ifelse
-} def
+} bind def
 
 % pts -> pts'   (a dot as a short dab: the stick presses and drags a
 % little, so a dot is never a clean disc. Centred on the dot's points,
@@ -294,7 +300,7 @@
     /dcdl dcw 0.25 mul def
     [ dcdcx dcda cos dcdl mul sub dcdcy dcda sin dcdl mul sub
       dcdcx dcda cos dcdl mul add dcdcy dcda sin dcdl mul add ]
-} def
+} bind def
 
 % pts -   (one subpath as one chalk stroke with the stick's tip)
 % @internal
@@ -329,13 +335,13 @@
     dcSeedOn { dcSo /Seed dcSeed dcSi 7919 mul add 2147483 mod put } if
     dcpts dcpolypath
     dcSo dkstroke
-} def
+} bind def
 
 % a b -> max, min
 % @internal
-/dcmax { 2 copy lt { exch } if pop } def
+/dcmax { 2 copy lt { exch } if pop } bind def
 % @internal
-/dcmin { 2 copy gt { exch } if pop } def
+/dcmin { 2 copy gt { exch } if pop } bind def
 
 % pts -   (one subpath as a broad side-of-chalk mark: parallel lanes)
 % @internal
@@ -406,7 +412,7 @@
     dcSo /Streak dcStreak put
     dcSo /Dropout 0 put
     dcSo /Load 1 put
-} def
+} bind def
 
 % pts s0 s1 -> pts'   (the polyline with s0 points cut from its start and
 % s1 from its end, measured along it)
@@ -440,7 +446,7 @@
         /dcts dcte def
     } for
     counttomark 4 lt { cleartomark dctp } { dctomark } ifelse
-} def
+} bind def
 
 % opts -   (validates dcchalk's keys into dc* globals)
 % @internal
@@ -478,7 +484,7 @@
         /dcSeedOn true def /dcSeed dcO /Seed get cvi 2147483 mod def
     } { /dcSeedOn false def } ifelse
     /dcTiltS dcTilt sin def
-} def
+} bind def
 
 % -   (the loose dust of every stroke in dcsubs: specks beside the line,
 % thinning away from it and drifting down the board, all in one fill.
@@ -527,7 +533,7 @@
             fill
         grestore
     } if
-} def
+} bind def
 
 % -   (records every subpath of the current path; dcchalk's body)
 % @internal
@@ -545,7 +551,7 @@
         dcsubs dcSi get
         dcTilt 0 gt { dcsidestroke } { dctipstroke } ifelse
     } for
-} def
+} bind def
 
 %%SelfTest: dcchalk-rejects-malformed-options
 %   newpath 0 0 moveto 50 0 lineto
@@ -612,7 +618,7 @@
     } stopped
     end
     { stop } if
-} def
+} bind def
 
 %%SelfTest: dcchalkcolor-sets-the-colour
 %   { /mauve dcchalkcolor } /dcchalkcolor-unknown-colour (/mauve) mustguard
@@ -628,7 +634,7 @@
     dup type /nametype ne { pop dcchalkcolor-needs-a-name } if
     dcchalks 1 index known not { pop dcchalkcolor-unknown-colour } if
     dcchalks exch get aload pop setrgbcolor
-} def
+} bind def
 
 % ----------------------------------------------------------------- board
 
@@ -636,7 +642,7 @@
 % @internal
 /dcdeg {
     dup 360 div floor 360 mul sub
-} def
+} bind def
 
 % The ghost writing's chalk: wider than the writing (the eraser smeared
 % it) and at a light touch (the eraser took the peaks).
@@ -678,7 +684,7 @@
 % @internal
 /dchash {
     exch 255 and dcP exch get add 255 and dcP exch get 255 div
-} def
+} bind def
 
 % u v -> 0..1   (value noise: smoothstepped bilinear between lattice
 % hashes at the integer points around (u, v))
@@ -693,7 +699,7 @@
     dcni dcnj dchash dcni 1 add dcnj dchash dcnfu dclerp
     dcni dcnj 1 add dchash dcni 1 add dcnj 1 add dchash dcnfu dclerp
     dcnfv dclerp
-} def
+} bind def
 
 % x y -> 0..1   (the dust film at board point (x, y), board-local points)
 % @internal
@@ -746,14 +752,14 @@
     % the film tops out at 2: dust heaped on the ledge reads brighter than
     % any haze
     dup 0 lt { pop 0 } if dup 2 gt { pop 2 } if
-} def
+} bind def
 
 % f -> r g b   (the board colour under a dust film f)
 % @internal
 /dcfcolor {
     dchk mul /dcfk exch def
     0 1 2 { dup dcG exch get exch dcWhite exch get dcfk dclerp } for
-} def
+} bind def
 
 % -   (paints the haze field over the board rectangle, one colorimage)
 % @internal
@@ -766,7 +772,7 @@
         { dcRows dcri get /dcri dcri 1 add def }
         false 3 colorimage
     grestore
-} def
+} bind def
 
 % -   (computes the field's rows: dcRows, one rgb string per sample row,
 % bottom row first, plus dcFmean, the field's mean)
@@ -831,7 +837,7 @@
         } for
     ] def
     /dcFmean dcFsum dcNx dcNy mul div def
-} def
+} bind def
 
 % The coarse grid the field is evaluated on, in points per cell: the
 % field is bilinear between grid points, and every feature (a wipe's
@@ -867,7 +873,7 @@
             } repeat
         } forall
     grestore
-} def
+} bind def
 
 % -   (the film's grain: dust caught in the board's own texture reads as
 % fine specks, a little lighter, more of them where the film is thicker,
@@ -894,7 +900,7 @@
         } repeat
         fill
     grestore
-} def
+} bind def
 
 % x y -> f   (the film at a board point, from the coarse grid)
 % @internal
@@ -904,14 +910,14 @@
     dcGrid dcaj get dup dcai get exch dcai 1 add get 1 index sub dcau mul add
     dcGrid dcaj 1 add get dup dcai get exch dcai 1 add get 1 index sub dcau mul add
     1 index sub dcav mul add
-} def
+} bind def
 
 % x y r -   (a speck as a subpath)
 % @internal
 /dcgdot {
     /dcgr exch def /dcgy exch def /dcgx exch def
     dcgx dcgr add dcgy moveto dcgx dcgy dcgr 0 360 arc closepath
-} def
+} bind def
 
 % Grain specks offered per square point of board, at /Haze 0.7.
 % @internal
@@ -932,7 +938,7 @@
             } if
         } repeat
     grestore
-} def
+} bind def
 
 % -   (re-lays the film over every other swipe's band: the eraser took
 % the ghost writing there and left only its dust)
@@ -951,7 +957,7 @@
             dcpaintfield
         grestore
     } for
-} def
+} bind def
 
 % -   (re-lays the field inside every wipe, cutting the ghost writing the
 % wipe passed over; the field is already darker there)
@@ -972,7 +978,7 @@
             dcpaintfield
         grestore
     } forall
-} def
+} bind def
 
 % -   (the chalk tray under the board: a lip, and a floor covered in
 % fallen dust, thickest against the board)
@@ -999,7 +1005,7 @@
             dcrand 0.35 mul 0.1 add 0 360 arc fill
         } repeat
     grestore
-} def
+} bind def
 
 % x y w h opts -   (validates dcboard's keys into dc* globals)
 % @internal
@@ -1030,7 +1036,7 @@
         /dcGhostOn true def
     } { /dcGhostOn false def } ifelse
     /dcWhite dcchalks /white get def
-} def
+} bind def
 
 % -   (lays out the swipes, smudges and wipes from the board's seed)
 % @internal
@@ -1077,7 +1083,7 @@
     /dcSw [ dcSw { dcswbox } forall ] def
     /dcSm [ dcSm { dcellbox } forall ] def
     /dcWp [ dcWp { dcellbox } forall ] def
-} def
+} bind def
 
 % [cx cy r a0 a1 b] -> [cx cy r a0 a1 b x0 y0 x1 y1]   (the swipe's box,
 % from 17 points along its arc, grown by the band's half-width)
@@ -1095,7 +1101,7 @@
     } for
     /dcxb dcxa 5 get dcxa 2 get 0.02 mul add def
     [ dcxa aload pop dcx0 dcxb sub dcy0 dcxb sub dcx1 dcxb add dcy1 dcxb add ]
-} def
+} bind def
 
 % [cx cy l h a w] -> [cx cy l h a w x0 y0 x1 y1]   (an ellipse's box)
 % @internal
@@ -1104,14 +1110,14 @@
     /dcxb dcxa 2 get dcxa 3 get dcmax def
     [ dcxa aload pop dcxa 0 get dcxb sub dcxa 1 get dcxb sub
       dcxa 0 get dcxb add dcxa 1 get dcxb add ]
-} def
+} bind def
 
 % feature -> bool   (the field point dcfx dcfy lies in its box)
 % @internal
 /dcinbox {
     dup 6 get dcfx le 1 index 8 get dcfx ge and
     1 index 7 get dcfy le and exch 9 get dcfy ge and
-} def
+} bind def
 
 % x y w h opts -   (dcboard's body, run inside dcscratch)
 % @internal
@@ -1143,7 +1149,7 @@
     grestore
     { stop } if
     dcTray 0 gt { dctray } if
-} def
+} bind def
 
 % -   (the /Ghost writing: the caller's path, drawn as what the eraser
 % left in the tooth, one faint and broken level of chalk)
@@ -1167,7 +1173,7 @@
         dcscratch /dcLevels undef
     grestore
     { stop } if
-} def
+} bind def
 
 %%SelfTest: dcboard-rejects-malformed-options
 %   { 0 0 100 100 5 dcboard } /dcboard-options-must-be-a-dict (a number for the options) mustguard
@@ -1248,4 +1254,4 @@
     { dcboardbody } stopped
     end
     { stop } if
-} def
+} bind def
