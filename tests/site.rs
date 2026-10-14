@@ -36,6 +36,11 @@ fn build_site_assembles_everything() {
         "extending.html",
         "javascript.html",
         "agents.html",
+        "guides.html",
+        "contribute.html",
+        "learn.html",
+        "fonts.html",
+        "charts.html",
         "style.css",
         "pscat.js",
         "pscat.wasm",
@@ -64,4 +69,15 @@ fn build_site_assembles_everything() {
             "gallery shows {name} but it wasn't rendered"
         );
     }
+    // Links, navigation and orphans (#250): the same check CI runs.
+    let check = Command::new("python3")
+        .arg(root.join("scripts/check_site_links.py"))
+        .arg(&out)
+        .output()
+        .expect("run check_site_links.py");
+    assert!(
+        check.status.success(),
+        "site link check failed:\n{}",
+        String::from_utf8_lossy(&check.stdout)
+    );
 }
