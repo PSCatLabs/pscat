@@ -1,0 +1,114 @@
+%!PS-Adobe-3.0
+%%Title: Board-math glyphs -- the symbols issue #339 added to strokeglyphs.ps
+%%BoundingBox: 0 0 900 1100
+%%EndComments
+
+% Specimen for the board-math symbols added to lib/strokeglyphs.ps and
+% lib/mathkit.ps in issue #339: relations (≡ ∼ ≃ ⊆ ⊃ ⊇ ↦ ⊥ ∝ ∴ ∵),
+% operators (∘ ∗ ⋆ ∖), the angle brackets, the double bar, ℏ and ℓ, ι υ Υ,
+% the superscript digits, and the double, triple and contour integrals.
+% Top to bottom: each new glyph three times (seeds s, s+1, s+2), the
+% new growing symbols at three sizes, sgpath text that used to refuse,
+% and mathkit formulas that use them. A plain pen throughout, as in
+% examples/strokeglyphs.ps. Run from the repo root:
+%
+%   pscat --page 900x1100 examples/strokeglyphs_board_math.ps
+%
+% In a PostScript string every TeX backslash is written twice.
+
+(lib/handscript.ps) run
+(lib/strokeglyphs.ps) run
+(lib/mathkit.ps) run
+
+/ink { 0.10 0.12 0.30 setrgbcolor } def
+/pen { ink 1.5 setlinewidth 1 setlinecap 1 setlinejoin stroke } def
+/label { /Helvetica findfont exch scalefont setfont 0.45 setgray } def
+
+1 1 0.985 setrgbcolor clippath fill
+
+/size 26 def
+/left 40 def
+/right 860 def
+/cx left def
+/cy 1030 def
+/seed 1 def
+
+% (title) heading -   a section heading on its own line
+/heading {
+  /cy cy 40 sub def
+  11 label left cy moveto show
+  /cy cy 42 sub def
+  /cx left def
+} def
+
+% /name triple -   the glyph three times, its name beneath
+/triple {
+  /nm exch def
+  /w [nm nm nm] << /Size size >> sgwidth def
+  cx w add right gt { /cx left def /cy cy 58 sub def } if
+  newpath [nm nm nm] cx cy << /Size size /Seed seed >> sgpath pen
+  5.5 label cx cy 14 sub moveto nm 40 string cvs show
+  /seed seed 3 add def
+  /cx cx w add 14 add def
+} def
+
+22 label left 1070 moveto (strokeglyphs.ps and mathkit.ps: more board-math symbols) show
+9 label left 1054 moveto
+(Each new glyph three times, seeds s, s+1, s+2, plain pen. Size 26, default /Jitter.) show
+
+(RELATIONS AND OPERATORS) heading
+[ /equiv /sim /simeq /reflexsubset /propersuperset /reflexsuperset /mapsto
+  /perpendicular /proportional /therefore /because /ringoperator
+  /asteriskmath /star /setminus ] { triple } forall
+
+(LETTERS, SUPERSCRIPTS AND THE TEXT-SIZE BRACKETS) heading
+[ /hbar /ell /iota /upsilon /Upsilon /zerosuperior /onesuperior
+  /twosuperior /threesuperior /nsuperior /minussuperior /plussuperior
+  /angleleft /angleright /dblbar /iint /iiint /oint ] { triple } forall
+
+% ---- the new growing symbols, three sizes each
+/cy cy 20 sub def
+(GROWING SYMBOLS: sggrow AT HEIGHT+DEPTH 24, 48 AND 84 POINTS) heading
+/cy cy 70 sub def
+/sizes [ [17 7] [34 14] [60 24] ] def
+[ /angleleft /angleright /dblbar /iint /iiint /oint ]
+{
+  /sym exch def
+  /x0 cx def
+  sizes {
+    aload pop /dd exch def /hh exch def
+    newpath cx cy moveto
+    hh dd << /Symbol sym /Size size /Seed seed >> sggrow
+    pen
+    /seed seed 1 add def
+    /cx exch cx add 10 add def
+  } forall
+  5.5 label x0 cy 40 sub moveto sym 40 string cvs show
+  /cx cx 30 add def
+} forall
+
+% ---- sgpath text that used to raise sg-missing-glyph
+/cy cy 50 sub def
+(SGPATH TEXT, FROM A UTF-8 STRING) heading
+newpath (i² = −1,  x⁻¹ = 1/x,  2³ = 8  ∴  ℏω ∼ ℓι ≡ υ) left cy
+  << /Size 30 /Seed 700 >> sgpath pen
+/cy cy 46 sub def
+newpath (A ⊆ B ⊃ C,  f∘g,  x ↦ x²,  a ⊥ b,  y ∝ x,  ⟨ι|υ⟩) left cy
+  << /Size 30 /Seed 710 >> sgpath pen
+
+% ---- mathkit formulas
+(MATHKIT FORMULAS WITH THE NEW SYMBOLS, /Irregular 1) heading
+% (tex) seed dy -   a formula at the current cx, cy
+/formula {
+  /fdy exch def /fseed exch def /ftex exch def
+  /cy cy fdy sub def
+  newpath ftex left cy << /Size 34 /Seed fseed >> mkpath pen
+} def
+(\\oint_C \\vec{E} \\cdot d\\vec{\\ell} = -\\frac{d\\Phi_B}{dt}) 21 34 formula
+(E = \\hbar \\omega \\qquad \\langle \\psi | \\phi \\rangle = \\iint_D \\psi^{\\ast} \\phi \\, dA) 22 96 formula
+(A \\subseteq B \\Rightarrow A \\cup B = B \\qquad f \\circ g\\,(x) = f(g(x))) 23 70 formula
+(\\therefore \; x \\equiv y \\qquad \\| v \\|^2 = \\langle v, v \\rangle) 24 62 formula
+(\\left\\langle \\frac{a}{b} \\right\\rangle \\iiint_V \\rho \\, dV) 25 92 formula
+
+showpage
+%%EOF

@@ -217,12 +217,12 @@ fn the_layout_is_deterministic_and_seeded() {
 fn unsupported_tex_fails_with_an_error_that_names_it() {
     for (src, expect) in [
         (
-            r"(\\iint f) 0 0 << >> mkpath",
-            r"mk-unsupported-command:\iint",
+            r"(\\oplus f) 0 0 << >> mkpath",
+            r"mk-unsupported-command:\oplus",
         ),
         (
-            r"(a \\star b) 0 0 << >> mkpath",
-            r"mk-unsupported-command:\star",
+            r"(a \\aleph b) 0 0 << >> mkpath",
+            r"mk-unsupported-command:\aleph",
         ),
         ("(a * b) 0 0 << >> mkpath", "mk-unsupported-character:*"),
         (

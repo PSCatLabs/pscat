@@ -1236,7 +1236,11 @@ its own seeded generator, never the caller's `rand`, and
 `examples/strokeglyphs.ps` is the specimen sheet. A character or glyph name
 with no glyph raises `sg-missing-glyph:<char>` from `sgpath` and `sgwidth`
 before anything is drawn (issue #350); `/Strict false` restores the old
-advance-300-and-draw-nothing behaviour.
+advance-300-and-draw-nothing behaviour. Issue #339 added the board-math
+symbols a lecture needs: `≡ ∼ ≃ ⊆ ⊃ ⊇ ↦ ⊥ ∝ ∴ ∘ ∗ ⋆ ∖ ⟨ ⟩ ‖ ℏ ℓ ι υ Υ`, the
+double, triple and contour integrals `∬ ∭ ∮` (also `sggrow` symbols), and
+superscript digits (`i²`, `x⁻¹`); `examples/strokeglyphs_board_math.ps`
+is their specimen.
 
 ```postscript
 (lib/handscript.ps) run
@@ -1248,8 +1252,11 @@ newpath (∀ε>0 ∃δ>0) 40 300 << /Size 40 /Seed 7 >> sgpath
 `lib/mathkit.ps` (issue #237) lays out a subset of TeX math as those
 skeletons with TeX's box model. The subset covers:
 - scripts, `\frac`, `\sqrt[n]{}`;
-- `\sum`, `\prod` and `\int` with limits, and `\lim`;
-- `\left( \right)` delimiters that grow to fit;
+- `\sum`, `\prod`, `\int`, `\iint`, `\iiint` and `\oint` with limits, and `\lim`;
+- `\left( \right)` delimiters that grow to fit, including `\langle \rangle`
+  and `\|`;
+- relations and operators such as `\equiv \sim \subseteq \mapsto \perp
+  \therefore \circ \ast`, and `\hbar \ell`;
 - matrices and `cases`, accents and `\boxed`;
 - Greek and operator names.
 
