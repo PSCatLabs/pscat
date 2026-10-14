@@ -75,6 +75,31 @@ enum Frame {
     PostOp(PostOp),
 }
 
+/// One unit of work `next_item` hands the step loop. A procedure's
+/// operators and executable names, almost every element a bound
+/// library runs, arrive as a plain fn pointer or name id: no `Object`
+/// clone, no refcount traffic, no drop (#323).
+enum Item {
+    Op(crate::object::OpFn),
+    Name(u32),
+    Obj(Object),
+}
+
+impl Item {
+    /// Decide what a procedure element is, from a borrow of it.
+    #[inline]
+    fn fetch(o: &Object) -> Item {
+        if o.executable {
+            match &o.value {
+                Value::Operator(op) => return Item::Op(op.func),
+                Value::Name(n) => return Item::Name(n.id()),
+                _ => {}
+            }
+        }
+        Item::Obj(o.clone())
+    }
+}
+
 pub(crate) enum PostOp {
     /// A Separation tint transform finished: pop the alt-space
     /// components it produced and make them the current color (the
@@ -384,9 +409,9 @@ impl Interp {
             if self.quit_requested {
                 return Ok(false);
             }
-            let obj = match self.next_item() {
+            let item = match self.next_item() {
                 Ok(None) => return Ok(false),
-                Ok(Some(o)) => o,
+                Ok(Some(item)) => item,
                 Err(e) => {
                     // A scan/syntax error short-circuits out of
                     // next_item before any Action ran, so the failing
@@ -396,7 +421,12 @@ impl Interp {
                     continue;
                 }
             };
-            if let Err(e) = self.execute_element(obj) {
+            let done = match item {
+                Item::Op(func) => func(self),
+                Item::Name(id) => self.execute_name(id),
+                Item::Obj(obj) => self.execute_element(obj),
+            };
+            if let Err(e) = done {
                 self.recover(e)?;
             }
         }
@@ -563,12 +593,12 @@ impl Interp {
 
     /// Pull the next object to execute off the execution stack, popping
     /// exhausted frames and iterating loop frames as needed.
-    fn next_item(&mut self) -> Result<Option<Object>, PsError> {
+    fn next_item(&mut self) -> Result<Option<Item>, PsError> {
         // Frame inspection and stack mutation can't overlap borrows, so
         // each pass decides on an action first, then applies it.
         enum Action {
-            Yield(Object),
-            PopThenYield(Object),
+            Yield(Item),
+            PopThenYield(Item),
             Pop,
             PopThenPush(Object),
             PopThenPush2(Object, Object),
@@ -611,13 +641,20 @@ impl Interp {
                         Some(Token::RBrace) => {
                             return Err(PsError::Syntax("'}' with no matching '{'".to_string()));
                         }
-                        Some(Token::LBrace) => Action::Yield(scan_procedure(lexer, 0, dstack)?),
-                        Some(Token::ImmediateName(n)) => {
-                            Action::Yield(resolve_immediate(&n, dstack)?)
+                        Some(Token::LBrace) => {
+                            Action::Yield(Item::Obj(scan_procedure(lexer, 0, dstack)?))
                         }
-                        Some(tok) => Action::Yield(token_to_object(tok)),
+                        Some(Token::ImmediateName(n)) => {
+                            Action::Yield(Item::Obj(resolve_immediate(&n, dstack)?))
+                        }
+                        Some(tok) => Action::Yield(Item::Obj(token_to_object(tok))),
                     },
-                    Frame::Proc { body, pc } => match body.get(*pc) {
+                    // The element is inspected in place (one momentary
+                    // borrow, released before it executes, so a `put`
+                    // into the running procedure still works): an
+                    // operator or executable name yields without
+                    // cloning the object (#323).
+                    Frame::Proc { body, pc } => match body.peek(*pc, Item::fetch) {
                         None => Action::Pop,
                         Some(o) => {
                             *pc += 1;
@@ -792,20 +829,24 @@ impl Interp {
     /// `{...}` a deferred procedure), as is everything literal.
     fn execute_element(&mut self, obj: Object) -> Result<(), PsError> {
         match (&obj.value, obj.executable) {
-            (Value::Name(n), true) => {
-                let id = n.id();
-                self.last_name = Some(id);
-                let resolved = self
-                    .load_id(id)
-                    .ok_or_else(|| PsError::Undefined(n.to_string()))?;
-                self.execute_resolved(resolved)
-            }
+            (Value::Name(n), true) => self.execute_name(n.id()),
             (Value::Operator(op), true) => (op.func)(self),
             _ => {
                 self.push(obj);
                 Ok(())
             }
         }
+    }
+
+    /// Execute the executable name with interned id `id`: look it up on
+    /// the dictionary stack and run what it resolves to.
+    #[inline]
+    fn execute_name(&mut self, id: u32) -> Result<(), PsError> {
+        self.last_name = Some(id);
+        let resolved = self
+            .load_id(id)
+            .ok_or_else(|| PsError::Undefined(crate::name::resolve(id).to_string()))?;
+        self.execute_resolved(resolved)
     }
 
     /// Execute the object a name resolved to. Unlike `execute_element`,
@@ -822,7 +863,14 @@ impl Interp {
             }
             match &obj.value {
                 Value::Operator(op) => return (op.func)(self),
-                Value::Array(body) => return self.push_proc_frame(body.clone()),
+                Value::Array(_) => {
+                    // Move the body out rather than cloning it (and then
+                    // dropping `obj`): one refcount round trip fewer.
+                    let Value::Array(body) = obj.value else {
+                        unreachable!()
+                    };
+                    return self.push_proc_frame(body);
+                }
                 // An executable string runs as source — the `(...) cvx
                 // exec` idiom found code uses constantly.
                 Value::String(s) => {

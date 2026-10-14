@@ -75,6 +75,19 @@ impl PsArray {
         }
     }
 
+    /// Apply `f` to element `i` in place, under one borrow that ends
+    /// before this returns (so `f` must not try to execute anything).
+    /// The interpreter's procedure fetch uses it to avoid cloning
+    /// elements it only needs to look at (#323).
+    #[inline]
+    pub(crate) fn peek<R>(&self, i: usize, f: impl FnOnce(&Object) -> R) -> Option<R> {
+        if i < self.len {
+            Some(f(&self.data.borrow()[self.off + i]))
+        } else {
+            None
+        }
+    }
+
     pub fn put(&self, i: usize, obj: Object) -> Result<(), PsError> {
         if i >= self.len {
             return Err(PsError::Rangecheck);
