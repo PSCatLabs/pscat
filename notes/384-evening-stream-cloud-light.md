@@ -35,5 +35,7 @@ Left, the committed still; right, the new one. Below, the two left clouds close 
 - **Reproducibility.** Two 2x renders are byte-identical; `--lint` is clean;
   Ghostscript renders the scene without errors (correctness only; its rand
   stream differs).
-- **Left alone** (separate tickets): the waterfall `/Scatter`, and the lit band
-  still reads a little uniform along each cloud's length.
+- **Left alone** (separate tickets): the waterfall `/Scatter`, and #433, the lit
+  band's stepped feather and even saturation along each cloud's length.
+- **No halo.** A 2.5x crop of the right-hand cloud's underside shows nothing on the
+  sky below the outline: the softening is into the body.
