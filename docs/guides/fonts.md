@@ -80,6 +80,11 @@ set from no variation to a battered machine:
 
 <p><img src="../typewriter_specimen.png" width="60%" alt="The /Typewriter specimen"/></p>
 
+The ink is ribbon ink: the face pressed through inked fabric, so the weave's
+voids show in the letter, the edge feathers, clogged keys fill their counters,
+and density follows pressure and `/Ribbon` (wetness). `/InkModel false` gives
+flat ink. `docs/typewriter/ink_vs_real.png` sets it beside the reference scans.
+
 The ribbon weave, clogged counters and one-side-heavy keys come with
 ## The font catalog
 

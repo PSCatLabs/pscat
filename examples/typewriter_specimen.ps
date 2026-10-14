@@ -1,23 +1,29 @@
 %!PS-Adobe-3.0
-%%Title: typewriter specimen -- the /Typewriter font, from no variation to a battered machine (issue #211)
+%%Title: typewriter specimen -- the /Typewriter font, from no variation to a battered machine (issues #211, #212)
 %%BoundingBox: 0 0 612 792
 %%EndComments
 
 % Specimen for lib/typewriter.ps (docs/TYPEWRITER.md). Top to bottom:
 %
 %   ascii      the full printable ASCII set four times, with the same
-%              machine and document: no variation (/Wear 0), the machine's
-%              quirks only, quirks plus line and strike variation at the
-%              measured defaults (/Wear 1), and a battered machine (/Wear 2.5)
+%              machine and document: no variation in flat ink (/Wear 0,
+%              /InkModel false: #211's ink), then in ribbon ink the
+%              machine's quirks only, quirks plus line and strike variation
+%              at the measured defaults (/Wear 1), and a battered machine
+%              (/Wear 2.5)
 %   repeats    one key struck again and again, enlarged 3.2x: with quirks
-%              only every strike is the same (a key's bias holds); with
-%              strikes on, no two are alike
+%              only every strike is the same, ink and all (a key's bias
+%              holds); with strikes on, no two are alike; machine 7's `o`
+%              has a clogged counter
 %   presets    the same sentence on the /electric, /manual and /worn
-%              presets, then elite pitch, then a red ribbon run and a
-%              strikeover (a t struck over a mistyped r, strike index 1)
+%              presets and on a bone-dry ribbon, then elite pitch, then a
+%              red ribbon run and a strikeover (a t struck over a mistyped
+%              r, strike index 1)
 %
-% The ink is #211's flat ink (fill plus a pressure-driven spread); the
-% ribbon weave, clogged counters and one-side-heavy keys arrive with #212.
+% The ink is #212's ribbon ink: the weave's voids, a feathered edge,
+% clogged counters, heavy sides, density from pressure and /Ribbon.
+% docs/typewriter/ink_vs_real.png (docs/typewriter/tools/ink_compare.py)
+% sets it beside the reference scans at their own resolution.
 %
 %   pscat --page 612x792 --dpi 200 --png typewriter_specimen.png examples/typewriter_specimen.ps
 %   gs -q -dNOSAFER -dBATCH -dNOPAUSE -sDEVICE=png16m -r200 -dGraphicsAlphaBits=4 -dTextAlphaBits=4 \
@@ -43,16 +49,16 @@
     72 spy 12 sub moveto spascii2 show
 } def
 
-(/Typewriter -- lib/typewriter.ps, issue #211) 54 762 splabel
+(/Typewriter -- lib/typewriter.ps, issues #211 and #212) 54 762 splabel
 (Courier Prime outlines; machine 7, document 3; pica, /Size 12.5) 54 752 splabel
 
 735 sprule
-(1. No variation, /Wear 0: the plain face, with the ink spread past it \(/Ribbon 0.7\).) 54 718 splabel
-72 706 moveto << /Machine 7 /Seed 3 /Wear 0 /LineWear 1 /StrikeWear 1 /MachineWear 1 >> tw-setup spascii1 show
+(1. No variation, flat ink \(/Wear 0, /InkModel false\): the plain face with the ink spread past it.) 54 718 splabel
+72 706 moveto << /Machine 7 /Seed 3 /Wear 0 /LineWear 1 /StrikeWear 1 /MachineWear 1 /InkModel false >> tw-setup spascii1 show
 72 694 moveto spascii2 show
 
-660 << /Wear 1 /LineWear 0 /StrikeWear 0 >>
-(2. Machine quirks only: each key's own offset, lean and weight, the same wherever it is struck.) sprow
+660 << /Wear 1 /LineWear 0 /StrikeWear 0 /InkModel true >>
+(2. Ribbon ink from here on. Machine quirks only: each key's own offset, lean, weight and clog, the same wherever struck.) sprow
 614 << /LineWear 1 /StrikeWear 1 >>
 (3. Quirks + line + strike variation at the measured defaults, /Wear 1. Real typing is this subtle.) sprow
 568 << /Wear 2.5 >>
@@ -64,15 +70,16 @@
 120 490 moveto << /Wear 1 /LineWear 0 /StrikeWear 0 /Size 40 /Pitch 3.125 >> tw-setup (eeeeeeeeeeee) show
 (+ strikes) 54 450 splabel
 120 440 moveto << /LineWear 1 /StrikeWear 1 >> tw-setup (eeeeeeeeeeee) show
-(+ strikes, a) 54 400 splabel
-120 390 moveto << >> tw-setup (aaaaaaaaaaaa) show
+(+ strikes, o: clogged) 54 400 splabel
+120 390 moveto << >> tw-setup (oooooooooooo) show
 
 365 sprule
-/spline (In reply to your letter of June 22, I will say that if you do not need) def
-(Presets: /electric, /manual \(the default\), /worn) 54 348 splabel
+/spline (In reply to your letter of June 22, I will say that if you do not) def
+(Presets: /electric, /manual \(the default\), /worn; then /manual on a bone-dry ribbon, /Ribbon 0.1) 54 348 splabel
 72 334 moveto << /Preset /electric /Size 12.5 /Pitch 10 /Seed 11 >> tw-setup spline show
 72 322 moveto << /Preset /manual >> tw-setup spline show
 72 310 moveto << /Preset /worn >> tw-setup spline show
+72 298 moveto << /Preset /manual /Ribbon 0.1 >> tw-setup spline show
 
 (Elite: /Pitch 12, /Size 11.5) 54 286 splabel
 72 274 moveto << /Preset /manual /Pitch 12 /Size 11.5 /Seed 12 >> tw-setup
