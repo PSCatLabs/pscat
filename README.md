@@ -1344,6 +1344,8 @@ skeletons with TeX's box model. The subset covers:
   \therefore \circ \ast`, and `\hbar \ell`;
 - `*` is `\ast`, as in TeX: a binary operator between terms, and `z^*` or
   `A_*` a raised or lowered asterisk for a conjugate or an adjoint;
+  inside `\text{}`, `\mathrm{}` and `\operatorname{}` it is a raised text
+  asterisk (strokeglyphs' `/asterisk`), as TeX sets it in text;
 - matrices and `cases`, accents and `\boxed`;
 - Greek and operator names.
 

@@ -226,10 +226,6 @@ fn unsupported_tex_fails_with_an_error_that_names_it() {
         ),
         ("(a @ b) 0 0 << >> mkpath", "mk-unsupported-character:@"),
         (
-            r"(\\text{a*b}) 0 0 << >> mkpath",
-            "mk-unsupported-character:*",
-        ),
-        (
             r"(\\begin{array} x \\end{array}) 0 0 << >> mkpath",
             "mk-unsupported-environment:array",
         ),
@@ -254,6 +250,58 @@ fn unsupported_tex_fails_with_an_error_that_names_it() {
             "{src}: expected {expect:?} in the error, got {report}"
         );
     }
+}
+
+/// Issue #378: an ASCII `*` inside `\text{}`, `\mathrm{}` and
+/// `\operatorname{}` is TeX's raised text asterisk, not a refusal and not
+/// the centred math `\ast` that `*` is outside them (#364).
+#[test]
+fn a_star_in_text_runs_is_a_raised_asterisk() {
+    let mut it = with_libs();
+    for tex in [
+        r"\\text{a*b}",
+        r"\\mathrm{a*b}",
+        r"\\operatorname{a*b}",
+        r"\\text{*}",
+    ] {
+        run(
+            &mut it,
+            &format!(
+                "newpath ({tex}) 100 300 << /Size 30 /Seed 1 /Irregular 0 >> mkpath \
+                 pathbbox 4 array astore newpath"
+            ),
+        );
+        let b = numbers(&mut it);
+        assert!(b[2] > b[0] && b[3] > b[1], "{tex}: drew nothing: {b:?}");
+        assert!(it.operand_stack().is_empty(), "{tex} leaked operands");
+    }
+    // the star's ink: a lone text star sits above a lone math star
+    let lly = |it: &mut Interp, tex: &str| {
+        run(
+            it,
+            &format!(
+                "newpath ({tex}) 0 0 << /Size 100 /Irregular 0 >> mkpath \
+                 pathbbox pop pop exch pop 1 array astore newpath"
+            ),
+        );
+        numbers(it)[0]
+    };
+    let text = lly(&mut it, r"\\text{*}");
+    let math = lly(&mut it, "*");
+    assert!(text > math + 10.0, "text star {text} vs math star {math}");
+    // and set as a plain letter it is narrower than the spaced math a \ast b
+    run(
+        &mut it,
+        r"(\\text{a*b}) << /Size 100 /Irregular 0 >> mkmetrics /Width get
+          (a*b) << /Size 100 /Irregular 0 >> mkmetrics /Width get 2 array astore",
+    );
+    let w = numbers(&mut it);
+    assert!(
+        w[0] < w[1],
+        "text a*b {} not narrower than math {}",
+        w[0],
+        w[1]
+    );
 }
 
 /// The `% @example:` lines are what `--capabilities` hands an agent to try

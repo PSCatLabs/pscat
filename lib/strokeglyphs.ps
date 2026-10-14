@@ -51,6 +51,13 @@
 % raised, so a reshaped digit reshapes its superscript. The glyphs are
 % named in the Adobe style (/reflexsubset is ⊆, /ringoperator is ∘).
 %
+% --- The text asterisk (issue #378) ----------------------------------------
+% ASCII * is /asterisk: a small upright star raised to the top of the
+% x-height, as TeX sets it in text. It is a different glyph from the
+% centred math ∗ (U+2217, /asteriskmath, a binary operator), which is
+% still reached by its code point. Before #378 a * in sgpath text was a
+% missing glyph; mathkit's `*` in math is still \ast (its own table).
+%
 % --- Subscripts and variant Greek (issue #366) ----------------------------
 % Subscript digits ₀ ₁ ... ₉ with ₊ ₋ ₌ and the letters ₐ ₑ ₒ ₓ ₙ ᵢ ⱼ are
 % derived the way the superscripts are, by the same `sgderive`: the base
@@ -320,6 +327,12 @@
   /Upsilon [560 [50 600 100 690 180 690 260 590 280 380 280 0]
                 [510 700 420 560 340 460 280 380]]
 
+  % --- the text asterisk (issue #378): ASCII * as TeX sets it in text, a
+  % small upright star raised to the top of the x-height. Same three-stroke
+  % construction as /asteriskmath, but centred at 585 rather than on the
+  % math axis, so \text{a*b} reads as an asterisk and not a binary operator.
+  /asterisk [320 [160 690 160 480] [69 638 251 532] [69 532 251 638]]
+
   % --- letters for physics and calculus. The hbar is handscript's h with
   % a short slanted bar through the stem; the script ell is one stroke
   % with a loop at the top.
@@ -333,7 +346,7 @@
 % Encoding, and A-Z from the capitals above.
 % @internal
 /sgcmap <<
-  43 /plus  45 /hyphen  47 /slash  58 /colon  59 /semicolon
+  42 /asterisk  43 /plus  45 /hyphen  47 /slash  58 /colon  59 /semicolon
   60 /less  61 /equal  62 /greater  40 /parenleft  41 /parenright
   91 /bracketleft  93 /bracketright  123 /braceleft  125 /braceright
   124 /bar
@@ -1151,6 +1164,21 @@
 %   (the variant theta is not the plain theta) mustbe
 %   /epsilon << /Size 1000 >> sgmetrics /Advance get 420 eq
 %   (the plain epsilon keeps its advance) mustbe
+%%EndSelfTest
+%
+%%SelfTest: ascii-star-is-the-text-asterisk
+%   % issue #378: ASCII * names /asterisk, an upright star raised above the
+%   % math axis; the centred math star stays /asteriskmath (U+2217)
+%   (*) << /Size 1000 >> sgmetrics dup /Name get /asterisk eq
+%   (ASCII * is the glyph /asterisk) mustbe
+%   /BBox get 1 get 400 gt (the text asterisk sits above the math axis) mustbe
+%   (∗) << /Size 1000 >> sgmetrics /Name get /asteriskmath eq
+%   (U+2217 is still /asteriskmath) mustbe
+%   (*) << /Size 1000 >> sgwidth 320 eq (the text asterisk advances 320) mustbe
+%   (a*b) << /Size 1000 >> sgwidth [/a /asterisk /b] << /Size 1000 >> sgwidth eq
+%   (a string and its name array measure the same) mustbe
+%   newpath (a*b) 0 0 << /Jitter 0 >> sgpath
+%   newpath
 %%EndSelfTest
 %
 %%SelfTest: every-glyph-is-well-formed
