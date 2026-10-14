@@ -121,7 +121,10 @@ HandScriptDict begin
                 [300 480 300 20]] def
     /five  [420 [330 700 110 700 90 430 260 470 360 300 300 60 90 30]] def
     /six   [420 [320 690 140 520 70 250 140 50 300 30 360 200 240 330 90 260]] def
-    /seven [400 [70 700 360 700 180 20]] def
+    % the corner point is doubled: the midpoint rule would otherwise
+    % slur the bar and the diagonal into one curve that reads as ')'
+    % (issue #298)
+    /seven [400 [70 700 360 700 360 700 180 20]] def
     /eight [420 [210 700 80 570 200 400 330 240 210 30 90 240 210 400 340 560 210 700]] def
     /nine  [430 [330 660 150 640 90 480 190 370 330 430]
                 [340 690 330 100 220 0]] def
