@@ -575,7 +575,7 @@
     newpath 490 evHZ moveto evrightedge
     << /Under /evunderstream load /Outward 180 /Length 9 /Spacing 3 /Crisp 0.2
        /Brush { << /Width 4 /Charge 0.8 /Depletion 0.9 /Edge 0.5 /Touch 0.8 >> pkbroad } >> pkbrushedge
-} def
+} bind def
 % the meadows' far edge against the wood's foot, in the meadow colour a
 % little lit
 % the head of the stream, where it meets the far shore: the water's own
@@ -586,7 +586,7 @@
     newpath 456 evHZ 2 add moveto 490 evHZ 2 add lineto
     << /Under evWOOD /Outward 90 /Length 5 /Spacing 2 /Crisp 0.25
        /Brush { << /Width 2.5 /Charge 0.8 /Depletion 0.9 /Edge 0.5 /Touch 0.8 >> pkbroad } >> pkbrushedge
-} def
+} bind def
 /evfaredges {
     17 srand
     [ evMEADOWLT evMEADOW 0.8 mix3 ] evset
@@ -596,7 +596,7 @@
     newpath 496 evHZ 1 sub moveto 770 evHZ 1 sub lineto
     << /Under evWOOD /Outward 90 /Length 6 /Spacing 2.5 /Crisp 0.2
        /Brush { << /Width 3 /Charge 0.8 /Depletion 0.9 /Edge 0.5 /Touch 0.8 >> pkbroad } >> pkbrushedge
-} def
+} bind def
 
 % ---- paint -----------------------------------------------------------
 

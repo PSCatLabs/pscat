@@ -34,8 +34,11 @@ break a ruled edge are replaced by it; the 2x still is re-rendered. Only the
   it is set to what is really painted at each edge: the meadow colour lit toward
   the glow along the far shore, and nearly plain meadow beside the stream
   (the lit meadow colour showed as yellow spikes).
-- **Each call has its own `srand`** (17, 19, 21), so nothing painted afterwards
-  moves.
+- **Random state.** The three new edge procedures each start from their own
+  `srand` (17, 19, 21), so the elements after them keep their marks. The
+  exception is `evnear`: its `pkbrushedge` draws from the stream partway
+  through the procedure and the bush density changed, so the rim bushes, tufts
+  and grass of both near banks fall differently from the first still.
 - **Review.** Three render rounds: first colour too bright, then a pale glitch
   at the stream's head from a sky-coloured `/Under`, then bushes thinned. The
   result is a clear improvement at 2x: the stream and shore edges read as brushed
