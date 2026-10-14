@@ -9,11 +9,11 @@
 <main class="wide">
   <h1>Fonts</h1>
   <p class="sub">Every face <code>findfont</code> can reach, rendered by
-  pscat itself. Two families: eight <b>Type3 faces</b> whose glyphs are
-  PostScript programs (<code>lib/fonts/</code>), and a 62-file
+  pscat itself. Two families: nine <b>Type3 faces</b> whose glyphs are
+  PostScript programs (<code>lib/fonts/</code>, <code>lib/handscript.ps</code>, <code>lib/typewriter.ps</code>), and a 62-file
   <b>runtime catalog</b> (<code>fonts/catalog/</code>) of libre outline
   faces loaded from disk on first use — together they resolve every
-  classic LaserWriter 35 name, plus 35 more display and text families
+  classic LaserWriter 35 name, plus 40 more display and text families
   and four international-script faces (Korean, Japanese, Thai).
   Run <code>pscat --fonts</code> for the complete, current list of
   names and aliases.</p>
@@ -42,6 +42,8 @@
       <div class="body"><b>/Confetti</b><span>A thrown handful — paper slips and dots in a six-color party palette, still falling</span></div></div>
     <div class="card"><img src="assets/fonts/type3/handscript.png" alt="/HandScript specimen" loading="lazy">
       <div class="body"><b>/HandScript</b><span>Dynamic handwriting: rand-jittered strokes, so no two letters ever match. The <a href="agents.html">MCP server</a> and <code>scripts/handwrite.sh</code> turn a string into a handwritten page</span></div></div>
+    <div class="card"><img src="assets/fonts/type3/typewriter.png" alt="/Typewriter specimen" loading="lazy">
+      <div class="body"><b>/Typewriter</b><span>Dynamic typing: Courier Prime redrawn at every strike through a ribbon, so one key never lands twice alike. Seeded, so the same page types the same in Ghostscript. <code>lib/typewriter.ps</code></span></div></div>
   </div>
 
   <h2>The standard thirty-five</h2>
@@ -68,7 +70,7 @@
   text family.</p>
 
   <h2>The display shelf</h2>
-  <p>35 curated families from the Google Fonts collection (all OFL or
+  <p>38 curated families from the Google Fonts collection (all OFL or
   Apache 2.0) spanning garalde to arcade, script to blackletter. Drop
   your own <code>.ttf</code>/<code>.otf</code> into any
   <code>fonts/catalog/</code> subdirectory and <code>/&lt;FileStem&gt;
@@ -136,6 +138,8 @@
       <div class="body"><span>glowing-terminal mono</span></div></div>
     <div class="card"><img src="assets/fonts/catalog/specialelite.png" alt="SpecialElite" loading="lazy">
       <div class="body"><span>worn typewriter</span></div></div>
+    <div class="card"><img src="assets/fonts/catalog/courierprime.png" alt="CourierPrime" loading="lazy">
+      <div class="body"><span>clean typewriter Courier &mdash; the outlines behind <code>/Typewriter</code></span></div></div>
     <div class="card"><img src="assets/fonts/catalog/orbitron.png" alt="Orbitron" loading="lazy">
       <div class="body"><span>sci-fi geometric display</span></div></div>
     <div class="card"><img src="assets/fonts/catalog/audiowide.png" alt="Audiowide" loading="lazy">

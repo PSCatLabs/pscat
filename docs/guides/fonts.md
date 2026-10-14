@@ -158,7 +158,7 @@ Helvetica/Times/Courier, TeX Gyre covers Palatino, Bookman, New
 Century Schoolbook, Avant Garde, Zapf Chancery, and
 Helvetica-Narrow, and the URW symbol faces give `/Symbol` and
 `/ZapfDingbats` real glyphs with their proper PLRM encodings. On
-top of that: 35 curated display and text families — Garamond to
+top of that: 38 curated display and text families — Garamond to
 Playfair, Poppins to Oswald, Great Vibes to Permanent Marker,
 fraktur, western, horror, arcade, terminal, sci-fi, stencil, comic.
 
@@ -173,5 +173,6 @@ licenses — all OFL, Apache 2.0, GUST, or AGPL-with-font-exception;
 per-family license files ride alongside the fonts). Drop your own
 `.ttf`/`.otf` into any subdirectory and `/<FileStem> findfont`
 finds it. The [font gallery](https://jeromebanks.github.io/postscript_interpreter/fonts.html)
-on the project site shows every face — Type 3 library included — one
+on the project site shows every face — Type 3 library included, with a card
+for `/Typewriter` (one key struck twenty times) beside Courier Prime's — one
 card at a time.
