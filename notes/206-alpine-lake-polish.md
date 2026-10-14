@@ -33,8 +33,11 @@ criteria ask for a NOTES.md entry; per repo convention it lives here.
   360pt) `pkbroad` grazes, warm because the water near the shore mirrors
   the dawn horizon, running out to one or two striations. Grazes are now
   three short strokes a row (30 to 130pt), width 3 to 7, `/Edge 0.45`,
-  mixed toward the reflected wood (fading in over the 40pt under the
-  shore) or 0.6 toward the reflected range below that. The 14 liner
+  each row's colour mixed 0.6 toward what the water mirrors there: the
+  reflected wood just under the shore, sliding to the reflected range
+  over the next 40pt down. (A first cut ramped the mix strength instead
+  of the target, which left rows 24 to 40pt under the shore almost pure
+  sky colour, still tan rules over the reflected wood.) The 14 liner
   light lines are 16 runs of 1 to 3 glints each, of random length (4 to
   26pt), weight (0.6 to 1.3pt) and strength (mixed up to 0.55 toward the
   water under them). The full-width shore line is broken into 40 to 200pt
@@ -43,7 +46,9 @@ criteria ask for a NOTES.md entry; per repo convention it lives here.
 ## Timing
 
 1x, `--png --page 760x560`, back to back on the same machine (user time):
-before 25.8s / 25.9s, after 26.2s / 26.4s, about +0.4s (+1.5%). The
+before 25.8s / 25.9s, after 26.2s / 26.4s, about +0.4s (+1.5%). A
+later pair under load from other agents' renders was noisier (before
+34.7s / 28.6s, after 30.3s / 27.5s) and shows no regression either. The
 issue's ceiling was the ~51s it measured on a slower setup. The 2x still
 takes about 27s either way. Ghostscript (`gs -dNOSAFER`) still renders
 it without error.

@@ -531,13 +531,9 @@ lkWL 4 sub -8 0 {
     /lky exch def
     % just under the shore the water mirrors the dark wood, below that the
     % range, not the sky, so a pull carries some of what it crosses
-    lky lkWL 44 sub gt {
-        [ lkWL lky sub lkWL add lkskyat ] 0.84 shade 3 array astore
-        lkRWOOD lky lkWL 44 sub sub 40 div 0.65 mul mix3
-    } {
-        [ lkWL lky sub lkWL add lkskyat ] 0.84 shade 3 array astore
-        lkRRANGE 0.6 mix3
-    } ifelse setrgbcolor
+    /lkgt lky lkWL 44 sub sub 40 div 0 max 1 min def
+    [ lkWL lky sub lkWL add lkskyat ] 0.84 shade 3 array astore
+    [ lkRRANGE lkRWOOD lkgt mix3 ] 0.6 mix3 setrgbcolor
     3 {
         /lkx 800 chance 100 sub def
         lkx lky lkx 30 add 100 chance add lky 1.5 lkj add lkseg

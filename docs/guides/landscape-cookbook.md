@@ -282,13 +282,13 @@ grestore
 - A **foot** is a directional `pkwet`: `/Direction 90 /OneSided true /Stretch 8 /Offset 30 /Layers 14 /Under` the range's colour. The wrapped spray is tapped along the foot and lifted up the slope in layers, so the foot dissolves into the haze rising off the lake. Clip to the range's silhouette first so the haze stays inside the range.
 - Keep `/Layers` pinned while tuning: with `/Layers` left to default, a directional `/Offset` also sets the depth and re-rolls everything after it.
 - Expect a granular fringe at 2x. The dense core fuses and the falloff stays granular; that grain is what makes it vapour and not a gradient, and Alpine Lake's mist band is the same at its 2x still. Only a coarser speck than 1 pt turns it into static.
-- A lifted foot repeats whatever it wraps once per layer, so spray in it should be a fine grain and not the body of the haze: let a solid band carry the lift (a wavering top keeps the layers' steps from ruling) and keep the spray sparse and fine (`/Speck 0.6`, `/Density` about 50). Alpine Lake does this since issue #206.
+- A lifted foot repeats whatever it wraps once per layer, so sparse 1 pt spray in it multiplies into gravel. Two settings work: fuse the spray densely, as the snippet below does, or let a solid band carry the lift (a wavering top keeps the layers' steps from ruling) with the spray only a sparse, fine grain on it (`/Speck 0.6`, `/Density` about 50), as Alpine Lake does since issue #206.
 
 **Failures.**
 - *Ruled stripes.* Alpine Lake's first mist was a stack of horizontal `pkbroad` strokes whose charge fell as they rose; at 2x it read as ruled stripes. Use the directional lift.
 - *A pale rim round the foot.* `/Under` should be the colour that is really behind the foot, not the mist. Where the range is half faded already, mix it. Where the sky changes down a tall foot, a procedural `/Under` with `/Box` and `/Bands` asks for the backdrop band by band (recipe 2); pin `/Layers` low, since a foot's 14 layers leave room for only 4 cells.
 - *Static.* Speck too coarse, or `/Density` too low; raise it.
-- *Gravel in a lifted foot.* 1 pt spray at a sparse density, repeated through 14 layers, reads as a coarse speckled band, not haze. Carry the lift on the band and make the spray finer (above).
+- *Gravel in a lifted foot.* 1 pt spray at a sparse density, repeated through 14 layers, reads as a coarse speckled band, not haze. Fuse the spray, or carry the lift on a band and make the spray finer (above).
 - *A lifted foot that stops a reflection.* A directional `pkwet` nested inside another multiplies their passes, and the innermost procedure may run at most 64 times; pull the reflection of a part that already has a lifted foot sharp instead of pulling it again (Alpine Lake's `35 lksharp`, recipe 9).
 
 ```postscript
