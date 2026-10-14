@@ -65,7 +65,9 @@
 % once it is nearly full, and a board's names were enough to double the
 % cost of the chalk drawn after it.
 % @internal
-/dcscratch 600 dict def
+/dcnewscratch { 600 dict } def
+% @internal
+/dcscratch dcnewscratch def
 
 % ------------------------------------------------------------- generator
 
@@ -342,16 +344,26 @@
     /dcL dcpts dcplen def
     /dccw dcw 1 dcTiltS sub mul dcSide dcTiltS mul add def
     /dck dccw dcw 1.4 mul div round cvi 3 dcmax 8 dcmin def
-    /dclw dccw dck div 1.8 mul def
+    /dcew dccw dck div 0.9 mul def
+    /dcfh dccw 2 div dcew 0.6 mul sub def
+    /dcfs dcfh 2 mul dck 2 sub div def
     dcpts 0 get dcpts 1 get dcposseed dcSeedOn { pop dcSeed dcSi 7919 mul add } if
     dcsrand dcrand pop
     0 1 dck 1 sub {
         /dcli exch def
         /dcedge dcli 0 eq dcli dck 1 sub eq or def
-        /dclo dcli 0.5 add dck div 0.5 sub dccw dclw sub mul def
+        % the two edge lanes are narrow and sit at the patch's rims; the
+        % face lanes share what lies between, overlapping
+        dcedge {
+            /dclw dcew def
+            /dclo dccw dcew sub 2 div dcli 0 eq { neg } if def
+        } {
+            /dclw dcfs 1.6 mul def
+            /dclo dcli 1 sub 0.5 add dcfs mul dcfh sub def
+        } ifelse
         % each lane lands and lifts a little apart: a ragged square end
-        /dcs0 dcrand dclw 1.2 mul mul def
-        /dcs1 dcrand dclw 1.2 mul mul def
+        /dcs0 dcrand dccw dck div 1.2 mul mul def
+        /dcs1 dcrand dccw dck div 1.2 mul mul def
         [
             0 1 dcn 1 sub {
                 /dcvi exch def
@@ -1165,6 +1177,7 @@
 % @example: (lib/handscript.ps) run (lib/strokeglyphs.ps) run 40 40 520 300 << /Surface /slate /Ghost { (old notes) 60 200 << /Size 30 >> sgpath } >> dcboard
 % @param: /Surface [name] /slate (near-black) or /greenboard (dark green) (default /greenboard)
 % @param: /Ground [rgb array] The bare board's tone, under the dust (default from /Surface)
+% @param: /Weave [points] The board's tooth spacing, passed to dksurface: coarser than drykit's own board surfaces, because at 2x a 0.4pt tooth is below a pixel and costs twice the cells (default 0.7)
 % @param: /Seed [integer] Seed for the board's tooth, haze, swipes, wipes and specks; leaves the caller's rand stream untouched (default 1)
 % @param: /Haze [0..1] How thick the film of chalk dust over the board is; 0 is a freshly washed board (default 0.4)
 % @param: /Ghost [proc] Earlier writing, as a procedure that builds a path and paints nothing (sgpath calls, lines), which dcboard draws as chalk that was erased; it must leave the operand stack as it found it (default none)
