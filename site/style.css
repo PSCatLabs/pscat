@@ -117,7 +117,7 @@ th { color: var(--dim); font-weight: 600; }
   background: var(--panel); border: 1px solid var(--edge); border-radius: 8px;
   padding: 0 0 12px; overflow: hidden;
 }
-.card img { width: 100%; display: block; background: #fff; }
+.card img { width: 100%; height: auto; display: block; background: #fff; }
 .card .body { padding: 10px 14px 0; }
 .card .body b { display: block; margin-bottom: 3px; }
 .card .body span { color: var(--dim); font-size: 14px; }
