@@ -224,7 +224,11 @@ fn unsupported_tex_fails_with_an_error_that_names_it() {
             r"(a \\aleph b) 0 0 << >> mkpath",
             r"mk-unsupported-command:\aleph",
         ),
-        ("(a * b) 0 0 << >> mkpath", "mk-unsupported-character:*"),
+        ("(a @ b) 0 0 << >> mkpath", "mk-unsupported-character:@"),
+        (
+            r"(\\text{a*b}) 0 0 << >> mkpath",
+            "mk-unsupported-character:*",
+        ),
         (
             r"(\\begin{array} x \\end{array}) 0 0 << >> mkpath",
             "mk-unsupported-environment:array",
