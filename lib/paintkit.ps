@@ -6454,8 +6454,9 @@ systemdict /setalpha known /pwhasalpha exch def
 % That is a few multiplies and three square roots per pigmix, with no
 % iteration. What it buys over a lerp: blue and yellow multiply their
 % absorption bands, so they leave green; white (strength 12) has almost no
-% absorption and a great deal of scatter, so a little of it lifts a colour a
-% long way and the tint loses saturation as it lightens; a strong dark
+% absorption and a great deal of scatter, so tints are not a straight line
+% toward white (how fast each lightens depends on the pigment) and lose
+% saturation as they lighten; a strong dark
 % pigment (phthalo blue) dominates a mix, as it does in a pot.
 %
 % What it is not, so nobody expects it:
@@ -6578,7 +6579,7 @@ systemdict /setalpha known /pwhasalpha exch def
 } bind def
 
 % @kind: Procedure
-% @summary: A tint: the pigment (or [r g b] colour) with t parts titanium white, t from 0 (the pigment) to 1 (white). Not a lerp: white's tinting strength is 12, so t 0.2 is already pastel, and the tint loses saturation as it lightens.
+% @summary: A tint: the pigment (or [r g b] colour) with t parts titanium white, t from 0 (the pigment) to 1 (white). Not a lerp: how fast a colour lightens depends on the pigment, and the tint loses saturation as it lightens.
 % @example: /phthaloblue 0.25 pigtint setrgbcolor
 /pigtint {
     /pgmt exch def /pgmp exch def
