@@ -893,11 +893,14 @@ renders eight examples in both and compares block-downsampled output).
   *inside the fill* (`pmemit`/`pmstamp`/`ptemit`, behind `ptk 0 gt`), from
   the head position (`pmnc`, `ptnc`, or +-1 for pktrowel's ridges) and the
   flip of the run's first stop, then passed through `puwet`, which grades it
-  by the running `pkwet` pass (L3): frames have 8 slots, and 4-6 are the
+  by the running `pkwet` pass (L3): frames have 9 slots, and 4-6 are the
   per-pass factors, a copy of `/Under` and the running pass index (slot 7,
   issue #179, holds one backdrop per pass for a procedural `/Under` and is
   null otherwise: `puwet` reads it first, so a loaded colour grades toward
-  the pass's own backdrop). A new
+  the pass's own backdrop; slot 8, issue #359, is a banded call's record:
+  the cells' clips, backdrops, pass colours and the saved random stream, null
+  otherwise; the pass loop tests it, and each cell points slot 5 at its own
+  backdrop, so `puwet` needs nothing new). A new
   adopter must call `puwet` on every loaded colour, or its marks go solid
   inside a pull. `pkfan` adopts it too (L4, `pfColorRec`): its colour is set
   per *run* (`pfrun`) and per pressed ray (`pfray`) by `pfcolor`, from the
@@ -990,7 +993,7 @@ renders eight examples in both and compares block-downsampled output).
   (`docs/guides/landscape/<name>.png`, 2x). Edit a snippet in the markdown, then
   `COOKBOOK_WRITE_THUMBS=1 cargo test --profile ci --test landscape_cookbook`
   and look at the PNG; the test does not compare pictures. When a tool the
-  cookbook names as pending lands (#180, #229, #230, #345, #346, #347, #359),
+  cookbook names as pending lands (#180, #229, #230, #345, #346, #347),
   update the recipe in its "Tools not yet landed" table; when Evening Stream
   (#187, PR #348) merges, link its still from the cookbook.
 - **Paintkit slices prove byte identity with `scripts/identity_check.sh

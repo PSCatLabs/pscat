@@ -100,7 +100,7 @@ Two kinds. **Vapour** is spray, soft all through; use it for haze and wispy cirr
 **Vapour (left of the picture).**
 - `pkspray` with a fine speck: `/Speck` 1 to 1.2, a small `/Nozzle` (about 7% of the cloud's width) and a high `/Density` (about 400). At a 1 pt speck the particles fuse into a solid core and only the falloff stays granular. At `/Speck` 2 or 3 the same counts give lumpy bars that read as paint, not vapour.
 - Several overlapping arcs of spray make the shape, not one long path.
-- `pkwet` with `/Soft 1` and `/Under` set to the colour actually behind the mark. A single `[r g b]` is the simple case. Over a graded sky, give a procedure `x y -> r g b` and `/At [x y]`, the place the cloud sits: each softening pass is then mixed toward the sky at its own displacement, and the pale or dark rim a single colour leaves at one end goes away (issue #179). The procedure must be pure: no painting, no `pkwet`, exactly three numbers out. A mark taller than the sky's change is better split into several calls, each with its own `/At`; the answer is per pass, not per pixel (issue #359).
+- `pkwet` with `/Soft 1` and `/Under` set to the colour actually behind the mark. A single `[r g b]` is the simple case. Over a graded sky, give a procedure `x y -> r g b` and `/At [x y]`, the place the cloud sits: each softening pass is then mixed toward the sky at its own displacement, and the pale or dark rim a single colour leaves at one end goes away (issue #179). The procedure must be pure: no painting, no `pkwet`, exactly three numbers out. A mark that is tall against the sky's change wants the backdrop per band: give `/Box [x y w h]` (where the mark sits) and `/Bands [cols rows]` in place of `/At`, and the procedure is asked once per cell of a grid over the box and each softening pass is painted once per cell, mixed toward that cell's sky (issue #359). Pick rows so a cell is no taller than about half `/Offset`. The mark then runs (`/Layers` - 1) x cells + 1 times, so keep that within 64. For a cloud about as tall as `/Offset`, `/At` is as good and cheaper, which is why the snippet below uses it.
 
 **A cloud with form (right of the picture).** From Evening Stream.
 - Scumble tiny circles over the cloud's outline with `pkscumblein` (a region motion, so the outline goes through `scpath` first), and paint them with a `pkbroad` loaded with two cloud colours.
@@ -113,7 +113,7 @@ Two kinds. **Vapour** is spray, soft all through; use it for haze and wispy cirr
 - *Ring clouds.* Brush narrower than 2x the circle radius (above).
 - *Clouds that read as static.* The speck is coarse; see the 1 pt rule.
 - *Spots like a leopard.* Dabs (`pkdab`) clumped at cloud scale read as spots; use scumbled circles.
-- *A pale or dark halo around a cloud.* `/Under` is the wrong colour, or a single colour over a strong gradient. Use the `/Under` procedure with `/At`.
+- *A pale or dark halo around a cloud.* `/Under` is the wrong colour, or a single colour over a strong gradient. Use the `/Under` procedure with `/At`, or with `/Box` and `/Bands` if the mark is tall.
 - *Lights that read as rings.* A thin lit band holds few circles, and a lone circle paints as a ring. Use smaller circles (and more of them) for the core of the light, as the snippet does.
 - *A light that is a stripe.* One lit pass at one value ends on a line. Lay a deep half-light first, then a shallow core.
 
@@ -285,7 +285,7 @@ grestore
 
 **Failures.**
 - *Ruled stripes.* Alpine Lake's first mist was a stack of horizontal `pkbroad` strokes whose charge fell as they rose; at 2x it read as ruled stripes. Use the directional lift.
-- *A pale rim round the foot.* `/Under` should be the colour that is really behind the foot, not the mist. Where the range is half faded already, mix it.
+- *A pale rim round the foot.* `/Under` should be the colour that is really behind the foot, not the mist. Where the range is half faded already, mix it. Where the sky changes down a tall foot, a procedural `/Under` with `/Box` and `/Bands` asks for the backdrop band by band (recipe 2).
 - *Static.* Speck too coarse, or `/Density` too low; raise it.
 - *A lifted foot that stops a reflection.* A directional `pkwet` nested inside another multiplies their passes, and the innermost procedure may run at most 64 times; pull the reflection of a part that already has a lifted foot sharp instead of pulling it again (Alpine Lake's `35 lksharp`, recipe 9).
 
@@ -814,7 +814,6 @@ A recipe is a workaround where one of these would be one call. When one lands, u
 |---|---|---|
 | [#229](https://github.com/jeromebanks/postscript_interpreter/issues/229) | `/TipColor` and `/TipReach`: a lit tip on a dark stem | 6 Evergreens, 11 Grass |
 | [#230](https://github.com/jeromebanks/postscript_interpreter/issues/230) | `/Colors` on `pkdry` and `pkoil`'s ridges | 4 Mist, 10 Bank, foam on water |
-| [#359](https://github.com/jeromebanks/postscript_interpreter/issues/359) | `pkwet` backdrop per band, not per pass | 2 Clouds, 4 Mist |
 
 Evening Stream ([PR #348](https://github.com/jeromebanks/postscript_interpreter/pull/348), pending, `gallery/evening_stream.ps` on `feature/187-second-wet-on-wet-landscape`) is the second worked example once it merges: a dark sunset with a stream, a cabin and autumn trees. Its techniques are folded into recipes 2, 8, 9, 10 and 11. When it merges, link its still `gallery/renders/evening_stream.png` from this page.
 
