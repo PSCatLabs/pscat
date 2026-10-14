@@ -22,6 +22,8 @@ on:
       - "scripts/site_examples.py"
       - "scripts/check_learn_examples.mjs"
       - "scripts/check_site_links.py"
+      - "scripts/gallery.py"
+      - "scripts/test_gallery.py"
       - "scripts/test_site_scripts.py"
       - "gallery/**"
       - "examples/**"
@@ -51,7 +53,7 @@ jobs:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
       - name: Site script self-test
-        run: python3 scripts/test_site_scripts.py
+        run: python3 scripts/test_site_scripts.py && python3 scripts/test_gallery.py
       - run: ./scripts/build_site.sh
       - name: Check links and navigation
         run: python3 scripts/check_site_links.py _site

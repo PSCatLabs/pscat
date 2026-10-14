@@ -26,3 +26,8 @@ python3 -m http.server -d _site          # open http://localhost:8000
 `build_site.sh` also renders the font gallery cards
 (`scripts/build_font_gallery.sh`) and the example and gallery stills fresh
 each time, so the site never drifts from what the interpreter actually does.
+
+The gallery pages are generated: `gallery/manifest.json` lists every piece and
+specimen, and `scripts/gallery.py` writes `gallery.html` and one page per piece
+from it (there is no hand-written gallery page). Add a piece by adding a
+manifest entry; see [`gallery/README.md`](../../gallery/README.md).

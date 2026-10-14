@@ -6,12 +6,13 @@
 #
 # Pieces: the authored pages (site/, with the shared header, footer and
 # <head> from site/_partials/ applied last, by scripts/site_pages.py),
-# the wasm build + JS library,
-# playground example sources (self-contained files only — the wasm
-# build has no filesystem), the Learn page's examples (site/learn/,
-# placed into the page by scripts/site_examples.py and checked in the
-# wasm build by scripts/check_learn_examples.mjs), and PNG renders of
-# every gallery piece and example, produced by pscat itself.
+# the wasm build + JS library, the gallery (gallery.html and one page per
+# piece, generated from gallery/manifest.json by scripts/gallery.py), the
+# playground example sources (self-contained files only — the wasm build has
+# no filesystem), the Learn page's examples (site/learn/, placed into the
+# page by scripts/site_examples.py and checked in the wasm build by
+# scripts/check_learn_examples.mjs), and PNG renders of every gallery piece
+# and example, produced by pscat itself.
 #
 # Then check it: scripts/check_site_links.py (CI runs it after this).
 set -euo pipefail
@@ -36,61 +37,26 @@ else
   echo "build_site.sh: node not found, skipping the Learn examples' browser check" >&2
 fi
 
-# 3. playground example sources
-for f in examples/sierpinski.ps examples/koch_snowflake.ps \
-         examples/golden_spiral.ps examples/specimen.ps \
-         examples/testcard.ps examples/handwriting.ps \
-         gallery/fern.ps gallery/golden_bloom.ps \
-         gallery/cathedral_rose.ps gallery/hundred_lines.ps; do
-  cp "$ROOT/$f" "$OUT/examples/"
-done
+# 3. the gallery, generated from gallery/manifest.json (#251): the check first,
+# so a piece with no entry or a missing render stops the build; then
+# gallery.html and one page per piece (with the shell markers, so the last step
+# dresses them), the renders, reference photos and the playground sources
+# (self-contained files only: the wasm build has no filesystem).
+python3 "$ROOT/scripts/gallery.py" check
+python3 "$ROOT/scripts/gallery.py" build "$OUT"
+python3 "$ROOT/scripts/gallery.py" stage "$OUT"
 cp "$ROOT"/site/learn/*.ps "$OUT/examples/learn/"
 
-# 4. renders — gallery stills are pre-rendered in the repo; examples
-# render here at their canonical sizes (BoundingBox where declared).
-cp "$ROOT"/gallery/renders/*.png "$OUT/assets/renders/"
-cp "$ROOT"/gallery/references/* "$OUT/assets/references/"
-cp "$ROOT/lib/fonts/specimen.png" "$OUT/assets/renders/font_library.png"
-cp "$ROOT/lib/fonts/specimen2.png" "$OUT/assets/renders/font_library2.png"
-cp "$ROOT/fonts/catalog/specimen-1.png" "$OUT/assets/renders/font_catalog1.png"
-cp "$ROOT/fonts/catalog/specimen-2.png" "$OUT/assets/renders/font_catalog2.png"
-cp "$ROOT"/lib/styles/specimen_*.png "$OUT/assets/renders/"
-
-# 5. the font gallery — one card per face (site/fonts.html)
+# 4. the font gallery: one card per face (site/fonts.html)
 "$ROOT/scripts/build_font_gallery.sh" "$OUT/assets/fonts"
 
+# 5. the specimens and examples that have no committed render: pscat draws
+# them here at the page size the manifest gives
 cargo build --release --manifest-path "$ROOT/Cargo.toml"
 BIN="$ROOT/target/release/pscat"
-render() { # file WxH
-  "$BIN" --page "$2" --png "$OUT/assets/renders/$(basename "$1" .ps).png" "$ROOT/$1"
-}
-render examples/sierpinski.ps 500x500
-render examples/koch_snowflake.ps 500x500
-render examples/golden_spiral.ps 500x500
-render examples/testcard.ps 612x792
-render examples/specimen.ps 612x792
-render examples/strokeglyphs.ps 900x1600
-render examples/mathkit_specimen.ps 1000x1960
-render examples/postcard.ps 612x792
-render examples/type3_ransom.ps 612x792
-render examples/handwriting.ps 612x792
-render examples/graph_paper.ps 612x792
-render examples/dataviz_paper.ps 612x792
-render examples/template_card.ps 612x792
-render examples/template_letter.ps 612x792
-render examples/template_certificate.ps 612x792
-render examples/template_invitation.ps 612x792
-render examples/template_poster.ps 612x792
-render examples/lettering.ps 900x900
-render examples/fillkit.ps 900x900
-render examples/headline.ps 900x900
-render examples/jersey.ps 900x1200
-render examples/apparel_shirt.ps 1400x760
-render examples/drykit_specimen.ps 840x1000
-render examples/drychalk_specimen.ps 840x1080
-render examples/drycrayon_specimen.ps 840x1000
-render examples/drycrayon_motion_demo.ps 840x760
-render examples/drycharcoal_specimen.ps 720x490
+while read -r src page id; do
+  "$BIN" --page "$page" --png "$OUT/assets/renders/$id.png" "$ROOT/$src"
+done < <(python3 "$ROOT/scripts/gallery.py" renders)
 # the Learn examples that draw, at their %%BoundingBox size and twice the
 # resolution, so they stay sharp on high-density screens
 for f in "$ROOT"/site/learn/*.ps; do

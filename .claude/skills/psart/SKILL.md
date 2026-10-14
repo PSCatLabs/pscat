@@ -606,4 +606,9 @@ showpage
 `gallery/hortus.ps` is the worked example (herbarium plate:
 L-systems + alongpath blossoms + letterpress); `gallery/README.md`
 is the brief for gallery-quality pieces, and `examples/` has the
-font showcases.
+font showcases. To add a finished piece to the gallery, add an entry
+to `gallery/manifest.json` (copy a neighbour; `gallery/README.md`
+lists the fields), commit its render in `gallery/renders/`, and run
+`python3 scripts/gallery.py sync` then `check`: the site's gallery and
+piece pages, the README highlights and `gallery/show.sh` are generated
+from the manifest, so never edit `gallery.html` by hand.

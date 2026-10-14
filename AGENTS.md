@@ -141,6 +141,13 @@ predates it.
   `gallery/renders/` and a slideshow script (`show.sh`); see
   `gallery/README.md`. Art files stay within the interpreter's current
   operator set — they double as its most demanding integration tests.
+  **`gallery/manifest.json` is the one list of what the gallery shows.** A new
+  piece adds an entry there (title, category, libraries, blurb, alt text, page
+  size, speed) plus its `.ps` and `renders/*.png`, then runs
+  `python3 scripts/gallery.py sync` and `check`. The site's `gallery.html` and
+  per-piece pages, the README highlights, the `gallery/README.md` table and
+  `show.sh` are generated from it: **nobody edits `gallery.html` by hand**.
+  `cargo test` runs the check, so a `gallery/*.ps` with no entry fails CI.
 
 ## Using pscat as a tool (not working on it)
 

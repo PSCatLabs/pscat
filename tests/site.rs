@@ -69,6 +69,15 @@ fn build_site_assembles_everything() {
             "gallery shows {name} but it wasn't rendered"
         );
     }
+    // One generated page per gallery piece (#251), linked from the gallery.
+    let pieces = std::fs::read_to_string(root.join("gallery/manifest.json")).expect("manifest");
+    let manifest: serde_json::Value = serde_json::from_str(&pieces).expect("manifest is JSON");
+    for p in manifest["pieces"].as_array().expect("pieces") {
+        let id = p["id"].as_str().expect("id").replace('_', "-");
+        let page = format!("gallery-{id}.html");
+        assert!(out.join(&page).exists(), "missing piece page {page}");
+        assert!(gallery.contains(&page), "gallery.html does not link {page}");
+    }
     // Links, navigation and orphans (#250): the same check CI runs.
     let check = Command::new("python3")
         .arg(root.join("scripts/check_site_links.py"))
