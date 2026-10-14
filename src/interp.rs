@@ -184,7 +184,7 @@ enum JEntry {
     /// A `gstate` object overwritten by `currentgstate` or `copy` (#394).
     GState {
         gs: Rc<RefCell<crate::gfx::GraphicsState>>,
-        old: crate::gfx::GraphicsState,
+        old: Box<crate::gfx::GraphicsState>,
     },
 }
 
@@ -1306,7 +1306,7 @@ impl Interp {
         if rec.seen.insert(Rc::as_ptr(g) as usize) {
             self.journal.push(JEntry::GState {
                 gs: g.clone(),
-                old: g.borrow().clone(),
+                old: Box::new(g.borrow().clone()),
             });
         }
     }
@@ -1353,7 +1353,7 @@ impl Interp {
                 // and this cell is kept alive by `data`/`dict` itself.
                 JEntry::Array { data, old } => *data.borrow_mut() = old,
                 JEntry::Dict { dict, old } => *dict.borrow_mut() = old,
-                JEntry::GState { gs, old } => *gs.borrow_mut() = old,
+                JEntry::GState { gs, old } => *gs.borrow_mut() = *old,
             }
         }
         // grestoreall to the save point, then drop the saved state —
