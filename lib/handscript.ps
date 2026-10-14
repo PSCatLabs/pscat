@@ -115,7 +115,10 @@ HandScriptDict begin
     /z [420 [70 480 350 480 60 30 360 30]] def
     /zero  [400 [200 700 60 500 60 180 200 0 340 180 340 500 200 700]] def
     /one   [400 [120 560 220 700 220 20]] def
-    /two   [420 [70 550 180 700 330 620 300 420 70 30 360 40]] def
+    % the base's corner point is doubled, as in /seven below: the midpoint
+    % rule would otherwise slur the diagonal and the base into a curl
+    % (issue #416)
+    /two   [420 [70 550 180 700 330 620 300 420 70 30 70 30 360 40]] def
     /three [420 [80 620 220 700 330 570 220 400 340 250 220 20 70 90]] def
     /four  [430 [280 700 70 250 380 260]
                 [300 480 300 20]] def
