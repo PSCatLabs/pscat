@@ -22,8 +22,10 @@ BASE="$(cd "$1" && pwd -P)"
 mkdir -p "$(dirname "$2")"
 OUT="$(cd "$(dirname "$2")" && pwd -P)/$(basename "$2")"
 case "$OUT" in "$BASE"/*) die "OUT_BIN must be outside BASE_WORKTREE" ;; esac
-cargo build --release --bin pscat --manifest-path "$BASE/Cargo.toml" >&2
-TARGET_DIR=$(cargo metadata --format-version 1 --no-deps --manifest-path "$BASE/Cargo.toml" 2>/dev/null \
+# cd into the base tree: --manifest-path alone leaves Cargo reading the CALLER's
+# .cargo/config.toml (rustflags, target dir), not the base tree's.
+(cd "$BASE" && cargo build --release --bin pscat) >&2
+TARGET_DIR=$(cd "$BASE" && cargo metadata --format-version 1 --no-deps 2>/dev/null \
     | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')
 SRC="${TARGET_DIR:-${CARGO_TARGET_DIR:-$BASE/target}}/release/pscat"
 [ -x "$SRC" ] || die "built binary '$SRC' not found"
