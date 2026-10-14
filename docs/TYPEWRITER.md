@@ -102,7 +102,8 @@ same in pscat and gs):
   glyph drawn under `setcachedevice` and replays the first strike for every
   later one. A probe drew `eee`, each offset by a hash of its position: gs
   rendered three identical boxes under `setcachedevice` and three different
-  ones under `setcharwidth`. pscat differs under both. A cached glyph is also
+  ones under `setcharwidth`. pscat, which has no Type 3 glyph cache, rendered
+  three different ones under both. A cached glyph is also
   a mask, so it would lose the clip-based ink of section 6.
 - **`BuildChar` is a pure function** of the font's settings, the cell, the
   code, and the strike index. It never changes a counter. `stringwidth` and
@@ -112,9 +113,14 @@ same in pscat and gs):
   `definefont`, so settings such as the machine seed and the current strike
   index sit in a separate dict that `BuildChar` reads. `lib/fonts/neon.ps` and
   `lib/handscript.ps` use this same pattern.
-- **Position is a cell.** `BuildChar` maps its device origin back to page space
-  (`0 0 transform`, then the inverse of the page matrix stored at setup) and
-  rounds to a line and a column on the pitch grid. The cell is the key to all
+- **Position is a cell.** `BuildChar` maps its device origin back to the
+  text block's frame and rounds to a line and a column on the pitch grid. It
+  uses `0 0 transform`, then the inverse of a matrix the library captures
+  **when a text block starts** (`twsetup`, and each block in #213's layout
+  API), not once at load. An artist who rotates or scales before typing (an
+  angled memo), or #214 applying scan skew, then still gets whole lines on one
+  grid. The prototype captures it once at load, which is enough for its flat
+  page. The cell is the key to all
   per-strike randomness (section 7). Rounding to whole cells means a sub-pixel
   difference between pscat and gs never re-rolls a strike. Text placed off the
   grid still works: it lands in the nearest cell.
@@ -132,7 +138,7 @@ printable code:
 | Quirk | Default | From |
 |---|---|---|
 | offset x, y | normal, sd 0.08pt | M1: 0.07–0.11pt per letter after face shape is removed |
-| bent slug | 6% of keys get an extra ±0.2–0.45pt vertical offset and ±0.5–1° lean | M1's largest per-letter offsets (0.15–0.23pt); lean is not resolved on the board, so it stays rare |
+| bent slug | 6% of keys get an extra ±0.1–0.25pt vertical offset and a ±0.3–0.8° lean | The offset matches M1's largest per-letter offsets (0.15–0.23pt). The lean is **not measured** (rotation is below the board's resolution). It is a small value set by eye: #211 checks it against T2 and T9. |
 | weight | multiplier, normal, mean 1, sd 0.06 | M2: some keys heavy every time (T2's `r`) |
 | clogged counter | 15% of letters that have a counter (`a e o` twice as likely); fill fraction 0.5–1 | M5 (T6) |
 | one side heavy | 8% of keys; a direction and a strength of 0.3–0.6 | M7 (T12) |
@@ -152,19 +158,21 @@ printable code:
 | offset x | normal, sd 0.2pt | 0.22–0.27pt within a letter (upper bound) |
 | offset y | normal, sd 0.15pt | 0.14–0.20pt |
 | rotation | normal, sd 0.25° | upper bound only (REFERENCES.md, Rotation) |
+| mis-strike | 1% of strikes take 4× the offset above | the tails: 0.8–0.9% of strikes land more than 1pt off horizontally, which a normal of sd 0.2pt almost never gives |
 | pressure | normal, mean 1, sd 0.08, times a finger factor (0.9 on the little-finger keys `q a z p` and `; / -`); 1% of strikes are very light (0.5) | coverage CV 0.07–0.21; T7 |
 
 **One knob, `/Wear`** (`[ratio]`, default 1), multiplies every machine and
 strike magnitude above. 0 is a perfect machine, 1 is the measured
-good-condition manual (Szilard, T9), and about 2 is an old, heavily used machine
-(Duncan, whose tails are three to eight times Szilard's). Values above that are
-for art. Presets set several keys together:
+good-condition manual (Szilard, T9), and about 1.5 is an old, hard-used machine
+(Duncan: its sds are 1.2–1.5× Szilard's, and strikes 0.5pt or more off the
+baseline are 8× as common). Values above 2 are for art. Presets set several
+keys together:
 
 | `/Preset` | Settings |
 |---|---|
 | `/manual` (default) | `/Wear 1`, pressure sd 0.08, `/Ribbon 0.7` |
 | `/electric` | `/Wear 0.7`, pressure sd 0.03 and no finger factor (M2; T11's evenness) |
-| `/worn` | `/Wear 2`, `/Ribbon 0.35` |
+| `/worn` | `/Wear 1.5`, `/Ribbon 0.35` |
 
 **Strike index.** A second strike at the same cell needs its own variation (T3,
 T5). The side dict holds a strike index, 0 by default, which is part of the
@@ -186,8 +194,12 @@ All of it is vector. Each strike draws, inside one `gsave`:
    underneath shows through them. The prototype's holes sit on a regular grid
    and read as a halftone. #212 must jitter their size and position per yarn.
 2. **Body.** Fill the glyph (outer contours and counters together, so the
-   nonzero rule keeps counters open). The colour is the ink colour, lifted
-   toward paper by `/Ribbon` and the strike's pressure.
+   nonzero rule keeps counters open) in the ink colour. **No step paints a
+   colour lightened toward the paper.** Pressure and `/Ribbon` act only on
+   coverage (the hole tiles, step 1) and on spread (step 3). A worn or faded
+   ribbon is expressed in `/Ink` itself (T10's grey-brown). So the library
+   never needs to know the paper's colour, and #214 can tone or stain the
+   paper freely.
 3. **Spread (M3).** Stroke the same outline with a round join. The width is
    set by pressure × machine weight × `/Ribbon`, about 0.25–0.6pt in total
    (0.12–0.3pt per side). This brings the face's stem up to the measured
@@ -195,9 +207,10 @@ All of it is vector. Each strike draws, inside one `gsave`:
    clip, the edge breaks up where a hole falls on it: the feathering.
 4. **Filled counter (M5).** For a clogged key, fill the counter subpaths at
    the clog fraction × pressure.
-5. **One side heavy (M7).** For a one-side key, first draw the body at
-   reduced strength, then redraw it at full strength clipped to a half-plane in
-   the key's direction.
+5. **One side heavy (M7).** For a one-side key, draw the body through a
+   sparser weave tile (more holes), then draw it again through the normal tile,
+   clipped to a half-plane in the key's direction. Both passes use the same
+   ink: the light side is lighter by coverage, not by colour.
 
 Keys: `/Ink` (`[rgb array]`, default near-black `[0.13 0.13 0.15]`: M6; a
 purple or blue-black ribbon is just a colour) and `/Ribbon` (`[0..1]`, wetness,
@@ -215,11 +228,26 @@ this.
 ## 7. Randomness that stays out of the caller's stream
 
 - The library never calls `rand` or `srand`.
-- Every random value is a hash of integers through a private 256-entry
-  permutation table, shuffled once at setup by the Schrage-form LCG that
-  paintkit uses for `pjrand` (CANVAS_SURFACE.md 3.4). The keys are `/Machine` or
-  `/Seed`, line, column, code, strike index, and a slot number per quantity. An
-  approximately normal value is the sum of three hashed uniforms.
+- Every random value is a hash of integer keys through a private 256-entry
+  permutation table. The table is shuffled **once, from a fixed constant**, by
+  the Schrage-form LCG that paintkit uses for `pjrand` (CANVAS_SURFACE.md 3.4).
+  The seeds are never used to shuffle it. They enter as keys:
+  - machine quirks hash `/Machine`, the code, and a slot;
+  - line effects hash `/Seed`, the line, and a slot;
+  - strikes hash `/Seed`, the line, the column, the code, the strike index, and a
+    slot.
+
+  So a new document (`/Seed`) never re-rolls the machine's quirks: the same
+  machine's `e` sits high in every document, the epic's principle.
+- **Each key is its own hash input.** Keys are folded into the hash state 8
+  bits at a time, so seeds and columns above 255 stay distinct, not truncated
+  to 256 values. The slot number (which quantity: x offset, y offset, pressure,
+  ...) is a separate key too. Adding it to the column, as an early draft of the
+  prototype did, makes column c+1's x equal column c's y, and strike index 1 at
+  column c equal strike index 0 at column c+31. Those collisions hit exactly the
+  overtype runs that the strike index exists for. `tw_proto.ps`'s `mix` and
+  `hn` show the shape.
+- An approximately normal value is the sum of three hashed uniforms.
 - Consequences:
   - The caller's `rand` stream is untouched, so `--sweep-seed` varies a piece's
     composition while its typing stays fixed.
@@ -228,25 +256,30 @@ this.
   - Typing text in one place never re-rolls another line, because nothing is
     drawn from a sequence.
   - `stringwidth` and `charpath` are side-effect free.
-- The prototype's hash has 8-bit outputs. That is enough for jitter, and #211
-  may chain two lookups for 16 bits where a smooth value is needed (the
+- The prototype's hash has 8-bit outputs. That is enough for jitter. #211 may
+  fold one more round for 16 bits where a smooth value is needed (the
   line-advance noise).
 
 ## 8. Performance budget
 
 **Measured** with `tw_proto.ps`, MODE 1: a full page of 50 lines × 50 strikes
-(2,500 cells, about 2,100 glyphs, the rest spaces), at 300 dpi. These are CPU
-times (`user`), two runs each, and the two runs agreed. pscat is the release
-build; gs is 10.07.1. The load average was about 2.6.
+(2,500 cells, about 2,100 glyphs, the rest spaces), at 300 dpi, with Courier
+Prime outlines. These are CPU times (`user`), best of 3. pscat is this branch's
+release build (`target/release/pscat` at the #210 commit); gs is 10.07.1. The
+load average was high (9–18, from other agents), so treat these as upper bounds.
 
 | Case | pscat | gs |
 |---|---|---|
-| outlines and jitter, no ink | 0.14s | 0.09s |
-| with the ink model (weave clip, fill, spread stroke, counters) | 0.62s | 0.28s |
+| outlines and jitter, no ink | 0.32s | 0.20s |
+| with the ink model (weave clip, fill, spread stroke, counters) | 1.00s | 0.44s |
+
+An earlier draft of the prototype, with a cheaper but collision-prone hash
+(section 7), measured 0.64s and 0.28s with ink. The hash is now about half
+the cost, and #211 can cache per-machine values in a 95-entry table.
 
 **Budget (advisory, not a CI gate):** a full page of about 2,500 strikes
 renders in **5s of CPU or less** in each interpreter at 300 dpi. That is about
-8× the prototype in pscat and 18× in gs, so #212 has room for a richer ink
+5× the prototype in pscat and 11× in gs, so #212 has room for a richer ink
 model. If #212's ink goes over it, simplify the ink or raise the budget. The
 budget is a guard against an accidental 10× regression, not a target to
 optimize toward.
@@ -296,8 +329,13 @@ Each is phrased as a decision, with a recommendation.
     until a reference turns up;
   - embossing: treat it as extra pressure on `. , ' "` (a darker, slightly
     larger dot), not as a lighting effect;
-  - x-outs: build them from strikeovers, since they are the same mechanism.
-  #215's agent looks for references to the first two before the comparison.
+  - x-outs: build them from strikeovers, since they are the same mechanism;
+  - electric typewriters: the board has no confirmed electric sample. The
+    O'Brien memo is electric only by inference (REFERENCES.md, "Electric, by
+    inference"). The `/electric` preset is a lower-variation manual, not a
+    separate model.
+  #215's agent looks for references to two-colour bleed, embossing and a
+  confirmed electric (IBM Selectric) page before the comparison.
 - **Q4. Defaults that follow the measurements.** At body size and screen
   resolution, measured jitter is barely visible, and the default page may look
   "too clean" at first glance. Recommend keeping the measured defaults

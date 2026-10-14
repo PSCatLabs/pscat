@@ -12,12 +12,13 @@ Rules followed:
 - Every observation was made by looking at the scan, and most were also
   measured on it (see Measurements). A trait from #210's list that has no
   image behind it is marked **not yet sourced**.
-- Every crop comes from a public-domain source. All are US federal records
-  (works of the US government, 17 U.S.C. § 105) or records held by NARA and
-  marked public domain on Wikimedia Commons. The table gives the source of
-  each crop.
+- Every committed crop comes from a public-domain source: a work of the US
+  government (17 U.S.C. § 105; Commons tag `{{PD-USGov}}`), or, for the
+  Szilard petition, a work published without a copyright notice (Commons tag
+  `{{PD-US-no notice}}`). The Status column gives the tag read from each file
+  page. The O'Brien memo is measured but **not** cropped: see its row.
 - Real agency letterheads, seals and classification markings appear in some
-  crops (T1, T14, T15). They are here as references only. The epic does not
+  crops (T1, T11, T14, T15). They are here as references only. The epic does not
   allow them in specimens: specimens use fictional organizations.
 - `tools/make_board.py` rebuilds `refs/` and `reference_board.jpg` from the
   sources. `tools/measure.py`, `tools/mono.py` and `tools/stem.py` produce the
@@ -27,13 +28,13 @@ Rules followed:
 
 | Key | Document | Typewriter | Scan | Source | Status |
 |---|---|---|---|---|---|
-| Duncan | J. J. Duncan to Supt. W. C. Kohlenberg, 17 Aug 1914 | manual, pica (10 cpi), double spaced | 2411×3150 TIFF, 300 dpi | [Commons, NARA 284501](https://commons.wikimedia.org/wiki/File:J.J._Duncan_to_Superintendent_W.C._Kohlenberg,_Crow_Creek_Agency,_South_Dakota._-_NARA_-_284501.tif) | public domain (US federal record) |
-| FDR | "Day of Infamy" first typed draft, 7 Dec 1941, pp. 1–2 | manual, elite (12 cpi), triple spaced | 2400×3152 JPEG, 300 dpi | [Commons, via DPLA / FDR Library](https://commons.wikimedia.org/wiki/File:Annotated_Draft_of_Proposed_Message_to_Congress_Requesting_Declaration_of_War_Against_Japan_-_DPLA_-_2eb3ebba93444052d0046022975cbff5_(page_1).jpg) | public domain (presidential record) |
-| Szilard | Petition from Leo Szilard and other scientists to President Truman, 17 Jul 1945 | manual, elite, single spaced | 2069×3150 colour JPEG, about 240 dpi (inferred, see below) | [Commons, NARA 6250638](https://commons.wikimedia.org/wiki/File:Petition_from_Leo_Szilard_and_Other_Scientists_to_President_Harry_S._Truman_01.jpg) | public domain (Commons; NARA record) |
-| O'Brien | Larry O'Brien, memorandum to Kennedy coordinators, 1960 | monospace elite; electric inferred (see below) | 2551×3300 JPEG, 300 dpi | [Commons, NARA 194005](https://commons.wikimedia.org/wiki/File:Larry_O%27Brien_Memorandum_to_Kennedy_Co-ordinators_and_Campaign_Directors_-_NARA_-_194005.jpg) | public domain (Commons; NARA record) |
-| MFR 1955 | Eisenhower, Memorandum for the Record, 31 Jan 1955 | proportional (IBM Executive type) | 1686×2200 JPEG, 200 dpi | [Commons, NARA 186540](https://commons.wikimedia.org/wiki/File:Memorandum_for_the_Record_-_NARA_-_186540.jpg) | public domain (US federal record) |
-| NSAM 55 | National Security Action Memorandum No. 55, 28 Jun 1961 | proportional, bold | 2428×3150 JPEG, 300 dpi | [Commons, NARA 193454](https://commons.wikimedia.org/wiki/File:National_Security_Action_Memorandum_No._55_Relations_of_the_JCS_to_the_President_in_Cold_War_Operations_-_NARA_-_193454.jpg) | public domain (US federal record) |
-| JFK 10106 | CIA memorandum to the FBI, May 1961, JFK Assassination Records 104-10297-10106 | monospace; bitonal release copy | PDF, rasterized at 300 dpi | [archives.gov](https://www.archives.gov/files/research/jfk/releases/104-10297-10106.pdf) | public domain (US federal record) |
+| Duncan | J. J. Duncan to Supt. W. C. Kohlenberg, 17 Aug 1914 | manual, pica (10 cpi), double spaced | 2411×3150 TIFF, 300 dpi | [Commons, NARA 284501](https://commons.wikimedia.org/wiki/File:J.J._Duncan_to_Superintendent_W.C._Kohlenberg,_Crow_Creek_Agency,_South_Dakota._-_NARA_-_284501.tif) | `{{PD-USGov}}` (an Indian Service superintendent's letter) |
+| FDR | "Day of Infamy" first typed draft, 7 Dec 1941, pp. 1–2 | manual, elite (12 cpi), triple spaced | 2400×3152 JPEG, 300 dpi | [Commons, via DPLA / FDR Library](https://commons.wikimedia.org/wiki/File:Annotated_Draft_of_Proposed_Message_to_Congress_Requesting_Declaration_of_War_Against_Japan_-_DPLA_-_2eb3ebba93444052d0046022975cbff5_(page_1).jpg) | `{{PD-USGov}}` (the President's own draft) |
+| Szilard | Petition from Leo Szilard and other scientists to President Truman, 17 Jul 1945 | manual, elite, single spaced | 2069×3150 colour JPEG, about 240 dpi (inferred, see below) | [Commons, NARA 6250638](https://commons.wikimedia.org/wiki/File:Petition_from_Leo_Szilard_and_Other_Scientists_to_President_Harry_S._Truman_01.jpg) | `{{PD-US-no notice}}` (written by Manhattan Project scientists, not a federal work) |
+| O'Brien | Larry O'Brien, memorandum to Kennedy coordinators, 1960 | monospace elite; electric inferred (see below) | 2551×3300 JPEG, 300 dpi | [Commons, NARA 194005](https://commons.wikimedia.org/wiki/File:Larry_O%27Brien_Memorandum_to_Kennedy_Co-ordinators_and_Campaign_Directors_-_NARA_-_194005.jpg) | Commons tags it `{{PD-USGov}}`, but a 1960 campaign memo is not plainly a federal work. **Measured and linked, not cropped.** |
+| MFR 1955 | Eisenhower, Memorandum for the Record, 31 Jan 1955 | proportional (IBM Executive type) | 1686×2200 JPEG, 200 dpi | [Commons, NARA 186540](https://commons.wikimedia.org/wiki/File:Memorandum_for_the_Record_-_NARA_-_186540.jpg) | `{{PD-USGov}}` |
+| NSAM 55 | National Security Action Memorandum No. 55, 28 Jun 1961 | proportional, bold | 2428×3150 JPEG, 300 dpi | [Commons, NARA 193454](https://commons.wikimedia.org/wiki/File:National_Security_Action_Memorandum_No._55_Relations_of_the_JCS_to_the_President_in_Cold_War_Operations_-_NARA_-_193454.jpg) | `{{PD-USGov}}` |
+| JFK 10106 | CIA memorandum to the FBI, May 1961, JFK Assassination Records 104-10297-10106 | monospace; bitonal release copy | PDF, rasterized at 300 dpi | [archives.gov](https://www.archives.gov/files/research/jfk/releases/104-10297-10106.pdf) | US federal record (a CIA memorandum), 17 U.S.C. § 105 |
 | NBS C431 | C. E. Waters, *Typewriter Ribbons and Carbon Paper*, National Bureau of Standards Circular C431 (about 1941) | text only | — | [Internet Archive](https://archive.org/details/circularofbureau431wate) | public domain (US government publication) |
 
 These sources were viewed but no crop was committed:
@@ -85,8 +86,8 @@ cross-checked from the text:
 | T8 | `T08_szilard_e_tiles.png` | Every `e` in the Szilard petition. The shape and the grey tone are very even. | A good machine with a worn ribbon: low variation, low contrast. |
 | T9 | `T09_szilard_block.jpg` | Elite, single spaced, justified only on the left, with a ragged right edge. Paragraphs indent 10 columns. Hyphenation at line ends ("im-/posed"). The paper is toned. | Layout for #213. The look is set by margin regularity: the left edge is very straight (0.17pt sd). |
 | T10 | `T10_szilard_zoom.jpg` | The ink is grey-brown, not black (mean darkness 0.63, against 0.76–0.81 elsewhere). Edges are soft but not ragged. | Ink colour and strength are parameters. A worn ribbon is lighter, not just patchier. |
-| T11 | `T11_obrien_even.jpg` | 1960: monospace elite with very even weight, and underlining typed as one continuous rule of underscores under each word. | The underscore is a separate strike in the same cell, after backspacing. Its rule joins across cells. |
-| T12 | `T12_obrien_half_strikes.jpg` | One paragraph of the same memo: many letters print only their top or bottom half ("use one", "party"), with stray marks. | A strike can land unevenly, printing one side heavier, or one side not at all. This is the "prints heavier on one side" trait. Here it may come from a stencil or duplication rather than the typewriter. |
+| T11 | `T11_nsam55_underscores.jpg` | A heading underlined by typed underscores, as one continuous rule, and the item letters `a.` underscored. The O'Brien memo (not cropped, linked above) shows the same on monospace elite: a continuous underscore under each word, with very even weight. | The underscore is a separate strike in the same cell, after backspacing. Its rule joins across cells. |
+| T12 | O'Brien memo, item C (not cropped; [file page](https://commons.wikimedia.org/wiki/File:Larry_O%27Brien_Memorandum_to_Kennedy_Co-ordinators_and_Campaign_Directors_-_NARA_-_194005.jpg)) | One paragraph of the memo: many letters print only their top or bottom half ("use one", "party"), with stray marks. | A strike can land unevenly, printing one side heavier, or one side not at all. This is the "prints heavier on one side" trait. Here it may come from a stencil or duplication rather than the typewriter. |
 | T13 | `T13_mfr1955_erasure.jpg` | A proportional executive face. In the margin, a ghost of erased typing ("agr") remains as a faint grey. Weight varies strongly per letter. | An erasure leaves a faint ghost of the original strikes: a correction for #213 or #214. Proportional faces are out of scope (see TYPEWRITER.md). |
 | T14 | `T14_nsam55_marks.jpg` | A black redaction bar, a "DISPATCHED" date stamp, a declassification stamp with handwriting, and a struck-through typed line. | Released-document marks for #214. Specimens must invent their own: no real markings. |
 | T15 | `T15_jfk_release_copy.jpg` | A bitonal release copy. Counters are filled, thin strokes have dropped out, and specks are scattered over the page. | The "released copy" degradation for #214. It sits on top of the typewriter look, so #211 and #212 tune against T2–T10, not this. |
@@ -173,9 +174,9 @@ pressure variation, not as a separate model.
 
 | Trait in #210 | Status |
 |---|---|
-| manual and electric typewriters | Manual: T1–T10. Electric: **inferred only**, from T11 and the measurements. |
+| manual and electric typewriters | Manual: T1–T10. Electric: **inferred only**, from the O'Brien measurements (see Electric, by inference). |
 | pica and elite pitch | Pica: T1, T2. Elite: T3–T10. Both are verified from the line/character pitch ratio. |
-| per-machine quirks: high or low letters, lean, one side heavier | High/low letters are measured (0.07–0.11pt sd, at most about 0.23pt). The clogged `a` (T6). One side heavier: T12. **Lean is not resolved** at these scans (see Rotation). |
+| per-machine quirks: high or low letters, lean, one side heavier | High/low letters are measured (0.07–0.11pt sd, at most about 0.23pt). The clogged `a` (T6). One side heavier: T12 (observed, not cropped). **Lean is not resolved** at these scans (see Rotation). |
 | per-strike offset, rotation, pressure | Offset is measured (0.2–0.3pt sd). Pressure: T2, T7 and coverage CV 0.07–0.21. Rotation: upper bound only. |
 | light strokes from weak fingers | T2, T7 |
 | punctuation that embosses the paper | **Not yet sourced.** Periods print dark and round (T1, T2), but no scan shows raking light, so embossing is not visible. |

@@ -1,14 +1,17 @@
 ## Typewriter: reference study and design, awaiting approval (issue #210, 2026-10-14)
 
 #210 is the first ticket of epic #209. It delivers the reference board
-(`docs/typewriter/REFERENCES.md`, 15 crops from public-domain scans) and the
+(`docs/typewriter/REFERENCES.md`, 14 crops from public-domain scans) and the
 design (`docs/TYPEWRITER.md`). No library code was written. The maintainer
 approves the design before #211 starts.
 
 ### What was done
 
-- **Sources.** Seven public-domain scans: US federal records via Commons/NARA,
-  plus one JFK Assassination Records release PDF, dated 1914 to 1961. Also NBS
+- **Sources.** Seven scans dated 1914 to 1961: US federal records via
+  Commons/NARA, plus one JFK Assassination Records release PDF. Crops were
+  committed only where the Commons file page carries `{{PD-USGov}}` or
+  `{{PD-US-no notice}}`. The 1960 O'Brien campaign memo is measured and linked,
+  but not cropped, because it is not plainly a federal work. Also NBS
   Circular C431 (about 1941) on ribbons. Pitch and dpi were cross-checked from
   the ratio of line pitch to character pitch (a 1/6-inch line), so the pica/elite
   verdicts don't rely on the files' dpi tags.
@@ -21,7 +24,8 @@ approves the design before #211 starts.
 - **Prototype.** `docs/typewriter/prototypes/tw_proto.ps` is a Type 3 font
   drawing embedded outlines with keyed-hash jitter, a weave clip, an ink-spread
   stroke and filled counters. It runs in pscat and gs. A 2,500-cell page at
-  300 dpi takes 0.62s (pscat) and 0.28s (gs) of CPU.
+  300 dpi takes 1.00s (pscat) and 0.44s (gs) of CPU, best of 3, under a load
+  average of 9–18.
 
 ### Decisions (pending approval)
 
@@ -45,6 +49,10 @@ approves the design before #211 starts.
   `setcharwidth`.
 - pscat's `def` rejects integer keys, where gs accepts them (#338). The
   prototype uses `put`.
+- Hash keys must each be a separate input, slot number included. The first
+  draft added slots to the column key, so column c+1's x offset equalled
+  column c's y offset. Seeds enter as keys and never shuffle the table, so a
+  new document keeps the machine's quirks.
 - `ln` is an operator: a variable named `ln` inside a `bind`-ed procedure
   becomes a call to the natural log.
 

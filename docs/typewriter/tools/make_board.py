@@ -4,9 +4,10 @@
 
 Downloads each source scan into CACHE_DIR (once), cuts the crops listed in
 CROPS into docs/typewriter/refs/, and composes docs/typewriter/reference_board.jpg.
-Every source is a US federal record or a document held by NARA and marked
-public domain on Wikimedia Commons, or a JFK Assassination Records release
-PDF (a federal record). docs/typewriter/REFERENCES.md has the table.
+Every committed crop's source carries {{PD-USGov}} or {{PD-US-no notice}} on
+Wikimedia Commons, or is a JFK Assassination Records release PDF (a federal
+record). docs/typewriter/REFERENCES.md has the table. The O'Brien memo (T12)
+is measured but not cropped: see REFERENCES.md.
 Needs Pillow, Ghostscript (for the PDF) and tesseract (for the letter tiles).
 """
 import os
@@ -31,7 +32,6 @@ SOURCES = {
     "fdr1": (C + "2/2e/Annotated_Draft_of_Proposed_Message_to_Congress_Requesting_Declaration_of_War_Against_Japan_-_DPLA_-_2eb3ebba93444052d0046022975cbff5_%28page_1%29.jpg", "img"),
     "fdr2": (C + "d/dc/Annotated_Draft_of_Proposed_Message_to_Congress_Requesting_Declaration_of_War_Against_Japan_-_DPLA_-_2eb3ebba93444052d0046022975cbff5_%28page_2%29.jpg", "img"),
     "szilard": (C + "d/d3/Petition_from_Leo_Szilard_and_Other_Scientists_to_President_Harry_S._Truman_01.jpg", "img"),
-    "obrien": (C + "e/e2/Larry_O%27Brien_Memorandum_to_Kennedy_Co-ordinators_and_Campaign_Directors_-_NARA_-_194005.jpg", "img"),
     "mfr1955": (C + "f/f4/Memorandum_for_the_Record_-_NARA_-_186540.jpg", "img"),
     "nsam55": (C + "8/81/National_Security_Action_Memorandum_No._55_Relations_of_the_JCS_to_the_President_in_Cold_War_Operations_-_NARA_-_193454.jpg", "img"),
     "jfk10106": ("https://www.archives.gov/files/research/jfk/releases/104-10297-10106.pdf", "pdf"),
@@ -46,8 +46,7 @@ CROPS = [
     ("T05_fdr2_strikeover.jpg", "fdr2", (960, 1055, 1230, 1149), 2, "T5 'm' struck over 'n'"),
     ("T09_szilard_block.jpg", "szilard", (120, 330, 2000, 900), 0.6, "T9 Szilard 1945, elite, margins"),
     ("T10_szilard_zoom.jpg", "szilard", (250, 570, 1150, 650), 1.5, "T10 worn grey-brown ribbon"),
-    ("T11_obrien_even.jpg", "obrien", (330, 1060, 1500, 1200), 1, "T11 1960, even ink, typed underscore"),
-    ("T12_obrien_half_strikes.jpg", "obrien", (433, 2260, 2295, 2425), 0.8, "T12 half-struck letters"),
+    ("T11_nsam55_underscores.jpg", "nsam55", (300, 560, 2200, 1450), 0.5, "T11 typed underscores (proportional face)"),
     ("T13_mfr1955_erasure.jpg", "mfr1955", (202, 1265, 1045, 1375), 1.2, "T13 erasure ghost; proportional face"),
     ("T14_nsam55_marks.jpg", "nsam55", (300, 180, 2400, 640), 0.5, "T14 redaction, stamps (not for specimens)"),
     ("T15_jfk_release_copy.jpg", "jfk10106", (452, 1081, 2009, 1539), 0.7, "T15 bitonal release copy"),
