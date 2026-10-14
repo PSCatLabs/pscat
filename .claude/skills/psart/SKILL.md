@@ -284,7 +284,10 @@ Which tool to pick:
 For a chalkboard, use `lib/drychalk.ps`, not a pen stroke in a chalk
 colour (that is `gallery/hundred_lines.ps`'s flat look). Load
 `lib/handscript.ps` and `lib/strokeglyphs.ps` too for handwriting: `sgpath`
-gives skeleton paths, and `dcchalk` inks them.
+gives skeleton paths, and `dcchalk` inks them. A character with no
+skeleton (a superscript two, say) raises `sg-missing-glyph:<char>` rather
+than vanishing; write it another way, or pass `/Strict false` to let it
+advance blank.
 
 ```postscript
 (lib/artkit.ps) run (lib/paintkit.ps) run (lib/drykit.ps) run

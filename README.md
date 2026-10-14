@@ -1169,7 +1169,10 @@ advances, `sggrow` builds a sum, product, integral, radical, paren,
 bracket, brace or bar sized to a height and depth, and `sgmetrics` gives
 the advance, box, italic correction and TeX math class. Jitter comes from
 its own seeded generator, never the caller's `rand`, and
-`examples/strokeglyphs.ps` is the specimen sheet.
+`examples/strokeglyphs.ps` is the specimen sheet. A character or glyph name
+with no glyph raises `sg-missing-glyph:<char>` from `sgpath` and `sgwidth`
+before anything is drawn (issue #350); `/Strict false` restores the old
+advance-300-and-draw-nothing behaviour.
 
 ```postscript
 (lib/handscript.ps) run
