@@ -86,7 +86,7 @@ More on the less obvious ones:
 
 You don't need a git checkout or a Rust toolchain just to *use* pscat.
 `scripts/package_release.sh` builds `pscat` and `pscat-mcp` and bundles them
-with their runtime assets (`lib/`, `fonts/catalog/`, `scripts/handwrite.sh`)
+with their runtime assets (`lib/`, `fonts/catalog/`, `scripts/handwrite.sh`, `scripts/typewrite.sh`)
 into a standalone directory. CI does this automatically and attaches the
 result to a
 [GitHub Release](https://github.com/jeromebanks/postscript_interpreter/releases)

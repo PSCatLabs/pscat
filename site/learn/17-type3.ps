@@ -1,0 +1,19 @@
+%!PS
+%%BoundingBox: 0 0 300 200
+% A Type 3 font draws each character with an ordinary procedure.
+/Dots 5 dict def
+Dots begin
+  /FontType 3 def
+  /FontMatrix [0.001 0 0 0.001 0 0] def
+  /FontBBox [0 0 700 700] def
+  /Encoding StandardEncoding def
+  /BuildChar {                    % font charcode -> draws one glyph
+    exch pop                      % keep the character code
+    700 0 setcharwidth
+    350 350 3 -1 roll 96 sub 30 mul 0 360 arc fill
+  } def
+end
+/Dots Dots definefont pop
+/Dots findfont 48 scalefont setfont
+20 70 moveto (abcdefg) show
+showpage

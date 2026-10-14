@@ -17,7 +17,10 @@
 //!   -2 = no program begun;
 //! - `ps_pixels`/`ps_pixels_len`/`ps_width`/`ps_height` — the live
 //!   canvas, premultiplied RGBA (opaque page, so plain RGBA);
-//! - `ps_run(src, len, w, h)` — begin + drive to completion.
+//! - `ps_run(src, len, w, h)` — begin + drive to completion;
+//! - `ps_output_ptr`/`ps_output_len` — what the program has printed so
+//!   far (`=`, `==`, `stack`, `pstack`, `print`), UTF-8 as written; a
+//!   wasm32 module has no stdout, so `ps_begin` captures it (#252).
 
 use std::cell::RefCell;
 
@@ -54,6 +57,7 @@ pub unsafe extern "C" fn ps_begin(src: *const u8, len: usize, w: u32, h: u32) ->
     let Some(mut it) = Interp::with_page(w, h) else {
         return -1;
     };
+    it.capture_stdout();
     it.begin_source(&source);
     INTERP.with(|s| *s.borrow_mut() = Some(it));
     ERROR.with(|e| e.borrow_mut().clear());
@@ -131,4 +135,22 @@ pub extern "C" fn ps_error_ptr() -> *const u8 {
 #[unsafe(no_mangle)]
 pub extern "C" fn ps_error_len() -> usize {
     ERROR.with(|e| e.borrow().len())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ps_output_ptr() -> *const u8 {
+    INTERP.with(|s| {
+        s.borrow()
+            .as_ref()
+            .map_or(std::ptr::null(), |it| it.captured_stdout().as_ptr())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ps_output_len() -> usize {
+    INTERP.with(|s| {
+        s.borrow()
+            .as_ref()
+            .map_or(0, |it| it.captured_stdout().len())
+    })
 }

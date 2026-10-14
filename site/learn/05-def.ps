@@ -1,0 +1,7 @@
+%!PS
+/side 50 def
+side side mul ==
+/square { dup mul } def    % a procedure is an executable array
+7 square ==
+/square load ==            % load fetches the value without running it
+{ 1 2 add } exec ==        % exec runs a procedure that is on the stack

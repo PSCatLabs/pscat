@@ -198,7 +198,13 @@ fn every_migrated_file_names_match_the_catalog_exactly() {
         // if/when one does).
         let mut expected: BTreeSet<String> = capabilities::catalog()
             .into_iter()
-            .filter(|c| c.source == mf.source && c.kind != CapabilityKind::Palette)
+            // a Type 3 face lives in FontDirectory, not userdict (lib/typewriter.ps
+            // is migrated and also holds the hand-written /Typewriter row)
+            .filter(|c| {
+                c.source == mf.source
+                    && c.kind != CapabilityKind::Palette
+                    && c.kind != CapabilityKind::Type3Face
+            })
             .map(|c| c.name)
             .collect();
         expected.extend(mf.internal_names.iter().map(|s| s.to_string()));
@@ -603,6 +609,9 @@ fn type3_faces_are_actually_defined_after_loading() {
         .collect();
     on_disk.insert("lib/handscript.ps".to_string());
     on_disk.insert("lib/hangul.ps".to_string());
+    // The typewriter (#211) is a migrated library whose font row is
+    // hand-written: build.rs does not take @kind: Type3Face.
+    on_disk.insert("lib/typewriter.ps".to_string());
     assert_name_sets_match(
         "lib/fonts/*.ps + named outliers",
         &on_disk,
@@ -611,6 +620,10 @@ fn type3_faces_are_actually_defined_after_loading() {
 
     for (name, source) in entries {
         let mut it = Interp::with_page(200, 200).expect("page");
+        if source == "lib/typewriter.ps" {
+            // the face draws from the generated outline table
+            load(&mut it, "lib/typewriter_outlines.ps");
+        }
         load(&mut it, &source);
         it.run_str(&format!("FontDirectory /{name} known"))
             .unwrap_or_else(|e| panic!("{source}: known check failed: {}", it.error_report(&e)));

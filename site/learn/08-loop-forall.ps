@@ -1,0 +1,6 @@
+%!PS
+/n 1 def
+{ n 100 gt { exit } if  /n n 2 mul def } loop
+n ==
+[10 20 30] { 2 mul == } forall
+(abc) { == } forall                        % a string gives character codes

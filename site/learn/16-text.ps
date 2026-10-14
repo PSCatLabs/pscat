@@ -1,0 +1,13 @@
+%!PS
+%%BoundingBox: 0 0 300 200
+/Helvetica findfont 28 scalefont setfont
+20 140 moveto (Hello, PostScript) show
+/Times-Italic findfont 20 scalefont setfont
+0.6 0.1 0.3 setrgbcolor
+20 100 moveto (Text is just more paint.) show
+gsave
+  20 40 translate  15 rotate
+  /Courier findfont 18 scalefont setfont
+  0 0 moveto (turned with the axes) show
+grestore
+showpage

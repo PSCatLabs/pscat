@@ -16,6 +16,7 @@ SCRIPTS = Path(__file__).resolve().parent
 PARTIALS = SCRIPTS.parent / "site" / "_partials"
 sys.path.insert(0, str(SCRIPTS))
 import check_site_links  # noqa: E402
+import site_examples  # noqa: E402
 import site_pages  # noqa: E402
 
 PAGE = """<!DOCTYPE html><html><head><!--@head--><title>t</title></head><body>
@@ -97,6 +98,38 @@ class SiteScripts(unittest.TestCase):
         body = '<select><option value="gone.ps">g</option></select>'
         site = build(self.tmp.name, full(**{"playground.html": ("playground", body)}))
         self.assertTrue(any("gone.ps" in p for p in run_check(site, self.repo)))
+
+    def test_try_it_link_without_example(self):
+        body = ('<a href="playground.html?example=learn/a.ps">ok</a>'
+                '<a href="playground.html?example=learn/gone.ps">bad</a>')
+        site = build(self.tmp.name, full(**{"learn.html": ("learn", body)}))
+        (site / "examples" / "learn").mkdir(parents=True)
+        (site / "examples" / "learn" / "a.ps").write_text("1 ==")
+        probs = run_check(site, self.repo)
+        self.assertEqual(len(probs), 1, probs)
+        self.assertIn("learn/gone.ps", probs[0])
+
+    def test_example_markers_expand(self):
+        ex = Path(self.tmp.name) / "ex"
+        ex.mkdir()
+        (ex / "a.ps").write_text("%!PS\n1 2 add ==\n")
+        (ex / "a.out").write_text("3\n")
+        (ex / "b.ps").write_text("%!PS\n%%BoundingBox: 0 0 30 20\n0 0 5 5 rectfill showpage\n")
+        site = Path(self.tmp.name) / "s"
+        (site / "assets" / "learn").mkdir(parents=True)
+        (site / "assets" / "learn" / "b.png").write_bytes(b"")
+        used = set()
+        out = site_examples.expand('<!--@example a--><!--@example b "a square"-->', ex, site, used)
+        self.assertEqual(used, {"a", "b"})
+        self.assertIn('href="playground.html?example=learn/a.ps"', out)
+        self.assertIn("1 2 add ==", out)
+        self.assertIn('<pre class="output"><code>3</code></pre>', out)
+        self.assertIn('<img src="assets/learn/b.png" alt="a square" width="30" height="20"', out)
+        # a drawing needs alt text; an unknown example fails
+        with self.assertRaises(ValueError):
+            site_examples.expand("<!--@example b-->", ex, site, set())
+        with self.assertRaises(ValueError):
+            site_examples.expand("<!--@example zz-->", ex, site, set())
 
     def test_missing_nav_marker_fails_the_build(self):
         with self.assertRaises(ValueError):

@@ -199,7 +199,7 @@ Two kinds. **Vapour** is spray, soft all through; use it for haze and wispy cirr
 
 **The key rules.**
 - **Clip the knife work to the silhouette.** A knife edge on a real ridge stops dead against the sky, and clipping is what gives your ridge the same crisp line. An unclipped pull overshoots into the sky.
-- **Shadow planes are areas filled with pulls, never pulls along a shallow ridge.** A knife pull along a ridge just becomes a bar across the range. Hang a triangle off the right ridge (the peak, a point down the ridge, a point low inside the face) and fill it with `pktrowelplane`: one call lays overlapping vertical pulls clipped to the path, and the blade's texture makes it read as a plane.
+- **Shadow planes are areas filled with pulls, never pulls along a shallow ridge.** A knife pull along a ridge just becomes a bar across the range. Hang a triangle off the right ridge (the peak, a point down the ridge, a point low inside the face) and fill it with `pktrowelplane`: one call lays overlapping vertical pulls clipped to the path, and the blade's texture makes it read as a plane. (Alpine Lake's shadow planes are built this way since issue #361; before that they were a hand-made triangle, clip and loop of vertical pulls.)
 - **Snow goes down the lit face**, pulled a little steeper than the slope so it bites into the face, in several pulls that fall short by different amounts; the snow's lower edge is then ragged, as it is on a mountain.
 - Order each peak: shadow plane first, then snow, so the snow's edge overlaps the plane's.
 

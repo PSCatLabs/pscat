@@ -330,6 +330,12 @@ No new page-scale CI test is added. #204's concern about CI time stands.
   names for its text wrapping (`twgn`, `twgrem`, `twline`, `twlines`, `twlast`,
   `twn`, `twrest`, `twstr`), so the library's public names must avoid those, and
   its internals live in the side dict.
+  **As built (#213)** (`notes/213-typewriter-layout.md`): `tw-type`,
+  `tw-linecount` and `tw-pageheight` in `lib/typewriter.ps`, one options dict
+  for layout and `tw-setup` keys; `<u>`, `<x>` and `<o>old|new</o>` markup (an
+  x-out is a strikeover at strike index +1, an underline +2); `/Memo`;
+  `/PageNumbers`; `/PageStart` for paper; `scripts/typewrite.sh`; the
+  `Typewriter` catalog row.
 - **#214, released-document look.** T14 and T15: aging, photocopy and bitonal
   loss, stamps, redactions. Everything fictional.
 - **#215, specimen.** A side-by-side against T1/T2 and T9/T10 crops at scan

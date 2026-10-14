@@ -42,6 +42,7 @@ showpage</textarea>
       <span id="status"></span>
     </div>
     <div id="err"></div>
+    <pre id="out" aria-label="Program output" hidden></pre>
   </div>
   <div id="play-right"><canvas id="page" width="612" height="792"></canvas></div>
 </div>
@@ -53,6 +54,7 @@ const canvas = document.getElementById('page');
 const err = document.getElementById('err');
 const status = document.getElementById('status');
 const speed = document.getElementById('speed');
+const out = document.getElementById('out');
 const srcBox = document.getElementById('src');
 const ps = await Pscat.load();
 let raf = 0;
@@ -64,9 +66,19 @@ function pageSize(source) {
   return m ? [Number(m[1]), Number(m[2])] : [612, 792];
 }
 
+// What the program printed with = == stack pstack print; the box stays
+// hidden until there is something to show.
+function showOutput() {
+  const text = ps.output;
+  if (out.textContent !== text) out.textContent = text;
+  out.hidden = text === '';
+}
+
 function start() {
   cancelAnimationFrame(raf);
   err.textContent = '';
+  out.textContent = '';
+  out.hidden = true;
   const [w, h] = pageSize(srcBox.value);
   let steps = 0;
   try {
@@ -79,6 +91,7 @@ function start() {
     const more = ps.step(Number(speed.value));
     steps += Number(speed.value);
     ps.paintTo(canvas);
+    showOutput();
     if (more === 1) {
       status.textContent = `running… ${steps.toLocaleString()} steps`;
       raf = requestAnimationFrame(frame);
@@ -93,13 +106,32 @@ function start() {
 }
 
 document.getElementById('run').addEventListener('click', start);
+async function load(name) {
+  const resp = await fetch(`examples/${name}`);
+  if (!resp.ok) throw new Error(`could not load example ${name} (${resp.status})`);
+  srcBox.value = await resp.text();
+}
+
 document.getElementById('examples').addEventListener('change', async (e) => {
   if (!e.target.value) return;
-  const resp = await fetch(`examples/${e.target.value}`);
-  srcBox.value = await resp.text();
+  await load(e.target.value);
   start();
 });
-start();
+
+// playground.html?example=NAME.ps opens examples/NAME.ps instead of the
+// program above: the Learn page's "Try it" links use this. Only plain
+// relative names are accepted (letters, digits, - _ and one folder).
+const wanted = new URLSearchParams(location.search).get('example');
+let ready = true;
+if (wanted && /^([A-Za-z0-9_-]+\/)?[A-Za-z0-9_-]+\.ps$/.test(wanted)) {
+  try {
+    await load(wanted);
+  } catch (e) {
+    ready = false;
+    err.textContent = String(e.message || e);
+  }
+}
+if (ready) start();
 </script>
 </body>
 </html>

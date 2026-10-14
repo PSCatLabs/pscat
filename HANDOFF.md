@@ -700,6 +700,13 @@ renders eight examples in both and compares block-downsampled output).
    rounding (`nearly_same` in `tests/typewriter.rs`). Tune against
    `docs/typewriter/ink_vs_real.png` (`docs/typewriter/tools/ink_compare.py`);
    `notes/212-ribbon-ink.md`.
+   #213 shipped the layout (`tw-type`, `tw-linecount`, `tw-pageheight`; the
+   "layout" block at the end of `lib/typewriter.ps`, private names `ly*`),
+   `scripts/typewrite.sh` (`PSCAT_BIN`, `--ps`, `--height fit`, `--reflow`),
+   the `Typewriter` catalog row (hand-written: build.rs rejects Type3Face)
+   and `examples/typewriter_memo.txt`. One layout makes the line list both
+   `tw-linecount` and `tw-type` use. #214 paints paper in `/PageStart`;
+   `notes/213-typewriter-layout.md`.
    #242 shipped the charcoal gallery piece, `gallery/lincoln_charcoal.ps`
    (*Study after Berger, 1864*), and `lib/etching.ps`'s `et-tonemap`, which
    returns a photo as a grid of darkness for any piece that wants a
@@ -1116,6 +1123,21 @@ renders eight examples in both and compares block-downsampled output).
   pair of runs, 3% on the Lincoln portrait in gs (`notes/326-bind-drycharcoal.md`).
 - Test Interps at 100×100; golden runs at 500×500/r72. Metric
   assertions use 1e-3 tolerances where the pen is f32.
+- **Program output goes through `Interp::write_stdout`** (#252), not
+  `println!`. `=`, `==`, `stack`, `pstack` and `print` call it; the wasm
+  build turns on `capture_stdout` (a wasm32 module has no stdout) and
+  `pscat.js` exposes the buffer as `ps.output`, which the playground
+  shows. A new printing operator must use it too, or its output vanishes
+  in the browser.
+- **The Learn page's examples are files** (#252): `site/learn/NN-name.ps`,
+  plus `NN-name.out` with exactly what it prints. `site/learn.html` names
+  them with `<!--@example NAME "alt text"-->` markers that
+  `scripts/site_examples.py` expands at build time; `tests/learn.rs`
+  checks each against its `.out` in pscat and in gs, and
+  `scripts/check_learn_examples.mjs` (run by `build_site.sh`) in the wasm
+  build. Change an example's output and you must change its `.out` and
+  the prose around it. `playground.html?example=learn/NAME.ps` is how
+  the "Try it" links open them.
 
 ## Verification checklist before calling any future stage done
 

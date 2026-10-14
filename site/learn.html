@@ -6,34 +6,490 @@
 </head>
 <body>
 <!--@header learn-->
-<main>
+<main class="learn">
   <h1>Learn PostScript</h1>
-  <p class="sub">A language where you push values onto a stack and then say what to do with them.</p>
+  <p class="sub">Where the language came from, and how to write it: a short
+  history, then a tutorial you can run as you read.</p>
 
-  <p>The full tutorial is still being written: the history of PostScript, a
-  stack-language primer, and programs you can run as you read. This page
-  holds its place in the navigation, with a first taste in the meantime.</p>
+  <p>PostScript is a programming language for describing pages. A PostScript
+  file is not a picture of a page. It is a program that draws the page when
+  something runs it: a printer, a viewer, or an interpreter such as pscat. This
+  page has two parts. The first tells how the language came about and where it
+  went. The second teaches it, from <code>3 4 add</code> to a complete drawing.
+  Every example in the tutorial has a <b>Try it</b> link that opens it in the
+  <a href="playground.html">playground</a>, where you can change it and run it
+  again.</p>
 
-  <h2>A first taste</h2>
-  <p>PostScript puts the operands first and the operator last. In
-  <code>100 100 moveto</code>, the two numbers are pushed onto the stack and
-  <code>moveto</code> pops them and moves the pen there. Drawing is describing
-  a path, then painting it. This fills a teal square:</p>
-<pre><code>%!PS
-0.2 0.7 0.6 setrgbcolor
-100 100 moveto  200 100 lineto  200 200 lineto  100 200 lineto  closepath
-fill
-showpage</code></pre>
-  <p>Paste it into the <a href="playground.html">playground</a> and press Run.
-  The playground opens on a longer program that you can edit, and its example
-  menu loads more.</p>
+  <nav class="toc" aria-label="On this page">
+    <div>
+      <b><a href="#history">Part 1: A short history</a></b>
+      <ol>
+        <li><a href="#before">Before PostScript</a></li>
+        <li><a href="#adobe">Adobe and PostScript</a></li>
+        <li><a href="#publishing">The LaserWriter and desktop publishing</a></li>
+        <li><a href="#fonts">Fonts</a></li>
+        <li><a href="#screens">Display PostScript</a></li>
+        <li><a href="#levels">Language levels</a></li>
+        <li><a href="#eps">EPS</a></li>
+        <li><a href="#pdf">PDF</a></li>
+        <li><a href="#today">PostScript today</a></li>
+        <li><a href="#reading">Reading list</a> and <a href="#sources">sources</a></li>
+      </ol>
+    </div>
+    <div>
+      <b><a href="#tutorial">Part 2: The fundamentals</a></b>
+      <ol>
+        <li><a href="#stack">Postfix and the operand stack</a></li>
+        <li><a href="#three-stacks">The three stacks</a></li>
+        <li><a href="#names">Names and procedures</a></li>
+        <li><a href="#control">Control flow</a></li>
+        <li><a href="#dicts">Dictionaries and scope</a></li>
+        <li><a href="#paths">Paths and painting</a></li>
+        <li><a href="#coords">Coordinates</a></li>
+        <li><a href="#gstate">The graphics state</a></li>
+        <li><a href="#text">Text and fonts</a></li>
+        <li><a href="#sunburst">A complete program</a></li>
+        <li><a href="#next">Where to go next</a></li>
+      </ol>
+    </div>
+  </nav>
 
-  <h2>Meanwhile</h2>
+  <!-- ================================================================ -->
+  <h2 id="history">Part 1: A short history</h2>
+
+  <p>The numbers in brackets point to the <a href="#sources">sources</a> at the
+  end of this part. The main one is John Warnock's own account of how the
+  language came about <a class="cite" href="#src-1">[1]</a>.</p>
+
+  <h3 id="before">Before PostScript: a stack machine and JaM</h3>
+  <p>The story starts in 1974 at Evans &amp; Sutherland, a computer graphics
+  company. John Warnock managed a small group that had one year to build a 3D
+  model of New York Harbor for a ship simulator. One of the group, John
+  Gaffney, suggested a small interpreted language for entering the model's
+  data, and they called it Joy. It worked so well that Warnock, Gaffney and
+  Paul Zima went on to build a fuller language, the Design System. It ran on an
+  imaginary stack machine, it had dictionaries, and it had three stacks:
+  operand, execution and dictionary. All three survive in PostScript. It was
+  built on a PDP-11 between 1975 and 1978 and had almost everything PostScript
+  would need except the graphics operators
+  <a class="cite" href="#src-1">[1]</a>.</p>
+  <p>In 1978 Warnock joined Xerox's Palo Alto Research Center (PARC), in Chuck
+  Geschke's new Imaging Sciences Laboratory. There he rebuilt the same kind of
+  interpreter with Martin Newell and Doug Wyatt, and called it JaM, for "John
+  and Martin". To JaM they added an imaging model: shapes made of straight
+  lines and cubic Bézier curves, filled or outlined, along with text, images
+  and clipping <a class="cite" href="#src-1">[1]</a>. Warnock and Wyatt
+  described the model in a 1982 SIGGRAPH paper
+  <a class="cite" href="#src-13">[13]</a>.</p>
+  <p>From 1979 Warnock and Geschke worked with Butler Lampson, Bob Sproull,
+  Brian Reid and Jerry Mendelson on Interpress, a printing protocol for Xerox.
+  Xerox adopted it, but only on condition that it stay unpublished until every
+  Xerox printer used it. Warnock and Geschke were convinced it would never
+  succeed that way, and they decided to leave and start a company
+  <a class="cite" href="#src-1">[1]</a>.</p>
+
+  <h3 id="adobe">Adobe and PostScript (1982–1984)</h3>
+  <p>Warnock and Geschke founded Adobe Systems on 2 December 1982. They named
+  it after Adobe Creek, which ran down the street from Warnock's house. The
+  first plan was to build complete document systems for businesses, around a
+  language based on JaM. With the engineers Doug Brotz, Bill Paxton and Ed
+  Taft, that language became PostScript <a class="cite" href="#src-1">[1]</a>.</p>
+  <p>In May 1983 Steve Jobs called them. Apple was finishing the Macintosh,
+  wanted a laser printer to go with it, and was interested in a partnership.
+  Because PostScript was a full programming language, the converter from the
+  Mac's QuickDraw graphics to PostScript could itself be written in PostScript
+  and live in the printer's memory. Adobe changed its plan: it would provide
+  the software between personal computers and the new laser printers, instead
+  of whole systems <a class="cite" href="#src-1">[1]</a>.</p>
+  <p>One hard problem remained: text. A letter drawn straight from its outline
+  looked bad at the low resolutions of screens and laser printers. Warnock's
+  idea was to adjust each outline to the device's pixel grid before filling
+  it, and he worked it out with Brotz and Paxton. Adobe kept the method a trade
+  secret rather than patent it. Adobe announced PostScript in 1984
+  <a class="cite" href="#src-1">[1]</a>, and it reached customers the
+  following year, inside the first PostScript printer
+  <a class="cite" href="#src-3">[3]</a>. In 2022 the Computer History Museum
+  published the source code of a very early version, from late February 1984
+  <a class="cite" href="#src-2">[2]</a>.</p>
+
+  <h3 id="publishing">The LaserWriter and desktop publishing (1985)</h3>
+  <p>The first PostScript printer was Apple's LaserWriter, introduced at the
+  start of 1985 <a class="cite" href="#src-3">[3]</a><a class="cite" href="#src-4">[4]</a>.
+  The same year Aldus released PageMaker, a page-layout program for the
+  Macintosh. PageMaker used the Mac's graphical interface, PostScript and the
+  LaserWriter together, and the Computer History Museum dates the start of the
+  desktop publishing revolution to its release
+  <a class="cite" href="#src-3">[3]</a><a class="cite" href="#src-5">[5]</a>.</p>
+  <p>A PostScript program describes the page, not the dots of one printer, so
+  the same document has to come out right on a 300-dot-per-inch laser printer
+  and on a 1,200-dot-per-inch imagesetter, the machine a typesetter uses to put
+  pages on film <a class="cite" href="#src-1">[1]</a>. In 1985 Linotype
+  released the Linotronic 100 and 300 imagesetters with PostScript, and their
+  output compared well with traditional typesetting equipment
+  <a class="cite" href="#src-3">[3]</a>. Besides Apple and Linotype, Adobe
+  signed DEC, Wang, QMS and Compugraphic, then IBM in 1986, after which
+  Hewlett-Packard licensed PostScript for its printers too
+  <a class="cite" href="#src-1">[1]</a>.</p>
+
+  <h3 id="fonts">Fonts: Type 1, Type 3 and TrueType</h3>
+  <p>PostScript has two main kinds of outline font. A <b>Type 3</b> font draws
+  each letter with ordinary PostScript procedures, so anyone can write one
+  <a class="cite" href="#src-6">[6]</a>. A <b>Type 1</b> font is more compact
+  and carries <em>hints</em>, notes about each letter's shape that the
+  interpreter's special rasterizer uses to make text look good at small sizes
+  and low resolutions. Type 1 fonts are also encrypted
+  <a class="cite" href="#src-7">[7]</a>.</p>
+  <p>Apple developed an outline font format of its own, TrueType, designed to
+  avoid paying per-font royalties to the owners of other font technologies
+  and to get past some limits of Type 1. Apple agreed to license it to
+  Microsoft <a class="cite" href="#src-8">[8]</a>, and the two companies
+  announced a joint plan to support it <a class="cite" href="#src-3">[3]</a>.
+  In 1989 Adobe released Adobe Type Manager, which drew Type 1 fonts smoothly
+  on screen, and made the Type 1 format an open standard
+  <a class="cite" href="#src-3">[3]</a>; its specification was published as
+  a book in 1990
+  <a class="cite" href="#src-7">[7]</a>. TrueType shipped in Apple's System 7
+  in May 1991 and in Microsoft Windows 3.1 in April 1992
+  <a class="cite" href="#src-8">[8]</a>. This contest between the formats is
+  often called the font wars.</p>
+
+  <h3 id="screens">Display PostScript</h3>
+  <p>In 1988 Adobe introduced Display PostScript, which applies the same
+  imaging model to computer screens, so that what is on screen matches what
+  prints <a class="cite" href="#src-3">[3]</a>. NeXT's operating system,
+  NeXTSTEP, used it: its programming manuals give Display PostScript a
+  chapter of its own <a class="cite" href="#src-12">[12]</a>. The second
+  edition of Adobe's reference manual documented the Display PostScript
+  extensions, and the third edition took them out again
+  <a class="cite" href="#src-6">[6]</a>.</p>
+
+  <h3 id="levels">Language levels 1, 2 and 3</h3>
+  <p>The language grew in three steps, which Adobe calls LanguageLevels. Each
+  level includes everything in the levels before it
+  <a class="cite" href="#src-6">[6]</a>. LanguageLevel 1 is the original
+  language, as it first shipped in 1985 <a class="cite" href="#src-3">[3]</a>. Level 2
+  was released in 1990, adding support for colour separations among much else
+  <a class="cite" href="#src-3">[3]</a>. LanguageLevel 3 is documented in the
+  third edition of the <em>PostScript Language Reference</em>, published in
+  1999, where Adobe calls its matching printer software Adobe PostScript 3
+  <a class="cite" href="#src-6">[6]</a>. Each level has its own edition of the
+  manual. The <code>&lt;&lt; &gt;&gt;</code> dictionary syntax used in the
+  tutorial below is one of Level 2's additions
+  <a class="cite" href="#src-6">[6]</a>.</p>
+
+  <h3 id="eps">EPS: PostScript inside other documents</h3>
+  <p>An Encapsulated PostScript (EPS) file is a PostScript program that
+  describes a single page and is meant to be placed inside another document,
+  like a logo in a brochure or a chart in a report. It is ordinary PostScript
+  with a few restrictions, and it must give the size of what it draws in a
+  <code>%%BoundingBox</code> comment. Adobe's specification of the format
+  reached version 3.0 in 1992 <a class="cite" href="#src-9">[9]</a>. The
+  tutorial's drawing examples carry the same comment, which is how the
+  playground knows what size to make the page.</p>
+
+  <h3 id="pdf">PDF, PostScript's descendant</h3>
+  <p>Adobe released Acrobat 1.0, and with it the Portable Document Format
+  (PDF), in 1993 <a class="cite" href="#src-3">[3]</a>. The PDF standard
+  states the family tie itself: at the core of PDF is an imaging model derived
+  from PostScript, but where PostScript is a programming language, PDF is a
+  structured file format, designed to be fast to view on screen
+  <a class="cite" href="#src-10">[10]</a>. In 2008 PDF 1.7 became the
+  international standard ISO 32000-1 <a class="cite" href="#src-10">[10]</a>.
+  Warnock calls PDF a derivative of PostScript, and credits the two together
+  with transforming printing and publishing around the world
+  <a class="cite" href="#src-1">[1]</a>.</p>
+
+  <h3 id="today">PostScript today</h3>
+  <p>Most documents now travel as PDF, but PostScript is still around.
+  <a href="https://www.ghostscript.com/">Ghostscript</a>, the open-source
+  PostScript and PDF interpreter, is still developed, and pscat checks its own
+  output against it. Type 1 fonts are fading: Adobe's applications stopped
+  supporting them after January 2023, though Adobe still supports CFF, a
+  compact form of Type 1 used inside OpenType fonts
+  <a class="cite" href="#src-11">[11]</a>. And the language is still a good
+  way to draw with code, which is what the rest of this page is about.</p>
+
+  <h3 id="reading">Reading list</h3>
   <ul>
-    <li>Run and edit programs in the <a href="playground.html">playground</a>.</li>
-    <li>Read the source of any piece in the <a href="gallery.html">gallery</a>;
-      each one is a single PostScript file.</li>
-    <li>Browse the <a href="guides.html">guides</a> for what the libraries can do.</li>
+    <li>John E. Warnock, "The Origins of PostScript", <em>IEEE Annals of the
+      History of Computing</em> 40:3 (2018) <a class="cite" href="#src-1">[1]</a>.
+      The story above, from the man who started it.</li>
+    <li>David C. Brock, "PostScript: A Digital Printing Press", Computer History
+      Museum (2022) <a class="cite" href="#src-2">[2]</a>. A readable history,
+      with the early source code.</li>
+    <li>Adobe Systems, <em>PostScript Language Tutorial and Cookbook</em>
+      (Addison-Wesley, 1985). Adobe's original introduction, full of small
+      programs. It covers Level 1 only.</li>
+    <li>Glenn C. Reid, <em>Thinking in PostScript</em> (Addison-Wesley, 1990).
+      How to write PostScript well, not only correctly.</li>
+    <li>Adobe Systems, <em>PostScript Language Reference</em>, third edition
+      (Addison-Wesley, 1999) <a class="cite" href="#src-6">[6]</a>. The
+      authority on every operator.</li>
+    <li>Pamela Pfiffner, <em>Inside the Publishing Revolution: The Adobe
+      Story</em> (Adobe Press, 2003). The company's history.</li>
+    <li>The Computer History Museum's Desktop Publishing Pioneer Meeting
+      (2017) <a class="cite" href="#src-4">[4]</a>. Transcripts of people from
+      Adobe, Apple, Aldus and elsewhere talking it over.</li>
+  </ul>
+
+  <h3 id="sources">Sources</h3>
+  <ol class="sources">
+    <li id="src-1">John E. Warnock, "The Origins of PostScript", <em>IEEE Annals
+      of the History of Computing</em>, vol. 40, no. 3, July–September 2018,
+      pp. 68–76. <a href="https://doi.org/10.1109/MAHC.2018.033841112">doi:10.1109/MAHC.2018.033841112</a></li>
+    <li id="src-2">David C. Brock, <a href="https://computerhistory.org/blog/postscript-a-digital-printing-press/">"PostScript:
+      A Digital Printing Press"</a>, Computer History Museum blog, 1 December 2022.</li>
+    <li id="src-3">Computer History Museum, Information Technology Corporate
+      Histories Project, <a href="https://archive.computerhistory.org/resources/access/text/2012/10/102746510-05-01-acc.pdf">"Adobe
+      Systems"</a> (company timeline).</li>
+    <li id="src-4">Computer History Museum, <a href="https://archive.computerhistory.org/resources/access/text/2019/01/102738494-05-01-acc.pdf">Desktop
+      Publishing Pioneer Meeting, Day 2, Session 7: Ventura, Aldus and Apple</a>,
+      recorded 23 May 2017 (transcript).</li>
+    <li id="src-5">Computer History Museum, <a href="https://www.computerhistory.org/revolution/personal-computers/17/306">"Desktop
+      Publishing"</a>, in the exhibition <em>Revolution: The First 2000 Years of
+      Computing</em>.</li>
+    <li id="src-6">Adobe Systems, <a href="https://www.adobe.com/jp/print/postscript/pdfs/PLRM.pdf"><em>PostScript
+      Language Reference</em>, third edition</a> (Addison-Wesley, 1999):
+      preface, sections 1.2, 3.2, 4.3 and 5.2, appendix D.</li>
+    <li id="src-7">Adobe Systems, <a href="https://adobe-type-tools.github.io/font-tech-notes/pdfs/T1_SPEC.pdf"><em>Adobe
+      Type 1 Font Format</em></a> (Addison-Wesley, 1990): chapters 1 and 7.</li>
+    <li id="src-8">Microsoft, <a href="https://learn.microsoft.com/en-us/typography/truetype/history">"A
+      brief history of TrueType"</a>.</li>
+    <li id="src-9">Adobe Systems, <a href="https://web.archive.org/web/2017/https://www.adobe.com/content/dam/acom/en/devnet/actionscript/articles/5002.EPSF_Spec.pdf"><em>Encapsulated
+      PostScript File Format Specification</em>, version 3.0</a>, Technical
+      Note #5002, 1 May 1992 (archived copy).</li>
+    <li id="src-10"><a href="https://opensource.adobe.com/dc-acrobat-sdk-docs/pdfstandards/PDF32000_2008.pdf">ISO
+      32000-1:2008, <em>Document management — Portable document format — Part 1:
+      PDF 1.7</em></a>, first edition, 1 July 2008 (Adobe's copy): introduction.</li>
+    <li id="src-11">Adobe, <a href="https://helpx.adobe.com/fonts/kb/postscript-type-1-fonts-end-of-support.html">"PostScript
+      Type 1 fonts end of support"</a>, last updated 11 July 2023.</li>
+    <li id="src-12">NeXT Computer, <a href="https://www.mirrorservice.org/sites/www.bitsavers.org/pdf/next/Release_3_Nov93/NeXTSTEP_Programming_Interface_Summary_Release_3_Nov93.pdf"><em>NeXTSTEP
+      Programming Interface Summary</em>, Release 3</a> (1993), chapter 5,
+      "Display PostScript".</li>
+    <li id="src-13">John Warnock and Douglas K. Wyatt, "A Device Independent
+      Graphics Imaging Model for Use with Raster Devices", <em>Computer
+      Graphics</em> (SIGGRAPH '82), vol. 16, no. 3, 1982, pp. 313–319.
+      <a href="https://doi.org/10.1145/965145.801297">doi:10.1145/965145.801297</a></li>
+  </ol>
+
+  <!-- ================================================================ -->
+  <h2 id="tutorial">Part 2: The fundamentals</h2>
+
+  <p>Each example below shows a whole program, then what it does when it runs.
+  Press <b>Try it</b> to open it in the playground, change something, and press
+  Run. Everything after a <code>%</code> on a line is a comment. Two comments
+  appear at the top of many examples: <code>%!PS</code> marks the file as
+  PostScript, and <code>%%BoundingBox: 0 0 300 200</code> gives the size of
+  the page, here 300 by 200 points.</p>
+
+  <h3 id="stack">Postfix and the operand stack</h3>
+  <p>PostScript keeps its working values on a <b>stack</b>, a pile where the
+  last thing put on is the first taken off. A number in a program is pushed
+  onto the stack. An operator such as <code>add</code> pops its operands off
+  the stack and pushes its result. So the operands come first and the
+  operator last, which is called <b>postfix</b> notation: <code>3 4 add</code>
+  leaves 7 on the stack. The operator <code>==</code> pops the top item and
+  prints it.</p>
+  <!--@example 01-postfix-->
+  <p>There are no parentheses and no precedence rules: the order of the words
+  is the order of the work. In <code>2 3 4 mul add</code>, the
+  <code>mul</code> comes first, so 3 × 4 is worked out before the
+  addition.</p>
+
+  <p><code>pstack</code> prints everything on the stack, top first, and leaves
+  it there. <code>clear</code> empties the stack. A few operators exist only to
+  rearrange the stack: <code>dup</code> copies the top item, <code>exch</code>
+  swaps the top two, and <code>pop</code> throws the top one away. Text in
+  parentheses, like <code>(-- dup --)</code>, is a string, and <code>=</code>
+  prints a string without its parentheses.</p>
+  <!--@example 02-stack-->
+
+  <p>Two more reach deeper into the stack. <code><i>n</i> index</code> copies
+  the item <i>n</i> places below the top, counting the top as 0.
+  <code><i>n j</i> roll</code> turns the top <i>n</i> items round by <i>j</i>
+  places: with <code>1 2 3</code> on the stack, <code>3 1 roll</code> leaves
+  <code>3 1 2</code>, reading from the bottom up. Remember that
+  <code>pstack</code> prints the top first.</p>
+  <!--@example 03-roll-index-->
+
+  <h3 id="three-stacks">The three stacks</h3>
+  <p>The interpreter keeps three stacks, the same three as Warnock's Design
+  System in the 1970s.</p>
+  <ul>
+    <li>The <b>operand stack</b> holds data: the numbers, strings and other
+      values you have been pushing.</li>
+    <li>The <b>dictionary stack</b> decides what names mean. A dictionary is a
+      table of names and values. When the interpreter meets a name such as
+      <code>add</code> or <code>x</code>, it looks in the top dictionary first,
+      then the next one down, and so on. The bottom of the stack always holds
+      <code>systemdict</code>, with the built-in operators, and
+      <code>userdict</code>, where your own definitions go; Level 2
+      interpreters add a third, <code>globaldict</code>, between them.</li>
+    <li>The <b>execution stack</b> holds the interpreter's own work: the
+      procedures it is in the middle of running, and where to carry on in each.
+      You rarely touch it directly, but it is what lets a procedure call
+      another and then continue where it left off.</li>
+  </ul>
+  <p><code>begin</code> pushes a dictionary onto the dictionary stack and
+  <code>end</code> pops it off, so the same name can mean different things in
+  different places. <code>def</code>, explained in the next section, gives a
+  name a value in the top dictionary.</p>
+  <!--@example 04-dict-stack-->
+
+  <h3 id="names">Names and procedures</h3>
+  <p>A name written with a slash, like <code>/side</code>, is a
+  <b>literal name</b>: it is pushed onto the stack as it is instead of being
+  looked up. <code>def</code> takes a name and a value and stores them in the
+  top dictionary. After that, the plain name <code>side</code> is looked up
+  and replaced by its value.</p>
+  <p>Code in braces, such as <code>{ dup mul }</code>, is a <b>procedure</b>.
+  It does not run when it is read. Instead it is pushed as one object: an
+  array of instructions, marked as executable. Store one under a name with
+  <code>def</code> and the name works like a new operator. <code>load</code>
+  fetches a name's value without running it, and <code>exec</code> runs a
+  procedure that is on the stack.</p>
+  <!--@example 05-def-->
+
+  <p>Names are looked up when a procedure runs, not when it is defined, so
+  redefining a name changes every procedure that uses it. <code>bind</code>
+  prevents that for operators: it swaps each operator name in a procedure for
+  the operator itself, once, when the procedure is defined. Bound procedures
+  also run a little faster, which is why real programs bind most of
+  theirs.</p>
+  <!--@example 06-bind-->
+
+  <h3 id="control">Control flow</h3>
+  <p>Control flow is made of operators that take procedures as operands.
+  Comparisons such as <code>gt</code> (greater than), <code>lt</code>,
+  <code>eq</code> and <code>ne</code> push <code>true</code> or
+  <code>false</code>. <code>if</code> takes a boolean and one procedure, and
+  <code>ifelse</code> takes a boolean and two. <code>for</code> takes a start,
+  a step, a limit and a procedure, and runs the procedure once for each value
+  of a counter, pushing the counter first. <code>repeat</code> runs a
+  procedure a given number of times.</p>
+  <!--@example 07-if-for-->
+
+  <p><code>loop</code> runs a procedure over and over until <code>exit</code>
+  stops it. <code>forall</code> runs a procedure once for each element of an
+  array (written in square brackets) or a string, pushing the element each
+  time. Each character of a string comes out as its character code.</p>
+  <!--@example 08-loop-forall-->
+
+  <h3 id="dicts">Dictionaries and scope</h3>
+  <p>Dictionaries are also ordinary data. <code><i>n</i> dict</code> makes an
+  empty one with room for <i>n</i> entries, <code>put</code> stores a value
+  under a key, and <code>get</code> reads one back.
+  <code>&lt;&lt; … &gt;&gt;</code> builds a dictionary from pairs of keys and
+  values. Pushing a dictionary with <code>begin</code> makes its keys into
+  names you can use directly. That is the usual way to give a procedure local
+  variables: in <code>hypot</code> below, <code>a</code> and <code>b</code>
+  exist only between <code>begin</code> and <code>end</code>.</p>
+  <!--@example 09-dicts-->
+
+  <h3 id="paths">Paths and painting</h3>
+  <p>Drawing happens in two steps. First you build a <b>path</b>, an invisible
+  outline. <code>newpath</code> starts a fresh one, <code>moveto</code> sets
+  the current point, <code>lineto</code> adds a straight line to a new point,
+  and <code>closepath</code> joins the last point back to the first. Then you
+  paint it: <code>stroke</code> draws along the path with the current line
+  width and colour, and <code>fill</code> paints its inside. Painting uses the
+  path up, so the next one starts empty. <code>setrgbcolor</code> takes red,
+  green and blue, each from 0 to 1. <code>showpage</code> at the end sends the
+  finished page to the printer, or here, to the screen.</p>
+  <!--@example 10-paths "A black triangle outline beside a filled blue square."-->
+
+  <p><code>curveto</code> adds a cubic Bézier curve: two control points that
+  pull the curve towards them, then the end point. <code>arc</code> adds part
+  of a circle, given its centre, its radius, and the start and end angles in
+  degrees. <code>setgray</code> picks a grey from 0 (black) to 1 (white).
+  Rectangles are common enough to have shortcuts: <i>x y width height</i>
+  <code>rectfill</code> fills one and <code>rectstroke</code> outlines one,
+  without touching the current path. Later examples use them.</p>
+  <!--@example 11-curves "A black S-shaped curve beside an orange disc with a white open ring inside it."-->
+
+  <p><code>clip</code> turns the current path into a stencil: everything
+  painted afterwards shows only inside it. Here a circle clips a set of
+  coloured stripes. Each stripe uses <code>rlineto</code>, which is like
+  <code>lineto</code> but measured from the current point: <code>0 200
+  rlineto</code> means "200 straight up from here".</p>
+  <!--@example 12-clip "Vertical stripes shading from blue to purple, visible only inside a circle."-->
+
+  <h3 id="coords">Coordinates</h3>
+  <p>The page's origin, (0, 0), is at its bottom left corner, with <i>x</i>
+  going right and <i>y</i> going <em>up</em>. One unit is 1/72 of an inch,
+  about the same as a printer's point, so a US Letter page is 612 by 792 units
+  <a class="cite" href="#src-6">[6]</a>.</p>
+  <p>You can move and turn the coordinate system itself. <code>translate</code>
+  moves the origin, <code>rotate</code> turns the axes counter-clockwise by a
+  number of degrees, and <code>scale</code> stretches them. Each one changes
+  the <b>current transformation matrix</b>, or CTM, which maps the
+  coordinates you write to the device's pixels. Each change builds on the ones
+  before it, which is why the loop below draws the very same bar each time and
+  only turns between bars.</p>
+  <!--@example 13-coordinates "A black one-inch square, and a ring of twelve red bars around a centre point."-->
+
+  <p><code>scale</code> stretches everything drawn after it, including the
+  width of lines.</p>
+  <!--@example 14-scale "Three square outlines: a plain one, one stretched sideways with thicker upright sides, and one stretched upwards."-->
+
+  <h3 id="gstate">The graphics state</h3>
+  <p>The current colour, line width, font, CTM, path and clipping region
+  together make up the <b>graphics state</b>. <code>gsave</code> saves a copy
+  of it, and <code>grestore</code> brings the saved copy back. Wrapping some
+  drawing in <code>gsave</code> … <code>grestore</code> lets it move, turn and
+  change colour without disturbing anything drawn after it.</p>
+  <!--@example 15-gsave "A red square turned 45 degrees in the middle, and an upright green square at the bottom left."-->
+
+  <h3 id="text">Text and fonts</h3>
+  <p>To draw text, find a font by name with <code>findfont</code>, set its size
+  in points with <code>scalefont</code>, and make it current with
+  <code>setfont</code>. Then <code>moveto</code> where the line starts and
+  <code>show</code> a string. Letters are shapes like any other: they take the
+  current colour and turn with the axes.</p>
+  <!--@example 16-text "Hello, PostScript in Helvetica; an italic line in dark red; and a line of Courier tilted upwards."-->
+
+  <p>A <b>Type 3</b> font is one you write yourself. It is a dictionary with a
+  few required entries and a <code>BuildChar</code> procedure, which the
+  interpreter calls to draw each character. This one draws every letter as a
+  dot that grows through the alphabet. <code>definefont</code> registers it
+  under a name, so that <code>findfont</code> can find it like any other
+  font.</p>
+  <!--@example 17-type3 "A row of seven black dots growing from tiny to large."-->
+
+  <h3 id="sunburst">A complete program: a sunburst</h3>
+  <p>Now put the pieces together, one step at a time. First move the origin
+  to the centre of the page and draw a single ray.</p>
+  <!--@example 18-sunburst-1 "One black horizontal line starting at the centre of the page."-->
+
+  <p>Next, make the ray a procedure and repeat it 36 times, turning 10 degrees
+  between rays. Since 36 × 10 = 360, the rays go all the way round.</p>
+  <!--@example 19-sunburst-2 "Thirty-six black rays spreading out from the centre."-->
+
+  <p>Last, use a <code>for</code> loop so that each ray knows its number
+  <i>i</i>. The number picks the ray's hue with <code>sethsbcolor</code> (hue,
+  saturation and brightness, each from 0 to 1), and whether it is even picks
+  the ray's length. <code>setlinecap</code> rounds the ends of the rays, and a
+  yellow disc covers the centre.</p>
+  <!--@example 20-sunburst-3 "Rainbow-coloured rays of alternating length around a yellow disc."-->
+
+  <p>Try changing the number of rays, the turn, or the colours. If a change
+  breaks the program, the playground shows the error and the line it
+  happened on.</p>
+
+  <h3 id="next">Where to go next</h3>
+  <ul>
+    <li>Open the <a href="playground.html">playground</a> and pick one of its
+      longer examples from the menu: fractals, spirals and a type specimen.</li>
+    <li>Read the source of the pieces in the <a href="gallery.html">gallery</a>.
+      Each one is a single PostScript file.</li>
+    <li>pscat comes with libraries for art, charts, handwriting and page
+      layout, all written in PostScript. The <a href="guides.html">guides</a>
+      show what they can do, and the <a href="fonts.html">fonts</a> page shows
+      every face you can pass to <code>findfont</code>.</li>
+    <li>For every operator and every detail, see Adobe's
+      <a href="https://www.adobe.com/jp/print/postscript/pdfs/PLRM.pdf"><em>PostScript
+      Language Reference</em></a> (the PLRM), and for style, the books in the
+      <a href="#reading">reading list</a>.</li>
   </ul>
 </main>
 <!--@footer-->

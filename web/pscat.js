@@ -89,6 +89,18 @@ export class Pscat {
     return new TextDecoder().decode(new Uint8Array(this.ex.memory.buffer, ptr, len));
   }
 
+  /**
+   * What the program has printed with =, ==, stack, pstack or print
+   * since begin() ('' when nothing). Read it during a stepped run to
+   * show output as it appears.
+   */
+  get output() {
+    const len = this.ex.ps_output_len();
+    if (len === 0) return '';
+    const ptr = this.ex.ps_output_ptr();
+    return new TextDecoder().decode(new Uint8Array(this.ex.memory.buffer, ptr, len));
+  }
+
   /** Blit the live page into a <canvas> (resizes it to match). */
   paintTo(canvas) {
     const w = this.width;
