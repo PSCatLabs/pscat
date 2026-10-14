@@ -32,7 +32,8 @@ got="$(jq -c "$EXPR" "$T/fixture.json" 2>&1)"
 want='[227,234,5,12,9]'
 [ "$got" = "$want" ] || bad "fixture: got $got, want $want"
 
-# A bare digit-per-item bug (the old `[][0]` form) would print [2,2,2,...] here.
+# Single multi-digit link. The old `[][0]` form fails under system jq and prints
+# first digits under gh's embedded gojq (`gh pr list --jq`, the live path).
 got1="$(printf '[{"body":"Closes #1234"}]' | jq -c "$EXPR" 2>&1)"
 [ "$got1" = '[1234]' ] || bad "single multi-digit: got $got1, want [1234]"
 
