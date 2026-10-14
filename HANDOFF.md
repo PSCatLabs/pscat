@@ -1039,8 +1039,8 @@ renders eight examples in both and compares block-downsampled output).
 - tiny-skia `Transform::from_row(sx, ky, kx, sy, tx, ty)` matches the
   PS matrix order `[a b c d tx ty]` — `ops/matrix.rs` documents it;
   don't rediscover this the hard way.
-- **artkit, paintkit, drykit and drychalk define every procedure
-  `} bind def`** (#307, #318), and `tests/libbind.rs` fails for any procedure added without
+- **artkit, paintkit, drykit, drychalk and drycharcoal define every procedure
+  `} bind def`** (#307, #318, #326), and `tests/libbind.rs` fails for any procedure added without
   it. Ghostscript resolves each executable name in a procedure body at
   run time, and with several libraries loaded those lookups are what
   make gs slow (alpine_lake 30 s unbound, 10 s bound). A private scratch
@@ -1054,8 +1054,9 @@ renders eight examples in both and compares block-downsampled output).
   bound (20% to 30% on its specimen), so it stays. drycrayon and the older
   kits are deliberately unbound: drycrayon gained under 1%, and the rest
   take 0.33 s or less in gs or cannot run there (no fonts), so there is
-  nothing to win (`notes/318-bind-drychalk.md`). drycharcoal (merged in #315 after this work began)
-  is not bound yet (#326).
+  nothing to win (`notes/318-bind-drychalk.md`). drycharcoal is bound too, but
+  it gains little: 0.4% of the instructions on its specimen and, in one
+  pair of runs, 3% on the Lincoln portrait in gs (`notes/326-bind-drycharcoal.md`).
 - Test Interps at 100×100; golden runs at 500×500/r72. Metric
   assertions use 1e-3 tolerances where the pen is f32.
 
