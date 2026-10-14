@@ -7446,12 +7446,13 @@ fn graded_cloud(under_opts: &str) -> Interp {
 
 /// How far the fringe of `graded_cloud` is from "cloud blended into the
 /// local sky": each pixel's residual after the best blend between the sky
-/// at its own height and the cloud's cream, summed over the cloud's rows.
-/// A pass mixed toward the wrong backdrop is a colour no such blend makes.
-fn rim_residual(it: &Interp) -> f64 {
+/// at its own height and the cloud's cream, summed over the page rows
+/// `gy` (height above the horizon). A pass mixed toward the wrong backdrop
+/// is a colour no such blend makes.
+fn rim_residual(it: &Interp, gy: std::ops::Range<u32>) -> f64 {
     let (top, low, cream) = ([0.06, 0.16, 0.50], [0.98, 0.86, 0.68], [0.99, 0.98, 0.97]);
     let mut sum = 0.0;
-    for gy in 15..135u32 {
+    for gy in gy {
         let t = gy as f64 / 150.0;
         let sky: Vec<f64> = (0..3).map(|c| low[c] + (top[c] - low[c]) * t).collect();
         let d: Vec<f64> = (0..3).map(|c| cream[c] - sky[c]).collect();
@@ -7473,9 +7474,12 @@ fn rim_residual(it: &Interp) -> f64 {
 /// The acceptance criterion: over a strong vertical gradient the one-colour
 /// /Under (the sky at the cloud's centre, which is what an artist
 /// hand-matches) leaves a rim, and the procedure removes most of it.
-/// Measured when this was written: 264.6 against 121.2, 2.2x. The test
-/// asks for 1.6x so a re-tuned brush cannot flip it, but a procedure that
-/// was silently ignored (or evaluated at one fixed point) would give 1.0x.
+/// Measured when this was written, rows 15..135: 264.6 against 121.2
+/// (2.2x). Below the cloud, where the gradient is furthest from the
+/// hand-matched colour, 206.9 against 80.6 (2.6x); above it, 57.7 against
+/// 40.6, a smaller win, so only the total and the lower half are asserted.
+/// The bound is 1.6x so a re-tuned brush cannot flip it, but a procedure
+/// that was silently ignored (or evaluated at one fixed point) gives 1.0x.
 #[test]
 fn wet_procedural_under_removes_the_rim_over_a_gradient() {
     let constant =
@@ -7484,13 +7488,22 @@ fn wet_procedural_under_removes_the_rim_over_a_gradient() {
         "/At [ 135 70 ] /Under { exch pop 150 div 0 max 1 min /skt exch def \
            [ 0.98 0.86 0.68 ] [ 0.06 0.16 0.50 ] skt mix3 }",
     );
-    let (c, p) = (rim_residual(&constant), rim_residual(&procedural));
+    let (c, p) = (
+        rim_residual(&constant, 15..135),
+        rim_residual(&procedural, 15..135),
+    );
     assert!(
         c > 1.6 * p,
         "the procedure should cut the rim: constant {c:.1}, procedural {p:.1}"
     );
-    // The marks themselves did not move: same cloud, same stream.
-    assert!(ink_count(&constant) == ink_count(&procedural) || c != p);
+    let (c, p) = (
+        rim_residual(&constant, 15..70),
+        rim_residual(&procedural, 15..70),
+    );
+    assert!(
+        c > 1.6 * p,
+        "the rim below the cloud should go: constant {c:.1}, procedural {p:.1}"
+    );
 }
 
 /// A procedure that always answers the literal's colour draws what the

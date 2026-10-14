@@ -296,6 +296,10 @@ the pass budget and the nesting machinery rely on.
 - Slot 6 is the index of the pass now running. It is written immediately
   before `{ pqmyframe 1 get exec } stopped`, in the same place the
   colour is set today.
+- Slot 7 (issue #179) is `null` for a literal `/Under`, and for a
+  procedural one an array of per-pass backdrops (`null` at the core). `puwet`
+  reads it first, so a loaded colour grades toward the backdrop of the pass it
+  is painted in; the other slots mean what they did.
 
 `puwet` applies `mix3(c, U_d, k_d)` for `d = 1 .. pqdnow`, outermost
 first, which is the order in which nested `pkwet` calls mix the

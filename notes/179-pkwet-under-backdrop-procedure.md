@@ -40,10 +40,12 @@ Design calls, and why:
 
 Measured (examples/paintkit_wet_under_demo.ps, the sky gradient over 150pt,
 a 34pt /Offset): the fringe's residual against "cloud blended into the local
-sky" is 264.6 with the hand-matched constant and 121.2 with the procedure.
-A 40pt thinner cloud measures 316 against 123. `wet_procedural_under_removes_the_rim_over_a_gradient`
+sky" is 264.6 with the hand-matched constant and 121.2 with the procedure (2.2x).
+Below the cloud, where the sky is furthest from the hand-matched colour, it
+is 206.9 against 80.6; above, 57.7 against 40.6, so the pale rim above is
+only modestly better and the specimen's caption names the cold rim below. `wet_procedural_under_removes_the_rim_over_a_gradient`
 asks for 1.6x.
 
-Deferred: per-pixel (or per-band) backdrops would need either a hook into
+Deferred (issue #359): per-pixel (or per-band) backdrops would need either a hook into
 every preset's colour set or clipping each pass into bands (which breaks the
 brush's random stream across bands), so neither was attempted.
