@@ -12,10 +12,10 @@ math, and #339 had added `\ast` (glyph `/asteriskmath`) only.
   centred `/asteriskmath` set at script size and lifted by the superscript
   shift, and `A_*` the same lowered. The existing script and class rules do
   the rest: a `*` at the start of a formula or after another operator
-  becomes an ordinary symbol (no thick space), `a*b` gets the binary-operator
+  becomes an ordinary symbol (no medium space), `a*b` gets the binary-operator
   spaces, `z^*` and `z^{*}` are the same.
 - New selftest `ascii-star-is-ast`: `a*b` = `a \ast b` and `z^*` =
-  `z^{\ast}` in width, a leading `*` takes no space, `z^*` rises above `z`,
+  `z^{\ast}` in width, a leading or trailing `*` takes no space (widths just add), `z^*` rises above `z`,
   `A_*` hangs below the baseline, and a set of starred scripts, fractions,
   sums and `\left(...\right)^*` lay out and draw.
 - The old guard `(a * b) -> mk-unsupported-character:*` moved to `@`
@@ -28,5 +28,10 @@ math, and #339 had added `\ast` (glyph `/asteriskmath`) only.
   where ASCII `*` has no glyph. A new selftest line pins it. TeX text mode
   would give a raised asterisk there; tracked as a follow-up issue.
 - Committed renders: `scripts/identity_check.sh --loader lib/strokeglyphs.ps
-  --loader lib/mathkit.ps` and `gallery/chalkboard_lecture.ps` from PR #353
-  are byte-identical (see the PR).
+  --loader lib/mathkit.ps` against the merge-base worktree, one release binary
+  (the main checkout's) for both trees: 14 of 14 pages identical across 7
+  files, and the control (a driver drawing `z^* = a*b`, which errors in the
+  base) differs, as it must. `gallery/chalkboard_lecture.ps` from PR #353
+  (branch feature/238-professors-chalkboard-lecture) renders byte-identically
+  (`cmp`) in both trees; it contains no `*`, so that was expected.
+- Follow-up: #378 (`*` inside `\text`).

@@ -2247,11 +2247,16 @@
 %   (z^*) << /Size 100 /Irregular 0 >> mkmetrics /Width get
 %   (z^{\\ast}) << /Size 100 /Irregular 0 >> mkmetrics /Width get eq
 %   (z^* is z^{\\ast}) mustbe
-%   % a star at the start of a formula or after another operator is an
-%   % ordinary symbol (TeX rule 5): no thick space before it
-%   (*x) << /Size 100 /Irregular 0 >> mkmetrics /Width get
-%   (a*b) << /Size 100 /Irregular 0 >> mkmetrics /Width get lt
-%   (a leading * takes no space before it) mustbe
+%   % a star at the start or the end of a formula is an ordinary symbol
+%   % (TeX rules 5 and 6): no medium space beside it, so widths just add
+%   (*b) << /Size 100 /Irregular 0 >> mkmetrics /Width get
+%   (*) << /Size 100 /Irregular 0 >> mkmetrics /Width get
+%   (b) << /Size 100 /Irregular 0 >> mkmetrics /Width get add sub abs 0.01 lt
+%   (a leading * takes no space after it) mustbe
+%   (a*) << /Size 100 /Irregular 0 >> mkmetrics /Width get
+%   (a) << /Size 100 /Irregular 0 >> mkmetrics /Width get
+%   (*) << /Size 100 /Irregular 0 >> mkmetrics /Width get add sub abs 0.01 lt
+%   (a trailing * takes no space before it) mustbe
 %   % raised in a superscript, lowered in a subscript
 %   (z^*) << /Size 100 /Irregular 0 >> mkmetrics /Height get
 %   (z) << /Size 100 /Irregular 0 >> mkmetrics /Height get gt
