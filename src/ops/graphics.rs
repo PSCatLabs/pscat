@@ -26,6 +26,7 @@ pub fn install(dict: &mut Dict) {
     op(dict, "fill", fill);
     op(dict, "eofill", eofill);
     op(dict, "stroke", stroke);
+    op(dict, "strokepath", strokepath);
     op(dict, "erasepage", erasepage);
     op(dict, "showpage", showpage);
     op(dict, "copypage", copypage);
@@ -236,6 +237,13 @@ fn eofill(it: &mut Interp) -> Result<(), PsError> {
 
 fn stroke(it: &mut Interp) -> Result<(), PsError> {
     it.gfx.stroke();
+    Ok(())
+}
+
+/// `strokepath` -- replace the current path with the outline `stroke`
+/// would paint. No error on an empty path (gs-pinned).
+fn strokepath(it: &mut Interp) -> Result<(), PsError> {
+    it.gfx.stroke_path();
     Ok(())
 }
 

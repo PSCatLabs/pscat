@@ -19,7 +19,7 @@ What follows is the tour, roughly in the order it was built.
 three-stack interpreter, stack/arithmetic operators, `def`,
 dictionaries, `if`/`ifelse`, `for`/`repeat`/`loop`/`exit`, comparisons,
 `bind`), the graphics engine (paths, `arc`/`arcn`, `fill`/`eofill`/
-`stroke`, `gsave`/`grestore`, colors and line attributes,
+`stroke`/`strokepath`, `gsave`/`grestore`, colors and line attributes,
 `translate`/`rotate`/`scale`), and a **live window** so you can watch
 programs draw — or headless PNG rendering, cross-checked against
 Ghostscript on the example fractals. Errors use the standard PostScript
