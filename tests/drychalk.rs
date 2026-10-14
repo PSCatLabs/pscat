@@ -128,11 +128,18 @@ fn dcchalk_every_documented_parameter_changes_the_render() {
         );
     }
     // /Side only acts on a tilted stick: check it against a tilted baseline.
-    assert_ne!(stroke("/Side 4 /Tilt 80"), stroke("/Tilt 80"), "/Side is a no-op");
+    assert_ne!(
+        stroke("/Side 4 /Tilt 80"),
+        stroke("/Tilt 80"),
+        "/Side is a no-op"
+    );
     let mut tested: Vec<String> = varied.iter().map(|(k, _)| k.to_string()).collect();
     tested.sort_unstable();
     assert_eq!(
-        advertised("% @summary: Strokes the current path as chalk", "\n/dcchalk "),
+        advertised(
+            "% @summary: Strokes the current path as chalk",
+            "\n/dcchalk "
+        ),
         tested,
         "advertised and tested keys differ"
     );
@@ -315,7 +322,10 @@ fn dust_is_thickest_at_the_ledge() {
     let bottom = |it: &Interp| mean(it, 0, 112, 200, 120);
     let (b1, b0) = (bottom(&with), bottom(&without));
     eprintln!("bottom band: ledge {b1:.1}, none {b0:.1}");
-    assert!(b1 > b0 + 4.0, "the ledge band ({b1:.1}) is no brighter ({b0:.1})");
+    assert!(
+        b1 > b0 + 4.0,
+        "the ledge band ({b1:.1}) is no brighter ({b0:.1})"
+    );
 }
 
 /// C5: a wipe takes the dust film off, so it reads darker than the haze.
@@ -334,7 +344,10 @@ fn a_wipe_is_darker_than_the_haze() {
     let all = |it: &Interp| mean(it, 0, 0, 200, 120);
     let (w, n) = (all(&board(8)), all(&board(0)));
     eprintln!("mean with wipes {w:.2}, without {n:.2}");
-    assert!(w < n - 0.3, "wipes ({w:.2}) did not darken the board ({n:.2})");
+    assert!(
+        w < n - 0.3,
+        "wipes ({w:.2}) did not darken the board ({n:.2})"
+    );
 }
 
 /// The CI budget (DRYMEDIA.md 6.2): a dressed board with a ghost and a
@@ -352,7 +365,10 @@ fn a_small_board_renders_within_the_ci_budget() {
     let secs = t0.elapsed().as_secs_f64();
     eprintln!("small board: {secs:.2}s");
     assert!(!data(&it).is_empty());
-    assert!(secs < 2.0, "the board took {secs:.2}s, over the 2s CI budget");
+    assert!(
+        secs < 2.0,
+        "the board took {secs:.2}s, over the 2s CI budget"
+    );
 }
 
 fn gs_available() -> bool {
@@ -470,7 +486,10 @@ fn ghostscript_accepts_a_packed_ghost_procedure() {
         200,
         120,
         1.0,
-        &body.replace("/pk load type /packedarraytype ne { pk-is-not-packed } if", ""),
+        &body.replace(
+            "/pk load type /packedarraytype ne { pk-is-not-packed } if",
+            "",
+        ),
     );
     assert!(!data(&it).is_empty());
 }
