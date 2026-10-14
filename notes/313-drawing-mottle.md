@@ -42,12 +42,16 @@ blocks. The default's is 0.14, the old `/Mottle 6`'s 0.25 (five seeds); the
 test requires under 0.7 times.
 
 **Reach test threshold.** `dkstroke_reaches_every_knuckle_its_ink_touches`
-failed by one pixel on the new paper (`tilt 90 on a 10pt side`, seed 3).
-It was an anti-aliasing difference between the band's clip and the
-whole-page clip (49.6 of 255 against a threshold of 40), not a missed
-knuckle: a missed knuckle uncovers whole pixels, and the one-cell-short
-control differs in hundreds. The finer mottle raises that noise (max about
-25 before, about 50 now). `missed` now counts differences over 80.
+failed by one pixel on the new paper (`tilt 90 on a 10pt side`, seed 3, pixel
+186,367 at 504 dpi). In that pixel the band render is 50 of 255 lighter than
+the whole-page render, so it is not the two-way rasterizer noise the old
+comment describes. It is a knuckle that grazes the ink's edge by under a pixel,
+which the band's reach drops: the difference vanishes at `/dkslack` 3. It is
+one fifth of one pixel, and production draws at `/dkslack` 0. A missed
+knuckle that matters uncovers whole pixels (the one-cell-short control: 294
+pixels here, 486 on the old paper). `missed` now counts differences over 60
+(the worst case seen is 49.6) and its comment says so. Seen on the new paper's
+second seed too (pixel 202,425 at seed 2, 40 of 255, under the old bar).
 
 **Renders that changed** (found with `scripts/identity_check.sh --loader
 lib/drykit.ps`, control a `dkcatch` fill on `/drawing`; the other six
@@ -60,10 +64,20 @@ luma is 207.2 before and 208.1 after: the tone is unchanged and the grain
 is a little finer and more even. Smudged cells in the specimen show a few
 more white flecks.
 
-**Timings** (CPU `user`, `--dpi 144`, load 3 to 6, before then after):
-Lincoln 2x 23.6 s then 23.4 s; drycharcoal specimen 4.5 s then 4.5 s;
-drykit specimen 9.7 s then 9.6 s in gs and 3.9 s in pscat. The mottle's
-scale has no cost of its own.
+**Timings** (CPU `user`, `--dpi 144`, base then head, back to back; load 3 to 14,
+so they are noisy). pscat: Lincoln 2x 23.6 s then 23.4 s; drycharcoal specimen
+4.5 s then 4.5 s; drykit specimen 4.7 and 5.0 s then 5.5 and 4.7 s. gs
+(`-dNOSAFER`, libraries loaded with `run`, so slower than the concatenated
+`-dSAFER` runs in notes/241): drycharcoal specimen 12.6 and 13.0 s then 11.8
+and 16.1 s; drykit specimen 9.7 s then 9.6 s. The mottle's scale has no cost
+of its own. The gs drycharcoal figure is over the 10 s advisory budget on base
+too, in this setup.
+
+**Derived images.** `docs/drymedia/lincoln_compare.png` was rebuilt with its
+script. `docs/drycharcoal_refs_compare.png` (#241) has crops of the old
+specimen on its right-hand side and no build recipe in the repo (its crops are
+at about 8 px per point with a finer grain than a 576 dpi pscat render gives),
+so it was left as a #241-era snapshot; a follow-up issue asks for a script.
 
 **Not changed.** The other four surfaces keep their mottle (slate 4,
 newsprint 3, construction 8). Crayon's coarse paper is meant to be patchy.

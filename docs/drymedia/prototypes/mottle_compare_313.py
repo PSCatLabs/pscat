@@ -11,7 +11,8 @@ main (/Relief 0.35, /Mottle 6) and now (the defaults).
     cargo build --release --bin pscat
     python3 docs/drymedia/prototypes/mottle_compare_313.py [BEFORE_REF]   # from the repo root
 
-BEFORE_REF is a git ref holding the old gallery still (default origin/main).
+BEFORE_REF is a git ref holding the old gallery still (default 2d605be, the
+commit before #313).
 """
 import io
 import subprocess
@@ -20,7 +21,7 @@ import tempfile
 from PIL import Image, ImageDraw, ImageFont
 
 BIN = "target/release/pscat"
-REF = sys.argv[1] if len(sys.argv) > 1 else "origin/main"
+REF = sys.argv[1] if len(sys.argv) > 1 else "2d605be"
 OUT = "docs/drymedia/mottle_compare_313.png"
 
 SWATCH = r"""%!PS

@@ -254,16 +254,19 @@ fn a_lighter_touch_catches_inside_a_heavier_one() {
 /// Pixels whose luma differs by more than anti-aliasing noise. A whole-page
 /// clip path has far larger bounds than the band's, and the rasterizer's
 /// fixed-point precision follows the bounds, so the same edge pixel can
-/// come out a few levels apart (measured up to 16 of 255 on /drawing's old
-/// coarse mottle, and up to 50 on its fine one (#313), in both directions --
-/// a pixel *lighter* with more clip, which no missing knuckle can explain).
-/// A missed knuckle leaves whole pixels uninked (a band one cell short
-/// differs in hundreds of them, below).
+/// come out a few levels apart (measured up to 16 of 255 in both directions
+/// on /drawing's old coarse mottle -- a pixel *lighter* with more clip, which
+/// no missing knuckle can explain). The finer mottle of #313 adds a rarer
+/// case: a knuckle grazing the ink's edge by under a pixel, which the band's
+/// reach drops and the whole page keeps. It costs one pixel a fifth lighter
+/// (50 of 255; it is gone at `dkslack` 3, which no case needs). A missed
+/// knuckle at the ink leaves whole pixels uninked (a band one cell short
+/// differs in hundreds of them, below), so the bar is 60.
 fn missed(a: &Interp, b: &Interp) -> usize {
     lumas(a)
         .iter()
         .zip(lumas(b))
-        .filter(|(p, q)| (**p - q).abs() > 80.0)
+        .filter(|(p, q)| (**p - q).abs() > 60.0)
         .count()
 }
 
@@ -400,7 +403,7 @@ fn the_swept_band_misses_no_knuckle_that_touches_the_ink() {
 /// The reach test above must be able to fail on a near miss: with the
 /// band's reach one cell short (a negative `dkslack` of one cell's worth of
 /// pixels), the knuckles it drops at the ink's edge are seen. It needs a
-/// broken catch (touch 0.6, measured 486 pixels): near touch 1 the catch is
+/// broken catch (touch 0.6, measured 294 pixels on the current drawing paper, 486 before #313): near touch 1 the catch is
 /// all but solid and a dropped edge knuckle covers ink that is already
 /// covered (0 pixels at touch 0.99). So the matrix above has a sparse case.
 #[test]
