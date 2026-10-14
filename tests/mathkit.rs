@@ -279,13 +279,19 @@ fn every_example_tag_runs_clean() {
 }
 
 /// The specimen draws the whole test set, an /Irregular row and a chalk
-/// board through mkalign's /Ink. A guard, not a benchmark: about 0.6 s of
-/// CPU in a release build, against DRYMEDIA's 2 s for a CI test render
-/// (thread CPU time, best of 3, as AGENTS.md asks).
+/// board through mkalign's /Ink. A guard, not a benchmark: about 0.67 s of
+/// CPU under `--profile ci` locally, and about 2.0 s on the GitHub runner
+/// (the main push run 38551816510 read 2.03, 2.01, 2.23 s against the old
+/// 2 s cap, issue #386). The render has not grown since mathkit landed;
+/// the runner is simply about 3x slower. DRYMEDIA 6.2's 2 s per-render cap
+/// is for `tests/drykit*.rs`; a specimen in `examples/` gets 10 s there.
+/// 5 s (the paintkit hang guards' size) leaves 2.5x over the runner and
+/// still catches a 7x regression (thread CPU time, best of 3, as AGENTS.md
+/// asks).
 #[test]
 fn the_specimen_renders_with_ink_and_a_clean_stack() {
     let src = std::fs::read("examples/mathkit_specimen.ps").expect("specimen present");
-    let it = within_cpu_budget("mathkit specimen", Duration::from_secs(2), 3, || {
+    let it = within_cpu_budget("mathkit specimen", Duration::from_secs(5), 3, || {
         let mut it = Interp::with_page(1000, 1960).expect("page");
         it.run_source(&src)
             .unwrap_or_else(|e| panic!("specimen failed: {}", it.error_report(&e)));
