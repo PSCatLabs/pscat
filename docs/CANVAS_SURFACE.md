@@ -187,10 +187,17 @@ height(i, j)   = (1 - Relief)*hash(i, j, 0) + Relief*mottle(centre)
 ```
 
 The knuckle at cell `(i, j)` is centred at `((i+0.5)W, (j+0.5)W)`,
-nudged by up to `0.15W` on each axis by `hash(i,j,2)` and `hash(i,j,3)`
-so that the lattice doesn't read as a grid. It is an ellipse of
-semi-axes `0.8W x 0.42W`, long along x when `i + j` is odd and along y
+nudged by up to `0.15W` on each axis by `hash(i,j,2)` and `hash(i,j,3)`,
+and moved by its threads' wander: the column (warp) thread shifts it
+in x by `wander(i, j, 5)`, the row (weft) thread in y by
+`wander(j, i, 6)`, where `wander(t, k, s)` is smoothstepped 1D value
+noise along the thread over `hash(t, floor(k/3), s)`, in `-0.35W..0.35W` (issue #298: on a
+ruled lattice the catch read as a square pixel grid at 2x). It is an
+ellipse of semi-axes `0.65W x 0.55W` times a per-knuckle size
+`0.8 + 0.4 hash(i,j,4)`, long along x when `i + j` is odd and along y
 when it is even: a plain weave's warp and weft taking turns over.
+(Before #298: no wander or size variation, semi-axes `0.8W x 0.42W`,
+top-fifth growth 0.25.)
 
 `and 255` (not `mod`) keeps negative cell indices in range, as artkit's
 `noise2` learned. The per-knuckle hash repeats every 256 cells (640pt at
@@ -213,8 +220,9 @@ llx lly urx ury touch pjcatch -     % user-space box; clips the current gsave
    `pjCTM itransform` to canvas space, and take their bounding box.
    Grow it by the largest distance a knuckle can reach from its own
    cell's centre, then convert it to a cell range. That distance is a
-   long semi-axis of `0.8W x 1.375` (the largest `s` below) plus the
-   `0.15W` nudge, or `1.25W`. Without the margin, a knuckle centred in
+   long semi-axis of `0.65W x 1.1 x 1.45 x 1.2` (the largest `s` below,
+   with the size variation) plus the `0.15W` nudge and the `0.35W`
+   thread wander, or `1.75W`. Without the margin, a knuckle centred in
    a neighbouring cell that overhangs into the mark would be missing.
    Two strokes with different boxes would then catch on different
    pixels where they overlap, and test 7's whole-page comparison would
@@ -227,7 +235,7 @@ llx lly urx ury touch pjcatch -     % user-space box; clips the current gsave
    CTM changes per knuckle, as `pvfleck` does) scaled by
 
    ```
-   s = (0.6 + 0.5 * min(1, d/0.3)) * (1 + 0.25 * max(0, (touch - 0.8)/0.2))
+   s = (0.6 + 0.5 * min(1, d/0.3)) * (1 + 0.45 * max(0, (touch - 0.8)/0.2))
    ```
 
    The first factor makes a knuckle the paint barely reaches catch a
@@ -235,7 +243,9 @@ llx lly urx ury touch pjcatch -     % user-space box; clips the current gsave
    its neighbours. The second factor grows every knuckle over the top
    fifth of the range, so coverage reaches the whole mark continuously.
    Without it the prototype's catch was still only 97.3% solid at
-   `/Touch 0.999`; with it, 99.9% at 0.99.
+   `/Touch 0.999`; with it, 99.9% at 0.99. The #298 knuckles (rounder,
+   wandering) need the larger 0.45: a 200pt square is then 96.5% /
+   99.1% / 99.8% covered at 0.9 / 0.95 / 0.99.
 5. If no knuckle passed, use a degenerate one-point path (`x y moveto x
    y lineto`), so the clip is empty rather than unchanged. Verified in
    both pscat and gs: a rectangle filled through a zero-knuckle catch

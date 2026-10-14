@@ -10163,6 +10163,16 @@ systemdict /setalpha known /pwhasalpha exch def
 % /Touch 0.99 the diamonds left a hole at every cell corner, short of the
 % near-solid catch the design promises there (NOTES.md, issue #220).
 %
+% The lattice is not ruled (issue #298). On a regular lattice the knuckles
+% read as a square pixel grid at 2x, more halftone than canvas. So each
+% column (warp) thread wanders sideways and each row (weft) thread up and
+% down, slowly along its length (`pjwander`), each knuckle's size varies
+% 0.8..1.2 by hash(i, j, 4), and the knuckles are rounder (0.65 x 0.55 of
+% a cell where they were 0.8 x 0.42). The rounder, wandering knuckles leave
+% more gaps near full touch, so the top-fifth growth is 0.45 where it was
+% 0.25: a 200pt square is 96.5% / 99.1% / 99.8% covered at /Touch 0.9 /
+% 0.95 / 0.99, against 95.9% / 98.7% / 99.7% before.
+%
 % Scratch prefix pj-. Distinct from every pk*-prefixed name because the
 % adopting presets (pkdry, pkfan) call pkribbon, which clobbers those.
 
@@ -10271,11 +10281,31 @@ systemdict /setalpha known /pwhasalpha exch def
     pop
 } bind def
 
+% t k s -> offset   (the wander of thread t at crossing k, in cells)
+% A thread of the weave is not ruled: it drifts a little from its place,
+% slowly, as it runs. The offset is smoothstepped 1D value noise along the
+% thread, a lattice point every 3 crossings, from hash(t, floor(k/3), s),
+% in -0.35..0.35 of a cell. pjcatch calls it as `i j 5 pjwander` for the
+% column (warp) thread's x and `j i 6 pjwander` for the row (weft) thread's
+% y (separate slots, so the field is not mirrored about the diagonal), so a
+% column of knuckles shifts together and the lattice stops reading as a
+% grid. t and k must be integers; a pure function of them, no rand.
+% @internal
+/pjwander {
+    /pjws exch def /pjwk exch def /pjwt exch def
+    /pjwq pjwk 3 div floor cvi def
+    /pjwf pjwk pjwq 3 mul sub 3 div def
+    /pjwf pjwf dup mul 3 2 pjwf mul sub mul def
+    pjwt pjwq pjws pjhash pjwt pjwq 1 add pjws pjhash pjwf pjlerp
+    0.5 sub 0.7 mul
+} bind def
+
 % llx lly urx ury -   (sets pji0 pjj0 pji1 pjj1 and pjhuge)
 % The cells whose knuckle can reach a user-space box: its corners taken to
 % canvas space, bounded, and grown by the farthest a knuckle reaches from its
-% own cell's centre -- a long semi-axis of 0.8W at the largest scale 1.375,
-% plus the 0.15W nudge, or 1.25W. Without that margin a knuckle centred in a
+% own cell's centre -- a long semi-axis of 0.65W at the largest scale
+% 1.1 x 1.45 x 1.2 (catch, top-fifth growth, size variation), about 1.24W,
+% plus the 0.15W nudge and the 0.35W thread wander, or 1.75W. Without that margin a knuckle centred in a
 % neighbouring cell and overhanging the mark would be missing, and two marks
 % with different boxes would catch on different pixels where they overlap.
 % pjhuge is true when a cell index is past 1e9, where `cvi` could overflow; the
@@ -10290,7 +10320,7 @@ systemdict /setalpha known /pwhasalpha exch def
     pjrx0 pjry1 pjrgrow
     pjrx1 pjry1 pjrgrow
     /pjrw userdict /pjW get def
-    /pjrm pjrw 1.25 mul def
+    /pjrm pjrw 1.75 mul def
     /pjhuge false def
     [ pjbx0 pjrm sub pjby0 pjrm sub pjbx1 pjrm add pjby1 pjrm add ] {
         pjrw div floor
@@ -10349,8 +10379,10 @@ systemdict /setalpha known /pwhasalpha exch def
 % llx lly urx ury touch -   (intersects the clip with the surface's catch)
 % The box is in the current user space. Every knuckle with
 % d = height + touch - 1 > 0 joins the clip, scaled by
-%   (0.6 + 0.5 min(1, d/0.3)) * (1 + 0.25 max(0, (touch - 0.8)/0.2))
-% so a knuckle the paint barely reaches catches a speck, a well-covered one a
+%   (0.6 + 0.5 min(1, d/0.3)) * (1 + 0.45 max(0, (touch - 0.8)/0.2))
+%   * (0.8 + 0.4 hash(i, j, 4))
+% and centred off the lattice by the 0.15W nudge and the thread wander
+% (pjwander), so a knuckle the paint barely reaches catches a speck, a well-covered one a
 % full knuckle that merges with its neighbours, and every knuckle grows over
 % the top fifth of the range so coverage reaches the whole mark continuously.
 % At touch >= 1 it does nothing. With no knuckle passing, the clip becomes
@@ -10375,7 +10407,7 @@ systemdict /setalpha known /pwhasalpha exch def
         pjcells pjbudget gt { pjcatch-area-exceeds-safety-limit } if
         /pjcw userdict /pjW get def
         /pjp userdict /pjP get def
-        /pjgrow pjt 0.8 sub 0.2 div dup 0 lt { pop 0 } if 0.25 mul 1 add def
+        /pjgrow pjt 0.8 sub 0.2 div dup 0 lt { pop 0 } if 0.45 mul 1 add def
         /pjsaved matrix currentmatrix def
         userdict /pjCTM get setmatrix
         newpath
@@ -10388,11 +10420,14 @@ systemdict /setalpha known /pwhasalpha exch def
                 pjd 0 gt {
                     /pjs pjd 0.3 div dup 1 gt { pop 1 } if 0.5 mul 0.6 add
                         pjgrow mul pjcw mul def
-                    pjci 0.5 add pjci pjcj 2 pjhash 0.5 sub 0.3 mul add pjcw mul
-                    pjcj 0.5 add pjci pjcj 3 pjhash 0.5 sub 0.3 mul add pjcw mul
+                    /pjs pjs pjci pjcj 4 pjhash 0.4 mul 0.8 add mul def
+                    pjci 0.5 add pjci pjcj 2 pjhash 0.5 sub 0.3 mul add
+                        pjci pjcj 5 pjwander add pjcw mul
+                    pjcj 0.5 add pjci pjcj 3 pjhash 0.5 sub 0.3 mul add
+                        pjcj pjci 6 pjwander add pjcw mul
                     pjci pjcj add 1 and 1 eq
-                        { pjs 0.8 mul pjs 0.42 mul }
-                        { pjs 0.42 mul pjs 0.8 mul }
+                        { pjs 0.65 mul pjs 0.55 mul }
+                        { pjs 0.55 mul pjs 0.65 mul }
                     ifelse
                     pjoval
                     /pjn pjn 1 add def
