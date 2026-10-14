@@ -12,14 +12,14 @@ Every snippet is complete and sized for a 360 by 240 pt page. From the repo root
 pscat --page 360x240 --dpi 144 --png out.png recipe.ps
 ```
 
-`--png` (or `--headless`) is required, or pscat opens a window and waits. `--dpi 144` renders at twice the size: fine spray and bristles need it to read as vapour rather than static, and the thumbnails below are made that way (`pscat --page 360x240 --dpi 144`). Then **look at the PNG**. Run it again with `--lint` once it draws, which catches a blank page, an unbalanced `gsave` and stack leaks that a good-looking picture can hide.
+`--png` (or `--headless`) is required, or pscat opens a window and waits. `--dpi 144` renders at twice the size: fine spray and bristles need it to read as vapour rather than static, and the thumbnails below are made that way (`pscat --page 360x240 --dpi 144`). Then **look at the PNG**. Run it again with `--lint` once it draws, which catches a blank page, an unbalanced `gsave` and stack leaks that a good-looking picture can hide. A clean lint does not mean the program ran clean, though: watch stderr for a `%%[ Error: ...` line, because a recipe that died halfway still prints a picture.
 
 The snippets share a few habits. They are worth copying.
 
 - **Seed first**: `N srand` after the library loads. Every mark draws from the random stream, so the same seed paints the same picture and a changed number moves only what comes after it.
 - **Prefix your own names** (`wt_y`, `mt_px`). Paintkit's presets redefine their own `pk-`, `pn-`, `pb-`, `pz-`, `po-`, `pq-`, `pd-` names on every call, and so does artkit, so a scratch name that collides is overwritten in the middle of a painting.
 - **Colours are `r g b` on the stack, `[r g b]` in a dict.** `mix3` (`[a] [b] t mix3` gives `r g b`) and `shade` (`[a] k shade` gives `r g b`) return three numbers, so `setrgbcolor` takes them directly and a `/Colors` entry wraps them: `[ [ c 1.03 shade ] ... ]`. The presets paint in the colour you set; there is no colour key outside `/Colors`.
-- **Stay out of `setalpha`.** Nothing here uses it, so the same file renders under Ghostscript with only its random stream differing.
+- **Stay out of `setalpha`.** Nothing here uses it, so the same snippet renders under Ghostscript, with only its random stream differing and no antialiasing (fine spray comes out heavier). The snippets end without `showpage`, because pscat paints its page at exit, so ask gs for one: `gs -q -dNOSAFER -dBATCH -dNOPAUSE -sDEVICE=png16m -g360x240 -r72 -sOutputFile=out.png recipe.ps -c showpage` (`-dNOSAFER` because the snippet reads `lib/`). All eleven were checked this way.
 
 ## Colour: a palette that mixes like paint
 
@@ -138,7 +138,7 @@ Two kinds. **Vapour** is spray, soft all through; use it for haze and wispy cirr
   } for }
   % /Under is the colour behind the mark: a procedure x y -> r g b, asked
   % where the cloud sits (/At), so the rim matches the graded sky.
-  << /Soft 1 /Offset 30 /At [ cl_x cl_y ] /Under { exch pop skyat } >> pkwet
+  << /Soft 1 /Offset 30 /At [ cl_x cl_w 2 div add  cl_y cl_w 0.08 mul add ] /Under { exch pop skyat } >> pkwet
 } def
 20 70 150 1 vapour
 
@@ -158,7 +158,7 @@ Two kinds. **Vapour** is spray, soft all through; use it for haze and wispy cirr
 /form {                                  % x y w seed -
   srand /fm_w exch def /fm_y exch def /fm_x exch def
   /fm_h fm_w 0.28 mul def
-  /fm_r fm_w 0.03 mul def                % circle radius
+  /fm_r fm_w 0.04 mul def                % circle radius
   /fm_under [ fm_x fm_w 2 div add skyat ] def
   /fm_body [ 0.55 0.52 0.66 ] def  /fm_lit [ 1 0.88 0.72 ] def
   /fm_n fm_w fm_h mul 1.4 mul fm_r dup mul 3.14 mul div cvi def
@@ -275,6 +275,7 @@ grestore
 - A **band** is `pkwet /Soft 0.6` with `/Under` a colour between the range and the sky.
 - A **foot** is a directional `pkwet`: `/Direction 90 /OneSided true /Stretch 8 /Offset 30 /Layers 14 /Under` the range's colour. The wrapped spray is tapped along the foot and lifted up the slope in layers, so the foot dissolves into the haze rising off the lake. Clip to the range's silhouette first so the haze stays inside the range.
 - Keep `/Layers` pinned while tuning: with `/Layers` left to default, a directional `/Offset` also sets the depth and re-rolls everything after it.
+- Expect a granular fringe at 2x. The dense core fuses and the falloff stays granular; that grain is what makes it vapour and not a gradient, and Alpine Lake's mist is the same at its 2x still. Only a coarser speck than 1 pt turns it into static.
 
 **Failures.**
 - *Ruled stripes.* Alpine Lake's first mist was a stack of horizontal `pkbroad` strokes whose charge fell as they rose; at 2x it read as ruled stripes. Use the directional lift.
@@ -413,22 +414,22 @@ LAKE aload pop setrgbcolor -10 -10 380 80 rectfill
 % out and down from it, widening toward the base. Each tier is a real
 % stroke out from the trunk, so /Light can flip the loaded colours.
 /pine {
-  /pn_lit exch def /pn_dark exch def srand
-  /pn_h exch def /pn_y exch def /pn_x exch def
-  pn_dark aload pop setrgbcolor
-  newpath pn_x pn_y moveto pn_x pn_y pn_h add lineto
-  << /Width pn_h 0.03 mul 1 max /Taper 0.95 /Waver 0.3 >> pkliner
-  /pn_n pn_h 12 div cvi 3 max def
-  0 1 pn_n { /pn_k exch def
-    /pn_f pn_k pn_n div def                              % 0 at the top
-    /pn_ty pn_y pn_h add pn_h 0.9 mul pn_f mul sub def
-    /pn_sp pn_h 0.04 mul pn_h 0.34 mul pn_f mul add def  % the tier's reach
-    [ -1 1 ] { /pn_s exch def
-      newpath pn_x pn_ty moveto
-      pn_x pn_sp pn_s mul add  pn_ty pn_sp 0.45 mul sub lineto
-      << /Width pn_h 0.11 mul 3 max /Bristles 12 /Splay 0.8 /Load 0.88
+  /tr_lit exch def /tr_dark exch def srand
+  /tr_h exch def /tr_y exch def /tr_x exch def
+  tr_dark aload pop setrgbcolor
+  newpath tr_x tr_y moveto tr_x tr_y tr_h add lineto
+  << /Width tr_h 0.03 mul 1 max /Taper 0.95 /Waver 0.3 >> pkliner
+  /tr_n tr_h 14 div cvi 3 max def
+  0 1 tr_n { /tr_k exch def
+    /tr_f tr_k tr_n div def                              % 0 at the top
+    /tr_ty tr_y tr_h add tr_h 0.9 mul tr_f mul sub def
+    /tr_sp tr_h 0.04 mul tr_h 0.34 mul tr_f mul add def  % the tier's reach
+    [ -1 1 ] { /tr_s exch def
+      newpath tr_x tr_ty moveto
+      tr_x tr_sp tr_s mul add  tr_ty tr_sp 0.45 mul sub lineto
+      << /Width tr_h 0.11 mul 3 max /Bristles 10 /Splay 0.8 /Load 0.88
          /Dropout 0.12 /Ragged 0.45 /Flick 0.7
-         /Colors [ pn_lit pn_dark pn_dark pn_dark ] /ColorMix 0.15 /Light 150 >> pkfan
+         /Colors [ tr_lit tr_dark tr_dark tr_dark ] /ColorMix 0.15 /Light 150 >> pkfan
     } forall
   } for
 } def
