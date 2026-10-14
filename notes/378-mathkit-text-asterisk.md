@@ -22,3 +22,11 @@ refused in text runs, which take glyph names straight from strokeglyphs'
   `a_star_in_text_runs_is_a_raised_asterisk`.
 - Identity: `scripts/identity_check.sh --loader lib/strokeglyphs.ps --loader
   lib/mathkit.ps` byte-identical, with a control that must differ.
+- Chalkboard: gallery/chalkboard_lecture.ps from PR #353's branch (it has no
+  `lib/` changes of its own, so the merge-base tree is its base) rendered
+  byte-identically (`cmp`) from the base tree and this branch, at 144 dpi, each
+  with its own tree as the working directory. Its own control, a `/Strict false`
+  `(a*b)` sgpath drawn through the same two commands, differs between the
+  trees, so the cwd really picked each tree's libs.
+- Demo surface: none added. A new specimen or gallery entry would change a
+  committed render; the glyph's look is shown in the PR instead.
