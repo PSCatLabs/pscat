@@ -375,6 +375,60 @@ fn every_paintkit_parameter_states_its_unit() {
     }
 }
 
+/// The catalog names the loaded-colour keys (issue #183, specimen slice #227)
+/// on every preset that takes them, each with the unit the design gives it
+/// (PAINT_LOADING.md 2.1), and does not advertise the British spellings the
+/// presets reject. `pkwet`'s `/Direction` row must tell an artist that a
+/// loaded colour is graded for them, or the "paint in the colour you
+/// inherit" rule reads as forbidding `/Colors`.
+#[test]
+fn the_catalog_names_the_loaded_color_keys_on_every_adopter() {
+    let caps = capabilities::catalog();
+    let unit_of = |preset: &str, key: &str| -> String {
+        let cap = caps
+            .iter()
+            .find(|c| c.source == "lib/paintkit.ps" && c.name == preset)
+            .unwrap_or_else(|| panic!("{preset} in the catalog"));
+        let p = cap
+            .parameters
+            .iter()
+            .find(|p| p.name == key)
+            .unwrap_or_else(|| panic!("{preset} does not advertise /{key}"));
+        p.description[1..].split_once("] ").unwrap().0.to_string()
+    };
+    for preset in ["pkfan", "pkbroad", "pktrowel", "pkdab"] {
+        assert_eq!(unit_of(preset, "Colors"), "array of rgb arrays", "{preset}");
+        assert_eq!(unit_of(preset, "ColorMix"), "0..1", "{preset}");
+    }
+    for preset in ["pkfan", "pkbroad", "pktrowel"] {
+        assert_eq!(unit_of(preset, "Light"), "degrees", "{preset}");
+    }
+    for preset in ["pkdab", "pkoil"] {
+        assert_eq!(unit_of(preset, "HighlightColor"), "rgb array", "{preset}");
+        assert_eq!(unit_of(preset, "ShadowColor"), "rgb array", "{preset}");
+    }
+    for cap in caps.iter().filter(|c| c.source == "lib/paintkit.ps") {
+        for p in &cap.parameters {
+            assert!(
+                !p.name.contains("Colour"),
+                "{} advertises the British spelling /{}",
+                cap.name,
+                p.name
+            );
+        }
+    }
+    let pkwet = caps.iter().find(|c| c.name == "pkwet").expect("pkwet");
+    let direction = pkwet
+        .parameters
+        .iter()
+        .find(|p| p.name == "Direction")
+        .expect("pkwet /Direction");
+    assert!(
+        direction.description.contains("loaded colors (/Colors)"),
+        "pkwet /Direction does not say loaded colors are graded"
+    );
+}
+
 /// drykit (issue #234) and the dry-media files built on it (`lib/dry*.ps`)
 /// follow paintkit's #141 rules (docs/DRYMEDIA.md 3): every parameter
 /// states a unit from the same closed list, and neither `/Spread` nor

@@ -23,8 +23,9 @@
 %                              /Relief, as pkcanvas leaves them in userdict
 %   pjmemo                     the height memo pjheight fills
 %
-% Slice D1 (this file so far): `dksurface`, the named surfaces, the private
-% generator, and `dkcatch`. Slice D2 adds `dkstroke` and `dkbatch` on top.
+% Public: `dksurface` (the named surfaces), `dkstroke` (a stroke) and
+% `dkbatch` (strokes drawn level-major together). Internal: `dkcatch`, the
+% catch every stroke is drawn through, and `dkrand`, the private generator.
 %
 % `dkcatch` differs from paintkit's `pjcatch` in two ways (DRYMEDIA.md 2.1):
 %
@@ -39,7 +40,7 @@
 %   nearest segment outright, whatever the touch or a uniform widening. When
 %   half-widths vary along a run, a wider catch can bring a nearer, thinner
 %   segment into reach and turn a knuckle, so nesting is not guaranteed
-%   there (D2 tests it with a /Pressure run).
+%   there (tests/drykit.rs measures it under a /Pressure run: none seen).
 % * Swept-band cells. It visits only the cells whose centre lies within
 %   reach of the centerline -- per segment, the exact column-by-column
 %   interval of its capsule -- not every cell of the mark's bounding box.
@@ -57,13 +58,19 @@
 % before its `clip` (DRYMEDIA.md 2.4, Q8); it is a gs internal, absent in
 % pscat, and it lives in the caller's gsave like the clip does.
 %
-% Determinism. drykit never calls `rand` or `srand`. The surface takes no
-% draws at all, and the tool-side generator (`dkrand`, for D2's contact
-% chain, lanes and fallout) is the same Schrage-form minimal standard LCG
-% as paintkit's `pjrand`, under its own state in userdict.
+% Determinism. drykit takes no draws from the caller's `rand` stream. The
+% surface takes no draws at all; the tool-side generator (`dkrand`, for
+% the contact chains and fallout seeds) is the same Schrage-form minimal
+% standard LCG as paintkit's `pjrand`, under its own state in userdict;
+% and fallout goes through artkit's `scatter` with a /Seed, which seeds
+% `rand` and restores the caller's stream afterwards.
 %
 % Scratch prefix dk-. Every name is distinct from the pk*/pj*/pu* families,
-% because D2 calls pkribbon for geometry and pkribbon clobbers pk* names.
+% so nothing paintkit runs (pjheight's own scratch, a preset drawn in the
+% same piece, pkribbon's habit of clobbering pk* names) can reach it.
+% dkstroke builds its own ink geometry and does not call pkribbon
+% (DRYMEDIA.md 3.3 allowed for it; a union of discs and quads keeps the ink
+% exactly within the reach the catch is cut for).
 
 % Unique cells one catch may build. Past it dkcatch rejects; a caller with a
 % larger mark splits it into several catches.
@@ -135,13 +142,15 @@
 /dkstate 2 def
 
 % The named surfaces (DRYMEDIA.md 2.3): plain pkcanvas keys plus the
-% surface's own colour. These are starting values from the reference board;
-% D2's specimen re-tunes them before any test pins their pixels.
+% surface's own colour. Starting values from the reference board, with
+% /Relief raised where the shared-tooth test needed it: Q4 (mean phi >= 0.4
+% between crossing strokes) failed on newsprint at 0.4 and passes at 0.55,
+% the boards' value (tests/drykit.rs test 1 checks every surface).
 % @internal
 /dksurfaces <<
     /slate        << /Weave 0.4  /Relief 0.55 /Mottle 4 /Ground [0.13 0.14 0.16] >>
     /greenboard   << /Weave 0.4  /Relief 0.55 /Mottle 4 /Ground [0.17 0.23 0.20] >>
-    /newsprint    << /Weave 0.35 /Relief 0.4  /Mottle 3 /Ground [0.86 0.84 0.78] >>
+    /newsprint    << /Weave 0.35 /Relief 0.55 /Mottle 3 /Ground [0.86 0.84 0.78] >>
     /drawing      << /Weave 0.6  /Relief 0.65 /Mottle 6 /Ground [0.95 0.94 0.90] >>
     /construction << /Weave 0.9  /Relief 0.75 /Mottle 8 /Ground [0.20 0.34 0.62] >>
 >> def
@@ -160,12 +169,12 @@
 % px py -   (widen dklo..dkhi by the reach disc about p, on column dkx)
 % @internal
 /dkdisc {
-    /dkpy exch def /dkpx exch def
-    /dkq dkR2 dkx dkpx sub dup mul sub def
+    /dkey0 exch def /dkex0 exch def
+    /dkq dkR2 dkx dkex0 sub dup mul sub def
     dkq 0 ge {
         /dkq dkq sqrt def
-        dkpy dkq sub dup dklo lt { /dklo exch def } { pop } ifelse
-        dkpy dkq add dup dkhi gt { /dkhi exch def } { pop } ifelse
+        dkey0 dkq sub dup dklo lt { /dklo exch def } { pop } ifelse
+        dkey0 dkq add dup dkhi gt { /dkhi exch def } { pop } ifelse
     } if
 } def
 
@@ -619,6 +628,775 @@
         dkband
         dkemit
     } if
+} def
+
+% ---------------------------------------------------------------- dkstroke
+%
+% A stroke is resolved into a *record* before anything is drawn
+% (DRYMEDIA.md 3.3): the path is walked once, each stop's touch, width and
+% lane contacts are resolved once (a caller's /Touch or /Pressure procedure
+% runs exactly once per stop, HANDOFF's "/Pressure inside a loop"), and the
+% result is a list of runs, each `[key [ [x y hw] ... ]]`, where key is the
+% run's touch band (plus its lane's tilt offset). The record also keeps the
+% CTM the stroke was given in, so a batch can render it later from inside
+% another gsave. Rendering (`dkrender`) then draws every record of a call,
+% or of a whole `dkbatch`, level-major: all the faint levels first, then the
+% brighter ones, so a later stroke's dim level never covers an earlier
+% stroke's bright core. Within a pass, runs that share a touch, streak and
+% colour share one catch (chunked under `dkbudget`), so overlapping strokes
+% visit each cell once.
+%
+% Tool-side randomness (the contact chain of each lane) comes from
+% `dkrand`, seeded per subpath: from `/Seed` plus the subpath's index when
+% /Seed is given, else from the subpath's first point in canvas space, to
+% 0.01pt, so adding a stroke elsewhere never re-rolls this one and a
+% subpath draws the same whether it came in one call or in a batch. Each
+% lane takes its own sub-seed and exactly one draw per stop, whatever the
+% chain does with it. Fallout goes through artkit's `scatter`, whose /Seed
+% restores the caller's stream.
+%
+% Scratch prefixes: dkS for the walk and the record, dkZ for rendering, so
+% neither collides with dkcatch's names, which run in the middle of both.
+
+% mark x1 .. xn -> [x1 .. xn]   (`]` for a mark pushed in another
+% procedure or branch; build.rs's scanner pairs brackets lexically)
+% @internal
+/dktomark {
+    counttomark array astore exch pop
+} def
+
+% n -> real   (a lane's or a piece's sub-seed from a subpath seed)
+% @internal
+/dksubseed {
+    7919 mul dkSseed 1073741823 mod abs add dksrand dkrand pop
+} def
+
+% canvas coordinate -> 0..46336   (to 0.01pt, folded for a 31-bit seed)
+% @internal
+/dkSquant {
+    100 mul round dup abs 2e9 gt { pop 0 } if cvi 46337 mod abs
+} def
+
+% proc-or-not -> bool   (an executable array: what drykit calls a procedure)
+% @internal
+/dkisproc {
+    dup xcheck exch type dup /arraytype eq exch /packedarraytype eq or and
+} def
+
+% dict key default lo hi /error -> number   (a number option in lo..hi)
+% The error is raised by executing its name, so it reads as itself.
+% @internal
+/dkoptnum {
+    /dkoe exch def /dkoh exch def /dkol exch def
+    dkget
+    dup dkisnum not { pop dkoe cvx exec } if
+    dup dkol lt 1 index dkoh gt or { pop dkoe cvx exec } if
+} def
+
+% value /error -> value   (an rgb array of three numbers 0..1)
+% @internal
+/dkrgb {
+    /dkoe exch def
+    dup type /arraytype ne { dkoe cvx exec } if
+    dup xcheck { dkoe cvx exec } if
+    dup length 3 ne { dkoe cvx exec } if
+    dup {
+        dup dkisnum not { pop dkoe cvx exec } if
+        dup 0 lt exch 1 gt or { dkoe cvx exec } if
+    } forall
+    aload pop 3 array astore
+} def
+
+% a b t -> [a + (b - a) t]   (rgb arrays)
+% @internal
+/dklerp3 {
+    /dklt exch def /dklb exch def /dkla exch def
+    [ 0 1 2 { /dklk exch def
+        dkla dklk get dklb dklk get dkla dklk get sub dklt mul add } for ]
+} def
+
+% -   (resolves one subpath, stops dkSall[dkSa .. dkSb], into runs on the
+% operand stack, each `[key run]`; called inside the record's `[ ... ]`)
+% @internal
+/dkSsub {
+    /dkSm dkSb dkSa sub 1 add def
+    % seed
+    dkSo /Seed known {
+        /dkSseed dkSo /Seed get cvi dkSk add def
+    } {
+        dkSall dkSa get aload pop pop pop pop pop
+        transform userdict /pjCTM get itransform
+        dkSquant exch dkSquant 46337 mul add
+        /dkSseed exch def
+    } ifelse
+    % per stop: touch key, width, effective width
+    /dkStk dkSm array def
+    /dkSwe dkSm array def
+    0 1 dkSm 1 sub {
+        /dkSi exch def
+        /dkSst dkSall dkSa dkSi add get def
+        /dkSt dkSst 3 get def
+        dkStp {
+            dkSt dkStouch
+            dup dkisnum not { pop dkstroke-touch-procedure-must-return-a-number } if
+            dup 0 lt { pop 0 } if dup 1 gt { pop 1 } if
+            dkSbands mul floor cvi dup dkSbands 1 sub gt { pop dkSbands 1 sub } if
+            0.5 add dkSbands div
+        } { dkStouch } ifelse
+        dkStk dkSi 3 -1 roll put
+        dkSpp {
+            dkSt dkSpress
+            dup dkisnum not { pop dkstroke-pressure-procedure-must-return-a-number } if
+            dup 0 lt { pop 0 } if
+        } { 1 } ifelse
+        dkSw mul dkSwear dkSt mul 1 add mul
+        1 dkStilt sub mul dkSside dkStilt mul add
+        dkSwe dkSi 3 -1 roll put
+    } for
+    % fallout keeps the subpath's centerline and effective widths
+    dkSfallout 0 gt {
+        dkSfall dkSfn [ 0 1 dkSm 1 sub {
+            /dkSi exch def
+            dkSall dkSa dkSi add get dup 0 get exch 1 get dkSwe dkSi get 3 array astore
+        } for ] dkSseed 2 array astore put
+        /dkSfn dkSfn 1 add def
+    } if
+    % lanes
+    0 1 dkSlanes 1 sub {
+        /dkSl exch def
+        /dkSlo dkSl 0.5 add dkSlanes div 0.5 sub def
+        /dkSdt dkSlanes 3 ge dkStilt 0 gt and {
+            dkSl 0 eq dkSl dkSlanes 1 sub eq or { 0.06 } { -0.06 } ifelse dkStilt mul
+        } { 0 } ifelse def
+        dkSl 1 add dksubseed
+        /dkSon dkrand dkSload lt def
+        /dkSopen false def
+        /dkSkey 0 def
+        0 1 dkSm 1 sub {
+            /dkSi exch def
+            /dkSst dkSall dkSa dkSi add get def
+            dkSi 0 gt {
+                dkrand
+                dkSon
+                    { dkSdropout dkSst 4 get mul dkSw div lt { /dkSon false def } if }
+                    { dkSload dkSst 4 get mul dkSw div lt { /dkSon true def } if }
+                ifelse
+            } if
+            dkSon {
+                % this lane's stop: offset across the patch, its own half-width
+                /dkSa0 dkSst 2 get def
+                /dkSwi dkSwe dkSi get def
+                dkSst 0 get dkSa0 sin neg dkSlo dkSwi mul mul add
+                dkSst 1 get dkSa0 cos dkSlo dkSwi mul mul add
+                dkSwi dkSlanes div 2 div dkSlanes 1 gt { 1.18 mul } if
+                3 array astore
+                /dkSnew exch def
+                /dkSk2 dkStk dkSi get dkSdt add dup 0 lt { pop 0 } if def
+                dkSopen {
+                    dkSnew
+                    dkSk2 dkSkey ne {
+                        % the band changes here: the segment into this stop
+                        % was the old band's; close it and start the new one
+                        dktomark dkSkey exch 2 array astore
+                        mark dkSnew
+                        /dkSkey dkSk2 def
+                    } if
+                } {
+                    mark dkSnew
+                    /dkSopen true def
+                    /dkSkey dkSk2 def
+                } ifelse
+            } {
+                dkSopen { dktomark dkSkey exch 2 array astore /dkSopen false def } if
+            } ifelse
+        } for
+        dkSopen { dktomark dkSkey exch 2 array astore } if
+    } for
+} def
+
+% opts -   (validates every key, then walks and resolves the current path
+% into a record; renders it, or adds it to the open dkbatch)
+% @internal
+/dkSrecord {
+    /dkSo exch def
+    /dkSo load type /dicttype ne { dkstroke-options-must-be-a-dict } if
+    userdict /pjCTM known not { dkstroke-needs-a-surface } if
+    /dkSw dkSo /Width 2 1e-6 1e6 /dkstroke-width-must-be-positive dkoptnum def
+    /dkStouch dkSo /Touch 0.8 dkget def
+    /dkStouch load dkisproc {
+        /dkStp true def
+    } {
+        /dkStp false def
+        /dkStouch load dkisnum not { dkstroke-touch-must-be-a-number-or-procedure } if
+        dkStouch 0 lt dkStouch 1 gt or { dkstroke-touch-must-be-0-to-1 } if
+    } ifelse
+    /dkSbands dkSo /Bands 4 1 16 /dkstroke-bands-must-be-1-to-16 dkoptnum def
+    dkSbands dup cvi ne { dkstroke-bands-must-be-1-to-16 } if
+    /dkSbands dkSbands cvi def
+    dkSo /Pressure known {
+        /dkSpress dkSo /Pressure get def
+        /dkSpress load dkisproc not { dkstroke-pressure-must-be-a-procedure } if
+        /dkSpp true def
+    } { /dkSpp false def } ifelse
+    /dkSwear dkSo /Wear 0 0 4 /dkstroke-wear-must-be-0-to-4 dkoptnum def
+    /dkStilt dkSo /Tilt 0 0 90 /dkstroke-tilt-must-be-0-to-90 dkoptnum def
+    /dkSside dkSo /Side 8 1e-6 1e6 /dkstroke-side-must-be-positive dkoptnum def
+    /dkSstreak dkSo /Streak 1.4 1 4 /dkstroke-streak-must-be-1-to-4 dkoptnum def
+    /dkSlevels dkSo /Levels 2 1 4 /dkstroke-levels-must-be-1-to-4 dkoptnum def
+    dkSlevels dup cvi ne { dkstroke-levels-must-be-1-to-4 } if
+    /dkSlevels dkSlevels cvi def
+    /dkSstrength dkSo /Strength 0.85 0 1 /dkstroke-strength-must-be-0-to-1 dkoptnum def
+    dkSo /Under known {
+        dkSo /Under get /dkstroke-under-must-be-an-rgb-array dkrgb
+    } {
+        userdict /dkGround known not { dkstroke-needs-a-surface } if
+        userdict /dkGround get
+    } ifelse
+    /dkSunder exch def
+    /dkShalo dkSo /Halo 0.25 0 4 /dkstroke-halo-must-be-0-to-4 dkoptnum def
+    /dkSload dkSo /Load 1 0 1 /dkstroke-load-must-be-0-to-1 dkoptnum def
+    /dkSdropout dkSo /Dropout 0 0 1 /dkstroke-dropout-must-be-0-to-1 dkoptnum def
+    /dkSlanes dkSo /Lanes 1 1 12 /dkstroke-lanes-must-be-1-to-12 dkoptnum def
+    dkSlanes dup cvi ne { dkstroke-lanes-must-be-1-to-12 } if
+    /dkSlanes dkSlanes cvi def
+    /dkSfallout dkSo /Fallout 0 0 20 /dkstroke-fallout-must-be-0-to-20 dkoptnum def
+    /dkSdrift dkSo /Drift 0 0 1e6 /dkstroke-drift-must-not-be-negative dkoptnum def
+    dkSo /Seed known {
+        dkSo /Seed get dup dkisnum not { pop dkstroke-seed-must-be-a-number } if
+        abs 2147483647 ge { dkstroke-seed-must-be-within-integer-range } if
+    } if
+    % Tilt: s = sin(Tilt) blends the tip's width toward /Side; a tilted
+    % stick presses at the edges of its patch, so it gets at least three
+    % lanes (edge, face, edge) to carry that.
+    /dkStilt dkStilt sin def
+    dkStilt 0 gt dkSlanes 3 lt and { /dkSlanes 3 def } if
+
+    % Walk: count, then fill a preallocated array (artkit's walkpath warns
+    % that a proc which leaves anything on the stack breaks multi-subpath
+    % paths, so the stops are not collected with `[ ... ]` around it).
+    % The pitch sets how finely touch, pressure and the contact chain vary
+    % along the stroke, not the ink's smoothness (the ink is the walked
+    % centerline, which follows the flattened path's own corners closely
+    % enough at this spacing). 1pt is fine for glyph-sized strokes; a finer
+    % one costs walk and catch time for no visible change.
+    /dkSpitch dkSw 0.75 mul dup 1 lt { pop 1 } if dup 4 gt { pop 4 } if def
+    /dkSn 0 def
+    dkSpitch { pop pop pop pop pop pop /dkSn dkSn 1 add def } walkpath
+    /dkSall dkSn array def
+    /dkSi 0 def
+    dkSpitch {
+        6 array astore dkSall dkSi 3 -1 roll put /dkSi dkSi 1 add def
+    } walkpath
+    newpath
+
+    /dkSrec 16 dict def
+    dkSrec /ctm matrix currentmatrix put
+    dkSrec /pig [ currentrgbcolor ] put
+    dkSrec /under dkSunder put
+    dkSrec /strength dkSstrength put
+    dkSrec /levels dkSlevels put
+    dkSrec /halo dkShalo dkSw mul 2 div put
+    dkSrec /streak dkSstreak put
+    dkSrec /width dkSw put
+    dkSrec /fallout dkSfallout put
+    dkSrec /drift dkSdrift put
+    1 0 dtransform userdict /pjCTM get idtransform
+    0 1 dtransform userdict /pjCTM get idtransform dksvmax
+    dkSrec /sv 3 -1 roll put
+    /dkSfall dkSn 1 dkmax array def
+    /dkSfn 0 def
+    % subpaths start at a stop flagged 1 (first) or 3 (a single point)
+    /dkSstarts [
+        0 1 dkSn 1 sub {
+            dup dkSall exch get 5 get dup 1 eq exch 3 eq or { } { pop } ifelse
+        } for
+    ] def
+    dkSrec /runs [
+        0 1 dkSstarts length 1 sub {
+            /dkSk exch def
+            /dkSa dkSstarts dkSk get def
+            /dkSb dkSk 1 add dkSstarts length lt
+                { dkSstarts dkSk 1 add get 1 sub } { dkSn 1 sub } ifelse def
+            dkSsub
+        } for
+    ] put
+    dkSrec /falls dkSfall 0 dkSfn getinterval put
+
+    userdict /dkBatch known {
+        userdict /dkBatch get /dkBb exch def
+        dkBb /pig known {
+            dkBb /pig get dkSrec /pig get
+            true 0 1 2 { 3 index 1 index get 3 index 3 -1 roll get eq and } for
+            3 1 roll pop pop
+            not { dkbatch-mixes-pigments } if
+        } { dkBb /pig dkSrec /pig get put } ifelse
+        dkBb dkBb /n get dkSrec put
+        dkBb /n dkBb /n get 1 add put
+    } {
+        [ dkSrec ] dkrender
+    } ifelse
+} def
+
+% e1 e2 -> bool   (same touch, streak and colour: may share one catch)
+% @internal
+/dkZsame {
+    /dkZe2 exch def /dkZe1 exch def
+    true 0 1 4 { dup dkZe1 exch get exch dkZe2 exch get eq and } for
+} def
+
+% run R -> estimated cells   (what a catch over the run visits)
+% The run and R are in the run's own user space; dkZsvE is its stretch to
+% canvas space, so the cell size is converted rather than every stop.
+% Length x 2R plus the round ends, over the cell area: the cells within R
+% of the centerline. Overlap between runs only lowers the real count.
+% @internal
+/dkZest {
+    /dkZR exch def /dkZer exch def
+    0
+    0 1 dkZer length 2 sub {
+        /dkZq exch def
+        dkZer dkZq 1 add get 0 get dkZer dkZq get 0 get sub dup mul
+        dkZer dkZq 1 add get 1 get dkZer dkZq get 1 get sub dup mul add sqrt
+        add
+    } for
+    dkZR 2 mul mul dkZR dup mul 3.1416 mul add
+    userdict /pjW get dkZsvE div dup mul div
+} def
+
+% entries -   (one catch over the entries' runs, then their ink through it)
+% Entry: [touch streak r g b rec run hwadd].
+% @internal
+/dkZdraw {
+    /dkZg exch def
+    gsave
+        dkZg 0 get dup 2 get exch dup 3 get exch 4 get setrgbcolor
+        userdict /pjCTM get setmatrix
+        /dkZKc dkZg 0 get 1 get 1.1 mul 0.22 add userdict /pjW get mul def
+        [
+            dkZg {
+                /dkZde exch def
+                /dkZm dkZde 5 get /ctm get def
+                /dkZsv dkZde 5 get /sv get def
+                /dkZha dkZde 7 get def
+                [ dkZde 6 get {
+                    aload pop dkZha add dkZsv mul
+                    3 1 roll dkZm transform userdict /pjCTM get itransform 3 -1 roll
+                    3 array astore
+                } forall ] dkZthin
+            } forall
+        ]
+        % A run too wide for any chunk still reaches dkcatch, whose budget
+        % guard names the problem; the gsave is given back before it
+        % propagates (levels already drawn stay drawn).
+        dkZg 0 get 0 get dkZg 0 get 1 get
+        { dkcatch } stopped { grestore stop } if
+        dkZg {
+            /dkZde exch def
+            dkZde 5 get /ctm get setmatrix
+            /dkZha dkZde 7 get def
+            dkZde 6 get dkZink
+        } forall
+    grestore
+} def
+
+% canvas-run -> canvas-run   (fewer stops for the catch, same reach)
+% walkpath's pitch is set for the ink, and is far finer than the catch
+% needs: a capsule per short segment revisits the same cells many times
+% (measured 19 us per cell, against 3.5 for long segments). So the catch
+% keeps about one stop per twice its reach, and each kept stop's
+% half-width grows by the widest stop and the farthest chord deviation in
+% the windows on either side of it, so the thinned centerline still
+% reaches every cell the full one did.
+% @internal
+/dkZthin {
+    /dkZtr exch def
+    /dkZtn dkZtr length def
+    dkZtn 3 lt {
+        dkZtr
+    } {
+        /dkZtl 0 def /dkZth 0 def
+        0 1 dkZtn 2 sub {
+            /dkZq exch def
+            /dkZtl dkZtl
+                dkZtr dkZq 1 add get 0 get dkZtr dkZq get 0 get sub dup mul
+                dkZtr dkZq 1 add get 1 get dkZtr dkZq get 1 get sub dup mul add sqrt
+                add def
+        } for
+        dkZtr { 2 get dup dkZth gt { /dkZth exch def } { pop } ifelse } forall
+        /dkZtk dkZth dkZKc add 2 mul dkZtl dkZtn 1 sub div 1e-9 dkmax div floor cvi 1 dkmax def
+        dkZtk 1 eq {
+            dkZtr
+        } {
+            % kept indices: 0, k, 2k, ..., and the last
+            /dkZti [ 0 dkZtk dkZtn 2 sub { } for dkZtn 1 sub ] def
+            /dkZtw dkZti length 1 sub array def
+            0 1 dkZti length 2 sub {
+                /dkZq exch def
+                /dkZa0 dkZti dkZq get def /dkZa1 dkZti dkZq 1 add get def
+                /dkZax dkZtr dkZa0 get 0 get def /dkZay dkZtr dkZa0 get 1 get def
+                /dkZbx dkZtr dkZa1 get 0 get dkZax sub def
+                /dkZby dkZtr dkZa1 get 1 get dkZay sub def
+                /dkZbl dkZbx dup mul dkZby dup mul add def
+                /dkZwm 0 def
+                dkZa0 1 dkZa1 {
+                    dkZtr exch get aload pop
+                    /dkZch exch def /dkZcy exch dkZay sub def /dkZcx exch dkZax sub def
+                    dkZbl 0 gt {
+                        dkZcx dkZbx mul dkZcy dkZby mul add dkZbl div
+                        dup 0 lt { pop 0 } if dup 1 gt { pop 1 } if
+                        dup dkZbx mul dkZcx exch sub dup mul
+                        exch dkZby mul dkZcy exch sub dup mul add sqrt
+                    } {
+                        dkZcx dup mul dkZcy dup mul add sqrt
+                    } ifelse
+                    dkZch add dup dkZwm gt { /dkZwm exch def } { pop } ifelse
+                } for
+                dkZtw dkZq dkZwm put
+            } for
+            [
+                0 1 dkZti length 1 sub {
+                    /dkZq exch def
+                    dkZtr dkZti dkZq get get dup 0 get exch 1 get
+                    dkZq 0 gt { dkZtw dkZq 1 sub get } { 0 } ifelse
+                    dkZq dkZti length 1 sub lt { dkZtw dkZq get } { 0 } ifelse
+                    dkmax
+                    3 array astore
+                } for
+            ]
+        } ifelse
+    } ifelse
+} def
+
+% run -   (paints one run's ink, in the current (the run's own) space)
+% A run of one stop is a dot. Otherwise a constant-width run is a
+% round-capped stroke, and a varying one is the union of a disc at every
+% stop and a quadrilateral along every segment, all counter-clockwise so
+% the nonzero fill is their union: the ink stays within each segment's
+% wider end, the reach dkcatch was cut for.
+% @internal
+/dkZink {
+    /dkZir exch def
+    /dkZconst true def
+    dkZir { 2 get dkZir 0 get 2 get ne { /dkZconst false def } if } forall
+    dkZir length 1 eq dkZconst not or {
+        newpath
+        dkZir {
+            aload pop dkZha add /dkZih exch def /dkZiy exch def /dkZix exch def
+            dkZih 0 gt {
+                dkZix dkZih add dkZiy moveto
+                dkZix dkZiy dkZih 0 360 arc closepath
+            } if
+        } forall
+        0 1 dkZir length 2 sub {
+            /dkZq exch def
+            dkZir dkZq get aload pop dkZha add /dkZh0 exch def /dkZy0 exch def /dkZx0 exch def
+            dkZir dkZq 1 add get aload pop dkZha add /dkZh1 exch def /dkZy1 exch def /dkZx1 exch def
+            /dkZdx dkZx1 dkZx0 sub def /dkZdy dkZy1 dkZy0 sub def
+            /dkZl dkZdx dup mul dkZdy dup mul add sqrt def
+            dkZl 0 gt {
+                /dkZnx dkZdy neg dkZl div def /dkZny dkZdx dkZl div def
+                dkZx0 dkZnx dkZh0 mul sub dkZy0 dkZny dkZh0 mul sub moveto
+                dkZx1 dkZnx dkZh1 mul sub dkZy1 dkZny dkZh1 mul sub lineto
+                dkZx1 dkZnx dkZh1 mul add dkZy1 dkZny dkZh1 mul add lineto
+                dkZx0 dkZnx dkZh0 mul add dkZy0 dkZny dkZh0 mul add lineto
+                closepath
+            } if
+        } for
+        fill
+    } {
+        dkZir 0 get 2 get dkZha add dup 0 gt {
+            2 mul setlinewidth 1 setlinecap 1 setlinejoin
+            newpath
+            dkZir 0 get 0 get dkZir 0 get 1 get moveto
+            dkZir { aload pop pop lineto } forall
+            stroke
+        } { pop } ifelse
+    } ifelse
+} def
+
+% entries -   (dkZdraw in chunks whose estimated cells fit dkbudget)
+% @internal
+/dkZgroup {
+    /dkZgs exch def
+    /dkZK dkZgs 0 get 1 get 1.1 mul 0.22 add userdict /pjW get mul def
+    /dkZsum 0 def
+    /dkZcut dkbudget 0.6 mul def
+    mark
+    dkZgs {
+        /dkZe exch def
+        /dkZrr dkZe 6 get def
+        /dkZhr dkZe 7 get def
+        /dkZmaxh 0 def
+        dkZrr { 2 get dkZhr add dup dkZmaxh gt { /dkZmaxh exch def } { pop } ifelse } forall
+        /dkZsvE dkZe 5 get /sv get def
+        /dkZRr dkZmaxh dkZK dkZsvE div add def
+        dkZrr dkZRr dkZest
+        dup dkZcut gt dkZrr length 2 gt and {
+            % one long run: split it into pieces that share an end stop
+            pop
+            /dkZpe dkZrr length 1 sub def
+            /dkZp0 0 def
+            {
+                dkZp0 dkZpe ge { exit } if
+                /dkZp1 dkZp0 1 add def
+                {
+                    dkZp1 dkZpe ge { exit } if
+                    dkZrr dkZp0 dkZp1 dkZp0 sub 2 add getinterval dkZRr dkZest
+                    dkZcut gt { exit } if
+                    /dkZp1 dkZp1 1 add def
+                } loop
+                /dkZpiece dkZrr dkZp0 dkZp1 dkZp0 sub 1 add getinterval def
+                /dkZpc dkZpiece dkZRr dkZest def
+                counttomark 0 gt dkZsum dkZpc add dkZcut gt and {
+                    dktomark dkZdraw mark /dkZsum 0 def
+                } if
+                [ dkZe aload pop pop pop dkZpiece dkZhr ]
+                /dkZsum dkZsum dkZpc add def
+                /dkZp0 dkZp1 def
+            } loop
+        } {
+            /dkZc exch def
+            counttomark 0 gt dkZsum dkZc add dkZcut gt and {
+                dktomark dkZdraw mark /dkZsum 0 def
+            } if
+            dkZe
+            /dkZsum dkZsum dkZc add def
+        } ifelse
+    } forall
+    counttomark 0 gt { dktomark dkZdraw } { pop } ifelse
+} def
+
+% records -   (draws records level-major, then their fallout)
+% @internal
+/dkrender {
+    /dkZrecs exch def
+    /dkZmax 0 def
+    dkZrecs { /levels get dup dkZmax gt { /dkZmax exch def } { pop } ifelse } forall
+    1 1 dkZmax {
+        /dkZp exch def
+        /dkZents [
+            dkZrecs {
+                /dkZr exch def
+                /dkZL dkZr /levels get def
+                /dkZj dkZp dkZmax dkZL sub sub def
+                dkZj 1 ge {
+                    /dkZoff dkZL dkZj sub 0.12 mul def
+                    /dkZcol dkZr /under get dkZr /pig get
+                        dkZr /strength get dkZj mul dkZL div dklerp3 def
+                    /dkZha dkZj 1 eq dkZL 2 ge and { dkZr /halo get } { 0 } ifelse def
+                    dkZr /runs get {
+                        aload pop /dkZrun exch def
+                        dkZoff add dkZr /streak get dkZcol aload pop
+                        dkZr dkZrun dkZha 8 array astore
+                    } forall
+                } if
+            } forall
+        ] def
+        /dkZdone dkZents length array def
+        0 1 dkZents length 1 sub {
+            /dkZa exch def
+            dkZdone dkZa get true ne {
+                /dkZe0 dkZents dkZa get def
+                [
+                    dkZa 1 dkZents length 1 sub {
+                        /dkZb exch def
+                        dkZdone dkZb get true ne {
+                            dkZents dkZb get dup dkZe0 dkZsame
+                                { dkZdone dkZb true put } { pop } ifelse
+                        } if
+                    } for
+                ] dkZgroup
+            } if
+        } for
+    } for
+    dkZrecs { dkZfallout } forall
+} def
+
+% rec -   (the record's loose particles, through artkit's scatter)
+% Each ~20pt piece of each subpath's centerline gets round(Fallout x its
+% length) particles in a rectangle along it, thinning away from the line
+% (/Weight), each nudged down canvas-space y by up to /Drift (/Scale
+% carries the nudge's fraction). /Seed comes from the subpath's seed and
+% the piece's index, and scatter restores the caller's stream.
+% @internal
+/dkZfallout {
+    /dkZr exch def
+    dkZr /fallout get 0 gt {
+        /dkZfcol dkZr /under get dkZr /pig get dkZr /strength get 0.7 mul dklerp3 def
+        /dkZfr dkZr /width get 0.05 mul dup 0.12 lt { pop 0.12 } if def
+        dkZr /falls get {
+            aload pop /dkSseed exch def /dkZfs exch def
+            /dkZfi 0 def
+            /dkZp0 0 def
+            /dkZfn dkZfs length def
+            dkZfn 1 gt {
+                {
+                    dkZp0 dkZfn 1 sub ge { exit } if
+                    /dkZp1 dkZp0 def /dkZflen 0 def /dkZfh 0 def
+                    {
+                        dkZp1 dkZfn 1 sub ge dkZflen 20 ge or { exit } if
+                        /dkZflen dkZflen
+                            dkZfs dkZp1 1 add get 0 get dkZfs dkZp1 get 0 get sub dup mul
+                            dkZfs dkZp1 1 add get 1 get dkZfs dkZp1 get 1 get sub dup mul add sqrt
+                            add def
+                        dkZfs dkZp1 get 2 get dup dkZfh gt { /dkZfh exch def } { pop } ifelse
+                        /dkZp1 dkZp1 1 add def
+                    } loop
+                    /dkZfh dkZfh 0.9 mul def
+                    /dkZfc dkZflen dkZr /fallout get mul round cvi def
+                    /dkZfi dkZfi 1 add def
+                    dkZfc 0 gt dkZflen 0 gt and dkZfh 0 gt and {
+                        gsave
+                            dkZr /ctm get setmatrix
+                            dkZfcol aload pop setrgbcolor
+                            dkZfs dkZp0 get 0 get dkZfs dkZp0 get 1 get translate
+                            dkZfs dkZp1 get 1 get dkZfs dkZp0 get 1 get sub
+                            dkZfs dkZp1 get 0 get dkZfs dkZp0 get 0 get sub atan rotate
+                            0 dkZr /drift get neg userdict /pjCTM get dtransform idtransform
+                            /dkZdy exch def /dkZdx exch def
+                            0 dkZfh neg dkZflen dkZfh 2 mul screct
+                            <<
+                                /Count dkZfc
+                                /Seed 100000 dkZfi add dksubseed dkrand 2147483646 mul cvi
+                                /Scale [0 1]
+                                /Weight { exch pop abs dkZfh div 1 exch sub }
+                                /Mark {
+                                    pop /dkZms exch def
+                                    dkZms dkZdy mul add exch dkZms dkZdx mul add exch
+                                    /dkZmy exch def /dkZmx exch def
+                                    newpath dkZmx dkZfr add dkZmy moveto
+                                    dkZmx dkZmy dkZfr 0 360 arc fill
+                                }
+                            >> scatter
+                        grestore
+                    } if
+                    /dkZp0 dkZp1 def
+                } loop
+            } if
+        } forall
+    } if
+} def
+
+%%SelfTest: dkstroke-rejects-malformed-options
+%   << /Surface /drawing >> dksurface
+%   newpath 0 0 moveto 50 0 lineto
+%   { 5 dkstroke } /dkstroke-options-must-be-a-dict (a number for the options) mustguard
+%   { << /Width 0 >> dkstroke } /dkstroke-width-must-be-positive (/Width 0) mustguard
+%   { << /Width { 2 } >> dkstroke } /dkstroke-width-must-be-positive (a procedure /Width) mustguard
+%   { << /Touch 1.2 >> dkstroke } /dkstroke-touch-must-be-0-to-1 (/Touch 1.2) mustguard
+%   { << /Touch -0.1 >> dkstroke } /dkstroke-touch-must-be-0-to-1 (/Touch -0.1) mustguard
+%   { << /Touch (x) >> dkstroke } /dkstroke-touch-must-be-a-number-or-procedure (a string /Touch) mustguard
+%   { << /Pressure 2 >> dkstroke } /dkstroke-pressure-must-be-a-procedure (a number /Pressure) mustguard
+%   { << /Levels 0 >> dkstroke } /dkstroke-levels-must-be-1-to-4 (/Levels 0) mustguard
+%   { << /Levels 5 >> dkstroke } /dkstroke-levels-must-be-1-to-4 (/Levels 5) mustguard
+%   { << /Levels 1.5 >> dkstroke } /dkstroke-levels-must-be-1-to-4 (/Levels 1.5) mustguard
+%   { << /Bands 0 >> dkstroke } /dkstroke-bands-must-be-1-to-16 (/Bands 0) mustguard
+%   { << /Bands 17 >> dkstroke } /dkstroke-bands-must-be-1-to-16 (/Bands 17) mustguard
+%   { << /Streak 0.5 >> dkstroke } /dkstroke-streak-must-be-1-to-4 (/Streak 0.5) mustguard
+%   { << /Tilt 120 >> dkstroke } /dkstroke-tilt-must-be-0-to-90 (/Tilt 120) mustguard
+%   { << /Side 0 >> dkstroke } /dkstroke-side-must-be-positive (/Side 0) mustguard
+%   { << /Wear -1 >> dkstroke } /dkstroke-wear-must-be-0-to-4 (/Wear -1) mustguard
+%   { << /Strength 2 >> dkstroke } /dkstroke-strength-must-be-0-to-1 (/Strength 2) mustguard
+%   { << /Under [1 1] >> dkstroke } /dkstroke-under-must-be-an-rgb-array (a two-entry /Under) mustguard
+%   { << /Halo -0.2 >> dkstroke } /dkstroke-halo-must-be-0-to-4 (/Halo -0.2) mustguard
+%   { << /Load 2 >> dkstroke } /dkstroke-load-must-be-0-to-1 (/Load 2) mustguard
+%   { << /Dropout -1 >> dkstroke } /dkstroke-dropout-must-be-0-to-1 (/Dropout -1) mustguard
+%   { << /Lanes 0 >> dkstroke } /dkstroke-lanes-must-be-1-to-12 (/Lanes 0) mustguard
+%   { << /Fallout -1 >> dkstroke } /dkstroke-fallout-must-be-0-to-20 (/Fallout -1) mustguard
+%   { << /Drift -3 >> dkstroke } /dkstroke-drift-must-not-be-negative (/Drift -3) mustguard
+%   { << /Seed (s) >> dkstroke } /dkstroke-seed-must-be-a-number (a string /Seed) mustguard
+%   { << /Seed 1e12 >> dkstroke } /dkstroke-seed-must-be-within-integer-range (/Seed 1e12) mustguard
+%   { << /Touch { pop (x) } >> dkstroke } /dkstroke-touch-procedure-must-return-a-number
+%   (a /Touch procedure returning a string) mustguard
+%   { gsave << >> dkstroke grestore } (the defaults) mustpass
+%%EndSelfTest
+%
+%%SelfTest: dkstroke-needs-a-surface
+%   newpath 0 0 moveto 50 0 lineto
+%   { << >> dkstroke } /dkstroke-needs-a-surface (a stroke before any surface) mustguard
+%   << >> pkcanvas
+%   { << >> dkstroke } /dkstroke-needs-a-surface (a canvas but no ground and no /Under) mustguard
+%   { gsave newpath 0 0 moveto 50 0 lineto << /Under [1 1 1] >> dkstroke grestore }
+%   (a bare pkcanvas with an explicit /Under) mustpass
+%%EndSelfTest
+%
+%%SelfTest: dkstroke-takes-no-draws-from-the-callers-stream
+%   << /Surface /slate >> dksurface
+%   1 srand rand /dkta exch def
+%   1 srand
+%   gsave newpath 10 10 moveto 90 40 lineto 30 80 moveto 80 80 lineto
+%   << /Width 4 /Touch { 0.5 mul 0.4 add } /Pressure { 1 exch sub } /Dropout 0.3 /Load 0.7
+%      /Lanes 3 /Tilt 40 /Fallout 0.5 /Drift 2 >> dkstroke grestore
+%   rand dkta eq
+%   (dkstroke, with every random feature on, leaves the caller's stream untouched) mustbe
+%%EndSelfTest
+%
+%%SelfTest: dkstroke-a-run-past-the-budget-raises-cleanly
+%   % A run too wide for any chunk reaches dkcatch's own budget guard, with
+%   % dkZdraw's gsave given back (the block checks the graphics stack).
+%   % Codex review of PR #286: the flush test once counted its own boolean
+%   % as a queued entry and raised rangecheck on an empty queue instead.
+%   << /Surface /drawing >> dksurface
+%   /dkbudget 500 def
+%   { newpath 0 0 moveto 10 0 lineto << /Width 100 /Touch 0.5 >> dkstroke }
+%   /dkcatch-area-exceeds-safety-limit (a run wider than any chunk) mustguard
+%   { gsave newpath 0 0 moveto 10 0 lineto << /Width 2 /Touch 0.5 >> dkstroke grestore }
+%   (a run inside the budget after a rejected one) mustpass
+%%EndSelfTest
+%
+%%SelfTest: dkbatch-guards
+%   << /Surface /slate >> dksurface
+%   { 5 dkbatch } /dkbatch-needs-a-procedure (a number) mustguard
+%   { { { } dkbatch } dkbatch } /dkbatch-cannot-nest (a batch inside a batch) mustguard
+%   userdict /dkBatch known not
+%   (a nested batch's error closes the outer batch) mustbe
+%   { {
+%       1 1 1 setrgbcolor newpath 0 0 moveto 50 0 lineto << >> dkstroke
+%       0 0 0 setrgbcolor newpath 0 9 moveto 50 9 lineto << >> dkstroke
+%   } dkbatch } /dkbatch-mixes-pigments (two pigments in one batch) mustguard
+%   userdict /dkBatch known not
+%   (a failed batch leaves no batch open) mustbe
+%   { gsave { newpath 0 0 moveto 50 0 lineto << >> dkstroke } dkbatch grestore }
+%   (a one-stroke batch) mustpass
+%   { gsave { } dkbatch grestore } (an empty batch) mustpass
+%%EndSelfTest
+%
+% @kind: Procedure
+% @summary: Draws the current path as a dry stick (chalk, crayon, charcoal) dragged across the surface set by dksurface, in the current colour: pigment lands only where the stick's contact patch meets raised tooth, so light pressure breaks into streaks along the direction of travel and heavy pressure fills the valleys. Tone builds in deposit levels drawn faint-first, so crossings read darker, not lighter. Consumes the current path like fill; takes no rand draws from the caller's stream.
+% @example: << /Surface /greenboard >> dksurface 0.93 0.94 0.9 setrgbcolor newpath 40 60 moveto 300 80 lineto << /Width 3 /Touch { 0.25 sub abs 0.9 exch sub } >> dkstroke
+% @param: /Width [points] Contact width of the stick's tip; must be > 0 (default 2)
+% @param: /Touch [0..1] Pressure against the tooth, the same quantity as paintkit's /Touch: low catches only the highest knuckles, 1 is solid. A procedure {t -> touch}, t = 0..1 along each subpath, gives a pressure profile, run once per stop and quantized to /Bands levels (default 0.8)
+% @param: /Bands [count] Touch levels a /Touch procedure is quantized to, 1..16 (default 4)
+% @param: /Pressure [proc] {t -> multiplier} width profile along each subpath, paintkit's meaning: a landing blob, a tapered lift. Run once per stop (default unset, constant width)
+% @param: /Wear [fraction of /Width] How much wider the contact gets from the start of a subpath to its end as the tip flattens, 0..4 (default 0)
+% @param: /Tilt [degrees] 0 draws with the tip; toward 90 the stick lies on its side, the contact widens toward /Side and the edges of the patch press harder than its face (default 0)
+% @param: /Side [points] Length of the stick in contact when it lies on its side at /Tilt 90; must be > 0 (default 8)
+% @param: /Streak [ratio] How much each tooth knuckle is stretched along the direction of travel, 1..4; 1 is round (default 1.4)
+% @param: /Levels [count] Deposit levels, 1..4: the faintest reaches the most tooth and is drawn first, each brighter level lands on less (default 2)
+% @param: /Strength [0..1] How strongly the top level reads against /Under: chalk is about 0.8, compressed charcoal about 0.95 (default 0.85)
+% @param: /Under [rgb array] What lies beneath; lower levels lerp from it toward the pigment. drykit cannot read the page back, so it must be told (default the surface's /Ground)
+% @param: /Halo [fraction of /Width] Extra width of the faintest level when /Levels is 2 or more: dust beside the stroke, 0..4 (default 0.25)
+% @param: /Load [per /Width] 0..1 rate at which a lifted lane lands again per Width of travel, pkdry's meaning (default 1)
+% @param: /Dropout [per /Width] 0..1 rate at which a lane lifts off per Width of travel, independent of the tooth (default 0)
+% @param: /Lanes [count] Parallel lanes across the contact patch, 1..12, each with its own contact chain: crayon striation, split charcoal tails. A tilted stick uses at least 3 (default 1)
+% @param: /Fallout [count per points] Loose particles per point of stroke length, 0..20, placed with artkit's scatter beside the stroke (default 0)
+% @param: /Drift [points] How far fallout drifts down canvas-space y: chalk on a vertical board falls (default 0)
+% @param: /Seed [integer] Seed for the tool-side randomness (contact chains, fallout); subpath i uses Seed + i. Leaves the caller's rand stream untouched (default from each subpath's first point on the canvas, so adding a stroke elsewhere never re-rolls this one)
+/dkstroke {
+    dkSrecord
+} def
+
+% @kind: Procedure
+% @summary: Runs a procedure whose dkstroke calls are drawn together, level-major: every stroke's faint level first, then every bright one, so crossing layers of hatching or re-stroked lines stay dark where they cross instead of the second layer's faint level greying the first's core. One pigment per batch (a second colour gets its own batch, drawn after); batches don't nest. Each stroke keeps the coordinate system it was given in; the clip used is the one in force when the batch ends.
+% @example: 0.12 0.12 0.13 setrgbcolor { 0 6 120 { newpath dup 0 moveto 120 add 120 lineto << /Width 1.2 >> dkstroke } for } dkbatch
+/dkbatch {
+    dup dkisproc not { pop dkbatch-needs-a-procedure } if
+    userdict /dkBatch known { pop userdict /dkBatch undef dkbatch-cannot-nest } if
+    userdict /dkBatch 8 dict dup /n 0 put put
+    stopped { userdict /dkBatch undef stop } if
+    userdict /dkBatch get /dkBb exch def
+    userdict /dkBatch undef
+    [ 0 1 dkBb /n get 1 sub { dkBb exch get } for ] dkrender
 } def
 
 %%SelfTest: dksurface-rejects-malformed-options

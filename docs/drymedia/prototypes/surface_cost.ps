@@ -33,6 +33,11 @@
 %           same oriented knuckles, built over swept-band cells only
 %   MODE 5  MODE 3 through dkcatch; "cells" then counts the unique cells
 %           dkcatch actually built, not a bounding box
+%   MODE 6  the shipped engine (#234 slice D2): each glyph is one dkbatch
+%           of dkstroke calls, /Levels 2 (a dim level 25% wider at
+%           TOUCH + 0.12, then the core), the landing as a /Touch and
+%           /Pressure profile over the first 12%; "catches" counts dkcatch
+%           calls, which dkbatch shares across a glyph's strokes
 %
 % Each glyph stroke is drawn in two pressure bands: its body at TOUCH, and a
 % landing dab (the first ~12% of the skeleton) at TOUCH + 0.2. Catches nest
@@ -48,6 +53,7 @@
 /MOTTLE where { pop } { /MOTTLE GRAIN 10 mul def } ifelse
 /ELONG where { pop } { /ELONG 1.8 def } ifelse
 /PEN where { pop } { /PEN 70 def } ifelse
+/LEVELS where { pop } { /LEVELS 2 def } ifelse    % MODE 6 only; 1 is the ghost-text proxy
 
 (lib/artkit.ps) run
 (lib/paintkit.ps) run
@@ -55,6 +61,16 @@
 
 (docs/drymedia/prototypes/dqcatch.ps) run
 (lib/drykit.ps) run
+% count every catch dkstroke builds (MODE 6)
+/dkcatch0 /dkcatch load def
+/dkcatch {
+    /dkn 0 def
+    dkcatch0
+    userdict /dqcatches2 dup userdict exch known
+        { userdict /dqcatches2 get } { 0 } ifelse 1 add put
+    userdict /dqcells2 dup userdict exch known
+        { userdict /dqcells2 get } { 0 } ifelse dkn add put
+} def
 
 % ---------------------------------------------------------------- drawing
 /dqcells 0 def        % cells visited, for the cost report
@@ -174,12 +190,20 @@ dqwork begin
         /J JJ def
         /dqsks [ 1 1 dqg length 1 sub { dqg exch get dqjitter } for ] def
         /J 0 def
+        MODE 6 eq {
+            { dqsks {
+                newpath drawstroke
+                << /Width currentlinewidth /Levels LEVELS /Streak ELONG /Under BOARD
+                   /Touch { 0.12 lt { TOUCH 0.2 add } { TOUCH } ifelse } /Bands 16
+                   /Pressure { 0.12 lt { 1.3 } { 1 } ifelse } >> dkstroke
+            } forall } dkbatch
+        } if
         MODE 3 eq MODE 5 eq or {
             gsave DIM aload pop setrgbcolor
                 dqsks { TOUCH 0.12 add 1.25 dqstroke } forall
             grestore
         } if
-        dqsks { TOUCH 1 dqstroke } forall
+        MODE 6 ne { dqsks { TOUCH 1 dqstroke } forall } if
     grestore
     dqg 0 get dqsz mul 1000 div
 } def
@@ -192,6 +216,7 @@ end
 
 % ---------------------------------------------------------------- the board
 << /Seed 7 /Weave GRAIN /Mottle MOTTLE /Relief RELIEF >> pkcanvas
+/BOARD [0.16 0.22 0.20] def
 0.16 0.22 0.20 setrgbcolor 0 0 720 480 rectfill
 0.93 0.94 0.90 setrgbcolor
 /DIM [0.16 0.22 0.20] [0.93 0.94 0.90] 0.45 dqlerp3 def
@@ -214,5 +239,8 @@ HandScriptDict begin dqwork begin
 end end
 
 (MODE ) print MODE 20 string cvs print ( GRAIN ) print GRAIN 20 string cvs print
+MODE 6 eq {
+    /dqcatches userdict /dqcatches2 get def /dqcells userdict /dqcells2 get def
+} if
 ( catches ) print dqcatches 20 string cvs print ( cells ) print dqcells 20 string cvs print ( band-estimate ) print dqband cvi =
 showpage

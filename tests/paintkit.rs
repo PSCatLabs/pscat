@@ -10986,3 +10986,200 @@ fn dab_and_oil_advertise_the_loaded_color_keys() {
         }
     }
 }
+
+// --- the loading specimen (issue #183, slice L5b #227) ----------------
+//
+// PAINT_LOADING.md test 12, and the checks `examples/paintkit_loading_demo.ps`
+// needs to stay a specimen: each of its six panels paints, and what each one
+// is there to show is in the pixels.
+
+/// Every loaded-colour key on every adopting preset, inside a directional
+/// `pkwet`, as one driver. `pscat` runs it in process (so the test proves
+/// something where `gs` is absent) and Ghostscript runs it under
+/// `true setpacking`, where `pkwet`'s procedure and every nested literal
+/// are packed arrays.
+const LOADING_DRIVER: &str = "true setpacking 3 srand \
+    0.2 0.2 0.2 setrgbcolor \
+    { newpath 20 20 moveto 150 40 lineto \
+        << /Width 18 /Bristles 14 /Colors [[1 0 0] [0 0 1]] /ColorMix 0.4 /Light 120 >> pkfan \
+      newpath 20 70 moveto 150 90 lineto \
+        << /Width 18 /Colors [[1 0 0] [0 1 0] [0 0 1]] /ColorMix 0 /Light 45 >> pkbroad \
+      newpath 20 120 moveto 150 140 lineto \
+        << /Width 18 /Colors [[1 1 1] [0 0 1]] /ColorMix 1 /Light 180 >> pktrowel \
+      newpath 30 170 moveto 90 180 lineto 150 170 lineto \
+        << /Size 5 /Scatter 10 /Colors [[0 0.4 0] [0.9 0.9 0.2]] /ColorMix 0.5 \
+           /HighlightColor [1 0.8 0.2] /ShadowColor [0 0.1 0.5] /Light 135 >> pkdab \
+      newpath 20 210 moveto 150 215 lineto \
+        << /Width 14 /HighlightColor [1 0.8 0.2] /ShadowColor [0 0.1 0.5] >> pkoil } \
+    << /Direction 270 /OneSided true /Offset 16 /Layers 5 /Under [1 1 1] >> pkwet";
+
+#[test]
+fn ghostscript_accepts_paint_loading() {
+    // In process first: a driver that pscat rejects proves nothing about gs.
+    let mut it = fresh(200, 240);
+    it.run_str(LOADING_DRIVER)
+        .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+    assert!(
+        ink_count(&it) > 2000,
+        "the loading driver barely painted: {}",
+        ink_count(&it)
+    );
+
+    let gs_ok = std::process::Command::new("gs")
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success());
+    if !gs_ok {
+        eprintln!("skipping gs compatibility check: gs not installed");
+        return;
+    }
+    let artkit = std::fs::read_to_string("lib/artkit.ps").expect("artkit");
+    let paintkit = std::fs::read_to_string("lib/paintkit.ps").expect("paintkit");
+    let dir = std::env::temp_dir().join(format!("pscat-loading-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let combined = dir.join("loading_gs.ps");
+    std::fs::write(
+        &combined,
+        format!("{artkit}\n{paintkit}\n{LOADING_DRIVER}\nshowpage\n"),
+    )
+    .expect("write");
+    let out = std::process::Command::new("gs")
+        .args([
+            "-dNOPAUSE",
+            "-dBATCH",
+            "-q",
+            "-sDEVICE=png16m",
+            "-g200x240",
+            "-r72",
+            "-o/dev/null",
+        ])
+        .arg(&combined)
+        .output()
+        .expect("run gs");
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(
+        out.status.success() && !String::from_utf8_lossy(&out.stdout).contains("Error"),
+        "gs rejected the loading driver: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}
+
+#[test]
+fn ghostscript_accepts_the_loading_demo() {
+    let gs_ok = std::process::Command::new("gs")
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success());
+    if !gs_ok {
+        eprintln!("skipping gs compatibility check: gs not installed");
+        return;
+    }
+    let out = std::process::Command::new("gs")
+        .args([
+            "-dNOSAFER",
+            "-dNOPAUSE",
+            "-dBATCH",
+            "-q",
+            "-sDEVICE=png16m",
+            "-g780x640",
+            "-r72",
+            "-o/dev/null",
+            "examples/paintkit_loading_demo.ps",
+        ])
+        .output()
+        .expect("run gs");
+    assert!(
+        out.status.success() && !String::from_utf8_lossy(&out.stdout).contains("Error"),
+        "gs rejected examples/paintkit_loading_demo.ps: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}
+
+/// The specimen renders, and each panel shows what it is there for. Panels
+/// are 240 x 240 at (20, 340), (270, 340), (520, 340) and (20, 50), (270, 50),
+/// (520, 50) in PostScript points (y up); the page is 780 x 640.
+#[test]
+fn the_loading_demo_shows_what_each_panel_is_for() {
+    let source = std::fs::read("examples/paintkit_loading_demo.ps").expect("read the demo");
+    let mut it = Interp::with_page(780, 640).expect("page");
+    it.run_source(&source)
+        .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+    assert!(it.gfx().page_shown, "the demo never reached showpage");
+    let px = it.gfx().pixmap.pixels().to_vec();
+    // Pixels of a panel (x0, y0 in PostScript points), as (r, g, b).
+    let panel = |x0: usize, y0: usize| -> Vec<[u8; 3]> {
+        let mut v = Vec::new();
+        for row in 0..240 {
+            let py = 640 - (y0 + 239 - row) - 1;
+            for col in 0..240 {
+                let p = px[py * 780 + x0 + col];
+                v.push([p.red(), p.green(), p.blue()]);
+            }
+        }
+        v
+    };
+    let count =
+        |pixels: &[[u8; 3]], f: &dyn Fn([u8; 3]) -> bool| pixels.iter().filter(|&&p| f(p)).count();
+    // The panel ground is [0.12 0.16 0.23] (31 41 59); the water and the
+    // mountain are other flat fills, so "inked" means a loaded colour: any
+    // pixel that is light or saturated.
+    let lit = |p: [u8; 3]| p[0] > 130 || p[1] > 130 || p[2] > 180;
+
+    // Top row: both trees paint, and /Light changes the render.
+    let (plain, lit_tree) = (panel(20, 340), panel(270, 340));
+    assert!(
+        count(&plain, &lit) > 3000,
+        "the brush-relative tree is blank"
+    );
+    assert!(count(&lit_tree, &lit) > 3000, "the lit tree is blank");
+    // Same seeds and geometry, so without /Light the two panels agree to
+    // within antialiasing; with it, one colour swaps faces on many pixels.
+    let moved = plain
+        .iter()
+        .zip(&lit_tree)
+        .filter(|(a, b)| (0..3).any(|i| (a[i] as i32 - b[i] as i32).abs() > 60))
+        .count();
+    assert!(moved > 1500, "/Light moved only {moved} pixels of the tree");
+
+    // The snow pull holds both its colours: white and blue.
+    let snow = panel(520, 340);
+    let white = count(&snow, &|p| p[0] > 225 && p[1] > 225 && p[2] > 225);
+    let blue = count(&snow, &|p| p[2] > 200 && p[0] < 140);
+    assert!(
+        white > 800 && blue > 800,
+        "snow pull: white {white}, blue {blue}"
+    );
+
+    // The broad strokes carry ochre and teal, from the same brush.
+    let broad = panel(20, 50);
+    let ochre = count(&broad, &|p| p[0] > 200 && p[1] > 140 && p[2] < 110);
+    let teal = count(&broad, &|p| p[0] < 70 && p[1] > 90 && p[2] > 110);
+    assert!(
+        ochre > 2000 && teal > 2000,
+        "broad: ochre {ochre}, teal {teal}"
+    );
+
+    // The bushes: the warm /HighlightColor shows up on the lower one only.
+    // Plain /Highlight mixes toward white, which never reads yellow.
+    let bushes = panel(270, 50);
+    let (upper, lower) = (&bushes[..120 * 240], &bushes[120 * 240..]);
+    let warm = |p: [u8; 3]| p[0] > 150 && p[1] > 140 && p[2] < 100;
+    assert_eq!(count(upper, &warm), 0, "the plain bush has warm pixels");
+    assert!(
+        count(lower, &warm) > 300,
+        "the hued bush has no warm highlights"
+    );
+
+    // The pull: the reflection fades. Compare the leaf-green pixels in the
+    // band just under the bank with the band at the foot of the panel.
+    let shore = panel(520, 50);
+    let green = |p: [u8; 3]| p[1] > 110 && p[0] < 190 && p[2] < 120 && p[1] > p[2] + 40;
+    let band = |from: usize, to: usize| count(&shore[from * 240..to * 240], &green);
+    // Rows count from the top of the panel; the waterline is at row 105.
+    let (near, far) = (band(120, 150), band(210, 240));
+    assert!(near > 600, "the reflection is missing: {near}");
+    assert!(
+        far * 3 < near,
+        "the pulled reflection does not fade: {near} near the bank, {far} at the foot"
+    );
+}

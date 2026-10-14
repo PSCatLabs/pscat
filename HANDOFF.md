@@ -597,10 +597,14 @@ renders eight examples in both and compares block-downsampled output).
    `pjhash`, `pjCTM`, `pjP`, `pjW`, `pjM`, `pjR`, `pjmemo`) without editing
    paintkit.ps. A change to those names breaks drykit: the
    `drykit-paintkit-contract` self-test in `lib/drykit.ps` pins them (#270
-   moves them to `lib/toothkit.ps`). Slice D1 of #234 has landed
-   `lib/drykit.ps` (`dksurface`, the internal `dkcatch`, `dkrand`); D2 adds
-   `dkstroke` and `dkbatch`. D1's measured cost is in
-   `notes/234-drykit-core.md` and DRYMEDIA.md 6.1.
+   moves them to `lib/toothkit.ps`). #234 built `lib/drykit.ps`:
+   `dksurface`, `dkstroke` and `dkbatch` are public, and `dkcatch` and
+   `dkrand` are internal. The medium files (#235 chalk, #239 crayon, #241
+   charcoal) are presets over `dkstroke`. Measured cost is in
+   `notes/234-drykit-core.md` and DRYMEDIA.md 6.1. A full board plus ghost
+   text is about 7% over its pscat budget (#283). `dkbatch` keeps each
+   stroke's CTM, so hatch layers can be drawn rotated inside it. It allows
+   one pigment per batch.
    Slice G1 (#236) shipped `lib/strokeglyphs.ps`: skeleton glyphs as paths
    (`sgpath`, `sgwidth`, `sggrow`, `sgmetrics`). In its glyph data a point
    written twice is a sharp corner, and the midpoint rule never passes
@@ -776,7 +780,7 @@ renders eight examples in both and compares block-downsampled output).
   painting step and restore it with `srand` on replay
   (`gallery/alpine_lake.ps`'s `lkdo`, issue #191).
 - **Loaded colours: `pkbroad`, `pktrowel`, `pkfan` and `pkdab` adopt them, the rest do
-  not yet** (issue #183, slices L1-L5; design in `docs/PAINT_LOADING.md`).
+  not yet** (issue #183, slices L1-L5b; design in `docs/PAINT_LOADING.md`).
   `lib/paintkit.ps`'s `pu-` section (`puparse`, `puat`, `puflips`, `puwet`,
   `puspell`, `pulightneedscolors`) turns a head position into a colour.
   A preset keeps the record `puparse` returns under *its own* prefix
@@ -804,8 +808,14 @@ renders eight examples in both and compares block-downsampled output).
   never reads `/Light`); `pulightneedscolors` is not, because `/Light` is
   pkdab's own. `/HighlightColor` and `/ShadowColor` (`puhue`, on `pkdab` and
   `pkoil`) are mix targets graded once through `puwet` at the top of the call,
-  and `pkoil` keeps them as `poHighlightColor`/`poShadowColor`. L5b (the
-  specimen) is next.
+  and `pkoil` keeps them as `poHighlightColor`/`poShadowColor`. L5b (#227) is
+  the specimen, `examples/paintkit_loading_demo.ps` (render at
+  `docs/paintkit_loading_demo.png`); it writes branches as real strokes out from
+  the trunk, because `/Light` flips by chord and a pressed fan is never
+  flipped. `/Light 150` puts the first colour on the upper face of every
+  branch, `ghostscript_accepts_paint_loading` drives every new key on every
+  adopter inside a directional `pkwet`, and `L6`/`L7` (`/TipColor`, `pkdry`,
+  `pkoil` ridges) are what is left of #183.
 - **Paintkit slices prove byte identity with `scripts/identity_check.sh
   BASE_WORKTREE [BIN] --control FILE [--gallery-still]`** (issue #263), not
   by hand. It renders every tracked `examples/`, `gallery/` and
