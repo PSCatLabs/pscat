@@ -1200,9 +1200,9 @@
 %   % the crossbar passes the stem: the rightmost point is past x = 280
 %   /four << /Size 1000 >> sgmetrics /BBox get 2 get 280 gt
 %   (the 4's crossbar runs past its stem) mustbe
-%   /foursuperior << /Size 1000 >> sgmetrics /Advance get
-%   /twosuperior << /Size 1000 >> sgmetrics /Advance get eq
-%   (the superscript 4 is still derived at the digit width) mustbe
+%   /foursuperior << /Size 1000 >> sgmetrics /BBox get 3 get
+%   /four << /Size 1000 >> sgmetrics /BBox get 3 get 0.6 mul 320 add sub abs 1 lt
+%   (the superscript 4 follows the new 4: scaled to 0.6 and raised 320) mustbe
 %   newpath (4) 0 0 << /Jitter 0 >> sgpath
 %   newpath
 %%EndSelfTest
