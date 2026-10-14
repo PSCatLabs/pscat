@@ -59,6 +59,8 @@ def clusters(a, b):
 
 PAD = 10
 ROWW = 1800
+# extra zoomed tiles (file, box, zoom) for spots too small to read at 1x
+ZOOMS = {'field_notes.png': [((230, 1024, 278, 1054), 6)]}
 sections = []
 for label, f in NAMES:
     a = Image.open(f'{B}/{f}').convert('RGB')
@@ -71,6 +73,10 @@ for label, f in NAMES:
         if z != 1:
             ca = ca.resize((ca.width * z, ca.height * z), Image.LANCZOS)
             cb = cb.resize((cb.width * z, cb.height * z), Image.LANCZOS)
+        pairs.append((ca, cb))
+    for box, z in ZOOMS.get(f, []):
+        ca = a.crop(box).resize(((box[2] - box[0]) * z, (box[3] - box[1]) * z), Image.LANCZOS)
+        cb = b.crop(box).resize(((box[2] - box[0]) * z, (box[3] - box[1]) * z), Image.LANCZOS)
         pairs.append((ca, cb))
     sections.append((label, pairs))
 

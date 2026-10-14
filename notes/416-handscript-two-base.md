@@ -17,7 +17,7 @@ The advance stays 420, so no line's layout moves. Each copy of the corner draws
 its own jitter, so the corner is a sharp point that shivers slightly, which
 reads as pen pressure and not as a defect (checked in the board-size renders in the panel).
 
-Variants rendered side by side at 90pt, with and without jitter: the plain
+Variants rendered side by side at 90pt, at the default jitter: the plain
 doubled corner (kept); a straighter diagonal (a lower second-to-last control
 point); an extra mid-diagonal point; an extra mid-base point. All the flat-base
 forms read as a 2; the plain doubled corner is the smallest change that does it,
@@ -26,7 +26,10 @@ so it won (maintainer: a clear improvement, not perfection).
 ## Consequences
 
 - Two more jitter draws per 2: in `hs-write` output every glyph after a 2
-  draws differently (field_notes: the axis labels and the caption beside them).
+  draws differently. In field_notes that is the whole run of text after the
+  first 2: the axis labels and caption, the "species mix" title and the
+  legend names (their letters are redrawn with new jitter, same words, same
+  layout; the panel shows each).
   strokeglyphs and chalkboard pieces seed per stroke, so there only the 2 moves.
 - `lib/strokeglyphs.ps` copies handscript's glyphs at load (`sginit`) and has
   no `/two` override, so its 2, the derived superscript and subscript 2 and
@@ -64,6 +67,11 @@ renders has a committed Ghostscript twin; a gs run of a handscript 2 (with
 
 `docs/two_compare_416.png` is the before/after panel: every changed spot, left
 is before, right is after. Built by `notes/416-compare-panel.py`.
+
+Checked and not affected: the site's rendered pages (`build_site.sh`) and the
+font gallery cards are built, not committed, and the handscript card has no
+digit; `scripts/handwrite.sh` output is not committed anywhere; the
+the Type 3 faces in `lib/fonts/` (circuitry, neon, ...) have their own digit tables and do not load handscript.
 
 Historical panels (`specimen_polish_298_compare.png`, `four_compare_351.png`)
 are left as they were.
