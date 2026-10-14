@@ -8,6 +8,8 @@ use common::{cpu_time_of, within_cpu_budget};
 use std::time::Duration;
 
 /// The whole point of the switch: sleeping costs wall time, not CPU time.
+/// Unix only: elsewhere `thread_cpu_time` falls back to wall time.
+#[cfg(unix)]
 #[test]
 fn sleeping_is_wall_time_not_cpu_time() {
     let ((), cpu) = cpu_time_of(|| std::thread::sleep(Duration::from_millis(300)));
