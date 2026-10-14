@@ -10899,7 +10899,7 @@ fn dab_a_uniform_load_is_the_plain_brush() {
 
 /// Inside a one-sided directional pull the loaded dab colour and both
 /// mix targets are graded toward `/Under` like an inherited colour: the
-/// outer pass, clear of the core, holds no pure red or blue.
+/// outer pass, clear of the core, holds nothing but green.
 #[test]
 fn wet_pull_grades_dab_colors_and_hue_colors() {
     let it = wet_loaded(
@@ -10927,16 +10927,39 @@ fn wet_pull_grades_dab_colors_and_hue_colors() {
             if [r, g, b] != [255, 255, 255] {
                 inked += 1;
             }
-            if is_red(r, g, b) || is_blue(r, g, b) {
+            // Graded, the outer pass is green, white at its fringe: red or blue
+            // never beats green.
+            if r > g + 20 || b > g + 20 {
                 hue += 1;
             }
         }
     }
     assert!(inked > 800, "the outer pass is nearly blank: {inked}");
-    assert_eq!(
-        hue, 0,
-        "{hue} of {inked} outer pixels are ungraded red or blue"
+    assert_eq!(hue, 0, "{hue} of {inked} outer pixels are ungraded");
+
+    // pkoil's ridges mix toward the same graded targets.
+    let it = wet_loaded(
+        "1 0 0 setrgbcolor",
+        "newpath 50 160 moveto 350 160 lineto \
+         << /Width 30 /ColorJitter 0 /Highlight 1 /Shadow 1 \
+            /HighlightColor [0 0 1] /ShadowColor [0 0 1] >> pkoil",
+        "/Direction 270 /OneSided true /Layers 2 /Offset 80 /Under [0 1 0]",
     );
+    let (mut inked, mut hue) = (0, 0);
+    for y in 102..140u32 {
+        for x in 100..300u32 {
+            let p = it.gfx().pixmap.pixel(x, y).unwrap();
+            let (r, g, b) = (p.red() as i32, p.green() as i32, p.blue() as i32);
+            if [r, g, b] != [255, 255, 255] {
+                inked += 1;
+            }
+            if r > g + 20 || b > g + 20 {
+                hue += 1;
+            }
+        }
+    }
+    assert!(inked > 800, "the outer oil pass is nearly blank: {inked}");
+    assert_eq!(hue, 0, "{hue} of {inked} outer oil pixels are ungraded");
 }
 
 /// `pkdab` and `pkoil` advertise the new keys, each with a unit.

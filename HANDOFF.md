@@ -790,7 +790,16 @@ renders eight examples in both and compares block-downsampled output).
   per *run* (`pfrun`) and per pressed ray (`pfray`) by `pfcolor`, from the
   bristle's `pfub` and the stored `/ColorJitter` draw `pfcj` (taken where it
   always was, so the stream doesn't move), because a bristle's runs span every
-  subpath and `/Light` flips per subpath. `pkdab` (L5) is next.
+  subpath and `/Light` flips per subpath. `pkdab` (L5, #226) takes `/Colors` per dab: `pdColorRec`, resolved once
+  per dab into slot 14 of the dab array from the slot-5 draw it already had
+  (`puat` at `u = 1 - 2*pdd5`, flip false, then `puwet`), so all three layers
+  read one colour and no draw is added. `puparse` is called unconditionally
+  (its unset branch is the spelling and `/ColorMix`-needs-`/Colors` guards, and
+  never reads `/Light`); `pulightneedscolors` is not, because `/Light` is
+  pkdab's own. `/HighlightColor` and `/ShadowColor` (`puhue`, on `pkdab` and
+  `pkoil`) are mix targets graded once through `puwet` at the top of the call,
+  and `pkoil` keeps them as `poHighlightColor`/`poShadowColor`. L5b (the
+  specimen) is next.
 - **Paintkit slices prove byte identity with `scripts/identity_check.sh
   BASE_WORKTREE [BIN] --control FILE [--gallery-still]`** (issue #263), not
   by hand. It renders every tracked `examples/`, `gallery/` and
