@@ -27,10 +27,19 @@ What was built (`lib/paintkit.ps`, right after `pktrowel`):
   PLRM, and the box is a place the two interpreters could differ). The rows are
   then drawn under `Direction rotate`.
 - Determinism: two draws per row (row shift, row tilt), then the row's
-  `pktrowel` draws. The stream is fixed by the area, `/Direction`, `/Width`,
-  `/Angle`, `/Cover` and `/Overlap`, so turning any of those re-rolls the
-  plane; a pure texture key does not. That is weaker than `pktrowel`'s
-  per-control promise and the docs say so.
+  `pktrowel` draws. The stream is fixed by what decides the row count, row
+  length and stops per row: the area, `/Direction`, `/Width`, `/Angle`,
+  `/Cover`, `/Overlap` (`/Coverage` when it is unset), `/Drag`, `/Pitch` and
+  `/Lanes`. Turning any of those re-rolls the plane; a pure texture key does
+  not. That is weaker than `pktrowel`'s per-control promise and the docs say
+  so.
+- Error path: the plane runs `pktrowel` once on an empty path before it
+  changes any state, so every guard `pktrowel` owns (`/Lanes`, `/Colors`,
+  `/Touch` with no canvas, `/Pressure`...) fires with the caller's own clip and
+  CTM, not inside the clip and rotation. If it fails, the gsave is undone and
+  the same call is repeated on the caller's path, which raises the same error
+  again from a clean state (every guard precedes any drawing). The row count is compared as a real
+  before `cvi`, so an area far past `cvi`'s range raises the plane's guard.
 - Safety: 4000 rows, counted before anything is drawn; each row is also
   bounded by `pktrowel`'s own budget.
 - Scratch prefix `tpl` (checked unused): `pktrowel` overwrites every `pt*` name

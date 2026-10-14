@@ -219,6 +219,26 @@ fn the_path_and_clip_survive_the_call() {
 }
 
 #[test]
+fn a_rejected_key_leaves_the_callers_clip_and_matrix_alone() {
+    // /Lanes is checked by pktrowel, not by the plane. The error must come
+    // before the plane's clip and rotation, or a caller that catches it is
+    // left clipped to the facet and rotated.
+    let mut it = fresh(100, 100);
+    run(
+        &mut it,
+        &format!(
+            "{TRI_PAGE} {{ << /Width 12 /Lanes 50 >> pktrowelplane }} stopped pop \
+             newpath 0 0 1 setrgbcolor 80 80 15 15 rectfill"
+        ),
+    );
+    let p = it.gfx().pixmap.pixel(87, 12).expect("pixel");
+    assert!(
+        p.blue() > 200 && p.red() < 60,
+        "the facet's clip or a rotation was left behind by the error"
+    );
+}
+
+#[test]
 fn a_rotated_matrix_changes_nothing_about_the_edge() {
     // Under `100 0 translate 90 rotate` user (x, y) is device (100 - y, x)
     // page-wise, so the same triangle sits at a known place.
