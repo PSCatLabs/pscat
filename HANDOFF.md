@@ -671,6 +671,13 @@ renders eight examples in both and compares block-downsampled output).
    `userdict /dkBatch` (pinned by `drycrayon-drykit-contract`). Passes and
    layering are declared (`/Pass`, `/Over`), because drykit can't read the
    page. `notes/239-drycrayon.md` has the tuning numbers against the crops.
+   Typewriter (epic #209): **read `docs/TYPEWRITER.md` and
+   `docs/typewriter/REFERENCES.md` before starting #211–#215.** The
+   #210 design (Courier Prime outlines embedded in a Type 3 `/Typewriter`,
+   keyed-hash variation, clip-based ribbon ink) waits on the maintainer's
+   approval. Its gotchas: `BuildChar` must use `setcharwidth` (gs replays a
+   `setcachedevice` glyph) and stay pure (`stringwidth` runs it), and
+   pscat's `def` rejects integer keys (#338; use `put`).
 5. Watercolor (issue #47, gated on the architecture spike in issue
    #46): read `docs/WATERCOLOR.md` before starting — it recommends a
    small `alpha: f32` field on `GraphicsState` (already prototyped as
