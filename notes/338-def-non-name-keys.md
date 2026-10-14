@@ -40,3 +40,5 @@ Verification:
   `gallery/renders/alpine_lake.png` also equals the branch binary's render.
 
 Not done: nothing deferred.
+
+Also: tests/selftest.rs's pressure-guard probe (`row_5_and_10`) had relied on `def` rejecting the leaked number key; it now fails later with `undefined`, same point (the unguarded call still raises, not silent).

@@ -26,8 +26,9 @@
 //! recording: four of these five guards close a *silent* defect (the
 //! library accepts malformed input and draws the wrong thing), but
 //! `pkribbon`'s `/Pressure` guard does not. Removing it produces a
-//! `typecheck` on `def`, from deep inside the implementation, with no
-//! hint of which option was wrong — which is precisely what PR #76's
+//! `typecheck` on `def` (an `undefined` since #338, when `def` began to
+//! accept a leaked number as a key), from deep inside the implementation,
+//! with no hint of which option was wrong — which is precisely what PR #76's
 //! round 2 described: the unexecuted value "leaks extra operands into
 //! every downstream computation instead of raising a clean error".
 //! [`Unguarded`] makes each row state which shape it is, so a change
