@@ -51,7 +51,8 @@ file is mostly *digits*, which Flate cannot shrink.
 ## Measured and not shipped
 
 - **Fewer decimals** (`f()` writes 3; tried 2 for path coordinates only, trailing
-  zeros trimmed): alpine_lake 74.4 -> 58.8 MB (-21%), first_rain -17%,
+  zeros trimmed, measured on top of the `l` drop, so about -19% from precision
+  alone): alpine_lake 74.4 -> 58.8 MB (-21% combined), first_rain -17%,
   wet_pull_demo -24%. Rasters are no longer identical: 102 of 103 files differ
   by a few hundred to a few thousand pixels (alpine_lake 4,171 px, max channel
   delta 231 — gs draws without anti-aliasing, so a 0.005 pt shift flips edge
