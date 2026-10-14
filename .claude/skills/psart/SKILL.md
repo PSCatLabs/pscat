@@ -237,6 +237,18 @@ Which tool to pick:
   so 270 is down the page. `examples/paintkit_wet_pull_demo.ps` shows
   all three.
 
+  `/Under` can be a procedure `x y -> r g b` (with `/At [x y]`, required unless `/Box` is given)
+  when the backdrop changes across the mark, such as a cloud over a graded
+  sky: each pass is mixed toward the backdrop at `/At` plus its own
+  displacement, so the pale/dark rim a single colour leaves goes away.
+  It must be a pure function (no painting, no `pkwet`, no stack
+  reliance) returning three numbers in 0..1; the answer is per pass, not
+  per pixel; for a tall mark give `/Box [x y w h] /Bands [cols rows]` instead
+  of `/At` and it is asked per band (a cell no taller than about half
+  `/Offset`; the mark runs (Layers - 1) x cells + 1 times, at most 64).
+  `examples/paintkit_wet_under_demo.ps` is the side-by-side, and
+  `examples/paintkit_wet_bands_demo.ps` the tall-mark one.
+
 - **`pkcanvas` / `/Touch`** — a shared canvas under light strokes. Every
   other "less paint" key breaks one stroke up on its own; `/Touch` is the one
   that is anchored to the canvas. `<< /Seed 7 /Weave 2.5 >> pkcanvas` once,
@@ -267,7 +279,8 @@ Which tool to pick:
   (clouds, bushes); `pktap` → `pkfan`, or `/Length 0` → `pkdab` (a clump
   per tap); `pkpull` → `pkbroad` with `/Direction -90` (reflection pulled
   down from a horizon) or `pkliner` with `/Direction 90` (grass pushed
-  up, `/Bow` for blades); `pkzigzag` → `pkliner` or `pkbroad` (water).
+  up, `/Bow` for blades, `/Scatter` so the roots do not sit on one ruled
+  line); `pkzigzag` → `pkliner` or `pkbroad` (water).
   Two rules: **every motion replaces the current path** (so a guide, or
   the outline `scpath` leaves behind, is never painted — one motion, one
   paint, then build the next); and the region motions take an artkit
@@ -275,6 +288,34 @@ Which tool to pick:
   spine motions read the current path as the guide. They draw only from
   `frnd`, so they are deterministic under your `srand`.
   `examples/paintkit_motion_demo.ps` shows each beside its brush.
+  **A lit side on a mass** (clouds, bushes, a tree crown): `pkscumblein`
+  with `/Light <deg>` keeps only the circles along the edge that faces the
+  light (`/Reach` how deep, `/Feather` how graded). Paint the body over the
+  whole region first, then a half-light (`/Reach 0.4`) and a core
+  (`/Reach 0.15`, smaller circles) in loads close to the body's value; the
+  shadow side is `/Light` turned round. Specimen:
+  `docs/paintkit_massing_demo.png`.
+
+- **Brushed edges** — `pkbrushedge` (and the motion under it, `pkfeather`).
+  A filled mass (a meadow, a bank, a pond) has a ruled vector edge; fill it,
+  then `MASS setrgbcolor massPath << /Under BEHIND >> pkbrushedge` pulls the
+  mass's colour out across the edge and cuts the colour behind back in, so
+  the edge reads as painted. Give it the closed outline you filled (holes
+  and mirrored reflections work: the mass itself says which side is out) or
+  just the visible crest, left open, whose out side is `/Outward` (default
+  up). `/Under` is a colour, a pigment name or a procedure `x y -> r g b`
+  (a graded sky or water); `/Slant` tilts the strokes (wind in a meadow, a
+  dragged bank); `/Crisp 0.3` leaves stretches untouched (lost and found);
+  `/Brush` swaps the brush (`{ << /Width 2 >> pkliner }` for grass blades).
+  `examples/paintkit_brushedge_demo.ps` shows before and after.
+
+**Painting a landscape?** Read `docs/guides/landscape-cookbook.md` first: one
+recipe per element (sky, clouds, mountains, mist, far forest, evergreens,
+bushes, water, reflection, foreground bank, grass), each with the tools, the
+order, the settings that matter, the usual failure with its fix and a complete
+snippet that renders as it stands (360x240 pt: `pscat --page 360x240 --dpi 144
+--png out.png recipe.ps`), plus the order a wet-on-wet landscape is painted in.
+Copy a recipe and change the numbers rather than re-deriving the technique.
 
 (A fuller paintkit tour, and an audit of the parameter docs, is issue
 #99 — this section is the short orientation, not that sweep.)
@@ -284,7 +325,10 @@ Which tool to pick:
 For a chalkboard, use `lib/drychalk.ps`, not a pen stroke in a chalk
 colour (that is `gallery/hundred_lines.ps`'s flat look). Load
 `lib/handscript.ps` and `lib/strokeglyphs.ps` too for handwriting: `sgpath`
-gives skeleton paths, and `dcchalk` inks them.
+gives skeleton paths, and `dcchalk` inks them. A character with no
+skeleton (a superscript two, say) raises `sg-missing-glyph:<char>` rather
+than vanishing; write it another way, or pass `/Strict false` to let it
+advance blank.
 
 ```postscript
 (lib/artkit.ps) run (lib/paintkit.ps) run (lib/drykit.ps) run
@@ -315,6 +359,78 @@ newpath 58 170 moveto 260 172 lineto << /Tilt 85 /Side 5 >> dcchalk
   measured against photographs. Raising it gives the fake-font look.
 - Cost: a 42pt line is about 0.7s at 2x, so keep a board to about a dozen
   lines. `examples/drychalk_specimen.ps` shows everything.
+
+## Board math: TeX formulas (`lib/mathkit.ps`, after handscript and strokeglyphs)
+
+For formulas on a board, use `lib/mathkit.ps`, not hand-placed `sgpath`
+calls. It lays out a subset of TeX with TeX's box model and appends the
+strokeglyphs skeletons as a path. It paints nothing, so a plain `stroke`
+or drychalk's `dcchalk` inks it. **Write every TeX backslash twice** in a
+PostScript string: `(\\frac{a}{b})`. A single backslash is eaten by the
+string, and mathkit refuses what is left with a named error
+(`mk-bare-word-needs-a-backslash:sqrt`, `mk-control-character:...`).
+
+```postscript
+(lib/handscript.ps) run (lib/strokeglyphs.ps) run (lib/mathkit.ps) run
+newpath (x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}) 60 500 << /Size 36 /Seed 1 >> mkpath
+1.6 setlinewidth 1 setlinecap 1 setlinejoin stroke
+```
+
+- **`(tex) x y opts mkpath`** puts the baseline's left end at x y.
+- **`(tex) opts mkmetrics`** returns `/Width /Height /Depth /Align` in
+  points without drawing. It always agrees with `mkpath`, so measure,
+  then place.
+- **`[ (line) ... ] x y opts mkalign`** writes a derivation, aligned at x
+  on each line's `&` or before its first `=`. It returns one record per
+  line: `/Origin /Angle /Width /Height /Depth /Align /BBox`.
+  `/Ink { pop ... dcchalk }` inks each line as it is written, so pressure
+  or colour can change down the board.
+- **`mkframe`**, **`mkunderline`** and **`mkarrow`** draw the annotations.
+  `mkframe` makes a box with overshooting corners, or `/Shape /oval`.
+  `mkunderline` takes `/Double`, and `mkarrow` takes `/Bend`. `mkframe`
+  and `mkunderline` take a line record (`recs 2 get << >> mkframe`) and
+  follow its slope. Inside a formula, `\\boxed{...}` and
+  `\\underline{...}` do the same.
+- A side note is plain `sgpath` text, or `\\text{...}` inside a formula.
+
+Supported TeX:
+
+| Group | Commands |
+|---|---|
+| Scripts | `x^2`, `x_i`, `x_i^2`, `f'` |
+| Fractions and roots | `\frac`, `\dfrac`, `\tfrac`, `\binom`, `\sqrt{x}`, `\sqrt[n]{x}` |
+| Large operators and names | `\sum`, `\prod`, `\int` (limits under/over in display style, `\limits` / `\nolimits`); `\lim`, `\max`, `\min`, `\sup`, `\inf`, `\det` (limits under); `\sin`, `\cos`, `\log`, `\ln`, `\exp` and others; `\operatorname{...}` |
+| Delimiters | `\left( ... \right)` with `( ) [ ] \{ \} \| \langle \rangle` (the characters `⟨ ⟩ ‖ ∥` typed directly work too) and `.`; `\big` `\Big` `\bigg` `\Bigg` and their `l`/`r` forms |
+| Environments | `matrix`, `pmatrix`, `bmatrix`, `Bmatrix`, `vmatrix`, `cases` (rows `\\`, cells `&`) |
+| Accents and frames | `\vec`, `\hat`, `\bar`, `\dot`, `\ddot`, `\tilde`, `\overline`, `\underline`, `\boxed` |
+| Text | `\text{...}`, `\mathrm{...}` |
+| Spacing | `\,` `\:` `\;` `\!` `\ ` `\quad` `\qquad` `~` (plain spaces are ignored, as in TeX) |
+| Symbols | Greek `\alpha` ... `\Omega`, `\infty`, `\partial`, `\nabla`, `\pm`, `\times`, `\cdot`, `\le`, `\ge`, `\ne`, `\approx`, `\to`, `\Rightarrow`, `\iff`, `\in`, `\subset`, `\cup`, `\cap`, `\forall`, `\exists`, `\cdots`, ...; Unicode symbols typed directly (α ∞ ≤ ∂) |
+
+Anything else fails with a name saying what it was, for example
+`mk-unsupported-command:\iint` or `mk-unsupported-character:*`.
+
+- **`/Irregular`** (default 1) is the board hand. 0 is clean TeX, and 2 is
+  hurried. It varies sizes, gaps and script heights, makes fraction bars
+  overshoot, and slopes and drifts the baseline (`/Slope` fixes the tilt).
+  `/Jitter` is each glyph's own wobble.
+- Other keys: `/Style /text` gives inline sizes with side limits,
+  `/Spacing` multiplies TeX's spaces, and `/MathHand false` drops the
+  curly x.
+- **Seeds.** With a fixed `/Seed`, editing the end of a formula never
+  re-rolls its start. Unseeded, the layout comes from the text (so
+  `mkmetrics` agrees with `mkpath`) and the glyph jitter from the
+  position.
+- **Pitfalls:**
+  - Parentheses in a PostScript string must balance. Write
+    `\\left[ 0, 1 \\right\)` with `\)`.
+  - Keep each formula on one source line, or end the line with a
+    backslash to continue the string.
+  - `x_{max}` is refused, because `max` is a command. Write `x_{\\max}`
+    or `x_{\\text{max}}`.
+
+`examples/mathkit_specimen.ps` draws the test set, from the quadratic
+formula to Maxwell's equations, and a chalk derivation.
 
 ## Dry media: crayon (`lib/drycrayon.ps`)
 
@@ -368,9 +484,10 @@ newpath 40 40 moveto 200 80 lineto << /Touch 0.7 >> dycrayon
   the preset.
 - `opts dhhatch` — hatches the current path's region to `/Value` (0..1, or
   `{x y -> value}`): up to `/Layers` crossing layers of hand strokes, all in
-  one `dkbatch` so crossings stay dark. It clips to the region and cannot run
-  inside a `dkbatch`. Hatch a region's layers in **one** call: two calls are
-  two batches, and at `/Levels 2` or more the second one's faint level greys
+  one `dkbatch` so crossings stay dark. It clips to the region. Overlapping
+  regions go in **one** `{ ... } dkbatch` (#312): each call keeps its own
+  region, and the crossings stay dark. As two separate calls they are two
+  batches, and at `/Levels 2` or more the second one's faint level greys
   the first's crossings.
 - `opts dhsmudge` — the path is a stump's track: a wide, soft stroke that
   fills the tooth, leaving `/Value` between paper and the current colour.

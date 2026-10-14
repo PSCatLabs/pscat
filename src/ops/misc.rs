@@ -26,6 +26,75 @@ pub fn install(dict: &mut Dict) {
     op(dict, "wcheck", access_check);
 }
 
+/// Fill `errordict` (issue #372). Ghostscript's has a handler per error
+/// name, and found code re-raises a caught error with
+/// `errordict /rangecheck get exec`. Without the entries that lookup is
+/// itself an `undefined` error, so the re-raise reported `undefined`
+/// where Ghostscript keeps the name.
+///
+/// Only names the interpreter can raise get an entry: Ghostscript has
+/// 14 more (`stackoverflow`, `VMerror`, `invalidaccess`, ...), but a
+/// program can only meet them by catching one, and pscat never raises
+/// them.
+pub(crate) fn install_errordict(dict: &mut Dict) {
+    use super::op;
+    macro_rules! handlers {
+        ($($f:ident => $name:literal),* $(,)?) => {$(
+            fn $f(it: &mut Interp) -> Result<(), PsError> {
+                reraise(it, $name)
+            }
+            op(dict, $name, $f);
+        )*};
+    }
+    handlers! {
+        h_stackunderflow => "stackunderflow",
+        h_execstackoverflow => "execstackoverflow",
+        h_typecheck => "typecheck",
+        h_rangecheck => "rangecheck",
+        h_undefined => "undefined",
+        h_undefinedresult => "undefinedresult",
+        h_unmatchedmark => "unmatchedmark",
+        h_nocurrentpoint => "nocurrentpoint",
+        h_invalidexit => "invalidexit",
+        h_dictstackunderflow => "dictstackunderflow",
+        h_invalidfont => "invalidfont",
+        h_invalidfileaccess => "invalidfileaccess",
+        h_undefinedfilename => "undefinedfilename",
+        h_syntaxerror => "syntaxerror",
+        h_limitcheck => "limitcheck",
+        h_ioerror => "ioerror",
+        h_invalidrestore => "invalidrestore",
+        h_undefinedresource => "undefinedresource",
+    }
+    op(dict, "handleerror", handleerror);
+}
+
+/// What an `errordict` handler does when run by hand: raise `name`
+/// again, with the top operand as the offending command (the PLRM has
+/// the interpreter push that object before running the handler). The
+/// raised error is the real one, so an enclosing `stopped` records it in
+/// `$error` and an uncaught one is reported, both under `name`.
+///
+/// Deviation, on an empty operand stack: Ghostscript dies with an
+/// unrecoverable `stackunderflow`. pscat does not restore an operator's
+/// operands when it fails (HANDOFF.md), so after a catch the stack is
+/// often empty where Ghostscript's holds the failed operands. The
+/// handler then falls back to the command `$error` already holds, which
+/// keeps the error name, the thing a re-raise exists to preserve.
+fn reraise(it: &mut Interp, name: &'static str) -> Result<(), PsError> {
+    let command = it.ostack.pop().or_else(|| {
+        it.load("$error").and_then(|e| match &e.value {
+            Value::Dict(d) => d.borrow().get("command"),
+            _ => None,
+        })
+    });
+    let text = command.as_ref().map(|c| c.text());
+    if let Some(c) = command {
+        it.set_error_command(c);
+    }
+    Err(PsError::from_name(name, text).unwrap_or(PsError::Undefined(name.to_string())))
+}
+
 fn access_noop(it: &mut Interp) -> Result<(), PsError> {
     // operand ... operand: identity, but stackunderflow still applies.
     let obj = it.pop()?;

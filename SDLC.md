@@ -2,7 +2,8 @@
 sdlcify_version: 1
 repo: jeromebanks/postscript_interpreter
 default_branch: main
-generated: 2026-10-13
+generated: 2026-10-14
+quality_gate: "PSCAT_PROFILE=ci ./scripts/selftest.sh && cargo test --profile ci && cargo clippy --all-targets -- -D warnings && cargo fmt --all -- --check"
 merge_policy:
   mode: agent-full
 required_status_checks:
@@ -39,10 +40,12 @@ policy, then re-run `sdlcify` to apply it to GitHub.
    before writing code — catch a bad approach while it's still cheap to
    change.
 4. **Implement**, commit at coherent checkpoints, not one giant commit.
-5. **Quality gate clean before opening a PR**: `cargo build && cargo
-   test && cargo clippy --all-targets -- -D warnings && cargo fmt --all
-   -- --check` — the same command CI runs, so the PR isn't the first
-   place a break shows up.
+5. **Quality gate clean before opening a PR**: `PSCAT_PROFILE=ci
+   ./scripts/selftest.sh && cargo test --profile ci && cargo clippy
+   --all-targets -- -D warnings && cargo fmt --all -- --check` — the
+   same checks CI runs (`.github/workflows/ci.yml`), so the PR isn't the
+   first place a break shows up. The string is `quality_gate` in the
+   frontmatter above.
 6. **Diff reviewed** before the PR is called done — a second look at the
    actual changes, not just the plan.
 7. **Open the PR**, referencing the issue (`Closes #N`), with a summary

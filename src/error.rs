@@ -177,4 +177,41 @@ mod tests {
         }
         assert_eq!(PsError::from_name("notanerror", None), None);
     }
+
+    /// `errordict` has a handler for every error the interpreter can
+    /// raise (issue #372), or `errordict /name get exec` would be an
+    /// `undefined` error again for that name. Same list as above, so a
+    /// new variant without a handler fails here.
+    #[test]
+    fn every_error_name_has_an_errordict_handler() {
+        let mut errordict = crate::object::Dict::new();
+        crate::ops::misc::install_errordict(&mut errordict);
+        for e in [
+            PsError::StackUnderflow,
+            PsError::ExecStackOverflow,
+            PsError::Typecheck,
+            PsError::Rangecheck,
+            PsError::Undefined("thing".to_string()),
+            PsError::UndefinedResult,
+            PsError::UnmatchedMark,
+            PsError::NoCurrentPoint,
+            PsError::InvalidExit,
+            PsError::DictStackUnderflow,
+            PsError::InvalidFont,
+            PsError::InvalidFileAccess,
+            PsError::UndefinedFilename,
+            PsError::Syntax(String::new()),
+            PsError::Limitcheck,
+            PsError::Io,
+            PsError::InvalidRestore,
+            PsError::UndefinedResource,
+        ] {
+            let e = sample_of(&e);
+            assert!(
+                errordict.get(e.name()).is_some(),
+                "errordict has no handler for {}",
+                e.name()
+            );
+        }
+    }
 }

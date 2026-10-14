@@ -27,21 +27,19 @@ pub fn install(dict: &mut Dict) {
     // `<<` is just a mark, installed as a constant in ops::install_all.
 }
 
-/// def/load/store keys are names; strings convert per the PLRM. (put/get
-/// with arbitrary keys live in ops::data.)
-fn pop_key(it: &mut Interp) -> Result<crate::name::PsName, PsError> {
-    match &it.pop()?.value {
-        Value::Name(n) => Ok(n.clone()),
-        Value::String(s) => Ok(crate::name::intern(&s.text())),
-        _ => Err(PsError::Typecheck),
-    }
-}
-
+/// `key value def`: any non-null key, per the PLRM (`put` has always taken
+/// the same keys). Names -- by far the common case -- go straight to the
+/// interned-id path; every other key (integer, real, boolean, string, ...)
+/// takes the out-of-line general path in `Interp::define_key` so it adds no
+/// work to the hot one (#323).
 fn def(it: &mut Interp) -> Result<(), PsError> {
     let value = it.pop()?;
-    let key = pop_key(it)?;
-    it.define_name(&key, value);
-    Ok(())
+    let key = it.pop()?;
+    if let Value::Name(n) = &key.value {
+        it.define_name(n, value);
+        return Ok(());
+    }
+    it.define_key(&key, value)
 }
 
 fn make_dict(it: &mut Interp) -> Result<(), PsError> {
@@ -73,10 +71,12 @@ fn end(it: &mut Interp) -> Result<(), PsError> {
 }
 
 fn load(it: &mut Interp) -> Result<(), PsError> {
-    let key = pop_key(it)?;
-    let obj = it
-        .load_id(key.id())
-        .ok_or_else(|| PsError::Undefined(key.to_string()))?;
+    let key = it.pop()?;
+    let found = match &key.value {
+        Value::Name(n) => it.load_id(n.id()),
+        _ => it.load_key(&key)?,
+    };
+    let obj = found.ok_or_else(|| PsError::Undefined(key.text()))?;
     it.push(obj);
     Ok(())
 }

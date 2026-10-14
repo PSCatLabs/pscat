@@ -1,0 +1,94 @@
+%!PS-Adobe-3.0
+%%Title: Paintkit -- a backdrop that varies: pkwet /Under as a procedure (issue #179)
+%%BoundingBox: 0 0 640 250
+%%EndComments
+
+% Specimen for pkwet's procedural /Under (lib/paintkit.ps). pkwet grades each
+% softening pass toward /Under, "the colour already on the canvas there".
+% With one [r g b] that is one colour for every pass, so over a backdrop that
+% changes where the mark sits the outer passes are right at one end and leave
+% a visibly pale or dark rim at the other.
+%
+%   /Under { y-sky }   a procedure  x y -> r g b  in the user space pkwet is
+%   /At [x y]          called in, asked once per softening pass for the
+%                      backdrop at /At plus that pass's displacement
+%
+% Left: the same cloud over the same strongly graded sky, /Under one colour
+% (the sky at the cloud's centre, which is what you would hand-match): the
+% passes displaced down are a cold grey against the warm horizon, where the
+% gradient is furthest from the mid-sky colour; the rim above is smaller.
+% Right: /Under the sky function itself. Same seed, same marks; only the
+% colour each pass is mixed toward differs, and most of the rim is gone.
+%
+% The procedure runs inside pkwet's frame, so it must be a pure function: no
+% painting, no calling pkwet, no reliance on what else is on the operand
+% stack. /At is required with a procedure (pkwet cannot see where a mark
+% sits) and the answer is per pass, not per pixel: a mark that is tall
+% against the gradient is better split into several pkwet calls, each with
+% its own /At.
+%
+%   pscat --page 640x250 examples/paintkit_wet_under_demo.ps --png wet_under.png
+
+(lib/artkit.ps) run
+(lib/paintkit.ps) run
+
+/SKYTOP [0.06 0.16 0.50] def
+/SKYLOW [0.98 0.86 0.68] def
+/SKYH 150 def
+/skyat {                                   % y -> r g b   (0 horizon .. SKYH zenith)
+    SKYH div 0 max 1 min /skt exch def
+    SKYLOW SKYTOP skt mix3
+} def
+
+1 1 1 setrgbcolor clippath fill
+
+/label {                                   % x y string -
+    gsave
+        0.30 0.30 0.30 setrgbcolor
+        /Helvetica findfont 9 scalefont setfont
+        3 1 roll moveto show
+    grestore
+} def
+
+% One 300 x 150 panel at (px, 50): the graded sky and the same one-colour
+% cloud, softened by pkwet.
+/panel {                                   % px procedural? -
+    /ppro exch def /ppx exch def
+    gsave
+        ppx 50 translate
+        newpath 0 0 moveto 300 0 lineto 300 SKYH lineto 0 SKYH lineto closepath clip
+        0 1 SKYH 1 sub {
+            /pgy exch def
+            pgy skyat setrgbcolor
+            newpath 0 pgy moveto 300 pgy lineto 300 pgy 2 add lineto 0 pgy 2 add lineto
+            closepath fill
+        } for
+        0.99 0.98 0.97 setrgbcolor
+        41 srand
+        {
+            newpath 50 68 moveto 100 84 150 56 215 74 curveto
+            << /Nozzle 10 /Density 380 /Falloff 1 /Speck 1.1 /Overspray 0.4 >> pkspray
+            newpath 75 62 moveto 130 70 170 54 235 64 curveto
+            << /Nozzle 8 /Density 300 /Falloff 1 /Speck 1.1 /Overspray 0.45 >> pkspray
+        }
+        ppro
+            { << /Soft 1 /Offset 34 /Layers 6
+                 /At [ 135 70 ] /Under { exch pop skyat } >> }
+            { << /Soft 1 /Offset 34 /Layers 6
+                 /Under [ 70 skyat ] >> }
+        ifelse
+        pkwet
+    grestore
+} def
+
+0   false panel
+340 true  panel
+
+10  225 (a constant /Under: one colour for every pass) label
+350 225 (a procedural /Under: the backdrop where each pass sits) label
+10  36 (/Under [ 70 skyat ]    the sky at the cloud's centre, hand-matched) label
+10  24 (a cold grey rim below the cloud) label
+350 36 (/Under { exch pop skyat }  /At [ 135 70 ]) label
+350 24 (each pass mixed toward the sky at its own height: the rim is gone) label
+
+showpage

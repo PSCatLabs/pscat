@@ -1,0 +1,119 @@
+%!PS-Adobe-3.0
+%%Title: Paintkit — brushed edges for filled masses (issue #347)
+%%BoundingBox: 0 0 720 640
+%%EndComments
+
+% Specimen for pkbrushedge and pkfeather (lib/paintkit.ps, "Brushed edges").
+% A filled path has a ruled vector edge, and paint never does. pkbrushedge
+% feathers it: short strokes of the mass's colour pulled out across the edge,
+% and strokes of the colour behind it cut back in, so the two interlock.
+%
+%   MASS setrgbcolor  bankpath fill
+%   bankpath << /Under WATER >> pkbrushedge
+%
+% Left: the mass filled, nothing else. Right: the same fill, then one
+% pkbrushedge call.
+% Top: a far meadow against a graded sky. The path is the open crest, so
+% /Outward (up, the default) says which side is out, and /Under is a
+% procedure, so each cut takes the sky's colour where it lands. /Crisp leaves
+% stretches of the edge untouched: lost and found.
+% Middle: a dark near bank over water, its whole outline closed; the strokes
+% are slanted and dragged, as a bank is painted.
+% Bottom: a field with a pond in it. The pond is a hole in the field (its
+% subpath wound the other way), and the mass itself says which side is out,
+% so the field's colour is pulled into the pond and the water cut back into
+% the field.
+%
+% No alpha anywhere, so Ghostscript renders the same page (its rand stream
+% differs, so the strokes fall differently).
+%
+%   pscat --page 720x640 --dpi 144 examples/paintkit_brushedge_demo.ps --png brushedge.png
+
+(lib/artkit.ps) run
+(lib/paintkit.ps) run
+
+347 srand
+0.97 0.96 0.93 setrgbcolor clippath fill
+
+/zbtext {                                    % x y size string -
+    /zbs exch def /zbz exch def /zby exch def /zbx exch def
+    /Helvetica findfont zbz scalefont setfont zbx zby moveto zbs show
+} def
+
+% x y {draw} zbpanel -   a 330 x 170 panel, clipped, framed
+/zbpanel {
+    /zbdraw exch def
+    gsave translate
+        newpath 0 0 330 170 rectclip
+        zbdraw
+    grestore
+} def
+
+0.15 0.15 0.15 setrgbcolor
+30 610 16 (Brushed edges: pkbrushedge, one call after the fill) zbtext
+0.35 0.35 0.35 setrgbcolor
+30 590 10 (before: the filled path) zbtext
+375 590 10 (after: the same fill, then  path << /Under ... >> pkbrushedge) zbtext
+
+% ---- 1. A far meadow against a graded sky ---------------------------------
+/SKYHI [ 0.56 0.68 0.84 ] def
+/SKYLO [ 0.88 0.86 0.80 ] def
+/MEADOW [ /sapgreen 3 /yellowochre 1 /titaniumwhite 1 ] pigcolor def
+% x y -> r g b   the sky at a point of the panel
+/zbsky { exch pop 60 sub 110 div dup 0 lt { pop 0 } if dup 1 gt { pop 1 } if
+         SKYLO SKYHI 3 -1 roll mix3 } def
+/zbcrest { newpath -10 78 moveto 70 96 150 70 230 84 curveto 280 92 310 80 340 86 curveto } def
+/zbmeadow {
+    0 1 169 { /zby exch def zby 0.5 add 0 exch zbsky setrgbcolor
+              0 zby 330 1.2 rectfill } for
+    MEADOW aload pop setrgbcolor
+    zbcrest 340 -10 lineto -10 -10 lineto closepath fill
+} def
+20 410 { zbmeadow } zbpanel
+370 410 {
+    zbmeadow
+    MEADOW aload pop setrgbcolor
+    zbcrest << /Under { zbsky } /Slant 12 /Crisp 0.25 >> pkbrushedge
+} zbpanel
+
+% ---- 2. A dark near bank over water ---------------------------------------
+/WATER [ /phthaloblue 1 /titaniumwhite 4 /burntumber 0.3 ] pigcolor def
+/BANK [ /burntumber 2 /sapgreen 1 /midnightblack 1 ] pigcolor def
+/zbbank { newpath -10 -10 moveto -10 104 lineto 60 120 130 96 200 86 curveto
+          250 78 290 64 340 60 curveto 340 -10 lineto closepath } def
+/zbwater {
+    WATER aload pop setrgbcolor clippath fill
+    WATER 0.9 shade setrgbcolor 0 40 330 3 rectfill 0 140 330 2 rectfill
+    BANK aload pop setrgbcolor zbbank fill
+} def
+20 220 { zbwater } zbpanel
+370 220 {
+    zbwater
+    BANK aload pop setrgbcolor
+    zbbank << /Under WATER /Slant -35 /Length 11 /Lean 20 /Bow 0.15 >> pkbrushedge
+} zbpanel
+
+% ---- 3. A field with a pond: the pond is a hole in the field ---------------
+/FIELD [ /yellowochre 2 /sapgreen 1 /titaniumwhite 1 ] pigcolor def
+/POND [ /phthaloblue 1 /titaniumwhite 3 ] pigcolor def
+% The field: a rectangle well past the panel (its own edges are clipped
+% away) with the pond wound the other way, so `fill` leaves a hole.
+/zbfield {
+    newpath -40 -40 moveto 370 -40 lineto 370 210 lineto -40 210 lineto closepath
+    matrix currentmatrix /zbm exch def
+    165 80 translate 1 0.42 scale 130 0 moveto 0 0 130 0 -360 arcn closepath
+    zbm setmatrix
+} def
+/zbpond {
+    POND aload pop setrgbcolor clippath fill
+    FIELD aload pop setrgbcolor zbfield fill
+} def
+20 30 { zbpond } zbpanel
+370 30 {
+    zbpond
+    FIELD aload pop setrgbcolor
+    zbfield << /Under POND /Length 9 >> pkbrushedge
+} zbpanel
+
+0.35 0.35 0.35 setrgbcolor
+30 14 9 (top: open crest, procedural /Under (graded sky), /Crisp 0.25.  middle: closed bank, /Slant -35.  bottom: a hole, brushed into the pond.) zbtext

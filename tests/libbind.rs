@@ -1,4 +1,5 @@
-//! artkit, paintkit, drykit and drychalk bind their procedures (issues #307, #318).
+//! artkit, paintkit, drykit, drychalk, drycharcoal and mathkit bind their
+//! procedures (issues #307, #318, #326, #237).
 //!
 //! Ghostscript looks up every executable name in a procedure body at run
 //! time, through the dictionary stack, and a userdict that already holds
@@ -18,16 +19,30 @@
 //!
 //! drychalk gained about 7% (examples/drychalk_specimen.ps, 2.38 s to 2.22 s).
 //! drycrayon gained under 1% and the older kits are too cheap in gs to
-//! measure, so they stay unbound (notes/318-bind-drychalk.md); drycharcoal
-//! is a follow-up.
+//! measure, so they stay unbound (notes/318-bind-drychalk.md). drycharcoal
+//! (#326) gained little (notes/326-bind-drycharcoal.md) but is bound with
+//! drykit and drychalk; it needs hatchkit, which is not bound.
+//! mathkit (#237) was written bound from the start; it needs handscript
+//! and strokeglyphs, which are not bound, so those, like hatchkit, load
+//! before the snapshot and the walk never sees them.
 
 use pscat::Interp;
 
-const LIBS: [&str; 4] = [
+const LIBS: [&str; 6] = [
     "lib/artkit.ps",
     "lib/paintkit.ps",
     "lib/drykit.ps",
     "lib/drychalk.ps",
+    "lib/drycharcoal.ps",
+    "lib/mathkit.ps",
+];
+
+/// Libraries a checked one needs but that are not themselves checked:
+/// loaded before the snapshot, so their names are part of the baseline.
+const PREREQS: [&str; 3] = [
+    "lib/handscript.ps",
+    "lib/strokeglyphs.ps",
+    "lib/hatchkit.ps",
 ];
 
 /// Defines the walker, snapshots userdict, and leaves its checks for
@@ -67,6 +82,11 @@ userdict {
 #[test]
 fn library_procedures_are_bound() {
     let mut it = Interp::new();
+    for path in PREREQS {
+        let text = std::fs::read(path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        it.run_source(&text)
+            .unwrap_or_else(|e| panic!("{path} failed to load: {}", it.error_report(&e)));
+    }
     it.run_str(PROLOGUE).expect("prologue");
     for path in LIBS {
         let text = std::fs::read(path).unwrap_or_else(|e| panic!("{path}: {e}"));
@@ -97,7 +117,12 @@ fn library_procedures_are_bound_in_ghostscript() {
         eprintln!("skipping gs bind check: gs not installed");
         return;
     }
-    let mut src = String::from(PROLOGUE);
+    let mut src = String::new();
+    for path in PREREQS {
+        src.push_str(&std::fs::read_to_string(path).expect("read prerequisite"));
+        src.push('\n');
+    }
+    src.push_str(PROLOGUE);
     for path in LIBS {
         src.push_str(&std::fs::read_to_string(path).expect("read lib"));
         src.push('\n');

@@ -4,8 +4,11 @@
 #   bash "$(git rev-parse --show-toplevel)/.claude/skills/work-issue/scripts/heartbeat.sh" <N>
 #
 # The two commands below are the heartbeat refresh from references/claim-protocol.md
-# ("Heartbeat writes after the claim"), moved verbatim in #276. It deliberately
-# never runs `mkdir`: a missing lock dir means this run no longer owns the issue.
+# ("Heartbeat writes after the claim"), moved in #276. It deliberately never runs
+# `mkdir`: a missing lock dir means this run no longer owns the issue. Since #297
+# the lock may hold generation dirs (gen.K); the heartbeat stays the one shared
+# LOCKDIR/heartbeat file, so this script and older copies of it work on both
+# layouts. The temp name is per process (two writers never share one).
 # If this fails with "No such file or directory": stop, never recreate the lock
 # dir; re-run claim.sh and continue only if it says `claimed`.
 # Not `set -e`: the status of the final command is the script's status.
@@ -16,4 +19,4 @@ case "$N" in
 esac
 
 LOCKDIR="$(git rev-parse --path-format=absolute --git-common-dir)/work-issue-lock-$N"
-date +%s > "$LOCKDIR/heartbeat.tmp" && mv "$LOCKDIR/heartbeat.tmp" "$LOCKDIR/heartbeat"
+date +%s > "$LOCKDIR/heartbeat.tmp.$$" && mv "$LOCKDIR/heartbeat.tmp.$$" "$LOCKDIR/heartbeat"

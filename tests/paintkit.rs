@@ -7413,6 +7413,804 @@ fn ghostscript_accepts_the_directional_wet_demo() {
     );
 }
 
+// --- pkwet: a procedural /Under (issue #179) -------------------------
+//
+// /Under may be `x y -> r g b`, asked once per softening pass at /At plus
+// the pass's displacement. What has to hold: a literal [r g b] is untouched
+// (the byte-identity half is scripts/identity_check.sh against the
+// committed renders), a procedure that always answers the literal's colour
+// draws exactly what the literal does, the rim over a graded backdrop
+// really does go, and every malformed answer is a named error that leaves
+// pkwet usable.
+
+/// A cloud sprayed over a 300x150 vertical gradient, softened with
+/// `under_opts`. The same marks and seed whichever /Under is given.
+fn graded_cloud(under_opts: &str) -> Interp {
+    let mut it = fresh(300, 150);
+    it.run_str(&format!(
+        "/skyat {{ 150 div 0 max 1 min /skt exch def \
+           [ 0.98 0.86 0.68 ] [ 0.06 0.16 0.50 ] skt mix3 }} def \
+         0 1 149 {{ /gy exch def gy skyat setrgbcolor \
+           newpath 0 gy moveto 300 gy lineto 300 gy 2 add lineto 0 gy 2 add lineto \
+           closepath fill }} for \
+         0.99 0.98 0.97 setrgbcolor 41 srand \
+         {{ newpath 50 68 moveto 100 84 150 56 215 74 curveto \
+            << /Nozzle 10 /Density 380 /Falloff 1 /Speck 1.1 /Overspray 0.4 >> pkspray \
+            newpath 75 62 moveto 130 70 170 54 235 64 curveto \
+            << /Nozzle 8 /Density 300 /Falloff 1 /Speck 1.1 /Overspray 0.45 >> pkspray }} \
+         << /Soft 1 /Offset 34 /Layers 6 {under_opts} >> pkwet"
+    ))
+    .unwrap_or_else(|e| panic!("{under_opts}: {}", it.error_report(&e)));
+    it
+}
+
+/// How far the fringe of `graded_cloud` is from "cloud blended into the
+/// local sky": each pixel's residual after the best blend between the sky
+/// at its own height and the cloud's cream, summed over the page rows
+/// `gy` (height above the horizon). A pass mixed toward the wrong backdrop
+/// is a colour no such blend makes.
+fn rim_residual(it: &Interp, gy: std::ops::Range<u32>) -> f64 {
+    let (top, low, cream) = ([0.06, 0.16, 0.50], [0.98, 0.86, 0.68], [0.99, 0.98, 0.97]);
+    let mut sum = 0.0;
+    for gy in gy {
+        let t = gy as f64 / 150.0;
+        let sky: Vec<f64> = (0..3).map(|c| low[c] + (top[c] - low[c]) * t).collect();
+        let d: Vec<f64> = (0..3).map(|c| cream[c] - sky[c]).collect();
+        let dd: f64 = d.iter().map(|v| v * v).sum();
+        for x in 0..300u32 {
+            let p = it.gfx().pixmap.pixel(x, 149 - gy).expect("in bounds");
+            let v = [p.red(), p.green(), p.blue()].map(|c| c as f64 / 255.0);
+            let v: Vec<f64> = (0..3).map(|c| v[c] - sky[c]).collect();
+            let a = (v.iter().zip(&d).map(|(a, b)| a * b).sum::<f64>() / dd).clamp(0.0, 1.0);
+            sum += (0..3)
+                .map(|c| (v[c] - a * d[c]).powi(2))
+                .sum::<f64>()
+                .sqrt();
+        }
+    }
+    sum
+}
+
+/// The acceptance criterion: over a strong vertical gradient the one-colour
+/// /Under (the sky at the cloud's centre, which is what an artist
+/// hand-matches) leaves a rim, and the procedure removes most of it.
+/// Measured when this was written, rows 15..135: 264.6 against 121.2
+/// (2.2x). Below the cloud, where the gradient is furthest from the
+/// hand-matched colour, 206.9 against 80.6 (2.6x); above it, 57.7 against
+/// 40.6, a smaller win, so only the total and the lower half are asserted.
+/// The bound is 1.6x so a re-tuned brush cannot flip it, but a procedure
+/// that was silently ignored (or evaluated at one fixed point) gives 1.0x.
+#[test]
+fn wet_procedural_under_removes_the_rim_over_a_gradient() {
+    let constant =
+        graded_cloud("/Under [ 0.06 0.16 0.50 ] [ 0.98 0.86 0.68 ] 70 150 div mix3 3 array astore");
+    let procedural = graded_cloud(
+        "/At [ 135 70 ] /Under { exch pop 150 div 0 max 1 min /skt exch def \
+           [ 0.98 0.86 0.68 ] [ 0.06 0.16 0.50 ] skt mix3 }",
+    );
+    let (c, p) = (
+        rim_residual(&constant, 15..135),
+        rim_residual(&procedural, 15..135),
+    );
+    assert!(
+        c > 1.6 * p,
+        "the procedure should cut the rim: constant {c:.1}, procedural {p:.1}"
+    );
+    let (c, p) = (
+        rim_residual(&constant, 15..70),
+        rim_residual(&procedural, 15..70),
+    );
+    assert!(
+        c > 1.6 * p,
+        "the rim below the cloud should go: constant {c:.1}, procedural {p:.1}"
+    );
+}
+
+/// A procedure that always answers the literal's colour draws what the
+/// literal draws, to the byte: the plan, the draws and the mixes are the
+/// same ones, and the procedure is ignored for everything but the colour.
+/// Isotropic and directional, one-colour inheritance.
+#[test]
+fn wet_procedural_under_that_is_constant_matches_the_literal() {
+    for opts in [
+        "/Soft 0.9",
+        "/Soft 1 /Offset 20 /Layers 5 /Pickup 0.7",
+        "/Direction 270 /OneSided true /Offset 18",
+        "/Direction 0 /Offset 12 /Stretch 3",
+        "/Soft 0",
+    ] {
+        let run = |under: &str| {
+            let mut it = fresh(400, 200);
+            it.run_str(&format!(
+                "0.1 0.2 0.3 setrgbcolor 11 srand {{ {WET_MARK} }} << {opts} {under} >> pkwet"
+            ))
+            .unwrap_or_else(|e| panic!("{opts}: {}", it.error_report(&e)));
+            pixels(&it)
+        };
+        assert_eq!(
+            run("/Under [ 0.62 0.72 0.86 ]"),
+            run("/At [ 200 100 ] /Under { pop pop 0.62 0.72 0.86 }"),
+            "{opts}: a constant procedure must match the literal"
+        );
+    }
+}
+
+/// Loaded colours read the per-pass backdrop through `puwet` (frame slot
+/// 7), so a pull of a two-colour stroke grades the same under a constant
+/// procedure as under the literal.
+#[test]
+fn wet_procedural_under_grades_loaded_colors_like_the_literal() {
+    for (preset, base) in LOAD_PRESETS {
+        let run = |under: &str| {
+            let it = wet_loaded(
+                "0 0 0 setrgbcolor",
+                &format!(
+                    "newpath 50 160 moveto 350 160 lineto \
+                     << {base} /Colors [[1 0 0] [0 0 1]] /ColorMix 0 >> {preset}"
+                ),
+                &format!("/Direction 270 /OneSided true /Layers 3 /Offset 80 {under}"),
+            );
+            pixels(&it)
+        };
+        assert_eq!(
+            run("/Under [0 1 0]"),
+            run("/At [ 200 100 ] /Under { pop pop 0 1 0 }"),
+            "{preset}: loaded colours under a constant procedure"
+        );
+    }
+}
+
+/// And it is really per pass: a procedure whose answer depends on y gives
+/// the passes different backdrops, so a loaded pull over a gradient is not
+/// the literal's render (guards slot 7 and the per-pass read in `puwet`
+/// against being a constant in disguise).
+#[test]
+fn wet_procedural_under_varies_per_pass_for_loaded_colors_too() {
+    let preset = "pkbroad";
+    let base = "/Width 50 /Charge 1 /Depletion 0 /Edge 0 /ColorJitter 0";
+    let run = |under: &str| {
+        let it = wet_loaded(
+            "0 0 0 setrgbcolor",
+            &format!(
+                "newpath 50 160 moveto 350 160 lineto \
+                 << {base} /Colors [[1 0 0] [0 0 1]] /ColorMix 0 >> {preset}"
+            ),
+            &format!("/Direction 270 /OneSided true /Layers 3 /Offset 80 {under}"),
+        );
+        pixels(&it)
+    };
+    assert_ne!(
+        run("/Under [0 1 0]"),
+        run("/At [ 200 160 ] /Under { exch pop 200 div 0 max 1 min 0 exch 0 exch }"),
+        "a per-pass backdrop must reach the loaded colours"
+    );
+}
+
+/// What the procedure is asked: once per softening pass, never for the
+/// core, at /At plus that pass's displacement, in the user space of the
+/// call, with nothing of pkwet's on the operand stack.
+#[test]
+fn wet_procedural_under_is_asked_per_pass_at_the_displaced_point() {
+    let mut it = fresh(200, 200);
+    it.run_str(
+        "userdict /asked [ ] put userdict /depths [ ] put \
+         1 0 0 setrgbcolor 3 srand \
+         { newpath 20 20 moveto 60 20 lineto << /Width 4 >> pkribbon } \
+         << /Direction 270 /OneSided true /Offset 12 /Layers 3 /At [ 5 100 ] \
+            /Under { count /c exch def /y exch def /x exch def \
+                     userdict /asked [ asked aload pop x y ] put \
+                     userdict /depths [ depths aload pop c ] put \
+                     0.5 0.5 0.5 } >> pkwet \
+         asked aload pop depths aload pop count",
+    )
+    .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+    let st: Vec<f64> = it
+        .operand_stack()
+        .iter()
+        .map(|o| o.repr().to_string().parse().expect("number"))
+        .collect();
+    // asked: x1 y1 x2 y2, depths: d1 d2, then the count of this probe's own items.
+    assert_eq!(st.len(), 7, "{st:?}");
+    assert!(
+        (st[1] - 94.0).abs() < 0.01 && (st[3] - 88.0).abs() < 0.01,
+        "{st:?}"
+    );
+    assert!(
+        (st[0] - 5.0).abs() < 3.0 && (st[2] - 5.0).abs() < 3.0,
+        "{st:?}"
+    );
+    // The procedure saw its two position operands and nothing else: the
+    // count at entry is 2, plus what the caller had under pkwet (nothing).
+    assert_eq!((st[4], st[5]), (2.0, 2.0), "{st:?}");
+}
+
+/// Every malformed answer is a named error, the depth counter is where
+/// it was, and the operand stack is the caller's again.
+#[test]
+fn wet_procedural_under_rejects_malformed_answers_by_name() {
+    let m = "{ newpath 10 10 moveto 100 10 lineto << /Width 10 >> pkribbon }";
+    for (opts, want) in [
+        ("/Under { pop pop 0 0 0 }", "pkwet-under-procedure-needs-at"),
+        (
+            "/Under [ 0 0 0 ] /At [ 0 0 ]",
+            "pkwet-at-needs-an-under-procedure",
+        ),
+        (
+            "/Under { pop pop 0 0 0 } /At 5",
+            "pkwet-at-must-be-an-x-y-pair",
+        ),
+        (
+            "/Under { pop pop 0 0 0 } /At [ 1 2 3 ]",
+            "pkwet-at-must-be-an-x-y-pair",
+        ),
+        (
+            "/Under { pop pop 0 0 0 } /At [ (a) 2 ]",
+            "pkwet-at-must-be-an-x-y-pair",
+        ),
+        (
+            "/Under { pop pop 0 0 0 } /At { 1 2 }",
+            "pkwet-at-must-not-be-a-procedure",
+        ),
+        (
+            "/Under { pop pop 1 2 } /At [ 0 0 ]",
+            "pkwet-under-procedure-must-return-3-numbers",
+        ),
+        (
+            "/Under { pop pop 1 2 3 4 } /At [ 0 0 ]",
+            "pkwet-under-procedure-must-return-3-numbers",
+        ),
+        (
+            "/Under { } /At [ 0 0 ]",
+            "pkwet-under-procedure-must-return-3-numbers",
+        ),
+        (
+            "/Under { pop pop } /At [ 0 0 ]",
+            "pkwet-under-procedure-must-return-3-numbers",
+        ),
+        (
+            "/Under { pop pop (a) 0 0 } /At [ 0 0 ]",
+            "pkwet-under-procedure-results-must-be-numbers",
+        ),
+        (
+            "/Under { pop pop 0 0 [ 1 ] } /At [ 0 0 ]",
+            "pkwet-under-procedure-results-must-be-numbers",
+        ),
+        (
+            "/Under { pop pop 0 -0.1 0 } /At [ 0 0 ]",
+            "pkwet-under-procedure-results-must-be-0-to-1",
+        ),
+        (
+            "/Under { pop pop 0 0 1.5 } /At [ 0 0 ]",
+            "pkwet-under-procedure-results-must-be-0-to-1",
+        ),
+    ] {
+        // Caught, then a clean call: the guard must not poison the next
+        // pkwet, nor leave a gsave, nor leave junk on the stack.
+        let mut it = fresh(120, 120);
+        it.run_str(&format!(
+            "0 0 0 setrgbcolor 5 srand clear \
+             {{ {m} << /Soft 1 {opts} >> pkwet }} stopped \
+             {{ $error /command get = count pqdepth }} {{ (no error) = }} ifelse"
+        ))
+        .unwrap_or_else(|e| panic!("{opts}: {}", it.error_report(&e)));
+        let st: Vec<String> = it
+            .operand_stack()
+            .iter()
+            .map(|o| o.repr().to_string())
+            .collect();
+        // A bad answer from the procedure is cleaned up after (the stack is
+        // the caller's again). A bad option, like every option guard in
+        // this file, leaves its offending operand where it raised.
+        let answer = opts.contains("/Under {") && opts.contains("/At [ 0 0 ]");
+        assert_eq!(
+            st.last().map(String::as_str),
+            Some("0"),
+            "{opts}: depth {st:?}"
+        );
+        if answer {
+            assert_eq!(st, ["0", "0"], "{opts}: stack {st:?} (count then depth)");
+        }
+        let mut it = fresh(120, 120);
+        let e = it
+            .run_str(&format!("{m} << /Soft 1 {opts} >> pkwet"))
+            .unwrap_err();
+        let report = it.error_report(&e).to_string();
+        assert!(report.contains(want), "{opts}: wanted {want}, got {report}");
+        // The call after the rejection still paints, one gsave level
+        // deep from where it started.
+        let mut it = fresh(120, 120);
+        it.run_str(&format!(
+            "0 0 0 setrgbcolor 5 srand \
+             {{ {m} << /Soft 1 {opts} >> pkwet }} stopped pop \
+             {m} << /Soft 1 >> pkwet"
+        ))
+        .unwrap_or_else(|e| panic!("{opts}: {}", it.error_report(&e)));
+        assert!(
+            ink_count(&it) > 100,
+            "{opts}: the call after a rejection painted nothing"
+        );
+    }
+}
+
+/// An error raised *inside* the backdrop procedure unwinds like one raised
+/// inside the wrapped procedure: the depth is put back, so the next
+/// top-level pkwet is not one level deeper.
+#[test]
+fn wet_procedural_under_that_raises_leaves_the_depth_alone() {
+    let mut it = fresh(120, 120);
+    it.run_str(
+        "0 0 0 setrgbcolor 5 srand \
+         { { newpath 10 10 moveto 100 10 lineto << /Width 10 >> pkribbon } \
+           << /Soft 1 /At [ 0 0 ] /Under { nosuchname } >> pkwet } stopped pop \
+         pqdepth",
+    )
+    .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+    assert_eq!(it.operand_stack().last().expect("depth").repr(), "0");
+}
+
+// --- pkwet: a backdrop per band (issue #359) -------------------------
+//
+// /Box [x y w h] with /Bands [cols rows] asks the /Under procedure once per
+// cell of a grid over the mark and runs each softening pass once per cell,
+// clipped to it, so the backdrop varies across a tall mark and not just
+// from pass to pass. What has to hold: a banded call over a backdrop that
+// never changes draws what the literal does (the cells fit together, no
+// seams, the random stream comes out where one run leaves it), the rim over
+// a gradient is smaller than per pass on a tall mark and no worse on a short
+// one, and the guards are named and unwind.
+
+/// A tall column sprayed over the same 300x150 gradient as `graded_cloud`
+/// (110pt of its 150), softened with `under_opts`.
+fn graded_column(under_opts: &str) -> Interp {
+    let mut it = fresh(300, 150);
+    it.run_str(&format!(
+        "/skyat {{ 150 div 0 max 1 min /skt exch def \
+           [ 0.98 0.86 0.68 ] [ 0.06 0.16 0.50 ] skt mix3 }} def \
+         0 1 149 {{ /gy exch def gy skyat setrgbcolor \
+           newpath 0 gy moveto 300 gy lineto 300 gy 2 add lineto 0 gy 2 add lineto \
+           closepath fill }} for \
+         0.99 0.98 0.97 setrgbcolor 41 srand \
+         {{ newpath 150 20 moveto 150 130 lineto \
+            << /Nozzle 12 /Density 380 /Falloff 1 /Speck 1.1 /Overspray 0.4 >> pkspray }} \
+         << /Soft 1 /Offset 34 /Layers 6 {under_opts} >> pkwet"
+    ))
+    .unwrap_or_else(|e| panic!("{under_opts}: {}", it.error_report(&e)));
+    it
+}
+
+const SKY_FN: &str = "{ exch pop 150 div 0 max 1 min /skt exch def \
+       [ 0.98 0.86 0.68 ] [ 0.06 0.16 0.50 ] skt mix3 }";
+
+/// The acceptance criterion: on a mark that is tall against a strong
+/// gradient, a backdrop per band leaves a smaller rim than the one per pass
+/// (#179), and the more rows the smaller. Measured when this was written,
+/// rows 15..135 of `graded_column`: per pass 186.7, 1x2 149.9, 1x4 112.5,
+/// 1x8 82.9 (2.25x). On the short cloud per pass is already near the
+/// answer, so few rows are worse than it (1x3: 146.9 against 119.8) and
+/// enough are better (1x6: 98.4): bands are for marks taller than about
+/// /Offset, and a cell wants to be no taller than about half /Offset.
+#[test]
+fn wet_bands_remove_more_of_the_rim_than_one_backdrop_per_pass() {
+    let per_pass = graded_column(&format!("/At [ 150 75 ] /Under {SKY_FN}"));
+    let banded = |rows: u32| {
+        graded_column(&format!(
+            "/Box [ 120 20 60 110 ] /Bands [ 1 {rows} ] /Under {SKY_FN}"
+        ))
+    };
+    let p = rim_residual(&per_pass, 15..135);
+    let (b4, b8) = (
+        rim_residual(&banded(4), 15..135),
+        rim_residual(&banded(8), 15..135),
+    );
+    assert!(p > 1.3 * b4, "4 rows: per pass {p:.1}, banded {b4:.1}");
+    assert!(p > 1.6 * b8, "8 rows: per pass {p:.1}, banded {b8:.1}");
+    assert!(b4 > b8, "more rows, less rim: {b4:.1} then {b8:.1}");
+
+    // The short mark: with enough rows, no worse than per pass.
+    let c = rim_residual(
+        &graded_cloud(&format!("/At [ 135 70 ] /Under {SKY_FN}")),
+        15..135,
+    );
+    let b = rim_residual(
+        &graded_cloud(&format!(
+            "/Box [ 50 56 185 30 ] /Bands [ 1 6 ] /Under {SKY_FN}"
+        )),
+        15..135,
+    );
+    assert!(
+        b < 1.1 * c,
+        "the short cloud: per pass {c:.1}, banded {b:.1}"
+    );
+}
+
+/// A backdrop that never changes: the banded call draws what the literal
+/// draws, up to the clip's coverage rounding, and leaves the random stream
+/// where it leaves it. That one comparison is "the cells fit together, with
+/// no seam at a cell edge (even one that falls inside a pixel), and the
+/// replayed stream consumes exactly one run".
+#[test]
+fn wet_bands_over_a_constant_backdrop_match_the_literal() {
+    for opts in [
+        "/Soft 1 /Offset 20 /Layers 4",
+        "/Soft 0.9",
+        "/Direction 270 /OneSided true /Offset 18 /Layers 5",
+        "/Direction 0 /Offset 12 /Stretch 3 /Layers 5",
+    ] {
+        let run = |under: &str| {
+            let mut it = fresh(300, 200);
+            it.run_str(&format!(
+                "0.9 0.9 0.9 setrgbcolor clippath fill 0.2 0.2 0.2 setrgbcolor 7 srand \
+                 {{ newpath 150 20 moveto 150 180 lineto << /Width 26 >> pkribbon \
+                    newpath 100 60 moveto 220 140 lineto << /Width 12 /Roughness 0.6 >> pkribbon }} \
+                 << {opts} {under} >> pkwet rand"
+            ))
+            .unwrap_or_else(|e| panic!("{opts}: {}", it.error_report(&e)));
+            let next = it.operand_stack().last().expect("rand").repr().to_string();
+            (pixels(&it), next)
+        };
+        let (lit, lit_next) = run("/Under [ 0.5 0.6 0.7 ]");
+        for bands in [
+            "/Box [ 130 20 40 160 ] /Bands [ 1 4 ]",
+            "/Box [ 101.3 20.7 119 160 ] /Bands [ 3 3 ]",
+            "/Box [ 130 20 40 160 ] /Bands [ 1 1 ]",
+        ] {
+            let (b, b_next) = run(&format!("{bands} /Under {{ pop pop 0.5 0.6 0.7 }}"));
+            assert_eq!(b_next, lit_next, "{opts} {bands}: the stream moved");
+            let worst = lit.iter().zip(&b).map(|(a, b)| a.abs_diff(*b)).max();
+            assert!(
+                worst <= Some(3),
+                "{opts} {bands}: a seam or a moved mark, worst channel step {worst:?}"
+            );
+        }
+    }
+    // The control: a backdrop that varies down the page is not the literal.
+    let mut it = fresh(300, 200);
+    it.run_str(
+        "0.9 0.9 0.9 setrgbcolor clippath fill 0.2 0.2 0.2 setrgbcolor 7 srand \
+         { newpath 150 20 moveto 150 180 lineto << /Width 26 >> pkribbon } \
+         << /Soft 1 /Offset 20 /Layers 4 /Box [ 130 20 40 160 ] /Bands [ 1 4 ] \
+            /Under { exch pop 200 div 0 0 3 -1 roll } >> pkwet",
+    )
+    .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+    let mut lit = fresh(300, 200);
+    lit.run_str(
+        "0.9 0.9 0.9 setrgbcolor clippath fill 0.2 0.2 0.2 setrgbcolor 7 srand \
+         { newpath 150 20 moveto 150 180 lineto << /Width 26 >> pkribbon } \
+         << /Soft 1 /Offset 20 /Layers 4 /Under [ 0 0 0.5 ] >> pkwet",
+    )
+    .expect("literal");
+    let worst = pixels(&it)
+        .iter()
+        .zip(pixels(&lit))
+        .map(|(a, b)| a.abs_diff(b))
+        .max();
+    assert!(worst > Some(30), "the control should differ: {worst:?}");
+}
+
+/// The same two-ribbon scene as the constant-backdrop test, under `pre`
+/// (a transform) and optionally `--sweep-seed`'s override: its pixels, and
+/// the next `rand`.
+fn bands_scene(pre: &str, opts: &str, ov: Option<i64>) -> (Vec<u8>, String) {
+    let mut it = fresh(300, 200);
+    it.set_seed_override(ov);
+    it.run_str(&format!(
+        "0.9 0.9 0.9 setrgbcolor clippath fill {pre} 0.2 0.2 0.2 setrgbcolor 7 srand \
+         {{ newpath 150 20 moveto 150 180 lineto << /Width 26 >> pkribbon \
+            newpath 100 60 moveto 220 140 lineto << /Width 12 /Roughness 0.6 >> pkribbon }} \
+         << /Soft 1 /Offset 20 /Layers 4 {opts} >> pkwet rand"
+    ))
+    .unwrap_or_else(|e| panic!("{pre} {opts}: {}", it.error_report(&e)));
+    let next = it.operand_stack().last().expect("rand").repr().to_string();
+    (pixels(&it), next)
+}
+
+fn worst_step(a: &[u8], b: &[u8]) -> u8 {
+    a.iter()
+        .zip(b)
+        .map(|(a, b)| a.abs_diff(*b))
+        .max()
+        .unwrap_or(0)
+}
+
+/// `--sweep-seed` intercepts every `srand`, and the banded call's replay is
+/// an `srand` of an `rrand` value: that has to come back exactly (#202), or
+/// the cells would draw different marks and the pieces would not fit.
+#[test]
+fn wet_bands_fit_together_under_a_sweep_seed() {
+    let lit = bands_scene("", "/Under [ 0.5 0.6 0.7 ]", Some(99));
+    let banded = bands_scene(
+        "",
+        "/Box [ 101.3 20.7 119 160 ] /Bands [ 3 3 ] /Under { pop pop 0.5 0.6 0.7 }",
+        Some(99),
+    );
+    assert_eq!(banded.1, lit.1, "the stream moved under the override");
+    let w = worst_step(&banded.0, &lit.0);
+    assert!(w <= 3, "the cells do not fit under the override: {w}");
+    // Not the unforced scene: the override really was in force.
+    let plain = bands_scene("", "/Under [ 0.5 0.6 0.7 ]", None);
+    assert!(
+        worst_step(&plain.0, &lit.0) > 30,
+        "the override changed nothing"
+    );
+}
+
+/// A quarter-turned page: the pixel snap rounds both device coordinates, so
+/// the grid keeps its shape (a constant backdrop matches the literal; a
+/// varying one at 4 rows is not the one at 2).
+#[test]
+fn wet_bands_keep_their_grid_on_a_quarter_turned_page() {
+    for pre in ["300 0 translate 90 rotate", "0 200 translate -90 rotate"] {
+        // The scene is drawn in the turned space, so aim it inside the page.
+        let (lit, ln) = bands_scene(pre, "/Under [ 0.5 0.6 0.7 ]", None);
+        let (b, bn) = bands_scene(
+            pre,
+            "/Box [ 130 20 40 160 ] /Bands [ 2 4 ] /Under { pop pop 0.5 0.6 0.7 }",
+            None,
+        );
+        assert_eq!(bn, ln, "{pre}: the stream moved");
+        assert!(worst_step(&lit, &b) <= 3, "{pre}: a seam or a moved mark");
+        let sky = "/Under { exch pop 200 div 0 0 3 -1 roll }";
+        let (r2, _) = bands_scene(
+            pre,
+            &format!("/Box [ 130 20 40 160 ] /Bands [ 1 2 ] {sky}"),
+            None,
+        );
+        let (r4, _) = bands_scene(
+            pre,
+            &format!("/Box [ 130 20 40 160 ] /Bands [ 1 4 ] {sky}"),
+            None,
+        );
+        assert!(worst_step(&r2, &r4) > 10, "{pre}: 4 rows are 2 rows");
+    }
+}
+
+/// The snap itself, on a quarter turn and flipped: distinct user
+/// coordinates stay distinct (a one-coordinate snap collapses every inner
+/// edge of the grid to one value) and each moves by under a pixel.
+#[test]
+fn wet_band_edges_snap_to_device_pixels_on_every_axis_aligned_ctm() {
+    for pre in [
+        "",
+        "1 -1 scale 0 -200 translate",
+        "300 0 translate 90 rotate",
+        "0 200 translate -90 rotate",
+        "2 2 scale",
+    ] {
+        let mut it = fresh(300, 200);
+        it.run_str(&format!(
+            "gsave {pre} 10.3 pqsx 20.3 pqsx 40.7 pqsx 10.3 pqsy 20.3 pqsy 40.7 pqsy grestore"
+        ))
+        .unwrap_or_else(|e| panic!("{pre}: {}", it.error_report(&e)));
+        let v: Vec<f64> = it
+            .operand_stack()
+            .iter()
+            .map(|o| o.repr().to_string().parse().expect("number"))
+            .collect();
+        let scale = if pre == "2 2 scale" { 2.0 } else { 1.0 };
+        for (got, want) in v.iter().zip([10.3, 20.3, 40.7, 10.3, 20.3, 40.7]) {
+            assert!((got - want).abs() <= 1.0 / scale, "{pre}: {v:?}");
+        }
+        assert!(
+            v[0] < v[1] && v[1] < v[2] && v[3] < v[4] && v[4] < v[5],
+            "{pre}: {v:?}"
+        );
+    }
+}
+
+/// A single-layer call has only the core, which asks nothing: `/Soft 0`
+/// with `/Box` never runs the backdrop procedure, as with `/At`.
+#[test]
+fn wet_bands_at_soft_zero_ask_nothing() {
+    let mut it = fresh(100, 100);
+    it.run_str(
+        "userdict /pwn 0 put 0 0 0 setrgbcolor \
+         { newpath 10 10 moveto 90 10 lineto << /Width 6 >> pkribbon } \
+         << /Soft 0 /Box [ 10 5 80 10 ] /Bands [ 2 2 ] \
+            /Under { pop pop userdict /pwn pwn 1 add put 0 0 0 } >> pkwet pwn",
+    )
+    .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+    assert_eq!(it.operand_stack().last().expect("pwn").repr(), "0");
+}
+
+/// What the procedure is asked: once per cell (not per pass, never for the
+/// core), at the cell's centre in the grid that is /Box grown by /Offset,
+/// in the user space of the call, with nothing of pkwet's on the stack.
+#[test]
+fn wet_bands_ask_once_per_cell_at_its_centre() {
+    let mut it = fresh(200, 200);
+    it.run_str(
+        "userdict /asked [ ] put userdict /depths [ ] put 0 0 0 setrgbcolor 3 srand \
+         { newpath 20 20 moveto 60 20 lineto << /Width 4 >> pkribbon } \
+         << /Layers 4 /Offset 10 /Box [ 40 50 60 30 ] /Bands [ 2 2 ] \
+            /Under { count /c exch def /y exch def /x exch def \
+                     userdict /asked [ asked aload pop x y ] put \
+                     userdict /depths [ depths aload pop c ] put \
+                     0.5 0.5 0.5 } >> pkwet \
+         asked aload pop depths aload pop",
+    )
+    .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+    let st: Vec<f64> = it
+        .operand_stack()
+        .iter()
+        .map(|o| o.repr().to_string().parse().expect("number"))
+        .collect();
+    // The grid: x 30..110 and y 40..90, 40 by 25 a cell, row by row.
+    assert_eq!(
+        st,
+        [
+            50.0, 52.5, 90.0, 52.5, 50.0, 77.5, 90.0, 77.5, 2.0, 2.0, 2.0, 2.0
+        ],
+        "{st:?}"
+    );
+}
+
+/// A procedure that raises inside a banded pass unwinds like an unbanded
+/// one: the depth is put back, no gsave is left over, and the caller's
+/// colour is its own again. So does one that raises in the backdrop.
+#[test]
+fn wet_bands_unwind_on_every_exit() {
+    for body in [
+        "{ newpath 10 10 moveto 100 10 lineto << /Width 8 >> pkribbon nosuchname }",
+        "{ newpath 10 10 moveto 100 10 lineto << /Width 8 >> pkribbon }",
+    ] {
+        for under in [
+            "{ pop pop 0.5 0.5 0.5 }",
+            "{ nosuchname }",
+            "{ pop pop 1 2 }",
+        ] {
+            let mut it = fresh(120, 120);
+            it.run_str(&format!(
+                "0.1 0.2 0.3 setrgbcolor 5 srand gsave \
+                 {{ {body} << /Soft 1 /Box [ 10 5 90 10 ] /Bands [ 3 2 ] /Under {under} >> pkwet }} \
+                 stopped pop \
+                 currentrgbcolor pqdepth \
+                 grestore"
+            ))
+            .unwrap_or_else(|e| panic!("{body} {under}: {}", it.error_report(&e)));
+            let st: Vec<String> = it
+                .operand_stack()
+                .iter()
+                .map(|o| o.repr().to_string())
+                .collect();
+            assert_eq!(st.last().map(String::as_str), Some("0"), "{body}: {st:?}");
+            let rgb: Vec<f64> = st[st.len() - 4..st.len() - 1]
+                .iter()
+                .map(|v| v.parse().expect("number"))
+                .collect();
+            assert!(
+                rgb.iter()
+                    .zip([0.1, 0.2, 0.3])
+                    .all(|(a, b)| (a - b).abs() < 1e-5),
+                "{body} {under}: the caller's colour is {rgb:?}"
+            );
+        }
+    }
+}
+
+/// A banded call inside the wrapped procedure of a banded call: each takes
+/// its own frame (the grid, the saved stream and the cell backdrop live
+/// there, not in names the inner call would overwrite), and the whole
+/// nest is within the budget it is charged for.
+#[test]
+fn wet_bands_nest() {
+    let mut it = fresh(200, 200);
+    it.run_str(
+        "0.1 0.1 0.1 setrgbcolor 9 srand \
+         { { newpath 20 40 moveto 180 40 lineto << /Width 10 >> pkribbon } \
+           << /Layers 2 /Offset 6 /Box [ 20 30 160 20 ] /Bands [ 2 1 ] \
+              /Under { pop pop 0.9 0.5 0.1 } >> pkwet } \
+         << /Layers 2 /Offset 6 /Box [ 20 30 160 20 ] /Bands [ 1 2 ] \
+            /Under { pop pop 0.2 0.5 0.9 } >> pkwet \
+         pqdepth",
+    )
+    .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+    assert_eq!(it.operand_stack().last().expect("depth").repr(), "0");
+    assert!(ink_count(&it) > 300, "the nest painted nothing");
+}
+
+/// A loaded colour grades toward the cell's backdrop (frame slot 5, which
+/// `puwet` reads): under a constant procedure a banded pull of a two-colour
+/// stroke is the unbanded literal's, to clip rounding, and under one that
+/// varies down the page it is not.
+#[test]
+fn wet_bands_grade_loaded_colors_toward_the_cell() {
+    for (preset, base) in LOAD_PRESETS {
+        let run = |under: &str| {
+            let it = wet_loaded(
+                "0 0 0 setrgbcolor",
+                &format!(
+                    "newpath 50 160 moveto 350 160 lineto \
+                     << {base} /Colors [[1 0 0] [0 0 1]] /ColorMix 0 >> {preset}"
+                ),
+                &format!("/Direction 270 /OneSided true /Layers 3 /Offset 80 {under}"),
+            );
+            pixels(&it)
+        };
+        let lit = run("/Under [0 1 0]");
+        let worst = |other: Vec<u8>| lit.iter().zip(other).map(|(a, b)| a.abs_diff(b)).max();
+        let same = run("/Box [ 50 150 300 20 ] /Bands [ 2 3 ] /Under { pop pop 0 1 0 }");
+        assert!(
+            worst(same) <= Some(3),
+            "{preset}: a banded loaded pull under a constant procedure"
+        );
+        let varied = run(
+            "/Box [ 50 150 300 20 ] /Bands [ 1 3 ] /Under { exch pop 200 div 0 max 1 min 0 exch 0 exch }",
+        );
+        assert!(
+            worst(varied) > Some(30),
+            "{preset}: the cell backdrop must reach the loaded colours"
+        );
+    }
+}
+
+/// The banded specimen runs under Ghostscript too (`rectclip`, `rrand` and
+/// `srand` are plain PostScript; its random scatter differs).
+#[test]
+fn ghostscript_accepts_paintkit_wet_bands_demo() {
+    let gs_ok = std::process::Command::new("gs")
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success());
+    if !gs_ok {
+        eprintln!("skipping gs compatibility check: gs not installed");
+        return;
+    }
+    let out = std::process::Command::new("gs")
+        .args([
+            "-dNOSAFER",
+            "-dNOPAUSE",
+            "-dBATCH",
+            "-q",
+            "-sDEVICE=png16m",
+            "-g640x310",
+            "-r72",
+            "-o/dev/null",
+            "examples/paintkit_wet_bands_demo.ps",
+        ])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("run gs");
+    assert!(
+        out.status.success() && !String::from_utf8_lossy(&out.stdout).contains("Error"),
+        "gs rejected examples/paintkit_wet_bands_demo.ps: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}
+
+/// The specimen runs under Ghostscript too (its `exch pop` backdrop and
+/// every key are plain PostScript; its random scatter differs).
+#[test]
+fn ghostscript_accepts_paintkit_wet_under_demo() {
+    let gs_ok = std::process::Command::new("gs")
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success());
+    if !gs_ok {
+        eprintln!("skipping gs compatibility check: gs not installed");
+        return;
+    }
+    let out = std::process::Command::new("gs")
+        .args([
+            "-dNOSAFER",
+            "-dNOPAUSE",
+            "-dBATCH",
+            "-q",
+            "-sDEVICE=png16m",
+            "-g640x250",
+            "-r72",
+            "-o/dev/null",
+            "examples/paintkit_wet_under_demo.ps",
+        ])
+        .output()
+        .expect("run gs");
+    assert!(
+        out.status.success() && !String::from_utf8_lossy(&out.stdout).contains("Error"),
+        "gs rejected examples/paintkit_wet_under_demo.ps: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}
+
 // --- pkdab: the foliage / dab brush (issue #117) ----------------------
 //
 // What the tool is defined by: clustered irregular dabs; one set of
@@ -8481,6 +9279,91 @@ fn assert_bowed_strokes_stay_within_their_length(code: &str, length: f64) {
 }
 
 #[test]
+fn pull_scatter_only_translates_each_start_across_the_spine() {
+    // /Scatter 0 and /Scatter 6 draw the same stream (a set key draws one
+    // more value per stroke, whatever its size), so the strokes are the
+    // same strokes and only their starts move: across the spine by up to 6.
+    let run = |scatter: f64| {
+        strokes(&motion_segs(&format!(
+            "5 srand {SPINE} << /Spacing 10 /Wander 0.6 /Lean 10 /Scatter {scatter} >> pkpull"
+        )))
+    };
+    let (flat, loose) = (run(0.0), run(6.0));
+    assert_eq!(flat.len(), loose.len());
+    let mut off = 0;
+    for (a, b) in flat.iter().zip(&loose) {
+        assert!((a.0.1 - 100.0).abs() < 1e-6, "scatter 0 leaves the spine");
+        assert!(
+            (a.0.0 - b.0.0).abs() < 1e-6,
+            "scatter slid a start along the spine"
+        );
+        assert!(
+            (b.0.1 - 100.0).abs() <= 6.0 + 1e-6,
+            "start {} is past /Scatter",
+            b.0.1
+        );
+        // the pull itself (its vector) is the same stroke
+        assert!(((a.1.0 - a.0.0) - (b.1.0 - b.0.0)).abs() < 1e-6);
+        assert!(((a.1.1 - a.0.1) - (b.1.1 - b.0.1)).abs() < 1e-6);
+        if (b.0.1 - 100.0).abs() > 0.5 {
+            off += 1;
+        }
+    }
+    assert!(
+        off > flat.len() / 2,
+        "only {off} of {} starts left the spine",
+        flat.len()
+    );
+}
+
+#[test]
+fn pull_scatter_is_across_the_spine_not_along_the_pull() {
+    // A vertical spine pulled sideways: the offset is horizontal (the spine's
+    // normal), so the starts stay on their even rows.
+    let s = strokes(&motion_segs(
+        "5 srand newpath 50 0 moveto 50 100 lineto \
+         << /Spacing 10 /Wander 0 /Direction 0 /Lean 0 /Scatter 6 >> pkpull",
+    ));
+    assert_eq!(s.len(), 11);
+    let mut off = 0;
+    for (i, st) in s.iter().enumerate() {
+        assert!(
+            (st.0.1 - 10.0 * i as f64).abs() < 1e-3,
+            "slid along the spine"
+        );
+        assert!((st.0.0 - 50.0).abs() <= 6.0 + 1e-6);
+        if (st.0.0 - 50.0).abs() > 0.5 {
+            off += 1;
+        }
+    }
+    assert!(off > 5, "only {off} starts left the spine");
+}
+
+#[test]
+fn pull_scatter_follows_the_normal_of_a_curved_spine() {
+    // Quarter circle of radius 100: starts stay within /Scatter of the arc.
+    let s = strokes(&motion_segs(
+        "5 srand newpath 100 0 moveto 0 0 100 0 90 arc \
+         << /Spacing 10 /Wander 0 /Scatter 5 >> pkpull",
+    ));
+    assert!(s.len() > 10);
+    let radii: Vec<f64> = s.iter().map(|st| st.0.0.hypot(st.0.1)).collect();
+    assert!(radii.iter().all(|r| (r - 100.0).abs() <= 5.3), "{radii:?}");
+    assert!(radii.iter().any(|r| (r - 100.0).abs() > 1.0), "{radii:?}");
+}
+
+#[test]
+fn pull_scatter_set_even_to_zero_draws_one_more_value_per_stroke() {
+    // Naming /Scatter costs one draw per stroke; leaving it out costs none
+    // (the render-identity check covers the unset stream against main).
+    let plain = |opts: &str| strokes(&motion_segs(&format!("5 srand {SPINE} {opts} pkpull")));
+    let set = plain("<< /Spacing 10 /Scatter 0 >>");
+    let unset = plain("<< /Spacing 10 >>");
+    assert_ne!(set, unset, "a set /Scatter draws one more value per stroke");
+    assert_eq!(set, plain("<< /Spacing 10 /Scatter 0 >>"), "deterministic");
+}
+
+#[test]
 fn bowed_pulls_do_not_overshoot_their_tip() {
     for dir in [0, 90, -90, 37] {
         assert_bowed_strokes_stay_within_their_length(
@@ -8691,7 +9574,15 @@ fn motions_advertise_exactly_their_tested_parameters() {
         ),
         (
             "pkscumblein",
-            &["Count", "Radius", "RadiusJitter", "Squash"][..],
+            &[
+                "Count",
+                "Feather",
+                "Light",
+                "Radius",
+                "RadiusJitter",
+                "Reach",
+                "Squash",
+            ][..],
         ),
         (
             "pkscumble",
@@ -8716,6 +9607,7 @@ fn motions_advertise_exactly_their_tested_parameters() {
                 "Lean",
                 "Length",
                 "LengthJitter",
+                "Scatter",
                 "Spacing",
                 "Wander",
             ][..],
@@ -8781,6 +9673,39 @@ fn ghostscript_accepts_the_motion_specimen() {
     assert!(
         status.success(),
         "gs rejected examples/paintkit_motion_demo.ps"
+    );
+}
+
+/// The light-aware massing specimen (issue #345) promises in its header that
+/// Ghostscript renders it too.
+#[test]
+fn ghostscript_accepts_the_massing_specimen() {
+    let gs_ok = std::process::Command::new("gs")
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success());
+    if !gs_ok {
+        eprintln!("skipping gs compatibility check: gs not installed");
+        return;
+    }
+    let status = std::process::Command::new("gs")
+        .args([
+            "-dNOSAFER",
+            "-dNOPAUSE",
+            "-dBATCH",
+            "-q",
+            "-sDEVICE=png16m",
+            "-g780x630",
+            "-r72",
+            "-o/dev/null",
+            "examples/paintkit_massing_demo.ps",
+        ])
+        .stdin(std::process::Stdio::null())
+        .status()
+        .expect("run gs");
+    assert!(
+        status.success(),
+        "gs rejected examples/paintkit_massing_demo.ps"
     );
 }
 
@@ -11277,5 +12202,116 @@ fn the_loading_demo_shows_what_each_panel_is_for() {
     assert!(
         far * 3 < near,
         "the pulled reflection does not fade: {near} near the bank, {far} at the foot"
+    );
+}
+
+/// Issue #299: pkribbon, pknib and pkfeather scan the whole path with their
+/// own `pathforall` before they reach `walkpath`, so walkpath's segment bound
+/// (issue #110) cannot fire first. The scan (`pkscanclosed`) now carries the
+/// same bound. Deterministic, not timed: `walkpath` is replaced by a stub that
+/// records it was reached, so a refusal that comes from walkpath's own pass
+/// (the old behaviour) fails here, however fast the machine is.
+#[test]
+fn pre_walkpath_scans_refuse_a_huge_segment_count_before_walkpath() {
+    for call in ["<< >> pkribbon", "<< >> pknib", "<< >> pkfeather"] {
+        let mut it = fresh(200, 200);
+        it.run_str(
+            "/reached false def /walkpath { pop pop /reached true def } def \
+             newpath 20 20 moveto 400000 { 0 0 rlineto } repeat 100 0 rlineto",
+        )
+        .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+        let err = it.run_str(call).expect_err(call);
+        assert!(
+            matches!(err, PsError::Undefined(ref n) if n == "walkpath-segment-count-exceeds-safety-limit"),
+            "{call}: expected the segment-count guard, got {err}"
+        );
+        assert_eq!(it.operand_stack().len(), 0, "{call}: clean operand stack");
+        it.run_str("reached").unwrap();
+        assert_eq!(
+            it.operand_stack()[0].repr(),
+            "false",
+            "{call}: refused by the pre-walkpath scan, not by walkpath"
+        );
+    }
+}
+
+/// The bound is the same one walkpath uses: exactly `wkmaxsegs` segments
+/// still draw (the scan must not refuse what walkpath accepts), one more is
+/// refused by the scan. Curves count once in the scan and many times
+/// flattened, so a path of curves is never refused by the scan alone.
+#[test]
+fn pre_walkpath_scans_accept_exactly_wkmaxsegs_segments() {
+    for call in ["<< /Pitch 50 >> pkribbon", "<< /Pitch 50 >> pknib"] {
+        let mut it = fresh(200, 200);
+        it.run_str("0 0 0 setrgbcolor").unwrap();
+        // A moveto plus (limit - 2) zero linetos plus one real one is exactly
+        // wkmaxsegs visits, so it draws.
+        it.run_str("newpath 20 20 moveto wkmaxsegs 2 sub { 0 0 rlineto } repeat 100 0 rlineto")
+            .unwrap();
+        it.run_str(call)
+            .unwrap_or_else(|e| panic!("{call} at the limit: {}", it.error_report(&e)));
+        assert!(ink_count(&it) > 0, "{call}: drew at the limit");
+        it.run_str("newpath 20 20 moveto wkmaxsegs 1 sub { 0 0 rlineto } repeat 100 0 rlineto")
+            .unwrap();
+        let err = it.run_str(call).expect_err(call);
+        assert!(
+            matches!(err, PsError::Undefined(ref n) if n == "walkpath-segment-count-exceeds-safety-limit"),
+            "{call}: one over the limit, got {err}"
+        );
+    }
+}
+
+/// Issue #401: `pktrowelplane` flattens and scans its area outline without
+/// walkpath, so it carries the same `wkmaxsegs` bound itself. A refusal comes
+/// before any row (`pktrowel` is stubbed and sees only its one empty-path
+/// validation call) and leaves the operand stack, the graphics state and the
+/// caller's path as they were. Not timed: the count of `pktrowel` calls says
+/// where the refusal came from, however fast the machine is.
+#[test]
+fn pktrowelplane_refuses_a_huge_outline_before_any_row() {
+    let mut it = fresh(200, 200);
+    it.run_str(
+        "/calls 0 def /pktrowel { pop /calls calls 1 add def } def 0.25 setgray \
+         newpath 20 20 moveto 400000 { 0 0 rlineto } repeat 100 0 rlineto 0 80 rlineto closepath",
+    )
+    .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+    let err = it
+        .run_str("<< /Width 20 >> pktrowelplane")
+        .expect_err("pktrowelplane");
+    assert!(
+        matches!(err, PsError::Undefined(ref n) if n == "walkpath-segment-count-exceeds-safety-limit"),
+        "expected the segment-count guard, got {err}"
+    );
+    assert_eq!(it.operand_stack().len(), 0, "clean operand stack");
+    it.run_str("calls currentgray 0.25 sub abs 0.001 lt currentpoint pop pop")
+        .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+    let st: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
+    assert_eq!(st, ["1", "true"], "one validation call, gray and path kept");
+}
+
+/// The bound is `wkmaxsegs` exactly: an outline of that many visits still
+/// fills, one more is refused. The closed triangle is moveto, lineto, lineto
+/// and closepath (4) plus the padding.
+#[test]
+fn pktrowelplane_accepts_exactly_wkmaxsegs_outline_segments() {
+    let mut it = fresh(200, 200);
+    it.run_str("0 0 0 setrgbcolor").unwrap();
+    it.run_str(
+        "newpath 20 20 moveto 150 20 lineto wkmaxsegs 4 sub { 0 0 rlineto } repeat \
+         85 150 lineto closepath << /Width 20 >> pktrowelplane",
+    )
+    .unwrap_or_else(|e| panic!("at the limit: {}", it.error_report(&e)));
+    assert!(ink_count(&it) > 0, "drew at the limit");
+    it.run_str(
+        "newpath 20 20 moveto 150 20 lineto wkmaxsegs 3 sub { 0 0 rlineto } repeat \
+         85 150 lineto closepath",
+    )
+    .unwrap();
+    let err = it
+        .run_str("<< /Width 20 >> pktrowelplane")
+        .expect_err("one over");
+    assert!(
+        matches!(err, PsError::Undefined(ref n) if n == "walkpath-segment-count-exceeds-safety-limit"),
+        "one over the limit, got {err}"
     );
 }

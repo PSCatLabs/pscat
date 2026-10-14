@@ -53,23 +53,47 @@ fn rand(it: &mut Interp) -> Result<(), PsError> {
     Ok(())
 }
 
+/// Marks an `rrand` result handed out while a seed override is armed
+/// (issue #202). `rrand` yields `state | RRAND_TAG`; a later `srand` of
+/// exactly such a value is a state *restore*, not a seeding, so the
+/// override leaves it alone. The tag sits at bit 40, above the 31-bit
+/// state and below 2^53, so it survives a trip through a real. A value
+/// outside `[RRAND_TAG, RRAND_TAG + 2^31)` -- every ordinary seed, and
+/// any seed a library derives by arithmetic from `rrand` -- is still
+/// forced.
+const RRAND_TAG: i64 = 1 << 40;
+const RAND_MASK: i64 = 0x7fff_ffff;
+
 fn srand(it: &mut Interp) -> Result<(), PsError> {
     let requested = it.pop_int()?;
     match it.seed_override {
         // A sweep (issue #21) still consumes the operand per the PLRM,
         // it just ignores its value -- the found script's own `N
-        // srand` line keeps working unmodified.
+        // srand` line keeps working unmodified. The one exception is
+        // an `rrand` value coming back (the save/restore idiom every
+        // seeded library uses): forcing that would replace the saved
+        // stream with the forced seed, so it restores exactly and does
+        // not count as the override firing.
+        Some(_) if requested & !RAND_MASK == RRAND_TAG => {
+            it.rand_state = requested & RAND_MASK;
+        }
         Some(forced) => {
-            it.rand_state = forced & 0x7fff_ffff;
+            it.rand_state = forced & RAND_MASK;
             it.seed_override_fired = true;
         }
-        None => it.rand_state = requested & 0x7fff_ffff,
+        None => it.rand_state = requested & RAND_MASK,
     }
     Ok(())
 }
 
 fn rrand(it: &mut Interp) -> Result<(), PsError> {
-    it.push(Object::int(it.rand_state));
+    // Plain state without an override, so a default render is untouched.
+    let tag = if it.seed_override.is_some() {
+        RRAND_TAG
+    } else {
+        0
+    };
+    it.push(Object::int(it.rand_state | tag));
     Ok(())
 }
 

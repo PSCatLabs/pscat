@@ -746,12 +746,16 @@ fn cli_capabilities_flag_prints_valid_matching_json() {
 
 /// Issue #236: `lib/strokeglyphs.ps` keeps paintkit's #141 convention
 /// (its units are checked by `every_migrated_parameter_states_its_unit`)
-/// and never uses `/Spread` or `/Density` (docs/DRYMEDIA.md 3.1).
+/// and never uses `/Spread` or `/Density` (docs/DRYMEDIA.md 3.1); nor does
+/// `lib/mathkit.ps` (#237), which lays out its glyphs.
 #[test]
 fn strokeglyphs_does_not_reuse_reserved_parameter_names() {
     let caps = capabilities::catalog();
     let mut checked = 0;
-    for cap in caps.iter().filter(|c| c.source == "lib/strokeglyphs.ps") {
+    for cap in caps
+        .iter()
+        .filter(|c| c.source == "lib/strokeglyphs.ps" || c.source == "lib/mathkit.ps")
+    {
         for p in &cap.parameters {
             assert!(
                 p.name != "Spread" && p.name != "Density",
@@ -763,7 +767,7 @@ fn strokeglyphs_does_not_reuse_reserved_parameter_names() {
         }
     }
     assert!(
-        checked >= 10,
-        "only {checked} strokeglyphs parameters checked"
+        checked >= 40,
+        "only {checked} strokeglyphs and mathkit parameters checked"
     );
 }

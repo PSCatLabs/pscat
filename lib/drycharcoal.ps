@@ -41,14 +41,14 @@
 % private generator, re-seeded per line from /Seed, the layer and the
 % line's index, so pscat and Ghostscript lay the same strokes.
 %
-% A batch renders under the clip in force when it ends, so dhhatch clips
-% to its region and closes its own batch inside that clip. It cannot run
-% inside a caller's dkbatch, and two separate dhhatch calls are two
-% batches: at /Levels 2 or more, where they overlap, the second one's
-% faint level lands over the first one's cores (at the default one level
-% there is no faint level, and two calls draw as one). Hatch a region's
-% layers in one call. (#312 would
-% let a batch hold records under different clips.)
+% With no batch open, dhhatch clips to its region and closes its own batch
+% inside that clip. Inside a caller's dkbatch it joins that batch, its
+% region kept with every stroke by drykit's dkclip (#312), so overlapping
+% regions hatched in one batch stay level-major. Two separate dhhatch calls
+% are two batches: at /Levels 2 or more, where they overlap, the second
+% one's faint level lands over the first one's cores (at the default one
+% level there is no faint level, and two calls draw as one). So put
+% overlapping regions in one `{ ... } dkbatch`.
 %
 % Smudge, lift and construction lines (DRYMEDIA.md 3.4):
 %
@@ -79,7 +79,7 @@
 % @internal
 /dhisnum {
     type dup /integertype eq exch /realtype eq or
-} def
+} bind def
 
 % (prefix) (suffix) -   (raises the error named prefix-suffix)
 % @internal
@@ -90,14 +90,14 @@
     dup dhep length (-) putinterval
     dup dhep length 1 add dhes putinterval
     cvn cvx exec
-} def
+} bind def
 
 % dict key default -> value   (the default when the key is absent)
 % @internal
 /dhget {
     /dhgd exch def
     2 copy known { get } { pop pop /dhgd load } ifelse
-} def
+} bind def
 
 % dict key default lo hi (prefix) (suffix) -> number   (a number in lo..hi)
 % @internal
@@ -106,7 +106,7 @@
     dhget
     dup dhisnum not { pop dhnp dhns dherr } if
     dup dhnl lt 1 index dhnh gt or { pop dhnp dhns dherr } if
-} def
+} bind def
 
 % value (prefix) (suffix) -> [r g b]   (an rgb array of three numbers 0..1)
 % @internal
@@ -120,13 +120,13 @@
         dup 0 lt exch 1 gt or { dhnp dhns dherr } if
     } forall
     aload pop 3 array astore
-} def
+} bind def
 
 % (prefix) -   (raises prefix-cannot-run-inside-a-dkbatch when one is open)
 % @internal
 /dhnobatch {
     userdict /dkBatch known { (cannot-run-inside-a-dkbatch) dherr } { pop } ifelse
-} def
+} bind def
 
 % Each medium's default /Grade.
 % @internal
@@ -167,14 +167,14 @@
             /Streak 1.2 /Levels 2 /Halo 0.7
         >>
     } if
-} def
+} bind def
 
 % t -> width multiplier   (a stick's square landing and flicked lift:
 % full width until the last 15% of the stroke, then thinning to 0.35)
 % @internal
 /dhtail {
     dup 0.85 gt { 0.85 sub 0.15 div 0.65 mul 1 exch sub } { pop 1 } ifelse
-} def
+} bind def
 
 % opts (prefix) -> preset-dict   (validates /Medium and /Grade)
 % @internal
@@ -185,7 +185,7 @@
     dhgrades /dhmm load known not { dhmp (unknown-medium) dherr } if
     dhmo /Grade dhgrades /dhmm load get 0 1 dhmp (grade-must-be-0-to-1) dhnum
     /dhmm load exch dhpreset
-} def
+} bind def
 
 % preset opts [keys] -> dict   (the preset, then every caller key not
 % listed in [keys] on top of it: the caller wins)
@@ -199,7 +199,7 @@
         dhxk { /dhxn load eq { /dhxskip true def } if } forall
         dhxskip not { dup /dhxn load /dhxv load put } if
     } forall
-} def
+} bind def
 
 %%SelfTest: dhstroke-rejects-malformed-options
 %   << /Surface /drawing >> dksurface
@@ -234,7 +234,7 @@
     dhso (dhstroke) dhmedium
     dhso [ /Medium /Grade ] dhmerge
     dkstroke
-} def
+} bind def
 
 % --- hatching ---------------------------------------------------------
 
@@ -272,13 +272,13 @@
         ifelse
     } ifelse
     dhhk dhhL div sub dhhL mul
-} def
+} bind def
 
 % a b -> hypot
 % @internal
 /dhhypot {
     dup mul exch dup mul add sqrt
-} def
+} bind def
 
 % x0 y0 x1 y1 q i -   (one hatch line, of quantized value q, split into
 % hand strokes; i is the line's index within its layer)
@@ -328,7 +328,7 @@
             /dhhn dhhn 1 add def
         } loop
     } if
-} def
+} bind def
 
 % -   (the /Mark hook: the path hatch collected is current, hatchwidths
 % holds each segment's quantized value)
@@ -345,7 +345,7 @@
             dhhqs dhhii get dhhii dhhline
         } if
     } for
-} def
+} bind def
 
 %%SelfTest: dhhatch-rejects-malformed-options
 %   << /Surface /drawing >> dksurface
@@ -371,9 +371,14 @@
 %   { newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath << /Medium /chalk >> dhhatch }
 %   /dhhatch-unknown-medium (/Medium /chalk) mustguard
 %   { newpath << >> dhhatch } /dhhatch-needs-a-region-path (no current path) mustguard
+%   { gsave newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath
+%     { << >> dhhatch } dkbatch grestore } (inside a dkbatch, #312) mustpass
 %   { newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath
-%     { << >> dhhatch } dkbatch } /dhhatch-cannot-run-inside-a-dkbatch (inside a dkbatch) mustguard
-%   userdict /dkBatch known not (the refused call closes the caller's batch) mustbe
+%     { 1 1 1 setrgbcolor newpath 0 0 moveto 9 9 lineto << >> dkstroke
+%       0 0 0 setrgbcolor newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath << >> dhhatch } dkbatch }
+%   /dkbatch-mixes-pigments (inside a batch of another colour) mustguard
+%   userdict /dkBatch known not userdict /dkClip known not and
+%   (the refused call closes the caller's batch and its own region) mustbe
 %   { newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath
 %     << /Value { pop pop (x) } >> dhhatch } /dhhatch-value-procedure-must-return-a-number
 %   (a /Value procedure returning a string) mustguard
@@ -401,7 +406,7 @@
 %%EndSelfTest
 %
 % @kind: Procedure
-% @summary: Hatches the region of the current path in charcoal, to a value given as a number or a {x y -> value} procedure (0 white, 1 darkest): layers of parallel hand strokes, each crossing the last, are added where the value is darker, with more pressure and width inside each layer. Every layer is inked by drykit's dkstroke inside one dkbatch, so crossings stay dark, and the strokes break up on the paper's tooth. Clips to the region and consumes the path. Cannot run inside a dkbatch; hatch a region's layers in one call. Other dkstroke keys pass through to every stroke. Takes no rand draws from the caller's stream.
+% @summary: Hatches the region of the current path in charcoal, to a value given as a number or a {x y -> value} procedure (0 white, 1 darkest): layers of parallel hand strokes, each crossing the last, are added where the value is darker, with more pressure and width inside each layer. Every layer is inked by drykit's dkstroke inside one dkbatch, so crossings stay dark, and the strokes break up on the paper's tooth. Clips to the region and consumes the path. Inside a dkbatch of the same colour it joins the batch, keeping its region, so overlapping regions hatched in one batch keep their crossings dark. Other dkstroke keys pass through to every stroke. Takes no rand draws from the caller's stream.
 % @example: << /Surface /drawing >> dksurface 0.11 0.1 0.1 setrgbcolor newpath 40 40 moveto 200 40 lineto 200 160 lineto 40 160 lineto closepath << /Medium /pencil /Value { pop 40 sub 160 div } >> dhhatch
 % @param: /Medium [name] /vine, /compressed or /pencil (default /pencil)
 % @param: /Grade [0..1] Hard (0) to soft (1), as in dhstroke (default the medium's)
@@ -416,7 +421,6 @@
 /dhhatch {
     dup type /dicttype ne { pop dhhatch-options-must-be-a-dict } if
     /dhho exch def
-    (dhhatch) dhnobatch
     dhho dup /Medium known not { dup length 1 add dict copy dup /Medium /pencil put } if
     (dhhatch) dhmedium /dhhpre exch def
     dhho /Value 0.5 dhget
@@ -467,9 +471,7 @@
     4 array astore /dhhbb exch def
     /dhhbad false def
     /dhhfail false def
-    gsave
-    clip
-    { {
+    /dhhlayers {
         0 1 dhhL 1 sub {
             /dhhk exch def
             <<
@@ -481,12 +483,22 @@
                 /Mark { dhhmark }
             >> hatch
         } for
-    } dkbatch } stopped { grestore newpath stop } if
-    grestore
-    newpath
+    } def
+    userdict /dkBatch known {
+        % Inside a caller's dkbatch: join it, the region kept by dkclip
+        % with every stroke (#312), so overlapping regions hatched in one
+        % batch stay level-major. dkclip gives its gsave back on an error.
+        { { dhhlayers } dkclip } stopped { newpath stop } if
+    } {
+        gsave
+        clip
+        { { dhhlayers } dkbatch } stopped { grestore newpath stop } if
+        grestore
+        newpath
+    } ifelse
     dhhfail { stop } if
     dhhbad { dhhatch-value-procedure-must-return-a-number } if
-} def
+} bind def
 
 % --- smudging, lifting, construction lines ------------------------------
 
@@ -496,7 +508,7 @@
     dup 0.15 lt { 0.15 div 0.5 mul 0.5 add } {
         dup 0.85 gt { 1 exch sub 0.15 div 0.5 mul 0.5 add } { pop 1 } ifelse
     } ifelse
-} def
+} bind def
 
 % a b t -> [a + (b - a) t]   (rgb arrays)
 % @internal
@@ -504,7 +516,7 @@
     /dhlt exch def /dhlb exch def /dhla exch def
     [ 0 1 2 { /dhlk exch def
         dhla dhlk get dhlb dhlk get dhla dhlk get sub dhlt mul add } for ]
-} def
+} bind def
 
 %%SelfTest: dhsmudge-dhlift-dhsketch-guards
 %   << /Surface /drawing >> dksurface
@@ -570,7 +582,7 @@
     { dkstroke } stopped { grestore newpath stop } if
     grestore
     newpath
-} def
+} bind def
 
 % @kind: Procedure
 % @summary: Lifts charcoal along the current path with an eraser: paper colour drawn through the tooth's peaks first, over the tone beneath (/Under, by default the current colour). A kneaded eraser leaves a soft, speckled grey highlight that never gets back to paper white; a hard eraser cuts a narrow, crisper line. Consumes the path; cannot run inside a dkbatch. Other dkstroke keys pass through. Takes no rand draws from the caller's stream.
@@ -603,7 +615,7 @@
     { dkstroke } stopped { grestore newpath stop } if
     grestore
     newpath
-} def
+} bind def
 
 % @kind: Procedure
 % @summary: Draws the current path as faint construction lines: a light, hard vine charcoal line laid down several times, each pass shifted and turned a little, as an artist's layout sketch is, so later strokes cover it where they cross. In the current colour; may run inside a dkbatch of the same colour. Other dkstroke keys pass through. Consumes the path; takes no rand draws from the caller's stream.
@@ -653,11 +665,11 @@
     }
     userdict /dkBatch known { exec } { dkbatch } ifelse
     newpath
-} def
+} bind def
 
 % a -> max(a, 1)   (a divisor that cannot be zero)
 % @internal
 /dhmaxr {
     dup 1 lt { pop 1 } if
-} def
+} bind def
 %%EOF

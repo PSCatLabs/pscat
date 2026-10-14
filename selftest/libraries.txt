@@ -20,4 +20,5 @@ lib/hatchkit.ps
 lib/strokeglyphs.ps
 lib/drycrayon.ps
 lib/drycharcoal.ps
+lib/mathkit.ps
 lib/etching.ps

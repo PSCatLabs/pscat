@@ -72,7 +72,9 @@ page (nothing painted), an unbalanced `gsave`/`grestore`, or stuff
 left on the operand/dict stack. Findings print to stderr as
 `pscat: lint: [check] message` (or `pscat: lint: clean`); it doesn't
 change the exit code — read the findings, don't just grep for
-failure. `pscat-mcp`'s `render_postscript` runs this automatically
+failure. A run that ended in a PostScript error is never `clean`: it
+prints `pscat: lint: [run-error]` after the error report (and exits
+non-zero, as any errored run does). `pscat-mcp`'s `render_postscript` runs this automatically
 and appends a `Lint:` block to its response when there's something to
 report (silent when clean).
 

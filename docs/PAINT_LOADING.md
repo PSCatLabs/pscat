@@ -215,7 +215,10 @@ r g b puwet           ->  r g b        % applies pkwet's active passes (3.4)
   The guards are `pkfan-colors-must-be-an-array`,
   `pkfan-colors-must-have-1-to-8-colors`,
   `pkfan-colors-entries-must-be-rgb-arrays` and
-  `pkfan-colors-components-must-be-0-to-1`.
+  `pkfan-colors-components-must-be-0-to-1`. An entry may also be a bare
+  pigment name (`/sapgreen`, issue #356), resolved once through `Pigments`;
+  an unknown name is `pkfan-colors-unknown-pigment-see-PigmentNames` and a
+  `pigmix` spec is `pkfan-colors-pigmix-spec-needs-pigcolors`.
 
 ### 3.2 Per preset, in PostScript terms
 
@@ -296,6 +299,10 @@ the pass budget and the nesting machinery rely on.
 - Slot 6 is the index of the pass now running. It is written immediately
   before `{ pqmyframe 1 get exec } stopped`, in the same place the
   colour is set today.
+- Slot 7 (issue #179) is `null` for a literal `/Under`, and for a
+  procedural one an array of per-pass backdrops (`null` at the core). `puwet`
+  reads it first, so a loaded colour grades toward the backdrop of the pass it
+  is painted in; the other slots mean what they did.
 
 `puwet` applies `mix3(c, U_d, k_d)` for `d = 1 .. pqdnow`, outermost
 first, which is the order in which nested `pkwet` calls mix the

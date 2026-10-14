@@ -55,8 +55,9 @@
 % header, at the end of this file, for full docs.
 %
 % The brush *motions* (issue #184) are not brushes: path builders that make
-% the input a preset takes (criss-cross, scumble, tap, pull, zig-zag). They
-% are the last section of this file.
+% the input a preset takes (criss-cross, scumble, tap, pull, zig-zag). After
+% them, `pkbrushedge` and its motion `pkfeather` (issue #347) brush the ruled
+% edge of a filled mass.
 %
 % `pkspray` (issue #44) is not built on `pkribbon` -- spray is discrete
 % particle deposition, not an offset band -- but it shares the same
@@ -149,6 +150,9 @@
 % mh-/mx-/mc-/ms-/mt-/mp-/mz- (the brush motion generators: pkcrisscross,
 % pkscumblein, pkscumble, pktap, pkpull, pkzigzag) -- issue #184, see the
 % section at the end of this file. They call no preset.
+% mf- (pkfeather) and pe- (pkbrushedge) -- issue #347, the "Brushed edges"
+% section after the motions. pe- is distinct from every preset prefix
+% because pkbrushedge calls the caller's /Brush, usually a preset.
 % pj- (pkcanvas, the canvas surface's sampler and pjcatch) -- issue #182,
 % see the last section of this file. Distinct from every pk* name because the
 % presets that will call pjcatch (pkdry, pkfan) call pkribbon.
@@ -167,16 +171,34 @@
 % wkmeasure: emit the previous subpath's flag on each new moveto
 % (skipped on the very first), then once more after the loop for the
 % last subpath.
+%
+% This is also the segment-count bound for the presets that scan before
+% they walk (issue #299). pkribbon, pknib and pkfeather call it ahead of
+% their first walkpath, so walkpath's own bound (artkit's wkmaxsegs,
+% issue #110) cannot fire first. Moveto, lineto and closepath each count
+% one, as in wkmeasure, and a path over wkmaxsegs raises
+% `walkpath-segment-count-exceeds-safety-limit` the moment the count
+% passes it, so the refusal costs 50,000 visits and not the whole path.
+% The scan reads the path before it is flattened, so its count is never
+% more than wkmeasure's: no path walkpath accepts is refused here. The
+% error fires with this procedure's `[` mark and the pathforall operands
+% on the stack, so it clears back to the mark first.
 % @internal
 /pkscanclosed {
-    /pkscclosed false def /pkscfirst true def
+    /pkscclosed false def /pkscfirst true def /pkscn 0 def
     [
         { pop pop
+          /pkscn pkscn 1 add def
+          pkscn wkmaxsegs gt { cleartomark walkpath-segment-count-exceeds-safety-limit } if
           pkscfirst { /pkscfirst false def } { pkscclosed } ifelse
           /pkscclosed false def }
-        { pop pop }
+        { pop pop
+          /pkscn pkscn 1 add def
+          pkscn wkmaxsegs gt { cleartomark walkpath-segment-count-exceeds-safety-limit } if }
         { pop pop pop pop pop pop }
-        { /pkscclosed true def }
+        { /pkscn pkscn 1 add def
+          pkscn wkmaxsegs gt { cleartomark walkpath-segment-count-exceeds-safety-limit } if
+          /pkscclosed true def }
         pathforall
         pkscfirst not { pkscclosed } if
     ]
@@ -557,6 +579,53 @@
 %   (a zero-length pointed subpath) mustpass
 %%EndSelfTest
 %
+%%SelfTest: pre-walkpath-scans-share-walkpaths-segment-bound
+%   % Issue #299: pkribbon, pknib and pkfeather scan the path before
+%   % walkpath, via pkscanclosed, which carries the same wkmaxsegs bound.
+%   % A moveto, (wkmaxsegs - 2) zero-length linetos and one real lineto are
+%   % exactly wkmaxsegs visits; one more zero-length lineto is one over.
+%   { newpath 0 0 moveto wkmaxsegs 2 sub { 0 0 rlineto } repeat 40 0 rlineto
+%     << /Pitch 50 >> pkribbon }
+%   (pkribbon at exactly wkmaxsegs segments) mustpass
+%   { newpath 0 0 moveto wkmaxsegs 2 sub { 0 0 rlineto } repeat 40 0 rlineto
+%     << /Pitch 50 >> pknib }
+%   (pknib at exactly wkmaxsegs segments) mustpass
+%   { newpath 0 0 moveto wkmaxsegs 1 sub { 0 0 rlineto } repeat 40 0 rlineto
+%     << >> pkribbon }
+%   /walkpath-segment-count-exceeds-safety-limit
+%   (pkribbon one segment over wkmaxsegs) mustguard
+%   { newpath 0 0 moveto wkmaxsegs 1 sub { 0 0 rlineto } repeat 40 0 rlineto
+%     << >> pknib }
+%   /walkpath-segment-count-exceeds-safety-limit
+%   (pknib one segment over wkmaxsegs) mustguard
+%   { newpath 0 0 moveto wkmaxsegs 1 sub { 0 0 rlineto } repeat 40 0 rlineto
+%     << >> pkfeather }
+%   /walkpath-segment-count-exceeds-safety-limit
+%   (pkfeather one segment over wkmaxsegs) mustguard
+%%EndSelfTest
+%
+%%SelfTest: pre-walkpath-scans-refuse-before-walkpath-runs
+%   % The block above passes on a tree without the scan bound too, because
+%   % walkpath's own pass refuses the same path. Here walkpath is replaced by
+%   % a stub (each block runs in a fresh interpreter), so only a refusal from
+%   % the scan itself passes.
+%   /tgot false def
+%   /walkpath { pop pop /tgot true def } def
+%   { newpath 0 0 moveto wkmaxsegs 1 sub { 0 0 rlineto } repeat 40 0 rlineto
+%     << >> pkribbon }
+%   /walkpath-segment-count-exceeds-safety-limit
+%   (pkribbon is refused by its scan) mustguard
+%   { newpath 0 0 moveto wkmaxsegs 1 sub { 0 0 rlineto } repeat 40 0 rlineto
+%     << >> pknib }
+%   /walkpath-segment-count-exceeds-safety-limit
+%   (pknib is refused by its scan) mustguard
+%   { newpath 0 0 moveto wkmaxsegs 1 sub { 0 0 rlineto } repeat 40 0 rlineto
+%     << >> pkfeather }
+%   /walkpath-segment-count-exceeds-safety-limit
+%   (pkfeather is refused by its scan) mustguard
+%   tgot not (walkpath was never reached) mustbe
+%%EndSelfTest
+%
 % @kind: Procedure
 % @summary: Treats the current path as a centerline and fills a variable-width ribbon along it, built on walkpath. Color comes from whatever the caller already set.
 % @example: newpath ... << /Width 10 /Pressure { pktaper } >> pkribbon
@@ -657,7 +726,9 @@
     /pkjitter pkopts /Jitter 0 pkgetdef def
     /pkjitter load xcheck { pkribbon-jitter-must-not-be-a-procedure } if
 
-    /pkclosedflags pkscanclosed def
+    % Scan first, name second: the bound (issue #299) can raise inside the
+    % scan, and a name pushed ahead of it would be left on the stack.
+    pkscanclosed /pkclosedflags exch def
 
     % Two walkpath passes over the same (surviving, per its own
     % contract) flattened path -- count, then fill a preallocated
@@ -865,16 +936,13 @@
 /pknib {
     /pnopts exch def
 
-    /pnmoveto 0 def /pnclosed false def
-    {
-        pop pop /pnmoveto pnmoveto 1 add def
-    } {
-        pop pop
-    } {
-        pop pop pop pop pop pop
-    } {
-        /pnclosed true def
-    } pathforall
+    % One flag per subpath, from pkscanclosed, which is also the
+    % segment-count bound (issue #299): a pathforall of its own here
+    % would scan a pathological path in full before walkpath's bound
+    % could fire.
+    pkscanclosed /pnflags exch def
+    /pnmoveto pnflags length def /pnclosed false def
+    pnflags { { /pnclosed true def } if } forall
     pnmoveto 1 gt { pknib-path-must-be-a-single-subpath } if
     pnclosed { pknib-path-must-not-be-closed } if
 
@@ -1973,8 +2041,8 @@
 % @param: /Shadow [0..1] restrained shadow strength on the opposite side (default 0.10)
 % @param: /Pressure [proc] {t -> mult} proc over normalized path progress; shapes the base ribbon, bristle ridges, highlight and shadow alike (default { pkflat })
 % @param: /Jitter [points] Seeded edge displacement amount, forwarded to each dash's pkribbon Jitter (default 0)
-% @param: /HighlightColor [rgb array] the color the highlight ridge mixes toward, instead of white; /Highlight still sets how far (default unset: toward white)
-% @param: /ShadowColor [rgb array] the color the shadow ridge mixes toward, instead of black; /Shadow still sets how far (default unset: toward black)
+% @param: /HighlightColor [rgb array] the color the highlight ridge mixes toward, instead of white; /Highlight still sets how far; a bare pigment name such as /titaniumwhite stands for that pigment, and a pigmix spec goes through pigcolor (default unset: toward white)
+% @param: /ShadowColor [rgb array] the color the shadow ridge mixes toward, instead of black; /Shadow still sets how far; a bare pigment name such as /titaniumwhite stands for that pigment, and a pigmix spec goes through pigcolor (default unset: toward black)
 /pkoil {
     /poopts exch def
     /poWidth poopts /Width 14 pkgetdef def
@@ -2453,7 +2521,7 @@
 %%EndSelfTest
 
 % @kind: Procedure
-% @summary: A trowel / palette-knife stroke: a rigid flat blade dragging viscous paint, swept along the blade direction rather than the path normal, depositing broken masses with lengthwise scrape streaks, a dragged smear, and built-up ridges at the blade edges. Not built on pkribbon; lays no solid base pass, so the underlayer reads through. Deterministic under the caller's own srand; bounded by Lanes * stops.
+% @summary: A trowel / palette-knife stroke: a rigid flat blade dragging viscous paint, swept along the blade direction rather than the path normal, depositing broken masses with lengthwise scrape streaks, a dragged smear, and built-up ridges at the blade edges. With /Colors it runs up to eight loaded colours across the blade, blended by /ColorMix and lit from /Light. Not built on pkribbon; lays no solid base pass, so the underlayer reads through. Deterministic under the caller's own srand; bounded by Lanes * stops.
 % @example: newpath 40 120 moveto 260 150 lineto << /Width 72 /Angle 18 /Coverage 0.82 >> pktrowel
 % @param: /Width [points] Blade length; must be > 0 (default 24)
 % @param: /Pitch [points] walkpath sampling pitch for the shared centerline pass; must be > 0 (default Width*0.35, capped at 4)
@@ -2468,7 +2536,7 @@
 % @param: /EdgeBuildup [0..1] darker ridges of paint piled at the two blade edges, drawn last (default 0.35)
 % @param: /Jitter [points] Seeded lateral displacement of the lane boundaries, deterministic under the caller's own N srand (default 0)
 % @param: /ColorJitter [0..1] per-lane color variation magnitude around the caller's current color (default 0.06)
-% @param: /Colors [array of rgb arrays] 1 to 8 loaded colors, listed from the blade's left end (looking along the travel) to its right, evenly spaced across it; the edge-buildup ridges take the colors of their own edges; when set, the current color is not used for the mark, though /ColorJitter still varies it (default unset)
+% @param: /Colors [array of rgb arrays] 1 to 8 loaded colors, listed from the blade's left end (looking along the travel) to its right, evenly spaced across it; the edge-buildup ridges take the colors of their own edges; when set, the current color is not used for the mark, though /ColorJitter still varies it. An entry may be a bare pigment name such as /sapgreen (see PigmentNames), which stands for that pigment; a pigmix spec goes through pigcolors (default unset)
 % @param: /ColorMix [0..1] with /Colors, how far neighbouring colors have blended on the blade: 0 is hard bands, 1 a smooth gradient (default 0.3)
 % @param: /Light [degrees] with /Colors, the direction the light comes from, counterclockwise from +x in user space: each subpath puts the first color on the side facing the light, whichever way it travels (default unset: the first color stays on the left of the travel)
 % @param: /Touch [0..1] How hard the blade presses into the shared canvas set by pkcanvas, which must be called first: below 1 the mark lands only on the weave's knuckles that stand proud enough for that pressure to reach, lower is lighter and 0 deposits nothing; 1 is full contact, identical to leaving it unset. Takes no rand draws (default unset)
@@ -2713,6 +2781,434 @@
         grestore
     } if
 } bind def
+
+% --- palette-knife plane (issue #180) ---------------------------------
+% opts pktrowelplane -
+%
+% A palette knife's other main job, after cutting a highlight edge, is
+% laying a *plane*: covering a mountain face or a rock with overlapping
+% blade pulls so it reads as one flat facet that carries the blade's own
+% texture. `pktrowel` only walks a centerline, and faking a plane with it
+% failed twice in gallery/alpine_lake.ps (#118): a pull along a shallow
+% ridge draws a bar across the range, and pulls stepped down the ridge
+% make stripes. What worked was a hand-built triangle, a clip and
+% vertical pulls at a fixed spacing; this is that pattern as a procedure.
+%
+% The current path is the area. It is left exactly as the caller had it
+% (the whole procedure runs inside one gsave).
+%
+%   newpath x0 y0 moveto x1 y1 lineto x2 y2 lineto closepath
+%   << /Width 14 /Direction -80 /Colors [ [ .3 .3 .4 ] [ .5 .5 .6 ] ] >> pktrowelplane
+%
+% How it works. The path is flattened and projected on the pull direction
+% to find its extent (not `pathbbox`, whose box under a rotated matrix is
+% a loose one that differs between interpreters). The CTM is then rotated
+% so the pull direction is +x, and one `pktrowel` stroke is run along a
+% straight row for each lateral step across the area, every row overrunning
+% the area at both ends so that the blade's entry/exit trim, its /Drag and
+% its skew all fall outside it. Every key `pktrowel` knows is passed
+% straight through, so the plane takes its blade, texture and colour keys
+% (/Width, /Angle, /Cover, /Coverage, /Viscosity, /Scrape, /EdgeBuildup,
+% /Drag, /Colors, /Light, /Touch, ...) with their meanings and defaults
+% unchanged. /Angle is the blade's angle to the pulls, as in `pktrowel`.
+%
+% Edge: crisp, and it comes from CLIPPING, not from blade geometry. The
+% path is made the clip before the first pull, so every pull ends dead
+% against the facet's boundary -- the same crisp ridge #118's clip gave.
+% (A blade cannot be steered along an arbitrary boundary, and an unclipped
+% plane would be a rectangle.) The clip nests inside whatever clip the
+% caller already has.
+%
+% Spacing and overlap. A blade of width W at angle A carrying /Cover C
+% deposits a band
+%
+%     F = W * cos(A) * (0.35 + 0.65*C)
+%
+% across the direction of travel (the same width `pktrowel` uses), and
+% rows are placed F * (1 - Overlap) apart, so /Overlap is the fraction of
+% each pull that the next one covers. Unset, it follows the blade's
+% coverage: 0.15 + 0.6 * (1 - Coverage), so a patchy blade (low /Coverage)
+% overlaps more and the pulls still close up into one plane while a full
+% blade (/Coverage 1) overlaps only enough to hide the seam.
+%
+% A /Pressure that tapers each pull narrows its band below F, and rows spaced
+% for F would leave bare gaps between them. So when /Pressure is given, the
+% plane reads it at 17 points of the stretch of each row that lies inside the
+% area, takes the smallest |value| P, and spaces the rows for F * P instead:
+% /Overlap then means the fraction of the *thinnest* part of each pull that
+% the next one covers. P is capped at 1 (a /Pressure above 1 just overlaps
+% more; it does not spread the rows) and floored at 0.25 (a pull that tapers
+% to nothing costs at most four times the rows, and keeps a thin end, as a
+% real knife's does). The proc is run a few times for this, but the random
+% stream is put back, so a /Pressure that draws random numbers does not move the
+% plane's own draws. The default /RowJitter and /AngleJitter follow the
+% narrowed band. A /Pressure of 1, or one that never dips below 1, spaces the
+% rows exactly as if it were not given. A dip narrower than 1/16 of the row
+% can be missed by the sampling.
+%
+% Texture. /RowJitter shifts each row sideways by up to that many points
+% and /AngleJitter tilts it by up to that many degrees, so the rows are
+% not machine-parallel. Two neighbouring rows can move toward each other
+% or apart, so the default shift is 0.4 of the overlap (F * Overlap * 0.4,
+% at most 0.8 of it between neighbours): a larger one opens a bare seam
+% between rows (seen in the first render, as a full-height white line). A
+% /RowJitter above half the overlap can do so, and so can an /AngleJitter
+% on a long row. Each pull also gets `pktrowel`'s own lane texture,
+% scrape and per-lane colour jitter.
+%
+% Determinism: the caller's own `N srand`, same doctrine as `pktrowel`.
+% The stream is two draws per row, then the row's `pktrowel` draws. So it is
+% fixed by what decides the number of rows, their length and the stops in
+% each: the area, /Direction, /Width, /Angle, /Cover, /Overlap (and /Coverage
+% when /Overlap is unset), /Drag and /Pitch (the overrun), /Lanes, and the
+% depth of a tapering /Pressure (which narrows the rows). Turning
+% any of those re-rolls the plane; turning a pure texture key (/Scrape,
+% /Viscosity, /EdgeBuildup, /ColorJitter, /Colors, ...) does not. That is
+% weaker than `pktrowel`'s own one-control-at-a-time promise.
+%
+% Safety: at most 4000 rows, checked before anything is drawn; each row is
+% also bounded by `pktrowel`'s own deposit budget. The area outline is bounded
+% too (issue #401): it is flattened and scanned for its extent without going
+% through walkpath, so the scan counts moveto, lineto and closepath visits as
+% walkpath's own pass does and a path over wkmaxsegs (50,000) is refused with
+% `walkpath-segment-count-exceeds-safety-limit`, the same name and limit as
+% every walkpath preset, before any row is drawn. A refusal leaves the caller's
+% path and graphics state as they were.
+%
+% Scratch prefix tpl- (unused elsewhere), so the many `pt*` names the
+% `pktrowel` call overwrites on every row cannot clobber the loop's state.
+
+% x y tplpt -   (widens the s/t extent by one path point)
+% s is the coordinate along the pull direction, t across it (left of travel).
+% @internal
+/tplpt {
+    /tply exch def /tplpx exch def
+    tplpx tplcd mul tply tplsd mul add
+    dup tplsmin lt { dup /tplsmin exch def } if
+    dup tplsmax gt { /tplsmax exch def } { pop } ifelse
+    tplpx tplsd mul neg tply tplcd mul add
+    dup tpltmin lt { dup /tpltmin exch def } if
+    dup tpltmax gt { /tpltmax exch def } { pop } ifelse
+    /tplany true def
+    /tpln tpln 1 add def
+    tpln wkmaxsegs gt { /tplover true def exit } if
+} bind def
+
+% @kind: Procedure
+% @summary: A palette-knife plane: fills the current path's area with overlapping, parallel pktrowel pulls in one direction, so the area reads as a single flat facet carrying the blade's texture (a mountain face, a rock). The edge is crisp because the path is the clip. Takes every pktrowel key (Width, Angle, Cover, Coverage, Viscosity, Scrape, EdgeBuildup, Drag, Colors, ColorMix, Light, Touch, Pressure, ...) unchanged, plus Direction, Overlap, RowJitter and AngleJitter. Row spacing follows the blade footprint, its overlap and the thinnest a tapering Pressure gets inside the area, so a taper does not open gaps between rows; deterministic under the caller's own srand; at most 4000 rows; an outline over wkmaxsegs (50,000) segments is refused with walkpath-segment-count-exceeds-safety-limit. Leaves the caller's path as it was.
+% @example: newpath 40 40 moveto 200 40 lineto 120 180 lineto closepath << /Width 16 /Direction -80 /Angle 12 >> pktrowelplane
+% @param: /Width [points] Blade length, passed to pktrowel; must be > 0 (default 24)
+% @param: /Direction [degrees] Direction the pulls travel, counterclockwise from +x in user space; -90 pulls straight down (default -90)
+% @param: /Overlap [fraction of a pull's band] How much of each pull the next one covers, 0 up to but not including 0.95; unset, 0.15 + 0.6*(1 - Coverage) (default unset)
+% @param: /RowJitter [points] Largest sideways shift of a row from its even position, deterministic under the caller's srand; more than half the overlap can open a seam (default 0.4 * the overlap width)
+% @param: /AngleJitter [degrees] Largest tilt of a row from the pull direction, deterministic under the caller's srand, 0 to 20 (default: the tilt that moves a row's far end 0.15 of the overlap, at most 1.5)
+% @param: /Angle [degrees] Blade angle to the pulls as in pktrowel, -80..80; footprint thickness goes as cos(Angle) (default 0)
+% @param: /Cover [0..1] Paint on the blade as in pktrowel; scales the band each pull deposits and so the row spacing (default 0.85)
+% @param: /Coverage [0..1] Fraction of each pull's contact area that deposits, as in pktrowel; also sets the default /Overlap (default 0.82)
+% @param: /Pressure [proc] {t -> mult} proc over each pull's own progress, as in pktrowel; the rows are spaced for the thinnest it gets inside the area (1 down to 0.25), so a taper does not leave gaps; a proc that draws random numbers leaves the stream as it found it (default unset)
+% @param: /Scrape [0..1] Lengthwise thinning of each pull, as in pktrowel (default 0.15)
+% @param: /EdgeBuildup [0..1] Darker ridges at the two blade edges of each pull, as in pktrowel (default 0.35)
+% @param: /Colors [array of rgb arrays] 1 to 8 loaded colors across the blade, as in pktrowel (default unset)
+% @param: /Touch [0..1] How hard the blade presses into the canvas set by pkcanvas, as in pktrowel (default unset)
+/pktrowelplane {
+    /tplopts exch def
+    /tplWidth tplopts /Width 24 pkgetdef def
+    /tplWidth load xcheck { pktrowelplane-width-must-not-be-a-procedure } if
+    tplWidth 0 le { pktrowelplane-width-must-be-positive } if
+    /tplDir tplopts /Direction -90 pkgetdef def
+    /tplDir load xcheck { pktrowelplane-direction-must-not-be-a-procedure } if
+    /tplLanes tplopts /Lanes 14 pkgetdef def
+    /tplAngle tplopts /Angle 0 pkgetdef def
+    /tplAngle load xcheck { pktrowelplane-angle-must-not-be-a-procedure } if
+    tplAngle -80 lt tplAngle 80 gt or { pktrowelplane-angle-must-be-minus80-to-80 } if
+    /tplCover tplopts /Cover tplopts /Load 0.85 pkgetdef pkgetdef def
+    /tplCover load xcheck { pktrowelplane-cover-must-not-be-a-procedure } if
+    tplCover 0 lt tplCover 1 gt or { pktrowelplane-cover-must-be-0-to-1 } if
+    /tplCoverage tplopts /Coverage 0.82 pkgetdef def
+    /tplCoverage load xcheck { pktrowelplane-coverage-must-not-be-a-procedure } if
+    tplCoverage 0 lt tplCoverage 1 gt or { pktrowelplane-coverage-must-be-0-to-1 } if
+    /tplDrag tplopts /Drag 0.35 pkgetdef def
+    /tplDrag load xcheck { pktrowelplane-drag-must-not-be-a-procedure } if
+    tplDrag 0 lt tplDrag 1 gt or { pktrowelplane-drag-must-be-0-to-1 } if
+    /tplPitch tplopts /Pitch tplWidth 0.35 mul dup 4 gt { pop 4 } if pkgetdef def
+    /tplPitch load xcheck { pktrowelplane-pitch-must-not-be-a-procedure } if
+    tplPitch 0 le { pktrowelplane-pitch-must-be-positive } if
+    /tplOverlap tplopts /Overlap 0.15 0.6 1 tplCoverage sub mul add pkgetdef def
+    /tplOverlap load xcheck { pktrowelplane-overlap-must-not-be-a-procedure } if
+    tplOverlap 0 lt tplOverlap 0.95 ge or { pktrowelplane-overlap-must-be-0-to-under-0.95 } if
+    /tplAJit tplopts /AngleJitter 0 pkgetdef def
+    /tplAJitSet tplopts /AngleJitter known def
+    /tplAJit load xcheck { pktrowelplane-anglejitter-must-not-be-a-procedure } if
+    tplAJit 0 lt tplAJit 20 gt or { pktrowelplane-anglejitter-must-be-0-to-20 } if
+    % the band one pull deposits across its direction of travel
+    /tplF tplWidth tplAngle cos abs mul 0.35 0.65 tplCover mul add mul def
+    % the default /RowJitter needs the effective band (below), so it is set there
+    /tplRJitSet tplopts /RowJitter known def
+    /tplRJit tplopts /RowJitter 0 pkgetdef def
+    /tplRJit load xcheck { pktrowelplane-rowjitter-must-not-be-a-procedure } if
+    tplRJit 0 lt { pktrowelplane-rowjitter-must-not-be-negative } if
+    % Every key `pktrowel` checks is checked here, on an empty path: it runs all
+    % its guards, draws nothing and takes no random draw. So a bad /Lanes,
+    % /Colors, /Touch (no canvas) or /Pressure raises before the clip or the
+    % rotation below is in force. If it does, the gsave is undone and the same
+    % call is made again on the caller's own path: every guard sits before
+    % `pktrowel` draws or changes state, so it raises the same error again,
+    % from a clean graphics state and with the error reported as `pktrowel`'s.
+    { gsave newpath tplopts pktrowel grestore } stopped { grestore tplopts pktrowel } if
+    /tplcd tplDir cos def /tplsd tplDir sin def
+    /tplsmin 1e30 def /tplsmax -1e30 def /tpltmin 1e30 def /tpltmax -1e30 def
+    /tplany false def
+    % Segment-count bound (issue #401): this scan walks the flattened outline
+    % without ever calling walkpath, so #110's wkmaxsegs does not reach it. It
+    % counts moveto, lineto and closepath visits, the three wkmeasure counts, and
+    % past wkmaxsegs it stops the scan with `exit`. The raise waits until the
+    % grestore below has put the caller's path and graphics state back, so a
+    % refusal leaves both as it found them. `exit` is a plain `exit` out of
+    % pathforall (which loops), not an error.
+    /tpln 0 def /tplover false def
+    gsave
+        flattenpath
+        { tplpt } { tplpt }
+        { } { /tpln tpln 1 add def tpln wkmaxsegs gt { /tplover true def exit } if }
+        pathforall
+    grestore
+    tplover { walkpath-segment-count-exceeds-safety-limit } if
+    tplany {
+        % rows run from a third of a band outside the near edge to the far one
+        /tplt0 tpltmin tplF 0.3 mul sub def
+        % How far a row must overrun the area so the blade's entry/exit trim
+        % (up to 6% of the row), its drag and its skew all land outside it.
+        /tplspan tplsmax tplsmin sub def
+        /tplm tplspan 0.07 mul tplWidth 0.5 mul tplAngle sin abs tplDrag add mul add
+              tplPitch add 0.85 div def
+        /tplsc tplsmin tplsmax add 0.5 mul def
+        /tplhl tplspan 0.5 mul tplm add def
+        % The band a row really lays is F*P, where P is the thinnest the caller's
+        % /Pressure gets inside the area. Only a /Pressure that dips below 1 changes
+        % anything: everything else keeps F and so keeps today's output exactly.
+        /tplFe tplF def
+        tplopts /Pressure known {
+            % The proc is read at 17 points of the row's own t that the area
+            % occupies (the overrun at both ends lies outside it, and a taper to 0
+            % there must not set the spacing). It may draw random numbers, so the
+            % stream is put back if it moved. P is never above 1 (a heavier
+            % pressure just overlaps more) and never below 0.25, so a pull that
+            % tapers to nothing costs at most four times the rows and still leaves
+            % a thin end, as a real knife does.
+            /tplPressure tplopts /Pressure get def
+            /tplrr rrand def
+            /tplplo tplm 2 tplhl mul div def
+            1 /tplP exch def
+            0 1 16 {
+                16 div 1 2 tplplo mul sub mul tplplo add tplPressure abs
+                dup tplP lt { /tplP exch def } { pop } ifelse
+            } for
+            rrand tplrr ne { tplrr srand } if
+            tplP 0.25 max /tplP exch def
+            tplP 1 lt { /tplFe tplF tplP mul def } if
+        } if
+        /tplStep tplFe 1 tplOverlap sub mul def
+        tplRJitSet not { /tplRJit tplFe tplOverlap mul 0.4 mul def } if
+        % compared as a real: `cvi` of a huge extent would raise rangecheck
+        % instead of the guard
+        /tplrows tpltmax tplF 0.3 mul add tplt0 sub tplStep div ceiling 1 add def
+        tplrows 4000 gt { pktrowelplane-row-count-exceeds-safety-limit } if
+        /tplrows tplrows cvi def
+        % Unset, the tilt is what moves a row's far end by 0.15 of the overlap,
+        % at most 1.5 degrees, so the tilt cannot open a seam on a long row.
+        tplAJitSet not {
+            /tplAJit 0.15 tplFe tplOverlap mul mul tplhl div 1 min
+                dup dup mul 1 exch sub sqrt atan 1.5 min def
+        } if
+        % /Light is a direction in the caller's user space; the rows are drawn
+        % in a space rotated by /Direction, where the same light is /Light -
+        % /Direction. The caller's own dict is left alone.
+        /tplrowopts tplopts def
+        tplopts /Light known {
+            /tplrowopts tplopts dup length 1 add dict copy def
+            tplrowopts /Light tplopts /Light get tplDir sub put
+        } if
+        % A row can still raise a guard the empty-path call could not (the deposit
+        % budget, or /Touch's area limit, both of which depend on the row's
+        % length). The rows run under the clip and the rotation, so an error
+        % must not leave them behind: it is caught, the gsave undone, and the
+        % error raised again from here. Every `pktrowel` guard is an undefined
+        % name, so naming it again is the same error; anything else is raised
+        % through errordict, whose handler takes the offending command off the
+        % operand stack (Ghostscript and pscat alike), so it is pushed first.
+        % A caller's /Pressure may also just `stop`, which
+        % raises no error: newerror tells the two apart, and a plain stop is
+        % passed on as a plain stop.
+        $error /newerror false put
+        {
+        gsave
+            clip
+            newpath
+            tplDir rotate
+            0 1 tplrows 1 sub {
+                /tpli exch def
+                % both draws are unconditional: a fixed stream
+                /tplrt tplt0 tpli tplStep mul add tplRJit pkjit add def
+                /tplra tplAJit pkjit def
+                newpath
+                tplsc tplhl tplra cos mul sub  tplrt tplhl tplra sin mul sub moveto
+                tplsc tplhl tplra cos mul add  tplrt tplhl tplra sin mul add lineto
+                tplrowopts pktrowel
+            } for
+        grestore
+        } stopped {
+            grestore
+            $error /newerror get {
+                $error /errorname get /undefined eq
+                    { $error /command get cvx exec }
+                    { $error /command get errordict $error /errorname get 2 copy known { get exec } { pop pop pop stop } ifelse }
+                ifelse
+            } { stop } ifelse
+        } if
+    } if
+} bind def
+
+%%SelfTest: pktrowelplane-bounds-its-area-outline
+%   % Issue #401: pktrowelplane flattens and scans the area outline itself,
+%   % never through walkpath, so it counts moveto, lineto and closepath visits
+%   % against wkmaxsegs. A closed triangle is moveto + lineto + lineto +
+%   % closepath = 4 visits, so (wkmaxsegs - 4) extra zero-length linetos make
+%   % exactly wkmaxsegs; one more is over. Zero-length linetos survive
+%   % flattenpath, so the count is real.
+%   { newpath 0 0 moveto 50 0 lineto wkmaxsegs 4 sub { 0 0 rlineto } repeat
+%     25 40 lineto closepath << /Width 40 >> pktrowelplane }
+%   (a closed outline of exactly wkmaxsegs segments still fills) mustpass
+%   { newpath 0 0 moveto 50 0 lineto wkmaxsegs 3 sub { 0 0 rlineto } repeat
+%     25 40 lineto closepath << /Width 40 >> pktrowelplane }
+%   /walkpath-segment-count-exceeds-safety-limit
+%   (a closed outline one segment over wkmaxsegs) mustguard
+%   { newpath 0 0 moveto wkmaxsegs { 0 0 rlineto } repeat
+%     << /Width 40 >> pktrowelplane }
+%   /walkpath-segment-count-exceeds-safety-limit
+%   (an open outline one segment over wkmaxsegs) mustguard
+%%EndSelfTest
+%
+%%SelfTest: pktrowelplane-refuses-a-huge-outline-before-any-row
+%   % Without the bound the call never refuses, so the guard is pinned by
+%   % where it fires. pktrowel is replaced by a counter (each block runs in
+%   % a fresh interpreter): the one call every run makes is the empty-path
+%   % validation call, so a refusal before any row means exactly one call.
+%   /tcalls 0 def
+%   /pktrowel { pop /tcalls tcalls 1 add def } def
+%   { newpath 0 0 moveto 50 0 lineto wkmaxsegs 3 sub { 0 0 rlineto } repeat
+%     25 40 lineto closepath << /Width 40 >> pktrowelplane }
+%   /walkpath-segment-count-exceeds-safety-limit
+%   (the over-limit outline is refused) mustguard
+%   tcalls 1 eq (no row was laid before the refusal) mustbe
+%%EndSelfTest
+%
+%%SelfTest: pktrowelplane-refusal-leaves-the-caller-as-it-was
+%   % The raise comes after the scan's grestore, not from inside it: the
+%   % caller's graphics state and curved path are untouched by a refusal.
+%   0.25 setgray
+%   newpath 0 0 moveto 20 0 30 20 50 20 curveto wkmaxsegs { 0 0 rlineto } repeat
+%   closepath
+%   { << /Width 40 >> pktrowelplane } stopped /tstop exch def
+%   tstop $error /command get /walkpath-segment-count-exceeds-safety-limit eq and
+%   (the refusal is the bound's undefined name) mustbe
+%   currentgray 0.25 sub abs 0.001 lt (the gray was not changed) mustbe
+%   /tcurves 0 def
+%   { pop pop } { pop pop } { pop pop pop pop pop pop /tcurves 1 def } { }
+%   pathforall
+%   tcurves 1 eq (the curve in the caller's path was not flattened) mustbe
+%%EndSelfTest
+%
+%%SelfTest: pktrowelplane-guards
+%   % a triangle path, set up per case (the procedure reads the current path)
+%   { newpath 0 0 moveto 50 0 lineto 25 40 lineto closepath << /Width 0 >> pktrowelplane }
+%   /pktrowelplane-width-must-be-positive
+%   (/Width 0) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto 25 40 lineto closepath << /Width { 5 } >> pktrowelplane }
+%   /pktrowelplane-width-must-not-be-a-procedure
+%   (/Width { 5 }) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto 25 40 lineto closepath << /Direction { 5 } >> pktrowelplane }
+%   /pktrowelplane-direction-must-not-be-a-procedure
+%   (/Direction { 5 }) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto 25 40 lineto closepath << /Angle 90 >> pktrowelplane }
+%   /pktrowelplane-angle-must-be-minus80-to-80
+%   (/Angle 90) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto 25 40 lineto closepath << /Cover 1.5 >> pktrowelplane }
+%   /pktrowelplane-cover-must-be-0-to-1
+%   (/Cover 1.5) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto 25 40 lineto closepath << /Coverage -1 >> pktrowelplane }
+%   /pktrowelplane-coverage-must-be-0-to-1
+%   (/Coverage -1) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto 25 40 lineto closepath << /Overlap 1 >> pktrowelplane }
+%   /pktrowelplane-overlap-must-be-0-to-under-0.95
+%   (/Overlap 1: zero spacing, unbounded rows) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto 25 40 lineto closepath << /Overlap -0.1 >> pktrowelplane }
+%   /pktrowelplane-overlap-must-be-0-to-under-0.95
+%   (/Overlap -0.1) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto 25 40 lineto closepath << /RowJitter -1 >> pktrowelplane }
+%   /pktrowelplane-rowjitter-must-not-be-negative
+%   (/RowJitter -1) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto 25 40 lineto closepath << /AngleJitter 30 >> pktrowelplane }
+%   /pktrowelplane-anglejitter-must-be-0-to-20
+%   (/AngleJitter 30) mustguard
+%
+%   % rows are counted before anything is drawn: a 1000pt area under a 0.1pt blade
+%   { newpath 0 0 moveto 1000 0 lineto 1000 1000 lineto closepath
+%     << /Width 0.1 >> pktrowelplane }
+%   /pktrowelplane-row-count-exceeds-safety-limit
+%   (a tiny blade on a big area) mustguard
+%
+%   % a key only pktrowel checks still raises before the clip and rotation
+%   { newpath 0 0 moveto 50 0 lineto 25 40 lineto closepath << /Lanes 50 >> pktrowelplane }
+%   /pktrowel-lanes-must-be-1-to-40
+%   (/Lanes 50, caught by pktrowel's own guard) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto 25 40 lineto closepath << /Touch 0.5 >> pktrowelplane }
+%   /pktrowel-touch-needs-a-canvas
+%   (/Touch with no canvas) mustguard
+%
+%   % a row past pktrowel's deposit budget raises with the state still unwound
+%   % (this block also fails on a gsave left open)
+%   { newpath 0 0 moveto 100000 0 lineto 100000 10 lineto 0 10 lineto closepath
+%     << /Width 12 /Direction 0 >> pktrowelplane }
+%   /pktrowel-deposit-count-exceeds-safety-limit
+%   (a 100000pt row) mustguard
+%
+%   { gsave newpath 0 0 moveto 50 0 lineto 25 40 lineto closepath
+%     << /Width 10 >> pktrowelplane grestore }
+%   (a triangle) mustpass
+%
+%   { gsave newpath << /Width 10 >> pktrowelplane grestore }
+%   (an empty path is nothing to fill) mustpass
+%
+%   { gsave newpath 5 5 moveto << /Width 10 >> pktrowelplane grestore }
+%   (a bare moveto, no area) mustpass
+%
+%   { gsave newpath 0 0 moveto 50 0 lineto 25 40 lineto closepath
+%     << /Width 10 /Direction 35 /Colors [ [ 1 0 0 ] [ 0 0 1 ] ] /Light 90 >> pktrowelplane
+%     grestore }
+%   (a loaded, directed plane) mustpass
+%
+%   % a huge extent still raises the row guard, not rangecheck
+%   { newpath 0 0 moveto 1e12 0 lineto 1e12 1e12 lineto closepath
+%     << /Width 10 >> pktrowelplane }
+%   /pktrowelplane-row-count-exceeds-safety-limit
+%   (an area far past cvi's range) mustguard
+%
+%   % the caller's path survives
+%   { gsave newpath 0 0 moveto 50 0 lineto 25 40 lineto closepath
+%     << /Width 10 >> pktrowelplane
+%     pathbbox pop exch pop exch pop 50 eq grestore } stopped { false } if
+%   (the path is left as it was) mustbe
+%%EndSelfTest
 
 % --- fan brush (issue #114) -------------------------------------------
 % opts pkfan -
@@ -3050,7 +3546,7 @@
 %%EndSelfTest
 
 % @kind: Procedure
-% @summary: A fan brush: a bundle of bristles that leaves a flattened ferrule and splays apart as the stroke travels, for foliage, evergreen branches, grasses and soft feathering. Distinct from pkdry, whose bristles stay parallel -- /Splay is the whole difference. Many thin bristles at high Load give a soft feathered mark; fewer at low Load give separated bristle marks. A single-point subpath is a pressed fan, its bristles radiating through a 140-degree arc opening toward +y; rotate the space around it to aim it elsewhere. Deterministic under the caller's own srand; bounded by Bristles * stops.
+% @summary: A fan brush: a bundle of bristles that leaves a flattened ferrule and splays apart as the stroke travels, for foliage, evergreen branches, grasses and soft feathering. Distinct from pkdry, whose bristles stay parallel -- /Splay is the whole difference. With /Colors it spreads up to eight loaded colours across the bristles, blended by /ColorMix and lit from /Light. Many thin bristles at high Load give a soft feathered mark; fewer at low Load give separated bristle marks. A single-point subpath is a pressed fan, its bristles radiating through a 140-degree arc opening toward +y; rotate the space around it to aim it elsewhere. Deterministic under the caller's own srand; bounded by Bristles * stops.
 % @example: newpath 40 120 moveto 100 150 160 160 210 145 curveto << /Width 60 /Splay 0.6 >> pkfan
 % @param: /Width [points] Fan width at full spread; must be > 0 (default 30)
 % @param: /Bristles [count] Bristle count; must be a whole number, hard safety cap 1..60 (default 24)
@@ -3065,7 +3561,7 @@
 % @param: /Jitter [points] Seeded lateral displacement of each bristle's trace (default 0)
 % @param: /Pitch [points] walkpath sampling pitch for the shared centerline pass; must be > 0 (default BristleWidth*0.6, capped at 6)
 % @param: /ColorJitter [0..1] per-bristle color variation around the caller's current color (default 0.06)
-% @param: /Colors [array of rgb arrays] 1 to 8 loaded colors, listed from the fan's left edge (looking along the travel) to its right, evenly spaced across the bristles; when set, the current color is not used for the mark, though /ColorJitter still varies it; a pressed fan paints them across its arc, first color on the left of its axis (default unset)
+% @param: /Colors [array of rgb arrays] 1 to 8 loaded colors, listed from the fan's left edge (looking along the travel) to its right, evenly spaced across the bristles; when set, the current color is not used for the mark, though /ColorJitter still varies it; a pressed fan paints them across its arc, first color on the left of its axis. An entry may be a bare pigment name such as /sapgreen (see PigmentNames), which stands for that pigment; a pigmix spec goes through pigcolors (default unset)
 % @param: /ColorMix [0..1] with /Colors, how far neighbouring colors have blended on the brush: 0 is hard bands, 1 a smooth gradient (default 0.3)
 % @param: /Light [degrees] with /Colors, the direction the light comes from, counterclockwise from +x in user space: each subpath puts the first color on the side facing the light, whichever way it travels; a pressed fan is never flipped (default unset: the first color stays on the left of the travel)
 % @param: /Touch [0..1] How hard the fan presses into the shared canvas set by pkcanvas, which must be called first: below 1 the bristles land only on the weave's knuckles that stand proud enough for that pressure to reach, lower is lighter and 0 deposits nothing; 1 is full contact, identical to leaving it unset. Composes with /Load and /Dropout and takes no rand draws (default unset)
@@ -3635,7 +4131,7 @@
 %%EndSelfTest
 
 % @kind: Procedure
-% @summary: A broad flat brush for block-ins, sky and water bands, reflections and broad masses. What separates it from pktrowel's blade and pknib's pmn is that a brush runs out of paint: the band is divided into striations that drop out one by one as the charge falls along the stroke, so the mark fades from solid to broken along its own direction. Square ends, and parallel edges that are crisp at /Edge 0 -- the default /Edge 0.15 roughens them by about a pixel. Deterministic under the caller's own srand; bounded by Grain * stops.
+% @summary: A broad flat brush for block-ins, sky and water bands, reflections and broad masses. What separates it from pktrowel's blade and pknib's pmn is that a brush runs out of paint: the band is divided into striations that drop out one by one as the charge falls along the stroke, so the mark fades from solid to broken along its own direction. With /Colors it lays up to eight loaded colours across the band, blended by /ColorMix and lit from /Light. Square ends, and parallel edges that are crisp at /Edge 0 -- the default /Edge 0.15 roughens them by about a pixel. Deterministic under the caller's own srand; bounded by Grain * stops.
 % @example: newpath 40 120 moveto 300 130 lineto << /Width 46 /Charge 0.95 /Depletion 0.6 >> pkbroad
 % @param: /Width [points] Band width; must be > 0 (default 40)
 % @param: /Angle [degrees] Brush rotation in degrees relative to the direction of travel, -80..80; constant along a curve, unlike pknib's fixed world angle (default 0)
@@ -3645,7 +4141,7 @@
 % @param: /Edge [0..1] roughness applied to every striation boundary, not only the band's outer sides -- so above about 0.3 it also breaks holes through the band's interior (8% of interior pixels at 0.9); 0 is a crisp flat-brush edge (default 0.15)
 % @param: /Pitch [points] walkpath sampling pitch for the shared centerline pass; must be > 0 (default Width*0.3, capped at 4)
 % @param: /ColorJitter [0..1] per-striation color variation around the caller's current color (default 0.05)
-% @param: /Colors [array of rgb arrays] 1 to 8 loaded colors, listed from the brush's left edge (looking along the travel) to its right, evenly spaced across the band; when set, the current color is not used for the mark, though /ColorJitter still varies it (default unset)
+% @param: /Colors [array of rgb arrays] 1 to 8 loaded colors, listed from the brush's left edge (looking along the travel) to its right, evenly spaced across the band; when set, the current color is not used for the mark, though /ColorJitter still varies it. An entry may be a bare pigment name such as /sapgreen (see PigmentNames), which stands for that pigment; a pigmix spec goes through pigcolors (default unset)
 % @param: /ColorMix [0..1] with /Colors, how far neighbouring colors have blended on the brush: 0 is hard bands, 1 a smooth gradient (default 0.3)
 % @param: /Light [degrees] with /Colors, the direction the light comes from, counterclockwise from +x in user space: each subpath puts the first color on the side facing the light, whichever way it travels (default unset: the first color stays on the left of the travel)
 % @param: /Touch [0..1] How hard the brush presses into the shared canvas set by pkcanvas, which must be called first: below 1 the band lands only on the weave's knuckles that stand proud enough for that pressure to reach, lower is lighter and 0 deposits nothing; 1 is full contact, identical to leaving it unset. Composes with /Charge and /Depletion and takes no rand draws (default unset)
@@ -4687,6 +5183,97 @@
 % examples/paintkit_wet_pull_demo.ps, pulls three reflected elements
 % and grazes them: about 20s for the page in a release build.
 %
+% A backdrop that varies (issue #179)
+% ------------------------------------
+% /Under is one colour, and a mark rarely sits on one: a cloud spans a
+% graded sky, mist drifts over the foot of a range that fades into it.
+% With one colour the outer passes are right at one end and leave a pale
+% or dark rim at the other (#118 hand-matched it until the rim went).
+% /Under may also be a procedure `x y -> r g b`, the backdrop as a
+% function, and /At [x y] says where the mark sits:
+%
+%   { ... } << /Soft 1 /Offset 30
+%              /At [ 135 70 ] /Under { exch pop skyat } >> pkwet
+%
+% Each softening pass asks the procedure for the backdrop at /At plus that
+% pass's own displacement, and mixes toward the answer instead of toward a
+% fixed colour; the core pass has no backdrop and asks nothing. So the
+% question is per pass, not per pixel: pkwet cannot see where the wrapped
+% mark paints (it is a procedure; see below), and one colour has to serve
+% a whole pass. What the procedure fixes is the shift the displacement
+% causes, the larger share of the rim at a generous /Offset. A mark that
+% is tall against the gradient still has the rest, so split it into
+% several pkwet calls, each with its own /At, or give /Box and /Bands
+% instead (below). /At is required with a procedure unless /Box is given
+% (named error otherwise) and rejected with an [r g b], where it would mean
+% nothing. The coordinates are those of the user space pkwet is
+% called in, as /Direction's are: inside a mirror or a translate the
+% procedure sees shifted ones. A literal [r g b] takes exactly the code it
+% always did, with the same draws.
+%
+% The procedure runs inside pkwet's frame, once per softening pass, before
+% the first pass and after the plan is fixed. Keep it a pure function: it
+% must not paint, must not call pkwet, and must not rely on what else is
+% on the operand stack (it is called with nothing of pkwet's there, so
+% one that counts the stack sees only the caller's items). It must leave
+% exactly three numbers in 0..1. Anything else raises
+% pkwet-under-procedure-must-return-3-numbers, -results-must-be-numbers or
+% -results-must-be-0-to-1, with the depth counter and the operand stack
+% put back first. Cost: at most Layers - 1 calls per pkwet call.
+%
+% A backdrop per band (issue #359)
+% --------------------------------
+% One colour per pass leaves the rim a tall mark's own height makes: over a
+% sky that changes down the mark, the top of a pass is right and the bottom
+% is not. pkwet still cannot see where the wrapped
+% procedure paints, so it cannot ask per fill or per pixel; what it can do is
+% cut the page into cells and paint each pass once per cell:
+%
+%   { ... } << /Soft 1 /Offset 30 /Layers 5
+%              /Box [ 120 20 60 110 ] /Bands [ 1 6 ]
+%              /Under { exch pop skyat } >> pkwet
+%
+% /Box says where the mark sits (x y w h, in the user space pkwet is called
+% in); /Bands is the grid, columns by rows. The grid covers the box grown by
+% /Offset on every side, because a pass is displaced by up to /Offset and its
+% rim lands there; the outer cells' clips run on outward, so none of it is
+% cut off. The procedure is asked once per cell, at its centre (not per pass,
+% and not displaced: a cell is a fixed piece of page, and the question is what
+% is under it), and each softening pass runs once per cell, clipped to the
+% cell, in the caller's colour mixed toward that cell's answer. The core is
+% laid once, whole, in the caller's own colour. /Box and /At are alternatives
+% (a named error for both, or for one of /Box and /Bands without the other,
+% or for either with a literal /Under).
+%
+% The wrapped procedure runs once per cell, and every run has to lay the same
+% marks or the pieces would not fit. So the random stream is saved when a
+% pass starts and put back (`rrand`, `srand`) before every cell after the
+% first: each cell draws the same mark and the clips cut it up, and when the
+% pass is done the stream stands where one unbanded run would have left it,
+% so no mark drawn after the call moves, and the number of cells never
+% re-rolls a thing. A procedure that reseeds itself replays its own seed in
+% every cell. The same replay is why a banded call over a backdrop that never
+% changes draws what the literal does, to the rounding of a clip's coverage
+% (`wet_bands_over_a_constant_backdrop_match_the_literal`); the cell edges
+% between cells are snapped to the device pixel grid, so neighbours share
+% one edge exactly and leave no seam (exact for an axis-aligned or quarter-turn
+% CTM; a page turned by another angle can show a faint hairline).
+%
+% Measured (tests/paintkit.rs, a 110pt column over a strong gradient,
+% /Offset 34): the residual rim is 186.7 with one backdrop per pass, 112.5
+% with 4 rows and 82.9 with 8, 2.25x less. On a short cloud per pass is
+% already near the answer, and 3 rows are worse than it (146.9 against 119.8)
+% where 6 are better (98.4). Pick rows so a cell is no taller than about half
+% /Offset; for a mark about as tall as /Offset, /At is as good and cheaper.
+%
+% Cost: the wrapped procedure runs (Layers - 1) x cells + 1 times, so it is
+% counted against the same 64-run budget as a directional call
+% (pkwet-too-many-passes, checked before any draw): 12 cells at 6 layers, 21
+% at 4. An unclipped procedure still does all its work in every cell, so a
+% spray at the specimen's density costs that many times as much. Not done,
+% and still open: asking the backdrop per fill inside a preset (a hook into
+% each preset's colour set), which would take no clipping at all.
+%
 % pkwash is deliberately *not* wrappable: it resets alpha and blend mode
 % itself, by design, so it will not honor a surrounding context. pkwet
 % is for the stroke families.
@@ -4793,9 +5380,194 @@
 % depth pqdset -
 % @internal
 /pqdset { userdict /pqdepth 3 -1 roll put } bind def
-% -> frame   (this invocation's 7-slot frame; pkwet lists the slots)
+% -> frame   (this invocation's 9-slot frame; pkwet lists the slots)
 % @internal
 /pqmyframe { userdict /pqframes get pqdnow get } bind def
+
+% x y -> [r g b]   (issue #179: ask the /Under procedure for the backdrop
+% at one point and check its answer)
+% It runs with nothing of this call's on the operand stack, so a procedure
+% that counts the stack sees only the caller's items, and it is the only
+% caller code that runs while the frame is half built: every way out
+% below first rolls the depth back, so a caught error or a rejected
+% result never leaves pqdepth raised (the nesting guard does the same).
+% Reads pqUnderProc. Draws no random number.
+% @internal
+/pqaskunder {
+    count 2 sub /pqc0 exch def
+    { pqUnderProc } stopped { pqdnow 1 sub pqdset stop } if
+    % Exactly three results, nothing more, nothing fewer. Anything
+    % else is dropped back to the entry count (if the procedure ate
+    % into the caller's items there is nothing to put back) and
+    % named, rather than left to fail inside mix3.
+    count pqc0 sub 3 ne {
+        count pqc0 sub dup 0 gt { { pop } repeat } { pop } ifelse
+        pqdnow 1 sub pqdset pkwet-under-procedure-must-return-3-numbers
+    } if
+    3 array astore /pqur exch def
+    0 1 2 {
+        pqur exch get dup type dup /integertype ne exch /realtype ne and
+            { pop pqdnow 1 sub pqdset pkwet-under-procedure-results-must-be-numbers } if
+        dup 0 lt exch 1 gt or
+            { pqdnow 1 sub pqdset pkwet-under-procedure-results-must-be-0-to-1 } if
+    } for
+    pqur
+} bind def
+
+% -> -   (procedural /Under, issue #179: evaluate the backdrop procedure
+% for every softening pass and re-mix that pass's colour toward the result)
+% Reads pqplan, pqks, pqbase, pqPickup, pqLayers and pqAt, and
+% leaves the per-pass backdrop arrays in pqunders (null at the core, which
+% has none). The procedure gets the pass's position, `At` plus the pass's
+% displacement from the plan, in the user space pkwet was called in.
+% Nothing here draws a random number.
+% @internal
+/pqwetunder {
+    /pqunders pqLayers array def
+    0 1 pqLayers 1 sub {
+        /pqi exch def
+        pqplan pqi get dup length 2 gt {
+            /pqent exch def
+            pqAt 0 get pqent 0 get add
+            pqAt 1 get pqent 1 get add
+            pqaskunder /pqur exch def
+            pqunders pqi pqur put
+            pqplan pqi
+            [
+                pqent 0 get pqent 1 get
+                pqbase pqur pqks pqi get mix3
+            ]
+            put
+        } { pop } ifelse
+    } for
+} bind def
+
+% x -> x'   /   y -> y'   (issue #359: a user-space coordinate moved to the
+% nearest device pixel edge along its own axis; exact when the CTM is
+% axis-aligned or a quarter turn, where one device coordinate is the whole
+% story, so both are rounded)
+% @internal
+/pqsx { 0 transform round exch round exch itransform pop } bind def
+% @internal
+/pqsy { 0 exch transform round exch round exch itransform exch pop } bind def
+
+% -> -   (banded /Under, issue #359: the grid of cells and what each one
+% is mixed toward)
+% Reads pqBox, pqCols, pqRows, pqSpread, pqplan, pqks, pqbase and
+% pqLayers and leaves pqbrec = [ rects backdrops mixed rng ] for the frame:
+%   rects      per cell, the [x y w h] its softening passes are clipped to
+%   backdrops  per cell, the colour the procedure answered at its centre
+%   mixed      per pass, null at the core, else per cell the pass colour
+%              (the caller's colour mixed toward that cell's backdrop)
+%   rng        the stream saved at the start of each pass (see pqwetbandpass)
+% The grid covers /Box grown by /Offset on every side, because a pass is
+% displaced by up to /Offset and its rim lands there; the edge cells' clips
+% run on outward without limit, so nothing of a displaced pass is cut off.
+% Cells are numbered row by row from the low corner, the order asked in.
+% @internal
+/pqwetbands {
+    /pqbx pqBox 0 get pqSpread sub def
+    /pqby pqBox 1 get pqSpread sub def
+    /pqbw pqBox 2 get pqSpread 2 mul add pqCols div def
+    /pqbh pqBox 3 get pqSpread 2 mul add pqRows div def
+    % The clip edges between cells, snapped to the device pixel grid: two
+    % clips that abut at a fractional pixel each cover part of the pixel, and
+    % two opaque fills at part coverage let the ground show through as a
+    % hairline (the seam pktrowel's lane overlap exists to avoid). Snapped, the
+    % neighbours share one edge exactly. A snap is exact when the CTM does
+    % rotate by other than a quarter turn or skew, which is every page here; a
+    % CTM turned by some other angle can show a faint seam. The first and last edges run on outward without limit.
+    /pqxe pqCols 1 add array def
+    /pqye pqRows 1 add array def
+    0 1 pqCols {
+        /pqbi exch def
+        pqxe pqbi
+        pqbi 0 eq { pqbx 100000 sub } {
+            pqbi pqCols eq { pqbx pqbw pqCols mul add 100000 add }
+                           { pqbx pqbi pqbw mul add pqsx } ifelse } ifelse
+        put
+    } for
+    0 1 pqRows {
+        /pqbj exch def
+        pqye pqbj
+        pqbj 0 eq { pqby 100000 sub } {
+            pqbj pqRows eq { pqby pqbh pqRows mul add 100000 add }
+                           { pqby pqbj pqbh mul add pqsy } ifelse } ifelse
+        put
+    } for
+    /pqrects pqCols pqRows mul array def
+    /pqbks pqCols pqRows mul array def
+    0 1 pqRows 1 sub {
+        /pqbj exch def
+        0 1 pqCols 1 sub {
+            /pqbi exch def
+            pqbx pqbi pqbw mul add pqbw 2 div add
+            pqby pqbj pqbh mul add pqbh 2 div add
+            pqaskunder /pqur exch def
+            pqbks pqbj pqCols mul pqbi add pqur put
+            pqrects pqbj pqCols mul pqbi add
+            [ pqxe pqbi get  pqye pqbj get
+              pqxe pqbi 1 add get pqxe pqbi get sub
+              pqye pqbj 1 add get pqye pqbj get sub ]
+            put
+        } for
+    } for
+    /pqmixed pqLayers array def
+    0 1 pqLayers 1 sub {
+        /pqi exch def
+        pqplan pqi get length 2 gt {
+            pqmixed pqi pqbks length array put
+            0 1 pqbks length 1 sub {
+                /pqbn exch def
+                pqmixed pqi get pqbn
+                [ pqbase pqbks pqbn get pqks pqi get mix3 ]
+                put
+            } for
+        } if
+    } for
+    /pqbrec [ pqrects pqbks pqmixed null ] def
+} bind def
+
+% -> -   (one banded softening pass, issue #359: the pass named by frame
+% slot 6, once per cell)
+% Each cell is its own gsave, clipped to the cell's rectangle in the user
+% space pkwet was called in, painting in that cell's mix, translated by the
+% pass's displacement, and running the wrapped procedure under `stopped`
+% exactly as an unbanded pass does. Slot 5 is pointed at the cell's backdrop
+% so a loaded colour (`puwet`) grades toward the same colour.
+%
+% The wrapped procedure runs once per cell, and each run must lay the same
+% marks, or the cells would not fit together. So the random stream is saved
+% when the pass starts and put back before every cell after the first
+% (`rrand`/`srand`, the convention hatchkit and artkit use): every cell
+% draws the same mark and the clips cut it into pieces, and when the pass is
+% done the stream is where one unbanded run would have left it, so no mark
+% after the call moves. A procedure that reseeds itself replays its own seed
+% in every cell anyway.
+%
+% Everything this reads is read from the frame, never from a global: the
+% wrapped procedure may itself call pkwet, which would overwrite them.
+% @internal
+/pqwetbandpass {
+    pqmyframe 8 get 3 rrand put
+    0 1 pqmyframe 8 get 0 get length 1 sub {
+        /pqwc exch def
+        pqmyframe 8 get /pqwr exch def
+        pqwr 0 get length 1 gt pqwc 0 gt and { pqwr 3 get srand } if
+        gsave
+            pqwr 0 get length 1 gt { pqwr 0 get pqwc get aload pop rectclip } if
+            pqwr 2 get pqmyframe 6 get get pqwc get aload pop setrgbcolor
+            pqmyframe 5 pqwr 1 get pqwc get put
+            pqmyframe 0 get pqmyframe 6 get get dup 0 get exch 1 get translate
+            { pqmyframe 1 get exec } stopped
+        {
+            grestore
+            pqdnow 1 sub pqdset
+            stop
+        } if
+        grestore
+    } for
+} bind def
 
 %%SelfTest: pkwet-rejects-malformed-directional-options
 %   { { } << /Direction (down) >> pkwet }
@@ -4907,11 +5679,178 @@
 %   pkwetn 4 eq (/Offset 6 wins over /Spread 22: 4 passes) mustbe
 %%EndSelfTest
 %
+%%SelfTest: pkwet-rejects-malformed-procedural-under
+%   % A procedural /Under needs /At, and /At means nothing without one.
+%   { { } << /Under { pop pop 0 0 0 } >> pkwet }
+%   /pkwet-under-procedure-needs-at
+%   (a procedure without /At) mustguard
+%
+%   { { } << /Under [ 0 0 0 ] /At [ 0 0 ] >> pkwet }
+%   /pkwet-at-needs-an-under-procedure
+%   (/At with a literal /Under) mustguard
+%
+%   { { } << /Under { pop pop 0 0 0 } /At 5 >> pkwet }
+%   /pkwet-at-must-be-an-x-y-pair
+%   (/At as a number) mustguard
+%
+%   { { } << /Under { pop pop 0 0 0 } /At [ 0 ] >> pkwet }
+%   /pkwet-at-must-be-an-x-y-pair
+%   (/At with one element) mustguard
+%
+%   { { } << /Under { pop pop 0 0 0 } /At [ 0 (a) ] >> pkwet }
+%   /pkwet-at-must-be-an-x-y-pair
+%   (/At with a string) mustguard
+%
+%   { { } << /Under { pop pop 0 0 0 } /At { 0 0 } >> pkwet }
+%   /pkwet-at-must-not-be-a-procedure
+%   (/At as a procedure) mustguard
+%
+%   % What the backdrop procedure hands back. Each rejection also puts the
+%   % depth counter and the operand stack back: the guard itself is what
+%   % must not poison the next call.
+%   { { } << /Under { pop pop 1 2 } /At [ 0 0 ] >> pkwet }
+%   /pkwet-under-procedure-must-return-3-numbers
+%   (two results) mustguard
+%
+%   { { } << /Under { pop pop 1 2 3 4 } /At [ 0 0 ] >> pkwet }
+%   /pkwet-under-procedure-must-return-3-numbers
+%   (four results) mustguard
+%
+%   { { } << /Under { } /At [ 0 0 ] >> pkwet }
+%   /pkwet-under-procedure-must-return-3-numbers
+%   (a procedure that leaves the position, four values) mustguard
+%
+%   { { } << /Under { pop pop (a) 0 0 } /At [ 0 0 ] >> pkwet }
+%   /pkwet-under-procedure-results-must-be-numbers
+%   (a string result) mustguard
+%
+%   { { } << /Under { pop pop 2 0 0 } /At [ 0 0 ] >> pkwet }
+%   /pkwet-under-procedure-results-must-be-0-to-1
+%   (a result of 2) mustguard
+%
+%   pqdepth 0 eq (every rejection rolled the depth back) mustbe
+%
+%   % The procedure is asked once per softening pass, at /At plus the
+%   % pass's displacement, and never for the core: a one-sided pull of 12
+%   % over 3 layers goes down 6 and 12 from /At, so y = 94 then 88 (the
+%   % plan is indexed from the core out; the passes are drawn the other way).
+%   userdict /pwul [ ] put
+%   { } << /Direction 270 /OneSided true /Offset 12 /Layers 3
+%          /At [ 5 100 ]
+%          /Under { /pwy exch def /pwx exch def
+%                   userdict /pwul [ pwul aload pop pwx pwy ] put
+%                   0.5 0.5 0.5 } >> pkwet
+%   pwul length 4 eq (asked for the 2 softening passes, not the core) mustbe
+%   pwul 1 get 94 sub abs 0.01 lt (the inner softening pass is 6 down) mustbe
+%   pwul 3 get 88 sub abs 0.01 lt (the outermost pass is 12 down) mustbe
+%   pwul 0 get 5 sub abs 3 lt (x stays near /At) mustbe
+%%EndSelfTest
+%
+%%SelfTest: pkwet-rejects-malformed-bands
+%   % /Box and /Bands go together, instead of /At, with a procedural /Under.
+%   { { } << /Under { pop pop 0 0 0 } /Box [ 0 0 9 9 ] >> pkwet }
+%   /pkwet-box-needs-bands
+%   (/Box without /Bands) mustguard
+%
+%   { { } << /Under { pop pop 0 0 0 } /Bands [ 2 2 ] >> pkwet }
+%   /pkwet-bands-need-a-box
+%   (/Bands without /Box) mustguard
+%
+%   { { } << /Under { pop pop 0 0 0 } /Box [ 0 0 9 9 ] /Bands [ 2 2 ] /At [ 0 0 ] >> pkwet }
+%   /pkwet-at-and-box-are-exclusive
+%   (/At with /Box) mustguard
+%
+%   { { } << /Under [ 0 0 0 ] /Box [ 0 0 9 9 ] /Bands [ 2 2 ] >> pkwet }
+%   /pkwet-box-needs-an-under-procedure
+%   (/Box with a literal /Under) mustguard
+%
+%   { { } << /Under { pop pop 0 0 0 } /Box 5 /Bands [ 2 2 ] >> pkwet }
+%   /pkwet-box-must-be-x-y-w-h
+%   (a number as /Box) mustguard
+%
+%   { { } << /Under { pop pop 0 0 0 } /Box [ 0 0 9 ] /Bands [ 2 2 ] >> pkwet }
+%   /pkwet-box-must-be-x-y-w-h
+%   (a 3-element /Box) mustguard
+%
+%   { { } << /Under { pop pop 0 0 0 } /Box [ 0 0 0 9 ] /Bands [ 2 2 ] >> pkwet }
+%   /pkwet-box-must-be-x-y-w-h
+%   (a /Box with no width) mustguard
+%
+%   { { } << /Under { pop pop 0 0 0 } /Box { 0 0 9 9 } /Bands [ 2 2 ] >> pkwet }
+%   /pkwet-box-must-not-be-a-procedure
+%   (a procedure as /Box) mustguard
+%
+%   { { } << /Under { pop pop 0 0 0 } /Box [ 0 0 9 9 ] /Bands 4 >> pkwet }
+%   /pkwet-bands-must-be-cols-rows
+%   (a number as /Bands) mustguard
+%
+%   { { } << /Under { pop pop 0 0 0 } /Box [ 0 0 9 9 ] /Bands [ 2 ] >> pkwet }
+%   /pkwet-bands-must-be-cols-rows
+%   (a 1-element /Bands) mustguard
+%
+%   { { } << /Under { pop pop 0 0 0 } /Box [ 0 0 9 9 ] /Bands [ 2 1.5 ] >> pkwet }
+%   /pkwet-bands-must-be-cols-rows
+%   (a fractional /Bands) mustguard
+%
+%   { { } << /Under { pop pop 0 0 0 } /Box [ 0 0 9 9 ] /Bands { 2 2 } >> pkwet }
+%   /pkwet-bands-must-not-be-a-procedure
+%   (a procedure as /Bands) mustguard
+%
+%   { { } << /Under { pop pop 0 0 0 } /Box [ 0 0 9 9 ] /Bands [ 0 2 ] >> pkwet }
+%   /pkwet-bands-must-be-1-to-16
+%   (0 columns) mustguard
+%
+%   { { } << /Under { pop pop 0 0 0 } /Box [ 0 0 9 9 ] /Bands [ 2 17 ] >> pkwet }
+%   /pkwet-bands-must-be-1-to-16
+%   (17 rows) mustguard
+%
+%   % A banded call is asked once per cell, for the softening passes only,
+%   % and its answers are checked as an /At call's are.
+%   { { } << /Under { pop pop 0 0 2 } /Box [ 0 0 9 9 ] /Bands [ 1 2 ] >> pkwet }
+%   /pkwet-under-procedure-results-must-be-0-to-1
+%   (a result of 2 from a banded call) mustguard
+%
+%   pqdepth 0 eq (every rejection rolled the depth back) mustbe
+%
+%   % The pass budget counts every cell: (Layers - 1) * cells + 1 runs of
+%   % the mark. 5 * 12 + 1 = 61 is inside the 64 a chain of this kind may
+%   % multiply its mark by; 5 * 16 + 1 = 81 is not.
+%   userdict /pwbn 0 put
+%   { userdict /pwbn pwbn 1 add put }
+%   << /Layers 6 /Offset 0 /Under { pop pop 0 0 0 } /Box [ 0 0 9 9 ] /Bands [ 3 4 ] >> pkwet
+%   pwbn 61 eq (3 x 4 cells at 6 layers run the mark 61 times) mustbe
+%
+%   { { } << /Layers 6 /Under { pop pop 0 0 0 } /Box [ 0 0 9 9 ] /Bands [ 4 4 ] >> pkwet }
+%   /pkwet-too-many-passes
+%   (4 x 4 cells at 6 layers is 81 runs) mustguard
+%
+%   % One cell is no banding: the mark runs once per pass.
+%   userdict /pwbn 0 put
+%   { userdict /pwbn pwbn 1 add put }
+%   << /Layers 4 /Under { pop pop 0 0 0 } /Box [ 0 0 9 9 ] /Bands [ 1 1 ] >> pkwet
+%   pwbn 4 eq (one cell runs the mark once per pass) mustbe
+%
+%   % The procedure is asked once per cell, at its centre in the padded
+%   % grid: /Box grown by /Offset (here 4) on every side, 2 x 1 cells.
+%   userdict /pwul [ ] put
+%   { } << /Layers 2 /Offset 4 /Box [ 10 20 8 6 ] /Bands [ 2 1 ]
+%          /Under { /pwy exch def /pwx exch def
+%                   userdict /pwul [ pwul aload pop pwx pwy ] put
+%                   0.5 0.5 0.5 } >> pkwet
+%   pwul length 4 eq (asked once per cell, not per pass) mustbe
+%   pwul 0 get 10 sub abs 0.01 lt (the first cell's centre x) mustbe
+%   pwul 1 get 23 sub abs 0.01 lt (and y) mustbe
+%   pwul 2 get 18 sub abs 0.01 lt (the second cell's centre x) mustbe
+%%EndSelfTest
+%
 % @kind: Procedure
-% @summary: Runs a mark-drawing procedure several times, each pass displaced further and mixed further toward a declared backdrop color, so the mark's core stays solid while its edge grades away into the layer beneath. The wet-on-wet softener for skies, clouds, mist and distant forms; works with every stroke preset in this file. The procedure must build its own path: a path constructed before the call cannot be displaced, because PostScript paths are in device space once built, so every pass would land on the same geometry and nothing would soften. Pair it with a broken or particulate brush (pkspray, pkdry, pktrowel at low Coverage) -- a solid brush keeps its own hard silhouette and only gains a halo. With /Direction the passes line up along one axis instead: a reflection pulled down, a mountain foot lifted into mist, a sky swept across. Uses no alpha, so unlike pkwash it needs no Ghostscript fallback.
+% @summary: Runs a mark-drawing procedure several times, each pass displaced further and mixed further toward a declared backdrop color, so the mark's core stays solid while its edge grades away into the layer beneath. The wet-on-wet softener for skies, clouds, mist and distant forms; works with every stroke preset in this file. The procedure must build its own path: a path constructed before the call cannot be displaced, because PostScript paths are in device space once built, so every pass would land on the same geometry and nothing would soften. Pair it with a broken or particulate brush (pkspray, pkdry, pktrowel at low Coverage) -- a solid brush keeps its own hard silhouette and only gains a halo. With /Direction the passes line up along one axis instead: a reflection pulled down, a mountain foot lifted into mist, a sky swept across. /Under may be a procedure `x y -> r g b` (with /At, or with /Box and /Bands for a mark that is tall against the backdrop) for a backdrop that varies across the mark, such as a graded sky. Uses no alpha, so unlike pkwash it needs no Ghostscript fallback.
 % @example: { newpath 40 120 moveto 260 150 lineto << /Width 40 >> pkribbon } << /Soft 0.7 /Under [0.62 0.72 0.86] >> pkwet
 % @param: /Soft [0..1] master softness; supplies the defaults for Layers and Offset. 0 is a single undisplaced pass that marks the page exactly as calling the proc directly would, random stream included; the procedure still runs inside a gsave, so a path or graphics state it leaves behind does not survive the call (default 0.6)
-% @param: /Under [rgb array] the color already on the canvas that this mark settles into; the outermost pass is nearly this color (default [1 1 1])
+% @param: /Under [rgb array] the color already on the canvas that this mark settles into; the outermost pass is nearly this color. May also be a procedure `x y -> r g b` (three numbers in 0..1, user space), the backdrop as a function: it is asked once per softening pass, at /At plus that pass's displacement, so the rim goes where the backdrop changes across the mark. It must be a pure function: no painting, no pkwet call, no reliance on the operand stack. A mark taller than the backdrop's change is better asked per band: see /Box and /Bands (default [1 1 1])
+% @param: /At [points] With a procedural /Under only (required there): [x y] where the mark sits, in the user space pkwet is called in, the point each pass's displacement is added to before the procedure is asked for the backdrop (default absent)
+% @param: /Box [array of points] With a procedural /Under and /Bands (instead of /At): [x y w h], where the mark sits, in the user space pkwet is called in. The /Under procedure is then asked once per cell of a grid over the box grown by /Offset on every side, at the cell's centre, and each softening pass is run once per cell, clipped to it and mixed toward that cell's answer, so the backdrop varies across a tall mark and not only from pass to pass. The grid's outer cells run on outward, so a displaced rim is not cut off (default absent)
+% @param: /Bands [array of count] With /Box (required with it): [columns rows] of the grid, each a whole number 1 to 16. A cell wants to be no taller than about half /Offset, and a short mark is as well served by /At. The wrapped procedure runs (Layers - 1) x columns x rows + 1 times, which a nest of such calls may multiply by at most 64 (a 6-layer call can have 12 cells, a 4-layer one 21); the random stream is replayed per cell, so every cell lays the same marks and the stream ends where one unbanded run leaves it (default absent)
 % @param: /Pickup [0..1] how far the outermost pass mixes toward Under; lower keeps the mark's own color out to its edge (default 0.85)
 % @param: /Layers [count] Passes to draw, outermost first; must be a whole number, hard cap 1..6, or 1..16 with /Direction (default 1 + round(Soft*5); with /Direction, raised to keep same-side passes at most 2pt apart, up to 16)
 % @param: /Offset [points] How far in points the outermost pass is displaced from the true path; inert at Layers 1, which has only a core pass. Formerly /Spread, still accepted as a deprecated alias; /Offset wins if both are given (default Soft*14)
@@ -4955,14 +5894,78 @@
     /pqPickup load xcheck { pkwet-pickup-must-not-be-a-procedure } if
     pqPickup 0 lt pqPickup 1 gt or { pkwet-pickup-must-be-0-to-1 } if
     /pqUnder pqopts /Under [ 1 1 1 ] pkgetdef def
-    /pqUnder load xcheck { pkwet-under-must-not-be-a-procedure } if
-    /pqUnder load type /arraytype ne { pkwet-under-must-be-a-3-element-array } if
-    pqUnder length 3 ne { pkwet-under-must-be-a-3-element-array } if
-    0 1 2 {
-        pqUnder exch get dup type dup /integertype ne exch /realtype ne and
-            { pkwet-under-components-must-be-numbers } if
-        dup 0 lt exch 1 gt or { pkwet-under-components-must-be-0-to-1 } if
-    } for
+    % /Under is a literal [r g b] or, since issue #179, a backdrop
+    % procedure `x y -> r g b` (see "A backdrop that varies" in the header).
+    % The array branch is the code that was always here, verbatim, so a
+    % literal /Under validates and plans exactly as before; the procedure
+    % branch parks a white placeholder in pqUnder so the plan loop below
+    % runs unchanged and its random draws are identical, then pqwetunder
+    % overwrites the colours.
+    /pqUnder load xcheck {
+        /pqUnder load type dup /arraytype eq exch /packedarraytype eq or not
+            { pkwet-under-must-be-a-3-element-array } if
+        % Where the mark sits: /At, one point asked per pass (issue #179), or
+        % /Box with /Bands, a grid of cells asked once each (issue #359).
+        pqopts /At known pqopts /Box known and { pkwet-at-and-box-are-exclusive } if
+        pqopts /Box known pqopts /Bands known xor {
+            pqopts /Box known { pkwet-box-needs-bands } { pkwet-bands-need-a-box } ifelse
+        } if
+        pqopts /Box known {
+            /pqBox pqopts /Box get def
+            /pqBox load type dup /arraytype eq exch /packedarraytype eq or not
+                { pkwet-box-must-be-x-y-w-h } if
+            /pqBox load xcheck { pkwet-box-must-not-be-a-procedure } if
+            pqBox length 4 ne { pkwet-box-must-be-x-y-w-h } if
+            0 1 3 {
+                pqBox exch get dup type dup /integertype ne exch /realtype ne and
+                    { pkwet-box-must-be-x-y-w-h } if
+                pop
+            } for
+            pqBox 2 get 0 le pqBox 3 get 0 le or { pkwet-box-must-be-x-y-w-h } if
+            /pqBands pqopts /Bands get def
+            /pqBands load type dup /arraytype eq exch /packedarraytype eq or not
+                { pkwet-bands-must-be-cols-rows } if
+            /pqBands load xcheck { pkwet-bands-must-not-be-a-procedure } if
+            pqBands length 2 ne { pkwet-bands-must-be-cols-rows } if
+            0 1 1 {
+                pqBands exch get dup type dup /integertype ne exch /realtype ne and
+                    { pkwet-bands-must-be-cols-rows } if
+                dup dup truncate ne { pkwet-bands-must-be-cols-rows } if
+                dup 1 lt exch 16 gt or { pkwet-bands-must-be-1-to-16 } if
+            } for
+            /pqCols pqBands 0 get cvi def
+            /pqRows pqBands 1 get cvi def
+            /pqbanded true def
+        } {
+            /pqbanded false def
+            pqopts /At known not { pkwet-under-procedure-needs-at } if
+            /pqAt pqopts /At get def
+            /pqAt load type dup /arraytype eq exch /packedarraytype eq or not
+                { pkwet-at-must-be-an-x-y-pair } if
+            /pqAt load xcheck { pkwet-at-must-not-be-a-procedure } if
+            pqAt length 2 ne { pkwet-at-must-be-an-x-y-pair } if
+            0 1 1 {
+                pqAt exch get dup type dup /integertype ne exch /realtype ne and
+                    { pkwet-at-must-be-an-x-y-pair } if
+                pop
+            } for
+        } ifelse
+        /pqUnderProc /pqUnder load def
+        /pqUnder [ 1 1 1 ] def
+        /pqunderp true def
+    } {
+        /pqUnder load type /arraytype ne { pkwet-under-must-be-a-3-element-array } if
+        pqUnder length 3 ne { pkwet-under-must-be-a-3-element-array } if
+        0 1 2 {
+            pqUnder exch get dup type dup /integertype ne exch /realtype ne and
+                { pkwet-under-components-must-be-numbers } if
+            dup 0 lt exch 1 gt or { pkwet-under-components-must-be-0-to-1 } if
+        } for
+        pqopts /At known { pkwet-at-needs-an-under-procedure } if
+        pqopts /Box known pqopts /Bands known or { pkwet-box-needs-an-under-procedure } if
+        /pqbanded false def
+        /pqunderp false def
+    } ifelse
     % /Stretch and /OneSided only mean anything along a direction; given
     % without one they are rejected rather than silently ignored, since
     % an artist who wrote them expected a pull and would otherwise get a
@@ -5030,15 +6033,22 @@
         { userdict /pqframes get pqdnow 1 sub get dup 2 get exch 3 get }
         { 1 false }
     ifelse
-    pqdir or /pqchaindir exch def
-    pqLayers mul /pqchain exch def
+    pqdir or pqbanded or /pqchaindir exch def
+    % A banded call (issue #359) runs the mark once per cell in every
+    % softening pass, so that is what it multiplies the chain by.
+    pqbanded { pqLayers 1 sub pqCols pqRows mul mul 1 add } { pqLayers } ifelse
+    mul /pqchain exch def
     pqchaindir pqchain 64 gt and
         { pqdnow 1 sub pqdset pkwet-too-many-passes } if
-    % Seven slots: 0 the plan, 1 the procedure, 2-3 the pass budget's
-    % running product and flag, and 4-6 the pass mix that loaded colours
-    % read (issue #183 slice L3, below). 4-6 go at the end so 0-3 keep the
-    % meaning the budget and the nesting machinery rely on.
-    userdict /pqframes get pqdnow 7 array put
+    % Nine slots: 0 the plan, 1 the procedure, 2-3 the pass budget's
+    % running product and flag, 4-6 the pass mix that loaded colours
+    % read (issue #183 slice L3, below), and 7 the per-pass backdrop
+    % colours of a procedural /Under (issue #179; null for a literal one,
+    % which is what keeps puwet's old path), and 8 a banded call's record
+    % (issue #359: the cells' clips, backdrops, pass colours and the saved
+    % random stream; null for any other call). The later slots go at the end
+    % so 0-3 keep the meaning the budget and the nesting machinery rely on.
+    userdict /pqframes get pqdnow 9 array put
     pqmyframe 1 /pqproc load put
     pqmyframe 2 pqchain put
     pqmyframe 3 pqchaindir put
@@ -5109,6 +6119,12 @@
         % exactly the t the line above hands mix3 elsewhere. No draw.
         pqks pqi pqf 0 gt { pqf pqPickup mul } { 0 } ifelse put
     } for
+    % A procedural /Under (issue #179) re-colours the softening passes now,
+    % after the plan's displacements are fixed and before any pass runs,
+    % so the backdrop procedure sees the final geometry and the wrapped
+    % procedure has not run yet.
+    % (a single-layer call has only the core, which asks nothing, banded or not)
+    pqunderp { pqbanded { pqLayers 1 gt { pqwetbands } if } { pqwetunder } ifelse } if
     % Outermost pass first, so each subsequent (less displaced, less
     % mixed) pass is laid over it and the caller's own color lands last,
     % exactly on the path.
@@ -5135,6 +6151,12 @@
     % the error path needs nothing new. Every existing render is unchanged.
     pqmyframe 4 pqks put
     pqmyframe 5 pqUnder aload pop 3 array astore put
+    % A procedural /Under's per-pass colours, for puwet; pqwetunder left
+    % them in pqunders. Slot 5 is then the unread white placeholder.
+    pqunderp pqbanded not and { pqmyframe 7 pqunders put } if
+    % A banded call's cells, clips and colours (issue #359); slot 8 stays null
+    % for any other call, and the pass loop tests it.
+    pqbanded pqLayers 1 gt and { pqmyframe 8 pqbrec put } if
     % Each pass runs under `stopped`, which is what makes this wrapper
     % safe to abandon. Three separate review findings were all the same
     % missing unwind-protect: a caught error leaked one graphics-state
@@ -5177,6 +6199,11 @@
         % its colour is set.
         dup pqmyframe 6 3 -1 roll put
         pqmyframe 0 get exch get
+        % A banded softening pass (issue #359) goes cell by cell; the core,
+        % and every pass of any other call, takes the path that was here.
+        dup length 2 gt pqmyframe 8 get null ne and
+        { pop pqwetbandpass }
+        {
         gsave
             dup length 2 gt
                 { aload pop setrgbcolor translate }
@@ -5189,6 +6216,7 @@
             stop
         } if
         grestore
+        } ifelse
     } for
     pqdnow 1 sub pqdset
     % No trailing setrgbcolor: every pass ran inside its own
@@ -5238,10 +6266,14 @@
 %     doesn't change every mark placed after it. The obvious
 %     alternative -- `rrand` to save the stream, `srand` to seed
 %     locally, `srand` again to restore -- looks equivalent but is not:
-%     under `--sweep-seed` (issue #21) *every* `srand` is intercepted
-%     and forced to the sweep's value, so the "restore" would silently
-%     reset the caller's stream to the sweep seed on every wash, and
-%     the sweep's own never-called-srand diagnostic would misfire.
+%     under `--sweep-seed` (issue #21) an `srand` of a literal seed, as
+%     /Seed would be, is intercepted and forced to the sweep's value,
+%     so the local seed would no longer be the wash's own and /Seed
+%     would stop telling one wash from another. (Since issue #202 the
+%     restore itself is safe: a restore of an `rrand` value is left
+%     alone under the override, so the caller's stream is not reset and
+%     the never-called-srand diagnostic stays truthful. This bullet
+%     rests on the local seed, not on the restore.)
 %   * `pwrand` is a Schrage-decomposed minimal-standard LCG, whose
 %     intermediate products are provably within 32-bit integer range,
 %     so it produces the *same* texture under real Ghostscript (where
@@ -6202,10 +7234,10 @@ systemdict /setalpha known /pwhasalpha exch def
 % @param: /Light [degrees] Direction the light comes from, in degrees counterclockwise from +x in user space (default 120, up and to the left)
 % @param: /Pitch [points] walkpath sampling pitch for the spine; must be > 0 (default Size, capped at 6)
 % @param: /ColorJitter [0..1] per-dab tint variation around the current color (default 0.08)
-% @param: /Colors [array of rgb arrays] 1 to 8 loaded colors, evenly spaced along the load; each dab takes one, at the position its existing outline-phase draw gives it, so a clump mixes the colors in proportion to their share of the list ([dark dark dark yellow] is mostly dark). When set, the current color is not used for the mark, though /ColorJitter still varies it. Takes no random draw, so it recolors a mark without moving it (default unset)
+% @param: /Colors [array of rgb arrays] 1 to 8 loaded colors, evenly spaced along the load; each dab takes one, at the position its existing outline-phase draw gives it, so a clump mixes the colors in proportion to their share of the list ([dark dark dark yellow] is mostly dark). When set, the current color is not used for the mark, though /ColorJitter still varies it. Takes no random draw, so it recolors a mark without moving it. An entry may be a bare pigment name such as /sapgreen (see PigmentNames), which stands for that pigment; a pigmix spec goes through pigcolors (default unset)
 % @param: /ColorMix [0..1] with /Colors, how far neighbouring colors have blended on the brush: 0 gives each dab one of two neighbouring colors outright, 1 a smooth gradient between them (default 0.3)
-% @param: /HighlightColor [rgb array] the color the lighter dabs on the lit side mix toward, instead of white; /Highlight still sets how far (default unset: toward white)
-% @param: /ShadowColor [rgb array] the color the darker underlayer mixes toward, instead of black; /Shadow still sets how far (default unset: toward black)
+% @param: /HighlightColor [rgb array] the color the lighter dabs on the lit side mix toward, instead of white; /Highlight still sets how far; a bare pigment name such as /titaniumwhite stands for that pigment, and a pigmix spec goes through pigcolor (default unset: toward white)
+% @param: /ShadowColor [rgb array] the color the darker underlayer mixes toward, instead of black; /Shadow still sets how far; a bare pigment name such as /titaniumwhite stands for that pigment, and a pigmix spec goes through pigcolor (default unset: toward black)
 /pkdab {
     /pdopts exch def
     /pdsize pdopts /Size 6 pkgetdef def
@@ -6416,6 +7448,326 @@ systemdict /setalpha known /pwhasalpha exch def
 } bind def
 
 % ============================================================================
+% Pigments: a named oil palette that mixes like paint (issue #185)
+% ============================================================================
+%
+% artkit's `mix3` is an RGB lerp, which is wrong for paint in the ways that
+% matter: blue and yellow lerp to grey, white only lightens, and a dark mix
+% never goes rich. This section is the paint answer. It touches no preset and
+% changes no existing render; the presets take its colours through the keys
+% they already have (`/Colors`, `/HighlightColor`, `/ShadowColor`), which since
+% #356 also accept a bare pigment name (the resolver, `pupig`, reads `Pigments`).
+%
+%   /name pigment            -> r g b       a pigment as it comes from the tube
+%   [ /name w /name w ... ] pigmix -> r g b mix by weight, like paint
+%   /name t pigtint          -> r g b       t parts titanium white
+%   /name t pigshade         -> r g b       t parts midnight black
+%   spec pigcolor            -> [r g b]     one colour as an array
+%   [ spec ... ] pigcolors   -> [[r g b]..] a whole /Colors list
+%
+% The palette is `Pigments`, a dict of name -> [r g b strength], listed in
+% tube order by `PigmentNames`: titaniumwhite midnightblack phthaloblue
+% prussianblue alizarin sapgreen cadmiumyellow indianyellow yellowochre
+% vandykebrown darksienna burntumber brightred. r g b is the pigment's
+% colour as it reads on white paper; strength is its tinting strength
+% relative to a plain colour (1). Inside a mix every channel is held to
+% 0.012-0.985 so a pure 0 or 1 cannot blow up the maths; a lone pigment
+% is returned as it is stored.
+%
+% The model is Kubelka-Munk's two-constant theory, run per channel on r g b
+% rather than on a spectrum. Paint absorbs (K) and scatters (S) light, and in
+% a mixture the absorption and scattering simply add, weighted by how much of
+% each pigment is in the pot. A pigment of reflectance R has K/S =
+% (1-R)^2 / 2R; a mixture of pigments i with weights w_i and strengths s_i
+% has, per channel,
+%
+%     a_i = w_i s_i          K/S = sum(a_i (1-R_i)^2 / 2R_i) / sum(a_i)
+%     R   = 1 + K/S - sqrt((K/S)^2 + 2 K/S)
+%
+% That is a few multiplies and three square roots per pigmix, with no
+% iteration. What it buys over a lerp: blue and yellow multiply their
+% absorption bands, so they leave green; white (strength 12) has almost no
+% absorption and a great deal of scatter, so tints are not a straight line
+% toward white (how fast each lightens depends on the pigment) and lose
+% saturation as they lighten; a strong dark
+% pigment (phthalo blue) dominates a mix, as it does in a pot.
+%
+% What it is not, so nobody expects it:
+%   * three bands, not a spectrum. Two pigments that look alike in r g b but
+%     differ in spectrum (the two blues, say) mix as their r g b says, and
+%     complements (phthalo blue and bright red) fall to a very dark neutral
+%     rather than the lively brown a real pot gives. The pigments' r g b and
+%     strengths are tuned by eye against reference mixes, not measured.
+%   * mixed in the encoded (gamma) rgb the display uses, not linear light.
+%     That saves a power per channel; a linear-light mix would give different
+%     (usually darker) midtones.
+%   * a mix, not a layer. It says what a pot of paint looks like, not what a
+%     thin glaze over another colour looks like, and nothing here is wet,
+%     opaque or dry. Weights are parts by volume, not by visual share.
+%
+% Every function validates its input and raises a self-documenting guard
+% (`pigmix-unknown-pigment`, ...). Scratch variables all start `pgm`: the
+% presets' nested calls clobber `pk*` names, and pigmix is meant to be called
+% from inside a preset's own procedure.
+
+% @kind: Dial
+% @summary: The oil palette: a dict of 13 named pigments, each [r g b strength]; r g b is the colour as it reads on white paper, strength the tinting strength (titanium white 12, a plain colour 1). Read it with pigment, mix it with pigmix; iterate it in tube order with PigmentNames.
+% @example: Pigments /phthaloblue get aload pop pop setrgbcolor
+/Pigments <<
+    /titaniumwhite [0.95 0.96 0.97 12.0]
+    /midnightblack [0.04 0.04 0.05 1.0]
+    /phthaloblue   [0.09 0.24 0.55 1.6]
+    /prussianblue  [0.05 0.17 0.32 1.4]
+    /alizarin      [0.55 0.05 0.24 1.8]
+    /sapgreen      [0.16 0.38 0.08 1.2]
+    /cadmiumyellow [0.99 0.87 0.04 1.6]
+    /indianyellow  [0.94 0.63 0.07 1.1]
+    /yellowochre   [0.78 0.56 0.20 1.0]
+    /vandykebrown  [0.24 0.14 0.09 0.9]
+    /darksienna    [0.46 0.22 0.10 1.0]
+    /burntumber    [0.32 0.17 0.10 1.0]
+    /brightred     [0.82 0.10 0.07 1.6]
+>> def
+
+% @kind: Dial
+% @summary: The names of the 13 pigments in tube order (Pigments has no order of its own): white, black, the blues, alizarin, the greens, the yellows and ochre, the browns, bright red.
+% @example: PigmentNames { pigment setrgbcolor ... } forall
+/PigmentNames [
+    /titaniumwhite /midnightblack /phthaloblue /prussianblue /alizarin
+    /sapgreen /cadmiumyellow /indianyellow /yellowochre /vandykebrown
+    /darksienna /burntumber /brightred
+] def
+
+% r -> K/S for one channel. The clamp keeps a pure 0 or 1 channel finite.
+% @internal
+/pgmks { 0.012 max 0.985 min dup 1 exch sub dup mul exch 2 mul div } bind def
+
+% q -> R   (the Kubelka-Munk reflectance for K/S = q)
+% @internal
+/pgmr { dup dup mul 1 index 2 mul add sqrt neg exch 1 add add } bind def
+
+% number -> bool
+% @internal
+/pgmnum { type dup /integertype eq exch /realtype eq or } bind def
+
+% entry -> r g b strength   (a pigment name, or a literal [r g b] array)
+% @internal
+/pgmentry {
+    dup type /nametype eq {
+        dup Pigments exch known not { pigmix-unknown-pigment } if
+        Pigments exch get aload pop
+    } {
+        dup xcheck { pigmix-entry-must-be-a-name-or-rgb-array } if
+        dup type /arraytype ne { pigmix-entry-must-be-a-name-or-rgb-array } if
+        dup length 3 ne { pigmix-entry-must-be-a-name-or-rgb-array } if
+        dup {
+            dup pgmnum { dup 0 ge exch 1 le and } { pop false } ifelse
+            not { pigmix-rgb-components-must-be-0-to-1 } if
+        } forall
+        aload pop 1
+    } ifelse
+} bind def
+
+% @kind: Procedure
+% @summary: Mix pigments like paint. Takes a flat array of name-and-weight pairs, [ /phthaloblue 1 /alizarin 1 ], and returns r g b like mix3. An entry may be a literal [r g b] array in place of a name (a plain colour, strength 1). Weights are parts, not fractions, and a zero weight is left out. Blue and yellow give green, blue and crimson violet; white tints instead of just lightening. A single pigment comes back exactly.
+% @example: [ /sapgreen 3 /cadmiumyellow 1 ] pigmix setrgbcolor
+/pigmix {
+    /pgms exch def
+    % `load`, not the name: naming a procedure would run it.
+    /pgms load xcheck { pigmix-needs-an-array } if
+    /pgms load type /arraytype ne { pigmix-needs-an-array } if
+    pgms length 2 mod 0 ne { pigmix-entries-come-in-pairs } if
+    /pgmn 0 def /pgmsum 0 def /pgmk0 0 def /pgmk1 0 def /pgmk2 0 def
+    0 2 pgms length 2 sub {
+        /pgmi exch def
+        pgms pgmi 1 add get dup pgmnum not { pigmix-weight-must-be-a-number } if
+        dup 0 lt { pigmix-weight-must-not-be-negative } if
+        /pgmw exch def
+        % The entry is checked even at weight 0, so a typo is never silent.
+        pgms pgmi get pgmentry /pgmst exch def 3 array astore /pgmcur exch def
+        pgmw 0 gt {
+            /pgml pgmcur def
+            /pgma pgmw pgmst mul def
+            /pgmn pgmn 1 add def
+            /pgmsum pgmsum pgma add def
+            /pgmk0 pgml 0 get pgmks pgma mul pgmk0 add def
+            /pgmk1 pgml 1 get pgmks pgma mul pgmk1 add def
+            /pgmk2 pgml 2 get pgmks pgma mul pgmk2 add def
+        } if
+    } for
+    pgmn 0 eq { pigmix-weights-sum-to-zero } if
+    pgmn 1 eq {
+        pgml aload pop
+    } {
+        pgmk0 pgmsum div pgmk1 pgmsum div pgmk2 pgmsum div
+        pgmr 3 1 roll pgmr 3 1 roll pgmr 3 1 roll
+    } ifelse
+} bind def
+
+% @kind: Procedure
+% @summary: One pigment as it comes from the tube, as r g b. The same as [ /name 1 ] pigmix.
+% @example: /alizarin pigment setrgbcolor
+/pigment {
+    dup type /nametype ne { pigment-needs-a-name } if
+    1 2 array astore pigmix
+} bind def
+
+% @kind: Procedure
+% @summary: A tint: the pigment (or [r g b] colour) with t parts titanium white, t from 0 (the pigment) to 1 (white). Not a lerp: how fast a colour lightens depends on the pigment, and the tint loses saturation as it lightens.
+% @example: /phthaloblue 0.25 pigtint setrgbcolor
+/pigtint {
+    /pgmt exch def /pgmp exch def
+    /pgmt load xcheck { pigtint-amount-must-not-be-a-procedure } if
+    /pgmp load xcheck { pigtint-pigment-must-not-be-a-procedure } if
+    /pgmt load pgmnum not { pigtint-amount-must-be-a-number } if
+    pgmt 0 lt pgmt 1 gt or { pigtint-amount-must-be-0-to-1 } if
+    [ pgmp 1 pgmt sub /titaniumwhite pgmt ] pigmix
+} bind def
+
+% @kind: Procedure
+% @summary: A shade: the pigment (or [r g b] colour) with t parts midnight black, t from 0 (the pigment) to 1 (black). Black has strength 1, so t 0.1 already goes deep; shade with a dark brown or blue instead of black for a richer dark.
+% @example: /sapgreen 0.1 pigshade setrgbcolor
+/pigshade {
+    /pgmt exch def /pgmp exch def
+    /pgmt load xcheck { pigshade-amount-must-not-be-a-procedure } if
+    /pgmp load xcheck { pigshade-pigment-must-not-be-a-procedure } if
+    /pgmt load pgmnum not { pigshade-amount-must-be-a-number } if
+    pgmt 0 lt pgmt 1 gt or { pigshade-amount-must-be-0-to-1 } if
+    [ pgmp 1 pgmt sub /midnightblack pgmt ] pigmix
+} bind def
+
+% @kind: Procedure
+% @summary: One colour as an [r g b] array, the shape /Colors, /HighlightColor and /ShadowColor take. The operand is a pigment name or a pigmix spec: /sapgreen pigcolor, or [ /sapgreen 3 /cadmiumyellow 1 ] pigcolor.
+% @example: << /HighlightColor /cadmiumyellow pigcolor >> pkdab
+/pigcolor {
+    dup type /nametype eq { pigment } { pigmix } ifelse
+    3 array astore
+} bind def
+
+% @kind: Procedure
+% @summary: A whole /Colors list from pigments. Takes an array whose entries are pigment names, pigmix specs or plain [r g b] arrays, and returns the array of rgb arrays a preset's /Colors wants. A list of bare names needs no wrapper (/Colors takes names itself); pigcolors is for lists that include pigmix specs.
+% @example: << /Colors [ /sapgreen [ /sapgreen 1 /cadmiumyellow 1 ] ] pigcolors >> pkfan
+/pigcolors {
+    /pgmsrc exch def
+    /pgmsrc load xcheck { pigcolors-needs-an-array } if
+    /pgmsrc load type /arraytype ne { pigcolors-needs-an-array } if
+    pgmsrc length array
+    0 1 pgmsrc length 1 sub {
+        /pgmj exch def
+        dup pgmj
+        pgmsrc pgmj get
+        % A plain [r g b] array is kept as the colour it is; a spec starts
+        % with a name.
+        dup type /arraytype eq
+            { dup length 0 gt { dup 0 get pgmnum } { false } ifelse } { false } ifelse
+        { pgmentry pop 3 array astore } { pigcolor } ifelse
+        put
+    } for
+} bind def
+
+%%SelfTest: pigmix-mixes-like-paint
+%   % r g b r' g' b' compared within 0.002 (near3), or exactly (same3).
+%   /pgtnear3 { 6 array astore /pgtv exch def
+%       true 0 1 2 { /pgti exch def
+%           pgtv pgti get pgtv pgti 3 add get sub abs 0.002 lt and } for } bind def
+%   /pgtsame3 { 6 array astore /pgtv exch def
+%       true 0 1 2 { /pgti exch def
+%           pgtv pgti get pgtv pgti 3 add get eq and } for } bind def
+%
+%   % One pigment comes back exactly, however many parts of it.
+%   [ /alizarin 3 ] pigmix 0.55 0.05 0.24 pgtsame3
+%   (one pigment is exact) mustbe
+%   /alizarin pigment 0.55 0.05 0.24 pgtsame3
+%   (pigment is exact) mustbe
+%
+%   % The mixes the issue asks for, pinned to the model's output.
+%   [ /phthaloblue 1 /cadmiumyellow 1 ] pigmix 0.155 0.349 0.073 pgtnear3
+%   (phthalo blue and cadmium yellow) mustbe
+%   [ /phthaloblue 1 /alizarin 1 ] pigmix 0.157 0.079 0.320 pgtnear3
+%   (phthalo blue and alizarin) mustbe
+%   /phthaloblue 0.25 pigtint 0.227 0.446 0.723 pgtnear3
+%   (a quarter white on phthalo blue) mustbe
+%
+%   % What the pins mean: blue and yellow green, blue and crimson violet.
+%   [ /phthaloblue 1 /cadmiumyellow 1 ] pigmix
+%   /pgtb exch def /pgtg exch def /pgtr exch def
+%   pgtg pgtr gt pgtg pgtb gt and
+%   (blue and yellow: green is the largest channel) mustbe
+%   [ /phthaloblue 1 /alizarin 1 ] pigmix
+%   /pgtb exch def /pgtg exch def /pgtr exch def
+%   pgtb pgtg gt pgtr pgtg gt and
+%   (blue and crimson: green is the smallest channel) mustbe
+%
+%   % Weights are parts: scaling them all changes nothing, and neither does
+%   % the order.
+%   [ /sapgreen 3 /cadmiumyellow 1 ] pigmix
+%   [ /cadmiumyellow 10 /sapgreen 30 ] pigmix pgtnear3
+%   (scale and order do not matter) mustbe
+%
+%   % A zero weight is left out, but its entry is still checked.
+%   [ /alizarin 1 /phthaloblue 0 ] pigmix 0.55 0.05 0.24 pgtsame3
+%   (a zero weight leaves the entry out) mustbe
+%   { [ /alizarin 1 /nothue 0 ] pigmix }
+%   /pigmix-unknown-pigment
+%   (a zero-weight typo is still caught) mustguard
+%
+%   % Tints: 0 is the pigment, 1 is white; shades end at black.
+%   /sapgreen 0 pigtint 0.16 0.38 0.08 pgtsame3
+%   (a tint of 0 is the pigment) mustbe
+%   /sapgreen 1 pigtint 0.95 0.96 0.97 pgtsame3
+%   (a tint of 1 is white) mustbe
+%   /sapgreen 1 pigshade 0.04 0.04 0.05 pgtsame3
+%   (a shade of 1 is black) mustbe
+%
+%   % A plain [r g b] array mixes as a colour of strength 1.
+%   [ [ 0.8 0.2 0.4 ] 1 [ 0.8 0.2 0.4 ] 1 ] pigmix 0.8 0.2 0.4 pgtnear3
+%   (a colour mixed with itself) mustbe
+%
+%   % pigcolor and pigcolors give the shape /Colors takes.
+%   /alizarin pigcolor dup length 3 eq exch 0 get 0.55 eq and
+%   (pigcolor of a name) mustbe
+%   [ /alizarin 1 /titaniumwhite 1 ] pigcolor length 3 eq
+%   (pigcolor of a spec) mustbe
+%   [ /alizarin [ /alizarin 1 /titaniumwhite 1 ] [ 0.1 0.2 0.3 ] ] pigcolors
+%   dup length 3 eq exch 2 get 1 get 0.2 eq and
+%   (pigcolors keeps a plain rgb array) mustbe
+%   { << /Colors [ /sapgreen [ /sapgreen 1 /cadmiumyellow 1 ] ] pigcolors >>
+%     (pkfan) puparse pop }
+%   (pigcolors output passes the /Colors guards) mustpass
+%%EndSelfTest
+%
+%%SelfTest: pigmix-rejects-malformed-specs
+%   { 5 pigmix } /pigmix-needs-an-array (a number) mustguard
+%   { { /alizarin 1 } pigmix } /pigmix-needs-an-array (a procedure) mustguard
+%   % A procedure that would return a valid spec must be refused, not run.
+%   { { [ /alizarin 1 ] } pigmix } /pigmix-needs-an-array (a procedure returning a spec) mustguard
+%   { [ /alizarin ] pigmix } /pigmix-entries-come-in-pairs (a missing weight) mustguard
+%   { [ /alizarin 1 /sapgreen ] pigmix } /pigmix-entries-come-in-pairs (a trailing name) mustguard
+%   { [ /nothue 1 ] pigmix } /pigmix-unknown-pigment (an unknown pigment) mustguard
+%   { [ /alizarin (a lot) ] pigmix } /pigmix-weight-must-be-a-number (a string weight) mustguard
+%   { [ /alizarin -1 /sapgreen 2 ] pigmix } /pigmix-weight-must-not-be-negative (a negative weight) mustguard
+%   { [ /alizarin 0 /sapgreen 0 ] pigmix } /pigmix-weights-sum-to-zero (all weights zero) mustguard
+%   { [ ] pigmix } /pigmix-weights-sum-to-zero (an empty mix) mustguard
+%   { [ 5 1 ] pigmix } /pigmix-entry-must-be-a-name-or-rgb-array (a number as an entry) mustguard
+%   { [ [ 1 0 ] 1 ] pigmix } /pigmix-entry-must-be-a-name-or-rgb-array (a 2-element entry) mustguard
+%   { [ { 1 0 0 } 1 ] pigmix } /pigmix-entry-must-be-a-name-or-rgb-array (a procedure as an entry) mustguard
+%   { [ [ 0 0 1.5 ] 1 ] pigmix } /pigmix-rgb-components-must-be-0-to-1 (a component of 1.5) mustguard
+%   { (alizarin) pigment } /pigment-needs-a-name (a string as a pigment) mustguard
+%   { /nothue pigment } /pigmix-unknown-pigment (an unknown pigment name) mustguard
+%   { /alizarin 1.5 pigtint } /pigtint-amount-must-be-0-to-1 (a tint of 1.5) mustguard
+%   { /alizarin { 0.5 } pigtint } /pigtint-amount-must-not-be-a-procedure (a procedure as the tint) mustguard
+%   { { /alizarin } 0.5 pigtint } /pigtint-pigment-must-not-be-a-procedure (a procedure as the pigment) mustguard
+%   { /alizarin { 0.5 } pigshade } /pigshade-amount-must-not-be-a-procedure (a procedure as the shade) mustguard
+%   { { /alizarin } 0.5 pigshade } /pigshade-pigment-must-not-be-a-procedure (a procedure as the shaded pigment) mustguard
+%   { /alizarin (x) pigtint } /pigtint-amount-must-be-a-number (a string tint) mustguard
+%   { /alizarin -0.1 pigshade } /pigshade-amount-must-be-0-to-1 (a shade of -0.1) mustguard
+%   { 5 pigcolors } /pigcolors-needs-an-array (a number as the list) mustguard
+%   { { [ /alizarin ] } pigcolors } /pigcolors-needs-an-array (a procedure as the list) mustguard
+%   { [ /nothue ] pigcolors } /pigmix-unknown-pigment (an unknown name in the list) mustguard
+%   { [ [ 0.1 0.2 ] ] pigcolors } /pigmix-entry-must-be-a-name-or-rgb-array (a short rgb array in the list) mustguard
+%%EndSelfTest
+%
+% ============================================================================
 % Loaded colours: the `pu-` resolver (issue #183, slice L1 of
 % docs/PAINT_LOADING.md)
 % ============================================================================
@@ -6485,6 +7837,43 @@ systemdict /setalpha known /pwhasalpha exch def
         { pusn (-colours-is-spelled-colors) pugrd } if
 } bind def
 
+% (a) (b) pucat -> (ab)   (concatenate two strings; builds a guard prefix)
+% @internal
+/pucat {
+    /pucb exch def /puca exch def
+    puca length pucb length add string
+    dup 0 puca putinterval
+    dup puca length pucb putinterval
+} bind def
+
+% obj pujspec -> bool   (a literal array whose first element is a name)
+% That is the shape of a `pigmix` spec ([ /sapgreen 1 /cadmiumyellow 1 ]). It
+% never fits a colour key, which takes an [r g b] of numbers, so a key that sees
+% one says to wrap it in `pigcolors` instead of "not an rgb array". The length
+% is tested before the element is read: `[ ]` is not a spec.
+% @internal
+/pujspec {
+    dup type /arraytype eq {
+        dup xcheck { pop false } {
+            dup length 0 gt { 0 get type /nametype eq } { pop false } ifelse
+        } ifelse
+    } { pop false } ifelse
+} bind def
+
+% (prefix) /name pupig -> [r g b]
+% A bare pigment name in a colour key (#356): the same colour `pigcolor` gives,
+% read straight from `Pigments` so the resolver does not call into pigmix and
+% its `pgm` scratch. A lone pigment is returned as stored, so a name and its
+% `pigcolor` are the same bits. The array is a fresh one: it must not alias the
+% palette's own entry. An unknown name raises `<prefix>-unknown-pigment-see-
+% PigmentNames`, which says where the valid names are listed.
+% @internal
+/pupig {
+    /pujn exch def /pujp exch def
+    Pigments pujn known not { pujp (-unknown-pigment-see-PigmentNames) pugrd } if
+    Pigments pujn get aload pop pop 3 array astore
+} bind def
+
 % opts /Key (preset-key) puhue -> [r g b] | null
 % One optional rgb colour key (`/HighlightColor`, `/ShadowColor`): `null` when
 % the key is unset, else the validated array. The second operand is the guard
@@ -6498,7 +7887,11 @@ systemdict /setalpha known /pwhasalpha exch def
     puho puhk known not { null } {
         /puhv puho puhk get def
         /puhv load xcheck { puhp (-must-be-an-rgb-array) pugrd } if
+        % A literal name is a pigment: resolve it once, then it is checked like
+        % any [r g b].
+        /puhv load type /nametype eq { /puhv puhp /puhv load pupig def } if
         /puhv load type /arraytype ne { puhp (-must-be-an-rgb-array) pugrd } if
+        puhv pujspec { puhp (-pigmix-spec-needs-pigcolors) pugrd } if
         puhv length 3 ne { puhp (-must-be-an-rgb-array) pugrd } if
         puhv {
             dup type dup /integertype eq exch /realtype eq or
@@ -6537,9 +7930,27 @@ systemdict /setalpha known /pwhasalpha exch def
         /pupc load type /arraytype ne { pupn (-colors-must-be-an-array) pugrd } if
         pupc length dup 1 lt exch 8 gt or
             { pupn (-colors-must-have-1-to-8-colors) pugrd } if
+        % A bare pigment name stands for its colour: resolve each one here, once,
+        % so the rest of the checks and the record see only [r g b] arrays. The
+        % copy is made only when a name is present, so a load without one is the
+        % caller's own array, exactly as before.
+        /pujany false def
+        pupc { dup xcheck not exch type /nametype eq and { /pujany true def } if } forall
+        pujany {
+            /pujr pupc length array def
+            0 1 pupc length 1 sub {
+                /pujk exch def
+                pupc pujk get
+                dup xcheck not 1 index type /nametype eq and
+                    { /pujv exch def pupn (-colors) pucat pujv pupig } if
+                pujr exch pujk exch put
+            } for
+            /pupc pujr def
+        } if
         % Each entry is a literal 3-element array, not a procedure that
-        % happens to hold three items.
+        % happens to hold three items. A pigmix spec gets its own guard.
         pupc {
+            dup pujspec { pupn (-colors-pigmix-spec-needs-pigcolors) pugrd } if
             dup xcheck { pop false } {
                 dup type /arraytype eq { length 3 eq } { pop false } ifelse
             } ifelse
@@ -6629,7 +8040,12 @@ systemdict /setalpha known /pwhasalpha exch def
         1 1 pqdnow {
             userdict /pqframes get exch get /puwf exch def
             puwf 4 get puwf 6 get get /puwk exch def
-            puwk 0 ne { /puwc [ puwc puwf 5 get puwk mix3 ] def } if
+            puwk 0 ne {
+                % a procedural /Under (issue #179) keeps one backdrop per pass
+                /puwc [ puwc
+                    puwf 7 get dup null eq { pop puwf 5 get } { puwf 6 get get } ifelse
+                    puwk mix3 ] def
+            } if
         } for
         puwc aload pop
     } if
@@ -6793,6 +8209,81 @@ systemdict /setalpha known /pwhasalpha exch def
 %   1 index 2 get true eq and
 %   exch 3 get 90 eq and
 %   (a given /ColorMix and /Light) mustbe
+%%EndSelfTest
+%
+%%SelfTest: colour-keys-take-bare-pigment-names
+%   % #356: a literal pigment name in /Colors, /HighlightColor or /ShadowColor
+%   % stands for the colour `pigcolor` gives, bit for bit.
+%   /pgeq { /pgqb exch def /pgqa exch def
+%       true 0 1 2 { /pgqi exch def pgqa pgqi get pgqb pgqi get eq and } for } bind def
+%   << /Colors [ /sapgreen /cadmiumyellow ] >> (pkfan) puparse 0 get /pgcols exch def
+%   pgcols length 2 eq
+%   pgcols 0 get /sapgreen pigcolor pgeq and
+%   pgcols 1 get /cadmiumyellow pigcolor pgeq and
+%   (bare names in /Colors are the pigments pigcolor gives) mustbe
+%
+%   % Names and rgb arrays mix; the caller's array is left alone.
+%   /pgin [ /alizarin [ 0 0 1 ] ] def
+%   << /Colors pgin >> (pkfan) puparse 0 get /pgcols exch def
+%   pgcols 0 get /alizarin pigcolor pgeq
+%   pgcols 1 get [ 0 0 1 ] pgeq and
+%   pgin 0 get type /nametype eq and
+%   (names and rgb arrays mix, and the options array is not changed) mustbe
+%
+%   % No name: the caller's own array comes back, as before.
+%   /pgl [ [ 0 0 0 ] [ 1 1 1 ] ] def
+%   << /Colors pgl >> (pkfan) puparse 0 get pgl eq
+%   (a load without names is the same array) mustbe
+%
+%   % The resolved colour is its own array, not the palette's entry.
+%   << /Colors [ /sapgreen ] >> (pkfan) puparse 0 get 0 get 0 0.5 put
+%   Pigments /sapgreen get 0 get 0.16 eq
+%   (a resolved colour does not alias the palette) mustbe
+%
+%   << /HighlightColor /titaniumwhite >> /HighlightColor (pkdab-highlightcolor) puhue
+%   /titaniumwhite pigcolor pgeq
+%   (a bare name as /HighlightColor) mustbe
+%   << /ShadowColor /midnightblack >> /ShadowColor (pkoil-shadowcolor) puhue
+%   /midnightblack pigcolor pgeq
+%   (a bare name as /ShadowColor) mustbe
+%
+%   { << /Colors [ /sapgreen /nothue ] >> (pkfan) puparse }
+%   /pkfan-colors-unknown-pigment-see-PigmentNames
+%   (an unknown name in /Colors) mustguard
+%   { << /HighlightColor /nothue >> /HighlightColor (pkdab-highlightcolor) puhue }
+%   /pkdab-highlightcolor-unknown-pigment-see-PigmentNames
+%   (an unknown name as /HighlightColor) mustguard
+%   { << /ShadowColor /nothue >> /ShadowColor (pkoil-shadowcolor) puhue }
+%   /pkoil-shadowcolor-unknown-pigment-see-PigmentNames
+%   (an unknown name as /ShadowColor) mustguard
+%   % A single name is a pigment, not a /Colors list.
+%   { << /Colors /sapgreen >> (pkfan) puparse }
+%   /pkfan-colors-must-be-an-array
+%   (a name as the whole /Colors) mustguard
+%   % The length rule still comes first.
+%   { << /Colors [ 9 { /sapgreen } repeat ] >> (pkfan) puparse }
+%   /pkfan-colors-must-have-1-to-8-colors
+%   (nine names) mustguard
+%   % A pigmix spec belongs in pigcolors, and the guard says so.
+%   { << /Colors [ [ /sapgreen 1 /cadmiumyellow 1 ] ] >> (pkfan) puparse }
+%   /pkfan-colors-pigmix-spec-needs-pigcolors
+%   (a pigmix spec in /Colors) mustguard
+%   { << /Colors [ [ /sapgreen 1 /nothue ] ] >> (pkfan) puparse }
+%   /pkfan-colors-pigmix-spec-needs-pigcolors
+%   (a three-element spec in /Colors) mustguard
+%   { << /HighlightColor [ /sapgreen 1 ] >> /HighlightColor (pkdab-highlightcolor) puhue }
+%   /pkdab-highlightcolor-pigmix-spec-needs-pigcolors
+%   (a pigmix spec as /HighlightColor) mustguard
+%   % The old guards are unchanged for what is not a name.
+%   { << /Colors [ [ ] ] >> (pkfan) puparse }
+%   /pkfan-colors-entries-must-be-rgb-arrays
+%   (an empty array entry) mustguard
+%   { << /Colors [ { /sapgreen } ] >> (pkfan) puparse }
+%   /pkfan-colors-entries-must-be-rgb-arrays
+%   (a procedure entry) mustguard
+%   { << /HighlightColor [ ] >> /HighlightColor (pkdab-highlightcolor) puhue }
+%   /pkdab-highlightcolor-must-be-an-rgb-array
+%   (an empty array as /HighlightColor) mustguard
 %%EndSelfTest
 %
 %%SelfTest: puat-resolves-colours-at-head-positions
@@ -7198,6 +8689,71 @@ systemdict /setalpha known /pwhasalpha exch def
 %   (a dict as the region) mustguard
 %%EndSelfTest
 %
+%%SelfTest: pkscumblein-light-guards
+%   { 0 0 100 100 screct << /Light { 90 } >> pkscumblein }
+%   /pkscumblein-light-must-not-be-a-procedure
+%   (/Light { 90 }) mustguard
+%
+%   { 0 0 100 100 screct << /Light /up >> pkscumblein }
+%   /pkscumblein-light-must-be-a-number
+%   (/Light /up) mustguard
+%
+%   { 0 0 100 100 screct << /Light 90 /Reach 0 >> pkscumblein }
+%   /pkscumblein-reach-must-be-0-exclusive-to-1
+%   (/Reach 0) mustguard
+%
+%   { 0 0 100 100 screct << /Light 90 /Reach 1.5 >> pkscumblein }
+%   /pkscumblein-reach-must-be-0-exclusive-to-1
+%   (/Reach 1.5) mustguard
+%
+%   { 0 0 100 100 screct << /Light 90 /Feather -0.1 >> pkscumblein }
+%   /pkscumblein-feather-must-be-0-to-1
+%   (/Feather -0.1) mustguard
+%
+%   { 0 0 100 100 screct << /Light 90 /Feather { 1 } >> pkscumblein }
+%   /pkscumblein-feather-must-not-be-a-procedure
+%   (/Feather { 1 }) mustguard
+%
+%   % /Reach and /Feather say how the lit side is cut; without /Light there
+%   % is no lit side, so they would silently do nothing.
+%   { 0 0 100 100 screct << /Reach 0.4 >> pkscumblein }
+%   /pkscumblein-reach-needs-light
+%   (/Reach without /Light) mustguard
+%
+%   { 0 0 100 100 screct << /Feather 0 >> pkscumblein }
+%   /pkscumblein-feather-needs-light
+%   (/Feather without /Light) mustguard
+%
+%   % /Light 0 is a real angle (light from +x), not "unset".
+%   { 0 0 100 100 screct << /Light 0 /Reach 1 /Feather 0 >> pkscumblein }
+%   (/Light 0 with the full reach) mustpass
+%%EndSelfTest
+%
+%%SelfTest: pkscumblein-light-keeps-the-lit-side
+%   % Every circle a lit pass keeps sits within /Reach of the edge facing the
+%   % light (its centre is the circle's moveto point less its radius, so test
+%   % the start point with the radius as slack), and the lit pass is a subset
+%   % of the unlit one under the same seed: same draws, fewer circles.
+%   { /lt_n 0 def /lt_bad 0 def
+%     7 srand 0 0 200 100 screct << /Count 200 /Radius 3 /RadiusJitter 0 >> pkscumblein
+%     { pop pop /lt_n lt_n 1 add def } { pop pop } { 6 { pop } repeat } { } pathforall
+%     /lt_all lt_n def /lt_n 0 def
+%     7 srand 0 0 200 100 screct
+%     << /Count 200 /Radius 3 /RadiusJitter 0 /Light 90 /Reach 0.25 /Feather 0 >> pkscumblein
+%     { /lt_n lt_n 1 add def exch pop 100 25 sub 6 sub lt { /lt_bad lt_bad 1 add def } if }
+%     { pop pop } { 6 { pop } repeat } { } pathforall
+%     lt_bad 0 ne { lit-circle-outside-the-band } if
+%     lt_n 0 eq lt_n lt_all ge or { lit-pass-is-not-a-proper-subset } if
+%     % From below the same rectangle: the band is now along the bottom.
+%     /lt_bad 0 def
+%     7 srand 0 0 200 100 screct
+%     << /Count 200 /Radius 3 /RadiusJitter 0 /Light 270 /Reach 0.25 /Feather 0 >> pkscumblein
+%     { exch pop 25 6 add gt { /lt_bad lt_bad 1 add def } if }
+%     { pop pop } { 6 { pop } repeat } { } pathforall
+%     lt_bad 0 ne { lit-circle-outside-the-bottom-band } if }
+%   (the lit pass keeps only the band facing the light) mustpass
+%%EndSelfTest
+%
 %%SelfTest: pkcrisscross-lean-and-its-deprecated-spread-alias
 %   % /Spread is the deprecated name for /Lean (issue #141) and is still
 %   % read, through the same guard, when /Lean is absent.
@@ -7266,6 +8822,17 @@ systemdict /setalpha known /pwhasalpha exch def
 %   { newpath 0 0 moveto 50 0 lineto << /Bow 1 >> pkpull }
 %   /pkpull-bow-must-be-0-to-0.5
 %   (/Bow 1) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Scatter -1 >> pkpull }
+%   /pkpull-scatter-must-be-non-negative
+%   (/Scatter -1) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Scatter { 3 } >> pkpull }
+%   /pkpull-scatter-must-not-be-a-procedure
+%   (/Scatter { 3 }) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Scatter 0 >> pkpull }
+%   (/Scatter 0) mustpass
 %
 %   { newpath 0 0 moveto 100000 0 lineto << /Spacing 0.1 >> pkpull }
 %   /pkpull-count-exceeds-safety-limit
@@ -7378,6 +8945,9 @@ systemdict /setalpha known /pwhasalpha exch def
 % @param: /Radius [points] Mean circle radius in points; must be > 0 (default 4)
 % @param: /RadiusJitter [fraction of /Radius] 0..1 how far each circle's radius varies around /Radius (default 0.4)
 % @param: /Squash [ratio] Vertical radius as a fraction of the horizontal one, > 0 and <= 1; 1 is a circle, smaller flattens a cloud's underside (default 1)
+% @param: /Light [degrees] Light-aware massing (issue #345): the direction the light comes from, counterclockwise from +x in user space (270 is from below, 90 from above). Set, it keeps only the circles on the region's lit side, a band that follows the outline's lumps along the edge facing the light, so a second pass in a lighter load over a body pass gives the mass a lit side: `region << /Count n >> pkscumblein body-brush  region << /Count n /Light 120 >> pkscumblein lit-brush`. Same circles, positions and random draws as the unlit call with the same seed (default unset: every circle is kept)
+% @param: /Reach [fraction of the region's depth along the light] With /Light, how deep the lit band reaches in from the edge facing the light, > 0 and <= 1; the depth is the length of the line through the region's bounding box centre in the light's direction, so 0.3 lights about the outer 30% of a round mass, and a band stays in proportion when the region is resized (default 0.3)
+% @param: /Feather [0..1] With /Light, how much of /Reach is a graded border: circles in the inner /Feather part of the band thin out toward the shadow instead of stopping on a hard line; 0 is a hard edge (default 0.5)
 /pkscumblein {
     /mcopts exch def /mcreg exch def
     mcreg mhisregion not { pkscumblein-needs-a-region } if
@@ -7394,8 +8964,40 @@ systemdict /setalpha known /pwhasalpha exch def
     /mcsq mcopts /Squash 1 pkgetdef def
     /mcsq load xcheck { pkscumblein-squash-must-not-be-a-procedure } if
     mcsq 0 le mcsq 1 gt or { pkscumblein-squash-must-be-0-exclusive-to-1 } if
+    % Light-aware massing (issue #345). Tested with `known`, not by value:
+    % /Light 0 is light from +x. Unset, none of this runs and the motion is
+    % byte-identical to before.
+    /mclit mcopts /Light known def
+    mclit {
+        /mclight mcopts /Light get def
+        /mclight load xcheck { pkscumblein-light-must-not-be-a-procedure } if
+        /mclight load type dup /integertype ne exch /realtype ne and
+            { pkscumblein-light-must-be-a-number } if
+        /mcreach mcopts /Reach 0.3 pkgetdef def
+        /mcreach load xcheck { pkscumblein-reach-must-not-be-a-procedure } if
+        mcreach 0 le mcreach 1 gt or { pkscumblein-reach-must-be-0-exclusive-to-1 } if
+        /mcfeather mcopts /Feather 0.5 pkgetdef def
+        /mcfeather load xcheck { pkscumblein-feather-must-not-be-a-procedure } if
+        mcfeather 0 lt mcfeather 1 gt or { pkscumblein-feather-must-be-0-to-1 } if
+    } {
+        mcopts /Reach known { pkscumblein-reach-needs-light } if
+        mcopts /Feather known { pkscumblein-feather-needs-light } if
+    } ifelse
 
     mcreg mccount mhgrid
+    mclit {
+        % The region's depth along the light: the length of the line through
+        % its bounding box's centre in the light's direction, i.e. the box's
+        % width or height, whichever the line crosses first. /Reach is a
+        % fraction of it, so the lit band keeps its proportion when the region
+        % is resized. (Not the box projected on the light's axis: for a wide,
+        % low bush lit at 45 degrees that is nearly twice the real depth.)
+        /mclx mclight cos def /mcly mclight sin def
+        /mcdepth 1e30
+            mclx abs 1e-6 gt { mhbw mclx abs div min } if
+            mcly abs 1e-6 gt { mhbh mcly abs div min } if
+        def
+    } if
     mhcols mhrows mul 40000 gt { pkscumblein-too-many-cells } if
     newpath
     /mcm matrix currentmatrix def
@@ -7407,7 +9009,19 @@ systemdict /setalpha known /pwhasalpha exch def
             frnd /mcfr exch def frnd /mcph exch def
             /mcx mhgx0 mcc mcfx add mhcw mul add def
             /mcy mhgy0 mcr mcfy add mhch mul add def
-            mcx mcy mcreg scin {
+            mcx mcy mcreg scin
+            mclit {
+                % Lit when a step toward the light leaves the region: the
+                % circle sits within that step of the edge facing the light,
+                % so every lump of the outline gets its own lit cap. The step
+                % shrinks by up to /Feather on the cell's own phase draw
+                % (uniform, and independent of where the circle lands), which
+                % grades the inner border without a new draw.
+                {
+                    /mcstep mcreach mcdepth mul 1 mcfeather mcph mul sub mul def
+                    mcx mclx mcstep mul add mcy mcly mcstep mul add mcreg scin not
+                } { false } ifelse
+            } if {
                 /mcrr mcrad 1 mcfr 2 mul 1 sub mcrj mul add mul 0.1 mcrad mul max def
                 /mcpa mcph 360 mul def
                 % Build in a translated, squashed space, then put the matrix
@@ -7541,7 +9155,7 @@ systemdict /setalpha known /pwhasalpha exch def
 } bind def
 
 % @kind: Procedure
-% @summary: A pull brush motion from a line: the current path is read as a spine and replaced with strokes that start on it and are pulled along a fixed direction -- down from a horizon for reflections, up from a ground line for grass, down a ridge for a knife's "touch and pull" highlights. Builds a path and paints nothing, so it composes with any preset: `opts pkpull << >> pkliner`. Deterministic under the caller's own srand.
+% @summary: A pull brush motion from a line: the current path is read as a spine and replaced with strokes that start on it (or within /Scatter of it) and are pulled along a fixed direction -- down from a horizon for reflections, up from a ground line for grass, down a ridge for a knife's "touch and pull" highlights. Builds a path and paints nothing, so it composes with any preset: `opts pkpull << >> pkliner`. Deterministic under the caller's own srand.
 % @example: newpath 0 300 moveto 800 300 lineto << /Direction -90 /Length 60 /Spacing 6 >> pkpull << /Width 5 /Charge 0.6 >> pkbroad
 % @param: /Length [points] Mean stroke length in points; must be > 0 (default 30)
 % @param: /LengthJitter [fraction of /Length] 0..1 how far each stroke's length varies around /Length (default 0.5)
@@ -7550,6 +9164,7 @@ systemdict /setalpha known /pwhasalpha exch def
 % @param: /Direction [degrees] Heading of every pull in degrees counterclockwise from +x, in user space: -90 pulls down, 90 pushes up (default -90)
 % @param: /Lean [degrees] Random lean of each pull around /Direction, in degrees; must be >= 0 (default 6)
 % @param: /Bow [fraction of stroke length] 0..0.5 sideways bend of each pull as a fraction of its length, to either side at random; 0 is straight (default 0)
+% @param: /Scatter [points] Random offset of each stroke's start from the spine, in points, to either side across it (along its normal; /Wander already slides starts along it); must be >= 0. Unset, every start lies exactly on the spine; set (even to 0) it draws one more random value per stroke (default unset)
 /pkpull {
     /mpopts exch def
     /mplen mpopts /Length 30 pkgetdef def
@@ -7572,6 +9187,14 @@ systemdict /setalpha known /pwhasalpha exch def
     /mpbow mpopts /Bow 0 pkgetdef def
     /mpbow load xcheck { pkpull-bow-must-not-be-a-procedure } if
     mpbow 0 lt mpbow 0.5 gt or { pkpull-bow-must-be-0-to-0.5 } if
+    % /Scatter has no default: unset draws no extra value per stroke, so a
+    % render that never names it keeps the random stream it always had.
+    /mpscatset mpopts /Scatter known def
+    mpscatset {
+        /mpscat mpopts /Scatter get def
+        /mpscat load xcheck { pkpull-scatter-must-not-be-a-procedure } if
+        mpscat 0 lt { pkpull-scatter-must-be-non-negative } if
+    } if
 
     % The guide is walked at a sixth of the spacing and every stroke starts
     % on one of those samples. A sample always lies on the flattened guide,
@@ -7611,7 +9234,15 @@ systemdict /setalpha known /pwhasalpha exch def
             /mpj mpi mpfw 2 mul 1 sub mpwander mul mpn 2 div mul round cvi add def
             mpj mpbase lt { /mpj mpbase def } if
             mpj mpend gt { /mpj mpend def } if
-            mhstops mpj get dup 0 get /mpsx exch def 1 get /mpsy exch def
+            mhstops mpj get /mpst exch def
+            /mpsx mpst 0 get def /mpsy mpst 1 get def
+            mpscatset {
+                % Across the spine: along the normal of the stop the start
+                % slid to (its tangent angle is element 2, in degrees).
+                frnd 2 mul 1 sub mpscat mul /mpsoff exch def
+                /mpsx mpsx mpst 2 get sin mpsoff mul sub def
+                /mpsy mpsy mpst 2 get cos mpsoff mul add def
+            } if
             /mpa mpdir mpfl 2 mul 1 sub mplean mul add def
             /mpl mplen 1 mpfj 2 mul 1 sub mplj mul add mul def
             /mpdx mpa cos mpl mul def /mpdy mpa sin mpl mul def
@@ -7708,6 +9339,758 @@ systemdict /setalpha known /pwhasalpha exch def
             } ifelse
         } ifelse
     } for
+} bind def
+
+% ============================================================================
+% Brushed edges (issue #347)
+% ============================================================================
+%
+% Every big mass in a landscape (a meadow, a near bank, the water between two
+% banks) starts as a filled path, and a filled path has a ruled vector edge.
+% Paint never has one. A painter breaks it by feathering: short strokes
+% dragged *across* the boundary, the mass's own colour pulled out over what is
+% behind it and the colour behind cut back into the mass, so the two
+% interlock. The edge stays where it was, but it reads as brushed. Near
+% things keep a firmer edge than far ones, and an edge is rarely broken all
+% the way along: stretches that dissolve and stretches left crisp ("lost and
+% found") lead the eye along it.
+%
+%   opts pkfeather     the motion: strokes across the current path's edge,
+%                      along its local normal (paints nothing)
+%   opts pkbrushedge   the one-call edge: the mass colour pulled out, then
+%                      the backdrop (/Under) cut back in, each through a brush
+%
+% `pkfeather` follows the motion family's contract (see "Brush motions"
+% above): it replaces the current path with the strokes, paints nothing, and
+% draws only from frnd: one draw per call (the /CrispSeed default) and a
+% fixed four per stroke slot. Which way is
+% "out" is decided once per subpath:
+%
+% * A subpath closed with `closepath` is part of a mass. The mass is the whole
+%   current path filled with the nonzero rule, exactly as `fill` would paint
+%   it (artkit's `scpath` region), and a few probe points just to the left of
+%   the walk ask it which side the paint is on. So a hole, wound either way,
+%   is brushed out into the hole, and a mirrored space (`1 -1 scale`) needs
+%   nothing special.
+% * With two or more closed subpaths (a cloud bank of overlapping blobs) an
+%   edge can lie inside the others' mass. A pair of points either side of each
+%   stroke's anchor asks the same region, and when both are in the mass the
+%   stroke is skipped: the edge is hidden, so brushing it would nick the
+%   middle of the mass (issue #381). Its random draws are still taken, so the
+%   strokes that remain are the ones the edge would have had. The subpath's
+%   side is voted on wherever its edge shows. One closed subpath never asks.
+% * An open subpath is an edge with no mass attached (the visible crest of a
+%   bank, the far edge of a meadow): its out side is the one that faces
+%   /Outward (default 90, up), whichever way the guide was drawn.
+%
+% `pkbrushedge` keeps the caller's path and graphics state (it works inside
+% gsave/grestore, like the presets), so the usual shape is
+%
+%   MASS setrgbcolor  bankpath fill
+%   bankpath << /Under WATER >> pkbrushedge
+%
+% Scratch prefixes: mf- (pkfeather), pe- (pkbrushedge). pkbrushedge calls
+% pkfeather (mf-, and the motions' shared mh- helpers), artkit's scpath, and
+% the caller's /Brush, which is usually a preset and so rewrites pk*, po-,
+% pb- and the other preset prefixes; pe- is none of those.
+
+%%SelfTest: pkfeather-and-pkbrushedge-guards
+%   { newpath 0 0 moveto 50 0 lineto << /Toward /up >> pkfeather }
+%   /pkfeather-toward-must-be-out-in-or-both
+%   (/Toward /up) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Toward (out) >> pkfeather }
+%   /pkfeather-toward-must-be-out-in-or-both
+%   (/Toward as a string) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Length 0 >> pkfeather }
+%   /pkfeather-length-must-be-positive
+%   (/Length 0) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /LengthJitter 1.5 >> pkfeather }
+%   /pkfeather-lengthjitter-must-be-0-to-1
+%   (/LengthJitter 1.5) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Overlap -0.1 >> pkfeather }
+%   /pkfeather-overlap-must-be-0-to-1
+%   (/Overlap -0.1) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Spacing 0 >> pkfeather }
+%   /pkfeather-spacing-must-be-positive
+%   (/Spacing 0) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Wander 2 >> pkfeather }
+%   /pkfeather-wander-must-be-0-to-1
+%   (/Wander 2) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Lean -1 >> pkfeather }
+%   /pkfeather-lean-must-be-non-negative
+%   (/Lean -1) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Slant 85 >> pkfeather }
+%   /pkfeather-slant-must-be-minus-80-to-80
+%   (/Slant 85) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Bow 0.6 >> pkfeather }
+%   /pkfeather-bow-must-be-0-to-0.5
+%   (/Bow 0.6) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Crisp 1.2 >> pkfeather }
+%   /pkfeather-crisp-must-be-0-to-1
+%   (/Crisp 1.2) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /CrispRun 0 >> pkfeather }
+%   /pkfeather-crisprun-must-be-positive
+%   (/CrispRun 0) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /CrispSeed 2 >> pkfeather }
+%   /pkfeather-crispseed-must-be-0-to-1
+%   (/CrispSeed 2) mustguard
+%
+%   % The wrapper scales and mirrors keys for its inward pass only when they
+%   % are numbers, so a bad one is still named by pkfeather's own guard.
+%   { newpath 0 0 moveto 50 0 lineto << /Under [ 1 1 1 ] /Length { 5 } >> pkbrushedge }
+%   /pkfeather-length-must-not-be-a-procedure
+%   (/Length { 5 } with /Under) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Under [ 1 1 1 ] /Overlap { 0.3 } >> pkbrushedge }
+%   /pkfeather-overlap-must-not-be-a-procedure
+%   (/Overlap { 0.3 } with /Under) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Outward { 90 } >> pkfeather }
+%   /pkfeather-outward-must-not-be-a-procedure
+%   (/Outward { 90 }) mustguard
+%
+%   { newpath 0 0 moveto 100000 0 lineto << /Spacing 0.1 >> pkfeather }
+%   /pkfeather-count-exceeds-safety-limit
+%   (a tiny spacing on a long line) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto 100 0 lineto << /Crisp 0.5 /CrispRun 1e-12 >> pkfeather }
+%   /pkfeather-crisp-stretch-count-exceeds-safety-limit
+%   (a vanishing /CrispRun) mustguard
+%
+%   % A closed square whose length is a whole number of strokes gets one
+%   % stroke per corner, not a second one where the walk closes.
+%   newpath 0 0 moveto 3 0 lineto 3 3 lineto 0 3 lineto closepath
+%   << /Spacing 3 /Wander 0 >> pkfeather
+%   /zzn 0 def { pop pop /zzn zzn 1 add def } { pop pop } { 6 { pop } repeat } { } pathforall
+%   newpath zzn 4 eq (a closed square gets no doubled seam stroke) mustbe
+%
+%   { newpath 0 0 moveto 50 0 lineto 7 pkfeather }
+%   /pkfeather-needs-an-options-dict
+%   (a number as the options) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << >> pkfeather
+%     newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath << /Toward /both /Crisp 0.5 >> pkfeather
+%     newpath << >> pkfeather }
+%   (pkfeather with defaults, a closed mass, and an empty path) mustpass
+%
+%   % Which side is out. Straight strokes starting on the edge (/Overlap 0,
+%   % no lean, wander or jitter) must all end outside the mass: a ring's outer
+%   % edge outward, its hole's edge into the hole, whichever way each is
+%   % wound, and the same under a mirrored CTM.
+%   /zzfring { newpath 50 0 moveto 0 0 50 0 360 arc closepath
+%              20 0 moveto 0 0 20 360 0 arcn closepath } def
+%   /zzfringr { newpath 50 0 moveto 0 0 50 360 0 arcn closepath
+%               20 0 moveto 0 0 20 0 360 arc closepath } def
+%   /zzfout {   % {ring} -> bool : every stroke end lies outside the mass
+%     exec scpath /zzreg exch def
+%     << /Overlap 0 /Lean 0 /Wander 0 /LengthJitter 0 /Length 5 >> pkfeather
+%     /zzok true def
+%     { pop pop } { zzreg scin { /zzok false def } if } { 6 { pop } repeat } { }
+%     pathforall newpath zzok } def
+%   { zzfring } zzfout (a ring with its hole wound the other way) mustbe
+%   { zzfringr } zzfout (the same ring wound the other way round) mustbe
+%   gsave 1 -1 scale { zzfring } zzfout grestore (a ring under 1 -1 scale) mustbe
+%   % A mass far thinner than the probe step still finds its out side (the
+%   % strokes are shorter than the mass is thick, so a wrong side ends in it).
+%   newpath 0 0 moveto 100 0 lineto 100 0.1 lineto 0 0.1 lineto closepath
+%   scpath /zzreg exch def
+%   << /Overlap 0 /Lean 0 /Wander 0 /LengthJitter 0 /Length 0.02 >> pkfeather
+%   /zzok true def
+%   { pop pop } { zzreg scin { /zzok false def } if } { 6 { pop } repeat } { }
+%   pathforall newpath zzok (a 100 x 0.1 sliver) mustbe
+%   % Overlapping closed blobs (issue #381): an edge inside the union is
+%   % hidden and gets no stroke, so every stroke end of the union's outline
+%   % lies outside the union. Two squares that cross; and a small circle
+%   % mostly swallowed by a big one, whose visible arc must still brush out.
+%   /zzfblobs {   % {blobs} -> bool : every stroke end lies outside the union
+%     exec scpath /zzreg exch def
+%     << /Overlap 0 /Lean 0 /Wander 0 /LengthJitter 0 /Length 5 >> pkfeather
+%     /zzok true def
+%     { pop pop } { zzreg scin { /zzok false def } if } { 6 { pop } repeat } { }
+%     pathforall newpath zzok } def
+%   { newpath 0 0 moveto 40 0 lineto 40 40 lineto 0 40 lineto closepath
+%     20 10 moveto 60 10 lineto 60 50 lineto 20 50 lineto closepath } zzfblobs
+%   (two overlapping squares: no stroke on an edge inside the other) mustbe
+%   { newpath 50 0 moveto 0 0 50 0 360 arc closepath
+%     57 0 moveto 45 0 12 0 360 arc closepath } zzfblobs
+%   (a blob mostly swallowed by another still brushes its visible arc out) mustbe
+%   % ... down to a bar inside the circle with only its end sticking out: the
+%   % subpath's own seven first probes all fall on hidden edge (it starts
+%   % where the end falls between them), so it needs the wider search.
+%   { newpath 50 0 moveto 0 0 50 0 360 arc closepath
+%     3.7 -5 moveto 51 -5 lineto 51 5 lineto 0 5 lineto 0 -5 lineto closepath } zzfblobs
+%   (a bar all but swallowed brushes its visible end out) mustbe
+%   { newpath 50 0 moveto 0 0 50 0 360 arc closepath
+%     57 0 moveto 45 0 12 0 360 arc closepath
+%     30 0 moveto 10 0 20 0 360 arc closepath } zzfblobs
+%   (three overlapping circles) mustbe
+%   gsave 1 -1 scale
+%   { newpath 0 0 moveto 40 0 lineto 40 40 lineto 0 40 lineto closepath
+%     20 10 moveto 60 10 lineto 60 50 lineto 20 50 lineto closepath } zzfblobs
+%   grestore (two overlapping squares under 1 -1 scale) mustbe
+%   % Hidden strokes still draw their four numbers, so the visible strokes
+%   % are the ones the blobs would have had; and the hidden edge is simply
+%   % not painted: fewer strokes than the two outlines alone would give.
+%   newpath 0 0 moveto 40 0 lineto 40 40 lineto 0 40 lineto closepath
+%   20 10 moveto 60 10 lineto 60 50 lineto 20 50 lineto closepath
+%   << /Wander 0 >> pkfeather
+%   /zzn 0 def { pop pop /zzn zzn 1 add def } { pop pop } { 6 { pop } repeat } { } pathforall
+%   newpath
+%   newpath 0 0 moveto 40 0 lineto 40 40 lineto 0 40 lineto closepath << /Wander 0 >> pkfeather
+%   /zzm 0 def { pop pop /zzm zzm 1 add def } { pop pop } { 6 { pop } repeat } { } pathforall
+%   newpath zzn zzm 2 mul lt (overlapping squares: strokes only on the visible edge) mustbe
+%   % Blobs that do not touch lose nothing: two far-apart squares get exactly
+%   % the strokes of one square, twice.
+%   newpath 0 0 moveto 40 0 lineto 40 40 lineto 0 40 lineto closepath
+%   200 0 moveto 240 0 lineto 240 40 lineto 200 40 lineto closepath
+%   << /Wander 0 >> pkfeather
+%   /zzn 0 def { pop pop /zzn zzn 1 add def } { pop pop } { 6 { pop } repeat } { } pathforall
+%   newpath 0 0 moveto 40 0 lineto 40 40 lineto 0 40 lineto closepath << /Wander 0 >> pkfeather
+%   /zzm 0 def { pop pop /zzm zzm 1 add def } { pop pop } { 6 { pop } repeat } { } pathforall
+%   newpath zzn zzm 2 mul eq (blobs that do not touch keep every stroke) mustbe
+%   % A hole thinner than the probe step is not an edge hidden inside the
+%   % mass: its boundary is still brushed (Codex review, round 1). A square
+%   % with a hairline slit wound the other way gets the strokes of both.
+%   newpath 0 0 moveto 100 0 lineto 100 100 lineto 0 100 lineto closepath
+%   << /Wander 0 >> pkfeather
+%   /zzsq 0 def { pop pop /zzsq zzsq 1 add def } { pop pop } { 6 { pop } repeat } { } pathforall
+%   newpath 0 0 moveto 100 0 lineto 100 100 lineto 0 100 lineto closepath
+%   10 50 moveto 10 50.1 lineto 90 50.1 lineto 90 50 lineto closepath
+%   << /Wander 0 >> pkfeather
+%   /zzsl 0 def { pop pop /zzsl zzsl 1 add def } { pop pop } { 6 { pop } repeat } { } pathforall
+%   newpath zzsl zzsq 40 add gt (a hairline hole in a mass keeps its brushed edge) mustbe
+%   % ... and it is brushed into the hole, not into the mass (strokes shorter
+%   % than the hole is thick, so a wrong side ends in the mass).
+%   newpath 0 0 moveto 100 0 lineto 100 100 lineto 0 100 lineto closepath
+%   10 50 moveto 10 50.1 lineto 90 50.1 lineto 90 50 lineto closepath
+%   scpath /zzreg exch def
+%   newpath 0 0 moveto 100 0 lineto 100 100 lineto 0 100 lineto closepath
+%   10 50 moveto 10 50.1 lineto 90 50.1 lineto 90 50 lineto closepath
+%   << /Overlap 0 /Lean 0 /Wander 0 /LengthJitter 0 /Length 0.04 >> pkfeather
+%   /zzok true def
+%   { pop pop } { zzreg scin { /zzok false def } if } { 6 { pop } repeat } { }
+%   pathforall newpath zzok (a hairline hole's strokes end outside the mass) mustbe
+%   % An open crest drawn right to left still brushes up (/Outward 90).
+%   newpath 100 0 moveto 0 0 lineto
+%   << /Overlap 0 /Lean 0 /Wander 0 /LengthJitter 0 /Length 5 >> pkfeather
+%   /zzok true def
+%   { pop pop } { exch pop 5 sub abs 0.001 gt { /zzok false def } if } { 6 { pop } repeat } { }
+%   pathforall newpath zzok (an open crest drawn right to left brushes up) mustbe
+%
+%   { newpath 0 0 moveto 50 0 lineto << /InSpacing 0 >> pkbrushedge }
+%   /pkbrushedge-inspacing-must-be-positive
+%   (/InSpacing 0) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto 7 pkbrushedge }
+%   /pkbrushedge-needs-an-options-dict
+%   (a number as the options) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Brush 3 >> pkbrushedge }
+%   /pkbrushedge-brush-must-be-a-procedure
+%   (/Brush 3) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Toward /in >> pkbrushedge }
+%   /pkbrushedge-sets-toward-itself
+%   (/Toward given to the wrapper) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Under [ 0 0 ] >> pkbrushedge }
+%   /pkbrushedge-under-must-be-a-3-element-array
+%   (/Under [ 0 0 ]) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Under [ 0 2 0 ] >> pkbrushedge }
+%   /pkbrushedge-under-components-must-be-0-to-1
+%   (/Under [ 0 2 0 ]) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Under /nosuchpaint >> pkbrushedge }
+%   /pkbrushedge-under-unknown-pigment-see-PigmentNames
+%   (/Under /nosuchpaint) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Under { pop pop 1 2 } >> pkbrushedge }
+%   /pkbrushedge-under-procedure-must-return-3-numbers
+%   (/Under returning two numbers) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Under { pop pop 0 0 5 } >> pkbrushedge }
+%   /pkbrushedge-under-procedure-results-must-be-0-to-1
+%   (/Under returning 5) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /InLength 0 >> pkbrushedge }
+%   /pkbrushedge-inlength-must-be-positive
+%   (/InLength 0) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath
+%     << /Under [ 1 1 1 ] >> pkbrushedge
+%     << /Under /titaniumwhite >> pkbrushedge
+%     << /Under { pop pop 1 1 1 } >> pkbrushedge
+%     << >> pkbrushedge }
+%   (pkbrushedge with each form of /Under, and without one) mustpass
+%
+%   % The wrapper leaves the caller's path and the operand stack as they were.
+%   count newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath
+%   << /Under { pop pop 0.5 0.5 0.5 } >> pkbrushedge
+%   count 1 sub eq currentpoint 0 eq exch 0 eq and and newpath
+%   (the caller's path and operand stack survive) mustbe
+%%EndSelfTest
+
+% x y -> bool   is the point inside the mass (mfreg)?
+% @internal
+/mfinmass { mfreg siinside } bind def
+
+% n -> u   a number in [0, 1) that depends only on n and mfseed: the crisp
+% stretches' own generator, so they do not move with the frnd stream.
+% @internal
+/mfu { 12.9898 mul mfseed 36000 mul add sin 43758.5453 mul abs dup floor sub } bind def
+
+% -> len   the length of crisp/brushed stretch number mfiv of subpath mfsub,
+% in the state mfbrushing says: /CrispRun * (1 - /Crisp) brushed or
+% /CrispRun * /Crisp crisp on average, each 0.4 to 1.6 times that.
+% @internal
+/mfivlen {
+    mfrun mfbrushing { 1 mfcrisp sub } { mfcrisp } ifelse mul
+    mfsub 7919 mul mfiv 2 mul add 2 add mfu 1.2 mul 0.4 add mul
+} bind def
+
+% @kind: Procedure
+% @summary: A feathering brush motion across a mass's edge: the current path is read as the edge of a filled mass and replaced with short strokes that cross it along the local normal, so a ruled vector edge can be brushed instead. /Toward /out starts each stroke inside the mass and pulls it out (paint it in the mass's colour); /in starts outside and pulls in (paint it in the colour behind); /both alternates. A subpath closed with closepath is a mass edge, and the mass itself (the whole path filled nonzero, as fill would) decides which side is out, holes included, and with two or more closed subpaths an edge lying inside the others' mass (overlapping blobs) gets no stroke; an open subpath is a bare edge whose out side faces /Outward. Builds a path and paints nothing, so it composes with any preset: `opts pkfeather << >> pkbroad`. pkbrushedge does both directions and both colours in one call. Deterministic under the caller's own srand.
+% @example: newpath 0 120 moveto 120 150 240 110 360 135 curveto << /Length 12 /Spacing 3 /Slant 15 >> pkfeather << /Width 2 /Charge 0.8 /Depletion 0.8 >> pkbroad
+% @param: /Toward [name] /out, /in or /both: which way each stroke is pulled across the edge; /out starts in the mass and ends outside it, /in the reverse, /both alternates stroke by stroke (default /out)
+% @param: /Length [points] Mean stroke length in points; must be > 0 (default 8)
+% @param: /LengthJitter [fraction of /Length] 0..1 how far each stroke's length varies around /Length (default 0.6)
+% @param: /Overlap [fraction of stroke length] 0..1 how much of each stroke lies on the side it starts from, before it crosses the edge; 0 starts on the edge (default 0.35)
+% @param: /Spacing [points] Mean distance between strokes along the edge, in points; must be > 0 (default 3)
+% @param: /Wander [fraction of /Spacing] 0..1 how far a stroke slides along the edge from its even slot (default 0.5)
+% @param: /Lean [degrees] Random lean of each stroke around its heading, in degrees; must be >= 0 (default 30)
+% @param: /Slant [degrees] A fixed tilt of every stroke away from the edge's normal, counterclockwise, -80..80: a meadow's grass bent by the wind, a bank dragged one way (default 0)
+% @param: /Bow [fraction of stroke length] 0..0.5 sideways bend of each stroke as a fraction of its length, to either side at random; 0 is straight (default 0)
+% @param: /Crisp [0..1] the share of the edge left crisp, in stretches: brushed (lost) stretches alternate with untouched (found) ones, as a painter's edges do, rather than the edge being broken evenly all along; 0 brushes all of it (default 0)
+% @param: /CrispRun [points] Mean length of one crisp stretch plus the brushed stretch after it, in points; must be > 0. Only matters with /Crisp above 0 (default 60)
+% @param: /CrispSeed [0..1] where the crisp stretches fall: they depend only on this seed and the arc length along each subpath, so two calls with one seed leave the same stretches crisp at any spacing; pkbrushedge gives both its passes one seed this way (default one draw from frnd, taken whether or not the key is given)
+% @param: /Outward [degrees] For an open subpath only: the direction that is out of the mass, counterclockwise from +x in user space; each open subpath brushes out on whichever side of it faces this way. Closed subpaths ignore it (default 90, up)
+/pkfeather {
+    /mfopts exch def
+    /mfopts load type /dicttype ne { pkfeather-needs-an-options-dict } if
+    /mftoward mfopts /Toward /out pkgetdef def
+    /mftoward load type /nametype ne { pkfeather-toward-must-be-out-in-or-both } if
+    /mftoward load /out ne /mftoward load /in ne and /mftoward load /both ne and
+        { pkfeather-toward-must-be-out-in-or-both } if
+    /mflen mfopts /Length 8 pkgetdef def
+    /mflen load xcheck { pkfeather-length-must-not-be-a-procedure } if
+    mflen 0 le { pkfeather-length-must-be-positive } if
+    /mflj mfopts /LengthJitter 0.6 pkgetdef def
+    /mflj load xcheck { pkfeather-lengthjitter-must-not-be-a-procedure } if
+    mflj 0 lt mflj 1 gt or { pkfeather-lengthjitter-must-be-0-to-1 } if
+    /mfover mfopts /Overlap 0.35 pkgetdef def
+    /mfover load xcheck { pkfeather-overlap-must-not-be-a-procedure } if
+    mfover 0 lt mfover 1 gt or { pkfeather-overlap-must-be-0-to-1 } if
+    /mfspacing mfopts /Spacing 3 pkgetdef def
+    /mfspacing load xcheck { pkfeather-spacing-must-not-be-a-procedure } if
+    mfspacing 0 le { pkfeather-spacing-must-be-positive } if
+    /mfwander mfopts /Wander 0.5 pkgetdef def
+    /mfwander load xcheck { pkfeather-wander-must-not-be-a-procedure } if
+    mfwander 0 lt mfwander 1 gt or { pkfeather-wander-must-be-0-to-1 } if
+    /mflean mfopts /Lean 30 pkgetdef def
+    /mflean load xcheck { pkfeather-lean-must-not-be-a-procedure } if
+    mflean 0 lt { pkfeather-lean-must-be-non-negative } if
+    /mfslant mfopts /Slant 0 pkgetdef def
+    /mfslant load xcheck { pkfeather-slant-must-not-be-a-procedure } if
+    mfslant -80 lt mfslant 80 gt or { pkfeather-slant-must-be-minus-80-to-80 } if
+    /mfbow mfopts /Bow 0 pkgetdef def
+    /mfbow load xcheck { pkfeather-bow-must-not-be-a-procedure } if
+    mfbow 0 lt mfbow 0.5 gt or { pkfeather-bow-must-be-0-to-0.5 } if
+    /mfcrisp mfopts /Crisp 0 pkgetdef def
+    /mfcrisp load xcheck { pkfeather-crisp-must-not-be-a-procedure } if
+    mfcrisp 0 lt mfcrisp 1 gt or { pkfeather-crisp-must-be-0-to-1 } if
+    /mfrun mfopts /CrispRun 60 pkgetdef def
+    /mfrun load xcheck { pkfeather-crisprun-must-not-be-a-procedure } if
+    mfrun 0 le { pkfeather-crisprun-must-be-positive } if
+    % The seed is drawn whether or not it is given, so giving it moves
+    % nothing else.
+    frnd /mfseed0 exch def
+    /mfseed mfopts /CrispSeed mfseed0 pkgetdef def
+    /mfseed load xcheck { pkfeather-crispseed-must-not-be-a-procedure } if
+    mfseed 0 lt mfseed 1 gt or { pkfeather-crispseed-must-be-0-to-1 } if
+    /mfoutward mfopts /Outward 90 pkgetdef def
+    /mfoutward load xcheck { pkfeather-outward-must-not-be-a-procedure } if
+    /mfoutward load type dup /integertype ne exch /realtype ne and
+        { pkfeather-outward-must-be-a-number } if
+
+    % Which subpaths were closed with closepath, and, if any was, the mass
+    % they bound: the whole path as fill would paint it. Both read the path
+    % before mhcollect walks it (walkpath leaves it in place, flattened).
+    pkscanclosed /mfclosed exch def
+    /mfanyclosed false def
+    mfclosed { { /mfanyclosed true def } if } forall
+    mfanyclosed { scpath /mfreg exch def } if
+    % Two or more closed subpaths may overlap (a cloud bank built from
+    % several blobs): an edge lying inside the others' mass is hidden, and
+    % its strokes are skipped (issue #381). One closed subpath is its own
+    % whole mass, so it never pays for the test.
+    /mfncl 0 def
+    mfclosed { { /mfncl mfncl 1 add def } if } forall
+    /mfmulti mfncl 2 ge def
+
+    % The edge is walked at a sixth of the spacing and every stroke sits on
+    % one of those samples, as in pkpull: a stroke can slide along the edge
+    % by whole samples without leaving it. 120000 samples bound 20000 strokes.
+    /mfn 6 def
+    mfspacing mfn div 120000 { pkfeather-count-exceeds-safety-limit } mhcollect
+
+    % The crisp stretches are walked along the whole edge, so their count is
+    % bounded too: a tiny /CrispRun on a long edge would otherwise loop for
+    % ever (or stall, once a stretch is below the arc length's precision).
+    % The shortest stretch is 0.4 of the shorter mean.
+    mfcrisp 0 gt mfcrisp 1 lt and {
+        0 0 1 mhn 1 sub { mhstops exch get 4 get add } for
+        mfrun mfcrisp 1 mfcrisp sub min mul 0.4 mul 100000 mul gt
+            { pkfeather-crisp-stretch-count-exceeds-safety-limit } if
+    } if
+
+    % Each subpath's out side, once for the whole subpath: +1 when out is to
+    % the left of the walk, -1 to the right. A one-sided rule per stop would
+    % flip at every wiggle of an open guide and at every corner of a mass.
+    [ 0 1 mhn 1 sub {
+        dup mhstops exch get 5 get 1 and 1 ne { pop } if
+    } for ] /mfstarts exch def
+    /mfsigns mfstarts length array def
+    0 1 mfstarts length 1 sub {
+        /mfs exch def
+        /mfb mfstarts mfs get def
+        /mfe mfs mfstarts length 1 sub lt { mfstarts mfs 1 add get 1 sub } { mhn 1 sub } ifelse def
+        mfs mfclosed length lt { mfclosed mfs get } { false } ifelse {
+            % Seven probes (more with overlapping blobs, below) spread along the
+            % subpath, each a pair of points a small step to either side of the walk; the majority says which
+            % side the paint is on. A probe only counts when exactly one of
+            % its points is in the mass. Otherwise the step jumped right
+            % across a thin mass (or landed on a corner), so it is halved
+            % and tried again: the answer depends on the mass, never on the
+            % stroke spacing (Codex review, round 1).
+            /mfleft 0 def /mfvotes 0 def
+            % With overlapping blobs much of the subpath can be hidden inside
+            % the others, and a hidden probe does not vote, so it is probed at
+            % 28 places, all of them counted: a blob all but swallowed still
+            % gets its vote from the arc that shows.
+            /mfnp mfmulti { 28 } { 7 } ifelse def
+            0 1 mfnp 1 sub {
+                mfe mfb sub mfnp div exch 0.5 add mul round cvi mfb add
+                mhstops exch get /mfst exch def
+                mfst 5 get 3 ne {
+                    /mfnx mfst 2 get 90 add cos def
+                    /mfny mfst 2 get 90 add sin def
+                    /mfeps mfspacing mfn div 0.5 mul def
+                    /mfeps0 mfeps def
+                    40 {
+                        mfst 0 get mfnx mfeps mul add mfst 1 get mfny mfeps mul add
+                        mfinmass /mfpl exch def
+                        mfst 0 get mfnx mfeps mul sub mfst 1 get mfny mfeps mul sub
+                        mfinmass /mfpr exch def
+                        mfpl mfpr ne {
+                            /mfvotes mfvotes 1 add def
+                            mfpl { /mfleft mfleft 1 add def } if
+                            exit
+                        } if
+                        % Both in the mass, with overlapping blobs: a hidden
+                        % edge, or a hole thinner than the step. One try at a
+                        % sixty-fourth of the step tells them apart; halving
+                        % 40 times over a hidden edge would not.
+                        mfpl mfpr and mfmulti and {
+                            mfeps mfeps0 lt { exit } if
+                            /mfeps mfeps0 64 div def
+                        } {
+                            /mfeps mfeps 0.5 mul def
+                        } ifelse
+                    } repeat
+                } if
+            } for
+            mfsigns mfs mfleft mfvotes 2 div gt { -1 } { 1 } ifelse put
+        } {
+            % An open edge: out is the side whose normal, summed along the
+            % walk, faces /Outward.
+            /mfdot 0 def
+            mfb 1 mfe {
+                mhstops exch get 2 get 90 add mfoutward sub cos
+                /mfdot exch mfdot add def
+            } for
+            mfsigns mfs mfdot 0 ge { 1 } { -1 } ifelse put
+        } ifelse
+    } for
+
+    newpath
+    /mfsub -1 def /mfk 0 def
+    0 1 mhn 1 sub {
+        /mfi exch def
+        mhstops mfi get 5 get /mfatend exch def
+        mfatend 1 and 1 eq {
+            /mfsub mfsub 1 add def
+            /mfbase mfi def
+            /mfend mfi def
+            {
+                mfend mhn 1 sub ge { exit } if
+                mhstops mfend get 5 get 2 and 2 eq { exit } if
+                /mfend mfend 1 add def
+            } loop
+            /mfisclosed mfsub mfclosed length lt { mfclosed mfsub get } { false } ifelse def
+            /mfsgn mfsigns mfsub get def
+            % The crisp stretches of this subpath: a function of the arc
+            % length from its start and the seed alone, so two calls with one
+            % seed (pkbrushedge's two passes) leave the same stretches crisp
+            % whatever their spacing.
+            /mfarc 0 def /mfiv 0 def
+            /mftot 0 mfbase 1 add 1 mfend { mhstops exch get 4 get add } for def
+            /mfbrushing mfsub 7919 mul mfu mfcrisp ge def
+            % Start partway into the first stretch, so subpaths do not all
+            % begin on a stretch boundary.
+            /mfnext mfivlen mfsub 7919 mul 1 add mfu mul def
+        } {
+            /mfarc mfarc mhstops mfi get 4 get add def
+        } ifelse
+        mfcrisp 0 gt mfcrisp 1 lt and {
+            { mfarc mfnext le { exit } if
+              /mfbrushing mfbrushing not def
+              /mfiv mfiv 1 add def
+              /mfnext mfnext mfivlen add def } loop
+        } if
+        % A slot is every sixth sample, plus an open subpath's end when it is
+        % at least half a spacing past the last slot. A closed subpath ends
+        % where it started, so no slot falls within half a spacing of its
+        % end: one there doubled the stroke at the start (Codex round 2; the
+        % walk's own end stop can repeat the last regular one, so "the end
+        % stop" alone was not enough).
+        /mfr mfend mfbase sub mfn mod def
+        mfi mfbase sub mfn mod 0 eq
+        mfisclosed mfi mfbase gt and { mftot mfarc sub mfspacing 0.5 mul ge and } if
+        mfi mfend eq mfr 0 gt and mfisclosed not and
+            { mfr 1 sub mfspacing mfn div mul mhstops mfend get 4 get add
+              mfspacing 0.5 mul ge }
+            { false }
+        ifelse
+        or {
+            % Four draws per slot, brushed or crisp.
+            frnd /mffw exch def frnd /mffl exch def
+            frnd /mffj exch def frnd /mffb exch def
+            mfbrushing {
+                /mfj mfi mffw 2 mul 1 sub mfwander mul mfn 2 div mul round cvi add def
+                mfj mfbase lt { /mfj mfbase def } if
+                mfj mfend gt { /mfj mfend def } if
+                mhstops mfj get /mfst exch def
+                % An edge hidden inside the other blobs is not brushed: both
+                % points of a pair just either side of the stroke's anchor
+                % are in the mass. They are asked at the probe step and, if
+                % both are in, once more at a sixty-fourth of it: a hole
+                % thinner than the step has its far side within that
+                % (Codex review, round 1), while a genuinely hidden edge
+                % stays inside however small the step.
+                /mfhide false def
+                mfmulti mfisclosed and mfst 5 get 3 ne and {
+                    /mfhide true def
+                    [ 1 0.015625 ] {
+                        mfspacing mfn div 0.5 mul mul /mfhe exch def
+                        mfst 0 get mfst 2 get 90 add cos mfhe mul add
+                        mfst 1 get mfst 2 get 90 add sin mfhe mul add mfinmass
+                        mfst 0 get mfst 2 get 90 add cos mfhe mul sub
+                        mfst 1 get mfst 2 get 90 add sin mfhe mul sub mfinmass
+                        and not { /mfhide false def exit } if
+                    } forall
+                } if
+                mfhide not {
+                % A lone point has no edge direction: it is pulled along
+                % /Outward itself.
+                /mfnorm mfst 5 get 3 eq
+                    { mfoutward }
+                    { mfst 2 get 90 mfsgn mul add }
+                ifelse def
+                /mfa mfnorm mfslant add mffl 2 mul 1 sub mflean mul add def
+                /mftoward load /in eq
+                /mftoward load /both eq mfk 2 mod 1 eq and
+                or { /mfa mfa 180 add def } if
+                /mfl mflen 1 mffj 2 mul 1 sub mflj mul add mul def
+                /mfdx mfa cos mfl mul def /mfdy mfa sin mfl mul def
+                /mfsx mfst 0 get mfdx mfover mul sub def
+                /mfsy mfst 1 get mfdy mfover mul sub def
+                mfsx mfsy moveto
+                mfbow 0 gt {
+                    /mfoff mfbow mfl mul mffb 0.5 lt { 1 } { -1 } ifelse mul def
+                    /mfnx mfa sin neg mfoff mul def
+                    /mfny mfa cos mfoff mul def
+                    mfsx mfdx 3 div add mfnx add
+                    mfsy mfdy 3 div add mfny add
+                    mfsx mfdx 2 mul 3 div add mfnx add
+                    mfsy mfdy 2 mul 3 div add mfny add
+                    mfsx mfdx add mfsy mfdy add curveto
+                } {
+                    mfsx mfdx add mfsy mfdy add lineto
+                } ifelse
+                } if
+            } if
+            /mfk mfk 1 add def
+        } if
+    } for
+} bind def
+
+% x y -> -   (procedural /Under: ask it for the backdrop at x y, check the
+% answer, and set it as the colour). The procedure runs with nothing of
+% pkbrushedge's on the operand stack.
+% @internal
+/peunderat {
+    count 2 sub /pec0 exch def
+    peUnderProc
+    count pec0 sub 3 ne {
+        count pec0 sub dup 0 gt { { pop } repeat } { pop } ifelse
+        pkbrushedge-under-procedure-must-return-3-numbers
+    } if
+    3 array astore /peur exch def
+    0 1 2 {
+        peur exch get dup type dup /integertype ne exch /realtype ne and
+            { pop pkbrushedge-under-procedure-results-must-be-numbers } if
+        dup 0 lt exch 1 gt or
+            { pkbrushedge-under-procedure-results-must-be-0-to-1 } if
+    } for
+    peur aload pop setrgbcolor
+} bind def
+
+% any -> bool   an integer or a real?
+% @internal
+/penum { type dup /integertype eq exch /realtype eq or } bind def
+
+% /Toward -> dict   (a copy of the caller's options with /Toward set, and
+% /Length scaled by peinlen for the inward pass; the caller's dict is never
+% written)
+% @internal
+/peopts {
+    /petow exch def
+    peopts0 length 2 add dict
+    peopts0 { 2 index 3 1 roll put } forall
+    dup /Toward petow put
+    % The inward pass mirrors the outward one: /Overlap counts from the side
+    % a stroke starts on, so 1 - /Overlap puts an inward stroke over the
+    % same stretch of the normal an outward one covers. Fewer of them, so
+    % the backdrop nicks the edge rather than ruling a pale band inside it.
+    % One seed for both passes, so their crisp stretches line up.
+    dup /CrispSeed known not { dup /CrispSeed peseed put } if
+    % A key that is not a number is passed on untouched, so pkfeather's
+    % own guard names it.
+    petow /in eq {
+        dup /Length 8 pkgetdef dup penum
+            { peinlen mul 1 index exch /Length exch put } { pop } ifelse
+        dup /Spacing 3 pkgetdef dup penum
+            { peinspace mul 1 index exch /Spacing exch put } { pop } ifelse
+        dup /Overlap 0.35 pkgetdef dup penum
+            { 1 exch sub 1 index exch /Overlap exch put } { pop } ifelse
+    } if
+} bind def
+
+% -   gsave and grestore, counted in pedepth so pkbrushedge can unwind
+% to the caller's level when an error stops it halfway.
+% @internal
+/pegsave { gsave /pedepth pedepth 1 add def } bind def
+% @internal
+/pegrestore { grestore /pedepth pedepth 1 sub def } bind def
+
+% @kind: Procedure
+% @summary: Brushes the edge of a filled mass in one call: short strokes in the current colour pulled out across the current path's edge, then, with /Under, strokes in the backdrop colour cut back into the mass, so the two interlock and the ruled vector edge reads as painted. Fill the mass first; the path is the mass's outline (closed with closepath: holes and mirrored spaces work) or just the visible edge left open, whose out side is /Outward. Every pkfeather key is accepted and passed on (except /Toward, which this sets), and each pass is painted by /Brush. /Under takes what pkwet's /Under takes, plus a pigment name; a procedural /Under is asked once per inward stroke, at the stroke's start, so a graded sky or water cuts back in its own colour all along. The caller's path, colour and graphics state survive. A mass built from several overlapping closed blobs (a cloud bank, a bush of ellipses) can go in as one path: an edge lying inside the others is hidden, and is not brushed. Deterministic under the caller's own srand.
+% @example: newpath 0 120 moveto 120 150 240 110 360 135 curveto 360 0 lineto 0 0 lineto closepath gsave 0.18 0.30 0.12 setrgbcolor fill grestore 0.18 0.30 0.12 setrgbcolor << /Under [ 0.62 0.72 0.86 ] /Slant 10 >> pkbrushedge
+% @param: /Under [rgb array or name] the colour behind the mass, cut back into it by the inward strokes; an [r g b] array, a pigment name such as /titaniumwhite (see PigmentNames), or a procedure `x y -> r g b` (three numbers in 0..1, user space; a pure function, as pkwet's) asked at each inward stroke's start. Unset paints the outward strokes only (default unset)
+% @param: /Brush [proc] the brush both passes are painted with: a procedure that paints the current path in the current colour, normally a preset with its options, such as `{ << /Width 2 >> pkdry }` (default `{ << /Width 5 /Charge 0.8 /Depletion 0.9 /Edge 0.6 /Grain 10 >> pkbroad }`, a small flat brush that runs dry as it crosses, so each stroke breaks up at its far end)
+% @param: /InLength [fraction of /Length] the inward strokes' length as a fraction of the outward ones'; must be > 0. Each inward stroke covers the stretch of the normal an outward one does (its /Overlap is mirrored), so most of it lies outside the mass and only its tip cuts in (default 1)
+% @param: /InSpacing [multiple of /Spacing] the inward strokes' spacing as a multiple of the outward ones'; must be > 0. Sparser cuts nick the edge; as dense as the outward strokes, they rule a pale band just inside it (default 2)
+/pkbrushedge {
+    /peopts0 exch def
+    /peopts0 load type /dicttype ne { pkbrushedge-needs-an-options-dict } if
+    peopts0 /Toward known { pkbrushedge-sets-toward-itself } if
+    /pebrush peopts0 /Brush
+        { << /Width 5 /Charge 0.8 /Depletion 0.9 /Edge 0.6 /Grain 10 >> pkbroad }
+        pkgetdef def
+    /pebrush load xcheck not { pkbrushedge-brush-must-be-a-procedure } if
+    /peinlen peopts0 /InLength 1 pkgetdef def
+    /peinlen load xcheck { pkbrushedge-inlength-must-not-be-a-procedure } if
+    peinlen 0 le { pkbrushedge-inlength-must-be-positive } if
+    /peinspace peopts0 /InSpacing 2 pkgetdef def
+    /peinspace load xcheck { pkbrushedge-inspacing-must-not-be-a-procedure } if
+    peinspace 0 le { pkbrushedge-inspacing-must-be-positive } if
+    % /Under: none, a colour (array or pigment name), or a backdrop procedure.
+    /pemode 0 def
+    peopts0 /Under known {
+        /peUnder peopts0 /Under get def
+        /peUnder load xcheck {
+            /peUnder load type dup /arraytype eq exch /packedarraytype eq or not
+                { pkbrushedge-under-must-be-a-3-element-array } if
+            /peUnderProc /peUnder load def
+            /pemode 2 def
+        } {
+            /peUnder load type /nametype eq {
+                /peUnder (pkbrushedge-under) peUnder pupig def
+            } if
+            /peUnder load type /arraytype ne { pkbrushedge-under-must-be-a-3-element-array } if
+            peUnder length 3 ne { pkbrushedge-under-must-be-a-3-element-array } if
+            0 1 2 {
+                peUnder exch get dup type dup /integertype ne exch /realtype ne and
+                    { pkbrushedge-under-components-must-be-numbers } if
+                dup 0 lt exch 1 gt or { pkbrushedge-under-components-must-be-0-to-1 } if
+            } for
+            /pemode 1 def
+        } ifelse
+    } if
+
+    % Every gsave below goes through pegsave, which counts it, so an error
+    % raised in the middle (a bad pkfeather key, a backdrop procedure's bad
+    % answer, the brush's own guard) can be unwound to the caller's level
+    % and passed on: the caller's graphics state is never left open.
+    frnd /peseed exch def
+    /pedepth 0 def
+    {
+    pegsave
+        % In first: the backdrop cut back into the mass.
+        pemode 1 eq {
+            pegsave peUnder aload pop setrgbcolor /in peopts pkfeather pebrush pegrestore
+        } if
+        pemode 2 eq {
+            % One brush call per stroke, each in the backdrop where it
+            % starts. The strokes are read back from the path first:
+            % [ /m x y /l x y ] or [ /m x y /c x1 y1 x2 y2 x3 y3 ] each.
+            pegsave
+                /in peopts pkfeather
+                [ { /m 3 1 roll } { /l 3 1 roll } { /c 7 1 roll } { } pathforall ]
+                /pesegs exch def
+                /pei 0 def
+                {
+                    pei pesegs length ge { exit } if
+                    pesegs pei get /m eq {
+                        pesegs pei 1 add get pesegs pei 2 add get peunderat
+                        newpath pesegs pei 1 add get pesegs pei 2 add get moveto
+                        /pei pei 3 add def
+                        pei pesegs length lt {
+                            pesegs pei get /l eq {
+                                pesegs pei 1 add get pesegs pei 2 add get lineto
+                                /pei pei 3 add def
+                            } {
+                                pesegs pei get /c eq {
+                                    pesegs pei 1 add 6 getinterval aload pop curveto
+                                    /pei pei 7 add def
+                                } if
+                            } ifelse
+                        } if
+                        pebrush
+                    } {
+                        /pei pei 1 add def
+                    } ifelse
+                } loop
+            pegrestore
+        } if
+        % Out, last: the mass's own colour pulled over what is behind it, on
+        % top of the nicks, so the two interlock.
+        pegsave /out peopts pkfeather pebrush pegrestore
+    pegrestore
+    } stopped { pedepth { grestore } repeat stop } if
 } bind def
 
 % ============================================================================

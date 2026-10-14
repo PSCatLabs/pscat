@@ -26,8 +26,9 @@
 //! recording: four of these five guards close a *silent* defect (the
 //! library accepts malformed input and draws the wrong thing), but
 //! `pkribbon`'s `/Pressure` guard does not. Removing it produces a
-//! `typecheck` on `def`, from deep inside the implementation, with no
-//! hint of which option was wrong — which is precisely what PR #76's
+//! `typecheck` on `def` (an `undefined` since #338, when `def` began to
+//! accept a leaked number as a key), from deep inside the implementation,
+//! with no hint of which option was wrong — which is precisely what PR #76's
 //! round 2 described: the unexecuted value "leaks extra operands into
 //! every downstream computation instead of raising a clean error".
 //! [`Unguarded`] makes each row state which shape it is, so a change
@@ -261,9 +262,11 @@ fn row_5_and_10_a_non_callable_pressure_is_caught() {
         "    not { pkribbon-pressure-must-be-a-procedure } if\n",
         "newpath 0 0 moveto 40 0 lineto << /Pressure 5 >> pkribbon",
         // Not silent: an unexecuted /Pressure value leaks onto the
-        // stack and `def` eventually chokes on it, far from the call
-        // site and naming nothing useful.
-        Unguarded::RaisesSomethingElse("typecheck"),
+        // stack, shifts the operands of a later `def`, and a name that
+        // was never defined fails far from the call site, naming nothing
+        // useful. (Before #338 `def` took the leaked number as its key
+        // and raised typecheck; it is a legal key now, as in Ghostscript.)
+        Unguarded::RaisesSomethingElse("undefined"),
         "pkribbon-rejects-a-non-callable-pressure",
     );
 }

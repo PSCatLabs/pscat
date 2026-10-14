@@ -941,6 +941,13 @@
 
     userdict /dkBatch known {
         userdict /dkBatch get /dkBb exch def
+        % The dkclip region in force (#312), unless it is the one the batch
+        % itself was opened in: that one is still in force when the batch
+        % renders, and clipping to it twice would thin its edges.
+        dkSrec /clip
+            userdict /dkClip known { userdict /dkClip get } { null } ifelse
+            dup dkBb /base get eq { pop null } if
+        put
         dkBb /pig known {
             dkBb /pig get dkSrec /pig get
             true 0 1 2 { 3 index 1 index get 3 index 3 -1 roll get eq and } for
@@ -950,6 +957,7 @@
         dkBb dkBb /n get dkSrec put
         dkBb /n dkBb /n get 1 add put
     } {
+        dkSrec /clip null put
         [ dkSrec ] dkrender
     } ifelse
 } bind def
@@ -959,6 +967,26 @@
 /dkZsame {
     /dkZe2 exch def /dkZe1 exch def
     true 0 1 4 { dup dkZe1 exch get exch dkZe2 exch get eq and } for
+    % and the same dkclip region (#312), compared only when the rest match
+    dup { pop dkZe1 5 get /clip get dkZe2 5 get /clip get eq } if
+} bind def
+
+% entry -   (intersects the clip with a record's dkclip region, #312)
+% Each link from the entry up to the batch's own base (dkZbase, set by
+% dkbatch) is replayed in device space, where dkclip captured it, and
+% clipped to. Leaves the CTM at identity and the path empty: the caller
+% sets its own space next.
+% @internal
+/dkZclipin {
+    mark exch
+    {
+        dup null eq { pop exit } if
+        dup dkZbase eq { pop exit } if
+        dup 1 get exch 0 get
+    } loop
+    matrix setmatrix
+    { counttomark 0 eq { exit } if newpath exec clip } loop
+    pop newpath
 } bind def
 
 % run R -> estimated cells   (what a catch over the run visits)
@@ -987,6 +1015,7 @@
     /dkZg exch def
     gsave
         dkZg 0 get dup 2 get exch dup 3 get exch 4 get setrgbcolor
+        dkZg 0 get 5 get /clip get dup null eq { pop } { dkZclipin } ifelse
         userdict /pjCTM get setmatrix
         /dkZKc dkZg 0 get 1 get 1.1 mul 0.22 add userdict /pjW get mul def
         [
@@ -1239,6 +1268,7 @@
 /dkZfallout {
     /dkZr exch def
     dkZr /fallout get 0 gt {
+        dkZr /clip get dup null eq { pop } { gsave dkZclipin } ifelse
         /dkZfcol dkZr /under get dkZr /pig get dkZr /strength get 0.7 mul dklerp3 def
         /dkZfr dkZr /width get 0.05 mul dup 0.12 lt { pop 0.12 } if def
         dkZr /falls get {
@@ -1291,6 +1321,7 @@
                 } loop
             } if
         } forall
+        dkZr /clip get null ne { grestore } if
     } if
 } bind def
 
@@ -1404,16 +1435,85 @@
 } bind def
 
 % @kind: Procedure
-% @summary: Runs a procedure whose dkstroke calls are drawn together, level-major: every stroke's faint level first, then every bright one, so crossing layers of hatching or re-stroked lines stay dark where they cross instead of the second layer's faint level greying the first's core. One pigment per batch (a second colour gets its own batch, drawn after); batches don't nest. Each stroke keeps the coordinate system it was given in; the clip used is the one in force when the batch ends.
+% @summary: Runs a procedure whose dkstroke calls are drawn together, level-major: every stroke's faint level first, then every bright one, so crossing layers of hatching or re-stroked lines stay dark where they cross instead of the second layer's faint level greying the first's core. One pigment per batch (a second colour gets its own batch, drawn after); batches don't nest. Each stroke keeps the coordinate system it was given in, and the region of any dkclip it was made inside; otherwise the clip used is the one in force when the batch ends (a plain clip inside the batch is not kept).
 % @example: 0.12 0.12 0.13 setrgbcolor { 0 6 120 { newpath dup 0 moveto 120 add 120 lineto << /Width 1.2 >> dkstroke } for } dkbatch
 /dkbatch {
     dup dkisproc not { pop dkbatch-needs-a-procedure } if
     userdict /dkBatch known { pop userdict /dkBatch undef dkbatch-cannot-nest } if
-    userdict /dkBatch 8 dict dup /n 0 put put
+    % base: the dkclip region the batch opens in, still in force when it
+    % renders, so its records need not re-clip to it (#312)
+    userdict /dkBatch 8 dict dup /n 0 put
+        dup /base userdict /dkClip known { userdict /dkClip get } { null } ifelse put
+    put
     stopped { userdict /dkBatch undef stop } if
     userdict /dkBatch get /dkBb exch def
     userdict /dkBatch undef
+    /dkZbase dkBb /base get def
     [ 0 1 dkBb /n get 1 sub { dkBb exch get } for ] dkrender
+} bind def
+
+%%SelfTest: dkclip-guards
+%   << /Surface /slate >> dksurface
+%   { 5 dkclip } /dkclip-needs-a-procedure (a number) mustguard
+%   { newpath { } dkclip } /dkclip-needs-a-path (no current path) mustguard
+%   { newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath { 1 0 div } dkclip }
+%   /undefinedresult (an error inside the procedure) mustfail
+%   userdict /dkClip known not
+%   (a failed dkclip leaves no region in force) mustbe
+%   { newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath
+%     { { newpath 0 0 moveto 50 0 lineto << >> dkstroke
+%         1 1 1 setrgbcolor newpath 0 9 moveto 50 9 lineto << >> dkstroke } dkbatch } dkclip }
+%   /dkbatch-mixes-pigments (a batch inside a dkclip that fails) mustguard
+%   userdict /dkClip known not userdict /dkBatch known not and
+%   (and it leaves neither a region nor a batch open) mustbe
+%   { gsave newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath { } dkclip grestore }
+%   (an empty procedure) mustpass
+%%EndSelfTest
+%
+%%SelfTest: dkclip-scopes-its-region
+%   << /Surface /slate >> dksurface
+%   newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath
+%   { /dkta userdict /dkClip get def
+%     newpath 10 10 moveto 20 10 lineto 20 20 lineto closepath
+%     { /dktb userdict /dkClip get def } dkclip
+%     /dktc userdict /dkClip get def } dkclip
+%   dkta dktc eq (an inner dkclip gives the outer region back) mustbe
+%   dktb 0 get dkta eq (the inner region links to the outer one) mustbe
+%   userdict /dkClip known not (and none is left in force after) mustbe
+%   newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath
+%   { /dktd { currentpoint } stopped { true } { pop pop false } ifelse def } dkclip
+%   dktd (the procedure starts with no current path) mustbe
+%   { currentpoint } stopped (and the path is consumed) mustbe
+%%EndSelfTest
+%
+% @kind: Procedure
+% @summary: Clips to the current path, as clip does, while a procedure runs, and keeps that region for every dkstroke the procedure makes inside an open dkbatch: the batch renders those strokes later, level-major with the rest, but each under its own region. So differently clipped strokes (overlapping hatched regions, a shape's interior and its background) can share one batch and keep their crossings dark. The region is the nonzero inside of the path, intersected with any dkclip already in force. Consumes the path; the procedure starts with none, and everything it changes in the graphics state is given back. Takes no rand draws.
+% @example: << /Surface /drawing >> dksurface 0.1 0.1 0.1 setrgbcolor { newpath 20 20 moveto 120 20 lineto 120 120 lineto closepath { 0 4 140 { newpath dup 0 moveto 0 140 rlineto pop << /Width 1.5 >> dkstroke } for } dkclip newpath 60 20 moveto 160 20 lineto 160 120 lineto closepath { 0 4 140 { newpath 0 exch moveto 180 0 rlineto << /Width 1.5 >> dkstroke } for } dkclip } dkbatch
+/dkclip {
+    dup dkisproc not { pop dkclip-needs-a-procedure } if
+    { pathbbox } stopped { pop dkclip-needs-a-path } { pop pop pop pop } ifelse
+    % [parent path]: the path in device space, as operators (so a caller's
+    % own moveto cannot change it), replayed by dkZclipin
+    userdict /dkClip known { userdict /dkClip get } { null } ifelse
+    gsave matrix setmatrix
+    [
+        { systemdict /moveto get }
+        { systemdict /lineto get }
+        { systemdict /curveto get }
+        { systemdict /closepath get }
+        pathforall
+    ] cvx
+    grestore
+    2 array astore
+    userdict /dkClip 3 -1 roll put
+    gsave
+    clip newpath
+    stopped
+    userdict /dkClip get 0 get dup null eq
+        { pop userdict /dkClip undef } { userdict exch /dkClip exch put } ifelse
+    grestore
+    newpath
+    { stop } if
 } bind def
 
 %%SelfTest: dksurface-rejects-malformed-options

@@ -1,0 +1,45 @@
+%!PS-Adobe-3.0
+%%Title: mathkit strict-lint rendering driver (issue #237)
+%%Pages: 5
+%%BoundingBox: 0 0 300 200
+%%SelfTestPage: 300x200
+%%EndComments
+
+% Run with:  pscat --page 300x200 --lint-strict selftest/drivers/mathkit.ps
+% (scripts/selftest.sh does this for every driver in this directory).
+% One showpage per scenario, each wrapped gsave/grestore, nothing left
+% on the stacks (selftest/README.md has the two rules). Every scenario
+% must put ink on its page: a blank page means mathkit built an empty
+% path.
+
+(lib/handscript.ps) run
+(lib/strokeglyphs.ps) run
+(lib/mathkit.ps) run
+
+/pen { 1.4 setlinewidth 1 setlinecap 1 setlinejoin stroke } def
+
+% 1. a fraction with a root
+gsave newpath (x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}) 20 100
+  << /Size 26 /Seed 1 >> mkpath pen grestore
+showpage
+
+% 2. a large operator with limits, and a growing delimiter
+gsave newpath (\\left( \\sum_{i=1}^n a_i \\right)^2) 20 100
+  << /Size 26 /Seed 2 >> mkpath pen grestore
+showpage
+
+% 3. a matrix and cases
+gsave newpath (\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix} \\begin{cases} 1 & x > 0 \\\\ 0 \\end{cases})
+  20 100 << /Size 22 /Seed 3 >> mkpath pen grestore
+showpage
+
+% 4. an aligned derivation, its last line framed
+gsave newpath [ (y &= (x+1)^2) (&= x^2 + 2x + 1) ] 80 150 << /Size 22 /Seed 4 >> mkalign
+  1 get << /Size 22 >> mkframe pen grestore
+showpage
+
+% 5. an underline, an arrow and an oval
+gsave newpath 20 40 200 42 << /Double true >> mkunderline
+  40 80 200 150 << /Bend 30 >> mkarrow
+  200 60 280 120 << /Shape /oval >> mkframe pen grestore
+showpage
