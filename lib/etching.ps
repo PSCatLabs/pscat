@@ -530,6 +530,20 @@ end
     /f null def
   end
 } def
+%%SelfTest: et-tonemap-rejects-malformed-options
+%   % The guards run before the photo is opened, so no file is needed.
+%   { << /Columns 4 >> et-tonemap } /et-tonemap-needs-photo (no /Photo) mustguard
+%   { << /Photo (none.jpg) /Columns 0 >> et-tonemap } /et-tonemap-sizes-must-be-positive (/Columns 0) mustguard
+%   { << /Photo (none.jpg) /Rows -3 >> et-tonemap } /et-tonemap-sizes-must-be-positive (/Rows -3) mustguard
+%   { << /Photo (none.jpg) /Samples 0 >> et-tonemap } /et-tonemap-sizes-must-be-positive (/Samples 0) mustguard
+%   { << /Photo (none.jpg) /Rows 2.5 >> et-tonemap } /et-tonemap-sizes-must-be-integers (/Rows 2.5) mustguard
+%   { << /Photo (none.jpg) /Samples (3) >> et-tonemap } /et-tonemap-sizes-must-be-integers (a string /Samples) mustguard
+%   % A refused call leaves the dict stack as it found it.
+%   countdictstack /ettd0 exch def
+%   { << /Photo (none.jpg) /Columns 0 >> et-tonemap } stopped pop clear
+%   countdictstack ettd0 eq (a refused et-tonemap leaves EtchLayout off the dict stack) mustbe
+%%EndSelfTest
+
 % opts et-tonemap -> rows
 %   << /Photo (path.jpg)   % required: a 1- or 3-component JPEG
 %      /Columns 96         % grid width, cells (default 64)
