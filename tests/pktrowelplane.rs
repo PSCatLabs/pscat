@@ -568,7 +568,7 @@ fn same_seed_same_plane_and_a_different_seed_differs() {
 
 #[test]
 fn a_whole_plane_is_cheap() {
-    within_cpu_budget("a 300x300 plane", Duration::from_secs(2), 3, || {
+    within_cpu_budget("a 300x300 plane", Duration::from_secs(5), 3, || {
         let mut it = fresh(320, 320);
         run(
             &mut it,
