@@ -380,19 +380,16 @@ def gallery_html(m):
                'Below it are specimens and examples, the demo sheets for each library. Every picture is '
                'deterministic: run the same file and you get the same pixels. Many run live in the '
                '<a href="playground.html">playground</a>.</p>' % n_art)
-    out.append("  " + jump_bar("Art", [(c["id"], c["title"], len(ps)) for c, ps in cats]))
-    out.append("  " + jump_bar("Specimens and examples",
-                               [("group-" + g["id"], g["title"],
-                                 sum(s["group"] == g["id"] for s in m["specimens"]))
-                                for g in m["groups"]]))
-    out.append('  <div class="filter" id="filter" hidden>\n    <span class="jump-label">Show art that uses</span>\n'
-               '    <button type="button" data-lib="" aria-pressed="true">everything</button>')
+    out.append("  " + jump_bar("Art", [(c["id"], c["title"], len(ps)) for c, ps in cats]
+                              + [("specimens", "Specimens and examples", n_spec)]))
+    out.append('  <details class="filter" id="filter" hidden>\n    <summary>Filter the art by library</summary>\n'
+               '    <div class="chips">\n      <button type="button" data-lib="" aria-pressed="true">everything</button>')
     for lib, n in chips:
-        out.append('    <button type="button" data-lib="%s" aria-pressed="false">%s <span>%d</span></button>'
+        out.append('      <button type="button" data-lib="%s" aria-pressed="false">%s <span>%d</span></button>'
                    % (attr(lib), html.escape(m["libraries"][lib]["title"]), n))
     if plain:
-        out.append('    <button type="button" data-lib="plain" aria-pressed="false">no library <span>%d</span></button>' % plain)
-    out.append("  </div>")
+        out.append('      <button type="button" data-lib="plain" aria-pressed="false">no library <span>%d</span></button>' % plain)
+    out.append("    </div>\n  </details>")
     out.append('  <div id="art">')
     for c, ps in cats:
         out.append('  <section id="%s">\n  <h2>%s</h2>\n  <p>%s</p>\n  <div class="cards">'
@@ -403,6 +400,9 @@ def gallery_html(m):
     out.append('  <h2 id="specimens">Specimens and examples</h2>\n'
                '  <p>These are the library demo sheets and sample programs. Each group links to the guide '
                'that explains the library behind it.</p>')
+    out.append("  " + jump_bar("Groups", [("group-" + g["id"], g["title"],
+                                          sum(s["group"] == g["id"] for s in m["specimens"]))
+                                         for g in m["groups"]]))
     for g in m["groups"]:
         ss = [s for s in m["specimens"] if s["group"] == g["id"]]
         out.append('  <section id="group-%s">\n  <h3>%s</h3>\n  <p>%s <a href="%s">Read the guide</a>.</p>\n  <div class="cards">'

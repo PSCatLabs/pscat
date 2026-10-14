@@ -162,20 +162,20 @@ a.card .tag {
 .card .body b a:hover { color: var(--accent); }
 .card .meta { padding: 6px 14px 0; font-size: 13px; color: var(--dim); }
 .card[hidden], #art section[hidden] { display: none; }
-section[id] { scroll-margin-top: 72px; }
-section[id] .cards { align-items: start; }
+#art section, #specimens, [id^="group-"] { scroll-margin-top: 72px; }
+#art .cards, [id^="group-"] .cards { align-items: start; }
 
 .jump-label { margin: 18px 0 4px; font: 600 13px var(--mono); color: var(--dim); text-transform: uppercase; letter-spacing: .04em; }
-.jump, .filter { display: flex; flex-wrap: wrap; gap: 8px; }
+.jump { display: flex; flex-wrap: wrap; gap: 8px; }
 .jump a, .filter button {
   display: inline-block; padding: 4px 12px; border-radius: 999px; font-size: 14px;
   background: var(--panel); border: 1px solid var(--edge); color: var(--ink); text-decoration: none;
 }
 .jump a:hover, .filter button:hover { border-color: var(--accent); background: var(--panel); }
 .jump a span, .filter button span { color: var(--dim); margin-left: 4px; }
-.filter { align-items: center; margin-top: 18px; }
+.filter { display: block; margin-top: 18px; }
 .filter[hidden] { display: none; }
-.filter .jump-label { margin: 0 6px 0 0; }
+.filter .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .filter button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
 
 .crumbs { margin: 0 0 14px; color: var(--dim); font-size: 14px; }

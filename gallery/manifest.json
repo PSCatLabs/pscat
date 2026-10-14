@@ -134,7 +134,7 @@
    "render": "gallery/renders/golden_bloom.png",
    "page": "700x700",
    "speed": 150,
-   "alt": "Golden Bloom, a sunflower-like disc of 1,300 florets spiralling out from the centre in warm gold and orange",
+   "alt": "Golden Bloom, a disc of 1,300 glowing dots spiralling out from a small gold centre through orange and red to pink and magenta at the rim, on a dark ground",
    "blurb": "Phyllotaxis: 1,300 florets at the golden angle, spaced like a sunflower.",
    "technique": "Each floret sits at the golden angle (about 137.5 degrees) from the last, at a distance that grows with the square root of its number. That one rule packs the disc evenly and produces the interlocking spirals found in sunflowers and pine cones."
   },
@@ -151,7 +151,7 @@
    "render": "gallery/renders/cathedral_rose.png",
    "page": "700x700",
    "speed": 60,
-   "alt": "Cathedral Rose, a lace-like rosette woven from straight chords in blue and gold on a dark ground",
+   "alt": "Cathedral Rose, a lace-like rosette woven from straight red and gold chords inside a gold ring on a dark purple ground",
    "blurb": "A Maurer rose: straight chords walking a six-petal curve in 71 and 97 degree strides.",
    "technique": "A Maurer rose joins points on the rose curve r = sin 6θ with straight lines, stepping a fixed number of degrees each time. Two walks, one in 71 degree strides and one in 97, are layered; the straight lines alone weave the lace."
   },
@@ -168,9 +168,9 @@
    "render": "gallery/renders/ember_tree.png",
    "page": "620x820",
    "speed": 400,
-   "alt": "Ember Tree, a bare branching tree in silhouette against a banded dusk sky with a glowing sun",
+   "alt": "Ember Tree, a tree with a spreading crown of golden leaf clusters in front of a large glowing sun setting on a dusk sky that fades from deep blue to red",
    "blurb": "Recursive branching from a seeded random generator, a banded dusk sky and layered sun glow.",
-   "technique": "Every branch splits into two shorter ones, with the angle and length of each drawn from a small random-number generator the piece carries itself (a linear congruential generator, so the picture is the same every time). The sky is a stack of colour bands, and the sun is several translucent discs."
+   "technique": "Every branch splits into shorter ones, with the angle and length of each drawn from a small random-number generator the piece carries itself (a linear congruential generator, so the picture is the same every time). The sky is a stack of colour bands and the sun a disc with a layered glow."
   },
   {
    "id": "fern",
@@ -202,7 +202,7 @@
    "render": "gallery/renders/silk_waves.png",
    "page": "700x480",
    "speed": 150,
-   "alt": "Silk Waves, sixty-six glowing threads rippling across the page in layers of blue, violet and pink",
+   "alt": "Silk Waves, sixty-six thin threads rippling across a dark page, shading from violet at the top to teal at the bottom, with a few white threads",
    "blurb": "Sixty-six threads displaced by two interfering sine waves.",
    "technique": "Each thread is one long curve. Two sine waves with different wavelengths push every thread sideways by a different amount along its length, and where the waves reinforce each other the threads gather into silk-like folds."
   },
@@ -219,7 +219,7 @@
    "render": "gallery/renders/frost_mandala.png",
    "page": "700x700",
    "speed": 150,
-   "alt": "Frost Mandala, a six-fold symmetric pattern of overlapping icy circles in pale blue and white",
+   "alt": "Frost Mandala, a six-fold pattern of fine overlapping circle outlines in pale blue and teal on a near-black ground, with faint rays",
    "blurb": "Six-fold circle recursion with an 11 degree twist per generation, over 1,555 circles.",
    "technique": "One circle spawns six smaller circles around its rim, each of which does the same, and every generation is twisted by 11 degrees. The result is a snowflake-like mandala built from more than fifteen hundred circles."
   },
@@ -290,9 +290,9 @@
    "render": "gallery/renders/woven_labyrinth.png",
    "page": "640x640",
    "speed": 400,
-   "alt": "Woven Labyrinth, a quilt of curved black-and-white paths that chain into one flowing maze",
+   "alt": "Woven Labyrinth, a square grid of tiles, each split corner to corner into one orange and one navy triangle, under a title and a double frame",
    "blurb": "Truchet's 1704 two-triangle tile, randomly quarter-turned 256 times, chains into a flowing quilt.",
-   "technique": "Sébastien Truchet's 1704 tile is a square cut along its diagonal into two triangles. Each of 256 copies is turned by a random quarter turn, and because the tile's marks meet at the midpoints of its edges, the single motif chains into continuous paths. It uses artkit's `truchet`."
+   "technique": "Sébastien Truchet's 1704 tile is a square split corner to corner into two contrasting triangles. Each of 256 copies is turned by a random quarter turn, and because the diagonals meet from tile to tile, the single motif chains into a continuous, flowing labyrinth. The program carries its own copy of artkit's `truchet`."
   },
   {
    "id": "infinite_descent",
@@ -307,7 +307,7 @@
    "render": "gallery/renders/infinite_descent.png",
    "page": "640x640",
    "speed": 500,
-   "alt": "Infinite Descent, a disc tiled with heptagons that shrink toward the rim, coloured in rings by generation",
+   "alt": "Infinite Descent, a disc tiled with heptagons that shrink toward the rim, coloured in rings from dark navy at the centre through purple to orange-red at the edge",
    "blurb": "A hyperbolic tessellation: one heptagon reflected across its own edges, four generations deep.",
    "technique": "A single heptagon is reflected across each of its edges, and the copies across theirs, for four generations. The tiles are drawn on the Poincaré disc, where the hyperbolic plane's infinite tiling shrinks toward the rim; 232 tiles are coloured in rings by generation. It uses artkit's `httile`."
   },
@@ -328,9 +328,9 @@
    "render": "gallery/renders/recursive_peaks.png",
    "page": "640x640",
    "speed": 400,
-   "alt": "Recursive Peaks, a night mountain range of faceted low-poly peaks under a starfield with snowflakes floating overhead",
-   "blurb": "A night mountain range built entirely from artkit's fractals: faceted peaks, a carpet-pattern starfield, snowflakes.",
-   "technique": "The peaks are triangles subdivided with `gasket` and shaded by altitude, the sparse starfield comes from `carpet`, and the snowflakes floating overhead are `edgepoly` Koch and quadratic Koch curves. Everything is a fractal from artkit's fractals section."
+   "alt": "Recursive Peaks, three mountains made of nested triangles shaded from white tips to grey, under a night sky of cyan and pink stars and three fractal snowflake outlines",
+   "blurb": "A night mountain range built entirely from artkit's fractals: nested-triangle peaks, a carpet-pattern starfield and snowflake curves.",
+   "technique": "The peaks are triangles subdivided with `gasket` and shaded by altitude, the sparse starfield comes from `carpet`, and the snowflakes overhead are `edgepoly` Koch and quadratic Koch curves. Everything is a fractal from artkit's fractals section."
   },
   {
    "id": "ripple_range",
@@ -348,7 +348,7 @@
    "render": "gallery/renders/ripple_range.png",
    "page": "680x560",
    "speed": 500,
-   "alt": "Ripple Range, a three-dimensional surface of overlapping circular ripples drawn as stacked ridges",
+   "alt": "Ripple Range, a three-dimensional surface drawn as stacked ridges that shade from orange at the back to blue at the front, with a pale dip where the ripples meet",
    "blurb": "Two decaying ripples summed into a height field and drawn as a 3D surface.",
    "technique": "Two ripple sources, each fading with distance, are added into a height field. The surface is swept row by row under `graph.ps`'s `project3` camera, each row a filled ridge that hides the ones behind it, painted back to front (the painter's algorithm)."
   },
@@ -414,7 +414,7 @@
    "render": "gallery/renders/lodestone.png",
    "page": "640x640",
    "speed": 1200,
-   "alt": "Lodestone, hundreds of iron filings curling in concentric loops around a rock like the field lines of a magnet",
+   "alt": "Lodestone, hundreds of short dark strokes (iron filings) curling in loops around a dark rock on a pale tan ground, like the field lines of a magnet",
    "blurb": "1,400 iron filings tracing a flow field around a rock, like the field lines of a magnet.",
    "technique": "Each filing is traced through a flow field with `advect`. The field comes from `curl2` applied to a hand-composed potential, coherent `noise2` texture plus a radial term, whose perpendicular gradient curls a purely radial field into the concentric loops real filings make around a magnet."
   },
@@ -627,7 +627,7 @@
    "render": "gallery/renders/keepin_it_real.png",
    "page": "720x900",
    "speed": 500,
-   "alt": "Keepin' it Real, a shirt front lettered in fat groovy faces with plasma-colour fills, above a typewriter punchline for the back",
+   "alt": "Keepin' it Real, a shirt front lettered twice in fat groovy faces with green, blue and red plasma fills, above a typewriter punchline for the back",
    "blurb": "A recreated shirt front in two groovy faces, filled with GIMP-style plasma, over a typewriter punchline.",
    "technique": "The shirt front is set in both groovy faces, Bagel Fat One (the chosen one) and Chewy, with the same composition, seed and palette, and filled with fillkit's plasma through lettering's `/plasma` treatment. The words `I'm` and `Keepin' it` tuck against the `ea` of `Real` through headline's `hllayout`, and the back's typewriter punchline sits below."
   },
