@@ -165,6 +165,33 @@ fn render_stays_silent_about_lint_when_the_page_is_clean() {
 }
 
 #[test]
+fn render_of_an_errored_program_reports_the_error_once_not_a_lint_verdict() {
+    // Issue #369: `--lint` now prints a `[run-error]` line for a run that
+    // errored; the `PostScript error:` block already says so, so the
+    // `Lint:` block must not repeat it.
+    let mut s = Server::start();
+    initialized(&mut s);
+    let resp = s.call(json!({
+        "jsonrpc": "2.0", "id": 10, "method": "tools/call",
+        "params": { "name": "render_postscript",
+                    "arguments": { "source": "0 0 40 40 rectfill pop showpage",
+                                   "width": 40, "height": 40 } }
+    }));
+    let content = resp["result"]["content"].as_array().expect("content array");
+    let texts: Vec<&str> = content.iter().filter_map(|c| c["text"].as_str()).collect();
+    let err = texts
+        .iter()
+        .find(|t| t.starts_with("PostScript error:"))
+        .expect("an error block");
+    assert!(err.contains("stackunderflow"), "{err}");
+    assert!(!err.contains("run-error"), "{err}");
+    assert!(
+        texts.iter().all(|t| !t.contains("run-error")),
+        "no run-error line in any block: {texts:?}"
+    );
+}
+
+#[test]
 fn render_surfaces_lint_findings_for_a_blank_page() {
     let mut s = Server::start();
     initialized(&mut s);
