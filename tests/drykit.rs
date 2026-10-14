@@ -976,8 +976,8 @@ fn dkclip_keeps_a_strokes_region_in_a_batch() {
 /// `eoclip` ring inside a rotated square, `rectclip` then `initclip`, a
 /// clip the batch ends under (the stroke made before it stays whole), a
 /// plain clip inside a `dkclip` and a `dkclip` inside a plain clip,
-/// `setgstate`, a `save`/`restore` that takes a clip back, and an /After
-/// stroke under a plain clip. Control: with the shadows blocked (a
+/// `setgstate`, a `save`/`restore` that takes a clip back, an /After
+/// stroke under a plain clip, `initgraphics` and `grestoreall`. Control: with the shadows blocked (a
 /// caller's userdict `gsave`), the nested ring is lost.
 #[test]
 fn a_plain_clip_in_a_batch_renders_as_at_once() {
@@ -993,7 +993,7 @@ fn a_plain_clip_in_a_batch_renders_as_at_once() {
     const FREE: &str = "newpath 10 92 moveto 130 92 lineto << /Width 4 >> dkstroke";
     const LIFT: &str = "0.2 0.3 0.25 setrgbcolor newpath 10 50 moveto 130 50 lineto \
                         << /Width 6 /After true >> dkstroke";
-    let cases: [(&str, String); 8] = [
+    let cases: [(&str, String); 10] = [
         (
             "a nested eoclip",
             format!("gsave {RING} {CL} grestore {FREE}"),
@@ -1022,6 +1022,14 @@ fn a_plain_clip_in_a_batch_renders_as_at_once() {
         (
             "an /After stroke under a plain clip",
             format!("{FREE} gsave {RING} {LIFT} grestore"),
+        ),
+        (
+            "initgraphics",
+            format!("gsave {RING} {CL} initgraphics 0.93 0.94 0.90 setrgbcolor {FREE} grestore"),
+        ),
+        (
+            "grestoreall",
+            format!("gsave gsave {RING} {CL} grestoreall {FREE}"),
         ),
     ];
     let differ = |a: &[u8], b: &[u8]| a.chunks(4).zip(b.chunks(4)).filter(|(p, q)| p != q).count();

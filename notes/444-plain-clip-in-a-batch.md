@@ -53,18 +53,29 @@ Limit: a procedure bound before the batch has `clip` resolved to the
 operator, so its clips are not seen; its strokes use the clip in force
 when the batch ends, which is the old behaviour. drykit's own media
 (`dhhatch` etc.) use `dkclip` and are unaffected. pscat has no
-`clipsave`/`cliprestore`; gs does, and they are not shadowed.
+`clipsave`/`cliprestore`; gs does, and they are not shadowed, so in gs a
+`cliprestore` after a stroke captured an inner clip leaves later strokes
+under that inner clip (#454).
+
+Behaviour change: a batch that ends under a clip it made used to render
+every stroke under that clip (the documented rule); now the strokes made
+before the clip stay whole, as they would drawn at once. No committed
+render relies on the old rule.
+
+No specimen: nothing renders differently unless a caller clips inside a
+batch (the same call as #393).
 
 ## Evidence
 
-- `tests/drykit.rs` `a_plain_clip_in_a_batch_renders_as_at_once`: eight
+- `tests/drykit.rs` `a_plain_clip_in_a_batch_renders_as_at_once`: ten
   cases, each byte-identical in a batch to the same program drawn at once:
   an `eoclip` ring nested in a rotated square, `rectclip` then `initclip`,
   a clip the batch ends under (the earlier stroke stays whole), a plain
   clip inside a `dkclip`, a `dkclip` inside a plain clip, `setgstate`,
-  `save`/`restore` (also identical on main: a regression guard), and an
-  `/After` stroke under a plain clip. Against main's drykit the first seven
-  real cases differ by 2,488 to 7,813 pixels. Control in the test: the
+  `save`/`restore` (also identical on main: a regression guard), an
+  `/After` stroke under a plain clip, `initgraphics` and `grestoreall`.
+  Against main's drykit the first eight cases other than `save`/`restore`
+  differ by 2,488 to 7,813 pixels. Control in the test: the
   shadows blocked by a userdict `gsave` lose the ring.
 - `plain_clips_in_a_batch_group_as_dkclip_regions_do`: two overlapping
   hatched regions under `gsave ... clip ... grestore` in one batch are
@@ -80,7 +91,10 @@ when the batch ends, which is the old behaviour. drykit's own media
   (a middle-third clip keeps 0.33 of the ink in pscat and 0.33 in gs;
   main's drykit keeps all of it in both). The nested-ring case renders
   byte-identical in gs as a batch and at once (png16m, 144 dpi); main's
-  drykit differs there. All nine names resolve to gs's systemdict.
+  drykit differs there. All nine names resolve to gs's systemdict as
+  operators (so `bind` inlines them and no shadow calls itself); a gs
+  batch running `rectclip`, `initclip`, `setgstate`, `initgraphics` and
+  `grestoreall` leaves no shadow behind, and a second batch still clips.
 - Identity: see the PR (`scripts/identity_check.sh --loader` for drykit
   and the media libraries, `--files` for the prototypes). No committed
   render makes a plain clip inside a batch, so nothing changes.
