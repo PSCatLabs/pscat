@@ -15,7 +15,7 @@ the 7 (#298) and the 4 (#351):
 
 The advance stays 420, so no line's layout moves. Each copy of the corner draws
 its own jitter, so the corner is a sharp point that shivers slightly, which
-reads as pen pressure and not as a defect (checked at board size, three seeds).
+reads as pen pressure and not as a defect (checked in the board-size renders in the panel).
 
 Variants rendered side by side at 90pt, with and without jitter: the plain
 doubled corner (kept); a straighter diagonal (a lower second-to-last control
