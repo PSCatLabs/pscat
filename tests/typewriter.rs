@@ -90,6 +90,20 @@ fn mean_diff(a: &[u8], b: &[u8]) -> f64 {
         / a.len() as f64
 }
 
+/// The ribbon ink's clip has hundreds of edges per glyph, so the same
+/// strike drawn at another cell (another device origin) can round a pixel
+/// or two differently. Two renders are "the same strike" when at most
+/// this many pixels differ; a different strike moves hundreds.
+const ROUNDING_PX: usize = 12;
+
+fn differing(a: &[u8], b: &[u8]) -> usize {
+    a.iter().zip(b).filter(|(x, y)| x != y).count()
+}
+
+fn nearly_same(a: &[u8], b: &[u8]) -> bool {
+    differing(a, b) <= ROUNDING_PX
+}
+
 const PARAGRAPH: &str = "Dear Sir, In reply to your letter of June 22";
 
 #[test]
@@ -134,28 +148,36 @@ fn repeated_strikes_differ_but_a_machines_quirks_hold() {
     let full = cells(&three_lines("/Machine 2 /Seed 5", text));
     for i in 0..full.len() {
         for j in i + 1..full.len() {
-            assert_ne!(full[i], full[j], "strikes {i} and {j} of `e` are identical");
+            assert!(
+                !nearly_same(&full[i], &full[j]),
+                "strikes {i} and {j} of `e` are identical"
+            );
         }
     }
     // Machine quirks only: every `e` is the same `e`, on every line and in
-    // every document, and another machine's `e` is a different one.
+    // every document, and another machine's `e` is a different one. The
+    // ink's weave is keyed by the key, not the strike, when strikes do not
+    // vary, so this holds with the ink model on (up to rounding).
     let quirks = "/Machine 2 /LineWear 0 /StrikeWear 0";
     let only = cells(&three_lines(&format!("{quirks} /Seed 5"), text));
     assert!(
-        only.iter().all(|c| *c == only[0]),
+        only.iter().all(|c| nearly_same(c, &only[0])),
         "a machine quirk moved within a page"
     );
     assert!(only[0].iter().any(|&p| p > 128), "the box missed the glyph");
     let other_doc = cells(&three_lines(&format!("{quirks} /Seed 6"), text));
-    assert_eq!(
-        only[0], other_doc[0],
+    assert!(
+        nearly_same(&only[0], &other_doc[0]),
         "a new /Seed re-rolled the machine's quirks"
     );
     let other_machine = cells(&three_lines(
         "/Machine 3 /LineWear 0 /StrikeWear 0 /Seed 5",
         text,
     ));
-    assert_ne!(only[0], other_machine[0], "two machines type the same `e`");
+    assert!(
+        !nearly_same(&only[0], &other_machine[0]),
+        "two machines type the same `e`"
+    );
 }
 
 #[test]
@@ -202,10 +224,12 @@ fn an_option_change_mid_line_types_as_a_fresh_block_would() {
         after(&fresh).iter().any(|&p| p > 128),
         "the box missed the glyphs"
     );
-    assert_eq!(
-        after(&changed),
-        after(&fresh),
-        "a mid-line /Wear change kept the line's old variation"
+    // Up to rounding: `show` reaches column 3 by adding advances, the
+    // fresh block by a moveto.
+    let n = differing(&after(&changed), &after(&fresh));
+    assert!(
+        n <= ROUNDING_PX,
+        "a mid-line /Wear change kept the line's old variation ({n} px differ)"
     );
 }
 
@@ -258,14 +282,15 @@ fn the_callers_rand_stream_is_untouched() {
 
 #[test]
 fn zero_variation_is_the_plain_courier_prime_face() {
-    // /Wear 0 removes every variation; /Ribbon 0 the ink spread. What is
+    // /Wear 0 removes every variation, /InkModel false the ribbon's weave
+    // and /Ribbon 0 the ink spread. What is
     // left must be Courier Prime itself, drawn here from the TrueType file
     // through pscat's own font machinery, squeezed to pica as the font is.
     // Each character is placed on the pica grid: the TTF's own advance is
     // 1228/2048 em, 0.07% short of Courier's 600 units, which a whole line
     // of `show` would accumulate.
     let zero = ink(&render(&format!(
-        "36 84 moveto << /Wear 0 /Ribbon 0 >> tw-setup ({PARAGRAPH}) show"
+        "36 84 moveto << /Wear 0 /Ribbon 0 /InkModel false >> tw-setup ({PARAGRAPH}) show"
     )));
     let ttf = ink(&render(&format!(
         "0.13 0.13 0.15 setrgbcolor \
@@ -273,7 +298,7 @@ fn zero_variation_is_the_plain_courier_prime_face() {
          /i 0 def ({PARAGRAPH}) {{ 36 i 7.2 mul add 84 moveto ( ) dup 0 4 -1 roll put show /i i 1 add def }} forall"
     )));
     let worn = ink(&render(&format!(
-        "36 84 moveto << /Wear 0 >> tw-setup ({PARAGRAPH}) show"
+        "36 84 moveto << /Wear 0 /InkModel false >> tw-setup ({PARAGRAPH}) show"
     )));
     let same = mean_diff(&zero, &ttf);
     let spread = mean_diff(&worn, &ttf);
@@ -289,9 +314,88 @@ fn zero_variation_is_the_plain_courier_prime_face() {
     );
     // And with no variation, the seeds have nothing to vary.
     let seeded = ink(&render(&format!(
-        "36 84 moveto << /Wear 0 /Ribbon 0 /Machine 9 /Seed 9 >> tw-setup ({PARAGRAPH}) show"
+        "36 84 moveto << /Wear 0 /Ribbon 0 /InkModel false /Machine 9 /Seed 9 >> tw-setup ({PARAGRAPH}) show"
     )));
     assert_eq!(zero, seeded, "seeds moved a glyph at /Wear 0");
+}
+
+/// Total darkness of a page.
+fn mass(img: &[u8]) -> f64 {
+    img.iter().map(|&p| f64::from(p)).sum()
+}
+
+/// The ribbon ink (#212) leaves the weave's voids open inside the type
+/// face, where flat ink is solid, and a drier ribbon leaves more of them.
+#[test]
+fn the_weave_opens_voids_and_a_dry_ribbon_opens_more() {
+    let line = |opts: &str| {
+        ink(&render(&format!(
+            "36 84 moveto << /Machine 1 /Seed 1 {opts} >> tw-setup ({PARAGRAPH}) show"
+        )))
+    };
+    // the share of flat ink's solid pixels that the weave leaves light
+    let voids = |ribbon: f64| {
+        let flat = line(&format!("/Ribbon {ribbon} /InkModel false"));
+        let inked = line(&format!("/Ribbon {ribbon}"));
+        let solid = flat.iter().filter(|&&p| p >= 200).count();
+        let open = flat
+            .iter()
+            .zip(&inked)
+            .filter(|&(&f, &i)| f >= 200 && i < 128)
+            .count();
+        open as f64 / solid as f64
+    };
+    let wet = voids(0.7);
+    let dry = voids(0.15);
+    eprintln!("voids in the type face: wet ribbon {wet:.3}, dry ribbon {dry:.3}");
+    assert!(
+        (0.01..0.25).contains(&wet),
+        "a wet ribbon left {wet:.3} of the face open"
+    );
+    assert!(
+        dry > 1.5 * wet,
+        "a dry ribbon ({dry:.3}) is not patchier than a wet one ({wet:.3})"
+    );
+}
+
+/// A clogged key's counter fills (TYPEWRITER.md section 6 step 4).
+#[test]
+fn a_clogged_counter_fills_with_ink() {
+    // Machine 10's `o` is clogged (clog fraction 1.0); machine 1's is not.
+    // The counter's middle, at the cell's centre and half the x-height up.
+    let middle = |machine: i32| -> f64 {
+        let img = ink(&render(&format!(
+            "36 84 moveto << /Machine {machine} /Seed 1 /LineWear 0 /StrikeWear 0 >> tw-setup (o) show"
+        )));
+        let w = width_px();
+        let (cx, cy) = (X0 + CELL / 2, Y0 - 13);
+        let mut sum = 0.0;
+        for y in cy - 2..=cy + 2 {
+            for x in cx - 2..=cx + 2 {
+                sum += f64::from(img[y * w + x]);
+            }
+        }
+        sum / 25.0
+    };
+    let clogged = middle(10);
+    let clean = middle(1);
+    eprintln!("counter darkness: clogged {clogged:.1}, clean {clean:.1}");
+    assert!(
+        clogged > 100.0,
+        "machine 10's `o` did not fill: {clogged:.1}"
+    );
+    assert!(
+        clean < 20.0,
+        "machine 1's clean `o` has ink in its counter: {clean:.1}"
+    );
+    // With the ink model off the counter stays open, as #211 drew it.
+    let flat = mass(&ink(&render(
+        "36 84 moveto << /Machine 10 /Seed 1 /LineWear 0 /StrikeWear 0 /InkModel false >> tw-setup (o) show",
+    )));
+    let inked = mass(&ink(&render(
+        "36 84 moveto << /Machine 10 /Seed 1 /LineWear 0 /StrikeWear 0 >> tw-setup (o) show",
+    )));
+    assert!(inked > flat, "the clogged counter added no ink");
 }
 
 #[test]
@@ -374,8 +478,8 @@ fn ghostscript_types_the_same_page_and_caches_no_glyph() {
     let strikes = cells(&gs_full);
     for i in 0..strikes.len() {
         for j in i + 1..strikes.len() {
-            assert_ne!(
-                strikes[i], strikes[j],
+            assert!(
+                !nearly_same(&strikes[i], &strikes[j]),
                 "gs replayed strike {i} as strike {j}"
             );
         }
@@ -385,7 +489,7 @@ fn ghostscript_types_the_same_page_and_caches_no_glyph() {
         &driver("/Machine 2 /Seed 5 /LineWear 0 /StrikeWear 0"),
     ));
     assert!(
-        quirks.iter().all(|c| *c == quirks[0]),
+        quirks.iter().all(|c| nearly_same(c, &quirks[0])),
         "gs moved a machine quirk"
     );
 

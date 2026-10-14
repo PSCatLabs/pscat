@@ -143,7 +143,7 @@ the source of truth:
   yet (e.g. one long compile or one big edit in progress) — also
   refresh right before starting the quality-gate build below, and
   again if any single step within it runs long.
-- Update the notes fragment (`notes/`), `HANDOFF.md` and `README.md` on the branch as
+- Update the notes fragment (`notes/`), `HANDOFF.md` and the matching `docs/guides/` page on the branch as
   capabilities land, per AGENTS.md — not as an afterthought.
 
 Refresh the heartbeat before this build (it's often the single
