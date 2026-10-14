@@ -59,8 +59,12 @@
 % * Layering. Wax slides on wax, so a colour laid over another (/Over)
 %   catches less and the colour beneath shows through its gaps.
 % * Tip wear (Y6). /Worn is how blunt the crayon is: a new point has a
-%   narrow dense core in a wide ragged rim; a worn flat face presses evenly
-%   across. /Wear widens the contact along each stroke, drykit's meaning.
+%   narrow dense core in a wide ragged rim; a worn flat face is wider and
+%   presses evenly across. /Wear widens the contact along each stroke,
+%   drykit's meaning.
+% * One deposit level. Wax is opaque and leaves no dust, so a crayon has
+%   none of chalk's tone ramp (drykit's M4): each of the core and the rim
+%   is a single drykit level. That is also half the catches.
 %
 % dycrayon draws each subpath as its own pair of dkstroke calls (the touch
 % profile depends on the subpath's own turns), all inside one dkbatch, so
@@ -311,13 +315,20 @@ userdict /dystate 2 put
 % (Worn 0) and a worn flat (Worn 1); and how wide the dense core is, as a
 % fraction of /Width, at the same two ends.
 % @internal
-/dyKrim0 0.22 def
+/dyKrim0 0.16 def
 % @internal
-/dyKrim1 0.10 def
+/dyKrim1 0.06 def
 % @internal
 /dyKcore0 0.5 def
 % @internal
 /dyKcore1 0.85 def
+
+% Touch added to every crayon level. dkstroke's faint level sits 0.12
+% above its touch (DRYMEDIA.md 3.3), so a crayon's single level, raised by
+% the same, covers the tooth a two-level dkstroke at the same /Touch
+% covers: /Touch keeps drykit's meaning.
+% @internal
+/dyKlift 0.12 def
 
 % Touch added per pass after the first, and taken away when wax slides on
 % an earlier colour (/Over).
@@ -455,18 +466,20 @@ userdict /dystate 2 put
     dyKs 7907 add dysrand
     /dyKp1 dyrand 360 mul def
     /dyKp2 dyrand 360 mul def
-    /dyKbonus dyKpass 1 sub dyKpassstep mul dyKhasover { dyKresist sub } if def
+    /dyKbonus dyKpass 1 sub dyKpassstep mul dyKhasover { dyKresist sub } if dyKlift add def
     /dyKrimoff dyKrim0 dyKrim1 dyKrim0 sub dyKworn mul add neg def
+    % a new point draws 0.8 Width, a worn flat 1.2 Width
+    /dyKww dyKw 0.8 0.4 dyKworn mul add mul def
     % Rim, then core: both in the open batch, so level-major together.
     dyKP dyKpath
-    << /Width dyKw /Touch dyKrimoff false dyKtouch
+    << /Width dyKww /Touch dyKrimoff false dyKtouch
        /Bands 16 /Levels 1 /Halo 0 /Streak dyKstreak /Strength dyKstrength
        /Wear dyKwear /Under dyKunder
        dyKhasseed { /Seed dyKs } if >> dkstroke
     dyKP dyKpath
-    << /Width dyKw dyKcore0 dyKcore1 dyKcore0 sub dyKworn mul add mul
+    << /Width dyKww dyKcore0 dyKcore1 dyKcore0 sub dyKworn mul add mul
        /Touch 0 true dyKtouch
-       /Bands 16 /Levels dyKhasover { 1 } { 2 } ifelse /Halo 0
+       /Bands 16 /Levels 1 /Halo 0
        /Streak dyKstreak /Strength dyKstrength
        /Wear dyKwear /Under dyKunder
        dyKhasseed { /Seed dyKs 1000003 add } if >> dkstroke
@@ -610,16 +623,16 @@ userdict /dystate 2 put
 % @kind: Procedure
 % @summary: Draws the current path in wax crayon, in the current colour, on the drykit surface (dypaper is crayon paper): the wax catches only on the paper's tooth, leaving white specks that streak along the stroke, and a rounded tip gives a dense core with a ragged rim. A child's pressure profile (a press on landing, a fade, an uneven wander) and wax build-up where the stroke turns or reverses are on by default. Repeated passes (/Pass) build coverage and a colour laid over another (/Over) lets it show through; draw passes or several calls of one colour inside one dkbatch. Consumes the current path like fill; takes no rand draws from the caller's stream.
 % @example: << >> dypaper /blue dycolor newpath 40 40 moveto 120 80 lineto 200 50 lineto << /Width 6 /Touch 0.7 >> dycrayon
-% @param: /Width [points] Contact width of the crayon; must be > 0 (default 6)
+% @param: /Width [points] Contact width of a half-worn crayon (/Worn 0.5); must be > 0 (default 6)
 % @param: /Touch [0..1] Pressure against the tooth, drykit's meaning: low catches only the highest tooth, 1 is solid. A procedure {t -> touch}, t = 0..1 along each subpath, is a base profile that the landing, fade, wander and build-up are added to (default 0.75)
 % @param: /Landing [0..1] Extra touch at the middle of the tip where each stroke lands, fading over its first two Widths (default 0.08)
 % @param: /Fade [0..1] How much the touch falls from the start of each stroke to its end, as the hand lifts (default 0.12)
 % @param: /Uneven [0..1] How far the touch wanders along each stroke, a child's uneven pressure (default 0.06)
 % @param: /Buildup [0..1] Extra touch at the middle of the tip where the stroke turns or reverses, as the hand slows and wax builds up; a full reversal gets all of it (default 0.15)
-% @param: /Worn [0..1] How blunt the crayon is: 0 is a new point (a narrow dense core in a wide ragged rim), 1 a worn flat face that presses evenly across its width (default 0.4)
+% @param: /Worn [0..1] How blunt the crayon is: 0 is a new point, a line 0.8 /Width wide with a narrow dense core in a ragged rim; 1 is a worn flat face, 1.2 /Width wide, pressing evenly across (default 0.4)
 % @param: /Wear [fraction of /Width] How much wider the contact gets from the start of each subpath to its end as the tip wears, drykit's meaning, 0..4 (default 0.1)
 % @param: /Pass [count] Which pass over the same area this is, 1..8: each later pass presses wax into more of the tooth. Draw the passes inside one dkbatch (default 1)
-% @param: /Over [rgb array] The crayon colour this stroke is laid over. Wax slides on wax, so the stroke catches less and the colour beneath shows through its gaps; it is drawn at one level, so no part of it is tinted toward the colour beneath (default unset: laid on the paper)
+% @param: /Over [rgb array] The crayon colour this stroke is laid over. Wax slides on wax, so the stroke catches less and the colour beneath shows through its gaps. It is drykit's /Under for the stroke: where the stroke runs past the colour onto bare paper it is tinted toward it by 1 - /Strength (default unset: laid on the paper)
 % @param: /Streak [ratio] How much each tooth knuckle is stretched along the stroke, drykit's meaning, 1..4: skipped valleys read as streaks (default 2.2)
 % @param: /Strength [0..1] How strongly the wax reads against the paper, drykit's meaning (default 0.95)
 % @param: /Seed [integer] Seed for the stroke's own randomness (the wander, drykit's tool side); subpath i uses Seed + i. Leaves the caller's rand stream untouched (default from each subpath's first point on the canvas)
@@ -727,6 +740,7 @@ userdict /dystate 2 put
     /dyWfs frnd def
     /dyWfh frnd def
     dyslotseed dysrand
+    /dyWp3 dyrand 360 mul def
     /dyWn dyWP length 2 idiv def
     dyWn 0 gt {
         % the offset line
@@ -751,9 +765,13 @@ userdict /dystate 2 put
             dyWtl 0 gt {
                 /dyWtx dyWtx dyWtl div def /dyWty dyWty dyWtl div def
             } { /dyWtx 1 def /dyWty 0 def } ifelse
+            % Two waves at lambda and 0.43 lambda, their sum swelling and
+            % shrinking under a third, slower one, so the wander never
+            % settles into a regular ripple.
             /dyWo
                 dyWp1 dyWs dyWlam div 360 mul add sin 0.65 mul
                 dyWp2 dyWs dyWlam 0.43 mul div 360 mul add sin 0.35 mul add
+                dyWp3 dyWs dyWlam 2.7 mul div 360 mul add sin 0.45 mul 0.75 add mul
                 dyWamp mul
                 dyrand 2 mul 1 sub dyWtrem mul add
             def
