@@ -905,6 +905,10 @@ renders eight examples in both and compares block-downsampled output).
   self-seeded scene without re-rolling its marks, log `rrand` at each
   painting step and restore it with `srand` on replay
   (`gallery/alpine_lake.ps`'s `lkdo`, issue #191).
+  An element that paints only in loaded colours and the inherited colour
+  needs none of that: `gallery/evening_stream.ps` (#187) pulls its whole
+  far wood into the stream in one directional pull. Don't mirror an element
+  that already holds a directional `pkwet` (its 64x nesting budget).
 - **Loaded colours: `pkbroad`, `pktrowel`, `pkfan` and `pkdab` adopt them, the rest do
   not yet** (issue #183, slices L1-L5b; design in `docs/PAINT_LOADING.md`).
   `lib/paintkit.ps`'s `pu-` section (`puparse`, `puat`, `puflips`, `puwet`,

@@ -998,6 +998,16 @@ tools, the order, the settings that matter, the usual failure with its fix, a
 complete snippet and a rendered thumbnail. `tests/landscape_cookbook.rs` runs
 every snippet, so they keep rendering.
 
+*Evening Stream* (`gallery/evening_stream.ps`, issue #187) is the second
+landscape, painted with the round-2 tools on one shared `pkcanvas`: a
+sunset sky from a broad brush loaded with two neighbouring sky colours,
+clouds scrubbed in with `pkscumblein` and lit from below, a backlit wood
+whose reflection is pulled down whole by one directional `pkwet` (it
+paints only in loaded colours, which `pkwet` grades), autumn trees on a
+loaded `pkdab` with warm highlight and cool shadow hues, evergreens on a
+fan loaded dark and lit with `/Light`, a `pkpull` fall, and
+`pkzigzag` light lines that catch on the canvas weave.
+
 `pkwash` (issue #47) is the watercolor medium, and the one preset here
 that needs something from the interpreter rather than only from
 PostScript: it fills the current path as a *translucent* wash. Two new
