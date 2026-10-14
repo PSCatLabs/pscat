@@ -12,8 +12,9 @@ reached `mkdelim`'s last branch, which took one ASCII byte, so the error was
 - `mkdelim`: a byte of 128 or more goes to the new `mkdelimutf8`, which
   accepts a character whose glyph name is in `mkdelimglyphs`: the ten
   symbols that grow (the parens, brackets, braces, `bar`, `angleleft`,
-  `angleright`, `dblbar`). So `⟨ ⟩ 〈 〉` give the angle brackets and `‖ ∥`
-  the double bar. This is an explicit set, not `sggrownames`, which also
+  `angleright`, `dblbar`). So U+27E8/27E9 and U+2329/232A give the angle
+  brackets, and U+2016 `‖` and U+2225 `∥` the double bar. This is an explicit
+  set, not `sggrownames`, which also
   holds `/summation /integral /radical ...`; `\left∑` stays refused.
 - Anything else is `mk-unsupported-delimiter:<whole character>`, for example
   `mk-unsupported-delimiter:∮`. The `\` then non-letter branch (`\left\⟨`)
