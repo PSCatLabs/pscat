@@ -19,3 +19,4 @@ lib/drychalk.ps
 lib/hatchkit.ps
 lib/strokeglyphs.ps
 lib/drycrayon.ps
+lib/drycharcoal.ps
