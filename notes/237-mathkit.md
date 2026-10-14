@@ -108,6 +108,13 @@ The psart skill has the table.
 
   All of it scales with `/Irregular`. At 0 the layout is TeX's, and only
   the glyph `/Jitter` remains.
+- **Primes are superscripts.** `'` is TeX's `^{\prime}`. Primes collect
+  in the superscript of the atom before them, so `f''` has two and `x'_i`
+  still subscripts x. `f'^2` merges into `f^{\prime 2}`, and `x^2'` is a
+  double superscript, as in TeX. strokeglyphs draws `/prime` already
+  raised for text, so the prime atom is lowered by 420 units and lands at
+  cap height in script size. The first cut drew `'` as a full-size
+  ordinary glyph; Codex's round 1 caught it.
 - **Seeds.** With no `/Seed`, the layout seed is a hash of the TeX string,
   so `mkmetrics` agrees with `mkpath` without one. The glyph jitter adds
   the device-space position, as `sgpath` does, so one formula written
