@@ -610,6 +610,17 @@ renders eight examples in both and compares block-downsampled output).
    written twice is a sharp corner, and the midpoint rule never passes
    through interior points, so check new glyphs on a `/Jitter 0` render.
    `notes/236-strokeglyphs.md` lists where it departs from the design.
+   Chalk (#235) shipped `lib/drychalk.ps`. `dcchalk` is the chalk preset
+   over `dkstroke`. `dcboard` dresses a slate or green board: haze,
+   `/Ghost` writing, swipes, wipes, ledge dust and a tray. It was tuned
+   against the reference photos (`notes/235-drychalk.md` has the numbers,
+   `docs/drymedia/chalk_compare_235.jpg` the side-by-side).
+   Ghostscript gotcha: **don't leave scratch names in userdict.** With
+   artkit, paintkit and drykit loaded, userdict is about 80% full, and gs's
+   open-hash lookups slow every operator once it fills further. drychalk's
+   public procedures run inside a private dict (`dcscratch begin ... end`)
+   (#307). drykit's `/Fallout` is slow in gs (#308), so drychalk draws its
+   own dust.
    #239 shipped `lib/drycrayon.ps` (`dy-`): `dycrayon` (a core and a rim
    `dkstroke` per subpath, one wax level each), `dypaper`, the crayon box
    (`dybox`, `dycolors`, `dycolor`) and six child motions with paintkit's
