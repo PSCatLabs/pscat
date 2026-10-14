@@ -158,7 +158,11 @@ edge that paint never has; `pkbrushedge` feathers it the way a painter does,
 with short strokes dragged across the boundary: the current colour (the
 mass's) pulled out over what is behind it, and the colour behind (`/Under`:
 a colour, a pigment name, or a procedure `x y -> r g b` for a graded sky)
-cut back in, sparser, so the two interlock. The current path is the edge.
+cut back in, sparser, so the two interlock. `/Mass` replaces the current
+colour with the same three forms, so a mass lit along its length (a meadow
+brighter toward the glow) pulls its own gradient out to its edge: a
+procedure is asked once per outward stroke, at the stroke's start. The
+current path is the edge.
 A subpath closed with `closepath` is a mass outline, and the mass itself
 (the path filled nonzero, as `fill` would) decides which side is out, so a
 hole is brushed into the hole and a mirrored reflection needs nothing

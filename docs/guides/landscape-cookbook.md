@@ -710,7 +710,7 @@ grestore
 **Settings.**
 - Brushed earth: dozens of broad strokes of two or three browns and dark greens, `/Width 14 /Charge 0.6 /Depletion 0.9 /Edge 0.2 /Grain 20`, **clipped to the bank's path** so they never leave it.
 - The lip catches the light: one `pkoil` stroke along the top edge in a lighter earth, `/Width 6 /Ridges 8 /Highlight 0.3`; it is a thin accent, so the brushed edge in step 4 breaks it with the rest of the rim.
-- The edge: `bankpath << /Under LAKE /Slant -30 /Length 12 >> pkbrushedge` in the bank's colour. `/Under` is what is really behind the bank (a procedure `x y -> r g b` for graded water); `/Slant` tilts the strokes the way the bank was dragged; `/Crisp 0.3` leaves stretches of the rim untouched, which a near bank in strong light can take.
+- The edge: `bankpath << /Under LAKE /Slant -30 /Length 12 >> pkbrushedge` in the bank's colour. `/Under` is what is really behind the bank (a procedure `x y -> r g b` for graded water); `/Slant` tilts the strokes the way the bank was dragged; `/Crisp 0.3` leaves stretches of the rim untouched, which a near bank in strong light can take. `/Mass` (the same forms as `/Under`) is the colour pulled out when it is not one colour: a procedure `x y -> r g b` for a bank or meadow graded along its length.
 - The bank is the nearest thing in the picture, so it can be nearly black; keep its value far from the water's. Only the grass tips catch the last light in Evening Stream.
 
 **Ruled edges.** A filled mass leaves a ruled vector edge, the one thing that gives away a digital bank. `pkbrushedge` breaks it in one call: the mass's colour pulled out across the edge and the colour behind cut back in, so they interlock (issue #347; specimen `docs/paintkit_brushedge_demo.png`). Give it the closed outline you filled (holes and mirrored reflections work) or just the visible crest left open, whose out side is `/Outward` (default up). Bushes and grass along the rim still help, as things growing there, not as the only fix.
@@ -719,6 +719,7 @@ grestore
 - *The earth bleeds past the bank.* No clip.
 - *A bank that looks cut out.* The edge is bare; brush it with `pkbrushedge`, then add bushes or grass where something grows.
 - *A pale band just inside the edge.* The inward cuts are too dense: keep `/InSpacing` at 2 or more.
+- *Spikes of the wrong colour along a graded mass.* One pull-out colour cannot match a mass lit toward one end: give `/Mass` the procedure that graded the fill (issue #426).
 
 ```postscript
 % recipe: bank
