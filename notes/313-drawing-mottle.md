@@ -64,14 +64,11 @@ luma is 207.2 before and 208.1 after: the tone is unchanged and the grain
 is a little finer and more even. Smudged cells in the specimen show a few
 more white flecks.
 
-**Timings** (CPU `user`, `--dpi 144`, base then head, back to back; load 3 to 14,
-so they are noisy). pscat: Lincoln 2x 23.6 s then 23.4 s; drycharcoal specimen
-4.5 s then 4.5 s; drykit specimen 4.7 and 5.0 s then 5.5 and 4.7 s. gs
-(`-dNOSAFER`, libraries loaded with `run`, so slower than the concatenated
-`-dSAFER` runs in notes/241): drycharcoal specimen 12.6 and 13.0 s then 11.8
-and 16.1 s; drykit specimen 9.7 s then 9.6 s. The mottle's scale has no cost
-of its own. The gs drycharcoal figure is over the 10 s advisory budget on base
-too, in this setup.
+**Timings** (pscat only, CPU `user`, `--dpi 144`, base then head, back to back;
+the machine was shared and loaded, so they are noisy and only a guard):
+Lincoln 2x 23.6 s then 23.4 s; drycharcoal specimen 4.5 s then 4.5 s; drykit
+specimen 4.7 and 5.0 s then 5.5 and 4.7 s. The mottle's scale has no cost of
+its own. Ghostscript was used only to check that the drykit specimen renders.
 
 **Derived images.** `docs/drymedia/lincoln_compare.png` was rebuilt with its
 script. `docs/drycharcoal_refs_compare.png` (#241) has crops of the old
