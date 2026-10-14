@@ -79,7 +79,7 @@
 % @internal
 /dhisnum {
     type dup /integertype eq exch /realtype eq or
-} def
+} bind def
 
 % (prefix) (suffix) -   (raises the error named prefix-suffix)
 % @internal
@@ -90,14 +90,14 @@
     dup dhep length (-) putinterval
     dup dhep length 1 add dhes putinterval
     cvn cvx exec
-} def
+} bind def
 
 % dict key default -> value   (the default when the key is absent)
 % @internal
 /dhget {
     /dhgd exch def
     2 copy known { get } { pop pop /dhgd load } ifelse
-} def
+} bind def
 
 % dict key default lo hi (prefix) (suffix) -> number   (a number in lo..hi)
 % @internal
@@ -106,7 +106,7 @@
     dhget
     dup dhisnum not { pop dhnp dhns dherr } if
     dup dhnl lt 1 index dhnh gt or { pop dhnp dhns dherr } if
-} def
+} bind def
 
 % value (prefix) (suffix) -> [r g b]   (an rgb array of three numbers 0..1)
 % @internal
@@ -120,13 +120,13 @@
         dup 0 lt exch 1 gt or { dhnp dhns dherr } if
     } forall
     aload pop 3 array astore
-} def
+} bind def
 
 % (prefix) -   (raises prefix-cannot-run-inside-a-dkbatch when one is open)
 % @internal
 /dhnobatch {
     userdict /dkBatch known { (cannot-run-inside-a-dkbatch) dherr } { pop } ifelse
-} def
+} bind def
 
 % Each medium's default /Grade.
 % @internal
@@ -167,14 +167,14 @@
             /Streak 1.2 /Levels 2 /Halo 0.7
         >>
     } if
-} def
+} bind def
 
 % t -> width multiplier   (a stick's square landing and flicked lift:
 % full width until the last 15% of the stroke, then thinning to 0.35)
 % @internal
 /dhtail {
     dup 0.85 gt { 0.85 sub 0.15 div 0.65 mul 1 exch sub } { pop 1 } ifelse
-} def
+} bind def
 
 % opts (prefix) -> preset-dict   (validates /Medium and /Grade)
 % @internal
@@ -185,7 +185,7 @@
     dhgrades /dhmm load known not { dhmp (unknown-medium) dherr } if
     dhmo /Grade dhgrades /dhmm load get 0 1 dhmp (grade-must-be-0-to-1) dhnum
     /dhmm load exch dhpreset
-} def
+} bind def
 
 % preset opts [keys] -> dict   (the preset, then every caller key not
 % listed in [keys] on top of it: the caller wins)
@@ -199,7 +199,7 @@
         dhxk { /dhxn load eq { /dhxskip true def } if } forall
         dhxskip not { dup /dhxn load /dhxv load put } if
     } forall
-} def
+} bind def
 
 %%SelfTest: dhstroke-rejects-malformed-options
 %   << /Surface /drawing >> dksurface
@@ -234,7 +234,7 @@
     dhso (dhstroke) dhmedium
     dhso [ /Medium /Grade ] dhmerge
     dkstroke
-} def
+} bind def
 
 % --- hatching ---------------------------------------------------------
 
@@ -272,13 +272,13 @@
         ifelse
     } ifelse
     dhhk dhhL div sub dhhL mul
-} def
+} bind def
 
 % a b -> hypot
 % @internal
 /dhhypot {
     dup mul exch dup mul add sqrt
-} def
+} bind def
 
 % x0 y0 x1 y1 q i -   (one hatch line, of quantized value q, split into
 % hand strokes; i is the line's index within its layer)
@@ -328,7 +328,7 @@
             /dhhn dhhn 1 add def
         } loop
     } if
-} def
+} bind def
 
 % -   (the /Mark hook: the path hatch collected is current, hatchwidths
 % holds each segment's quantized value)
@@ -345,7 +345,7 @@
             dhhqs dhhii get dhhii dhhline
         } if
     } for
-} def
+} bind def
 
 %%SelfTest: dhhatch-rejects-malformed-options
 %   << /Surface /drawing >> dksurface
@@ -498,7 +498,7 @@
     } ifelse
     dhhfail { stop } if
     dhhbad { dhhatch-value-procedure-must-return-a-number } if
-} def
+} bind def
 
 % --- smudging, lifting, construction lines ------------------------------
 
@@ -508,7 +508,7 @@
     dup 0.15 lt { 0.15 div 0.5 mul 0.5 add } {
         dup 0.85 gt { 1 exch sub 0.15 div 0.5 mul 0.5 add } { pop 1 } ifelse
     } ifelse
-} def
+} bind def
 
 % a b t -> [a + (b - a) t]   (rgb arrays)
 % @internal
@@ -516,7 +516,7 @@
     /dhlt exch def /dhlb exch def /dhla exch def
     [ 0 1 2 { /dhlk exch def
         dhla dhlk get dhlb dhlk get dhla dhlk get sub dhlt mul add } for ]
-} def
+} bind def
 
 %%SelfTest: dhsmudge-dhlift-dhsketch-guards
 %   << /Surface /drawing >> dksurface
@@ -582,7 +582,7 @@
     { dkstroke } stopped { grestore newpath stop } if
     grestore
     newpath
-} def
+} bind def
 
 % @kind: Procedure
 % @summary: Lifts charcoal along the current path with an eraser: paper colour drawn through the tooth's peaks first, over the tone beneath (/Under, by default the current colour). A kneaded eraser leaves a soft, speckled grey highlight that never gets back to paper white; a hard eraser cuts a narrow, crisper line. Consumes the path; cannot run inside a dkbatch. Other dkstroke keys pass through. Takes no rand draws from the caller's stream.
@@ -615,7 +615,7 @@
     { dkstroke } stopped { grestore newpath stop } if
     grestore
     newpath
-} def
+} bind def
 
 % @kind: Procedure
 % @summary: Draws the current path as faint construction lines: a light, hard vine charcoal line laid down several times, each pass shifted and turned a little, as an artist's layout sketch is, so later strokes cover it where they cross. In the current colour; may run inside a dkbatch of the same colour. Other dkstroke keys pass through. Consumes the path; takes no rand draws from the caller's stream.
@@ -665,11 +665,11 @@
     }
     userdict /dkBatch known { exec } { dkbatch } ifelse
     newpath
-} def
+} bind def
 
 % a -> max(a, 1)   (a divisor that cannot be zero)
 % @internal
 /dhmaxr {
     dup 1 lt { pop 1 } if
-} def
+} bind def
 %%EOF
