@@ -28,7 +28,10 @@ the stick's contact patch meets raised tooth.
 - **`{ ... } dkclip`** clips to the current path while the procedure
   runs, and the strokes it makes keep that region inside a batch. So
   differently clipped strokes, such as overlapping hatched regions, can
-  share one batch.
+  share one batch. A plain `clip` (or `eoclip`, `rectclip`) made inside
+  the batch is kept the same way: `{ gsave region clip ... grestore }`
+  works, nested and even-odd clips included. Only a clip made inside a
+  procedure you bound before the batch is not seen.
 - **`/After true`** on a `dkstroke` inside a batch draws that stroke on
   its own after the batch has rendered, in call order, in its own colour.
   It is how an eraser or a smudge can be drawn from inside a batch, over

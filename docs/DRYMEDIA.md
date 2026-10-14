@@ -282,14 +282,31 @@ and the replay stops at the region the batch itself was opened in, which is
 still in force then. Records under different regions never share a catch
 (`dkZsame` compares the region by identity), but records under one region
 still do. A record made outside any `dkclip` stores no region and renders
-exactly as before. A plain `clip` inside a batch is still not kept: pscat's
-`clippath` gives back only the newest of nested clips, or a rectangle or a
-mask trace of their intersection, and drops the eoclip rule, so a generic
-capture through it would not be exact. Since #394 pscat has Level 2 `gstate`
-objects, which do bring a clip back exactly; drykit adopting them needs a
-cheap identity test per clip, not per stroke (#444). A stroke under a `dkclip` region in a batch
+exactly as before. A stroke under a `dkclip` region in a batch
 renders byte-identically to the same stroke drawn at once under that clip
 (`tests/drykit.rs`).
+
+**A plain clip inside a batch (#444, as built).** pscat's `clippath` can't
+hand back a nested or `eoclip` clip exactly, but a Level 2 `gstate` (#394)
+holds the clip chain itself. A gstate per `dkstroke` would give every
+record a fresh object, and `dkZsame` could never group them. So while a
+batch's procedure runs, `dkbatch` puts shadows of `clip`, `eoclip`,
+`rectclip`, `initclip`, `setgstate`, `initgraphics`, `gsave`, `grestore`
+and `grestoreall` into userdict. A clip change only marks the batch dirty;
+the next `dkstroke` takes one `gstate`, and every stroke after it shares
+that object until the clip changes again. `gsave`/`grestore` keep a stack
+of the entry, so `gsave ... clip ... grestore` gives the outer one back.
+At render time a gstate record is put back with `setgstate` (which
+replaces the clip, so the batch's own clip is not applied twice), then the
+record's colour and CTM. A batch that ends still under a clip it made
+renders in the state it opened in, so strokes made before that clip stay
+whole. The shadows install only when all nine names resolve to systemdict
+(a caller's own `gsave` in userdict leaves the old rule), and a procedure
+bound before the batch reaches the operators directly: its clip, as before,
+is the one in force when the batch ends. Two overlapping regions hatched
+under plain clips in one batch take the same 6 catches as the same regions
+in `dkclip` calls (96 with a fresh gstate per stroke), and render
+byte-identically to them (`notes/444-plain-clip-in-a-batch.md`).
 
 Each pigment gets its own batch, in drawing order. If colours B and A shared
 a batch, B's dim level would be drawn under A's core. Real wax or charcoal

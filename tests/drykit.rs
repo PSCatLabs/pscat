@@ -953,15 +953,178 @@ fn dkclip_keeps_a_strokes_region_in_a_batch() {
         moved > 20,
         "moving the region half a point changed only {moved} pixels: the check cannot see the clip"
     );
+    // A plain clip inside the batch is dropped when drykit cannot shadow
+    // the clip operators (#444: here a caller's own `gsave` in userdict),
+    // so the comparison can see a lost clip.
     let plain = data(&board(
         140,
         100,
         2.0,
-        &format!("{{ gsave {REGION} clip newpath {CLIPPED} grestore {FREE} }} dkbatch"),
+        &format!(
+            "userdict /gsave systemdict /gsave get put \
+             {{ gsave {REGION} clip newpath {CLIPPED} grestore {FREE} }} dkbatch"
+        ),
     ));
     assert!(
         differ(&at_once(REGION), &plain) > 200,
-        "a plain clip inside a batch was kept: the batch already did what dkclip is for"
+        "an unshadowed plain clip inside a batch was kept"
+    );
+}
+
+/// #444: a plain clip made inside a batch is kept, exactly. Each case's
+/// batch is byte-identical to the same program drawn at once: a nested
+/// `eoclip` ring inside a rotated square, `rectclip` then `initclip`, a
+/// clip the batch ends under (the stroke made before it stays whole), a
+/// plain clip inside a `dkclip` and a `dkclip` inside a plain clip,
+/// `setgstate`, a `save`/`restore` that takes a clip back, and an /After
+/// stroke under a plain clip. Control: with the shadows blocked (a
+/// caller's userdict `gsave`), the nested ring is lost.
+#[test]
+fn a_plain_clip_in_a_batch_renders_as_at_once() {
+    // ring nested in a rotated square: two clip links, one even-odd
+    const RING: &str = "matrix currentmatrix 70 50 translate 20 rotate \
+                        newpath -40 -30 moveto 40 -30 lineto 40 30 lineto -40 30 lineto closepath clip \
+                        newpath 0 0 28 0 360 arc closepath 0 0 12 0 360 arc closepath eoclip \
+                        setmatrix newpath";
+    const OVAL: &str = "matrix currentmatrix 60 45 translate 1.4 1 scale \
+                        newpath 0 0 30 0 360 arc closepath setmatrix";
+    const CL: &str = "newpath 10 30 moveto 130 70 lineto 20 75 moveto 120 20 lineto \
+                      << /Width 5 /Levels 2 /Halo 1 /Lanes 2 /Fallout 0.6 /Drift 3 >> dkstroke";
+    const FREE: &str = "newpath 10 92 moveto 130 92 lineto << /Width 4 >> dkstroke";
+    const LIFT: &str = "0.2 0.3 0.25 setrgbcolor newpath 10 50 moveto 130 50 lineto \
+                        << /Width 6 /After true >> dkstroke";
+    let cases: [(&str, String); 8] = [
+        (
+            "a nested eoclip",
+            format!("gsave {RING} {CL} grestore {FREE}"),
+        ),
+        (
+            "rectclip, then initclip",
+            format!("gsave 30 20 70 50 rectclip {CL} initclip {FREE} grestore"),
+        ),
+        ("a clip the batch ends under", format!("{FREE} {RING} {CL}")),
+        (
+            "a plain clip inside a dkclip",
+            format!("{OVAL} {{ gsave {RING} {CL} grestore }} dkclip {FREE}"),
+        ),
+        (
+            "a dkclip inside a plain clip",
+            format!("gsave {RING} {OVAL} {{ {CL} }} dkclip grestore {FREE}"),
+        ),
+        (
+            "setgstate",
+            format!("/dktg gstate def gsave {RING} {CL} dktg setgstate {FREE} grestore"),
+        ),
+        (
+            "save and restore",
+            format!("save {RING} restore {CL} {FREE}"),
+        ),
+        (
+            "an /After stroke under a plain clip",
+            format!("{FREE} gsave {RING} {LIFT} grestore"),
+        ),
+    ];
+    let differ = |a: &[u8], b: &[u8]| a.chunks(4).zip(b.chunks(4)).filter(|(p, q)| p != q).count();
+    let at_once = |body: &str| {
+        // dkclip with no batch open is plain clip-and-run
+        data(&board(140, 100, 2.0, body))
+    };
+    for (what, body) in &cases {
+        let batched = data(&board(140, 100, 2.0, &format!("{{ {body} }} dkbatch")));
+        let d = differ(&at_once(body), &batched);
+        assert_eq!(
+            d, 0,
+            "{what}: the batch differs from drawing at once in {d} pixels"
+        );
+    }
+    let blocked = data(&board(
+        140,
+        100,
+        2.0,
+        &format!(
+            "userdict /gsave systemdict /gsave get put {{ {} }} dkbatch",
+            cases[0].1
+        ),
+    ));
+    let lost = differ(&at_once(&cases[0].1), &blocked);
+    assert!(
+        lost > 200,
+        "with the shadows blocked only {lost} pixels changed: the check cannot see the clip"
+    );
+}
+
+/// #444: strokes under one plain clip share one gstate, so they group in
+/// the batch exactly as strokes inside one `dkclip` do: two overlapping
+/// regions, each hatched under a plain `gsave ... clip ... grestore`, in
+/// one batch, are byte-identical to the same regions as dkclip calls.
+#[test]
+fn plain_clips_in_a_batch_group_as_dkclip_regions_do() {
+    const OPTS: &str = "/Width 3 /Touch 0.75 /Halo 1.5 /Levels 2";
+    const RA: &str = "newpath 10 10 moveto 90 10 lineto 90 90 lineto 10 90 lineto closepath";
+    const RB: &str = "newpath 50 10 moveto 130 10 lineto 130 90 lineto 50 90 lineto closepath";
+    let hatch = |dx: i32| {
+        format!("0 6 140 {{ newpath dup 0 moveto {dx} 100 rlineto pop << {OPTS} >> dkstroke }} for")
+    };
+    let (ha, hb) = (hatch(40), hatch(-40));
+    let plain = data(&board(
+        140,
+        100,
+        2.0,
+        &format!("{{ gsave {RA} clip {ha} grestore gsave {RB} clip {hb} grestore }} dkbatch"),
+    ));
+    let dk = data(&board(
+        140,
+        100,
+        2.0,
+        &format!("{{ {RA} {{ {ha} }} dkclip {RB} {{ {hb} }} dkclip }} dkbatch"),
+    ));
+    let differ = |a: &[u8], b: &[u8]| a.chunks(4).zip(b.chunks(4)).filter(|(p, q)| p != q).count();
+    let d = differ(&plain, &dk);
+    assert_eq!(
+        d, 0,
+        "plain clips grouped differently from dkclip regions: {d} pixels"
+    );
+    // Grouping does not show in the pixels (a catch shared or not lands the
+    // same ink), so count the catches: the plain clips take as many as the
+    // dkclip regions, and a fresh gstate per stroke (each stroke under its
+    // own clip of the same region) takes more, since none can share one.
+    let per_stroke = |r: &str, dx: i32| {
+        format!(
+            "0 6 140 {{ gsave {r} clip newpath dup 0 moveto {dx} 100 rlineto pop \
+             << {OPTS} >> dkstroke grestore }} for"
+        )
+    };
+    let catches = |body: &str| {
+        let mut it = board(
+            140,
+            100,
+            2.0,
+            &format!(
+                "/dktn 0 def /dktcatch /dkcatch load def \
+                 /dkcatch {{ /dktn dktn 1 add def dktcatch }} def {body} dktn"
+            ),
+        );
+        it.pop_int().expect("catch count")
+    };
+    let n_plain = catches(&format!(
+        "{{ gsave {RA} clip {ha} grestore gsave {RB} clip {hb} grestore }} dkbatch"
+    ));
+    let n_dk = catches(&format!(
+        "{{ {RA} {{ {ha} }} dkclip {RB} {{ {hb} }} dkclip }} dkbatch"
+    ));
+    let n_fresh = catches(&format!(
+        "{{ {} {} }} dkbatch",
+        per_stroke(RA, 40),
+        per_stroke(RB, -40)
+    ));
+    eprintln!("catches: plain {n_plain}, dkclip {n_dk}, a gstate per stroke {n_fresh}");
+    assert_eq!(
+        n_plain, n_dk,
+        "plain clips took a different number of catches"
+    );
+    assert!(
+        n_fresh > 2 * n_plain,
+        "a gstate per stroke took {n_fresh} catches against {n_plain}: grouping is not seen"
     );
 }
 
@@ -1294,4 +1457,39 @@ fn a_curvy_run_at_long_knuckles_fits_its_chunks() {
         inked(&it).iter().filter(|&&i| i).count() > 1000,
         "the curvy run drew almost nothing"
     );
+}
+
+/// #444 under Ghostscript: the same middle third as above, but as a plain
+/// `gsave ... clip ... grestore` inside the batch. gs has gstate objects
+/// too, and drykit's shadows install there (every clip operator is in its
+/// systemdict), so the stroke keeps about a third of its ink in both.
+/// Runs locally only.
+#[test]
+fn ghostscript_keeps_a_plain_clip_in_a_batch() {
+    if !gs_available() {
+        eprintln!("skipping gs plain-clip check: gs not installed");
+        return;
+    }
+    const STROKE: &str = "newpath 0 20 moveto 120 20 lineto \
+                          << /Width 16 /Touch 0.9 /Levels 1 /Seed 7 >> dkstroke";
+    let clipped = format!(
+        "{{ gsave newpath 40 0 moveto 80 0 lineto 80 40 lineto 40 40 lineto closepath clip \
+         {STROKE} grestore }} dkbatch"
+    );
+    let surface = "<< /Surface /drawing /Seed 2 >> dksurface ";
+    let pscat = |body: &str| {
+        let ink = inked(&render(120, 40, 2.0, &format!("{surface}{body}")));
+        ink.iter().filter(|&&i| i).count() as f64 / ink.len() as f64
+    };
+    let gs_ink = |body: &str| gs_band_ink("", &format!("{surface}{body}"), (240, 80), 144);
+    let (p_full, p_clip) = (pscat(&format!("{{ {STROKE} }} dkbatch")), pscat(&clipped));
+    let (g_full, g_clip) = (gs_ink(&format!("{{ {STROKE} }} dkbatch")), gs_ink(&clipped));
+    eprintln!("ink: pscat {p_clip:.3} of {p_full:.3}, gs {g_clip:.3} of {g_full:.3}");
+    for (what, clip, full) in [("pscat", p_clip, p_full), ("gs", g_clip, g_full)] {
+        let r = clip / full;
+        assert!(
+            r > 0.25 && r < 0.42,
+            "{what}: the plain clip kept {r:.2} of the stroke's ink, not about a third"
+        );
+    }
 }
