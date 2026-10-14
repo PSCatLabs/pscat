@@ -85,8 +85,9 @@ case, restored stream, guard and untouched stream).
 **Not changed / follow-ups.** `lib/artkit.ps` untouched (#110 is editing it).
 `printkit` does not forward `/Mark`; #241 calls `hatch` itself.
 
-**Byte identity, measured.** Merge-base `5d5bad6` (the branch was rebased onto it
-first), a base worktree there, the same binary for both trees, each render run
+**Byte identity, measured.** Base `5d5bad6` (the merge-base when the comparison ran; the branch was then
+rebased onto `c22b262`, whose diff against `5d5bad6` does not touch
+`lib/hatchkit.ps`, so the comparison stands), a base worktree there, the same binary for both trees, each render run
 from its own tree root, PNG only (SVG is nondeterministic, #261). Twelve files:
 `examples/{etching_demo,halftone,hatching,printkit,stippling,surfacekit}.ps`,
 `gallery/{nightfall_triptych,out_of_register,varsity_backs}.ps`,
@@ -96,8 +97,13 @@ that does, 28 PNGs: 0 differ under `cmp`, all exit codes 0. `scripts/identity_ch
 covers paintkit loaders only, so this was a hand loop.
 Negative control: changing the candidate-centering divisor in `hatch` (`2 div`
 to `3 div` for `/hkslack`) made `examples/hatching.ps`, `examples/printkit.ps` and
-`gallery/nightfall_triptych.ps` differ, then reverted. `/Mark { stroke }` control:
-`examples/hatching.ps` with `/Mark { stroke }` injected into every `hatch` call
-renders differently (about 24 percent of the raw PNG bytes; the density panel's
-widths and the caller linewidth, as designed). `examples/printkit.ps` builds its
-options dict inside printkit, so it has no call to inject into.
+`gallery/nightfall_triptych.ps` differ, then reverted. `/Mark` controls, on `examples/hatching.ps` with the hook injected into every
+`hatch` call, decoded to pixels and split by panel (the panels set the caller's
+linewidth to 0.75, while the flat and cross-hatch panels pass `/Width 1`): with
+`/Mark { 1 setlinewidth stroke }` the flat and cross-hatch panels are pixel-identical
+to the default render (0 pixels differ) and only the `/Density` panel differs
+(27612 pixels: its per-run widths, which `hatchwidths` carries); with plain
+`/Mark { stroke }` all three panels differ (21049, 27507, 32845 pixels), because
+the hook then strokes at the caller's 0.75 instead of 1. That is design call 2.
+`examples/printkit.ps` builds its options dict inside printkit, so it has no call to
+inject into.

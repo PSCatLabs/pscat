@@ -140,7 +140,9 @@
 %           draws are exactly those of a call without /Mark. It runs even
 %           when no line survived (an empty path, an empty
 %           `hatchwidths`). Must be a procedure, else
-%           `hatch-mark-must-be-a-procedure`; `null` means unset.
+%           `hatch-mark-must-be-a-procedure`; `null` means unset. An error
+%           raised inside `proc` leaves `hatch`'s gsave open, as an error
+%           inside /Density does (the seed restore has already happened).
 %   /Seed n  seeds the sweep with `n srand`, restoring the caller's own
 %           random stream afterward via `rrand` — the same convention
 %           `lib/artkit.ps`'s `scatter` documents, including the same
