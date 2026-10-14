@@ -7,6 +7,8 @@
 //! pairing and not only the exit codes. The base tree is a temp directory
 //! holding a copy of one tracked example that loads no library.
 
+#![cfg(unix)]
+
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -232,5 +234,12 @@ fn the_positional_binary_still_renders_both_trees() {
     assert!(text(&o).contains("identical  examples/sierpinski.ps"));
     // One binary served both trees, each from its own working directory.
     assert!(lines(&su.base_log).is_empty());
-    assert_eq!(lines(&su.head_log).len(), 2);
+    let cwds = lines(&su.head_log);
+    let base_tree = su.base_tree.canonicalize().unwrap().display().to_string();
+    let head_tree = root().canonicalize().unwrap().display().to_string();
+    assert_eq!(cwds.len(), 2, "{cwds:?}");
+    assert!(
+        cwds.contains(&base_tree) && cwds.contains(&head_tree),
+        "{cwds:?}"
+    );
 }

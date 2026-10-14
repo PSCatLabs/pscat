@@ -26,9 +26,10 @@ What changed:
   the head build overwrite `target/release/pscat`.
 - `scripts/bench_compare.sh BASE_BIN HEAD_BIN FILE [N]`: interleaved rounds of
   base, head and base-again (the identical-binary control), child CPU time via
-  perl `times`, min and median per arm. 33 lines, so it stayed in. It prints
-  only at the end; CPU ticks are 10 ms, so use a file that takes a few hundred
-  ms or more.
+  perl `times`, min and median per arm. 37 lines, so it stayed in. Each round
+  goes to stderr as it finishes, so a bench stopped early leaves a partial
+  sample; CPU ticks are 10 ms, so use a file that takes a few hundred ms or
+  more.
 - `tests/identity_check.rs`: wrapper "binaries" log their cwd and exec the real
   pscat, so the tests assert the pairing (the base wrapper only ever ran in the
   base tree), the control differing (exit 0), the control not differing (exit
