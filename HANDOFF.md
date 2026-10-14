@@ -639,6 +639,16 @@ renders eight examples in both and compares block-downsampled output).
    `userdict /dkBatch` (pinned by `drycrayon-drykit-contract`). Passes and
    layering are declared (`/Pass`, `/Over`), because drykit can't read the
    page. `notes/239-drycrayon.md` has the tuning numbers against the crops.
+   #242 shipped the charcoal gallery piece, `gallery/lincoln_charcoal.ps`
+   (*Study after Berger, 1864*), and `lib/etching.ps`'s `et-tonemap`, which
+   returns a photo as a grid of darkness for any piece that wants a
+   photo's tones as data. The piece passes its tone map to `dhhatch` as a
+   `/Value` procedure. It renders in about 23 s in pscat and 22 s in gs, against
+   a 60 s budget. Ghostscript needs `--permit-file-read` for the libraries and
+   the JPEG. `notes/242-lincoln-charcoal.md` lists what the drycharcoal tools
+   could not do: a smudge or lift shows its own outline wherever the
+   hatching over it is light, and the hatching is crisper than real
+   stumped charcoal.
 5. Watercolor (issue #47, gated on the architecture spike in issue
    #46): read `docs/WATERCOLOR.md` before starting — it recommends a
    small `alpha: f32` field on `GraphicsState` (already prototyped as

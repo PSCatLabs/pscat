@@ -432,6 +432,9 @@ interpreter already had every building block this needed. Draws with ordinary
 alike. `scripts/photo_etch.sh` wraps it end to end (photo path in, PNG/
 SVG/PDF out — no PostScript required); `examples/etching_demo.ps` is a
 specimen sheet.
+`et-tonemap` (issue #242) returns the photo's tones as data instead: a
+grid of box-averaged darkness, row 0 at the top. The charcoal portrait
+`gallery/lincoln_charcoal.ps` hatches to such a grid.
 
 ```postscript
 (lib/etching.ps) run

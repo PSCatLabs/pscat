@@ -40,6 +40,7 @@ overridden per line through the font's scratch dict.
 | Keepin' it Real | `keepin_it_real.ps` | (issue #147) The recreated shirt front set in both groovy faces, Bagel Fat One (chosen) and Chewy, same composition, seed and palette, filled with fillkit's GIMP-style plasma through lettering's `/plasma` treatment; `I'm` / `Keepin' it` tuck against the `ea` of `Real` via headline's `hllayout`, and the back's typewriter punchline sits below |
 | Varsity Backs | `varsity_backs.ps` | (issue #167) Two team jerseys seen from behind — cardinal-and-gold and navy-and-white — each carrying `lib/jersey.ps`'s arched name over a large number with the classic layered lettering: a white or gold fill, a thin contrasting inner outline and a dark outer one, tracked capitals on the arch. The garment itself (mesh fabric, rib collar, yoke, side panels, sleeve and hem stripes, size tag, hanger) is specimen art drawn here, not library code: the library sizes the lettering for a print rectangle, which is the area between the yoke and the hem stripes |
 | Alpine Lake | `alpine_lake.ps` | (issue #118, epic #112's capstone) A snow-capped range over a still lake, painted back to front from the epic's brushes with no landscape helper: a criss-cross sky laid out by `pkcrisscross` (#184) and painted with `pkbroad` (#115), `pkspray` clouds and mist softened into the paint beneath by `pkwet` (#113), `pktrowel` snow and shadow planes clipped to each ridge (#111), mist lifted up the near range's foot by a directional `pkwet` (#181), a far forest tapped in with `pkdab` (#117), `pkfan` evergreens (#114), and `pkliner` trunks, grass and water lines (#116). The reflection replays the same self-seeded marks under `1 -1 scale`, one single-colour part at a time, each pulled straight down with directional `pkwet` (#191) and then grazed across. No alpha, so Ghostscript paints the same scene |
+| Study after Berger, 1864 | `lincoln_charcoal.ps` | (issue #242, epic #232) An art student's charcoal portrait of Abraham Lincoln after Anthony Berger's 1864 photograph (`references/lincoln_berger_1864.jpg`). `lib/etching.ps`'s `et-tonemap` reads the photo into a 240 × 300 grid of darkness, and drycharcoal (#241) draws to it in a student's order on drykit's drawing paper: faint `dhsketch` construction lines (head oval, centre line, brow/eye/nose/mouth lines, shoulders), `dhsmudge` stump tone inside the dark masses, `dhhatch` to the photo's values (fine and short in the face, finer still at the features, looser vine strokes in the coat), compressed-charcoal and pencil accents at the brows, eyes, nose and mouth, and hard-eraser `dhlift` streaks in the hair and on the lapel. The coat and the ground fade out raggedly, as in a real study. Renders in Ghostscript with `-dSAFER --permit-file-read=lib/ --permit-file-read=gallery/references/lincoln_berger_1864.jpg` |
 
 **Nightfall, Three Cuts departs from `printkit.ps`'s siblings' own precedent — hatchkit/stipplekit/surfacekit/halftonekit each shipped specimen-only, "a primitive gets a specimen, not a gallery card."** Issue #52 explicitly asked for one gallery composition in addition to the specimen sheet, so this is a deliberate one-off, not drift; the next sibling-file author should read it as that, not as a new default.
 
@@ -56,6 +57,18 @@ ground. The result is an interpretation, not a traced or photorealistic
 copy: `pkoil` supplies the wet planes and bristle ridges, while `pkdry`
 softens selected contour passages like a fan brush dragged through wet
 paint.
+
+`references/lincoln_berger_1864.jpg` is a 480 × 600 greyscale crop of
+the head and shoulders from Anthony Berger's photograph of Abraham
+Lincoln, taken at Mathew Brady's Washington gallery on 9 February 1864
+(Ostendorf O-91). Source: the Library of Congress print, via Wikimedia
+Commons, [File:Abraham Lincoln O-91 by Berger, 1864.png](https://commons.wikimedia.org/wiki/File:Abraham_Lincoln_O-91_by_Berger,_1864.png).
+It is in the **public domain** (a US work published before 1929, and
+marked public domain by Commons and the LoC). The Commons/LoC description
+names it the model for the five-dollar bill's portrait. **Study after
+Berger, 1864** reads its tones from this file; `docs/drymedia/lincoln_compare.png`
+sets the two side by side over real student studies from the #233
+reference board.
 
 ## Viewing the gallery
 

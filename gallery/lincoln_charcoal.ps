@@ -1,0 +1,325 @@
+%!PS-Adobe-3.0
+%%Title: Study after Berger, 1864 — an art student's charcoal portrait of Lincoln
+%%Creator: pscat drycharcoal (issue #242)
+%%BoundingBox: 0 0 480 600
+%%EndComments
+
+% A third-year student's charcoal study after Anthony Berger's photograph
+% of Abraham Lincoln, taken at Mathew Brady's Washington gallery on
+% 9 February 1864 (Ostendorf O-91; the Library of Congress print, public
+% domain; the Commons/LoC description names it the model for the
+% five-dollar bill's portrait).
+%
+% Reference: gallery/references/lincoln_berger_1864.jpg, a 480 x 600
+% greyscale crop of the head and shoulders. The page is the same 480 x
+% 600, one point per photo pixel, so every coordinate below was measured
+% off that crop (x right, y DOWN from the top, as the image reads) and
+% the P helpers flip it to PostScript's y.
+%
+% The tonal map comes from the photo itself: lib/etching.ps's et-tonemap
+% reads the JPEG into a grid of darkness, and the hatching and smudging
+% below ask that grid how dark each place is. The drawing goes down the
+% way a student lays it in:
+%   1. faint construction lines: the head's oval, the centre line, the
+%      brow, eye, nose and mouth lines, the shoulders;
+%   2. block-in of the big masses (hair, beard, coat) with the stump;
+%   3. hatching to the photo's values, short and fine in the face,
+%      longer and looser in the coat, fading out toward the edges;
+%   4. accents in compressed charcoal and pencil at the features;
+%   5. highlights lifted with an eraser, in streaks through the hair and
+%      along the lapel.
+% The clothes and the ground are left unfinished, as in a real study.
+%
+% Renders in pscat as-is (run from the repo root). Ghostscript refuses the
+% file reads under -dSAFER: grant them by the paths as written,
+%   gs -dSAFER --permit-file-read=lib/ \
+%      --permit-file-read=gallery/references/lincoln_berger_1864.jpg \
+%      -sDEVICE=png16m -r144 -g960x1200 -o out.png gallery/lincoln_charcoal.ps
+
+(lib/artkit.ps) run
+(lib/paintkit.ps) run
+(lib/drykit.ps) run
+(lib/hatchkit.ps) run
+(lib/drycharcoal.ps) run
+(lib/etching.ps) run
+
+% --- the photo's tonal map --------------------------------------------------
+% 240 x 300 cells of 2 x 2 points, row 0 at the top of the photo.
+/lcTM << /Photo (gallery/references/lincoln_berger_1864.jpg)
+         /Columns 240 /Rows 300 /Samples 2 >> et-tonemap def
+
+% gx gy -> darkness of one cell, clamped to the grid
+/lccell {
+    /lcgy exch def /lcgx exch def
+    lcgx 0 lt { /lcgx 0 def } if lcgx 239 gt { /lcgx 239 def } if
+    lcgy 0 lt { /lcgy 0 def } if lcgy 299 gt { /lcgy 299 def } if
+    lcTM lcgy get lcgx get
+} bind def
+
+% x y -> darkness in [0,1] at a page point, bilinear between cell centres
+/lctone {
+    600 exch sub 2 div 0.5 sub /lcy exch def
+    2 div 0.5 sub /lcx exch def
+    /lcx0 lcx floor def /lcy0 lcy floor def
+    /lcfx lcx lcx0 sub def /lcfy lcy lcy0 sub def
+    /lcx0 lcx0 cvi def /lcy0 lcy0 cvi def
+    lcx0 lcy0 lccell 1 lcfx sub mul lcx0 1 add lcy0 lccell lcfx mul add
+    1 lcfy sub mul
+    lcx0 lcy0 1 add lccell 1 lcfx sub mul lcx0 1 add lcy0 1 add lccell lcfx mul add
+    lcfy mul add
+} bind def
+
+% v lo hi -> v remapped so lo..hi spans 0..1, clamped
+/lcramp {
+    /lchi exch def /lclo exch def
+    lclo sub lchi lclo sub div
+    dup 0 lt { pop 0 } if dup 1 gt { pop 1 } if
+} bind def
+
+% x y -> a slow ragged wobble in about -1..1, so faded edges are uneven
+/lcwob {
+    /lcwy exch def /lcwx exch def
+    lcwx 0.043 mul lcwy 0.021 mul add 57.3 mul sin
+    lcwy 0.067 mul lcwx 0.017 mul sub 57.3 mul sin mul
+    lcwx 0.11 mul lcwy 0.09 mul add 57.3 mul sin 0.35 mul add
+} bind def
+
+% x y -> how finished the drawing is here, 1 at the head, fading to 0 at
+% the loose edges: an ellipse round the head and a wider, softer one
+% round the shoulders, whose lower half fades toward the page's foot.
+% The fade's edge is ragged (lcwob), as a hand stops unevenly.
+/lcmask {
+    /lcmy exch def /lcmx exch def
+    /lcmw lcmx lcmy lcwob 0.12 mul def
+    % head: centre (248, 205) in photo space, radii 118 x 160
+    lcmx 248 sub 118 div dup mul
+    600 lcmy sub 205 sub 160 div dup mul add sqrt lcmw add
+    0.86 1.08 lcramp 1 exch sub
+    % shoulders: centre (245, 440), radii 245 x 170
+    lcmx 245 sub 245 div dup mul
+    600 lcmy sub 440 sub 170 div dup mul add sqrt lcmw 2 mul add
+    0.45 1.0 lcramp 1 exch sub
+    600 lcmy sub 455 545 lcramp 1 exch sub lcmw 1.5 mul add
+    dup 0 lt { pop 0 } if dup 1 gt { pop 1 } if mul
+    0.9 mul
+    2 copy lt { exch } if pop
+} bind def
+
+% x y -> 1 in the middle of the face (eyes, nose, mouth), fading to 0
+% round it: there the hatching is finer, so the features keep their shape
+/lcfeat {
+    /lcfy exch def /lcfx exch def
+    lcfx 256 sub 72 div dup mul
+    600 lcfy sub 238 sub 62 div dup mul add sqrt
+    0.75 1.0 lcramp 1 exch sub
+} bind def
+
+% x y -> hatching value: the photo's darkness, stretched so the skin
+% stays light and hair, beard and coat go dark, times the finish mask,
+% less the middle of the face, which the fine hatching draws
+/lcvalue {
+    2 copy lcmask /lcm exch def
+    lcm 0.01 lt { pop pop 0 } {
+        2 copy lcfeat 1 exch sub /lcm exch lcm mul def
+        lctone 0.3 0.78 lcramp lcm mul
+    } ifelse
+} bind def
+
+% x y -> the fine hatching's value in the middle of the face
+/lcfine {
+    2 copy lcfeat /lcm exch def
+    lcm 0.01 lt { pop pop 0 } { lctone 0.33 0.72 lcramp lcm mul } ifelse
+} bind def
+
+% x y -> value of the darkest accents only (hair, beard, eye sockets, tie)
+/lcdeep {
+    2 copy lcmask /lcm exch def
+    lcm 0.01 lt { pop pop 0 } { lctone 0.6 0.9 lcramp lcm mul } ifelse
+} bind def
+
+% i j -> a repeatable pseudo-random number in [0,1) (no rand draws, so
+% pscat and Ghostscript agree)
+/lchash {
+    78.233 mul exch 12.9898 mul add 57.2958 mul sin 43758.5453 mul
+    dup floor sub
+} bind def
+
+% --- photo-space path helpers ----------------------------------------------
+/P { 600 exch sub } bind def                 % py -> page y
+/pm { P moveto } bind def                    % px py pm -
+/pl { P lineto } bind def                    % px py pl -
+/pc { P 6 -2 roll P 6 -2 roll P 6 -2 roll curveto } bind def
+% a closed polygon from [x0 y0 x1 y1 ...] in photo space
+/ppoly {
+    /lcpp exch def
+    newpath lcpp 0 get lcpp 1 get pm
+    2 2 lcpp length 1 sub { /lci exch def lcpp lci get lcpp lci 1 add get pl } for
+    closepath
+} bind def
+% an open polyline from the same kind of array
+/pline {
+    /lcpp exch def
+    newpath lcpp 0 get lcpp 1 get pm
+    2 2 lcpp length 1 sub { /lci exch def lcpp lci get lcpp lci 1 add get pl } for
+} bind def
+% cx cy rx ry -> an ellipse path in photo space
+/pellipse {
+    /lcery exch def /lcerx exch def /lcecy exch def /lcecx exch def
+    newpath
+    0 10 360 {
+        /lca exch def
+        lcecx lca cos lcerx mul add lcecy lca sin lcery mul add
+        lca 0 eq { pm } { pl } ifelse
+    } for
+    closepath
+} bind def
+
+% --- paper ------------------------------------------------------------------
+<< /Surface /drawing /Relief 0.35 /Seed 1864 >> dksurface
+userdict /dkGround get aload pop setrgbcolor
+0 0 480 600 rectfill
+/charcoal { 0.11 0.10 0.10 setrgbcolor } bind def
+charcoal
+
+% --- 1. construction lines --------------------------------------------------
+gsave
+    % the head's oval and the centre line, tilted with the head
+    248 210 92 140 pellipse << /Passes 2 /Seed 11 >> dhsketch
+    [ 262 60 252 360 ] pline << /Passes 2 /Seed 12 >> dhsketch
+    % brow, eye, nose and mouth lines
+    [ 160 186 340 183 ] pline << /Passes 2 /Seed 13 >> dhsketch
+    [ 168 204 336 201 ] pline << /Passes 1 /Seed 14 >> dhsketch
+    [ 200 252 318 249 ] pline << /Passes 2 /Seed 15 >> dhsketch
+    [ 205 279 318 276 ] pline << /Passes 1 /Seed 16 >> dhsketch
+    [ 200 342 300 340 ] pline << /Passes 1 /Seed 17 >> dhsketch
+    % shoulders and the neck's plumb line
+    [ 30 445 165 352 255 345 330 352 470 430 ] pline << /Passes 2 /Seed 18 /Shift 2 >> dhsketch
+    [ 252 345 248 590 ] pline << /Passes 1 /Seed 19 >> dhsketch
+grestore
+
+% --- 2. block-in with the stump ----------------------------------------------
+% Stump strokes on a jittered grid, only inside the dark masses (hair,
+% beard, coat: where the photo is darker than its grey backdrop) and
+% only where the drawing is well finished, so the tone sits under the
+% hatching rather than floating on the paper. Each takes its tone from
+% the photo at its middle. In the hair they follow the hair's sweep; in
+% the coat they lie along the shoulders' slope.
+0 1 35 {
+    /lcj exch def
+    0 1 29 {
+        /lci exch def
+        /lcsx lci 16 mul 4 add lci lcj lchash 10 mul add def
+        /lcsy lcj 14 mul 60 add lcj lci 7 add lchash 9 mul add def
+        lcsx lcsy P lctone /lcst exch def
+        lcsx lcsy P lcvalue /lcsv exch def
+        lcst 0.62 gt lcsv 0.5 gt and {
+            gsave
+                lcsx lcsy P translate
+                lcsy 350 lt { lcsx 250 sub 0.35 mul -12 add } { lcsx 250 sub 0.12 mul 20 add } ifelse
+                lci lcj 3 add lchash 20 mul 10 sub add rotate
+                newpath -16 0 moveto -5 2 5 -2 16 1 curveto
+                << /Value lcsv 0.42 mul /Width 12 /Touch 0.6 >> dhsmudge
+            grestore
+        } if
+    } for
+} for
+
+% --- 3. hatching to the photo's values ----------------------------------------
+% The head: fine, short pencil hatching (a stroke is about the size of
+% an eye's width, so features keep their shape).
+[ 0 25  480 25  480 425  405 392  300 348  165 352  95 398  0 455 ] ppoly
+<< /Medium /pencil /Value { lcvalue } /Layers 3 /Angle 50
+   /Spacing 2.2 /Length 10 /Seed 3 >> dhhatch
+
+% The eyes, nose and mouth: finer still, so a lid or a lip is several
+% lines deep.
+[ 175 170  340 170  340 310  175 310 ] ppoly
+<< /Medium /pencil /Grade 0.6 /Value { lcfine } /Layers 3 /Angle 40
+   /Spacing 1.5 /Length 6 /Seed 6 >> dhhatch
+
+% The coat and the shirt: vine, longer and looser strokes.
+[ 0 455  95 398  165 352  300 348  405 392  480 425  480 600  0 600 ] ppoly
+<< /Medium /vine /Grade 0.4 /Value { lcvalue } /Layers 3 /Angle 60
+   /Spacing 3.6 /Length 26 /Seed 4 >> dhhatch
+
+% The darkest masses again, in vine across the first hatching: hair,
+% beard, the eye sockets, the tie and the coat's shadows.
+[ 0 25  480 25  480 600  0 600 ] ppoly
+<< /Medium /vine /Grade 0.7 /Value { lcdeep } /Layers 2 /Angle -35
+   /Spacing 3 /Length 16 /Seed 5 >> dhhatch
+
+% --- 4. accents ----------------------------------------------------------------
+/acc { << /Medium /pencil /Grade 0.8 >> dhstroke } bind def
+/soft { << /Medium /pencil /Grade 0.45 >> dhstroke } bind def
+/dark { << /Medium /compressed /Grade 0.5 /Width 2.4 >> dhstroke } bind def
+% brows: short strokes laid along each brow, as the hairs grow
+/brow {   % [x0 y0 x1 y1] seed -
+    /lcbs exch def /lcb exch def
+    0 1 9 {
+        /lck exch def
+        /lct lck 9 div lck lcbs lchash 0.06 mul add def
+        lcb 0 get lcb 2 get lcb 0 get sub lct mul add
+        lcb 1 get lcb 3 get lcb 1 get sub lct mul add
+        lct 0.5 sub abs 2 mul 1 exch sub 3.5 mul sub
+        lck lcbs 1 add lchash 3 mul 1.5 sub add
+        /lcby exch def /lcbx exch def
+        /lcbl lck lcbs 2 add lchash 3 mul 2.5 add def
+        newpath lcbx lcbl sub lcby lcbl 0.6 mul add pm
+        lcbx lcbl add lcby lcbl 0.3 mul sub pl
+        << /Medium /compressed /Grade 0.45 /Width 1.6 /Seed lck lcbs add >> dhstroke
+    } for
+} bind def
+[ 196 191 234 191 ] 31 brow
+[ 264 193 310 191 ] 47 brow
+% eyes: heavy upper lids, the iris, a faint lower lid
+newpath 202 202 pm 208 199 219 198 229 203 pc soft
+newpath 268 203 pm 275 199 288 198 298 202 pc soft
+newpath 216 204 P 1.4 0 360 arc closepath << /Medium /compressed /Width 1.8 >> dhstroke
+newpath 284 203 P 1.4 0 360 arc closepath << /Medium /compressed /Width 1.8 >> dhstroke
+newpath 205 211 pm 214 213 222 212 229 209 pc soft
+newpath 270 210 pm 280 212 290 211 298 208 pc soft
+% nose: the wing, the nostrils and the shadow under it
+newpath 236 240 pm 230 248 233 255 242 254 pc acc
+newpath 243 253 pm 249 256 256 256 262 252 pc acc
+newpath 268 238 pm 274 246 272 254 265 256 pc soft
+% the folds from nose to mouth
+newpath 226 252 pm 219 260 216 268 218 277 pc soft
+newpath 280 236 pm 290 250 295 265 296 280 pc soft
+% mouth: the line between the lips, and the shadow under the lower lip
+newpath 223 281 pm 238 276 256 275 272 276 pc acc
+newpath 272 276 pm 284 277 294 279 300 283 pc acc
+newpath 242 290 pm 252 292 264 292 274 289 pc soft
+% the ear
+newpath 150 196 pm 132 192 124 220 134 245 pc acc
+newpath 134 245 pm 142 262 156 266 166 262 pc soft
+% the jaw under the beard, and the beard's lower edge
+newpath 178 284 pm 190 318 218 338 250 342 pc soft
+newpath 250 342 pm 282 338 304 318 316 286 pc soft
+% collar, bow tie and lapels, loosely
+newpath 205 350 pm 232 366 268 362 296 344 pc acc
+newpath 225 392 pm 205 378 182 372 168 376 pc acc
+newpath 168 376 pm 170 395 172 410 176 422 pc acc
+newpath 176 422 pm 195 412 212 404 225 398 pc acc
+newpath 232 392 pm 250 376 270 368 286 366 pc acc
+newpath 286 366 pm 282 384 276 398 268 410 pc acc
+newpath 268 410 pm 255 404 244 400 234 398 pc acc
+newpath 168 356 pm 176 400 172 440 165 480 pc << /Medium /vine /Grade 0.3 >> dhstroke
+newpath 300 352 pm 314 400 306 440 292 478 pc << /Medium /vine /Grade 0.3 >> dhstroke
+
+% --- 5. lifts ------------------------------------------------------------------
+% An eraser pulled through the charcoal where the light catches: streaks
+% in the hair's crown and over the temple, the lapel's sheen, the rim of
+% the ear. /Under is the tone the charcoal left there.
+/lift {   % px py (a point on the stroke, for its tone) -
+    P 2 copy lcvalue 3 1 roll lcfine add 0.85 mul /lclv exch def
+    [ 0 1 2 { /lck exch def userdict /dkGround get lck get dup
+              0.11 exch sub lclv mul add } for ] /lcunder exch def
+    << /Eraser /hard /Width 1.4 /Under lcunder >> dhlift
+} bind def
+newpath 232 92 pm 238 89 244 87 251 86 pc 240 89 lift
+newpath 256 94 pm 262 92 268 91 275 92 pc 264 92 lift
+newpath 306 112 pm 309 117 311 122 312 128 pc 309 118 lift
+newpath 300 380 pm 297 398 294 414 289 432 pc 296 405 lift
+newpath 146 236 pm 149 226 150 214 148 204 pc 149 220 lift
+
+showpage

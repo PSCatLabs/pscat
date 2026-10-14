@@ -231,3 +231,130 @@ fn et_draw_honors_exif_orientation_rotation() {
          top_right={top_right} top_left={top_left} bottom_left={bottom_left} bottom_right={bottom_right}"
     );
 }
+
+/// Runs `<< opts >> et-tonemap` and returns the grid as rows of darkness,
+/// checking every row has the same length.
+fn tonemap(it: &mut Interp, opts: &str) -> Vec<Vec<f64>> {
+    it.run_str(&format!(
+        "clear << {opts} >> et-tonemap \
+         dup {{ length }} forall count 1 sub array astore exch \
+         {{ aload pop }} forall"
+    ))
+    .unwrap_or_else(|e| panic!("et-tonemap failed: {}", it.error_report(&e)));
+    let stack: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
+    let num = |s: &str| -> f64 {
+        s.parse()
+            .unwrap_or_else(|_| panic!("expected a number, got {s}"))
+    };
+    // stack[0] is the array of row lengths; the cell values follow.
+    let lens: Vec<usize> = stack[0]
+        .trim_matches(|c| c == '[' || c == ']')
+        .split_whitespace()
+        .map(|s| num(s) as usize)
+        .collect();
+    let values: Vec<f64> = stack[1..].iter().map(|s| num(s)).collect();
+    assert_eq!(lens.iter().sum::<usize>(), values.len(), "cell count");
+    let mut rows = Vec::new();
+    let mut at = 0;
+    for n in lens {
+        rows.push(values[at..at + n].to_vec());
+        at += n;
+    }
+    it.run_str("clear").unwrap();
+    rows
+}
+
+#[test]
+fn et_tonemap_returns_a_grid_of_darkness_in_image_order() {
+    // tests/data/topdark.jpg: dark top rows over a light field. Row 0 of
+    // the map is the top of the photo (image order, unlike PostScript's
+    // y), so the first row must be darker than the last.
+    let mut it = with_lib(64, 64);
+    let rows = tonemap(
+        &mut it,
+        "/Photo (tests/data/topdark.jpg) /Columns 5 /Rows 4",
+    );
+    assert_eq!(rows.len(), 4, "one array per row");
+    assert!(rows.iter().all(|r| r.len() == 5), "five cells per row");
+    assert!(
+        rows.iter().flatten().all(|v| (0.0..=1.0).contains(v)),
+        "darkness lies in [0,1]: {rows:?}"
+    );
+    let mean = |r: &Vec<f64>| r.iter().sum::<f64>() / r.len() as f64;
+    assert!(
+        mean(&rows[0]) > mean(&rows[3]) + 0.3,
+        "the dark source rows are at the top: {rows:?}"
+    );
+}
+
+#[test]
+fn et_tonemap_matches_et_draws_darkness() {
+    // gray8.jpg is one flat grey: every cell is its darkness, whatever the
+    // grid or the sample count, and the operand stack is left clean.
+    let mut it = with_lib(64, 64);
+    let a = tonemap(
+        &mut it,
+        "/Photo (tests/data/gray8.jpg) /Columns 3 /Rows 3 /Samples 1",
+    );
+    let b = tonemap(
+        &mut it,
+        "/Photo (tests/data/gray8.jpg) /Columns 2 /Rows 5 /Samples 4",
+    );
+    let first = a[0][0];
+    for v in a.iter().chain(b.iter()).flatten() {
+        assert!(
+            (v - first).abs() < 0.02,
+            "a flat photo maps flat: {a:?} {b:?}"
+        );
+    }
+    it.run_str("<< /Photo (tests/data/gray8.jpg) >> et-tonemap pop")
+        .unwrap_or_else(|e| panic!("et-tonemap failed: {}", it.error_report(&e)));
+    assert!(
+        it.operand_stack().is_empty(),
+        "et-tonemap leaves only its grid"
+    );
+}
+
+#[test]
+fn et_tonemap_honors_exif_orientation() {
+    // cornerdark_exif6.jpg: orientation 6 puts the raw top-left dark
+    // block in the displayed top-right corner, as
+    // et_draw_honors_exif_orientation_rotation asserts for et-draw. The
+    // map is 40 x 80 displayed, so on a 4 x 4 grid the top-right cell
+    // (row 0, last column) must be the darkest.
+    let mut it = with_lib(64, 64);
+    let rows = tonemap(
+        &mut it,
+        "/Photo (tests/data/cornerdark_exif6.jpg) /Columns 4 /Rows 4",
+    );
+    let corner = rows[0][3];
+    for (j, row) in rows.iter().enumerate() {
+        for (i, v) in row.iter().enumerate() {
+            if (j, i) != (0, 3) {
+                assert!(corner > *v + 0.1, "top-right should be darkest: {rows:?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn et_tonemap_rejects_bad_sizes() {
+    for (opts, err) in [
+        ("/Columns 4", "et-tonemap-needs-photo"),
+        (
+            "/Photo (tests/data/gray8.jpg) /Columns 0",
+            "et-tonemap-sizes-must-be-positive",
+        ),
+        (
+            "/Photo (tests/data/gray8.jpg) /Rows 2.5",
+            "et-tonemap-sizes-must-be-integers",
+        ),
+    ] {
+        let mut it = with_lib(64, 64);
+        let e = it
+            .run_str(&format!("<< {opts} >> et-tonemap"))
+            .expect_err("bad options must raise");
+        let report = it.error_report(&e);
+        assert!(report.contains(err), "{opts}: expected {err}, got {report}");
+    }
+}
