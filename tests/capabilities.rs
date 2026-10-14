@@ -356,7 +356,7 @@ fn every_migrated_parameter_states_its_unit() {
         let mut checked = 0;
         for cap in &rows {
             for p in &cap.parameters {
-                let unit = leading_unit(&cap.name, p.name, &p.description);
+                let unit = leading_unit(&cap.name, p.name, p.description);
                 assert!(
                     unit_is_known(unit),
                     "{} {} /{}: unknown unit [{unit}]",
