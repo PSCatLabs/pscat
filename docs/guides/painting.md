@@ -617,7 +617,8 @@ loaded `pkdab` with warm highlight and cool shadow hues, evergreens on a
 fan loaded dark and lit with `/Light`, a `pkpull` fall, and
 `pkzigzag` light lines that catch on the canvas weave, and `pkbrushedge`
 on the stream banks, the far shore and the near banks, so no big mass has a
-ruled edge (issue #382).
+ruled edge (issue #382); the far shore and the stream banks pull out the
+meadow's own light with a procedural `/Mass`, lit under the glow (issue #455).
 
 ## Watercolor: pkwash and pkpaper
 

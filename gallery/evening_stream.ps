@@ -39,10 +39,14 @@
 %                    the same weave via /Touch
 %
 %   brushed edges    pkbrushedge (#347, applied in #382) on the stream's
-%   (#382)           banks, the stream's head, the far shore and the near
+%   (#382, #455)     banks, the stream's head, the far shore and the near
 %                    banks' rims: the mass colour pulled out over what is
 %                    behind it and that colour cut back in, so no big
-%                    mass keeps a ruled vector edge. The bushes and grass
+%                    mass keeps a ruled vector edge. The far shore and the
+%                    stream's banks pull out the meadow's own light (/Mass,
+%                    a procedure: lit under the glow), and the near banks
+%                    cut back in the stream exactly where it runs behind
+%                    them (/Under as a region list). The bushes and grass
 %                    that stay are things growing there.
 %
 % Not used: a named pigment palette with subtractive mixing (#185 has
@@ -513,7 +517,7 @@
     grestore
     % the bank's rim, brushed over the meadow (or the stream) behind it
     evBANK evset evnr
-    << /Under /evunderbank load /Outward 90 /Length 11 /Spacing 3 /Crisp 0.15
+    << /Under [ [ /evstreampath load /evwaterat load ] evMEADOW ] /Outward 90 /Length 11 /Spacing 3 /Crisp 0.15
        /Brush { << /Width 5 /Charge 0.8 /Depletion 0.9 /Edge 0.5 /Touch 0.8 >> pkbroad } >> pkbrushedge
     evnr
     << /Size 6 /Scatter 14 /Density 1.2 /Irregular 0.9 /Shadow 0.6 /Highlight 0.45
@@ -573,30 +577,32 @@
     { [ evux evuy evwaterat ] evWOOD 0.9 mix3 }
     { evux evuy evwaterat } ifelse
 } bind def
-% x y -> r g b   what lies behind a near bank's rim: the meadow, except in
-% the lower corners, where the stream runs behind it
-/evunderbank {
-    /evuy exch def /evux exch def
-    evux 240 evuy 10 add 0.78 mul add 340 min gt
-    evux 650 evuy 10 add 1.3 mul sub 450 max lt and
-    { evux evuy evwaterat }
-    { evMEADOW aload pop } ifelse
+% x y -> r g b   the meadow's colour at a point along its edge, for /Mass:
+% plain meadow, lit with the yellow of its light by a share that is largest
+% right on the far shore and fades to nothing 60 points toward the viewer,
+% and that is strongest under the glow (x = evSX) and thins toward the
+% corners, so the shore catches the last light where the sun went down and
+% the banks beside the stream pick it up only at their far ends. It draws
+% nothing random: pkbrushedge asks it once per stroke.
+/evmeadowat {
+    /evmay exch def /evmax exch def
+    evmax evSX sub abs 340 div 1 exch sub 0 max 1.5 exp 1.9 mul 0.25 add   % the glow's reach
+    1 evHZ evmay sub 60 div sub 0 max 0.3 mul mul                          % lit share
+    /evmal exch def
+    evMEADOW evMEADOWLT evmal mix3
 } bind def
 
 % The meadows' banks along the stream, brushed after the water and the fall
 % are down: the meadow's colour out over the water, the water cut back in.
 /evbankedges {
     19 srand
-    [ evMEADOWLT evMEADOW 0.9 mix3 ] evset
     newpath 456 evHZ moveto evleftedge
-    << /Under /evunderstream load /Outward 0 /Length 9 /Spacing 3 /Crisp 0.2
+    << /Under /evunderstream load /Mass /evmeadowat load /Outward 0 /Length 9 /Spacing 3 /Crisp 0.2
        /Brush { << /Width 4 /Charge 0.8 /Depletion 0.9 /Edge 0.5 /Touch 0.8 >> pkbroad } >> pkbrushedge
     newpath 490 evHZ moveto evrightedge
-    << /Under /evunderstream load /Outward 180 /Length 9 /Spacing 3 /Crisp 0.2
+    << /Under /evunderstream load /Mass /evmeadowat load /Outward 180 /Length 9 /Spacing 3 /Crisp 0.2
        /Brush { << /Width 4 /Charge 0.8 /Depletion 0.9 /Edge 0.5 /Touch 0.8 >> pkbroad } >> pkbrushedge
 } bind def
-% the meadows' far edge against the wood's foot, in the meadow colour a
-% little lit
 % the head of the stream, where it meets the far shore: the water's own
 % light pulled up a little over the wood's foot
 /evstreamhead {
@@ -606,15 +612,21 @@
     << /Under evWOOD /Outward 90 /Length 5 /Spacing 2 /Crisp 0.25
        /Brush { << /Width 2.5 /Charge 0.8 /Depletion 0.9 /Edge 0.5 /Touch 0.8 >> pkbroad } >> pkbrushedge
 } bind def
+% the meadows' far edge against the wood's foot, the meadow's own light
+% pulled out of it
 /evfaredges {
     17 srand
-    [ evMEADOWLT evMEADOW 0.8 mix3 ] evset
     newpath -10 evHZ 1 sub moveto 450 evHZ 1 sub lineto
-    << /Under evWOOD /Outward 90 /Length 6 /Spacing 2.5 /Crisp 0.2
+    << /Under evWOOD /Mass /evmeadowat load /Outward 90 /Length 6 /Spacing 2.5 /Crisp 0.2
        /Brush { << /Width 3 /Charge 0.8 /Depletion 0.9 /Edge 0.5 /Touch 0.8 >> pkbroad } >> pkbrushedge
     newpath 496 evHZ 1 sub moveto 770 evHZ 1 sub lineto
-    << /Under evWOOD /Outward 90 /Length 6 /Spacing 2.5 /Crisp 0.2
+    << /Under evWOOD /Mass /evmeadowat load /Outward 90 /Length 6 /Spacing 2.5 /Crisp 0.2
        /Brush { << /Width 3 /Charge 0.8 /Depletion 0.9 /Edge 0.5 /Touch 0.8 >> pkbroad } >> pkbrushedge
+    % one brush call per stroke (a procedural /Mass) draws differently from
+    % one call for the whole edge, and the stream is painted next: put the
+    % random state back where it stood, so the water and the fall keep
+    % their marks
+    2133854749 srand
 } bind def
 
 % ---- paint -----------------------------------------------------------
