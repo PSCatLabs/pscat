@@ -97,6 +97,12 @@ A stale reclaim (`claim.sh` after its fresh `mkdir` fails):
    reclaim path. A lost gen dir is left in place (deleting it would let its number be created
    twice).
 
+   The inode check assumes a released container's inode number is not handed straight to the
+   fresh re-create. APFS (this repo's macOS environment) allocates inode numbers from a
+   monotonically increasing 64-bit counter and does not reuse them in practice; on a filesystem
+   that reuses inode numbers promptly, a delayed racer's `gen.1` in a re-created lock could pass
+   this check. The guarantee is specific to the filesystem.
+
 Why the heartbeat is not per generation: `heartbeat.sh` runs in a fresh shell with only `<N>`,
 so it cannot know which generation its run owns without a token the skill would have to carry
 between tool calls, and the older copies of `heartbeat.sh` that resuming agents run write only
@@ -109,8 +115,10 @@ Why there is no retry any more: the #281 retry existed for the one racer that mo
 away and then lost its re-create, which could leave the lock with no owner. With `mkdir gen` as
 the only steal, a stale race has exactly one `mkdir` winner, who then writes the heartbeat; a
 racer whose view is out of date fails its `mkdir` and reports `lost`. The only zero-winner case
-left is the winner itself failing a post-check (a release or an older script's move at that
-instant), and then the lock reads `live` for at most 10 s and is reclaimable after.
+left, with only new scripts racing, is the winner itself failing a post-check (a release at that
+instant), and then the lock reads `live` for at most 10 s and is reclaimable after. With an older
+script in the race the lock can instead be left with a fresh heartbeat and no owner, reading
+`live` for 45 minutes (see Rollout); it is still released by `rm -rf` and reclaimed once stale.
 
 Residuals (new scripts only):
 

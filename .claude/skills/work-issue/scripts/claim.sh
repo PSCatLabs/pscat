@@ -55,7 +55,7 @@ claim() {
   # creates after it collides with ours, however long this process stalls.
   I0=$(inode)
   if [ -z "$I0" ]; then
-    RES="lost (the lock vanished while being read) — do not resume/claim; re-run claim.sh to re-check"
+    RES="lost (the lock vanished while being read) — do not resume/claim"
     return
   fi
   K=0
