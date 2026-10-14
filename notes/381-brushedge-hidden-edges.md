@@ -49,5 +49,8 @@ call, and the old vote paid up to 80 region probes per hidden probe. The
 - Blobs wound opposite ways cancel under the nonzero rule where they
   overlap, so that overlap is a hole and its edge is brushed into it.
   This is the rule `fill` paints with, so it is what the eye sees.
-- The specimen (`docs/paintkit_brushedge_demo.png`) is untouched: no panel
-  there overlaps. The PR carries a before/after render instead.
+- The specimen (`docs/paintkit_brushedge_demo.png`) and the cookbook's
+  bank thumbnail are untouched: neither overlaps (all eleven cookbook
+  recipes render byte-identically, base against head, 360x240 at 144 dpi).
+  `docs/paintkit_brushedge_overlap.png` is the before/after of a six-blob
+  bank (the same driver with the old library and the new).
