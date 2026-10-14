@@ -52,6 +52,13 @@ needs.)
   tested: it has no second subpath to hide behind.
 - Open subpaths are never skipped. They are part of the region (as in #347)
   but a crest drawn over a mass is the caller's decision.
+- A hole thinner than `/Spacing / 768` (0.004 pt at the default; 0.0006 device
+  pixels at 144 dpi) is read as a hidden edge: both looks fall in the mass
+  around it, so its boundary gets no strokes, where the old code halved the
+  step 40 times and kept them (Codex round 2: an 80 x 0.001 slit in a square).
+  Nothing a render can show distinguishes such a hole from none, a third look
+  would only move the threshold, and every look costs a probe on every
+  hidden slot.
 - A stroke anchored exactly on a vertex where the outline turns sharply can,
   rarely, see both probe points in the mass (the offset leaves the segment's
   normal) and be skipped. One slot, not a stretch.
