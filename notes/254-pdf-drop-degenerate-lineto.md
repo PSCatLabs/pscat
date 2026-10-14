@@ -58,7 +58,7 @@ file is mostly *digits*, which Flate cannot shrink.
   pixels outright). Worst 10 px block-mean difference over the corpus is 0.10
   (the golden bar in tests/golden.rs is 6.0). It does not fix the issue (still
   ~59 MB) and a ~3% radius error on a 0.17 pt speck is a real, if small, loss,
-  so it is left for a decision (follow-up issue).
+  so it is left for a decision (follow-up issue #320).
 - **Leading-zero stripping** (`.5`): -0.005%, nothing.
 - **Zlib level 9 instead of 6**: -1.3%, 2x the compression time. No.
 - **Relative path operators**: PDF has none (`m l c v y h re` only).
