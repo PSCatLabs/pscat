@@ -76,6 +76,7 @@ family's `OFL.txt` or Apache `LICENSE.txt`.
 | PressStart2P | 8-bit arcade pixels | OFL |
 | VT323 | glowing-terminal mono | OFL |
 | SpecialElite | worn typewriter | Apache 2.0 |
+| CourierPrime | typewriter Courier with slab serifs; the source of the `/Typewriter` font's outlines (`lib/typewriter.ps`, issue #211) | OFL |
 | Orbitron | sci-fi geometric display | OFL |
 | Audiowide | streamlined techno display | OFL |
 | StardosStencil | stencil serif | OFL |

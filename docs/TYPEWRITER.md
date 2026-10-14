@@ -1,9 +1,11 @@
 # TYPEWRITER.md: typewriter design (issue #210)
 
 This is the design for epic #209: a `/Typewriter` font and `lib/typewriter.ps`,
-for documents that look as if they were typed on a real typewriter. **It
-needs the maintainer's approval before #211 starts.** The open questions are
-in section 10.
+for documents that look as if they were typed on a real typewriter. The
+maintainer approved it with every recommendation in section 10. #211 built
+sections 2–5 and 7 with flat ink (`lib/typewriter.ps`,
+`notes/211-typewriter-font.md`); its public names are `tw-setup` and
+`tw-set`, and the machine seed is `/Machine`.
 
 Read these first:
 
