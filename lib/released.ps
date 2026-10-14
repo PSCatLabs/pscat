@@ -194,7 +194,7 @@ RelState begin {
 % per cell, so lamp, stains and edges never overpaint each other.
 /rlGrid {                                           % length -> array of cell edges
     /rgL exch def
-    600 array /rgA exch def
+    rgL 1.5 div cvi 8 add array /rgA exch def
     rgA 0 0 put  /rgN 1 def  /rgX 0 def
     {
         rgX rgL ge { exit } if
@@ -416,6 +416,7 @@ RelState begin {
     rsInk rlIsRgb not { end rel-stamp-ink-must-be-an-rgb-array } if
     rsFrame dup /box eq exch dup /double eq exch /none eq or or not
     { end rel-stamp-frame-must-be-box-double-or-none } if
+    rsStr 0 gt {
     gsave
     rsTrk rlIsNum not { end rel-stamp-tracking-must-be-a-number } if
     rsFont type /nametype ne { end rel-stamp-font-must-be-a-name } if
@@ -458,6 +459,7 @@ RelState begin {
         moveto rsTrk 0 3 -1 roll ashow
     } for
     grestore
+    } if
 } bind def
 
 % margin notes: hs-write (lib/handscript.ps) at a place and an angle
@@ -774,7 +776,7 @@ rlDefaults
 % @param: /Size [points] The type's size; the frame follows it (default 22)
 % @param: /Ink [rgb array] The stamp pad's colour (default a dull red)
 % @param: /Frame [name] /box, /double or /none (default /box)
-% @param: /Strength [0..1] How much ink there is: fewer holes and voids as it rises (default 0.8)
+% @param: /Strength [0..1] How much ink there is: fewer holes and voids as it rises; 0 presses no stamp at all (default 0.8)
 % @param: /Font [name] The typeface, any findfont name (default /Helvetica-Bold)
 % @param: /Tracking [points] Extra space after each letter: the spaced capitals of a date stamp (default 0)
 % @param: /Seed [integer] Seeds the holes; the same dict presses the same stamp (default 1)

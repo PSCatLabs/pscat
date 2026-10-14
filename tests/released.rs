@@ -265,6 +265,21 @@ fn a_rejected_call_leaves_the_dictionary_stack_and_names_its_key() {
 }
 
 #[test]
+fn a_zero_strength_stamp_and_a_huge_sheet_are_handled() {
+    let blank = page("");
+    assert_eq!(
+        differing(
+            &blank,
+            &page("<< /Text (RECEIVED) /Strength 0 /Size 30 >> rel-stamp")
+        ),
+        0,
+        "a stamp at strength 0 is off"
+    );
+    // the paper grid sizes itself from the sheet: 6000pt is more than 600 edges
+    let _ = page("<< /Width 6000 /Height 200 /EdgeDark 1 /Age 1 >> rel-paper");
+}
+
+#[test]
 fn a_stamp_is_uneven_ink_through_which_the_page_shows() {
     let stamp = |strength: &str| {
         page(&format!(
