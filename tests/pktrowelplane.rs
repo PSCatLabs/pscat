@@ -242,8 +242,8 @@ fn a_tapering_pressure_does_not_open_gaps_between_rows() {
 
 #[test]
 fn a_pressure_that_never_dips_spaces_the_rows_as_before() {
-    // Byte for byte: no /Pressure, a flat one, and one above 1 all give the
-    // same rows, because only a dip below 1 narrows the spacing.
+    // Byte for byte: no /Pressure and a flat one give the same plane, because
+    // only a dip below 1 narrows the spacing.
     let base = solid_plane("").gfx().pixmap.data().to_vec();
     let flat = solid_plane("/Pressure /pkflat load")
         .gfx()

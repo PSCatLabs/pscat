@@ -29,7 +29,7 @@ Decisions, and why:
 - **Floor 0.25, cap 1.** `pktaper` and `pkbell` reach about 0 inside the
   window, so without a floor the spacing would collapse to 0 and every such
   call would hit the 4000-row guard. At the floor a deep taper costs at most
-  four times the rows (measured: a 90x90 `pkbell` plane 0.04 s to 0.08 s CPU)
+  four times the rows (measured: a 90x90 `pkbell` plane 0.04 s to 0.08 s CPU; the 300x300 budget plane with `/Pressure { pkbell }` 0.22 s to 0.70 s CPU, 2 s budget)
   and still keeps a thin end, as a real knife does; the deepest taper is not
   fully closed by design. The cap at 1: a pressure above 1 only overlaps
   more, it never spreads the rows (and a flat `{ pkflat }` or no `/Pressure`
@@ -38,15 +38,19 @@ Decisions, and why:
   and `pktrowelplane`'s stream is "two draws per row". The sampling saves
   `rrand`, and calls `srand` to put it back only if the proc moved it, so a
   deterministic profile never calls `srand`. Under a seed-override sweep
-  (`src/ops/arith.rs`: `srand` ignores its operand) the restore is a no-op,
-  as it is for every other lib that uses this `rrand`/`srand` pattern; that
-  only matters to a proc that draws.
+  (`src/ops/arith.rs`: `srand` sets the forced seed, ignoring its operand) the
+  restore for a proc that draws rewinds the stream to the forced seed rather
+  than to where it was, the same as every other lib that uses this
+  `rrand`/`srand` pattern. An error inside the proc skips the restore (no
+  `finally` in PostScript; `scatter` documents the same).
 - **Where it runs.** After the empty-path `pktrowel` validation (a bad
   `/Pressure` still raises from `pktrowel`'s own guard) and before the row
   `gsave`, so an error or a `stop` inside the sampled proc cannot leave a clip
   or rotation behind.
 - Determinism doc: a tapering `/Pressure` now changes the row count, so it
   belongs in the list of things that re-roll the plane.
+
+Ghostscript 10.07 runs the new branch (`rrand`, `abs`, `max` in the `for`) and draws a solid square for a tapered plane.
 
 Limits: a dip narrower than 1/16 of the row can be missed; the proc is read
 in the caller's CTM, not the rows' rotated one (a pure function of t does not
