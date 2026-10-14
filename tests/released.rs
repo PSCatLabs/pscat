@@ -300,6 +300,38 @@ fn a_redaction_inside_an_overtype_still_covers() {
 }
 
 #[test]
+fn the_effects_leave_the_contents_graphics_state_and_paths_alone() {
+    // the content sees the caller's colour and line width, whatever paper,
+    // backdrop and copy sheets were painted first
+    let mut it = Interp::with_page(W, H).expect("page");
+    load(&mut it);
+    it.run_str(
+        "0 setgray 1 setlinewidth \
+         { currentgray currentlinewidth } \
+         << /Width 300 /Height 200 /Folds 0.5 /Punch 2 /Generation 1 /Skew 1 /Age 0.5 >> rel-page",
+    )
+    .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+    let st = it.operand_stack();
+    let n = st.len();
+    let num = |i: usize| st[n - i].repr().parse::<f64>().expect("a number");
+    assert_eq!((num(2), num(1)), (0.0, 1.0));
+    // a stamp and a bar are drawn on a fresh path: a path the caller has
+    // begun neither joins their ink nor their clip
+    let alone = |src: &str| page(src);
+    let with_path = |src: &str| {
+        page(&format!(
+            "10 10 moveto 250 150 lineto 100 20 lineto {src} newpath"
+        ))
+    };
+    for src in [
+        "<< /Lines [ (SEEN) ] /X 150 /Y 100 /Size 24 /Ink [0 0 0] >> rel-stamp",
+        "50 100 120 14 rel-redact",
+    ] {
+        assert_eq!(differing(&alone(src), &with_path(src)), 0, "{src}");
+    }
+}
+
+#[test]
 fn a_zero_strength_stamp_and_a_huge_sheet_are_handled() {
     let blank = page("");
     assert_eq!(

@@ -430,6 +430,7 @@ RelState begin {
     rsX rsY translate rsAng rotate
     rsSeed rsX cvi rsY cvi add rlSeed2
     % the clip: the stamp's box and holes
+    newpath
     rsBW 2 div 3 add neg rsBH 2 div 3 add neg moveto
     rsBW 6 add 0 rlineto 0 rsBH 6 add rlineto rsBW 6 add neg 0 rlineto closepath
     rlU 0.5 lt /rsFlip exch def
@@ -504,6 +505,7 @@ RelState begin {
     rdX0 rlIsNum rdX1 rlIsNum and rdY rlIsNum and rdS rlIsNum and not
     { end rel-redact-operands-must-be-numbers } if
     gsave
+    newpath
     rdX0 10 mul cvi rdY 3 mul cvi rlSeed2
     rlRInk aload pop setrgbcolor
     rdX0 rdY translate rlR 0.4 mul rotate rdX0 neg rdY neg translate
@@ -647,7 +649,7 @@ RelState begin {
 } bind def
 /rlOriginal {
     /rlCC 1 0.6 rlGen exp sub def
-    rlPaint { rlPaperDraw } if
+    rlPaint { gsave rlPaperDraw grestore } if
     /tw-set where { pop rlGen 0 gt } { false } ifelse {
         TWState /tCopies get /rlOldC exch def
         << /Copies rlGen >> tw-set
@@ -663,11 +665,13 @@ RelState begin {
     rlPrep
     gsave
     rlSkew 0 ne rlBack null ne or {
+        gsave
         rlBackRgb aload pop setrgbcolor
         newpath 0 0 moveto rlW 0 rlineto 0 rlH rlineto rlW neg 0 rlineto closepath fill
+        grestore
     } if
     rlSkew 0 ne { rlW 2 div rlH 2 div translate rlSkew rotate rlW 2 div neg rlH 2 div neg translate } if
-    rlGen 0 gt { rlSeed 10 rlSeed2 0.985 0.985 0.975 false false rlPaperField } if
+    rlGen 0 gt { gsave rlSeed 10 rlSeed2 0.985 0.985 0.975 false false rlPaperField grestore } if
     0 1 rlGen {
         /rlJ exch def
         gsave rlJ rlEnter
