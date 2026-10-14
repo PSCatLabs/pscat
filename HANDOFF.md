@@ -905,6 +905,18 @@ renders eight examples in both and compares block-downsampled output).
 - tiny-skia `Transform::from_row(sx, ky, kx, sy, tx, ty)` matches the
   PS matrix order `[a b c d tx ty]` — `ops/matrix.rs` documents it;
   don't rediscover this the hard way.
+- **artkit, paintkit and drykit define every procedure `} bind def`**
+  (#307), and `tests/libbind.rs` fails for any procedure added without
+  it. Ghostscript resolves each executable name in a procedure body at
+  run time, and with several libraries loaded those lookups are what
+  make gs slow (alpine_lake 30 s unbound, 10 s bound). A private scratch
+  dictionary (the drychalk pattern) was tried for drykit and paintkit and
+  is *slower*: a non-userdict dict on top of the dict stack costs every
+  operator lookup about 30% more (`notes/307-*.md` has the numbers). The
+  catch is that an operator redefined after a library loads no longer
+  reaches its procedures; library names that are not operators are still
+  late-bound, so overriding `dkbudget`, `pkribbon` and the like works.
+  drychalk, drycrayon and the older kits are not bound yet.
 - Test Interps at 100×100; golden runs at 500×500/r72. Metric
   assertions use 1e-3 tolerances where the pen is f32.
 

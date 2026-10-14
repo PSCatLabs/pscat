@@ -2,6 +2,18 @@
 %%Title: artkit.ps — a toolkit for generative art in PostScript
 %%Creator: pscat — Stage 19, the art toolkit
 %%EndComments
+%
+% Every procedure here is defined `} bind def` (issue #307). Ghostscript
+% looks up each executable name in a procedure body at run time, and
+% those lookups are slow once userdict holds the libraries' several
+% hundred names; `bind` resolves the operators once, when the library
+% loads. The cost: an operator redefined *after* this file loads (a
+% caller's own `/show`, `/rand`, `/fill`) no longer reaches these
+% procedures, and one redefined *before* it loads is left alone, since
+% `bind` only replaces names that are operators at that moment. Names
+% that are not operators (every library procedure, and tunables such as
+% drykit's `dkbudget`) stay late-bound, so overriding those works as
+% before. tests/libbind.rs fails for any procedure added without `bind`.
 
 % The pscat art toolkit: the procedures a generative piece reaches for
 % before it reaches for anything else. Defines into the current dict
@@ -50,7 +62,7 @@
 % Deterministic (rand), reproducible under srand. Drawn from rand's
 % high bits — successive low bits correlate (the marquee.ps finding).
 
-/chance { rand 8192 idiv exch mod } def          % n -> 0..n-1
+/chance { rand 8192 idiv exch mod } bind def          % n -> 0..n-1
 % An integer j draws through `chance` (mod), exactly as it always has, so
 % every seeded integer piece is byte-identical. A real j can't go through
 % `mod`, so it scales one `frnd` draw instead: same -j..j range, real result.
@@ -59,9 +71,9 @@
     { dup 2 mul 1 add chance exch sub }
     { dup 2 mul frnd mul exch sub }
     ifelse
-} def                                            % j -> -j..j
-/frnd { rand 8192 idiv 262143 and 262143 div } def  % -> 0.0..1.0
-/oneof { dup length chance get } def             % array -> element
+} bind def                                            % j -> -j..j
+/frnd { rand 8192 idiv 262143 and 262143 div } bind def  % -> 0.0..1.0
+/oneof { dup length chance get } bind def             % array -> element
 
 % --- color -----------------------------------------------------------
 
@@ -71,7 +83,7 @@
     tka 0 get tkb 0 get tka 0 get sub tkt mul add
     tka 1 get tkb 1 get tka 1 get sub tkt mul add
     tka 2 get tkb 2 get tka 2 get sub tkt mul add
-} def
+} bind def
 
 % [r g b] k shade -> r g b   (k<1 toward black, k>1 toward white)
 /shade {
@@ -85,7 +97,7 @@
         tkg 1 tkg sub tkm mul add
         tkb 1 tkb sub tkm mul add
     } ifelse
-} def
+} bind def
 
 % Eight moods, five colors each. `/dusk pal` -> the array;
 % `/dusk palpick` -> one of its colors as r g b.
@@ -108,8 +120,8 @@
                 [0.82 0.78 0.72] [0.93 0.91 0.87]]
 >> def
 
-/pal { Palettes exch get } def                   % /name -> array
-/palpick { pal oneof aload pop } def             % /name -> r g b
+/pal { Palettes exch get } bind def                   % /name -> array
+/palpick { pal oneof aload pop } bind def             % /name -> r g b
 
 % --- turtle ----------------------------------------------------------
 % A pen with a heading. `thome` moveto's the start; `fd` draws into
@@ -132,7 +144,7 @@ end
         /tsp 0 def
         tx ty moveto
     end
-} def
+} bind def
 
 /fd {                                            % dist -  (draws)
     TurtleState begin
@@ -141,7 +153,7 @@ end
         /ty ty th sin tkd mul add def
         tx ty lineto
     end
-} def
+} bind def
 
 /hop {                                           % dist -  (pen up)
     TurtleState begin
@@ -150,17 +162,17 @@ end
         /ty ty th sin tkd mul add def
         tx ty moveto
     end
-} def
+} bind def
 
-/tl { TurtleState begin th add /th exch def end } def    % ang -
-/tr { TurtleState begin th exch sub /th exch def end } def
+/tl { TurtleState begin th add /th exch def end } bind def    % ang -
+/tr { TurtleState begin th exch sub /th exch def end } bind def
 
 /tpush {
     TurtleState begin
         tstk tsp [tx ty th] put
         /tsp tsp 1 add def
     end
-} def
+} bind def
 
 /tpop {
     TurtleState begin
@@ -169,7 +181,7 @@ end
         /th exch def /ty exch def /tx exch def
         tx ty moveto
     end
-} def
+} bind def
 
 % --- L-systems -------------------------------------------------------
 % (axiom) rules depth lsys -> (expanded)
@@ -205,7 +217,7 @@ end
         /lscur lsbuf def
     } repeat
     lscur
-} def
+} bind def
 
 % (string) step angle ldraw -
 % Drive the turtle from an L-system string: F draw, f hop, + left,
@@ -223,7 +235,7 @@ end
         ldc 93 eq { tpop } if
         } ifelse } ifelse } ifelse } ifelse } ifelse
     } forall
-} def
+} bind def
 
 % --- brushes: walk any path ------------------------------------------
 % pitch {x y ang -> -} alongpath -
@@ -261,7 +273,7 @@ end
     { pop pop pop pop pop pop }
     { apsx apsy apseg }
     pathforall
-} def
+} bind def
 
 /apseg {                                         % x y -  (segment end)
     /apy1 exch def /apx1 exch def
@@ -280,12 +292,12 @@ end
         /aprem apt aplen sub def
     } if
     /aplx apx1 def /aply apy1 def
-} def
+} bind def
 
 /alongpath {                                     % pitch proc -
     exch /aponepitch exch def
     { aponepitch } exch alintern
-} def
+} bind def
 
 % --- brushes: centerline sampler (foundation for painterly brushes) --
 % pitch {x y ang t sp atend -> -} walkpath -
@@ -390,7 +402,7 @@ end
         pathforall
         wkmfirst not { wkmsum } if
     ]
-} def
+} bind def
 
 /wkseg {                                         % x1 y1 -  (segment end)
     /wky1 exch def /wkx1 exch def
@@ -423,7 +435,7 @@ end
         /wkcum wkcum wkseglen add def
     } if
     /wkx wkx1 def /wky wky1 def
-} def
+} bind def
 
 /wkend {                                         % -  (subpath close-out)
     wkemitted {
@@ -431,7 +443,7 @@ end
     } {
         wkx wky 0 0 0 3 wkproc
     } ifelse
-} def
+} bind def
 
 /walkpath {                                      % pitch proc -
     /wkproc exch def /wkpitch exch def
@@ -456,7 +468,7 @@ end
     { wksx wksy wkseg }
     pathforall
     wkstarted { wkend } if
-} def
+} bind def
 
 % Self-tests: `pscat --selftest lib/artkit.ps` (see docs/SELFTEST.md).
 % The segment-count bound is checked at its edge on both sides, with
@@ -514,7 +526,7 @@ end
           /pti pti 1 add def
       } { pop pop pop } ifelse }
     alintern
-} def
+} bind def
 
 % cx cy r ang (str) ctext -
 % Circular text: sets (str) along a circle of radius r centered at
@@ -538,7 +550,7 @@ end
         newpath ctx cty ctr ctang ctang ctspan 1.05 mul sub arcn
         ctstr pathtext
     grestore
-} def
+} bind def
 
 % cx cy r (str) ctextctr -
 % ctext's common case: center (str) at the top of the circle (90
@@ -549,7 +561,7 @@ end
     /ctcstr exch def /ctcr exch def /ctcy exch def /ctcx exch def
     /ctcspan ctcstr stringwidth pop ctcr div 57.29578 mul def  % degrees/radian
     ctcx ctcy ctcr 90 ctcspan 2 div add ctcstr ctext
-} def
+} bind def
 
 % --- shapes (appended to the current path) ---------------------------
 
@@ -561,7 +573,7 @@ end
         tkx tka cos tkr mul add tky tka sin tkr mul add lineto
     } for
     closepath
-} def
+} bind def
 
 /star {                                          % cx cy r-out r-in n -
     /tkn exch def /tkri exch def /tkro exch def
@@ -574,7 +586,7 @@ end
         tkx tka cos tkr mul add tky tka sin tkr mul add lineto
     } for
     closepath
-} def
+} bind def
 
 /rrect {                                         % x y w h r -
     /tkr exch def /tkh exch def /tkw exch def /tky exch def /tkx exch def
@@ -584,7 +596,7 @@ end
     tkx tkr add tky tkh add tkr sub tkr 90 180 arc
     tkx tkr add tky tkr add tkr 180 270 arc
     closepath
-} def
+} bind def
 
 % --- text ------------------------------------------------------------
 
@@ -592,13 +604,13 @@ end
     /tky exch def /tkx exch def /tks exch def
     tkx tks stringwidth pop 2 div sub tky moveto
     tks show
-} def
+} bind def
 
 /fitfont {                                       % (s) targetwidth -
     /tkw exch def
     stringwidth pop /tkcur exch def
     tkcur 0.001 gt { currentfont tkw tkcur div scalefont setfont } if
-} def
+} bind def
 
 % --- paragraph / flowing text -----------------------------------------
 % Greedy word-wrap (not Knuth-Plass optimal-fit) under the current font,
@@ -685,7 +697,7 @@ end
         { /tlrest tlstr tlbreak 1 add tlen tlbreak 1 add sub getinterval def }
     ifelse
     tlline tlrest tlatend tlnl or
-} def
+} bind def
 
 % (str) tfwordgaps  n -
 % Counts space-separated gaps in str (word count minus one), used to
@@ -699,7 +711,7 @@ end
         ifelse
     } loop
     twgn
-} def
+} bind def
 
 % (str) width tfwrap  ARRAY -
 % Wraps str into an array of lines, none wider than width under the
@@ -730,7 +742,7 @@ end
         } loop
         twlines 0 twn getinterval
     } ifelse
-} def
+} bind def
 
 % x0 x1 y just lastline (line) tfdrawline -
 % Draws one already-wrapped line at baseline y within [x0,x1] under
@@ -799,7 +811,7 @@ end
     } {
         tdx0 tdy moveto tdline show
     } ifelse } ifelse } ifelse
-} def
+} bind def
 
 % boundsproc y0 ybot leading just (str) tfflow  (leftover) -
 % The general paragraph-flow engine: boundsproc is {y -> x0 x1}, called
@@ -826,7 +838,7 @@ end
         /tfstr tfrest def
     } loop
     tfstr
-} def
+} bind def
 
 % x y w h leading just (str) tfblock  (leftover) -
 % tfflow's common case: flow str into the rectangle x,y,w,h (bottom-
@@ -840,7 +852,7 @@ end
     tby tbh add tblead sub
     tby tblead tbjust tbstr
     tfflow
-} def
+} bind def
 
 % x0 y0 colw gap h ncols leading just (str) tfcols  (leftover) -
 % Flows str across ncols equal-width columns (colw wide, gap between
@@ -860,7 +872,7 @@ end
         /tcstr exch def
     } for
     tcstr
-} def
+} bind def
 
 % --- layout ----------------------------------------------------------
 
@@ -878,7 +890,7 @@ end
             tkcw tkch tkproc
         } for
     } for
-} def
+} bind def
 
 % --- scatter (deterministic mark distribution) ------------------------
 % The area-shaped counterpart to alongpath/walkpath's path-shaped walk:
@@ -1044,7 +1056,7 @@ end
 % `scatter` again is the gasket/carpet nesting case: the library stays
 % unwrapped, so wrap the nested call in your own dict if you need it.
 
-/scisnum { type dup /integertype eq exch /realtype eq or } def % v -> bool
+/scisnum { type dup /integertype eq exch /realtype eq or } bind def % v -> bool
 
 % opts key default scgetdef -> value
 % artkit's own copy of the wrap-the-default-in-an-array trick (see
@@ -1056,7 +1068,7 @@ end
     /scgdk exch def
     /scgdt exch def
     scgdt scgdk known { scgdt scgdk get } { scgdd 0 get } ifelse
-} def
+} bind def
 
 % rate scodds -> bool
 % Clamped probability roll: certain at rate >= 1, impossible at
@@ -1068,7 +1080,7 @@ end
         { pop true }
         { dup 0 le { pop false } { frnd exch lt } ifelse }
     ifelse
-} def
+} bind def
 
 /sccallable {                                    % v -> bool
 % Executable *and* actually runs something when invoked. A bare
@@ -1107,7 +1119,7 @@ end
             { false exit }
         ifelse
     } loop
-} def
+} bind def
 
 /scokrange {                                     % v -> bool  ([lo hi]?)
 % A *literal* two-number array. An executable one (`{ 1 2 }`) is a
@@ -1124,7 +1136,7 @@ end
               ifelse }
           ifelse }
     ifelse
-} def
+} bind def
 
 % --- regions ---------------------------------------------------------
 
@@ -1142,7 +1154,7 @@ end
     << /Kind /rect
        /BBox [ sqrx sqry sqrx sqrw add sqry sqrh add ]
        /Area sqrw sqrh mul >>
-} def
+} bind def
 
 /sqpcollinear {                                  % x y -
 % Track whether every point of the current subpath lies on one line:
@@ -1176,7 +1188,7 @@ end
             gt { /sqpcol false def } if
         } ifelse
     } if
-} def
+} bind def
 
 /sqbounds {                                      % x y -
 % Grow the *current subpath's* box. It reaches the region's own bbox
@@ -1193,7 +1205,7 @@ end
         sqby sqpy0 lt { /sqpy0 sqby def } if
         sqby sqpy1 gt { /sqpy1 sqby def } if
     } ifelse
-} def
+} bind def
 
 /sqpmerge {                                      % -
 % Fold the finished subpath's box into the region's, but only if that
@@ -1236,7 +1248,7 @@ end
         % fill -- so `scin` and the edge ceiling agree with `scarea`.
         /sqn sqpstart def
     } ifelse
-} def
+} bind def
 
 /sqemit {                                        % x0 y0 x1 y1 -
 % Append one edge to the growable flat edge buffer. PostScript arrays
@@ -1256,7 +1268,7 @@ end
     sqbuf sqn 2 add sqe2 put
     sqbuf sqn 3 add sqe3 put
     /sqn sqn 4 add def
-} def
+} bind def
 
 /sqline {                                        % x y -   (segment end)
     /sqly exch def /sqlx exch def
@@ -1279,7 +1291,7 @@ end
     sqlx sqly sqpcollinear
     /sqpn sqpn 1 add def
     /sqcx sqlx def /sqcy sqly def
-} def
+} bind def
 
 /sqclose {                                       % -   (closepath)
 % Emitting the closing edge also *ends* the subpath, so `sqhave` goes
@@ -1299,7 +1311,7 @@ end
         sqpmerge
         /sqhave false def
     } if
-} def
+} bind def
 
 /sqmove {                                        % x y -   (subpath start)
     /sqmy exch def /sqmx exch def
@@ -1312,7 +1324,7 @@ end
     /sqcx sqmx def /sqcy sqmy def
     /sqsx sqmx def /sqsy sqmy def
     /sqhave true def
-} def
+} bind def
 
 /scpath {                                        % -> region
 % The current path as a region. Flattens it (the path survives,
@@ -1345,7 +1357,7 @@ end
        /BBox [ sqbx0 sqby0 sqbx1 sqby1 ]
        /Edges sqbuf 0 sqn getinterval
        /Rule /nonzero >>
-} def
+} bind def
 
 % region -> num
 % A rectangle's area is exact and cached in its /Area; a path region's
@@ -1397,7 +1409,7 @@ end
 % `/Count` scatter over such a region needs no area at all.
 /scarea {
     dup /Area known { /Area get } { sqmeasure } ifelse
-} def
+} bind def
 
 /sqainsert {                                     % y -
 % One slab boundary into the sorted boundary list, coincident ones
@@ -1446,7 +1458,7 @@ end
     } if
     sqawork sqabudget gt sqanys sqays length ge or
         { scarea-region-too-complex-to-measure } if
-} def
+} bind def
 
 /sqscanline {                                    % -> covered width
 % Every edge crossing the horizontal line y = sqasy, insertion-sorted
@@ -1497,7 +1509,7 @@ end
                   sqaxs sqai 1 add get sqaxs sqai get sub add def } if
     } for
     sqacov
-} def
+} bind def
 
 % Measurement work units (edge scans and sort shifts), tuned so the
 % ceiling costs about a second in this interpreter rather than the
@@ -1553,7 +1565,7 @@ end
         } for
         sqawork sqabudget gt { scarea-region-too-complex-to-measure } if
     } for
-} def
+} bind def
 
 /sqmeasure {                                     % region -> num
     /sqareg exch def
@@ -1593,7 +1605,7 @@ end
         } for
         sqatotal
     } ifelse
-} def
+} bind def
 
 /siedge {                                        % index -   (one edge)
 % Half-open crossing test against the ray running +x from (six,siy):
@@ -1611,7 +1623,7 @@ end
             siy1 siy0 gt { /siw siw 1 add def } { /siw siw 1 sub def } ifelse
         } if
     } if
-} def
+} bind def
 
 /siscan {                                        % -> bool  (path region)
     /siedges sireg /Edges get def
@@ -1622,7 +1634,7 @@ end
         { sic 2 mod 0 ne }
         { siw 0 ne }
     ifelse
-} def
+} bind def
 
 /siinside {                                       % x y region -> bool
 % scin's containment test with no operand checks: scatter calls it
@@ -1635,7 +1647,7 @@ end
         { false }
         { sireg /Kind get /rect eq { true } { siscan } ifelse }
     ifelse
-} def
+} bind def
 
 /scin {                                          % x y region -> bool
 % Operands are checked on the stack before they are bound -- see
@@ -1644,7 +1656,7 @@ end
     1 index scisnum 3 index scisnum and
         not { scin-needs-two-numbers } if
     siinside
-} def
+} bind def
 
 % --- scatter ---------------------------------------------------------
 
@@ -1673,11 +1685,11 @@ end
         } for
         scfok
     } ifelse
-} def
+} bind def
 
 /scwins {                                        % -> bool  (weight roll)
     schasw { scpx scpy scwt scodds } { true } ifelse
-} def
+} bind def
 
 /scdeposit {                                     % -   (place one mark)
     scmin 0 gt {
@@ -1699,7 +1711,7 @@ end
     /scrun scrun 1 add def
     ScatterState /placed scrun put
     scpx scpy scsc scang scmark
-} def
+} bind def
 
 % Self-tests: `pscat --selftest lib/artkit.ps` (see docs/SELFTEST.md).
 % scatter validates its whole option dict before drawing a single
@@ -2009,7 +2021,7 @@ end
     % `--sweep-seed` the sweep overrides this restore too, which is
     % the whole point of a sweep.
     scseeded { scsaved srand } if
-} def
+} bind def
 
 % Containment work units (candidate tests, charged by the region's
 % edge count) a single scatter call may spend before it is stopped --
@@ -2020,7 +2032,7 @@ end
 
 /ScatterState 4 dict def
 ScatterState /placed 0 put
-/scplaced { ScatterState /placed get } def       % marks placed, read-only
+/scplaced { ScatterState /placed get } bind def       % marks placed, read-only
 
 % --- tiling (regular and randomized tessellations) --------------------
 % `grid` above already covers the square case. This section adds one
@@ -2067,7 +2079,7 @@ ScatterState /placed 0 put
             tgproc
         } for
     } for
-} def
+} bind def
 
 % cx cy r hex -  (appended to current path; pointy-top, like ngon/star)
 /hex {
@@ -2079,7 +2091,7 @@ ScatterState /placed 0 put
         tgx tga cos tgr mul add tgy tga sin tgr mul add lineto
     } for
     closepath
-} def
+} bind def
 
 % cx cy s up tri -  (appended to current path; up true points up)
 /tri {
@@ -2096,7 +2108,7 @@ ScatterState /placed 0 put
         tgx tgs 2 div add tgy tga add lineto
     } ifelse
     closepath
-} def
+} bind def
 
 % x y w h cols rows {cx cy r -} hexgrid -
 % Pointy-top hex lattice, cols hexes spanning w, odd rows staggered by
@@ -2124,7 +2136,7 @@ ScatterState /placed 0 put
             tgr tgproc
         } for
     } for
-} def
+} bind def
 
 % x y w h cols rows {cx cy s up -} trigrid -
 % Triangular lattice: cols upward triangles span w; each row packs
@@ -2151,7 +2163,7 @@ ScatterState /placed 0 put
             tgs tgup tgproc
         } for
     } for
-} def
+} bind def
 
 % x y w h cols rows {w h -} truchet -
 % Truchet tiles: walks a square grid like grid, but wraps each call in
@@ -2177,7 +2189,7 @@ ScatterState /placed 0 put
             grestore
         } for
     } for
-} def
+} bind def
 
 % --- fractals: edge-replacement and area-subdivision -------------------
 % Two distinct self-similar-geometry genres, generalized from the
@@ -2243,7 +2255,7 @@ ScatterState /placed 0 put
             } for
         } ifelse
     end
-} def
+} bind def
 
 % Two verified generators (own dict, `Palettes`-style): `/koch` is the
 % classic bump (verified above); `/quadkoch` is an 8-segment generator
@@ -2256,7 +2268,7 @@ ScatterState /placed 0 put
     /koch     [[0 60 -120 60] 3]
     /quadkoch [[0 90 -90 -90 0 90 90 -90] 4]
 >> def
-/fgen { FractalGens exch get aload pop } def   % /name -> turns scale
+/fgen { FractalGens exch get aload pop } bind def   % /name -> turns scale
 
 % [x0 y0 x1 y1 ... ] turns scale depth edgepoly -  (closed subpath
 % appended to current path — stroke or fill it yourself)
@@ -2299,7 +2311,7 @@ ScatterState /placed 0 put
         eplen epang epturns epscale epdepth edgefractal
     } for
     closepath
-} def
+} bind def
 
 % x1 y1 x2 y2 x3 y3 depth {x1 y1 x2 y2 x3 y3 -} gasket -
 % The Sierpinski gasket: at depth 0, calls proc with the triangle's
@@ -2402,7 +2414,7 @@ ScatterState /placed 0 put
             /gksp gksp 3 add def
         } ifelse
     } loop
-} def
+} bind def
 
 % x y w h depth {x y w h -} carpet -
 % The Sierpinski carpet: the square/rectangle counterpart to `gasket`
@@ -2457,7 +2469,7 @@ ScatterState /placed 0 put
             } for
         } ifelse
     } loop
-} def
+} bind def
 
 % --- hyperbolic geometry (Poincare disk model) ------------------------
 % The disk model: the whole hyperbolic plane lives inside a Euclidean
@@ -2487,7 +2499,7 @@ ScatterState /placed 0 put
     /hpr exch def /hpcy exch def /hpcx exch def
     hpcx hpx hpr mul add
     hpcy hpy hpr mul add
-} def
+} bind def
 
 % hrad theta hpolar -> x y   (hyperbolic radius + angle(deg) -> logical
 % Poincare coords: x = tanh(hrad/2)*cos(theta), y = tanh(hrad/2)*sin(theta).
@@ -2507,7 +2519,7 @@ ScatterState /placed 0 put
     /haR 1 hau sub 1 hau add div def
     haR hath cos mul
     haR hath sin mul
-} def
+} bind def
 
 % x1 y1 x2 y2 horthocircle -> a b r isline
 % The geodesic through two logical points: the circle orthogonal to the
@@ -2652,7 +2664,7 @@ ScatterState /placed 0 put
         /hor hor2 0 gt { hor2 sqrt } { 0 } ifelse def
         hocx hocy hor false
     } ifelse
-} def
+} bind def
 
 % a b r isline x y hreflect -> x' y'
 % Reflects a logical point across the geodesic horthocircle described
@@ -2674,7 +2686,7 @@ ScatterState /placed 0 put
         hra hrr dup mul hrdx mul hrd2 div add
         hrb hrr dup mul hrdy mul hrd2 div add
     } ifelse
-} def
+} bind def
 
 % cx cy r x1 y1 x2 y2 hgeo -
 % Appends the hyperbolic geodesic between two *logical* points to the
@@ -2722,7 +2734,7 @@ ScatterState /placed 0 put
             hgdcx hgdcy hgdr hga1 hga2 arcn
         } ifelse
     } ifelse
-} def
+} bind def
 
 % cx cy r [v0x v0y v1x v1y ... ] hpoly -
 % A closed geodesic polygon from a flat array of logical vertices, as
@@ -2770,7 +2782,7 @@ ScatterState /placed 0 put
         } ifelse
     } for
     closepath
-} def
+} bind def
 
 % cx cy r p q depth {gen proc} httile -
 % A regular {p,q} hyperbolic tessellation (p-gons, q meeting at every
@@ -2956,7 +2968,7 @@ ScatterState /placed 0 put
             } for
         } if
     } loop
-} def
+} bind def
 
 % --- noise / flow fields ----------------------------------------------
 % Coherent (Perlin-style) gradient noise for organic texture, curl noise
@@ -3053,20 +3065,20 @@ ScatterState /placed 0 put
         Perm nii Perm nij get put
         Perm nij nitmp put
     } for
-} def
+} bind def
 
 /gethash {                                       % xi yi -> h  (0..255)
     /ghy exch def /ghx exch def
     Perm ghx get ghy add 255 and
     Perm exch get
-} def
+} bind def
 
 /grad2 {                                         % h x y -> dot
     /g2y exch def /g2x exch def /g2h exch def
     /g2i g2h 7 and 2 mul def
     Grad2 g2i get g2x mul
     Grad2 g2i 1 add get g2y mul add
-} def
+} bind def
 
 /nfade {                                         % t -> f(t)  (quintic
     /nft exch def                                % smoothstep, fade(0)=0,
@@ -3075,11 +3087,11 @@ ScatterState /placed 0 put
     nft3 10 mul                                  % exactly 0 at integer
     nft3 nft mul 15 mul sub                      % lattice points, since
     nft3 nft2 mul 6 mul add                      % it zeroes both lerps
-} def
+} bind def
 
 /nlerp { /nlt exch def /nlb exch def /nla exch def   % a b t -> a+(b-a)*t
     nlb nla sub nlt mul nla add
-} def
+} bind def
 
 /noise2 {                                        % x y -> n
     /n2y exch def /n2x exch def
@@ -3100,7 +3112,7 @@ ScatterState /placed 0 put
     n2n00 n2n10 n2u nlerp
     n2n01 n2n11 n2u nlerp
     n2v nlerp
-} def
+} bind def
 
 % x y eps {x y -> n} curl2 -> dx dy
 % Curl noise: the field's perpendicular gradient (dPsi/dy, -dPsi/dx),
@@ -3125,7 +3137,7 @@ ScatterState /placed 0 put
     c2len 0 gt {
         c2vx c2len div c2vy c2len div
     } { 0 0 } ifelse
-} def
+} bind def
 
 % x y n stepsize {x y -> dx dy} advect -
 % Traces one particle: moveto's the start, then n times calls the field
@@ -3148,7 +3160,7 @@ ScatterState /placed 0 put
         /ady ady adfy adstep mul add def
         adx ady lineto
     } repeat
-} def
+} bind def
 
 % --- gradients (axial and radial shading fills) ------------------------
 % A thin convenience layer over the interpreter's `shfill` operator (issue
@@ -3192,7 +3204,7 @@ ScatterState /placed 0 put
     } for
     << /FunctionType 3 /Domain [0 1]
        /Functions gdfuncs /Bounds gdbounds /Encode gdenc >>
-} def
+} bind def
 
 /axialsh {                                % x0 y0 x1 y1 colors -> shdict
     /gdcolors exch def
@@ -3200,7 +3212,7 @@ ScatterState /placed 0 put
     << /ShadingType 2 /ColorSpace /DeviceRGB
        /Coords [gdx0 gdy0 gdx1 gdy1]
        /Function gdcolors gradfn >>
-} def
+} bind def
 
 /radialsh {                        % x0 y0 r0 x1 y1 r1 colors -> shdict
     /gdcolors exch def
@@ -3209,7 +3221,7 @@ ScatterState /placed 0 put
     << /ShadingType 3 /ColorSpace /DeviceRGB
        /Coords [gdx0 gdy0 gdr0 gdx1 gdy1 gdr1]
        /Function gdcolors gradfn >>
-} def
+} bind def
 
-/gradfill { gsave clip shfill grestore } def          % shadingdict gradfill -
+/gradfill { gsave clip shfill grestore } bind def          % shadingdict gradfill -
 %%EOF

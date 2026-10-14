@@ -2,6 +2,18 @@
 %%Title: paintkit.ps — pressure-sensitive ribbon strokes for artkit
 %%Creator: pscat — issue #41, the painterly-brush series' foundation
 %%EndComments
+%
+% Every procedure here is defined `} bind def` (issue #307). Ghostscript
+% looks up each executable name in a procedure body at run time, and
+% those lookups are slow once userdict holds the libraries' several
+% hundred names; `bind` resolves the operators once, when the library
+% loads. The cost: an operator redefined *after* this file loads (a
+% caller's own `/show`, `/rand`, `/fill`) no longer reaches these
+% procedures, and one redefined *before* it loads is left alone, since
+% `bind` only replaces names that are operators at that moment. Names
+% that are not operators (every library procedure, and tunables such as
+% drykit's `dkbudget`) stay late-bound, so overriding those works as
+% before. tests/libbind.rs fails for any procedure added without `bind`.
 % @requires: (lib/artkit.ps) run
 
 % A fifth sibling to graph.ps/dataviz.ps/etching.ps/pagekit.ps, but --
@@ -168,7 +180,7 @@
         pathforall
         pkscfirst not { pkscclosed } if
     ]
-} def
+} bind def
 
 % opts key default pkgetdef  value -
 % The default is wrapped in a 1-element array rather than bound
@@ -186,21 +198,21 @@
         { pkgdict pkgkey get }
         { pkgdef 0 get }
     ifelse
-} def
+} bind def
 
 % --- pressure presets: t -> mult -------------------------------------
 % @kind: Procedure
 % @summary: pkribbon's default /Pressure preset: constant width (t -> 1.0).
 % @example: t pkflat mult
-/pkflat  { pop 1.0 } def                          % constant
+/pkflat  { pop 1.0 } bind def                          % constant
 % @kind: Procedure
 % @summary: A pkribbon /Pressure preset: linear taper across the whole stroke (t -> t).
 % @example: t pktaper mult
-/pktaper { } def                                  % linear (t is the mult)
+/pktaper { } bind def                                  % linear (t is the mult)
 % @kind: Procedure
 % @summary: A pkribbon /Pressure preset: non-linear 0->1->0 hump, widest at the middle of the stroke.
 % @example: t pkbell mult
-/pkbell  { 180 mul sin } def                      % non-linear 0->1->0 hump
+/pkbell  { 180 mul sin } bind def                      % non-linear 0->1->0 hump
 
 % t -> mult   (StartTaper/EndTaper ramp; reads pkstarttaper/pkendtaper)
 % Both ramps are computed unconditionally and combined with the
@@ -227,7 +239,7 @@
         ifelse
     def
     pktfs pktfe lt { pktfs } { pktfe } ifelse
-} def
+} bind def
 
 % t -> halfwidth   (reads pkwidth/pkpressure/pktaperf's globals)
 % @internal
@@ -237,11 +249,11 @@
     pkht pkpressure
     pkht pktaperf
     mul mul 2 div
-} def
+} bind def
 
 % amount -> offset in -amount..amount, deterministic under srand
 % @internal
-/pkjit { frnd 2 mul 1 sub mul } def
+/pkjit { frnd 2 mul 1 sub mul } bind def
 
 % x y ang halfw side -> ex ey   (side: -1 right / +1 left of travel;
 % applies /Jitter along the perpendicular, skipped entirely at 0)
@@ -253,7 +265,7 @@
     /pkepa pkeang 90 pkeside mul add def
     pkex pkepa cos pkeoff mul add
     pkey pkepa sin pkeoff mul add
-} def
+} bind def
 
 % [x y ang t sp atend] pkdot -   (degenerate single-point fallback)
 % Diameter is Width*Pressure only -- not pkhalfwat's full
@@ -268,7 +280,7 @@
     3 get /pkdt exch def
     /pkdhw pkwidth pkdt pkpressure mul 2 div def
     pkdhw 0 gt { pkdx pkdy pkdhw 0 360 arc closepath } if
-} def
+} bind def
 
 % start end side reverse pkloop -   (one closed offset loop, no caps)
 % `reverse` must be opposite between the two loops of a ring (right
@@ -296,7 +308,7 @@
         pklx pkly pklang pklt pkhalfwat pklside pkedge lineto
     } for
     closepath
-} def
+} bind def
 
 % start end pkopenrun -   (one open ribbon polygon with caps)
 % A cap degrades to /pointed automatically only when its half-width is
@@ -402,7 +414,7 @@
         } ifelse
         closepath
     } ifelse
-} def
+} bind def
 
 % start end closed pkbuildrun -   (one subpath's worth of walkpath stops;
 % closed comes from pkscanclosed, not inferred from coordinates)
@@ -456,7 +468,7 @@
             pkbrstart pkbrend pkopenrun
         } ifelse
     } ifelse
-} def
+} bind def
 
 % opts pkribbon -
 %
@@ -691,7 +703,7 @@
         fill
         grestore
     } if
-} def
+} bind def
 
 % --- angled-nib calligraphy brush (issue #42) -------------------------
 % opts pknib -
@@ -806,7 +818,7 @@
     } {
         pnbestang
     } ifelse
-} def
+} bind def
 
 % t -> mult   (installed as pkribbon's own /Pressure; reads
 % pnangle/pnminwidth/pnuserpressure/pnangles, set fresh by pknib)
@@ -835,7 +847,7 @@
         }
     ifelse
     pnpt pnuserpressure mul
-} def
+} bind def
 
 % @kind: Procedure
 % @summary: An angled-nib calligraphy preset built on pkribbon: mark width is driven by the angle between local path direction and a fixed nib angle, widest perpendicular to it and narrowing toward MinWidth parallel to it. The current path must be exactly one open subpath -- call once per stroke.
@@ -934,7 +946,7 @@
     pnopts pnribbonopts copy pop
     pnribbonopts /Pressure /pnpressure load put
     pnribbonopts pkribbon
-} def
+} bind def
 
 % --- dry-bristle brush (issue #43) ------------------------------------
 % opts pkdry -
@@ -1286,7 +1298,7 @@
         } for
         grestore
     } if
-} def
+} bind def
 
 % rate -> bool   (true with probability rate, clamped at both ends: a
 % rate >= 1 is *always* true and a rate <= 0 is *always* false, not
@@ -1302,7 +1314,7 @@
         { pop true }
         { dup 0 le { pop false } { frnd exch lt } ifelse }
     ifelse
-} def
+} bind def
 
 % pboff pbw pbrunstart pbrunend pbdashrun -   (one bristle's dashes
 % across one subpath's raw-stop range [pbrunstart pbrunend], inclusive
@@ -1414,7 +1426,7 @@
     pbdrstate {
         << /Width pbdrw /Jitter pbjitter /Pitch pbpitch >> pkribbon
     } if
-} def
+} bind def
 
 % --- spray-paint brush (issue #44) ------------------------------------
 % opts pkspray -
@@ -1546,7 +1558,7 @@
         { pop true }
         { dup 0 le { pop false } { frnd exch lt } ifelse }
     ifelse
-} def
+} bind def
 
 % cx cy baseradius pzpdot -   (append one particle dot to the current
 % path; consumes this particle's randomness in the pinned order the
@@ -1585,7 +1597,7 @@
     % with a stray line across the whole batched path.
     pzdpx pzdsz 2 div add pzdpz moveto
     pzdpx pzdpz pzdsz 2 div 0 360 arc
-} def
+} bind def
 
 % x y baseradius count pzburstcluster -   (count particles pooled
 % around one point: trigger-dwell bursts and the degenerate dab)
@@ -1593,7 +1605,7 @@
 /pzburstcluster {
     /pzbc exch def /pzbbR exch def /pzby exch def /pzbx exch def
     1 1 pzbc { pop pzbx pzby pzbbR pzpdot } for
-} def
+} bind def
 
 % opts pkspray -
 % @kind: Procedure
@@ -1774,7 +1786,7 @@
         fill
         grestore
     } if
-} def
+} bind def
 % --- stylized oil-paint brush (issue #45) -----------------------------
 % opts pkoil -
 % A stylized oil-paint impasto preset built from layered pressure ribbons
@@ -1831,7 +1843,7 @@
 % @internal
 /poroll {
     dup 1 ge { pop true } { dup 0 le { pop false } { frnd exch lt } ifelse } ifelse
-} def
+} bind def
 
 % Pressure proc handed to each nested pkribbon call. The nested ribbon
 % sees only its own run's polyline, so its t restarts at 0 for every
@@ -1840,11 +1852,11 @@
 % every short dash would get a fresh 0..1 pressure domain.
 % t -> mult
 % @internal
-/porpress { porsingle { pop 1 } { porT1 porT0 sub mul porT0 add poPressure } ifelse } def
+/porpress { porsingle { pop 1 } { porT1 porT0 sub mul porT0 add poPressure } ifelse } bind def
 
 % -
 % @internal
-/porbr { << /Width porw /Jitter poJitter /Pitch poPitch /Pressure /porpress load >> pkribbon } def
+/porbr { << /Width porw /Jitter poJitter /Pitch poPitch /Pressure /porpress load >> pkribbon } bind def
 
 % pooff porw porunstart porunend porad -
 % Offsets are scaled by the caller's /Pressure at each stop, and the
@@ -1885,7 +1897,7 @@
         /poradi poradi 1 add def
     } loop
     porstate { porbr } if
-} def
+} bind def
 
 %%SelfTest: pkoil-hue-keys
 %   { newpath 0 0 moveto 10 0 lineto << /HighlightColor 5 >> pkoil }
@@ -2094,7 +2106,7 @@
         } if
         grestore
     } if
-} def
+} bind def
 
 % --- trowel / palette knife (issue #111) ------------------------------
 % opts pktrowel -
@@ -2203,7 +2215,7 @@
 /ptroll {
     frnd exch
     dup 1 ge { pop pop true } { dup 0 le { pop pop false } { lt } ifelse } ifelse
-} def
+} bind def
 
 % i u e ptpt  ->  x y
 % Blade-space to device space: lateral offset `u` along the blade
@@ -2218,7 +2230,7 @@
     /ptpb ptpa 90 add ptAngle add def
     ptpx ptpb cos ptpu mul add ptpa cos ptpe mul add
     ptpy ptpb sin ptpu mul add ptpa sin ptpe mul add
-} def
+} bind def
 
 % i ptcolor -   (set the loaded color for a run that starts at stop i; only
 % called with /Colors set)
@@ -2231,7 +2243,7 @@
     ptColorRec ptcu
     ptColorRec 2 get { ptflips ptcli get } { false } ifelse
     puat puwet 3 array astore ptcsh shade setrgbcolor
-} def
+} bind def
 
 % - ptemit -   (fills the ptk accumulated stops as one strip, resets ptk)
 % Each end gets two extra vertices, carrying half a pitch of contact
@@ -2276,7 +2288,7 @@
         closepath fill
     } if
     /ptk 0 def
-} def
+} bind def
 
 % - ptgemit -   (ptemit, but only when there is a ridge to draw)
 % The ridge pass runs, and draws its randomness, even at /EdgeBuildup 0
@@ -2286,7 +2298,7 @@
 % coupling `ptroll` draws-before-it-clamps to avoid: a second pktrowel
 % call, or any seeded art placed after this one, would silently move.
 % @internal
-/ptgemit { ptEdgeBuildup 0 gt { ptemit } { /ptk 0 def } ifelse } def
+/ptgemit { ptEdgeBuildup 0 gt { ptemit } { /ptk 0 def } ifelse } bind def
 
 % na nb ptridge -   (a continuous strip between two normalized blade
 % offsets, one per subpath -- the edge buildup, which never breaks)
@@ -2310,7 +2322,7 @@
         ptgrec 5 get 2 and 2 eq { ptgemit } if
     } for
     ptgemit
-} def
+} bind def
 
 %%SelfTest: pktrowel-touch-guards
 %   % The no-canvas cases first: nothing in this block has set a surface yet.
@@ -2700,7 +2712,7 @@
         ptbasecolor aload pop setrgbcolor
         grestore
     } if
-} def
+} bind def
 
 % --- fan brush (issue #114) -------------------------------------------
 % opts pkfan -
@@ -2827,14 +2839,14 @@
 % @internal
 /pfroll {
     dup 1 ge { pop true } { dup 0 le { pop false } { frnd exch lt } ifelse } ifelse
-} def
+} bind def
 
 % t pfopen -> multiplier   (reads pfferrule)
 % @internal
 /pfopen {
     dup 0 le { pop 0 } { 0.6 exp } ifelse
     1 pfferrule sub mul pfferrule add
-} def
+} bind def
 
 % i pfcolor -   (set the loaded color of the current bristle for a run that
 % starts at stop i; only called with /Colors set)
@@ -2849,7 +2861,7 @@
     pfColorRec pfub
     pfColorRec 2 get { pfflips pfcli get } { false } ifelse
     puat puwet 3 array astore 1 pfcj add shade setrgbcolor
-} def
+} bind def
 
 % runstart runend islast pfrun -
 % Builds one contiguous inked run of the current bristle as a
@@ -2898,7 +2910,7 @@
     pfColorRec null ne { pfrstart pfcolor } if
     << /Width pfrw /Pitch pfrp /StartCap /pointed /EndCap /pointed
        /EndTaper pflast { pfFlick } { 0 } ifelse >> pkribbon
-} def
+} bind def
 
 % i pfray -   (the current bristle's ray of a *pressed* fan, at the
 % degenerate stop `i`)
@@ -2931,7 +2943,7 @@
     pfColorRec null ne { pfrayi pfcolor } if
     << /Width pfrw /Pitch pfrp /StartCap /pointed /EndCap /pointed
        /EndTaper pfFlick >> pkribbon
-} def
+} bind def
 
 %%SelfTest: pkfan-colors-rejects-malformed-loads
 %   { newpath 0 0 moveto 50 0 lineto << /Colors 5 >> pkfan }
@@ -3238,7 +3250,7 @@
         pfbasecolor aload pop setrgbcolor
         grestore
     } if
-} def
+} bind def
 
 % --- broad flat brush (issue #115) ------------------------------------
 % opts pkbroad -
@@ -3352,7 +3364,7 @@
     /pmpb pmpa 90 add pmAngle add def
     pmpx pmpb cos pmpu mul add
     pmpy pmpb sin pmpu mul add
-} def
+} bind def
 
 % i pmcolor -   (set the loaded color of the current striation for a run
 % that starts at stop i; only called with /Colors set)
@@ -3365,7 +3377,7 @@
     pmColorRec pmnc
     pmColorRec 2 get { pmflips pmcli get } { false } ifelse
     puat puwet 3 array astore 1 pmcj add shade setrgbcolor
-} def
+} bind def
 
 % i na nb back fwd pmstamp -   (the brush's footprint at a single stop)
 %
@@ -3411,7 +3423,7 @@
     pmsbx pmsfwd  pmscos mul add  pmsby pmsfwd  pmssin mul add lineto
     pmsbx pmsback pmscos mul sub  pmsby pmsback pmssin mul sub lineto
     closepath fill
-} def
+} bind def
 
 % i pmgap -> length   (how far the stroke travels on from stop i)
 %
@@ -3430,7 +3442,7 @@
         ifelse
     } { pop pmPitch 0.5 mul } ifelse
     dup 0 le { pop pmPitch 0.5 mul } if
-} def
+} bind def
 
 % start end na nb ranout pmemit -   (one striation run, as a filled strip)
 %
@@ -3474,7 +3486,7 @@
         % run knows which way the brush was going.
         pmstart pmnav pmnbv 0 pmstart pmgap pmstamp
     } ifelse
-} def
+} bind def
 
 % charge affinity pmwets -> bool   (does this striation deposit here?)
 %
@@ -3491,7 +3503,7 @@
         { pop pop true }
         { dup 0 le { pop pop false } { lt } ifelse }
     ifelse
-} def
+} bind def
 
 % v pmtaper -> tapered   (narrows a boundary toward the striation center)
 %
@@ -3503,7 +3515,7 @@
 % @internal
 /pmtaper {
     pmnc sub pmtap mul pmnc add
-} def
+} bind def
 
 % -> multiplier   (reads pmei/pmstart/pmspan/pmran; the run-end taper)
 % Written as its own proc so pmemit's two point loops can't drift apart.
@@ -3516,7 +3528,7 @@
             { pop 1 }
         ifelse
     } { 1 } ifelse
-} def
+} bind def
 
 %%SelfTest: pkbroad-colors-rejects-malformed-loads
 %   { newpath 0 0 moveto 50 0 lineto << /Colors 5 >> pkbroad }
@@ -3819,7 +3831,7 @@
         pmbase aload pop setrgbcolor
         grestore
     } if
-} def
+} bind def
 
 % --- liner / detail brush (issue #116) --------------------------------
 % opts pkliner -
@@ -3971,7 +3983,7 @@
     % regular beading along a long stroke.
     /pqaf pqaf dup mul 3 pqaf 2 mul sub mul def
     pqa0 pqa1 pqa0 sub pqaf mul add
-} def
+} bind def
 
 % charge affinity pqwets -> bool   (is the tip depositing here?)
 %
@@ -3986,7 +3998,7 @@
         { pop pop true }
         { dup 0 le { pop pop false } { lt } ifelse }
     ifelse
-} def
+} bind def
 
 % t pqhw -> half width   (the artist's lift, before any run-end taper)
 % @internal
@@ -3994,7 +4006,7 @@
     /pqht exch def
     pqWidth 0.5 mul 1 pqTaper pqht 1.25 exp mul sub mul
     dup 0 lt { pop 0 } if
-} def
+} bind def
 
 % s t pqoff -> lateral offset   (how far the tip has wandered)
 %
@@ -4016,7 +4028,7 @@
             add add pqoamp mul
         }
     ifelse
-} def
+} bind def
 
 % i pqnrm -> nx ny   (unit normal of the displaced centerline at stop i)
 %
@@ -4037,7 +4049,7 @@
         { pqndy neg pqnl div  pqndx pqnl div }
         { pqraw pqni get 2 get 90 add dup cos exch sin }
     ifelse
-} def
+} bind def
 
 % i pqrunw -> half width   (the lift, plus this run's own lift-on/off)
 %
@@ -4075,7 +4087,7 @@
                   1 sub pqrdep mul 1 add mul } if
         } if
     } if
-} def
+} bind def
 
 % i side pqside -> x y   (a boundary point of the ribbon at stop i)
 %
@@ -4091,7 +4103,7 @@
     /pqsw pqsdi pqrunw pqsdd mul def
     pqcx pqsdi get pqsnx pqsw mul add
     pqcy pqsdi get pqsny pqsw mul add
-} def
+} bind def
 
 % start end pqemit -   (one wet run, as a filled ribbon)
 % @internal
@@ -4199,14 +4211,14 @@
             } if
         } ifelse
     } ifelse
-} def
+} bind def
 
 % start end lifton liftoff pqrun -   (emit one run with its end shapes)
 % @internal
 /pqrun {
     /pqrtoff exch def /pqrton exch def
     pqemit
-} def
+} bind def
 
 %%SelfTest: pkliner-touch-guards
 %   % The no-canvas cases first: nothing in this block has set a surface yet.
@@ -4466,7 +4478,7 @@
         pqbase aload pop setrgbcolor
         grestore
     } if
-} def
+} bind def
 
 % --- wet interaction: soft layered paint (issue #113) -----------------
 % proc opts pkwet -
@@ -4777,13 +4789,13 @@
 % below claims cannot happen (review of PR #138).
 % -> depth
 % @internal
-/pqdnow { userdict /pqdepth get } def
+/pqdnow { userdict /pqdepth get } bind def
 % depth pqdset -
 % @internal
-/pqdset { userdict /pqdepth 3 -1 roll put } def
+/pqdset { userdict /pqdepth 3 -1 roll put } bind def
 % -> frame   (this invocation's 7-slot frame; pkwet lists the slots)
 % @internal
-/pqmyframe { userdict /pqframes get pqdnow get } def
+/pqmyframe { userdict /pqframes get pqdnow get } bind def
 
 %%SelfTest: pkwet-rejects-malformed-directional-options
 %   { { } << /Direction (down) >> pkwet }
@@ -5184,7 +5196,7 @@
     % restoring it *by hand* would force the graphics state into
     % DeviceRGB, losing the caller's color space if they were painting in
     % DeviceGray or DeviceCMYK (Codex review).
-} def
+} bind def
 
 % --- watercolor wash and paper ground (issue #47) ---------------------
 % opts pkwash -
@@ -5306,7 +5318,7 @@ systemdict /setalpha known /pwhasalpha exch def
         (flattening each mark against white; overlaps will not mix.\n)
         print
     } if
-} def
+} bind def
 
 % seed -   (seeds this section's own generator; see the header)
 % Reduced mod 2147483646 *before* `abs` so the most negative
@@ -5316,7 +5328,7 @@ systemdict /setalpha known /pwhasalpha exch def
 /pwsrand {
     cvi 2147483646 mod abs 1 add
     /pwstate exch def
-} def
+} bind def
 
 % -> 0.0..1.0
 % Schrage's decomposition of the minimal standard LCG (16807, 2^31-1):
@@ -5330,7 +5342,7 @@ systemdict /setalpha known /pwhasalpha exch def
     /pwstate pwstate 127773 mod 16807 mul pwq 2836 mul sub def
     pwstate 0 lt { /pwstate pwstate 2147483647 add def } if
     pwstate 2147483647 div
-} def
+} bind def
 
 % The wobble's harmonic ladder. *Integer* multiples of the subpath's
 % normalized progress, so the displacement at t=1 equals the one at t=0
@@ -5373,7 +5385,7 @@ systemdict /setalpha known /pwhasalpha exch def
     % the caller's winding direction, which nothing here can know.
     /pwdx pwrand 0.6 mul 0.3 sub def
     /pwdy pwrand 0.6 mul 0.3 sub def
-} def
+} bind def
 
 % t subphase -> displacement in about -1..1
 % @internal
@@ -5393,7 +5405,7 @@ systemdict /setalpha known /pwhasalpha exch def
         def
     } for
     pwacc pwanorm mul
-} def
+} bind def
 
 % atotal -   (fallback only: the opaque color this mark would have had
 % over white paper at total coverage `atotal`)
@@ -5404,7 +5416,7 @@ systemdict /setalpha known /pwhasalpha exch def
     1 1 pwg sub pwft mul sub
     1 1 pwb sub pwft mul sub
     setrgbcolor
-} def
+} bind def
 
 % amark -   (paint for one mark of alpha `amark` laid over whatever
 % this wash has already put down, tracked in pwcum)
@@ -5415,7 +5427,7 @@ systemdict /setalpha known /pwhasalpha exch def
         { pwmk setalpha }
         { 1 1 pwcum sub 1 pwmk sub mul sub pwsetflat }
     ifelse
-} def
+} bind def
 
 % -   (builds the current layer's wobbled boundary into the current
 % path, one closed subpath per subpath of the sampled source)
@@ -5446,7 +5458,7 @@ systemdict /setalpha known /pwhasalpha exch def
         pwfirst { pwnx pwny moveto } { pwnx pwny lineto } ifelse
     } for
     pwstarted { closepath } if
-} def
+} bind def
 
 % @kind: Procedure
 % @summary: Fills the current path as a translucent watercolor wash: layered passes each with their own wobbled wet boundary, an optional darker rim where pigment pools at the drying edge, and optional granulation. Color comes from whatever the caller already set. Needs pscat's setalpha; falls back to flattening against white elsewhere.
@@ -5708,7 +5720,7 @@ systemdict /setalpha known /pwhasalpha exch def
 
         grestore
     } if
-} def
+} bind def
 
 % -   (pkpaper's own rectangle as the current path; needed twice now,
 % once to fill the ground and once to clip the texture to it)
@@ -5717,7 +5729,7 @@ systemdict /setalpha known /pwhasalpha exch def
     newpath
     pvx pvy moveto pvw 0 rlineto 0 pvh rlineto pvw neg 0 rlineto
     closepath
-} def
+} bind def
 
 % tone-component -> the opaque color one grain mark flattens to
 % Only reached when there's no real alpha to composite with. The
@@ -5741,7 +5753,7 @@ systemdict /setalpha known /pwhasalpha exch def
         }
         { pvfcomp 1 pvdepth pvalpha mul sub mul }
     ifelse
-} def
+} bind def
 
 % cx cy len wid ang -   (adds one rotated fleck to the current path)
 % Built from explicit corner arithmetic rather than translate/rotate,
@@ -5765,7 +5777,7 @@ systemdict /setalpha known /pwhasalpha exch def
     pvfx pvfl pvfc mul sub pvfw pvfs mul sub
     pvfy pvfl pvfs mul sub pvfw pvfc mul add lineto
     closepath
-} def
+} bind def
 
 % @kind: Procedure
 % @summary: Lays a paper ground for watercolor: a tone fill over the given rectangle plus seeded grain speckle and fiber flecks. Paint it first; washes go over it. Uses setalpha where available and falls back to flattened tones elsewhere.
@@ -5912,7 +5924,7 @@ systemdict /setalpha known /pwhasalpha exch def
         } if
         grestore
     } if
-} def
+} bind def
 
 % --- foliage / dab brush (issue #117) ----------------------------------
 % opts pkdab -
@@ -5980,7 +5992,7 @@ systemdict /setalpha known /pwhasalpha exch def
         pdm1x pdm1y curveto
     } for
     closepath
-} def
+} bind def
 
 %%SelfTest: pkdab-rejects-malformed-options
 %   { newpath 0 0 moveto 10 0 lineto << /Size 0 >> pkdab }
@@ -6401,7 +6413,7 @@ systemdict /setalpha known /pwhasalpha exch def
         } if
         grestore
     } if
-} def
+} bind def
 
 % ============================================================================
 % Loaded colours: the `pu-` resolver (issue #183, slice L1 of
@@ -6457,7 +6469,7 @@ systemdict /setalpha known /pwhasalpha exch def
     dup 0 pugp putinterval
     dup pugp length pugs putinterval
     cvn cvx exec
-} def
+} bind def
 
 % opts (preset) puspell -   (/Colours and friends are errors, not ignored)
 % `pkgetdef` ignores keys it doesn't know, so without this a British spelling
@@ -6471,7 +6483,7 @@ systemdict /setalpha known /pwhasalpha exch def
     puso /ShadowColour known or
     puso /TipColour known or
         { pusn (-colours-is-spelled-colors) pugrd } if
-} def
+} bind def
 
 % opts /Key (preset-key) puhue -> [r g b] | null
 % One optional rgb colour key (`/HighlightColor`, `/ShadowColor`): `null` when
@@ -6495,7 +6507,7 @@ systemdict /setalpha known /pwhasalpha exch def
         } forall
         puhv
     } ifelse
-} def
+} bind def
 
 % opts (preset) pulightneedscolors -   (/Light without /Colors is an error)
 % For presets that don't already have a /Light of their own: an artist who
@@ -6505,7 +6517,7 @@ systemdict /setalpha known /pwhasalpha exch def
     /pulnn exch def /pulno exch def
     pulno /Light known pulno /Colors known not and
         { pulnn (-light-needs-colors) pugrd } if
-} def
+} bind def
 
 % opts (preset) puparse -> rec | null
 % See the section header for the record. Checks run in a fixed order, the
@@ -6556,7 +6568,7 @@ systemdict /setalpha known /pwhasalpha exch def
         } ifelse
         [ pupc pupm pupls pupl ]
     } ifelse
-} def
+} bind def
 
 % rec u flip puat -> r g b
 % The colour at head position u (section 2.4 of the design). N colours sit at
@@ -6597,7 +6609,7 @@ systemdict /setalpha known /pwhasalpha exch def
               ifelse }
         ifelse
     } ifelse
-} def
+} bind def
 
 % r g b puwet -> r g b
 % A loaded colour graded by the `pkwet` passes it is painted in (slice L3,
@@ -6621,7 +6633,7 @@ systemdict /setalpha known /pwhasalpha exch def
         } for
         puwc aload pop
     } if
-} def
+} bind def
 
 %%SelfTest: puparse-rejects-malformed-loads
 %   { << /Colors 5 >> (pkfan) puparse }
@@ -6950,7 +6962,7 @@ systemdict /setalpha known /pwhasalpha exch def
         } if
     } for
     puff
-} def
+} bind def
 
 %%SelfTest: puflips-mirrors-subpaths-facing-away-from-the-light
 %   % Stops are [x y angle t sp atend]: 1 starts a subpath, 2 ends one, 3 is both.
@@ -7054,7 +7066,7 @@ systemdict /setalpha known /pwhasalpha exch def
         { dup /BBox known exch /Kind known and }
         { pop false }
     ifelse
-} def
+} bind def
 
 % region count mhgrid -
 % Lays a jittered grid of about `count` kept cells. The cell count is what the
@@ -7086,7 +7098,7 @@ systemdict /setalpha known /pwhasalpha exch def
     }
     { /mhcols 0 def /mhrows 0 def /mhcw 1 def /mhch 1 def }
     ifelse
-} def
+} bind def
 
 % pitch cap {guard} mhcollect -
 % Walks the current path (flattened) and stores every stop as
@@ -7110,7 +7122,7 @@ systemdict /setalpha known /pwhasalpha exch def
         6 array astore mhstops mhi 3 -1 roll put
         /mhi mhi 1 add def
     } walkpath
-} def
+} bind def
 
 %%SelfTest: motion-region-and-budget-guards
 %   { 0 0 100 100 screct << /Count 0 >> pkcrisscross }
@@ -7357,7 +7369,7 @@ systemdict /setalpha known /pwhasalpha exch def
             } if
         } for
     } for
-} def
+} bind def
 
 % @kind: Procedure
 % @summary: A scumbling brush motion in a region (artkit's screct or scpath): many small separate circles scattered evenly, the tiny-circles stroke of clouds and bushes. Builds closed circle (or squashed ellipse) subpaths and paints nothing, so it composes with any preset: `region opts pkscumblein << >> pkoil`. Replaces the current path. For a connected chain of overlapping loops along a line use pkscumble.
@@ -7407,7 +7419,7 @@ systemdict /setalpha known /pwhasalpha exch def
             } if
         } for
     } for
-} def
+} bind def
 
 % @kind: Procedure
 % @summary: A scumbling brush motion along a line: the current path is read as a spine and replaced with one continuous chain of overlapping loops per subpath, the circular scrubbing stroke that builds clouds and bushes. Builds a path and paints nothing, so it composes with any preset: `opts pkscumble << >> pkoil`. A one-point subpath becomes a single circle. Deterministic under the caller's own srand.
@@ -7477,7 +7489,7 @@ systemdict /setalpha known /pwhasalpha exch def
             } if
         } ifelse
     } for
-} def
+} bind def
 
 % @kind: Procedure
 % @summary: A tapping / pouncing brush motion along a line: the current path is read as a spine and replaced with short stabs scattered along it, the foliage and distant-forest stroke. Each tap is a tiny two-point stroke, so it paints with any preset: `opts pktap << >> pkfan`; at /Length 0 each tap is a zero-length stroke that pkdab reads as one clump. Deterministic under the caller's own srand.
@@ -7526,7 +7538,7 @@ systemdict /setalpha known /pwhasalpha exch def
             mtpx mta cos mtl mul add mtpy mta sin mtl mul add lineto
         } if
     } for
-} def
+} bind def
 
 % @kind: Procedure
 % @summary: A pull brush motion from a line: the current path is read as a spine and replaced with strokes that start on it and are pulled along a fixed direction -- down from a horizon for reflections, up from a ground line for grass, down a ridge for a knife's "touch and pull" highlights. Builds a path and paints nothing, so it composes with any preset: `opts pkpull << >> pkliner`. Deterministic under the caller's own srand.
@@ -7620,7 +7632,7 @@ systemdict /setalpha known /pwhasalpha exch def
             } ifelse
         } if
     } for
-} def
+} bind def
 
 % @kind: Procedure
 % @summary: A zig-zag brush motion along a line: the current path is read as a spine and replaced with one polyline per subpath that alternates to either side of it, the back-and-forth stroke of water and sweeps. It starts and ends on the spine. Builds a path and paints nothing, so it composes with any preset: `opts pkzigzag << >> pkbroad`. Deterministic under the caller's own srand.
@@ -7696,7 +7708,7 @@ systemdict /setalpha known /pwhasalpha exch def
             } ifelse
         } ifelse
     } for
-} def
+} bind def
 
 % ============================================================================
 % The canvas surface (issue #182, slice S1 of docs/CANVAS_SURFACE.md)
@@ -7782,7 +7794,7 @@ systemdict /setalpha known /pwhasalpha exch def
 % @internal
 /pjisnum {
     type dup /integertype eq exch /realtype eq or
-} def
+} bind def
 
 % seed -   (seeds the surface's own generator)
 % Reduced mod 2147483646 *before* `abs`, and offset to 1..2147483646 because 0
@@ -7791,7 +7803,7 @@ systemdict /setalpha known /pwhasalpha exch def
 /pjsrand {
     cvi 2147483646 mod abs 1 add
     /pjstate exch def
-} def
+} bind def
 
 % -> 0.0..1.0   (exclusive at both ends)
 % Schrage's decomposition of the minimal standard LCG (16807, 2^31-1), so the
@@ -7802,7 +7814,7 @@ systemdict /setalpha known /pwhasalpha exch def
     /pjstate pjstate 127773 mod 16807 mul pjq 2836 mul sub def
     pjstate 0 lt { /pjstate pjstate 2147483647 add def } if
     pjstate 2147483647 div
-} def
+} bind def
 
 % i j s -> 0..1   (reads the permutation table from `pjp`)
 % `and 255` rather than `mod`, so a negative index stays in range. i, j and s
@@ -7811,14 +7823,14 @@ systemdict /setalpha known /pwhasalpha exch def
 /pjhash {
     3 -1 roll add 255 and pjp exch get
     add 255 and pjp exch get 255 div
-} def
+} bind def
 
 % a b t -> a + (b - a) t
 % @internal
 /pjlerp {
     /pjlt exch def
     pjlt mul exch 1 pjlt sub mul add
-} def
+} bind def
 
 % real -> integer 0..255   (floor, reduced mod 256 as a real first)
 % The hash depends only on its indices mod 256, so reducing before `cvi`
@@ -7827,7 +7839,7 @@ systemdict /setalpha known /pwhasalpha exch def
 % @internal
 /pjwrap {
     floor dup 256 div floor 256 mul sub cvi 255 and
-} def
+} bind def
 
 % x y -> 0..1   (the slow mottle at a canvas-space point)
 % @internal
@@ -7839,7 +7851,7 @@ systemdict /setalpha known /pwhasalpha exch def
     pjmx pjmy 101 pjhash pjmx 1 add pjmy 101 pjhash pjux pjlerp
     pjmx pjmy 1 add 101 pjhash pjmx 1 add pjmy 1 add 101 pjhash pjux pjlerp
     pjuy pjlerp
-} def
+} bind def
 
 % i j -> height 0..1   (the knuckle in cell (i, j); i and j integers)
 % @internal
@@ -7862,7 +7874,7 @@ systemdict /setalpha known /pwhasalpha exch def
             pjhk 0 ge { pjmd length pjmemocap lt { pjmd pjhk 2 index put } if } if
         }
     ifelse
-} def
+} bind def
 
 % x y -   (widen the canvas-space box pjbx0..pjby1 to a user-space point)
 % @internal
@@ -7874,7 +7886,7 @@ systemdict /setalpha known /pwhasalpha exch def
     dup pjbx0 lt { dup /pjbx0 exch def } if
     dup pjbx1 gt { dup /pjbx1 exch def } if
     pop
-} def
+} bind def
 
 % llx lly urx ury -   (sets pji0 pjj0 pji1 pjj1 and pjhuge)
 % The cells whose knuckle can reach a user-space box: its corners taken to
@@ -7903,7 +7915,7 @@ systemdict /setalpha known /pwhasalpha exch def
         cvi
     } forall
     /pjj1 exch def /pji1 exch def /pjj0 exch def /pji0 exch def
-} def
+} bind def
 
 % llx lly urx ury -> cells   (how many cells a catch over this box builds)
 % @internal
@@ -7913,7 +7925,7 @@ systemdict /setalpha known /pwhasalpha exch def
         { pjbudget 1 add }
         { pji1 pji0 sub 1 add cvr pjj1 pjj0 sub 1 add cvr mul }
     ifelse
-} def
+} bind def
 
 % raw reach pjstopbox -> llx lly urx ury
 % The user-space box an adopting preset passes to pjcells and pjcatch: the
@@ -7935,7 +7947,7 @@ systemdict /setalpha known /pwhasalpha exch def
         pjsby pjsbd add dup pjsby1 gt { /pjsby1 exch def } { pop } ifelse
     } forall
     pjsbx0 pjsby0 pjsbx1 pjsby1
-} def
+} bind def
 
 % cx cy rx ry -   (appends one axis-aligned ellipse as four curveto's)
 % Explicit corner arithmetic, with no CTM change per knuckle, as pvfleck does.
@@ -7949,7 +7961,7 @@ systemdict /setalpha known /pwhasalpha exch def
     pjox pjex sub pjoy pjky sub  pjox pjkx sub pjoy pjey sub  pjox pjoy pjey sub curveto
     pjox pjkx add pjoy pjey sub  pjox pjex add pjoy pjky sub  pjox pjex add pjoy curveto
     closepath
-} def
+} bind def
 
 % llx lly urx ury touch -   (intersects the clip with the surface's catch)
 % The box is in the current user space. Every knuckle with
@@ -8008,7 +8020,7 @@ systemdict /setalpha known /pwhasalpha exch def
         clip newpath
         pjsaved setmatrix
     } ifelse
-} def
+} bind def
 
 %%SelfTest: pkcanvas-rejects-malformed-options
 %   { << /Weave 0 >> pkcanvas } /pkcanvas-weave-must-be-positive
@@ -8170,4 +8182,4 @@ systemdict /setalpha known /pwhasalpha exch def
     userdict /pjM pjsmottle put
     userdict /pjR pjsrelief put
     userdict /pjmemo 1024 dict put
-} def
+} bind def
