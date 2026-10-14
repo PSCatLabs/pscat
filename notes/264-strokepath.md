@@ -43,3 +43,17 @@ path's bbox by half the line width instead.
 - **Hairlines.** Widths of one device pixel or less take tiny-skia's hairline
   rasterizer in `stroke` but are an ordinary filled outline after `strokepath`,
   so the own-raster test skips the zero-width case and the gs test covers it.
+- **Blast radius of the odd-dash fix.** No checked-in program uses an odd dash
+  array (grepped `lib/`, `gallery/`, `examples/`, `site/`, `web/`, `art/`, the
+  corpus; `lib/paintkit.ps` only sets `[]`), so no checked-in render changes. SVG
+  and PDF output already repeated odd arrays themselves (both formats define it);
+  only the raster was wrong, and now all three agree.
+- **Known deviation: the current point.** After `strokepath` the current point
+  is the start of the outline's first contour. gs starts on the other side of the
+  line (butt line `10 10 moveto 50 10 lineto`, width 10: gs (10, 5), pscat
+  (10, 15)), because tiny-skia's stroker walks the outline in the opposite
+  direction. Not fixed: nothing in the repo reads `currentpoint` after
+  `strokepath`, and the outline's winding and contents are unaffected.
+- **CI has no Ghostscript**, so the live gs comparisons skip there; the
+  hard-coded gs-pinned asserts still run. The gs comparisons were run locally
+  against Homebrew gs.

@@ -329,6 +329,22 @@ fn zero_width_is_one_device_pixel() {
 }
 
 #[test]
+fn gsave_strokepath_pathbbox_grestore_is_the_stroked_footprint() {
+    // The idiom from the drykit prototype (#233): measure the stroked
+    // footprint of a centerline without disturbing the path.
+    assert_eq!(
+        eval(
+            "newpath 100 100 moveto 300 100 lineto 20 setlinewidth \
+             gsave strokepath pathbbox grestore pathbbox"
+        ),
+        [
+            "100.0", "90.0", "300.0", "110.0", // the stroked outline
+            "100.0", "100.0", "300.0", "100.0", // the centerline, restored
+        ]
+    );
+}
+
+#[test]
 fn result_is_reported_in_current_user_space() {
     // The outline is stored in device space; pathbbox maps it back
     // through the CTM in force when it is asked, so a scale between
@@ -404,10 +420,16 @@ fn strokepath_bbox_matches_ghostscript() {
         let src = format!("newpath {path} strokepath");
         match (bbox(&src), gs_bbox(&src)) {
             (Some(a), Some(b)) => {
-                // Round joins: gs reports the control-polygon extent of
-                // its Bezier arcs (about 1 unit past the arc at width
-                // 20); pscat's is tighter. 1.0 covers it.
-                assert!(near(a, b, 1.0), "{name}: pscat {a:?} vs gs {b:?}");
+                // Most cases agree to a few thousandths. Round joins:
+                // gs reports the control-polygon extent of its Bezier
+                // arcs (about 1 unit past the arc at width 20); pscat's
+                // box is the tighter true one.
+                let tol = if name.contains("round join") {
+                    1.0
+                } else {
+                    0.05
+                };
+                assert!(near(a, b, tol), "{name}: pscat {a:?} vs gs {b:?}");
             }
             (None, None) => {}
             (a, b) => panic!("{name}: pscat {a:?} vs gs {b:?}"),
