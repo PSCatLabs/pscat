@@ -1,4 +1,4 @@
-//! drychalk (issue #235; design `docs/DRYMEDIA.md`): the chalk preset
+//! drychalk (issue #235; design `docs/dev/design/DRYMEDIA.md`): the chalk preset
 //! `dcchalk`, the chalk colours and the board dressing `dcboard`, over
 //! drykit's `dkstroke`.
 //!

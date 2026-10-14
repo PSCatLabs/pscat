@@ -75,7 +75,7 @@ pub(crate) fn install_errordict(dict: &mut Dict) {
 ///
 /// Deviation, on an empty operand stack: Ghostscript dies with an
 /// unrecoverable `stackunderflow`. pscat does not restore an operator's
-/// operands when it fails (HANDOFF.md), so after a catch the stack is
+/// operands when it fails (docs/dev/HANDOFF.md), so after a catch the stack is
 /// often empty where Ghostscript's holds the failed operands. The
 /// handler then falls back to the command `$error` already holds, which
 /// keeps the error name, the thing a re-raise exists to preserve.

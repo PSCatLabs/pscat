@@ -171,7 +171,7 @@ fn callable_density_total_tracks_the_peak_not_the_average() {
     // 400 * (0.5 + 1.0)/2 =~ 300. Confirmed empirically (headless
     // pscat, this exact call) to land at 400, matching the peak
     // reading, not the integral one -- pinned here as a regression
-    // guard for the design decision NOTES.md's issue #50 entry
+    // guard for the design decision docs/archive/NOTES.md's issue #50 entry
     // documents at length.
     let got = eval(
         "0 0 200 200 screct \

@@ -150,7 +150,7 @@ installed — fonts, Type 3 faces, artkit's mood palettes,
 `lib/pagekit.ps`'s templates, and artkit's/the style packs' major
 procedures — with a `pscat_version` field for drift detection. Prefer
 this over guessing a name from prose (this file included; see
-CAPABILITIES.md). Same catalog is exposed to MCP clients as the
+docs/dev/CAPABILITIES.md). Same catalog is exposed to MCP clients as the
 `describe_art_capabilities` tool.
 
 ## Making art
@@ -187,7 +187,7 @@ worth planning around:
 
 `lib/paintkit.ps`'s `pkwash`/`pkpaper` are the watercolor medium built
 on top of these; `pscat --capabilities` has their full option list, and
-`docs/WATERCOLOR.md` explains why the mechanism is shaped this way.
+`docs/dev/design/WATERCOLOR.md` explains why the mechanism is shaped this way.
 
 ## Watch it draw (needs a display)
 

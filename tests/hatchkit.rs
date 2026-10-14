@@ -22,7 +22,7 @@ fn run(it: &mut Interp, src: &str) {
         .unwrap_or_else(|e| panic!("eval of {src:?} failed: {}", it.error_report(&e)));
     // `hatch`'s own contract is `opts hatch -`; a leftover operand
     // here would be exactly the kind of leak (a /Density proc that
-    // doesn't consume both its operands, say) HANDOFF.md records
+    // doesn't consume both its operands, say) docs/dev/HANDOFF.md records
     // `--lint` catching in `et-hatch` and `tfdrawline` -- assert it
     // directly rather than relying on `--lint` being run separately.
     assert!(
@@ -299,7 +299,7 @@ fn density_proc_that_leaks_an_operand_is_visible_on_the_stack() {
     // scatter's /Mark and /Weight carry: it must consume both of its
     // operands. A proc that only pops one leaks the other per sample
     // -- not silently swallowed by `hatch`, which is what makes
-    // `--lint` able to catch it (HANDOFF.md records real leaks of
+    // `--lint` able to catch it (docs/dev/HANDOFF.md records real leaks of
     // exactly this shape it found in et-hatch and tfdrawline).
     let mut it = with_lib(60, 60);
     it.run_str(
@@ -568,7 +568,7 @@ fn clobbering_trim_bounds_from_density_does_not_bypass_max_samples() {
 // PostScript has no private namespace, so this stays a documented
 // contract -- `lib/artkit.ps`'s `scatter` ships with the identical
 // exposure for `/Mark`/`/Weight` against its own sc-/sq-/si- prefixes
-// (see NOTES.md's issue #49 entry for the full disposition).
+// (see docs/archive/NOTES.md's issue #49 entry for the full disposition).
 
 #[test]
 fn preflight_line_count_matches_the_real_drawing_loop_exactly() {

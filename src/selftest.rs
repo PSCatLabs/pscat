@@ -1,5 +1,5 @@
 //! `%%SelfTest` blocks and `pscat --selftest` (issue #95, Phase A
-//! mechanism 1 of `docs/PS_LIBRARY_COUPLING.md`'s "Touchpoint 2").
+//! mechanism 1 of `docs/dev/PS_LIBRARY_COUPLING.md`'s "Touchpoint 2").
 //!
 //! A PostScript library can carry its own validation-guard regression
 //! tests as doc comments, so checking a PS-only change no longer

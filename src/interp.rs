@@ -170,7 +170,7 @@ impl ForControl {
 
 /// One undo entry in the save/restore journal: the whole backing store
 /// of an array or dict as it was when first mutated at the current save
-/// level (object-granularity copy-on-write — see `VM.md`). Strings are
+/// level (object-granularity copy-on-write — see `docs/dev/VM.md`). Strings are
 /// exempt from restore per PLRM §3.7.3.2, so they never appear here.
 enum JEntry {
     Array {
@@ -308,7 +308,7 @@ impl Interp {
         // errordict holds a handler per error name, so a program can
         // re-raise a caught error with `errordict /name get exec` (issue
         // #372). A handler installed over one of them is not yet
-        // consulted when an error happens — see NOTES.md.
+        // consulted when an error happens — see docs/archive/NOTES.md.
         let mut errordict = Dict::new();
         ops::misc::install_errordict(&mut errordict);
         system.put(
@@ -1265,7 +1265,7 @@ impl Interp {
         Ok(None)
     }
 
-    // --- save/restore (design: VM.md) -----------------------------------
+    // --- save/restore (design: docs/dev/VM.md) -----------------------------------
 
     /// Copy-on-write barrier: call *before* mutating an array's contents.
     /// First touch at the current save level snapshots the whole backing
@@ -1434,7 +1434,7 @@ impl Interp {
     /// begin`" idiom); with plain `Rc` and no cycle collector, that
     /// means neither dict — nor anything a program stored in
     /// `userdict` — is ever freed by simply dropping the `Interp` (see
-    /// `HANDOFF.md`'s "systemdict self-reference" gotcha). Normally
+    /// `docs/dev/HANDOFF.md`'s "systemdict self-reference" gotcha). Normally
     /// that's one small, bounded, process-lifetime leak and genuinely
     /// doesn't matter. It stops being bounded for a caller that
     /// constructs many `Interp`s within one process run (issue #21's

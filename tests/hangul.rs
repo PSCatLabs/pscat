@@ -1,7 +1,7 @@
 //! lib/hangul.ps (issue #6): the jamo-composition Hangul face and its
 //! hg-write/hg-linecount wrap engine. No Ghostscript compatibility
 //! test — unlike lib/handscript.ps, this face needs the interpreter's
-//! `/UnicodeBuildChar true` extension (FONTS.md's "Unicode-mode Type 3
+//! `/UnicodeBuildChar true` extension (docs/dev/FONTS.md's "Unicode-mode Type 3
 //! BuildChar" addendum) to get a full codepoint into BuildChar, which
 //! is a pscat-only deviation with no gs equivalent.
 

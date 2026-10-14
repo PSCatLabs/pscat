@@ -1,6 +1,6 @@
 //! Generates `src/capabilities.rs`'s tag-driven catalog rows from
 //! `% @...` doc-comment tags in `lib/*.ps` (issue #94, follow-up to
-//! #92's `docs/PS_LIBRARY_COUPLING.md`, "Touchpoint 1").
+//! #92's `docs/dev/PS_LIBRARY_COUPLING.md`, "Touchpoint 1").
 //!
 //! Runs entirely at build time, on the host filesystem -- this is a
 //! normal cargo build script, not a wasm-runtime disk read. It writes
@@ -79,7 +79,7 @@
 //! strictly) *or* listed in [`LEGACY_FILES`] below. A file in neither
 //! bucket -- including a brand-new file nobody has touched yet --
 //! fails the build immediately, closing the "new sibling file
-//! silently uncataloged" gap `docs/PS_LIBRARY_COUPLING.md` calls
+//! silently uncataloged" gap `docs/dev/PS_LIBRARY_COUPLING.md` calls
 //! mandatory. A file that starts using tags must be removed from
 //! [`LEGACY_FILES`] (also enforced) so the two mechanisms never
 //! silently disagree about who owns a file.
@@ -94,7 +94,7 @@ use std::path::{Path, PathBuf};
 /// tags, remove its file name from this list, delete its now-redundant
 /// `Entry` rows from `ENTRIES`. `graph.ps`/`dataviz.ps`/`etching.ps`
 /// aren't in `capabilities.rs` at all today (a deliberate scope cut --
-/// see `CAPABILITIES.md`'s "Scope cuts") but still need to be listed
+/// see `docs/dev/CAPABILITIES.md`'s "Scope cuts") but still need to be listed
 /// here, or this script has no way to distinguish "deliberately
 /// uncataloged" from "forgotten."
 const LEGACY_FILES: &[&str] = &[

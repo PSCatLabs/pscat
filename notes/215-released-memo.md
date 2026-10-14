@@ -1,7 +1,7 @@
 # #215: Released in Part, the typed-memo gallery piece, and the blind comparison
 
 Epic #209's last ticket. Builds on #211–#214; read
-`notes/214-released-look.md` first. The design is `docs/TYPEWRITER.md`.
+`notes/214-released-look.md` first. The design is `docs/dev/design/TYPEWRITER.md`.
 
 ## What shipped
 
@@ -22,8 +22,8 @@ Epic #209's last ticket. Builds on #211–#214; read
 - `gallery/manifest.json` entry (lettering), and `typewriter`,
   `typewriter_outlines` and `released` in its library registry (guide:
   `docs/guides/fonts.md`). The READMEs' tables are regenerated.
-- `docs/typewriter/tools/blind_compare.py` writes:
-  - `docs/typewriter/blind_grid.png`: six strips, A to F, in a fixed shuffled
+- `docs/dev/design/typewriter/tools/blind_compare.py` writes:
+  - `docs/dev/design/typewriter/blind_grid.png`: six strips, A to F, in a fixed shuffled
     order: four from real scans (T2, T9, T10 and T15; three documents) and two
     from the render. Every strip is one typed line at one scale (240 dpi, the
     Szilard scan's own) and one size (720 x 64 px), greyscale; the render's go
@@ -32,7 +32,7 @@ Epic #209's last ticket. Builds on #211–#214; read
     T9 by 1.67 (the one real enlargement), T10 by 0.67, T15 by 1.14. T4, at
     600 dpi, is too small for a strip at 240. The key is printed, not
     committed: it is in the PR, so the maintainer can judge first.
-  - `docs/typewriter/memo_vs_real.png`: the page beside T1 at T1's scale
+  - `docs/dev/design/typewriter/memo_vs_real.png`: the page beside T1 at T1's scale
     (75 dpi).
     T1 (a 1914 letter) is the board's only full typed page; it is not a
     released memo, but it is the closest real page in the repo.
@@ -74,7 +74,7 @@ the PR under the key, so that nothing in the repo gives the answer away first.
 
 - #466: a copy's paper keeps no grey haze or grain.
 - #467: the 4x mis-strike on y lifts a letter beyond the measured tail.
-- #468: the reference search docs/TYPEWRITER.md Q3 asked of this ticket
+- #468: the reference search docs/dev/design/TYPEWRITER.md Q3 asked of this ticket
   (two-colour bleed, embossing, a confirmed electric page) was not done.
 - Already open: #448 (multi-page `rel-page`, so the piece is one page), #449,
   #450, #451, #422, #423.

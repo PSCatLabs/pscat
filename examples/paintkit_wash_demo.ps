@@ -6,7 +6,7 @@
 % Specimen for paintkit's pkwash/pkpaper (lib/paintkit.ps): translucent
 % washes built on pscat's setalpha/setblendmode (issue #47's renderer
 % extension, the architecture issue #46's spike selected -- see
-% docs/WATERCOLOR.md). Row 1 ramps /Alpha, row 2 /Wet, row 3 /Bloom,
+% docs/dev/design/WATERCOLOR.md). Row 1 ramps /Alpha, row 2 /Wet, row 3 /Bloom,
 % row 4 /Layers, row 5 /Grain, row 6 is the wash-order question:
 % the same two washes in both orders under /Normal and under
 % /Multiply. The whole sheet sits on a pkpaper ground.
@@ -14,7 +14,7 @@
 % Under an interpreter without setalpha -- real Ghostscript, notably --
 % every wash here falls back to its flattened-over-white equivalent and
 % the sheet still renders, opaque: see the note printed to stdout, and
-% docs/WATERCOLOR.md for why that gap exists at all.
+% docs/dev/design/WATERCOLOR.md for why that gap exists at all.
 %
 %   pscat --page 620x820 examples/paintkit_wash_demo.ps --png wash.png
 

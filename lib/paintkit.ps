@@ -497,7 +497,7 @@
 % Self-tests: `pscat --selftest lib/paintkit.ps`. Each block below
 % pins a defect cross-model review actually found on PR #76, so a
 % guard can't be dropped or weakened without something going red --
-% see docs/SELFTEST.md for the convention and the defect map.
+% see docs/dev/SELFTEST.md for the convention and the defect map.
 %
 %%SelfTest: pkribbon-rejects-a-non-callable-pressure
 %   % PR #76 round 2: a bare number as /Pressure is never
@@ -1094,7 +1094,7 @@
 % 24): the default (18 bristles, default Pitch) renders in ~1.5s; the
 % /Bristles safety cap (100) at the same default Pitch takes ~8s.
 % Custom, finer /Pitch values raise the sample count and cost
-% proportionally -- see NOTES.md's issue #43 entry for the full
+% proportionally -- see docs/archive/NOTES.md's issue #43 entry for the full
 % figures.
 %
 % Cusp guard (issue #79): the stop budget above doesn't see the cost of
@@ -6138,7 +6138,7 @@
     % neither plain names nor the operand stack works here.
     pqmyframe 0 pqplan put
     % The pass mix, for a preset painting in *loaded* colours (`/Colors`,
-    % issue #183 slice L3, docs/PAINT_LOADING.md 3.4). Setting the colour
+    % issue #183 slice L3, docs/dev/design/PAINT_LOADING.md 3.4). Setting the colour
     % before a pass grades an inherited colour, but a loaded brush paints
     % in its own, so every pass would come out at full strength and a pull
     % would read as a hard block. `puwet` instead mixes each loaded colour
@@ -6231,7 +6231,7 @@
 % x y w h opts pkpaper -
 %
 % The watercolor medium, implementing the architecture issue #46's
-% spike selected and recorded in `docs/WATERCOLOR.md`: real alpha
+% spike selected and recorded in `docs/dev/design/WATERCOLOR.md`: real alpha
 % compositing in the renderer (`setalpha`/`setblendmode`, this repo's
 % only non-PLRM painting operators) for the translucency and pooling,
 % noise-perturbed *vector* geometry for the wet, irregular boundary --
@@ -6252,7 +6252,7 @@
 % Wash order. Under the default /Blend /Normal, washes composite
 % source-over: a later wash reads as fresher paint over a drier one,
 % and the result depends on the order they were laid down. That is
-% honest watercolor behavior, and `docs/WATERCOLOR.md` flagged it as
+% honest watercolor behavior, and `docs/dev/design/WATERCOLOR.md` flagged it as
 % something this issue had to either document or give control over.
 % Both: /Blend /Multiply is the order-independent alternative --
 % multiplication commutes, so a stack of washes reads the same however
@@ -7769,7 +7769,7 @@ systemdict /setalpha known /pwhasalpha exch def
 %
 % ============================================================================
 % Loaded colours: the `pu-` resolver (issue #183, slice L1 of
-% docs/PAINT_LOADING.md)
+% docs/dev/design/PAINT_LOADING.md)
 % ============================================================================
 %
 % A brush loaded with more than one colour (`/Colors`, adopted by the presets
@@ -10392,7 +10392,7 @@ systemdict /setalpha known /pwhasalpha exch def
 } bind def
 
 % ============================================================================
-% The canvas surface (issue #182, slice S1 of docs/CANVAS_SURFACE.md)
+% The canvas surface (issue #182, slice S1 of docs/dev/design/CANVAS_SURFACE.md)
 % ============================================================================
 %
 % A painter's lightest strokes catch only on the raised weave of the canvas,
@@ -10459,7 +10459,7 @@ systemdict /setalpha known /pwhasalpha exch def
 % The knuckles are ellipses, not diamonds (CANVAS_SURFACE.md Q9). A diamond's
 % `|x|/a + |y|/b` reaches a cell corner later than an ellipse does, so at
 % /Touch 0.99 the diamonds left a hole at every cell corner, short of the
-% near-solid catch the design promises there (NOTES.md, issue #220).
+% near-solid catch the design promises there (docs/archive/NOTES.md, issue #220).
 %
 % The lattice is not ruled (issue #298). On a regular lattice the knuckles
 % read as a square pixel grid at 2x, more halftone than canvas. So each

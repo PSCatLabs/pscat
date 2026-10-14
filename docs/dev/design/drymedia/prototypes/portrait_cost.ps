@@ -1,0 +1,132 @@
+%!PS-Adobe-3.0
+%%Title: drykit cost prototype -- a portrait-sized charcoal load through dkcatch
+%%BoundingBox: 0 0 480 600
+%%EndComments
+% Issue #234 slice D1, NOT library code and NOT a portrait. A proxy for the
+% cost of #242's full charcoal portrait, built from DRYMEDIA.md 6.2's stated
+% basis: about 3000 hatch strokes, each in two deposit levels, plus a few
+% wide smudges, on /drawing paper. The strokes are laid out in patches of
+% parallel hatching at random angles (four directions, as cross-hatching
+% builds tone), placed by drykit's private generator so pscat and gs draw
+% the same layout. It prints the catches and the unique cells dkcatch built.
+%
+%   pscat --dpi 144 --page 480x600 --png out.png docs/dev/design/drymedia/prototypes/portrait_cost.ps
+%
+% Prepend `/ENGINE true def` to draw it through the shipped engine
+% instead: every hatch stroke a dkstroke (/Levels 2) in one dkbatch, the
+% smudges as dkstroke calls, rather than dkcatch over hand-built levels.
+%
+% For gs, inline the three `run` lines (gs -dSAFER refuses the file reads)
+% and render at -r144 -g960x1200.
+
+(lib/artkit.ps) run
+(lib/paintkit.ps) run
+(lib/drykit.ps) run
+% count every catch (ENGINE mode builds them inside dkstroke)
+/dkcatch0 /dkcatch load def
+/dkcatch {
+    /dkn 0 def
+    dkcatch0
+    ENGINE {
+        userdict /pccatches pccatches 1 add put
+        userdict /pccells pccells dkn add put
+    } if
+} def
+
+/STROKES where { pop } { /STROKES 3000 def } ifelse
+/LEN where { pop } { /LEN 40 def } ifelse        % hatch stroke length, points
+/WIDTH where { pop } { /WIDTH 1.2 def } ifelse   % hatch contact width, points
+/TOUCH where { pop } { /TOUCH 0.7 def } ifelse
+/STREAK where { pop } { /STREAK 1.4 def } ifelse
+/ENGINE where { pop } { /ENGINE false def } ifelse   % true: dkstroke in one dkbatch
+
+<< /Surface /drawing /Seed 5 >> dksurface
+userdict /dkGround get aload pop setrgbcolor 0 0 480 600 rectfill
+/ink [0.12 0.12 0.13] def
+/dim [ 0 1 2 { /k exch def userdict /dkGround get k get ink k get
+       userdict /dkGround get k get sub 0.45 mul add } for ] def
+
+/pccatches 0 def
+/pccells 0 def
+% run touch hw -   (one stroke at one level: catch, then the stroked ink)
+/pclevel {
+    /pchw exch def /pct exch def /pcrun exch def
+    gsave
+        [ pcrun { aload pop pop pchw 3 array astore } forall ] /pcst exch def
+        [ pcst ] pct STREAK dkcatch
+        /pccatches pccatches 1 add def
+        /pccells pccells dkn add def
+        newpath pcrun 0 get aload pop pop moveto
+        pcrun { aload pop pop lineto } forall
+        pchw 2 mul setlinewidth 1 setlinecap 1 setlinejoin stroke
+    grestore
+} def
+
+% Hatch patches: each patch is a centre, an angle and a run of parallel
+% strokes 2.2pt apart, each a gently bowed three-stop line. The layout is
+% drawn first, from drykit's generator, so the strokes (which reseed it)
+% can't perturb it.
+9 dksrand
+/pcn 0 def
+/pcruns [
+{
+    pcn STROKES ge { exit } if
+    /pcx 40 dkrand 400 mul add def /pcy 40 dkrand 520 mul add def
+    /pca dkrand 4 mul floor 45 mul 22.5 add def
+    /pcm 8 dkrand 16 mul add cvi def
+    0 1 pcm 1 sub {
+        /pck exch def
+        pcn STROKES lt {
+            /pco pck pcm 2 div sub 2.2 mul def
+            /pcl LEN 0.7 dkrand 0.6 mul add mul def
+            /pcbow dkrand 0.5 sub 3 mul def
+            [ -0.5 0 0.5 ] {
+                /pcs exch def
+                /pcoff pco 0.5 pcs abs sub pcbow mul add def
+                pcx pca cos pcs pcl mul mul add pca sin pcoff mul sub
+                pcy pca sin pcs pcl mul mul add pca cos pcoff mul add
+                0 3 array astore
+            } forall
+            3 array astore
+            /pcn pcn 1 add def
+        } if
+    } for
+} loop
+] def
+
+ENGINE {
+    % the shipped engine: each stroke's two levels come from dkstroke
+    % itself, level-major across the whole batch
+    ink aload pop setrgbcolor
+    {
+        pcruns {
+            /pcrun exch def
+            newpath pcrun 0 get aload pop pop moveto
+            pcrun { aload pop pop lineto } forall
+            << /Width WIDTH /Touch TOUCH /Streak STREAK /Levels 2 /Strength 1 >> dkstroke
+        } forall
+    } dkbatch
+} {
+    pcruns {
+        /pcrun exch def
+        dim aload pop setrgbcolor pcrun TOUCH 0.12 add WIDTH 1.25 mul 2 div pclevel
+        ink aload pop setrgbcolor pcrun TOUCH WIDTH 2 div pclevel
+    } forall
+} ifelse
+
+% Six wide stump smudges at high touch, in a mid tone.
+[0.45 0.45 0.46] aload pop setrgbcolor
+0 1 5 {
+    /pck exch def
+    /pcy 90 pck 80 mul add def
+    ENGINE {
+        newpath 60 pcy moveto 240 pcy 20 add lineto 420 pcy lineto
+        << /Width 24 /Touch 0.95 /Levels 1 /Strength 1 >> dkstroke
+    } {
+        [ [60 pcy 0] [240 pcy 20 add 0] [420 pcy 0] ] 0.95 12 pclevel
+    } ifelse
+} for
+
+(catches ) print pccatches 20 string cvs print
+( cells ) print pccells =
+showpage

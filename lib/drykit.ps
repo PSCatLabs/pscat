@@ -1,6 +1,6 @@
 %!PS-Adobe-3.0
 %%Title: drykit.ps — dry media core: a stick drawn across a toothed surface
-%%Creator: pscat — issue #234 (design: docs/DRYMEDIA.md)
+%%Creator: pscat — issue #234 (design: docs/dev/design/DRYMEDIA.md)
 %%EndComments
 %
 % Every procedure here is defined `} bind def` (issue #307). Ghostscript
@@ -21,7 +21,7 @@
 % so drykit builds every mark through a *catch*: a clip made of the
 % knuckles of the surface that the stick reaches at a given touch.
 %
-% The surface is paintkit's (#182, docs/CANVAS_SURFACE.md): one `pkcanvas`
+% The surface is paintkit's (#182, docs/dev/design/CANVAS_SURFACE.md): one `pkcanvas`
 % height field in canvas space, so a piece that mixes paintkit and drykit
 % marks has one canvas, and two crossing strokes break up on the same
 % tooth whichever library drew them. drykit never edits lib/paintkit.ps.
@@ -94,7 +94,7 @@
 % touching it, still shades that edge pixel; a test that wants pixel
 % identity against a whole-page catch sets 1.5 (more than a pixel's
 % diagonal). At 144 dpi 1.5 pixels is 0.75pt of reach on each side, which
-% cost the full board 60% more cells (docs/DRYMEDIA.md 6.1) for a
+% cost the full board 60% more cells (docs/dev/design/DRYMEDIA.md 6.1) for a
 % sub-pixel difference at the ink's edge.
 % @internal
 /dkslack 0 def

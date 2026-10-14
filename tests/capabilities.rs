@@ -153,7 +153,7 @@ fn pagekit_names_match_the_catalog_exactly() {
 /// migrated_files()` reports -- so migrating the *next* `lib/*.ps`
 /// file to the `% @...` tag convention gets this protection
 /// automatically, with no new hand-written test function to remember.
-/// That's the actual gap `docs/PS_LIBRARY_COUPLING.md` (issue #94's
+/// That's the actual gap `docs/dev/PS_LIBRARY_COUPLING.md` (issue #94's
 /// spec) calls out: a near-duplicate per-file test is exactly as easy
 /// to forget as the catalog registration itself. `build.rs` only
 /// guarantees a new file gets *noticed* (tagged or in `LEGACY_FILES`)
@@ -511,7 +511,7 @@ fn the_catalog_names_the_loaded_color_keys_on_every_adopter() {
 }
 
 /// drykit (issue #234) and the dry-media files built on it (`lib/dry*.ps`)
-/// follow paintkit's #141 rules (docs/DRYMEDIA.md 3): every parameter
+/// follow paintkit's #141 rules (docs/dev/design/DRYMEDIA.md 3): every parameter
 /// states a unit (checked for every migrated file by
 /// `every_migrated_parameter_states_its_unit`), and neither `/Spread` nor
 /// `/Density` appears, since paintkit and stipplekit already gave those
@@ -570,7 +570,7 @@ fn handscript_and_hangul_names_match_the_catalog_exactly() {
 /// (`--fonts`/`resolve`) -- they're defined by `definefont` straight
 /// into PostScript's own `FontDirectory`. `findfont` on an unknown name
 /// substitutes rather than erroring (a deliberate deviation, see
-/// HANDOFF.md), so success/failure of `findfont` itself can't tell a
+/// docs/dev/HANDOFF.md), so success/failure of `findfont` itself can't tell a
 /// real face from a substituted one; checking `FontDirectory` directly
 /// is what actually proves the file defines the name the catalog claims.
 #[test]
@@ -759,7 +759,7 @@ fn cli_capabilities_flag_prints_valid_matching_json() {
 
 /// Issue #236: `lib/strokeglyphs.ps` keeps paintkit's #141 convention
 /// (its units are checked by `every_migrated_parameter_states_its_unit`)
-/// and never uses `/Spread` or `/Density` (docs/DRYMEDIA.md 3.1); nor does
+/// and never uses `/Spread` or `/Density` (docs/dev/design/DRYMEDIA.md 3.1); nor does
 /// `lib/mathkit.ps` (#237), which lays out its glyphs.
 #[test]
 fn strokeglyphs_does_not_reuse_reserved_parameter_names() {

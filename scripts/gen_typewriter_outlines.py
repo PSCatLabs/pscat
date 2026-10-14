@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate lib/typewriter_outlines.ps: Courier Prime's printable-ASCII
 outlines as PostScript path data, for the /Typewriter font (lib/typewriter.ps,
-issue #211, design docs/TYPEWRITER.md section 2).
+issue #211, design docs/dev/design/TYPEWRITER.md section 2).
 
     python3 scripts/gen_typewriter_outlines.py
 

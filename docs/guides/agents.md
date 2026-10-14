@@ -28,7 +28,7 @@ MCP server over stdio exposing four tools:
   this build's creative toolkit actually has installed: fonts, Type 3
   program faces, mood palettes, page templates, and artkit/style-pack
   procedures (`--capabilities` on the CLI). See
-  [`CAPABILITIES.md`](../../CAPABILITIES.md).
+  [`docs/dev/CAPABILITIES.md`](../dev/CAPABILITIES.md).
 - `eval_postscript` — run headlessly, get back what the program
   printed, or the standard error name plus an operand-stack
   post-mortem.

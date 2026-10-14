@@ -1,21 +1,25 @@
 # AGENTS.md
 
-Operating conventions for any AI coding agent working in this repo. Project
-vision, priorities, and staged milestones live in `INIT.md` — read that
-first. This file covers *how* to work, not *what* to build.
+Operating conventions for any AI coding agent working in this repo. Start
+with `docs/dev/HANDOFF.md` for where the project stands and what to work on;
+the original vision and staged milestones are history, kept in
+`docs/archive/INIT.md`. This file covers *how* to work, not *what* to build.
 
 ## Before you start
 
-- Read `INIT.md` in full.
-- If this is a fresh session and `INIT.md`'s Stage 1 hasn't been completed
-  yet (check for an architecture writeup / commit history), start there.
-- If Stage 1 is done, check for a stage-summary (in commit messages, a
-  `NOTES.md`, `notes/`, or similar — use your judgment on where past summaries were
-  left) before continuing, so you're not re-deciding settled questions.
-- Stages 5 and beyond are planned in `ROADMAP.md`, including which model
-  tier each task is suited to and an escalation rule for tasks that turn
-  out to touch the object model or execution machine. Follow it unless
-  you have a good reason not to — and record that reason in a `notes/` fragment.
+- Read `docs/dev/HANDOFF.md`, then `docs/dev/ARCHITECTURE.md`; the other
+  contributor docs are indexed in `docs/dev/README.md`.
+- Read `docs/archive/INIT.md` for the project's original vision and
+  priorities. Every stage in it is done, so use it for intent, not as a to-do
+  list.
+- Per-issue summaries of past work are in `notes/` (one file per issue); the
+  summaries from before `notes/` existed are in the frozen
+  `docs/archive/NOTES.md`. Check them before re-deciding a settled question.
+- The staged roadmap (with the model tier suited to each task and an
+  escalation rule for tasks that touch the object model or execution machine)
+  is `docs/archive/ROADMAP.md`. It is complete; the guidance still applies to
+  how to scope new work, and a reason for departing from it belongs in a
+  `notes/` fragment.
 
 ## Toolchain & commands
 
@@ -34,11 +38,9 @@ first. This file covers *how* to work, not *what* to build.
 
 ## Workflow
 
-- Follow the staged deliverables in `INIT.md` in order, unless you have a
-  good reason to resequence — if so, say so explicitly rather than
-  silently reordering.
-- Pause after Stage 1 for the architecture writeup described in `INIT.md`
-  before starting Stage 2.
+- Work from issues (see `SDLC.md`). If you resequence work the issues or
+  `docs/dev/HANDOFF.md` lay out, say so explicitly rather than silently
+  reordering.
 - At the end of each stage: summarize what was built, what tradeoffs were
   made, and what was explicitly deferred. Commit with a message that
   reflects the stage, not just the last edit made.
@@ -70,7 +72,7 @@ predates it.
   code; do explain non-obvious design choices (e.g. why the dict stack is
   structured a particular way).
 - Tests live alongside the code they test. Add integration or golden-image
-  tests where `INIT.md`'s stages call for demonstrable rendering output.
+  tests where `docs/archive/INIT.md`'s stages call for demonstrable rendering output.
 - **Timing assertions in `tests/` measure CPU time, never wall time**
   (`notes/329-cpu-time-render-budget-tests.md`). Wall time includes every
   slice the scheduler gave to other processes, so with several agents or a
@@ -95,7 +97,7 @@ predates it.
   `scale_budget` to a hand-rolled bound).
 - A change to `lib/*.ps` that adds or tightens a *validation guard*
   belongs in a `%%SelfTest` block in that file, next to the guard —
-  `./scripts/selftest.sh` runs them and `docs/SELFTEST.md` has the
+  `./scripts/selftest.sh` runs them and `docs/dev/SELFTEST.md` has the
   convention. Rust stays the right home for anything needing pixel
   readback or a real `gs`.
 - A procedure added to `lib/artkit.ps`, `lib/paintkit.ps`,
@@ -110,16 +112,20 @@ predates it.
 
 ## Where things live
 
-- `ARCHITECTURE.md` — the design writeup (object model, execution model,
+- `docs/dev/` — contributor docs, indexed in `docs/dev/README.md`:
+  `HANDOFF.md` (read first), `VM.md`, `FONTS.md`, `CAPABILITIES.md`, the
+  selftest and library-coupling notes, and `design/` (the per-library design
+  records and their evidence images).
+- `docs/dev/ARCHITECTURE.md` — the design writeup (object model, execution model,
   rendering-crate leanings, deliberate deferrals). Read before changing
   anything structural.
 - `docs/guides/` — user guides, one per library or topic (the old README's
   long tour); `docs/archive/` — history kept as written, including the
   stage log. Check links with `python3 scripts/check_md_links.py` (CI runs it
   as the `links` workflow); it skips `docs/archive/` and `notes/`.
-- `NOTES.md` — per-stage summaries, newest first, frozen as of 2026-10-13.
+- `docs/archive/NOTES.md` — per-stage summaries, newest first, frozen as of 2026-10-13.
 - `notes/` — newer entries, one file per issue (`notes/<issue>-<slug>.md`,
-  format in `notes/README.md`). Write new notes here, not in `NOTES.md`, so
+  format in `notes/README.md`). Write new notes here, not in `docs/archive/NOTES.md`, so
   concurrent PRs never conflict.
 - `src/lexer.rs` — tokenizer; unit tests in-module.
 - `src/object.rs` — `Object`/`Value`/`Dict`/`Num`.
