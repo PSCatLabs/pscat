@@ -791,6 +791,27 @@ renders eight examples in both and compares block-downsampled output).
   bristle's `pfub` and the stored `/ColorJitter` draw `pfcj` (taken where it
   always was, so the stream doesn't move), because a bristle's runs span every
   subpath and `/Light` flips per subpath. `pkdab` (L5) is next.
+- **A touched mark is clipped in canvas space; set the canvas first** (issue
+  #182, slices S1-S4; design in `docs/CANVAS_SURFACE.md`). `opts pkcanvas`
+  records the CTM in force when it is called as *canvas space* and builds a
+  seeded weave of knuckles there; `/Touch` below 1 on `pktrowel`, `pkdry`,
+  `pkfan`, `pkbroad` or `pkliner` clips the mark to the knuckles its pressure
+  reaches (`pjcatch`, called right after the preset's drawing `gsave`). Call
+  `pkcanvas` once, first, in the space the piece is painted in, *before* any
+  `translate`, `scale` or `rotate` a panel applies: the catch is then built
+  under the saved matrix, so every touched stroke, in any later CTM and
+  every `pkwet` pass, catches on the same knuckles. A canvas set up inside a
+  moved space is a different, moved canvas, and a second `pkcanvas` call
+  replaces the first. `/Touch` with no surface raises `pkX-touch-needs-a-canvas`
+  (never a silent full mark), and `/Touch 1` is the unset path. A caller's own
+  clip intersects with the catch. `/Touch` takes no `rand` draws, so turning it
+  on never moves anything painted after it. The reach box a preset passes to
+  `pjcatch` must cover every emitter it has (`touch_box_contains_the_whole_mark`
+  is the test); a new adopter writes the same breakdown beside its code.
+  `examples/paintkit_canvas_demo.ps` is the specimen (render at
+  `docs/paintkit_canvas_demo.png`), and `the_weave_is_in_canvas_points_at_any_dpi`
+  pins that the pattern is the same at 72 and 144 dpi. To supersample a piece
+  with `2 2 scale`, put it *before* `pkcanvas` so the weave scales with it.
 - **Paintkit slices prove byte identity with `scripts/identity_check.sh
   BASE_WORKTREE [BIN] --control FILE [--gallery-still]`** (issue #263), not
   by hand. It renders every tracked `examples/`, `gallery/` and
