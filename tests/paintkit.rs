@@ -7817,7 +7817,10 @@ fn wet_bands_remove_more_of_the_rim_than_one_backdrop_per_pass() {
         )),
         15..135,
     );
-    assert!(b < 1.1 * c, "the short cloud: per pass {c:.1}, banded {b:.1}");
+    assert!(
+        b < 1.1 * c,
+        "the short cloud: per pass {c:.1}, banded {b:.1}"
+    );
 }
 
 /// A backdrop that never changes: the banded call draws what the literal
@@ -7909,7 +7912,9 @@ fn wet_bands_ask_once_per_cell_at_its_centre() {
     // The grid: x 30..110 and y 40..90, 40 by 25 a cell, row by row.
     assert_eq!(
         st,
-        [50.0, 52.5, 90.0, 52.5, 50.0, 77.5, 90.0, 77.5, 2.0, 2.0, 2.0, 2.0],
+        [
+            50.0, 52.5, 90.0, 52.5, 50.0, 77.5, 90.0, 77.5, 2.0, 2.0, 2.0, 2.0
+        ],
         "{st:?}"
     );
 }
@@ -7923,7 +7928,11 @@ fn wet_bands_unwind_on_every_exit() {
         "{ newpath 10 10 moveto 100 10 lineto << /Width 8 >> pkribbon nosuchname }",
         "{ newpath 10 10 moveto 100 10 lineto << /Width 8 >> pkribbon }",
     ] {
-        for under in ["{ pop pop 0.5 0.5 0.5 }", "{ nosuchname }", "{ pop pop 1 2 }"] {
+        for under in [
+            "{ pop pop 0.5 0.5 0.5 }",
+            "{ nosuchname }",
+            "{ pop pop 1 2 }",
+        ] {
             let mut it = fresh(120, 120);
             it.run_str(&format!(
                 "0.1 0.2 0.3 setrgbcolor 5 srand gsave \
@@ -7944,7 +7953,9 @@ fn wet_bands_unwind_on_every_exit() {
                 .map(|v| v.parse().expect("number"))
                 .collect();
             assert!(
-                rgb.iter().zip([0.1, 0.2, 0.3]).all(|(a, b)| (a - b).abs() < 1e-5),
+                rgb.iter()
+                    .zip([0.1, 0.2, 0.3])
+                    .all(|(a, b)| (a - b).abs() < 1e-5),
                 "{body} {under}: the caller's colour is {rgb:?}"
             );
         }
