@@ -28,6 +28,7 @@ Rules followed:
 | `chalk_ghosting_closeup` | [Hand pressed against a chalkboard revealing traces of past lessons](https://commons.wikimedia.org/wiki/File:Hand_pressed_against_a_chalkboard_revealing_traces_of_past_lessons_and_ideas_in_a_classroom_setting.jpg) | Shixart1985 | CC BY 2.0 |
 | `chalk_eraser_swipes` | [Chalkboard Texture](https://commons.wikimedia.org/wiki/File:Chalkboard_Texture.jpg) | JOGOS Public Assets | CC BY-SA 4.0 |
 | `chalk_full_board`, `chalk_ledge_erasers`, `chalk_double_underline` | [Math01](https://commons.wikimedia.org/wiki/File:Math01.jpg) | MathKnight | CC BY 2.5 |
+| `chalk_fermi_circle` | [Enrico Fermi at the blackboard](https://commons.wikimedia.org/wiki/File:Enrico_Fermi_at_the_blackboard.jpg) (greyscale, cropped and reduced) | Smithsonian Institution | Public domain |
 | `chalk_FAKE_font_composite` | [Black(green)board-eqns](https://commons.wikimedia.org/wiki/File:Black(green)board-eqns.jpg) | MikeRun, after Andrzej 22 | CC0 |
 | `crayon_child_rhino_6y`, `crayon_fill_streaks`, `crayon_fill_ground` | [6 years old kid drawings of crayon drawings of rhinoceros](https://commons.wikimedia.org/wiki/File:6_years_old_kid_drawings_of_crayon_drawings_of_rhinoceros_in_the_Safari_Park.jpg) | MrAlanKoh | CC0 |
 | `crayon_child_tadpole_3y` | [Child drawing age 3 crayon on paper](https://commons.wikimedia.org/wiki/File:Child_drawing_age_3_crayon_on_paper.jpg) | "My daughter Teresa" (uploader) | CC BY-SA 3.0 |
@@ -49,6 +50,8 @@ The comparison panels in `prototypes/` (`chalk_compare.jpg`) contain crops from 
 - the ledge (C9, CC BY 2.5, MathKnight).
 
 It is CC BY-SA 4.0, with all five attributions.
+
+`lecture_compare_238.png` (#238) puts the `gallery/chalkboard_lecture.ps` still above C7, C1, C11 (Fermi), C5 and C3, with 1:1 details of the render. It contains the C3 crop (CC BY-SA 3.0), so like `chalk_compare_235.jpg` it is CC BY-SA 4.0, with every attribution. It is built by `prototypes/lecture_compare.py`.
 
 The crayon comparison panels (#239) are built by `prototypes/crayon_compare.py`. `crayon_compare.png` uses only the CC0 crops from MrAlanKoh's rhino drawing, so it stays CC0 apart from pscat's own renders. `crayon_compare_figure.png` contains `crayon_child_tadpole_3y`, so it is CC BY-SA 3.0, with the source's attribution.
 
@@ -82,6 +85,7 @@ reuse; the others add nothing the crops above lack:
 | C8 | `chalk_double_underline` | A "double underline" is two separate strokes, not parallel. The second is shorter and converges on the first. | An underline is two strokes with independent jitter. Never offset copies. |
 | C9 | `chalk_ledge_erasers` | Erasers on the tray sit in a light halo of fallen dust. The tray lip reads lighter than the wall below it. | Ledge dust is a fallout deposit concentrated at the tray, densest around erasers. |
 | C10 | `chalk_FAKE_font_composite` | **What a fake looks like:** a TeX font pasted onto a board photo. Strokes are uniform, perfectly white and perfectly smooth, with typeset spacing and identical repeated glyphs. | The negative example for #238. Every trait above is missing here. |
+| C11 | `chalk_fermi_circle` | Fermi's board (1940s press photo): a diagram drawn freehand at lecture scale. The circles are slightly out of round and their strokes are heavy and even. The formulas above it are written larger than the diagram's labels. | Diagrams are drawn bigger and bolder than the writing. A freehand circle is one long stroke whose closure overshoots. Used for #238's unit circle. |
 
 ### Board numbers (for #236, #237, #238)
 
@@ -162,6 +166,6 @@ reuse; the others add nothing the crops above lack:
 These are needed before #238, #240 and #242 compare renders. Each can be
 found by the gallery ticket's own agent:
 
-- a chalk box around a result, and a dust halo under fresh strokes;
+- a chalk box around a result, and a dust halo under fresh strokes (still not sourced after #238: no free photo of a boxed result turned up in a Commons search, so #238's box follows mathkit's `mkframe`);
 - crayon colour-over-colour layering, build-up at a turn, and a sky band;
 - charcoal cross-hatching, construction lines, and charcoal on newsprint.
