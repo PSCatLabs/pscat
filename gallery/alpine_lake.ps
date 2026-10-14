@@ -23,8 +23,9 @@
 %                    overlapping pulls clipped to a triangle (#361)
 %   pkwet    (#113)  clouds, mist and the far forest's crest settled
 %                    into the paint beneath them instead of sitting on it;
-%            (#181)  directional, the near range's foot lifted into mist
-%                    and the whole reflection pulled down
+%            (#181)  directional, the near range's foot lifted into mist,
+%                    the far range's banks of haze lifted both ways
+%                    (#407), and the whole reflection pulled down
 %   pkfan    (#114)  the evergreens' branch tiers, the spires in the
 %                    far forest
 %   pkdab    (#117)  the far forest's tapped crest, the bushes on the bank
@@ -310,16 +311,48 @@
     } if
 } def
 
-% y under seed -   a band of mist tapped wet into whatever is under it
+% The far range's mist: a few banks of haze drifting across it, each a
+% filled lens, lifted both ways off its core with a two-sided
+% directional pkwet so it fades up into the range and down toward the
+% near one, with a little very fine spray tapped along it.
+% (Through #206 it was one curve of 1pt spray at Density 150 under an
+% isotropic pkwet: at 2x a granular streak, gravel more than haze, the
+% same fault #206 fixed in the near range's foot. #407: a full-width
+% filled band read as a ruled stripe and flattened the shadow planes,
+% so the haze is broken into banks with gaps, where the planes and the
+% fine spray show through.) The core is mixed toward the range, as a
+% full-strength lkMIST core read as a white line.
+/lkMC [ lkMIST lkFAR 0.45 mix3 ] def
+% x0 x1 dy thick -   one bank: a lens from x0 to x1 at lkmy+dy, bulging
+% up by thick and down by about half that
+/lkwisp {
+    /lkwt exch def /lkwy exch lkmy add def /lkwx1 exch def /lkwx0 exch def
+    /lkwl lkwx1 lkwx0 sub def
+    newpath lkwx0 lkwy moveto
+    lkwx0 lkwl 0.3 mul add lkwy lkwt add
+    lkwx0 lkwl 0.7 mul add lkwy lkwt add 2 sub
+    lkwx1 lkwy 2 add curveto
+    lkwx0 lkwl 0.65 mul add lkwy lkwt 0.6 mul sub
+    lkwx0 lkwl 0.3 mul add lkwy lkwt 0.5 mul sub
+    lkwx0 lkwy curveto
+    closepath fill
+} bind def
+% y under seed -   the banks of mist, worked wet into whatever is under
+% them. Nested in the reflection's 6-layer pull, the 8 layers here stay
+% under pkwet's 64x budget (past it, pkwet-too-many-passes).
 /lkmist {
     srand /lkmu exch def /lkmy exch def
-    /lkmd lkmy 300 gt { 150 } { 60 } ifelse def
-    lkMIST {
-        { newpath -20 lkmy moveto 250 lkmy 8 sub 520 lkmy 8 add 780 lkmy 2 sub curveto
-          << /Nozzle 12 /Density lkmd /Falloff 1 /Speck 1 /Speckle 0.6 /Overspray 0.6 >> pkspray }
-        << /Soft 1 /Under lkmu >> pkwet
+    lkMC {
+        { -20 250 -4 10 lkwisp  265 460 5 7 lkwisp
+          420 525 -7 4 lkwisp   545 790 -1 9 lkwisp
+          newpath -20 lkmy moveto 250 lkmy 8 sub 6 lkj add
+          520 lkmy 8 add 6 lkj add 780 lkmy 2 sub curveto
+          << /Nozzle 10 /Density 60 /Falloff 1 /Speck 0.6 /Speckle 0.5
+             /Overspray 0.6 >> pkspray }
+        << /Direction 90 /Stretch 8 /Offset 7 /Layers 8 /Pickup 0.9
+           /Under lkmu >> pkwet
     } 1 lkdo
-} def
+} bind def
 
 % ---- the far tree line ----------------------------------------------
 
@@ -500,7 +533,7 @@ lkFAR                    lkWATER                 11 12 7 lkpull
 [ lkFAR 0.84 shade ]     lkFAR                   12 8 5 lkpull
 lkSNOWR                  lkFAR                   13 8 5 lkpull
 [ lkFAR lkSNOWR 0.55 mix3 ] lkFAR                14 8 5 lkpull
-lkMIST                   lkFAR                   21 10 6 lkpull
+lkMC                     lkFAR                   21 10 6 lkpull
 lkNEAR                   [ lkFAR lkMIST 0.4 mix3 ] 31 12 7 lkpull
 [ lkNEAR 0.84 shade ]    lkNEAR                  32 12 7 lkpull
 /lkPST 2 def
