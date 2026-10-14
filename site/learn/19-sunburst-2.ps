@@ -1,0 +1,8 @@
+%!PS
+%%BoundingBox: 0 0 300 300
+% Step 2: a procedure for one ray, repeated with a turn between rays.
+150 150 translate
+/ray { 0 0 moveto 130 0 lineto stroke } def
+4 setlinewidth
+36 { ray 10 rotate } repeat
+showpage

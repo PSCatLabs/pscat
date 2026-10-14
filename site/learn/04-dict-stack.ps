@@ -1,0 +1,8 @@
+%!PS
+% A name is looked up on the dictionary stack, top dictionary first.
+/x 1 def               % defines x in userdict
+2 dict begin           % push a new, empty dictionary
+  /x 2 def             % this x lives in the new dictionary
+  x ==                 % finds the newer x first
+end                    % pop the dictionary again
+x ==                   % back to the outer x

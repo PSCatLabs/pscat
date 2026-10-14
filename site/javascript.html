@@ -60,6 +60,7 @@ requestAnimationFrame(frame);</code></pre>
     <tr><td><code>pixels()</code></td><td>copied RGBA bytes — node-friendly</td></tr>
     <tr><td><code>width</code>, <code>height</code></td><td>current page size in pixels</td></tr>
     <tr><td><code>error</code></td><td>last error report ('' when clean) — standard PostScript error names</td></tr>
+    <tr><td><code>output</code></td><td>what the program has printed since <code>begin</code> with <code>=</code>, <code>==</code>, <code>stack</code>, <code>pstack</code> or <code>print</code> ('' when nothing); readable mid-run, kept to 64 KB</td></tr>
   </table>
   <p>Errors are REPL-style: the machine unwinds but the page and
   operand stack survive, and the instance stays usable for the next

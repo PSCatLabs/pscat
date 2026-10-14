@@ -257,8 +257,19 @@ pub struct Interp {
     /// Non-Font resource categories (ops/level2.rs). Font shares
     /// FontDirectory instead.
     resources: crate::ops::level2::CategoryMap,
+    /// When set, `=`, `==`, `stack`, `pstack` and `print` append here
+    /// instead of writing to the process's stdout (issue #252). The
+    /// browser build turns it on, since a wasm32 module has no stdout,
+    /// so the playground can show what a program prints. Off by default:
+    /// the CLI, REPL and MCP server keep writing straight to stdout.
+    stdout_capture: Option<Vec<u8>>,
     pub(crate) gfx: Gfx,
 }
+
+/// The most a captured stdout keeps (see [`Interp::capture_stdout`]): a
+/// runaway `{ 1 == } loop` in a browser tab must not grow without limit.
+pub const STDOUT_CAPTURE_LIMIT: usize = 64 * 1024;
+const STDOUT_TRUNCATED: &[u8] = b"\n%% output truncated: more than 64 KB\n";
 
 impl Interp {
     pub fn new() -> Self {
@@ -333,6 +344,7 @@ impl Interp {
             packing: false,
             clock: crate::clock::Clock::start(),
             resources: Default::default(),
+            stdout_capture: None,
             gfx,
         })
     }
@@ -1446,6 +1458,43 @@ impl Interp {
 
     pub fn pop_f64(&mut self) -> Result<f64, PsError> {
         Ok(self.pop_num()?.to_f64())
+    }
+
+    /// Collect what the program prints (`=`, `==`, `stack`, `pstack`,
+    /// `print`) in a buffer instead of writing it to stdout, starting
+    /// empty. Kept to [`STDOUT_CAPTURE_LIMIT`] bytes plus a note saying
+    /// the rest was dropped.
+    pub fn capture_stdout(&mut self) {
+        self.stdout_capture = Some(Vec::new());
+    }
+
+    /// What has been printed since [`Interp::capture_stdout`]; empty when
+    /// capture is off.
+    pub fn captured_stdout(&self) -> &[u8] {
+        self.stdout_capture.as_deref().unwrap_or(&[])
+    }
+
+    /// Program output: to the capture buffer when one is on, else stdout
+    /// (flushed when `flush` is set, as `print` does: a prompt with no
+    /// newline must still appear).
+    pub(crate) fn write_stdout(&mut self, bytes: &[u8], flush: bool) -> std::io::Result<()> {
+        use std::io::Write;
+        let Some(buf) = self.stdout_capture.as_mut() else {
+            let mut out = std::io::stdout();
+            out.write_all(bytes)?;
+            return if flush { out.flush() } else { Ok(()) };
+        };
+        if buf.len() >= STDOUT_CAPTURE_LIMIT {
+            return Ok(());
+        }
+        let room = STDOUT_CAPTURE_LIMIT - buf.len();
+        if bytes.len() <= room {
+            buf.extend_from_slice(bytes);
+        } else {
+            buf.extend_from_slice(&bytes[..room]);
+            buf.extend_from_slice(STDOUT_TRUNCATED);
+        }
+        Ok(())
     }
 
     pub fn gfx(&self) -> &Gfx {

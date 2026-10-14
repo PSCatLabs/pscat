@@ -1,0 +1,12 @@
+%!PS
+%%BoundingBox: 0 0 300 200
+% One unit is 1/72 inch, and y goes up. This square is one inch wide.
+20 20 72 72 rectfill
+% translate moves the origin; rotate turns the axes (degrees, counter-clockwise)
+200 100 translate
+0.8 0 0 setrgbcolor
+12 {
+  20 -4 50 8 rectfill        % one bar, drawn in the turned axes
+  30 rotate                  % each turn adds to the last one
+} repeat
+showpage

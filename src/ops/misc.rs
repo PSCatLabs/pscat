@@ -1,8 +1,6 @@
 //! Output and interpreter-control operators: the pieces that make a REPL
 //! and `--eval` mode actually demonstrable.
 
-use std::io::Write;
-
 use crate::error::PsError;
 use crate::interp::Interp;
 use crate::object::{Dict, Object, Value};
@@ -138,29 +136,25 @@ fn handleerror(it: &mut Interp) -> Result<(), PsError> {
 
 fn print_text(it: &mut Interp) -> Result<(), PsError> {
     let obj = it.pop()?;
-    println!("{}", obj.text());
-    Ok(())
+    let line = format!("{}\n", obj.text());
+    out(it, line.as_bytes(), false)
 }
 
 fn print_syntactic(it: &mut Interp) -> Result<(), PsError> {
     let obj = it.pop()?;
-    println!("{}", obj.repr());
-    Ok(())
+    let line = format!("{}\n", obj.repr());
+    out(it, line.as_bytes(), false)
 }
 
 /// Print the whole stack, top first, without disturbing it (PLRM `stack`).
 fn stack_dump(it: &mut Interp) -> Result<(), PsError> {
-    for obj in it.ostack.iter().rev() {
-        println!("{}", obj.text());
-    }
-    Ok(())
+    let text: String = it.ostack.iter().rev().map(|o| o.text() + "\n").collect();
+    out(it, text.as_bytes(), false)
 }
 
 fn pstack_dump(it: &mut Interp) -> Result<(), PsError> {
-    for obj in it.ostack.iter().rev() {
-        println!("{}", obj.repr());
-    }
-    Ok(())
+    let text: String = it.ostack.iter().rev().map(|o| o.repr() + "\n").collect();
+    out(it, text.as_bytes(), false)
 }
 
 fn print_string(it: &mut Interp) -> Result<(), PsError> {
@@ -168,10 +162,14 @@ fn print_string(it: &mut Interp) -> Result<(), PsError> {
     let Value::String(s) = &obj.value else {
         return Err(PsError::Typecheck);
     };
-    let mut out = std::io::stdout();
-    out.write_all(&s.borrow_bytes())
-        .and_then(|()| out.flush())
-        .map_err(|_| PsError::Io)
+    let bytes = s.borrow_bytes().to_vec();
+    out(it, &bytes, true)
+}
+
+/// Program output goes through the interpreter, which sends it to stdout
+/// or, in the browser build, to a buffer the page reads (issue #252).
+fn out(it: &mut Interp, bytes: &[u8], flush: bool) -> Result<(), PsError> {
+    it.write_stdout(bytes, flush).map_err(|_| PsError::Io)
 }
 
 fn quit(it: &mut Interp) -> Result<(), PsError> {

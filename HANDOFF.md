@@ -1116,6 +1116,21 @@ renders eight examples in both and compares block-downsampled output).
   pair of runs, 3% on the Lincoln portrait in gs (`notes/326-bind-drycharcoal.md`).
 - Test Interps at 100×100; golden runs at 500×500/r72. Metric
   assertions use 1e-3 tolerances where the pen is f32.
+- **Program output goes through `Interp::write_stdout`** (#252), not
+  `println!`. `=`, `==`, `stack`, `pstack` and `print` call it; the wasm
+  build turns on `capture_stdout` (a wasm32 module has no stdout) and
+  `pscat.js` exposes the buffer as `ps.output`, which the playground
+  shows. A new printing operator must use it too, or its output vanishes
+  in the browser.
+- **The Learn page's examples are files** (#252): `site/learn/NN-name.ps`,
+  plus `NN-name.out` with exactly what it prints. `site/learn.html` names
+  them with `<!--@example NAME "alt text"-->` markers that
+  `scripts/site_examples.py` expands at build time; `tests/learn.rs`
+  checks each against its `.out` in pscat and in gs, and
+  `scripts/check_learn_examples.mjs` (run by `build_site.sh`) in the wasm
+  build. Change an example's output and you must change its `.out` and
+  the prose around it. `playground.html?example=learn/NAME.ps` is how
+  the "Try it" links open them.
 
 ## Verification checklist before calling any future stage done
 

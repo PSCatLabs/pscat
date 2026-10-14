@@ -1,0 +1,6 @@
+%!PS
+/twice-bound { 2 mul } bind def   % bind looks mul up now
+/twice-late  { 2 mul } def        % this one looks mul up every time
+/mul { add } def                  % redefine mul (never do this for real)
+5 twice-bound ==
+5 twice-late ==

@@ -1,0 +1,12 @@
+%!PS
+%%BoundingBox: 0 0 300 200
+% gsave saves the graphics state; grestore brings it back.
+0.1 0.5 0.3 setrgbcolor
+gsave
+  150 100 translate
+  45 rotate
+  0.9 0.2 0.2 setrgbcolor
+  -40 -40 80 80 rectfill        % red, turned square
+grestore
+20 20 60 60 rectfill            % green again, and unturned
+showpage

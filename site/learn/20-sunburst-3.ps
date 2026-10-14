@@ -1,0 +1,16 @@
+%!PS
+%%BoundingBox: 0 0 300 300
+% Step 3: colour each ray by its angle, alternate the lengths, add a sun.
+150 150 translate
+/ray {                      % length -> draws one ray along the x axis
+  0 0 moveto 0 lineto stroke
+} def
+6 setlinewidth  1 setlinecap
+0 1 35 {                    % i = 0 ... 35 is on the stack
+  dup 36 div 0.8 1 sethsbcolor
+  2 mod 0 eq { 140 } { 100 } ifelse ray
+  10 rotate
+} for
+1 0.85 0.2 setrgbcolor
+0 0 40 0 360 arc fill
+showpage
