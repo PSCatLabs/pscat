@@ -14,8 +14,8 @@
 % painting tools, and each tool does the job it would on a real easel:
 %
 %   pkbroad  (#115)  the sky's criss-cross block-in, the earth of the
-%                    bank, and the horizontal strokes grazed across the
-%                    lake
+%                    bank, the horizontal strokes grazed across the
+%                    lake and the ripples breaking its reflected snow
 %   pkcrisscross (#184)  where the sky's block-in strokes fall
 %   pktrowel (#111)  the knife: snow down the lit faces, shadow snow and
 %                    shadow planes down the dark ones
@@ -26,7 +26,7 @@
 %   pkfan    (#114)  the evergreens' branch tiers, the spires in the
 %                    far forest
 %   pkdab    (#117)  the far forest's tapped crest, the bushes on the bank
-%   pkliner  (#116)  trunks, grass, and the light lines on the water
+%   pkliner  (#116)  trunks, grass, and the glints on the water
 %   pkspray / pkoil  cloud vapour and mist; the lit lip of the bank
 %
 % The reflection is not a separate drawing. Each scene element is a
@@ -36,7 +36,9 @@
 % one single-colour part at a time. Each part is pulled straight down
 % with a directional pkwet into the paint really beneath it, the way a
 % dry brush drags a wet reflection, then grazed across with horizontal
-% strokes and cut with light lines.
+% strokes and cut with glints. The snow goes in well toward the water's
+% colour, as a reflection is darker than what it mirrors, and ripples in
+% the reflected range's colour break it up at the foot of the lake.
 %
 % No setalpha anywhere (pkwash/pkpaper are deliberately not used), so
 % Ghostscript renders the same picture without a fallback path -- only
@@ -277,24 +279,32 @@
         } if
     } for
     grestore
-    % last, the foot: a band of haze, then fine spray tapped along it and
-    % lifted up into the range with a directional pkwet, so the foot
-    % dissolves into mist rising off the lake. (#118 brushed a fade up
-    % with a stack of pkbroad strokes; at 2x it read as ruled stripes.)
+    % last, the foot: a band of haze with a wavering top, then a little
+    % very fine spray tapped along it, both lifted up into the range with
+    % a directional pkwet, so the foot dissolves into mist rising off the
+    % lake. (#118 brushed a fade up with a stack of pkbroad strokes; at 2x
+    % it read as ruled stripes. #191's lift carried 1pt spray at a sparse
+    % density through all 14 layers, and read as gravel. #206: the band
+    % now rides the lift too, its wavy top keeping the steps from ruling,
+    % and the spray is a fine grain on it at 0.6pt.)
     % Only the near range has one: the far range's foot is (all but a
     % sliver) behind it.
     lkfoot {
     gsave
         lkpts lkrangepath clip
         lkMIST {
-            -20 lkWL 4 sub 800 16 rectfill
-            { 0 1 1 {
+            { newpath -20 lkWL 4 sub moveto
+              -20 lkWL 14 add lineto
+              120 lkWL 22 add 230 lkWL 8 add 360 lkWL 16 add curveto
+              480 lkWL 24 add 620 lkWL 6 add 780 lkWL 15 add curveto
+              780 lkWL 4 sub lineto closepath fill
+              0 1 1 {
                 /lkk exch def
                 newpath -20 lkWL 16 add lkk 7 mul add moveto
                 250 lkWL 22 add lkk 7 mul add 6 lkj add
                 520 lkWL 10 add lkk 7 mul add 6 lkj add
                 780 lkWL 18 add lkk 7 mul add curveto
-                << /Nozzle 10 /Density 90 /Falloff 1 /Speck 1 /Speckle 0.6
+                << /Nozzle 10 /Density 50 /Falloff 1 /Speck 0.6 /Speckle 0.5
                    /Overspray 0.6 >> pkspray
               } for }
             << /Direction 90 /OneSided true /Stretch 8 /Offset 40 /Layers 14
@@ -469,12 +479,13 @@ lkWL -2 0 {
 % (A nested horizontal pkwet graze per part, as in #181's specimen, was
 % tried: it more than doubled the reflection's cost for little visible
 % gain over the pkbroad strokes grazed across afterwards.)
+/lkPST 5 def                                     % lkpull's /Stretch
 /lkpull {
     /lkpl exch def /lkps exch def /lkwant exch def /lkpu exch def
     % the reflection carries the scene's colour, a little toward the water
     lkWATER 0.15 mix3 setrgbcolor
     { gsave lkmirror lkscene grestore }
-    << /Direction 270 /OneSided true /Stretch 5 /Offset lkps /Layers lkpl
+    << /Direction 270 /OneSided true /Stretch lkPST /Offset lkps /Layers lkpl
        /Pickup 0.8 /Under lkpu >> pkwet
 } def
 % code -   one part replayed mirrored and sharp, in its own colours
@@ -483,16 +494,23 @@ lkWL -2 0 {
     gsave lkmirror lkscene grestore
     /lkown false def
 } def
+% Reflected snow is not snow: a reflection is darker and lower in
+% contrast than what it mirrors, so the snow parts go into the water
+% already well toward the water's colour, or the peaks at the foot of the
+% lake stay brighter and crisper than the softened tree line above them.
+/lkSNOWR [ [ lkSNOW 0.9 shade ] lkWATER 0.4 mix3 ] def
 /lkmode /replay def /lkown false def
 lkFAR                    lkWATER                 11 12 7 lkpull
 [ lkFAR 0.84 shade ]     lkFAR                   12 8 5 lkpull
-[ lkSNOW 0.9 shade ]      lkFAR                   13 8 5 lkpull
-[ lkFAR lkSNOW 0.55 mix3 ] lkFAR                 14 8 5 lkpull
+lkSNOWR                  lkFAR                   13 8 5 lkpull
+[ lkFAR lkSNOWR 0.55 mix3 ] lkFAR                14 8 5 lkpull
 lkMIST                   lkFAR                   21 10 6 lkpull
 lkNEAR                   [ lkFAR lkMIST 0.4 mix3 ] 31 12 7 lkpull
 [ lkNEAR 0.84 shade ]    lkNEAR                  32 12 7 lkpull
-[ lkSNOW 0.9 shade ]      lkNEAR                  33 12 7 lkpull
-[ lkNEAR lkSNOW 0.55 mix3 ] lkNEAR               34 12 7 lkpull
+/lkPST 2 def
+lkSNOWR                  lkNEAR                  33 16 9 lkpull
+[ lkNEAR lkSNOWR 0.55 mix3 ] lkNEAR              34 16 9 lkpull
+/lkPST 5 def
 % the near range's lifted foot carries its own directional pkwet, and
 % mirrored that lift already runs down the water; pulling it as well
 % would nest 14 x 7 passes, past pkwet's 64x budget
@@ -503,27 +521,65 @@ lkLINE                   [ lkLINE lkMIST 0.4 mix3 ] 42 12 7 lkpull
 lkFARPINE                lkLINE                  52 12 7 lkpull
 lkFARPINELT              lkFARPINE               53 12 7 lkpull
 /lkmode /record def
+/lkRWOOD [ lkLINE lkWATER 0.15 mix3 ] def        % the wood, reflected
+/lkRRANGE [ lkNEAR lkWATER 0.15 mix3 ] def       % the near range, reflected
 7 srand
+% Horizontal pulls of the water colour, three to a row, of uneven length
+% and width with a broken edge, so they read as the surface and not as
+% rules drawn across the lake.
 lkWL 4 sub -8 0 {
     /lky exch def
-    [ lkWL lky sub lkWL add lkskyat ] 0.84 shade setrgbcolor
-    /lkx 700 chance 100 sub def
-    lkx lky lkx 200 add 160 chance add lky 1.5 lkj add lkseg
-    << /Width 5 /Charge 0.3 /Depletion 0.9 /Edge 0.3 >> pkbroad
+    % just under the shore the water mirrors the dark wood, below that the
+    % range, not the sky, so a pull carries some of what it crosses
+    /lkgt lky lkWL 44 sub sub 40 div 0 max 1 min def
+    [ lkWL lky sub lkWL add lkskyat ] 0.84 shade 3 array astore
+    [ lkRRANGE lkRWOOD lkgt mix3 ] 0.6 mix3 setrgbcolor
+    3 {
+        /lkx 800 chance 100 sub def
+        lkx lky lkx 30 add 100 chance add lky 1.5 lkj add lkseg
+        << /Width 3 frnd 4 mul add /Charge 0.3 /Depletion 0.9 /Edge 0.45 >> pkbroad
+    } repeat
 } for
-% light lines on the water, densest just below the far shore
-[ lkSNOW lkWL lkskyat 3 array astore 0.15 mix3 ] lkset
-0 1 13 {
+% Ripples across the foot of the lake, in the reflected range's own
+% colour: lost on the range, they cut the reflected snow into broken
+% bands, so the peaks there stop reading as crisp blocks.
+lkRRANGE lkset
+80 -3 0 {
+    /lky exch def
+    3 {
+        /lkx 760 chance 80 sub def
+        lkx lky lkx 60 add 160 chance add lky 0.8 lkj add lkseg
+        << /Width 1.4 frnd add /Charge 0.55 /Depletion 0.8 /Edge 0.4 >> pkbroad
+    } repeat
+} for
+% light lines on the water, densest just below the far shore: each one a
+% short run of glints of uneven length, weight and strength (mixed some
+% way toward the water under it), not one ruled stroke
+/lkGLINT [ lkSNOW lkWL lkskyat 3 array astore 0.15 mix3 ] def
+0 1 15 {
     pop
     /lkx 740 chance def
     /lky lkWL 3 sub 60 chance dup mul 60 div sub def
-    lkx lky lkx 14 add 36 chance add lky 0.6 lkj add lkseg
-    << /Width 1.1 /Taper 0.6 /Waver 0.3 /Charge 0.8 /Depletion 0.6 >> pkliner
+    [ lkGLINT [ [ lkWL lky sub lkWL add lkskyat ] 0.84 shade ] frnd 0.55 mul mix3 ] lkset
+    /lkgw 0.6 frnd 0.7 mul add def
+    3 chance 1 add {
+        /lkgl 4 22 chance add def
+        lkx lky lkx lkgl add lky 0.5 lkj add lkseg
+        << /Width lkgw /Taper 0.7 /Waver 0.3 /Charge 0.8 /Depletion 0.6 >> pkliner
+        /lkx lkx lkgl add 3 add 14 chance add def
+    } repeat
 } for
-% the light line where the far shore meets its own reflection
+% the light line where the far shore meets its own reflection, broken
+% into lengths: still water holds it, but not as one ruled line
 [ lkWL lkskyat ] 1.12 shade setrgbcolor
--10 lkWL 3 sub 770 lkWL 3 sub lkseg
-<< /Width 1.6 /Charge 0.9 /Depletion 0.3 /Edge 0.2 >> pkbroad
+/lkx -10 def
+{
+    lkx 770 ge { exit } if
+    /lkgl 40 160 chance add def
+    lkx lkWL 3 sub 0.4 lkj add lkx lkgl add lkWL 3 sub 0.4 lkj add lkseg
+    << /Width 1.2 frnd 0.6 mul add /Charge 0.9 /Depletion 0.5 /Edge 0.3 >> pkbroad
+    /lkx lkx lkgl add 4 add 18 chance add def
+} loop
 grestore
 
 % ---- foreground bank -------------------------------------------------
