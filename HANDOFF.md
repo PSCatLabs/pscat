@@ -912,6 +912,22 @@ renders eight examples in both and compares block-downsampled output).
   `examples/paintkit_pigment_demo.ps` (render at
   `docs/paintkit_pigment_demo.png`). Retuning a pigment moves the pinned
   mixes in `reference_mixes_are_pinned`: change them on purpose.
+- **`pktrowelplane` (issue #180) is a sibling of `pktrowel`, not a mode.** It
+  runs `pktrowel` once per row across the current path's area and passes its
+  own options dict straight through, so every `pktrowel` key keeps its meaning
+  (the plane's own keys are `/Direction`, `/Overlap`, `/RowJitter`,
+  `/AngleJitter`; `pktrowel` ignores unknown keys). Scratch names start `tpl`
+  because `pktrowel` overwrites every `pt*` name on each row. The extent is
+  taken from `flattenpath` + `pathforall` projected on the pull axis, not
+  `pathbbox` under a rotated CTM. The edge is the clip (`clip` before the first
+  row, inside a gsave that also restores the caller's path). Gotchas: `RowJitter`
+  and `AngleJitter` default to values that cannot open a seam between rows (a
+  first render had a bare full-height line at 20% of the row spacing); a dead
+  lane from `/Scrape` is a bare track no neighbouring row covers unless
+  `/Overlap` is above about 0.5; rows are spaced for the nominal width, so a
+  tapering `/Pressure` opens gaps. Tests are `tests/pktrowelplane.rs` plus a
+  `%%SelfTest` block; the specimen is `examples/paintkit_plane_demo.ps`
+  (`docs/paintkit_plane_demo.png`).
 - **Paintkit slices prove byte identity with `scripts/identity_check.sh
   BASE_WORKTREE [BIN] --control FILE [--gallery-still]`** (issue #263), not
   by hand. It renders every tracked `examples/`, `gallery/` and

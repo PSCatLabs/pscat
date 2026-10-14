@@ -1,0 +1,210 @@
+%!PS-Adobe-3.0
+%%Title: Paintkit — palette-knife planes (issue #180)
+%%BoundingBox: 0 0 780 900
+%%EndComments
+
+% Specimen for pktrowelplane (lib/paintkit.ps): fill the current path's area
+% with overlapping palette-knife pulls so it reads as one flat facet that
+% carries the blade's texture. pktrowel alone walks a centerline; this is
+% the primitive for laying a whole mountain face, rock or cliff.
+%
+%   newpath ... closepath
+%   << /Width 16 /Direction -80 /Angle 12 /Colors [ ... ] >> pktrowelplane
+%
+% Top: a peak built from planes, each with its own direction, tone and
+% blade. The lit face is pulled down the left slope and the shadow face down
+% the right one, the way a knife is pulled along a peak's own angles; snow
+% is pulled over each face with a lighter load; a rock band on each face is
+% pulled across the slope; the foothills are pulled flat. Two faces meet
+% along the ridge with a crisp edge, because each plane's path is its clip.
+% Colours come from the pigment palette (pigcolor).
+%
+% Bottom, row 1: /Direction 90, 45, 0 and -45 on one slab, all else equal.
+% Bottom, row 2: /Overlap 0, 0.3 and 0.6 (about 0.5 and above also closes the
+% bare track a nicked blade leaves), then the same slab with one `pktrowel`
+% pull: the bar #118 got before this procedure existed.
+%
+% No alpha anywhere, so Ghostscript renders the same page (its rand stream
+% differs, so the texture falls differently).
+%
+%   pscat --page 780x900 examples/paintkit_plane_demo.ps --png plane.png
+
+(lib/artkit.ps) run
+(lib/paintkit.ps) run
+
+1 1 1 setrgbcolor clippath fill
+
+/dptext {                                    % x y size string -
+    /dps exch def /dpz exch def /dpy exch def /dpx exch def
+    /Helvetica findfont dpz scalefont setfont dpx dpy moveto dps show
+} def
+/dpcap {                                     % x y string -
+    /dpcs exch def /dpcy exch def /dpcx exch def
+    0.25 0.25 0.25 setrgbcolor dpcx dpcy 9 dpcs dptext
+} def
+% x y (prefix) value -   caption "prefix value"
+/dpnumcap {
+    /dpnv exch def /dpnp exch def /dpny exch def /dpnx exch def
+    0.25 0.25 0.25 setrgbcolor /Helvetica findfont 9 scalefont setfont
+    dpnx dpny moveto dpnp show dpnv 20 string cvs show
+} def
+
+% [ x0 y0 x1 y1 ... ] dppoly -    (a new closed path through the points)
+/dppoly {
+    /dppts exch def
+    newpath dppts 0 get dppts 1 get moveto
+    2 2 dppts length 2 sub { dppts exch 2 getinterval aload pop lineto } for
+    closepath
+} def
+
+% [ recipe ] dpbase -    lay the current path's area in one flat colour first
+% (a ground for the knife to go over; the path is kept)
+/dpbase { pigmix setrgbcolor gsave fill grestore } def
+
+% ======================================================================
+% The scene: y 400..900
+% ======================================================================
+% sky: bands of paint from a pale warm horizon up to a deeper blue, each
+% band mixed as paint (blue + white + a breath of warm)
+0 1 99 {
+    /dpk exch def
+    /dpu dpk 99 div def
+    [ /phthaloblue 0.55 dpu 1.2 mul add  /titaniumwhite 9 dpu 6 mul sub
+      /yellowochre 0.22 1 dpu sub mul ] pigmix setrgbcolor
+    0 400 dpk 5 mul add 780 6 rectfill
+} for
+
+% the far range: one pale plane, pulled down the slope
+17 srand
+[ 0 430 0 560 90 600 160 640 230 600 300 650 360 610 430 640 520 590 600 640 690 600 780 650 780 430 ] dppoly
+[ /phthaloblue 0.3 /titaniumwhite 1.0 /alizarin 0.06 ] dpbase
+<< /Width 22 /Direction -90 /Angle 8 /Overlap 0.5 /Scrape 0.04 /Coverage 0.95
+   /EdgeBuildup 0.08 /ColorJitter 0.03
+   /Colors [ [ /phthaloblue 0.3 /titaniumwhite 0.9 /alizarin 0.07 ] pigcolor
+             [ /phthaloblue 0.3 /titaniumwhite 1.2 /alizarin 0.05 ] pigcolor ] >> pktrowelplane
+
+% the lit face (left): warm grey rock, pulled down the left slope
+23 srand
+[ 395 860 330 790 300 730 240 680 190 600 110 520 40 440 20 430 395 430
+  395 430 385 480 400 540 380 600 410 680 388 740 402 800 ] dppoly
+[ /burntumber 0.35 /yellowochre 0.1 /titaniumwhite 0.55 /phthaloblue 0.08 ] dpbase
+<< /Width 20 /Direction -118 /Angle 14 /Overlap 0.5 /Scrape 0.05 /Coverage 0.95
+   /Viscosity 0.8 /EdgeBuildup 0.12 /ColorJitter 0.04
+   /Colors [
+     [ /burntumber 0.5 /titaniumwhite 0.5 /phthaloblue 0.1 ] pigcolor
+     [ /burntumber 0.4 /yellowochre 0.1 /titaniumwhite 0.6 /phthaloblue 0.08 ] pigcolor
+     [ /burntumber 0.15 /yellowochre 0.1 /titaniumwhite 0.9 /phthaloblue 0.02 ] pigcolor ]
+   /ColorMix 0.5 /Light 160 >> pktrowelplane
+
+% the shadow face (right): blue-violet, pulled down the right slope
+31 srand
+[ 395 860 440 810 480 760 520 720 570 690 620 610 700 540 760 440 765 430 395 430
+  395 430 385 480 400 540 380 600 410 680 388 740 402 800 ] dppoly
+[ /phthaloblue 0.35 /alizarin 0.15 /titaniumwhite 0.55 ] dpbase
+<< /Width 20 /Direction -64 /Angle -14 /Overlap 0.5 /Scrape 0.05 /Coverage 0.95
+   /Viscosity 0.8 /EdgeBuildup 0.12 /ColorJitter 0.04
+   /Colors [
+     [ /phthaloblue 0.45 /alizarin 0.25 /titaniumwhite 0.4 /vandykebrown 0.15 ] pigcolor
+     [ /phthaloblue 0.35 /alizarin 0.15 /titaniumwhite 0.55 ] pigcolor
+     [ /phthaloblue 0.3 /titaniumwhite 0.8 ] pigcolor ]
+   /ColorMix 0.5 /Light 160 >> pktrowelplane
+
+% strata: a rock band on each face, pulled across the slope
+41 srand
+[ 20 430 40 440 110 520 200 550 300 500 392 540 395 430 ] dppoly
+[ /vandykebrown 0.6 /titaniumwhite 0.25 ] dpbase
+<< /Width 14 /Direction -6 /Angle 10 /Overlap 0.5 /Scrape 0.08 /Coverage 0.9
+   /Viscosity 0.7 /EdgeBuildup 0.2 /ColorJitter 0.05
+   /Colors [
+     [ /vandykebrown 0.6 /titaniumwhite 0.2 ] pigcolor
+     [ /burntumber 0.5 /titaniumwhite 0.35 /phthaloblue 0.08 ] pigcolor ]
+   /ColorMix 0.5 >> pktrowelplane
+43 srand
+[ 395 430 392 540 480 510 580 530 655 560 700 540 730 470 765 430 ] dppoly
+[ /prussianblue 0.4 /vandykebrown 0.4 /titaniumwhite 0.3 ] dpbase
+<< /Width 14 /Direction 4 /Angle -10 /Overlap 0.5 /Scrape 0.08 /Coverage 0.9
+   /Viscosity 0.7 /EdgeBuildup 0.2 /ColorJitter 0.05
+   /Colors [
+     [ /prussianblue 0.4 /vandykebrown 0.4 /titaniumwhite 0.2 ] pigcolor
+     [ /phthaloblue 0.3 /alizarin 0.15 /titaniumwhite 0.4 ] pigcolor ]
+   /ColorMix 0.5 >> pktrowelplane
+
+% snow: a lighter load over the top of each face. The paint is allowed to
+% break (Coverage), as it does under a light hand.
+53 srand
+[ 395 860 330 790 300 730 340 745 355 700 375 720 388 740 402 800 ] dppoly
+<< /Width 14 /Direction -112 /Angle 12 /Overlap 0.45 /Scrape 0.1 /Coverage 0.78
+   /Viscosity 0.7 /EdgeBuildup 0.25 /ColorJitter 0.03
+   /Colors [ [ /titaniumwhite 1 /yellowochre 0.02 ] pigcolor
+             [ /titaniumwhite 1 /phthaloblue 0.02 ] pigcolor ] >> pktrowelplane
+57 srand
+[ 395 860 440 810 480 760 452 742 432 712 410 680 388 740 402 800 ] dppoly
+<< /Width 14 /Direction -68 /Angle -12 /Overlap 0.45 /Scrape 0.1 /Coverage 0.78
+   /Viscosity 0.7 /EdgeBuildup 0.25 /ColorJitter 0.03
+   /Colors [ [ /titaniumwhite 1 /phthaloblue 0.12 ] pigcolor
+             [ /titaniumwhite 1 /phthaloblue 0.07 /alizarin 0.02 ] pigcolor ] >> pktrowelplane
+
+% the foothills: dark, pulled flat
+61 srand
+[ 0 400 0 455 100 442 250 458 400 440 550 458 700 446 780 458 780 400 ] dppoly
+[ /sapgreen 1 /vandykebrown 0.5 /midnightblack 0.3 ] dpbase
+<< /Width 26 /Direction 0 /Angle 6 /Overlap 0.5 /Scrape 0.05 /Coverage 0.95
+   /EdgeBuildup 0.1 /ColorJitter 0.04
+   /Colors [ [ /sapgreen 1 /vandykebrown 0.6 /midnightblack 0.2 ] pigcolor
+             [ /sapgreen 1 /prussianblue 0.5 /vandykebrown 0.3 ] pigcolor ] >> pktrowelplane
+
+0.2 0.2 0.25 setrgbcolor
+20 880 11 (pktrowelplane: a mountain face laid in knife planes, one direction and tone per plane) dptext
+
+% ======================================================================
+% The slab, with options: y 20..350
+% ======================================================================
+% a slab-shaped path inside the 170 x 150 box at (bx, by)
+/dpslab {                                    % bx by -
+    /dpby exch def /dpbx exch def
+    [ dpbx 8 add dpby 8 add   dpbx 150 add dpby 18 add   dpbx 165 add dpby 110 add
+      dpbx 80 add dpby 142 add   dpbx 12 add dpby 100 add ] dppoly
+} def
+% bx by opts -   one panel: the slab on a pale box, planed with opts
+/dppanel {
+    /dpo exch def /dpby exch def /dpbx exch def
+    0.9 0.9 0.92 setrgbcolor dpbx dpby 170 150 rectfill
+    77 srand
+    dpbx dpby dpslab [ /phthaloblue 0.35 /titaniumwhite 0.6 ] dpbase dpo pktrowelplane
+} def
+/dpslabcolors [
+    [ /phthaloblue 0.4 /titaniumwhite 0.5 /vandykebrown 0.1 ] pigcolor
+    [ /phthaloblue 0.3 /alizarin 0.1 /titaniumwhite 0.7 ] pigcolor ] def
+
+% row 1: the direction
+[ 90 45 0 -45 ] /dpdirs exch def
+0 1 3 {
+    /dpi exch def
+    /dpdx 20 dpi 190 mul add def
+    dpdx 215 << /Width 16 /Direction dpdirs dpi get /Angle 10 /Overlap 0.5
+                /Scrape 0.05 /Coverage 0.95 /EdgeBuildup 0.1
+                /Colors dpslabcolors /ColorMix 0.5 >> dppanel
+    dpdx 203 (/Direction ) dpdirs dpi get dpnumcap
+} for
+
+% row 2: the overlap, then one pull along the slab for contrast
+[ 0 0.3 0.6 ] /dpovs exch def
+0 1 2 {
+    /dpi exch def
+    /dpdx 20 dpi 190 mul add def
+    dpdx 25 << /Width 16 /Direction -90 /Angle 10 /Overlap dpovs dpi get
+               /Scrape 0.05 /Coverage 0.82 /EdgeBuildup 0.1
+               /Colors dpslabcolors /ColorMix 0.5 >> dppanel
+    dpdx 13 (/Overlap ) dpovs dpi get dpnumcap
+} for
+% the same slab with a single wide pull along its long axis
+0.9 0.9 0.92 setrgbcolor 590 25 170 150 rectfill
+77 srand
+590 25 dpslab
+gsave
+    clip
+    newpath 590 70 moveto 760 90 lineto
+    << /Width 70 /Angle 10 /Scrape 0.05 /Coverage 0.95 /EdgeBuildup 0.1
+       /Colors dpslabcolors /ColorMix 0.5 >> pktrowel
+grestore
+590 13 (one pktrowel pull: a bar, not a plane) dpcap
