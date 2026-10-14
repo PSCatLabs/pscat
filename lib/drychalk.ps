@@ -460,12 +460,14 @@
     dcO /Under known {
         dcO /Under get /dcchalk-under-must-be-an-rgb-array dcrgb
     } {
+        userdict /dkGround known not { dcchalk-needs-a-surface } if
+        % dcboard's tone holds only while its surface does: dksurface
+        % writes a fresh /dkGround array, so a later surface (identity, not
+        % value) falls back to its own ground (Codex review of PR #310)
         userdict /dcUnder known {
-            userdict /dcUnder get
-        } {
-            userdict /dkGround known not { dcchalk-needs-a-surface } if
-            userdict /dkGround get
-        } ifelse
+            userdict /dcUnderG get userdict /dkGround get eq
+        } { false } ifelse
+        { userdict /dcUnder get } { userdict /dkGround get } ifelse
     } ifelse
     /dcUnderC exch def
     dcO /Seed known {
@@ -1125,6 +1127,7 @@
             dcG aload pop setrgbcolor dcBx dcBy dcBw dcBh rectfill
             dcpaintfield
             userdict /dcUnder [ dcFmean dcfcolor ] put
+            userdict /dcUnderG userdict /dkGround get put
             dcBseed 5 mul 1 add dcsrand dcrand pop
             dcgrain
             % the erased writing, then half the swipes lay the film back
@@ -1215,6 +1218,11 @@
 %   rand sttaken eq (dcboard leaves the caller's stream untouched) mustbe
 %   userdict /dkSurface get /slate eq (dcboard sets the drykit surface) mustbe
 %   userdict /dcUnder known (and the tone chalk is drawn against) mustbe
+%   << /Width 2 >> dcchalkopts dcUnderC userdict /dcUnder get eq
+%   (chalk on that board blends against the board's tone) mustbe
+%   << /Surface /drawing >> dksurface
+%   << /Width 2 >> dcchalkopts dcUnderC userdict /dkGround get eq
+%   (after a new surface, chalk blends against that surface's ground) mustbe
 %%EndSelfTest
 %
 % @kind: Procedure
