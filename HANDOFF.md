@@ -769,8 +769,8 @@ renders eight examples in both and compares block-downsampled output).
   self-seeded scene without re-rolling its marks, log `rrand` at each
   painting step and restore it with `srand` on replay
   (`gallery/alpine_lake.ps`'s `lkdo`, issue #191).
-- **Loaded colours: `pkbroad`, `pktrowel` and `pkfan` adopt them, the rest do
-  not yet** (issue #183, slices L1-L3; design in `docs/PAINT_LOADING.md`).
+- **Loaded colours: `pkbroad`, `pktrowel`, `pkfan` and `pkdab` adopt them, the rest do
+  not yet** (issue #183, slices L1-L5; design in `docs/PAINT_LOADING.md`).
   `lib/paintkit.ps`'s `pu-` section (`puparse`, `puat`, `puflips`, `puwet`,
   `puspell`, `pulightneedscolors`) turns a head position into a colour.
   A preset keeps the record `puparse` returns under *its own* prefix
@@ -790,7 +790,16 @@ renders eight examples in both and compares block-downsampled output).
   per *run* (`pfrun`) and per pressed ray (`pfray`) by `pfcolor`, from the
   bristle's `pfub` and the stored `/ColorJitter` draw `pfcj` (taken where it
   always was, so the stream doesn't move), because a bristle's runs span every
-  subpath and `/Light` flips per subpath. `pkdab` (L5) is next.
+  subpath and `/Light` flips per subpath. `pkdab` (L5, #226) takes `/Colors` per dab: `pdColorRec`, resolved once
+  per dab into slot 14 of the dab array from the slot-5 draw it already had
+  (`puat` at `u = 1 - 2*pdd5`, flip false, then `puwet`), so all three layers
+  read one colour and no draw is added. `puparse` is called unconditionally
+  (its unset branch is the spelling and `/ColorMix`-needs-`/Colors` guards, and
+  never reads `/Light`); `pulightneedscolors` is not, because `/Light` is
+  pkdab's own. `/HighlightColor` and `/ShadowColor` (`puhue`, on `pkdab` and
+  `pkoil`) are mix targets graded once through `puwet` at the top of the call,
+  and `pkoil` keeps them as `poHighlightColor`/`poShadowColor`. L5b (the
+  specimen) is next.
 - **Paintkit slices prove byte identity with `scripts/identity_check.sh
   BASE_WORKTREE [BIN] --control FILE [--gallery-still]`** (issue #263), not
   by hand. It renders every tracked `examples/`, `gallery/` and
