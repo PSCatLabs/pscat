@@ -18,6 +18,7 @@ git -C "$T" add . && git -C "$T" -c user.email=t@t -c user.name=t commit -qm x
 # The hook prints some noise, then the number in the file as its last line.
 cat > "$T/hook.sh" <<'HOOK'
 #!/bin/sh
+[ "$#" -eq 1 ] || exit 9   # exactly one argument: the file
 echo noise
 n=$(sed -n 's/^[a-z] //p' "$1"); [ "$n" = bad ] && exit 3
 echo "$n"

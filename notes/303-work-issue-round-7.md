@@ -28,9 +28,28 @@ running the old and new scripts on the same trees and diffing the output. Multi-
 output was already compared page by page (`ls page*.png`); this is now documented and exercised
 (`selftest/drivers/artkit.ps` is 8 pages).
 
-**Verified against main itself** (base = detached worktree at the merge-base with a
-`/ic303probe true def` marker appended to the lib, uncommitted; the control draws by
-`/ic303probe where`): `--loader lib/artkit.ps` 79 of 79 page renders identical across 63 files,
-control differs; `--loader lib/hatchkit.ps` 3 of 3 identical, control differs.
+**Verified against main itself** (after the final rebase, which pulled in `lib/drykit.ps`, so the base was
+re-created from the new merge-base and the checks re-run). Base = detached worktree at the merge-base
+with a `/ic303probe true def` marker appended to the lib (uncommitted); the control draws by
+`/ic303probe where`. Same binary for both trees.
+- `--loader lib/artkit.ps`: 79 of 79 page renders identical across 63 files (includes the 8-page
+  `selftest/drivers/artkit.ps`), control differs, exit 0.
+- `--loader lib/hatchkit.ps`: 3 of 3 identical, control differs, exit 0; without the marker the control
+  does not differ and the exit is 2.
+- Default (no flag): output identical to the pre-change script on the same trees (diff of both logs, timings
+  normalised): 33 of 33 pages across 24 files, exit 0.
+- `--files` with a base `setrgbcolor` redefinition: 7 of 8 pages of the multi-page driver DIFFER, exit 1;
+  a bad path in the list exits 64 before any scratch directory is made.
+- Also: `test-scan.sh`, `test-sweep.sh` and a short `test-claim.sh` run (ALL PASS); `claim.sh`/`heartbeat.sh`
+  unchanged; full gate green after the rebase.
+
+**Won't-change outcome** (coordinator addition, from #287/PR #304): `Refs #N` in the PR body, small for the
+plan gate, step 9 closes with `--reason "not planned"` plus `wontfix` (finish.md). `gh pr checks --watch`
+logs are read with `tail -n 25`.
+
+**Review fixes (advisor).** `sweep-max.sh` passed the file to the hook twice (test hook now fails unless it
+gets exactly one argument); the finish.md `EXTRA_WORKTREES` is an array, not an `<...>` placeholder that is a
+shell parse error; `--files` paths are validated before the scratch dir exists; `--gallery-still` dies early
+when the pick leaves out `alpine_lake`.
 
 **Deferred.** Nothing.

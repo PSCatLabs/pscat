@@ -109,7 +109,7 @@ Then re-read `$WORKTREE_DIR/.claude/skills/work-issue/SKILL.md` (it may have cha
 1. Read the issue: `gh issue view <N> --json title,body,comments`. Make design calls yourself; flag only what is hard to reverse.
 2. Estimate size from the whole diff (code, tests and notes all count). **Small** = 20 lines or fewer AND no API change (no new/changed
    public Rust item, PostScript operator, CLI flag or lib procedure name). Otherwise **full**.
-   This is the only definition of small.
+   This is the only definition of small, except that a won't-change PR (step 7) is always small.
 3. Write the plan in your reply: files, approach, what you are not doing.
 4. **Hard gate, no code before it.** Heartbeat, then call the `advisor` tool (small: one short
    call, or skip and say so). If it objects, revise the plan. Heartbeat. The report's
@@ -165,6 +165,8 @@ EOF
 )"
 ```
 The body must contain `Closes #<N>` on its own line even when you write it without this template.
+**Won't-change outcome** (measurement shows the issue's change should not be made; the PR ships only comments and
+notes): write `Refs #<N>` instead, because merging `Closes #<N>` closes the issue as completed. Step 9 closes it as not planned.
 If the dispatcher said up front that this run will not merge, write the body for the maintainer from
 the start (pitfalls.md "Stop without merging"; a specimen PR commits and embeds its render, demo-surfaces.md). Always push with that explicit refspec, never a bare `git push`. Then:
 ```sh
@@ -216,7 +218,8 @@ Read `.claude/skills/work-issue/references/codex-review.md` now (full policy). T
     ```sh
     gh pr checks <PR#> --watch --fail-fast > <SCRATCH>/ci-<N>.log 2>&1; echo "exit=$?" >> <SCRATCH>/ci-<N>.log
     ```
-    Wait for the notification; no `sleep` loops, no `| tail`, no hand-back while it runs. `exit=` is a
+    Wait for the notification; no `sleep` loops, no `| tail`, no hand-back while it runs. The watch logs a line every
+    10 s: read only the end of the log (`tail -n 25 <SCRATCH>/ci-<N>.log`). `exit=` is a
     hint only. Heartbeat after every watch, wait ~10 s, re-run the `merge-tree` line above, then merge only if this prints
     `true` (`UNKNOWN` and a brief post-watch `false` print `false`: re-query up to 3 times, ~10 s apart, before calling it a failure):
     `gh pr view <PR#> --json mergeable,mergeStateStatus,statusCheckRollup --jq '(.mergeable == "MERGEABLE" and .mergeStateStatus != "DIRTY") and ([.statusCheckRollup[] | (.conclusion // .state)] | (length > 0 and all(. == "SUCCESS")))'`
@@ -230,7 +233,7 @@ Read `.claude/skills/work-issue/references/codex-review.md` now (full policy). T
 **Read `.claude/skills/work-issue/references/finish.md` now** and run its "Step 9" block as one Bash
 call. It runs from the main checkout (not the worktree) and starts by re-declaring `WORKTREE_DIR`
 and `BRANCH`. It aborts unless the PR is `MERGED`; if the issue is still `OPEN` it closes it with a
-comment linking the PR. It also removes, by exact recorded path, any extra comparison or base worktrees you made. Then confirm main CI for your merge commit (pitfalls.md "Main CI after
+comment linking the PR (won't-change: finish.md's variant). It also removes, by exact recorded path, any extra comparison or base worktrees you made. Then confirm main CI for your merge commit (pitfalls.md "Main CI after
 merge"). Red: stop, report it first, start no other work.
 
 ## 10. Final report

@@ -23,7 +23,7 @@ The line ranges drift when you edit the file: re-check them (the first and last 
 | Step 4 is a hard gate | 567-575 |
 | One scratch location | 577-589 |
 | Evidence runs and scratch hygiene (#273) | 591-614 |
-| Added in #303 (round 7: friction from the #110, #271, #279, #281, #285, #293 runs) | 616-664 |
+| Added in #303 (round 7: friction from the #110, #271, #279, #281, #285, #293 runs) | 616-674 |
 <!-- /TOC -->
 
 - **Don't work in the main checkout.** The whole point of the worktree
@@ -620,7 +620,8 @@ earlier run's files; resume decisions are made from GitHub state
   agents' pattern kills hit other agents' renders on 2026-10-13 (#259's run killed #110's).
   Start the process, record `$!` (`cmd & PID=$!`, write the number in your reply since
   shell state does not persist), and `kill "$PID"` only that. A process you did not start
-  is not yours to stop, even when it is wedged.
+  is not yours to stop, even when it is wedged. A task started with `run_in_background` has no
+  `$!` in your shell: stop it with `TaskStop <task id>`, which is scoped to your own tasks.
 - **`gh --jq` runs gojq, not system `jq`.** Their regex flavours and some builtins differ
   (see #293, the `scan` expression). Test every jq expression that
   will run inside `gh ... --jq` through `gh` itself (`gh pr list --json body --jq '...'`
@@ -660,5 +661,14 @@ earlier run's files; resume decisions are made from GitHub state
   before/after tree from step 5 is cleaned in step 9 (finish.md) from the list of paths you
   wrote down, never by matching `git worktree list`. Name them so the path does not end
   `-issue-<N>` (step 3 resumes on that suffix) and keep them outside the repo.
+- **A "won't change" outcome needs its own path (#287/PR #304).** When measurement shows the issue's
+  change should not be made and the PR ships only comments and notes: the PR body says `Refs #<N>`
+  (never `Closes`, which closes the issue as COMPLETED on merge); the plan gate counts it small; step 9
+  closes the issue with `--reason "not planned"` and the `wontfix` label (finish.md). Comment the
+  measurement on the issue first (step 5.4).
+- **`gh pr checks --watch` logs a refresh every 10 s**, so `<SCRATCH>/ci-<N>.log` grows long. Read it
+  with `tail -n 25`, not whole (the `exit=` line is last).
+- **Never edit a shell script while it runs.** bash reads a script as it executes; an edit mid-run
+  gave a syntax error at a later line (seen while verifying #303). Wait for the run, or copy the script.
 - **Codex cannot run harnesses**; for concurrency or shell changes the advisor plus real load
   runs are the review that counts (codex-review.md).

@@ -27,7 +27,7 @@ die() { echo "sweep-max.sh: $*" >&2; exit 64; }
 if [ "${1:-}" = "--one" ]; then   # internal: --one TREE HOOK [ARG...] FILE
     tree=$2; shift 2
     file=""; for file; do :; done   # the last argument
-    out=$( (cd "$tree" && "$@" "$file") 2>/dev/null) && rc=0 || rc=$?
+    out=$( (cd "$tree" && "$@") 2>/dev/null) && rc=0 || rc=$?
     last=$(printf '%s\n' "$out" | tail -n 1)
     case "$last" in
         ''|*[!0-9eE.+-]*|[eE]*) rc=1 ;;

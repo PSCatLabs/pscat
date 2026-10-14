@@ -177,6 +177,14 @@ EOF_LOADERS
 if [ -n "$FILES_LIST" ]; then
     [ -f "$FILES_LIST" ] || die "--files list '$FILES_LIST' not found"
     FILES_LIST="$(cd "$(dirname "$FILES_LIST")" && pwd -P)/$(basename "$FILES_LIST")"
+    # Check the paths now, before any scratch directory exists, so a typo leaves nothing behind.
+    while IFS= read -r f; do
+        f="${f%%#*}"
+        f=$(printf '%s' "$f" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+        [ -n "$f" ] || continue
+        git -C "$ROOT" ls-files --error-unmatch -- "$f" >/dev/null 2>&1 \
+            || die "--files: '$f' is not a tracked file in $ROOT"
+    done < "$FILES_LIST"
 fi
 LOADER_DESC=$(printf '%s' "$LOADERS" | tr '\n' ' ' | sed 's/ *$//')
 [ -n "$LOADER_DESC" ] || LOADER_DESC="the --files list"
@@ -310,14 +318,15 @@ if [ -n "$FILES_LIST" ]; then
         f="${f%%#*}"
         f=$(printf '%s' "$f" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
         [ -n "$f" ] || continue
-        git -C "$ROOT" ls-files --error-unmatch -- "$f" >/dev/null 2>&1 \
-            || die "--files: '$f' is not a tracked file in $ROOT"
         printf '%s\n' "$f" >> "$FILES"
     done < "$FILES_LIST"
     # drop duplicates, keep order
     awk '!seen[$0]++' "$FILES" > "$FILES.u" && mv "$FILES.u" "$FILES"
 fi
 [ -s "$FILES" ] || die "no tracked file under examples/, gallery/ or selftest/drivers/ loads ($LOADER_DESC)"
+if [ "$GALLERY_STILL" -eq 1 ] && ! grep -qx 'gallery/alpine_lake.ps' "$FILES"; then
+    die "--gallery-still needs gallery/alpine_lake.ps among the files, and this pick ($LOADER_DESC) leaves it out"
+fi
 
 # ---- the job list (gallery first: alpine_lake is the long pole) --------------
 JOBLIST="$OUT/jobs.nul"
