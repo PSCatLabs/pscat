@@ -12,12 +12,17 @@ through its two calls):
   subpath asks the whole-path region (the one the side test already built)
   about a pair of points `/Spacing / 12` either side of the stroke's anchor.
   Both in the mass means the edge is hidden there, and the stroke is not
-  emitted. The slot's four `frnd` draws and its `mfk` count are still taken,
+  emitted; but before calling it hidden the pair is asked once more at a
+  sixty-fourth of the step, because a hole thinner than the step puts both
+  points in the mass while its boundary is plainly visible (Codex round 1:
+  an 80 x 0.1 hole in a square lost most of its strokes). A hidden edge stays
+  inside however small the step. The slot's four `frnd` draws and its `mfk` count are still taken,
   so the strokes that remain are the ones the edge would have had and the
   contract (one draw per call, four per slot) is unchanged.
 - The subpath's side vote, which a hidden stretch gave no vote to (and
-  wasted 40 halvings trying), now gives up at once on a both-in probe in the
-  multi case and votes over 28 places instead of 7. The issue's
+  wasted 40 halvings trying), now tries a both-in probe once more at a
+  sixty-fourth of the step in the multi case, then gives up, and votes over 28
+  places instead of 7 (a both-out probe, a thin mass, still halves as before). The issue's
   other symptom (the vote flipping a whole blob) came from a blob mostly
   swallowed by another: few of its 7 fixed probes were on visible edge. A
   bar inside a circle with just its end sticking out starts at an angle where
@@ -30,12 +35,16 @@ through its two calls):
   pond, which has two closed subpaths; the control, overlapping ellipses
   through `pkbrushedge`, differs as it must).
 
-**Cost.** Two `siinside` calls per brushed slot of a multi-closed path, twice
-for `pkbrushedge` (inward and outward). Measured against the old code on a
-six-ellipse bank at 260x130 (`pkbrushedge`, spacing 3): 1.19 s CPU before,
-0.62 s after. It is cheaper because the hidden strokes were each a brush
+**Cost.** Two `siinside` calls per brushed slot of a multi-closed path, four
+when it is hidden (the second look at a sixty-fourth of the step), twice for
+`pkbrushedge` (inward and outward). Measured against the old code on a
+six-ellipse bank at 260x130 (`pkbrushedge`, spacing 3): 1.14 s CPU before,
+0.78 s after. It is cheaper because the hidden strokes were each a brush
 call, and the old vote paid up to 80 region probes per hidden probe. The
-`pkfeather` motion alone: about 0.5 s before, 0.3 s after.
+`pkfeather` motion alone, which paints nothing: 0.46 s before, 0.45 s after.
+(A first version halved the step nine times on every hidden slot: 2.65 s,
+more than twice the old cost. One extra look is what the thin-hole case
+needs.)
 
 **Not done / limits.**
 

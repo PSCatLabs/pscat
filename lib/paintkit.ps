@@ -9082,6 +9082,28 @@ systemdict /setalpha known /pwhasalpha exch def
 %   newpath 0 0 moveto 40 0 lineto 40 40 lineto 0 40 lineto closepath << /Wander 0 >> pkfeather
 %   /zzm 0 def { pop pop /zzm zzm 1 add def } { pop pop } { 6 { pop } repeat } { } pathforall
 %   newpath zzn zzm 2 mul eq (blobs that do not touch keep every stroke) mustbe
+%   % A hole thinner than the probe step is not an edge hidden inside the
+%   % mass: its boundary is still brushed (Codex review, round 1). A square
+%   % with a hairline slit wound the other way gets the strokes of both.
+%   newpath 0 0 moveto 100 0 lineto 100 100 lineto 0 100 lineto closepath
+%   << /Wander 0 >> pkfeather
+%   /zzsq 0 def { pop pop /zzsq zzsq 1 add def } { pop pop } { 6 { pop } repeat } { } pathforall
+%   newpath 0 0 moveto 100 0 lineto 100 100 lineto 0 100 lineto closepath
+%   10 50 moveto 10 50.1 lineto 90 50.1 lineto 90 50 lineto closepath
+%   << /Wander 0 >> pkfeather
+%   /zzsl 0 def { pop pop /zzsl zzsl 1 add def } { pop pop } { 6 { pop } repeat } { } pathforall
+%   newpath zzsl zzsq 40 add gt (a hairline hole in a mass keeps its brushed edge) mustbe
+%   % ... and it is brushed into the hole, not into the mass (strokes shorter
+%   % than the hole is thick, so a wrong side ends in the mass).
+%   newpath 0 0 moveto 100 0 lineto 100 100 lineto 0 100 lineto closepath
+%   10 50 moveto 10 50.1 lineto 90 50.1 lineto 90 50 lineto closepath
+%   scpath /zzreg exch def
+%   newpath 0 0 moveto 100 0 lineto 100 100 lineto 0 100 lineto closepath
+%   10 50 moveto 10 50.1 lineto 90 50.1 lineto 90 50 lineto closepath
+%   << /Overlap 0 /Lean 0 /Wander 0 /LengthJitter 0 /Length 0.04 >> pkfeather
+%   /zzok true def
+%   { pop pop } { zzreg scin { /zzok false def } if } { 6 { pop } repeat } { }
+%   pathforall newpath zzok (a hairline hole's strokes end outside the mass) mustbe
 %   % An open crest drawn right to left still brushes up (/Outward 90).
 %   newpath 100 0 moveto 0 0 lineto
 %   << /Overlap 0 /Lean 0 /Wander 0 /LengthJitter 0 /Length 5 >> pkfeather
@@ -9288,22 +9310,27 @@ systemdict /setalpha known /pwhasalpha exch def
                     /mfnx mfst 2 get 90 add cos def
                     /mfny mfst 2 get 90 add sin def
                     /mfeps mfspacing mfn div 0.5 mul def
+                    /mfeps0 mfeps def
                     40 {
                         mfst 0 get mfnx mfeps mul add mfst 1 get mfny mfeps mul add
                         mfinmass /mfpl exch def
                         mfst 0 get mfnx mfeps mul sub mfst 1 get mfny mfeps mul sub
-                        mfinmass
-                        dup mfpl ne {
-                            pop
+                        mfinmass /mfpr exch def
+                        mfpl mfpr ne {
                             /mfvotes mfvotes 1 add def
                             mfpl { /mfleft mfleft 1 add def } if
                             exit
                         } if
-                        % Both points in the mass: with overlapping blobs this
-                        % stretch of edge is hidden inside the others, and no
-                        % smaller step will find the mass's edge there.
-                        mfpl and mfmulti and { exit } if
-                        /mfeps mfeps 0.5 mul def
+                        % Both in the mass, with overlapping blobs: a hidden
+                        % edge, or a hole thinner than the step. One try at a
+                        % sixty-fourth of the step tells them apart; halving
+                        % 40 times over a hidden edge would not.
+                        mfpl mfpr and mfmulti and {
+                            mfeps mfeps0 lt { exit } if
+                            /mfeps mfeps0 64 div def
+                        } {
+                            /mfeps mfeps 0.5 mul def
+                        } ifelse
                     } repeat
                 } if
             } for
@@ -9380,15 +9407,22 @@ systemdict /setalpha known /pwhasalpha exch def
                 mhstops mfj get /mfst exch def
                 % An edge hidden inside the other blobs is not brushed: both
                 % points of a pair just either side of the stroke's anchor
-                % are in the mass.
+                % are in the mass. They are asked at the probe step and, if
+                % both are in, once more at a sixty-fourth of it: a hole
+                % thinner than the step has its far side within that
+                % (Codex review, round 1), while a genuinely hidden edge
+                % stays inside however small the step.
                 /mfhide false def
                 mfmulti mfisclosed and mfst 5 get 3 ne and {
-                    /mfhe mfspacing mfn div 0.5 mul def
-                    /mfhx mfst 2 get 90 add cos mfhe mul def
-                    /mfhy mfst 2 get 90 add sin mfhe mul def
-                    mfst 0 get mfhx add mfst 1 get mfhy add mfinmass
-                    mfst 0 get mfhx sub mfst 1 get mfhy sub mfinmass
-                    and /mfhide exch def
+                    /mfhide true def
+                    [ 1 0.015625 ] {
+                        mfspacing mfn div 0.5 mul mul /mfhe exch def
+                        mfst 0 get mfst 2 get 90 add cos mfhe mul add
+                        mfst 1 get mfst 2 get 90 add sin mfhe mul add mfinmass
+                        mfst 0 get mfst 2 get 90 add cos mfhe mul sub
+                        mfst 1 get mfst 2 get 90 add sin mfhe mul sub mfinmass
+                        and not { /mfhide false def exit } if
+                    } forall
                 } if
                 mfhide not {
                 % A lone point has no edge direction: it is pulled along
