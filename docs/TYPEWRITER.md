@@ -332,12 +332,16 @@ No new page-scale CI test is added. #204's concern about CI time stands.
   its internals live in the side dict.
   **As built (#213)** (`notes/213-typewriter-layout.md`): `tw-type`,
   `tw-linecount` and `tw-pageheight` in `lib/typewriter.ps`, one options dict
-  for layout and `tw-setup` keys; `<u>`, `<x>` and `<o>old|new</o>` markup (an
+  for layout and `tw-setup` keys; `<u>`, `<x>` and `<o>old|new</o>` markup (`<r>` came with #214) (an
   x-out is a strikeover at strike index +1, an underline +2); `/Memo`;
   `/PageNumbers`; `/PageStart` for paper; `scripts/typewrite.sh`; the
   `Typewriter` catalog row.
 - **#214, released-document look.** T14 and T15: aging, photocopy and bitonal
   loss, stamps, redactions. Everything fictional.
+  **As built (#214)** (`notes/214-released-look.md`): `lib/released.ps`
+  (`rel-page`, `rel-paper`, `rel-stamp`, `rel-note`, `rel-redact`), the
+  typewriter's `/Copies` key (copy loss in the ink: more spread, filled
+  counters, a contrast curve on coverage) and `<r>..</r>` / `/Redactor`.
 - **#215, specimen.** A side-by-side against T1/T2 and T9/T10 crops at scan
   resolution. The user judges it.
 

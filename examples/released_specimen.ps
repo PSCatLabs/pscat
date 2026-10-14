@@ -1,0 +1,78 @@
+%!PS-Adobe-3.0
+%%Title: released-document specimen -- one memo through 0, 1 and 3 photocopy generations (issue #214)
+%%BoundingBox: 0 0 1876 520
+%%EndComments
+
+% Specimen for lib/released.ps (docs/TYPEWRITER.md, "As built (#214)"). One
+% typed memo, three times with the same machine and seed, so only the release
+% layer differs:
+%
+%   left    the original: aged paper, a darker edge, folds, punch holes and
+%           the scanner's tilt and lamp, with a "received" stamp, a margin
+%           note and redaction bars over two names (<r>..</r> in the text)
+%   middle  the same memo after one photocopy (/Generation 1): grey and
+%           contrasty, the copier's lid at the edge, specks and a streak,
+%           the type thicker with its counters closing, the punch holes black
+%   right   after three (/Generation 3): near bitonal, the type fat and
+%           broken, specks and spatter gathered at the edges
+%
+% Every stamp, note and name is invented. docs/typewriter/release_vs_real.png
+% (docs/typewriter/tools/release_compare.py) sets crops of this beside the
+% reference scans T14 and T15.
+%
+%   pscat --page 1876x520 --dpi 150 --png released_specimen.png examples/released_specimen.ps
+%   gs -q -dNOSAFER -dBATCH -dNOPAUSE -sDEVICE=png16m -r150 -g3908x1083 -dGraphicsAlphaBits=4 -dTextAlphaBits=4 \
+%      -sOutputFile=released_specimen_gs.png examples/released_specimen.ps </dev/null
+
+(lib/artkit.ps) run
+(lib/surfacekit.ps) run
+(lib/handscript.ps) run
+(lib/typewriter_outlines.ps) run
+(lib/typewriter.ps) run
+(lib/released.ps) run
+
+1 setgray clippath fill
+
+% sr- prefix: specimen-local.
+/srmemo (Effective Monday, the third floor will begin keeping a daily log of every visitor who signs the book at the front desk. The log is to be typed, not written by hand, on the green ruled forms that Supply has sent up.
+
+The reasons are plain. On two occasions last quarter we could not say who had been in the building when a file went missing. The matter was raised with <r>Mr. L. T. Voss</r> and is now closed.
+
+Questions about the forms should go to <r>Mrs. Okafor</r>, extension 214.) def
+
+% x gen label -> -   one sheet at x, through gen photocopies
+/srsheet {
+    /srl exch def /srg exch def /srx exch def
+    gsave srx 36 translate
+    {
+        <<
+            /Text srmemo /Width 612 /Height 480 /Margin 54 /MarginTop 62
+            /Machine 4 /Seed 9 /Wear 1.2 /MachineWear 0.45 /Ink [0.2 0.18 0.18] /Ribbon 0.6
+            /Memo << /To (Mr. H. T. Delacroix, Deputy Superintendent)
+                     /From (R. M. Albright, Office Manager)
+                     /Subject (Visitor log, third floor)
+                     /Date (March 6, 1964) >>
+            /Redactor { rel-redact }
+        >> tw-type
+    } <<
+        /Width 612 /Height 480 /Seed 21 /Generation srg
+        /Age 0.6 /EdgeDark 0.5 /Folds 0.5 /Lamp 0.25 /Skew 0.3 /Punch 3
+        /Redact 0.7
+        /Stamps [
+            << /Lines [ (RECEIVED) (14 MAR 1964) ] /X 480 /Y 424 /Angle 3 /Size 13
+               /Ink [0.1 0.1 0.12] /Frame /box /Font /Helvetica /Tracking 1.6 /Seed 3 /Strength 0.6 >>
+            << /Lines [ (RELEASED) (IN PART) ] /X 150 /Y 112 /Angle -9 /Size 22
+               /Ink [0.62 0.1 0.12] /Frame /double /Seed 5 /Strength 0.6 >>
+        ]
+        /Notes [ << /Text (ok to file - jb) /X 360 /Y 128 /Angle 5 /Size 17 /Width 200 >> ]
+    >> rel-page
+    grestore
+    /Helvetica findfont 9 scalefont setfont 0.35 setgray
+    srx 60 add 16 moveto srl show
+} bind def
+
+20 0 (generation 0: the original, aged, folded and scanned) srsheet
+628 1 (generation 1: one photocopy of it) srsheet
+1236 3 (generation 3: a copy of a copy of a copy) srsheet
+
+showpage

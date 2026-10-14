@@ -108,7 +108,9 @@ showpage
 - **Markup in `/Text`** (nothing to escape; any other `<` is literal):
   `<u>underlined</u>` (backspace and type underscores), `<x>crossed out</x>`
   (x struck over each letter) and `<o>old|new</o>` (new typed over old, one
-  unbreakable token as wide as the longer side). Each pass strikes at its own
+  unbreakable token as wide as the longer side) and `<r>redacted</r>` (typed,
+  then covered by a bar over the whole run; see the released-document look
+  below). Each pass strikes at its own
   strike index, so an x over an `x` is a second blow, not a copy of the first.
 - **Memo:** `/Memo << /To (...) /From (...) /Subject (...) /Date (...) >>`
   types a centred, underlined MEMORANDUM title, the TO / FROM / SUBJECT / DATE
@@ -147,6 +149,55 @@ Ghostscript (`gs -dNOSAFER`; the render above beside the same page in
 [gs](../typewriter_memo_gs.png)), `--reflow` joins each paragraph's lines.
 Typographic quotes and dashes become ASCII; any other non-ASCII letter becomes
 `?`, since the machine has no such key. `--help` lists every option.
+
+### The released-document look
+
+`lib/released.ps` (issue #214; needs `lib/artkit.ps` and `lib/surfacekit.ps`,
+and `lib/handscript.ps` for margin notes) makes a typed page look like a
+document that was released decades later:
+
+```postscript
+(lib/artkit.ps) run (lib/surfacekit.ps) run (lib/handscript.ps) run
+(lib/typewriter_outlines.ps) run (lib/typewriter.ps) run (lib/released.ps) run
+{ << /Text (The matter was raised with <r>Mr. L. T. Voss</r> and is now closed.)
+     /Memo << /To (All Staff) /Subject (Daily log) >>
+     /Redactor { rel-redact } >> tw-type }
+<< /Age 0.6 /EdgeDark 0.5 /Folds 0.5 /Lamp 0.25 /Skew 0.3 /Punch 3
+   /Generation 3
+   /Stamps [ << /Lines [ (RECEIVED) (14 MAR 1964) ] /X 480 /Y 700 /Angle 3 >> ]
+   /Notes  [ << /Text (ok to file - jb) /X 360 /Y 128 /Angle 5 >> ] >> rel-page
+showpage
+```
+
+`rel-page` runs the content proc (any drawing; `tw-type` is the intended one)
+inside a stack of effects, each optional and each off at strength 0:
+
+- **Paper** (under the type): `/Age` (ivory tone, blotches, foxing, fibres),
+  `/EdgeDark`, `/Lamp` (the scanner's gradient), `/Folds` at `/FoldAt`, `/Punch`
+  holes, and `/Skew` on a `/Backdrop`.
+- **Photocopies**: `/Generation` 1 to 8. Each generation is a sheet the last
+  one was copied onto, with its own small rotation and shift, black specks,
+  streaks and a lid-dark sliver at the edge (`/Speckle`, `/CopyEdge`). A copy
+  is grey and contrasty: paper and stains go white. The content's type gets the
+  typewriter's `/Copies` key, which thickens strokes, closes counters and drops
+  light strikes (`rel-page` sets it for you).
+- **Marks** over the content: `/Stamps` (`rel-stamp`: ink through a clip with
+  holes, so the page shows through), `/Notes` (`rel-note`: handwriting),
+  `/Staple`, `/Clip`.
+- **Redactions**: `<r>words</r>` in a `tw-type` text; `/Redactor { rel-redact }`
+  makes the bar a marker's, otherwise it is a plain black bar. The bar covers
+  whole cells, so a word is always covered.
+
+Use `rel-paper` alone as `tw-type`'s `/PageStart` to age every page of a long
+document (the copy layers need `rel-page`, one page). The same `/Seed` draws the
+same page. Every stamp, name and note in a piece must be invented: no real
+agency's seal or marking.
+
+<p><img src="../released_specimen.png" alt="One memo through 0, 1 and 3 photocopy generations"/></p>
+
+`examples/released_specimen.ps` renders this (gs: [the same](../released_specimen_gs.png));
+`docs/typewriter/release_vs_real.png` sets crops of it beside the reference
+scans T14, T15 and T10.
 
 ## The font catalog
 
