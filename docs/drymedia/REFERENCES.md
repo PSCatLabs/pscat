@@ -52,7 +52,7 @@ It is CC BY-SA 4.0, with all five attributions.
 
 The crayon comparison panels (#239) are built by `prototypes/crayon_compare.py`. `crayon_compare.png` uses only the CC0 crops from MrAlanKoh's rhino drawing, so it stays CC0 apart from pscat's own renders. `crayon_compare_figure.png` contains `crayon_child_tadpole_3y`, so it is CC BY-SA 3.0, with the source's attribution.
 
-The gallery piece's comparison panel (#240), `crayon_drawing_compare.png`, is built by `prototypes/crayon_drawing_compare.py` from Y5 only (the rhino drawing, CC0), so it is CC0 apart from pscat's own render. Y5 may be oil pastel rather than crayon (see its row), so the match of grain is approximate. `crayon_drawing_gs.png` is the same piece rendered by Ghostscript, whose `rand` lays the motions out slightly differently.
+The gallery piece's comparison panel (#240), `crayon_drawing_compare.jpg`, is built by `prototypes/crayon_drawing_compare.py` from Y5 only (the rhino drawing, CC0), so it is CC0 apart from pscat's own render. Y5 may be oil pastel rather than crayon (see its row), so the match of grain is approximate. `crayon_drawing_gs.png` is the same piece rendered by Ghostscript, whose `rand` lays the motions out slightly differently.
 
 These sources were viewed but no crop is committed. One is not free to
 reuse; the others add nothing the crops above lack:

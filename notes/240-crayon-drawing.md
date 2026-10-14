@@ -4,7 +4,7 @@
 on printer paper, 792x612 pt, built from `lib/drycrayon.ps` (#239) and
 `lib/strokeglyphs.ps` (#236). No library changes. Rendered still:
 `gallery/renders/crayon_drawing.png` (2x, as the gallery convention says).
-The reference panel is `docs/drymedia/crayon_drawing_compare.png`, built by
+The reference panel is `docs/drymedia/crayon_drawing_compare.jpg`, built by
 `docs/drymedia/prototypes/crayon_drawing_compare.py`; the gs render is
 `docs/drymedia/crayon_drawing_gs.png`.
 
@@ -30,7 +30,7 @@ and after drawing, not from memory:
   scribble over the blue band with the blue showing through the gaps, its ring
   and rays `dyloop` and `dyrays` with large `/Wobble`, `/Gap` and `/Lean`.
   It has a smile, as suns do.
-- **Faces and spill** (the advisor's pass after the first render): every
+- **Faces and spill** (a second pass after the first render): every
   figure has two dots and a smile (`cdface`, head radius and centre from
   dyfigure's own geometry: 0.13 h at 0.87 h up for a stick figure, 0.3 h at
   0.7 h for a tadpole). Each fill is a polygon with its corners knocked up
@@ -51,7 +51,7 @@ and after drawing, not from memory:
 
 | | pscat | gs |
 |---|---|---|
-| render at 2x (`--dpi 144`, 1584x1224), CPU `user` | 8.7 s (13.2 s before #332 landed; the machine ran at load average 12 to 27, so wall time swung up to 25 s) | 5.2 s |
+| render at 2x (`--dpi 144`, 1584x1224), CPU `user` | 8.7 s (the first draft, with an older binary, took 13.2 s; the machine ran at load average 12 to 27 while I measured, so wall time swung up to 25 s) | 5.2 s |
 | `tests/crayon_drawing.rs`, `--profile ci`, 1x plus gs | about 15 s for the pair (a whole piece, so over the 2 s per-render line for `tests/drykit*.rs`, which is for specimen-scale renders) | |
 | DRYMEDIA.md 6.2 budget for this piece | 20 s | 20 s |
 

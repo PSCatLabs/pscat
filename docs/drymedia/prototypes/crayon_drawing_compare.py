@@ -1,4 +1,4 @@
-"""Builds docs/drymedia/crayon_drawing_compare.png (#240).
+"""Builds docs/drymedia/crayon_drawing_compare.jpg (#240).
 
 A 6-year-old's whole crayon picture (REFERENCES.md Y5, CC0) beside
 gallery/crayon_drawing.ps, and three same-scale details under them: the sun's
@@ -8,7 +8,7 @@ repo root:
 
     python3 -I docs/drymedia/prototypes/crayon_drawing_compare.py \
         docs/drymedia/refs gallery/renders/crayon_drawing.png \
-        docs/drymedia/crayon_drawing_compare.png
+        docs/drymedia/crayon_drawing_compare.jpg
 
 The still is the committed 2x render (1584x1224). Needs Pillow.
 """
@@ -64,4 +64,4 @@ for i, (label, ca, cb) in enumerate(details):
 y = y0 + rows * (200 + lab + pad)
 d.text((pad, y), 'Left: CC0 (MrAlanKoh, Wikimedia Commons). Right: pscat, 2x. This panel is CC0 apart from pscat\'s render.',
        fill=(90, 90, 90), font=small)
-img.save(out)
+img.save(out, quality=88)
