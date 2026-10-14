@@ -121,8 +121,15 @@ TWState begin {
 
 % slot -> uniform in (0, 1), from the prefix state hA hB. Each quantity
 % passes its own slot as a separate key: adding a slot to another key would
-% make column c+1's x equal column c's y (TYPEWRITER.md section 7).
-/uni { hA hB 3 -1 roll mix2 exch 256 mul add 0.5 add 65536 div } bind def
+% make column c+1's x equal column c's y (TYPEWRITER.md section 7). The two
+% chains never mix inside mix2, so the high byte hashes both of them: from
+% one chain alone, two prefixes sharing hA (one pair in 256) would agree on
+% the high byte of every draw.
+/uni {
+    hA hB 3 -1 roll mix2
+    exch 1 index add 255 and P exch get 256 mul add
+    0.5 add 65536 div
+} bind def
 % slot -> roughly normal, sd 1 (three uniforms)
 /gau {
     4 mul dup 1 add uni exch dup 2 add uni exch 3 add uni
@@ -219,14 +226,16 @@ TWState begin {
     /Ribbon      [ /tRibbon     /tIsUnit   /tw-ribbon-must-be-0-to-1 ]
 >> def
 
-% opts -> -  (TWState is the current dict). Every key is checked before any
-% is applied, so a rejected call changes nothing.
+% opts -> -  (TWState is the current dict, begun by the caller). Every key
+% is checked before any is applied, so a rejected call changes nothing, and
+% each guard ends TWState first, so a caller's `stopped` does not leave it
+% on the dict stack to catch the caller's next def.
 /tApply {
-    dup type /dicttype ne { pop tw-options-must-be-a-dict } if
-    dup { pop tKeys exch known not { tw-unknown-option } if } forall
+    dup type /dicttype ne { pop end tw-options-must-be-a-dict } if
+    dup { pop tKeys exch known not { end tw-unknown-option } if } forall
     dup {
         exch tKeys exch get aload pop               % value internal check guard
-        3 index 2 index cvx exec { pop pop pop pop } { 4 1 roll pop pop pop cvx exec } ifelse
+        3 index 2 index cvx exec { pop pop pop pop } { 4 1 roll pop pop pop end cvx exec } ifelse
     } forall
     dup /Preset known { dup /Preset get tPresets exch get { def } forall } if
     {
@@ -242,9 +251,12 @@ TWState begin {
     /wearM tWear tMWear mul def
     /wearL tWear tLWear mul def
     /wearS tWear tSWear mul def
+    % the line memo holds values scaled by the wear: any option change
+    % drops it, so a strike never depends on what was typed before
+    /tLineFor null def
     tDocFor tSeed ne {
         5 tSeed tDomain /docB exch def /docA exch def
-        /tDocFor tSeed def /tLineFor null def
+        /tDocFor tSeed def
     } if
     tMtabFor tMachine ne {
         6 tMachine tDomain /tMB exch def /tMA exch def
@@ -398,6 +410,13 @@ end definefont pop } exec
 %   { << /Machine 9 /Wear -1 >> tw-setup } /tw-wear-must-be-a-non-negative-number
 %   (one bad key among good ones) mustguard
 %   TWState /tMachine get 1 eq (and the good ones were not applied) mustbe
+%
+%   countdictstack mark { << /Wear -1 >> tw-setup } stopped pop cleartomark countdictstack eq
+%   (a rejected tw-setup leaves the dict stack as it was) mustbe
+%   countdictstack mark { << /Bogus 1 >> tw-set } stopped pop cleartomark countdictstack eq
+%   (a rejected tw-set leaves the dict stack as it was) mustbe
+%   countdictstack mark { 7 tw-set } stopped pop cleartomark countdictstack eq
+%   (a non-dict leaves the dict stack as it was) mustbe
 %%EndSelfTest
 
 %%SelfTest: tw-setup-applies-presets-and-keys

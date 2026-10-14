@@ -14,7 +14,7 @@
 %              strikes on, no two are alike
 %   presets    the same sentence on the /electric, /manual and /worn
 %              presets, then elite pitch, then a red ribbon run and a
-%              strikeover (a second strike index at the same cells)
+%              strikeover (a t struck over a mistyped r, strike index 1)
 %
 % The ink is #211's flat ink (fill plus a pressure-driven spread); the
 % ribbon weave, clogged counters and one-side-heavy keys arrive with #212.
@@ -79,13 +79,13 @@
 (this exhibit until schools open, we may be able to have some specimens for) show
 72 262 moveto (exhibit at the Mitchell Corn Palace. I am sorry we did not know about it.) show
 
-(A red ribbon run \(/Ink, tw-set\), and a strikeover: the word retyped at /Strike 1) 54 238 splabel
+(A red ribbon run \(/Ink, tw-set\), and a strikeover: a mistyped r corrected by striking t over it at /Strike 1) 54 238 splabel
 72 226 moveto << /Pitch 10 /Size 12.5 /Seed 13 >> tw-setup (Please note the ) show
 << /Ink [0.62 0.12 0.10] >> tw-set (DEADLINE) show
 << /Ink [0.13 0.13 0.15] >> tw-set ( of July 1.) show
-72 214 moveto (Shipped on the ) show
-currentpoint (tenth) show moveto << /Strike 1 >> tw-set (tenth) show
-<< /Strike 0 >> tw-set (, by rail.) show
+72 214 moveto (Shipped on the ten) show
+currentpoint (r) show moveto << /Strike 1 >> tw-set (t) show
+<< /Strike 0 >> tw-set (h, by rail.) show
 
 190 sprule
 (The same /Machine and /Seed type the same page in pscat and Ghostscript; the caller's rand stream is untouched.) 54 172 splabel

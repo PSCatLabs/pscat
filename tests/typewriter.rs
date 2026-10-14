@@ -170,6 +170,37 @@ fn a_second_strike_at_a_cell_differs_from_the_first() {
     assert_ne!(strike(1), strike(2));
 }
 
+/// The line layer is memoized per line, already scaled by the wear. A
+/// change of options mid-line must drop it, or a strike would depend on
+/// what was typed before it on the line.
+#[test]
+fn an_option_change_mid_line_types_as_a_fresh_block_would() {
+    let after = |img: &[u8]| -> Vec<u8> {
+        let w = width_px();
+        // columns 3 onwards; the space at column 2 keeps `b`'s ink out
+        let x0 = X0 + 3 * CELL - CELL / 2;
+        (Y0 - 40..Y0 + 12)
+            .flat_map(|y| img[y * w + x0..y * w + x0 + 3 * CELL].to_vec())
+            .collect()
+    };
+    let changed = ink(&render(
+        "36 84 moveto << /Machine 3 /Seed 8 /Wear 2 >> tw-setup (ab ) show \
+         << /Wear 0.5 >> tw-set (def) show",
+    ));
+    let fresh = ink(&render(
+        "36 84 moveto << /Machine 3 /Seed 8 /Wear 0.5 >> tw-setup 57.6 84 moveto (def) show",
+    ));
+    assert!(
+        after(&fresh).iter().any(|&p| p > 128),
+        "the box missed the glyphs"
+    );
+    assert_eq!(
+        after(&changed),
+        after(&fresh),
+        "a mid-line /Wear change kept the line's old variation"
+    );
+}
+
 #[test]
 fn stringwidth_and_charpath_change_nothing_a_later_show_draws() {
     let setup = "36 84 moveto << /Machine 4 /Seed 2 >> tw-setup";

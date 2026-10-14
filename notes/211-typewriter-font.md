@@ -25,7 +25,7 @@ sections 2–5 and 7 of it, with flat ink. Section 6 (ribbon ink) is #212.
     frame.
 - `examples/typewriter_specimen.ps` renders `docs/typewriter_specimen.png`
   (pscat) and `docs/typewriter_specimen_gs.png` (gs). Both are 200 dpi.
-- `tests/typewriter.rs` (8 tests), the `%%SelfTest` blocks in
+- `tests/typewriter.rs` (9 tests), the `%%SelfTest` blocks in
   `lib/typewriter.ps` (guards, presets, pica and elite advances), and the
   library added to `tests/libbind.rs`.
 
@@ -108,12 +108,23 @@ sections 2–5 and 7 of it, with flat ink. Section 6 (ribbon ink) is #212.
   every prefix to 256 states, so one strike in 256 got another cell's
   draws. Two Pearson chains, with different starts and byte offsets, give
   16 bits.
+  - The chains never mix inside `mix2`. So a draw's high byte hashes both
+    chains' final bytes. From one chain alone, two prefixes that share the
+    first chain's state (one pair in 256) would agree on the high byte of
+    every draw (step 6 review).
   - Seeds are folded in at `tw-setup`; the cell, the code and the strike
     index are folded in per strike.
   - Separate domain keys keep the machine, line and strike draws apart.
 - **The machine table** (95 entries) is rebuilt only when `/Machine`
-  changes. The line layer is memoized per line. Both are memoization, so
-  `BuildChar` stays pure in effect.
+  changes. The line layer is memoized per line.
+  - The line memo holds values already scaled by the wear, so every option
+    change drops it. Otherwise a `/Wear` change mid-line would keep the
+    line's old variation (step 6 review;
+    `an_option_change_mid_line_types_as_a_fresh_block_would`).
+  - Both are memoization, so `BuildChar` stays pure in effect.
+- **Guards end `TWState` before they raise.** A caller's `stopped` must
+  not leave the side dict on the dict stack, where it would catch the
+  caller's next `def`. A `%%SelfTest` pins this.
 - **Pressure and weight** set the width of the spread stroke:
   `0.6pt × /Ribbon × pressure × weight`. That is section 6 step 3, the one
   part of the ink model that flat ink can show.
