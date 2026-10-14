@@ -769,8 +769,8 @@ renders eight examples in both and compares block-downsampled output).
   self-seeded scene without re-rolling its marks, log `rrand` at each
   painting step and restore it with `srand` on replay
   (`gallery/alpine_lake.ps`'s `lkdo`, issue #191).
-- **Loaded colours: `pkbroad`, `pktrowel` and `pkfan` adopt them, the rest do
-  not yet** (issue #183, slices L1-L3; design in `docs/PAINT_LOADING.md`).
+- **Loaded colours: `pkbroad`, `pktrowel`, `pkfan` and `pkdab` adopt them, the rest do
+  not yet** (issue #183, slices L1-L5; design in `docs/PAINT_LOADING.md`).
   `lib/paintkit.ps`'s `pu-` section (`puparse`, `puat`, `puflips`, `puwet`,
   `puspell`, `pulightneedscolors`) turns a head position into a colour.
   A preset keeps the record `puparse` returns under *its own* prefix
