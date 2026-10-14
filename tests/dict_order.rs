@@ -98,7 +98,11 @@ fn names_come_first_then_exotic_keys_in_insertion_order() {
 fn forall_order_is_identical_across_processes() {
     let run = |src: &str| {
         let out = Command::new(BIN).args(["-e", src]).output().expect("spawn");
-        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
         String::from_utf8_lossy(&out.stdout).into_owned()
     };
     let issue = "/d 20 dict def 0 1 15 { d exch 1 put } for d { pop } forall count array astore ==";

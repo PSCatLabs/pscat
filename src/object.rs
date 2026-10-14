@@ -675,7 +675,11 @@ impl Dict {
             .map(|(k, v)| (Object::lit(Value::Name(name::resolve(*k))), v.clone()))
             .collect();
         if self.exotic.len() < 2 {
-            out.extend(self.exotic.values().map(|e| (e.key.clone(), e.value.clone())));
+            out.extend(
+                self.exotic
+                    .values()
+                    .map(|e| (e.key.clone(), e.value.clone())),
+            );
         } else {
             let mut ex: Vec<&ExoticEntry> = self.exotic.values().collect();
             ex.sort_unstable_by_key(|e| e.seq);
