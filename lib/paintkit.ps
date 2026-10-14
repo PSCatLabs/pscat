@@ -579,6 +579,53 @@
 %   (a zero-length pointed subpath) mustpass
 %%EndSelfTest
 %
+%%SelfTest: pre-walkpath-scans-share-walkpaths-segment-bound
+%   % Issue #299: pkribbon, pknib and pkfeather scan the path before
+%   % walkpath, via pkscanclosed, which carries the same wkmaxsegs bound.
+%   % A moveto, (wkmaxsegs - 2) zero-length linetos and one real lineto are
+%   % exactly wkmaxsegs visits; one more zero-length lineto is one over.
+%   { newpath 0 0 moveto wkmaxsegs 2 sub { 0 0 rlineto } repeat 40 0 rlineto
+%     << /Pitch 50 >> pkribbon }
+%   (pkribbon at exactly wkmaxsegs segments) mustpass
+%   { newpath 0 0 moveto wkmaxsegs 2 sub { 0 0 rlineto } repeat 40 0 rlineto
+%     << /Pitch 50 >> pknib }
+%   (pknib at exactly wkmaxsegs segments) mustpass
+%   { newpath 0 0 moveto wkmaxsegs 1 sub { 0 0 rlineto } repeat 40 0 rlineto
+%     << >> pkribbon }
+%   /walkpath-segment-count-exceeds-safety-limit
+%   (pkribbon one segment over wkmaxsegs) mustguard
+%   { newpath 0 0 moveto wkmaxsegs 1 sub { 0 0 rlineto } repeat 40 0 rlineto
+%     << >> pknib }
+%   /walkpath-segment-count-exceeds-safety-limit
+%   (pknib one segment over wkmaxsegs) mustguard
+%   { newpath 0 0 moveto wkmaxsegs 1 sub { 0 0 rlineto } repeat 40 0 rlineto
+%     << >> pkfeather }
+%   /walkpath-segment-count-exceeds-safety-limit
+%   (pkfeather one segment over wkmaxsegs) mustguard
+%%EndSelfTest
+%
+%%SelfTest: pre-walkpath-scans-refuse-before-walkpath-runs
+%   % The block above passes on a tree without the scan bound too, because
+%   % walkpath's own pass refuses the same path. Here walkpath is replaced by
+%   % a stub (each block runs in a fresh interpreter), so only a refusal from
+%   % the scan itself passes.
+%   /tgot false def
+%   /walkpath { pop pop /tgot true def } def
+%   { newpath 0 0 moveto wkmaxsegs 1 sub { 0 0 rlineto } repeat 40 0 rlineto
+%     << >> pkribbon }
+%   /walkpath-segment-count-exceeds-safety-limit
+%   (pkribbon is refused by its scan) mustguard
+%   { newpath 0 0 moveto wkmaxsegs 1 sub { 0 0 rlineto } repeat 40 0 rlineto
+%     << >> pknib }
+%   /walkpath-segment-count-exceeds-safety-limit
+%   (pknib is refused by its scan) mustguard
+%   { newpath 0 0 moveto wkmaxsegs 1 sub { 0 0 rlineto } repeat 40 0 rlineto
+%     << >> pkfeather }
+%   /walkpath-segment-count-exceeds-safety-limit
+%   (pkfeather is refused by its scan) mustguard
+%   tgot not (walkpath was never reached) mustbe
+%%EndSelfTest
+%
 % @kind: Procedure
 % @summary: Treats the current path as a centerline and fills a variable-width ribbon along it, built on walkpath. Color comes from whatever the caller already set.
 % @example: newpath ... << /Width 10 /Pressure { pktaper } >> pkribbon

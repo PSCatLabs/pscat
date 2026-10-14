@@ -38,6 +38,14 @@ pknib and pkfeather each get past their scan, call the stub and return without a
 `pre_walkpath_scans_accept_exactly_wkmaxsegs_segments`: exactly `wkmaxsegs` visits still draw through
 pkribbon and pknib, one more is refused.
 
+**Self-tests** (lib/paintkit.ps, added after Codex round 1): `pre-walkpath-scans-share-walkpaths-segment-bound`
+(exactly `wkmaxsegs` visits draw through pkribbon and pknib, one more is refused for pkribbon, pknib and
+pkfeather) and `pre-walkpath-scans-refuse-before-walkpath-runs`, which stubs `walkpath` (each block runs in a
+fresh interpreter) so only a refusal from the scan passes. The first block passes on base too, because
+walkpath's own pass refuses the same path; the second fails on base (checked with `origin/main`'s
+`lib/paintkit.ps` plus the block: `1 of 51 block(s) failed`). The Rust tests stay for the clean-stack and
+exact-boundary drawing checks.
+
 **Not done.** No new top-level name (nothing for `ARTKIT_INTERNAL`). The other whole-path `pathforall`s in
 paintkit are `pktrowelplane`'s (it flattens and scans the area outline for its extent, then clips to it;
 it never calls `walkpath` on that path, so there is no #110 bound for it to be "before") and
