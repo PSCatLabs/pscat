@@ -187,3 +187,65 @@ fn dsc_comments_are_ignored() {
         ["3"]
     );
 }
+
+// --- def/load with non-name keys (#338) ---------------------------------
+
+#[test]
+fn def_accepts_non_name_keys() {
+    // The issue's repro: an integer key, read back with `get`.
+    assert_eq!(
+        eval("5 dict begin 1 (one) def currentdict 1 get end"),
+        ["(one)"]
+    );
+    // Booleans and non-integral reals are keys too.
+    assert_eq!(
+        eval("4 dict begin true (t) def 1.5 (r) def true load 1.5 load end"),
+        ["(t)", "(r)"]
+    );
+}
+
+#[test]
+fn def_integral_real_key_is_the_integer_key() {
+    // PLRM: a real key with an integral value is converted to an integer,
+    // in both directions, and 1.5 stays distinct from 1 and 2.
+    assert_eq!(
+        eval(
+            "4 dict begin 2.0 (two) def currentdict 2 get 1 (x) def 1.0 load 1.5 (y) def 1 load 2 load end"
+        ),
+        ["(two)", "(x)", "(x)", "(two)"]
+    );
+}
+
+#[test]
+fn def_string_key_becomes_a_name() {
+    assert_eq!(eval("4 dict begin (abc) 7 def /abc load end"), ["7"]);
+    assert_eq!(eval("4 dict begin /abc 8 def (abc) load end"), ["8"]);
+}
+
+#[test]
+fn def_and_load_non_name_keys_edge_cases() {
+    assert_eq!(eval_err("null 1 def"), PsError::Typecheck);
+    assert_eq!(eval_err("null load"), PsError::Typecheck);
+    // A load miss names the key.
+    assert_eq!(eval_err("99 load"), PsError::Undefined("99".to_string()));
+    // load walks the whole dictionary stack, not just the top dict.
+    assert_eq!(
+        eval("1 (outer) def 2 dict begin 1 load end 1 load"),
+        ["(outer)", "(outer)"]
+    );
+    // An inner definition shadows the outer one only while it is open.
+    assert_eq!(
+        eval("1 (outer) def 2 dict begin 1 (inner) def 1 load end 1 load"),
+        ["(inner)", "(outer)"]
+    );
+}
+
+#[test]
+fn def_non_name_key_is_undone_by_restore() {
+    assert_eq!(
+        eval("save 1 (x) def restore currentdict 1 known"),
+        ["false"]
+    );
+    // An outer definition made before the save survives it.
+    assert_eq!(eval("1 (a) def save 1 (b) def restore 1 load"), ["(a)"]);
+}
