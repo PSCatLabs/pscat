@@ -40,13 +40,13 @@ twice:
 | with `dcscratch` | 2.22, 2.25 |
 | without, names in userdict | 3.08, 2.73 |
 
-About 20% faster with it. The drychalk and drykit names the specimen
-defines while it runs (a couple of hundred) are enough to hurt userdict's
-hash table, and with bound procedures few operator lookups remain to be
-slowed by the private dictionary. Left as it was, with a comment saying
-so. (The difference from drykit and paintkit in #307, where the private
-dictionary lost, is that those bind their procedures *and* define far
-fewer names at run time per call.)
+About 20% faster with it. The run-to-run spread is wide (the machine was
+shared), but every "with" run beat every "without" run. This is not
+explained: #307 found the opposite for drykit and paintkit, where the
+private dictionary lost, and the micro-benchmark there said a hit in a
+crowded userdict is erratic (it depends on where the hot names fall in the
+hash table), so drychalk's win may be partly where its names land. Left as
+it was, with a comment saying it was re-measured.
 
 ### The other kits
 
@@ -70,9 +70,8 @@ gallery piece that loads each library:
 Everything measurable is at or under 0.33 s, most of it gs startup, so
 binding cannot move it. fillkit, lettering, headline, jersey and apparel
 (and hangul) stop in gs on a missing font (`lettering-font-not-found`):
-they use pscat's bundled fonts, so there is no gs time to improve. A
-hot-path win in pscat is a different question and was not measured
-(pscat looks operators up without the dictionary-stack cost). These are
+they use pscat's bundled fonts, so there is no gs time to improve. Whether
+bind helps these in pscat was not measured. These are
 left as `} def` rather than bound on a guess.
 
 ### Audit (drychalk)
