@@ -1274,6 +1274,12 @@ symbols a lecture needs: `≡ ∼ ≃ ⊆ ⊃ ⊇ ↦ ⊥ ∝ ∴ ∘ ∗ ⋆ �
 double, triple and contour integrals `∬ ∭ ∮` (also `sggrow` symbols), and
 superscript digits (`i²`, `x⁻¹`); `examples/strokeglyphs_board_math.ps`
 is their specimen.
+Issue #366 added subscript digits, signs and letters (`H₂O`, `xₙ`, `Σᵢ₌₀`,
+derived from the digit skeletons the way the superscripts are) and the
+variant Greek letters `ϑ ϰ ϱ ϖ ς ϵ ϕ`; `examples/strokeglyphs_subscripts_greek.ps`
+is their specimen. In mathkit `\varphi \vartheta \varkappa \varrho \varpi
+\varsigma` now draw the variants, and `\epsilon` is the lunate ϵ while
+`\varepsilon` stays the three-shaped ε, as in TeX.
 
 ```postscript
 (lib/handscript.ps) run

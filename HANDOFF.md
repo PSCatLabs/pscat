@@ -631,6 +631,9 @@ renders eight examples in both and compares block-downsampled output).
    #339 filled the commonest gaps (relations, ∘ ∗ ⋆, ⟨ ⟩ ‖, ℏ ℓ, ι υ Υ,
    ∬ ∭ ∮, superscript digits derived from the digit skeletons):
    `notes/339-board-math-glyphs.md`.
+   #366 added subscript digits and letters (the same derivation, lowered
+   80 units) and the variant Greek letters, and mapped mathkit's `\varphi`
+   and friends to them: `notes/366-subscripts-variant-greek.md`.
    #237 shipped `lib/mathkit.ps` (`mk-`): TeX-subset math laid out with
    TeX's box model as those skeletons (`mkpath`, `mkmetrics`, `mkalign`,
    and the annotations `mkframe`, `mkunderline`, `mkarrow`), with
