@@ -1,0 +1,142 @@
+%!PS-Adobe-3.0
+%%Title: drychalk specimen -- chalk handwriting on a green board and a slate, before and after (issue #235)
+%%BoundingBox: 0 0 840 1080
+%%EndComments
+
+% Specimen for lib/drychalk.ps (docs/DRYMEDIA.md, the chalk medium over
+% drykit). Top to bottom:
+%
+%   before   gallery/hundred_lines.ps's look: handscript's Type 3 font, a
+%            plain pen stroke in a chalk colour on a flat board
+%   after    the same sentence, the same skeletons (strokeglyphs imports
+%            handscript's lowercase), drawn with dcchalk on a dcboard
+%   green    a dressed green board: the last lecture's erased writing
+%            under eraser swipes and two finger wipes, dust along the
+%            ledge and in the tray, fresh writing over it, a side-of-chalk
+%            underline and a box in coloured chalk
+%   slate    a dressed slate: a side-of-chalk shaded block, landing and
+%            lifting strokes, pressed dots, and every chalk colour
+%
+%   pscat --page 840x1080 --png drychalk_specimen.png examples/drychalk_specimen.ps
+%
+% Budget (DRYMEDIA.md 6.2): 10 s at 2x (--dpi 144) in pscat and gs.
+
+(lib/artkit.ps) run
+(lib/paintkit.ps) run
+(lib/drykit.ps) run
+(lib/handscript.ps) run
+(lib/strokeglyphs.ps) run
+(lib/drychalk.ps) run
+
+0.97 0.96 0.93 setrgbcolor clippath fill
+
+% sp- prefix: specimen-local.
+/spfont { /Helvetica findfont exch scalefont setfont } def
+/splabel { 0.32 0.32 0.30 setrgbcolor 10 spfont moveto show } def
+
+% x y w h -   (a wooden frame around a board)
+/spframe {
+    /sph exch def /spw exch def /spy exch def /spx exch def
+    0.42 0.29 0.17 setrgbcolor
+    spx 8 sub spy 8 sub spw 16 add sph 16 add rectfill
+    0.33 0.22 0.12 setrgbcolor
+    spx 8 sub spy 8 sub spw 16 add 3 rectfill
+} def
+
+% (text) x y size seed -   (a line of handwriting as a path)
+/spline {
+    /spsd exch def /spsz exch def
+    << /Size spsz /Seed spsd /Jitter 0.02 >> sgpath
+} def
+
+/penance (i will not cache my glyphs.) def
+
+% ----------------------------------------------------------- before
+
+(before: gallery/hundred_lines.ps, handscript's font stroked with a plain pen in a chalk colour) 20 1058 splabel
+20 930 800 112 spframe
+0.09 0.16 0.13 setrgbcolor 20 930 800 112 rectfill
+/HandScript findfont 42 scalefont setfont
+HandScriptDict /work get /J 12 put
+1985 srand
+0.86 0.86 0.80 setrgbcolor 52 990 moveto penance show
+HandScriptDict /work get /J 16 put
+0.82 0.82 0.76 setrgbcolor 60 944 moveto penance show
+
+% ------------------------------------------------------------ after
+
+(after: the same skeletons, size and pen width drawn with dcchalk on a dcboard green board) 20 908 splabel
+20 780 800 112 spframe
+20 780 800 112 << /Surface /greenboard /Seed 3 /Haze 0.35 /Swipes 2 /Wipes 0 /Smudges 1 /Ledge 0 >> dcboard
+/white dcchalkcolor
+newpath penance 52 840 42 11 spline penance 60 794 42 12 spline
+<< /Width 1.9 >> dcchalk
+
+% ------------------------------------------------------ green board
+
+(a dressed green board: last lecture's writing erased under swipes and wipes, dust on the ledge and in the tray, fresh chalk over it) 20 756 splabel
+20 418 800 322 spframe
+20 432 800 308 << /Surface /greenboard /Seed 7 /Tray 14 /Swipes 7 /Wipes 2
+    /Ghost {
+        (the area under the curve) 470 700 30 101 spline
+        (x squared plus y squared) 70 500 32 103 spline
+    } >> dcboard
+/white dcchalkcolor
+newpath
+(chalk on a green board) 60 678 34 201 spline
+(the stick lands heavy, tires, and lifts) 60 618 30 202 spline
+(dust falls down the board) 60 560 30 203 spline
+<< /Width 1.8 >> dcchalk
+% a side-of-chalk underline under the first line, two strokes (C8)
+newpath 58 668 moveto 330 671 lineto << /Tilt 85 /Side 5 >> dcchalk
+newpath 64 662 moveto 300 663 lineto << /Tilt 85 /Side 4 /Touch 0.6 >> dcchalk
+% a boxed result in yellow
+/yellow dcchalkcolor
+newpath (a = g mod p) 568 494 34 204 spline << /Width 1.8 >> dcchalk
+newpath 552 478 moveto 556 538 lineto 760 535 lineto 757 474 lineto 550 481 lineto
+<< /Width 1.6 /Touch 0.62 >> dcchalk
+/pink dcchalkcolor
+newpath 470 470 moveto 520 490 lineto 516 478 moveto 520 490 lineto 507 491 lineto
+<< /Width 1.6 >> dcchalk
+
+% ------------------------------------------------------------- slate
+
+(a dressed slate, no ghost writing: a side-of-chalk shaded block, landing and lifting strokes, pressed dots, and the chalk colours) 20 394 splabel
+20 70 800 310 spframe
+20 70 800 310 << /Surface /slate /Seed 5 /Haze 0.3 /Swipes 4 /Wipes 1 /Ledge 14 >> dcboard
+/white dcchalkcolor
+% shading with the side of the stick: a block of broad strokes
+0 1 2 {
+    /spk exch def
+    newpath 60 spk 6.5 mul 258 add moveto 200 spk 6.5 mul 261 add lineto
+    << /Tilt 85 /Side 9 /Touch 0.56 /Seed 400 spk add >> dcchalk
+} for
+(side of the stick) 60 228 22 302 spline
+<< /Width 1.4 >> dcchalk
+% landing and lifting, light to heavy
+[ 0.55 0.68 0.8 ] {
+    /spt exch def
+    newpath 260 spt 0.55 sub 200 mul 254 add moveto
+    330 spt 0.55 sub 200 mul 280 add 400 spt 0.55 sub 200 mul 236 add 470 spt 0.55 sub 200 mul 262 add curveto
+    << /Width 2.4 /Touch spt /Landing 0.8 /Lift 0.8 >> dcchalk
+} forall
+(lands, tires, lifts) 280 228 22 303 spline
+<< /Width 1.4 >> dcchalk
+% pressed dots
+newpath 0 1 6 { 22 mul 520 add 262 moveto 0.6 0 rlineto } for
+<< /Width 2.6 >> dcchalk
+(pressed dots) 520 228 22 304 spline
+<< /Width 1.4 >> dcchalk
+% the colours
+/spi -1 def
+[ /white /yellow /pink /blue /green /orange ] {
+    /spc exch def
+    /spi spi 1 add def
+    spc dcchalkcolor
+    newpath spc 30 string cvs 60 spi 125 mul add 140 26 500 spi add spline
+    << /Width 1.6 >> dcchalk
+} forall
+
+0.32 0.32 0.30 setrgbcolor 9 spfont
+(drychalk: lib/drychalk.ps over lib/drykit.ps; handwriting skeletons from lib/strokeglyphs.ps, whose lowercase is lib/handscript.ps's) 20 40 moveto show
+showpage

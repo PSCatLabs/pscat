@@ -72,6 +72,7 @@ render examples/headline.ps 900x900
 render examples/jersey.ps 900x1200
 render examples/apparel_shirt.ps 1400x760
 render examples/drykit_specimen.ps 840x1000
+render examples/drychalk_specimen.ps 840x1080
 render examples/drycrayon_specimen.ps 840x1000
 render examples/drycrayon_motion_demo.ps 840x760
 render examples/drycharcoal_specimen.ps 720x490

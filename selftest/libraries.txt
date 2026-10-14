@@ -15,6 +15,7 @@ lib/artkit.ps
 lib/paintkit.ps
 lib/stipplekit.ps
 lib/drykit.ps
+lib/drychalk.ps
 lib/hatchkit.ps
 lib/strokeglyphs.ps
 lib/drycrayon.ps

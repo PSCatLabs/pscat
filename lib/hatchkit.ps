@@ -56,7 +56,7 @@
 %           multi-angle engraving fills (three or more). The random
 %           stream is consumed one full pass at a time, in this order,
 %           so reproducibility holds per angle as well as overall.
-%   /Spacing num  device units between adjacent lines within one pass;
+%   /Spacing num  user-space units between adjacent lines within one pass;
 %           must be > 0 (default 6).
 %   /Width num-or-[lo hi]  stroke width. A single number draws every
 %           line at that width (unless /Density overrides it — see
@@ -575,20 +575,20 @@
 % @kind: Procedure
 % @summary: Fills the current clip region with a family of parallel hatch lines — single or multi-angle, with seeded width, wobble, dropout, and length variation, and an optional per-point density callback for tonal shading. Does not clip on its own; set the region as the current clip before calling.
 % @example: newpath 20 20 moveto 180 20 lineto 180 180 lineto 20 180 lineto closepath clip << /Angle 30 /Spacing 4 /Seed 7 >> hatch
-% @param: /BBox [x0 y0 x1 y1] area to sweep; defaults to `pathbbox` of the current path
-% @param: /Angle single hatch angle in degrees (default 45), ignored when /Angles is given
-% @param: /Angles [deg ...] one full pass per angle, in order — cross-hatching and multi-angle fills
-% @param: /Spacing device units between lines within a pass; must be > 0 (default 6)
-% @param: /Width num or [lo hi] stroke width, or its range for a per-line uniform draw (default 1)
-% @param: /Wobble num >= 0 max random perpendicular offset per line (default 0)
-% @param: /Dropout num in [0,1] probability a candidate line is skipped (default 0)
-% @param: /Trim [lo hi] fraction of a line's in-region length to shorten by, split randomly between ends (default [0 0])
+% @param: /BBox [array of points] [x0 y0 x1 y1] area to sweep; defaults to `pathbbox` of the current path
+% @param: /Angle [degrees] Single hatch angle, 0 = horizontal (default 45), ignored when /Angles is given
+% @param: /Angles [array of degrees] One full pass per angle, in order — cross-hatching and multi-angle fills
+% @param: /Spacing [points] Distance between lines within a pass, in the current user space; must be > 0 (default 6)
+% @param: /Width [points or array of points] Stroke width, or a [lo hi] range for a per-line uniform draw (default 1)
+% @param: /Wobble [points] Max random perpendicular offset per line; must be >= 0 (default 0)
+% @param: /Dropout [0..1] Probability a candidate line is skipped (default 0)
+% @param: /Trim [array of fraction of line length] [lo hi] fraction of a line's in-region length to shorten by, split randomly between ends (default [0 0])
 % @param: /Mark [proc] procedure (not null); appends each line's path (after /Wobble, /Trim and /Dropout) to a fresh current path instead of stroking it, then runs once at the end, inside the gsave, with `hatchwidths` bound to the per-line widths; /Density runs count as lines
-% @param: /Density {x y -> d} optional per-sample tone callback in [0,1] (clamped); drives width buckets and a no-ink cutoff
-% @param: /DensityThreshold num in [0,1] samples at or below this draw no ink (default 0)
-% @param: /Seed n seeds with `n srand`, restores the caller's stream afterward via `rrand`
-% @param: /MaxLines n hard cap on total candidate lines across all angles, checked before drawing (default 20000)
-% @param: /MaxSamples n hard cap on total /Density calls across all angles, checked before drawing (default 2000000)
+% @param: /Density [proc] {x y -> d} optional per-sample tone callback in [0,1] (clamped); drives width buckets and a no-ink cutoff
+% @param: /DensityThreshold [0..1] Samples at or below this draw no ink (default 0)
+% @param: /Seed [integer] Seeds with `n srand`, restores the caller's stream afterward via `rrand`
+% @param: /MaxLines [count] Hard cap on total candidate lines across all angles, checked before drawing (default 20000)
+% @param: /MaxSamples [count] Hard cap on total /Density calls across all angles, checked before drawing (default 2000000)
 /hatch {
   % Operand checks (#259). Everything the caller hands `hatch` -- the
   % options dict, and each option value read out of it -- is checked

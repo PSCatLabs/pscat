@@ -265,13 +265,18 @@ fn generated_paintkit_entries_have_the_right_fields() {
     ));
 }
 
-/// Issue #141: every paintkit parameter's description starts with its
-/// unit in brackets, so an agent reading `--capabilities` can tell
-/// "Offset 14" (points) from "Spread 0.8" (a fraction of /Width) without
-/// opening the library. The vocabulary is closed on purpose: a check for
-/// a leading `[` alone would accept `/Under [r g b] ...` with no unit
-/// added, and free-form units drift (`pt`, `pts`, `user units`).
-fn paintkit_unit_is_known(unit: &str) -> bool {
+/// Issue #141 (paintkit), generalised in #195 to every migrated library:
+/// every parameter's description starts with its unit in brackets, so an
+/// agent reading `--capabilities` can tell "Offset 14" (points) from
+/// "Spread 0.8" (a fraction of /Width) without opening the library. The
+/// vocabulary is closed on purpose: a check for a leading `[` alone would
+/// accept `/Under [r g b] ...` with no unit added, and free-form units
+/// drift (`pt`, `pts`, `user units`). A lone unit is a fixed token or one
+/// of the prefix forms; `array of U` and `U or V` combine known units, so
+/// `[x0 y0 x1 y1]` is `array of points` and a `/Palette` is `name or array
+/// of rgb arrays`. Add a token here only when no existing one says what the
+/// number is; lengths in user space are `points`, as in paintkit.
+fn unit_is_known(unit: &str) -> bool {
     const FIXED: &[&str] = &[
         "points",
         "degrees",
@@ -284,50 +289,120 @@ fn paintkit_unit_is_known(unit: &str) -> bool {
         "array of rgb arrays",
         "boolean",
         "integer",
+        "string",
+        "dict",
+        "array",
     ];
-    FIXED.contains(&unit)
-        || ["fraction of ", "per ", "multiple of ", "count per "]
-            .iter()
-            .any(|form| unit.strip_prefix(form).is_some_and(|rest| !rest.is_empty()))
+    if FIXED.contains(&unit) {
+        return true;
+    }
+    if ["fraction of ", "per ", "multiple of ", "count per "]
+        .iter()
+        .any(|form| unit.strip_prefix(form).is_some_and(|rest| !rest.is_empty()))
+    {
+        return true;
+    }
+    if let Some(inner) = unit.strip_prefix("array of ") {
+        return unit_is_known(inner);
+    }
+    unit.split_once(" or ")
+        .is_some_and(|(a, b)| unit_is_known(a) && unit_is_known(b))
 }
 
 #[test]
-fn every_paintkit_parameter_states_its_unit() {
+fn the_unit_vocabulary_stays_closed() {
+    for ok in [
+        "points",
+        "array of points",
+        "name or array of rgb arrays",
+        "count or name",
+        "array of fraction of the box",
+        "count per inch",
+    ] {
+        assert!(unit_is_known(ok), "[{ok}] should be a known unit");
+    }
+    for bad in [
+        "pt",
+        "num",
+        "user units",
+        "x0 y0 x1 y1",
+        "h s v",
+        "array of",
+        "points or",
+        "points or pt",
+        "fraction of ",
+    ] {
+        assert!(!unit_is_known(bad), "[{bad}] should not be a known unit");
+    }
+}
+
+/// The unit a description leads with, or a panic naming the parameter.
+fn leading_unit<'a>(owner: &str, name: &str, description: &'a str) -> &'a str {
+    description
+        .strip_prefix('[')
+        .and_then(|rest| rest.split_once("] "))
+        .map(|(unit, _)| unit)
+        .unwrap_or_else(|| {
+            panic!("{owner} /{name}: description must start with a [unit], got {description:?}")
+        })
+}
+
+#[test]
+fn every_migrated_parameter_states_its_unit() {
+    let caps = capabilities::catalog();
+    let mut total = 0;
+    for mf in capabilities::migrated_files() {
+        let rows: Vec<_> = caps.iter().filter(|c| c.source == mf.source).collect();
+        let mut checked = 0;
+        for cap in &rows {
+            for p in &cap.parameters {
+                let unit = leading_unit(&cap.name, p.name, p.description);
+                assert!(
+                    unit_is_known(unit),
+                    "{} {} /{}: unknown unit [{unit}]",
+                    mf.source,
+                    cap.name,
+                    p.name
+                );
+                // The two names #141 was about mean one thing everywhere.
+                // fillkit's /Spread is the one deliberate exception (#195):
+                // GIMP's name for a 0..1 sample-coordinate jitter, with no
+                // /Width to be a fraction of.
+                match p.name {
+                    "Spread" if mf.source == "lib/fillkit.ps" => {
+                        assert_eq!(unit, "fraction of the box", "{} /Spread", cap.name)
+                    }
+                    "Spread" => assert_eq!(unit, "fraction of /Width", "{} /Spread", cap.name),
+                    "Load" => assert_eq!(unit, "per /Width", "{} /Load", cap.name),
+                    _ => {}
+                }
+                checked += 1;
+            }
+        }
+        // A file that declares `@param` tags must have had them all read:
+        // a new migrated library is covered by construction, and one whose
+        // tags never reach the catalog fails here instead of passing empty.
+        let src = std::fs::read_to_string(mf.source).expect("read migrated file");
+        let declared = src.lines().filter(|l| l.starts_with("% @param:")).count();
+        assert_eq!(
+            declared, checked,
+            "{}: {declared} @param tags in the file but {checked} checked",
+            mf.source
+        );
+        total += checked;
+    }
+    assert!(total > 350, "only {total} migrated parameters checked");
+}
+
+#[test]
+fn every_paintkit_parameter_has_the_issue_141_shape() {
     let caps = capabilities::catalog();
     let paintkit: Vec<_> = caps
         .iter()
         .filter(|c| c.source == "lib/paintkit.ps")
         .collect();
     assert!(!paintkit.is_empty(), "no paintkit entries in the catalog");
-    let mut checked = 0;
-    for cap in &paintkit {
-        for p in &cap.parameters {
-            let unit = p
-                .description
-                .strip_prefix('[')
-                .and_then(|rest| rest.split_once("] "))
-                .map(|(unit, _)| unit)
-                .unwrap_or_else(|| {
-                    panic!(
-                        "{} /{}: description must start with a [unit], got {:?}",
-                        cap.name, p.name, p.description
-                    )
-                });
-            assert!(
-                paintkit_unit_is_known(unit),
-                "{} /{}: unknown unit [{unit}]",
-                cap.name,
-                p.name
-            );
-            // The two names #141 was about mean one thing everywhere.
-            match p.name {
-                "Spread" => assert_eq!(unit, "fraction of /Width", "{} /Spread", cap.name),
-                "Load" => assert_eq!(unit, "per /Width", "{} /Load", cap.name),
-                _ => {}
-            }
-            checked += 1;
-        }
-    }
+    let checked: usize = paintkit.iter().map(|c| c.parameters.len()).sum();
     assert!(checked > 100, "only {checked} paintkit parameters checked");
 
     // pkcanvas (issue #182) is a setup procedure, not a preset, but its
@@ -431,11 +506,12 @@ fn the_catalog_names_the_loaded_color_keys_on_every_adopter() {
 
 /// drykit (issue #234) and the dry-media files built on it (`lib/dry*.ps`)
 /// follow paintkit's #141 rules (docs/DRYMEDIA.md 3): every parameter
-/// states a unit from the same closed list, and neither `/Spread` nor
+/// states a unit (checked for every migrated file by
+/// `every_migrated_parameter_states_its_unit`), and neither `/Spread` nor
 /// `/Density` appears, since paintkit and stipplekit already gave those
 /// names other meanings.
 #[test]
-fn every_drykit_parameter_states_its_unit() {
+fn drykit_files_do_not_reuse_reserved_parameter_names() {
     let caps = capabilities::catalog();
     let dry: Vec<_> = caps
         .iter()
@@ -448,23 +524,6 @@ fn every_drykit_parameter_states_its_unit() {
     let mut checked = 0;
     for cap in &dry {
         for p in &cap.parameters {
-            let unit = p
-                .description
-                .strip_prefix('[')
-                .and_then(|rest| rest.split_once("] "))
-                .map(|(unit, _)| unit)
-                .unwrap_or_else(|| {
-                    panic!(
-                        "{} /{}: description must start with a [unit], got {:?}",
-                        cap.name, p.name, p.description
-                    )
-                });
-            assert!(
-                paintkit_unit_is_known(unit),
-                "{} /{}: unknown unit [{unit}]",
-                cap.name,
-                p.name
-            );
             assert!(
                 !matches!(p.name, "Spread" | "Density"),
                 "{} advertises /{}, which drykit must not use (#141)",
@@ -685,32 +744,15 @@ fn cli_capabilities_flag_prints_valid_matching_json() {
     }
 }
 
-/// Issue #236: `lib/strokeglyphs.ps` keeps paintkit's #141 convention,
-/// a bracketed unit from the same closed vocabulary on every parameter,
+/// Issue #236: `lib/strokeglyphs.ps` keeps paintkit's #141 convention
+/// (its units are checked by `every_migrated_parameter_states_its_unit`)
 /// and never uses `/Spread` or `/Density` (docs/DRYMEDIA.md 3.1).
 #[test]
-fn every_strokeglyphs_parameter_states_its_unit() {
+fn strokeglyphs_does_not_reuse_reserved_parameter_names() {
     let caps = capabilities::catalog();
     let mut checked = 0;
     for cap in caps.iter().filter(|c| c.source == "lib/strokeglyphs.ps") {
         for p in &cap.parameters {
-            let unit = p
-                .description
-                .strip_prefix('[')
-                .and_then(|rest| rest.split_once("] "))
-                .map(|(unit, _)| unit)
-                .unwrap_or_else(|| {
-                    panic!(
-                        "{} /{}: description must start with a [unit], got {:?}",
-                        cap.name, p.name, p.description
-                    )
-                });
-            assert!(
-                paintkit_unit_is_known(unit),
-                "{} /{}: unknown unit [{unit}]",
-                cap.name,
-                p.name
-            );
             assert!(
                 p.name != "Spread" && p.name != "Density",
                 "{} /{}: a name #141 reserves",

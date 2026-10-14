@@ -8739,7 +8739,7 @@ fn motions_advertise_exactly_their_tested_parameters() {
             "{proc_name}'s advertised parameters drifted"
         );
         // ...and each one is actually read by the proc's body.
-        let body_end = src[def + 1..].find("\n} def").expect("end") + def + 1;
+        let body_end = src[def + 1..].find("\n} bind def").expect("end") + def + 1;
         let body = &src[def..body_end];
         for p in &expected {
             assert!(

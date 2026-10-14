@@ -410,13 +410,6 @@ fn strokepath_bbox_matches_ghostscript() {
         return;
     }
     for (name, path) in CASES {
-        if name.contains("rotated") {
-            // pathbbox itself differs from gs under rotation (gs maps
-            // the device-space box back to user space; pscat maps each
-            // point), with or without strokepath. The rotated raster is
-            // compared below instead.
-            continue;
-        }
         let src = format!("newpath {path} strokepath");
         match (bbox(&src), gs_bbox(&src)) {
             (Some(a), Some(b)) => {

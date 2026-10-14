@@ -656,13 +656,13 @@
 % @kind: Procedure
 % @summary: Measure and place a headline region: one dominant run and any number of supporting runs, each positioned by anchors and offsets against the region or against another run's (or one glyph range's) measured ink box, sized by point size, fit-to-box or ratio to another run. Nothing is drawn. Fails with a named error (headline-run-outside-region, headline-runs-collide, headline-fit-below-minimum-size, ...) rather than clip or overlap silently; the caller's font, path and operand stack are untouched on both success and failure. See the file header for every run option.
 % @example: [ 30 30 570 370 ] [ << /Name /big /Text (Real) /Font /PermanentMarker /FitBox [ 500 260 ] /At [ 40 40 ] >> << /Name /small /Text (Keepin' it) /SizeOf [ /big 0.2 ] /At << /To /big /H 1 /V 1 >> /Anchor [ /right /bottom ] /Offset [ 0 10 ] >> ] hllayout hldraw
-% @param: /Text string the run's text; a newline forces a line break
-% @param: /Font name installed outline face (default /Helvetica-Bold); a missing face raises headline-font-not-found
-% @param: /Size num points; or exactly one of /FitWidth, /FitHeight, /FitBox [w h], /FitRegion true, /SizeOf [name ratio]
-% @param: /At [x y] or << /To name /H f /V f /Chars [i j] >> (byte offsets) the point the anchor lands on, absolute or in an earlier run's ink box
-% @param: /Anchor [h v] which point of the run's own ink box sits on /At (default [/left /baseline]: left ink edge on the first baseline)
-% @param: /Offset [dx dy] points added to the resolved /At
-% @param: /Avoid array names or [name i j] glyph ranges this run's ink must clear by /Clearance (default every earlier run)
+% @param: /Text [string] The run's text; a newline forces a line break
+% @param: /Font [name] Installed outline face (default /Helvetica-Bold); a missing face raises headline-font-not-found
+% @param: /Size [points] Font size; or exactly one of /FitWidth, /FitHeight, /FitBox [w h], /FitRegion true, /SizeOf [name ratio]
+% @param: /At [array of points or dict] [x y], or << /To name /H f /V f /Chars [i j] >> (byte offsets): the point the anchor lands on, absolute or in an earlier run's ink box
+% @param: /Anchor [array] [h v] which point of the run's own ink box sits on /At (default [/left /baseline]: left ink edge on the first baseline)
+% @param: /Offset [array of points] [dx dy] added to the resolved /At
+% @param: /Avoid [array] Names or [name i j] glyph ranges this run's ink must clear by /Clearance (default every earlier run)
 /hllayout { 2 { hlbody } hlcall } def
 
 % layout hldraw -

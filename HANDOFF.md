@@ -344,8 +344,11 @@ dominant run plus supporting runs by anchors/offsets against measured
 draws (per-run `/Draw` proc, so `psyletter` can slot in),
 `hlrunink`/`hlcharink`/`hlink` read the geometry back. Gotcha worth
 remembering repo-wide: `pathbbox` after `charpath` includes the trailing
-advance-point `moveto` and (unflattened) Bezier control points — walk
-the flattened path instead (NOTES.md has the details).
+advance-point `moveto` (gs ignores a trailing moveto; #316) and
+(unflattened) Bezier control points — walk the flattened path instead
+(NOTES.md has the details). Under a rotated or skewed CTM `pathbbox` is
+gs's box: the user-space box of the *device* bbox, larger than the tight
+user-space box (#288, `notes/288-pathbbox-rotated-ctm.md`).
 `examples/headline.ps` is the specimen (shirt front + `Tuesday`), with a
 site card. The final shirt using #144's treatment is a follow-up.
 Also done: issue #144, psychedelic display lettering — `lib/lettering.ps`
@@ -617,6 +620,17 @@ renders eight examples in both and compares block-downsampled output).
    written twice is a sharp corner, and the midpoint rule never passes
    through interior points, so check new glyphs on a `/Jitter 0` render.
    `notes/236-strokeglyphs.md` lists where it departs from the design.
+   Chalk (#235) shipped `lib/drychalk.ps`. `dcchalk` is the chalk preset
+   over `dkstroke`. `dcboard` dresses a slate or green board: haze,
+   `/Ghost` writing, swipes, wipes, ledge dust and a tray. It was tuned
+   against the reference photos (`notes/235-drychalk.md` has the numbers,
+   `docs/drymedia/chalk_compare_235.jpg` the side-by-side).
+   Ghostscript gotcha: **don't leave scratch names in userdict.** With
+   artkit, paintkit and drykit loaded, userdict is about 80% full, and gs's
+   open-hash lookups slow every operator once it fills further. drychalk's
+   public procedures run inside a private dict (`dcscratch begin ... end`)
+   (#307). drykit's `/Fallout` is slow in gs (#308), so drychalk draws its
+   own dust.
    #239 shipped `lib/drycrayon.ps` (`dy-`): `dycrayon` (a core and a rim
    `dkstroke` per subpath, one wax level each), `dypaper`, the crayon box
    (`dybox`, `dycolors`, `dycolor`) and six child motions with paintkit's
@@ -783,7 +797,11 @@ renders eight examples in both and compares block-downsampled output).
   different quantity gets a different name (`/Offset`, `/Cover`,
   `/Scatter`, `/Lean`, `/Charge` are the precedents). Every `@param`
   description starts with a bracketed unit, and
-  `tests/capabilities.rs` fails a new parameter that has none.
+  `tests/capabilities.rs::every_migrated_parameter_states_its_unit` fails a
+  new parameter that has none in *any* tag-migrated library (#195), from a
+  closed vocabulary (`unit_is_known`). The one deliberate exception is
+  fillkit's `/Spread`, `[fraction of the box]`, GIMP's name for a sample
+  jitter; the test pins it.
 - **Abutting filled polygons leave an anti-aliased hairline seam.**
   Two shapes sharing an exact edge do not composite to a solid mass —
   `pktrowel`'s blade lanes had to be given an 18% overlap or a
@@ -894,6 +912,18 @@ renders eight examples in both and compares block-downsampled output).
 - tiny-skia `Transform::from_row(sx, ky, kx, sy, tx, ty)` matches the
   PS matrix order `[a b c d tx ty]` — `ops/matrix.rs` documents it;
   don't rediscover this the hard way.
+- **artkit, paintkit and drykit define every procedure `} bind def`**
+  (#307), and `tests/libbind.rs` fails for any procedure added without
+  it. Ghostscript resolves each executable name in a procedure body at
+  run time, and with several libraries loaded those lookups are what
+  make gs slow (alpine_lake 30 s unbound, 10 s bound). A private scratch
+  dictionary (the drychalk pattern) was tried for drykit and paintkit and
+  is *slower*: a non-userdict dict on top of the dict stack costs every
+  operator lookup about 30% more (`notes/307-*.md` has the numbers). The
+  catch is that an operator redefined after a library loads no longer
+  reaches its procedures; library names that are not operators are still
+  late-bound, so overriding `dkbudget`, `pkribbon` and the like works.
+  drychalk, drycrayon and the older kits are not bound yet.
 - Test Interps at 100×100; golden runs at 500×500/r72. Metric
   assertions use 1e-3 tolerances where the pen is f32.
 

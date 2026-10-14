@@ -440,7 +440,7 @@ branch.
     every adopting preset, inside a directional `pkwet`, under `true
     setpacking`, checking that gs exits 0.
 13. `tests/capabilities.rs`: `array of rgb arrays` added to `FIXED`, so
-    `every_paintkit_parameter_states_its_unit` passes. The existing
+    `every_migrated_parameter_states_its_unit` passes. The existing
     `/Load`-is-`[per /Width]` pin is untouched.
 
 **Byte identity across the repo** (#141's method, run in every slice

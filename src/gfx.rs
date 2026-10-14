@@ -100,6 +100,19 @@ impl PsPath {
         out
     }
 
+    /// Device-space bounding box `[llx, lly, urx, ury]` of every path
+    /// point, curve control points included (the PLRM allows it, and gs
+    /// does it). `None` for an empty path.
+    fn device_bbox(&self) -> Option<[f32; 4]> {
+        let mut pts = self.points().into_iter();
+        let first = pts.next()?;
+        let mut b = [first.x, first.y, first.x, first.y];
+        for p in pts {
+            b = [b[0].min(p.x), b[1].min(p.y), b[2].max(p.x), b[3].max(p.y)];
+        }
+        Some(b)
+    }
+
     pub(crate) fn curve_to(&mut self, c1: DevPoint, c2: DevPoint, p: DevPoint) {
         self.segs.push(Seg::Curve(c1, c2, p));
         self.current = Some(p);
@@ -268,34 +281,59 @@ impl PsPath {
     }
 
     /// PDF path-construction operators for the same segments.
-    pub(crate) fn to_pdf_ops(&self) -> String {
+    ///
+    /// `area` is true when the path will be filled or used as a clip
+    /// (never stroked): a zero-length `l` to the current point then
+    /// contributes no area, so it is omitted (#254). `pkspray` specks
+    /// are `m x y l x y` + four `c`, and the `l` is pure overhead there.
+    /// A stroke keeps it: a zero-length segment decides caps and joins.
+    pub(crate) fn to_pdf_ops(&self, area: bool) -> String {
         use std::fmt::Write as _;
         let mut d = String::new();
         let f = |v: f32| {
             let s = format!("{v:.3}");
             s.trim_end_matches('0').trim_end_matches('.').to_string()
         };
-        for seg in &self.segs {
+        // The point the subpath is at, as the PDF will print it, so a
+        // zero-length `l` is recognised by what gs would see.
+        let mut cur: Option<(String, String)> = None;
+        let mut start: Option<(String, String)> = None;
+        for (i, seg) in self.segs.iter().enumerate() {
             match *seg {
                 Seg::Move(p) => {
-                    let _ = write!(d, "{} {} m ", f(p.x), f(p.y));
+                    let (x, y) = (f(p.x), f(p.y));
+                    let _ = write!(d, "{x} {y} m ");
+                    start = Some((x.clone(), y.clone()));
+                    cur = Some((x, y));
                 }
                 Seg::Line(p) => {
-                    let _ = write!(d, "{} {} l ", f(p.x), f(p.y));
+                    let (x, y) = (f(p.x), f(p.y));
+                    // Only when more real geometry follows in this
+                    // subpath, so a bare `m` + `l` stays as it was.
+                    let more = matches!(self.segs.get(i + 1), Some(Seg::Line(_) | Seg::Curve(..)));
+                    let degenerate = cur.as_ref().is_some_and(|c| c.0 == x && c.1 == y);
+                    if !(area && degenerate && more) {
+                        let _ = write!(d, "{x} {y} l ");
+                    }
+                    cur = Some((x, y));
                 }
                 Seg::Curve(c1, c2, p) => {
+                    let (x, y) = (f(p.x), f(p.y));
                     let _ = write!(
                         d,
-                        "{} {} {} {} {} {} c ",
+                        "{} {} {} {} {x} {y} c ",
                         f(c1.x),
                         f(c1.y),
                         f(c2.x),
                         f(c2.y),
-                        f(p.x),
-                        f(p.y)
                     );
+                    cur = Some((x, y));
                 }
-                Seg::Close => d.push_str("h "),
+                Seg::Close => {
+                    d.push_str("h ");
+                    // `h` returns the current point to the subpath start.
+                    cur = start.clone();
+                }
             }
         }
         d.trim_end().to_string()
@@ -2133,16 +2171,20 @@ impl Gfx {
         Some(out)
     }
 
-    /// Bounding box of the current path in user space (control points
-    /// included, per the PLRM's allowance).
+    /// `pathbbox`: the user-space box of the path's device-space bounding
+    /// box, as Ghostscript computes it (issue #288). The device box is
+    /// taken first (control points included), then its four corners are mapped back through the inverse CTM and
+    /// min/maxed. Under a rotation or skew that is larger than the tight
+    /// user-space box of the path; with an axis-aligned CTM the two agree.
     pub fn path_bbox(&self) -> Result<(f64, f64, f64, f64), PsError> {
-        let pts = self.state.path.points();
-        if pts.is_empty() {
-            return Err(PsError::NoCurrentPoint);
-        }
+        let [dlx, dly, dux, duy] = self
+            .state
+            .path
+            .device_bbox()
+            .ok_or(PsError::NoCurrentPoint)?;
         let (mut lx, mut ly, mut ux, mut uy) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
-        for p in pts {
-            let (x, y) = self.device_to_user(p)?;
+        for (x, y) in [(dlx, dly), (dux, dly), (dux, duy), (dlx, duy)] {
+            let (x, y) = self.device_to_user(DevPoint { x, y })?;
             lx = lx.min(x);
             ly = ly.min(y);
             ux = ux.max(x);

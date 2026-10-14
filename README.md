@@ -1128,6 +1128,37 @@ newpath 40 60 moveto 300 80 lineto
 << /Width 3 /Touch 0.7 >> dkstroke
 ```
 
+`lib/drychalk.ps` (issue #235) is chalk on a board, built on drykit.
+- **`dcboard`** (`x y w h opts`) dresses a board and makes it the surface
+  for chalk. It draws:
+  - the board's tone, black slate or green board;
+  - a dust film that is never flat;
+  - the last lecture's writing, erased (`/Ghost`, a path procedure);
+  - eraser swipe arcs, darker finger wipes and lighter smudges;
+  - dust settled along the ledge (`/Ledge`) and in the chalk tray
+    (`/Tray`).
+- **`dcchalk`** strokes the current path as chalk, one stroke per subpath.
+  - Each stroke lands heavy, tires in the middle and lifts thin.
+  - Its weight differs a little from its neighbours'.
+  - Dots are pressed, and dust falls beside every stroke.
+  - With `/Tilt`, the stick lies on its side for broad underlines and
+    shading: two bright edges over a granular face.
+- **`/name dcchalkcolor`** sets white or a soft yellow, pink, blue, green
+  or orange.
+
+The defaults were tuned against the photographs in `docs/drymedia/refs/`.
+Real chalk reads about halfway from the board to white, not white.
+`examples/drychalk_specimen.ps` shows `gallery/hundred_lines.ps`'s
+pen-stroke chalk before and after, on both boards.
+
+```postscript
+(lib/artkit.ps) run (lib/paintkit.ps) run (lib/drykit.ps) run
+(lib/handscript.ps) run (lib/strokeglyphs.ps) run (lib/drychalk.ps) run
+40 40 520 300 << /Surface /slate /Ghost { (old notes) 60 250 << /Size 30 >> sgpath } >> dcboard
+/white dcchalkcolor
+newpath (fresh notes) 60 180 << /Size 32 >> sgpath << /Width 1.8 >> dcchalk
+```
+
 `lib/strokeglyphs.ps` (issue #236, the first slice of the dry-media epic
 #232) gives single-stroke skeleton glyphs for board math as *paths*, not
 ink: capitals, handscript's lowercase and digits, a math hand (curly x,
