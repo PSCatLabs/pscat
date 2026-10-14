@@ -975,7 +975,7 @@ renders eight examples in both and compares block-downsampled output).
   its snippets are the tests.** `tests/landscape_cookbook.rs` pulls every
   ```` ```postscript ```` block out of the markdown (first line `% recipe: <name>`),
   runs it in-process on a 360x240 page, and fails on an error, a lint finding, a
-  dirty operand stack, a near-blank page, 2 s of CPU or a missing thumbnail
+  dirty operand stack, a near-blank page, 5 s of CPU or a missing thumbnail
   (`docs/guides/landscape/<name>.png`, 2x). Edit a snippet in the markdown, then
   `COOKBOOK_WRITE_THUMBS=1 cargo test --profile ci --test landscape_cookbook`
   and look at the PNG; the test does not compare pictures. When a tool the

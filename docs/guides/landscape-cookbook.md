@@ -820,7 +820,7 @@ Evening Stream ([PR #348](https://github.com/jeromebanks/postscript_interpreter/
 
 ## Keeping the recipes honest
 
-`tests/landscape_cookbook.rs` extracts every `postscript` block in this file, runs each on a 360 by 240 page, and fails if it errors, leaves the operand stack dirty, trips pscat's lint (a blank page, an unbalanced `gsave`), draws a nearly blank page, takes more than 2 s of CPU, or has no thumbnail. A block's first line is `% recipe: <name>`, and its thumbnail is `docs/guides/landscape/<name>.png`. After you change a snippet, regenerate its picture and look at it:
+`tests/landscape_cookbook.rs` extracts every `postscript` block in this file, runs each on a 360 by 240 page, and fails if it errors, leaves the operand stack dirty, trips pscat's lint (a blank page, an unbalanced `gsave`), draws a nearly blank page, takes more than 5 s of CPU, or has no thumbnail. A block's first line is `% recipe: <name>`, and its thumbnail is `docs/guides/landscape/<name>.png`. After you change a snippet, regenerate its picture and look at it:
 
 ```sh
 COOKBOOK_WRITE_THUMBS=1 cargo test --profile ci --test landscape_cookbook
