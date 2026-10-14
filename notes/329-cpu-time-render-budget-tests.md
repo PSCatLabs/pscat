@@ -55,8 +55,14 @@ suite 3 times under the same 20 hogs while the machine's load average stood
 at 17-35 (0 failures; crayon scene 0.68, 0.68, 0.72 s). The hogs were
 started with their PIDs recorded and killed by PID afterwards.
 
-The DRYMEDIA budgets keep 3-8x headroom: a real 2x regression (crayon scene
-at 1.3 s) still passes, a 3.5x one fails. The `paintkit` hang guards have
+The DRYMEDIA budgets keep 3-8x headroom (crayon 3x, charcoal 4.5x, chalk
+and drykit 6-8x of the idle CPU time): a 2x regression (crayon scene at
+1.3 s) still passes, and a 3.5x one fails. That was equally true of the old
+wall-clock tests (idle wall time was about the same 0.6 s against 2 s), so
+this PR does not weaken them. Catching 2x with an absolute number would mean
+budgets about 1.5x the loaded maximum, with no CPU numbers from the CI
+runners to validate them against, so the 2 s caps stay and #333 tracks
+baseline-relative budgets. The `paintkit` hang guards have
 200x or more headroom by design: what they catch is a walk-everything
 regression (the fan test's comment records ~24 s of nested work), not drift.
 The budget values are unchanged from before.

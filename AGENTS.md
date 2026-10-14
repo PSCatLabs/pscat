@@ -81,7 +81,9 @@ predates it.
   sample cannot fail the suite:
   - An absolute budget (DRYMEDIA.md 6.2: a CI test render takes 2 s or
     less): `within_cpu_budget(what, budget, 3, || ...)`. The closure
-    rebuilds whatever it mutates; it returns the fastest try's value.
+    rebuilds whatever it mutates; it returns the fastest try's value. The
+    2 s cap is DRYMEDIA's, not a tuned bound: the four render scenes
+    measure 0.25-0.7 s of CPU, so this catches a 3-8x regression, not 2x.
   - A "the guard must not walk the path first" test: a bound relative to a
     same-run baseline (`pitfalls.md`, "Timing assertions in tests"), with
     both sides timed by `cpu_time_of` / `thread_cpu_time`
