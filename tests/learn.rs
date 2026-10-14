@@ -143,6 +143,16 @@ fn captured_stdout_collects_output_and_is_capped() {
     assert!(out.len() <= pscat::interp::STDOUT_CAPTURE_LIMIT + 64);
     assert!(String::from_utf8_lossy(out).ends_with("output truncated: more than 64 KB\n"));
 
+    // a write that finds the buffer exactly full still leaves the note
+    let mut it = Interp::new();
+    it.capture_stdout();
+    let fill = pscat::interp::STDOUT_CAPTURE_LIMIT;
+    it.run_str(&format!("{fill} {{ (x) print }} repeat (missing) print"))
+        .expect("run");
+    let out = String::from_utf8_lossy(it.captured_stdout());
+    assert!(!out.contains("missing"));
+    assert!(out.ends_with("output truncated: more than 64 KB\n"));
+
     // off by default
     assert!(Interp::new().captured_stdout().is_empty());
 }

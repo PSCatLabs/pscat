@@ -263,6 +263,9 @@ pub struct Interp {
     /// so the playground can show what a program prints. Off by default:
     /// the CLI, REPL and MCP server keep writing straight to stdout.
     stdout_capture: Option<Vec<u8>>,
+    /// Set once the capture buffer has dropped output and carries the
+    /// truncation note; later writes are discarded.
+    stdout_truncated: bool,
     pub(crate) gfx: Gfx,
 }
 
@@ -345,6 +348,7 @@ impl Interp {
             clock: crate::clock::Clock::start(),
             resources: Default::default(),
             stdout_capture: None,
+            stdout_truncated: false,
             gfx,
         })
     }
@@ -1466,6 +1470,7 @@ impl Interp {
     /// the rest was dropped.
     pub fn capture_stdout(&mut self) {
         self.stdout_capture = Some(Vec::new());
+        self.stdout_truncated = false;
     }
 
     /// What has been printed since [`Interp::capture_stdout`]; empty when
@@ -1484,15 +1489,18 @@ impl Interp {
             out.write_all(bytes)?;
             return if flush { out.flush() } else { Ok(()) };
         };
-        if buf.len() >= STDOUT_CAPTURE_LIMIT {
+        if self.stdout_truncated || bytes.is_empty() {
             return Ok(());
         }
+        // Until truncation the buffer never exceeds the limit, so a write
+        // that finds it exactly full still adds the note below.
         let room = STDOUT_CAPTURE_LIMIT - buf.len();
         if bytes.len() <= room {
             buf.extend_from_slice(bytes);
         } else {
             buf.extend_from_slice(&bytes[..room]);
             buf.extend_from_slice(STDOUT_TRUNCATED);
+            self.stdout_truncated = true;
         }
         Ok(())
     }

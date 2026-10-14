@@ -147,14 +147,22 @@ fn print_syntactic(it: &mut Interp) -> Result<(), PsError> {
 }
 
 /// Print the whole stack, top first, without disturbing it (PLRM `stack`).
+/// One item at a time: a stack of many references to one big string must
+/// not be expanded into a single buffer first.
 fn stack_dump(it: &mut Interp) -> Result<(), PsError> {
-    let text: String = it.ostack.iter().rev().map(|o| o.text() + "\n").collect();
-    out(it, text.as_bytes(), false)
+    for i in (0..it.ostack.len()).rev() {
+        let line = format!("{}\n", it.ostack[i].text());
+        out(it, line.as_bytes(), false)?;
+    }
+    Ok(())
 }
 
 fn pstack_dump(it: &mut Interp) -> Result<(), PsError> {
-    let text: String = it.ostack.iter().rev().map(|o| o.repr() + "\n").collect();
-    out(it, text.as_bytes(), false)
+    for i in (0..it.ostack.len()).rev() {
+        let line = format!("{}\n", it.ostack[i].repr());
+        out(it, line.as_bytes(), false)?;
+    }
+    Ok(())
 }
 
 fn print_string(it: &mut Interp) -> Result<(), PsError> {
