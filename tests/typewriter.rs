@@ -103,6 +103,14 @@ fn the_same_seeds_type_the_same_page_byte_for_byte() {
         page("/Machine 8 /Seed 3"),
         "a new /Machine changed nothing"
     );
+    // The caller's graphics state is not the font's: a dash and a cap set
+    // before typing leave the ink as it was.
+    let dashed = ink(&render(&format!(
+        "[3 2] 0 setdash 2 setlinecap \
+         36 84 moveto << /Machine 7 /Seed 3 >> tw-setup ({PARAGRAPH}) show \
+         36 72 moveto ({PARAGRAPH}) show 36 60 moveto ({PARAGRAPH}) show"
+    )));
+    assert_eq!(a, dashed, "the caller's dash or cap changed the ink");
     // Plain use, without tw-setup: the load-time defaults and frame.
     let plain = || {
         ink(&render(&format!(

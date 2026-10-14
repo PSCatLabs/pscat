@@ -344,7 +344,11 @@ TWState begin {
     xS 1 scale newpath dup 0 get exec 1 get exec
     tMat setmatrix                              % a round pen, not a squeezed one
     inkW 0 gt {
-        gsave fill grestore inkW setlinewidth 1 setlinejoin stroke
+        % a solid pen with round joins whatever the caller left in the
+        % graphics state: a dash would break the ink, and a round or square
+        % cap marks the outline's zero-length closing segments
+        gsave fill grestore
+        inkW setlinewidth 1 setlinejoin 0 setlinecap [] 0 setdash stroke
     } { fill } ifelse
 } bind def
 
