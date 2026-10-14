@@ -25,8 +25,13 @@ instrumenting `wkmeasure` and rendering all 107 tracked non-lib `.ps`/`.eps` fil
 | 72 dpi | 319 | `gallery/alpine_lake.ps` (about 53,000 walkpath calls, none large) |
 | 72 dpi | 268 | `examples/paintkit_dry_demo.ps` |
 
-The limit is about 16x the largest count at 4x the shipped resolution. The drykit specimen never calls
-`walkpath` at all (`lib/drykit.ps` and `tests/drykit.rs` have no match), so it is not in the table.
+| 72 / 288 dpi | 15 / 29 | `examples/drykit_specimen.ps` (`dkstroke` walks short strokes; 90 calls) |
+| 72 / 288 dpi | 151 | `examples/paintkit_loading_demo.ps` (21,060 calls) |
+| 72 / 288 dpi | 145 | `examples/paintkit_canvas_demo.ps` |
+
+The limit is about 16x the largest count at 4x the shipped resolution. (The table was measured on the base
+before the drykit D2, loading and canvas specimens landed on `main`; those three rows were measured after
+rebasing onto them.)
 
 **alongpath, pathtext, ctext, et-draw: decided not to guard.** Written into `alintern`'s header comment.
 `walkpath`'s bound exists because its callers promise a deposit budget "checked before any drawing
