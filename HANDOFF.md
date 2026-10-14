@@ -743,7 +743,10 @@ renders eight examples in both and compares block-downsampled output).
    identical in pscat and gs and never touches `rand`. Compare against
    `docs/typewriter/release_vs_real.png`
    (`docs/typewriter/tools/release_compare.py`); `notes/214-released-look.md`.
-   #215 builds the gallery specimen and blind comparison on it.
+   #215 shipped the gallery piece `gallery/released_memo.ps` (*Released in
+   Part*) and the blind boards `docs/typewriter/blind_grid.png` and
+   `memo_vs_real.png` (`docs/typewriter/tools/blind_compare.py`; the key is in
+   the PR, not the repo); `notes/215-released-memo.md`. Leftovers: #466, #467, #468.
    #242 shipped the charcoal gallery piece, `gallery/lincoln_charcoal.ps`
    (*Study after Berger, 1864*), and `lib/etching.ps`'s `et-tonemap`, which
    returns a photo as a grid of darkness for any piece that wants a
