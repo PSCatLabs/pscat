@@ -2761,10 +2761,22 @@
 % each pull that the next one covers. Unset, it follows the blade's
 % coverage: 0.15 + 0.6 * (1 - Coverage), so a patchy blade (low /Coverage)
 % overlaps more and the pulls still close up into one plane while a full
-% blade (/Coverage 1) overlaps only enough to hide the seam. Spacing uses
-% the *nominal* width: a /Pressure profile that tapers each pull narrows
-% it below F and opens gaps between rows, which is a real knife effect;
-% lower /Overlap's effective value (raise it) to compensate.
+% blade (/Coverage 1) overlaps only enough to hide the seam.
+%
+% A /Pressure that tapers each pull narrows its band below F, and rows spaced
+% for F would leave bare gaps between them. So when /Pressure is given, the
+% plane reads it at 17 points of the stretch of each row that lies inside the
+% area, takes the smallest |value| P, and spaces the rows for F * P instead:
+% /Overlap then means the fraction of the *thinnest* part of each pull that
+% the next one covers. P is capped at 1 (a /Pressure above 1 just overlaps
+% more; it does not spread the rows) and floored at 0.25 (a pull that tapers
+% to nothing costs at most four times the rows, and keeps a thin end, as a
+% real knife's does). The proc is run a few times for this, but the random
+% stream is put back, so a /Pressure that draws random numbers does not move the
+% plane's own draws. The default /RowJitter and /AngleJitter follow the
+% narrowed band. A /Pressure of 1, or one that never dips below 1, spaces the
+% rows exactly as if it were not given. A dip narrower than 1/16 of the row
+% can be missed by the sampling.
 %
 % Texture. /RowJitter shifts each row sideways by up to that many points
 % and /AngleJitter tilts it by up to that many degrees, so the rows are
@@ -2780,7 +2792,8 @@
 % The stream is two draws per row, then the row's `pktrowel` draws. So it is
 % fixed by what decides the number of rows, their length and the stops in
 % each: the area, /Direction, /Width, /Angle, /Cover, /Overlap (and /Coverage
-% when /Overlap is unset), /Drag and /Pitch (the overrun), /Lanes. Turning
+% when /Overlap is unset), /Drag and /Pitch (the overrun), /Lanes, and the
+% depth of a tapering /Pressure (which narrows the rows). Turning
 % any of those re-rolls the plane; turning a pure texture key (/Scrape,
 % /Viscosity, /EdgeBuildup, /ColorJitter, /Colors, ...) does not. That is
 % weaker than `pktrowel`'s own one-control-at-a-time promise.
@@ -2806,7 +2819,7 @@
 } bind def
 
 % @kind: Procedure
-% @summary: A palette-knife plane: fills the current path's area with overlapping, parallel pktrowel pulls in one direction, so the area reads as a single flat facet carrying the blade's texture (a mountain face, a rock). The edge is crisp because the path is the clip. Takes every pktrowel key (Width, Angle, Cover, Coverage, Viscosity, Scrape, EdgeBuildup, Drag, Colors, ColorMix, Light, Touch, ...) unchanged, plus Direction, Overlap, RowJitter and AngleJitter. Row spacing follows the blade footprint and its overlap; deterministic under the caller's own srand; at most 4000 rows. Leaves the caller's path as it was.
+% @summary: A palette-knife plane: fills the current path's area with overlapping, parallel pktrowel pulls in one direction, so the area reads as a single flat facet carrying the blade's texture (a mountain face, a rock). The edge is crisp because the path is the clip. Takes every pktrowel key (Width, Angle, Cover, Coverage, Viscosity, Scrape, EdgeBuildup, Drag, Colors, ColorMix, Light, Touch, Pressure, ...) unchanged, plus Direction, Overlap, RowJitter and AngleJitter. Row spacing follows the blade footprint, its overlap and the thinnest a tapering Pressure gets inside the area, so a taper does not open gaps between rows; deterministic under the caller's own srand; at most 4000 rows. Leaves the caller's path as it was.
 % @example: newpath 40 40 moveto 200 40 lineto 120 180 lineto closepath << /Width 16 /Direction -80 /Angle 12 >> pktrowelplane
 % @param: /Width [points] Blade length, passed to pktrowel; must be > 0 (default 24)
 % @param: /Direction [degrees] Direction the pulls travel, counterclockwise from +x in user space; -90 pulls straight down (default -90)
@@ -2816,6 +2829,7 @@
 % @param: /Angle [degrees] Blade angle to the pulls as in pktrowel, -80..80; footprint thickness goes as cos(Angle) (default 0)
 % @param: /Cover [0..1] Paint on the blade as in pktrowel; scales the band each pull deposits and so the row spacing (default 0.85)
 % @param: /Coverage [0..1] Fraction of each pull's contact area that deposits, as in pktrowel; also sets the default /Overlap (default 0.82)
+% @param: /Pressure [proc] {t -> mult} proc over each pull's own progress, as in pktrowel; the rows are spaced for the thinnest it gets inside the area (1 down to 0.25), so a taper does not leave gaps; a proc that draws random numbers leaves the stream as it found it (default unset)
 % @param: /Scrape [0..1] Lengthwise thinning of each pull, as in pktrowel (default 0.15)
 % @param: /EdgeBuildup [0..1] Darker ridges at the two blade edges of each pull, as in pktrowel (default 0.35)
 % @param: /Colors [array of rgb arrays] 1 to 8 loaded colors across the blade, as in pktrowel (default unset)
@@ -2852,8 +2866,9 @@
     tplAJit 0 lt tplAJit 20 gt or { pktrowelplane-anglejitter-must-be-0-to-20 } if
     % the band one pull deposits across its direction of travel
     /tplF tplWidth tplAngle cos abs mul 0.35 0.65 tplCover mul add mul def
-    /tplStep tplF 1 tplOverlap sub mul def
-    /tplRJit tplopts /RowJitter tplF tplOverlap mul 0.4 mul pkgetdef def
+    % the default /RowJitter needs the effective band (below), so it is set there
+    /tplRJitSet tplopts /RowJitter known def
+    /tplRJit tplopts /RowJitter 0 pkgetdef def
     /tplRJit load xcheck { pktrowelplane-rowjitter-must-not-be-a-procedure } if
     tplRJit 0 lt { pktrowelplane-rowjitter-must-not-be-negative } if
     % Every key `pktrowel` checks is checked here, on an empty path: it runs all
@@ -2874,11 +2889,6 @@
     tplany {
         % rows run from a third of a band outside the near edge to the far one
         /tplt0 tpltmin tplF 0.3 mul sub def
-        % compared as a real: `cvi` of a huge extent would raise rangecheck
-        % instead of the guard
-        /tplrows tpltmax tplF 0.3 mul add tplt0 sub tplStep div ceiling 1 add def
-        tplrows 4000 gt { pktrowelplane-row-count-exceeds-safety-limit } if
-        /tplrows tplrows cvi def
         % How far a row must overrun the area so the blade's entry/exit trim
         % (up to 6% of the row), its drag and its skew all land outside it.
         /tplspan tplsmax tplsmin sub def
@@ -2886,10 +2896,41 @@
               tplPitch add 0.85 div def
         /tplsc tplsmin tplsmax add 0.5 mul def
         /tplhl tplspan 0.5 mul tplm add def
+        % The band a row really lays is F*P, where P is the thinnest the caller's
+        % /Pressure gets inside the area. Only a /Pressure that dips below 1 changes
+        % anything: everything else keeps F and so keeps today's output exactly.
+        /tplFe tplF def
+        tplopts /Pressure known {
+            % The proc is read at 17 points of the row's own t that the area
+            % occupies (the overrun at both ends lies outside it, and a taper to 0
+            % there must not set the spacing). It may draw random numbers, so the
+            % stream is put back if it moved. P is never above 1 (a heavier
+            % pressure just overlaps more) and never below 0.25, so a pull that
+            % tapers to nothing costs at most four times the rows and still leaves
+            % a thin end, as a real knife does.
+            /tplPressure tplopts /Pressure get def
+            /tplrr rrand def
+            /tplplo tplm 2 tplhl mul div def
+            1 /tplP exch def
+            0 1 16 {
+                16 div 1 2 tplplo mul sub mul tplplo add tplPressure abs
+                dup tplP lt { /tplP exch def } { pop } ifelse
+            } for
+            rrand tplrr ne { tplrr srand } if
+            tplP 0.25 max /tplP exch def
+            tplP 1 lt { /tplFe tplF tplP mul def } if
+        } if
+        /tplStep tplFe 1 tplOverlap sub mul def
+        tplRJitSet not { /tplRJit tplFe tplOverlap mul 0.4 mul def } if
+        % compared as a real: `cvi` of a huge extent would raise rangecheck
+        % instead of the guard
+        /tplrows tpltmax tplF 0.3 mul add tplt0 sub tplStep div ceiling 1 add def
+        tplrows 4000 gt { pktrowelplane-row-count-exceeds-safety-limit } if
+        /tplrows tplrows cvi def
         % Unset, the tilt is what moves a row's far end by 0.15 of the overlap,
         % at most 1.5 degrees, so the tilt cannot open a seam on a long row.
         tplAJitSet not {
-            /tplAJit 0.15 tplF tplOverlap mul mul tplhl div 1 min
+            /tplAJit 0.15 tplFe tplOverlap mul mul tplhl div 1 min
                 dup dup mul 1 exch sub sqrt atan 1.5 min def
         } if
         % /Light is a direction in the caller's user space; the rows are drawn

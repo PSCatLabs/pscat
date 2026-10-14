@@ -196,6 +196,90 @@ fn overlap_sets_the_row_spacing() {
     );
 }
 
+/// A black plane over the page's square with a solid blade, so any white left
+/// inside the square is a gap between rows (issue #362).
+fn solid_plane(pressure: &str) -> Interp {
+    let mut it = fresh(120, 120);
+    run(
+        &mut it,
+        &format!(
+            "5 srand 0 0 0 setrgbcolor newpath 10 10 moveto 110 10 lineto 110 110 lineto \
+             10 110 lineto closepath << /Width 10 /Direction -90 /Angle 0 /Coverage 1 \
+             /Scrape 0 /EdgeBuildup 0 /Lanes 20 /Overlap 0.3 {pressure} >> pktrowelplane"
+        ),
+    );
+    it
+}
+
+fn bare_fraction(it: &Interp) -> f64 {
+    let mut bare = 0usize;
+    for y in 14..106 {
+        for x in 14..106 {
+            if luma_at(it, x, y) > 160.0 {
+                bare += 1;
+            }
+        }
+    }
+    bare as f64 / (92.0 * 92.0)
+}
+
+#[test]
+fn a_tapering_pressure_does_not_open_gaps_between_rows() {
+    // The blade is half as wide at the top of each pull as at the bottom.
+    // Rows spaced for the nominal width left a bare line between neighbours
+    // at the narrow end; they are now spaced for the thinnest the profile gets.
+    let taper = "/Pressure { 0.5 mul 0.5 add }";
+    let it = solid_plane(taper);
+    let bare = bare_fraction(&it);
+    assert!(
+        bare < 0.01,
+        "a tapering pressure left {bare:.3} of the area bare"
+    );
+    // and a flat pressure must still be solid.
+    let flat = bare_fraction(&solid_plane("/Pressure { pop 1 }"));
+    assert!(flat < 0.01, "a flat pressure left {flat:.3} bare");
+}
+
+#[test]
+fn a_pressure_that_never_dips_spaces_the_rows_as_before() {
+    // Byte for byte: no /Pressure, a flat one, and one above 1 all give the
+    // same rows, because only a dip below 1 narrows the spacing.
+    let base = solid_plane("").gfx().pixmap.data().to_vec();
+    let flat = solid_plane("/Pressure /pkflat load")
+        .gfx()
+        .pixmap
+        .data()
+        .to_vec();
+    assert!(base == flat, "pkflat changed the plane");
+}
+
+#[test]
+fn reading_the_pressure_leaves_the_random_stream_alone() {
+    // The profile draws a random number on its first 17 calls only. Those are
+    // the plane's own reads of it for the spacing (the rows call it once per
+    // stop, after). If those draws were not put back, the plane's own draws
+    // would shift and the two renders would differ.
+    let with = |draw: &str| {
+        let mut it = fresh(120, 120);
+        run(
+            &mut it,
+            &format!(
+                "/cnt 0 def 5 srand 0 0 0 setrgbcolor newpath 10 10 moveto 110 10 lineto \
+                 110 110 lineto 10 110 lineto closepath << /Width 10 /Direction -90 /Overlap 0.3 \
+                 /Pressure {{ /cnt cnt 1 add def {draw} 0.5 mul 0.5 add }} >> pktrowelplane \
+                 rrand /after exch def"
+            ),
+        );
+        run(&mut it, "after");
+        let after = it.pop_int().ok();
+        (it.gfx().pixmap.data().to_vec(), after)
+    };
+    let drawn = with("cnt 17 le { rand pop } if");
+    let quiet = with("");
+    assert!(drawn.0 == quiet.0, "the sampling's draws moved the plane");
+    assert_eq!(drawn.1, quiet.1, "the sampling's draws moved the stream");
+}
+
 #[test]
 fn the_path_and_clip_survive_the_call() {
     let mut it = fresh(100, 100);
