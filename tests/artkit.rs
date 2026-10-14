@@ -239,6 +239,76 @@ fn walkpath_refuses_a_path_over_its_segment_limit_and_leaves_a_clean_stack() {
     );
 }
 
+/// Issue #110: every deposit budget counts what a preset *emits*, and
+/// a path of zero-length segments emits nothing, so none of them can
+/// see it coming. The bound has to live in `walkpath`'s own measuring
+/// pass, and it must fire before the first preset has drawn. Timed
+/// against a calibration -- a legal path just under the limit, walked
+/// to the end -- rather than a wall-clock constant: a count-then-check
+/// implementation walks all 400,000 segments (several times the
+/// calibration) and is caught by the ratio on any machine.
+#[test]
+fn every_walkpath_preset_refuses_a_huge_segment_count_promptly() {
+    fn timed_path(n: usize, call: &str) -> (Interp, Result<(), PsError>, std::time::Duration) {
+        let mut it = Interp::with_page(200, 200).expect("page");
+        load(&mut it);
+        let src = std::fs::read("lib/paintkit.ps").expect("paintkit present");
+        it.run_source(&src)
+            .unwrap_or_else(|e| panic!("paintkit failed to load: {}", it.error_report(&e)));
+        it.run_str("1 1 1 setrgbcolor clippath fill")
+            .expect("white background");
+        it.run_str(&format!(
+            "0 0 0 setrgbcolor newpath 20 20 moveto {n} {{ 0 0 rlineto }} repeat 100 0 rlineto"
+        ))
+        .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+        let started = std::time::Instant::now();
+        let r = it.run_str(call).map(|_| ());
+        (it, r, started.elapsed())
+    }
+    // This test shares the machine with the rest of the suite, which
+    // runs in parallel, so one timing can be inflated several-fold by
+    // scheduling alone. Every time here is the best of three: a slow
+    // outlier only costs a retry, while a real regression (a refusal
+    // that walks all 400,000 segments) is slow every time.
+    const TRIES: usize = 3;
+    // Calibration: 40,000 segments is under the 50,000 limit, so this
+    // walks everything twice. The unguarded cost of the huge path is
+    // several times this; the guarded refusal is a fraction of it.
+    let t_ok = (0..TRIES)
+        .map(|_| {
+            let (_, ok, t) = timed_path(40_000, "1 { pop pop pop pop pop pop } walkpath");
+            ok.expect("a path under the limit still walks");
+            t
+        })
+        .min()
+        .unwrap();
+    let bound = t_ok.max(std::time::Duration::from_millis(50)) * 3;
+
+    for preset in [
+        "pkribbon", "pknib", "pkdry", "pkspray", "pkoil", "pktrowel", "pkfan", "pkbroad",
+        "pkliner", "pkwash", "pkdab",
+    ] {
+        let mut best = std::time::Duration::MAX;
+        for _ in 0..TRIES {
+            let (it, r, took) = timed_path(400_000, &format!("<< >> {preset}"));
+            let err = r.expect_err(preset);
+            assert!(
+                matches!(err, PsError::Undefined(ref n) if n == "walkpath-segment-count-exceeds-safety-limit"),
+                "{preset}: expected the segment-count guard, got {err}"
+            );
+            assert_eq!(ink_count(&it), 0, "{preset}: nothing may be drawn first");
+            best = best.min(took);
+            if best < bound {
+                break;
+            }
+        }
+        assert!(
+            best < bound,
+            "{preset}: refused in {best:?} at best, but walking everything costs several times {t_ok:?}"
+        );
+    }
+}
+
 #[test]
 fn walkpath_does_not_misclassify_short_positive_segments_under_a_large_scale() {
     // A 0.00005-unit line under a 1,000,000x scale is a real, visible

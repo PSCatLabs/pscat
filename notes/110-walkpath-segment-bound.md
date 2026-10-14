@@ -42,7 +42,7 @@ image; `lib/etching.ps` has no `pathforall`).
   more is refused, many two-segment subpaths are refused (consecutive bare movetos collapse in the path, so
   they cannot be used), the proc never ran, and a small path walks after a refusal.
 - `tests/artkit.rs`: the same boundary through the Rust API, plus an empty operand stack after the guard.
-- `tests/paintkit.rs`, `every_walkpath_preset_refuses_a_huge_segment_count_promptly`: all 11 walkpath-based
+- `tests/artkit.rs`, `every_walkpath_preset_refuses_a_huge_segment_count_promptly`: all 11 walkpath-based
   presets (pkribbon, pknib, pkdry, pkspray, pkoil, pktrowel, pkfan, pkbroad, pkliner, pkwash, pkdab) get a
   400,000 zero-length-segment path, must raise the guard name, draw no ink, and finish inside three times the
   time a legal 40,000-segment walk takes (self-relative, so it holds on a slow machine; every time is the
@@ -61,4 +61,18 @@ trips the limit and so differs between trees, and `alpine_lake` equal to its com
 identical. The same render of all 107 tracked files (125 PNGs, including the artkit-only ones identity_check
 does not cover) in a base and a head tree: all byte-identical.
 
-New top-level name `wkmaxsegs` added to `ARTKIT_INTERNAL` in `src/capabilities.rs`.
+**What the bound does not reach.** `pkribbon` and `pknib` run their own `pathforall` over the whole path
+(`pkscanclosed` at `lib/paintkit.ps:159`, and a single-subpath check in `pknib`) before they call
+`walkpath`, so the guard cannot fire first. Refusal time, with path construction subtracted (best of five,
+release build): `pkribbon` 0.094 s at 400,000 zero-length segments and 0.261 s at 1,600,000; `pknib` the
+same; `pkdry`, `pkwash` flat (0.07 s and 0.07 s, the start-up cost of those presets). That is linear in
+segment count at about 0.16 microseconds per segment, roughly 17x cheaper than a `walkpath` pass (2.7
+microseconds), and the caller has already paid O(n) to build such a path. So the claim here is that
+`walkpath`'s own traversal is bounded, not that every preset is bounded end to end. Filed as a follow-up.
+(Whether a preset opens a `gsave`/`begin` before its first `walkpath` call and so leaves it open when the
+guard fires is the same exposure the existing deposit-count guards already have, since they too raise from
+inside a `walkpath` proc; this change does not alter it.)
+
+New top-level name `wkmaxsegs` added to `ARTKIT_INTERNAL` in `src/capabilities.rs`. Deliberately not
+edited: `README.md`, `HANDOFF.md` and `tests/paintkit.rs`, which held PRs #285 and #279 also change, and
+`lib/drykit.ps`.
