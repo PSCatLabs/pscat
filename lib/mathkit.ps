@@ -113,7 +113,7 @@
   /Lambda [/sym /Lambda] /Xi [/sym /Xi] /Pi [/sym /Pi] /Sigma [/sym /Sigma]
   /Phi [/sym /Phi] /Psi [/sym /Psi] /Omega [/sym /Omega]
   /infty [/sym /infinity] /partial [/sym /partialdiff] /nabla [/sym /nabla]
-  /ell [/sym /l] /prime [/sym /prime]
+  /ell [/sym /l] /prime [/sym /prime /ord -420]
   /pm [/sym /plusminus] /mp [/sym /minusplus] /times [/sym /multiply]
   /div [/sym /divide] /cdot [/sym /periodcentered] /cup [/sym /union]
   /cap [/sym /intersection]
@@ -160,10 +160,10 @@
 >> def
 
 % Printable ASCII that is not a letter or digit -> [glyph class]. The
-% hyphen is a minus in math, and ' is a prime.
+% hyphen is a minus in math (' is a prime superscript, `mkbprime`).
 % @internal
 /mkascii <<
-  33 [/exclam /close] 39 [/prime /ord] 40 [/parenleft /open]
+  33 [/exclam /close] 40 [/parenleft /open]
   41 [/parenright /close] 43 [/plus /bin] 44 [/comma /punct]
   45 [/minus /bin] 46 [/period /ord] 47 [/slash /ord] 58 [/colon /rel]
   59 [/semicolon /punct] 60 [/less /rel] 61 [/equal /rel]
@@ -430,7 +430,7 @@
 % @internal
 /mkbytes <<
   92 /mkbslash 123 /mkblbrace 125 /mkbrbrace 94 /mkbsup 95 /mkbsub
-  38 /mkbamp 36 /mkbdollar 126 /mkbtilde 93 /mkbrbrack
+  38 /mkbamp 36 /mkbdollar 126 /mkbtilde 93 /mkbrbrack 39 /mkbprime
 >> def
 
 % - -> term   the end of the string
@@ -502,9 +502,42 @@
     << /T /empty /C /ord /K mknewk >> 3 1 roll
   } if
   2 index 2 index known {
-    1 index /Sup eq { mk-double-superscript } { mk-double-subscript } ifelse
-  } if
-  2 index 3 1 roll put
+    1 index /Sup eq 3 index /Primes known and {
+      % f'^2 is TeX's f^{\prime 2}: the primes and the superscript share one
+      /mksl exch def pop
+      dup /Sup get /mkss exch def
+      dup /Sup [ mkss aload pop mksl aload pop ] put
+      dup /Primes undef
+      /none
+    } {
+      1 index /Sup eq { mk-double-superscript } { mk-double-subscript } ifelse
+    } ifelse
+  } {
+    2 index 3 1 roll put
+    /none
+  } ifelse
+} bind def
+
+% - -> atom   a prime, lowered so that as a superscript it sits at the
+% cap height (strokeglyphs draws /prime already raised for text)
+% @internal
+/mkprimeatom { << /T /sym /G /prime /C /ord /Dy -420 /K mknewk >> } bind def
+
+% byte -> term   ' is TeX's ^{\prime}: primes collect in the superscript
+% of the atom before them, so f'' has two and x'_i still subscripts x
+% @internal
+/mkbprime {
+  pop
+  mkmode /arg eq { (mk-missing-argument:) mkarglabel mkfail } if
+  mkadv
+  dup mkisnucleus not { << /T /empty /C /ord /K mknewk >> } if
+  dup /Sup known {
+    dup /Primes known not { mk-double-superscript } if
+    dup /Sup get [ exch aload pop mkprimeatom ] 1 index exch /Sup exch put
+  } {
+    dup /Sup [ mkprimeatom ] put
+    dup /Primes true put
+  } ifelse
   /none
 } bind def
 
@@ -1964,6 +1997,7 @@
 %   { (\\vec) 0 0 << >> mkpath } /mk-missing-argument:\vec (an accent with nothing) mustguard
 %   { (x^2^3) 0 0 << >> mkpath } /mk-double-superscript (x^2^3) mustguard
 %   { (x_1_2) 0 0 << >> mkpath } /mk-double-subscript (x_1_2) mustguard
+%   { (x^2') 0 0 << >> mkpath } /mk-double-superscript (a prime after a superscript) mustguard
 %   { ({x) 0 0 << >> mkpath } /mk-missing-closing-brace (an open brace) mustguard
 %   { (x}) 0 0 << >> mkpath } /mk-extra-closing-brace (a stray closing brace) mustguard
 %   { (\\left[ x) 0 0 << >> mkpath } /mk-left-without-right (a left with no right) mustguard
@@ -2069,6 +2103,15 @@
 %   (a leading minus is unary, with no space) mustbe
 %   (y &= 2x) mkt-m /Align get (y) mkt-m /Width get sub abs 0.01 lt
 %   (& marks the alignment point) mustbe
+%   (x') mkt-m /Width get (x^{\\prime}) mkt-m /Width get sub abs 0.01 lt
+%   (a prime is as wide as x^{\\prime}) mustbe
+%   (x') mkt-m /Height get (x^{\\prime}) mkt-m /Height get sub abs 0.01 lt
+%   (and as tall) mustbe
+%   (x'_i) mkt-m /Width get (x^{\\prime}_i) mkt-m /Width get sub abs 0.01 lt
+%   (x'_i subscripts x, not the prime: it is x^{\\prime}_i) mustbe
+%   (f'^2) mkt-m /Width get (f^{\\prime 2}) mkt-m /Width get sub abs 0.01 lt
+%   (f'^2 is f^{\\prime 2}) mustbe
+%   (f'') mkt-m /Width get (f') mkt-m /Width get gt (two primes are wider) mustbe
 %   (y = 2x) mkt-m /Align get (y &= 2x) mkt-m /Align get sub abs 0.01 lt
 %   (without &, the line aligns before its relation) mustbe
 %   (x^2) << /Size 100 /Irregular 0 /Seed 1 >> mkmetrics /Width get
