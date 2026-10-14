@@ -1747,4 +1747,45 @@ mod tests {
              end -- not eexec's injected copy, which the program's own `end` already removed"
         );
     }
+
+    // --- #323: procedure fetch without a clone, def without re-intern ---
+
+    fn run_top(src: &str) -> String {
+        let mut it = Interp::new();
+        it.run_str(src).expect("runs");
+        it.pop().expect("a result").repr()
+    }
+
+    #[test]
+    fn put_into_a_running_procedure_is_seen_by_the_same_run() {
+        // Element 10 (`sub`) is replaced by `add` before the fetch
+        // reaches it, so the running procedure sees the new element.
+        let src = "/p { /p load 10 {add} bind 0 get put 10 3 sub } def p";
+        assert_eq!(run_top(src), "13");
+        assert_eq!(run_top(&format!("{src} pop p")), "13");
+    }
+
+    #[test]
+    fn a_procedure_executes_itself_recursively() {
+        assert_eq!(run_top("/f { dup 0 gt { 1 sub f } if } def 5 f"), "0");
+        assert_eq!(
+            run_top("/q { dup 0 gt { 1 sub /q load exec } if } def 7 q"),
+            "0"
+        );
+    }
+
+    #[test]
+    fn def_inside_save_is_rolled_back_by_restore() {
+        assert_eq!(run_top("/x 1 def save /x 2 def x exch restore x add"), "3");
+        assert_eq!(run_top("(k) 5 def k /k load add"), "10");
+    }
+
+    #[test]
+    fn undefined_name_inside_a_procedure_is_reported_by_name() {
+        let mut it = Interp::new();
+        let err = it.run_str("/p { 1 nosuchname } def p").unwrap_err();
+        assert_eq!(err, PsError::Undefined("nosuchname".to_string()));
+        let report = it.error_report(&err);
+        assert!(report.contains("OffendingCommand: nosuchname"), "{report}");
+    }
 }
