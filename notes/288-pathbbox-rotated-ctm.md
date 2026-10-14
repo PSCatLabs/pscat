@@ -43,17 +43,25 @@ gs, now pscat: 0 -43.30 121.65 80.80       before: 0 0 100 50
   gallery/renders stills. That is a separate decision, so #288 only does the
   rotation. `tests/pathbbox.rs` pins pscat's current answer as a known
   deviation.
-- **Render impact: none.** Released binary before vs after over all 115
-  tracked non-lib .ps (examples, gallery, selftest drivers, docs, art): every PNG byte
-  identical. `scripts/identity_check.sh --loader` (with a wrapper binary that
-  picks old/new by directory) for artkit (82 pages), drykit (4), paintkit (36),
-  fillkit (9), hatchkit (3), halftonekit (2), printkit (2) and lettering (9):
-  all identical. An instrumented build that logged every `pathbbox` whose
-  answer changed found only two corpus programs with a rotated or skewed CTM at
-  the call: examples/apparel_second.ps (3 calls) and
-  docs/drymedia/prototypes/surface_cost.ps (`dqclip`, 1422 calls); both render
-  identically, because their callers clip or sweep with the box (a superset
-  box only widens a clipped sweep).
+- **Render impact: none for committed renders; one prototype's printed numbers
+  move.** Release binary before vs after over all 115 tracked non-lib .ps
+  (examples, gallery, selftest drivers, docs; `art/` holds no .ps, its stills are
+  built from examples/): every PNG byte identical. `scripts/identity_check.sh
+  --loader` (with a wrapper binary that picks old/new by directory) for artkit
+  (82 pages), drykit (4), paintkit (36), fillkit (9), hatchkit (3), halftonekit
+  (2), printkit (2) and lettering (9): all identical. `path_bbox` has one
+  caller, the `pathbbox` operator, so no recorder (SVG viewBox, PDF box) reads it.
+  An instrumented build that logged every `pathbbox` whose answer changed found
+  only two corpus programs with a rotated or skewed CTM at the call:
+  examples/apparel_second.ps (3 calls; PNG, SVG and PDF all byte-identical to
+  before) and docs/drymedia/prototypes/surface_cost.ps (`dqclip`, 1422 calls).
+  The prototype's PNG is identical, but its SVG/PDF differ (extra clipped
+  cells) and its printed bounding-box catch cost rises about 4% in modes 1-3
+  (MODE 1/2: 387825 -> 403750 cells, MODE 3: 815003 -> 846631; modes 4-6 and the
+  band estimate unchanged). That is the prototype's rotated "footprint box grown
+  by half the line width", the stand-in `strokepath` (#264) was built to replace;
+  DRYMEDIA.md's quoted figures (553k band estimate) are not among the moved
+  numbers, so no doc was edited.
 - **Caller audit** (acceptance criterion 2). Nobody needs the tight box, so no
   tight-box helper was added. A looser user-space box is a superset of the
   tight one, and every caller uses it as a clipped region, a lattice sweep
