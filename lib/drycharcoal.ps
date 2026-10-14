@@ -1,0 +1,618 @@
+%!PS-Adobe-3.0
+%%Title: drycharcoal.ps — charcoal on drykit: vine, compressed and pencil; hatching, smudging, lifting, construction lines
+%%Creator: pscat — issue #241 (design: docs/DRYMEDIA.md 3.4)
+%%EndComments
+% @requires: (lib/artkit.ps) run (lib/paintkit.ps) run (lib/drykit.ps) run (lib/hatchkit.ps) run
+
+% Charcoal presets and techniques on the dry-media engine (epic #232).
+% Everything here is a call pattern for drykit's `dkstroke`: the medium
+% presets choose its keys, and each technique is a way of driving it
+% (DRYMEDIA.md 3.4). Nothing here edits drykit or hatchkit.
+%
+%   dhstroke  the current path in vine, compressed or pencil charcoal
+%   dhhatch   the current path's region, hatched to a value (number or
+%             {x y -> value}), every layer inside one dkbatch
+%   dhsmudge  the current path as a stump's or finger's track
+%   dhlift    the current path as an eraser's track (kneaded or hard)
+%   dhsketch  the current path as faint construction lines, re-stroked
+%
+% The pigment is the current colour, as in drykit. A charcoal is a warm
+% near-black, for example 0.11 0.10 0.10 setrgbcolor.
+%
+% Media (reference board H2, H4, H6, H7). /Grade runs from 0 (hard) to 1
+% (soft) in every medium; each medium has its own default:
+%
+%   /vine        grey and dusty: three deposit levels, a wide halo, two
+%                lanes that lift off now and then, a little fallout
+%   /compressed  dark and dense: high touch, strength near 1, a narrow
+%                halo, so it reads as a near-solid deposit (H7)
+%   /pencil      a sharp point: thin, and at a hard grade light enough to
+%                break into rows of dots on the tooth (H2)
+%
+% Hatching. `hatch` (lib/hatchkit.ps) lays the lines through its /Mark
+% hook (#271) and draws nothing itself; the hook splits each line into
+% hand-length strokes and inks them with dkstroke. All the layers go into
+% one dkbatch, so where layers cross the dark cores stay on top and the
+% crossings read darker (DRYMEDIA.md 3.3). The value is built in layers:
+% with /Layers L, layer k (0-based) inks only where the value is above
+% k/L, and within its own interval the value raises its touch and width.
+% hatch is called with no /Seed, /Wobble, /Trim, /Dropout or width range,
+% so it takes no rand draws: all hand variation comes from drykit's
+% private generator, re-seeded per line from /Seed, the layer and the
+% line's index, so pscat and Ghostscript lay the same strokes.
+%
+% A batch renders under the clip in force when it ends, so dhhatch clips
+% to its region and closes its own batch inside that clip. It cannot run
+% inside a caller's dkbatch, and two separate dhhatch calls are two
+% batches: where they overlap, the second one's faint level lands over
+% the first one's cores. Hatch a region's layers in one call.
+%
+% Smudge, lift and construction lines (DRYMEDIA.md 3.4):
+%
+% * dhsmudge draws a wide stroke at high touch, so it fills the tooth's
+%   valleys, in a tone between /Under (what lies beneath) and the
+%   pigment, with a soft two-level edge and directional streaks along
+%   the stump's travel (H1, H5). drykit cannot read the page back, so the
+%   smudge cannot move the marks it passes over: it is told their tone.
+%   Drawn at moderate touch over hatching, the hatch's darkest specks
+%   survive between the knuckles it catches, as stumped hatching does.
+% * dhlift draws paper colour through the catch, peaks first, with
+%   /Under the tone beneath: a kneaded-eraser lift is grey, soft-edged and
+%   speckled, never back to paper white (H8); a hard eraser cuts a narrow,
+%   crisper line.
+% * dhsketch draws the path faintly, several times, each pass shifted and
+%   turned a little, as an artist's layout lines are; later strokes cover
+%   it where they cross.
+%
+% Determinism. No procedure here takes a draw from the caller's rand
+% stream. drykit's own generator (dksrand/dkrand) is seeded per line or
+% per pass from /Seed.
+%
+% Scratch prefix dh-. dhhatch's /Value procedure runs inside hatch's
+% sweep: it must consume x y, leave one number, and not touch h-, hk-,
+% dh- or dk- names.
+
+% any -> bool   (an integer or a real)
+% @internal
+/dhisnum {
+    type dup /integertype eq exch /realtype eq or
+} def
+
+% (prefix) (suffix) -   (raises the error named prefix-suffix)
+% @internal
+/dherr {
+    /dhes exch def /dhep exch def
+    dhep length dhes length add 1 add string
+    dup 0 dhep putinterval
+    dup dhep length (-) putinterval
+    dup dhep length 1 add dhes putinterval
+    cvn cvx exec
+} def
+
+% dict key default -> value   (the default when the key is absent)
+% @internal
+/dhget {
+    /dhgd exch def
+    2 copy known { get } { pop pop /dhgd load } ifelse
+} def
+
+% dict key default lo hi (prefix) (suffix) -> number   (a number in lo..hi)
+% @internal
+/dhnum {
+    /dhns exch def /dhnp exch def /dhnh exch def /dhnl exch def
+    dhget
+    dup dhisnum not { pop dhnp dhns dherr } if
+    dup dhnl lt 1 index dhnh gt or { pop dhnp dhns dherr } if
+} def
+
+% value (prefix) (suffix) -> [r g b]   (an rgb array of three numbers 0..1)
+% @internal
+/dhrgb {
+    /dhns exch def /dhnp exch def
+    dup type /arraytype ne { pop dhnp dhns dherr } if
+    dup xcheck { pop dhnp dhns dherr } if
+    dup length 3 ne { pop dhnp dhns dherr } if
+    dup {
+        dup dhisnum not { pop dhnp dhns dherr } if
+        dup 0 lt exch 1 gt or { dhnp dhns dherr } if
+    } forall
+    aload pop 3 array astore
+} def
+
+% (prefix) -   (raises prefix-cannot-run-inside-a-dkbatch when one is open)
+% @internal
+/dhnobatch {
+    userdict /dkBatch known { (cannot-run-inside-a-dkbatch) dherr } { pop } ifelse
+} def
+
+% Each medium's default /Grade.
+% @internal
+/dhgrades << /vine 0.5 /compressed 0.8 /pencil 0.5 >> def
+
+% medium grade -> dict   (the dkstroke keys of a medium at a grade)
+% Grade 0 is hard (lighter, thinner, less tooth filled), 1 soft. Tuned
+% against the reference crops (docs/drymedia/REFERENCES.md H2, H4, H6, H7);
+% notes/241-drycharcoal.md has the comparison.
+% @internal
+/dhpreset {
+    /dhpg exch def /dhpm exch def
+    dhpm /vine eq {
+        <<
+            /Width 2.4 dhpg 2 mul add
+            /Touch 0.56 dhpg 0.16 mul add
+            /Strength 0.58 dhpg 0.25 mul add
+            /Streak 2 /Levels 2 /Halo 0.15
+            /Lanes 3 /Dropout 0.04 /Load 0.85
+            /Fallout 0.12 /Pressure { dhtail }
+        >>
+    } if
+    dhpm /compressed eq {
+        <<
+            /Width 3 dhpg 2 mul add
+            /Touch 0.74 dhpg 0.14 mul add
+            /Strength 0.88 dhpg 0.1 mul add
+            /Streak 1.6 /Levels 2 /Halo 0
+            /Lanes 2 /Dropout 0.015 /Load 0.9
+            /Pressure { dhtail }
+        >>
+    } if
+    dhpm /pencil eq {
+        <<
+            /Width 0.3 dhpg 0.35 mul add
+            /Touch 0.46 dhpg 0.25 mul add
+            /Strength 0.5 dhpg 0.45 mul add
+            /Streak 1.2 /Levels 2 /Halo 0.7
+        >>
+    } if
+} def
+
+% t -> width multiplier   (a stick's square landing and flicked lift:
+% full width until the last 15% of the stroke, then thinning to 0.35)
+% @internal
+/dhtail {
+    dup 0.85 gt { 0.85 sub 0.15 div 0.65 mul 1 exch sub } { pop 1 } ifelse
+} def
+
+% opts (prefix) -> preset-dict   (validates /Medium and /Grade)
+% @internal
+/dhmedium {
+    /dhmp exch def /dhmo exch def
+    /dhmm dhmo /Medium /vine dhget def
+    /dhmm load type /nametype ne { dhmp (medium-must-be-a-name) dherr } if
+    dhgrades /dhmm load known not { dhmp (unknown-medium) dherr } if
+    dhmo /Grade dhgrades /dhmm load get 0 1 dhmp (grade-must-be-0-to-1) dhnum
+    /dhmm load exch dhpreset
+} def
+
+% preset opts [keys] -> dict   (the preset, then every caller key not
+% listed in [keys] on top of it: the caller wins)
+% @internal
+/dhmerge {
+    /dhxk exch def /dhxo exch def
+    dup length dhxo length add dict copy
+    dhxo {
+        /dhxv exch def /dhxn exch def
+        /dhxskip false def
+        dhxk { /dhxn load eq { /dhxskip true def } if } forall
+        dhxskip not { dup /dhxn load /dhxv load put } if
+    } forall
+} def
+
+%%SelfTest: dhstroke-rejects-malformed-options
+%   << /Surface /drawing >> dksurface
+%   newpath 0 0 moveto 50 0 lineto
+%   { 5 dhstroke } /dhstroke-options-must-be-a-dict (a number for the options) mustguard
+%   { << /Medium /chalk >> dhstroke } /dhstroke-unknown-medium (/Medium /chalk) mustguard
+%   { << /Medium (vine) >> dhstroke } /dhstroke-medium-must-be-a-name (a string /Medium) mustguard
+%   { << /Grade 1.5 >> dhstroke } /dhstroke-grade-must-be-0-to-1 (/Grade 1.5) mustguard
+%   { << /Grade { 1 } >> dhstroke } /dhstroke-grade-must-be-0-to-1 (a procedure /Grade) mustguard
+%   % drykit's own guards still apply to the keys passed through.
+%   { << /Levels 9 >> dhstroke } /dkstroke-levels-must-be-1-to-4 (/Levels 9) mustguard
+%   { gsave << /Medium /compressed /Grade 0 >> dhstroke grestore } (compressed, hard) mustpass
+%   { gsave newpath 0 0 moveto 50 0 lineto << /Medium /pencil >> dhstroke grestore } (pencil) mustpass
+%%EndSelfTest
+%
+%%SelfTest: dhstroke-takes-no-draws-from-the-callers-stream
+%   << /Surface /drawing >> dksurface
+%   1 srand rand /dhta exch def
+%   1 srand
+%   gsave newpath 10 10 moveto 90 40 lineto << /Medium /vine >> dhstroke grestore
+%   rand dhta eq (dhstroke /vine, with fallout and lanes, leaves the caller's stream untouched) mustbe
+%%EndSelfTest
+%
+% @kind: Procedure
+% @summary: Draws the current path in charcoal on the dksurface paper, in the current colour: vine charcoal (grey, dusty, easily broken), compressed charcoal (dark and dense) or a charcoal pencil (a sharp point; hard grades break into dots on the tooth). A thin wrapper over drykit's dkstroke: the medium and grade choose its keys, and any other dkstroke key in the options overrides them. Consumes the current path; takes no rand draws from the caller's stream.
+% @example: << /Surface /drawing >> dksurface 0.11 0.1 0.1 setrgbcolor newpath 40 60 moveto 200 90 lineto << /Medium /compressed >> dhstroke
+% @param: /Medium [name] /vine, /compressed or /pencil (default /vine)
+% @param: /Grade [0..1] Hard (0) to soft (1): softer is wider, darker and fills more of the tooth (default 0.5 for vine and pencil, 0.8 for compressed)
+/dhstroke {
+    dup type /dicttype ne { pop dhstroke-options-must-be-a-dict } if
+    /dhso exch def
+    dhso (dhstroke) dhmedium
+    dhso [ /Medium /Grade ] dhmerge
+    dkstroke
+} def
+
+% --- hatching ---------------------------------------------------------
+
+% Layer k's angle offset from /Angle: the second layer crosses the first
+% square on, the third and fourth split the difference.
+% @internal
+/dhhoffsets [ 0 90 45 135 ] def
+
+% x y -> d   (layer dhhk's density: the value's position inside the
+% layer's own interval k/L .. (k+1)/L, which hatch clamps to 0..1)
+% @internal
+/dhhdens {
+    dhhv 0 get dup dhisnum
+        { 3 1 roll pop pop }
+        {
+            exec
+            dup dhisnum not { pop dhhatch-value-procedure-must-return-a-number } if
+        }
+    ifelse
+    dhhk dhhL div sub dhhL mul
+} def
+
+% a b -> hypot
+% @internal
+/dhhypot {
+    dup mul exch dup mul add sqrt
+} def
+
+% x0 y0 x1 y1 q i -   (one hatch line, of quantized value q, split into
+% hand strokes; i is the line's index within its layer)
+% @internal
+/dhhline {
+    /dhhi exch def /dhhq exch def
+    /dhy1 exch def /dhx1 exch def /dhy0 exch def /dhx0 exch def
+    /dhhlen dhx1 dhx0 sub dhy1 dhy0 sub dhhypot def
+    dhhlen 0.5 gt {
+        /dhux dhx1 dhx0 sub dhhlen div def
+        /dhuy dhy1 dhy0 sub dhhlen div def
+        % this line's own stream: the seed, the layer, the line
+        dhhseed 7919 mul dhhk 104729 mul add dhhi 613 mul add dksrand
+        /dhhs dkrand dhhLen mul 0.5 mul neg def
+        /dhhn 0 def
+        {
+            dhhs dhhlen ge { exit } if
+            % a stroke dhhLen * 0.6..1.4 long, overlapping or leaving a
+            % small gap after the last, jogged across the line a little
+            /dhha dhhs dup 0 lt { pop 0 } if def
+            /dhhs dhhs dhhLen 0.6 dkrand 0.8 mul add mul add def
+            /dhhb dhhs dup dhhlen gt { pop dhhlen } if def
+            /dhhj1 dkrand 0.5 sub dhhsp mul 0.5 mul def
+            /dhhj2 dhhj1 dkrand 0.5 sub dhhsp mul 0.4 mul add def
+            /dhhw dhhwidth 0.4 0.6 dhhq mul add mul 0.85 dkrand 0.3 mul add mul def
+            /dhhpseed dkrand 1000000 mul cvi def
+            /dhhs dhhs dkrand 0.35 sub dhhLen mul 0.25 mul add def
+            dhhb dhha sub 1 gt {
+                newpath
+                dhx0 dhux dhha mul add dhuy dhhj1 mul sub
+                dhy0 dhuy dhha mul add dhux dhhj1 mul add moveto
+                dhx0 dhux dhhb mul add dhuy dhhj2 mul sub
+                dhy0 dhuy dhhb mul add dhux dhhj2 mul add lineto
+                % one options dict for every stroke: dkstroke copies what
+                % it needs into its record, and a fresh dict per stroke
+                % was Ghostscript garbage (its collector rescans the
+                % tooth memo on every pass)
+                dhhbase
+                dup /Width dhhw put
+                dup /Touch dhhtouch put
+                dup /Seed dhhpseed put
+                dkstroke
+            } if
+            /dhhn dhhn 1 add def
+        } loop
+    } if
+} def
+
+% -   (the /Mark hook: the path hatch collected is current, hatchwidths
+% holds each segment's quantized value)
+% @internal
+/dhhmark {
+    mark { } { } { pop pop pop pop pop pop } { } pathforall dktomark
+    /dhhpts exch def
+    /dhhqs hatchwidths def
+    newpath
+    0 1 dhhpts length 4 idiv 1 sub {
+        /dhhii exch def
+        dhhpts dhhii 4 mul 4 getinterval aload pop
+        dhhqs dhhii get dhhii dhhline
+    } for
+} def
+
+%%SelfTest: dhhatch-rejects-malformed-options
+%   << /Surface /drawing >> dksurface
+%   { 5 dhhatch } /dhhatch-options-must-be-a-dict (a number for the options) mustguard
+%   { newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath << /Value 1.5 >> dhhatch }
+%   /dhhatch-value-must-be-0-to-1 (/Value 1.5) mustguard
+%   { newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath << /Value (x) >> dhhatch }
+%   /dhhatch-value-must-be-a-number-or-procedure (a string /Value) mustguard
+%   { newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath << /Value /x >> dhhatch }
+%   /dhhatch-value-must-be-a-number-or-procedure (a literal name /Value) mustguard
+%   { newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath << /Layers 0 >> dhhatch }
+%   /dhhatch-layers-must-be-1-to-4 (/Layers 0) mustguard
+%   { newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath << /Layers 2.5 >> dhhatch }
+%   /dhhatch-layers-must-be-1-to-4 (/Layers 2.5) mustguard
+%   { newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath << /Spacing 0 >> dhhatch }
+%   /dhhatch-spacing-must-be-positive (/Spacing 0) mustguard
+%   { newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath << /Length 0 >> dhhatch }
+%   /dhhatch-length-must-be-positive (/Length 0) mustguard
+%   { newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath << /Angle (a) >> dhhatch }
+%   /dhhatch-angle-must-be-a-number (a string /Angle) mustguard
+%   { newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath << /Seed 1e12 >> dhhatch }
+%   /dhhatch-seed-must-be-an-integer-in-range (/Seed 1e12) mustguard
+%   { newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath << /Medium /chalk >> dhhatch }
+%   /dhhatch-unknown-medium (/Medium /chalk) mustguard
+%   { newpath << >> dhhatch } /dhhatch-needs-a-region-path (no current path) mustguard
+%   { newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath
+%     { << >> dhhatch } dkbatch } /dhhatch-cannot-run-inside-a-dkbatch (inside a dkbatch) mustguard
+%   userdict /dkBatch known not (the refused call closes the caller's batch) mustbe
+%   { newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath
+%     << /Value { pop pop (x) } >> dhhatch } /dhhatch-value-procedure-must-return-a-number
+%   (a /Value procedure returning a string) mustguard
+%   { gsave newpath 0 0 moveto 40 0 lineto 40 40 lineto closepath
+%     << /Value { pop 40 div } /Layers 2 >> dhhatch grestore } (a value procedure) mustpass
+%%EndSelfTest
+%
+%%SelfTest: dhhatch-takes-no-draws-from-the-callers-stream
+%   << /Surface /drawing >> dksurface
+%   1 srand rand /dhta exch def
+%   1 srand
+%   gsave newpath 0 0 moveto 40 0 lineto 40 40 lineto 0 40 lineto closepath << >> dhhatch grestore
+%   rand dhta eq (dhhatch with default options leaves the caller's stream untouched) mustbe
+%   1 srand
+%   gsave newpath 0 0 moveto 40 0 lineto 40 40 lineto 0 40 lineto closepath
+%   << /Medium /vine /Value { add 80 div } >> dhhatch grestore
+%   rand dhta eq (and so does vine hatching to a value procedure) mustbe
+%%EndSelfTest
+%
+% @kind: Procedure
+% @summary: Hatches the region of the current path in charcoal, to a value given as a number or a {x y -> value} procedure (0 white, 1 darkest): layers of parallel hand strokes, each crossing the last, are added where the value is darker, with more pressure and width inside each layer. Every layer is inked by drykit's dkstroke inside one dkbatch, so crossings stay dark, and the strokes break up on the paper's tooth. Clips to the region and consumes the path. Cannot run inside a dkbatch; hatch a region's layers in one call. Other dkstroke keys pass through to every stroke. Takes no rand draws from the caller's stream.
+% @example: << /Surface /drawing >> dksurface 0.11 0.1 0.1 setrgbcolor newpath 40 40 moveto 200 40 lineto 200 160 lineto 40 160 lineto closepath << /Medium /pencil /Value { pop 40 sub 160 div } >> dhhatch
+% @param: /Medium [name] /vine, /compressed or /pencil (default /pencil)
+% @param: /Grade [0..1] Hard (0) to soft (1), as in dhstroke (default the medium's)
+% @param: /Value [0..1] How dark to hatch, 0 (no ink) to 1 (every layer at full pressure); a number, or a procedure {x y -> value} in the caller's user space, run along every line (default 0.5)
+% @param: /Layers [count] Crossing layers at full value, 1..4: the second crosses the first at 90 degrees, the third and fourth at 45 (default 3)
+% @param: /Angle [degrees] Direction of the first layer (default 45)
+% @param: /Spacing [points] Distance between lines within a layer; must be > 0 (default 2.4 pencil, 3.4 vine, 4 compressed)
+% @param: /Length [points] Mean length of one hand stroke along a line; must be > 0 (default 28)
+% @param: /Width [points] Contact width of a stroke at full value; lighter strokes are narrower (default 0.4 x /Spacing)
+% @param: /Touch [0..1] Pressure on every stroke (default the medium's; with a number /Value, raised or lowered by 0.3 x (Value - 0.5))
+% @param: /Seed [integer] Seed for the strokes' hand variation; the caller's rand stream is untouched (default 1)
+/dhhatch {
+    dup type /dicttype ne { pop dhhatch-options-must-be-a-dict } if
+    /dhho exch def
+    (dhhatch) dhnobatch
+    dhho dup /Medium known not { dup length 1 add dict copy dup /Medium /pencil put } if
+    (dhhatch) dhmedium /dhhpre exch def
+    dhho /Value 0.5 dhget
+    dup dhisnum {
+        dup 0 lt 1 index 1 gt or { pop dhhatch-value-must-be-0-to-1 } if
+    } {
+        dup dkisproc not { pop dhhatch-value-must-be-a-number-or-procedure } if
+    } ifelse
+    1 array astore /dhhv exch def
+    /dhhL dhho /Layers 3 1 4 (dhhatch) (layers-must-be-1-to-4) dhnum def
+    dhhL dup cvi ne { dhhatch-layers-must-be-1-to-4 } if
+    /dhhL dhhL cvi def
+    /dhhang dhho /Angle 45 dhget def
+    /dhhang load dhisnum not { dhhatch-angle-must-be-a-number } if
+    /dhhsp dhho /Spacing
+        << /pencil 1.6 /vine 2.8 /compressed 3.4 >> dhho /Medium /pencil dhget get
+        1e-6 1e6 (dhhatch) (spacing-must-be-positive) dhnum def
+    /dhhLen dhho /Length 28 1e-6 1e6 (dhhatch) (length-must-be-positive) dhnum def
+    /dhhseed dhho /Seed 1 dhget def
+    /dhhseed load dhisnum not { dhhatch-seed-must-be-an-integer-in-range } if
+    dhhseed abs 1e6 gt { dhhatch-seed-must-be-an-integer-in-range } if
+    /dhhseed dhhseed cvi def
+    % A hatch line is drawn with the point or a sharpened edge, not the
+    % whole stick: its width follows the spacing, and it has one lane, one
+    % deposit level and no fallout, unless the caller says otherwise. One
+    % level costs about 40% less than two (notes/241-drycharcoal.md), and
+    % the layers crossing each other build the tone a second level would.
+    dhhpre /Width dhhsp 0.4 mul put
+    dhhpre /Lanes 1 put
+    dhhpre /Levels 1 put
+    dhhpre /Fallout 0 put
+    /dhhbase dhhpre dhho [ /Medium /Grade /Value /Layers /Angle /Spacing /Length /Seed ] dhmerge def
+    /dhhwidth dhhbase /Width get def
+    /dhhtouch dhhbase /Touch get def
+    % A number /Value also sets the pressure: light hatching barely
+    % catches (the dotted lines of reference H2), dark hatching fills more
+    % of the tooth. One touch per call keeps every layer in one catch, so
+    % a /Value procedure varies width and layers only.
+    dhho /Touch known not dhhv 0 get dhisnum and {
+        /dhhtouch dhhtouch dhhv 0 get 0.5 sub 0.3 mul add
+            dup 0.05 lt { pop 0.05 } if dup 1 gt { pop 1 } if def
+    } if
+    /dhhwidth load dhisnum not { dhhatch-width-must-be-positive } if
+    dhhwidth 0 le { dhhatch-width-must-be-positive } if
+    /dhhtouch load dhisnum not { dhhatch-touch-must-be-0-to-1 } if
+    dhhtouch 0 lt dhhtouch 1 gt or { dhhatch-touch-must-be-0-to-1 } if
+    { pathbbox } stopped { dhhatch-needs-a-region-path } if
+    4 array astore /dhhbb exch def
+    gsave
+    clip
+    {
+        0 1 dhhL 1 sub {
+            /dhhk exch def
+            <<
+                /BBox dhhbb
+                /Angle dhhang dhhoffsets dhhk get add
+                /Spacing dhhsp
+                /Width [ 0 1 ]
+                /Density { dhhdens }
+                /Mark { dhhmark }
+            >> hatch
+        } for
+    } dkbatch
+    grestore
+    newpath
+} def
+
+% --- smudging, lifting, construction lines ------------------------------
+
+% t -> width multiplier   (a soft landing and lift for stump and eraser)
+% @internal
+/dhsoft {
+    dup 0.15 lt { 0.15 div 0.5 mul 0.5 add } {
+        dup 0.85 gt { 1 exch sub 0.15 div 0.5 mul 0.5 add } { pop 1 } ifelse
+    } ifelse
+} def
+
+% a b t -> [a + (b - a) t]   (rgb arrays)
+% @internal
+/dhlerp3 {
+    /dhlt exch def /dhlb exch def /dhla exch def
+    [ 0 1 2 { /dhlk exch def
+        dhla dhlk get dhlb dhlk get dhla dhlk get sub dhlt mul add } for ]
+} def
+
+%%SelfTest: dhsmudge-dhlift-dhsketch-guards
+%   << /Surface /drawing >> dksurface
+%   newpath 0 0 moveto 50 0 lineto
+%   { 5 dhsmudge } /dhsmudge-options-must-be-a-dict (a number for smudge options) mustguard
+%   { << /Value 2 >> dhsmudge } /dhsmudge-value-must-be-0-to-1 (/Value 2) mustguard
+%   { << /Under [1 1] >> dhsmudge } /dhsmudge-under-must-be-an-rgb-array (a two-entry /Under) mustguard
+%   { { << >> dhsmudge } dkbatch } /dhsmudge-cannot-run-inside-a-dkbatch (a smudge in a batch) mustguard
+%   { 5 dhlift } /dhlift-options-must-be-a-dict (a number for lift options) mustguard
+%   { << /Eraser /putty >> dhlift } /dhlift-unknown-eraser (/Eraser /putty) mustguard
+%   { << /Ground [2 0 0] >> dhlift } /dhlift-ground-must-be-an-rgb-array (a /Ground above 1) mustguard
+%   { << /Under 0.5 >> dhlift } /dhlift-under-must-be-an-rgb-array (a number /Under) mustguard
+%   { { << >> dhlift } dkbatch } /dhlift-cannot-run-inside-a-dkbatch (a lift in a batch) mustguard
+%   { 5 dhsketch } /dhsketch-options-must-be-a-dict (a number for sketch options) mustguard
+%   { << /Passes 0 >> dhsketch } /dhsketch-passes-must-be-1-to-6 (/Passes 0) mustguard
+%   { << /Shift -1 >> dhsketch } /dhsketch-shift-must-be-0-to-20 (/Shift -1) mustguard
+%   { newpath << >> dhsketch } /dhsketch-needs-a-path (no current path) mustguard
+%   { gsave newpath 0 0 moveto 50 0 lineto << >> dhsmudge grestore } (a smudge) mustpass
+%   { gsave newpath 0 0 moveto 50 0 lineto << /Eraser /hard >> dhlift grestore } (a hard lift) mustpass
+%   { gsave newpath 0 0 moveto 50 0 lineto { << >> dhsketch } dkbatch grestore } (a sketch in a batch) mustpass
+%%EndSelfTest
+%
+%%SelfTest: dhsmudge-dhlift-dhsketch-take-no-draws
+%   << /Surface /drawing >> dksurface
+%   1 srand rand /dhta exch def
+%   1 srand
+%   gsave newpath 10 10 moveto 90 40 lineto << >> dhsmudge grestore
+%   gsave newpath 10 10 moveto 90 40 lineto << >> dhlift grestore
+%   gsave newpath 10 10 moveto 90 40 lineto 30 70 lineto << >> dhsketch grestore
+%   rand dhta eq (smudge, lift and sketch leave the caller's stream untouched) mustbe
+%%EndSelfTest
+%
+% @kind: Procedure
+% @summary: Smudges along the current path as a paper stump or finger would: a wide, soft-edged stroke at high pressure that fills the tooth's valleys with a tone between the paper and the current colour (/Value), over what lies beneath (/Under), with faint streaks along the direction of travel. drykit cannot read the page back, so the smudge is told the tone beneath and the tone to leave; at moderate /Touch over hatching, the hatch's darkest specks still show. Consumes the path; cannot run inside a dkbatch. Other dkstroke keys pass through. Takes no rand draws from the caller's stream.
+% @example: << /Surface /drawing >> dksurface 0.11 0.1 0.1 setrgbcolor newpath 40 60 moveto 220 70 lineto << /Value 0.4 /Width 18 >> dhsmudge
+% @param: /Value [0..1] The tone the smudge leaves, from the paper (0) to the current colour (1): smudging spreads charcoal, so over a dark mass it is lighter than the mass (default 0.4)
+% @param: /Width [points] Width of the stump's contact (default 14)
+% @param: /Touch [0..1] Pressure: high fills the valleys, lower leaves the marks beneath showing between the knuckles (default 0.66)
+% @param: /Under [rgb array] What lies beneath (default the surface's /Ground)
+/dhsmudge {
+    dup type /dicttype ne { pop dhsmudge-options-must-be-a-dict } if
+    /dhmo exch def
+    (dhsmudge) dhnobatch
+    /dhmv dhmo /Value 0.4 0 1 (dhsmudge) (value-must-be-0-to-1) dhnum def
+    /dhmg userdict /dkGround known { userdict /dkGround get } { [ 1 1 1 ] } ifelse def
+    /dhmu dhmo /Under dhmg dhget (dhsmudge) (under-must-be-an-rgb-array) dhrgb def
+    <<
+        /Width 14 /Touch 0.66 /Streak 2.6 /Levels 2 /Halo 0.2 /Strength 1
+        /Pressure { dhsoft }
+    >> dhmo [ /Value /Under ] dhmerge
+    dup /Under dhmu put
+    gsave
+    dhmg [ currentrgbcolor ] dhmv dhlerp3 aload pop setrgbcolor
+    dkstroke
+    grestore
+    newpath
+} def
+
+% @kind: Procedure
+% @summary: Lifts charcoal along the current path with an eraser: paper colour drawn through the tooth's peaks first, over the tone beneath (/Under, by default the current colour). A kneaded eraser leaves a soft, speckled grey highlight that never gets back to paper white; a hard eraser cuts a narrow, crisper line. Consumes the path; cannot run inside a dkbatch. Other dkstroke keys pass through. Takes no rand draws from the caller's stream.
+% @example: << /Surface /drawing >> dksurface 0.11 0.1 0.1 setrgbcolor newpath 40 40 220 60 rectfill newpath 60 70 moveto 200 70 lineto << /Eraser /kneaded >> dhlift
+% @param: /Eraser [name] /kneaded (soft, grey, speckled) or /hard (narrow, crisp) (default /kneaded)
+% @param: /Ground [rgb array] The paper colour the eraser uncovers (default the surface's /Ground)
+% @param: /Under [rgb array] The charcoal tone being lifted (default the current colour)
+% @param: /Width [points] Width of the eraser's contact (default 10 kneaded, 2.2 hard)
+% @param: /Touch [0..1] How far into the tooth the lift reaches: low lifts only the peaks (default 0.58 kneaded, 0.95 hard)
+/dhlift {
+    dup type /dicttype ne { pop dhlift-options-must-be-a-dict } if
+    /dhlo exch def
+    (dhlift) dhnobatch
+    /dhle dhlo /Eraser /kneaded dhget def
+    /dhle load type /nametype ne { dhlift-eraser-must-be-a-name } if
+    /dhle load /kneaded ne /dhle load /hard ne and { dhlift-unknown-eraser } if
+    /dhlg dhlo /Ground userdict /dkGround known { userdict /dkGround get } { [ 1 1 1 ] } ifelse dhget
+        (dhlift) (ground-must-be-an-rgb-array) dhrgb def
+    /dhlu dhlo /Under [ currentrgbcolor ] dhget (dhlift) (under-must-be-an-rgb-array) dhrgb def
+    dhle /kneaded eq {
+        << /Width 10 /Touch 0.58 /Strength 0.62 /Levels 2 /Halo 0.45 /Streak 1.6
+           /Pressure { dhsoft } >>
+    } {
+        << /Width 2.2 /Touch 0.95 /Strength 0.9 /Levels 1 /Streak 1.2 >>
+    } ifelse
+    dhlo [ /Eraser /Ground /Under ] dhmerge
+    dup /Under dhlu put
+    gsave
+    dhlg aload pop setrgbcolor
+    dkstroke
+    grestore
+    newpath
+} def
+
+% @kind: Procedure
+% @summary: Draws the current path as faint construction lines: a light, hard vine charcoal line laid down several times, each pass shifted and turned a little, as an artist's layout sketch is, so later strokes cover it where they cross. In the current colour; may run inside a dkbatch of the same colour. Other dkstroke keys pass through. Consumes the path; takes no rand draws from the caller's stream.
+% @example: << /Surface /drawing >> dksurface 0.11 0.1 0.1 setrgbcolor newpath 40 40 moveto 120 160 lineto 200 50 lineto << /Passes 3 >> dhsketch
+% @param: /Passes [count] How many times the line is laid down, 1..6 (default 2)
+% @param: /Shift [points] How far a pass can stray from the path, 0..20 (default 1.2)
+% @param: /Touch [0..1] Pressure: faint construction lines barely catch (default 0.45)
+% @param: /Strength [0..1] How dark a pass reads against the paper (default 0.38)
+% @param: /Seed [integer] Seed for the passes' shifts and texture; the caller's rand stream is untouched (default 1)
+/dhsketch {
+    dup type /dicttype ne { pop dhsketch-options-must-be-a-dict } if
+    /dhko exch def
+    /dhkn dhko /Passes 2 1 6 (dhsketch) (passes-must-be-1-to-6) dhnum def
+    dhkn dup cvi ne { dhsketch-passes-must-be-1-to-6 } if
+    /dhkn dhkn cvi def
+    /dhks dhko /Shift 1.2 0 20 (dhsketch) (shift-must-be-0-to-20) dhnum def
+    /dhkseed dhko /Seed 1 -1e6 1e6 (dhsketch) (seed-must-be-an-integer-in-range) dhnum cvi def
+    { pathbbox } stopped { dhsketch-needs-a-path } if
+    /dhky1 exch def /dhkx1 exch def /dhky0 exch def /dhkx0 exch def
+    /dhkcx dhkx0 dhkx1 add 2 div def
+    /dhkcy dhky0 dhky1 add 2 div def
+    % the turn that moves the path's far end by about Shift
+    /dhkrot dhks dhkx1 dhkx0 sub dhky1 dhky0 sub dhhypot 2 div dhmaxr div 57.2958 mul def
+    [ { /moveto cvx } { /lineto cvx } { /curveto cvx } { /closepath cvx } pathforall ] cvx
+    /dhkpath exch def
+    /vine 0.2 dhpreset
+    dup /Width 1.1 put dup /Touch 0.45 put dup /Strength 0.38 put
+    dup /Fallout 0 put dup /Levels 1 put dup /Lanes 1 put
+    dhko [ /Passes /Shift /Seed ] dhmerge
+    /dhkbase exch def
+    {
+        0 1 dhkn 1 sub {
+            /dhkp exch def
+            dhkseed 7919 mul dhkp 613 mul add dksrand
+            /dhkdx dkrand 0.5 sub 2 mul dhks mul def
+            /dhkdy dkrand 0.5 sub 2 mul dhks mul def
+            /dhkr dkrand 0.5 sub 2 mul dhkrot mul def
+            gsave
+            dhkcx dhkdx add dhkcy dhkdy add translate
+            dhkr rotate
+            dhkcx neg dhkcy neg translate
+            newpath dhkpath
+            dhkbase dup length 1 add dict copy dup /Seed dhkseed 101 mul dhkp add put
+            dkstroke
+            grestore
+        } for
+    }
+    userdict /dkBatch known { exec } { dkbatch } ifelse
+    newpath
+} def
+
+% a -> max(a, 1)   (a divisor that cannot be zero)
+% @internal
+/dhmaxr {
+    dup 1 lt { pop 1 } if
+} def
+%%EOF

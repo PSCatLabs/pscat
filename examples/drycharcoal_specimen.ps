@@ -1,0 +1,144 @@
+%!PS-Adobe-3.0
+%%Title: drycharcoal specimen -- vine, compressed and pencil charcoal; hatching, smudging, lifting and construction lines (issue #241)
+%%BoundingBox: 0 0 720 490
+%%EndComments
+
+% Specimen for lib/drycharcoal.ps (docs/DRYMEDIA.md 3.4), on drawing
+% paper from lib/drykit.ps. Top to bottom:
+%
+%   media        dhstroke: vine, compressed and pencil charcoal, each at
+%                /Grade 0 (hard), 0.5 and 1 (soft)
+%   hatching     a value scale from white to black built by dhhatch alone:
+%                each step adds pressure and width, and a crossing layer
+%                every quarter of the way
+%   smudging     the same scale built the way a stumped tone is: a light
+%                vine hatch, then dhsmudge to the step's value
+%   techniques   a sphere hatched to a {x y -> value} procedure; a
+%                compressed mass smudged across, with kneaded-eraser
+%                highlights and a hard-eraser line lifted out; a layout
+%                sketch in construction lines, partly covered by the
+%                drawing made over it
+%
+%   pscat --page 720x490 --png drycharcoal_specimen.png examples/drycharcoal_specimen.ps
+%
+% Budget (DRYMEDIA.md 6.2): 10 s at 2x (--dpi 144) in pscat and gs.
+
+(lib/artkit.ps) run
+(lib/paintkit.ps) run
+(lib/drykit.ps) run
+(lib/hatchkit.ps) run
+(lib/drycharcoal.ps) run
+
+% Drawing paper with less of its slow mottle than drykit's default: the
+% tooth breaks charcoal up knuckle by knuckle rather than in patches.
+<< /Surface /drawing /Relief 0.35 /Seed 7 >> dksurface
+userdict /dkGround get aload pop setrgbcolor clippath fill
+% The layout below was drawn on a taller page; it sits 70pt lower here.
+0 -70 translate
+
+% sp- prefix: specimen-local.
+/spfont { /Helvetica findfont exch scalefont setfont } def
+/splabel { moveto show } def
+/spink { 0.3 0.29 0.28 setrgbcolor } def
+/spchar { 0.11 0.10 0.10 setrgbcolor } def
+/spcell { newpath moveto 32 0 rlineto 0 32 rlineto -32 0 rlineto closepath } def
+
+spink 15 spfont (drycharcoal) 24 530 splabel
+9 spfont (vine, compressed and pencil charcoal on drykit; hatching, smudging, lifting, construction lines) 120 530 splabel
+
+% --- value scales -------------------------------------------------------
+% Six steps each, 0 to 1. Hatching: pencil, a crossing layer every
+% quarter. Smudging: a light vine hatch, then a stump to the step's value.
+spink 11 spfont (value scale, hatching) 24 400 splabel
+(value scale, smudging) 380 400 splabel
+9 spfont
+0 1 5 {
+    /spi exch def
+    /spv spi 5 div def
+    /spx 24 spi 54 mul add def
+    spink spv 4 string cvs spx 8 add 336 splabel
+    spv 4 string cvs spx 364 add 336 splabel
+    spchar
+    spx 348 spcell << /Value spv /Seed spi /Medium /pencil /Grade 1 /Layers 4 >> dhhatch
+    spx 356 add 348 spcell << /Value spv 0.4 mul /Seed spi 20 add /Medium /vine /Layers 1 >> dhhatch
+    gsave
+        spx 356 add 348 spcell clip
+        newpath spx 356 add 6 sub 344 moveto
+        0 1 2 { pop 40 7 rlineto -40 5 rlineto } for
+        << /Value spv /Width 14 /Seed spi >> dhsmudge
+    grestore
+} for
+
+% --- techniques ---------------------------------------------------------
+spink 11 spfont (hatching to a value procedure) 24 300 splabel
+(smudge and lift) 268 300 splabel
+(construction lines) 500 300 splabel
+
+% A sphere lit from the upper left: the value rises away from the light,
+% and the cast shadow on the ground is a flat value.
+spchar
+/spsx 110 def /spsy 176 def /spsr 48 def
+newpath 120 104 moveto 196 98 lineto 198 118 lineto 150 124 lineto closepath
+<< /Value 0.8 /Angle 20 /Layers 3 /Medium /pencil /Grade 0.7 /Seed 3 >> dhhatch
+newpath spsx spsy spsr 0 360 arc closepath
+<< /Value {
+       % x y -> value: the light comes from the upper left, (-0.55, 0.65)
+       spsy sub spsr div exch spsx sub spsr div
+       2 copy dup mul exch dup mul add /spd exch def
+       -0.55 mul exch 0.65 mul add
+       neg 0.42 mul 0.42 add spd 0.3 mul add
+   }
+   /Angle 35 /Layers 4 /Medium /pencil /Grade 0.7 /Seed 5 >> dhhatch
+
+% A compressed-charcoal mass, smudged across its lower half with a stump,
+% then lifted: a kneaded-eraser highlight and a hard-eraser line.
+spchar
+0 1 5 {
+    /spi exch def
+    newpath 286 140 spi 13 mul add moveto 120 6 rlineto
+    << /Medium /compressed /Width 13 /Seed spi >> dhstroke
+} for
+gsave
+    newpath 286 134 122 88 rectclip
+    newpath 266 180 moveto 160 -9 rlineto -160 -9 rlineto 160 -9 rlineto -160 -9 rlineto 160 -9 rlineto
+    << /Value 0.82 /Width 16 /Touch 0.7 /Under [0.15 0.14 0.14] /Seed 2 >> dhsmudge
+grestore
+newpath 304 206 moveto 330 198 360 204 392 194 curveto << /Width 11 /Seed 4 >> dhlift
+newpath 296 184 moveto 400 178 lineto << /Eraser /hard /Seed 8 >> dhlift
+
+% A layout sketch of a jug: construction lines first, then a few firm
+% vine and compressed strokes over part of it.
+spchar
+newpath 590 110 moveto 590 270 lineto << /Passes 1 /Seed 1 >> dhsketch
+newpath 540 262 moveto 640 262 lineto 540 112 moveto 640 112 lineto << /Passes 2 /Seed 2 >> dhsketch
+newpath 590 230 32 0 360 arc closepath << /Passes 2 /Seed 3 >> dhsketch
+newpath 556 260 moveto 544 190 538 140 556 114 curveto 624 114 lineto 642 140 636 190 624 260 curveto
+<< /Passes 3 /Seed 4 >> dhsketch
+newpath 626 230 moveto 674 226 674 160 636 156 curveto << /Passes 2 /Seed 5 >> dhsketch
+newpath 556 260 moveto 544 190 538 140 556 114 curveto
+<< /Medium /vine /Grade 0.7 /Seed 6 >> dhstroke
+newpath 556 114 moveto 624 114 lineto << /Medium /compressed /Grade 0.4 /Width 3 /Seed 7 >> dhstroke
+newpath 626 230 moveto 674 226 674 160 636 156 curveto << /Medium /vine /Grade 0.5 /Seed 8 >> dhstroke
+
+% --- media ---------------------------------------------------------------
+% Drawn last, after everything else on the page: vine charcoal's fallout
+% goes through artkit's `scatter`, and in Ghostscript every call after a
+% first `scatter` runs about twice as slowly (issue filed from #241).
+spink 11 spfont (media) 24 500 splabel
+9 spfont
+[ /vine /compressed /pencil ] {
+    /spm exch def
+    /spx spm /vine eq { 24 } { spm /compressed eq { 256 } { 488 } ifelse } ifelse def
+    spink spm 20 string cvs spx 484 splabel
+    (grade 0     0.5     1) spx 100 add 484 splabel
+    spchar
+    0 1 2 {
+        /spg exch def
+        newpath spx spg 70 mul add 428 moveto 18 40 rlineto 22 0 rlineto 18 -30 rlineto
+        << /Medium spm /Grade spg 2 div /Seed spg 3 add >> dhstroke
+    } for
+} forall
+
+spink 8 spfont
+(lib/drycharcoal.ps: dhstroke, dhhatch, dhsmudge, dhlift and dhsketch, all inked through drykit's dkstroke on one dksurface) 24 84 splabel
+showpage
