@@ -332,6 +332,39 @@ fn the_effects_leave_the_contents_graphics_state_and_paths_alone() {
 }
 
 #[test]
+fn the_callers_current_point_survives_the_wrapper_and_a_rejected_stamp_changes_nothing() {
+    for opts in ["", "/Age 0.5 /Generation 2 /Skew 1"] {
+        let mut it = Interp::with_page(W, H).expect("page");
+        load(&mut it);
+        it.run_str(&format!(
+            "10 20 moveto 60 20 lineto {{ currentpoint }} << /Width 300 /Height 200 {opts} >> rel-page"
+        ))
+        .unwrap_or_else(|e| panic!("{opts}: {}", it.error_report(&e)));
+        let st = it.operand_stack();
+        let n = st.len();
+        let num = |i: usize| st[n - i].repr().parse::<f64>().expect("a number");
+        // the point keeps its place on the page; the content's own frame is
+        // moved a few points by the skew and the copies
+        assert!(
+            (num(2) - 60.0).abs() < 6.0 && (num(1) - 20.0).abs() < 6.0,
+            "{opts}: {} {}",
+            num(2),
+            num(1)
+        );
+    }
+    let mut it = Interp::with_page(W, H).expect("page");
+    load(&mut it);
+    it.run_str(
+        "/Courier findfont 12 scalefont setfont \
+         { << /Lines [ 5 ] >> rel-stamp } stopped pop \
+         { << /Lines [ (a) ] /Font /NoSuchFace-Bold >> rel-stamp } stopped pop \
+         currentfont /FontName get",
+    )
+    .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+    assert_eq!(it.operand_stack().last().unwrap().repr(), "/Courier");
+}
+
+#[test]
 fn a_zero_strength_stamp_and_a_huge_sheet_are_handled() {
     let blank = page("");
     assert_eq!(

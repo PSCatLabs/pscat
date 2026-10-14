@@ -416,13 +416,14 @@ RelState begin {
     rsInk rlIsRgb not { end rel-stamp-ink-must-be-an-rgb-array } if
     rsFrame dup /box eq exch dup /double eq exch /none eq or or not
     { end rel-stamp-frame-must-be-box-double-or-none } if
-    rsStr 0 gt {
-    gsave
     rsTrk rlIsNum not { end rel-stamp-tracking-must-be-a-number } if
     rsFont type /nametype ne { end rel-stamp-font-must-be-a-name } if
+    rsLines { type /stringtype ne { end rel-stamp-lines-must-be-an-array-of-strings } if } forall
+    rsFont findfont pop
+    rsStr 0 gt {
+    gsave
     rsFont findfont rsSize scalefont setfont
-    0 rsLines { dup type /stringtype ne { end rel-stamp-lines-must-be-an-array-of-strings } if
-                dup stringwidth pop exch length 1 sub rsTrk mul add 2 copy lt { exch } if pop } forall /rsMaxW exch def
+    0 rsLines { dup stringwidth pop exch length 1 sub rsTrk mul add 2 copy lt { exch } if pop } forall /rsMaxW exch def
     rsSize 1.18 mul /rsLH exch def
     rsSize 0.5 mul /rsPad exch def
     rsMaxW rsPad 2 mul add /rsBW exch def
@@ -650,6 +651,7 @@ RelState begin {
 /rlOriginal {
     /rlCC 1 0.6 rlGen exp sub def
     rlPaint { gsave rlPaperDraw grestore } if
+    rlRePath
     /tw-set where { pop rlGen 0 gt } { false } ifelse {
         TWState /tCopies get /rlOldC exch def
         << /Copies rlGen >> tw-set
@@ -661,7 +663,20 @@ RelState begin {
     rlMarks
     /rlCC 0 def
 } bind def
+% the caller's path, kept as a procedure while the sheets are clipped (a clip
+% needs the current path) and laid again, at the same device places, for the
+% content: `{ 10 10 moveto } ... rel-page` still has its current point
+/rlGrabPath {
+    matrix currentmatrix /rlM0 exch def
+    mark { /moveto cvx } { /lineto cvx } { /curveto cvx } { /closepath cvx } pathforall
+    counttomark array astore exch pop cvx /rlPathP exch def
+} bind def
+/rlRePath {
+    matrix currentmatrix /rlMc exch def
+    rlM0 setmatrix newpath rlPathP rlMc setmatrix
+} bind def
 /rlRun {
+    rlGrabPath
     rlPrep
     gsave
     rlSkew 0 ne rlBack null ne or {
