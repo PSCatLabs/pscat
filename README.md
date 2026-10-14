@@ -1198,6 +1198,9 @@ baseline slopes and drifts (`/Irregular`, where 0 is clean TeX).
 Every TeX backslash is written twice in a PostScript string.
 `examples/mathkit_specimen.ps` is the specimen: the fixed test set, from
 the quadratic formula to Maxwell's equations, and a derivation in chalk.
+The gallery piece `gallery/chalkboard_lecture.ps` (issue #238) fills a
+whole board with it: Euler's formula derived across three drychalk
+panels.
 
 ```postscript
 (lib/handscript.ps) run (lib/strokeglyphs.ps) run (lib/mathkit.ps) run
@@ -1329,6 +1332,7 @@ tree or fern grows.
 | `ring_of_type.ps` | (Stage 6) one sentence circling eleven shrinking rings, set glyph by glyph around a charpath ampersand |
 | `hundred_lines.ps` | (Stage 10) the Stage 12 /HandScript dynamic font writing punishment lines on a chalkboard — same sentence nine times, no two letters alike |
 | `hortus.ps` | (Stage 19) a herbarium plate: three L-system plants grown by turtle, blossoms stamped along each plant's own path with `pathforall` |
+| `chalkboard_lecture.ps` | (issue #238) a professor's slate board after deriving Euler's formula: mathkit's TeX layout written in drychalk chalk over the last lecture's erased ghost writing |
 
 View them one at a time:
 
@@ -1349,6 +1353,7 @@ View them one at a time:
 </p>
 <p>
   <img src="gallery/renders/hundred_lines.png" width="30%" alt="Hundred Lines"/>
+  <img src="gallery/renders/chalkboard_lecture.png" width="60%" alt="Lecture 14, a chalkboard derivation of Euler's formula"/>
 </p>
 
 Details, page sizes, and re-render instructions live in

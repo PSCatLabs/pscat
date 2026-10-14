@@ -1,0 +1,298 @@
+%!PS-Adobe-3.0
+%%Title: Lecture 14 (a chalkboard after the lecture)
+%%Creator: pscat gallery (issue #238)
+%%BoundingBox: 0 0 1440 900
+%%EndComments
+
+% A slate chalkboard as a professor left it after the lecture: Euler's
+% formula derived from the Taylor series, across three sliding panels.
+%
+%   left    the Taylor series of e^x, cos and sin, recalled, and the
+%           powers of i
+%   middle  x = i theta substituted and the series regrouped into its
+%           real and imaginary parts, with the result boxed in yellow
+%   right   the unit circle sketched in the complex plane, theta = pi,
+%           Euler's identity circled, and the homework in the corner
+%
+% Under the fresh chalk lies the last lecture (the Gaussian integral and
+% a sketched bell curve), erased under eraser swipes and finger wipes.
+% Dust lies along the ledge and in the tray. The lecturer starts fresh
+% and presses hard. By the right panel the hand is quicker, looser and
+% lighter, except where the result is boxed.
+%
+% Everything is lib/drychalk.ps (dcboard, dcchalk) over drykit, with
+% the formulas laid out by lib/mathkit.ps and the words written with
+% lib/strokeglyphs.ps. No alpha, so Ghostscript renders it too.
+%
+%   pscat --page 1440x900 --png chalkboard_lecture.png gallery/chalkboard_lecture.ps
+%   gs -dSAFER --permit-file-read=lib/ -sDEVICE=png16m -r72 -g1440x900 \
+%      -o chalkboard_lecture.png gallery/chalkboard_lecture.ps
+
+(lib/artkit.ps) run
+(lib/paintkit.ps) run
+(lib/drykit.ps) run
+(lib/handscript.ps) run
+(lib/strokeglyphs.ps) run
+(lib/drychalk.ps) run
+(lib/mathkit.ps) run
+
+% The piece's own names live in one private dict, so they don't fill
+% userdict (a fuller userdict slows every lookup in gs, notes/235).
+/lectdict 200 dict def
+lectdict begin
+
+% ------------------------------------------------------------ helpers
+
+% (text) x y size seed -   words in the board hand, appended to the path
+/lcwords {
+    /wsd exch def /wsz exch def
+    << /Size wsz /Seed wsd /Jitter 0.022 /Slant lcslant >> sgpath
+} def
+
+% (tex) x y size seed irregular -   a formula, appended to the path
+/lctex {
+    /tir exch def /tsd exch def /tsz exch def
+    << /Size tsz /Seed tsd /Irregular tir /Slant lcslant >> mkpath
+} def
+
+% width touch -   ink the current path as chalk
+/lcink {
+    /ito exch def /iwd exch def
+    << /Width iwd /Touch ito >> dcchalk
+} def
+
+% cx cy rx ry seed -   a freehand ellipse: out of round, and the end
+% overshoots the start where the hand closes it
+/lcloop {
+    /lsd exch def /lry exch def /lrx exch def /lcy exch def /lcx exch def
+    /lph lsd 37 mul def
+    /lst lsd 53 mul 360 mod def
+    0 1 64 {
+        /lk exch def
+        /ltt lk 64 div 380 mul lst add def
+        /lw 1 ltt 2 mul lph add sin 0.035 mul add lk 64 div 0.03 mul add def
+        lcx ltt cos lrx mul lw mul add
+        lcy ltt sin lry mul lw mul add
+        lk 0 eq { moveto } { lineto } ifelse
+    } for
+} def
+
+% x0 y0 x1 y1 n -   a dashed line drawn as n separate dashes
+/lcdashes {
+    /dn exch def /dy1 exch def /dx1 exch def /dy0 exch def /dx0 exch def
+    0 1 dn 1 sub {
+        /dk exch def
+        dx0 dx1 dx0 sub dk dn div mul add dy0 dy1 dy0 sub dk dn div mul add moveto
+        dx0 dx1 dx0 sub dk 0.55 add dn div mul add dy0 dy1 dy0 sub dk 0.55 add dn div mul add lineto
+    } for
+} def
+
+% ------------------------------------------------------------- layout
+
+% The board's three panels abut; aluminium seams are drawn over the joints.
+/lcslant 0 def   % the hand's forward lean, set per panel: it grows as the lecture hurries
+/lcBY 112 def /lcBH 752 def
+/lcP1 36 def /lcP2 492 def /lcP3 948 def /lcPW 456 def
+
+/lcboardopts {   % seed haze swipes wipes ghost -> dict
+    /bgh exch def /bwi exch def /bsw exch def /bhz exch def /bsd exch def
+    << /Surface /slate /Seed bsd /Haze bhz /Swipes bsw /Wipes bwi /Smudges 3
+       /Ledge 22 /Tray 26 /Erased 0.5 /Ghost /bgh load >>
+} def
+
+% --------------------------------------------------------------- frame
+
+0.30 0.29 0.27 setrgbcolor clippath fill
+% the wall, a little lighter towards the top
+0 1 19 {
+    /lck exch def
+    0.30 lck 0.004 mul add dup dup 0.98 mul setrgbcolor
+    0 lck 45 mul 1440 46 rectfill
+} for
+% wooden frame
+0.36 0.24 0.14 setrgbcolor 18 70 1404 812 rectfill
+0.43 0.30 0.18 setrgbcolor 22 lcBY lcBH add 2 add 1396 14 rectfill
+0.28 0.18 0.10 setrgbcolor 18 70 1404 6 rectfill
+
+% ================================================================ left
+
+lcP1 lcBY lcPW lcBH 101 0.42 7 2 {
+    (I = \\int_{-\\infty}^{\\infty} e^{-x^2}\\,dx) lcP1 40 add 760 44 9001 1.2 lctex
+    (I^2 = \\int\\!\\!\\int e^{-(x^2+y^2)}\\,dx\\,dy) lcP1 60 add 640 40 9002 1.2 lctex
+    (polar coords) lcP1 250 add 560 30 9003 lcwords
+} lcboardopts dcboard
+/lcslant 2 def
+
+/white dcchalkcolor
+% the date, small, top left; the title, underlined twice
+newpath (Oct 14) lcP1 18 add 828 20 11 lcwords 1.1 0.66 lcink
+newpath (Lecture 14: Euler's formula) lcP1 20 add 784 34 12 lcwords 1.7 0.78 lcink
+newpath lcP1 20 add 772 moveto lcP1 392 add 776 lineto
+        lcP1 34 add 764 moveto lcP1 300 add 766 lineto 1.6 0.7 lcink
+
+newpath (Recall: Taylor series) lcP1 20 add 712 28 13 lcwords 1.5 0.74 lcink
+
+/lsz 34 def
+newpath
+[ (e^x &= \\sum_{n=0}^{\\infty} \\frac{x^n}{n!})
+  (&= 1 + x + \\frac{x^2}{2!} + \\frac{x^3}{3!} + \\cdots)
+  (\\cos x &= 1 - \\frac{x^2}{2!} + \\frac{x^4}{4!} - \\cdots)
+  (\\sin x &= x - \\frac{x^3}{3!} + \\frac{x^5}{5!} - \\cdots) ]
+  lcP1 104 add 644 << /Size lsz /Seed 210 /Leading 2.2 /Irregular 1.3 /Slant lcslant
+     /Ink { pop 1.6 0.76 lcink } >> mkalign
+/lrecs exch def
+% "even" and "odd" written beside cos and sin
+/blue dcchalkcolor
+newpath (even) lcP1 14 add lrecs 2 get /Origin get 1 get 30 add 20 14 lcwords
+        (odd) lcP1 14 add lrecs 3 get /Origin get 1 get 30 add 20 15 lcwords 1.2 0.66 lcink
+
+% powers of i, a small table under a rule
+/white dcchalkcolor
+newpath (powers of i:) lcP1 20 add 232 26 16 lcwords 1.4 0.72 lcink
+newpath
+(i^2 = -1) lcP1 40 add 186 lsz 220 1.3 lctex
+(i^3 = -i) lcP1 236 add 188 lsz 221 1.3 lctex
+(i^4 = 1) lcP1 40 add 140 lsz 222 1.3 lctex
+(\\ldots \\text{repeats}) lcP1 230 add 142 26 223 1.3 lctex
+1.55 0.74 lcink
+
+% =============================================================== middle
+
+lcP2 lcBY lcPW lcBH 202 0.5 9 2 {
+    (= \\sqrt{\\pi}) lcP2 260 add 610 44 9010 1.2 lctex
+    newpath lcP2 40 add 340 moveto lcP2 120 add 344 lcP2 150 add 470 lcP2 200 add 476 curveto
+        lcP2 250 add 470 lcP2 280 add 344 lcP2 360 add 340 curveto
+    lcP2 30 add 320 moveto lcP2 380 add 322 lineto
+} lcboardopts dcboard
+/lcslant 4 def
+
+/white dcchalkcolor
+newpath (Put x = iθ:) lcP2 20 add 806 30 31 lcwords 1.5 0.72 lcink
+
+/msz 33 def
+newpath
+[ (e^{i\\theta} &= 1 + i\\theta + \\frac{(i\\theta)^2}{2!} + \\frac{(i\\theta)^3}{3!} + \\cdots)
+  (&= 1 + i\\theta - \\frac{\\theta^2}{2!} - i\\frac{\\theta^3}{3!} + \\cdots) ]
+  lcP2 64 add 738 << /Size msz /Seed 310 /Leading 2.3 /Irregular 1.6 /Slant lcslant
+     /Ink { pop 1.5 0.7 lcink } >> mkalign
+/mrecs exch def
+
+% the reminder that i squared is -1, in pink, with an arrow up to the sign
+/pink dcchalkcolor
+newpath (i^2 = -1\\;!) lcP2 44 add 568 24 32 1.6 lctex 1.3 0.68 lcink
+newpath lcP2 150 add 584 lcP2 186 add 632 << /Size 24 /Bend -25 /Seed 33 >> mkarrow 1.3 0.66 lcink
+
+/white dcchalkcolor
+newpath (regroup:) lcP2 20 add 520 26 34 lcwords 1.4 0.7 lcink
+newpath
+[ (&= \\left(1 - \\frac{\\theta^2}{2!} + \\frac{\\theta^4}{4!} - \\cdots\\right))
+  (&\\quad + i\\left(\\theta - \\frac{\\theta^3}{3!} + \\cdots\\right)) ]
+  lcP2 74 add 462 << /Size msz /Seed 320 /Leading 2.4 /Irregular 1.7 /Slant lcslant
+     /Ink { pop 1.5 0.68 lcink } >> mkalign
+/grecs exch def
+
+% the two brackets named, in blue chalk, under each one
+/blue dcchalkcolor
+newpath lcP2 100 add grecs 0 get /BBox get 1 get 4 sub grecs 0 get /BBox get 2 get 6 add grecs 0 get /BBox get 1 get 1 add << /Size msz /Seed 41 >> mkunderline
+        (cos θ) grecs 0 get /BBox get 2 get 10 add grecs 0 get /Origin get 1 get 24 42 lcwords 1.3 0.68 lcink
+newpath lcP2 128 add grecs 1 get /BBox get 1 get 4 sub grecs 1 get /BBox get 2 get 6 add grecs 1 get /BBox get 1 get 2 sub << /Size msz /Seed 43 >> mkunderline
+        (sin θ) grecs 1 get /BBox get 2 get 10 add grecs 1 get /Origin get 1 get 24 44 lcwords 1.3 0.68 lcink
+
+% the result, boxed in yellow and pressed hard
+/yellow dcchalkcolor
+% therefore: three pressed dots
+newpath lcP2 16 add 230 moveto 0.6 0.3 rlineto lcP2 38 add 230 moveto 0.6 0.3 rlineto
+        lcP2 27 add 250 moveto 0.6 0.3 rlineto 2.8 0.85 lcink
+newpath (e^{i\\theta} = \\cos\\theta + i\\sin\\theta) lcP2 80 add 224 38 51 1.2 lctex
+1.9 0.86 lcink
+/rbox (e^{i\\theta} = \\cos\\theta + i\\sin\\theta) << /Size 38 /Seed 51 /Irregular 1.2 /Slant lcslant >> mkmetrics def
+/rllx lcP2 80 add def /rlly 224 rbox /Depth get sub def
+/rurx rllx rbox /Width get add def /rury 224 rbox /Height get add def
+newpath rllx rlly rurx rury << /Size 38 /Seed 52 /Pad 14 >> mkframe 1.8 0.84 lcink
+newpath rllx rlly rurx rury << /Size 38 /Seed 53 /Pad 22 /Irregular 1.6 >> mkframe 1.5 0.7 lcink
+
+/white dcchalkcolor
+newpath (Euler, 1748) lcP2 250 add 136 22 54 lcwords 1.2 0.64 lcink
+
+% ================================================================ right
+
+lcP3 lcBY lcPW lcBH 303 0.46 8 1 {
+    lcP3 50 add 470 moveto lcP3 410 add 470 lineto
+    lcP3 60 add 480 moveto lcP3 140 add 486 lcP3 180 add 700 lcP3 230 add 702 curveto
+        lcP3 280 add 700 lcP3 320 add 486 lcP3 400 add 480 curveto
+    (e^{-x^2}) lcP3 300 add 650 36 9020 1.2 lctex
+} lcboardopts dcboard
+/lcslant 6 def
+
+/white dcchalkcolor
+/lccx lcP3 190 add def /lccy 590 def /lcR 130 def
+% the axes, each a stroke with an arrowhead
+newpath lccx lcR 50 add sub lccy 2 sub lccx lcR 60 add add lccy 3 add << /Size 26 /Seed 61 >> mkarrow 1.4 0.68 lcink
+newpath lccx 1 add lccy lcR 45 add sub lccx 3 sub lccy lcR 62 add add << /Size 26 /Seed 62 >> mkarrow 1.4 0.68 lcink
+newpath (Re) lccx lcR 64 add add lccy 18 sub 22 63 lcwords (Im) lccx 12 add lccy lcR 56 add add 22 64 lcwords 1.2 0.64 lcink
+% the unit circle, freehand
+newpath lccx lccy lcR lcR 1.02 mul 66 lcloop 1.5 0.7 lcink
+% the radius to e^{i theta}, and its point
+/lcth 38 def
+/lcex lccx lcth cos lcR mul add def /lcey lccy lcth sin lcR mul add def
+newpath lccx lccy moveto lcex lcey lineto 1.5 0.72 lcink
+newpath lcex lcey moveto 0.5 0.3 rlineto 3 0.85 lcink
+% the projections, dashed
+newpath lcex lcey lcex lccy 2 add 6 lcdashes lcex lcey lccx 2 add lcey 7 lcdashes 1.2 0.6 lcink
+% the angle, a small arc
+newpath 4 1 lcth 4 sub { /lca exch def lccx lca cos 34 mul add lccy lca sin 34 mul add lca 4 eq { moveto } { lineto } ifelse } for
+1.3 0.66 lcink
+newpath (θ) lccx 40 add lccy 8 add 20 66 lcwords 1.2 0.66 lcink
+newpath (e^{i\\theta}) lcex 8 add lcey 10 add 26 67 1.9 lctex 1.4 0.66 lcink
+newpath (1) lccx lcR 2 div add 10 sub lccy lcth 2 div sin lcR mul 0.5 mul add 18 add 20 68 lcwords 1.1 0.6 lcink
+/blue dcchalkcolor
+newpath (cos θ) lccx 26 add lccy 26 sub 18 69 lcwords (sin θ) lcex 8 add lccy 50 add 18 70 lcwords 1.1 0.6 lcink
+
+% theta = pi, and the identity circled
+/white dcchalkcolor
+newpath (θ = π:) lcP3 22 add 352 32 71 lcwords 1.4 0.62 lcink
+newpath (e^{i\\pi} = -1) lcP3 150 add 352 34 72 1.9 lctex 1.4 0.62 lcink
+newpath (\\Rightarrow) lcP3 40 add 278 30 73 1.9 lctex 1.5 0.7 lcink
+/yellow dcchalkcolor
+newpath (e^{i\\pi} + 1 = 0) lcP3 100 add 274 38 74 1.6 lctex 1.8 0.82 lcink
+/eid (e^{i\\pi} + 1 = 0) << /Size 38 /Seed 74 /Irregular 1.6 /Slant lcslant >> mkmetrics def
+newpath lcP3 100 add eid /Width get 2 div add 286 eid /Width get 0.62 mul 42 75 lcloop 1.6 0.76 lcink
+/pink dcchalkcolor
+newpath (!!) lcP3 322 add 300 30 76 lcwords 1.5 0.74 lcink
+newpath (five constants, one line) lcP3 30 add 214 22 77 lcwords 1.2 0.6 lcink
+
+% homework, bottom right, boxed lightly
+/white dcchalkcolor
+newpath (HW: 3.2, 3.5, 3.9) lcP3 250 add 160 22 78 lcwords (due Fri) lcP3 290 add 134 22 79 lcwords 1.2 0.58 lcink
+newpath lcP3 240 add 122 lcP3 436 add 182 << /Size 22 /Seed 80 /Pad 4 >> mkframe 1.1 0.54 lcink
+
+% ---------------------------------------------------------- seams, tray
+
+% aluminium strips over the joints between panels
+[ lcP2 lcP3 ] {
+    /sx exch def
+    0.55 0.55 0.53 setrgbcolor sx 4 sub lcBY 8 lcBH rectfill
+    0.70 0.70 0.68 setrgbcolor sx 3 sub lcBY 2 lcBH rectfill
+    0.40 0.40 0.39 setrgbcolor sx 3 add lcBY 1 lcBH rectfill
+} forall
+
+% two felt erasers and a few chalk stubs in the tray
+/lceraser {   % x tilt -
+    /et exch def /exx exch def
+    gsave exx lcBY 13 sub translate et rotate
+        0.50 0.36 0.22 setrgbcolor -40 6 80 13 rectfill   % the wooden back
+        0.60 0.45 0.30 setrgbcolor -40 16 80 3 rectfill
+        0.36 0.36 0.35 setrgbcolor -40 0 80 6 rectfill    % the felt, grey with dust
+        0.66 0.66 0.63 setrgbcolor -40 0 80 2 rectfill
+    grestore
+} def
+300 1.2 lceraser 1120 -0.8 lceraser
+/lcstub {   % x len r g b -
+    setrgbcolor /sl exch def /sxx exch def
+    newpath sxx lcBY 8 sub moveto sl 0 rlineto 5 setlinewidth 1 setlinecap stroke
+} def
+480 26 0.92 0.92 0.88 lcstub 520 14 0.92 0.88 0.62 lcstub 860 18 0.90 0.90 0.86 lcstub
+1250 30 0.90 0.72 0.76 lcstub
+
+end
+showpage
