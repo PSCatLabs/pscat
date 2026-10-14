@@ -1,0 +1,107 @@
+%!PS-Adobe-3.0
+%%Title: mathkit specimen -- the fixed test set of TeX formulas as stroke skeletons (issue #237)
+%%BoundingBox: 0 0 1000 1960
+%%EndComments
+
+% Specimen for lib/mathkit.ps: TeX-subset math laid out as strokeglyphs
+% skeletons with board-writing irregularity. Top to bottom:
+%
+%   the test set   twelve well-known formulas, each with mkpath (or
+%                  mkalign for Maxwell's equations), stroked with a plain
+%                  pen; the default /Irregular 1
+%   irregular      one formula at /Irregular 0 (clean TeX), 1 and 2
+%   board          a derivation with mkalign on a drychalk board, inked
+%                  line by line through /Ink, the result \\boxed, an
+%                  underline, an arrow and a side note in pink
+%
+%   pscat --page 1000x1960 --png mathkit_specimen.png examples/mathkit_specimen.ps
+%
+% In a PostScript string every TeX backslash is written twice.
+
+(lib/artkit.ps) run
+(lib/paintkit.ps) run
+(lib/drykit.ps) run
+(lib/handscript.ps) run
+(lib/strokeglyphs.ps) run
+(lib/drychalk.ps) run
+(lib/mathkit.ps) run
+
+0.985 0.98 0.965 setrgbcolor clippath fill
+
+% sp- prefix: specimen-local.
+/spfont { /Helvetica findfont exch scalefont setfont } def
+/splabel { 0.42 0.42 0.40 setrgbcolor 11 spfont moveto show } def
+/spheading { 0.30 0.30 0.28 setrgbcolor 12 spfont moveto show } def
+/sppen {
+  0.10 0.12 0.30 setrgbcolor 1.5 setlinewidth 1 setlinecap 1 setlinejoin stroke
+} def
+/spsize 32 def
+
+% (label) (tex) y seed -   one formula of the test set
+/spformula {
+  /spseed exch def /spy exch def /sptex exch def
+  40 spy 3 add splabel
+  newpath sptex 230 spy << /Size spsize /Seed spseed >> mkpath sppen
+} def
+
+0.20 0.20 0.18 setrgbcolor 24 spfont
+40 1910 moveto (mathkit.ps: TeX-subset math as stroke skeletons) show
+0.42 0.42 0.40 setrgbcolor 12 spfont
+40 1890 moveto (The fixed test set of issue #237, laid out with TeX's box model and written with board-hand irregularity; strokeglyphs skeletons, a plain pen.) show
+
+(THE TEST SET, /Irregular 1 \(the default\)) 40 1850 spheading
+
+(Quadratic formula) (x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}) 1795 1 spformula
+(Euler's identity) (e^{i\\pi} + 1 = 0) 1720 2 spformula
+(Gaussian integral) (\\int_{-\\infty}^{\\infty} e^{-x^2}\\,dx = \\sqrt{\\pi}) 1645 3 spformula
+
+(Maxwell's equations) 40 1540 splabel
+newpath
+[ (\\nabla \\cdot \\vec{E} &= \\frac{\\rho}{\\varepsilon_0})
+  (\\nabla \\cdot \\vec{B} &= 0)
+  (\\nabla \\times \\vec{E} &= -\\frac{\\partial \\vec{B}}{\\partial t})
+  (\\nabla \\times \\vec{B} &= \\mu_0 \\vec{J} + \\mu_0 \\varepsilon_0 \\frac{\\partial \\vec{E}}{\\partial t}) ]
+  330 1540 << /Size spsize /Seed 4 /Leading 1.75 >> mkalign pop sppen
+
+(Taylor series) (f(x) = \\sum_{n=0}^{\\infty} \\frac{f^{(n)}(a)}{n!}\\,(x-a)^n) 1200 5 spformula
+(Inverse of a 2 by 2 matrix)
+  (\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}^{-1} = \\frac{1}{ad - bc} \\begin{pmatrix} d & -b \\\\ -c & a \\end{pmatrix})
+  1085 6 spformula
+(Derivative as a limit) (f'(x) = \\lim_{h \\to 0} \\frac{f(x+h) - f(x)}{h}) 980 7 spformula
+(Wallis product) (\\frac{\\pi}{2} = \\prod_{n=1}^{\\infty} \\frac{4n^2}{4n^2 - 1}) 875 8 spformula
+(Cauchy-Schwarz)
+  (\\left( \\sum_{i=1}^n a_i b_i \\right)^2 \\le \\left( \\sum_{i=1}^n a_i^2 \\right) \\left( \\sum_{i=1}^n b_i^2 \\right))
+  755 9 spformula
+(Fourier transform) (\\hat{f}(\\xi) = \\int_{-\\infty}^{\\infty} f(x)\\, e^{-2\\pi i x \\xi}\\,dx) 640 10 spformula
+(Roots and cases) (\\sqrt[3]{x^3} = x \\qquad |x| = \\begin{cases} x & x \\ge 0 \\\\ -x & x < 0 \\end{cases}) 540 11 spformula
+(Stirling, and e) (n! \\approx \\sqrt{2\\pi n} \\left( \\frac{n}{e} \\right)^n \\qquad e = \\lim_{n \\to \\infty} \\left( 1 + \\frac{1}{n} \\right)^n) 440 12 spformula
+
+(IRREGULAR 0, 1 AND 2: CLEAN TeX, A STEADY LECTURER, A HURRIED ONE) 40 372 spheading
+/spirr (\\sin^2\\theta + \\cos^2\\theta = 1) def
+0 1 2 {
+  /spi exch def
+  (/Irregular ) 40 310 spi 60 mul sub splabel
+  spi 3 string cvs 103 310 spi 60 mul sub moveto show
+  newpath spirr 200 310 spi 60 mul sub << /Size 30 /Seed 21 /Irregular spi >> mkpath sppen
+} for
+
+% ------------------------------------------------------------- board
+
+(ON A BOARD: mkalign inked through /Ink with dcchalk) 560 345 spheading
+/spboard [ 560 18 400 300 ] def
+0.42 0.29 0.17 setrgbcolor 552 10 416 316 rectfill
+spboard aload pop << /Surface /greenboard /Seed 8 /Haze 0.3 /Swipes 3 /Wipes 1 /Ledge 10 >> dcboard
+/white dcchalkcolor
+newpath
+[ (I^2 &= \\int_0^{2\\pi}\\!\\int_0^{\\infty} e^{-r^2}\\, r\\,dr\\,d\\theta)
+  (&= 2\\pi \\cdot \\frac{1}{2})
+  (I &= \\boxed{\\sqrt{\\pi}}) ]
+  640 262 << /Size 26 /Seed 31 /Leading 2.1
+     /Ink { pop << /Width 1.6 >> dcchalk } >> mkalign
+/sprecs exch def
+/pink dcchalkcolor
+newpath sprecs 0 get << /Size 26 /Seed 5 >> mkunderline << /Width 1.4 >> dcchalk
+newpath 860 120 800 166 << /Size 26 /Bend -35 /Seed 6 >> mkarrow << /Width 1.4 >> dcchalk
+newpath (polar!) 820 92 << /Size 22 /Seed 7 >> sgpath << /Width 1.4 >> dcchalk
+
+showpage

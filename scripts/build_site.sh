@@ -56,6 +56,7 @@ render examples/golden_spiral.ps 500x500
 render examples/testcard.ps 612x792
 render examples/specimen.ps 612x792
 render examples/strokeglyphs.ps 900x1600
+render examples/mathkit_specimen.ps 1000x1960
 render examples/postcard.ps 612x792
 render examples/type3_ransom.ps 612x792
 render examples/handwriting.ps 612x792
