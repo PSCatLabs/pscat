@@ -207,7 +207,7 @@ userdict /dystate 2 put
 % The colours of a standard 16-crayon box, in box order, as sRGB. They are
 % a wax crayon's colours on white paper rather than paint primaries: a
 % little muted, the yellow warm, the white faintly grey.
-% @kind: Constant
+% @kind: Dial
 % @summary: The crayon box: a dict of 16 named crayon colours (rgb arrays), the colours of a standard 16-crayon box as they read on white paper. Iterate them in box order with dycolors; set one with dycolor.
 % @example: dybox /bluegreen get aload pop setrgbcolor
 /dybox <<
@@ -229,7 +229,7 @@ userdict /dystate 2 put
     /white        [0.96 0.96 0.94]
 >> def
 
-% @kind: Constant
+% @kind: Dial
 % @summary: The names of the crayon box's 16 colours, in box order (dybox has no order of its own): red, red-orange, orange, yellow-orange, yellow, yellow-green, green, blue-green, blue, blue-violet, violet, red-violet, carnation pink, brown, black, white.
 % @example: dycolors { dycolor ... } forall
 /dycolors [
@@ -488,15 +488,15 @@ userdict /dystate 2 put
 % offset core -> touch-or-procedure   (the subpath's touch for dkstroke)
 % A plain number when nothing varies along the stroke, so dkstroke draws
 % one band; otherwise a procedure closing over this subpath's profile.
-% The landing and the build-up press the core only: pushing harder drives
-% the middle of the tip into the valleys while its rounded edge still
-% skims the tooth, so a pressed spot is dense inside a ragged edge rather
-% than a solid disc.
+% The landing presses the core only, and the build-up the core fully and
+% the rim by half: pushing harder drives the middle of the tip into the
+% valleys while its rounded edge still skims the tooth, so a pressed spot
+% is dense inside a ragged edge rather than a solid disc.
 % @internal
 /dyKtouch {
     /dyKcore exch def /dyKoff exch def
     /dyKl dyKcore { dyKland } { 0 } ifelse def
-    /dyKb dyKcore { dyKbuild } { 0 } ifelse def
+    /dyKb dyKcore { dyKbuild } { dyKbuild 0.5 mul } ifelse def
     dyKtp not dyKl 0 eq and dyKfade 0 eq and dyKuneven 0 eq and dyKb 0 eq and {
         dyKt dyKbonus add dyKoff add 0 1 dyclamp
     } {
@@ -1192,13 +1192,17 @@ userdict /dystate 2 put
         } forall
     } ifelse
     % hair: short strokes over the top of the head, from the outline out
+    % (two draws for its slot and length, then dyWseg's six)
     1 1 dyFhair {
         /dyFi exch def
-        /dyFa 90 55 sub 110 dyFi 0.5 sub dyFhair div mul add def
-        /dyFl dyFh 0.07 mul dyFhr 0.25 mul add def
-        dyFx dyFa cos dyFhr 0.95 mul mul add dyFcy dyFa sin dyFhr 0.95 mul mul add
-        dyFx dyFa cos dyFhr dyFl add mul add dyFcy dyFa sin dyFhr dyFl add mul add
-        dyFwob 0.5 mul dyFlam dyFwob 0.1 mul dyFov 0.3 mul dyWseg
+        /dyFfa frnd def /dyFfl frnd def
+        /dyFa 90 55 sub 110 dyFi 0.5 sub dyFhair div mul add
+              dyFfa 2 mul 1 sub 40 dyFhair div mul add def
+        /dyFl dyFhr 0.32 mul 0.6 dyFfl 0.8 mul add mul def
+        /dyFr0 dyFhr 1.02 mul def
+        dyFx dyFa cos dyFr0 mul add dyFcy dyFa sin dyFr0 mul add
+        dyFx dyFa cos dyFr0 dyFl add mul add dyFcy dyFa sin dyFr0 dyFl add mul add
+        dyFwob 0.3 mul dyFlam dyFwob 0.1 mul dyFov 0.2 mul dyWseg
     } for
 } def
 
