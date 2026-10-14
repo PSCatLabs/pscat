@@ -14,20 +14,34 @@ handscript's glyphs first and then `sgsrc`, so the entry replaces the copy.
 the old 4 (the existing "hs-write renders identically with strokeglyphs
 loaded" test still holds).
 
-    /four [430 [280 700 50 230 50 230 390 230] [280 700 280 10]]
+    /four [430 [120 700 55 235 55 235 395 235] [295 700 295 10]]
 
-A closed 4. Stroke one is the diagonal and the crossbar, with the corner at
-`(50 230)` written twice so it is sharp (see "Doubled points make corners" in
-notes/236). Stroke two is the stem, from the diagonal's top `(280 700)` down
-to the baseline. The crossbar runs on to `x = 390`, past the stem. The
-advance stays 430, so no line's layout moves: every pixel that differs in the
-renders is inside a 4 (checked against all the changed regions).
+An open 4, as a hand writes it. Stroke one is the left stroke and the
+crossbar: it comes down from the top, a little slanted, into a corner at
+`(55 235)` written twice so it is sharp (see "Doubled points make corners" in
+notes/236), then runs right to `x = 395`. Stroke two is a straight stem, full
+height, from `(295 700)` to the baseline, crossing the crossbar; the crossbar
+runs 100 units past it. The two strokes do not meet at the top. The advance
+stays 430, so no line's layout moves: every pixel that differs in the renders
+is inside a 4 (checked against all the changed regions).
+
+**Review round.** The first version was a closed (triangle) 4, the diagonal
+and the stem meeting at the top. The maintainer preferred an open 4 that is
+more readable as a four. I rendered nine variants side by side at board size
+(chalkboard 4!, theta^4, "Oct 14", the digits row, at /Jitter 0 and with the
+default jitter), varying how vertical the left stroke is (top x from 70 to
+150, corner x from 40 to 70), the crossbar height (235 to 250) and the stem
+x (285 to 300). All the open forms read as a 4 and none as a bolt; the one
+kept has a slight slant (a vertical left stroke makes "4" look like "H" with a
+missing leg, a strong slant looks like the old hook), a clear corner, and a
+crossbar that visibly crosses a full-height stem.
 
 The superscript and subscript 4s are derived from the base glyph in `sginit`
 (notes/339), so `x⁴`, `₄` and mathkit's `^4` / `_4` follow for free.
 
-A `%%SelfTest: digit-four-is-a-closed-four` pins the advance, the bbox and
-the crossbar-past-the-stem property.
+A `%%SelfTest: digit-four-is-an-open-four` pins the advance, the bbox, the
+crossbar-past-the-stem property, and the open top (the first stroke starts at
+`(120, 700)`, left of the stem).
 
 ## Evidence
 
@@ -62,10 +76,9 @@ chalkboard has no committed gs render.
 `docs/drymedia/four_compare_351.png` is the before/after panel: every 4 that
 changed, left is before, right is after.
 
-Timings with the release binary, two renders in parallel: chalkboard 9 s at
-144 dpi (the same before and after), mathkit specimen 1 s, the two strokeglyphs
-specimens under 1 s. Wall time is the same before and after (the base and head
-renders ran in parallel).
+Timing guard, pscat only: chalkboard about 7 to 9 s at 144 dpi before and
+after, mathkit specimen about 1 s, the strokeglyphs specimens under 1 s. The
+local machine is noisy, so these are not budgets.
 
 ## Not done
 
