@@ -8923,17 +8923,14 @@ fn pull_scatter_follows_the_normal_of_a_curved_spine() {
 }
 
 #[test]
-fn pull_scatter_leaves_the_unset_stream_alone() {
-    // Naming /Scatter costs one draw per stroke; leaving it out costs none,
-    // so the same options without it must not change.
+fn pull_scatter_set_even_to_zero_draws_one_more_value_per_stroke() {
+    // Naming /Scatter costs one draw per stroke; leaving it out costs none
+    // (the render-identity check covers the unset stream against main).
     let plain = |opts: &str| strokes(&motion_segs(&format!("5 srand {SPINE} {opts} pkpull")));
-    assert_eq!(
-        plain("<< /Spacing 10 >>"),
-        plain("<< /Spacing 10 /Wander 0.5 >>")
-    );
     let set = plain("<< /Spacing 10 /Scatter 0 >>");
     let unset = plain("<< /Spacing 10 >>");
     assert_ne!(set, unset, "a set /Scatter draws one more value per stroke");
+    assert_eq!(set, plain("<< /Spacing 10 /Scatter 0 >>"), "deterministic");
 }
 
 #[test]
