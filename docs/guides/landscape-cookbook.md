@@ -285,7 +285,7 @@ grestore
 
 **Failures.**
 - *Ruled stripes.* Alpine Lake's first mist was a stack of horizontal `pkbroad` strokes whose charge fell as they rose; at 2x it read as ruled stripes. Use the directional lift.
-- *A pale rim round the foot.* `/Under` should be the colour that is really behind the foot, not the mist. Where the range is half faded already, mix it. Where the sky changes down a tall foot, a procedural `/Under` with `/Box` and `/Bands` asks for the backdrop band by band (recipe 2).
+- *A pale rim round the foot.* `/Under` should be the colour that is really behind the foot, not the mist. Where the range is half faded already, mix it. Where the sky changes down a tall foot, a procedural `/Under` with `/Box` and `/Bands` asks for the backdrop band by band (recipe 2); pin `/Layers` low, since a foot's 14 layers leave room for only 4 cells.
 - *Static.* Speck too coarse, or `/Density` too low; raise it.
 - *A lifted foot that stops a reflection.* A directional `pkwet` nested inside another multiplies their passes, and the innermost procedure may run at most 64 times; pull the reflection of a part that already has a lifted foot sharp instead of pulling it again (Alpine Lake's `35 lksharp`, recipe 9).
 

@@ -7887,6 +7887,131 @@ fn wet_bands_over_a_constant_backdrop_match_the_literal() {
     assert!(worst > Some(30), "the control should differ: {worst:?}");
 }
 
+/// The same two-ribbon scene as the constant-backdrop test, under `pre`
+/// (a transform) and optionally `--sweep-seed`'s override: its pixels, and
+/// the next `rand`.
+fn bands_scene(pre: &str, opts: &str, ov: Option<i64>) -> (Vec<u8>, String) {
+    let mut it = fresh(300, 200);
+    it.set_seed_override(ov);
+    it.run_str(&format!(
+        "0.9 0.9 0.9 setrgbcolor clippath fill {pre} 0.2 0.2 0.2 setrgbcolor 7 srand \
+         {{ newpath 150 20 moveto 150 180 lineto << /Width 26 >> pkribbon \
+            newpath 100 60 moveto 220 140 lineto << /Width 12 /Roughness 0.6 >> pkribbon }} \
+         << /Soft 1 /Offset 20 /Layers 4 {opts} >> pkwet rand"
+    ))
+    .unwrap_or_else(|e| panic!("{pre} {opts}: {}", it.error_report(&e)));
+    let next = it.operand_stack().last().expect("rand").repr().to_string();
+    (pixels(&it), next)
+}
+
+fn worst_step(a: &[u8], b: &[u8]) -> u8 {
+    a.iter()
+        .zip(b)
+        .map(|(a, b)| a.abs_diff(*b))
+        .max()
+        .unwrap_or(0)
+}
+
+/// `--sweep-seed` intercepts every `srand`, and the banded call's replay is
+/// an `srand` of an `rrand` value: that has to come back exactly (#202), or
+/// the cells would draw different marks and the pieces would not fit.
+#[test]
+fn wet_bands_fit_together_under_a_sweep_seed() {
+    let lit = bands_scene("", "/Under [ 0.5 0.6 0.7 ]", Some(99));
+    let banded = bands_scene(
+        "",
+        "/Box [ 101.3 20.7 119 160 ] /Bands [ 3 3 ] /Under { pop pop 0.5 0.6 0.7 }",
+        Some(99),
+    );
+    assert_eq!(banded.1, lit.1, "the stream moved under the override");
+    let w = worst_step(&banded.0, &lit.0);
+    assert!(w <= 3, "the cells do not fit under the override: {w}");
+    // Not the unforced scene: the override really was in force.
+    let plain = bands_scene("", "/Under [ 0.5 0.6 0.7 ]", None);
+    assert!(
+        worst_step(&plain.0, &lit.0) > 30,
+        "the override changed nothing"
+    );
+}
+
+/// A quarter-turned page: the pixel snap rounds both device coordinates, so
+/// the grid keeps its shape (a constant backdrop matches the literal; a
+/// varying one at 4 rows is not the one at 2).
+#[test]
+fn wet_bands_keep_their_grid_on_a_quarter_turned_page() {
+    for pre in ["300 0 translate 90 rotate", "0 200 translate -90 rotate"] {
+        // The scene is drawn in the turned space, so aim it inside the page.
+        let (lit, ln) = bands_scene(pre, "/Under [ 0.5 0.6 0.7 ]", None);
+        let (b, bn) = bands_scene(
+            pre,
+            "/Box [ 130 20 40 160 ] /Bands [ 2 4 ] /Under { pop pop 0.5 0.6 0.7 }",
+            None,
+        );
+        assert_eq!(bn, ln, "{pre}: the stream moved");
+        assert!(worst_step(&lit, &b) <= 3, "{pre}: a seam or a moved mark");
+        let sky = "/Under { exch pop 200 div 0 0 3 -1 roll }";
+        let (r2, _) = bands_scene(
+            pre,
+            &format!("/Box [ 130 20 40 160 ] /Bands [ 1 2 ] {sky}"),
+            None,
+        );
+        let (r4, _) = bands_scene(
+            pre,
+            &format!("/Box [ 130 20 40 160 ] /Bands [ 1 4 ] {sky}"),
+            None,
+        );
+        assert!(worst_step(&r2, &r4) > 10, "{pre}: 4 rows are 2 rows");
+    }
+}
+
+/// The snap itself, on a quarter turn and flipped: distinct user
+/// coordinates stay distinct (a one-coordinate snap collapses every inner
+/// edge of the grid to one value) and each moves by under a pixel.
+#[test]
+fn wet_band_edges_snap_to_device_pixels_on_every_axis_aligned_ctm() {
+    for pre in [
+        "",
+        "1 -1 scale 0 -200 translate",
+        "300 0 translate 90 rotate",
+        "0 200 translate -90 rotate",
+        "2 2 scale",
+    ] {
+        let mut it = fresh(300, 200);
+        it.run_str(&format!(
+            "gsave {pre} 10.3 pqsx 20.3 pqsx 40.7 pqsx 10.3 pqsy 20.3 pqsy 40.7 pqsy grestore"
+        ))
+        .unwrap_or_else(|e| panic!("{pre}: {}", it.error_report(&e)));
+        let v: Vec<f64> = it
+            .operand_stack()
+            .iter()
+            .map(|o| o.repr().to_string().parse().expect("number"))
+            .collect();
+        let scale = if pre == "2 2 scale" { 2.0 } else { 1.0 };
+        for (got, want) in v.iter().zip([10.3, 20.3, 40.7, 10.3, 20.3, 40.7]) {
+            assert!((got - want).abs() <= 1.0 / scale, "{pre}: {v:?}");
+        }
+        assert!(
+            v[0] < v[1] && v[1] < v[2] && v[3] < v[4] && v[4] < v[5],
+            "{pre}: {v:?}"
+        );
+    }
+}
+
+/// A single-layer call has only the core, which asks nothing: `/Soft 0`
+/// with `/Box` never runs the backdrop procedure, as with `/At`.
+#[test]
+fn wet_bands_at_soft_zero_ask_nothing() {
+    let mut it = fresh(100, 100);
+    it.run_str(
+        "userdict /pwn 0 put 0 0 0 setrgbcolor \
+         { newpath 10 10 moveto 90 10 lineto << /Width 6 >> pkribbon } \
+         << /Soft 0 /Box [ 10 5 80 10 ] /Bands [ 2 2 ] \
+            /Under { pop pop userdict /pwn pwn 1 add put 0 0 0 } >> pkwet pwn",
+    )
+    .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+    assert_eq!(it.operand_stack().last().expect("pwn").repr(), "0");
+}
+
 /// What the procedure is asked: once per cell (not per pass, never for the
 /// core), at the cell's centre in the grid that is /Box grown by /Offset,
 /// in the user space of the call, with nothing of pkwet's on the stack.

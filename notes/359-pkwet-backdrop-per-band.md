@@ -27,14 +27,22 @@ Design calls, and why:
   re-rolls a mark. Proof: a banded call over a constant backdrop leaves the
   same `rand` as the literal and renders within 3 levels of it
   (`wet_bands_over_a_constant_backdrop_match_the_literal`).
-  The `srand` makes a program that never seeds look seeded to `--sweep-seed`'s
-  never-called-`srand` diagnostic; accepted, only a banded call does it.
+  Under `--sweep-seed` (which intercepts every `srand`) the cells still fit,
+  since an `srand` of an `rrand` value is restored exactly (#202, just fixed):
+  `wet_bands_fit_together_under_a_sweep_seed`. The replay also makes a
+  program that never seeds look seeded to the sweep's never-called-`srand`
+  diagnostic; accepted, only a banded call does it.
 - **Cell edges are snapped to the device pixel grid** (`transform`, `round`,
   `itransform`). Unsnapped, an edge inside a pixel gives each neighbour
   partial coverage and two opaque partial fills let the ground through
   (measured: steps of up to 30 levels along the edge at a 101.3pt boundary;
-  snapped, 2 levels everywhere, the clip mask's rounding). Exact for a CTM
-  that does not rotate or skew; a turned page can show a faint hairline.
+  snapped, 2 levels everywhere, the clip mask's rounding). Exact for an
+  axis-aligned or quarter-turn CTM (both device coordinates are rounded: a
+  one-coordinate snap collapses every inner edge of the grid to one value
+  under `90 rotate`, which `wet_band_edges_snap_to_device_pixels_on_every_axis_aligned_ctm`
+  catches); a page turned by another angle can show a faint hairline.
+- **A single-layer call asks nothing.** `/Soft 0` with `/Box` skips the grid,
+  as `/At` skips the procedure: the core has no backdrop.
 - **Pass budget.** A banded call runs the mark (Layers - 1) x cells + 1 times
   and counts as chain-restricted like a directional one: the 64 cap applies,
   so 12 cells at 6 layers (61 runs), 21 at 4. 16 x 16 is accepted by

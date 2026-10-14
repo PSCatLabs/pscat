@@ -5123,8 +5123,8 @@
 % changes draws what the literal does, to the rounding of a clip's coverage
 % (`wet_bands_over_a_constant_backdrop_match_the_literal`); the cell edges
 % between cells are snapped to the device pixel grid, so neighbours share
-% one edge exactly and leave no seam (exact for a CTM that does not rotate
-% or skew; a turned page can show a faint hairline).
+% one edge exactly and leave no seam (exact for an axis-aligned or quarter-turn
+% CTM; a page turned by another angle can show a faint hairline).
 %
 % Measured (tests/paintkit.rs, a 110pt column over a strong gradient,
 % /Offset 34): the residual rim is 186.7 with one backdrop per pass, 112.5
@@ -5310,12 +5310,13 @@
 } bind def
 
 % x -> x'   /   y -> y'   (issue #359: a user-space coordinate moved to the
-% nearest device pixel edge along its own axis; exact when the CTM does not
-% rotate or skew)
+% nearest device pixel edge along its own axis; exact when the CTM is
+% axis-aligned or a quarter turn, where one device coordinate is the whole
+% story, so both are rounded)
 % @internal
-/pqsx { 0 transform pop round 0 itransform pop } bind def
+/pqsx { 0 transform round exch round exch itransform pop } bind def
 % @internal
-/pqsy { 0 exch transform exch pop round 0 exch itransform exch pop } bind def
+/pqsy { 0 exch transform round exch round exch itransform exch pop } bind def
 
 % -> -   (banded /Under, issue #359: the grid of cells and what each one
 % is mixed toward)
@@ -5341,8 +5342,8 @@
     % two opaque fills at part coverage let the ground show through as a
     % hairline (the seam pktrowel's lane overlap exists to avoid). Snapped, the
     % neighbours share one edge exactly. A snap is exact when the CTM does
-    % not rotate or skew, which is every page here; a turned CTM can show a
-    % faint seam. The first and last edges run on outward without limit.
+    % rotate by other than a quarter turn or skew, which is every page here; a
+    % CTM turned by some other angle can show a faint seam. The first and last edges run on outward without limit.
     /pqxe pqCols 1 add array def
     /pqye pqRows 1 add array def
     0 1 pqCols {
@@ -5989,7 +5990,8 @@
     % after the plan's displacements are fixed and before any pass runs,
     % so the backdrop procedure sees the final geometry and the wrapped
     % procedure has not run yet.
-    pqunderp { pqbanded { pqwetbands } { pqwetunder } ifelse } if
+    % (a single-layer call has only the core, which asks nothing, banded or not)
+    pqunderp { pqbanded { pqLayers 1 gt { pqwetbands } if } { pqwetunder } ifelse } if
     % Outermost pass first, so each subsequent (less displaced, less
     % mixed) pass is laid over it and the caller's own color lands last,
     % exactly on the path.
@@ -6021,7 +6023,7 @@
     pqunderp pqbanded not and { pqmyframe 7 pqunders put } if
     % A banded call's cells, clips and colours (issue #359); slot 8 stays null
     % for any other call, and the pass loop tests it.
-    pqbanded { pqmyframe 8 pqbrec put } if
+    pqbanded pqLayers 1 gt and { pqmyframe 8 pqbrec put } if
     % Each pass runs under `stopped`, which is what makes this wrapper
     % safe to abandon. Three separate review findings were all the same
     % missing unwind-protect: a caught error leaked one graphics-state
