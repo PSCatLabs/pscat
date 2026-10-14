@@ -223,8 +223,11 @@ fn buildup_presses_harder_at_the_turns() {
 
 /// Coverage builds with each declared pass. Every crayon level is one
 /// drykit level in the stroke's full colour, so passes of one colour need
-/// no dkbatch: inside one, or as separate calls, they render the same up
-/// to anti-aliasing (measured: 0.7% of pixels differ by more than 60).
+/// no dkbatch: inside one, or as separate calls, they render nearly the
+/// same. Measured: 245 of 38400 pixels differ by more than 60, 211 of them
+/// on an edge (anti-aliasing) and the rest where passes cross (a batch
+/// shares one catch among runs whose touches coincide); coverage within
+/// 0.3%.
 #[test]
 fn passes_build_coverage_with_or_without_a_batch() {
     let fill = |passes: u32, batch: bool| {
@@ -250,8 +253,7 @@ fn passes_build_coverage_with_or_without_a_batch() {
         c[1] > c[0] + 0.03 && c[2] > c[1] + 0.02,
         "coverage did not build: {c:?}"
     );
-    // Same colour, so only anti-aliased edges can differ: drawn in one
-    // batch, overlapping edges are composited once as a union.
+    // Same colour: only edges and crossings can differ (see above).
     let (a, b) = (rgb(&fill(3, true)), rgb(&fill(3, false)));
     let differ = a
         .iter()

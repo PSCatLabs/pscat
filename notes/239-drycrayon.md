@@ -54,9 +54,11 @@ covers, and `/Touch` keeps drykit's meaning.
 - **Batches.** dycrayon opens a `dkbatch` unless one is open. It detects
   one by `userdict /dkBatch`, drykit's record. That dependency is new and
   unpinned by drykit, so the `drycrayon-drykit-contract` self-test pins it.
-  One colour's passes render the same in a batch or as separate calls:
-  0.7% of pixels differ by more than 60, all of them anti-aliasing.
-  That's because every crayon level is one full-colour drykit level. The
+  One colour's passes render nearly the same in a batch or as separate
+  calls, because every crayon level is one full-colour drykit level:
+  245 of 38400 pixels differ by more than 60. 211 of them are on edges
+  (anti-aliasing); the rest are where passes cross, because a batch shares
+  one catch among runs whose touches coincide. Coverage differs by 0.3%. The
   advisor's concern that pass 2's faint level would grey pass 1's core
   only applies to two-level strokes.
 - **`/Over`** sets drykit's `/Under`. Where a stroke runs past the colour

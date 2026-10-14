@@ -54,8 +54,12 @@
 %   harder: /Buildup raises the touch where the walked path turns.
 % * Repeated passes. Drykit can't read the page back, so a later pass over
 %   the same area is declared with /Pass: each pass presses wax into more
-%   of the tooth. Passes must be drawn inside one `dkbatch`, or the second
-%   pass's faint level greys the first one's core (DRYMEDIA.md 3.3).
+%   of the tooth. Every crayon level is one drykit level in the stroke's
+%   full colour, so passes of one colour need no `dkbatch`: inside one or
+%   as separate calls they cover the same (tests/drycrayon.rs measures it;
+%   a batch shares catches where touches coincide, so a few pixels where
+%   passes cross differ). A batch is still how to join several dycrayon
+%   calls into one level-major render.
 % * Layering. Wax slides on wax, so a colour laid over another (/Over)
 %   catches less and the colour beneath shows through its gaps.
 % * Tip wear (Y6). /Worn is how blunt the crayon is: a new point has a
@@ -194,7 +198,10 @@
     2147483647 div
 } def
 
-userdict /dystate 2 put
+% The generator's state, as `1 dysrand` leaves it, so dyrand works before
+% anything seeds it.
+% @internal
+/dystate 2 def
 
 % -> integer 0..999999   (one caller draw, as a seed for dysrand)
 % @internal
@@ -289,7 +296,7 @@ userdict /dystate 2 put
 % @kind: Procedure
 % @summary: Sets up crayon paper as the drykit surface: drykit's construction-paper tooth made coarser and softer, on a white ground, tuned against the crayon reference crops (docs/drymedia/REFERENCES.md Y1, Y2) so a light scribble leaves a quarter to a third of the paper showing in streaks and a heavy one is nearly solid. Takes dksurface's keys, any of which replaces the default; paints nothing (paint the ground yourself) and takes no rand draws.
 % @example: << /Seed 4 >> dypaper 0.97 0.96 0.93 setrgbcolor clippath fill
-% @param: /Surface [name] The drykit surface underneath, as dksurface (default /construction)
+% @param: /Surface [name] The drykit surface underneath, as dksurface; the other keys keep crayon paper's defaults unless given, so `<< /Surface /slate >> dypaper` is slate's ground with crayon paper's tooth and white ground (default /construction)
 % @param: /Seed [integer] Seed for the paper's tooth, as dksurface (default 1)
 % @param: /Weave [points] Tooth spacing, as dksurface (default 1.4: a child's cheap paper, coarser than drykit's 0.9)
 % @param: /Mottle [points] Scale of the slow variation in the tooth, as dksurface (default 8)
@@ -570,6 +577,12 @@ userdict /dystate 2 put
 %   { newpath 0 0 moveto 50 0 lineto << /Seed (s) >> dycrayon } /dycrayon-seed-must-be-a-number
 %   (a string /Seed) mustguard
 %
+%   { newpath 0 0 moveto 50 0 lineto << /Seed 2000000000 >> dycrayon }
+%   /dycrayon-seed-must-be-within-integer-range
+%   (a /Seed whose derived seeds would overflow) mustguard
+%   { newpath 0 0 moveto 50 0 lineto 0 5 moveto 50 5 lineto << /Seed 1073741823 >> dycrayon }
+%   (the largest /Seed, on two subpaths) mustpass
+%
 %   % A procedure /Touch is a procedure whether or not it was packed.
 %   { newpath 0 0 moveto 50 0 lineto << /Touch [ /pop cvx 0.7 ] cvx >> dycrayon }
 %   (a procedure /Touch) mustpass
@@ -621,7 +634,7 @@ userdict /dystate 2 put
 %%EndSelfTest
 %
 % @kind: Procedure
-% @summary: Draws the current path in wax crayon, in the current colour, on the drykit surface (dypaper is crayon paper): the wax catches only on the paper's tooth, leaving white specks that streak along the stroke, and a rounded tip gives a dense core with a ragged rim. A child's pressure profile (a press on landing, a fade, an uneven wander) and wax build-up where the stroke turns or reverses are on by default. Repeated passes (/Pass) build coverage and a colour laid over another (/Over) lets it show through; draw passes or several calls of one colour inside one dkbatch. Consumes the current path like fill; takes no rand draws from the caller's stream.
+% @summary: Draws the current path in wax crayon, in the current colour, on the drykit surface (dypaper is crayon paper): the wax catches only on the paper's tooth, leaving white specks that streak along the stroke, and a rounded tip gives a dense core with a ragged rim. A child's pressure profile (a press on landing, a fade, an uneven wander) and wax build-up where the stroke turns or reverses are on by default. Repeated passes (/Pass) build coverage and a colour laid over another (/Over) lets it show through. Called inside an open dkbatch it joins it. Consumes the current path like fill; takes no rand draws from the caller's stream.
 % @example: << >> dypaper /blue dycolor newpath 40 40 moveto 120 80 lineto 200 50 lineto << /Width 6 /Touch 0.7 >> dycrayon
 % @param: /Width [points] Contact width of a half-worn crayon (/Worn 0.5); must be > 0 (default 6)
 % @param: /Touch [0..1] Pressure against the tooth, drykit's meaning: low catches only the highest tooth, 1 is solid. A procedure {t -> touch}, t = 0..1 along each subpath, is a base profile that the landing, fade, wander and build-up are added to (default 0.75)
@@ -631,7 +644,7 @@ userdict /dystate 2 put
 % @param: /Buildup [0..1] Extra touch at the middle of the tip where the stroke turns or reverses, as the hand slows and wax builds up; a full reversal gets all of it (default 0.15)
 % @param: /Worn [0..1] How blunt the crayon is: 0 is a new point, a line 0.8 /Width wide with a narrow dense core in a ragged rim; 1 is a worn flat face, 1.2 /Width wide, pressing evenly across (default 0.4)
 % @param: /Wear [fraction of /Width] How much wider the contact gets from the start of each subpath to its end as the tip wears, drykit's meaning, 0..4 (default 0.1)
-% @param: /Pass [count] Which pass over the same area this is, 1..8: each later pass presses wax into more of the tooth. Draw the passes inside one dkbatch (default 1)
+% @param: /Pass [count] Which pass over the same area this is, 1..8: each later pass presses wax into more of the tooth (default 1)
 % @param: /Over [rgb array] The crayon colour this stroke is laid over. Wax slides on wax, so the stroke catches less and the colour beneath shows through its gaps. It is drykit's /Under for the stroke: where the stroke runs past the colour onto bare paper it is tinted toward it by 1 - /Strength (default unset: laid on the paper)
 % @param: /Streak [ratio] How much each tooth knuckle is stretched along the stroke, drykit's meaning, 1..4: skipped valleys read as streaks (default 2.2)
 % @param: /Strength [0..1] How strongly the wax reads against the paper, drykit's meaning (default 0.95)
@@ -669,7 +682,8 @@ userdict /dystate 2 put
         /dyKhasseed true def
         /dyKseed dyKo /Seed get def
         /dyKseed load dyisnum not { dycrayon-seed-must-be-a-number } if
-        dyKseed abs 2147483647 ge { dycrayon-seed-must-be-within-integer-range } if
+        % subpath k's core is seeded Seed + k + 1000003, which must still fit
+        dyKseed abs 1073741824 ge { dycrayon-seed-must-be-within-integer-range } if
     } { /dyKhasseed false def } ifelse
 
     /dyKsubs dyKsubpaths def
