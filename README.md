@@ -587,7 +587,10 @@ edge untouched (lost and found edges), `/Brush` picks the brush (a small
 pkbroad that runs dry by default). The strokes come from `pkfeather`, a
 brush motion in the family above that paints nothing, for anyone who wants
 to pair it with another preset by hand. The caller's path and graphics state
-survive; it works in Ghostscript. `examples/paintkit_brushedge_demo.ps`
+survive; it works in Ghostscript. A mass built from several overlapping closed
+blobs (a cloud bank, a bush of ellipses) goes in as one path: an edge lying
+inside the others is hidden, so it is not brushed (issue #381).
+`examples/paintkit_brushedge_demo.ps`
 (`docs/paintkit_brushedge_demo.png`) shows each case before and after.
 
 ![Brushed edges, before and after](docs/paintkit_brushedge_demo.png)
