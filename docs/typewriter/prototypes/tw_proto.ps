@@ -1,0 +1,128 @@
+%!PS
+% tw_proto.ps: the #210 prototype for docs/TYPEWRITER.md. Not library code.
+% It checks three things before #211 builds the real font:
+%   1. A Type 3 font whose BuildChar varies every strike works in pscat and gs
+%      (setcharwidth, never setcachedevice: gs would replay the first strike).
+%   2. The ink model (spread stroke, weave holes as a clip, filled counters)
+%      can be drawn in plain PostScript.
+%   3. What a full page of about 2,500 strikes costs.
+%
+% Generate the outlines first, from the repo root (TYPEWRITER.md's timings and
+% prototype_vs_real.png used Courier Prime; with no argument the generator
+% falls back to the bundled Liberation Mono):
+%   python3 docs/typewriter/prototypes/gen_glyphs.py path/to/CourierPrime-Regular.ttf
+% Then:
+%   pscat --dpi 300 --png /tmp/p.png docs/typewriter/prototypes/tw_proto.ps
+%   gs -q -dNOSAFER -dBATCH -dNOPAUSE -sDEVICE=pnggray -r300 -sOutputFile=/tmp/g.png \
+%      docs/typewriter/prototypes/tw_proto.ps
+% (gs needs -dNOSAFER, or -I., only because this file runs twglyphs.ps by a
+% relative path; the library will not.)
+% Knobs: /MODE 1 = a full page (cost), 2 = one sample paragraph (look);
+%        /INK false = plain outlines with jitter only (the cost floor).
+
+/MODE where { pop } { /MODE 1 def } ifelse
+/INK  where { pop } { /INK true def } ifelse
+
+(docs/typewriter/prototypes/twglyphs.ps) run
+
+% gs dilates every fill and clip by part of a pixel, which closes 1-2 px
+% weave holes (DRYMEDIA.md 2.4). Guarded so pscat skips it.
+/.setfilladjust2 where { pop 0 0 .setfilladjust2 } if
+
+% ---- side dict: all state lives here (gs locks the font dict at definefont) --
+/TWS 40 dict def
+TWS begin
+  % private generator: Schrage form of the minimal-standard LCG, as paintkit's
+  % pjrand. No rand, no srand: the caller's random stream is never touched.
+  /seed 1 def
+  /lcg { seed 127773 idiv /hi exch def seed 127773 mod /lo exch def
+         16807 lo mul 2836 hi mul sub dup 0 le { 2147483647 add } if
+         dup /seed exch def } def
+  /P [ 0 1 255 { } for ] def            % permutation, Fisher-Yates
+  255 -1 1 { /i exch def /j lcg i 1 add mod def
+    P i get P j get P i 3 -1 roll put P j 3 -1 roll put } for
+  % h: i j k -> 0..1 (three integer keys through the table)
+  /h { 255 and 3 1 roll 255 and exch 255 and P exch get add 255 and P exch get
+       add 255 and P exch get 255 div } def
+  % g: i j k -> roughly normal, sd about 1 (three uniforms)
+  /g { 3 copy h 4 1 roll 3 copy 101 add h 4 1 roll 202 add h add add 1.5 sub 2 mul } def
+  /pitch 7.2 def /lead 12 def           % pica, 6 lines to the inch
+  /pageinv matrix currentmatrix matrix invertmatrix def
+  /pass 0 def                           % strike index: bump it to re-type a cell
+  /ink 0.1 def                          % ink grey (0 = black)
+  % ---- weave tiles: the inked part of the ribbon as a union of rectangles.
+  % 150 yarns to the inch (NBS C431) = 0.48pt = 40 glyph units at 12pt.
+  % A cell is a void (a hole 18 units square) with probability 0.22.
+  /tile { /t exch def [
+    -380 40 940 { /y exch def
+      -200 y 1000 8 -200 y 26 add 1000 14      % the two solid bands of this row
+      /x0 -200 def
+      -200 40 780 { /x exch def
+        x 40 idiv y 40 idiv t h 0.22 lt {
+          x0 y 8 add x 8 add x0 sub 18 /x0 x 26 add def } if } for
+      x0 y 8 add 800 x0 sub 18 } for ] } def
+  /tiles [ 0 1 7 { 37 mul tile } for ] def
+end
+
+/TWfont 12 dict def
+TWfont begin
+  /FontType 3 def
+  /FontMatrix [0.001 0 0 0.001 0 0] def
+  /FontBBox [-200 -380 800 940] def
+  /Encoding StandardEncoding def
+  /BuildChar {                           % font code
+    exch pop
+    600 0 setcharwidth                   % NOT setcachedevice: gs replays strike 1
+    TWG 1 index known not { pop } {
+    TWS begin
+      /code exch def /gl TWG code get def
+      % where is this strike on the page: column and line of the device origin
+      0 0 transform pageinv transform
+      lead div round cvi /lin exch def pitch div round cvi /col exch def
+      % per-machine quirk for this key, fixed for the machine (units: 1/1000 em)
+      /qx code 1 7 g 6 mul def /qy code 2 7 g 8 mul def /qr code 3 7 g 0.15 mul def
+      code 4 7 h 0.08 lt { /qy qy code 5 7 h 0.5 sub 60 mul add def } if  % bent slug
+      % per-strike variation, keyed by position and pass (pure: no counters)
+      /k col pass 31 mul add def
+      /sx lin k code g 26 mul def /sy lin k 1 add code g 18 mul def
+      /sr lin k 2 add code g 0.3 mul def
+      /pr lin k 3 add code h 0.25 mul 0.85 add def          % pressure 0.85..1.1
+      qx sx add qy sy add translate qr sr add rotate
+      ink setgray
+      INK {
+        gsave
+          lin k 5 add code h 40 mul lin k 6 add code h 40 mul translate
+          tiles lin k 7 add code h 7.99 mul cvi get rectclip
+          lin k 5 add code h -40 mul lin k 6 add code h -40 mul translate
+          newpath gl 0 get exec gl 1 get exec
+          gsave fill grestore
+          pr 60 mul 12 sub setlinewidth 1 setlinejoin stroke    % ink spread
+          code 97 eq code 101 eq or {                          % clogged a, e
+            newpath gl 1 get exec ink 0.25 add setgray fill } if
+        grestore
+      } {
+        newpath gl 0 get exec gl 1 get exec fill
+      } ifelse
+    end } ifelse
+  } bind def
+end
+/Typewriter TWfont definefont pop
+
+/Typewriter findfont 12 scalefont setfont
+/text (In reply to your letter of June 22, 1914, I will say that if you do not need this exhibit until schools open, we may be able to have some specimens for exhibit at the Mitchell Corn Palace. ) def
+/col 0 def
+MODE 1 eq {
+  % a full page: 50 lines of 50 strikes = 2,500, single spaced
+  0 1 49 { /l exch def
+    72 720 l 12 mul sub moveto
+    0 1 49 { /c exch def text l 50 mul c add text length mod 1 getinterval show } for
+  } for
+} {
+  % one double-spaced paragraph at the Duncan letter's measure
+  /ws { 72 exch moveto show } def
+  (In reply to your letter of June 22, 1914, I will say) 700 ws
+  (that if you do not need this exhibit until schools open, we) 676 ws
+  (may be able to have some specimens for exhibit at the Mitchell) 652 ws
+  (Corn Palace.  I am sorry we did not know about the matter before) 628 ws
+} ifelse
+showpage
