@@ -108,7 +108,8 @@
 % ---------------------------------------------------------- the data
 
 % Authored glyphs, [advance stroke stroke ...] in design units. The
-% lowercase, digits and punctuation come from handscript at load.
+% lowercase, digits and punctuation come from handscript at load, except
+% the 4, which is redrawn here (#351).
 % @internal
 /sgsrc <<
   % --- capitals (cap height 700). Stems before crossbars.
@@ -147,6 +148,16 @@
   /X [520 [60 700 460 0] [460 700 60 0]]
   /Y [520 [60 700 260 360] [460 700 260 360 260 360 260 0]]
   /Z [500 [60 700 440 700 440 700 60 0 60 0 450 0]]
+
+  % --- digit 4 (issue #351): overrides handscript's, whose bent stroke and
+  % short stem read as a lightning bolt at board size. An open 4, as a hand
+  % writes it: the left stroke comes down from the top, slightly slanted,
+  % into a sharp (doubled) corner and runs right as the crossbar; a
+  % straight full-height stem crosses the crossbar, and the crossbar runs
+  % on past it. The stroke and the stem do not meet at the top. The
+  % advance stays handscript's 430, so no line's layout moves. The derived
+  % superscript and subscript 4s (sginit) follow this shape.
+  /four [430 [120 700 55 235 55 235 395 235] [295 700 295 10]]
 
   % --- the board-math hand: a curly x, crossed z, and friends
   /x.curly [500 [60 440 120 500 210 450 240 250 220 60 150 0 60 40]
@@ -1178,6 +1189,25 @@
 %   (a*b) << /Size 1000 >> sgwidth [/a /asterisk /b] << /Size 1000 >> sgwidth eq
 %   (a string and its name array measure the same) mustbe
 %   newpath (a*b) 0 0 << /Jitter 0 >> sgpath
+%   newpath
+%%EndSelfTest
+%
+%%SelfTest: digit-four-is-an-open-four
+%   % issue #351: the 4 is redrawn here, not handscript's bent stroke
+%   /four << /Size 1000 >> sgmetrics /Advance get 430 eq
+%   (the 4 keeps handscript's advance, so no layout moves) mustbe
+%   /four << /Size 1000 >> sgmetrics /BBox get dup 3 get 700 eq
+%   exch 2 get 395 eq and (the 4 is cap height tall, its crossbar reaching 395) mustbe
+%   % the crossbar passes the stem (x = 295)
+%   /four << /Size 1000 >> sgmetrics /BBox get 2 get 295 gt
+%   (the 4's crossbar runs past its stem) mustbe
+%   % open top: the left stroke starts at (120, 700), well left of the stem
+%   newpath (4) 0 0 << /Size 1000 /Jitter 0 >> sgpath
+%   [ { } { } { } { } pathforall ] dup 0 get 120 eq exch 1 get 700 eq and
+%   (the 4's first stroke starts at the top, left of the stem: an open 4) mustbe
+%   /foursuperior << /Size 1000 >> sgmetrics /BBox get 3 get
+%   /four << /Size 1000 >> sgmetrics /BBox get 3 get 0.6 mul 320 add sub abs 1 lt
+%   (the superscript 4 follows the new 4: scaled to 0.6 and raised 320) mustbe
 %   newpath
 %%EndSelfTest
 %
