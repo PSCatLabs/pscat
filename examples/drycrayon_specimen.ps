@@ -7,9 +7,10 @@
 % `dypaper`, with the preset's defaults unless a panel names a key.
 %
 %   the box     each of the 16 colours at /Touch 0.55, 0.72 and 0.9
-%   passes      one region scribbled once, twice and three times, the
-%               passes in one dkbatch with /Pass 1, 2, 3
-%   build-up    a zigzag at /Buildup 0 and at 0.4: wax builds at the turns
+%   passes      one region scribbled once, twice and three times, with
+%               /Pass 1, 2, 3 (in one dkbatch, though one colour's passes
+%               render the same without one)
+%   build-up    a serpentine at /Buildup 0 and at 0.5: wax builds at the turns
 %   tip wear    /Worn 0 (a new point), 0.5 and 1 (a worn flat), and a long
 %               stroke at /Wear 1.5
 %   layering    yellow, then blue over it with /Over: both show; the blue
@@ -60,7 +61,7 @@
 9 spfont (each cell: /Touch 0.55, 0.72, 0.9) 30 560 splabel
 
 % --- passes ---
-12 spfont (passes, one batch: 1, 2, 3) 30 530 splabel
+12 spfont (passes: 1, 2, 3) 30 530 splabel
 /blue dycolor
 [ 1 2 3 ] {
     /spn exch def
@@ -75,14 +76,16 @@
 } forall
 
 % --- build-up at turns ---
-12 spfont (build-up at the turns: 0, 0.4) 300 530 splabel
+12 spfont (build-up at the turns: 0, 0.5) 300 530 splabel
 /red dycolor
-[ 0 0.4 ] {
+[ 0 0.5 ] {
     /spb exch def
-    /spx spb 0.4 div 120 mul 300 add def
-    newpath spx 415 moveto
-    0 1 7 { /spj exch def spx spj 2 mod 0 eq { 95 } { 5 } ifelse add 415 spj 1 add 12 mul add lineto } for
-    << /Touch 0.68 /Buildup spb /Seed 3 >> dycrayon
+    /spx spb 0.5 div 125 mul 310 add def
+    newpath spx 418 moveto spx 90 add 418 lineto
+    spx 90 add 430 12 -90 90 arc spx 442 lineto
+    spx 454 12 270 90 arcn spx 90 add 466 lineto
+    spx 90 add 478 12 -90 90 arc spx 490 lineto
+    << /Touch 0.6 /Buildup spb /Seed 3 >> dycrayon
 } forall
 
 % --- tip wear ---

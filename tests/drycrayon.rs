@@ -164,7 +164,11 @@ fn dycrayon_every_documented_parameter_changes_the_render() {
 fn dycrayon_is_deterministic_and_seeded_by_position() {
     let body = "0.6 0.1 0.2 setrgbcolor newpath 10 10 moveto 90 50 lineto << >> dycrayon";
     let a = data(&render(100, 60, 2.0, body));
-    assert_eq!(a, data(&render(100, 60, 2.0, body)), "same input, other pixels");
+    assert_eq!(
+        a,
+        data(&render(100, 60, 2.0, body)),
+        "same input, other pixels"
+    );
     // A stroke added elsewhere doesn't re-roll this one.
     let more = format!("{body} newpath 10 55 moveto 30 55 lineto << >> dycrayon");
     let b = render(100, 60, 2.0, &more);
@@ -254,7 +258,10 @@ fn passes_build_coverage_with_or_without_a_batch() {
         .zip(&b)
         .filter(|(p, q)| p.iter().zip(q.iter()).any(|(x, y)| x.abs_diff(*y) > 60))
         .count();
-    eprintln!("batch vs separate calls: {differ} of {} pixels differ by > 60", a.len());
+    eprintln!(
+        "batch vs separate calls: {differ} of {} pixels differ by > 60",
+        a.len()
+    );
     assert!(
         differ * 50 < a.len(),
         "passes in a batch and as separate calls differ in {differ} pixels"
@@ -343,7 +350,10 @@ fn motions_are_deterministic_and_replace_the_path() {
         let b = path_of(&format!("newpath 7 srand {call}"));
         let c = path_of(&format!("newpath 8 srand {call}"));
         assert!(a.len() > 6, "{call}: an empty path");
-        assert_eq!(a, b, "{call}: the old path survived, or the same srand gave another path");
+        assert_eq!(
+            a, b,
+            "{call}: the old path survived, or the same srand gave another path"
+        );
         assert_ne!(a, c, "{call}: another srand gave the same path");
     }
 }
@@ -426,7 +436,11 @@ fn every_motion_parameter_changes_the_path() {
         let run = |extra: &str| path_of(&format!("7 srand {}", template.replace("{}", extra)));
         let baseline = run("");
         for (_, extra) in varied {
-            assert_ne!(run(extra), baseline, "{name} {extra}: the path did not change");
+            assert_ne!(
+                run(extra),
+                baseline,
+                "{name} {extra}: the path did not change"
+            );
         }
         assert_tested(name, varied);
     }
@@ -456,12 +470,20 @@ fn reshaping_a_slot_does_not_reroll_the_others() {
             .filter(|(_, c)| c[2] == "/m")
             .map(|(i, _)| i)
             .collect();
-        p.chunks(3).skip(ms[1]).take(20).flat_map(|c| c.to_vec()).collect()
+        p.chunks(3)
+            .skip(ms[1])
+            .take(20)
+            .flat_map(|c| c.to_vec())
+            .collect()
     };
     // The overshoot changes the lead-in point, which is the moveto, so
     // compare from the first lineto of the second line on.
     let (a, b) = (second("2"), second("12"));
-    assert_eq!(a[3..], b[3..], "the second line moved with the first's overshoot");
+    assert_eq!(
+        a[3..],
+        b[3..],
+        "the second line moved with the first's overshoot"
+    );
 }
 
 fn gs_available() -> bool {
@@ -585,11 +607,17 @@ fn ghostscript_takes_packed_procedures_and_runs_every_motion() {
         .output()
         .expect("run gs");
     let _ = std::fs::remove_dir_all(&dir);
-    let text = String::from_utf8_lossy(&out.stdout).to_string()
-        + &String::from_utf8_lossy(&out.stderr);
+    let text =
+        String::from_utf8_lossy(&out.stdout).to_string() + &String::from_utf8_lossy(&out.stderr);
     eprintln!("{text}");
-    assert!(text.contains("packed: packedarraytype") || text.contains("packed: /packedarraytype"), "not packed: {text}");
-    assert!(text.contains("touch-ok"), "a packed /Touch was refused: {text}");
+    assert!(
+        text.contains("packed: packedarraytype") || text.contains("packed: /packedarraytype"),
+        "not packed: {text}"
+    );
+    assert!(
+        text.contains("touch-ok"),
+        "a packed /Touch was refused: {text}"
+    );
     assert!(
         text.contains("/undefined") && text.contains("dywobble-wobble-must-be-non-negative"),
         "a packed /Wobble was not refused by its guard: {text}"
@@ -615,5 +643,8 @@ fn a_crayon_scene_renders_within_the_ci_budget() {
     let secs = t0.elapsed().as_secs_f64();
     eprintln!("crayon scene: {secs:.2}s");
     assert!(inked(&it).iter().any(|&i| i), "nothing drawn");
-    assert!(secs < 2.0, "the scene took {secs:.2}s, over the 2s CI budget");
+    assert!(
+        secs < 2.0,
+        "the scene took {secs:.2}s, over the 2s CI budget"
+    );
 }
