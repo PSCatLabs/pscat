@@ -35,3 +35,7 @@ a face and a Type 3 font without adding a card. Now there are two:
 The gallery PNGs are not checked in (the script regenerates them into
 `_site/assets/fonts`), so the PR carries no images; the maintainer's
 before/after are the two new cards.
+
+Deferred: the stale catalog counts are #437. (main's `docs/guides/fonts.md`
+has a sentence cut off before the `## The font catalog` heading; #432's diff
+removes that line, so it is left to #432.)
