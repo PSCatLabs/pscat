@@ -684,3 +684,44 @@ fn cli_capabilities_flag_prints_valid_matching_json() {
         }
     }
 }
+
+/// Issue #236: `lib/strokeglyphs.ps` keeps paintkit's #141 convention,
+/// a bracketed unit from the same closed vocabulary on every parameter,
+/// and never uses `/Spread` or `/Density` (docs/DRYMEDIA.md 3.1).
+#[test]
+fn every_strokeglyphs_parameter_states_its_unit() {
+    let caps = capabilities::catalog();
+    let mut checked = 0;
+    for cap in caps.iter().filter(|c| c.source == "lib/strokeglyphs.ps") {
+        for p in &cap.parameters {
+            let unit = p
+                .description
+                .strip_prefix('[')
+                .and_then(|rest| rest.split_once("] "))
+                .map(|(unit, _)| unit)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{} /{}: description must start with a [unit], got {:?}",
+                        cap.name, p.name, p.description
+                    )
+                });
+            assert!(
+                paintkit_unit_is_known(unit),
+                "{} /{}: unknown unit [{unit}]",
+                cap.name,
+                p.name
+            );
+            assert!(
+                p.name != "Spread" && p.name != "Density",
+                "{} /{}: a name #141 reserves",
+                cap.name,
+                p.name
+            );
+            checked += 1;
+        }
+    }
+    assert!(
+        checked >= 10,
+        "only {checked} strokeglyphs parameters checked"
+    );
+}

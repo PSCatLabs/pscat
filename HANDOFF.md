@@ -605,6 +605,11 @@ renders eight examples in both and compares block-downsampled output).
    text is about 7% over its pscat budget (#283). `dkbatch` keeps each
    stroke's CTM, so hatch layers can be drawn rotated inside it. It allows
    one pigment per batch.
+   Slice G1 (#236) shipped `lib/strokeglyphs.ps`: skeleton glyphs as paths
+   (`sgpath`, `sgwidth`, `sggrow`, `sgmetrics`). In its glyph data a point
+   written twice is a sharp corner, and the midpoint rule never passes
+   through interior points, so check new glyphs on a `/Jitter 0` render.
+   `notes/236-strokeglyphs.md` lists where it departs from the design.
 5. Watercolor (issue #47, gated on the architecture spike in issue
    #46): read `docs/WATERCOLOR.md` before starting — it recommends a
    small `alpha: f32` field on `GraphicsState` (already prototyped as

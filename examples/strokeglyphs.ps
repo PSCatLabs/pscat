@@ -1,0 +1,146 @@
+%!PS-Adobe-3.0
+%%Title: Stroke glyphs — a specimen sheet for strokeglyphs.ps
+%%BoundingBox: 0 0 900 1600
+%%EndComments
+
+% Specimen for lib/strokeglyphs.ps (issue #236): every skeleton glyph,
+% each written three times (seeds s, s+1, s+2) to show the per-instance
+% jitter, then the growing symbols at three sizes and a line of board
+% math. Drawn with a plain pen: `sgpath` only builds the path, and the
+% stroke below is the whole "medium". Run from the repo root:
+%
+%   pscat --page 900x1600 examples/strokeglyphs.ps
+
+(lib/handscript.ps) run
+(lib/strokeglyphs.ps) run
+
+/ink { 0.10 0.12 0.30 setrgbcolor } def
+/pen { ink 1.5 setlinewidth 1 setlinecap 1 setlinejoin stroke } def
+/label { /Helvetica findfont exch scalefont setfont 0.45 setgray } def
+
+1 1 0.985 setrgbcolor clippath fill
+
+/size 24 def
+/left 40 def
+/right 860 def
+/cx left def
+/cy 1480 def
+/seed 1 def
+
+% (title) heading -   a section heading on its own line
+/heading {
+  /cy cy 44 sub def
+  11 label left cy moveto show
+  /cy cy 46 sub def
+  /cx left def
+} def
+
+% /name triple -   the glyph three times, its name beneath
+/triple {
+  /nm exch def
+  /w [nm nm nm] << /Size size >> sgwidth def
+  cx w add right gt { /cx left def /cy cy 58 sub def } if
+  newpath [nm nm nm] cx cy << /Size size /Seed seed >> sgpath pen
+  5.5 label cx cy 14 sub moveto nm 40 string cvs show
+  /seed seed 3 add def
+  /cx cx w add 14 add def
+} def
+
+% [names] section -
+/section { { triple } forall } def
+
+22 label left 1540 moveto (strokeglyphs.ps: skeleton glyphs for board math) show
+9 label left 1524 moveto
+(Each glyph three times, seeds s, s+1, s+2, plain pen. Growing symbols at three sizes. Size 24, default /Jitter.) show
+
+(CAPITALS) heading
+[ /A /B /C /D /E /F /G /H /I /J /K /L /M /N /O /P /Q /R /S /T /U /V /W
+  /X /Y /Z ] section
+
+(LOWERCASE AND DIGITS, IMPORTED FROM HANDSCRIPT) heading
+[ /a /b /c /d /e /f /g /h /i /j /k /l /m /n /o /p /q /r /s /t /u /v /w
+  /x /y /z /zero /one /two /three /four /five /six /seven /eight /nine
+  /period /comma /hyphen /quoteright /exclam /question ] section
+
+(THE MATH HAND) heading
+[ /x.curly /y.math /z.crossed /t.math /n.math ] section
+
+(GREEK) heading
+[ /alpha /beta /gamma /delta /epsilon /zeta /eta /theta /kappa /lambda
+  /mu /nu /xi /pi /rho /sigma /tau /phi /chi /psi /omega
+  /Gamma /Delta /Theta /Lambda /Xi /Pi /Sigma /Phi /Psi /Omega ] section
+
+(OPERATORS AND RELATIONS) heading
+[ /plus /minus /multiply /divide /periodcentered /plusminus /minusplus
+  /equal /notequal /approxequal /less /greater /lessequal /greaterequal
+  /arrowright /arrowleft /arrowdblright /arrowdblboth
+  /infinity /partialdiff /nabla /element /notelement /propersubset
+  /union /intersection /universal /existential /prime /ellipsis
+  /logicalnot /slash /colon /semicolon ] section
+
+(TEXT-SIZE DELIMITERS AND LARGE OPERATORS) heading
+[ /parenleft /parenright /bracketleft /bracketright /braceleft
+  /braceright /bar /summation /product /integral /radical ] section
+
+% ---- growing symbols, three sizes each
+(GROWING SYMBOLS: sggrow AT HEIGHT+DEPTH 24, 48 AND 84 POINTS) heading
+/cy cy 30 sub def
+/sizes [ [17 7] [34 14] [60 24] ] def
+[ /parenleft /parenright /bracketleft /bracketright /braceleft
+  /braceright /bar /integral /radical /summation /product ]
+{
+  /sym exch def
+  sym /integral eq { /cx left def /cy cy 116 sub def } if
+  /x0 cx def
+  sizes {
+    aload pop /dd exch def /hh exch def
+    newpath cx cy moveto
+    hh dd << /Symbol sym /Size size /Seed seed
+             sym /radical eq { /Span 30 } if >> sggrow
+    pen
+    /seed seed 1 add def
+    /cx exch cx add sym /radical eq { 30 add } if 12 add def
+  } forall
+  5.5 label x0 cy 40 sub moveto sym 40 string cvs show
+  /cx cx 26 add def
+} forall
+
+% ---- a line of board math, from a UTF-8 string
+/cy cy 50 sub def
+(A LINE OF BOARD MATH, FROM A UTF-8 STRING) heading
+newpath (∀ε>0 ∃δ>0: |x−a|<δ ⇒ |f(x)−f(a)|<ε) left cy
+  << /Size 30 /Seed 400 >> sgpath pen
+
+% and one with grown delimiters: ( sum_{n=1}^{N} x_n a ) = sqrt(2 pi)
+/cy cy 100 sub def
+/cx left def
+/grow { % h d sym seed -> -   draws at cx cy, advances cx
+  /gs exch def /gsym exch def
+  newpath cx cy moveto
+  << /Symbol gsym /Size 30 /Seed gs gsym /radical eq { /Span 80 } if >>
+  sggrow pen /cx exch cx add def
+} def
+/write { % text size seed dx dy -> -   draws at cx+dx cy+dy
+  /wdy exch def /wdx exch def /ws exch def /wz exch def /wt exch def
+  newpath wt cx wdx add cy wdy add << /Size wz /Seed ws >> sgpath pen
+} def
+50 22 /parenleft 500 grow
+/cx cx 4 add def
+36 18 /summation 501 grow
+(n=1) 14 502 -40 -40 write
+[/N] 14 505 -34 44 write
+[/x.curly] 30 510 8 0 write
+/cx cx [/x.curly] << /Size 30 >> sgwidth add 8 add def
+[/n.math] 18 515 0 -9 write
+/cx cx [/n.math] << /Size 18 >> sgwidth add 8 add def
+(a) 30 520 0 0 write
+/cx cx (a) << /Size 30 >> sgwidth add 6 add def
+50 22 /parenright 530 grow
+/cx cx 16 add def
+(=) 30 540 0 0 write
+/cx cx (=) << /Size 30 >> sgwidth add 10 add def
+30 8 /radical 550 grow
+(2π) 30 560 4 0 write
+
+showpage
+%%EOF

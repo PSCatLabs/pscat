@@ -1,0 +1,37 @@
+%!PS-Adobe-3.0
+%%Title: strokeglyphs strict-lint rendering driver (issue #236)
+%%Pages: 4
+%%BoundingBox: 0 0 200 200
+%%SelfTestPage: 200x200
+%%EndComments
+
+% Run with:  pscat --page 200x200 --lint-strict selftest/drivers/strokeglyphs.ps
+% (scripts/selftest.sh does this for every driver in this directory).
+% One showpage per scenario, each wrapped gsave/grestore, nothing left
+% on the stacks (selftest/README.md has the two rules). Every scenario
+% must put ink on its page: a blank page means sgpath or sggrow built
+% an empty path.
+
+(lib/handscript.ps) run
+(lib/strokeglyphs.ps) run
+
+/pen { 1.5 setlinewidth 1 setlinecap 1 setlinejoin stroke } def
+
+% 1. capitals and Greek from a UTF-8 string
+gsave newpath (AΣβ) 20 100 << /Size 40 /Seed 3 >> sgpath pen grestore
+showpage
+
+% 2. operators from a name array, slanted
+gsave newpath [/integral /partialdiff /lessequal /infinity] 20 100
+  << /Size 40 /Slant 12 >> sgpath pen grestore
+showpage
+
+% 3. a tall grown brace
+gsave newpath 40 20 moveto 150 10 << /Symbol /braceleft /Size 20 >> sggrow pop
+  pen grestore
+showpage
+
+% 4. a radical with a vinculum
+gsave newpath 20 60 moveto 60 10 << /Symbol /radical /Size 20 /Span 100 >>
+  sggrow pop pen grestore
+showpage

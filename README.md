@@ -1128,6 +1128,25 @@ newpath 40 60 moveto 300 80 lineto
 << /Width 3 /Touch 0.7 >> dkstroke
 ```
 
+`lib/strokeglyphs.ps` (issue #236, the first slice of the dry-media epic
+#232) gives single-stroke skeleton glyphs for board math as *paths*, not
+ink: capitals, handscript's lowercase and digits, a math hand (curly x,
+crossed z), Greek, operators and relations, and growing delimiters.
+`sgpath` appends a string's jittered centerlines to the current path
+(UTF-8 or an array of glyph names), `sgwidth` measures from the fixed
+advances, `sggrow` builds a sum, product, integral, radical, paren,
+bracket, brace or bar sized to a height and depth, and `sgmetrics` gives
+the advance, box, italic correction and TeX math class. Jitter comes from
+its own seeded generator, never the caller's `rand`, and
+`examples/strokeglyphs.ps` is the specimen sheet.
+
+```postscript
+(lib/handscript.ps) run
+(lib/strokeglyphs.ps) run
+newpath (∀ε>0 ∃δ>0) 40 300 << /Size 40 /Seed 7 >> sgpath
+1.5 setlinewidth 1 setlinecap 1 setlinejoin stroke
+```
+
 ## The website
 
 **[jeromebanks.github.io/postscript_interpreter](https://jeromebanks.github.io/postscript_interpreter/)**
