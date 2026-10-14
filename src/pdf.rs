@@ -508,9 +508,35 @@ fn path_ops(path: &crate::gfx::PsPath, area: bool) -> String {
     path.to_pdf_ops(area)
 }
 
+/// A PDF number with at most `decimals` fractional digits, trailing zeros
+/// and a bare `.` trimmed, and never `-0` (a tiny negative rounds to `0`).
+pub(crate) fn fmt_num(v: f32, decimals: usize) -> String {
+    let s = format!("{v:.decimals$}");
+    let t = if s.contains('.') {
+        s.trim_end_matches('0').trim_end_matches('.')
+    } else {
+        s.as_str()
+    };
+    if t == "-0" {
+        "0".to_string()
+    } else {
+        t.to_string()
+    }
+}
+
+/// Colours, alpha, line widths, dash arrays, miter limits and the image
+/// `cm`: three decimals. A scale factor or a hairline width keeps its
+/// relative precision this way, which two decimals would not.
 fn f(v: f32) -> String {
-    let s = format!("{v:.3}");
-    s.trim_end_matches('0').trim_end_matches('.').to_string()
+    fmt_num(v, 3)
+}
+
+/// Path coordinates (`m l c` in fills, strokes and clips): two decimals
+/// (#320). Device units are points, so the error is at most 0.005 pt, and
+/// the same coordinate always rounds to the same text, so shapes that
+/// shared an edge still share it. Roughly -20% on a speck-heavy page.
+pub(crate) fn path_coord(v: f32) -> String {
+    fmt_num(v, 2)
 }
 
 /// Encode a PDF text-string object. Printable-ASCII input becomes an
@@ -581,6 +607,21 @@ pub fn scan_document_info(source: &[u8]) -> (Option<String>, Option<String>) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn number_formatting_trims_and_never_prints_negative_zero() {
+        assert_eq!(f(-0.0), "0");
+        assert_eq!(f(-0.0004), "0");
+        assert_eq!(f(0.125), "0.125");
+        assert_eq!(f(0.1239), "0.124");
+        assert_eq!(path_coord(-0.004), "0");
+        assert_eq!(path_coord(-0.006), "-0.01");
+        assert_eq!(path_coord(100.0), "100");
+        assert_eq!(path_coord(12.5), "12.5");
+        assert_eq!(path_coord(10.126), "10.13");
+        assert_eq!(fmt_num(100.0, 0), "100");
+        assert_eq!(fmt_num(-0.4, 0), "0");
+    }
+
     use super::*;
 
     #[test]

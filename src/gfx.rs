@@ -280,24 +280,32 @@ impl PsPath {
         d
     }
 
-    /// PDF path-construction operators for the same segments.
+    /// PDF path-construction operators for the same segments, with
+    /// coordinates at two decimals (`crate::pdf::path_coord`, #320).
     ///
     /// `area` is true when the path will be filled or used as a clip
     /// (never stroked): a zero-length `l` to the current point then
     /// contributes no area, so it is omitted (#254). `pkspray` specks
     /// are `m x y l x y` + four `c`, and the `l` is pure overhead there.
     /// A stroke keeps it: a zero-length segment decides caps and joins.
+    ///
+    /// Rounding can itself collapse a short real `l` onto the current
+    /// point. Such a segment is dropped in strokes too (it would be a
+    /// zero-length segment that was never in the program), unless it is
+    /// all there is of its subpath, where it stays so the dot survives.
+    /// Equality is judged on the printed coordinates, i.e. on what gs
+    /// would read.
     pub(crate) fn to_pdf_ops(&self, area: bool) -> String {
+        use crate::pdf::path_coord as f;
         use std::fmt::Write as _;
         let mut d = String::new();
-        let f = |v: f32| {
-            let s = format!("{v:.3}");
-            s.trim_end_matches('0').trim_end_matches('.').to_string()
-        };
-        // The point the subpath is at, as the PDF will print it, so a
-        // zero-length `l` is recognised by what gs would see.
+        // The point the subpath is at, as printed and as in the program.
         let mut cur: Option<(String, String)> = None;
         let mut start: Option<(String, String)> = None;
+        let mut raw_cur: Option<DevPoint> = None;
+        let mut raw_start: Option<DevPoint> = None;
+        // Whether this subpath has written an `l` or `c` after its `m`.
+        let mut emitted = false;
         for (i, seg) in self.segs.iter().enumerate() {
             match *seg {
                 Seg::Move(p) => {
@@ -305,17 +313,29 @@ impl PsPath {
                     let _ = write!(d, "{x} {y} m ");
                     start = Some((x.clone(), y.clone()));
                     cur = Some((x, y));
+                    raw_start = Some(p);
+                    raw_cur = Some(p);
+                    emitted = false;
                 }
                 Seg::Line(p) => {
                     let (x, y) = (f(p.x), f(p.y));
                     // Only when more real geometry follows in this
                     // subpath, so a bare `m` + `l` stays as it was.
                     let more = matches!(self.segs.get(i + 1), Some(Seg::Line(_) | Seg::Curve(..)));
-                    let degenerate = cur.as_ref().is_some_and(|c| c.0 == x && c.1 == y);
-                    if !(area && degenerate && more) {
+                    let collapsed = cur.as_ref().is_some_and(|c| c.0 == x && c.1 == y);
+                    let genuine = raw_cur == Some(p);
+                    let drop = collapsed
+                        && if genuine {
+                            area && more
+                        } else {
+                            emitted || more
+                        };
+                    if !drop {
                         let _ = write!(d, "{x} {y} l ");
+                        emitted = true;
                     }
                     cur = Some((x, y));
+                    raw_cur = Some(p);
                 }
                 Seg::Curve(c1, c2, p) => {
                     let (x, y) = (f(p.x), f(p.y));
@@ -328,11 +348,15 @@ impl PsPath {
                         f(c2.y),
                     );
                     cur = Some((x, y));
+                    raw_cur = Some(p);
+                    emitted = true;
                 }
                 Seg::Close => {
                     d.push_str("h ");
                     // `h` returns the current point to the subpath start.
                     cur = start.clone();
+                    raw_cur = raw_start;
+                    emitted = false;
                 }
             }
         }
