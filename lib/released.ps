@@ -1,0 +1,803 @@
+%!PS-Adobe-3.0
+%%Title: released.ps -- the released-document look
+%%Creator: pscat -- issue #214 (epic #209, design docs/TYPEWRITER.md)
+%%EndComments
+
+% @requires: (lib/artkit.ps) run (lib/surfacekit.ps) run
+
+% A page that has been through decades and a copier: aged paper, a scanner's
+% skew and lamp, photocopy generations (each adds its own skew, speckle and
+% edge shadow, and the type it holds closes up), punch holes, a staple, a
+% paper clip, rubber stamps, redaction bars and handwritten margin notes.
+% Written for lib/typewriter.ps, but `rel-page` wraps any drawing.
+%
+%   { ... draw the page ... } << /Age 0.6 /Generation 2 /Stamps [ ... ] >> rel-page
+%
+% Everything is vector and opaque (Ghostscript has no alpha), so the effects
+% are stepped bands, clip holes and ordinary fills:
+%
+%   paper     under the content: tone, blotches, foxing, grain and fibres
+%             (lib/surfacekit.ps), edge darkening, the scanner lamp, folds,
+%             punch holes.
+%   copies    every generation is a sheet the last one was copied onto. The
+%             original is drawn through a chain of small rotations and
+%             shifts, so the content carries the sum of them, a first copy's
+%             specks are tilted again by the next one, and the copier's lid
+%             shows as a dark sliver where a copy's image does not reach its
+%             sheet. A copy turns colour to grey and sharpens it: paper and
+%             stains go white, dark things stay dark (the copier's curve).
+%   marks     over the content, in the original's frame, so a copy copies
+%             them too: staple, clip, notes, stamps. Stamp ink is a clip
+%             with holes, so the page shows through where a stamp is light.
+%   typed     lib/typewriter.ps gives the type its own copy loss, its
+%             /Copies key (fill the counters in, thicken the strokes, drop
+%             the light strikes); `rel-page` sets it to /Generation for the
+%             content. `<r>text</r>` in a tw-type text is a redaction, and
+%             `/Redactor { rel-redact }` makes the bar a marker's.
+%
+% Every effect has a strength, and 0 (the default) turns it off: with no
+% option set `rel-page` runs the content and draws nothing else. The same
+% /Seed draws the same page. The library has its own generator and never
+% touches the caller's rand stream, and it is the same generator in pscat and
+% in Ghostscript; only the paper's grain and fibres (lib/surfacekit.ps, which
+% use rand under a restored seed) differ in detail between the two.
+%
+% Every stamp, note and redaction is invented text. The library ships no real
+% agency's seal, insignia or classification marking, and a piece made with it
+% should not draw one.
+%
+% Load: (lib/artkit.ps) run (lib/surfacekit.ps) run (lib/released.ps) run
+% and, for margin notes, (lib/handscript.ps) run first. gs: -dNOSAFER.
+
+% @internal
+/RelState << >> def
+RelState begin {
+
+% ---- the private generator ---------------------------------------------
+% Schrage's minimal standard, the same integers in pscat and Ghostscript.
+/rlSt 1 def
+/rlNext {
+    rlSt 127773 idiv 2836 mul
+    rlSt 127773 mod 16807 mul exch sub
+    dup 0 le { 2147483647 add } if
+    dup /rlSt exch def
+} bind def
+/rlU { rlNext 2147483647 div } bind def                 % (0,1)
+/rlR { rlU 2 mul 1 sub } bind def                       % (-1,1)
+/rlSeed2 {                                              % a b -> -
+    exch 20011 mod abs 997 mul exch 997 mod abs add 1 add 101 mul 7 add
+    /rlSt exch def
+    rlNext pop rlNext pop rlNext pop
+} bind def
+/rlLerp { /rlLt exch def 1 index sub rlLt mul add } bind def     % a b t -> a+(b-a)t
+
+% ---- defaults and options ----------------------------------------------
+/rlDefaults {
+    /rlSeed 1 def  /rlW 612 def  /rlH 792 def
+    /rlAge 0 def  /rlEdge 0 def  /rlFolds 0 def  /rlFoldAt [ 0.333 0.667 ] def
+    /rlLamp 0 def  /rlSkew 0 def  /rlBack null def
+    /rlGen 0 def  /rlSpeck 1 def  /rlCEdge 0.6 def
+    /rlPunch 0 def  /rlStaple 0 def  /rlClip 0 def  /rlShadow 0.6 def
+    /rlStamps [ ] def  /rlNotes [ ] def
+} bind def
+/rlRag 0.5 def  /rlRInk [ 0.05 0.05 0.06 ] def    % redaction: kept between calls
+
+/rlIsNum { type dup /integertype eq exch /realtype eq or } bind def
+/rlIsUnit { dup rlIsNum { dup 0 ge exch 1 le and } { pop false } ifelse } bind def
+/rlIsInt { type /integertype eq } bind def
+/rlIsCount { dup rlIsInt { dup 0 ge exch 8 le and } { pop false } ifelse } bind def
+/rlIsPos { dup rlIsNum { 0 gt } { pop false } ifelse } bind def
+/rlIsAngle { dup rlIsNum { dup -10 ge exch 10 le and } { pop false } ifelse } bind def
+/rlIsRgb {
+    dup type /arraytype eq {
+        dup length 3 eq { true exch { rlIsUnit and } forall } { pop false } ifelse
+    } { pop false } ifelse
+} bind def
+/rlIsRgbOrNull { dup null eq { pop true } { rlIsRgb } ifelse } bind def
+/rlIsFolds {
+    dup type /arraytype eq 1 index xcheck not and {
+        true exch { rlIsUnit and } forall
+    } { pop false } ifelse
+} bind def
+/rlIsList { dup type /arraytype eq exch xcheck not and } bind def
+
+/rlKeys <<
+    /Seed       [ /rlSeed   /rlIsInt    /rel-seed-must-be-an-integer ]
+    /Width      [ /rlW      /rlIsPos    /rel-width-must-be-a-positive-number ]
+    /Height     [ /rlH      /rlIsPos    /rel-height-must-be-a-positive-number ]
+    /Age        [ /rlAge    /rlIsUnit   /rel-age-must-be-0-to-1 ]
+    /EdgeDark   [ /rlEdge   /rlIsUnit   /rel-edgedark-must-be-0-to-1 ]
+    /Folds      [ /rlFolds  /rlIsUnit   /rel-folds-must-be-0-to-1 ]
+    /FoldAt     [ /rlFoldAt /rlIsFolds  /rel-foldat-must-be-an-array-of-fractions-0-to-1 ]
+    /Lamp       [ /rlLamp   /rlIsUnit   /rel-lamp-must-be-0-to-1 ]
+    /Skew       [ /rlSkew   /rlIsAngle  /rel-skew-must-be-within-10-degrees ]
+    /Backdrop   [ /rlBack   /rlIsRgbOrNull /rel-backdrop-must-be-an-rgb-array ]
+    /Generation [ /rlGen    /rlIsCount  /rel-generation-must-be-an-integer-0-to-8 ]
+    /Speckle    [ /rlSpeck  /rlIsUnit   /rel-speckle-must-be-0-to-1 ]
+    /CopyEdge   [ /rlCEdge  /rlIsUnit   /rel-copyedge-must-be-0-to-1 ]
+    /Punch      [ /rlPunch  /rlIsCount  /rel-punch-must-be-an-integer-0-to-8 ]
+    /Staple     [ /rlStaple /rlIsCount  /rel-staple-must-be-an-integer-0-to-8 ]
+    /Clip       [ /rlClip   /rlIsCount  /rel-clip-must-be-an-integer-0-to-8 ]
+    /Shadow     [ /rlShadow /rlIsUnit   /rel-shadow-must-be-0-to-1 ]
+    /Stamps     [ /rlStamps /rlIsList   /rel-stamps-must-be-an-array-of-dicts ]
+    /Notes      [ /rlNotes  /rlIsList   /rel-notes-must-be-an-array-of-dicts ]
+    /Redact     [ /rlRag    /rlIsUnit   /rel-redact-must-be-0-to-1 ]
+    /RedactInk  [ /rlRInk   /rlIsRgb    /rel-redactink-must-be-an-rgb-array ]
+>> def
+
+% opts -> -  (RelState is the current dict). Every key is checked before any
+% is applied, and each guard ends RelState first, so a caller's `stopped`
+% never leaves it on the dictionary stack.
+/rlApply {
+    dup type /dicttype ne { pop end rel-options-must-be-a-dict } if
+    dup { pop rlKeys exch known not { end rel-unknown-option } if } forall
+    dup {
+        exch rlKeys exch get aload pop              % value var check guard
+        3 index 2 index cvx exec { pop pop pop pop } { 4 1 roll pop pop pop end cvx exec } ifelse
+    } forall
+    { exch rlKeys exch get 0 get exch def } forall
+} bind def
+
+% ---- colour: the copier's curve ------------------------------------------
+% rlCC is the copy loss of the layer being drawn: 0 passes every colour
+% through. A copy is grey, and works on the darkness d: paper (d about 0.15)
+% falls toward white and stains with it, dark things keep their weight.
+/rlCC 0 def
+/rlMono {                                           % r g b -> r' g' b'
+    0.11 mul exch 0.59 mul add exch 0.3 mul add
+    1 exch sub /rmD exch def
+    rmD 0.4 sub 1 2.5 rlCC mul add mul 0.45 add
+    dup 0 lt { pop 0 } if dup 1 gt { pop 1 } if
+    rmD sub rlCC 3 mul dup 1 gt { pop 1 } if mul rmD add
+    1 exch sub dup dup
+} bind def
+/rlSet { rlCC 0 gt { rlMono } if setrgbcolor } bind def
+/rlCol { rlCC 0 gt { rlMono } if } bind def                % r g b -> r g b
+
+% the paper's tone: white at /Age 0, the ivory of the references (T9) at 0.6
+/rlTone {
+    1 0.89 rlAge rlLerp  0.995 0.81 rlAge rlLerp  0.98 0.68 rlAge rlLerp
+} bind def
+/rlTone3 { rlTone /rlTb exch def /rlTg exch def /rlTr exch def } bind def
+% f -> r g b: the tone times f
+/rlToneX {
+    /rlXf exch def rlTone rlXf mul 3 1 roll rlXf mul 3 1 roll rlXf mul 3 1 roll
+} bind def
+% r g b t -> r' g' b': the tone, t of the way to (r g b)
+/rlToneTo {
+    /rlMt exch def /rlMb exch def /rlMg exch def /rlMr exch def
+    rlTone3
+    rlTr rlMr rlMt rlLerp  rlTg rlMg rlMt rlLerp  rlTb rlMb rlMt rlLerp
+} bind def
+
+% ---- paper -----------------------------------------------------------------
+/rlSheetP { 0 0 moveto rlW 0 rlineto 0 rlH rlineto rlW neg 0 rlineto closepath } bind def
+/rlSheet { newpath rlSheetP } bind def
+% a jittered polygon (a path): cx cy r n j -> -
+/rlBlob {
+    /rbJ exch def /rbN exch def /rbR exch def /rbY exch def /rbX exch def
+    0 1 rbN 1 sub {
+        /rbI exch def
+        rbI 360 mul rbN div rlR 180 rbN div mul add /rbA exch def
+        rbR 1 rlR rbJ mul add mul /rbRr exch def
+        rbX rbA cos rbRr mul add  rbY rbA sin rbRr mul add
+        rbI 0 eq { moveto } { lineto } ifelse
+    } for
+    closepath
+} bind def
+/rlLampAng 100 def
+% ---- the paper as a field -----------------------------------------------------
+% The sheet is laid in cells, fine at the edges and coarse inside, each filled
+% with the colour the paper has at its centre: the tone, shifted toward a
+% stain by the blotches, shaded by the scanner lamp and darkened toward the
+% edges. Everything that varies smoothly across the sheet is one opaque fill
+% per cell, so lamp, stains and edges never overpaint each other.
+/rlGrid {                                           % length -> array of cell edges
+    /rgL exch def
+    600 array /rgA exch def
+    rgA 0 0 put  /rgN 1 def  /rgX 0 def
+    {
+        rgX rgL ge { exit } if
+        rgX rgL rgX sub 2 copy gt { exch } if pop
+        dup 8 lt { pop 1.5 } { dup 20 lt { pop 3 } { dup 44 lt { pop 6 } { pop 9 } ifelse } ifelse } ifelse
+        rgX add dup rgL gt { pop rgL } if /rgX exch def
+        rgA rgN rgX put  /rgN rgN 1 add def
+    } loop
+    rgA 0 rgN getinterval
+} bind def
+% the blotches: soft elliptical bumps of stain
+/rlBlotInit {
+    /rlBn rlAge 6 mul 3 add round cvi def
+    /rlBc rlBn 5 mul array def
+    0 1 rlBn 1 sub {
+        5 mul /rbi exch def
+        rlBc rbi rlU rlW mul put
+        rlBc rbi 1 add rlU rlH mul put
+        rlBc rbi 2 add rlU 150 mul 70 add put
+        rlBc rbi 3 add rlU 0.8 mul 1 add put
+        rlBc rbi 4 add rlU 0.5 mul 0.5 add rlAge mul 0.55 mul put
+    } for
+} bind def
+/rlBlotAt {                                         % x y -> stain 0..1
+    /rbY exch def /rbX exch def
+    0
+    0 1 rlBn 1 sub {
+        5 mul /rbi exch def
+        rbX rlBc rbi get sub rlBc rbi 2 add get rlBc rbi 3 add get mul div dup mul
+        rbY rlBc rbi 1 add get sub rlBc rbi 2 add get div dup mul add
+        -1.4 mul 2.718282 exch exp rlBc rbi 4 add get mul add
+    } for
+    dup 0.4 gt { pop 0.4 } if
+} bind def
+/rlEdgeAt {                                         % x y -> darkening 0..1
+    /reY exch def /reX exch def
+    reX rlW reX sub 2 copy gt { exch } if pop
+    reY rlH reY sub 2 copy gt { exch } if pop
+    2 copy gt { exch } if pop
+    8 40 rlEdge rlLerp div 1 exch sub dup 0 lt { pop 0 } if dup mul rlEdge mul
+} bind def
+/rlLampAt {                                         % x y -> shade factor
+    rlH 2 div sub rlLampAng sin mul exch rlW 2 div sub rlLampAng cos mul add
+    rlW dup mul rlH dup mul add sqrt div 0.5 add dup 0 lt { pop 0 } if dup 1 gt { pop 1 } if
+    dup mul 0.15 mul 0.04 add rlLamp mul 1 exch sub
+} bind def
+% r g b blot edge -> -  fills the sheet: this colour as the tone, with the
+% stains (blot true), the lamp (/Lamp) and the darkened edge (edge true)
+/rlPaperField {
+    /rpEd exch def /rpBl exch def /rpB exch def /rpG exch def /rpR exch def
+    rlAge 0 gt rpBl and { rlBlotInit } { /rlBn 0 def } ifelse
+    rlLamp 0 le rlBn 0 le and rpEd rlEdge 0 gt and not and {
+        rpR rpG rpB rlSet rlSheet fill
+    } {
+        gsave rlSheet clip newpath
+        rlW rlGrid /rpXs exch def  rlH rlGrid /rpYs exch def
+        0 1 rpXs length 2 sub {
+            /rpI exch def
+            rpXs rpI get /rpX0 exch def  rpXs rpI 1 add get /rpX1 exch def
+            rpX0 rpX1 add 2 div /rpCx exch def
+            0 1 rpYs length 2 sub {
+                /rpJ exch def
+                rpYs rpJ get /rpY0 exch def  rpYs rpJ 1 add get /rpY1 exch def
+                rpY0 rpY1 add 2 div /rpCy exch def
+                rpBl rlBn 0 gt and {
+                    rpCx rpCy rlBlotAt 0.82 0.76 0.62 4 -1 roll rlToneTo
+                } { rpR rpG rpB } ifelse
+                rpCx rpCy rlLampAt /rpF exch def
+                rpF mul 3 1 roll rpF mul 3 1 roll rpF mul 3 1 roll
+                rpEd rlEdge 0 gt and {
+                    rpCx rpCy rlEdgeAt /rpW exch def
+                    1 rpW 0.4 mul sub mul 3 1 roll
+                    1 rpW 0.27 mul sub mul 3 1 roll
+                    1 rpW 0.2 mul sub mul 3 1 roll
+                } if
+                rlSet
+                rpX0 rpY0 rpX1 rpX0 sub 0.8 add rpY1 rpY0 sub 0.8 add rectfill
+            } for
+        } for
+        grestore
+    } ifelse
+} bind def
+% surfacekit's grain (foxing) and fibres over the sheet; a copy has lost them
+/rlTexture {
+    rlAge 0 gt {
+        0 0 rlW rlH screct /rlReg exch def
+        rlReg << /Count rlAge 220 mul cvi 1 add /Color [ 0.55 0.42 0.26 rlCol ]
+                 /Strength 0.5 1 rlCC sub mul /Radius 0.7 /Seed rlSeed 101 add >> grain
+        rlReg << /Count rlAge 110 mul cvi 1 add /Color [ 0.62 0.54 0.4 rlCol ]
+                 /Strength 0.4 1 rlCC sub mul /Length [ 3 11 ] /Width 0.45
+                 /Rotate [ 0 360 ] /Seed rlSeed 102 add >> fiber
+    } if
+} bind def
+% folds: a soft shadow band, a highlight beside it and a dry, broken crease
+/rlFoldLines {
+    rlFolds 0 gt {
+        rlFoldAt {
+            1 exch sub rlH mul /rlFy exch def
+            1 rlFolds 0.04 mul sub rlToneX rlSet
+            9 setlinewidth 0 rlFy moveto rlW rlFy lineto stroke
+            rlTone3
+            rlTr 1 rlTr sub rlFolds 0.12 mul mul add
+            rlTg 1 rlTg sub rlFolds 0.12 mul mul add
+            rlTb 1 rlTb sub rlFolds 0.12 mul mul add rlSet
+            3 setlinewidth 0 rlFy 3 add moveto rlW rlFy 3 add lineto stroke
+            1 rlFolds 0.22 mul sub rlToneX rlSet
+            0.7 setlinewidth
+            /rlFx 0 def
+            {
+                rlFx rlW ge { exit } if
+                rlU 90 mul 15 add /rlFl exch def
+                rlU 0.88 lt {
+                    rlFx rlFy rlR 0.35 mul add moveto
+                    rlFx rlFl add rlFy rlR 0.35 mul add lineto stroke
+                } if
+                /rlFx rlFx rlFl add rlU 5 mul add def
+            } loop
+        } forall
+    } if
+} bind def
+% punch holes: a ring of shadow, then the lid or the desk through the hole
+/rlBackRgb { rlBack null eq { [ 0.8 0.8 0.78 ] } { rlBack } ifelse } bind def
+/rlPunches {
+    rlPunch 0 gt {
+        rlPunch 2 eq { 227 } { rlPunch 3 eq { 306 } { rlH 0.8 mul rlPunch 1 sub dup 1 lt { pop 1 } if div } ifelse } ifelse /rlPs exch def
+        0 1 rlPunch 1 sub {
+            rlPunch 1 sub 2 div sub rlPs mul rlH 2 div add /rlPy exch def
+            1 rlShadow 0.18 mul sub rlToneX rlSet
+            34 rlPy 9.6 24 0.012 rlBlob fill
+            rlGen 0 eq { rlBackRgb aload pop setrgbcolor } { 0.1 setgray } ifelse
+            34 rlPy 8.5 24 0.02 rlBlob fill
+        } for
+    } if
+} bind def
+
+% the paper under the content (in the frame of the sheet)
+/rlPaperDraw {
+    rlSeed 11 rlSeed2 rlTone true true rlPaperField
+    rlTexture
+    rlSeed 14 rlSeed2 rlFoldLines
+    rlSeed 15 rlSeed2 rlPunches
+} bind def
+
+% ---- marks over the content -------------------------------------------------
+% a staple: the bar, its shadow, a highlight and the dark of the prongs
+/rlStapleAt {                                       % x y angle -> -
+    gsave 3 1 roll translate rotate
+    1 rlShadow 0.35 mul sub rlToneX rlSet
+    gsave 1.5 -1.7 translate -11 -1.6 22 3.2 rectfill grestore
+    0.55 0.56 0.58 rlSet -10.5 -1.3 21 2.6 rectfill
+    0.86 0.87 0.88 rlSet -10.5 0.2 21 0.8 rectfill
+    0.22 0.22 0.24 rlSet -10.5 -1.3 2 2.6 rectfill 8.5 -1.3 2 2.6 rectfill
+    grestore
+} bind def
+/rlStaples {
+    0 1 rlStaple 1 sub {
+        /rsi exch def
+        rsi 0 eq { 48 rlH 34 sub 38 } { 14 rlH 34 sub rsi 40 mul sub 90 } ifelse
+        rlStapleAt
+    } for
+} bind def
+% a clip's loops, as three nested ellipses
+/rlClipLoops {                                      % shade -> -
+    /rcSh exch def
+    matrix currentmatrix /rcM exch def
+    [ [ 0 0 6.6 21 ] [ 0 -3 4.4 16.5 ] [ 0 3 2.2 11.5 ] ] {
+        aload pop /rcRy exch def /rcRx exch def /rcCy exch def /rcCx exch def
+        rcM setmatrix
+        rcCx rcCy translate rcRx rcRy scale newpath 0 0 1 0 360 arc
+        rcM setmatrix rcSh setlinewidth stroke
+    } forall
+} bind def
+/rlClips {
+    0 1 rlClip 1 sub {
+        /rci exch def
+        gsave rlW 0.3 mul rci 70 mul add rlH 28 sub translate 8 rotate
+        1 rlShadow 0.4 mul sub rlToneX rlSet
+        gsave 1.8 -2.4 translate 2.4 rlClipLoops grestore
+        0.5 0.51 0.54 rlSet 1.3 rlClipLoops
+        0.85 0.86 0.88 rlSet -0.5 0.5 translate 0.45 rlClipLoops
+        grestore
+    } for
+} bind def
+
+% a stamp: ink pressed through a clip with holes, so the page (and the type
+% under it) shows through where the stamp is light
+/rlStampKeys <<
+    /Lines 1 /Text 1 /X 1 /Y 1 /Angle 1 /Size 1 /Ink 1 /Frame 1 /Strength 1 /Seed 1
+    /Font 1 /Tracking 1
+>> def
+/rlIsStamp {
+    dup type /dicttype eq {
+        true exch {
+            pop rlStampKeys exch known and
+        } forall
+    } { pop false } ifelse
+} bind def
+/rlStampDraw {
+    dup rlIsStamp not { pop end rel-stamp-must-be-a-dict-of-known-keys } if
+    /rsD exch def
+    rsD /Lines known { rsD /Lines get } {
+        rsD /Text known { [ rsD /Text get ] } { end rel-stamp-needs-lines-or-text } ifelse
+    } ifelse /rsLines exch def
+    rsD /X known { rsD /X get } { rlW 2 div } ifelse /rsX exch def
+    rsD /Y known { rsD /Y get } { rlH 2 div } ifelse /rsY exch def
+    rsD /Angle known { rsD /Angle get } { 0 } ifelse /rsAng exch def
+    rsD /Size known { rsD /Size get } { 22 } ifelse /rsSize exch def
+    rsD /Ink known { rsD /Ink get } { [ 0.62 0.12 0.14 ] } ifelse /rsInk exch def
+    rsD /Frame known { rsD /Frame get } { /box } ifelse /rsFrame exch def
+    rsD /Strength known { rsD /Strength get } { 0.8 } ifelse /rsStr exch def
+    rsD /Seed known { rsD /Seed get } { 1 } ifelse /rsSeed exch def
+    rsD /Font known { rsD /Font get } { /Helvetica-Bold } ifelse /rsFont exch def
+    rsD /Tracking known { rsD /Tracking get } { 0 } ifelse /rsTrk exch def
+    rsLines type /arraytype ne { end rel-stamp-lines-must-be-an-array-of-strings } if
+    rsSize rlIsPos not { end rel-stamp-size-must-be-a-positive-number } if
+    rsStr rlIsUnit not { end rel-stamp-strength-must-be-0-to-1 } if
+    rsInk rlIsRgb not { end rel-stamp-ink-must-be-an-rgb-array } if
+    rsFrame dup /box eq exch dup /double eq exch /none eq or or not
+    { end rel-stamp-frame-must-be-box-double-or-none } if
+    gsave
+    rsTrk rlIsNum not { end rel-stamp-tracking-must-be-a-number } if
+    rsFont type /nametype ne { end rel-stamp-font-must-be-a-name } if
+    rsFont findfont rsSize scalefont setfont
+    0 rsLines { dup type /stringtype ne { end rel-stamp-lines-must-be-an-array-of-strings } if
+                dup stringwidth pop exch length 1 sub rsTrk mul add 2 copy lt { exch } if pop } forall /rsMaxW exch def
+    rsSize 1.18 mul /rsLH exch def
+    rsSize 0.5 mul /rsPad exch def
+    rsMaxW rsPad 2 mul add /rsBW exch def
+    rsLines length rsLH mul rsPad 0.9 mul add /rsBH exch def
+    rsX rsY translate rsAng rotate
+    rsSeed rsX cvi rsY cvi add rlSeed2
+    % the clip: the stamp's box and holes
+    rsBW 2 div 3 add neg rsBH 2 div 3 add neg moveto
+    rsBW 6 add 0 rlineto 0 rsBH 6 add rlineto rsBW 6 add neg 0 rlineto closepath
+    rlU 0.5 lt /rsFlip exch def
+    1 rsStr sub 0.55 mul 0.04 add rsBW mul rsBH mul 7 div cvi 0 1 3 -1 roll 1 sub {
+        pop
+        rlU 1.6 exp rsFlip { 1 exch sub } if 0.5 sub rsBW 4 add mul
+        rlU 0.5 sub rsBH 4 add mul
+        rlU 2 exp 1.3 mul 0.25 add 6 0.3 rlBlob
+    } for
+    1 rsStr sub 8 mul 2 add cvi 0 1 3 -1 roll 1 sub {
+        pop
+        rlU 0.5 sub rsBW mul rlU 0.5 sub rsBH mul rlU 3 mul 1.5 add 8 0.35 rlBlob
+    } for
+    eoclip newpath
+    rsInk aload pop rlSet
+    rsFrame /none ne {
+        rsSize 0.075 mul setlinewidth 1 setlinejoin
+        rsBW 2 div neg rsBH 2 div neg rsBW rsBH rectstroke
+        rsFrame /double eq {
+            rsBW 2 div neg 2.4 add rsBH 2 div neg 2.4 add rsBW 4.8 sub rsBH 4.8 sub rectstroke
+        } if
+    } if
+    0 1 rsLines length 1 sub {
+        /rsI exch def
+        rsLines rsI get dup dup stringwidth pop exch length 1 sub rsTrk mul add 2 div neg
+        rsLines length rsLH mul 2 div rsLH rsI 0.8 add mul sub
+        moveto rsTrk 0 3 -1 roll ashow
+    } for
+    grestore
+} bind def
+
+% margin notes: hs-write (lib/handscript.ps) at a place and an angle
+/rlNoteKeys << /Text 1 /X 1 /Y 1 /Angle 1 /Size 1 /Width 1 /Ink 1 /Seed 1 /Pen 1 >> def
+/rlIsNote {
+    dup type /dicttype eq {
+        true exch { pop rlNoteKeys exch known and } forall
+    } { pop false } ifelse
+} bind def
+/rlNoteDraw {
+    dup rlIsNote not { pop end rel-note-must-be-a-dict-of-known-keys } if
+    /rnD exch def
+    rnD /Text known not { end rel-note-needs-text } if
+    rnD /Text get type /stringtype ne { end rel-note-text-must-be-a-string } if
+    /hs-write where { pop } { end rel-note-needs-lib-handscript } ifelse
+    rnD /X known { rnD /X get } { 60 } ifelse /rnX exch def
+    rnD /Y known { rnD /Y get } { rlH 2 div } ifelse /rnY exch def
+    rnD /Angle known { rnD /Angle get } { 0 } ifelse /rnAng exch def
+    rnD /Size known { rnD /Size get } { 15 } ifelse /rnSize exch def
+    rnD /Width known { rnD /Width get } { 150 } ifelse /rnWidth exch def
+    rnD /Ink known { rnD /Ink get } { [ 0.13 0.14 0.34 ] } ifelse /rnInk exch def
+    rnD /Seed known { rnD /Seed get } { 1 } ifelse /rnSeed exch def
+    rnD /Pen known { rnD /Pen get } { 36 } ifelse /rnPen exch def
+    rnSize rlIsPos not rnWidth rlIsPos not or { end rel-note-size-and-width-must-be-positive } if
+    rnInk rlIsRgb not { end rel-note-ink-must-be-an-rgb-array } if
+    rnSeed rlIsInt not { end rel-note-seed-must-be-an-integer } if
+    gsave
+    rnX rnY translate rnAng rotate
+    rrand /rnOld exch def
+    << /Text rnD /Text get /Size rnSize /Width rnWidth /Height rnSize 0.75 mul /Margin 0
+       /Leading 1.25 /Ink [ rnInk aload pop rlCol ] /Seed rnSeed /StartWobble 0 /Jitter 18 /Pen rnPen >>
+    end hs-write RelState begin
+    rnOld srand
+    grestore
+} bind def
+
+% a marker's redaction bar over x0..x1 at a baseline, `size` points type:
+% ragged edges, a slight tilt, a second streaky pass
+/rlRedactDraw {                                     % x0 x1 y size -> -
+    /rdS exch def /rdY exch def /rdX1 exch def /rdX0 exch def
+    gsave
+    rdX0 10 mul cvi rdY 3 mul cvi rlSeed2
+    rlRInk aload pop setrgbcolor
+    rdX0 rdY translate rlR 0.4 mul rotate rdX0 neg rdY neg translate
+    rdY rdS 0.82 mul add /rdTop exch def
+    rdY rdS 0.27 mul sub /rdBot exch def
+    360 rlU 40 mul 55 add div /rdK exch def
+    rlU 360 mul /rdPh exch def
+    rlRag 1.6 mul /rdA exch def
+    0 1 1 {
+        /rdPass exch def
+        rdPass 0 eq { 0.4 } { 1.0 } ifelse /rdPad exch def
+        rdPass 0 eq { 0 } { 0.8 } ifelse /rdIn exch def
+        rdX0 rdPad sub /rdXl exch def  rdX1 rdPad add /rdXr exch def
+        % the marker's rounded ends: the corners cut, the middle proud
+        rdXl 1.2 add rdBot rdIn add moveto
+        rdXl rlRag 0.8 mul rlR mul add rdBot rdTop add 2 div lineto
+        rdXl 1.2 add rdTop rdIn sub lineto
+        % along the top, left to right
+        rdXl 3 add
+        { dup rdXr 3 sub ge { pop exit } if
+          dup dup rdK mul rdPh add sin rdA mul rdTop add rlRag 0.5 mul rlR mul add rdIn sub lineto
+          rlU 1.2 mul 1.6 add add } loop
+        rdXr 1.2 sub rdTop rdIn sub lineto
+        rdXr rlRag 0.8 mul rlR mul add rdBot rdTop add 2 div lineto
+        rdXr 1.2 sub rdBot rdIn add lineto
+        % back along the bottom
+        rdXr 3 sub
+        { dup rdXl 3 add le { pop exit } if
+          dup dup rdK mul rdPh add sin rdA mul rdBot add rlRag 0.5 mul rlR mul add rdIn add lineto
+          rlU 1.2 mul 1.6 add sub } loop
+        closepath fill
+    } for
+    grestore
+} bind def
+
+% ---- copies ---------------------------------------------------------------------
+% generation i (1..): a small rotation and shift of the sheet about its centre
+/rlPrep {
+    /rlTdx rlGen 1 add array def  /rlTdy rlGen 1 add array def
+    /rlTth rlGen 1 add array def  /rlTs rlGen 1 add array def
+    1 1 rlGen {
+        /rlPi exch def
+        rlSeed 500 rlPi add rlSeed2
+        rlTdx rlPi rlR 3.2 mul put   rlTdy rlPi rlR 2.6 mul put
+        rlTth rlPi rlR 0.32 mul put  rlTs rlPi 1 rlR 0.003 mul add put
+    } for
+} bind def
+/rlTfm {                                            % i -> -  concat T_i
+    /rlTi exch def
+    rlW 2 div rlTdx rlTi get add rlH 2 div rlTdy rlTi get add translate
+    rlTth rlTi get rotate rlTs rlTi get dup scale
+    rlW 2 div neg rlH 2 div neg translate
+} bind def
+% j -> -  in a gsave: the sheets g..j as clips, the CTM in frame j
+/rlEnter {
+    /rlEj exch def
+    rlGen -1 rlEj { /rlEi exch def rlSheet clip newpath rlEi rlEj gt { rlEi rlTfm } if } for
+} bind def
+% the copier's lid: where copy j's sheet is not covered by the last sheet's image
+/rlLid {
+    1 rlCEdge 0.88 mul sub setgray
+    rlSheet matrix currentmatrix /rlLm exch def
+    rlJ rlTfm rlSheetP rlLm setmatrix eofill
+} bind def
+% a shadow along the image's edge, stepping from the lid's grey to the paper
+/rlEdgeShadow {
+    gsave rlJ rlTfm rlSheet clip newpath
+    rlJ 1 eq {
+        /rlCC 1 0.6 rlGen exp sub def rlTone rlCol
+        /rlEb exch def /rlEg exch def /rlEr exch def /rlCC 0 def
+    } { /rlEr 1 def /rlEg 1 def /rlEb 1 def } ifelse
+    1 rlCEdge 0.8 mul sub /rlEd exch def
+    3 1.5 rlCEdge mul add 8 div /rlEs exch def
+    0 1 7 {
+        /rlEk exch def
+        rlEk 7 div 0.8 exp /rlEt exch def
+        rlEd rlEr rlEt rlLerp  rlEd rlEg rlEt rlLerp  rlEd rlEb rlEt rlLerp setrgbcolor
+        rlEk 0.5 add rlEs mul /rlEq exch def
+        rlEq rlEq moveto rlW rlEq 2 mul sub 0 rlineto 0 rlH rlEq 2 mul sub rlineto
+        rlW rlEq 2 mul sub neg 0 rlineto closepath
+        rlEs 1.2 mul setlinewidth stroke
+    } for
+    grestore
+} bind def
+% the copier's dirt: black specks (some in spatters, many near the edges)
+% and a few faint vertical streaks
+/rlSpecks {
+    rlSeed 300 rlJ add rlSeed2
+    rlSpeck 230 mul cvi 0 1 3 -1 roll 1 sub {
+        pop
+        rlU 0.35 lt {
+            rlU 0.5 lt { rlU 30 mul rlU 0.5 lt { rlW exch sub } if rlU rlH mul }
+                       { rlU rlW mul rlU 30 mul rlU 0.5 lt { rlH exch sub } if } ifelse
+        } { rlU rlW mul rlU rlH mul } ifelse
+        /rlSy exch def /rlSx exch def
+        rlU 3 exp 1.1 mul 0.28 add /rlSr exch def
+        rlU 0.4 mul 0.04 add setgray
+        rlSx rlSy rlSr 5 0.3 rlBlob fill
+        rlU 0.3 lt {
+            1 1 rlU 3 mul 2 add cvi {
+                pop
+                rlSx rlR 6 mul add rlSy rlR 6 mul add rlSr 0.55 mul 5 0.3 rlBlob fill
+            } for
+        } if
+    } for
+    rlSpeck 1.5 mul cvi 0 1 3 -1 roll 1 sub {
+        pop
+        rlU 0.25 mul 0.5 add setgray
+        rlU 0.6 mul 0.3 add setlinewidth
+        rlU rlW mul rlU rlH mul 0.4 mul moveto
+        rlR 4 mul rlU 120 mul 40 add rlineto stroke
+    } for
+} bind def
+/rlCopyLayer {
+    /rlCC 1 0.6 rlGen rlJ sub exp sub def
+    rlLid rlEdgeShadow rlSpecks
+    /rlCC 0 def
+} bind def
+
+% ---- the page --------------------------------------------------------------------
+/rlIsProc { dup type /arraytype eq { xcheck } { pop false } ifelse } bind def
+/rlPaint {
+    rlGen 0 gt rlAge 0 gt or rlEdge 0 gt or rlLamp 0 gt or rlSkew 0 ne or rlBack null ne or
+    rlFolds 0 gt or rlPunch 0 gt or
+} bind def
+% the layers' marks, over the content
+/rlMarks {
+    rlNotes { rlNoteDraw } forall
+    rlStamps { rlStampDraw } forall
+    rlStaples rlClips
+} bind def
+/rlOriginal {
+    /rlCC 1 0.6 rlGen exp sub def
+    rlPaint { rlPaperDraw } if
+    /tw-set where { pop rlGen 0 gt } { false } ifelse {
+        TWState /tCopies get /rlOldC exch def
+        << /Copies rlGen >> tw-set
+        /rlProc load end exec RelState begin
+        << /Copies rlOldC >> tw-set
+    } {
+        /rlProc load end exec RelState begin
+    } ifelse
+    rlMarks
+    /rlCC 0 def
+} bind def
+/rlRun {
+    rlPrep
+    gsave
+    rlSkew 0 ne rlBack null ne or {
+        rlBackRgb aload pop setrgbcolor
+        newpath 0 0 moveto rlW 0 rlineto 0 rlH rlineto rlW neg 0 rlineto closepath fill
+    } if
+    rlSkew 0 ne { rlW 2 div rlH 2 div translate rlSkew rotate rlW 2 div neg rlH 2 div neg translate } if
+    rlGen 0 gt { rlSeed 10 rlSeed2 0.985 0.985 0.975 false false rlPaperField } if
+    0 1 rlGen {
+        /rlJ exch def
+        gsave rlJ rlEnter
+        rlJ 0 eq { rlOriginal } { rlCopyLayer } ifelse
+        grestore
+    } for
+    grestore
+} bind def
+
+rlDefaults
+
+} exec end % RelState
+
+%%SelfTest: rel-guards
+%   { { } 5 rel-page } /rel-options-must-be-a-dict
+%   (a number for the options) mustguard
+%
+%   { 5 << >> rel-page } /rel-content-must-be-a-procedure
+%   (a number for the content) mustguard
+%
+%   { { } << /Aged 1 >> rel-page } /rel-unknown-option
+%   (a misspelt key) mustguard
+%
+%   { << /Age 1.5 >> rel-paper } /rel-age-must-be-0-to-1
+%   (an age above 1) mustguard
+%
+%   { { } << /Generation 9 >> rel-page } /rel-generation-must-be-an-integer-0-to-8
+%   (nine generations) mustguard
+%
+%   { { } << /Generation 1.5 >> rel-page } /rel-generation-must-be-an-integer-0-to-8
+%   (half a generation) mustguard
+%
+%   { { } << /Skew 20 >> rel-page } /rel-skew-must-be-within-10-degrees
+%   (a skew of 20 degrees) mustguard
+%
+%   { { } << /Backdrop [ 1 1 ] >> rel-page } /rel-backdrop-must-be-an-rgb-array
+%   (two components for the backdrop) mustguard
+%
+%   { << /Txt (x) >> rel-stamp } /rel-stamp-must-be-a-dict-of-known-keys
+%   (a stamp with an unknown key) mustguard
+%
+%   { << >> rel-stamp } /rel-stamp-needs-lines-or-text
+%   (a stamp with nothing to say) mustguard
+%
+%   { << /Lines [ (a) ] /Strength 2 >> rel-stamp } /rel-stamp-strength-must-be-0-to-1
+%   (a stamp strength above 1) mustguard
+%
+%   countdictstack mark { { } << /Age 2 >> rel-page } stopped pop cleartomark countdictstack eq
+%   (a rejected rel-page leaves the dict stack as it was) mustbe
+%   countdictstack mark { << /Lines 3 >> rel-stamp } stopped pop cleartomark countdictstack eq
+%   (a rejected rel-stamp leaves the dict stack as it was) mustbe
+%%EndSelfTest
+
+% @kind: Procedure
+% @summary: Draws a page the way a released document looks, around any content: `{ content } opts rel-page`. The content proc is run once, in the page's own frame; it draws the typed page (lib/typewriter.ps tw-type is the intended content, and gets /Copies set to /Generation unless it sets its own). Paper is painted under it (tone, blotches, grain and fibres, edge darkening, the scanner lamp, folds, punch holes); /Generation photocopies each add a small skew and shift, black specks and streaks, the copier's lid at the edges and the copier's grey, high-contrast curve; marks are drawn over it (notes, stamps, a staple, a clip). Every effect is off at strength 0, the default, so with no options the content is simply run. Deterministic under /Seed. The caller's rand stream is untouched.
+% @example: (lib/artkit.ps) run (lib/surfacekit.ps) run (lib/released.ps) run { 100 600 moveto /Courier findfont 14 scalefont setfont (A typed line.) show } << /Age 0.6 /Generation 2 /Skew 0.4 /Stamps [ << /Lines [ (RECEIVED) (14 OCT 1964) ] /X 400 /Y 700 /Angle 8 >> ] >> rel-page showpage
+% @param: /Seed [integer] Seeds every random mark; the same seed draws the same page (default 1)
+% @param: /Width [points] The sheet's width (default 612)
+% @param: /Height [points] The sheet's height (default 792)
+% @param: /Age [0..1] The paper's age: its tone from white to ivory, blotches, foxing, grain and fibres. 0.6 is the ivory of the Szilard petition (default 0)
+% @param: /EdgeDark [0..1] The darkening toward an old sheet's edges (default 0)
+% @param: /Folds [0..1] Fold creases: a shadow band, a highlight and a dry broken crease at each /FoldAt (default 0)
+% @param: /FoldAt [array of 0..1] Where the folds are, as fractions of the height from the top (default [0.333 0.667], a letter folded in thirds)
+% @param: /Lamp [0..1] The scanner lamp's uneven gradient across the sheet (default 0)
+% @param: /Skew [degrees] The sheet's tilt on the scanner bed, within 10 degrees; the bed shows around it (default 0)
+% @param: /Backdrop [rgb array] The scanner bed or desk around a skewed sheet and showing through punch holes; any value draws it (default none, and light grey when the sheet is skewed)
+% @param: /Generation [count] Photocopy generations, 0 to 8: 0 is the original, 1 a copy, 3 a copy of a copy of a copy (default 0)
+% @param: /Speckle [0..1] Each copy's black specks and streaks (default 1)
+% @param: /CopyEdge [0..1] How dark the copier's lid and edge shadows are (default 0.6)
+% @param: /Punch [count] Punch holes down the left margin: 2 and 3 are the standard spacings (default 0)
+% @param: /Staple [count] Staples across the top corner (default 0)
+% @param: /Clip [count] Paper clips along the top, drawn as shadows and loops (default 0)
+% @param: /Shadow [0..1] How dark the shadows of the staple, the clip and the punch holes are (default 0.6)
+% @param: /Stamps [array of dicts] Rubber stamps over the content, each a dict for rel-stamp (default none)
+% @param: /Notes [array of dicts] Handwritten margin notes over the content, each a dict for rel-note, which needs lib/handscript.ps (default none)
+% @param: /Redact [0..1] How ragged rel-redact's bars are, kept for later rel-redact calls (default 0.5)
+% @param: /RedactInk [rgb array] The colour of rel-redact's bars, kept for later calls (default near black)
+/rel-page {
+    RelState begin
+    rlDefaults rlApply
+    dup rlIsProc not { pop end rel-content-must-be-a-procedure } if
+    /rlProc exch def
+    rlRun
+    end
+} bind def
+
+% @kind: Procedure
+% @summary: Paints only the paper of rel-page, for a page typed elsewhere or on a second page: the tone, blotches, grain and fibres, edge darkening, lamp, folds and punch holes, always at least the sheet's tone. tw-type's /PageStart is the place: `/PageStart { << /Age 0.6 /Folds 0.5 >> rel-paper }`. It draws in the current frame inside its own gsave.
+% @example: (lib/artkit.ps) run (lib/surfacekit.ps) run (lib/released.ps) run << /Age 0.7 /EdgeDark 0.6 /Folds 0.5 >> rel-paper showpage
+% @param: /Seed [integer] As rel-page (default 1)
+% @param: /Width [points] As rel-page (default 612)
+% @param: /Height [points] As rel-page (default 792)
+% @param: /Age [0..1] As rel-page (default 0)
+% @param: /EdgeDark [0..1] As rel-page (default 0)
+% @param: /Folds [0..1] As rel-page (default 0)
+% @param: /FoldAt [array of 0..1] As rel-page (default [0.333 0.667])
+% @param: /Lamp [0..1] As rel-page (default 0)
+% @param: /Backdrop [rgb array] As rel-page: the colour seen through punch holes (default light grey)
+% @param: /Punch [count] As rel-page (default 0)
+% @param: /Shadow [0..1] As rel-page (default 0.6)
+/rel-paper {
+    RelState begin
+    rlDefaults rlApply
+    gsave /rlCC 0 def rlPaperDraw grestore
+    end
+} bind def
+
+% @kind: Procedure
+% @summary: Presses one rubber stamp, at its place and angle, in the current frame: a framed block of lines of bold sans text in one ink, laid through a clip with holes, denser holes toward one side and a few voids, so the ink is uneven and the page shows through. The text is whatever the caller invents: no real agency's seal or classification marking. Takes one dict.
+% @example: (lib/artkit.ps) run (lib/surfacekit.ps) run (lib/released.ps) run << /Lines [ (FILE COPY) ] /X 300 /Y 400 /Angle -6 /Size 30 >> rel-stamp showpage
+% @param: /Lines [array of strings] The lines, centred; or /Text for one (default none: one of the two is needed)
+% @param: /Text [string] One line, instead of /Lines (default none)
+% @param: /X [points] The stamp's centre, across (default the middle of the last sheet rel-page or rel-paper was given: 612 x 792 at first)
+% @param: /Y [points] The stamp's centre, up (default the middle of that sheet)
+% @param: /Angle [degrees] Rotation about the centre (default 0)
+% @param: /Size [points] The type's size; the frame follows it (default 22)
+% @param: /Ink [rgb array] The stamp pad's colour (default a dull red)
+% @param: /Frame [name] /box, /double or /none (default /box)
+% @param: /Strength [0..1] How much ink there is: fewer holes and voids as it rises (default 0.8)
+% @param: /Font [name] The typeface, any findfont name (default /Helvetica-Bold)
+% @param: /Tracking [points] Extra space after each letter: the spaced capitals of a date stamp (default 0)
+% @param: /Seed [integer] Seeds the holes; the same dict presses the same stamp (default 1)
+/rel-stamp {
+    RelState begin rlStampDraw end
+} bind def
+
+% @kind: Procedure
+% @summary: Writes a margin note in lib/handscript.ps handwriting (lowercase only: the font has no capitals) at a place and an angle, in the current frame. The note's ink is run through the copy curve inside rel-page. Needs lib/handscript.ps loaded first. Takes one dict.
+% @example: (lib/artkit.ps) run (lib/surfacekit.ps) run (lib/handscript.ps) run (lib/released.ps) run << /Text (see me about this - jb) /X 60 /Y 500 /Angle 4 >> rel-note showpage
+% @param: /Text [string] The note, lowercase (default none: required)
+% @param: /X [points] Where the first baseline starts, across (default 60)
+% @param: /Y [points] Where the first baseline starts, up (default the middle of the sheet)
+% @param: /Angle [degrees] Rotation about that point (default 0)
+% @param: /Size [points] The handwriting's size (default 15)
+% @param: /Width [points] The width the note wraps at (default 150)
+% @param: /Ink [rgb array] The pen's colour (default a blue ballpoint)
+% @param: /Pen [glyph units] The pen's width in thousandths of an em, as lib/handscript.ps /Pen (default 36)
+% @param: /Seed [integer] Seeds the pen's wobble (default 1)
+/rel-note {
+    RelState begin rlNoteDraw end
+} bind def
+
+% @kind: Procedure
+% @summary: Draws a marker's redaction bar over x0 to x1 at a baseline, for type of the given size in points: ragged edges, a slight tilt and a second streaky pass, covering the whole word with a little over. It is the procedure for tw-type's /Redactor: `<< /Redactor { rel-redact } /Text (the <r>name</r> was withheld) >> tw-type`. The bar's raggedness and colour are /Redact and /RedactInk, as last set by rel-page.
+% @example: (lib/artkit.ps) run (lib/surfacekit.ps) run (lib/released.ps) run 100 300 4 12 rel-redact 100 100 400 100 12 rel-redact showpage
+% @param: /Redact [0..1] How ragged the bar is, set through rel-page (default 0.5)
+% @param: /RedactInk [rgb array] The bar's colour, set through rel-page (default near black)
+/rel-redact {
+    RelState begin rlRedactDraw end
+} bind def

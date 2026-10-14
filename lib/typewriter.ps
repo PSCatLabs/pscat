@@ -156,6 +156,7 @@ TWState begin {
 /tWear 1 def  /tMWear 1 def  /tLWear 1 def  /tSWear 1 def
 /tPitch 10 def  /tSize 12.5 def
 /tInk [0.13 0.13 0.15] def  /tRibbon 0.7 def
+/tCopies 0 def  /tCopyC 0 def
 /tPSd 0.08 def  /tFinger true def  /tInkOn true def
 /tMat matrix def
 /tFillAdj /.setfilladjust2 where { pop true } { false } ifelse def
@@ -238,6 +239,7 @@ TWState begin {
     /Ink         [ /tInk        /tIsRgb    /tw-ink-must-be-an-rgb-array ]
     /Ribbon      [ /tRibbon     /tIsUnit   /tw-ribbon-must-be-0-to-1 ]
     /InkModel    [ /tInkOn      /tIsBool   /tw-inkmodel-must-be-a-boolean ]
+    /Copies      [ /tCopies     /tIsNonNeg /tw-copies-must-be-a-non-negative-number ]
 >> def
 
 % opts -> -  (TWState is the current dict, begun by the caller). Every key
@@ -265,6 +267,8 @@ TWState begin {
     /wearM tWear tMWear mul def
     /wearL tWear tLWear mul def
     /wearS tWear tSWear mul def
+    % photocopy generations (#214): 0 at no copies, so no copy branch runs
+    /tCopyC 1 0.55 tCopies exp sub def
     % the line memo holds values scaled by the wear: any option change
     % drops it, so a strike never depends on what was typed before
     /tLineFor null def
@@ -341,7 +345,9 @@ TWState begin {
     wearS mul 1 add dup 0.1 lt { pop 0.1 } if
     mWt wearM mul 1 add dup 0.1 lt { pop 0.1 } if mul
     /tPr exch def
-    tPr 48 mul tRibbon mul /inkW exch def           % spread: 0.6pt x ribbon at 1
+    tPr 48 mul tRibbon mul
+    tCopyC 0 gt { 1 tCopyC 0.7 mul add mul } if     % copies spread the toner
+    /inkW exch def                                  % spread: 0.6pt x ribbon at 1
 
     % place: line + machine + strike offsets, the tilt's rise along the
     % line, then the rotations about the middle of the face
@@ -540,6 +546,12 @@ grestore
     1 tPr sub dup 0 gt { 0.55 } { 0.15 } ifelse mul add
     wearS 0 gt { tPageWear 0.06 mul wearS 1 2 copy gt { exch } if pop mul add } if
     dup 0 lt { pop 0 } if /pBody exch def
+    % a photocopy's contrast curve (#214): a dark strike fills in (fewer
+    % voids), a light one drops out (more)
+    tCopyC 0 gt {
+        /pBody pBody 0.18 sub 1 tCopyC 3 mul add mul 0.18 add tCopyC 0.14 mul add
+        dup 0 lt { pop 0 } if def
+    } if
     % the spread is split: the body carries a third of it, the feather
     % reaches to #211's spread through a sparse weave
     /wBodyW inkW 0.3 mul def
@@ -593,7 +605,9 @@ grestore
     % clog fraction (more on a more worn machine, less on a light strike)
     mClog wearM mul dup 1 gt { pop 1 } if
     tPr dup 1 gt { pop 1 } if mul /tFill exch def
-    tFill 0.05 gt {
+    % a copy fills every counter in over its generations
+    tCopyC 0 gt { /tFill tFill tCopyC 0.8 mul add dup 1 gt { pop 1 } if def } if
+    tFill 0.05 gt tCBox kCode 32 sub get 2 get 0 gt and {
         % the band runs across the counter's circumscribed circle, from the
         % dirt's side (a fixed direction per key) to the fraction; its edge
         % is ragged: solid to 0.12 short of it, then through a sparse
@@ -669,6 +683,9 @@ end definefont pop } exec
 %   { << /InkModel 1 >> tw-set } /tw-inkmodel-must-be-a-boolean
 %   (a number for the ink model) mustguard
 %
+%   { << /Copies -1 >> tw-set } /tw-copies-must-be-a-non-negative-number
+%   (a negative number of copies) mustguard
+%
 %   { << /Machine 9 /Wear -1 >> tw-setup } /tw-wear-must-be-a-non-negative-number
 %   (one bad key among good ones) mustguard
 %   TWState /tMachine get 1 eq (and the good ones were not applied) mustbe
@@ -740,6 +757,7 @@ end definefont pop } exec
 % @param: /Ribbon [0..1] Ribbon wetness: how far the ink spreads past the type face (0 for none), and how solid the ink is: a drier ribbon leaves more of the weave's voids open (default 0.7)
 % @param: /InkModel [boolean] true draws ribbon ink (the weave's voids, a feathered edge, clogged counters, a heavy side, density from pressure and /Ribbon); false draws flat ink, the glyph filled and stroked solid (default true)
 % @param: /Strike [integer] The strike index: a second strike at the same cell (a strikeover, a bold double strike) needs a new index to get its own variation (default 0)
+% @param: /Copies [count] Photocopy generations the type has been through, 0 for the original: each adds spread, fills the counters in and sharpens the contrast of the ink's coverage, so dark strikes close up and light ones drop out; 1 is a first copy, 3 a copy of a copy of a copy (default 0)
 /tw-setup {
     TWState begin tApply tFrame end
     /Typewriter findfont TWState /tSize get scalefont setfont
@@ -761,6 +779,7 @@ end definefont pop } exec
 % @param: /Ribbon [0..1] As tw-setup (no default: the current value stays)
 % @param: /InkModel [boolean] As tw-setup (no default: the current value stays)
 % @param: /Strike [integer] As tw-setup (no default: the current value stays)
+% @param: /Copies [count] As tw-setup (no default: the current value stays)
 /tw-set {
     dup type /dicttype eq { dup /Size known } { false } ifelse exch
     TWState begin tApply end
@@ -776,13 +795,16 @@ end definefont pop } exec
 % The text is parsed once into three parallel strings, one byte per cell:
 %   lyC  the character typed
 %   lyA  attribute bits: 1 underline, 2 glued (inside <o>..</o>: one
-%        unbreakable token)
+%        unbreakable token), 4 redacted
 %   lyO  the character struck over it (0 for none)
 % Markup, with no escapes needed (any other < is literal):
 %   <u>text</u>      underlined: a second pass of underscores
 %   <x>text</x>      crossed out: x struck over each character
 %   <o>old|new</o>   overtyped: new struck over old; the token is as wide as
 %                    the longer side and never breaks across a line
+%   <r>text</r>      redacted (#214): typed, then covered with a bar over
+%                    each run on a line, by the /Redactor procedure (a
+%                    plain black bar when there is none)
 % Bytes above 126 are not on the machine: each takes one blank cell, and
 % tw-linecount counts them the same way. Control characters other than tab
 % and newline are blank cells; carriage returns are dropped.
@@ -854,12 +876,13 @@ TWState begin {
     /PageNumbers [ /lyPN   /lyIsPN      /tw-pagenumbers-must-be-none-top-or-bottom ]
     /PageStart   [ /lyPS   /lyIsProc    /tw-pagestart-must-be-a-procedure ]
     /Memo        [ /lyMemo /lyIsMemo    /tw-memo-must-be-a-dict-of-known-string-keys ]
+    /Redactor    [ /lyRd   /lyIsProc    /tw-redactor-must-be-a-procedure ]
 >> def
 /lyDefaults {
     /lyText () def  /lyW 612 def  /lyH 792 def  /lyM 72 def
     /lyML -1 def  /lyMR -1 def  /lyMT -1 def  /lyMB -1 def
     /lySp 1 def  /lyInd 0 def  /lyTabs 5 def  /lyPN /none def
-    /lyPS null def  /lyMemo null def
+    /lyPS null def  /lyMemo null def  /lyRd null def
 } bind def
 
 % opts -> typeOpts. Reads the layout keys into ly variables and returns a
@@ -980,6 +1003,8 @@ TWState begin {
     [ (</x>) { /lyIx lyIx 1 sub dup 0 lt { pop 0 } if def } bind ]
     [ (<o>)  { lyIo 0 eq { /lyIo 1 def /lyOs lyN def } if } bind ]
     [ (</o>) { /lyIo 0 def } bind ]
+    [ (<r>)  { /lyIr lyIr 1 add def } bind ]
+    [ (</r>) { /lyIr lyIr 1 sub dup 0 lt { pop 0 } if def } bind ]
 ] def
 /lyTag {                                    % -> bool : consumed a tag at lyI
     /lyTr false def
@@ -998,7 +1023,8 @@ TWState begin {
         lyCh 10 eq { /lyIo 0 def } if
         lyCh 32 lt lyCh 9 ne and lyCh 10 ne and { /lyCh 32 def } if
         lyIo 0 gt lyCh 9 eq and { /lyCh 32 def } if
-        lyIu 0 gt { 1 } { 0 } ifelse lyIo 0 gt { 2 } { 0 } ifelse or /lyAt exch def
+        lyIu 0 gt { 1 } { 0 } ifelse lyIo 0 gt { 2 } { 0 } ifelse or
+        lyIr 0 gt { 4 } { 0 } ifelse or /lyAt exch def
         lyIo 2 eq {
             lyCh 32 gt { lyCh } { 0 } ifelse /lyOv exch def
             lyOv 0 gt { /lyAnyO true def } if
@@ -1017,6 +1043,7 @@ TWState begin {
                 lyIx 0 gt lyCh 32 gt and { 120 /lyAnyO true def } { 0 } ifelse
                 lyO lyN 3 -1 roll put
                 lyAt 1 and 0 ne { /lyAnyU true def } if
+                lyAt 4 and 0 ne { /lyAnyR true def } if
                 /lyN lyN 1 add def
             } ifelse
         } ifelse
@@ -1025,8 +1052,8 @@ TWState begin {
 /lyParse {                                  % string -> -
     /lyT exch def  /lyTn lyT length def
     /lyC lyTn string def  /lyA lyTn string def  /lyO lyTn string def
-    /lyN 0 def  /lyIu 0 def  /lyIx 0 def  /lyIo 0 def  /lyI 0 def
-    /lyAnyO false def  /lyAnyU false def
+    /lyN 0 def  /lyIu 0 def  /lyIx 0 def  /lyIo 0 def  /lyIr 0 def  /lyI 0 def
+    /lyAnyO false def  /lyAnyU false def  /lyAnyR false def
     {
         lyI lyTn ge { exit } if
         lyTag not { lyT lyI get lyAdd /lyI lyI 1 add def } if
@@ -1141,6 +1168,37 @@ TWState begin {
     } for
     lpIn { lpS lyLb lpC0 lpP lyShowRun } if
 } bind def
+% the line's redacted runs: each is handed, as x0 x1 baseline size, to the
+% /Redactor procedure with TWState ended (as /PageStart is), else covered by a
+% plain black bar. The cells keep their column, so a run is a whole number of
+% cells wide.
+/lyRedactRun {                              % c0 c1 -> -
+    lyPt mul lyL add exch lyPt mul lyL add exch
+    lyYr tSize
+    /lrdS exch def /lrdY exch def /lrdX1 exch def /lrdX0 exch def
+    /lyRd load null ne {
+        lrdX0 lrdX1 lrdY lrdS
+        gsave /lyRd load end exec TWState begin grestore
+    } {
+        gsave 0 setgray newpath
+        lrdX0 lrdY lrdS 0.25 mul sub moveto lrdX1 lrdY lrdS 0.25 mul sub lineto
+        lrdX1 lrdY lrdS 0.8 mul add lineto lrdX0 lrdY lrdS 0.8 mul add lineto
+        closepath fill grestore
+    } ifelse
+} bind def
+/lyRedactLine {
+    /lrCol lyLc def  /lrIn false def
+    lyLa 1 lyLb 1 sub {
+        /lrJ exch def
+        lyA lrJ get 4 and 0 ne {
+            lrIn not { /lrIn true def /lrC0 lrCol def } if
+        } {
+            lrIn { lrC0 lrCol lyRedactRun /lrIn false def } if
+        } ifelse
+        /lrCol lrCol lyC lrJ get lyNext def
+    } for
+    lrIn { lrC0 lrCol lyRedactRun } if
+} bind def
 /lyDrawLine {                               % global row -> -
     /ldR exch def
     lyLines ldR 3 mul get /lyLa exch def
@@ -1152,6 +1210,7 @@ TWState begin {
     lyAnyO { /tStrike lyS0 1 add def 1 lyLinePass } if
     lyAnyU { /tStrike lyS0 2 add def 2 lyLinePass } if
     /tStrike lyS0 def
+    lyAnyR { lyRedactLine } if
 } bind def
 /lyPageNum {
     lyPN /none eq { } {
@@ -1230,6 +1289,9 @@ TWState begin {
 %   { << /PageStart 5 >> tw-type } /tw-pagestart-must-be-a-procedure
 %   (a number for PageStart) mustguard
 %
+%   { << /Redactor 5 >> tw-type } /tw-redactor-must-be-a-procedure
+%   (a number for the redactor) mustguard
+%
 %   { << /Memo << /Sbject (x) >> >> tw-linecount } /tw-memo-must-be-a-dict-of-known-string-keys
 %   (a misspelt memo key) mustguard
 %
@@ -1258,6 +1320,8 @@ TWState begin {
 %   (a word wider than a line is split, 70 letters in 30 columns) mustbe
 %   << /Text (<o>ab|c</o> <u>d</u><x>e</x>) /Width 612 >> tw-linecount 1 eq
 %   (markup takes no cells) mustbe
+%   << /Text (a <r>b c</r> d\n<r>e</r>) >> tw-linecount 2 eq
+%   (redaction tags take no cells) mustbe
 %   << /Text (a b) /Memo << /To (x) >> >> tw-linecount 6 eq
 %   (a memo: title, blank, one field, rule, blank, then the text) mustbe
 %%EndSelfTest
@@ -1279,6 +1343,7 @@ TWState begin {
 % @param: /PageNumbers [name] /none, /bottom (centred "- 2 -" on every page) or /top (right-aligned "2" from page 2) (default /none)
 % @param: /PageStart [proc] Run before each page is typed, the first included, inside a gsave: paint the paper here. Pages after the first follow a showpage, so they are typed in the default graphics state, not a rotated or scaled one (default none)
 % @param: /Memo [dict] A memo header typed above the text: /To /From /Cc /Subject /Date /Title (strings; /Title defaults to MEMORANDUM and is centred and underlined) and /Rule (boolean, the underscore line under the header, default true); a long field wraps hung under its text (default none)
+% @param: /Redactor [proc] Covers each run of <r>..</r> text on a line: called as x0 x1 baseline size [points], in the page frame inside a gsave, with the typewriter's side dictionary ended (lib/released.ps rel-redact is one); without it a plain black bar is drawn (default none)
 % @param: /Preset [name] As tw-setup: /manual, /electric or /worn (no default: the current options stay)
 % @param: /Machine [integer] As tw-setup (no default: the current value stays)
 % @param: /Seed [integer] As tw-setup (no default: the current value stays)
@@ -1292,6 +1357,7 @@ TWState begin {
 % @param: /Ink [rgb array] As tw-setup (no default: the current value stays)
 % @param: /Ribbon [0..1] As tw-setup (no default: the current value stays)
 % @param: /InkModel [boolean] As tw-setup (no default: the current value stays)
+% @param: /Copies [count] As tw-setup (no default: the current value stays)
 /tw-type {
     TWState begin
     lySplit                                 % the layout keys read; the rest left
