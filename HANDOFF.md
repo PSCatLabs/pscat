@@ -934,8 +934,10 @@ renders eight examples in both and compares block-downsampled output).
   and `AngleJitter` default to values that cannot open a seam between rows (a
   first render had a bare full-height line at 20% of the row spacing); a dead
   lane from `/Scrape` is a bare track no neighbouring row covers unless
-  `/Overlap` is above about 0.5; rows are spaced for the nominal width, so a
-  tapering `/Pressure` opens gaps. Tests are `tests/pktrowelplane.rs` plus a
+  `/Overlap` is above about 0.5; a `/Pressure` is read at 17 points of the
+  row inside the area and the rows are spaced for the smallest |value|, in
+  `[0.25, 1]` times the nominal band (issue #362, `notes/362-*.md`; the stream
+  is restored with `rrand`/`srand` only when the proc moved it). Tests are `tests/pktrowelplane.rs` plus a
   `%%SelfTest` block; the specimen is `examples/paintkit_plane_demo.ps`
   (`docs/paintkit_plane_demo.png`).
 - **The landscape cookbook (issue #186) is `docs/guides/landscape-cookbook.md`;
