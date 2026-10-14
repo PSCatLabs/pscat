@@ -621,6 +621,13 @@ renders eight examples in both and compares block-downsampled output).
    public procedures run inside a private dict (`dcscratch begin ... end`)
    (#307). drykit's `/Fallout` is slow in gs (#308), so drychalk draws its
    own dust.
+   #239 shipped `lib/drycrayon.ps` (`dy-`): `dycrayon` (a core and a rim
+   `dkstroke` per subpath, one wax level each), `dypaper`, the crayon box
+   (`dybox`, `dycolors`, `dycolor`) and six child motions with paintkit's
+   #184 contract. dycrayon joins a `dkbatch` the caller opened by reading
+   `userdict /dkBatch` (pinned by `drycrayon-drykit-contract`). Passes and
+   layering are declared (`/Pass`, `/Over`), because drykit can't read the
+   page. `notes/239-drycrayon.md` has the tuning numbers against the crops.
 5. Watercolor (issue #47, gated on the architecture spike in issue
    #46): read `docs/WATERCOLOR.md` before starting — it recommends a
    small `alpha: f32` field on `GraphicsState` (already prototyped as

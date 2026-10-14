@@ -316,6 +316,17 @@ file:
 - **Board surfaces** use `/Weave 0.7`. At 2x a 0.4pt tooth is below a
   pixel and costs 2.25 times the cells.
 
+**As built for crayon (#239, `lib/drycrayon.ps`).** Lane dropout read as
+bricks, not striation, so `dycrayon` uses no lanes. Each subpath is two
+one-level `dkstroke` calls: a dense core and a wider rim at lower touch,
+which gives the ragged edge (a rounded tip presses hardest at its
+centre). Build-up at a turn is a `/Touch` procedure built from the
+subpath's own walked turning. Colour layering is declared with `/Over`
+(wax on wax catches less). Repeated passes are declared with `/Pass`.
+Crayon paper (`dypaper`) is `/construction` at `/Weave 1.4 /Relief 0.65
+/Mottle 8` on a white ground, tuned against Y1 and Y2:
+`notes/239-drycrayon.md` has the numbers.
+
 ## 4. Stroke skeletons (#236)
 
 ### 4.1 Decision: a new, catalog-migrated glyph library
