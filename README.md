@@ -907,6 +907,14 @@ own randomness and logs it as it paints, so the lake replays the same
 marks under `1 -1 scale`, one single-colour part at a time, each
 pulled down with directional `pkwet` (issue #191).
 
+How to paint each element of a landscape with these tools is written up as
+a cookbook, [`docs/guides/landscape-cookbook.md`](docs/guides/landscape-cookbook.md)
+(issue #186): eleven short recipes (sky, clouds, mountains, mist, far forest,
+evergreens, bushes, water, reflections, foreground bank, grass), each with the
+tools, the order, the settings that matter, the usual failure with its fix, a
+complete snippet and a rendered thumbnail. `tests/landscape_cookbook.rs` runs
+every snippet, so they keep rendering.
+
 `pkwash` (issue #47) is the watercolor medium, and the one preset here
 that needs something from the interpreter rather than only from
 PostScript: it fills the current path as a *translucent* wash. Two new
