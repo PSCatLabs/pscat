@@ -1436,6 +1436,11 @@
 %   { gsave newpath 0 0 moveto 50 0 lineto << /After true >> dkstroke grestore }
 %   (/After with no batch open draws at once) mustpass
 %   userdict /dkBatch known not (and no batch is left open) mustbe
+%   % an /After stroke's render errors surface when the batch ends
+%   /dkbudget 500 def
+%   { { newpath 0 0 moveto 10 0 lineto << /Width 100 /Touch 0.5 /After true >> dkstroke } dkbatch }
+%   /dkcatch-area-exceeds-safety-limit (an /After stroke past the budget) mustguard
+%   userdict /dkBatch known not (and it leaves no batch open) mustbe
 %%EndSelfTest
 %
 % @kind: Procedure

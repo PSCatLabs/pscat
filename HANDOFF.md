@@ -612,7 +612,7 @@ renders eight examples in both and compares block-downsampled output).
    text is 25.2s in pscat against a 30s budget, after #307's `bind`
    (`notes/283-drykit-perf-remeasure.md`; levers in #324). `dkbatch` keeps each
    stroke's CTM, so hatch layers can be drawn rotated inside it. It allows
-   one pigment per batch.
+   one pigment per batch (an `/After` stroke may differ, #393).
    #241 shipped `lib/drycharcoal.ps` (`dhstroke`, `dhhatch`, `dhsmudge`,
    `dhlift`, `dhsketch`; `notes/241-drycharcoal.md`). `dhhatch` lays lines
    through hatchkit's `/Mark` hook and inks every layer in one `dkbatch`

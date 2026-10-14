@@ -194,6 +194,7 @@ The pigment is the current colour, as everywhere in paintkit. No key sets it.
 | `/Lanes` | `[count]` | 1 | Parallel lanes across the contact patch, each with its own contact chain: crayon striation (Y3) and split charcoal tails (H6). |
 | `/Fallout` | `[count per points]` | 0 | Loose particles per point of stroke length (M6), placed with artkit's `scatter`. |
 | `/Drift` | `[points]` | 0 | How far fallout drifts down canvas-space y: chalk on a vertical board falls. |
+| `/After` | `[boolean]` | false | Inside a `dkbatch`, draw this stroke on its own after the batch renders, in call order, in its own colour (#393). Ignored with no batch open. |
 | `/Seed` | `[integer]` | from the position | Seed for the tool-side randomness (contact chain, lane offsets, fallout). By default it is derived from the first point's canvas-space position, so adding a stroke elsewhere never re-rolls this one. |
 
 `/Spread` is deliberately absent: nothing here is a fraction of `/Width`
