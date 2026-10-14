@@ -496,6 +496,8 @@ newpath 40 40 moveto 200 80 lineto << /Touch 0.7 >> dycrayon
   region, and the crossings stay dark. As two separate calls they are two
   batches, and at `/Levels 2` or more the second one's faint level greys
   the first's crossings.
+  Your own `gsave region clip ... grestore` around `dkstroke` calls inside
+  a batch is kept as well (#444), nested and `eoclip` clips included.
 - `opts dhsmudge` — the path is a stump's track: a wide, soft stroke that
   fills the tooth, leaving `/Value` between paper and the current colour.
   drykit cannot read the page, so give `/Under` (the tone beneath) when it
