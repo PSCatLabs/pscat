@@ -1139,11 +1139,21 @@
   % ordinary (a unary minus), before a relation, closing or punctuation too
   /mlk mln array def
   /mlp -1 def
+  /mltop mll mktoplist eq def
+  /mlam 0 def
   0 1 mln 1 sub {
     /mli exch def
-    % an alignment marker stands for TeX's {} at the start of the right
-    % column: an empty ordinary atom, so &= keeps the space before =
-    mll mli get dup /T get /align eq { pop /ord } { mkclass } ifelse
+    % an alignment marker (the 1st, 3rd ... &) stands for TeX's {} at the
+    % start of the right column: an empty ordinary atom, so &= keeps the
+    % space before =. The 2nd, 4th ... & start a fresh cell, as TeX
+    % align's right-aligned columns do: the list ends there and starts again
+    mll mli get dup /T get /align eq {
+      pop /mlam mlam 1 add def
+      mltop mlam 2 mod 0 eq and {
+        mlp 0 ge { mlk mlp get /bin eq { mlk mlp /ord put } if } if
+        /mlp -1 def null
+      } { /ord } ifelse
+    } { mkclass } ifelse
     dup null ne {
       dup /bin eq {
         mlp 0 lt { pop /ord } {
@@ -1160,7 +1170,7 @@
   } for
   mlp 0 ge { mlk mlp get /bin eq { mlk mlp /ord put } if } if
   /mlx 0 def /mlh 0 def /mld 0 def /mlpc null def /mlni 0 def
-  /mltop mll mktoplist eq def
+  /mlam 0 def
   [
   0 1 mln 1 sub {
     /mli exch def
@@ -1178,7 +1188,10 @@
         % every top-level & and the number of items before it, for
         % mkalign's columns
         mltop { /mkaligns [ mkaligns aload pop [ mlx mlni ] ] mkset } if
-        mlpc null eq { /mlpc /ord def } if
+        /mlam mlam 1 add def
+        mltop mlam 2 mod 0 eq and { /mlpc null def } {
+          mlpc null eq { /mlpc /ord def } if
+        } ifelse
       } {
         /mlcl mlk mli get def
         % a line that starts with its relation (= 2x under y = 2x) keeps
@@ -2431,6 +2444,12 @@
 %   /mkt-sentinel eq (and cuts the operand stack back to the call) mustbe
 %   countdictstack mkt-d0 eq (and unwinds the dictionary stack) mustbe
 %   /mkt-sentinel
+%   { (\\sum_{\\substack{a \\\\ \\oplus}} x) 0 0 << >> mkpath } stopped
+%   (an error inside a substack row is raised) mustbe
+%   /mkt-sentinel eq (and cuts the operand stack back past its rows) mustbe
+%   countdictstack mkt-d0 eq (and unwinds the dictionary stack) mustbe
+%   mkt-ctm-same (and keeps the CTM) mustbe
+%   /mkt-sentinel
 %   [ (a) (b) ] 0 0 << /Ink { pop newpath } >> mkalign
 %   length 2 eq (mkalign returns a record per line) mustbe
 %   /mkt-sentinel eq (and consumes only its operands) mustbe
@@ -2768,6 +2787,10 @@
 %   newpath [ (x &= a & y &= b) ] 100 300 << /Size 30 /Irregular 0 /Seed 2 /ColumnGap 1 >> mkalign
 %   0 get /Width get exch sub 30 sub abs 0.01 lt
 %   (/ColumnGap is in multiples of /Size) mustbe
+%   % the 2nd & starts a fresh cell: a minus after it is unary, as in TeX
+%   newpath [ (a &= b & -y &= c) ] 100 300 mkt-o mkalign 0 get /Width get
+%   newpath [ (a &= b & {-y} &= c) ] 100 300 mkt-o mkalign 0 get /Width get
+%   sub abs 0.01 lt (a minus after the 2nd & is unary) mustbe
 %   % one & per line is laid out as it always was
 %   newpath [ (y &= 2x) (&= x + x) ] 100 300 mkt-o mkalign
 %   0 get /Width get (y &= 2x) mkt-o mkmetrics /Width get sub abs 0.01 lt

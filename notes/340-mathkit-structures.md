@@ -64,6 +64,13 @@ committed render changed (see Evidence).
     `mkunderline` follow.
   - A line with one `&` or none is untouched, and so is everything when
     no line has two. So every existing derivation lays out as before.
+  - The 1st, 3rd ... `&` still stand for TeX's `{}` (an empty ordinary
+    atom). The 2nd, 4th ... start a fresh cell, as amsmath's right-aligned
+    columns do: the class pass ends the list there (a trailing binary
+    operator becomes ordinary) and no space carries across. So
+    `x + y &= 3 & -x + 2y &= 0` sets the second minus unary (advisor
+    review; a self-test, which fails on the first cut by two medium
+    spaces).
   - `mkpath` and `mkmetrics` are unchanged: `/Align` is still the first
     `&`.
 
@@ -73,10 +80,16 @@ committed render changed (see Evidence).
   expected one, but sggrow's API is a height and a depth. A horizontal
   grower would need a second calling convention, or would misuse H and D.
   Turning the existing brace keeps one brace shape for both the vertical
-  and the horizontal one. A future `mkbrace` annotation could do the same.
+  and the horizontal one.
 - **The second column pair isn't jittered on its own.** The whole line
   still wanders (`/Jx`), and the gaps between atoms are irregular, which
-  reads as a hand. A per-column wander can come later if a board wants it.
+  reads as a hand.
+
+## Follow-up filed
+
+- #439: `alignat`-style columns and a per-column wander, `\mod` and
+  `\pod`, `\nolimits` on a brace, and an `mkbrace` annotation built the
+  same way as the turned brace.
 
 ## Behaviour change to know about
 
