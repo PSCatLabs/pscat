@@ -8007,6 +8007,41 @@ fn wet_bands_grade_loaded_colors_toward_the_cell() {
     }
 }
 
+/// The banded specimen runs under Ghostscript too (`rectclip`, `rrand` and
+/// `srand` are plain PostScript; its random scatter differs).
+#[test]
+fn ghostscript_accepts_paintkit_wet_bands_demo() {
+    let gs_ok = std::process::Command::new("gs")
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success());
+    if !gs_ok {
+        eprintln!("skipping gs compatibility check: gs not installed");
+        return;
+    }
+    let out = std::process::Command::new("gs")
+        .args([
+            "-dNOSAFER",
+            "-dNOPAUSE",
+            "-dBATCH",
+            "-q",
+            "-sDEVICE=png16m",
+            "-g640x310",
+            "-r72",
+            "-o/dev/null",
+            "examples/paintkit_wet_bands_demo.ps",
+        ])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("run gs");
+    assert!(
+        out.status.success() && !String::from_utf8_lossy(&out.stdout).contains("Error"),
+        "gs rejected examples/paintkit_wet_bands_demo.ps: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}
+
 /// The specimen runs under Ghostscript too (its `exch pop` backdrop and
 /// every key are plain PostScript; its random scatter differs).
 #[test]
