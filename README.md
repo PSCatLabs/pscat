@@ -628,6 +628,18 @@ the colours the lit and shaded layers mix toward instead of white and black
 yellow-green highlights and blue shadows. All three are graded by an enclosing
 `pkwet`.
 
+`examples/paintkit_loading_demo.ps` is the specimen for all of the above (issue
+#227): the same loaded evergreen brush-relative and then with `/Light 150`
+(the first colour moves from the underside of the left branches to the upper
+face of every one), a knife pull loaded white and blue, a broad brush loaded
+ochre and teal at `/ColorMix` 0, 0.3 and 1, a bush and bank lip with and
+without a warm `/HighlightColor` and cool `/ShadowColor`, and the loaded
+evergreen's reflection pulled down by a directional `pkwet`. Draw a branch as a
+real stroke out from the trunk when you want `/Light` to flip it: a chord
+shorter than `/Pitch` (a pressed fan, a dab) is never flipped.
+
+![The loading specimen](docs/paintkit_loading_demo.png)
+
 `pkliner` (issue #116) is the liner/detail brush — the fine marks made
 last and over everything else: bare branches, trunks, grass stems,
 rigging, shoreline accents. The issue asks for the complement of

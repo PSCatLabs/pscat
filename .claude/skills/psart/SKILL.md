@@ -178,6 +178,27 @@ Which tool to pick:
   For depth, call it several times: dark/large first, light/small last,
   each on its own tighter spine. It does not know what a bush is — the
   shape comes from your spines.
+- **Loaded brushes: `/Colors`, `/ColorMix`, `/Light`** on `pkfan`,
+  `pkbroad`, `pktrowel` (and `/Colors` per dab on `pkdab`) — one stroke in
+  two or more colours, the way a real brush is loaded. `/Colors [[r g b] ...]`
+  (1 to 8) runs from the head's left edge, looking along the travel, to its
+  right; `/ColorMix` is 0 for hard bands and 1 for a smooth gradient
+  (default 0.3), and `/Colors` replaces the current colour. **The load is
+  brush-relative, so a stroke drawn backwards swaps its colours**: for an
+  evergreen whose branches go out to both sides of the trunk, add `/Light
+  degrees` (the direction the light comes from, as `pkdab`'s) and each
+  subpath puts the first colour on whichever side faces it. Branches must be
+  real strokes out from the trunk (`moveto`/`lineto`): a pressed fan or a dab
+  is never flipped. Make the dark half narrow at a low `/ColorMix` (0.1 or so)
+  or it blends to one hue at page size. `/HighlightColor` and `/ShadowColor`
+  on `pkdab` and `pkoil` are the hues the lit and shaded layers mix toward
+  instead of white and black (a warm yellow and a cool blue make a sunlit
+  bush; `/Highlight` and `/Shadow` still say how far). A loaded mark goes
+  inside a directional `pkwet` without any extra step: `pkwet` grades loaded
+  colours itself, so a loaded reflection pulls down and fades. Never call
+  `setrgbcolor` inside the pkwet procedure. `/Colours` is rejected, not
+  ignored. `examples/paintkit_loading_demo.ps` shows all of it.
+
 - **`pkwash`** / **`pkpaper`** — watercolor and its ground. The only
   presets needing pscat's `setalpha`; under plain `gs` they fall back
   to flattening against white and overlaps stop mixing.

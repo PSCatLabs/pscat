@@ -771,7 +771,7 @@ renders eight examples in both and compares block-downsampled output).
   painting step and restore it with `srand` on replay
   (`gallery/alpine_lake.ps`'s `lkdo`, issue #191).
 - **Loaded colours: `pkbroad`, `pktrowel`, `pkfan` and `pkdab` adopt them, the rest do
-  not yet** (issue #183, slices L1-L5; design in `docs/PAINT_LOADING.md`).
+  not yet** (issue #183, slices L1-L5b; design in `docs/PAINT_LOADING.md`).
   `lib/paintkit.ps`'s `pu-` section (`puparse`, `puat`, `puflips`, `puwet`,
   `puspell`, `pulightneedscolors`) turns a head position into a colour.
   A preset keeps the record `puparse` returns under *its own* prefix
@@ -799,8 +799,14 @@ renders eight examples in both and compares block-downsampled output).
   never reads `/Light`); `pulightneedscolors` is not, because `/Light` is
   pkdab's own. `/HighlightColor` and `/ShadowColor` (`puhue`, on `pkdab` and
   `pkoil`) are mix targets graded once through `puwet` at the top of the call,
-  and `pkoil` keeps them as `poHighlightColor`/`poShadowColor`. L5b (the
-  specimen) is next.
+  and `pkoil` keeps them as `poHighlightColor`/`poShadowColor`. L5b (#227) is
+  the specimen, `examples/paintkit_loading_demo.ps` (render at
+  `docs/paintkit_loading_demo.png`); it writes branches as real strokes out from
+  the trunk, because `/Light` flips by chord and a pressed fan is never
+  flipped. `/Light 150` puts the first colour on the upper face of every
+  branch, `ghostscript_accepts_paint_loading` drives every new key on every
+  adopter inside a directional `pkwet`, and `L6`/`L7` (`/TipColor`, `pkdry`,
+  `pkoil` ridges) are what is left of #183.
 - **Paintkit slices prove byte identity with `scripts/identity_check.sh
   BASE_WORKTREE [BIN] --control FILE [--gallery-still]`** (issue #263), not
   by hand. It renders every tracked `examples/`, `gallery/` and
