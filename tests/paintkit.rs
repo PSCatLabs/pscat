@@ -7748,6 +7748,265 @@ fn wet_procedural_under_that_raises_leaves_the_depth_alone() {
     assert_eq!(it.operand_stack().last().expect("depth").repr(), "0");
 }
 
+// --- pkwet: a backdrop per band (issue #359) -------------------------
+//
+// /Box [x y w h] with /Bands [cols rows] asks the /Under procedure once per
+// cell of a grid over the mark and runs each softening pass once per cell,
+// clipped to it, so the backdrop varies across a tall mark and not just
+// from pass to pass. What has to hold: a banded call over a backdrop that
+// never changes draws what the literal does (the cells fit together, no
+// seams, the random stream comes out where one run leaves it), the rim over
+// a gradient is smaller than per pass on a tall mark and no worse on a short
+// one, and the guards are named and unwind.
+
+/// A tall column sprayed over the same 300x150 gradient as `graded_cloud`
+/// (110pt of its 150), softened with `under_opts`.
+fn graded_column(under_opts: &str) -> Interp {
+    let mut it = fresh(300, 150);
+    it.run_str(&format!(
+        "/skyat {{ 150 div 0 max 1 min /skt exch def \
+           [ 0.98 0.86 0.68 ] [ 0.06 0.16 0.50 ] skt mix3 }} def \
+         0 1 149 {{ /gy exch def gy skyat setrgbcolor \
+           newpath 0 gy moveto 300 gy lineto 300 gy 2 add lineto 0 gy 2 add lineto \
+           closepath fill }} for \
+         0.99 0.98 0.97 setrgbcolor 41 srand \
+         {{ newpath 150 20 moveto 150 130 lineto \
+            << /Nozzle 12 /Density 380 /Falloff 1 /Speck 1.1 /Overspray 0.4 >> pkspray }} \
+         << /Soft 1 /Offset 34 /Layers 6 {under_opts} >> pkwet"
+    ))
+    .unwrap_or_else(|e| panic!("{under_opts}: {}", it.error_report(&e)));
+    it
+}
+
+const SKY_FN: &str = "{ exch pop 150 div 0 max 1 min /skt exch def \
+       [ 0.98 0.86 0.68 ] [ 0.06 0.16 0.50 ] skt mix3 }";
+
+/// The acceptance criterion: on a mark that is tall against a strong
+/// gradient, a backdrop per band leaves a smaller rim than the one per pass
+/// (#179), and the more rows the smaller. Measured when this was written,
+/// rows 15..135 of `graded_column`: per pass 186.7, 1x2 149.9, 1x4 112.5,
+/// 1x8 82.9 (2.25x). On the short cloud per pass is already near the
+/// answer, so few rows are worse than it (1x3: 146.9 against 119.8) and
+/// enough are better (1x6: 98.4): bands are for marks taller than about
+/// /Offset, and a cell wants to be no taller than about half /Offset.
+#[test]
+fn wet_bands_remove_more_of_the_rim_than_one_backdrop_per_pass() {
+    let per_pass = graded_column(&format!("/At [ 150 75 ] /Under {SKY_FN}"));
+    let banded = |rows: u32| {
+        graded_column(&format!(
+            "/Box [ 120 20 60 110 ] /Bands [ 1 {rows} ] /Under {SKY_FN}"
+        ))
+    };
+    let p = rim_residual(&per_pass, 15..135);
+    let (b4, b8) = (
+        rim_residual(&banded(4), 15..135),
+        rim_residual(&banded(8), 15..135),
+    );
+    assert!(p > 1.3 * b4, "4 rows: per pass {p:.1}, banded {b4:.1}");
+    assert!(p > 1.6 * b8, "8 rows: per pass {p:.1}, banded {b8:.1}");
+    assert!(b4 > b8, "more rows, less rim: {b4:.1} then {b8:.1}");
+
+    // The short mark: with enough rows, no worse than per pass.
+    let c = rim_residual(
+        &graded_cloud(&format!("/At [ 135 70 ] /Under {SKY_FN}")),
+        15..135,
+    );
+    let b = rim_residual(
+        &graded_cloud(&format!(
+            "/Box [ 50 56 185 30 ] /Bands [ 1 6 ] /Under {SKY_FN}"
+        )),
+        15..135,
+    );
+    assert!(b < 1.1 * c, "the short cloud: per pass {c:.1}, banded {b:.1}");
+}
+
+/// A backdrop that never changes: the banded call draws what the literal
+/// draws, up to the clip's coverage rounding, and leaves the random stream
+/// where it leaves it. That one comparison is "the cells fit together, with
+/// no seam at a cell edge (even one that falls inside a pixel), and the
+/// replayed stream consumes exactly one run".
+#[test]
+fn wet_bands_over_a_constant_backdrop_match_the_literal() {
+    for opts in [
+        "/Soft 1 /Offset 20 /Layers 4",
+        "/Soft 0.9",
+        "/Direction 270 /OneSided true /Offset 18 /Layers 5",
+        "/Direction 0 /Offset 12 /Stretch 3 /Layers 5",
+    ] {
+        let run = |under: &str| {
+            let mut it = fresh(300, 200);
+            it.run_str(&format!(
+                "0.9 0.9 0.9 setrgbcolor clippath fill 0.2 0.2 0.2 setrgbcolor 7 srand \
+                 {{ newpath 150 20 moveto 150 180 lineto << /Width 26 >> pkribbon \
+                    newpath 100 60 moveto 220 140 lineto << /Width 12 /Roughness 0.6 >> pkribbon }} \
+                 << {opts} {under} >> pkwet rand"
+            ))
+            .unwrap_or_else(|e| panic!("{opts}: {}", it.error_report(&e)));
+            let next = it.operand_stack().last().expect("rand").repr().to_string();
+            (pixels(&it), next)
+        };
+        let (lit, lit_next) = run("/Under [ 0.5 0.6 0.7 ]");
+        for bands in [
+            "/Box [ 130 20 40 160 ] /Bands [ 1 4 ]",
+            "/Box [ 101.3 20.7 119 160 ] /Bands [ 3 3 ]",
+            "/Box [ 130 20 40 160 ] /Bands [ 1 1 ]",
+        ] {
+            let (b, b_next) = run(&format!("{bands} /Under {{ pop pop 0.5 0.6 0.7 }}"));
+            assert_eq!(b_next, lit_next, "{opts} {bands}: the stream moved");
+            let worst = lit.iter().zip(&b).map(|(a, b)| a.abs_diff(*b)).max();
+            assert!(
+                worst <= Some(3),
+                "{opts} {bands}: a seam or a moved mark, worst channel step {worst:?}"
+            );
+        }
+    }
+    // The control: a backdrop that varies down the page is not the literal.
+    let mut it = fresh(300, 200);
+    it.run_str(
+        "0.9 0.9 0.9 setrgbcolor clippath fill 0.2 0.2 0.2 setrgbcolor 7 srand \
+         { newpath 150 20 moveto 150 180 lineto << /Width 26 >> pkribbon } \
+         << /Soft 1 /Offset 20 /Layers 4 /Box [ 130 20 40 160 ] /Bands [ 1 4 ] \
+            /Under { exch pop 200 div 0 0 3 -1 roll } >> pkwet",
+    )
+    .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+    let mut lit = fresh(300, 200);
+    lit.run_str(
+        "0.9 0.9 0.9 setrgbcolor clippath fill 0.2 0.2 0.2 setrgbcolor 7 srand \
+         { newpath 150 20 moveto 150 180 lineto << /Width 26 >> pkribbon } \
+         << /Soft 1 /Offset 20 /Layers 4 /Under [ 0 0 0.5 ] >> pkwet",
+    )
+    .expect("literal");
+    let worst = pixels(&it)
+        .iter()
+        .zip(pixels(&lit))
+        .map(|(a, b)| a.abs_diff(b))
+        .max();
+    assert!(worst > Some(30), "the control should differ: {worst:?}");
+}
+
+/// What the procedure is asked: once per cell (not per pass, never for the
+/// core), at the cell's centre in the grid that is /Box grown by /Offset,
+/// in the user space of the call, with nothing of pkwet's on the stack.
+#[test]
+fn wet_bands_ask_once_per_cell_at_its_centre() {
+    let mut it = fresh(200, 200);
+    it.run_str(
+        "userdict /asked [ ] put userdict /depths [ ] put 0 0 0 setrgbcolor 3 srand \
+         { newpath 20 20 moveto 60 20 lineto << /Width 4 >> pkribbon } \
+         << /Layers 4 /Offset 10 /Box [ 40 50 60 30 ] /Bands [ 2 2 ] \
+            /Under { count /c exch def /y exch def /x exch def \
+                     userdict /asked [ asked aload pop x y ] put \
+                     userdict /depths [ depths aload pop c ] put \
+                     0.5 0.5 0.5 } >> pkwet \
+         asked aload pop depths aload pop",
+    )
+    .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+    let st: Vec<f64> = it
+        .operand_stack()
+        .iter()
+        .map(|o| o.repr().to_string().parse().expect("number"))
+        .collect();
+    // The grid: x 30..110 and y 40..90, 40 by 25 a cell, row by row.
+    assert_eq!(
+        st,
+        [50.0, 52.5, 90.0, 52.5, 50.0, 77.5, 90.0, 77.5, 2.0, 2.0, 2.0, 2.0],
+        "{st:?}"
+    );
+}
+
+/// A procedure that raises inside a banded pass unwinds like an unbanded
+/// one: the depth is put back, no gsave is left over, and the caller's
+/// colour is its own again. So does one that raises in the backdrop.
+#[test]
+fn wet_bands_unwind_on_every_exit() {
+    for body in [
+        "{ newpath 10 10 moveto 100 10 lineto << /Width 8 >> pkribbon nosuchname }",
+        "{ newpath 10 10 moveto 100 10 lineto << /Width 8 >> pkribbon }",
+    ] {
+        for under in ["{ pop pop 0.5 0.5 0.5 }", "{ nosuchname }", "{ pop pop 1 2 }"] {
+            let mut it = fresh(120, 120);
+            it.run_str(&format!(
+                "0.1 0.2 0.3 setrgbcolor 5 srand gsave \
+                 {{ {body} << /Soft 1 /Box [ 10 5 90 10 ] /Bands [ 3 2 ] /Under {under} >> pkwet }} \
+                 stopped pop \
+                 currentrgbcolor pqdepth \
+                 grestore"
+            ))
+            .unwrap_or_else(|e| panic!("{body} {under}: {}", it.error_report(&e)));
+            let st: Vec<String> = it
+                .operand_stack()
+                .iter()
+                .map(|o| o.repr().to_string())
+                .collect();
+            assert_eq!(st.last().map(String::as_str), Some("0"), "{body}: {st:?}");
+            let rgb: Vec<f64> = st[st.len() - 4..st.len() - 1]
+                .iter()
+                .map(|v| v.parse().expect("number"))
+                .collect();
+            assert!(
+                rgb.iter().zip([0.1, 0.2, 0.3]).all(|(a, b)| (a - b).abs() < 1e-5),
+                "{body} {under}: the caller's colour is {rgb:?}"
+            );
+        }
+    }
+}
+
+/// A banded call inside the wrapped procedure of a banded call: each takes
+/// its own frame (the grid, the saved stream and the cell backdrop live
+/// there, not in names the inner call would overwrite), and the whole
+/// nest is within the budget it is charged for.
+#[test]
+fn wet_bands_nest() {
+    let mut it = fresh(200, 200);
+    it.run_str(
+        "0.1 0.1 0.1 setrgbcolor 9 srand \
+         { { newpath 20 40 moveto 180 40 lineto << /Width 10 >> pkribbon } \
+           << /Layers 2 /Offset 6 /Box [ 20 30 160 20 ] /Bands [ 2 1 ] \
+              /Under { pop pop 0.9 0.5 0.1 } >> pkwet } \
+         << /Layers 2 /Offset 6 /Box [ 20 30 160 20 ] /Bands [ 1 2 ] \
+            /Under { pop pop 0.2 0.5 0.9 } >> pkwet \
+         pqdepth",
+    )
+    .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+    assert_eq!(it.operand_stack().last().expect("depth").repr(), "0");
+    assert!(ink_count(&it) > 300, "the nest painted nothing");
+}
+
+/// A loaded colour grades toward the cell's backdrop (frame slot 5, which
+/// `puwet` reads): under a constant procedure a banded pull of a two-colour
+/// stroke is the unbanded literal's, to clip rounding, and under one that
+/// varies down the page it is not.
+#[test]
+fn wet_bands_grade_loaded_colors_toward_the_cell() {
+    for (preset, base) in LOAD_PRESETS {
+        let run = |under: &str| {
+            let it = wet_loaded(
+                "0 0 0 setrgbcolor",
+                &format!(
+                    "newpath 50 160 moveto 350 160 lineto \
+                     << {base} /Colors [[1 0 0] [0 0 1]] /ColorMix 0 >> {preset}"
+                ),
+                &format!("/Direction 270 /OneSided true /Layers 3 /Offset 80 {under}"),
+            );
+            pixels(&it)
+        };
+        let lit = run("/Under [0 1 0]");
+        let worst = |other: Vec<u8>| lit.iter().zip(other).map(|(a, b)| a.abs_diff(b)).max();
+        let same = run("/Box [ 50 150 300 20 ] /Bands [ 2 3 ] /Under { pop pop 0 1 0 }");
+        assert!(
+            worst(same) <= Some(3),
+            "{preset}: a banded loaded pull under a constant procedure"
+        );
+        let varied = run(
+            "/Box [ 50 150 300 20 ] /Bands [ 1 3 ] /Under { exch pop 200 div 0 max 1 min 0 exch 0 exch }",
+        );
+        assert!(
+            worst(varied) > Some(30),
+            "{preset}: the cell backdrop must reach the loaded colours"
+        );
+    }
+}
+
 /// The specimen runs under Ghostscript too (its `exch pop` backdrop and
 /// every key are plain PostScript; its random scatter differs).
 #[test]
