@@ -5,7 +5,8 @@ for documents that look as if they were typed on a real typewriter. The
 maintainer approved it with every recommendation in section 10. #211 built
 sections 2–5 and 7 with flat ink (`lib/typewriter.ps`,
 `notes/211-typewriter-font.md`); its public names are `tw-setup` and
-`tw-set`, and the machine seed is `/Machine`.
+`tw-set`, and the machine seed is `/Machine`. #212 built section 6, the
+ribbon ink (`notes/212-ribbon-ink.md`; "As built" at the end of section 6).
 
 Read these first:
 
@@ -226,6 +227,26 @@ own `gsave`, as drykit does. pscat skips it.
 
 Carbon copies, photocopy loss, stamps and redactions belong to #214, on top of
 this.
+
+**As built (#212).** Steps 1–5 as above, with these choices:
+
+- The weave clip is an `eoclip` of one outer rectangle and the holes (the holes
+  never overlap), not a `rectclip` union: the holes can then be jittered
+  quadrilaterals. A bank of 8 × 8-yarn patches (4 variants × 16 hole levels,
+  0–0.75) is built once at load. A strike lays patches over its glyph at a
+  hashed angle and sub-yarn offset, with a hashed variant per patch. Holes cluster
+  over 2 × 2 yarns, so the voids gather into the blotches the scans show.
+- The spread is split. The body is stroked at 0.3 of #211's spread width, and a
+  feather pass at 0.85 of it goes through a much sparser weave. That gives the
+  ragged edge (M3 and "edge feathering").
+- The hole level is 0.16 at the default `/Ribbon 0.7`, 0.31 at `/worn`, and up to
+  0.75 bone dry. It rises by 0.55 × (1 − pressure) on light strikes, and drifts
+  ±0.06 across the page (ribbon wear, keyed by `/Seed`).
+- A clogged counter fills a band across the counter, from a fixed side per key,
+  over clog × machine wear × pressure of its width. The band's edge is ragged.
+- `/StrikeWear 0` keys every ink draw by the key, not the strike, so a quirks-only
+  page still repeats a key exactly. `/InkModel false` restores #211's flat ink.
+- Not built: the worn band and two-colour bleed (#422).
 
 ## 7. Randomness that stays out of the caller's stream
 

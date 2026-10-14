@@ -253,8 +253,12 @@ set from no variation to a battered machine:
 
 <p><img src="docs/typewriter_specimen.png" width="60%" alt="The /Typewriter specimen"/></p>
 
-The ribbon weave, clogged counters and one-side-heavy keys come with
-#212, the layout API (margins, tabs, strikeovers) with #213.
+The ink (#212) is ribbon ink: the face pressed through inked fabric, so
+the weave's voids show in the letter, the edge feathers, clogged keys fill
+their counters, and density follows pressure and `/Ribbon` (wetness).
+`/InkModel false` gives flat ink. `docs/typewriter/ink_vs_real.png` sets it
+beside the reference scans. The layout API (margins, tabs, strikeovers)
+comes with #213.
 
 ## The font library
 

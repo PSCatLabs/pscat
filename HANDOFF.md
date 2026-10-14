@@ -691,6 +691,15 @@ renders eight examples in both and compares block-downsampled output).
    to draw (`tMbuild`). build.rs's catalog scan rejects `/x N dict def` and
    sees every top-level `def`, so the side dict and the font are filled
    inside `{ ... } exec` (`notes/211-typewriter-font.md`).
+   #212 shipped the ribbon ink (`tInkStrike` in the "ribbon ink" section
+   of `lib/typewriter.ps`): a weave clip (`eoclip` of hashed patches of
+   jittered holes, built once at load), a feather pass, the body, clogged
+   counters and heavy sides; `/InkModel false` is #211's flat ink, byte for
+   byte. At `/StrikeWear 0` the weave is keyed by the key, so quirks-only
+   rows still repeat; tests compare such strikes up to a few pixels of
+   rounding (`nearly_same` in `tests/typewriter.rs`). Tune against
+   `docs/typewriter/ink_vs_real.png` (`docs/typewriter/tools/ink_compare.py`);
+   `notes/212-ribbon-ink.md`.
    #242 shipped the charcoal gallery piece, `gallery/lincoln_charcoal.ps`
    (*Study after Berger, 1864*), and `lib/etching.ps`'s `et-tonemap`, which
    returns a photo as a grid of darkness for any piece that wants a
