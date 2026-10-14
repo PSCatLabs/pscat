@@ -166,6 +166,114 @@ fn a_top_level_stop_with_no_pending_error_is_silent() {
     );
 }
 
+/// Issue #372. `errordict` was an empty dict, so the re-raise idiom
+/// `errordict /rangecheck get exec` failed on its own lookup and
+/// reported `undefined` (OffendingCommand `rangecheck`) where
+/// Ghostscript keeps the name. The cases here were run against
+/// Ghostscript 10.07 first.
+#[test]
+fn an_errordict_handler_re_raises_under_its_own_name() {
+    // One handler per name the interpreter can raise, and `$error`
+    // records the same name.
+    for name in [
+        "stackunderflow",
+        "execstackoverflow",
+        "typecheck",
+        "rangecheck",
+        "undefined",
+        "undefinedresult",
+        "unmatchedmark",
+        "nocurrentpoint",
+        "invalidexit",
+        "dictstackunderflow",
+        "invalidfont",
+        "invalidfileaccess",
+        "undefinedfilename",
+        "syntaxerror",
+        "limitcheck",
+        "ioerror",
+        "invalidrestore",
+        "undefinedresource",
+    ] {
+        assert_eq!(
+            eval(&format!(
+                "{{ /cmd errordict /{name} get exec }} stopped \
+                 {{ $error /errorname get $error /newerror get }} if"
+            )),
+            [format!("/{name}"), "true".to_string()],
+            "errordict /{name} get exec"
+        );
+    }
+}
+
+/// ...the command is the operand the handler was run on, stored as it
+/// is (Ghostscript keeps `(abc)`, `/foo`, `2`), and the handler consumes
+/// it. Operands under it stay.
+#[test]
+fn an_errordict_handler_takes_its_command_from_the_operand_stack() {
+    assert_eq!(
+        eval("{ 1 (abc) errordict /rangecheck get exec } stopped { $error /command get } if"),
+        ["1", "(abc)"]
+    );
+    assert_eq!(
+        eval("{ 7 /foo errordict /typecheck get exec } stopped { $error /command get } if"),
+        ["7", "/foo"]
+    );
+    assert_eq!(
+        eval("{ 2 errordict /typecheck get exec } stopped { $error /command get } if"),
+        ["2"]
+    );
+}
+
+/// ...and a handler run by hand with nothing caught by a `stopped`
+/// reports the error under its name, naming the operand as the offender.
+#[test]
+fn an_uncaught_errordict_handler_is_reported_under_its_own_name() {
+    let mut it = Interp::new();
+    let e = it
+        .run_str("/foo errordict /typecheck get exec")
+        .unwrap_err();
+    assert_eq!(e, PsError::Typecheck);
+    assert_eq!(
+        it.error_report(&e),
+        "%%[ Error: typecheck; OffendingCommand: foo; Line: 1 ]%%"
+    );
+    // `undefined` carries the operand as its payload, like the
+    // interpreter's own.
+    assert_eq!(
+        eval_err("/nosuchthing errordict /undefined get exec"),
+        PsError::Undefined("nosuchthing".to_string())
+    );
+}
+
+/// The reported name survives the idiom the issue was found with: catch
+/// a real error, then raise it again through errordict. The failed
+/// operand stack is not restored (HANDOFF.md), so the handler finds it
+/// empty and falls back to the command `$error` already holds, where
+/// Ghostscript would die with an unrecoverable stackunderflow.
+#[test]
+fn an_errordict_re_raise_after_a_catch_keeps_the_name_and_command() {
+    let mut it = Interp::new();
+    let e = it
+        .run_str(
+            "{ [1] 5 get } stopped { \
+               errordict $error /errorname get get exec } if",
+        )
+        .unwrap_err();
+    assert_eq!(e, PsError::Rangecheck);
+    let report = it.error_report(&e);
+    assert!(
+        report.contains("rangecheck") && report.contains("OffendingCommand: get"),
+        "a re-raise must keep rangecheck and get, got {report}"
+    );
+    // The handler's lookup is no longer an error of its own: both
+    // spellings of the guard from lib/paintkit.ps find it.
+    assert_eq!(
+        eval("errordict /rangecheck known errordict /handleerror known"),
+        ["true", "true"]
+    );
+}
+
 #[test]
 fn def_and_dictionaries() {
     assert_eq!(eval("/x 5 def x"), ["5"]);
