@@ -42,3 +42,10 @@ Verification:
 Not done: nothing deferred.
 
 Also: tests/selftest.rs's pressure-guard probe (`row_5_and_10`) had relied on `def` rejecting the leaked number key; it now fails later with `undefined`, same point (the unguarded call still raises, not silent).
+
+Committed stills: of the 27 `gallery/renders/*.png`, 23 equal this harness's
+render byte for byte. The other four (`hortus`, `hundred_lines`,
+`keepin_it_real`, `varsity_backs`) do not, but the base-commit binary's
+render of each is byte-identical to the branch binary's, so the mismatch
+predates this change (those stills were made with settings other than this
+harness's 144 dpi / `%%BoundingBox` page).
