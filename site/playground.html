@@ -99,6 +99,17 @@ document.getElementById('examples').addEventListener('change', async (e) => {
   srcBox.value = await resp.text();
   start();
 });
+// A gallery page links here with ?example=name.ps to open that program.
+// Only a plain file name is accepted, and only from examples/.
+const wanted = new URLSearchParams(location.search).get('example');
+if (wanted && /^[\w.-]+\.ps$/.test(wanted)) {
+  const resp = await fetch(`examples/${wanted}`);
+  if (resp.ok) {
+    srcBox.value = await resp.text();
+    const pick = document.getElementById('examples');
+    if ([...pick.options].some((o) => o.value === wanted)) pick.value = wanted;
+  }
+}
 start();
 </script>
 </body>

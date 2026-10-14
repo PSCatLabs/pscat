@@ -566,7 +566,10 @@ renders eight examples in both and compares block-downsampled output).
 
 ## Next work, in recommended order
 
-1. **More Gallery II pieces** — the slot stays open by design;
+1. **More gallery pieces** — the slot stays open by design. A new piece
+   adds an entry to `gallery/manifest.json` (#251: the one list behind
+   the site gallery, the README highlights and `show.sh`; never edit
+   `gallery.html`) and runs `python3 scripts/gallery.py sync`.
    `gallery/README.md` is the brief, and Hundred Lines
    (`gallery/hundred_lines.ps`) shows the /HandScript font reused.
    The Stage 15 faces (`lib/fonts/`) and the Stage 20 style packs

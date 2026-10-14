@@ -1,51 +1,132 @@
 # Gallery
 
-Generative art, written in pure PostScript for `pscat` and using only
-the operator set the interpreter had when each piece was made. The six
-originals date to Stage 3 — no `rand`, no `sethsbcolor`, no arrays — so
-they carry their own linear-congruential random generator and HSB→RGB
-converter as PostScript procedures. Ring of Type is the Stage 6 piece
-and leans on what that stage added: fonts, `stringwidth`, `charpath`.
-Hundred Lines opens Gallery II (Stage 10): it reuses the Stage 12
-/HandScript dynamic handwriting font wholesale, pulling two knobs the
-letter demo left alone — the jitter amplitude and pen width are
-overridden per line through the font's scratch dict.
+Generative art written in plain PostScript for `pscat`. Each piece is one
+`.ps` file in this directory with a rendered still in `renders/`; together
+they are the most demanding tests the interpreter has. The published
+[gallery](https://jeromebanks.github.io/postscript_interpreter/gallery.html)
+shows them by category, with a page for each piece.
 
-| Piece | File | Technique |
+**The manifest.** [`manifest.json`](manifest.json) is the one list of what
+the gallery shows. The site's gallery and its per-piece pages, the highlights
+grid in the top-level README, the table below and `./gallery/show.sh` are all
+generated from it. Nobody edits `gallery.html` by hand.
+
+## Adding a piece
+
+1. Write `gallery/<name>.ps`, with a `%%BoundingBox` header that gives the page size.
+2. Render the still to `gallery/renders/<name>.png` (see "Re-rendering the
+   stills" below).
+3. Add an entry to `manifest.json`: title, category, the libraries the file
+   loads, a one-sentence `blurb`, a few sentences on the technique, the `alt`
+   text for the picture, the page size, the slideshow `speed` and the date.
+   Copy a neighbouring entry. Set `featured` only for the handful shown in the
+   README, and `playground` only if the program reads no other file (the
+   browser build has no filesystem).
+4. Run `python3 scripts/gallery.py sync` to refresh the generated tables, then
+   `python3 scripts/gallery.py check`. CI runs the check on every pull
+   request: it fails if a tracked `gallery/*.ps` has no entry, an entry's
+   render is missing, or a generated part is out of date.
+
+The check also keeps the wording newcomer-friendly: describe what the piece
+does, not which project stage or issue produced it.
+
+## The pieces
+
+<!-- gallery:table:start -->
+### Geometry and fractals
+
+Pictures that fall out of a formula: roses, spirals, tilings and fractals.
+
+| Piece | File | How it is made |
 |---|---|---|
-| Golden Bloom | `golden_bloom.ps` | Phyllotaxis: 1,300 florets at the golden angle, √-spaced |
-| Cathedral Rose | `cathedral_rose.ps` | Maurer rose: chords walking r=sin 6θ in 71° and 97° strides |
-| Ember Tree | `ember_tree.ps` | Recursive branching with an LCG; banded dusk gradient; layered sun glow |
-| Fern, After Barnsley | `fern.ps` | Chaos game, 48,000 points over four affine maps |
-| Silk Waves | `silk_waves.ps` | 66 threads displaced by two interfering sine fields |
-| Frost Mandala | `frost_mandala.ps` | Six-fold circle recursion, 11° twist per generation (1,555+ circles) |
-| Ring of Type | `ring_of_type.ps` | One sentence circling 11 shrinking rings, set glyph by glyph; charpath ampersand |
-| Hundred Lines | `hundred_lines.ps` | The Stage 12 /HandScript dynamic font writing punishment lines on a chalkboard — same sentence nine times, no two letters alike, jitter climbing line by line |
-| Hortus Machinalis | `hortus.ps` | (Stage 19) A herbarium plate: three L-system plants grown by turtle, dried blossoms stamped along the plant's own path with `pathforall`, Palatino letterpress |
-| Woven Labyrinth | `woven_labyrinth.ps` | Sébastien Truchet's 1704 two-triangle tile, randomly quarter-turned 256 times (artkit's `truchet`) — the single motif chains into a continuous flowing quilt pattern |
-| Infinite Descent | `infinite_descent.ps` | A Poincaré-disk {7,3} hyperbolic tessellation (artkit's `httile`) — one heptagon reflected across its own edges out to four generations, 232 tiles colored in rings by generation |
-| Recursive Peaks | `recursive_peaks.ps` | A night mountain range built entirely from artkit's fractals section: `gasket`-subdivided low-poly peaks shaded by altitude, a `carpet`-driven sparse starfield, and `edgepoly` koch/quadkoch snowflakes floating overhead |
-| Ripple Range | `ripple_range.ps` | (issue #13) Two decaying ripple sources summed into a height field and swept row by row under `graph.ps`'s `project3` camera — each row an occluding filled ridge, back-to-front painter's algorithm |
-| Field Notes | `field_notes.ps` | (issue #14) A marsh census styled as a naturalist's field journal: `dataviz.ps`'s `barchart` and `linechart` sharing one category axis (weekly sightings against a temperature trend), a species-mix donut with a hand-drawn legend, all lettered in the Stage 12 /HandScript font |
-| The Compositor's Proof | `compositors_proof.ps` | (issue #16) A printer's proof sheet for artkit's paragraph-flow section: a motto set inside a round medallion via `tfflow` and a hand-written circle boundsproc, a justified body paragraph via `tfblock`, and a two-column colophon via `tfcols` that genuinely spills from the first column into the second |
-| Lodestone | `lodestone.ps` | (issue #19) A naturalist's demonstration plate: 1,400 `advect`-traced iron filings swirling around a jittered rock, following a `curl2` flow field built from a hand-composed potential — coherent `noise2` texture plus a radial term, whose perpendicular gradient curls a purely radial field into the concentric loops real filings make around a magnet |
-| Plum Branch in Ink | `plum_branch.ps` | (issues #40/#41) A sumi-e plum-blossom branch where variable width is the whole point: every stroke — trunk, forking branches, grass at the foot, even the background wash — is one bezier or turtle centerline walked by artkit's `walkpath` and filled by paintkit's `pkribbon`, a quadratic pressure curve narrowing each branch to a brush-lifted point, independent start/end tapers on the grass blades, jitter for a loaded-ink edge |
-| Flying White: Reeds at Dusk | `flying_white_reeds.ps` | (issue #80) A wetland at dusk built around paintkit's `pkdry` dry-bristle brush (issue #43): reed stalks each a loaded base and a drier, more broken tip sharing an endpoint, plus a broken reflection on the water and thin dry-brush mist in the sky — the same primitive at three different scales, over a banded `mix3` dusk-palette gradient |
-| Fugitive Pigments | `fugitive_pigments.ps` | (issue #84) A poetry broadside — an original poem on impermanence, typeset in Palatino under a title spray-stenciled through its own `charpath`. The paintkit brushes are the whole illustration: the milky way is `pkspray` cloud and star-dust passes along two shared bezier centerlines, the moon wears a spray halo, the horizon glow is spray hugging a line, the reeds are `pknib` tapers with spray-dab seed heads, and the field is `pkdry` broken texture |
-| Mochi in Denim Blue | `mochi_denim_blue.ps` | (issue #100) A close-cropped portrait study from `references/mochi.jpg`: broad overlapping `pkoil` masses model an orange-sable Pomeranian against a scraped denim-blue canvas, `pkdry` breaks the silhouette into a furry edge, and selectively crisp eyes and nose hold the likeness |
-| First Rain | `first_rain.ps` | (issue #47) A river valley in layered watercolor: paintkit's `pkwash` over a `pkpaper` ground, painted the way a watercolor is — palest and wettest first, then five receding ridges each darker, drier and tighter than the one behind it, every color composited by the renderer over the paint already down rather than guessed in advance. The rain veil is a wash with its edge pooling turned off; the reeds are `pkribbon` drawn under the same wash alpha |
-| Firefly Census | `firefly_census.ps` | (issue #48) A summer field after dark in which every mark is placed by artkit's `scatter` and none by hand: the star field is a `/Weight` procedure (a Milky Way band times coherent `noise2`), the hill's stipple is scattered into the silhouette's own outline captured with `scpath`, the meadow is `/MinSpacing`-separated blade anchors whose height and tone come from their own y, and the fireflies are two passes over one seed — halos, then cores — so every core lands inside its own halo |
-| Out of Register | `out_of_register.ps` | (issue #126) A three-plate risograph sunset misregistered on purpose, in which every tonal mark is a halftonekit cell and none by hand: a teal dot plate (sky and water gradients, 15°), an orange dot plate (linear-cone sun halo plus horizon band, 75°), and a dark line plate (two tent ridges shaded by height fraction, 45°), each shifted a few units so the lattice moves and the image stays — flat sun core, shifted ring, registration crosshairs, plate color bars, and letterpress title in solid key ink |
-| Nightfall, Three Cuts | `nightfall_triptych.ps` | (issue #52) A moonlit ridge over water putting printkit's three presets to work in one scene rather than three specimen boxes: the sky and water are `engraving`'s fine crosshatch at two different angles, the mountains are `woodcut`'s grain-following breakup, the foreground reeds are `linocut`'s bolder, simplified marks. Every silhouette is filled solid ink first, then its own preset runs a second time over the same path with `/Color` set to a *lighter* tone — the "carved-through-to-the-paper" look real relief printmaking gets from gouging a line's worth of wood or lino away, which an ink-only additive preset can't otherwise produce |
-| Keepin' it Real | `keepin_it_real.ps` | (issue #147) The recreated shirt front set in both groovy faces, Bagel Fat One (chosen) and Chewy, same composition, seed and palette, filled with fillkit's GIMP-style plasma through lettering's `/plasma` treatment; `I'm` / `Keepin' it` tuck against the `ea` of `Real` via headline's `hllayout`, and the back's typewriter punchline sits below |
-| Varsity Backs | `varsity_backs.ps` | (issue #167) Two team jerseys seen from behind — cardinal-and-gold and navy-and-white — each carrying `lib/jersey.ps`'s arched name over a large number with the classic layered lettering: a white or gold fill, a thin contrasting inner outline and a dark outer one, tracked capitals on the arch. The garment itself (mesh fabric, rib collar, yoke, side panels, sleeve and hem stripes, size tag, hanger) is specimen art drawn here, not library code: the library sizes the lettering for a print rectangle, which is the area between the yoke and the hem stripes |
-| Alpine Lake | `alpine_lake.ps` | (issue #118, epic #112's capstone) A snow-capped range over a still lake, painted back to front from the epic's brushes with no landscape helper: a criss-cross sky laid out by `pkcrisscross` (#184) and painted with `pkbroad` (#115), `pkspray` clouds and mist softened into the paint beneath by `pkwet` (#113), `pktrowel` snow and shadow planes clipped to each ridge (#111), mist lifted up the near range's foot by a directional `pkwet` (#181), a far forest tapped in with `pkdab` (#117), `pkfan` evergreens (#114), and `pkliner` trunks, grass and water lines (#116). The reflection replays the same self-seeded marks under `1 -1 scale`, one single-colour part at a time, each pulled straight down with directional `pkwet` (#191) and then grazed across. No alpha, so Ghostscript paints the same scene |
-| Lecture 14 | `chalkboard_lecture.ps` | (issue #238, epic #232's chalk track) A slate board as a professor left it after deriving Euler's formula from the Taylor series, across three sliding panels: the series recalled, x = iθ substituted and regrouped into its real and imaginary parts, the result boxed twice in yellow chalk, then a freehand unit circle and Euler's identity circled, with side notes, arrows, underlines and the homework in a corner. Formulas are `lib/mathkit.ps` layouts (`mkalign`, `mkframe`, `mkunderline`, `mkarrow`), inked with `lib/drychalk.ps`'s `dcchalk` on three `dcboard` panels that carry the last lecture (the Gaussian integral and a bell curve) as `/Ghost` writing under eraser swipes. The hand leans further and loosens panel by panel. No alpha, so Ghostscript draws the same board |
-| My Family and Our House | `crayon_drawing.ps` | (issue #240, the crayon track of epic #232) A six-year-old's picture on printer paper, built the way a child builds one from `lib/drycrayon.ps` on drykit's toothed surface: the sky a band of blue scribble across the top and the grass a band along the bottom, both laid in side-by-side patches that run past their edges and leave white seams; a sun far too big, yellow scribble over the blue with a smile; a red house with a brown roof, a path, a tree with apples, flowers, birds and a smoking chimney; four stick figures about as tall as the house; and the name in strokeglyphs' capitals (#236) with a backward S, each letter its own size and lean. Outlines go on last. The drawing is `dywobble`, `dyscribble`, `dyloop`, `dyrays`, `dygrass` and `dyfigure` paths inked by `dycrayon` in the 16-crayon box's colours. The reference comparison is `docs/drymedia/crayon_drawing_compare.jpg` |
-| Study after Berger, 1864 | `lincoln_charcoal.ps` | (issue #242, epic #232) An art student's charcoal portrait of Abraham Lincoln after Anthony Berger's 1864 photograph (`references/lincoln_berger_1864.jpg`). `lib/etching.ps`'s `et-tonemap` reads the photo into a 240 × 300 grid of darkness, and drycharcoal (#241) draws to it in a student's order on drykit's drawing paper: faint `dhsketch` construction lines (head oval, centre line, brow/eye/nose/mouth lines, shoulders), `dhsmudge` stump tone inside the dark masses, `dhhatch` to the photo's values (fine and short in the face, finer still at the features, looser vine strokes in the coat), compressed-charcoal and pencil accents at the brows, eyes, nose and mouth, and hard-eraser `dhlift` streaks in the hair and on the lapel. The coat and the ground fade out raggedly, as in a real study. Renders in Ghostscript with `-dSAFER --permit-file-read=lib/ --permit-file-read=gallery/references/lincoln_berger_1864.jpg` |
-| Evening Stream | `evening_stream.ps` | (issue #187, epic #112's second landscape) An autumn evening: a stream comes out of the glow where the sun went down, over a little fall and between near-black banks, past a cabin with its lamp lit. Painted on one `pkcanvas` (#182) with the round-2 tools and no landscape helper: a criss-cross sky from a broad brush loaded with two neighbouring sky colours (`/Colors`, #183), clouds scumbled in tiny circles (`pkscumblein`, #184) with a lit underside, a backlit wood tapped in with `pktap` and a loaded `pkdab` whose reflection is pulled down whole by one directional `pkwet` (#181), autumn trees with warm `/HighlightColor` and cool `/ShadowColor`, evergreens on a fan loaded dark and lit with `/Light`, knife rocks and cabin, a `pkpull` fall and grass, `pkzigzag` light on the water caught on the canvas weave with `/Touch`, and the meadows', stream's and near banks' ruled edges brushed with `pkbrushedge` (#382). No alpha, so Ghostscript paints the same scene |
+| [Golden Bloom](https://jeromebanks.github.io/postscript_interpreter/gallery-golden-bloom.html) | [`golden_bloom.ps`](golden_bloom.ps) | Each floret sits at the golden angle (about 137.5 degrees) from the last, at a distance that grows with the square root of its number. That one rule packs the disc evenly and produces the interlocking spirals found in sunflowers and pine cones. |
+| [Cathedral Rose](https://jeromebanks.github.io/postscript_interpreter/gallery-cathedral-rose.html) | [`cathedral_rose.ps`](cathedral_rose.ps) | A Maurer rose joins points on the rose curve r = sin 6θ with straight lines, stepping a fixed number of degrees each time. Two walks, one in 71 degree strides and one in 97, are layered; the straight lines alone weave the lace. |
+| [Fern, After Barnsley](https://jeromebanks.github.io/postscript_interpreter/gallery-fern.html) | [`fern.ps`](fern.ps) | Michael Barnsley's fern is built by picking one of four simple transformations at random, over and over, and plotting where the point lands. After 48,000 plots a frond appears, though no line of it was drawn. Change the seed and the same fern grows from different dots. |
+| [Frost Mandala](https://jeromebanks.github.io/postscript_interpreter/gallery-frost-mandala.html) | [`frost_mandala.ps`](frost_mandala.ps) | One circle spawns six smaller circles around its rim, each of which does the same, and every generation is twisted by 11 degrees. The result is a snowflake-like mandala built from more than fifteen hundred circles. |
+| [Woven Labyrinth](https://jeromebanks.github.io/postscript_interpreter/gallery-woven-labyrinth.html) | [`woven_labyrinth.ps`](woven_labyrinth.ps) | Sébastien Truchet's 1704 tile is a square cut along its diagonal into two triangles. Each of 256 copies is turned by a random quarter turn, and because the tile's marks meet at the midpoints of its edges, the single motif chains into continuous paths. It uses artkit's `truchet`. |
+| [Infinite Descent](https://jeromebanks.github.io/postscript_interpreter/gallery-infinite-descent.html) | [`infinite_descent.ps`](infinite_descent.ps) | A single heptagon is reflected across each of its edges, and the copies across theirs, for four generations. The tiles are drawn on the Poincaré disc, where the hyperbolic plane's infinite tiling shrinks toward the rim; 232 tiles are coloured in rings by generation. It uses artkit's `httile`. |
+| [Recursive Peaks](https://jeromebanks.github.io/postscript_interpreter/gallery-recursive-peaks.html) | [`recursive_peaks.ps`](recursive_peaks.ps) | The peaks are triangles subdivided with `gasket` and shaded by altitude, the sparse starfield comes from `carpet`, and the snowflakes floating overhead are `edgepoly` Koch and quadratic Koch curves. Everything is a fractal from artkit's fractals section. |
 
-**Nightfall, Three Cuts departs from `printkit.ps`'s siblings' own precedent — hatchkit/stipplekit/surfacekit/halftonekit each shipped specimen-only, "a primitive gets a specimen, not a gallery card."** Issue #52 explicitly asked for one gallery composition in addition to the specimen sheet, so this is a deliberate one-off, not drift; the next sibling-file author should read it as that, not as a new default.
+### Generative and L-systems
+
+Rules and random numbers that grow into plants, fabrics and fields.
+
+| Piece | File | How it is made |
+|---|---|---|
+| [Ember Tree](https://jeromebanks.github.io/postscript_interpreter/gallery-ember-tree.html) | [`ember_tree.ps`](ember_tree.ps) | Every branch splits into two shorter ones, with the angle and length of each drawn from a small random-number generator the piece carries itself (a linear congruential generator, so the picture is the same every time). The sky is a stack of colour bands, and the sun is several translucent discs. |
+| [Silk Waves](https://jeromebanks.github.io/postscript_interpreter/gallery-silk-waves.html) | [`silk_waves.ps`](silk_waves.ps) | Each thread is one long curve. Two sine waves with different wavelengths push every thread sideways by a different amount along its length, and where the waves reinforce each other the threads gather into silk-like folds. |
+| [Hortus Machinalis](https://jeromebanks.github.io/postscript_interpreter/gallery-hortus.html) | [`hortus.ps`](hortus.ps) | Three plants are grown from short rewriting rules (L-systems) that a turtle follows to draw stems. Dried blossoms are then stamped along each plant's own path by walking it with `pathforall` at even spacing, and the labels are set in Palatino, as a plate deserves. |
+| [Lodestone](https://jeromebanks.github.io/postscript_interpreter/gallery-lodestone.html) | [`lodestone.ps`](lodestone.ps) | Each filing is traced through a flow field with `advect`. The field comes from `curl2` applied to a hand-composed potential, coherent `noise2` texture plus a radial term, whose perpendicular gradient curls a purely radial field into the concentric loops real filings make around a magnet. |
+| [Firefly Census](https://jeromebanks.github.io/postscript_interpreter/gallery-firefly-census.html) | [`firefly_census.ps`](firefly_census.ps) | The star field is a weight procedure (a Milky Way band times coherent `noise2`), the hill's stipple is scattered into the silhouette's own outline captured with `scpath`, the meadow is minimum-spaced grass anchors whose height and tone come from their own height on the page, and the fireflies are two passes over one seed: halos first, then cores, so every core lands inside its own halo. |
+
+### Painting
+
+Brush strokes with bristle, loaded paint, wet edges and paper underneath.
+
+| Piece | File | How it is made |
+|---|---|---|
+| [Plum Branch in Ink](https://jeromebanks.github.io/postscript_interpreter/gallery-plum-branch.html) | [`plum_branch.ps`](plum_branch.ps) | Every stroke in the picture (trunk, forking branches, grass at the foot, even the background wash) is one centre line walked by artkit's `walkpath` and filled by paintkit's `pkribbon`. A pressure curve narrows each branch to a point, the grass blades taper independently at each end, and jitter gives the loaded-ink edge. |
+| [Flying White: Reeds at Dusk](https://jeromebanks.github.io/postscript_interpreter/gallery-flying-white-reeds.html) | [`flying_white_reeds.ps`](flying_white_reeds.ps) | Built around paintkit's `pkdry` dry-bristle brush. Each reed stalk is a loaded base and a drier, more broken tip sharing an endpoint; the water carries a broken reflection and the sky a thin dry-brush mist. The same primitive is used at three scales, over a banded dusk gradient from `mix3`. |
+| [Fugitive Pigments](https://jeromebanks.github.io/postscript_interpreter/gallery-fugitive-pigments.html) | [`fugitive_pigments.ps`](fugitive_pigments.ps) | The poem is about impermanence, typeset in Palatino under a title spray-stencilled through its own `charpath` outline. The illustration is all paintkit brushes: the Milky Way is `pkspray` cloud and star dust along two shared curves, the moon wears a spray halo, the reeds are `pknib` tapers with spray-dab seed heads, and the field is `pkdry` broken texture. |
+| [Mochi in Denim Blue](https://jeromebanks.github.io/postscript_interpreter/gallery-mochi-denim-blue.html) | [`mochi_denim_blue.ps`](mochi_denim_blue.ps) | A close-cropped study made from a photograph. Broad overlapping `pkoil` masses model the orange-sable dog, `pkdry` breaks the silhouette into a furry edge, and selectively crisp eyes and nose hold the likeness. The result is an interpretation, not a traced copy. |
+| [First Rain](https://jeromebanks.github.io/postscript_interpreter/gallery-first-rain.html) | [`first_rain.ps`](first_rain.ps) | paintkit's `pkwash` over a `pkpaper` ground, painted the way a watercolour is: the palest, wettest washes first, then five receding ridges, each darker, drier and tighter than the one behind it. Every colour is composited by the renderer over the paint already down rather than guessed in advance. The rain veil is a wash with its edge pooling turned off, and the reeds are `pkribbon` drawn under the same wash. |
+| [Alpine Lake](https://jeromebanks.github.io/postscript_interpreter/gallery-alpine-lake.html) | [`alpine_lake.ps`](alpine_lake.ps) | Painted back to front from paintkit's brushes, with no landscape helper. The sky is laid out with `pkcrisscross` and painted with `pkbroad`; spray clouds and mist are softened into the paint beneath by `pkwet`; snow and shadow planes come from `pktrowel`, clipped to each ridge; a far forest is tapped in with `pkdab`; evergreens are `pkfan`; trunks, grass and water lines are `pkliner`. The reflection replays the same self-seeded marks upside down, one single-colour part at a time, each pulled straight down with a directional `pkwet` and then grazed across. |
+| [Evening Stream](https://jeromebanks.github.io/postscript_interpreter/gallery-evening-stream.html) | [`evening_stream.ps`](evening_stream.ps) | Painted on one shared canvas (`pkcanvas`) with the newer paintkit tools and no landscape helper. A criss-cross sky comes from a broad brush loaded with two neighbouring sky colours; clouds are scumbled in tiny circles (`pkscumblein`) with a lit underside; a backlit wood is tapped in with `pktap` and a loaded `pkdab`, its reflection pulled down whole by one directional `pkwet`. Autumn trees take warm highlights and cool shadows, evergreens a fan loaded dark and lit with `/Light`, the rocks and cabin come from a palette knife, a `pkpull` fall and grass finish the bank, and `pkzigzag` light on the water is caught on the canvas weave. The stream's banks, its head, the far shore and the near banks' rims are brushed with `pkbrushedge`, so no big mass keeps a ruled vector edge. |
+
+### Printmaking and etching
+
+Halftone dots, hatching and relief cuts: pictures made of marks.
+
+| Piece | File | How it is made |
+|---|---|---|
+| [Out of Register](https://jeromebanks.github.io/postscript_interpreter/gallery-out-of-register.html) | [`out_of_register.ps`](out_of_register.ps) | Every tonal mark is a halftonekit cell, and none is placed by hand. A teal dot plate (sky and water, at 15 degrees), an orange dot plate (the sun's halo and a horizon band, at 75 degrees) and a dark line plate (two ridges shaded by height, at 45 degrees) are each shifted a few units, so the dot lattice moves while the image stays. The flat sun core, the registration crosshairs, the colour bars and the letterpress title are all there too. |
+| [Nightfall, Three Cuts](https://jeromebanks.github.io/postscript_interpreter/gallery-nightfall-triptych.html) | [`nightfall_triptych.ps`](nightfall_triptych.ps) | printkit's three presets are used together in one scene rather than as three separate samples. Sky and water are the engraving preset's fine crosshatch at two angles, the mountains are the woodcut preset's grain-following breakup, and the foreground reeds are the linocut preset's bolder, simpler marks. Each silhouette is filled solid ink first, then its own preset runs a second time over the same path in a lighter colour, giving the carved-through-to-the-paper look of gouged wood or lino. |
+
+### Lettering and type
+
+Text set glyph by glyph, flowed into shapes, or written by hand.
+
+| Piece | File | How it is made |
+|---|---|---|
+| [Ring of Type](https://jeromebanks.github.io/postscript_interpreter/gallery-ring-of-type.html) | [`ring_of_type.ps`](ring_of_type.ps) | Each letter is placed and rotated individually around a circle, using the width of each letter (`stringwidth`) to space it. The ampersand in the middle is drawn from the outline of the character itself (`charpath`), so it can be stroked and filled like any other shape. |
+| [Hundred Lines](https://jeromebanks.github.io/postscript_interpreter/gallery-hundred-lines.html) | [`hundred_lines.ps`](hundred_lines.ps) | The HandScript font draws every letter as a fresh handwritten stroke, so no two copies of the same letter are alike. This piece reuses it wholesale and turns two knobs the font leaves alone: the jitter and the pen width are overridden for each line, so the writing gets sloppier from the first line to the last. |
+| [The Compositor's Proof](https://jeromebanks.github.io/postscript_interpreter/gallery-compositors-proof.html) | [`compositors_proof.ps`](compositors_proof.ps) | A motto is set inside a round medallion with `tfflow` and a hand-written circle boundary procedure. A body paragraph is justified with `tfblock`, and a two-column colophon set with `tfcols` genuinely spills from the first column into the second. |
+
+### Data visualization
+
+Charts and surfaces drawn as clean vector figures.
+
+| Piece | File | How it is made |
+|---|---|---|
+| [Ripple Range](https://jeromebanks.github.io/postscript_interpreter/gallery-ripple-range.html) | [`ripple_range.ps`](ripple_range.ps) | Two ripple sources, each fading with distance, are added into a height field. The surface is swept row by row under `graph.ps`'s `project3` camera, each row a filled ridge that hides the ones behind it, painted back to front (the painter's algorithm). |
+| [Field Notes](https://jeromebanks.github.io/postscript_interpreter/gallery-field-notes.html) | [`field_notes.ps`](field_notes.ps) | `dataviz.ps`'s `barchart` and `linechart` share one category axis, plotting weekly sightings against a temperature trend. A species-mix donut chart has a hand-drawn legend, and all of the lettering is in the HandScript font. |
+
+### Apparel and design
+
+Print artwork for shirts and jerseys.
+
+| Piece | File | How it is made |
+|---|---|---|
+| [Keepin' it Real](https://jeromebanks.github.io/postscript_interpreter/gallery-keepin-it-real.html) | [`keepin_it_real.ps`](keepin_it_real.ps) | The shirt front is set in both groovy faces, Bagel Fat One (the chosen one) and Chewy, with the same composition, seed and palette, and filled with fillkit's plasma through lettering's `/plasma` treatment. The words `I'm` and `Keepin' it` tuck against the `ea` of `Real` through headline's `hllayout`, and the back's typewriter punchline sits below. |
+| [Varsity Backs](https://jeromebanks.github.io/postscript_interpreter/gallery-varsity-backs.html) | [`varsity_backs.ps`](varsity_backs.ps) | Each jersey carries `lib/jersey.ps`'s arched name over a large number with classic layered lettering: a white or gold fill, a thin contrasting inner outline and a dark outer one, with tracked capitals on the arch. The garment itself (mesh fabric, rib collar, yoke, side panels, sleeve and hem stripes, size tag, hanger) is drawn in the piece rather than in the library; the library only sizes the lettering for a print rectangle. |
+
+### Drawing (dry media)
+
+Chalk, crayon and charcoal on slate and toothed paper.
+
+| Piece | File | How it is made |
+|---|---|---|
+| [Lecture 14](https://jeromebanks.github.io/postscript_interpreter/gallery-chalkboard-lecture.html) | [`chalkboard_lecture.ps`](chalkboard_lecture.ps) | Three sliding slate panels show the Taylor series recalled, then x = iθ substituted and regrouped into its real and imaginary parts, the result boxed twice in yellow chalk, and a freehand unit circle with Euler's identity circled. Side notes, arrows, underlines and the homework fill the corners. The formulas are `lib/mathkit.ps` layouts inked with `lib/drychalk.ps`'s `dcchalk`, on `dcboard` panels that still carry the last lecture (the Gaussian integral and a bell curve) as ghost writing under eraser swipes. The hand leans further and loosens panel by panel. |
+| [My Family and Our House](https://jeromebanks.github.io/postscript_interpreter/gallery-crayon-drawing.html) | [`crayon_drawing.ps`](crayon_drawing.ps) | Built the way a child builds one, from `lib/drycrayon.ps` on drykit's toothed surface. The sky is a band of blue scribble across the top and the grass a band along the bottom, both laid in side-by-side patches that run past their edges and leave white seams. A sun far too big, a red house with a brown roof, a path, an apple tree, flowers, birds, a smoking chimney and four stick figures about as tall as the house follow, and the name is set in strokeglyphs capitals with a backward S, each letter its own size and lean. Outlines go on last. The paths come from `dywobble`, `dyscribble`, `dyloop`, `dyrays`, `dygrass` and `dyfigure`, inked by `dycrayon` in the colours of a 16-crayon box. |
+| [Study after Berger, 1864](https://jeromebanks.github.io/postscript_interpreter/gallery-lincoln-charcoal.html) | [`lincoln_charcoal.ps`](lincoln_charcoal.ps) | `lib/etching.ps`'s `et-tonemap` reads the photograph into a 240 by 300 grid of darkness, and drycharcoal draws to it in a student's order on drykit's drawing paper: faint `dhsketch` construction lines (head oval, centre line, brow, eye, nose and mouth lines, shoulders), `dhsmudge` stump tone inside the dark masses, `dhhatch` to the photo's values (fine and short in the face, finer still at the features, looser vine strokes in the coat), compressed-charcoal and pencil accents at the brows, eyes, nose and mouth, and hard-eraser `dhlift` streaks in the hair and on the lapel. The coat and the ground fade out raggedly, as in a real study. |
+<!-- gallery:table:end -->
+
+Nightfall, Three Cuts is a deliberate exception. The sibling printmaking
+libraries (hatchkit, stipplekit, surfacekit, halftonekit) each ship with a
+specimen sheet only, on the rule that a primitive gets a specimen, not a
+gallery card. Nightfall was asked for explicitly, as one composition that
+puts printkit's three presets to work together, so it is a one-off and not a
+new default.
 
 ## Reference portrait study
 

@@ -7,37 +7,31 @@ look at.
   art capability, template, chart type, font, etc.), give it a demo
   somewhere it's actually seen — and match the surface's real
   requirements, not just its most visible file:
-  - A generative-art piece: add it to `gallery/show.sh`'s `PIECES`
-    array *and* the parallel `PAGES`/`SPEEDS` arrays at the same
-    index — all three are indexed together under `set -u`, so a
-    `PIECES`-only addition leaves `--live` mode aborting on an unbound
-    variable the moment it reaches the new entry. Also update
-    `gallery/README.md`, *and* render + commit
-    `gallery/renders/<name>.png` — `show.sh`'s default (non-`--live`)
-    mode silently skips any piece missing that PNG, which defeats the
-    whole point. Record the exact `gs` invocation the piece needs in its header comment and the
-    README entry: a piece that reads a file (`(lib/artkit.ps) run`) needs `-dNOSAFER` or
+  - A generative-art piece: add an entry to `gallery/manifest.json` (copy a neighbour;
+    `gallery/README.md` "Adding a piece" lists the fields), render + commit
+    `gallery/renders/<name>.png`, then run `python3 scripts/gallery.py sync` and
+    `python3 scripts/gallery.py check`. **The manifest is the only list**: the
+    site's `gallery.html` and the per-piece pages, the README highlights, the
+    `gallery/README.md` table and `gallery/show.sh` (which reads each piece's page
+    size and speed from it) are generated from it, so never edit them by hand and
+    never add the piece to `show.sh` or `build_site.sh`. `cargo test` runs the
+    check: a tracked `gallery/*.ps` with no entry, a missing render, or a stale
+    generated table fails it. Record the exact `gs` invocation the piece needs in its
+    header comment: a piece that reads a file (`(lib/artkit.ps) run`) needs `-dNOSAFER` or
     `--permit-file-read=lib/` (the trailing slash is required; `lib` without it still fails) plus relative paths, and gs run in the default safe mode fails it
-    with `invalidfileaccess`.
-  - The published site: a card in `site/gallery.html`, backed by a
-    PNG in `_site/assets/renders/`. For a gallery piece, that PNG
-    comes free from `build_site.sh`'s existing
-    `gallery/renders/*.png` wildcard copy — don't *also* add a
-    `render` call targeting the same basename, since `render` runs
-    after that copy and would overwrite the committed, intentionally
-    2×-supersampled still with a plain canonical-size one
-    (`gallery/README.md`'s "Re-rendering the stills" explains the
-    supersampling). A `render` call in `scripts/build_site.sh` is for
-    anything *without* a pre-rendered gallery still — most
-    `examples/*.ps` pieces. An `<option>` in `site/playground.html`'s
-    picker additionally requires the file be self-contained — no
-    `(lib/x.ps) run` of a sibling library, since the wasm build has no
-    filesystem — and copied into `build_site.sh`'s own source loop, or
-    the playground fetches a 404.
+    with `invalidfileaccess`. Set `"playground": true` only if the file reads no other
+    file (the wasm build has no filesystem); the build then stages it in
+    `_site/examples/` and the piece's page gets an "open in playground" link. The
+    renders are 2x supersampled (`gallery/README.md`, "Re-rendering the stills"): the
+    manifest's render is the committed still, and `build_site.sh` never re-renders it.
+  - The published site, for a specimen or example that is not a gallery piece: a
+    `specimens` entry in `gallery/manifest.json` (a `render` committed in the repo, or a
+    `source` plus a `page` size that `build_site.sh` renders with pscat). Do not edit
+    `site/gallery.html`: it no longer exists.
 
   - A library specimen (a `lib/` file's own showcase, e.g. a brush or paper kit): a committed
-    PNG under `docs/` (the specimen render) plus an optional site card in `site/gallery.html`,
-    backed by a PNG in `_site/assets/renders/` per the rules above.
+    PNG under `docs/` (the specimen render) plus an optional `specimens` entry in
+    `gallery/manifest.json` per the rules above.
 
   A specimen PR that stops at the no-merge path (pitfalls.md "Stop without merging") must **commit
   its render and embed it** (`![...](docs/<name>.png)` in the PR body or a comment, with an absolute
