@@ -27,7 +27,12 @@ motions; nothing existing changed):
   the whole path as a nonzero region (artkit `scpath`/`siinside`), majority
   wins. Per-subpath signed area was the first plan and is wrong at holes (a
   hole's own interior is the hole, so its strokes would go into the mass);
-  the region test also makes mirrored CTMs free. An open subpath (a visible
+  the region test also makes mirrored CTMs free. Each probe is a pair of
+  points, one either side of the walk, and counts only when exactly one is in
+  the mass; otherwise its step is halved and it tries again. A one-sided probe
+  at a step tied to `/Spacing` (the first version) stepped right across a mass
+  thinner than `/Spacing / 12` and chose the wrong side, and the two passes of
+  `pkbrushedge` (different spacings) could disagree (Codex round 1). An open subpath (a visible
   crest) faces `/Outward` by its summed normal, so the crest can be drawn
   either way. Closure comes from `pkscanclosed`, not coincident endpoints.
 - *Lost and found.* Painters' edges are not broken evenly all along; `/Crisp`

@@ -8866,6 +8866,14 @@ systemdict /setalpha known /pwhasalpha exch def
 %   { zzfring } zzfout (a ring with its hole wound the other way) mustbe
 %   { zzfringr } zzfout (the same ring wound the other way round) mustbe
 %   gsave 1 -1 scale { zzfring } zzfout grestore (a ring under 1 -1 scale) mustbe
+%   % A mass far thinner than the probe step still finds its out side (the
+%   % strokes are shorter than the mass is thick, so a wrong side ends in it).
+%   newpath 0 0 moveto 100 0 lineto 100 0.1 lineto 0 0.1 lineto closepath
+%   scpath /zzreg exch def
+%   << /Overlap 0 /Lean 0 /Wander 0 /LengthJitter 0 /Length 0.02 >> pkfeather
+%   /zzok true def
+%   { pop pop } { zzreg scin { /zzok false def } if } { 6 { pop } repeat } { }
+%   pathforall newpath zzok (a 100 x 0.1 sliver) mustbe
 %   % An open crest drawn right to left still brushes up (/Outward 90).
 %   newpath 100 0 moveto 0 0 lineto
 %   << /Overlap 0 /Lean 0 /Wander 0 /LengthJitter 0 /Length 5 >> pkfeather
@@ -9035,19 +9043,33 @@ systemdict /setalpha known /pwhasalpha exch def
         /mfb mfstarts mfs get def
         /mfe mfs mfstarts length 1 sub lt { mfstarts mfs 1 add get 1 sub } { mhn 1 sub } ifelse def
         mfs mfclosed length lt { mfclosed mfs get } { false } ifelse {
-            % Seven probes spread along the subpath, each a small step to the
-            % left of the walk; the majority says which side the paint is on.
-            % A probe at a corner can land either way, so one does not decide.
-            /mfeps mfspacing mfn div 0.5 mul def
+            % Seven probes spread along the subpath, each a pair of points a
+            % small step to either side of the walk; the majority says which
+            % side the paint is on. A probe only counts when exactly one of
+            % its points is in the mass. Otherwise the step jumped right
+            % across a thin mass (or landed on a corner), so it is halved
+            % and tried again: the answer depends on the mass, never on the
+            % stroke spacing (Codex review, round 1).
             /mfleft 0 def /mfvotes 0 def
             0 1 6 {
                 mfe mfb sub 7 div exch 0.5 add mul round cvi mfb add
                 mhstops exch get /mfst exch def
                 mfst 5 get 3 ne {
-                    /mfvotes mfvotes 1 add def
-                    mfst 0 get mfst 2 get 90 add cos mfeps mul add
-                    mfst 1 get mfst 2 get 90 add sin mfeps mul add
-                    mfinmass { /mfleft mfleft 1 add def } if
+                    /mfnx mfst 2 get 90 add cos def
+                    /mfny mfst 2 get 90 add sin def
+                    /mfeps mfspacing mfn div 0.5 mul def
+                    40 {
+                        mfst 0 get mfnx mfeps mul add mfst 1 get mfny mfeps mul add
+                        mfinmass /mfpl exch def
+                        mfst 0 get mfnx mfeps mul sub mfst 1 get mfny mfeps mul sub
+                        mfinmass
+                        mfpl ne {
+                            /mfvotes mfvotes 1 add def
+                            mfpl { /mfleft mfleft 1 add def } if
+                            exit
+                        } if
+                        /mfeps mfeps 0.5 mul def
+                    } repeat
                 } if
             } for
             mfsigns mfs mfleft mfvotes 2 div gt { -1 } { 1 } ifelse put
