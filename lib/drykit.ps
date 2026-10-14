@@ -952,9 +952,16 @@
         % The dkclip region in force (#312), unless it is the one the batch
         % itself was opened in: that one is still in force when the batch
         % renders, and clipping to it twice would thin its edges.
+        % A plain clip changed inside the batch (#444): the gstate taken at
+        % the first stroke after the change, shared until the next one.
         dkSrec /clip
-            userdict /dkClip known { userdict /dkClip get } { null } ifelse
-            dup dkBb /base get eq { pop null } if
+            dkBb /pc get null eq {
+                userdict /dkClip known { userdict /dkClip get } { null } ifelse
+                dup dkBb /base get eq { pop null } if
+            } {
+                dkBb /pc get /dirty eq { dkBb /pc gstate put } if
+                dkBb /pc get
+            } ifelse
         put
         dkSafter {
             % /After (#393): drawn at once after the batch renders, in call
@@ -1004,6 +1011,98 @@
     pop newpath
 } bind def
 
+% clip -   (a record's /clip at render time: a gstate, #444, or a dkclip entry)
+% A gstate is put back whole, so the clip is exactly the one in force when
+% the stroke was made (it replaces the clip in force, never intersects
+% it); the CTM, colour and path it also brings back are the caller's to
+% set next, as after dkZclipin.
+% @internal
+/dkZclipat {
+    dup type /gstatetype eq { setgstate newpath } { dkZclipin } ifelse
+} bind def
+
+% A plain clip inside a dkbatch (#444). While a batch's procedure runs,
+% dkbatch puts these into userdict in place of the clip operators and
+% gsave/grestore (only if every one of those names still resolves to
+% systemdict). The batch dict tracks /pc, the plain clip in force:
+%   null    no plain clip change (the #312 rule: the dkclip entry, if any)
+%   /dirty  changed since the last capture: the next dkstroke takes a gstate
+%   gstate  that capture, shared by every stroke until the clip changes
+% so strokes under one clip share one gstate object, and dkZsame's
+% identity test still groups them. /pcs is a stack of /pc values, pushed
+% by gsave and popped by grestore ([rest pc] links). A change the shadows
+% cannot follow goes to /dirty, never to null: /dirty only costs grouping.
+% Procedures bound before the batch reach the operators directly and are
+% not seen (the old behaviour: the clip in force when the batch ends).
+% @internal
+/dkPdirty {
+    userdict /dkBatch known { userdict /dkBatch get /pc /dirty put } if
+} bind def
+% @internal
+/dkPpush {
+    userdict /dkBatch known {
+        userdict /dkBatch get dup /pcs get 1 index /pc get 2 array astore
+        /pcs exch put
+    } if
+} bind def
+% @internal
+/dkPpop {
+    userdict /dkBatch known {
+        userdict /dkBatch get dup /pcs get dup null eq
+            { pop /pc /dirty put }
+            { 2 copy 0 get /pcs exch put 1 get /pc exch put } ifelse
+    } if
+} bind def
+% @internal
+/dkPclip { clip dkPdirty } bind def
+% @internal
+/dkPeoclip { eoclip dkPdirty } bind def
+% @internal
+/dkPrectclip { rectclip dkPdirty } bind def
+% @internal
+/dkPinitclip { initclip dkPdirty } bind def
+% @internal
+/dkPsetgstate { setgstate dkPdirty } bind def
+% @internal
+/dkPinitgraphics { initgraphics dkPdirty } bind def
+% @internal
+/dkPgsave { dkPpush gsave } bind def
+% @internal
+/dkPgrestore { grestore dkPpop } bind def
+% @internal
+/dkPgrestoreall {
+    grestoreall
+    userdict /dkBatch known { userdict /dkBatch get dup /pcs null put /pc /dirty put } if
+} bind def
+% [name shadow ...]   (the names dkbatch shadows, with their shadows)
+% @internal
+/dkPnames [
+    /clip /dkPclip load /eoclip /dkPeoclip load /rectclip /dkPrectclip load
+    /initclip /dkPinitclip load /setgstate /dkPsetgstate load
+    /initgraphics /dkPinitgraphics load /gsave /dkPgsave load
+    /grestore /dkPgrestore load /grestoreall /dkPgrestoreall load
+] def
+% -   (puts the shadows into userdict, if every name resolves to systemdict)
+% @internal
+/dkPon {
+    true 0 2 dkPnames length 1 sub {
+        dkPnames exch get where { systemdict eq } { false } ifelse and
+    } for
+    { 0 2 dkPnames length 1 sub {
+        userdict exch dkPnames exch 2 getinterval aload pop put
+    } for } if
+} bind def
+% -   (takes back every shadow dkPon put into userdict)
+% @internal
+/dkPoff {
+    0 2 dkPnames length 1 sub {
+        dkPnames exch 2 getinterval aload pop
+        1 index userdict exch known {
+            userdict 2 index get eq { userdict exch undef } { pop } ifelse
+        } { pop pop } ifelse
+    } for
+} bind def
+
 % run R -> estimated cells   (what a catch over the run visits)
 % The run and R are in the run's own user space; dkZsvE is its stretch to
 % canvas space, so the cell size is converted rather than every stop.
@@ -1029,8 +1128,8 @@
 /dkZdraw {
     /dkZg exch def
     gsave
+        dkZg 0 get 5 get /clip get dup null eq { pop } { dkZclipat } ifelse
         dkZg 0 get dup 2 get exch dup 3 get exch 4 get setrgbcolor
-        dkZg 0 get 5 get /clip get dup null eq { pop } { dkZclipin } ifelse
         userdict /pjCTM get setmatrix
         /dkZKc dkZg 0 get 1 get 1.1 mul 0.22 add userdict /pjW get mul def
         [
@@ -1283,7 +1382,7 @@
 /dkZfallout {
     /dkZr exch def
     dkZr /fallout get 0 gt {
-        dkZr /clip get dup null eq { pop } { gsave dkZclipin } ifelse
+        dkZr /clip get dup null eq { pop } { gsave dkZclipat } ifelse
         /dkZfcol dkZr /under get dkZr /pig get dkZr /strength get 0.7 mul dklerp3 def
         /dkZfr dkZr /width get 0.05 mul dup 0.12 lt { pop 0.12 } if def
         dkZr /falls get {
@@ -1443,6 +1542,37 @@
 %   userdict /dkBatch known not (and it leaves no batch open) mustbe
 %%EndSelfTest
 %
+%%SelfTest: dkbatch-keeps-a-plain-clip
+%   % #444: strokes under one plain clip share one gstate (so they can
+%   % share a catch); a stroke after the grestore has none; a new clip
+%   % takes a new gstate. dkBb is the batch dkbatch closed last.
+%   << /Surface /slate >> dksurface
+%   /dktbox { newpath 0 0 moveto 40 0 lineto 40 40 lineto closepath } def
+%   /dktline { newpath 0 5 moveto 50 5 lineto << >> dkstroke } def
+%   gsave
+%   { gsave dktbox clip dktline dktline grestore dktline
+%     gsave dktbox clip dktline grestore
+%     /dktin /clip where { userdict eq } { false } ifelse def } dkbatch
+%   grestore
+%   dktin (inside a batch, clip is drykit's shadow) mustbe
+%   dkBb 0 get /clip get type /gstatetype eq (a stroke under a plain clip keeps a gstate) mustbe
+%   dkBb 0 get /clip get dkBb 1 get /clip get eq (two strokes under one clip share it) mustbe
+%   dkBb 2 get /clip get null eq (a stroke after the grestore keeps none) mustbe
+%   dkBb 3 get /clip get dkBb 0 get /clip get ne (a new clip takes a new gstate) mustbe
+%   userdict /clip known userdict /gsave known or not
+%   (the shadows are gone after the batch) mustbe
+%   gsave
+%   { { dktbox clip 1 0 div } dkbatch } /undefinedresult (an error in the batch) mustfail
+%   grestore
+%   userdict /clip known userdict /grestore known or not
+%   (and after a batch that fails) mustbe
+%   % a caller's own gsave in userdict: no shadows, the old rule
+%   userdict /gsave systemdict /gsave get put
+%   gsave { gsave dktbox clip dktline grestore } dkbatch grestore
+%   userdict /gsave undef
+%   dkBb 0 get /clip get null eq (with a userdict gsave the clip operators are left alone) mustbe
+%%EndSelfTest
+%
 % @kind: Procedure
 % @summary: Draws the current path as a dry stick (chalk, crayon, charcoal) dragged across the surface set by dksurface, in the current colour: pigment lands only where the stick's contact patch meets raised tooth, so light pressure breaks into streaks along the direction of travel and heavy pressure fills the valleys. Tone builds in deposit levels drawn faint-first, so crossings read darker, not lighter. Consumes the current path like fill; takes no rand draws from the caller's stream.
 % @example: << /Surface /greenboard >> dksurface 0.93 0.94 0.9 setrgbcolor newpath 40 60 moveto 300 80 lineto << /Width 3 /Touch { 0.25 sub abs 0.9 exch sub } >> dkstroke
@@ -1469,6 +1599,15 @@
     dkSrecord
 } bind def
 
+% -   (renders the closed batch dkBb: its records level-major, then each
+% /After record on its own, in call order)
+% @internal
+/dkBrender {
+    [ 0 1 dkBb /n get 1 sub { dkBb exch get } for ] dkrender
+    [ 0 1 dkBafter length 1 sub { dkBafter exch get } for ]
+    { [ exch ] dkrender } forall
+} bind def
+
 % @kind: Procedure
 % @summary: Runs a procedure whose dkstroke calls are drawn together, level-major: every stroke's faint level first, then every bright one, so crossing layers of hatching or re-stroked lines stay dark where they cross instead of the second layer's faint level greying the first's core. One pigment per batch: a stroke of another colour raises dkbatch-mixes-pigments unless it is an /After stroke, which is drawn on its own after the batch renders, in call order. Batches don't nest. Each stroke keeps the coordinate system it was given in, and the region of any dkclip it was made inside; otherwise the clip used is the one in force when the batch ends (a plain clip inside the batch is not kept).
 % @example: 0.12 0.12 0.13 setrgbcolor { 0 6 120 { newpath dup 0 moveto 120 add 120 lineto << /Width 1.2 >> dkstroke } for } dkbatch
@@ -1477,19 +1616,31 @@
     userdict /dkBatch known { pop userdict /dkBatch undef dkbatch-cannot-nest } if
     % base: the dkclip region the batch opens in, still in force when it
     % renders, so its records need not re-clip to it (#312)
+    % pc, pcs: the plain clip in force and its gsave stack, kept by the
+    % shadows dkPon installs (#444); g: the graphics state the batch opens
+    % in, for strokes made before a plain clip the batch ends under
     userdict /dkBatch 8 dict dup /n 0 put
         dup /base userdict /dkClip known { userdict /dkClip get } { null } ifelse put
+        dup /pc null put dup /pcs null put dup /g gstate put
     put
-    stopped { userdict /dkBatch undef stop } if
+    dkPon
+    stopped { dkPoff userdict /dkBatch undef stop } if
+    dkPoff
     userdict /dkBatch get /dkBb exch def
     userdict /dkBatch undef
     /dkZbase dkBb /base get def
     % /After strokes (#393), each drawn at once after the batch, in call
     % order, under the same base
     /dkBafter dkBb /after known { dkBb /after get } { 0 dict } ifelse def
-    [ 0 1 dkBb /n get 1 sub { dkBb exch get } for ] dkrender
-    [ 0 1 dkBafter length 1 sub { dkBafter exch get } for ]
-    { [ exch ] dkrender } forall
+    dkBb /pc get null eq {
+        dkBrender
+    } {
+        % The batch ends under a plain clip it made (#444): render in the
+        % state it opened in, so strokes made before that clip are not cut
+        % by it (those made under it carry their own gstate).
+        gsave dkBb /g get setgstate newpath
+        { dkBrender } stopped grestore { stop } if
+    } ifelse
 } bind def
 
 %%SelfTest: dkclip-guards
@@ -1546,9 +1697,16 @@
     grestore
     2 array astore
     userdict /dkClip 3 -1 roll put
+    % Inside a batch under a plain clip (#444), this region changes the
+    % clip the next stroke must capture; the plain clip comes back after.
+    dkPpush
+    userdict /dkBatch known {
+        userdict /dkBatch get /pc get null ne { dkPdirty } if
+    } if
     gsave
     clip newpath
     stopped
+    dkPpop
     userdict /dkClip get 0 get dup null eq
         { pop userdict /dkClip undef } { userdict exch /dkClip exch put } ifelse
     grestore
