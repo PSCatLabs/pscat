@@ -338,14 +338,14 @@ grestore
 - The back row's crest is `0.95` times the front crest's height, in a colour half mixed toward the mist; wrap its crest in `pkwet /Soft 0.6` with `/Under` the colour of what is really behind it (the half-faded range foot), not the mist itself, which would leave a pale rim around the forest.
 - The front row is one body colour, with its light only along the crest, and left crisp. The contrast between a softened back and a crisp front is what puts air between the two. The back row takes no lit pass: it is the paler, hazier plane, and its edge is already the lightest thing in the wood.
 - Lift the lit region by 2 pt (`gsave 0 2 translate` around the lit passes). The tapped crest's dabs (`/Scatter 4`) stand above the fill's edge, so a region on the fill's edge puts the light under a dark rim: a light line under a dark outline, not a lit crest.
-- Reach is a fraction of the region's depth along the light, and the mass is deep everywhere, so the half-light is shallow (0.17, about 4 pt) and the core shallower. A deeper band lights the whole front row and loses the dark mass.
+- `/Reach` is a fraction of the region's depth along the light, which is the mass's whole height (about 22 pt), so where the crest dips to 9 pt a deep reach lights it all the way down. Keep the half-light shallow (0.17, about 4 pt) and the core shallower, or the whole front row is lit and the dark mass is lost.
 - Dab size sets the look: `/Size 1.4 /Scatter 1` is a clump about 4 pt across. At `/Size 1.9 /Scatter 1.8` the clumps read as grey bubbles stuck on the mass.
 - `pkfan` spires: `/Width 5 /Bristles 10 /Splay 0.9 /Ragged 0.5 /Flick 0.9`; a few, at random positions along the crest.
 
 **Failures.**
 - *A ruled, flat edge on the mass.* Always a tapped crest over a filled mass, never the fill alone. The fill's edge is a vector line; for a forest the tapped dabs are the right break, since they read as foliage. A mass that is not foliage (a meadow, a bare bank) takes `pkbrushedge` instead (recipe 10).
 - *A pale rim round the back row.* `/Under` is wrong; see above.
-- *A washed-out front row.* The lit load is too light, the band too deep or the clumps too big, so the front row matches the back row in value. Mix the load from the body toward the glow by 0.4 at most, keep `/Reach` under 0.2, and keep the dabs small.
+- *A washed-out front row.* The lit load is too light, the band too deep or the clumps too big, so the front row matches the back row in value. Keep the loads close to the body (the snippet's are 40% and 80% of the way to a glow that is itself only 35% of the way to a pale colour), keep `/Reach` under 0.2, and keep the dabs small.
 - *Lit bubbles instead of a lit crest.* Too few circles (`/Count` is over the whole region and the band holds a fraction of it, so a thin band needs hundreds) or dabs too big. A lone clump reads as a spot, as on a bush.
 - *The light under a dark rim.* The lit region is not lifted over the tapped crest; see the settings.
 

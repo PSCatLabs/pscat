@@ -28,8 +28,8 @@ row takes no pass: it is the paler, hazier plane.
 
 - First draft mixed toward the sky the wrong way round (`SKY LINE 0.25
   mix3` is 75% sky) and the front row came out lighter than the back row.
-- The mass's depth is its whole height, so even `/Reach 0.28` lit the
-  whole front row where the crest dips. 0.17 and 0.07 keep it a rim.
+- The region's depth is its whole height (about 22 pt), so where the crest
+  dips to 9 pt even `/Reach 0.28` lit the whole front row. 0.17 and 0.07 keep it a rim.
 - `pkdab /Size 1.9 /Scatter 1.8` painted grey bubbles; 1.4/1 and 1.1/0.8
   paint a clump about 4 pt across. A thin band needs hundreds of circles
   because `/Count` is over the whole region (700 and 900 here).
@@ -38,8 +38,12 @@ row takes no pass: it is the paler, hazier plane.
   (`0.64 crest`) fixed it but lifts high humps 3.6 pt and low dips 1.4 pt,
   and breaks the recipe's "mass, crest and spires agree" rule, so the lit
   passes run under `gsave 0 2 translate`, a constant lift.
-- The lit passes leave the colour set to the light's load; the spires and
-  the shore band need `LINE aload pop setrgbcolor` again.
+- The first drafts left the colour set to the light's load, so the spires
+  and the shore band came out light. The lit passes now sit in a `gsave`,
+  and `grestore` puts the body colour back; the `LINE aload pop setrgbcolor`
+  line before the spires is belt and braces.
+- The lit passes use random draws, so the spires land in different places
+  after than before. That is the stream moving, not a change to the spires.
 
 **Cost.** 0.46 s of CPU before, 0.72 s after (CLI, user time); budget 2 s.
 The test's negative check (`PSCAT_TEST_BUDGET_SCALE=0.001`) still fails the
