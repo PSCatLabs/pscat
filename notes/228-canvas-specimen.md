@@ -36,5 +36,5 @@ only the branch has, and S4 adds none).
   clipped in canvas space; set the canvas first".
 - **Catalog check.** `pkcanvas`'s `@summary` already names all five adopters
   (S3), so no edit to `lib/paintkit.ps` was needed (L5, #226, is editing it).
-- Not here: S5 (`pkoil`, `pkdab`, `pknib`, `pkribbon`, a `/Box` wrapper, a
-  `/Touch` procedure, a ground tone) and a site card for the specimen.
+- Not here: S5, which is #231 (more adopters, a `/Box` wrapper, a `/Touch`
+  procedure, a ground tone). No site card: the render is committed under `docs/`.

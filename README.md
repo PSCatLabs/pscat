@@ -744,7 +744,7 @@ plain wet mist and under a lift, and a sky before and after a sweep.
 catch on. Every other "less paint" key in paintkit (`/Load`, `/Charge`,
 `/Coverage`) models the tool, so two strokes that cross each break up on
 their own. `opts pkcanvas` sets, once, a seeded weave of raised knuckles
-(`/Seed`, `/Weave` and `/Mottle` in canvas points, `/Relief` 0..1), and
+(`/Seed` an integer, `/Weave` and `/Mottle` in canvas points, `/Relief` 0..1), and
 `/Touch` (0..1) on `pktrowel`, `pkdry`, `pkfan`, `pkbroad` or `pkliner` lands
 a mark only on the knuckles that pressure reaches: lower is lighter, 0
 deposits nothing, 1 is full contact, identical to leaving it unset. Every
@@ -762,7 +762,8 @@ newpath 18 206 moveto 90 172 150 84 224 40 curveto
 Call `pkcanvas` before any `translate`, `scale` or `rotate` the piece
 applies: the surface is defined in the space in force when it was set, and
 a touched mark is clipped in that canvas space wherever it is painted
-later. `/Touch` with no canvas is an error rather than a silent full mark,
+later. `/Touch` with no canvas is an error rather than a silent full mark (even
+`/Touch 1`, which otherwise renders exactly as unset),
 it takes no `rand` draws (so turning it on moves nothing painted after it),
 and it composes with `/Colors` loads and with `pkwet`, inside which every
 pass catches on the same knuckles. `examples/paintkit_canvas_demo.ps` shows
