@@ -530,8 +530,21 @@ pub struct Dict {
     /// u32 multiply per probe instead of hashing the name's text.
     names: HashMap<u32, Object, IdHashBuilder>,
     /// Exotic entries keep the original key object so `forall` and
-    /// `copy` can hand it back.
-    exotic: HashMap<ExoticKey, (Object, Object)>,
+    /// `copy` can hand it back, plus the sequence number of the key's
+    /// first insertion. The map itself has a randomly seeded hasher (and
+    /// pointer-keyed entries move with ASLR), so `pairs` re-sorts by
+    /// that sequence number to give `forall` a run-to-run stable order.
+    exotic: HashMap<ExoticKey, ExoticEntry>,
+    /// Next insertion sequence number for `exotic`.
+    next_seq: u64,
+}
+
+/// One non-name dictionary entry: insertion sequence, key object, value.
+#[derive(Clone)]
+struct ExoticEntry {
+    seq: u64,
+    key: Object,
+    value: Object,
 }
 
 impl Dict {
@@ -568,17 +581,45 @@ impl Dict {
     pub fn get_obj(&self, key: &Object) -> Result<Option<Object>, PsError> {
         Ok(match classify_key(key)? {
             KeyClass::Name(n) => self.names.get(&n.id()).cloned(),
-            KeyClass::Exotic(k) => self.exotic.get(&k).map(|(_, v)| v.clone()),
+            KeyClass::Exotic(k) => self.exotic.get(&k).map(|e| e.value.clone()),
         })
     }
 
     pub fn put_obj(&mut self, key: &Object, value: Object) -> Result<(), PsError> {
+        if let Value::Name(n) = &key.value {
+            self.names.insert(n.id(), value);
+            return Ok(());
+        }
+        self.put_other(key, value)
+    }
+
+    /// The non-name half of `put_obj`, kept out of line so the name-key
+    /// `def` hot path stays small.
+    #[inline(never)]
+    fn put_other(&mut self, key: &Object, value: Object) -> Result<(), PsError> {
         match classify_key(key)? {
             KeyClass::Name(n) => {
                 self.names.insert(n.id(), value);
             }
             KeyClass::Exotic(k) => {
-                self.exotic.insert(k, (key.clone(), value));
+                // Redefining a key keeps its original slot in `forall`
+                // order; `undef` then `put` moves it to the end.
+                let seq = self.next_seq;
+                match self.exotic.entry(k) {
+                    std::collections::hash_map::Entry::Occupied(mut o) => {
+                        let e = o.get_mut();
+                        e.key = key.clone();
+                        e.value = value;
+                    }
+                    std::collections::hash_map::Entry::Vacant(v) => {
+                        v.insert(ExoticEntry {
+                            seq,
+                            key: key.clone(),
+                            value,
+                        });
+                        self.next_seq += 1;
+                    }
+                }
             }
         }
         Ok(())
@@ -621,15 +662,25 @@ impl Dict {
     }
 
     /// Snapshot of (key, value) pairs for `forall`/`copy`. Name keys come
-    /// back as literal name objects. Order is unspecified, as the PLRM
-    /// allows.
+    /// back as literal name objects. The PLRM leaves the order
+    /// unspecified, but it is stable from run to run: name keys first, in
+    /// the fixed-hasher order of their interned ids (deterministic for a
+    /// given program, not insertion order -- name lookups are the hot
+    /// path and carry no sequence number), then every other key in
+    /// insertion order.
     pub fn pairs(&self) -> Vec<(Object, Object)> {
         let mut out: Vec<(Object, Object)> = self
             .names
             .iter()
             .map(|(k, v)| (Object::lit(Value::Name(name::resolve(*k))), v.clone()))
             .collect();
-        out.extend(self.exotic.values().cloned());
+        if self.exotic.len() < 2 {
+            out.extend(self.exotic.values().map(|e| (e.key.clone(), e.value.clone())));
+        } else {
+            let mut ex: Vec<&ExoticEntry> = self.exotic.values().collect();
+            ex.sort_unstable_by_key(|e| e.seq);
+            out.extend(ex.into_iter().map(|e| (e.key.clone(), e.value.clone())));
+        }
         out
     }
 }
