@@ -1194,6 +1194,32 @@ impl Interp {
         }
     }
 
+    /// `def` for any non-name key (integer, real, boolean, string, ...):
+    /// the general half of [`define_name`](Self::define_name), kept out of
+    /// line so the name-key hot path stays small. `Dict::put_obj` applies
+    /// the PLRM key rules (whole reals become integers, strings become
+    /// names, null is a typecheck).
+    #[inline(never)]
+    pub(crate) fn define_key(&mut self, key: &Object, obj: Object) -> Result<(), PsError> {
+        if let Some(top) = self.dstack.last().cloned() {
+            self.journal_dict(&top);
+            top.borrow_mut().put_obj(key, obj)?;
+        }
+        Ok(())
+    }
+
+    /// `load` for a non-name key: the same top-down walk as
+    /// [`load_id`](Self::load_id), through the general key lookup.
+    #[inline(never)]
+    pub(crate) fn load_key(&self, key: &Object) -> Result<Option<Object>, PsError> {
+        for d in self.dstack.iter().rev() {
+            if let Some(obj) = d.borrow().get_obj(key)? {
+                return Ok(Some(obj));
+            }
+        }
+        Ok(None)
+    }
+
     // --- save/restore (design: VM.md) -----------------------------------
 
     /// Copy-on-write barrier: call *before* mutating an array's contents.
