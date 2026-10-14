@@ -18,10 +18,13 @@ s = 259/72.0
 def ours(img, x, y, w, h, H):
     # PS-point box -> pixel crop
     return img.crop((int(x*s), int((H-y-h)*s), int((x+w)*s), int((H-y)*s)))
-try:
-    font = ImageFont.truetype('/System/Library/Fonts/Helvetica.ttc', 22)
-except Exception:
-    font = ImageFont.load_default()
+def load_font(size):
+    try:
+        return ImageFont.truetype('/System/Library/Fonts/Helvetica.ttc', size)
+    except OSError:
+        return ImageFont.load_default()
+font = load_font(22)
+small = load_font(16)
 sp = Image.open(spec).convert('RGB')
 fg = Image.open(f'{refs}/crayon_fill_ground.jpg').convert('RGB')
 fs = Image.open(f'{refs}/crayon_fill_streaks.jpg').convert('RGB')
@@ -43,7 +46,7 @@ for la, a, lb, b in rows:
     d.text((pad*2+W, y), lb, fill=(60,60,60), font=font)
     img.paste(a.resize((W,Hc)), (pad, y+lab)); img.paste(b.resize((W,Hc)), (pad*2+W, y+lab))
     y += Hc + lab + pad
-d.text((pad, y), 'Left: CC0 crops (MrAlanKoh, Wikimedia Commons). Right: pscat, 259 dpi (about the crops\' scale).', fill=(90,90,90), font=ImageFont.truetype('/System/Library/Fonts/Helvetica.ttc', 16))
+d.text((pad, y), 'Left: CC0 crops (MrAlanKoh, Wikimedia Commons). Right: pscat, 259 dpi (about the crops\' scale).', fill=(90,90,90), font=small)
 img.save(out1)
 # figure: tadpole reference vs dyfigure tadpole
 mo = Image.open(motion).convert('RGB')
@@ -56,5 +59,5 @@ d = ImageDraw.Draw(img2)
 d.text((pad, pad), 'Y4 a 3-year-old\'s tadpole figure: reference', fill=(60,60,60), font=font)
 d.text((pad*2+tw, pad), 'dyfigure /Tadpole true /Hair 9 + dycrayon', fill=(60,60,60), font=font)
 img2.paste(t.resize((tw,th)), (pad, pad+lab)); img2.paste(ofig.resize((tw,oh)), (pad*2+tw, pad+lab))
-d.text((pad, pad+lab+max(th,oh)+12), tad, fill=(90,90,90), font=ImageFont.truetype('/System/Library/Fonts/Helvetica.ttc', 16))
+d.text((pad, pad+lab+max(th,oh)+12), tad, fill=(90,90,90), font=small)
 img2.save(out2)
