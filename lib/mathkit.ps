@@ -51,6 +51,9 @@
 %   \parallel \propto \therefore \because    relations
 %   \circ \ast \star \setminus               binary operators
 %   \hbar \ell \iota \upsilon \Upsilon \langle \rangle \|  letters, brackets
+%   \varphi \vartheta \varkappa \varrho \varpi \varsigma   variant Greek;
+%   \epsilon is the lunate ϵ and \varepsilon the three-shaped ε, as in TeX
+%   (before issue #366 both drew the three-shaped one)
 % Anything else fails with an undefined name that says what it was:
 % `mk-unsupported-command:\oplus`, `mk-unsupported-character:*`, and so
 % on. Nothing is dropped silently. `$` is ignored, so ($x^2$) works.
@@ -108,13 +111,15 @@
 % @internal
 /mkcmds <<
   /alpha [/sym /alpha] /beta [/sym /beta] /gamma [/sym /gamma]
-  /delta [/sym /delta] /epsilon [/sym /epsilon] /varepsilon [/sym /epsilon]
+  /delta [/sym /delta] /epsilon [/sym /lunateepsilon]
+  /varepsilon [/sym /epsilon]
   /zeta [/sym /zeta] /eta [/sym /eta] /theta [/sym /theta]
-  /vartheta [/sym /theta] /kappa [/sym /kappa] /lambda [/sym /lambda]
+  /vartheta [/sym /theta1] /kappa [/sym /kappa]
+  /varkappa [/sym /kappa1] /lambda [/sym /lambda]
   /mu [/sym /mu] /nu [/sym /nu] /xi [/sym /xi] /pi [/sym /pi]
-  /varpi [/sym /pi] /rho [/sym /rho] /varrho [/sym /rho]
-  /sigma [/sym /sigma] /varsigma [/sym /sigma] /tau [/sym /tau]
-  /phi [/sym /phi] /varphi [/sym /phi] /chi [/sym /chi] /psi [/sym /psi]
+  /varpi [/sym /omega1] /rho [/sym /rho] /varrho [/sym /rho1]
+  /sigma [/sym /sigma] /varsigma [/sym /sigma1] /tau [/sym /tau]
+  /phi [/sym /phi] /varphi [/sym /phi.loopy] /chi [/sym /chi] /psi [/sym /psi]
   /omega [/sym /omega]
   /Gamma [/sym /Gamma] /Delta [/sym /Delta] /Theta [/sym /Theta]
   /Lambda [/sym /Lambda] /Xi [/sym /Xi] /Pi [/sym /Pi] /Sigma [/sym /Sigma]
@@ -2184,6 +2189,33 @@
 %   (\\left\\langle \\frac{a}{b} \\right\\rangle) << /Size 60 /Irregular 0 >>
 %   mkmetrics dup /Height get exch /Depth get add 60 gt
 %   (a grown angle bracket spans its fraction) mustbe
+%%EndSelfTest
+%
+%%SelfTest: variant-greek-is-its-own-glyph
+%   % issue #366: the variant commands draw glyphs of their own, not the
+%   % plain letters they used to alias
+%   [ [ (\\varphi) (\\phi) ] [ (\\vartheta) (\\theta) ] [ (\\varpi) (\\pi) ]
+%     [ (\\varrho) (\\rho) ] [ (\\varsigma) (\\sigma) ] [ (\\varkappa) (\\kappa) ]
+%     [ (\\epsilon) (\\varepsilon) ] ] true exch {
+%     aload pop
+%     << /Size 100 /Irregular 0 >> mkmetrics /Width get exch
+%     << /Size 100 /Irregular 0 >> mkmetrics /Width get ne and
+%   } forall
+%   (every variant is wider or narrower than its plain letter) mustbe
+%   % mathkit's \varepsilon is the three-shaped epsilon, as it always was
+%   (\\varepsilon) << /Size 100 /Irregular 0 >> mkmetrics /Width get
+%   (ε) << /Size 100 /Irregular 0 >> mkmetrics /Width get eq
+%   (\varepsilon is still the three-shaped epsilon) mustbe
+%   % the typed Unicode forms reach the same glyphs as the commands
+%   (ϑ) << /Size 100 /Irregular 0 >> mkmetrics /Width get
+%   (\\vartheta) << /Size 100 /Irregular 0 >> mkmetrics /Width get eq
+%   (a typed ϑ is \vartheta) mustbe
+%   (ϵ) << /Size 100 /Irregular 0 >> mkmetrics /Width get
+%   (\\epsilon) << /Size 100 /Irregular 0 >> mkmetrics /Width get eq
+%   (a typed ϵ is \epsilon) mustbe
+%   (\\varphi_i + \\vartheta^2 = \\varkappa \\varrho \\varpi \\varsigma)
+%   << /Size 40 /Seed 3 >> mkmetrics /Width get 0 gt
+%   (variants lay out in scripts and runs) mustbe
 %%EndSelfTest
 %
 %%SelfTest: every-name-in-the-tables-has-a-glyph

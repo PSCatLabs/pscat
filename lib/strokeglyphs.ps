@@ -51,6 +51,18 @@
 % raised, so a reshaped digit reshapes its superscript. The glyphs are
 % named in the Adobe style (/reflexsubset is ⊆, /ringoperator is ∘).
 %
+% --- Subscripts and variant Greek (issue #366) ----------------------------
+% Subscript digits ₀ ₁ ... ₉ with ₊ ₋ ₌ and the letters ₐ ₑ ₒ ₓ ₙ ᵢ ⱼ are
+% derived the way the superscripts are, by the same `sgderive`: the base
+% glyph's skeleton at 0.6 scale, 15 units in from the left, lowered 80
+% units (/zeroinferior ... /ninferior). In sgpath text they follow the
+% letter as a glyph after it; in mathkit `x_2` stays the way to write a
+% subscript. The variant Greek letters ϑ ϰ ϱ ϖ ς ϵ are authored (/theta1
+% /kappa1 /rho1 /omega1 /sigma1 /lunateepsilon). ϕ (U+03D5) draws the
+% existing stroked /phi, which is already that form; the curly φ is
+% /phi.loopy, reached by name (`[/phi.loopy]`) and by mathkit's \varphi.
+% U+03C6 keeps drawing /phi, as it always has.
+%
 % --- Text ---------------------------------------------------------------
 % Text is a string or an array of glyph names. A string is decoded as
 % UTF-8: ASCII maps to handscript's lowercase, digits and punctuation
@@ -182,6 +194,30 @@
             [270 700 270 -250]]
   /omega [600 [130 480 60 300 90 80 190 0 280 70 300 270 300 270 320 70
                410 0 510 80 540 300 470 480]]
+
+  % --- Greek variant forms (issue #366). Each stands beside the plain
+  % letter above, which is untouched: /phi.loopy is the curly phi (the
+  % plain /phi is the stroked one, TeX's \phi), /theta1 the hooked
+  % script theta, /lunateepsilon the C with a bar (the plain /epsilon is
+  % the three-shaped one), /kappa1, /rho1, /omega1 (the pi variant, an
+  % omega with a bar over it) and /sigma1 (the final sigma, with a tail).
+  /phi.loopy [560 [330 710 290 500 190 300 110 120 130 40 230 20 330 90 430 260
+                   520 400 520 450 440 470 370 400 280 200 200 -60 140 -240]]
+  /theta1 [470 [330 640 160 520 80 300 120 90 240 10 350 80 400 280 380 500
+                320 640 330 720 420 740 470 680 410 600]
+               [100 350 380 350]]
+  /lunateepsilon [440 [370 440 280 500 150 470 80 330 80 170 150 40 280 0 380 50]
+                      [90 250 290 250]]
+  /kappa1 [440 [90 500 80 230 90 0]
+               [370 490 270 520 160 440 90 270]
+               [90 270 200 270 290 170 410 0]]
+  /rho1 [470 [60 -140 90 -250 130 -160 120 90 150 330 250 480 380 440 440 270
+              400 90 290 10 180 20 130 80]]
+  /omega1 [600 [130 480 60 300 90 80 190 0 280 70 300 270 300 270 320 70
+                410 0 510 80 540 300 470 480]
+               [60 540 330 560 560 530]]
+  /sigma1 [440 [400 470 290 500 150 450 80 290 120 100 250 10 340 20
+                390 -80 340 -170 280 -230]]
 
   % --- Greek, uppercase. The letters Sigma and Pi; the n-ary sum and
   % product operators are /summation and /product, built by sggrow.
@@ -319,6 +355,8 @@
   8800 /notequal  8804 /lessequal  8805 /greaterequal  8834 /propersubset
   8901 /periodcentered
   933 /Upsilon  953 /iota  959 /o  965 /upsilon
+  962 /sigma1  977 /theta1  981 /phi  982 /omega1  1008 /kappa1  1009 /rho1
+  1013 /lunateepsilon
   8214 /dblbar  8463 /hbar  8467 /ell
   8614 /mapsto  8726 /setminus  8727 /asteriskmath  8728 /ringoperator
   8733 /proportional  8741 /dblbar  8748 /iint  8749 /iiint  8750 /oint
@@ -623,6 +661,33 @@
 % @internal
 /sgtab << >> def
 
+% [base name code-point extra ...] raise -> -   derive scaled-and-shifted
+% copies of glyphs (the superscripts and subscripts): each base skeleton at
+% 0.6 scale, 15 units in from the left, raised by raise plus the row's
+% extra, registered under its name and code point. Runs inside sginit's
+% private dict.
+% @internal
+/sgderive {
+  /sgrz exch def
+  /sgsup exch def
+  0 4 sgsup length 4 sub {
+    /sgsj exch def
+    sgtab sgsup sgsj get get /sgbg exch def
+    sgsup sgsj 3 add get /sgbx exch def
+    sgcmap sgsup sgsj 2 add get sgsup sgsj 1 add get put
+    [ sgbg 0 get 0.6 mul 30 add
+      2 1 sgbg length 1 sub {
+        sgbg exch get /sgbs exch def
+        [ 0 2 sgbs length 2 sub {
+            /sgbk exch def
+            sgbs sgbk get 0.6 mul 15 add
+            sgbs sgbk 1 add get 0.6 mul sgrz add sgbx add
+          } for ]
+      } for ] sgaddbox
+    sgtab exch sgsup sgsj 1 add get exch put
+  } for
+} def
+
 % - -> -   fill sgtab and the ASCII half of sgcmap. Runs once, at load,
 % inside a private dict so its scratch never reaches userdict.
 % @internal
@@ -654,23 +719,20 @@
     /eight /eightsuperior 8312 0  /nine /ninesuperior 8313 0
     /plus /plussuperior 8314 60  /minus /minussuperior 8315 60
     /n /nsuperior 8319 0 ]
-  /sgsup exch def
-  0 4 sgsup length 4 sub {
-    /sgsj exch def
-    sgtab sgsup sgsj get get /sgbg exch def
-    sgsup sgsj 3 add get /sgbx exch def
-    sgcmap sgsup sgsj 2 add get sgsup sgsj 1 add get put
-    [ sgbg 0 get 0.6 mul 30 add
-      2 1 sgbg length 1 sub {
-        sgbg exch get /sgbs exch def
-        [ 0 2 sgbs length 2 sub {
-            /sgbk exch def
-            sgbs sgbk get 0.6 mul 15 add
-            sgbs sgbk 1 add get 0.6 mul 320 add sgbx add
-          } for ]
-      } for ] sgaddbox
-    sgtab exch sgsup sgsj 1 add get exch put
-  } for
+  320 sgderive
+  % Subscripts (issue #366): the same derivation, lowered 80 units so the
+  % digits hang a little below the baseline. The signs again sit 60 higher.
+  [ /zero /zeroinferior 8320 0  /one /oneinferior 8321 0
+    /two /twoinferior 8322 0  /three /threeinferior 8323 0
+    /four /fourinferior 8324 0  /five /fiveinferior 8325 0
+    /six /sixinferior 8326 0  /seven /seveninferior 8327 0
+    /eight /eightinferior 8328 0  /nine /nineinferior 8329 0
+    /plus /plusinferior 8330 60  /minus /minusinferior 8331 60
+    /equal /equalinferior 8332 60
+    /a /ainferior 8336 0  /e /einferior 8337 0  /o /oinferior 8338 0
+    /x /xinferior 8339 0  /n /ninferior 8345 0
+    /i /iinferior 7522 0  /j /jinferior 11388 0 ]
+  -80 sgderive
   % text-size growing symbols, from the same builders sggrow uses
   [ /parenleft 750 250 0  /parenright 750 250 0
     /bracketleft 750 250 0  /bracketright 750 250 0
@@ -1050,6 +1112,47 @@
 %   newpath
 %%EndSelfTest
 %
+%%SelfTest: subscripts-and-variant-greek
+%   % issue #366: each of these was a sg-missing-glyph before
+%   (ϑ ϰ ϱ ϖ ς ϵ ϕ) << >> sgwidth 0 gt (the variant Greek letters measure) mustbe
+%   (H₂O x₀ ₁₂₃₄₅₆₇₈₉ n₊ n₋ a₌b xₙ ₐₑₒₓ ᵢⱼ) << >> sgwidth 0 gt
+%   (subscript digits, signs and letters measure) mustbe
+%   % a subscript is the digit at 0.6 scale, lowered: narrower than the
+%   % digit, and its ink hangs below the baseline
+%   (₂) << /Size 1000 >> sgwidth (2) << /Size 1000 >> sgwidth lt
+%   (a subscript two is narrower than a two) mustbe
+%   /twoinferior << /Size 1000 >> sgmetrics /BBox get 1 get 0 lt
+%   (a subscript two hangs below the baseline) mustbe
+%   % derived from the digit: the same skeleton at 0.6 scale, a 15 unit
+%   % side bearing, lowered 80
+%   /twoinferior << /Size 1000 >> sgmetrics /BBox get 3 get
+%   /two << /Size 1000 >> sgmetrics /BBox get 3 get 0.6 mul 80 sub sub abs 1 lt
+%   (the subscript two is the two, scaled and lowered) mustbe
+%   /twoinferior << /Size 1000 >> sgmetrics /Advance get
+%   /twosuperior << /Size 1000 >> sgmetrics /Advance get eq
+%   (a subscript and a superscript digit advance alike) mustbe
+%   % the subscript sits 400 units below the superscript
+%   /twosuperior << /Size 1000 >> sgmetrics /BBox get 3 get
+%   /twoinferior << /Size 1000 >> sgmetrics /BBox get 3 get sub 400 sub abs 1 lt
+%   (the superscript is 400 units above the subscript) mustbe
+%   % the code points reach the glyphs
+%   (₂) << /Size 50 >> sgwidth /twoinferior << /Size 50 >> sgmetrics /Advance get eq
+%   (U+2082 is the subscript two) mustbe
+%   (ₙ) << /Size 50 >> sgwidth /ninferior << /Size 50 >> sgmetrics /Advance get eq
+%   (U+2099 is the subscript n) mustbe
+%   (ϑ) << /Size 50 >> sgwidth /theta1 << /Size 50 >> sgmetrics /Advance get eq
+%   (U+03D1 is /theta1) mustbe
+%   (ϕ) << /Size 50 >> sgwidth (φ) << /Size 50 >> sgwidth eq
+%   (U+03D5 draws the stroked phi, as U+03C6 does) mustbe
+%   % the variants are drawn differently from the plain letters, and the
+%   % plain letters are untouched
+%   /theta << /Size 1000 >> sgmetrics /Advance get 450 eq
+%   /theta1 << /Size 1000 >> sgmetrics /Advance get 450 ne and
+%   (the variant theta is not the plain theta) mustbe
+%   /epsilon << /Size 1000 >> sgmetrics /Advance get 420 eq
+%   (the plain epsilon keeps its advance) mustbe
+%%EndSelfTest
+%
 %%SelfTest: every-glyph-is-well-formed
 %   /sgt-ok true def
 %   sgtab {
@@ -1085,7 +1188,7 @@
 %
 % (text) x y opts sgpath -
 % @kind: Procedure
-% @summary: Appends the jittered centerline skeleton of a string (UTF-8: Latin, digits, superscript digits, Greek, math operators and relations) or an array of glyph names to the current path at baseline x y, one subpath per pen stroke, painting nothing. Stroke it with a pen or hand it to a dry medium. Uses its own seeded generator, never the caller's rand.
+% @summary: Appends the jittered centerline skeleton of a string (UTF-8: Latin, digits, superscript and subscript digits, Greek with its variant forms, math operators and relations) or an array of glyph names to the current path at baseline x y, one subpath per pen stroke, painting nothing. Stroke it with a pen or hand it to a dry medium. Uses its own seeded generator, never the caller's rand.
 % @example: (lib/handscript.ps) run (lib/strokeglyphs.ps) run newpath (∀ε>0 ∃δ>0) 72 600 << /Size 40 /Seed 7 >> sgpath 2 setlinewidth 1 setlinecap 1 setlinejoin stroke
 % @param: /Size [points] The em size: cap height is 0.7 of it (default 36)
 % @param: /Slant [degrees] Forward lean applied to every glyph as a shear about the baseline (default 0)
