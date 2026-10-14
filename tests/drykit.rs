@@ -977,7 +977,9 @@ fn dkclip_keeps_a_strokes_region_in_a_batch() {
 /// clip the batch ends under (the stroke made before it stays whole), a
 /// plain clip inside a `dkclip` and a `dkclip` inside a plain clip,
 /// `setgstate`, a `save`/`restore` that takes a clip back, an /After
-/// stroke under a plain clip, `initgraphics` and `grestoreall`. Control: with the shadows blocked (a
+/// stroke under a plain clip, `initgraphics`, `grestoreall`, and a
+/// `dkclip` inside a wrapper bound before the batch (the workaround for a
+/// plain clip there, whose restore drykit cannot see: #459). Control: with the shadows blocked (a
 /// caller's userdict `gsave`), the nested ring is lost.
 #[test]
 fn a_plain_clip_in_a_batch_renders_as_at_once() {
@@ -993,7 +995,7 @@ fn a_plain_clip_in_a_batch_renders_as_at_once() {
     const FREE: &str = "newpath 10 92 moveto 130 92 lineto << /Width 4 >> dkstroke";
     const LIFT: &str = "0.2 0.3 0.25 setrgbcolor newpath 10 50 moveto 130 50 lineto \
                         << /Width 6 /After true >> dkstroke";
-    let cases: [(&str, String); 10] = [
+    let cases: [(&str, String); 11] = [
         (
             "a nested eoclip",
             format!("gsave {RING} {CL} grestore {FREE}"),
@@ -1031,14 +1033,25 @@ fn a_plain_clip_in_a_batch_renders_as_at_once() {
             "grestoreall",
             format!("gsave gsave {RING} {CL} grestoreall {FREE}"),
         ),
+        (
+            "a dkclip inside a bound wrapper (the workaround for #459)",
+            format!("{{ {OVAL} {{ {CL} }} dkclip }} dktwrap {FREE}"),
+        ),
     ];
+    // a wrapper bound before any batch: its gsave/grestore are unseen
+    const WRAP: &str = "/dktwrap { gsave exec grestore } bind def ";
     let differ = |a: &[u8], b: &[u8]| a.chunks(4).zip(b.chunks(4)).filter(|(p, q)| p != q).count();
     let at_once = |body: &str| {
         // dkclip with no batch open is plain clip-and-run
-        data(&board(140, 100, 2.0, body))
+        data(&board(140, 100, 2.0, &format!("{WRAP}{body}")))
     };
     for (what, body) in &cases {
-        let batched = data(&board(140, 100, 2.0, &format!("{{ {body} }} dkbatch")));
+        let batched = data(&board(
+            140,
+            100,
+            2.0,
+            &format!("{WRAP}{{ {body} }} dkbatch"),
+        ));
         let d = differ(&at_once(body), &batched);
         assert_eq!(
             d, 0,

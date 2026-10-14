@@ -633,7 +633,10 @@ renders eight examples in both and compares block-downsampled output).
    `dkstroke` after a clip change takes one Level 2 `gstate` (#394), shared
    by the strokes after it, so they still group
    (`notes/444-plain-clip-in-a-batch.md`). Gotcha: a procedure bound before
-   the batch calls the operators directly, and its clip is not seen.
+   the batch calls the operators directly, so neither its clips nor its
+   restores are seen; a callback that clips and strokes inside a bound
+   `gsave exec grestore` wrapper leaves later strokes under that clip
+   (#459; use `dkclip` in such callbacks).
    #393: `dkstroke /After true` in a batch is drawn on its own after the
    batch renders, in call order, in its own colour; `dhsmudge` and `dhlift`
    use it, so they run inside a batch, over everything the batch lays

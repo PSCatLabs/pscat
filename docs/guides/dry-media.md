@@ -30,8 +30,12 @@ the stick's contact patch meets raised tooth.
   differently clipped strokes, such as overlapping hatched regions, can
   share one batch. A plain `clip` (or `eoclip`, `rectclip`) made inside
   the batch is kept the same way: `{ gsave region clip ... grestore }`
-  works, nested and even-odd clips included. Only a clip made inside a
-  procedure you bound before the batch is not seen.
+  works, nested and even-odd clips included. One catch: a procedure
+  bound before the batch calls `clip`, `gsave` and `grestore` directly,
+  so drykit sees neither its clips nor its restores. If you pass a
+  callback that clips and strokes to a bound `gsave ... exec ... grestore`
+  wrapper, the batch's later strokes stay under that clip. Use `dkclip`
+  inside such callbacks.
 - **`/After true`** on a `dkstroke` inside a batch draws that stroke on
   its own after the batch has rendered, in call order, in its own colour.
   It is how an eraser or a smudge can be drawn from inside a batch, over

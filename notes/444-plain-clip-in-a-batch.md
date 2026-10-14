@@ -49,9 +49,19 @@ are taken back when the procedure returns, on an error too.
   systemdict. A caller with its own `gsave` (say) in userdict keeps the
   old rule rather than a half-tracked stack.
 
-Limit: a procedure bound before the batch has `clip` resolved to the
-operator, so its clips are not seen; its strokes use the clip in force
-when the batch ends, which is the old behaviour. drykit's own media
+Limit: a procedure bound before the batch has `clip`, `gsave` and
+`grestore` resolved to the operators, so drykit sees neither its clips
+nor its restores. A clip it makes is simply not kept (its strokes use the
+clip in force when the batch ends, the old behaviour). Worse, a callback
+that clips and strokes inside a bound `gsave ... exec ... grestore`
+wrapper has its clip seen but not the wrapper's `grestore`, so the
+batch's later strokes stay under the stale capture (Codex review round 1;
+#459). A callback that clips but makes no `dkstroke` is harmless (the
+capture is lazy), and `dkclip` inside such a callback is exact (a test
+row). Standard PostScript cannot observe that `grestore`: a per-stroke
+`clippath pathbbox` guard would cost about 1.6 ms per stroke under a
+nested clip (a mask trace, what #312 avoided) and is still not exact;
+#459 lists the options. drykit's own media
 (`dhhatch` etc.) use `dkclip` and are unaffected. pscat has no
 `clipsave`/`cliprestore`; gs does, and they are not shadowed, so in gs a
 `cliprestore` after a stroke captured an inner clip leaves later strokes
@@ -67,15 +77,17 @@ batch (the same call as #393).
 
 ## Evidence
 
-- `tests/drykit.rs` `a_plain_clip_in_a_batch_renders_as_at_once`: ten
+- `tests/drykit.rs` `a_plain_clip_in_a_batch_renders_as_at_once`: eleven
   cases, each byte-identical in a batch to the same program drawn at once:
   an `eoclip` ring nested in a rotated square, `rectclip` then `initclip`,
   a clip the batch ends under (the earlier stroke stays whole), a plain
   clip inside a `dkclip`, a `dkclip` inside a plain clip, `setgstate`,
   `save`/`restore` (also identical on main: a regression guard), an
-  `/After` stroke under a plain clip, `initgraphics` and `grestoreall`.
-  Against main's drykit the first eight cases other than `save`/`restore`
-  differ by 2,488 to 7,813 pixels. Control in the test: the
+  `/After` stroke under a plain clip, `initgraphics`, `grestoreall`, and a
+  `dkclip` inside a bound wrapper. Against main's drykit the nine cases
+  other than `save`/`restore` and the bound-wrapper `dkclip` (both
+  regression guards, identical on main too) differ by 2,488 to 7,813
+  pixels. Control in the test: the
   shadows blocked by a userdict `gsave` lose the ring.
 - `plain_clips_in_a_batch_group_as_dkclip_regions_do`: two overlapping
   hatched regions under `gsave ... clip ... grestore` in one batch are

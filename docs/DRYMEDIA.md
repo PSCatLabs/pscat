@@ -301,9 +301,13 @@ replaces the clip, so the batch's own clip is not applied twice), then the
 record's colour and CTM. A batch that ends still under a clip it made
 renders in the state it opened in, so strokes made before that clip stay
 whole. The shadows install only when all nine names resolve to systemdict
-(a caller's own `gsave` in userdict leaves the old rule), and a procedure
-bound before the batch reaches the operators directly: its clip, as before,
-is the one in force when the batch ends. Two overlapping regions hatched
+(a caller's own `gsave` in userdict leaves the old rule). A procedure bound
+before the batch reaches the operators directly, so drykit sees neither its
+clips nor its restores: a callback that clips and strokes inside a bound
+`gsave ... exec ... grestore` wrapper leaves the batch's later strokes under
+that clip (a callback that clips but makes no stroke is harmless, since the
+capture is lazy). `dkclip` inside such callbacks works; #459 tracks
+noticing the restore. Two overlapping regions hatched
 under plain clips in one batch take the same 6 catches as the same regions
 in `dkclip` calls (96 with a fresh gstate per stroke), and render
 byte-identically to them (`notes/444-plain-clip-in-a-batch.md`).
