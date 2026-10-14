@@ -689,6 +689,16 @@ renders eight examples in both and compares block-downsampled output).
    to draw (`tMbuild`). build.rs's catalog scan rejects `/x N dict def` and
    sees every top-level `def`, so the side dict and the font are filled
    inside `{ ... } exec` (`notes/211-typewriter-font.md`).
+   #242 shipped the charcoal gallery piece, `gallery/lincoln_charcoal.ps`
+   (*Study after Berger, 1864*), and `lib/etching.ps`'s `et-tonemap`, which
+   returns a photo as a grid of darkness for any piece that wants a
+   photo's tones as data. The piece passes its tone map to `dhhatch` as a
+   `/Value` procedure. It renders in about 23 s in pscat and 22 s in gs, against
+   a 60 s budget. Ghostscript needs `--permit-file-read` for the libraries and
+   the JPEG. `notes/242-lincoln-charcoal.md` lists what the drycharcoal tools
+   could not do: a smudge or lift shows its own outline wherever the
+   hatching over it is light, and the hatching is crisper than real
+   stumped charcoal.
 5. Watercolor (issue #47, gated on the architecture spike in issue
    #46): read `docs/WATERCOLOR.md` before starting — it recommends a
    small `alpha: f32` field on `GraphicsState` (already prototyped as

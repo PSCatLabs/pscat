@@ -42,6 +42,7 @@ overridden per line through the font's scratch dict.
 | Alpine Lake | `alpine_lake.ps` | (issue #118, epic #112's capstone) A snow-capped range over a still lake, painted back to front from the epic's brushes with no landscape helper: a criss-cross sky laid out by `pkcrisscross` (#184) and painted with `pkbroad` (#115), `pkspray` clouds and mist softened into the paint beneath by `pkwet` (#113), `pktrowel` snow and shadow planes clipped to each ridge (#111), mist lifted up the near range's foot by a directional `pkwet` (#181), a far forest tapped in with `pkdab` (#117), `pkfan` evergreens (#114), and `pkliner` trunks, grass and water lines (#116). The reflection replays the same self-seeded marks under `1 -1 scale`, one single-colour part at a time, each pulled straight down with directional `pkwet` (#191) and then grazed across. No alpha, so Ghostscript paints the same scene |
 | Lecture 14 | `chalkboard_lecture.ps` | (issue #238, epic #232's chalk track) A slate board as a professor left it after deriving Euler's formula from the Taylor series, across three sliding panels: the series recalled, x = iθ substituted and regrouped into its real and imaginary parts, the result boxed twice in yellow chalk, then a freehand unit circle and Euler's identity circled, with side notes, arrows, underlines and the homework in a corner. Formulas are `lib/mathkit.ps` layouts (`mkalign`, `mkframe`, `mkunderline`, `mkarrow`), inked with `lib/drychalk.ps`'s `dcchalk` on three `dcboard` panels that carry the last lecture (the Gaussian integral and a bell curve) as `/Ghost` writing under eraser swipes. The hand leans further and loosens panel by panel. No alpha, so Ghostscript draws the same board |
 | My Family and Our House | `crayon_drawing.ps` | (issue #240, the crayon track of epic #232) A six-year-old's picture on printer paper, built the way a child builds one from `lib/drycrayon.ps` on drykit's toothed surface: the sky a band of blue scribble across the top and the grass a band along the bottom, both laid in side-by-side patches that run past their edges and leave white seams; a sun far too big, yellow scribble over the blue with a smile; a red house with a brown roof, a path, a tree with apples, flowers, birds and a smoking chimney; four stick figures about as tall as the house; and the name in strokeglyphs' capitals (#236) with a backward S, each letter its own size and lean. Outlines go on last. The drawing is `dywobble`, `dyscribble`, `dyloop`, `dyrays`, `dygrass` and `dyfigure` paths inked by `dycrayon` in the 16-crayon box's colours. The reference comparison is `docs/drymedia/crayon_drawing_compare.jpg` |
+| Study after Berger, 1864 | `lincoln_charcoal.ps` | (issue #242, epic #232) An art student's charcoal portrait of Abraham Lincoln after Anthony Berger's 1864 photograph (`references/lincoln_berger_1864.jpg`). `lib/etching.ps`'s `et-tonemap` reads the photo into a 240 × 300 grid of darkness, and drycharcoal (#241) draws to it in a student's order on drykit's drawing paper: faint `dhsketch` construction lines (head oval, centre line, brow/eye/nose/mouth lines, shoulders), `dhsmudge` stump tone inside the dark masses, `dhhatch` to the photo's values (fine and short in the face, finer still at the features, looser vine strokes in the coat), compressed-charcoal and pencil accents at the brows, eyes, nose and mouth, and hard-eraser `dhlift` streaks in the hair and on the lapel. The coat and the ground fade out raggedly, as in a real study. Renders in Ghostscript with `-dSAFER --permit-file-read=lib/ --permit-file-read=gallery/references/lincoln_berger_1864.jpg` |
 
 **Nightfall, Three Cuts departs from `printkit.ps`'s siblings' own precedent — hatchkit/stipplekit/surfacekit/halftonekit each shipped specimen-only, "a primitive gets a specimen, not a gallery card."** Issue #52 explicitly asked for one gallery composition in addition to the specimen sheet, so this is a deliberate one-off, not drift; the next sibling-file author should read it as that, not as a new default.
 
@@ -58,6 +59,18 @@ ground. The result is an interpretation, not a traced or photorealistic
 copy: `pkoil` supplies the wet planes and bristle ridges, while `pkdry`
 softens selected contour passages like a fan brush dragged through wet
 paint.
+
+`references/lincoln_berger_1864.jpg` is a 480 × 600 greyscale crop of
+the head and shoulders from Anthony Berger's photograph of Abraham
+Lincoln, taken at Mathew Brady's Washington gallery on 9 February 1864
+(Ostendorf O-91). Source: the Library of Congress print, via Wikimedia
+Commons, [File:Abraham Lincoln O-91 by Berger, 1864.png](https://commons.wikimedia.org/wiki/File:Abraham_Lincoln_O-91_by_Berger,_1864.png).
+It is in the **public domain** (a US work published before 1929, and
+marked public domain by Commons and the LoC). The Commons/LoC description
+names it the model for the five-dollar bill's portrait. **Study after
+Berger, 1864** reads its tones from this file; `docs/drymedia/lincoln_compare.png`
+sets the two side by side over real student studies from the #233
+reference board.
 
 ## Viewing the gallery
 

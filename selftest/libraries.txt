@@ -22,3 +22,4 @@ lib/drycrayon.ps
 lib/drycharcoal.ps
 lib/mathkit.ps
 lib/typewriter.ps
+lib/etching.ps
