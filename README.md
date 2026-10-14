@@ -1060,6 +1060,41 @@ newpath 40 40 moveto 260 40 lineto 260 260 lineto 40 260 lineto closepath
 << /Seed 5 >> woodcut
 ```
 
+`lib/drykit.ps` (issue #234; design in `docs/DRYMEDIA.md`) is the core of
+the dry media: chalk, crayon and charcoal. It draws the current path as a
+dry stick dragged across a toothed surface, and pigment lands only where
+the stick's contact patch meets raised tooth.
+- **`dksurface`** names the surface: slate, green board, newsprint, drawing
+  paper or construction paper. Each is a `pkcanvas` tooth plus the
+  surface's colour, so paintkit and drykit marks share one canvas.
+- **`dkstroke`** draws in the current colour.
+  - Light `/Touch` catches only the tooth's peaks. The knuckles are stretched
+    along the direction of travel, so the gaps read as streaks.
+  - `/Tilt` lays the stick on its side.
+  - `/Wear` flattens the tip along a stroke.
+  - `/Lanes`, `/Load` and `/Dropout` break it into striations.
+  - `/Fallout` scatters loose particles beside it.
+  - Tone builds in deposit levels, drawn faint-first.
+- **`{ ... } dkbatch`** draws several `dkstroke` calls level-major, so
+  crossing hatch layers stay dark where they cross.
+
+drykit takes no draws from the caller's `rand` stream. Its surface and
+tool-side randomness come from private seeded generators, and fallout goes
+through a seeded `scatter`, which restores the stream. Adding a stroke
+never moves another mark.
+Fine tooth relies on Ghostscript's fill adjust being off, and drykit turns
+it off itself. `examples/drykit_specimen.ps` shows one stick on all five
+surfaces, at three pressures, at three tilts, with a wearing tip and with a
+crossing.
+
+```postscript
+(lib/artkit.ps) run (lib/paintkit.ps) run (lib/drykit.ps) run
+<< /Surface /greenboard >> dksurface
+0.93 0.94 0.90 setrgbcolor
+newpath 40 60 moveto 300 80 lineto
+<< /Width 3 /Touch 0.7 >> dkstroke
+```
+
 ## The website
 
 **[jeromebanks.github.io/postscript_interpreter](https://jeromebanks.github.io/postscript_interpreter/)**

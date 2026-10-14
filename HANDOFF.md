@@ -597,10 +597,14 @@ renders eight examples in both and compares block-downsampled output).
    `pjhash`, `pjCTM`, `pjP`, `pjW`, `pjM`, `pjR`, `pjmemo`) without editing
    paintkit.ps. A change to those names breaks drykit: the
    `drykit-paintkit-contract` self-test in `lib/drykit.ps` pins them (#270
-   moves them to `lib/toothkit.ps`). Slice D1 of #234 has landed
-   `lib/drykit.ps` (`dksurface`, the internal `dkcatch`, `dkrand`); D2 adds
-   `dkstroke` and `dkbatch`. D1's measured cost is in
-   `notes/234-drykit-core.md` and DRYMEDIA.md 6.1.
+   moves them to `lib/toothkit.ps`). #234 built `lib/drykit.ps`:
+   `dksurface`, `dkstroke` and `dkbatch` are public, and `dkcatch` and
+   `dkrand` are internal. The medium files (#235 chalk, #239 crayon, #241
+   charcoal) are presets over `dkstroke`. Measured cost is in
+   `notes/234-drykit-core.md` and DRYMEDIA.md 6.1. A full board plus ghost
+   text is about 7% over its pscat budget (#283). `dkbatch` keeps each
+   stroke's CTM, so hatch layers can be drawn rotated inside it. It allows
+   one pigment per batch.
 5. Watercolor (issue #47, gated on the architecture spike in issue
    #46): read `docs/WATERCOLOR.md` before starting — it recommends a
    small `alpha: f32` field on `GraphicsState` (already prototyped as

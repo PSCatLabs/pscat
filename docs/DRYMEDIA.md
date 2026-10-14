@@ -2,8 +2,10 @@
 
 This is the design for epic #232. The maintainer approved it on 2026-10-13
 (PR #265), accepting every recommended answer to Q1–Q9 in section 10.
-Slice D1 (#234) is implemented in `lib/drykit.ps`, and its measurements
-are in 6.1; D2 and the rest are not built yet.
+Slices D1 and D2 (#234) are implemented in `lib/drykit.ps`
+(`dksurface`, `dkcatch`, `dkstroke`, `dkbatch`); measurements are in 6.1,
+and the deviations from this text are marked "As built". G1, the medium
+files and the gallery pieces are not built yet.
 
 Read these first:
 
@@ -235,6 +237,17 @@ stroke A's bright core where they cross. Drawing every dim level first
 avoids that, and keeps the monotone "more chalk is brighter" look without
 alpha.
 
+**As built**, a batch record also keeps the CTM its stroke was given in,
+so strokes drawn inside their own `gsave ... rotate ... grestore` render
+in place when the batch ends (the clip used is the one in force then).
+Each subpath is seeded from its own first point, so one call with two
+subpaths and two calls in a batch draw identically. A second pigment in
+one batch raises `dkbatch-mixes-pigments`. Within a pass, runs with the
+same touch, streak and colour share one catch, chunked under `dkbudget`;
+the catch takes a thinned centerline (about one stop per twice its
+reach, the thinned stops' reach grown by the chord deviation), because
+walkpath's pitch made short capsules revisit each cell up to 6 times.
+
 **Across calls, opaque levels lighten crossings.** `prototypes/layering.ps`
 draws two charcoal hatch layers crossing at 90°, each line with a dim level
 and a dark core. Drawn as two calls, the second layer's dim level paints
@@ -259,7 +272,10 @@ a batch, B's dim level would be drawn under A's core. Real wax or charcoal
 in a later colour lies on top.
 
 Ribbon geometry comes from round-capped strokes for constant width, and from
-`pkribbon`'s outline for `/Pressure` and `/Wear`. drykit calls `pkribbon`
+`pkribbon`'s outline for `/Pressure` and `/Wear`. **As built:** a varying
+width is a union of a disc at every stop and a quadrilateral along every
+segment instead, so the ink stays exactly within each segment's wider end,
+the reach `dkcatch` is cut for. pkribbon is not called. drykit calls `pkribbon`
 only for geometry, and all its own state is under `dk-`, so `pkribbon`'s
 habit of clobbering `pk*` names cannot reach it (HANDOFF).
 
@@ -424,6 +440,28 @@ at 144 dpi (`--dpi 144`, gs `-r144`), load average about 3.5:
   dpi), because a knuckle that ends inside an edge pixel still shades it.
   That margin cost the board 60% more cells (2.31M, 24s in pscat), so it
   is `dkslack`, 0 by default, and only the reach test sets it.
+
+**Measured in D2 (#234), through `dkstroke` and `dkbatch`.**
+`surface_cost.ps` MODE 6 draws each glyph as one `dkbatch` of `dkstroke`
+calls (two levels, the landing as a `/Touch` and `/Pressure` profile);
+`/LEVELS 1` is the ghost-text proxy. `portrait_cost.ps` with
+`/ENGINE true` draws all 3000 hatch strokes as `dkstroke` in one
+`dkbatch`. Same machine and method as above:
+
+| Case | Catches | Cells | pscat | gs |
+|---|---|---|---|---|
+| board core (MODE 6) | 2484 | 0.83M | 19.7–19.9s | 10.1–10.3s |
+| ghost-text proxy (MODE 6, one level) | 1242 | 0.43M | 11.5–12.9s | 6.0–6.6s |
+| **board core + ghost** | | | **31.2–32.8s** | **16.1–16.9s** |
+| portrait proxy (`/ENGINE true`) | 35 | 1.76M | 39.8–41.9s | 27.4–27.9s |
+| `examples/drykit_specimen.ps` (trimmed to fit) | | | 7.5s | 3.5s |
+
+The portrait and the specimen are inside 6.2's budget in both
+interpreters. The board core plus a one-level ghost pass is inside it in
+gs and about 7% over in pscat, before board dressing: the engine adds the
+walk, the per-stop resolution and the ink to D1's bare catches, and its
+catches cost about 13 µs per cell in pscat. #283 has the breakdown and the
+levers (chiefly a reach band cut per orientation). #238 is the real piece.
 
 Two things scale beyond that:
 
