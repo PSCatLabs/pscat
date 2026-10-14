@@ -48,3 +48,8 @@ zune-jpeg = "0.5.15"
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 softbuffer = "0.4.8"
 winit = "0.30.13"
+
+# tests/common's CPU-time clock (issue #329); already in the tree through
+# winit and friends, so this adds nothing new to the build.
+[target.'cfg(unix)'.dev-dependencies]
+libc = "0.2"

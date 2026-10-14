@@ -71,6 +71,26 @@ predates it.
   structured a particular way).
 - Tests live alongside the code they test. Add integration or golden-image
   tests where `INIT.md`'s stages call for demonstrable rendering output.
+- **Timing assertions in `tests/` measure CPU time, never wall time**
+  (`notes/329-cpu-time-render-budget-tests.md`). Wall time includes every
+  slice the scheduler gave to other processes, so with several agents or a
+  shared CI runner a 0.6 s render reads 2 s and the test flakes. The
+  helpers are in `tests/common/mod.rs` (`mod common;`), on the test
+  thread's CPU clock (`CLOCK_THREAD_CPUTIME_ID`; a process-wide clock would
+  count the neighbouring tests). Two shapes, both best-of-N so one slow
+  sample cannot fail the suite:
+  - An absolute budget (DRYMEDIA.md 6.2: a CI test render takes 2 s or
+    less): `within_cpu_budget(what, budget, 3, || ...)`. The closure
+    rebuilds whatever it mutates; it returns the fastest try's value.
+  - A "the guard must not walk the path first" test: a bound relative to a
+    same-run baseline (`pitfalls.md`, "Timing assertions in tests"), with
+    both sides timed by `cpu_time_of` / `thread_cpu_time`
+    (`every_walkpath_preset_refuses_a_huge_segment_count_promptly` is the
+    model).
+  Do not use `Instant` in a test. Negative check for a new budget test:
+  `PSCAT_TEST_BUDGET_SCALE=0.001 cargo test --profile ci --test <file>
+  <name>` scales every budget in the run and must make it fail (apply
+  `scale_budget` to a hand-rolled bound).
 - A change to `lib/*.ps` that adds or tightens a *validation guard*
   belongs in a `%%SelfTest` block in that file, next to the guard —
   `./scripts/selftest.sh` runs them and `docs/SELFTEST.md` has the
