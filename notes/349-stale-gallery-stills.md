@@ -17,7 +17,7 @@ Cause of the two real diffs: `git bisect run` (byte-equality with the committed
 still as the test) lands on 4d26e38, "Fix hollow centre when a tiny curve is
 stroked wider than its diameter" (#170). It flattens tiny curves before
 stroking, so the full-stop dots in `hundred_lines` and a few glyph-edge pixels
-in `varsity_backs` anti-alias slightly differently. Both ststills were
+in `varsity_backs` anti-alias slightly differently. Both stills were
 byte-identical on the commit before it (`4d26e38~1`). #289, #317, #327, #300,
 #332 and #344 are not involved.
 
