@@ -52,14 +52,18 @@ def tracked_files():
     return [p for p in out.split("\0") if p]
 
 
+def _blank(m):
+    return re.sub(r"[^\n]", " ", m.group(0))
+
+
+def blank_fences(text):
+    """Blank out fenced code blocks, keeping line numbers."""
+    return re.sub(r"^(```|~~~).*?^\1[^\n]*$", _blank, text, flags=re.S | re.M)
+
+
 def blank_code(text):
     """Blank out fenced blocks and inline code spans, keeping line numbers."""
-
-    def blank(m):
-        return re.sub(r"[^\n]", " ", m.group(0))
-
-    text = re.sub(r"^(```|~~~).*?^\1[^\n]*$", blank, text, flags=re.S | re.M)
-    return re.sub(r"`[^`\n]*`", blank, text)
+    return re.sub(r"`[^`\n]*`", _blank, blank_fences(text))
 
 
 def slugify(heading):
@@ -75,7 +79,7 @@ def slugify(heading):
 def anchors_of(text):
     """The set of fragment names a Markdown file offers."""
     anchors, seen = set(), {}
-    stripped = blank_code(text)
+    stripped = blank_fences(text)  # headings keep their `code` text in the slug
     for m in re.finditer(r"^ {0,3}#{1,6}[ \t]+(.+?)[ \t]*#*[ \t]*$", stripped, flags=re.M):
         slug = slugify(m.group(1))
         n = seen.get(slug, 0)

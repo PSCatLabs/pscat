@@ -28,6 +28,11 @@ class Slugs(unittest.TestCase):
     def test_duplicates_get_suffixes(self):
         self.assertEqual(c.anchors_of("# A\n## A\n## A\n"), {"a", "a-1", "a-2"})
 
+    def test_inline_code_in_a_heading_keeps_its_text(self):
+        self.assertEqual(c.anchors_of("# Using `pscat`\n## `pkwet` and /Touch\n"), {"using-pscat", "pkwet-and-touch"})
+        files = {"a.md": "[x](#using-pscat) [y](b.md#the-pkwet-brush)\n# Using `pscat`\n", "b.md": "## The `pkwet` brush\n"}
+        self.assertEqual(run(files), [])
+
     def test_headings_in_code_fences_do_not_count(self):
         self.assertEqual(c.anchors_of("```\n# not a heading\n```\n# Real\n"), {"real"})
 
