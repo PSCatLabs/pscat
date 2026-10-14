@@ -4868,7 +4868,7 @@
             3 array astore /pqur exch def
             0 1 2 {
                 pqur exch get dup type dup /integertype ne exch /realtype ne and
-                    { pqdnow 1 sub pqdset pkwet-under-procedure-results-must-be-numbers } if
+                    { pop pqdnow 1 sub pqdset pkwet-under-procedure-results-must-be-numbers } if
                 dup 0 lt exch 1 gt or
                     { pqdnow 1 sub pqdset pkwet-under-procedure-results-must-be-0-to-1 } if
             } for
@@ -4991,6 +4991,73 @@
 %   { userdict /pkwetn pkwetn 1 add put }
 %   << /Direction 270 /OneSided true /Offset 6 /Spread 22 >> pkwet
 %   pkwetn 4 eq (/Offset 6 wins over /Spread 22: 4 passes) mustbe
+%%EndSelfTest
+%
+%%SelfTest: pkwet-rejects-malformed-procedural-under
+%   % A procedural /Under needs /At, and /At means nothing without one.
+%   { { } << /Under { pop pop 0 0 0 } >> pkwet }
+%   /pkwet-under-procedure-needs-at
+%   (a procedure without /At) mustguard
+%
+%   { { } << /Under [ 0 0 0 ] /At [ 0 0 ] >> pkwet }
+%   /pkwet-at-needs-an-under-procedure
+%   (/At with a literal /Under) mustguard
+%
+%   { { } << /Under { pop pop 0 0 0 } /At 5 >> pkwet }
+%   /pkwet-at-must-be-an-x-y-pair
+%   (/At as a number) mustguard
+%
+%   { { } << /Under { pop pop 0 0 0 } /At [ 0 ] >> pkwet }
+%   /pkwet-at-must-be-an-x-y-pair
+%   (/At with one element) mustguard
+%
+%   { { } << /Under { pop pop 0 0 0 } /At [ 0 (a) ] >> pkwet }
+%   /pkwet-at-must-be-an-x-y-pair
+%   (/At with a string) mustguard
+%
+%   { { } << /Under { pop pop 0 0 0 } /At { 0 0 } >> pkwet }
+%   /pkwet-at-must-not-be-a-procedure
+%   (/At as a procedure) mustguard
+%
+%   % What the backdrop procedure hands back. Each rejection also puts the
+%   % depth counter and the operand stack back: the guard itself is what
+%   % must not poison the next call.
+%   { { } << /Under { pop pop 1 2 } /At [ 0 0 ] >> pkwet }
+%   /pkwet-under-procedure-must-return-3-numbers
+%   (two results) mustguard
+%
+%   { { } << /Under { pop pop 1 2 3 4 } /At [ 0 0 ] >> pkwet }
+%   /pkwet-under-procedure-must-return-3-numbers
+%   (four results) mustguard
+%
+%   { { } << /Under { } /At [ 0 0 ] >> pkwet }
+%   /pkwet-under-procedure-must-return-3-numbers
+%   (a procedure that leaves the position, four values) mustguard
+%
+%   { { } << /Under { pop pop (a) 0 0 } /At [ 0 0 ] >> pkwet }
+%   /pkwet-under-procedure-results-must-be-numbers
+%   (a string result) mustguard
+%
+%   { { } << /Under { pop pop 2 0 0 } /At [ 0 0 ] >> pkwet }
+%   /pkwet-under-procedure-results-must-be-0-to-1
+%   (a result of 2) mustguard
+%
+%   pqdepth 0 eq (every rejection rolled the depth back) mustbe
+%
+%   % The procedure is asked once per softening pass, at /At plus the
+%   % pass's displacement, and never for the core: a one-sided pull of 12
+%   % over 3 layers goes down 6 and 12 from /At, so y = 94 then 88 (the
+%   % plan is indexed from the core out; the passes are drawn the other way).
+%   userdict /pwul [ ] put
+%   { } << /Direction 270 /OneSided true /Offset 12 /Layers 3
+%          /At [ 5 100 ]
+%          /Under { /pwy exch def /pwx exch def
+%                   userdict /pwul [ pwul aload pop pwx pwy ] put
+%                   0.5 0.5 0.5 } >> pkwet
+%   pwul length 4 eq (asked for the 2 softening passes, not the core) mustbe
+%   pwul 1 get 94 sub abs 0.01 lt (the inner softening pass is 6 down) mustbe
+%   pwul 3 get 88 sub abs 0.01 lt (the outermost pass is 12 down) mustbe
+%   pwul 0 get 5 sub abs 3 lt (x stays near /At) mustbe
 %%EndSelfTest
 %
 % @kind: Procedure
