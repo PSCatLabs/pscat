@@ -806,6 +806,27 @@ graze it across. `examples/paintkit_wet_pull_demo.ps` shows a
 reflection sharp, pulled and pulled-then-grazed, a mountain foot under
 plain wet mist and under a lift, and a sky before and after a sweep.
 
+`/Under` may also be a procedure `x y -> r g b` (issue #179) for a backdrop
+that changes across the mark: a cloud over a graded sky, mist over a range
+that fades into it. With one colour the outer passes are right at one end and
+leave a pale or dark rim at the other. Give `/At [x y]` (where the mark sits,
+in the user space you call pkwet in) and each softening pass asks the
+procedure for the backdrop at `/At` plus its own displacement:
+
+```postscript
+{ ... cloud ... }
+<< /Soft 1 /Offset 34 /At [135 70] /Under { exch pop skyat } >> pkwet
+```
+
+The procedure runs inside pkwet's frame, so it must be a pure function: no
+painting, no `pkwet`, no reliance on the operand stack, and exactly three
+numbers in 0..1 out (anything else is a named error). The question is per
+pass, not per pixel, so a mark tall against the gradient is better split into
+several calls, each with its own `/At`. A literal `[r g b]` behaves exactly
+as before. `examples/paintkit_wet_under_demo.ps` sets one cloud over a strong
+sky gradient with a constant and a procedural `/Under`
+(`docs/paintkit_wet_under_demo.png`).
+
 `pkcanvas` and `/Touch` (issue #182) give light strokes one canvas to
 catch on. Every other "less paint" key in paintkit (`/Load`, `/Charge`,
 `/Coverage`) models the tool, so two strokes that cross each break up on

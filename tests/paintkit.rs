@@ -7413,6 +7413,374 @@ fn ghostscript_accepts_the_directional_wet_demo() {
     );
 }
 
+// --- pkwet: a procedural /Under (issue #179) -------------------------
+//
+// /Under may be `x y -> r g b`, asked once per softening pass at /At plus
+// the pass's displacement. What has to hold: a literal [r g b] is untouched
+// (the byte-identity half is scripts/identity_check.sh against the
+// committed renders), a procedure that always answers the literal's colour
+// draws exactly what the literal does, the rim over a graded backdrop
+// really does go, and every malformed answer is a named error that leaves
+// pkwet usable.
+
+/// A cloud sprayed over a 300x150 vertical gradient, softened with
+/// `under_opts`. The same marks and seed whichever /Under is given.
+fn graded_cloud(under_opts: &str) -> Interp {
+    let mut it = fresh(300, 150);
+    it.run_str(&format!(
+        "/skyat {{ 150 div 0 max 1 min /skt exch def \
+           [ 0.98 0.86 0.68 ] [ 0.06 0.16 0.50 ] skt mix3 }} def \
+         0 1 149 {{ /gy exch def gy skyat setrgbcolor \
+           newpath 0 gy moveto 300 gy lineto 300 gy 2 add lineto 0 gy 2 add lineto \
+           closepath fill }} for \
+         0.99 0.98 0.97 setrgbcolor 41 srand \
+         {{ newpath 50 68 moveto 100 84 150 56 215 74 curveto \
+            << /Nozzle 10 /Density 380 /Falloff 1 /Speck 1.1 /Overspray 0.4 >> pkspray \
+            newpath 75 62 moveto 130 70 170 54 235 64 curveto \
+            << /Nozzle 8 /Density 300 /Falloff 1 /Speck 1.1 /Overspray 0.45 >> pkspray }} \
+         << /Soft 1 /Offset 34 /Layers 6 {under_opts} >> pkwet"
+    ))
+    .unwrap_or_else(|e| panic!("{under_opts}: {}", it.error_report(&e)));
+    it
+}
+
+/// How far the fringe of `graded_cloud` is from "cloud blended into the
+/// local sky": each pixel's residual after the best blend between the sky
+/// at its own height and the cloud's cream, summed over the page rows
+/// `gy` (height above the horizon). A pass mixed toward the wrong backdrop
+/// is a colour no such blend makes.
+fn rim_residual(it: &Interp, gy: std::ops::Range<u32>) -> f64 {
+    let (top, low, cream) = ([0.06, 0.16, 0.50], [0.98, 0.86, 0.68], [0.99, 0.98, 0.97]);
+    let mut sum = 0.0;
+    for gy in gy {
+        let t = gy as f64 / 150.0;
+        let sky: Vec<f64> = (0..3).map(|c| low[c] + (top[c] - low[c]) * t).collect();
+        let d: Vec<f64> = (0..3).map(|c| cream[c] - sky[c]).collect();
+        let dd: f64 = d.iter().map(|v| v * v).sum();
+        for x in 0..300u32 {
+            let p = it.gfx().pixmap.pixel(x, 149 - gy).expect("in bounds");
+            let v = [p.red(), p.green(), p.blue()].map(|c| c as f64 / 255.0);
+            let v: Vec<f64> = (0..3).map(|c| v[c] - sky[c]).collect();
+            let a = (v.iter().zip(&d).map(|(a, b)| a * b).sum::<f64>() / dd).clamp(0.0, 1.0);
+            sum += (0..3)
+                .map(|c| (v[c] - a * d[c]).powi(2))
+                .sum::<f64>()
+                .sqrt();
+        }
+    }
+    sum
+}
+
+/// The acceptance criterion: over a strong vertical gradient the one-colour
+/// /Under (the sky at the cloud's centre, which is what an artist
+/// hand-matches) leaves a rim, and the procedure removes most of it.
+/// Measured when this was written, rows 15..135: 264.6 against 121.2
+/// (2.2x). Below the cloud, where the gradient is furthest from the
+/// hand-matched colour, 206.9 against 80.6 (2.6x); above it, 57.7 against
+/// 40.6, a smaller win, so only the total and the lower half are asserted.
+/// The bound is 1.6x so a re-tuned brush cannot flip it, but a procedure
+/// that was silently ignored (or evaluated at one fixed point) gives 1.0x.
+#[test]
+fn wet_procedural_under_removes_the_rim_over_a_gradient() {
+    let constant =
+        graded_cloud("/Under [ 0.06 0.16 0.50 ] [ 0.98 0.86 0.68 ] 70 150 div mix3 3 array astore");
+    let procedural = graded_cloud(
+        "/At [ 135 70 ] /Under { exch pop 150 div 0 max 1 min /skt exch def \
+           [ 0.98 0.86 0.68 ] [ 0.06 0.16 0.50 ] skt mix3 }",
+    );
+    let (c, p) = (
+        rim_residual(&constant, 15..135),
+        rim_residual(&procedural, 15..135),
+    );
+    assert!(
+        c > 1.6 * p,
+        "the procedure should cut the rim: constant {c:.1}, procedural {p:.1}"
+    );
+    let (c, p) = (
+        rim_residual(&constant, 15..70),
+        rim_residual(&procedural, 15..70),
+    );
+    assert!(
+        c > 1.6 * p,
+        "the rim below the cloud should go: constant {c:.1}, procedural {p:.1}"
+    );
+}
+
+/// A procedure that always answers the literal's colour draws what the
+/// literal draws, to the byte: the plan, the draws and the mixes are the
+/// same ones, and the procedure is ignored for everything but the colour.
+/// Isotropic and directional, one-colour inheritance.
+#[test]
+fn wet_procedural_under_that_is_constant_matches_the_literal() {
+    for opts in [
+        "/Soft 0.9",
+        "/Soft 1 /Offset 20 /Layers 5 /Pickup 0.7",
+        "/Direction 270 /OneSided true /Offset 18",
+        "/Direction 0 /Offset 12 /Stretch 3",
+        "/Soft 0",
+    ] {
+        let run = |under: &str| {
+            let mut it = fresh(400, 200);
+            it.run_str(&format!(
+                "0.1 0.2 0.3 setrgbcolor 11 srand {{ {WET_MARK} }} << {opts} {under} >> pkwet"
+            ))
+            .unwrap_or_else(|e| panic!("{opts}: {}", it.error_report(&e)));
+            pixels(&it)
+        };
+        assert_eq!(
+            run("/Under [ 0.62 0.72 0.86 ]"),
+            run("/At [ 200 100 ] /Under { pop pop 0.62 0.72 0.86 }"),
+            "{opts}: a constant procedure must match the literal"
+        );
+    }
+}
+
+/// Loaded colours read the per-pass backdrop through `puwet` (frame slot
+/// 7), so a pull of a two-colour stroke grades the same under a constant
+/// procedure as under the literal.
+#[test]
+fn wet_procedural_under_grades_loaded_colors_like_the_literal() {
+    for (preset, base) in LOAD_PRESETS {
+        let run = |under: &str| {
+            let it = wet_loaded(
+                "0 0 0 setrgbcolor",
+                &format!(
+                    "newpath 50 160 moveto 350 160 lineto \
+                     << {base} /Colors [[1 0 0] [0 0 1]] /ColorMix 0 >> {preset}"
+                ),
+                &format!("/Direction 270 /OneSided true /Layers 3 /Offset 80 {under}"),
+            );
+            pixels(&it)
+        };
+        assert_eq!(
+            run("/Under [0 1 0]"),
+            run("/At [ 200 100 ] /Under { pop pop 0 1 0 }"),
+            "{preset}: loaded colours under a constant procedure"
+        );
+    }
+}
+
+/// And it is really per pass: a procedure whose answer depends on y gives
+/// the passes different backdrops, so a loaded pull over a gradient is not
+/// the literal's render (guards slot 7 and the per-pass read in `puwet`
+/// against being a constant in disguise).
+#[test]
+fn wet_procedural_under_varies_per_pass_for_loaded_colors_too() {
+    let preset = "pkbroad";
+    let base = "/Width 50 /Charge 1 /Depletion 0 /Edge 0 /ColorJitter 0";
+    let run = |under: &str| {
+        let it = wet_loaded(
+            "0 0 0 setrgbcolor",
+            &format!(
+                "newpath 50 160 moveto 350 160 lineto \
+                 << {base} /Colors [[1 0 0] [0 0 1]] /ColorMix 0 >> {preset}"
+            ),
+            &format!("/Direction 270 /OneSided true /Layers 3 /Offset 80 {under}"),
+        );
+        pixels(&it)
+    };
+    assert_ne!(
+        run("/Under [0 1 0]"),
+        run("/At [ 200 160 ] /Under { exch pop 200 div 0 max 1 min 0 exch 0 exch }"),
+        "a per-pass backdrop must reach the loaded colours"
+    );
+}
+
+/// What the procedure is asked: once per softening pass, never for the
+/// core, at /At plus that pass's displacement, in the user space of the
+/// call, with nothing of pkwet's on the operand stack.
+#[test]
+fn wet_procedural_under_is_asked_per_pass_at_the_displaced_point() {
+    let mut it = fresh(200, 200);
+    it.run_str(
+        "userdict /asked [ ] put userdict /depths [ ] put \
+         1 0 0 setrgbcolor 3 srand \
+         { newpath 20 20 moveto 60 20 lineto << /Width 4 >> pkribbon } \
+         << /Direction 270 /OneSided true /Offset 12 /Layers 3 /At [ 5 100 ] \
+            /Under { count /c exch def /y exch def /x exch def \
+                     userdict /asked [ asked aload pop x y ] put \
+                     userdict /depths [ depths aload pop c ] put \
+                     0.5 0.5 0.5 } >> pkwet \
+         asked aload pop depths aload pop count",
+    )
+    .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+    let st: Vec<f64> = it
+        .operand_stack()
+        .iter()
+        .map(|o| o.repr().to_string().parse().expect("number"))
+        .collect();
+    // asked: x1 y1 x2 y2, depths: d1 d2, then the count of this probe's own items.
+    assert_eq!(st.len(), 7, "{st:?}");
+    assert!(
+        (st[1] - 94.0).abs() < 0.01 && (st[3] - 88.0).abs() < 0.01,
+        "{st:?}"
+    );
+    assert!(
+        (st[0] - 5.0).abs() < 3.0 && (st[2] - 5.0).abs() < 3.0,
+        "{st:?}"
+    );
+    // The procedure saw its two position operands and nothing else: the
+    // count at entry is 2, plus what the caller had under pkwet (nothing).
+    assert_eq!((st[4], st[5]), (2.0, 2.0), "{st:?}");
+}
+
+/// Every malformed answer is a named error, the depth counter is where
+/// it was, and the operand stack is the caller's again.
+#[test]
+fn wet_procedural_under_rejects_malformed_answers_by_name() {
+    let m = "{ newpath 10 10 moveto 100 10 lineto << /Width 10 >> pkribbon }";
+    for (opts, want) in [
+        ("/Under { pop pop 0 0 0 }", "pkwet-under-procedure-needs-at"),
+        (
+            "/Under [ 0 0 0 ] /At [ 0 0 ]",
+            "pkwet-at-needs-an-under-procedure",
+        ),
+        (
+            "/Under { pop pop 0 0 0 } /At 5",
+            "pkwet-at-must-be-an-x-y-pair",
+        ),
+        (
+            "/Under { pop pop 0 0 0 } /At [ 1 2 3 ]",
+            "pkwet-at-must-be-an-x-y-pair",
+        ),
+        (
+            "/Under { pop pop 0 0 0 } /At [ (a) 2 ]",
+            "pkwet-at-must-be-an-x-y-pair",
+        ),
+        (
+            "/Under { pop pop 0 0 0 } /At { 1 2 }",
+            "pkwet-at-must-not-be-a-procedure",
+        ),
+        (
+            "/Under { pop pop 1 2 } /At [ 0 0 ]",
+            "pkwet-under-procedure-must-return-3-numbers",
+        ),
+        (
+            "/Under { pop pop 1 2 3 4 } /At [ 0 0 ]",
+            "pkwet-under-procedure-must-return-3-numbers",
+        ),
+        (
+            "/Under { } /At [ 0 0 ]",
+            "pkwet-under-procedure-must-return-3-numbers",
+        ),
+        (
+            "/Under { pop pop } /At [ 0 0 ]",
+            "pkwet-under-procedure-must-return-3-numbers",
+        ),
+        (
+            "/Under { pop pop (a) 0 0 } /At [ 0 0 ]",
+            "pkwet-under-procedure-results-must-be-numbers",
+        ),
+        (
+            "/Under { pop pop 0 0 [ 1 ] } /At [ 0 0 ]",
+            "pkwet-under-procedure-results-must-be-numbers",
+        ),
+        (
+            "/Under { pop pop 0 -0.1 0 } /At [ 0 0 ]",
+            "pkwet-under-procedure-results-must-be-0-to-1",
+        ),
+        (
+            "/Under { pop pop 0 0 1.5 } /At [ 0 0 ]",
+            "pkwet-under-procedure-results-must-be-0-to-1",
+        ),
+    ] {
+        // Caught, then a clean call: the guard must not poison the next
+        // pkwet, nor leave a gsave, nor leave junk on the stack.
+        let mut it = fresh(120, 120);
+        it.run_str(&format!(
+            "0 0 0 setrgbcolor 5 srand clear \
+             {{ {m} << /Soft 1 {opts} >> pkwet }} stopped \
+             {{ $error /command get = count pqdepth }} {{ (no error) = }} ifelse"
+        ))
+        .unwrap_or_else(|e| panic!("{opts}: {}", it.error_report(&e)));
+        let st: Vec<String> = it
+            .operand_stack()
+            .iter()
+            .map(|o| o.repr().to_string())
+            .collect();
+        // A bad answer from the procedure is cleaned up after (the stack is
+        // the caller's again). A bad option, like every option guard in
+        // this file, leaves its offending operand where it raised.
+        let answer = opts.contains("/Under {") && opts.contains("/At [ 0 0 ]");
+        assert_eq!(
+            st.last().map(String::as_str),
+            Some("0"),
+            "{opts}: depth {st:?}"
+        );
+        if answer {
+            assert_eq!(st, ["0", "0"], "{opts}: stack {st:?} (count then depth)");
+        }
+        let mut it = fresh(120, 120);
+        let e = it
+            .run_str(&format!("{m} << /Soft 1 {opts} >> pkwet"))
+            .unwrap_err();
+        let report = it.error_report(&e).to_string();
+        assert!(report.contains(want), "{opts}: wanted {want}, got {report}");
+        // The call after the rejection still paints, one gsave level
+        // deep from where it started.
+        let mut it = fresh(120, 120);
+        it.run_str(&format!(
+            "0 0 0 setrgbcolor 5 srand \
+             {{ {m} << /Soft 1 {opts} >> pkwet }} stopped pop \
+             {m} << /Soft 1 >> pkwet"
+        ))
+        .unwrap_or_else(|e| panic!("{opts}: {}", it.error_report(&e)));
+        assert!(
+            ink_count(&it) > 100,
+            "{opts}: the call after a rejection painted nothing"
+        );
+    }
+}
+
+/// An error raised *inside* the backdrop procedure unwinds like one raised
+/// inside the wrapped procedure: the depth is put back, so the next
+/// top-level pkwet is not one level deeper.
+#[test]
+fn wet_procedural_under_that_raises_leaves_the_depth_alone() {
+    let mut it = fresh(120, 120);
+    it.run_str(
+        "0 0 0 setrgbcolor 5 srand \
+         { { newpath 10 10 moveto 100 10 lineto << /Width 10 >> pkribbon } \
+           << /Soft 1 /At [ 0 0 ] /Under { nosuchname } >> pkwet } stopped pop \
+         pqdepth",
+    )
+    .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+    assert_eq!(it.operand_stack().last().expect("depth").repr(), "0");
+}
+
+/// The specimen runs under Ghostscript too (its `exch pop` backdrop and
+/// every key are plain PostScript; its random scatter differs).
+#[test]
+fn ghostscript_accepts_paintkit_wet_under_demo() {
+    let gs_ok = std::process::Command::new("gs")
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success());
+    if !gs_ok {
+        eprintln!("skipping gs compatibility check: gs not installed");
+        return;
+    }
+    let out = std::process::Command::new("gs")
+        .args([
+            "-dNOSAFER",
+            "-dNOPAUSE",
+            "-dBATCH",
+            "-q",
+            "-sDEVICE=png16m",
+            "-g640x250",
+            "-r72",
+            "-o/dev/null",
+            "examples/paintkit_wet_under_demo.ps",
+        ])
+        .output()
+        .expect("run gs");
+    assert!(
+        out.status.success() && !String::from_utf8_lossy(&out.stdout).contains("Error"),
+        "gs rejected examples/paintkit_wet_under_demo.ps: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}
+
 // --- pkdab: the foliage / dab brush (issue #117) ----------------------
 //
 // What the tool is defined by: clustered irregular dabs; one set of

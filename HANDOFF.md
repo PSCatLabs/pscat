@@ -870,8 +870,11 @@ renders eight examples in both and compares block-downsampled output).
   *inside the fill* (`pmemit`/`pmstamp`/`ptemit`, behind `ptk 0 gt`), from
   the head position (`pmnc`, `ptnc`, or +-1 for pktrowel's ridges) and the
   flip of the run's first stop, then passed through `puwet`, which grades it
-  by the running `pkwet` pass (L3): frames have 7 slots, and 4-6 are the
-  per-pass factors, a copy of `/Under` and the running pass index. A new
+  by the running `pkwet` pass (L3): frames have 8 slots, and 4-6 are the
+  per-pass factors, a copy of `/Under` and the running pass index (slot 7,
+  issue #179, holds one backdrop per pass for a procedural `/Under` and is
+  null otherwise: `puwet` reads it first, so a loaded colour grades toward
+  the pass's own backdrop). A new
   adopter must call `puwet` on every loaded colour, or its marks go solid
   inside a pull. `pkfan` adopts it too (L4, `pfColorRec`): its colour is set
   per *run* (`pfrun`) and per pressed ray (`pfray`) by `pfcolor`, from the
