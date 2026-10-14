@@ -36,7 +36,7 @@ Record the start time for the final report: `date '+%Y-%m-%d %H:%M:%S %Z'`.
 The **open-PR list** (numbers already claimed by an open PR's `Closes #N`) is used below:
 ```sh
 gh pr list --state open --json body --jq \
-  '[.[].body | scan("(?:Closes|Fixes|Resolves) #([0-9]+)")[][0] | tonumber]'
+  '[.[].body | scan("(?:Closes|Fixes|Resolves) #([0-9]+)"; "gi") | .[0] | tonumber]'
 ```
 **If `<N>` was given:** `gh issue view <N> --json state,title,labels`, then the open-PR list.
 - Closed, or `in-progress` AND in the open-PR list → stop, tell the user.
