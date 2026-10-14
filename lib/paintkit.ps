@@ -2867,7 +2867,13 @@
 % weaker than `pktrowel`'s own one-control-at-a-time promise.
 %
 % Safety: at most 4000 rows, checked before anything is drawn; each row is
-% also bounded by `pktrowel`'s own deposit budget.
+% also bounded by `pktrowel`'s own deposit budget. The area outline is bounded
+% too (issue #401): it is flattened and scanned for its extent without going
+% through walkpath, so the scan counts moveto, lineto and closepath visits as
+% walkpath's own pass does and a path over wkmaxsegs (50,000) is refused with
+% `walkpath-segment-count-exceeds-safety-limit`, the same name and limit as
+% every walkpath preset, before any row is drawn. A refusal leaves the caller's
+% path and graphics state as they were.
 %
 % Scratch prefix tpl- (unused elsewhere), so the many `pt*` names the
 % `pktrowel` call overwrites on every row cannot clobber the loop's state.
@@ -2884,10 +2890,12 @@
     dup tpltmin lt { dup /tpltmin exch def } if
     dup tpltmax gt { /tpltmax exch def } { pop } ifelse
     /tplany true def
+    /tpln tpln 1 add def
+    tpln wkmaxsegs gt { /tplover true def exit } if
 } bind def
 
 % @kind: Procedure
-% @summary: A palette-knife plane: fills the current path's area with overlapping, parallel pktrowel pulls in one direction, so the area reads as a single flat facet carrying the blade's texture (a mountain face, a rock). The edge is crisp because the path is the clip. Takes every pktrowel key (Width, Angle, Cover, Coverage, Viscosity, Scrape, EdgeBuildup, Drag, Colors, ColorMix, Light, Touch, Pressure, ...) unchanged, plus Direction, Overlap, RowJitter and AngleJitter. Row spacing follows the blade footprint, its overlap and the thinnest a tapering Pressure gets inside the area, so a taper does not open gaps between rows; deterministic under the caller's own srand; at most 4000 rows. Leaves the caller's path as it was.
+% @summary: A palette-knife plane: fills the current path's area with overlapping, parallel pktrowel pulls in one direction, so the area reads as a single flat facet carrying the blade's texture (a mountain face, a rock). The edge is crisp because the path is the clip. Takes every pktrowel key (Width, Angle, Cover, Coverage, Viscosity, Scrape, EdgeBuildup, Drag, Colors, ColorMix, Light, Touch, Pressure, ...) unchanged, plus Direction, Overlap, RowJitter and AngleJitter. Row spacing follows the blade footprint, its overlap and the thinnest a tapering Pressure gets inside the area, so a taper does not open gaps between rows; deterministic under the caller's own srand; at most 4000 rows; an outline over wkmaxsegs (50,000) segments is refused with walkpath-segment-count-exceeds-safety-limit. Leaves the caller's path as it was.
 % @example: newpath 40 40 moveto 200 40 lineto 120 180 lineto closepath << /Width 16 /Direction -80 /Angle 12 >> pktrowelplane
 % @param: /Width [points] Blade length, passed to pktrowel; must be > 0 (default 24)
 % @param: /Direction [degrees] Direction the pulls travel, counterclockwise from +x in user space; -90 pulls straight down (default -90)
@@ -2950,10 +2958,21 @@
     /tplcd tplDir cos def /tplsd tplDir sin def
     /tplsmin 1e30 def /tplsmax -1e30 def /tpltmin 1e30 def /tpltmax -1e30 def
     /tplany false def
+    % Segment-count bound (issue #401): this scan walks the flattened outline
+    % without ever calling walkpath, so #110's wkmaxsegs does not reach it. It
+    % counts moveto, lineto and closepath visits, the three wkmeasure counts, and
+    % past wkmaxsegs it stops the scan with `exit`. The raise waits until the
+    % grestore below has put the caller's path and graphics state back, so a
+    % refusal leaves both as it found them. `exit` is a plain `exit` out of
+    % pathforall (which loops), not an error.
+    /tpln 0 def /tplover false def
     gsave
         flattenpath
-        { tplpt } { tplpt } { } { } pathforall
+        { tplpt } { tplpt }
+        { } { /tpln tpln 1 add def tpln wkmaxsegs gt { /tplover true def exit } if }
+        pathforall
     grestore
+    tplover { walkpath-segment-count-exceeds-safety-limit } if
     tplany {
         % rows run from a third of a band outside the near edge to the far one
         /tplt0 tpltmin tplF 0.3 mul sub def
@@ -3049,6 +3068,56 @@
     } if
 } bind def
 
+%%SelfTest: pktrowelplane-bounds-its-area-outline
+%   % Issue #401: pktrowelplane flattens and scans the area outline itself,
+%   % never through walkpath, so it counts moveto, lineto and closepath visits
+%   % against wkmaxsegs. A closed triangle is moveto + lineto + lineto +
+%   % closepath = 4 visits, so (wkmaxsegs - 4) extra zero-length linetos make
+%   % exactly wkmaxsegs; one more is over. Zero-length linetos survive
+%   % flattenpath, so the count is real.
+%   { newpath 0 0 moveto 50 0 lineto wkmaxsegs 4 sub { 0 0 rlineto } repeat
+%     25 40 lineto closepath << /Width 40 >> pktrowelplane }
+%   (a closed outline of exactly wkmaxsegs segments still fills) mustpass
+%   { newpath 0 0 moveto 50 0 lineto wkmaxsegs 3 sub { 0 0 rlineto } repeat
+%     25 40 lineto closepath << /Width 40 >> pktrowelplane }
+%   /walkpath-segment-count-exceeds-safety-limit
+%   (a closed outline one segment over wkmaxsegs) mustguard
+%   { newpath 0 0 moveto wkmaxsegs { 0 0 rlineto } repeat
+%     << /Width 40 >> pktrowelplane }
+%   /walkpath-segment-count-exceeds-safety-limit
+%   (an open outline one segment over wkmaxsegs) mustguard
+%%EndSelfTest
+%
+%%SelfTest: pktrowelplane-refuses-a-huge-outline-before-any-row
+%   % Without the bound the call never refuses, so the guard is pinned by
+%   % where it fires. pktrowel is replaced by a counter (each block runs in
+%   % a fresh interpreter): the one call every run makes is the empty-path
+%   % validation call, so a refusal before any row means exactly one call.
+%   /tcalls 0 def
+%   /pktrowel { pop /tcalls tcalls 1 add def } def
+%   { newpath 0 0 moveto 50 0 lineto wkmaxsegs 3 sub { 0 0 rlineto } repeat
+%     25 40 lineto closepath << /Width 40 >> pktrowelplane }
+%   /walkpath-segment-count-exceeds-safety-limit
+%   (the over-limit outline is refused) mustguard
+%   tcalls 1 eq (no row was laid before the refusal) mustbe
+%%EndSelfTest
+%
+%%SelfTest: pktrowelplane-refusal-leaves-the-caller-as-it-was
+%   % The raise comes after the scan's grestore, not from inside it: the
+%   % caller's graphics state and curved path are untouched by a refusal.
+%   0.25 setgray
+%   newpath 0 0 moveto 20 0 30 20 50 20 curveto wkmaxsegs { 0 0 rlineto } repeat
+%   closepath
+%   { << /Width 40 >> pktrowelplane } stopped /tstop exch def
+%   tstop $error /command get /walkpath-segment-count-exceeds-safety-limit eq and
+%   (the refusal is the bound's undefined name) mustbe
+%   currentgray 0.25 sub abs 0.001 lt (the gray was not changed) mustbe
+%   /tcurves 0 def
+%   { pop pop } { pop pop } { pop pop pop pop pop pop /tcurves 1 def } { }
+%   pathforall
+%   tcurves 1 eq (the curve in the caller's path was not flattened) mustbe
+%%EndSelfTest
+%
 %%SelfTest: pktrowelplane-guards
 %   % a triangle path, set up per case (the procedure reads the current path)
 %   { newpath 0 0 moveto 50 0 lineto 25 40 lineto closepath << /Width 0 >> pktrowelplane }
@@ -6197,10 +6266,14 @@
 %     doesn't change every mark placed after it. The obvious
 %     alternative -- `rrand` to save the stream, `srand` to seed
 %     locally, `srand` again to restore -- looks equivalent but is not:
-%     under `--sweep-seed` (issue #21) *every* `srand` is intercepted
-%     and forced to the sweep's value, so the "restore" would silently
-%     reset the caller's stream to the sweep seed on every wash, and
-%     the sweep's own never-called-srand diagnostic would misfire.
+%     under `--sweep-seed` (issue #21) an `srand` of a literal seed, as
+%     /Seed would be, is intercepted and forced to the sweep's value,
+%     so the local seed would no longer be the wash's own and /Seed
+%     would stop telling one wash from another. (Since issue #202 the
+%     restore itself is safe: a restore of an `rrand` value is left
+%     alone under the override, so the caller's stream is not reset and
+%     the never-called-srand diagnostic stays truthful. This bullet
+%     rests on the local seed, not on the restore.)
 %   * `pwrand` is a Schrage-decomposed minimal-standard LCG, whose
 %     intermediate products are provably within 32-bit integer range,
 %     so it produces the *same* texture under real Ghostscript (where
