@@ -584,6 +584,8 @@ renders eight examples in both and compares block-downsampled output).
    adds an entry to `gallery/manifest.json` (#251: the one list behind
    the site gallery, the README highlights and `show.sh`; never edit
    `gallery.html`) and runs `python3 scripts/gallery.py sync`.
+   The entry's source gets its "View source" window on the site for free
+   (#461: staged to `_site/source/`, shown by `site/source-viewer.js`).
    `gallery/README.md` is the brief, and Hundred Lines
    (`gallery/hundred_lines.ps`) shows the /HandScript font reused.
    The Stage 15 faces (`lib/fonts/`) and the Stage 20 style packs
