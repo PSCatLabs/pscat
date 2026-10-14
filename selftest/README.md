@@ -5,7 +5,7 @@
 ```
 
 Runs every library's `%%SelfTest` blocks, then strict-lints every
-rendering driver in `drivers/`. `docs/SELFTEST.md` is the full writeup:
+rendering driver in `drivers/`. `docs/dev/SELFTEST.md` is the full writeup:
 the convention, the assertion vocabulary, which defect classes this
 covers, and — just as important — which it doesn't.
 

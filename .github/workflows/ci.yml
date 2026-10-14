@@ -23,7 +23,7 @@
 # comparison. It posts the same way the test summary does. It is
 # deliberately NOT in `required_status_checks` below (see SDLC.md) —
 # a red ❌ here is a strong signal, not an enforced merge block; see
-# NOTES.md for why and the follow-up issue tracking promoting it.
+# docs/archive/NOTES.md for why and the follow-up issue tracking promoting it.
 #
 # Both jobs post via scripts/gh_comment_upsert.sh (a marker-based
 # find-or-create/update), not `gh pr comment --edit-last`: `--edit-last`

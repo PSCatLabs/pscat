@@ -1,4 +1,4 @@
-//! The /Typewriter font (issue #211; design `docs/TYPEWRITER.md`).
+//! The /Typewriter font (issue #211; design `docs/dev/design/TYPEWRITER.md`).
 //!
 //! The option guards and presets are `%%SelfTest` blocks in
 //! `lib/typewriter.ps`. These tests need pixels or a real `gs`: the same

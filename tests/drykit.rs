@@ -1,4 +1,4 @@
-//! drykit (issue #234, slice D1; design `docs/DRYMEDIA.md`): `dksurface`
+//! drykit (issue #234, slice D1; design `docs/dev/design/DRYMEDIA.md`): `dksurface`
 //! and the swept-band oriented catch `dkcatch`, driven directly the way
 //! D2's `dkstroke` will call it -- a catch, then the stroke's ink through it.
 //!

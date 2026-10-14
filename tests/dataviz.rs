@@ -76,7 +76,7 @@ fn dvsum_totals_the_array() {
 #[test]
 fn barchart_draws_one_rect_from_baseline_to_value() {
     // Painting consumes the path in this interpreter (fill/stroke are
-    // an implicit newpath — a deliberate deviation, see HANDOFF.md),
+    // an implicit newpath — a deliberate deviation, see docs/dev/HANDOFF.md),
     // and barchart fills each bar internally, so pathbbox can't see
     // it afterward; check pixels instead. n=1, gap=0.2, frame 0..10
     // over a 100x100 viewport at the origin: center=50, width=80, so

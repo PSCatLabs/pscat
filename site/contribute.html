@@ -14,7 +14,7 @@
 
   <h2>Start here</h2>
   <div class="cards">
-    <a class="card" href="https://github.com/jeromebanks/postscript_interpreter/blob/main/HANDOFF.md"><b>HANDOFF</b><span>Orientation for a fresh session: the architecture in one page, the gotchas, and what is still open.</span><br><span class="tag">Markdown on GitHub</span></a>
+    <a class="card" href="https://github.com/jeromebanks/postscript_interpreter/blob/main/docs/dev/HANDOFF.md"><b>HANDOFF</b><span>Orientation for a fresh session: the architecture in one page, the gotchas, and what is still open.</span><br><span class="tag">Markdown on GitHub</span></a>
     <a class="card" href="architecture.html"><b>Architecture</b><span>The three ideas that explain most of the code, and a map of the source tree.</span><br><span class="tag">on this site</span></a>
     <a class="card" href="extending.html"><b>Extending</b><span>How to add an operator or a library, with Ghostscript as the oracle for what is correct.</span><br><span class="tag">on this site</span></a>
     <a class="card" href="https://github.com/jeromebanks/postscript_interpreter/blob/main/AGENTS.md"><b>AGENTS</b><span>The working conventions: build and test commands, commit hygiene, and the code quality bar.</span><br><span class="tag">Markdown on GitHub</span></a>
@@ -22,15 +22,17 @@
 
   <h2>How the pieces work</h2>
   <div class="cards">
-    <a class="card" href="https://github.com/jeromebanks/postscript_interpreter/blob/main/ARCHITECTURE.md"><b>ARCHITECTURE</b><span>The full design write-up for the interpreter.</span><br><span class="tag">Markdown on GitHub</span></a>
-    <a class="card" href="https://github.com/jeromebanks/postscript_interpreter/blob/main/VM.md"><b>VM</b><span>How <code>save</code> and <code>restore</code> work, and the rules for mutating arrays and dictionaries.</span><br><span class="tag">Markdown on GitHub</span></a>
-    <a class="card" href="https://github.com/jeromebanks/postscript_interpreter/blob/main/FONTS.md"><b>FONTS</b><span>The font machinery: Type 3 programs, Type 1 parsing and the runtime catalog.</span><br><span class="tag">Markdown on GitHub</span></a>
-    <a class="card" href="https://github.com/jeromebanks/postscript_interpreter/blob/main/docs/DRYMEDIA.md"><b>Library design docs</b><span>Why the paint and dry-media libraries are built the way they are, starting with the dry-media design.</span><br><span class="tag">Markdown on GitHub</span></a>
+    <a class="card" href="https://github.com/jeromebanks/postscript_interpreter/blob/main/docs/dev/ARCHITECTURE.md"><b>ARCHITECTURE</b><span>The full design write-up for the interpreter.</span><br><span class="tag">Markdown on GitHub</span></a>
+    <a class="card" href="https://github.com/jeromebanks/postscript_interpreter/blob/main/docs/dev/VM.md"><b>VM</b><span>How <code>save</code> and <code>restore</code> work, and the rules for mutating arrays and dictionaries.</span><br><span class="tag">Markdown on GitHub</span></a>
+    <a class="card" href="https://github.com/jeromebanks/postscript_interpreter/blob/main/docs/dev/FONTS.md"><b>FONTS</b><span>The font machinery: Type 3 programs, Type 1 parsing and the runtime catalog.</span><br><span class="tag">Markdown on GitHub</span></a>
+    <a class="card" href="https://github.com/jeromebanks/postscript_interpreter/blob/main/docs/dev/design/DRYMEDIA.md"><b>Library design docs</b><span>Why the paint and dry-media libraries are built the way they are, starting with the dry-media design.</span><br><span class="tag">Markdown on GitHub</span></a>
   </div>
-  <p class="small">More design documents, such as the paint-loading and
-  watercolor models, are in the repository's
-  <a href="https://github.com/jeromebanks/postscript_interpreter/tree/main/docs">docs/</a>
-  folder.</p>
+  <p class="small">The paint-loading, canvas-surface, watercolor and typewriter
+  design records are in
+  <a href="https://github.com/jeromebanks/postscript_interpreter/tree/main/docs/dev/design">docs/dev/design/</a>,
+  and
+  <a href="https://github.com/jeromebanks/postscript_interpreter/blob/main/docs/dev/README.md">docs/dev/README.md</a>
+  indexes every contributor document.</p>
 
   <h2>How a change gets merged</h2>
   <p>Work starts as a GitHub issue, then a feature branch, then a pull request that
@@ -38,7 +40,8 @@
   <a href="https://github.com/jeromebanks/postscript_interpreter/blob/main/SDLC.md">SDLC.md</a> records the exact policy. Each
   piece of work also leaves a short note in
   <a href="https://github.com/jeromebanks/postscript_interpreter/tree/main/notes">notes/</a>, and
-  <a href="https://github.com/jeromebanks/postscript_interpreter/blob/main/NOTES.md">NOTES.md</a> is the frozen history of the
+  <a href="https://github.com/jeromebanks/postscript_interpreter/blob/main/docs/archive/NOTES.md">NOTES.md</a>, in the
+  <a href="https://github.com/jeromebanks/postscript_interpreter/tree/main/docs/archive">archive</a>, is the frozen history of the
   decisions made before that.</p>
   <p>To pick something up, browse the
   <a href="https://github.com/jeromebanks/postscript_interpreter/issues">open issues</a>; the labels show priority, difficulty and

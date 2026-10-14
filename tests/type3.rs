@@ -276,7 +276,7 @@ fn charpath_on_type3_advances_without_outlines() {
     assert_eq!(ink_count(&it), 0, "charpath painted nothing");
 }
 
-/// `/UnicodeBuildChar true` (see FONTS.md's "Unicode-mode Type 3
+/// `/UnicodeBuildChar true` (see docs/dev/FONTS.md's "Unicode-mode Type 3
 /// BuildChar" addendum) — the mechanism `lib/hangul.ps` builds on.
 /// BuildChar stashes the raw operand into userdict so the test can
 /// read it back without relying on any drawing.

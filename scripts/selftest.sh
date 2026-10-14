@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # selftest.sh — the PS-native verification pass (issue #95, Phase A of
-# docs/PS_LIBRARY_COUPLING.md's "Touchpoint 2"): run every library's
+# docs/dev/PS_LIBRARY_COUPLING.md's "Touchpoint 2"): run every library's
 # `%%SelfTest` blocks, then strict-lint every rendering driver.
 #
 #   ./scripts/selftest.sh
@@ -8,7 +8,7 @@
 # Nothing here needs Ghostscript, a golden image, or a line of Rust —
 # that's the point. A PS-only change to lib/*.ps can be checked with
 # this alone; `cargo test` still covers everything else (see
-# docs/SELFTEST.md for exactly what this does and doesn't replace).
+# docs/dev/SELFTEST.md for exactly what this does and doesn't replace).
 #
 # Exits non-zero on the first failing check, printing what failed.
 set -euo pipefail

@@ -174,7 +174,7 @@ fn put(it: &mut Interp) -> Result<(), PsError> {
             a.put(index_of(&key)?, value)
         }
         // Strings take no journal barrier: restore exempts string
-        // contents, per PLRM §3.7.3.2 (pinned against gs — VM.md).
+        // contents, per PLRM §3.7.3.2 (pinned against gs — docs/dev/VM.md).
         Value::String(s) => {
             let b = match value.value {
                 Value::Integer(i) if (0..=255).contains(&i) => i as u8,

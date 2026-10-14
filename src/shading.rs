@@ -25,7 +25,7 @@
 //! via the *shading's* own `/Domain` (`t = t0 + pos*(t1-t0)`) — not
 //! the function's `/Domain`, which only clips `t` once it gets there;
 //! those are different axes and conflating them was a real bug caught
-//! by an `advisor` review of this file (NOTES.md's entry has the
+//! by an `advisor` review of this file (docs/archive/NOTES.md's entry has the
 //! story). When every leg is exactly linear (`N == 1`, one level of
 //! stitching at most — what `gradfn` in `lib/artkit.ps` always emits
 //! — *and* nothing downstream of `eval` could turn that linear-in-t
@@ -46,7 +46,7 @@
 //! `/Functions` recursion, and a function's own `/Domain` wrongly
 //! defaulting instead of being required — came from a second Codex
 //! review of the first round's fix, not the first round itself
-//! (NOTES.md's entry has the full story).
+//! (docs/archive/NOTES.md's entry has the full story).
 
 use crate::error::PsError;
 use crate::object::{Dict, Value};

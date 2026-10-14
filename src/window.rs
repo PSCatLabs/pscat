@@ -1,6 +1,6 @@
 //! The live rendering window.
 //!
-//! Single-threaded and step-driven, as planned in `ARCHITECTURE.md`: the
+//! Single-threaded and step-driven, as planned in `docs/dev/ARCHITECTURE.md`: the
 //! winit event loop owns the interpreter, runs a budget of interpreter
 //! steps per frame, then blits the canvas. No locks, no channels, and
 //! pausing/slowing execution is just a smaller budget.
@@ -74,7 +74,7 @@ pub fn run_windowed(interp: Interp, options: WindowOptions) -> Result<(), String
 }
 
 /// The `--interactive` mode: the terminal REPL and the live window at
-/// once — type PostScript, watch it draw. Per the ARCHITECTURE.md
+/// once — type PostScript, watch it draw. Per the docs/dev/ARCHITECTURE.md
 /// threading rule the interpreter stays owned by the event loop; a
 /// reader thread ships raw stdin lines in through the loop's proxy and
 /// never touches interpreter state. Each complete chunk runs on the

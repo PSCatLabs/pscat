@@ -248,7 +248,7 @@ fn an_uncaught_errordict_handler_is_reported_under_its_own_name() {
 
 /// The reported name survives the idiom the issue was found with: catch
 /// a real error, then raise it again through errordict. The failed
-/// operand stack is not restored (HANDOFF.md), so the handler finds it
+/// operand stack is not restored (docs/dev/HANDOFF.md), so the handler finds it
 /// empty and falls back to the command `$error` already holds, where
 /// Ghostscript would die with an unrecoverable stackunderflow.
 #[test]

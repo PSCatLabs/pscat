@@ -10,7 +10,7 @@
   <h1>Extending the interpreter</h1>
   <p class="sub">The repo is built to be picked up mid-stream — by a
   person or by a coding agent. Start with
-  <a href="https://github.com/jeromebanks/postscript_interpreter/blob/main/HANDOFF.md">HANDOFF.md</a>
+  <a href="https://github.com/jeromebanks/postscript_interpreter/blob/main/docs/dev/HANDOFF.md">HANDOFF.md</a>
   (orientation and gotchas), then
   <a href="https://github.com/jeromebanks/postscript_interpreter/blob/main/AGENTS.md">AGENTS.md</a>
   (working conventions). <a href="contribute.html">Contribute</a> lists the rest.</p>
@@ -42,7 +42,7 @@ EOF</code></pre>
     <li><b>If the operator mutates an array or dict</b>, call
       <code>journal_array</code>/<code>journal_dict</code> first so
       <code>restore</code> can roll it back (strings exempt by spec —
-      read VM.md before touching mutators).</li>
+      read docs/dev/VM.md before touching mutators).</li>
     <li><b>If it needs to run a PostScript procedure mid-operator</b>
       (callbacks, tint transforms), do <em>not</em> call the machine
       recursively — push a <code>Frame::PostOp</code> continuation.
@@ -60,7 +60,7 @@ cargo fmt --check</code></pre>
   <p>Rendering changes get pixel or golden tests
   (<code>tests/golden.rs</code> renders the examples in both pscat
   and gs and compares block-downsampled output). Commit per coherent
-  chunk, keep the README and HANDOFF.md in step with the change, and
+  chunk, keep the README and docs/dev/HANDOFF.md in step with the change, and
   leave a short note in <code>notes/</code> for whoever picks it up next.</p>
 
   <h2>Which model for which task (agent sessions)</h2>

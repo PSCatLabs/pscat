@@ -1,6 +1,6 @@
 //! Font and text operators — thin operand-stack adapters over
 //! `crate::font` (the glyph engine) plus the FontDirectory bookkeeping.
-//! Architecture and deviations: `FONTS.md`.
+//! Architecture and deviations: `docs/dev/FONTS.md`.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -104,7 +104,7 @@ pub(crate) fn findfont(it: &mut Interp) -> Result<(), PsError> {
 }
 
 /// key font definefont → font. Installs into FontDirectory; gives dicts
-/// that lack one an FID (the seam to the outline registry — see FONTS.md).
+/// that lack one an FID (the seam to the outline registry — see docs/dev/FONTS.md).
 pub(crate) fn definefont(it: &mut Interp) -> Result<(), PsError> {
     let font_obj = it.pop()?;
     let key = it.pop()?;
@@ -359,7 +359,7 @@ fn stringwidth(it: &mut Interp) -> Result<(), PsError> {
 /// path. The bool selects stroke-path vs fill-path semantics in real
 /// PostScript; outline fonts have only one useful form, so both operands
 /// produce it. Type 3 glyphs advance without contributing outlines
-/// (documented in FONTS.md).
+/// (documented in docs/dev/FONTS.md).
 fn charpath(it: &mut Interp) -> Result<(), PsError> {
     let Value::Boolean(_) = it.pop()?.value else {
         return Err(PsError::Typecheck);

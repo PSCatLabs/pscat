@@ -620,7 +620,7 @@ impl ColorSpace {
 /// `Multiply` matters to watercolor beyond looking right: unlike
 /// source-over, it's commutative, so a stack of washes reads the same
 /// regardless of the order they were laid down — the direct answer to
-/// the order-dependence `docs/WATERCOLOR.md` left open for this issue.
+/// the order-dependence `docs/dev/design/WATERCOLOR.md` left open for this issue.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum BlendMode {
     /// Source-over: PostScript's ordinary compositing, and the default.
@@ -688,7 +688,7 @@ pub struct GraphicsState {
     pub rgb: (f32, f32, f32),
     /// Fill/stroke alpha, 0.0..1.0 — `setalpha`/`currentalpha`, the
     /// public contract issue #47 landed on top of issue #46's
-    /// watercolor spike (`docs/WATERCOLOR.md`). A pscat extension, not
+    /// watercolor spike (`docs/dev/design/WATERCOLOR.md`). A pscat extension, not
     /// a PLRM operator: real Ghostscript has no PostScript-callable
     /// alpha operator at all (tested in the spike), so an alpha-bearing
     /// program is the first thing here that doesn't render under plain
@@ -1281,7 +1281,7 @@ impl Gfx {
             // `apply_opacity` is the shader-side equivalent. Without
             // this, `setalpha` would silently do nothing to `shfill`
             // alone, exactly the per-target divergence issue #47
-            // exists to close (docs/WATERCOLOR.md's "public contract").
+            // exists to close (docs/dev/design/WATERCOLOR.md's "public contract").
             let mut shader = shader;
             let alpha = self.state.alpha;
             if alpha < 1.0 {
@@ -1345,7 +1345,7 @@ impl Gfx {
                 // the ramp's *position-weighted* average color — real
                 // PDF shading dictionaries need pattern-colorspace
                 // machinery this exporter doesn't have; documented gap
-                // (HANDOFF.md). Weighted by the position gap between
+                // (docs/dev/HANDOFF.md). Weighted by the position gap between
                 // consecutive stops (trapezoidal integration), not a
                 // flat mean over the stop list: stops aren't evenly
                 // spaced (build_stops packs extra ones at stitching
@@ -2295,23 +2295,23 @@ mod tests {
 
     /// Issue #46's watercolor architecture spike, Approach B: the
     /// same three-circle Venn scene as
-    /// `docs/watercolor_prototypes/common_gesture.ps`'s Circ1/Circ2/
+    /// `docs/dev/design/watercolor_prototypes/common_gesture.ps`'s Circ1/Circ2/
     /// Circ3 and Color1/Color2/Color3 (transcribed by hand below --
     /// there's no shared build between Rust and PostScript here),
     /// rendered with real alpha compositing instead of Approach A's
     /// hand-averaged nested-clip blend colors. Kept as-is after issue
     /// #47 turned that prototype field into the public `setalpha`
-    /// operator: it still regenerates the image `docs/WATERCOLOR.md`
+    /// operator: it still regenerates the image `docs/dev/design/WATERCOLOR.md`
     /// embeds, and poking the field directly (rather than routing
     /// through the operator) is what keeps the sample a record of what
     /// the *spike* rendered. `#[ignore]`d because it writes a file as a
     /// side effect and exists to regenerate
-    /// `docs/watercolor_prototypes/approach_b_alpha_ext.png` on
+    /// `docs/dev/design/watercolor_prototypes/approach_b_alpha_ext.png` on
     /// demand, not to run under ordinary `cargo test`:
     ///
     ///   cargo test --release watercolor_prototype_b_alpha_sample -- --ignored
     #[test]
-    #[ignore = "writes docs/watercolor_prototypes/approach_b_alpha_ext.png; issue #46 spike prototype, not a regression test"]
+    #[ignore = "writes docs/dev/design/watercolor_prototypes/approach_b_alpha_ext.png; issue #46 spike prototype, not a regression test"]
     fn watercolor_prototype_b_alpha_sample() {
         let mut gfx = Gfx::new(620, 620).expect("620x620 pixmap");
 
@@ -2344,7 +2344,7 @@ mod tests {
         }
 
         gfx.pixmap
-            .save_png("docs/watercolor_prototypes/approach_b_alpha_ext.png")
+            .save_png("docs/dev/design/watercolor_prototypes/approach_b_alpha_ext.png")
             .expect("save prototype png");
     }
 

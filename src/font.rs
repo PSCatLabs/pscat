@@ -1,7 +1,7 @@
 //! Font machinery: the bundled-font registry, the current-font graphics
 //! state, and the glyph → path engine behind `show`/`stringwidth`/
 //! `charpath`. The architecture (and its deliberate deviations) is
-//! documented in `FONTS.md` at the repo root.
+//! documented in `docs/dev/FONTS.md` at the repo root.
 //!
 //! The seam between PostScript font *dicts* (which programs own and
 //! mutate) and Rust-side glyph data is the `FID` entry: an index into
@@ -33,7 +33,7 @@ struct Builtin {
 }
 
 /// The standard base-13 names minus Symbol (no metric-compatible open
-/// TTF exists; see FONTS.md), backed by Liberation faces, which are
+/// TTF exists; see docs/dev/FONTS.md), backed by Liberation faces, which are
 /// metric-compatible with the Adobe originals.
 static BUILTINS: [Builtin; 12] = [
     Builtin {
@@ -97,7 +97,7 @@ pub(crate) fn builtin_index(name: &str) -> Option<i64> {
 /// symbol faces carry their own PLRM encodings; everything else is
 /// StandardEncoding like the builtins. `Unicode` is a deliberate
 /// deviation from the byte-indexed model (see the "Unicode-mode
-/// catalog faces" addendum in FONTS.md): fonts whose native script
+/// catalog faces" addendum in docs/dev/FONTS.md): fonts whose native script
 /// can't fit in a 256-entry Encoding (Hangul, kana/kanji, Thai) get a
 /// `show` pipeline that decodes the string as UTF-8 and maps each
 /// codepoint straight to a glyph via the face's `cmap`, bypassing
@@ -323,7 +323,7 @@ pub(crate) fn is_unicode_font(fid: i64) -> bool {
 
 /// Whether a Type 3 font dict opted into Unicode-mode `BuildChar` — the
 /// procedural-font counterpart of `is_unicode_font`'s bundled-TrueType
-/// mechanism (see `FONTS.md`'s "Unicode-mode Type 3 BuildChar"
+/// mechanism (see `docs/dev/FONTS.md`'s "Unicode-mode Type 3 BuildChar"
 /// addendum). A Type 3 dict with `/UnicodeBuildChar true` gets `show`
 /// decoding its argument as UTF-8 and passing the full codepoint to
 /// `BuildChar` instead of narrowing to a byte — this is what makes
@@ -554,7 +554,7 @@ pub fn available_fonts() -> Vec<String> {
 
 /// Parsed faces, once per process — the bundled data is `'static`, so
 /// the zero-copy `Face` views can live forever. (Stage 6 task 7:
-/// measured before/after; numbers in NOTES.md.)
+/// measured before/after; numbers in docs/archive/NOTES.md.)
 static FACES: std::sync::OnceLock<Vec<Face<'static>>> = std::sync::OnceLock::new();
 
 fn face_for(fid: i64) -> Result<&'static Face<'static>, PsError> {
@@ -779,7 +779,7 @@ fn ctm_lin(gfx: &Gfx, (x, y): (f64, f64)) -> (f64, f64) {
     )
 }
 
-/// The Encoding lookup, read live from the font dict per the FONTS.md
+/// The Encoding lookup, read live from the font dict per the docs/dev/FONTS.md
 /// set-time-semantics decision; a font dict without an Encoding
 /// (hand-built) falls back to StandardEncoding. Out-of-range or
 /// non-name entries behave as .notdef.
@@ -1086,7 +1086,7 @@ fn decode_one(text: &[u8], pos: usize, unicode: bool) -> Option<(u32, usize)> {
     }
 }
 
-/// The execution-stack frame behind the whole show family (`FONTS.md`
+/// The execution-stack frame behind the whole show family (`docs/dev/FONTS.md`
 /// Decision 6). One glyph per machine step: outline glyphs paint
 /// synchronously, Type 3 glyphs yield to their BuildChar/BuildGlyph
 /// procedure, and kshow yields to its proc between characters. Because
@@ -1291,7 +1291,7 @@ impl ShowCtx {
     /// path, and hand the machine the procedure to run. Metrics-only
     /// modes run the procedure with painting suppressed — that's how
     /// stringwidth learns a Type 3 width (charpath on Type 3 advances
-    /// without appending outlines; documented in FONTS.md).
+    /// without appending outlines; documented in docs/dev/FONTS.md).
     fn begin_type3_glyph(
         &mut self,
         gfx: &mut Gfx,

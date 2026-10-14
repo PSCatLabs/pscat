@@ -1,7 +1,7 @@
 //! pscat — a PostScript interpreter.
 //!
-//! See `ARCHITECTURE.md` at the repo root for the design writeup and
-//! `INIT.md` for the project vision and staged roadmap.
+//! See `docs/dev/ARCHITECTURE.md` at the repo root for the design writeup and
+//! `docs/archive/INIT.md` for the project vision and staged roadmap.
 
 pub mod capabilities;
 pub(crate) mod clock;

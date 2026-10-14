@@ -1,4 +1,4 @@
-//! drycrayon (issue #239; design `docs/DRYMEDIA.md`): the crayon preset
+//! drycrayon (issue #239; design `docs/dev/design/DRYMEDIA.md`): the crayon preset
 //! `dycrayon`, crayon paper `dypaper`, and the child-drawing motions
 //! (`dywobble`, `dyscribble`, `dyloop`, `dyfigure`, `dyrays`, `dygrass`).
 //!

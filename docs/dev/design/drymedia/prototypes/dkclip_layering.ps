@@ -1,0 +1,58 @@
+%!PS-Adobe-3.0
+%%Title: dkclip -- overlapping hatched regions in one dkbatch (issue #312)
+%%BoundingBox: 0 0 520 300
+%%EndComments
+% Issue #312 specimen. Run from the repo root:
+%   pscat --dpi 144 --page 520x300 --png docs/dev/design/drymedia/dkclip_layering.png docs/dev/design/drymedia/prototypes/dkclip_layering.ps
+%   gs -dNOSAFER -dBATCH -dNOPAUSE -sDEVICE=png16m -r144 -g1040x600 -sOutputFile=out.png docs/dev/design/drymedia/prototypes/dkclip_layering.ps
+%
+% Two charcoal regions hatched with dhhatch at two deposit levels: a disc
+% (a head in shadow) at 45 degrees and a background square at 135 degrees,
+% overlapping. Same seeds, same strokes in both panels.
+%   left   two dhhatch calls: two batches. Where the regions overlap, the
+%          square's faint level is drawn over the disc's dark cores, so
+%          the crossings grey out.
+%   right  the same two calls inside one { ... } dkbatch. Each call keeps
+%          its own region (drykit's dkclip), and the batch draws every
+%          faint level first, so the crossings stay dark.
+% Before #312 the right panel raised dhhatch-cannot-run-inside-a-dkbatch.
+
+(lib/artkit.ps) run
+(lib/paintkit.ps) run
+(lib/drykit.ps) run
+(lib/hatchkit.ps) run
+(lib/drycharcoal.ps) run
+
+<< /Surface /drawing /Seed 3 >> dksurface
+userdict /dkGround get aload pop setrgbcolor clippath fill
+
+/disc { newpath 165 135 moveto 95 135 70 0 360 arc closepath } def
+/square { newpath 105 55 moveto 235 55 lineto 235 245 lineto 105 245 lineto closepath } def
+/opts {
+    << /Medium /compressed /Grade 0.6 /Value 0.75 /Layers 1 /Levels 2
+       /Halo 1.2 /Spacing 4.5 >>
+} def
+
+% -   (the two regions, hatched as two calls)
+/regions {
+    disc opts dup /Angle 45 put dup /Seed 11 put dhhatch
+    square opts dup /Angle 135 put dup /Seed 12 put dhhatch
+} def
+
+/label {
+    /Helvetica findfont 11 scalefont setfont
+    0.25 0.24 0.23 setrgbcolor
+    dup stringwidth pop 2 div 130 exch sub 18 moveto show
+} def
+
+0.11 0.1 0.1 setrgbcolor
+gsave
+    regions
+    (two dhhatch calls: two batches) label
+grestore
+gsave 260 0 translate
+    0.11 0.1 0.1 setrgbcolor
+    { regions } dkbatch
+    (the same calls in one dkbatch) label
+grestore
+showpage

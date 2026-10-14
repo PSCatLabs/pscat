@@ -1,0 +1,53 @@
+%!PS-Adobe-3.0
+%%Title: drykit design prototype -- do opaque deposit levels survive layering across calls?
+%%BoundingBox: 0 0 400 200
+%%EndComments
+% Issue #233 prototype, NOT library code (docs/dev/design/DRYMEDIA.md 3.3). Run from
+% the repo root:  pscat --dpi 144 --page 400x200 --png out.png docs/dev/design/drymedia/prototypes/layering.ps
+%
+% Two hatch layers, dark charcoal on light paper, at 45 and -45 degrees,
+% each line drawn with two opaque deposit levels (a dim, wider level lerped
+% 45% from the paper toward the pigment, then the full-strength core at a
+% lower touch), through dqcatch.
+%   left panel   each layer is ONE call: its dim level, then its core;
+%                the second layer's dim level is drawn after the first
+%                layer's core
+%   right panel  both layers in one call, level-major: both dim levels,
+%                then both cores
+
+(lib/artkit.ps) run
+(lib/paintkit.ps) run
+(docs/dev/design/drymedia/prototypes/dqcatch.ps) run
+
+<< /Seed 3 /Weave 0.6 >> pkcanvas
+/paper [0.95 0.94 0.90] def
+/ink [0.12 0.12 0.13] def
+/dim [ 0 1 2 { /k exch def paper k get ink k get paper k get sub 0.45 mul add } for ] def
+paper aload pop setrgbcolor 0 0 400 200 rectfill
+
+% x0 ang level -   (one hatch layer, 9 lines, in a 160x160 square at x0)
+/layer {
+    /lv exch def /ang exch def /x0 exch def
+    gsave
+        newpath x0 20 moveto 160 0 rlineto 0 160 rlineto -160 0 rlineto closepath clip
+        x0 80 add 100 translate ang rotate
+        -90 18 90 {
+            /yy exch def
+            gsave
+                lv 1 eq { dim aload pop setrgbcolor 3.2 setlinewidth /tt 0.9 def }
+                        { ink aload pop setrgbcolor 2.2 setlinewidth /tt 0.7 def } ifelse
+                1 setlinecap
+                -120 yy 1.6 sub 120 yy 1.6 add tt 0 1.6 dqcatch
+                newpath -120 yy moveto 120 yy lineto stroke
+            grestore
+        } for
+    grestore
+} def
+
+% left: layer by layer (two calls)
+20 45 1 layer  20 45 2 layer
+20 -45 1 layer 20 -45 2 layer
+% right: level-major (one call)
+220 45 1 layer 220 -45 1 layer
+220 45 2 layer 220 -45 2 layer
+showpage

@@ -1,12 +1,12 @@
 %!PS-Adobe-3.0
 %%Title: typewriter.ps -- the /Typewriter font
-%%Creator: pscat -- issues #211, #212 (epic #209, design docs/TYPEWRITER.md)
+%%Creator: pscat -- issues #211, #212 (epic #209, design docs/dev/design/TYPEWRITER.md)
 %%EndComments
 
 % A dynamic Type 3 font, /Typewriter, that types like a real machine: the
 % Courier Prime outlines (lib/typewriter_outlines.ps), moved by three
 % layers of variation measured from real typed pages
-% (docs/typewriter/REFERENCES.md, docs/TYPEWRITER.md section 5):
+% (docs/dev/design/typewriter/REFERENCES.md, docs/dev/design/TYPEWRITER.md section 5):
 %
 %   machine  fixed quirks per key, from /Machine: an offset, a bent slug
 %            (6% of keys: a vertical offset and a lean), a weight bias.
@@ -68,7 +68,7 @@
 % The same /Machine and /Seed give the same page, in pscat and in gs.
 %
 % Limits, accepted (notes/211-typewriter-font.md):
-%   - It is a Type 3 font, so `charpath` gives no outline (FONTS.md,
+%   - It is a Type 3 font, so `charpath` gives no outline (docs/dev/FONTS.md,
 %     Decision 6) and lib/lettering.ps cannot fill it. Use
 %     /CourierPrime-Regular (fonts/catalog/CourierPrime) for outline work.
 %   - Printable ASCII only (32-126). Any other byte advances one cell and

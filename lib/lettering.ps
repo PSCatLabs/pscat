@@ -18,7 +18,7 @@
 % cannot leave the letters. The face must be an *outline* face
 % (any `fonts/catalog` TrueType/OpenType face, or a builtin) — a
 % Type 3 face's `charpath` does not capture painted glyph outlines
-% (FONTS.md), so it is not usable here.
+% (docs/dev/FONTS.md), so it is not usable here.
 %
 % Layering, bottom to top:
 %   1. clip to the glyph outlines (`charpath` + `clip`)
@@ -55,7 +55,7 @@
 % The field is one small image under the vector clip (fillkit.ps header).
 %
 % Which effects survive which output (all verified against pscat's
-% own SVG/PDF/PNG output; see NOTES.md, issue #144):
+% own SVG/PDF/PNG output; see docs/archive/NOTES.md, issue #144):
 %   /solid /patches /mottled   pure paths + clip: vector in SVG and PDF
 %                              (SVG <clipPath>, PDF `W n`), never rasterized
 %   /plasma /clouds /diffclouds /conical
