@@ -2892,22 +2892,6 @@
             /tplAJit 0.15 tplF tplOverlap mul mul tplhl div 1 min
                 dup dup mul 1 exch sub sqrt atan 1.5 min def
         } if
-        % The row budget, counted the way `pktrowel` counts it, on a row of the
-        % longest length (tilt included), before the clip or the rotation is
-        % in force: a row that exceeded it would raise inside both, and a
-        % caller catching the error would be left clipped and rotated. The
-        % walk stops at the limit; the guard is raised after the gsave is undone.
-        /tplover false def
-        /tplcnt 0 def
-        {
-            gsave newpath
-            0 0 moveto tplhl 2 mul tplAJit cos div 0 lineto
-            tplPitch { pop pop pop pop pop pop
-                       /tplcnt tplcnt 1 add def
-                       tplLanes tplcnt mul 120000 gt { /tplover true def stop } if } walkpath
-            grestore
-        } stopped { grestore } if
-        tplover { pktrowel-deposit-count-exceeds-safety-limit } if
         % /Light is a direction in the caller's user space; the rows are drawn
         % in a space rotated by /Direction, where the same light is /Light -
         % /Direction. The caller's own dict is left alone.
@@ -2916,6 +2900,14 @@
             /tplrowopts tplopts dup length 1 add dict copy def
             tplrowopts /Light tplopts /Light get tplDir sub put
         } if
+        % A row can still raise a guard the empty-path call could not (the deposit
+        % budget, or /Touch's area limit, both of which depend on the row's
+        % length). The rows run under the clip and the rotation, so an error
+        % must not leave them behind: it is caught, the gsave undone, and the
+        % error raised again from here. Every `pktrowel` guard is an undefined
+        % name, so naming it again is the same error; anything else is raised
+        % through errordict.
+        {
         gsave
             clip
             newpath
@@ -2931,6 +2923,13 @@
                 tplrowopts pktrowel
             } for
         grestore
+        } stopped {
+            grestore
+            $error /errorname get /undefined eq
+                { $error /command get cvx exec }
+                { errordict $error /errorname get 2 copy known { get exec } { pop pop stop } ifelse }
+            ifelse
+        } if
     } if
 } bind def
 

@@ -45,10 +45,13 @@ What was built (`lib/paintkit.ps`, right after `pktrowel`):
   (in a copy of the options dict; the caller's is untouched). Found by the
   Codex review of the PR: passed on unchanged, the first colour sat on the
   wrong side of the blade for most directions.
-- Error state: the first real row can still exceed `pktrowel`'s deposit budget
-  (a very long area). The plane counts that budget itself, on a row of the
-  longest length, before the clip and rotation (Codex review, round 1), and
-  raises `pktrowel-deposit-count-exceeds-safety-limit` from a clean state.
+- Error state: a row can raise a guard the empty-path call could not see (the
+  deposit budget and `/Touch`'s area limit both depend on the row's length).
+  The Codex review found the deposit budget (round 1) and then `/Touch` (round
+  2) leaking the clip and rotation, so the rows are now wrapped generally: the
+  loop is caught, the gsave undone and the error raised again (the guard name
+  executed again for every `undefined`, `errordict` for anything else, which pscat
+  reports as `undefined` where Ghostscript keeps the name).
 - Safety: 4000 rows, counted before anything is drawn; each row is also
   bounded by `pktrowel`'s own budget.
 - Scratch prefix `tpl` (checked unused): `pktrowel` overwrites every `pt*` name

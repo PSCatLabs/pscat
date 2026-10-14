@@ -239,6 +239,30 @@ fn a_rejected_key_leaves_the_callers_clip_and_matrix_alone() {
 }
 
 #[test]
+fn a_touch_budget_error_leaves_the_state_alone() {
+    // A fine weave makes the catch's cell count exceed its budget only once a
+    // row's own extent is known, which the plane cannot see in advance.
+    let mut it = fresh(100, 100);
+    run(
+        &mut it,
+        &format!(
+            "<< /Weave 0.01 >> pkcanvas {TRI_PAGE} \
+             {{ << /Width 12 /Direction 30 /Touch 0.5 >> pktrowelplane }} stopped \
+             {{ $error /command get /pktrowel-touch-area-exceeds-safety-limit eq }} {{ false }} ifelse \
+             /tplseen exch def \
+             newpath 0 0 1 setrgbcolor 80 80 15 15 rectfill"
+        ),
+    );
+    run(&mut it, "tplseen { 1 } { 0 } ifelse");
+    assert_eq!(it.pop_int().ok(), Some(1), "the touch guard did not fire");
+    let p = it.gfx().pixmap.pixel(87, 12).expect("pixel");
+    assert!(
+        p.blue() > 200 && p.red() < 60,
+        "the facet's clip or a rotation was left behind"
+    );
+}
+
+#[test]
 fn a_rotated_matrix_changes_nothing_about_the_edge() {
     // Under `100 0 translate 90 rotate` user (x, y) is device (100 - y, x)
     // page-wise, so the same triangle sits at a known place.
