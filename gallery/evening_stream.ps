@@ -1,0 +1,568 @@
+%!PS-Adobe-3.0
+%%Title: Evening Stream — a second wet-on-wet landscape, on loaded brushes and one canvas
+%%Creator: pscat — issue #187, epic #112's second landscape
+%%BoundingBox: 0 0 760 560
+%%EndComments
+
+% An autumn evening: the sun just down behind a backlit wood, a stream
+% coming out of the glow, over a little fall and down to the viewer
+% between dark banks, a cabin with its lamp lit, and a near-black
+% foreground where only the grass tips catch the last light.
+%
+% Where Alpine Lake (#118) was painted with single-colour marks, this one
+% is painted with the round-2 tools, and each answers one of the gaps
+% #118 left:
+%
+%   value range      the darks are near black and the only near-whites
+%                    are the glow, its reflection, the fall and the lamp
+%   double loading   /Colors (#183) on pkbroad, pkfan, pktrowel and
+%   (#183)           pkdab: the sky's block-in carries two neighbouring
+%                    sky colours, pines carry dark and lit green with
+%                    /Light toward the sun, the knife carries a lit and a
+%                    shadow edge, the autumn masses a whole palette;
+%                    pkdab /HighlightColor and /ShadowColor give warm
+%                    lights and cool shadows instead of white and black
+%   motions (#184)   pkcrisscross for the sky, pkscumblein's tiny
+%                    circles for the clouds, pkscumble for the foam,
+%                    pktap for the far wood's crest, pkpull for the fall
+%                    and the grass, pkzigzag for the light on the water
+%   pulled           the far wood's reflection is pulled down by a
+%   reflections      directional pkwet (#181) -- one pull for the whole
+%   (#181)           element, because its marks are loaded colours
+%                    pkwet grades for you, not a part-by-part replay
+%   clouds with form the whole cloud scrubbed in the light its
+%                    underside catches, then the dark body over it,
+%                    shifted up, leaving a lit crescent along the lumpy
+%                    underside; all of it worked wet into the sky
+%   one canvas       pkcanvas (#182) once, first: every light, dry mark
+%   (#182)           (water lines, foam, meadow, grass tips) catches on
+%                    the same weave via /Touch
+%
+% Not used: a named pigment palette with subtractive mixing (#185 has
+% not landed), so colours are mixed with artkit's mix3 and shade.
+%
+% No setalpha, so Ghostscript renders the same picture (its rand stream
+% differs, so the marks fall differently).
+%
+%   pscat --page 760x560 --speed 600 gallery/evening_stream.ps
+
+(lib/artkit.ps) run
+(lib/paintkit.ps) run
+
+187 srand
+
+% Scratch names are ev-prefixed: paintkit's presets redefine their own
+% pk-/pn-/pb-/pz-/po-/pq-/pd-/pu-/pj- names on every call, and artkit
+% has its own set.
+
+/evW 760 def
+/evH 560 def
+/evHZ 250 def                                    % the far shore
+/evSX 470 def /evSY 268 def                      % where the sun went down
+
+% ---- palette ---------------------------------------------------------
+
+/evGLOW    [1.00 0.95 0.74] def
+/evGOLD    [1.00 0.80 0.42] def
+/evROSE    [0.93 0.52 0.42] def
+/evMAUVE   [0.58 0.34 0.50] def
+/evVIOLET  [0.22 0.16 0.36] def
+/evCLOUD   [0.36 0.25 0.40] def                  % cloud bodies, against the light
+/evRIM     [1.00 0.78 0.58] def                  % their lit edges
+/evRIDGE   [0.52 0.36 0.50] def
+/evWOOD    [0.22 0.12 0.16] def                  % the backlit far wood
+/evWOODLT  [0.55 0.24 0.18] def
+/evBANK    [0.05 0.06 0.03] def                  % the foreground: near black
+/evMEADOW  [0.16 0.17 0.07] def
+/evMEADOWLT [0.62 0.55 0.22] def
+/evPINE    [0.03 0.07 0.05] def
+/evPINELT  [0.34 0.33 0.11] def
+/evLEAF  [ [0.16 0.05 0.05] [0.34 0.09 0.06] [0.62 0.20 0.07] [0.86 0.42 0.10] [0.97 0.66 0.22] ] def
+
+/evset { aload pop setrgbcolor } def
+/evj { frnd 2 mul 1 sub mul } def                % x -> -x..x
+/evseg { newpath 4 2 roll moveto lineto } def    % x0 y0 x1 y1 -
+
+% x y -> r g b   the sky at a point: a vertical sunset ramp, brightened
+% toward a glow around where the sun went down
+/evskyat {
+    /evqy exch def /evqx exch def
+    /evt evqy evHZ sub evH evHZ sub div 0 max 1 min def
+    evt 0.22 lt {
+        [ evGOLD evROSE evt 0.22 div mix3 ]
+    } {
+        evt 0.55 lt {
+            [ evROSE evMAUVE evt 0.22 sub 0.33 div mix3 ]
+        } {
+            [ evMAUVE evVIOLET evt 0.55 sub 0.45 div mix3 ]
+        } ifelse
+    } ifelse
+    /evd evqx evSX sub dup mul evqy evSY sub 1.6 mul dup mul add sqrt def
+    evGLOW 1 evd 260 div sub 0 max 1.6 exp mix3
+} def
+
+% ---- the canvas ------------------------------------------------------
+
+<< /Seed 187 /Weave 2.5 /Relief 0.6 >> pkcanvas
+
+% ---- sky -------------------------------------------------------------
+
+/evsky {
+    evHZ 20 sub 3 evH {
+        /evy exch def
+        0 8 evW {
+            /evx exch def
+            evx 4 add evy 1.5 add evskyat setrgbcolor
+            evx evy 8.5 3.5 rectfill
+        } for
+    } for
+    % the block-in: criss-cross strokes of a broad brush loaded with the
+    % sky a shade lighter on one edge and a shade darker on the other,
+    % blended on the brush, so the gradient picks up a worked surface
+    1 srand
+    evHZ 10 add 30 evH {
+        /evy exch def
+        -40 100 evW {
+            /evx exch def
+            [ evx 50 add evy 15 add evskyat ] /evc exch def
+            evx evy 100 30 screct
+            << /Count 3 /Length 56 /Angle 32 /Lean 6 /LengthJitter 0.2 >> pkcrisscross
+            << /Width 30 /Charge 0.5 /Depletion 0.85 /Edge 0.3 /ColorMix 1
+               /Colors [ [ evc 1.025 shade ] [ evc 0.975 shade ] ] >> pkbroad
+        } for
+    } for
+} def
+
+% x y w seed -   one cloud, painted the way the style paints one: tiny
+% circles scrubbed in with a broad brush loaded with two cloud colours,
+% then the underside, where the glow from below catches it, scrubbed
+% again in the rim colour, and the whole mass worked wet into the sky.
+/evcloudpath {
+    newpath evcx evcy moveto
+    evcx evcw 0.1 mul add evcy evch 0.9 mul add
+    evcx evcw 0.3 mul add evcy evch 1.1 mul add
+    evcx evcw 0.42 mul add evcy evch 0.8 mul add curveto
+    evcx evcw 0.55 mul add evcy evch 1.35 mul add
+    evcx evcw 0.8 mul add evcy evch 1.05 mul add
+    evcx evcw 0.84 mul add evcy evch 0.5 mul add curveto
+    evcx evcw 0.95 mul add evcy evch 0.5 mul add
+    evcx evcw 1.02 mul add evcy evch 0.2 mul add
+    evcx evcw add evcy curveto
+    evcx evcw 0.8 mul add evcy evch 0.3 mul sub
+    evcx evcw 0.6 mul add evcy evch 0.25 mul add
+    evcx evcw 0.45 mul add evcy evch 0.1 mul sub curveto
+    evcx evcw 0.3 mul add evcy evch 0.35 mul sub
+    evcx evcw 0.15 mul add evcy evch 0.1 mul add
+    evcx evcy curveto closepath
+} def
+/evcloud {
+    srand /evcw exch def /evcy exch def /evcx exch def
+    /evch evcw 0.28 mul def
+    /evcr evcw 0.03 mul def
+    /evcunder [ evcx evcw 2 div add evcy evch 0.5 mul add evskyat ] def
+    /evcbody [ evCLOUD evcunder 0.5 mix3 ] def
+    /evcn evcw evch mul 1.4 mul evcr dup mul 3.14 mul div cvi def
+    % the whole cloud first in the light its underside catches, then the
+    % body over it, shifted up, so only a crescent of light is left along
+    % the lumpy underside (the shift also makes the cloud taller)
+    { evcloudpath scpath
+      << /Count evcn /Radius evcr /Squash 0.7 >> pkscumblein
+      << /Width evcr 2.2 mul /Charge 0.75 /Depletion 0.5 /Edge 0.4 /ColorMix 0.8
+         /Colors [ [ evRIM evcbody 0.15 mix3 ] [ evRIM evcbody 0.55 mix3 ] ] >> pkbroad
+      gsave
+        0 evch 0.3 mul translate
+        evcloudpath scpath
+        << /Count evcn /Radius evcr /Squash 0.7 >> pkscumblein
+        << /Width evcr 2.2 mul /Charge 0.75 /Depletion 0.5 /Edge 0.4 /ColorMix 0.8
+           /Colors [ [ evcbody 1.12 shade ] [ evcbody 0.88 shade ] ] >> pkbroad
+      grestore }
+    << /Soft 0.6 /Under evcunder >> pkwet
+} def
+
+% ---- the distant ridge -----------------------------------------------
+
+/evRIDGEPTS [
+    -10 286  40 312  90 334  140 322  200 344  250 322  300 304
+    350 290  400 280  550 282  600 300  640 322  690 338  730 318  770 300
+] def
+/evridgepath {
+    newpath -10 evHZ 4 sub moveto
+    0 2 evRIDGEPTS length 1 sub { evRIDGEPTS exch 2 getinterval aload pop lineto } for
+    770 evHZ 4 sub lineto closepath
+} def
+/evRIDGEC [ evRIDGE evROSE 0.3 mix3 ] def
+/evridge {
+    3 srand
+    evRIDGEC evset evridgepath fill
+    % its foot lifted into the haze off the water
+    gsave
+        evridgepath clip
+        [ evGOLD evROSE 0.5 mix3 ] evset
+        { -20 evHZ 4 sub 800 10 rectfill
+          newpath -20 evHZ 14 add moveto 260 evHZ 20 add 520 evHZ 10 add 780 evHZ 16 add curveto
+          << /Nozzle 10 /Density 80 /Falloff 1 /Speck 1 /Speckle 0.6 /Overspray 0.6 >> pkspray }
+        << /Direction 90 /OneSided true /Stretch 8 /Offset 36 /Layers 14
+           /Pickup 0.9 /Under evRIDGEC >> pkwet
+    grestore
+} def
+
+% ---- the far wood ----------------------------------------------------
+
+% x -> crest height above the shore; low where the sun went down
+/evwoodh {
+    /evwx exch def
+    evwx 0.07 mul sin 7 mul evwx 0.19 mul sin 4 mul add
+    evwx evSX sub abs 300 div 1 min 34 mul add 10 add
+} def
+/evwoodcrest {
+    newpath -10 dup evwoodh evHZ add moveto
+    -4 6 770 { dup evwoodh evHZ add lineto } for
+} def
+% The wood paints only in loaded colours and the colour it inherits, so
+% pkwet can pull the whole element at once for the reflection.
+/evwood {
+    4 srand
+    evwoodcrest 770 evHZ 6 sub lineto -10 evHZ 6 sub lineto closepath fill
+    evwoodcrest
+    << /Spacing 5 /Length 0 /Scatter 6 >> pktap
+    << /Size 3.4 /Scatter 6 /Density 3 /Irregular 0.9 /Shadow 0.3 /Highlight 0.45
+       /Light 90 /Colors [ evWOOD evWOOD [ evWOOD evWOODLT 0.5 mix3 ] ]
+       /HighlightColor evGOLD >> pkdab
+    % a few taller trees standing out of it
+    0 1 16 {
+        pop
+        /evx 760 chance def
+        /evt evx evwoodh evHZ add def
+        evx evt 4 sub evx 2 evj add evt 14 add 20 chance add evseg
+        << /Width 7 /Bristles 12 /Splay 0.9 /Load 0.9 /Ragged 0.5 /Flick 0.9
+           /Colors [ evWOODLT evWOOD evWOOD ] /ColorMix 0.3 /Light 90 >> pkfan
+    } for
+} def
+
+% ---- the stream ------------------------------------------------------
+
+% It comes out of the glow, bends left to a little fall, and widens as
+% it comes down to the viewer. The edges are shared with the banks.
+/evFALLY 178 def                                 % the fall's lip
+/evFALLB 158 def                                 % ...and its foot
+/evleftedge {                                    % far to near, from 456 evHZ
+    436 236 380 222 352 200 curveto
+    340 190 336 184 338 evFALLY curveto
+    340 evFALLB lineto
+    328 120 300 60 240 -10 curveto
+} def
+/evrightedge {                                   % far to near, from 490 evHZ
+    500 226 462 200 448 evFALLY curveto
+    450 evFALLB lineto
+    470 110 560 60 650 -10 curveto
+} def
+/evrightedgeup {                                 % near to far, from 650 -10
+    560 60 470 110 450 evFALLB curveto
+    448 evFALLY lineto
+    462 200 500 226 490 evHZ 2 add curveto
+} def
+/evstreampath {
+    newpath 456 evHZ 2 add moveto evleftedge
+    650 -10 lineto evrightedgeup closepath
+} def
+/evleftbank {
+    newpath -10 evHZ 2 sub moveto 456 evHZ 2 sub lineto 456 evHZ lineto
+    evleftedge -10 -10 lineto closepath
+} def
+/evrightbank {
+    newpath 770 evHZ 2 sub moveto 490 evHZ 2 sub lineto 490 evHZ lineto
+    evrightedge 770 -10 lineto closepath
+} def
+
+/evwaterat {                                     % x y -> r g b
+    /evwy exch def /evwx exch def
+    [ [ evwx evHZ 2 mul evwy sub evskyat ] [0.16 0.10 0.22]
+      1 evwy evHZ div sub 0 max 0.75 mul mix3 ] 0.86 shade
+} def
+% y -> x   roughly the middle of the stream at height y
+/evmidat {
+    /evmy exch def
+    evmy evFALLY gt
+    { 393 evmy evFALLY sub evHZ evFALLY sub div 80 mul add }
+    { 445 evFALLY evmy sub evFALLY div 50 mul sub } ifelse
+} def
+
+/evstream {
+    gsave
+    evstreampath clip
+    0 3 evHZ 6 add {
+        /evy exch def
+        200 6 700 {
+            /evx exch def
+            evx 3 add evy evwaterat setrgbcolor
+            evx evy 6.5 3.5 rectfill
+        } for
+    } for
+    % the far wood pulled down into the upper reach: the whole element,
+    % mirrored about the shore, in one directional pull
+    gsave
+        0 evFALLY evW evHZ evFALLY sub rectclip
+        evWOOD evset
+        { gsave 0 evHZ 2 mul translate 1 -1 scale evwood grestore }
+        << /Direction 270 /OneSided true /Stretch 5 /Offset 18 /Layers 9
+           /Pickup 0.75 /Under [ evSX evHZ 30 sub evwaterat ] >> pkwet
+    grestore
+    % light on the water: short zig-zag passes of a narrow brush loaded
+    % with the glow and the water, gathered under the sun's reflection
+    7 srand
+    evHZ 6 sub -9 0 {
+        /evy exch def
+        evy evFALLY 4 add gt evy evFALLB 6 sub lt or {
+            /evx evy evmidat 70 evj add 30 sub def
+            newpath evx evy moveto evx 30 add 50 chance add evy lineto
+            << /Amplitude 0.8 /Wavelength 30 >> pkzigzag
+            << /Width 2.2 /Charge 0.9 /Depletion 0.7 /Edge 0.3 /Touch 0.7
+               /Colors [ evGLOW [ evx evy evwaterat ] ] /ColorMix 0.5 >> pkbroad
+        } if
+    } for
+    grestore
+} def
+
+% ---- the fall --------------------------------------------------------
+
+/evfall {
+    9 srand
+    % the falling water: strokes pulled straight down off the lip
+    gsave
+        evstreampath clip
+        [ evMAUVE 0.7 shade ] evset 330 evFALLB 130 evFALLY evFALLB sub rectfill
+        newpath 340 evFALLY 1 add moveto 450 evFALLY 1 add lineto
+        << /Length 21 /LengthJitter 0.45 /Spacing 2.6 /Wander 0.9 /Direction -90 /Lean 4 /Bow 0.08 >> pkpull
+        [ evGLOW [ evMAUVE 0.7 shade ] 0.15 mix3 ] evset
+        << /Width 1.8 /Taper 0.5 /Charge 0.9 /Depletion 0.55 /Waver 0.4 >> pkliner
+        % foam where it lands, and the churn spreading from it
+        newpath 335 evFALLB 2 add moveto 455 evFALLB lineto
+        << /Radius 4.5 /Squash 0.5 >> pkscumble
+        [ evGLOW 0.98 shade ] evset
+        << /Width 3.2 /Bristles 8 /Load 0.85 /Dropout 0.25 /Touch 0.8 >> pkdry
+        newpath 345 evFALLB 9 sub moveto 450 evFALLB 11 sub lineto
+        << /Radius 3 /Squash 0.4 >> pkscumble
+        << /Width 2 /Bristles 6 /Load 0.6 /Dropout 0.45 /Touch 0.65 >> pkdry
+    grestore
+    % the rock lip the water drops over: knife pulls, lit on top
+    newpath 336 evFALLY 2 add moveto 380 evFALLY 4 add 410 evFALLY 1 add 452 evFALLY 3 add curveto
+    << /Width 7 /Coverage 0.95 /Viscosity 0.7 /Scrape 0.3
+       /Colors [ [0.56 0.40 0.36] [0.10 0.08 0.08] ] /ColorMix 0.2 /Light 90 >> pktrowel
+} def
+
+% ---- the cabin -------------------------------------------------------
+
+/evcabin {
+    11 srand
+    /evcx 160 def /evcy 196 def
+    % walls: vertical knife pulls, a lit and a shadow edge
+    gsave
+        evcx evcy 64 32 rectclip
+        evcx 3 add 6 evcx 66 add {
+            /evx exch def
+            evx evcy 34 add evx 1 evj add evcy 2 sub evseg
+            << /Width 7 /Coverage 0.95 /Viscosity 0.8 /Scrape 0.2
+               /Colors [ [0.34 0.20 0.13] [0.10 0.06 0.05] ] /ColorMix 0.4 /Light 0 >> pktrowel
+        } for
+    grestore
+    % the roof, its glow-side slope lit
+    [0.10 0.06 0.06] evset
+    newpath evcx 6 sub evcy 30 add moveto evcx 32 add evcy 56 add lineto
+    evcx 70 add evcy 30 add lineto closepath fill
+    evcx 32 add evcy 56 add evcx 72 add evcy 28 add evseg
+    << /Width 5 /Coverage 0.9 /Viscosity 0.7 /Scrape 0.3 /Angle 10
+       /Colors [ [0.96 0.62 0.32] [0.30 0.14 0.10] ] /ColorMix 0.15 /Light 60 >> pktrowel
+    % the lamp in the window
+    [1.0 0.86 0.42] evset evcx 38 add evcy 9 add 11 11 rectfill
+    [0.10 0.06 0.05] evset evcx 43 add evcy 9 add 1 11 rectfill
+    evcx 38 add evcy 14 add 11 1 rectfill
+} def
+
+% ---- banks and meadows -----------------------------------------------
+
+/evmeadow {                                      % path-proc seed -
+    srand /evmp exch def
+    evMEADOW evset evmp fill
+    gsave
+        evmp clip
+        0 1 220 {
+            pop
+            /evx 800 chance 20 sub def
+            /evy evHZ 150 frnd 1.8 exp mul sub def
+            % the glow catches the far meadow, fading toward the viewer
+            /evf evHZ evy sub 90 div 1 min def
+            evx evy evx 60 add 40 chance add evy 3 evj add evseg
+            << /Width 12 /Charge 0.7 /Depletion 0.85 /Edge 0.3 /Touch 0.85 /ColorMix 0.6
+               /Colors [ [ evMEADOWLT evMEADOW evf 0.5 add 1 min mix3 ] evMEADOW ] >> pkbroad
+        } for
+    grestore
+} def
+
+% spine-proc seed -   bushes along a stream bank
+/evbushes {
+    srand exec
+    << /Size 4 /Scatter 16 /Density 1.6 /Irregular 0.9 /Shadow 0.6 /Highlight 0.55
+       /Light 70 /Colors [ [0.05 0.07 0.03] [0.12 0.14 0.05] [0.22 0.20 0.06] ]
+       /HighlightColor [0.80 0.62 0.24] /ShadowColor [0.04 0.03 0.06] >> pkdab
+} def
+
+% ---- trees -----------------------------------------------------------
+
+% x y w h seed light -   an autumn tree: a liner trunk and limbs, then
+% foliage pounced on in clumps from a brush loaded with the season
+/evtree {
+    /evtl exch def srand /evth exch def /evtw exch def /evty exch def /evtx exch def
+    [0.10 0.06 0.05] evset
+    evtx evty evtx 3 evj add evty evth 0.75 mul add evseg
+    << /Width evtw 0.06 mul 2 max /Taper 0.8 /Waver 0.4 >> pkliner
+    0 1 3 {
+        pop
+        evtx evty evth 0.35 mul add evth 0.3 mul cvi chance add
+        evtx evtw 0.45 evj mul add evty evth 0.85 mul add 10 evj add evseg
+        << /Width evtw 0.025 mul 1.2 max /Taper 0.9 /Waver 0.8 >> pkliner
+    } for
+    0 1 7 {
+        /evk exch def
+        /evkf evk 7 div def
+        /evkw 1 evkf 0.5 sub abs 1.2 mul sub def % widest across the middle
+        newpath
+        evtx evtw 0.48 mul evkw mul sub 6 evj add  evty evth 0.36 mul add evk evth 0.08 mul mul add moveto
+        evtx evtw 0.48 mul evkw mul add 6 evj add  evty evth 0.38 mul add evk evth 0.08 mul mul add lineto
+        << /Size evtw 0.028 mul 2.2 max /Scatter evtw 0.11 mul /Density 4 /Irregular 0.85
+           /Shadow 0.55 /Highlight 0.45 /Light evtl
+           /Colors evLEAF /ColorMix 0.4
+           /HighlightColor [1.0 0.84 0.42] /ShadowColor [0.16 0.06 0.16] >> pkdab
+    } for
+} def
+
+% x y h seed light -   a pine: a trunk, then branches pulled outward
+% from it by a fan loaded with a little lit green and a lot of dark
+/evpine {
+    /evpl exch def srand /evph exch def /evpy exch def /evpx exch def
+    evPINE evset
+    evpx evpy evpx evpy evph add evseg
+    << /Width evph 0.03 mul 1.5 max /Taper 0.95 /Waver 0.3 >> pkliner
+    /evn evph 8 div cvi 4 max def
+    0 1 evn {
+        /evk exch def
+        /evf evk evn div def
+        /evty evpy evph add evph 0.9 mul evf mul sub def
+        /evspan evph 0.03 mul evph 0.3 mul evf mul add 4 evj add def
+        [ -1 1 ] {
+            /evs exch def
+            evpx evty
+            evpx evspan evs mul add  evty evspan 0.55 mul sub 3 evj add evseg
+            << /Width evph 0.09 mul 4 max /Bristles 26 /Splay 0.9 /Load 0.9
+               /Dropout 0.14 /Ragged 0.6 /Flick 0.8
+               /Colors [ evPINELT evPINE evPINE evPINE ] /ColorMix 0.15 /Light evpl >> pkfan
+        } forall
+    } for
+} def
+
+% ---- foreground ------------------------------------------------------
+
+/evnearleft {
+    newpath -10 -10 moveto -10 140 lineto
+    60 150 150 128 214 100 curveto 250 80 262 40 270 -10 curveto closepath
+} def
+/evnearright {
+    newpath 770 -10 moveto 770 160 lineto
+    700 160 650 128 610 96 curveto 580 64 572 30 566 -10 curveto closepath
+} def
+% path-proc rim-proc seed -   a near bank: near-black earth, a few dark
+% brushed strokes, bushes, and grass pulled up along the rim and in
+% tufts across it, catching the last light on the canvas weave
+/evnear {
+    srand /evnr exch def /evnp exch def
+    evBANK evset evnp fill
+    gsave
+        evnp clip
+        0 1 30 {
+            pop
+            [ [0.10 0.07 0.04] [0.04 0.08 0.04] ] 2 chance get evset
+            /evx 800 chance 20 sub def /evy 160 chance def
+            evx evy evx 50 add 30 chance add evy 3 evj add evseg
+            << /Width 14 /Charge 0.6 /Depletion 0.9 /Edge 0.2 >> pkbroad
+        } for
+    grestore
+    evnr
+    << /Size 6 /Scatter 18 /Density 2.5 /Irregular 0.9 /Shadow 0.6 /Highlight 0.45
+       /Light 70 /Colors [ [0.03 0.05 0.02] [0.08 0.10 0.04] ]
+       /HighlightColor [0.50 0.42 0.14] /ShadowColor [0.02 0.02 0.04] >> pkdab
+    % a few tufts across the bank, dimmer than the rim's
+    gsave
+        evnp clip
+        0 1 7 {
+            pop
+            /evx 760 chance def /evy 120 chance def
+            newpath evx evy moveto evx 20 add 12 chance add evy 4 evj add lineto
+            << /Length 12 /LengthJitter 0.6 /Spacing 2.5 /Direction 90 /Lean 18 /Bow 0.2 >> pkpull
+            [ evMEADOWLT 0.55 shade ] evset
+            << /Width 1.3 /Taper 0.95 /Waver 0.6 /Touch 0.7 >> pkliner
+        } for
+    grestore
+    evnr
+    << /Length 18 /LengthJitter 0.6 /Spacing 2.2 /Direction 90 /Lean 16 /Bow 0.2 >> pkpull
+    [ evMEADOWLT 0.95 shade ] evset
+    << /Width 1.4 /Taper 0.95 /Waver 0.6 /Touch 0.8 >> pkliner
+} def
+
+% x y w seed -   a rock at the water's edge: a dark mass, its top
+% pulled across by a knife loaded with a lit top and a dark underside
+/evrock {
+    srand /evrw exch def /evry exch def /evrx exch def
+    [0.06 0.05 0.05] evset
+    newpath evrx evrw 0.5 mul sub evry moveto
+    evrx evrw 0.45 mul sub evry evrw 0.45 mul add
+    evrx evrw 0.2 mul add evry evrw 0.55 mul add
+    evrx evrw 0.5 mul add evry curveto closepath fill
+    % the lit top: short knife touches across the crown
+    0 1 2 {
+        /evk exch def
+        evrx evrw 0.3 mul sub evk evrw 0.18 mul mul add  evry evrw 0.28 mul add evk 1.5 mul sub
+        evrx evrw 0.02 mul add evk evrw 0.16 mul mul add  evry evrw 0.32 mul add evk 2 mul sub evseg
+        << /Width evrw 0.1 mul 2 max /Coverage 0.9 /Viscosity 0.7 /Scrape 0.4 /Angle 30
+           /Colors [ [0.66 0.48 0.40] [0.20 0.14 0.13] ] /ColorMix 0.3 /Light 80 >> pktrowel
+    } for
+} def
+
+% ---- paint -----------------------------------------------------------
+
+evsky
+100 474 210 21 evcloud
+540 496 190 22 evcloud
+300 412 150 23 evcloud
+620 404 120 24 evcloud
+evridge
+evWOOD evset evwood
+{ evleftbank } 13 evmeadow
+{ evrightbank } 14 evmeadow
+% the meadows' far edge, tapped along the shore so it is not a ruled line
+17 srand
+newpath -10 evHZ 1 sub moveto 450 evHZ 1 sub lineto
+<< /Spacing 4 /Length 0 /Scatter 2 >> pktap
+<< /Size 2.2 /Scatter 2.5 /Density 3 /Irregular 0.9 /Shadow 0.3 /Highlight 0.4 /Light 90
+   /Colors [ evMEADOW [ evMEADOW evWOOD 0.5 mix3 ] ] /HighlightColor evMEADOWLT >> pkdab
+newpath 496 evHZ 1 sub moveto 770 evHZ 1 sub lineto
+<< /Spacing 4 /Length 0 /Scatter 2 >> pktap
+<< /Size 2.2 /Scatter 2.5 /Density 3 /Irregular 0.9 /Shadow 0.3 /Highlight 0.4 /Light 90
+   /Colors [ evMEADOW [ evMEADOW evWOOD 0.5 mix3 ] ] /HighlightColor evMEADOWLT >> pkdab
+evstream
+evfall
+evcabin
+% bushes along both banks of the stream
+{ newpath 240 214 moveto 330 196 lineto 336 170 lineto 320 120 lineto } 15 evbushes
+{ newpath 520 236 moveto 470 198 lineto 456 160 lineto 500 110 lineto 560 70 lineto } 16 evbushes
+% the autumn wood on either side of the clearing
+690 160 160 230 31 150 evtree
+590 190 110 150 32 150 evtree
+50 200 130 200 33 30 evtree
+% evergreens framing the scene
+44 80 320 41 20 evpine
+110 104 230 42 20 evpine
+728 110 280 43 160 evpine
+{ evnearleft } { newpath -10 136 moveto 60 146 150 126 212 100 curveto 248 80 260 40 268 -10 curveto } 51 evnear
+{ evnearright } { newpath 568 -10 moveto 574 30 582 64 612 98 curveto 650 130 700 158 770 156 curveto } 52 evnear
+350 132 26 61 evrock 520 92 40 62 evrock 318 76 34 63 evrock 586 30 30 64 evrock
+
+showpage
