@@ -92,7 +92,7 @@ from its own tree root, PNG only (SVG is nondeterministic, #261). Twelve files:
 `gallery/{nightfall_triptych,out_of_register,varsity_backs}.ps`,
 `docs/drymedia/prototypes/layering.ps` and the artkit and paintkit selftest
 drivers. That is every file in the repo that calls `hatch` or loads a library
-that does, 32 PNGs: 0 differ under `cmp`, all exit codes 0. `scripts/identity_check.sh`
+that does, 28 PNGs: 0 differ under `cmp`, all exit codes 0. `scripts/identity_check.sh`
 covers paintkit loaders only, so this was a hand loop.
 Negative control: changing the candidate-centering divisor in `hatch` (`2 div`
 to `3 div` for `/hkslack`) made `examples/hatching.ps`, `examples/printkit.ps` and
