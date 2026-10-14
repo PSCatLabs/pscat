@@ -1299,6 +1299,8 @@ skeletons with TeX's box model. The subset covers:
   and `\|`, or the characters `⟨ ⟩ ‖ ∥` typed directly;
 - relations and operators such as `\equiv \sim \subseteq \mapsto \perp
   \therefore \circ \ast`, and `\hbar \ell`;
+- `*` is `\ast`, as in TeX: a binary operator between terms, and `z^*` or
+  `A_*` a raised or lowered asterisk for a conjugate or an adjoint;
 - matrices and `cases`, accents and `\boxed`;
 - Greek and operator names.
 

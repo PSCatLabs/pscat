@@ -51,12 +51,15 @@
 %   \equiv \sim \simeq \subseteq \supset \supseteq \mapsto \perp
 %   \parallel \propto \therefore \because    relations
 %   \circ \ast \star \setminus               binary operators
+%   *                             is \ast, as in TeX: a binary operator between
+%                                 terms, and z^* or A_* a raised or lowered
+%                                 asterisk (a conjugate or an adjoint)
 %   \hbar \ell \iota \upsilon \Upsilon \langle \rangle \|  letters, brackets
 %   \varphi \vartheta \varkappa \varrho \varpi \varsigma   variant Greek;
 %   \epsilon is the lunate ϵ and \varepsilon the three-shaped ε, as in TeX
 %   (before issue #366 both drew the three-shaped one)
 % Anything else fails with an undefined name that says what it was:
-% `mk-unsupported-command:\oplus`, `mk-unsupported-character:*`, and so
+% `mk-unsupported-command:\oplus`, `mk-unsupported-character:@`, and so
 % on. Nothing is dropped silently. `$` is ignored, so ($x^2$) works.
 %
 % --- Layout ---------------------------------------------------------
@@ -189,7 +192,8 @@
 % @internal
 /mkascii <<
   33 [/exclam /close] 40 [/parenleft /open]
-  41 [/parenright /close] 43 [/plus /bin] 44 [/comma /punct]
+  41 [/parenright /close] 42 [/asteriskmath /bin] 43 [/plus /bin]
+  44 [/comma /punct]
   45 [/minus /bin] 46 [/period /ord] 47 [/slash /ord] 58 [/colon /rel]
   59 [/semicolon /punct] 60 [/less /rel] 61 [/equal /rel]
   62 [/greater /rel] 63 [/question /close] 91 [/bracketleft /open]
@@ -2059,13 +2063,15 @@
 %   { (\frac{a}{b}) 0 0 << >> mkpath }
 %   /mk-control-character:write-each-TeX-backslash-as-\\ (a form feed from \f) mustguard
 %   { (\\iiiint f) 0 0 << >> mkpath } /mk-unsupported-command:\iiiint (\iiiint) mustguard
-%   { (a * b) 0 0 << >> mkpath } /mk-unsupported-character:* (an asterisk) mustguard
+%   { (a @ b) 0 0 << >> mkpath } /mk-unsupported-character:@ (an at sign) mustguard
 %   { (⊕) 0 0 << >> mkpath } /mk-unsupported-character:⊕ (a circled plus) mustguard
 %   { (\\left< x \\right>) 0 0 << >> mkpath } (mk-unsupported-delimiter:<) cvn
 %   (an angle bracket delimiter) mustguard
 %   { (\\left\\lceil x \\right.) 0 0 << >> mkpath } /mk-unsupported-delimiter:\lceil
 %   (\lceil) mustguard
 %   { (\\oplus) 0 0 << >> mkpath } /mk-unsupported-command:\oplus (\oplus) mustguard
+%   % an asterisk in \text is still refused: only math has the TeX meaning
+%   { (\\text{a*b}) 0 0 << >> mkpath } /mk-unsupported-character:* (an asterisk in \text) mustguard
 %   { (\\begin{array} x \\end{array}) 0 0 << >> mkpath }
 %   /mk-unsupported-environment:array (the array environment) mustguard
 %   { (x^) 0 0 << >> mkpath } /mk-missing-argument:^ (a superscript with nothing) mustguard
@@ -2231,6 +2237,35 @@
 %   (\\left\\langle \\frac{a}{b} \\right\\rangle) << /Size 60 /Irregular 0 >>
 %   mkmetrics dup /Height get exch /Depth get add 60 gt
 %   (a grown angle bracket spans its fraction) mustbe
+%%EndSelfTest
+%
+%%SelfTest: ascii-star-is-ast
+%   % issue #364: * was refused; in math it is \\ast, with TeX's class rules
+%   (a*b) << /Size 100 /Irregular 0 >> mkmetrics /Width get
+%   (a \\ast b) << /Size 100 /Irregular 0 >> mkmetrics /Width get eq
+%   (a*b is a \\ast b) mustbe
+%   (z^*) << /Size 100 /Irregular 0 >> mkmetrics /Width get
+%   (z^{\\ast}) << /Size 100 /Irregular 0 >> mkmetrics /Width get eq
+%   (z^* is z^{\\ast}) mustbe
+%   % a star at the start of a formula or after another operator is an
+%   % ordinary symbol (TeX rule 5): no thick space before it
+%   (*x) << /Size 100 /Irregular 0 >> mkmetrics /Width get
+%   (a*b) << /Size 100 /Irregular 0 >> mkmetrics /Width get lt
+%   (a leading * takes no space before it) mustbe
+%   % raised in a superscript, lowered in a subscript
+%   (z^*) << /Size 100 /Irregular 0 >> mkmetrics /Height get
+%   (z) << /Size 100 /Irregular 0 >> mkmetrics /Height get gt
+%   (z^* rises above z) mustbe
+%   (A_*) << /Size 100 /Irregular 0 >> mkmetrics /Depth get 0 gt
+%   (A_* hangs below the baseline) mustbe
+%   [ (\\psi^*) (f^{**}) (A^* B_*) (z^* = x - i y) (\\left(z^*\\right)^*)
+%     (\\sum_{k=1}^* a_k^*) (a * b) (\\frac{a^*}{b_*})
+%   ] true exch {
+%     /mkt-s exch def
+%     mkt-s << /Size 40 /Seed 3 >> mkmetrics /Width get 0 gt and
+%     newpath mkt-s 0 0 << /Size 40 /Seed 3 >> mkpath newpath
+%   } forall
+%   (starred scripts lay out and draw) mustbe
 %%EndSelfTest
 %
 %%SelfTest: delimiters-typed-as-unicode
