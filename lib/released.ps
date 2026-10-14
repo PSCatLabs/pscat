@@ -623,6 +623,16 @@ RelState begin {
     /rlCC 0 def
 } bind def
 
+% rel-paper may run inside the content of a rel-page (tw-type's /PageStart):
+% it keeps the enclosing page's options, copy level and generator state
+/rlSave {                                           % -> dict
+    rlKeys length 4 add dict /rsvD exch def
+    rlKeys { exch pop 0 get /rsvK exch def rsvD rsvK rsvK load put } forall
+    rsvD /rlCC rlCC put  rsvD /rlSt rlSt put
+    rsvD
+} bind def
+/rlRestore { { def } forall } bind def              % dict -> -
+
 % ---- the page --------------------------------------------------------------------
 /rlIsProc { dup type /arraytype eq { xcheck } { pop false } ifelse } bind def
 /rlPaint {
@@ -760,8 +770,10 @@ rlDefaults
 % @param: /Shadow [0..1] As rel-page (default 0.6)
 /rel-paper {
     RelState begin
+    rlSave exch
     rlDefaults rlApply
     gsave /rlCC 0 def rlPaperDraw grestore
+    rlRestore
     end
 } bind def
 

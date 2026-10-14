@@ -265,6 +265,41 @@ fn a_rejected_call_leaves_the_dictionary_stack_and_names_its_key() {
 }
 
 #[test]
+fn rel_paper_inside_a_page_keeps_the_pages_options() {
+    // the content paints paper with its own options; the page's generations
+    // and stamps must still be drawn after it
+    let page_opts = "/Generation 2 /Stamps [ << /Lines [ (SEEN) ] /X 150 /Y 100 /Size 24 >> ]";
+    let dark = |p: &[u8]| p.iter().filter(|&&v| v < 100).count() as f64;
+    let plain = rel_page("{ }", page_opts);
+    let nested = rel_page(
+        "{ << /Age 0.5 /Width 120 /Height 80 >> rel-paper }",
+        page_opts,
+    );
+    assert!(dark(&plain) > 500.0);
+    assert!(
+        (dark(&nested) / dark(&plain) - 1.0).abs() < 0.03,
+        "{} against {} dark pixels",
+        dark(&nested),
+        dark(&plain)
+    );
+}
+
+#[test]
+fn a_redaction_inside_an_overtype_still_covers() {
+    let p = page(
+        "<< /Text (a <o>old|<r>secret</r></o> b) /Width 300 /Height 200 /Margin 30 >> tw-type",
+    );
+    // the bar's rows are dark right across the 6 cells of the replacement
+    let row = |py: u32| &p[(py * W) as usize..((py + 1) * W) as usize];
+    let top = (30.0 + 0.75 * 12.5) as u32;
+    assert!(
+        row(top - 2)[(30.0 + 2.0 * 7.2) as usize + 2..(30.0 + 8.0 * 7.2) as usize - 2]
+            .iter()
+            .all(|&v| v < 60)
+    );
+}
+
+#[test]
 fn a_zero_strength_stamp_and_a_huge_sheet_are_handled() {
     let blank = page("");
     assert_eq!(

@@ -1028,8 +1028,10 @@ TWState begin {
         lyIo 2 eq {
             lyCh 32 gt { lyCh } { 0 } ifelse /lyOv exch def
             lyOv 0 gt { /lyAnyO true def } if
+            lyAt 4 and 0 ne { /lyAnyR true def } if
             lyOp lyN lyOs sub lt {
                 lyO lyOs lyOp add lyOv put
+                lyAt 4 and 0 ne { lyA lyOs lyOp add 2 copy get 4 or put } if
             } {
                 lyC lyN 32 put  lyA lyN lyAt put  lyO lyN lyOv put
                 /lyN lyN 1 add def
