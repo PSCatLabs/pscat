@@ -70,11 +70,11 @@ Steps that changed the look, in order:
 4. **Haze range grows with /Haze squared.** A heavily erased board (C6)
    is milky. A lightly dusted one stays dark.
 
-**Cost** (CPU `user`, release build, load average 3 to 5):
+**Cost** (CPU `user`, release build, load average 3 to 9 on a shared machine):
 
 | | pscat | gs | budget |
 |---|---|---|---|
-| `examples/drychalk_specimen.ps` at 2x | 8.5s | 4.5s | 10s |
+| `examples/drychalk_specimen.ps` at 2x | 8.5–9.0s | 4.1–4.5s | 10s |
 | `tests/drychalk.rs` slowest render | 0.22s (a small board, `--profile ci`) | | 2s |
 
 Three findings, each now handled in drychalk:
@@ -83,7 +83,7 @@ Three findings, each now handled in drychalk:
   leaves userdict about 80% full, and dcboard's scratch names pushed it to
   88%. Every operator lookup that misses userdict then got slower: one
   side stroke went from 0.21s to 0.44s, and the specimen took 14.8s in
-  gs. drychalk's public procedures now run inside a private 600-slot dict
+  gs. drychalk's public procedures now run inside a private 1200-slot dict (about 500 names land in it on the specimen)
   (`dcscratch`), and gs takes 4.5s. drykit's and paintkit's own names
   still pay this cost.
 - **drykit `/Fallout` in gs** (#308). It makes one artkit `scatter` call

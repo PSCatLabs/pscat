@@ -69,7 +69,7 @@
 % once it is nearly full, and a board's names were enough to double the
 % cost of the chalk drawn after it.
 % @internal
-/dcnewscratch { 600 dict } def
+/dcnewscratch { 1200 dict } def
 % @internal
 /dcscratch dcnewscratch def
 
@@ -777,6 +777,9 @@
     /dcsx dcBw dcNx div def /dcsy dcBh dcNy div def
     % the field itself is evaluated on a coarse grid, dcgrid samples a
     % cell, and bilinear between: every feature is many cells wide
+    % about dcgridpt points a cell whatever the resolution, so a wipe or the
+    % ledge's falloff is never narrower than a cell
+    /dcgrid dcgridpt dcstep div round cvi 1 dcmax def
     /dcMx dcNx dcgrid div ceiling cvi 1 dcmax def
     /dcMy dcNy dcgrid div ceiling cvi 1 dcmax def
     /dcGx dcBw dcMx div def /dcGy dcBh dcMy div def
@@ -826,9 +829,11 @@
     /dcFmean dcFsum dcNx dcNy mul div def
 } def
 
-% Field samples per side of the coarse grid the field is evaluated on.
+% The coarse grid the field is evaluated on, in points per cell: the
+% field is bilinear between grid points, and every feature (a wipe's
+% half-height, the ledge's falloff) is wider than this.
 % @internal
-/dcgrid 4 def
+/dcgridpt 6 def
 
 % -   (fine streaks along every swipe's arc: the felt's fibres leave lines
 % a little lighter or darker than the band they lie in)
@@ -1111,42 +1116,51 @@
     << /Surface dcBn /Seed dcBseed /Ground dcG /Weave dcWeave >> dksurface
     dcboardlayout
     dcbuildfield
+    % Every gsave below is given back before an error propagates (drykit's
+    % dkZdraw pattern), so a failed board leaves no clip behind.
     gsave
         newpath dcBx dcBy dcBw dcBh rectclip
-        % the board, then its film
-        dcG aload pop setrgbcolor dcBx dcBy dcBw dcBh rectfill
-        dcpaintfield
-        userdict /dcUnder [ dcFmean dcfcolor ] put
-        dcBseed 5 mul 1 add dcsrand dcrand pop
-        dcgrain
-        % the erased writing: chalk at a fraction of its strength, smeared
-        % wider and broken, then half the swipes lay the film back over it
-        dcGhostOn {
-            gsave
-                newpath
-                count /dcgc exch def
-                % the caller's procedure runs in the caller's dictionaries
-                /dcGhost load end stopped dcscratch begin { grestore grestore stop } if
-                count dcgc ne {
-                    count dcgc sub { pop } repeat
-                    grestore grestore dcboard-ghost-must-leave-the-stack-alone
-                } if
-                % what the eraser left in the tooth: one faint, broken level
-                dcWhite aload pop setrgbcolor
-                /dcLevels 1 def
-                << /Width dcGhostW /Touch dcGhostT /Strength 1 dcErased sub 0.25 mul 0.03 add
-                   /Dust 0 /Landing 0.2 /Lift 0.2 /Vary 1 /Streak 2.6
-                   /Seed dcBseed 31 mul 2147483 mod >> dcchalk
-                /dcLevels 3 def
-            grestore
-            dcreswipe
-        } if
-        dcBseed 7 mul 3 add dcsrand dcrand pop
-        dcstreaks
-        dcrewipe
-        dcLedge 0 gt { dcspecks } if
+        {
+            % the board, then its film
+            dcG aload pop setrgbcolor dcBx dcBy dcBw dcBh rectfill
+            dcpaintfield
+            userdict /dcUnder [ dcFmean dcfcolor ] put
+            dcBseed 5 mul 1 add dcsrand dcrand pop
+            dcgrain
+            % the erased writing, then half the swipes lay the film back
+            dcGhostOn { dcghost dcreswipe } if
+            dcBseed 7 mul 3 add dcsrand dcrand pop
+            dcstreaks
+            dcrewipe
+            dcLedge 0 gt { dcspecks } if
+        } stopped
     grestore
+    { stop } if
     dcTray 0 gt { dctray } if
+} def
+
+% -   (the /Ghost writing: the caller's path, drawn as what the eraser
+% left in the tooth, one faint and broken level of chalk)
+% @internal
+/dcghost {
+    gsave
+        {
+            newpath
+            count /dcgc exch def
+            % the caller's procedure runs in the caller's dictionaries
+            /dcGhost load end stopped dcscratch begin { stop } if
+            count dcgc gt { count dcgc sub { pop } repeat dcboard-ghost-must-leave-the-stack-alone } if
+            count dcgc lt { dcboard-ghost-must-leave-the-stack-alone } if
+            dcWhite aload pop setrgbcolor
+            dcscratch /dcLevels 1 put
+            << /Width dcGhostW /Touch dcGhostT /Strength 1 dcErased sub 0.25 mul 0.03 add
+               /Dust 0 /Landing 0.2 /Lift 0.2 /Vary 1 /Streak 2.6
+               /Seed dcBseed 31 mul 2147483 mod >> dcchalk
+        } stopped
+        % the one-level dial is the ghost's alone, error or not
+        dcscratch /dcLevels undef
+    grestore
+    { stop } if
 } def
 
 %%SelfTest: dcboard-rejects-malformed-options
@@ -1176,6 +1190,22 @@
 %   (a slate with a ghost) mustpass
 %   true setpacking /dcpk { 5 20 moveto 45 22 lineto } def false setpacking
 %   { gsave 0 0 50 40 << /Ghost /dcpk load >> dcboard grestore } (a packed /Ghost) mustpass
+%%EndSelfTest
+%
+%%SelfTest: dcboard-an-error-mid-board-leaves-no-clip
+%   % A ghost too wide for drykit's catch budget raises cleanly: the board's
+%   % clip and gsaves are given back, and the ghost's one-level dial does
+%   % not leak into later chalk.
+%   /dkbudget 20 def
+%   { 0 0 50 40 << /Ghost { 5 20 moveto 45 22 lineto } >> dcboard }
+%   /dkcatch-area-exceeds-safety-limit (a ghost past the catch budget) mustguard
+%   /dkbudget 150000 def
+%   dcscratch /dcLevels known not (the ghost's dial is gone) mustbe
+%   clippath pathbbox 4 2 roll pop pop 60 gt exch 60 gt and
+%   (no board clip is left in force) mustbe
+%   gsave { 0 0 50 40 << /Ghost { 1 2 } >> dcboard } stopped grestore
+%   (a /Ghost that leaves values raises) mustbe
+%   count 0 eq (and its values are popped) mustbe
 %%EndSelfTest
 %
 %%SelfTest: dcboard-takes-no-draws-and-sets-the-board
