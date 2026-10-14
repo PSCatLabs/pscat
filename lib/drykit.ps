@@ -985,7 +985,11 @@
                 } forall ] dkZthin
             } forall
         ]
-        dkZg 0 get 0 get dkZg 0 get 1 get dkcatch
+        % A run too wide for any chunk still reaches dkcatch, whose budget
+        % guard names the problem; the gsave is given back before it
+        % propagates (levels already drawn stay drawn).
+        dkZg 0 get 0 get dkZg 0 get 1 get
+        { dkcatch } stopped { grestore stop } if
         dkZg {
             /dkZde exch def
             dkZde 5 get /ctm get setmatrix
@@ -1143,7 +1147,7 @@
                 } loop
                 /dkZpiece dkZrr dkZp0 dkZp1 dkZp0 sub 1 add getinterval def
                 /dkZpc dkZpiece dkZRr dkZest def
-                dkZsum dkZpc add dkZcut gt counttomark 0 gt and {
+                counttomark 0 gt dkZsum dkZpc add dkZcut gt and {
                     dktomark dkZdraw mark /dkZsum 0 def
                 } if
                 [ dkZe aload pop pop pop dkZpiece dkZhr ]
@@ -1152,7 +1156,7 @@
             } loop
         } {
             /dkZc exch def
-            dkZsum dkZc add dkZcut gt counttomark 0 gt and {
+            counttomark 0 gt dkZsum dkZc add dkZcut gt and {
                 dktomark dkZdraw mark /dkZsum 0 def
             } if
             dkZe
@@ -1325,6 +1329,19 @@
 %      /Lanes 3 /Tilt 40 /Fallout 0.5 /Drift 2 >> dkstroke grestore
 %   rand dkta eq
 %   (dkstroke, with every random feature on, leaves the caller's stream untouched) mustbe
+%%EndSelfTest
+%
+%%SelfTest: dkstroke-a-run-past-the-budget-raises-cleanly
+%   % A run too wide for any chunk reaches dkcatch's own budget guard, with
+%   % dkZdraw's gsave given back (the block checks the graphics stack).
+%   % Codex review of PR #286: the flush test once counted its own boolean
+%   % as a queued entry and raised rangecheck on an empty queue instead.
+%   << /Surface /drawing >> dksurface
+%   /dkbudget 500 def
+%   { newpath 0 0 moveto 10 0 lineto << /Width 100 /Touch 0.5 >> dkstroke }
+%   /dkcatch-area-exceeds-safety-limit (a run wider than any chunk) mustguard
+%   { gsave newpath 0 0 moveto 10 0 lineto << /Width 2 /Touch 0.5 >> dkstroke grestore }
+%   (a run inside the budget after a rejected one) mustpass
 %%EndSelfTest
 %
 %%SelfTest: dkbatch-guards
