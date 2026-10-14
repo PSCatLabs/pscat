@@ -1,27 +1,11 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--@head-->
 <title>pscat — for coding agents</title>
-<link rel="stylesheet" href="style.css">
 </head>
 <body>
-<header>
-  <a class="brand" href="index.html">pscat</a>
-  <nav>
-    <a href="index.html">Home</a>
-    <a href="playground.html">Playground</a>
-    <a href="charts.html">Charts</a>
-    <a href="gallery.html">Gallery</a>
-    <a href="fonts.html">Fonts</a>
-    <a href="architecture.html">Architecture</a>
-    <a href="extending.html">Extending</a>
-    <a href="javascript.html">JavaScript</a>
-    <a class="here" href="agents.html">Agents</a>
-    <a href="https://github.com/jeromebanks/postscript_interpreter">GitHub</a>
-  </nav>
-</header>
+<!--@header agents-->
 <main>
   <h1>pscat as a tool for agents</h1>
   <p class="sub">Everything a coding agent — Claude Code, Codex,
@@ -48,7 +32,7 @@ cargo build --release      # → target/release/pscat and target/release/pscat-m
   <p><code>.claude/skills/psviz/SKILL.md</code> is the paper-viz companion to <code>pscat</code>/<code>psart</code>: it teaches agents to reach for <code>lib/graph.ps</code> (plotfn/plotparam/plotpolar/plotsurface) and <code>lib/dataviz.ps</code> (bar/line/area/scatter/pie) for documents, with calling conventions and copy-paste templates — so a “make me a chart for my paper” request goes straight to a clean figure instead of the generative-art loop. The interactive counterpart lives at <a href="charts.html">Charts</a>.</p>
 
   <h2>Surface 2 — the MCP server</h2>
-  <p><code>pscat-mcp</code> speaks MCP over stdio and exposes three
+  <p><code>pscat-mcp</code> speaks MCP over stdio and exposes four
   tools. It shells out to the pscat CLI (found next to it) rather
   than linking the interpreter — PostScript's <code>=</code> and
   <code>print</code> write to stdout, which is the JSON-RPC channel,
@@ -67,6 +51,11 @@ cargo build --release      # → target/release/pscat and target/release/pscat-m
         "r,g,b", jitter, seed, dpi, out_path</td>
         <td>a handwritten-note PNG — the /HandScript dynamic font,
         word-wrapped and auto-sized; same seed, same page</td></tr>
+    <tr><td><code>describe_art_capabilities</code></td>
+        <td>none</td>
+        <td>structured JSON listing the fonts, Type 3 faces, palettes,
+        page templates and library procedures this build really has, so
+        an agent need not guess names from documentation</td></tr>
     <tr><td><code>eval_postscript</code></td>
         <td>source</td>
         <td>what the program printed; on error, the standard
@@ -99,12 +88,10 @@ pscat -e '3 4 add ='                     # one-liner eval
   after an error — usually exactly what you want when debugging.</p>
 
   <h2>Working <em>on</em> pscat with an agent</h2>
-  <p>The repo itself is agent-first: <code>HANDOFF.md</code> orients
-  a fresh session, <code>ROADMAP.md</code> routes every task to a
-  model tier, <code>AGENTS.md</code> holds the working conventions,
-  and the whole history was built stage by stage this way. See
-  <a href="extending.html">Extending</a>.</p>
+  <p>The repo itself is agent-first: <code>HANDOFF.md</code> orients a fresh
+  session and <code>AGENTS.md</code> holds the working conventions. See
+  <a href="contribute.html">Contribute</a>.</p>
 </main>
-<footer>pscat — built by hand, tested against Ghostscript, drawn live.</footer>
+<!--@footer-->
 </body>
 </html>

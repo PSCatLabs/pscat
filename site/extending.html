@@ -1,37 +1,19 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--@head-->
 <title>pscat — extending the interpreter</title>
-<link rel="stylesheet" href="style.css">
 </head>
 <body>
-<header>
-  <a class="brand" href="index.html">pscat</a>
-  <nav>
-    <a href="index.html">Home</a>
-    <a href="playground.html">Playground</a>
-    <a href="charts.html">Charts</a>
-    <a href="gallery.html">Gallery</a>
-    <a href="fonts.html">Fonts</a>
-    <a href="architecture.html">Architecture</a>
-    <a class="here" href="extending.html">Extending</a>
-    <a href="javascript.html">JavaScript</a>
-    <a href="agents.html">Agents</a>
-    <a href="https://github.com/jeromebanks/postscript_interpreter">GitHub</a>
-  </nav>
-</header>
+<!--@header contribute-->
 <main>
   <h1>Extending the interpreter</h1>
   <p class="sub">The repo is built to be picked up mid-stream — by a
   person or by a coding agent. Start with
   <a href="https://github.com/jeromebanks/postscript_interpreter/blob/main/HANDOFF.md">HANDOFF.md</a>
-  (orientation + gotchas), then
-  <a href="https://github.com/jeromebanks/postscript_interpreter/blob/main/ROADMAP.md">ROADMAP.md</a>
-  (the task list) and
+  (orientation and gotchas), then
   <a href="https://github.com/jeromebanks/postscript_interpreter/blob/main/AGENTS.md">AGENTS.md</a>
-  (working conventions).</p>
+  (working conventions). <a href="contribute.html">Contribute</a> lists the rest.</p>
 
   <h2>Ghostscript is the oracle</h2>
   <p>Every semantics question gets settled the same way: write a
@@ -78,18 +60,17 @@ cargo fmt --check</code></pre>
   <p>Rendering changes get pixel or golden tests
   (<code>tests/golden.rs</code> renders the examples in both pscat
   and gs and compares block-downsampled output). Commit per coherent
-  chunk with stage-prefixed messages; sync
-  README/NOTES/ROADMAP/HANDOFF in the same or a closing commit.</p>
+  chunk, keep the README and HANDOFF.md in step with the change, and
+  leave a short note in <code>notes/</code> for whoever picks it up next.</p>
 
-  <h2>Model routing (for agent sessions)</h2>
-  <p>Every ROADMAP task is tagged with the least-capable model
-  expected to do it well — <code>[haiku]</code> for mechanical,
-  well-specified work; <code>[sonnet]</code> for the workhorse
-  middle; <code>[opus]</code> for anything touching the object
-  model, the machine's control flow, or profiling-guided rewrites.
-  The escalation rule: if a smaller-tagged task turns out to touch
-  <code>object.rs</code> or the frame machinery, stop and record the
-  finding in NOTES.md rather than improvising.</p>
+  <h2>Which model for which task (agent sessions)</h2>
+  <p>Tasks are labelled with the least-capable model expected to do them
+  well: Haiku for mechanical, well-specified work; Sonnet for the workhorse
+  middle; Opus for anything touching the object model, the machine's
+  control flow, or profiling-guided rewrites. The escalation rule: if a
+  smaller-tagged task turns out to touch <code>object.rs</code> or the
+  frame machinery, stop and record the finding in a note under
+  <code>notes/</code> rather than improvising.</p>
 
   <h2>Gotchas that will bite you</h2>
   <ul>
@@ -109,6 +90,6 @@ cargo fmt --check</code></pre>
       font).</li>
   </ul>
 </main>
-<footer>pscat — built by hand, tested against Ghostscript, drawn live.</footer>
+<!--@footer-->
 </body>
 </html>

@@ -1,0 +1,55 @@
+# Build the GitHub Pages site on a pull request and check it (#250), without
+# deploying: scripts/check_site_links.py fails the run on a broken link, an
+# orphan page, an inconsistent navigation, or a GitHub link to a repo path that
+# no longer exists. That last one is what a doc move (#249) breaks.
+#
+# This is its own workflow rather than a job in pages.yml because pages.yml
+# deploys and its `pages` concurrency group cancels in-flight runs: a PR run
+# must never cancel, or be cancelled by, a deploy. It is deliberately not in
+# `required_status_checks` (SDLC.md), and it only starts when a PR touches
+# something the site is built from, so a PR that doesn't has no `site` check
+# at all, rather than a skipped one.
+name: site-check
+
+on:
+  pull_request:
+    paths:
+      - "site/**"
+      - "scripts/build_site.sh"
+      - "scripts/build_wasm.sh"
+      - "scripts/build_font_gallery.sh"
+      - "scripts/site_pages.py"
+      - "scripts/check_site_links.py"
+      - "scripts/test_site_scripts.py"
+      - "gallery/**"
+      - "examples/**"
+      - "docs/**"
+      - "web/**"
+      - "lib/fonts/**"
+      - "lib/styles/**"
+      - "fonts/catalog/**"
+      - "*.md"
+      - ".github/workflows/site-check.yml"
+      - ".github/workflows/pages.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  site:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Site script self-test
+        run: python3 scripts/test_site_scripts.py
+      - run: ./scripts/build_site.sh
+      - name: Check links and navigation
+        run: python3 scripts/check_site_links.py _site

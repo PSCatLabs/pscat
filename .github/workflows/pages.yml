@@ -27,6 +27,9 @@ jobs:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
       - run: ./scripts/build_site.sh
+      # A broken link blocks the deploy (#250); site-check.yml runs the same
+      # check on pull requests.
+      - run: python3 scripts/check_site_links.py _site
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
