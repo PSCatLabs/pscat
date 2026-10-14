@@ -27,13 +27,14 @@ no `lib/` change.
   as the body's covers it, and what is left under the cream is a soft mauve
   halo into the sky.
 - **Tried and not kept.** Soft 0.6 with 2.6/2.8x brushes: rings gone, but the band
-  grew a third wider and swallowed the body. Soft 0.45: no contour sliver
-  hidden, a dark line came back. A narrower `/Reach` (0.22, 0.08): thinner band, and
-  the half-light thinned out into stripes. Not tried: per-pass `pkwet` with `/Under`
+  grew noticeably wider and swallowed the body. Soft 0.45: the dark line under the
+  cream came back. A narrower `/Reach` (0.22, 0.08): a thinner band. Not tried: per-pass `pkwet` with `/Under`
   the layer beneath (half of each halo falls on sky, so it brings back the grey-violet
   rim #384 removed), and a load that varies along the cloud's length (see the
   follow-up).
 - **Pixels.** The render differs from the still on main only inside the four cloud
-  boxes (each cloud's outline box plus 20 pt: 0 differing pixels outside them).
+  boxes: each cloud's outline extent (x from `cx` to `cx + 1.02 w`, y from `cy - 0.35 h`
+  to `cy + 1.35 h`, `h = 0.36 w`) plus 15 pt, the smallest margin with 0 differing
+  pixels outside (10 pt leaves 660, in the wet halo).
   Two 2x renders are byte-identical; `--lint` is clean; Ghostscript renders the
   scene without errors (correctness only).
