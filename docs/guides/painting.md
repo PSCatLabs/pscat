@@ -161,8 +161,19 @@ a colour, a pigment name, or a procedure `x y -> r g b` for a graded sky)
 cut back in, sparser, so the two interlock. `/Mass` replaces the current
 colour with the same three forms, so a mass lit along its length (a meadow
 brighter toward the glow) pulls its own gradient out to its edge: a
-procedure is asked once per outward stroke, at the stroke's start. The
-current path is the edge.
+procedure is asked once per outward stroke, at the stroke's start. Either key
+also takes a region list, `[ [ region colour ] ... default ]`: each stroke
+is coloured by the first region its start lies in, else the default, so the
+backdrop follows another path's fill exactly (the stream behind a bank's
+corner) with no hand-written geometry test. A region is an artkit region
+(`screct`, `scpath`) or a procedure that builds a path, and each colour is
+any of the three forms:
+
+```postscript
+bankpath << /Under [ [ { streampath } /waterat load ] MEADOW ] >> pkbrushedge
+```
+
+The current path is the edge.
 A subpath closed with `closepath` is a mass outline, and the mass itself
 (the path filled nonzero, as `fill` would) decides which side is out, so a
 hole is brushed into the hole and a mirrored reflection needs nothing

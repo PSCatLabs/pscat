@@ -1087,6 +1087,13 @@ renders eight examples in both and compares block-downsampled output).
   / `pecolat` (guard names keep the key's prefix); a procedural `/Mass` costs
   one `/Brush` call per outward stroke, as a procedural `/Under` does per
   inward one, so even a constant procedure paints differently from the array.
+  **Region lists (issue #456):** `/Under` and `/Mass` also take
+  `[ [ region colour ] ... default ]` (mode 3 in `pecolkey`, parsed by
+  `peregions`, looked up per stroke by `pereglook` through the same
+  `pestrokes` / `pecolat`); a `{path}` region is built once per call inside
+  its own gsave. A convenience over a procedure calling `scin` on a region
+  built beforehand, which paints the same strokes byte for byte.
+  `notes/456-pkbrushedge-region-under.md`.
   `notes/381-brushedge-hidden-edges.md`.
 - **The landscape cookbook (issue #186) is `docs/guides/landscape-cookbook.md`;
   its snippets are the tests.** `tests/landscape_cookbook.rs` pulls every

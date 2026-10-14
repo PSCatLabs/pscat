@@ -9361,6 +9361,17 @@ systemdict /setalpha known /pwhasalpha exch def
 %                      then the mass colour (the current colour, or /Mass)
 %                      pulled out, each through a brush
 %
+% A colour key (/Under, /Mass) is an [r g b] array, a pigment name, a
+% procedure x y -> r g b, or a region list (issue #456):
+%
+%   [ [ region colour ] [ region colour ] ... default ]
+%
+% asked at each stroke's start: the first region holding it gives the colour,
+% else the default. A region is artkit's (`screct`, `scpath`, tested with
+% `siinside`, nonzero like `fill`) or a procedure that builds a path, made
+% into a region once per call. It is a convenience: a procedure that tests a
+% region built beforehand with `scin` does the same stroke for stroke.
+%
 % `pkfeather` follows the motion family's contract (see "Brush motions"
 % above): it replaces the current path with the strokes, paints nothing, and
 % draws only from frnd: one draw per call (the /CrispSeed default) and a
@@ -9710,6 +9721,100 @@ systemdict /setalpha known /pwhasalpha exch def
 %        newpath } >> pkbrushedge
 %   newpath zzmok zzmb 20 gt and zzmc zzmb eq and
 %   (a procedural /Mass colours each outward stroke where it starts) mustbe
+%
+%   % A region list (issue #456): [ [ region colour ] ... default ], for
+%   % /Under and /Mass alike.
+%   /zzrp { 0 0 moveto 10 0 lineto 10 10 lineto closepath } def
+%   { newpath 0 0 moveto 50 0 lineto << /Under [ [ /zzrp load [ 1 1 1 ] ] ] >> pkbrushedge }
+%   /pkbrushedge-under-regions-need-a-region-and-a-default-colour
+%   (/Under region list without a default) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto
+%     << /Under [ [ /zzrp load [ 1 1 1 ] ] [ /zzrp load [ 0 0 0 ] ] ] >> pkbrushedge }
+%   /pkbrushedge-under-regions-must-end-with-a-default-colour
+%   (/Under region list ending in a pair) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto
+%     << /Under [ [ /zzrp load [ 1 1 1 ] 3 ] [ 0 0 0 ] ] >> pkbrushedge }
+%   /pkbrushedge-under-region-entries-must-be-region-colour-pairs
+%   (/Under region entry of three elements) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto
+%     << /Under [ [ /zzrp load [ 1 1 1 ] ] 7 [ 0 0 0 ] ] >> pkbrushedge }
+%   /pkbrushedge-under-region-entries-must-be-region-colour-pairs
+%   (/Under region entry that is a number) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto
+%     << /Under [ [ (box) [ 1 1 1 ] ] [ 0 0 0 ] ] >> pkbrushedge }
+%   /pkbrushedge-under-region-must-be-a-region-or-a-path-procedure
+%   (/Under region that is a string) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto
+%     << /Under [ [ /zzrp load [ 0 2 0 ] ] [ 0 0 0 ] ] >> pkbrushedge }
+%   /pkbrushedge-under-components-must-be-0-to-1
+%   (/Under region colour out of range) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto
+%     << /Under [ [ /zzrp load [ 1 1 1 ] ] /nosuchpaint ] >> pkbrushedge }
+%   /pkbrushedge-under-unknown-pigment-see-PigmentNames
+%   (/Under region default an unknown pigment) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto
+%     << /Under [ [ /zzrp load [ [ /zzrp load [ 1 1 1 ] ] [ 0 0 0 ] ] ] [ 0 0 0 ] ] >> pkbrushedge }
+%   /pkbrushedge-under-region-colours-must-not-be-region-lists
+%   (/Under region list nested in a region colour) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath
+%     << /Mass [ [ /zzrp load { pop pop 1 2 } ] [ 0 0 0 ] ] >> pkbrushedge }
+%   /pkbrushedge-mass-procedure-must-return-3-numbers
+%   (/Mass region colour procedure returning two numbers) mustguard
+%
+%   % A {path} region that fails while being built unwinds its gsave, and
+%   % a good one leaves the caller's path and operand stack alone.
+%   % (The error leaves peregions' own `[` mark, so the stack is cut back
+%   % by count, not cleartomark.)
+%   gsave 0.125 0 0 setrgbcolor count /zzc0 exch def
+%   { newpath 0 0 moveto 50 0 lineto
+%     << /Under [ [ { 0 0 moveto zznosuchop } [ 1 1 1 ] ] [ 0 0 0 ] ] >> pkbrushedge }
+%   stopped /zzst exch def count zzc0 sub { pop } repeat
+%   zzst currentrgbcolor pop pop 0.125 sub abs 0.01 lt and grestore
+%   (a failing region path unwinds its gsave) mustbe
+%
+%   count newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath
+%   << /Under [ [ /zzrp load /titaniumwhite ] [ 0 0 1 ] ]
+%      /Mass [ [ 0 0 10 10 screct { pop pop 0 1 0 } ] [ 1 0 0 ] ] >> pkbrushedge
+%   count 1 sub eq currentpoint 0 eq exch 0 eq and and newpath
+%   (a region list leaves the caller's path and operand stack alone) mustbe
+%
+%   % Each stroke is painted in the colour of the first region its start
+%   % lies in, else the default (a procedure, asked at the start). The
+%   % mass is a closed box, so pkfeather builds its own scpath region too.
+%   % Region 1, a {path}: x < 50, colour A. Region 2, a screct: y < 20,
+%   % colour C (it overlaps region 1, which comes first). Elsewhere B, red
+%   % rising with x. Starts within a point of a boundary are not judged.
+%   /zzrA [ 0.1 0.9 0.1 ] def /zzrC [ 0.9 0.9 0.1 ] def
+%   /zzrB { pop 200 div 0 max 1 min 0 0.5 } def
+%   /zzrL [ [ { -60 -60 moveto 50 -60 lineto 50 100 lineto -60 100 lineto closepath } zzrA ]
+%           [ -60 -60 300 80 screct zzrC ] /zzrB load ] def
+%   /zzrok true def /zzrn 0 def /zzra 0 def /zzrb 0 def /zzrc 0 def
+%   newpath 0 0 moveto 100 0 lineto 100 40 lineto 0 40 lineto closepath
+%   << /Under zzrL /Mass zzrL
+%      /Brush { /zzrn zzrn 1 add def /zzr1 null def
+%        { zzr1 null eq { 2 array astore /zzr1 exch def } { pop pop } ifelse }
+%        { pop pop } { 6 { pop } repeat } { } pathforall
+%        zzr1 aload pop /zzry exch def /zzrx exch def
+%        zzrx 50 sub abs 1 gt zzry 20 sub abs 1 gt and {
+%          zzrx 50 lt { zzrA aload pop /zzra zzra 1 add def }
+%            { zzry 20 lt { zzrC aload pop /zzrc zzrc 1 add def }
+%              { zzrx zzry zzrB /zzrb zzrb 1 add def } ifelse } ifelse
+%          3 array astore /zzre exch def
+%          currentrgbcolor zzre 2 get sub abs 0.01 gt
+%          exch zzre 1 get sub abs 0.01 gt or
+%          exch zzre 0 get sub abs 0.01 gt or { /zzrok false def } if
+%        } if
+%        newpath } >> pkbrushedge
+%   newpath zzrok zzra 0 gt and zzrb 0 gt and zzrc 0 gt and
+%   (a region list colours each stroke by the first region it starts in) mustbe
 %%EndSelfTest
 
 % x y -> bool   is the point inside the mass (mfreg)?
@@ -10037,6 +10142,11 @@ systemdict /setalpha known /pwhasalpha exch def
     /pekp exch def /pekk exch def /peko exch def
     peko pekk known not { null 0 } {
         /pekv peko pekk get def
+        /pekv load peislist {
+            % A region list (issue #456): handed whole to peregions, which
+            % needs nothing of this call's scratch afterwards.
+            pekv pekp peregions 3
+        } {
         /pekv load xcheck {
             /pekv load type dup /arraytype eq exch /packedarraytype eq or not
                 { pekp (-must-be-a-3-element-array) pugrd } if
@@ -10052,7 +10162,83 @@ systemdict /setalpha known /pwhasalpha exch def
             } for
             pekv 1
         } ifelse
+        } ifelse
     } ifelse
+} bind def
+
+% any -> bool   (a region list's shape: a literal array whose first element
+% is not a number, as `[ [ region colour ] ... colour ]` is and `[ r g b ]`
+% is not; issue #456)
+% @internal
+/peislist {
+    dup xcheck { pop false } {
+        dup type dup /arraytype eq exch /packedarraytype eq or {
+            dup length 0 gt { 0 get penum not } { pop false } ifelse
+        } { pop false } ifelse
+    } ifelse
+} bind def
+
+% list (prefix) -> entries   (a region list checked and made ready: each
+% [ region colour ] pair becomes [ region mode value ] and the default
+% colour at the end [ null mode value ], in pecolkey's colour modes 1 and 2.
+% A {path} region is built here, once, in the call's user space, inside its
+% own gsave so the caller's path survives; one that fails unwinds that
+% gsave and passes its error on.)
+% @internal
+/peregions {
+    /perp exch def /perl exch def
+    perl length 2 lt { perp (-regions-need-a-region-and-a-default-colour) pugrd } if
+    perl dup length 1 sub get peislist
+        { perp (-regions-must-end-with-a-default-colour) pugrd } if
+    [
+    0 1 perl length 1 sub {
+        /peri exch def
+        peri perl length 1 sub lt {
+            perl peri get /pere exch def
+            /pere load xcheck { perp (-region-entries-must-be-region-colour-pairs) pugrd } if
+            /pere load type dup /arraytype eq exch /packedarraytype eq or not
+                { perp (-region-entries-must-be-region-colour-pairs) pugrd } if
+            pere length 2 ne { perp (-region-entries-must-be-region-colour-pairs) pugrd } if
+            pere 0 get dup mhisregion {
+                % a region dict (artkit's screct or scpath), used as is
+            } {
+                dup xcheck
+                1 index type dup /arraytype eq exch /packedarraytype eq or and {
+                    gsave
+                    { newpath exec scpath } stopped { grestore stop } if
+                    grestore
+                } {
+                    pop perp (-region-must-be-a-region-or-a-path-procedure) pugrd
+                } ifelse
+            } ifelse
+            pere 1 get
+        } {
+            null perl peri get
+        } ifelse
+        % region colour -> [ region mode value ]
+        /pecv exch def
+        /pecv load peislist
+            { perp (-region-colours-must-not-be-region-lists) pugrd } if
+        << /C /pecv load >> /C perp pecolkey exch 3 array astore
+    } for
+    ]
+} bind def
+
+% x y entries -> r g b   (the colour of the first entry whose region holds
+% x y, or the default's: an array's components, or a procedure's answer at
+% x y; pecolat checks it)
+% @internal
+/pereglook {
+    /perl exch def /pery exch def /perx exch def
+    perl {
+        dup 0 get dup null eq { pop true } { perx pery 3 -1 roll siinside } ifelse
+        { exit } if
+        pop
+    } forall
+    dup 1 get 1 eq
+        { 2 get aload pop }
+        { perx pery 3 -1 roll 2 get exec }
+    ifelse
 } bind def
 
 % -> -   (the current path is pkfeather's strokes: paint each with one
@@ -10127,10 +10313,10 @@ systemdict /setalpha known /pwhasalpha exch def
 /pegrestore { grestore /pedepth pedepth 1 sub def } bind def
 
 % @kind: Procedure
-% @summary: Brushes the edge of a filled mass in one call: short strokes in the mass's colour (the current colour, or /Mass) pulled out across the current path's edge, then, with /Under, strokes in the backdrop colour cut back into the mass, so the two interlock and the ruled vector edge reads as painted. Fill the mass first; the path is the mass's outline (closed with closepath: holes and mirrored spaces work) or just the visible edge left open, whose out side is /Outward. Every pkfeather key is accepted and passed on (except /Toward, which this sets), and each pass is painted by /Brush. /Under takes what pkwet's /Under takes, plus a pigment name; a procedural /Under is asked once per inward stroke, at the stroke's start, so a graded sky or water cuts back in its own colour all along. /Mass takes the same forms for the pulled-out colour, so a mass lit along its length (a meadow brighter toward the glow) carries its own gradient to its edge. The caller's path, colour and graphics state survive. A mass built from several overlapping closed blobs (a cloud bank, a bush of ellipses) can go in as one path: an edge lying inside the others is hidden, and is not brushed. Deterministic under the caller's own srand.
+% @summary: Brushes the edge of a filled mass in one call: short strokes in the mass's colour (the current colour, or /Mass) pulled out across the current path's edge, then, with /Under, strokes in the backdrop colour cut back into the mass, so the two interlock and the ruled vector edge reads as painted. Fill the mass first; the path is the mass's outline (closed with closepath: holes and mirrored spaces work) or just the visible edge left open, whose out side is /Outward. Every pkfeather key is accepted and passed on (except /Toward, which this sets), and each pass is painted by /Brush. /Under takes what pkwet's /Under takes, plus a pigment name; a procedural /Under is asked once per inward stroke, at the stroke's start, so a graded sky or water cuts back in its own colour all along. /Mass takes the same forms for the pulled-out colour, so a mass lit along its length (a meadow brighter toward the glow) carries its own gradient to its edge. Either key also takes a region list, `[ [ region colour ] ... default ]`, so the backdrop follows another path's fill exactly (water behind a bank, a meadow beside it). The caller's path, colour and graphics state survive. A mass built from several overlapping closed blobs (a cloud bank, a bush of ellipses) can go in as one path: an edge lying inside the others is hidden, and is not brushed. Deterministic under the caller's own srand.
 % @example: newpath 0 120 moveto 120 150 240 110 360 135 curveto 360 0 lineto 0 0 lineto closepath gsave 0.18 0.30 0.12 setrgbcolor fill grestore 0.18 0.30 0.12 setrgbcolor << /Under [ 0.62 0.72 0.86 ] /Slant 10 >> pkbrushedge
-% @param: /Under [rgb array or name] the colour behind the mass, cut back into it by the inward strokes; an [r g b] array, a pigment name such as /titaniumwhite (see PigmentNames), or a procedure `x y -> r g b` (three numbers in 0..1, user space; a pure function, as pkwet's) asked at each inward stroke's start. Unset paints the outward strokes only (default unset)
-% @param: /Mass [rgb array or name] the mass's colour, pulled out over the backdrop by the outward strokes; an [r g b] array, a pigment name, or a procedure `x y -> r g b` (three numbers in 0..1, user space; a pure function) asked at each outward stroke's start, so a graded mass keeps its gradient along the edge. A procedure costs one /Brush call per outward stroke, so even a constant one paints differently from the array form. Unset uses the current colour (default unset)
+% @param: /Under [rgb array or name] the colour behind the mass, cut back into it by the inward strokes; an [r g b] array, a pigment name such as /titaniumwhite (see PigmentNames), or a procedure `x y -> r g b` (three numbers in 0..1, user space; a pure function, as pkwet's) asked at each inward stroke's start; or a region list `[ [ region colour ] ... default ]`: each stroke takes the colour of the first region its start lies in (artkit's nonzero inside test, as `fill` paints), else the default at the end. A region is an artkit region (`screct`, `scpath`) or a procedure that builds a path, turned into one region per call in the call's user space; each colour is an array, a pigment name or a procedure, as above. The region list is pkbrushedge's own, not pkwet's. Unset paints the outward strokes only (default unset)
+% @param: /Mass [rgb array or name] the mass's colour, pulled out over the backdrop by the outward strokes; an [r g b] array, a pigment name, or a procedure `x y -> r g b` (three numbers in 0..1, user space; a pure function) asked at each outward stroke's start, so a graded mass keeps its gradient along the edge; or a region list, as /Under's. A procedure or a region list costs one /Brush call per outward stroke, so even a constant one paints differently from the array form. Unset uses the current colour (default unset)
 % @param: /Brush [proc] the brush both passes are painted with: a procedure that paints the current path in the current colour, normally a preset with its options, such as `{ << /Width 2 >> pkdry }` (default `{ << /Width 5 /Charge 0.8 /Depletion 0.9 /Edge 0.6 /Grain 10 >> pkbroad }`, a small flat brush that runs dry as it crosses, so each stroke breaks up at its far end)
 % @param: /InLength [fraction of /Length] the inward strokes' length as a fraction of the outward ones'; must be > 0. Each inward stroke covers the stretch of the normal an outward one does (its /Overlap is mirrored), so most of it lies outside the mass and only its tip cuts in (default 1)
 % @param: /InSpacing [multiple of /Spacing] the inward strokes' spacing as a multiple of the outward ones'; must be > 0. Sparser cuts nick the edge; as dense as the outward strokes, they rule a pale band just inside it (default 2)
@@ -10173,6 +10359,14 @@ systemdict /setalpha known /pwhasalpha exch def
                 /in peopts pkfeather pestrokes
             pegrestore
         } if
+        pemode 3 eq {
+            % A region list (issue #456): the same, each stroke in the
+            % colour of the region it starts in.
+            pegsave
+                /pecolp { peUnder pereglook } def /pecolx (pkbrushedge-under) def
+                /in peopts pkfeather pestrokes
+            pegrestore
+        } if
         % Out, last: the mass's own colour pulled over what is behind it, on
         % top of the nicks, so the two interlock. That is the current colour,
         % or /Mass: one colour, or (a procedure) one brush call per stroke,
@@ -10184,6 +10378,12 @@ systemdict /setalpha known /pwhasalpha exch def
         pemmode 2 eq {
             pegsave
                 /pecolp /peMass load def /pecolx (pkbrushedge-mass) def
+                /out peopts pkfeather pestrokes
+            pegrestore
+        } if
+        pemmode 3 eq {
+            pegsave
+                /pecolp { peMass pereglook } def /pecolx (pkbrushedge-mass) def
                 /out peopts pkfeather pestrokes
             pegrestore
         } if
