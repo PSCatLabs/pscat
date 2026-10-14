@@ -21,10 +21,13 @@ order every run. Pointer-keyed entries add a second source of instability
   sequence number on every name entry and a sort on every `forall` over
   systemdict and the font dicts, which is the hot path, for no determinism
   gain. Not done.
-- **Cost.** `put_obj` has a name fast path now, with the non-name half in an
-  out-of-line `put_other`. The first version (match on `classify_key` in
-  `put_obj` itself) made `defloop` measurably slower (about 15-20% on a 2M-store
-  loop) by changing what the `def` path inlined; the fast path removed that.
+- **Cost.** `put_obj` has a name fast path, with the non-name half in an
+  out-of-line `put_other`. `def` does not go through `put_obj` (it calls
+  `Dict::put` with an interned name), but the `put` operator does. An
+  intermediate version without the fast path read ~15-20% slower on a 2M-store
+  `/x exch def` loop; since `def` does not reach `put_obj`, that was most likely a
+  code-layout effect of the bigger function, not real work. With the fast path
+  the minimums were 178 ms before and 185 ms after (+4%), medians overlapping.
   Release A/B against the pre-change binary, 15 interleaved runs of
   `benches/regression.rs`: fib 27 130 -> 133 ms (+2.5%), defloop 200k 27 -> 27 ms
   (+2.1%), sierpinski 5 -> 5 ms, fern 253 -> 261 ms (+2.9%), peak RSS unchanged
