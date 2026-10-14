@@ -921,7 +921,7 @@ ordinary path, so they feed any preset.
 | `pkscumblein` | region | many small separate circles | `pkoil` (clouds) |
 | `pkscumble` | the current path | a chain of overlapping loops | `pkdry` (a scrubbed edge) |
 | `pktap` | the current path | short stabs along it | `pkfan`, or `/Length 0` for `pkdab` clumps |
-| `pkpull` | the current path | strokes pulled from it along a direction | `pkbroad` down (reflection), `pkliner` up (grass) |
+| `pkpull` | the current path | strokes pulled from it along a direction (`/Scatter` starts them off the line, so a fall or grass is not a picket fence) | `pkbroad` down (reflection), `pkliner` up (grass) |
 | `pkzigzag` | the current path | a zig-zag about it | `pkliner` (water) |
 
 ```postscript
@@ -1320,6 +1320,8 @@ skeletons with TeX's box model. The subset covers:
   and `\|`, or the characters `⟨ ⟩ ‖ ∥` typed directly;
 - relations and operators such as `\equiv \sim \subseteq \mapsto \perp
   \therefore \circ \ast`, and `\hbar \ell`;
+- `*` is `\ast`, as in TeX: a binary operator between terms, and `z^*` or
+  `A_*` a raised or lowered asterisk for a conjugate or an adjoint;
 - matrices and `cases`, accents and `\boxed`;
 - Greek and operator names.
 

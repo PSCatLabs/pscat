@@ -8280,6 +8280,17 @@ systemdict /setalpha known /pwhasalpha exch def
 %   /pkpull-bow-must-be-0-to-0.5
 %   (/Bow 1) mustguard
 %
+%   { newpath 0 0 moveto 50 0 lineto << /Scatter -1 >> pkpull }
+%   /pkpull-scatter-must-be-non-negative
+%   (/Scatter -1) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Scatter { 3 } >> pkpull }
+%   /pkpull-scatter-must-not-be-a-procedure
+%   (/Scatter { 3 }) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Scatter 0 >> pkpull }
+%   (/Scatter 0) mustpass
+%
 %   { newpath 0 0 moveto 100000 0 lineto << /Spacing 0.1 >> pkpull }
 %   /pkpull-count-exceeds-safety-limit
 %   (a tiny spacing on a long line) mustguard
@@ -8554,7 +8565,7 @@ systemdict /setalpha known /pwhasalpha exch def
 } bind def
 
 % @kind: Procedure
-% @summary: A pull brush motion from a line: the current path is read as a spine and replaced with strokes that start on it and are pulled along a fixed direction -- down from a horizon for reflections, up from a ground line for grass, down a ridge for a knife's "touch and pull" highlights. Builds a path and paints nothing, so it composes with any preset: `opts pkpull << >> pkliner`. Deterministic under the caller's own srand.
+% @summary: A pull brush motion from a line: the current path is read as a spine and replaced with strokes that start on it (or within /Scatter of it) and are pulled along a fixed direction -- down from a horizon for reflections, up from a ground line for grass, down a ridge for a knife's "touch and pull" highlights. Builds a path and paints nothing, so it composes with any preset: `opts pkpull << >> pkliner`. Deterministic under the caller's own srand.
 % @example: newpath 0 300 moveto 800 300 lineto << /Direction -90 /Length 60 /Spacing 6 >> pkpull << /Width 5 /Charge 0.6 >> pkbroad
 % @param: /Length [points] Mean stroke length in points; must be > 0 (default 30)
 % @param: /LengthJitter [fraction of /Length] 0..1 how far each stroke's length varies around /Length (default 0.5)
@@ -8563,6 +8574,7 @@ systemdict /setalpha known /pwhasalpha exch def
 % @param: /Direction [degrees] Heading of every pull in degrees counterclockwise from +x, in user space: -90 pulls down, 90 pushes up (default -90)
 % @param: /Lean [degrees] Random lean of each pull around /Direction, in degrees; must be >= 0 (default 6)
 % @param: /Bow [fraction of stroke length] 0..0.5 sideways bend of each pull as a fraction of its length, to either side at random; 0 is straight (default 0)
+% @param: /Scatter [points] Random offset of each stroke's start from the spine, in points, to either side across it (along its normal; /Wander already slides starts along it); must be >= 0. Unset, every start lies exactly on the spine; set (even to 0) it draws one more random value per stroke (default unset)
 /pkpull {
     /mpopts exch def
     /mplen mpopts /Length 30 pkgetdef def
@@ -8585,6 +8597,14 @@ systemdict /setalpha known /pwhasalpha exch def
     /mpbow mpopts /Bow 0 pkgetdef def
     /mpbow load xcheck { pkpull-bow-must-not-be-a-procedure } if
     mpbow 0 lt mpbow 0.5 gt or { pkpull-bow-must-be-0-to-0.5 } if
+    % /Scatter has no default: unset draws no extra value per stroke, so a
+    % render that never names it keeps the random stream it always had.
+    /mpscatset mpopts /Scatter known def
+    mpscatset {
+        /mpscat mpopts /Scatter get def
+        /mpscat load xcheck { pkpull-scatter-must-not-be-a-procedure } if
+        mpscat 0 lt { pkpull-scatter-must-be-non-negative } if
+    } if
 
     % The guide is walked at a sixth of the spacing and every stroke starts
     % on one of those samples. A sample always lies on the flattened guide,
@@ -8624,7 +8644,15 @@ systemdict /setalpha known /pwhasalpha exch def
             /mpj mpi mpfw 2 mul 1 sub mpwander mul mpn 2 div mul round cvi add def
             mpj mpbase lt { /mpj mpbase def } if
             mpj mpend gt { /mpj mpend def } if
-            mhstops mpj get dup 0 get /mpsx exch def 1 get /mpsy exch def
+            mhstops mpj get /mpst exch def
+            /mpsx mpst 0 get def /mpsy mpst 1 get def
+            mpscatset {
+                % Across the spine: along the normal of the stop the start
+                % slid to (its tangent angle is element 2, in degrees).
+                frnd 2 mul 1 sub mpscat mul /mpsoff exch def
+                /mpsx mpsx mpst 2 get sin mpsoff mul sub def
+                /mpsy mpsy mpst 2 get cos mpsoff mul add def
+            } if
             /mpa mpdir mpfl 2 mul 1 sub mplean mul add def
             /mpl mplen 1 mpfj 2 mul 1 sub mplj mul add mul def
             /mpdx mpa cos mpl mul def /mpdy mpa sin mpl mul def

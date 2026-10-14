@@ -276,7 +276,8 @@ Which tool to pick:
   (clouds, bushes); `pktap` → `pkfan`, or `/Length 0` → `pkdab` (a clump
   per tap); `pkpull` → `pkbroad` with `/Direction -90` (reflection pulled
   down from a horizon) or `pkliner` with `/Direction 90` (grass pushed
-  up, `/Bow` for blades); `pkzigzag` → `pkliner` or `pkbroad` (water).
+  up, `/Bow` for blades, `/Scatter` so the roots do not sit on one ruled
+  line); `pkzigzag` → `pkliner` or `pkbroad` (water).
   Two rules: **every motion replaces the current path** (so a guide, or
   the outline `scpath` leaves behind, is never painted — one motion, one
   paint, then build the next); and the region motions take an artkit
