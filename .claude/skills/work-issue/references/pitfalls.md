@@ -161,8 +161,8 @@ of general pitfalls.
   reopens the exact TOCTOU race #35 exists to close: a second
   invocation's `mkdir` fails, it reads the not-yet-written heartbeat
   as empty/stale, and steals from a run that already believes it won.
-  Same reasoning applies to the reclaim path's post-`mv` `mkdir` +
-  heartbeat write.
+  Same reasoning applies to the reclaim path's `mkdir gen.<K+1>` +
+  heartbeat write (#297: the newest generation reads live for 10 s).
 - **Claim and heartbeat are scripts since #276 (round 6).** Two agents in a row ran only
   the `mkdir` branch of the pasted claim block. Run `scripts/claim.sh <N>` as one command and
   never retype its lines; `scripts/heartbeat.sh <N>` is the refresh. After editing

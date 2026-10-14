@@ -66,7 +66,7 @@ lock commands: the script is the race-tested protocol, and a partial copy has fa
 ```sh
 bash "$(git rev-parse --show-toplevel)/.claude/skills/work-issue/scripts/claim.sh" <N>
 ```
-It can take ~30 s after a lost race: run it in the foreground and wait.
+Run it in the foreground; it returns at once (no waits or retries since #297).
 (`references/claim-protocol.md` is the rationale; read it only to edit the script.) Then:
 - `RESULT=claimed*` → you own `<N>`. Continue.
 - `RESULT=live*` or `RESULT=lost*` on a resume candidate → claim the next one (then the fresh picker).
