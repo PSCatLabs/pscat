@@ -220,6 +220,13 @@ fn zero_length_lineto_is_dropped_from_fills_and_clips_but_kept_in_strokes() {
         2,
         "real segments stay"
     );
+    // after closepath the current point is the subpath start, so a lineto
+    // back to the last pre-close point is a real segment and stays
+    let (pdf, _) = pdf_and_canvas(
+        b"newpath 10 10 moveto 50 10 lineto 50 50 lineto closepath
+          50 50 lineto 80 80 lineto fill",
+    );
+    assert_eq!(pdf_text(&pdf).matches(" l ").count(), 4, "all lines kept");
     // a lone zero-length line (nothing follows it) is left alone too
     let (pdf, _) = pdf_and_canvas(b"newpath 10 10 moveto 10 10 lineto fill");
     assert!(pdf_text(&pdf).contains(" l "));

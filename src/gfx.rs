@@ -297,11 +297,13 @@ impl PsPath {
         // The point the subpath is at, as the PDF will print it, so a
         // zero-length `l` is recognised by what gs would see.
         let mut cur: Option<(String, String)> = None;
+        let mut start: Option<(String, String)> = None;
         for (i, seg) in self.segs.iter().enumerate() {
             match *seg {
                 Seg::Move(p) => {
                     let (x, y) = (f(p.x), f(p.y));
                     let _ = write!(d, "{x} {y} m ");
+                    start = Some((x.clone(), y.clone()));
                     cur = Some((x, y));
                 }
                 Seg::Line(p) => {
@@ -327,7 +329,11 @@ impl PsPath {
                     );
                     cur = Some((x, y));
                 }
-                Seg::Close => d.push_str("h "),
+                Seg::Close => {
+                    d.push_str("h ");
+                    // `h` returns the current point to the subpath start.
+                    cur = start.clone();
+                }
             }
         }
         d.trim_end().to_string()
