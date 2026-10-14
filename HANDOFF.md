@@ -604,7 +604,7 @@ renders eight examples in both and compares block-downsampled output).
    paintkit.ps. A change to those names breaks drykit: the
    `drykit-paintkit-contract` self-test in `lib/drykit.ps` pins them (#270
    moves them to `lib/toothkit.ps`). #234 built `lib/drykit.ps`:
-   `dksurface`, `dkstroke` and `dkbatch` are public, and `dkcatch` and
+   `dksurface`, `dkstroke`, `dkbatch` and `dkclip` (#312) are public, and `dkcatch` and
    `dkrand` are internal. The medium files (#235 chalk, #239 crayon, #241
    charcoal) are presets over `dkstroke`. Measured cost is in
    `notes/234-drykit-core.md` and DRYMEDIA.md 6.1. A full board plus ghost

@@ -513,8 +513,12 @@ fn gs_band_ink(prelude: &str, body: &str, px: (usize, usize), dpi: u32) -> f64 {
     }
     let dir = std::env::temp_dir().join(format!("pscat-drykit-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("temp dir");
-    let file = dir.join(format!("gs-{}.ps", prelude.len()));
-    let png = dir.join(format!("gs-{}.png", prelude.len()));
+    // One name per call: the gs tests run on parallel threads of one
+    // process, and two of them pass the same (empty) prelude.
+    static CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let file = dir.join(format!("gs-{n}.ps"));
+    let png = dir.join(format!("gs-{n}.png"));
     std::fs::write(
         &file,
         format!("{prelude}\n{src}\n1 setgray clippath fill 0 setgray {body}\nshowpage\n"),

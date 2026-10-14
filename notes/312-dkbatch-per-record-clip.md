@@ -71,8 +71,10 @@ applies only if it is in force when the batch ends (documented in
   - drycrayon scene: 0.349–0.354 s → 0.351–0.353 s
 
   Flat: records outside `dkclip` pay one extra `eq` per matching pair.
-  The two-region specimen in one batch costs the same as two calls (pscat
-  0.79 s against 0.80 s at 144 dpi for the scratch version).
+  None of these tests uses `dkclip`. The per-record clip's own cost:
+  two overlapping hatched regions in one batch take 0.79 s CPU in pscat
+  at 144 dpi, against 0.80 s as two separate calls. The regions never
+  shared a catch anyway, and the replay is one clip per catch chunk.
 
 ## Specimen
 
@@ -81,3 +83,12 @@ applies only if it is in force when the batch ends (documented in
 hatched with `dhhatch` at `/Levels 2`. On the left they are two calls,
 and the square's faint level greys the disc's crossings. On the right
 they are the same calls in one `dkbatch`, and the crossings stay dark.
+
+## Follow-ups
+
+- #393: `dhsmudge` and `dhlift` inside a dkbatch (they set their own
+  colour, so they can't share a charcoal batch's pigment).
+- #394: exact `clippath` under nested clips, or `gstate`, so a plain `clip`
+  could survive a batch without `dkclip`.
+- PR #343 (the Lincoln portrait) was told it can now hatch its regions in
+  one batch. Its render is unchanged until it opts in.
