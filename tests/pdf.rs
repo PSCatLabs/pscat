@@ -187,6 +187,44 @@ fn strokes_appear_in_pdf_only_export() {
     );
 }
 
+/// Issue #254: a `pkspray` speck is `moveto` + a zero-length `lineto` +
+/// curves. The zero-length segment adds no area, so a fill and a clip
+/// leave it out of the PDF; a stroke keeps it because it decides caps
+/// and joins. A `lineto` that actually moves is always kept.
+#[test]
+fn zero_length_lineto_is_dropped_from_fills_and_clips_but_kept_in_strokes() {
+    let speck = b"newpath 100 100 moveto 100 100 lineto
+                  100 110 110 120 120 120 curveto closepath";
+    let with = |tail: &[u8]| {
+        let mut src = speck.to_vec();
+        src.extend_from_slice(tail);
+        let (pdf, _) = pdf_and_canvas(&src);
+        pdf_text(&pdf)
+    };
+    let fill = with(b" fill");
+    assert!(fill.contains(" c h f\n"), "speck still drawn: {fill}");
+    assert!(!fill.contains(" l "), "no lineto in a fill: {fill}");
+    let clip = with(b" clip newpath 0 0 10 10 rectfill");
+    let prelude = clip
+        .lines()
+        .find(|l| l.contains(" W n "))
+        .expect("clip group");
+    assert!(prelude.contains(" c h W n "), "clip kept: {clip}");
+    assert!(!prelude.contains(" l "), "no lineto in a clip: {clip}");
+    let stroke = with(b" 4 setlinewidth 1 setlinecap stroke");
+    assert!(stroke.contains(" l "), "stroke keeps its lineto: {stroke}");
+
+    let (pdf, _) = pdf_and_canvas(b"newpath 10 10 moveto 50 10 lineto 50 50 lineto fill");
+    assert_eq!(
+        pdf_text(&pdf).matches(" l ").count(),
+        2,
+        "real segments stay"
+    );
+    // a lone zero-length line (nothing follows it) is left alone too
+    let (pdf, _) = pdf_and_canvas(b"newpath 10 10 moveto 10 10 lineto fill");
+    assert!(pdf_text(&pdf).contains(" l "));
+}
+
 /// Issue #20: real PDF shading dictionaries need pattern-colorspace
 /// machinery this exporter doesn't have, so `shfill` approximates as a
 /// flat fill in the ramp's average color -- deliberately, so a

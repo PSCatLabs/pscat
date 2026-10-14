@@ -281,32 +281,51 @@ impl PsPath {
     }
 
     /// PDF path-construction operators for the same segments.
-    pub(crate) fn to_pdf_ops(&self) -> String {
+    ///
+    /// `area` is true when the path will be filled or used as a clip
+    /// (never stroked): a zero-length `l` to the current point then
+    /// contributes no area, so it is omitted (#254). `pkspray` specks
+    /// are `m x y l x y` + four `c`, and the `l` is pure overhead there.
+    /// A stroke keeps it: a zero-length segment decides caps and joins.
+    pub(crate) fn to_pdf_ops(&self, area: bool) -> String {
         use std::fmt::Write as _;
         let mut d = String::new();
         let f = |v: f32| {
             let s = format!("{v:.3}");
             s.trim_end_matches('0').trim_end_matches('.').to_string()
         };
-        for seg in &self.segs {
+        // The point the subpath is at, as the PDF will print it, so a
+        // zero-length `l` is recognised by what gs would see.
+        let mut cur: Option<(String, String)> = None;
+        for (i, seg) in self.segs.iter().enumerate() {
             match *seg {
                 Seg::Move(p) => {
-                    let _ = write!(d, "{} {} m ", f(p.x), f(p.y));
+                    let (x, y) = (f(p.x), f(p.y));
+                    let _ = write!(d, "{x} {y} m ");
+                    cur = Some((x, y));
                 }
                 Seg::Line(p) => {
-                    let _ = write!(d, "{} {} l ", f(p.x), f(p.y));
+                    let (x, y) = (f(p.x), f(p.y));
+                    // Only when more real geometry follows in this
+                    // subpath, so a bare `m` + `l` stays as it was.
+                    let more = matches!(self.segs.get(i + 1), Some(Seg::Line(_) | Seg::Curve(..)));
+                    let degenerate = cur.as_ref().is_some_and(|c| c.0 == x && c.1 == y);
+                    if !(area && degenerate && more) {
+                        let _ = write!(d, "{x} {y} l ");
+                    }
+                    cur = Some((x, y));
                 }
                 Seg::Curve(c1, c2, p) => {
+                    let (x, y) = (f(p.x), f(p.y));
                     let _ = write!(
                         d,
-                        "{} {} {} {} {} {} c ",
+                        "{} {} {} {} {x} {y} c ",
                         f(c1.x),
                         f(c1.y),
                         f(c2.x),
                         f(c2.y),
-                        f(p.x),
-                        f(p.y)
                     );
+                    cur = Some((x, y));
                 }
                 Seg::Close => d.push_str("h "),
             }

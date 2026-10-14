@@ -147,7 +147,7 @@ impl PdfRecorder {
             let _ = write!(
                 out,
                 "{} {} n ",
-                path_ops(&n.path),
+                path_ops(&n.path, true),
                 match n.rule {
                     FillRule::EvenOdd => "W*",
                     _ => "W",
@@ -214,7 +214,7 @@ Q",
             f(rgb.0),
             f(rgb.1),
             f(rgb.2),
-            path_ops(path),
+            path_ops(path, true),
             match rule {
                 FillRule::EvenOdd => "f*",
                 _ => "f",
@@ -263,7 +263,7 @@ Q",
             f(rgb.2),
             f(width),
             f(miter_limit),
-            path_ops(path),
+            path_ops(path, false),
         );
     }
 
@@ -502,9 +502,10 @@ fn deflate(parts: &[&[u8]]) -> Option<Vec<u8>> {
     enc.finish().ok()
 }
 
-/// PDF path-construction operators for a device-space path.
-fn path_ops(path: &crate::gfx::PsPath) -> String {
-    path.to_pdf_ops()
+/// PDF path-construction operators for a device-space path. `area` is
+/// true for a fill or a clip, false for a stroke (see `to_pdf_ops`).
+fn path_ops(path: &crate::gfx::PsPath, area: bool) -> String {
+    path.to_pdf_ops(area)
 }
 
 fn f(v: f32) -> String {
