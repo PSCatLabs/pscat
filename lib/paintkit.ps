@@ -8840,6 +8840,17 @@ systemdict /setalpha known /pwhasalpha exch def
 %   /pkfeather-count-exceeds-safety-limit
 %   (a tiny spacing on a long line) mustguard
 %
+%   { newpath 0 0 moveto 50 0 lineto 100 0 lineto << /Crisp 0.5 /CrispRun 1e-12 >> pkfeather }
+%   /pkfeather-crisp-stretch-count-exceeds-safety-limit
+%   (a vanishing /CrispRun) mustguard
+%
+%   % A closed square whose length is a whole number of strokes gets one
+%   % stroke per corner, not a second one where the walk closes.
+%   newpath 0 0 moveto 3 0 lineto 3 3 lineto 0 3 lineto closepath
+%   << /Spacing 3 /Wander 0 >> pkfeather
+%   /zzn 0 def { pop pop /zzn zzn 1 add def } { pop pop } { 6 { pop } repeat } { } pathforall
+%   newpath zzn 4 eq (a closed square gets no doubled seam stroke) mustbe
+%
 %   { newpath 0 0 moveto 50 0 lineto 7 pkfeather }
 %   /pkfeather-needs-an-options-dict
 %   (a number as the options) mustguard
@@ -9031,6 +9042,16 @@ systemdict /setalpha known /pwhasalpha exch def
     /mfn 6 def
     mfspacing mfn div 120000 { pkfeather-count-exceeds-safety-limit } mhcollect
 
+    % The crisp stretches are walked along the whole edge, so their count is
+    % bounded too: a tiny /CrispRun on a long edge would otherwise loop for
+    % ever (or stall, once a stretch is below the arc length's precision).
+    % The shortest stretch is 0.4 of the shorter mean.
+    mfcrisp 0 gt mfcrisp 1 lt and {
+        0 0 1 mhn 1 sub { mhstops exch get 4 get add } for
+        mfrun mfcrisp 1 mfcrisp sub min mul 0.4 mul 100000 mul gt
+            { pkfeather-crisp-stretch-count-exceeds-safety-limit } if
+    } if
+
     % Each subpath's out side, once for the whole subpath: +1 when out is to
     % the left of the walk, -1 to the right. A one-sided rule per stop would
     % flip at every wiggle of an open guide and at every corner of a mass.
@@ -9106,6 +9127,7 @@ systemdict /setalpha known /pwhasalpha exch def
             % seed (pkbrushedge's two passes) leave the same stretches crisp
             % whatever their spacing.
             /mfarc 0 def /mfiv 0 def
+            /mftot 0 mfbase 1 add 1 mfend { mhstops exch get 4 get add } for def
             /mfbrushing mfsub 7919 mul mfu mfcrisp ge def
             % Start partway into the first stretch, so subpaths do not all
             % begin on a stretch boundary.
@@ -9121,9 +9143,13 @@ systemdict /setalpha known /pwhasalpha exch def
         } if
         % A slot is every sixth sample, plus an open subpath's end when it is
         % at least half a spacing past the last slot. A closed subpath ends
-        % where it started, so its end is never a slot of its own.
+        % where it started, so no slot falls within half a spacing of its
+        % end: one there doubled the stroke at the start (Codex round 2; the
+        % walk's own end stop can repeat the last regular one, so "the end
+        % stop" alone was not enough).
         /mfr mfend mfbase sub mfn mod def
         mfi mfbase sub mfn mod 0 eq
+        mfisclosed mfi mfbase gt and { mftot mfarc sub mfspacing 0.5 mul ge and } if
         mfi mfend eq mfr 0 gt and mfisclosed not and
             { mfr 1 sub mfspacing mfn div mul mhstops mfend get 4 get add
               mfspacing 0.5 mul ge }
