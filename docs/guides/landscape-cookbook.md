@@ -338,7 +338,7 @@ grestore
 - `pkfan` spires: `/Width 5 /Bristles 10 /Splay 0.9 /Ragged 0.5 /Flick 0.9`; a few, at random positions along the crest.
 
 **Failures.**
-- *A ruled, flat edge on the mass.* Always a tapped crest over a filled mass, never the fill alone. The fill's edge is a vector line (see recipe 10 and [#347](https://github.com/jeromebanks/postscript_interpreter/issues/347)); the dabs hide it.
+- *A ruled, flat edge on the mass.* Always a tapped crest over a filled mass, never the fill alone. The fill's edge is a vector line; for a forest the tapped dabs are the right break, since they read as foliage. A mass that is not foliage (a meadow, a bare bank) takes `pkbrushedge` instead (recipe 10).
 - *A pale rim round the back row.* `/Under` is wrong; see above.
 
 ```postscript
@@ -665,22 +665,24 @@ grestore
 
 ## 10. The foreground bank
 
-![A dark bank with brushed earth, a lit lip and tapped edge](landscape/bank.png)
+![A dark bank with brushed earth, a lit lip and a brushed edge](landscape/bank.png)
 
-**Tools.** A fill, `pkbroad` clipped to it, `pkoil` for the lip, `pkdab` for the edge (issues #115, #117).
+**Tools.** A fill, `pkbroad` clipped to it, `pkoil` for the lip, `pkbrushedge` for the edge (issues #115, #347).
 
-**Order.** The mass in one near-black colour; brushed earth over it, clipped to it; the lit lip; the dabs that break the edge.
+**Order.** The mass in one near-black colour; brushed earth over it, clipped to it; the lit lip; the brushed edge over all of it.
 
 **Settings.**
 - Brushed earth: dozens of broad strokes of two or three browns and dark greens, `/Width 14 /Charge 0.6 /Depletion 0.9 /Edge 0.2 /Grain 20`, **clipped to the bank's path** so they never leave it.
-- The lip catches the light: one `pkoil` stroke along the top edge in a lighter earth, `/Width 6 /Ridges 8 /Highlight 0.3`; it is a thin accent, so the dabs in step 4 sit over most of it.
+- The lip catches the light: one `pkoil` stroke along the top edge in a lighter earth, `/Width 6 /Ridges 8 /Highlight 0.3`; it is a thin accent, so the brushed edge in step 4 breaks it with the rest of the rim.
+- The edge: `bankpath << /Under LAKE /Slant -30 /Length 12 >> pkbrushedge` in the bank's colour. `/Under` is what is really behind the bank (a procedure `x y -> r g b` for graded water); `/Slant` tilts the strokes the way the bank was dragged; `/Crisp 0.3` leaves stretches of the rim untouched, which a near bank in strong light can take.
 - The bank is the nearest thing in the picture, so it can be nearly black; keep its value far from the water's. Only the grass tips catch the last light in Evening Stream.
 
-**Ruled edges.** A filled mass leaves a ruled vector edge, the one thing that gives away a digital bank. Break it with tapped dabs, bushes or grass along it. A brushed edge for filled masses is [#347](https://github.com/jeromebanks/postscript_interpreter/issues/347); until it lands, the dabs along the rim are the fix.
+**Ruled edges.** A filled mass leaves a ruled vector edge, the one thing that gives away a digital bank. `pkbrushedge` breaks it in one call: the mass's colour pulled out across the edge and the colour behind cut back in, so they interlock (issue #347; specimen `docs/paintkit_brushedge_demo.png`). Give it the closed outline you filled (holes and mirrored reflections work) or just the visible crest left open, whose out side is `/Outward` (default up). Bushes and grass along the rim still help, as things growing there, not as the only fix.
 
 **Failures.**
 - *The earth bleeds past the bank.* No clip.
-- *A bank that looks cut out.* The edge is bare; add dabs, bushes or grass.
+- *A bank that looks cut out.* The edge is bare; brush it with `pkbrushedge`, then add bushes or grass where something grows.
+- *A pale band just inside the edge.* The inward cuts are too dense: keep `/InSpacing` at 2 or more.
 
 ```postscript
 % recipe: bank
@@ -696,8 +698,7 @@ LAKE aload pop setrgbcolor clippath fill
   60 84 130 66 190 52 curveto 230 40 260 26 300 22 curveto
   330 20 350 30 370 40 curveto 370 -60 lineto closepath } def
 
-% 1. The mass, in one dark colour. Its edge is a ruled vector line, so
-%    the later layers (the lip, bushes and grass) are what hide it.
+% 1. The mass, in one dark colour.
 BANK aload pop setrgbcolor bankpath fill
 
 % 2. Brushed earth, clipped to the bank: broad strokes of browns and
@@ -716,13 +717,11 @@ grestore
 newpath 0 70 moveto 60 82 130 64 190 50 curveto
 << /Width 6 /Ridges 8 /Load 0.5 /Dropout 0.5 /Highlight 0.3 >> pkoil
 
-% 4. Break the ruled edge: tapped dabs along it, in a green that sits
-%    between the earth and the grass.
-[ 0.15 0.25 0.10 ] aload pop setrgbcolor
-newpath 0 74 moveto 60 86 130 68 190 54 curveto 230 42 260 28 300 24 curveto
-  330 22 350 32 370 42 curveto
-<< /Size 3 /Scatter 14 /Density 6 /Highlight 0.6 /Shadow 0.5 /Irregular 0.9
-   /HighlightColor [ 0.45 0.55 0.20 ] /ShadowColor [ 0.04 0.07 0.05 ] >> pkdab
+% 4. Brush the ruled edge: the bank's colour pulled out over the water and
+%    the water cut back into the bank, slanted the way the bank was dragged.
+%    After the lip, so the lip is broken with the rest of the edge.
+BANK aload pop setrgbcolor
+bankpath << /Under LAKE /Slant -30 /Length 12 /Lean 20 /Bow 0.15 >> pkbrushedge
 ```
 
 ## 11. Grass
@@ -785,7 +784,6 @@ A recipe is a workaround where one of these would be one call. When one lands, u
 |---|---|---|
 | [#229](https://github.com/jeromebanks/postscript_interpreter/issues/229) | `/TipColor` and `/TipReach`: a lit tip on a dark stem | 6 Evergreens, 11 Grass |
 | [#230](https://github.com/jeromebanks/postscript_interpreter/issues/230) | `/Colors` on `pkdry` and `pkoil`'s ridges | 4 Mist, 10 Bank, foam on water |
-| [#347](https://github.com/jeromebanks/postscript_interpreter/issues/347) | a brushed edge for filled masses | 5 Forest, 10 Bank |
 | [#359](https://github.com/jeromebanks/postscript_interpreter/issues/359) | `pkwet` backdrop per band, not per pass | 2 Clouds, 4 Mist |
 
 Evening Stream ([PR #348](https://github.com/jeromebanks/postscript_interpreter/pull/348), pending, `gallery/evening_stream.ps` on `feature/187-second-wet-on-wet-landscape`) is the second worked example once it merges: a dark sunset with a stream, a cabin and autumn trees. Its techniques are folded into recipes 2, 8, 9, 10 and 11. When it merges, link its still `gallery/renders/evening_stream.png` from this page.

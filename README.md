@@ -571,6 +571,27 @@ under any CTM and in Ghostscript. `examples/paintkit_plane_demo.ps`
 (`docs/paintkit_plane_demo.png`) builds a mountain from planes in pigment
 colours and sets out the direction and overlap.
 
+`pkbrushedge` (issue #347) brushes the edge of a filled mass. A meadow, a
+bank or a pond starts as a filled path, and a filled path has a ruled vector
+edge that paint never has; `pkbrushedge` feathers it the way a painter does,
+with short strokes dragged across the boundary: the current colour (the
+mass's) pulled out over what is behind it, and the colour behind (`/Under`:
+a colour, a pigment name, or a procedure `x y -> r g b` for a graded sky)
+cut back in, sparser, so the two interlock. The current path is the edge.
+A subpath closed with `closepath` is a mass outline, and the mass itself
+(the path filled nonzero, as `fill` would) decides which side is out, so a
+hole is brushed into the hole and a mirrored reflection needs nothing
+special; an open subpath is a bare crest whose out side is `/Outward`
+(default up). `/Slant` tilts the strokes, `/Crisp` leaves stretches of the
+edge untouched (lost and found edges), `/Brush` picks the brush (a small
+pkbroad that runs dry by default). The strokes come from `pkfeather`, a
+brush motion in the family above that paints nothing, for anyone who wants
+to pair it with another preset by hand. The caller's path and graphics state
+survive; it works in Ghostscript. `examples/paintkit_brushedge_demo.ps`
+(`docs/paintkit_brushedge_demo.png`) shows each case before and after.
+
+![Brushed edges, before and after](docs/paintkit_brushedge_demo.png)
+
 `pkfan` (issue #114) is the fan brush: foliage, evergreen branches,
 grasses, cloud feathering, soft texture. Its nearest relative is
 `pkdry`, and exactly one term separates them. `pkdry` holds each bristle

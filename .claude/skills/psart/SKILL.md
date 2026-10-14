@@ -293,6 +293,19 @@ Which tool to pick:
   shadow side is `/Light` turned round. Specimen:
   `docs/paintkit_massing_demo.png`.
 
+- **Brushed edges** — `pkbrushedge` (and the motion under it, `pkfeather`).
+  A filled mass (a meadow, a bank, a pond) has a ruled vector edge; fill it,
+  then `MASS setrgbcolor massPath << /Under BEHIND >> pkbrushedge` pulls the
+  mass's colour out across the edge and cuts the colour behind back in, so
+  the edge reads as painted. Give it the closed outline you filled (holes
+  and mirrored reflections work: the mass itself says which side is out) or
+  just the visible crest, left open, whose out side is `/Outward` (default
+  up). `/Under` is a colour, a pigment name or a procedure `x y -> r g b`
+  (a graded sky or water); `/Slant` tilts the strokes (wind in a meadow, a
+  dragged bank); `/Crisp 0.3` leaves stretches untouched (lost and found);
+  `/Brush` swaps the brush (`{ << /Width 2 >> pkliner }` for grass blades).
+  `examples/paintkit_brushedge_demo.ps` shows before and after.
+
 **Painting a landscape?** Read `docs/guides/landscape-cookbook.md` first: one
 recipe per element (sky, clouds, mountains, mist, far forest, evergreens,
 bushes, water, reflection, foreground bank, grass), each with the tools, the
