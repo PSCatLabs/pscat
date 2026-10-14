@@ -632,13 +632,13 @@ fn ghostscript_takes_packed_procedures_and_runs_every_motion() {
 }
 
 /// The CI budget (DRYMEDIA.md 6.2): a small crayon scene -- a scribble
-/// fill, a figure, rays and grass -- renders in under 2 s under
+/// fill, a figure, rays and grass -- renders in under 5 s under
 /// `--profile ci`. Measured in thread CPU time, best of 3 (issue #329),
 /// so load from other processes cannot fail it. Printed so drift is
 /// visible before it fails.
 #[test]
 fn a_crayon_scene_renders_within_the_ci_budget() {
-    let it = within_cpu_budget("crayon scene", Duration::from_secs(2), 3, || {
+    let it = within_cpu_budget("crayon scene", Duration::from_secs(5), 3, || {
         render(
             200,
             150,

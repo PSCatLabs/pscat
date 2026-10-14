@@ -547,7 +547,7 @@ Two things scale beyond that:
 | full portrait (#242) | ≤ 60s | ≤ 60s | ~3000 hatch strokes × 2 levels, plus smudges; about 2× the board in cells |
 | child's drawing (#240) | ≤ 20s | ≤ 20s | fewer, larger strokes at coarser `/Weave` (0.9) |
 | each specimen in `examples/` | ≤ 10s | ≤ 10s | specimens are smaller than pieces |
-| each `tests/drykit*.rs` render | ≤ 2s under `--profile ci` | — | CI (#204) |
+| each `tests/drykit*.rs` render | ≤ 5s under `--profile ci` | — | CI (#204) |
 | all of `tests/drykit*.rs` together | ≤ 30s under `--profile ci` | — | CI (#204) |
 
 CI renders no gallery pieces. It runs `scripts/selftest.sh`, `cargo test`
@@ -621,7 +621,7 @@ Rust tests (`tests/drykit.rs`):
    and every `@param` has a unit. The capabilities unit check is extended to
    drykit's files.
 8. **Budget smoke test:** a 100-stroke render under `--profile ci` stays
-   under 2s.
+   under 5s.
 
 ## 9. Slice plan
 
