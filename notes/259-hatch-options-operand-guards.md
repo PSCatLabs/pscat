@@ -51,7 +51,17 @@ checked with the other options rather than where it is read).
 error or silent acceptance: an executable array where an array of numbers
 belongs, a non-dict options operand, a wrong-length `/Width` or `/Trim`
 (was a raw `rangecheck`), a non-number in `/Angles`/`/BBox`. A well-formed call
-is untouched. Renders are byte-identical (see the PR for the comparison).
+is untouched. Renders are byte-identical: 13 files that load hatchkit or one of its
+dependants (`examples/{hatching,printkit,surfacekit,stippling,halftone,etching_demo}.ps`,
+`gallery/{nightfall_triptych,out_of_register,varsity_backs}.ps`, two
+`docs/drymedia/prototypes`, the artkit and paintkit selftest drivers) gave 29
+PNGs from a base worktree (merge-base `b2e56e3`) and from this branch, same
+binary, each run from its own tree root: 0 differ under `cmp`. Negative
+control: changing the candidate-centering divisor in the branch's `hatch`
+(`2 div` to `3 div` for `/hkslack`) made `examples/hatching.ps`,
+`examples/printkit.ps` and `gallery/nightfall_triptych.ps` differ (the three
+files that actually call `hatch`), then reverted. PNG only: SVG output is
+nondeterministic (#261).
 
 **For #271 (a `/Mark` hook).** Add the new option's check in the block at the
 top of `hatch`, same shape: read it with `hkgetdef` (or `known`/`get`), keep
