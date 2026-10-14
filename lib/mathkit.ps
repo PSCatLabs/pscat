@@ -1579,11 +1579,13 @@
   } ifelse
 } bind def
 
-% - -> box   (in mkatom) \substack: rows centred, a script line apart,
-% the block centred on the axis
+% - -> box   (in mkatom) \substack: rows in script style whatever the
+% context (amsmath's subarray), centred, a script line apart, the block
+% centred on the axis
 % @internal
 /mknsubstack {
-  /bxs [ at /Rows get { st cr mklist } forall ] def
+  /qs 2 mkem def
+  /bxs [ at /Rows get { 2 cr mklist } forall ] def
   /nr bxs length def
   /sw 0 bxs { 0 get max } forall def
   /by [ nr { 0 } repeat ] def
@@ -1591,7 +1593,7 @@
     /i exch def
     by i
       by i 1 sub get
-      s bxs i 1 sub get 2 get bxs i get 1 get add s 0.12 mul add max
+      qs bxs i 1 sub get 2 get bxs i get 1 get add qs 0.12 mul add max
       sub
     put
   } for
@@ -1602,7 +1604,7 @@
     [ 0 1 nr 1 sub {
         /i exch def
         at /K get i 8 mul 2 add mkseedk
-        [ /b sw bxs i get 0 get sub 2 div 1 mkjit mkIrr mul 0.04 mul s mul add
+        [ /b sw bxs i get 0 get sub 2 div 1 mkjit mkIrr mul 0.04 mul qs mul add
              by i get sh add bxs i get 3 get ]
       } for ] ]
 } bind def
@@ -2734,6 +2736,11 @@
 %   (a substack hangs deeper than one row) mustbe
 %   (\\substack{a \\\\ b \\\\}) mkt-m /Height get (\\substack{a \\\\ b}) mkt-m /Height get eq
 %   (a trailing row break adds no row) mustbe
+%   (\\substack{x}) mkt-m /Width get (x) mkt-m /Width get 0.7 mul sub abs 0.01 lt
+%   (substack rows are script style even at the top level) mustbe
+%   (\\sum_{\\sum_{\\substack{xxxxxxxx}}}) mkt-m /Width get
+%   (\\sum_{\\sum_{xxxxxxxx}}) mkt-m /Width get gt
+%   (and in a second-level limit, where scriptscript would be smaller) mustbe
 %   % \not
 %   (a \\not= b) mkt-m /Width get (a \\neq b) mkt-m /Width get sub abs 0.01 lt
 %   (\not= is \neq) mustbe

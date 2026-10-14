@@ -38,7 +38,9 @@ committed render changed (see Evidence).
   places: `}` ends it (`mkbrbrace`), `\\` gives a new row (`mkctlsym`),
   end of string raises `mk-missing-closing-brace` (`mkateof`), and `&`
   stays `mk-misplaced-ampersand`.
-  - The rows are centred, a script line apart (at least 1 em, more if
+  - The rows are set in script style whatever the context, as amsmath's
+    `subarray` sets them (Codex round 1), centred, a script line apart
+    (at least 1 script em, more if
     they are tall), and the block is centred on the axis, like amsmath's
     `subarray`.
   - A trailing `\\` adds no row.
