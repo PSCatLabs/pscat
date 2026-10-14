@@ -113,6 +113,10 @@ predates it.
 - `ARCHITECTURE.md` — the design writeup (object model, execution model,
   rendering-crate leanings, deliberate deferrals). Read before changing
   anything structural.
+- `docs/guides/` — user guides, one per library or topic (the old README's
+  long tour); `docs/archive/` — history kept as written, including the
+  stage log. Check links with `python3 scripts/check_md_links.py` (CI runs it
+  as the `links` workflow); it skips `docs/archive/` and `notes/`.
 - `NOTES.md` — per-stage summaries, newest first, frozen as of 2026-10-13.
 - `notes/` — newer entries, one file per issue (`notes/<issue>-<slug>.md`,
   format in `notes/README.md`). Write new notes here, not in `NOTES.md`, so

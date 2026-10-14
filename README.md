@@ -11,18 +11,16 @@ for broad PostScript coverage over time.
 **[jeromebanks.github.io/postscript_interpreter](https://jeromebanks.github.io/postscript_interpreter/)** has the docs, the full gallery, a specimen of every font,
 and a live playground that runs the interpreter in your browser, no install.
 
-<table>
-<tr>
-<td><a href="https://jeromebanks.github.io/postscript_interpreter/gallery.html"><img src="gallery/renders/cathedral_rose.png" alt="Cathedral Rose: a Maurer rose drawn as straight chords"/></a></td>
-<td><a href="https://jeromebanks.github.io/postscript_interpreter/gallery.html"><img src="gallery/renders/hortus.png" alt="Hortus Machinalis: L-system plants on a herbarium plate"/></a></td>
-<td><a href="https://jeromebanks.github.io/postscript_interpreter/gallery.html"><img src="gallery/renders/alpine_lake.png" alt="Alpine Lake: a landscape painted with paintkit brushes"/></a></td>
-</tr>
-<tr>
-<td><a href="https://jeromebanks.github.io/postscript_interpreter/gallery.html"><img src="gallery/renders/nightfall_triptych.png" alt="Nightfall, Three Cuts: woodcut, linocut and engraving in one scene"/></a></td>
-<td><a href="https://jeromebanks.github.io/postscript_interpreter/gallery.html"><img src="gallery/renders/ring_of_type.png" alt="Ring of Type: a sentence set around concentric rings"/></a></td>
-<td><a href="https://jeromebanks.github.io/postscript_interpreter/gallery.html"><img src="gallery/renders/ripple_range.png" alt="Ripple Range: a 3D surface plot"/></a></td>
-</tr>
-</table>
+<p>
+  <a href="https://jeromebanks.github.io/postscript_interpreter/gallery.html"><img src="gallery/renders/cathedral_rose.png" width="32%" alt="Cathedral Rose: a Maurer rose drawn as straight chords"/></a>
+  <a href="https://jeromebanks.github.io/postscript_interpreter/gallery.html"><img src="gallery/renders/hortus.png" width="32%" alt="Hortus Machinalis: L-system plants on a herbarium plate"/></a>
+  <a href="https://jeromebanks.github.io/postscript_interpreter/gallery.html"><img src="gallery/renders/alpine_lake.png" width="32%" alt="Alpine Lake: a landscape painted with paintkit brushes"/></a>
+</p>
+<p>
+  <a href="https://jeromebanks.github.io/postscript_interpreter/gallery.html"><img src="gallery/renders/nightfall_triptych.png" width="32%" alt="Nightfall, Three Cuts: woodcut, linocut and engraving in one scene"/></a>
+  <a href="https://jeromebanks.github.io/postscript_interpreter/gallery.html"><img src="gallery/renders/ring_of_type.png" width="32%" alt="Ring of Type: a sentence set around concentric rings"/></a>
+  <a href="https://jeromebanks.github.io/postscript_interpreter/gallery.html"><img src="gallery/renders/ripple_range.png" width="32%" alt="Ripple Range: a 3D surface plot"/></a>
+</p>
 
 ## Quick start
 

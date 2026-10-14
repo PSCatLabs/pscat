@@ -8,7 +8,10 @@ The plan is `docs/dev/DOCS_PLAN.md` (#247); this is its first step.
 **Where the old README went** (section dispositions follow the plan):
 
 - "Status" (stage log) to `docs/archive/STATUS_LOG.md`, verbatim under a short
-  provenance heading; `docs/archive/README.md` indexes it.
+  provenance heading; `docs/archive/README.md` indexes it. The whole old README
+  is also kept word for word as `docs/archive/README_BEFORE_FRONT_DOOR.md`,
+  because the guides were edited (issue references and build-note asides
+  removed) and "nothing is lost" should hold for the prose too.
 - "Building & running" and "Installing pscat without the repo" to
   `docs/guides/getting-started.md`, with the sweep, spool, halftone and PDF
   prose from the stage log folded in as "more on the less obvious flags".
@@ -34,8 +37,8 @@ there was one, and build-note passages (what was rendered first and rejected)
 were folded to the conclusion. A truncated sentence in the old apparel paragraph
 was repaired. `drycrayon` and `drycharcoal` had no README text; each got a short
 paragraph written from its header comment. The `/Typewriter` paragraph about
-what #212 and #213 will add was dropped: it was forward-looking progress
-narrative that the library header owns.
+what #212 and #213 will add was dropped from the guide (still in the archived
+README): forward-looking progress narrative that the library header owns.
 
 **Load-bearing fixes.** `tests/headline.rs` now reads its snippet from
 `docs/guides/lettering.md` (kept byte-identical). `AGENTS.md`, the `pscat` skill,
