@@ -27,4 +27,8 @@ for p in $(sed -n 's/.*hog pid //p' "$T/err2") $(sed -n 's/^cmd //p' "$T/cmdpid"
 # 3. Bad arguments.
 bash "$LR" -n 0 -- true 2>/dev/null; [ $? -eq 64 ] || bad "-n 0 must exit 64"
 bash "$LR" 2>/dev/null; [ $? -eq 64 ] || bad "no command must exit 64"
+# A bare -n once looped forever (Codex round 1): run it in the background so a hang fails, not blocks.
+bash "$LR" -n 2>/dev/null & P=$!
+for _ in 1 2 3 4 5 6 7 8 9 10; do alive "$P" || break; python3 -c 'import time; time.sleep(0.2)'; done
+if alive "$P"; then kill "$P"; bad "bare -n hangs"; else wait "$P"; [ $? -eq 64 ] || bad "bare -n must exit 64"; fi
 [ "$fail" -eq 0 ] && echo "test-load-run: ok" || { echo "test-load-run: $fail failure(s)"; exit 1; }

@@ -10,7 +10,7 @@
 N=""
 while [ $# -gt 0 ]; do
     case "$1" in
-        -n) N=${2:-}; shift 2 ;;
+        -n) [ $# -ge 2 ] || { echo "load-run.sh: -n needs a value" >&2; exit 64; }; N=$2; shift 2 ;;
         --) shift; break ;;
         *) echo "usage: load-run.sh [-n N] -- CMD [ARGS...]" >&2; exit 64 ;;
     esac
