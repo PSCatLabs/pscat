@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!--@head-->
+<title>pscat — learn PostScript</title>
+</head>
+<body>
+<!--@header learn-->
+<main>
+  <h1>Learn PostScript</h1>
+  <p class="sub">A language where you push values onto a stack and then say what to do with them.</p>
+
+  <p>The full tutorial is still being written: the history of PostScript, a
+  stack-language primer, and programs you can run as you read. This page
+  holds its place in the navigation, with a first taste in the meantime.</p>
+
+  <h2>A first taste</h2>
+  <p>PostScript puts the operands first and the operator last. In
+  <code>100 100 moveto</code>, the two numbers are pushed onto the stack and
+  <code>moveto</code> pops them and moves the pen there. Drawing is describing
+  a path, then painting it. This fills a teal square:</p>
+<pre><code>%!PS
+0.2 0.7 0.6 setrgbcolor
+100 100 moveto  200 100 lineto  200 200 lineto  100 200 lineto  closepath
+fill
+showpage</code></pre>
+  <p>Paste it into the <a href="playground.html">playground</a> and press Run.
+  The playground opens on a longer program that you can edit, and its example
+  menu loads more.</p>
+
+  <h2>Meanwhile</h2>
+  <ul>
+    <li>Run and edit programs in the <a href="playground.html">playground</a>.</li>
+    <li>Read the source of any piece in the <a href="gallery.html">gallery</a>;
+      each one is a single PostScript file.</li>
+    <li>Browse the <a href="guides.html">guides</a> for what the libraries can do.</li>
+  </ul>
+</main>
+<!--@footer-->
+</body>
+</html>

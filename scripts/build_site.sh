@@ -4,10 +4,14 @@
 #   ./scripts/build_site.sh
 #   python3 -m http.server -d _site       # preview locally
 #
-# Pieces: the authored pages (site/), the wasm build + JS library,
+# Pieces: the authored pages (site/, with the shared header, footer and
+# <head> from site/_partials/ applied last, by scripts/site_pages.py),
+# the wasm build + JS library,
 # playground example sources (self-contained files only — the wasm
 # build has no filesystem), and PNG renders of every gallery piece
 # and example, produced by pscat itself.
+#
+# Then check it: scripts/check_site_links.py (CI runs it after this).
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 OUT="$ROOT/_site"
@@ -15,7 +19,7 @@ OUT="$ROOT/_site"
 rm -rf "$OUT"
 mkdir -p "$OUT/assets/renders" "$OUT/assets/references" "$OUT/examples" "$OUT/lib"
 
-# 1. the authored pages
+# 1. the authored pages (the shell is applied in the last step)
 cp "$ROOT"/site/*.html "$ROOT"/site/style.css "$OUT/"
 cp "$ROOT"/lib/graph.ps "$ROOT"/lib/dataviz.ps "$OUT/lib/"
 
@@ -77,5 +81,8 @@ render examples/drychalk_specimen.ps 840x1080
 render examples/drycrayon_specimen.ps 840x1000
 render examples/drycrayon_motion_demo.ps 840x760
 render examples/drycharcoal_specimen.ps 720x490
+
+# 6. the shared shell, last, so pages generated above get it too
+python3 "$ROOT/scripts/site_pages.py" "$OUT"
 
 echo "site assembled: $OUT ($(du -sh "$OUT" | cut -f1))"

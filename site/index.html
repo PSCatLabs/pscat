@@ -1,105 +1,108 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>pscat — a PostScript interpreter for watching programs draw</title>
-<link rel="stylesheet" href="style.css">
+<!--@head-->
+<title>pscat — watch PostScript draw</title>
+<meta name="description" content="pscat is a PostScript interpreter written in Rust: run a program and watch the picture draw itself, in a window, in your browser, or as PNG, SVG and PDF.">
 </head>
 <body>
-<header>
-  <a class="brand" href="index.html">pscat</a>
-  <nav>
-    <a class="here" href="index.html">Home</a>
-    <a href="playground.html">Playground</a>
-    <a href="charts.html">Charts</a>
-    <a href="gallery.html">Gallery</a>
-    <a href="fonts.html">Fonts</a>
-    <a href="architecture.html">Architecture</a>
-    <a href="extending.html">Extending</a>
-    <a href="javascript.html">JavaScript</a>
-    <a href="agents.html">Agents</a>
-    <a href="https://github.com/jeromebanks/postscript_interpreter">GitHub</a>
-  </nav>
-</header>
-<main>
-  <h1>A PostScript interpreter, written in Rust,<br>for watching programs draw.</h1>
-  <p class="sub">Not a Ghostscript replacement — a from-scratch Level 2
-  interpreter built to relive sending hand-written PostScript straight
-  to a LaserWriter, and to watch the recursion happen, live.</p>
+<!--@header home-->
+<main class="wide">
+  <section class="landing-hero">
+    <div class="copy">
+      <h1>Watch PostScript draw itself.</h1>
+      <p class="lede">PostScript is the language printers once spoke: a page is
+      a program that draws it. <b>pscat</b> is a PostScript interpreter written
+      in Rust. Run a program and the picture appears stroke by stroke, in a
+      window, in your browser tab, or as a PNG, SVG or PDF.</p>
+      <p class="cta">
+        <a class="primary" href="gallery.html">See the gallery</a>
+        <a href="learn.html">Learn PostScript</a>
+        <a href="playground.html">Try it in your browser</a>
+      </p>
+    </div>
+    <figure>
+      <img src="assets/renders/evening_stream.png" width="1520" height="1120"
+           alt="Evening Stream: a purple dusk sky over a cabin, autumn trees and a winding stream, painted in layered strokes">
+      <figcaption>Evening Stream, a wet-on-wet landscape. Every stroke is
+      PostScript: the source is <code>gallery/evening_stream.ps</code>.</figcaption>
+    </figure>
+  </section>
 
-  <div class="hero">
-    <img src="assets/renders/cathedral_rose.png" alt="Cathedral Rose — a Maurer rose in woven chords">
-    <img src="assets/renders/font_library.png" alt="The font library specimen — neon, marquee, constellation, chiseled stone">
-    <img src="assets/renders/handwriting.png" alt="A letter in the /HandScript dynamic handwriting font">
+  <h2>What you can make with it</h2>
+  <div class="cards">
+    <div class="card"><div class="body"><b>Generative art</b>
+      <span>Turtle graphics, L-systems, noise and flow fields, plus brushes
+      that behave like watercolor, chalk, charcoal and ink. The
+      <a href="gallery.html">gallery</a> is all of it, rendered by pscat itself.</span></div></div>
+    <div class="card"><div class="body"><b>Type and lettering</b>
+      <span>Original display faces where every letter is a small program,
+      a handwriting font where no two letters match, and a catalog of open
+      fonts. See <a href="fonts.html">Fonts</a>.</span></div></div>
+    <div class="card"><div class="body"><b>Charts for papers</b>
+      <span>Function plots, surfaces, bar, line, area, scatter and pie charts
+      as clean vector figures. Try the <a href="charts.html">interactive demos</a>.</span></div></div>
+    <div class="card"><div class="body"><b>A tool for agents</b>
+      <span>A command-line renderer, a skill for coding agents and an MCP
+      server, so an AI can draw, look at the result and refine it. See
+      <a href="agents.html">For agents</a>.</span></div></div>
   </div>
 
-  <p>
-    <span class="pill">live winit window</span>
-    <span class="pill">PNG · SVG · PDF out</span>
-    <span class="pill">runs in the browser (wasm)</span>
-    <span class="pill">Type 1 · Type 3 · TrueType text</span>
-    <span class="pill">save/restore VM</span>
-    <span class="pill">filters &amp; sampled images</span>
-    <span class="pill">MCP server + agent skill</span>
-    <span class="pill">golden-tested against Ghostscript</span>
-  </p>
+  <h2>Where to next</h2>
+  <div class="cards">
+    <a class="card" href="learn.html"><b>Learn</b><span>PostScript from first principles: the stack, the page, and programs to try.</span></a>
+    <a class="card" href="gallery.html"><b>Gallery</b><span>Finished pieces and library specimens, with the source behind each.</span></a>
+    <a class="card" href="fonts.html"><b>Fonts</b><span>Every typeface <code>findfont</code> can reach, drawn by pscat.</span></a>
+    <a class="card" href="playground.html"><b>Playground</b><span>Type PostScript, press Run, watch it draw. No install.</span></a>
+    <a class="card" href="guides.html"><b>Guides</b><span>How to use pscat and each art library, plus the JavaScript API.</span></a>
+    <a class="card" href="agents.html"><b>For agents</b><span>The skills and the MCP server for Claude Code, Codex and others.</span></a>
+    <a class="card" href="contribute.html"><b>Contribute</b><span>How the code is organised, how to extend it, and how work gets merged.</span></a>
+  </div>
 
-  <h2>Try it now</h2>
-  <p>The <a href="playground.html">playground</a> runs the full
-  interpreter in your browser tab — type PostScript, watch it draw,
-  no install. Or build the real thing:</p>
+  <h2>Install it</h2>
+  <p>The <a href="playground.html">playground</a> needs nothing. To run the real
+  thing, with the live window and every output format:</p>
 <pre><code>git clone https://github.com/jeromebanks/postscript_interpreter
 cd postscript_interpreter
 cargo run --release -- --page 500x500 examples/sierpinski.ps   # watch it draw
 cargo run --release -- --png out.png file.ps                   # headless render
 cargo run --release -- -i                                      # REPL + live window</code></pre>
 
-  <h2>What's inside</h2>
+  <h2>What is inside</h2>
+  <p>
+    <span class="pill">live window</span>
+    <span class="pill">PNG · SVG · PDF out</span>
+    <span class="pill">runs in the browser (wasm)</span>
+    <span class="pill">Type 1 · Type 3 · TrueType text</span>
+    <span class="pill">save / restore VM</span>
+    <span class="pill">image filters</span>
+    <span class="pill">MCP server and agent skills</span>
+    <span class="pill">tested against Ghostscript</span>
+  </p>
   <ul>
-    <li><b>The language core</b> — tokenizer, object model, a
-      three-stack machine with an explicit frame stack (no recursion),
-      catchable errors with the standard PostScript names, tail-call-safe
-      loops, <code>save</code>/<code>restore</code> as copy-on-write
-      journaling.</li>
-    <li><b>Graphics</b> — paths, fills, strokes, clipping chains, dash
-      patterns, HSB/CMYK/Indexed/Separation color, sampled images with
-      decode filters (ASCIIHex/85, RunLength, Flate, LZW, DCT/JPEG),
-      halftone screening, multi-page documents.</li>
-    <li><b>Text</b> — the standard base fonts (metric-compatible
-      Liberation faces), Type 3 glyph programs, and real Type 1 fonts:
-      <code>currentfile eexec</code>, encrypted charstrings and all.</li>
-    <li><b>Output</b> — a live window (arrow keys browse pages), PNG at
-      any dpi, SVG and PDF export verified by letting Ghostscript
-      rasterize them back, a spool mode that watches a directory like
-      the printer in the corner of the lab.</li>
-    <li><b>A font library</b> — original Type 3 display faces where
-      every glyph is a program: neon tube, marquee bulbs, star charts,
-      chiseled stone, and a dynamic handwriting font where no two
-      letters ever match. See the <a href="gallery.html">gallery</a>.</li>
+    <li><b>The language.</b> A from-scratch Level 2 interpreter: three
+      stacks and an explicit frame stack (no recursion), catchable errors
+      with the standard PostScript names, and <code>save</code> /
+      <code>restore</code> built on copy-on-write journaling.
+      <a href="architecture.html">Architecture</a> explains the design.</li>
+    <li><b>Graphics.</b> Paths, fills, strokes, clipping, dash patterns,
+      HSB, CMYK, Indexed and Separation color, sampled images with the usual
+      decode filters, halftone screening and multi-page documents.</li>
+    <li><b>Text.</b> The standard base fonts, Type 3 glyph programs, and
+      real Type 1 fonts down to <code>eexec</code> and encrypted charstrings.</li>
+    <li><b>Output.</b> A live window you can page through, PNG at any dpi,
+      SVG and PDF checked by letting Ghostscript rasterize them back, and a
+      spool mode that watches a directory like the printer in the corner of
+      the lab.</li>
   </ul>
 
-  <h2>Read more</h2>
-  <table>
-    <tr><td><a href="architecture.html">Architecture</a></td>
-        <td>the three ideas that explain most of the code, and the crate map</td></tr>
-    <tr><td><a href="extending.html">Extending</a></td>
-        <td>how to add operators and features; the Ghostscript-as-oracle workflow</td></tr>
-    <tr><td><a href="javascript.html">JavaScript</a></td>
-        <td>the wasm build and the browser library, step-driven drawing included</td></tr>
-    <tr><td><a href="agents.html">Agents</a></td>
-        <td>the CLI, the skill, and the MCP server — pscat as a tool for Claude Code, Codex, OpenClaw, Hermes</td></tr>
-    <tr><td><a href="gallery.html">Gallery</a></td>
-        <td>generative art, examples, and the font specimens, all rendered by pscat itself</td></tr>
-  </table>
-
   <h2>Why</h2>
-  <p>I used to write raw PostScript by hand in college and send it
-  straight to a LaserWriter. This is a from-scratch Rust interpreter
-  built to relive that — watching a hand-written recursive PostScript
-  program draw itself, live, without depending on a decades-old C
-  codebase to do it.</p>
+  <p>I used to write raw PostScript by hand in college and send it straight
+  to a LaserWriter. This is a from-scratch Rust interpreter built to relive
+  that: watching a hand-written recursive program draw itself, live, without
+  depending on a decades-old C codebase to do it. It is not a Ghostscript
+  replacement, and it is happy to be checked against Ghostscript.</p>
 </main>
-<footer>pscat — built by hand, tested against Ghostscript, drawn live.</footer>
+<!--@footer-->
 </body>
 </html>

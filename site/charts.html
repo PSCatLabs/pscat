@@ -1,10 +1,8 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--@head-->
 <title>pscat charts — paper-ready data visualization</title>
-<link rel="stylesheet" href="style.css">
 <style>
 #chart-play { display:flex; flex-wrap:wrap; gap:18px; padding:18px 24px; }
 #chart-left { flex:1 1 520px; min-width:320px; }
@@ -12,27 +10,13 @@
 #chart-left textarea { width:100%; height:420px; font:13px/1.5 ui-monospace,monospace; padding:10px; background:var(--panel); color:var(--ink); border:1px solid var(--edge); border-radius:6px; }
 #chart-controls { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-top:10px; }
 #chart-controls select, #chart-controls button { padding:6px 10px; }
-#chart-err { color:#e8a1bb; min-height:1.2em; margin-top:8px; white-space:pre-wrap; font-size:13px; }
+#chart-err { color:var(--err); min-height:1.2em; margin-top:8px; white-space:pre-wrap; font-size:13px; }
 canvas#chart-page { border:1px solid var(--edge); background:#fff; max-width:100%; height:auto; }
 .small { color:var(--dim); font-size:13px; }
 </style>
 </head>
 <body>
-<header>
-  <a class="brand" href="index.html">pscat</a>
-  <nav>
-    <a href="index.html">Home</a>
-    <a href="playground.html">Playground</a>
-    <a class="here" href="charts.html">Charts</a>
-    <a href="gallery.html">Gallery</a>
-    <a href="fonts.html">Fonts</a>
-    <a href="architecture.html">Architecture</a>
-    <a href="extending.html">Extending</a>
-    <a href="javascript.html">JavaScript</a>
-    <a href="agents.html">Agents</a>
-    <a href="https://github.com/jeromebanks/postscript_interpreter">GitHub</a>
-  </nav>
-</header>
+<!--@header guides-->
 <main class="wide">
 <h1>Charts — paper-ready data visualization</h1>
 <p class="sub">Interactive demos of <code>lib/graph.ps</code> (function and surface plotting) and <code>lib/dataviz.ps</code> (bar / line / area / scatter / pie). Pick a preset, edit the data or function, press Run. The PostScript source below is complete and self-contained — no <code>(lib/...) run</code> needed in the browser; copy it verbatim into a file with <code>(lib/graph.ps) run</code> / <code>(lib/dataviz.ps) run</code> for paper use. See <code>.claude/skills/psviz</code> for the agent-authoring guide.</p>
@@ -51,6 +35,7 @@ canvas#chart-page { border:1px solid var(--edge); background:#fff; max-width:100
   </div>
   <div id="chart-right"><canvas id="chart-page" width="612" height="792"></canvas></div>
 </div>
+<!--@footer-->
 <script type="module">
 import { Pscat } from './pscat.js';
 
