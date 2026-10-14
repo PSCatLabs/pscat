@@ -6416,6 +6416,312 @@ systemdict /setalpha known /pwhasalpha exch def
 } bind def
 
 % ============================================================================
+% Pigments: a named oil palette that mixes like paint (issue #185)
+% ============================================================================
+%
+% artkit's `mix3` is an RGB lerp, which is wrong for paint in the ways that
+% matter: blue and yellow lerp to grey, white only lightens, and a dark mix
+% never goes rich. This section is the paint answer. It touches no preset and
+% changes no existing render; the presets take its colours through the keys
+% they already have (`/Colors`, `/HighlightColor`, `/ShadowColor`).
+%
+%   /name pigment            -> r g b       a pigment as it comes from the tube
+%   [ /name w /name w ... ] pigmix -> r g b mix by weight, like paint
+%   /name t pigtint          -> r g b       t parts titanium white
+%   /name t pigshade         -> r g b       t parts midnight black
+%   spec pigcolor            -> [r g b]     one colour as an array
+%   [ spec ... ] pigcolors   -> [[r g b]..] a whole /Colors list
+%
+% The palette is `Pigments`, a dict of name -> [r g b strength], listed in
+% tube order by `PigmentNames`: titaniumwhite midnightblack phthaloblue
+% prussianblue alizarin sapgreen cadmiumyellow indianyellow yellowochre
+% vandykebrown darksienna burntumber brightred. r g b is the pigment's
+% colour as it reads on white paper; strength is its tinting strength
+% relative to a plain colour (1). Inside a mix every channel is held to
+% 0.012-0.985 so a pure 0 or 1 cannot blow up the maths; a lone pigment
+% is returned as it is stored.
+%
+% The model is Kubelka-Munk's two-constant theory, run per channel on r g b
+% rather than on a spectrum. Paint absorbs (K) and scatters (S) light, and in
+% a mixture the absorption and scattering simply add, weighted by how much of
+% each pigment is in the pot. A pigment of reflectance R has K/S =
+% (1-R)^2 / 2R; a mixture of pigments i with weights w_i and strengths s_i
+% has, per channel,
+%
+%     a_i = w_i s_i          K/S = sum(a_i (1-R_i)^2 / 2R_i) / sum(a_i)
+%     R   = 1 + K/S - sqrt((K/S)^2 + 2 K/S)
+%
+% That is a few multiplies and three square roots per pigmix, with no
+% iteration. What it buys over a lerp: blue and yellow multiply their
+% absorption bands, so they leave green; white (strength 12) has almost no
+% absorption and a great deal of scatter, so a little of it lifts a colour a
+% long way and the tint loses saturation as it lightens; a strong dark
+% pigment (phthalo blue) dominates a mix, as it does in a pot.
+%
+% What it is not, so nobody expects it:
+%   * three bands, not a spectrum. Two pigments that look alike in r g b but
+%     differ in spectrum (the two blues, say) mix as their r g b says, and
+%     complements (phthalo blue and bright red) fall to a very dark neutral
+%     rather than the lively brown a real pot gives. The pigments' r g b and
+%     strengths are tuned by eye against reference mixes, not measured.
+%   * mixed in the encoded (gamma) rgb the display uses, not linear light.
+%     That saves a power per channel; a linear-light mix would give different
+%     (usually darker) midtones.
+%   * a mix, not a layer. It says what a pot of paint looks like, not what a
+%     thin glaze over another colour looks like, and nothing here is wet,
+%     opaque or dry. Weights are parts by volume, not by visual share.
+%
+% Every function validates its input and raises a self-documenting guard
+% (`pigmix-unknown-pigment`, ...). Scratch variables all start `pgm`: the
+% presets' nested calls clobber `pk*` names, and pigmix is meant to be called
+% from inside a preset's own procedure.
+
+% @kind: Dial
+% @summary: The oil palette: a dict of 13 named pigments, each [r g b strength]; r g b is the colour as it reads on white paper, strength the tinting strength (titanium white 12, a plain colour 1). Read it with pigment, mix it with pigmix; iterate it in tube order with PigmentNames.
+% @example: Pigments /phthaloblue get aload pop pop setrgbcolor
+/Pigments <<
+    /titaniumwhite [0.95 0.96 0.97 12.0]
+    /midnightblack [0.04 0.04 0.05 1.0]
+    /phthaloblue   [0.09 0.24 0.55 1.6]
+    /prussianblue  [0.05 0.17 0.32 1.4]
+    /alizarin      [0.55 0.05 0.24 1.8]
+    /sapgreen      [0.16 0.38 0.08 1.2]
+    /cadmiumyellow [0.99 0.87 0.04 1.6]
+    /indianyellow  [0.94 0.63 0.07 1.1]
+    /yellowochre   [0.78 0.56 0.20 1.0]
+    /vandykebrown  [0.24 0.14 0.09 0.9]
+    /darksienna    [0.46 0.22 0.10 1.0]
+    /burntumber    [0.32 0.17 0.10 1.0]
+    /brightred     [0.82 0.10 0.07 1.6]
+>> def
+
+% @kind: Dial
+% @summary: The names of the 13 pigments in tube order (Pigments has no order of its own): white, black, the blues, alizarin, the greens, the yellows and ochre, the browns, bright red.
+% @example: PigmentNames { dup 20 20 moveto pigment setrgbcolor ... } forall
+/PigmentNames [
+    /titaniumwhite /midnightblack /phthaloblue /prussianblue /alizarin
+    /sapgreen /cadmiumyellow /indianyellow /yellowochre /vandykebrown
+    /darksienna /burntumber /brightred
+] def
+
+% r -> K/S for one channel. The clamp keeps a pure 0 or 1 channel finite.
+% @internal
+/pgmks { 0.012 max 0.985 min dup 1 exch sub dup mul exch 2 mul div } bind def
+
+% q -> R   (the Kubelka-Munk reflectance for K/S = q)
+% @internal
+/pgmr { dup dup mul 1 index 2 mul add sqrt neg exch 1 add add } bind def
+
+% number -> bool
+% @internal
+/pgmnum { type dup /integertype eq exch /realtype eq or } bind def
+
+% entry -> r g b strength   (a pigment name, or a literal [r g b] array)
+% @internal
+/pgmentry {
+    dup type /nametype eq {
+        dup Pigments exch known not { pigmix-unknown-pigment } if
+        Pigments exch get aload pop
+    } {
+        dup xcheck { pigmix-entry-must-be-a-name-or-rgb-array } if
+        dup type /arraytype ne { pigmix-entry-must-be-a-name-or-rgb-array } if
+        dup length 3 ne { pigmix-entry-must-be-a-name-or-rgb-array } if
+        dup {
+            dup pgmnum { dup 0 ge exch 1 le and } { pop false } ifelse
+            not { pigmix-rgb-components-must-be-0-to-1 } if
+        } forall
+        aload pop 1
+    } ifelse
+} bind def
+
+% @kind: Procedure
+% @summary: Mix pigments like paint. Takes a flat array of name-and-weight pairs, [ /phthaloblue 1 /alizarin 1 ], and returns r g b like mix3. An entry may be a literal [r g b] array in place of a name (a plain colour, strength 1). Weights are parts, not fractions, and a zero weight is left out. Blue and yellow give green, blue and crimson violet; white tints instead of just lightening. A single pigment comes back exactly.
+% @example: [ /sapgreen 3 /cadmiumyellow 1 ] pigmix setrgbcolor
+/pigmix {
+    /pgms exch def
+    pgms xcheck { pigmix-needs-an-array } if
+    pgms type /arraytype ne { pigmix-needs-an-array } if
+    pgms length 2 mod 0 ne { pigmix-entries-come-in-pairs } if
+    /pgmn 0 def /pgmsum 0 def /pgmk0 0 def /pgmk1 0 def /pgmk2 0 def
+    0 2 pgms length 2 sub {
+        /pgmi exch def
+        pgms pgmi 1 add get dup pgmnum not { pigmix-weight-must-be-a-number } if
+        dup 0 lt { pigmix-weight-must-not-be-negative } if
+        /pgmw exch def
+        % The entry is checked even at weight 0, so a typo is never silent.
+        pgms pgmi get pgmentry /pgmst exch def 3 array astore /pgmcur exch def
+        pgmw 0 gt {
+            /pgml pgmcur def
+            /pgma pgmw pgmst mul def
+            /pgmn pgmn 1 add def
+            /pgmsum pgmsum pgma add def
+            /pgmk0 pgml 0 get pgmks pgma mul pgmk0 add def
+            /pgmk1 pgml 1 get pgmks pgma mul pgmk1 add def
+            /pgmk2 pgml 2 get pgmks pgma mul pgmk2 add def
+        } if
+    } for
+    pgmn 0 eq { pigmix-weights-sum-to-zero } if
+    pgmn 1 eq {
+        pgml aload pop
+    } {
+        pgmk0 pgmsum div pgmk1 pgmsum div pgmk2 pgmsum div
+        pgmr 3 1 roll pgmr 3 1 roll pgmr 3 1 roll
+    } ifelse
+} bind def
+
+% @kind: Procedure
+% @summary: One pigment as it comes from the tube, as r g b. The same as [ /name 1 ] pigmix.
+% @example: /alizarin pigment setrgbcolor
+/pigment {
+    dup type /nametype ne { pigment-needs-a-name } if
+    1 2 array astore pigmix
+} bind def
+
+% @kind: Procedure
+% @summary: A tint: the pigment (or [r g b] colour) with t parts titanium white, t from 0 (the pigment) to 1 (white). Not a lerp: white's tinting strength is 12, so t 0.2 is already pastel, and the tint loses saturation as it lightens.
+% @example: /phthaloblue 0.25 pigtint setrgbcolor
+/pigtint {
+    /pgmt exch def /pgmp exch def
+    pgmt pgmnum not { pigtint-amount-must-be-a-number } if
+    pgmt 0 lt pgmt 1 gt or { pigtint-amount-must-be-0-to-1 } if
+    [ pgmp 1 pgmt sub /titaniumwhite pgmt ] pigmix
+} bind def
+
+% @kind: Procedure
+% @summary: A shade: the pigment (or [r g b] colour) with t parts midnight black, t from 0 (the pigment) to 1 (black). Black has strength 1, so t 0.1 already goes deep; shade with a dark brown or blue instead of black for a richer dark.
+% @example: /sapgreen 0.1 pigshade setrgbcolor
+/pigshade {
+    /pgmt exch def /pgmp exch def
+    pgmt pgmnum not { pigshade-amount-must-be-a-number } if
+    pgmt 0 lt pgmt 1 gt or { pigshade-amount-must-be-0-to-1 } if
+    [ pgmp 1 pgmt sub /midnightblack pgmt ] pigmix
+} bind def
+
+% @kind: Procedure
+% @summary: One colour as an [r g b] array, the shape /Colors, /HighlightColor and /ShadowColor take. The operand is a pigment name or a pigmix spec: /sapgreen pigcolor, or [ /sapgreen 3 /cadmiumyellow 1 ] pigcolor.
+% @example: << /HighlightColor /cadmiumyellow pigcolor >> pkdab
+/pigcolor {
+    dup type /nametype eq { pigment } { pigmix } ifelse
+    3 array astore
+} bind def
+
+% @kind: Procedure
+% @summary: A whole /Colors list from pigments. Takes an array whose entries are pigment names, pigmix specs or plain [r g b] arrays, and returns the array of rgb arrays a preset's /Colors wants.
+% @example: << /Colors [ /sapgreen [ /sapgreen 1 /cadmiumyellow 1 ] ] pigcolors >> pkfan
+/pigcolors {
+    /pgmsrc exch def
+    pgmsrc xcheck { pigcolors-needs-an-array } if
+    pgmsrc type /arraytype ne { pigcolors-needs-an-array } if
+    pgmsrc length array
+    0 1 pgmsrc length 1 sub {
+        /pgmj exch def
+        dup pgmj
+        pgmsrc pgmj get
+        % A plain [r g b] array is kept as the colour it is; a spec starts
+        % with a name.
+        dup type /arraytype eq
+            { dup length 0 gt { dup 0 get pgmnum } { false } ifelse } { false } ifelse
+        { pgmentry pop 3 array astore } { pigcolor } ifelse
+        put
+    } for
+} bind def
+
+%%SelfTest: pigmix-mixes-like-paint
+%   % r g b r' g' b' compared within 0.002 (near3), or exactly (same3).
+%   /pgtnear3 { 6 array astore /pgtv exch def
+%       true 0 1 2 { /pgti exch def
+%           pgtv pgti get pgtv pgti 3 add get sub abs 0.002 lt and } for } bind def
+%   /pgtsame3 { 6 array astore /pgtv exch def
+%       true 0 1 2 { /pgti exch def
+%           pgtv pgti get pgtv pgti 3 add get eq and } for } bind def
+%
+%   % One pigment comes back exactly, however many parts of it.
+%   [ /alizarin 3 ] pigmix 0.55 0.05 0.24 pgtsame3
+%   (one pigment is exact) mustbe
+%   /alizarin pigment 0.55 0.05 0.24 pgtsame3
+%   (pigment is exact) mustbe
+%
+%   % The mixes the issue asks for, pinned to the model's output.
+%   [ /phthaloblue 1 /cadmiumyellow 1 ] pigmix 0.155 0.349 0.073 pgtnear3
+%   (phthalo blue and cadmium yellow) mustbe
+%   [ /phthaloblue 1 /alizarin 1 ] pigmix 0.157 0.079 0.320 pgtnear3
+%   (phthalo blue and alizarin) mustbe
+%   /phthaloblue 0.25 pigtint 0.227 0.446 0.723 pgtnear3
+%   (a quarter white on phthalo blue) mustbe
+%
+%   % What the pins mean: blue and yellow green, blue and crimson violet.
+%   [ /phthaloblue 1 /cadmiumyellow 1 ] pigmix
+%   /pgtb exch def /pgtg exch def /pgtr exch def
+%   pgtg pgtr gt pgtg pgtb gt and
+%   (blue and yellow: green is the largest channel) mustbe
+%   [ /phthaloblue 1 /alizarin 1 ] pigmix
+%   /pgtb exch def /pgtg exch def /pgtr exch def
+%   pgtb pgtg gt pgtr pgtg gt and
+%   (blue and crimson: green is the smallest channel) mustbe
+%
+%   % Weights are parts: scaling them all changes nothing, and neither does
+%   % the order.
+%   [ /sapgreen 3 /cadmiumyellow 1 ] pigmix
+%   [ /cadmiumyellow 10 /sapgreen 30 ] pigmix pgtnear3
+%   (scale and order do not matter) mustbe
+%
+%   % A zero weight is left out, but its entry is still checked.
+%   [ /alizarin 1 /phthaloblue 0 ] pigmix 0.55 0.05 0.24 pgtsame3
+%   (a zero weight leaves the entry out) mustbe
+%   { [ /alizarin 1 /nothue 0 ] pigmix }
+%   /pigmix-unknown-pigment
+%   (a zero-weight typo is still caught) mustguard
+%
+%   % Tints: 0 is the pigment, 1 is white; shades end at black.
+%   /sapgreen 0 pigtint 0.16 0.38 0.08 pgtsame3
+%   (a tint of 0 is the pigment) mustbe
+%   /sapgreen 1 pigtint 0.95 0.96 0.97 pgtsame3
+%   (a tint of 1 is white) mustbe
+%   /sapgreen 1 pigshade 0.04 0.04 0.05 pgtsame3
+%   (a shade of 1 is black) mustbe
+%
+%   % A plain [r g b] array mixes as a colour of strength 1.
+%   [ [ 0.8 0.2 0.4 ] 1 [ 0.8 0.2 0.4 ] 1 ] pigmix 0.8 0.2 0.4 pgtnear3
+%   (a colour mixed with itself) mustbe
+%
+%   % pigcolor and pigcolors give the shape /Colors takes.
+%   /alizarin pigcolor dup length 3 eq exch 0 get 0.55 eq and
+%   (pigcolor of a name) mustbe
+%   [ /alizarin 1 /titaniumwhite 1 ] pigcolor length 3 eq
+%   (pigcolor of a spec) mustbe
+%   [ /alizarin [ /alizarin 1 /titaniumwhite 1 ] [ 0.1 0.2 0.3 ] ] pigcolors
+%   dup length 3 eq exch 2 get 1 get 0.2 eq and
+%   (pigcolors keeps a plain rgb array) mustbe
+%   { << /Colors [ /sapgreen [ /sapgreen 1 /cadmiumyellow 1 ] ] pigcolors >>
+%     (pkfan) puparse pop }
+%   (pigcolors output passes the /Colors guards) mustpass
+%%EndSelfTest
+%
+%%SelfTest: pigmix-rejects-malformed-specs
+%   { 5 pigmix } /pigmix-needs-an-array (a number) mustguard
+%   { { /alizarin 1 } pigmix } /pigmix-needs-an-array (a procedure) mustguard
+%   { [ /alizarin ] pigmix } /pigmix-entries-come-in-pairs (a missing weight) mustguard
+%   { [ /alizarin 1 /sapgreen ] pigmix } /pigmix-entries-come-in-pairs (a trailing name) mustguard
+%   { [ /nothue 1 ] pigmix } /pigmix-unknown-pigment (an unknown pigment) mustguard
+%   { [ /alizarin (a lot) ] pigmix } /pigmix-weight-must-be-a-number (a string weight) mustguard
+%   { [ /alizarin -1 /sapgreen 2 ] pigmix } /pigmix-weight-must-not-be-negative (a negative weight) mustguard
+%   { [ /alizarin 0 /sapgreen 0 ] pigmix } /pigmix-weights-sum-to-zero (all weights zero) mustguard
+%   { [ ] pigmix } /pigmix-weights-sum-to-zero (an empty mix) mustguard
+%   { [ 5 1 ] pigmix } /pigmix-entry-must-be-a-name-or-rgb-array (a number as an entry) mustguard
+%   { [ [ 1 0 ] 1 ] pigmix } /pigmix-entry-must-be-a-name-or-rgb-array (a 2-element entry) mustguard
+%   { [ { 1 0 0 } 1 ] pigmix } /pigmix-entry-must-be-a-name-or-rgb-array (a procedure as an entry) mustguard
+%   { [ [ 0 0 1.5 ] 1 ] pigmix } /pigmix-rgb-components-must-be-0-to-1 (a component of 1.5) mustguard
+%   { (alizarin) pigment } /pigment-needs-a-name (a string as a pigment) mustguard
+%   { /nothue pigment } /pigmix-unknown-pigment (an unknown pigment name) mustguard
+%   { /alizarin 1.5 pigtint } /pigtint-amount-must-be-0-to-1 (a tint of 1.5) mustguard
+%   { /alizarin (x) pigtint } /pigtint-amount-must-be-a-number (a string tint) mustguard
+%   { /alizarin -0.1 pigshade } /pigshade-amount-must-be-0-to-1 (a shade of -0.1) mustguard
+%   { 5 pigcolors } /pigcolors-needs-an-array (a number as the list) mustguard
+%   { [ /nothue ] pigcolors } /pigmix-unknown-pigment (an unknown name in the list) mustguard
+%   { [ [ 0.1 0.2 ] ] pigcolors } /pigmix-entry-must-be-a-name-or-rgb-array (a short rgb array in the list) mustguard
+%%EndSelfTest
+%
+% ============================================================================
 % Loaded colours: the `pu-` resolver (issue #183, slice L1 of
 % docs/PAINT_LOADING.md)
 % ============================================================================
