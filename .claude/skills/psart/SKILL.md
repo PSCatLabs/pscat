@@ -316,6 +316,78 @@ newpath 58 170 moveto 260 172 lineto << /Tilt 85 /Side 5 >> dcchalk
 - Cost: a 42pt line is about 0.7s at 2x, so keep a board to about a dozen
   lines. `examples/drychalk_specimen.ps` shows everything.
 
+## Board math: TeX formulas (`lib/mathkit.ps`, after handscript and strokeglyphs)
+
+For formulas on a board, use `lib/mathkit.ps`, not hand-placed `sgpath`
+calls. It lays out a subset of TeX with TeX's box model and appends the
+strokeglyphs skeletons as a path. It paints nothing, so a plain `stroke`
+or drychalk's `dcchalk` inks it. **Write every TeX backslash twice** in a
+PostScript string: `(\\frac{a}{b})`. A single backslash is eaten by the
+string, and mathkit refuses what is left with a named error
+(`mk-bare-word-needs-a-backslash:sqrt`, `mk-control-character:...`).
+
+```postscript
+(lib/handscript.ps) run (lib/strokeglyphs.ps) run (lib/mathkit.ps) run
+newpath (x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}) 60 500 << /Size 36 /Seed 1 >> mkpath
+1.6 setlinewidth 1 setlinecap 1 setlinejoin stroke
+```
+
+- **`(tex) x y opts mkpath`** puts the baseline's left end at x y.
+- **`(tex) opts mkmetrics`** returns `/Width /Height /Depth /Align` in
+  points without drawing. It always agrees with `mkpath`, so measure,
+  then place.
+- **`[ (line) ... ] x y opts mkalign`** writes a derivation, aligned at x
+  on each line's `&` or before its first `=`. It returns one record per
+  line: `/Origin /Angle /Width /Height /Depth /Align /BBox`.
+  `/Ink { pop ... dcchalk }` inks each line as it is written, so pressure
+  or colour can change down the board.
+- **`mkframe`**, **`mkunderline`** and **`mkarrow`** draw the annotations.
+  `mkframe` makes a box with overshooting corners, or `/Shape /oval`.
+  `mkunderline` takes `/Double`, and `mkarrow` takes `/Bend`. `mkframe`
+  and `mkunderline` take a line record (`recs 2 get << >> mkframe`) and
+  follow its slope. Inside a formula, `\\boxed{...}` and
+  `\\underline{...}` do the same.
+- A side note is plain `sgpath` text, or `\\text{...}` inside a formula.
+
+Supported TeX:
+
+| Group | Commands |
+|---|---|
+| Scripts | `x^2`, `x_i`, `x_i^2`, `f'` |
+| Fractions and roots | `\frac`, `\dfrac`, `\tfrac`, `\binom`, `\sqrt{x}`, `\sqrt[n]{x}` |
+| Large operators and names | `\sum`, `\prod`, `\int` (limits under/over in display style, `\limits` / `\nolimits`); `\lim`, `\max`, `\min`, `\sup`, `\inf`, `\det` (limits under); `\sin`, `\cos`, `\log`, `\ln`, `\exp` and others; `\operatorname{...}` |
+| Delimiters | `\left( ... \right)` with `( ) [ ] \{ \} \|` and `.`; `\big` `\Big` `\bigg` `\Bigg` and their `l`/`r` forms |
+| Environments | `matrix`, `pmatrix`, `bmatrix`, `Bmatrix`, `vmatrix`, `cases` (rows `\\`, cells `&`) |
+| Accents and frames | `\vec`, `\hat`, `\bar`, `\dot`, `\ddot`, `\tilde`, `\overline`, `\underline`, `\boxed` |
+| Text | `\text{...}`, `\mathrm{...}` |
+| Spacing | `\,` `\:` `\;` `\!` `\ ` `\quad` `\qquad` `~` (plain spaces are ignored, as in TeX) |
+| Symbols | Greek `\alpha` ... `\Omega`, `\infty`, `\partial`, `\nabla`, `\pm`, `\times`, `\cdot`, `\le`, `\ge`, `\ne`, `\approx`, `\to`, `\Rightarrow`, `\iff`, `\in`, `\subset`, `\cup`, `\cap`, `\forall`, `\exists`, `\cdots`, ...; Unicode symbols typed directly (α ∞ ≤ ∂) |
+
+Anything else fails with a name saying what it was, for example
+`mk-unsupported-command:\iint` or `mk-unsupported-character:*`.
+
+- **`/Irregular`** (default 1) is the board hand. 0 is clean TeX, and 2 is
+  hurried. It varies sizes, gaps and script heights, makes fraction bars
+  overshoot, and slopes and drifts the baseline (`/Slope` fixes the tilt).
+  `/Jitter` is each glyph's own wobble.
+- Other keys: `/Style /text` gives inline sizes with side limits,
+  `/Spacing` multiplies TeX's spaces, and `/MathHand false` drops the
+  curly x.
+- **Seeds.** With a fixed `/Seed`, editing the end of a formula never
+  re-rolls its start. Unseeded, the layout comes from the text (so
+  `mkmetrics` agrees with `mkpath`) and the glyph jitter from the
+  position.
+- **Pitfalls:**
+  - Parentheses in a PostScript string must balance. Write
+    `\\left[ 0, 1 \\right\)` with `\)`.
+  - Keep each formula on one source line, or end the line with a
+    backslash to continue the string.
+  - `x_{max}` is refused, because `max` is a command. Write `x_{\\max}`
+    or `x_{\\text{max}}`.
+
+`examples/mathkit_specimen.ps` draws the test set, from the quadratic
+formula to Maxwell's equations, and a chalk derivation.
+
 ## Dry media: crayon (`lib/drycrayon.ps`)
 
 Chalk, crayon and charcoal sit on `lib/drykit.ps` (design:

@@ -317,9 +317,10 @@
 /mkgrowdry {
   mkscratch begin
   /mkgds exch def /mkgdD exch def /mkgdH exch def /mkgdy exch def
-  gsave newpath 0 0 moveto
-  mkgdH mkgdD << /Symbol mkgdy /Size mkgds /Jitter 0 /Slant mkSlant >> sggrow
-  currentpoint
+  gsave
+  { newpath 0 0 moveto
+    mkgdH mkgdD << /Symbol mkgdy /Size mkgds /Jitter 0 /Slant mkSlant >> sggrow
+    currentpoint } stopped { grestore end stop } if
   grestore
   end
 } bind def
@@ -1297,7 +1298,7 @@
   /spx nb 0 get ic add def
   /sbx nb 0 get def
   at /T get /op eq {
-    isint { /spx spx s 0.05 mul add def /sbx sbx nb 0 get 0.32 mul sub def }
+    isint { /spx spx s 0.08 mul add def /sbx sbx nb 0 get 0.32 mul sub def }
           { /spx spx s 0.1 mul add def /sbx sbx s 0.1 mul add def } ifelse
   } if
   /sw nb 0 get def
@@ -1326,13 +1327,17 @@
   /lh nb 1 get def /ld nb 2 get def
   pb null ne { /pyy nb 1 get g1 add pb 2 get add def /lh pyy pb 1 get add def } if
   bb null ne { /byy nb 2 get g2 add bb 1 get add def /ld byy bb 2 get add def } if
+  % under /Slant the operator leans: the limits follow its top and foot
+  /tn mkSlant sin mkSlant cos div def
   [ lw lh ld
     [ [ /b lw nb 0 get sub 2 div 0 nb 3 get ]
       pb null ne {
-        [ /b lw pb 0 get sub 2 div r 5 get 0.04 mul s mul add pyy pb 3 get ]
+        [ /b lw pb 0 get sub 2 div r 5 get 0.04 mul s mul add nb 1 get tn mul add
+          pyy pb 3 get ]
       } if
       bb null ne {
-        [ /b lw bb 0 get sub 2 div r 6 get 0.04 mul s mul add byy neg bb 3 get ]
+        [ /b lw bb 0 get sub 2 div r 6 get 0.04 mul s mul add nb 2 get tn mul sub
+          byy neg bb 3 get ]
       } if ] ]
 } bind def
 
@@ -1628,14 +1633,18 @@
 } bind def
 
 % Public entry: N proc -> results. Runs proc inside mkscratch; if it
-% raises, pops what it left on the operand stack down to where its N
-% operands started, unwinds the dictionary stack, and re-raises.
+% raises, puts back the CTM (the drawing rotates it for the slope), pops
+% what it left on the operand stack down to where its N operands
+% started, unwinds the dictionary stack, and re-raises, so $error still
+% names the original guard.
 % @internal
 /mkentry {
   mkscratch begin
   exch count 2 sub exch sub /mkbase exch mkset
   /mkdepth countdictstack 1 sub mkset
+  /mkctm matrix currentmatrix mkset
   stopped {
+    mkscratch /mkctm get setmatrix
     { count mkscratch /mkbase get le { exit } if pop } loop
     { countdictstack mkscratch /mkdepth get le { exit } if end } loop
     stop
@@ -1746,10 +1755,13 @@
     mkj /Box get 3 get 0 0 mkrender
     setmatrix
     mkj /Ink get dup null ne {
-      mkscratch /mkbase get mkscratch /mkdepth get 3 -1 roll
-      mkj /I get exch
+      /mkinkp exch def
+      mkscratch /mkbase get mkscratch /mkdepth get mkscratch /mkctm get
+      mkj /I get /mkinkp load
       end exec mkscratch begin
-      mkscratch /mkdepth 3 -1 roll put mkscratch /mkbase 3 -1 roll put
+      mkscratch /mkctm 3 -1 roll put
+      mkscratch /mkdepth 3 -1 roll put
+      mkscratch /mkbase 3 -1 roll put
     } { pop } ifelse
   } forall
 } bind def
@@ -1773,11 +1785,18 @@
   /mkJitter exch def
 } bind def
 
-% record -> w h d   (a line record from mkalign, checked)
+% record -> M w h d   (a line record from mkalign, checked; the CTM is
+% moved to the line's origin and slope, M is the matrix to restore)
 % @internal
 /mkreadrecord {
   dup /Origin known 1 index /Angle known and 1 index /Width known and
   1 index /Height known and 1 index /Depth known and
+  not { mk-record-must-come-from-mkalign } if
+  dup /Origin get dup type /arraytype eq {
+    dup length 2 eq { aload pop mkisnum exch mkisnum and } { pop false } ifelse
+  } { pop false } ifelse
+  1 index /Angle get mkisnum and 1 index /Width get mkisnum and
+  1 index /Height get mkisnum and 1 index /Depth get mkisnum and
   not { mk-record-must-come-from-mkalign } if
   matrix currentmatrix exch
   dup /Origin get aload pop translate dup /Angle get rotate
@@ -1975,6 +1994,11 @@
 %   { [ (a) (b) ] 0 0 << /Ink { pop no-such-name } >> mkalign } /no-such-name
 %   (an error inside /Ink) mustguard
 %   countdictstack mkt-d0 eq (/Ink's error unwinds the dictionary stack too) mustbe
+%   matrix currentmatrix /mkt-m0 exch def
+%   { [ (a) (b) ] 100 100 << /Slope 30 /Ink { pop 45 rotate no-such-name } >> mkalign }
+%   /no-such-name (an error inside /Ink after a rotate) mustguard
+%   true 0 1 5 { dup mkt-m0 exch get exch matrix currentmatrix exch get eq and } for
+%   (the CTM is put back after an error) mustbe
 %%EndSelfTest
 %
 %%SelfTest: mkpath-is-deterministic-and-leaves-rand-alone
@@ -2058,6 +2082,8 @@
 %   { 0 0 10 (a) << >> mkframe } /mk-coordinates-must-be-numbers (a string corner) mustguard
 %   { 0 0 10 10 << /Shape /star >> mkframe } /mk-shape-must-be-box-or-oval (/Shape /star) mustguard
 %   { << /Width 3 >> << >> mkframe } /mk-record-must-come-from-mkalign (a dict that is no record) mustguard
+%   { << /Origin [0 0] /Angle (up) /Width 1 /Height 1 /Depth 0 >> << >> mkframe }
+%   /mk-record-must-come-from-mkalign (a record with a string angle) mustguard
 %   { 0 0 10 10 << /Double 1 >> mkunderline } /mk-double-must-be-a-boolean (/Double 1) mustguard
 %   { 0 0 10 10 << /Bend /left >> mkarrow } /mk-bend-must-be-a-number (/Bend /left) mustguard
 %   { 0 0 10 10 << /Head 0 >> mkarrow } /mk-head-must-be-a-positive-number (/Head 0) mustguard

@@ -621,6 +621,14 @@ renders eight examples in both and compares block-downsampled output).
    written twice is a sharp corner, and the midpoint rule never passes
    through interior points, so check new glyphs on a `/Jitter 0` render.
    `notes/236-strokeglyphs.md` lists where it departs from the design.
+   #237 shipped `lib/mathkit.ps` (`mk-`): TeX-subset math laid out with
+   TeX's box model as those skeletons (`mkpath`, `mkmetrics`, `mkalign`,
+   and the annotations `mkframe`, `mkunderline`, `mkarrow`), with
+   board-hand irregularity under `/Irregular`. TeX backslashes are doubled
+   in PostScript strings; a single one is refused by name, never drawn
+   as letters. Its layout recursion keeps locals in one small dict per
+   call, so its public procedures unwind the dict stack on error
+   (`mkentry`). `notes/237-mathkit.md` has the design calls.
    Chalk (#235) shipped `lib/drychalk.ps`. `dcchalk` is the chalk preset
    over `dkstroke`. `dcboard` dresses a slate or green board: haze,
    `/Ghost` writing, swipes, wipes, ledge dust and a tray. It was tuned

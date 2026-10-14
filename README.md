@@ -1178,6 +1178,34 @@ newpath (∀ε>0 ∃δ>0) 40 300 << /Size 40 /Seed 7 >> sgpath
 1.5 setlinewidth 1 setlinecap 1 setlinejoin stroke
 ```
 
+`lib/mathkit.ps` (issue #237) lays out a subset of TeX math as those
+skeletons with TeX's box model. The subset covers:
+- scripts, `\frac`, `\sqrt[n]{}`;
+- `\sum`, `\prod` and `\int` with limits, and `\lim`;
+- `\left( \right)` delimiters that grow to fit;
+- matrices and `cases`, accents and `\boxed`;
+- Greek and operator names.
+
+Anything outside the subset fails with an error that names it. The
+layout is written with a lecturer's irregularity: sizes and gaps vary,
+scripts sit a little high or low, fraction bars overshoot, and the
+baseline slopes and drifts (`/Irregular`, where 0 is clean TeX).
+- `mkpath` appends a formula's path and `mkmetrics` measures it.
+- `mkalign` writes a derivation aligned on `=`. It returns a record per
+  line, which `mkframe` and `mkunderline` follow along its slope.
+- `mkarrow` points a side note at a term.
+
+Every TeX backslash is written twice in a PostScript string.
+`examples/mathkit_specimen.ps` is the specimen: the fixed test set, from
+the quadratic formula to Maxwell's equations, and a derivation in chalk.
+
+```postscript
+(lib/handscript.ps) run (lib/strokeglyphs.ps) run (lib/mathkit.ps) run
+newpath (\\int_{-\\infty}^{\\infty} e^{-x^2}\\,dx = \\sqrt{\\pi}) 40 300
+  << /Size 36 /Seed 3 >> mkpath
+1.6 setlinewidth 1 setlinecap 1 setlinejoin stroke
+```
+
 ## The website
 
 **[jeromebanks.github.io/postscript_interpreter](https://jeromebanks.github.io/postscript_interpreter/)**
