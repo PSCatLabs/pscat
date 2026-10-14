@@ -429,16 +429,23 @@
 % @kind: Procedure
 % @summary: Size and place an arched team name over a dominant player number, with an optional caption, inside a print rectangle. Nothing is drawn; the layout dict reports each part's size, origin and ink box (/Name /Number /Caption, each with /Ink [x0 y0 x1 y1]), plus /Ink for the whole graphic. Fails with a named error (jersey-name-too-wide, jersey-name-too-tilted, jersey-does-not-fit, jersey-number-not-dominant, ...) when the requested geometry is impossible; the caller's font, path and operand stack are untouched either way. See the file header for every option.
 % @example: << /Name (Cleveland Steamers) /Number (69) /Rect [ 36 36 576 684 ] /Margin 12 /Preset /light >> jerseylayout
-% @param: /Name string the arched line; exact text kept
-% @param: /Number string the number as text, so (00) survives
-% @param: /Rect [x0 y0 x1 y1] the print rectangle
-% @param: /Caption string optional small line under the number
-% @param: /NameFont /NumberFont /CaptionFont name installed outline faces (default /Helvetica-Bold)
-% @param: /Margin num kept clear on every side (default 0); outline included
-% @param: /Radius num baseline radius of the arch (default 1.1 x usable width); smaller is tighter
-% @param: /MaxTilt deg largest rotation of any name letter (default 35)
-% @param: /Dominance num, /MaxDominance num the number's ink height as a multiple of the name's cap height: at least (default 1.8), at most (default 6)
-% @param: /Fill /Outline /CaptionFill [r g b] colours; /OutlineWidth num points (0 = none); /Preset /light or /dark defaults
+% @param: /Name [string] The arched line; exact text kept
+% @param: /Number [string] The number as text, so (00) survives
+% @param: /Rect [array of points] [x0 y0 x1 y1] the print rectangle, in user space
+% @param: /Caption [string] Optional small line under the number
+% @param: /NameFont [name] Installed outline face for the arched name (default /Helvetica-Bold)
+% @param: /NumberFont [name] Installed outline face for the number (default /Helvetica-Bold)
+% @param: /CaptionFont [name] Installed outline face for the caption (default /Helvetica-Bold)
+% @param: /Margin [points] Kept clear on every side; outline included (default 0)
+% @param: /Radius [points] Baseline radius of the arch; smaller is tighter (default 1.1 x usable width)
+% @param: /MaxTilt [degrees] Largest rotation of any name letter (default 35)
+% @param: /Dominance [multiple of the name's cap height] The number's ink height is at least this (default 1.8)
+% @param: /MaxDominance [multiple of the name's cap height] The number's ink height is at most this (default 6)
+% @param: /Fill [rgb array] Colour of the name and number; overrides /Preset's (default navy on /light, white on /dark)
+% @param: /Outline [rgb array] Colour of the outside outline; overrides /Preset's (default red on /light, gold on /dark)
+% @param: /CaptionFill [rgb array] Colour of the caption (default the /Fill colour)
+% @param: /OutlineWidth [points] Outside outline thickness; 0 = none (default 0.5% of the usable width)
+% @param: /Preset [name] /light or /dark default colours for a light or a dark garment (default /light)
 /jerseylayout {
   1 { jybuild } jycall
 } def

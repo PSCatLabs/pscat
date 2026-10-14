@@ -312,15 +312,15 @@
 % @kind: Procedure
 % @summary: Fills the current clip region with a regular print screen — dot, line, or cross-line — with per-cell tone-driven mark sizing and a per-layer registration offset. Set the region with <path> clip first; layer one call per ink for misregistered multi-plate work.
 % @example: newpath 40 40 moveto 200 40 lineto 200 200 lineto 40 200 lineto closepath clip << /Screen /dot /Frequency 9 /Tone 0.5 >> halftone
-% @param: /BBox [x0 y0 x1 y1] area to sweep the lattice across; defaults to pathbbox of the current path; must be an array of exactly four numbers
-% @param: /Screen /dot, /line, or /cross — one filled circle, one round-capped rule segment, or two perpendicular rule segments per cell (default /dot)
-% @param: /Frequency num > 0 cells per inch (default 9)
-% @param: /Angle num screen angle in degrees; per-layer rotation offsets are per-call values (default 45)
-% @param: /Tone num or {x y -> w} flat ink or a per-cell-center tone callback in pre-offset user-space coordinates, clamped to [0,1] (default 1)
-% @param: /MaxRadius num > 0 dot radius at full tone, default half the cell pitch; read only for /dot, harmless otherwise
-% @param: /MaxWidth num > 0 rule width at full tone, default a full pitch; read only for /line and /cross, harmless otherwise
-% @param: /Offset [dx dy] per-layer registration shift in user units, applied unconditionally via translate (default [0 0])
-% @param: /MaxCells n hard cap on visited lattice cells, checked before any drawing or /Tone call (default 200000)
+% @param: /BBox [array of points] [x0 y0 x1 y1] area to sweep the lattice across; defaults to pathbbox of the current path; must be an array of exactly four numbers
+% @param: /Screen [name] /dot, /line, or /cross — one filled circle, one round-capped rule segment, or two perpendicular rule segments per cell (default /dot)
+% @param: /Frequency [count per inch] Cells per inch; must be > 0 (default 9)
+% @param: /Angle [degrees] Screen angle; per-layer rotation offsets are per-call values (default 45)
+% @param: /Tone [0..1 or proc] Flat ink, or a {x y -> w} per-cell-center tone callback in pre-offset user-space coordinates, clamped to [0,1] (default 1)
+% @param: /MaxRadius [points] Dot radius at full tone, must be > 0, default half the cell pitch; read only for /dot, harmless otherwise
+% @param: /MaxWidth [points] Rule width at full tone, must be > 0, default a full pitch; read only for /line and /cross, harmless otherwise
+% @param: /Offset [array of points] [dx dy] per-layer registration shift in user space, applied unconditionally via translate (default [0 0])
+% @param: /MaxCells [count] Hard cap on visited lattice cells, checked before any drawing or /Tone call (default 200000)
 /halftone {
   % The options operand arrives wrapped: a caller who passes a bare
   % procedure where the dict belongs must get

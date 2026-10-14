@@ -776,7 +776,11 @@ renders eight examples in both and compares block-downsampled output).
   different quantity gets a different name (`/Offset`, `/Cover`,
   `/Scatter`, `/Lean`, `/Charge` are the precedents). Every `@param`
   description starts with a bracketed unit, and
-  `tests/capabilities.rs` fails a new parameter that has none.
+  `tests/capabilities.rs::every_migrated_parameter_states_its_unit` fails a
+  new parameter that has none in *any* tag-migrated library (#195), from a
+  closed vocabulary (`unit_is_known`). The one deliberate exception is
+  fillkit's `/Spread`, `[fraction of the box]`, GIMP's name for a sample
+  jitter; the test pins it.
 - **Abutting filled polygons leave an anti-aliased hairline seam.**
   Two shapes sharing an exact edge do not composite to a solid mass —
   `pktrowel`'s blade lanes had to be given an 18% overlap or a

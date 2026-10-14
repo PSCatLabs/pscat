@@ -481,10 +481,10 @@
 % @kind: Procedure
 % @summary: Take a configuration dict for a two-sided (plus optional sleeve) apparel graphic and, per the ApparelMode name (default /proof), draw a reduced proof sheet of every piece, draw one piece at full size, or print a piece's size, the piece list, or a JSON manifest. Front, back and sleeves are independent print areas; absent pieces are skipped. Pair with scripts/apparel_export.sh for per-piece PNG/SVG/PDF files.
 % @example: << /Name (demo) /Pieces << /Front << /Size [ 6 6 ] /Text (Real) /Font /AlfaSlabOne >> >> >> apmain
-% @param: /Pieces dict of /Front /Back /SleeveLeft /SleeveRight piece dicts, each with /Size [w h] inches and /Text (or /Runs); absent pieces are not exported
-% @param: /DPI num export resolution (default 300)
-% @param: /Seed num integer texture seed (default 1); each piece derives its own
-% @param: /Background /transparent|[r g b] nothing behind the art (default), or a fill colour for mock-ups
+% @param: /Pieces [dict] /Front /Back /SleeveLeft /SleeveRight piece dicts, each with /Size [w h] in inches and /Text (or /Runs); absent pieces are not exported
+% @param: /DPI [count per inch] Export resolution (default 300)
+% @param: /Seed [integer] Texture seed (default 1); each piece derives its own
+% @param: /Background [name or rgb array] /transparent for nothing behind the art (default), or a fill colour for mock-ups
 /apmain {
   4 dict begin
   /apmcf exch def

@@ -460,14 +460,14 @@
 % @kind: Procedure
 % @summary: Fill the box x0 y0 x1 y1 with a GIMP-style plasma: a midpoint-displacement (diamond-square) fractal colour field of soft, blended clouds. Random RGB per channel by default (GIMP's look), or one field mapped through /Palette. Paint inside a clip to fill a shape; seeded and deterministic, and the caller's rand state is left alone.
 % @example: gsave 40 40 360 260 rectclip 40 40 360 260 << /Seed 7 /Turbulence 1.2 >> plasmafill grestore
-% @param: /Seed num integer seed (default 1)
-% @param: /Turbulence num 0..10 roughness: per-level displacement decays as 2^(-1/(1+t)), so low is smooth and blobby, high keeps fine crinkle (default 1)
-% @param: /Detail num 3..7 subdivision levels, i.e. a (2^n+1)-point square grid; capped at 7 to stay under Level 2's 65535-element array limit (default 6)
-% @param: /Palette name-or-array blend this palette instead of random RGB: one plasma field mapped through the ramp (default: random RGB)
-% @param: /Resolution num-or-/device 8..512 image samples along the longer side, or /device for one per device pixel, up to 4096 (default 128)
-% @param: /Spread num 0..1 GIMP Spread as sample-coordinate jitter (default 0)
-% @param: /RGBNoise num 0..1 per-channel grain (default 0)
-% @param: /HSVNoise [h s v] hue/saturation/value grain, each 0..1 (default off)
+% @param: /Seed [integer] Noise seed (default 1)
+% @param: /Turbulence [ratio] 0..10 roughness: per-level displacement decays as 2^(-1/(1+t)), so low is smooth and blobby, high keeps fine crinkle (default 1)
+% @param: /Detail [count] 3..7 subdivision levels, i.e. a (2^n+1)-point square grid; capped at 7 to stay under Level 2's 65535-element array limit (default 6)
+% @param: /Palette [name or array of rgb arrays] Blend this palette instead of random RGB: one plasma field mapped through the ramp (default: random RGB)
+% @param: /Resolution [count or name] 8..512 image samples along the longer side, or /device for one per device pixel, up to 4096 (default 128)
+% @param: /Spread [fraction of the box] 0..1 GIMP Spread: each sample is taken from a point displaced by up to this fraction of the fill box. It has the same name as paintkit's /Spread (a fraction of /Width) and is deliberately not renamed; the unit tells them apart (default 0)
+% @param: /RGBNoise [0..1] Per-channel grain (default 0)
+% @param: /HSVNoise [array of 0..1] [h s v] hue/saturation/value grain, each 0..1 (default off)
 /plasmafill {
   fkargs
   count 5 sub 300 dict begin
@@ -491,15 +491,15 @@
 % @kind: Procedure
 % @summary: Fill the box with GIMP-style Solid Noise: Perlin-style fractal noise (artkit's noise2, several octaves) mapped through /Palette (default black to white). /Turbulent gives the creased, ridged variant. Not tileable, unlike GIMP's, because noise2's table is not periodic in the box.
 % @example: gsave 40 40 360 260 rectclip 40 40 360 260 << /Seed 3 /Palette /dusk /Scale 3 >> solidnoisefill grestore
-% @param: /Seed num integer seed (default 1)
-% @param: /Scale num > 0 noise features across the longer side (default 4)
-% @param: /Detail num 1..8 octaves (default 4)
-% @param: /Turbulent bool sum absolute values for the ridged look (default false)
-% @param: /Palette name-or-array ramp the noise is mapped through (default black to white)
-% @param: /Resolution num-or-/device 8..512 image samples along the longer side, or /device for one per device pixel, up to 4096 (default 128)
-% @param: /Spread num 0..1 GIMP Spread as sample-coordinate jitter (default 0)
-% @param: /RGBNoise num 0..1 per-channel grain (default 0)
-% @param: /HSVNoise [h s v] hue/saturation/value grain, each 0..1 (default off)
+% @param: /Seed [integer] Noise seed (default 1)
+% @param: /Scale [count] Noise features across the longer side; must be > 0 (default 4)
+% @param: /Detail [count] 1..8 octaves (default 4)
+% @param: /Turbulent [boolean] Sum absolute values for the ridged look (default false)
+% @param: /Palette [name or array of rgb arrays] Ramp the noise is mapped through (default black to white)
+% @param: /Resolution [count or name] 8..512 image samples along the longer side, or /device for one per device pixel, up to 4096 (default 128)
+% @param: /Spread [fraction of the box] 0..1 GIMP Spread: each sample is taken from a point displaced by up to this fraction of the fill box. It has the same name as paintkit's /Spread (a fraction of /Width) and is deliberately not renamed; the unit tells them apart (default 0)
+% @param: /RGBNoise [0..1] Per-channel grain (default 0)
+% @param: /HSVNoise [array of 0..1] [h s v] hue/saturation/value grain, each 0..1 (default off)
 /solidnoisefill {
   fkargs
   count 5 sub 300 dict begin
@@ -523,14 +523,14 @@
 % @kind: Procedure
 % @summary: Fill the box with a Difference-Clouds look: the absolute difference of two independent fractal-noise fields, which folds the noise into dark creases and bright veins. GIMP's filter differences the new clouds against the existing image; with no pixel readback in PostScript, both fields are generated here.
 % @example: gsave 40 40 360 260 rectclip 40 40 360 260 << /Seed 5 /Palette /nocturne >> diffcloudsfill grestore
-% @param: /Seed num integer seed (default 1)
-% @param: /Scale num > 0 noise features across the longer side (default 3)
-% @param: /Detail num 1..8 octaves (default 4)
-% @param: /Palette name-or-array ramp the result is mapped through (default black to white)
-% @param: /Resolution num-or-/device 8..512 image samples along the longer side, or /device for one per device pixel, up to 4096 (default 128)
-% @param: /Spread num 0..1 GIMP Spread as sample-coordinate jitter (default 0)
-% @param: /RGBNoise num 0..1 per-channel grain (default 0)
-% @param: /HSVNoise [h s v] hue/saturation/value grain, each 0..1 (default off)
+% @param: /Seed [integer] Noise seed (default 1)
+% @param: /Scale [count] Noise features across the longer side; must be > 0 (default 3)
+% @param: /Detail [count] 1..8 octaves (default 4)
+% @param: /Palette [name or array of rgb arrays] Ramp the result is mapped through (default black to white)
+% @param: /Resolution [count or name] 8..512 image samples along the longer side, or /device for one per device pixel, up to 4096 (default 128)
+% @param: /Spread [fraction of the box] 0..1 GIMP Spread: each sample is taken from a point displaced by up to this fraction of the fill box. It has the same name as paintkit's /Spread (a fraction of /Width) and is deliberately not renamed; the unit tells them apart (default 0)
+% @param: /RGBNoise [0..1] Per-channel grain (default 0)
+% @param: /HSVNoise [array of 0..1] [h s v] hue/saturation/value grain, each 0..1 (default off)
 /diffcloudsfill {
   fkargs
   count 5 sub 300 dict begin
@@ -554,17 +554,17 @@
 % @kind: Procedure
 % @summary: Fill the box with one of the GIMP gradient shapes that artkit's axialsh/radialsh do not cover: /bilinear (mirrored linear), /square, /conical (angle sweep) or /spiral, mapped through /Palette. Linear and radial gradients stay in artkit (axialsh, radialsh); GIMP's shapeburst and dimpled shapes need distance transforms and are skipped.
 % @example: gsave 40 40 360 260 rectclip 40 40 360 260 << /Shape /conical /Palette /carnival >> gradshapefill grestore
-% @param: /Shape name /bilinear, /square, /conical or /spiral (default /conical)
-% @param: /Center [cx cy] gradient centre as fractions of the box (default [0.5 0.5])
-% @param: /Angle num rotation in degrees (default 0)
-% @param: /Radius num > 0 extent as a fraction of half the longer side (default 1)
-% @param: /Turns num spiral windings from centre to /Radius (default 3)
-% @param: /Symmetric bool conical only: mirror the sweep so it has no seam (default false)
-% @param: /Palette name-or-array ramp (default black to white)
-% @param: /Resolution num-or-/device 8..512 image samples along the longer side, or /device for one per device pixel, up to 4096 (default 128)
-% @param: /Spread num 0..1 GIMP Spread as sample-coordinate jitter (default 0)
-% @param: /RGBNoise num 0..1 per-channel grain (default 0)
-% @param: /HSVNoise [h s v] hue/saturation/value grain, each 0..1 (default off)
+% @param: /Shape [name] /bilinear, /square, /conical or /spiral (default /conical)
+% @param: /Center [array of fraction of the box] [cx cy] gradient centre (default [0.5 0.5])
+% @param: /Angle [degrees] Rotation (default 0)
+% @param: /Radius [fraction of half the longer side] Extent; must be > 0 (default 1)
+% @param: /Turns [count] Spiral windings from centre to /Radius (default 3)
+% @param: /Symmetric [boolean] Conical only: mirror the sweep so it has no seam (default false)
+% @param: /Palette [name or array of rgb arrays] Ramp (default black to white)
+% @param: /Resolution [count or name] 8..512 image samples along the longer side, or /device for one per device pixel, up to 4096 (default 128)
+% @param: /Spread [fraction of the box] 0..1 GIMP Spread: each sample is taken from a point displaced by up to this fraction of the fill box. It has the same name as paintkit's /Spread (a fraction of /Width) and is deliberately not renamed; the unit tells them apart (default 0)
+% @param: /RGBNoise [0..1] Per-channel grain (default 0)
+% @param: /HSVNoise [array of 0..1] [h s v] hue/saturation/value grain, each 0..1 (default off)
 /gradshapefill {
   fkargs
   count 5 sub 300 dict begin
