@@ -481,9 +481,10 @@ newpath 40 40 moveto 200 80 lineto << /Touch 0.7 >> dycrayon
   the preset.
 - `opts dhhatch` — hatches the current path's region to `/Value` (0..1, or
   `{x y -> value}`): up to `/Layers` crossing layers of hand strokes, all in
-  one `dkbatch` so crossings stay dark. It clips to the region and cannot run
-  inside a `dkbatch`. Hatch a region's layers in **one** call: two calls are
-  two batches, and at `/Levels 2` or more the second one's faint level greys
+  one `dkbatch` so crossings stay dark. It clips to the region. Overlapping
+  regions go in **one** `{ ... } dkbatch` (#312): each call keeps its own
+  region, and the crossings stay dark. As two separate calls they are two
+  batches, and at `/Levels 2` or more the second one's faint level greys
   the first's crossings.
 - `opts dhsmudge` — the path is a stump's track: a wide, soft stroke that
   fills the tooth, leaving `/Value` between paper and the current colour.

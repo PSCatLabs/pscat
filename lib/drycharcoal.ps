@@ -41,14 +41,14 @@
 % private generator, re-seeded per line from /Seed, the layer and the
 % line's index, so pscat and Ghostscript lay the same strokes.
 %
-% A batch renders under the clip in force when it ends, so dhhatch clips
-% to its region and closes its own batch inside that clip. It cannot run
-% inside a caller's dkbatch, and two separate dhhatch calls are two
-% batches: at /Levels 2 or more, where they overlap, the second one's
-% faint level lands over the first one's cores (at the default one level
-% there is no faint level, and two calls draw as one). Hatch a region's
-% layers in one call. (#312 would
-% let a batch hold records under different clips.)
+% With no batch open, dhhatch clips to its region and closes its own batch
+% inside that clip. Inside a caller's dkbatch it joins that batch, its
+% region kept with every stroke by drykit's dkclip (#312), so overlapping
+% regions hatched in one batch stay level-major. Two separate dhhatch calls
+% are two batches: at /Levels 2 or more, where they overlap, the second
+% one's faint level lands over the first one's cores (at the default one
+% level there is no faint level, and two calls draw as one). So put
+% overlapping regions in one `{ ... } dkbatch`.
 %
 % Smudge, lift and construction lines (DRYMEDIA.md 3.4):
 %
@@ -371,9 +371,14 @@
 %   { newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath << /Medium /chalk >> dhhatch }
 %   /dhhatch-unknown-medium (/Medium /chalk) mustguard
 %   { newpath << >> dhhatch } /dhhatch-needs-a-region-path (no current path) mustguard
+%   { gsave newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath
+%     { << >> dhhatch } dkbatch grestore } (inside a dkbatch, #312) mustpass
 %   { newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath
-%     { << >> dhhatch } dkbatch } /dhhatch-cannot-run-inside-a-dkbatch (inside a dkbatch) mustguard
-%   userdict /dkBatch known not (the refused call closes the caller's batch) mustbe
+%     { 1 1 1 setrgbcolor newpath 0 0 moveto 9 9 lineto << >> dkstroke
+%       0 0 0 setrgbcolor newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath << >> dhhatch } dkbatch }
+%   /dkbatch-mixes-pigments (inside a batch of another colour) mustguard
+%   userdict /dkBatch known not userdict /dkClip known not and
+%   (the refused call closes the caller's batch and its own region) mustbe
 %   { newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath
 %     << /Value { pop pop (x) } >> dhhatch } /dhhatch-value-procedure-must-return-a-number
 %   (a /Value procedure returning a string) mustguard
@@ -401,7 +406,7 @@
 %%EndSelfTest
 %
 % @kind: Procedure
-% @summary: Hatches the region of the current path in charcoal, to a value given as a number or a {x y -> value} procedure (0 white, 1 darkest): layers of parallel hand strokes, each crossing the last, are added where the value is darker, with more pressure and width inside each layer. Every layer is inked by drykit's dkstroke inside one dkbatch, so crossings stay dark, and the strokes break up on the paper's tooth. Clips to the region and consumes the path. Cannot run inside a dkbatch; hatch a region's layers in one call. Other dkstroke keys pass through to every stroke. Takes no rand draws from the caller's stream.
+% @summary: Hatches the region of the current path in charcoal, to a value given as a number or a {x y -> value} procedure (0 white, 1 darkest): layers of parallel hand strokes, each crossing the last, are added where the value is darker, with more pressure and width inside each layer. Every layer is inked by drykit's dkstroke inside one dkbatch, so crossings stay dark, and the strokes break up on the paper's tooth. Clips to the region and consumes the path. Inside a dkbatch of the same colour it joins the batch, keeping its region, so overlapping regions hatched in one batch keep their crossings dark. Other dkstroke keys pass through to every stroke. Takes no rand draws from the caller's stream.
 % @example: << /Surface /drawing >> dksurface 0.11 0.1 0.1 setrgbcolor newpath 40 40 moveto 200 40 lineto 200 160 lineto 40 160 lineto closepath << /Medium /pencil /Value { pop 40 sub 160 div } >> dhhatch
 % @param: /Medium [name] /vine, /compressed or /pencil (default /pencil)
 % @param: /Grade [0..1] Hard (0) to soft (1), as in dhstroke (default the medium's)
@@ -416,7 +421,6 @@
 /dhhatch {
     dup type /dicttype ne { pop dhhatch-options-must-be-a-dict } if
     /dhho exch def
-    (dhhatch) dhnobatch
     dhho dup /Medium known not { dup length 1 add dict copy dup /Medium /pencil put } if
     (dhhatch) dhmedium /dhhpre exch def
     dhho /Value 0.5 dhget
@@ -467,9 +471,7 @@
     4 array astore /dhhbb exch def
     /dhhbad false def
     /dhhfail false def
-    gsave
-    clip
-    { {
+    /dhhlayers {
         0 1 dhhL 1 sub {
             /dhhk exch def
             <<
@@ -481,9 +483,19 @@
                 /Mark { dhhmark }
             >> hatch
         } for
-    } dkbatch } stopped { grestore newpath stop } if
-    grestore
-    newpath
+    } def
+    userdict /dkBatch known {
+        % Inside a caller's dkbatch: join it, the region kept by dkclip
+        % with every stroke (#312), so overlapping regions hatched in one
+        % batch stay level-major. dkclip gives its gsave back on an error.
+        { { dhhlayers } dkclip } stopped { newpath stop } if
+    } {
+        gsave
+        clip
+        { { dhhlayers } dkbatch } stopped { grestore newpath stop } if
+        grestore
+        newpath
+    } ifelse
     dhhfail { stop } if
     dhhbad { dhhatch-value-procedure-must-return-a-number } if
 } def

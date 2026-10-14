@@ -844,6 +844,113 @@ fn dkbatch_keeps_each_strokes_own_space() {
     );
 }
 
+/// #312: a stroke made inside `dkclip` in a batch renders exactly as the
+/// same stroke drawn at once under the same clip: the region, captured in
+/// device space (here an ellipse, so curves, under a rotated and scaled
+/// space), is replayed for its record and for its fallout. A stroke made
+/// outside the dkclip, in the same batch, is not clipped. Two controls: the
+/// region moved by half a point differs (the comparison can see the clip),
+/// and a plain `clip` inside the batch is not kept (what dkclip is for).
+#[test]
+fn dkclip_keeps_a_strokes_region_in_a_batch() {
+    const REGION: &str = "matrix currentmatrix 70 50 translate 20 rotate 1.4 1 scale \
+                          newpath 0 0 25 0 360 arc closepath setmatrix";
+    const MOVED: &str = "matrix currentmatrix 70.5 50 translate 20 rotate 1.4 1 scale \
+                         newpath 0 0 25 0 360 arc closepath setmatrix";
+    const CLIPPED: &str = "newpath 10 30 moveto 130 70 lineto 20 75 moveto 120 20 lineto \
+                           << /Width 5 /Levels 2 /Halo 1 /Lanes 2 /Fallout 0.6 /Drift 3 >> dkstroke";
+    const FREE: &str = "newpath 10 92 moveto 130 92 lineto << /Width 4 >> dkstroke";
+    let at_once = |region: &str| {
+        data(&board(
+            140,
+            100,
+            2.0,
+            &format!("gsave {region} clip newpath {CLIPPED} grestore {FREE}"),
+        ))
+    };
+    let batched = data(&board(
+        140,
+        100,
+        2.0,
+        &format!("{{ {REGION} {{ {CLIPPED} }} dkclip {FREE} }} dkbatch"),
+    ));
+    let differ = |a: &[u8], b: &[u8]| a.chunks(4).zip(b.chunks(4)).filter(|(p, q)| p != q).count();
+    assert_eq!(
+        differ(&at_once(REGION), &batched),
+        0,
+        "a dkclip region in a batch did not render as the same clip at once"
+    );
+    let moved = differ(&at_once(MOVED), &batched);
+    assert!(
+        moved > 20,
+        "moving the region half a point changed only {moved} pixels: the check cannot see the clip"
+    );
+    let plain = data(&board(
+        140,
+        100,
+        2.0,
+        &format!("{{ gsave {REGION} clip newpath {CLIPPED} grestore {FREE} }} dkbatch"),
+    ));
+    assert!(
+        differ(&at_once(REGION), &plain) > 200,
+        "a plain clip inside a batch was kept: the batch already did what dkclip is for"
+    );
+}
+
+/// #312, the layering problem: two crossing strokes, each inside its own
+/// dkclip region (the regions overlap where they cross), in one batch,
+/// stay level-major: no pixel of A's bright core inside the overlap is
+/// covered by B's dim level. The same regions in two batches, the
+/// control, do cover it.
+#[test]
+fn dkclip_regions_in_one_batch_stay_level_major() {
+    const OPTS: &str = "/Width 6 /Touch 0.75 /Halo 1.5 /Dropout 0.3 /Load 0.6 /Lanes 2";
+    const A: &str = "newpath 10 20 moveto 130 80 lineto";
+    const B: &str = "newpath 10 80 moveto 130 20 lineto";
+    const RA: &str = "newpath 0 0 moveto 100 0 lineto 100 100 lineto 0 100 lineto closepath";
+    const RB: &str = "newpath 40 0 moveto 140 0 lineto 140 100 lineto 40 100 lineto closepath";
+    let core_a = {
+        let it = board(140, 100, 3.0, &format!("{A} << {OPTS} >> dkstroke"));
+        let l = lumas(&it);
+        let max = l.iter().cloned().fold(0f32, f32::max);
+        // A's core, inside the overlap (x 40..100 pt, 3 px per pt)
+        l.iter()
+            .enumerate()
+            .map(|(i, &v)| {
+                let x = i % 420;
+                v > max - 4.0 && (126..294).contains(&x)
+            })
+            .collect::<Vec<bool>>()
+    };
+    let a = format!("{RA} {{ {A} << {OPTS} >> dkstroke }} dkclip");
+    let b = format!("{RB} {{ {B} << {OPTS} >> dkstroke }} dkclip");
+    let one = board(140, 100, 3.0, &format!("{{ {a} {b} }} dkbatch"));
+    let two = board(
+        140,
+        100,
+        3.0,
+        &format!("{{ {a} }} dkbatch {{ {b} }} dkbatch"),
+    );
+    let max = lumas(&one).iter().cloned().fold(0f32, f32::max);
+    let dimmed = |it: &Interp| {
+        lumas(it)
+            .iter()
+            .zip(&core_a)
+            .filter(|(l, c)| **c && **l < max - 30.0)
+            .count()
+    };
+    assert_eq!(
+        dimmed(&one),
+        0,
+        "one batch let B's dim level cover A's core across regions"
+    );
+    assert!(
+        dimmed(&two) > 20,
+        "two batches did not dim A's core ({} pixels): the check proves nothing",
+        dimmed(&two)
+    );
+}
+
 /// Test 2 for strokes, with half-widths that vary (/Pressure): a lighter
 /// touch inside a heavier one. Not guaranteed by construction (a heavier
 /// touch reaches further, which can bring a nearer, thinner segment into a
@@ -1045,6 +1152,40 @@ fn ghostscript_agrees_on_a_stroke() {
         other > same * 2.0,
         "another seed is as close ({other:.2}): the check is too weak"
     );
+}
+
+/// #312 under Ghostscript: dkclip captures its region with `pathforall` in
+/// device space and the batch replays it there. A stroke across the page,
+/// made inside a dkclip of its middle third in a batch, inks about a third
+/// of what it inks unclipped, in gs as in pscat. Runs locally only.
+#[test]
+fn ghostscript_keeps_a_dkclip_region_in_a_batch() {
+    if !gs_available() {
+        eprintln!("skipping gs dkclip check: gs not installed");
+        return;
+    }
+    const STROKE: &str = "newpath 0 20 moveto 120 20 lineto \
+                          << /Width 16 /Touch 0.9 /Levels 1 /Seed 7 >> dkstroke";
+    let clipped = format!(
+        "{{ newpath 40 0 moveto 80 0 lineto 80 40 lineto 40 40 lineto closepath \
+         {{ {STROKE} }} dkclip }} dkbatch"
+    );
+    let surface = "<< /Surface /drawing /Seed 2 >> dksurface ";
+    let pscat = |body: &str| {
+        let ink = inked(&render(120, 40, 2.0, &format!("{surface}{body}")));
+        ink.iter().filter(|&&i| i).count() as f64 / ink.len() as f64
+    };
+    let gs_ink = |body: &str| gs_band_ink("", &format!("{surface}{body}"), (240, 80), 144);
+    let (p_full, p_clip) = (pscat(&format!("{{ {STROKE} }} dkbatch")), pscat(&clipped));
+    let (g_full, g_clip) = (gs_ink(&format!("{{ {STROKE} }} dkbatch")), gs_ink(&clipped));
+    eprintln!("ink: pscat {p_clip:.3} of {p_full:.3}, gs {g_clip:.3} of {g_full:.3}");
+    for (what, clip, full) in [("pscat", p_clip, p_full), ("gs", g_clip, g_full)] {
+        let r = clip / full;
+        assert!(
+            r > 0.25 && r < 0.42,
+            "{what}: the dkclip kept {r:.2} of the stroke's ink, not about a third"
+        );
+    }
 }
 
 /// Chunking estimates a run's cells before `dkZthin` grows the thinned
