@@ -416,14 +416,14 @@
 % @kind: Procedure
 % @summary: Woodcut preset — one directional hatch pass (the grain), with high wobble/dropout/trim for hand-cut breakup, plus a scatter of small jittered chip marks along the grain. Built on hatchkit's hatch and artkit's scatter; clips to the current path internally, so no caller pre-clip or region object is needed.
 % @example: newpath 20 20 moveto 180 20 lineto 180 180 lineto 20 180 lineto closepath << /Seed 5 >> woodcut
-% @param: /Scale num in [0.001, 1000], overall size multiplier (default 1)
-% @param: /Density num in [0,1], ink coverage (default 0.5)
-% @param: /Roughness num in [0,1], hand-cut irregularity (default 0.5)
-% @param: /Seed n, derives one sub-seed per underlying call (default: ambient stream)
-% @param: /Color [r g b] ink color (default a warm near-black)
-% @param: /Budget num, per-sub-call safety cap forwarded to hatch/scatter (default 20000)
-% @param: /Paper bool, lay a subtle surfacekit grain pass under the ink (default false)
-% @param: /Angle num, degrees, dominant grain direction (default 0)
+% @param: /Scale [ratio] Overall size multiplier, in [0.001, 1000] (default 1)
+% @param: /Density [0..1] Ink coverage (default 0.5)
+% @param: /Roughness [0..1] Hand-cut irregularity (default 0.5)
+% @param: /Seed [integer] Derives one sub-seed per underlying call (default: ambient stream)
+% @param: /Color [rgb array] Ink color (default a warm near-black)
+% @param: /Budget [count] Per-sub-call safety cap forwarded to hatch/scatter (default 20000)
+% @param: /Paper [boolean] Lay a subtle surfacekit grain pass under the ink (default false)
+% @param: /Angle [degrees] Dominant grain direction (default 0)
 /woodcut {
   [ 0.09 0.07 0.05 ] { woodcut-opts-must-be-a-dict } propts /prres exch def
   /prscale prres /Scale get def
@@ -505,14 +505,14 @@
 % @kind: Procedure
 % @summary: Linocut preset — one bold, low-wobble hatch pass and a sparse scatter of a few large chip marks (simplified, deliberate carving, not grain-following breakup). Built on hatchkit's hatch and artkit's scatter; clips to the current path internally.
 % @example: newpath 20 20 moveto 180 20 lineto 180 180 lineto 20 180 lineto closepath << /Seed 5 >> linocut
-% @param: /Scale num in [0.001, 1000], overall size multiplier (default 1)
-% @param: /Density num in [0,1], ink coverage (default 0.5)
-% @param: /Roughness num in [0,1], hand-cut irregularity (default 0.5)
-% @param: /Seed n, derives one sub-seed per underlying call (default: ambient stream)
-% @param: /Color [r g b] ink color (default a flat near-black)
-% @param: /Budget num, per-sub-call safety cap forwarded to hatch/scatter (default 20000)
-% @param: /Paper bool, lay a subtle surfacekit grain pass under the ink (default false)
-% @param: /Angle num, degrees, dominant carve direction (default 0)
+% @param: /Scale [ratio] Overall size multiplier, in [0.001, 1000] (default 1)
+% @param: /Density [0..1] Ink coverage (default 0.5)
+% @param: /Roughness [0..1] Hand-cut irregularity (default 0.5)
+% @param: /Seed [integer] Derives one sub-seed per underlying call (default: ambient stream)
+% @param: /Color [rgb array] Ink color (default a flat near-black)
+% @param: /Budget [count] Per-sub-call safety cap forwarded to hatch/scatter (default 20000)
+% @param: /Paper [boolean] Lay a subtle surfacekit grain pass under the ink (default false)
+% @param: /Angle [degrees] Dominant carve direction (default 0)
 /linocut {
   [ 0.04 0.04 0.04 ] { linocut-opts-must-be-a-dict } propts /prres exch def
   /prscale prres /Scale get def
@@ -594,14 +594,14 @@
 % @kind: Procedure
 % @summary: Engraving preset — one hatchkit call sweeping three angles (60 degrees apart) at fine spacing, thin width, and minimal wobble/dropout: controlled crosshatched line work, no chip marks. Built entirely on hatchkit's hatch; clips to the current path internally.
 % @example: newpath 20 20 moveto 180 20 lineto 180 180 lineto 20 180 lineto closepath << /Seed 5 >> engraving
-% @param: /Scale num in [0.001, 1000], overall size multiplier (default 1)
-% @param: /Density num in [0,1], ink coverage (default 0.5)
-% @param: /Roughness num in [0,1], line irregularity (default 0.5, applied lightly)
-% @param: /Seed n, derives one sub-seed per underlying call (default: ambient stream)
-% @param: /Color [r g b] ink color (default a cool near-black)
-% @param: /Budget num, safety cap on the combined three-angle line count (default 20000)
-% @param: /Paper bool, lay a subtle surfacekit grain pass under the ink (default false)
-% @param: /Angle num, degrees, offset applied to all three fixed angles (default 0)
+% @param: /Scale [ratio] Overall size multiplier, in [0.001, 1000] (default 1)
+% @param: /Density [0..1] Ink coverage (default 0.5)
+% @param: /Roughness [0..1] Line irregularity (default 0.5, applied lightly)
+% @param: /Seed [integer] Derives one sub-seed per underlying call (default: ambient stream)
+% @param: /Color [rgb array] Ink color (default a cool near-black)
+% @param: /Budget [count] Safety cap on the combined three-angle line count (default 20000)
+% @param: /Paper [boolean] Lay a subtle surfacekit grain pass under the ink (default false)
+% @param: /Angle [degrees] Offset applied to all three fixed angles (default 0)
 /engraving {
   [ 0.05 0.05 0.09 ] { engraving-opts-must-be-a-dict } propts /prres exch def
   /prscale prres /Scale get def

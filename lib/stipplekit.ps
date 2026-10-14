@@ -188,9 +188,9 @@
 % @kind: Procedure
 % @summary: Places dots (or a caller-supplied point mark) across a region according to a density — a constant number, or a per-point {x y -> w} tone callback for sparse-to-dense stippling. A thin convenience layer over artkit.ps's scatter; every option not listed here (/Count, /MinSpacing, /Seed, /Tries, /Budget, /Scale, /Rotate, /Mark, /Weight) is scatter's own, forwarded unchanged.
 % @example: 0 0 200 200 screct << /Density 0.02 /Seed 3 /MinSpacing 4 >> stipple
-% @param: /Density num or {x y -> w} marks per unit area (a number), or a relative [0,1] tone callback paired with /MaxDensity for the absolute scale
-% @param: /MaxDensity num >= 0 marks per unit area at a relative tone of 1; required only when /Density is a callback
-% @param: /DotRadius num > 0 base radius the default circular /Mark scales from via scatter's own /Scale range (default 1.5)
+% @param: /Density [count per unit area or proc] Marks per unit area (a number), or a {x y -> w} relative [0,1] tone callback paired with /MaxDensity for the absolute scale
+% @param: /MaxDensity [count per unit area] Marks per unit area at a relative tone of 1; must be >= 0, required only when /Density is a callback
+% @param: /DotRadius [points] Base radius the default circular /Mark scales from via scatter's own /Scale range; must be > 0 (default 1.5)
 /stipple {
   % The whole options operand is wrapped before its own type is even
   % checked -- the same auto-execution hazard as every proc-typed

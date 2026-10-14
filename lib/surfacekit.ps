@@ -385,9 +385,9 @@
 % @kind: Procedure
 % @summary: Paper grain speckling — a scatter of tiny flecks. Fine vs. coarse grain is a choice of /Density and /Scale on this one preset, not two separate operators. Every option not listed here (/Count, /Density, /MinSpacing, /Seed, /Tries, /Budget, /Scale, /Rotate, /Mark, /Weight) is scatter's own (artkit.ps), forwarded unchanged.
 % @example: 0 0 200 200 screct << /Density 0.3 /Scale [0.4 1.4] /Seed 3 >> grain
-% @param: /Color [r g b] speck color, each in [0,1] (default a warm paper-fleck gray)
-% @param: /Strength num 0..1, how strongly flecks read against the paper (default 0.5)
-% @param: /Radius num > 0 base speck radius before scatter's own /Scale (default 0.6)
+% @param: /Color [rgb array] Speck color, each in [0,1] (default a warm paper-fleck gray)
+% @param: /Strength [0..1] How strongly flecks read against the paper (default 0.5)
+% @param: /Radius [points] Base speck radius before scatter's own /Scale; must be > 0 (default 0.6)
 /grain {
   1 array astore /sfoptsbox exch def
   { grain-region-must-be-a-region } sfregiondef /sfregion exch def
@@ -445,10 +445,10 @@
 % @kind: Procedure
 % @summary: Paper fibers — short, thin, randomly oriented strokes scattered across a region. Orientation comes from scatter's own /Rotate, not a new random draw. Every option not listed here (/Count, /Density, /MinSpacing, /Seed, /Tries, /Budget, /Scale, /Rotate, /Mark, /Weight) is scatter's own (artkit.ps), forwarded unchanged.
 % @example: 0 0 200 200 screct << /Density 0.3 /Rotate [0 360] /Seed 5 >> fiber
-% @param: /Color [r g b] fiber color, each in [0,1] (default a warm pale fiber tone)
-% @param: /Strength num 0..1, how strongly fibers read against the paper (default 0.5)
-% @param: /Length [lo hi] fiber length range in user-space units (default [3 9])
-% @param: /Width num > 0 base stroke width before scatter's own /Scale (default 0.5)
+% @param: /Color [rgb array] Fiber color, each in [0,1] (default a warm pale fiber tone)
+% @param: /Strength [0..1] How strongly fibers read against the paper (default 0.5)
+% @param: /Length [array of points] [lo hi] fiber length range in user space (default [3 9])
+% @param: /Width [points] Base stroke width before scatter's own /Scale; must be > 0 (default 0.5)
 /fiber {
   1 array astore /sfoptsbox exch def
   { fiber-region-must-be-a-region } sfregiondef /sfregion exch def
@@ -529,11 +529,11 @@
 % @kind: Procedure
 % @summary: Scratches and scuffs — sparse long strokes with a small deterministic kink at the midpoint, scattered across a region. Named `scuff` rather than `scratch` since this codebase already uses "scratch" as a term of art for private working state throughout every sibling library's own docs. Every option not listed here (/Count, /Density, /MinSpacing, /Seed, /Tries, /Budget, /Scale, /Rotate, /Mark, /Weight) is scatter's own (artkit.ps), forwarded unchanged.
 % @example: 0 0 200 200 screct << /Count 8 /Rotate [0 360] /Seed 9 >> scuff
-% @param: /Color [r g b] scuff color, each in [0,1] (default a dark scuffed tone)
-% @param: /Strength num 0..1, how strongly scuffs read against the paper (default 0.5)
-% @param: /Length [lo hi] scuff length range in user-space units (default [14 40])
-% @param: /Width num > 0 base stroke width before scatter's own /Scale (default 0.7)
-% @param: /Kink num perpendicular kink amount, a fraction of length (default 0.18)
+% @param: /Color [rgb array] Scuff color, each in [0,1] (default a dark scuffed tone)
+% @param: /Strength [0..1] How strongly scuffs read against the paper (default 0.5)
+% @param: /Length [array of points] [lo hi] scuff length range in user space (default [14 40])
+% @param: /Width [points] Base stroke width before scatter's own /Scale; must be > 0 (default 0.7)
+% @param: /Kink [fraction of /Length] Perpendicular kink amount (default 0.18)
 /scuff {
   1 array astore /sfoptsbox exch def
   { scuff-region-must-be-a-region } sfregiondef /sfregion exch def
@@ -590,10 +590,10 @@
 % @kind: Procedure
 % @summary: Subtle print/registration imperfections — sparse soft smudge blobs (nested lightening rings, largest and faintest outermost) suggesting a mis-registered ink layer. A stylized single-color mark, not a multi-plate CMY simulation. Every option not listed here (/Count, /Density, /MinSpacing, /Seed, /Tries, /Budget, /Scale, /Rotate, /Mark, /Weight) is scatter's own (artkit.ps), forwarded unchanged.
 % @example: 0 0 200 200 screct << /Count 6 /Scale [0.8 1.6] /Seed 11 >> misreg
-% @param: /Color [r g b] smudge color, each in [0,1] (default a cool muted tone)
-% @param: /Strength num 0..1, how strongly the innermost ring reads (default 0.35)
-% @param: /Radius num > 0 outermost-ring base radius before scatter's own /Scale (default 3)
-% @param: /Rings int >= 1 number of nested rings (default 3)
+% @param: /Color [rgb array] Smudge color, each in [0,1] (default a cool muted tone)
+% @param: /Strength [0..1] How strongly the innermost ring reads (default 0.35)
+% @param: /Radius [points] Outermost-ring base radius before scatter's own /Scale; must be > 0 (default 3)
+% @param: /Rings [count] Number of nested rings; must be >= 1 (default 3)
 /misreg {
   1 array astore /sfoptsbox exch def
   { misreg-region-must-be-a-region } sfregiondef /sfregion exch def
@@ -638,13 +638,13 @@
 % @kind: Procedure
 % @summary: Canvas weave — a regular grid of alternating over/under thread bumps across a region, testing each cell's center with scin (artkit.ps) rather than a caller-supplied mark; not scatter-based, since a weave is a fixed structure rather than a random placement. Clip the ambient graphics state first for an exact edge on a non-rectangular region (see this file's own header).
 % @example: 0 0 200 200 screct << /Pitch 5 /Seed 2 >> weave
-% @param: /Color [r g b] thread color, each in [0,1] (default a canvas tan)
-% @param: /Strength num 0..1, how strongly threads read against the paper (default 0.5)
-% @param: /Pitch num > 0 grid spacing between thread centers (default 6)
-% @param: /Width num > 0 thread thickness (default 1.2)
-% @param: /Seed n seeds a small per-cell shade jitter with `n srand`, restoring the caller's stream afterward via `rrand` (hatchkit's own convention) -- the grid geometry itself is always exactly regular, seeded or not
-% @param: /MaxThreads int pre-flight cap on grid cell count (default 20000)
-% @param: /MaxEdgeSamples int pre-flight cap on cell count times region edge count, checked only for a scpath path region (default 2000000)
+% @param: /Color [rgb array] Thread color, each in [0,1] (default a canvas tan)
+% @param: /Strength [0..1] How strongly threads read against the paper (default 0.5)
+% @param: /Pitch [points] Grid spacing between thread centers; must be > 0 (default 6)
+% @param: /Width [points] Thread thickness; must be > 0 (default 1.2)
+% @param: /Seed [integer] Seeds a small per-cell shade jitter with `n srand`, restoring the caller's stream afterward via `rrand` (hatchkit's own convention) -- the grid geometry itself is always exactly regular, seeded or not
+% @param: /MaxThreads [count] Pre-flight cap on grid cell count (default 20000)
+% @param: /MaxEdgeSamples [count] Pre-flight cap on cell count times region edge count, checked only for a scpath path region (default 2000000)
 /weave {
   1 array astore /sfoptsbox exch def
   { weave-region-must-be-a-region } sfregiondef /sfregion exch def
