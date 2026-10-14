@@ -42,3 +42,9 @@ What changed:
 Not done: the issue's `--base-bin` could default the base binary to a build of
 the base tree. Left explicit, since a cold build is minutes and belongs in a
 background command the caller controls. Related: #331.
+
+Real run (not just the wrapper tests): base worktree at `3d58985^`, base binary
+from `build_base_bin.sh`, head binary built in the branch (`3d58985` plus these
+scripts), control `/s 1 (one) def` then a `rectfill`, `--loader lib/artkit.ps`:
+84 of 84 page renders identical across 68 files in 42 s, and the control differed
+(the old binary stops at `def`).
