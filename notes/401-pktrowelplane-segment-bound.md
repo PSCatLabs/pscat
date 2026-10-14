@@ -23,8 +23,18 @@ Ghostscript), the existing `grestore` runs, and the raise comes after it. No new
 
 **What it does not buy.** `flattenpath` and `pathforall`'s snapshot of the path still cost O(n)
 before the first callback; the early `exit` saves the rest of the scan, the clip and the row loop.
-The caller also already paid O(n) to build the path, which is why this was P3. Measured before the
-change (issue): 100,000 segments 0.09 s, 400,000 about 0.27 s, no refusal.
+The caller also already paid O(n) to build the path, which is why this was P3.
+
+Measured (release build, `usertime` ms, path construction excluded, artkit loaded, same binary with
+`lib/paintkit.ps` from each tree, three runs each; base runs to completion, head refuses):
+
+| segments | base | head |
+|---|---|---|
+| 100,000 | 75-80 | 35-36 |
+| 400,000 | 256-267 | 43 |
+
+The head figure barely grows from 100,000 to 400,000: what is left is `flattenpath` and the snapshot,
+not PostScript time. The refusal no longer walks the path.
 
 **Why it cannot refuse a legal outline.** The scan reads the flattened path, as `wkmeasure` does,
 so an outline of at most `wkmaxsegs` visits is the same set `walkpath` would accept. Exactly
