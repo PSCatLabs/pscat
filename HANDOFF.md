@@ -605,7 +605,8 @@ renders eight examples in both and compares block-downsampled output).
    `dkrand` are internal. The medium files (#235 chalk, #239 crayon, #241
    charcoal) are presets over `dkstroke`. Measured cost is in
    `notes/234-drykit-core.md` and DRYMEDIA.md 6.1. A full board plus ghost
-   text is about 7% over its pscat budget (#283). `dkbatch` keeps each
+   text is 25.2s in pscat against a 30s budget, after #307's `bind`
+   (`notes/283-drykit-perf-remeasure.md`; levers in #324). `dkbatch` keeps each
    stroke's CTM, so hatch layers can be drawn rotated inside it. It allows
    one pigment per batch.
    Slice G1 (#236) shipped `lib/strokeglyphs.ps`: skeleton glyphs as paths
