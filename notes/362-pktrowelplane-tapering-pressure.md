@@ -60,3 +60,5 @@ Tests (`tests/pktrowelplane.rs`): a tapering pressure leaves less than 1% of
 a solid-blade plane bare (it was 4.3% before); a flat `/Pressure` renders
 byte-identically to none; a proc that draws on its first 17 calls leaves the
 plane and the stream exactly as a proc that does not.
+
+Before/after render (two shadow facets, a gentle and a harder taper; left is main, right is this change): `docs/pktrowelplane_taper_before_after.png`.
