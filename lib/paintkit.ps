@@ -9073,6 +9073,13 @@ systemdict /setalpha known /pwhasalpha exch def
 %   newpath 0 0 moveto 40 0 lineto 40 40 lineto 0 40 lineto closepath << /Wander 0 >> pkfeather
 %   /zzm 0 def { pop pop /zzm zzm 1 add def } { pop pop } { 6 { pop } repeat } { } pathforall
 %   newpath zzn zzm 2 mul lt (overlapping squares: strokes only on the visible edge) mustbe
+%   % Blobs that do not touch lose nothing: two far-apart squares get exactly
+%   % the strokes of one square, twice.
+%   newpath 0 0 moveto 40 0 lineto 40 40 lineto 0 40 lineto closepath
+%   200 0 moveto 240 0 lineto 240 40 lineto 200 40 lineto closepath
+%   << /Wander 0 >> pkfeather
+%   /zzn 0 def { pop pop /zzn zzn 1 add def } { pop pop } { 6 { pop } repeat } { } pathforall
+%   newpath zzn zzm 2 mul eq (blobs that do not touch keep every stroke) mustbe
 %   % An open crest drawn right to left still brushes up (/Outward 90).
 %   newpath 100 0 moveto 0 0 lineto
 %   << /Overlap 0 /Lean 0 /Wander 0 /LengthJitter 0 /Length 5 >> pkfeather

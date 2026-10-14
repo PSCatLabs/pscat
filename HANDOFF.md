@@ -971,6 +971,12 @@ renders eight examples in both and compares block-downsampled output).
   (guards plus a ring wound both ways and a ring under `1 -1 scale`); the
   specimen is `examples/paintkit_brushedge_demo.ps`
   (`docs/paintkit_brushedge_demo.png`); cookbook recipe 10 uses it.
+  **Overlapping blobs (issue #381):** with two or more closed subpaths a
+  stroke is skipped where a pair of points either side of its anchor are both
+  in the whole-path region (an edge hidden inside the others), and the side
+  vote ignores both-in probes and searches up to 28 places for seven votes. A
+  single closed subpath never probes, so single outlines render byte-identically.
+  `notes/381-brushedge-hidden-edges.md`.
 - **The landscape cookbook (issue #186) is `docs/guides/landscape-cookbook.md`;
   its snippets are the tests.** `tests/landscape_cookbook.rs` pulls every
   ```` ```postscript ```` block out of the markdown (first line `% recipe: <name>`),
