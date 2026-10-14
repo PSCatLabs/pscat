@@ -8207,6 +8207,71 @@ systemdict /setalpha known /pwhasalpha exch def
 %   (a dict as the region) mustguard
 %%EndSelfTest
 %
+%%SelfTest: pkscumblein-light-guards
+%   { 0 0 100 100 screct << /Light { 90 } >> pkscumblein }
+%   /pkscumblein-light-must-not-be-a-procedure
+%   (/Light { 90 }) mustguard
+%
+%   { 0 0 100 100 screct << /Light /up >> pkscumblein }
+%   /pkscumblein-light-must-be-a-number
+%   (/Light /up) mustguard
+%
+%   { 0 0 100 100 screct << /Light 90 /Reach 0 >> pkscumblein }
+%   /pkscumblein-reach-must-be-0-exclusive-to-1
+%   (/Reach 0) mustguard
+%
+%   { 0 0 100 100 screct << /Light 90 /Reach 1.5 >> pkscumblein }
+%   /pkscumblein-reach-must-be-0-exclusive-to-1
+%   (/Reach 1.5) mustguard
+%
+%   { 0 0 100 100 screct << /Light 90 /Feather -0.1 >> pkscumblein }
+%   /pkscumblein-feather-must-be-0-to-1
+%   (/Feather -0.1) mustguard
+%
+%   { 0 0 100 100 screct << /Light 90 /Feather { 1 } >> pkscumblein }
+%   /pkscumblein-feather-must-not-be-a-procedure
+%   (/Feather { 1 }) mustguard
+%
+%   % /Reach and /Feather say how the lit side is cut; without /Light there
+%   % is no lit side, so they would silently do nothing.
+%   { 0 0 100 100 screct << /Reach 0.4 >> pkscumblein }
+%   /pkscumblein-reach-needs-light
+%   (/Reach without /Light) mustguard
+%
+%   { 0 0 100 100 screct << /Feather 0 >> pkscumblein }
+%   /pkscumblein-feather-needs-light
+%   (/Feather without /Light) mustguard
+%
+%   % /Light 0 is a real angle (light from +x), not "unset".
+%   { 0 0 100 100 screct << /Light 0 /Reach 1 /Feather 0 >> pkscumblein }
+%   (/Light 0 with the full reach) mustpass
+%%EndSelfTest
+%
+%%SelfTest: pkscumblein-light-keeps-the-lit-side
+%   % Every circle a lit pass keeps sits within /Reach of the edge facing the
+%   % light (its centre is the circle's moveto point less its radius, so test
+%   % the start point with the radius as slack), and the lit pass is a subset
+%   % of the unlit one under the same seed: same draws, fewer circles.
+%   { /lt_n 0 def /lt_bad 0 def
+%     7 srand 0 0 200 100 screct << /Count 200 /Radius 3 /RadiusJitter 0 >> pkscumblein
+%     { pop pop /lt_n lt_n 1 add def } { pop pop } { 6 { pop } repeat } { } pathforall
+%     /lt_all lt_n def /lt_n 0 def
+%     7 srand 0 0 200 100 screct
+%     << /Count 200 /Radius 3 /RadiusJitter 0 /Light 90 /Reach 0.25 /Feather 0 >> pkscumblein
+%     { /lt_n lt_n 1 add def exch pop 100 25 sub 6 sub lt { /lt_bad lt_bad 1 add def } if }
+%     { pop pop } { 6 { pop } repeat } { } pathforall
+%     lt_bad 0 ne { lit-circle-outside-the-band } if
+%     lt_n 0 eq lt_n lt_all ge or { lit-pass-is-not-a-proper-subset } if
+%     % From below the same rectangle: the band is now along the bottom.
+%     /lt_bad 0 def
+%     7 srand 0 0 200 100 screct
+%     << /Count 200 /Radius 3 /RadiusJitter 0 /Light 270 /Reach 0.25 /Feather 0 >> pkscumblein
+%     { exch pop 25 6 add gt { /lt_bad lt_bad 1 add def } if }
+%     { pop pop } { 6 { pop } repeat } { } pathforall
+%     lt_bad 0 ne { lit-circle-outside-the-bottom-band } if }
+%   (the lit pass keeps only the band facing the light) mustpass
+%%EndSelfTest
+%
 %%SelfTest: pkcrisscross-lean-and-its-deprecated-spread-alias
 %   % /Spread is the deprecated name for /Lean (issue #141) and is still
 %   % read, through the same guard, when /Lean is absent.
@@ -8398,6 +8463,9 @@ systemdict /setalpha known /pwhasalpha exch def
 % @param: /Radius [points] Mean circle radius in points; must be > 0 (default 4)
 % @param: /RadiusJitter [fraction of /Radius] 0..1 how far each circle's radius varies around /Radius (default 0.4)
 % @param: /Squash [ratio] Vertical radius as a fraction of the horizontal one, > 0 and <= 1; 1 is a circle, smaller flattens a cloud's underside (default 1)
+% @param: /Light [degrees] Light-aware massing (issue #345): the direction the light comes from, counterclockwise from +x in user space (270 is from below, 90 from above). Set, it keeps only the circles on the region's lit side, a band that follows the outline's lumps along the edge facing the light, so a second pass in a lighter load over a body pass gives the mass a lit side: `region << /Count n >> pkscumblein body-brush  region << /Count n /Light 120 >> pkscumblein lit-brush`. Same circles, positions and random draws as the unlit call with the same seed (default unset: every circle is kept)
+% @param: /Reach [fraction of the region's depth along the light] With /Light, how deep the lit band reaches in from the edge facing the light, > 0 and <= 1; the depth is the length of the line through the region's bounding box centre in the light's direction, so 0.3 lights about the outer 30% of a round mass, and a band stays in proportion when the region is resized (default 0.3)
+% @param: /Feather [0..1] With /Light, how much of /Reach is a graded border: circles in the inner /Feather part of the band thin out toward the shadow instead of stopping on a hard line; 0 is a hard edge (default 0.5)
 /pkscumblein {
     /mcopts exch def /mcreg exch def
     mcreg mhisregion not { pkscumblein-needs-a-region } if
@@ -8414,8 +8482,40 @@ systemdict /setalpha known /pwhasalpha exch def
     /mcsq mcopts /Squash 1 pkgetdef def
     /mcsq load xcheck { pkscumblein-squash-must-not-be-a-procedure } if
     mcsq 0 le mcsq 1 gt or { pkscumblein-squash-must-be-0-exclusive-to-1 } if
+    % Light-aware massing (issue #345). Tested with `known`, not by value:
+    % /Light 0 is light from +x. Unset, none of this runs and the motion is
+    % byte-identical to before.
+    /mclit mcopts /Light known def
+    mclit {
+        /mclight mcopts /Light get def
+        /mclight load xcheck { pkscumblein-light-must-not-be-a-procedure } if
+        /mclight load type dup /integertype ne exch /realtype ne and
+            { pkscumblein-light-must-be-a-number } if
+        /mcreach mcopts /Reach 0.3 pkgetdef def
+        /mcreach load xcheck { pkscumblein-reach-must-not-be-a-procedure } if
+        mcreach 0 le mcreach 1 gt or { pkscumblein-reach-must-be-0-exclusive-to-1 } if
+        /mcfeather mcopts /Feather 0.5 pkgetdef def
+        /mcfeather load xcheck { pkscumblein-feather-must-not-be-a-procedure } if
+        mcfeather 0 lt mcfeather 1 gt or { pkscumblein-feather-must-be-0-to-1 } if
+    } {
+        mcopts /Reach known { pkscumblein-reach-needs-light } if
+        mcopts /Feather known { pkscumblein-feather-needs-light } if
+    } ifelse
 
     mcreg mccount mhgrid
+    mclit {
+        % The region's depth along the light: the length of the line through
+        % its bounding box's centre in the light's direction, i.e. the box's
+        % width or height, whichever the line crosses first. /Reach is a
+        % fraction of it, so the lit band keeps its proportion when the region
+        % is resized. (Not the box projected on the light's axis: for a wide,
+        % low bush lit at 45 degrees that is nearly twice the real depth.)
+        /mclx mclight cos def /mcly mclight sin def
+        /mcdepth 1e30
+            mclx abs 1e-6 gt { mhbw mclx abs div min } if
+            mcly abs 1e-6 gt { mhbh mcly abs div min } if
+        def
+    } if
     mhcols mhrows mul 40000 gt { pkscumblein-too-many-cells } if
     newpath
     /mcm matrix currentmatrix def
@@ -8427,7 +8527,19 @@ systemdict /setalpha known /pwhasalpha exch def
             frnd /mcfr exch def frnd /mcph exch def
             /mcx mhgx0 mcc mcfx add mhcw mul add def
             /mcy mhgy0 mcr mcfy add mhch mul add def
-            mcx mcy mcreg scin {
+            mcx mcy mcreg scin
+            mclit {
+                % Lit when a step toward the light leaves the region: the
+                % circle sits within that step of the edge facing the light,
+                % so every lump of the outline gets its own lit cap. The step
+                % shrinks by up to /Feather on the cell's own phase draw
+                % (uniform, and independent of where the circle lands), which
+                % grades the inner border without a new draw.
+                {
+                    /mcstep mcreach mcdepth mul 1 mcfeather mcph mul sub mul def
+                    mcx mclx mcstep mul add mcy mcly mcstep mul add mcreg scin not
+                } { false } ifelse
+            } if {
                 /mcrr mcrad 1 mcfr 2 mul 1 sub mcrj mul add mul 0.1 mcrad mul max def
                 /mcpa mcph 360 mul def
                 % Build in a translated, squashed space, then put the matrix

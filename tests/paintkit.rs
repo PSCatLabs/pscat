@@ -9238,6 +9238,39 @@ fn ghostscript_accepts_the_motion_specimen() {
     );
 }
 
+/// The light-aware massing specimen (issue #345) promises in its header that
+/// Ghostscript renders it too.
+#[test]
+fn ghostscript_accepts_the_massing_specimen() {
+    let gs_ok = std::process::Command::new("gs")
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success());
+    if !gs_ok {
+        eprintln!("skipping gs compatibility check: gs not installed");
+        return;
+    }
+    let status = std::process::Command::new("gs")
+        .args([
+            "-dNOSAFER",
+            "-dNOPAUSE",
+            "-dBATCH",
+            "-q",
+            "-sDEVICE=png16m",
+            "-g780x630",
+            "-r72",
+            "-o/dev/null",
+            "examples/paintkit_massing_demo.ps",
+        ])
+        .stdin(std::process::Stdio::null())
+        .status()
+        .expect("run gs");
+    assert!(
+        status.success(),
+        "gs rejected examples/paintkit_massing_demo.ps"
+    );
+}
+
 // --- deprecated key aliases (issue #141) ------------------------------
 // Four keys were renamed so that /Spread always means a 0..1 fraction of
 // /Width and /Load always means a contact rate per /Width of travel. Each

@@ -923,6 +923,25 @@ motion lays a jittered grid sized from the region's area, so even
 coverage is kept and `/Count` stays about right for a non-rectangular
 region. `examples/paintkit_motion_demo.ps` shows each beside its brush.
 
+**Light-aware massing** (issue #345). A scumbled mass painted in one load
+is flat. Give `pkscumblein` a `/Light` (the direction the light comes
+from, in degrees, as elsewhere in paintkit) and it keeps only the circles
+on the side of the region that faces the light, in a band that follows
+every lump of the outline: `/Reach` is how deep (a fraction of the
+region's depth along the light, default 0.3) and `/Feather` grades its
+inner border. Paint the body over the whole region, then the same region
+again with `/Light` in a lighter load; the shadow side is the same call
+with the light turned round. Unset, the motion is unchanged. With the same
+seed the lit circles are a subset of the unlit ones.
+
+```postscript
+region << /Count 300 /Radius 4 >> pkscumblein << ... body ... >> pkdab
+region << /Count 300 /Radius 4 /Light 135 /Reach 0.3 >> pkscumblein
+<< ... lit load ... >> pkdab                              % a bush lit from the upper left
+```
+
+![Light-aware massing: before and after](docs/paintkit_massing_demo.png)
+
 All of these come together in the gallery piece *Alpine Lake*
 (`gallery/alpine_lake.ps`, issue #118), a full wet-on-wet landscape
 painted from paintkit's brushes alone. It has a `pkcrisscross` sky
