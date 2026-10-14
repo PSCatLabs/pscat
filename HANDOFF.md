@@ -472,7 +472,8 @@ renders eight examples in both and compares block-downsampled output).
   Adobe inverted-CMYK JPEGs untested.
 - errordict handlers not consulted; error-time operand-stack
   restoration not done (PLRM handlers see pre-error operands).
-- Stroke width ≈ √|det CTM| (anisotropic pens wrong); `showpage`
+- Stroke width ≈ √|det CTM| (anisotropic pens wrong; `strokepath`
+  inherits it, since it shares `stroke`'s parameters); `showpage`
   doesn't erase; ints are i64; `flattenpath` uses a fixed
   quarter-pixel tolerance (`setflat` not modeled — chord counts
   differ from gs, shapes agree).
