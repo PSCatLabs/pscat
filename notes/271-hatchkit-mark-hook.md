@@ -107,3 +107,10 @@ to the default render (0 pixels differ) and only the `/Density` panel differs
 the hook then strokes at the caller's 0.75 instead of 1. That is design call 2.
 `examples/printkit.ps` builds its options dict inside printkit, so it has no call to
 inject into.
+
+**Codex round 1 (P2): packed procedures.** Under `true setpacking` Ghostscript types a
+procedure literal `packedarraytype`, so the first `/Mark` guard (`arraytype` only)
+rejected a valid `{ stroke }` there. This interpreter never packs, so no pscat test
+could show it. Fixed with `hkisproc` (executable array, packed or not), and a real-gs
+regression test (`ghostscript_accepts_a_mark_procedure_under_packing`) that fails with
+the old guard (`/undefined in hatch-mark-must-be-a-procedure`) and passes with the new.

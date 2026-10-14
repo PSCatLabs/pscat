@@ -1079,6 +1079,53 @@ fn a_bad_mark_is_rejected_before_the_stream_or_graphics_state_moves() {
 }
 
 #[test]
+fn ghostscript_accepts_a_mark_procedure_under_packing() {
+    // Under `true setpacking` Ghostscript types a procedure literal
+    // `packedarraytype`, which the /Mark guard must accept (Codex review,
+    // PR #300). This interpreter never packs, so only real gs can show it.
+    let gs_ok = std::process::Command::new("gs")
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success());
+    if !gs_ok {
+        eprintln!("skipping gs packing check: gs not installed");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("pscat-hatch-mark-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let ps = dir.join("mark_packed.ps");
+    std::fs::write(
+        &ps,
+        "(lib/hatchkit.ps) run\n\
+         true setpacking\n\
+         /marks 0 def\n\
+         0 0 50 50 rectclip\n\
+         << /BBox [0 0 50 50] /Spacing 5 /Mark { /marks marks 1 add def stroke } >> hatch\n\
+         marks 1 ne { /marks_not_one_after_hatch undefined } if\n\
+         showpage\n",
+    )
+    .unwrap();
+    let out = std::process::Command::new("gs")
+        .args([
+            "-dNOSAFER",
+            "-dNOPAUSE",
+            "-dBATCH",
+            "-q",
+            "-sDEVICE=nullpage",
+        ])
+        .arg(&ps)
+        .output()
+        .expect("run gs");
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(
+        out.status.success(),
+        "gs rejected a packed /Mark procedure: {}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
 fn ghostscript_accepts_the_hatching_specimen_sheet() {
     // The acceptance criterion itself -- the specimen page runs
     // unchanged in both interpreters. `-dNOSAFER` is needed because

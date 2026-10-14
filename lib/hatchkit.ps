@@ -255,6 +255,12 @@
   dup type /arraytype eq { xcheck not } { pop false } ifelse
 } def
 
+% v hkisproc -> bool  (an executable array, packed or not)
+% @internal
+/hkisproc {
+  dup xcheck exch type dup /arraytype eq exch /packedarraytype eq or and
+} def
+
 % array hkallnums -> bool  (every element a number; true when empty)
 % `forall` pushes each element and runs only its own body, never the
 % element itself, so a procedure inside the array is inspected, not run.
@@ -722,7 +728,9 @@
   dup null eq
     { pop /hmarkon false def }
     {
-      dup type /arraytype eq 1 index xcheck and not
+      % Under `true setpacking` Ghostscript types a procedure literal
+      % `packedarraytype` (this interpreter never does), so accept both.
+      dup hkisproc not
         { hatch-mark-must-be-a-procedure }
       if
       1 array astore /hmarkopt exch def
