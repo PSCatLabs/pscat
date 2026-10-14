@@ -625,6 +625,9 @@ renders eight examples in both and compares block-downsampled output).
    glyph name with no glyph raises `sg-missing-glyph:<char>` before any
    ink, instead of advancing blank (the superscript two in #238's
    `(i² = -1)` used to vanish silently). `/Strict false` opts out.
+   #339 filled the commonest gaps (relations, ∘ ∗ ⋆, ⟨ ⟩ ‖, ℏ ℓ, ι υ Υ,
+   ∬ ∭ ∮, superscript digits derived from the digit skeletons):
+   `notes/339-board-math-glyphs.md`.
    #237 shipped `lib/mathkit.ps` (`mk-`): TeX-subset math laid out with
    TeX's box model as those skeletons (`mkpath`, `mkmetrics`, `mkalign`,
    and the annotations `mkframe`, `mkunderline`, `mkarrow`), with

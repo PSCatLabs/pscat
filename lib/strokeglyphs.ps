@@ -41,6 +41,16 @@
 % its points, so the box bounds the unjittered centerline. Ink extends
 % past it by half the pen width plus the jitter.
 %
+% --- Board math beyond the first slice (issue #339) -----------------------
+% Relations ≡ ∼ ≃ ⊆ ⊃ ⊇ ↦ ⊥ ∝ ∴ ∵, operators ∘ ∗ ⋆ ∖, the angle brackets
+% ⟨ ⟩ and the double bar ‖ ∥ (both as text glyphs and as `sggrow`
+% symbols /angleleft /angleright /dblbar), ℏ ℓ, ι υ Υ ο, the double,
+% triple and contour integrals (/iint /iiint /oint), and the superscript
+% digits ⁰ ¹ ² ³ ⁴ ... ⁹ with ⁺ ⁻ ⁿ. The superscripts are not authored:
+% `sginit` builds each from its base glyph's skeleton at 0.6 scale,
+% raised, so a reshaped digit reshapes its superscript. The glyphs are
+% named in the Adobe style (/reflexsubset is ⊆, /ringoperator is ∘).
+%
 % --- Text ---------------------------------------------------------------
 % Text is a string or an array of glyph names. A string is decoded as
 % UTF-8: ASCII maps to handscript's lowercase, digits and punctuation
@@ -239,6 +249,47 @@
   /slash [380 [330 720 50 -120]]
   /colon [220 [100 330 115 320 105 310] [100 30 115 20 105 10]]
   /semicolon [240 [110 330 125 320 115 310] [115 40 105 -10 70 -90]]
+
+  % --- more board math (issue #339). Relations and operators share the
+  % construction of their neighbours above: three bars like /equal's two,
+  % the subset-or-equal bar like /lessequal's, the wave of /approxequal.
+  /equiv [560 [70 420 490 420] [70 250 490 250] [70 80 490 80]]
+  /sim [560 [70 250 160 300 260 260 360 220 450 240 490 280]]
+  /simeq [560 [70 330 160 380 260 340 360 300 450 320 490 360]
+              [70 140 490 140]]
+  /ringoperator [400 [200 360 120 340 90 250 120 160 200 140 280 160 310 250
+                      280 340 200 360 190 358]]
+  /asteriskmath [400 [200 370 200 130] [96 310 304 190] [96 190 304 310]]
+  /star [520 [260 450 378 88 378 88 70 312 70 312 450 312 450 312 142 88
+              142 88 260 450]]
+  /setminus [400 [70 450 330 50]]
+  /reflexsubset [560 [460 480 260 480 120 430 70 285 120 140 260 90 460 90]
+                     [70 -20 460 -20]]
+  /propersuperset [520 [60 470 260 470 400 420 450 250 400 80 260 30 60 30]]
+  /reflexsuperset [560 [100 480 300 480 440 430 490 285 440 140 300 90 100 90]
+                       [100 -20 490 -20]]
+  /mapsto [760 [60 250 690 250] [540 370 700 250 700 250 540 130]
+              [60 350 60 150]]
+  /perpendicular [520 [260 480 260 40] [60 40 460 40]]
+  /proportional [560 [500 130 420 100 330 140 250 250 170 360 80 390 30 300
+                      30 200 80 110 170 140 250 250 330 360 420 400 500 370]]
+  /therefore [520 [260 430 275 420 265 410] [120 110 135 100 125 90]
+                  [400 110 415 100 405 90]]
+  /because [520 [120 410 135 400 125 390] [400 410 415 400 405 390]
+                [260 130 275 120 265 110]]
+
+  % --- Greek letters that were missing
+  /iota [300 [120 480 120 110 140 30 190 0 240 20 260 60]]
+  /upsilon [480 [60 480 70 220 140 40 250 0 350 50 420 240 440 480]]
+  /Upsilon [560 [50 600 100 690 180 690 260 590 280 380 280 0]
+                [510 700 420 560 340 460 280 380]]
+
+  % --- letters for physics and calculus. The hbar is handscript's h with
+  % a short slanted bar through the stem; the script ell is one stroke
+  % with a loop at the top.
+  /hbar [440 [80 750 80 20] [80 350 210 510 350 430 360 20] [10 570 150 600]]
+  /ell [360 [320 90 260 10 170 10 120 120 140 340 200 580 270 730 330 740
+             340 670 290 520 210 360 160 220]]
 >> def
 
 % Code point -> glyph name for UTF-8 text. ASCII letters, digits and
@@ -267,6 +318,14 @@
   8745 /intersection  8746 /union  8747 /integral  8776 /approxequal
   8800 /notequal  8804 /lessequal  8805 /greaterequal  8834 /propersubset
   8901 /periodcentered
+  933 /Upsilon  953 /iota  959 /o  965 /upsilon
+  8214 /dblbar  8463 /hbar  8467 /ell
+  8614 /mapsto  8726 /setminus  8727 /asteriskmath  8728 /ringoperator
+  8733 /proportional  8741 /dblbar  8748 /iint  8749 /iiint  8750 /oint
+  8756 /therefore  8757 /because  8764 /sim  8771 /simeq  8801 /equiv
+  8835 /propersuperset  8838 /reflexsubset  8839 /reflexsuperset
+  8869 /perpendicular  8902 /star  9001 /angleleft  9002 /angleright
+  10178 /perpendicular  10216 /angleleft  10217 /angleright
   119899 /n.math  119905 /t.math  119909 /x.curly  119910 /y.math
   119911 /z.crossed
 >> def
@@ -277,15 +336,21 @@
 % @internal
 /sgclass <<
   /summation /op  /product /op  /integral /op
+  /iint /op  /iiint /op  /oint /op
   /plus /bin  /minus /bin  /multiply /bin  /divide /bin
   /periodcentered /bin  /plusminus /bin  /minusplus /bin
   /union /bin  /intersection /bin
+  /ringoperator /bin  /asteriskmath /bin  /star /bin  /setminus /bin
   /equal /rel  /notequal /rel  /approxequal /rel  /less /rel
   /greater /rel  /lessequal /rel  /greaterequal /rel  /arrowright /rel
   /arrowleft /rel  /arrowdblright /rel  /arrowdblboth /rel
   /element /rel  /notelement /rel  /propersubset /rel  /colon /rel
-  /parenleft /open  /bracketleft /open  /braceleft /open
+  /equiv /rel  /sim /rel  /simeq /rel  /reflexsubset /rel
+  /propersuperset /rel  /reflexsuperset /rel  /mapsto /rel
+  /perpendicular /rel  /proportional /rel  /therefore /rel  /because /rel
+  /parenleft /open  /bracketleft /open  /braceleft /open  /angleleft /open
   /parenright /close  /bracketright /close  /braceright /close
+  /angleright /close
   /comma /punct  /semicolon /punct
 >> def
 
@@ -386,6 +451,32 @@
     } for ]
 } def
 
+% stroke dx -> stroke   a copy of the flat stroke moved right by dx
+% @internal
+/sgshift {
+  /sgsd exch def
+  dup length array copy /sgsa exch def
+  0 2 sgsa length 2 sub {
+    /sgsk exch def sgsa sgsk sgsa sgsk get sgsd add put
+  } for
+  sgsa
+} def
+
+% H D S n -> [adv stroke ...]   n integral signs, each moved right of the
+% last by 0.85 of the integral's inked width, so the hooks of the
+% neighbours overlap in height, not in ink (a double and triple integral)
+% @internal
+/sgintn {
+  /sgin exch def
+  sggrowers /integral get exec /sgig exch def
+  /sgdx sgig 0 get 120 sub 0.85 mul def
+  [ sgig 0 get sgin 1 sub sgdx mul add
+    0 1 sgin 1 sub {
+      sgdx mul /sgik exch def
+      1 1 sgig length 1 sub { sgig exch get sgik sgshift } for
+    } for ]
+} def
+
 % --------------------------------------------------- growing symbols
 
 % Each builder takes H D S (glyph units: height above the baseline,
@@ -430,6 +521,32 @@
   /bar {
     sggrowprep
     [ sgsb 2 mul  [ sgsb sgH  sgsb sgD neg ] sgpoly ]
+  }
+  /angleleft {
+    sggrowprep
+    /sgw 90 sgT 0.1 mul add 240 min def
+    [ sgsb 2 mul sgw add
+      [ sgsb sgw add sgH  sgsb sgH sgD sub 2 div  sgsb sgw add sgD neg ]
+      sgpoly ]
+  }
+  /dblbar {
+    sggrowprep
+    [ sgsb 2 mul 110 add
+      [ sgsb sgH  sgsb sgD neg ] sgpoly
+      [ sgsb 110 add sgH  sgsb 110 add sgD neg ] sgpoly ]
+  }
+  /iint { 2 sgintn }
+  /iiint { 3 sgintn }
+  /oint {
+    sggrowprep
+    sgH sgD sgS sggrowers /integral get exec /sgig exch def
+    % the ring stays a text-size ring however tall the sign grows, as the
+    % jitter does; it sits on the axis of the extent, over the stem
+    /sgr 120 sgT 0.03 mul add 200 min def
+    /sgrcx sgig 0 get 2 div def
+    /sgrcy sgH sgD sub 2 div def
+    [ sgig 0 get  sgig 1 get
+      [ 0 45 405 { dup cos sgr mul sgrcx add exch sin sgr mul sgrcy add } for ] ]
   }
   /integral {
     sggrowprep
@@ -490,15 +607,17 @@
   dup /parenright eq { pop sggrowers /parenleft get exec sgmirror } {
   dup /bracketright eq { pop sggrowers /bracketleft get exec sgmirror } {
   dup /braceright eq { pop sggrowers /braceleft get exec sgmirror } {
+  dup /angleright eq { pop sggrowers /angleleft get exec sgmirror } {
     sggrowers exch get exec
-  } ifelse } ifelse } ifelse
+  } ifelse } ifelse } ifelse } ifelse
   sgaddbox
 } def
 
 % The names `sggrow` accepts.
 % @internal
 /sggrownames [ /parenleft /parenright /bracketleft /bracketright
-  /braceleft /braceright /bar /integral /radical /summation /product ] def
+  /braceleft /braceright /bar /integral /radical /summation /product
+  /angleleft /angleright /dblbar /iint /iiint /oint ] def
 
 % The run-time glyph table, filled by sginit.
 % @internal
@@ -524,12 +643,42 @@
     sgcmap sgk 65 add sgch cvn put
   } for
   sgsrc { sgaddbox sgtab 3 1 roll put } forall
+  % Superscript digits (and + - n), made from the base glyph's own
+  % skeleton at 0.6 scale, raised: so the digits stay one source and a
+  % reshaped digit reshapes its superscript. [base name code-point extra
+  % raise]; the signs sit a little higher, level with the digits' middle.
+  [ /zero /zerosuperior 8304 0  /one /onesuperior 185 0
+    /two /twosuperior 178 0  /three /threesuperior 179 0
+    /four /foursuperior 8308 0  /five /fivesuperior 8309 0
+    /six /sixsuperior 8310 0  /seven /sevensuperior 8311 0
+    /eight /eightsuperior 8312 0  /nine /ninesuperior 8313 0
+    /plus /plussuperior 8314 60  /minus /minussuperior 8315 60
+    /n /nsuperior 8319 0 ]
+  /sgsup exch def
+  0 4 sgsup length 4 sub {
+    /sgsj exch def
+    sgtab sgsup sgsj get get /sgbg exch def
+    sgsup sgsj 3 add get /sgbx exch def
+    sgcmap sgsup sgsj 2 add get sgsup sgsj 1 add get put
+    [ sgbg 0 get 0.6 mul 30 add
+      2 1 sgbg length 1 sub {
+        sgbg exch get /sgbs exch def
+        [ 0 2 sgbs length 2 sub {
+            /sgbk exch def
+            sgbs sgbk get 0.6 mul 15 add
+            sgbs sgbk 1 add get 0.6 mul 320 add sgbx add
+          } for ]
+      } for ] sgaddbox
+    sgtab exch sgsup sgsj 1 add get exch put
+  } for
   % text-size growing symbols, from the same builders sggrow uses
   [ /parenleft 750 250 0  /parenright 750 250 0
     /bracketleft 750 250 0  /bracketright 750 250 0
     /braceleft 750 250 0  /braceright 750 250 0
     /bar 750 250 0  /integral 800 300 0  /radical 720 80 250
-    /summation 650 150 0  /product 650 150 0 ]
+    /summation 650 150 0  /product 650 150 0
+    /angleleft 750 250 0  /angleright 750 250 0  /dblbar 750 250 0
+    /iint 800 300 0  /iiint 800 300 0  /oint 800 300 0 ]
   /sgfix exch def
   0 4 sgfix length 4 sub {
     /sgk exch def
@@ -752,22 +901,22 @@
 %%EndSelfTest
 %
 %%SelfTest: sgpath-refuses-a-missing-glyph-by-name
-%   { (i² = 1) 0 0 << >> sgpath } /sg-missing-glyph:² (a superscript two) mustguard
-%   { (a∮b) 0 0 << >> sgpath } /sg-missing-glyph:∮ (a contour integral) mustguard
-%   { (x²) << >> sgwidth } /sg-missing-glyph:² (sgwidth is strict too) mustguard
+%   { (i⊕ = 1) 0 0 << >> sgpath } /sg-missing-glyph:⊕ (a circled plus) mustguard
+%   { (aℵb) 0 0 << >> sgpath } /sg-missing-glyph:ℵ (an aleph) mustguard
+%   { (x⊕) << >> sgwidth } /sg-missing-glyph:⊕ (sgwidth is strict too) mustguard
 %   { [ /a /nosuchglyph /b ] 0 0 << >> sgpath } /sg-missing-glyph:nosuchglyph
 %   (an unknown name) mustguard
 %   { [ /a /.notdef ] 0 0 << >> sgpath } /sg-missing-glyph:.notdef
 %   (an explicit .notdef) mustguard
-%   { (a²) 0 0 << /Strict true >> sgpath } /sg-missing-glyph:² (/Strict true) mustguard
+%   { (a⊕) 0 0 << /Strict true >> sgpath } /sg-missing-glyph:⊕ (/Strict true) mustguard
 %   { (a) 0 0 << /Strict 1 >> sgpath } /sg-strict-must-be-a-boolean
 %   (a number as /Strict) mustguard
 %   % the refusal comes before any ink: the path is still empty
-%   newpath { (ab²) 0 0 << >> sgpath } /sg-missing-glyph:² (ab²) mustguard
+%   newpath { (ab⊕) 0 0 << >> sgpath } /sg-missing-glyph:⊕ (ab⊕) mustguard
 %   { currentpoint } stopped (nothing was added to the path) mustbe
 %   % /Strict false is the handscript behaviour: 300 units, no ink
-%   newpath (a²) 0 0 << /Strict false /Size 1000 /Jitter 0 >> sgpath
-%   (a²) << /Strict false /Size 1000 >> sgwidth
+%   newpath (a⊕) 0 0 << /Strict false /Size 1000 /Jitter 0 >> sgpath
+%   (a⊕) << /Strict false /Size 1000 >> sgwidth
 %   (a) << /Size 1000 >> sgwidth 300 add eq
 %   (a missing glyph advances 300 units under /Strict false) mustbe
 %   newpath
@@ -845,6 +994,62 @@
 %   newpath
 %%EndSelfTest
 %
+%%SelfTest: board-math-glyphs-are-all-there
+%   % issue #339: each of these was a sg-missing-glyph before
+%   (≡ ∼ ≃ ∘ ∗ ⋆ ∖ ⊆ ⊃ ⊇ ↦ ⊥ ∥ ∝ ∴ ∵ ⟨ ⟩ ‖ ℏ ℓ ∬ ∭ ∮ ι υ Υ ο) << >> sgwidth
+%   0 gt (the board-math symbols all measure) mustbe
+%   (i² = −1 x⁻¹ a³ ⁴⁵⁶⁷⁸⁹⁰ ¹ ⁺ ⁿ) << >> sgwidth 0 gt
+%   (superscript digits, signs and n measure) mustbe
+%   % a superscript is the digit at 0.6 scale, raised: narrower, and the
+%   % ink sits above the cap height's middle
+%   (²) << /Size 1000 >> sgwidth (2) << /Size 1000 >> sgwidth lt
+%   (a superscript two is narrower than a two) mustbe
+%   /twosuperior << /Size 1000 >> sgmetrics /BBox get 1 get 300 gt
+%   (a superscript two stands above the baseline) mustbe
+%   % the superscript digits are derived from the digits: the same skeleton
+%   % at 0.6 scale with a 15 unit side bearing and a raise of 320
+%   /twosuperior << /Size 1000 >> sgmetrics /BBox get 3 get
+%   /two << /Size 1000 >> sgmetrics /BBox get 3 get 0.6 mul 320 add sub abs 1 lt
+%   (the superscript two is the two, scaled and raised) mustbe
+%   % classes
+%   /equiv << >> sgmetrics /Class get /rel eq (≡ is a relation) mustbe
+%   /reflexsubset << >> sgmetrics /Class get /rel eq (⊆ is a relation) mustbe
+%   /ringoperator << >> sgmetrics /Class get /bin eq (∘ is a binary operator) mustbe
+%   /therefore << >> sgmetrics /Class get /rel eq (∴ is a relation) mustbe
+%   /angleleft << >> sgmetrics /Class get /open eq (⟨ opens) mustbe
+%   /angleright << >> sgmetrics /Class get /close eq (⟩ closes) mustbe
+%   /oint << >> sgmetrics /Class get /op eq (∮ is a large operator) mustbe
+%   /hbar << >> sgmetrics /Class get /ord eq (ℏ is ordinary) mustbe
+%   % the text characters reach the same glyphs
+%   (∮) << /Size 50 >> sgwidth /oint << /Size 50 >> sgmetrics /Advance get eq
+%   (∮ is the oint glyph) mustbe
+%   (⟨) << /Size 50 >> sgwidth (〈) << /Size 50 >> sgwidth eq
+%   (U+27E8 and U+2329 are the same glyph) mustbe
+%   (‖) << /Size 50 >> sgwidth (∥) << /Size 50 >> sgwidth eq
+%   (‖ and ∥ are the same glyph) mustbe
+%   % grown delimiters span exactly height and depth, and the right-hand
+%   % one is the left-hand one mirrored
+%   newpath 0 0 moveto 100 40 << /Symbol /angleleft /Size 30 /Jitter 0 >> sggrow pop
+%   pathbbox exch pop 3 -1 roll pop 100 eq exch -40 eq and
+%   (a grown angle bracket spans -40..100) mustbe
+%   newpath 0 0 moveto 100 40 << /Symbol /angleright /Size 30 /Jitter 0 >> sggrow pop
+%   pathbbox exch pop 3 -1 roll pop 100 eq exch -40 eq and
+%   (a grown right angle bracket spans -40..100) mustbe
+%   newpath 0 0 moveto 100 40 << /Symbol /dblbar /Size 30 /Jitter 0 >> sggrow pop
+%   pathbbox exch pop 3 -1 roll pop 100 eq exch -40 eq and
+%   (a grown double bar spans -40..100) mustbe
+%   newpath 0 0 moveto 100 40 << /Symbol /oint /Size 30 /Jitter 0 >> sggrow
+%   newpath 0 0 moveto 100 40 << /Symbol /integral /Size 30 /Jitter 0 >> sggrow
+%   eq (the contour integral has the single integral's advance) mustbe
+%   % ∬ and ∭ grow wider by one integral each
+%   newpath 0 0 moveto 60 20 << /Symbol /integral /Size 30 >> sggrow
+%   newpath 0 0 moveto 60 20 << /Symbol /iint /Size 30 >> sggrow
+%   newpath 0 0 moveto 60 20 << /Symbol /iiint /Size 30 >> sggrow
+%   /sgt-c exch def /sgt-b exch def /sgt-a exch def
+%   sgt-a sgt-b lt sgt-b sgt-c lt and (each extra integral widens the sign) mustbe
+%   newpath
+%%EndSelfTest
+%
 %%SelfTest: every-glyph-is-well-formed
 %   /sgt-ok true def
 %   sgtab {
@@ -880,7 +1085,7 @@
 %
 % (text) x y opts sgpath -
 % @kind: Procedure
-% @summary: Appends the jittered centerline skeleton of a string (UTF-8: Latin, digits, Greek, math operators) or an array of glyph names to the current path at baseline x y, one subpath per pen stroke, painting nothing. Stroke it with a pen or hand it to a dry medium. Uses its own seeded generator, never the caller's rand.
+% @summary: Appends the jittered centerline skeleton of a string (UTF-8: Latin, digits, superscript digits, Greek, math operators and relations) or an array of glyph names to the current path at baseline x y, one subpath per pen stroke, painting nothing. Stroke it with a pen or hand it to a dry medium. Uses its own seeded generator, never the caller's rand.
 % @example: (lib/handscript.ps) run (lib/strokeglyphs.ps) run newpath (∀ε>0 ∃δ>0) 72 600 << /Size 40 /Seed 7 >> sgpath 2 setlinewidth 1 setlinecap 1 setlinejoin stroke
 % @param: /Size [points] The em size: cap height is 0.7 of it (default 36)
 % @param: /Slant [degrees] Forward lean applied to every glyph as a shear about the baseline (default 0)
@@ -922,9 +1127,9 @@
 
 % height depth opts sggrow -> advance
 % @kind: Procedure
-% @summary: Appends a growing symbol (sum, product, integral, radical, parentheses, brackets, braces or the bar) sized to span height above to depth below the baseline, starting at the current point, and returns its advance in points. The jitter stays at the text size however tall the symbol grows.
+% @summary: Appends a growing symbol (sum, product, single, double, triple or contour integral, radical, parentheses, brackets, braces, angle brackets, the bar or the double bar) sized to span height above to depth below the baseline, starting at the current point, and returns its advance in points. The jitter stays at the text size however tall the symbol grows.
 % @example: (lib/handscript.ps) run (lib/strokeglyphs.ps) run newpath 72 400 moveto 60 30 << /Symbol /parenleft /Size 30 >> sggrow pop 2 setlinewidth stroke
-% @param: /Symbol [name] One of /summation /product /integral /radical /parenleft /parenright /bracketleft /bracketright /braceleft /braceright /bar (required)
+% @param: /Symbol [name] One of /summation /product /integral /iint /iiint /oint /radical /parenleft /parenright /bracketleft /bracketright /braceleft /braceright /bar /angleleft /angleright /dblbar (required)
 % @param: /Span [points] For /radical only, how far the vinculum runs to the right of the sign, over the content (default 0)
 % @param: /Size [points] The text em size, which sets the jitter scale and the minimum widths (default 36)
 % @param: /Slant [degrees] Shear about the baseline, as for sgpath (default 0)
