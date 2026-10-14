@@ -1,0 +1,26 @@
+# Markdown link check (issue #248): every relative link, image and #fragment in
+# the repo's tracked Markdown must resolve, and so must links into this repo's
+# own GitHub tree. A separate workflow from ci.yml on purpose: it needs only
+# python3 (no Rust build), so it is fast and cheap, and a broken link reads as
+# its own failure on the PR. External URLs are not checked (they are flaky in
+# CI); the built site has its own checker (scripts/check_site_links.py).
+# docs/archive/ and notes/ are skipped; see scripts/check_md_links.py.
+name: links
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  markdown-links:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unit tests for the checker
+        run: python3 scripts/test_check_md_links.py
+      - name: Check Markdown links
+        run: python3 scripts/check_md_links.py

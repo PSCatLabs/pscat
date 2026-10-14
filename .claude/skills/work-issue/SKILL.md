@@ -117,7 +117,7 @@ Then re-read `$WORKTREE_DIR/.claude/skills/work-issue/SKILL.md` (it may have cha
 
 ## 5. Implement
 
-1. Read every file before you Edit it. Follow AGENTS.md's "Code quality bar"; write notes in `notes/<N>-<slug>.md` (never NOTES.md), update HANDOFF.md/README.md.
+1. Read every file before you Edit it. Follow AGENTS.md's "Code quality bar"; write notes in `notes/<N>-<slug>.md` (never NOTES.md), update HANDOFF.md and the matching `docs/guides/` page (README.md is a short front door; edit it only for a headline change).
 2. If a human could look at the result (art, template, chart, font), read `.claude/skills/work-issue/references/demo-surfaces.md` now.
 3. Commit at checkpoints; heartbeat at each. Evidence sweeps, scratch dirs: pitfalls.md "Evidence runs and scratch hygiene".
 4. Deferred work becomes an issue, not just a notes line (keep the URLs for the report):

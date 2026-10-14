@@ -103,8 +103,10 @@ predates it.
   `} def`: unbound, gs looks up every operator in it at run time and runs
   1.5 to 3 times slower (`notes/307-bind-library-procedures.md`,
   `notes/318-bind-drychalk.md`, `notes/326-bind-drycharcoal.md`). `tests/libbind.rs` enforces it.
-- Keep `README.md` accurate to *current* state, not aspirational state.
-  Update it as capabilities land, not just at the end.
+- Keep the docs accurate to *current* state, not aspirational state.
+  Update them as capabilities land, not just at the end. User-facing
+  how-to goes in the matching page of `docs/guides/`; `README.md` is a
+  short front door and gets a line only for a new headline capability.
 
 ## Where things live
 
@@ -142,7 +144,7 @@ If you're an agent that just needs to *run* PostScript — render a
 file, debug one, generate a handwritten note — read
 `.claude/skills/pscat/SKILL.md`: it has the command recipes and
 pitfalls in one page, regardless of which agent runtime you are.
-MCP-wired agents can use `pscat-mcp` instead (README, "For agents").
+MCP-wired agents can use `pscat-mcp` instead (`docs/guides/agents.md`).
 
 <!-- sdlcify:managed:start -->
 ## SDLC

@@ -186,8 +186,8 @@ Arrow keys browse completed pages in any window mode.
   behavioral oracle (see AGENTS.md).
 - MCP alternative: `pscat-mcp` (same target dir) exposes
   `render_postscript`, `handwrite`, and `eval_postscript` as MCP
-  tools over stdio, for agents wired that way. See README "For
-  agents".
+  tools over stdio, for agents wired that way. See
+  `docs/guides/agents.md`.
 - Browser/JS alternative: `./scripts/build_wasm.sh` then serve
   `web/` — `web/pscat.js` runs and renders PostScript in a page
   (`Pscat.load()`, `run`/`begin`/`step`, `paintTo(canvas)`);
