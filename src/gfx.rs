@@ -100,6 +100,19 @@ impl PsPath {
         out
     }
 
+    /// Device-space bounding box `[llx, lly, urx, ury]` of every path
+    /// point, curve control points included (the PLRM allows it, and gs
+    /// does it). `None` for an empty path.
+    fn device_bbox(&self) -> Option<[f32; 4]> {
+        let mut pts = self.points().into_iter();
+        let first = pts.next()?;
+        let mut b = [first.x, first.y, first.x, first.y];
+        for p in pts {
+            b = [b[0].min(p.x), b[1].min(p.y), b[2].max(p.x), b[3].max(p.y)];
+        }
+        Some(b)
+    }
+
     pub(crate) fn curve_to(&mut self, c1: DevPoint, c2: DevPoint, p: DevPoint) {
         self.segs.push(Seg::Curve(c1, c2, p));
         self.current = Some(p);
@@ -2133,16 +2146,20 @@ impl Gfx {
         Some(out)
     }
 
-    /// Bounding box of the current path in user space (control points
-    /// included, per the PLRM's allowance).
+    /// `pathbbox`: the user-space box of the path's device-space bounding
+    /// box, as Ghostscript computes it (issue #288). The device box is
+    /// taken first (control points included), then its four corners are mapped back through the inverse CTM and
+    /// min/maxed. Under a rotation or skew that is larger than the tight
+    /// user-space box of the path; with an axis-aligned CTM the two agree.
     pub fn path_bbox(&self) -> Result<(f64, f64, f64, f64), PsError> {
-        let pts = self.state.path.points();
-        if pts.is_empty() {
-            return Err(PsError::NoCurrentPoint);
-        }
+        let [dlx, dly, dux, duy] = self
+            .state
+            .path
+            .device_bbox()
+            .ok_or(PsError::NoCurrentPoint)?;
         let (mut lx, mut ly, mut ux, mut uy) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
-        for p in pts {
-            let (x, y) = self.device_to_user(p)?;
+        for (x, y) in [(dlx, dly), (dux, dly), (dux, duy), (dlx, duy)] {
+            let (x, y) = self.device_to_user(DevPoint { x, y })?;
             lx = lx.min(x);
             ly = ly.min(y);
             ux = ux.max(x);

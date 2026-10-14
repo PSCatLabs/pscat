@@ -344,8 +344,11 @@ dominant run plus supporting runs by anchors/offsets against measured
 draws (per-run `/Draw` proc, so `psyletter` can slot in),
 `hlrunink`/`hlcharink`/`hlink` read the geometry back. Gotcha worth
 remembering repo-wide: `pathbbox` after `charpath` includes the trailing
-advance-point `moveto` and (unflattened) Bezier control points — walk
-the flattened path instead (NOTES.md has the details).
+advance-point `moveto` (gs ignores a trailing moveto; #316) and
+(unflattened) Bezier control points — walk the flattened path instead
+(NOTES.md has the details). Under a rotated or skewed CTM `pathbbox` is
+gs's box: the user-space box of the *device* bbox, larger than the tight
+user-space box (#288, `notes/288-pathbbox-rotated-ctm.md`).
 `examples/headline.ps` is the specimen (shirt front + `Tuesday`), with a
 site card. The final shirt using #144's treatment is a follow-up.
 Also done: issue #144, psychedelic display lettering — `lib/lettering.ps`
