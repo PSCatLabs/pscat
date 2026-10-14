@@ -22,8 +22,8 @@ takes a draw from the caller's `rand`:
   `/Dropout` or width range, so it draws nothing (the advisor's plan review). The hook
   splits each line into hand strokes, `/Length` × 0.6..1.4, with a small jog across
   the line. It draws from drykit's `dkrand`, re-seeded per line from (`/Seed`, layer,
-  line index), so pscat and gs lay identical strokes. The gs block comparison is 0.99
-  against 4.41 for another seed.
+  line index), so pscat and gs lay identical strokes. The gs block comparison is 1.27
+  against 5.17 for another seed.
 - **One touch per call.** Catches are shared only between runs with equal touch,
   streak and colour, so varying touch per stroke split them. Two touch bands cost 2×
   the catch time, so the value varies width and layer count instead. A *number*
@@ -38,7 +38,7 @@ takes a draw from the caller's `rand`:
   because a batch renders under the clip in force at its end. So `dhhatch` refuses to
   run inside a caller's `dkbatch`, and two `dhhatch` calls over the same area grey
   each other's crossings. `tests/drycharcoal.rs::one_call_keeps_crossings_dark`
-  measures it at two levels: one call gives mean luma 125.6, two calls 137.1. Filed
+  measures it at two levels: one call gives mean luma 125.9, two calls 137.1. Filed
   as #312: per-record clips in `dkbatch`.
 - **A `/Value` procedure that returns a non-number** raises
   `dhhatch-value-procedure-must-return-a-number` after the batch closes. Raising from
@@ -102,7 +102,7 @@ time, so the numbers below are inflated by up to about 1.5×.
   copies the values it needs into its record.
 
 **Tests** (`tests/drycharcoal.rs`, 11):
-- the two value scales are monotone (hatching 239 → 79, smudging 239 → 46 luma);
+- the two value scales are monotone (hatching 239 → 80, smudging 239 → 55 luma);
 - a `/Value` ramp shades across its region;
 - one call keeps crossings darker than two;
 - a kneaded lift is grey and never paper, and a hard eraser is lighter along its line;
