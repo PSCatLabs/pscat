@@ -165,11 +165,18 @@
     newpath 120 232 moveto 175 200 lineto 240 170 lineto 240 0 lineto
     150 0 lineto 128 120 lineto closepath fill
 }  def
+% Each pull bows a little and its lanes are jittered (/Jitter), so the
+% edges break up the way paint leaves a blade; a straight pull with
+% /Jitter 0 has hard parallel edges and reads as a strip of tape (#298).
 /ldpull {                                    % x0 y0 x1 y1 seed -
     srand
     /ldy1 exch def /ldx1 exch def /ldy0 exch def /ldx0 exch def
-    newpath ldx0 ldy0 moveto ldx1 ldy1 lineto
-    << /Width 34 /Coverage 0.95 /Scrape 0.15 /EdgeBuildup 0 /ColorJitter 0.02
+    newpath ldx0 ldy0 moveto
+    ldx0 2 mul ldx1 add 3 div 4 add ldy0 2 mul ldy1 add 3 div
+    ldx0 ldx1 2 mul add 3 div 3 sub ldy0 ldy1 2 mul add 3 div
+    ldx1 ldy1 curveto
+    << /Width 34 /Coverage 0.88 /Scrape 0.15 /EdgeBuildup 0 /Jitter 0.8
+       /Drag 0.5 /ColorJitter 0.02
        /Colors [ ldSNOW ldICE ] /ColorMix 0.8 /Light 180 >> pktrowel
 } def
 /ldsnow {
