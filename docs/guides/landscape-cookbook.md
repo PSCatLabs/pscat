@@ -281,12 +281,14 @@ grestore
 - A **band** is `pkwet /Soft 0.6` with `/Under` a colour between the range and the sky.
 - A **foot** is a directional `pkwet`: `/Direction 90 /OneSided true /Stretch 8 /Offset 30 /Layers 14 /Under` the range's colour. The wrapped spray is tapped along the foot and lifted up the slope in layers, so the foot dissolves into the haze rising off the lake. Clip to the range's silhouette first so the haze stays inside the range.
 - Keep `/Layers` pinned while tuning: with `/Layers` left to default, a directional `/Offset` also sets the depth and re-rolls everything after it.
-- Expect a granular fringe at 2x. The dense core fuses and the falloff stays granular; that grain is what makes it vapour and not a gradient, and Alpine Lake's mist is the same at its 2x still. Only a coarser speck than 1 pt turns it into static.
+- Expect a granular fringe at 2x. The dense core fuses and the falloff stays granular; that grain is what makes it vapour and not a gradient, and Alpine Lake's mist band is the same at its 2x still. Only a coarser speck than 1 pt turns it into static.
+- A lifted foot repeats whatever it wraps once per layer, so spray in it should be a fine grain and not the body of the haze: let a solid band carry the lift (a wavering top keeps the layers' steps from ruling) and keep the spray sparse and fine (`/Speck 0.6`, `/Density` about 50). Alpine Lake does this since issue #206.
 
 **Failures.**
 - *Ruled stripes.* Alpine Lake's first mist was a stack of horizontal `pkbroad` strokes whose charge fell as they rose; at 2x it read as ruled stripes. Use the directional lift.
 - *A pale rim round the foot.* `/Under` should be the colour that is really behind the foot, not the mist. Where the range is half faded already, mix it. Where the sky changes down a tall foot, a procedural `/Under` with `/Box` and `/Bands` asks for the backdrop band by band (recipe 2); pin `/Layers` low, since a foot's 14 layers leave room for only 4 cells.
 - *Static.* Speck too coarse, or `/Density` too low; raise it.
+- *Gravel in a lifted foot.* 1 pt spray at a sparse density, repeated through 14 layers, reads as a coarse speckled band, not haze. Carry the lift on the band and make the spray finer (above).
 - *A lifted foot that stops a reflection.* A directional `pkwet` nested inside another multiplies their passes, and the innermost procedure may run at most 64 times; pull the reflection of a part that already has a lifted foot sharp instead of pulling it again (Alpine Lake's `35 lksharp`, recipe 9).
 
 ```postscript
@@ -573,12 +575,14 @@ newpath 290 52 moveto
 **Settings.**
 - Water is the sky mirrored about the waterline in thin bands, a little darker (`0.84` to `0.86` of the sky's colour), so it is lightest at the far shore and deepens toward the viewer.
 - Horizontal strokes of a broad brush that runs out (`/Charge 0.25 /Depletion 0.9`) leave the colour beneath showing between them; that is the water's surface.
-- Light lines: a fine liner (`/Width 1.1 /Taper 0.6 /Waver 0.3`) in the sky's colour, densest just below the far shore (`chance` squared biases the spread), sparser toward the viewer. A last line where the shore meets its reflection ties them together.
+- Light lines: a fine liner (`/Width 1.1 /Taper 0.6 /Waver 0.3`) in the sky's colour, densest just below the far shore (`chance` squared biases the spread), sparser toward the viewer. A last line where the shore meets its reflection ties them together. Alpine Lake (issue #206) breaks each into a short run of glints of uneven length, width and strength, and the shore line into lengths.
+- Over a reflection, mix the horizontal pulls some way toward the reflected colour they cross: a pull in the pure sky colour reads as a pale rule across a dark reflected wood.
 - For moving water, `pkzigzag` builds a zig-zag about a guide path and a narrow `pkbroad` loaded with the glow and the water colour paints it (Evening Stream).
 
 **Failures.**
 - *Water that reads as a flat sheet.* Without the horizontal pulls the surface has nothing on it; vary their starts and lengths.
 - *Light lines that look like scratches.* Too white, too many, or evenly spread; use the sky's own colour.
+- *Ruled lines.* Long pulls of one width, and a low-charge brush running out to one or two striations over hundreds of points, read as rules drawn across the lake. Keep pulls short and vary their width.
 
 ```postscript
 % recipe: water
@@ -638,6 +642,7 @@ newpath -10 WL 3 sub moveto 370 WL 3 sub lineto
 - **Inherited colour.** `pkwet` grades a pass by setting a mixed colour before the procedure runs, so a procedure that calls `setrgbcolor` draws every pass at full strength and the pull comes out as hard echoes. Set the colour first (mixed a little toward the water, as the snippet does), and never call `setrgbcolor` inside.
 - Pass `/Under` the colour of the water where the reflection falls, and clip to the water.
 - Then graze horizontal strokes of the water colour across the reflection with a low-charge `pkbroad`, so the reflection shows between the strokes.
+- A bright part (snow) goes in well toward the water's colour, since a reflection is darker and lower in contrast than what it mirrors; at the foot of the lake, short ripples in the reflected range's own colour vanish on the range and break the snow into bands (Alpine Lake, issue #206).
 
 **An element with several colours.** An element that sets its own colours (a snow range with white, shadow and rock) cannot be pulled whole. Alpine Lake handles it by recording: every painting step in each element is a numbered checkpoint that logs the random state (`rrand`) as it paints; in the lake the whole scene runs again under `1 -1 scale`, and a checkpoint paints only when its code is the one asked for, after restoring its logged state (`srand`), so one single-colour part at a time is pulled down with its own directional `pkwet` and its own `/Under`. Geometry and clips run in both modes, since they draw nothing. See `lkdo`, `lkpull` and `lksharp` in `gallery/alpine_lake.ps`. It is too much to be a short snippet, so prefer the whole-element pull when you can arrange it: load the colours onto the brush with `/Colors` (and `pkdab`'s `/HighlightColor`), as Evening Stream does for its far wood.
 
