@@ -137,8 +137,10 @@ The psart skill has the table.
 
 | | pscat | gs |
 |---|---|---|
-| `examples/mathkit_specimen.ps`: 14 formulas, an `/Irregular` row and a chalk board | 0.60 s at 1x, 0.70 s at 2x | 0.29 s |
+| `examples/mathkit_specimen.ps`: 14 formulas, an `/Irregular` row and a chalk board | 0.60 s at 1x, 0.70 s at 2x (0.68 s thread CPU under `--profile ci`, the test's 2 s budget) | 0.29 s |
 | one display formula (quadratic, Taylor) | about 10 ms | |
+
+`docs/drymedia/mathkit_specimen.png` is the specimen at 2x (`--dpi 144`).
 
 **Deferred** (filed):
 

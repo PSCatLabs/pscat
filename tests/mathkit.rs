@@ -9,14 +9,21 @@
 //! error text a user actually sees, the catalog examples, the specimen,
 //! and Ghostscript building the same layout and path.
 
+mod common;
+
+use common::within_cpu_budget;
 use pscat::Interp;
+use std::time::Duration;
 
 const LIBS: [&str; 3] = ["lib/handscript.ps", "lib/strokeglyphs.ps", "lib/mathkit.ps"];
 
 /// The fixed test set (issue #237's acceptance), as the specimen draws it.
 /// Each TeX backslash is doubled for the PostScript string.
 const TEST_SET: [(&str, &str); 14] = [
-    ("quadratic formula", r"x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}"),
+    (
+        "quadratic formula",
+        r"x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}",
+    ),
     ("Euler's identity", r"e^{i\\pi} + 1 = 0"),
     (
         "Gaussian integral",
@@ -93,7 +100,10 @@ fn numbers(it: &mut Interp) -> Vec<f64> {
     let repr = arr.repr();
     repr.trim_matches(|c| c == '[' || c == ']')
         .split_whitespace()
-        .map(|t| t.parse::<f64>().unwrap_or_else(|_| panic!("not a number: {t}")))
+        .map(|t| {
+            t.parse::<f64>()
+                .unwrap_or_else(|_| panic!("not a number: {t}"))
+        })
         .collect()
 }
 
@@ -143,12 +153,27 @@ fn the_fixed_test_set_lays_out_in_a_headless_pass() {
         );
         let b = numbers(&mut it);
         let tol = 3.0;
-        assert!(b[0] >= 100.0 - tol, "{name}: ink starts left of the box: {b:?}");
-        assert!(b[2] <= 100.0 + w + tol, "{name}: ink ends past the box: {b:?} w={w}");
-        assert!(b[1] >= 300.0 - d - tol, "{name}: ink below the box: {b:?} d={d}");
-        assert!(b[3] <= 300.0 + h + tol, "{name}: ink above the box: {b:?} h={h}");
+        assert!(
+            b[0] >= 100.0 - tol,
+            "{name}: ink starts left of the box: {b:?}"
+        );
+        assert!(
+            b[2] <= 100.0 + w + tol,
+            "{name}: ink ends past the box: {b:?} w={w}"
+        );
+        assert!(
+            b[1] >= 300.0 - d - tol,
+            "{name}: ink below the box: {b:?} d={d}"
+        );
+        assert!(
+            b[3] <= 300.0 + h + tol,
+            "{name}: ink above the box: {b:?} h={h}"
+        );
     }
-    assert!(it.operand_stack().is_empty(), "the test set leaked operands");
+    assert!(
+        it.operand_stack().is_empty(),
+        "the test set leaked operands"
+    );
 }
 
 #[test]
@@ -191,17 +216,29 @@ fn the_layout_is_deterministic_and_seeded() {
 #[test]
 fn unsupported_tex_fails_with_an_error_that_names_it() {
     for (src, expect) in [
-        (r"(\\iint f) 0 0 << >> mkpath", r"mk-unsupported-command:\iint"),
-        (r"(a \\star b) 0 0 << >> mkpath", r"mk-unsupported-command:\star"),
+        (
+            r"(\\iint f) 0 0 << >> mkpath",
+            r"mk-unsupported-command:\iint",
+        ),
+        (
+            r"(a \\star b) 0 0 << >> mkpath",
+            r"mk-unsupported-command:\star",
+        ),
         ("(a * b) 0 0 << >> mkpath", "mk-unsupported-character:*"),
         (
             r"(\\begin{array} x \\end{array}) 0 0 << >> mkpath",
             "mk-unsupported-environment:array",
         ),
         // the commonest mistake: one backslash, eaten by the string
-        (r"(\sqrt{2}) 0 0 << >> mkpath", "mk-bare-word-needs-a-backslash:sqrt"),
+        (
+            r"(\sqrt{2}) 0 0 << >> mkpath",
+            "mk-bare-word-needs-a-backslash:sqrt",
+        ),
         (r"(\nabla f) 0 0 << >> mkpath", "mk-control-character"),
-        (r"(\\frac{1}) 0 0 << >> mkpath", r"mk-missing-argument:\frac"),
+        (
+            r"(\\frac{1}) 0 0 << >> mkpath",
+            r"mk-missing-argument:\frac",
+        ),
     ] {
         let mut it = with_libs();
         let err = it
@@ -230,24 +267,28 @@ fn every_example_tag_runs_clean() {
         let mut it = Interp::with_page(300, 200).expect("page");
         it.run_str(example)
             .unwrap_or_else(|e| panic!("@example {example:?} failed: {}", it.error_report(&e)));
-        assert!(ink_count(&it) > 0 || example.contains("mkmetrics"), "{example} drew nothing");
+        assert!(
+            ink_count(&it) > 0 || example.contains("mkmetrics"),
+            "{example} drew nothing"
+        );
     }
 }
 
 /// The specimen draws the whole test set, an /Irregular row and a chalk
-/// board through mkalign's /Ink. A guard, not a benchmark: it takes about
-/// 0.7 s in a release build, and the dry-media budget for a specimen is 10 s.
+/// board through mkalign's /Ink. A guard, not a benchmark: about 0.6 s of
+/// CPU in a release build, against DRYMEDIA's 2 s for a CI test render
+/// (thread CPU time, best of 3, as AGENTS.md asks).
 #[test]
 fn the_specimen_renders_with_ink_and_a_clean_stack() {
     let src = std::fs::read("examples/mathkit_specimen.ps").expect("specimen present");
-    let t0 = std::time::Instant::now();
-    let mut it = Interp::with_page(1000, 1960).expect("page");
-    it.run_source(&src)
-        .unwrap_or_else(|e| panic!("specimen failed: {}", it.error_report(&e)));
-    let secs = t0.elapsed().as_secs_f64();
+    let it = within_cpu_budget("mathkit specimen", Duration::from_secs(2), 3, || {
+        let mut it = Interp::with_page(1000, 1960).expect("page");
+        it.run_source(&src)
+            .unwrap_or_else(|e| panic!("specimen failed: {}", it.error_report(&e)));
+        it
+    });
     assert!(it.operand_stack().is_empty(), "specimen leaked operands");
     assert!(ink_count(&it) > 30_000, "specimen drew too little ink");
-    assert!(secs < 10.0, "the specimen took {secs:.1}s, over the 10s budget");
 }
 
 /// mkalign aligns its lines on `&` (or before the first relation): with no
