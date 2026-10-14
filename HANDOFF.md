@@ -490,7 +490,15 @@ renders eight examples in both and compares block-downsampled output).
   than an analytically exact intersection — a superset by construction
   (any nonzero-coverage pixel counts as inside), not a pixel-perfect
   boundary. A single, non-nested clip is unaffected: it still returns
-  the exact original path, bit-for-bit.
+  the exact original path, bit-for-bit. It also drops the `eoclip` rule.
+  For an exact capture and replay of the clip in force, use a Level 2
+  `gstate` object (#394): `setgstate` restores the same mask and chain.
+- `gstate` objects (#394): `gstate`, `currentgstate`, `setgstate`, and
+  `copy` between two gstates; `currentgstate`/`copy` are journaled, so
+  `restore` undoes them, as in gs. No local/global VM distinction, no
+  `invalidaccess` for a read-only gstate. A program that `setgstate`s an
+  older clip back makes the exporters reopen that clip's `Rc`; SVG reuses
+  its `clipPath` id.
 - `shfill` (issue #20): `FunctionType` restricted to 2 (exponential)
   and 3 (stitching) — 0 (sampled) and 4 (calculator) unsupported,
   since those would need the same `Frame::PostOp` reentrancy
@@ -620,7 +628,9 @@ renders eight examples in both and compares block-downsampled output).
    through drykit's `dkclip` (#312, `notes/312-dkbatch-per-record-clip.md`):
    a `dkstroke` made inside `{ ... } dkclip` keeps that region when its
    batch renders later. A plain `clip` inside a batch is still not kept
-   (pscat's `clippath` can't hand back a nested clip exactly).
+   (pscat's `clippath` can't hand back a nested clip exactly). Level 2
+   `gstate`/`currentgstate`/`setgstate` (#394, `notes/394-gstate-objects.md`)
+   can: a gstate holds the clip chain's `Rc`. drykit's adoption is #444.
    #393: `dkstroke /After true` in a batch is drawn on its own after the
    batch renders, in call order, in its own colour; `dhsmudge` and `dhlift`
    use it, so they run inside a batch, over everything the batch lays
