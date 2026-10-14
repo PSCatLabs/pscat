@@ -58,6 +58,13 @@ the PR/issue comment (below) that this was a same-family fallback, not
 policy, so a human knows to expect a real Codex pass once the runtime
 is fixed.
 
+**Codex reviews read-only and cannot run harnesses (#303).** Its sandbox runs no scripts, races or
+renders; its own comments say "runtime tests were not run" (#276 rounds 1 and 2). A clean Codex pass
+therefore says nothing about runtime behaviour. For a change to concurrency, locking, timing or shell
+scripts, the review that counts is the `advisor` call plus real load runs you do yourself (the race
+test, a repeated stress loop, a negative check with the guard disabled). Say so in the review-round
+comment instead of presenting Codex's "no findings" as the verification, and still post Codex's review.
+
 Otherwise, run the Codex review from inside `$WORKTREE_DIR` — cwd can
 reset between tool calls (see Pitfalls), and a review run from the
 wrong directory reviews the wrong tree and still returns a confident

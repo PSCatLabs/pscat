@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # identity_check.sh -- shared cross-tree PNG byte-identity check for paintkit
-# slices (issue #263).
+# slices (issue #263), and (--loader / --files, #303) for any lib change that
+# must render identically.
 #
 #   scripts/identity_check.sh BASE_WORKTREE [BIN] [options]
 #
@@ -9,7 +10,8 @@
 # by hand; this script is that proof, written once. It renders every tracked
 # file that loads lib/paintkit.ps -- `examples/*.ps`, `gallery/*.ps` and
 # `selftest/drivers/*.ps` -- from two trees with ONE binary, and compares the
-# PNGs byte for byte.
+# PNGs byte for byte. Any other lib change that must render identically uses
+# `--loader lib/<name>.ps` (below) to pick the files instead.
 #
 #   BASE_WORKTREE  a checkout of the baseline. It MUST be at the branch's base
 #                  commit (what the branch was last rebased onto, i.e. after
@@ -41,8 +43,25 @@
 #   * Files come from `git ls-files` in the branch tree, so untracked scratch
 #     files never join in. A file absent from the base (a new demo) is listed
 #     as `new` and is not compared.
+#   * A multi-page file is compared page by page: pscat writes page-001.png,
+#     page-002.png, ... (a single page is page.png). The page lists must match
+#     in both trees, then each page is compared and reported as `page N`.
 #
 # Options
+#   --loader LIB          pick the files that load LIB (e.g. lib/artkit.ps)
+#                         instead of lib/paintkit.ps. Repeatable. The pick is
+#                         TRANSITIVE: a lib that loads LIB (`(lib/x.ps) run`,
+#                         also in a `% @requires:` line) counts as a loader too,
+#                         so --loader lib/artkit.ps also covers every file that
+#                         reaches artkit through paintkit, drykit, ... The
+#                         libs found are listed on stderr. A file mentioned
+#                         only inside a comment is over-included, never missed.
+#                         Without --loader (or --files) the pick is exactly
+#                         the old one: files that load lib/paintkit.ps.
+#   --files LIST          also (or instead, with no --loader) render the files
+#                         listed in LIST: one repo-relative path per line, blank
+#                         lines and `#` comments ignored, each tracked in the
+#                         branch tree. Use it for a slice no loader describes.
 #   --control FILE        negative control. A tiny driver that uses a key only
 #                         the branch has. It is rendered from both trees and the
 #                         PNGs must DIFFER, which proves each tree really loaded
@@ -101,6 +120,8 @@ BASE=""
 BIN=""
 CONTROL=""
 CONTROL_PAGE=""
+LOADERS=""       # newline-separated --loader libs (empty = lib/paintkit.ps)
+FILES_LIST=""    # --files LIST
 GALLERY_STILL=0
 DPI=72
 GALLERY_DPI=144
@@ -111,6 +132,10 @@ positional=0
 
 while [ $# -gt 0 ]; do
     case "$1" in
+        --loader)        [ $# -ge 2 ] || die "--loader needs a lib path such as lib/artkit.ps"
+                         LOADERS="${LOADERS:+$LOADERS
+}$2"; shift 2 ;;
+        --files)         [ $# -ge 2 ] || die "--files needs a list file"; FILES_LIST=$2; shift 2 ;;
         --control)       [ $# -ge 2 ] || die "--control needs a file"; CONTROL=$2; shift 2 ;;
         --control-page)  [ $# -ge 2 ] || die "--control-page needs WxH"; CONTROL_PAGE=$2; shift 2 ;;
         --gallery-still) GALLERY_STILL=1; shift ;;
@@ -135,8 +160,26 @@ done
 [ -n "$BASE" ] || die "usage: identity_check.sh BASE_WORKTREE [BIN] [options]"
 [ -d "$BASE" ] || die "BASE_WORKTREE '$BASE' is not a directory"
 BASE="$(cd "$BASE" && pwd -P)"
-[ -f "$BASE/lib/paintkit.ps" ] || die "$BASE has no lib/paintkit.ps"
-[ -f "$ROOT/lib/paintkit.ps" ] || die "$ROOT has no lib/paintkit.ps"
+# The libs that pick the files. Default: lib/paintkit.ps (the old behaviour).
+DEFAULT_LOADER=0
+if [ -z "$LOADERS" ] && [ -z "$FILES_LIST" ]; then
+    LOADERS="lib/paintkit.ps"
+    DEFAULT_LOADER=1
+fi
+while IFS= read -r l; do
+    [ -n "$l" ] || continue
+    case "$l" in lib/*.ps) ;; *) die "--loader '$l' must look like lib/<name>.ps" ;; esac
+    [ -f "$BASE/$l" ] || die "$BASE has no $l"
+    [ -f "$ROOT/$l" ] || die "$ROOT has no $l"
+done <<EOF_LOADERS
+$LOADERS
+EOF_LOADERS
+if [ -n "$FILES_LIST" ]; then
+    [ -f "$FILES_LIST" ] || die "--files list '$FILES_LIST' not found"
+    FILES_LIST="$(cd "$(dirname "$FILES_LIST")" && pwd -P)/$(basename "$FILES_LIST")"
+fi
+LOADER_DESC=$(printf '%s' "$LOADERS" | tr '\n' ' ' | sed 's/ *$//')
+[ -n "$LOADER_DESC" ] || LOADER_DESC="the --files list"
 if [ "$BASE" = "$ROOT" ]; then
     die "BASE_WORKTREE is this tree itself; pass a separate checkout of the base commit"
 fi
@@ -221,15 +264,60 @@ key_of() { printf '%s' "$1" | sed 's|/|__|g'; }
 
 FILES="$OUT/files.txt"
 : > "$FILES"
-while IFS= read -r f; do
-    [ -n "$f" ] || continue
-    if grep -qE '\(lib/paintkit\.ps\)' "$ROOT/$f"; then
-        printf '%s\n' "$f" >> "$FILES"
+if [ -n "$LOADERS" ]; then
+    # The libs that load a --loader lib, directly or through another lib. Only in
+    # --loader mode, where a change to a base lib (artkit) reaches most files
+    # through the libs built on it. The default (no --loader) stays the old direct
+    # match on lib/paintkit.ps.
+    SET="$LOADERS"
+    if [ "$DEFAULT_LOADER" -eq 0 ]; then
+        changed=1
+        while [ "$changed" -eq 1 ]; do
+            changed=0
+            for cand in $(git -C "$ROOT" ls-files -- 'lib/*.ps'); do
+                case "$cand" in lib/*/*) continue ;; esac
+                if printf '%s\n' "$SET" | grep -qxF "$cand"; then continue; fi
+                while IFS= read -r m; do
+                    if grep -qF "($m)" "$ROOT/$cand"; then
+                        SET="$SET
+$cand"
+                        changed=1
+                        break
+                    fi
+                done <<EOF_SET
+$SET
+EOF_SET
+            done
+        done
+        echo "identity_check.sh: files that load any of: $(printf '%s' "$SET" | tr '\n' ' ')" >&2
     fi
-done <<EOF_LIST
+    while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        while IFS= read -r m; do
+            if grep -qF "($m)" "$ROOT/$f"; then
+                printf '%s\n' "$f" >> "$FILES"
+                break
+            fi
+        done <<EOF_SET2
+$SET
+EOF_SET2
+    done <<EOF_LIST
 $(git -C "$ROOT" ls-files -- 'examples/*.ps' 'gallery/*.ps' 'selftest/drivers/*.ps')
 EOF_LIST
-[ -s "$FILES" ] || die "no tracked file under examples/, gallery/ or selftest/drivers/ loads (lib/paintkit.ps)"
+fi
+if [ -n "$FILES_LIST" ]; then
+    while IFS= read -r f; do
+        f="${f%%#*}"
+        f=$(printf '%s' "$f" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+        [ -n "$f" ] || continue
+        git -C "$ROOT" ls-files --error-unmatch -- "$f" >/dev/null 2>&1 \
+            || die "--files: '$f' is not a tracked file in $ROOT"
+        printf '%s\n' "$f" >> "$FILES"
+    done < "$FILES_LIST"
+    # drop duplicates, keep order
+    awk '!seen[$0]++' "$FILES" > "$FILES.u" && mv "$FILES.u" "$FILES"
+fi
+[ -s "$FILES" ] || die "no tracked file under examples/, gallery/ or selftest/drivers/ loads ($LOADER_DESC)"
 
 # ---- the job list (gallery first: alpine_lake is the long pole) --------------
 JOBLIST="$OUT/jobs.nul"
@@ -270,7 +358,7 @@ if [ -n "$CONTROL" ]; then
     add_job head "$ROOT" "$CONTROL_KEY" "$cpage" "$DPI" "$CONTROL"
 else
     echo "identity_check.sh: WARNING: no --control given. Without a negative control nothing proves each tree" >&2
-    echo "  loaded its own lib/paintkit.ps, so an all-identical result could mean both used the same one." >&2
+    echo "  loaded its own $LOADER_DESC, so an all-identical result could mean both used the same one." >&2
 fi
 
 # Each job is 5 NUL-separated fields after the fixed `--render-one BIN`; the

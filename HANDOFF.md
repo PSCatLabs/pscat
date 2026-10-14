@@ -847,6 +847,10 @@ renders eight examples in both and compares block-downsampled output).
   commit. Exit 1 = a page differs or pscat errored; exit 2 = the negative
   control rendered identically, so the pages prove nothing. Write the
   control as a tiny driver using a key only the branch has.
+  Since #303 it fits any lib change that must render identically:
+  `--loader lib/<name>.ps` (repeatable, transitive through the libs built on
+  it) or `--files LIST` picks the files, and multi-page output
+  (`page-001.png`, ...) is compared page by page.
 - **A "collect stops, then draw runs" brush must not call the caller's
   `/Pressure` proc inside its per-lane/per-bristle loop.** A caller's
   proc is arbitrary code and may consume randomness (`{ frnd }` is a

@@ -36,6 +36,13 @@ look at.
     PNG under `docs/` (the specimen render) plus an optional site card in `site/gallery.html`,
     backed by a PNG in `_site/assets/renders/` per the rules above.
 
+  A specimen PR that stops at the no-merge path (pitfalls.md "Stop without merging") must **commit
+  its render and embed it** (`![...](docs/<name>.png)` in the PR body or a comment, with an absolute
+  `https://github.com/<owner>/<repo>/blob/<head sha>/docs/<name>.png?raw=true` URL), pinned to the
+  head SHA and rendered **after the final rebase**: a render taken before it can show a library
+  that is no longer the one in the PR (#286 had none, #303). Re-render and re-push if the rebase
+  moved `lib/`.
+
   Copy an existing similar entry's pattern rather than guessing which
   of these apply. An `examples/*.ps` file alone is a regression
   fixture, not a demo; it's fine as the *only* artifact when the

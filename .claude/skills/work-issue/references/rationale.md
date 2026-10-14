@@ -289,3 +289,15 @@ scratchpad but harness prompts do. (#208 reversed this: see below.)
   zero-step infrastructure failure with no newer push.
 - **8.12 query** requires `mergeable == "MERGEABLE"`; a `git merge-tree` check
   runs before the CI wait so a PR that will go DIRTY is caught first.
+
+## Round 7 (#303): why the rebase moved late and the merge re-queries
+
+Both come from runs that were correct when they checked and stale when they merged. The identity
+check, the gate and a committed specimen all describe one tree; a rebase after any of them
+(pulling in `lib/`, `src/` or tests) silently makes the result describe a tree that no longer
+exists. So the rebase is the last thing before those checks, and the pitfalls matrix says what
+to redo when it pulls in code versus docs only. The merge-state query reads GitHub's lazily
+computed `mergeable`/`mergeStateStatus`, which can print `false` or `UNKNOWN` for a few seconds
+after a watch ends even with every check green, so it is repeated right before `gh pr merge`.
+Pattern kills (`pkill -f`) are forbidden outright because every agent on the machine shares one
+process table: only a PID you recorded from `$!` is yours.

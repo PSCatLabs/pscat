@@ -5,7 +5,7 @@ under 250 lines). Step numbers refer to `../SKILL.md`; "Pitfalls" means `pitfall
 
 ## Step 9. Post-merge cleanup
 
-Step 9 runs from the **main checkout**, never from `$WORKTREE_DIR` (the block removes
+Step 9 (#303: now also removes the extra step-5 worktrees) runs from the **main checkout**, never from `$WORKTREE_DIR` (the block removes
 that worktree; a shell standing in it breaks). Shell state does not persist, so start the
 Bash call by re-declaring `WORKTREE_DIR` (absolute path) and `BRANCH`, and `cd` to the
 main checkout (`git worktree list` shows it first).
@@ -24,6 +24,10 @@ gh issue view <N> --json labels --jq '[.labels[].name]'   # must list neither in
 gh issue view <N> --json comments --jq '[.comments[].body | select(startswith("## Summary of work"))] | length'   # both counts >= 1
 gh issue view <N> --json comments --jq '[.comments[].body | select(test("^## (Codex|Fallback) review, round"))] | length'
 git worktree remove "$WORKTREE_DIR" 2>&1 || true
+# Extra comparison or base worktrees made in step 5 (the identity base, a before/after tree): list the
+# EXACT paths you recorded when you made them, never a pattern over `git worktree list` (other agents'
+# `-issue-<M>` trees sit in it). --force: a base tree may carry a scratch edit. Delete this line if none.
+for W in <EXTRA_WORKTREE_PATH_1> <EXTRA_WORKTREE_PATH_2>; do git worktree remove --force "$W" 2>&1 || true; done
 git -C "$(git rev-parse --show-toplevel)" branch -D "$BRANCH" 2>&1 || true
 git -C "$(git rev-parse --show-toplevel)" fetch origin --prune
 git -C "$(git rev-parse --show-toplevel)" ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1 && git -C "$(git rev-parse --show-toplevel)" push origin --delete "$BRANCH"   # only if still there
