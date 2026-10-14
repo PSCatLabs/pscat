@@ -39,8 +39,8 @@ Epic #209's last ticket. Builds on #211–#214; read
 ## Decisions
 
 - **One copy, with the type kept open.** `rel-page` passes `/Generation` to the
-  type as `/Copies`; at 1 that already filled most counters and read heavier
-  than T15 at 300 dpi. The piece sets `/Copies 0.35` in the
+  type as `/Copies`; at 1 that already filled most counters and looked heavy
+  at 300 dpi. The piece sets `/Copies 0.35` in the
   `tw-type` dict (the library keeps the content's own value), so the page goes
   through the copier but the type closes up only a little. Recorded as a tip in
   the guide.
