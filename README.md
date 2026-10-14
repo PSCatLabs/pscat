@@ -560,7 +560,10 @@ straight through (`/Width`, `/Angle`, `/Coverage`, `/Scrape`, `/EdgeBuildup`,
 clip, not because of the blade's geometry; each row overruns the area so the
 blade's trim, drag and skew fall outside it. Rows are `Width * cos(Angle) *
 (0.35 + 0.65 * Cover) * (1 - Overlap)` apart, and `/Overlap` unset follows
-`/Coverage` (a patchier blade overlaps more); `/RowJitter` and `/AngleJitter`
+`/Coverage` (a patchier blade overlaps more); a tapering `/Pressure` narrows
+the band, so the rows are spaced for the thinnest it gets inside the area
+(read at 17 points, capped at 1, floored at 0.25) and a taper leaves no gaps
+between rows (issue #362); `/RowJitter` and `/AngleJitter`
 keep the rows from being machine-parallel. Above about `/Overlap 0.5` the rows
 also cover each other's `/Scrape` nicks. Deterministic under the caller's own
 `srand`, at most 4000 rows, the path left as the caller had it. It works
