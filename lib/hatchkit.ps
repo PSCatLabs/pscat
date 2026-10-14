@@ -147,6 +147,20 @@
 %           never *how many* samples are taken
 %           (`hatch-sample-count-exceeds-safety-limit`).
 %
+% Malformed options are rejected, never run (#259). The options operand
+% must be a dict (`hatch-opts-must-be-a-dict`); /Angle /Spacing /Wobble
+% /Dropout /DensityThreshold /Seed /MaxLines /MaxSamples must be numbers
+% (`hatch-<name>-must-be-a-number`); /BBox, /Angles, /Width (when not a
+% number) and /Trim must be literal arrays of numbers -- four, any
+% number, exactly two, exactly two (`hatch-bbox-must-be-four-numbers`,
+% `hatch-angles-must-be-an-array-of-numbers`,
+% `hatch-width-must-be-a-number-or-a-pair`,
+% `hatch-trim-must-be-two-numbers`). An executable array `{ ... }`, an
+% operator or an executable name in any of those slots, or inside one of
+% those arrays, is refused before anything is bound, so its side effect
+% never happens. /Density is the one value meant to run, and stays
+% callable (`hatch-density-must-be-callable`).
+%
 % Reproducibility: for a given /BBox, /Angles order, and seed, the same
 % options draw the same picture, in this interpreter. As with every
 % other rand-driven procedure in this codebase, that pinning is local
@@ -196,6 +210,32 @@
   /hkgdk exch def
   /hkgdt exch def
   hkgdt hkgdk known { hkgdt hkgdk get } { hkgdd 0 get } ifelse
+} def
+
+% v hkisnum -> bool
+% `type` only inspects its operand, so this is safe on a procedure, an
+% operator or an executable name that has not been bound to a name yet
+% (see the "Operand checks" note on `hatch`, #259).
+% @internal
+/hkisnum {
+  type dup /integertype eq exch /realtype eq or
+} def
+
+% v hkliteralarray -> bool  (an array that is *not* executable)
+% An executable array is a procedure, not a list of values: `{ 1 2 }`
+% where a pair belongs would run, and run again on every bare reference
+% once bound.
+% @internal
+/hkliteralarray {
+  dup type /arraytype eq { xcheck not } { pop false } ifelse
+} def
+
+% array hkallnums -> bool  (every element a number; true when empty)
+% `forall` pushes each element and runs only its own body, never the
+% element itself, so a procedure inside the array is inspected, not run.
+% @internal
+/hkallnums {
+  true exch { hkisnum and } forall
 } def
 
 % v hkclamp01 -> v', clamped into [0,1]
@@ -283,6 +323,156 @@
   hktlo hkthi hkhit
 } def
 
+%%SelfTest: hatch-never-executes-a-malformed-options-operand
+%   % #259: a procedure, operator or executable name where the options
+%   % dict belongs used to be bound by `def` and then run by the next bare
+%   % reference, so its side effect happened before a raw stackunderflow.
+%   % Every case asserts the guard *name* and that the side effect never ran.
+%   /tgotfn { /tgot true def } def
+%   /tgot false def
+%   { { /tgot true def } hatch }
+%   /hatch-opts-must-be-a-dict
+%   (a procedure as the options) mustguard
+%   tgot not (a procedure as the options: nothing ran) mustbe
+%   /tgot false def
+%   { /add load hatch }
+%   /hatch-opts-must-be-a-dict
+%   (an operator as the options) mustguard
+%   tgot not (an operator as the options: nothing ran) mustbe
+%   /tgot false def
+%   { /tgotfn cvx hatch }
+%   /hatch-opts-must-be-a-dict
+%   (an executable name as the options) mustguard
+%   tgot not (an executable name as the options: nothing ran) mustbe
+%   /tgot false def
+%   { 5 hatch }
+%   /hatch-opts-must-be-a-dict
+%   (a number as the options) mustguard
+%   tgot not (a number as the options: nothing ran) mustbe
+%%EndSelfTest
+%
+%%SelfTest: hatch-never-executes-a-malformed-numeric-option
+%   % The same hazard one level down. A procedure that leaves a number
+%   % was the worst case: it was silently accepted and re-run on every
+%   % bare reference, so these use a value-returning procedure.
+%   /tgotfn { /tgot true def } def
+%   /tgot false def
+%   { << /BBox [0 0 50 50] /Angle { /tgot true def 1 } >> hatch }
+%   /hatch-angle-must-be-a-number
+%   (a procedure as /Angle) mustguard
+%   tgot not (a procedure as /Angle: nothing ran) mustbe
+%   /tgot false def
+%   { << /BBox [0 0 50 50] /Spacing { /tgot true def 1 } >> hatch }
+%   /hatch-spacing-must-be-a-number
+%   (a procedure as /Spacing) mustguard
+%   tgot not (a procedure as /Spacing: nothing ran) mustbe
+%   /tgot false def
+%   { << /BBox [0 0 50 50] /Wobble { /tgot true def 1 } >> hatch }
+%   /hatch-wobble-must-be-a-number
+%   (a procedure as /Wobble) mustguard
+%   tgot not (a procedure as /Wobble: nothing ran) mustbe
+%   /tgot false def
+%   { << /BBox [0 0 50 50] /Dropout { /tgot true def 1 } >> hatch }
+%   /hatch-dropout-must-be-a-number
+%   (a procedure as /Dropout) mustguard
+%   tgot not (a procedure as /Dropout: nothing ran) mustbe
+%   /tgot false def
+%   { << /BBox [0 0 50 50] /DensityThreshold { /tgot true def 1 } >> hatch }
+%   /hatch-density-threshold-must-be-a-number
+%   (a procedure as /DensityThreshold) mustguard
+%   tgot not (a procedure as /DensityThreshold: nothing ran) mustbe
+%   /tgot false def
+%   { << /BBox [0 0 50 50] /Seed { /tgot true def 1 } >> hatch }
+%   /hatch-seed-must-be-a-number
+%   (a procedure as /Seed) mustguard
+%   tgot not (a procedure as /Seed: nothing ran) mustbe
+%   /tgot false def
+%   { << /BBox [0 0 50 50] /MaxLines { /tgot true def 1 } >> hatch }
+%   /hatch-maxlines-must-be-a-number
+%   (a procedure as /MaxLines) mustguard
+%   tgot not (a procedure as /MaxLines: nothing ran) mustbe
+%   /tgot false def
+%   { << /BBox [0 0 50 50] /MaxSamples { /tgot true def 1 } >> hatch }
+%   /hatch-maxsamples-must-be-a-number
+%   (a procedure as /MaxSamples) mustguard
+%   tgot not (a procedure as /MaxSamples: nothing ran) mustbe
+%   /tgot false def
+%   { << /BBox [0 0 50 50] /Spacing /add load >> hatch }
+%   /hatch-spacing-must-be-a-number
+%   (an operator as /Spacing) mustguard
+%   tgot not (an operator as /Spacing: nothing ran) mustbe
+%   /tgot false def
+%   { << /BBox [0 0 50 50] /Spacing /tgotfn cvx >> hatch }
+%   /hatch-spacing-must-be-a-number
+%   (an executable name as /Spacing) mustguard
+%   tgot not (an executable name as /Spacing: nothing ran) mustbe
+%%EndSelfTest
+%
+%%SelfTest: hatch-never-executes-a-malformed-array-option
+%   % /BBox, /Angles, /Width and /Trim take literal arrays of numbers.
+%   % An executable array is a procedure, and so is a procedure sitting
+%   % in one of the array's elements: each is checked before `aload` or
+%   % a bind, and neither runs.
+%   /tgotfn { /tgot true def } def
+%   /tgot false def
+%   { << /BBox { /tgot true def 0 0 50 50 } >> hatch }
+%   /hatch-bbox-must-be-four-numbers
+%   (a procedure as /BBox) mustguard
+%   tgot not (a procedure as /BBox: nothing ran) mustbe
+%   /tgot false def
+%   { << /BBox [ { /tgot true def 1 } 0 50 50 ] >> hatch }
+%   /hatch-bbox-must-be-four-numbers
+%   (a procedure in /BBox) mustguard
+%   tgot not (a procedure in /BBox: nothing ran) mustbe
+%   /tgot false def
+%   { << /BBox [ 0 0 50 /tgotfn cvx ] >> hatch }
+%   /hatch-bbox-must-be-four-numbers
+%   (an executable name in /BBox) mustguard
+%   tgot not (an executable name in /BBox: nothing ran) mustbe
+%   /tgot false def
+%   { << /BBox [0 0 50 50] /Angles { /tgot true def 30 } >> hatch }
+%   /hatch-angles-must-be-an-array-of-numbers
+%   (a procedure as /Angles) mustguard
+%   tgot not (a procedure as /Angles: nothing ran) mustbe
+%   /tgot false def
+%   { << /BBox [0 0 50 50] /Angles [ { /tgot true def 1 } ] >> hatch }
+%   /hatch-angles-must-be-an-array-of-numbers
+%   (a procedure in /Angles) mustguard
+%   tgot not (a procedure in /Angles: nothing ran) mustbe
+%   /tgot false def
+%   { << /BBox [0 0 50 50] /Width { /tgot true def 1 2 } >> hatch }
+%   /hatch-width-must-be-a-number-or-a-pair
+%   (a procedure as /Width) mustguard
+%   tgot not (a procedure as /Width: nothing ran) mustbe
+%   /tgot false def
+%   { << /BBox [0 0 50 50] /Width [ 1 { /tgot true def 1 } ] >> hatch }
+%   /hatch-width-must-be-a-number-or-a-pair
+%   (a procedure in /Width) mustguard
+%   tgot not (a procedure in /Width: nothing ran) mustbe
+%   /tgot false def
+%   { << /BBox [0 0 50 50] /Trim { /tgot true def 0 0.1 } >> hatch }
+%   /hatch-trim-must-be-two-numbers
+%   (a procedure as /Trim) mustguard
+%   tgot not (a procedure as /Trim: nothing ran) mustbe
+%   /tgot false def
+%   { << /BBox [0 0 50 50] /Trim [ 0 { /tgot true def 1 } ] >> hatch }
+%   /hatch-trim-must-be-two-numbers
+%   (a procedure in /Trim) mustguard
+%   tgot not (a procedure in /Trim: nothing ran) mustbe
+%   /tgot false def
+%   { << /BBox [0 0 50 50] /Trim [ 0 /add load ] >> hatch }
+%   /hatch-trim-must-be-two-numbers
+%   (an operator in /Trim) mustguard
+%   tgot not (an operator in /Trim: nothing ran) mustbe
+%   % The well-formed shapes are untouched, and /Density is still the one
+%   % slot that is meant to run.
+%   /tgot false def
+%   { << /BBox [0 0 50 50] /Seed 3 /Angles [ 0 90 ] /Width [ 1 2 ] /Trim [ 0 0.2 ] /Density { pop pop /tgot true def 1 } >> hatch }
+%   (a well-formed options dict still hatches) mustpass
+%   tgot (a /Density callback still runs) mustbe
+%%EndSelfTest
+%
+
 % opts hatch -
 % @kind: Procedure
 % @summary: Fills the current clip region with a family of parallel hatch lines — single or multi-angle, with seeded width, wobble, dropout, and length variation, and an optional per-point density callback for tonal shading. Does not clip on its own; set the region as the current clip before calling.
@@ -301,17 +491,36 @@
 % @param: /MaxLines n hard cap on total candidate lines across all angles, checked before drawing (default 20000)
 % @param: /MaxSamples n hard cap on total /Density calls across all angles, checked before drawing (default 2000000)
 /hatch {
+  % Operand checks (#259). Everything the caller hands `hatch` -- the
+  % options dict, and each option value read out of it -- is checked
+  % while it is still on the operand stack and only then bound with
+  % `def`. A name bound to a procedure, an operator or an executable
+  % name runs on its next bare reference, so binding first and
+  % validating through the name (`hkspacing 0 le`) would execute a
+  % malformed value, and run it again on every later reference, instead
+  % of rejecting it: its side effect happened, then a raw
+  % `stackunderflow` (or nothing at all, for a procedure that happens to
+  % leave a number) replaced the named error. `type`, `xcheck`,
+  % `hkisnum`, `hkliteralarray` and `hkallnums` only inspect a value
+  % that is still on the stack. The one slot meant to run is /Density,
+  % and it is already kept out of reach in a 1-element array below.
+  % Every check precedes the pre-flight loop, `srand` and `gsave`, so a
+  % rejected call leaves the random stream and graphics state alone.
+  % Add a new option's check here, in the same shape.
+  dup type /dicttype ne { hatch-opts-must-be-a-dict } if
   /hopts exch def
 
   hopts /BBox known
     {
       hopts /BBox get
+      dup hkliteralarray not { hatch-bbox-must-be-four-numbers } if
       % aload pushes every element (not just four) then the array
       % itself; an oversized array would silently leave its leading
       % elements sitting under the four this code actually consumes,
       % violating `hatch`'s own `opts hatch -` contract (Codex review,
       % PR #121, round 3).
       dup length 4 ne { hatch-bbox-must-have-four-elements } if
+      dup hkallnums not { hatch-bbox-must-be-four-numbers } if
       aload pop
     }
     { pathbbox }
@@ -327,14 +536,24 @@
   /hcx hbx0 hbx1 add 2 div def
   /hcy hby0 hby1 add 2 div def
 
-  hopts /Spacing 6 hkgetdef /hkspacing exch def
+  hopts /Spacing 6 hkgetdef
+  dup hkisnum not { hatch-spacing-must-be-a-number } if
+  /hkspacing exch def
   hkspacing 0 le { hatch-spacing-must-be-positive } if
   /hkstep hkspacing 0.5 mul def
   hkstep 0.25 lt { /hkstep 0.25 def } if
 
   hopts /Angles known
-    { hopts /Angles get }
-    { [ hopts /Angle 45 hkgetdef ] }
+    {
+      hopts /Angles get
+      dup hkliteralarray not { hatch-angles-must-be-an-array-of-numbers } if
+      dup hkallnums not { hatch-angles-must-be-an-array-of-numbers } if
+    }
+    {
+      hopts /Angle 45 hkgetdef
+      dup hkisnum not { hatch-angle-must-be-a-number } if
+      1 array astore
+    }
   ifelse
   /hangles exch def
   % A private copy, not the caller's own array reference: /Angles is
@@ -347,7 +566,13 @@
   % than /MaxLines ever saw and approved (Codex review, PR #121).
   hangles hangles length array copy /hangles exch def
 
-  hopts /Width 1 hkgetdef /hwidthopt exch def
+  hopts /Width 1 hkgetdef
+  dup hkisnum not {
+    dup hkliteralarray not { hatch-width-must-be-a-number-or-a-pair } if
+    dup length 2 ne { hatch-width-must-be-a-number-or-a-pair } if
+    dup hkallnums not { hatch-width-must-be-a-number-or-a-pair } if
+  } if
+  /hwidthopt exch def
   hwidthopt type /arraytype eq
     {
       /hwidthlo hwidthopt 0 get def
@@ -361,11 +586,19 @@
     }
   ifelse
 
-  hopts /Wobble 0 hkgetdef /hwobble exch def
+  hopts /Wobble 0 hkgetdef
+  dup hkisnum not { hatch-wobble-must-be-a-number } if
+  /hwobble exch def
   hwobble 0 lt { hatch-wobble-must-not-be-negative } if
-  hopts /Dropout 0 hkgetdef /hdropout exch def
+  hopts /Dropout 0 hkgetdef
+  dup hkisnum not { hatch-dropout-must-be-a-number } if
+  /hdropout exch def
   hdropout 0 lt hdropout 1 gt or { hatch-dropout-must-be-a-fraction-in-0-1 } if
-  hopts /Trim [ 0 0 ] hkgetdef /htrimopt exch def
+  hopts /Trim [ 0 0 ] hkgetdef
+  dup hkliteralarray not { hatch-trim-must-be-two-numbers } if
+  dup length 2 ne { hatch-trim-must-be-two-numbers } if
+  dup hkallnums not { hatch-trim-must-be-two-numbers } if
+  /htrimopt exch def
   /hktrimlo htrimopt 0 get def
   /hktrimhi htrimopt 1 get def
   % Trim's fraction is only ever supposed to *shrink* a line's own
@@ -388,12 +621,23 @@
   hdensityopt 0 get null ne
     { hdensityopt 0 get xcheck not { hatch-density-must-be-callable } if }
   if
-  hopts /DensityThreshold 0 hkgetdef /hdthresh exch def
+  hopts /DensityThreshold 0 hkgetdef
+  dup hkisnum not { hatch-density-threshold-must-be-a-number } if
+  /hdthresh exch def
   hdthresh 0 lt hdthresh 1 gt or { hatch-density-threshold-must-be-a-fraction-in-0-1 } if
   /hnbuckets 6 def
 
-  hopts /MaxLines 20000 hkgetdef /hmaxlines exch def
-  hopts /MaxSamples 2000000 hkgetdef /hmaxsamples exch def
+  hopts /MaxLines 20000 hkgetdef
+  dup hkisnum not { hatch-maxlines-must-be-a-number } if
+  /hmaxlines exch def
+  hopts /MaxSamples 2000000 hkgetdef
+  dup hkisnum not { hatch-maxsamples-must-be-a-number } if
+  /hmaxsamples exch def
+  % /Seed is only read after the pre-flight, but checked here with the
+  % rest: a malformed one must be rejected before anything runs.
+  hopts /Seed known
+    { hopts /Seed get dup hkisnum not { hatch-seed-must-be-a-number } if pop }
+  if
 
   % ---- deterministic pre-flight budget check (no drawing, no RNG) ----
   /htotallines 0 def

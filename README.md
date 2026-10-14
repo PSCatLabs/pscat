@@ -19,7 +19,7 @@ What follows is the tour, roughly in the order it was built.
 three-stack interpreter, stack/arithmetic operators, `def`,
 dictionaries, `if`/`ifelse`, `for`/`repeat`/`loop`/`exit`, comparisons,
 `bind`), the graphics engine (paths, `arc`/`arcn`, `fill`/`eofill`/
-`stroke`, `gsave`/`grestore`, colors and line attributes,
+`stroke`/`strokepath`, `gsave`/`grestore`, colors and line attributes,
 `translate`/`rotate`/`scale`), and a **live window** so you can watch
 programs draw — or headless PNG rendering, cross-checked against
 Ghostscript on the example fractals. Errors use the standard PostScript
@@ -616,6 +616,17 @@ keys (issue #224): the colours run across its bristles, first colour on the
 left of the travel, and a pressed fan paints them across its arc. `/Colors`
 replaces the current colour, but `/ColorJitter` still varies it, and unset
 keys change nothing.
+
+`pkdab` takes `/Colors` and `/ColorMix` too (issue #226), but with no head to
+load across, each dab takes one colour from the load, at the position its
+existing outline-phase draw gives it: `[dark dark dark yellow]` is a mostly
+dark mass with a few yellow dabs, and `/ColorMix 0` makes every dab one colour
+outright. It takes no new random draw, so `/Colors` recolours a clump without
+moving a dab. `/HighlightColor` and `/ShadowColor` on `pkdab` and `pkoil` are
+the colours the lit and shaded layers mix toward instead of white and black
+(`/Highlight` and `/Shadow` still say how far), so a sunlit bush can have
+yellow-green highlights and blue shadows. All three are graded by an enclosing
+`pkwet`.
 
 `pkliner` (issue #116) is the liner/detail brush — the fine marks made
 last and over everything else: bare branches, trunks, grass stems,

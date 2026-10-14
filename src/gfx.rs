@@ -176,6 +176,43 @@ impl PsPath {
         out
     }
 
+    /// Build a path from a tiny-skia one (the stroker's output). Goes
+    /// through the builders so `current` and `subpath_start` stay right;
+    /// quads become the equivalent cubics.
+    pub(crate) fn from_skia(path: &tiny_skia::Path) -> PsPath {
+        use tiny_skia::PathSegment;
+        let dp = |p: tiny_skia::Point| DevPoint { x: p.x, y: p.y };
+        let mut out = PsPath::default();
+        let mut cur = DevPoint { x: 0.0, y: 0.0 };
+        for seg in path.segments() {
+            match seg {
+                PathSegment::MoveTo(p) => {
+                    cur = dp(p);
+                    out.move_to(cur);
+                }
+                PathSegment::LineTo(p) => {
+                    cur = dp(p);
+                    out.line_to(cur);
+                }
+                PathSegment::QuadTo(q, p) => {
+                    let (q, p) = (dp(q), dp(p));
+                    let third = |a: DevPoint, b: DevPoint| DevPoint {
+                        x: a.x + (b.x - a.x) * (2.0 / 3.0),
+                        y: a.y + (b.y - a.y) * (2.0 / 3.0),
+                    };
+                    out.curve_to(third(cur, q), third(p, q), p);
+                    cur = p;
+                }
+                PathSegment::CubicTo(a, b, p) => {
+                    cur = dp(p);
+                    out.curve_to(dp(a), dp(b), cur);
+                }
+                PathSegment::Close => out.close(),
+            }
+        }
+        out
+    }
+
     /// Append another path's segments (charpath splicing glyph outlines
     /// into the current path).
     pub(crate) fn extend_from(&mut self, other: &PsPath) {
@@ -1287,22 +1324,7 @@ impl Gfx {
         }
         if let Some(path) = self.state.path.to_skia_for_stroke(self.device_line_width()) {
             self.prepare_paint();
-            let scale = self.ctm_scale();
-            let scaled_dash = self.state.dash.as_ref().map(|(pattern, phase)| {
-                // Dash lengths are user-space; scale them like the width.
-                let scaled: Vec<f32> = pattern.iter().map(|d| (*d * scale) as f32).collect();
-                (scaled, (*phase * scale) as f32)
-            });
-            let dash = scaled_dash
-                .clone()
-                .and_then(|(p, phase)| tiny_skia::StrokeDash::new(p, phase));
-            let stroke = Stroke {
-                width: self.device_line_width(),
-                line_cap: self.state.line_cap,
-                line_join: self.state.line_join,
-                miter_limit: self.state.miter_limit,
-                dash,
-            };
+            let (stroke, scaled_dash) = self.stroke_params();
             let paint = self.paint();
             let mask = self.clip_mask();
             self.pixmap.stroke_path(
@@ -1365,6 +1387,64 @@ impl Gfx {
             self.dirty = true;
         }
         self.newpath();
+    }
+
+    /// The device-space stroker settings the current graphics state
+    /// implies, plus the scaled dash `(pattern, phase)` the SVG/PDF
+    /// recorders want. One place for `stroke` and `strokepath`, so the
+    /// outline `strokepath` hands back is the one `stroke` paints.
+    fn stroke_params(&self) -> (Stroke, Option<(Vec<f32>, f32)>) {
+        let scale = self.ctm_scale();
+        let scaled_dash = self.state.dash.as_ref().map(|(pattern, phase)| {
+            // Dash lengths are user-space; scale them like the width.
+            // An odd-length array repeats to itself-then-itself (PLRM:
+            // `[3] 0 setdash` is 3 on, 3 off; `[2 1 3]` alternates
+            // on/off across two periods), which is the array doubled --
+            // tiny-skia rejects odd arrays outright, which used to turn
+            // them into solid lines.
+            let mut scaled: Vec<f32> = pattern.iter().map(|d| (*d * scale) as f32).collect();
+            if scaled.len() % 2 == 1 {
+                scaled.extend_from_within(..);
+            }
+            (scaled, (*phase * scale) as f32)
+        });
+        let dash = scaled_dash
+            .clone()
+            .and_then(|(p, phase)| tiny_skia::StrokeDash::new(p, phase));
+        let stroke = Stroke {
+            width: self.device_line_width(),
+            line_cap: self.state.line_cap,
+            line_join: self.state.line_join,
+            miter_limit: self.state.miter_limit,
+            dash,
+        };
+        (stroke, scaled_dash)
+    }
+
+    /// `strokepath`: replace the current path with the outline `stroke`
+    /// would paint (device space, so `pathbbox`/`pathforall` report it
+    /// in the current user space). Runs the same sequence tiny-skia's
+    /// `stroke_path` does before rasterizing: dash, then stroke, at
+    /// resolution scale 1 (the path is already in device space). Paints
+    /// nothing, so it works under `suppress_paint` too. A path with no
+    /// drawable stroke (empty, a lone moveto, a zero-length subpath
+    /// under butt caps) leaves an empty path, as in gs.
+    pub fn stroke_path(&mut self) {
+        let outline = self
+            .state
+            .path
+            .to_skia_for_stroke(self.device_line_width())
+            .and_then(|path| {
+                let (stroke, _) = self.stroke_params();
+                let dashed = match &stroke.dash {
+                    Some(d) => path.dash(d, 1.0)?,
+                    None => path,
+                };
+                dashed.stroke(&stroke, 1.0)
+            });
+        self.state.path = outline
+            .as_ref()
+            .map_or_else(PsPath::default, PsPath::from_skia);
     }
 
     /// √|det CTM| — the user-to-device scale factor for widths and dash
