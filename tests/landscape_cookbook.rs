@@ -57,7 +57,9 @@ fn recipes() -> Vec<Recipe> {
                 let name = first
                     .strip_prefix("% recipe: ")
                     .unwrap_or_else(|| {
-                        panic!("a postscript block must start with `% recipe: <name>`, got {first:?}")
+                        panic!(
+                            "a postscript block must start with `% recipe: <name>`, got {first:?}"
+                        )
                     })
                     .trim()
                     .to_string();
@@ -142,7 +144,13 @@ fn write_thumbnails(all: &[Recipe]) {
         let out = thumb_path(&r.name);
         std::fs::create_dir_all(THUMBS).expect("thumbnail dir");
         let status = Command::new(env!("CARGO_BIN_EXE_pscat"))
-            .args(["--page", &format!("{PAGE_W}x{PAGE_H}"), "--dpi", "144", "--png"])
+            .args([
+                "--page",
+                &format!("{PAGE_W}x{PAGE_H}"),
+                "--dpi",
+                "144",
+                "--png",
+            ])
             .arg(&out)
             .arg(&ps)
             .status()
@@ -163,7 +171,11 @@ fn recipes_are_named_once_and_each_has_a_current_thumbnail() {
         assert!(names.contains(&want), "the cookbook lost recipe {want:?}");
     }
     let unique: HashSet<&str> = names.iter().copied().collect();
-    assert_eq!(unique.len(), names.len(), "duplicate recipe names: {names:?}");
+    assert_eq!(
+        unique.len(),
+        names.len(),
+        "duplicate recipe names: {names:?}"
+    );
 
     let doc = std::fs::read_to_string(DOC).expect("doc");
     for r in &all {
@@ -180,7 +192,12 @@ fn recipes_are_named_once_and_each_has_a_current_thumbnail() {
                 r.name
             )
         });
-        assert_eq!(&png[..8], b"\x89PNG\r\n\x1a\n", "recipe {}: not a PNG", r.name);
+        assert_eq!(
+            &png[..8],
+            b"\x89PNG\r\n\x1a\n",
+            "recipe {}: not a PNG",
+            r.name
+        );
         let (w, h) = (
             u32::from_be_bytes([png[16], png[17], png[18], png[19]]),
             u32::from_be_bytes([png[20], png[21], png[22], png[23]]),
