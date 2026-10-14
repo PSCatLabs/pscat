@@ -17,3 +17,4 @@ lib/stipplekit.ps
 lib/drykit.ps
 lib/hatchkit.ps
 lib/strokeglyphs.ps
+lib/drycrayon.ps

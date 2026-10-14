@@ -1,0 +1,139 @@
+%!PS-Adobe-3.0
+%%Title: drycrayon specimen -- the crayon box at three pressures, passes, build-up, tip wear, layering and scribble fill (issue #239)
+%%BoundingBox: 0 0 840 1000
+%%EndComments
+
+% Specimen for lib/drycrayon.ps (docs/DRYMEDIA.md, #239): `dycrayon` on
+% `dypaper`, with the preset's defaults unless a panel names a key.
+%
+%   the box     each of the 16 colours at /Touch 0.55, 0.72 and 0.9
+%   passes      one region scribbled once, twice and three times, with
+%               /Pass 1, 2, 3 (in one dkbatch, though one colour's passes
+%               render the same without one)
+%   build-up    a serpentine at /Buildup 0 and at 0.5: wax builds at the turns
+%   tip wear    /Worn 0 (a new point), 0.5 and 1 (a worn flat), and a long
+%               stroke at /Wear 1.5
+%   layering    yellow, then blue over it with /Over: both show; the blue
+%               runs past the yellow onto bare paper on the right
+%   scribble    dyscribble over a disc and a triangle
+%
+%   pscat --page 840x1000 --png drycrayon_specimen.png examples/drycrayon_specimen.ps
+%
+% Budget (DRYMEDIA.md 6.2): 10 s at 2x (--dpi 144) in pscat and gs.
+
+(lib/artkit.ps) run
+(lib/paintkit.ps) run
+(lib/drykit.ps) run
+(lib/drycrayon.ps) run
+
+<< /Seed 7 >> dypaper
+0.97 0.96 0.93 setrgbcolor clippath fill
+% The motions draw from the caller's stream: fix it.
+11 srand
+
+% sp- prefix: specimen-local.
+/spfont { /Helvetica findfont exch scalefont setfont } def
+/splabel { moveto 0.35 0.34 0.33 setrgbcolor show } def
+/spink [0.30 0.30 0.32] def
+
+14 spfont (drycrayon: the crayon box, each colour at three pressures) 30 965 splabel
+
+% --- the box: 4 columns x 4 rows of colours ---
+/spnames [ (red) (red-orange) (orange) (yellow-orange) (yellow) (yellow-green)
+           (green) (blue-green) (blue) (blue-violet) (violet) (red-violet)
+           (carnation pink) (brown) (black) (white, on grey paper) ] def
+0 1 15 {
+    /spi exch def
+    /spx spi 4 mod 200 mul 30 add def
+    /spy 930 spi 4 idiv 92 mul sub def
+    9 spfont spnames spi get spx spy splabel
+    % white needs something to show on: a sheet of grey paper, drawn over
+    spi 15 eq { 0.42 0.45 0.50 setrgbcolor spx spy 84 sub 180 76 rectfill } if
+    [ 0.55 0.72 0.9 ] {
+        /spt exch def
+        /spk spt 0.55 sub 0.17 div def
+        dycolors spi get dycolor
+        newpath spx spk 55 mul add 6 add spy 78 sub moveto 22 66 rlineto
+        << /Touch spt /Seed spi 10 mul spk cvi add
+           spi 15 eq { /Over [0.42 0.45 0.50] } if >> dycrayon
+    } forall
+} for
+9 spfont (each cell: /Touch 0.55, 0.72, 0.9) 30 560 splabel
+
+% --- passes ---
+12 spfont (passes: 1, 2, 3) 30 530 splabel
+/blue dycolor
+[ 1 2 3 ] {
+    /spn exch def
+    /spx spn 1 sub 85 mul 30 add def
+    {
+        1 1 spn {
+            /spp exch def
+            spx 410 70 100 screct << /Spacing 6 /Direction spp 1 sub 25 mul >> dyscribble
+            << /Touch 0.62 /Pass spp >> dycrayon
+        } for
+    } dkbatch
+} forall
+
+% --- build-up at turns ---
+12 spfont (build-up at the turns: 0, 0.5) 300 530 splabel
+/red dycolor
+[ 0 0.5 ] {
+    /spb exch def
+    /spx spb 0.5 div 125 mul 310 add def
+    newpath spx 418 moveto spx 90 add 418 lineto
+    spx 90 add 430 12 -90 90 arc spx 442 lineto
+    spx 454 12 270 90 arcn spx 90 add 466 lineto
+    spx 90 add 478 12 -90 90 arc spx 490 lineto
+    << /Touch 0.6 /Buildup spb /Seed 3 >> dycrayon
+} forall
+
+% --- tip wear ---
+12 spfont (tip wear: /Worn 0, 0.5, 1; /Wear 1.5) 560 530 splabel
+/green dycolor
+[ 0 0.5 1 ] {
+    /spw exch def
+    newpath spw 50 mul 575 add 425 moveto 20 80 rlineto
+    << /Worn spw /Touch 0.72 /Seed 5 >> dycrayon
+} forall
+newpath 720 420 moveto 760 470 790 440 805 505 curveto
+<< /Width 4 /Wear 1.5 /Touch 0.74 /Seed 9 >> dycrayon
+
+% --- layering ---
+12 spfont (layering: blue /Over yellow, running past it) 30 370 splabel
+/yellow dycolor
+30 230 160 110 screct << /Spacing 5.5 >> dyscribble << /Touch 0.74 >> dycrayon
+/blue dycolor
+70 215 190 135 screct << /Spacing 6 /Direction 70 >> dyscribble
+<< /Touch 0.72 /Over dybox /yellow get >> dycrayon
+/carnation dycolor
+290 240 90 90 screct << /Spacing 5.5 /Direction 90 >> dyscribble << /Touch 0.76 >> dycrayon
+/violet dycolor
+300 250 70 70 screct << /Spacing 6 /Direction -30 >> dyscribble
+<< /Touch 0.7 /Over dybox /carnation get >> dycrayon
+
+% --- scribble fill ---
+12 spfont (scribble fill: dyscribble over a disc and a triangle) 450 370 splabel
+/orange dycolor
+newpath 540 285 55 0 360 arc closepath scpath << /Spacing 5 /Direction 10 >> dyscribble
+<< /Touch 0.7 >> dycrayon
+/brown dycolor
+newpath 640 225 moveto 800 225 lineto 720 345 lineto closepath scpath
+<< /Spacing 5 /Direction -8 /Overrun 5 >> dyscribble << /Touch 0.68 >> dycrayon
+
+% --- light, medium, heavy fills: the reference board's range ---
+12 spfont (one fill at /Touch 0.6, 0.72, 0.88) 30 185 splabel
+[ 0.6 0.72 0.88 ] {
+    /spt exch def
+    /redviolet dycolor
+    spt 0.6 sub 0.14 div 0.5 add cvi 135 mul 30 add 55 110 100 screct << /Spacing 5 >> dyscribble
+    << /Touch spt >> dycrayon
+} forall
+/black dycolor
+newpath 480 60 moveto 530 150 lineto 580 60 lineto 630 150 lineto 680 60 lineto 730 150 lineto 780 60 lineto
+<< /Width 5 /Touch 0.8 >> dycrayon
+9 spfont (black, a zigzag at 0.8) 480 40 splabel
+
+0.45 0.44 0.42 setrgbcolor 8 spfont
+(lib/drycrayon.ps: dycrayon on dypaper; dyscribble for the fills. Each later pass and the build-up press wax into more of the tooth; /Over lets the colour beneath show through.) 30 14 moveto show
+showpage

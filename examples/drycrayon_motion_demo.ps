@@ -1,0 +1,107 @@
+%!PS-Adobe-3.0
+%%Title: drycrayon motions -- a child's wobbly lines, scribble fill, loops, figures, sun rays and grass (issue #239)
+%%BoundingBox: 0 0 840 760
+%%EndComments
+
+% Specimen for the child-drawing motions in lib/drycrayon.ps, each inked
+% with `dycrayon` on `dypaper`. Where a motion follows a guide, the guide
+% is drawn first as a thin grey hairline, so the motion can be read
+% against what it was asked to draw.
+%
+%   dywobble    straight guides and a square, made shaky and overshooting
+%   dyscribble  back-and-forth fill over a box and a blob, past the edges
+%   dyloop      circles in one loop that doesn't close
+%   dyfigure    a stick figure and a tadpole figure with hair
+%   dyrays      a sun: a dyloop outline, a dyscribble fill, dyrays
+%   dygrass     grass blades, and a zigzag line of grass
+%
+% The motions draw from the caller's `rand`, so `srand` fixes the
+% composition; Ghostscript's `rand` differs from pscat's, so its render of
+% this page has the same motions laid out differently (DRYMEDIA.md 3.2).
+%
+%   pscat --page 840x760 --png drycrayon_motion_demo.png examples/drycrayon_motion_demo.ps
+%
+% Budget (DRYMEDIA.md 6.2): 10 s at 2x (--dpi 144) in pscat and gs.
+
+(lib/artkit.ps) run
+(lib/paintkit.ps) run
+(lib/drykit.ps) run
+(lib/drycrayon.ps) run
+
+<< /Seed 3 >> dypaper
+0.97 0.96 0.93 setrgbcolor clippath fill
+5 srand
+
+% mo- prefix: specimen-local.
+/mofont { /Helvetica findfont exch scalefont setfont } def
+/molabel { moveto 0.35 0.34 0.33 setrgbcolor show } def
+% the guide as a grey hairline, leaving the path in place
+/moguide { gsave 0.6 0.6 0.62 setrgbcolor 0.5 setlinewidth stroke grestore } def
+
+14 mofont (drycrayon: a child's motions, inked with dycrayon) 30 725 molabel
+
+% --- dywobble ---
+11 mofont (dywobble: straight guides, a square) 30 690 molabel
+[ 0 1 2 ] {
+    /moi exch def
+    newpath 40 650 moi 32 mul sub moveto 250 655 moi 32 mul sub lineto moguide
+    /blue dycolor
+    << /Wobble moi 1.2 mul 0.6 add /Overshoot moi 5 mul 3 add >> dywobble << /Width 4 >> dycrayon
+} forall
+newpath 300 560 moveto 390 560 lineto 390 650 lineto 300 650 lineto closepath moguide
+/red dycolor << /Wobble 2 /Overshoot 9 >> dywobble << /Width 4 >> dycrayon
+
+% --- dyscribble ---
+11 mofont (dyscribble: a box, a blob) 450 690 molabel
+newpath 460 560 110 90 4 copy rectstroke pop pop pop pop
+460 560 110 90 screct /green dycolor
+<< /Spacing 5 /Overrun 5 /Miss 0.2 >> dyscribble << /Width 6 /Touch 0.72 >> dycrayon
+newpath 690 605 moveto 700 670 790 660 800 615 curveto 810 570 720 550 690 605 curveto closepath
+moguide scpath /violet dycolor
+<< /Spacing 5 /Direction 35 /Overrun 4 >> dyscribble << /Width 6 /Touch 0.72 >> dycrayon
+
+% --- dyloop ---
+11 mofont (dyloop: circles that don't close) 30 515 molabel
+/brown dycolor
+[ [70 450 30] [150 450 22] [215 455 16] [270 445 26 ] ] {
+    aload pop << >> dyloop << /Width 3.5 /Touch 0.78 >> dycrayon
+} forall
+
+% --- dyfigure ---
+11 mofont (dyfigure: stick and tadpole) 340 515 molabel
+/black dycolor
+380 360 130 << /Hair 0 /Arms 25 >> dyfigure << /Width 3 /Touch 0.8 >> dycrayon
+/redorange dycolor
+520 360 135 << /Tadpole true /Hair 9 /Arms 5 >> dyfigure << /Width 3 /Touch 0.8 >> dycrayon
+
+% --- dyrays: a sun ---
+11 mofont (dyrays: a sun) 650 515 molabel
+/yellow dycolor
+newpath 740 420 34 0 360 arc closepath scpath << /Spacing 4.5 /Direction 20 /Overrun 3 >> dyscribble << /Width 6 /Touch 0.76 >> dycrayon
+/orange dycolor
+740 420 36 << /Gap 15 >> dyloop << /Width 4 /Touch 0.8 >> dycrayon
+740 420 36 << /Count 13 /Length 30 >> dyrays << /Width 4 /Touch 0.78 >> dycrayon
+
+% --- dygrass ---
+11 mofont (dygrass: blades along a line, and a zigzag) 30 300 molabel
+newpath 40 220 moveto 140 230 280 214 380 224 curveto moguide
+/green dycolor << /Spacing 6 /Length 22 >> dygrass << /Width 3.5 /Touch 0.76 >> dycrayon
+newpath 440 220 moveto 800 222 lineto moguide
+/yellowgreen dycolor << /Spacing 9 /Length 26 /Zigzag true /Lean 10 >> dygrass << /Width 3.5 /Touch 0.78 >> dycrayon
+
+% --- together: the vocabulary of #240 ---
+11 mofont (together) 30 170 molabel
+/blue dycolor
+20 128 380 30 screct << /Spacing 6 /Direction 4 /Overrun 6 /Miss 0.25 >> dyscribble << /Width 7 /Touch 0.66 >> dycrayon
+/green dycolor
+newpath 20 30 moveto 400 34 lineto << /Spacing 5 /Length 18 >> dygrass << /Width 3.5 /Touch 0.8 >> dycrayon
+/black dycolor
+150 30 95 << /Arms 30 >> dyfigure << /Width 3 /Touch 0.82 >> dycrayon
+/yellow dycolor
+330 100 16 << >> dyloop << /Width 4 /Touch 0.8 >> dycrayon
+330 100 16 << /Count 10 /Length 14 >> dyrays << /Width 3.5 /Touch 0.8 >> dycrayon
+
+0.45 0.44 0.42 setrgbcolor 8 mofont
+(lib/drycrayon.ps: dywobble, dyscribble, dyloop, dyfigure, dyrays and dygrass) 440 42 moveto show
+(build paths and paint nothing; dycrayon inks them. Grey hairlines are the guides.) 440 30 moveto show
+showpage
