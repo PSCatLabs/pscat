@@ -183,6 +183,53 @@ fn one_call_keeps_crossings_dark() {
     );
 }
 
+/// #312: dhhatch joins a caller's dkbatch, each call keeping its own region
+/// (drykit's dkclip). Two overlapping regions hatched in one batch, at two
+/// deposit levels, keep the overlap's crossings dark, where two separate
+/// calls let the second region's faint level grey the first one's cores.
+/// Away from the overlap the one-batch render is the two calls' render,
+/// pixel for pixel: each region is clipped as it was.
+#[test]
+fn overlapping_regions_in_one_batch_keep_crossings_dark() {
+    const A: &str = "/Value 1 /Layers 1 /Angle 45 /Levels 2 /Halo 1.5 /Seed 2";
+    const B: &str = "/Value 1 /Layers 1 /Angle 135 /Levels 2 /Halo 1.5 /Seed 3";
+    let calls = format!(
+        "{} << {A} >> dhhatch {} << {B} >> dhhatch",
+        cell(2, 2, 40),
+        cell(22, 22, 40)
+    );
+    let two = render(64, 64, 3.0, &calls);
+    let one = render(64, 64, 3.0, &format!("{{ {calls} }} dkbatch"));
+    let a = mean(&one, 64, 3.0, (25.0, 25.0, 39.0, 39.0));
+    let b = mean(&two, 64, 3.0, (25.0, 25.0, 39.0, 39.0));
+    eprintln!("overlap: one batch {a:.1}, two calls {b:.1}");
+    assert!(
+        a < b - 2.0,
+        "one batch ({a:.1}) is not darker than two calls ({b:.1}) where the regions overlap"
+    );
+    // Away from the overlap: A's corner (x, y 2..20 pt) and B's (44..62 pt).
+    let (lo, la) = (lumas(&one), lumas(&two));
+    let w = 192;
+    let mut differ = 0;
+    for (x0, y0) in [(2.0f32, 2.0f32), (44.0, 44.0)] {
+        for y in ((64.0 - y0 - 18.0) * 3.0) as usize..((64.0 - y0) * 3.0) as usize {
+            for x in (x0 * 3.0) as usize..((x0 + 18.0) * 3.0) as usize {
+                if lo[y * w + x] != la[y * w + x] {
+                    differ += 1;
+                }
+            }
+        }
+    }
+    assert_eq!(
+        differ, 0,
+        "one batch changed {differ} pixels away from the overlap"
+    );
+    assert!(
+        mean(&one, 64, 3.0, (4.0, 4.0, 18.0, 18.0)) < 200.0,
+        "nothing hatched in A's corner"
+    );
+}
+
 /// A kneaded lift is lighter than the charcoal it lifts but never back to
 /// paper; a hard eraser lifts more along its line.
 #[test]

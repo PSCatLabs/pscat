@@ -1256,6 +1256,10 @@ the stick's contact patch meets raised tooth.
   - Tone builds in deposit levels, drawn faint-first.
 - **`{ ... } dkbatch`** draws several `dkstroke` calls level-major, so
   crossing hatch layers stay dark where they cross.
+- **`{ ... } dkclip`** clips to the current path while the procedure
+  runs, and the strokes it makes keep that region inside a batch. So
+  differently clipped strokes, such as overlapping hatched regions, can
+  share one batch (#312).
 
 drykit takes no draws from the caller's `rand` stream. Its surface and
 tool-side randomness come from private seeded generators, and fallout goes
