@@ -17,7 +17,7 @@ through its two calls):
   contract (one draw per call, four per slot) is unchanged.
 - The subpath's side vote, which a hidden stretch gave no vote to (and
   wasted 40 halvings trying), now gives up at once on a both-in probe in the
-  multi case and looks at up to 28 places for seven that count. The issue's
+  multi case and votes over 28 places instead of 7. The issue's
   other symptom (the vote flipping a whole blob) came from a blob mostly
   swallowed by another: few of its 7 fixed probes were on visible edge. A
   bar inside a circle with just its end sticking out starts at an angle where

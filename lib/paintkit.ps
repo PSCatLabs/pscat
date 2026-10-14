@@ -9079,6 +9079,8 @@ systemdict /setalpha known /pwhasalpha exch def
 %   200 0 moveto 240 0 lineto 240 40 lineto 200 40 lineto closepath
 %   << /Wander 0 >> pkfeather
 %   /zzn 0 def { pop pop /zzn zzn 1 add def } { pop pop } { 6 { pop } repeat } { } pathforall
+%   newpath 0 0 moveto 40 0 lineto 40 40 lineto 0 40 lineto closepath << /Wander 0 >> pkfeather
+%   /zzm 0 def { pop pop /zzm zzm 1 add def } { pop pop } { 6 { pop } repeat } { } pathforall
 %   newpath zzn zzm 2 mul eq (blobs that do not touch keep every stroke) mustbe
 %   % An open crest drawn right to left still brushes up (/Outward 90).
 %   newpath 100 0 moveto 0 0 lineto
@@ -9275,11 +9277,11 @@ systemdict /setalpha known /pwhasalpha exch def
             % stroke spacing (Codex review, round 1).
             /mfleft 0 def /mfvotes 0 def
             % With overlapping blobs much of the subpath can be hidden inside
-            % the others, so it is probed at more places (until seven count);
-            % a blob all but swallowed still gets a vote from its visible arc.
+            % the others, and a hidden probe does not vote, so it is probed at
+            % 28 places, all of them counted: a blob all but swallowed still
+            % gets its vote from the arc that shows.
             /mfnp mfmulti { 28 } { 7 } ifelse def
             0 1 mfnp 1 sub {
-                mfvotes 7 ge { pop exit } if
                 mfe mfb sub mfnp div exch 0.5 add mul round cvi mfb add
                 mhstops exch get /mfst exch def
                 mfst 5 get 3 ne {

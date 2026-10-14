@@ -974,7 +974,7 @@ renders eight examples in both and compares block-downsampled output).
   **Overlapping blobs (issue #381):** with two or more closed subpaths a
   stroke is skipped where a pair of points either side of its anchor are both
   in the whole-path region (an edge hidden inside the others), and the side
-  vote ignores both-in probes and searches up to 28 places for seven votes. A
+  vote ignores both-in probes and votes over 28 places instead of 7. A
   single closed subpath never probes, so single outlines render byte-identically.
   `notes/381-brushedge-hidden-edges.md`.
 - **The landscape cookbook (issue #186) is `docs/guides/landscape-cookbook.md`;
