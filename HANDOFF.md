@@ -608,9 +608,10 @@ renders eight examples in both and compares block-downsampled output).
    #241 shipped `lib/drycharcoal.ps` (`dhstroke`, `dhhatch`, `dhsmudge`,
    `dhlift`, `dhsketch`; `notes/241-drycharcoal.md`). `dhhatch` lays lines
    through hatchkit's `/Mark` hook and inks every layer in one `dkbatch`
-   inside its own region clip, so it can't join a caller's batch (#312).
+   inside its own region clip, so it can't join a caller's batch, and at
+   `/Levels 2` two calls over one area grey each other's crossings (#312).
    Hatching costs about 0.07 ms per square point per layer in pscat. In gs,
-   anything after an artkit `scatter` (fallout) runs about 2x slower (#311).
+   drykit work after an artkit `scatter` (fallout) runs about 2x slower (#311).
    Slice G1 (#236) shipped `lib/strokeglyphs.ps`: skeleton glyphs as paths
    (`sgpath`, `sgwidth`, `sggrow`, `sgmetrics`). In its glyph data a point
    written twice is a sharp corner, and the midpoint rule never passes

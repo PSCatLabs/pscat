@@ -47,8 +47,8 @@ spink 15 spfont (drycharcoal) 24 530 splabel
 9 spfont (vine, compressed and pencil charcoal on drykit; hatching, smudging, lifting, construction lines) 120 530 splabel
 
 % --- value scales -------------------------------------------------------
-% Six steps each, 0 to 1. Hatching: pencil, a crossing layer every
-% quarter. Smudging: a light vine hatch, then a stump to the step's value.
+% Six steps each, 0 to 1. Hatching: soft pencil at two deposit levels
+% (one level tops out at a dark grey), a crossing layer every quarter. Smudging: a light vine hatch, then a stump to the step's value.
 spink 11 spfont (value scale, hatching) 24 400 splabel
 (value scale, smudging) 380 400 splabel
 9 spfont
@@ -59,7 +59,7 @@ spink 11 spfont (value scale, hatching) 24 400 splabel
     spink spv 4 string cvs spx 6 add 336 splabel
     spv 4 string cvs spx 362 add 336 splabel
     spchar
-    spx 348 spcell << /Value spv /Seed spi /Medium /pencil /Grade 1 /Layers 4 >> dhhatch
+    spx 348 spcell << /Value spv /Seed spi /Medium /pencil /Grade 1 /Layers 4 /Levels 2 >> dhhatch
     spx 356 add 348 spcell << /Value spv 0.4 mul /Seed spi 20 add /Medium /vine /Layers 1 >> dhhatch
     gsave
         spx 356 add 348 spcell clip

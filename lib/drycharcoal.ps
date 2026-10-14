@@ -44,8 +44,10 @@
 % A batch renders under the clip in force when it ends, so dhhatch clips
 % to its region and closes its own batch inside that clip. It cannot run
 % inside a caller's dkbatch, and two separate dhhatch calls are two
-% batches: where they overlap, the second one's faint level lands over
-% the first one's cores. Hatch a region's layers in one call. (#312 would
+% batches: at /Levels 2 or more, where they overlap, the second one's
+% faint level lands over the first one's cores (at the default one level
+% there is no faint level, and two calls draw as one). Hatch a region's
+% layers in one call. (#312 would
 % let a batch hold records under different clips.)
 %
 % Smudge, lift and construction lines (DRYMEDIA.md 3.4):
@@ -278,7 +280,7 @@
         /dhhs dkrand dhhLen mul 0.5 mul neg def
         /dhhn 0 def
         {
-            dhhs dhhlen ge { exit } if
+            dhhs dhhlen ge dhhfail or { exit } if
             % a stroke dhhLen * 0.6..1.4 long, overlapping or leaving a
             % small gap after the last, jogged across the line a little
             /dhha dhhs dup 0 lt { pop 0 } if def
@@ -303,7 +305,10 @@
                 dup /Width dhhw put
                 dup /Touch dhhtouch put
                 dup /Seed dhhpseed put
-                dkstroke
+                % a malformed pass-through key fails here, inside hatch's
+                % gsave and ours: note it, stop drawing, raise it after
+                % both are closed
+                { dkstroke } stopped { /dhhfail true def } if
             } if
             /dhhn dhhn 1 add def
         } loop
@@ -320,8 +325,10 @@
     newpath
     0 1 dhhpts length 4 idiv 1 sub {
         /dhhii exch def
-        dhhpts dhhii 4 mul 4 getinterval aload pop
-        dhhqs dhhii get dhhii dhhline
+        dhhfail not {
+            dhhpts dhhii 4 mul 4 getinterval aload pop
+            dhhqs dhhii get dhhii dhhline
+        } if
     } for
 } def
 
@@ -355,6 +362,9 @@
 %   { newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath
 %     << /Value { pop pop (x) } >> dhhatch } /dhhatch-value-procedure-must-return-a-number
 %   (a /Value procedure returning a string) mustguard
+%   { newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath << /Levels 9 >> dhhatch }
+%   /dkstroke-levels-must-be-1-to-4 (a bad pass-through key, every gsave given back) mustguard
+%   userdict /dkBatch known not (the failed hatch closed its batch) mustbe
 %   { gsave newpath 0 0 moveto 40 0 lineto 40 40 lineto closepath
 %     << /Value { pop 40 div } /Layers 2 >> dhhatch grestore } (a value procedure) mustpass
 %%EndSelfTest
@@ -437,9 +447,10 @@
     { pathbbox } stopped { dhhatch-needs-a-region-path } if
     4 array astore /dhhbb exch def
     /dhhbad false def
+    /dhhfail false def
     gsave
     clip
-    {
+    { {
         0 1 dhhL 1 sub {
             /dhhk exch def
             <<
@@ -451,9 +462,10 @@
                 /Mark { dhhmark }
             >> hatch
         } for
-    } dkbatch
+    } dkbatch } stopped { grestore newpath stop } if
     grestore
     newpath
+    dhhfail { stop } if
     dhhbad { dhhatch-value-procedure-must-return-a-number } if
 } def
 
@@ -491,6 +503,15 @@
 %   { << /Passes 0 >> dhsketch } /dhsketch-passes-must-be-1-to-6 (/Passes 0) mustguard
 %   { << /Shift -1 >> dhsketch } /dhsketch-shift-must-be-0-to-20 (/Shift -1) mustguard
 %   { newpath << >> dhsketch } /dhsketch-needs-a-path (no current path) mustguard
+%   % A malformed key passed through to dkstroke raises drykit's error with
+%   % every gsave given back (the block checks the graphics stack).
+%   { newpath 0 0 moveto 50 0 lineto << /Levels 9 >> dhsmudge } /dkstroke-levels-must-be-1-to-4
+%   (a bad pass-through key in a smudge) mustguard
+%   { newpath 0 0 moveto 50 0 lineto << /Levels 9 >> dhlift } /dkstroke-levels-must-be-1-to-4
+%   (a bad pass-through key in a lift) mustguard
+%   { newpath 0 0 moveto 50 0 lineto << /Levels 9 >> dhsketch } /dkstroke-levels-must-be-1-to-4
+%   (a bad pass-through key in a sketch) mustguard
+%   userdict /dkBatch known not (the failed sketch closed its batch) mustbe
 %   { gsave newpath 0 0 moveto 50 0 lineto << >> dhsmudge grestore } (a smudge) mustpass
 %   { gsave newpath 0 0 moveto 50 0 lineto << /Eraser /hard >> dhlift grestore } (a hard lift) mustpass
 %   { gsave newpath 0 0 moveto 50 0 lineto { << >> dhsketch } dkbatch grestore } (a sketch in a batch) mustpass
@@ -527,7 +548,7 @@
     dup /Under dhmu put
     gsave
     dhmg [ currentrgbcolor ] dhmv dhlerp3 aload pop setrgbcolor
-    dkstroke
+    { dkstroke } stopped { grestore newpath stop } if
     grestore
     newpath
 } def
@@ -560,7 +581,7 @@
     dup /Under dhlu put
     gsave
     dhlg aload pop setrgbcolor
-    dkstroke
+    { dkstroke } stopped { grestore newpath stop } if
     grestore
     newpath
 } def
@@ -607,7 +628,7 @@
             dhkcx neg dhkcy neg translate
             newpath dhkpath
             dhkbase dup length 1 add dict copy dup /Seed dhkseed 101 mul dhkp add put
-            dkstroke
+            { dkstroke } stopped { grestore stop } if
             grestore
         } for
     }

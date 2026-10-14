@@ -36,10 +36,15 @@ takes a draw from the caller's `rand`:
   other cuts). Crossing layers build the tone that a second level would.
 - **Batches and clips.** The region is clipped and the batch closes inside that clip,
   because a batch renders under the clip in force at its end. So `dhhatch` refuses to
-  run inside a caller's `dkbatch`, and two `dhhatch` calls over the same area grey
-  each other's crossings. `tests/drycharcoal.rs::one_call_keeps_crossings_dark`
+  run inside a caller's `dkbatch`, and at `/Levels 2` or more two `dhhatch` calls over
+  the same area grey each other's crossings. At the default one level there is no
+  faint level, and two calls draw as one. `tests/drycharcoal.rs::one_call_keeps_crossings_dark`
   measures it at two levels: one call gives mean luma 125.9, two calls 137.1. Filed
   as #312: per-record clips in `dkbatch`.
+- **A malformed key passed through to `dkstroke`** (for example `/Levels 9`) fails
+  inside hatch's `gsave` and ours. The hook catches it, stops drawing, and re-raises
+  after both are closed. `dhsmudge`, `dhlift` and `dhsketch` give back their `gsave`
+  the same way. Self-tests pin each case (the advisor's implementation review).
 - **A `/Value` procedure that returns a non-number** raises
   `dhhatch-value-procedure-must-return-a-number` after the batch closes. Raising from
   inside `hatch` left two `gsave`s open.
@@ -77,13 +82,14 @@ patches several points across, which reads as blotches. The specimen and tests u
 relief is a Q4 trade-off for the maintainer.
 
 **Measured** (CPU `user`, release pscat `--dpi 144`, gs 10.07.1 `-r144`, libraries
-concatenated for gs's `-dSAFER`). The machine's load average was 6–12 throughout. The
-drykit specimen, recorded at 7.5 s in #234, measured 7.9–11.75 s here at the same
-time, so the numbers below are inflated by up to about 1.5×.
+concatenated for gs's `-dSAFER`). The machine's load average was 4–12 during this work; the
+drykit specimen (7.5 s in #234) measured 7.7–11.75 s here, so the earlier
+numbers below are inflated by up to about 1.5×. The final specimen run was at
+load 4, with the drykit specimen at 7.7 s.
 
 | Piece | pscat | gs | Budget |
 |---|---|---|---|
-| `examples/drycharcoal_specimen.ps` | 8.5–9.8 s (drykit specimen 11.75 s alongside) | 6.3–7.3 s | 10 s |
+| `examples/drycharcoal_specimen.ps` (final, after the rebase) | 8.7 s, twice; the drykit specimen measured 7.7 s alongside (7.5 s in #234) | 6.4 s, twice | 10 s |
 | `dhhatch`, 120 × 120 pt, value 1, one layer / four layers | 1.3 s / 4.0 s | | |
 | slowest CI test render, 40 × 40 pt at four layers (`--profile ci`, file in parallel) | 0.74 s | | 2 s |
 | `tests/drycharcoal.rs`, whole file (`--profile ci`) | 6.4 s | | 30 s for all drykit tests |
@@ -93,8 +99,8 @@ time, so the numbers below are inflated by up to about 1.5×.
   #242's portrait should budget its hatched area with this.
 - **An earlier specimen layout took 42 s.** It hatched about 66k pt²·layers and drew
   vine first. Cells and the sphere were shrunk to fit.
-- **Ghostscript slows after `scatter`.** Every call after a first artkit `scatter`
-  runs about 2× slower in gs (12.3 s against 6.3 s for this specimen, by drawing
+- **Ghostscript slows after `scatter`.** drykit work after a first artkit `scatter`
+  runs about 2× slower in gs (a plain integer loop or a `pjheight` loop barely slows) (12.3 s against 6.3 s for this specimen, by drawing
   order alone; `-dNOGC` 7.7 s). Vine's fallout calls `scatter`, so the specimen
   draws its vine strokes last. Filed as #311, not root-caused.
 - **A fresh options dict per hatch stroke** was suspected of feeding that GC cost.
@@ -102,7 +108,8 @@ time, so the numbers below are inflated by up to about 1.5×.
   copies the values it needs into its record.
 
 **Tests** (`tests/drycharcoal.rs`, 11):
-- the two value scales are monotone (hatching 239 → 80, smudging 239 → 55 luma);
+- the two value scales are monotone and reach the darks. Hatching runs 239 → 61 luma
+  at two deposit levels (one level stops at 80, a dark grey). Smudging runs 239 → 55;
 - a `/Value` ramp shades across its region;
 - one call keeps crossings darker than two;
 - a kneaded lift is grey and never paper, and a hard eraser is lighter along its line;
@@ -112,7 +119,8 @@ time, so the numbers below are inflated by up to about 1.5×.
   and tested sets are equal;
 - the CI budget smoke test;
 - two real-gs tests, run locally only: a packed `/Value` procedure under
-  `true setpacking` is accepted, and pscat and gs agree on a hatched region.
+  `true setpacking` is accepted (with `/Seed ±999999`, the guard's bound), and pscat
+  and gs agree on a hatched region.
 
 Self-tests cover the guards, the no-draws rule for all five procedures (`dhhatch`
 with default options included), and the refusal inside a `dkbatch`.

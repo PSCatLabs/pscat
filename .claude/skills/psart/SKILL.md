@@ -333,7 +333,8 @@ newpath 40 40 moveto 200 80 lineto << /Touch 0.7 >> dycrayon
   `{x y -> value}`): up to `/Layers` crossing layers of hand strokes, all in
   one `dkbatch` so crossings stay dark. It clips to the region and cannot run
   inside a `dkbatch`. Hatch a region's layers in **one** call: two calls are
-  two batches, and the second one's faint level greys the first's crossings.
+  two batches, and at `/Levels 2` or more the second one's faint level greys
+  the first's crossings.
 - `opts dhsmudge` — the path is a stump's track: a wide, soft stroke that
   fills the tooth, leaving `/Value` between paper and the current colour.
   drykit cannot read the page, so give `/Under` (the tone beneath) when it
@@ -346,8 +347,8 @@ newpath 40 40 moveto 200 80 lineto << /Touch 0.7 >> dycrayon
 - None of them draws from your `rand` stream. **Cost:** hatching costs about
   0.07 ms per square point per layer in release pscat at 2x (a 120 x 120 pt
   square is 1.3 s at one layer, 4 s at four), so keep hatched areas modest.
-  In Ghostscript, any `scatter` (vine charcoal's fallout) makes everything
-  after it slower, so draw vine strokes late.
+  In Ghostscript, any `scatter` (vine charcoal's fallout) makes the drykit
+  work after it about 2x slower (#311), so draw vine strokes late.
   `examples/drycharcoal_specimen.ps` shows all of it.
 
 ## Style packs (`lib/styles/`, load after artkit)

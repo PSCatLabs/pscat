@@ -66,14 +66,15 @@ fn cell(x: u32, y: u32, s: u32) -> String {
     format!("newpath {x} {y} moveto {s} 0 rlineto 0 {s} rlineto -{s} 0 rlineto closepath")
 }
 
-/// The hatching value scale: every step darker than the last, from paper
-/// at 0 to well into the darks at 1.
+/// The hatching value scale, as the specimen draws it (soft pencil, two
+/// deposit levels): every step darker than the last, from paper at 0 to
+/// near the pigment at 1.
 #[test]
 fn hatching_builds_a_value_scale() {
     let mut src = String::new();
     for i in 0..6 {
         src.push_str(&format!(
-            "{} << /Value {} /Seed {i} /Medium /pencil /Grade 1 /Layers 4 >> dhhatch ",
+            "{} << /Value {} /Seed {i} /Medium /pencil /Grade 1 /Layers 4 /Levels 2 >> dhhatch ",
             cell(4 + i * 34, 4, 30),
             f64::from(i) / 5.0
         ));
@@ -89,10 +90,7 @@ fn hatching_builds_a_value_scale() {
     for w in steps.windows(2) {
         assert!(w[1] < w[0] - 5.0, "the scale is not monotone: {steps:?}");
     }
-    assert!(
-        steps[0] - steps[5] > 120.0,
-        "the scale spans too little: {steps:?}"
-    );
+    assert!(steps[5] < 70.0, "the darkest step is not dark: {steps:?}");
 }
 
 /// The smudging scale (a light hatch, then a stump to each value), as in
@@ -440,7 +438,8 @@ fn ghostscript_accepts_a_packed_value_procedure() {
              true setpacking\n\
              /v {{ pop 50 div }} def\n\
              /v load type /packedarraytype ne {{ /not_packed undefined }} if\n\
-             {} << /Value /v load /Layers 2 >> dhhatch\n\
+             {} << /Value /v load /Layers 2 /Seed 999999 >> dhhatch\n\
+             newpath 0 0 moveto 50 50 lineto << /Seed -999999 >> dhsketch\n\
              false setpacking showpage\n",
             libs_source(),
             cell(0, 0, 50)
