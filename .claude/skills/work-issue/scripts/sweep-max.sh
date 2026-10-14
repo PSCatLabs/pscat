@@ -29,9 +29,10 @@ if [ "${1:-}" = "--one" ]; then   # internal: --one TREE HOOK [ARG...] FILE
     file=""; for file; do :; done   # the last argument
     out=$( (cd "$tree" && "$@") 2>/dev/null) && rc=0 || rc=$?
     last=$(printf '%s\n' "$out" | tail -n 1)
-    case "$last" in
-        ''|*[!0-9eE.+-]*|[eE]*) rc=1 ;;
-    esac
+    last=$(printf '%s' "$last" | tr -d '[:space:]')
+    # A complete number: integer, decimal or scientific. A character whitelist alone
+    # would accept `1e+`, `--` and `1.2.3`.
+    printf '%s\n' "$last" | grep -Eq '^[+-]?([0-9]+[.]?[0-9]*|[.][0-9]+)([eE][+-]?[0-9]+)?$' || rc=1
     if [ "$rc" -eq 0 ]; then printf 'OK %s %s\n' "$last" "$file"; else printf 'FAIL %s\n' "$file"; fi
     exit 0
 fi

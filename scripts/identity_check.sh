@@ -178,7 +178,7 @@ if [ -n "$FILES_LIST" ]; then
     [ -f "$FILES_LIST" ] || die "--files list '$FILES_LIST' not found"
     FILES_LIST="$(cd "$(dirname "$FILES_LIST")" && pwd -P)/$(basename "$FILES_LIST")"
     # Check the paths now, before any scratch directory exists, so a typo leaves nothing behind.
-    while IFS= read -r f; do
+    while IFS= read -r f || [ -n "$f" ]; do
         f="${f%%#*}"
         f=$(printf '%s' "$f" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
         [ -n "$f" ] || continue
@@ -314,7 +314,7 @@ $(git -C "$ROOT" ls-files -- 'examples/*.ps' 'gallery/*.ps' 'selftest/drivers/*.
 EOF_LIST
 fi
 if [ -n "$FILES_LIST" ]; then
-    while IFS= read -r f; do
+    while IFS= read -r f || [ -n "$f" ]; do
         f="${f%%#*}"
         f=$(printf '%s' "$f" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
         [ -n "$f" ] || continue

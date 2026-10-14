@@ -36,6 +36,18 @@ out=$("$SWEEP" --tree "$T" --glob 'gallery/*.ps' -- "$T/hook.sh"); rc=$?
 printf '%s\n' "$out" | grep -qx 'FAIL gallery/z.ps' || bad "missing FAIL line: $out"
 printf '%s\n' "$out" | grep -qx 'MAX 12 gallery/b.ps' || bad "FAIL file hid the real max: $out"
 
+# Malformed numbers must be FAIL, well-formed ones accepted (Codex round 1).
+mkdir "$T/num"
+i=0; for v in '1e+' '--' '1.2.3' 'e5' '1e3' '-2.5' '.5' '7.'; do
+    i=$((i + 1)); printf 'n %s\n' "$v" > "$T/num/n$i.ps"
+done
+git -C "$T" add num && git -C "$T" -c user.email=t@t -c user.name=t commit -qm num
+out=$("$SWEEP" --tree "$T" --glob 'num/*.ps' -- "$T/hook.sh"); rc=$?
+[ "$rc" -eq 1 ] || bad "malformed numbers must exit 1, got $rc"
+for n in 1 2 3 4; do printf '%s\n' "$out" | grep -qx "FAIL num/n$n.ps" || bad "n$n.ps should FAIL: $out"; done
+for n in 5 6 7 8; do printf '%s\n' "$out" | grep -q " num/n$n.ps\$" && ! printf '%s\n' "$out" | grep -qx "FAIL num/n$n.ps" || bad "n$n.ps should be accepted: $out"; done
+printf '%s\n' "$out" | grep -qx 'MAX 1e3 num/n5.ps' || bad "MAX should be 1e3: $out"
+
 "$SWEEP" --tree "$T" --glob 'nothing/*.ps' -- "$T/hook.sh" >/dev/null 2>&1; [ $? -eq 64 ] || bad "empty match must exit 64"
 "$SWEEP" --tree "$T" --glob 'gallery/*.ps' >/dev/null 2>&1; [ $? -eq 64 ] || bad "no hook must exit 64"
 [ "$(git -C "$T" status --short)" = "?? hook.sh" ] || bad "the sweep changed the tree: $(git -C "$T" status --short)"
