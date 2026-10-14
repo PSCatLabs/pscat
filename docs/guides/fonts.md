@@ -116,15 +116,19 @@ showpage
   `/Cc`, `/Title` and `/Rule`.
 - **Pages:** text that runs past the bottom margin continues after a `showpage`;
   `/PageNumbers /bottom` types "- 2 -" and `/top` types "2" from page 2.
-  `/PageStart { ... }` runs before every page, the first included: paint the
-  paper there, so a page you composed is not cleared. The caller does the
+  `/PageStart { ... }` runs before every page, the first included, inside a
+  `gsave`: paint the paper there, so a page you composed is not cleared. Pages
+  after the first follow a `showpage`, so they are typed in the default
+  graphics state, not a rotated or scaled one. The caller does the
   last `showpage`, as with `hs-write`. `tw-type` leaves the carriage at the start
   of the next line, so `show` can carry on.
 - **Measuring:** `<< ... >> tw-linecount` returns the number of lines and
   `tw-pageheight` the page height that holds them, drawing nothing and
   changing no option. They share the layout with `tw-type`, so they always
   agree on the line breaks.
-- Bytes above 126 are not on the machine: each is a blank cell.
+- Bytes above 126 are not on the machine: each is a blank cell. The text is
+  one PostScript string, so Ghostscript's 65,535-byte string limit caps it at
+  about 30 pages.
 
 `scripts/typewrite.sh` does the same from a text file, to PNG or PDF:
 

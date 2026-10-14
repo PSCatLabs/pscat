@@ -385,6 +385,32 @@ fn pages_overflow_onto_the_next_with_a_page_start_and_numbers() {
 }
 
 #[test]
+fn a_page_start_cannot_leak_state_and_the_strike_index_is_restored() {
+    // a paper proc that moves the origin and clips, and paints nothing, must
+    // leave the typing as it was
+    let plain = typed("", "Dear Sir");
+    let with = typed(
+        "/PageStart { 50 50 translate 10 rotate 0 0 5 5 rectclip newpath 3 3 moveto }",
+        "Dear Sir",
+    );
+    assert_eq!(plain, with, "PageStart leaked its graphics state");
+    // /Strike is back to the caller's value, also after a markup-heavy page
+    let mut it = Interp::with_page(100, 100).expect("page");
+    load(&mut it);
+    it.run_str(
+        "<< /Strike 4 >> tw-setup << /Text (<u>a</u> <x>b</x>) >> tw-type \
+         TWState /tStrike get",
+    )
+    .unwrap();
+    assert_eq!(it.operand_stack().last().unwrap().repr(), "4");
+    // a memo field is one paragraph even with a newline in it
+    assert_eq!(
+        linecount("/Memo << /To (a\nb) >> /Text (t) /Width 288 /Margin 36"),
+        linecount("/Memo << /To (a b) >> /Text (t) /Width 288 /Margin 36")
+    );
+}
+
+#[test]
 fn tw_pageheight_holds_exactly_the_text() {
     let mut it = Interp::with_page(100, 100).expect("page");
     load(&mut it);

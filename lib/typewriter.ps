@@ -808,7 +808,7 @@ TWState begin {
 /lyIsCount { dup tIsInt { 0 ge } { pop false } ifelse } bind def
 /lyIsTabs {
     dup type /integertype eq { 0 gt } {
-        dup type /arraytype eq {
+        dup type /arraytype eq 1 index xcheck not and {
             /ltOk true def /ltPrev -1 def
             {
                 dup type /integertype eq {
@@ -916,6 +916,17 @@ TWState begin {
     /lyNLP lyY0 lyBot sub 0.001 add lyStep div floor cvi 1 add dup 1 lt { pop 1 } if def
 } bind def
 
+% string -> a copy with newlines and carriage returns as spaces: a memo field
+% is one paragraph, so the hang bookkeeping stays in step with the text
+/lyOneLine {
+    dup length string copy /lo exch def
+    0 1 lo length 1 sub {
+        /loI exch def
+        lo loI get dup 10 eq exch 13 eq or { lo loI 32 put } if
+    } for
+    lo
+} bind def
+
 % ---- the memo header -------------------------------------------------------
 % sets lyHg0 lyHg1 (the paragraphs hung at lyHang) and lyBody0 (the first
 % paragraph of the body); returns the header's text
@@ -935,7 +946,7 @@ TWState begin {
         lyMemo lyKey known {
             lyAcc lyLab lyCat
             lyHang lyLab length sub 32 lyRep lyCat
-            lyMemo lyKey get lyCat (\n) lyCat /lyAcc exch def
+            lyMemo lyKey get lyOneLine lyCat (\n) lyCat /lyAcc exch def
             /lyPn lyPn 1 add def
         } if
     } forall
@@ -1140,6 +1151,7 @@ TWState begin {
     0 lyLinePass
     lyAnyO { /tStrike lyS0 1 add def 1 lyLinePass } if
     lyAnyU { /tStrike lyS0 2 add def 2 lyLinePass } if
+    /tStrike lyS0 def
 } bind def
 /lyPageNum {
     lyPN /none eq { } {
@@ -1168,7 +1180,7 @@ TWState begin {
 /lyPage {                                   % page index -> -
     /lyPg exch def
     lyPg 0 gt { showpage } if
-    /lyPS load null ne { /lyPS load end exec TWState begin } if
+    /lyPS load null ne { gsave /lyPS load end exec TWState begin grestore } if
     newpath lyL lyY0 lyPg lyNLP mul lyStep mul add moveto tFrame
     /Typewriter findfont tSize scalefont setfont
     /lyR0 lyPg lyNLP mul def
@@ -1205,6 +1217,9 @@ TWState begin {
 %
 %   { << /Tabs [ 8 4 ] >> tw-linecount } /tw-tabs-must-be-a-positive-integer-or-ascending-columns
 %   (tab stops out of order) mustguard
+%
+%   { << /Tabs { 6 20 } >> tw-linecount } /tw-tabs-must-be-a-positive-integer-or-ascending-columns
+%   (a procedure for the tab stops) mustguard
 %
 %   { << /Tabs 0 >> tw-linecount } /tw-tabs-must-be-a-positive-integer-or-ascending-columns
 %   (a tab stop every 0 columns) mustguard
@@ -1248,7 +1263,7 @@ TWState begin {
 %%EndSelfTest
 
 % @kind: Procedure
-% @summary: Types a text on the page the way a typist would: word-wrapped to the margins, with tab stops, single/1.5/double spacing (the platen advances in half-lines, and the font's line layer gives each line its own carriage-return offset, advance error and baseline drift), underlining and strikeovers by markup, an optional memo header (TO/FROM/SUBJECT/DATE) and page numbers. Takes one options dict: the layout keys below plus any tw-setup key (/Machine /Seed /Wear /Pitch /Size /Ink /Ribbon /Preset ...), which persist as they do for tw-setup. Text that overflows a page is continued on the next one after a showpage; the last page is left for the caller to showpage. Markup in /Text, with no escapes needed: <u>underlined</u>, <x>crossed out</x> (x struck over each letter), <o>old|new</o> (new overtyped on old, one unbreakable token as wide as the longer side). A tab goes to the next tab stop, bytes above 126 are blank cells, and a blank line is kept. tw-linecount always agrees with it on line breaks. Leaves the carriage at the start of the line after the last one typed.
+% @summary: Types a text on the page the way a typist would: word-wrapped to the margins, with tab stops, single/1.5/double spacing (the platen advances in half-lines, and the font's line layer gives each line its own carriage-return offset, advance error and baseline drift), underlining and strikeovers by markup, an optional memo header (TO/FROM/SUBJECT/DATE) and page numbers. Takes one options dict: the layout keys below plus any tw-setup key (/Machine /Seed /Wear /Pitch /Size /Ink /Ribbon /Preset ...), which persist as they do for tw-setup. Text that overflows a page is continued on the next one after a showpage; the last page is left for the caller to showpage. Markup in /Text, with no escapes needed: <u>underlined</u>, <x>crossed out</x> (x struck over each letter), <o>old|new</o> (new overtyped on old, one unbreakable token as wide as the longer side). A tab goes to the next tab stop, bytes above 126 are blank cells, and a blank line is kept. tw-linecount always agrees with it on line breaks. Leaves the carriage at the start of the line after the last one typed. The text is one PostScript string, so Ghostscript's 65,535-byte string limit caps it (about 30 pages).
 % @example: (lib/typewriter_outlines.ps) run (lib/typewriter.ps) run << /Text (Dear Sir,\n\nI enclose the <u>specimens</u> you asked for, and a <o>wrong|right</o> correction.) /Machine 7 /Seed 3 >> tw-type showpage
 % @param: /Text [string] The text to type, with the <u> <x> <o> markup; newlines break lines, a blank line stays blank (default empty)
 % @param: /Width [points] Page width (default 612)
@@ -1262,7 +1277,7 @@ TWState begin {
 % @param: /Indent [count] Columns to indent the first line of each paragraph (default 0)
 % @param: /Tabs [count or array of count] A tab goes to the next stop: a number is a stop every N columns, an array lists ascending stop columns counted from the left margin (default 5)
 % @param: /PageNumbers [name] /none, /bottom (centred "- 2 -" on every page) or /top (right-aligned "2" from page 2) (default /none)
-% @param: /PageStart [proc] Run before each page is typed, the first included, with the graphics state fresh: paint the paper here. Pages after the first follow a showpage (default none)
+% @param: /PageStart [proc] Run before each page is typed, the first included, inside a gsave: paint the paper here. Pages after the first follow a showpage, so they are typed in the default graphics state, not a rotated or scaled one (default none)
 % @param: /Memo [dict] A memo header typed above the text: /To /From /Cc /Subject /Date /Title (strings; /Title defaults to MEMORANDUM and is centred and underlined) and /Rule (boolean, the underscore line under the header, default true); a long field wraps hung under its text (default none)
 % @param: /Preset [name] As tw-setup: /manual, /electric or /worn (no default: the current options stay)
 % @param: /Machine [integer] As tw-setup (no default: the current value stays)
