@@ -64,7 +64,10 @@ fn the_drawing_builds_in_pscat_with_its_parts_where_the_composition_puts_them() 
     let grass = fraction(&px, 400, 55, 780, 145, is_green);
     assert!(grass < 0.95, "grass has white seams, got {grass}");
     let grass_green = fraction(&px, 0, 55, 792, 145, |p| is_green(p) || p[1] > 180);
-    assert!(grass_green > 0.5, "the ground band is green, got {grass_green}");
+    assert!(
+        grass_green > 0.5,
+        "the ground band is green, got {grass_green}"
+    );
     // the air: between the sky's lower edge and the roof, away from the
     // birds and the smoke, is bare paper
     let air = fraction(&px, 400, 300, 590, 390, is_paper);
@@ -93,7 +96,13 @@ fn the_drawing_runs_in_ghostscript() {
     // The piece loads its libraries with relative `run`s from the repo
     // root (cargo's test cwd), which gs's default -dSAFER refuses.
     let out = std::process::Command::new("gs")
-        .args(["-dNOSAFER", "-dNOPAUSE", "-dBATCH", "-q", "-sDEVICE=nullpage"])
+        .args([
+            "-dNOSAFER",
+            "-dNOPAUSE",
+            "-dBATCH",
+            "-q",
+            "-sDEVICE=nullpage",
+        ])
         .arg(format!("-dDEVICEWIDTHPOINTS={W}"))
         .arg(format!("-dDEVICEHEIGHTPOINTS={H}"))
         .arg(PIECE)

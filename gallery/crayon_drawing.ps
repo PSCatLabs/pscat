@@ -41,7 +41,7 @@
 (lib/handscript.ps) run
 (lib/strokeglyphs.ps) run
 
-<< /Seed 5 >> dypaper
+<< /Seed 5 /Ground [1 1 1] >> dypaper
 1 1 1 setrgbcolor clippath fill
 240 srand
 
@@ -63,7 +63,7 @@
 /cdfill {
     /cdft exch def /cdfw exch def /cdfd exch def /cdfs exch def
     scpath
-    << /Spacing cdfs /Direction cdfd /Overrun 5 /Miss 0.2 /Scatter 1.6 >> dyscribble
+    << /Spacing cdfs /Direction cdfd /Overrun 8 /Miss 0.25 /Scatter 1.8 >> dyscribble
     << /Width cdfw /Touch cdft >> dycrayon
 } def
 
@@ -95,9 +95,33 @@
     closepath
 } def
 
+% The same polygon with every corner knocked a few points off, for the
+% colour: a child fills first and outlines after, and the two never quite
+% agree, so the colour spills past some edges and falls short of others.
+/cdpolyj {
+    /cdja exch def
+    [ 0 1 cdja length 1 sub { cdja exch get -5 5 cdr add } for ] cdpoly
+} def
+
 % a dot, as a child makes one: a tiny loop pressed hard
 %   cx cy r  cdblob
 /cdblob { << /Gap 40 /Wobble 0.4 >> dyloop << /Width 5.5 /Touch 0.95 /Worn 0.2 >> dycrayon } def
+
+% a face on a head of radius r at (cx, cy), in the current crayon: two dots
+% for eyes and a short smile that is never quite level
+%   cx cy r  cdface
+/cdface {
+    /cdfr exch def /cdfcy exch def /cdfcx exch def
+    cdfcx cdfr 0.38 mul sub cdfcy cdfr 0.2 mul add cdfr 0.1 mul
+    << /Gap 40 /Wobble 0.2 >> dyloop << /Width 3 /Touch 0.95 /Worn 0.2 >> dycrayon
+    cdfcx cdfr 0.38 mul add cdfcy cdfr 0.2 mul add cdfr 0.1 mul
+    << /Gap 40 /Wobble 0.2 >> dyloop << /Width 3 /Touch 0.95 /Worn 0.2 >> dycrayon
+    newpath cdfcx cdfr 0.45 mul sub cdfcy cdfr 0.32 mul sub moveto
+    cdfcx cdfr 0.2 mul sub cdfcy cdfr 0.62 mul sub
+    cdfcx cdfr 0.2 mul add cdfcy cdfr 0.6 mul sub
+    cdfcx cdfr 0.45 mul add cdfcy cdfr 0.28 mul sub curveto
+    << /Wobble 0.4 /Overshoot 1 >> dywobble << /Width 2.8 /Touch 0.9 >> dycrayon
+} def
 
 % a flower on a stem: x ybase height color-name  cdflower
 /cdflower {
@@ -105,13 +129,18 @@
     /green dycolor
     newpath cdfx cdfy moveto cdfx 4 -4 cdr add cdfy cdfh add lineto cdhand
     << /Width 3.4 /Touch 0.8 >> dycrayon
-    /cdfl 3 5 cdr def
     % a couple of leaves
     newpath cdfx cdfy cdfh 0.4 mul add moveto cdfx 14 add cdfy cdfh 0.55 mul add lineto cdhand
     << /Width 3 /Touch 0.78 >> dycrayon
     cdfc dycolor
-    0 60 300 { /cdfa exch def
-        cdfx 4 add cdfa cos 13 mul add cdfy cdfh add cdfa sin 13 mul add 7.5
+    % petals: how many, how far out and how big are each flower's own
+    /cdfn 5 7.99 cdr cvi def
+    /cdfp 11 15 cdr def
+    /cdfq 6 9 cdr def
+    /cdfa0 0 360 cdr def
+    0 1 cdfn 1 sub { /cdfi exch def
+        /cdfa cdfa0 cdfi 360 mul cdfn div add def
+        cdfx 4 add cdfa cos cdfp mul add cdfy cdfh add cdfa sin cdfp mul add cdfq
         << /Gap 30 /Wobble 1 >> dyloop << /Width 3.4 /Touch 0.82 >> dycrayon
     } for
     /yellow dycolor
@@ -164,20 +193,20 @@ newpath 92 482 moveto 104 466 130 462 150 484 curveto cdhand << /Width 3.4 /Touc
 
 % a brown path from the door down to the edge of the grass
 /yelloworange dycolor
-[ 244 152  278 152  334 54  198 54 ] cdpoly 6 70 9 0.62 cdfill
+[ 244 152  278 152  334 54  198 54 ] cdpolyj 6 70 9 0.62 cdfill
 
 % --------------------------------------------------------------- the house
 % walls red (scribbled up and down), roof brown, door brown, windows blue
 /red dycolor
-[ 172 152  350 152  350 300  172 300 ] cdpoly 6.5 78 9.5 0.72 cdfill
+[ 172 152  350 152  350 300  172 300 ] cdpolyj 6.5 78 9.5 0.72 cdfill
 /brown dycolor
-[ 152 298  261 398  370 298 ] cdpoly 6 18 9 0.74 cdfill
-[ 242 152  280 152  280 238  242 238 ] cdpoly 5.5 84 8 0.78 cdfill
+[ 152 298  261 398  370 298 ] cdpolyj 6 18 9 0.74 cdfill
+[ 242 152  280 152  280 238  242 238 ] cdpolyj 5.5 84 8 0.78 cdfill
 /blue dycolor
-[ 188 205  228 205  228 245  188 245 ] cdpoly 5 80 7 0.6 cdfill
-[ 294 205  334 205  334 245  294 245 ] cdpoly 5 80 7 0.6 cdfill
+[ 188 205  228 205  228 245  188 245 ] cdpolyj 5 80 7 0.6 cdfill
+[ 294 205  334 205  334 245  294 245 ] cdpolyj 5 80 7 0.6 cdfill
 /redorange dycolor
-[ 298 352  298 424  334 424  334 326 ] cdpoly 5.5 70 8 0.75 cdfill
+[ 298 352  298 424  334 424  334 326 ] cdpolyj 5.5 70 8 0.75 cdfill
 
 % outlines, last
 /black dycolor
@@ -200,7 +229,7 @@ newpath 298 350 moveto 298 424 lineto 334 424 lineto 334 326 lineto cdhand cdout
 
 % ---------------------------------------------------------------- the tree
 /brown dycolor
-[ 672 150  680 292  720 292  728 150 ] cdpoly 5 84 8 0.78 cdfill
+[ 672 150  680 292  720 292  728 150 ] cdpolyj 5 84 8 0.78 cdfill
 /green dycolor
 newpath 698 372 84 0 360 arc closepath 6 20 9.5 0.74 cdfill
 /black dycolor
@@ -217,15 +246,19 @@ newpath 698 372 84 0 360 arc closepath 6 20 9.5 0.74 cdfill
 % ------------------------------------------------------------- the family
 % four lollipop people in a row, feet on the grass at no fixed height
 /violet dycolor
-[ 495 208  456 116  536 116 ] cdpoly 6 80 9 0.72 cdfill
+[ 495 208  456 116  536 116 ] cdpolyj 6 80 9 0.72 cdfill
 /blue dycolor
 405 78 185 << /Arms 28 /Hair 7 >> dyfigure << /Width 4.2 /Touch 0.85 >> dycrayon
+405 238.95 24 cdface
 /redviolet dycolor
 495 92 168 << /Arms 35 /Hair 0 >> dyfigure << /Width 4.2 /Touch 0.85 >> dycrayon
+495 238.2 21.8 cdface
 /orange dycolor
 567 70 112 << /Arms 40 /Hair 5 >> dyfigure << /Width 4 /Touch 0.85 >> dycrayon
+567 167.4 14.6 cdface
 /black dycolor
 634 100 70 << /Tadpole true /Hair 6 /Arms 10 >> dyfigure << /Width 3.6 /Touch 0.85 >> dycrayon
+634 149 21 cdface
 
 % ----------------------------------------------------------------- flowers
 44 62 56 /red cdflower
