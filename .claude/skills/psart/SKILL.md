@@ -285,6 +285,13 @@ Which tool to pick:
   spine motions read the current path as the guide. They draw only from
   `frnd`, so they are deterministic under your `srand`.
   `examples/paintkit_motion_demo.ps` shows each beside its brush.
+  **A lit side on a mass** (clouds, bushes, a tree crown): `pkscumblein`
+  with `/Light <deg>` keeps only the circles along the edge that faces the
+  light (`/Reach` how deep, `/Feather` how graded). Paint the body over the
+  whole region first, then a half-light (`/Reach 0.4`) and a core
+  (`/Reach 0.15`, smaller circles) in loads close to the body's value; the
+  shadow side is `/Light` turned round. Specimen:
+  `docs/paintkit_massing_demo.png`.
 
 - **Brushed edges** — `pkbrushedge` (and the motion under it, `pkfeather`).
   A filled mass (a meadow, a bank, a pond) has a ruled vector edge; fill it,

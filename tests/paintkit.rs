@@ -9144,7 +9144,15 @@ fn motions_advertise_exactly_their_tested_parameters() {
         ),
         (
             "pkscumblein",
-            &["Count", "Radius", "RadiusJitter", "Squash"][..],
+            &[
+                "Count",
+                "Feather",
+                "Light",
+                "Radius",
+                "RadiusJitter",
+                "Reach",
+                "Squash",
+            ][..],
         ),
         (
             "pkscumble",
@@ -9235,6 +9243,39 @@ fn ghostscript_accepts_the_motion_specimen() {
     assert!(
         status.success(),
         "gs rejected examples/paintkit_motion_demo.ps"
+    );
+}
+
+/// The light-aware massing specimen (issue #345) promises in its header that
+/// Ghostscript renders it too.
+#[test]
+fn ghostscript_accepts_the_massing_specimen() {
+    let gs_ok = std::process::Command::new("gs")
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success());
+    if !gs_ok {
+        eprintln!("skipping gs compatibility check: gs not installed");
+        return;
+    }
+    let status = std::process::Command::new("gs")
+        .args([
+            "-dNOSAFER",
+            "-dNOPAUSE",
+            "-dBATCH",
+            "-q",
+            "-sDEVICE=png16m",
+            "-g780x630",
+            "-r72",
+            "-o/dev/null",
+            "examples/paintkit_massing_demo.ps",
+        ])
+        .stdin(std::process::Stdio::null())
+        .status()
+        .expect("run gs");
+    assert!(
+        status.success(),
+        "gs rejected examples/paintkit_massing_demo.ps"
     );
 }
 

@@ -105,7 +105,8 @@ Two kinds. **Vapour** is spray, soft all through; use it for haze and wispy cirr
 **A cloud with form (right of the picture).** From Evening Stream.
 - Scumble tiny circles over the cloud's outline with `pkscumblein` (a region motion, so the outline goes through `scpath` first), and paint them with a `pkbroad` loaded with two cloud colours.
 - **The brush must be at least twice the circle radius** (`/Width` 2.2 times `/Radius` in the snippet), or each circle paints as a ring, a "Cheerio" cloud.
-- **Lit from below.** Scrub the whole cloud in the light its underside catches, then scrub the body over it, shifted up by about 30% of its height and unclipped, so a crescent of light is left along the lumpy underside. Do all of it inside one `pkwet`. Clipping the body to the cloud lets the lit layer's `pkwet` halo ring the top as well.
+- **A lit side** (issue #345). Scrub the body over the whole cloud in one value, then the light into the side that faces it: the same `pkscumblein` call with `/Light` (where the light comes from, in degrees: 270 is the glow below an evening cloud, 90 the sun above, 160 a low sun on the left) keeps only the circles along the edge facing the light, in a band that follows every lump of the outline. `/Reach` is how deep the band goes, as a fraction of the cloud's depth along the light, and `/Feather` grades its inner border. Paint it the way a painter models a mass: a deep, soft half-light (`/Reach 0.4 /Feather 0.9`, a load between body and light), then the core of the light near the edge (`/Reach 0.2`). Keep the light close in value to the body and in one shape; a light that is too bright or too scattered is the usual mistake. A shadow side is the same call with the light turned round and a darker load.
+- Work the body wet into the sky (`/Under` the sky), and the lights wet into the body (`/Under` the body colour, a lower `/Soft`), since that is what is under them.
 - `/Count` is worked out from the cloud's area over one circle's area, so the circles stay the same size when you change the cloud's width.
 
 **Failures.**
@@ -113,7 +114,8 @@ Two kinds. **Vapour** is spray, soft all through; use it for haze and wispy cirr
 - *Clouds that read as static.* The speck is coarse; see the 1 pt rule.
 - *Spots like a leopard.* Dabs (`pkdab`) clumped at cloud scale read as spots; use scumbled circles.
 - *A pale or dark halo around a cloud.* `/Under` is the wrong colour, or a single colour over a strong gradient. Use the `/Under` procedure with `/At`.
-- Light-aware massing (a lit side on a scumbled region) is still a hand-built workaround; see [#345](https://github.com/jeromebanks/postscript_interpreter/issues/345).
+- *Lights that read as rings.* A thin lit band holds few circles, and a lone circle paints as a ring. Use smaller circles (and more of them) for the core of the light, as the snippet does.
+- *A light that is a stripe.* One lit pass at one value ends on a line. Lay a deep half-light first, then a shallow core.
 
 ```postscript
 % recipe: clouds
@@ -162,21 +164,27 @@ Two kinds. **Vapour** is spray, soft all through; use it for haze and wispy cirr
   /fm_under [ fm_x fm_w 2 div add skyat ] def
   /fm_body [ 0.55 0.52 0.66 ] def  /fm_lit [ 1 0.88 0.72 ] def
   /fm_n fm_w fm_h mul 1.4 mul fm_r dup mul 3.14 mul div cvi def
-  { % the whole cloud in the light that catches its underside ...
+  { % the body over the whole cloud, in one value ...
     fm_x fm_y fm_w fm_h lump scpath
     << /Count fm_n /Radius fm_r /Squash 0.7 >> pkscumblein
     % the brush is at least 2x the circle radius, or each circle is a ring
     << /Width fm_r 2.2 mul /Charge 0.75 /Depletion 0.5 /Edge 0.4 /ColorMix 0.8
-       /Colors [ [ fm_lit fm_under 0.2 mix3 ] [ fm_lit fm_under 0.5 mix3 ] ] >> pkbroad
-    % ... then the body over it, shifted up and not clipped, so a crescent
-    % of light stays along the underside
-    gsave 0 fm_h 0.3 mul translate
-      fm_x fm_y fm_w fm_h lump scpath
-      << /Count fm_n /Radius fm_r /Squash 0.7 >> pkscumblein
-      << /Width fm_r 2.2 mul /Charge 0.75 /Depletion 0.5 /Edge 0.4 /ColorMix 0.8
-         /Colors [ [ fm_body 1.1 shade ] [ fm_body 0.9 shade ] ] >> pkbroad
-    grestore }
+       /Colors [ [ fm_body 1.1 shade ] [ fm_body 0.9 shade ] ] >> pkbroad }
   << /Soft 0.6 /Under fm_under >> pkwet
+  { % ... then its lit side: /Light keeps only the circles along the edge
+    % that faces the light (270, the glow below), following every lump.
+    % A deep, soft half-light first, then the core of the light at the edge.
+    fm_x fm_y fm_w fm_h lump scpath
+    << /Count fm_n 2 mul /Radius fm_r /Squash 0.7 /Light 270 /Reach 0.4 /Feather 0.9 >> pkscumblein
+    << /Width fm_r 2.2 mul /Charge 0.75 /Depletion 0.5 /Edge 0.4 /ColorMix 0.8
+       /Colors [ [ fm_body fm_lit 0.35 mix3 ] [ fm_body fm_lit 0.5 mix3 ] ] >> pkbroad
+    % the core: a thin band, so smaller circles, or each one shows as a ring
+    fm_x fm_y fm_w fm_h lump scpath
+    << /Count fm_n 4 mul /Radius fm_r 0.6 mul /Squash 0.7 /Light 270 /Reach 0.22 /Feather 1 >> pkscumblein
+    << /Width fm_r 1.4 mul /Charge 0.8 /Depletion 0.4 /Edge 0.4 /ColorMix 0.8
+       /Colors [ [ fm_lit fm_under 0.2 mix3 ] [ fm_lit fm_body 0.2 mix3 ] ] >> pkbroad }
+  % worked wet into the body, which is what is under it
+  << /Soft 0.2 /Under fm_body >> pkwet
 } def
 200 150 140 2 form
 ```
@@ -448,22 +456,24 @@ newpath 370 -10 moveto 370 56 lineto 320 60 290 30 284 -10 curveto closepath fil
 
 ## 7. Bushes
 
-![A three-layer bush and a standalone clump](landscape/bushes.png)
+![A massed bush with a lit side and a shadow side, and a standalone clump](landscape/bushes.png)
 
-**Tools.** `pkdab` (issue #117) with `/HighlightColor` and `/ShadowColor` (issue #226), and the pigment palette.
+**Tools.** `pkscumblein` with `/Light` (issues #184, #345) for where the leaves go, `pkdab` (issue #117) with `/HighlightColor` and `/ShadowColor` (issue #226) for the leaves, and the pigment palette.
 
-**Order.** Dark and large first, then lighter and smaller on a tighter spine, then the lit tops last.
+**Order.** The body over the whole bush in one value, then the shadow side, then the lit side, then the core of the light: each pass a smaller, lighter (or darker) dab on the circles the region motion keeps.
 
 **Settings.**
-- The path is a **spine**; every stop seeds a cluster of dabs within `/Scatter`. A single-point subpath is a standalone clump.
-- Build depth by calling it three times, each on a tighter spine: `/Size` 5, 3.4, 2.4 and `/Scatter` 16, 9, 5.
-- `/HighlightColor` and `/ShadowColor` are the colours the lit and shaded layers mix toward instead of white and black: a warm yellow-green and a cool blue-black make a sunlit bush. `/Highlight` and `/Shadow` still say how far.
-- Put the spine on the shape you want and no more; the brush does not know what a bush is.
+- The bush is a **region**: draw its outline (a lumpy dome on a flat foot) and `scpath` it. `pkscumblein` scatters small circles over it and `pkdab` pounces a clump of leaves on each, so the bush fills its shape instead of following a line.
+- `/Light` on `pkscumblein` keeps only the circles along the edge that faces the light, following each lobe of the outline, so every bump gets its own lit cap. The shadow side is the same call with the light turned round (`LIGHT 180 add`) and a cooler load.
+- `/Reach` 0.3 to 0.4 for the half-light, 0.15 for its core; `/Feather` 0.7 to 0.8 so the light thins out into the body rather than ending on a line.
+- `/HighlightColor` and `/ShadowColor` are the colours the lit and shaded dabs mix toward instead of white and black: a warm yellow-green and a cool blue-black make a sunlit bush. On the shadow pass set `/HighlightColor` to the body colour, or its dabs get chalky highlights.
+- A tree mass reads as one value with its light and dark as variations on it: keep the lit load a mix of the body and the warm colour, not the warm colour itself.
 
 **Failures.**
-- *A floating bush.* The spine is above the bank. Put it on the rise, so the first layer's dark dabs overlap the bank's edge.
-- *White, chalky highlights.* No `/HighlightColor`; the lit layer mixes toward white.
-- A lit side on a whole massed region is still hand-built; see [#345](https://github.com/jeromebanks/postscript_interpreter/issues/345).
+- *A floating bush.* The outline's foot is above the bank. Sit it on the rise, so the body's dabs overlap the bank's edge.
+- *White, chalky highlights.* No `/HighlightColor`; the dabs mix toward white.
+- *A spotty, leopard bush.* Lights scattered over the whole mass. Keep them on the side facing the light with `/Light`, in one shape.
+- *A flat, sausage bush.* One pass along a spine, every dab painted alike. Mass it as a region with a lit and a shadow side.
 
 ```postscript
 % recipe: bushes
@@ -477,25 +487,43 @@ newpath 370 -10 moveto 370 56 lineto 320 60 290 30 284 -10 curveto closepath fil
 [ 0.12 0.10 0.07 ] aload pop setrgbcolor                   % the bank under the bush
 newpath -10 -10 moveto -10 80 lineto 150 90 260 70 370 50 curveto 370 -10 lineto closepath fill
 
-% A bush is a pounce along a spine, built up in layers of one tool: dark
-% and large first, then lighter and smaller on a tighter spine, so the
-% body is dark, the middle mid and the lit tops last. The highlight and
-% shadow colours are what the lit and shaded dabs mix toward, instead of
-% white and black.
+% cx y w h - region   a bush's outline: a lumpy dome on a flat foot
+/bu_dome {
+  /bu_h exch def /bu_w exch def /bu_y exch def /bu_x exch def
+  newpath
+  0 6 180 {
+    /bu_a exch def
+    /bu_k 1 bu_a 7 mul sin 0.1 mul add bu_a 13 mul 40 add sin 0.06 mul add def
+    bu_x bu_a cos bu_w 2 div mul bu_k mul add  bu_y bu_a sin bu_h mul bu_k mul add
+    bu_a 0 eq { moveto } { lineto } ifelse
+  } for
+  closepath scpath
+} def
+
+% A bush is a mass with a lit side and a shadow side, built in passes over
+% one region: pkscumblein scatters small circles over the outline and
+% pkdab pounces a clump of leaves on each. The body goes over the whole
+% region in one value; then /Light keeps only the circles on the side that
+% faces the light, so the same call lays the shadow side (light turned
+% round, a cooler load) and the lit side (a warmer load, then its core).
+/LIGHT 115 def                                             % sun up and to the left
 GREEN aload pop setrgbcolor
-newpath 40 78 moveto 100 106 170 94 230 70 curveto
-<< /Size 5 /Scatter 16 /Density 7 /Highlight 0.2 /Shadow 0.7 /Irregular 0.9
+135 72 190 52 bu_dome << /Count 90 /Radius 3 >> pkscumblein
+<< /Size 4 /Scatter 5 /Density 3 /Highlight 0.2 /Shadow 0.5 /Irregular 0.9
    /HighlightColor WARM /ShadowColor COOL >> pkdab
 
-[ GREEN WARM 0.25 mix3 ] aload pop setrgbcolor
-newpath 60 84 moveto 110 106 165 98 215 78 curveto
-<< /Size 3.4 /Scatter 9 /Density 7 /Highlight 0.5 /Shadow 0.5 /Irregular 0.9
-   /Light 70 /HighlightColor WARM /ShadowColor COOL >> pkdab
+[ GREEN COOL 0.5 mix3 ] aload pop setrgbcolor
+135 72 190 52 bu_dome << /Count 70 /Radius 3 /Light LIGHT 180 add /Reach 0.3 /Feather 0.8 >> pkscumblein
+<< /Size 3.4 /Scatter 4 /Density 3 /Irregular 0.9 /Highlight 0.1 /Shadow 0.4
+   /HighlightColor GREEN /ShadowColor COOL >> pkdab
 
-[ GREEN WARM 0.55 mix3 ] aload pop setrgbcolor
-newpath 80 96 moveto 115 110 160 104 195 88 curveto
-<< /Size 2.4 /Scatter 5 /Density 6 /Highlight 0.8 /Shadow 0.2 /Irregular 0.9
-   /Light 70 /HighlightColor WARM >> pkdab
+[ GREEN WARM 0.35 mix3 ] aload pop setrgbcolor
+135 72 190 52 bu_dome << /Count 90 /Radius 2.5 /Light LIGHT /Reach 0.4 /Feather 0.7 >> pkscumblein
+<< /Size 3 /Scatter 4 /Density 3 /Irregular 0.9 /Highlight 0.5 /Light LIGHT /HighlightColor WARM >> pkdab
+
+[ GREEN WARM 0.65 mix3 ] aload pop setrgbcolor
+135 72 190 52 bu_dome << /Count 90 /Radius 2 /Light LIGHT /Reach 0.15 >> pkscumblein
+<< /Size 2.4 /Scatter 3 /Density 3 /Irregular 0.9 /Highlight 0.7 /Light LIGHT /HighlightColor WARM >> pkdab
 
 % A standalone clump: a single-point subpath.
 GREEN aload pop setrgbcolor
@@ -756,7 +784,6 @@ A recipe is a workaround where one of these would be one call. When one lands, u
 |---|---|---|
 | [#229](https://github.com/jeromebanks/postscript_interpreter/issues/229) | `/TipColor` and `/TipReach`: a lit tip on a dark stem | 6 Evergreens, 11 Grass |
 | [#230](https://github.com/jeromebanks/postscript_interpreter/issues/230) | `/Colors` on `pkdry` and `pkoil`'s ridges | 4 Mist, 10 Bank, foam on water |
-| [#345](https://github.com/jeromebanks/postscript_interpreter/issues/345) | light-aware massing for clouds and bushes | 2 Clouds, 7 Bushes |
 | [#359](https://github.com/jeromebanks/postscript_interpreter/issues/359) | `pkwet` backdrop per band, not per pass | 2 Clouds, 4 Mist |
 
 Evening Stream ([PR #348](https://github.com/jeromebanks/postscript_interpreter/pull/348), pending, `gallery/evening_stream.ps` on `feature/187-second-wet-on-wet-landscape`) is the second worked example once it merges: a dark sunset with a stream, a cabin and autumn trees. Its techniques are folded into recipes 2, 8, 9, 10 and 11. When it merges, link its still `gallery/renders/evening_stream.png` from this page.

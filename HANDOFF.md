@@ -801,6 +801,16 @@ renders eight examples in both and compares block-downsampled output).
   still reads a clump). Scratch prefix `mh-` for the helpers and one
   letter per motion (`mx` `mc` `ms` `mt` `mp` `mz`); none calls a preset,
   so none is clobbered by `pkribbon`.
+- **`pkscumblein /Light` filters, it does not re-scatter** (issue #345). A
+  lit pass lays the same grid and the same four draws per cell as the unlit
+  call, then keeps a circle only when a step of `/Reach` x depth toward the
+  light leaves the region (one `scin`), the step shortened by up to
+  `/Feather` on the cell's own phase draw. So `/Count` still counts circles
+  over the *whole* region (a lit band keeps a fraction: ask for more), the
+  lit circles are a subset of the unlit ones under the same seed, and unset
+  it takes no extra draw (byte-identical). The depth is the bounding box's
+  chord through its centre along the light, not its projection, which
+  nearly doubled the band on a wide mass lit at 45 degrees.
 - **A touched mark is clipped in canvas space; set the canvas first** (issue
   #182, slices S1-S4; design in `docs/CANVAS_SURFACE.md`). `opts pkcanvas`
   records the CTM in force when it is called as *canvas space* and builds a
