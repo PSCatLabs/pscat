@@ -623,6 +623,8 @@ renders eight examples in both and compares block-downsampled output).
    (pscat's `clippath` can't hand back a nested clip exactly).
    Hatching costs about 0.07 ms per square point per layer in pscat. In gs,
    drykit work after an artkit `scatter` (fallout) runs about 2x slower (#311).
+   #313: `/drawing` paper's `/Mottle` is 1.5, so charcoal hatching breaks up in
+   specks, not patches, at the default `/Relief 0.65` (`notes/313-drawing-mottle.md`).
    Slice G1 (#236) shipped `lib/strokeglyphs.ps`: skeleton glyphs as paths
    (`sgpath`, `sgwidth`, `sggrow`, `sgmetrics`). In its glyph data a point
    written twice is a sharp corner, and the midpoint rule never passes
