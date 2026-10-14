@@ -32,7 +32,7 @@ separate binary and cannot see `main.rs`'s constant.
 the interpreter). Proof: `scripts/identity_check.sh --base-bin/--head-bin`,
 see the PR.
 
-**Not done.** `pscat::lint::check` (the library API used by
-`tests/landscape_cookbook.rs`) still takes no run status; those tests
-`panic!` on a failed `run_source` before linting. Only the CLI verdict line
-needed it.
+**Deliberately unchanged.** `pscat::lint::check` (the library API used by
+`tests/landscape_cookbook.rs`) still takes no run status: those tests
+`panic!` on a failed `run_source` before linting, so they cannot reach the
+bug. Only the CLI verdict line needed it.
