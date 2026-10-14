@@ -8849,6 +8849,94 @@ fn assert_bowed_strokes_stay_within_their_length(code: &str, length: f64) {
 }
 
 #[test]
+fn pull_scatter_only_translates_each_start_across_the_spine() {
+    // /Scatter 0 and /Scatter 6 draw the same stream (a set key draws one
+    // more value per stroke, whatever its size), so the strokes are the
+    // same strokes and only their starts move: across the spine by up to 6.
+    let run = |scatter: f64| {
+        strokes(&motion_segs(&format!(
+            "5 srand {SPINE} << /Spacing 10 /Wander 0.6 /Lean 10 /Scatter {scatter} >> pkpull"
+        )))
+    };
+    let (flat, loose) = (run(0.0), run(6.0));
+    assert_eq!(flat.len(), loose.len());
+    let mut off = 0;
+    for (a, b) in flat.iter().zip(&loose) {
+        assert!((a.0.1 - 100.0).abs() < 1e-6, "scatter 0 leaves the spine");
+        assert!(
+            (a.0.0 - b.0.0).abs() < 1e-6,
+            "scatter slid a start along the spine"
+        );
+        assert!(
+            (b.0.1 - 100.0).abs() <= 6.0 + 1e-6,
+            "start {} is past /Scatter",
+            b.0.1
+        );
+        // the pull itself (its vector) is the same stroke
+        assert!(((a.1.0 - a.0.0) - (b.1.0 - b.0.0)).abs() < 1e-6);
+        assert!(((a.1.1 - a.0.1) - (b.1.1 - b.0.1)).abs() < 1e-6);
+        if (b.0.1 - 100.0).abs() > 0.5 {
+            off += 1;
+        }
+    }
+    assert!(
+        off > flat.len() / 2,
+        "only {off} of {} starts left the spine",
+        flat.len()
+    );
+}
+
+#[test]
+fn pull_scatter_is_across_the_spine_not_along_the_pull() {
+    // A vertical spine pulled sideways: the offset is horizontal (the spine's
+    // normal), so the starts stay on their even rows.
+    let s = strokes(&motion_segs(
+        "5 srand newpath 50 0 moveto 50 100 lineto \
+         << /Spacing 10 /Wander 0 /Direction 0 /Lean 0 /Scatter 6 >> pkpull",
+    ));
+    assert_eq!(s.len(), 11);
+    let mut off = 0;
+    for (i, st) in s.iter().enumerate() {
+        assert!(
+            (st.0.1 - 10.0 * i as f64).abs() < 1e-3,
+            "slid along the spine"
+        );
+        assert!((st.0.0 - 50.0).abs() <= 6.0 + 1e-6);
+        if (st.0.0 - 50.0).abs() > 0.5 {
+            off += 1;
+        }
+    }
+    assert!(off > 5, "only {off} starts left the spine");
+}
+
+#[test]
+fn pull_scatter_follows_the_normal_of_a_curved_spine() {
+    // Quarter circle of radius 100: starts stay within /Scatter of the arc.
+    let s = strokes(&motion_segs(
+        "5 srand newpath 100 0 moveto 0 0 100 0 90 arc \
+         << /Spacing 10 /Wander 0 /Scatter 5 >> pkpull",
+    ));
+    assert!(s.len() > 10);
+    let radii: Vec<f64> = s.iter().map(|st| st.0.0.hypot(st.0.1)).collect();
+    assert!(radii.iter().all(|r| (r - 100.0).abs() <= 5.3), "{radii:?}");
+    assert!(radii.iter().any(|r| (r - 100.0).abs() > 1.0), "{radii:?}");
+}
+
+#[test]
+fn pull_scatter_leaves_the_unset_stream_alone() {
+    // Naming /Scatter costs one draw per stroke; leaving it out costs none,
+    // so the same options without it must not change.
+    let plain = |opts: &str| strokes(&motion_segs(&format!("5 srand {SPINE} {opts} pkpull")));
+    assert_eq!(
+        plain("<< /Spacing 10 >>"),
+        plain("<< /Spacing 10 /Wander 0.5 >>")
+    );
+    let set = plain("<< /Spacing 10 /Scatter 0 >>");
+    let unset = plain("<< /Spacing 10 >>");
+    assert_ne!(set, unset, "a set /Scatter draws one more value per stroke");
+}
+
+#[test]
 fn bowed_pulls_do_not_overshoot_their_tip() {
     for dir in [0, 90, -90, 37] {
         assert_bowed_strokes_stay_within_their_length(
@@ -9084,6 +9172,7 @@ fn motions_advertise_exactly_their_tested_parameters() {
                 "Lean",
                 "Length",
                 "LengthJitter",
+                "Scatter",
                 "Spacing",
                 "Wander",
             ][..],
