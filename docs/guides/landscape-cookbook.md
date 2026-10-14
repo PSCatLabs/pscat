@@ -388,7 +388,7 @@ newpath -10 WL 2 add moveto 370 WL 2 add lineto
 **Settings.**
 - Each tier is a real stroke out from the trunk (`moveto`, `lineto`), left and right. **A load is brush-relative, so a stroke drawn backwards swaps its colours**; with `/Light` (degrees, the direction the light comes from) each stroke puts the first colour on whichever side faces the light. A pressed fan or a dab is never flipped, so draw the tiers as strokes.
 - `/Colors [ lit dark dark dark ] /ColorMix 0.15`: the entries are evenly spaced across the brush, so repeating the dark one gives it more of the head, and a low `/ColorMix` keeps the seam crisp.
-- `/Width` of about 9% of the tree's height, `/Bristles` 18 to 26 and `/Ragged` 0.45 or more. `/Ragged` feathers the tips, without it the tiers read as combs.
+- `/Width` of about 11% of the tree's height, `/Bristles` 12 to 26 (more costs CPU time quickly) and `/Ragged` 0.45 or more. `/Ragged` feathers the tips, without it the tiers read as combs.
 
 **Where they stand.**
 - **Far stands: paler and bluer**, small, on the far shore; the same tree, more air.
@@ -640,7 +640,7 @@ grestore
 
 ![A dark bank with brushed earth, a lit lip and tapped edge](landscape/bank.png)
 
-**Tools.** A fill, `pkbroad` clipped to it, `pkoil` for the lip, `pkdab` for the edge (issues #115, #43, #117).
+**Tools.** A fill, `pkbroad` clipped to it, `pkoil` for the lip, `pkdab` for the edge (issues #115, #117).
 
 **Order.** The mass in one near-black colour; brushed earth over it, clipped to it; the lit lip; the dabs that break the edge.
 
