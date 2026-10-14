@@ -3,8 +3,9 @@
 Read when editing the claim. `SKILL.md` step 1 runs **`../scripts/claim.sh <N>`** as one command
 and step 3 onward runs **`../scripts/heartbeat.sh <N>`**; neither is pasted into the skill any more
 (#276, round 6: two agents in a row ran only the fresh-claim `mkdir` branch of the pasted block,
-which is the abbreviation the script exists to prevent). The scripts are this file's commands moved
-verbatim, `<N>` becoming `$N`; the only added lines are the argument check. Do not edit, shorten,
+which is the abbreviation the script exists to prevent). The scripts started as this file's commands
+moved verbatim, `<N>` becoming `$N`, plus an argument check; #281 then added an inode identity check
+and a bounded retry to `claim.sh` (see "Zero winners and the retry" below). Do not edit, shorten,
 reorder or split them without re-running **`../scripts/test-claim.sh`** (below). Everything else
 in this file is the reasoning behind the scripts, kept so a future editor does not "simplify" a
 guard away.
@@ -37,7 +38,8 @@ this doc, this one is immune to the cwd-reset pitfall below, so no
 `-C` or remembered variable is needed:
 
 The commands are in `../scripts/claim.sh` (read it there; it keeps the original inline comments).
-It prints exactly one `RESULT=` line.
+It prints exactly one `RESULT=` line. After a retry the line ends `[attempt K]`, and earlier
+attempts are logged as `claim.sh: attempt K: ...` lines, which never start with `RESULT=`.
 
 
 `RESULT=claimed*`: this invocation owns issue #<N>. Continue (to step
@@ -78,9 +80,101 @@ by artificially delaying one racer's `mv` past the other's full
 reclaim-and-recreate cycle: reproduced the double-claim without this
 check, zero double-claims across repeated runs with it.
 
-`stat -f %m` is BSD/macOS syntax (this repo's environment) — if it
+**Caveat, measured in #281:** the "third racer landing in that exact
+instant" excluded above happens on a loaded machine. Every ABA move
+(mv away, check, mv back) leaves the lock *name* free for a moment, and
+a racer whose first `mkdir` was delayed by load lands right in that
+gap. Then either the original claimant's by-path heartbeat write lands
+in the newcomer's dir, or the restore `mv` nests into it (BSD `mv` onto
+an existing dir moves *into* it). Either way both report `claimed`. The
+pre-#281 script showed 2 double claims in 300 stale trials under load
+(10 `yes` hogs, load average about 24). This is tracked in #297. #281
+narrows the window but does not close it. Closing it needs a move-free
+design: `mkdir`-per-generation inside the lock.
+
+### Inode identity (#281)
+
+The content check has a blind spot: an empty or garbage stale dir has
+`ORIG_HB_CONTENT=""`, and so does any freshly re-created, still-empty
+lock dir. So "a staleness read can never match a fresh one" is false
+there. A delayed racer could move another racer's in-flight re-create,
+see `""` = `""`, "reclaim" it, and then the first racer's heartbeat
+write landed in the delayed racer's new dir, giving a double claim
+(reproduced deterministically: `test-claim.sh` "empty-dir ABA" fails on
+the pre-#281 script). The fix is to compare object identity, not just
+content:
+
+- One `stat -f '%i %m'` before the heartbeat read gives the inode and
+  the mtime of the *same* object. If the stat fails, the mtime is "now"
+  (fail toward live) and the empty inode blocks the steal.
+- **Pre-check:** right before the `mv`, the inode at the lock name must
+  still be the one judged stale. If not, report `lost` and move
+  nothing. This removes most ABA moves, and with them most of the
+  name-free moments behind the caveat above and behind zero winners.
+  It is still check-then-act, so the post-check stays.
+- **Post-check:** after the `mv`, both the inode and the heartbeat
+  content of `$STEAL` must match the snapshot.
+- Inode reuse would defeat this only if the stale dir were deleted and
+  its inode number handed to a new dir while a racer still held the
+  snapshot. The stale dir is only removed (`rm -rf "$STEAL"`) *after*
+  the stealer's new `mkdir`, so the new dir cannot get its number, and
+  APFS allocates inode numbers from a monotonically increasing 64-bit
+  counter, so it does not reuse them in practice.
+- `$STEAL` also carries the attempt number, so a retry can never `mv`
+  onto its own earlier steal name (which would nest).
+
+Rollout residual: copies of the old `claim.sh` that agents are running
+right now lack the inode check, so an old and a new racer on an empty
+stale dir can still hit the empty-dir ABA. This goes away once every
+checkout has pulled.
+
+### Zero winners and the retry (#281)
+
+A stale race could end with nobody holding the lock. Racer A moves the
+stale dir L0 away, passes the checks and `mkdir`s L1. Racer B read the
+same stale heartbeat but was delayed: its `mv` grabs L1 before A's
+heartbeat lands, B sees the mismatch and restores L1, and while L1 is
+away A's heartbeat write fails, so A reports `lost a rare 3-way reclaim
+race`. L1 is left with no heartbeat. It reads `live` for 10 s, and
+every racer has already reported `lost` or `live`. The pre-#281 script
+did this in 91 of 300 loaded stale trials.
+
+Exactly one racer can be in that position. At the start of a stale race
+L0 is the only object under the name, so the first `mv` to succeed
+moves L0 and passes both checks. That racer either claims or takes the
+3-way branch. So a zero-winner trial always contains exactly one 3-way
+loser (confirmed on every zero-winner trace in the #281 runs), and it
+alone retries:
+
+- It waits (`settle`, at most 13 s) until either a numeric heartbeat
+  appears, so someone owns the lock and the retry will report `live`,
+  or the leftover dir has existed past the 10 s grace window. A
+  **missing** dir does not end the wait. The 3-way loss happens while
+  an ABA mover has the dir moved away, and a `mkdir` into that gap is
+  exactly the double claim in the caveat above.
+- It then runs the whole protocol again, with up to 3 attempts. Every
+  safety decision stays in the unchanged guarded logic. The retry only
+  decides *when* to look again.
+
+Why not retry on every `lost` or young-empty `live`? Two reasons:
+
+- Every loser waking at the 10 s mark would re-run a contended race
+  that can again end with zero winners.
+- Every racer that merely saw an in-flight fresh claim would steal it
+  at 10 s, which multiplies exposure to the #72 gap.
+
+With one waiter, attempt 2 is uncontended.
+
+Residual: the retry steals the leftover dir once it is 10 s old. If
+that dir were in fact a live claimant suspended for more than 10 s
+between its `mkdir` and its heartbeat, that is the #72 gap with one
+more waiter in it. Exactly one winner is not a proof either: attempt 2
+can itself hit a 3-way loss (that is why there is a third attempt), and
+the transit-window double claim (#297) remains.
+
+`stat -f '%i %m'` is BSD/macOS syntax (this repo's environment) — if it
 ever fails for a reason other than a genuinely missing directory, the
-`|| date +%s` fallback makes `DIR_MTIME` "now," i.e. `DIR_AGE` near
+fallback makes `DIR_MTIME` "now," i.e. `DIR_AGE` near
 zero, i.e. `AGE=0` (live). That's deliberate: when the age can't be
 determined, fail toward "don't steal" rather than toward "assume
 stale" — the former just delays a legitimate reclaim slightly, the
@@ -231,16 +325,27 @@ throwaway git repo (no real lock is touched) and races `RACERS` (4) copies of th
 start barrier so they genuinely overlap:
 
 - 30 fresh-claim races (exactly one `claimed (fresh)`, every other racer `live` or `lost`);
-- 20 stale-heartbeat reclaim races (never two winners; losers report `lost` or `live`). Zero winners
-  is a safe outcome, but a real one: roughly 2% of stale trials, up to 20% on a loaded machine
-  (liveness gap tracked in #281): a racer's ABA restore lands on another's
-  in-flight reclaim, everyone reports `lost`, and the lock stays reclaimable;
+- 20 stale-heartbeat reclaim races, each with **exactly one** winner, and the lock ends holding a
+  recent numeric heartbeat. A failure is labelled `zero` (the #281 liveness bug) or `double` (the
+  #297 transit-window residual). It also counts the trials whose *first* attempt had no winner and
+  those that needed a retry. 20 quiet trials rarely fail. For a real measurement run
+  `STALE_TRIALS=1000` (or at least 300) while the machine is busy, e.g. ten `yes >/dev/null` hogs;
 - an empty lock dir under 10 s old reads `live`, one backdated past the grace window is reclaimed by
   exactly one racer, and a garbage heartbeat on an old dir is reclaimed;
 - a fresh heartbeat makes every racer `live`;
-- the ABA case: one racer delayed (a `sleep 1` injected into a *copy* of the script) past another's
-  full reclaim-and-recreate, which must report `ABA detected, restored`;
-- with `CLAIM_ORIG=<file>` (the original block, from `git show <pre-#276 ref>:...claim-protocol.md`)
-  it diffs the script body against that block with `<N>` replaced by `$N`.
+- the ABA case: one racer delayed (a `sleep 1` injected into a *copy* of the script, just before its
+  `mv`) past another's full reclaim-and-recreate, which must report `ABA detected, restored`;
+- the inode pre-check: the same delay injected *before* the pre-check makes the late racer back off
+  with `lock replaced before the steal`, moving nothing;
+- the empty-dir ABA: two delayed copies on an old empty dir, where the content check alone cannot
+  tell the dirs apart; exactly one claim (the pre-#281 script double-claims here);
+- the 3-way retry: a copy forced into the 3-way branch on attempt 1 waits out the grace window and
+  reclaims the orphan on attempt 2, or reports `live` if a heartbeat appears meanwhile;
+- `heartbeat.sh` refreshes an existing lock and fails, without creating it, on a missing one.
+
+`CLAIM=<path>` runs the same tests against another copy (e.g. the pre-#281 script from
+`git show <ref>:.claude/skills/work-issue/scripts/claim.sh`) for before/after numbers. Tests that
+need the #281 retry are skipped for a copy without it. `TRACE=1` prints every racer's output for
+each stale trial whose first attempt had no winner.
 
 `FRESH_TRIALS`, `STALE_TRIALS` and `RACERS` override the counts.
