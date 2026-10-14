@@ -1637,18 +1637,28 @@
 % what it left on the operand stack down to where its N operands
 % started, unwinds the dictionary stack, and re-raises, so $error still
 % names the original guard.
+%
+% The depths and the CTM are baked into the error handler this builds,
+% which lives on the execution stack: a mathkit call made from /Ink
+% (nested inside this one) has its own, and can't overwrite this one's.
+% The procedure run is { proc stopped { state mkunwind stop } { end } ifelse }.
 % @internal
 /mkentry {
-  mkscratch begin
-  exch count 2 sub exch sub /mkbase exch mkset
-  /mkdepth countdictstack 1 sub mkset
-  /mkctm matrix currentmatrix mkset
-  stopped {
-    mkscratch /mkctm get setmatrix
-    { count mkscratch /mkbase get le { exit } if pop } loop
-    { countdictstack mkscratch /mkdepth get le { exit } if end } loop
-    stop
-  } { end } ifelse
+  exch count 2 sub exch sub 0 max
+  countdictstack matrix currentmatrix 3 array astore
+  [ exch /mkunwind cvx /stop load ] cvx
+  exch [ exch /stopped load 4 -1 roll [ /end load ] cvx /ifelse load ] cvx
+  mkscratch begin exec
+} bind def
+
+% junk... [base depth ctm] -> -   cut the operand stack back to base,
+% the dictionary stack to depth, and put back the CTM
+% @internal
+/mkunwind {
+  dup 2 get setmatrix
+  { count 1 index 0 get 1 add le { exit } if exch pop } loop
+  { countdictstack 1 index 1 get le { exit } if end } loop
+  pop
 } bind def
 
 % ------------------------------------------------------------- bodies
@@ -1755,13 +1765,8 @@
     mkj /Box get 3 get 0 0 mkrender
     setmatrix
     mkj /Ink get dup null ne {
-      /mkinkp exch def
-      mkscratch /mkbase get mkscratch /mkdepth get mkscratch /mkctm get
-      mkj /I get /mkinkp load
+      mkj /I get exch
       end exec mkscratch begin
-      mkscratch /mkctm 3 -1 roll put
-      mkscratch /mkdepth 3 -1 roll put
-      mkscratch /mkbase 3 -1 roll put
     } { pop } ifelse
   } forall
 } bind def
@@ -1983,22 +1988,39 @@
 %%EndSelfTest
 %
 %%SelfTest: errors-leave-the-stacks-as-they-were
+%   % bare `stopped`, not mustguard (which restores the stacks itself), and
+%   % a sentinel under each call, so popping too far shows as well
 %   /mkt-d0 countdictstack def
-%   count /mkt-c0 exch def
-%   { (\\frac{\\left[ \\begin{pmatrix} a & \\iint}{b}) 0 0 << >> mkpath }
-%   /mk-unsupported-command:\iint (an error deep inside nested groups) mustguard
-%   countdictstack mkt-d0 eq (the dictionary stack is unwound) mustbe
-%   count mkt-c0 eq (nothing is left on the operand stack) mustbe
-%   [ (a) (b) ] 0 0 << /Ink { pop newpath } >> { mkalign } stopped not
-%   exch length 2 eq and (mkalign returns a record per line) mustbe
-%   { [ (a) (b) ] 0 0 << /Ink { pop no-such-name } >> mkalign } /no-such-name
-%   (an error inside /Ink) mustguard
-%   countdictstack mkt-d0 eq (/Ink's error unwinds the dictionary stack too) mustbe
 %   matrix currentmatrix /mkt-m0 exch def
+%   /mkt-ctm-same {
+%     true 0 1 5 { dup mkt-m0 exch get exch matrix currentmatrix exch get eq and } for
+%   } def
+%   /mkt-sentinel
+%   { (\\frac{\\left[ \\begin{pmatrix} a & \\iint}{b}) 0 0 << >> mkpath } stopped
+%   (an error deep inside nested groups is raised) mustbe
+%   /mkt-sentinel eq (the operand stack is cut back to the call, no further) mustbe
+%   countdictstack mkt-d0 eq (the dictionary stack is unwound) mustbe
+%   /mkt-sentinel
+%   [ (a) (b) ] 0 0 << /Ink { pop newpath } >> mkalign
+%   length 2 eq (mkalign returns a record per line) mustbe
+%   /mkt-sentinel eq (and consumes only its operands) mustbe
+%   % an error inside /Ink, after the user rotated
+%   /mkt-sentinel
 %   { [ (a) (b) ] 100 100 << /Slope 30 /Ink { pop 45 rotate no-such-name } >> mkalign }
-%   /no-such-name (an error inside /Ink after a rotate) mustguard
-%   true 0 1 5 { dup mkt-m0 exch get exch matrix currentmatrix exch get eq and } for
-%   (the CTM is put back after an error) mustbe
+%   stopped (an error inside /Ink is raised) mustbe
+%   /mkt-sentinel eq (/Ink's error cuts the operand stack back) mustbe
+%   countdictstack mkt-d0 eq (/Ink's error unwinds the dictionary stack) mustbe
+%   mkt-ctm-same (the CTM is put back after an error) mustbe
+%   % a mathkit call nested in /Ink fails: the outer call still unwinds to
+%   % its own depths, not the inner one's
+%   /mkt-sentinel
+%   { [ (a) (b) ] 100 100 << /Ink { pop 30 rotate 7 7 (\\iint) 0 0 << >> mkpath } >> mkalign }
+%   stopped (a nested error is raised) mustbe
+%   $error /command get (mk-unsupported-command:\\iint) cvn eq
+%   (it names the nested guard) mustbe
+%   /mkt-sentinel eq (the outer call cuts the operand stack back to its own base) mustbe
+%   countdictstack mkt-d0 eq (and the dictionary stack to its own depth) mustbe
+%   mkt-ctm-same (and puts back its own CTM) mustbe
 %%EndSelfTest
 %
 %%SelfTest: mkpath-is-deterministic-and-leaves-rand-alone

@@ -58,10 +58,18 @@ The psart skill has the table.
   its locals in one small dict per call.
 - **Errors unwind the stacks.** Every public procedure runs through
   `mkentry`. It begins `mkscratch` (drychalk's private-dict pattern) and
-  records the operand and dict stack depths. On error it pops back to
-  both depths and re-raises, so `$error` still names the original guard.
-  A self-test covers an error three groups deep and an error inside
-  `/Ink`.
+  builds its own error handler, `{ proc stopped { state mkunwind stop }
+  { end } ifelse }`. The state is the operand base, the dict depth and the
+  CTM, baked in as literals. The handler lives on the execution stack, so
+  a mathkit call nested in `/Ink` has its own handler and can't overwrite
+  the outer one's. The first version kept the state in `mkscratch`, and a
+  failing nested call broke the outer unwind (advisor review). On error
+  the handler puts the CTM back, cuts both stacks back and re-raises, so
+  `$error` still names the original guard. Self-tests use a bare
+  `stopped` and a sentinel, and each unwind step was mutation-checked:
+  - an error three groups deep;
+  - an error in `/Ink` after a rotate;
+  - a nested mathkit call failing inside `/Ink`.
 - **The box format** is `[w h d items]`. The items are glyph, grower, rule,
   accent and frame entries, plus `[/b dx dy items]` for a placed box.
   The renderer walks the tree once. The slope is a CTM rotate that is
