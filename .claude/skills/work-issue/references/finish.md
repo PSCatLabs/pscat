@@ -15,7 +15,7 @@ One Bash call; the first line aborts it unless the PR is `MERGED`. Never reorder
 with a correct `Closes` line), the second line closes it with a comment linking the PR.
 ```sh
 WORKTREE_DIR=<absolute path>; BRANCH=<branch>
-EXTRA_WORKTREES=()   # exact paths of extra step-5 worktrees (identity base, comparison trees), e.g. ("/abs/idbase" "/abs/other"); empty if none
+EXTRA_WORKTREES=()   # exact paths of extra step-5 worktrees (identity base, comparison trees, the base worktree behind --base-bin), e.g. ("/abs/idbase" "/abs/other"); empty if none
 cd "$(git worktree list --porcelain | sed -n '1s/^worktree //p')" || exit 1   # the main checkout
 test "$(gh pr view <PR#> --json state --jq .state)" = MERGED || { echo "PR not MERGED: stop, no cleanup"; exit 1; }
 [ "$(gh issue view <N> --json state --jq .state)" = OPEN ] && gh issue close <N> --comment "Merged in <PR URL>."

@@ -13,17 +13,17 @@ The line ranges drift when you edit the file: re-check them (the first and last 
 | General pitfalls (a flat list of bullets) | 29-207 |
 | Added in #194 (friction from the #189 / PR #193 run, and #151) | 209-255 |
 | Waiting and timeouts | 257-275 |
-| Step 5 checklist | 277-316 |
-| CI wait (#199, from the #178 / PR #198 run; timings and pass/fail rule updated in #208) | 318-386 |
-| Main CI after merge (#257, #273) | 388-426 |
-| Pending-CI hand-back (only if you truly cannot wait) | 428-447 |
-| Resume paths (#208) | 449-490 |
-| Stop without merging when the dispatcher says so (#208) | 492-516 |
-| Rebase and merge rules (#208) | 518-565 |
-| Step 4 is a hard gate | 567-575 |
-| One scratch location | 577-589 |
-| Evidence runs and scratch hygiene (#273) | 591-614 |
-| Added in #303 (round 7: friction from the #110, #271, #279, #281, #285, #293 runs) | 616-674 |
+| Step 5 checklist | 277-333 |
+| CI wait (#199, from the #178 / PR #198 run; timings and pass/fail rule updated in #208) | 335-403 |
+| Main CI after merge (#257, #273) | 405-443 |
+| Pending-CI hand-back (only if you truly cannot wait) | 445-464 |
+| Resume paths (#208) | 466-507 |
+| Stop without merging when the dispatcher says so (#208) | 509-533 |
+| Rebase and merge rules (#208) | 535-582 |
+| Step 4 is a hard gate | 584-592 |
+| One scratch location | 594-606 |
+| Evidence runs and scratch hygiene (#273) | 608-631 |
+| Added in #303 (round 7: friction from the #110, #271, #279, #281, #285, #293 runs) | 633-691 |
 <!-- /TOC -->
 
 - **Don't work in the main checkout.** The whole point of the worktree
@@ -310,6 +310,23 @@ Cheapest first, before the long gate:
    proves each tree loads its own lib; keep the marker out of the branch. The corpus can take
    minutes at gallery resolution: run the check with `run_in_background: true` and a log
    (pitfalls "Long foreground commands").
+   **A change under `src/` (interpreter, operators, rasteriser) is the standard case for the two-binary
+   form (#335):** `scripts/identity_check.sh BASE_WORKTREE --base-bin BASE_BIN --head-bin HEAD_BIN
+   --control FILE --loader lib/artkit.ps` (or `--files LIST`). The base tree renders with the base
+   binary, the head tree with the head binary, so no wrapper that picks a binary by cwd is needed.
+   Build the base binary FROM the base worktree, in the background (a cold release build takes
+   minutes): `scripts/build_base_bin.sh BASE_WORKTREE "<SCRATCH>/base-pscat-<N>"`; it copies the
+   binary out because a shared target dir would let the head build overwrite it. The head binary is
+   `cargo build --release --bin pscat` in `$WORKTREE_DIR`. Give both flags or neither, and not with
+   a positional BIN. The control must use behaviour only the head binary has (for an operator fix,
+   the call that used to raise the error): it must render differently, which proves each tree ran
+   its own binary; exit 2 otherwise. Use a lib corpus wide enough to reach the operator
+   (`--loader lib/artkit.ps`, about 63 files), since the default paintkit pick is narrow. If the
+   change touches both `src/` and `lib/`, the base tree is still the merge-base worktree. List the
+   base worktree for step 9's `EXTRA_WORKTREES` (the binary in `<SCRATCH>` dies with the session).
+   Timing guard (not a goal): `scripts/bench_compare.sh BASE_BIN HEAD_BIN FILE [N]` prints CPU
+   min/median for base, head and an identical-binary control. It is fine to stop a running bench
+   and report a partial sample when the coordinator narrows the scope, or just use a small N.
 5. Every pscat probe you run by hand needs `--headless`, or `-e`/`--png`. Without one of
    them pscat opens a window and the call blocks until it is closed:
    `pscat --headless -e '3 4 add ='`, `pscat --png <SCRATCH>/probe-<N>.png file.ps`.

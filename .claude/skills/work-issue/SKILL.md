@@ -131,6 +131,10 @@ Then re-read `$WORKTREE_DIR/.claude/skills/work-issue/SKILL.md` (it may have cha
    and follow that copy. If it brought in only docs, skill or CI files, redo nothing; if it brought in
    `lib/`, `src/` or tests, redo the identity base, the identity check and the full gate (same entry).
    A lib change that must render identically: `scripts/identity_check.sh --loader <lib>` (checklist item 4).
+   A change under `src/` that must render identically: `scripts/identity_check.sh BASE_WORKTREE --base-bin
+   <base> --head-bin <head> --control <driver>` (base binary from `scripts/build_base_bin.sh`; checklist
+   item 4). It is the standard proof; do not hand-roll a wrapper. List its base worktree in step 9's
+   `EXTRA_WORKTREES`.
    Do pitfalls.md "Step 5 checklist" (cheap checks first). Heartbeat, then run with
    `run_in_background: true` (over 120s; run it in the foreground if the last gate took under ~60 s):
    ```sh
