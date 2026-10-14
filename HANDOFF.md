@@ -648,6 +648,11 @@ renders eight examples in both and compares block-downsampled output).
    as letters. Its layout recursion keeps locals in one small dict per
    call, so its public procedures unwind the dict stack on error
    (`mkentry`). `notes/237-mathkit.md` has the design calls.
+   #340 added `\overbrace`/`\underbrace` (strokeglyphs' grown left brace,
+   drawn under a CTM turned a quarter, no new grower), `\overset`
+   `\underset` `\stackrel` `\substack`, the style switches, `\not`,
+   `\bmod` `\pmod`, and TeX align's columns in `mkalign` (several `&` a
+   line, `/ColumnGap`): `notes/340-mathkit-structures.md`.
    Chalk (#235) shipped `lib/drychalk.ps`. `dcchalk` is the chalk preset
    over `dkstroke`. `dcboard` dresses a slate or green board: haze,
    `/Ghost` writing, swipes, wipes, ledge dust and a tray. It was tuned

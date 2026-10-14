@@ -1,0 +1,108 @@
+%!PS-Adobe-3.0
+%%Title: mathkit structures -- braces, stacked labels, style switches, \not and align columns (issue #340)
+%%BoundingBox: 0 0 1000 1320
+%%EndComments
+
+% Specimen for the TeX structures issue #340 added to lib/mathkit.ps.
+% Top to bottom:
+%
+%   braces       \overbrace and \underbrace with their labels
+%   stacked      \overset, \underset, \stackrel and \substack limits
+%   negation     \not, \pmod and \bmod
+%   styles       \displaystyle, \textstyle and \scriptstyle mid-formula
+%   columns      mkalign with several & per line: TeX align's columns,
+%                with a pen, then on a drychalk board
+%
+%   pscat --page 1000x1320 --png mathkit_structures.png examples/mathkit_structures.ps
+%   gs -dNOSAFER -dBATCH -dNOPAUSE -sDEVICE=png16m -g1000x1320 -r72 \
+%      -sOutputFile=mathkit_structures.png examples/mathkit_structures.ps
+%
+% In a PostScript string every TeX backslash is written twice.
+
+(lib/artkit.ps) run
+(lib/paintkit.ps) run
+(lib/drykit.ps) run
+(lib/handscript.ps) run
+(lib/strokeglyphs.ps) run
+(lib/drychalk.ps) run
+(lib/mathkit.ps) run
+
+0.985 0.98 0.965 setrgbcolor clippath fill
+
+% sp- prefix: specimen-local.
+/spfont { /Helvetica findfont exch scalefont setfont } def
+/splabel { 0.42 0.42 0.40 setrgbcolor 11 spfont moveto show } def
+/spheading { 0.30 0.30 0.28 setrgbcolor 12 spfont moveto show } def
+/sppen {
+  0.10 0.12 0.30 setrgbcolor 1.5 setlinewidth 1 setlinecap 1 setlinejoin stroke
+} def
+/spsize 30 def
+
+% (label) (tex) x y seed -   one formula, its label on the left margin
+/spformula {
+  /spseed exch def /spy exch def /spx exch def /sptex exch def
+  40 spy 3 add splabel
+  newpath sptex spx spy << /Size spsize /Seed spseed >> mkpath sppen
+} def
+
+0.20 0.20 0.18 setrgbcolor 24 spfont
+40 1270 moveto (mathkit.ps: more TeX structures) show
+0.42 0.42 0.40 setrgbcolor 12 spfont
+40 1250 moveto (Issue #340: braces, stacked labels, negation, style switches and align columns, at the default /Irregular 1; a plain pen, then chalk.) show
+
+(BRACES) 40 1210 spheading
+(\\underbrace, \\overbrace)
+  (\\underbrace{1 + 1 + \\cdots + 1}_{n \\text{ times}} = n \\qquad \\overbrace{a_1 + a_2 + \\cdots + a_k}^{k \\text{ terms}} = S_k)
+  230 1140 1 spformula
+(Nested)
+  (\\overbrace{x + \\underbrace{y + z}_{\\text{inner}} + w}^{\\text{outer}})
+  230 1040 2 spformula
+
+(STACKED LABELS) 40 980 spheading
+(\\overset, \\stackrel)
+  (f(x) \\overset{\\text{def}}{=} \\lim_{h \\to 0} \\frac{f(x+h) - f(x)}{h} \\qquad A \\stackrel{\\sim}{\\to} B)
+  230 920 3 spformula
+(\\underset, \\substack)
+  (\\underset{x \\to 0}{\\lim} \\frac{\\sin x}{x} = 1 \\qquad \\sum_{\\substack{0 \\le i \\le m \\\\ 0 < j < n}} P(i, j))
+  230 830 4 spformula
+
+(NEGATION AND CONGRUENCE) 40 750 spheading
+(\\not, \\pmod)
+  (a^{p-1} \\equiv 1 \\pmod{p} \\qquad a \\not\\equiv b \\pmod{n})
+  230 705 5 spformula
+(\\not, \\bmod)
+  (x \\not\\in A \\quad a \\not= b \\quad a \\not< b \\quad A \\not\\subset B \\qquad 17 \\bmod 5 = 2)
+  230 640 6 spformula
+
+(STYLE SWITCHES) 40 585 spheading
+(\\textstyle, \\displaystyle)
+  (\\textstyle \\sum_{k=1}^n k \\quad \\displaystyle \\sum_{k=1}^n k = \\frac{n(n+1)}{2})
+  230 525 7 spformula
+(A continued fraction)
+  (x = \\frac{1}{\\displaystyle 1 + \\frac{1}{\\displaystyle 1 + \\frac{1}{1 + x}}} \\qquad \\frac{1}{1 + \\frac{1}{1 + \\frac{1}{1 + x}}})
+  230 440 8 spformula
+
+% ------------------------------------------------------------- columns
+
+(ALIGN COLUMNS: mkalign with several & per line) 40 270 spheading
+newpath
+[ (f(x) &= x^2 & f'(x) &= 2x)
+  (g(x) &= \\sin x & g'(x) &= \\cos x)
+  (h(x) &= e^{3x} & h'(x) &= 3e^{3x}) ]
+  110 225 << /Size 24 /Seed 9 /Leading 1.9 >> mkalign pop sppen
+
+/spboard [ 520 18 440 230 ] def
+0.42 0.29 0.17 setrgbcolor 512 10 456 246 rectfill
+spboard aload pop << /Surface /greenboard /Seed 11 /Haze 0.3 /Swipes 2 /Wipes 1 /Ledge 10 >> dcboard
+/white dcchalkcolor
+newpath
+[ (x + y &= 3 & 2x - y &= 0)
+  (\\therefore 3x &= 3 & y &= 3 - x)
+  (x &= 1 & y &= 2) ]
+  620 200 << /Size 24 /Seed 12 /Leading 2.1 /ColumnGap 1.6
+     /Ink { pop << /Width 1.5 >> dcchalk } >> mkalign
+/sprecs exch def
+/pink dcchalkcolor
+newpath sprecs 2 get << /Size 24 /Seed 13 >> mkframe << /Width 1.3 >> dcchalk
+
+showpage

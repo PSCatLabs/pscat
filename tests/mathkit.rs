@@ -367,15 +367,8 @@ fn mkalign_lines_up_the_relations() {
     }
 }
 
-/// #237's compatibility criterion: Ghostscript runs the specimen, and lays
-/// out the same formula to the same box and the same path from the same
-/// seed (gs computes in single precision, hence the tolerance).
-#[test]
-fn ghostscript_builds_the_same_layout_and_path() {
-    if !gs_available() {
-        eprintln!("skipping gs compatibility check: gs not installed");
-        return;
-    }
+/// Ghostscript renders `file` on a `page` (WxH) without an error.
+fn assert_gs_renders(file: &str, page: &str) {
     let status = std::process::Command::new("gs")
         .args([
             "-dNOSAFER",
@@ -383,21 +376,26 @@ fn ghostscript_builds_the_same_layout_and_path() {
             "-dBATCH",
             "-q",
             "-sDEVICE=png16m",
-            "-g1000x1960",
+            &format!("-g{page}"),
             "-r72",
             "-o/dev/null",
-            "examples/mathkit_specimen.ps",
+            file,
         ])
+        .stdin(std::process::Stdio::null())
         .status()
         .expect("run gs");
-    assert!(status.success(), "gs rejected examples/mathkit_specimen.ps");
+    assert!(status.success(), "gs rejected {file}");
+}
 
+/// Ghostscript lays out `tex` to the same box and the same path as pscat,
+/// from the same seed (gs computes in single precision, hence the
+/// tolerance of 0.02 pt).
+fn assert_gs_same_layout_and_path(tex: &str) {
     let body = format!(
         "({tex}) << /Size 30 /Seed 3 >> mkmetrics \
          dup /Width get exch dup /Height get exch /Depth get \
          newpath ({tex}) 40 200 << /Size 30 /Seed 3 >> mkpath \
-         {{ }} {{ }} {{ }} {{ }} pathforall",
-        tex = TEST_SET[6].1
+         {{ }} {{ }} {{ }} {{ }} pathforall"
     );
     let probe = format!(
         "(lib/handscript.ps) run (lib/strokeglyphs.ps) run (lib/mathkit.ps) run {body} \
@@ -413,6 +411,7 @@ fn ghostscript_builds_the_same_layout_and_path() {
             "-c",
         ])
         .arg(&probe)
+        .stdin(std::process::Stdio::null())
         .output()
         .expect("run gs");
     assert!(
@@ -438,11 +437,51 @@ fn ghostscript_builds_the_same_layout_and_path() {
     // gs printed top of stack first
     ours.reverse();
     assert!(ours.len() > 300, "the probe path is suspiciously short");
-    assert_eq!(ours.len(), gs_nums.len(), "path lengths differ");
+    assert_eq!(ours.len(), gs_nums.len(), "{tex}: path lengths differ");
     for (i, (a, b)) in ours.iter().zip(&gs_nums).enumerate() {
         assert!(
             (a - b).abs() <= 20,
-            "value {i} differs: pscat {a} vs gs {b} (thousandths of a point)"
+            "{tex}: value {i} differs: pscat {a} vs gs {b} (thousandths of a point)"
         );
     }
+}
+
+/// #237's compatibility criterion: Ghostscript runs the specimen, and lays
+/// out the same formula to the same box and the same path from the same
+/// seed.
+#[test]
+fn ghostscript_builds_the_same_layout_and_path() {
+    if !gs_available() {
+        eprintln!("skipping gs compatibility check: gs not installed");
+        return;
+    }
+    assert_gs_renders("examples/mathkit_specimen.ps", "1000x1960");
+    assert_gs_same_layout_and_path(TEST_SET[6].1);
+}
+
+/// Issue #340's structures in Ghostscript: the structures specimen renders,
+/// and a brace drawn under a quarter-turned CTM, a struck relation, a
+/// substack and \pmod lay out to the same box and path as in pscat.
+#[test]
+fn ghostscript_builds_the_same_structures() {
+    if !gs_available() {
+        eprintln!("skipping gs compatibility check: gs not installed");
+        return;
+    }
+    assert_gs_renders("examples/mathkit_structures.ps", "1000x1320");
+    assert_gs_same_layout_and_path(
+        r"\\overbrace{a + \\underbrace{b + c}_{k}}^{n} \\not< \\sum_{\\substack{i<m \\\\ j<n}} x \\pmod{p}",
+    );
+}
+
+/// Issue #340's structures specimen: braces, stacked labels, \not, style
+/// switches and mkalign's columns, with a pen and on a chalk board.
+#[test]
+fn the_structures_specimen_renders_with_ink_and_a_clean_stack() {
+    let src = std::fs::read("examples/mathkit_structures.ps").expect("specimen present");
+    let mut it = Interp::with_page(1000, 1320).expect("page");
+    it.run_source(&src)
+        .unwrap_or_else(|e| panic!("specimen failed: {}", it.error_report(&e)));
+    assert!(it.operand_stack().is_empty(), "specimen leaked operands");
+    assert!(ink_count(&it) > 20_000, "specimen drew too little ink");
 }
