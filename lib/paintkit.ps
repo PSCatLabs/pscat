@@ -55,8 +55,9 @@
 % header, at the end of this file, for full docs.
 %
 % The brush *motions* (issue #184) are not brushes: path builders that make
-% the input a preset takes (criss-cross, scumble, tap, pull, zig-zag). They
-% are the last section of this file.
+% the input a preset takes (criss-cross, scumble, tap, pull, zig-zag). After
+% them, `pkbrushedge` and its motion `pkfeather` (issue #347) brush the ruled
+% edge of a filled mass.
 %
 % `pkspray` (issue #44) is not built on `pkribbon` -- spray is discrete
 % particle deposition, not an offset band -- but it shares the same
@@ -149,6 +150,9 @@
 % mh-/mx-/mc-/ms-/mt-/mp-/mz- (the brush motion generators: pkcrisscross,
 % pkscumblein, pkscumble, pktap, pkpull, pkzigzag) -- issue #184, see the
 % section at the end of this file. They call no preset.
+% mf- (pkfeather) and pe- (pkbrushedge) -- issue #347, the "Brushed edges"
+% section after the motions. pe- is distinct from every preset prefix
+% because pkbrushedge calls the caller's /Brush, usually a preset.
 % pj- (pkcanvas, the canvas surface's sampler and pjcatch) -- issue #182,
 % see the last section of this file. Distinct from every pk* name because the
 % presets that will call pjcatch (pkdry, pkfan) call pkribbon.
@@ -8745,6 +8749,636 @@ systemdict /setalpha known /pwhasalpha exch def
             } ifelse
         } ifelse
     } for
+} bind def
+
+% ============================================================================
+% Brushed edges (issue #347)
+% ============================================================================
+%
+% Every big mass in a landscape (a meadow, a near bank, the water between two
+% banks) starts as a filled path, and a filled path has a ruled vector edge.
+% Paint never has one. A painter breaks it by feathering: short strokes
+% dragged *across* the boundary, the mass's own colour pulled out over what is
+% behind it and the colour behind cut back into the mass, so the two
+% interlock. The edge stays where it was, but it reads as brushed. Near
+% things keep a firmer edge than far ones, and an edge is rarely broken all
+% the way along: stretches that dissolve and stretches left crisp ("lost and
+% found") lead the eye along it.
+%
+%   opts pkfeather     the motion: strokes across the current path's edge,
+%                      along its local normal (paints nothing)
+%   opts pkbrushedge   the one-call edge: the mass colour pulled out, then
+%                      the backdrop (/Under) cut back in, each through a brush
+%
+% `pkfeather` follows the motion family's contract (see "Brush motions"
+% above): it replaces the current path with the strokes, paints nothing, and
+% draws only from frnd: one draw per call (the /CrispSeed default) and a
+% fixed four per stroke slot. Which way is
+% "out" is decided once per subpath:
+%
+% * A subpath closed with `closepath` is part of a mass. The mass is the whole
+%   current path filled with the nonzero rule, exactly as `fill` would paint
+%   it (artkit's `scpath` region), and a few probe points just to the left of
+%   the walk ask it which side the paint is on. So a hole, wound either way,
+%   is brushed out into the hole, and a mirrored space (`1 -1 scale`) needs
+%   nothing special.
+% * An open subpath is an edge with no mass attached (the visible crest of a
+%   bank, the far edge of a meadow): its out side is the one that faces
+%   /Outward (default 90, up), whichever way the guide was drawn.
+%
+% `pkbrushedge` keeps the caller's path and graphics state (it works inside
+% gsave/grestore, like the presets), so the usual shape is
+%
+%   MASS setrgbcolor  bankpath fill
+%   bankpath << /Under WATER >> pkbrushedge
+%
+% Scratch prefixes: mf- (pkfeather), pe- (pkbrushedge). pkbrushedge calls
+% pkfeather (mf-, and the motions' shared mh- helpers), artkit's scpath, and
+% the caller's /Brush, which is usually a preset and so rewrites pk*, po-,
+% pb- and the other preset prefixes; pe- is none of those.
+
+%%SelfTest: pkfeather-and-pkbrushedge-guards
+%   { newpath 0 0 moveto 50 0 lineto << /Toward /up >> pkfeather }
+%   /pkfeather-toward-must-be-out-in-or-both
+%   (/Toward /up) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Toward (out) >> pkfeather }
+%   /pkfeather-toward-must-be-out-in-or-both
+%   (/Toward as a string) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Length 0 >> pkfeather }
+%   /pkfeather-length-must-be-positive
+%   (/Length 0) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /LengthJitter 1.5 >> pkfeather }
+%   /pkfeather-lengthjitter-must-be-0-to-1
+%   (/LengthJitter 1.5) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Overlap -0.1 >> pkfeather }
+%   /pkfeather-overlap-must-be-0-to-1
+%   (/Overlap -0.1) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Spacing 0 >> pkfeather }
+%   /pkfeather-spacing-must-be-positive
+%   (/Spacing 0) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Wander 2 >> pkfeather }
+%   /pkfeather-wander-must-be-0-to-1
+%   (/Wander 2) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Lean -1 >> pkfeather }
+%   /pkfeather-lean-must-be-non-negative
+%   (/Lean -1) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Slant 85 >> pkfeather }
+%   /pkfeather-slant-must-be-minus-80-to-80
+%   (/Slant 85) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Bow 0.6 >> pkfeather }
+%   /pkfeather-bow-must-be-0-to-0.5
+%   (/Bow 0.6) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Crisp 1.2 >> pkfeather }
+%   /pkfeather-crisp-must-be-0-to-1
+%   (/Crisp 1.2) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /CrispRun 0 >> pkfeather }
+%   /pkfeather-crisprun-must-be-positive
+%   (/CrispRun 0) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /CrispSeed 2 >> pkfeather }
+%   /pkfeather-crispseed-must-be-0-to-1
+%   (/CrispSeed 2) mustguard
+%
+%   % The wrapper scales and mirrors keys for its inward pass only when they
+%   % are numbers, so a bad one is still named by pkfeather's own guard.
+%   { newpath 0 0 moveto 50 0 lineto << /Under [ 1 1 1 ] /Length { 5 } >> pkbrushedge }
+%   /pkfeather-length-must-not-be-a-procedure
+%   (/Length { 5 } with /Under) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Under [ 1 1 1 ] /Overlap { 0.3 } >> pkbrushedge }
+%   /pkfeather-overlap-must-not-be-a-procedure
+%   (/Overlap { 0.3 } with /Under) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Outward { 90 } >> pkfeather }
+%   /pkfeather-outward-must-not-be-a-procedure
+%   (/Outward { 90 }) mustguard
+%
+%   { newpath 0 0 moveto 100000 0 lineto << /Spacing 0.1 >> pkfeather }
+%   /pkfeather-count-exceeds-safety-limit
+%   (a tiny spacing on a long line) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto 100 0 lineto << /Crisp 0.5 /CrispRun 1e-12 >> pkfeather }
+%   /pkfeather-crisp-stretch-count-exceeds-safety-limit
+%   (a vanishing /CrispRun) mustguard
+%
+%   % A closed square whose length is a whole number of strokes gets one
+%   % stroke per corner, not a second one where the walk closes.
+%   newpath 0 0 moveto 3 0 lineto 3 3 lineto 0 3 lineto closepath
+%   << /Spacing 3 /Wander 0 >> pkfeather
+%   /zzn 0 def { pop pop /zzn zzn 1 add def } { pop pop } { 6 { pop } repeat } { } pathforall
+%   newpath zzn 4 eq (a closed square gets no doubled seam stroke) mustbe
+%
+%   { newpath 0 0 moveto 50 0 lineto 7 pkfeather }
+%   /pkfeather-needs-an-options-dict
+%   (a number as the options) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << >> pkfeather
+%     newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath << /Toward /both /Crisp 0.5 >> pkfeather
+%     newpath << >> pkfeather }
+%   (pkfeather with defaults, a closed mass, and an empty path) mustpass
+%
+%   % Which side is out. Straight strokes starting on the edge (/Overlap 0,
+%   % no lean, wander or jitter) must all end outside the mass: a ring's outer
+%   % edge outward, its hole's edge into the hole, whichever way each is
+%   % wound, and the same under a mirrored CTM.
+%   /zzfring { newpath 50 0 moveto 0 0 50 0 360 arc closepath
+%              20 0 moveto 0 0 20 360 0 arcn closepath } def
+%   /zzfringr { newpath 50 0 moveto 0 0 50 360 0 arcn closepath
+%               20 0 moveto 0 0 20 0 360 arc closepath } def
+%   /zzfout {   % {ring} -> bool : every stroke end lies outside the mass
+%     exec scpath /zzreg exch def
+%     << /Overlap 0 /Lean 0 /Wander 0 /LengthJitter 0 /Length 5 >> pkfeather
+%     /zzok true def
+%     { pop pop } { zzreg scin { /zzok false def } if } { 6 { pop } repeat } { }
+%     pathforall newpath zzok } def
+%   { zzfring } zzfout (a ring with its hole wound the other way) mustbe
+%   { zzfringr } zzfout (the same ring wound the other way round) mustbe
+%   gsave 1 -1 scale { zzfring } zzfout grestore (a ring under 1 -1 scale) mustbe
+%   % A mass far thinner than the probe step still finds its out side (the
+%   % strokes are shorter than the mass is thick, so a wrong side ends in it).
+%   newpath 0 0 moveto 100 0 lineto 100 0.1 lineto 0 0.1 lineto closepath
+%   scpath /zzreg exch def
+%   << /Overlap 0 /Lean 0 /Wander 0 /LengthJitter 0 /Length 0.02 >> pkfeather
+%   /zzok true def
+%   { pop pop } { zzreg scin { /zzok false def } if } { 6 { pop } repeat } { }
+%   pathforall newpath zzok (a 100 x 0.1 sliver) mustbe
+%   % An open crest drawn right to left still brushes up (/Outward 90).
+%   newpath 100 0 moveto 0 0 lineto
+%   << /Overlap 0 /Lean 0 /Wander 0 /LengthJitter 0 /Length 5 >> pkfeather
+%   /zzok true def
+%   { pop pop } { exch pop 5 sub abs 0.001 gt { /zzok false def } if } { 6 { pop } repeat } { }
+%   pathforall newpath zzok (an open crest drawn right to left brushes up) mustbe
+%
+%   { newpath 0 0 moveto 50 0 lineto << /InSpacing 0 >> pkbrushedge }
+%   /pkbrushedge-inspacing-must-be-positive
+%   (/InSpacing 0) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto 7 pkbrushedge }
+%   /pkbrushedge-needs-an-options-dict
+%   (a number as the options) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Brush 3 >> pkbrushedge }
+%   /pkbrushedge-brush-must-be-a-procedure
+%   (/Brush 3) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Toward /in >> pkbrushedge }
+%   /pkbrushedge-sets-toward-itself
+%   (/Toward given to the wrapper) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Under [ 0 0 ] >> pkbrushedge }
+%   /pkbrushedge-under-must-be-a-3-element-array
+%   (/Under [ 0 0 ]) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Under [ 0 2 0 ] >> pkbrushedge }
+%   /pkbrushedge-under-components-must-be-0-to-1
+%   (/Under [ 0 2 0 ]) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Under /nosuchpaint >> pkbrushedge }
+%   /pkbrushedge-under-unknown-pigment-see-PigmentNames
+%   (/Under /nosuchpaint) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Under { pop pop 1 2 } >> pkbrushedge }
+%   /pkbrushedge-under-procedure-must-return-3-numbers
+%   (/Under returning two numbers) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Under { pop pop 0 0 5 } >> pkbrushedge }
+%   /pkbrushedge-under-procedure-results-must-be-0-to-1
+%   (/Under returning 5) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /InLength 0 >> pkbrushedge }
+%   /pkbrushedge-inlength-must-be-positive
+%   (/InLength 0) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath
+%     << /Under [ 1 1 1 ] >> pkbrushedge
+%     << /Under /titaniumwhite >> pkbrushedge
+%     << /Under { pop pop 1 1 1 } >> pkbrushedge
+%     << >> pkbrushedge }
+%   (pkbrushedge with each form of /Under, and without one) mustpass
+%
+%   % The wrapper leaves the caller's path and the operand stack as they were.
+%   count newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath
+%   << /Under { pop pop 0.5 0.5 0.5 } >> pkbrushedge
+%   count 1 sub eq currentpoint 0 eq exch 0 eq and and newpath
+%   (the caller's path and operand stack survive) mustbe
+%%EndSelfTest
+
+% x y -> bool   is the point inside the mass (mfreg)?
+% @internal
+/mfinmass { mfreg siinside } bind def
+
+% n -> u   a number in [0, 1) that depends only on n and mfseed: the crisp
+% stretches' own generator, so they do not move with the frnd stream.
+% @internal
+/mfu { 12.9898 mul mfseed 36000 mul add sin 43758.5453 mul abs dup floor sub } bind def
+
+% -> len   the length of crisp/brushed stretch number mfiv of subpath mfsub,
+% in the state mfbrushing says: /CrispRun * (1 - /Crisp) brushed or
+% /CrispRun * /Crisp crisp on average, each 0.4 to 1.6 times that.
+% @internal
+/mfivlen {
+    mfrun mfbrushing { 1 mfcrisp sub } { mfcrisp } ifelse mul
+    mfsub 7919 mul mfiv 2 mul add 2 add mfu 1.2 mul 0.4 add mul
+} bind def
+
+% @kind: Procedure
+% @summary: A feathering brush motion across a mass's edge: the current path is read as the edge of a filled mass and replaced with short strokes that cross it along the local normal, so a ruled vector edge can be brushed instead. /Toward /out starts each stroke inside the mass and pulls it out (paint it in the mass's colour); /in starts outside and pulls in (paint it in the colour behind); /both alternates. A subpath closed with closepath is a mass edge, and the mass itself (the whole path filled nonzero, as fill would) decides which side is out, holes included; an open subpath is a bare edge whose out side faces /Outward. Builds a path and paints nothing, so it composes with any preset: `opts pkfeather << >> pkbroad`. pkbrushedge does both directions and both colours in one call. Deterministic under the caller's own srand.
+% @example: newpath 0 120 moveto 120 150 240 110 360 135 curveto << /Length 12 /Spacing 3 /Slant 15 >> pkfeather << /Width 2 /Charge 0.8 /Depletion 0.8 >> pkbroad
+% @param: /Toward [name] /out, /in or /both: which way each stroke is pulled across the edge; /out starts in the mass and ends outside it, /in the reverse, /both alternates stroke by stroke (default /out)
+% @param: /Length [points] Mean stroke length in points; must be > 0 (default 8)
+% @param: /LengthJitter [fraction of /Length] 0..1 how far each stroke's length varies around /Length (default 0.6)
+% @param: /Overlap [fraction of stroke length] 0..1 how much of each stroke lies on the side it starts from, before it crosses the edge; 0 starts on the edge (default 0.35)
+% @param: /Spacing [points] Mean distance between strokes along the edge, in points; must be > 0 (default 3)
+% @param: /Wander [fraction of /Spacing] 0..1 how far a stroke slides along the edge from its even slot (default 0.5)
+% @param: /Lean [degrees] Random lean of each stroke around its heading, in degrees; must be >= 0 (default 30)
+% @param: /Slant [degrees] A fixed tilt of every stroke away from the edge's normal, counterclockwise, -80..80: a meadow's grass bent by the wind, a bank dragged one way (default 0)
+% @param: /Bow [fraction of stroke length] 0..0.5 sideways bend of each stroke as a fraction of its length, to either side at random; 0 is straight (default 0)
+% @param: /Crisp [0..1] the share of the edge left crisp, in stretches: brushed (lost) stretches alternate with untouched (found) ones, as a painter's edges do, rather than the edge being broken evenly all along; 0 brushes all of it (default 0)
+% @param: /CrispRun [points] Mean length of one crisp stretch plus the brushed stretch after it, in points; must be > 0. Only matters with /Crisp above 0 (default 60)
+% @param: /CrispSeed [0..1] where the crisp stretches fall: they depend only on this seed and the arc length along each subpath, so two calls with one seed leave the same stretches crisp at any spacing; pkbrushedge gives both its passes one seed this way (default one draw from frnd, taken whether or not the key is given)
+% @param: /Outward [degrees] For an open subpath only: the direction that is out of the mass, counterclockwise from +x in user space; each open subpath brushes out on whichever side of it faces this way. Closed subpaths ignore it (default 90, up)
+/pkfeather {
+    /mfopts exch def
+    /mfopts load type /dicttype ne { pkfeather-needs-an-options-dict } if
+    /mftoward mfopts /Toward /out pkgetdef def
+    /mftoward load type /nametype ne { pkfeather-toward-must-be-out-in-or-both } if
+    /mftoward load /out ne /mftoward load /in ne and /mftoward load /both ne and
+        { pkfeather-toward-must-be-out-in-or-both } if
+    /mflen mfopts /Length 8 pkgetdef def
+    /mflen load xcheck { pkfeather-length-must-not-be-a-procedure } if
+    mflen 0 le { pkfeather-length-must-be-positive } if
+    /mflj mfopts /LengthJitter 0.6 pkgetdef def
+    /mflj load xcheck { pkfeather-lengthjitter-must-not-be-a-procedure } if
+    mflj 0 lt mflj 1 gt or { pkfeather-lengthjitter-must-be-0-to-1 } if
+    /mfover mfopts /Overlap 0.35 pkgetdef def
+    /mfover load xcheck { pkfeather-overlap-must-not-be-a-procedure } if
+    mfover 0 lt mfover 1 gt or { pkfeather-overlap-must-be-0-to-1 } if
+    /mfspacing mfopts /Spacing 3 pkgetdef def
+    /mfspacing load xcheck { pkfeather-spacing-must-not-be-a-procedure } if
+    mfspacing 0 le { pkfeather-spacing-must-be-positive } if
+    /mfwander mfopts /Wander 0.5 pkgetdef def
+    /mfwander load xcheck { pkfeather-wander-must-not-be-a-procedure } if
+    mfwander 0 lt mfwander 1 gt or { pkfeather-wander-must-be-0-to-1 } if
+    /mflean mfopts /Lean 30 pkgetdef def
+    /mflean load xcheck { pkfeather-lean-must-not-be-a-procedure } if
+    mflean 0 lt { pkfeather-lean-must-be-non-negative } if
+    /mfslant mfopts /Slant 0 pkgetdef def
+    /mfslant load xcheck { pkfeather-slant-must-not-be-a-procedure } if
+    mfslant -80 lt mfslant 80 gt or { pkfeather-slant-must-be-minus-80-to-80 } if
+    /mfbow mfopts /Bow 0 pkgetdef def
+    /mfbow load xcheck { pkfeather-bow-must-not-be-a-procedure } if
+    mfbow 0 lt mfbow 0.5 gt or { pkfeather-bow-must-be-0-to-0.5 } if
+    /mfcrisp mfopts /Crisp 0 pkgetdef def
+    /mfcrisp load xcheck { pkfeather-crisp-must-not-be-a-procedure } if
+    mfcrisp 0 lt mfcrisp 1 gt or { pkfeather-crisp-must-be-0-to-1 } if
+    /mfrun mfopts /CrispRun 60 pkgetdef def
+    /mfrun load xcheck { pkfeather-crisprun-must-not-be-a-procedure } if
+    mfrun 0 le { pkfeather-crisprun-must-be-positive } if
+    % The seed is drawn whether or not it is given, so giving it moves
+    % nothing else.
+    frnd /mfseed0 exch def
+    /mfseed mfopts /CrispSeed mfseed0 pkgetdef def
+    /mfseed load xcheck { pkfeather-crispseed-must-not-be-a-procedure } if
+    mfseed 0 lt mfseed 1 gt or { pkfeather-crispseed-must-be-0-to-1 } if
+    /mfoutward mfopts /Outward 90 pkgetdef def
+    /mfoutward load xcheck { pkfeather-outward-must-not-be-a-procedure } if
+    /mfoutward load type dup /integertype ne exch /realtype ne and
+        { pkfeather-outward-must-be-a-number } if
+
+    % Which subpaths were closed with closepath, and, if any was, the mass
+    % they bound: the whole path as fill would paint it. Both read the path
+    % before mhcollect walks it (walkpath leaves it in place, flattened).
+    pkscanclosed /mfclosed exch def
+    /mfanyclosed false def
+    mfclosed { { /mfanyclosed true def } if } forall
+    mfanyclosed { scpath /mfreg exch def } if
+
+    % The edge is walked at a sixth of the spacing and every stroke sits on
+    % one of those samples, as in pkpull: a stroke can slide along the edge
+    % by whole samples without leaving it. 120000 samples bound 20000 strokes.
+    /mfn 6 def
+    mfspacing mfn div 120000 { pkfeather-count-exceeds-safety-limit } mhcollect
+
+    % The crisp stretches are walked along the whole edge, so their count is
+    % bounded too: a tiny /CrispRun on a long edge would otherwise loop for
+    % ever (or stall, once a stretch is below the arc length's precision).
+    % The shortest stretch is 0.4 of the shorter mean.
+    mfcrisp 0 gt mfcrisp 1 lt and {
+        0 0 1 mhn 1 sub { mhstops exch get 4 get add } for
+        mfrun mfcrisp 1 mfcrisp sub min mul 0.4 mul 100000 mul gt
+            { pkfeather-crisp-stretch-count-exceeds-safety-limit } if
+    } if
+
+    % Each subpath's out side, once for the whole subpath: +1 when out is to
+    % the left of the walk, -1 to the right. A one-sided rule per stop would
+    % flip at every wiggle of an open guide and at every corner of a mass.
+    [ 0 1 mhn 1 sub {
+        dup mhstops exch get 5 get 1 and 1 ne { pop } if
+    } for ] /mfstarts exch def
+    /mfsigns mfstarts length array def
+    0 1 mfstarts length 1 sub {
+        /mfs exch def
+        /mfb mfstarts mfs get def
+        /mfe mfs mfstarts length 1 sub lt { mfstarts mfs 1 add get 1 sub } { mhn 1 sub } ifelse def
+        mfs mfclosed length lt { mfclosed mfs get } { false } ifelse {
+            % Seven probes spread along the subpath, each a pair of points a
+            % small step to either side of the walk; the majority says which
+            % side the paint is on. A probe only counts when exactly one of
+            % its points is in the mass. Otherwise the step jumped right
+            % across a thin mass (or landed on a corner), so it is halved
+            % and tried again: the answer depends on the mass, never on the
+            % stroke spacing (Codex review, round 1).
+            /mfleft 0 def /mfvotes 0 def
+            0 1 6 {
+                mfe mfb sub 7 div exch 0.5 add mul round cvi mfb add
+                mhstops exch get /mfst exch def
+                mfst 5 get 3 ne {
+                    /mfnx mfst 2 get 90 add cos def
+                    /mfny mfst 2 get 90 add sin def
+                    /mfeps mfspacing mfn div 0.5 mul def
+                    40 {
+                        mfst 0 get mfnx mfeps mul add mfst 1 get mfny mfeps mul add
+                        mfinmass /mfpl exch def
+                        mfst 0 get mfnx mfeps mul sub mfst 1 get mfny mfeps mul sub
+                        mfinmass
+                        mfpl ne {
+                            /mfvotes mfvotes 1 add def
+                            mfpl { /mfleft mfleft 1 add def } if
+                            exit
+                        } if
+                        /mfeps mfeps 0.5 mul def
+                    } repeat
+                } if
+            } for
+            mfsigns mfs mfleft mfvotes 2 div gt { -1 } { 1 } ifelse put
+        } {
+            % An open edge: out is the side whose normal, summed along the
+            % walk, faces /Outward.
+            /mfdot 0 def
+            mfb 1 mfe {
+                mhstops exch get 2 get 90 add mfoutward sub cos
+                /mfdot exch mfdot add def
+            } for
+            mfsigns mfs mfdot 0 ge { 1 } { -1 } ifelse put
+        } ifelse
+    } for
+
+    newpath
+    /mfsub -1 def /mfk 0 def
+    0 1 mhn 1 sub {
+        /mfi exch def
+        mhstops mfi get 5 get /mfatend exch def
+        mfatend 1 and 1 eq {
+            /mfsub mfsub 1 add def
+            /mfbase mfi def
+            /mfend mfi def
+            {
+                mfend mhn 1 sub ge { exit } if
+                mhstops mfend get 5 get 2 and 2 eq { exit } if
+                /mfend mfend 1 add def
+            } loop
+            /mfisclosed mfsub mfclosed length lt { mfclosed mfsub get } { false } ifelse def
+            /mfsgn mfsigns mfsub get def
+            % The crisp stretches of this subpath: a function of the arc
+            % length from its start and the seed alone, so two calls with one
+            % seed (pkbrushedge's two passes) leave the same stretches crisp
+            % whatever their spacing.
+            /mfarc 0 def /mfiv 0 def
+            /mftot 0 mfbase 1 add 1 mfend { mhstops exch get 4 get add } for def
+            /mfbrushing mfsub 7919 mul mfu mfcrisp ge def
+            % Start partway into the first stretch, so subpaths do not all
+            % begin on a stretch boundary.
+            /mfnext mfivlen mfsub 7919 mul 1 add mfu mul def
+        } {
+            /mfarc mfarc mhstops mfi get 4 get add def
+        } ifelse
+        mfcrisp 0 gt mfcrisp 1 lt and {
+            { mfarc mfnext le { exit } if
+              /mfbrushing mfbrushing not def
+              /mfiv mfiv 1 add def
+              /mfnext mfnext mfivlen add def } loop
+        } if
+        % A slot is every sixth sample, plus an open subpath's end when it is
+        % at least half a spacing past the last slot. A closed subpath ends
+        % where it started, so no slot falls within half a spacing of its
+        % end: one there doubled the stroke at the start (Codex round 2; the
+        % walk's own end stop can repeat the last regular one, so "the end
+        % stop" alone was not enough).
+        /mfr mfend mfbase sub mfn mod def
+        mfi mfbase sub mfn mod 0 eq
+        mfisclosed mfi mfbase gt and { mftot mfarc sub mfspacing 0.5 mul ge and } if
+        mfi mfend eq mfr 0 gt and mfisclosed not and
+            { mfr 1 sub mfspacing mfn div mul mhstops mfend get 4 get add
+              mfspacing 0.5 mul ge }
+            { false }
+        ifelse
+        or {
+            % Four draws per slot, brushed or crisp.
+            frnd /mffw exch def frnd /mffl exch def
+            frnd /mffj exch def frnd /mffb exch def
+            mfbrushing {
+                /mfj mfi mffw 2 mul 1 sub mfwander mul mfn 2 div mul round cvi add def
+                mfj mfbase lt { /mfj mfbase def } if
+                mfj mfend gt { /mfj mfend def } if
+                mhstops mfj get /mfst exch def
+                % A lone point has no edge direction: it is pulled along
+                % /Outward itself.
+                /mfnorm mfst 5 get 3 eq
+                    { mfoutward }
+                    { mfst 2 get 90 mfsgn mul add }
+                ifelse def
+                /mfa mfnorm mfslant add mffl 2 mul 1 sub mflean mul add def
+                /mftoward load /in eq
+                /mftoward load /both eq mfk 2 mod 1 eq and
+                or { /mfa mfa 180 add def } if
+                /mfl mflen 1 mffj 2 mul 1 sub mflj mul add mul def
+                /mfdx mfa cos mfl mul def /mfdy mfa sin mfl mul def
+                /mfsx mfst 0 get mfdx mfover mul sub def
+                /mfsy mfst 1 get mfdy mfover mul sub def
+                mfsx mfsy moveto
+                mfbow 0 gt {
+                    /mfoff mfbow mfl mul mffb 0.5 lt { 1 } { -1 } ifelse mul def
+                    /mfnx mfa sin neg mfoff mul def
+                    /mfny mfa cos mfoff mul def
+                    mfsx mfdx 3 div add mfnx add
+                    mfsy mfdy 3 div add mfny add
+                    mfsx mfdx 2 mul 3 div add mfnx add
+                    mfsy mfdy 2 mul 3 div add mfny add
+                    mfsx mfdx add mfsy mfdy add curveto
+                } {
+                    mfsx mfdx add mfsy mfdy add lineto
+                } ifelse
+            } if
+            /mfk mfk 1 add def
+        } if
+    } for
+} bind def
+
+% x y -> -   (procedural /Under: ask it for the backdrop at x y, check the
+% answer, and set it as the colour). The procedure runs with nothing of
+% pkbrushedge's on the operand stack.
+% @internal
+/peunderat {
+    count 2 sub /pec0 exch def
+    peUnderProc
+    count pec0 sub 3 ne {
+        count pec0 sub dup 0 gt { { pop } repeat } { pop } ifelse
+        pkbrushedge-under-procedure-must-return-3-numbers
+    } if
+    3 array astore /peur exch def
+    0 1 2 {
+        peur exch get dup type dup /integertype ne exch /realtype ne and
+            { pop pkbrushedge-under-procedure-results-must-be-numbers } if
+        dup 0 lt exch 1 gt or
+            { pkbrushedge-under-procedure-results-must-be-0-to-1 } if
+    } for
+    peur aload pop setrgbcolor
+} bind def
+
+% any -> bool   an integer or a real?
+% @internal
+/penum { type dup /integertype eq exch /realtype eq or } bind def
+
+% /Toward -> dict   (a copy of the caller's options with /Toward set, and
+% /Length scaled by peinlen for the inward pass; the caller's dict is never
+% written)
+% @internal
+/peopts {
+    /petow exch def
+    peopts0 length 2 add dict
+    peopts0 { 2 index 3 1 roll put } forall
+    dup /Toward petow put
+    % The inward pass mirrors the outward one: /Overlap counts from the side
+    % a stroke starts on, so 1 - /Overlap puts an inward stroke over the
+    % same stretch of the normal an outward one covers. Fewer of them, so
+    % the backdrop nicks the edge rather than ruling a pale band inside it.
+    % One seed for both passes, so their crisp stretches line up.
+    dup /CrispSeed known not { dup /CrispSeed peseed put } if
+    % A key that is not a number is passed on untouched, so pkfeather's
+    % own guard names it.
+    petow /in eq {
+        dup /Length 8 pkgetdef dup penum
+            { peinlen mul 1 index exch /Length exch put } { pop } ifelse
+        dup /Spacing 3 pkgetdef dup penum
+            { peinspace mul 1 index exch /Spacing exch put } { pop } ifelse
+        dup /Overlap 0.35 pkgetdef dup penum
+            { 1 exch sub 1 index exch /Overlap exch put } { pop } ifelse
+    } if
+} bind def
+
+% -   gsave and grestore, counted in pedepth so pkbrushedge can unwind
+% to the caller's level when an error stops it halfway.
+% @internal
+/pegsave { gsave /pedepth pedepth 1 add def } bind def
+% @internal
+/pegrestore { grestore /pedepth pedepth 1 sub def } bind def
+
+% @kind: Procedure
+% @summary: Brushes the edge of a filled mass in one call: short strokes in the current colour pulled out across the current path's edge, then, with /Under, strokes in the backdrop colour cut back into the mass, so the two interlock and the ruled vector edge reads as painted. Fill the mass first; the path is the mass's outline (closed with closepath: holes and mirrored spaces work) or just the visible edge left open, whose out side is /Outward. Every pkfeather key is accepted and passed on (except /Toward, which this sets), and each pass is painted by /Brush. /Under takes what pkwet's /Under takes, plus a pigment name; a procedural /Under is asked once per inward stroke, at the stroke's start, so a graded sky or water cuts back in its own colour all along. The caller's path, colour and graphics state survive. Give it one non-overlapping outline per call: an edge hidden inside a union of overlapping blobs is brushed too. Deterministic under the caller's own srand.
+% @example: newpath 0 120 moveto 120 150 240 110 360 135 curveto 360 0 lineto 0 0 lineto closepath gsave 0.18 0.30 0.12 setrgbcolor fill grestore 0.18 0.30 0.12 setrgbcolor << /Under [ 0.62 0.72 0.86 ] /Slant 10 >> pkbrushedge
+% @param: /Under [rgb array or name] the colour behind the mass, cut back into it by the inward strokes; an [r g b] array, a pigment name such as /titaniumwhite (see PigmentNames), or a procedure `x y -> r g b` (three numbers in 0..1, user space; a pure function, as pkwet's) asked at each inward stroke's start. Unset paints the outward strokes only (default unset)
+% @param: /Brush [proc] the brush both passes are painted with: a procedure that paints the current path in the current colour, normally a preset with its options, such as `{ << /Width 2 >> pkdry }` (default `{ << /Width 5 /Charge 0.8 /Depletion 0.9 /Edge 0.6 /Grain 10 >> pkbroad }`, a small flat brush that runs dry as it crosses, so each stroke breaks up at its far end)
+% @param: /InLength [fraction of /Length] the inward strokes' length as a fraction of the outward ones'; must be > 0. Each inward stroke covers the stretch of the normal an outward one does (its /Overlap is mirrored), so most of it lies outside the mass and only its tip cuts in (default 1)
+% @param: /InSpacing [multiple of /Spacing] the inward strokes' spacing as a multiple of the outward ones'; must be > 0. Sparser cuts nick the edge; as dense as the outward strokes, they rule a pale band just inside it (default 2)
+/pkbrushedge {
+    /peopts0 exch def
+    /peopts0 load type /dicttype ne { pkbrushedge-needs-an-options-dict } if
+    peopts0 /Toward known { pkbrushedge-sets-toward-itself } if
+    /pebrush peopts0 /Brush
+        { << /Width 5 /Charge 0.8 /Depletion 0.9 /Edge 0.6 /Grain 10 >> pkbroad }
+        pkgetdef def
+    /pebrush load xcheck not { pkbrushedge-brush-must-be-a-procedure } if
+    /peinlen peopts0 /InLength 1 pkgetdef def
+    /peinlen load xcheck { pkbrushedge-inlength-must-not-be-a-procedure } if
+    peinlen 0 le { pkbrushedge-inlength-must-be-positive } if
+    /peinspace peopts0 /InSpacing 2 pkgetdef def
+    /peinspace load xcheck { pkbrushedge-inspacing-must-not-be-a-procedure } if
+    peinspace 0 le { pkbrushedge-inspacing-must-be-positive } if
+    % /Under: none, a colour (array or pigment name), or a backdrop procedure.
+    /pemode 0 def
+    peopts0 /Under known {
+        /peUnder peopts0 /Under get def
+        /peUnder load xcheck {
+            /peUnder load type dup /arraytype eq exch /packedarraytype eq or not
+                { pkbrushedge-under-must-be-a-3-element-array } if
+            /peUnderProc /peUnder load def
+            /pemode 2 def
+        } {
+            /peUnder load type /nametype eq {
+                /peUnder (pkbrushedge-under) peUnder pupig def
+            } if
+            /peUnder load type /arraytype ne { pkbrushedge-under-must-be-a-3-element-array } if
+            peUnder length 3 ne { pkbrushedge-under-must-be-a-3-element-array } if
+            0 1 2 {
+                peUnder exch get dup type dup /integertype ne exch /realtype ne and
+                    { pkbrushedge-under-components-must-be-numbers } if
+                dup 0 lt exch 1 gt or { pkbrushedge-under-components-must-be-0-to-1 } if
+            } for
+            /pemode 1 def
+        } ifelse
+    } if
+
+    % Every gsave below goes through pegsave, which counts it, so an error
+    % raised in the middle (a bad pkfeather key, a backdrop procedure's bad
+    % answer, the brush's own guard) can be unwound to the caller's level
+    % and passed on: the caller's graphics state is never left open.
+    frnd /peseed exch def
+    /pedepth 0 def
+    {
+    pegsave
+        % In first: the backdrop cut back into the mass.
+        pemode 1 eq {
+            pegsave peUnder aload pop setrgbcolor /in peopts pkfeather pebrush pegrestore
+        } if
+        pemode 2 eq {
+            % One brush call per stroke, each in the backdrop where it
+            % starts. The strokes are read back from the path first:
+            % [ /m x y /l x y ] or [ /m x y /c x1 y1 x2 y2 x3 y3 ] each.
+            pegsave
+                /in peopts pkfeather
+                [ { /m 3 1 roll } { /l 3 1 roll } { /c 7 1 roll } { } pathforall ]
+                /pesegs exch def
+                /pei 0 def
+                {
+                    pei pesegs length ge { exit } if
+                    pesegs pei get /m eq {
+                        pesegs pei 1 add get pesegs pei 2 add get peunderat
+                        newpath pesegs pei 1 add get pesegs pei 2 add get moveto
+                        /pei pei 3 add def
+                        pei pesegs length lt {
+                            pesegs pei get /l eq {
+                                pesegs pei 1 add get pesegs pei 2 add get lineto
+                                /pei pei 3 add def
+                            } {
+                                pesegs pei get /c eq {
+                                    pesegs pei 1 add 6 getinterval aload pop curveto
+                                    /pei pei 7 add def
+                                } if
+                            } ifelse
+                        } if
+                        pebrush
+                    } {
+                        /pei pei 1 add def
+                    } ifelse
+                } loop
+            pegrestore
+        } if
+        % Out, last: the mass's own colour pulled over what is behind it, on
+        % top of the nicks, so the two interlock.
+        pegsave /out peopts pkfeather pebrush pegrestore
+    pegrestore
+    } stopped { pedepth { grestore } repeat stop } if
 } bind def
 
 % ============================================================================
