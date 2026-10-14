@@ -131,8 +131,12 @@ fn gstate_objects_are_composite_with_identity() {
             "false"
         ]
     );
+    // `==` prints `-gstate-`, as in gs.
+    assert_eq!(eval("gstate"), ["-gstate-"]);
     let it = run("/g gstate def g ==");
     assert!(it.operand_stack().is_empty());
+    // Copying a gstate onto itself is a no-op, not a double borrow.
+    assert_eq!(eval("/g gstate def g g copy g eq"), ["true"]);
     // Usable as a dict key, by identity.
     assert_eq!(
         eval("/g gstate def /d 2 dict def d g 5 put d gstate 6 put d g get d length"),
