@@ -11774,3 +11774,59 @@ fn the_loading_demo_shows_what_each_panel_is_for() {
         "the pulled reflection does not fade: {near} near the bank, {far} at the foot"
     );
 }
+
+/// Issue #299: pkribbon, pknib and pkfeather scan the whole path with their
+/// own `pathforall` before they reach `walkpath`, so walkpath's segment bound
+/// (issue #110) cannot fire first. The scan (`pkscanclosed`) now carries the
+/// same bound. Deterministic, not timed: `walkpath` is replaced by a stub that
+/// records it was reached, so a refusal that comes from walkpath's own pass
+/// (the old behaviour) fails here, however fast the machine is.
+#[test]
+fn pre_walkpath_scans_refuse_a_huge_segment_count_before_walkpath() {
+    for call in ["<< >> pkribbon", "<< >> pknib", "<< >> pkfeather"] {
+        let mut it = fresh(200, 200);
+        it.run_str(
+            "/reached false def /walkpath { pop pop /reached true def } def \
+             newpath 20 20 moveto 400000 { 0 0 rlineto } repeat 100 0 rlineto",
+        )
+        .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+        let err = it.run_str(call).expect_err(call);
+        assert!(
+            matches!(err, PsError::Undefined(ref n) if n == "walkpath-segment-count-exceeds-safety-limit"),
+            "{call}: expected the segment-count guard, got {err}"
+        );
+        assert_eq!(it.operand_stack().len(), 0, "{call}: clean operand stack");
+        it.run_str("reached").unwrap();
+        assert_eq!(
+            it.operand_stack()[0].repr(),
+            "false",
+            "{call}: refused by the pre-walkpath scan, not by walkpath"
+        );
+    }
+}
+
+/// The bound is the same one walkpath uses: exactly `wkmaxsegs` segments
+/// still draw (the scan must not refuse what walkpath accepts), one more is
+/// refused by the scan. Curves count once in the scan and many times
+/// flattened, so a path of curves is never refused by the scan alone.
+#[test]
+fn pre_walkpath_scans_accept_exactly_wkmaxsegs_segments() {
+    for call in ["<< /Pitch 50 >> pkribbon", "<< /Pitch 50 >> pknib"] {
+        let mut it = fresh(200, 200);
+        it.run_str("0 0 0 setrgbcolor").unwrap();
+        // A moveto plus (limit - 2) zero linetos plus one real one is exactly
+        // wkmaxsegs visits, so it draws.
+        it.run_str("newpath 20 20 moveto wkmaxsegs 2 sub { 0 0 rlineto } repeat 100 0 rlineto")
+            .unwrap();
+        it.run_str(call)
+            .unwrap_or_else(|e| panic!("{call} at the limit: {}", it.error_report(&e)));
+        assert!(ink_count(&it) > 0, "{call}: drew at the limit");
+        it.run_str("newpath 20 20 moveto wkmaxsegs 1 sub { 0 0 rlineto } repeat 100 0 rlineto")
+            .unwrap();
+        let err = it.run_str(call).expect_err(call);
+        assert!(
+            matches!(err, PsError::Undefined(ref n) if n == "walkpath-segment-count-exceeds-safety-limit"),
+            "{call}: one over the limit, got {err}"
+        );
+    }
+}

@@ -171,16 +171,34 @@
 % wkmeasure: emit the previous subpath's flag on each new moveto
 % (skipped on the very first), then once more after the loop for the
 % last subpath.
+%
+% This is also the segment-count bound for the presets that scan before
+% they walk (issue #299). pkribbon, pknib and pkfeather call it ahead of
+% their first walkpath, so walkpath's own bound (artkit's wkmaxsegs,
+% issue #110) cannot fire first. Moveto, lineto and closepath each count
+% one, as in wkmeasure, and a path over wkmaxsegs raises
+% `walkpath-segment-count-exceeds-safety-limit` the moment the count
+% passes it, so the refusal costs 50,000 visits and not the whole path.
+% The scan reads the path before it is flattened, so its count is never
+% more than wkmeasure's: no path walkpath accepts is refused here. The
+% error fires with this procedure's `[` mark and the pathforall operands
+% on the stack, so it clears back to the mark first.
 % @internal
 /pkscanclosed {
-    /pkscclosed false def /pkscfirst true def
+    /pkscclosed false def /pkscfirst true def /pkscn 0 def
     [
         { pop pop
+          /pkscn pkscn 1 add def
+          pkscn wkmaxsegs gt { cleartomark walkpath-segment-count-exceeds-safety-limit } if
           pkscfirst { /pkscfirst false def } { pkscclosed } ifelse
           /pkscclosed false def }
-        { pop pop }
+        { pop pop
+          /pkscn pkscn 1 add def
+          pkscn wkmaxsegs gt { cleartomark walkpath-segment-count-exceeds-safety-limit } if }
         { pop pop pop pop pop pop }
-        { /pkscclosed true def }
+        { /pkscn pkscn 1 add def
+          pkscn wkmaxsegs gt { cleartomark walkpath-segment-count-exceeds-safety-limit } if
+          /pkscclosed true def }
         pathforall
         pkscfirst not { pkscclosed } if
     ]
@@ -661,7 +679,9 @@
     /pkjitter pkopts /Jitter 0 pkgetdef def
     /pkjitter load xcheck { pkribbon-jitter-must-not-be-a-procedure } if
 
-    /pkclosedflags pkscanclosed def
+    % Scan first, name second: the bound (issue #299) can raise inside the
+    % scan, and a name pushed ahead of it would be left on the stack.
+    pkscanclosed /pkclosedflags exch def
 
     % Two walkpath passes over the same (surviving, per its own
     % contract) flattened path -- count, then fill a preallocated
@@ -869,16 +889,13 @@
 /pknib {
     /pnopts exch def
 
-    /pnmoveto 0 def /pnclosed false def
-    {
-        pop pop /pnmoveto pnmoveto 1 add def
-    } {
-        pop pop
-    } {
-        pop pop pop pop pop pop
-    } {
-        /pnclosed true def
-    } pathforall
+    % One flag per subpath, from pkscanclosed, which is also the
+    % segment-count bound (issue #299): a pathforall of its own here
+    % would scan a pathological path in full before walkpath's bound
+    % could fire.
+    pkscanclosed /pnflags exch def
+    /pnmoveto pnflags length def /pnclosed false def
+    pnflags { { /pnclosed true def } if } forall
     pnmoveto 1 gt { pknib-path-must-be-a-single-subpath } if
     pnclosed { pknib-path-must-not-be-closed } if
 
