@@ -325,21 +325,29 @@ grestore
 
 ![Two rows of tapped forest along a far shore](landscape/forest.png)
 
-**Tools.** A filled mass, `pkdab` for the tapped crest, `pkfan` for the spires, `pkbroad` for the band along the shore, `pkwet` for the back row's softness.
+**Tools.** A filled mass, `pkdab` for the tapped crest, `pkscumblein` with `/Light` (issue #345) and `pkdab` for the crest's lit side, `pkfan` for the spires, `pkbroad` for the band along the shore, `pkwet` for the back row's softness.
 
-**Order.** The back row (paler, softened), the front row (darker, crisp): the mass, its tapped crest, the spires standing out of it, and the band along the shore.
+**Order.** The back row (paler, softened), the front row (darker, crisp): the mass, its tapped crest, the light along the crest, the spires standing out of it, and the band along the shore.
 
 **Key idea.** **A far forest is a filled mass with a tapped crest**, not a thousand trees. The mass is a plain fill under a crest path; the crest is `pkdab` with `/Size` 2, `/Scatter` 4 and `/Density` 4 along that same path, which makes the fuzzy edge that reads as foliage. A distant forest is an edge, not a texture.
+
+**The crest's light** (issue #383). A wood against a glowing sky is backlit: a dark mass with a thin, broken light along its top edge where the glow catches the leaves, and none inside. The mass is a region (its crest path closed down to the waterline, then `scpath`), and `pkscumblein /Light 90` keeps only the circles along its top edge, following every hump of the crest, a small `pkdab` clump on each. Two passes, as in recipes 2 and 7: a half-light (`/Reach 0.17 /Feather 0.8`), then a core right at the edge (`/Reach 0.07`, smaller circles and dabs). Both loads are a mix of the body and a pale, slightly warm glow, so the light stays close to the body's value: the front row must stay darker than the back row, or the light reads as haze and the two rows fuse.
 
 **Settings.**
 - Put a crest function (`foothill` in the snippet) in a named procedure and have the mass, the crest and the spires all use it, so they agree.
 - The back row's crest is `0.95` times the front crest's height, in a colour half mixed toward the mist; wrap its crest in `pkwet /Soft 0.6` with `/Under` the colour of what is really behind it (the half-faded range foot), not the mist itself, which would leave a pale rim around the forest.
-- The front row is one colour throughout and left crisp. The contrast between a softened back and a crisp front is what puts air between the two.
+- The front row is one body colour, with its light only along the crest, and left crisp. The contrast between a softened back and a crisp front is what puts air between the two. The back row takes no lit pass: it is the paler, hazier plane, and its edge is already the lightest thing in the wood.
+- Lift the lit region by 2 pt (`gsave 0 2 translate` around the lit passes). The tapped crest's dabs (`/Scatter 4`) stand above the fill's edge, so a region on the fill's edge puts the light under a dark rim: a light line under a dark outline, not a lit crest.
+- `/Reach` is a fraction of the region's depth along the light, which is the mass's whole height (about 22 pt), so where the crest dips to 9 pt a deep reach lights it all the way down. Keep the half-light shallow (0.17, about 4 pt) and the core shallower, or the whole front row is lit and the dark mass is lost.
+- Dab size sets the look: `/Size 1.4 /Scatter 1` is a clump about 4 pt across. At `/Size 1.9 /Scatter 1.8` the clumps read as grey bubbles stuck on the mass.
 - `pkfan` spires: `/Width 5 /Bristles 10 /Splay 0.9 /Ragged 0.5 /Flick 0.9`; a few, at random positions along the crest.
 
 **Failures.**
 - *A ruled, flat edge on the mass.* Always a tapped crest over a filled mass, never the fill alone. The fill's edge is a vector line; for a forest the tapped dabs are the right break, since they read as foliage. A mass that is not foliage (a meadow, a bare bank) takes `pkbrushedge` instead (recipe 10).
 - *A pale rim round the back row.* `/Under` is wrong; see above.
+- *A washed-out front row.* The lit load is too light, the band too deep or the clumps too big, so the front row matches the back row in value. Keep the loads close to the body (the snippet's are 40% and 80% of the way to a glow that is itself only 35% of the way to a pale colour), keep `/Reach` under 0.2, and keep the dabs small.
+- *Lit bubbles instead of a lit crest.* Too few circles (`/Count` is over the whole region and the band holds a fraction of it, so a thin band needs hundreds) or dabs too big. A lone clump reads as a spot, as on a bush.
+- *The light under a dark rim.* The lit region is not lifted over the tapped crest; see the settings.
 
 ```postscript
 % recipe: forest
@@ -369,12 +377,34 @@ BACK aload pop setrgbcolor 0.95 mass
 { 0.95 crest << /Size 2.2 /Scatter 5 /Density 4 /Shadow 0 /Highlight 0 /Irregular 1 >> pkdab }
 << /Soft 0.6 /Under [ RANGE MIST 0.5 mix3 ] >> pkwet
 
-% 2. The front row: one colour throughout, left crisp. The mass, its tapped
-%    crest, a few spires standing out of it, and a band along the shore.
+% 2. The front row: one body colour, left crisp. The mass, its tapped crest,
+%    the crest's lit side (below), a few spires standing out of it, and a
+%    band along the shore.
 LINE aload pop setrgbcolor
 0.55 mass
 0.55 crest
 << /Size 2 /Scatter 4 /Density 4 /Shadow 0.3 /Highlight 0.08 /Irregular 1 >> pkdab
+
+% 2b. The crest's lit side. The sky glow is above the wood, so the light
+%    comes from 90, and a backlit wood is a dark mass with a thin, broken
+%    light along its top edge, not a lit band. The mass is a region, and
+%    /Light keeps only the circles along its top edge, a small clump of
+%    dabs on each, in a load close to the body's value. The region is lifted
+%    2 pt so the dabs sit on the tapped crest (whose dabs stand above the
+%    fill's edge), not under it.
+/GLOW [ LINE [ 0.80 0.82 0.74 ] 0.35 mix3 ] def       % the sky glow, a shade warmer than the sky
+/lit_mass { 0.55 crest 370 WL lineto -10 WL lineto closepath scpath } def
+gsave 0 2 translate
+[ LINE GLOW 0.4 mix3 ] aload pop setrgbcolor
+lit_mass
+<< /Count 700 /Radius 1.6 /Light 90 /Reach 0.17 /Feather 0.8 >> pkscumblein
+<< /Size 1.4 /Scatter 1 /Density 3 /Irregular 1 /Highlight 0.15 /Shadow 0 /Light 90 /HighlightColor GLOW >> pkdab
+[ LINE GLOW 0.8 mix3 ] aload pop setrgbcolor
+lit_mass
+<< /Count 900 /Radius 1.2 /Light 90 /Reach 0.07 /Feather 1 >> pkscumblein
+<< /Size 1.1 /Scatter 0.8 /Density 3 /Irregular 1 /Highlight 0.3 /Shadow 0 /Light 90 /HighlightColor GLOW >> pkdab
+grestore
+LINE aload pop setrgbcolor                  % back to the body's colour for the spires and the band
 0 1 18 { pop
   /fo_x 360 chance def  /fo_t fo_x foothill 0.55 mul WL add def
   newpath fo_x fo_t 2 sub moveto fo_x fo_t 12 add 14 chance add lineto
