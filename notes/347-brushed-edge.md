@@ -11,9 +11,8 @@ motions; nothing existing changed):
   replaced with short strokes across it along the local normal. `/Toward
   /out | /in | /both`, `/Length`, `/LengthJitter`, `/Overlap` (the share of a
   stroke on its starting side), `/Spacing`, `/Wander`, `/Lean`, `/Slant` (a
-  fixed tilt from the normal), `/Bow`, `/Crisp` + `/CrispRun` (lost and found:
-  stretches left untouched, a two-state walk along the edge), `/Outward` (for
-  open subpaths).
+  fixed tilt from the normal), `/Bow`, `/Crisp` + `/CrispRun` + `/CrispSeed`
+  (lost and found: stretches left untouched), `/Outward` (for open subpaths).
 - `opts pkbrushedge` — the one-call edge. Inward cuts in `/Under` (colour,
   pigment name, or procedure `x y -> r g b`, asked per stroke) first, then the
   outward strokes in the current colour, each through `/Brush` (default a
@@ -33,7 +32,12 @@ motions; nothing existing changed):
   either way. Closure comes from `pkscanclosed`, not coincident endpoints.
 - *Lost and found.* Painters' edges are not broken evenly all along; `/Crisp`
   is named for what the artist sees (stretches left crisp), not "lost", which
-  in painting means the opposite (a dissolved edge).
+  in painting means the opposite (a dissolved edge). The first version ran a
+  per-slot two-state walk on `frnd`; in `pkbrushedge` the two passes then had
+  different crisp stretches, so only about Crisp squared of the edge was
+  really untouched (review). The stretches are now a function of arc length
+  and `/CrispSeed` alone (a small private hash, `mfu`), and the wrapper gives
+  both passes one seed.
 - *Order and density of the two passes.* First prototypes painted the outward
   pass, then an inward pass as dense as it: the inward strokes' inner ends
   ruled a pale band just inside the edge. The inward pass is now first,
@@ -67,4 +71,7 @@ in Ghostscript too.
 
 **Not done.** No `eofill` rule (the region is nonzero, like `fill`); an
 outline mixing open and closed subpaths puts the open ones into the region
-too. Evening Stream (PR #348) is not edited here.
+too. One non-overlapping outline per call: a mass built from overlapping
+closed blobs has edges hidden inside the union, and those get brushed too
+(the inward pass would nick the middle of the mass). Brush the union's
+outline, or each blob in its own call where its edge shows. Evening Stream (PR #348) is not edited here.

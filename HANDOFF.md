@@ -945,8 +945,8 @@ renders eight examples in both and compares block-downsampled output).
   (`docs/paintkit_plane_demo.png`).
 - **`pkbrushedge` / `pkfeather` (issue #347) brush a filled mass's edge.**
   Their own section ("Brushed edges") sits after the brush motions.
-  `pkfeather` is a motion (replaces the path, paints nothing, five `frnd`
-  draws per slot, slots at a sixth of `/Spacing` as in `pkpull`). The out
+  `pkfeather` is a motion (replaces the path, paints nothing, one `frnd`
+  draw per call and four per slot, slots at a sixth of `/Spacing` as in `pkpull`). The out
   side is decided once per subpath, never per stop: for a closepath'd
   subpath, seven probes just left of the walk are tested against artkit's
   `scpath` region of the whole path (nonzero, like `fill`), so holes of
