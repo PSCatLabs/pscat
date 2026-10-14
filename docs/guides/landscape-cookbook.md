@@ -706,12 +706,12 @@ newpath 0 74 moveto 60 86 130 68 190 54 curveto 230 42 260 28 300 24 curveto
 **Order.** The grass is the last mark of the painting. Along the rim first, then a few tufts across the bank, dimmer than the rim's.
 
 **Settings.**
-- `pkpull` pulls strokes from the current path along a direction: `/Direction 90 /Length 18 /LengthJitter 0.6 /Spacing 2.2 /Lean 16 /Bow 0.2`. `/Bow` curves them like blades and `/Lean` tilts them. It builds a path and paints nothing, so the next call decides the brush: here `pkliner`, `/Width 1.4 /Taper 0.95 /Waver 0.6`.
+- `pkpull` pulls strokes from the current path along a direction: `/Direction 90 /Length 18 /LengthJitter 0.6 /Spacing 2.2 /Lean 16 /Bow 0.2 /Scatter 3`. `/Bow` curves them like blades, `/Lean` tilts them, and `/Scatter` (points) starts each one up to that far to either side of the guide, across it, so the roots do not sit on one ruled line. It builds a path and paints nothing, so the next call decides the brush: here `pkliner`, `/Width 1.4 /Taper 0.95 /Waver 0.6`.
 - **One canvas.** `<< /Seed 7 /Weave 2.5 /Relief 0.6 >> pkcanvas` once, *first*, in the space the piece is painted in (before any `translate` or `scale`). `/Touch` (0 to 1) on `pkliner`, `pkdry`, `pkfan`, `pkbroad` or `pktrowel` lands a mark only on the knuckles that pressure reaches: lower is lighter. Every touched stroke catches on the same weave, so a dry brush and a knife crossing share it. A `/Touch` with no canvas is an error.
 - The rim's grass is lighter in tone and heavier in touch (0.8); the tufts across the bank are dimmer (0.7).
 
 **Failures.**
-- *Grass like a picket fence hung from a rail.* `pkpull` starts every stroke exactly on the spine, with no across-spine scatter. Raise `/Wander` and `/LengthJitter`, and pull from a few short guide strokes across the bank as well as the rim; see [#346](https://github.com/jeromebanks/postscript_interpreter/issues/346).
+- *Grass, or a waterfall, like a picket fence hung from a rail.* Unset, `pkpull` starts every stroke exactly on the spine, and `/Wander` only slides a start *along* it. Set `/Scatter` to a few points (the rim here uses 3; a fall pulled down off a lip reads better at 4 to 6) so the starts spread across the line. Raise `/LengthJitter` too, so the tips do not line up either.
 - *Grass that is one flat colour.* A dark stem with a lit tip would be `/TipColor` ([#229](https://github.com/jeromebanks/postscript_interpreter/issues/229)); for now layer a darker pass under a lighter one.
 - *`/Touch` that does nothing visible.* `/Touch 1` is full contact, the same as unset; take it down to 0.5 to 0.8.
 - *The canvas pattern moved.* `pkcanvas` must be called before any `translate`, `scale` or `rotate` the piece applies, and supersampling with `2 2 scale` goes before it.
@@ -733,7 +733,8 @@ newpath -10 -10 moveto -10 90 lineto 90 104 200 70 280 54 curveto
 % 1. Grass along the rim: pkpull pulls strokes up from the guide path,
 %    leaning and bowing like blades, and a liner paints each one.
 newpath -10 90 moveto 90 104 200 70 280 54 curveto 330 46 350 60 370 76 curveto
-<< /Length 18 /LengthJitter 0.6 /Spacing 2.2 /Direction 90 /Lean 16 /Bow 0.2 >> pkpull
+<< /Length 18 /LengthJitter 0.6 /Spacing 2.2 /Direction 90 /Lean 16 /Bow 0.2
+   /Scatter 3 >> pkpull
 [ 0.62 0.55 0.22 ] aload pop setrgbcolor
 << /Width 1.4 /Taper 0.95 /Waver 0.6 /Touch 0.8 >> pkliner
 
@@ -757,7 +758,6 @@ A recipe is a workaround where one of these would be one call. When one lands, u
 | [#229](https://github.com/jeromebanks/postscript_interpreter/issues/229) | `/TipColor` and `/TipReach`: a lit tip on a dark stem | 6 Evergreens, 11 Grass |
 | [#230](https://github.com/jeromebanks/postscript_interpreter/issues/230) | `/Colors` on `pkdry` and `pkoil`'s ridges | 4 Mist, 10 Bank, foam on water |
 | [#345](https://github.com/jeromebanks/postscript_interpreter/issues/345) | light-aware massing for clouds and bushes | 2 Clouds, 7 Bushes |
-| [#346](https://github.com/jeromebanks/postscript_interpreter/issues/346) | `pkpull` across-spine scatter | 11 Grass, a waterfall |
 | [#347](https://github.com/jeromebanks/postscript_interpreter/issues/347) | a brushed edge for filled masses | 5 Forest, 10 Bank |
 | [#359](https://github.com/jeromebanks/postscript_interpreter/issues/359) | `pkwet` backdrop per band, not per pass | 2 Clouds, 4 Mist |
 
