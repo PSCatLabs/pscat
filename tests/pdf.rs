@@ -232,6 +232,75 @@ fn zero_length_lineto_is_dropped_from_fills_and_clips_but_kept_in_strokes() {
     assert!(pdf_text(&pdf).contains(" l "));
 }
 
+/// Issue #320: path coordinates are written with two decimals, trailing
+/// zeros trimmed, never `-0`. Colours, widths and dashes keep three.
+#[test]
+fn path_coordinates_use_two_decimals_and_other_numbers_keep_three() {
+    let (pdf, _) = pdf_and_canvas(
+        b"newpath 10.126 20.004 moveto 30.5 20.004 lineto 30.5 40 lineto
+          closepath 0.125 setlinewidth 0.123 0.456 0.789 setrgbcolor
+          [0.125 0.5] 0.25 setdash stroke",
+    );
+    let text = pdf_text(&pdf);
+    assert!(text.contains("10.13 "), "two-decimal coordinate: {text}");
+    assert!(!text.contains("10.126"), "no third decimal: {text}");
+    assert!(text.contains(" l "), "{text}");
+    assert!(
+        text.contains("0.123 0.456 0.789 RG"),
+        "colour keeps 3: {text}"
+    );
+    assert!(text.contains("0.125 w"), "width keeps 3: {text}");
+    assert!(text.contains("[0.125 0.5] 0.25 d"), "dash keeps 3: {text}");
+    // a tiny negative coordinate must not print as -0
+    let (pdf, _) =
+        pdf_and_canvas(b"newpath -0.004 500.004 moveto 50 0.001 lineto 50 50 lineto fill");
+    let text = pdf_text(&pdf);
+    assert!(
+        !text.contains("-0 ") && !text.contains("-0."),
+        "no -0: {text}"
+    );
+    // the page is 500 high, so user y 500.004 is device y -0.004 (-> 0)
+    assert!(text.contains(" 0 0 m "), "{text}");
+}
+
+/// Issue #320: rounding can collapse a short real `l` onto the current
+/// point. It is dropped in a stroke too, except as the whole subpath.
+#[test]
+fn rounding_collapsed_linetos_are_dropped_in_strokes_unless_alone() {
+    let stroke = |ps: &[u8]| {
+        let (pdf, _) = pdf_and_canvas(ps);
+        pdf_text(&pdf)
+    };
+    // trailing collapsed l after real geometry, square caps
+    let t = stroke(b"2 setlinecap 4 setlinewidth newpath 10 10 moveto 50 10 lineto 50.002 10.002 lineto stroke");
+    assert_eq!(t.matches(" l ").count(), 1, "{t}");
+    // collapsed in the middle
+    let t = stroke(
+        b"4 setlinewidth newpath 10 10 moveto 50 10 lineto 50.003 10 lineto 50 50 lineto stroke",
+    );
+    assert_eq!(t.matches(" l ").count(), 2, "{t}");
+    // two collapsed in a row from the start: exactly one m + one l left
+    let t = stroke(b"1 setlinecap 4 setlinewidth newpath 10 10 moveto 10.002 10 lineto 10.003 10.001 lineto stroke");
+    assert_eq!(t.matches(" l ").count(), 1, "{t}");
+    assert_eq!(t.matches(" m ").count(), 1, "{t}");
+    // closed, collapsed, nothing else: kept as a dot
+    let t = stroke(
+        b"1 setlinecap 4 setlinewidth newpath 10 10 moveto 10.002 10 lineto closepath stroke",
+    );
+    assert_eq!(t.matches(" l ").count(), 1, "{t}");
+    // a genuine zero-length segment in a stroke is still kept (#254)
+    let t = stroke(b"1 setlinecap 4 setlinewidth newpath 10 10 moveto 50 10 lineto 50 10 lineto 50 50 lineto stroke");
+    assert_eq!(t.matches(" l ").count(), 3, "{t}");
+    // fill: a collapsed l before the curve goes, as in #254
+    let t =
+        stroke(b"newpath 10 10 moveto 10.002 10 lineto 10 20 20 30 30 30 curveto closepath fill");
+    assert_eq!(t.matches(" l ").count(), 0, "{t}");
+    // closepath resets the current point to the start: a collapsed line
+    // back onto the start, after close, is dropped when more follows
+    let t = stroke(b"newpath 10 10 moveto 50 10 lineto 50 50 lineto closepath 10.001 10 lineto 80 80 lineto fill");
+    assert_eq!(t.matches(" l ").count(), 3, "{t}");
+}
+
 /// Issue #20: real PDF shading dictionaries need pattern-colorspace
 /// machinery this exporter doesn't have, so `shfill` approximates as a
 /// flat fill in the ramp's average color -- deliberately, so a
