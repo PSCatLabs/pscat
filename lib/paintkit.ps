@@ -2827,6 +2827,7 @@
     tplWidth 0 le { pktrowelplane-width-must-be-positive } if
     /tplDir tplopts /Direction -90 pkgetdef def
     /tplDir load xcheck { pktrowelplane-direction-must-not-be-a-procedure } if
+    /tplLanes tplopts /Lanes 14 pkgetdef def
     /tplAngle tplopts /Angle 0 pkgetdef def
     /tplAngle load xcheck { pktrowelplane-angle-must-not-be-a-procedure } if
     tplAngle -80 lt tplAngle 80 gt or { pktrowelplane-angle-must-be-minus80-to-80 } if
@@ -2891,6 +2892,30 @@
             /tplAJit 0.15 tplF tplOverlap mul mul tplhl div 1 min
                 dup dup mul 1 exch sub sqrt atan 1.5 min def
         } if
+        % The row budget, counted the way `pktrowel` counts it, on a row of the
+        % longest length (tilt included), before the clip or the rotation is
+        % in force: a row that exceeded it would raise inside both, and a
+        % caller catching the error would be left clipped and rotated. The
+        % walk stops at the limit; the guard is raised after the gsave is undone.
+        /tplover false def
+        /tplcnt 0 def
+        {
+            gsave newpath
+            0 0 moveto tplhl 2 mul tplAJit cos div 0 lineto
+            tplPitch { pop pop pop pop pop pop
+                       /tplcnt tplcnt 1 add def
+                       tplLanes tplcnt mul 120000 gt { /tplover true def stop } if } walkpath
+            grestore
+        } stopped { grestore } if
+        tplover { pktrowel-deposit-count-exceeds-safety-limit } if
+        % /Light is a direction in the caller's user space; the rows are drawn
+        % in a space rotated by /Direction, where the same light is /Light -
+        % /Direction. The caller's own dict is left alone.
+        /tplrowopts tplopts def
+        tplopts /Light known {
+            /tplrowopts tplopts dup length 1 add dict copy def
+            tplrowopts /Light tplopts /Light get tplDir sub put
+        } if
         gsave
             clip
             newpath
@@ -2903,7 +2928,7 @@
                 newpath
                 tplsc tplhl tplra cos mul sub  tplrt tplhl tplra sin mul sub moveto
                 tplsc tplhl tplra cos mul add  tplrt tplhl tplra sin mul add lineto
-                tplopts pktrowel
+                tplrowopts pktrowel
             } for
         grestore
     } if
@@ -2965,6 +2990,13 @@
 %   { newpath 0 0 moveto 50 0 lineto 25 40 lineto closepath << /Touch 0.5 >> pktrowelplane }
 %   /pktrowel-touch-needs-a-canvas
 %   (/Touch with no canvas) mustguard
+%
+%   % a row past pktrowel's deposit budget raises with the state still unwound
+%   % (this block also fails on a gsave left open)
+%   { newpath 0 0 moveto 100000 0 lineto 100000 10 lineto 0 10 lineto closepath
+%     << /Width 12 /Direction 0 >> pktrowelplane }
+%   /pktrowel-deposit-count-exceeds-safety-limit
+%   (a 100000pt row) mustguard
 %
 %   { gsave newpath 0 0 moveto 50 0 lineto 25 40 lineto closepath
 %     << /Width 10 >> pktrowelplane grestore }

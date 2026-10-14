@@ -263,6 +263,85 @@ fn a_rotated_matrix_changes_nothing_about_the_edge() {
     );
 }
 
+/// Pixels that differ clearly between two renders.
+fn differing(a: &Interp, b: &Interp, w: u32, h: u32) -> usize {
+    let mut n = 0;
+    for y in 0..h {
+        for x in 0..w {
+            let (p, q) = (
+                a.gfx().pixmap.pixel(x, y).expect("in bounds"),
+                b.gfx().pixmap.pixel(x, y).expect("in bounds"),
+            );
+            let d = (p.red() as i32 - q.red() as i32).abs()
+                + (p.green() as i32 - q.green() as i32).abs()
+                + (p.blue() as i32 - q.blue() as i32).abs();
+            if d > 90 {
+                n += 1;
+            }
+        }
+    }
+    n
+}
+
+#[test]
+fn light_is_in_the_callers_space_not_the_rows() {
+    // The same facet drawn two ways: a plane at /Direction 90 with the light
+    // from 90 degrees, and the same plane built in a space rotated 90
+    // degrees, where it is /Direction 0 and /Light 0. They must agree. (If
+    // /Light were passed on unchanged, the first would see the light 90
+    // degrees from where it was asked, and the colours would sit on the
+    // wrong sides of the blade.)
+    let opts = "/Width 14 /Angle 0 /Coverage 1 /Scrape 0 /EdgeBuildup 0 /ColorJitter 0 \
+                /Colors [ [ 1 0 0 ] [ 0 0 1 ] ] /ColorMix 0";
+    let mut direct = fresh(100, 100);
+    run(
+        &mut direct,
+        &format!(
+            "3 srand newpath 10 10 moveto 90 10 lineto 40 85 lineto closepath \
+             << {opts} /Direction 90 /Light 90 >> pktrowelplane"
+        ),
+    );
+    let mut turned = fresh(100, 100);
+    run(
+        &mut turned,
+        &format!(
+            "3 srand gsave 90 rotate newpath 10 -10 moveto 10 -90 lineto 85 -40 lineto closepath \
+             << {opts} /Direction 0 /Light 0 >> pktrowelplane grestore"
+        ),
+    );
+    let n = differing(&direct, &turned, 100, 100);
+    assert!(n < 150, "{n} pixels differ between the two ways to say it");
+    // and a different light does change the picture, so the test can fail
+    let mut other = fresh(100, 100);
+    run(
+        &mut other,
+        &format!(
+            "3 srand newpath 10 10 moveto 90 10 lineto 40 85 lineto closepath \
+             << {opts} /Direction 90 /Light 0 >> pktrowelplane"
+        ),
+    );
+    assert!(
+        differing(&direct, &other, 100, 100) > 500,
+        "/Light made no difference"
+    );
+}
+
+#[test]
+fn a_row_past_the_deposit_budget_leaves_the_state_alone() {
+    let mut it = fresh(100, 100);
+    run(
+        &mut it,
+        "newpath 0 0 moveto 100000 0 lineto 100000 10 lineto 0 10 lineto closepath \
+         { << /Width 12 /Direction 0 >> pktrowelplane } stopped pop \
+         newpath 0 0 1 setrgbcolor 80 80 15 15 rectfill",
+    );
+    let p = it.gfx().pixmap.pixel(87, 12).expect("pixel");
+    assert!(
+        p.blue() > 200 && p.red() < 60,
+        "the facet's clip or a rotation was left behind"
+    );
+}
+
 #[test]
 fn a_scaled_matrix_scales_the_plane_with_it() {
     let mut it = fresh(100, 100);

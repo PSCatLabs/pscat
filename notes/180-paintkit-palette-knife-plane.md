@@ -40,6 +40,15 @@ What was built (`lib/paintkit.ps`, right after `pktrowel`):
   the same call is repeated on the caller's path, which raises the same error
   again from a clean state (every guard precedes any drawing). The row count is compared as a real
   before `cvi`, so an area far past `cvi`'s range raises the plane's guard.
+- `/Light` is a direction in the caller's user space but the rows are drawn
+  in a space rotated by `/Direction`, so the rows get `/Light - /Direction`
+  (in a copy of the options dict; the caller's is untouched). Found by the
+  Codex review of the PR: passed on unchanged, the first colour sat on the
+  wrong side of the blade for most directions.
+- Error state: the first real row can still exceed `pktrowel`'s deposit budget
+  (a very long area). The plane counts that budget itself, on a row of the
+  longest length, before the clip and rotation (Codex review, round 1), and
+  raises `pktrowel-deposit-count-exceeds-safety-limit` from a clean state.
 - Safety: 4000 rows, counted before anything is drawn; each row is also
   bounded by `pktrowel`'s own budget.
 - Scratch prefix `tpl` (checked unused): `pktrowel` overwrites every `pt*` name
