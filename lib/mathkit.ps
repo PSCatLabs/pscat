@@ -60,6 +60,16 @@
 %   \varphi \vartheta \varkappa \varrho \varpi \varsigma   variant Greek;
 %   \epsilon is the lunate ϵ and \varepsilon the three-shaped ε, as in TeX
 %   (before issue #366 both drew the three-shaped one)
+%   \displaystyle \textstyle \scriptstyle \scriptscriptstyle
+%                                 the rest of the group in that style
+%   \overbrace{...}^{label} \underbrace{...}_{label}
+%                                 a grown brace, the label beyond it
+%   \overset{a}{b} \underset{a}{b} \stackrel{a}{b}   a over (under) b
+%   \sum_{\substack{i<m \\ j<n}}  stacked limits
+%   \not= \not\in \not<          a struck relation (≠ ∉, else a slash)
+%   a \bmod b   a \equiv b \pmod{n}
+%   mkalign lines with several &: TeX align's columns, right, left,
+%                                 right, left ..., pairs /ColumnGap apart
 % Anything else fails with an undefined name that says what it was:
 % `mk-unsupported-command:\oplus`, `mk-unsupported-character:@`, and so
 % on. Nothing is dropped silently. `$` is ignored, so ($x^2$) works.
@@ -187,6 +197,12 @@
   /vec [/acc /vec] /hat [/acc /hat] /bar [/acc /bar] /dot [/acc /dot]
   /ddot [/acc /ddot] /tilde [/acc /tilde] /overline [/acc /overline]
   /underline [/acc /underline] /boxed [/acc /boxed]
+  /displaystyle [/do /mkcstyle] /textstyle [/do /mkcstyle]
+  /scriptstyle [/do /mkcstyle] /scriptscriptstyle [/do /mkcstyle]
+  /overbrace [/do /mkcbrace] /underbrace [/do /mkcbrace]
+  /overset [/do /mkcset] /underset [/do /mkcset] /stackrel [/do /mkcset]
+  /substack [/do /mkcsubstack]
+  /not [/do /mkcnot] /bmod [/do /mkcbmod] /pmod [/do /mkcpmod]
 >> def
 
 % Printable ASCII that is not a letter or digit -> [glyph class]. The
@@ -365,6 +381,20 @@
   end
 } bind def
 
+% sym H D s -> llx urx   (a dry run of sggrow at /Jitter 0, upright,
+% under an identity CTM so the box is exact: the ink's left and right)
+% @internal
+/mkgrowink {
+  mkscratch begin
+  /mkgds exch def /mkgdD exch def /mkgdH exch def /mkgdy exch def
+  gsave
+  { matrix setmatrix newpath 0 0 moveto
+    mkgdH mkgdD << /Symbol mkgdy /Size mkgds /Jitter 0 /Slant 0 >> sggrow pop
+    pathbbox pop exch pop } stopped { grestore end stop } if
+  grestore
+  end
+} bind def
+
 % style -> points
 % @internal
 /mkem { mksizes exch get mkSize mul } bind def
@@ -438,13 +468,14 @@
 % @internal
 /mkisnucleus {
   dup type /dicttype eq {
-    /T get dup /space ne exch /align ne and
+    /T get dup /space ne 1 index /align ne and exch /style ne and
   } { pop false } ifelse
 } bind def
 
 % mode -> list term   Parse atoms until the mode's terminator.
 % Modes: /top (to the end), /group (to }), /left (to \right), /cell
-% (to &, \\ or \end), /opt (to ]). The term says what ended it.
+% (to &, \\ or \end), /opt (to ]), /stack (a \substack row: to \\ or }).
+% The term says what ended it.
 % @internal
 /mkparse {
   6 dict begin
@@ -477,7 +508,7 @@
 % @internal
 /mkateof {
   mkmode /top eq mkmode /cell eq or { /eof } {
-    mkmode /group eq { mk-missing-closing-brace } if
+    mkmode /group eq mkmode /stack eq or { mk-missing-closing-brace } if
     mkmode /left eq { mk-left-without-right } if
     mkmode /opt eq { mk-sqrt-index-needs-a-closing-bracket } if
     (mk-missing-argument:) mkarglabel mkfail
@@ -496,7 +527,7 @@
 % @internal
 /mkbrbrace {
   pop
-  mkmode /group eq { mkadv /rbrace } {
+  mkmode /group eq mkmode /stack eq or { mkadv /rbrace } {
     mkmode /arg eq { (mk-missing-argument:) mkarglabel mkfail } if
     mkmode /left eq { mk-left-without-right } if
     mk-extra-closing-brace
@@ -681,7 +712,7 @@
 % @internal
 /mkctlsym {
   dup 92 eq {
-    pop mkmode /cell eq { /newrow } { mk-row-break-outside-a-matrix } ifelse
+    pop mkmode /cell eq mkmode /stack eq or { /newrow } { mk-row-break-outside-a-matrix } ifelse
   } {
     mkctlspace 1 index known { mkctlspace exch get mkspatom /none } {
       dup 123 eq { pop /braceleft /open mksymatom /none } {
@@ -951,6 +982,91 @@
   1 index exch /Lim exch put
 } bind def
 
+% (cmd) -> marker   \displaystyle \textstyle \scriptstyle
+% \scriptscriptstyle: the rest of the list is set in that style
+% @internal
+/mkcstyle {
+  dup (displaystyle) eq { pop 0 } {
+    dup (textstyle) eq { pop 1 } { (scriptstyle) eq { 2 } { 3 } ifelse } ifelse
+  } ifelse
+  /mksty exch def
+  << /T /style /S mksty >>
+} bind def
+
+% (cmd) -> atom   \overbrace{...} and \underbrace{...}: TeX's
+% \mathop{...}\limits, so ^ over an overbrace and _ under an underbrace
+% are its labels
+% @internal
+/mkcbrace {
+  (overbrace) eq { /over (\\overbrace) } { /under (\\underbrace) } ifelse
+  mkarg /mkbrl exch def /mkbrd exch def
+  << /T /brace /Dir mkbrd /L mkbrl /C /op /Lim /yes /K mknewk >>
+} bind def
+
+% (cmd) -> atom   \overset{a}{b}, \underset{a}{b}, \stackrel{a}{b}: a set
+% in script style over (or under) b. The class is b's when b is one
+% relation or binary operator (amsmath's rule), else ordinary; \stackrel
+% is always a relation
+% @internal
+/mkcset {
+  /mkosn exch def
+  (\\) mkosn mkcat dup mkarg exch mkarg
+  /mkosb exch def /mkosa exch def
+  mkosn (stackrel) eq { /rel } {
+    mkosb length 1 eq {
+      mkosb 0 get mkclass dup /rel eq 1 index /bin eq or not { pop /ord } if
+    } { /ord } ifelse
+  } ifelse /mkosc exch def
+  << /T /overset /Dir mkosn (underset) eq { /under } { /over } ifelse
+     /A mkosa /L mkosb /C mkosc /K mknewk >>
+} bind def
+
+% (cmd) -> atom   \substack{a \\ b}: rows stacked and centred, for a
+% large operator's limits
+% @internal
+/mkcsubstack {
+  pop
+  mkskip mkpeek 123 ne { mk-substack-needs-braces } if
+  mkadv
+  [ { /stack mkparse /rbrace eq { exit } if } loop ]
+  % a trailing \\ leaves an empty last row
+  dup length 1 gt { dup dup length 1 sub get length 0 eq {
+    0 1 index length 1 sub getinterval } if } if
+  /mksbr exch def
+  << /T /substack /Rows mksbr /C /ord /K mknewk >>
+} bind def
+
+% (cmd) -> atom   \not before one symbol: \not= is ≠ and \not\in is ∉;
+% any other symbol is struck through with a hand-drawn slash
+% @internal
+/mkcnot {
+  pop
+  (\\not) mkarg
+  dup length 1 ne { mk-not-needs-one-symbol-after-it } if
+  0 get
+  dup /T get /sym ne { mk-not-needs-one-symbol-after-it } if
+  dup /G get dup /equal eq { pop dup /G /notequal put } {
+    /element eq { dup /G /notelement put } { dup /Not true put } ifelse
+  } ifelse
+} bind def
+
+% (cmd) -> atom   \bmod: an upright "mod" between two terms
+% @internal
+/mkcbmod { pop (mod) mkstrnames /text /bin /no mkrunatom } bind def
+
+% (cmd) -> atoms   \pmod{n}: a quad, then (mod n)
+% @internal
+/mkcpmod {
+  pop
+  (\\pmod) mkarg /mkpml exch def
+  18 mkspatom
+  /parenleft /open mksymatom
+  (mod) mkstrnames /text /ord /no mkrunatom
+  6 mkspatom
+  << /T /group /L mkpml /C /ord /K mknewk >>
+  /parenright /close mksymatom
+} bind def
+
 % string -> list   the whole formula
 % @internal
 /mkparsetop {
@@ -980,10 +1096,11 @@
 % of its own (`N dict begin ... end`); the public procedures unwind the
 % dictionary stack if anything raises.
 
-% atom -> class or null (spaces and alignment markers have none)
+% atom -> class or null (spaces, alignment and style markers have none)
 % @internal
 /mkclass {
-  dup /T get dup /space eq exch /align eq or { pop null } { /C get } ifelse
+  dup /T get dup /space eq 1 index /align eq or exch /style eq or
+  { pop null } { /C get } ifelse
 } bind def
 
 % - -> -   reset the top-level alignment marks
@@ -991,6 +1108,7 @@
 /mkclearalign {
   mkscratch /mkalignx known { mkscratch /mkalignx undef } if
   mkscratch /mkrelx known { mkscratch /mkrelx undef } if
+  /mkaligns [ ] mkset
 } bind def
 
 % list style cramped -> box   the formula's top list (records alignment)
@@ -1041,7 +1159,7 @@
     } { pop } ifelse
   } for
   mlp 0 ge { mlk mlp get /bin eq { mlk mlp /ord put } if } if
-  /mlx 0 def /mlh 0 def /mld 0 def /mlpc null def
+  /mlx 0 def /mlh 0 def /mld 0 def /mlpc null def /mlni 0 def
   /mltop mll mktoplist eq def
   [
   0 1 mln 1 sub {
@@ -1051,8 +1169,15 @@
     dup /space eq {
       pop /mlx mlx mla /W get mls mkem mul 18 div add def
     } {
+      dup /style eq {
+        % \displaystyle and friends: the rest of the list in that style
+        pop /mls mla /S get def
+      } {
       /align eq {
         mltop mkscratch /mkalignx known not and { /mkalignx mlx mkset } if
+        % every top-level & and the number of items before it, for
+        % mkalign's columns
+        mltop { /mkaligns [ mkaligns aload pop [ mlx mlni ] ] mkset } if
         mlpc null eq { /mlpc /ord def } if
       } {
         /mlcl mlk mli get def
@@ -1069,6 +1194,8 @@
         [ /b mlx 0 4 index 3 get ] exch
         0 get mlx add /mlx exch def
         /mlpc mlcl def
+        /mlni mlni 1 add def
+      } ifelse
       } ifelse
     } ifelse
   } for
@@ -1096,7 +1223,8 @@
 /mknuc <<
   /sym /mknsym /op /mknop /fn /mknrun /text /mknrun /group /mkngroup
   /frac /mknfrac /sqrt /mknsqrt /lr /mknlr /big /mknbig /mat /mknmat
-  /acc /mknacc /empty /mknempty
+  /acc /mknacc /empty /mknempty /brace /mknbrace /overset /mknoverset
+  /substack /mknsubstack
 >> def
 
 % atom style cramped -> box   one atom with its scripts. The atom's
@@ -1120,7 +1248,7 @@
 % - -> bool   (in mkatom) limits go under and over this atom
 % @internal
 /mkuselimits {
-  at /T get dup /op eq exch /fn eq or {
+  at /T get dup /op eq 1 index /fn eq or exch /brace eq or {
     at /Lim get dup /yes eq exch /auto eq st 0 eq and or
   } { false } ifelse
 } bind def
@@ -1133,10 +1261,23 @@
   /sc ss 1000 div def
   /dy at /Dy get sc mul r 1 get 0.025 mul s mul add def
   /ic m 5 get sc mul def /ischar true def
-  [ m 0 get sc mul
-    m 4 get sc mul dy add 0 max
-    m 2 get sc mul dy add neg 0 max
-    [ [ /g 0 dy ss at /G get at /K get 3 mul ] ] ]
+  at /Not known {
+    % \not: a slash through the glyph's ink, centred on the axis
+    /nx m 1 get m 3 get add 2 div sc mul def
+    /ny s 0.25 mul dy add def
+    /nh m 4 get m 2 get sub sc mul 2 div s 0.12 mul add s 0.34 mul max def
+    /nw nh 0.4 mul def
+    [ m 0 get sc mul
+      m 4 get sc mul dy add ny nh add max 0 max
+      m 2 get sc mul dy add neg nh ny sub max 0 max
+      [ [ /g 0 dy ss at /G get at /K get 3 mul ]
+        [ /r nx nw sub ny nh sub nx nw add ny nh add ss at /K get 3 mul 1 add ] ] ]
+  } {
+    [ m 0 get sc mul
+      m 4 get sc mul dy add 0 max
+      m 2 get sc mul dy add neg 0 max
+      [ [ /g 0 dy ss at /G get at /K get 3 mul ] ] ]
+  } ifelse
 } bind def
 
 % - -> box
@@ -1375,6 +1516,84 @@
   } ifelse
 } bind def
 
+% - -> box   (in mkatom) \overbrace and \underbrace: strokeglyphs' grown
+% left brace turned a quarter, so its point faces away from the content
+% and its arms reach down (or up) to it; the labels are limits
+% @internal
+/mknbrace {
+  /cb at /L get st cr mklist def
+  /bl cb 0 get s 0.4 mul max def
+  /bw bl cb 0 get max def
+  /bg s 0.08 r 2 get 0.03 mul add mul def
+  /braceleft bl 0 s mkgrowink /bur exch def /bll exch def
+  /bth bur bll sub def
+  /tn mkSlant sin mkSlant cos div def
+  at /Dir get /over eq {
+    /by cb 1 get bg add bur add def
+    /bmy cb 1 get bg add bth 2 div add def
+    [ bw cb 1 get bg add bth add cb 2 get
+      [ [ /b bw cb 0 get sub 2 div 0 cb 3 get ]
+        [ /h bw bl sub 2 div bmy tn mul add by bl 0 s at /K get 3 mul -90 ] ] ]
+  } {
+    /by cb 2 get bg add bur add neg def
+    /bmy cb 2 get bg add bth 2 div add neg def
+    [ bw cb 1 get cb 2 get bg add bth add
+      [ [ /b bw cb 0 get sub 2 div 0 cb 3 get ]
+        [ /h bw bl sub 2 div bmy tn mul add by 0 bl s at /K get 3 mul 90 ] ] ]
+  } ifelse
+} bind def
+
+% - -> box   (in mkatom) \overset, \underset, \stackrel: the label in
+% script style, centred over (or under) the base, a little off
+% @internal
+/mknoverset {
+  /cb at /L get st cr mklist def
+  /ps mkscriptstyle st get def
+  /ab at /A get ps at /Dir get /under eq cr or mklist def
+  /og s 0.1 r 2 get 0.03 mul add mul def
+  /ow cb 0 get ab 0 get max def
+  /tn mkSlant sin mkSlant cos div def
+  at /Dir get /over eq {
+    /oy cb 1 get og add ab 2 get add def
+    [ ow oy ab 1 get add cb 2 get
+      [ [ /b ow cb 0 get sub 2 div 0 cb 3 get ]
+        [ /b ow ab 0 get sub 2 div r 3 get 0.04 mul s mul add oy tn mul add oy ab 3 get ] ] ]
+  } {
+    /oy cb 2 get og add ab 1 get add neg def
+    [ ow cb 1 get oy neg ab 2 get add
+      [ [ /b ow cb 0 get sub 2 div 0 cb 3 get ]
+        [ /b ow ab 0 get sub 2 div r 3 get 0.04 mul s mul add oy tn mul add oy ab 3 get ] ] ]
+  } ifelse
+} bind def
+
+% - -> box   (in mkatom) \substack: rows centred, a script line apart,
+% the block centred on the axis
+% @internal
+/mknsubstack {
+  /bxs [ at /Rows get { st cr mklist } forall ] def
+  /nr bxs length def
+  /sw 0 bxs { 0 get max } forall def
+  /by [ nr { 0 } repeat ] def
+  1 1 nr 1 sub {
+    /i exch def
+    by i
+      by i 1 sub get
+      s bxs i 1 sub get 2 get bxs i get 1 get add s 0.12 mul add max
+      sub
+    put
+  } for
+  /top bxs 0 get 1 get def
+  /bot by nr 1 sub get bxs nr 1 sub get 2 get sub def
+  /sh s 0.25 mul top bot add 2 div sub def
+  [ sw top sh add bot sh add neg
+    [ 0 1 nr 1 sub {
+        /i exch def
+        at /K get i 8 mul 2 add mkseedk
+        [ /b sw bxs i get 0 get sub 2 div 1 mkjit mkIrr mul 0.04 mul s mul add
+             by i get sh add bxs i get 3 get ]
+      } for ] ]
+} bind def
+
 % box -> box   (in mkatom) TeX rules 18a-f: superscript and subscript.
 % A single glyph takes the font's shifts; a bigger nucleus hangs its
 % scripts from its own top and bottom. Then the hand: a little high or low.
@@ -1469,6 +1688,7 @@
 % @internal
 /mkdraws <<
   /b /mkdrawb /g /mkdrawg /w /mkdraww /r /mkdrawr /a /mkdrawa /f /mkdrawf
+  /h /mkdrawh
 >> def
 
 % @internal
@@ -1498,6 +1718,24 @@
   mkdH mkdD
   << /Symbol mkdsym /Size mkds /Seed mkdk /Jitter mkJitter /Slant mkSlant /Span mkdsp >>
   mkscratch begin sggrow end pop
+} bind def
+
+% A brace turned a quarter (\overbrace, \underbrace): sggrow's left
+% brace under a CTM rotated by angle, saved and restored (never gsave,
+% which would drop the path). Upright, since /Slant would shear it
+% along the wrong axis; the layout moved it to follow the slant.
+% @internal
+/mkdrawh {
+  aload pop
+  /mkdang exch def mkG add /mkdk exch def /mkds exch def
+  /mkdD exch def /mkdH exch def
+  mroy add /mkdy exch def mrox add /mkdx exch def pop
+  matrix currentmatrix
+  mkdx mkdy mkdx mkdH mkdD add 2 div add mkdrift add translate mkdang rotate
+  0 0 moveto mkdH mkdD
+  << /Symbol /braceleft /Size mkds /Seed mkdk /Jitter mkJitter /Slant 0 >>
+  mkscratch begin sggrow end pop
+  setmatrix
 } bind def
 
 % @internal
@@ -1812,6 +2050,9 @@
   mkao /Leading 1.9 mkopt dup mkisnum { dup 0 le } { true } ifelse
     { mk-leading-must-be-a-positive-number } if
   /mkLead exch def
+  mkao /ColumnGap 2 mkopt dup mkisnum { dup 0 lt } { true } ifelse
+    { mk-columngap-must-be-a-non-negative-number } if
+  mkSize mul /mkCgap exch def
   mkao /Ink null mkopt
   dup null ne {
     dup xcheck 1 index type dup /arraytype eq exch /packedarraytype eq or and
@@ -1836,9 +2077,10 @@
       -2 0 mkseedk
       << /Box mkjb /Ax mkalignof /S mkS /Slope mkslopeA /dA mkdA /dF mkdF
          /dP mkdP /Jx 1 mkjit /Jy 1 mkjit /I mkli /Ink /mkInk load
-         /Jitter mkJitter /Slant mkSlant /Irr mkIrr >>
+         /Jitter mkJitter /Slant mkSlant /Irr mkIrr /Al mkaligns >>
     } for
   ] def
+  mkcolumns
   % baselines: each below the last by the leading or by what they hold,
   % the = column a little off from line to line
   /mkpy mkay0 def /mkpd 0 def
@@ -1883,6 +2125,73 @@
       end exec mkscratch begin
     } { pop } ifelse
   } forall
+} bind def
+
+% job j -> x   (in mkcolumns) the x of the line's j-th & (from 1), or
+% its width when it has fewer
+% @internal
+/mkcolat {
+  1 index /Al get length 1 index ge {
+    1 sub exch /Al get exch get 0 get
+  } { pop /Box get 0 get } ifelse
+} bind def
+
+% - -> -   (in mkalignbody) TeX align's columns, when a line has more
+% than one &: the columns between them alternate right and left aligned,
+% and each right-left pair sits /ColumnGap after the widest left column
+% of the pair before it. A line with one & (or none) is left as it is;
+% so is every line when none has two. Each line's atoms after its 2nd,
+% 4th, ... & move right, and its box widens by as much.
+% @internal
+/mkcolumns {
+  /mkcm 0 def
+  mkjobs { /Al get length mkcm max /mkcm exch def } forall
+  mkcm 2 ge {
+    % the alignment point of each pair, from the first &
+    /mkcP [ 0 ] def
+    1 1 mkcm 2 idiv {
+      /mkck exch def
+      /mkcwa 0 def /mkcwb 0 def
+      mkjobs {
+        /mkcj exch def
+        /mkcn mkcj /Al get length def
+        mkcn mkck 2 mul 1 sub ge {
+          mkcj mkck 2 mul mkcolat mkcj mkck 2 mul 1 sub mkcolat sub
+          mkcwa max /mkcwa exch def
+        } if
+        mkcn mkck 2 mul ge {
+          mkcj mkck 2 mul 1 add mkcolat mkcj mkck 2 mul mkcolat sub
+          mkcwb max /mkcwb exch def
+        } if
+      } forall
+      /mkcP [ mkcP aload pop mkcP mkck 1 sub get mkcwa add mkCgap add mkcwb add ] def
+    } for
+    mkjobs {
+      /mkcj exch def
+      /mkcn mkcj /Al get length def
+      mkcn 2 ge {
+        /mkcb mkcj /Box get def
+        /mkca1 mkcj 1 mkcolat def
+        % pair k's shift, and the first item it moves
+        /mkcD [ 1 1 mkcn 2 idiv {
+            /mkck exch def
+            mkcP mkck get mkcj mkck 2 mul 1 add mkcolat mkca1 sub sub
+          } for ] def
+        /mkcI [ 1 1 mkcn 2 idiv { 2 mul 1 sub mkcj /Al get exch get 1 get } for ] def
+        /mkcit [ 0 1 mkcb 3 get length 1 sub {
+            /mkci exch def
+            /mkcs 0 def
+            0 1 mkcI length 1 sub {
+              dup mkcI exch get mkci le { mkcD exch get /mkcs exch def } { pop } ifelse
+            } for
+            mkcb 3 get mkci get aload pop
+            3 -1 roll mkcs add 3 1 roll 4 array astore
+          } for ] def
+        mkcj /Box [ mkcb 0 get mkcD dup length 1 sub get add
+                    mkcb 1 get mkcb 2 get mkcit ] put
+      } if
+    } forall
+  } if
 } bind def
 
 % opts -> -   the options every annotation shares
@@ -2354,6 +2663,118 @@
 %   (variants lay out in scripts and runs) mustbe
 %%EndSelfTest
 %
+%%SelfTest: tex-structures-lay-out
+%   % issue #340: style switches, braces, stacked labels, \not, \bmod,
+%   % \pmod; each was refused as an unsupported command before
+%   [ (\\displaystyle \\sum_i x) (a \\textstyle \\sum_i x) (\\scriptstyle x + y)
+%     (\\scriptscriptstyle x) (\\overbrace{a+b}^{n}) (\\underbrace{a+b}_{k})
+%     (\\overbrace{}) (\\underbrace{x}) (\\overset{a}{=}) (\\underset{x}{\\lim} f)
+%     (a \\stackrel{?}{=} b) (\\sum_{\\substack{i<m \\\\ j<n}} a_{ij})
+%     (\\substack{a \\\\ b \\\\}) (a \\not= b) (x \\not\\in A) (a \\not< b)
+%     (A \\not\\subset B) (a \\not{\\equiv} b) (7 \\bmod 3) (a \\equiv b \\pmod{n})
+%     (\\overbrace{\\underbrace{x}_{1}}^{2}) ]
+%   true exch {
+%     /mkt-s exch def
+%     mkt-s << /Size 40 /Seed 3 >> mkmetrics /Width get 0 gt and
+%     newpath mkt-s 0 0 << /Size 40 /Seed 3 /Slant 10 >> mkpath newpath
+%   } forall
+%   (every new structure lays out and draws) mustbe
+%   /mkt-m { << /Size 100 /Irregular 0 >> mkmetrics } def
+%   % a style switch sets the rest of the list in that style
+%   (\\displaystyle \\sum_{i=1}^n i) << /Size 100 /Irregular 0 /Style /text >> mkmetrics
+%   /Height get (\\sum_{i=1}^n i) mkt-m /Height get sub abs 0.01 lt
+%   (\displaystyle in text style stacks the limits) mustbe
+%   (\\textstyle \\sum_{i=1}^n i) mkt-m /Height get
+%   (\\sum_{i=1}^n i) << /Size 100 /Irregular 0 /Style /text >> mkmetrics /Height get
+%   sub abs 0.01 lt (\textstyle puts them beside) mustbe
+%   (\\scriptstyle x) mkt-m /Width get (x) mkt-m /Width get 0.7 mul sub abs 0.01 lt
+%   (\scriptstyle sets x at 0.7) mustbe
+%   (x \\scriptstyle x) mkt-m /Width get (x) mkt-m /Width get 1.7 mul sub abs 0.01 lt
+%   (only after the switch) mustbe
+%   % braces stand over and under, their labels beyond them
+%   (\\overbrace{a+b}) mkt-m /Height get (a+b) mkt-m /Height get 15 add gt
+%   (an overbrace stands above its content) mustbe
+%   (\\overbrace{a+b}^{n}) mkt-m /Height get (\\overbrace{a+b}) mkt-m /Height get gt
+%   (and its label above it) mustbe
+%   (\\underbrace{a+b}) mkt-m /Depth get /mkt-d exch def
+%   mkt-d (a+b) mkt-m /Depth get 15 add gt (an underbrace hangs below its content) mustbe
+%   (\\underbrace{a+b}_{k}) mkt-m /Depth get mkt-d gt (and its label below it) mustbe
+%   % \overset takes its base's class: a relation keeps its spaces
+%   (x \\overset{a}{=} y) mkt-m /Width get (\\overset{a}{=}) mkt-m /Width get sub
+%   (x = y) mkt-m /Width get (=) mkt-m /Width get sub sub abs 0.01 lt
+%   (\overset{a}{=} is a relation) mustbe
+%   (x \\stackrel{a}{b} y) mkt-m /Width get (\\stackrel{a}{b}) mkt-m /Width get sub
+%   (x = y) mkt-m /Width get (=) mkt-m /Width get sub sub abs 0.01 lt
+%   (\stackrel makes a relation) mustbe
+%   (\\overset{a}{=}) mkt-m /Height get (=) mkt-m /Height get gt
+%   (the label stands over the base) mustbe
+%   (\\underset{a}{=}) mkt-m /Depth get (=) mkt-m /Depth get gt
+%   (\underset puts it under) mustbe
+%   % \substack stacks rows under an operator
+%   (\\sum_{\\substack{a \\\\ b}}) mkt-m /Depth get (\\sum_{a}) mkt-m /Depth get gt
+%   (a substack hangs deeper than one row) mustbe
+%   (\\substack{a \\\\ b \\\\}) mkt-m /Height get (\\substack{a \\\\ b}) mkt-m /Height get eq
+%   (a trailing row break adds no row) mustbe
+%   % \not
+%   (a \\not= b) mkt-m /Width get (a \\neq b) mkt-m /Width get sub abs 0.01 lt
+%   (\not= is \neq) mustbe
+%   (a \\not\\in b) mkt-m /Width get (a \\notin b) mkt-m /Width get sub abs 0.01 lt
+%   (\not\in is \notin) mustbe
+%   (a \\not< b) mkt-m /Width get (a < b) mkt-m /Width get sub abs 0.01 lt
+%   (a struck relation keeps its width and class) mustbe
+%   (\\not<) mkt-m /Height get (<) mkt-m /Height get gt (the slash reaches past it) mustbe
+%   % \bmod is a binary operator, \pmod a quad then (mod n)
+%   (a \\bmod b) mkt-m /Width get (a \\text{mod} b) mkt-m /Width get gt
+%   (\bmod takes a binary operator's spaces) mustbe
+%   (a \\pmod{n}) mkt-m /Width get (a \\quad (\\text{mod}\\,\\,n)) mkt-m /Width get
+%   sub abs 0.01 lt (\pmod{n} is a quad and (mod n)) mustbe
+%   % refusals
+%   { (a \\not \\frac{1}{2}) 0 0 << >> mkpath } /mk-not-needs-one-symbol-after-it
+%   (\not before a fraction) mustguard
+%   { (a \\not{<>} b) 0 0 << >> mkpath } /mk-not-needs-one-symbol-after-it
+%   (\not before two symbols) mustguard
+%   { (\\not) 0 0 << >> mkpath } /mk-missing-argument:\not (\not with nothing) mustguard
+%   { (\\substack a) 0 0 << >> mkpath } /mk-substack-needs-braces
+%   (\substack without braces) mustguard
+%   { (\\substack{a & b}) 0 0 << >> mkpath } /mk-misplaced-ampersand (& in a substack) mustguard
+%   { (\\substack{a \\\\ b) 0 0 << >> mkpath } /mk-missing-closing-brace
+%   (an open substack) mustguard
+%   { (\\overbrace) 0 0 << >> mkpath } /mk-missing-argument:\overbrace
+%   (\overbrace with nothing) mustguard
+%   { (\\overset{a}) 0 0 << >> mkpath } /mk-missing-argument:\overset
+%   (\overset with one argument) mustguard
+%   { [ (a) ] 0 0 << /ColumnGap -1 >> mkalign } /mk-columngap-must-be-a-non-negative-number
+%   (/ColumnGap -1) mustguard
+%   % a bare command word lost its backslash
+%   { (a not b) 0 0 << >> mkpath } /mk-bare-word-needs-a-backslash:not (a bare not) mustguard
+%%EndSelfTest
+%
+%%SelfTest: mkalign-columns-alternate-right-and-left
+%   % issue #340: with more than one & a line has TeX align's columns
+%   /mkt-o << /Size 30 /Irregular 0 /Seed 2 >> def
+%   /mkt-ends { [ exch { dup /Origin get 0 get exch /Width get add } forall ] } def
+%   newpath [ (x &= a & y &= b) (xxx &= aaaaaa & y &= b) ] 100 300 mkt-o mkalign
+%   mkt-ends aload pop sub abs 0.01 lt
+%   (the second pair of columns starts at one x on every line) mustbe
+%   newpath [ (x &= a & y &= b) (xxx &= aaaaaa & yyyy &= b) ] 100 300 mkt-o mkalign
+%   mkt-ends aload pop sub abs 0.01 lt
+%   (its right column is right-aligned: the pair's & lines up) mustbe
+%   newpath [ (x &= a & y &= b) (x &= a) ] 100 300 mkt-o mkalign
+%   0 get /Width get
+%   (x &= a & y &= b) mkt-o mkmetrics /Width get 59 add gt
+%   (the pairs stand /ColumnGap apart) mustbe
+%   newpath [ (x &= a & y &= b) ] 100 300 << /Size 30 /Irregular 0 /Seed 2 /ColumnGap 0 >> mkalign
+%   0 get /Width get
+%   newpath [ (x &= a & y &= b) ] 100 300 << /Size 30 /Irregular 0 /Seed 2 /ColumnGap 1 >> mkalign
+%   0 get /Width get exch sub 30 sub abs 0.01 lt
+%   (/ColumnGap is in multiples of /Size) mustbe
+%   % one & per line is laid out as it always was
+%   newpath [ (y &= 2x) (&= x + x) ] 100 300 mkt-o mkalign
+%   0 get /Width get (y &= 2x) mkt-o mkmetrics /Width get sub abs 0.01 lt
+%   (a single & changes nothing) mustbe
+%   newpath
+%%EndSelfTest
+%
 %%SelfTest: every-name-in-the-tables-has-a-glyph
 %   /mkt-ok true def
 %   mkcmds {
@@ -2429,6 +2850,7 @@
 % @summary: Lays out a derivation, one TeX string per line, aligned on each line's & (or before its first relation, so lines starting with = line up) at x, the first baseline at y, and appends every line's path. Each line slopes and drifts on its own and the column wanders a little. Returns one record per line for annotations: /Origin [x y], /Angle, /Width, /Height, /Depth, /Align and an axis-aligned /BBox [llx lly urx ury]; mkframe and mkunderline accept a record.
 % @example: (lib/handscript.ps) run (lib/strokeglyphs.ps) run (lib/mathkit.ps) run newpath [ (f(x) &= (x+1)^2) (&= x^2 + 2x + 1) ] 150 200 << /Size 28 >> mkalign pop 1.5 setlinewidth 1 setlinecap stroke
 % @param: /Leading [multiple of /Size] The least distance from one baseline to the next; taller lines push further (default 1.9)
+% @param: /ColumnGap [multiple of /Size] With more than one & on a line (TeX align's columns: right, left, right, left ...), the space between one right-left pair of columns and the next (default 2)
 % @param: /Ink [proc] Called after each line's path is appended, with the line's index on the stack, to paint it (for example { pop << /Width 2 >> dcchalk }), so each line can be inked differently; it must consume the index and paint or clear the path (default none: every line stays on the current path)
 % @param: /Size [points] As for mkpath (default 36)
 % @param: /Style [name] As for mkpath (default /display)
