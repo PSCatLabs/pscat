@@ -1,0 +1,10 @@
+%!PS
+%%BoundingBox: 0 0 300 200
+% clip: later painting only shows inside the current path
+newpath 150 100 80 0 360 arc clip
+newpath
+0 10 300 {                       % x = 0, 10, 20 ... 300
+  dup 300 div 0.3 0.8 setrgbcolor
+  0 moveto  0 200 rlineto  6 setlinewidth stroke
+} for
+showpage

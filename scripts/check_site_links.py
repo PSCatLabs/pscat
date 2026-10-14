@@ -13,7 +13,9 @@ It fails (exit 1, one line per problem) when:
     .../tree/<ref>/<path>) names a path that is not in the REPO_ROOT checkout.
     This is what catches a doc move (#249) that forgets the site;
   * a playground <option value="x.ps"> has no examples/x.ps (the 404 a
-    forgotten build_site.sh copy line causes);
+    forgotten build_site.sh copy line causes), or a link to
+    playground.html?example=x.ps (the Learn page's "Try it", #252) names
+    an example that is not there;
   * the files the pages load from script (pscat.js, pscat.wasm) are missing;
   * a page has no main navigation, or its navigation differs from the home
     page's, or it does not mark exactly one entry as the current page;
@@ -32,7 +34,7 @@ import re
 import sys
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import unquote, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 REPO_URL = "https://github.com/jeromebanks/postscript_interpreter"
 # page-to-page links in these attributes
@@ -146,6 +148,10 @@ def check(site, repo):
             if t is None or not exists_exact(site, t) or not (site / t).is_file():
                 problems.append("%s: broken %s link: %s" % (src, tag, url))
                 continue
+            if t == "playground.html":
+                for v in parse_qs(u.query).get("example", []):
+                    if not exists_exact(site, "examples/" + v):
+                        problems.append("%s: playground example %s is not in examples/" % (src, v))
             if t in pages:
                 if tag == "a":
                     edges[src].add(t)

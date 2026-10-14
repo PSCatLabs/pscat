@@ -1,0 +1,6 @@
+%!PS
+5 3 gt ==                                  % comparisons push a boolean
+5 3 gt { (bigger) } { (smaller) } ifelse =
+1 1 4 { == } for                           % start step limit {proc} for
+0  1 1 100 { add } for  ==                 % the sum 1 + 2 + ... + 100
+3 { (hip hip) = } repeat

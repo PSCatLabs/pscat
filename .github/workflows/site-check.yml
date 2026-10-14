@@ -19,6 +19,8 @@ on:
       - "scripts/build_wasm.sh"
       - "scripts/build_font_gallery.sh"
       - "scripts/site_pages.py"
+      - "scripts/site_examples.py"
+      - "scripts/check_learn_examples.mjs"
       - "scripts/check_site_links.py"
       - "scripts/test_site_scripts.py"
       - "gallery/**"

@@ -188,6 +188,44 @@ a.card .tag {
 .cta a.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .cta a.primary:hover { filter: brightness(1.08); }
 
+/* ------- Learn page (#252) ------- */
+/* in-page links land below the sticky header, not under it */
+main.learn [id] { scroll-margin-top: 72px; }
+.toc {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
+  gap: 6px 28px; margin: 24px 0 8px; padding: 14px 18px;
+  background: var(--panel); border: 1px solid var(--edge); border-radius: 8px;
+}
+.toc ol { margin: 6px 0 4px; padding-left: 22px; }
+.toc li { margin: 2px 0; }
+.toc b a { color: var(--ink); text-decoration: none; }
+a.cite { font-size: .8em; vertical-align: super; line-height: 0; text-decoration: none; margin-left: 1px; }
+ol.sources li { font-size: 15px; overflow-wrap: anywhere; }
+
+/* an example: its source, the "Try it" link, then what it prints or draws */
+figure.example {
+  margin: 14px 0 24px; border: 1px solid var(--edge); border-radius: 8px;
+  overflow: hidden; background: var(--panel);
+}
+figure.example > pre { margin: 0; border: 0; border-radius: 0; background: transparent; }
+figure.example figcaption {
+  display: flex; justify-content: flex-end; padding: 6px 12px;
+  border-top: 1px solid var(--edge); font-size: 14px;
+}
+a.try {
+  font-family: var(--mono); font-weight: 600; text-decoration: none;
+  padding: 3px 10px; border-radius: 6px; border: 1px solid var(--accent);
+}
+a.try:hover { background: var(--accent); color: var(--accent-ink); }
+a.try::after { content: " ▸"; }
+.result { border-top: 1px solid var(--edge); padding: 10px 14px 14px; background: var(--bg); }
+.result .label {
+  display: block; margin-bottom: 6px; font: 12px var(--mono);
+  color: var(--dim); text-transform: uppercase; letter-spacing: .06em;
+}
+.result pre.output { margin: 0; }
+.result img { display: block; background: #fff; border: 1px solid var(--edge); border-radius: 3px; }
+
 /* ------- footer ------- */
 .site-footer {
   border-top: 1px solid var(--edge); color: var(--dim);
@@ -219,6 +257,7 @@ body.app { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction:
 #controls { display: flex; gap: 10px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
 #status { color: var(--dim); margin-left: auto; white-space: nowrap; }
 #err { color: var(--err); white-space: pre-wrap; margin-top: 8px; max-height: 6em; overflow: auto; }
+#out { margin: 8px 0 0; max-height: 14em; overflow: auto; white-space: pre-wrap; }
 #play-right { display: flex; align-items: center; justify-content: center; padding: 16px; background: var(--stage); }
 #page {
   max-height: calc(100vh - 100px); max-width: 44vw;
