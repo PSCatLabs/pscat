@@ -237,6 +237,25 @@ Which tool to pick:
   so 270 is down the page. `examples/paintkit_wet_pull_demo.ps` shows
   all three.
 
+- **`pkcanvas` / `/Touch`** — a shared canvas under light strokes. Every
+  other "less paint" key breaks one stroke up on its own; `/Touch` is the one
+  that is anchored to the canvas. `<< /Seed 7 /Weave 2.5 >> pkcanvas` once,
+  *first*, in the space the piece is painted in (before any `translate` or
+  `scale`), sets a seeded weave of raised knuckles and paints nothing. Then
+  `/Touch 0..1` on `pktrowel`, `pkdry`, `pkfan`, `pkbroad` or `pkliner` lands
+  the mark only on the knuckles that pressure reaches: lower is lighter, 0
+  deposits nothing, 1 is full contact (the same as unset). Because the surface
+  is one, strokes that cross share it: give the heavier stroke the higher
+  touch and lay it first (dry brush `0.7`, knife `0.55`), and the knife lands
+  on a subset of the brush's knuckles. A touch with no `pkcanvas` is an error,
+  `/Touch` takes no `rand` draws (turning it on moves nothing after it), it
+  composes with `/Colors`, `/Load` and `/Coverage`, and inside a directional
+  `pkwet` every pass catches on the same knuckles, so a pulled reflection
+  streaks along the weave. `/Weave` is in canvas points, so supersampling
+  with `2 2 scale` put *before* `pkcanvas` keeps the pattern.
+  `examples/paintkit_canvas_demo.ps` shows the crossing strokes with and
+  without the surface, a `/Touch` sweep, a coloured load and a wet pull.
+
 - **Brush motions** — `pkcrisscross`, `pkscumblein`, `pkscumble`,
   `pktap`, `pkpull`, `pkzigzag`. Not brushes: *path builders*, the other
   half of a painting (the brushes are heads, these are the named wet-on-wet

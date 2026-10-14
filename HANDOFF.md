@@ -736,6 +736,28 @@ renders eight examples in both and compares block-downsampled output).
   still reads a clump). Scratch prefix `mh-` for the helpers and one
   letter per motion (`mx` `mc` `ms` `mt` `mp` `mz`); none calls a preset,
   so none is clobbered by `pkribbon`.
+- **A touched mark is clipped in canvas space; set the canvas first** (issue
+  #182, slices S1-S4; design in `docs/CANVAS_SURFACE.md`). `opts pkcanvas`
+  records the CTM in force when it is called as *canvas space* and builds a
+  seeded weave of knuckles there; `/Touch` below 1 on `pktrowel`, `pkdry`,
+  `pkfan`, `pkbroad` or `pkliner` clips the mark to the knuckles its pressure
+  reaches (`pjcatch`, called right after the preset's drawing `gsave`). Call
+  `pkcanvas` once, first, in the space the piece is painted in, *before* any
+  `translate`, `scale` or `rotate` a panel applies: the catch is then built
+  under the saved matrix, so every touched stroke, in any later CTM and
+  every `pkwet` pass, catches on the same knuckles. A canvas set up inside a
+  moved space is a different, moved canvas, and a second `pkcanvas` call
+  replaces the first. `/Touch` with no surface raises `pkX-touch-needs-a-canvas`
+  (never a silent full mark), even for `/Touch 1`, which renders exactly as
+  unset but still needs the canvas. A caller's own
+  clip intersects with the catch. `/Touch` takes no `rand` draws, so turning it
+  on never moves anything painted after it. The reach box a preset passes to
+  `pjcatch` must cover every emitter it has (`touch_box_contains_the_whole_mark`
+  is the test); a new adopter writes the same breakdown beside its code.
+  `examples/paintkit_canvas_demo.ps` is the specimen (render at
+  `docs/paintkit_canvas_demo.png`), and `the_weave_is_in_canvas_points_at_any_dpi`
+  pins that the pattern is the same at 72 and 144 dpi. To supersample a piece
+  with `2 2 scale`, put it *before* `pkcanvas` so the weave scales with it.
 - **A paintkit key means one thing in every preset** (issue #141).
   `/Spread` is always a 0..1 fraction of `/Width`; `/Load` is always a
   contact rate per `/Width` of travel. A new preset that needs a

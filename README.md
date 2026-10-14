@@ -763,6 +763,39 @@ graze it across. `examples/paintkit_wet_pull_demo.ps` shows a
 reflection sharp, pulled and pulled-then-grazed, a mountain foot under
 plain wet mist and under a lift, and a sky before and after a sweep.
 
+`pkcanvas` and `/Touch` (issue #182) give light strokes one canvas to
+catch on. Every other "less paint" key in paintkit (`/Load`, `/Charge`,
+`/Coverage`) models the tool, so two strokes that cross each break up on
+their own. `opts pkcanvas` sets, once, a seeded weave of raised knuckles
+(`/Seed` an integer, `/Weave` and `/Mottle` in canvas points, `/Relief` 0..1), and
+`/Touch` (0..1) on `pktrowel`, `pkdry`, `pkfan`, `pkbroad` or `pkliner` lands
+a mark only on the knuckles that pressure reaches: lower is lighter, 0
+deposits nothing, 1 is full contact, identical to leaving it unset. Every
+touched stroke catches on the same knuckles, so a dry brush and a knife
+crossing share one weave:
+
+```postscript
+<< /Seed 7 /Weave 2.5 >> pkcanvas                 % once, first, before any translate
+newpath 14 52 moveto 70 118 118 112 226 196 curveto
+<< /Width 34 /Touch 0.7 >> pkdry                  % laid first, the heavier touch
+newpath 18 206 moveto 90 172 150 84 224 40 curveto
+<< /Width 32 /Touch 0.55 >> pktrowel              % the knife, on the same weave
+```
+
+Call `pkcanvas` before any `translate`, `scale` or `rotate` the piece
+applies: the surface is defined in the space in force when it was set, and
+a touched mark is clipped in that canvas space wherever it is painted
+later. `/Touch` with no canvas is an error rather than a silent full mark (even
+`/Touch 1`, which otherwise renders exactly as unset),
+it takes no `rand` draws (so turning it on moves nothing painted after it),
+and it composes with `/Colors` loads and with `pkwet`, inside which every
+pass catches on the same knuckles. `examples/paintkit_canvas_demo.ps` shows
+the crossing strokes full, on their own break-up and on the shared canvas,
+a `/Touch` sweep, touched strokes with a `/Colors` load and a touched
+stroke pulled down inside a directional `pkwet`.
+
+![The canvas surface specimen](docs/paintkit_canvas_demo.png)
+
 The presets above are brush *heads*; a painting is equally made of
 brush *motions*, and the wet-on-wet vocabulary is mostly named ones.
 Six path builders (issue #184) generate them, from a region or a guide

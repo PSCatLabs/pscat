@@ -1,0 +1,215 @@
+%!PS-Adobe-3.0
+%%Title: Paintkit — the canvas surface: pkcanvas and /Touch (issue #228)
+%%BoundingBox: 0 0 780 640
+%%EndComments
+
+% Specimen for pkcanvas and the /Touch key (lib/paintkit.ps, design in
+% docs/CANVAS_SURFACE.md). Every other "less paint" control in paintkit
+% models the tool, so it is private to one stroke: two strokes that
+% cross each break up on their own. /Touch is the one control anchored
+% to the canvas. pkcanvas sets one seeded weave of raised knuckles for
+% the whole piece; a stroke with /Touch below 1 lands only on the
+% knuckles its pressure reaches, so every touched stroke catches on the
+% same weave.
+%
+% Top row: the same two strokes three times, a dry brush laid first and
+% a palette knife across it, with the same seeds.
+%
+%   full contact   no /Touch: solid paint (the surface is set but unused,
+%                  so this is exactly the page without pkcanvas)
+%   own break-up   each tool's private controls (/Load, /Coverage): the
+%                  two strokes break up independently, and where they
+%                  cross the knife covers the brush with no relation
+%   /Touch         the same strokes touched lightly: they share the weave,
+%                  so the knife lands on a subset of the brush's knuckles
+%                  and the crossing reads as one canvas under both
+%
+% Bottom row: a /Touch sweep from light to full contact; touched strokes
+% that carry a /Colors load (a three-colour knife and fan, composing with
+% the loaded-brush keys); and a touched stroke inside a directional
+% pkwet, where every pass catches on the same knuckles and the pulled
+% reflection streaks along the weave.
+%
+% Two rules this page follows:
+%
+%   * pkcanvas is called once, first, in page space, before any
+%     translate or scale. The surface is defined in the space in force
+%     when it is set, and a touched mark is clipped in that canvas space
+%     whatever the CTM is when it is painted, so the panels below can
+%     move freely and the weave stays put.
+%   * /Touch needs a canvas: without pkcanvas it raises
+%     pkX-touch-needs-a-canvas rather than silently painting the full
+%     mark. /Touch 1 is full contact, identical to leaving it unset.
+%
+% No alpha anywhere, so Ghostscript renders the same page (its rand
+% stream differs, so the marks fall differently).
+%
+%   pscat --page 780x640 examples/paintkit_canvas_demo.ps --png canvas.png
+
+(lib/artkit.ps) run
+(lib/paintkit.ps) run
+
+/pcdGROUND [0.14 0.18 0.25] def
+/pcdKNIFE  [0.96 0.94 0.88] def
+/pcdOCHRE  [0.92 0.68 0.32] def
+/pcdROSE   [0.88 0.52 0.50] def
+/pcdSKY    [0.55 0.72 0.82] def
+
+/pcdset { aload pop setrgbcolor } def
+
+% One surface for the whole page, set before any panel moves the origin.
+<< /Seed 7 /Weave 2.5 >> pkcanvas
+
+1 1 1 setrgbcolor clippath fill
+
+/pcdlabel {                                  % x y string -
+    /pcdls exch def /pcdly exch def /pcdlx exch def
+    gsave
+        0.35 0.35 0.35 setrgbcolor
+        /Helvetica findfont 9 scalefont setfont
+        pcdlx pcdly moveto pcdls show
+    grestore
+} def
+/pcdsmall {                                  % x y string -
+    /pcdls exch def /pcdly exch def /pcdlx exch def
+    gsave
+        0.78 0.80 0.84 setrgbcolor
+        /Helvetica findfont 8 scalefont setfont
+        pcdlx pcdly moveto pcdls show
+    grestore
+} def
+
+% A 240 x 240 panel of dark ground at the origin.
+/pcdground { pcdGROUND pcdset 0 0 240 240 rectfill } def
+
+% ======================================================================
+% Top row: the same dry brush and palette knife, three ways. Each takes
+% the controls that differ between panels; a touch of -1 leaves /Touch
+% unset. Seeds are fixed inside, so the geometry is the same everywhere.
+% ======================================================================
+/pcdbrush {                                  % load dropout touch -
+    /pcdbt exch def /pcdbd exch def /pcdbl exch def
+    11 srand
+    pcdOCHRE pcdset
+    newpath 14 52 moveto 70 118 118 112 226 196 curveto
+    << /Width 34 /Bristles 40 /BristleWidth 3 /WidthJitter 0.3
+       /Load pcdbl /Dropout pcdbd /Jitter 0 /ColorJitter 0.05 >>
+    pcdbt 0 ge { dup /Touch pcdbt put } if
+    pkdry
+} def
+/pcdknife {                                  % coverage scrape touch -
+    /pcdkt exch def /pcdks exch def /pcdkc exch def
+    23 srand
+    pcdKNIFE pcdset
+    newpath 18 206 moveto 90 172 150 84 224 40 curveto
+    << /Width 32 /Coverage pcdkc /Scrape pcdks /EdgeBuildup 0
+       /ColorJitter 0.03 >>
+    pcdkt 0 ge { dup /Touch pcdkt put } if
+    pktrowel
+} def
+
+% panel-x label  proc -   one top-row panel at (x, 330)
+/pcdpanel {
+    /pcdpp exch def /pcdpl exch def /pcdpx exch def
+    gsave
+        pcdpx 330 translate
+        pcdground
+        0 0 240 240 rectclip
+        pcdpp
+    grestore
+    pcdpx 316 pcdpl pcdlabel
+} def
+
+20  (full contact: no /Touch)                 { 1 0 -1 pcdbrush 1 0.1 -1 pcdknife } pcdpanel
+270 (own break-up: /Load, /Coverage)          { 0.4 0.45 -1 pcdbrush 0.5 0.35 -1 pcdknife } pcdpanel
+520 (shared canvas: /Touch 0.7 then 0.55)     { 1 0 0.7 pcdbrush 1 0.1 0.55 pcdknife } pcdpanel
+
+% ======================================================================
+% Bottom row, left: the /Touch sweep. One near-solid knife stroke per
+% touch, light to full contact; 1 is identical to leaving /Touch unset.
+% ======================================================================
+/pcdsweep {
+    /pcdsi 0 def
+    [ [ 0.15 (0.15) ] [ 0.3 (0.3) ] [ 0.45 (0.45) ] [ 0.6 (0.6) ]
+      [ 0.8 (0.8) ] [ 1 (1 = unset) ] ] {
+        aload pop /pcdsl exch def /pcdst exch def
+        pcdKNIFE pcdset
+        newpath 52 220 pcdsi 36 mul sub moveto 232 220 pcdsi 36 mul sub lineto
+        3 srand
+        << /Width 26 /Coverage 1 /Scrape 0 /EdgeBuildup 0 /ColorJitter 0
+           /Touch pcdst >> pktrowel
+        8 217 pcdsi 36 mul sub pcdsl pcdsmall
+        /pcdsi pcdsi 1 add def
+    } forall
+} def
+
+% ======================================================================
+% Bottom row, middle: touched strokes that carry a /Colors load. A
+% three-colour knife and a three-colour fan cross; each loads its own
+% colours, and the weave decides where either lands.
+% ======================================================================
+/pcdloaded {
+    31 srand
+    newpath 16 206 moveto 90 170 150 96 224 52 curveto
+    << /Width 40 /Coverage 1 /Scrape 0.1 /EdgeBuildup 0
+       /Colors [ pcdKNIFE pcdSKY pcdROSE ] /ColorMix 0.25 /Light 120
+       /Touch 0.65 >> pktrowel
+    35 srand
+    newpath 16 54 moveto 90 100 150 150 224 196 curveto
+    << /Width 40 /Bristles 36 /BristleWidth 3 /Load 1 /Dropout 0.05
+       /Colors [ pcdOCHRE pcdROSE pcdKNIFE ] /ColorMix 0.25
+       /Touch 0.65 >> pkfan
+} def
+
+% ======================================================================
+% Bottom row, right: a touched stroke inside a directional pkwet. The
+% knife is laid as a ridge and pulled straight down; every pass builds
+% its catch in canvas space, so the pull streaks along the weave
+% instead of smearing it. Upper: an untouched stroke, pulled. Lower:
+% the same stroke at /Touch 0.6, pulled.
+% ======================================================================
+/pcdknifeat {                                % y touch -   one horizontal stroke
+    /pcdkt exch def /pcdky exch def
+    5 srand
+    newpath 20 pcdky moveto 220 pcdky 4 add lineto
+    << /Width 30 /Coverage 1 /Scrape 0.1 /EdgeBuildup 0 /ColorJitter 0
+       /Touch pcdkt >> pktrowel
+} def
+/pcdpull {                                   % proc -
+    [ pcdKNIFE 0.9 shade ] pcdset
+    << /Direction 270 /OneSided true /Stretch 10 /Offset 28 /Pickup 0.8
+       /Under pcdGROUND >> pkwet
+} def
+/pcdwet {
+    pcdKNIFE pcdset
+    { 196 1 pcdknifeat } pcdpull
+    { 106 0.6 pcdknifeat } pcdpull
+    8 226 (untouched, pulled down) pcdsmall
+    8 136 (/Touch 0.6, pulled down) pcdsmall
+} def
+
+/pcdpanel2 {                                 % x label proc -
+    /pcdpp exch def /pcdpl exch def /pcdpx exch def
+    gsave
+        pcdpx 40 translate
+        pcdground
+        0 0 240 240 rectclip
+        pcdpp
+    grestore
+    pcdpx 26 pcdpl pcdlabel
+} def
+
+20  (/Touch sweep, light to full contact)     { pcdsweep } pcdpanel2
+270 (touched strokes with a /Colors load)     { pcdloaded } pcdpanel2
+520 (a touched stroke inside a directional pkwet) { pcdwet } pcdpanel2
+
+% ---- page title ------------------------------------------------------
+gsave
+    0.12 0.12 0.12 setrgbcolor
+    /Helvetica-Bold findfont 15 scalefont setfont
+    20 614 moveto (pkcanvas and /Touch: one canvas under every light stroke) show
+    0.4 0.4 0.4 setrgbcolor
+    /Helvetica findfont 9 scalefont setfont
+    20 598 moveto
+    (A dry brush and a palette knife crossing, then the /Touch sweep, a colour load and a wet pull. pkcanvas is called once, first.) show
+grestore

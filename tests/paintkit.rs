@@ -9145,6 +9145,98 @@ fn ghostscript_agrees_on_the_surface() {
     );
 }
 
+/// CANVAS_SURFACE.md test 6: the weave is in canvas points, so a touched
+/// mark has the same pattern at any dpi. A 72dpi render and a 144dpi
+/// render of one page, compared in the same 10pt blocks (`tests/golden.rs`
+/// size, 10px and 20px), must agree within that file's tolerance (mean
+/// block difference under 6).
+///
+/// The weave is coarse (8pt) so the pattern lives at block scale, as in
+/// `ghostscript_agrees_on_the_surface`; at the default 2.5pt every seed
+/// averages alike. The negative control is what a device-space weave
+/// would look like: the same page at 144dpi with the weave halved to
+/// 4 canvas points (8 device pixels, as at 72dpi's 8). It has to fall
+/// well outside the tolerance, or the comparison cannot tell a weave
+/// in points from a weave in pixels.
+#[test]
+fn the_weave_is_in_canvas_points_at_any_dpi() {
+    let blocks = |scale: u32, weave: &str, seed: u32| {
+        let mut it = Interp::with_page_scaled(200, 200, scale as f32).expect("page");
+        load(&mut it);
+        it.run_str(&format!(
+            "1 1 1 setrgbcolor clippath fill 0 0 0 setrgbcolor \
+             << /Seed {seed} /Weave {weave} >> pkcanvas 5 srand \
+             newpath 10 100 moveto 190 100 lineto \
+             << /Width 120 /Charge 1 /Depletion 0 /Edge 0 /ColorJitter 0 \
+                /Touch 0.5 >> pkbroad"
+        ))
+        .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+        let side = (200 * scale) as usize;
+        let rgb: Vec<[u8; 3]> = it
+            .gfx()
+            .pixmap
+            .pixels()
+            .iter()
+            .map(|p| [p.red(), p.green(), p.blue()])
+            .collect();
+        assert_eq!(rgb.len(), side * side, "page size at {scale}x");
+        canvas_blocks(&rgb, side, side, (10 * scale) as usize)
+    };
+    let low = blocks(1, "8", 11);
+    let (mean, disjoint) = canvas_mean_block_diff(&low, &blocks(2, "8", 11));
+    eprintln!("72dpi vs 144dpi weave: mean block diff {mean:.2}, disjoint {disjoint}");
+    assert_eq!(disjoint, 0, "blocks inked at one dpi only");
+    assert!(mean < 6.0, "the weave moved with the dpi: {mean:.2}");
+
+    // The controls: a weave sized in pixels rather than points, and
+    // another seed, are both far outside that tolerance.
+    let (pixels, _) = canvas_mean_block_diff(&low, &blocks(2, "4", 11));
+    let (seed, _) = canvas_mean_block_diff(&low, &blocks(2, "8", 12));
+    eprintln!("controls: device-space weave {pixels:.2}, other seed {seed:.2}");
+    assert!(
+        pixels > mean * 2.0 && pixels > 6.0,
+        "a device-space weave is within tolerance ({pixels:.2} vs {mean:.2})"
+    );
+    assert!(
+        seed > mean * 2.0 && seed > 6.0,
+        "another seed is within tolerance ({seed:.2} vs {mean:.2})"
+    );
+}
+
+/// The specimen page runs under Ghostscript too (it uses no alpha). Its
+/// rand stream differs, so this only checks that gs accepts the file and
+/// that every touched mark and the `pkcanvas` call run there.
+#[test]
+fn ghostscript_accepts_the_canvas_demo() {
+    let gs_ok = std::process::Command::new("gs")
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success());
+    if !gs_ok {
+        eprintln!("skipping gs compatibility check: gs not installed");
+        return;
+    }
+    let out = std::process::Command::new("gs")
+        .args([
+            "-dNOSAFER",
+            "-dNOPAUSE",
+            "-dBATCH",
+            "-q",
+            "-sDEVICE=png16m",
+            "-g780x640",
+            "-r72",
+            "-o/dev/null",
+            "examples/paintkit_canvas_demo.ps",
+        ])
+        .output()
+        .expect("run gs");
+    assert!(
+        out.status.success() && !String::from_utf8_lossy(&out.stdout).contains("Error"),
+        "gs rejected examples/paintkit_canvas_demo.ps: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}
+
 // --- loaded colours (issue #183, slice L2 #221): pkbroad and pktrowel ----
 //
 // `/Colors`, `/ColorMix` and `/Light` on the presets that read a head
