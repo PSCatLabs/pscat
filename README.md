@@ -96,7 +96,8 @@ hand; `examples/gradients.ps` is the specimen sheet.
 sweep instead of once, so exploring seeds or a parameter is one
 invocation instead of N hand-edits: `--sweep-seed` overrides every
 `srand` call transparently (found art with a hardcoded `N srand` line
-sweeps unmodified), `--sweep NAME=` predefines `/NAME` in userdict for
+sweeps unmodified) except a restore of a value saved with `rrand`, which
+puts the saved stream back (issue #202), `--sweep NAME=` predefines `/NAME` in userdict for
 a source that opts in to read it. `--png` writes numbered per-frame
 files; `--contact-sheet PATH` composites every frame into one grid PNG
 instead (`--grid COLSxROWS` overrides the default layout) — either or
