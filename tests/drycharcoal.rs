@@ -3,7 +3,11 @@
 //! from the caller's stream" are `%%SelfTest` blocks in
 //! `lib/drycharcoal.ps`; these tests check what the renders do.
 
+mod common;
+
+use common::within_cpu_budget;
 use pscat::Interp;
+use std::time::Duration;
 
 const LIBS: [&str; 5] = [
     "lib/artkit.ps",
@@ -379,26 +383,26 @@ fn every_documented_parameter_changes_the_render() {
 }
 
 /// DRYMEDIA.md 6.2: a test-sized hatch, every layer, under 2 s under
-/// `--profile ci` (60 x 60 pt measured 2.4 s with the file in parallel). Printed so drift is visible before it fails.
+/// `--profile ci` (60 x 60 pt measured 2.4 s wall time with the file in
+/// parallel). Thread CPU time, best of 3 (issue #329), so load from other
+/// processes cannot fail it. Printed so drift is visible before it fails.
 #[test]
 fn a_hatched_region_renders_within_the_ci_budget() {
-    let t0 = std::time::Instant::now();
-    let it = render(
-        44,
-        44,
-        2.0,
-        &format!(
-            "{} << /Value 1 /Layers 4 /Seed 1 >> dhhatch",
-            cell(2, 2, 40)
-        ),
-    );
-    let secs = t0.elapsed().as_secs_f64();
-    eprintln!("40 x 40 pt, four layers: {secs:.2}s");
+    let it = within_cpu_budget("40 x 40 pt, four layers", Duration::from_secs(2), 3, || {
+        render(
+            44,
+            44,
+            2.0,
+            &format!(
+                "{} << /Value 1 /Layers 4 /Seed 1 >> dhhatch",
+                cell(2, 2, 40)
+            ),
+        )
+    });
     assert!(
         mean(&it, 44, 2.0, (6.0, 6.0, 38.0, 38.0)) < 200.0,
         "nothing drawn"
     );
-    assert!(secs < 2.0, "took {secs:.2}s, over the 2s CI budget");
 }
 
 fn gs_available() -> bool {

@@ -9,7 +9,11 @@
 //! mark with brighter edges than its face, ghost writing far fainter than
 //! fresh chalk, wipes darker than the haze and dust thickest at the ledge.
 
+mod common;
+
+use common::within_cpu_budget;
 use pscat::Interp;
+use std::time::Duration;
 
 const LIBS: [&str; 6] = [
     "lib/artkit.ps",
@@ -351,24 +355,20 @@ fn a_wipe_is_darker_than_the_haze() {
 }
 
 /// The CI budget (DRYMEDIA.md 6.2): a dressed board with a ghost and a
-/// line of chalk renders in under 2 s under `--profile ci`.
+/// line of chalk renders in under 2 s under `--profile ci`. Thread CPU
+/// time, best of 3 (issue #329), so load from other processes cannot fail it.
 #[test]
 fn a_small_board_renders_within_the_ci_budget() {
-    let t0 = std::time::Instant::now();
-    let it = render(
-        240,
-        120,
-        1.0,
-        "0 0 240 120 << /Seed 1 /Ghost { (old notes) 20 70 << /Size 24 /Seed 1 >> sgpath } >> dcboard \
-         /white dcchalkcolor newpath (chalk) 20 30 << /Size 28 /Seed 2 >> sgpath << >> dcchalk",
-    );
-    let secs = t0.elapsed().as_secs_f64();
-    eprintln!("small board: {secs:.2}s");
+    let it = within_cpu_budget("small board", Duration::from_secs(2), 3, || {
+        render(
+            240,
+            120,
+            1.0,
+            "0 0 240 120 << /Seed 1 /Ghost { (old notes) 20 70 << /Size 24 /Seed 1 >> sgpath } >> dcboard \
+             /white dcchalkcolor newpath (chalk) 20 30 << /Size 28 /Seed 2 >> sgpath << >> dcchalk",
+        )
+    });
     assert!(!data(&it).is_empty());
-    assert!(
-        secs < 2.0,
-        "the board took {secs:.2}s, over the 2s CI budget"
-    );
 }
 
 fn gs_available() -> bool {

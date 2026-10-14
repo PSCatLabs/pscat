@@ -23,7 +23,11 @@
 //! jitter's determinism, and corners/a direction reversal rendering
 //! without crashing.
 
+mod common;
+
+use common::within_cpu_budget;
 use pscat::{Interp, PsError};
+use std::time::Duration;
 
 fn load(it: &mut Interp) {
     for path in ["lib/artkit.ps", "lib/paintkit.ps"] {
@@ -2918,22 +2922,23 @@ fn pkwash_rejects_malformed_options() {
 /// perimeter is 12 million stops). Counting first and checking after —
 /// the shape this originally had — passes a check at `/Pitch 0.01` and
 /// still hangs at this one, because the counting walk *is* the
-/// unbounded work; the wall-clock bound below is what actually
+/// unbounded work; the CPU-time bound below is what actually
 /// distinguishes the two implementations (Codex review, PR #109).
 #[test]
 fn pkwash_bounds_its_own_work_before_doing_any_of_it() {
-    let mut it = fresh(400, 400);
-    let started = std::time::Instant::now();
-    let err = it.run_str(
-        "0 0 0 setrgbcolor newpath 200 200 190 0 360 arc closepath \
-         << /Alpha 0.3 /Pitch 0.0001 >> pkwash",
-    );
-    let elapsed = started.elapsed();
-    assert!(err.is_err(), "an unbounded sample count should be refused");
-    assert_eq!(ink_count(&it), 0, "and nothing should have been drawn");
-    assert!(
-        elapsed < std::time::Duration::from_secs(2),
-        "the budget must be arithmetic, not discovered by walking: took {elapsed:?}"
+    within_cpu_budget(
+        "pkwash absurd /Pitch refused without walking",
+        Duration::from_secs(2),
+        3,
+        || {
+            let mut it = fresh(400, 400);
+            let err = it.run_str(
+                "0 0 0 setrgbcolor newpath 200 200 190 0 360 arc closepath \
+                 << /Alpha 0.3 /Pitch 0.0001 >> pkwash",
+            );
+            assert!(err.is_err(), "an unbounded sample count should be refused");
+            assert_eq!(ink_count(&it), 0, "and nothing should have been drawn");
+        },
     );
 }
 
@@ -3422,21 +3427,22 @@ fn pkpaper_keeps_its_texture_inside_its_rectangle() {
 /// measurement traversal, not after it (Codex review, PR #109, round 5).
 #[test]
 fn an_invalid_explicit_pitch_is_rejected_before_walking() {
-    let mut it = fresh(400, 400);
     // A path expensive enough to walk that doing so before rejecting is
     // measurable: 60,000 tiny segments.
-    let started = std::time::Instant::now();
-    let err = it.run_str(
-        "0 0 0 setrgbcolor newpath 0 0 moveto 1 1 60000 { pop 0.002 0.002 rlineto } for \
-           closepath \
-         << /Alpha 0.3 /Pitch 0 >> pkwash",
-    );
-    let elapsed = started.elapsed();
-    assert!(err.is_err(), "/Pitch 0 should be rejected");
-    assert_eq!(ink_count(&it), 0);
-    assert!(
-        elapsed < std::time::Duration::from_millis(900),
-        "rejection walked the path first: took {elapsed:?}"
+    within_cpu_budget(
+        "pkwash /Pitch 0 rejected before walking",
+        Duration::from_millis(900),
+        3,
+        || {
+            let mut it = fresh(400, 400);
+            let err = it.run_str(
+                "0 0 0 setrgbcolor newpath 0 0 moveto 1 1 60000 { pop 0.002 0.002 rlineto } for \
+                   closepath \
+                 << /Alpha 0.3 /Pitch 0 >> pkwash",
+            );
+            assert!(err.is_err(), "/Pitch 0 should be rejected");
+            assert_eq!(ink_count(&it), 0);
+        },
     );
 }
 
@@ -4484,24 +4490,25 @@ fn fan_a_degenerate_subpath_radiates_even_beside_a_normal_one() {
 /// own resampling was the one nested cost that budget did not bound --
 /// `/Pitch 0.001` sampled a fixed-length ray millions of times while
 /// passing the guard. The ray's pitch is now floored relative to its own
-/// length. Asserted as a wall-clock bound, since the failure mode is a
+/// length. Asserted as a CPU-time bound, since the failure mode is a
 /// hang rather than a wrong pixel.
 #[test]
 fn fan_a_pressed_dab_cannot_be_made_unboundedly_expensive() {
-    let start = std::time::Instant::now();
-    let mut it = fresh(200, 200);
-    it.run_str(
-        "0 0 0 setrgbcolor 3 srand newpath 100 100 moveto \
-         << /Width 70 /Bristles 60 /Pitch 0.001 /Ragged 0 >> pkfan",
-    )
-    .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
-    let elapsed = start.elapsed();
-    assert!(ink_count(&it) > 300, "the dab should still paint");
-    assert!(
-        elapsed < std::time::Duration::from_secs(5),
-        "a fine /Pitch must not make a fixed-length ray unboundedly \
-         expensive: took {elapsed:?}"
+    let it = within_cpu_budget(
+        "fan pressed dab at a fine /Pitch",
+        Duration::from_secs(5),
+        3,
+        || {
+            let mut it = fresh(200, 200);
+            it.run_str(
+                "0 0 0 setrgbcolor 3 srand newpath 100 100 moveto \
+                 << /Width 70 /Bristles 60 /Pitch 0.001 /Ragged 0 >> pkfan",
+            )
+            .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+            it
+        },
     );
+    assert!(ink_count(&it) > 300, "the dab should still paint");
 }
 
 /// Codex review of PR #139, round 2: `/Jitter` displaces each
@@ -4510,22 +4517,17 @@ fn fan_a_pressed_dab_cannot_be_made_unboundedly_expensive() {
 /// guard still counts only the original stops. Resampling that inflated
 /// path at the original pitch was nested work the budget did not bound.
 /// Same class as the pressed-ray case, and asserted the same way --
-/// wall clock, because the failure mode is a hang.
+/// CPU time, because the failure mode is a hang.
 #[test]
 fn fan_a_huge_jitter_cannot_inflate_the_nested_resampling() {
-    let start = std::time::Instant::now();
-    let mut it = fresh(200, 200);
-    it.run_str(
-        "0 0 0 setrgbcolor 3 srand newpath 100 100 moveto 101 100 lineto \
-         << /Width 20 /Bristles 1 /Pitch 1 /Jitter 10000 >> pkfan",
-    )
-    .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
-    let elapsed = start.elapsed();
-    assert!(
-        elapsed < std::time::Duration::from_secs(5),
-        "a large /Jitter must not multiply the nested resampling without \
-         bound: took {elapsed:?}"
-    );
+    within_cpu_budget("fan with a huge /Jitter", Duration::from_secs(5), 3, || {
+        let mut it = fresh(200, 200);
+        it.run_str(
+            "0 0 0 setrgbcolor 3 srand newpath 100 100 moveto 101 100 lineto \
+                 << /Width 20 /Bristles 1 /Pitch 1 /Jitter 10000 >> pkfan",
+        )
+        .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+    });
 }
 
 /// Codex review of PR #139, round 2: adding pkfan's `pfroll` initially
@@ -4561,19 +4563,19 @@ fn each_preset_keeps_its_own_roll_helper() {
 /// strokes.
 #[test]
 fn fan_a_huge_width_at_full_splay_cannot_inflate_the_nested_resampling() {
-    let start = std::time::Instant::now();
-    let mut it = fresh(200, 200);
-    it.run_str(
-        "0 0 0 setrgbcolor 3 srand newpath 100 100 moveto 101 100 lineto \
-         << /Width 1000000 /Bristles 2 /BristleWidth 1 /Spread 1 /Splay 1 \
-            /Pitch 1 /Load 1 /Dropout 0 /Ragged 0 /Jitter 0 >> pkfan",
-    )
-    .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
-    let elapsed = start.elapsed();
-    assert!(
-        elapsed < std::time::Duration::from_secs(5),
-        "splay displacement must be covered by the nested bound too: \
-         took {elapsed:?}"
+    within_cpu_budget(
+        "fan with a huge /Width at full /Splay",
+        Duration::from_secs(5),
+        3,
+        || {
+            let mut it = fresh(200, 200);
+            it.run_str(
+                "0 0 0 setrgbcolor 3 srand newpath 100 100 moveto 101 100 lineto \
+                 << /Width 1000000 /Bristles 2 /BristleWidth 1 /Spread 1 /Splay 1 \
+                    /Pitch 1 /Load 1 /Dropout 0 /Ragged 0 /Jitter 0 >> pkfan",
+            )
+            .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+        },
     );
 }
 
@@ -4637,28 +4639,30 @@ fn fan_batched_pressed_dabs_are_charged_against_the_budget() {
     for i in 0..100 {
         movetos.push_str(&format!(" {} {} moveto closepath", 10 + i, 50 + (i % 7)));
     }
-    let mut it = fresh(200, 200);
-    let start = std::time::Instant::now();
-    let res = it.run_str(&format!(
-        "0 0 0 setrgbcolor 3 srand {movetos} \
-         << /Width 40 /Bristles 60 /Load 1 /Dropout 0 >> pkfan"
-    ));
-    let elapsed = start.elapsed();
-    let e = res.expect_err("batched dabs at 60 bristles must exceed the budget");
-    assert!(
-        it.error_report(&e)
-            .contains("pkfan-deposit-count-exceeds-safety-limit"),
-        "expected the deposit budget guard, got {}",
-        it.error_report(&e)
-    );
-    assert!(
-        elapsed < std::time::Duration::from_secs(5),
-        "the guard must reject before doing the work: took {elapsed:?}"
-    );
-    assert_eq!(
-        ink_count(&it),
-        0,
-        "a rejected budget must leave the canvas clean"
+    // The guard must reject before doing the work: bounded in CPU time.
+    within_cpu_budget(
+        "fan batched dabs rejected by the deposit budget",
+        Duration::from_secs(5),
+        3,
+        || {
+            let mut it = fresh(200, 200);
+            let res = it.run_str(&format!(
+                "0 0 0 setrgbcolor 3 srand {movetos} \
+                 << /Width 40 /Bristles 60 /Load 1 /Dropout 0 >> pkfan"
+            ));
+            let e = res.expect_err("batched dabs at 60 bristles must exceed the budget");
+            assert!(
+                it.error_report(&e)
+                    .contains("pkfan-deposit-count-exceeds-safety-limit"),
+                "expected the deposit budget guard, got {}",
+                it.error_report(&e)
+            );
+            assert_eq!(
+                ink_count(&it),
+                0,
+                "a rejected budget must leave the canvas clean"
+            );
+        },
     );
 }
 
