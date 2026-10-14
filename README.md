@@ -153,6 +153,8 @@ cargo run -- --halftone file.ps           # classic 45° halftone dots, like a
 cargo run -- --lint --png out.png file.ps # self-check: blank page? unbalanced
                                           # gsave? stuff left on the stack?
 cargo run -- --lint-strict file.ps        # ...and exit non-zero on any finding
+                                          # (a run that errored is never "clean":
+                                          # lint prints [run-error] and exits 1)
 cargo run -- --selftest lib/paintkit.ps   # run a library's %%SelfTest blocks
 ./scripts/selftest.sh                     # every library's blocks, plus strict
                                           # lint over every rendering driver

@@ -443,7 +443,7 @@ fn finish_headless(
 ) -> ExitCode {
     let mut lint_failed = false;
     if options.lint {
-        let found = report_lint(interp, options, &declared_pages);
+        let found = report_lint(interp, options, &declared_pages, ok);
         lint_failed = options.lint_strict && found;
     }
     if let Some(path) = &options.png {
@@ -522,6 +522,11 @@ fn finish_headless(
     }
 }
 
+/// The check name `--lint` reports for a run that ended in an error.
+/// `pscat-mcp`'s `split_lint_findings` drops this line by its literal
+/// text (it is a separate binary), so keep the two in step.
+const RUN_ERROR_CHECK: &str = "run-error";
+
 /// `--lint`: print findings to stderr, one per line, prefixed
 /// `pscat: lint:` so a caller can grep for them (or, for `pscat-mcp`,
 /// parse them back out of the child's stderr). Runs regardless of `ok`
@@ -529,10 +534,16 @@ fn finish_headless(
 /// should still surface. Returns whether anything was found, which is
 /// what `--lint-strict` turns into a non-zero exit; plain `--lint`
 /// stays advisory, as it has been since issue #17.
+///
+/// `ok` is whether the program ran to the end. An errored run is never
+/// "clean" (issue #369): the verdict line used to say so right under the
+/// `%%[ Error ... ]%%` report, and agents trust that line. The exit code
+/// is untouched (`finish_headless` already fails an errored run).
 fn report_lint(
     interp: &Interp,
     options: &Options,
     declared_pages: &pscat::lint::DeclaredPages,
+    ok: bool,
 ) -> bool {
     // The blank-page/stack-leak checks assume the run was meant to
     // produce a page — true for any file or stdin run, whether or not
@@ -552,13 +563,23 @@ fn report_lint(
         || options.svg.is_some()
         || options.pdf.is_some();
     let findings = interp.lint_with_pages(render_checks, declared_pages);
+    if !ok {
+        eprintln!(
+            "pscat: lint: [{RUN_ERROR_CHECK}] the run ended in an error (see the report above), so this is not a clean run"
+        );
+    }
     if findings.is_empty() {
-        eprintln!("pscat: lint: clean");
-        return false;
+        if ok {
+            eprintln!("pscat: lint: clean");
+        }
+        return !ok;
     }
     for f in &findings {
         eprintln!("pscat: lint: [{}] {}", f.check, f.message);
     }
+    // The footer counts real findings only: an errored run already
+    // fails on its own, so "because --lint-strict was given" would be
+    // misleading for it.
     if options.lint_strict {
         eprintln!(
             "pscat: lint: {} finding(s) — failing because --lint-strict was given",

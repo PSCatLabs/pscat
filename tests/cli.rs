@@ -103,6 +103,55 @@ fn lint_is_clean_when_nothing_is_wrong() {
     assert!(stderr.contains("pscat: lint: clean"), "stderr: {stderr}");
 }
 
+// --- issue #369: an errored run is never "clean" ---------------------
+
+#[test]
+fn lint_does_not_call_an_errored_run_clean() {
+    // `pop` on an empty stack: the report said stackunderflow and the
+    // very next line said `lint: clean`, which agents trust.
+    for args in [
+        vec!["--lint", "-e", "pop"],
+        vec!["--lint", "-"],
+        vec!["--lint-strict", "-e", "pop"],
+    ] {
+        let (ok, _out, stderr) = run(&args, "pop");
+        assert!(!ok, "{args:?}: an errored run exits non-zero: {stderr}");
+        assert!(stderr.contains("stackunderflow"), "{args:?}: {stderr}");
+        assert!(
+            stderr.contains("pscat: lint: [run-error]"),
+            "{args:?}: {stderr}"
+        );
+        assert!(
+            !stderr.contains("pscat: lint: clean"),
+            "{args:?}: must not say clean: {stderr}"
+        );
+    }
+}
+
+#[test]
+fn lint_strict_footer_counts_real_findings_not_the_run_error() {
+    // Error only: no real finding, so no "failing because --lint-strict".
+    let (ok, _out, stderr) = run(&["--lint-strict", "-e", "pop"], "");
+    assert!(!ok);
+    assert!(!stderr.contains("because --lint-strict"), "{stderr}");
+    // Error plus a real finding (the blank page): footer says 1, not 2.
+    let (ok, _out, stderr) = run(&["--lint-strict", "-"], "pop\nshowpage");
+    assert!(!ok);
+    assert!(stderr.contains("pscat: lint: [blank-page]"), "{stderr}");
+    assert!(
+        stderr.contains("pscat: lint: 1 finding(s) \u{2014} failing because --lint-strict"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn lint_after_a_successful_run_is_still_clean_and_exits_zero() {
+    let (ok, _out, stderr) = run(&["--lint", "-e", "3 4 add pop"], "");
+    assert!(ok, "{stderr}");
+    assert!(stderr.contains("pscat: lint: clean"), "{stderr}");
+    assert!(!stderr.contains("[run-error]"), "{stderr}");
+}
+
 #[test]
 fn lint_skips_the_blank_page_check_for_eval_style_usage() {
     // -e is the "leave a result on the stack, don't necessarily draw
