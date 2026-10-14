@@ -76,5 +76,5 @@ against the `origin/main` library (4 of the 5 Rust tests, all 3 blocks).
 
 **Not changed / follow-ups.** `scatter`'s own `/BBox` residual and `scarea`'s
 raw `typecheck` live in `lib/artkit.ps`, which another change (#110) is
-editing; they remain open on #259's body. Options that dependants
+editing; they are filed as #295. Options that dependants
 (`printkit`, `surfacekit`, ...) forward to `hatch` were not audited.
