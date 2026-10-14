@@ -896,6 +896,22 @@ renders eight examples in both and compares block-downsampled output).
   branch, `ghostscript_accepts_paint_loading` drives every new key on every
   adopter inside a directional `pkwet`, and `L6`/`L7` (`/TipColor`, `pkdry`,
   `pkoil` ridges) are what is left of #183.
+- **Pigments and `pigmix` (issue #185) are a section of `lib/paintkit.ps`,
+  before the `pu-` resolver, and touch no preset.** `Pigments` is
+  `name -> [r g b strength]` (the `dybox` pattern: a `@kind: Dial` dict, with
+  `PigmentNames` for tube order). `pigmix` is Kubelka-Munk per r/g/b channel:
+  K/S = sum(a_i (1-R)^2 / 2R) / sum(a_i) with a_i = weight x strength, then
+  R = 1 + K/S - sqrt((K/S)^2 + 2 K/S). Scratch names all start `pgm` (pagekit
+  owns `pg`+word, the presets clobber `pk*`). Entries are checked even at
+  weight 0; one live entry is returned as stored; no random draws. The
+  presets get pigments through `pigcolor`/`pigcolors`, which produce the
+  `[r g b]` arrays `/Colors`, `/HighlightColor` and `/ShadowColor` already
+  validate, so `puparse` and `puhue` are untouched (a /Colors entry that is a
+  bare pigment name is not accepted: wrap the list in `pigcolors`). Tests are
+  `tests/pigment.rs` plus two `%%SelfTest` blocks; the specimen is
+  `examples/paintkit_pigment_demo.ps` (render at
+  `docs/paintkit_pigment_demo.png`). Retuning a pigment moves the pinned
+  mixes in `reference_mixes_are_pinned`: change them on purpose.
 - **Paintkit slices prove byte identity with `scripts/identity_check.sh
   BASE_WORKTREE [BIN] --control FILE [--gallery-still]`** (issue #263), not
   by hand. It renders every tracked `examples/`, `gallery/` and
