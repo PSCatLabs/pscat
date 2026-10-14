@@ -1,6 +1,6 @@
 %!PS-Adobe-3.0
 %%Title: typewriter.ps -- the /Typewriter font
-%%Creator: pscat -- issue #211 (epic #209, design docs/TYPEWRITER.md)
+%%Creator: pscat -- issues #211, #212 (epic #209, design docs/TYPEWRITER.md)
 %%EndComments
 
 % A dynamic Type 3 font, /Typewriter, that types like a real machine: the
@@ -21,11 +21,15 @@
 % The defaults follow the measurements, which are a fraction of a point at
 % body size: a page at /Wear 1 looks clean at a glance, as real typing does.
 % Raise /Wear for a battered machine (1.5 is an old, hard-used one; above 2
-% is for art). The ink here is flat: the glyph filled in /Ink and stroked
-% with a round pen whose width follows pressure x key weight x /Ribbon (the
-% ink spreading past the type face). The ribbon weave, clogged counters and
-% one-side-heavy keys are #212's; this file already computes the last two
-% per key (the machine table) so #212 only has to draw them.
+% is for art).
+%
+% The ink (#212, "ribbon ink" below) is the face pressed through an inked
+% fabric ribbon: the weave's voids left open in the letter, a ragged fringe
+% where ink wicks into the paper, clogged counters filled on the keys the
+% machine table marks, a heavy side on others, density following pressure,
+% /Ribbon (wetness) and a slow drift across the page. /InkModel false gives
+% #211's flat ink instead: the glyph filled in /Ink and stroked with a round
+% pen whose width follows pressure x key weight x /Ribbon.
 %
 % Use:
 %   (lib/typewriter_outlines.ps) run (lib/typewriter.ps) run
@@ -152,7 +156,7 @@ TWState begin {
 /tWear 1 def  /tMWear 1 def  /tLWear 1 def  /tSWear 1 def
 /tPitch 10 def  /tSize 12.5 def
 /tInk [0.13 0.13 0.15] def  /tRibbon 0.7 def
-/tPSd 0.08 def  /tFinger true def
+/tPSd 0.08 def  /tFinger true def  /tInkOn true def
 /tMat matrix def
 /tFillAdj /.setfilladjust2 where { pop true } { false } ifelse def
 /tMtabFor null def  /tDocFor null def  /tLineFor null def
@@ -216,6 +220,7 @@ TWState begin {
         dup length 3 eq { true exch { tIsUnit and } forall } { pop false } ifelse
     } { pop false } ifelse
 } bind def
+/tIsBool { type /booleantype eq } bind def
 /tIsPreset { dup type /nametype eq { tPresets exch known } { pop false } ifelse } bind def
 
 % the option keys: internal name, check, guard
@@ -232,6 +237,7 @@ TWState begin {
     /Size        [ /tSize       /tIsPos    /tw-size-must-be-a-positive-number ]
     /Ink         [ /tInk        /tIsRgb    /tw-ink-must-be-an-rgb-array ]
     /Ribbon      [ /tRibbon     /tIsUnit   /tw-ribbon-must-be-0-to-1 ]
+    /InkModel    [ /tInkOn      /tIsBool   /tw-inkmodel-must-be-a-boolean ]
 >> def
 
 % opts -> -  (TWState is the current dict, begun by the caller). Every key
@@ -318,7 +324,7 @@ TWState begin {
 
     tLineFor kLine ne { tLbuild } if
     tMtab kCode 32 sub get aload pop
-    pop pop pop /mWt exch def /mR exch def /mY exch def /mX exch def
+    /mSS exch def /mSA exch def /mClog exch def /mWt exch def /mR exch def /mY exch def /mX exch def
 
     docA docB 2 mix2 kLine mix2 kCol mix2 kCode mix2 tStrike mix2
     /hB exch def /hA exch def
@@ -334,7 +340,8 @@ TWState begin {
     } ifelse
     wearS mul 1 add dup 0.1 lt { pop 0.1 } if
     mWt wearM mul 1 add dup 0.1 lt { pop 0.1 } if mul
-    48 mul tRibbon mul /inkW exch def           % spread: 0.6pt x ribbon at 1
+    /tPr exch def
+    tPr 48 mul tRibbon mul /inkW exch def           % spread: 0.6pt x ribbon at 1
 
     % place: line + machine + strike offsets, the tilt's rise along the
     % line, then the rotations about the middle of the face
@@ -351,6 +358,7 @@ TWState begin {
     % the ink's spread (DRYMEDIA.md 2.4; TYPEWRITER.md section 6). pscat
     % has no fill adjust and skips this.
     tFillAdj { 0 0 .setfilladjust2 } if
+    tInkOn { tInkStrike } {
     TWOutlines kCode get
     tMat currentmatrix pop
     xS 1 scale newpath dup 0 get exec 1 get exec
@@ -362,6 +370,239 @@ TWState begin {
         gsave fill grestore
         inkW setlinewidth 1 setlinejoin 0 setlinecap [] 0 setdash stroke
     } { fill } ifelse
+    } ifelse
+} bind def
+
+% ---- ribbon ink (#212; TYPEWRITER.md section 6) ----------------------------
+% The letter is the type face pressed through an inked fabric ribbon. Each
+% strike draws its ink through a clip that leaves the weave's voids open
+% (holes are a clip, never paper-coloured paint, so whatever is under the
+% page shows through them), in up to four passes:
+%
+%   feather  the outline stroked wider than the spread, through a sparse
+%            weave: the ragged fringe of ink wicking into the paper
+%   body     the glyph filled and stroked with the pressure-driven spread,
+%            through the strike's weave; a one-side-heavy key draws it
+%            through a sparser weave, then again through the normal one on
+%            its heavy half only
+%   counter  a clogged key's counters filled through the weave, over the
+%            fraction of each counter the dirt has packed
+%
+% The weave is a bank of patches, 8 x 8 yarns at 0.48pt (150 yarns to the
+% inch: the ribbon does not scale with the type), built once at load from
+% the fixed hash: 4 variants, each at 16 hole levels (hole probability 0,
+% 0.05 ... 0.75). Each yarn cell has one jittered quadrilateral hole, drawn
+% when its rank is below the level, larger at higher levels, so a denser
+% strike's holes are a subset of a lighter one's. A strike lays the patches
+% over its glyph at its own angle and sub-yarn offset, a hashed variant per
+% patch, and clips with eoclip (the patches' outer rectangle plus the holes,
+% which never overlap).
+%
+% Density: the hole level rises as the ribbon dries (/Ribbon falls) and as
+% the strike's pressure falls, and drifts slowly across the page (ribbon
+% wear, keyed by /Seed). Every draw here is a hash: per strike when strike
+% variation is on, per machine key when /StrikeWear is 0 (so a quirks-only
+% page repeats a key exactly, ink and all). /InkModel false draws #211's
+% flat ink instead.
+
+/tYarn 0.48 def                                 % yarn pitch, points
+/tPatch tYarn 8 mul def                         % patch side, points
+/tWeave [ 0 1 3 {
+    /tV exch def
+    % per cell: rank, centre x y, size factor, 8 corner jitters
+    /tCells [ 0 1 63 {
+        /tC exch def
+        % the clump: a field over 2 x 2 cells (about 1pt), so the voids
+        % gather into the blotches a scan shows, not an even pin-prick grid
+        9 tV tDomain tC 8 mod 2 idiv mix2 tC 8 idiv 2 idiv mix2 /hB exch def /hA exch def
+        1 uni
+        8 tV tDomain tC mix2 /hB exch def /hA exch def
+        [
+            % the mean of the two uniforms, mapped back to uniform (its
+            % triangular CDF), so a level's hole fraction is its level
+            exch 1 uni add 2 div
+            dup 0.5 lt { dup mul 2 mul } { 1 exch sub dup mul 2 mul 1 exch sub } ifelse
+            tC 8 mod 0.5 add tYarn mul 2 uni 0.5 sub 0.08 mul tYarn mul add
+            tC 8 idiv 0.5 add tYarn mul 3 uni 0.5 sub 0.08 mul tYarn mul add
+            4 uni 0.4 mul 0.6 add
+            5 1 12 { uni 0.5 sub 0.12 mul tYarn mul } for
+        ]
+    } for ] def
+    [ 0 1 15 {
+        /tPk exch 0.05 mul def
+        % half-size at a size factor of 1: 0.15-0.4 of the pitch, so the
+        % hole stays inside its cell (centre jitter 0.04, corners 0.06)
+        /tH tPk 0.33 mul 0.15 add tYarn mul def
+        [ tCells {
+            aload pop
+            /tJ8 exch def /tJ7 exch def /tJ6 exch def /tJ5 exch def
+            /tJ4 exch def /tJ3 exch def /tJ2 exch def /tJ1 exch def
+            tH mul /tHs exch def /tCy exch def /tCx exch def
+            tPk lt {
+                tCx tHs sub tJ1 add tCy tHs sub tJ2 add /moveto load
+                tCx tHs add tJ3 add tCy tHs sub tJ4 add /lineto load
+                tCx tHs add tJ5 add tCy tHs add tJ6 add /lineto load
+                tCx tHs sub tJ7 add tCy tHs add tJ8 add /lineto load
+                /closepath load
+            } if
+        } forall ] cvx
+    } for ]
+} for ] def
+
+% per code: the outline's and the counters' bounding boxes, glyph units
+% (unsqueezed), for laying patches and sizing a clogged counter's fill
+/tGBox 95 array def  /tCBox 95 array def
+gsave
+33 1 126 {
+    /tC exch def
+    newpath TWOutlines tC get 0 get exec pathbbox 4 array astore tGBox tC 32 sub 3 -1 roll put
+    TWOutlines tC get 1 get dup length 0 gt {
+        newpath exec pathbbox 4 array astore
+    } { pop [0 0 0 0] } ifelse
+    tCBox tC 32 sub 3 -1 roll put
+} for
+grestore
+
+/tClipM matrix def
+/tSmooth { dup dup mul exch 2 mul 3 exch sub mul } bind def    % smoothstep
+% kx ky -> -1..1, the ribbon-wear noise at a knot
+/tWearKnot {
+    docA docB 4 mix2 3 -1 roll mix2 3 -1 roll mix2 /hB exch def /hA exch def
+    1 uni 2 mul 1 sub
+} bind def
+% -> -1..1, smooth across the page: knots every 8 columns and 8 half-lines
+/tPageWear {
+    kCol 8 div dup floor dup /tWx exch def sub tSmooth /tFx exch def
+    kLine 8 div dup floor dup /tWy exch def sub tSmooth /tFy exch def
+    tWx tWy tWearKnot 1 tFx sub mul tWx 1 add tWy tWearKnot tFx mul add 1 tFy sub mul
+    tWx tWy 1 add tWearKnot 1 tFx sub mul tWx 1 add tWy 1 add tWearKnot tFx mul add tFy mul
+    add
+} bind def
+
+% p -> level 0..15
+/tLevel { 20 mul round cvi dup 0 lt { pop 0 } if dup 15 gt { pop 15 } if } bind def
+
+% level -> -  clips to the weave at that level (the CTM is tMat before and
+% after). Level 0 has no holes and clips nothing.
+/tWeaveClip {
+    dup 0 gt {
+        /wL exch def
+        tClipM setmatrix
+        newpath
+        wI0 tPatch mul wJ0 tPatch mul moveto
+        wI1 1 add tPatch mul wJ0 tPatch mul lineto
+        wI1 1 add tPatch mul wJ1 1 add tPatch mul lineto
+        wI0 tPatch mul wJ1 1 add tPatch mul lineto closepath
+        wI0 1 wI1 {
+            /wI exch def
+            wJ0 1 wJ1 {
+                /wJ exch def
+                tClipM setmatrix wI tPatch mul wJ tPatch mul translate
+                tWeave wA wB wI mix2 wJ mix2 pop 3 and get wL get exec
+            } for
+        } for
+        eoclip newpath tMat setmatrix
+    } { pop } ifelse
+} bind def
+
+% the glyph's path, squeezed to the pitch; the CTM is tMat before and after
+/tGlyphPath {
+    newpath xS 1 scale tGlyph 0 get exec tGlyph 1 get exec tMat setmatrix
+} bind def
+/tPen { setlinewidth 1 setlinejoin 0 setlinecap [] 0 setdash } bind def
+/tBody {
+    tGlyphPath
+    wBodyW 0 gt { gsave fill grestore wBodyW tPen stroke } { fill } ifelse
+} bind def
+
+% fraction p -> -  fills the clogged counters through the weave at p, over
+% the band from the dirt's side to the fraction of the counter's circle
+/tClogBand {
+    exch dup 0 gt {
+        gsave
+            exch tLevel tWeaveClip
+            tCx0 tCx1 add 2 div xS mul tCy0 tCy1 add 2 div translate tCAng rotate
+            tR neg tR neg 3 -1 roll tR 2 mul mul tR 2 mul rectclip tMat setmatrix
+            newpath xS 1 scale tGlyph 1 get exec tMat setmatrix fill
+        grestore
+    } { pop pop } ifelse
+} bind def
+
+% -  draws the strike's ink (from tStrikeGlyph: the glyph frame is the CTM)
+/tInkStrike {
+    tMat currentmatrix pop
+    /tGlyph TWOutlines kCode get def
+    /sA hA def /sB hB def                       % the strike's prefix
+    % density: dryness, pressure (a heavy strike fills the weave in), and
+    % the slow ribbon wear across the page
+    % 0.16 at the default /Ribbon 0.7, 0.31 worn (0.35), 0.75 bone dry
+    1 tRibbon sub dup 0.2 mul exch dup mul dup mul 0.45 mul add 0.1 add
+    1 tPr sub dup 0 gt { 0.55 } { 0.15 } ifelse mul add
+    wearS 0 gt { tPageWear 0.06 mul wearS 1 2 copy gt { exch } if pop mul add } if
+    dup 0 lt { pop 0 } if /pBody exch def
+    % the spread is split: the body carries a third of it, the feather
+    % reaches to #211's spread through a sparse weave
+    /wBodyW inkW 0.3 mul def
+    /fW inkW -0.15 mul def
+    % the weave's frame: per strike, or per key when strikes do not vary
+    wearS 0 eq { tMA tMB kCode mix2 } { sA sB } ifelse
+    20 mix2 /hB exch def /hA exch def
+    /wA hA def /wB hB def
+    tMat setmatrix
+    advU cellW div dup scale
+    1 uni 90 mul rotate
+    2 uni tYarn mul 3 uni tYarn mul translate
+    tClipM currentmatrix pop
+    % the patches that cover the glyph's box, grown by the ink's reach
+    tGBox kCode 32 sub get aload pop
+    inkW fW add 2 div 4 add /tM exch def
+    tM add /tY1 exch def xS mul tM add /tX1 exch def
+    tM sub /tY0 exch def xS mul tM sub /tX0 exch def
+    /wI0 99999 def /wJ0 99999 def /wI1 -99999 def /wJ1 -99999 def
+    [ tX0 tY0 tX1 tY0 tX1 tY1 tX0 tY1 ] aload pop
+    4 {
+        tMat transform itransform
+        tPatch div floor cvi dup wJ0 lt { dup /wJ0 exch def } if
+        dup wJ1 gt { /wJ1 exch def } { pop } ifelse
+        tPatch div floor cvi dup wI0 lt { dup /wI0 exch def } if
+        dup wI1 gt { /wI1 exch def } { pop } ifelse
+    } repeat
+    tMat setmatrix
+
+    % feather
+    gsave
+        pBody 0.5 add tLevel tWeaveClip
+        tGlyphPath inkW fW add tPen stroke
+    grestore
+    % body; a one-side-heavy key's light side is sparser
+    mSS wearM mul dup 1 gt { pop 1 } if /tSide exch def
+    tSide 0 gt {
+        gsave pBody tSide 0.5 mul add tLevel tWeaveClip tBody grestore
+        gsave
+            pBody tLevel tWeaveClip
+            tX0 tX1 add 2 div tY0 tY1 add 2 div translate mSA rotate
+            0 -2000 2000 4000 rectclip tMat setmatrix
+            tBody
+        grestore
+    } {
+        gsave pBody tLevel tWeaveClip tBody grestore
+    } ifelse
+    % a clogged counter: the dirt packs the counter from one side, over the
+    % clog fraction (more on a more worn machine, less on a light strike)
+    mClog wearM mul dup 1 gt { pop 1 } if
+    tPr dup 1 gt { pop 1 } if mul /tFill exch def
+    tFill 0.05 gt {
+        % the band runs across the counter's circumscribed circle, from the
+        % dirt's side (a fixed direction per key) to the fraction; its edge
+        % is ragged: solid to 0.12 short of it, then through a sparse
+        % weave to 0.12 past it
+        tCBox kCode 32 sub get aload pop
+        /tCy1 exch def /tCx1 exch def /tCy0 exch def /tCx0 exch def
+        tCx1 tCx0 sub xS mul tCy1 tCy0 sub tLen 2 div /tR exch def
+        tMA tMB kCode mix2 /hB exch def /hA exch def 14 uni 360 mul /tCAng exch def
+        tFill 0.12 sub pBody tClogBand
+        tFill 0.12 add pBody 0.45 add tClogBand
+    } if
 } bind def
 
 } exec end % TWState
@@ -422,6 +663,9 @@ end definefont pop } exec
 %
 %   { << /Ribbon 1.5 >> tw-setup } /tw-ribbon-must-be-0-to-1
 %   (a ribbon above 1) mustguard
+%
+%   { << /InkModel 1 >> tw-set } /tw-inkmodel-must-be-a-boolean
+%   (a number for the ink model) mustguard
 %
 %   { << /Machine 9 /Wear -1 >> tw-setup } /tw-wear-must-be-a-non-negative-number
 %   (one bad key among good ones) mustguard
@@ -491,7 +735,8 @@ end definefont pop } exec
 % @param: /Pitch [count per inch] Characters per inch: 10 is pica, 12 elite. Sets the advance; the glyphs are squeezed to fit it (default 10)
 % @param: /Size [points] The type's em, which sets its height (default 12.5; 11.5 suits elite)
 % @param: /Ink [rgb array] The ribbon's colour; a worn ribbon is a lighter, browner colour here (default [0.13 0.13 0.15])
-% @param: /Ribbon [0..1] Ribbon wetness: how far the ink spreads past the type face, 0 for none (default 0.7)
+% @param: /Ribbon [0..1] Ribbon wetness: how far the ink spreads past the type face (0 for none), and how solid the ink is: a drier ribbon leaves more of the weave's voids open (default 0.7)
+% @param: /InkModel [boolean] true draws ribbon ink (the weave's voids, a feathered edge, clogged counters, a heavy side, density from pressure and /Ribbon); false draws flat ink, the glyph filled and stroked solid (default true)
 % @param: /Strike [integer] The strike index: a second strike at the same cell (a strikeover, a bold double strike) needs a new index to get its own variation (default 0)
 /tw-setup {
     TWState begin tApply tFrame end
@@ -512,6 +757,7 @@ end definefont pop } exec
 % @param: /Size [points] As tw-setup; also resets the font at the new size (no default: the current value stays)
 % @param: /Ink [rgb array] As tw-setup (no default: the current value stays)
 % @param: /Ribbon [0..1] As tw-setup (no default: the current value stays)
+% @param: /InkModel [boolean] As tw-setup (no default: the current value stays)
 % @param: /Strike [integer] As tw-setup (no default: the current value stays)
 /tw-set {
     dup type /dicttype eq { dup /Size known } { false } ifelse exch
