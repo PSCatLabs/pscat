@@ -53,7 +53,9 @@
 %   \circ \ast \star \setminus               binary operators
 %   *                             is \ast, as in TeX: a binary operator between
 %                                 terms, and z^* or A_* a raised or lowered
-%                                 asterisk (a conjugate or an adjoint)
+%                                 asterisk (a conjugate or an adjoint). Inside
+%                                 \text{}, \mathrm{} and \operatorname{} it is
+%                                 the raised text asterisk, as TeX sets it
 %   \hbar \ell \iota \upsilon \Upsilon \langle \rangle \|  letters, brackets
 %   \varphi \vartheta \varkappa \varrho \varpi \varsigma   variant Greek;
 %   \epsilon is the lunate ϵ and \varepsilon the three-shaped ε, as in TeX
@@ -2070,8 +2072,6 @@
 %   { (\\left\\lceil x \\right.) 0 0 << >> mkpath } /mk-unsupported-delimiter:\lceil
 %   (\lceil) mustguard
 %   { (\\oplus) 0 0 << >> mkpath } /mk-unsupported-command:\oplus (\oplus) mustguard
-%   % an asterisk in \text is still refused: only math has the TeX meaning
-%   { (\\text{a*b}) 0 0 << >> mkpath } /mk-unsupported-character:* (an asterisk in \text) mustguard
 %   { (\\begin{array} x \\end{array}) 0 0 << >> mkpath }
 %   /mk-unsupported-environment:array (the array environment) mustguard
 %   { (x^) 0 0 << >> mkpath } /mk-missing-argument:^ (a superscript with nothing) mustguard
@@ -2271,6 +2271,31 @@
 %     newpath mkt-s 0 0 << /Size 40 /Seed 3 >> mkpath newpath
 %   } forall
 %   (starred scripts lay out and draw) mustbe
+%%EndSelfTest
+%
+%%SelfTest: ascii-star-in-text-is-a-raised-asterisk
+%   % issue #378: * was refused inside \text, \mathrm and \operatorname,
+%   % where TeX sets a raised text asterisk, not the centred math \ast
+%   [ (\\text{a*b}) (\\mathrm{a*b}) (\\operatorname{a*b}) (\\text{*})
+%     (\\mathrm{x*}) (\\text{a * b}) ] true exch {
+%     /mkt-s exch def
+%     mkt-s << /Size 40 /Seed 3 >> mkmetrics /Width get 0 gt and
+%     newpath mkt-s 0 0 << /Size 40 /Seed 3 >> mkpath newpath
+%   } forall
+%   (a star in text, mathrm and operatorname lays out and draws) mustbe
+%   % set as an ordinary letter: no medium space around it, so it is
+%   % narrower than the math a \ast b
+%   (\\text{a*b}) << /Size 100 /Irregular 0 >> mkmetrics /Width get
+%   (a*b) << /Size 100 /Irregular 0 >> mkmetrics /Width get lt
+%   (a text star takes no binary-operator space) mustbe
+%   % raised, not on the math axis: the ink of a lone text star starts
+%   % higher than a lone math star's
+%   newpath (\\text{*}) 0 0 << /Size 100 /Irregular 0 >> mkpath
+%   pathbbox pop pop exch pop
+%   newpath (*) 0 0 << /Size 100 /Irregular 0 >> mkpath
+%   pathbbox pop pop exch pop
+%   gt (a text star sits higher than the math star) mustbe
+%   newpath
 %%EndSelfTest
 %
 %%SelfTest: delimiters-typed-as-unicode
