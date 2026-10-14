@@ -100,10 +100,21 @@ sections 2–5 and 7 of it, with flat ink. Section 6 (ribbon ink) is #212.
 - **The frame.** It is the CTM at `tw-setup`, moved to the current point if
   there is one. Baselines a whole number of lines below that point land on
   integer cell rows, never on a .5 rounding boundary.
-- **Cell sizes come from the glyph's actual advance and em** (in the frame),
-  not from `/Pitch`. Plain `12 scalefont` use (advance 6.9pt) still gets a
-  distinct cell per glyph, rather than two glyphs rounding into one cell
-  every 25 columns and sharing their draws.
+- **Cells.** A column is the glyph's own advance as drawn, measured in the
+  frame. A line is a fixed half-line step of 6pt in the frame, as a
+  platen ratchets, whatever the type size.
+  - The column comes from the advance, not from `/Pitch`. So plain
+    `12 scalefont` use (a 6.9pt advance) still gives each glyph its own
+    cell, instead of two glyphs rounding into one cell every 25 columns and
+    sharing their draws.
+  - The line is not scaled by the em. A first draft scaled it by the
+    em / `/Size`, but plain use leaves `/Size` at 12.5. Then 12pt baselines
+    under `12 scalefont` fell on an 11.52pt grid, and line 12 landed
+    exactly on a .5 rounding boundary, where pscat and gs could round
+    differently (Codex round 3).
+  - Half-line steps put single, 1.5 and double spacing on whole steps, and
+    give any two baselines at least 6pt apart their own key. The
+    `tw-line-keys` self-test pins this; with the em-scaled grid it fails.
 - **A 16-bit hash state.** The prototype's 8-bit Pearson chain collapsed
   every prefix to 256 states, so one strike in 256 got another cell's
   draws. Two Pearson chains, with different starts and byte offsets, give

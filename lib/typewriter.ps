@@ -44,9 +44,12 @@
 % The size given to scalefont plays the part of /Size.
 %
 % Cells. Every random value is keyed by the strike's cell: BuildChar maps
-% its origin back into the frame and rounds it to a column (the advance)
-% and a line (1/6 inch at /Size). Rounding to whole cells keeps pscat and gs
-% on the same draws despite sub-pixel differences. The frame is the CTM
+% its origin back into the frame and rounds it to a column (the glyph's own
+% advance) and a line. Lines are counted in half-line steps of 1/12 inch,
+% whatever the type size, as a typewriter's platen ratchets: single, 1.5
+% and double spacing all land on whole steps, and any two baselines at
+% least 6pt apart get different line keys. Rounding to whole cells keeps
+% pscat and gs on the same draws despite sub-pixel differences. The frame is the CTM
 % when tw-setup runs, moved to the current point if there is one, so an
 % artist's rotate or scale before typing keeps whole lines on one grid. Text
 % placed off the grid lands in its nearest cell.
@@ -292,8 +295,9 @@ TWState begin {
     /lX 1 gau 16 mul wearL mul def              % carriage return: sd 0.2pt
     /lTilt 2 gau 0.08 mul wearL mul def         % tilt: sd 0.08 degrees
     % advance error: smooth in the line index, bounded at 0.3pt (not a
-    % random walk), knots every two lines, smoothstep between them
-    kLine 2 div dup floor dup /tKn exch def sub
+    % random walk), knots every two lines (four half-line steps),
+    % smoothstep between them
+    kLine 4 div dup floor dup /tKn exch def sub
     dup dup mul exch 2 mul 3 exch sub mul /tS exch def
     tKn tKnot 1 tS sub mul tKn 1 add tKnot tS mul add 24 mul wearL mul /lY exch def
     /tLineFor kLine def
@@ -302,12 +306,15 @@ TWState begin {
 % code -> -  draws one strike in the current cell (TWState is current)
 /tStrikeGlyph {
     /kCode exch def
-    % the cell: the glyph origin in the frame, in advances and line pitches
+    % the cell: the glyph origin in the frame, in advances and half-lines.
+    % The column pitch is the advance as drawn, so plain `12 scalefont` use
+    % (a 6.9pt advance) still gives each glyph its own column. The line
+    % pitch is a fixed 6pt of the frame, never derived from /Size, which
+    % plain use leaves at its default.
     0 0 transform frameInv transform /fY exch def /fX exch def
     advU 0 dtransform frameInv dtransform tLen /cellW exch def
-    0 12000 dtransform frameInv dtransform tLen tSize div /cellH exch def
     fX cellW div round cvi /kCol exch def
-    fY cellH div round cvi /kLine exch def
+    fY 6 div round cvi /kLine exch def
 
     tLineFor kLine ne { tLbuild } if
     tMtab kCode 32 sub get aload pop
@@ -430,6 +437,23 @@ end definefont pop } exec
 %   { << /Seed -2147483648 /Machine -2147483648 >> tw-set } (the most negative 32-bit seeds) mustpass
 %   { << /Seed 2147483647 /Machine 2147483647 >> tw-set } (the largest 32-bit seeds) mustpass
 %   { << /Seed 1 /Machine 1 >> tw-set } (back to the defaults) mustpass
+%%EndSelfTest
+
+%%SelfTest: tw-line-keys
+%   % plain use at another size, on 12pt baselines: every line two
+%   % half-line steps below the last, and never a skipped or shared key
+%   /Typewriter findfont 12 scalefont setfont
+%   /twtOk true def
+%   0 1 30 {
+%       /twtN exch def
+%       0 twtN -12 mul moveto (a) show
+%       TWState /kLine get twtN -2 mul ne { /twtOk false def } if
+%   } for
+%   twtOk (12pt lines at 12pt type step two half-lines each) mustbe
+%   /Typewriter findfont 10 scalefont setfont
+%   0 -24 moveto (a) show TWState /kLine get -4 eq
+%   0 -30 moveto (a) show TWState /kLine get -5 eq and
+%   (lines 6pt apart get their own keys) mustbe
 %%EndSelfTest
 
 %%SelfTest: tw-setup-applies-presets-and-keys
