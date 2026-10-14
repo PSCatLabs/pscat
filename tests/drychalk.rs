@@ -153,7 +153,7 @@ fn dcboard_every_documented_parameter_changes_the_render() {
             100,
             1.0,
             &format!(
-                "0 0 160 100 << /Seed 4 /Ghost {{ 20 60 moveto 140 64 lineto }} {extra} >> dcboard"
+                "0 20 160 80 << /Seed 4 /Ghost {{ 20 60 moveto 140 64 lineto }} {extra} >> dcboard"
             ),
         ))
     };
@@ -492,4 +492,50 @@ fn ghostscript_accepts_a_packed_ghost_procedure() {
         ),
     );
     assert!(!data(&it).is_empty());
+}
+
+/// The tray sits below the board: the board's own bottom rows are the same
+/// with and without it (Codex review of PR #310).
+#[test]
+fn the_tray_is_drawn_below_the_board() {
+    let board = |tray: u32| {
+        render(
+            100,
+            100,
+            2.0,
+            &format!(
+                "0 30 100 70 << /Seed 2 /Tray {tray} /Ledge 10 /Swipes 0 /Wipes 0 /Smudges 0 >> dcboard"
+            ),
+        )
+    };
+    let (a, b) = (board(0), board(20));
+    let w = a.gfx().pixmap.width();
+    // device rows 0..140 are the board (y 30..100pt at 2x, y down)
+    let rows = |it: &Interp| it.gfx().pixmap.pixels()[..(140 * w) as usize].to_vec();
+    assert_eq!(rows(&a), rows(&b), "the tray painted over the board");
+    assert_ne!(data(&a), data(&b), "the tray drew nothing");
+}
+
+/// /Landing presses a dot harder (Codex review of PR #310): a page of dots
+/// is brighter at /Landing 1 than at /Landing 0.
+#[test]
+fn landing_presses_dots_harder() {
+    let dots = |landing: &str| {
+        on_board(
+            200,
+            60,
+            2.0,
+            &format!(
+                "newpath 0 1 19 {{ 9 mul 10 add 30 moveto 0.5 0 rlineto }} for \
+                 << /Width 3 /Dust 0 /Vary 0 /Landing {landing} /Seed 4 >> dcchalk"
+            ),
+        )
+    };
+    let lit = |it: &Interp| mean(it, 0, 40, 400, 80);
+    let (hard, soft) = (lit(&dots("1")), lit(&dots("0")));
+    eprintln!("dots: landing 1 {hard:.2}, landing 0 {soft:.2}");
+    assert!(
+        hard > soft + 0.2,
+        "/Landing did not press the dots ({hard:.2} vs {soft:.2})"
+    );
 }

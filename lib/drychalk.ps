@@ -312,7 +312,9 @@
     /dcTlandL dcdot { 2 } { 2.4 dcw mul dcL 1e-6 dcmax div 0.06 dcmax 0.3 dcmin } ifelse def
     /dcTlift dcLift dcband 2.5 mul mul def
     /dcTfloor 1 dcLift 0.55 mul sub def
-    dcdot { /dcTland 0 def } if
+    % a dot is pressed: half the landing's extra touch for the whole dab
+    % (all of it reads as a clean disc), Codex review of PR #310
+    dcdot { /dcTb dcTb dcLanding 0.5 mul add def /dcTland 0 def } if
     /dcww dcw 1 dcr2 0.5 sub dcVary mul 0.24 mul add mul
         dcdot { 1.2 mul } if def
     dcSo /Width dcww put
@@ -978,11 +980,12 @@
 /dctray {
     gsave
         /.setfilladjust2 where { pop 0 0 .setfilladjust2 } if
-        % the floor, dusted: a smooth ramp from heavy dust at the back
+        % the floor, below the board, dusted: a smooth ramp from heavy dust
+        % at the back (the strip nearest the board is the dustiest)
         0 1 7 {
             8 div /dctk exch def
             dcG [0.74 0.74 0.71] 0.85 dctk 0.5 mul sub dclerp3 aload pop setrgbcolor
-            dcBx dcBy dcTray dctk mul sub dcBw dcTray 8 div 0.01 add rectfill
+            dcBx dcBy dcTray dctk 0.125 add mul sub dcBw dcTray 8 div 0.01 add rectfill
         } for
         % the lip: a lighter edge catching the light
         [0.80 0.80 0.77] aload pop setrgbcolor

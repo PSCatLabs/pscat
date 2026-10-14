@@ -93,7 +93,7 @@ Three findings, each now handled in drychalk:
   samples, and the samples between are bilinear. Building the field took
   0.55s before and takes 0.09s now.
 
-**Tests** (`tests/drychalk.rs`, 11, about 4s):
+**Tests** (`tests/drychalk.rs`, 13, about 4s):
 - every `dcchalk` and `dcboard` key changes the render, and the
   advertised keys equal the tested keys;
 - determinism, and a word written elsewhere re-rolls nothing;
@@ -106,7 +106,10 @@ Three findings, each now handled in drychalk:
 - the CI budget;
 - gs block agreement on a dressed board with chalk (0.60, against 4.97
   for another seed), local only;
-- a packed `/Ghost` under real gs, local only.
+- a packed `/Ghost` under real gs, local only;
+- the tray is drawn below the board, and `/Landing` presses dots harder
+  (both from Codex's review of PR #310, as is the check that a later
+  `dksurface` drops dcboard's tone).
 
 Self-tests cover every guard and the caller's `rand` stream. A packed
 `/Ghost` runs under `true setpacking`.
