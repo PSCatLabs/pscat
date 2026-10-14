@@ -125,8 +125,10 @@ content:
 
 Rollout residual: copies of the old `claim.sh` that agents are running
 right now lack the inode check, so an old and a new racer on an empty
-stale dir can still hit the empty-dir ABA. This goes away once every
-checkout has pulled.
+stale dir can still hit the empty-dir ABA. An old copy that is the
+3-way loser also does not retry: a mixed race (2 old + 2 new, 300
+stale trials under load) still had 35 zero-winner trials, and 0
+doubles. Both go away once every checkout has pulled.
 
 ### Zero winners and the retry (#281)
 

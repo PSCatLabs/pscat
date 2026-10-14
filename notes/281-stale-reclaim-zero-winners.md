@@ -23,8 +23,31 @@ protocol could **double-claim** (filed as #297).
   reclaimed; live if a heartbeat appears). `CLAIM=` runs the same harness on another copy, and
   `TRACE=1` dumps first-attempt-no-winner traces. The `CLAIM_ORIG` verbatim diff is gone, since
   the body now differs on purpose.
-- **Numbers.** Same new harness, 1000 stale trials each, 10 `yes` hogs on 10 cores, pre-#281
-  script then this one: see the PR description and the #281 comments.
+- **Numbers** (4 racers, 10-core Mac, `yes >/dev/null` CPU hogs):
+
+  | Run | Load | Exactly 1 winner | Zero winners | Double claims |
+  |---|---|---|---|---|
+  | Baseline: `main`'s harness and script, 300 stale | 10 hogs, load average 7 → 24 | 207 | 91 | 2 |
+  | New harness, `CLAIM=` pre-#281 script, 1000 stale | 20 hogs, load average 15 → 29 | 596 | 397 | 5 |
+  | Same harness, this script, 1000 stale | 20 hogs, load average 29 → 49 | 1000 | 0 | 0 |
+  | Final harness, this script, 300 stale (ALL PASS) | 10 hogs, load average 24 → 31 | 300 | 0 | 0 |
+
+  All 397 zero-winner traces had exactly one `3-way` loser. With this script, the pre-check cut
+  trials with no first-attempt winner from 397 to 1, and the retry resolved that one. 135 trials
+  had a retry; the other 134 retries saw a winner's heartbeat and reported `live`.
+- **Ablation:** with the pre-check disabled, 300 stale trials had 15 orphans (no first-attempt
+  winner). The retry reclaimed all 15: 300/300 exactly one winner, 0 doubles. Doubles were 0
+  both in total and among retry claims, so the retry's orphan reclaim is safe under contention.
+- **Double claims** went from 5/1000 to 0/1000 at higher load. That is "not observed", not
+  "fixed": the #297 mechanism is unchanged, and the pre-check only removes most ABA moves.
+- **Changed assertion:** the backdated-dir check now accepts exactly one winner of either kind.
+  Under load, a late racer's first `mkdir` can land while the stealer has the dead dir moved
+  away, giving one `claimed (fresh)`. The strict version, 100 trials each under load: the
+  original script had 6 such trials, this one 8. So it is load, not this change.
+- **Rollout:** a mixed race (2 pre-#281 copies + 2 new, 300 stale) had 35 zero-winner trials
+  and 0 doubles. When an old copy is the 3-way loser it does not retry, so zero winners persist
+  until every checkout has pulled.
 - **Residuals** (in `claim-protocol.md`): the transit-window double claim (#297) is narrowed, not
   closed. The retry adds one waiter to the #72 suspended-claimant gap. Old copies of `claim.sh`
-  still lack the inode check until every checkout pulls.
+  lack the inode check and the retry until every checkout pulls. `claim.sh` can now take up to
+  ~30 s after a lost race (SKILL.md step 1 says to wait).
