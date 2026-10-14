@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # build_font_gallery.sh — render one card PNG per available font face for
-# site/fonts.html: the eight Type3 lib/fonts/ faces (their natural
-# materials, colors lifted from examples/font_library*.ps) and the 48
-# fonts/catalog/ families (the standard 35 plus the display shelf, same
-# label/font/sample data as examples/font_catalog.ps). Deterministic
+# site/fonts.html: the Type3 faces (the eight lib/fonts/ faces in their
+# natural materials, colors lifted from examples/font_library*.ps, plus
+# lib/handscript.ps and lib/typewriter.ps) and the fonts/catalog/ families
+# (the standard 35 plus the display shelf, same label/font/sample data as
+# examples/font_catalog.ps). Deterministic
 # (each rand-driven face is srand-seeded) and self-contained: run it any
 # time to regenerate, nothing here is checked in.
 #
@@ -126,6 +127,21 @@ card handscript 440x130 type3 <<'EOF'
 showpage
 EOF
 
+# /Typewriter is dynamic like /HandScript: every strike differs, so its card
+# is one key struck twenty times. The library never calls rand (its draws are
+# hashes of /Machine, /Seed and the cell), so no srand is needed.
+card typewriter 440x130 type3 <<'EOF'
+%!PS
+(lib/typewriter_outlines.ps) run
+(lib/typewriter.ps) run
+0.98 0.97 0.94 setrgbcolor clippath fill
+28 64 moveto << /Machine 7 /Seed 3 /Wear 1.5 /Size 30 /Pitch 4 >> tw-setup
+(eeeeeeeeeeeeeeeeeeee) show
+28 28 moveto << /Size 12.5 /Pitch 10 >> tw-setup
+(every strike lands a little different) show
+showpage
+EOF
+
 # ------------------------------------------------------------- catalog
 # label | findfont name | sample text | point size
 cat <<'TABLE' | while IFS='|' read -r label fn sample size; do
@@ -170,6 +186,7 @@ Creepster|Creepster-Regular|Hamburgefonstiv|24
 PressStart2P|PressStart2P-Regular|HAMBURGE|16
 VT323|VT323-Regular|Hamburgefonstiv|26
 SpecialElite|SpecialElite-Regular|Hamburgefonstiv|22
+CourierPrime|CourierPrime-Regular|Hamburgefonstiv 12|22
 Orbitron|Orbitron-Regular|Hamburgefonst|20
 Audiowide|Audiowide-Regular|Hamburgefonst|20
 StardosStencil|StardosStencil-Regular|Hamburgefonstiv|22
