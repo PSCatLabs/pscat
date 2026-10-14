@@ -248,14 +248,29 @@
 % layer's own interval k/L .. (k+1)/L, which hatch clamps to 0..1)
 % @internal
 /dhhdens {
-    dhhv 0 get dup dhisnum
-        { 3 1 roll pop pop }
-        {
-            exec
-            % raised after the batch closes, so no gsave is left open
-            dup dhisnum not { pop 0 /dhhbad true def } if
-        }
-    ifelse
+    dhhfail { pop pop 0 } {
+        dhhv 0 get dup dhisnum
+            { 3 1 roll pop pop }
+            {
+                % run under stopped, so an error inside the procedure (or a
+                % wrong result count) is raised only after hatch's gsave
+                % and dhhatch's own are closed (Codex review, PR #315)
+                /dhhvp exch def
+                mark 3 1 roll { dhhvp } stopped
+                    { cleartomark 0 /dhhfail true def }
+                    {
+                        counttomark 1 ne
+                            { cleartomark 0 /dhhbad true def }
+                            {
+                                exch pop
+                                dup dhisnum not { pop 0 /dhhbad true def } if
+                            }
+                        ifelse
+                    }
+                ifelse
+            }
+        ifelse
+    } ifelse
     dhhk dhhL div sub dhhL mul
 } def
 
@@ -362,6 +377,10 @@
 %   { newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath
 %     << /Value { pop pop (x) } >> dhhatch } /dhhatch-value-procedure-must-return-a-number
 %   (a /Value procedure returning a string) mustguard
+%   { newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath << /Value { pop pop 1 0 div } >> dhhatch }
+%   /undefinedresult (a /Value procedure that raises, every gsave given back) mustfail
+%   { newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath << /Value { } >> dhhatch }
+%   /dhhatch-value-procedure-must-return-a-number (a /Value procedure leaving two results) mustguard
 %   { newpath 0 0 moveto 50 0 lineto 50 50 lineto closepath << /Levels 9 >> dhhatch }
 %   /dkstroke-levels-must-be-1-to-4 (a bad pass-through key, every gsave given back) mustguard
 %   userdict /dkBatch known not (the failed hatch closed its batch) mustbe

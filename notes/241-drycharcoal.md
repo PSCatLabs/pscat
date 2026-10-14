@@ -45,9 +45,11 @@ takes a draw from the caller's `rand`:
   inside hatch's `gsave` and ours. The hook catches it, stops drawing, and re-raises
   after both are closed. `dhsmudge`, `dhlift` and `dhsketch` give back their `gsave`
   the same way. Self-tests pin each case (the advisor's implementation review).
-- **A `/Value` procedure that returns a non-number** raises
-  `dhhatch-value-procedure-must-return-a-number` after the batch closes. Raising from
-  inside `hatch` left two `gsave`s open.
+- **A `/Value` procedure that raises, or leaves anything but one number,** runs under
+  `stopped`. Its error, or `dhhatch-value-procedure-must-return-a-number`, is raised
+  after the batch and both `gsave`s close. Raising from inside `hatch` left `gsave`s
+  open: first for a non-number result, then, as Codex round 1 found, for an error
+  inside the procedure.
 
 **Smudge semantics** (the advisor asked for the justification). "Softens and spreads
 existing marks in a region along a direction" needs readback, which this interpreter
