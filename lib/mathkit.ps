@@ -1899,6 +1899,180 @@
 
 % ------------------------------------------------------------- API
 
+%%SelfTest: mkpath-rejects-malformed-operands
+%   { 5 0 0 << >> mkpath } /mk-tex-must-be-a-string (a number as text) mustguard
+%   { (x) (a) 0 << >> mkpath } /mk-xy-must-be-numbers (a string as x) mustguard
+%   { (x) 0 0 5 mkpath } /mk-opts-must-be-a-dict (a number as opts) mustguard
+%   { (x) 0 0 << /Size 0 >> mkpath } /mk-size-must-be-a-positive-number (/Size 0) mustguard
+%   { (x) 0 0 << /Style /inline >> mkpath } /mk-style-must-be-display-or-text
+%   (/Style /inline) mustguard
+%   { (x) 0 0 << /Seed 1.5 >> mkpath } /mk-seed-must-be-an-integer (a real /Seed) mustguard
+%   { (x) 0 0 << /Irregular -1 >> mkpath } /mk-irregular-must-be-a-non-negative-number
+%   (/Irregular -1) mustguard
+%   { (x) 0 0 << /Slope (up) >> mkpath } /mk-slope-must-be-a-number (a string /Slope) mustguard
+%   { (x) 0 0 << /Jitter -0.1 >> mkpath } /mk-jitter-must-be-a-non-negative-number
+%   (/Jitter -0.1) mustguard
+%   { (x) 0 0 << /Slant /left >> mkpath } /mk-slant-must-be-a-number (a name /Slant) mustguard
+%   { (x) 0 0 << /Spacing -2 >> mkpath } /mk-spacing-must-be-a-non-negative-number
+%   (/Spacing -2) mustguard
+%   { (x) 0 0 << /MathHand 1 >> mkpath } /mk-mathhand-must-be-a-boolean (/MathHand 1) mustguard
+%   { (x) 5 mkmetrics } /mk-opts-must-be-a-dict (mkmetrics with a number as opts) mustguard
+%%EndSelfTest
+%
+%%SelfTest: mkpath-refuses-what-it-does-not-support
+%   % a single backslash is eaten by the PostScript string: \sqrt is "sqrt",
+%   % \frac starts with a form feed
+%   { (\sqrt{x}) 0 0 << >> mkpath } /mk-bare-word-needs-a-backslash:sqrt
+%   (a lost backslash before sqrt) mustguard
+%   { (\frac{a}{b}) 0 0 << >> mkpath }
+%   /mk-control-character:write-each-TeX-backslash-as-\\ (a form feed from \f) mustguard
+%   { (\\iint f) 0 0 << >> mkpath } /mk-unsupported-command:\iint (\iint) mustguard
+%   { (a * b) 0 0 << >> mkpath } /mk-unsupported-character:* (an asterisk) mustguard
+%   { (∮) 0 0 << >> mkpath } /mk-unsupported-character:∮ (a contour integral) mustguard
+%   { (\\left< x \\right>) 0 0 << >> mkpath } (mk-unsupported-delimiter:<) cvn
+%   (an angle bracket delimiter) mustguard
+%   { (\\left\\langle x \\right.) 0 0 << >> mkpath } /mk-unsupported-delimiter:\langle
+%   (\langle) mustguard
+%   { (\\begin{array} x \\end{array}) 0 0 << >> mkpath }
+%   /mk-unsupported-environment:array (the array environment) mustguard
+%   { (x^) 0 0 << >> mkpath } /mk-missing-argument:^ (a superscript with nothing) mustguard
+%   { (\\frac{a}) 0 0 << >> mkpath } /mk-missing-argument:\frac (\frac with one argument) mustguard
+%   { (\\vec) 0 0 << >> mkpath } /mk-missing-argument:\vec (an accent with nothing) mustguard
+%   { (x^2^3) 0 0 << >> mkpath } /mk-double-superscript (x^2^3) mustguard
+%   { (x_1_2) 0 0 << >> mkpath } /mk-double-subscript (x_1_2) mustguard
+%   { ({x) 0 0 << >> mkpath } /mk-missing-closing-brace (an open brace) mustguard
+%   { (x}) 0 0 << >> mkpath } /mk-extra-closing-brace (a stray closing brace) mustguard
+%   { (\\left[ x) 0 0 << >> mkpath } /mk-left-without-right (a left with no right) mustguard
+%   { (x \\right]) 0 0 << >> mkpath } /mk-right-without-left (a right with no left) mustguard
+%   { (a \\\\ b) 0 0 << >> mkpath } /mk-row-break-outside-a-matrix (\\ in a line) mustguard
+%   { ({a & b}) 0 0 << >> mkpath } /mk-misplaced-ampersand (& inside a group) mustguard
+%   { (\\begin{pmatrix} a & b) 0 0 << >> mkpath } /mk-begin-without-end:pmatrix
+%   (an unclosed matrix) mustguard
+%   { (\\begin{pmatrix} a \\end{bmatrix}) 0 0 << >> mkpath }
+%   /mk-end-does-not-match-begin:pmatrix (mismatched environments) mustguard
+%   { (x \\end{pmatrix}) 0 0 << >> mkpath } /mk-end-without-begin (a stray \end) mustguard
+%   { (\\sqrt[3 x) 0 0 << >> mkpath } /mk-sqrt-index-needs-a-closing-bracket
+%   (an open root index) mustguard
+%   { (\\text x) 0 0 << >> mkpath } /mk-text-needs-braces (\text without braces) mustguard
+%   { (x \\limits) 0 0 << >> mkpath } /mk-limits-needs-an-operator-before-it
+%   (\limits after a letter) mustguard
+%   { (\\left x \\right.) 0 0 << >> mkpath } /mk-unsupported-delimiter:x
+%   (a letter as a delimiter) mustguard
+%   { (x_{max}) 0 0 << >> mkpath } /mk-bare-word-needs-a-backslash:max
+%   (the letters of an operator name) mustguard
+%   { (x_{\\text{max}} + \\$) 0 0 << >> mkpath } /mk-unsupported-command:\$ (\$) mustguard
+%%EndSelfTest
+%
+%%SelfTest: errors-leave-the-stacks-as-they-were
+%   /mkt-d0 countdictstack def
+%   count /mkt-c0 exch def
+%   { (\\frac{\\left[ \\begin{pmatrix} a & \\iint}{b}) 0 0 << >> mkpath }
+%   /mk-unsupported-command:\iint (an error deep inside nested groups) mustguard
+%   countdictstack mkt-d0 eq (the dictionary stack is unwound) mustbe
+%   count mkt-c0 eq (nothing is left on the operand stack) mustbe
+%   [ (a) (b) ] 0 0 << /Ink { pop newpath } >> { mkalign } stopped not
+%   exch length 2 eq and (mkalign returns a record per line) mustbe
+%   { [ (a) (b) ] 0 0 << /Ink { pop no-such-name } >> mkalign } /no-such-name
+%   (an error inside /Ink) mustguard
+%   countdictstack mkt-d0 eq (/Ink's error unwinds the dictionary stack too) mustbe
+%%EndSelfTest
+%
+%%SelfTest: mkpath-is-deterministic-and-leaves-rand-alone
+%   /mkt-flat { [ { } { } { } { } pathforall ] } def
+%   /mkt-same {
+%     /mkt-b exch def /mkt-a exch def
+%     mkt-a length mkt-b length eq {
+%       true 0 1 mkt-a length 1 sub {
+%         dup mkt-a exch get exch mkt-b exch get sub abs 1e-6 lt and
+%       } for
+%     } { false } ifelse
+%   } def
+%   /mkt-q (x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}) def
+%   1234 srand /mkt-r0 rrand def
+%   newpath mkt-q 10 20 << /Seed 9 >> mkpath mkt-flat /mkt-p1 exch def
+%   newpath mkt-q 10 20 << /Seed 9 >> mkpath mkt-flat /mkt-p2 exch def
+%   newpath mkt-q 10 20 << /Seed 10 >> mkpath mkt-flat /mkt-p3 exch def
+%   mkt-p1 mkt-p2 mkt-same (the same seed gives the same path) mustbe
+%   mkt-p1 mkt-p3 mkt-same not (another seed gives another path) mustbe
+%   rrand mkt-r0 eq (the caller's rand stream is untouched) mustbe
+%   % editing the end of a formula never re-rolls its start
+%   newpath (a + b) 10 20 << /Seed 4 >> mkpath mkt-flat /mkt-s1 exch def
+%   newpath (a + b = c^2) 10 20 << /Seed 4 >> mkpath mkt-flat
+%   0 mkt-s1 length getinterval mkt-s1 mkt-same (a longer formula starts the same) mustbe
+%   % unseeded: the layout comes from the text, so it measures the same anywhere
+%   mkt-q << >> mkmetrics /Width get
+%   mkt-q << >> mkmetrics /Width get eq (unseeded metrics are stable) mustbe
+%   newpath
+%%EndSelfTest
+%
+%%SelfTest: the-layout-follows-tex
+%   /mkt-m { << /Size 100 /Irregular 0 >> mkmetrics } def
+%   (x^2) mkt-m /Width get (x) mkt-m /Width get gt (a superscript widens) mustbe
+%   (x^2) mkt-m /Height get (x) mkt-m /Height get gt (and rises) mustbe
+%   (x_2) mkt-m /Depth get (x) mkt-m /Depth get gt (a subscript hangs below) mustbe
+%   (\\frac{a}{b}) mkt-m dup /Height get 50 gt exch /Depth get 30 gt and
+%   (a fraction stands above and below the axis) mustbe
+%   (\\sum_{i=1}^n i) mkt-m /Height get
+%   (\\sum_{i=1}^n i) << /Size 100 /Irregular 0 /Style /text >> mkmetrics /Height get
+%   gt (display style stacks the limits) mustbe
+%   (\\sqrt{x}) mkt-m /Height get (x) mkt-m /Height get gt (a root clears its content) mustbe
+%   (\\left( \\frac{a}{b} \\right)) mkt-m /Height get (\\frac{a}{b}) mkt-m /Height get ge
+%   (a left delimiter grows to its content) mustbe
+%   (a+b) mkt-m /Width get (ab) mkt-m /Width get gt (binary operators get space) mustbe
+%   (-b) mkt-m /Width get (a-b) mkt-m /Width get (a) mkt-m /Width get sub lt
+%   (a leading minus is unary, with no space) mustbe
+%   (y &= 2x) mkt-m /Align get (y) mkt-m /Width get sub abs 0.01 lt
+%   (& marks the alignment point) mustbe
+%   (y = 2x) mkt-m /Align get (y &= 2x) mkt-m /Align get sub abs 0.01 lt
+%   (without &, the line aligns before its relation) mustbe
+%   (x^2) << /Size 100 /Irregular 0 /Seed 1 >> mkmetrics /Width get
+%   (x^2) << /Size 100 /Irregular 0 /Seed 2 >> mkmetrics /Width get eq
+%   (/Irregular 0 is the same layout for every seed) mustbe
+%   (x^2+y^2) << /Size 100 /Seed 1 >> mkmetrics /Width get
+%   (x^2+y^2) << /Size 100 /Seed 2 >> mkmetrics /Width get ne
+%   (/Irregular 1 varies with the seed) mustbe
+%%EndSelfTest
+%
+%%SelfTest: every-name-in-the-tables-has-a-glyph
+%   /mkt-ok true def
+%   mkcmds {
+%     exch pop dup 0 get /sym eq { 1 get sgtab exch known not { /mkt-ok false def } if }
+%     { pop } ifelse
+%   } forall
+%   mkt-ok (every \command glyph exists in strokeglyphs) mustbe
+%   /mkt-ok true def
+%   mkascii { exch pop 0 get sgtab exch known not { /mkt-ok false def } if } forall
+%   mkhand { exch pop sgtab exch known not { /mkt-ok false def } if } forall
+%   mkdigits { sgtab exch known not { /mkt-ok false def } if } forall
+%   mkdelimwords { exch pop sgtab exch known not { /mkt-ok false def } if } forall
+%   mkt-ok (every ASCII, math-hand, digit and delimiter glyph exists) mustbe
+%   /mkt-ok true def
+%   mkcmds {
+%     exch pop dup 0 get /do eq { 1 get where not { /mkt-ok false def } { pop } ifelse }
+%     { pop } ifelse
+%   } forall
+%   mkt-ok (every structure command has its parser) mustbe
+%%EndSelfTest
+%
+%%SelfTest: annotations-reject-malformed-operands
+%   { 0 0 10 (a) << >> mkframe } /mk-coordinates-must-be-numbers (a string corner) mustguard
+%   { 0 0 10 10 << /Shape /star >> mkframe } /mk-shape-must-be-box-or-oval (/Shape /star) mustguard
+%   { << /Width 3 >> << >> mkframe } /mk-record-must-come-from-mkalign (a dict that is no record) mustguard
+%   { 0 0 10 10 << /Double 1 >> mkunderline } /mk-double-must-be-a-boolean (/Double 1) mustguard
+%   { 0 0 10 10 << /Bend /left >> mkarrow } /mk-bend-must-be-a-number (/Bend /left) mustguard
+%   { 0 0 10 10 << /Head 0 >> mkarrow } /mk-head-must-be-a-positive-number (/Head 0) mustguard
+%   { 5 5 5 5 << >> mkarrow } /mk-arrow-needs-two-distinct-points (a zero-length arrow) mustguard
+%   { [ (a) 5 ] 0 0 << >> mkalign } /mk-lines-must-be-an-array-of-strings (a number as a line) mustguard
+%   { [ (a) ] 0 0 << /Ink 5 >> mkalign } /mk-ink-must-be-a-procedure (/Ink 5) mustguard
+%   { [ (a) ] 0 0 << /Leading 0 >> mkalign } /mk-leading-must-be-a-positive-number (/Leading 0) mustguard
+%   newpath [ (a = b) (c = d) ] 0 0 << >> mkalign
+%   dup 1 get << /Shape /oval >> mkframe
+%   1 get << /Double true >> mkunderline
+%   0 0 50 20 << /Bend 30 >> mkarrow
+%   currentpoint pop pop true (a record frames and underlines its line) mustbe
+%   newpath
+%%EndSelfTest
+%
 % (tex) x y opts mkpath -
 % @kind: Procedure
 % @summary: Lays out a TeX math string (a subset: scripts, \\frac, \\sqrt, \\sum \\prod \\int with limits, \\left( \\right), matrices, accents, Greek; write each TeX backslash twice in a PostScript string) and appends its stroke skeletons to the current path with the baseline's left end at x y, painting nothing. Stroke it with a pen or hand it to a dry medium such as dcchalk. The layout wobbles like board writing, scaled by /Irregular.
