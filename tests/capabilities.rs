@@ -384,8 +384,8 @@ fn every_migrated_parameter_states_its_unit() {
         // tags never reach the catalog fails here instead of passing empty.
         let src = std::fs::read_to_string(mf.source).expect("read migrated file");
         let declared = src.lines().filter(|l| l.starts_with("% @param:")).count();
-        assert!(
-            (declared == 0) == (checked == 0),
+        assert_eq!(
+            declared, checked,
             "{}: {declared} @param tags in the file but {checked} checked",
             mf.source
         );

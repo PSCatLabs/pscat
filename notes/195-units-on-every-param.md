@@ -46,13 +46,15 @@ sweep has no transform and works in the current user space (like `/BBox` and
 jersey bundled several keys into three `@param` lines (`/NameFont /NumberFont
 /CaptionFont`, `/Dominance` + `/MaxDominance`, `/Fill /Outline /CaptionFill
 ...`), so a single unit would have described only the first key; they are now
-one row per key (so jersey advertises 5 more parameters, with defaults taken
-from the code).
+one row per key (jersey goes from 10 catalog rows to 17, defaults taken from the code).
+The split also fixed a real catalog bug: the bundled row's trailing
+`(default 6)` was parsed as the default of `/Dominance`, so the catalog said
+`/Dominance` defaults to 6 when it is 1.8 (6 is `/MaxDominance`'s).
 
 **Renders are byte-identical** (docs comments only): `scripts/identity_check.sh
 --loader <lib>` for each touched library.
 
-**Open dry-media branches.** `lib/drycrayon.ps` (#309) and `lib/drychalk.ps`
+**Open dry-media branches.** Checked by copying the PR-branch files into `lib/` and running the new test (then removing them): both pass, and neither advertises `/Load` or `/Spread`. `lib/drycrayon.ps` (#309) and `lib/drychalk.ps`
 (#235) were not edited; their `@param` units on the PR branches all fall inside
 the existing vocabulary, so the generic test passes on them once they merge.
 `lib/drycharcoal.ps` (#241) has no branch yet; the test will check it when it
