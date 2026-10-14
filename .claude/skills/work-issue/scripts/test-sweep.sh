@@ -38,7 +38,7 @@ printf '%s\n' "$out" | grep -qx 'MAX 12 gallery/b.ps' || bad "FAIL file hid the 
 
 # Malformed numbers must be FAIL, well-formed ones accepted (Codex round 1).
 mkdir "$T/num"
-i=0; for v in '1e+' '--' '1.2.3' 'e5' '1e3' '-2.5' '.5' '7.'; do
+i=0; for v in '1e+' '--' '1.2.3' '1 2' '1e3' '-2.5' '.5' '7.'; do
     i=$((i + 1)); printf 'n %s\n' "$v" > "$T/num/n$i.ps"
 done
 git -C "$T" add num && git -C "$T" -c user.email=t@t -c user.name=t commit -qm num

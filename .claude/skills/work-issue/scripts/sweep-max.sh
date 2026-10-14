@@ -29,7 +29,7 @@ if [ "${1:-}" = "--one" ]; then   # internal: --one TREE HOOK [ARG...] FILE
     file=""; for file; do :; done   # the last argument
     out=$( (cd "$tree" && "$@") 2>/dev/null) && rc=0 || rc=$?
     last=$(printf '%s\n' "$out" | tail -n 1)
-    last=$(printf '%s' "$last" | tr -d '[:space:]')
+    last=$(printf '%s' "$last" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')   # trim the ends only
     # A complete number: integer, decimal or scientific. A character whitelist alone
     # would accept `1e+`, `--` and `1.2.3`.
     printf '%s\n' "$last" | grep -Eq '^[+-]?([0-9]+[.]?[0-9]*|[.][0-9]+)([eE][+-]?[0-9]+)?$' || rc=1
