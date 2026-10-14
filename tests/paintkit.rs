@@ -12260,3 +12260,58 @@ fn pre_walkpath_scans_accept_exactly_wkmaxsegs_segments() {
         );
     }
 }
+
+/// Issue #401: `pktrowelplane` flattens and scans its area outline without
+/// walkpath, so it carries the same `wkmaxsegs` bound itself. A refusal comes
+/// before any row (`pktrowel` is stubbed and sees only its one empty-path
+/// validation call) and leaves the operand stack, the graphics state and the
+/// caller's path as they were. Not timed: the count of `pktrowel` calls says
+/// where the refusal came from, however fast the machine is.
+#[test]
+fn pktrowelplane_refuses_a_huge_outline_before_any_row() {
+    let mut it = fresh(200, 200);
+    it.run_str(
+        "/calls 0 def /pktrowel { pop /calls calls 1 add def } def 0.25 setgray \
+         newpath 20 20 moveto 400000 { 0 0 rlineto } repeat 100 0 rlineto 0 80 rlineto closepath",
+    )
+    .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+    let err = it
+        .run_str("<< /Width 20 >> pktrowelplane")
+        .expect_err("pktrowelplane");
+    assert!(
+        matches!(err, PsError::Undefined(ref n) if n == "walkpath-segment-count-exceeds-safety-limit"),
+        "expected the segment-count guard, got {err}"
+    );
+    assert_eq!(it.operand_stack().len(), 0, "clean operand stack");
+    it.run_str("calls currentgray 0.25 sub abs 0.001 lt currentpoint pop pop")
+        .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+    let st: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
+    assert_eq!(st, ["1", "true"], "one validation call, gray and path kept");
+}
+
+/// The bound is `wkmaxsegs` exactly: an outline of that many visits still
+/// fills, one more is refused. The closed triangle is moveto, lineto, lineto
+/// and closepath (4) plus the padding.
+#[test]
+fn pktrowelplane_accepts_exactly_wkmaxsegs_outline_segments() {
+    let mut it = fresh(200, 200);
+    it.run_str("0 0 0 setrgbcolor").unwrap();
+    it.run_str(
+        "newpath 20 20 moveto 150 20 lineto wkmaxsegs 4 sub { 0 0 rlineto } repeat \
+         85 150 lineto closepath << /Width 20 >> pktrowelplane",
+    )
+    .unwrap_or_else(|e| panic!("at the limit: {}", it.error_report(&e)));
+    assert!(ink_count(&it) > 0, "drew at the limit");
+    it.run_str(
+        "newpath 20 20 moveto 150 20 lineto wkmaxsegs 3 sub { 0 0 rlineto } repeat \
+         85 150 lineto closepath",
+    )
+    .unwrap();
+    let err = it
+        .run_str("<< /Width 20 >> pktrowelplane")
+        .expect_err("one over");
+    assert!(
+        matches!(err, PsError::Undefined(ref n) if n == "walkpath-segment-count-exceeds-safety-limit"),
+        "one over the limit, got {err}"
+    );
+}
