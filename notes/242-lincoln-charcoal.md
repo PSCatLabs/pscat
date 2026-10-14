@@ -64,8 +64,21 @@ et-draw's behaviour is unchanged: the existing etching tests pass.
    one's `/Under` is the tone the hatching left there.
 
 No rand draws: jitter comes from a sin-based hash of grid indices.
-pscat and gs draw the same marks. The mean luma difference at 144 dpi is
-14.7 of 255, and it comes from tooth-level anti-aliasing, not layout.
+pscat and gs renders match by eye. The mean luma difference at 144 dpi is
+14.7 of 255. That figure was not checked against a control. gs's 32-bit
+reals (the hash multiplies `sin` by 43758) and its DCT rounding can each
+move a mark or shift a hatch threshold.
+
+`et-tonemap` checks its options before `EtchLayout begin`, so a refused
+call leaves the dict stack clean, and a test pins this.
+`et-loadbuf`'s own errors still leave `EtchLayout` on the dict stack, as
+they always have in `et-draw`. That covers a file that isn't a JPEG and
+an unsupported component count. `et-loadbuf` now closes `et-scan`'s file
+handle, which et-draw used to leave open.
+
+
+**The piece's names** carry an `lc` prefix (`lcP` and so on), because
+`/P` is a top-level name in `lib/strokeglyphs.ps`.
 
 **Review rounds (art).** Nine renders, in two passes.
 

@@ -14,7 +14,7 @@
 % greyscale crop of the head and shoulders. The page is the same 480 x
 % 600, one point per photo pixel, so every coordinate below was measured
 % off that crop (x right, y DOWN from the top, as the image reads) and
-% the P helpers flip it to PostScript's y.
+% the lcP helpers flip it to PostScript's y.
 %
 % The tonal map comes from the photo itself: lib/etching.ps's et-tonemap
 % reads the JPEG into a grid of darkness, and the hatching and smudging
@@ -145,10 +145,10 @@
 } bind def
 
 % --- photo-space path helpers ----------------------------------------------
-/P { 600 exch sub } bind def                 % py -> page y
-/pm { P moveto } bind def                    % px py pm -
-/pl { P lineto } bind def                    % px py pl -
-/pc { P 6 -2 roll P 6 -2 roll P 6 -2 roll curveto } bind def
+/lcP { 600 exch sub } bind def                 % py -> page y
+/pm { lcP moveto } bind def                    % px py pm -
+/pl { lcP lineto } bind def                    % px py pl -
+/pc { lcP 6 -2 roll lcP 6 -2 roll lcP 6 -2 roll curveto } bind def
 % a closed polygon from [x0 y0 x1 y1 ...] in photo space
 /ppoly {
     /lcpp exch def
@@ -210,11 +210,11 @@ grestore
         /lci exch def
         /lcsx lci 16 mul 4 add lci lcj lchash 10 mul add def
         /lcsy lcj 14 mul 60 add lcj lci 7 add lchash 9 mul add def
-        lcsx lcsy P lctone /lcst exch def
-        lcsx lcsy P lcvalue /lcsv exch def
+        lcsx lcsy lcP lctone /lcst exch def
+        lcsx lcsy lcP lcvalue /lcsv exch def
         lcst 0.62 gt lcsv 0.5 gt and {
             gsave
-                lcsx lcsy P translate
+                lcsx lcsy lcP translate
                 lcsy 350 lt { lcsx 250 sub 0.35 mul -12 add } { lcsx 250 sub 0.12 mul 20 add } ifelse
                 lci lcj 3 add lchash 20 mul 10 sub add rotate
                 newpath -16 0 moveto -5 2 5 -2 16 1 curveto
@@ -274,8 +274,8 @@ grestore
 % eyes: heavy upper lids, the iris, a faint lower lid
 newpath 202 202 pm 208 199 219 198 229 203 pc soft
 newpath 268 203 pm 275 199 288 198 298 202 pc soft
-newpath 216 204 P 1.4 0 360 arc closepath << /Medium /compressed /Width 1.8 >> dhstroke
-newpath 284 203 P 1.4 0 360 arc closepath << /Medium /compressed /Width 1.8 >> dhstroke
+newpath 216 204 lcP 1.4 0 360 arc closepath << /Medium /compressed /Width 1.8 >> dhstroke
+newpath 284 203 lcP 1.4 0 360 arc closepath << /Medium /compressed /Width 1.8 >> dhstroke
 newpath 205 211 pm 214 213 222 212 229 209 pc soft
 newpath 270 210 pm 280 212 290 211 298 208 pc soft
 % nose: the wing, the nostrils and the shadow under it
@@ -311,7 +311,7 @@ newpath 300 352 pm 314 400 306 440 292 478 pc << /Medium /vine /Grade 0.3 >> dhs
 % in the hair's crown and over the temple, the lapel's sheen, the rim of
 % the ear. /Under is the tone the charcoal left there.
 /lift {   % px py (a point on the stroke, for its tone) -
-    P 2 copy lcvalue 3 1 roll lcfine add 0.85 mul /lclv exch def
+    lcP 2 copy lcvalue 3 1 roll lcfine add 0.85 mul /lclv exch def
     [ 0 1 2 { /lck exch def userdict /dkGround get lck get dup
               0.11 exch sub lclv mul add } for ] /lcunder exch def
     << /Eraser /hard /Width 1.4 /Under lcunder >> dhlift

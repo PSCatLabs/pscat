@@ -299,6 +299,7 @@ EtchLayout begin
     /photopath exch def
     photopath (r) file et-scan
     /orientation exch def /ncomp exch def /height exch def /width exch def
+    f closefile   % et-scan's handle: the samples come through DCTDecode
     ncomp 1 eq ncomp 3 eq or not { et-unsupported-ncomp } if
     photopath (r) file /DCTDecode filter /jf exch def
     % One string per row, not one width*height*ncomp string for the
@@ -545,15 +546,19 @@ end
 %        photo's tones as data (gallery/lincoln_charcoal.ps reads a
 %        portrait this way) instead of et-draw's engraving.
 /et-tonemap {
+  % The guards run before `EtchLayout begin`, so a refused call leaves
+  % the dict stack as it found it.
+  dup /Photo known not { et-tonemap-needs-photo } if
+  dup [ /Columns /Rows /Samples ] {
+    1 index exch 2 copy known { get } { pop pop 64 } ifelse
+    dup type /integertype ne { et-tonemap-sizes-must-be-integers } if
+    1 lt { et-tonemap-sizes-must-be-positive } if
+  } forall pop
   EtchLayout begin
     /Opts exch def
-    Opts /Photo known not { et-tonemap-needs-photo } if
     /etmc Opts /Columns known { Opts /Columns get } { 64 } ifelse def
     /etmr Opts /Rows known { Opts /Rows get } { 64 } ifelse def
     /etmn Opts /Samples known { Opts /Samples get } { 3 } ifelse def
-    etmc type /integertype ne etmr type /integertype ne or
-    etmn type /integertype ne or { et-tonemap-sizes-must-be-integers } if
-    etmc 1 lt etmr 1 lt or etmn 1 lt or { et-tonemap-sizes-must-be-positive } if
     Opts /Photo get et-loadbuf
     /etmcw dispwidth etmc div def
     /etmch dispheight etmr div def

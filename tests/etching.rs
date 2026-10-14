@@ -288,7 +288,7 @@ fn et_tonemap_returns_a_grid_of_darkness_in_image_order() {
 }
 
 #[test]
-fn et_tonemap_matches_et_draws_darkness() {
+fn et_tonemap_maps_a_flat_photo_flat() {
     // gray8.jpg is one flat grey: every cell is its darkness, whatever the
     // grid or the sample count, and the operand stack is left clean.
     let mut it = with_lib(64, 64);
@@ -357,4 +357,17 @@ fn et_tonemap_rejects_bad_sizes() {
         let report = it.error_report(&e);
         assert!(report.contains(err), "{opts}: expected {err}, got {report}");
     }
+    // A refused call leaves the dict stack as it found it.
+    let mut it = with_lib(64, 64);
+    it.run_str(
+        "countdictstack /cd0 exch def \
+         { << /Photo (tests/data/gray8.jpg) /Rows 0 >> et-tonemap } stopped pop \
+         clear countdictstack cd0 eq",
+    )
+    .unwrap_or_else(|e| panic!("probe failed: {}", it.error_report(&e)));
+    assert_eq!(
+        it.operand_stack().last().map(|o| o.repr()),
+        Some("true".to_string()),
+        "a refused et-tonemap must not leave EtchLayout on the dict stack"
+    );
 }
