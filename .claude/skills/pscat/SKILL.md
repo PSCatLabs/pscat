@@ -93,6 +93,27 @@ lowercased, and characters outside a–z 0–9 `.,-'!?` advance
 invisibly. The underlying library `lib/handscript.ps` is embeddable
 (one options dict; see its header for the schema).
 
+## Typewritten pages (text file → PNG/PDF)
+
+```sh
+./scripts/typewrite.sh letter.txt -o letter.png
+./scripts/typewrite.sh --reflow --spacing 2 --page-numbers bottom -o draft.pdf draft.txt
+./scripts/typewrite.sh --memo-to "All Staff" --memo-from "Records" \
+    --memo-subject "Carbon copies" --memo-date "Oct 14, 1962" --height fit -o memo.png body.txt
+```
+
+Types the text in the /Typewriter font: a machine's per-key quirks, each line's
+carriage return and drift, per-strike variation and ribbon ink; word-wrapped,
+with tab stops, `--spacing`, `--indent`, and an optional memo header. Markup in the
+text: `<u>underlined</u>`, `<x>crossed out</x>`, `<o>old|new</o>`. Same
+`--machine`/`--seed`, same page, in pscat and Ghostscript (`--ps out.ps` writes the
+driver for `gs -dNOSAFER`). `--height fit` sizes the page to the text; text past
+a page makes more pages (PNG: `out-001.png`, ...). `--reflow` joins each
+paragraph's lines. Non-ASCII becomes ASCII or `?`. From PostScript:
+`<< /Text (...) /Memo << /To (...) >> /Seed 3 >> tw-type showpage` after
+`(lib/typewriter_outlines.ps) run (lib/typewriter.ps) run`; `tw-linecount` and
+`tw-pageheight` measure. `--help` lists the options.
+
 ## Fonts
 
 ```sh

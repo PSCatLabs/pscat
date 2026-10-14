@@ -700,6 +700,13 @@ renders eight examples in both and compares block-downsampled output).
    rounding (`nearly_same` in `tests/typewriter.rs`). Tune against
    `docs/typewriter/ink_vs_real.png` (`docs/typewriter/tools/ink_compare.py`);
    `notes/212-ribbon-ink.md`.
+   #213 shipped the layout (`tw-type`, `tw-linecount`, `tw-pageheight`; the
+   "layout" block at the end of `lib/typewriter.ps`, private names `ly*`),
+   `scripts/typewrite.sh` (`PSCAT_BIN`, `--ps`, `--height fit`, `--reflow`),
+   the `Typewriter` catalog row (hand-written: build.rs rejects Type3Face)
+   and `examples/typewriter_memo.txt`. One layout makes the line list both
+   `tw-linecount` and `tw-type` use. #214 paints paper in `/PageStart`;
+   `notes/213-typewriter-layout.md`.
    #242 shipped the charcoal gallery piece, `gallery/lincoln_charcoal.ps`
    (*Study after Berger, 1864*), and `lib/etching.ps`'s `et-tonemap`, which
    returns a photo as a grid of darkness for any piece that wants a
