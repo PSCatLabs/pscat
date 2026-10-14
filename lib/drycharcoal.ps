@@ -45,7 +45,8 @@
 % to its region and closes its own batch inside that clip. It cannot run
 % inside a caller's dkbatch, and two separate dhhatch calls are two
 % batches: where they overlap, the second one's faint level lands over
-% the first one's cores. Hatch a region's layers in one call.
+% the first one's cores. Hatch a region's layers in one call. (#312 would
+% let a batch hold records under different clips.)
 %
 % Smudge, lift and construction lines (DRYMEDIA.md 3.4):
 %
@@ -235,10 +236,11 @@
 
 % --- hatching ---------------------------------------------------------
 
-% Layer k's angle offset from /Angle: the second layer crosses the first
-% square on, the third and fourth split the difference.
+% Layer k's angle offset from /Angle. Uneven on purpose: square-on layers
+% at even steps (0 90 45 135) wove a lattice that no hand draws; a hatcher
+% crosses at a slant and turns the paper a little each time.
 % @internal
-/dhhoffsets [ 0 90 45 135 ] def
+/dhhoffsets [ 0 65 130 25 ] def
 
 % x y -> d   (layer dhhk's density: the value's position inside the
 % layer's own interval k/L .. (k+1)/L, which hatch clamps to 0..1)
@@ -248,7 +250,8 @@
         { 3 1 roll pop pop }
         {
             exec
-            dup dhisnum not { pop dhhatch-value-procedure-must-return-a-number } if
+            % raised after the batch closes, so no gsave is left open
+            dup dhisnum not { pop 0 /dhhbad true def } if
         }
     ifelse
     dhhk dhhL div sub dhhL mul
@@ -374,7 +377,7 @@
 % @param: /Medium [name] /vine, /compressed or /pencil (default /pencil)
 % @param: /Grade [0..1] Hard (0) to soft (1), as in dhstroke (default the medium's)
 % @param: /Value [0..1] How dark to hatch, 0 (no ink) to 1 (every layer at full pressure); a number, or a procedure {x y -> value} in the caller's user space, run along every line (default 0.5)
-% @param: /Layers [count] Crossing layers at full value, 1..4: the second crosses the first at 90 degrees, the third and fourth at 45 (default 3)
+% @param: /Layers [count] Crossing layers at full value, 1..4: they lie at /Angle, then 65, 130 and 25 degrees from it (default 3)
 % @param: /Angle [degrees] Direction of the first layer (default 45)
 % @param: /Spacing [points] Distance between lines within a layer; must be > 0 (default 2.4 pencil, 3.4 vine, 4 compressed)
 % @param: /Length [points] Mean length of one hand stroke along a line; must be > 0 (default 28)
@@ -433,6 +436,7 @@
     dhhtouch 0 lt dhhtouch 1 gt or { dhhatch-touch-must-be-0-to-1 } if
     { pathbbox } stopped { dhhatch-needs-a-region-path } if
     4 array astore /dhhbb exch def
+    /dhhbad false def
     gsave
     clip
     {
@@ -450,6 +454,7 @@
     } dkbatch
     grestore
     newpath
+    dhhbad { dhhatch-value-procedure-must-return-a-number } if
 } def
 
 % --- smudging, lifting, construction lines ------------------------------
@@ -506,7 +511,7 @@
 % @example: << /Surface /drawing >> dksurface 0.11 0.1 0.1 setrgbcolor newpath 40 60 moveto 220 70 lineto << /Value 0.4 /Width 18 >> dhsmudge
 % @param: /Value [0..1] The tone the smudge leaves, from the paper (0) to the current colour (1): smudging spreads charcoal, so over a dark mass it is lighter than the mass (default 0.4)
 % @param: /Width [points] Width of the stump's contact (default 14)
-% @param: /Touch [0..1] Pressure: high fills the valleys, lower leaves the marks beneath showing between the knuckles (default 0.66)
+% @param: /Touch [0..1] Pressure: high fills the valleys, lower leaves the marks beneath showing between the knuckles (default 0.74)
 % @param: /Under [rgb array] What lies beneath (default the surface's /Ground)
 /dhsmudge {
     dup type /dicttype ne { pop dhsmudge-options-must-be-a-dict } if
@@ -516,7 +521,7 @@
     /dhmg userdict /dkGround known { userdict /dkGround get } { [ 1 1 1 ] } ifelse def
     /dhmu dhmo /Under dhmg dhget (dhsmudge) (under-must-be-an-rgb-array) dhrgb def
     <<
-        /Width 14 /Touch 0.66 /Streak 2.6 /Levels 2 /Halo 0.2 /Strength 1
+        /Width 14 /Touch 0.74 /Streak 1.6 /Levels 2 /Halo 0.2 /Strength 1
         /Pressure { dhsoft }
     >> dhmo [ /Value /Under ] dhmerge
     dup /Under dhmu put
@@ -534,7 +539,7 @@
 % @param: /Ground [rgb array] The paper colour the eraser uncovers (default the surface's /Ground)
 % @param: /Under [rgb array] The charcoal tone being lifted (default the current colour)
 % @param: /Width [points] Width of the eraser's contact (default 10 kneaded, 2.2 hard)
-% @param: /Touch [0..1] How far into the tooth the lift reaches: low lifts only the peaks (default 0.58 kneaded, 0.95 hard)
+% @param: /Touch [0..1] How far into the tooth the lift reaches: low lifts only the peaks (default 0.48 kneaded, 0.95 hard)
 /dhlift {
     dup type /dicttype ne { pop dhlift-options-must-be-a-dict } if
     /dhlo exch def
@@ -546,7 +551,7 @@
         (dhlift) (ground-must-be-an-rgb-array) dhrgb def
     /dhlu dhlo /Under [ currentrgbcolor ] dhget (dhlift) (under-must-be-an-rgb-array) dhrgb def
     dhle /kneaded eq {
-        << /Width 10 /Touch 0.58 /Strength 0.62 /Levels 2 /Halo 0.45 /Streak 1.6
+        << /Width 10 /Touch 0.48 /Strength 0.6 /Levels 3 /Halo 1.4 /Streak 1.6
            /Pressure { dhsoft } >>
     } {
         << /Width 2.2 /Touch 0.95 /Strength 0.9 /Levels 1 /Streak 1.2 >>

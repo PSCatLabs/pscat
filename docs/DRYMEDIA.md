@@ -309,6 +309,14 @@ Crayon paper (`dypaper`) is `/construction` at `/Weave 1.4 /Relief 0.65
 /Mottle 8` on a white ground, tuned against Y1 and Y2:
 `notes/239-drycrayon.md` has the numbers.
 
+**As built (#241, `lib/drycharcoal.ps`):** hatching, smudge and lift follow
+this table. `dhhatch` calls `hatch` with `/Mark` and no rolls of its own, and
+draws all hand variation from `dkrand`. It closes its batch inside its own
+region clip, so separate regions can't share a batch yet (#312). The smudge
+is told the tone it leaves (`/Value`, from paper to pigment) as well as
+`/Under`. Measurements and the reference comparison are in
+`notes/241-drycharcoal.md`.
+
 ## 4. Stroke skeletons (#236)
 
 ### 4.1 Decision: a new, catalog-migrated glyph library

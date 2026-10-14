@@ -74,5 +74,6 @@ render examples/apparel_shirt.ps 1400x760
 render examples/drykit_specimen.ps 840x1000
 render examples/drycrayon_specimen.ps 840x1000
 render examples/drycrayon_motion_demo.ps 840x760
+render examples/drycharcoal_specimen.ps 720x490
 
 echo "site assembled: $OUT ($(du -sh "$OUT" | cut -f1))"

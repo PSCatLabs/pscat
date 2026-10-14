@@ -41,7 +41,7 @@ userdict /dkGround get aload pop setrgbcolor clippath fill
 /splabel { moveto show } def
 /spink { 0.3 0.29 0.28 setrgbcolor } def
 /spchar { 0.11 0.10 0.10 setrgbcolor } def
-/spcell { newpath moveto 32 0 rlineto 0 32 rlineto -32 0 rlineto closepath } def
+/spcell { newpath moveto 28 0 rlineto 0 28 rlineto -28 0 rlineto closepath } def
 
 spink 15 spfont (drycharcoal) 24 530 splabel
 9 spfont (vine, compressed and pencil charcoal on drykit; hatching, smudging, lifting, construction lines) 120 530 splabel
@@ -56,15 +56,15 @@ spink 11 spfont (value scale, hatching) 24 400 splabel
     /spi exch def
     /spv spi 5 div def
     /spx 24 spi 54 mul add def
-    spink spv 4 string cvs spx 8 add 336 splabel
-    spv 4 string cvs spx 364 add 336 splabel
+    spink spv 4 string cvs spx 6 add 336 splabel
+    spv 4 string cvs spx 362 add 336 splabel
     spchar
     spx 348 spcell << /Value spv /Seed spi /Medium /pencil /Grade 1 /Layers 4 >> dhhatch
     spx 356 add 348 spcell << /Value spv 0.4 mul /Seed spi 20 add /Medium /vine /Layers 1 >> dhhatch
     gsave
         spx 356 add 348 spcell clip
         newpath spx 356 add 6 sub 344 moveto
-        0 1 2 { pop 40 7 rlineto -40 5 rlineto } for
+        0 1 2 { pop 36 6 rlineto -36 4 rlineto } for
         << /Value spv /Width 14 /Seed spi >> dhsmudge
     grestore
 } for
@@ -77,8 +77,8 @@ spink 11 spfont (hatching to a value procedure) 24 300 splabel
 % A sphere lit from the upper left: the value rises away from the light,
 % and the cast shadow on the ground is a flat value.
 spchar
-/spsx 110 def /spsy 176 def /spsr 48 def
-newpath 120 104 moveto 196 98 lineto 198 118 lineto 150 124 lineto closepath
+/spsx 106 def /spsy 178 def /spsr 44 def
+newpath 112 114 moveto 190 108 lineto 192 128 lineto 140 136 lineto closepath
 << /Value 0.8 /Angle 20 /Layers 3 /Medium /pencil /Grade 0.7 /Seed 3 >> dhhatch
 newpath spsx spsy spsr 0 360 arc closepath
 << /Value {
@@ -103,7 +103,7 @@ gsave
     newpath 266 180 moveto 160 -9 rlineto -160 -9 rlineto 160 -9 rlineto -160 -9 rlineto 160 -9 rlineto
     << /Value 0.82 /Width 16 /Touch 0.7 /Under [0.15 0.14 0.14] /Seed 2 >> dhsmudge
 grestore
-newpath 304 206 moveto 330 198 360 204 392 194 curveto << /Width 11 /Seed 4 >> dhlift
+newpath 304 196 moveto 330 188 360 194 392 184 curveto << /Width 10 /Seed 4 >> dhlift
 newpath 296 184 moveto 400 178 lineto << /Eraser /hard /Seed 8 >> dhlift
 
 % A layout sketch of a jug: construction lines first, then a few firm
@@ -123,7 +123,7 @@ newpath 626 230 moveto 674 226 674 160 636 156 curveto << /Medium /vine /Grade 0
 % --- media ---------------------------------------------------------------
 % Drawn last, after everything else on the page: vine charcoal's fallout
 % goes through artkit's `scatter`, and in Ghostscript every call after a
-% first `scatter` runs about twice as slowly (issue filed from #241).
+% first `scatter` runs about twice as slowly (#311).
 spink 11 spfont (media) 24 500 splabel
 9 spfont
 [ /vine /compressed /pencil ] {

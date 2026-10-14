@@ -316,6 +316,40 @@ newpath 40 40 moveto 200 80 lineto << /Touch 0.7 >> dycrayon
   knuckle). `examples/drycrayon_specimen.ps` and
   `examples/drycrayon_motion_demo.ps` show everything.
 
+## Charcoal (`lib/drycharcoal.ps`, on drykit)
+
+```
+(lib/artkit.ps) run (lib/paintkit.ps) run (lib/drykit.ps) run
+(lib/hatchkit.ps) run (lib/drycharcoal.ps) run
+<< /Surface /drawing /Relief 0.35 >> dksurface   % less mottle suits charcoal
+0.11 0.10 0.10 setrgbcolor                        % the pigment is the current colour
+```
+
+- `opts dhstroke` — the current path in `/Medium /vine` (grey, dusty),
+  `/compressed` (dark, dense) or `/pencil` (sharp; hard grades break into
+  dots). `/Grade` 0 (hard) to 1 (soft). Any other `dkstroke` key overrides
+  the preset.
+- `opts dhhatch` — hatches the current path's region to `/Value` (0..1, or
+  `{x y -> value}`): up to `/Layers` crossing layers of hand strokes, all in
+  one `dkbatch` so crossings stay dark. It clips to the region and cannot run
+  inside a `dkbatch`. Hatch a region's layers in **one** call: two calls are
+  two batches, and the second one's faint level greys the first's crossings.
+- `opts dhsmudge` — the path is a stump's track: a wide, soft stroke that
+  fills the tooth, leaving `/Value` between paper and the current colour.
+  drykit cannot read the page, so give `/Under` (the tone beneath) when it
+  is not paper. Over hatching, a moderate `/Touch` lets the hatch show.
+- `opts dhlift` — an eraser's track: `/Eraser /kneaded` (grey, soft, never
+  back to paper) or `/hard` (a narrow, crisp line). `/Under` defaults to the
+  current colour.
+- `opts dhsketch` — faint construction lines, laid `/Passes` times, each
+  shifted by up to `/Shift`; draw the drawing over them.
+- None of them draws from your `rand` stream. **Cost:** hatching costs about
+  0.07 ms per square point per layer in release pscat at 2x (a 120 x 120 pt
+  square is 1.3 s at one layer, 4 s at four), so keep hatched areas modest.
+  In Ghostscript, any `scatter` (vine charcoal's fallout) makes everything
+  after it slower, so draw vine strokes late.
+  `examples/drycharcoal_specimen.ps` shows all of it.
+
 ## Style packs (`lib/styles/`, load after artkit)
 
 Four motif libraries, one per aesthetic — each registers three
