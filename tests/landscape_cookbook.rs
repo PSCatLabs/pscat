@@ -25,6 +25,15 @@ const DOC: &str = "docs/guides/landscape-cookbook.md";
 const THUMBS: &str = "docs/guides/landscape";
 const PAGE_W: u32 = 360;
 const PAGE_H: u32 = 240;
+/// Per-recipe CPU budget (thread CPU time, best of 3, as AGENTS.md asks). A
+/// guard, not a benchmark: the slowest recipes measure about 0.72 s (forest)
+/// and 0.67 s (evergreens) under `--profile ci` locally, and the GitHub
+/// runner is about 3x slower than the dev machine, so the old 2 s cap left
+/// no headroom there (the same failure the mathkit specimen had, issues
+/// #386 and #387). 5 s leaves about 2.5x over the runner's time, so a
+/// regression of about 2.5x on the runner (7x locally) fails it. The 2 s CI
+/// cap in DRYMEDIA 6.2 is for `tests/drykit*.rs`, not for these recipes.
+const RECIPE_CPU_BUDGET: Duration = Duration::from_secs(5);
 /// Every recipe the cookbook promises, so deleting one is a failure.
 const EXPECTED: [&str; 11] = [
     "sky",
@@ -95,43 +104,38 @@ fn every_recipe_renders_clean_and_inside_its_budget() {
     for r in &all {
         // Each snippet is checked as pscat's own `--lint` would: a blank
         // page, an unbalanced gsave and a stack leak are all findings.
-        within_cpu_budget(
-            &format!("recipe {}", r.name),
-            Duration::from_secs(2),
-            3,
-            || {
-                let it = run_recipe(r);
-                let findings = it.lint(true);
-                assert!(
-                    findings.is_empty(),
-                    "recipe {}: lint: {:?}",
-                    r.name,
-                    findings
-                        .iter()
-                        .map(|f| format!("{}: {}", f.check, f.message))
-                        .collect::<Vec<_>>()
-                );
-                assert!(
-                    it.operand_stack().is_empty(),
-                    "recipe {} leaves the operand stack dirty",
-                    r.name
-                );
-                // A picture, not a blank page or one flat fill.
-                let distinct: HashSet<u32> = it
-                    .gfx()
-                    .pixmap
-                    .pixels()
+        within_cpu_budget(&format!("recipe {}", r.name), RECIPE_CPU_BUDGET, 3, || {
+            let it = run_recipe(r);
+            let findings = it.lint(true);
+            assert!(
+                findings.is_empty(),
+                "recipe {}: lint: {:?}",
+                r.name,
+                findings
                     .iter()
-                    .map(|p| u32::from_le_bytes([p.red(), p.green(), p.blue(), p.alpha()]))
-                    .collect();
-                assert!(
-                    distinct.len() > 200,
-                    "recipe {} draws only {} distinct colours",
-                    r.name,
-                    distinct.len()
-                );
-            },
-        );
+                    .map(|f| format!("{}: {}", f.check, f.message))
+                    .collect::<Vec<_>>()
+            );
+            assert!(
+                it.operand_stack().is_empty(),
+                "recipe {} leaves the operand stack dirty",
+                r.name
+            );
+            // A picture, not a blank page or one flat fill.
+            let distinct: HashSet<u32> = it
+                .gfx()
+                .pixmap
+                .pixels()
+                .iter()
+                .map(|p| u32::from_le_bytes([p.red(), p.green(), p.blue(), p.alpha()]))
+                .collect();
+            assert!(
+                distinct.len() > 200,
+                "recipe {} draws only {} distinct colours",
+                r.name,
+                distinct.len()
+            );
+        });
     }
 }
 
