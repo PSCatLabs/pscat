@@ -164,7 +164,12 @@ skeletons with TeX's box model. The subset covers:
   inside `\text{}`, `\mathrm{}` and `\operatorname{}` it is a raised text
   asterisk (strokeglyphs' `/asterisk`), as TeX sets it in text;
 - matrices and `cases`, accents and `\boxed`;
-- Greek and operator names.
+- Greek and operator names;
+- `\overbrace{...}^{label}` and `\underbrace{...}_{label}` with a grown
+  brace, `\overset`, `\underset`, `\stackrel` and `\substack` limits;
+- `\displaystyle`, `\textstyle` and `\scriptstyle` mid-formula;
+- `\not` before a relation (`\not=` is ≠, `\not\in` is ∉, anything else
+  gets a slash), `\bmod` and `\pmod{n}`.
 
 Anything outside the subset fails with an error that names it. The
 layout is written with a lecturer's irregularity: sizes and gaps vary,
@@ -172,12 +177,17 @@ scripts sit a little high or low, fraction bars overshoot, and the
 baseline slopes and drifts (`/Irregular`, where 0 is clean TeX).
 - `mkpath` appends a formula's path and `mkmetrics` measures it.
 - `mkalign` writes a derivation aligned on `=`. It returns a record per
-  line, which `mkframe` and `mkunderline` follow along its slope.
+  line, which `mkframe` and `mkunderline` follow along its slope. With
+  several `&` on a line it sets TeX align's columns (right, left, right,
+  left ...), each pair `/ColumnGap` (in multiples of `/Size`, default 2)
+  after the last.
 - `mkarrow` points a side note at a term.
 
 Every TeX backslash is written twice in a PostScript string.
 `examples/mathkit_specimen.ps` is the specimen: the fixed test set, from
 the quadratic formula to Maxwell's equations, and a derivation in chalk.
+`examples/mathkit_structures.ps` shows the structures issue #340 added
+(`docs/drymedia/mathkit_structures.png`).
 The gallery piece `gallery/chalkboard_lecture.ps` fills a
 whole board with it: Euler's formula derived across three drychalk
 panels.
