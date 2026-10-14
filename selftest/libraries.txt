@@ -21,3 +21,4 @@ lib/strokeglyphs.ps
 lib/drycrayon.ps
 lib/drycharcoal.ps
 lib/mathkit.ps
+lib/typewriter.ps
