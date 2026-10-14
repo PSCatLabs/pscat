@@ -454,7 +454,7 @@ calls (two levels, the landing as a `/Touch` and `/Pressure` profile);
 | ghost-text proxy (MODE 6, one level) | 1242 | 0.43M | 11.5–12.9s | 6.0–6.6s |
 | **board core + ghost** | | | **31.2–32.8s** | **16.1–16.9s** |
 | portrait proxy (`/ENGINE true`) | 35 | 1.76M | 39.8–41.9s | 27.4–27.9s |
-| `examples/drykit_specimen.ps` | | | 9.0–9.4s | 3.6–4.2s |
+| `examples/drykit_specimen.ps` (trimmed to fit) | | | 7.5s | 3.5s |
 
 The portrait and the specimen are inside 6.2's budget in both
 interpreters. The board core plus a one-level ghost pass is inside it in

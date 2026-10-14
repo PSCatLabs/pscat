@@ -174,7 +174,7 @@ The second half of #234. It adds two public procedures to `lib/drykit.ps`:
 
 | Piece | pscat | gs | Budget | Status |
 |---|---|---|---|---|
-| Specimen | 9.0–9.4s | 3.6–4.2s | 10s | inside |
+| Specimen, at 2x after trimming its layout (it was 11s under load) | 7.5s | 3.5s | 10s | inside |
 | Portrait proxy, through one `dkbatch` | 40–42s | 27–28s | 60s | inside |
 | Board core + one-level ghost pass | 31.2–32.8s | 16.1–16.9s | 30s | gs inside, pscat ~7% over |
 
@@ -182,7 +182,7 @@ The board overrun is filed as #283, with a cost breakdown. The main lever
 is a reach band cut per orientation: beside a straight segment the knuckle
 needs only its short axis.
 
-**Tests** (`tests/drykit.rs`, 17 total; about 15s for the file):
+**Tests** (`tests/drykit.rs`, 18 total; 12–19s for the file, depending on load):
 - **Test 1**, per surface.
 - **Test 3, extended to `dkstroke`.** It covers `/Streak` 4, `/Tilt` 90,
   `/Wear` 1, `/Pressure` above 1, lanes with dropout, a banded touch
@@ -200,8 +200,15 @@ needs only its short axis.
 - **Test 6**, gs block agreement: 0.43 against 18.5 for another seed.
 - **Test 7.** All 18 `dkstroke` keys are live, and the advertised and
   tested sets are equal.
-- **Test 8.** 100 strokes render in about 0.6s alone and under 2s under
-  load.
+- **Test 8.** 100 strokes at one level render in 0.56s with the file in
+  parallel. At two levels it was 1.2s, too close to the 2s bar for a slow
+  CI runner.
+- **A curvy run at `/Streak 4` under a small budget.** Chunking estimates
+  cells before thinning grows the reach by the chord deviation, so a curvy
+  run's catch can exceed the estimate. Measured: it still fits at
+  `dkbudget` 800. The gap is noted in #283, together with a second one: a
+  budget error raised mid-render leaves that level's `gsave` open and the
+  earlier levels drawn.
 
 New self-tests cover `dkstroke`'s guards, the missing-surface error, no
 caller draws with every random feature on, and `dkbatch`'s guards.

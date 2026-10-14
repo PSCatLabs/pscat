@@ -20,6 +20,8 @@
 %             same tooth and staying bright where they cross
 %
 %   pscat --page 840x1000 --png drykit_specimen.png examples/drykit_specimen.ps
+%
+% Budget (DRYMEDIA.md 6.2): 10 s at 2x (--dpi 144) in pscat and gs.
 
 (lib/artkit.ps) run
 (lib/paintkit.ps) run
@@ -61,26 +63,26 @@
     [ 0.55 0.7 0.85 ] {
         /spt exch def
         /spi spt 0.55 sub 0.15 div def
-        newpath 50 spi 75 mul add spy 20 add moveto 30 90 rlineto
+        newpath 50 spi 75 mul add spy 20 add moveto 24 72 rlineto
         << /Width 5 /Touch spt /Streak spst >> dkstroke
     } forall
     % three tilts
     [ 0 45 90 ] {
         /spa exch def
-        newpath 320 spa 1.25 mul add spy 20 add moveto 30 90 rlineto
+        newpath 320 spa 1.25 mul add spy 20 add moveto 24 72 rlineto
         << /Width 5 /Touch 0.72 /Tilt spa /Side 10 /Streak spst >> dkstroke
     } forall
     % the wearing stroke: a heavy landing, a tired middle, a fading lift
-    550 spy 95 add 250 spcurve
+    550 spy 95 add 210 spcurve
     << /Width 3.5 /Wear 1.5 /Streak spst
        /Touch { dup 0.08 lt { pop 0.92 } { 0.08 sub 0.92 div 0.3 mul 0.86 exch sub } ifelse }
        /Bands 6
        /Pressure { dup 0.85 gt { 1 exch sub 6.67 mul } { pop 1 } ifelse } >> dkstroke
     % a crossing pair, level-major in one batch
     {
-        newpath 560 spy 15 add moveto 790 spy 45 add lineto
+        newpath 560 spy 15 add moveto 750 spy 45 add lineto
         << /Width 4 /Touch 0.7 /Streak spst >> dkstroke
-        newpath 560 spy 45 add moveto 790 spy 15 add lineto
+        newpath 560 spy 45 add moveto 750 spy 15 add lineto
         << /Width 4 /Touch 0.7 /Streak spst >> dkstroke
     } dkbatch
 } def

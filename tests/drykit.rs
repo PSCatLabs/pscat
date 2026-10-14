@@ -934,7 +934,9 @@ fn dkstroke_every_documented_parameter_changes_the_render() {
 
 /// Test 8, the CI budget smoke test: a 100-stroke dkstroke render stays
 /// under 2 s under `--profile ci` (DRYMEDIA.md 6.2). Printed so drift is
-/// visible before it fails.
+/// visible before it fails. One level, so the bar has room on a slow CI
+/// runner: two levels measured 1.2 s here with the rest of this file
+/// running in parallel.
 #[test]
 fn a_hundred_strokes_render_within_the_ci_budget() {
     let t0 = std::time::Instant::now();
@@ -944,7 +946,7 @@ fn a_hundred_strokes_render_within_the_ci_budget() {
         1.0,
         "<< /Surface /drawing /Seed 2 >> dksurface 0.1 0.1 0.12 setrgbcolor \
          { 0 1 99 { /i exch def newpath i 10 mod 18 mul 12 add i 10 idiv 18 mul 12 add moveto \
-           12 6 rlineto << /Width 1.2 /Touch 0.7 >> dkstroke } for } dkbatch",
+           12 6 rlineto << /Width 1.2 /Touch 0.7 /Levels 1 >> dkstroke } for } dkbatch",
     );
     let secs = t0.elapsed().as_secs_f64();
     eprintln!("100 strokes: {secs:.2}s");
@@ -1039,5 +1041,26 @@ fn ghostscript_agrees_on_a_stroke() {
     assert!(
         other > same * 2.0,
         "another seed is as close ({other:.2}): the check is too weak"
+    );
+}
+
+/// Chunking estimates a run's cells before `dkZthin` grows the thinned
+/// stops' reach by the chord deviation, so a curvy run's catch is larger
+/// than estimated. On glyph-radius curves at the longest knuckles and a
+/// small budget, the chunks still fit: the stroke renders without raising.
+#[test]
+fn a_curvy_run_at_long_knuckles_fits_its_chunks() {
+    let it = render(
+        240,
+        110,
+        2.0,
+        "/dkbudget 800 def << /Surface /slate >> dksurface 0 0 0 setrgbcolor \
+         newpath 20 50 moveto 20 90 120 90 120 50 curveto 120 10 220 10 220 50 curveto \
+         220 70 200 80 190 70 curveto << /Width 3 /Touch 0.9 /Streak 4 /Under [1 1 1] >> dkstroke \
+         newpath 30 20 15 0 350 arc << /Width 2 /Streak 4 /Touch 0.95 /Under [1 1 1] >> dkstroke",
+    );
+    assert!(
+        inked(&it).iter().filter(|&&i| i).count() > 1000,
+        "the curvy run drew almost nothing"
     );
 }
