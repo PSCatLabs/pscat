@@ -12,6 +12,14 @@
 % nothing; the caller strokes it with a plain pen, or hands it to a
 % medium (drykit's `dkstroke`, #234).
 %
+% Design intent (docs/guides/handwriting.md#design-intent): these are
+% the same loose, slightly sloppy human hand as handscript's, not a
+% geometric one. A glyph is a bug only when it reads as a different
+% character. That is why the 4 here is an override (#351, it read as a
+% lightning bolt); the 7 is handscript's own (#298, it read as ")").
+% Make the smallest fix that removes a misreading, keep the curl and
+% wobble, and don't file "looks a little odd" tidy-ups (#416).
+%
 %   (x = 2y + 1) 72 600 << /Size 40 /Seed 7 >> sgpath
 %   1 setlinecap 1 setlinejoin 2 setlinewidth stroke
 %

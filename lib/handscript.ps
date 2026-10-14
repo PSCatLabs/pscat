@@ -10,6 +10,13 @@
 % it can be embedded wholesale in other applications; it runs
 % unchanged in Ghostscript.
 %
+% Design intent (docs/guides/handwriting.md#design-intent): the hand is
+% meant to look human-written, legible but loose, uneven and a little
+% sloppy. A glyph is a bug only when it reads as a different character
+% (the 4 as a lightning bolt, #351; the 7 as ")", #298). Fix that with
+% the smallest change that removes the misreading and keep the curl and
+% wobble. Don't tidy a glyph just because it looks a little odd (#416).
+%
 % API — one options dict in, all keys optional except /Text:
 %
 %   << /Text (the note to write)   % lowercase; the font has no caps
