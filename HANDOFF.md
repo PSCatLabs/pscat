@@ -558,7 +558,7 @@ renders eight examples in both and compares block-downsampled output).
   not error, wherever the PLRM allows latitude — but record every
   such choice in the module docs and NOTES.md.
 - Commit per coherent chunk with stage-prefixed messages; update
-  README/ROADMAP and your notes fragment in the same or a closing commit.
+  the matching `docs/guides/` page and your notes fragment in the same or a closing commit.
 - **Notes go in `notes/<issue>-<slug>.md`, one file per issue, not in
   `NOTES.md`** (#273): concurrent PRs each prepending to `NOTES.md`
   conflicted constantly. `NOTES.md` is frozen history up to 2026-10-13;

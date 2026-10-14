@@ -103,14 +103,20 @@ predates it.
   `} def`: unbound, gs looks up every operator in it at run time and runs
   1.5 to 3 times slower (`notes/307-bind-library-procedures.md`,
   `notes/318-bind-drychalk.md`, `notes/326-bind-drycharcoal.md`). `tests/libbind.rs` enforces it.
-- Keep `README.md` accurate to *current* state, not aspirational state.
-  Update it as capabilities land, not just at the end.
+- Keep the docs accurate to *current* state, not aspirational state.
+  Update them as capabilities land, not just at the end. User-facing
+  how-to goes in the matching page of `docs/guides/`; `README.md` is a
+  short front door and gets a line only for a new headline capability.
 
 ## Where things live
 
 - `ARCHITECTURE.md` — the design writeup (object model, execution model,
   rendering-crate leanings, deliberate deferrals). Read before changing
   anything structural.
+- `docs/guides/` — user guides, one per library or topic (the old README's
+  long tour); `docs/archive/` — history kept as written, including the
+  stage log. Check links with `python3 scripts/check_md_links.py` (CI runs it
+  as the `links` workflow); it skips `docs/archive/` and `notes/`.
 - `NOTES.md` — per-stage summaries, newest first, frozen as of 2026-10-13.
 - `notes/` — newer entries, one file per issue (`notes/<issue>-<slug>.md`,
   format in `notes/README.md`). Write new notes here, not in `NOTES.md`, so
@@ -142,7 +148,7 @@ If you're an agent that just needs to *run* PostScript — render a
 file, debug one, generate a handwritten note — read
 `.claude/skills/pscat/SKILL.md`: it has the command recipes and
 pitfalls in one page, regardless of which agent runtime you are.
-MCP-wired agents can use `pscat-mcp` instead (README, "For agents").
+MCP-wired agents can use `pscat-mcp` instead (`docs/guides/agents.md`).
 
 <!-- sdlcify:managed:start -->
 ## SDLC

@@ -3,7 +3,7 @@
 //! An MCP server over stdio (newline-delimited JSON-RPC 2.0) exposing
 //! three tools: `render_postscript`, `handwrite`, `eval_postscript`.
 //! Works with any MCP client — Claude Code, Codex, OpenClaw, Hermes;
-//! registration one-liners are in the README's "For agents" section.
+//! registration one-liners are in `docs/guides/agents.md`.
 //!
 //! Design choice: the server **shells out to the pscat CLI** (and
 //! `scripts/handwrite.sh`) rather than linking the interpreter.

@@ -522,14 +522,14 @@ fn changing_face_or_phrase_recomputes_or_fails_clearly() {
 
 #[test]
 fn documented_examples_run_and_capabilities_lists_the_api() {
-    let src = std::fs::read_to_string("README.md").expect("README");
+    let src = std::fs::read_to_string("docs/guides/lettering.md").expect("lettering guide");
     let start = src
         .find("(lib/headline.ps) run\n[ 40 40 860 400 ]")
         .expect("snippet");
     let snippet = &src[start..src[start..].find("```").map(|e| start + e).unwrap()];
     let mut it = with_lib(900, 900);
     it.run_str(snippet)
-        .unwrap_or_else(|e| panic!("README snippet failed: {}", it.error_report(&e)));
+        .unwrap_or_else(|e| panic!("lettering guide snippet failed: {}", it.error_report(&e)));
     let caps = pscat::capabilities::payload_json().to_string();
     for name in ["hllayout", "hldraw", "hlrunink", "hlcharink", "hlink"] {
         assert!(
