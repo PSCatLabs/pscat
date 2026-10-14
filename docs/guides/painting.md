@@ -593,7 +593,7 @@ every snippet, so they keep rendering.
 *Evening Stream* (`gallery/evening_stream.ps`) is the second
 landscape, painted with the multi-colour loads and the canvas surface on one shared `pkcanvas`: a
 sunset sky from a broad brush loaded with two neighbouring sky colours,
-clouds scrubbed in with `pkscumblein` and lit from below, a backlit wood
+clouds scrubbed in with `pkscumblein` and lit from below with its `/Light 270` (issue #384), a backlit wood
 whose reflection is pulled down whole by one directional `pkwet` (it
 paints only in loaded colours, which `pkwet` grades), autumn trees on a
 loaded `pkdab` with warm highlight and cool shadow hues, evergreens on a
