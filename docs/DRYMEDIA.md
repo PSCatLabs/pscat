@@ -484,13 +484,21 @@ calls (two levels, the landing as a `/Touch` and `/Pressure` profile);
 | **board core + ghost** | | | **31.2–32.8s** | **16.1–16.9s** |
 | portrait proxy (`/ENGINE true`) | 35 | 1.76M | 39.8–41.9s | 27.4–27.9s |
 | `examples/drykit_specimen.ps` (trimmed to fit) | | | 7.5s | 3.5s |
+| board core, after #307's `bind` (5214389, best of 3) | 2484 | 0.83M | 15.9–16.1s | 4.4s |
+| ghost-text proxy, after `bind` | 1242 | 0.43M | 9.3s | 2.5s |
+| **board core + ghost, after `bind`** | | | **25.2s** | **6.9s** |
 
 The portrait and the specimen are inside 6.2's budget in both
-interpreters. The board core plus a one-level ghost pass is inside it in
-gs and about 7% over in pscat, before board dressing: the engine adds the
-walk, the per-stop resolution and the ink to D1's bare catches, and its
-catches cost about 13 µs per cell in pscat. #283 has the breakdown and the
-levers (chiefly a reach band cut per orientation). #238 is the real piece.
+interpreters. At D2 the board core plus a one-level ghost pass was inside
+it in gs and about 7% over in pscat, before board dressing: the engine
+adds the walk, the per-stop resolution and the ink to D1's bare catches,
+and its catches cost about 13 µs per cell in pscat. #307 bound the
+libraries, which brought pscat to 25.2s, inside the budget with 4.8s left
+for board dressing (D1 had left about 8s). See
+`notes/283-drykit-perf-remeasure.md`. #324 carries the drykit levers
+(chiefly a reach band cut per orientation), and #323 carries pscat's
+interpreter cost, which is now most of the gap to gs. #238 is the real
+piece.
 
 Two things scale beyond that:
 
