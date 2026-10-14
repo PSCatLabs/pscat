@@ -8894,6 +8894,13 @@ systemdict /setalpha known /pwhasalpha exch def
 %   the walk ask it which side the paint is on. So a hole, wound either way,
 %   is brushed out into the hole, and a mirrored space (`1 -1 scale`) needs
 %   nothing special.
+% * With two or more closed subpaths (a cloud bank of overlapping blobs) an
+%   edge can lie inside the others' mass. A pair of points either side of each
+%   stroke's anchor asks the same region, and when both are in the mass the
+%   stroke is skipped: the edge is hidden, so brushing it would nick the
+%   middle of the mass (issue #381). Its random draws are still taken, so the
+%   strokes that remain are the ones the edge would have had. The subpath's
+%   side is voted on wherever its edge shows. One closed subpath never asks.
 % * An open subpath is an edge with no mass attached (the visible crest of a
 %   bank, the far edge of a meadow): its out side is the one that faces
 %   /Outward (default 90, up), whichever way the guide was drawn.
@@ -9025,6 +9032,47 @@ systemdict /setalpha known /pwhasalpha exch def
 %   /zzok true def
 %   { pop pop } { zzreg scin { /zzok false def } if } { 6 { pop } repeat } { }
 %   pathforall newpath zzok (a 100 x 0.1 sliver) mustbe
+%   % Overlapping closed blobs (issue #381): an edge inside the union is
+%   % hidden and gets no stroke, so every stroke end of the union's outline
+%   % lies outside the union. Two squares that cross; and a small circle
+%   % mostly swallowed by a big one, whose visible arc must still brush out.
+%   /zzfblobs {   % {blobs} -> bool : every stroke end lies outside the union
+%     exec scpath /zzreg exch def
+%     << /Overlap 0 /Lean 0 /Wander 0 /LengthJitter 0 /Length 5 >> pkfeather
+%     /zzok true def
+%     { pop pop } { zzreg scin { /zzok false def } if } { 6 { pop } repeat } { }
+%     pathforall newpath zzok } def
+%   { newpath 0 0 moveto 40 0 lineto 40 40 lineto 0 40 lineto closepath
+%     20 10 moveto 60 10 lineto 60 50 lineto 20 50 lineto closepath } zzfblobs
+%   (two overlapping squares: no stroke on an edge inside the other) mustbe
+%   { newpath 50 0 moveto 0 0 50 0 360 arc closepath
+%     57 0 moveto 45 0 12 0 360 arc closepath } zzfblobs
+%   (a blob mostly swallowed by another still brushes its visible arc out) mustbe
+%   % ... down to a bar inside the circle with only its end sticking out: the
+%   % subpath's own seven first probes all fall on hidden edge (it starts
+%   % where the end falls between them), so it needs the wider search.
+%   { newpath 50 0 moveto 0 0 50 0 360 arc closepath
+%     3.7 -5 moveto 51 -5 lineto 51 5 lineto 0 5 lineto 0 -5 lineto closepath } zzfblobs
+%   (a bar all but swallowed brushes its visible end out) mustbe
+%   { newpath 50 0 moveto 0 0 50 0 360 arc closepath
+%     57 0 moveto 45 0 12 0 360 arc closepath
+%     30 0 moveto 10 0 20 0 360 arc closepath } zzfblobs
+%   (three overlapping circles) mustbe
+%   gsave 1 -1 scale
+%   { newpath 0 0 moveto 40 0 lineto 40 40 lineto 0 40 lineto closepath
+%     20 10 moveto 60 10 lineto 60 50 lineto 20 50 lineto closepath } zzfblobs
+%   grestore (two overlapping squares under 1 -1 scale) mustbe
+%   % Hidden strokes still draw their four numbers, so the visible strokes
+%   % are the ones the blobs would have had; and the hidden edge is simply
+%   % not painted: fewer strokes than the two outlines alone would give.
+%   newpath 0 0 moveto 40 0 lineto 40 40 lineto 0 40 lineto closepath
+%   20 10 moveto 60 10 lineto 60 50 lineto 20 50 lineto closepath
+%   << /Wander 0 >> pkfeather
+%   /zzn 0 def { pop pop /zzn zzn 1 add def } { pop pop } { 6 { pop } repeat } { } pathforall
+%   newpath
+%   newpath 0 0 moveto 40 0 lineto 40 40 lineto 0 40 lineto closepath << /Wander 0 >> pkfeather
+%   /zzm 0 def { pop pop /zzm zzm 1 add def } { pop pop } { 6 { pop } repeat } { } pathforall
+%   newpath zzn zzm 2 mul lt (overlapping squares: strokes only on the visible edge) mustbe
 %   % An open crest drawn right to left still brushes up (/Outward 90).
 %   newpath 100 0 moveto 0 0 lineto
 %   << /Overlap 0 /Lean 0 /Wander 0 /LengthJitter 0 /Length 5 >> pkfeather
@@ -9105,7 +9153,7 @@ systemdict /setalpha known /pwhasalpha exch def
 } bind def
 
 % @kind: Procedure
-% @summary: A feathering brush motion across a mass's edge: the current path is read as the edge of a filled mass and replaced with short strokes that cross it along the local normal, so a ruled vector edge can be brushed instead. /Toward /out starts each stroke inside the mass and pulls it out (paint it in the mass's colour); /in starts outside and pulls in (paint it in the colour behind); /both alternates. A subpath closed with closepath is a mass edge, and the mass itself (the whole path filled nonzero, as fill would) decides which side is out, holes included; an open subpath is a bare edge whose out side faces /Outward. Builds a path and paints nothing, so it composes with any preset: `opts pkfeather << >> pkbroad`. pkbrushedge does both directions and both colours in one call. Deterministic under the caller's own srand.
+% @summary: A feathering brush motion across a mass's edge: the current path is read as the edge of a filled mass and replaced with short strokes that cross it along the local normal, so a ruled vector edge can be brushed instead. /Toward /out starts each stroke inside the mass and pulls it out (paint it in the mass's colour); /in starts outside and pulls in (paint it in the colour behind); /both alternates. A subpath closed with closepath is a mass edge, and the mass itself (the whole path filled nonzero, as fill would) decides which side is out, holes included, and with two or more closed subpaths an edge lying inside the others' mass (overlapping blobs) gets no stroke; an open subpath is a bare edge whose out side faces /Outward. Builds a path and paints nothing, so it composes with any preset: `opts pkfeather << >> pkbroad`. pkbrushedge does both directions and both colours in one call. Deterministic under the caller's own srand.
 % @example: newpath 0 120 moveto 120 150 240 110 360 135 curveto << /Length 12 /Spacing 3 /Slant 15 >> pkfeather << /Width 2 /Charge 0.8 /Depletion 0.8 >> pkbroad
 % @param: /Toward [name] /out, /in or /both: which way each stroke is pulled across the edge; /out starts in the mass and ends outside it, /in the reverse, /both alternates stroke by stroke (default /out)
 % @param: /Length [points] Mean stroke length in points; must be > 0 (default 8)
@@ -9175,6 +9223,13 @@ systemdict /setalpha known /pwhasalpha exch def
     /mfanyclosed false def
     mfclosed { { /mfanyclosed true def } if } forall
     mfanyclosed { scpath /mfreg exch def } if
+    % Two or more closed subpaths may overlap (a cloud bank built from
+    % several blobs): an edge lying inside the others' mass is hidden, and
+    % its strokes are skipped (issue #381). One closed subpath is its own
+    % whole mass, so it never pays for the test.
+    /mfncl 0 def
+    mfclosed { { /mfncl mfncl 1 add def } if } forall
+    /mfmulti mfncl 2 ge def
 
     % The edge is walked at a sixth of the spacing and every stroke sits on
     % one of those samples, as in pkpull: a stroke can slide along the edge
@@ -9204,16 +9259,21 @@ systemdict /setalpha known /pwhasalpha exch def
         /mfb mfstarts mfs get def
         /mfe mfs mfstarts length 1 sub lt { mfstarts mfs 1 add get 1 sub } { mhn 1 sub } ifelse def
         mfs mfclosed length lt { mfclosed mfs get } { false } ifelse {
-            % Seven probes spread along the subpath, each a pair of points a
-            % small step to either side of the walk; the majority says which
+            % Seven probes (more with overlapping blobs, below) spread along the
+            % subpath, each a pair of points a small step to either side of the walk; the majority says which
             % side the paint is on. A probe only counts when exactly one of
             % its points is in the mass. Otherwise the step jumped right
             % across a thin mass (or landed on a corner), so it is halved
             % and tried again: the answer depends on the mass, never on the
             % stroke spacing (Codex review, round 1).
             /mfleft 0 def /mfvotes 0 def
-            0 1 6 {
-                mfe mfb sub 7 div exch 0.5 add mul round cvi mfb add
+            % With overlapping blobs much of the subpath can be hidden inside
+            % the others, so it is probed at more places (until seven count);
+            % a blob all but swallowed still gets a vote from its visible arc.
+            /mfnp mfmulti { 28 } { 7 } ifelse def
+            0 1 mfnp 1 sub {
+                mfvotes 7 ge { pop exit } if
+                mfe mfb sub mfnp div exch 0.5 add mul round cvi mfb add
                 mhstops exch get /mfst exch def
                 mfst 5 get 3 ne {
                     /mfnx mfst 2 get 90 add cos def
@@ -9224,11 +9284,16 @@ systemdict /setalpha known /pwhasalpha exch def
                         mfinmass /mfpl exch def
                         mfst 0 get mfnx mfeps mul sub mfst 1 get mfny mfeps mul sub
                         mfinmass
-                        mfpl ne {
+                        dup mfpl ne {
+                            pop
                             /mfvotes mfvotes 1 add def
                             mfpl { /mfleft mfleft 1 add def } if
                             exit
                         } if
+                        % Both points in the mass: with overlapping blobs this
+                        % stretch of edge is hidden inside the others, and no
+                        % smaller step will find the mass's edge there.
+                        mfpl and mfmulti and { exit } if
                         /mfeps mfeps 0.5 mul def
                     } repeat
                 } if
@@ -9304,6 +9369,19 @@ systemdict /setalpha known /pwhasalpha exch def
                 mfj mfbase lt { /mfj mfbase def } if
                 mfj mfend gt { /mfj mfend def } if
                 mhstops mfj get /mfst exch def
+                % An edge hidden inside the other blobs is not brushed: both
+                % points of a pair just either side of the stroke's anchor
+                % are in the mass.
+                /mfhide false def
+                mfmulti mfisclosed and mfst 5 get 3 ne and {
+                    /mfhe mfspacing mfn div 0.5 mul def
+                    /mfhx mfst 2 get 90 add cos mfhe mul def
+                    /mfhy mfst 2 get 90 add sin mfhe mul def
+                    mfst 0 get mfhx add mfst 1 get mfhy add mfinmass
+                    mfst 0 get mfhx sub mfst 1 get mfhy sub mfinmass
+                    and /mfhide exch def
+                } if
+                mfhide not {
                 % A lone point has no edge direction: it is pulled along
                 % /Outward itself.
                 /mfnorm mfst 5 get 3 eq
@@ -9331,6 +9409,7 @@ systemdict /setalpha known /pwhasalpha exch def
                 } {
                     mfsx mfdx add mfsy mfdy add lineto
                 } ifelse
+                } if
             } if
             /mfk mfk 1 add def
         } if
@@ -9397,7 +9476,7 @@ systemdict /setalpha known /pwhasalpha exch def
 /pegrestore { grestore /pedepth pedepth 1 sub def } bind def
 
 % @kind: Procedure
-% @summary: Brushes the edge of a filled mass in one call: short strokes in the current colour pulled out across the current path's edge, then, with /Under, strokes in the backdrop colour cut back into the mass, so the two interlock and the ruled vector edge reads as painted. Fill the mass first; the path is the mass's outline (closed with closepath: holes and mirrored spaces work) or just the visible edge left open, whose out side is /Outward. Every pkfeather key is accepted and passed on (except /Toward, which this sets), and each pass is painted by /Brush. /Under takes what pkwet's /Under takes, plus a pigment name; a procedural /Under is asked once per inward stroke, at the stroke's start, so a graded sky or water cuts back in its own colour all along. The caller's path, colour and graphics state survive. Give it one non-overlapping outline per call: an edge hidden inside a union of overlapping blobs is brushed too. Deterministic under the caller's own srand.
+% @summary: Brushes the edge of a filled mass in one call: short strokes in the current colour pulled out across the current path's edge, then, with /Under, strokes in the backdrop colour cut back into the mass, so the two interlock and the ruled vector edge reads as painted. Fill the mass first; the path is the mass's outline (closed with closepath: holes and mirrored spaces work) or just the visible edge left open, whose out side is /Outward. Every pkfeather key is accepted and passed on (except /Toward, which this sets), and each pass is painted by /Brush. /Under takes what pkwet's /Under takes, plus a pigment name; a procedural /Under is asked once per inward stroke, at the stroke's start, so a graded sky or water cuts back in its own colour all along. The caller's path, colour and graphics state survive. A mass built from several overlapping closed blobs (a cloud bank, a bush of ellipses) can go in as one path: an edge lying inside the others is hidden, and is not brushed. Deterministic under the caller's own srand.
 % @example: newpath 0 120 moveto 120 150 240 110 360 135 curveto 360 0 lineto 0 0 lineto closepath gsave 0.18 0.30 0.12 setrgbcolor fill grestore 0.18 0.30 0.12 setrgbcolor << /Under [ 0.62 0.72 0.86 ] /Slant 10 >> pkbrushedge
 % @param: /Under [rgb array or name] the colour behind the mass, cut back into it by the inward strokes; an [r g b] array, a pigment name such as /titaniumwhite (see PigmentNames), or a procedure `x y -> r g b` (three numbers in 0..1, user space; a pure function, as pkwet's) asked at each inward stroke's start. Unset paints the outward strokes only (default unset)
 % @param: /Brush [proc] the brush both passes are painted with: a procedure that paints the current path in the current colour, normally a preset with its options, such as `{ << /Width 2 >> pkdry }` (default `{ << /Width 5 /Charge 0.8 /Depletion 0.9 /Edge 0.6 /Grain 10 >> pkbroad }`, a small flat brush that runs dry as it crosses, so each stroke breaks up at its far end)
