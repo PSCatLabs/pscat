@@ -330,8 +330,10 @@ start barrier so they genuinely overlap:
   #297 transit-window residual). It also counts the trials whose *first* attempt had no winner and
   those that needed a retry. 20 quiet trials rarely fail. For a real measurement run
   `STALE_TRIALS=1000` (or at least 300) while the machine is busy, e.g. ten `yes >/dev/null` hogs;
-- an empty lock dir under 10 s old reads `live`, one backdated past the grace window is reclaimed by
-  exactly one racer, and a garbage heartbeat on an old dir is reclaimed;
+- an empty lock dir under 10 s old reads `live`, one backdated past the grace window is taken by
+  exactly one racer, and a garbage heartbeat on an old dir is reclaimed. "Taken" is usually a
+  reclaim, but under load a late racer's first `mkdir` can land while the stealer has the dead dir
+  moved away, giving one `claimed (fresh)` winner;
 - a fresh heartbeat makes every racer `live`;
 - the ABA case: one racer delayed (a `sleep 1` injected into a *copy* of the script, just before its
   `mv`) past another's full reclaim-and-recreate, which must report `ABA detected, restored`;

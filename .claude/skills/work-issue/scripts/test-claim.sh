@@ -92,13 +92,16 @@ for t in $(seq 1 5); do
   [ "$(count live)" = "$RACERS" ] && ok=$((ok + 1)) || bad "young empty dir trial $t not all live"
 done
 echo "young empty lock dir:  $ok/5 trials all live"
-# ... and backdated past the grace window it is a dead claim -> exactly one reclaims it
-ok=0
+# ... and backdated past the grace window it is a dead claim -> exactly one racer takes it. Usually
+# a reclaim; under load a late racer's first mkdir can land in the instant the stealer has moved the
+# dead dir away (the stealer then loses its re-create): still exactly one winner, so it counts.
+ok=0; f3=0
 for t in $(seq 1 10); do
   rm -rf "$LOCKS"/work-issue-lock-103*; mkdir "$(lock 103)"; backdate "$(lock 103)"; race 103 $(many)
-  [ "$(count 'claimed')" = 1 ] && [ "$(count 'claimed (reclaimed')" = 1 ] && ok=$((ok + 1)) || bad "old empty dir trial $t: $(trace)"
+  f3=$((f3 + $(count 'claimed (fresh)')))
+  [ "$(count 'claimed')" = 1 ] && held 103 && ok=$((ok + 1)) || bad "old empty dir trial $t: $(trace)"
 done
-echo "old empty lock dir:    $ok/10 trials with exactly 1 reclaim"
+echo "old empty lock dir:    $ok/10 trials with exactly 1 winner ($f3 fresh-after-steal)"
 # garbage heartbeat content on an old dir behaves the same
 rm -rf "$LOCKS"/work-issue-lock-104*; mkdir "$(lock 104)"; echo junk > "$(lock 104)/heartbeat"; backdate "$(lock 104)"; race 104 "$CLAIM"
 [ "$(count 'claimed (reclaimed')" = 1 ] && echo "garbage heartbeat:     reclaimed" || bad "garbage heartbeat not reclaimed"
