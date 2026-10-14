@@ -283,11 +283,11 @@ fn every_example_tag_runs_clean() {
 /// CPU under `--profile ci` locally, and about 2.0 s on the GitHub runner
 /// (the main push run 38551816510 read 2.03, 2.01, 2.23 s against the old
 /// 2 s cap, issue #386). The render has not grown since mathkit landed;
-/// the runner is simply about 3x slower. DRYMEDIA 6.2's 2 s per-render cap
-/// is for `tests/drykit*.rs`; a specimen in `examples/` gets 10 s there.
-/// 5 s (the paintkit hang guards' size) leaves 2.5x over the runner and
-/// still catches a 7x regression (thread CPU time, best of 3, as AGENTS.md
-/// asks).
+/// the runner is simply about 3x slower. The 2 s CI cap in DRYMEDIA 6.2 is
+/// for `tests/drykit*.rs`; that table budgets a specimen at 10 s as a
+/// release render. 5 s (the paintkit hang guards' size) leaves 2.5x over
+/// the runner's time, so a regression of about 2.5x on the runner (7x
+/// locally) fails it (thread CPU time, best of 3, as AGENTS.md asks).
 #[test]
 fn the_specimen_renders_with_ink_and_a_clean_stack() {
     let src = std::fs::read("examples/mathkit_specimen.ps").expect("specimen present");

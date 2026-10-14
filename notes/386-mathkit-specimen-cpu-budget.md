@@ -23,12 +23,15 @@ runner is about 3x slower than the dev machine, and the 2 s cap was only ever 3x
 ## Change
 
 Budget 2 s -> 5 s (2.5x the observed runner time, 7.5x local; same size as the paintkit hang
-guards). DRYMEDIA 6.2's 2 s is for `tests/drykit*.rs`; an `examples/` specimen gets 10 s there.
+guards). A regression of about 2.5x on the runner (7x locally) now fails it. DRYMEDIA 6.2's 2 s CI
+cap is drykit's (`tests/drykit*.rs`); its table budgets an `examples/` specimen at 10 s as a release
+render, not as a CI test budget.
 
 ## Other budget tests
 
-`strokeglyphs.rs` and `strokepath.rs` have no CPU budgets. Local best-of-3 for the other absolute
+`strokeglyphs.rs` and `strokepath.rs` have no CPU budgets. Local best of 3 for the other absolute
 budgets: drychalk 0.155 s, drycharcoal 0.227, drycrayon 0.350, drykit 0.169, pktrowelplane 0.262,
-pigment 0.159 (budget 1 s), landscape sky 0.028, paintkit hang guards 0.005-0.012 s. The tightest,
-drycrayon, has about 5.7x headroom locally and 1.9x at the runner's 3x, so left alone.
-Baseline-relative budgets that would not need this tuning are tracked in #333.
+pigment 0.159 (budget 1 s), paintkit hang guards 0.005-0.012 s. Those have 5.7x or more local
+headroom (1.9x on a 3x runner or better), so they stay. The landscape cookbook's `evergreens`
+recipe is 0.670 s against 2 s, the same ratio the specimen had; it is outside mathkit/strokeglyphs
+and was filed separately. Baseline-relative budgets that would not need this tuning are tracked in #333.
