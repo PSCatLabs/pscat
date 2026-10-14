@@ -675,7 +675,7 @@
    "speed": 600,
    "alt": "Alpine Lake, snow-capped peaks reflected in a still lake under a criss-cross brushed sky, with evergreens in the foreground",
    "blurb": "A snow-capped range over a still lake, painted wet-on-wet from paintkit's brushes alone.",
-   "technique": "Painted back to front from paintkit's brushes, with no landscape helper. The sky is laid out with `pkcrisscross` and painted with `pkbroad`; spray clouds and mist are softened into the paint beneath by `pkwet`; snow and shadow planes come from `pktrowel`, clipped to each ridge; a far forest is tapped in with `pkdab`; evergreens are `pkfan`; trunks, grass and water lines are `pkliner`. The reflection replays the same self-seeded marks upside down, one single-colour part at a time, each pulled straight down with a directional `pkwet` and then grazed across."
+   "technique": "Painted back to front from paintkit's brushes, with no landscape helper. The sky is laid out with `pkcrisscross` and painted with `pkbroad`; spray clouds and mist are softened into the paint beneath by `pkwet`, and the far range wears banks of haze lifted both ways by a directional `pkwet`; snow comes from `pktrowel` and the shadow planes from `pktrowelplane`, both clipped to each ridge; a far forest is tapped in with `pkdab`; evergreens are `pkfan`; trunks, grass and water lines are `pkliner`. The reflection replays the same self-seeded marks upside down, one single-colour part at a time, each pulled straight down with a directional `pkwet` and then grazed across."
   },
   {
    "id": "chalkboard_lecture",
@@ -789,7 +789,7 @@
    "speed": 600,
    "alt": "Evening Stream, an autumn evening with a glowing sky, a stream tumbling over a small fall between dark banks, autumn trees and a cabin with a lit window",
    "blurb": "An autumn evening: a stream comes out of the sunset glow, over a little fall, past a cabin with its lamp lit.",
-   "technique": "Painted on one shared canvas (`pkcanvas`) with the newer paintkit tools and no landscape helper. A criss-cross sky comes from a broad brush loaded with two neighbouring sky colours; clouds are scumbled in tiny circles (`pkscumblein`) with a lit underside; a backlit wood is tapped in with `pktap` and a loaded `pkdab`, its reflection pulled down whole by one directional `pkwet`. Autumn trees take warm highlights and cool shadows, evergreens a fan loaded dark and lit with `/Light`, the rocks and cabin come from a palette knife, a `pkpull` fall and grass finish the bank, and `pkzigzag` light on the water is caught on the canvas weave. The stream's banks, its head, the far shore and the near banks' rims are brushed with `pkbrushedge`, so no big mass keeps a ruled vector edge."
+   "technique": "Painted on one shared canvas (`pkcanvas`) with the newer paintkit tools and no landscape helper. A criss-cross sky comes from a broad brush loaded with two neighbouring sky colours; clouds are scumbled in tiny circles (`pkscumblein`) and lit along their lumpy undersides by the same brush's `/Light`, as from the glow below; a backlit wood is tapped in with `pktap` and a loaded `pkdab`, its reflection pulled down whole by one directional `pkwet`. Autumn trees take warm highlights and cool shadows, evergreens a fan loaded dark and lit with `/Light`, the rocks and cabin come from a palette knife, a `pkpull` fall and grass finish the bank, and `pkzigzag` light on the water is caught on the canvas weave. The stream's banks, its head, the far shore and the near banks' rims are brushed with `pkbrushedge`, so no big mass keeps a ruled vector edge."
   }
  ],
  "groups": [
@@ -1031,6 +1031,15 @@
    "blurb": "TeX-subset mathematics laid out with TeX's box model as stroke skeletons: fractions, roots, sums and integrals, matrices and accents, written with a lecturer's irregularity, and an aligned derivation in chalk.",
    "source": "examples/mathkit_specimen.ps",
    "page": "1000x1960"
+  },
+  {
+   "id": "mathkit_structures",
+   "group": "dry",
+   "title": "mathkit structures",
+   "alt": "A mathkit specimen of TeX structures: braces with labels, stacked limits, negation and modular arithmetic, style switches mid-formula, and aligned columns in pen and in chalk on a board",
+   "blurb": "More TeX structures as stroke skeletons: over- and underbraces with labels, stacked limits, negation, style switches mid-formula, and aligned columns, in pen and in chalk.",
+   "source": "examples/mathkit_structures.ps",
+   "page": "1000x1320"
   },
   {
    "id": "graph_paper",
