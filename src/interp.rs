@@ -181,6 +181,11 @@ enum JEntry {
         dict: Rc<RefCell<Dict>>,
         old: Dict,
     },
+    /// A `gstate` object overwritten by `currentgstate` or `copy` (#394).
+    GState {
+        gs: Rc<RefCell<crate::gfx::GraphicsState>>,
+        old: crate::gfx::GraphicsState,
+    },
 }
 
 /// The interpreter-side record behind a `save` object.
@@ -1291,6 +1296,21 @@ impl Interp {
         }
     }
 
+    /// The `gstate` counterpart of [`journal_array`]: `currentgstate`
+    /// and `copy` overwrite a gstate object's contents, which `restore`
+    /// rolls back, as gs does.
+    pub(crate) fn journal_gstate(&mut self, g: &Rc<RefCell<crate::gfx::GraphicsState>>) {
+        let Some(rec) = self.save_stack.last_mut() else {
+            return;
+        };
+        if rec.seen.insert(Rc::as_ptr(g) as usize) {
+            self.journal.push(JEntry::GState {
+                gs: g.clone(),
+                old: g.borrow().clone(),
+            });
+        }
+    }
+
     pub(crate) fn do_save(&mut self) -> Object {
         let (gfx_depth, gfx_state) = self.gfx.glyph_snapshot();
         let handle = Rc::new(SaveHandle {
@@ -1333,6 +1353,7 @@ impl Interp {
                 // and this cell is kept alive by `data`/`dict` itself.
                 JEntry::Array { data, old } => *data.borrow_mut() = old,
                 JEntry::Dict { dict, old } => *dict.borrow_mut() = old,
+                JEntry::GState { gs, old } => *gs.borrow_mut() = old,
             }
         }
         // grestoreall to the save point, then drop the saved state —

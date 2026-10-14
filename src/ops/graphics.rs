@@ -35,6 +35,10 @@ pub fn install(dict: &mut Dict) {
     op(dict, "gsave", gsave);
     op(dict, "grestore", grestore);
     op(dict, "grestoreall", grestoreall);
+    // Level 2 gstate objects (#394)
+    op(dict, "gstate", gstate);
+    op(dict, "currentgstate", currentgstate);
+    op(dict, "setgstate", setgstate);
     op(dict, "setgray", setgray);
     op(dict, "setrgbcolor", setrgbcolor);
     op(dict, "setlinewidth", setlinewidth);
@@ -285,6 +289,49 @@ fn gsave(it: &mut Interp) -> Result<(), PsError> {
 /// that save's restore), or to the bottom when no save is live.
 fn grestoreall(it: &mut Interp) -> Result<(), PsError> {
     it.do_grestoreall();
+    Ok(())
+}
+
+/// `- gstate gstate`: a new gstate object holding a copy of the current
+/// graphics state (path, CTM, colour, font, clip and the rest). The
+/// copy is cheap: the clip mask and its chain are shared `Rc`s, so the
+/// cost is the current path's length, not the page's pixel count.
+fn gstate(it: &mut Interp) -> Result<(), PsError> {
+    let g = it.gfx.state().clone();
+    it.push(Object::lit(Value::GState(std::rc::Rc::new(
+        std::cell::RefCell::new(g),
+    ))));
+    Ok(())
+}
+
+/// `gstate currentgstate gstate`: overwrite the operand's contents with
+/// the current graphics state and push it back (the same object, so
+/// `eq` still holds). Journaled, so `restore` undoes it.
+fn currentgstate(it: &mut Interp) -> Result<(), PsError> {
+    let obj = it.pop()?;
+    let Value::GState(g) = &obj.value else {
+        it.push(obj);
+        return Err(PsError::Typecheck);
+    };
+    let g = g.clone();
+    it.journal_gstate(&g);
+    *g.borrow_mut() = it.gfx.state().clone();
+    it.push(obj);
+    Ok(())
+}
+
+/// `gstate setgstate -`: replace the current graphics state with a copy
+/// of the operand's. The gsave stack is untouched (PLRM), so a later
+/// `grestore` still pops to whatever was saved before. The clip comes
+/// back exactly: the same mask and chain `Rc`s that were in force when
+/// the gstate was taken, nested and `eoclip` links included.
+fn setgstate(it: &mut Interp) -> Result<(), PsError> {
+    let obj = it.pop()?;
+    let Value::GState(g) = &obj.value else {
+        it.push(obj);
+        return Err(PsError::Typecheck);
+    };
+    *it.gfx.state_mut() = g.borrow().clone();
     Ok(())
 }
 
