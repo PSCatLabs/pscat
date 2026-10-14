@@ -625,6 +625,9 @@ renders eight examples in both and compares block-downsampled output).
    glyph name with no glyph raises `sg-missing-glyph:<char>` before any
    ink, instead of advancing blank (the superscript two in #238's
    `(i² = -1)` used to vanish silently). `/Strict false` opts out.
+   #339 filled the commonest gaps (relations, ∘ ∗ ⋆, ⟨ ⟩ ‖, ℏ ℓ, ι υ Υ,
+   ∬ ∭ ∮, superscript digits derived from the digit skeletons):
+   `notes/339-board-math-glyphs.md`.
    #237 shipped `lib/mathkit.ps` (`mk-`): TeX-subset math laid out with
    TeX's box model as those skeletons (`mkpath`, `mkmetrics`, `mkalign`,
    and the annotations `mkframe`, `mkunderline`, `mkarrow`), with
@@ -928,6 +931,17 @@ renders eight examples in both and compares block-downsampled output).
   tapering `/Pressure` opens gaps. Tests are `tests/pktrowelplane.rs` plus a
   `%%SelfTest` block; the specimen is `examples/paintkit_plane_demo.ps`
   (`docs/paintkit_plane_demo.png`).
+- **The landscape cookbook (issue #186) is `docs/guides/landscape-cookbook.md`;
+  its snippets are the tests.** `tests/landscape_cookbook.rs` pulls every
+  ```` ```postscript ```` block out of the markdown (first line `% recipe: <name>`),
+  runs it in-process on a 360x240 page, and fails on an error, a lint finding, a
+  dirty operand stack, a near-blank page, 2 s of CPU or a missing thumbnail
+  (`docs/guides/landscape/<name>.png`, 2x). Edit a snippet in the markdown, then
+  `COOKBOOK_WRITE_THUMBS=1 cargo test --profile ci --test landscape_cookbook`
+  and look at the PNG; the test does not compare pictures. When a tool the
+  cookbook names as pending lands (#180, #229, #230, #345, #346, #347, #359),
+  update the recipe in its "Tools not yet landed" table; when Evening Stream
+  (#187, PR #348) merges, link its still from the cookbook.
 - **Paintkit slices prove byte identity with `scripts/identity_check.sh
   BASE_WORKTREE [BIN] --control FILE [--gallery-still]`** (issue #263), not
   by hand. It renders every tracked `examples/`, `gallery/` and

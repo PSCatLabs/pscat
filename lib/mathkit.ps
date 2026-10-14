@@ -32,11 +32,14 @@
 %   x^2  x_i  x_i^2  x'           scripts, both on one base, primes
 %   \frac \dfrac \tfrac \binom    fractions (\binom has no bar)
 %   \sqrt{x}  \sqrt[n]{x}         roots
-%   \sum \prod \int               large operators; limits under/over
-%                                 in display style, \limits \nolimits
+%   \sum \prod \int \iint \iiint \oint
+%                                 large operators; limits under/over
+%                                 in display style (beside, for the
+%                                 integrals), \limits \nolimits
 %   \lim \max \min \sup \inf \det \gcd \Pr     limits under in display
 %   \sin \cos \tan \log \ln \exp ... \operatorname{...}   upright names
-%   \left( ... \right)            ( ) [ ] \{ \} | and . grow to fit
+%   \left( ... \right)            ( ) [ ] \{ \} | \| \langle \rangle
+%                                 \lVert \rVert and . grow to fit
 %   \big( \Big( \bigg( \Bigg(     fixed sizes, with l and r forms
 %   \begin{matrix} pmatrix bmatrix Bmatrix vmatrix cases
 %   \vec \hat \bar \dot \ddot \tilde \overline \underline \boxed
@@ -44,8 +47,12 @@
 %   \, \: \; \! \  \quad \qquad ~  spacing; plain spaces are ignored
 %   Greek \alpha ... \Omega, and Unicode Greek and math symbols
 %   typed directly (α ∞ ≤ ∂ ∇ ∑ ...).
+%   \equiv \sim \simeq \subseteq \supset \supseteq \mapsto \perp
+%   \parallel \propto \therefore \because    relations
+%   \circ \ast \star \setminus               binary operators
+%   \hbar \ell \iota \upsilon \Upsilon \langle \rangle \|  letters, brackets
 % Anything else fails with an undefined name that says what it was:
-% `mk-unsupported-command:\iint`, `mk-unsupported-character:*`, and so
+% `mk-unsupported-command:\oplus`, `mk-unsupported-character:*`, and so
 % on. Nothing is dropped silently. `$` is ignored, so ($x^2$) works.
 %
 % --- Layout ---------------------------------------------------------
@@ -113,10 +120,19 @@
   /Lambda [/sym /Lambda] /Xi [/sym /Xi] /Pi [/sym /Pi] /Sigma [/sym /Sigma]
   /Phi [/sym /Phi] /Psi [/sym /Psi] /Omega [/sym /Omega]
   /infty [/sym /infinity] /partial [/sym /partialdiff] /nabla [/sym /nabla]
-  /ell [/sym /l] /prime [/sym /prime /ord -420]
+  /ell [/sym /ell] /prime [/sym /prime /ord -420]
+  /hbar [/sym /hbar] /iota [/sym /iota] /upsilon [/sym /upsilon]
+  /Upsilon [/sym /Upsilon]
   /pm [/sym /plusminus] /mp [/sym /minusplus] /times [/sym /multiply]
   /div [/sym /divide] /cdot [/sym /periodcentered] /cup [/sym /union]
-  /cap [/sym /intersection]
+  /cap [/sym /intersection] /circ [/sym /ringoperator]
+  /ast [/sym /asteriskmath] /star [/sym /star] /setminus [/sym /setminus]
+  /equiv [/sym /equiv] /sim [/sym /sim] /simeq [/sym /simeq]
+  /subseteq [/sym /reflexsubset] /supset [/sym /propersuperset]
+  /supseteq [/sym /reflexsuperset] /mapsto [/sym /mapsto]
+  /perp [/sym /perpendicular] /parallel [/sym /dblbar /rel]
+  /propto [/sym /proportional] /therefore [/sym /therefore]
+  /because [/sym /because]
   /leq [/sym /lessequal] /le [/sym /lessequal] /geq [/sym /greaterequal]
   /ge [/sym /greaterequal] /neq [/sym /notequal] /ne [/sym /notequal]
   /approx [/sym /approxequal] /to [/sym /arrowright]
@@ -127,13 +143,16 @@
   /subset [/sym /propersubset] /forall [/sym /universal]
   /exists [/sym /existential] /neg [/sym /logicalnot] /lnot [/sym /logicalnot]
   /mid [/sym /bar /rel] /vert [/sym /bar] /lvert [/sym /bar /open]
-  /rvert [/sym /bar /close] /lbrace [/sym /braceleft /open]
+  /rvert [/sym /bar /close] /Vert [/sym /dblbar] /lVert [/sym /dblbar /open]
+  /rVert [/sym /dblbar /close] /langle [/sym /angleleft]
+  /rangle [/sym /angleright] /lbrace [/sym /braceleft /open]
   /rbrace [/sym /braceright /close] /lbrack [/sym /bracketleft /open]
   /rbrack [/sym /bracketright /close] /colon [/sym /colon /punct]
   /ldots [/sym /ellipsis /inner] /dots [/sym /ellipsis /inner]
   /cdots [/sym /ellipsis /inner 235]
   /sum [/op /summation /auto] /prod [/op /product /auto]
-  /int [/op /integral /no]
+  /int [/op /integral /no] /iint [/op /iint /no] /iiint [/op /iiint /no]
+  /oint [/op /oint /no]
   /lim [/fn (lim) /auto] /max [/fn (max) /auto] /min [/fn (min) /auto]
   /sup [/fn (sup) /auto] /inf [/fn (inf) /auto] /det [/fn (det) /auto]
   /gcd [/fn (gcd) /auto] /Pr [/fn (Pr) /auto]
@@ -171,6 +190,14 @@
   93 [/bracketright /close] 124 [/bar /ord]
 >> def
 
+% The integral signs: their limits go beside them, not over and under.
+% @internal
+/mkintnames << /integral true /iint true /iiint true /oint true >> def
+
+% name -> bool
+% @internal
+/mkisintname { mkintnames exch known } bind def
+
 % @internal
 /mkdigits [/zero /one /two /three /four /five /six /seven /eight /nine] def
 
@@ -200,7 +227,8 @@
 /mkenvs <<
   /matrix [null null /c] /pmatrix [/parenleft /parenright /c]
   /bmatrix [/bracketleft /bracketright /c] /Bmatrix [/braceleft /braceright /c]
-  /vmatrix [/bar /bar /c] /cases [/braceleft null /l]
+  /vmatrix [/bar /bar /c] /Vmatrix [/dblbar /dblbar /c]
+  /cases [/braceleft null /l]
 >> def
 
 % Style -> its em as a fraction of /Size: display, text, script, scriptscript.
@@ -608,7 +636,7 @@
   dup /.notdef eq { pop (mk-unsupported-character:) exch mkfail } if
   exch pop
   dup /summation eq 1 index /product eq or { /auto mkopatom } {
-    dup /integral eq { /no mkopatom } { dup mkgclass mksymatom } ifelse
+    dup mkisintname { /no mkopatom } { dup mkgclass mksymatom } ifelse
   } ifelse
 } bind def
 
@@ -633,7 +661,9 @@
     mkctlspace 1 index known { mkctlspace exch get mkspatom /none } {
       dup 123 eq { pop /braceleft /open mksymatom /none } {
         dup 125 eq { pop /braceright /close mksymatom /none } {
-          1 string dup 0 4 -1 roll put (mk-unsupported-command:\\) exch mkfail
+          dup 124 eq { pop /dblbar /ord mksymatom /none } {
+            1 string dup 0 4 -1 roll put (mk-unsupported-command:\\) exch mkfail
+          } ifelse
         } ifelse
       } ifelse
     } ifelse
@@ -702,6 +732,7 @@
     pop mkadv
     mkpeek dup 123 eq { pop mkadv /braceleft } {
       dup 125 eq { pop mkadv /braceright } {
+        dup 124 eq { pop mkadv /dblbar } {
         mkisletter {
           mkletters
           mkdelimwords 1 index cvn known {
@@ -711,7 +742,7 @@
           mkpeek 0 lt { (mk-unsupported-delimiter:\\) () mkfail } if
           mkadv 1 string dup 0 mksrc mkpos 1 sub get put
           (mk-unsupported-delimiter:\\) exch mkfail
-        } ifelse
+        } ifelse } ifelse
       } ifelse
     } ifelse
   } {
@@ -724,6 +755,8 @@
 /mkdelimwords <<
   /lbrace /braceleft /rbrace /braceright /lbrack /bracketleft
   /rbrack /bracketright /vert /bar /lvert /bar /rvert /bar
+  /langle /angleleft /rangle /angleright /Vert /dblbar /lVert /dblbar
+  /rVert /dblbar
 >> def
 
 % (cmd) -> atom   \frac \dfrac \tfrac \binom
@@ -1065,7 +1098,7 @@
 % - -> box   (in mkatom) a large operator, display size in display style
 % @internal
 /mknop {
-  at /G get /integral eq {
+  at /G get mkisintname {
     st 0 eq { 1.2 0.72 } { 0.8 0.3 } ifelse
   } {
     st 0 eq { 0.92 0.38 } { 0.65 0.15 } ifelse
@@ -1302,7 +1335,7 @@
   /nb exch def
   /ps mkscriptstyle st get def
   /pe ps mkem def
-  /isint at /T get /op eq { at /G get /integral eq } { false } ifelse def
+  /isint at /T get /op eq { at /G get mkisintname } { false } ifelse def
   at /Sup known { /pb at /Sup get ps cr mklist def } { /pb null def } ifelse
   at /Sub known { /bb at /Sub get ps true mklist def } { /bb null def } ifelse
   ischar { /u 0 def /v 0 def } {
@@ -1983,13 +2016,14 @@
 %   (a lost backslash before sqrt) mustguard
 %   { (\frac{a}{b}) 0 0 << >> mkpath }
 %   /mk-control-character:write-each-TeX-backslash-as-\\ (a form feed from \f) mustguard
-%   { (\\iint f) 0 0 << >> mkpath } /mk-unsupported-command:\iint (\iint) mustguard
+%   { (\\iiiint f) 0 0 << >> mkpath } /mk-unsupported-command:\iiiint (\iiiint) mustguard
 %   { (a * b) 0 0 << >> mkpath } /mk-unsupported-character:* (an asterisk) mustguard
-%   { (∮) 0 0 << >> mkpath } /mk-unsupported-character:∮ (a contour integral) mustguard
+%   { (⊕) 0 0 << >> mkpath } /mk-unsupported-character:⊕ (a circled plus) mustguard
 %   { (\\left< x \\right>) 0 0 << >> mkpath } (mk-unsupported-delimiter:<) cvn
 %   (an angle bracket delimiter) mustguard
-%   { (\\left\\langle x \\right.) 0 0 << >> mkpath } /mk-unsupported-delimiter:\langle
-%   (\langle) mustguard
+%   { (\\left\\lceil x \\right.) 0 0 << >> mkpath } /mk-unsupported-delimiter:\lceil
+%   (\lceil) mustguard
+%   { (\\oplus) 0 0 << >> mkpath } /mk-unsupported-command:\oplus (\oplus) mustguard
 %   { (\\begin{array} x \\end{array}) 0 0 << >> mkpath }
 %   /mk-unsupported-environment:array (the array environment) mustguard
 %   { (x^) 0 0 << >> mkpath } /mk-missing-argument:^ (a superscript with nothing) mustguard
@@ -2030,7 +2064,7 @@
 %     true 0 1 5 { dup mkt-m0 exch get exch matrix currentmatrix exch get eq and } for
 %   } def
 %   /mkt-sentinel
-%   { (\\frac{\\left[ \\begin{pmatrix} a & \\iint}{b}) 0 0 << >> mkpath } stopped
+%   { (\\frac{\\left[ \\begin{pmatrix} a & \\oplus}{b}) 0 0 << >> mkpath } stopped
 %   (an error deep inside nested groups is raised) mustbe
 %   /mkt-sentinel eq (the operand stack is cut back to the call, no further) mustbe
 %   countdictstack mkt-d0 eq (the dictionary stack is unwound) mustbe
@@ -2048,9 +2082,9 @@
 %   % a mathkit call nested in /Ink fails: the outer call still unwinds to
 %   % its own depths, not the inner one's
 %   /mkt-sentinel
-%   { [ (a) (b) ] 100 100 << /Ink { pop 30 rotate 7 7 (\\iint) 0 0 << >> mkpath } >> mkalign }
+%   { [ (a) (b) ] 100 100 << /Ink { pop 30 rotate 7 7 (\\oplus) 0 0 << >> mkpath } >> mkalign }
 %   stopped (a nested error is raised) mustbe
-%   $error /command get (mk-unsupported-command:\\iint) cvn eq
+%   $error /command get (mk-unsupported-command:\\oplus) cvn eq
 %   (it names the nested guard) mustbe
 %   /mkt-sentinel eq (the outer call cuts the operand stack back to its own base) mustbe
 %   countdictstack mkt-d0 eq (and the dictionary stack to its own depth) mustbe
@@ -2120,6 +2154,36 @@
 %   (x^2+y^2) << /Size 100 /Seed 1 >> mkmetrics /Width get
 %   (x^2+y^2) << /Size 100 /Seed 2 >> mkmetrics /Width get ne
 %   (/Irregular 1 varies with the seed) mustbe
+%%EndSelfTest
+%
+%%SelfTest: board-math-symbols-lay-out
+%   % issue #339: each of these was a mk-unsupported-command or
+%   % mk-unsupported-character before; every one must lay out and draw
+%   [ (a \\equiv b) (a \\sim b) (a \\simeq b) (f \\circ g) (a \\ast b)
+%     (a \\star b) (A \\setminus B) (A \\subseteq B) (A \\supset B)
+%     (A \\supseteq B) (x \\mapsto y) (a \\perp b) (a \\parallel b)
+%     (y \\propto x) (\\therefore x) (\\because x) (\\hbar \\omega) (\\ell)
+%     (\\iota \\upsilon \\Upsilon) (\\langle x \\rangle) (\\| v \\|)
+%     (\\iint f) (\\iiint f) (\\oint_C f) (\\left\\langle x \\right\\rangle)
+%     (\\left\\Vert x \\right\\|) (\\bigl\\langle x \\bigr\\rangle)
+%     (\\begin{Vmatrix} a & b \\\\ c & d \\end{Vmatrix})
+%     (≡ ∼ ≃ ∘ ∗ ⋆ ∖ ⊆ ⊃ ⊇ ↦ ⊥ ∥ ∝ ∴ ∵ ⟨ ⟩ ‖ ℏ ℓ ∬ ∭ ∮ ι υ Υ)
+%   ] true exch {
+%     /mkt-s exch def
+%     mkt-s << /Size 40 /Seed 3 >> mkmetrics /Width get 0 gt and
+%     newpath mkt-s 0 0 << /Size 40 /Seed 3 >> mkpath newpath
+%   } forall
+%   (every board-math symbol lays out and draws) mustbe
+%   % the integrals carry their limits beside them, as \int does
+%   (\\oint_C^D f) << /Size 100 /Irregular 0 >> mkmetrics /Width get
+%   (\\int_C^D f) << /Size 100 /Irregular 0 >> mkmetrics /Width get lt not
+%   (a contour integral is no narrower than an integral) mustbe
+%   (\\oint_0^1) << /Size 100 /Irregular 0 /Style /display >> mkmetrics /Height get
+%   (\\sum_0^1) << /Size 100 /Irregular 0 /Style /display >> mkmetrics /Height get lt
+%   (an oint's limits stay beside it: shorter than a sum's stacked limits) mustbe
+%   (\\left\\langle \\frac{a}{b} \\right\\rangle) << /Size 60 /Irregular 0 >>
+%   mkmetrics dup /Height get exch /Depth get add 60 gt
+%   (a grown angle bracket spans its fraction) mustbe
 %%EndSelfTest
 %
 %%SelfTest: every-name-in-the-tables-has-a-glyph
