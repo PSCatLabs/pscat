@@ -8,7 +8,11 @@
 //! Guards, the private generator, "no draws from the caller's stream" and
 //! the paintkit contract are `%%SelfTest` blocks in `lib/drykit.ps`.
 
+mod common;
+
+use common::within_cpu_budget;
 use pscat::Interp;
+use std::time::Duration;
 
 fn load(it: &mut Interp) {
     for path in ["lib/artkit.ps", "lib/paintkit.ps", "lib/drykit.ps"] {
@@ -652,7 +656,7 @@ fn dkstroke_reaches_every_knuckle_its_ink_touches() {
                 }
             )
         };
-        let t0 = std::time::Instant::now();
+        let t0 = common::thread_cpu_time();
         let paper = |src: &str| {
             render(
                 70,
@@ -663,7 +667,10 @@ fn dkstroke_reaches_every_knuckle_its_ink_touches() {
         };
         let band = paper(&src(false));
         let whole = paper(&src(true));
-        eprintln!("{name}: {:.2}s", t0.elapsed().as_secs_f64());
+        eprintln!(
+            "{name}: {:.2}s cpu",
+            (common::thread_cpu_time() - t0).as_secs_f64()
+        );
         let diff = missed(&band, &whole);
         assert_eq!(
             diff, 0,
@@ -933,28 +940,24 @@ fn dkstroke_every_documented_parameter_changes_the_render() {
 }
 
 /// Test 8, the CI budget smoke test: a 100-stroke dkstroke render stays
-/// under 2 s under `--profile ci` (DRYMEDIA.md 6.2). Printed so drift is
-/// visible before it fails. One level, so the bar has room on a slow CI
+/// under 2 s under `--profile ci` (DRYMEDIA.md 6.2). Thread CPU time,
+/// best of 3 (issue #329), so load from other processes cannot fail it.
+/// Printed so drift is visible before it fails. One level, so the bar has room on a slow CI
 /// runner: two levels measured 1.2 s here with the rest of this file
 /// running in parallel.
 #[test]
 fn a_hundred_strokes_render_within_the_ci_budget() {
-    let t0 = std::time::Instant::now();
-    let it = render(
-        200,
-        200,
-        1.0,
-        "<< /Surface /drawing /Seed 2 >> dksurface 0.1 0.1 0.12 setrgbcolor \
-         { 0 1 99 { /i exch def newpath i 10 mod 18 mul 12 add i 10 idiv 18 mul 12 add moveto \
-           12 6 rlineto << /Width 1.2 /Touch 0.7 /Levels 1 >> dkstroke } for } dkbatch",
-    );
-    let secs = t0.elapsed().as_secs_f64();
-    eprintln!("100 strokes: {secs:.2}s");
+    let it = within_cpu_budget("100 strokes", Duration::from_secs(2), 3, || {
+        render(
+            200,
+            200,
+            1.0,
+            "<< /Surface /drawing /Seed 2 >> dksurface 0.1 0.1 0.12 setrgbcolor \
+             { 0 1 99 { /i exch def newpath i 10 mod 18 mul 12 add i 10 idiv 18 mul 12 add moveto \
+               12 6 rlineto << /Width 1.2 /Touch 0.7 /Levels 1 >> dkstroke } for } dkbatch",
+        )
+    });
     assert!(inked(&it).iter().any(|&i| i), "nothing drawn");
-    assert!(
-        secs < 2.0,
-        "100 strokes took {secs:.2}s, over the 2s CI budget"
-    );
 }
 
 /// Test 6: Ghostscript agrees with pscat on a stroke, block for block (the

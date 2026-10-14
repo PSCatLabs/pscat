@@ -1117,6 +1117,7 @@ name = "pscat"
 version = "0.5.1"
 dependencies = [
  "flate2",
+ "libc",
  "serde_json",
  "softbuffer",
  "thiserror 2.0.18",

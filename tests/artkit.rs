@@ -4,6 +4,9 @@
 //! by arithmetic (turtle positions, L-system growth), rendering by
 //! ink counts — the corpus policy for rand-driven art.
 
+mod common;
+
+use common::{scale_budget, thread_cpu_time};
 use pscat::{Interp, PsError};
 
 fn load(it: &mut Interp) {
@@ -244,7 +247,7 @@ fn walkpath_refuses_a_path_over_its_segment_limit_and_leaves_a_clean_stack() {
 /// see it coming. The bound has to live in `walkpath`'s own measuring
 /// pass, and it must fire before the first preset has drawn. Timed
 /// against a calibration -- a legal path just under the limit, walked
-/// to the end -- rather than a wall-clock constant: a count-then-check
+/// to the end -- rather than an absolute constant: a count-then-check
 /// implementation walks all 400,000 segments (several times the
 /// calibration) and is caught by the ratio on any machine.
 #[test]
@@ -261,14 +264,14 @@ fn every_walkpath_preset_refuses_a_huge_segment_count_promptly() {
             "0 0 0 setrgbcolor newpath 20 20 moveto {n} {{ 0 0 rlineto }} repeat 100 0 rlineto"
         ))
         .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
-        let started = std::time::Instant::now();
+        // Thread CPU time, not wall time (issue #329): load from other
+        // processes cannot inflate it.
+        let started = thread_cpu_time();
         let r = it.run_str(call).map(|_| ());
-        (it, r, started.elapsed())
+        (it, r, thread_cpu_time() - started)
     }
-    // This test shares the machine with the rest of the suite, which
-    // runs in parallel, so one timing can be inflated several-fold by
-    // scheduling alone. Every time here is the best of three: a slow
-    // outlier only costs a retry, while a real regression (a refusal
+    // Every time here is CPU time, and the best of three: a slow
+    // outlier (cache contention, a cold start) only costs a retry, while a real regression (a refusal
     // that walks all 400,000 segments) is slow every time.
     const TRIES: usize = 3;
     // Calibration: 40,000 segments is under the 50,000 limit, so this
@@ -282,7 +285,9 @@ fn every_walkpath_preset_refuses_a_huge_segment_count_promptly() {
         })
         .min()
         .unwrap();
-    let bound = t_ok.max(std::time::Duration::from_millis(50)) * 3;
+    // PSCAT_TEST_BUDGET_SCALE (tests/common) shrinks the bound for the
+    // negative check: at 0.001 this test must fail.
+    let bound = scale_budget(t_ok.max(std::time::Duration::from_millis(50)) * 3);
 
     for preset in [
         "pkribbon", "pknib", "pkdry", "pkspray", "pkoil", "pktrowel", "pkfan", "pkbroad",

@@ -9,7 +9,11 @@
 //! header says, the motions are deterministic and keep their draws per
 //! slot, Ghostscript agrees, and a render fits the CI budget.
 
+mod common;
+
+use common::within_cpu_budget;
 use pscat::Interp;
+use std::time::Duration;
 
 const LIBS: [&str; 4] = [
     "lib/artkit.ps",
@@ -629,24 +633,21 @@ fn ghostscript_takes_packed_procedures_and_runs_every_motion() {
 
 /// The CI budget (DRYMEDIA.md 6.2): a small crayon scene -- a scribble
 /// fill, a figure, rays and grass -- renders in under 2 s under
-/// `--profile ci`. Printed so drift is visible before it fails.
+/// `--profile ci`. Measured in thread CPU time, best of 3 (issue #329),
+/// so load from other processes cannot fail it. Printed so drift is
+/// visible before it fails.
 #[test]
 fn a_crayon_scene_renders_within_the_ci_budget() {
-    let t0 = std::time::Instant::now();
-    let it = render(
-        200,
-        150,
-        1.0,
-        "0.2 0.4 0.8 setrgbcolor 10 120 180 20 screct << >> dyscribble << >> dycrayon \
-         0.1 0.1 0.1 setrgbcolor 60 20 70 << >> dyfigure << /Width 3 >> dycrayon \
-         0.98 0.6 0.1 setrgbcolor 160 80 12 << >> dyrays << /Width 3 >> dycrayon \
-         0.2 0.6 0.3 setrgbcolor newpath 5 15 moveto 195 18 lineto << >> dygrass << /Width 3 >> dycrayon",
-    );
-    let secs = t0.elapsed().as_secs_f64();
-    eprintln!("crayon scene: {secs:.2}s");
+    let it = within_cpu_budget("crayon scene", Duration::from_secs(2), 3, || {
+        render(
+            200,
+            150,
+            1.0,
+            "0.2 0.4 0.8 setrgbcolor 10 120 180 20 screct << >> dyscribble << >> dycrayon \
+             0.1 0.1 0.1 setrgbcolor 60 20 70 << >> dyfigure << /Width 3 >> dycrayon \
+             0.98 0.6 0.1 setrgbcolor 160 80 12 << >> dyrays << /Width 3 >> dycrayon \
+             0.2 0.6 0.3 setrgbcolor newpath 5 15 moveto 195 18 lineto << >> dygrass << /Width 3 >> dycrayon",
+        )
+    });
     assert!(inked(&it).iter().any(|&i| i), "nothing drawn");
-    assert!(
-        secs < 2.0,
-        "the scene took {secs:.2}s, over the 2s CI budget"
-    );
 }
