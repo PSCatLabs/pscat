@@ -870,15 +870,16 @@ TWState begin {
     dup type /dicttype ne { end tw-options-must-be-a-dict } if
     lyDefaults
     dup length dict /lyRest exch def
-    {
-        /lyV exch def /lyK exch def
-        lyKeys lyK known {
-            lyKeys lyK get aload pop
+    {                                       % key value
+        1 index lyKeys exch known {
+            lyKeys 2 index get aload pop
             /lyG exch def /lyCk exch def /lyVar exch def
-            lyV lyCk cvx exec { lyVar lyV def } { end lyG cvx exec } ifelse
+            % the value stays on the operand stack: a procedure (/PageStart)
+            % would run if it were fetched by name
+            dup lyCk cvx exec { lyVar exch def pop } { lyG end cvx exec } ifelse
         } {
-            tKeys lyK known not { end tw-unknown-option } if
-            lyRest lyK lyV put
+            tKeys 2 index known not { end tw-unknown-option } if
+            lyRest 3 1 roll put
         } ifelse
     } forall
     lyRest
@@ -1167,7 +1168,7 @@ TWState begin {
 /lyPage {                                   % page index -> -
     /lyPg exch def
     lyPg 0 gt { showpage } if
-    lyPS null ne { lyPS end exec TWState begin } if
+    /lyPS load null ne { /lyPS load end exec TWState begin } if
     newpath lyL lyY0 lyPg lyNLP mul lyStep mul add moveto tFrame
     /Typewriter findfont tSize scalefont setfont
     /lyR0 lyPg lyNLP mul def
@@ -1185,6 +1186,66 @@ TWState begin {
 } bind def
 
 } exec end % TWState (layout)
+
+%%SelfTest: tw-type-guards
+%   { 5 tw-type } /tw-options-must-be-a-dict
+%   (a number for the options) mustguard
+%
+%   { << /Txt (a) >> tw-type } /tw-unknown-option
+%   (a misspelt key) mustguard
+%
+%   { << /Text 5 >> tw-linecount } /tw-text-must-be-a-string
+%   (a number for the text) mustguard
+%
+%   { << /Spacing 0 >> tw-type } /tw-spacing-must-be-0.5-to-20
+%   (spacing below half a line) mustguard
+%
+%   { << /Margin -1 >> tw-pageheight } /tw-margin-must-be-a-non-negative-number
+%   (a negative margin) mustguard
+%
+%   { << /Tabs [ 8 4 ] >> tw-linecount } /tw-tabs-must-be-a-positive-integer-or-ascending-columns
+%   (tab stops out of order) mustguard
+%
+%   { << /Tabs 0 >> tw-linecount } /tw-tabs-must-be-a-positive-integer-or-ascending-columns
+%   (a tab stop every 0 columns) mustguard
+%
+%   { << /PageNumbers /middle >> tw-type } /tw-pagenumbers-must-be-none-top-or-bottom
+%   (an unknown page number place) mustguard
+%
+%   { << /PageStart 5 >> tw-type } /tw-pagestart-must-be-a-procedure
+%   (a number for PageStart) mustguard
+%
+%   { << /Memo << /Sbject (x) >> >> tw-linecount } /tw-memo-must-be-a-dict-of-known-string-keys
+%   (a misspelt memo key) mustguard
+%
+%   { << /Pitch 0 >> tw-linecount } /tw-pitch-must-be-a-positive-number
+%   (a zero pitch counts nothing) mustguard
+%
+%   { << /Wear -1 /Text (a) >> tw-type } /tw-wear-must-be-a-non-negative-number
+%   (tw-setup's own check reaches tw-type) mustguard
+%
+%   countdictstack mark { << /Spacing 0 >> tw-type } stopped pop cleartomark countdictstack eq
+%   (a rejected tw-type leaves the dict stack as it was) mustbe
+%   countdictstack mark { << /Wear -1 /Text (a) >> tw-type } stopped pop cleartomark countdictstack eq
+%   (tw-setup rejecting a key leaves the dict stack as it was) mustbe
+%   countdictstack mark { << /Bogus 1 >> tw-linecount } stopped pop cleartomark countdictstack eq
+%   (a rejected tw-linecount leaves the dict stack as it was) mustbe
+%%EndSelfTest
+
+%%SelfTest: tw-linecount-wraps
+%   << /Text (aaa bbb ccc ddd eee fff) /Width 144 /Margin 36 >> tw-linecount 3 eq
+%   (72pt of text at pica is 10 columns: two 3-letter words per line) mustbe
+%   << /Text (a\nb\n\nc\n) /Width 612 >> tw-linecount 4 eq
+%   (newlines break, a blank line stays, a final newline ends the last line) mustbe
+%   << /Text () >> tw-linecount 0 eq
+%   (no text, no lines) mustbe
+%   << /Text (aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa) /Width 252 /Margin 36 >> tw-linecount 3 eq
+%   (a word wider than a line is split, 70 letters in 30 columns) mustbe
+%   << /Text (<o>ab|c</o> <u>d</u><x>e</x>) /Width 612 >> tw-linecount 1 eq
+%   (markup takes no cells) mustbe
+%   << /Text (a b) /Memo << /To (x) >> >> tw-linecount 6 eq
+%   (a memo: title, blank, one field, rule, blank, then the text) mustbe
+%%EndSelfTest
 
 % @kind: Procedure
 % @summary: Types a text on the page the way a typist would: word-wrapped to the margins, with tab stops, single/1.5/double spacing (the platen advances in half-lines, and the font's line layer gives each line its own carriage-return offset, advance error and baseline drift), underlining and strikeovers by markup, an optional memo header (TO/FROM/SUBJECT/DATE) and page numbers. Takes one options dict: the layout keys below plus any tw-setup key (/Machine /Seed /Wear /Pitch /Size /Ink /Ribbon /Preset ...), which persist as they do for tw-setup. Text that overflows a page is continued on the next one after a showpage; the last page is left for the caller to showpage. Markup in /Text, with no escapes needed: <u>underlined</u>, <x>crossed out</x> (x struck over each letter), <o>old|new</o> (new overtyped on old, one unbreakable token as wide as the longer side). A tab goes to the next tab stop, bytes above 126 are blank cells, and a blank line is kept. tw-linecount always agrees with it on line breaks. Leaves the carriage at the start of the line after the last one typed.
