@@ -1,0 +1,278 @@
+%!PS-Adobe-3.0
+%%Title: Paintkit — loaded brushes: /Colors, /Light and the highlight and shadow hues (issue #227)
+%%BoundingBox: 0 0 780 640
+%%EndComments
+
+% Specimen for the loaded-colour keys (lib/paintkit.ps, design in
+% docs/PAINT_LOADING.md). Every paintkit mark used to be one colour:
+% whatever setrgbcolor had set, varied by /ColorJitter. A real brush is
+% loaded with two colours at once -- a fan brush dipped in dark green and
+% touched in yellow-green, a knife with white on one edge and blue on the
+% other -- and lays both in one stroke. /Colors says what the brush
+% carries:
+%
+%   /Colors     1 to 8 colors, from the head's left edge (looking along
+%               the travel) to its right edge, evenly spaced across it
+%   /ColorMix   0 is hard side-by-side bands, 1 a smooth gradient
+%   /Light      degrees, as pkdab's: the first color goes on whichever
+%               side of each subpath faces the light, however it travels
+%
+% pkdab and pkoil also take /HighlightColor and /ShadowColor, the hues
+% their lit and shaded layers mix toward instead of white and black.
+%
+% Top row: the same evergreen twice, then a knife. Left, brush-relative
+% (no /Light): the first color sits on the left of each stroke, so the
+% branches drawn out to the left carry it underneath and the ones drawn
+% out to the right carry it on top. Middle: the same tree, same seeds,
+% with /Light 150, so every branch is lit on its upper face. Right: a
+% snow pull down a dark face, a knife loaded with white and blue, laid
+% light side up.
+%
+% Bottom row: a broad brush with two colors at /ColorMix 0, 0.3 and 1;
+% two bushes and bank lips, the left with today's /Highlight and
+% /Shadow (toward white and black) and the right with a warm
+% /HighlightColor and a cool /ShadowColor; and the loaded evergreen
+% standing on a shore, its reflection pulled down into the water by a
+% directional pkwet.
+%
+% Two rules this page follows:
+%
+%   * A branch must be a real stroke that travels outward from the
+%     trunk. /Light flips the load per subpath by its chord, and a chord
+%     shorter than /Pitch (a pressed fan, a dab) is never flipped.
+%   * Inside pkwet a mark paints either in the color it inherits (the
+%     trunk, which is set outside the call) or in loaded colors (the
+%     branches), which pkwet grades for you. Neither calls setrgbcolor
+%     inside the procedure, or every graded pass would come out hard.
+%
+% No alpha anywhere, so Ghostscript renders the same page (its rand
+% stream differs, so the marks fall differently).
+%
+%   pscat --page 780x640 examples/paintkit_loading_demo.ps --png loading.png
+
+(lib/artkit.ps) run
+(lib/paintkit.ps) run
+
+/ldGROUND  [0.12 0.16 0.23] def
+/ldWATER   [0.17 0.25 0.35] def
+/ldLIT     [0.62 0.76 0.30] def         % the fan's lit yellow-green
+/ldDARK    [0.05 0.17 0.13] def         % ...and its dark green
+/ldTRUNK   [0.28 0.19 0.12] def
+/ldSNOW    [0.97 0.97 0.95] def
+/ldICE     [0.40 0.58 0.88] def
+/ldOCHRE   [0.93 0.68 0.30] def
+/ldTEAL    [0.18 0.48 0.58] def
+
+/ldset { aload pop setrgbcolor } def
+
+1 1 1 setrgbcolor clippath fill
+
+/ldlabel {                                   % x y string -
+    /ldls exch def /ldly exch def /ldlx exch def
+    gsave
+        0.35 0.35 0.35 setrgbcolor
+        /Helvetica findfont 9 scalefont setfont
+        ldlx ldly moveto ldls show
+    grestore
+} def
+/ldsmall {                                   % x y string -
+    /ldls exch def /ldly exch def /ldlx exch def
+    gsave
+        0.80 0.82 0.86 setrgbcolor
+        /Helvetica findfont 8 scalefont setfont
+        ldlx ldly moveto ldls show
+    grestore
+} def
+
+% A 240 x 240 panel of dark ground at the origin.
+/ldground { ldGROUND ldset 0 0 240 240 rectfill } def
+
+% panel-x panel-y label proc -   one panel, caption underneath
+/ldpanel {
+    /ldpp exch def /ldpl exch def /ldpy exch def /ldpx exch def
+    gsave
+        ldpx ldpy translate
+        ldground
+        0 0 240 240 rectclip
+        ldpp
+    grestore
+    ldpx ldpy 14 sub ldpl ldlabel
+} def
+
+% ======================================================================
+% The evergreen. A liner trunk, then tiers of fan-brush branches, each a
+% stroke from the trunk out and down, widening toward the base. The
+% branches carry [lit dark]; ldlight is /Light in degrees, or -1 for a
+% brush-relative load. The trunk is not here: it is painted in whatever
+% color is current, so a pkwet around the whole tree can grade it.
+% ======================================================================
+/ldlight -1 def
+
+/ldbranches {                                % x y h -
+    /ldh exch def /ldy exch def /ldx exch def
+    /ldn 5 def
+    0 1 ldn {
+        /ldk exch def
+        /ldf ldk ldn div def                 % 0 at the top, 1 at the foot
+        /ldty ldy ldh add ldh 0.9 mul ldf mul sub def
+        /ldspan ldh 0.14 mul ldh 0.34 mul ldf mul add def
+        [ -1 1 ] {
+            /lds exch def
+            newpath
+            ldx ldty moveto
+            ldx ldspan lds mul add ldty ldspan 0.5 mul sub lineto
+            << /Width ldh 0.17 mul /Bristles 44 /Splay 0.45 /Load 0.95
+               /Dropout 0.04 /Ragged 0.35 /ColorJitter 0.03
+               /Colors [ ldLIT ldDARK ] /ColorMix 0.12 >>
+            ldlight 0 ge { dup /Light ldlight put } if
+            pkfan
+        } forall
+    } for
+} def
+
+/ldtrunk {                                   % x y h -
+    /ldh exch def /ldy exch def /ldx exch def
+    newpath ldx ldy moveto ldx ldy ldh add lineto
+    << /Width ldh 0.045 mul 2 max /Taper 0.9 /Waver 0.2 >> pkliner
+} def
+
+% x y h light -   a whole tree on its own trunk color
+/ldtree {
+    /ldlight exch def
+    /ldh exch def /ldy exch def /ldx exch def
+    9 srand
+    ldTRUNK ldset
+    ldx ldy ldh ldtrunk
+    ldx ldy ldh ldbranches
+} def
+
+% ======================================================================
+% Top row, left and middle: the same tree, brush-relative and lit.
+% ======================================================================
+20  340 (brush-relative: no /Light)      { 120 46 180 -1  ldtree } ldpanel
+270 340 (/Light 150: lit on the upper face) { 120 46 180 150 ldtree } ldpanel
+
+% ======================================================================
+% Top row, right: a snow pull. A dark mountain face; four knife pulls
+% from the ridge down it, loaded [snow ice]. /Light 180 (from the left)
+% puts the white on the lit edge of every pull, whichever way it goes.
+% ======================================================================
+/ldmountain {
+    0.20 0.24 0.35 setrgbcolor
+    newpath 0 0 moveto 0 150 lineto 70 190 lineto 120 232 lineto
+    175 200 lineto 240 170 lineto 240 0 lineto closepath fill
+    0.27 0.31 0.43 setrgbcolor
+    newpath 120 232 moveto 175 200 lineto 240 170 lineto 240 0 lineto
+    150 0 lineto 128 120 lineto closepath fill
+}  def
+/ldpull {                                    % x0 y0 x1 y1 seed -
+    srand
+    /ldy1 exch def /ldx1 exch def /ldy0 exch def /ldx0 exch def
+    newpath ldx0 ldy0 moveto ldx1 ldy1 lineto
+    << /Width 34 /Coverage 0.95 /Scrape 0.15 /EdgeBuildup 0 /ColorJitter 0.02
+       /Colors [ ldSNOW ldICE ] /ColorMix 0.8 /Light 180 >> pktrowel
+} def
+/ldsnow {
+    ldmountain
+    122 216  50  80   3 ldpull
+    128 212  96  26   4 ldpull
+    140 204 154  40   5 ldpull
+    152 194 208  74   6 ldpull
+} def
+520 340 (snow pull: a knife loaded [white blue]) { ldsnow } ldpanel
+
+% ======================================================================
+% Bottom row, left: a broad brush with two colors, three mixes. Each
+% stroke is the same curve; only /ColorMix differs.
+% ======================================================================
+/ldbroad {                                   % y mix label -
+    /ldbl exch def /ldbm exch def /ldby exch def
+    newpath 18 ldby moveto 100 ldby 14 add 160 ldby 14 sub 224 ldby 6 add curveto
+    << /Width 46 /Charge 1 /Depletion 0 /Edge 0.2 /ColorJitter 0
+       /Colors [ ldOCHRE ldTEAL ] /ColorMix ldbm >> pkbroad
+    8 ldby 28 add ldbl ldsmall
+} def
+/ldmixes {
+    5 srand
+    185 0   (/ColorMix 0: a hard double load) ldbroad
+    110 0.3 (0.3, the default: a short seam)   ldbroad
+     35 1   (1: a smooth gradient across the head) ldbroad
+} def
+20 50 (a broad brush loaded [ochre teal]) { ldmixes } ldpanel
+
+% ======================================================================
+% Bottom row, middle: bushes. Both bushes and both bank lips are the same
+% geometry and seeds. The upper one uses /Highlight and /Shadow alone,
+% which shade toward white and black; the lower adds /HighlightColor
+% (warm) and /ShadowColor (cool) on the dabs and on the oil lip.
+% ======================================================================
+/ldbush {                                    % y hue? -
+    /ldhue exch def /ldby exch def
+    /ldbo << /Size 6 /Scatter 15 /Density 5 /Highlight 1 /Shadow 0.9
+             /Light 135 /Irregular 1 /ColorJitter 0.03 >> def
+    /ldlo << /Width 20 /Ridges 9 /Highlight 0.9 /Shadow 0.9 >> def
+    ldhue {
+        ldbo /HighlightColor [ 1 0.82 0.22 ] put
+        ldbo /ShadowColor [ 0.04 0.10 0.55 ] put
+        ldlo /HighlightColor [ 1 0.82 0.22 ] put
+        ldlo /ShadowColor [ 0.04 0.10 0.55 ] put
+    } if
+    21 srand
+    0.28 0.42 0.20 setrgbcolor
+    newpath 14 ldby 24 sub moveto 226 ldby 24 sub lineto ldlo pkoil
+    22 srand
+    0.18 0.40 0.20 setrgbcolor
+    newpath 50 ldby moveto 120 ldby 10 add lineto 190 ldby lineto ldbo pkdab
+} def
+/ldbushes {
+    170 false ldbush
+     62 true  ldbush
+    8 224 (/Highlight, /Shadow: toward white and black) ldsmall
+    8 100 (+ /HighlightColor warm, /ShadowColor cool) ldsmall
+} def
+270 50 (pkdab and pkoil: highlight and shadow hues) { ldbushes } ldpanel
+
+% ======================================================================
+% Bottom row, right: the loaded evergreen on a shore, its reflection
+% pulled down into the water. The mirror and the srand are inside the
+% procedure, so every pass redraws the same tree and 270 is down the
+% page. The trunk takes the inherited color; the branches grade on
+% their own. The tree stands on a strip of bank above the waterline so
+% its lowest branch does not cross into its own reflection.
+% ======================================================================
+/ldwl 135 def
+/ldshore {
+    ldWATER ldset 0 0 240 ldwl rectfill
+    0.07 0.10 0.12 setrgbcolor 0 ldwl 240 16 rectfill
+    ldTRUNK ldset
+    9 srand
+    120 ldwl 20 add 70 ldtrunk
+    9 srand
+    120 ldwl 20 add 70 ldbranches
+    gsave
+        0 0 240 ldwl rectclip
+        ldTRUNK ldset
+        {
+            9 srand
+            0 ldwl 2 mul translate 1 -1 scale
+            120 ldwl 20 add 70 ldtrunk
+            120 ldwl 20 add 70 ldbranches
+        }
+        << /Direction 270 /OneSided true /Stretch 6 /Offset 56 /Layers 16
+           /Pickup 1 /Under ldWATER >> pkwet
+    grestore
+} def
+520 50 (the loaded evergreen pulled down in a pkwet) { ldshore } ldpanel
+
+% ---- page title ------------------------------------------------------
+gsave
+    0.12 0.12 0.12 setrgbcolor
+    /Helvetica-Bold findfont 15 scalefont setfont
+    20 614 moveto (Loaded brushes: two colors in one stroke) show
+    0.4 0.4 0.4 setrgbcolor
+    /Helvetica findfont 9 scalefont setfont
+    20 598 moveto
+    (/Colors, /ColorMix and /Light on the fan, knife and broad brush; /HighlightColor and /ShadowColor on pkdab and pkoil; and a loaded mark graded by pkwet.) show
+grestore
+
+showpage
