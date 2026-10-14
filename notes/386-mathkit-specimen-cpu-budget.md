@@ -34,4 +34,4 @@ budgets: drychalk 0.155 s, drycharcoal 0.227, drycrayon 0.350, drykit 0.169, pkt
 pigment 0.159 (budget 1 s), paintkit hang guards 0.005-0.012 s. Those have 5.7x or more local
 headroom (1.9x on a 3x runner or better), so they stay. The landscape cookbook's `evergreens`
 recipe is 0.670 s against 2 s, the same ratio the specimen had; it is outside mathkit/strokeglyphs
-and was filed separately. Baseline-relative budgets that would not need this tuning are tracked in #333.
+and was filed separately (#387). Baseline-relative budgets that would not need this tuning are tracked in #333.
