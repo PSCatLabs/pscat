@@ -1,0 +1,458 @@
+%!PS-Adobe-3.0
+%%Title: typewriter.ps -- the /Typewriter font
+%%Creator: pscat -- issue #211 (epic #209, design docs/TYPEWRITER.md)
+%%EndComments
+
+% A dynamic Type 3 font, /Typewriter, that types like a real machine: the
+% Courier Prime outlines (lib/typewriter_outlines.ps), moved by three
+% layers of variation measured from real typed pages
+% (docs/typewriter/REFERENCES.md, docs/TYPEWRITER.md section 5):
+%
+%   machine  fixed quirks per key, from /Machine: an offset, a bent slug
+%            (6% of keys: a vertical offset and a lean), a weight bias.
+%            The same machine's `e` sits high on every page it types.
+%   line     per line, from /Seed: a carriage-return offset, a bounded
+%            smooth error in the line advance, a slight tilt.
+%   strike   per strike, from /Seed, the cell, the key and the strike
+%            index: an offset, a rotation, the rare mis-strike (1%, 4x),
+%            and pressure (finger factor on the little-finger keys, 1% very
+%            light strikes, punctuation struck harder).
+%
+% The defaults follow the measurements, which are a fraction of a point at
+% body size: a page at /Wear 1 looks clean at a glance, as real typing does.
+% Raise /Wear for a battered machine (1.5 is an old, hard-used one; above 2
+% is for art). The ink here is flat: the glyph filled in /Ink and stroked
+% with a round pen whose width follows pressure x key weight x /Ribbon (the
+% ink spreading past the type face). The ribbon weave, clogged counters and
+% one-side-heavy keys are #212's; this file already computes the last two
+% per key (the machine table) so #212 only has to draw them.
+%
+% Use:
+%   (lib/typewriter_outlines.ps) run (lib/typewriter.ps) run
+%   72 700 moveto << /Machine 7 /Seed 3 >> tw-setup
+%   (Dear Sir,) show
+%
+% tw-setup starts a text block: it takes the options (any key; unknown
+% keys are an error), captures the cell frame (below), and sets the font
+% at /Size. tw-set changes options inside a block (a red ribbon run, the
+% strike index for an overtype) without moving the frame. Options persist
+% from one call to the next; /Preset, when given, first resets /Wear,
+% /Ribbon and the pressure model to the preset's values.
+%
+% Plain use works too: `/Typewriter findfont 12.5 scalefont setfont` and
+% `show`, with the defaults (machine 1, seed 1, the frame captured at load).
+% The size given to scalefont plays the part of /Size.
+%
+% Cells. Every random value is keyed by the strike's cell: BuildChar maps
+% its origin back into the frame and rounds it to a column (the advance)
+% and a line (1/6 inch at /Size). Rounding to whole cells keeps pscat and gs
+% on the same draws despite sub-pixel differences. The frame is the CTM
+% when tw-setup runs, moved to the current point if there is one, so an
+% artist's rotate or scale before typing keeps whole lines on one grid. Text
+% placed off the grid lands in its nearest cell.
+%
+% Purity. BuildChar is a pure function of the options, the cell, the code
+% and the strike index: `stringwidth` and `charpath` run it and change
+% nothing a later `show` draws. Glyphs are drawn under setcharwidth, never
+% setcachedevice, so gs never caches one and replays it (TYPEWRITER.md
+% section 4). The library never calls rand or srand: its draws are hashes
+% through a private permutation table, so the caller's rand stream is
+% untouched and `--sweep-seed` varies a piece's composition, not its typing.
+% The same /Machine and /Seed give the same page, in pscat and in gs.
+%
+% Limits, accepted (notes/211-typewriter-font.md):
+%   - It is a Type 3 font, so `charpath` gives no outline (FONTS.md,
+%     Decision 6) and lib/lettering.ps cannot fill it. Use
+%     /CourierPrime-Regular (fonts/catalog/CourierPrime) for outline work.
+%   - Printable ASCII only (32-126). Any other byte advances one cell and
+%     draws nothing, as a key the machine does not have. The apostrophe
+%     and grave are the typewriter's straight ' and `, not the curly
+%     quotes StandardEncoding names for codes 39 and 96.
+%
+% gs: gs -dNOSAFER (or --permit-file-read=lib/) to run the files, as for
+% every library here.
+
+% @requires: (lib/typewriter_outlines.ps) run
+
+% @internal
+/TWState << >> def
+% The side dict is filled inside one procedure, run once, so the scan that
+% builds the capability catalog (build.rs) sees one top-level definition
+% here, not the side dict's own.
+TWState begin {
+
+% ---- the private hash (TYPEWRITER.md section 7) ---------------------------
+% A 256-entry permutation, shuffled once from a fixed constant by the
+% Schrage-form minimal-standard LCG (paintkit's pjrand). The seeds never
+% shuffle it: they enter as hash keys, so a new /Seed never re-rolls the
+% machine's quirks.
+/tLcg 1 def
+/tNext {
+    tLcg 127773 idiv 2836 mul
+    tLcg 127773 mod 16807 mul exch sub
+    dup 0 le { 2147483647 add } if
+    dup /tLcg exch def
+} bind def
+/P [ 0 1 255 { } for ] def
+255 -1 1 {
+    /tI exch def
+    /tJ tNext tI 1 add mod def
+    P tI get P tJ get P tI 3 -1 roll put P tJ 3 -1 roll put
+} for
+
+% a b k -> a' b'. Two Pearson chains over the bytes of k (the second with
+% a different start and offset), so the state is 16 bits: an 8-bit state
+% would give one cell in 256 the same draws as another. Each key is folded
+% a byte at a time, so keys above 255 stay distinct; negative keys (cells
+% left of or below the frame origin) are moved to their own range first.
+/mix2 {
+    dup 0 lt { neg 1000003 add } if cvi
+    {
+        3 1 roll
+        2 index 255 and
+        dup 4 -1 roll add 101 add 255 and P exch get
+        3 1 roll
+        add 255 and P exch get
+        exch
+        3 -1 roll -8 bitshift
+        dup 0 eq { pop exit } if
+    } loop
+} bind def
+
+% slot -> uniform in (0, 1), from the prefix state hA hB. Each quantity
+% passes its own slot as a separate key: adding a slot to another key would
+% make column c+1's x equal column c's y (TYPEWRITER.md section 7).
+/uni { hA hB 3 -1 roll mix2 exch 256 mul add 0.5 add 65536 div } bind def
+% slot -> roughly normal, sd 1 (three uniforms)
+/gau {
+    4 mul dup 1 add uni exch dup 2 add uni exch 3 add uni
+    add add 1.5 sub 2 mul
+} bind def
+% prefix states for the three domains, so a machine and a document with
+% the same number never share draws
+/tDomain { 0 1 3 -1 roll mix2 3 -1 roll mix2 } bind def   % n k -> a b
+
+% ---- defaults -------------------------------------------------------------
+/tMachine 1 def  /tSeed 1 def  /tStrike 0 def
+/tWear 1 def  /tMWear 1 def  /tLWear 1 def  /tSWear 1 def
+/tPitch 10 def  /tSize 12.5 def
+/tInk [0.13 0.13 0.15] def  /tRibbon 0.7 def
+/tPSd 0.08 def  /tFinger true def
+/tMat matrix def
+/tMtabFor null def  /tDocFor null def  /tLineFor null def
+
+% /Preset -> /Wear, /Ribbon and the pressure model (TYPEWRITER.md section 5)
+/tPresets <<
+    /manual   << /tWear 1   /tRibbon 0.7  /tPSd 0.08 /tFinger true >>
+    /electric << /tWear 0.7 /tRibbon 0.7  /tPSd 0.03 /tFinger false >>
+    /worn     << /tWear 1.5 /tRibbon 0.35 /tPSd 0.08 /tFinger true >>
+>> def
+
+% pressure adjustments by code: the little-finger keys (q a z p ; / - and
+% their shifts) strike lighter; . , ' " concentrate the blow on a small face
+% and print darker (TYPEWRITER.md Q3: embossing as extra pressure)
+/tFingerAdj 128 array def
+0 1 127 { tFingerAdj exch 0 put } for
+(qazp;/-QAZP:?_) { tFingerAdj exch -0.1 put } forall
+/tEmbossAdj 128 array def
+0 1 127 { tEmbossAdj exch 0 put } for
+(.,'") { tEmbossAdj exch 0.15 put } forall
+
+% ---- the machine table ----------------------------------------------------
+% One entry per printable code, at /Wear 1 (wear scales them at the strike):
+% [ x y rotation weight-deviation clog-fraction one-side-angle one-side-strength ]
+% in glyph units (1000/em; 80 units = 1pt at /Size 12.5) and degrees.
+% clog and one-side are 0 for keys without the quirk; #212 draws them.
+/tMbuild {
+    /tMtab 95 array def
+    32 1 126 {
+        /kCode exch def
+        tMA tMB kCode mix2 /hB exch def /hA exch def
+        1 gau 6.4 mul                               % x: sd 0.08pt
+        2 gau 6.4 mul                               % y: sd 0.08pt
+        0                                           % lean
+        3 uni 0.06 lt {                             % bent slug, 6% of keys
+            pop
+            4 uni 12 mul 8 add 5 uni 0.5 lt { neg } if add   % 0.1-0.25pt
+            6 uni 0.5 mul 0.3 add 7 uni 0.5 lt { neg } if    % 0.3-0.8 degrees
+        } if
+        8 gau 0.06 mul                              % weight: sd 0.06
+        TWOutlines kCode get 1 get length 0 gt {    % clogged counter
+            9 uni kCode 97 eq kCode 101 eq or kCode 111 eq or { 0.3 } { 0.15 } ifelse lt
+            { 10 uni 0.5 mul 0.5 add } { 0 } ifelse
+        } { 0 } ifelse
+        11 uni 0.08 lt {                            % one side heavy, 8% of keys
+            12 uni 360 mul 13 uni 0.3 mul 0.3 add
+        } { 0 0 } ifelse
+        7 array astore tMtab kCode 32 sub 3 -1 roll put
+    } for
+    /tMtabFor tMachine def
+} bind def
+
+% ---- options --------------------------------------------------------------
+/tIsNum { type dup /integertype eq exch /realtype eq or } bind def
+/tIsInt { type /integertype eq } bind def
+/tIsNonNeg { dup tIsNum { 0 ge } { pop false } ifelse } bind def
+/tIsPos { dup tIsNum { 0 gt } { pop false } ifelse } bind def
+/tIsUnit { dup tIsNum { dup 0 ge exch 1 le and } { pop false } ifelse } bind def
+/tIsRgb {
+    dup type /arraytype eq {
+        dup length 3 eq { true exch { tIsUnit and } forall } { pop false } ifelse
+    } { pop false } ifelse
+} bind def
+/tIsPreset { dup type /nametype eq { tPresets exch known } { pop false } ifelse } bind def
+
+% the option keys: internal name, check, guard
+/tKeys <<
+    /Preset      [ null         /tIsPreset /tw-preset-must-be-manual-electric-or-worn ]
+    /Machine     [ /tMachine    /tIsInt    /tw-machine-must-be-an-integer ]
+    /Seed        [ /tSeed       /tIsInt    /tw-seed-must-be-an-integer ]
+    /Strike      [ /tStrike     /tIsInt    /tw-strike-must-be-an-integer ]
+    /Wear        [ /tWear       /tIsNonNeg /tw-wear-must-be-a-non-negative-number ]
+    /MachineWear [ /tMWear      /tIsNonNeg /tw-wear-must-be-a-non-negative-number ]
+    /LineWear    [ /tLWear      /tIsNonNeg /tw-wear-must-be-a-non-negative-number ]
+    /StrikeWear  [ /tSWear      /tIsNonNeg /tw-wear-must-be-a-non-negative-number ]
+    /Pitch       [ /tPitch      /tIsPos    /tw-pitch-must-be-a-positive-number ]
+    /Size        [ /tSize       /tIsPos    /tw-size-must-be-a-positive-number ]
+    /Ink         [ /tInk        /tIsRgb    /tw-ink-must-be-an-rgb-array ]
+    /Ribbon      [ /tRibbon     /tIsUnit   /tw-ribbon-must-be-0-to-1 ]
+>> def
+
+% opts -> -  (TWState is the current dict). Every key is checked before any
+% is applied, so a rejected call changes nothing.
+/tApply {
+    dup type /dicttype ne { pop tw-options-must-be-a-dict } if
+    dup { pop tKeys exch known not { tw-unknown-option } if } forall
+    dup {
+        exch tKeys exch get aload pop               % value internal check guard
+        3 index 2 index cvx exec { pop pop pop pop } { 4 1 roll pop pop pop cvx exec } ifelse
+    } forall
+    dup /Preset known { dup /Preset get tPresets exch get { def } forall } if
+    {
+        exch tKeys exch get 0 get dup null eq { pop pop } { exch def } ifelse
+    } forall
+    tDerive
+} bind def
+
+% the values every strike reads, from the options
+/tDerive {
+    /advU 72000 tPitch div tSize div def        % the advance, glyph units
+    /xS advU 600 div def                        % the face is drawn on 600
+    /wearM tWear tMWear mul def
+    /wearL tWear tLWear mul def
+    /wearS tWear tSWear mul def
+    tDocFor tSeed ne {
+        5 tSeed tDomain /docB exch def /docA exch def
+        /tDocFor tSeed def /tLineFor null def
+    } if
+    tMtabFor tMachine ne {
+        6 tMachine tDomain /tMB exch def /tMA exch def
+        tMbuild
+    } if
+} bind def
+
+% the cell frame: the CTM, moved to the current point if there is one
+/tFrame {
+    { currentpoint } stopped { matrix } { matrix translate } ifelse
+    matrix currentmatrix matrix concatmatrix matrix invertmatrix
+    /frameInv exch def
+    /tLineFor null def
+} bind def
+
+% ---- the strike -----------------------------------------------------------
+/tLen { dup mul exch dup mul add sqrt } bind def
+
+% knot -> -1..1, the line-advance noise at a knot
+/tKnot {
+    docA docB 3 mix2 3 -1 roll mix2 /hB exch def /hA exch def
+    1 uni 2 mul 1 sub
+} bind def
+
+% the line layer, for kLine (glyph units and degrees)
+/tLbuild {
+    docA docB 1 mix2 kLine mix2 /hB exch def /hA exch def
+    /lX 1 gau 16 mul wearL mul def              % carriage return: sd 0.2pt
+    /lTilt 2 gau 0.08 mul wearL mul def         % tilt: sd 0.08 degrees
+    % advance error: smooth in the line index, bounded at 0.3pt (not a
+    % random walk), knots every two lines, smoothstep between them
+    kLine 2 div dup floor dup /tKn exch def sub
+    dup dup mul exch 2 mul 3 exch sub mul /tS exch def
+    tKn tKnot 1 tS sub mul tKn 1 add tKnot tS mul add 24 mul wearL mul /lY exch def
+    /tLineFor kLine def
+} bind def
+
+% code -> -  draws one strike in the current cell (TWState is current)
+/tStrikeGlyph {
+    /kCode exch def
+    % the cell: the glyph origin in the frame, in advances and line pitches
+    0 0 transform frameInv transform /fY exch def /fX exch def
+    advU 0 dtransform frameInv dtransform tLen /cellW exch def
+    0 12000 dtransform frameInv dtransform tLen tSize div /cellH exch def
+    fX cellW div round cvi /kCol exch def
+    fY cellH div round cvi /kLine exch def
+
+    tLineFor kLine ne { tLbuild } if
+    tMtab kCode 32 sub get aload pop
+    pop pop pop /mWt exch def /mR exch def /mY exch def /mX exch def
+
+    docA docB 2 mix2 kLine mix2 kCol mix2 kCode mix2 tStrike mix2
+    /hB exch def /hA exch def
+    /sX 1 gau 16 mul wearS mul def              % sd 0.2pt
+    /sY 2 gau 12 mul wearS mul def              % sd 0.15pt
+    /sR 3 gau 0.25 mul wearS mul def            % sd 0.25 degrees
+    4 uni 0.01 lt { /sX sX 4 mul def /sY sY 4 mul def } if    % mis-strike
+    % pressure: a deviation from 1, scaled by the strike wear
+    5 uni 0.01 lt { -0.5 } {                    % 1% very light
+        6 gau tPSd mul
+        tFinger { tFingerAdj kCode get add } if
+        tEmbossAdj kCode get add
+    } ifelse
+    wearS mul 1 add dup 0.1 lt { pop 0.1 } if
+    mWt wearM mul 1 add dup 0.1 lt { pop 0.1 } if mul
+    48 mul tRibbon mul /inkW exch def           % spread: 0.6pt x ribbon at 1
+
+    % place: line + machine + strike offsets, the tilt's rise along the
+    % line, then the rotations about the middle of the face
+    lX mX wearM mul add sX add
+    lY mY wearM mul add sY add kCol advU mul lTilt sin mul lTilt cos div add
+    translate
+    advU 2 div 250 translate
+    lTilt mR wearM mul add sR add rotate
+    advU 2 div neg -250 translate
+
+    tInk aload pop setrgbcolor
+    TWOutlines kCode get
+    tMat currentmatrix pop
+    xS 1 scale newpath dup 0 get exec 1 get exec
+    tMat setmatrix                              % a round pen, not a squeezed one
+    inkW 0 gt {
+        gsave fill grestore inkW setlinewidth 1 setlinejoin stroke
+    } { fill } ifelse
+} bind def
+
+} exec end % TWState
+
+% Load-time state: the defaults, and the frame the default CTM gives, so
+% plain findfont/show works without tw-setup.
+TWState begin << >> tApply tFrame end
+
+{ /Typewriter 8 dict dup begin
+    /FontType 3 def
+    /FontMatrix [0.001 0 0 0.001 0 0] def
+    /FontBBox [-200 -380 800 940] def
+    /Encoding StandardEncoding def
+    % The side dict rides in the font: gs makes the font dict read-only at
+    % definefont, and the side dict, reached through it, stays writable.
+    /TWS TWState def
+    /BuildChar {
+        exch /TWS get begin
+        advU 0 setcharwidth                     % never setcachedevice
+        dup 32 gt 1 index 127 lt and { tStrikeGlyph } { pop } ifelse
+        end
+    } bind def
+end definefont pop } exec
+
+%%SelfTest: tw-setup-guards
+%   { 5 tw-setup } /tw-options-must-be-a-dict
+%   (a number for the options) mustguard
+%
+%   { << /wear 2 >> tw-setup } /tw-unknown-option
+%   (a misspelt key) mustguard
+%
+%   { << /Preset /portable >> tw-setup } /tw-preset-must-be-manual-electric-or-worn
+%   (an unknown preset) mustguard
+%
+%   { << /Machine 2.5 >> tw-setup } /tw-machine-must-be-an-integer
+%   (a real machine number) mustguard
+%
+%   { << /Seed (1) >> tw-set } /tw-seed-must-be-an-integer
+%   (a string seed) mustguard
+%
+%   { << /Strike 1.0 >> tw-set } /tw-strike-must-be-an-integer
+%   (a real strike index) mustguard
+%
+%   { << /Wear -1 >> tw-setup } /tw-wear-must-be-a-non-negative-number
+%   (a negative wear) mustguard
+%
+%   { << /StrikeWear /high >> tw-set } /tw-wear-must-be-a-non-negative-number
+%   (a name for a layer's wear) mustguard
+%
+%   { << /Pitch 0 >> tw-setup } /tw-pitch-must-be-a-positive-number
+%   (a zero pitch) mustguard
+%
+%   { << /Size -12 >> tw-setup } /tw-size-must-be-a-positive-number
+%   (a negative size) mustguard
+%
+%   { << /Ink [0 0] >> tw-setup } /tw-ink-must-be-an-rgb-array
+%   (two components) mustguard
+%
+%   { << /Ribbon 1.5 >> tw-setup } /tw-ribbon-must-be-0-to-1
+%   (a ribbon above 1) mustguard
+%
+%   { << /Machine 9 /Wear -1 >> tw-setup } /tw-wear-must-be-a-non-negative-number
+%   (one bad key among good ones) mustguard
+%   TWState /tMachine get 1 eq (and the good ones were not applied) mustbe
+%%EndSelfTest
+
+%%SelfTest: tw-setup-applies-presets-and-keys
+%   << /Preset /worn >> tw-setup
+%   TWState /tWear get 1.5 eq TWState /tRibbon get 0.35 eq and
+%   (the worn preset) mustbe
+%
+%   << /Preset /electric /Ribbon 0.9 >> tw-setup
+%   TWState /tWear get 0.7 eq TWState /tRibbon get 0.9 eq and
+%   TWState /tFinger get not and
+%   (a key given with a preset overrides it) mustbe
+%
+%   << /Machine 4 >> tw-set
+%   TWState /tWear get 0.7 eq TWState /tMachine get 4 eq and
+%   (options persist from call to call) mustbe
+%
+%   << /Pitch 12 /Size 11.5 >> tw-setup
+%   currentfont /TWS known (tw-setup sets the font) mustbe
+%   (M) stringwidth pop 6 sub abs 0.001 lt (elite: a 6pt advance at 12 cpi) mustbe
+%
+%   << /Preset /manual /Pitch 10 /Size 12.5 /Machine 1 /Seed 1 >> tw-setup
+%   (x) stringwidth pop 7.2 sub abs 0.001 lt (pica: a 7.2pt advance at 10 cpi) mustbe
+%%EndSelfTest
+
+% @kind: Procedure
+% @summary: Starts a block of typewriter text: applies the options (a /Preset first, then any other key; options persist from call to call), captures the cell frame (the CTM, moved to the current point if there is one) and sets the /Typewriter font at /Size. Then `show` types. The same /Machine and /Seed always type the same page; the caller's rand stream is untouched.
+% @example: (lib/typewriter_outlines.ps) run (lib/typewriter.ps) run 72 700 moveto << /Machine 7 /Seed 3 >> tw-setup (Dear Sir, I enclose the specimens.) show
+% @param: /Preset [name] /manual (a good-condition manual), /electric (a lower-variation manual with even pressure) or /worn (an old, hard-used machine with a dry ribbon); resets /Wear, /Ribbon and the pressure model before the other keys apply (default /manual)
+% @param: /Machine [integer] The machine: seeds each key's fixed quirks (offset, bent slug, weight). A new /Seed never re-rolls them (default 1)
+% @param: /Seed [integer] The document: seeds the line and strike variation (default 1)
+% @param: /Wear [ratio] Multiplies every variation: 0 is a perfect machine, 1 the measured good-condition manual, 1.5 an old one, above 2 for art (default 1)
+% @param: /MachineWear [ratio] Multiplies the machine layer only, on top of /Wear (default 1)
+% @param: /LineWear [ratio] Multiplies the line layer only, on top of /Wear (default 1)
+% @param: /StrikeWear [ratio] Multiplies the strike layer only, pressure included, on top of /Wear (default 1)
+% @param: /Pitch [count per inch] Characters per inch: 10 is pica, 12 elite. Sets the advance; the glyphs are squeezed to fit it (default 10)
+% @param: /Size [points] The type's em, which sets its height (default 12.5; 11.5 suits elite)
+% @param: /Ink [rgb array] The ribbon's colour; a worn ribbon is a lighter, browner colour here (default [0.13 0.13 0.15])
+% @param: /Ribbon [0..1] Ribbon wetness: how far the ink spreads past the type face, 0 for none (default 0.7)
+% @param: /Strike [integer] The strike index: a second strike at the same cell (a strikeover, a bold double strike) needs a new index to get its own variation (default 0)
+/tw-setup {
+    TWState begin tApply tFrame end
+    /Typewriter findfont TWState /tSize get scalefont setfont
+} bind def
+
+% @kind: Procedure
+% @summary: Changes /Typewriter options inside a block without moving its cell frame: a red ribbon run (/Ink), the strike index for an overtype (/Strike), a heavier hand. Takes tw-setup's keys; a /Size given also resets the font.
+% @example: (lib/typewriter_outlines.ps) run (lib/typewriter.ps) run 72 700 moveto << >> tw-setup (word) show 72 700 moveto << /Strike 1 >> tw-set (____) show << /Strike 0 >> tw-set
+% @param: /Preset [name] As tw-setup: /manual, /electric or /worn (no default: the current options stay)
+% @param: /Machine [integer] As tw-setup (no default: the current value stays)
+% @param: /Seed [integer] As tw-setup (no default: the current value stays)
+% @param: /Wear [ratio] As tw-setup (no default: the current value stays)
+% @param: /MachineWear [ratio] As tw-setup (no default: the current value stays)
+% @param: /LineWear [ratio] As tw-setup (no default: the current value stays)
+% @param: /StrikeWear [ratio] As tw-setup (no default: the current value stays)
+% @param: /Pitch [count per inch] As tw-setup (no default: the current value stays)
+% @param: /Size [points] As tw-setup; also resets the font at the new size (no default: the current value stays)
+% @param: /Ink [rgb array] As tw-setup (no default: the current value stays)
+% @param: /Ribbon [0..1] As tw-setup (no default: the current value stays)
+% @param: /Strike [integer] As tw-setup (no default: the current value stays)
+/tw-set {
+    dup type /dicttype eq { dup /Size known } { false } ifelse exch
+    TWState begin tApply end
+    { /Typewriter findfont TWState /tSize get scalefont setfont } if
+} bind def

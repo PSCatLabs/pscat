@@ -25,24 +25,30 @@
 //! mathkit (#237) was written bound from the start; it needs handscript
 //! and strokeglyphs, which are not bound, so those, like hatchkit, load
 //! before the snapshot and the walk never sees them.
+//! typewriter (#211) was written bound from the start; its generated
+//! outline table (lib/typewriter_outlines.ps) binds each glyph procedure as
+//! it is read and holds them in a dict the walk does not enter, so it loads
+//! as a prerequisite.
 
 use pscat::Interp;
 
-const LIBS: [&str; 6] = [
+const LIBS: [&str; 7] = [
     "lib/artkit.ps",
     "lib/paintkit.ps",
     "lib/drykit.ps",
     "lib/drychalk.ps",
     "lib/drycharcoal.ps",
     "lib/mathkit.ps",
+    "lib/typewriter.ps",
 ];
 
 /// Libraries a checked one needs but that are not themselves checked:
 /// loaded before the snapshot, so their names are part of the baseline.
-const PREREQS: [&str; 3] = [
+const PREREQS: [&str; 4] = [
     "lib/handscript.ps",
     "lib/strokeglyphs.ps",
     "lib/hatchkit.ps",
+    "lib/typewriter_outlines.ps",
 ];
 
 /// Defines the walker, snapshots userdict, and leaves its checks for

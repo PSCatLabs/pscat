@@ -1,0 +1,352 @@
+//! The /Typewriter font (issue #211; design `docs/TYPEWRITER.md`).
+//!
+//! The option guards and presets are `%%SelfTest` blocks in
+//! `lib/typewriter.ps`. These tests need pixels or a real `gs`: the same
+//! seeds give the same page, repeated strikes differ while a machine's
+//! quirks hold, a second strike at one cell differs, `stringwidth` and
+//! `charpath` change nothing, the caller's `rand` stream is untouched, zero
+//! variation is the plain Courier Prime face, Ghostscript types the same
+//! page without caching a glyph, and a strip fits the CI budget.
+
+mod common;
+
+use common::within_cpu_budget;
+use pscat::Interp;
+use std::time::Duration;
+
+const LIBS: [&str; 2] = ["lib/typewriter_outlines.ps", "lib/typewriter.ps"];
+
+/// 300 dpi: a pica cell (7.2pt) is exactly 30 px and a line (12pt) 50 px,
+/// so cells that start on the frame's grid start on whole pixels and two
+/// strikes with the same variation rasterize the same.
+const SCALE: f32 = 300.0 / 72.0;
+const CELL: usize = 30;
+const LINE: usize = 50;
+/// The page, in points, and where typing starts: (36, 84) is (150, 150) px
+/// from the top left.
+const W: u32 = 288;
+const H: u32 = 120;
+const X0: usize = 150;
+const Y0: usize = 150;
+
+fn load(it: &mut Interp) {
+    for path in LIBS {
+        let src = std::fs::read(path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        it.run_source(&src)
+            .unwrap_or_else(|e| panic!("{path} failed to load: {}", it.error_report(&e)));
+    }
+}
+
+/// Runs `src` on a white page with the libraries loaded.
+fn render(src: &str) -> Interp {
+    let mut it = Interp::with_page_scaled(W, H, SCALE).expect("page");
+    load(&mut it);
+    it.run_str(&format!("1 setgray clippath fill {src}"))
+        .unwrap_or_else(|e| panic!("{src}: {}", it.error_report(&e)));
+    it
+}
+
+/// Darkness (255 - luminance) per pixel.
+fn ink(it: &Interp) -> Vec<u8> {
+    it.gfx()
+        .pixmap
+        .pixels()
+        .iter()
+        .map(|p| 255 - ((u32::from(p.red()) + u32::from(p.green()) + u32::from(p.blue())) / 3) as u8)
+        .collect()
+}
+
+fn width_px() -> usize {
+    (W as f32 * SCALE).round() as usize
+}
+
+/// The pixels of the two-cell box around cell (`line`, `col`): one cell to
+/// either side of the glyph's advance, from an ascender to a descender.
+fn cell(img: &[u8], line: usize, col: usize) -> Vec<u8> {
+    let w = width_px();
+    let (x0, y0) = (X0 + col * CELL - CELL / 2, Y0 + line * LINE - 40);
+    let mut out = Vec::with_capacity(2 * CELL * 52);
+    for y in y0..y0 + 52 {
+        out.extend_from_slice(&img[y * w + x0..y * w + x0 + 2 * CELL]);
+    }
+    out
+}
+
+/// Types `text` on three lines at the default grid, with `opts`.
+fn three_lines(opts: &str, text: &str) -> Vec<u8> {
+    ink(&render(&format!(
+        "36 84 moveto << {opts} >> tw-setup ({text}) show \
+         36 72 moveto ({text}) show 36 60 moveto ({text}) show"
+    )))
+}
+
+fn mean_diff(a: &[u8], b: &[u8]) -> f64 {
+    a.iter()
+        .zip(b)
+        .map(|(x, y)| (f64::from(*x) - f64::from(*y)).abs())
+        .sum::<f64>()
+        / a.len() as f64
+}
+
+const PARAGRAPH: &str = "Dear Sir, In reply to your letter of June 22";
+
+#[test]
+fn the_same_seeds_type_the_same_page_byte_for_byte() {
+    let page = |opts: &str| three_lines(opts, PARAGRAPH);
+    let a = page("/Machine 7 /Seed 3");
+    assert_eq!(a, page("/Machine 7 /Seed 3"), "same seeds, another page");
+    assert_ne!(a, page("/Machine 7 /Seed 4"), "a new /Seed changed nothing");
+    assert_ne!(a, page("/Machine 8 /Seed 3"), "a new /Machine changed nothing");
+    // Plain use, without tw-setup: the load-time defaults and frame.
+    let plain = || {
+        ink(&render(&format!(
+            "/Typewriter findfont 12.5 scalefont setfont 36 84 moveto ({PARAGRAPH}) show"
+        )))
+    };
+    assert_eq!(plain(), plain(), "plain findfont/show is not deterministic");
+}
+
+#[test]
+fn repeated_strikes_differ_but_a_machines_quirks_hold() {
+    // Every other cell, so a box holds one glyph and its neighbours' ink
+    // stays out of it.
+    let text = "e e e e e e e";
+    let cells = |img: &[u8]| -> Vec<Vec<u8>> {
+        (0..3)
+            .flat_map(|line| (0..7).map(move |k| (line, 2 * k)))
+            .map(|(line, col)| cell(img, line, col))
+            .collect()
+    };
+    let full = cells(&three_lines("/Machine 2 /Seed 5", text));
+    for i in 0..full.len() {
+        for j in i + 1..full.len() {
+            assert_ne!(full[i], full[j], "strikes {i} and {j} of `e` are identical");
+        }
+    }
+    // Machine quirks only: every `e` is the same `e`, on every line and in
+    // every document, and another machine's `e` is a different one.
+    let quirks = "/Machine 2 /LineWear 0 /StrikeWear 0";
+    let only = cells(&three_lines(&format!("{quirks} /Seed 5"), text));
+    assert!(only.iter().all(|c| *c == only[0]), "a machine quirk moved within a page");
+    assert!(only[0].iter().any(|&p| p > 128), "the box missed the glyph");
+    let other_doc = cells(&three_lines(&format!("{quirks} /Seed 6"), text));
+    assert_eq!(only[0], other_doc[0], "a new /Seed re-rolled the machine's quirks");
+    let other_machine = cells(&three_lines(
+        "/Machine 3 /LineWear 0 /StrikeWear 0 /Seed 5",
+        text,
+    ));
+    assert_ne!(only[0], other_machine[0], "two machines type the same `e`");
+}
+
+#[test]
+fn a_second_strike_at_a_cell_differs_from_the_first() {
+    let strike = |n: i32| {
+        cell(
+            &ink(&render(&format!(
+                "36 84 moveto << /Machine 1 /Seed 1 /Strike {n} >> tw-setup (a) show"
+            ))),
+            0,
+            0,
+        )
+    };
+    assert_eq!(strike(0), strike(0));
+    assert_ne!(strike(0), strike(1), "strike index 1 retyped strike 0 exactly");
+    assert_ne!(strike(1), strike(2));
+}
+
+#[test]
+fn stringwidth_and_charpath_change_nothing_a_later_show_draws() {
+    let setup = "36 84 moveto << /Machine 4 /Seed 2 >> tw-setup";
+    let plain = ink(&render(&format!("{setup} ({PARAGRAPH}) show")));
+    let probed = ink(&render(&format!(
+        "{setup} ({PARAGRAPH}) stringwidth pop pop \
+         gsave newpath 36 84 moveto ({PARAGRAPH}) true charpath newpath grestore \
+         36 84 moveto ({PARAGRAPH}) show"
+    )));
+    assert_eq!(plain, probed, "stringwidth or charpath changed the page");
+    let blank = ink(&render(&format!(
+        "{setup} ({PARAGRAPH}) stringwidth pop pop newpath 36 84 moveto ({PARAGRAPH}) false charpath newpath"
+    )));
+    assert!(blank.iter().all(|&p| p == 0), "stringwidth or charpath painted");
+    // The advance is the pitch, whatever the glyph's variation.
+    let mut it = render(&format!("{setup} (abc) stringwidth"));
+    let stack: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
+    assert_eq!(stack.len(), 2);
+    let wx: f64 = stack[0].parse().expect("a number");
+    assert!((wx - 21.6).abs() < 1e-6, "three pica advances: {wx}");
+    it.run_str("clear").expect("clear");
+}
+
+#[test]
+fn the_callers_rand_stream_is_untouched() {
+    let draws = |src: &str| -> Vec<String> {
+        let mut it = Interp::with_page_scaled(W, H, SCALE).expect("page");
+        it.run_str("42 srand").expect("srand");
+        if !src.is_empty() {
+            load(&mut it);
+            it.run_str(src)
+                .unwrap_or_else(|e| panic!("{src}: {}", it.error_report(&e)));
+        }
+        it.run_str("rand rand rand").expect("rand");
+        it.operand_stack().iter().map(|o| o.repr()).collect()
+    };
+    let bare = draws("");
+    let typed = draws(&format!(
+        "36 84 moveto << /Machine 5 /Seed 5 /Wear 3 >> tw-setup ({PARAGRAPH}) show \
+         << /Machine 6 /Strike 1 >> tw-set ({PARAGRAPH}) stringwidth pop pop"
+    ));
+    assert_eq!(bare, typed, "loading or typing drew from rand");
+}
+
+#[test]
+fn zero_variation_is_the_plain_courier_prime_face() {
+    // /Wear 0 removes every variation; /Ribbon 0 the ink spread. What is
+    // left must be Courier Prime itself, drawn here from the TrueType file
+    // through pscat's own font machinery, squeezed to pica as the font is.
+    // Each character is placed on the pica grid: the TTF's own advance is
+    // 1228/2048 em, 0.07% short of Courier's 600 units, which a whole line
+    // of `show` would accumulate.
+    let zero = ink(&render(&format!(
+        "36 84 moveto << /Wear 0 /Ribbon 0 >> tw-setup ({PARAGRAPH}) show"
+    )));
+    let ttf = ink(&render(&format!(
+        "0.13 0.13 0.15 setrgbcolor \
+         /CourierPrime-Regular findfont [12.5 0.96 mul 0 0 12.5 0 0] makefont setfont \
+         /i 0 def ({PARAGRAPH}) {{ 36 i 7.2 mul add 84 moveto ( ) dup 0 4 -1 roll put show /i i 1 add def }} forall"
+    )));
+    let worn = ink(&render(&format!(
+        "36 84 moveto << /Wear 0 >> tw-setup ({PARAGRAPH}) show"
+    )));
+    let same = mean_diff(&zero, &ttf);
+    let spread = mean_diff(&worn, &ttf);
+    eprintln!("zero variation vs the TTF: {same:.4}; with the ink spread: {spread:.4}");
+    assert!(ttf.iter().any(|&p| p > 128), "the TTF did not render");
+    assert!(same < 0.05, "zero variation is not the plain face: {same:.4}");
+    assert!(spread > 20.0 * same.max(0.01), "the comparison cannot tell a spread stroke");
+    // And with no variation, the seeds have nothing to vary.
+    let seeded = ink(&render(&format!(
+        "36 84 moveto << /Wear 0 /Ribbon 0 /Machine 9 /Seed 9 >> tw-setup ({PARAGRAPH}) show"
+    )));
+    assert_eq!(zero, seeded, "seeds moved a glyph at /Wear 0");
+}
+
+#[test]
+fn a_strip_types_within_the_cpu_budget() {
+    let src = format!(
+        "36 84 moveto << /Preset /worn /Machine 2 >> tw-setup ({PARAGRAPH} {PARAGRAPH}) show \
+         36 72 moveto ({PARAGRAPH} {PARAGRAPH}) show 36 60 moveto ({PARAGRAPH} {PARAGRAPH}) show"
+    );
+    within_cpu_budget("typewriter strip", Duration::from_secs(2), 3, || {
+        render(&src);
+    });
+}
+
+fn gs_available() -> bool {
+    std::process::Command::new("gs")
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success())
+}
+
+/// Renders `body` in Ghostscript at this file's page and scale; darkness
+/// per pixel.
+fn gs_ink(tag: &str, body: &str) -> Vec<u8> {
+    let mut src = String::new();
+    for path in LIBS {
+        src.push_str(&std::fs::read_to_string(path).expect("read lib"));
+        src.push('\n');
+    }
+    src.push_str(&format!("1 setgray clippath fill {body}\nshowpage\n"));
+    let dir = std::env::temp_dir().join(format!("pscat-typewriter-{}-{tag}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let file = dir.join("tw.ps");
+    let png = dir.join("tw.png");
+    std::fs::write(&file, src).expect("write");
+    let px = width_px();
+    let status = std::process::Command::new("gs")
+        .args(["-dNOPAUSE", "-dBATCH", "-q", "-sDEVICE=png16m"])
+        .arg(format!("-g{px}x{}", (H as f32 * SCALE).round() as usize))
+        .arg("-r300")
+        .arg(format!("-o{}", png.display()))
+        .arg(&file)
+        .stdin(std::process::Stdio::null())
+        .status()
+        .expect("run gs");
+    assert!(status.success(), "gs rejected the typewriter driver");
+    let img = tiny_skia::Pixmap::decode_png(&std::fs::read(&png).expect("png")).expect("decode");
+    let _ = std::fs::remove_dir_all(&dir);
+    img.pixels()
+        .iter()
+        .map(|p| 255 - ((u32::from(p.red()) + u32::from(p.green()) + u32::from(p.blue())) / 3) as u8)
+        .collect()
+}
+
+/// Ghostscript: no strike is a cached replay of another (the reason the
+/// font uses setcharwidth), a machine's quirks hold, and the page is the
+/// one pscat types, cell for cell, with another seed as the negative
+/// control. Local only: CI has no gs.
+#[test]
+fn ghostscript_types_the_same_page_and_caches_no_glyph() {
+    if !gs_available() {
+        eprintln!("skipping gs typewriter check: gs not installed");
+        return;
+    }
+    let text = "e e e e e e e";
+    let driver = |opts: &str| {
+        format!(
+            "36 84 moveto << {opts} >> tw-setup ({text}) show \
+             36 72 moveto ({text}) show 36 60 moveto ({text}) show"
+        )
+    };
+    let cells = |img: &[u8]| -> Vec<Vec<u8>> {
+        (0..3)
+            .flat_map(|line| (0..7).map(move |k| (line, 2 * k)))
+            .map(|(line, col)| cell(img, line, col))
+            .collect()
+    };
+    let gs_full = gs_ink("full", &driver("/Machine 2 /Seed 5 /Wear 2"));
+    let strikes = cells(&gs_full);
+    for i in 0..strikes.len() {
+        for j in i + 1..strikes.len() {
+            assert_ne!(strikes[i], strikes[j], "gs replayed strike {i} as strike {j}");
+        }
+    }
+    let quirks = cells(&gs_ink(
+        "quirks",
+        &driver("/Machine 2 /Seed 5 /LineWear 0 /StrikeWear 0"),
+    ));
+    assert!(quirks.iter().all(|c| *c == quirks[0]), "gs moved a machine quirk");
+
+    // The same draws as pscat: compare cell by cell, by ink mass and
+    // centroid, which do not depend on the two rasterizers' edges.
+    let summary = |img: &[u8]| -> Vec<(f64, f64, f64)> {
+        cells(img)
+            .iter()
+            .map(|c| {
+                let (mut m, mut sx, mut sy) = (0.0, 0.0, 0.0);
+                for (i, &p) in c.iter().enumerate() {
+                    let p = f64::from(p);
+                    m += p;
+                    sx += p * (i % (2 * CELL)) as f64;
+                    sy += p * (i / (2 * CELL)) as f64;
+                }
+                (m, sx / m, sy / m)
+            })
+            .collect()
+    };
+    let centroid_gap = |a: &[(f64, f64, f64)], b: &[(f64, f64, f64)]| {
+        a.iter()
+            .zip(b)
+            .map(|(p, q)| ((p.1 - q.1).powi(2) + (p.2 - q.2).powi(2)).sqrt())
+            .sum::<f64>()
+            / a.len() as f64
+    };
+    let gs = summary(&gs_full);
+    let ours = summary(&three_lines("/Machine 2 /Seed 5 /Wear 2", text));
+    let other = summary(&three_lines("/Machine 2 /Seed 6 /Wear 2", text));
+    let same = centroid_gap(&gs, &ours);
+    let differ = centroid_gap(&gs, &other);
+    eprintln!("gs vs pscat: mean centroid gap {same:.3} px; another seed {differ:.3} px");
+    assert!(same < 0.25, "gs and pscat place the strikes differently: {same:.3} px");
+    assert!(differ > 2.0 * same, "another seed is as close ({differ:.3}): the check is too weak");
+}
