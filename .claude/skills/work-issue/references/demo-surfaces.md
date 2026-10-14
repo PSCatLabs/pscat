@@ -15,7 +15,10 @@ look at.
     `gallery/README.md`, *and* render + commit
     `gallery/renders/<name>.png` — `show.sh`'s default (non-`--live`)
     mode silently skips any piece missing that PNG, which defeats the
-    whole point.
+    whole point. Record the exact `gs` invocation the piece needs in its header comment and the
+    README entry: a piece that reads a file (`(lib/artkit.ps) run`) needs `-dNOSAFER` or
+    `--permit-file-read=<dir>` plus relative paths, and gs run in the default safe mode fails it
+    with `invalidfileaccess`.
   - The published site: a card in `site/gallery.html`, backed by a
     PNG in `_site/assets/renders/`. For a gallery piece, that PNG
     comes free from `build_site.sh`'s existing
@@ -42,6 +45,9 @@ look at.
   head SHA and rendered **after the final rebase**: a render taken before it can show a library
   that is no longer the one in the PR (#286 had none, #303). Re-render and re-push if the rebase
   moved `lib/`.
+  Merging `main` into the branch after you pinned the image URLs (a `DIRTY` resolution, 8.12) moves
+  the head: the pinned SHA is then stale, and a stale SHA still renders, so nobody notices. Re-pin
+  every URL to the new head and update the body with `gh pr edit <PR#> --body-file <file>`.
 
   Copy an existing similar entry's pattern rather than guessing which
   of these apply. An `examples/*.ps` file alone is a regression

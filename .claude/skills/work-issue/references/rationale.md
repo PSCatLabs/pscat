@@ -301,3 +301,15 @@ computed `mergeable`/`mergeStateStatus`, which can print `false` or `UNKNOWN` fo
 after a watch ends even with every check green, so it is repeated right before `gh pr merge`.
 Pattern kills (`pkill -f`) are forbidden outright because every agent on the machine shares one
 process table: only a PID you recorded from `$!` is yours.
+
+## Round 8 (#331): a way out without a PR, prototypes, and a no-merge hand-over that is green
+
+The skill assumed every run ends in a PR. A run whose measurement disproves the issue and leaves
+nothing worth committing had no exit: finish.md's "Close without a PR" is that exit (the
+`Refs` won't-change PR stays for findings worth shipping as notes). The plan gate says no code
+before the advisor call; a throwaway prototype in a scratch worktree is code that is never
+shipped, so it is allowed after the gate, cleaned up by exact path. A no-merge dispatch used to
+stop before 8.12, which left the maintainer a PR with CI possibly red or running; it now waits for
+green and stops before 8.13 only. Timing advice has one home (pitfalls "Prototypes and timing"),
+points at `bench_compare.sh` and the AGENTS.md CPU-time convention, and stays advisory. The
+pitfalls contents list is by section name because line numbers drifted on every edit.
