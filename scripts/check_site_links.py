@@ -26,6 +26,7 @@ For #248's Markdown link checker: the helpers (repo_path_for, in_repo,
 check_fragment) are plain functions, so it can import them rather than
 re-implement the GitHub-URL-to-path rule.
 """
+import os
 import posixpath
 import re
 import sys
@@ -83,8 +84,25 @@ def repo_path_for(url):
     return unquote(urlsplit(m.group(1)).path).rstrip("/")
 
 
+def exists_exact(root, rel):
+    """True if root/rel exists with every path component spelled exactly.
+
+    Path.exists() is case-insensitive on macOS, but Linux CI and GitHub Pages
+    are not, so a link that passes locally could 404 once published.
+    """
+    cur = Path(root)
+    for part in [p for p in rel.split("/") if p]:
+        try:
+            if part not in os.listdir(cur):
+                return False
+        except OSError:
+            return False
+        cur = cur / part
+    return True
+
+
 def in_repo(repo, rel):
-    return rel == "" or (repo / rel).exists()
+    return exists_exact(repo, rel)
 
 
 def check_fragment(page, frag):
@@ -105,7 +123,7 @@ def check(site, repo):
         t = posixpath.normpath(posixpath.join(base, unquote(path)))
         if t.startswith(".."):
             return None
-        if (site / t).is_dir():
+        if (site / t).is_dir() and exists_exact(site, t):
             t = posixpath.join(t, "index.html")
         return t
 
@@ -125,7 +143,7 @@ def check(site, repo):
                     problems.append("%s: no #%s on this page" % (src, u.fragment))
                 continue
             t = target_file(src, u.path)
-            if t is None or not (site / t).is_file():
+            if t is None or not exists_exact(site, t) or not (site / t).is_file():
                 problems.append("%s: broken %s link: %s" % (src, tag, url))
                 continue
             if t in pages:
@@ -134,11 +152,11 @@ def check(site, repo):
                 if not check_fragment(pages[t], unquote(u.fragment)):
                     problems.append("%s: %s has no #%s" % (src, t, u.fragment))
         for v in page.options:
-            if v.endswith(".ps") and not (site / "examples" / v).is_file():
+            if v.endswith(".ps") and not exists_exact(site, "examples/" + v):
                 problems.append("%s: <option> example %s is not in examples/" % (src, v))
 
     for need in ("style.css", "pscat.js", "pscat.wasm"):
-        if not (site / need).is_file():
+        if not exists_exact(site, need):
             problems.append("%s is missing from the site" % need)
 
     # navigation: present, identical everywhere, one current entry

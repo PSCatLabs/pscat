@@ -80,6 +80,14 @@ class SiteScripts(unittest.TestCase):
         self.assertEqual(len(probs), 1)
         self.assertIn("moved.md", probs[0])
 
+    def test_link_case_must_match_exactly(self):
+        # passes on a case-insensitive file system unless the check is exact
+        bad = '<a href="Learn.html">x</a><a href="%s/blob/main/DOCS/a.md">y</a>' % check_site_links.REPO_URL
+        site = build(self.tmp.name, full(**{"guides.html": ("guides", bad)}))
+        probs = run_check(site, self.repo)
+        self.assertTrue(any("Learn.html" in p for p in probs), probs)
+        self.assertTrue(any("DOCS/a.md" in p for p in probs), probs)
+
     def test_orphan_page(self):
         pages = full(**{"lost.html": ("guides", "<main>lost</main>")})
         site = build(self.tmp.name, pages)
