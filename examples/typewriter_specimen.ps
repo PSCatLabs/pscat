@@ -1,0 +1,94 @@
+%!PS-Adobe-3.0
+%%Title: typewriter specimen -- the /Typewriter font, from no variation to a battered machine (issue #211)
+%%BoundingBox: 0 0 612 792
+%%EndComments
+
+% Specimen for lib/typewriter.ps (docs/TYPEWRITER.md). Top to bottom:
+%
+%   ascii      the full printable ASCII set four times, with the same
+%              machine and document: no variation (/Wear 0), the machine's
+%              quirks only, quirks plus line and strike variation at the
+%              measured defaults (/Wear 1), and a battered machine (/Wear 2.5)
+%   repeats    one key struck again and again, enlarged 3.2x: with quirks
+%              only every strike is the same (a key's bias holds); with
+%              strikes on, no two are alike
+%   presets    the same sentence on the /electric, /manual and /worn
+%              presets, then elite pitch, then a red ribbon run and a
+%              strikeover (a second strike index at the same cells)
+%
+% The ink is #211's flat ink (fill plus a pressure-driven spread); the
+% ribbon weave, clogged counters and one-side-heavy keys arrive with #212.
+%
+%   pscat --page 612x792 --dpi 200 --png typewriter_specimen.png examples/typewriter_specimen.ps
+%   gs -q -dNOSAFER -dBATCH -dNOPAUSE -sDEVICE=png16m -r200 -dGraphicsAlphaBits=4 -dTextAlphaBits=4 \
+%      -sOutputFile=typewriter_specimen_gs.png examples/typewriter_specimen.ps </dev/null
+
+(lib/typewriter_outlines.ps) run
+(lib/typewriter.ps) run
+
+0.98 0.97 0.94 setrgbcolor clippath fill
+
+% sp- prefix: specimen-local.
+/splabel { 0.45 0.43 0.40 setrgbcolor /Helvetica findfont 7.5 scalefont setfont moveto show } def
+/sprule { 0.80 0.78 0.74 setrgbcolor 0.5 setlinewidth newpath dup 54 exch moveto 558 exch lineto stroke } def
+
+/spascii1 ( !"#$%&'\(\)*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNO) def
+/spascii2 (PQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~) def
+
+% y opts label -   (the ASCII set on two lines at y, with opts)
+/sprow {
+    /splab exch def /spopt exch def /spy exch def
+    splab 54 spy 11 add splabel
+    72 spy moveto spopt tw-setup spascii1 show
+    72 spy 12 sub moveto spascii2 show
+} def
+
+(/Typewriter -- lib/typewriter.ps, issue #211) 54 762 splabel
+(Courier Prime outlines; machine 7, document 3; pica, /Size 12.5) 54 752 splabel
+
+735 sprule
+(1. No variation, /Wear 0: the plain face, with the ink spread past it \(/Ribbon 0.7\).) 54 718 splabel
+72 706 moveto << /Machine 7 /Seed 3 /Wear 0 /LineWear 1 /StrikeWear 1 /MachineWear 1 >> tw-setup spascii1 show
+72 694 moveto spascii2 show
+
+660 << /Wear 1 /LineWear 0 /StrikeWear 0 >>
+(2. Machine quirks only: each key's own offset, lean and weight, the same wherever it is struck.) sprow
+614 << /LineWear 1 /StrikeWear 1 >>
+(3. Quirks + line + strike variation at the measured defaults, /Wear 1. Real typing is this subtle.) sprow
+568 << /Wear 2.5 >>
+(4. A battered machine, /Wear 2.5.) sprow
+
+540 sprule
+(Repeats, enlarged 3.2x \(/Size 40, /Pitch 3.125\), /Wear 1: one key struck twelve times.) 54 524 splabel
+(Quirks only) 54 500 splabel
+120 490 moveto << /Wear 1 /LineWear 0 /StrikeWear 0 /Size 40 /Pitch 3.125 >> tw-setup (eeeeeeeeeeee) show
+(+ strikes) 54 450 splabel
+120 440 moveto << /LineWear 1 /StrikeWear 1 >> tw-setup (eeeeeeeeeeee) show
+(+ strikes, a) 54 400 splabel
+120 390 moveto << >> tw-setup (aaaaaaaaaaaa) show
+
+365 sprule
+/spline (In reply to your letter of June 22, I will say that if you do not need) def
+(Presets: /electric, /manual \(the default\), /worn) 54 348 splabel
+72 334 moveto << /Preset /electric /Size 12.5 /Pitch 10 /Seed 11 >> tw-setup spline show
+72 322 moveto << /Preset /manual >> tw-setup spline show
+72 310 moveto << /Preset /worn >> tw-setup spline show
+
+(Elite: /Pitch 12, /Size 11.5) 54 286 splabel
+72 274 moveto << /Preset /manual /Pitch 12 /Size 11.5 /Seed 12 >> tw-setup
+(this exhibit until schools open, we may be able to have some specimens for) show
+72 262 moveto (exhibit at the Mitchell Corn Palace. I am sorry we did not know about it.) show
+
+(A red ribbon run \(/Ink, tw-set\), and a strikeover: the word retyped at /Strike 1) 54 238 splabel
+72 226 moveto << /Pitch 10 /Size 12.5 /Seed 13 >> tw-setup (Please note the ) show
+<< /Ink [0.62 0.12 0.10] >> tw-set (DEADLINE) show
+<< /Ink [0.13 0.13 0.15] >> tw-set ( of July 1.) show
+72 214 moveto (Shipped on the ) show
+currentpoint (tenth) show moveto << /Strike 1 >> tw-set (tenth) show
+<< /Strike 0 >> tw-set (, by rail.) show
+
+190 sprule
+(The same /Machine and /Seed type the same page in pscat and Ghostscript; the caller's rand stream is untouched.) 54 172 splabel
+(Glyphs are drawn under setcharwidth, never cached: every strike is drawn afresh.) 54 162 splabel
+
+showpage

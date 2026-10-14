@@ -676,10 +676,19 @@ renders eight examples in both and compares block-downsampled output).
    Typewriter (epic #209): **read `docs/TYPEWRITER.md` and
    `docs/typewriter/REFERENCES.md` before starting #211–#215.** The
    #210 design (Courier Prime outlines embedded in a Type 3 `/Typewriter`,
-   keyed-hash variation, clip-based ribbon ink) waits on the maintainer's
-   approval. Its gotchas: `BuildChar` must use `setcharwidth` (gs replays a
-   `setcachedevice` glyph) and stay pure (`stringwidth` runs it), and
-   pscat's `def` rejects integer keys (#338; use `put`).
+   keyed-hash variation, clip-based ribbon ink) is approved. Its gotchas:
+   `BuildChar` must use `setcharwidth` (gs replays a `setcachedevice`
+   glyph) and stay pure (`stringwidth` runs it), and pscat's `def` rejects
+   integer keys (#338; use `put`).
+   #211 shipped `lib/typewriter.ps` (`tw-setup`, `tw-set`; state in the
+   `TWState` side dict, reached through the font's `/TWS`) over the
+   generated `lib/typewriter_outlines.ps` (`scripts/gen_typewriter_outlines.py`
+   from `fonts/catalog/CourierPrime`). The ink is flat: fill plus a spread
+   stroke of pressure x key weight x `/Ribbon`. The machine table already
+   holds each key's clog fraction and one-side angle and strength for #212
+   to draw (`tMbuild`). build.rs's catalog scan rejects `/x N dict def` and
+   sees every top-level `def`, so the side dict and the font are filled
+   inside `{ ... } exec` (`notes/211-typewriter-font.md`).
 5. Watercolor (issue #47, gated on the architecture spike in issue
    #46): read `docs/WATERCOLOR.md` before starting — it recommends a
    small `alpha: f32` field on `GraphicsState` (already prototyped as

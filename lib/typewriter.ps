@@ -139,6 +139,7 @@ TWState begin {
 /tInk [0.13 0.13 0.15] def  /tRibbon 0.7 def
 /tPSd 0.08 def  /tFinger true def
 /tMat matrix def
+/tFillAdj /.setfilladjust2 where { pop true } { false } ifelse def
 /tMtabFor null def  /tDocFor null def  /tLineFor null def
 
 % /Preset -> /Wear, /Ribbon and the pressure model (TYPEWRITER.md section 5)
@@ -321,6 +322,11 @@ TWState begin {
     advU 2 div neg -250 translate
 
     tInk aload pop setrgbcolor
+    % gs dilates every fill and stroke by part of a pixel, which at body
+    % size closes the counters of elite type; the stroke here already is
+    % the ink's spread (DRYMEDIA.md 2.4; TYPEWRITER.md section 6). pscat
+    % has no fill adjust and skips this.
+    tFillAdj { 0 0 .setfilladjust2 } if
     TWOutlines kCode get
     tMat currentmatrix pop
     xS 1 scale newpath dup 0 get exec 1 get exec
