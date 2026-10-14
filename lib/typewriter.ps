@@ -100,13 +100,11 @@ TWState begin {
     P tI get P tJ get P tI 3 -1 roll put P tJ 3 -1 roll put
 } for
 
-% a b k -> a' b'. Two Pearson chains over the bytes of k (the second with
-% a different start and offset), so the state is 16 bits: an 8-bit state
-% would give one cell in 256 the same draws as another. Each key is folded
-% a byte at a time, so keys above 255 stay distinct; negative keys (cells
-% left of or below the frame origin) are moved to their own range first.
-/mix2 {
-    dup 0 lt { neg 1000003 add } if cvi
+% a b k -> a' b' for k >= 0. Two Pearson chains over the bytes of k (the
+% second with a different start and offset), so the state is 16 bits: an
+% 8-bit state would give one cell in 256 the same draws as another. Each key
+% is folded a byte at a time, so keys above 255 stay distinct.
+/mix2u {
     {
         3 1 roll
         2 index 255 and
@@ -117,6 +115,13 @@ TWState begin {
         3 -1 roll -8 bitshift
         dup 0 eq { pop exit } if
     } loop
+} bind def
+% a b k -> a' b' for any integer (or a real, truncated). A negative key
+% (a cell left of or below the frame origin, a negative seed) folds as
+% -(k+1), which cannot overflow even at the most negative integer, then a
+% marker byte.
+/mix2 {
+    cvi dup 0 lt { 1 add neg mix2u 255 mix2u } { mix2u } ifelse
 } bind def
 
 % slot -> uniform in (0, 1), from the prefix state hA hB. Each quantity
@@ -421,6 +426,10 @@ end definefont pop } exec
 %   (a rejected tw-set leaves the dict stack as it was) mustbe
 %   countdictstack mark { 7 tw-set } stopped pop cleartomark countdictstack eq
 %   (a non-dict leaves the dict stack as it was) mustbe
+%
+%   { << /Seed -2147483648 /Machine -2147483648 >> tw-set } (the most negative 32-bit seeds) mustpass
+%   { << /Seed 2147483647 /Machine 2147483647 >> tw-set } (the largest 32-bit seeds) mustpass
+%   { << /Seed 1 /Machine 1 >> tw-set } (back to the defaults) mustpass
 %%EndSelfTest
 
 %%SelfTest: tw-setup-applies-presets-and-keys
