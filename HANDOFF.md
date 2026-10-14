@@ -174,7 +174,8 @@ coordinates, and a field proc that doesn't consume its `x y` silently
 leaking stack values instead of erroring — the same class of bug
 `--lint` also caught directly in `examples/noise.ps`'s first draft).
 Also done: issue #21, sweep/contact-sheet rendering — `--sweep-seed`
-(overrides every `srand` call transparently, via a new
+(overrides every `srand` call transparently, except a restore of an
+`rrand` value (#202), via a new
 `Interp::set_seed_override`/`seed_override_fired` pair checked in
 `ops/arith.rs`'s `srand`, so found art with a hardcoded `N srand` line
 sweeps unmodified) and `--sweep NAME=` (predefines `/NAME` in userdict

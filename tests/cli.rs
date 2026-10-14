@@ -350,7 +350,7 @@ fn sweep_seed_warns_when_source_never_calls_srand() {
 #[test]
 fn sweep_seed_leaves_an_rrand_restore_alone() {
     let out = tmp("sweep-restore.png");
-    let source = "7 srand /saved rrand def \
+    let source = "7 srand rand pop /saved rrand def \
          rand 255 mod 255 div rand 255 mod 255 div rand 255 mod 255 div setrgbcolor \
          0 0 10 20 rectfill \
          saved srand \

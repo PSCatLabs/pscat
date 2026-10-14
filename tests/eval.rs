@@ -273,17 +273,19 @@ fn rrand_is_the_plain_state_without_an_override() {
 
 #[test]
 fn seed_override_restores_an_rrand_value_exactly() {
-    // Save, reseed (forced), draw, restore, draw: the draw after the
-    // restore equals the draw that followed the save.
+    // The stream is moved off the seed before saving, so a forced restore
+    // (the old behaviour: state = 99) cannot pass by landing on the same
+    // state. The first draw after the save is the reference; reseed with
+    // a literal (forced), draw, restore, and the next draw must be it.
     let (stack, fired) = eval_seeded(
-        "5 srand /saved rrand def rand rand pop pop \
-         /saved load srand rand /saved load srand rand eq",
+        "5 srand rand pop /saved rrand def rand /ref exch def \
+         3 srand rand pop saved srand rand ref eq",
     );
     assert_eq!(stack, ["true"]);
-    // Both restores were left alone; only the first, literal, srand fired.
-    assert!(fired);
+    assert!(fired, "the literal srand is still forced");
+    // Only a restore: the override never fired.
     let (stack, fired) =
-        eval_seeded("/saved rrand def rand pop saved srand rand saved srand rand eq");
+        eval_seeded("/saved rrand def rand /ref exch def rand pop saved srand rand ref eq");
     assert_eq!(stack, ["true"]);
     assert!(!fired, "an rrand restore is not the override firing");
 }
@@ -302,8 +304,11 @@ fn seed_override_still_forces_a_literal_or_derived_seed() {
 #[test]
 fn seed_override_paintkit_style_conditional_restore() {
     // `rrand r ne { r srand } if`, the idiom paintkit's knife uses: the
-    // stream moved, so it is put back.
-    let (stack, _) =
-        eval_seeded("3 srand /r rrand def rand pop rrand r ne { r srand } if rrand r eq");
+    // stream moved, so it is put back. The save is taken off the forced
+    // seed, so a forced restore would not reproduce it.
+    let (stack, _) = eval_seeded(
+        "3 srand rand pop /r rrand def rand /ref exch def rand pop \
+         rrand r ne { r srand } if rand ref eq",
+    );
     assert_eq!(stack, ["true"]);
 }
