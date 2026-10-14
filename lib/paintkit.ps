@@ -2906,7 +2906,10 @@
         % must not leave them behind: it is caught, the gsave undone, and the
         % error raised again from here. Every `pktrowel` guard is an undefined
         % name, so naming it again is the same error; anything else is raised
-        % through errordict.
+        % through errordict. A caller's /Pressure may also just `stop`, which
+        % raises no error: newerror tells the two apart, and a plain stop is
+        % passed on as a plain stop.
+        $error /newerror false put
         {
         gsave
             clip
@@ -2925,10 +2928,12 @@
         grestore
         } stopped {
             grestore
-            $error /errorname get /undefined eq
-                { $error /command get cvx exec }
-                { errordict $error /errorname get 2 copy known { get exec } { pop pop stop } ifelse }
-            ifelse
+            $error /newerror get {
+                $error /errorname get /undefined eq
+                    { $error /command get cvx exec }
+                    { errordict $error /errorname get 2 copy known { get exec } { pop pop stop } ifelse }
+                ifelse
+            } { stop } ifelse
         } if
     } if
 } bind def

@@ -263,6 +263,38 @@ fn a_touch_budget_error_leaves_the_state_alone() {
 }
 
 #[test]
+fn a_pressure_that_stops_is_passed_on_as_a_stop() {
+    // A /Pressure procedure may `stop`. That is no error: the plane must undo
+    // its clip and rotation and stop too, without replaying an old error.
+    let mut it = fresh(100, 100);
+    run(
+        &mut it,
+        &format!(
+            "$error /errorname /undefined put $error /command /an-old-failed-command put \
+             {TRI_PAGE} {{ << /Width 12 /Pressure {{ pop stop }} >> pktrowelplane }} stopped \
+             /tplstopped exch def \
+             newpath 0 0 1 setrgbcolor 80 80 15 15 rectfill \
+             $error /newerror get /tplnew exch def"
+        ),
+    );
+    run(
+        &mut it,
+        "tplstopped { 1 } { 0 } ifelse tplnew { 0 } { 1 } ifelse",
+    );
+    assert_eq!(it.pop_int().ok(), Some(1), "an old error was replayed");
+    assert_eq!(
+        it.pop_int().ok(),
+        Some(1),
+        "the stop did not reach the caller"
+    );
+    let p = it.gfx().pixmap.pixel(87, 12).expect("pixel");
+    assert!(
+        p.blue() > 200 && p.red() < 60,
+        "the facet's clip or a rotation was left behind"
+    );
+}
+
+#[test]
 fn a_rotated_matrix_changes_nothing_about_the_edge() {
     // Under `100 0 translate 90 rotate` user (x, y) is device (100 - y, x)
     // page-wise, so the same triangle sits at a known place.

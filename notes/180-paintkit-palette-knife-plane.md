@@ -52,6 +52,9 @@ What was built (`lib/paintkit.ps`, right after `pktrowel`):
   loop is caught, the gsave undone and the error raised again (the guard name
   executed again for every `undefined`, `errordict` for anything else, which pscat
   reports as `undefined` where Ghostscript keeps the name).
+  A caller's `/Pressure` that just executes `stop` raises no error, so `$error
+  /newerror` (cleared first) tells it apart and a plain `stop` is passed on
+  (Codex round 3).
 - Safety: 4000 rows, counted before anything is drawn; each row is also
   bounded by `pktrowel`'s own budget.
 - Scratch prefix `tpl` (checked unused): `pktrowel` overwrites every `pt*` name
