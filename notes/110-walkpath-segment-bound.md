@@ -1,0 +1,62 @@
+## walkpath: bound the source-segment count (issue #110, 2026-10-13)
+
+`walkpath` flattens the path and runs `wkmeasure` over every segment before it emits a stop. Every
+preset budget (pkspray's 150,000, pkwash's boundary samples, pkdry's bristle x sample product) counts
+what is *deposited*, so a path of hundreds of thousands of tiny or zero-length segments passes them all
+and still costs seconds. Reproduced on this machine (release build): 200,000 segments of 0.0007 pt,
+`pkribbon` 1.11 s; 300,000 zero-length segments plus one real one, bare `walkpath` 0.60 s.
+
+**The fix.** `lib/artkit.ps` gains `/wkmaxsegs 50000 def`. `wkmeasure`, which already visits every
+segment, counts moveto, lineto and closepath visits and raises
+`walkpath-segment-count-exceeds-safety-limit` the moment the count passes the limit. It runs `cleartomark`
+first, so the `[` mark and the pathforall operands do not leak into a `stopped` caller. The count is
+taken during the measuring pass, so the caller's proc has not run and no preset has drawn. The same run
+that took 1.11 s is now refused in 0.1 s including path construction.
+
+**Why 50,000.** The largest per-call segment count any tracked `.ps` file feeds `walkpath`, measured by
+instrumenting `wkmeasure` and rendering all 107 tracked non-lib `.ps`/`.eps` files plus every
+`%%SelfTest` block (`selftest.sh`):
+
+| resolution | maximum | where |
+|---|---|---|
+| 72 dpi | 1,726 | `examples/paintkit_motion_demo.ps` |
+| 288 dpi (4x any shipped build; `flattenpath` works in device space) | 3,167 | same file |
+| 72 dpi, selftest blocks | 402 | `selftest/drivers/paintkit.ps` |
+| 72 dpi | 319 | `gallery/alpine_lake.ps` (about 53,000 walkpath calls, none large) |
+| 72 dpi | 268 | `examples/paintkit_dry_demo.ps` |
+
+The limit is about 16x the largest count at 4x the shipped resolution. The drykit specimen never calls
+`walkpath` at all (`lib/drykit.ps` and `tests/drykit.rs` have no match), so it is not in the table.
+
+**alongpath, pathtext, ctext, et-draw: decided not to guard.** Written into `alintern`'s header comment.
+`walkpath`'s bound exists because its callers promise a deposit budget "checked before any drawing
+starts" and a source segment that emits no stop slips past it. `alongpath` makes no such promise: its
+stamp count is already bounded only by the caller's pitch (0.0001 on a 500 pt line is five million
+stamps and nothing refuses that), so a segment bound would cap one cost of an interface whose main cost
+is uncapped. It would also risk refusing legitimately dense `charpath` outlines. The residual: `pathtext`
+keeps walking segments after its last glyph is placed. `et-draw` is not a path walk (it samples a decoded
+image; `lib/etching.ps` has no `pathforall`).
+
+**Tests.**
+- `%%SelfTest: walkpath-bounds-its-segment-count` (`lib/artkit.ps`): exactly `wkmaxsegs` segments walks, one
+  more is refused, many two-segment subpaths are refused (consecutive bare movetos collapse in the path, so
+  they cannot be used), the proc never ran, and a small path walks after a refusal.
+- `tests/artkit.rs`: the same boundary through the Rust API, plus an empty operand stack after the guard.
+- `tests/paintkit.rs`, `every_walkpath_preset_refuses_a_huge_segment_count_promptly`: all 11 walkpath-based
+  presets (pkribbon, pknib, pkdry, pkspray, pkoil, pktrowel, pkfan, pkbroad, pkliner, pkwash, pkdab) get a
+  400,000 zero-length-segment path, must raise the guard name, draw no ink, and finish inside twice the
+  time a legal 40,000-segment walk takes (self-relative, so it holds on a slow machine). Checked to fail:
+  with the limit raised past the path, `pkribbon` succeeds; with the limit set to 399,990 (a
+  count-then-check shape) it fails on the timing assertion (522 ms against a 187 ms bound).
+
+**Cost on legal paths.** The counter adds three small operations per segment. 100 walks of a 40,000-segment
+path: 47.4 s base against 48.9 s branch (runs 46.9 / 47.4 / 47.8 against 50.9 / 52.8 / 43.0, so within noise).
+50,000 walks of a 3-segment path: 14.2 s base against 14.3 s branch. A full `alpine_lake` render takes about
+100 s and varied 96 to 116 s between runs on either tree, which is more than any effect here.
+
+**Byte identity.** `scripts/identity_check.sh` (21 paintkit-loading files, 30 pages, with a control that
+trips the limit and so differs between trees, and `alpine_lake` equal to its committed still in both): all
+identical. The same render of all 107 tracked files (125 PNGs, including the artkit-only ones identity_check
+does not cover) in a base and a head tree: all byte-identical.
+
+New top-level name `wkmaxsegs` added to `ARTKIT_INTERNAL` in `src/capabilities.rs`.
