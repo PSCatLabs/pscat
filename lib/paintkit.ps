@@ -4687,6 +4687,43 @@
 % examples/paintkit_wet_pull_demo.ps, pulls three reflected elements
 % and grazes them: about 20s for the page in a release build.
 %
+% A backdrop that varies (issue #179)
+% ------------------------------------
+% /Under is one colour, and a mark rarely sits on one: a cloud spans a
+% graded sky, mist drifts over the foot of a range that fades into it.
+% With one colour the outer passes are right at one end and leave a pale
+% or dark rim at the other (#118 hand-matched it until the rim went).
+% /Under may also be a procedure `x y -> r g b`, the backdrop as a
+% function, and /At [x y] says where the mark sits:
+%
+%   { ... } << /Soft 1 /Offset 30
+%              /At [ 135 70 ] /Under { exch pop skyat } >> pkwet
+%
+% Each softening pass asks the procedure for the backdrop at /At plus that
+% pass's own displacement, and mixes toward the answer instead of toward a
+% fixed colour; the core pass has no backdrop and asks nothing. So the
+% question is per pass, not per pixel: pkwet cannot see where the wrapped
+% mark paints (it is a procedure; see below), and one colour has to serve
+% a whole pass. What the procedure fixes is the shift the displacement
+% causes, the larger share of the rim at a generous /Offset. A mark that
+% is tall against the gradient still has the rest, so split it into
+% several pkwet calls, each with its own /At. /At is required with a
+% procedure (named error otherwise) and rejected with an [r g b], where it
+% would mean nothing. The coordinates are those of the user space pkwet is
+% called in, as /Direction's are: inside a mirror or a translate the
+% procedure sees shifted ones. A literal [r g b] takes exactly the code it
+% always did, with the same draws.
+%
+% The procedure runs inside pkwet's frame, once per softening pass, before
+% the first pass and after the plan is fixed. Keep it a pure function: it
+% must not paint, must not call pkwet, and must not rely on what else is
+% on the operand stack (it is called with nothing of pkwet's there, so
+% one that counts the stack sees only the caller's items). It must leave
+% exactly three numbers in 0..1. Anything else raises
+% pkwet-under-procedure-must-return-3-numbers, -results-must-be-numbers or
+% -results-must-be-0-to-1, with the depth counter and the operand stack
+% put back first. Cost: at most Layers - 1 calls per pkwet call.
+%
 % pkwash is deliberately *not* wrappable: it resets alpha and blend mode
 % itself, by design, so it will not honor a surrounding context. pkwet
 % is for the stroke families.
@@ -4793,9 +4830,58 @@
 % depth pqdset -
 % @internal
 /pqdset { userdict /pqdepth 3 -1 roll put } bind def
-% -> frame   (this invocation's 7-slot frame; pkwet lists the slots)
+% -> frame   (this invocation's 8-slot frame; pkwet lists the slots)
 % @internal
 /pqmyframe { userdict /pqframes get pqdnow get } bind def
+
+% -> -   (procedural /Under, issue #179: evaluate the backdrop procedure
+% for every softening pass and re-mix that pass's colour toward the result)
+% Reads pqplan, pqks, pqbase, pqPickup, pqLayers, pqAt and pqUnderProc, and
+% leaves the per-pass backdrop arrays in pqunders (null at the core, which
+% has none). The procedure gets the pass's position, `At` plus the pass's
+% displacement from the plan, in the user space pkwet was called in. It
+% runs with nothing of this call's on the operand stack, so a procedure
+% that counts the stack sees only the caller's items, and it is the only
+% caller code that runs while the frame is half built: every way out
+% below first rolls the depth back, so a caught error or a rejected
+% result never leaves pqdepth raised (the nesting guard does the same).
+% Nothing here draws a random number.
+% @internal
+/pqwetunder {
+    /pqunders pqLayers array def
+    0 1 pqLayers 1 sub {
+        /pqi exch def
+        pqplan pqi get dup length 2 gt {
+            /pqent exch def
+            count /pqc0 exch def
+            pqAt 0 get pqent 0 get add
+            pqAt 1 get pqent 1 get add
+            { pqUnderProc } stopped { pqdnow 1 sub pqdset stop } if
+            % Exactly three results, nothing more, nothing fewer. Anything
+            % else is dropped back to the entry count (if the procedure ate
+            % into the caller's items there is nothing to put back) and
+            % named, rather than left to fail inside mix3.
+            count pqc0 sub 3 ne {
+                count pqc0 sub dup 0 gt { { pop } repeat } { pop } ifelse
+                pqdnow 1 sub pqdset pkwet-under-procedure-must-return-3-numbers
+            } if
+            3 array astore /pqur exch def
+            0 1 2 {
+                pqur exch get dup type dup /integertype ne exch /realtype ne and
+                    { pqdnow 1 sub pqdset pkwet-under-procedure-results-must-be-numbers } if
+                dup 0 lt exch 1 gt or
+                    { pqdnow 1 sub pqdset pkwet-under-procedure-results-must-be-0-to-1 } if
+            } for
+            pqunders pqi pqur put
+            pqplan pqi
+            [
+                pqent 0 get pqent 1 get
+                pqbase pqur pqks pqi get mix3
+            ]
+            put
+        } { pop } ifelse
+    } for
+} bind def
 
 %%SelfTest: pkwet-rejects-malformed-directional-options
 %   { { } << /Direction (down) >> pkwet }
@@ -4908,10 +4994,11 @@
 %%EndSelfTest
 %
 % @kind: Procedure
-% @summary: Runs a mark-drawing procedure several times, each pass displaced further and mixed further toward a declared backdrop color, so the mark's core stays solid while its edge grades away into the layer beneath. The wet-on-wet softener for skies, clouds, mist and distant forms; works with every stroke preset in this file. The procedure must build its own path: a path constructed before the call cannot be displaced, because PostScript paths are in device space once built, so every pass would land on the same geometry and nothing would soften. Pair it with a broken or particulate brush (pkspray, pkdry, pktrowel at low Coverage) -- a solid brush keeps its own hard silhouette and only gains a halo. With /Direction the passes line up along one axis instead: a reflection pulled down, a mountain foot lifted into mist, a sky swept across. Uses no alpha, so unlike pkwash it needs no Ghostscript fallback.
+% @summary: Runs a mark-drawing procedure several times, each pass displaced further and mixed further toward a declared backdrop color, so the mark's core stays solid while its edge grades away into the layer beneath. The wet-on-wet softener for skies, clouds, mist and distant forms; works with every stroke preset in this file. The procedure must build its own path: a path constructed before the call cannot be displaced, because PostScript paths are in device space once built, so every pass would land on the same geometry and nothing would soften. Pair it with a broken or particulate brush (pkspray, pkdry, pktrowel at low Coverage) -- a solid brush keeps its own hard silhouette and only gains a halo. With /Direction the passes line up along one axis instead: a reflection pulled down, a mountain foot lifted into mist, a sky swept across. /Under may be a procedure `x y -> r g b` (with /At) for a backdrop that varies across the mark, such as a graded sky. Uses no alpha, so unlike pkwash it needs no Ghostscript fallback.
 % @example: { newpath 40 120 moveto 260 150 lineto << /Width 40 >> pkribbon } << /Soft 0.7 /Under [0.62 0.72 0.86] >> pkwet
 % @param: /Soft [0..1] master softness; supplies the defaults for Layers and Offset. 0 is a single undisplaced pass that marks the page exactly as calling the proc directly would, random stream included; the procedure still runs inside a gsave, so a path or graphics state it leaves behind does not survive the call (default 0.6)
-% @param: /Under [rgb array] the color already on the canvas that this mark settles into; the outermost pass is nearly this color (default [1 1 1])
+% @param: /Under [rgb array or procedure] the color already on the canvas that this mark settles into; the outermost pass is nearly this color. A procedure `x y -> r g b` (three numbers in 0..1, user space) is the backdrop as a function: it is asked once per softening pass, at /At plus that pass's displacement, so the rim goes where the backdrop changes across the mark. It must be a pure function: no painting, no pkwet call, no reliance on the operand stack. A tall mark is better split into several calls, each with its own /At (default [1 1 1])
+% @param: /At [points] With a procedural /Under only (required there): [x y] where the mark sits, in the user space pkwet is called in, the point each pass's displacement is added to before the procedure is asked for the backdrop (default absent)
 % @param: /Pickup [0..1] how far the outermost pass mixes toward Under; lower keeps the mark's own color out to its edge (default 0.85)
 % @param: /Layers [count] Passes to draw, outermost first; must be a whole number, hard cap 1..6, or 1..16 with /Direction (default 1 + round(Soft*5); with /Direction, raised to keep same-side passes at most 2pt apart, up to 16)
 % @param: /Offset [points] How far in points the outermost pass is displaced from the true path; inert at Layers 1, which has only a core pass. Formerly /Spread, still accepted as a deprecated alias; /Offset wins if both are given (default Soft*14)
@@ -4955,14 +5042,41 @@
     /pqPickup load xcheck { pkwet-pickup-must-not-be-a-procedure } if
     pqPickup 0 lt pqPickup 1 gt or { pkwet-pickup-must-be-0-to-1 } if
     /pqUnder pqopts /Under [ 1 1 1 ] pkgetdef def
-    /pqUnder load xcheck { pkwet-under-must-not-be-a-procedure } if
-    /pqUnder load type /arraytype ne { pkwet-under-must-be-a-3-element-array } if
-    pqUnder length 3 ne { pkwet-under-must-be-a-3-element-array } if
-    0 1 2 {
-        pqUnder exch get dup type dup /integertype ne exch /realtype ne and
-            { pkwet-under-components-must-be-numbers } if
-        dup 0 lt exch 1 gt or { pkwet-under-components-must-be-0-to-1 } if
-    } for
+    % /Under is a literal [r g b] or, since issue #179, a backdrop
+    % procedure `x y -> r g b` (see "A backdrop that varies" in the header).
+    % The array branch is the code that was always here, verbatim, so a
+    % literal /Under validates and plans exactly as before; the procedure
+    % branch parks a white placeholder in pqUnder so the plan loop below
+    % runs unchanged and its random draws are identical, then pqwetunder
+    % overwrites the colours.
+    /pqUnder load xcheck {
+        /pqUnder load type dup /arraytype eq exch /packedarraytype eq or not
+            { pkwet-under-must-be-a-3-element-array } if
+        pqopts /At known not { pkwet-under-procedure-needs-at } if
+        /pqAt pqopts /At get def
+        /pqAt load type dup /arraytype eq exch /packedarraytype eq or not
+            { pkwet-at-must-be-an-x-y-pair } if
+        /pqAt load xcheck { pkwet-at-must-not-be-a-procedure } if
+        pqAt length 2 ne { pkwet-at-must-be-an-x-y-pair } if
+        0 1 1 {
+            pqAt exch get dup type dup /integertype ne exch /realtype ne and
+                { pkwet-at-must-be-an-x-y-pair } if
+            pop
+        } for
+        /pqUnderProc /pqUnder load def
+        /pqUnder [ 1 1 1 ] def
+        /pqunderp true def
+    } {
+        /pqUnder load type /arraytype ne { pkwet-under-must-be-a-3-element-array } if
+        pqUnder length 3 ne { pkwet-under-must-be-a-3-element-array } if
+        0 1 2 {
+            pqUnder exch get dup type dup /integertype ne exch /realtype ne and
+                { pkwet-under-components-must-be-numbers } if
+            dup 0 lt exch 1 gt or { pkwet-under-components-must-be-0-to-1 } if
+        } for
+        pqopts /At known { pkwet-at-needs-an-under-procedure } if
+        /pqunderp false def
+    } ifelse
     % /Stretch and /OneSided only mean anything along a direction; given
     % without one they are rejected rather than silently ignored, since
     % an artist who wrote them expected a pull and would otherwise get a
@@ -5034,11 +5148,13 @@
     pqLayers mul /pqchain exch def
     pqchaindir pqchain 64 gt and
         { pqdnow 1 sub pqdset pkwet-too-many-passes } if
-    % Seven slots: 0 the plan, 1 the procedure, 2-3 the pass budget's
-    % running product and flag, and 4-6 the pass mix that loaded colours
-    % read (issue #183 slice L3, below). 4-6 go at the end so 0-3 keep the
-    % meaning the budget and the nesting machinery rely on.
-    userdict /pqframes get pqdnow 7 array put
+    % Eight slots: 0 the plan, 1 the procedure, 2-3 the pass budget's
+    % running product and flag, 4-6 the pass mix that loaded colours
+    % read (issue #183 slice L3, below), and 7 the per-pass backdrop
+    % colours of a procedural /Under (issue #179; null for a literal one,
+    % which is what keeps puwet's old path). The later slots go at the end
+    % so 0-3 keep the meaning the budget and the nesting machinery rely on.
+    userdict /pqframes get pqdnow 8 array put
     pqmyframe 1 /pqproc load put
     pqmyframe 2 pqchain put
     pqmyframe 3 pqchaindir put
@@ -5109,6 +5225,11 @@
         % exactly the t the line above hands mix3 elsewhere. No draw.
         pqks pqi pqf 0 gt { pqf pqPickup mul } { 0 } ifelse put
     } for
+    % A procedural /Under (issue #179) re-colours the softening passes now,
+    % after the plan's displacements are fixed and before any pass runs,
+    % so the backdrop procedure sees the final geometry and the wrapped
+    % procedure has not run yet.
+    pqunderp { pqwetunder } if
     % Outermost pass first, so each subsequent (less displaced, less
     % mixed) pass is laid over it and the caller's own color lands last,
     % exactly on the path.
@@ -5135,6 +5256,9 @@
     % the error path needs nothing new. Every existing render is unchanged.
     pqmyframe 4 pqks put
     pqmyframe 5 pqUnder aload pop 3 array astore put
+    % A procedural /Under's per-pass colours, for puwet; pqwetunder left
+    % them in pqunders. Slot 5 is then the unread white placeholder.
+    pqunderp { pqmyframe 7 pqunders put } if
     % Each pass runs under `stopped`, which is what makes this wrapper
     % safe to abandon. Three separate review findings were all the same
     % missing unwind-protect: a caught error leaked one graphics-state
@@ -6629,7 +6753,12 @@ systemdict /setalpha known /pwhasalpha exch def
         1 1 pqdnow {
             userdict /pqframes get exch get /puwf exch def
             puwf 4 get puwf 6 get get /puwk exch def
-            puwk 0 ne { /puwc [ puwc puwf 5 get puwk mix3 ] def } if
+            puwk 0 ne {
+                % a procedural /Under (issue #179) keeps one backdrop per pass
+                /puwc [ puwc
+                    puwf 7 get dup null eq { pop puwf 5 get } { puwf 6 get get } ifelse
+                    puwk mix3 ] def
+            } if
         } for
         puwc aload pop
     } if
