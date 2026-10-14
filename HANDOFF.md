@@ -863,6 +863,9 @@ renders eight examples in both and compares block-downsampled output).
   `docs/paintkit_canvas_demo.png`), and `the_weave_is_in_canvas_points_at_any_dpi`
   pins that the pattern is the same at 72 and 144 dpi. To supersample a piece
   with `2 2 scale`, put it *before* `pkcanvas` so the weave scales with it.
+  The knuckles wander along their threads and vary in size (#298,
+  `pjwander`), so the catch reads as woven canvas, not a pixel grid;
+  drykit's `dkcatch` still uses the ruled lattice (#415).
 - **A paintkit key means one thing in every preset** (issue #141).
   `/Spread` is always a 0..1 fraction of `/Width`; `/Load` is always a
   contact rate per `/Width` of travel. A new preset that needs a
