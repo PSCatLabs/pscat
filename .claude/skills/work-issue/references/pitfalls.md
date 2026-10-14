@@ -625,7 +625,7 @@ earlier run's files; resume decisions are made from GitHub state
 - **`gh --jq` runs gojq, not system `jq`.** Their regex flavours and some builtins differ
   (see #293, the `scan` expression). Test every jq expression that
   will run inside `gh ... --jq` through `gh` itself (`gh pr list --json body --jq '...'`
-  against real or fixture data), not through `echo ... | jq`. `scripts/test-scan.sh` is the model.
+  against real or fixture data), not through `echo ... | jq`. `.claude/skills/work-issue/scripts/test-scan.sh` is the model.
   A plain `| jq` after `gh` is system jq; know which one a line uses.
 - **PostScript probe harnesses (executed names, `$error`).** In a hand-written probe, hold each
   callable you want to run later in a 1-element array (`[ { ... } ]`, run it with `0 get exec`),
@@ -653,10 +653,10 @@ earlier run's files; resume decisions are made from GitHub state
   the test is not measuring the guard.
 - **"Max value fed to X across all pieces" sweeps.** Questions such as "what is the
   largest segment count `walkpath` sees across every gallery piece" go through
-  `scripts/sweep-max.sh --glob 'gallery/*.ps' -- ./probe.sh`: it runs your per-file hook (any
+  `bash .claude/skills/work-issue/scripts/sweep-max.sh --glob 'gallery/*.ps' -- <SCRATCH>/probe.sh`: it runs your per-file hook (any
   command whose last stdout line is a number) over the tracked files in parallel and prints
   `MAX <value> <file>`. Write the hook once (a pscat run with a counting probe), keep it in
-  `<SCRATCH>`, and run the sweep with `run_in_background: true`. `scripts/test-sweep.sh` tests it.
+  `<SCRATCH>`, and run the sweep with `run_in_background: true`. `bash .claude/skills/work-issue/scripts/test-sweep.sh` tests it.
 - **Extra worktrees you create are yours to remove, by exact path.** An identity base or a
   before/after tree from step 5 is cleaned in step 9 (finish.md) from the list of paths you
   wrote down, never by matching `git worktree list`. Name them so the path does not end
