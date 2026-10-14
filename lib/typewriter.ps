@@ -569,11 +569,13 @@ grestore
     } repeat
     tMat setmatrix
 
-    % feather
-    gsave
-        pBody 0.5 add tLevel tWeaveClip
-        tGlyphPath inkW fW add tPen stroke
-    grestore
+    % feather (none at /Ribbon 0: a 0-width stroke is a 1-pixel hairline)
+    inkW fW add 0 gt {
+        gsave
+            pBody 0.5 add tLevel tWeaveClip
+            tGlyphPath inkW fW add tPen stroke
+        grestore
+    } if
     % body; a one-side-heavy key's light side is sparser
     mSS wearM mul dup 1 gt { pop 1 } if /tSide exch def
     tSide 0 gt {

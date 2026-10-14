@@ -44,7 +44,7 @@ first. TYPEWRITER.md's section 6 now ends with an "As built" list.
    - Round 3 thinned the body stroke.
    - Round 4 made the hole size and density steeper as the ribbon dries.
 
-   Still visibly different from the scans, and left for #215 or later:
+   Still visibly different from the scans, and filed as #423:
    - The renders are a little heavier than T2 and T4. Part of that is the
      Courier Prime face itself: elite stems are 0.84pt before any ink.
    - Real repeated strikes vary in weight more than ours do (T7 has one
@@ -63,9 +63,9 @@ first. TYPEWRITER.md's section 6 now ends with an "As built" list.
 3. **Budget.** I timed only pscat, as a guard (CPU, best of 2, load average
    about 5). TYPEWRITER.md section 8's full page (50 × 50 cells at 300 dpi)
    took **1.9 s user + 0.9–1.1 s sys** with ink, and 0.22 s flat. That is
-   within the 5 s advisory budget. Ghostscript was checked for correctness
-   only: the specimen and the comparison render without error. Its timing was
-   deliberately not measured. The CI strip test
+   within the 5 s advisory budget. Ghostscript is a correctness check only
+   here: the specimen, the comparison and the gs test render without error.
+   It was not timed against the budget. The CI strip test
    (`a_strip_types_within_the_cpu_budget`) runs with the ink on and passes.
 4. **Ink off is #211, byte for byte.**
    - Driver 1 is the #211 specimen (base tree's copy). Driver 2 is a mixed
@@ -104,6 +104,12 @@ first. TYPEWRITER.md's section 6 now ends with an "As built" list.
   of the fraction, then sparse to 0.12 past it. Machine wear scales the
   fraction, so `/Wear 0` has no clogs. A first version sized the band in fixed
   units, which filled nearly every clogged counter whole.
+- **No feather at `/Ribbon 0`.** Like #211's spread, a 0-width feather stroke
+  would be a 1-pixel hairline around every glyph, so it is skipped.
+- **One side heavy, checked by eye.** Machine 3's `R` (strength 0.46,
+  angle 173°) at `/Size 40` has a dense left half and a patchier right one.
+  At `/MachineWear 0` it is even. The boundary is a straight line through
+  the glyph's box centre. That is visible only when enlarged.
 - **`/StrikeWear 0` keys the ink by the key.** The weave's angle, offset and
   variants come from the machine table's hash, and the wear drift is off. A
   quirks-only page then repeats each key exactly, ink included, so #211's
@@ -126,3 +132,5 @@ first. TYPEWRITER.md's section 6 now ends with an "As built" list.
 
 - #422: the worn ribbon band and the two-colour bleed. Both are optional in
   the issue, and the design defers the bleed.
+- #423: the ink is a little heavy against T2 and T4, and the strike weight
+  is too even against T7.
