@@ -2957,27 +2957,46 @@ fn every_walkpath_preset_refuses_a_huge_segment_count_promptly() {
         let r = it.run_str(call).map(|_| ());
         (it, r, started.elapsed())
     }
+    // This test shares the machine with the rest of the suite, which
+    // runs in parallel, so one timing can be inflated several-fold by
+    // scheduling alone. Every time here is the best of three: a slow
+    // outlier only costs a retry, while a real regression (a refusal
+    // that walks all 400,000 segments) is slow every time.
+    const TRIES: usize = 3;
     // Calibration: 40,000 segments is under the 50,000 limit, so this
     // walks everything twice. The unguarded cost of the huge path is
     // several times this; the guarded refusal is a fraction of it.
-    let (_, ok, t_ok) = timed_path(40_000, "1 { pop pop pop pop pop pop } walkpath");
-    ok.expect("a path under the limit still walks");
-    let bound = t_ok.max(std::time::Duration::from_millis(50)) * 2;
+    let t_ok = (0..TRIES)
+        .map(|_| {
+            let (_, ok, t) = timed_path(40_000, "1 { pop pop pop pop pop pop } walkpath");
+            ok.expect("a path under the limit still walks");
+            t
+        })
+        .min()
+        .unwrap();
+    let bound = t_ok.max(std::time::Duration::from_millis(50)) * 3;
 
     for preset in [
         "pkribbon", "pknib", "pkdry", "pkspray", "pkoil", "pktrowel", "pkfan", "pkbroad",
         "pkliner", "pkwash", "pkdab",
     ] {
-        let (it, r, took) = timed_path(400_000, &format!("<< >> {preset}"));
-        let err = r.expect_err(preset);
+        let mut best = std::time::Duration::MAX;
+        for _ in 0..TRIES {
+            let (it, r, took) = timed_path(400_000, &format!("<< >> {preset}"));
+            let err = r.expect_err(preset);
+            assert!(
+                matches!(err, PsError::Undefined(ref n) if n == "walkpath-segment-count-exceeds-safety-limit"),
+                "{preset}: expected the segment-count guard, got {err}"
+            );
+            assert_eq!(ink_count(&it), 0, "{preset}: nothing may be drawn first");
+            best = best.min(took);
+            if best < bound {
+                break;
+            }
+        }
         assert!(
-            matches!(err, PsError::Undefined(ref n) if n == "walkpath-segment-count-exceeds-safety-limit"),
-            "{preset}: expected the segment-count guard, got {err}"
-        );
-        assert_eq!(ink_count(&it), 0, "{preset}: nothing may be drawn first");
-        assert!(
-            took < bound,
-            "{preset}: refused in {took:?}, but walking everything costs several times {t_ok:?}"
+            best < bound,
+            "{preset}: refused in {best:?} at best, but walking everything costs several times {t_ok:?}"
         );
     }
 }

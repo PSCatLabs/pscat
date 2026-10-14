@@ -44,10 +44,12 @@ image; `lib/etching.ps` has no `pathforall`).
 - `tests/artkit.rs`: the same boundary through the Rust API, plus an empty operand stack after the guard.
 - `tests/paintkit.rs`, `every_walkpath_preset_refuses_a_huge_segment_count_promptly`: all 11 walkpath-based
   presets (pkribbon, pknib, pkdry, pkspray, pkoil, pktrowel, pkfan, pkbroad, pkliner, pkwash, pkdab) get a
-  400,000 zero-length-segment path, must raise the guard name, draw no ink, and finish inside twice the
-  time a legal 40,000-segment walk takes (self-relative, so it holds on a slow machine). Checked to fail:
+  400,000 zero-length-segment path, must raise the guard name, draw no ink, and finish inside three times the
+  time a legal 40,000-segment walk takes (self-relative, so it holds on a slow machine; every time is the
+  best of three, because the first version, a single timing against twice the calibration, failed once under
+  the full suite's parallel load: 514 ms against a calibration inflated to 190 ms). Checked to fail:
   with the limit raised past the path, `pkribbon` succeeds; with the limit set to 399,990 (a
-  count-then-check shape) it fails on the timing assertion (522 ms against a 187 ms bound).
+  count-then-check shape) it fails on the timing assertion (471 ms against a 263 ms bound).
 
 **Cost on legal paths.** The counter adds three small operations per segment. 100 walks of a 40,000-segment
 path: 47.4 s base against 48.9 s branch (runs 46.9 / 47.4 / 47.8 against 50.9 / 52.8 / 43.0, so within noise).
