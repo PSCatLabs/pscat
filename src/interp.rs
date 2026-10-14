@@ -240,7 +240,10 @@ pub struct Interp {
     /// When set, every `srand` call ignores its operand and reseeds
     /// with this value instead (issue #21's `--sweep-seed`) — lets a
     /// sweep drive the RNG on found art that hardcodes its own
-    /// `N srand` line, with no source edit needed. `seed_override_fired`
+    /// `N srand` line, with no source edit needed. The exception is an
+    /// `srand` of a value `rrand` handed out under the override (a
+    /// saved stream coming back, issue #202), which restores it exactly.
+    /// `seed_override_fired`
     /// records whether an override actually intercepted a call, so a
     /// sweep over a script that never calls `srand` can be flagged
     /// instead of silently producing identical frames.
@@ -1370,8 +1373,9 @@ impl Interp {
     }
 
     /// Force every `srand` call to reseed with `seed` instead of its
-    /// operand (issue #21's `--sweep-seed`). `None` (the default)
-    /// leaves `srand` alone. Also clears the fired flag, so a caller
+    /// operand (issue #21's `--sweep-seed`), except one that restores a
+    /// value saved with `rrand` (issue #202). `None` (the default)
+    /// leaves `srand` and `rrand` alone. Also clears the fired flag, so a caller
     /// re-arming this on a fresh `Interp` starts from a clean read of
     /// [`seed_override_fired`](Self::seed_override_fired).
     pub fn set_seed_override(&mut self, seed: Option<i64>) {
