@@ -13,11 +13,12 @@ nothing draws a random number.
   the dab array (the array is one slot longer), so the shadow, body and
   highlight layers all read the same value. The unset path stores the caller's
   colour there, which is the same array the layers read before.
-- **`puparse` is called always, `pulightneedscolors` never.** The issue text
-  suggested calling `puparse` only when `/Colors` is set. `puparse`'s unset branch
-  is exactly the two checks pkdab still needs (the British spellings, and
-  `/ColorMix` without `/Colors`), and it never reads `/Light`, so calling it
-  unconditionally keeps those guards without duplicating them. A self-test pins
+- **`puparse` is called always, `pulightneedscolors` never.** Gating `puparse` on
+  `/Colors` being set was considered, and would leave the unset path without the
+  spelling and `/ColorMix`-needs-`/Colors` guards unless they were repeated.
+  `puparse`'s unset branch is exactly those two checks, and it never reads
+  `/Light`, so calling it unconditionally keeps the guards without duplicating
+  them. A self-test pins
   that `/Light 45` alone still passes: `/Light` is pkdab's own.
 - **Shadow and jitter.** pkdab folds `/ColorJitter` into the shadow layer's
   `shade` factor. With `/ShadowColor`, the layer mixes toward the target by
