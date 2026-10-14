@@ -231,8 +231,10 @@ def check(m):
         if s.get("group") not in group_ids:
             add("%s: unknown group %r" % (who, s.get("group")))
         has_render = bool(s.get("render"))
-        if not has_render and not (s.get("source") and re.fullmatch(r"\d+x\d+", s.get("page", ""))):
-            add("%s: needs a committed render, or a source and a page size to render at build time" % who)
+        if not s.get("source"):
+            add("%s: needs a source (every picture has a View source link)" % who)
+        elif not has_render and not re.fullmatch(r"\d+x\d+", s.get("page", "")):
+            add("%s: needs a committed render, or a page size to render the source at build time" % who)
         for k in ("render", "source"):
             if s.get(k) and not (ROOT / s[k]).exists():
                 add("%s: %s %s does not exist" % (who, k, s[k]))

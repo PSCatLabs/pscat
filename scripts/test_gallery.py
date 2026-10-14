@@ -83,10 +83,14 @@ class GalleryManifest(unittest.TestCase):
         piece(self.m, "lodestone")["technique"] = "Built for issue #19."
         self.has("stage or issue wording")
 
-    def test_specimen_needs_a_render_or_a_source_and_size(self):
+    def test_specimen_needs_a_source_and_a_render_or_a_size(self):
+        s = copy.deepcopy(self.m["specimens"][0])
         self.m["specimens"][0].pop("render")
+        self.m["specimens"][0].pop("page", None)
+        self.has("needs a committed render, or a page size")
+        self.m["specimens"][0].update(s)
         self.m["specimens"][0].pop("source")
-        self.has("needs a committed render")
+        self.has("needs a source")
 
     def test_readme_regions_must_be_in_sync(self):
         piece(self.m, "fern")["featured"] = True

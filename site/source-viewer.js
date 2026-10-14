@@ -121,10 +121,16 @@
   });
 
   closeEl.addEventListener('click', function () { dialog.close(); });
-  // the dialog has no padding, so a click that lands on the dialog itself is
-  // a click on the dimmed backdrop
+  // The dialog has no padding, so a click that lands on the dialog itself is
+  // a click on the dimmed backdrop. Both the press and the release must be
+  // there: dragging a selection out of the code must not close the window.
+  var pressedOnBackdrop = false;
+  dialog.addEventListener('pointerdown', function (e) {
+    pressedOnBackdrop = e.target === dialog;
+  });
   dialog.addEventListener('click', function (e) {
-    if (e.target === dialog) dialog.close();
+    if (e.target === dialog && pressedOnBackdrop) dialog.close();
+    pressedOnBackdrop = false;
   });
   dialog.addEventListener('close', function () {
     if (dialog.open) return;    // reopened before this (asynchronous) event arrived
