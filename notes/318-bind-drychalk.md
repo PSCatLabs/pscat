@@ -111,7 +111,7 @@ temporarily unbound `dcmin` makes both the pscat and the gs test fail.
 
 ### Left over
 
-- `lib/drycharcoal.ps` belongs to open PR #315 and is not bound: a
-  follow-up once it merges (#326).
+- `lib/drycharcoal.ps` was in open PR #315 while this ran (it merged at the end) and is not bound: a
+  follow-up (#326).
 - A pscat-side measurement of the font-using kits, if anyone wants to
   know whether bind helps there.

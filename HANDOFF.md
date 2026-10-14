@@ -928,7 +928,7 @@ renders eight examples in both and compares block-downsampled output).
   bound (20% to 30% on its specimen), so it stays. drycrayon and the older
   kits are deliberately unbound: drycrayon gained under 1%, and the rest
   take 0.33 s or less in gs or cannot run there (no fonts), so there is
-  nothing to win (`notes/318-bind-drychalk.md`). drycharcoal (open PR #315)
+  nothing to win (`notes/318-bind-drychalk.md`). drycharcoal (merged in #315 after this work began)
   is not bound yet (#326).
 - Test Interps at 100×100; golden runs at 500×500/r72. Metric
   assertions use 1e-3 tolerances where the pen is f32.
