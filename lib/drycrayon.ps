@@ -1,0 +1,1344 @@
+%!PS-Adobe-3.0
+%%Title: drycrayon.ps — wax crayon on paper, and a child's ways of drawing with it
+%%Creator: pscat — issue #239 (design: docs/DRYMEDIA.md)
+%%EndComments
+% @requires: (lib/artkit.ps) run (lib/paintkit.ps) run (lib/drykit.ps) run
+
+% The crayon medium of epic #232, built on drykit's core (lib/drykit.ps):
+% every mark is `dkstroke` on a `dksurface`, and this file only decides how
+% a wax crayon presses, what paper it is drawn on, and how a child moves it.
+% It never edits lib/drykit.ps.
+%
+% Public:
+%
+%   opts  dypaper     crayon paper: drykit's /construction tooth, coarser,
+%                     on a white ground (the reference crops' paper)
+%   /name dycolor     sets the current colour from the crayon box (dybox)
+%   opts  dycrayon    draws the current path in wax crayon, current colour
+%
+% and the child-drawing motions, the dry-media counterpart of paintkit's
+% #184 generators. Each builds a path and paints nothing, so it composes
+% with dycrayon (or any preset that inks a path):
+%
+%   opts         dywobble    a shaky, overshooting version of the current path
+%   region opts  dyscribble  back-and-forth scribble fill over a region
+%   cx cy r opts dyloop      a circle drawn in one loop that doesn't close
+%   x y h opts   dyfigure    a stick (or tadpole) figure
+%   cx cy r opts dyrays      quick sun rays around a disc
+%   opts         dygrass     quick grass blades along the current path
+%
+% The motions keep paintkit's contract (lib/paintkit.ps, "Brush motions"):
+% each *replaces* the current path; none paints or touches colour; all draw
+% only from artkit's `frnd`, so they are deterministic under the caller's
+% own `srand` and `--sweep-seed` varies the composition while the texture
+% (drykit's, seeded from the canvas) stays put. Every slot (a subpath, a
+% pass, a loop, a limb, a ray, a blade) takes a fixed number of `frnd`
+% draws, and any randomness whose amount depends on a slot's length (a
+% tremor sampled along a line) comes from a private generator seeded by one
+% of those draws. So a knob that reshapes one slot never re-rolls where the
+% later ones land. Each is bounded by a work budget, rejected by a
+% self-documenting guard.
+%
+% How the crayon presses (dycrayon), from the reference board
+% (docs/drymedia/REFERENCES.md, Y1-Y6):
+%
+% * Waxy coverage (Y1, Y2). The tip deposits only where it meets raised
+%   tooth, and a skipped valley streaks along the travel (drykit's oriented
+%   catch, /Streak about 2). A crayon tip is rounded, so it presses hardest
+%   at its centre: each stroke is a dense core plus a wider rim at lower
+%   touch, which gives the ragged, speckled edge of a real crayon line
+%   instead of a clean capsule.
+% * Pressure along a stroke (Y4). A child presses on landing and fades
+%   toward the lift, with an uneven, wandering pressure in between.
+% * Wax build-up (Y3). A turn or a reversal slows the hand and presses
+%   harder: /Buildup raises the touch where the walked path turns.
+% * Repeated passes. Drykit can't read the page back, so a later pass over
+%   the same area is declared with /Pass: each pass presses wax into more
+%   of the tooth. Passes must be drawn inside one `dkbatch`, or the second
+%   pass's faint level greys the first one's core (DRYMEDIA.md 3.3).
+% * Layering. Wax slides on wax, so a colour laid over another (/Over)
+%   catches less and the colour beneath shows through its gaps.
+% * Tip wear (Y6). /Worn is how blunt the crayon is: a new point has a
+%   narrow dense core in a wide ragged rim; a worn flat face presses evenly
+%   across. /Wear widens the contact along each stroke, drykit's meaning.
+%
+% dycrayon draws each subpath as its own pair of dkstroke calls (the touch
+% profile depends on the subpath's own turns), all inside one dkbatch, so
+% the call stays level-major. If the caller already has a dkbatch open,
+% dycrayon adds to it instead of opening one (batches don't nest). It tells
+% the two apart by `userdict /dkBatch`, drykit's open-batch record; the
+% `drycrayon-drykit-contract` self-test pins that.
+%
+% Determinism. dycrayon takes no draws from the caller's `rand`: its own
+% randomness (the phase of the uneven pressure) comes from a private
+% Schrage generator, seeded per subpath from /Seed or from the subpath's
+% first point on the canvas, as drykit seeds a stroke.
+%
+% Scratch prefixes: dy- (shared helpers), dyK (dycrayon), dyT (its touch
+% profile), dyC (path collection), dyW (wobble lines), dyS (dyscribble),
+% dyL (dyloop), dyF (dyfigure), dyR (dyrays), dyG (dygrass). None is a
+% prefix drykit or paintkit uses.
+
+% --- helpers ----------------------------------------------------------
+
+% any -> bool   (an integer or a real)
+% @internal
+/dyisnum {
+    type dup /integertype eq exch /realtype eq or
+} def
+
+% any -> bool   (an executable array or packed array: a procedure)
+% @internal
+/dyisproc {
+    dup xcheck exch type dup /arraytype eq exch /packedarraytype eq or and
+} def
+
+% dict key default -> value   (the default when the key is absent)
+% @internal
+/dyget {
+    /dygd exch def
+    2 copy known { get } { pop pop /dygd load } ifelse
+} def
+
+% dict key default lo hi /error -> number   (a number option in lo..hi)
+% Anything else, a procedure included, raises the error by name.
+% @internal
+/dyoptnum {
+    /dyoe exch def /dyoh exch def /dyol exch def
+    dyget
+    dup dyisnum not { pop dyoe cvx exec } if
+    dup dyol lt 1 index dyoh gt or { pop dyoe cvx exec } if
+} def
+
+% dict key default lo hi /error -> integer   (a whole number in lo..hi)
+% @internal
+/dyoptint {
+    dup /dyoie exch def
+    dyoptnum
+    dup dup cvi ne { pop dyoie cvx exec } if
+    cvi
+} def
+
+% dict key default /error -> bool
+% @internal
+/dyoptbool {
+    /dyoe exch def
+    dyget
+    dup type /booleantype ne { pop dyoe cvx exec } if
+} def
+
+% value /error -> [r g b]   (an rgb array of three numbers 0..1, copied)
+% @internal
+/dyrgb {
+    /dyoe exch def
+    dup type /arraytype ne 1 index type /packedarraytype ne and { dyoe cvx exec } if
+    dup xcheck { dyoe cvx exec } if
+    dup length 3 ne { dyoe cvx exec } if
+    dup {
+        dup dyisnum not { pop dyoe cvx exec } if
+        dup 0 lt exch 1 gt or { dyoe cvx exec } if
+    } forall
+    aload pop 3 array astore
+} def
+
+% a b -> max(a, b)
+% @internal
+/dymax {
+    2 copy lt { exch } if pop
+} def
+
+% a b -> min(a, b)
+% @internal
+/dymin {
+    2 copy gt { exch } if pop
+} def
+
+% x lo hi -> x clamped to lo..hi
+% @internal
+/dyclamp {
+    /dych exch def /dycl exch def
+    dup dycl lt { pop dycl } if
+    dup dych gt { pop dych } if
+} def
+
+% any -> bool   (an artkit region: screct or scpath)
+% @internal
+/dyisregion {
+    dup type /dicttype eq
+        { dup /BBox known exch /Kind known and }
+        { pop false }
+    ifelse
+} def
+
+% seed -   (seeds drycrayon's own generator)
+% The same Schrage-form minimal standard LCG as paintkit's pjrand and
+% drykit's dkrand, under its own state, so both interpreters draw the same
+% sequence and the caller's `rand` stream is never touched.
+% @internal
+/dysrand {
+    cvi 2147483646 mod abs 1 add
+    userdict /dystate 3 -1 roll put
+} def
+
+% -> 0.0..1.0   (exclusive at both ends)
+% @internal
+/dyrand {
+    userdict /dystate get
+    dup 127773 idiv 2836 mul exch 127773 mod 16807 mul exch sub
+    dup 0 lt { 2147483647 add } if
+    dup userdict /dystate 3 -1 roll put
+    2147483647 div
+} def
+
+userdict /dystate 2 put
+
+% -> integer 0..999999   (one caller draw, as a seed for dysrand)
+% @internal
+/dyslotseed {
+    frnd 999999 mul cvi
+} def
+
+% --- the crayon box ---------------------------------------------------
+
+% The colours of a standard 16-crayon box, in box order, as sRGB. They are
+% a wax crayon's colours on white paper rather than paint primaries: a
+% little muted, the yellow warm, the white faintly grey.
+% @kind: Constant
+% @summary: The crayon box: a dict of 16 named crayon colours (rgb arrays), the colours of a standard 16-crayon box as they read on white paper. Iterate them in box order with dycolors; set one with dycolor.
+% @example: dybox /bluegreen get aload pop setrgbcolor
+/dybox <<
+    /red          [0.84 0.16 0.20]
+    /redorange    [0.95 0.36 0.20]
+    /orange       [0.98 0.53 0.16]
+    /yelloworange [1.00 0.70 0.26]
+    /yellow       [0.99 0.87 0.22]
+    /yellowgreen  [0.66 0.81 0.30]
+    /green        [0.18 0.61 0.33]
+    /bluegreen    [0.08 0.57 0.62]
+    /blue         [0.16 0.41 0.79]
+    /blueviolet   [0.38 0.34 0.70]
+    /violet       [0.53 0.31 0.66]
+    /redviolet    [0.73 0.23 0.50]
+    /carnation    [0.98 0.62 0.72]
+    /brown        [0.61 0.36 0.21]
+    /black        [0.14 0.13 0.13]
+    /white        [0.96 0.96 0.94]
+>> def
+
+% @kind: Constant
+% @summary: The names of the crayon box's 16 colours, in box order (dybox has no order of its own): red, red-orange, orange, yellow-orange, yellow, yellow-green, green, blue-green, blue, blue-violet, violet, red-violet, carnation pink, brown, black, white.
+% @example: dycolors { dycolor ... } forall
+/dycolors [
+    /red /redorange /orange /yelloworange /yellow /yellowgreen /green
+    /bluegreen /blue /blueviolet /violet /redviolet /carnation /brown
+    /black /white
+] def
+
+%%SelfTest: dycolor-guards
+%   { (red) dycolor } /dycolor-needs-a-colour-name
+%   (a string for the name) mustguard
+%
+%   { /mauve dycolor } /dycolor-unknown-colour
+%   (a name not in the box) mustguard
+%
+%   { /blue dycolor } (a colour in the box) mustpass
+%   currentrgbcolor 0.79 sub abs 0.001 lt exch 0.41 sub abs 0.001 lt and
+%   exch 0.16 sub abs 0.001 lt and
+%   (dycolor sets the box's rgb) mustbe
+%
+%   dycolors length 16 eq (the box holds sixteen) mustbe
+%   true dycolors { dybox exch known and } forall
+%   (every name in dycolors is in dybox) mustbe
+%   dybox length 16 eq (and dybox holds nothing else) mustbe
+%%EndSelfTest
+%
+% @kind: Procedure
+% @summary: Sets the current colour to a crayon from the box (dybox): /red, /redorange, /orange, /yelloworange, /yellow, /yellowgreen, /green, /bluegreen, /blue, /blueviolet, /violet, /redviolet, /carnation, /brown, /black or /white. dycrayon then draws in it.
+% @example: /green dycolor newpath 40 40 moveto 200 60 lineto << >> dycrayon
+/dycolor {
+    dup type /nametype ne { pop dycolor-needs-a-colour-name } if
+    dybox 1 index known not { pop dycolor-unknown-colour } if
+    dybox exch get aload pop setrgbcolor
+} def
+
+% --- paper ------------------------------------------------------------
+
+%%SelfTest: dypaper-sets-crayon-paper
+%   { 5 dypaper } /dypaper-options-must-be-a-dict
+%   (a number for the options) mustguard
+%
+%   << >> dypaper
+%   userdict /dkSurface get /construction eq userdict /pjW get 1.4 eq and
+%   userdict /pjR get 0.65 eq and userdict /pjM get 8 eq and
+%   (the defaults: construction paper's tooth, coarser) mustbe
+%   userdict /dkGround get 0 get 0.97 eq (on a white ground) mustbe
+%
+%   << /Weave 1 /Ground [0.2 0.3 0.8] >> dypaper
+%   userdict /pjW get 1 eq userdict /pjR get 0.65 eq and
+%   userdict /dkGround get 2 get 0.8 eq and
+%   (a key given replaces its default and keeps the rest) mustbe
+%
+%   { << /Surface /marble >> dypaper } /dksurface-unknown-surface
+%   (dksurface's own guards still apply) mustguard
+%%EndSelfTest
+%
+% @kind: Procedure
+% @summary: Sets up crayon paper as the drykit surface: drykit's construction-paper tooth made coarser and softer, on a white ground, tuned against the crayon reference crops (docs/drymedia/REFERENCES.md Y1, Y2) so a light scribble leaves a quarter to a third of the paper showing in streaks and a heavy one is nearly solid. Takes dksurface's keys, any of which replaces the default; paints nothing (paint the ground yourself) and takes no rand draws.
+% @example: << /Seed 4 >> dypaper 0.97 0.96 0.93 setrgbcolor clippath fill
+% @param: /Surface [name] The drykit surface underneath, as dksurface (default /construction)
+% @param: /Seed [integer] Seed for the paper's tooth, as dksurface (default 1)
+% @param: /Weave [points] Tooth spacing, as dksurface (default 1.4: a child's cheap paper, coarser than drykit's 0.9)
+% @param: /Mottle [points] Scale of the slow variation in the tooth, as dksurface (default 8)
+% @param: /Relief [0..1] How much the slow mottle decides which tooth stands proud, as dksurface (default 0.65)
+% @param: /Ground [rgb array] The paper's colour, which crayon strokes read as what lies beneath, as dksurface (default a warm white [0.97 0.96 0.93])
+/dypaper {
+    dup type /dicttype ne { pop dypaper-options-must-be-a-dict } if
+    /dypo exch def
+    <<
+        /Surface /construction
+        /Ground [0.97 0.96 0.93]
+        /Weave 1.4
+        /Relief 0.65
+        /Mottle 8
+    >>
+    dup dypo { 3 copy put pop pop } forall
+    pop dksurface
+} def
+
+% --- dycrayon ---------------------------------------------------------
+
+% How far below the core's touch a crayon's rim presses, for a new point
+% (Worn 0) and a worn flat (Worn 1); and how wide the dense core is, as a
+% fraction of /Width, at the same two ends.
+% @internal
+/dyKrim0 0.22 def
+% @internal
+/dyKrim1 0.10 def
+% @internal
+/dyKcore0 0.5 def
+% @internal
+/dyKcore1 0.85 def
+
+% Touch added per pass after the first, and taken away when wax slides on
+% an earlier colour (/Over).
+% @internal
+/dyKpassstep 0.06 def
+% @internal
+/dyKresist 0.08 def
+
+% Subpaths one dycrayon call may draw (each is two dkstroke calls).
+% @internal
+/dyKmaxsubs 20000 def
+
+% t base isproc land fade uneven build L W p1 p2 turns pitch offset -> touch
+% The crayon's touch at t (0..1 along the subpath): the base (a number, or
+% the caller's {t -> touch}), a landing press over the first 2 Widths, a
+% fade toward the lift, a slow wander in two incommensurate waves, the
+% build-up at the walked turn nearest t, and a fixed offset (passes,
+% wax on wax, the rim). Clamped to 0..1.
+% @internal
+/dyTat {
+    /dyToff exch def /dyTpitch exch def /dyTturn exch def
+    /dyTp2 exch def /dyTp1 exch def /dyTW exch def /dyTL exch def
+    /dyTbuild exch def /dyTuneven exch def /dyTfade exch def /dyTland exch def
+    /dyTisp exch def /dyTbase exch def /dyTt exch def
+    dyTisp {
+        dyTt /dyTbase load exec
+        dup dyisnum not { pop dycrayon-touch-procedure-must-return-a-number } if
+    } { dyTbase } ifelse
+    /dyTs dyTt dyTL mul def
+    1 dyTs dyTW 2 mul div sub dup 0 lt { pop 0 } if dyTland mul add
+    dyTfade dyTt mul sub
+    dyTp1 dyTs 8 mul add sin 0.6 mul dyTp2 dyTs 21.2 mul add sin 0.4 mul add
+    dyTuneven mul add
+    dyTturn length 0 gt {
+        dyTs dyTpitch div round cvi 0 dyTturn length 1 sub dyclamp
+        dyTturn exch get dyTbuild mul add
+    } if
+    dyToff add
+    0 1 dyclamp
+} def
+
+% -> [ [x y x y ...] ... ]   (the current path, flattened, as point lists)
+% A closepath repeats the subpath's first point, so a closed outline is
+% walked all the way round, as dkstroke would walk it.
+% @internal
+/dyKsubpaths {
+    flattenpath
+    mark
+    /dyKopen false def
+    {
+        /dyKsy exch def /dyKsx exch def
+        dyKopen { counttomark array astore exch pop } if
+        mark dyKsx dyKsy
+        /dyKopen true def
+    }
+    { }
+    { pop pop pop pop pop pop }
+    { dyKsx dyKsy }
+    pathforall
+    dyKopen { counttomark array astore exch pop } if
+    counttomark array astore exch pop
+    newpath
+} def
+
+% P -   (the point list as a fresh path)
+% @internal
+/dyKpath {
+    /dyKpp exch def
+    newpath
+    dyKpp 0 get dyKpp 1 get moveto
+    1 1 dyKpp length 2 idiv 1 sub {
+        2 mul dup dyKpp exch get exch 1 add dyKpp exch get lineto
+    } for
+} def
+
+% -   (one subpath, dyKP, as a core and a rim: dyKk is its index)
+% @internal
+/dyKone {
+    dyKP dyKpath
+    % Its own walk, at the rim's pitch: length and the turn at each stop.
+    /dyKpitch dyKw 0.75 mul 1 4 dyclamp def
+    /dyKn 0 def
+    dyKpitch { pop pop pop pop pop pop /dyKn dyKn 1 add def } walkpath
+    /dyKang dyKn array def
+    /dyKi 0 def /dyKL 0 def
+    dyKpitch {
+        pop /dyKsp exch def pop dyKang dyKi 3 -1 roll put pop pop
+        dyKi 0 gt { /dyKL dyKL dyKsp add def } if
+        /dyKi dyKi 1 add def
+    } walkpath
+    % Turning per stop (0 at a straight stop, 1 at a reversal), summed over
+    % three stops so a curved turn counts as much as a sharp one, then
+    % spread one stop either side: the hand slows before and after.
+    /dyKd dyKn array def
+    0 1 dyKn 1 sub {
+        /dyKi exch def
+        dyKi 0 eq {
+            0
+        } {
+            % walkpath's headings are atan's 0..360, so the gap is at most 360
+            dyKang dyKi get dyKang dyKi 1 sub get sub abs
+            dup 180 gt { 360 exch sub } if
+        } ifelse
+        dyKd dyKi 3 -1 roll put
+    } for
+    /dyKturn [
+        0 1 dyKn 1 sub {
+            /dyKi exch def
+            0
+            dyKi 1 sub 1 dyKi 1 add {
+                dup 0 ge 1 index dyKn lt and { dyKd exch get add } { pop } ifelse
+            } for
+            120 div 1 dymin
+        } for
+    ] def
+    /dyKturn [
+        0 1 dyKn 1 sub {
+            /dyKi exch def
+            dyKturn dyKi get
+            dyKi 0 gt { dyKturn dyKi 1 sub get 0.7 mul dymax } if
+            dyKi dyKn 1 sub lt { dyKturn dyKi 1 add get 0.7 mul dymax } if
+        } for
+    ] def
+    % seed: /Seed + k, or the first point's canvas position (drykit's rule)
+    dyKhasseed {
+        /dyKs dyKseed cvi dyKk add def
+    } {
+        dyKP 0 get dyKP 1 get transform userdict /pjCTM get itransform
+        100 mul round dup abs 2e9 gt { pop 0 } if cvi 46337 mod abs
+        exch
+        100 mul round dup abs 2e9 gt { pop 0 } if cvi 46337 mod abs
+        exch 46337 mul add
+        /dyKs exch def
+    } ifelse
+    dyKs 7907 add dysrand
+    /dyKp1 dyrand 360 mul def
+    /dyKp2 dyrand 360 mul def
+    /dyKbonus dyKpass 1 sub dyKpassstep mul dyKhasover { dyKresist sub } if def
+    /dyKrimoff dyKrim0 dyKrim1 dyKrim0 sub dyKworn mul add neg def
+    % Rim, then core: both in the open batch, so level-major together.
+    dyKP dyKpath
+    << /Width dyKw /Touch dyKrimoff false dyKtouch
+       /Bands 16 /Levels 1 /Halo 0 /Streak dyKstreak /Strength dyKstrength
+       /Wear dyKwear /Under dyKunder
+       dyKhasseed { /Seed dyKs } if >> dkstroke
+    dyKP dyKpath
+    << /Width dyKw dyKcore0 dyKcore1 dyKcore0 sub dyKworn mul add mul
+       /Touch 0 true dyKtouch
+       /Bands 16 /Levels dyKhasover { 1 } { 2 } ifelse /Halo 0
+       /Streak dyKstreak /Strength dyKstrength
+       /Wear dyKwear /Under dyKunder
+       dyKhasseed { /Seed dyKs 1000003 add } if >> dkstroke
+} def
+
+% offset core -> touch-or-procedure   (the subpath's touch for dkstroke)
+% A plain number when nothing varies along the stroke, so dkstroke draws
+% one band; otherwise a procedure closing over this subpath's profile.
+% The landing and the build-up press the core only: pushing harder drives
+% the middle of the tip into the valleys while its rounded edge still
+% skims the tooth, so a pressed spot is dense inside a ragged edge rather
+% than a solid disc.
+% @internal
+/dyKtouch {
+    /dyKcore exch def /dyKoff exch def
+    /dyKl dyKcore { dyKland } { 0 } ifelse def
+    /dyKb dyKcore { dyKbuild } { 0 } ifelse def
+    dyKtp not dyKl 0 eq and dyKfade 0 eq and dyKuneven 0 eq and dyKb 0 eq and {
+        dyKt dyKbonus add dyKoff add 0 1 dyclamp
+    } {
+        [ /dyKt load dyKtp dyKl dyKfade dyKuneven dyKb
+          dyKL dyKw dyKp1 dyKp2 dyKturn dyKpitch dyKbonus dyKoff add
+          /dyTat cvx ] cvx
+    } ifelse
+} def
+
+% -   (every subpath of dyKsubs)
+% @internal
+/dyKdraw {
+    0 1 dyKsubs length 1 sub {
+        /dyKk exch def
+        /dyKP dyKsubs dyKk get def
+        dyKone
+    } for
+} def
+
+%%SelfTest: dycrayon-rejects-malformed-options
+%   << >> dypaper
+%   { newpath 0 0 moveto 50 0 lineto 5 dycrayon } /dycrayon-options-must-be-a-dict
+%   (a number for the options) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Width 0 >> dycrayon } /dycrayon-width-must-be-positive
+%   (/Width 0) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Touch 1.2 >> dycrayon } /dycrayon-touch-must-be-0-to-1
+%   (/Touch 1.2) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Touch (hard) >> dycrayon } /dycrayon-touch-must-be-a-number-or-procedure
+%   (a string /Touch) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Touch { pop (x) } >> dycrayon }
+%   /dycrayon-touch-procedure-must-return-a-number
+%   (a /Touch procedure returning a string) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Landing { 0.2 } >> dycrayon } /dycrayon-landing-must-be-0-to-1
+%   (a procedure /Landing) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Fade -0.1 >> dycrayon } /dycrayon-fade-must-be-0-to-1
+%   (/Fade -0.1) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Uneven 2 >> dycrayon } /dycrayon-uneven-must-be-0-to-1
+%   (/Uneven 2) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Buildup 1.5 >> dycrayon } /dycrayon-buildup-must-be-0-to-1
+%   (/Buildup 1.5) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Worn 3 >> dycrayon } /dycrayon-worn-must-be-0-to-1
+%   (/Worn 3) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Wear 5 >> dycrayon } /dycrayon-wear-must-be-0-to-4
+%   (/Wear 5) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Pass 1.5 >> dycrayon } /dycrayon-pass-must-be-1-to-8
+%   (a fractional /Pass) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Pass 9 >> dycrayon } /dycrayon-pass-must-be-1-to-8
+%   (/Pass 9) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Streak 0.5 >> dycrayon } /dycrayon-streak-must-be-1-to-4
+%   (/Streak 0.5) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Strength 2 >> dycrayon } /dycrayon-strength-must-be-0-to-1
+%   (/Strength 2) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Over [1 0] >> dycrayon } /dycrayon-over-must-be-an-rgb-array
+%   (a two-entry /Over) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Seed (s) >> dycrayon } /dycrayon-seed-must-be-a-number
+%   (a string /Seed) mustguard
+%
+%   % A procedure /Touch is a procedure whether or not it was packed.
+%   { newpath 0 0 moveto 50 0 lineto << /Touch [ /pop cvx 0.7 ] cvx >> dycrayon }
+%   (a procedure /Touch) mustpass
+%   { newpath 0 0 moveto 50 0 lineto
+%     true setpacking << /Touch { pop 0.7 } >> false setpacking dycrayon }
+%   (a packed procedure /Touch) mustpass
+%
+%   { newpath << >> dycrayon } (an empty path draws nothing) mustpass
+%%EndSelfTest
+%
+%%SelfTest: dycrayon-needs-a-surface
+%   userdict /dkGround undef
+%   { newpath 0 0 moveto 50 0 lineto << >> dycrayon } /dycrayon-needs-a-surface
+%   (no dksurface or dypaper yet) mustguard
+%%EndSelfTest
+%
+%%SelfTest: dycrayon-takes-no-draws-and-joins-an-open-batch
+%   << >> dypaper
+%   7 srand rand /dyta exch def
+%   7 srand newpath 0 0 moveto 30 10 lineto 0 20 lineto 40 40 moveto 60 40 lineto
+%   << /Seed 3 >> dycrayon rand dyta eq
+%   (dycrayon leaves the caller's stream untouched) mustbe
+%
+%   7 srand newpath 0 0 moveto 30 10 lineto 0 20 lineto << >> dycrayon rand dyta eq
+%   (with the position seed too) mustbe
+%
+%   { { newpath 0 0 moveto 30 10 lineto << >> dycrayon
+%       newpath 0 5 moveto 30 15 lineto << /Pass 2 >> dycrayon } dkbatch }
+%   (two dycrayon calls inside one open dkbatch) mustpass
+%
+%   { { newpath 0 0 moveto 30 10 lineto << >> dycrayon
+%       1 0 0 setrgbcolor newpath 0 5 moveto 30 15 lineto << >> dycrayon } dkbatch }
+%   /dkbatch-mixes-pigments
+%   (a second colour in the caller's batch is drykit's error) mustguard
+%   userdict /dkBatch known not (and the batch is closed after it) mustbe
+%%EndSelfTest
+%
+%%SelfTest: drycrayon-drykit-contract
+%   % dycrayon joins a batch the caller opened by reading drykit's open-batch
+%   % record. If drykit renames it, dycrayon would nest a batch and raise
+%   % dkbatch-cannot-nest inside every caller's batch: this fails first.
+%   /dyctin false def
+%   { /dyctin userdict /dkBatch known def } dkbatch
+%   dyctin (an open dkbatch is userdict /dkBatch) mustbe
+%   userdict /dkBatch known not (and it is gone when the batch ends) mustbe
+%   << >> dypaper
+%   userdict /dkGround known userdict /pjCTM known and
+%   (a surface leaves /dkGround and paintkit's /pjCTM in userdict) mustbe
+%%EndSelfTest
+%
+% @kind: Procedure
+% @summary: Draws the current path in wax crayon, in the current colour, on the drykit surface (dypaper is crayon paper): the wax catches only on the paper's tooth, leaving white specks that streak along the stroke, and a rounded tip gives a dense core with a ragged rim. A child's pressure profile (a press on landing, a fade, an uneven wander) and wax build-up where the stroke turns or reverses are on by default. Repeated passes (/Pass) build coverage and a colour laid over another (/Over) lets it show through; draw passes or several calls of one colour inside one dkbatch. Consumes the current path like fill; takes no rand draws from the caller's stream.
+% @example: << >> dypaper /blue dycolor newpath 40 40 moveto 120 80 lineto 200 50 lineto << /Width 6 /Touch 0.7 >> dycrayon
+% @param: /Width [points] Contact width of the crayon; must be > 0 (default 6)
+% @param: /Touch [0..1] Pressure against the tooth, drykit's meaning: low catches only the highest tooth, 1 is solid. A procedure {t -> touch}, t = 0..1 along each subpath, is a base profile that the landing, fade, wander and build-up are added to (default 0.75)
+% @param: /Landing [0..1] Extra touch at the middle of the tip where each stroke lands, fading over its first two Widths (default 0.08)
+% @param: /Fade [0..1] How much the touch falls from the start of each stroke to its end, as the hand lifts (default 0.12)
+% @param: /Uneven [0..1] How far the touch wanders along each stroke, a child's uneven pressure (default 0.06)
+% @param: /Buildup [0..1] Extra touch at the middle of the tip where the stroke turns or reverses, as the hand slows and wax builds up; a full reversal gets all of it (default 0.15)
+% @param: /Worn [0..1] How blunt the crayon is: 0 is a new point (a narrow dense core in a wide ragged rim), 1 a worn flat face that presses evenly across its width (default 0.4)
+% @param: /Wear [fraction of /Width] How much wider the contact gets from the start of each subpath to its end as the tip wears, drykit's meaning, 0..4 (default 0.1)
+% @param: /Pass [count] Which pass over the same area this is, 1..8: each later pass presses wax into more of the tooth. Draw the passes inside one dkbatch (default 1)
+% @param: /Over [rgb array] The crayon colour this stroke is laid over. Wax slides on wax, so the stroke catches less and the colour beneath shows through its gaps; it is drawn at one level, so no part of it is tinted toward the colour beneath (default unset: laid on the paper)
+% @param: /Streak [ratio] How much each tooth knuckle is stretched along the stroke, drykit's meaning, 1..4: skipped valleys read as streaks (default 2.2)
+% @param: /Strength [0..1] How strongly the wax reads against the paper, drykit's meaning (default 0.95)
+% @param: /Seed [integer] Seed for the stroke's own randomness (the wander, drykit's tool side); subpath i uses Seed + i. Leaves the caller's rand stream untouched (default from each subpath's first point on the canvas)
+/dycrayon {
+    dup type /dicttype ne { pop dycrayon-options-must-be-a-dict } if
+    /dyKo exch def
+    userdict /dkGround known not { dycrayon-needs-a-surface } if
+    /dyKw dyKo /Width 6 1e-6 1e6 /dycrayon-width-must-be-positive dyoptnum def
+    /dyKt dyKo /Touch 0.75 dyget def
+    /dyKt load dyisproc {
+        /dyKtp true def
+    } {
+        /dyKtp false def
+        /dyKt load dyisnum not { dycrayon-touch-must-be-a-number-or-procedure } if
+        dyKt 0 lt dyKt 1 gt or { dycrayon-touch-must-be-0-to-1 } if
+    } ifelse
+    /dyKland dyKo /Landing 0.08 0 1 /dycrayon-landing-must-be-0-to-1 dyoptnum def
+    /dyKfade dyKo /Fade 0.12 0 1 /dycrayon-fade-must-be-0-to-1 dyoptnum def
+    /dyKuneven dyKo /Uneven 0.06 0 1 /dycrayon-uneven-must-be-0-to-1 dyoptnum def
+    /dyKbuild dyKo /Buildup 0.15 0 1 /dycrayon-buildup-must-be-0-to-1 dyoptnum def
+    /dyKworn dyKo /Worn 0.4 0 1 /dycrayon-worn-must-be-0-to-1 dyoptnum def
+    /dyKwear dyKo /Wear 0.1 0 4 /dycrayon-wear-must-be-0-to-4 dyoptnum def
+    /dyKpass dyKo /Pass 1 1 8 /dycrayon-pass-must-be-1-to-8 dyoptint def
+    /dyKstreak dyKo /Streak 2.2 1 4 /dycrayon-streak-must-be-1-to-4 dyoptnum def
+    /dyKstrength dyKo /Strength 0.95 0 1 /dycrayon-strength-must-be-0-to-1 dyoptnum def
+    dyKo /Over known {
+        /dyKhasover true def
+        /dyKunder dyKo /Over get /dycrayon-over-must-be-an-rgb-array dyrgb def
+    } {
+        /dyKhasover false def
+        /dyKunder userdict /dkGround get def
+    } ifelse
+    dyKo /Seed known {
+        /dyKhasseed true def
+        /dyKseed dyKo /Seed get def
+        /dyKseed load dyisnum not { dycrayon-seed-must-be-a-number } if
+        dyKseed abs 2147483647 ge { dycrayon-seed-must-be-within-integer-range } if
+    } { /dyKhasseed false def } ifelse
+
+    /dyKsubs dyKsubpaths def
+    dyKsubs length dyKmaxsubs gt { dycrayon-too-many-subpaths } if
+    dyKsubs length 0 gt {
+        userdict /dkBatch known
+            { dyKdraw }
+            { { dyKdraw } dkbatch }
+        ifelse
+    } if
+} def
+
+% --- motions: shared pieces --------------------------------------------
+
+% pitch cap {guard} dyCcollect -
+% Walks the current path (flattened) and stores every stop as
+% [x y ang t sp atend] in dyCs, its length in dyCn. Counts first, with the
+% budget check inside the callback, then fills a preallocated array.
+% @internal
+/dyCcollect {
+    /dyCg exch def /dyCcap exch def /dyCp exch def
+    /dyCn 0 def
+    dyCp {
+        pop pop pop pop pop pop
+        /dyCn dyCn 1 add def
+        dyCn dyCcap gt { dyCg } if
+    } walkpath
+    /dyCs dyCn array def
+    /dyCi 0 def
+    dyCp {
+        6 array astore dyCs dyCi 3 -1 roll put
+        /dyCi dyCi 1 add def
+    } walkpath
+} def
+
+% -> [ [a b] ... ]   (index ranges of dyCs, one per subpath)
+% @internal
+/dyCsubs {
+    /dyCst [
+        0 1 dyCn 1 sub {
+            dup dyCs exch get 5 get dup 1 eq exch 3 eq or { } { pop } ifelse
+        } for
+    ] def
+    [
+        0 1 dyCst length 1 sub {
+            /dyCk exch def
+            dyCst dyCk get
+            dyCk 1 add dyCst length lt { dyCst dyCk 1 add get 1 sub } { dyCn 1 sub } ifelse
+            2 array astore
+        } for
+    ]
+} def
+
+% P amp lambda tremor overshoot -   (appends one wobbly line)
+% P is a flat [x y x y ...] list sampled finely along the line. Takes six
+% frnd draws (two wave phases, two overshoot lengths, the hook, a seed for
+% the tremor), whatever the line's length. The line wanders sideways in
+% two incommensurate waves of about `lambda`, shakes by up to `tremor` at
+% every sample, starts a little before its first point and runs past its
+% last by up to `overshoot`, hooking as the hand swings off.
+% @internal
+/dyWline {
+    /dyWover exch def /dyWtrem exch def /dyWlam exch def /dyWamp exch def
+    /dyWP exch def
+    /dyWp1 frnd 360 mul def
+    /dyWp2 frnd 360 mul def
+    /dyWfe frnd def
+    /dyWfs frnd def
+    /dyWfh frnd def
+    dyslotseed dysrand
+    /dyWn dyWP length 2 idiv def
+    dyWn 0 gt {
+        % the offset line
+        /dyWQ dyWn 2 mul array def
+        /dyWs 0 def
+        0 1 dyWn 1 sub {
+            /dyWi exch def
+            /dyWx dyWP dyWi 2 mul get def
+            /dyWy dyWP dyWi 2 mul 1 add get def
+            dyWi 0 gt {
+                /dyWs dyWs
+                    dyWx dyWP dyWi 1 sub 2 mul get sub dup mul
+                    dyWy dyWP dyWi 1 sub 2 mul 1 add get sub dup mul add sqrt
+                add def
+            } if
+            % tangent from the neighbours (one-sided at the ends)
+            /dyWa dyWi 1 sub 0 dymax def
+            /dyWb dyWi 1 add dyWn 1 sub dymin def
+            /dyWtx dyWP dyWb 2 mul get dyWP dyWa 2 mul get sub def
+            /dyWty dyWP dyWb 2 mul 1 add get dyWP dyWa 2 mul 1 add get sub def
+            /dyWtl dyWtx dup mul dyWty dup mul add sqrt def
+            dyWtl 0 gt {
+                /dyWtx dyWtx dyWtl div def /dyWty dyWty dyWtl div def
+            } { /dyWtx 1 def /dyWty 0 def } ifelse
+            /dyWo
+                dyWp1 dyWs dyWlam div 360 mul add sin 0.65 mul
+                dyWp2 dyWs dyWlam 0.43 mul div 360 mul add sin 0.35 mul add
+                dyWamp mul
+                dyrand 2 mul 1 sub dyWtrem mul add
+            def
+            dyWQ dyWi 2 mul dyWx dyWty dyWo mul sub put
+            dyWQ dyWi 2 mul 1 add dyWy dyWtx dyWo mul add put
+        } for
+        % heading at either end of the offset line
+        dyWn 1 gt {
+            /dyWh1 dyWQ dyWn 2 mul 1 sub get dyWQ dyWn 2 mul 3 sub get sub
+                   dyWQ dyWn 2 mul 2 sub get dyWQ dyWn 2 mul 4 sub get sub
+                   2 copy 0 eq exch 0 eq and { pop pop 0 } { atan } ifelse def
+            /dyWh0 dyWQ 1 get dyWQ 3 get sub dyWQ 0 get dyWQ 2 get sub
+                   2 copy 0 eq exch 0 eq and { pop pop 180 } { atan } ifelse def
+        } { /dyWh1 0 def /dyWh0 180 def } ifelse
+        % a short lead-in before the first point
+        /dyWe0 dyWover 0.3 mul dyWfs mul def
+        dyWQ 0 get dyWh0 cos dyWe0 mul add
+        dyWQ 1 get dyWh0 sin dyWe0 mul add moveto
+        0 1 dyWn 1 sub { 2 mul dup dyWQ exch get exch 1 add dyWQ exch get lineto } for
+        dyWn 1 eq dyWover 0 eq and { dyWQ 0 get dyWQ 1 get lineto } if
+        % the overshoot: three steps, turning by the hook
+        /dyWe1 dyWover 0.4 dyWfe 0.8 mul add mul def
+        dyWe1 0 gt {
+            /dyWhk dyWfh 2 mul 1 sub 30 mul def
+            /dyWcx dyWQ dyWn 2 mul 2 sub get def
+            /dyWcy dyWQ dyWn 2 mul 1 sub get def
+            1 1 3 {
+                /dyWh1 dyWh1 dyWhk 3 div add def
+                /dyWcx dyWcx dyWh1 cos dyWe1 3 div mul add def
+                /dyWcy dyWcy dyWh1 sin dyWe1 3 div mul add def
+                dyWcx dyWcy lineto
+                pop
+            } for
+        } if
+    } if
+} def
+
+% x0 y0 x1 y1 amp lambda tremor overshoot -   (dyWline along a segment)
+% @internal
+/dyWseg {
+    /dyWsv exch def /dyWst exch def /dyWsl exch def /dyWsa exch def
+    /dyWy1 exch def /dyWx1 exch def /dyWy0 exch def /dyWx0 exch def
+    /dyWlen dyWx1 dyWx0 sub dup mul dyWy1 dyWy0 sub dup mul add sqrt def
+    /dyWk dyWlen 2 div ceiling cvi 1 dymax 2000 dymin def
+    [ 0 1 dyWk {
+        dyWk div /dyWf exch def
+        dyWx0 dyWx1 dyWx0 sub dyWf mul add
+        dyWy0 dyWy1 dyWy0 sub dyWf mul add
+    } for ]
+    dyWsa dyWsl dyWst dyWsv dyWline
+} def
+
+% --- dywobble ------------------------------------------------------------
+
+%%SelfTest: dywobble-guards
+%   { newpath 0 0 moveto 50 0 lineto 5 dywobble } /dywobble-options-must-be-a-dict
+%   (a number for the options) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Wobble -1 >> dywobble } /dywobble-wobble-must-be-non-negative
+%   (/Wobble -1) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Wobble { 2 } >> dywobble } /dywobble-wobble-must-be-non-negative
+%   (a procedure /Wobble) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Wavelength 0 >> dywobble } /dywobble-wavelength-must-be-positive
+%   (/Wavelength 0) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Tremor -1 >> dywobble } /dywobble-tremor-must-be-non-negative
+%   (/Tremor -1) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Overshoot -1 >> dywobble } /dywobble-overshoot-must-be-non-negative
+%   (/Overshoot -1) mustguard
+%
+%   { newpath 0 0 moveto 1000000 0 lineto << /Wavelength 0.1 >> dywobble }
+%   /dywobble-point-count-exceeds-safety-limit
+%   (a tiny wavelength on a long line) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto 0 10 moveto 0 60 lineto << >> dywobble
+%     newpath 5 5 moveto << >> dywobble newpath << >> dywobble }
+%   (two subpaths, a lone point and an empty path) mustpass
+%
+%   % Deterministic under the caller's srand, and it replaces the path.
+%   3 srand newpath 0 0 moveto 80 0 lineto << >> dywobble pathbbox 4 array astore /dyta exch def
+%   3 srand newpath 0 0 moveto 80 0 lineto << >> dywobble pathbbox 4 array astore /dytb exch def
+%   true 0 1 3 { dup dyta exch get exch dytb exch get eq and } for
+%   (the same srand gives the same wobble) mustbe
+%   newpath 0 0 moveto 80 0 lineto << /Overshoot 0 /Tremor 0 >> dywobble
+%   pathbbox pop pop pop 0 ge (no lead-in without an overshoot) mustbe
+%%EndSelfTest
+%
+% @kind: Procedure
+% @summary: A child's wobbly line: the current path is read as a spine and replaced with a shaky version of each subpath -- a slow sideways wander, a fine tremor, a short lead-in, and an overshoot past the end that hooks as the hand swings off. A closed outline runs past its start. Builds a path and paints nothing, so it composes with dycrayon: `opts dywobble << >> dycrayon`. Deterministic under the caller's own srand, with six draws per subpath.
+% @example: newpath 40 60 moveto 240 70 lineto << /Wobble 2 /Overshoot 8 >> dywobble << >> dycrayon
+% @param: /Wobble [points] How far the line wanders to either side of the spine; must be >= 0 (default 1.5)
+% @param: /Wavelength [points] Distance along the line of one slow wander; must be > 0 (default 40)
+% @param: /Tremor [points] The fine shake at every sample, to either side; must be >= 0 (default 0.3)
+% @param: /Overshoot [points] How far each line runs past its end (about 0.4 to 1.2 times this), with a short lead-in before its start; must be >= 0 (default 5)
+/dywobble {
+    dup type /dicttype ne { pop dywobble-options-must-be-a-dict } if
+    /dyWO exch def
+    /dyWOa dyWO /Wobble 1.5 0 1e6 /dywobble-wobble-must-be-non-negative dyoptnum def
+    /dyWOl dyWO /Wavelength 40 1e-6 1e6 /dywobble-wavelength-must-be-positive dyoptnum def
+    /dyWOt dyWO /Tremor 0.3 0 1e6 /dywobble-tremor-must-be-non-negative dyoptnum def
+    /dyWOv dyWO /Overshoot 5 0 1e6 /dywobble-overshoot-must-be-non-negative dyoptnum def
+    % Samples every twelfth of a wander, at most 2 apart.
+    dyWOl 12 div 2 dymin 200000 { dywobble-point-count-exceeds-safety-limit } dyCcollect
+    newpath
+    dyCsubs {
+        aload pop /dyWOb exch def /dyWOf exch def
+        [ dyWOf 1 dyWOb { dyCs exch get dup 0 get exch 1 get } for ]
+        dyWOa dyWOl dyWOt dyWOv dyWline
+    } forall
+} def
+
+% --- dyscribble ------------------------------------------------------------
+
+%%SelfTest: dyscribble-guards
+%   { 7 << >> dyscribble } /dyscribble-needs-a-region
+%   (a number for the region) mustguard
+%
+%   { 0 0 100 50 screct 5 dyscribble } /dyscribble-options-must-be-a-dict
+%   (a number for the options) mustguard
+%
+%   { 0 0 100 50 screct << /Spacing 0 >> dyscribble } /dyscribble-spacing-must-be-positive
+%   (/Spacing 0) mustguard
+%
+%   { 0 0 100 50 screct << /Overrun -1 >> dyscribble } /dyscribble-overrun-must-be-non-negative
+%   (/Overrun -1) mustguard
+%
+%   { 0 0 100 50 screct << /Miss 2 >> dyscribble } /dyscribble-miss-must-be-0-to-1
+%   (/Miss 2) mustguard
+%
+%   { 0 0 100 50 screct << /Scatter -1 >> dyscribble } /dyscribble-scatter-must-be-non-negative
+%   (/Scatter -1) mustguard
+%
+%   { 0 0 100 50 screct << /Direction (up) >> dyscribble } /dyscribble-direction-must-be-a-number
+%   (a string /Direction) mustguard
+%
+%   { 0 0 100000 100000 screct << /Spacing 1 >> dyscribble }
+%   /dyscribble-too-many-passes
+%   (a tiny spacing over a huge region) mustguard
+%
+%   { 0 0 100 50 screct << /Direction 30 >> dyscribble
+%     newpath 0 0 moveto 60 0 lineto 30 40 lineto closepath scpath << >> dyscribble }
+%   (a rectangle at an angle and a triangle) mustpass
+%
+%   newpath 10 10 moveto 20 20 lineto 0 0 100 50 screct << /Miss 0 /Overrun 0 /Scatter 0 >> dyscribble
+%   pathbbox 4 2 roll pop pop 50 le exch 100 le and
+%   (without overrun or scatter the scribble stays in its box; the old path is gone) mustbe
+%%EndSelfTest
+%
+% @kind: Procedure
+% @summary: A child's scribble fill over a region (artkit's screct or scpath): one continuous back-and-forth line of passes /Spacing apart, each running past the region's edge by up to /Overrun before it turns, with some turns falling short (/Miss) and the passes uneven, so the fill goes outside the lines and leaves gaps. Each pass spans the region's outer extent along it, so a concave notch is scribbled over. Replaces the current path; paints nothing, so `region opts dyscribble << >> dycrayon`. Deterministic under the caller's own srand, with four draws per pass.
+% @example: 60 60 160 90 screct << /Spacing 5 /Overrun 4 >> dyscribble << /Width 7 /Touch 0.65 >> dycrayon
+% @param: /Spacing [points] Distance between passes, across them; must be > 0 (default 4)
+% @param: /Direction [degrees] Heading of the passes, counterclockwise from +x in user space (default 0: side to side)
+% @param: /Overrun [points] How far a turn runs past the region's edge, 0.3 to 1 times this; must be >= 0 (default 3)
+% @param: /Miss [0..1] Chance that a turn falls short of the edge, leaving a gap there (default 0.15)
+% @param: /Scatter [points] Random offset of each turn across the passes, so the passes are not parallel; must be >= 0 (default 1)
+/dyscribble {
+    1 index dyisregion not { dyscribble-needs-a-region } if
+    dup type /dicttype ne { pop pop dyscribble-options-must-be-a-dict } if
+    /dySO exch def /dySR exch def
+    /dySsp dySO /Spacing 4 1e-6 1e6 /dyscribble-spacing-must-be-positive dyoptnum def
+    /dySdir dySO /Direction 0 -1e6 1e6 /dyscribble-direction-must-be-a-number dyoptnum def
+    /dySover dySO /Overrun 3 0 1e6 /dyscribble-overrun-must-be-non-negative dyoptnum def
+    /dySmiss dySO /Miss 0.15 0 1 /dyscribble-miss-must-be-0-to-1 dyoptnum def
+    /dySscat dySO /Scatter 1 0 1e6 /dyscribble-scatter-must-be-non-negative dyoptnum def
+    /dySc dySdir cos def /dySs dySdir sin def
+    % the region's box in the passes' frame: u along, v across
+    dySR /BBox get aload pop
+    /dySy1 exch def /dySx1 exch def /dySy0 exch def /dySx0 exch def
+    /dySu0 1e30 def /dySu1 -1e30 def /dySv0 1e30 def /dySv1 -1e30 def
+    [ dySx0 dySy0 dySx1 dySy0 dySx1 dySy1 dySx0 dySy1 ] aload pop
+    4 {
+        /dySy exch def /dySx exch def
+        dySx dySc mul dySy dySs mul add
+        dup dySu0 lt { dup /dySu0 exch def } if
+        dup dySu1 gt { dup /dySu1 exch def } if pop
+        dySy dySc mul dySx dySs mul sub
+        dup dySv0 lt { dup /dySv0 exch def } if
+        dup dySv1 gt { dup /dySv1 exch def } if pop
+    } repeat
+    /dySrows dySv1 dySv0 sub dySsp div floor cvi 1 add def
+    dySrows 5000 gt { dyscribble-too-many-passes } if
+    % 160 samples along each pass find where it enters and leaves
+    /dySk 160 def
+    /dySdu dySu1 dySu0 sub dySk div def
+    newpath
+    /dySopen false def
+    /dySside 1 def
+    0 1 dySrows 1 sub {
+        /dySr exch def
+        /dySfo frnd def /dySfm frnd def /dySfd frnd def /dySfs frnd def
+        /dySv dySv0 dySv1 add 2 div dySr dySrows 1 sub 2 div sub dySsp mul add def
+        /dySa 1e30 def /dySb -1e30 def
+        0 1 dySk {
+            dySdu mul dySu0 add /dySu exch def
+            dySu dySc mul dySv dySs mul sub
+            dySu dySs mul dySv dySc mul add
+            dySR scin {
+                dySu dySa lt { /dySa dySu def } if
+                dySu dySb gt { /dySb dySu def } if
+            } if
+        } for
+        dySa dySb le {
+            /dySspan dySb dySa sub def
+            /dySvv dySv dySfs 2 mul 1 sub dySscat mul add def
+            dySopen not {
+                % the first pass starts on the far side of where it turns
+                dySside 0 gt { dySa dySover 0.5 mul sub } { dySb dySover 0.5 mul add } ifelse
+                /dySu exch def
+                dySu dySc mul dySvv dySs mul sub
+                dySu dySs mul dySvv dySc mul add moveto
+                /dySopen true def
+            } if
+            dySfm dySmiss lt {
+                dySside 0 gt
+                    { dySb dySspan 0.1 dySfd 0.3 mul add mul sub }
+                    { dySa dySspan 0.1 dySfd 0.3 mul add mul add } ifelse
+            } {
+                dySside 0 gt
+                    { dySb dySover 0.3 dySfo 0.7 mul add mul add }
+                    { dySa dySover 0.3 dySfo 0.7 mul add mul sub } ifelse
+            } ifelse
+            /dySu exch def
+            dySu dySc mul dySvv dySs mul sub
+            dySu dySs mul dySvv dySc mul add lineto
+            /dySside dySside neg def
+        } {
+            % a pass that misses the region ends this run of the line
+            /dySopen false def
+        } ifelse
+    } for
+} def
+
+% --- dyloop ------------------------------------------------------------
+
+% cx cy r gap squash lean wobble clockwise -   (appends one loop)
+% Six frnd draws: where it starts, how far short or past, the drift in
+% radius, the lean, two wobble phases.
+% @internal
+/dyLloop {
+    /dyLcw exch def /dyLwob exch def /dyLlean exch def /dyLsq exch def
+    /dyLgap exch def /dyLr exch def /dyLcy exch def /dyLcx exch def
+    /dyLa0 90 frnd 2 mul 1 sub 40 mul add def
+    /dyLsweep 360 frnd 2 mul 1 sub dyLgap mul add def
+    /dyLdrift frnd 2 mul 1 sub 0.08 mul def
+    /dyLtilt frnd 2 mul 1 sub dyLlean mul def
+    /dyLq1 frnd 360 mul def
+    /dyLq2 frnd 360 mul def
+    /dyLn dyLsweep 6 div ceiling cvi 1 dymax def
+    0 1 dyLn {
+        /dyLk exch def
+        /dyLf dyLk dyLn div def
+        /dyLa dyLa0 dyLsweep dyLf mul dyLcw { sub } { add } ifelse def
+        /dyLrr dyLr 1 dyLdrift dyLf mul add mul
+            dyLq1 dyLa 2 mul add sin 0.6 mul dyLq2 dyLa 3 mul add sin 0.4 mul add
+            dyLwob mul add def
+        /dyLx dyLa cos dyLrr mul def
+        /dyLy dyLa sin dyLrr mul dyLsq mul def
+        dyLcx dyLx dyLtilt cos mul add dyLy dyLtilt sin mul sub
+        dyLcy dyLx dyLtilt sin mul add dyLy dyLtilt cos mul add
+        dyLk 0 eq { moveto } { lineto } ifelse
+    } for
+} def
+
+%%SelfTest: dyloop-guards
+%   { 50 50 (r) << >> dyloop } /dyloop-needs-three-numbers
+%   (a string radius) mustguard
+%
+%   { 50 50 0 << >> dyloop } /dyloop-radius-must-be-positive
+%   (a zero radius) mustguard
+%
+%   { 50 50 10 5 dyloop } /dyloop-options-must-be-a-dict
+%   (a number for the options) mustguard
+%
+%   { 50 50 10 << /Gap 200 >> dyloop } /dyloop-gap-must-be-0-to-180
+%   (/Gap 200) mustguard
+%
+%   { 50 50 10 << /Squash 0 >> dyloop } /dyloop-squash-must-be-0-exclusive-to-1
+%   (/Squash 0) mustguard
+%
+%   { 50 50 10 << /Lean -1 >> dyloop } /dyloop-lean-must-be-non-negative
+%   (/Lean -1) mustguard
+%
+%   { 50 50 10 << /Wobble -1 >> dyloop } /dyloop-wobble-must-be-non-negative
+%   (/Wobble -1) mustguard
+%
+%   { 50 50 10 << /Clockwise 1 >> dyloop } /dyloop-clockwise-must-be-a-boolean
+%   (a number /Clockwise) mustguard
+%
+%   newpath 0 0 moveto 1 1 lineto 50 50 10 << /Gap 0 /Lean 0 /Wobble 0 >> dyloop
+%   pathbbox 4 2 roll 39 ge exch 39 ge and 3 1 roll 61 le exch 61 le and and
+%   (a loop at its radius; the old path is gone) mustbe
+%%EndSelfTest
+%
+% @kind: Procedure
+% @summary: A circle as a child draws it: one loop, started near the top, that doesn't close -- it stops short of its start or runs past it (up to /Gap degrees either way), drifts a little in radius so the ends miss, leans, squashes and wobbles. Replaces the current path; paints nothing, so `cx cy r opts dyloop << >> dycrayon`. Deterministic under the caller's own srand, with six draws.
+% @example: 150 150 40 << /Gap 30 >> dyloop << /Width 5 >> dycrayon
+% @param: /Gap [degrees] How far the end may fall short of the start or run past it, 0..180 (default 25)
+% @param: /Squash [ratio] Height of the loop as a fraction of its width, > 0 and <= 1 (default 0.9)
+% @param: /Lean [degrees] Random lean of the loop's long axis; must be >= 0 (default 20)
+% @param: /Wobble [points] How far the outline wavers from a smooth ellipse; must be >= 0 (default 4% of the radius)
+% @param: /Clockwise [boolean] Draw the loop clockwise (default false)
+/dyloop {
+    dup type /dicttype ne { pop dyloop-options-must-be-a-dict } if
+    3 index dyisnum 3 index dyisnum and 2 index dyisnum and
+        not { pop dyloop-needs-three-numbers } if
+    /dyLO exch def /dyLOr exch def /dyLOy exch def /dyLOx exch def
+    dyLOr 0 le { dyloop-radius-must-be-positive } if
+    /dyLOg dyLO /Gap 25 0 180 /dyloop-gap-must-be-0-to-180 dyoptnum def
+    /dyLOs dyLO /Squash 0.9 0 1 /dyloop-squash-must-be-0-exclusive-to-1 dyoptnum def
+    dyLOs 0 le { dyloop-squash-must-be-0-exclusive-to-1 } if
+    /dyLOl dyLO /Lean 20 0 1e6 /dyloop-lean-must-be-non-negative dyoptnum def
+    /dyLOw dyLO /Wobble dyLOr 0.04 mul 0 1e6 /dyloop-wobble-must-be-non-negative dyoptnum def
+    /dyLOc dyLO /Clockwise false /dyloop-clockwise-must-be-a-boolean dyoptbool def
+    newpath
+    dyLOx dyLOy dyLOr dyLOg dyLOs dyLOl dyLOw dyLOc dyLloop
+} def
+
+% --- dyfigure ------------------------------------------------------------
+
+%%SelfTest: dyfigure-guards
+%   { 50 (y) 80 << >> dyfigure } /dyfigure-needs-three-numbers
+%   (a string y) mustguard
+%
+%   { 50 0 -5 << >> dyfigure } /dyfigure-height-must-be-positive
+%   (a negative height) mustguard
+%
+%   { 50 0 80 [ ] dyfigure } /dyfigure-options-must-be-a-dict
+%   (an array for the options) mustguard
+%
+%   { 50 0 80 << /Tadpole 1 >> dyfigure } /dyfigure-tadpole-must-be-a-boolean
+%   (a number /Tadpole) mustguard
+%
+%   { 50 0 80 << /Arms 120 >> dyfigure } /dyfigure-arms-must-be-minus-80-to-80
+%   (/Arms 120) mustguard
+%
+%   { 50 0 80 << /Hair 2.5 >> dyfigure } /dyfigure-hair-must-be-0-to-40
+%   (a fractional /Hair) mustguard
+%
+%   { 50 0 80 << /Wobble -1 >> dyfigure } /dyfigure-wobble-must-be-non-negative
+%   (/Wobble -1) mustguard
+%
+%   { 50 0 80 << /Overshoot -1 >> dyfigure } /dyfigure-overshoot-must-be-non-negative
+%   (/Overshoot -1) mustguard
+%
+%   { 50 0 80 << /Tadpole true /Hair 9 >> dyfigure 50 0 80 << >> dyfigure }
+%   (a tadpole with hair, and a stick figure) mustpass
+%
+%   % The figure stands on y and is about h tall.
+%   50 0 80 << /Wobble 0 /Overshoot 0 >> dyfigure pathbbox
+%   72 ge exch pop exch -3 ge and exch pop
+%   (a stick figure from its feet to the top of its head) mustbe
+%%EndSelfTest
+%
+% @kind: Procedure
+% @summary: A child's figure, standing on (x, y), about h tall: a head drawn as one loop that doesn't close, and wobbly overshooting limbs. A stick figure has a body line with arms and legs on it; a tadpole figure (/Tadpole true), the way a three-year-old draws one, grows arms and legs straight out of a big head. Optional hair is a row of short strokes over the head. Replaces the current path; paints nothing, so `x y h opts dyfigure << >> dycrayon`. Deterministic under the caller's own srand, with a fixed number of draws per part.
+% @example: 120 40 140 << /Tadpole true /Hair 8 >> dyfigure << /Width 3 >> dycrayon
+% @param: /Tadpole [boolean] Arms and legs grow from a big head, with no body (default false)
+% @param: /Arms [degrees] Angle of the arms above the horizontal, -80..80; negative droops (default 15)
+% @param: /Hair [count] Short strokes of hair over the head, whole number 0..40 (default 0)
+% @param: /Wobble [points] How far each limb wanders from straight; must be >= 0 (default 1.5% of h)
+% @param: /Overshoot [points] How far each limb runs past its end; must be >= 0 (default 4% of h)
+/dyfigure {
+    dup type /dicttype ne { pop dyfigure-options-must-be-a-dict } if
+    3 index dyisnum 3 index dyisnum and 2 index dyisnum and
+        not { pop dyfigure-needs-three-numbers } if
+    /dyFO exch def /dyFh exch def /dyFy exch def /dyFx exch def
+    dyFh 0 le { dyfigure-height-must-be-positive } if
+    /dyFtad dyFO /Tadpole false /dyfigure-tadpole-must-be-a-boolean dyoptbool def
+    /dyFarms dyFO /Arms 15 -80 80 /dyfigure-arms-must-be-minus-80-to-80 dyoptnum def
+    /dyFhair dyFO /Hair 0 0 40 /dyfigure-hair-must-be-0-to-40 dyoptint def
+    /dyFwob dyFO /Wobble dyFh 0.015 mul 0 1e6 /dyfigure-wobble-must-be-non-negative dyoptnum def
+    /dyFov dyFO /Overshoot dyFh 0.04 mul 0 1e6 /dyfigure-overshoot-must-be-non-negative dyoptnum def
+    /dyFlam dyFh 0.5 mul def
+    newpath
+    dyFtad {
+        /dyFhr dyFh 0.3 mul def
+        /dyFcy dyFy dyFh add dyFhr sub def
+        dyFx dyFcy dyFhr 25 0.92 15 dyFhr 0.04 mul false dyLloop
+        % legs from the bottom of the head
+        [ -1 1 ] {
+            /dyFsd exch def
+            dyFx dyFsd dyFh 0.09 mul mul add dyFcy dyFhr 0.97 mul sub
+            dyFx dyFsd dyFh 0.13 mul mul add dyFy
+            dyFwob dyFlam dyFwob 0.2 mul dyFov dyWseg
+        } forall
+        % arms from the sides of the head
+        [ -1 1 ] {
+            /dyFsd exch def
+            /dyFay dyFcy dyFhr 0.15 mul sub def
+            dyFx dyFsd dyFhr 0.95 mul mul add dyFay
+            dyFx dyFsd dyFhr dyFh 0.38 mul add mul add
+            dyFay dyFh 0.38 mul dyFarms sin mul dyFarms cos div add
+            dyFwob dyFlam dyFwob 0.2 mul dyFov dyWseg
+        } forall
+    } {
+        /dyFhr dyFh 0.13 mul def
+        /dyFcy dyFy dyFh add dyFhr sub def
+        dyFx dyFcy dyFhr 25 0.92 15 dyFhr 0.04 mul false dyLloop
+        /dyFneck dyFcy dyFhr 0.95 mul sub def
+        /dyFhip dyFy dyFh 0.42 mul add def
+        dyFx dyFneck dyFx dyFhip dyFwob dyFlam dyFwob 0.2 mul dyFov 0.5 mul dyWseg
+        [ -1 1 ] {
+            /dyFsd exch def
+            dyFx dyFhip dyFx dyFsd dyFh 0.16 mul mul add dyFy
+            dyFwob dyFlam dyFwob 0.2 mul dyFov dyWseg
+        } forall
+        /dyFsh dyFneck dyFh 0.08 mul sub def
+        [ -1 1 ] {
+            /dyFsd exch def
+            dyFx dyFsh
+            dyFx dyFsd dyFh 0.3 mul mul add
+            dyFsh dyFh 0.3 mul dyFarms sin mul dyFarms cos div add
+            dyFwob dyFlam dyFwob 0.2 mul dyFov dyWseg
+        } forall
+    } ifelse
+    % hair: short strokes over the top of the head, from the outline out
+    1 1 dyFhair {
+        /dyFi exch def
+        /dyFa 90 55 sub 110 dyFi 0.5 sub dyFhair div mul add def
+        /dyFl dyFh 0.07 mul dyFhr 0.25 mul add def
+        dyFx dyFa cos dyFhr 0.95 mul mul add dyFcy dyFa sin dyFhr 0.95 mul mul add
+        dyFx dyFa cos dyFhr dyFl add mul add dyFcy dyFa sin dyFhr dyFl add mul add
+        dyFwob 0.5 mul dyFlam dyFwob 0.1 mul dyFov 0.3 mul dyWseg
+    } for
+} def
+
+% --- dyrays ------------------------------------------------------------
+
+%%SelfTest: dyrays-guards
+%   { 50 50 (r) << >> dyrays } /dyrays-needs-three-numbers
+%   (a string radius) mustguard
+%
+%   { 50 50 0 << >> dyrays } /dyrays-radius-must-be-positive
+%   (a zero radius) mustguard
+%
+%   { 50 50 10 5 dyrays } /dyrays-options-must-be-a-dict
+%   (a number for the options) mustguard
+%
+%   { 50 50 10 << /Count 0 >> dyrays } /dyrays-count-must-be-1-to-2000
+%   (/Count 0) mustguard
+%
+%   { 50 50 10 << /Count 2.5 >> dyrays } /dyrays-count-must-be-1-to-2000
+%   (a fractional /Count) mustguard
+%
+%   { 50 50 10 << /Length 0 >> dyrays } /dyrays-length-must-be-positive
+%   (/Length 0) mustguard
+%
+%   { 50 50 10 << /LengthJitter 2 >> dyrays } /dyrays-lengthjitter-must-be-0-to-1
+%   (/LengthJitter 2) mustguard
+%
+%   { 50 50 10 << /Offset -1 >> dyrays } /dyrays-offset-must-be-non-negative
+%   (/Offset -1) mustguard
+%
+%   { 50 50 10 << /Lean -1 >> dyrays } /dyrays-lean-must-be-non-negative
+%   (/Lean -1) mustguard
+%
+%   { 50 50 10 << /Wander 3 >> dyrays } /dyrays-wander-must-be-0-to-1
+%   (/Wander 3) mustguard
+%
+%   newpath 50 50 10 << /Count 8 >> dyrays
+%   /dyct 0 def { pop pop /dyct dyct 1 add def } { pop pop } { 6 { pop } repeat } { } pathforall
+%   dyct 8 eq
+%   (eight rays are eight strokes) mustbe
+%%EndSelfTest
+%
+% @kind: Procedure
+% @summary: A child's sun rays: /Count quick straight strokes around a disc of radius r at (cx, cy), starting a little off its edge, unevenly spaced, leaning and of uneven length. Replaces the current path; paints nothing, so `cx cy r opts dyrays << >> dycrayon` (draw the disc with dyloop or dyscribble). Deterministic under the caller's own srand, with four draws per ray.
+% @example: 300 300 40 << /Count 14 /Length 30 >> dyrays << /Width 5 >> dycrayon
+% @param: /Count [count] How many rays, whole number 1..2000 (default 12)
+% @param: /Length [points] Mean ray length; must be > 0 (default the radius)
+% @param: /LengthJitter [fraction of /Length] 0..1 how far each ray's length varies around /Length (default 0.35)
+% @param: /Offset [points] Mean gap between the disc's edge and where a ray starts, 0.5 to 1.5 times this; must be >= 0 (default a fifth of the radius)
+% @param: /Lean [degrees] Random lean of each ray away from pointing straight out; must be >= 0 (default 8)
+% @param: /Wander [fraction of the ray spacing] 0..1 how far each ray slides around the disc from its even slot (default 0.25)
+/dyrays {
+    dup type /dicttype ne { pop dyrays-options-must-be-a-dict } if
+    3 index dyisnum 3 index dyisnum and 2 index dyisnum and
+        not { pop dyrays-needs-three-numbers } if
+    /dyRO exch def /dyRr exch def /dyRy exch def /dyRx exch def
+    dyRr 0 le { dyrays-radius-must-be-positive } if
+    /dyRn dyRO /Count 12 1 2000 /dyrays-count-must-be-1-to-2000 dyoptint def
+    /dyRl dyRO /Length dyRr 1e-6 1e6 /dyrays-length-must-be-positive dyoptnum def
+    /dyRj dyRO /LengthJitter 0.35 0 1 /dyrays-lengthjitter-must-be-0-to-1 dyoptnum def
+    /dyRg dyRO /Offset dyRr 0.2 mul 0 1e6 /dyrays-offset-must-be-non-negative dyoptnum def
+    /dyRlean dyRO /Lean 8 0 1e6 /dyrays-lean-must-be-non-negative dyoptnum def
+    /dyRw dyRO /Wander 0.25 0 1 /dyrays-wander-must-be-0-to-1 dyoptnum def
+    newpath
+    0 1 dyRn 1 sub {
+        /dyRi exch def
+        /dyRfw frnd def /dyRfl frnd def /dyRfj frnd def /dyRfg frnd def
+        /dyRa dyRi 360 mul dyRn div 90 add dyRfw 2 mul 1 sub dyRw mul 360 mul dyRn div add def
+        /dyRd dyRr dyRg 0.5 dyRfg add mul add def
+        /dyRh dyRa dyRfl 2 mul 1 sub dyRlean mul add def
+        /dyRlen dyRl 1 dyRfj 2 mul 1 sub dyRj mul add mul def
+        /dyRsx dyRx dyRa cos dyRd mul add def
+        /dyRsy dyRy dyRa sin dyRd mul add def
+        dyRsx dyRsy moveto
+        dyRsx dyRh cos dyRlen mul add dyRsy dyRh sin dyRlen mul add lineto
+    } for
+} def
+
+% --- dygrass ------------------------------------------------------------
+
+%%SelfTest: dygrass-guards
+%   { newpath 0 0 moveto 50 0 lineto 5 dygrass } /dygrass-options-must-be-a-dict
+%   (a number for the options) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Spacing 0 >> dygrass } /dygrass-spacing-must-be-positive
+%   (/Spacing 0) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Length 0 >> dygrass } /dygrass-length-must-be-positive
+%   (/Length 0) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /LengthJitter -1 >> dygrass } /dygrass-lengthjitter-must-be-0-to-1
+%   (/LengthJitter -1) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Lean -1 >> dygrass } /dygrass-lean-must-be-non-negative
+%   (/Lean -1) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Direction { 90 } >> dygrass } /dygrass-direction-must-be-a-number
+%   (a procedure /Direction) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Wander 2 >> dygrass } /dygrass-wander-must-be-0-to-1
+%   (/Wander 2) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Zigzag 1 >> dygrass } /dygrass-zigzag-must-be-a-boolean
+%   (a number /Zigzag) mustguard
+%
+%   { newpath 0 0 moveto 1000000 0 lineto << /Spacing 0.5 >> dygrass }
+%   /dygrass-blade-count-exceeds-safety-limit
+%   (a tiny spacing on a long line) mustguard
+%
+%   { newpath 0 0 moveto 50 0 lineto << /Zigzag true >> dygrass
+%     newpath 5 5 moveto << >> dygrass newpath << >> dygrass }
+%   (zigzag grass, a lone point and an empty path) mustpass
+%
+%   newpath 0 0 moveto 100 0 lineto << /Spacing 10 /Lean 0 /LengthJitter 0 /Wander 0 >> dygrass
+%   /dyct 0 def { pop pop /dyct dyct 1 add def } { pop pop } { 6 { pop } repeat } { } pathforall
+%   dyct 11 eq
+%   (blades every /Spacing along the line) mustbe
+%%EndSelfTest
+%
+% @kind: Procedure
+% @summary: Grass as a child draws it: the current path is read as the ground line and replaced with quick blades up from it, /Spacing apart, leaning and of uneven length -- or, with /Zigzag, one continuous up-and-down line without lifting the crayon. Replaces the current path; paints nothing, so `opts dygrass << >> dycrayon`. Deterministic under the caller's own srand, with three draws per blade.
+% @example: newpath 20 40 moveto 300 46 lineto << /Spacing 6 /Length 18 >> dygrass << /Width 3.5 >> dycrayon
+% @param: /Spacing [points] Distance between blades along the ground line; must be > 0 (default 5)
+% @param: /Length [points] Mean blade length; must be > 0 (default 14)
+% @param: /LengthJitter [fraction of /Length] 0..1 how far each blade's length varies around /Length (default 0.4)
+% @param: /Lean [degrees] Random lean of each blade around /Direction; must be >= 0 (default 14)
+% @param: /Direction [degrees] Heading of the blades, counterclockwise from +x in user space (default 90, straight up)
+% @param: /Wander [fraction of /Spacing] 0..1 how far each blade's foot slides along the line from its even slot (default 0.4)
+% @param: /Zigzag [boolean] Join each blade's tip to the next blade's foot in one continuous line (default false)
+/dygrass {
+    dup type /dicttype ne { pop dygrass-options-must-be-a-dict } if
+    /dyGO exch def
+    /dyGsp dyGO /Spacing 5 1e-6 1e6 /dygrass-spacing-must-be-positive dyoptnum def
+    /dyGl dyGO /Length 14 1e-6 1e6 /dygrass-length-must-be-positive dyoptnum def
+    /dyGj dyGO /LengthJitter 0.4 0 1 /dygrass-lengthjitter-must-be-0-to-1 dyoptnum def
+    /dyGlean dyGO /Lean 14 0 1e6 /dygrass-lean-must-be-non-negative dyoptnum def
+    /dyGdir dyGO /Direction 90 -1e6 1e6 /dygrass-direction-must-be-a-number dyoptnum def
+    /dyGw dyGO /Wander 0.4 0 1 /dygrass-wander-must-be-0-to-1 dyoptnum def
+    /dyGz dyGO /Zigzag false /dygrass-zigzag-must-be-a-boolean dyoptbool def
+    dyGsp 50000 { dygrass-blade-count-exceeds-safety-limit } dyCcollect
+    newpath
+    dyCsubs {
+        aload pop /dyGb exch def /dyGa exch def
+        dyGa 1 dyGb {
+            /dyGi exch def
+            dyCs dyGi get aload pop
+            /dyGend exch def /dyGsp1 exch def pop /dyGang exch def /dyGy exch def /dyGx exch def
+            /dyGfw frnd def /dyGfl frnd def /dyGfj frnd def
+            % walkpath's closing stop can sit just past the last regular one
+            dyGend 2 and 2 eq dyGsp1 dyGsp 0.5 mul lt and dyGi dyGa gt and not {
+                /dyGo dyGfw 2 mul 1 sub dyGw mul dyGsp mul 0.5 mul def
+                /dyGfx dyGx dyGang cos dyGo mul add def
+                /dyGfy dyGy dyGang sin dyGo mul add def
+                /dyGh dyGdir dyGfl 2 mul 1 sub dyGlean mul add def
+                /dyGlen dyGl 1 dyGfj 2 mul 1 sub dyGj mul add mul def
+                dyGz dyGi dyGa gt and { dyGfx dyGfy lineto } { dyGfx dyGfy moveto } ifelse
+                dyGfx dyGh cos dyGlen mul add dyGfy dyGh sin dyGlen mul add lineto
+            } if
+        } for
+    } forall
+} def
