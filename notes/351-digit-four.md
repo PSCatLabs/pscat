@@ -21,7 +21,7 @@ A closed 4. Stroke one is the diagonal and the crossbar, with the corner at
 notes/236). Stroke two is the stem, from the diagonal's top `(280 700)` down
 to the baseline. The crossbar runs on to `x = 390`, past the stem. The
 advance stays 430, so no line's layout moves: every pixel that differs in the
-renders is inside a 4.
+renders is inside a 4 (checked against all the changed regions).
 
 The superscript and subscript 4s are derived from the base glyph in `sginit`
 (notes/339), so `x⁴`, `₄` and mathkit's `^4` / `_4` follow for free.
@@ -35,7 +35,7 @@ the crossbar-past-the-stem property.
 `origin/main` worktree, one binary for both trees: of the nine files that load
 strokeglyphs, exactly these differ, and the rest are byte-identical.
 
-- DIFFERS: `gallery/chalkboard_lecture.ps`, `examples/mathkit_specimen.ps`,
+- DIFFERS (every changed pixel cluster is a 4; the panel shows all of them): `gallery/chalkboard_lecture.ps`, `examples/mathkit_specimen.ps`,
   `examples/strokeglyphs.ps`, `examples/strokeglyphs_subscripts_greek.ps`,
   `selftest/drivers/mathkit.ps` page 1.
 - identical: `gallery/crayon_drawing.ps` (it writes only the capitals of a
@@ -64,11 +64,11 @@ changed, left is before, right is after.
 
 Timings with the release binary, two renders in parallel: chalkboard 9 s at
 144 dpi (the same before and after), mathkit specimen 1 s, the two strokeglyphs
-specimens under 1 s. Nothing moved: the new 4 has the same point count as the
-old one.
+specimens under 1 s. Wall time is the same before and after (the base and head
+renders ran in parallel).
 
 ## Not done
 
 The 4 is the only glyph changed. The 7 (`[70 700 360 700 180 20]`) has the
 same melted-corner look in the chalkboard crops ("1748" reads as "1)48"), but
-that is a different glyph and a different issue.
+that is a different glyph: filed as #410.
