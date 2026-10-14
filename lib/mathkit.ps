@@ -1,0 +1,2484 @@
+%!PS-Adobe-3.0
+%%Title: mathkit.ps — TeX-subset math layout to stroke skeletons
+%%Creator: pscat — issue #237
+%%EndComments
+% @requires: (lib/handscript.ps) run (lib/strokeglyphs.ps) run
+
+% Lays out a small subset of TeX math as stroke skeletons: the glyph
+% centerlines of lib/strokeglyphs.ps, placed by a simplified TeX box
+% model, then roughened the way a hand writes on a board. `mkpath`
+% appends the result to the current path and paints nothing, so any
+% pen or dry medium can ink it (a plain `stroke`, or drychalk's
+% `dcchalk`).
+%
+%   (lib/handscript.ps) run (lib/strokeglyphs.ps) run (lib/mathkit.ps) run
+%   newpath (x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}) 72 500
+%     << /Size 36 /Seed 7 >> mkpath
+%   1.6 setlinewidth 1 setlinecap 1 setlinejoin stroke
+%
+% --- Backslashes ----------------------------------------------------
+% A PostScript string eats single backslashes: (\sqrt) is the four
+% letters "sqrt", and (\frac) starts with a form feed. Write every TeX
+% backslash twice: (\\frac{a}{b}), and a TeX row break \\ as \\\\.
+% mathkit refuses the leftovers of a single backslash rather than
+% drawing them: a control character (\n \t \b \r \f) raises
+% `mk-control-character:...`, and a bare word that is a supported
+% command (sqrt, sum, alpha, lim ...) raises
+% `mk-bare-word-needs-a-backslash:...`; write \\text{max} for the
+% letters themselves. A formula stays on one line of PostScript source;
+% end a line with a backslash to continue the string.
+%
+% --- The supported subset ----------------------------------------------
+%   x^2  x_i  x_i^2  x'           scripts, both on one base, primes
+%   \frac \dfrac \tfrac \binom    fractions (\binom has no bar)
+%   \sqrt{x}  \sqrt[n]{x}         roots
+%   \sum \prod \int \iint \iiint \oint
+%                                 large operators; limits under/over
+%                                 in display style (beside, for the
+%                                 integrals), \limits \nolimits
+%   \lim \max \min \sup \inf \det \gcd \Pr     limits under in display
+%   \sin \cos \tan \log \ln \exp ... \operatorname{...}   upright names
+%   \left( ... \right)            ( ) [ ] \{ \} | \| \langle \rangle
+%                                 \lVert \rVert and . grow to fit; ⟨ ⟩ ‖ ∥
+%                                 typed directly work too (\left⟨ ... \right⟩)
+%   \big( \Big( \bigg( \Bigg(     fixed sizes, with l and r forms
+%   \begin{matrix} pmatrix bmatrix Bmatrix vmatrix cases
+%   \vec \hat \bar \dot \ddot \tilde \overline \underline \boxed
+%   \text{...} \mathrm{...}
+%   \, \: \; \! \  \quad \qquad ~  spacing; plain spaces are ignored
+%   Greek \alpha ... \Omega, and Unicode Greek and math symbols
+%   typed directly (α ∞ ≤ ∂ ∇ ∑ ...).
+%   \equiv \sim \simeq \subseteq \supset \supseteq \mapsto \perp
+%   \parallel \propto \therefore \because    relations
+%   \circ \ast \star \setminus               binary operators
+%   *                             is \ast, as in TeX: a binary operator between
+%                                 terms, and z^* or A_* a raised or lowered
+%                                 asterisk (a conjugate or an adjoint). Inside
+%                                 \text{}, \mathrm{} and \operatorname{} it is
+%                                 the raised text asterisk, as TeX sets it
+%   \hbar \ell \iota \upsilon \Upsilon \langle \rangle \|  letters, brackets
+%   \varphi \vartheta \varkappa \varrho \varpi \varsigma   variant Greek;
+%   \epsilon is the lunate ϵ and \varepsilon the three-shaped ε, as in TeX
+%   (before issue #366 both drew the three-shaped one)
+% Anything else fails with an undefined name that says what it was:
+% `mk-unsupported-command:\oplus`, `mk-unsupported-character:@`, and so
+% on. Nothing is dropped silently. `$` is ignored, so ($x^2$) works.
+%
+% --- Layout ---------------------------------------------------------
+% TeX's box model, simplified: four styles (display, text, script,
+% scriptscript; script is 0.7 of the size, scriptscript 0.55), TeX's
+% spacing table between the seven atom classes, its rules for scripts
+% (17-18), fractions (15), radicals (11) and large operators (13), with
+% the font parameters re-fitted to the skeletons' 1000-unit em
+% (x-height 500, axis 250). Glyph boxes come from strokeglyphs'
+% `sgmetrics` (the centerline's bounding box).
+%
+% --- Board-writing irregularity ------------------------------------------
+% /Irregular (default 1, 0 for a clean layout) scales every departure
+% from the clean layout: each atom's size varies a few percent and its
+% baseline bobs, gaps between atoms are uneven, superscripts sit a bit
+% high or low, fraction bars and vinculums overshoot and tilt, and the
+% whole line slopes (/Slope) and drifts slowly up and down. Each atom
+% draws its irregularity from its own seed (the formula's seed and the
+% atom's position in the source), so with a fixed /Seed, editing the
+% end of a formula never re-rolls its beginning. The glyph wobble
+% itself is strokeglyphs' /Jitter.
+%
+% --- Seeds --------------------------------------------------------------
+% With no /Seed, the layout's seed is a hash of the TeX string, so
+% `mkmetrics` measures exactly what `mkpath` draws; the glyph jitter
+% also mixes in the device-space position, so one formula written in
+% two places differs, as `sgpath` does. Uses its own generator, never
+% the caller's `rand`.
+%
+% Scratch: every name this file defines starts with `mk`. The public
+% procedures run inside a private dictionary (`mkscratch`), the
+% drychalk pattern, so a board's working names never reach userdict.
+
+% ------------------------------------------------------------- scratch
+
+% @internal
+/mknewscratch { 600 dict } bind def
+% @internal
+/mkscratch mknewscratch def
+
+% ---------------------------------------------------------- the tables
+
+% TeX control words (without the backslash) -> what they make.
+%   [/sym name]             a glyph, with its own math class
+%   [/sym name class]       a glyph with the class overridden
+%   [/sym name class dy]    ... raised dy design units (\cdots)
+%   [/op name limits]       a large operator, grown with sggrow
+%   [/fn (letters) limits]  an operator name, written upright
+%   [/sp mu]                an explicit space (18 mu = 1 em)
+%   [/do procname]          a structure with its own argument parser
+%   [/acc kind]             an accent, underline or frame on its argument
+% limits: /auto puts them under and over in display style, /no beside.
+% @internal
+/mkcmds <<
+  /alpha [/sym /alpha] /beta [/sym /beta] /gamma [/sym /gamma]
+  /delta [/sym /delta] /epsilon [/sym /lunateepsilon]
+  /varepsilon [/sym /epsilon]
+  /zeta [/sym /zeta] /eta [/sym /eta] /theta [/sym /theta]
+  /vartheta [/sym /theta1] /kappa [/sym /kappa]
+  /varkappa [/sym /kappa1] /lambda [/sym /lambda]
+  /mu [/sym /mu] /nu [/sym /nu] /xi [/sym /xi] /pi [/sym /pi]
+  /varpi [/sym /omega1] /rho [/sym /rho] /varrho [/sym /rho1]
+  /sigma [/sym /sigma] /varsigma [/sym /sigma1] /tau [/sym /tau]
+  /phi [/sym /phi] /varphi [/sym /phi.loopy] /chi [/sym /chi] /psi [/sym /psi]
+  /omega [/sym /omega]
+  /Gamma [/sym /Gamma] /Delta [/sym /Delta] /Theta [/sym /Theta]
+  /Lambda [/sym /Lambda] /Xi [/sym /Xi] /Pi [/sym /Pi] /Sigma [/sym /Sigma]
+  /Phi [/sym /Phi] /Psi [/sym /Psi] /Omega [/sym /Omega]
+  /infty [/sym /infinity] /partial [/sym /partialdiff] /nabla [/sym /nabla]
+  /ell [/sym /ell] /prime [/sym /prime /ord -420]
+  /hbar [/sym /hbar] /iota [/sym /iota] /upsilon [/sym /upsilon]
+  /Upsilon [/sym /Upsilon]
+  /pm [/sym /plusminus] /mp [/sym /minusplus] /times [/sym /multiply]
+  /div [/sym /divide] /cdot [/sym /periodcentered] /cup [/sym /union]
+  /cap [/sym /intersection] /circ [/sym /ringoperator]
+  /ast [/sym /asteriskmath] /star [/sym /star] /setminus [/sym /setminus]
+  /equiv [/sym /equiv] /sim [/sym /sim] /simeq [/sym /simeq]
+  /subseteq [/sym /reflexsubset] /supset [/sym /propersuperset]
+  /supseteq [/sym /reflexsuperset] /mapsto [/sym /mapsto]
+  /perp [/sym /perpendicular] /parallel [/sym /dblbar /rel]
+  /propto [/sym /proportional] /therefore [/sym /therefore]
+  /because [/sym /because]
+  /leq [/sym /lessequal] /le [/sym /lessequal] /geq [/sym /greaterequal]
+  /ge [/sym /greaterequal] /neq [/sym /notequal] /ne [/sym /notequal]
+  /approx [/sym /approxequal] /to [/sym /arrowright]
+  /rightarrow [/sym /arrowright] /leftarrow [/sym /arrowleft]
+  /gets [/sym /arrowleft] /Rightarrow [/sym /arrowdblright]
+  /implies [/sym /arrowdblright] /Leftrightarrow [/sym /arrowdblboth]
+  /iff [/sym /arrowdblboth] /in [/sym /element] /notin [/sym /notelement]
+  /subset [/sym /propersubset] /forall [/sym /universal]
+  /exists [/sym /existential] /neg [/sym /logicalnot] /lnot [/sym /logicalnot]
+  /mid [/sym /bar /rel] /vert [/sym /bar] /lvert [/sym /bar /open]
+  /rvert [/sym /bar /close] /Vert [/sym /dblbar] /lVert [/sym /dblbar /open]
+  /rVert [/sym /dblbar /close] /langle [/sym /angleleft]
+  /rangle [/sym /angleright] /lbrace [/sym /braceleft /open]
+  /rbrace [/sym /braceright /close] /lbrack [/sym /bracketleft /open]
+  /rbrack [/sym /bracketright /close] /colon [/sym /colon /punct]
+  /ldots [/sym /ellipsis /inner] /dots [/sym /ellipsis /inner]
+  /cdots [/sym /ellipsis /inner 235]
+  /sum [/op /summation /auto] /prod [/op /product /auto]
+  /int [/op /integral /no] /iint [/op /iint /no] /iiint [/op /iiint /no]
+  /oint [/op /oint /no]
+  /lim [/fn (lim) /auto] /max [/fn (max) /auto] /min [/fn (min) /auto]
+  /sup [/fn (sup) /auto] /inf [/fn (inf) /auto] /det [/fn (det) /auto]
+  /gcd [/fn (gcd) /auto] /Pr [/fn (Pr) /auto]
+  /sin [/fn (sin) /no] /cos [/fn (cos) /no] /tan [/fn (tan) /no]
+  /sec [/fn (sec) /no] /csc [/fn (csc) /no] /cot [/fn (cot) /no]
+  /arcsin [/fn (arcsin) /no] /arccos [/fn (arccos) /no]
+  /arctan [/fn (arctan) /no] /sinh [/fn (sinh) /no] /cosh [/fn (cosh) /no]
+  /tanh [/fn (tanh) /no] /log [/fn (log) /no] /ln [/fn (ln) /no]
+  /exp [/fn (exp) /no] /deg [/fn (deg) /no] /dim [/fn (dim) /no]
+  /ker [/fn (ker) /no] /arg [/fn (arg) /no]
+  /quad [/sp 18] /qquad [/sp 36]
+  /frac [/do /mkcfrac] /dfrac [/do /mkcfrac] /tfrac [/do /mkcfrac]
+  /binom [/do /mkcfrac] /sqrt [/do /mkcsqrt] /left [/do /mkcleft]
+  /begin [/do /mkcbegin]
+  /big [/do /mkcbig] /Big [/do /mkcbig] /bigg [/do /mkcbig]
+  /Bigg [/do /mkcbig] /bigl [/do /mkcbig] /Bigl [/do /mkcbig]
+  /biggl [/do /mkcbig] /Biggl [/do /mkcbig] /bigr [/do /mkcbig]
+  /Bigr [/do /mkcbig] /biggr [/do /mkcbig] /Biggr [/do /mkcbig]
+  /text [/do /mkctext] /mathrm [/do /mkctext] /operatorname [/do /mkctext]
+  /limits [/do /mkclimits] /nolimits [/do /mkclimits]
+  /vec [/acc /vec] /hat [/acc /hat] /bar [/acc /bar] /dot [/acc /dot]
+  /ddot [/acc /ddot] /tilde [/acc /tilde] /overline [/acc /overline]
+  /underline [/acc /underline] /boxed [/acc /boxed]
+>> def
+
+% Printable ASCII that is not a letter or digit -> [glyph class]. The
+% hyphen is a minus in math (' is a prime superscript, `mkbprime`).
+% @internal
+/mkascii <<
+  33 [/exclam /close] 40 [/parenleft /open]
+  41 [/parenright /close] 42 [/asteriskmath /bin] 43 [/plus /bin]
+  44 [/comma /punct]
+  45 [/minus /bin] 46 [/period /ord] 47 [/slash /ord] 58 [/colon /rel]
+  59 [/semicolon /punct] 60 [/less /rel] 61 [/equal /rel]
+  62 [/greater /rel] 63 [/question /close] 91 [/bracketleft /open]
+  93 [/bracketright /close] 124 [/bar /ord]
+>> def
+
+% The integral signs: their limits go beside them, not over and under.
+% @internal
+/mkintnames << /integral true /iint true /iiint true /oint true >> def
+
+% name -> bool
+% @internal
+/mkisintname { mkintnames exch known } bind def
+
+% @internal
+/mkdigits [/zero /one /two /three /four /five /six /seven /eight /nine] def
+
+% The board-math hand (/MathHand true): a curly x, crossed z and friends.
+% @internal
+/mkhand << /x /x.curly /y /y.math /z /z.crossed /t /t.math /n /n.math >> def
+
+% TeX's inter-atom spacing (TeXbook p. 170): 0 none, 1 thin (3 mu),
+% 2 medium (4 mu), 3 thick (5 mu); 10 + n only in display and text style.
+% @internal
+/mkspace <<
+  /ord   << /ord 0 /op 1 /bin 12 /rel 13 /open 0 /close 0 /punct 0 /inner 11 >>
+  /op    << /ord 1 /op 1 /bin 0 /rel 13 /open 0 /close 0 /punct 0 /inner 11 >>
+  /bin   << /ord 12 /op 12 /bin 0 /rel 0 /open 12 /close 0 /punct 0 /inner 12 >>
+  /rel   << /ord 13 /op 13 /bin 0 /rel 0 /open 13 /close 0 /punct 0 /inner 13 >>
+  /open  << /ord 0 /op 0 /bin 0 /rel 0 /open 0 /close 0 /punct 0 /inner 0 >>
+  /close << /ord 0 /op 1 /bin 12 /rel 13 /open 0 /close 0 /punct 0 /inner 11 >>
+  /punct << /ord 11 /op 11 /bin 0 /rel 11 /open 11 /close 11 /punct 11 /inner 11 >>
+  /inner << /ord 11 /op 1 /bin 12 /rel 13 /open 11 /close 0 /punct 11 /inner 11 >>
+>> def
+
+% @internal
+/mkmu [0 3 4 5] def
+
+% Environments -> [left-delimiter right-delimiter column-alignment]
+% @internal
+/mkenvs <<
+  /matrix [null null /c] /pmatrix [/parenleft /parenright /c]
+  /bmatrix [/bracketleft /bracketright /c] /Bmatrix [/braceleft /braceright /c]
+  /vmatrix [/bar /bar /c] /Vmatrix [/dblbar /dblbar /c]
+  /cases [/braceleft null /l]
+>> def
+
+% Style -> its em as a fraction of /Size: display, text, script, scriptscript.
+% @internal
+/mksizes [1 1 0.7 0.55] def
+
+% Style -> the style of its superscripts and subscripts, and of a
+% fraction's numerator and denominator.
+% @internal
+/mkscriptstyle [2 2 3 3] def
+% @internal
+/mkfracstyle [1 2 3 3] def
+
+% \big \Big \bigg \Bigg: half the delimiter's extent about the axis, in em.
+% @internal
+/mkbigs << /big 0.62 /Big 0.86 /bigg 1.12 /Bigg 1.4 >> def
+
+% ----------------------------------------------------------- generator
+
+% int -> -   seed mathkit's own generator (strokeglyphs' scheme: three
+% xorshift rounds, so neighbouring seeds don't give neighbouring draws).
+% The state lives in mkscratch whatever dictionary is on top.
+% @internal
+/mksetseed {
+  16#7FFFFFFF and
+  3 {
+    dup 13 bitshift xor 16#7FFFFFFF and
+    dup -17 bitshift xor
+    dup 5 bitshift xor 16#7FFFFFFF and
+  } repeat
+  2147483646 mod 1 add mkscratch /mkstate 3 -1 roll put
+  mkrand pop mkrand pop
+} bind def
+
+% - -> 0..1   Park-Miller by Schrage's method (paintkit's pjrand)
+% @internal
+/mkrand {
+  mkstate 127773 idiv 2836 mul
+  mkstate 127773 mod 16807 mul exch sub
+  dup 0 lt { 2147483647 add } if
+  dup mkscratch /mkstate 3 -1 roll put
+  2147483647 div
+} bind def
+
+% amp -> uniform in [-amp, amp]
+% @internal
+/mkjit { mkrand 2 mul 1 sub mul } bind def
+
+% k sub -> -   seed the generator for draw stream `sub` (0..63) of atom k
+% @internal
+/mkseedk {
+  63 and exch 64 mul add
+  mkS 16#7FFFF and 7919 mul add mksetseed
+} bind def
+
+% string -> int   (stays under 2^31 at every step, for Ghostscript)
+% @internal
+/mkhash { 5381 exch { exch 33 mul add 33554393 mod } forall } bind def
+
+% ------------------------------------------------------------- helpers
+
+% key value -> -   store in mkscratch, whatever dictionary is on top
+% @internal
+/mkset { mkscratch 3 1 roll put } bind def
+
+% obj -> bool
+% @internal
+/mkisnum { type dup /integertype eq exch /realtype eq or } bind def
+
+% opts /key default -> value
+% @internal
+/mkopt { 2 index 2 index known { pop get } { 3 1 roll pop pop } ifelse } bind def
+
+% (prefix) (detail) -> -   raise `undefined` on the name prefix+detail, so
+% the error names what was wrong (the detail is cut to 40 bytes)
+% @internal
+/mkfail {
+  dup length 40 gt { 0 40 getinterval } if
+  1 index length 1 index length add string
+  dup 0 4 index putinterval
+  dup 3 index length 4 -1 roll putinterval
+  exch pop cvn cvx exec
+} bind def
+
+% (a) (b) -> (ab)
+% @internal
+/mkcat {
+  1 index length 1 index length add string
+  dup 0 4 index putinterval
+  dup 3 index length 4 -1 roll putinterval
+  exch pop
+} bind def
+
+% name -> [advance llx lly urx ury italic class], at /Size 1000 and the
+% current /Slant (cached per formula)
+% @internal
+/mkmetric {
+  mkgm 1 index known { mkgm exch get } {
+    dup mkscratch begin << /Size 1000 /Slant mkSlant >> sgmetrics end
+    /mkmd exch def
+    [ mkmd /Advance get mkmd /BBox get aload pop mkmd /Italic get mkmd /Class get ]
+    mkgm 2 index 2 index put exch pop
+  } ifelse
+} bind def
+
+% name -> class
+% @internal
+/mkgclass { mkmetric 6 get } bind def
+
+% sym H D s -> advance xend yend   (a dry run of sggrow at /Jitter 0: the
+% advance, and where its last stroke ends, which for /radical is the
+% start of the vinculum)
+% @internal
+/mkgrowdry {
+  mkscratch begin
+  /mkgds exch def /mkgdD exch def /mkgdH exch def /mkgdy exch def
+  gsave
+  { newpath 0 0 moveto
+    mkgdH mkgdD << /Symbol mkgdy /Size mkgds /Jitter 0 /Slant mkSlant >> sggrow
+    currentpoint } stopped { grestore end stop } if
+  grestore
+  end
+} bind def
+
+% style -> points
+% @internal
+/mkem { mksizes exch get mkSize mul } bind def
+
+% - -> k   the next atom index
+% @internal
+/mknewk { mkK dup 1 add /mkK exch mkset } bind def
+
+% ------------------------------------------------------------- parser
+
+% The parser walks mksrc (bytes) at mkpos and leaves atoms (dicts) on
+% the operand stack between marks, so nesting needs no stack of its
+% own. Every atom carries /T (its type), /C (its math class) and /K
+% (its index in the source, which seeds its irregularity).
+
+% - -> byte or -1
+% @internal
+/mkpeek { mkpos mklen lt { mksrc mkpos get } { -1 } ifelse } bind def
+
+% - -> -
+% @internal
+/mkadv { /mkpos mkpos 1 add mkset } bind def
+
+% - -> -   TeX ignores spaces in math
+% @internal
+/mkskip { { mkpeek 32 eq { mkadv } { exit } ifelse } loop } bind def
+
+% byte -> bool
+% @internal
+/mkisletter {
+  dup 65 ge 1 index 90 le and exch dup 97 ge exch 122 le and or
+} bind def
+
+% - -> string   the run of ASCII letters at mkpos, consumed
+% @internal
+/mkletters {
+  mkpos
+  { mkpeek dup 0 ge { mkisletter } { pop false } ifelse
+    { mkadv } { exit } ifelse } loop
+  mksrc exch dup mkpos exch sub getinterval
+} bind def
+
+% name class -> atom
+% @internal
+/mksymatom {
+  /mkac exch def /mkag exch def
+  << /T /sym /G mkag /C mkac /Dy 0 /K mknewk >>
+} bind def
+
+% name limits -> atom
+% @internal
+/mkopatom {
+  /mkal exch def /mkag exch def
+  << /T /op /G mkag /Lim mkal /C /op /K mknewk >>
+} bind def
+
+% [names] type class limits -> atom   (a run of upright glyphs; one index
+% per glyph, so each keeps its own jitter)
+% @internal
+/mkrunatom {
+  /mkal exch def /mkac exch def /mkat exch def /mkan exch def
+  << /T mkat /N mkan /C mkac /Lim mkal /K mkK >>
+  /mkK mkK mkan length add 1 add mkset
+} bind def
+
+% mu -> atom
+% @internal
+/mkspatom { /mksw exch def << /T /space /W mksw >> } bind def
+
+% obj -> bool   can carry a script (an atom that is not a space or a marker)
+% @internal
+/mkisnucleus {
+  dup type /dicttype eq {
+    /T get dup /space ne exch /align ne and
+  } { pop false } ifelse
+} bind def
+
+% mode -> list term   Parse atoms until the mode's terminator.
+% Modes: /top (to the end), /group (to }), /left (to \right), /cell
+% (to &, \\ or \end), /opt (to ]). The term says what ended it.
+% @internal
+/mkparse {
+  6 dict begin
+  /mkmode exch def
+  [
+  { mkparseone dup /none eq { pop } { exit } ifelse } loop
+  /mkterm exch def
+  ] mkterm
+  end
+} bind def
+
+% - -> /none or a terminator   Parse one token. Most tokens push one
+% atom; scripts change the atom under them.
+% @internal
+/mkparseone {
+  mkskip mkpeek
+  dup 0 lt { pop mkateof } {
+    mkbytes 1 index known { mkbytes 1 index get load exec } { mkchar } ifelse
+  } ifelse
+} bind def
+
+% Bytes with a meaning of their own -> their handler (byte -> term)
+% @internal
+/mkbytes <<
+  92 /mkbslash 123 /mkblbrace 125 /mkbrbrace 94 /mkbsup 95 /mkbsub
+  38 /mkbamp 36 /mkbdollar 126 /mkbtilde 93 /mkbrbrack 39 /mkbprime
+>> def
+
+% - -> term   the end of the string
+% @internal
+/mkateof {
+  mkmode /top eq mkmode /cell eq or { /eof } {
+    mkmode /group eq { mk-missing-closing-brace } if
+    mkmode /left eq { mk-left-without-right } if
+    mkmode /opt eq { mk-sqrt-index-needs-a-closing-bracket } if
+    (mk-missing-argument:) mkarglabel mkfail
+  } ifelse
+} bind def
+
+% byte -> term
+% @internal
+/mkblbrace {
+  pop mkadv /group mkparse pop
+  /mkal exch def
+  << /T /group /L mkal /C /ord /K mknewk >> /none
+} bind def
+
+% byte -> term
+% @internal
+/mkbrbrace {
+  pop
+  mkmode /group eq { mkadv /rbrace } {
+    mkmode /arg eq { (mk-missing-argument:) mkarglabel mkfail } if
+    mkmode /left eq { mk-left-without-right } if
+    mk-extra-closing-brace
+  } ifelse
+} bind def
+
+% byte -> term   ] ends a root's index; anywhere else it is a bracket
+% @internal
+/mkbrbrack {
+  mkmode /opt eq { pop mkadv /rbrack } { mkchar } ifelse
+} bind def
+
+% byte -> term
+% @internal
+/mkbsup { pop /Sup (^) mkscript } bind def
+% @internal
+/mkbsub { pop /Sub (_) mkscript } bind def
+
+% byte -> term
+% @internal
+/mkbamp {
+  pop
+  mkmode /cell eq { mkadv /amp } {
+    mkmode /top eq { mkadv << /T /align >> /none } { mk-misplaced-ampersand } ifelse
+  } ifelse
+} bind def
+
+% byte -> term   $ ... $ is accepted and ignored
+% @internal
+/mkbdollar { pop mkadv /none } bind def
+
+% byte -> term   ~ is a normal space
+% @internal
+/mkbtilde { pop mkadv 6 mkspatom /none } bind def
+
+% /Sup|/Sub (label) -> term   attach a script to the atom below
+% @internal
+/mkscript {
+  mkmode /arg eq { (mk-missing-argument:) mkarglabel mkfail } if
+  mkadv
+  mkarg                                % key list
+  2 index mkisnucleus not {
+    << /T /empty /C /ord /K mknewk >> 3 1 roll
+  } if
+  2 index 2 index known {
+    1 index /Sup eq 3 index /Primes known and {
+      % f'^2 is TeX's f^{\prime 2}: the primes and the superscript share one
+      /mksl exch def pop
+      dup /Sup get /mkss exch def
+      dup /Sup [ mkss aload pop mksl aload pop ] put
+      dup /Primes undef
+      /none
+    } {
+      1 index /Sup eq { mk-double-superscript } { mk-double-subscript } ifelse
+    } ifelse
+  } {
+    2 index 3 1 roll put
+    /none
+  } ifelse
+} bind def
+
+% - -> atom   a prime, lowered so that as a superscript it sits at the
+% cap height (strokeglyphs draws /prime already raised for text)
+% @internal
+/mkprimeatom { << /T /sym /G /prime /C /ord /Dy -420 /K mknewk >> } bind def
+
+% byte -> term   ' is TeX's ^{\prime}: primes collect in the superscript
+% of the atom before them, so f'' has two and x'_i still subscripts x
+% @internal
+/mkbprime {
+  pop
+  mkmode /arg eq { (mk-missing-argument:) mkarglabel mkfail } if
+  mkadv
+  dup mkisnucleus not { << /T /empty /C /ord /K mknewk >> } if
+  dup /Sup known {
+    dup /Primes known not { mk-double-superscript } if
+    dup /Sup get [ exch aload pop mkprimeatom ] 1 index exch /Sup exch put
+  } {
+    dup /Sup [ mkprimeatom ] put
+    dup /Primes true put
+  } ifelse
+  /none
+} bind def
+
+% (label) -> list   A script's or command's argument: a {group}, or one
+% token. The label names the command in the error when it is missing.
+% @internal
+/mkarg {
+  mkskip
+  mkpeek 123 eq { pop mkadv /group mkparse pop } {
+    dup 4 dict begin /mkarglabel exch def /mkmode /arg def
+    [ mkparseone pop ]
+    end
+    dup length 0 eq { pop (mk-missing-argument:) exch mkfail } { exch pop } ifelse
+  } ifelse
+} bind def
+
+% byte -> term   letters, digits, ASCII symbols, UTF-8
+% @internal
+/mkchar {
+  dup 32 lt 1 index 127 eq or {
+    mk-control-character:write-each-TeX-backslash-as-\\
+  } if
+  dup 128 ge { mkutf8 } {
+    dup 48 ge 1 index 57 le and { mkadv mkdigits exch 48 sub get /ord mksymatom } {
+      dup mkisletter { mkletter } {
+        mkascii 1 index known { mkadv mkascii exch get aload pop mksymatom } {
+          mkadv 1 string dup 0 4 -1 roll put
+          (mk-unsupported-character:) exch mkfail
+        } ifelse
+      } ifelse
+    } ifelse
+  } ifelse
+  /none
+} bind def
+
+% byte -> atom
+% @internal
+/mkletter {
+  mkpos 0 eq { true } { mksrc mkpos 1 sub get mkisletter not } ifelse
+  { mkbareword } if
+  mkadv
+  1 string dup 0 4 -1 roll put cvn
+  mkHand { mkhand 1 index known { mkhand exch get } if } if
+  /ord mksymatom
+} bind def
+
+% - -> -   A run of letters that is a supported command lost its
+% backslash to the PostScript string: refuse it. (Two-letter words only
+% for the Greek ones that read as nothing else.)
+% @internal
+/mkbareword {
+  mkpos /mkbw0 exch def
+  mkletters /mkbw exch def
+  /mkpos mkbw0 mkset
+  mkcmds mkbw cvn known
+  mkbw length 3 ge mkbw (pi) eq or mkbw (mu) eq or mkbw (xi) eq or and
+  { (mk-bare-word-needs-a-backslash:) mkbw mkfail } if
+} bind def
+
+% lead-byte -> (char)   the whole UTF-8 character that starts with it,
+% consumed (cut short at the end of the source, so an error can name it)
+% @internal
+/mkutf8str {
+  dup 224 lt { pop 2 } { 240 lt { 3 } { 4 } ifelse } ifelse
+  mklen mkpos sub min
+  mksrc mkpos 3 -1 roll getinterval
+  /mkpos mkpos 2 index length add mkset
+} bind def
+
+% (char) -> name   strokeglyphs' name for it, /.notdef for a stranger
+% @internal
+/mkutf8name {
+  mkscratch begin << /Size 1000 >> sgmetrics end /Name get
+} bind def
+
+% lead-byte -> atom   one UTF-8 character, named by strokeglyphs
+% @internal
+/mkutf8 {
+  mkutf8str
+  dup mkutf8name
+  dup /.notdef eq { pop (mk-unsupported-character:) exch mkfail } if
+  exch pop
+  dup /summation eq 1 index /product eq or { /auto mkopatom } {
+    dup mkisintname { /no mkopatom } { dup mkgclass mksymatom } ifelse
+  } ifelse
+} bind def
+
+% byte -> term   a backslash: a control word or a control symbol
+% @internal
+/mkbslash {
+  pop mkadv
+  mkpeek dup 0 lt { pop (mk-unsupported-command:) (\\) mkfail } if
+  dup mkisletter { pop mkletters mkcommand } { mkadv mkctlsym } ifelse
+} bind def
+
+% Control symbols that are spaces -> mu
+% @internal
+/mkctlspace << 44 3 58 4 59 5 33 -3 32 6 >> def
+
+% byte -> term
+% @internal
+/mkctlsym {
+  dup 92 eq {
+    pop mkmode /cell eq { /newrow } { mk-row-break-outside-a-matrix } ifelse
+  } {
+    mkctlspace 1 index known { mkctlspace exch get mkspatom /none } {
+      dup 123 eq { pop /braceleft /open mksymatom /none } {
+        dup 125 eq { pop /braceright /close mksymatom /none } {
+          dup 124 eq { pop /dblbar /ord mksymatom /none } {
+            1 string dup 0 4 -1 roll put (mk-unsupported-command:\\) exch mkfail
+          } ifelse
+        } ifelse
+      } ifelse
+    } ifelse
+  } ifelse
+} bind def
+
+% string -> term   a control word
+% @internal
+/mkcommand {
+  dup (right) eq {
+    pop mkmode /left eq { /right } { mk-right-without-left } ifelse
+  } {
+    dup (end) eq {
+      pop mkmode /cell eq { /end } { mk-end-without-begin } ifelse
+    } {
+      mkcmds 1 index cvn known not { (mk-unsupported-command:\\) exch mkfail } if
+      dup cvn mkcmds exch get
+      dup 0 get
+      dup /sym eq {
+        pop exch pop
+        dup 1 get
+        1 index length 2 gt { 1 index 2 get } { dup mkgclass } ifelse
+        mksymatom
+        exch dup length 3 gt { 3 get 1 index exch /Dy exch put } { pop } ifelse
+      } {
+        dup /op eq { pop exch pop dup 1 get exch 2 get mkopatom } {
+          dup /fn eq {
+            pop exch pop dup 1 get mkstrnames exch 2 get
+            /fn /op 3 -1 roll mkrunatom
+          } {
+            dup /sp eq { pop exch pop 1 get mkspatom } {
+              dup /acc eq {
+                pop 1 get /mkak exch def
+                (\\) exch mkcat mkarg /mkal exch def
+                << /T /acc /A mkak /L mkal /C /ord /K mknewk >>
+              } {
+                pop 1 get load exec
+              } ifelse
+            } ifelse
+          } ifelse
+        } ifelse
+      } ifelse
+      /none
+    } ifelse
+  } ifelse
+} bind def
+
+% (letters) -> [names]   upright, never the math hand
+% @internal
+/mkstrnames {
+  [ exch { 1 string dup 0 4 -1 roll put cvn } forall ]
+} bind def
+
+% - -> delimiter name or null   after \left, \right or \big
+% @internal
+/mkdelim {
+  mkskip mkpeek
+  dup 0 lt { pop mk-missing-delimiter } if
+  dup 40 eq { pop mkadv /parenleft } {
+  dup 41 eq { pop mkadv /parenright } {
+  dup 91 eq { pop mkadv /bracketleft } {
+  dup 93 eq { pop mkadv /bracketright } {
+  dup 124 eq { pop mkadv /bar } {
+  dup 46 eq { pop mkadv null } {
+  dup 92 eq {
+    pop mkadv
+    mkpeek dup 123 eq { pop mkadv /braceleft } {
+      dup 125 eq { pop mkadv /braceright } {
+        dup 124 eq { pop mkadv /dblbar } {
+        mkisletter {
+          mkletters
+          mkdelimwords 1 index cvn known {
+            mkdelimwords exch cvn get
+          } { (mk-unsupported-delimiter:\\) exch mkfail } ifelse
+        } {
+          mkpeek 0 lt { (mk-unsupported-delimiter:\\) () mkfail } if
+          mkpeek 128 ge { mkpeek mkutf8str } {
+            mkadv 1 string dup 0 mksrc mkpos 1 sub get put
+          } ifelse
+          (mk-unsupported-delimiter:\\) exch mkfail
+        } ifelse } ifelse
+      } ifelse
+    } ifelse
+  } {
+    dup 128 ge { mkdelimutf8 } {
+      mkadv 1 string dup 0 4 -1 roll put (mk-unsupported-delimiter:) exch mkfail
+    } ifelse
+  } ifelse } ifelse } ifelse } ifelse } ifelse } ifelse } ifelse
+} bind def
+
+% lead-byte -> delimiter name   a delimiter typed as a UTF-8 character
+% (⟨ ⟩ ‖ ∥ ...): strokeglyphs' name for it, if it is one of the symbols
+% that grow; otherwise the error names the whole character
+% @internal
+/mkdelimutf8 {
+  mkutf8str dup mkutf8name
+  mkdelimglyphs 1 index known { exch pop } {
+    pop (mk-unsupported-delimiter:) exch mkfail
+  } ifelse
+} bind def
+
+% The symbols that grow as delimiters
+% @internal
+/mkdelimglyphs <<
+  /parenleft true /parenright true /bracketleft true /bracketright true
+  /braceleft true /braceright true /bar true
+  /angleleft true /angleright true /dblbar true
+>> def
+
+% Delimiter control words -> the growing symbol
+% @internal
+/mkdelimwords <<
+  /lbrace /braceleft /rbrace /braceright /lbrack /bracketleft
+  /rbrack /bracketright /vert /bar /lvert /bar /rvert /bar
+  /langle /angleleft /rangle /angleright /Vert /dblbar /lVert /dblbar
+  /rVert /dblbar
+>> def
+
+% (cmd) -> atom   \frac \dfrac \tfrac \binom
+% @internal
+/mkcfrac {
+  /mkfc exch def
+  mkfc (frac) eq { (\\frac) } { mkfc (dfrac) eq { (\\dfrac) } {
+    mkfc (tfrac) eq { (\\tfrac) } { (\\binom) } ifelse } ifelse } ifelse
+  /mkfl exch def
+  mkfl mkarg mkfl mkarg
+  /mkfd exch def /mkfn exch def
+  << /T /frac /Num mkfn /Den mkfd /C /inner
+     /Bar mkfc (binom) ne
+     /Paren mkfc (binom) eq
+     /Sty mkfc (dfrac) eq { 0 } { mkfc (tfrac) eq { 1 } { null } ifelse } ifelse
+     /K mknewk >>
+} bind def
+
+% (cmd) -> atom   \sqrt{x}, \sqrt[n]{x}
+% @internal
+/mkcsqrt {
+  pop
+  mkskip
+  mkpeek 91 eq { mkadv /opt mkparse pop } { null } ifelse
+  (\\sqrt) mkarg
+  /mkfl exch def /mkfi exch def
+  << /T /sqrt /L mkfl /I mkfi /C /ord /K mknewk >>
+} bind def
+
+% (cmd) -> atom   \left d ... \right d
+% @internal
+/mkcleft {
+  pop
+  mkdelim /mkld exch def
+  /left mkparse pop
+  /mkll exch def
+  mkdelim /mkrd exch def
+  << /T /lr /Ld mkld /Rd mkrd /L mkll /C /inner /K mknewk >>
+} bind def
+
+% (cmd) -> atom   \big( and its sizes; the l and r forms set the class
+% @internal
+/mkcbig {
+  /mkbn exch def
+  mkbn dup length 1 sub get
+  dup 108 eq { pop /open } { 114 eq { /close } { /ord } ifelse } ifelse
+  /mkbc exch def
+  mkbc /ord ne { mkbn 0 mkbn length 1 sub getinterval } { mkbn } ifelse
+  cvn mkbigs exch get /mkbs exch def
+  mkdelim /mkbd exch def
+  << /T /big /G mkbd /Sz mkbs /C mkbc /K mknewk >>
+} bind def
+
+% - -> string   {name} after \begin or \end
+% @internal
+/mkenvname {
+  mkskip mkpeek 123 ne { mk-environment-name-needs-braces } if
+  mkadv mkletters
+  mkpeek 125 ne { mk-environment-name-needs-braces } if
+  mkadv
+} bind def
+
+% (cmd) -> atom   \begin{env} rows of cells \end{env}
+% @internal
+/mkcbegin {
+  pop
+  mkenvname /mkenv exch def
+  mkenvs mkenv cvn known not { (mk-unsupported-environment:) mkenv mkfail } if
+  [ [
+  {
+    /cell mkparse
+    dup /amp eq { pop } {
+      dup /newrow eq { pop ] [ } {
+        /end eq { ] ] exit } {
+          (mk-begin-without-end:) mkenv mkfail
+        } ifelse
+      } ifelse
+    } ifelse
+  } loop
+  mkenvname mkenv ne { (mk-end-does-not-match-begin:) mkenv mkfail } if
+  % a trailing \\ leaves an empty last row
+  dup length 1 gt {
+    dup dup length 1 sub get
+    dup length 1 eq { 0 get length 0 eq } { pop false } ifelse {
+      0 1 index length 1 sub getinterval
+    } if
+  } if
+  /mkrows exch def
+  << /T /mat /Rows mkrows /Env mkenv cvn /C /inner /K mknewk >>
+} bind def
+
+% - -> string   the raw bytes of a {group}, for \text
+% @internal
+/mkrawarg {
+  mkskip mkpeek 123 ne { mk-text-needs-braces } if
+  mkadv mkpos 1
+  {
+    mkpeek dup 0 lt { pop mk-missing-closing-brace } if
+    dup 123 eq { pop 1 add } { 125 eq { 1 sub } if } ifelse
+    dup 0 eq { pop exit } if
+    mkadv
+  } loop
+  mksrc exch dup mkpos exch sub getinterval
+  mkadv
+} bind def
+
+% (cmd) -> atom   \text, \mathrm (spaces dropped), \operatorname
+% @internal
+/mkctext {
+  /mktc exch def
+  mkrawarg /mkts exch def
+  /mkti 0 def
+  [
+    {
+      mkti mkts length ge { exit } if
+      mkts mkti get
+      dup 32 lt 1 index 127 eq or {
+        mk-control-character:write-each-TeX-backslash-as-\\
+      } if
+      dup 92 eq { (mk-unsupported-command:\\) (inside-text) mkfail } if
+      dup 128 lt { pop 1 } {
+        dup 224 lt { pop 2 } { 240 lt { 3 } { 4 } ifelse } ifelse
+      } ifelse
+      mkts length mkti sub min /mktn exch def
+      mkts mkti mktn getinterval
+      dup mkscratch begin << /Size 1000 >> sgmetrics end /Name get
+      dup /.notdef eq { pop (mk-unsupported-character:) exch mkfail } if
+      exch pop
+      dup /space eq mktc (text) ne and { pop } if
+      /mkti mkti mktn add def
+    } loop
+  ]
+  mktc (operatorname) eq { /fn /op /no } { /text /ord /no } ifelse mkrunatom
+} bind def
+
+% (cmd) -> -   \limits and \nolimits change the operator before them
+% @internal
+/mkclimits {
+  (limits) eq { /yes } { /no } ifelse
+  1 index dup type /dicttype eq {
+    /T get dup /op eq exch /fn eq or
+  } { pop false } ifelse
+  not { mk-limits-needs-an-operator-before-it } if
+  1 index exch /Lim exch put
+} bind def
+
+% string -> list   the whole formula
+% @internal
+/mkparsetop {
+  /mksrc exch mkset
+  /mklen mksrc length mkset
+  /mkpos 0 mkset
+  /mkK 0 mkset
+  mkscratch /mkgmslant known not { /mkgmslant null mkset } if
+  mkgmslant mkSlant ne { /mkgm 64 dict mkset /mkgmslant mkSlant mkset } if
+  /top mkparse pop
+} bind def
+
+% ------------------------------------------------------------- layout
+
+% A box is [width height depth items], in points from its origin on the
+% baseline. The items:
+%   [/g x y size glyph seed]            a glyph (sgpath)
+%   [/w x y H D size symbol seed span]  a growing symbol (sggrow)
+%   [/r x0 y0 x1 y1 size seed]          a hand-drawn rule
+%   [/a kind x y width size seed]       an accent
+%   [/f x0 y0 x1 y1 size seed]          a hand-drawn frame
+%   [/b x y items]                      a box placed at x y
+% A seed is an offset from the formula's glyph seed, three per atom
+% index, so no two glyphs share one.
+%
+% Every layout procedure that recurses keeps its locals in a dictionary
+% of its own (`N dict begin ... end`); the public procedures unwind the
+% dictionary stack if anything raises.
+
+% atom -> class or null (spaces and alignment markers have none)
+% @internal
+/mkclass {
+  dup /T get dup /space eq exch /align eq or { pop null } { /C get } ifelse
+} bind def
+
+% - -> -   reset the top-level alignment marks
+% @internal
+/mkclearalign {
+  mkscratch /mkalignx known { mkscratch /mkalignx undef } if
+  mkscratch /mkrelx known { mkscratch /mkrelx undef } if
+} bind def
+
+% list style cramped -> box   the formula's top list (records alignment)
+% @internal
+/mklisttop {
+  2 index /mktoplist exch mkset
+  mkclearalign
+  mklist
+} bind def
+
+% - -> x   where the line aligns: its & if any, else just before its first
+% top-level relation, else 0
+% @internal
+/mkalignof {
+  mkscratch /mkalignx known { mkalignx } {
+    mkscratch /mkrelx known { mkrelx } { 0 } ifelse
+  } ifelse
+} bind def
+
+% list style cramped -> box   a horizontal list: atoms side by side with
+% TeX's spacing between their classes
+% @internal
+/mklist {
+  24 dict begin
+  /mlc exch def /mls exch def /mll exch def
+  /mln mll length def
+  % TeX's class rules: a binary operator with nothing to bind becomes
+  % ordinary (a unary minus), before a relation, closing or punctuation too
+  /mlk mln array def
+  /mlp -1 def
+  0 1 mln 1 sub {
+    /mli exch def
+    % an alignment marker stands for TeX's {} at the start of the right
+    % column: an empty ordinary atom, so &= keeps the space before =
+    mll mli get dup /T get /align eq { pop /ord } { mkclass } ifelse
+    dup null ne {
+      dup /bin eq {
+        mlp 0 lt { pop /ord } {
+          mlk mlp get dup /bin eq 1 index /op eq or 1 index /rel eq or
+          1 index /open eq or exch /punct eq or { pop /ord } if
+        } ifelse
+      } if
+      dup /rel eq 1 index /close eq or 1 index /punct eq or {
+        mlp 0 ge { mlk mlp get /bin eq { mlk mlp /ord put } if } if
+      } if
+      mlk mli 3 -1 roll put
+      /mlp mli def
+    } { pop } ifelse
+  } for
+  mlp 0 ge { mlk mlp get /bin eq { mlk mlp /ord put } if } if
+  /mlx 0 def /mlh 0 def /mld 0 def /mlpc null def
+  /mltop mll mktoplist eq def
+  [
+  0 1 mln 1 sub {
+    /mli exch def
+    /mla mll mli get def
+    mla /T get
+    dup /space eq {
+      pop /mlx mlx mla /W get mls mkem mul 18 div add def
+    } {
+      /align eq {
+        mltop mkscratch /mkalignx known not and { /mkalignx mlx mkset } if
+        mlpc null eq { /mlpc /ord def } if
+      } {
+        /mlcl mlk mli get def
+        % a line that starts with its relation (= 2x under y = 2x) keeps
+        % the space it would have after an atom, so the = signs line up
+        mlcl /rel eq mltop and mkscratch /mkrelx known not and {
+          /mkrelx mlx mkset
+          mlpc null eq { /mlpc /ord def } if
+        } if
+        mlpc null ne { /mlx mlx mlpc mlcl mls mla mkgap add def } if
+        mla mls mlc mkatom
+        dup 1 get mlh max /mlh exch def
+        dup 2 get mld max /mld exch def
+        [ /b mlx 0 4 index 3 get ] exch
+        0 get mlx add /mlx exch def
+        /mlpc mlcl def
+      } ifelse
+    } ifelse
+  } for
+  ] /mlit exch def
+  [ mlx mlh mld mlit ]
+  end
+} bind def
+
+% left-class right-class style right-atom -> points   the space between
+% two atoms: TeX's table, times /Spacing, made uneven by /Irregular
+% @internal
+/mkgap {
+  /K get 1 mkseedk
+  /mkgst exch def
+  exch mkspace exch get exch get
+  dup 10 ge { mkgst 1 le { 10 sub } { pop 0 } ifelse } if
+  mkmu exch get
+  mkgst mkem mul 18 div mkSpacing mul
+  1 mkjit mkIrr mul 0.05 mul mkgst mkem mul add
+  mkgst mkem -0.03 mul max
+} bind def
+
+% Atom types -> the procedure that builds the nucleus's box
+% @internal
+/mknuc <<
+  /sym /mknsym /op /mknop /fn /mknrun /text /mknrun /group /mkngroup
+  /frac /mknfrac /sqrt /mknsqrt /lr /mknlr /big /mknbig /mat /mknmat
+  /acc /mknacc /empty /mknempty
+>> def
+
+% atom style cramped -> box   one atom with its scripts. The atom's
+% irregularity is drawn first, from its own seed, so whatever its
+% contents draw cannot move it.
+% @internal
+/mkatom {
+  32 dict begin
+  /cr exch def /st exch def /at exch def
+  /s st mkem def
+  at /K get 0 mkseedk
+  /r [ 8 { 1 mkjit mkIrr mul } repeat ] def
+  /ic 0 def /ischar false def
+  mknuc at /T get get load exec
+  at /Sup known at /Sub known or {
+    mkuselimits { mklimits } { mkscripts } ifelse
+  } if
+  end
+} bind def
+
+% - -> bool   (in mkatom) limits go under and over this atom
+% @internal
+/mkuselimits {
+  at /T get dup /op eq exch /fn eq or {
+    at /Lim get dup /yes eq exch /auto eq st 0 eq and or
+  } { false } ifelse
+} bind def
+
+% - -> box   (in mkatom) a glyph, a few percent off its size, bobbing
+% @internal
+/mknsym {
+  /ss s 1 r 0 get 0.035 mul add mul def
+  /m at /G get mkmetric def
+  /sc ss 1000 div def
+  /dy at /Dy get sc mul r 1 get 0.025 mul s mul add def
+  /ic m 5 get sc mul def /ischar true def
+  [ m 0 get sc mul
+    m 4 get sc mul dy add 0 max
+    m 2 get sc mul dy add neg 0 max
+    [ [ /g 0 dy ss at /G get at /K get 3 mul ] ] ]
+} bind def
+
+% - -> box
+% @internal
+/mknempty { [ 0 0 0 [ ] ] } bind def
+
+% - -> box   (in mkatom) a large operator, display size in display style
+% @internal
+/mknop {
+  at /G get mkisintname {
+    st 0 eq { 1.2 0.72 } { 0.8 0.3 } ifelse
+  } {
+    st 0 eq { 0.92 0.38 } { 0.65 0.15 } ifelse
+  } ifelse
+  /od exch s mul 1 r 0 get 0.04 mul add mul def
+  /oh exch s mul 1 r 0 get 0.04 mul add mul def
+  at /G get oh od s mkgrowdry pop pop /ow exch def
+  [ ow oh od [ [ /w 0 0 oh od s at /G get at /K get 3 mul 0 ] ] ]
+} bind def
+
+% - -> box   (in mkatom) an upright run: an operator name or \text
+% @internal
+/mknrun {
+  /rx 0 def /rh 0 def /rd 0 def /rk at /K get def /sc s 1000 div def
+  [ at /N get {
+      /rn exch def /m rn mkmetric def
+      [ /g rx 0 s rn rk 3 mul ]
+      /rh rh m 4 get sc mul max def
+      /rd rd m 2 get sc mul neg max def
+      /rx rx m 0 get sc mul add def
+      /rk rk 1 add def
+  } forall ] /rit exch def
+  [ rx rh rd rit ]
+} bind def
+
+% - -> box   (in mkatom) a {group}
+% @internal
+/mkngroup { at /L get st cr mklist } bind def
+
+% - -> box   (in mkatom) TeX rule 15: numerator and denominator clear the
+% bar, which sits on the axis and overshoots both ends
+% @internal
+/mknfrac {
+  /fs at /Sty get dup null eq { pop st } if def
+  /fe fs mkem def
+  /ns mkfracstyle fs get def
+  /nb at /Num get ns false mklist def
+  /db at /Den get ns true mklist def
+  /fa fe 0.25 mul def /th fe 0.04 mul def
+  fs 0 eq { /u fe 0.74 mul def /v fe 0.7 mul def /phi fe 0.17 mul def }
+          { /u fe 0.44 mul def /v fe 0.38 mul def /phi fe 0.09 mul def } ifelse
+  u nb 2 get sub fa th 2 div add sub phi lt
+    { /u phi fa add th 2 div add nb 2 get add def } if
+  fa th 2 div sub v add db 1 get sub phi lt
+    { /v phi fa sub th 2 div add db 1 get add def } if
+  /fw nb 0 get db 0 get max fe 0.1 mul add def
+  /oL fe 0.03 r 2 get abs 0.12 mul add mul def
+  /oR fe 0.03 r 3 get abs 0.14 mul add mul def
+  /nd fe 0.08 mul def
+  /x1 nd oL add fw add oR add def
+  /cx nd oL add fw 2 div add def
+  /yL fa r 4 get 0.035 mul fe mul add def
+  /yR fa r 5 get 0.035 mul fe mul add def
+  [ x1 nd add
+    u nb 1 get add yL yR max th add max
+    v db 2 get add
+    [ [ /b cx nb 0 get 2 div sub r 6 get 0.05 mul fe mul add u nb 3 get ]
+      [ /b cx db 0 get 2 div sub r 7 get 0.05 mul fe mul add v neg db 3 get ]
+      at /Bar get { [ /r nd yL x1 yR fe at /K get 3 mul ] } if ] ]
+  at /Paren get { /parenleft /parenright fs mkdelimwrap } if
+} bind def
+
+% box left right style -> box   (in mkatom) delimiters grown to cover
+% the box about the axis; null for none
+% @internal
+/mkdelimwrap {
+  /dws exch def /drd exch def /dld exch def /dbx exch def
+  /de dws mkem def /da de 0.25 mul def
+  /dl dbx 1 get da sub dbx 2 get da add max de 0.08 mul add de 0.5 mul max def
+  /dH da dl add def /dD dl da sub def
+  /dk at /K get 3 mul def
+  dld null eq { /dwl de 0.12 mul def } { /dwl dld dH dD de mkgrowdry pop pop def } ifelse
+  drd null eq { /dwr de 0.12 mul def } { /dwr drd dH dD de mkgrowdry pop pop def } ifelse
+  [ dwl dbx 0 get add dwr add
+    dbx 1 get dH max
+    dbx 2 get dD max
+    [ dld null ne { [ /w 0 0 dH dD de dld dk 1 add 0 ] } if
+      [ /b dwl 0 dbx 3 get ]
+      drd null ne { [ /w dwl dbx 0 get add 0 dH dD de drd dk 2 add 0 ] } if ] ]
+} bind def
+
+% - -> box   (in mkatom) \left ... \right
+% @internal
+/mknlr { at /L get st cr mklist at /Ld get at /Rd get st mkdelimwrap } bind def
+
+% - -> box   (in mkatom) \big( and friends
+% @internal
+/mknbig {
+  /ba s 0.25 mul def /bl at /Sz get s mul def
+  /bH ba bl add def /bD bl ba sub def
+  at /G get null eq { [ s 0.12 mul 0 0 [ ] ] } {
+    at /G get bH bD s mkgrowdry pop pop /bw exch def
+    [ bw bH bD [ [ /w 0 0 bH bD s at /G get at /K get 3 mul 0 ] ] ]
+  } ifelse
+} bind def
+
+% - -> box   (in mkatom) TeX rule 11: the radical clears its cramped
+% content; the vinculum runs over it and overshoots
+% @internal
+/mknsqrt {
+  /cb at /L get st true mklist def
+  /phi st 0 eq { 0.17 } { 0.12 } ifelse s mul def
+  /qH cb 1 get phi add s 0.72 mul max def
+  /qD cb 2 get s 0.1 mul add s 0.14 mul max def
+  /radical qH qD s mkgrowdry pop /xv exch def pop
+  /gap s 0.1 mul def /pad s 0.1 mul def
+  /ov s 0.02 r 2 get abs 0.12 mul add mul def
+  /span gap cb 0 get add pad add ov add def
+  /xs 0 def /qh qH def
+  at /I get null ne {
+    /ib at /I get 3 false mklist def
+    /ix xv 0.58 mul def
+    /xs ib 0 get ix sub s 0.06 mul add 0 max def
+    /iy qD neg qH qD add 0.5 mul add ib 2 get add def
+    /qh qh iy ib 1 get add max def
+  } if
+  [ xs xv add gap add cb 0 get add pad add
+    qh s 0.03 mul add
+    qD
+    [ [ /w xs 0 qH qD s /radical at /K get 3 mul span ]
+      [ /b xs xv add gap add 0 cb 3 get ]
+      at /I get null ne { [ /b xs ix add ib 0 get sub iy ib 3 get ] } if ] ]
+} bind def
+
+% - -> box   (in mkatom) a matrix or cases: cells in text style, columns
+% centred (cases: left), rows on the axis, each cell a little off
+% @internal
+/mknmat {
+  /env mkenvs at /Env get get def
+  /cs st 0 eq { 1 } { st } ifelse def
+  /ce cs mkem def
+  /rows at /Rows get def
+  /nr rows length def
+  /nc 0 rows { length max } forall def
+  /bxs [ rows { [ exch { cs false mklist } forall ] } forall ] def
+  /cw [ nc { 0 } repeat ] def
+  /rh [ nr { 0 } repeat ] def
+  /rd [ nr { 0 } repeat ] def
+  0 1 nr 1 sub {
+    /i exch def
+    0 1 bxs i get length 1 sub {
+      /j exch def
+      /cb bxs i get j get def
+      cw j cw j get cb 0 get max put
+      rh i rh i get cb 1 get max put
+      rd i rd i get cb 2 get max put
+    } for
+  } for
+  /csep env 2 get /l eq { 1.0 } { 0.9 } ifelse ce mul def
+  /by [ nr { 0 } repeat ] def
+  1 1 nr 1 sub {
+    /i exch def
+    by i
+      by i 1 sub get
+      ce 1.3 mul rd i 1 sub get rh i get add ce 0.3 mul add max
+      sub
+    put
+  } for
+  /top rh 0 get def
+  /bot by nr 1 sub get rd nr 1 sub get sub def
+  /sh s 0.25 mul top bot add 2 div sub def
+  /cx [ nc { 0 } repeat ] def
+  1 1 nc 1 sub {
+    /j exch def cx j cx j 1 sub get cw j 1 sub get add csep add put
+  } for
+  /mw cx nc 1 sub get cw nc 1 sub get add def
+  /pd ce 0.1 mul def
+  [ mw pd 2 mul add top sh add bot sh add neg
+    [ 0 1 nr 1 sub {
+        /i exch def
+        0 1 bxs i get length 1 sub {
+          /j exch def
+          /cb bxs i get j get def
+          at /K get i 8 mul j add 2 add mkseedk
+          [ /b pd cx j get add
+               env 2 get /c eq { cw j get cb 0 get sub 2 div add } if
+               1 mkjit mkIrr mul 0.05 mul ce mul add
+               by i get sh add 1 mkjit mkIrr mul 0.04 mul ce mul add
+               cb 3 get ]
+        } for
+      } for ] ]
+  env 0 get null ne env 1 get null ne or { env 0 get env 1 get st mkdelimwrap } if
+} bind def
+
+% - -> box   (in mkatom) accents over the argument, \underline, \boxed
+% @internal
+/mknacc {
+  /ak at /A get def
+  /nb at /L get st true mklist def
+  ak /boxed eq {
+    % the frame's corners overshoot, so the box keeps a margin for them
+    /pd s 0.22 mul def /mg s 0.12 mul def
+    [ nb 0 get pd mg add 2 mul add nb 1 get pd add mg add nb 2 get pd add mg add
+      [ [ /b pd mg add 0 nb 3 get ]
+        [ /f mg nb 2 get pd add neg nb 0 get pd 2 mul add mg add nb 1 get pd add
+          s at /K get 3 mul ] ] ]
+  } {
+    ak /underline eq {
+      /uy nb 2 get s 0.14 mul add neg def
+      [ nb 0 get nb 1 get uy neg s 0.04 mul add
+        [ [ /b 0 0 nb 3 get ]
+          [ /r s -0.03 mul uy nb 0 get s 0.03 mul add
+            uy r 2 get 0.03 mul s mul add s at /K get 3 mul ] ] ]
+    } {
+      % over the ink of a single glyph, else over the whole box
+      at /L get length 1 eq { at /L get 0 get /T get /sym eq } { false } ifelse {
+        /m at /L get 0 get /G get mkmetric def
+        /sc s 1000 div def
+        /icx m 1 get m 3 get add 2 div sc mul def
+        /iw m 3 get m 1 get sub sc mul def
+      } { /icx nb 0 get 2 div def /iw nb 0 get def } ifelse
+      /ay nb 1 get s 0.12 mul add def
+      /icx icx ay mkSlant sin mkSlant cos div mul add def
+      /aw s 0.36 mul def /ah s 0.1 mul def
+      ak /vec eq { /aw iw 0.9 mul s 0.42 mul max def } if
+      ak /hat eq { /ah s 0.16 mul def } if
+      ak /bar eq { /aw iw 0.85 mul s 0.34 mul max def /ah s 0.02 mul def } if
+      ak /overline eq {
+        /icx nb 0 get 2 div def /aw nb 0 get s 0.08 mul add def /ah s 0.02 mul def
+      } if
+      ak /dot eq { /aw 0 def /ah s 0.05 mul def } if
+      ak /ddot eq { /aw s 0.2 mul def /ah s 0.05 mul def } if
+      [ nb 0 get ay ah add nb 2 get
+        [ [ /b 0 0 nb 3 get ] [ /a ak icx ay aw s at /K get 3 mul ] ] ]
+    } ifelse
+  } ifelse
+} bind def
+
+% box -> box   (in mkatom) TeX rules 18a-f: superscript and subscript.
+% A single glyph takes the font's shifts; a bigger nucleus hangs its
+% scripts from its own top and bottom. Then the hand: a little high or low.
+% @internal
+/mkscripts {
+  /nb exch def
+  /ps mkscriptstyle st get def
+  /pe ps mkem def
+  /isint at /T get /op eq { at /G get mkisintname } { false } ifelse def
+  at /Sup known { /pb at /Sup get ps cr mklist def } { /pb null def } ifelse
+  at /Sub known { /bb at /Sub get ps true mklist def } { /bb null def } ifelse
+  ischar { /u 0 def /v 0 def } {
+    /u nb 1 get pe 0.39 mul sub def /v nb 2 get pe 0.05 mul add def
+  } ifelse
+  % an integral's limits go beside its ends; any other large operator's
+  % superscript stands near its top
+  isint { /u nb 1 get pe 0.62 mul sub def /v nb 2 get pe 0.45 mul sub def } if
+  at /T get /op eq isint not and { /u u nb 1 get pe 0.2 mul sub max def } if
+  pb null ne {
+    /u u st 0 eq { 0.44 } { cr { 0.34 } { 0.4 } ifelse } ifelse s mul max
+      pb 2 get s 0.125 mul add max def
+  } if
+  bb null ne pb null eq and {
+    /v v s 0.17 mul max bb 1 get s 0.4 mul sub max def
+  } if
+  bb null ne pb null ne and {
+    /v v s 0.25 mul max def
+    /gp u pb 2 get sub bb 1 get v sub sub def
+    gp s 0.16 mul lt { /v v s 0.16 mul gp sub add def } if
+    /psi s 0.4 mul u pb 2 get sub sub def
+    psi 0 gt { /u u psi add def /v v psi sub def } if
+  } if
+  /u u r 3 get 0.08 mul s mul add def
+  /v v r 4 get 0.04 mul s mul add def
+  /spx nb 0 get ic add def
+  /sbx nb 0 get def
+  at /T get /op eq {
+    isint { /spx spx s 0.08 mul add def /sbx sbx nb 0 get 0.32 mul sub def }
+          { /spx spx s 0.1 mul add def /sbx sbx s 0.1 mul add def } ifelse
+  } if
+  /sw nb 0 get def
+  pb null ne { /sw sw spx pb 0 get add max def } if
+  bb null ne { /sw sw sbx bb 0 get add max def } if
+  [ sw s 0.05 mul add
+    nb 1 get pb null ne { u pb 1 get add max } if
+    nb 2 get bb null ne { v bb 2 get add max } if
+    [ [ /b 0 0 nb 3 get ]
+      pb null ne { [ /b spx u pb 3 get ] } if
+      bb null ne { [ /b sbx v neg bb 3 get ] } if ] ]
+} bind def
+
+% box -> box   (in mkatom) TeX rule 13: limits centred over and under
+% @internal
+/mklimits {
+  /nb exch def
+  /ps mkscriptstyle st get def
+  at /Sup known { /pb at /Sup get ps cr mklist def } { /pb null def } ifelse
+  at /Sub known { /bb at /Sub get ps true mklist def } { /bb null def } ifelse
+  /g1 s 0.13 mul r 3 get 0.04 mul s mul add def
+  /g2 s 0.13 mul r 4 get 0.04 mul s mul add def
+  /lw nb 0 get def
+  pb null ne { /lw lw pb 0 get max def } if
+  bb null ne { /lw lw bb 0 get max def } if
+  /lh nb 1 get def /ld nb 2 get def
+  pb null ne { /pyy nb 1 get g1 add pb 2 get add def /lh pyy pb 1 get add def } if
+  bb null ne { /byy nb 2 get g2 add bb 1 get add def /ld byy bb 2 get add def } if
+  % under /Slant the operator leans: the limits follow its top and foot
+  /tn mkSlant sin mkSlant cos div def
+  [ lw lh ld
+    [ [ /b lw nb 0 get sub 2 div 0 nb 3 get ]
+      pb null ne {
+        [ /b lw pb 0 get sub 2 div r 5 get 0.04 mul s mul add nb 1 get tn mul add
+          pyy pb 3 get ]
+      } if
+      bb null ne {
+        [ /b lw bb 0 get sub 2 div r 6 get 0.04 mul s mul add nb 2 get tn mul sub
+          byy neg bb 3 get ]
+      } if ] ]
+} bind def
+
+% ------------------------------------------------------------- drawing
+
+% items ox oy -> -   append every item's path, offset by ox oy
+% @internal
+/mkrender {
+  4 dict begin /mroy exch def /mrox exch def
+  { dup 0 get mkdraws exch get load exec } forall
+  end
+} bind def
+
+% Item tags -> their drawing procedures (item -> -)
+% @internal
+/mkdraws <<
+  /b /mkdrawb /g /mkdrawg /w /mkdraww /r /mkdrawr /a /mkdrawa /f /mkdrawf
+>> def
+
+% @internal
+/mkdrawb { dup 3 get exch dup 1 get mrox add exch 2 get mroy add mkrender } bind def
+
+% x -> dy   the slow drift of the baseline along the line
+% @internal
+/mkdrift { mkdF mul mkdP add sin mkdA mul } bind def
+
+% @internal
+/mkdrawg {
+  aload pop
+  mkG add /mkdk exch def /mkdn exch def /mkds exch def
+  mroy add /mkdy exch def mrox add /mkdx exch def pop
+  [ mkdn ] mkdx mkdy mkdx mkdrift add
+  << /Size mkds /Seed mkdk /Jitter mkJitter /Slant mkSlant >>
+  mkscratch begin sgpath end
+} bind def
+
+% @internal
+/mkdraww {
+  aload pop
+  /mkdsp exch def mkG add /mkdk exch def /mkdsym exch def /mkds exch def
+  /mkdD exch def /mkdH exch def
+  mroy add /mkdy exch def mrox add /mkdx exch def pop
+  mkdx mkdy mkdx mkdrift add moveto
+  mkdH mkdD
+  << /Symbol mkdsym /Size mkds /Seed mkdk /Jitter mkJitter /Slant mkSlant /Span mkdsp >>
+  mkscratch begin sggrow end pop
+} bind def
+
+% @internal
+/mkdrawr {
+  aload pop
+  mkG add /mkdk exch def /mkds exch def
+  mroy add /mky1 exch def mrox add /mkx1 exch def
+  mroy add /mky0 exch def mrox add /mkx0 exch def pop
+  mkx0 mky0 mkx0 mkdrift add mkx1 mky1 mkx1 mkdrift add mkds mkdk mkhandline
+} bind def
+
+% @internal
+/mkdrawf {
+  aload pop
+  mkG add /mkdk exch def /mkds exch def
+  mroy add /mky1 exch def mrox add /mkx1 exch def
+  mroy add /mky0 exch def mrox add /mkx0 exch def pop
+  mkx0 mkx1 add 2 div mkdrift /mkdd exch def
+  mkx0 mky0 mkdd add mkx1 mky1 mkdd add mkds mkdk /box mkhandbox
+} bind def
+
+% x0 y0 x1 y1 size seed -> -   one hand-drawn line as a subpath: it
+% bows a little, more the longer it is
+% @internal
+/mkhandline {
+  mksetseed
+  /mkhs exch def /mkhy1 exch def /mkhx1 exch def /mkhy0 exch def /mkhx0 exch def
+  /mkhdx mkhx1 mkhx0 sub def /mkhdy mkhy1 mkhy0 sub def
+  /mkhl mkhdx dup mul mkhdy dup mul add sqrt def
+  mkhl 1e-6 lt { /mkhl 1e-6 def } if
+  /mkhnx mkhdy neg mkhl div def /mkhny mkhdx mkhl div def
+  /mkhb mkJitter mkhs mul 1.2 mul mkhl 0.012 mul mkIrr mul add def
+  /mkhb1 mkhb mkjit def
+  /mkhb2 mkhb1 0.6 mul mkhb 0.4 mul mkjit add def
+  mkhx0 mkhy0 moveto
+  mkhx0 mkhdx 3 div add mkhnx mkhb1 mul add
+  mkhy0 mkhdy 3 div add mkhny mkhb1 mul add
+  mkhx0 mkhdx 2 mul 3 div add mkhnx mkhb2 mul add
+  mkhy0 mkhdy 2 mul 3 div add mkhny mkhb2 mul add
+  mkhx1 mkhy1 curveto
+} bind def
+
+% x y size -> -   a pressed dot: a very short stroke
+% @internal
+/mkdot {
+  0.014 mul /mkdts exch def
+  2 copy exch mkdts sub exch mkdts add moveto
+  exch mkdts add exch mkdts sub lineto
+} bind def
+
+% @internal
+/mkdrawa {
+  aload pop
+  mkG add /mkdk exch def /mkds exch def /mkaw exch def
+  mroy add /mkay exch def mrox add /mkax exch def /mkak exch def pop
+  /mkay mkay mkax mkdrift add def
+  mkak /vec eq {
+    mkax mkaw 2 div sub mkay mkax mkaw 2 div add mkay mkds mkdk mkhandline
+    mkdk 1 add mksetseed
+    /mkal mkds 0.15 mul def /mkah mkds 0.08 mul def
+    mkax mkaw 2 div add mkal sub mkay mkah add mkds 0.02 mul mkjit add moveto
+    mkax mkaw 2 div add mkay lineto
+    mkax mkaw 2 div add mkal sub mkay mkah sub mkds 0.02 mul mkjit add lineto
+  } if
+  mkak /hat eq {
+    mkdk mksetseed
+    mkax mkaw 2 div sub mkay mkds 0.02 mul mkjit add moveto
+    mkax mkay mkds 0.16 mul add lineto
+    mkax mkaw 2 div add mkay mkds 0.02 mul mkjit add lineto
+  } if
+  mkak /bar eq mkak /overline eq or {
+    mkax mkaw 2 div sub mkay mkax mkaw 2 div add mkay mkds mkdk mkhandline
+  } if
+  mkak /dot eq { mkax mkay mkds mkdot } if
+  mkak /ddot eq {
+    mkax mkaw 2 div sub mkay mkds mkdot mkax mkaw 2 div add mkay mkds mkdot
+  } if
+  mkak /tilde eq {
+    /mkat mkds 0.06 mul def
+    mkax mkaw 2 div sub mkay moveto
+    mkax mkaw 6 div sub mkay mkat 2.2 mul add
+    mkax mkaw 6 div add mkay mkat 2.2 mul sub
+    mkax mkaw 2 div add mkay mkat add curveto
+  } if
+} bind def
+
+% i -> points   (in mkhandbox) how far corner i overshoots
+% @internal
+/mkbover { mkbr exch get abs mkIrr mul 0.1 mul 0.035 add mkbs mul } bind def
+% i -> points   (in mkhandbox) how far edge end i wanders off the box
+% @internal
+/mkbedge { mkbr exch get 0.03 mul mkIrr mul mkbs mul } bind def
+
+% llx lly urx ury size seed shape -> -   a hand-drawn frame: four
+% strokes whose ends overshoot the corners, or one oval stroke that
+% overlaps where it started
+% @internal
+/mkhandbox {
+  /mkbsh exch def /mkbseed exch def /mkbs exch def
+  /mkbury exch def /mkburx exch def /mkblly exch def /mkbllx exch def
+  mkbseed mksetseed
+  /mkbr [ 16 { 1 mkjit } repeat ] def
+  mkbsh /oval eq { mkovalpath } {
+    mkbllx 0 mkbover sub mkbury 1 mkbedge add
+    mkburx 2 mkbover add mkbury 3 mkbedge add mkbs mkbseed 1 add mkhandline
+    mkburx 4 mkbedge add mkbury 5 mkbover add
+    mkburx 6 mkbedge add mkblly 7 mkbover sub mkbs mkbseed 2 add mkhandline
+    mkburx 8 mkbover add mkblly 9 mkbedge add
+    mkbllx 10 mkbover sub mkblly 11 mkbedge add mkbs mkbseed 3 add mkhandline
+    mkbllx 12 mkbedge add mkblly 13 mkbover sub
+    mkbllx 14 mkbedge add mkbury 15 mkbover add mkbs mkbseed 4 add mkhandline
+  } ifelse
+} bind def
+
+% theta -> x y   (in mkovalpath) a point of the hand's oval: the radius
+% wobbles and grows a little through the turn, so the end overlaps
+% outside the start
+% @internal
+/mkovalpt {
+  dup mkovale /mkoe exch def
+  dup cos mkrx mul mkoe mul mkcx add
+  exch sin mkry mul mkoe mul mkcy add
+} bind def
+
+% theta -> scale
+% @internal
+/mkovale {
+  dup mkph add sin 0.035 mul mkIrr mul
+  exch mkt0 sub 360 div 0.07 mul mkIrr mul 0.02 add add 1 add
+} bind def
+
+% theta -> dx dy   (per radian)
+% @internal
+/mkovaltan {
+  dup mkovale /mkoe exch def
+  dup sin neg mkrx mul mkoe mul
+  exch cos mkry mul mkoe mul
+} bind def
+
+% - -> -   (in mkhandbox)
+% @internal
+/mkovalpath {
+  /mkcx mkbllx mkburx add 2 div def /mkcy mkblly mkbury add 2 div def
+  /mkrx mkburx mkbllx sub 2 div def /mkry mkbury mkblly sub 2 div def
+  /mkt0 100 mkbr 0 get 25 mul add def
+  /mkph mkbr 1 get 180 mul def
+  /mkspan 360 40 add mkbr 2 get abs 25 mul add def
+  /mkdt mkspan 9 div def
+  /mkkk mkdt 4 div dup sin exch cos div 4 mul 3 div def
+  mkt0 mkovalpt moveto
+  0 1 8 {
+    mkdt mul mkt0 add /mkoa exch def
+    /mkob mkoa mkdt add def
+    mkoa mkovalpt /mkp1y exch def /mkp1x exch def
+    mkoa mkovaltan /mkt1y exch def /mkt1x exch def
+    mkob mkovalpt /mkp2y exch def /mkp2x exch def
+    mkob mkovaltan /mkt2y exch def /mkt2x exch def
+    mkp1x mkt1x mkkk mul add mkp1y mkt1y mkkk mul add
+    mkp2x mkt2x mkkk mul sub mkp2y mkt2y mkkk mul sub
+    mkp2x mkp2y curveto
+  } for
+} bind def
+
+% ------------------------------------------------------- options, seeds
+
+% opts -> -   the formula options, into mkscratch
+% @internal
+/mkreadopts {
+  dup type /dicttype ne { mk-opts-must-be-a-dict } if
+  /mko exch def
+  mko /Size 36 mkopt dup mkisnum { dup 0 le } { true } ifelse
+    { mk-size-must-be-a-positive-number } if
+  /mkSize exch def
+  mko /Style /display mkopt
+  dup /display eq { pop 0 } {
+    /text eq { 1 } { mk-style-must-be-display-or-text } ifelse
+  } ifelse /mkStyle exch def
+  mko /Seed null mkopt
+  dup null ne { dup type /integertype ne { mk-seed-must-be-an-integer } if } if
+  /mkSeedopt exch def
+  mko /Irregular 1 mkopt dup mkisnum { dup 0 lt } { true } ifelse
+    { mk-irregular-must-be-a-non-negative-number } if
+  /mkIrr exch def
+  mko /Slope null mkopt
+  dup null ne { dup mkisnum not { mk-slope-must-be-a-number } if } if
+  /mkSlope exch def
+  mko /Jitter 0.016 mkopt dup mkisnum { dup 0 lt } { true } ifelse
+    { mk-jitter-must-be-a-non-negative-number } if
+  /mkJitter exch def
+  mko /Slant 0 mkopt dup mkisnum not { mk-slant-must-be-a-number } if
+  /mkSlant exch def
+  mko /Spacing 1 mkopt dup mkisnum { dup 0 lt } { true } ifelse
+    { mk-spacing-must-be-a-non-negative-number } if
+  /mkSpacing exch def
+  mko /MathHand true mkopt
+  dup type /booleantype ne { mk-mathhand-must-be-a-boolean } if
+  /mkHand exch def
+} bind def
+
+% x y -> int   a device-space position, quantized (sgpath's rule)
+% @internal
+/mkposseed {
+  transform 100 mul round cvi exch 100 mul round cvi 1000003 mul add
+  16#7FFFFFFF and
+} bind def
+
+% tex x y -> -   the layout seed mkS (the /Seed, else a hash of the text)
+% and the glyph seed mkG (the /Seed, else the hash and the position)
+% @internal
+/mkseeds {
+  mkSeedopt null eq {
+    mkposseed exch mkhash dup /mkS exch mkset
+    add 16#7FFFFFFF and /mkG exch mkset
+  } {
+    pop pop pop /mkS mkSeedopt mkset /mkG mkSeedopt mkset
+  } ifelse
+} bind def
+
+% - -> -   the line's slope and drift, from mkS
+% @internal
+/mkglobals {
+  -1 0 mkseedk
+  1 mkjit 0.8 mul mkIrr mul
+  mkSlope null ne { pop mkSlope } if /mkslopeA exch mkset
+  /mkdA mkSize 0.03 mul mkIrr mul mkrand 0.5 add mul mkset
+  /mkdF 360 mkSize 6 mkrand 5 mul add mul div mkset
+  /mkdP mkrand 360 mul mkset
+} bind def
+
+% w h d angle x y drift -> [llx lly urx ury]   a sloped line's box
+% @internal
+/mkrotbox {
+  /mkrA exch def /mkrY exch def /mkrX exch def /mkra exch def
+  /mkrd exch def /mkrh exch def /mkrw exch def
+  /mkrx0 1e9 def /mkry0 1e9 def /mkrx1 -1e9 def /mkry1 -1e9 def
+  [ 0 mkrd neg mkrw mkrd neg mkrw mkrh 0 mkrh ]
+  0 2 6 {
+    1 index 1 index get exch 2 index exch 1 add get
+    /mkpy exch def /mkpx exch def
+    mkpx mkra cos mul mkpy mkra sin mul sub mkrX add
+    mkpx mkra sin mul mkpy mkra cos mul add mkrY add
+    dup mkrA sub mkry0 min /mkry0 exch def mkrA add mkry1 max /mkry1 exch def
+    dup mkrx0 min /mkrx0 exch def mkrx1 max /mkrx1 exch def
+  } for
+  pop
+  [ mkrx0 mkry0 mkrx1 mkry1 ]
+} bind def
+
+% Public entry: N proc -> results. Runs proc inside mkscratch; if it
+% raises, puts back the CTM (the drawing rotates it for the slope), pops
+% what it left on the operand stack down to where its N operands
+% started, unwinds the dictionary stack, and re-raises, so $error still
+% names the original guard.
+%
+% The depths and the CTM are baked into the error handler this builds,
+% which lives on the execution stack: a mathkit call made from /Ink
+% (nested inside this one) has its own, and can't overwrite this one's.
+% The procedure run is { proc stopped { state mkunwind stop } { end } ifelse }.
+% @internal
+/mkentry {
+  exch count 2 sub exch sub 0 max
+  countdictstack matrix currentmatrix 3 array astore
+  [ exch /mkunwind cvx /stop load ] cvx
+  exch [ exch /stopped load 4 -1 roll [ /end load ] cvx /ifelse load ] cvx
+  mkscratch begin exec
+} bind def
+
+% junk... [base depth ctm] -> -   cut the operand stack back to base,
+% the dictionary stack to depth, and put back the CTM
+% @internal
+/mkunwind {
+  dup 2 get setmatrix
+  { count 1 index 0 get 1 add le { exit } if exch pop } loop
+  { countdictstack 1 index 1 get le { exit } if end } loop
+  pop
+} bind def
+
+% ------------------------------------------------------------- bodies
+
+% tex x y opts -> -
+% @internal
+/mkpathbody {
+  mkreadopts
+  2 copy mkisnum exch mkisnum and not { mk-xy-must-be-numbers } if
+  /mky0 exch def /mkx0 exch def
+  dup type /stringtype ne { mk-tex-must-be-a-string } if
+  dup mkx0 mky0 mkseeds
+  mkparsetop mkStyle false mklisttop
+  mkglobals
+  matrix currentmatrix exch
+  mkx0 mky0 translate mkslopeA rotate
+  3 get 0 0 mkrender
+  setmatrix
+} bind def
+
+% tex opts -> dict
+% @internal
+/mkmetricsbody {
+  mkreadopts
+  dup type /stringtype ne { mk-tex-must-be-a-string } if
+  mkSeedopt null eq { dup mkhash } { mkSeedopt } ifelse /mkS exch mkset
+  mkparsetop mkStyle false mklisttop /mkmb exch def
+  << /Width mkmb 0 get /Height mkmb 1 get /Depth mkmb 2 get /Align mkalignof >>
+} bind def
+
+% [lines] x y opts -> [records]
+% @internal
+/mkalignbody {
+  dup type /dicttype ne { mk-opts-must-be-a-dict } if
+  dup /mkao exch def
+  mkreadopts
+  mkao /Leading 1.9 mkopt dup mkisnum { dup 0 le } { true } ifelse
+    { mk-leading-must-be-a-positive-number } if
+  /mkLead exch def
+  mkao /Ink null mkopt
+  dup null ne {
+    dup xcheck 1 index type dup /arraytype eq exch /packedarraytype eq or and
+    not { mk-ink-must-be-a-procedure } if
+  } if
+  /mkInk exch def
+  2 copy mkisnum exch mkisnum and not { mk-xy-must-be-numbers } if
+  /mkay0 exch def /mkax0 exch def
+  dup type dup /arraytype ne exch /packedarraytype ne and
+    { mk-lines-must-be-an-array-of-strings } if
+  dup { type /stringtype ne { mk-lines-must-be-an-array-of-strings } if } forall
+  /mklines exch def
+  % lay out every line: its box, alignment, slope and drift
+  /mkjobs [
+    0 1 mklines length 1 sub {
+      /mkli exch def
+      mklines mkli get
+      mkSeedopt null eq { dup mkhash } { mkSeedopt mkli 101 mul add } ifelse
+      /mkS exch mkset
+      mkparsetop mkStyle false mklisttop /mkjb exch def
+      mkglobals
+      -2 0 mkseedk
+      << /Box mkjb /Ax mkalignof /S mkS /Slope mkslopeA /dA mkdA /dF mkdF
+         /dP mkdP /Jx 1 mkjit /Jy 1 mkjit /I mkli /Ink /mkInk load
+         /Jitter mkJitter /Slant mkSlant /Irr mkIrr >>
+    } for
+  ] def
+  % baselines: each below the last by the leading or by what they hold,
+  % the = column a little off from line to line
+  /mkpy mkay0 def /mkpd 0 def
+  mkjobs {
+    /mkj exch def
+    mkj /I get 0 gt {
+      /mkpy mkpy
+        mkLead mkSize mul mkpd mkj /Box get 1 get add mkSize 0.35 mul add max
+        mkj /Jy get 0.1 mul mkSize mul mkIrr mul add
+        sub def
+    } if
+    mkj /Y mkpy put
+    mkj /X mkax0 mkj /Ax get sub mkj /Jx get 0.07 mul mkSize mul mkIrr mul add put
+    /mkpd mkj /Box get 2 get def
+    mkSeedopt null eq {
+      mkj /G mkj /X get mkj /Y get mkposseed mkj /S get add 16#7FFFFFFF and put
+    } { mkj /G mkj /S get put } ifelse
+  } forall
+  % the records the caller gets back
+  [ mkjobs {
+      /mkj exch def
+      << /Origin [ mkj /X get mkj /Y get ]
+         /Angle mkj /Slope get
+         /Width mkj /Box get 0 get /Height mkj /Box get 1 get
+         /Depth mkj /Box get 2 get /Align mkj /Ax get
+         /BBox mkj /Box get 0 get mkj /Box get 1 get mkj /Box get 2 get
+               mkj /Slope get mkj /X get mkj /Y get mkj /dA get mkrotbox >>
+  } forall ]
+  % draw each line, and ink it if asked; a nested mathkit call from /Ink
+  % may reuse every scratch name, so each line restores its own
+  mkjobs {
+    /mkj exch def
+    /mkG mkj /G get def /mkdA mkj /dA get def /mkdF mkj /dF get def
+    /mkdP mkj /dP get def /mkJitter mkj /Jitter get def
+    /mkSlant mkj /Slant get def /mkIrr mkj /Irr get def
+    matrix currentmatrix
+    mkj /X get mkj /Y get translate mkj /Slope get rotate
+    mkj /Box get 3 get 0 0 mkrender
+    setmatrix
+    mkj /Ink get dup null ne {
+      mkj /I get exch
+      end exec mkscratch begin
+    } { pop } ifelse
+  } forall
+} bind def
+
+% opts -> -   the options every annotation shares
+% @internal
+/mkannopts {
+  dup type /dicttype ne { mk-opts-must-be-a-dict } if
+  /mko exch def
+  mko /Size 36 mkopt dup mkisnum { dup 0 le } { true } ifelse
+    { mk-size-must-be-a-positive-number } if
+  /mkSize exch def
+  mko /Seed null mkopt
+  dup null ne { dup type /integertype ne { mk-seed-must-be-an-integer } if } if
+  /mkSeedopt exch def
+  mko /Irregular 1 mkopt dup mkisnum { dup 0 lt } { true } ifelse
+    { mk-irregular-must-be-a-non-negative-number } if
+  /mkIrr exch def
+  mko /Jitter 0.016 mkopt dup mkisnum { dup 0 lt } { true } ifelse
+    { mk-jitter-must-be-a-non-negative-number } if
+  /mkJitter exch def
+} bind def
+
+% record -> M w h d   (a line record from mkalign, checked; the CTM is
+% moved to the line's origin and slope, M is the matrix to restore)
+% @internal
+/mkreadrecord {
+  dup /Origin known 1 index /Angle known and 1 index /Width known and
+  1 index /Height known and 1 index /Depth known and
+  not { mk-record-must-come-from-mkalign } if
+  dup /Origin get dup type /arraytype eq {
+    dup length 2 eq { aload pop mkisnum exch mkisnum and } { pop false } ifelse
+  } { pop false } ifelse
+  1 index /Angle get mkisnum and 1 index /Width get mkisnum and
+  1 index /Height get mkisnum and 1 index /Depth get mkisnum and
+  not { mk-record-must-come-from-mkalign } if
+  matrix currentmatrix exch
+  dup /Origin get aload pop translate dup /Angle get rotate
+  dup /Width get exch dup /Height get exch /Depth get
+} bind def
+
+% four numbers -> -   (or the guard)
+% @internal
+/mkfournums {
+  4 copy mkisnum 4 1 roll mkisnum 4 1 roll mkisnum 4 1 roll mkisnum
+  and and and not { mk-coordinates-must-be-numbers } if
+} bind def
+
+% x y -> -   the annotation's seed (the /Seed, else from the position)
+% @internal
+/mkannseed {
+  mkSeedopt null eq { mkposseed } { pop pop mkSeedopt } ifelse /mkaS exch def
+} bind def
+
+% llx lly urx ury opts, or record opts -> -
+% @internal
+/mkframebody {
+  dup /mkfo exch def
+  mkannopts
+  mkfo /Pad mkSize 0.3 mul mkopt dup mkisnum not { mk-pad-must-be-a-number } if
+  /mkfpad exch def
+  mkfo /Shape /box mkopt dup /box ne 1 index /oval ne and
+    { mk-shape-must-be-box-or-oval } if
+  /mkfsh exch def
+  dup type /dicttype eq {
+    mkreadrecord /mkfd exch def /mkfh exch def /mkfw exch def
+    0 0 mkannseed
+    mkfpad neg mkfd mkfpad add neg mkfw mkfpad add mkfh mkfpad add
+    mkSize mkaS mkfsh mkhandbox
+    setmatrix
+  } {
+    mkfournums
+    3 index 3 index mkannseed
+    4 2 roll mkfpad sub exch mkfpad sub exch 4 2 roll
+    mkfpad add exch mkfpad add exch
+    mkSize mkaS mkfsh mkhandbox
+  } ifelse
+} bind def
+
+% x0 y0 x1 y1 opts, or record opts -> -
+% @internal
+/mkunderlinebody {
+  dup /mkuo exch def
+  mkannopts
+  mkuo /Double false mkopt dup type /booleantype ne
+    { mk-double-must-be-a-boolean } if
+  /mkudb exch def
+  dup type /dicttype eq {
+    mkreadrecord /mkud exch def pop /mkuw exch def
+    0 0 mkannseed
+    mkSize -0.1 mul mkud mkSize 0.2 mul add neg
+    mkuw mkSize 0.1 mul add mkud mkSize 0.2 mul add neg
+    mkunderlines
+    setmatrix
+  } {
+    mkfournums
+    3 index 3 index mkannseed
+    mkunderlines
+  } ifelse
+} bind def
+
+% x0 y0 x1 y1 -> -   one or two hand lines
+% @internal
+/mkunderlines {
+  /mkuy1 exch def /mkux1 exch def /mkuy0 exch def /mkux0 exch def
+  mkux0 mkuy0 mkux1 mkuy1 mkSize mkaS mkhandline
+  mkudb {
+    /mkug mkSize 0.12 mul def
+    mkux0 mkSize 0.05 mul add mkuy0 mkug sub
+    mkux1 mkSize 0.03 mul sub mkuy1 mkug sub mkSize mkaS 1 add mkhandline
+  } if
+} bind def
+
+% x0 y0 x1 y1 opts -> -
+% @internal
+/mkarrowbody {
+  dup /mkwo exch def
+  mkannopts
+  mkwo /Bend 0 mkopt dup mkisnum not { mk-bend-must-be-a-number } if
+  /mkwb exch def
+  mkwo /Head mkSize 0.3 mul mkopt dup mkisnum { dup 0 le } { true } ifelse
+    { mk-head-must-be-a-positive-number } if
+  /mkwh exch def
+  mkfournums
+  /mkwy1 exch def /mkwx1 exch def /mkwy0 exch def /mkwx0 exch def
+  mkwx0 mkwy0 mkannseed
+  mkaS mksetseed
+  /mkwdx mkwx1 mkwx0 sub def /mkwdy mkwy1 mkwy0 sub def
+  /mkwl mkwdx dup mul mkwdy dup mul add sqrt def
+  mkwl 1e-6 lt { mk-arrow-needs-two-distinct-points } if
+  % the bend's control point, off the chord's middle
+  /mkwq mkwl 2 div mkwb 2 div dup sin exch cos div mul def
+  /mkwqx mkwx0 mkwx1 add 2 div mkwdy mkwl div mkwq mul add def
+  /mkwqy mkwy0 mkwy1 add 2 div mkwdx neg mkwl div mkwq mul add def
+  mkwb 0 eq {
+    mkwx0 mkwy0 mkwx1 mkwy1 mkSize mkaS mkhandline
+  } {
+    mkwx0 mkwy0 moveto
+    mkwx0 mkwqx mkwx0 sub 2 mul 3 div add mkwy0 mkwqy mkwy0 sub 2 mul 3 div add
+    mkwx1 mkwqx mkwx1 sub 2 mul 3 div add mkwy1 mkwqy mkwy1 sub 2 mul 3 div add
+    mkwx1 mkwy1 curveto
+  } ifelse
+  % the head: one stroke, in, to the tip and out, along the end's tangent
+  mkaS 1 add mksetseed
+  mkwb 0 eq { mkwdy mkwdx } { mkwy1 mkwqy sub mkwx1 mkwqx sub } ifelse atan
+  /mkwt exch def
+  /mkwa 26 4 mkjit mkIrr mul add def
+  mkwx1 mkwt 180 add mkwa sub cos mkwh mul add
+  mkwy1 mkwt 180 add mkwa sub sin mkwh mul add moveto
+  mkwx1 mkwy1 lineto
+  mkwx1 mkwt 180 add mkwa add cos mkwh mul 0.9 mul add
+  mkwy1 mkwt 180 add mkwa add sin mkwh mul 0.9 mul add lineto
+} bind def
+
+% ------------------------------------------------------------- API
+
+%%SelfTest: mkpath-rejects-malformed-operands
+%   { 5 0 0 << >> mkpath } /mk-tex-must-be-a-string (a number as text) mustguard
+%   { (x) (a) 0 << >> mkpath } /mk-xy-must-be-numbers (a string as x) mustguard
+%   { (x) 0 0 5 mkpath } /mk-opts-must-be-a-dict (a number as opts) mustguard
+%   { (x) 0 0 << /Size 0 >> mkpath } /mk-size-must-be-a-positive-number (/Size 0) mustguard
+%   { (x) 0 0 << /Style /inline >> mkpath } /mk-style-must-be-display-or-text
+%   (/Style /inline) mustguard
+%   { (x) 0 0 << /Seed 1.5 >> mkpath } /mk-seed-must-be-an-integer (a real /Seed) mustguard
+%   { (x) 0 0 << /Irregular -1 >> mkpath } /mk-irregular-must-be-a-non-negative-number
+%   (/Irregular -1) mustguard
+%   { (x) 0 0 << /Slope (up) >> mkpath } /mk-slope-must-be-a-number (a string /Slope) mustguard
+%   { (x) 0 0 << /Jitter -0.1 >> mkpath } /mk-jitter-must-be-a-non-negative-number
+%   (/Jitter -0.1) mustguard
+%   { (x) 0 0 << /Slant /left >> mkpath } /mk-slant-must-be-a-number (a name /Slant) mustguard
+%   { (x) 0 0 << /Spacing -2 >> mkpath } /mk-spacing-must-be-a-non-negative-number
+%   (/Spacing -2) mustguard
+%   { (x) 0 0 << /MathHand 1 >> mkpath } /mk-mathhand-must-be-a-boolean (/MathHand 1) mustguard
+%   { (x) 5 mkmetrics } /mk-opts-must-be-a-dict (mkmetrics with a number as opts) mustguard
+%%EndSelfTest
+%
+%%SelfTest: mkpath-refuses-what-it-does-not-support
+%   % a single backslash is eaten by the PostScript string: \sqrt is "sqrt",
+%   % \frac starts with a form feed
+%   { (\sqrt{x}) 0 0 << >> mkpath } /mk-bare-word-needs-a-backslash:sqrt
+%   (a lost backslash before sqrt) mustguard
+%   { (\frac{a}{b}) 0 0 << >> mkpath }
+%   /mk-control-character:write-each-TeX-backslash-as-\\ (a form feed from \f) mustguard
+%   { (\\iiiint f) 0 0 << >> mkpath } /mk-unsupported-command:\iiiint (\iiiint) mustguard
+%   { (a @ b) 0 0 << >> mkpath } /mk-unsupported-character:@ (an at sign) mustguard
+%   { (⊕) 0 0 << >> mkpath } /mk-unsupported-character:⊕ (a circled plus) mustguard
+%   { (\\left< x \\right>) 0 0 << >> mkpath } (mk-unsupported-delimiter:<) cvn
+%   (an angle bracket delimiter) mustguard
+%   { (\\left\\lceil x \\right.) 0 0 << >> mkpath } /mk-unsupported-delimiter:\lceil
+%   (\lceil) mustguard
+%   { (\\oplus) 0 0 << >> mkpath } /mk-unsupported-command:\oplus (\oplus) mustguard
+%   { (\\begin{array} x \\end{array}) 0 0 << >> mkpath }
+%   /mk-unsupported-environment:array (the array environment) mustguard
+%   { (x^) 0 0 << >> mkpath } /mk-missing-argument:^ (a superscript with nothing) mustguard
+%   { (\\frac{a}) 0 0 << >> mkpath } /mk-missing-argument:\frac (\frac with one argument) mustguard
+%   { (\\vec) 0 0 << >> mkpath } /mk-missing-argument:\vec (an accent with nothing) mustguard
+%   { (x^2^3) 0 0 << >> mkpath } /mk-double-superscript (x^2^3) mustguard
+%   { (x_1_2) 0 0 << >> mkpath } /mk-double-subscript (x_1_2) mustguard
+%   { (x^2') 0 0 << >> mkpath } /mk-double-superscript (a prime after a superscript) mustguard
+%   { ({x) 0 0 << >> mkpath } /mk-missing-closing-brace (an open brace) mustguard
+%   { (x}) 0 0 << >> mkpath } /mk-extra-closing-brace (a stray closing brace) mustguard
+%   { (\\left[ x) 0 0 << >> mkpath } /mk-left-without-right (a left with no right) mustguard
+%   { (x \\right]) 0 0 << >> mkpath } /mk-right-without-left (a right with no left) mustguard
+%   { (a \\\\ b) 0 0 << >> mkpath } /mk-row-break-outside-a-matrix (\\ in a line) mustguard
+%   { ({a & b}) 0 0 << >> mkpath } /mk-misplaced-ampersand (& inside a group) mustguard
+%   { (\\begin{pmatrix} a & b) 0 0 << >> mkpath } /mk-begin-without-end:pmatrix
+%   (an unclosed matrix) mustguard
+%   { (\\begin{pmatrix} a \\end{bmatrix}) 0 0 << >> mkpath }
+%   /mk-end-does-not-match-begin:pmatrix (mismatched environments) mustguard
+%   { (x \\end{pmatrix}) 0 0 << >> mkpath } /mk-end-without-begin (a stray \end) mustguard
+%   { (\\sqrt[3 x) 0 0 << >> mkpath } /mk-sqrt-index-needs-a-closing-bracket
+%   (an open root index) mustguard
+%   { (\\text x) 0 0 << >> mkpath } /mk-text-needs-braces (\text without braces) mustguard
+%   { (x \\limits) 0 0 << >> mkpath } /mk-limits-needs-an-operator-before-it
+%   (\limits after a letter) mustguard
+%   { (\\left x \\right.) 0 0 << >> mkpath } /mk-unsupported-delimiter:x
+%   (a letter as a delimiter) mustguard
+%   { (x_{max}) 0 0 << >> mkpath } /mk-bare-word-needs-a-backslash:max
+%   (the letters of an operator name) mustguard
+%   { (x_{\\text{max}} + \\$) 0 0 << >> mkpath } /mk-unsupported-command:\$ (\$) mustguard
+%%EndSelfTest
+%
+%%SelfTest: errors-leave-the-stacks-as-they-were
+%   % bare `stopped`, not mustguard (which restores the stacks itself), and
+%   % a sentinel under each call, so popping too far shows as well
+%   /mkt-d0 countdictstack def
+%   matrix currentmatrix /mkt-m0 exch def
+%   /mkt-ctm-same {
+%     true 0 1 5 { dup mkt-m0 exch get exch matrix currentmatrix exch get eq and } for
+%   } def
+%   /mkt-sentinel
+%   { (\\frac{\\left[ \\begin{pmatrix} a & \\oplus}{b}) 0 0 << >> mkpath } stopped
+%   (an error deep inside nested groups is raised) mustbe
+%   /mkt-sentinel eq (the operand stack is cut back to the call, no further) mustbe
+%   countdictstack mkt-d0 eq (the dictionary stack is unwound) mustbe
+%   /mkt-sentinel
+%   { (\\left∮ x \\right.) 0 0 << >> mkpath } stopped
+%   (an error on a typed delimiter is raised) mustbe
+%   /mkt-sentinel eq (and cuts the operand stack back to the call) mustbe
+%   countdictstack mkt-d0 eq (and unwinds the dictionary stack) mustbe
+%   /mkt-sentinel
+%   [ (a) (b) ] 0 0 << /Ink { pop newpath } >> mkalign
+%   length 2 eq (mkalign returns a record per line) mustbe
+%   /mkt-sentinel eq (and consumes only its operands) mustbe
+%   % an error inside /Ink, after the user rotated
+%   /mkt-sentinel
+%   { [ (a) (b) ] 100 100 << /Slope 30 /Ink { pop 45 rotate no-such-name } >> mkalign }
+%   stopped (an error inside /Ink is raised) mustbe
+%   /mkt-sentinel eq (/Ink's error cuts the operand stack back) mustbe
+%   countdictstack mkt-d0 eq (/Ink's error unwinds the dictionary stack) mustbe
+%   mkt-ctm-same (the CTM is put back after an error) mustbe
+%   % a mathkit call nested in /Ink fails: the outer call still unwinds to
+%   % its own depths, not the inner one's
+%   /mkt-sentinel
+%   { [ (a) (b) ] 100 100 << /Ink { pop 30 rotate 7 7 (\\oplus) 0 0 << >> mkpath } >> mkalign }
+%   stopped (a nested error is raised) mustbe
+%   $error /command get (mk-unsupported-command:\\oplus) cvn eq
+%   (it names the nested guard) mustbe
+%   /mkt-sentinel eq (the outer call cuts the operand stack back to its own base) mustbe
+%   countdictstack mkt-d0 eq (and the dictionary stack to its own depth) mustbe
+%   mkt-ctm-same (and puts back its own CTM) mustbe
+%%EndSelfTest
+%
+%%SelfTest: mkpath-is-deterministic-and-leaves-rand-alone
+%   /mkt-flat { [ { } { } { } { } pathforall ] } def
+%   /mkt-same {
+%     /mkt-b exch def /mkt-a exch def
+%     mkt-a length mkt-b length eq {
+%       true 0 1 mkt-a length 1 sub {
+%         dup mkt-a exch get exch mkt-b exch get sub abs 1e-6 lt and
+%       } for
+%     } { false } ifelse
+%   } def
+%   /mkt-q (x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}) def
+%   1234 srand /mkt-r0 rrand def
+%   newpath mkt-q 10 20 << /Seed 9 >> mkpath mkt-flat /mkt-p1 exch def
+%   newpath mkt-q 10 20 << /Seed 9 >> mkpath mkt-flat /mkt-p2 exch def
+%   newpath mkt-q 10 20 << /Seed 10 >> mkpath mkt-flat /mkt-p3 exch def
+%   mkt-p1 mkt-p2 mkt-same (the same seed gives the same path) mustbe
+%   mkt-p1 mkt-p3 mkt-same not (another seed gives another path) mustbe
+%   rrand mkt-r0 eq (the caller's rand stream is untouched) mustbe
+%   % editing the end of a formula never re-rolls its start
+%   newpath (a + b) 10 20 << /Seed 4 >> mkpath mkt-flat /mkt-s1 exch def
+%   newpath (a + b = c^2) 10 20 << /Seed 4 >> mkpath mkt-flat
+%   0 mkt-s1 length getinterval mkt-s1 mkt-same (a longer formula starts the same) mustbe
+%   % unseeded: the layout comes from the text, so it measures the same anywhere
+%   mkt-q << >> mkmetrics /Width get
+%   mkt-q << >> mkmetrics /Width get eq (unseeded metrics are stable) mustbe
+%   newpath
+%%EndSelfTest
+%
+%%SelfTest: the-layout-follows-tex
+%   /mkt-m { << /Size 100 /Irregular 0 >> mkmetrics } def
+%   (x^2) mkt-m /Width get (x) mkt-m /Width get gt (a superscript widens) mustbe
+%   (x^2) mkt-m /Height get (x) mkt-m /Height get gt (and rises) mustbe
+%   (x_2) mkt-m /Depth get (x) mkt-m /Depth get gt (a subscript hangs below) mustbe
+%   (\\frac{a}{b}) mkt-m dup /Height get 50 gt exch /Depth get 30 gt and
+%   (a fraction stands above and below the axis) mustbe
+%   (\\sum_{i=1}^n i) mkt-m /Height get
+%   (\\sum_{i=1}^n i) << /Size 100 /Irregular 0 /Style /text >> mkmetrics /Height get
+%   gt (display style stacks the limits) mustbe
+%   (\\sqrt{x}) mkt-m /Height get (x) mkt-m /Height get gt (a root clears its content) mustbe
+%   (\\left( \\frac{a}{b} \\right)) mkt-m /Height get (\\frac{a}{b}) mkt-m /Height get ge
+%   (a left delimiter grows to its content) mustbe
+%   (a+b) mkt-m /Width get (ab) mkt-m /Width get gt (binary operators get space) mustbe
+%   (-b) mkt-m /Width get (a-b) mkt-m /Width get (a) mkt-m /Width get sub lt
+%   (a leading minus is unary, with no space) mustbe
+%   (y &= 2x) mkt-m /Align get (y) mkt-m /Width get sub abs 0.01 lt
+%   (& marks the alignment point) mustbe
+%   (x') mkt-m /Width get (x^{\\prime}) mkt-m /Width get sub abs 0.01 lt
+%   (a prime is as wide as x^{\\prime}) mustbe
+%   (x') mkt-m /Height get (x^{\\prime}) mkt-m /Height get sub abs 0.01 lt
+%   (and as tall) mustbe
+%   (x'_i) mkt-m /Width get (x^{\\prime}_i) mkt-m /Width get sub abs 0.01 lt
+%   (x'_i subscripts x, not the prime: it is x^{\\prime}_i) mustbe
+%   (f'^2) mkt-m /Width get (f^{\\prime 2}) mkt-m /Width get sub abs 0.01 lt
+%   (f'^2 is f^{\\prime 2}) mustbe
+%   (f'') mkt-m /Width get (f') mkt-m /Width get gt (two primes are wider) mustbe
+%   (y = 2x) mkt-m /Align get (y &= 2x) mkt-m /Align get sub abs 0.01 lt
+%   (without &, the line aligns before its relation) mustbe
+%   (x^2) << /Size 100 /Irregular 0 /Seed 1 >> mkmetrics /Width get
+%   (x^2) << /Size 100 /Irregular 0 /Seed 2 >> mkmetrics /Width get eq
+%   (/Irregular 0 is the same layout for every seed) mustbe
+%   (x^2+y^2) << /Size 100 /Seed 1 >> mkmetrics /Width get
+%   (x^2+y^2) << /Size 100 /Seed 2 >> mkmetrics /Width get ne
+%   (/Irregular 1 varies with the seed) mustbe
+%%EndSelfTest
+%
+%%SelfTest: board-math-symbols-lay-out
+%   % issue #339: each of these was a mk-unsupported-command or
+%   % mk-unsupported-character before; every one must lay out and draw
+%   [ (a \\equiv b) (a \\sim b) (a \\simeq b) (f \\circ g) (a \\ast b)
+%     (a \\star b) (A \\setminus B) (A \\subseteq B) (A \\supset B)
+%     (A \\supseteq B) (x \\mapsto y) (a \\perp b) (a \\parallel b)
+%     (y \\propto x) (\\therefore x) (\\because x) (\\hbar \\omega) (\\ell)
+%     (\\iota \\upsilon \\Upsilon) (\\langle x \\rangle) (\\| v \\|)
+%     (\\iint f) (\\iiint f) (\\oint_C f) (\\left\\langle x \\right\\rangle)
+%     (\\left\\Vert x \\right\\|) (\\bigl\\langle x \\bigr\\rangle)
+%     (\\begin{Vmatrix} a & b \\\\ c & d \\end{Vmatrix})
+%     (≡ ∼ ≃ ∘ ∗ ⋆ ∖ ⊆ ⊃ ⊇ ↦ ⊥ ∥ ∝ ∴ ∵ ⟨ ⟩ ‖ ℏ ℓ ∬ ∭ ∮ ι υ Υ)
+%   ] true exch {
+%     /mkt-s exch def
+%     mkt-s << /Size 40 /Seed 3 >> mkmetrics /Width get 0 gt and
+%     newpath mkt-s 0 0 << /Size 40 /Seed 3 >> mkpath newpath
+%   } forall
+%   (every board-math symbol lays out and draws) mustbe
+%   % the integrals carry their limits beside them, as \int does
+%   (\\oint_C^D f) << /Size 100 /Irregular 0 >> mkmetrics /Width get
+%   (\\int_C^D f) << /Size 100 /Irregular 0 >> mkmetrics /Width get lt not
+%   (a contour integral is no narrower than an integral) mustbe
+%   (\\oint_0^1) << /Size 100 /Irregular 0 /Style /display >> mkmetrics /Height get
+%   (\\sum_0^1) << /Size 100 /Irregular 0 /Style /display >> mkmetrics /Height get lt
+%   (an oint's limits stay beside it: shorter than a sum's stacked limits) mustbe
+%   (\\left\\langle \\frac{a}{b} \\right\\rangle) << /Size 60 /Irregular 0 >>
+%   mkmetrics dup /Height get exch /Depth get add 60 gt
+%   (a grown angle bracket spans its fraction) mustbe
+%%EndSelfTest
+%
+%%SelfTest: ascii-star-is-ast
+%   % issue #364: * was refused; in math it is \\ast, with TeX's class rules
+%   (a*b) << /Size 100 /Irregular 0 >> mkmetrics /Width get
+%   (a \\ast b) << /Size 100 /Irregular 0 >> mkmetrics /Width get eq
+%   (a*b is a \\ast b) mustbe
+%   (z^*) << /Size 100 /Irregular 0 >> mkmetrics /Width get
+%   (z^{\\ast}) << /Size 100 /Irregular 0 >> mkmetrics /Width get eq
+%   (z^* is z^{\\ast}) mustbe
+%   % a star at the start or the end of a formula is an ordinary symbol
+%   % (TeX rules 5 and 6): no medium space beside it, so widths just add
+%   (*b) << /Size 100 /Irregular 0 >> mkmetrics /Width get
+%   (*) << /Size 100 /Irregular 0 >> mkmetrics /Width get
+%   (b) << /Size 100 /Irregular 0 >> mkmetrics /Width get add sub abs 0.01 lt
+%   (a leading * takes no space after it) mustbe
+%   (a*) << /Size 100 /Irregular 0 >> mkmetrics /Width get
+%   (a) << /Size 100 /Irregular 0 >> mkmetrics /Width get
+%   (*) << /Size 100 /Irregular 0 >> mkmetrics /Width get add sub abs 0.01 lt
+%   (a trailing * takes no space before it) mustbe
+%   % raised in a superscript, lowered in a subscript
+%   (z^*) << /Size 100 /Irregular 0 >> mkmetrics /Height get
+%   (z) << /Size 100 /Irregular 0 >> mkmetrics /Height get gt
+%   (z^* rises above z) mustbe
+%   (A_*) << /Size 100 /Irregular 0 >> mkmetrics /Depth get 0 gt
+%   (A_* hangs below the baseline) mustbe
+%   [ (\\psi^*) (f^{**}) (A^* B_*) (z^* = x - i y) (\\left(z^*\\right)^*)
+%     (\\sum_{k=1}^* a_k^*) (a * b) (\\frac{a^*}{b_*})
+%   ] true exch {
+%     /mkt-s exch def
+%     mkt-s << /Size 40 /Seed 3 >> mkmetrics /Width get 0 gt and
+%     newpath mkt-s 0 0 << /Size 40 /Seed 3 >> mkpath newpath
+%   } forall
+%   (starred scripts lay out and draw) mustbe
+%%EndSelfTest
+%
+%%SelfTest: ascii-star-in-text-is-a-raised-asterisk
+%   % issue #378: * was refused inside \text, \mathrm and \operatorname,
+%   % where TeX sets a raised text asterisk, not the centred math \ast
+%   [ (\\text{a*b}) (\\mathrm{a*b}) (\\operatorname{a*b}) (\\text{*})
+%     (\\mathrm{x*}) (\\text{a * b}) ] true exch {
+%     /mkt-s exch def
+%     mkt-s << /Size 40 /Seed 3 >> mkmetrics /Width get 0 gt and
+%     newpath mkt-s 0 0 << /Size 40 /Seed 3 >> mkpath newpath
+%   } forall
+%   (a star in text, mathrm and operatorname lays out and draws) mustbe
+%   % set as an ordinary letter: no medium space around it, so it is
+%   % narrower than the math a \ast b
+%   (\\text{a*b}) << /Size 100 /Irregular 0 >> mkmetrics /Width get
+%   (a*b) << /Size 100 /Irregular 0 >> mkmetrics /Width get lt
+%   (a text star takes no binary-operator space) mustbe
+%   % raised, not on the math axis: the ink of a lone text star starts
+%   % higher than a lone math star's
+%   newpath (\\text{*}) 0 0 << /Size 100 /Irregular 0 >> mkpath
+%   pathbbox pop pop exch pop
+%   newpath (*) 0 0 << /Size 100 /Irregular 0 >> mkpath
+%   pathbbox pop pop exch pop
+%   gt (a text star sits higher than the math star) mustbe
+%   newpath
+%%EndSelfTest
+%
+%%SelfTest: delimiters-typed-as-unicode
+%   % issue #365: \left⟨ went to the ASCII branch, which took one byte, so
+%   % the error name held a raw lead byte and the real forms were refused
+%   /mkt-w { << /Size 60 /Irregular 0 >> mkmetrics /Width get } def
+%   (\\left⟨ \\frac{a}{b} \\right⟩) mkt-w
+%   (\\left\\langle \\frac{a}{b} \\right\\rangle) mkt-w eq
+%   (typed angle brackets are \langle and \rangle) mustbe
+%   (\\left‖ x \\right‖) mkt-w (\\left\\Vert x \\right\\Vert) mkt-w eq
+%   (a typed double bar is \Vert) mustbe
+%   (\\left∥ x \\right∥) mkt-w (\\left\\Vert x \\right\\Vert) mkt-w eq
+%   (the parallel sign is the same double bar) mustbe
+%   (\\bigl⟨ x \\bigr⟩) mkt-w (\\bigl\\langle x \\bigr\\rangle) mkt-w eq
+%   (\big takes them too) mustbe
+%   (\\left⟨ x \\right.) mkt-w (\\left\\langle x \\right.) mkt-w eq
+%   (a typed delimiter may pair with a dot) mustbe
+%   { (\\left∮ x \\right.) 0 0 << >> mkpath } /mk-unsupported-delimiter:∮
+%   (a contour integral is no delimiter) mustguard
+%   { (\\left∑ x \\right.) 0 0 << >> mkpath } /mk-unsupported-delimiter:∑
+%   (a grower that is no delimiter: a summation) mustguard
+%   { (\\left. x \\right⌋) 0 0 << >> mkpath } /mk-unsupported-delimiter:⌋
+%   (a floor bracket on the right) mustguard
+%   { (\\bigl⌈ x) 0 0 << >> mkpath } /mk-unsupported-delimiter:⌈
+%   (a ceiling bracket after \bigl) mustguard
+%   { (\\left\\⟨ x \\right.) 0 0 << >> mkpath } /mk-unsupported-delimiter:\⟨
+%   (a backslash before a typed character names both) mustguard
+%   { (\\left\342) 0 0 << >> mkpath } (mk-unsupported-delimiter:\342) cvn
+%   (a cut-off character at the end of the source) mustguard
+%%EndSelfTest
+%
+%%SelfTest: variant-greek-is-its-own-glyph
+%   % issue #366: the variant commands draw glyphs of their own, not the
+%   % plain letters they used to alias
+%   [ [ (\\varphi) (\\phi) ] [ (\\vartheta) (\\theta) ] [ (\\varpi) (\\pi) ]
+%     [ (\\varrho) (\\rho) ] [ (\\varsigma) (\\sigma) ] [ (\\varkappa) (\\kappa) ]
+%     [ (\\epsilon) (\\varepsilon) ] ] true exch {
+%     aload pop
+%     << /Size 100 /Irregular 0 >> mkmetrics /Width get exch
+%     << /Size 100 /Irregular 0 >> mkmetrics /Width get ne and
+%   } forall
+%   (every variant is wider or narrower than its plain letter) mustbe
+%   % mathkit's \varepsilon is the three-shaped epsilon, as it always was
+%   (\\varepsilon) << /Size 100 /Irregular 0 >> mkmetrics /Width get
+%   (ε) << /Size 100 /Irregular 0 >> mkmetrics /Width get eq
+%   (\varepsilon is still the three-shaped epsilon) mustbe
+%   % the typed Unicode forms reach the same glyphs as the commands
+%   (ϑ) << /Size 100 /Irregular 0 >> mkmetrics /Width get
+%   (\\vartheta) << /Size 100 /Irregular 0 >> mkmetrics /Width get eq
+%   (a typed ϑ is \vartheta) mustbe
+%   (ϵ) << /Size 100 /Irregular 0 >> mkmetrics /Width get
+%   (\\epsilon) << /Size 100 /Irregular 0 >> mkmetrics /Width get eq
+%   (a typed ϵ is \epsilon) mustbe
+%   (\\varphi_i + \\vartheta^2 = \\varkappa \\varrho \\varpi \\varsigma)
+%   << /Size 40 /Seed 3 >> mkmetrics /Width get 0 gt
+%   (variants lay out in scripts and runs) mustbe
+%%EndSelfTest
+%
+%%SelfTest: every-name-in-the-tables-has-a-glyph
+%   /mkt-ok true def
+%   mkcmds {
+%     exch pop dup 0 get /sym eq { 1 get sgtab exch known not { /mkt-ok false def } if }
+%     { pop } ifelse
+%   } forall
+%   mkt-ok (every \command glyph exists in strokeglyphs) mustbe
+%   /mkt-ok true def
+%   mkascii { exch pop 0 get sgtab exch known not { /mkt-ok false def } if } forall
+%   mkhand { exch pop sgtab exch known not { /mkt-ok false def } if } forall
+%   mkdigits { sgtab exch known not { /mkt-ok false def } if } forall
+%   mkdelimwords { exch pop sgtab exch known not { /mkt-ok false def } if } forall
+%   mkt-ok (every ASCII, math-hand, digit and delimiter glyph exists) mustbe
+%   /mkt-ok true def
+%   mkcmds {
+%     exch pop dup 0 get /do eq { 1 get where not { /mkt-ok false def } { pop } ifelse }
+%     { pop } ifelse
+%   } forall
+%   mkt-ok (every structure command has its parser) mustbe
+%%EndSelfTest
+%
+%%SelfTest: annotations-reject-malformed-operands
+%   { 0 0 10 (a) << >> mkframe } /mk-coordinates-must-be-numbers (a string corner) mustguard
+%   { 0 0 10 10 << /Shape /star >> mkframe } /mk-shape-must-be-box-or-oval (/Shape /star) mustguard
+%   { << /Width 3 >> << >> mkframe } /mk-record-must-come-from-mkalign (a dict that is no record) mustguard
+%   { << /Origin [0 0] /Angle (up) /Width 1 /Height 1 /Depth 0 >> << >> mkframe }
+%   /mk-record-must-come-from-mkalign (a record with a string angle) mustguard
+%   { 0 0 10 10 << /Double 1 >> mkunderline } /mk-double-must-be-a-boolean (/Double 1) mustguard
+%   { 0 0 10 10 << /Bend /left >> mkarrow } /mk-bend-must-be-a-number (/Bend /left) mustguard
+%   { 0 0 10 10 << /Head 0 >> mkarrow } /mk-head-must-be-a-positive-number (/Head 0) mustguard
+%   { 5 5 5 5 << >> mkarrow } /mk-arrow-needs-two-distinct-points (a zero-length arrow) mustguard
+%   { [ (a) 5 ] 0 0 << >> mkalign } /mk-lines-must-be-an-array-of-strings (a number as a line) mustguard
+%   { [ (a) ] 0 0 << /Ink 5 >> mkalign } /mk-ink-must-be-a-procedure (/Ink 5) mustguard
+%   { [ (a) ] 0 0 << /Leading 0 >> mkalign } /mk-leading-must-be-a-positive-number (/Leading 0) mustguard
+%   newpath [ (a = b) (c = d) ] 0 0 << >> mkalign
+%   dup 1 get << /Shape /oval >> mkframe
+%   1 get << /Double true >> mkunderline
+%   0 0 50 20 << /Bend 30 >> mkarrow
+%   currentpoint pop pop true (a record frames and underlines its line) mustbe
+%   newpath
+%%EndSelfTest
+%
+% (tex) x y opts mkpath -
+% @kind: Procedure
+% @summary: Lays out a TeX math string (a subset: scripts, \\frac, \\sqrt, \\sum \\prod \\int with limits, \\left( \\right), matrices, accents, Greek; write each TeX backslash twice in a PostScript string) and appends its stroke skeletons to the current path with the baseline's left end at x y, painting nothing. Stroke it with a pen or hand it to a dry medium such as dcchalk. The layout wobbles like board writing, scaled by /Irregular.
+% @example: (lib/handscript.ps) run (lib/strokeglyphs.ps) run (lib/mathkit.ps) run newpath (x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}) 40 120 << /Size 30 /Seed 3 >> mkpath 1.5 setlinewidth 1 setlinecap 1 setlinejoin stroke
+% @param: /Size [points] The em size of the formula's text style; scripts are 0.7 of it (default 36)
+% @param: /Style [name] /display (large operators grow, limits go under and over) or /text (default /display)
+% @param: /Seed [integer] Seed for the layout's irregularity and the glyphs' jitter; each atom draws from seed and its place in the source, so editing the end never re-rolls the start (default: a hash of the text for the layout, plus the device-space position for the glyph jitter)
+% @param: /Irregular [ratio] How far the layout departs from clean TeX like a hand on a board: sizes, gaps, script heights, bar overshoot, slope and drift; 0 is clean, 1 a steady lecturer, 2 a hurried one (default 1)
+% @param: /Slope [degrees] The baseline's tilt (default a random tilt within 0.8 degrees times /Irregular)
+% @param: /Jitter [fraction of /Size] Each glyph's own wobble, as for sgpath (default 0.016)
+% @param: /Slant [degrees] Forward lean of every glyph, as for sgpath; scripts and accents follow it (default 0)
+% @param: /Spacing [ratio] Multiplies TeX's spaces between atoms: around relations, binary operators and operators (default 1)
+% @param: /MathHand [boolean] Write x y z t n in the board hand (curly x, crossed z) rather than handscript's letters (default true)
+/mkpath { 4 { mkpathbody } mkentry } bind def
+
+% (tex) opts mkmetrics -> dict
+% @kind: Procedure
+% @summary: Measures what mkpath would draw for the same text and options without drawing: a dict of /Width, /Height (above the baseline) and /Depth (below) in points, and /Align, the x offset of the formula's & or, failing that, of the point just before its first top-level relation (0 if neither). Unrotated; the slope and drift are applied at drawing time.
+% @example: (lib/handscript.ps) run (lib/strokeglyphs.ps) run (lib/mathkit.ps) run (e^{i\\pi} + 1 = 0) << /Size 30 >> mkmetrics /Width get
+% @param: /Size [points] As for mkpath (default 36)
+% @param: /Style [name] As for mkpath (default /display)
+% @param: /Seed [integer] As for mkpath; the layout depends only on it, never the position (default a hash of the text)
+% @param: /Irregular [ratio] As for mkpath (default 1)
+% @param: /Spacing [ratio] As for mkpath (default 1)
+% @param: /Slant [degrees] As for mkpath (default 0)
+% @param: /MathHand [boolean] As for mkpath (default true)
+/mkmetrics { 2 { mkmetricsbody } mkentry } bind def
+
+% [(line) ...] x y opts mkalign -> [record ...]
+% @kind: Procedure
+% @summary: Lays out a derivation, one TeX string per line, aligned on each line's & (or before its first relation, so lines starting with = line up) at x, the first baseline at y, and appends every line's path. Each line slopes and drifts on its own and the column wanders a little. Returns one record per line for annotations: /Origin [x y], /Angle, /Width, /Height, /Depth, /Align and an axis-aligned /BBox [llx lly urx ury]; mkframe and mkunderline accept a record.
+% @example: (lib/handscript.ps) run (lib/strokeglyphs.ps) run (lib/mathkit.ps) run newpath [ (f(x) &= (x+1)^2) (&= x^2 + 2x + 1) ] 150 200 << /Size 28 >> mkalign pop 1.5 setlinewidth 1 setlinecap stroke
+% @param: /Leading [multiple of /Size] The least distance from one baseline to the next; taller lines push further (default 1.9)
+% @param: /Ink [proc] Called after each line's path is appended, with the line's index on the stack, to paint it (for example { pop << /Width 2 >> dcchalk }), so each line can be inked differently; it must consume the index and paint or clear the path (default none: every line stays on the current path)
+% @param: /Size [points] As for mkpath (default 36)
+% @param: /Style [name] As for mkpath (default /display)
+% @param: /Seed [integer] Line i uses Seed + 101 i (default a hash of each line, plus its position for the glyph jitter)
+% @param: /Irregular [ratio] As for mkpath; also scales how far each line's = column and leading wander (default 1)
+% @param: /Slope [degrees] Every line's tilt (default a random tilt per line)
+% @param: /Jitter [fraction of /Size] As for mkpath (default 0.016)
+% @param: /Slant [degrees] As for mkpath (default 0)
+% @param: /Spacing [ratio] As for mkpath (default 1)
+% @param: /MathHand [boolean] As for mkpath (default true)
+/mkalign { 4 { mkalignbody } mkentry } bind def
+
+% llx lly urx ury opts mkframe -   or   record opts mkframe -
+% @kind: Procedure
+% @summary: Appends a hand-drawn frame around a box, four strokes whose ends overshoot the corners (or one oval loop), painting nothing. Given a line record from mkalign, it frames that line along its slope; for a box inside a formula, \\boxed{...} does the same.
+% @example: (lib/handscript.ps) run (lib/strokeglyphs.ps) run (lib/mathkit.ps) run newpath 40 40 200 100 << /Size 30 /Shape /oval >> mkframe 1.5 setlinewidth stroke
+% @param: /Pad [points] Space between the box and the frame (default 0.3 /Size)
+% @param: /Shape [name] /box or /oval (default /box)
+% @param: /Size [points] The writing size it goes with, which scales the wobble and overshoot (default 36)
+% @param: /Seed [integer] Seed for the strokes (default from the position)
+% @param: /Irregular [ratio] How loosely it is drawn; 0 is a neat box (default 1)
+% @param: /Jitter [fraction of /Size] Bow of each stroke (default 0.016)
+/mkframe {
+  count 2 ge { 1 index type /dicttype eq { 2 } { 5 } ifelse } { 2 } ifelse
+  { mkframebody } mkentry
+} bind def
+
+% x0 y0 x1 y1 opts mkunderline -   or   record opts mkunderline -
+% @kind: Procedure
+% @summary: Appends a hand-drawn underline (or two, /Double) from x0 y0 to x1 y1, painting nothing; given a line record from mkalign, it underlines that line along its slope.
+% @example: (lib/handscript.ps) run (lib/strokeglyphs.ps) run (lib/mathkit.ps) run newpath 40 50 220 52 << /Double true >> mkunderline 1.5 setlinewidth stroke
+% @param: /Double [boolean] Two strokes, the second a little shorter and below (default false)
+% @param: /Size [points] The writing size it goes with, which scales the bow and the record form's offsets (default 36)
+% @param: /Seed [integer] Seed for the strokes (default from the position)
+% @param: /Irregular [ratio] How loosely it is drawn (default 1)
+% @param: /Jitter [fraction of /Size] Bow of each stroke (default 0.016)
+/mkunderline {
+  count 2 ge { 1 index type /dicttype eq { 2 } { 5 } ifelse } { 2 } ifelse
+  { mkunderlinebody } mkentry
+} bind def
+
+% x0 y0 x1 y1 opts mkarrow -
+% @kind: Procedure
+% @summary: Appends a hand-drawn arrow from x0 y0 to x1 y1, straight or bent, its head drawn as one stroke in to the tip and out, painting nothing; for pointing a side note at a term.
+% @example: (lib/handscript.ps) run (lib/strokeglyphs.ps) run (lib/mathkit.ps) run newpath 40 40 200 90 << /Bend 30 >> mkarrow 1.5 setlinewidth 1 setlinejoin stroke
+% @param: /Bend [degrees] How far the shaft curves: the turn between its start and end; positive bows to the right of the direction of travel (default 0)
+% @param: /Head [points] Length of the head's strokes (default 0.3 /Size)
+% @param: /Size [points] The writing size it goes with, which scales the wobble and the head (default 36)
+% @param: /Seed [integer] Seed for the strokes (default from the position)
+% @param: /Irregular [ratio] How loosely it is drawn (default 1)
+% @param: /Jitter [fraction of /Size] Bow of the shaft (default 0.016)
+/mkarrow { 5 { mkarrowbody } mkentry } bind def
+%%EOF

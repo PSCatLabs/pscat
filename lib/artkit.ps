@@ -2018,8 +2018,9 @@ end
 
     % rrand/srand round-trips exactly in both pscat and Ghostscript
     % (pinned by hand in both before this was written). Under
-    % `--sweep-seed` the sweep overrides this restore too, which is
-    % the whole point of a sweep.
+    % `--sweep-seed` pscat forces every ordinary `srand` but leaves a
+    % restore of an `rrand` value alone (issue #202), so the caller's
+    % stream still comes back.
     scseeded { scsaved srand } if
 } bind def
 

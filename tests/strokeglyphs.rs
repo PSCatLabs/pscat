@@ -46,6 +46,68 @@ fn the_specimen_renders_with_ink_and_a_clean_stack() {
     assert!(ink_count(&it) > 20_000, "specimen drew too little ink");
 }
 
+/// Issue #339's specimen: the new board-math glyphs in sgpath text and in
+/// mathkit formulas, on one page, ending with a clean stack.
+#[test]
+fn the_board_math_specimen_renders_with_ink_and_a_clean_stack() {
+    let src = std::fs::read("examples/strokeglyphs_board_math.ps").expect("specimen present");
+    let mut it = Interp::with_page(900, 1100).expect("page");
+    it.run_source(&src)
+        .unwrap_or_else(|e| panic!("specimen failed: {}", it.error_report(&e)));
+    assert!(it.operand_stack().is_empty(), "specimen leaked operands");
+    assert!(ink_count(&it) > 15_000, "specimen drew too little ink");
+}
+
+/// Issue #366's specimen: subscripts and variant Greek in sgpath text and
+/// in mathkit formulas, on one page, ending with a clean stack.
+#[test]
+fn the_subscripts_and_greek_specimen_renders_with_ink_and_a_clean_stack() {
+    let src = std::fs::read("examples/strokeglyphs_subscripts_greek.ps").expect("specimen present");
+    let mut it = Interp::with_page(900, 600).expect("page");
+    it.run_source(&src)
+        .unwrap_or_else(|e| panic!("specimen failed: {}", it.error_report(&e)));
+    assert!(it.operand_stack().is_empty(), "specimen leaked operands");
+    assert!(ink_count(&it) > 8_000, "specimen drew too little ink");
+}
+
+/// #339: every code point the issue and #238's agent asked for draws,
+/// where it used to raise `sg-missing-glyph:<char>` (#350).
+#[test]
+fn the_requested_board_math_characters_draw() {
+    let mut it = Interp::with_page(300, 300).expect("page");
+    load(&mut it, &["lib/handscript.ps", "lib/strokeglyphs.ps"]);
+    for ch in "≡∼≃∘∗⋆∖⊆⊃⊇↦⊥∥∝∴∵⟨⟩‖ℏℓ∬∭∮ιυΥο²³¹⁴⁵⁶⁷⁸⁹⁰⁺⁻ⁿ".chars()
+    {
+        // currentpoint raises nocurrentpoint when the glyph added no path
+        run(
+            &mut it,
+            &format!("newpath ({ch}) 100 100 << /Size 80 /Jitter 0 >> sgpath currentpoint clear"),
+        );
+        assert!(
+            it.operand_stack().is_empty(),
+            "{ch} left operands on the stack"
+        );
+    }
+}
+
+/// #366: the subscript digits and letters and the variant Greek letters
+/// draw, where they used to raise `sg-missing-glyph:<char>`.
+#[test]
+fn the_subscripts_and_variant_greek_draw() {
+    let mut it = Interp::with_page(300, 300).expect("page");
+    load(&mut it, &["lib/handscript.ps", "lib/strokeglyphs.ps"]);
+    for ch in "₀₁₂₃₄₅₆₇₈₉₊₋₌ₐₑₒₓₙᵢⱼϕϑϵϰϱϖς".chars() {
+        run(
+            &mut it,
+            &format!("newpath ({ch}) 100 100 << /Size 80 /Jitter 0 >> sgpath currentpoint clear"),
+        );
+        assert!(
+            it.operand_stack().is_empty(),
+            "{ch} left operands on the stack"
+        );
+    }
+}
+
 /// #236's compatibility criterion: existing handscript output is
 /// unchanged. strokeglyphs copies handscript's glyphs at load, so the
 /// risk is mutating the shared arrays or the rand stream; render the
@@ -136,10 +198,48 @@ fn ghostscript_builds_the_same_path_from_the_same_seed() {
         .status()
         .expect("run gs");
     assert!(status.success(), "gs rejected examples/strokeglyphs.ps");
+    let status = std::process::Command::new("gs")
+        .args([
+            "-dNOSAFER",
+            "-dNOPAUSE",
+            "-dBATCH",
+            "-q",
+            "-sDEVICE=png16m",
+            "-g900x1100",
+            "-r72",
+            "-o/dev/null",
+            "examples/strokeglyphs_board_math.ps",
+        ])
+        .status()
+        .expect("run gs");
+    assert!(
+        status.success(),
+        "gs rejected examples/strokeglyphs_board_math.ps"
+    );
+    let status = std::process::Command::new("gs")
+        .args([
+            "-dNOSAFER",
+            "-dNOPAUSE",
+            "-dBATCH",
+            "-q",
+            "-sDEVICE=png16m",
+            "-g900x600",
+            "-r72",
+            "-o/dev/null",
+            "examples/strokeglyphs_subscripts_greek.ps",
+        ])
+        .stdin(std::process::Stdio::null())
+        .status()
+        .expect("run gs");
+    assert!(
+        status.success(),
+        "gs rejected examples/strokeglyphs_subscripts_greek.ps"
+    );
 
     let probe = "(lib/handscript.ps) run (lib/strokeglyphs.ps) run \
-                 newpath (Aσ≤∑x) 10 20 << /Seed 9 /Slant 8 >> sgpath \
+                 newpath (Aσ≤∑x∮ℏ²⟨₂ϑ) 10 20 << /Seed 9 /Slant 8 >> sgpath \
                  40 60 moveto 50 20 << /Symbol /braceleft /Seed 3 >> sggrow pop \
+                 80 60 moveto 50 20 << /Symbol /oint /Seed 4 >> sggrow pop \
                  { } { } { } { } pathforall \
                  count { 1000 mul round cvi = } repeat";
     let gs = std::process::Command::new("gs")
@@ -164,8 +264,9 @@ fn ghostscript_builds_the_same_path_from_the_same_seed() {
     load(&mut it, &["lib/handscript.ps", "lib/strokeglyphs.ps"]);
     run(
         &mut it,
-        "newpath (Aσ≤∑x) 10 20 << /Seed 9 /Slant 8 >> sgpath \
+        "newpath (Aσ≤∑x∮ℏ²⟨₂ϑ) 10 20 << /Seed 9 /Slant 8 >> sgpath \
          40 60 moveto 50 20 << /Symbol /braceleft /Seed 3 >> sggrow pop \
+         80 60 moveto 50 20 << /Symbol /oint /Seed 4 >> sggrow pop \
          { } { } { } { } pathforall \
          count array astore { 1000 mul round cvi } forall",
     );

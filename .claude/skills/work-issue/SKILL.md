@@ -27,9 +27,9 @@ root) before running the step's commands.
   with the session: decide a resume from GitHub state.
 - macOS has no `timeout`, and foreground `sleep` may be blocked: pitfalls.md "Waiting and timeouts".
 - Never end a run with CI pending unless step 8.12's "pending CI" rule applies.
-- Read the top of `.claude/skills/work-issue/references/pitfalls.md` now (its contents table gives
-  line ranges: read sections with Read `offset`/`limit`; one `cat` truncates). (`references/rationale.md`
-  explains why each step is shaped as it is; read it before editing this skill.)
+- Read the top of `.claude/skills/work-issue/references/pitfalls.md` now (its contents list names the
+  sections: find one with `grep -n '^#' .claude/skills/work-issue/references/pitfalls.md`, read it with Read `offset`/`limit`; one `cat`
+  truncates). `references/rationale.md` says why each step is shaped so; read it before editing this skill.
 
 ## 1. Pick and claim the issue
 
@@ -66,8 +66,8 @@ lock commands: the script is the race-tested protocol, and a partial copy has fa
 ```sh
 bash "$(git rev-parse --show-toplevel)/.claude/skills/work-issue/scripts/claim.sh" <N>
 ```
-It can take up to ~30 s after a lost race (it re-checks once the lock settles): run it in the
-foreground and wait. (`references/claim-protocol.md` is the rationale; read it only to edit the script.) Then:
+Run it in the foreground; it returns at once (no waits or retries since #297).
+(`references/claim-protocol.md` is the rationale; read it only to edit the script.) Then:
 - `RESULT=claimed*` → you own `<N>`. Continue.
 - `RESULT=live*` or `RESULT=lost*` on a resume candidate → claim the next one (then the fresh picker).
   On an explicit `<N>` or a fresh pick → stop, report `<N>` is being worked on, try nothing else.
@@ -107,37 +107,40 @@ Then re-read `$WORKTREE_DIR/.claude/skills/work-issue/SKILL.md` (it may have cha
 ## 4. Plan, then get the plan reviewed
 
 1. Read the issue: `gh issue view <N> --json title,body,comments`. Make design calls yourself; flag only what is hard to reverse.
-2. Estimate size from the whole diff (code, tests and notes all count). **Small** = 20 lines or fewer AND no API change (no new/changed
+2. Estimate size from the whole diff (code, tests, notes). **Small** = 20 lines or fewer AND no API change (no new/changed
    public Rust item, PostScript operator, CLI flag or lib procedure name). Otherwise **full**.
-   This is the only definition of small, except that a won't-change PR (step 7) is always small.
+   The only definition of small, except that a won't-change PR (step 7) is always small.
 3. Write the plan in your reply: files, approach, what you are not doing.
 4. **Hard gate, no code before it.** Heartbeat, then call the `advisor` tool (small: one short
-   call, or skip and say so). If it objects, revise the plan. Heartbeat. The report's
-   `Plan review` line must say `done` or `skipped (small)`.
+   call, or skip and say so). If it objects, revise the plan. Heartbeat. The report's `Plan review` line
+   must say `done` or `skipped (small)`. After it a throwaway measurement prototype is allowed (pitfalls.md "Prototypes and timing").
 
 ## 5. Implement
 
 1. Read every file before you Edit it. Follow AGENTS.md's "Code quality bar"; write notes in `notes/<N>-<slug>.md` (never NOTES.md), update HANDOFF.md/README.md.
-2. If a human could look at the result (art, template, chart, font), read
-   `.claude/skills/work-issue/references/demo-surfaces.md` now and do what it says.
+2. If a human could look at the result (art, template, chart, font), read `.claude/skills/work-issue/references/demo-surfaces.md` now.
 3. Commit at checkpoints; heartbeat at each. Evidence sweeps, scratch dirs: pitfalls.md "Evidence runs and scratch hygiene".
 4. Deferred work becomes an issue, not just a notes line (keep the URLs for the report):
    `gh issue create --title "<title>" --body "<what and why; found while working #<N>>"`.
    If measurement disproves the premise: comment the data on the issue, say so atop the PR, file a follow-up.
+   Nothing worth committing (not even notes): no PR, finish.md "Close without a PR" instead of steps 6-9.
 5. Quality gate. Rebase as late as possible, right before the identity check and the gate, and
    before the first push: `git -C "$WORKTREE_DIR" fetch origin main && git -C "$WORKTREE_DIR" rebase
    origin/main` (a no-op when up to date; conflicts, or a PR that exists: pitfalls.md "Rebase and merge
    rules"). After a rebase that moved `HEAD`, re-read `$WORKTREE_DIR/.claude/skills/work-issue/SKILL.md`
    and follow that copy. If it brought in only docs, skill or CI files, redo nothing; if it brought in
-   `lib/`, `src/` or tests, redo the identity base, the identity check and the full gate (same entry).
-   A lib change that must render identically: `scripts/identity_check.sh --loader <lib>` (checklist item 4).
+   `lib/`, `src/` or tests, redo the identity base, the identity check and the full gate (same entry);
+   a later merge of `main` (the 8.12 local merge for `DIRTY`) that brings those in after the gate: re-run it, or write "CI covers it".
+   A `lib/` change that must render identically: `scripts/identity_check.sh --loader <lib>`; a `src/`
+   one: the same with `--base-bin/--head-bin` (checklist item 4; no hand-rolled wrapper). List its base
+   worktree in step 9's `EXTRA_WORKTREES`.
    Do pitfalls.md "Step 5 checklist" (cheap checks first). Heartbeat, then run with
    `run_in_background: true` (over 120s; run it in the foreground if the last gate took under ~60 s):
    ```sh
    rm -f <SCRATCH>/gate-<N>.log && cd "${WORKTREE_DIR:?}" && { PSCAT_PROFILE=ci ./scripts/selftest.sh && cargo test --profile ci && cargo clippy --all-targets -- -D warnings && cargo fmt --all -- --check; } > <SCRATCH>/gate-<N>.log 2>&1; echo "GATE_EXIT=$?" >> <SCRATCH>/gate-<N>.log
    ```
-   Wait for the completion notification or a Monitor (`ToolSearch select:Monitor`); never
-   `sleep` or `ScheduleWakeup`. `tail -40 <SCRATCH>/gate-<N>.log` must end with `GATE_EXIT=0`; else fix, re-run. Then heartbeat.
+   Wait for the completion notification or a Monitor (`ToolSearch select:Monitor`); never `sleep` or
+   `ScheduleWakeup`. `tail -40 <SCRATCH>/gate-<N>.log` must end with `GATE_EXIT=0`; else fix, re-run. Heartbeat.
 
 ## 6. Review the implementation
 
@@ -151,7 +154,7 @@ Then re-read `$WORKTREE_DIR/.claude/skills/work-issue/SKILL.md` (it may have cha
 ## 7. Open the PR
 
 ```sh
-git push -u origin "$BRANCH"
+git push -u origin "$BRANCH"   # explicit refspec, never a bare git push
 gh pr create --title "<summary>" --body "$(cat <<'EOF'
 ## Summary
 <what changed and why, in a few bullets>
@@ -168,7 +171,7 @@ The body must contain `Closes #<N>` on its own line even when you write it witho
 **Won't-change outcome** (measurement shows the issue's change should not be made; the PR ships only comments and
 notes): write `Refs #<N>` instead, because merging `Closes #<N>` closes the issue as completed. Step 9 closes it as not planned.
 If the dispatcher said up front that this run will not merge, write the body for the maintainer from
-the start (pitfalls.md "Stop without merging"; a specimen PR commits and embeds its render, demo-surfaces.md). Always push with that explicit refspec, never a bare `git push`. Then:
+the start (pitfalls.md "Stop without merging"; a specimen PR embeds its render, demo-surfaces.md). Then:
 ```sh
 gh issue edit <N> --remove-label in-progress --add-label in-review
 gh issue comment <N> --body "Opened <PR URL>."
@@ -194,10 +197,8 @@ Read `.claude/skills/work-issue/references/codex-review.md` now (full policy). T
      --scope branch --base origin/main \
      > <SCRATCH>/codex-review-<N>.json
    ```
-5. Check it succeeded; if not, do not post from the file (as in 3):
-   `jq -e '.codex.status == 0 and (.codex.stdout // "" | length > 0)' <SCRATCH>/codex-review-<N>.json`
-6. Post it on the PR, even when it is clean:
-   `gh pr comment <PR#> --body "$(jq -r '"## Codex review\n\n" + .codex.stdout' <SCRATCH>/codex-review-<N>.json)"`
+5. Check it succeeded; if not, do not post from the file (as in 3): `jq -e '.codex.status == 0 and (.codex.stdout // "" | length > 0)' <SCRATCH>/codex-review-<N>.json`
+6. Post it on the PR, even when clean: `gh pr comment <PR#> --body "$(jq -r '"## Codex review\n\n" + .codex.stdout' <SCRATCH>/codex-review-<N>.json)"`
 7. Read every finding. Decide for each: fix it, or state why not.
 8. Post the round on the issue (`## Codex review, round <R>` template in codex-review.md).
 9. If you fixed anything: commit, `git push` (no force), re-run the gate (5.5), go back to 4
@@ -205,8 +206,9 @@ Read `.claude/skills/work-issue/references/codex-review.md` now (full policy). T
 10. Merge eligibility, from `merge_policy.mode`:
     - `human-only`, or `size-and-risk-bar` and over the bar: `rm -rf "$(git rev-parse
       --path-format=absolute --git-common-dir)/work-issue-lock-<N>"`, go to step 10 (awaiting merge). Stop.
-    - `agent-full`, or under the bar: continue, unless the dispatcher said not to merge: do 11, release
-      the lock as above, keep `in-review` and the worktree, stop (pitfalls.md "Stop without merging").
+    - `agent-full`, or under the bar: continue, unless the dispatcher said not to merge: do 11 and 12
+      (wait for CI green), skip 13, release the lock as above, keep `in-review` and the worktree,
+      stop (pitfalls.md "Stop without merging").
 11. Write `<SCRATCH>/issue-<N>-summary.md`, starting `## Summary of work (PR #<PR#>)` with the sections
     in codex-review.md, then `gh issue comment <N> --body-file <SCRATCH>/issue-<N>-summary.md`
 12. First, in `$WORKTREE_DIR`: `git fetch origin main && git merge-tree --write-tree origin/main HEAD >/dev/null`;
@@ -215,15 +217,17 @@ Read `.claude/skills/work-issue/references/codex-review.md` now (full policy). T
     merging (`require_up_to_date: false`): never update the branch for it. `UNKNOWN` is not yet computed,
     not a failure: re-query up to 5 times, ~10 s apart. `DIRTY`: `gh pr update-branch` refuses, merge
     locally. If a check is pending, heartbeat, then run this with `run_in_background: true` (~2-3 min):
+    Right after a push the run is not registered yet: first retry the probe (up to ~1 min), then watch.
     ```sh
+    for i in 1 2 3 4 5 6; do gh pr checks <PR#> 2>&1 | grep -q 'no checks reported' || break; python3 -c 'import time; time.sleep(10)'; done
     gh pr checks <PR#> --watch --fail-fast > <SCRATCH>/ci-<N>.log 2>&1; echo "exit=$?" >> <SCRATCH>/ci-<N>.log
     ```
-    Wait for the notification; no `sleep` loops, no `| tail`, no hand-back while it runs. The watch logs a line every
-    10 s: read only the end of the log (`tail -n 25 <SCRATCH>/ci-<N>.log`). `exit=` is a
-    hint only. Heartbeat after every watch, wait ~10 s, re-run the `merge-tree` line above, then merge only if this prints
-    `true` (`UNKNOWN` and a brief post-watch `false` print `false`: re-query up to 3 times, ~10 s apart, before calling it a failure):
+    Wait for the notification; no `sleep` loops, no `| tail`, no hand-back while it runs. Read only the end of the
+    log (`tail -n 25 <SCRATCH>/ci-<N>.log`); `exit=` is a hint only. Heartbeat after every watch, wait ~10 s,
+    re-run the `merge-tree` line above, then merge only if this prints `true` (a brief post-watch `false` or
+    `UNKNOWN`: re-query up to 3 times, ~10 s apart, before calling it a failure):
     `gh pr view <PR#> --json mergeable,mergeStateStatus,statusCheckRollup --jq '(.mergeable == "MERGEABLE" and .mergeStateStatus != "DIRTY") and ([.statusCheckRollup[] | (.conclusion // .state)] | (length > 0 and all(. == "SUCCESS")))'`
-    Otherwise see pitfalls.md "CI wait" (pending, "no checks reported", infra failure: `gh run
+    Otherwise see pitfalls.md "CI wait" (pending, infra failure: `gh run
     rerun --failed`; a failed step: stop and report). Never merge past a failure or use `--admin`.
     Cannot wait: pitfalls.md "Pending-CI hand-back".
 13. Immediately before merging, re-run the `merge-tree` check and the query above (state settles late). `gh pr merge <PR#> --squash` (no `--delete-branch`: the repo deletes the remote branch; step 9 the local).
@@ -233,12 +237,13 @@ Read `.claude/skills/work-issue/references/codex-review.md` now (full policy). T
 **Read `.claude/skills/work-issue/references/finish.md` now** and run its "Step 9" block as one Bash
 call. It runs from the main checkout (not the worktree) and starts by re-declaring `WORKTREE_DIR`
 and `BRANCH`. It aborts unless the PR is `MERGED`; if the issue is still `OPEN` it closes it with a
-comment linking the PR (won't-change: finish.md's variant). It also removes, by exact recorded path, any extra comparison or base worktrees you made. Then confirm main CI for your merge commit (pitfalls.md "Main CI after
-merge"). Red: stop, report it first, start no other work.
+comment linking the PR (won't-change: finish.md's variant), and removes any extra worktrees you
+recorded. Then confirm main CI for your merge commit (pitfalls.md "Main CI after merge"). Red: stop,
+report it first, start no other work.
 
 ## 10. Final report
 
 **Read `.claude/skills/work-issue/references/finish.md` now** if you have not (runs that stop at
-8.10, a no-merge dispatch or pending CI skip step 9). End the run by printing its "Step 10" report
+8.10, a no-merge dispatch, pending CI or a close without a PR skip step 9). End the run by printing its "Step 10" report
 template, filled in, `none` where empty. Its lines: PR, Merge, Plan review, Checks, Wall time, Review rounds, Steps skipped or failed,
 Issues filed, Cleanup, Friction.

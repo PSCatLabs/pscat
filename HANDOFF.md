@@ -174,7 +174,8 @@ coordinates, and a field proc that doesn't consume its `x y` silently
 leaking stack values instead of erroring — the same class of bug
 `--lint` also caught directly in `examples/noise.ps`'s first draft).
 Also done: issue #21, sweep/contact-sheet rendering — `--sweep-seed`
-(overrides every `srand` call transparently, via a new
+(overrides every `srand` call transparently, except a restore of an
+`rrand` value (#202), via a new
 `Interp::set_seed_override`/`seed_override_fired` pair checked in
 `ops/arith.rs`'s `srand`, so found art with a hardcoded `N srand` line
 sweeps unmodified) and `--sweep NAME=` (predefines `/NAME` in userdict
@@ -473,8 +474,10 @@ renders eight examples in both and compares block-downsampled output).
   MultipleDataSources colorimage (limitcheck). DCTDecode buffers one
   whole JPEG (marker-aware, stops exactly at EOI); CCITTFax absent;
   Adobe inverted-CMYK JPEGs untested.
-- errordict handlers not consulted; error-time operand-stack
-  restoration not done (PLRM handlers see pre-error operands).
+- errordict holds a handler per error name (#372, so `errordict /name
+  get exec` re-raises), but a handler a program installs there is not
+  consulted on a real error; error-time operand-stack restoration not
+  done (PLRM handlers see pre-error operands).
 - Stroke width ≈ √|det CTM| (anisotropic pens wrong; `strokepath`
   inherits it, since it shares `stroke`'s parameters); `showpage`
   doesn't erase; ints are i64; `flattenpath` uses a fixed
@@ -573,7 +576,8 @@ renders eight examples in both and compares block-downsampled output).
    inscription, an orrery of brass.
 2. Leftovers when they itch: the remaining fib/fern machine-loop gap
    vs gs (Stage 11 findings in NOTES.md — the untaken levers are
-   representation changes), errordict handlers, error-time operand
+   representation changes), consulting a user-installed errordict
+   handler, error-time operand
    restoration, DSC-comment tolerance and more corpus files,
    CCITTFax. (`rectfill`/`rectstroke`/`rectclip` landed 2026-07-18,
    found missing by `--interactive`'s first session.)
@@ -601,7 +605,7 @@ renders eight examples in both and compares block-downsampled output).
    paintkit.ps. A change to those names breaks drykit: the
    `drykit-paintkit-contract` self-test in `lib/drykit.ps` pins them (#270
    moves them to `lib/toothkit.ps`). #234 built `lib/drykit.ps`:
-   `dksurface`, `dkstroke` and `dkbatch` are public, and `dkcatch` and
+   `dksurface`, `dkstroke`, `dkbatch` and `dkclip` (#312) are public, and `dkcatch` and
    `dkrand` are internal. The medium files (#235 chalk, #239 crayon, #241
    charcoal) are presets over `dkstroke`. Measured cost is in
    `notes/234-drykit-core.md` and DRYMEDIA.md 6.1. A full board plus ghost
@@ -612,8 +616,11 @@ renders eight examples in both and compares block-downsampled output).
    #241 shipped `lib/drycharcoal.ps` (`dhstroke`, `dhhatch`, `dhsmudge`,
    `dhlift`, `dhsketch`; `notes/241-drycharcoal.md`). `dhhatch` lays lines
    through hatchkit's `/Mark` hook and inks every layer in one `dkbatch`
-   inside its own region clip, so it can't join a caller's batch, and at
-   `/Levels 2` two calls over one area grey each other's crossings (#312).
+   inside its own region clip. Inside a caller's batch it joins that batch
+   through drykit's `dkclip` (#312, `notes/312-dkbatch-per-record-clip.md`):
+   a `dkstroke` made inside `{ ... } dkclip` keeps that region when its
+   batch renders later. A plain `clip` inside a batch is still not kept
+   (pscat's `clippath` can't hand back a nested clip exactly).
    Hatching costs about 0.07 ms per square point per layer in pscat. In gs,
    drykit work after an artkit `scatter` (fallout) runs about 2x slower (#311).
    Slice G1 (#236) shipped `lib/strokeglyphs.ps`: skeleton glyphs as paths
@@ -621,6 +628,24 @@ renders eight examples in both and compares block-downsampled output).
    written twice is a sharp corner, and the midpoint rule never passes
    through interior points, so check new glyphs on a `/Jitter 0` render.
    `notes/236-strokeglyphs.md` lists where it departs from the design.
+   Since #350 `sgpath` and `sgwidth` are strict by default: a character or
+   glyph name with no glyph raises `sg-missing-glyph:<char>` before any
+   ink, instead of advancing blank (the superscript two in #238's
+   `(i² = -1)` used to vanish silently). `/Strict false` opts out.
+   #339 filled the commonest gaps (relations, ∘ ∗ ⋆, ⟨ ⟩ ‖, ℏ ℓ, ι υ Υ,
+   ∬ ∭ ∮, superscript digits derived from the digit skeletons):
+   `notes/339-board-math-glyphs.md`.
+   #366 added subscript digits and letters (the same derivation, lowered
+   80 units) and the variant Greek letters, and mapped mathkit's `\varphi`
+   and friends to them: `notes/366-subscripts-variant-greek.md`.
+   #237 shipped `lib/mathkit.ps` (`mk-`): TeX-subset math laid out with
+   TeX's box model as those skeletons (`mkpath`, `mkmetrics`, `mkalign`,
+   and the annotations `mkframe`, `mkunderline`, `mkarrow`), with
+   board-hand irregularity under `/Irregular`. TeX backslashes are doubled
+   in PostScript strings; a single one is refused by name, never drawn
+   as letters. Its layout recursion keeps locals in one small dict per
+   call, so its public procedures unwind the dict stack on error
+   (`mkentry`). `notes/237-mathkit.md` has the design calls.
    Chalk (#235) shipped `lib/drychalk.ps`. `dcchalk` is the chalk preset
    over `dkstroke`. `dcboard` dresses a slate or green board: haze,
    `/Ghost` writing, swipes, wipes, ledge dust and a tray. It was tuned
@@ -632,6 +657,13 @@ renders eight examples in both and compares block-downsampled output).
    public procedures run inside a private dict (`dcscratch begin ... end`)
    (#307). drykit's `/Fallout` is slow in gs (#308), so drychalk draws its
    own dust.
+   #238 is the chalk gallery piece, `gallery/chalkboard_lecture.ps`: Euler's
+   formula on three `dcboard` panels. Draw each panel's chalk right after
+   its own `dcboard`, because `dcchalk` takes the last board as its
+   surface. A `/Ghost` proc that passes a procedure must `load` it. Never
+   `def` an operator's name (`loop`, `lt`) in a piece: handscript and
+   strokeglyphs aren't bound and will pick it up
+   (`notes/238-chalkboard-lecture.md`).
    #239 shipped `lib/drycrayon.ps` (`dy-`): `dycrayon` (a core and a rim
    `dkstroke` per subpath, one wax level each), `dypaper`, the crayon box
    (`dybox`, `dycolors`, `dycolor`) and six child motions with paintkit's
@@ -641,6 +673,13 @@ renders eight examples in both and compares block-downsampled output).
    page. `notes/239-drycrayon.md` has the tuning numbers against the crops.
    #240 is the gallery piece on it, `gallery/crayon_drawing.ps` (a child's
    house, family, sun and name); `notes/240-crayon-drawing.md`.
+   Typewriter (epic #209): **read `docs/TYPEWRITER.md` and
+   `docs/typewriter/REFERENCES.md` before starting #211–#215.** The
+   #210 design (Courier Prime outlines embedded in a Type 3 `/Typewriter`,
+   keyed-hash variation, clip-based ribbon ink) waits on the maintainer's
+   approval. Its gotchas: `BuildChar` must use `setcharwidth` (gs replays a
+   `setcachedevice` glyph) and stay pure (`stringwidth` runs it), and
+   pscat's `def` rejects integer keys (#338; use `put`).
 5. Watercolor (issue #47, gated on the architecture spike in issue
    #46): read `docs/WATERCOLOR.md` before starting — it recommends a
    small `alpha: f32` field on `GraphicsState` (already prototyped as
@@ -782,6 +821,16 @@ renders eight examples in both and compares block-downsampled output).
   still reads a clump). Scratch prefix `mh-` for the helpers and one
   letter per motion (`mx` `mc` `ms` `mt` `mp` `mz`); none calls a preset,
   so none is clobbered by `pkribbon`.
+- **`pkscumblein /Light` filters, it does not re-scatter** (issue #345). A
+  lit pass lays the same grid and the same four draws per cell as the unlit
+  call, then keeps a circle only when a step of `/Reach` x depth toward the
+  light leaves the region (one `scin`), the step shortened by up to
+  `/Feather` on the cell's own phase draw. So `/Count` still counts circles
+  over the *whole* region (a lit band keeps a fraction: ask for more), the
+  lit circles are a subset of the unlit ones under the same seed, and unset
+  it takes no extra draw (byte-identical). The depth is the bounding box's
+  chord through its centre along the light, not its projection, which
+  nearly doubled the band on a wide mass lit at 45 degrees.
 - **A touched mark is clipped in canvas space; set the canvas first** (issue
   #182, slices S1-S4; design in `docs/CANVAS_SURFACE.md`). `opts pkcanvas`
   records the CTM in force when it is called as *canvas space* and builds a
@@ -860,8 +909,14 @@ renders eight examples in both and compares block-downsampled output).
   *inside the fill* (`pmemit`/`pmstamp`/`ptemit`, behind `ptk 0 gt`), from
   the head position (`pmnc`, `ptnc`, or +-1 for pktrowel's ridges) and the
   flip of the run's first stop, then passed through `puwet`, which grades it
-  by the running `pkwet` pass (L3): frames have 7 slots, and 4-6 are the
-  per-pass factors, a copy of `/Under` and the running pass index. A new
+  by the running `pkwet` pass (L3): frames have 9 slots, and 4-6 are the
+  per-pass factors, a copy of `/Under` and the running pass index (slot 7,
+  issue #179, holds one backdrop per pass for a procedural `/Under` and is
+  null otherwise: `puwet` reads it first, so a loaded colour grades toward
+  the pass's own backdrop; slot 8, issue #359, is a banded call's record:
+  the cells' clips, backdrops, pass colours and the saved random stream, null
+  otherwise; the pass loop tests it, and each cell points slot 5 at its own
+  backdrop, so `puwet` needs nothing new). A new
   adopter must call `puwet` on every loaded colour, or its marks go solid
   inside a pull. `pkfan` adopts it too (L4, `pfColorRec`): its colour is set
   per *run* (`pfrun`) and per pressed ray (`pfray`) by `pfcolor`, from the
@@ -883,6 +938,80 @@ renders eight examples in both and compares block-downsampled output).
   branch, `ghostscript_accepts_paint_loading` drives every new key on every
   adopter inside a directional `pkwet`, and `L6`/`L7` (`/TipColor`, `pkdry`,
   `pkoil` ridges) are what is left of #183.
+- **Pigments and `pigmix` (issue #185) are a section of `lib/paintkit.ps`,
+  before the `pu-` resolver, and touch no preset.** `Pigments` is
+  `name -> [r g b strength]` (the `dybox` pattern: a `@kind: Dial` dict, with
+  `PigmentNames` for tube order). `pigmix` is Kubelka-Munk per r/g/b channel:
+  K/S = sum(a_i (1-R)^2 / 2R) / sum(a_i) with a_i = weight x strength, then
+  R = 1 + K/S - sqrt((K/S)^2 + 2 K/S). Scratch names all start `pgm` (pagekit
+  owns `pg`+word, the presets clobber `pk*`). Entries are checked even at
+  weight 0; one live entry is returned as stored; no random draws. The
+  presets get pigments through `pigcolor`/`pigcolors`, which produce the
+  `[r g b]` arrays `/Colors`, `/HighlightColor` and `/ShadowColor` already
+  validate. Since #356 `puparse` and `puhue` also accept a literal pigment name
+  (`/Colors [ /sapgreen /cadmiumyellow ]`, `/HighlightColor /titaniumwhite`),
+  resolved once by `pupig` straight from `Pigments`; a pigmix spec in a colour
+  key raises `<preset>-colors-pigmix-spec-needs-pigcolors` (or
+  `<prefix>-pigmix-spec-needs-pigcolors`), an unknown name
+  `...-unknown-pigment-see-PigmentNames`. Tests are
+  `tests/pigment.rs` plus two `%%SelfTest` blocks; the specimen is
+  `examples/paintkit_pigment_demo.ps` (render at
+  `docs/paintkit_pigment_demo.png`). Retuning a pigment moves the pinned
+  mixes in `reference_mixes_are_pinned`: change them on purpose.
+- **`pktrowelplane` (issue #180) is a sibling of `pktrowel`, not a mode.** It
+  runs `pktrowel` once per row across the current path's area and passes its
+  own options dict straight through, so every `pktrowel` key keeps its meaning
+  (the plane's own keys are `/Direction`, `/Overlap`, `/RowJitter`,
+  `/AngleJitter`; `pktrowel` ignores unknown keys). Scratch names start `tpl`
+  because `pktrowel` overwrites every `pt*` name on each row. The extent is
+  taken from `flattenpath` + `pathforall` projected on the pull axis, not
+  `pathbbox` under a rotated CTM. The edge is the clip (`clip` before the first
+  row, inside a gsave that also restores the caller's path). Gotchas: `RowJitter`
+  and `AngleJitter` default to values that cannot open a seam between rows (a
+  first render had a bare full-height line at 20% of the row spacing); a dead
+  lane from `/Scrape` is a bare track no neighbouring row covers unless
+  `/Overlap` is above about 0.5; a `/Pressure` is read at 17 points of the
+  row inside the area and the rows are spaced for the smallest |value|, in
+  `[0.25, 1]` times the nominal band (issue #362, `notes/362-*.md`; the stream
+  is restored with `rrand`/`srand` only when the proc moved it). Tests are `tests/pktrowelplane.rs` plus a
+  `%%SelfTest` block; the specimen is `examples/paintkit_plane_demo.ps`
+  (`docs/paintkit_plane_demo.png`).
+- **`pkbrushedge` / `pkfeather` (issue #347) brush a filled mass's edge.**
+  Their own section ("Brushed edges") sits after the brush motions.
+  `pkfeather` is a motion (replaces the path, paints nothing, one `frnd`
+  draw per call and four per slot, slots at a sixth of `/Spacing` as in `pkpull`). The out
+  side is decided once per subpath, never per stop: for a closepath'd
+  subpath, seven probes just left of the walk are tested against artkit's
+  `scpath` region of the whole path (nonzero, like `fill`), so holes of
+  either winding and mirrored CTMs work; an open subpath faces `/Outward`
+  by the summed normal. Signed area was rejected: it puts a hole's strokes
+  into the mass. `pkbrushedge` paints the inward cuts first (sparser,
+  `/InSpacing` 2, `/Overlap` mirrored) and the outward strokes last; inward
+  cuts as dense as the outward strokes rule a pale band just inside the
+  edge. A procedural `/Under` costs one `/Brush` call per inward stroke.
+  Every gsave goes through `pegsave` so an error mid-call unwinds to the
+  caller's level. Scratch prefixes `mf`/`pe`. Tests: the `%%SelfTest` block
+  (guards plus a ring wound both ways and a ring under `1 -1 scale`); the
+  specimen is `examples/paintkit_brushedge_demo.ps`
+  (`docs/paintkit_brushedge_demo.png`); cookbook recipe 10 uses it.
+  **Overlapping blobs (issue #381):** with two or more closed subpaths a
+  stroke is skipped where a pair of points either side of its anchor are both
+  in the whole-path region (an edge hidden inside the others; asked again at a
+  sixty-fourth of the step so a hairline hole is not mistaken for one), and
+  the side vote votes over 28 places instead of 7. A
+  single closed subpath never probes, so single outlines render byte-identically.
+  `notes/381-brushedge-hidden-edges.md`.
+- **The landscape cookbook (issue #186) is `docs/guides/landscape-cookbook.md`;
+  its snippets are the tests.** `tests/landscape_cookbook.rs` pulls every
+  ```` ```postscript ```` block out of the markdown (first line `% recipe: <name>`),
+  runs it in-process on a 360x240 page, and fails on an error, a lint finding, a
+  dirty operand stack, a near-blank page, 5 s of CPU or a missing thumbnail
+  (`docs/guides/landscape/<name>.png`, 2x). Edit a snippet in the markdown, then
+  `COOKBOOK_WRITE_THUMBS=1 cargo test --profile ci --test landscape_cookbook`
+  and look at the PNG; the test does not compare pictures. When a tool the
+  cookbook names as pending lands (#180, #229, #230, #345, #346, #347),
+  update the recipe in its "Tools not yet landed" table; when Evening Stream
+  (#187, PR #348) merges, link its still from the cookbook.
 - **Paintkit slices prove byte identity with `scripts/identity_check.sh
   BASE_WORKTREE [BIN] --control FILE [--gallery-still]`** (issue #263), not
   by hand. It renders every tracked `examples/`, `gallery/` and
@@ -896,6 +1025,11 @@ renders eight examples in both and compares block-downsampled output).
   `--loader lib/<name>.ps` (repeatable, transitive through the libs built on
   it) or `--files LIST` picks the files, and multi-page output
   (`page-001.png`, ...) is compared page by page.
+  **An interpreter (`src/`) change uses `--base-bin PATH --head-bin PATH`**
+  (issue #335) instead of the shared binary: the base tree renders with the
+  base binary (`scripts/build_base_bin.sh BASE_WORKTREE OUT`), the head tree
+  with the head one, and the control must use behaviour only the head binary
+  has. `scripts/bench_compare.sh` is the matching CPU-time guard.
 - **A "collect stops, then draw runs" brush must not call the caller's
   `/Pressure` proc inside its per-lane/per-bristle loop.** A caller's
   proc is arbitrary code and may consume randomness (`{ frnd }` is a
@@ -925,8 +1059,8 @@ renders eight examples in both and compares block-downsampled output).
 - tiny-skia `Transform::from_row(sx, ky, kx, sy, tx, ty)` matches the
   PS matrix order `[a b c d tx ty]` — `ops/matrix.rs` documents it;
   don't rediscover this the hard way.
-- **artkit, paintkit, drykit and drychalk define every procedure
-  `} bind def`** (#307, #318), and `tests/libbind.rs` fails for any procedure added without
+- **artkit, paintkit, drykit, drychalk and drycharcoal define every procedure
+  `} bind def`** (#307, #318, #326), and `tests/libbind.rs` fails for any procedure added without
   it. Ghostscript resolves each executable name in a procedure body at
   run time, and with several libraries loaded those lookups are what
   make gs slow (alpine_lake 30 s unbound, 10 s bound). A private scratch
@@ -940,8 +1074,9 @@ renders eight examples in both and compares block-downsampled output).
   bound (20% to 30% on its specimen), so it stays. drycrayon and the older
   kits are deliberately unbound: drycrayon gained under 1%, and the rest
   take 0.33 s or less in gs or cannot run there (no fonts), so there is
-  nothing to win (`notes/318-bind-drychalk.md`). drycharcoal (merged in #315 after this work began)
-  is not bound yet (#326).
+  nothing to win (`notes/318-bind-drychalk.md`). drycharcoal is bound too, but
+  it gains little: 0.4% of the instructions on its specimen and, in one
+  pair of runs, 3% on the Lincoln portrait in gs (`notes/326-bind-drycharcoal.md`).
 - Test Interps at 100×100; golden runs at 500×500/r72. Metric
   assertions use 1e-3 tolerances where the pen is f32.
 

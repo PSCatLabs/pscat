@@ -187,3 +187,128 @@ fn dsc_comments_are_ignored() {
         ["3"]
     );
 }
+
+// --- def/load with non-name keys (#338) ---------------------------------
+
+#[test]
+fn def_accepts_non_name_keys() {
+    // The issue's repro: an integer key, read back with `get`.
+    assert_eq!(
+        eval("5 dict begin 1 (one) def currentdict 1 get end"),
+        ["(one)"]
+    );
+    // Booleans and non-integral reals are keys too.
+    assert_eq!(
+        eval("4 dict begin true (t) def 1.5 (r) def true load 1.5 load end"),
+        ["(t)", "(r)"]
+    );
+}
+
+#[test]
+fn def_integral_real_key_is_the_integer_key() {
+    // PLRM: a real key with an integral value is converted to an integer,
+    // in both directions, and 1.5 stays distinct from 1 and 2.
+    assert_eq!(
+        eval(
+            "4 dict begin 2.0 (two) def currentdict 2 get 1 (x) def 1.0 load 1.5 (y) def 1 load 2 load end"
+        ),
+        ["(two)", "(x)", "(x)", "(two)"]
+    );
+}
+
+#[test]
+fn def_string_key_becomes_a_name() {
+    assert_eq!(eval("4 dict begin (abc) 7 def /abc load end"), ["7"]);
+    assert_eq!(eval("4 dict begin /abc 8 def (abc) load end"), ["8"]);
+}
+
+#[test]
+fn def_and_load_non_name_keys_edge_cases() {
+    assert_eq!(eval_err("null 1 def"), PsError::Typecheck);
+    assert_eq!(eval_err("null load"), PsError::Typecheck);
+    // A load miss names the key.
+    assert_eq!(eval_err("99 load"), PsError::Undefined("99".to_string()));
+    // load walks the whole dictionary stack, not just the top dict.
+    assert_eq!(
+        eval("1 (outer) def 2 dict begin 1 load end 1 load"),
+        ["(outer)", "(outer)"]
+    );
+    // An inner definition shadows the outer one only while it is open.
+    assert_eq!(
+        eval("1 (outer) def 2 dict begin 1 (inner) def 1 load end 1 load"),
+        ["(inner)", "(outer)"]
+    );
+}
+
+#[test]
+fn def_non_name_key_is_undone_by_restore() {
+    assert_eq!(
+        eval("save 1 (x) def restore currentdict 1 known"),
+        ["false"]
+    );
+    // An outer definition made before the save survives it.
+    assert_eq!(eval("1 (a) def save 1 (b) def restore 1 load"), ["(a)"]);
+}
+
+// --- issue #202: a seed override leaves an rrand restore alone ---------
+
+/// Runs `src` with `--sweep-seed`'s override armed at 99 and returns the
+/// stack plus whether the override fired.
+fn eval_seeded(src: &str) -> (Vec<String>, bool) {
+    let mut it = Interp::new();
+    it.set_seed_override(Some(99));
+    it.run_str(src)
+        .unwrap_or_else(|e| panic!("eval of {src:?} failed: {e}"));
+    let stack = it.operand_stack().iter().map(|o| o.repr()).collect();
+    (stack, it.seed_override_fired())
+}
+
+#[test]
+fn rrand_is_the_plain_state_without_an_override() {
+    // Default renders must not change: no tag, and a tagged value handed
+    // to srand with no override still masks down to the 31-bit state.
+    assert_eq!(eval("7 srand rrand"), ["7"]);
+    assert_eq!(eval("1099511627783 srand rrand"), ["7"]);
+}
+
+#[test]
+fn seed_override_restores_an_rrand_value_exactly() {
+    // The stream is moved off the seed before saving, so a forced restore
+    // (the old behaviour: state = 99) cannot pass by landing on the same
+    // state. The first draw after the save is the reference; reseed with
+    // a literal (forced), draw, restore, and the next draw must be it.
+    let (stack, fired) = eval_seeded(
+        "5 srand rand pop /saved rrand def rand /ref exch def \
+         3 srand rand pop saved srand rand ref eq",
+    );
+    assert_eq!(stack, ["true"]);
+    assert!(fired, "the literal srand is still forced");
+    // Only a restore: the override never fired.
+    let (stack, fired) =
+        eval_seeded("/saved rrand def rand /ref exch def rand pop saved srand rand ref eq");
+    assert_eq!(stack, ["true"]);
+    assert!(!fired, "an rrand restore is not the override firing");
+}
+
+#[test]
+fn seed_override_still_forces_a_literal_or_derived_seed() {
+    // A literal seed and one a library derives from rrand are forced: the
+    // two runs agree with `99 srand`, whatever the operand said.
+    let (forced, fired) = eval_seeded("12345 srand rand");
+    assert!(fired);
+    assert_eq!(forced, eval("99 srand rand"));
+    let (derived, _) = eval_seeded("rrand 7919 mul srand rand");
+    assert_eq!(derived, eval("99 srand rand"));
+}
+
+#[test]
+fn seed_override_paintkit_style_conditional_restore() {
+    // `rrand r ne { r srand } if`, the idiom paintkit's knife uses: the
+    // stream moved, so it is put back. The save is taken off the forced
+    // seed, so a forced restore would not reproduce it.
+    let (stack, _) = eval_seeded(
+        "3 srand rand pop /r rrand def rand /ref exch def rand pop \
+         rrand r ne { r srand } if rand ref eq",
+    );
+    assert_eq!(stack, ["true"]);
+}

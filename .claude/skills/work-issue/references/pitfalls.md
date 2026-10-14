@@ -5,25 +5,26 @@ Read by `SKILL.md` before step 1 (skim) and whenever a step says so.
 Step numbers ("step 1" ... "step 9") refer to the numbered steps in `../SKILL.md`, which keep their original numbering. "Pitfalls" / "the ... pitfall below" means `pitfalls.md` in this directory; "Claim the issue" means `claim-protocol.md`.
 
 <!-- TOC -->
-Read a section with the Read tool (`offset`/`limit`), not one `cat`: this file is long enough to be truncated.
-The line ranges drift when you edit the file: re-check them (the first and last line of each range) after any edit.
+This file is long enough that one `cat` truncates. Find a section with `grep -n '^#' .claude/skills/work-issue/references/pitfalls.md` and read it
+with the Read tool (`offset`/`limit`). The list below is by section name, not line number, so it does not
+drift when the file is edited; keep every heading's text unchanged, since `SKILL.md` and the other
+references cite sections by their quoted name. The first bullets, before the first heading, are the flat list
+of general pitfalls.
 
-| Section | Lines |
-|---|---|
-| General pitfalls (a flat list of bullets) | 29-207 |
-| Added in #194 (friction from the #189 / PR #193 run, and #151) | 209-255 |
-| Waiting and timeouts | 257-275 |
-| Step 5 checklist | 277-316 |
-| CI wait (#199, from the #178 / PR #198 run; timings and pass/fail rule updated in #208) | 318-386 |
-| Main CI after merge (#257, #273) | 388-426 |
-| Pending-CI hand-back (only if you truly cannot wait) | 428-447 |
-| Resume paths (#208) | 449-490 |
-| Stop without merging when the dispatcher says so (#208) | 492-516 |
-| Rebase and merge rules (#208) | 518-565 |
-| Step 4 is a hard gate | 567-575 |
-| One scratch location | 577-589 |
-| Evidence runs and scratch hygiene (#273) | 591-614 |
-| Added in #303 (round 7: friction from the #110, #271, #279, #281, #285, #293 runs) | 616-674 |
+- [Added in #194 (friction from the #189 / PR #193 run, and #151)](#added-in-194-friction-from-the-189--pr-193-run-and-151)
+- [Waiting and timeouts](#waiting-and-timeouts)
+- [Step 5 checklist](#step-5-checklist)
+- [CI wait (#199, from the #178 / PR #198 run; timings and pass/fail rule updated in #208)](#ci-wait-199-from-the-178--pr-198-run-timings-and-passfail-rule-updated-in-208)
+- [Main CI after merge (#257, #273)](#main-ci-after-merge-257-273)
+- [Pending-CI hand-back (only if you truly cannot wait)](#pending-ci-hand-back-only-if-you-truly-cannot-wait)
+- [Resume paths (#208)](#resume-paths-208)
+- [Stop without merging when the dispatcher says so (#208)](#stop-without-merging-when-the-dispatcher-says-so-208)
+- [Rebase and merge rules (#208)](#rebase-and-merge-rules-208)
+- [Step 4 is a hard gate](#step-4-is-a-hard-gate)
+- [One scratch location](#one-scratch-location)
+- [Evidence runs and scratch hygiene (#273)](#evidence-runs-and-scratch-hygiene-273)
+- [Added in #303 (round 7: friction from the #110, #271, #279, #281, #285, #293 runs)](#added-in-303-round-7-friction-from-the-110-271-279-281-285-293-runs)
+- [Prototypes and timing (#331, from the #316 and #329 runs)](#prototypes-and-timing-331-from-the-316-and-329-runs)
 <!-- /TOC -->
 
 - **Don't work in the main checkout.** The whole point of the worktree
@@ -160,8 +161,8 @@ The line ranges drift when you edit the file: re-check them (the first and last 
   reopens the exact TOCTOU race #35 exists to close: a second
   invocation's `mkdir` fails, it reads the not-yet-written heartbeat
   as empty/stale, and steals from a run that already believes it won.
-  Same reasoning applies to the reclaim path's post-`mv` `mkdir` +
-  heartbeat write.
+  Same reasoning applies to the reclaim path's `mkdir gen.<K+1>` +
+  heartbeat write (#297: the newest generation reads live for 10 s).
 - **Claim and heartbeat are scripts since #276 (round 6).** Two agents in a row ran only
   the `mkdir` branch of the pasted claim block. Run `scripts/claim.sh <N>` as one command and
   never retype its lines; `scripts/heartbeat.sh <N>` is the refresh. After editing
@@ -310,6 +311,23 @@ Cheapest first, before the long gate:
    proves each tree loads its own lib; keep the marker out of the branch. The corpus can take
    minutes at gallery resolution: run the check with `run_in_background: true` and a log
    (pitfalls "Long foreground commands").
+   **A change under `src/` (interpreter, operators, rasteriser) is the standard case for the two-binary
+   form (#335):** `scripts/identity_check.sh BASE_WORKTREE --base-bin BASE_BIN --head-bin HEAD_BIN
+   --control FILE --loader lib/artkit.ps` (or `--files LIST`). The base tree renders with the base
+   binary, the head tree with the head binary, so no wrapper that picks a binary by cwd is needed.
+   Build the base binary FROM the base worktree, in the background (a cold release build takes
+   minutes): `scripts/build_base_bin.sh BASE_WORKTREE "<SCRATCH>/base-pscat-<N>"`; it copies the
+   binary out because a shared target dir would let the head build overwrite it. The head binary is
+   `cargo build --release --bin pscat` in `$WORKTREE_DIR`. Give both flags or neither, and not with
+   a positional BIN. The control must use behaviour only the head binary has (for an operator fix,
+   the call that used to raise the error): it must render differently, which proves each tree ran
+   its own binary; exit 2 otherwise. Use a lib corpus wide enough to reach the operator
+   (`--loader lib/artkit.ps`, about 63 files), since the default paintkit pick is narrow. If the
+   change touches both `src/` and `lib/`, the base tree is still the merge-base worktree. List the
+   base worktree for step 9's `EXTRA_WORKTREES` (the binary in `<SCRATCH>` dies with the session).
+   Timing guard (not a goal): `scripts/bench_compare.sh BASE_BIN HEAD_BIN FILE [N]` prints CPU
+   min/median for base, head and an identical-binary control. It is fine to stop a running bench
+   and report a partial sample when the coordinator narrows the scope, or just use a small N.
 5. Every pscat probe you run by hand needs `--headless`, or `-e`/`--png`. Without one of
    them pscat opens a window and the call blocks until it is closed:
    `pscat --headless -e '3 4 add ='`, `pscat --png <SCRATCH>/probe-<N>.png file.ps`.
@@ -356,8 +374,10 @@ again after any push, which restarts CI).
   `perf-regression` is a signal to read, not to merge past.)
 - **"no checks reported"**: seconds after a push
   no check runs are registered yet, so `--watch` can exit non-zero with
-  that text (or the rollup is empty). It is not a CI failure. Re-launch
-  the same background command. After any push (a local merge for `DIRTY`
+  that text (or the rollup is empty). It is not a CI failure. SKILL.md 8.12 retries a
+  `gh pr checks` probe (up to ~1 min, keyed on the output text, never the exit code, since pending
+  checks also exit non-zero) before it starts the watch; if the watch still prints it,
+  re-launch the same command. After any push (a local merge for `DIRTY`
   included), start a fresh watch: the run before it covers an older head.
 - **Rerun after an infrastructure failure only.** `gh run rerun <run-id>
   --failed` is allowed when the failed job never ran a step: it was
@@ -494,7 +514,9 @@ and `## Fallback review, round` comments, not from this session.
 Some dispatches say not to merge (a gallery render waiting on the
 maintainer's eye, a human who wants the last look). Run steps 1-8.9 as
 usual, then at 8.10 do step 11 (the summary is posted so the issue carries
-the wrap-up) and stop **before** 8.12:
+the wrap-up), then step 12 (the `merge-tree` check, the "no checks reported" retry and the CI
+watch) until 8.12's query prints `true` (#331). Hand over a PR whose CI is green: a maintainer
+who finds it red or still running has to babysit it. Stop **before** 8.13, the merge:
 
 0. Write the PR body for the maintainer from the start (step 7): what changed and why, what
    you verified and how, what you did not or could not verify, what to look at first
@@ -505,8 +527,9 @@ the wrap-up) and stop **before** 8.12:
    maintainer off to run it themselves (#286).
 1. Release the lock: `rm -rf "$(git rev-parse --path-format=absolute --git-common-dir)/work-issue-lock-<N>"`.
 2. Keep the `in-review` label, the worktree and the branch. Do not run
-   step 9.
-3. Report `Merge: awaiting human merge (dispatcher said no merge)` with
+   step 9. If CI is red (a failed step, not infrastructure: "CI wait"), stop and report that
+   instead; never hand over silently.
+3. Report `Merge: awaiting human merge (dispatcher said no merge; CI green)` with
    the PR number, branch and worktree path.
 
 To merge later, `/work-issue <N>` again: the issue is `in-review` with an
@@ -537,6 +560,12 @@ lists what `main` gained. If every path is `*.md`, under `docs/`, `notes/`, `.cl
 `.github/`, the gate stands. Anything else (`lib/`, `src/`, `tests/`, `selftest/`,
 `examples/`, `gallery/`, `scripts/`, `build.rs`, `Cargo.*`, `site/`) means re-run it.
 Either way, re-read the worktree's `SKILL.md` after a rebase that moved `HEAD`.
+
+**A merge of `main` after the gate has passed (#331)** (the local merge for a `DIRTY` PR in 8.12;
+8.9's re-push of review fixes always re-runs the gate) follows the same allowlist. If it brought in `src/`, `lib/` or tests, either
+re-run the gate, or state in the PR comment that CI covers it: CI runs the identical four commands on
+the merge result, so for a code-only merge with no conflicts the second is legitimate and saves a
+local gate. Re-run locally when you resolved a conflict in code, or changed the identity-checked output.
 
 What to redo after a rebase that pulled in changes (#303):
 
@@ -644,13 +673,6 @@ earlier run's files; resume decisions are made from GitHub state
   scripts pass). In an interactive Bash call use an array (`FILES=(a b c); for f in "${FILES[@]}"`),
   `while read -r` over a file or heredoc, or `bash -c '...'`. The repo's scripts have a bash
   shebang; the Bash tool's own shell is zsh.
-- **Timing assertions in tests.** Wall-clock thresholds flake under load, and a
-  timing test that cannot fail proves nothing. Take the best (minimum) of N runs, N >= 5, for
-  both the guarded case and a baseline of the same work in the same run, assert a bound
-  RELATIVE to the baseline (`guarded <= 4 * baseline`) rather than an absolute number of
-  milliseconds, and add a negative check: run the identical assertion with the guard disabled
-  (a flag, an env var, the old build) and require it to FAIL. If the unguarded run also passes,
-  the test is not measuring the guard.
 - **"Max value fed to X across all pieces" sweeps.** Questions such as "what is the
   largest segment count `walkpath` sees across every gallery piece" go through
   `bash .claude/skills/work-issue/scripts/sweep-max.sh --glob 'gallery/*.ps' -- <SCRATCH>/probe.sh`: it runs your per-file hook (any
@@ -672,3 +694,35 @@ earlier run's files; resume decisions are made from GitHub state
   gave a syntax error at a later line (seen while verifying #303). Wait for the run, or copy the script.
 - **Codex cannot run harnesses**; for concurrency or shell changes the advisor plus real load
   runs are the review that counts (codex-review.md).
+
+### Prototypes and timing (#331, from the #316 and #329 runs)
+
+- **A throwaway measurement prototype is allowed after the step 4 plan review** even though no
+  production code is written before that gate. Use it to answer "is the change worth making" (a
+  timing, a count, a size), never to build the change. Make it in a scratch worktree outside the
+  repo whose path does not end `-issue-<N>` (step 3 resumes on that suffix), never commit or push it,
+  and write the path down: it goes in step 9's `EXTRA_WORKTREES` or in finish.md's "Close without a
+  PR" block. The measurement itself belongs on the issue (step 5.4); the prototype does not.
+- **Timing a change** is advisory: performance is a guard, not a goal. Use it to show a `src/` change
+  did not slow a render, not to tune. `scripts/bench_compare.sh BASE_BIN HEAD_BIN FILE [N]` (checklist
+  item 4) already does it right: CPU time (user+sys) of the child, interleaved arms, best of N, and an
+  identical-binary control whose gap to the base is the noise floor. By hand, the same recipe:
+  `/usr/bin/time -l` and read user+sys, never real. Suite wall time is unreliable when other agents
+  push the load average above 30: do not quote it, and do not chase a wall-time "regression" without
+  re-measuring in CPU time. To see whether a change survives a busy machine, run it under
+  `bash .claude/skills/work-issue/scripts/load-run.sh -n 8 -- <command>`: it starts the CPU hogs,
+  records their PIDs, and kills only those on exit (test: `scripts/test-load-run.sh`).
+- **Timing assertions in tests** measure CPU time, never wall time. The convention and helpers
+  are in AGENTS.md ("Code quality bar") and `tests/common/mod.rs`; do not restate the numbers here.
+  Pick the shape by the question:
+  - An **absolute budget** (a fixed cost with a documented cap, DRYMEDIA.md 6.2: a CI test render takes
+    2 s or less): `within_cpu_budget(what, budget, 3, || ...)`, best of 3. It catches a large regression
+    (3-8x), not 2x, so use it only where the cap is a requirement, not a tuned guess.
+  - A **self-relative bound** (a guard must not walk the path first; no fixed cap exists): time both
+    sides with `cpu_time_of` / `thread_cpu_time` in the same run and assert `guarded <= k * baseline`
+    (k a few). Best of N for both, N >= 5, so one slow sample cannot fail the suite.
+  - Never `Instant` in a test. Add a negative check so the test can fail: the identical assertion with
+    the guard disabled (a flag, an env var, the old build) must fail, and for a budget test
+    `PSCAT_TEST_BUDGET_SCALE=0.001 cargo test --profile ci --test <file> <name>` must fail (apply
+    `scale_budget` to a hand-rolled bound). If the unguarded run passes, the test does not measure the guard.
+

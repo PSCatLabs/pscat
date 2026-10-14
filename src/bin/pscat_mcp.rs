@@ -332,14 +332,19 @@ fn eval_postscript(args: &Value) -> Result<Value, String> {
 /// Split `--lint`'s `pscat: lint: ...` lines out of a child's stderr:
 /// `(finding lines joined with '\n', the rest of stderr joined back)`.
 /// The `pscat: lint: clean` line (no findings) is dropped from both —
-/// callers should stay silent when there's nothing to report.
+/// callers should stay silent when there's nothing to report. So is the
+/// `[run-error]` line (issue #369): `render_postscript` already leads
+/// with its own `PostScript error:` block for a failed run, and that
+/// block carries the report, so repeating the verdict under `Lint:`
+/// would only say the same thing twice.
 fn split_lint_findings(stderr: &str) -> (String, String) {
     const PREFIX: &str = "pscat: lint: ";
     const CLEAN: &str = "pscat: lint: clean";
+    const RUN_ERROR: &str = "pscat: lint: [run-error]";
     let mut findings = Vec::new();
     let mut rest = Vec::new();
     for line in stderr.lines() {
-        if line == CLEAN {
+        if line == CLEAN || line.starts_with(RUN_ERROR) {
             continue;
         } else if line.starts_with(PREFIX) {
             findings.push(line);

@@ -1,0 +1,96 @@
+%!PS-Adobe-3.0
+%%Title: Paintkit -- a backdrop per band: pkwet /Box and /Bands (issue #359)
+%%BoundingBox: 0 0 640 310
+%%EndComments
+
+% Specimen for pkwet's banded /Under (lib/paintkit.ps). pkwet grades each
+% softening pass toward /Under, "the colour already on the canvas there".
+% With a procedural /Under and /At (issue #179) that is one colour per pass,
+% asked at the pass's displaced anchor, so a mark that is tall against the
+% backdrop still has the rim its own height makes: the pass that is right at
+% the anchor is wrong at the foot and the head.
+%
+%   /Box [x y w h]     where the mark sits, in the user space pkwet is called in
+%   /Bands [cols rows] a grid over the box, grown by /Offset on every side
+%   /Under { ... }     asked once per cell, at the cell's centre
+%
+% Each softening pass is then run once per cell, clipped to it, and mixed
+% toward that cell's backdrop. The core is laid once, whole.
+%
+% Left: one tall plume over a strongly graded sky, /Under a procedure with
+% /At at the plume's middle: the outer passes are a pale grey against the
+% cold zenith and a cold blue against the warm horizon, a visible collar at
+% both ends. Right: the same plume, same seed, same marks, /Box over it and 12
+% rows: each band of every pass is mixed toward the sky at its own height
+% and the collar is gone. Only the colours differ; the random stream is
+% replayed per cell, so every cell lays the same marks and the clips cut
+% them into pieces.
+%
+% A cell wants to be no taller than about half /Offset, and the mark runs
+% (Layers - 1) x cells + 1 times, which has to stay within the 64 a chain of
+% such calls is budgeted: 4 x 12 + 1 = 49 here. A mark about as tall as
+% /Offset is as well served by /At, and cheaper.
+%
+%   pscat --page 640x310 examples/paintkit_wet_bands_demo.ps --png wet_bands.png
+
+(lib/artkit.ps) run
+(lib/paintkit.ps) run
+
+/SKYTOP [0.06 0.16 0.50] def
+/SKYLOW [0.98 0.86 0.68] def
+/SKYH 230 def
+/skyat {                                   % y -> r g b   (0 horizon .. SKYH zenith)
+    SKYH div 0 max 1 min /skt exch def
+    SKYLOW SKYTOP skt mix3
+} def
+
+1 1 1 setrgbcolor clippath fill
+
+/label {                                   % x y string -
+    gsave
+        0.30 0.30 0.30 setrgbcolor
+        /Helvetica findfont 9 scalefont setfont
+        3 1 roll moveto show
+    grestore
+} def
+
+% One 300 x 230 panel at (px, 50): the graded sky and the same tall plume,
+% softened by pkwet with the /At form or the /Box form.
+/panel {                                   % px banded? -
+    /ppro exch def /ppx exch def
+    gsave
+        ppx 50 translate
+        newpath 0 0 moveto 300 0 lineto 300 SKYH lineto 0 SKYH lineto closepath clip
+        0 1 SKYH 1 sub {
+            /pgy exch def
+            pgy skyat setrgbcolor
+            newpath 0 pgy moveto 300 pgy lineto 300 pgy 2 add lineto 0 pgy 2 add lineto
+            closepath fill
+        } for
+        0.99 0.98 0.97 setrgbcolor
+        41 srand
+        {
+            newpath 150 30 moveto 140 90 160 150 150 205 curveto
+            << /Nozzle 13 /Density 380 /Falloff 1 /Speck 1.1 /Overspray 0.4 >> pkspray
+        }
+        ppro
+            { << /Soft 1 /Offset 30 /Layers 5
+                 /Box [ 110 30 80 175 ] /Bands [ 1 12 ] /Under { exch pop skyat } >> }
+            { << /Soft 1 /Offset 30 /Layers 5
+                 /At [ 150 118 ] /Under { exch pop skyat } >> }
+        ifelse
+        pkwet
+    grestore
+} def
+
+0   false panel
+340 true  panel
+
+10  295 (/At [ 150 118 ]: one backdrop per pass) label
+350 295 (/Box [ 110 30 80 175 ] /Bands [ 1 12 ]: one per band) label
+10  36 (each pass is mixed toward the sky at the plume's middle: a pale collar) label
+10  24 (round the top and a cold blue one round the warm foot) label
+350 36 (each band of each pass is mixed toward the sky at its own height) label
+350 24 (same seed, same marks, the collar is gone) label
+
+showpage

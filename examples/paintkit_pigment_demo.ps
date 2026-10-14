@@ -1,0 +1,222 @@
+%!PS-Adobe-3.0
+%%Title: Paintkit — a pigment palette that mixes like paint (issue #185)
+%%BoundingBox: 0 0 780 980
+%%EndComments
+
+% Specimen for the pigment palette (lib/paintkit.ps, "Pigments"). artkit's
+% mix3 is an RGB lerp: blue and yellow lerp to grey, white only lightens, a
+% dark mix never goes rich. `pigmix` mixes the way paint does, so the same
+% recipe gives green from blue and yellow, violet from blue and crimson,
+% and a pastel tint from white that loses saturation as it lightens.
+%
+%   [ /phthaloblue 1 /cadmiumyellow 1 ] pigmix setrgbcolor
+%   /phthaloblue 0.2 pigtint setrgbcolor
+%   << /Colors [ /sapgreen [ /sapgreen 1 /cadmiumyellow 1 ] ] pigcolors >> pkfan
+%
+% Top: the thirteen pigments as they come from the tube, each with six
+% tints (t parts titanium white: 0.02 0.05 0.1 0.2 0.35 0.6). Each cell is
+% split: left is the paint tint, the narrow right strip is the same
+% recipe by RGB lerp toward white.
+% Middle: three ramps, each a paint mix above its RGB lerp.
+% Then eight classic landscape mixes, the paint mix large and the RGB lerp
+% of the same parts beside it.
+% Bottom: the palette feeding the brushes' own colour keys: a loaded broad
+% brush, a bush with a pigment highlight and shadow, and a loaded fan.
+%
+% No alpha anywhere, so Ghostscript renders the same page (its rand stream
+% differs, so the bristles fall differently).
+%
+%   pscat --page 780x980 examples/paintkit_pigment_demo.ps --png pigment.png
+
+(lib/artkit.ps) run
+(lib/paintkit.ps) run
+
+1 1 1 setrgbcolor clippath fill
+
+/zqset { aload pop setrgbcolor } def
+/zqtext {                                    % x y size string font -
+    /zqf exch def /zqs exch def /zqz exch def /zqy exch def /zqx exch def
+    zqf findfont zqz scalefont setfont zqx zqy moveto zqs show
+} def
+/zqnote { 8.5 exch 0.2 0.2 0.2 setrgbcolor /Helvetica zqtext } def
+% x y string -   small grey caption (size 7.5)
+/zqcap { 7.5 exch 0.38 0.38 0.38 setrgbcolor /Helvetica zqtext } def
+
+% ---- the naive mix, by the same parts ----------------------------------
+% [ /name w /name w ... ] -> r g b : the weighted average of the pigments'
+% colours as they come from the tube. This is what mix3 gives, extended to
+% any number of colours.
+/zqlerp {
+    /zqsp exch def
+    /zqa 0 def /zqb 0 def /zqc 0 def /zqt 0 def
+    0 2 zqsp length 2 sub {
+        /zqi exch def
+        /zqw zqsp zqi 1 add get def
+        zqsp zqi get pigment
+        /zqcb exch def /zqcg exch def /zqcr exch def
+        /zqa zqa zqcr zqw mul add def
+        /zqb zqb zqcg zqw mul add def
+        /zqc zqc zqcb zqw mul add def
+        /zqt zqt zqw add def
+    } for
+    zqa zqt div zqb zqt div zqc zqt div
+} def
+
+% ======================================================================
+% The tube: thirteen pigments, six tints each.
+% ======================================================================
+/zqtints [0.02 0.05 0.1 0.2 0.35 0.6] def
+/zqtube {
+    /zqy0 900 def
+    /zqcw 56 def
+    0 1 12 {
+        /zqn exch def
+        /zqname PigmentNames zqn get def
+        /zqx 26 zqn zqcw mul add def
+        zqname pigment setrgbcolor
+        zqx zqy0 zqcw 3 sub 30 rectfill
+        0 1 5 {
+            /zqk exch def
+            /zqt zqtints zqk get def
+            /zqy zqy0 zqk 1 add 20 mul sub def
+            zqname zqt pigtint setrgbcolor
+            zqx zqy 36 20 rectfill
+            [ zqname 1 zqt sub /titaniumwhite zqt ] zqlerp setrgbcolor
+            zqx 36 add zqy zqcw 39 sub 20 rectfill
+        } for
+        0.8 setgray 0.4 setlinewidth zqx zqy0 120 sub zqcw 3 sub 150 rectstroke
+        zqx zqy0 130 sub 6.5 zqname 20 string cvs /Helvetica-Bold 0.2 0.2 0.2 setrgbcolor zqtext
+    } for
+} def
+zqtube
+26 752 (Each tint cell: the paint tint on the left, the RGB lerp of the same parts on the right. A tint is not a straight line to white: it depends on the pigment.) zqcap
+
+% ======================================================================
+% Ramps: paint above, RGB lerp below.
+% ======================================================================
+/zqramp {                                    % y /a /b label -
+    /zqrl exch def /zqrb exch def /zqra exch def /zqry exch def
+    0 1 59 {
+        /zqj exch def
+        /zqu zqj 59 div def
+        [ zqra 1 zqu sub zqrb zqu ] pigmix setrgbcolor
+        26 zqj 12 mul add zqry 12 18 rectfill
+        [ zqra 1 zqu sub zqrb zqu ] zqlerp setrgbcolor
+        26 zqj 12 mul add zqry 18 sub 12 18 rectfill
+    } for
+    26 zqry 22 add zqrl zqnote
+} def
+695 /phthaloblue /cadmiumyellow (phthalo blue to cadmium yellow: the paint (above) goes through green, the RGB lerp through a muddy olive) zqramp
+638 /phthaloblue /alizarin (phthalo blue to alizarin: paint goes through violet, the lerp runs through a flatter plum) zqramp
+581 /phthaloblue /titaniumwhite (phthalo blue to titanium white: the paint tint stays a clean blue, the lerp slides through a greyer one) zqramp
+
+% ======================================================================
+% Classic landscape mixes.
+% ======================================================================
+/zqmix {                                     % x y [spec] label -
+    /zqml exch def /zqms exch def /zqmy exch def /zqmx exch def
+    0 2 zqms length 2 sub {
+        /zqi exch def
+        zqms zqi get pigment setrgbcolor
+        zqmx zqi 5 mul add zqmy 40 add 9 9 rectfill
+    } for
+    zqms pigmix setrgbcolor
+    zqmx zqmy 120 34 rectfill
+    zqms zqlerp setrgbcolor
+    zqmx 120 add zqmy 40 34 rectfill
+    zqmx zqmy 10 sub zqml zqcap
+} def
+/zqmixes {
+    26   500 [ /phthaloblue 1 /cadmiumyellow 1 ]                    (blue + yellow: green) zqmix
+    26   420 [ /sapgreen 1 /cadmiumyellow 1 ]                       (sap green + cadmium yellow: tree highlight) zqmix
+    26   340 [ /phthaloblue 1 /alizarin 1 ]                         (blue + alizarin: violet) zqmix
+    26   260 [ /phthaloblue 1 /alizarin 1 /titaniumwhite 6 ]        (+ white: distant lavender) zqmix
+    410  500 [ /phthaloblue 1 /titaniumwhite 4 ]                    (blue + white: sky) zqmix
+    410  420 [ /yellowochre 1 /titaniumwhite 1 ]                    (ochre + white: sunlit sand) zqmix
+    410  340 [ /vandykebrown 2 /prussianblue 1 /midnightblack 1 ]   (brown + blue + black: a rich dark) zqmix
+    410  260 [ /brightred 1 /cadmiumyellow 1 /titaniumwhite 1 ]     (red + yellow + white: warm light) zqmix
+} def
+zqmixes
+26 232 (Large swatch: pigmix. Narrow swatch: the RGB lerp of the same parts. Chips: the pigments, in order.) zqcap
+
+% ======================================================================
+% The palette feeding the brushes' colour keys.
+% ======================================================================
+/zqpanel {                                   % x caption proc -
+    /zqpp exch def /zqpc exch def /zqpx exch def
+    gsave
+        zqpx 60 translate
+        0.93 0.92 0.89 setrgbcolor 0 0 240 150 rectfill
+        0 0 240 150 rectclip
+        zqpp
+    grestore
+    zqpx 48 zqpc zqcap
+} def
+
+% A broad brush, loaded with two pigments or two mixes, three strokes.
+/zqloads [
+    [ /phthaloblue /titaniumwhite ]
+    [ /alizarin /yellowochre ]
+    [ [ /phthaloblue 1 /alizarin 1 /titaniumwhite 5 ] [ /vandykebrown 1 /titaniumwhite 3 ] ]
+] def
+/zqbroad {
+    5 srand
+    0 1 2 {
+        /zqk exch def
+        /zqoy 28 zqk 46 mul add def
+        newpath 14 zqoy moveto
+        90 zqoy 36 add 150 zqoy 20 sub 226 zqoy 6 add curveto
+        << /Width 34 /Charge 1 /Depletion 0 /Edge 0.2 /ColorJitter 0
+           /Colors zqloads zqk get pigcolors /ColorMix 0.3 >> pkbroad
+    } for
+} def
+26 (a broad brush loaded with pigments and pigmix specs) { zqbroad } zqpanel
+
+% A bush: body, highlight and shadow all from the palette.
+/zqbush {
+    21 srand
+    [ /sapgreen 3 /vandykebrown 1 ] pigmix setrgbcolor
+    newpath 14 38 moveto 226 38 lineto
+    << /Width 20 /Ridges 9 /Highlight 0.9 /Shadow 0.9
+       /HighlightColor [ /cadmiumyellow 2 /sapgreen 1 ] pigcolor
+       /ShadowColor [ /prussianblue 2 /sapgreen 1 ] pigcolor >> pkoil
+    22 srand
+    [ /sapgreen 3 /prussianblue 1 ] pigmix setrgbcolor
+    newpath 50 70 moveto 120 80 lineto 190 70 lineto
+    << /Size 6 /Scatter 15 /Density 5 /Highlight 1 /Shadow 0.9
+       /Light 135 /Irregular 1 /ColorJitter 0.03
+       /HighlightColor [ /cadmiumyellow 2 /sapgreen 1 ] pigcolor
+       /ShadowColor [ /prussianblue 2 /sapgreen 1 ] pigcolor >> pkdab
+} def
+270 (pkdab and pkoil: /HighlightColor and /ShadowColor from pigcolor) { zqbush } zqpanel
+
+% A loaded evergreen: each branch carries a sunlit mix and a shadow mix.
+/zqpine {
+    9 srand
+    /vandykebrown pigment setrgbcolor
+    newpath 120 14 moveto 120 130 lineto
+    << /Width 7 /Taper 0.9 /Waver 0.2 >> pkliner
+    0 1 4 {
+        /zqk exch def
+        /zqty 118 zqk 21 mul sub def
+        /zqsp 20 zqk 12 mul add def
+        [ -1 1 ] {
+            /zqs exch def
+            newpath 120 zqty moveto
+            120 zqsp zqs mul add zqty zqsp 0.5 mul sub lineto
+            << /Width 20 /Bristles 44 /Splay 0.45 /Load 0.95 /Dropout 0.04
+               /Ragged 0.35 /ColorJitter 0.03 /Light 150 /ColorMix 0.15
+               /Colors [ [ /sapgreen 1 /cadmiumyellow 1 ]
+                         [ /sapgreen 3 /midnightblack 1 ] ] pigcolors >> pkfan
+        } forall
+    } for
+} def
+514 (pkfan: /Colors [ [ sap green + cadmium ] [ sap green + black ] ] pigcolors) { zqpine } zqpanel
+
+% ---- page title ------------------------------------------------------
+0.12 0.12 0.12 setrgbcolor
+26 950 15 (Pigments that mix like paint) /Helvetica-Bold zqtext
+0.4 0.4 0.4 setrgbcolor
+26 936 8.5 (A named oil palette and pigmix, a Kubelka-Munk mix run per colour channel: blue and yellow make green, white tints instead of only lightening.) /Helvetica zqtext
+
+showpage

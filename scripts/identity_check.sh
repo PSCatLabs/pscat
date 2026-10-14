@@ -4,13 +4,15 @@
 # must render identically.
 #
 #   scripts/identity_check.sh BASE_WORKTREE [BIN] [options]
+#   scripts/identity_check.sh BASE_WORKTREE --base-bin PATH --head-bin PATH [options]
 #
 # Every slice of the paintkit epics (#112, #182, #183) promises "a render with
 # the new keys unset is byte-identical to before". L1, S1 and L2 each proved it
 # by hand; this script is that proof, written once. It renders every tracked
 # file that loads lib/paintkit.ps -- `examples/*.ps`, `gallery/*.ps` and
-# `selftest/drivers/*.ps` -- from two trees with ONE binary, and compares the
-# PNGs byte for byte. Any other lib change that must render identically uses
+# `selftest/drivers/*.ps` -- from two trees with ONE binary (or, for an
+# interpreter change, one binary per tree: --base-bin / --head-bin, below), and
+# compares the PNGs byte for byte. Any other lib change that must render identically uses
 # `--loader lib/<name>.ps` (below) to pick the files instead.
 #
 #   BASE_WORKTREE  a checkout of the baseline. It MUST be at the branch's base
@@ -24,6 +26,18 @@
 #                  `cargo build --release --bin pscat`. A BIN you pass is used
 #                  as-is and never built. The same binary renders both trees, so
 #                  a difference can only come from the trees' own files.
+#   --base-bin PATH  \ two binaries, for a change under src/ (issue #335). The base
+#   --head-bin PATH  / tree renders with PATH of the first, the head tree with the
+#                  second. Give both or neither, and not together with BIN. Neither
+#                  is built here. Make the base one with
+#                  scripts/build_base_bin.sh BASE_WORKTREE OUT_BIN (BASE_WORKTREE is
+#                  the same tree you pass as the first argument), the head one is the
+#                  release binary of this tree. A difference can now come from the
+#                  binary or from the trees' files. For a pure src/ change the files
+#                  are the same in both trees, so a difference is the binary's.
+#                  The default file pick (files that load lib/paintkit.ps) is narrow
+#                  for an interpreter change: add --loader lib/artkit.ps (about 63
+#                  files) or a --files LIST.
 #
 # The "branch" tree is the repo this script lives in. Each render runs with that
 # tree as its working directory, because `(lib/paintkit.ps) run` resolves
@@ -66,6 +80,11 @@
 #                         the branch has. It is rendered from both trees and the
 #                         PNGs must DIFFER, which proves each tree really loaded
 #                         its own library. Without it the script warns and skips.
+#                         With --base-bin/--head-bin it is the same test for the
+#                         binaries: a driver that uses behaviour only the head
+#                         binary has (for an operator fix, the call that used to
+#                         raise an error). The two renders must differ, which
+#                         proves each tree ran its own binary.
 #   --control-page WxH    page for the control (default: its own header, else
 #                         pscat's default page).
 #   --gallery-still       also require gallery/alpine_lake.ps to equal the
@@ -118,6 +137,8 @@ fi
 # ---- arguments ---------------------------------------------------------------
 BASE=""
 BIN=""
+BASE_BIN=""
+HEAD_BIN=""
 CONTROL=""
 CONTROL_PAGE=""
 LOADERS=""       # newline-separated --loader libs (empty = lib/paintkit.ps)
@@ -136,6 +157,8 @@ while [ $# -gt 0 ]; do
                          LOADERS="${LOADERS:+$LOADERS
 }$2"; shift 2 ;;
         --files)         [ $# -ge 2 ] || die "--files needs a list file"; FILES_LIST=$2; shift 2 ;;
+        --base-bin)      [ $# -ge 2 ] || die "--base-bin needs a pscat binary"; BASE_BIN=$2; shift 2 ;;
+        --head-bin)      [ $# -ge 2 ] || die "--head-bin needs a pscat binary"; HEAD_BIN=$2; shift 2 ;;
         --control)       [ $# -ge 2 ] || die "--control needs a file"; CONTROL=$2; shift 2 ;;
         --control-page)  [ $# -ge 2 ] || die "--control-page needs WxH"; CONTROL_PAGE=$2; shift 2 ;;
         --gallery-still) GALLERY_STILL=1; shift ;;
@@ -157,7 +180,13 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-[ -n "$BASE" ] || die "usage: identity_check.sh BASE_WORKTREE [BIN] [options]"
+[ -n "$BASE" ] || die "usage: identity_check.sh BASE_WORKTREE [BIN | --base-bin PATH --head-bin PATH] [options]"
+TWO_BINS=0
+if [ -n "$BASE_BIN" ] || [ -n "$HEAD_BIN" ]; then
+    [ -n "$BASE_BIN" ] && [ -n "$HEAD_BIN" ] || die "--base-bin and --head-bin go together; give both"
+    [ -z "$BIN" ] || die "BIN and --base-bin/--head-bin are alternatives; give one or the other"
+    TWO_BINS=1
+fi
 [ -d "$BASE" ] || die "BASE_WORKTREE '$BASE' is not a directory"
 BASE="$(cd "$BASE" && pwd -P)"
 # The libs that pick the files. Default: lib/paintkit.ps (the old behaviour).
@@ -205,7 +234,21 @@ fi
 case "$JOBS" in ''|*[!0-9]*|0) die "-j takes a positive number" ;; esac
 
 # ---- binary ------------------------------------------------------------------
-if [ -z "$BIN" ]; then
+if [ "$TWO_BINS" -eq 1 ]; then
+    for b in "$BASE_BIN" "$HEAD_BIN"; do
+        [ -x "$b" ] && [ -f "$b" ] || die "pscat binary '$b' is not an executable file"
+    done
+    BASE_BIN="$(cd "$(dirname "$BASE_BIN")" && pwd -P)/$(basename "$BASE_BIN")"
+    HEAD_BIN="$(cd "$(dirname "$HEAD_BIN")" && pwd -P)/$(basename "$HEAD_BIN")"
+    BIN=$HEAD_BIN
+    if cmp -s "$BASE_BIN" "$HEAD_BIN"; then
+        echo "identity_check.sh: WARNING: --base-bin and --head-bin are byte-identical files, so the" >&2
+        echo "  binaries cannot make the control differ; the check only compares the trees." >&2
+    fi
+else
+    BASE_BIN=""
+fi
+if [ "$TWO_BINS" -eq 0 ] && [ -z "$BIN" ]; then
     echo "building the release pscat (cargo build --release --bin pscat)..." >&2
     cargo build --release --bin pscat --manifest-path "$ROOT/Cargo.toml" >&2
     # Ask Cargo where the binary went (scripts/selftest.sh does the same): a
@@ -218,6 +261,8 @@ if [ -z "$BIN" ]; then
 fi
 [ -x "$BIN" ] || die "pscat binary '$BIN' is not executable"
 BIN="$(cd "$(dirname "$BIN")" && pwd -P)/$(basename "$BIN")"
+[ -n "$BASE_BIN" ] || BASE_BIN=$BIN
+HEAD_BIN=$BIN
 
 # ---- scratch -----------------------------------------------------------------
 made_out=0
@@ -332,8 +377,11 @@ fi
 JOBLIST="$OUT/jobs.nul"
 : > "$JOBLIST"
 add_job() { # tree-name tree-path key page dpi file
-    # xargs -0 drops empty arguments, so "no page" travels as "-".
-    printf '%s\0%s\0%s\0%s\0%s\0' "$2" "$OUT/$1/$3" "${4:--}" "$5" "$6" >> "$JOBLIST"
+    # xargs -0 drops empty arguments, so "no page" travels as "-". The binary is
+    # part of the job: the base tree renders with BASE_BIN, the head tree with HEAD_BIN.
+    local bin=$HEAD_BIN
+    [ "$1" = base ] && bin=$BASE_BIN
+    printf '%s\0%s\0%s\0%s\0%s\0%s\0' "$bin" "$2" "$OUT/$1/$3" "${4:--}" "$5" "$6" >> "$JOBLIST"
 }
 COMPARE="$OUT/compare.txt"   # lines: file key
 : > "$COMPARE"
@@ -367,15 +415,23 @@ if [ -n "$CONTROL" ]; then
     add_job head "$ROOT" "$CONTROL_KEY" "$cpage" "$DPI" "$CONTROL"
 else
     echo "identity_check.sh: WARNING: no --control given. Without a negative control nothing proves each tree" >&2
-    echo "  loaded its own $LOADER_DESC, so an all-identical result could mean both used the same one." >&2
+    if [ "$TWO_BINS" -eq 1 ]; then
+        echo "  ran its own binary, so an all-identical result could mean both used the same one." >&2
+    else
+        echo "  loaded its own $LOADER_DESC, so an all-identical result could mean both used the same one." >&2
+    fi
 fi
 
-# Each job is 5 NUL-separated fields after the fixed `--render-one BIN`; the
-# tree name is encoded in OUTDIR, so xargs passes: TREE OUTDIR PAGE DPI FILE.
+# Each job is 6 NUL-separated fields after the fixed `--render-one`; the tree
+# name is encoded in OUTDIR, so xargs passes: BIN TREE OUTDIR PAGE DPI FILE.
 START=$(date +%s)
 nfiles=$(wc -l < "$COMPARE" | tr -d ' ')
-echo "rendering $nfiles files x 2 trees with $BIN (-j $JOBS)" >&2
-xargs -0 -n 5 -P "$JOBS" "$SELF" --render-one "$BIN" < "$JOBLIST" \
+if [ "$TWO_BINS" -eq 1 ]; then
+    echo "rendering $nfiles files x 2 trees: base with $BASE_BIN, head with $HEAD_BIN (-j $JOBS)" >&2
+else
+    echo "rendering $nfiles files x 2 trees with $BIN (-j $JOBS)" >&2
+fi
+xargs -0 -n 6 -P "$JOBS" "$SELF" --render-one < "$JOBLIST" \
     || die "the render driver failed (see $OUT); this is a harness error, not a difference"
 
 # ---- compare -----------------------------------------------------------------
@@ -480,7 +536,11 @@ if [ -n "$CONTROL" ]; then
         if [ "$cdiff" -eq 1 ]; then
             echo "control    differs between the trees, as it must"
         else
-            echo "CONTROL FAILED  the control rendered identically in both trees: each tree may not have loaded its own library"
+            if [ "$TWO_BINS" -eq 1 ]; then
+                echo "CONTROL FAILED  the control rendered identically in both trees: it may not use anything only the head binary has, or the binaries may not differ"
+            else
+                echo "CONTROL FAILED  the control rendered identically in both trees: each tree may not have loaded its own library"
+            fi
             CONTROL_FAILED=1
         fi
     fi

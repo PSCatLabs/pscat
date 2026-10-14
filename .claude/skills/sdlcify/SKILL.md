@@ -51,6 +51,13 @@ non-recursive is enough for the common case):
 | `pyproject.toml` / `requirements.txt` | Python | `pip install -e .[dev] && pytest && ruff check . && ruff format --check .` | `actions/setup-python@v5` |
 | `go.mod` | Go | `go build ./... && go test ./... && go vet ./... && test -z "$(gofmt -l .)"` | `actions/setup-go@v5` |
 
+The quality-gate column is only the *default starting* command. If
+`SDLC.md`'s frontmatter has a `quality_gate:` field, that command wins
+(Phase 1, the `quality_gate` rule). The repo's own
+`.github/workflows/ci.yml` is the ground truth for what the gate is; a
+repo's CI can run a different sequence (a PS self-check script,
+`--profile ci`, no separate build).
+
 More than one marker present (rare) → ask which is primary rather than
 guessing. No marker at all → docs-only repo; skip the CI/linter phases
 entirely (nothing to build or test), everything else still applies.
@@ -68,6 +75,12 @@ skip straight to Phase 2 with that as target state** — don't re-ask.
 This is what makes re-runs (e.g. "we changed our merge policy, apply
 it") idempotent and driven by editing one file rather than re-answering
 questions.
+
+**The `quality_gate` rule** (read, not asked): if the frontmatter has
+`quality_gate:`, use that string verbatim as the gate command in
+`SDLC.md` step 5 and in the PR test plan. If it is absent, use the
+Phase 0 table default for the language. Never rewrite a set
+`quality_gate` on a re-run. Only a human edits it.
 
 If `SDLC.md` doesn't exist yet, this is a first run — ask the policy
 questions below, then write it (template: `references/sdlc-doc-template.md`).
@@ -136,6 +149,11 @@ diff — don't print anything yet, don't mutate anything yet.
   it as authored, not generated — don't overwrite it.** Only flag gaps
   (e.g. missing a trigger) in the report; let the user decide whether to
   hand-edit. Only *generate from scratch* when the file is absent.
+  If it exists and its run steps differ from the gate in use (the
+  `quality_gate` field, else the Phase 0 table default), report the
+  drift and tell the user to set `quality_gate` to the sequence CI
+  actually runs. Do not parse the workflow into a command: CI steps
+  carry env blocks, `| tee` pipes and `continue-on-error`.
 - **Linters**: for Rust this is satisfied by the CI quality-gate command
   already including `clippy --all-targets -- -D warnings` and
   `fmt --all -- --check` — no extra file needed. Other languages: check
