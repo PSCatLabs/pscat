@@ -473,8 +473,10 @@ renders eight examples in both and compares block-downsampled output).
   MultipleDataSources colorimage (limitcheck). DCTDecode buffers one
   whole JPEG (marker-aware, stops exactly at EOI); CCITTFax absent;
   Adobe inverted-CMYK JPEGs untested.
-- errordict handlers not consulted; error-time operand-stack
-  restoration not done (PLRM handlers see pre-error operands).
+- errordict holds a handler per error name (#372, so `errordict /name
+  get exec` re-raises), but a handler a program installs there is not
+  consulted on a real error; error-time operand-stack restoration not
+  done (PLRM handlers see pre-error operands).
 - Stroke width ≈ √|det CTM| (anisotropic pens wrong; `strokepath`
   inherits it, since it shares `stroke`'s parameters); `showpage`
   doesn't erase; ints are i64; `flattenpath` uses a fixed
@@ -573,7 +575,8 @@ renders eight examples in both and compares block-downsampled output).
    inscription, an orrery of brass.
 2. Leftovers when they itch: the remaining fib/fern machine-loop gap
    vs gs (Stage 11 findings in NOTES.md — the untaken levers are
-   representation changes), errordict handlers, error-time operand
+   representation changes), consulting a user-installed errordict
+   handler, error-time operand
    restoration, DSC-comment tolerance and more corpus files,
    CCITTFax. (`rectfill`/`rectstroke`/`rectclip` landed 2026-07-18,
    found missing by `--interactive`'s first session.)

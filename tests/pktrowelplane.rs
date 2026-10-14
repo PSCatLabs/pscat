@@ -295,6 +295,33 @@ fn a_pressure_that_stops_is_passed_on_as_a_stop() {
 }
 
 #[test]
+fn a_row_error_that_is_not_undefined_is_raised_again_under_its_name() {
+    // The plane catches a row's error, undoes its clip and rotation, and
+    // raises it through errordict. That used to report `undefined` in pscat
+    // (errordict had no handlers, issue #372); Ghostscript keeps the name
+    // and the command, and so must this.
+    let mut it = fresh(100, 100);
+    run(
+        &mut it,
+        &format!(
+            "{TRI_PAGE} {{ << /Width 12 /Pressure {{ pop [1] 5 get }} >> pktrowelplane }} stopped \
+             {{ $error /errorname get $error /command get }} if"
+        ),
+    );
+    let stack: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
+    assert_eq!(stack[stack.len() - 2..], ["/rangecheck", "get"]);
+    let mut it = fresh(100, 100);
+    let src = format!("{TRI_PAGE} << /Width 12 /Pressure {{ pop [1] 5 get }} >> pktrowelplane");
+    let e = it.run_str(&src).unwrap_err();
+    assert_eq!(e, pscat::PsError::Rangecheck);
+    assert!(
+        it.error_report(&e).contains("OffendingCommand: get"),
+        "{}",
+        it.error_report(&e)
+    );
+}
+
+#[test]
 fn a_rotated_matrix_changes_nothing_about_the_edge() {
     // Under `100 0 translate 90 rotate` user (x, y) is device (100 - y, x)
     // page-wise, so the same triangle sits at a known place.
