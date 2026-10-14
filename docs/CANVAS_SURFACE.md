@@ -189,9 +189,9 @@ height(i, j)   = (1 - Relief)*hash(i, j, 0) + Relief*mottle(centre)
 The knuckle at cell `(i, j)` is centred at `((i+0.5)W, (j+0.5)W)`,
 nudged by up to `0.15W` on each axis by `hash(i,j,2)` and `hash(i,j,3)`,
 and moved by its threads' wander: the column (warp) thread shifts it
-in x by `wander(i, j)`, the row (weft) thread in y by `wander(j, i)`,
-where `wander(t, k)` is smoothstepped 1D value noise along the thread
-over `hash(t, floor(k/3), 5)`, in `-0.35W..0.35W` (issue #298: on a
+in x by `wander(i, j, 5)`, the row (weft) thread in y by
+`wander(j, i, 6)`, where `wander(t, k, s)` is smoothstepped 1D value
+noise along the thread over `hash(t, floor(k/3), s)`, in `-0.35W..0.35W` (issue #298: on a
 ruled lattice the catch read as a square pixel grid at 2x). It is an
 ellipse of semi-axes `0.65W x 0.55W` times a per-knuckle size
 `0.8 + 0.4 hash(i,j,4)`, long along x when `i + j` is odd and along y

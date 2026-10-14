@@ -12,7 +12,7 @@ pixel grid. Changes, all pure functions of (seed, i, j), still no rand draws:
 
 - `pjwander`: each column (warp) thread shifts its knuckles in x, each row
   (weft) thread in y, by smoothstepped 1D value noise along the thread (a
-  lattice point every 3 crossings, hash slot 5), in -0.35..0.35 of a cell. A
+  lattice point every 3 crossings, hash slot 5 for warp and 6 for weft), in -0.35..0.35 of a cell. A
   column of knuckles moves together, so the lattice reads as wavy threads.
 - Per-knuckle size 0.8..1.2 (hash slot 4); rounder knuckles, 0.65 x 0.55.
 - The top-fifth growth goes from 0.25 to 0.45. Without it the gaps the
@@ -21,6 +21,10 @@ pixel grid. Changes, all pure functions of (seed, i, j), still no rand draws:
   with 0.25 growth 93.6 / 97.0 / 98.5%, final 96.5 / 99.1 / 99.8%.
 - `pjrange` margin 1.25W -> 1.75W (0.65 x 1.1 x 1.45 x 1.2 + 0.15 + 0.35).
   The 600pt budget self-test still builds 244 x 244 cells.
+- Mid-touch tone barely moves (same square, base -> head): /Touch 0.5
+  32.2 -> 32.3%, 0.6 50.8 -> 50.1%, 0.7 68.8 -> 67.1%, 0.8 82.0 -> 79.5%.
+  So the approved pieces' dry marks keep their tone; only the pattern
+  changes.
 
 Variants tried (aspect, wander period, amplitude): 0.72x0.5/4/±0.25,
 0.8x0.42/4/±0.35, 0.65x0.55/3/±0.35 (chosen), 0.9x0.4/5/±0.3. The dash-shaped

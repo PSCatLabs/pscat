@@ -10281,21 +10281,22 @@ systemdict /setalpha known /pwhasalpha exch def
     pop
 } bind def
 
-% t k -> offset   (the wander of thread t at crossing k, in cells)
+% t k s -> offset   (the wander of thread t at crossing k, in cells)
 % A thread of the weave is not ruled: it drifts a little from its place,
 % slowly, as it runs. The offset is smoothstepped 1D value noise along the
-% thread, a lattice point every 3 crossings, from hash(t, floor(k/3), 5),
-% in -0.35..0.35 of a cell. pjcatch calls it as `i j pjwander` for the column
-% (warp) thread's x and `j i pjwander` for the row (weft) thread's y, so a
+% thread, a lattice point every 3 crossings, from hash(t, floor(k/3), s),
+% in -0.35..0.35 of a cell. pjcatch calls it as `i j 5 pjwander` for the
+% column (warp) thread's x and `j i 6 pjwander` for the row (weft) thread's
+% y (separate slots, so the field is not mirrored about the diagonal), so a
 % column of knuckles shifts together and the lattice stops reading as a
 % grid. t and k must be integers; a pure function of them, no rand.
 % @internal
 /pjwander {
-    /pjwk exch def /pjwt exch def
+    /pjws exch def /pjwk exch def /pjwt exch def
     /pjwq pjwk 3 div floor cvi def
     /pjwf pjwk pjwq 3 mul sub 3 div def
     /pjwf pjwf dup mul 3 2 pjwf mul sub mul def
-    pjwt pjwq 5 pjhash pjwt pjwq 1 add 5 pjhash pjwf pjlerp
+    pjwt pjwq pjws pjhash pjwt pjwq 1 add pjws pjhash pjwf pjlerp
     0.5 sub 0.7 mul
 } bind def
 
@@ -10421,9 +10422,9 @@ systemdict /setalpha known /pwhasalpha exch def
                         pjgrow mul pjcw mul def
                     /pjs pjs pjci pjcj 4 pjhash 0.4 mul 0.8 add mul def
                     pjci 0.5 add pjci pjcj 2 pjhash 0.5 sub 0.3 mul add
-                        pjci pjcj pjwander add pjcw mul
+                        pjci pjcj 5 pjwander add pjcw mul
                     pjcj 0.5 add pjci pjcj 3 pjhash 0.5 sub 0.3 mul add
-                        pjcj pjci pjwander add pjcw mul
+                        pjcj pjci 6 pjwander add pjcw mul
                     pjci pjcj add 1 and 1 eq
                         { pjs 0.65 mul pjs 0.55 mul }
                         { pjs 0.55 mul pjs 0.65 mul }
