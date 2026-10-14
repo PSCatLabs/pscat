@@ -48,8 +48,14 @@
 % code point (`sgcmap`). Math-hand variants have names only (`/x.curly`
 % `/z.crossed` `/y.math` `/t.math` `/n.math`) and are also reached by
 % the math-italic code points U+1D465 and friends. A glyph that isn't
-% known advances as `.notdef` (300 units) and draws nothing, the same as
-% handscript.
+% known is an error by default: `sgpath` and `sgwidth` raise
+% `sg-missing-glyph:<char>` (the character itself for a string, the name
+% for a name array), before anything is drawn, the way mathkit refuses
+% a character with `mk-unsupported-character:`. Without it a typo such
+% as the superscript two in `(i² = -1)` vanished from the board with no
+% error (issue #350). `/Strict false` is the opt-out: an unknown glyph
+% then advances as `.notdef` (300 units) and draws nothing, as
+% handscript does.
 %
 % --- Jitter -------------------------------------------------------------
 % Resolved once into data from a private generator (a Schrage LCG, the
@@ -550,16 +556,43 @@
   sgcmap 1 index known { sgcmap exch get } { pop /.notdef } ifelse
 } def
 
+% name -> -   remember the first name that has no glyph (sgmiss)
+% @internal
+/sgnotename {
+  dup /.notdef eq 1 index sgtab exch known not or sgmiss null eq and
+    { 256 string cvs /sgmiss exch def } { pop } ifelse
+} def
+
+% label-string -> (never returns)   the strict-mode error, named for the
+% glyph that is missing (truncated to 40 bytes, as mathkit's labels are)
+% @internal
+/sgmissfail {
+  dup length 40 gt { 0 40 getinterval } if
+  (sg-missing-glyph:) length 1 index length add string
+  dup 0 (sg-missing-glyph:) putinterval
+  dup (sg-missing-glyph:) length 4 -1 roll putinterval
+  cvn cvx exec
+} def
+
+% - -> -   in strict mode, refuse the text sgnames just decoded if it
+% held a glyph that does not exist
+% @internal
+/sgcheckstrict {
+  sgstrict sgmiss null ne and { sgmiss sgmissfail } if
+} def
+
 % string-or-name-array -> array of glyph names (UTF-8 decode)
 % @internal
 /sgnames {
   dup type /stringtype eq {
     /sgs exch def
     /sgk 0 def
+    /sgmiss null def
     [ {
         sgk sgs length ge { exit } if
         /sgb sgs sgk get def
         /sgk sgk 1 add def
+        /sgk0 sgk 1 sub def
         sgb 128 lt { sgb } {
           sgb 224 lt { sgb 31 and 1 } {
             sgb 240 lt { sgb 15 and 2 } { sgb 7 and 3 } ifelse
@@ -572,11 +605,15 @@
           } repeat
         } ifelse
         sgcp2name
+        dup /.notdef eq sgmiss null eq and
+          { sgs sgk0 sgk sgk0 sub getinterval /sgmiss exch def } if
       } loop ]
   } {
     dup type /arraytype eq 1 index type /packedarraytype eq or {
+      /sgmiss null def
       dup {
-        type /nametype ne { sg-text-array-must-hold-glyph-names } if
+        dup type /nametype ne { sg-text-array-must-hold-glyph-names } if
+        sgnotename
       } forall
     } {
       sg-text-must-be-a-string-or-name-array
@@ -617,6 +654,11 @@
     dup type /integertype ne { sg-seed-must-be-an-integer } if
   } { null } ifelse
   /sgseed0 exch def
+  sgo /Strict known {
+    sgo /Strict get
+    dup type /booleantype ne { sg-strict-must-be-a-boolean } if
+  } { true } ifelse
+  /sgstrict exch def
 } def
 
 % x y -> int   the default seed: the origin's device-space position,
@@ -707,6 +749,28 @@
 %   (a name as /Slant) mustguard
 %   { (a) 0 0 << /Seed 1.5 >> sgpath } /sg-seed-must-be-an-integer
 %   (a real /Seed) mustguard
+%%EndSelfTest
+%
+%%SelfTest: sgpath-refuses-a-missing-glyph-by-name
+%   { (i² = 1) 0 0 << >> sgpath } /sg-missing-glyph:² (a superscript two) mustguard
+%   { (a∮b) 0 0 << >> sgpath } /sg-missing-glyph:∮ (a contour integral) mustguard
+%   { (x²) << >> sgwidth } /sg-missing-glyph:² (sgwidth is strict too) mustguard
+%   { [ /a /nosuchglyph /b ] 0 0 << >> sgpath } /sg-missing-glyph:nosuchglyph
+%   (an unknown name) mustguard
+%   { [ /a /.notdef ] 0 0 << >> sgpath } /sg-missing-glyph:.notdef
+%   (an explicit .notdef) mustguard
+%   { (a²) 0 0 << /Strict true >> sgpath } /sg-missing-glyph:² (/Strict true) mustguard
+%   { (a) 0 0 << /Strict 1 >> sgpath } /sg-strict-must-be-a-boolean
+%   (a number as /Strict) mustguard
+%   % the refusal comes before any ink: the path is still empty
+%   newpath { (ab²) 0 0 << >> sgpath } /sg-missing-glyph:² (ab²) mustguard
+%   { currentpoint } stopped (nothing was added to the path) mustbe
+%   % /Strict false is the handscript behaviour: 300 units, no ink
+%   newpath (a²) 0 0 << /Strict false /Size 1000 /Jitter 0 >> sgpath
+%   (a²) << /Strict false /Size 1000 >> sgwidth
+%   (a) << /Size 1000 >> sgwidth 300 add eq
+%   (a missing glyph advances 300 units under /Strict false) mustbe
+%   newpath
 %%EndSelfTest
 %
 %%SelfTest: sggrow-rejects-malformed-operands
@@ -822,6 +886,7 @@
 % @param: /Slant [degrees] Forward lean applied to every glyph as a shear about the baseline (default 0)
 % @param: /Jitter [fraction of /Size] Bound on each point's wobble and each glyph's baseline drift; 0 draws the exact skeleton (default 0.016)
 % @param: /Seed [integer] The glyph at index i is jittered from seed + i, so editing later text never re-rolls earlier glyphs (default: derived from the origin's device-space position, so text drawn in two places differs)
+% @param: /Strict [boolean] true raises sg-missing-glyph:<char> for a character or name with no glyph, before anything is drawn; false lets it advance 300 design units and draw nothing, as handscript does (default true)
 /sgpath {
   sgcheckopts
   4 1 roll
@@ -829,6 +894,7 @@
   /sgy0 exch def /sgx0 exch def
   sgnames /sgn exch def
   sgreadopts
+  sgcheckstrict
   sgseed0 null eq { /sgseed0 sgx0 sgy0 sgposseed def } if
   0 1 sgn length 1 sub {
     /sgi exch def
@@ -844,10 +910,12 @@
 % @summary: The width in points that sgpath would advance for the same text and /Size, from the fixed glyph advances only (never the jittered ink), so a layout measured with it always agrees with the drawing.
 % @example: (lib/handscript.ps) run (lib/strokeglyphs.ps) run (x + 1) << /Size 40 >> sgwidth
 % @param: /Size [points] The em size, as for sgpath (default 36)
+% @param: /Strict [boolean] As for sgpath: true raises sg-missing-glyph:<char>, false counts a missing glyph as 300 design units wide (default true)
 /sgwidth {
   sgcheckopts
   exch sgnames exch
   sgreadopts
+  sgcheckstrict
   0 exch { sgglyph 0 get add } forall
   sgsc mul
 } def
