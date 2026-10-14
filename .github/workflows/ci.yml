@@ -1,7 +1,7 @@
 # Build/test/lint gate for every push to main and every pull request —
-# the automated half of AGENTS.md's quality bar (`cargo build && cargo
-# test && cargo clippy --all-targets && cargo fmt --check`), so a PR
-# can't land without it passing.
+# the automated half of AGENTS.md's quality bar (`scripts/selftest.sh`,
+# `cargo test --profile ci`, `cargo clippy --all-targets -- -D warnings`,
+# `cargo fmt --all -- --check`), so a PR can't land without it passing.
 #
 # The test step's real pass/fail counts and failure output are also
 # posted as a PR comment (and echoed to the linked issue) via
