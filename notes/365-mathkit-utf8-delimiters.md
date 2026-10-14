@@ -25,9 +25,10 @@ reached `mkdelim`'s last branch, which took one ASCII byte, so the error was
 
 - ASCII errors (`\left<` is `mk-unsupported-delimiter:<`, `\left x` is `:x`).
 - Malformed UTF-8 (a lone continuation byte, a lead byte cut off by the end
-  of the source) still puts its raw bytes in the name: there is no character
-  to name. The sequence is taken as long as its lead byte says, as `mkutf8`
-  does for ordinary text.
+  of the source) is taken as long as its lead byte says, exactly as `mkutf8`
+  does for ordinary text, so the error name holds those raw bytes: there is
+  no character to name. Deliberate; the same input fails the same way
+  everywhere in mathkit.
 - The ASCII `*` and `^*` (#364) are a separate ticket.
 
 ### Tests
