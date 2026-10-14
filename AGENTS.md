@@ -76,10 +76,11 @@ predates it.
   `./scripts/selftest.sh` runs them and `docs/SELFTEST.md` has the
   convention. Rust stays the right home for anything needing pixel
   readback or a real `gs`.
-- A procedure added to `lib/artkit.ps`, `lib/paintkit.ps` or
-  `lib/drykit.ps` is defined `} bind def`, not `} def`: unbound, gs looks
-  up every operator in it at run time and runs 1.5 to 3 times slower
-  (`notes/307-bind-library-procedures.md`). `tests/libbind.rs` enforces it.
+- A procedure added to `lib/artkit.ps`, `lib/paintkit.ps`,
+  `lib/drykit.ps` or `lib/drychalk.ps` is defined `} bind def`, not
+  `} def`: unbound, gs looks up every operator in it at run time and runs
+  1.5 to 3 times slower (`notes/307-bind-library-procedures.md`,
+  `notes/318-bind-drychalk.md`). `tests/libbind.rs` enforces it.
 - Keep `README.md` accurate to *current* state, not aspirational state.
   Update it as capabilities land, not just at the end.
 
