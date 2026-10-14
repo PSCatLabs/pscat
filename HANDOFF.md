@@ -621,6 +621,10 @@ renders eight examples in both and compares block-downsampled output).
    written twice is a sharp corner, and the midpoint rule never passes
    through interior points, so check new glyphs on a `/Jitter 0` render.
    `notes/236-strokeglyphs.md` lists where it departs from the design.
+   Since #350 `sgpath` and `sgwidth` are strict by default: a character or
+   glyph name with no glyph raises `sg-missing-glyph:<char>` before any
+   ink, instead of advancing blank (the superscript two in #238's
+   `(i² = -1)` used to vanish silently). `/Strict false` opts out.
    #237 shipped `lib/mathkit.ps` (`mk-`): TeX-subset math laid out with
    TeX's box model as those skeletons (`mkpath`, `mkmetrics`, `mkalign`,
    and the annotations `mkframe`, `mkunderline`, `mkarrow`), with
