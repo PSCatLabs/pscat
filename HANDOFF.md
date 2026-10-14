@@ -639,6 +639,8 @@ renders eight examples in both and compares block-downsampled output).
    `userdict /dkBatch` (pinned by `drycrayon-drykit-contract`). Passes and
    layering are declared (`/Pass`, `/Over`), because drykit can't read the
    page. `notes/239-drycrayon.md` has the tuning numbers against the crops.
+   #240 is the gallery piece on it, `gallery/crayon_drawing.ps` (a child's
+   house, family, sun and name); `notes/240-crayon-drawing.md`.
 5. Watercolor (issue #47, gated on the architecture spike in issue
    #46): read `docs/WATERCOLOR.md` before starting — it recommends a
    small `alpha: f32` field on `GraphicsState` (already prototyped as

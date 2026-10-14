@@ -1,0 +1,264 @@
+%!PS-Adobe-3.0
+%%Title: My Family and Our House -- a young child's crayon drawing, from drycrayon
+%%Creator: pscat -- issue #240 (epic #232, the dry-media track)
+%%BoundingBox: 0 0 792 612
+%%EndComments
+
+% A drawing by a six-year-old on a sheet of printer paper: a house, a
+% family of stick figures, a tree, flowers, a huge shaky sun, the sky as
+% a band along the top, the grass as a band along the bottom, and the
+% artist's name in the corner.
+%
+% It is built the way a child builds one, which is the point of the
+% piece (docs/drymedia/REFERENCES.md, Y4 and Y5):
+%
+%   - the sky and the grass are bands that stop short: the paper between
+%     them is the air, and the colour is laid in patches of back-and-forth
+%     scribble that run past their edges and leave white seams
+%   - the sun is far too big, one loop that doesn't close, scribbled in
+%     yellow over the sky's blue (the blue shows through the yellow's gaps)
+%   - everything stands on the ground line: no perspective, figures about
+%     as tall as the house, the walls scribbled flat, outlines laid over
+%     the fills last
+%   - the figures are lollipop people with arms straight out
+%   - the signature has a backward S
+%
+% Libraries: drycrayon (the crayon, the paper and the six child motions)
+% on drykit; the name's letters are strokeglyphs' skeleton capitals (#236)
+% inked with the same crayon, one letter at a time so each can be its own
+% size and lean.
+%
+%   pscat --page 792x612 gallery/crayon_drawing.ps
+%
+% The motions draw from the caller's `rand`; Ghostscript's `rand` differs
+% from pscat's, so its render lays the same drawing out a little
+% differently (DRYMEDIA.md 3.2).
+
+(lib/artkit.ps) run
+(lib/paintkit.ps) run
+(lib/drykit.ps) run
+(lib/drycrayon.ps) run
+(lib/handscript.ps) run
+(lib/strokeglyphs.ps) run
+
+<< /Seed 5 >> dypaper
+1 1 1 setrgbcolor clippath fill
+240 srand
+
+% cd- prefix: this piece's own helpers.
+
+% --- how this child holds a crayon -----------------------------------------
+
+% wobble the current path as an unsteady hand would
+/cdhand { << /Wobble 2 /Overshoot 6 /Tremor 0.5 >> dywobble } def
+% an outline: firm, thin, and drawn over the colour
+/cdoutline { << /Width 3.6 /Touch 0.82 >> dycrayon } def
+% a shaky outline of the current path
+/cdline { cdhand cdoutline } def
+
+% -> frnd between lo and hi:   lo hi cdr
+/cdr { 1 index sub frnd mul add } def
+
+% scribble the current path's region: spacing direction width touch cdfill
+/cdfill {
+    /cdft exch def /cdfw exch def /cdfd exch def /cdfs exch def
+    scpath
+    << /Spacing cdfs /Direction cdfd /Overrun 5 /Miss 0.2 /Scatter 1.6 >> dyscribble
+    << /Width cdfw /Touch cdft >> dycrayon
+} def
+
+% A band of colour laid in side-by-side patches, each its own scribble
+% that wanders off its edge. Each patch is a screct, so it runs past the
+% band's ends and leaves the white seams between patches:
+%   x y w h  patch-width  direction  spacing  width  touch   cdband
+/cdband {
+    /cdbt exch def /cdbw exch def /cdbs exch def /cdbd exch def /cdbp exch def
+    /cdbh exch def /cdbwidth exch def /cdby exch def /cdbx exch def
+    /cdbc cdbx def
+    {
+        cdbc cdbx cdbwidth add ge { exit } if
+        /cdbpw cdbp 0.7 mul cdbp 1.3 mul cdr def
+        /cdbu cdbpw cdbx cdbwidth add cdbc sub lt { cdbpw } { cdbx cdbwidth add cdbc sub } ifelse def
+        cdbc cdby cdbu cdbh screct
+        << /Spacing cdbs /Direction cdbd 10 sub cdbd 10 add cdr /Overrun 7 /Miss 0.3 /Scatter 2 >> dyscribble
+        << /Width cdbw /Touch cdbt 0.07 sub cdbt 0.05 add cdr >> dycrayon
+        cdbc cdbu add cdbx cdbwidth add ge { exit } if
+        /cdbc cdbc cdbu add 4 sub def
+    } loop
+} def
+
+% a closed polygon from [x0 y0 x1 y1 ...]
+/cdpoly {
+    /cdpa exch def
+    newpath cdpa 0 get cdpa 1 get moveto
+    2 2 cdpa length 1 sub { /cdpi exch def cdpa cdpi get cdpa cdpi 1 add get lineto } for
+    closepath
+} def
+
+% a dot, as a child makes one: a tiny loop pressed hard
+%   cx cy r  cdblob
+/cdblob { << /Gap 40 /Wobble 0.4 >> dyloop << /Width 5.5 /Touch 0.95 /Worn 0.2 >> dycrayon } def
+
+% a flower on a stem: x ybase height color-name  cdflower
+/cdflower {
+    /cdfc exch def /cdfh exch def /cdfy exch def /cdfx exch def
+    /green dycolor
+    newpath cdfx cdfy moveto cdfx 4 -4 cdr add cdfy cdfh add lineto cdhand
+    << /Width 3.4 /Touch 0.8 >> dycrayon
+    /cdfl 3 5 cdr def
+    % a couple of leaves
+    newpath cdfx cdfy cdfh 0.4 mul add moveto cdfx 14 add cdfy cdfh 0.55 mul add lineto cdhand
+    << /Width 3 /Touch 0.78 >> dycrayon
+    cdfc dycolor
+    0 60 300 { /cdfa exch def
+        cdfx 4 add cdfa cos 13 mul add cdfy cdfh add cdfa sin 13 mul add 7.5
+        << /Gap 30 /Wobble 1 >> dyloop << /Width 3.4 /Touch 0.82 >> dycrayon
+    } for
+    /yellow dycolor
+    cdfx 4 add cdfy cdfh add 6 cdblob
+} def
+
+% one of the name's letters, its own size, lean and seed, optionally
+% written backwards (the child's S):  (X) x y size lean seed flip  cdletter
+/cdletter {
+    /cdlf exch def /cdls exch def /cdlr exch def /cdlz exch def
+    /cdly exch def /cdlx exch def /cdln exch def
+    gsave
+    cdlx cdlf 0 lt { cdln << /Size cdlz >> sgwidth add } if cdly translate
+    cdlr rotate cdlf 1 scale
+    newpath cdln 0 0 << /Size cdlz /Seed cdls /Jitter 0.03 >> sgpath
+    << /Width 4.4 /Touch 0.85 /Seed cdls >> dycrayon
+    grestore
+} def
+
+% ---------------------------------------------------------------- the sky
+% a band across the top, blue, ending well short of the horizon
+/blue dycolor
+8 494 776 112 210 5 8 10 0.62 cdband
+
+% ------------------------------------------------------------- the grass
+% a yellow-green band along the bottom, then darker tufts along its edge
+/yellowgreen dycolor
+6 52 780 98 130 2 6.5 9.5 0.7 cdband
+/green dycolor
+newpath 8 150 moveto 150 156 300 145 450 151 curveto 600 156 700 148 784 152 curveto
+<< /Spacing 10 /Length 30 /LengthJitter 0.5 /Lean 16 /Wander 0.5 >> dygrass
+<< /Width 4 /Touch 0.8 >> dycrayon
+
+% ---------------------------------------------------------------- the sun
+% far too big, and put in first. The disc is yellow scribble laid over the
+% blue sky, so the blue shows through its gaps.
+/yellow dycolor
+newpath 118 498 74 0 360 arc closepath
+6.5 28 9 0.74 cdfill
+/orange dycolor
+118 498 78 << /Gap 28 /Wobble 6 /Lean 25 /Squash 0.92 >> dyloop << /Width 5 /Touch 0.85 >> dycrayon
+118 498 78 << /Count 15 /Length 50 /LengthJitter 0.4 /Offset 12 /Lean 14 /Wander 0.35 >> dyrays
+<< /Width 5 /Touch 0.82 >> dycrayon
+
+% a face, because it is that kind of sun
+/black dycolor
+98 520 4 cdblob
+142 524 4 cdblob
+newpath 92 482 moveto 104 466 130 462 150 484 curveto cdhand << /Width 3.4 /Touch 0.85 >> dycrayon
+
+% a brown path from the door down to the edge of the grass
+/yelloworange dycolor
+[ 244 152  278 152  334 54  198 54 ] cdpoly 6 70 9 0.62 cdfill
+
+% --------------------------------------------------------------- the house
+% walls red (scribbled up and down), roof brown, door brown, windows blue
+/red dycolor
+[ 172 152  350 152  350 300  172 300 ] cdpoly 6.5 78 9.5 0.72 cdfill
+/brown dycolor
+[ 152 298  261 398  370 298 ] cdpoly 6 18 9 0.74 cdfill
+[ 242 152  280 152  280 238  242 238 ] cdpoly 5.5 84 8 0.78 cdfill
+/blue dycolor
+[ 188 205  228 205  228 245  188 245 ] cdpoly 5 80 7 0.6 cdfill
+[ 294 205  334 205  334 245  294 245 ] cdpoly 5 80 7 0.6 cdfill
+/redorange dycolor
+[ 298 352  298 424  334 424  334 326 ] cdpoly 5.5 70 8 0.75 cdfill
+
+% outlines, last
+/black dycolor
+[ 172 152  350 152  350 300  172 300 ] cdpoly cdline
+[ 152 298  261 398  370 298 ] cdpoly cdline
+[ 242 152  280 152  280 238  242 238 ] cdpoly cdline
+[ 188 205  228 205  228 245  188 245 ] cdpoly cdline
+[ 294 205  334 205  334 245  294 245 ] cdpoly cdline
+newpath 208 202 moveto 208 248 lineto cdhand << /Width 3 /Touch 0.8 >> dycrayon
+newpath 184 225 moveto 232 225 lineto cdhand << /Width 3 /Touch 0.8 >> dycrayon
+newpath 314 202 moveto 314 248 lineto cdhand << /Width 3 /Touch 0.8 >> dycrayon
+newpath 290 225 moveto 338 225 lineto cdhand << /Width 3 /Touch 0.8 >> dycrayon
+newpath 298 350 moveto 298 424 lineto 334 424 lineto 334 326 lineto cdhand cdoutline
+/yellow dycolor 270 192 3 cdblob
+% smoke: three loops that grow
+/black dycolor
+316 442 8 << /Gap 60 /Wobble 1 >> dyloop << /Width 3 /Touch 0.5 >> dycrayon
+326 464 12 << /Gap 60 /Wobble 1.5 >> dyloop << /Width 3 /Touch 0.5 >> dycrayon
+342 492 17 << /Gap 60 /Wobble 2 >> dyloop << /Width 3 /Touch 0.5 >> dycrayon
+
+% ---------------------------------------------------------------- the tree
+/brown dycolor
+[ 672 150  680 292  720 292  728 150 ] cdpoly 5 84 8 0.78 cdfill
+/green dycolor
+newpath 698 372 84 0 360 arc closepath 6 20 9.5 0.74 cdfill
+/black dycolor
+[ 672 150  680 292  720 292  728 150 ] cdpoly cdline
+698 372 88 << /Gap 25 /Wobble 5 >> dyloop << /Width 3.4 /Touch 0.8 >> dycrayon
+% apples
+/red dycolor
+662 352 6 cdblob
+738 392 6 cdblob
+700 322 6 cdblob
+740 340 6 cdblob
+668 412 6 cdblob
+
+% ------------------------------------------------------------- the family
+% four lollipop people in a row, feet on the grass at no fixed height
+/violet dycolor
+[ 495 208  456 116  536 116 ] cdpoly 6 80 9 0.72 cdfill
+/blue dycolor
+405 78 185 << /Arms 28 /Hair 7 >> dyfigure << /Width 4.2 /Touch 0.85 >> dycrayon
+/redviolet dycolor
+495 92 168 << /Arms 35 /Hair 0 >> dyfigure << /Width 4.2 /Touch 0.85 >> dycrayon
+/orange dycolor
+567 70 112 << /Arms 40 /Hair 5 >> dyfigure << /Width 4 /Touch 0.85 >> dycrayon
+/black dycolor
+634 100 70 << /Tadpole true /Hair 6 /Arms 10 >> dyfigure << /Width 3.6 /Touch 0.85 >> dycrayon
+
+% ----------------------------------------------------------------- flowers
+44 62 56 /red cdflower
+104 70 48 /violet cdflower
+160 64 60 /carnation cdflower
+762 66 58 /redorange cdflower
+350 66 52 /redorange cdflower
+
+% ------------------------------------------------------------------- birds
+/black dycolor
+[ [455 440] [530 405] [598 452] ] {
+    aload pop /cdby exch def /cdbx exch def
+    newpath cdbx 24 sub cdby moveto
+    cdbx 18 sub cdby 15 add cdbx 6 sub cdby 15 add cdbx cdby 1 sub curveto
+    cdbx 6 add cdby 15 add cdbx 18 add cdby 15 add cdbx 25 add cdby curveto
+    << /Wobble 0.8 /Overshoot 3 >> dywobble << /Width 3.4 /Touch 0.82 >> dycrayon
+} forall
+
+% ----------------------------------------------------------------- the name
+% [letter size lean seed flip colour]: each letter set down after the one
+% before it, with a gap that is never quite the same twice
+/cdnx 276 def
+[ [(J) 48 -4 3 1 /redorange] [(O) 52 3 17 1 /redorange] [(S) 48 -6 29 -1 /blue]
+  [(I) 50 5 31 1 /redviolet] [(E) 47 -3 41 1 /green] [( ) 30 0 0 1 /black]
+  [(6) 40 -6 57 1 /black] ] {
+    /cdsp exch def
+    cdsp 5 get dycolor
+    cdsp 0 get dup ( ) ne {
+        cdnx 10 14 cdr cdsp 1 get cdsp 2 get cdsp 3 get cdsp 4 get cdletter
+    } {
+        pop
+    } ifelse
+    /cdnx cdnx cdsp 0 get << /Size cdsp 1 get >> sgwidth add 2 9 cdr add def
+} forall
+
+showpage
