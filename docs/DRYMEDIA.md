@@ -285,7 +285,9 @@ still do. A record made outside any `dkclip` stores no region and renders
 exactly as before. A plain `clip` inside a batch is still not kept: pscat's
 `clippath` gives back only the newest of nested clips, or a rectangle or a
 mask trace of their intersection, and drops the eoclip rule, so a generic
-capture would not be exact. A stroke under a `dkclip` region in a batch
+capture through it would not be exact. Since #394 pscat has Level 2 `gstate`
+objects, which do bring a clip back exactly; drykit adopting them needs a
+cheap identity test per clip, not per stroke (#444). A stroke under a `dkclip` region in a batch
 renders byte-identically to the same stroke drawn at once under that clip
 (`tests/drykit.rs`).
 
