@@ -55,8 +55,9 @@
 % header, at the end of this file, for full docs.
 %
 % The brush *motions* (issue #184) are not brushes: path builders that make
-% the input a preset takes (criss-cross, scumble, tap, pull, zig-zag). They
-% are the last section of this file.
+% the input a preset takes (criss-cross, scumble, tap, pull, zig-zag). After
+% them, `pkbrushedge` and its motion `pkfeather` (issue #347) brush the ruled
+% edge of a filled mass.
 %
 % `pkspray` (issue #44) is not built on `pkribbon` -- spray is discrete
 % particle deposition, not an offset band -- but it shares the same
@@ -149,6 +150,9 @@
 % mh-/mx-/mc-/ms-/mt-/mp-/mz- (the brush motion generators: pkcrisscross,
 % pkscumblein, pkscumble, pktap, pkpull, pkzigzag) -- issue #184, see the
 % section at the end of this file. They call no preset.
+% mf- (pkfeather) and pe- (pkbrushedge) -- issue #347, the "Brushed edges"
+% section after the motions. pe- is distinct from every preset prefix
+% because pkbrushedge calls the caller's /Brush, usually a preset.
 % pj- (pkcanvas, the canvas surface's sampler and pjcatch) -- issue #182,
 % see the last section of this file. Distinct from every pk* name because the
 % presets that will call pjcatch (pkdry, pkfan) call pkribbon.

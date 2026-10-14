@@ -943,6 +943,24 @@ renders eight examples in both and compares block-downsampled output).
   is restored with `rrand`/`srand` only when the proc moved it). Tests are `tests/pktrowelplane.rs` plus a
   `%%SelfTest` block; the specimen is `examples/paintkit_plane_demo.ps`
   (`docs/paintkit_plane_demo.png`).
+- **`pkbrushedge` / `pkfeather` (issue #347) brush a filled mass's edge.**
+  Their own section ("Brushed edges") sits after the brush motions.
+  `pkfeather` is a motion (replaces the path, paints nothing, five `frnd`
+  draws per slot, slots at a sixth of `/Spacing` as in `pkpull`). The out
+  side is decided once per subpath, never per stop: for a closepath'd
+  subpath, seven probes just left of the walk are tested against artkit's
+  `scpath` region of the whole path (nonzero, like `fill`), so holes of
+  either winding and mirrored CTMs work; an open subpath faces `/Outward`
+  by the summed normal. Signed area was rejected: it puts a hole's strokes
+  into the mass. `pkbrushedge` paints the inward cuts first (sparser,
+  `/InSpacing` 2, `/Overlap` mirrored) and the outward strokes last; inward
+  cuts as dense as the outward strokes rule a pale band just inside the
+  edge. A procedural `/Under` costs one `/Brush` call per inward stroke.
+  Every gsave goes through `pegsave` so an error mid-call unwinds to the
+  caller's level. Scratch prefixes `mf`/`pe`. Tests: the `%%SelfTest` block
+  (guards plus a ring wound both ways and a ring under `1 -1 scale`); the
+  specimen is `examples/paintkit_brushedge_demo.ps`
+  (`docs/paintkit_brushedge_demo.png`); cookbook recipe 10 uses it.
 - **The landscape cookbook (issue #186) is `docs/guides/landscape-cookbook.md`;
   its snippets are the tests.** `tests/landscape_cookbook.rs` pulls every
   ```` ```postscript ```` block out of the markdown (first line `% recipe: <name>`),
