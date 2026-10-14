@@ -92,6 +92,38 @@ class GalleryManifest(unittest.TestCase):
         piece(self.m, "fern")["featured"] = True
         self.has("README.md is out of date with the manifest")
 
+    def test_a_source_must_be_a_single_file(self):
+        self.m["specimens"][0]["source"] = "lib/fonts"
+        self.has("is not a single file")
+
+    def test_loaded_files_and_line_rule(self):
+        src = "(lib/artkit.ps) run\n(lib/styles/toon.ps) run (lib/artkit.ps) run\n(lib/x.ps) print"
+        self.assertEqual(gallery.loaded_files(src), ["lib/artkit.ps", "lib/styles/toon.ps"])
+        # the newline that ends a file is not another line (site/source-viewer.js uses the same rule)
+        self.assertEqual(len(gallery.source_lines("a\nb\n")), 2)
+        self.assertEqual(len(gallery.source_lines("a\nb")), 2)
+        self.assertEqual(len(gallery.source_lines("a\n\n")), 2)
+
+    def test_every_entry_has_a_view_source_link_and_a_staged_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            site = Path(tmp)
+            gallery.build(self.m, site)
+            gallery.stage(self.m, site)
+            entries = self.m["pieces"] + self.m["specimens"]
+            for e in entries:
+                staged = site / "source" / e["source"]
+                self.assertEqual(staged.read_bytes(), (SCRIPTS.parent / e["source"]).read_bytes(), e["id"])
+            text = (site / "gallery.html").read_text(encoding="utf-8")
+            self.assertEqual(text.count('class="view-source"'), len(entries))
+            self.assertIn('<dialog id="source-dialog"', text)
+            for p in self.m["pieces"]:
+                page = (site / gallery.piece_page(p["id"])).read_text(encoding="utf-8")
+                self.assertIn('href="source/%s"' % p["source"], page, p["id"])
+                self.assertIn('<script src="source-viewer.js" defer>', page)
+            # a piece that loads libraries lists them for the window
+            alpine = (site / "gallery-alpine-lake.html").read_text(encoding="utf-8")
+            self.assertIn('data-libs="lib/artkit.ps lib/paintkit.ps"', alpine)
+
     def test_untracked_files_are_ignored(self):
         # the maintainer's work in progress must not fail the check
         self.assertNotIn("impasto_autumn", " ".join(self.errs()))
@@ -124,7 +156,7 @@ class GalleryManifest(unittest.TestCase):
                          "contribute.html"))
                 body += "</main></body></html>"
                 (site / name).write_text(site_pages.apply_shell(body, partials, name), encoding="utf-8")
-            for f in ("style.css", "pscat.js", "pscat.wasm"):
+            for f in ("style.css", "pscat.js", "pscat.wasm", "source-viewer.js"):
                 (site / f).write_text("")
             problems, _ = check_site_links.check(site, SCRIPTS.parent)
             self.assertEqual(problems, [])

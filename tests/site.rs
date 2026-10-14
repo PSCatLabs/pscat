@@ -42,6 +42,7 @@ fn build_site_assembles_everything() {
         "fonts.html",
         "charts.html",
         "style.css",
+        "source-viewer.js",
         "pscat.js",
         "pscat.wasm",
     ] {
@@ -77,6 +78,19 @@ fn build_site_assembles_everything() {
         let page = format!("gallery-{id}.html");
         assert!(out.join(&page).exists(), "missing piece page {page}");
         assert!(gallery.contains(&page), "gallery.html does not link {page}");
+    }
+    // "View source" (#461): every piece and specimen has its program staged
+    // where the window fetches it, byte for byte.
+    for e in manifest["pieces"]
+        .as_array()
+        .expect("pieces")
+        .iter()
+        .chain(manifest["specimens"].as_array().expect("specimens"))
+    {
+        let src = e["source"].as_str().expect("source");
+        let staged = std::fs::read(out.join("source").join(src))
+            .unwrap_or_else(|_| panic!("source/{src} was not staged"));
+        assert_eq!(staged, std::fs::read(root.join(src)).expect("read source"));
     }
     // Links, navigation and orphans (#250): the same check CI runs.
     let check = Command::new("python3")

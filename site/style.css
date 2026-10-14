@@ -199,6 +199,46 @@ summary { cursor: pointer; color: var(--accent); }
 }
 .small { color: var(--dim); font-size: 14px; }
 
+/* ------- "View source" window (#461; scripts/gallery.py, site/source-viewer.js) ------- */
+a.view-source { font-weight: 600; }
+.source-dialog {
+  padding: 0; border: 1px solid var(--edge); border-radius: 10px;
+  background: var(--bg); color: var(--ink);
+  width: min(1040px, calc(100vw - 32px)); max-width: none;
+  height: min(88vh, 940px); max-height: none;
+  box-shadow: 0 10px 50px var(--shadow); overscroll-behavior: contain;
+}
+.source-dialog[open] { display: flex; flex-direction: column; }
+.source-dialog::backdrop { background: rgba(8, 10, 14, .72); }
+html.dialog-open { overflow: hidden; }
+.source-head {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 18px;
+  padding: 12px 16px; border-bottom: 1px solid var(--edge); background: var(--panel);
+}
+.source-title { flex: 1 1 260px; min-width: 0; }
+.source-name { margin: 0; font: 700 16px var(--mono); color: var(--accent); overflow-wrap: anywhere; }
+.source-meta { margin: 0; color: var(--dim); font-size: 14px; }
+.source-actions { display: flex; align-items: center; gap: 14px; }
+.source-actions a { font-size: 14px; }
+.source-libs { flex: 1 0 100%; margin: 0; max-width: none; font-size: 14px; color: var(--dim); overflow-wrap: anywhere; }
+.source-libs[hidden] { display: none; }
+.source-body {
+  flex: 1; min-height: 0; overflow: auto; display: flex; align-items: flex-start;
+  background: var(--bg); font: 13px/1.5 var(--mono); tab-size: 4; overscroll-behavior: contain;
+}
+.source-body pre {
+  margin: 0; border: 0; border-radius: 0; background: transparent; max-width: none;
+  overflow: visible; font: inherit; line-height: inherit; padding: 12px 0; flex: none;
+}
+.source-body pre code { font: inherit; }
+.source-body pre.source-gutter {
+  position: sticky; left: 0; z-index: 1; text-align: right; padding: 12px 10px 12px 14px;
+  color: var(--dim); background: var(--panel); border-right: 1px solid var(--edge);
+  user-select: none; -webkit-user-select: none;
+}
+.source-body pre.source-code { padding: 12px 18px 12px 14px; white-space: pre; }
+.source-note { margin: 0; padding: 16px; font: 15px/1.6 var(--sans); color: var(--dim); }
+
 /* ------- landing page ------- */
 .landing-hero { margin: 0 0 8px; display: grid; gap: 8px 40px; align-items: center; }
 .landing-hero .copy { max-width: 62ch; }
@@ -311,6 +351,8 @@ body.app { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction:
   h2 { margin-top: 34px; }
   .cards { grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr)); gap: 14px; }
   .cta a { flex: 1 1 100%; text-align: center; }
+  .source-dialog { width: 100vw; height: 100vh; height: 100dvh; border-radius: 0; border: 0; }
+  .source-head { padding: 10px 12px; }
   #play { flex-direction: column; }
   #play-left { padding: 12px; }
   #src { flex: none; height: 46vh; min-height: 220px; }

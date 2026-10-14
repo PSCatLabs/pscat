@@ -1065,7 +1065,7 @@
    "title": "The specimen poster",
    "alt": "The Type 3 font library specimen poster",
    "blurb": "/Neon (glow by overdraw), /Marquee (bulbs, glints, burnouts), /Constellation (star charts) and /Lapidary (chiselled stone).",
-   "source": "lib/fonts",
+   "source": "examples/font_library.ps",
    "render": "lib/fonts/specimen.png"
   },
   {
@@ -1074,7 +1074,7 @@
    "title": "The second folio",
    "alt": "The Type 3 font library specimen, second folio",
    "blurb": "/Circuitry (copper traces, pads and vias), /Stitchwork (cross-stitch on the 45 degree grid) and /Confetti (a thrown handful, still falling).",
-   "source": "lib/fonts",
+   "source": "examples/font_library2.ps",
    "render": "lib/fonts/specimen2.png"
   },
   {
@@ -1093,7 +1093,7 @@
    "title": "The Standard Thirty-Five",
    "alt": "The standard 35 fonts specimen",
    "blurb": "Every classic name (Palatino, Bookman, Avant Garde, Zapf Chancery, Symbol, Dingbats) resolved to an open font.",
-   "source": "fonts/catalog",
+   "source": "examples/font_catalog.ps",
    "render": "fonts/catalog/specimen-1.png"
   },
   {
@@ -1102,7 +1102,7 @@
    "title": "The Catalog",
    "alt": "The font catalog specimen",
    "blurb": "A face for every occasion: 35 families across serif, sans, slab, script, blackletter, western, horror, pixel, sci-fi and more.",
-   "source": "fonts/catalog",
+   "source": "examples/font_catalog.ps",
    "render": "fonts/catalog/specimen-2.png"
   },
   {

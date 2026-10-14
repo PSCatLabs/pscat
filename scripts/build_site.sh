@@ -24,7 +24,7 @@ mkdir -p "$OUT/assets/renders" "$OUT/assets/references" "$OUT/assets/learn" \
   "$OUT/examples/learn" "$OUT/lib"
 
 # 1. the authored pages (the shell is applied in the last step)
-cp "$ROOT"/site/*.html "$ROOT"/site/style.css "$OUT/"
+cp "$ROOT"/site/*.html "$ROOT"/site/style.css "$ROOT"/site/source-viewer.js "$OUT/"
 cp "$ROOT"/lib/graph.ps "$ROOT"/lib/dataviz.ps "$OUT/lib/"
 
 # 2. the browser build
@@ -40,8 +40,9 @@ fi
 # 3. the gallery, generated from gallery/manifest.json (#251): the check first,
 # so a piece with no entry or a missing render stops the build; then
 # gallery.html and one page per piece (with the shell markers, so the last step
-# dresses them), the renders, reference photos and the playground sources
-# (self-contained files only: the wasm build has no filesystem).
+# dresses them), the renders, reference photos, the playground sources
+# (self-contained files only: the wasm build has no filesystem) and every
+# program for the "View source" window (source/<repo path>, #461).
 python3 "$ROOT/scripts/gallery.py" check
 python3 "$ROOT/scripts/gallery.py" build "$OUT"
 python3 "$ROOT/scripts/gallery.py" stage "$OUT"
