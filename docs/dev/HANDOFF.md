@@ -1,5 +1,11 @@
 # HANDOFF.md — state of the interpreter and how to continue
 
+> Where the docs live: user guides in [`docs/guides/`](../guides/README.md),
+> contributor docs (this file and its neighbours, indexed in
+> [`README.md`](README.md)) in `docs/dev/`, and history, including the frozen
+> `NOTES.md`, `ROADMAP.md` and `INIT.md`, in [`docs/archive/`](../archive/README.md).
+> Per-issue notes are in [`notes/`](../../notes/README.md).
+
 Written 2026-07-13 at the completion of Stages 6–7; last updated
 2026-08-15. Stages 8–20 are all complete: spool/halftone/Gallery II
 (10), perf parity (11), handwriting (12), the handwrite tool (13),
