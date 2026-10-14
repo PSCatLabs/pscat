@@ -146,9 +146,9 @@ case "$PRESET" in ""|manual|electric|worn) ;; *) die "--preset must be manual, e
 if [[ -z "$HAVE_TEXT" ]]; then
   if [[ -n "$FILE" && "$FILE" != - ]]; then
     [[ -r "$FILE" ]] || die "cannot read $FILE"
-    TEXT=$(cat "$FILE")
+    TEXT=$(cat "$FILE"; printf x); TEXT=${TEXT%x}   # keep trailing blank lines
   elif [[ "$FILE" == - || ! -t 0 ]]; then
-    TEXT=$(cat)
+    TEXT=$(cat; printf x); TEXT=${TEXT%x}
   fi
 fi
 [[ -n "$TEXT" || -n "$MEMO" ]] || die "no text given (a FILE, - for stdin, or --text)"
@@ -159,7 +159,7 @@ reflow() {
        { if (p == "") p = $0; else { sub(/^[ \t]+/, ""); p = p " " $0 } }
        END { if (p != "") print p }'
 }
-if [[ -n "$REFLOW" ]]; then TEXT=$(printf '%s\n' "$TEXT" | reflow); fi
+if [[ -n "$REFLOW" ]]; then TEXT=$(printf '%s' "$TEXT" | reflow; printf x); TEXT=${TEXT%x}; fi
 
 # ASCII only: the typewriter has no other keys. Typographic punctuation
 # becomes its plain form, any other character a "?".
@@ -175,7 +175,8 @@ pstr() { printf '%s' "$1" | ascii | sed -e 's/\\/\\\\/g' -e 's/(/\\(/g' -e 's/)/
 
 opts_dict() { # $1 = page height to declare
   echo "/TWOpts <<"
-  echo "  /Text ($(pstr "$TEXT"))"
+  local t; t=$(pstr "$TEXT"; printf x); t=${t%x}   # keep trailing blank lines
+  echo "  /Text ($t)"
   echo "  /Width $WIDTH  /Height $1"
   [[ -z "$MARGIN" ]] || echo "  /Margin $MARGIN"
   [[ -z "$ML" ]] || echo "  /MarginLeft $ML"
@@ -225,7 +226,9 @@ if [[ "$HEIGHT" == fit ]]; then
   [[ "$HEIGHT" =~ ^[0-9]+$ ]] || die "could not size the page (tw-pageheight gave: $HEIGHT)"
 fi
 
-{ cat "${LIBS[@]}"; opts_dict "$HEIGHT"; echo "TWOpts tw-type showpage"; } > "$TMP/render.ps"
+# the page size is declared in the driver, so `gs -dNOSAFER file.ps` needs no -g
+{ cat "${LIBS[@]}"; echo "/setpagedevice where { pop << /PageSize [ $WIDTH $HEIGHT ] >> setpagedevice } if"; opts_dict "$HEIGHT"
+  echo "TWOpts tw-type showpage"; } > "$TMP/render.ps"
 
 if [[ -n "$PSOUT" ]]; then
   cp "$TMP/render.ps" "$PSOUT"

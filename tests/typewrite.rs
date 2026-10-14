@@ -591,12 +591,30 @@ fn the_script_turns_typographic_characters_into_ascii_and_rejects_bad_input() {
     );
     let driver = String::from_utf8(std::fs::read(&ps).unwrap()).unwrap();
     assert!(
-        driver.contains("/Text (one two\n\n\tthree four)"),
+        driver.contains("/Text (one two\n\n\tthree four\n)"),
         "reflowed text: {}",
         driver
             .lines()
             .find(|l| l.contains("/Text ("))
             .unwrap_or("none")
+    );
+    // trailing blank lines are kept (command substitution would strip them)
+    let txt = dir.join("trail.txt");
+    std::fs::write(&txt, "a\n\n\n").unwrap();
+    let out = script(&[txt.to_str().unwrap(), "--ps", ps.to_str().unwrap()], &dir);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let driver = String::from_utf8(std::fs::read(&ps).unwrap()).unwrap();
+    assert!(
+        driver.contains("/Text (a\n\n\n)"),
+        "trailing blank lines lost"
+    );
+    assert!(
+        driver.contains("/PageSize [ 612 792 ]"),
+        "the driver does not declare its page size"
     );
     for bad in [
         &["--text", "x", "--page-numbers", "middle"][..],
@@ -667,6 +685,12 @@ fn ghostscript_types_the_memo_the_script_writes() {
         .status()
         .expect("run gs");
     assert!(status.success(), "gs rejected the typewrite driver");
+    let img = tiny_skia::Pixmap::decode_png(&std::fs::read(&png).unwrap()).unwrap();
+    assert_eq!(
+        (img.width(), img.height()),
+        (612, 792),
+        "the driver sets its own page size"
+    );
     let ours = dir.join("ours.png");
     let out = script(
         &[
