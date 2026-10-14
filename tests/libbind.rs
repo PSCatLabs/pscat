@@ -16,8 +16,8 @@
 //! unbound proves the walk can tell. It runs in pscat always, and in
 //! Ghostscript when `gs` is installed (CI has none).
 //!
-//! drychalk gained 18% (examples/drychalk_specimen.ps, 2.77 s to 2.26 s).
-//! drycrayon gained under 2% and the older kits are too cheap in gs to
+//! drychalk gained about 7% (examples/drychalk_specimen.ps, 2.38 s to 2.22 s).
+//! drycrayon gained under 1% and the older kits are too cheap in gs to
 //! measure, so they stay unbound (notes/318-bind-drychalk.md); drycharcoal
 //! is a follow-up.
 

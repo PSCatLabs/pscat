@@ -925,11 +925,11 @@ renders eight examples in both and compares block-downsampled output).
   reaches its procedures; library names that are not operators are still
   late-bound, so overriding `dkbudget`, `pkribbon` and the like works.
   drychalk's `dcscratch` private dictionary still pays once the library is
-  bound (about 20% on its specimen), so it stays. drycrayon and the older
-  kits are deliberately unbound: drycrayon gained under 2%, and the rest
-  take 0.2 s or less in gs or cannot run there (no fonts), so there is
+  bound (20% to 30% on its specimen), so it stays. drycrayon and the older
+  kits are deliberately unbound: drycrayon gained under 1%, and the rest
+  take 0.33 s or less in gs or cannot run there (no fonts), so there is
   nothing to win (`notes/318-bind-drychalk.md`). drycharcoal (open PR #315)
-  is not bound yet.
+  is not bound yet (#326).
 - Test Interps at 100×100; golden runs at 500×500/r72. Metric
   assertions use 1e-3 tolerances where the pen is f32.
 
