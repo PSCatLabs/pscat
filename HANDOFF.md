@@ -902,6 +902,11 @@ renders eight examples in both and compares block-downsampled output).
   `--loader lib/<name>.ps` (repeatable, transitive through the libs built on
   it) or `--files LIST` picks the files, and multi-page output
   (`page-001.png`, ...) is compared page by page.
+  **An interpreter (`src/`) change uses `--base-bin PATH --head-bin PATH`**
+  (issue #335) instead of the shared binary: the base tree renders with the
+  base binary (`scripts/build_base_bin.sh BASE_WORKTREE OUT`), the head tree
+  with the head one, and the control must use behaviour only the head binary
+  has. `scripts/bench_compare.sh` is the matching CPU-time guard.
 - **A "collect stops, then draw runs" brush must not call the caller's
   `/Pressure` proc inside its per-lane/per-bristle loop.** A caller's
   proc is arbitrary code and may consume randomness (`{ frnd }` is a
