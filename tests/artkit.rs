@@ -205,6 +205,41 @@ fn walkpath_rejects_non_positive_pitch_instead_of_hanging() {
 }
 
 #[test]
+fn walkpath_refuses_a_path_over_its_segment_limit_and_leaves_a_clean_stack() {
+    // Issue #110. The count is of source-segment visits (moveto, lineto
+    // and closepath each count one) taken in wkmeasure's own pass, so
+    // zero-length segments -- which emit no stop -- are caught too.
+    let mut it = Interp::new();
+    load(&mut it);
+    // Exactly at the limit: a moveto plus (limit - 1) linetos walks.
+    it.run_str(
+        "newpath 0 0 moveto wkmaxsegs 1 sub { 0 0 rlineto } repeat \
+         /n 0 def 1 { pop pop pop pop pop pop /n n 1 add def } walkpath",
+    )
+    .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+    assert_eq!(it.operand_stack().len(), 0, "a legal walk leaves nothing");
+    // One more segment is refused, before any stop reaches the proc.
+    it.run_str("newpath 0 0 moveto wkmaxsegs { 0 0 rlineto } repeat /n 0 def")
+        .unwrap();
+    let err = it
+        .run_str("1 { pop pop pop pop pop pop /n n 1 add def } walkpath")
+        .unwrap_err();
+    assert!(
+        matches!(err, PsError::Undefined(ref name) if name == "walkpath-segment-count-exceeds-safety-limit"),
+        "got {err}"
+    );
+    it.run_str("n").unwrap();
+    assert_eq!(
+        it.operand_stack()
+            .iter()
+            .map(|o| o.repr())
+            .collect::<Vec<_>>(),
+        ["0"],
+        "the proc never ran, and the guard left no mark or operands behind"
+    );
+}
+
+#[test]
 fn walkpath_does_not_misclassify_short_positive_segments_under_a_large_scale() {
     // A 0.00005-unit line under a 1,000,000x scale is a real, visible
     // 50-device-unit mark, not a degenerate point -- but the old guard

@@ -2937,6 +2937,51 @@ fn pkwash_bounds_its_own_work_before_doing_any_of_it() {
     );
 }
 
+/// Issue #110: every deposit budget counts what a preset *emits*, and
+/// a path of zero-length segments emits nothing, so none of them can
+/// see it coming. The bound has to live in `walkpath`'s own measuring
+/// pass, and it must fire before the first preset has drawn. Timed
+/// against a calibration -- a legal path just under the limit, walked
+/// to the end -- rather than a wall-clock constant: a count-then-check
+/// implementation walks all 400,000 segments (several times the
+/// calibration) and is caught by the ratio on any machine.
+#[test]
+fn every_walkpath_preset_refuses_a_huge_segment_count_promptly() {
+    fn timed_path(n: usize, call: &str) -> (Interp, Result<(), PsError>, std::time::Duration) {
+        let mut it = fresh(200, 200);
+        it.run_str(&format!(
+            "0 0 0 setrgbcolor newpath 20 20 moveto {n} {{ 0 0 rlineto }} repeat 100 0 rlineto"
+        ))
+        .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+        let started = std::time::Instant::now();
+        let r = it.run_str(call).map(|_| ());
+        (it, r, started.elapsed())
+    }
+    // Calibration: 40,000 segments is under the 50,000 limit, so this
+    // walks everything twice. The unguarded cost of the huge path is
+    // several times this; the guarded refusal is a fraction of it.
+    let (_, ok, t_ok) = timed_path(40_000, "1 { pop pop pop pop pop pop } walkpath");
+    ok.expect("a path under the limit still walks");
+    let bound = t_ok.max(std::time::Duration::from_millis(50)) * 2;
+
+    for preset in [
+        "pkribbon", "pknib", "pkdry", "pkspray", "pkoil", "pktrowel", "pkfan", "pkbroad",
+        "pkliner", "pkwash", "pkdab",
+    ] {
+        let (it, r, took) = timed_path(400_000, &format!("<< >> {preset}"));
+        let err = r.expect_err(preset);
+        assert!(
+            matches!(err, PsError::Undefined(ref n) if n == "walkpath-segment-count-exceeds-safety-limit"),
+            "{preset}: expected the segment-count guard, got {err}"
+        );
+        assert_eq!(ink_count(&it), 0, "{preset}: nothing may be drawn first");
+        assert!(
+            took < bound,
+            "{preset}: refused in {took:?}, but walking everything costs several times {t_ok:?}"
+        );
+    }
+}
+
 /// The same doctrine for the granulation budget, which used to be
 /// checked after the layers and the bloom had already been painted: a
 /// rejected wash has to leave the canvas untouched, not half-finished.
