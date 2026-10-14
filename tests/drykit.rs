@@ -96,7 +96,8 @@ fn band(surface: &str, seed: u32, angle: u32, touch: &str, streak: &str) -> Inte
 /// (DRYMEDIA.md 3.4: chalk on the boards and newsprint, charcoal on drawing
 /// paper at the default 1.4; crayon on construction paper at about 1.8),
 /// plus the surface the design measured on (pkcanvas's Relief 0.7).
-/// Measured means: boards and newsprint 0.42, drawing 0.46, construction
+/// Measured means: boards and newsprint 0.42, drawing 0.44 (0.46 at its
+/// old /Mottle 6; /Relief 0.35 gave 0.34), construction
 /// 0.42, the design's surface 0.51; controls -0.16 to 0.03. Phi falls as
 /// /Relief falls or /Streak rises: the boards at /Streak 1.8 give 0.38.
 #[test]
@@ -141,6 +142,64 @@ fn crossing_strokes_share_the_tooth() {
             mean(&control)
         );
     }
+}
+
+/// The spread of ink coverage across 3pt blocks of a 60pt square filled
+/// through one `dkcatch` at touch 0.6 on `surface`, as a standard deviation
+/// of per-block coverage (0..1).
+fn block_spread(surface: &str, seed: u32) -> f64 {
+    let it = render(
+        60,
+        60,
+        6.0,
+        &format!(
+            "<< {surface} /Seed {seed} >> dksurface \
+             [ [ [0 30 32] [60 30 32] ] ] 0.6 1.4 dkcatch 0 0 60 60 rectfill"
+        ),
+    );
+    let ink = inked(&it);
+    let (side, blocks) = (18, 20); // 3pt at 6 px/pt, over 360 px
+    let mut cover = Vec::new();
+    for by in 0..blocks {
+        for bx in 0..blocks {
+            let mut n = 0;
+            for y in 0..side {
+                for x in 0..side {
+                    n += usize::from(ink[(by * side + y) * 360 + bx * side + x]);
+                }
+            }
+            cover.push(n as f64 / (side * side) as f64);
+        }
+    }
+    let mean = cover.iter().sum::<f64>() / cover.len() as f64;
+    (cover.iter().map(|c| (c - mean).powi(2)).sum::<f64>() / cover.len() as f64).sqrt()
+}
+
+/// Issue #313: on drykit's default drawing paper, a flat mid-touch fill
+/// breaks up as specks, not in patches several points across. At the old
+/// `/Mottle 6` the slow mottle decided which tooth stood proud over whole
+/// patches, and fine hatching showed white islands the references do not.
+/// The patchiness is the spread of ink coverage between 3pt blocks: the
+/// coarse mottle's is about 1.8 times the default's, over five seeds.
+#[test]
+fn drawing_paper_breaks_up_in_specks_not_patches() {
+    let mean = |v: &[f64]| v.iter().sum::<f64>() / v.len() as f64;
+    let seeds = [1, 3, 7, 11, 19];
+    let fine: Vec<f64> = seeds
+        .iter()
+        .map(|&s| block_spread("/Surface /drawing", s))
+        .collect();
+    let coarse: Vec<f64> = seeds
+        .iter()
+        .map(|&s| block_spread("/Surface /drawing /Mottle 6", s))
+        .collect();
+    eprintln!("block spread: default {fine:.3?} /Mottle 6 {coarse:.3?}");
+    assert!(
+        mean(&fine) < 0.7 * mean(&coarse),
+        "default drawing paper spread {:.3} is not well below /Mottle 6's {:.3}",
+        mean(&fine),
+        mean(&coarse)
+    );
 }
 
 /// A bent four-segment centerline, as stops `[x y hw]`.
@@ -195,14 +254,19 @@ fn a_lighter_touch_catches_inside_a_heavier_one() {
 /// Pixels whose luma differs by more than anti-aliasing noise. A whole-page
 /// clip path has far larger bounds than the band's, and the rasterizer's
 /// fixed-point precision follows the bounds, so the same edge pixel can
-/// come out a few levels apart (measured up to 16 of 255, in both
-/// directions -- a pixel *lighter* with more clip, which no missing knuckle
-/// can explain). A missed knuckle leaves whole pixels uninked.
+/// come out a few levels apart (measured up to 16 of 255 in both directions
+/// on /drawing's old coarse mottle -- a pixel *lighter* with more clip, which
+/// no missing knuckle can explain). The finer mottle of #313 adds a rarer
+/// case: a knuckle grazing the ink's edge by under a pixel, which the band's
+/// reach drops and the whole page keeps. It costs one pixel a fifth lighter
+/// (50 of 255; it is gone at `dkslack` 3, which no case needs). A missed
+/// knuckle at the ink leaves whole pixels uninked (a band one cell short
+/// differs in hundreds of them, below), so the bar is 60.
 fn missed(a: &Interp, b: &Interp) -> usize {
     lumas(a)
         .iter()
         .zip(lumas(b))
-        .filter(|(p, q)| (**p - q).abs() > 40.0)
+        .filter(|(p, q)| (**p - q).abs() > 60.0)
         .count()
 }
 
@@ -339,7 +403,7 @@ fn the_swept_band_misses_no_knuckle_that_touches_the_ink() {
 /// The reach test above must be able to fail on a near miss: with the
 /// band's reach one cell short (a negative `dkslack` of one cell's worth of
 /// pixels), the knuckles it drops at the ink's edge are seen. It needs a
-/// broken catch (touch 0.6, measured 486 pixels): near touch 1 the catch is
+/// broken catch (touch 0.6, measured 294 pixels on the current drawing paper, 486 before #313): near touch 1 the catch is
 /// all but solid and a dropped edge knuckle covers ink that is already
 /// covered (0 pixels at touch 0.99). So the matrix above has a sparse case.
 #[test]
@@ -440,7 +504,7 @@ fn dksurface_every_documented_parameter_changes_the_render() {
     }
     assert_eq!(
         catch(
-            "/Surface /drawing /Seed 1 /Weave 0.6 /Mottle 6 /Relief 0.65 /Ground [0.95 0.94 0.90]"
+            "/Surface /drawing /Seed 1 /Weave 0.6 /Mottle 1.5 /Relief 0.65 /Ground [0.95 0.94 0.90]"
         ),
         baseline,
         "the documented defaults are not the defaults"

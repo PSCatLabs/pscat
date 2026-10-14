@@ -474,7 +474,7 @@ newpath 40 40 moveto 200 80 lineto << /Touch 0.7 >> dycrayon
 ```
 (lib/artkit.ps) run (lib/paintkit.ps) run (lib/drykit.ps) run
 (lib/hatchkit.ps) run (lib/drycharcoal.ps) run
-<< /Surface /drawing /Relief 0.35 >> dksurface   % less mottle suits charcoal
+<< /Surface /drawing >> dksurface                 % charcoal breaks up in specks (#313)
 0.11 0.10 0.10 setrgbcolor                        % the pigment is the current colour
 ```
 

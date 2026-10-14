@@ -158,12 +158,18 @@
 % /Relief raised where the shared-tooth test needed it: Q4 (mean phi >= 0.4
 % between crossing strokes) failed on newsprint at 0.4 and passes at 0.55,
 % the boards' value (tests/drykit.rs test 1 checks every surface).
+% /drawing's /Mottle is 1.5, not 6 (#313): at 6 the slow mottle opened white
+% islands several points across in fine hatching, which no reference shows
+% (H2, H4 break up as specks). A smaller mottle scale keeps /Relief 0.65, so
+% crossing strokes still share their tooth (Q4), while the patches shrink
+% to a few knuckles. Lowering /Relief to 0.35 also cured the islands but
+% put Q4 at 0.34. The mottle lattice repeats every 256 x /Mottle (384 pt).
 % @internal
 /dksurfaces <<
     /slate        << /Weave 0.4  /Relief 0.55 /Mottle 4 /Ground [0.13 0.14 0.16] >>
     /greenboard   << /Weave 0.4  /Relief 0.55 /Mottle 4 /Ground [0.17 0.23 0.20] >>
     /newsprint    << /Weave 0.35 /Relief 0.55 /Mottle 3 /Ground [0.86 0.84 0.78] >>
-    /drawing      << /Weave 0.6  /Relief 0.65 /Mottle 6 /Ground [0.95 0.94 0.90] >>
+    /drawing      << /Weave 0.6  /Relief 0.65 /Mottle 1.5 /Ground [0.95 0.94 0.90] >>
     /construction << /Weave 0.9  /Relief 0.75 /Mottle 8 /Ground [0.20 0.34 0.62] >>
 >> def
 
@@ -1581,7 +1587,7 @@
 % @param: /Surface [name] Which ground: /slate, /greenboard, /newsprint, /drawing or /construction. It sets the defaults of every key below (default /drawing)
 % @param: /Seed [integer] Seed for this surface alone, passed to pkcanvas; leaves the caller's rand stream untouched (default 1)
 % @param: /Weave [points] Tooth spacing, one knuckle per Weave x Weave cell, passed to pkcanvas (default from /Surface: 0.4 for the boards, 0.35 newsprint, 0.6 drawing paper, 0.9 construction paper)
-% @param: /Mottle [points] Scale of the slow variation in how proud the tooth stands, passed to pkcanvas (default from /Surface: 3 to 8)
+% @param: /Mottle [points] Scale of the slow variation in how proud the tooth stands, passed to pkcanvas (default from /Surface: 1.5 to 8)
 % @param: /Relief [0..1] How much the slow mottle, rather than each knuckle's own height, decides which tooth stands proud, passed to pkcanvas (default from /Surface: 0.4 to 0.75)
 % @param: /Ground [rgb array] The surface's own colour, three numbers 0..1. dksurface does not paint it; drykit marks read it as what lies beneath (default from /Surface: near-black slate, dark green-grey board, warm grey newsprint, off-white drawing paper, a blue construction paper)
 /dksurface {

@@ -29,9 +29,9 @@
 (lib/hatchkit.ps) run
 (lib/drycharcoal.ps) run
 
-% Drawing paper with less of its slow mottle than drykit's default: the
-% tooth breaks charcoal up knuckle by knuckle rather than in patches.
-<< /Surface /drawing /Relief 0.35 /Seed 7 >> dksurface
+% Drawing paper at drykit's defaults: its fine mottle breaks charcoal up
+% knuckle by knuckle rather than in patches (#313).
+<< /Surface /drawing /Seed 7 >> dksurface
 userdict /dkGround get aload pop setrgbcolor clippath fill
 % The layout below was drawn on a taller page; it sits 70pt lower here.
 0 -70 translate

@@ -116,7 +116,7 @@ them:
 | `/slate` | 0.4 | 0.55 | 4 | near black, slight blue | C3 |
 | `/greenboard` | 0.4 | 0.55 | 4 | dark grey-green | C1, C5, C7 |
 | `/newsprint` | 0.35 | 0.4 | 3 | warm light grey | not yet sourced |
-| `/drawing` | 0.6 | 0.65 | 6 | off-white | H1, H2, H4 |
+| `/drawing` | 0.6 | 0.65 | 1.5 | off-white | H1, H2, H4 |
 | `/construction` | 0.9 | 0.75 | 8 | saturated colour, chosen by the caller | Y1, Y2 |
 
 These are plain keys of the #182 surface. **Laid lines** (H1's vertical
