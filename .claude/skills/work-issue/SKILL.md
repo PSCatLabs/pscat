@@ -28,7 +28,7 @@ root) before running the step's commands.
 - macOS has no `timeout`, and foreground `sleep` may be blocked: pitfalls.md "Waiting and timeouts".
 - Never end a run with CI pending unless step 8.12's "pending CI" rule applies.
 - Read the top of `.claude/skills/work-issue/references/pitfalls.md` now (its contents list names the
-  sections: find one with `grep -n '^#' <file>`, read it with Read `offset`/`limit`; one `cat`
+  sections: find one with `grep -n '^#' .claude/skills/work-issue/references/pitfalls.md`, read it with Read `offset`/`limit`; one `cat`
   truncates). `references/rationale.md` says why each step is shaped so; read it before editing this skill.
 
 ## 1. Pick and claim the issue
@@ -130,7 +130,7 @@ Then re-read `$WORKTREE_DIR/.claude/skills/work-issue/SKILL.md` (it may have cha
    rules"). After a rebase that moved `HEAD`, re-read `$WORKTREE_DIR/.claude/skills/work-issue/SKILL.md`
    and follow that copy. If it brought in only docs, skill or CI files, redo nothing; if it brought in
    `lib/`, `src/` or tests, redo the identity base, the identity check and the full gate (same entry);
-   a later merge of `main` (8.9, 8.12) that brings those in after the gate: re-run it, or write "CI covers it".
+   a later merge of `main` (the 8.12 local merge for `DIRTY`) that brings those in after the gate: re-run it, or write "CI covers it".
    A `lib/` change that must render identically: `scripts/identity_check.sh --loader <lib>`; a `src/`
    one: the same with `--base-bin/--head-bin` (checklist item 4; no hand-rolled wrapper). List its base
    worktree in step 9's `EXTRA_WORKTREES`.

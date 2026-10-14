@@ -5,7 +5,7 @@ Read by `SKILL.md` before step 1 (skim) and whenever a step says so.
 Step numbers ("step 1" ... "step 9") refer to the numbered steps in `../SKILL.md`, which keep their original numbering. "Pitfalls" / "the ... pitfall below" means `pitfalls.md` in this directory; "Claim the issue" means `claim-protocol.md`.
 
 <!-- TOC -->
-This file is long enough that one `cat` truncates. Find a section with `grep -n '^#' <this file>` and read it
+This file is long enough that one `cat` truncates. Find a section with `grep -n '^#' .claude/skills/work-issue/references/pitfalls.md` and read it
 with the Read tool (`offset`/`limit`). The list below is by section name, not line number, so it does not
 drift when the file is edited; keep every heading's text unchanged, since `SKILL.md` and the other
 references cite sections by their quoted name. The first bullets, before the first heading, are the flat list
@@ -561,8 +561,8 @@ lists what `main` gained. If every path is `*.md`, under `docs/`, `notes/`, `.cl
 `examples/`, `gallery/`, `scripts/`, `build.rs`, `Cargo.*`, `site/`) means re-run it.
 Either way, re-read the worktree's `SKILL.md` after a rebase that moved `HEAD`.
 
-**A merge of `main` after the gate has passed (#331)** (the 8.9 re-push, or the local merge for a
-`DIRTY` PR in 8.12) follows the same allowlist. If it brought in `src/`, `lib/` or tests, either
+**A merge of `main` after the gate has passed (#331)** (the local merge for a `DIRTY` PR in 8.12;
+8.9's re-push of review fixes always re-runs the gate) follows the same allowlist. If it brought in `src/`, `lib/` or tests, either
 re-run the gate, or state in the PR comment that CI covers it: CI runs the identical four commands on
 the merge result, so for a code-only merge with no conflicts the second is legitimate and saves a
 local gate. Re-run locally when you resolved a conflict in code, or changed the identity-checked output.

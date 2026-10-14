@@ -17,7 +17,7 @@ look at.
     mode silently skips any piece missing that PNG, which defeats the
     whole point. Record the exact `gs` invocation the piece needs in its header comment and the
     README entry: a piece that reads a file (`(lib/artkit.ps) run`) needs `-dNOSAFER` or
-    `--permit-file-read=<dir>` plus relative paths, and gs run in the default safe mode fails it
+    `--permit-file-read=lib/` (the trailing slash is required; `lib` without it still fails) plus relative paths, and gs run in the default safe mode fails it
     with `invalidfileaccess`.
   - The published site: a card in `site/gallery.html`, backed by a
     PNG in `_site/assets/renders/`. For a gallery piece, that PNG
