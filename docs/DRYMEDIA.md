@@ -4,8 +4,9 @@ This is the design for epic #232. The maintainer approved it on 2026-10-13
 (PR #265), accepting every recommended answer to Q1–Q9 in section 10.
 Slices D1 and D2 (#234) are implemented in `lib/drykit.ps`
 (`dksurface`, `dkcatch`, `dkstroke`, `dkbatch`); measurements are in 6.1,
-and the deviations from this text are marked "As built". G1, the medium
-files and the gallery pieces are not built yet.
+and the deviations from this text are marked "As built". G1 (#236) and the
+chalk medium file (#235, `lib/drychalk.ps`) are built. The other medium files
+and the gallery pieces are not built yet.
 
 Read these first:
 
@@ -297,6 +298,23 @@ file:
 | Charcoal hatching (H2, H4) | hatch line *paths* inked by `dkstroke`, with all the layers of one pigment in one `dkbatch`. hatchkit draws lines itself and has no path hook, so #241 adds a `/Mark {path}` hook to `lib/hatchkit.ps` (a small, separate change) rather than copying its geometry. |
 | Smudge (H1, H5) | a wide `dkstroke` at high touch (fills the valleys), `/Strength` low, `/Under` = the caller's tone, directional `/Streak` |
 | Kneaded-eraser lift (H8) | `dkstroke` in *paper* colour with `/Under` set to the charcoal tone beneath: paper colour through the peaks |
+
+**As built (chalk, #235, `notes/235-drychalk.md`):**
+- **The landing and lift** follow this table. The lift tapers to a
+  floor, not to 0.
+- **The dust halo comes from specks** drawn by drychalk, not from
+  `/Halo`. A wide halo read as a grey outline. drykit's `/Fallout` was
+  slow in gs (#308).
+- **Side-of-chalk strokes** are drawn as lanes: narrow edge lanes that
+  press harder, with lighter face lanes between them.
+- **Ghosting is one faint level of chalk** with no haze layer on top. The
+  haze is painted first, as one `colorimage` field.
+- **Eraser swipes** are bands in that field plus thin felt streaks, not a
+  wide `dkstroke`. A wide catch across a board cost too much.
+- **Finger wipes** re-lay the darker field inside each wipe, so they cut
+  the ghost writing.
+- **Board surfaces** use `/Weave 0.7`. At 2x a 0.4pt tooth is below a
+  pixel and costs 2.25 times the cells.
 
 ## 4. Stroke skeletons (#236)
 
