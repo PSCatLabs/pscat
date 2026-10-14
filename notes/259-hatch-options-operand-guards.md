@@ -49,13 +49,18 @@ checked with the other options rather than where it is read).
 
 **Behaviour change.** Newly rejected, all with a named guard instead of a raw
 error or silent acceptance: an executable array where an array of numbers
-belongs, a non-dict options operand, a wrong-length `/Width` or `/Trim`
-(was a raw `rangecheck`), a non-number in `/Angles`/`/BBox`. A well-formed call
+belongs, a non-dict options operand, a non-number in `/Angles`/`/BBox`, and a
+wrong-length `/Width` or `/Trim`. Measured on `origin/main`: a 0- or 1-element
+pair raised a raw `get` error, but a 3-element pair was accepted silently
+(the third element was ignored), so requiring exactly two is a real, if small,
+tightening of what used to work; the documented shape is `[lo hi]`. `/Width`
+and `/Trim` given a `packedarray` are still accepted (this interpreter reports
+it as `arraytype`). A well-formed call
 is untouched. Renders are byte-identical: 13 files that load hatchkit or one of its
 dependants (`examples/{hatching,printkit,surfacekit,stippling,halftone,etching_demo}.ps`,
 `gallery/{nightfall_triptych,out_of_register,varsity_backs}.ps`, two
 `docs/drymedia/prototypes`, the artkit and paintkit selftest drivers) gave 29
-PNGs from a base worktree (merge-base `b2e56e3`) and from this branch, same
+PNGs from a base worktree (merge-base `b2e56e3`; the branch was then rebased onto `f4345c1`, which only adds work-issue skill and notes files, so the comparison stands) and from this branch, same
 binary, each run from its own tree root: 0 differ under `cmp`. Negative
 control: changing the candidate-centering divisor in the branch's `hatch`
 (`2 div` to `3 div` for `/hkslack`) made `examples/hatching.ps`,
@@ -76,5 +81,9 @@ against the `origin/main` library (4 of the 5 Rust tests, all 3 blocks).
 
 **Not changed / follow-ups.** `scatter`'s own `/BBox` residual and `scarea`'s
 raw `typecheck` live in `lib/artkit.ps`, which another change (#110) is
-editing; they are filed as #295. Options that dependants
-(`printkit`, `surfacekit`, ...) forward to `hatch` were not audited.
+editing; they are filed as #295. Option values forwarded to `hatch` by
+dependants: only `printkit` (`woodcut`, `linocut`, `engraving`) calls `hatch`
+(surfacekit, halftonekit and stipplekit do not), and it builds the options dict
+itself from values it has already validated. Probed with a value-returning
+procedure in each of its seven option slots, on this branch: all seven raise
+`printkit-<name>-must-be-a-...` and run nothing, for all three presets.

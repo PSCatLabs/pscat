@@ -780,19 +780,21 @@ fn hatch_never_executes_a_malformed_array_option() {
 #[test]
 fn a_rejected_hatch_leaves_the_random_stream_and_graphics_state_alone() {
     // Every operand check runs before `srand` and `gsave`: a rejected
-    // call must not have reseeded the caller's stream.
+    // call must not have reseeded the caller's stream, or left a `gsave`
+    // behind (checked through the line width a drawing pass would set).
     let mut it = with_lib(100, 100);
-    it.run_str("5 srand rand /first exch def 5 srand")
+    it.run_str("5 srand rand /first exch def 5 srand 7 setlinewidth")
         .expect("setup");
     let err = it
         .run_str("<< /BBox [0 0 50 50] /Seed 9 /Spacing { 1 } >> hatch")
         .unwrap_err();
     assert!(matches!(err, PsError::Undefined(ref n) if n == "hatch-spacing-must-be-a-number"));
-    it.run_str("rand first eq").expect("compare");
-    assert_eq!(
-        it.operand_stack().last().map(|o| o.repr()).as_deref(),
-        Some("true"),
-        "the caller's seed 5 stream was disturbed by a rejected call"
+    it.run_str("rand first eq currentlinewidth 7 eq")
+        .expect("compare");
+    let top: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
+    assert!(
+        top.ends_with(&["true".to_string(), "true".to_string()]),
+        "the caller's seed-5 stream or line width was disturbed by a rejected call: {top:?}"
     );
 }
 
