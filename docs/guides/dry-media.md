@@ -29,6 +29,10 @@ the stick's contact patch meets raised tooth.
   runs, and the strokes it makes keep that region inside a batch. So
   differently clipped strokes, such as overlapping hatched regions, can
   share one batch.
+- **`/After true`** on a `dkstroke` inside a batch draws that stroke on
+  its own after the batch has rendered, in call order, in its own colour.
+  It is how an eraser or a smudge can be drawn from inside a batch, over
+  everything the batch lays.
 
 drykit takes no draws from the caller's `rand` stream. Its surface and
 tool-side randomness come from private seeded generators, and fallout goes
@@ -106,6 +110,9 @@ grey and dusty; `/compressed`: dark and dense; `/pencil`: a sharp point) and a
 region to a value (a number, or a `{x y -> value}` callback), `dhsmudge` is a
 stump's or finger's track, `dhlift` is an eraser's track (kneaded or hard), and
 `dhsketch` lays faint construction lines. It needs hatchkit loaded.
+`dhsmudge` and `dhlift` may run inside a `dkbatch`: they are drawn after the
+batch's strokes, in call order, over all of them (even hatching made later
+in the batch), so to hatch over a lift, hatch in a later batch.
 `examples/drycharcoal_specimen.ps` is the specimen; the gallery piece *Study
 after Berger, 1864* is a charcoal portrait built with it.
 
@@ -157,7 +164,12 @@ skeletons with TeX's box model. The subset covers:
   inside `\text{}`, `\mathrm{}` and `\operatorname{}` it is a raised text
   asterisk (strokeglyphs' `/asterisk`), as TeX sets it in text;
 - matrices and `cases`, accents and `\boxed`;
-- Greek and operator names.
+- Greek and operator names;
+- `\overbrace{...}^{label}` and `\underbrace{...}_{label}` with a grown
+  brace, `\overset`, `\underset`, `\stackrel` and `\substack` limits;
+- `\displaystyle`, `\textstyle` and `\scriptstyle` mid-formula;
+- `\not` before a relation (`\not=` is ≠, `\not\in` is ∉, anything else
+  gets a slash), `\bmod` and `\pmod{n}`.
 
 Anything outside the subset fails with an error that names it. The
 layout is written with a lecturer's irregularity: sizes and gaps vary,
@@ -165,12 +177,17 @@ scripts sit a little high or low, fraction bars overshoot, and the
 baseline slopes and drifts (`/Irregular`, where 0 is clean TeX).
 - `mkpath` appends a formula's path and `mkmetrics` measures it.
 - `mkalign` writes a derivation aligned on `=`. It returns a record per
-  line, which `mkframe` and `mkunderline` follow along its slope.
+  line, which `mkframe` and `mkunderline` follow along its slope. With
+  several `&` on a line it sets TeX align's columns (right, left, right,
+  left ...), each pair `/ColumnGap` (in multiples of `/Size`, default 2)
+  after the last.
 - `mkarrow` points a side note at a term.
 
 Every TeX backslash is written twice in a PostScript string.
 `examples/mathkit_specimen.ps` is the specimen: the fixed test set, from
 the quadratic formula to Maxwell's equations, and a derivation in chalk.
+`examples/mathkit_structures.ps` shows the structures issue #340 added
+(`docs/drymedia/mathkit_structures.png`).
 The gallery piece `gallery/chalkboard_lecture.ps` fills a
 whole board with it: Euler's formula derived across three drychalk
 panels.

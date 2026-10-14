@@ -194,6 +194,7 @@ The pigment is the current colour, as everywhere in paintkit. No key sets it.
 | `/Lanes` | `[count]` | 1 | Parallel lanes across the contact patch, each with its own contact chain: crayon striation (Y3) and split charcoal tails (H6). |
 | `/Fallout` | `[count per points]` | 0 | Loose particles per point of stroke length (M6), placed with artkit's `scatter`. |
 | `/Drift` | `[points]` | 0 | How far fallout drifts down canvas-space y: chalk on a vertical board falls. |
+| `/After` | `[boolean]` | false | Inside a `dkbatch`, draw this stroke on its own after the batch renders, in call order, in its own colour (#393). Ignored with no batch open. |
 | `/Seed` | `[integer]` | from the position | Seed for the tool-side randomness (contact chain, lane offsets, fallout). By default it is derived from the first point's canvas-space position, so adding a stroke elsewhere never re-rolls this one. |
 
 `/Spread` is deliberately absent: nothing here is a fraction of `/Width`
@@ -284,13 +285,28 @@ still do. A record made outside any `dkclip` stores no region and renders
 exactly as before. A plain `clip` inside a batch is still not kept: pscat's
 `clippath` gives back only the newest of nested clips, or a rectangle or a
 mask trace of their intersection, and drops the eoclip rule, so a generic
-capture would not be exact. A stroke under a `dkclip` region in a batch
+capture through it would not be exact. Since #394 pscat has Level 2 `gstate`
+objects, which do bring a clip back exactly; drykit adopting them needs a
+cheap identity test per clip, not per stroke (#444). A stroke under a `dkclip` region in a batch
 renders byte-identically to the same stroke drawn at once under that clip
 (`tests/drykit.rs`).
 
 Each pigment gets its own batch, in drawing order. If colours B and A shared
 a batch, B's dim level would be drawn under A's core. Real wax or charcoal
 in a later colour lies on top.
+
+**`/After` strokes (#393, as built).** A `dkstroke` with `/After true` made
+inside a batch is recorded as usual (CTM, colour, `/Under`, `dkclip`
+region) but is kept out of the level-major pass and out of the batch's
+pigment check. When the batch has rendered, each `/After` stroke is drawn
+on its own, in call order, exactly as if it had been made just after the
+batch closed. drycharcoal's `dhsmudge` and `dhlift` set it, so a smudge or
+a lift can be made inside a charcoal batch: it lands on everything the
+batch lays, including strokes the procedure makes after it. Splitting the
+batch at the smudge instead would keep call order but break the
+level-major crossings for the rest of the batch, and a lift or smudge only
+makes sense on top of the charcoal it works. To hatch over a lift, hatch in
+a later batch.
 
 Ribbon geometry comes from round-capped strokes for constant width, and from
 `pkribbon`'s outline for `/Pressure` and `/Wear`. **As built:** a varying
@@ -352,7 +368,8 @@ this table. `dhhatch` calls `hatch` with `/Mark` and no rolls of its own, and
 draws all hand variation from `dkrand`. With no batch open it closes its
 batch inside its own region clip. Inside a caller's batch it joins that
 batch through `dkclip` (#312), so overlapping regions hatched in one batch
-stay level-major. The smudge
+stay level-major. `dhsmudge` and `dhlift` draw as `/After` strokes in a
+batch (#393): after it, in call order, over everything it lays. The smudge
 is told the tone it leaves (`/Value`, from paper to pigment) as well as
 `/Under`. Measurements and the reference comparison are in
 `notes/241-drycharcoal.md`.

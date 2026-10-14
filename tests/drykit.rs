@@ -1097,6 +1097,24 @@ fn dkstroke_every_documented_parameter_changes_the_render() {
             "{extra} rendered the same as the baseline: a no-op"
         );
     }
+    // /After (#393) acts only inside a batch: the stroke is drawn after a
+    // crossing stroke made later in the batch, instead of level-major with it.
+    let batched = |extra: &str| {
+        data(&board(
+            140,
+            60,
+            2.0,
+            &format!(
+                "{{ newpath 10 30 moveto 70 45 lineto 130 25 lineto << {BASE} {extra} >> dkstroke \
+                   newpath 20 10 moveto 120 50 lineto << {BASE} /Width 6 >> dkstroke }} dkbatch"
+            ),
+        ))
+    };
+    assert_ne!(
+        batched("/After true"),
+        batched(""),
+        "/After true rendered the same as the baseline in a batch: a no-op"
+    );
     // Every advertised key is in the list above, and nothing else is.
     let src = std::fs::read_to_string("lib/drykit.ps").expect("read drykit");
     let start = src
@@ -1110,6 +1128,7 @@ fn dkstroke_every_documented_parameter_changes_the_render() {
         .collect();
     advertised.sort_unstable();
     let mut tested: Vec<&str> = varied.iter().map(|(k, _)| *k).collect();
+    tested.push("After");
     tested.sort_unstable();
     assert_eq!(advertised, tested, "advertised and tested keys differ");
 }

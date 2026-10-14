@@ -766,3 +766,584 @@ end definefont pop } exec
     TWState begin tApply end
     { /Typewriter findfont TWState /tSize get scalefont setfont } if
 } bind def
+
+% ---- layout: tw-type, tw-linecount, tw-pageheight (#213) ------------------
+% One layout makes a list of line records [a b col0] (cells a..b-1 of the
+% parsed text, the first at column col0). tw-linecount returns the length of
+% that list and tw-type draws from it, so the two always agree. Everything
+% private here lives in TWState under the prefix ly (artkit owns tw*).
+%
+% The text is parsed once into three parallel strings, one byte per cell:
+%   lyC  the character typed
+%   lyA  attribute bits: 1 underline, 2 glued (inside <o>..</o>: one
+%        unbreakable token)
+%   lyO  the character struck over it (0 for none)
+% Markup, with no escapes needed (any other < is literal):
+%   <u>text</u>      underlined: a second pass of underscores
+%   <x>text</x>      crossed out: x struck over each character
+%   <o>old|new</o>   overtyped: new struck over old; the token is as wide as
+%                    the longer side and never breaks across a line
+% Bytes above 126 are not on the machine: each takes one blank cell, and
+% tw-linecount counts them the same way. Control characters other than tab
+% and newline are blank cells; carriage returns are dropped.
+TWState begin {
+
+% a n ch ... helpers
+/lyRep {                                    % n ch -> string of n ch
+    /lrC exch def /lrN exch def
+    lrN string /lrS exch def
+    0 1 lrN 1 sub { lrS exch lrC put } for
+    lrS
+} bind def
+/lyCat {                                    % a b -> ab
+    /lcB exch def /lcA exch def
+    lcA length lcB length add string
+    dup 0 lcA putinterval
+    dup lcA length lcB putinterval
+} bind def
+
+% ---- option checks (layout keys; the typewriter keys are tw-setup's) -------
+/lyIsStr { type /stringtype eq } bind def
+/lyIsSpacing { dup tIsNum { dup 0.5 ge exch 20 le and } { pop false } ifelse } bind def
+/lyIsCount { dup tIsInt { 0 ge } { pop false } ifelse } bind def
+/lyIsTabs {
+    dup type /integertype eq { 0 gt } {
+        dup type /arraytype eq 1 index xcheck not and {
+            /ltOk true def /ltPrev -1 def
+            {
+                dup type /integertype eq {
+                    dup ltPrev gt { /ltPrev exch def } { pop /ltOk false def } ifelse
+                } { pop /ltOk false def } ifelse
+            } forall
+            ltOk
+        } { pop false } ifelse
+    } ifelse
+} bind def
+/lyIsPN {
+    dup type /nametype eq {
+        dup /none eq 1 index /top eq or exch /bottom eq or
+    } { pop false } ifelse
+} bind def
+/lyIsProc { dup type /arraytype eq { xcheck } { pop false } ifelse } bind def
+/lyMemoKeys <<
+    /To /lyIsStr  /From /lyIsStr  /Cc /lyIsStr  /Subject /lyIsStr
+    /Date /lyIsStr  /Title /lyIsStr  /Rule /tIsBool
+>> def
+/lyIsMemo {
+    dup type /dicttype eq {
+        true exch {
+            /lmV exch def /lmK exch def
+            lyMemoKeys lmK known { lmV lyMemoKeys lmK get cvx exec and } { pop false } ifelse
+        } forall
+    } { pop false } ifelse
+} bind def
+
+% key -> [ internal-name check guard ]
+/lyKeys <<
+    /Text        [ /lyText /lyIsStr     /tw-text-must-be-a-string ]
+    /Width       [ /lyW    /tIsPos      /tw-width-must-be-a-positive-number ]
+    /Height      [ /lyH    /tIsPos      /tw-height-must-be-a-positive-number ]
+    /Margin      [ /lyM    /tIsNonNeg   /tw-margin-must-be-a-non-negative-number ]
+    /MarginLeft  [ /lyML   /tIsNonNeg   /tw-margin-must-be-a-non-negative-number ]
+    /MarginRight [ /lyMR   /tIsNonNeg   /tw-margin-must-be-a-non-negative-number ]
+    /MarginTop   [ /lyMT   /tIsNonNeg   /tw-margin-must-be-a-non-negative-number ]
+    /MarginBottom [ /lyMB  /tIsNonNeg   /tw-margin-must-be-a-non-negative-number ]
+    /Spacing     [ /lySp   /lyIsSpacing /tw-spacing-must-be-0.5-to-20 ]
+    /Indent      [ /lyInd  /lyIsCount   /tw-indent-must-be-a-non-negative-integer ]
+    /Tabs        [ /lyTabs /lyIsTabs    /tw-tabs-must-be-a-positive-integer-or-ascending-columns ]
+    /PageNumbers [ /lyPN   /lyIsPN      /tw-pagenumbers-must-be-none-top-or-bottom ]
+    /PageStart   [ /lyPS   /lyIsProc    /tw-pagestart-must-be-a-procedure ]
+    /Memo        [ /lyMemo /lyIsMemo    /tw-memo-must-be-a-dict-of-known-string-keys ]
+>> def
+/lyDefaults {
+    /lyText () def  /lyW 612 def  /lyH 792 def  /lyM 72 def
+    /lyML -1 def  /lyMR -1 def  /lyMT -1 def  /lyMB -1 def
+    /lySp 1 def  /lyInd 0 def  /lyTabs 5 def  /lyPN /none def
+    /lyPS null def  /lyMemo null def
+} bind def
+
+% opts -> typeOpts. Reads the layout keys into ly variables and returns a
+% dict of the rest, for tw-setup. A key in neither set is an error, so a
+% misspelling never passes silently. TWState is current: each guard ends it
+% first, as tApply's do.
+/lySplit {
+    dup type /dicttype ne { end tw-options-must-be-a-dict } if
+    lyDefaults
+    dup length dict /lyRest exch def
+    {                                       % key value
+        1 index lyKeys exch known {
+            lyKeys 2 index get aload pop
+            /lyG exch def /lyCk exch def /lyVar exch def
+            % the value stays on the operand stack: a procedure (/PageStart)
+            % would run if it were fetched by name
+            dup lyCk cvx exec { lyVar exch def pop } { lyG end cvx exec } ifelse
+        } {
+            tKeys 2 index known not { end tw-unknown-option } if
+            lyRest 3 1 roll put
+        } ifelse
+    } forall
+    lyRest
+} bind def
+
+% typeOpts -> -  : the pitch and size this call types at, without applying
+% the options (tw-linecount and tw-pageheight must not change the machine)
+/lyEff {
+    dup /Pitch known {
+        dup /Pitch get dup tIsPos not { end tw-pitch-must-be-a-positive-number } if
+        /lyP exch def
+    } { /lyP tPitch def } ifelse
+    dup /Size known {
+        dup /Size get dup tIsPos not { end tw-size-must-be-a-positive-number } if
+        /lySz exch def
+    } { /lySz tSize def } ifelse
+    pop
+} bind def
+
+% ---- geometry --------------------------------------------------------------
+/lyGeomX {
+    /lyPt 72 lyP div def                    % the advance, points
+    /lyL lyML 0 lt { lyM } { lyML } ifelse def
+    /lyR lyMR 0 lt { lyM } { lyMR } ifelse def
+    /lyTop lyMT 0 lt { lyM } { lyMT } ifelse def
+    /lyBot lyMB 0 lt { lyM } { lyMB } ifelse def
+    /lyCols lyW lyL sub lyR sub lyPt div 0.0001 add floor cvi dup 1 lt { pop 1 } if def
+    % single spacing is 12pt; the platen steps in 6pt half-lines
+    /lyStep lySp 2 mul round cvi 6 mul def
+    /lyHang 10 def
+} bind def
+/lyGeomY {
+    /lyY0 lyH lyTop sub 0.75 lySz mul sub def        % the first baseline
+    /lyNLP lyY0 lyBot sub 0.001 add lyStep div floor cvi 1 add dup 1 lt { pop 1 } if def
+} bind def
+
+% string -> a copy with newlines and carriage returns as spaces: a memo field
+% is one paragraph, so the hang bookkeeping stays in step with the text
+/lyOneLine {
+    dup length string copy /lo exch def
+    0 1 lo length 1 sub {
+        /loI exch def
+        lo loI get dup 10 eq exch 13 eq or { lo loI 32 put } if
+    } for
+    lo
+} bind def
+
+% ---- the memo header -------------------------------------------------------
+% sets lyHg0 lyHg1 (the paragraphs hung at lyHang) and lyBody0 (the first
+% paragraph of the body); returns the header's text
+/lyMemoText {
+    () /lyAcc exch def
+    /lyPn 0 def
+    lyMemo /Title known { lyMemo /Title get } { (MEMORANDUM) } ifelse /lyTt exch def
+    lyTt length 0 gt {
+        lyAcc
+        lyCols lyTt length sub 2 idiv dup 0 lt { pop 0 } if 32 lyRep lyCat
+        (<u>) lyCat lyTt lyCat (</u>) lyCat (\n\n) lyCat /lyAcc exch def
+        /lyPn lyPn 2 add def
+    } if
+    /lyHg0 lyPn def
+    [ [/To (TO:)] [/From (FROM:)] [/Cc (CC:)] [/Subject (SUBJECT:)] [/Date (DATE:)] ] {
+        aload pop /lyLab exch def /lyKey exch def
+        lyMemo lyKey known {
+            lyAcc lyLab lyCat
+            lyHang lyLab length sub 32 lyRep lyCat
+            lyMemo lyKey get lyOneLine lyCat (\n) lyCat /lyAcc exch def
+            /lyPn lyPn 1 add def
+        } if
+    } forall
+    /lyHg1 lyPn def
+    lyPn 0 gt {
+        lyMemo /Rule known { lyMemo /Rule get } { true } ifelse {
+            lyAcc lyCols 95 lyRep lyCat (\n) lyCat /lyAcc exch def
+            /lyPn lyPn 1 add def
+        } if
+        lyAcc (\n) lyCat /lyAcc exch def
+        /lyPn lyPn 1 add def
+    } if
+    /lyBody0 lyPn def
+    lyAcc
+} bind def
+% -> the whole text: the memo header (if any) and /Text
+/lyDoc {
+    /lyHg0 -1 def  /lyHg1 -1 def  /lyBody0 0 def
+    lyMemo null eq { lyText } { lyMemoText lyText lyCat } ifelse
+} bind def
+
+% ---- parsing ---------------------------------------------------------------
+/lyHas {                                    % str -> bool : str is at lyI
+    /lhS exch def
+    lhS length lyI add lyTn le { lyT lyI lhS length getinterval lhS eq } { false } ifelse
+} bind def
+/lyTagTab [
+    [ (<u>)  { /lyIu lyIu 1 add def } bind ]
+    [ (</u>) { /lyIu lyIu 1 sub dup 0 lt { pop 0 } if def } bind ]
+    [ (<x>)  { /lyIx lyIx 1 add def } bind ]
+    [ (</x>) { /lyIx lyIx 1 sub dup 0 lt { pop 0 } if def } bind ]
+    [ (<o>)  { lyIo 0 eq { /lyIo 1 def /lyOs lyN def } if } bind ]
+    [ (</o>) { /lyIo 0 def } bind ]
+] def
+/lyTag {                                    % -> bool : consumed a tag at lyI
+    /lyTr false def
+    lyTagTab {
+        dup 0 get lyHas {
+            dup 1 get exec
+            0 get length lyI add /lyI exch def
+            /lyTr true def exit
+        } { pop } ifelse
+    } forall
+    lyTr
+} bind def
+/lyAdd {                                    % c -> -  : append a cell
+    /lyCh exch def
+    lyCh 13 eq { } {
+        lyCh 10 eq { /lyIo 0 def } if
+        lyCh 32 lt lyCh 9 ne and lyCh 10 ne and { /lyCh 32 def } if
+        lyIo 0 gt lyCh 9 eq and { /lyCh 32 def } if
+        lyIu 0 gt { 1 } { 0 } ifelse lyIo 0 gt { 2 } { 0 } ifelse or /lyAt exch def
+        lyIo 2 eq {
+            lyCh 32 gt { lyCh } { 0 } ifelse /lyOv exch def
+            lyOv 0 gt { /lyAnyO true def } if
+            lyOp lyN lyOs sub lt {
+                lyO lyOs lyOp add lyOv put
+            } {
+                lyC lyN 32 put  lyA lyN lyAt put  lyO lyN lyOv put
+                /lyN lyN 1 add def
+            } ifelse
+            /lyOp lyOp 1 add def
+        } {
+            lyIo 1 eq lyCh 124 eq and {
+                /lyIo 2 def  /lyOp 0 def
+            } {
+                lyC lyN lyCh put  lyA lyN lyAt put
+                lyIx 0 gt lyCh 32 gt and { 120 /lyAnyO true def } { 0 } ifelse
+                lyO lyN 3 -1 roll put
+                lyAt 1 and 0 ne { /lyAnyU true def } if
+                /lyN lyN 1 add def
+            } ifelse
+        } ifelse
+    } ifelse
+} bind def
+/lyParse {                                  % string -> -
+    /lyT exch def  /lyTn lyT length def
+    /lyC lyTn string def  /lyA lyTn string def  /lyO lyTn string def
+    /lyN 0 def  /lyIu 0 def  /lyIx 0 def  /lyIo 0 def  /lyI 0 def
+    /lyAnyO false def  /lyAnyU false def
+    {
+        lyI lyTn ge { exit } if
+        lyTag not { lyT lyI get lyAdd /lyI lyI 1 add def } if
+    } loop
+} bind def
+
+% ---- wrapping ---------------------------------------------------------------
+/lyTab {                                    % col -> the next tab stop
+    lyTabs type /integertype eq {
+        lyTabs idiv 1 add lyTabs mul
+    } {
+        /ltC exch def  /ltR ltC 1 add def
+        lyTabs { dup ltC gt { /ltR exch def exit } { pop } ifelse } forall
+        ltR
+    } ifelse
+} bind def
+/lyNext { 9 eq { lyTab } { 1 add } ifelse } bind def        % col c -> col'
+/lyIsWord {                                 % i -> bool
+    /lwI exch def
+    lyC lwI get 32 gt lyA lwI get 2 and 0 ne or
+} bind def
+/lyEmit {                                   % a b col0 -> -
+    /leC exch def /leB exch def /leA exch def
+    lyLines lyNL 3 mul leA put
+    lyLines lyNL 3 mul 1 add leB put
+    lyLines lyNL 3 mul 2 add leC put
+    /lyNL lyNL 1 add def
+} bind def
+% start end index -> -  : wrap one paragraph greedily by word. Whitespace
+% where a line breaks is dropped, a word wider than a line is split, and
+% leading whitespace on a paragraph's first line is kept.
+/lyPara {
+    /paI exch def /paE exch def /paS exch def
+    /paFi paI lyBody0 lt { 0 } { lyInd } ifelse def
+    /paCi paI lyHg0 ge paI lyHg1 lt and { lyHang } { 0 } ifelse def
+    paFi lyCols 1 sub gt { /paFi lyCols 1 sub def } if
+    paCi lyCols 1 sub gt { /paCi lyCols 1 sub def } if
+    paS paE eq { paS paS paFi lyEmit } {
+        /paPos paS def  /paCol paFi def  /paA paS def  /paC0 paFi def
+        /paNB false def  /paWs -1 def
+        {
+            paPos paE ge { exit } if
+            paPos lyIsWord not {
+                paWs 0 lt { /paWs paPos def } if
+                /paCol paCol lyC paPos get lyNext def
+                /paPos paPos 1 add def
+            } {
+                /paWe paPos def
+                { paWe paE ge { exit } if paWe lyIsWord not { exit } if /paWe paWe 1 add def } loop
+                paNB paCol paWe paPos sub add lyCols gt and {
+                    paA paWs 0 ge { paWs } { paPos } ifelse paC0 lyEmit
+                    /paA paPos def  /paCol paCi def  /paC0 paCi def  /paNB false def
+                } if
+                {
+                    paPos paWe ge { exit } if
+                    paCol lyCols ge {
+                        paA paPos paC0 lyEmit
+                        /paA paPos def  /paCol paCi def  /paC0 paCi def
+                    } if
+                    /paCol paCol 1 add def  /paPos paPos 1 add def  /paNB true def
+                } loop
+                /paWs -1 def
+            } ifelse
+        } loop
+        paA paE paC0 lyEmit
+    } ifelse
+} bind def
+/lyLayout {
+    /lyNL 0 def
+    /lyLines lyN 2 mul 4 add 3 mul array def
+    lyN 0 gt {
+        /lyPs 0 def  /lyPi 0 def
+        {
+            /lyPe lyPs def
+            { lyPe lyN ge { exit } if lyC lyPe get 10 eq { exit } if /lyPe lyPe 1 add def } loop
+            lyPs lyPe lyPi lyPara
+            lyPe 1 add dup lyN ge { pop exit } if /lyPs exch def
+            /lyPi lyPi 1 add def
+        } loop
+    } if
+} bind def
+
+% ---- drawing ----------------------------------------------------------------
+/lyIncl {                                   % cell pass -> bool : is it struck in this pass
+    /liP exch def /liJ exch def
+    liP 0 eq { lyC liJ get 32 gt } {
+        liP 1 eq { lyO liJ get 32 gt } {
+            lyA liJ get 1 and 0 ne lyC liJ get 9 ne and
+        } ifelse
+    } ifelse
+} bind def
+/lyShowRun {                                % start end col pass -> -
+    /lrP exch def /lrCol exch def /lrE exch def /lrS exch def
+    lyL lrCol lyPt mul add lyYr moveto
+    lrP 0 eq { lyC lrS lrE lrS sub getinterval show } {
+        lrP 1 eq { lyO lrS lrE lrS sub getinterval show } {
+            lrE lrS sub 95 lyRep show
+        } ifelse
+    } ifelse
+} bind def
+/lyLinePass {                               % pass -> -  (the line is lyLa lyLb lyLc)
+    /lpP exch def
+    /lpCol lyLc def  /lpIn false def
+    lyLa 1 lyLb 1 sub {
+        /lpJ exch def
+        lpJ lpP lyIncl {
+            lpIn not { /lpIn true def /lpS lpJ def /lpC0 lpCol def } if
+        } {
+            lpIn { lpS lpJ lpC0 lpP lyShowRun /lpIn false def } if
+        } ifelse
+        /lpCol lpCol lyC lpJ get lyNext def
+    } for
+    lpIn { lpS lyLb lpC0 lpP lyShowRun } if
+} bind def
+/lyDrawLine {                               % global row -> -
+    /ldR exch def
+    lyLines ldR 3 mul get /lyLa exch def
+    lyLines ldR 3 mul 1 add get /lyLb exch def
+    lyLines ldR 3 mul 2 add get /lyLc exch def
+    /lyYr lyY0 ldR lyR0 sub lyStep mul sub def
+    /tStrike lyS0 def
+    0 lyLinePass
+    lyAnyO { /tStrike lyS0 1 add def 1 lyLinePass } if
+    lyAnyU { /tStrike lyS0 2 add def 2 lyLinePass } if
+    /tStrike lyS0 def
+} bind def
+/lyPageNum {
+    lyPN /none eq { } {
+        lyPN /bottom eq {
+            (- ) lyPg 1 add 12 string cvs lyCat ( -) lyCat /lnS exch def
+            lyCols lnS length sub 2 idiv
+            lyY0 lyBot 2 div sub lyStep div round cvi dup lyNLP lt { pop lyNLP } if
+            true
+        } {
+            lyPg 0 gt {
+                lyPg 1 add 12 string cvs /lnS exch def
+                lyCols lnS length sub
+                lyY0 lyH lyTop 2 div sub sub lyStep div round cvi dup -1 gt { pop -1 } if
+                true
+            } { false } ifelse
+        } ifelse
+        {
+            /lnRow exch def /lnCol exch def
+            /tStrike lyS0 def
+            lyL lnCol 0 gt { lnCol } { 0 } ifelse lyPt mul add
+            lyY0 lnRow lyStep mul sub moveto
+            lnS show
+        } if
+    } ifelse
+} bind def
+/lyPage {                                   % page index -> -
+    /lyPg exch def
+    lyPg 0 gt { showpage } if
+    /lyPS load null ne { gsave /lyPS load end exec TWState begin grestore } if
+    newpath lyL lyY0 lyPg lyNLP mul lyStep mul add moveto tFrame
+    /Typewriter findfont tSize scalefont setfont
+    /lyR0 lyPg lyNLP mul def
+    lyNL lyR0 sub dup lyNLP gt { pop lyNLP } if /lyCnt exch def
+    0 1 lyCnt 1 sub { lyR0 add lyDrawLine } for
+    lyPageNum
+} bind def
+/lyDraw {
+    /lyS0 tStrike def
+    /lyPages lyNL lyNLP add 1 sub lyNLP idiv dup 1 lt { pop 1 } if def
+    0 1 lyPages 1 sub { lyPage } for
+    /tStrike lyS0 def
+    % leave the carriage at the start of the next line
+    lyL lyY0 lyPages 1 sub lyNLP mul lyStep mul add lyNL lyStep mul sub moveto
+} bind def
+
+} exec end % TWState (layout)
+
+%%SelfTest: tw-type-guards
+%   { 5 tw-type } /tw-options-must-be-a-dict
+%   (a number for the options) mustguard
+%
+%   { << /Txt (a) >> tw-type } /tw-unknown-option
+%   (a misspelt key) mustguard
+%
+%   { << /Text 5 >> tw-linecount } /tw-text-must-be-a-string
+%   (a number for the text) mustguard
+%
+%   { << /Spacing 0 >> tw-type } /tw-spacing-must-be-0.5-to-20
+%   (spacing below half a line) mustguard
+%
+%   { << /Margin -1 >> tw-pageheight } /tw-margin-must-be-a-non-negative-number
+%   (a negative margin) mustguard
+%
+%   { << /Tabs [ 8 4 ] >> tw-linecount } /tw-tabs-must-be-a-positive-integer-or-ascending-columns
+%   (tab stops out of order) mustguard
+%
+%   { << /Tabs { 6 20 } >> tw-linecount } /tw-tabs-must-be-a-positive-integer-or-ascending-columns
+%   (a procedure for the tab stops) mustguard
+%
+%   { << /Tabs 0 >> tw-linecount } /tw-tabs-must-be-a-positive-integer-or-ascending-columns
+%   (a tab stop every 0 columns) mustguard
+%
+%   { << /PageNumbers /middle >> tw-type } /tw-pagenumbers-must-be-none-top-or-bottom
+%   (an unknown page number place) mustguard
+%
+%   { << /PageStart 5 >> tw-type } /tw-pagestart-must-be-a-procedure
+%   (a number for PageStart) mustguard
+%
+%   { << /Memo << /Sbject (x) >> >> tw-linecount } /tw-memo-must-be-a-dict-of-known-string-keys
+%   (a misspelt memo key) mustguard
+%
+%   { << /Pitch 0 >> tw-linecount } /tw-pitch-must-be-a-positive-number
+%   (a zero pitch counts nothing) mustguard
+%
+%   { << /Wear -1 /Text (a) >> tw-type } /tw-wear-must-be-a-non-negative-number
+%   (tw-setup's own check reaches tw-type) mustguard
+%
+%   countdictstack mark { << /Spacing 0 >> tw-type } stopped pop cleartomark countdictstack eq
+%   (a rejected tw-type leaves the dict stack as it was) mustbe
+%   countdictstack mark { << /Wear -1 /Text (a) >> tw-type } stopped pop cleartomark countdictstack eq
+%   (tw-setup rejecting a key leaves the dict stack as it was) mustbe
+%   countdictstack mark { << /Bogus 1 >> tw-linecount } stopped pop cleartomark countdictstack eq
+%   (a rejected tw-linecount leaves the dict stack as it was) mustbe
+%%EndSelfTest
+
+%%SelfTest: tw-linecount-wraps
+%   << /Text (aaa bbb ccc ddd eee fff) /Width 144 /Margin 36 >> tw-linecount 3 eq
+%   (72pt of text at pica is 10 columns: two 3-letter words per line) mustbe
+%   << /Text (a\nb\n\nc\n) /Width 612 >> tw-linecount 4 eq
+%   (newlines break, a blank line stays, a final newline ends the last line) mustbe
+%   << /Text () >> tw-linecount 0 eq
+%   (no text, no lines) mustbe
+%   << /Text (aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa) /Width 252 /Margin 36 >> tw-linecount 3 eq
+%   (a word wider than a line is split, 70 letters in 30 columns) mustbe
+%   << /Text (<o>ab|c</o> <u>d</u><x>e</x>) /Width 612 >> tw-linecount 1 eq
+%   (markup takes no cells) mustbe
+%   << /Text (a b) /Memo << /To (x) >> >> tw-linecount 6 eq
+%   (a memo: title, blank, one field, rule, blank, then the text) mustbe
+%%EndSelfTest
+
+% @kind: Procedure
+% @summary: Types a text on the page the way a typist would: word-wrapped to the margins, with tab stops, single/1.5/double spacing (the platen advances in half-lines, and the font's line layer gives each line its own carriage-return offset, advance error and baseline drift), underlining and strikeovers by markup, an optional memo header (TO/FROM/SUBJECT/DATE) and page numbers. Takes one options dict: the layout keys below plus any tw-setup key (/Machine /Seed /Wear /Pitch /Size /Ink /Ribbon /Preset ...), which persist as they do for tw-setup. Text that overflows a page is continued on the next one after a showpage; the last page is left for the caller to showpage. Markup in /Text, with no escapes needed: <u>underlined</u>, <x>crossed out</x> (x struck over each letter), <o>old|new</o> (new overtyped on old, one unbreakable token as wide as the longer side). A tab goes to the next tab stop, bytes above 126 are blank cells, and a blank line is kept. tw-linecount always agrees with it on line breaks. Leaves the carriage at the start of the line after the last one typed. The text is one PostScript string, so Ghostscript's 65,535-byte string limit caps it (about 30 pages).
+% @example: (lib/typewriter_outlines.ps) run (lib/typewriter.ps) run << /Text (Dear Sir,\n\nI enclose the <u>specimens</u> you asked for, and a <o>wrong|right</o> correction.) /Machine 7 /Seed 3 >> tw-type showpage
+% @param: /Text [string] The text to type, with the <u> <x> <o> markup; newlines break lines, a blank line stays blank (default empty)
+% @param: /Width [points] Page width (default 612)
+% @param: /Height [points] Page height; it sets how many lines fit before the next page, tw-pageheight gives the height that holds all the text (default 792)
+% @param: /Margin [points] All four margins (default 72)
+% @param: /MarginLeft [points] The left margin, if not /Margin (default /Margin)
+% @param: /MarginRight [points] The right margin, if not /Margin (default /Margin)
+% @param: /MarginTop [points] The top margin, if not /Margin (default /Margin)
+% @param: /MarginBottom [points] The bottom margin, if not /Margin (default /Margin)
+% @param: /Spacing [multiple of single spacing] 1 is single (12pt), 1.5 and 2 double; rounded to the platen's half-line steps, 0.5 to 20 (default 1)
+% @param: /Indent [count] Columns to indent the first line of each paragraph (default 0)
+% @param: /Tabs [count or array of count] A tab goes to the next stop: a number is a stop every N columns, an array lists ascending stop columns counted from the left margin (default 5)
+% @param: /PageNumbers [name] /none, /bottom (centred "- 2 -" on every page) or /top (right-aligned "2" from page 2) (default /none)
+% @param: /PageStart [proc] Run before each page is typed, the first included, inside a gsave: paint the paper here. Pages after the first follow a showpage, so they are typed in the default graphics state, not a rotated or scaled one (default none)
+% @param: /Memo [dict] A memo header typed above the text: /To /From /Cc /Subject /Date /Title (strings; /Title defaults to MEMORANDUM and is centred and underlined) and /Rule (boolean, the underscore line under the header, default true); a long field wraps hung under its text (default none)
+% @param: /Preset [name] As tw-setup: /manual, /electric or /worn (no default: the current options stay)
+% @param: /Machine [integer] As tw-setup (no default: the current value stays)
+% @param: /Seed [integer] As tw-setup (no default: the current value stays)
+% @param: /Strike [integer] As tw-setup; the text is struck at this index, strikeovers at +1 and underlining at +2 (no default: the current value stays)
+% @param: /Wear [ratio] As tw-setup (no default: the current value stays)
+% @param: /MachineWear [ratio] As tw-setup (no default: the current value stays)
+% @param: /LineWear [ratio] As tw-setup (no default: the current value stays)
+% @param: /StrikeWear [ratio] As tw-setup (no default: the current value stays)
+% @param: /Pitch [count per inch] As tw-setup: 10 is pica, 12 elite; it sets the columns per line (no default: the current value stays)
+% @param: /Size [points] As tw-setup; it also sets the first baseline, 0.75 em below the top margin (no default: the current value stays)
+% @param: /Ink [rgb array] As tw-setup (no default: the current value stays)
+% @param: /Ribbon [0..1] As tw-setup (no default: the current value stays)
+% @param: /InkModel [boolean] As tw-setup (no default: the current value stays)
+/tw-type {
+    TWState begin
+    lySplit                                 % the layout keys read; the rest left
+    end tw-setup TWState begin              % applied (and checked) by tw-setup
+    /lyP tPitch def  /lySz tSize def
+    lyGeomX lyGeomY lyDoc lyParse lyLayout
+    lyDraw
+    end
+} bind def
+
+% @kind: Procedure
+% @summary: Returns the number of lines tw-type would type for the same options, drawing nothing and changing no typewriter option: for auto-sizing a page. It counts typed lines (blank lines and a memo header included, page numbers not) over all pages, and always agrees with tw-type on the line breaks. Only /Pitch among the typewriter keys matters to it.
+% @example: (lib/typewriter_outlines.ps) run (lib/typewriter.ps) run << /Text (a short note) /Width 288 >> tw-linecount =
+% @param: /Text [string] As tw-type (default empty)
+% @param: /Width [points] As tw-type (default 612)
+% @param: /Margin [points] As tw-type (default 72)
+% @param: /MarginLeft [points] As tw-type (default /Margin)
+% @param: /MarginRight [points] As tw-type (default /Margin)
+% @param: /Indent [count] As tw-type (default 0)
+% @param: /Tabs [count or array of count] As tw-type (default 5)
+% @param: /Memo [dict] As tw-type (default none)
+% @param: /Pitch [count per inch] As tw-type: it sets the columns per line (no default: the current value stays)
+/tw-linecount {
+    TWState begin
+    lySplit lyEff
+    lyGeomX lyDoc lyParse lyLayout
+    lyNL
+    end
+} bind def
+
+% @kind: Procedure
+% @summary: Returns the page height, in points, that holds all the text tw-type would type for the same options on one page: the top margin, the first line's 0.75 em, the lines at /Spacing and the bottom margin. Use it to size a page to its text, as the headless pre-pass of scripts/typewrite.sh does with --height fit. /Height is ignored.
+% @example: (lib/typewriter_outlines.ps) run (lib/typewriter.ps) run << /Text (a short note) /Width 288 >> tw-pageheight =
+% @param: /Text [string] As tw-type (default empty)
+% @param: /Width [points] As tw-type (default 612)
+% @param: /Margin [points] As tw-type (default 72)
+% @param: /MarginLeft [points] As tw-type (default /Margin)
+% @param: /MarginRight [points] As tw-type (default /Margin)
+% @param: /MarginTop [points] As tw-type (default /Margin)
+% @param: /MarginBottom [points] As tw-type (default /Margin)
+% @param: /Spacing [multiple of single spacing] As tw-type (default 1)
+% @param: /Indent [count] As tw-type (default 0)
+% @param: /Tabs [count or array of count] As tw-type (default 5)
+% @param: /Memo [dict] As tw-type (default none)
+% @param: /Pitch [count per inch] As tw-type (no default: the current value stays)
+% @param: /Size [points] As tw-type (no default: the current value stays)
+/tw-pageheight {
+    TWState begin
+    lySplit lyEff
+    lyGeomX lyDoc lyParse lyLayout
+    lyTop 0.75 lySz mul add
+    lyNL 1 sub dup 0 lt { pop 0 } if lyStep mul add
+    lyBot add ceiling cvi
+    end
+} bind def

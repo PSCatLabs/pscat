@@ -295,6 +295,18 @@ fn copy(it: &mut Interp) -> Result<(), PsError> {
             it.push(top.clone());
             Ok(())
         }
+        // `gstate1 gstate2 copy gstate2` (#394): overwrite gstate2.
+        Value::GState(dst) => {
+            let src_obj = it.pop()?;
+            let Value::GState(src) = &src_obj.value else {
+                return Err(PsError::Typecheck);
+            };
+            it.journal_gstate(dst);
+            let value = src.borrow().clone();
+            *dst.borrow_mut() = value;
+            it.push(top.clone());
+            Ok(())
+        }
         _ => Err(PsError::Typecheck),
     }
 }

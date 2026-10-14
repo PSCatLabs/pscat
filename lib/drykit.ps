@@ -884,6 +884,8 @@
     /dkSlanes dkSlanes cvi def
     /dkSfallout dkSo /Fallout 0 0 20 /dkstroke-fallout-must-be-0-to-20 dkoptnum def
     /dkSdrift dkSo /Drift 0 0 1e6 /dkstroke-drift-must-not-be-negative dkoptnum def
+    /dkSafter dkSo /After false dkget def
+    /dkSafter load type /booleantype ne { dkstroke-after-must-be-a-boolean } if
     dkSo /Seed known {
         dkSo /Seed get dup dkisnum not { pop dkstroke-seed-must-be-a-number } if
         abs 2147483647 ge { dkstroke-seed-must-be-within-integer-range } if
@@ -954,14 +956,21 @@
             userdict /dkClip known { userdict /dkClip get } { null } ifelse
             dup dkBb /base get eq { pop null } if
         put
-        dkBb /pig known {
-            dkBb /pig get dkSrec /pig get
-            true 0 1 2 { 3 index 1 index get 3 index 3 -1 roll get eq and } for
-            3 1 roll pop pop
-            not { dkbatch-mixes-pigments } if
-        } { dkBb /pig dkSrec /pig get put } ifelse
-        dkBb dkBb /n get dkSrec put
-        dkBb /n dkBb /n get 1 add put
+        dkSafter {
+            % /After (#393): drawn at once after the batch renders, in call
+            % order, so it neither checks nor sets the batch's pigment.
+            dkBb /after known not { dkBb /after 8 dict put } if
+            dkBb /after get dup length dkSrec put
+        } {
+            dkBb /pig known {
+                dkBb /pig get dkSrec /pig get
+                true 0 1 2 { 3 index 1 index get 3 index 3 -1 roll get eq and } for
+                3 1 roll pop pop
+                not { dkbatch-mixes-pigments } if
+            } { dkBb /pig dkSrec /pig get put } ifelse
+            dkBb dkBb /n get dkSrec put
+            dkBb /n dkBb /n get 1 add put
+        } ifelse
     } {
         dkSrec /clip null put
         [ dkSrec ] dkrender
@@ -1358,6 +1367,7 @@
 %   { << /Lanes 0 >> dkstroke } /dkstroke-lanes-must-be-1-to-12 (/Lanes 0) mustguard
 %   { << /Fallout -1 >> dkstroke } /dkstroke-fallout-must-be-0-to-20 (/Fallout -1) mustguard
 %   { << /Drift -3 >> dkstroke } /dkstroke-drift-must-not-be-negative (/Drift -3) mustguard
+%   { << /After 1 >> dkstroke } /dkstroke-after-must-be-a-boolean (a number /After) mustguard
 %   { << /Seed (s) >> dkstroke } /dkstroke-seed-must-be-a-number (a string /Seed) mustguard
 %   { << /Seed 1e12 >> dkstroke } /dkstroke-seed-must-be-within-integer-range (/Seed 1e12) mustguard
 %   { << /Touch { pop (x) } >> dkstroke } /dkstroke-touch-procedure-must-return-a-number
@@ -1413,6 +1423,24 @@
 %   { gsave { newpath 0 0 moveto 50 0 lineto << >> dkstroke } dkbatch grestore }
 %   (a one-stroke batch) mustpass
 %   { gsave { } dkbatch grestore } (an empty batch) mustpass
+%   % /After strokes (#393) neither check nor set the batch's pigment, in
+%   % either order, and a batch of only /After strokes draws them
+%   { gsave { 1 1 1 setrgbcolor newpath 0 0 moveto 50 0 lineto << /After true >> dkstroke
+%       0 0 0 setrgbcolor newpath 0 9 moveto 50 9 lineto << >> dkstroke } dkbatch grestore }
+%   (an /After stroke of another colour first) mustpass
+%   { gsave { 0 0 0 setrgbcolor newpath 0 9 moveto 50 9 lineto << >> dkstroke
+%       1 1 1 setrgbcolor newpath 0 0 moveto 50 0 lineto << /After true >> dkstroke } dkbatch grestore }
+%   (an /After stroke of another colour last) mustpass
+%   { gsave { newpath 0 0 moveto 50 0 lineto << /After true >> dkstroke } dkbatch grestore }
+%   (a batch of only /After strokes) mustpass
+%   { gsave newpath 0 0 moveto 50 0 lineto << /After true >> dkstroke grestore }
+%   (/After with no batch open draws at once) mustpass
+%   userdict /dkBatch known not (and no batch is left open) mustbe
+%   % an /After stroke's render errors surface when the batch ends
+%   /dkbudget 500 def
+%   { { newpath 0 0 moveto 10 0 lineto << /Width 100 /Touch 0.5 /After true >> dkstroke } dkbatch }
+%   /dkcatch-area-exceeds-safety-limit (an /After stroke past the budget) mustguard
+%   userdict /dkBatch known not (and it leaves no batch open) mustbe
 %%EndSelfTest
 %
 % @kind: Procedure
@@ -1436,12 +1464,13 @@
 % @param: /Fallout [count per points] Loose particles per point of stroke length, 0..20, placed with artkit's scatter beside the stroke (default 0)
 % @param: /Drift [points] How far fallout drifts down canvas-space y: chalk on a vertical board falls (default 0)
 % @param: /Seed [integer] Seed for the tool-side randomness (contact chains, fallout); subpath i uses Seed + i. Leaves the caller's rand stream untouched (default from each subpath's first point on the canvas, so adding a stroke elsewhere never re-rolls this one)
+% @param: /After [boolean] Inside a dkbatch, draw this stroke on its own after the batch's other strokes have rendered (after strokes in call order), as if it were made just after the batch closed: it keeps its colour, coordinate system and dkclip region, and may be a different colour from the batch, so an eraser or a smudge can be drawn from inside a batch over everything the batch lays. Ignored with no batch open (default false)
 /dkstroke {
     dkSrecord
 } bind def
 
 % @kind: Procedure
-% @summary: Runs a procedure whose dkstroke calls are drawn together, level-major: every stroke's faint level first, then every bright one, so crossing layers of hatching or re-stroked lines stay dark where they cross instead of the second layer's faint level greying the first's core. One pigment per batch (a second colour gets its own batch, drawn after); batches don't nest. Each stroke keeps the coordinate system it was given in, and the region of any dkclip it was made inside; otherwise the clip used is the one in force when the batch ends (a plain clip inside the batch is not kept).
+% @summary: Runs a procedure whose dkstroke calls are drawn together, level-major: every stroke's faint level first, then every bright one, so crossing layers of hatching or re-stroked lines stay dark where they cross instead of the second layer's faint level greying the first's core. One pigment per batch: a stroke of another colour raises dkbatch-mixes-pigments unless it is an /After stroke, which is drawn on its own after the batch renders, in call order. Batches don't nest. Each stroke keeps the coordinate system it was given in, and the region of any dkclip it was made inside; otherwise the clip used is the one in force when the batch ends (a plain clip inside the batch is not kept).
 % @example: 0.12 0.12 0.13 setrgbcolor { 0 6 120 { newpath dup 0 moveto 120 add 120 lineto << /Width 1.2 >> dkstroke } for } dkbatch
 /dkbatch {
     dup dkisproc not { pop dkbatch-needs-a-procedure } if
@@ -1455,7 +1484,12 @@
     userdict /dkBatch get /dkBb exch def
     userdict /dkBatch undef
     /dkZbase dkBb /base get def
+    % /After strokes (#393), each drawn at once after the batch, in call
+    % order, under the same base
+    /dkBafter dkBb /after known { dkBb /after get } { 0 dict } ifelse def
     [ 0 1 dkBb /n get 1 sub { dkBb exch get } for ] dkrender
+    [ 0 1 dkBafter length 1 sub { dkBafter exch get } for ]
+    { [ exch ] dkrender } forall
 } bind def
 
 %%SelfTest: dkclip-guards

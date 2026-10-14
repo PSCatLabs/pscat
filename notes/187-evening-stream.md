@@ -52,7 +52,7 @@ README row and a README paragraph.
     is left along the lumpy underside, all inside one `pkwet /Soft 0.6`. Two
     things failed along the way: clipping the body to the cloud let the lit
     layer's `pkwet` halo ring the top as well, and a `pkscumble` chain along
-    the underside read as a sausage. This is a workaround, filed as #345.
+    the underside read as a sausage. This was a workaround, filed as #345 and replaced in #384.
   - *Canvas.* `pkcanvas` is called once, first, in page space. `/Touch` is on
     the water lines (0.7), foam (0.8, 0.65), meadow strokes (0.85) and grass
     (0.7, 0.8).

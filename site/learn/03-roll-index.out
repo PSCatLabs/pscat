@@ -1,0 +1,9 @@
+-- index copies the item n down, counting the top as 0 --
+10
+30
+20
+10
+-- roll turns the top n items by j places --
+2
+1
+3

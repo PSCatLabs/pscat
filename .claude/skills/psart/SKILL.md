@@ -384,7 +384,9 @@ newpath (x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}) 60 500 << /Size 36 /Seed 1 >> 
   on each line's `&` or before its first `=`. It returns one record per
   line: `/Origin /Angle /Width /Height /Depth /Align /BBox`.
   `/Ink { pop ... dcchalk }` inks each line as it is written, so pressure
-  or colour can change down the board.
+  or colour can change down the board. Several `&` on a line give TeX
+  align's columns (right, left, right, left ...), the pairs `/ColumnGap`
+  apart (multiples of `/Size`, default 2): `(f(x) &= x^2 & f'(x) &= 2x)`.
 - **`mkframe`**, **`mkunderline`** and **`mkarrow`** draw the annotations.
   `mkframe` makes a box with overshooting corners, or `/Shape /oval`.
   `mkunderline` takes `/Double`, and `mkarrow` takes `/Bend`. `mkframe`
@@ -405,10 +407,13 @@ Supported TeX:
 | Accents and frames | `\vec`, `\hat`, `\bar`, `\dot`, `\ddot`, `\tilde`, `\overline`, `\underline`, `\boxed` |
 | Text | `\text{...}`, `\mathrm{...}` |
 | Spacing | `\,` `\:` `\;` `\!` `\ ` `\quad` `\qquad` `~` (plain spaces are ignored, as in TeX) |
+| Braces and stacks | `\overbrace{...}^{label}`, `\underbrace{...}_{label}`, `\overset{a}{b}`, `\underset{a}{b}`, `\stackrel{a}{b}` (a relation), `\sum_{\substack{i<m \\ j<n}}` |
+| Styles | `\displaystyle`, `\textstyle`, `\scriptstyle`, `\scriptscriptstyle`: the rest of the group in that style |
+| Negation and congruence | `\not=` (≠), `\not\in` (∉), `\not<` and any other symbol (a slash through it); `a \bmod b`, `a \equiv b \pmod{n}` |
 | Symbols | Greek `\alpha` ... `\Omega`, `\infty`, `\partial`, `\nabla`, `\pm`, `\times`, `\cdot`, `\le`, `\ge`, `\ne`, `\approx`, `\to`, `\Rightarrow`, `\iff`, `\in`, `\subset`, `\cup`, `\cap`, `\forall`, `\exists`, `\cdots`, ...; Unicode symbols typed directly (α ∞ ≤ ∂) |
 
 Anything else fails with a name saying what it was, for example
-`mk-unsupported-command:\iint` or `mk-unsupported-character:*`.
+`mk-unsupported-command:\oplus` or `mk-unsupported-character:@`.
 
 - **`/Irregular`** (default 1) is the board hand. 0 is clean TeX, and 2 is
   hurried. It varies sizes, gaps and script heights, makes fraction bars
@@ -430,7 +435,9 @@ Anything else fails with a name saying what it was, for example
     or `x_{\\text{max}}`.
 
 `examples/mathkit_specimen.ps` draws the test set, from the quadratic
-formula to Maxwell's equations, and a chalk derivation.
+formula to Maxwell's equations, and a chalk derivation;
+`examples/mathkit_structures.ps` the braces, stacks, `\not` and align
+columns.
 
 ## Dry media: crayon (`lib/drycrayon.ps`)
 
@@ -496,6 +503,9 @@ newpath 40 40 moveto 200 80 lineto << /Touch 0.7 >> dycrayon
 - `opts dhlift` — an eraser's track: `/Eraser /kneaded` (grey, soft, never
   back to paper) or `/hard` (a narrow, crisp line). `/Under` defaults to the
   current colour.
+- Smudges and lifts may sit inside a `dkbatch` (#393): they are drawn after
+  the batch's strokes, in call order, over all of them, even hatching made
+  later in the batch. To hatch over a lift, hatch in a later batch.
 - `opts dhsketch` — faint construction lines, laid `/Passes` times, each
   shifted by up to `/Shift`; draw the drawing over them.
 - None of them draws from your `rand` stream. **Cost:** hatching costs about
@@ -545,6 +555,16 @@ reuse them in your own procs.
   — /Neon, /Marquee, /Constellation, /Lapidary, /Circuitry,
   /Stitchwork, /Confetti — take dials through their scratch dicts
   (each file's header documents them).
+- /Typewriter (`(lib/typewriter_outlines.ps) run (lib/typewriter.ps) run`)
+  types like a real machine, for memos, letters and "found document" pieces.
+  `<< /Text (...) /Width .. /Height .. /Margin .. /Spacing 1.5 /Machine 7 /Seed 3
+  /PageStart { paint the paper } >> tw-type showpage` wraps, tabs, underlines
+  (`<u>..</u>`), strikes over (`<x>..</x>`, `<o>old|new</o>`) and can type a
+  `/Memo << /To .. /From .. /Subject .. /Date .. >>` header and
+  `/PageNumbers /bottom`. It leaves the carriage on the next line. `tw-linecount`
+  and `tw-pageheight` size a page to its text without drawing. It is a Type 3
+  face, so `charpath` gives nothing: use `/CourierPrime-Regular` for outlines.
+  From a file: `scripts/typewrite.sh`.
 - Text as geometry: `(word) true charpath` then fill/stroke/clip
   it — or walk it with `alongpath`.
 

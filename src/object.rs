@@ -253,6 +253,11 @@ pub enum Value {
     Operator(Operator),
     File(FileHandle),
     Save(Rc<SaveHandle>),
+    /// A Level 2 `gstate` object (#394): a whole graphics state held by
+    /// reference, so `eq` is identity. The clip inside it is the live
+    /// chain's `Rc` (mask, paths and rules), so `setgstate` brings a
+    /// clip back exactly, nested and `eoclip` links included.
+    GState(Rc<RefCell<crate::gfx::GraphicsState>>),
 }
 
 #[derive(Clone)]
@@ -319,6 +324,7 @@ impl Object {
             Value::Operator(_) => "operatortype",
             Value::File(_) => "filetype",
             Value::Save(_) => "savetype",
+            Value::GState(_) => "gstatetype",
         }
     }
 
@@ -338,7 +344,8 @@ impl Object {
             | Value::Dict(_)
             | Value::Operator(_)
             | Value::File(_)
-            | Value::Save(_) => "--nostringval--".to_string(),
+            | Value::Save(_)
+            | Value::GState(_) => "--nostringval--".to_string(),
         }
     }
 
@@ -387,6 +394,7 @@ impl Object {
             Value::Operator(op) => format!("--{}--", op.name),
             Value::File(_) => "-file-".to_string(),
             Value::Save(_) => "-save-".to_string(),
+            Value::GState(_) => "-gstate-".to_string(),
         }
     }
 }
@@ -500,6 +508,7 @@ enum ExoticKey {
     OperatorId(usize),
     FileId(usize),
     SaveId(usize),
+    GStateId(usize),
 }
 
 enum KeyClass {
@@ -530,6 +539,7 @@ fn classify_key(key: &Object) -> Result<KeyClass, PsError> {
         Value::Operator(op) => KeyClass::Exotic(ExoticKey::OperatorId(op.func as usize)),
         Value::File(f) => KeyClass::Exotic(ExoticKey::FileId(Rc::as_ptr(f) as usize)),
         Value::Save(h) => KeyClass::Exotic(ExoticKey::SaveId(Rc::as_ptr(h) as usize)),
+        Value::GState(g) => KeyClass::Exotic(ExoticKey::GStateId(Rc::as_ptr(g) as usize)),
         // The one type the PLRM forbids as a key.
         Value::Null => return Err(PsError::Typecheck),
     })

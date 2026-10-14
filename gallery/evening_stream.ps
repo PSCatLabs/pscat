@@ -30,10 +30,10 @@
 %   reflections      directional pkwet (#181) -- one pull for the whole
 %   (#181)           element, because its marks are loaded colours
 %                    pkwet grades for you, not a part-by-part replay
-%   clouds with form the whole cloud scrubbed in the light its
-%                    underside catches, then the dark body over it,
-%                    shifted up, leaving a lit crescent along the lumpy
-%                    underside; all of it worked wet into the sky
+%   clouds with form the dark body scrubbed over the whole cloud and
+%   (#345, #384)     worked wet into the sky, then pkscumblein /Light 270
+%                    (a half-light, then its core) lights the lumpy
+%                    underside from the glow below
 %   one canvas       pkcanvas (#182) once, first: every light, dry mark
 %   (#182)           (water lines, foam, meadow, grass tips) catches on
 %                    the same weave via /Touch
@@ -142,8 +142,9 @@
 
 % x y w seed -   one cloud, painted the way the style paints one: tiny
 % circles scrubbed in with a broad brush loaded with two cloud colours,
-% then the underside, where the glow from below catches it, scrubbed
-% again in the rim colour, and the whole mass worked wet into the sky.
+% worked wet into the sky, then the underside, where the glow from below
+% catches it, scrubbed again in a lighter load with pkscumblein /Light 270
+% (#345, #384), a soft half-light and then its core, and worked into the body.
 /evcloudpath {
     newpath evcx evcy moveto
     evcx evcw 0.1 mul add evcy evch 0.9 mul add
@@ -164,27 +165,41 @@
 } def
 /evcloud {
     srand /evcw exch def /evcy exch def /evcx exch def
-    /evch evcw 0.28 mul def
+    /evch evcw 0.36 mul def
     /evcr evcw 0.03 mul def
     /evcunder [ evcx evcw 2 div add evcy evch 0.5 mul add evskyat ] def
     /evcbody [ evCLOUD evcunder 0.5 mix3 ] def
     /evcn evcw evch mul 1.4 mul evcr dup mul 3.14 mul div cvi def
-    % the whole cloud first in the light its underside catches, then the
-    % body over it, shifted up, so only a crescent of light is left along
-    % the lumpy underside (the shift also makes the cloud taller)
+    % the body over the whole cloud in one value, worked wet into the sky ...
     { evcloudpath scpath
       << /Count evcn /Radius evcr /Squash 0.7 >> pkscumblein
       << /Width evcr 2.2 mul /Charge 0.75 /Depletion 0.5 /Edge 0.4 /ColorMix 0.8
-         /Colors [ [ evRIM evcbody 0.15 mix3 ] [ evRIM evcbody 0.55 mix3 ] ] >> pkbroad
-      gsave
-        0 evch 0.3 mul translate
-        evcloudpath scpath
-        << /Count evcn /Radius evcr /Squash 0.7 >> pkscumblein
-        << /Width evcr 2.2 mul /Charge 0.75 /Depletion 0.5 /Edge 0.4 /ColorMix 0.8
-           /Colors [ [ evcbody 1.12 shade ] [ evcbody 0.88 shade ] ] >> pkbroad
-      grestore }
+         /Colors [ [ evcbody 1.12 shade ] [ evcbody 0.88 shade ] ] >> pkbroad }
     << /Soft 0.6 /Under evcunder >> pkwet
-} def
+    % ... then the light the glow throws up under it: /Light 270 keeps only
+    % the circles along the underside, in a band that follows every lump of
+    % it. The cream-peach of the underside, toned toward the sky behind it,
+    % goes on in three passes, a deep soft half-light, its core, and a last
+    % thin one right on the edge, so the underside is the brightest part and
+    % no unlit body shows below it; worked wet into the sky it hangs in.
+    /evclit [ evRIM evcunder 0.28 mix3 ] def
+    { evcloudpath scpath
+      << /Count evcn 3 mul /Radius evcr /Squash 0.7
+         /Light 270 /Reach 0.28 /Feather 1 >> pkscumblein
+      << /Width evcr 2.2 mul /Charge 0.75 /Depletion 0.5 /Edge 0.25 /ColorMix 0.8
+         /Colors [ [ evcbody evclit 0.3 mix3 ] [ evcbody evclit 0.45 mix3 ] ] >> pkbroad
+      evcloudpath scpath
+      << /Count evcn 5 mul /Radius evcr 0.85 mul /Squash 0.7
+         /Light 270 /Reach 0.1 /Feather 1 >> pkscumblein
+      << /Width evcr 1.9 mul /Charge 0.8 /Depletion 0.4 /Edge 0.05 /ColorMix 0.8
+         /Colors [ [ evcbody evclit 0.6 mix3 ] [ evcbody evclit 0.75 mix3 ] ] >> pkbroad
+      evcloudpath scpath
+      << /Count evcn 8 mul /Radius evcr /Squash 0.9
+         /Light 270 /Reach 0.03 /Feather 0.6 >> pkscumblein
+      << /Width evcr 2.2 mul /Charge 0.8 /Depletion 0.4 /Edge 0 /ColorMix 0.8
+         /Colors [ [ evclit evRIM 0.25 mix3 ] [ evclit evcbody 0.15 mix3 ] ] >> pkbroad }
+    << /Soft 0.3 /Under evcunder >> pkwet
+} bind def
 
 % ---- the distant ridge -----------------------------------------------
 

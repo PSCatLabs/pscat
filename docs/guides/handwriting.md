@@ -5,6 +5,18 @@ the `handwrite` command, which turns a string into a PNG, and `/HandScript`,
 the dynamic font underneath it. Both are pure PostScript, so the same file runs
 in Ghostscript too.
 
+## Design intent
+
+The hand is meant to look human-written: legible, but loose, uneven and a
+little sloppy. Regular, geometric glyphs defeat the purpose. A glyph is a bug
+only when it reads as a different character, as the 4 read as a lightning bolt
+(ϟ, #351) and the 7 read as ")" (#298, #410). Fix a misreading with the
+smallest change that removes it, and keep the curl, wobble and asymmetry.
+Compare variants at board size and pick the most human one that still reads
+correctly, not the most regular one. Don't file "this glyph looks a little
+odd" tidy-ups: #416 (a flat base for the 2) was closed as won't-fix for this
+reason.
+
 ## The handwrite tool
 
 ```sh

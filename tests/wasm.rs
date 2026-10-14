@@ -59,6 +59,10 @@ const rc2 = ps.run('1 2 bogus', 100, 100);
 if (rc2 !== -1) {{ console.error('expected error status, got ' + rc2); process.exit(1); }}
 if (!ps.error.includes('undefined')) {{ console.error('error not named: ' + ps.error); process.exit(1); }}
 if (ps.run('0 0 50 50 rectfill', 100, 100) !== 0) {{ console.error('not reusable after error'); process.exit(1); }}
+// What the program prints comes back as .output (#252), fresh per run.
+if (ps.output !== '') {{ console.error('output not cleared: ' + ps.output); process.exit(1); }}
+ps.run('3 4 add == (hi) print', 100, 100);
+if (ps.output !== '7\nhi') {{ console.error('wrong output: ' + JSON.stringify(ps.output)); process.exit(1); }}
 console.log('WASM_OK ' + blue);
 "#,
         lib = root.join("web/pscat.js").display(),

@@ -490,7 +490,15 @@ renders eight examples in both and compares block-downsampled output).
   than an analytically exact intersection — a superset by construction
   (any nonzero-coverage pixel counts as inside), not a pixel-perfect
   boundary. A single, non-nested clip is unaffected: it still returns
-  the exact original path, bit-for-bit.
+  the exact original path, bit-for-bit. It also drops the `eoclip` rule.
+  For an exact capture and replay of the clip in force, use a Level 2
+  `gstate` object (#394): `setgstate` restores the same mask and chain.
+- `gstate` objects (#394): `gstate`, `currentgstate`, `setgstate`, and
+  `copy` between two gstates; `currentgstate`/`copy` are journaled, so
+  `restore` undoes them, as in gs. No local/global VM distinction, no
+  `invalidaccess` for a read-only gstate. A program that `setgstate`s an
+  older clip back makes the exporters reopen that clip's `Rc`; SVG reuses
+  its `clipPath` id.
 - `shfill` (issue #20): `FunctionType` restricted to 2 (exponential)
   and 3 (stitching) — 0 (sampled) and 4 (calculator) unsupported,
   since those would need the same `Frame::PostOp` reentrancy
@@ -615,7 +623,7 @@ renders eight examples in both and compares block-downsampled output).
    text is 25.2s in pscat against a 30s budget, after #307's `bind`
    (`notes/283-drykit-perf-remeasure.md`; levers in #324). `dkbatch` keeps each
    stroke's CTM, so hatch layers can be drawn rotated inside it. It allows
-   one pigment per batch.
+   one pigment per batch (an `/After` stroke may differ, #393).
    #241 shipped `lib/drycharcoal.ps` (`dhstroke`, `dhhatch`, `dhsmudge`,
    `dhlift`, `dhsketch`; `notes/241-drycharcoal.md`). `dhhatch` lays lines
    through hatchkit's `/Mark` hook and inks every layer in one `dkbatch`
@@ -623,7 +631,13 @@ renders eight examples in both and compares block-downsampled output).
    through drykit's `dkclip` (#312, `notes/312-dkbatch-per-record-clip.md`):
    a `dkstroke` made inside `{ ... } dkclip` keeps that region when its
    batch renders later. A plain `clip` inside a batch is still not kept
-   (pscat's `clippath` can't hand back a nested clip exactly).
+   (pscat's `clippath` can't hand back a nested clip exactly). Level 2
+   `gstate`/`currentgstate`/`setgstate` (#394, `notes/394-gstate-objects.md`)
+   can: a gstate holds the clip chain's `Rc`. drykit's adoption is #444.
+   #393: `dkstroke /After true` in a batch is drawn on its own after the
+   batch renders, in call order, in its own colour; `dhsmudge` and `dhlift`
+   use it, so they run inside a batch, over everything the batch lays
+   (`notes/393-smudge-lift-in-a-batch.md`).
    Hatching costs about 0.07 ms per square point per layer in pscat. In gs,
    drykit work after an artkit `scatter` (fallout) runs about 2x slower (#311).
    #313: `/drawing` paper's `/Mottle` is 1.5, so charcoal hatching breaks up in
@@ -651,6 +665,11 @@ renders eight examples in both and compares block-downsampled output).
    as letters. Its layout recursion keeps locals in one small dict per
    call, so its public procedures unwind the dict stack on error
    (`mkentry`). `notes/237-mathkit.md` has the design calls.
+   #340 added `\overbrace`/`\underbrace` (strokeglyphs' grown left brace,
+   drawn under a CTM turned a quarter, no new grower), `\overset`
+   `\underset` `\stackrel` `\substack`, the style switches, `\not`,
+   `\bmod` `\pmod`, and TeX align's columns in `mkalign` (several `&` a
+   line, `/ColumnGap`): `notes/340-mathkit-structures.md`.
    Chalk (#235) shipped `lib/drychalk.ps`. `dcchalk` is the chalk preset
    over `dkstroke`. `dcboard` dresses a slate or green board: haze,
    `/Ghost` writing, swipes, wipes, ledge dust and a tray. It was tuned
@@ -703,6 +722,13 @@ renders eight examples in both and compares block-downsampled output).
    rounding (`nearly_same` in `tests/typewriter.rs`). Tune against
    `docs/typewriter/ink_vs_real.png` (`docs/typewriter/tools/ink_compare.py`);
    `notes/212-ribbon-ink.md`.
+   #213 shipped the layout (`tw-type`, `tw-linecount`, `tw-pageheight`; the
+   "layout" block at the end of `lib/typewriter.ps`, private names `ly*`),
+   `scripts/typewrite.sh` (`PSCAT_BIN`, `--ps`, `--height fit`, `--reflow`),
+   the `Typewriter` catalog row (hand-written: build.rs rejects Type3Face)
+   and `examples/typewriter_memo.txt`. One layout makes the line list both
+   `tw-linecount` and `tw-type` use. #214 paints paper in `/PageStart`;
+   `notes/213-typewriter-layout.md`.
    #242 shipped the charcoal gallery piece, `gallery/lincoln_charcoal.ps`
    (*Study after Berger, 1864*), and `lib/etching.ps`'s `et-tonemap`, which
    returns a photo as a grid of darkness for any piece that wants a
@@ -1119,6 +1145,21 @@ renders eight examples in both and compares block-downsampled output).
   pair of runs, 3% on the Lincoln portrait in gs (`notes/326-bind-drycharcoal.md`).
 - Test Interps at 100×100; golden runs at 500×500/r72. Metric
   assertions use 1e-3 tolerances where the pen is f32.
+- **Program output goes through `Interp::write_stdout`** (#252), not
+  `println!`. `=`, `==`, `stack`, `pstack` and `print` call it; the wasm
+  build turns on `capture_stdout` (a wasm32 module has no stdout) and
+  `pscat.js` exposes the buffer as `ps.output`, which the playground
+  shows. A new printing operator must use it too, or its output vanishes
+  in the browser.
+- **The Learn page's examples are files** (#252): `site/learn/NN-name.ps`,
+  plus `NN-name.out` with exactly what it prints. `site/learn.html` names
+  them with `<!--@example NAME "alt text"-->` markers that
+  `scripts/site_examples.py` expands at build time; `tests/learn.rs`
+  checks each against its `.out` in pscat and in gs, and
+  `scripts/check_learn_examples.mjs` (run by `build_site.sh`) in the wasm
+  build. Change an example's output and you must change its `.out` and
+  the prose around it. `playground.html?example=learn/NAME.ps` is how
+  the "Try it" links open them.
 
 ## Verification checklist before calling any future stage done
 

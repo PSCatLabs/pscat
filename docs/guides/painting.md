@@ -574,7 +574,7 @@ All of these come together in the gallery piece *Alpine Lake*
 (`gallery/alpine_lake.ps`), a full wet-on-wet landscape
 painted from paintkit's brushes alone. It has a `pkcrisscross` sky
 painted with `pkbroad`, `pkspray` clouds and mist under `pkwet`, and
-`pktrowel` snow and shadow planes on two ranges, the near one's foot
+`pktrowel` snow and `pktrowelplane` shadow planes on two ranges, the near one's foot
 lifted into mist. A `pkdab`-crested forest sits on the far shore, with
 `pkfan` evergreens, a pulled-down reflection and `pkliner` details.
 The reflection is not a second drawing: every scene element seeds its
@@ -593,7 +593,7 @@ every snippet, so they keep rendering.
 *Evening Stream* (`gallery/evening_stream.ps`) is the second
 landscape, painted with the multi-colour loads and the canvas surface on one shared `pkcanvas`: a
 sunset sky from a broad brush loaded with two neighbouring sky colours,
-clouds scrubbed in with `pkscumblein` and lit from below, a backlit wood
+clouds scrubbed in with `pkscumblein` and lit from below with its `/Light 270` (issue #384), a backlit wood
 whose reflection is pulled down whole by one directional `pkwet` (it
 paints only in loaded colours, which `pkwet` grades), autumn trees on a
 loaded `pkdab` with warm highlight and cool shadow hues, evergreens on a

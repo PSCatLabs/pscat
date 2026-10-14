@@ -164,6 +164,9 @@ impl Capability {
 fn load_sequence(kind: CapabilityKind, source: &str) -> String {
     match kind {
         CapabilityKind::Font => String::new(),
+        CapabilityKind::Type3Face if source == TYPEWRITER => {
+            "(lib/typewriter_outlines.ps) run (lib/typewriter.ps) run".to_string()
+        }
         CapabilityKind::Type3Face => format!("({source}) run"),
         _ => match source {
             s if s == ARTKIT => "(lib/artkit.ps) run".to_string(),
@@ -217,6 +220,7 @@ const SCIFI: &str = "lib/styles/scifi.ps";
 const TOON: &str = "lib/styles/toon.ps";
 const HANDSCRIPT: &str = "lib/handscript.ps";
 const HANGUL: &str = "lib/hangul.ps";
+const TYPEWRITER: &str = "lib/typewriter.ps";
 const LIB: &str = "library"; // availability: always present once its source is loaded
 
 /// Every top-level name `lib/artkit.ps` defines that is *not* cataloged
@@ -454,6 +458,18 @@ static ENTRIES: &[Entry] = &[
         &[],
         HANGUL,
         "/HangulScript findfont 48 scalefont setfont",
+        LIB
+    ),
+    // The font is a hand-written row (build.rs rejects @kind: Type3Face); the
+    // procedures that use it (tw-setup, tw-set, tw-type, tw-linecount,
+    // tw-pageheight) are tagged in lib/typewriter.ps itself.
+    entry!(
+        "Typewriter",
+        CapabilityKind::Type3Face,
+        "Types like a real machine: Courier Prime outlines redrawn at every strike with a fixed quirk per key (a machine), a carriage-return offset and baseline drift per line, a hand's variation per strike, and ribbon ink (a woven weave of voids, a feathered edge, clogged counters). Printable ASCII only; charpath gives no outline (a Type 3 face). Set it up with tw-setup, type a whole page with tw-type (wrapping, tabs, spacing, underlines, strikeovers, memo header, page numbers), size a page with tw-linecount and tw-pageheight; scripts/typewrite.sh types a text file. The same /Machine and /Seed give the same page in pscat and Ghostscript.",
+        &[],
+        TYPEWRITER,
+        "72 700 moveto << /Machine 7 /Seed 3 >> tw-setup (Dear Sir,) show",
         LIB
     ),
     // --- Palettes: artkit's eight moods -----------------------------

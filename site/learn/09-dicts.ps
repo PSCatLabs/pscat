@@ -1,0 +1,15 @@
+%!PS
+/point 2 dict def
+point /x 3 put
+point /y 4 put
+point /x get ==
+point begin  x y add ==  end               % begin makes its keys names
+<< /name (Ada) /born 1815 >> /born get ==  % << >> builds a dictionary
+% Local variables: a procedure with its own dictionary.
+/hypot {            % a b -> sqrt(a*a + b*b)
+  2 dict begin
+    /b exch def  /a exch def
+    a a mul b b mul add sqrt
+  end
+} def
+3 4 hypot ==

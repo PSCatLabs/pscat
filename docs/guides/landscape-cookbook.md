@@ -199,7 +199,7 @@ Two kinds. **Vapour** is spray, soft all through; use it for haze and wispy cirr
 
 **The key rules.**
 - **Clip the knife work to the silhouette.** A knife edge on a real ridge stops dead against the sky, and clipping is what gives your ridge the same crisp line. An unclipped pull overshoots into the sky.
-- **Shadow planes are areas filled with pulls, never pulls along a shallow ridge.** A knife pull along a ridge just becomes a bar across the range. Hang a triangle off the right ridge (the peak, a point down the ridge, a point low inside the face) and fill it with `pktrowelplane`: one call lays overlapping vertical pulls clipped to the path, and the blade's texture makes it read as a plane.
+- **Shadow planes are areas filled with pulls, never pulls along a shallow ridge.** A knife pull along a ridge just becomes a bar across the range. Hang a triangle off the right ridge (the peak, a point down the ridge, a point low inside the face) and fill it with `pktrowelplane`: one call lays overlapping vertical pulls clipped to the path, and the blade's texture makes it read as a plane. (Alpine Lake's shadow planes are built this way since issue #361; before that they were a hand-made triangle, clip and loop of vertical pulls.)
 - **Snow goes down the lit face**, pulled a little steeper than the slope so it bites into the face, in several pulls that fall short by different amounts; the snow's lower edge is then ragged, as it is on a mountain.
 - Order each peak: shadow plane first, then snow, so the snow's edge overlaps the plane's.
 
@@ -281,8 +281,9 @@ grestore
 - A **band** is `pkwet /Soft 0.6` with `/Under` a colour between the range and the sky.
 - A **foot** is a directional `pkwet`: `/Direction 90 /OneSided true /Stretch 8 /Offset 30 /Layers 14 /Under` the range's colour. The wrapped spray is tapped along the foot and lifted up the slope in layers, so the foot dissolves into the haze rising off the lake. Clip to the range's silhouette first so the haze stays inside the range.
 - Keep `/Layers` pinned while tuning: with `/Layers` left to default, a directional `/Offset` also sets the depth and re-rolls everything after it.
-- Expect a granular fringe at 2x. The dense core fuses and the falloff stays granular; that grain is what makes it vapour and not a gradient, and Alpine Lake's mist band is the same at its 2x still. Only a coarser speck than 1 pt turns it into static.
+- Expect a granular fringe at 2x. The dense core fuses and the falloff stays granular; that grain is what makes it vapour and not a gradient. Only a coarser speck than 1 pt turns it into static. A *sparse* 1 pt band is different: at 2x it reads as a granular streak, which is why Alpine Lake's far band changed (below).
 - A lifted foot repeats whatever it wraps once per layer, so sparse 1 pt spray in it multiplies into gravel. Two settings work: fuse the spray densely, as the snippet below does, or let a solid band carry the lift (a wavering top keeps the layers' steps from ruling) with the spray only a sparse, fine grain on it (`/Speck 0.6`, `/Density` about 50), as Alpine Lake does since issue #206.
+- A band can take the same treatment as a foot (Alpine Lake's far mist since issue #407): filled lenses of haze, a two-sided directional `pkwet` (`/Direction 90 /Offset 7 /Layers 8`, not one-sided) so each fades up and down off its core, and fine sparse spray along it. Break it into banks with gaps, mix the core part-way toward the range, and keep the offset short: a full-width band reads as a ruled stripe, a full-strength core as a white line, and a long offset buries the planes beneath it in the outer passes' flat colour.
 
 **Failures.**
 - *Ruled stripes.* Alpine Lake's first mist was a stack of horizontal `pkbroad` strokes whose charge fell as they rose; at 2x it read as ruled stripes. Use the directional lift.
