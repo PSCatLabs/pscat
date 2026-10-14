@@ -167,7 +167,9 @@ is coloured by the first region its start lies in, else the default, so the
 backdrop follows another path's fill exactly (the stream behind a bank's
 corner) with no hand-written geometry test. A region is an artkit region
 (`screct`, `scpath`) or a procedure that builds a path, and each colour is
-any of the three forms:
+any of the three forms. A region dict stays in the user space it was built
+in; under another CTM (a reflection drawn under `1 -1 scale`) give the
+procedure, which is built in the call's own:
 
 ```postscript
 bankpath << /Under [ [ { streampath } /waterat load ] MEADOW ] >> pkbrushedge

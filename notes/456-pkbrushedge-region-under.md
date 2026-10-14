@@ -19,7 +19,16 @@ backdrop follow another path's fill exactly.
   back through `pecolkey`, so its guard names keep the key's prefix) and
   painted stroke by stroke through the same `pestrokes` / `pecolat` as a
   procedure, with `pereglook` as the procedure. Modes 0 to 2 are untouched.
-- Told apart from `[ r g b ]` by its first element not being a number.
+- Told apart from `[ r g b ]` by its first element not being a number. One
+  side effect: a malformed array whose first element is not a number (such
+  as a pigmix-style `[ /name w ... ]`) used to raise `-must-be-a-3-element-
+  array` or `-components-must-be-numbers` and now raises
+  `-region-entries-must-be-region-colour-pairs`. Still a guard, no render
+  moves; the wider test gives `[ {path} WATER ]` (a pair left unwrapped) a
+  message that names the problem.
+- A region dict (`screct`, `scpath`) keeps the user space it was built in; a
+  `{path}` region is built in the call's, so it is the one to give under
+  another CTM (a reflection under `1 -1 scale`).
 - New guards (prefix `pkbrushedge-under` / `pkbrushedge-mass`):
   `-regions-need-a-region-and-a-default-colour`,
   `-regions-must-end-with-a-default-colour`,
