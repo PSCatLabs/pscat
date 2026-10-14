@@ -14,7 +14,7 @@ not exist yet. Real links in this file are relative to `docs/dev/`.
 - **README.** It shrinks from 1,358 lines to about 120. It keeps what pscat
   is, a picture, a quick start and links out. Nothing else.
 - **`docs/guides/`.** The README's long library tour ("Making art") and its
-  how-to sections become **13 user guides**, one per topic.
+  how-to sections become **12 user guides**, one per topic, plus an index.
 - **`docs/dev/`.** It holds contributor and design docs: `HANDOFF.md`,
   `ARCHITECTURE.md`, `VM.md`, `FONTS.md`, `CAPABILITIES.md`, and the library
   design docs now in `docs/`.
@@ -27,7 +27,7 @@ not exist yet. Real links in this file are relative to `docs/dev/`.
   For agents, Contribute, GitHub.
 - **Gallery.** It splits into two tiers. **Art** holds the 27 pieces in 8
   categories. **Specimens and examples** holds the 32 library demos now on the site.
-- **Reference map.** The moves touch **288 references (on 281 lines) in 95 files**,
+- **Reference map.** The moves touch **301 path references (on 294 lines) in 98 files**,
   mostly code comments. They are listed one by one in the
   [appendix](#appendix-reference-map). Three of them are load-bearing, so
   #248 and #249 must fix them in the same PR:
@@ -68,7 +68,7 @@ recommendations unless you say otherwise.
    rendered copy is wanted later, a converter can be added without moving
    anything.
 5. **The gallery has two tiers, and each art piece has one primary
-   category plus optional tags.** See [Gallery taxonomy](#gallery-taxonomy).
+   category plus optional tags.** See [Gallery taxonomy](#3-gallery-taxonomy).
    **Recommendation: yes.**
 
 ## 1. Inventory
@@ -189,8 +189,8 @@ these sections:
    in Rust. You can watch programs draw in a live window, render them to
    PNG, SVG or PDF, run them in the browser, and make art with the bundled
    PostScript libraries. Link to the site.
-2. **A hero grid.** Six gallery renders, at least one from each tier-1
-   category with work in it, linked to the site gallery.
+2. **A hero grid.** Six gallery renders from six different categories,
+   linked to the site gallery.
 3. **Quick start.**
    - Install: a release bundle or `cargo build --release`.
    - Render a file: `pscat --png out.png file.ps`.
@@ -198,7 +198,7 @@ these sections:
    - Try the playground.
    - Keep the five-line REPL taste: `40 2 add =`.
 4. **Learn PostScript.** One line linking to the site's Learn page (#252).
-5. **Guides.** A bulleted list of the 13 guides.
+5. **Guides.** A bulleted list of the 12 guides.
 6. **For AI agents.** Two lines: the skills and `pscat-mcp`, linking to
    `docs/guides/agents.md`.
 7. **Contributing.** Links to `AGENTS.md`, `SDLC.md`, `docs/dev/`,
@@ -327,8 +327,8 @@ The taxonomy is for #251. It has two tiers.
 | Category | Count | Pieces (`gallery/<file>.ps`) |
 |---|---|---|
 | **Geometry and fractals** | 7 | `golden_bloom`, `cathedral_rose`, `fern`, `frost_mandala`, `woven_labyrinth`, `infinite_descent`, `recursive_peaks` |
-| **Generative and L-systems** | 4 | `ember_tree`, `silk_waves`, `hortus`, `lodestone` |
-| **Painting** | 7 | `plum_branch`, `flying_white_reeds`, `fugitive_pigments`, `mochi_denim_blue`, `first_rain`, `firefly_census`, `alpine_lake` |
+| **Generative and L-systems** | 5 | `ember_tree`, `silk_waves`, `hortus`, `lodestone`, `firefly_census` |
+| **Painting** | 6 | `plum_branch`, `flying_white_reeds`, `fugitive_pigments`, `mochi_denim_blue`, `first_rain`, `alpine_lake` |
 | **Printmaking and etching** | 2 | `out_of_register`, `nightfall_triptych` |
 | **Lettering and type** | 3 | `ring_of_type`, `hundred_lines`, `compositors_proof` |
 | **Data visualization** | 2 | `field_notes`, `ripple_range` |
@@ -346,7 +346,7 @@ category, with the secondary tags for each:
 | `ripple_range` | Data visualization | geometry | It is a `graph.ps` surface plot. |
 | `hundred_lines` | Lettering and type | handwriting, chalk | It is about the handwriting font. It moves to Drawing only if it is redone with drychalk. |
 | `compositors_proof` | Lettering and type | layout | It is a paragraph-flow proof sheet. |
-| `firefly_census` | Painting | generative | It is a night scene whose marks are placed by `scatter`. It sits with the scenes rather than the algorithms. |
+| `firefly_census` | Generative and L-systems | landscape | It is a night scene, but every mark is placed by artkit's `scatter` and it uses no paintkit brush. |
 | `fugitive_pigments` | Painting | lettering | Its illustration is made entirely with paintkit brushes. |
 | `recursive_peaks` | Geometry and fractals | landscape | It is built from artkit's fractal section. |
 | `mochi_denim_blue` | Painting | portrait, reference study | The reference photo `gallery/references/mochi.jpg` shows on its per-piece page. |
@@ -414,7 +414,7 @@ render list in `build_site.sh` and the piece table in `gallery/README.md`.
 These are the references that the moves in section 2 break. They were found
 with `git grep -n` for each moving path, by its exact name.
 
-- **The count is 288 references, on 281 lines, in 95 files.**
+- **The count is 301 path references, on 294 lines, in 98 files.**
 - Files bound for `docs/archive/`, and the `notes/` fragments, are left
   out: they are history and are not rewritten.
 - A file's references to itself, such as its own title line, are included.
@@ -429,20 +429,38 @@ with `git grep -n` for each moving path, by its exact name.
 | `scripts/build_site.sh` | 1 | none | It copies a hard-coded list of gallery and example files. #251 replaces the list with the manifest. No doc path changes. |
 | `scripts/package_release.sh`, `release.yml` | 0 | 0 | Checked: the release bundle writes its own README and copies no docs. |
 | **Docs and site** | | | |
-| `README.md` | 1 | 15 | Rewritten by #248 anyway. Two embedded PNGs move with the painting guide. |
-| `HANDOFF.md` | 1 | 59 | Mostly "see `NOTES.md`" pointers. They become `docs/archive/NOTES.md`. |
-| Other moving docs (`ARCHITECTURE.md`, `VM.md`, `FONTS.md`, `CAPABILITIES.md`, the `docs/*.md` design docs and their prototypes) | 19 | 52 | Cross-links between moving docs. Many become sibling-relative. |
-| `site/` (`agents.html`, `architecture.html`, `extending.html`, `fonts.html`) | 4 | 9 | GitHub links to root docs. |
+| `README.md` | 1 | 16 | Rewritten by #248 anyway. Two embedded PNGs move with the painting guide. |
+| `HANDOFF.md` | 1 | 60 | Mostly "see `NOTES.md`" pointers. They become `docs/archive/NOTES.md`. |
+| Other moving docs (`ARCHITECTURE.md`, `VM.md`, `FONTS.md`, `CAPABILITIES.md`, the `docs/*.md` design docs and their prototypes) | 19 | 54 | Cross-links between moving docs. Many become sibling-relative. |
+| `site/` (`agents.html`, `architecture.html`, `extending.html`, `fonts.html`) | 4 | 11 | GitHub links to root docs. |
 | `fonts/README.md`, `fonts/catalog/README.md`, `selftest/README.md` | 3 | 3 | Pointers to `FONTS.md` and `docs/SELFTEST.md`. (`notes/README.md` is outside the grep, because `notes/` is excluded, but it is current: #249 updates its two `NOTES.md` mentions to `docs/archive/NOTES.md`.) |
 | **Comments only** (they still count against #249's "no stale grep" criterion) | | | |
 | `lib/*.ps` | 10 | 27 | Header comments citing `NOTES.md` and the design docs. |
-| `src/` and `build.rs` | 13 | 38 | Doc comments. |
-| `tests/` and `benches/` | 19 | 32 | Doc comments. |
+| `src/` and `build.rs` | 15 | 43 | Doc comments. |
+| `tests/` and `benches/` | 20 | 34 | Doc comments. |
 | `examples/`, `gallery/*.ps`, `selftest/drivers/`, `scripts/selftest.sh`, `.github/workflows/ci.yml` | 17 | 19 | Comments. |
 
 #249 applies one `sed` per old path, over exact path strings, then
 re-runs the same `git grep`. Any remaining hits must be inside
 `docs/archive/` or `notes/`.
+
+Two more things the move must handle that the table does not count:
+
+- **Links inside moved content.** Relative links and images in text that
+  moves break too. Examples are the README's `gallery/renders/...` and
+  `docs/paintkit_*.png` images when that text moves into `docs/guides/`,
+  and any `../`-relative link in a doc moving into `docs/dev/design/`.
+  #248 and #249 re-base these as they move each file.
+- **Bare-name mentions.** 61 more lines in 23 files cite a design doc by
+  name without its folder, such as `DRYMEDIA.md 6.2` in a test comment.
+  They name the doc rather than a path, so they stay correct after the
+  move and need no edit. #249's stale-path grep should match full paths
+  only.
+
+Nothing reads a moving doc at build or run time. A grep for
+`include_str!`, `include_bytes!` and `read_to_string` over `src/`,
+`benches/`, `build.rs`, `tests/` and `scripts/` finds only the
+`tests/headline.rs` README read.
 
 ## 5. Order of work
 
@@ -463,9 +481,9 @@ This repeats the epic's order, with the points this plan adds:
 ## Newcomer pass
 
 This plan was read through as a newcomer would read it. Library names
-appear with their file paths. "Stage" appears only in quotes from existing
-files. Every planned path is written as code, so the link checker does not
-flag it.
+appear with their file paths. Stage numbers appear only where the plan
+names the existing stage log that is being archived. Every planned path
+is written as code, so the link checker does not flag it.
 
 ## Appendix: reference map
 
@@ -484,13 +502,13 @@ before #249, because line numbers drift.
 | `.claude/skills/work-issue/references/rationale.md` | 146 `HANDOFF.md`, 278 `NOTES.md`, 281 `NOTES.md` |
 | `.github/workflows/ci.yml` | 26 `NOTES.md` |
 | `AGENTS.md` | 4 `INIT.md`, 9 `INIT.md`, 10 `INIT.md`, 13 `NOTES.md`, 15 `ROADMAP.md`, 37 `INIT.md`, 40 `INIT.md`, 73 `INIT.md`, 98 `docs/SELFTEST.md`, 111 `ARCHITECTURE.md`, 114 `NOTES.md`, 116 `NOTES.md` |
-| `ARCHITECTURE.md` | 3 `INIT.md`, 6 `FONTS.md`, 117 `FONTS.md` |
+| `ARCHITECTURE.md` | 3 `INIT.md`, 6 `FONTS.md`, 117 `FONTS.md`, 171 `VM.md` |
 | `CAPABILITIES.md` | 1 `CAPABILITIES.md`, 14 `NOTES.md`, 217 `NOTES.md` |
 | `CLAUDE.md` | 6 `INIT.md`, 17 `NOTES.md`, 18 `HANDOFF.md`, 21 `ROADMAP.md`, 24 `INIT.md` |
 | `FONTS.md` | 1 `FONTS.md`, 3 `ROADMAP.md`, 5 `ARCHITECTURE.md`, 416 `NOTES.md`, 500 `docs/groovy_font_choice.md` |
-| `HANDOFF.md` | 1 `HANDOFF.md`, 25 `FONTS.md`, 26 `NOTES.md`, 30 `NOTES.md`, 37 `NOTES.md`, 44 `NOTES.md`, 47 `NOTES.md`, 50 `FONTS.md`, 55 `NOTES.md`, 60 `NOTES.md`, 69 `NOTES.md`, 83 `NOTES.md`, 92 `NOTES.md`, 110 `NOTES.md`, 124 `NOTES.md`, 134 `NOTES.md`, 145 `NOTES.md`, 167 `NOTES.md`, 185 `NOTES.md`, 202 `CAPABILITIES.md`, 203 `NOTES.md`, 221 `NOTES.md`, 245 `NOTES.md`, 269 `NOTES.md`, 297 `NOTES.md`, 311 `NOTES.md`, 320 `docs/keepin_it_real_shirt.md`, 323 `NOTES.md`, 323 `docs/groovy_font_choice.md`, 328 `NOTES.md`, 335 `NOTES.md`, 349 `NOTES.md`, 361 `NOTES.md`, 370 `NOTES.md`, 386 `NOTES.md`, 395 `ROADMAP.md`, 396 `NOTES.md`, 531 `docs/WATERCOLOR.md`, 556 `NOTES.md`, 560 `NOTES.md`, 561 `NOTES.md`, 575 `NOTES.md`, 596 `docs/DRYMEDIA.md`, 597 `docs/drymedia/`, 628 `docs/drymedia/`, 643 `docs/WATERCOLOR.md`, 652 `docs/PS_LIBRARY_COUPLING.md`, 659 `HANDOFF.md`, 667 `NOTES.md`, 682 `NOTES.md`, 699 `docs/SELFTEST.md`, 702 `docs/GS_CHECK_INVENTORY.md`, 743 `NOTES.md`, 784 `docs/CANVAS_SURFACE.md`, 802 `docs/paintkit_canvas_demo.png`, 832 `NOTES.md`, 848 `docs/PAINT_LOADING.md`, 878 `docs/paintkit_loading_demo.png`, 911 `docs/DRYMEDIA.md` |
-| `README.md` | 65 `FONTS.md`, 65 `HANDOFF.md`, 105 `NOTES.md`, 120 `NOTES.md`, 136 `ARCHITECTURE.md`, 136 `INIT.md`, 137 `NOTES.md`, 137 `ROADMAP.md`, 641 `docs/paintkit_loading_demo.png`, 797 `docs/paintkit_canvas_demo.png`, 874 `docs/WATERCOLOR.md`, 995 `docs/keepin_it_real_shirt.md`, 1096 `docs/DRYMEDIA.md`, 1149 `docs/drymedia/`, 1255 `CAPABILITIES.md` |
-| `VM.md` | 6 `ARCHITECTURE.md` |
+| `HANDOFF.md` | 1 `HANDOFF.md`, 25 `FONTS.md`, 26 `NOTES.md`, 30 `NOTES.md`, 37 `NOTES.md`, 44 `NOTES.md`, 47 `NOTES.md`, 50 `FONTS.md`, 55 `NOTES.md`, 60 `NOTES.md`, 69 `NOTES.md`, 83 `NOTES.md`, 92 `NOTES.md`, 110 `NOTES.md`, 124 `NOTES.md`, 134 `NOTES.md`, 145 `NOTES.md`, 167 `NOTES.md`, 185 `NOTES.md`, 202 `CAPABILITIES.md`, 203 `NOTES.md`, 221 `NOTES.md`, 245 `NOTES.md`, 269 `NOTES.md`, 297 `NOTES.md`, 311 `NOTES.md`, 320 `docs/keepin_it_real_shirt.md`, 323 `NOTES.md`, 323 `docs/groovy_font_choice.md`, 328 `NOTES.md`, 335 `NOTES.md`, 349 `NOTES.md`, 361 `NOTES.md`, 370 `NOTES.md`, 386 `NOTES.md`, 395 `ROADMAP.md`, 396 `NOTES.md`, 405 `VM.md`, 531 `docs/WATERCOLOR.md`, 556 `NOTES.md`, 560 `NOTES.md`, 561 `NOTES.md`, 575 `NOTES.md`, 596 `docs/DRYMEDIA.md`, 597 `docs/drymedia/`, 628 `docs/drymedia/`, 643 `docs/WATERCOLOR.md`, 652 `docs/PS_LIBRARY_COUPLING.md`, 659 `HANDOFF.md`, 667 `NOTES.md`, 682 `NOTES.md`, 699 `docs/SELFTEST.md`, 702 `docs/GS_CHECK_INVENTORY.md`, 743 `NOTES.md`, 784 `docs/CANVAS_SURFACE.md`, 802 `docs/paintkit_canvas_demo.png`, 832 `NOTES.md`, 848 `docs/PAINT_LOADING.md`, 878 `docs/paintkit_loading_demo.png`, 911 `docs/DRYMEDIA.md` |
+| `README.md` | 65 `FONTS.md`, 65 `HANDOFF.md`, 69 `VM.md`, 105 `NOTES.md`, 120 `NOTES.md`, 136 `ARCHITECTURE.md`, 136 `INIT.md`, 137 `NOTES.md`, 137 `ROADMAP.md`, 641 `docs/paintkit_loading_demo.png`, 797 `docs/paintkit_canvas_demo.png`, 874 `docs/WATERCOLOR.md`, 995 `docs/keepin_it_real_shirt.md`, 1096 `docs/DRYMEDIA.md`, 1149 `docs/drymedia/`, 1255 `CAPABILITIES.md` |
+| `VM.md` | 1 `VM.md`, 6 `ARCHITECTURE.md` |
 | `build.rs` | 3 `docs/PS_LIBRARY_COUPLING.md`, 82 `docs/PS_LIBRARY_COUPLING.md`, 97 `CAPABILITIES.md` |
 | `benches/regression.rs` | 43 `NOTES.md`, 45 `NOTES.md` |
 | `benches/vs_gs.rs` | 11 `NOTES.md` |
@@ -539,18 +557,20 @@ before #249, because line numbers drift.
 | `selftest/README.md` | 8 `docs/SELFTEST.md` |
 | `selftest/drivers/paintkit.ps` | 11 `docs/PS_LIBRARY_COUPLING.md` |
 | `site/agents.html` | 102 `HANDOFF.md`, 103 `ROADMAP.md` |
-| `site/architecture.html` | 29 `ARCHITECTURE.md`, 31 `FONTS.md`, 105 `NOTES.md` |
-| `site/extending.html` | 29 `HANDOFF.md`, 31 `ROADMAP.md`, 92 `NOTES.md` |
+| `site/architecture.html` | 29 `ARCHITECTURE.md`, 30 `VM.md`, 31 `FONTS.md`, 105 `NOTES.md` |
+| `site/extending.html` | 29 `HANDOFF.md`, 31 `ROADMAP.md`, 63 `VM.md`, 92 `NOTES.md` |
 | `site/fonts.html` | 178 `FONTS.md` |
 | `src/capabilities.rs` | 344 `docs/PS_LIBRARY_COUPLING.md`, 453 `FONTS.md` |
 | `src/font.rs` | 4 `FONTS.md`, 36 `FONTS.md`, 100 `FONTS.md`, 326 `FONTS.md`, 557 `NOTES.md`, 782 `FONTS.md`, 1089 `FONTS.md`, 1294 `FONTS.md` |
 | `src/gfx.rs` | 623 `docs/WATERCOLOR.md`, 691 `docs/WATERCOLOR.md`, 1284 `docs/WATERCOLOR.md`, 1348 `HANDOFF.md`, 2298 `docs/watercolor_prototypes`, 2304 `docs/WATERCOLOR.md`, 2309 `docs/watercolor_prototypes`, 2314 `docs/watercolor_prototypes`, 2347 `docs/watercolor_prototypes` |
-| `src/interp.rs` | 281 `NOTES.md`, 1349 `HANDOFF.md` |
+| `src/interp.rs` | 173 `VM.md`, 281 `NOTES.md`, 1197 `VM.md`, 1349 `HANDOFF.md` |
 | `src/lib.rs` | 3 `ARCHITECTURE.md`, 4 `INIT.md` |
 | `src/main.rs` | 592 `NOTES.md` |
-| `src/object.rs` | 415 `NOTES.md` |
+| `src/object.rs` | 233 `VM.md`, 415 `NOTES.md` |
+| `src/ops/data.rs` | 177 `VM.md` |
 | `src/ops/font.rs` | 3 `FONTS.md`, 107 `FONTS.md`, 362 `FONTS.md` |
 | `src/ops/graphics.rs` | 55 `docs/WATERCOLOR.md`, 337 `docs/WATERCOLOR.md` |
+| `src/ops/vm.rs` | 2 `VM.md` |
 | `src/selftest.rs` | 2 `docs/PS_LIBRARY_COUPLING.md` |
 | `src/shading.rs` | 28 `NOTES.md`, 49 `NOTES.md` |
 | `src/window.rs` | 3 `ARCHITECTURE.md`, 77 `ARCHITECTURE.md` |
@@ -571,3 +591,4 @@ before #249, because line numbers drift.
 | `tests/stage5_gfx.rs` | 341 `docs/WATERCOLOR.md` |
 | `tests/stipplekit.rs` | 174 `NOTES.md` |
 | `tests/type3.rs` | 279 `FONTS.md` |
+| `tests/vm.rs` | 2 `VM.md`, 165 `VM.md` |
