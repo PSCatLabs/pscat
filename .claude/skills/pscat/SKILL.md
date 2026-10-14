@@ -105,7 +105,7 @@ invisibly. The underlying library `lib/handscript.ps` is embeddable
 Types the text in the /Typewriter font: a machine's per-key quirks, each line's
 carriage return and drift, per-strike variation and ribbon ink; word-wrapped,
 with tab stops, `--spacing`, `--indent`, and an optional memo header. Markup in the
-text: `<u>underlined</u>`, `<x>crossed out</x>`, `<o>old|new</o>`. Same
+text: `<u>underlined</u>`, `<x>crossed out</x>`, `<o>old|new</o>`, `<r>redacted</r>` (a black bar). Same
 `--machine`/`--seed`, same page, in pscat and Ghostscript (`--ps out.ps` writes the
 driver for `gs -dNOSAFER`). `--height fit` sizes the page to the text; text past
 a page makes more pages (PNG: `out-001.png`, ...). `--reflow` joins each
@@ -113,6 +113,13 @@ paragraph's lines. Non-ASCII becomes ASCII or `?`. From PostScript:
 `<< /Text (...) /Memo << /To (...) >> /Seed 3 >> tw-type showpage` after
 `(lib/typewriter_outlines.ps) run (lib/typewriter.ps) run`; `tw-linecount` and
 `tw-pageheight` measure. `--help` lists the options.
+
+A "released document" look (aged paper, scan skew, photocopy generations, stamps,
+redaction bars, margin notes, staple and punch holes): `lib/released.ps` after
+artkit, surfacekit (and handscript for notes). `{ << /Text (...<r>name</r>...)
+/Redactor { rel-redact } >> tw-type } << /Age 0.6 /Generation 3 /Stamps [ << /Lines
+[ (RECEIVED) (14 MAR 1964) ] /X 462 /Y 700 >> ] >> rel-page showpage`; every effect
+is optional, off at 0, and seeded (`/Seed`). Stamps and names must be invented.
 
 ## Fonts
 

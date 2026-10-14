@@ -408,6 +408,8 @@ RelState begin {
     rsD /Seed known { rsD /Seed get } { 1 } ifelse /rsSeed exch def
     rsD /Font known { rsD /Font get } { /Helvetica-Bold } ifelse /rsFont exch def
     rsD /Tracking known { rsD /Tracking get } { 0 } ifelse /rsTrk exch def
+    rsX rlIsNum rsY rlIsNum and rsAng rlIsNum and not { end rel-stamp-x-y-and-angle-must-be-numbers } if
+    rsSeed rlIsInt not { end rel-stamp-seed-must-be-an-integer } if
     rsLines type /arraytype ne { end rel-stamp-lines-must-be-an-array-of-strings } if
     rsSize rlIsPos not { end rel-stamp-size-must-be-a-positive-number } if
     rsStr rlIsUnit not { end rel-stamp-strength-must-be-0-to-1 } if
@@ -479,6 +481,7 @@ RelState begin {
     rnD /Ink known { rnD /Ink get } { [ 0.13 0.14 0.34 ] } ifelse /rnInk exch def
     rnD /Seed known { rnD /Seed get } { 1 } ifelse /rnSeed exch def
     rnD /Pen known { rnD /Pen get } { 36 } ifelse /rnPen exch def
+    rnX rlIsNum rnY rlIsNum and rnAng rlIsNum and not { end rel-note-x-y-and-angle-must-be-numbers } if
     rnSize rlIsPos not rnWidth rlIsPos not or { end rel-note-size-and-width-must-be-positive } if
     rnInk rlIsRgb not { end rel-note-ink-must-be-an-rgb-array } if
     rnSeed rlIsInt not { end rel-note-seed-must-be-an-integer } if
@@ -496,6 +499,8 @@ RelState begin {
 % ragged edges, a slight tilt, a second streaky pass
 /rlRedactDraw {                                     % x0 x1 y size -> -
     /rdS exch def /rdY exch def /rdX1 exch def /rdX0 exch def
+    rdX0 rlIsNum rdX1 rlIsNum and rdY rlIsNum and rdS rlIsNum and not
+    { end rel-redact-operands-must-be-numbers } if
     gsave
     rdX0 10 mul cvi rdY 3 mul cvi rlSeed2
     rlRInk aload pop setrgbcolor
@@ -705,7 +710,7 @@ rlDefaults
 %%EndSelfTest
 
 % @kind: Procedure
-% @summary: Draws a page the way a released document looks, around any content: `{ content } opts rel-page`. The content proc is run once, in the page's own frame; it draws the typed page (lib/typewriter.ps tw-type is the intended content, and gets /Copies set to /Generation unless it sets its own). Paper is painted under it (tone, blotches, grain and fibres, edge darkening, the scanner lamp, folds, punch holes); /Generation photocopies each add a small skew and shift, black specks and streaks, the copier's lid at the edges and the copier's grey, high-contrast curve; marks are drawn over it (notes, stamps, a staple, a clip). Every effect is off at strength 0, the default, so with no options the content is simply run. Deterministic under /Seed. The caller's rand stream is untouched.
+% @summary: Draws a page the way a released document looks, around any content: `{ content } opts rel-page`. The content proc is run once, in the page's own frame; it draws the typed page (lib/typewriter.ps tw-type is the intended content, and gets /Copies set to /Generation unless it sets its own). Paper is painted under it (tone, blotches, grain and fibres, edge darkening, the scanner lamp, folds, punch holes); /Generation photocopies each add a small skew and shift, black specks and streaks, the copier's lid at the edges and the copier's grey, high-contrast curve; marks are drawn over it (notes, stamps, a staple, a clip). Every effect is off at strength 0, the default, so with no options the content is simply run. Deterministic under /Seed. The caller's rand stream is untouched. One page only: the content must fit on the sheet and must not showpage (tw-type does after a full page), or the copies' clips and transforms break; age every page of a long document with rel-paper in /PageStart instead. If the content raises an error, the typewriter's /Copies is left set.
 % @example: (lib/artkit.ps) run (lib/surfacekit.ps) run (lib/released.ps) run { 100 600 moveto /Courier findfont 14 scalefont setfont (A typed line.) show } << /Age 0.6 /Generation 2 /Skew 0.4 /Stamps [ << /Lines [ (RECEIVED) (14 OCT 1964) ] /X 400 /Y 700 /Angle 8 >> ] >> rel-page showpage
 % @param: /Seed [integer] Seeds every random mark; the same seed draws the same page (default 1)
 % @param: /Width [points] The sheet's width (default 612)
@@ -724,8 +729,8 @@ rlDefaults
 % @param: /Staple [count] Staples across the top corner (default 0)
 % @param: /Clip [count] Paper clips along the top, drawn as shadows and loops (default 0)
 % @param: /Shadow [0..1] How dark the shadows of the staple, the clip and the punch holes are (default 0.6)
-% @param: /Stamps [array of dicts] Rubber stamps over the content, each a dict for rel-stamp (default none)
-% @param: /Notes [array of dicts] Handwritten margin notes over the content, each a dict for rel-note, which needs lib/handscript.ps (default none)
+% @param: /Stamps [array of dict] Rubber stamps over the content, each a dict for rel-stamp (default none)
+% @param: /Notes [array of dict] Handwritten margin notes over the content, each a dict for rel-note, which needs lib/handscript.ps (default none)
 % @param: /Redact [0..1] How ragged rel-redact's bars are, kept for later rel-redact calls (default 0.5)
 % @param: /RedactInk [rgb array] The colour of rel-redact's bars, kept for later calls (default near black)
 /rel-page {
@@ -761,7 +766,7 @@ rlDefaults
 % @kind: Procedure
 % @summary: Presses one rubber stamp, at its place and angle, in the current frame: a framed block of lines of bold sans text in one ink, laid through a clip with holes, denser holes toward one side and a few voids, so the ink is uneven and the page shows through. The text is whatever the caller invents: no real agency's seal or classification marking. Takes one dict.
 % @example: (lib/artkit.ps) run (lib/surfacekit.ps) run (lib/released.ps) run << /Lines [ (FILE COPY) ] /X 300 /Y 400 /Angle -6 /Size 30 >> rel-stamp showpage
-% @param: /Lines [array of strings] The lines, centred; or /Text for one (default none: one of the two is needed)
+% @param: /Lines [array of string] The lines, centred; or /Text for one (default none: one of the two is needed)
 % @param: /Text [string] One line, instead of /Lines (default none)
 % @param: /X [points] The stamp's centre, across (default the middle of the last sheet rel-page or rel-paper was given: 612 x 792 at first)
 % @param: /Y [points] The stamp's centre, up (default the middle of that sheet)
@@ -787,7 +792,7 @@ rlDefaults
 % @param: /Size [points] The handwriting's size (default 15)
 % @param: /Width [points] The width the note wraps at (default 150)
 % @param: /Ink [rgb array] The pen's colour (default a blue ballpoint)
-% @param: /Pen [glyph units] The pen's width in thousandths of an em, as lib/handscript.ps /Pen (default 36)
+% @param: /Pen [count] The pen's width in glyph units, thousandths of an em, as lib/handscript.ps /Pen (default 36)
 % @param: /Seed [integer] Seeds the pen's wobble (default 1)
 /rel-note {
     RelState begin rlNoteDraw end

@@ -709,8 +709,17 @@ renders eight examples in both and compares block-downsampled output).
    `scripts/typewrite.sh` (`PSCAT_BIN`, `--ps`, `--height fit`, `--reflow`),
    the `Typewriter` catalog row (hand-written: build.rs rejects Type3Face)
    and `examples/typewriter_memo.txt`. One layout makes the line list both
-   `tw-linecount` and `tw-type` use. #214 paints paper in `/PageStart`;
-   `notes/213-typewriter-layout.md`.
+   `tw-linecount` and `tw-type` use. `notes/213-typewriter-layout.md`.
+   #214 shipped `lib/released.ps` (`rel-page` wraps any content in aged paper,
+   scan skew and lamp, photocopy generations, marks; `rel-paper`, `rel-stamp`,
+   `rel-note`, `rel-redact`), the typewriter's `/Copies` key and `<r>`
+   redactions. No alpha anywhere: the paper is a field of opaque cells (fine at
+   the edges), copies are a chain of transforms with clips, stamps are
+   clip-with-holes. The library has its own generator (`rlU`), so it is
+   identical in pscat and gs and never touches `rand`. Compare against
+   `docs/typewriter/release_vs_real.png`
+   (`docs/typewriter/tools/release_compare.py`); `notes/214-released-look.md`.
+   #215 builds the gallery specimen and blind comparison on it.
    #242 shipped the charcoal gallery piece, `gallery/lincoln_charcoal.ps`
    (*Study after Berger, 1864*), and `lib/etching.ps`'s `et-tonemap`, which
    returns a photo as a grid of darkness for any piece that wants a

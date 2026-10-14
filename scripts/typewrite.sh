@@ -17,7 +17,9 @@
 # instead of rendering (it runs in Ghostscript with `gs -dNOSAFER`).
 #
 # Markup in the text (no escapes needed): <u>underlined</u>,
-# <x>crossed out</x>, <o>old|new</o> (new overtyped on old). Typographic
+# <x>crossed out</x>, <o>old|new</o> (new overtyped on old), <r>redacted</r>
+# (typed, then covered with a black bar; lib/released.ps has a marker's bar,
+# see its rel-redact and the /Redactor key). Typographic
 # quotes, dashes and the ellipsis become their ASCII forms; any other
 # non-ASCII character becomes "?": the machine has no such key.
 set -euo pipefail

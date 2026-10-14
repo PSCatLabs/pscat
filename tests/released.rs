@@ -201,9 +201,11 @@ fn a_redaction_bar_covers_its_whole_word() {
         let top = (200.0 - y) as u32; // the baseline, in pixel rows from the top
         for py in [top - 4, top - 2, top, top + 1] {
             let r = row(py);
-            for px in (x0.ceil() as usize + 1)..(x1.floor() as usize - 1) {
-                assert!(r[px] < 60, "{redactor:?}: a gap in the bar at {px},{py}");
-            }
+            let (lo, hi) = (x0.ceil() as usize + 1, x1.floor() as usize - 1);
+            assert!(
+                r[lo..hi].iter().all(|&v| v < 60),
+                "{redactor:?}: a gap in the bar at row {py}"
+            );
         }
         // and the word does not show through above or below
         let above = row(top - 14);
@@ -245,6 +247,10 @@ fn a_rejected_call_leaves_the_dictionary_stack_and_names_its_key() {
         "<< /Text (x) /Strength 7 >> rel-stamp",
         "<< /Text (x) /Font 5 >> rel-stamp",
         "<< >> rel-note",
+        "<< /Text (x) /X (a) >> rel-stamp",
+        "<< /Text (x) /Seed 1.5 >> rel-stamp",
+        "<< /Text (x) /Y /up >> rel-note",
+        "(a) 1 2 3 rel-redact",
     ] {
         let mut it = Interp::with_page(W, H).expect("page");
         load(&mut it);

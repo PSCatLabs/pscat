@@ -37,7 +37,7 @@ SHEET_TOP = PAGE_H - 36 - 480         # a sheet's top edge, points from the page
 # (reference, caption, reference dpi, [(generation, x, y, w, h) crops in sheet points from its top left])
 PANELS = [
     ("T14_nsam55_marks.jpg", "T14 NSAM 55 (1961): a date stamp, a redaction bar, a copy. Below: generation 1",
-     300, [(1, 345, 14, 252, 60), (1, 50, 170, 252, 60)]),
+     300, [(1, 360, 30, 252, 60), (1, 70, 222, 252, 60)]),
     ("T15_jfk_release_copy.jpg", "T15 a bitonal release copy. Below: generation 3",
      300, [(3, 54, 112, 261, 77)]),
     ("T10_szilard_zoom.jpg", "T10 Szilard (1945), aged paper, about 240 dpi. Below: generation 0",

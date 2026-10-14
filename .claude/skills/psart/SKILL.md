@@ -552,12 +552,19 @@ reuse them in your own procs.
   types like a real machine, for memos, letters and "found document" pieces.
   `<< /Text (...) /Width .. /Height .. /Margin .. /Spacing 1.5 /Machine 7 /Seed 3
   /PageStart { paint the paper } >> tw-type showpage` wraps, tabs, underlines
-  (`<u>..</u>`), strikes over (`<x>..</x>`, `<o>old|new</o>`) and can type a
+  (`<u>..</u>`), strikes over (`<x>..</x>`, `<o>old|new</o>`), redacts (`<r>..</r>`) and can type a
   `/Memo << /To .. /From .. /Subject .. /Date .. >>` header and
   `/PageNumbers /bottom`. It leaves the carriage on the next line. `tw-linecount`
   and `tw-pageheight` size a page to its text without drawing. It is a Type 3
   face, so `charpath` gives nothing: use `/CourierPrime-Regular` for outlines.
   From a file: `scripts/typewrite.sh`.
+- Released-document look (`lib/released.ps`, after artkit and surfacekit, and
+  handscript for notes): `{ content } << /Age 0.6 /EdgeDark 0.5 /Folds 0.5
+  /Skew 0.3 /Punch 3 /Generation 3 /Stamps [ << /Lines [ (RECEIVED) ] /X .. /Y ..
+  >> ] /Notes [ .. ] >> rel-page` wraps `tw-type` content in aged paper and photocopy
+  generations (1 a copy, 3 a copy of a copy of a copy); `<r>word</r>` in the text
+  plus `/Redactor { rel-redact }` blacks it out. `rel-stamp`, `rel-note` and
+  `rel-paper` work alone. Invent every stamp and name; no real seals.
 - Text as geometry: `(word) true charpath` then fill/stroke/clip
   it — or walk it with `alongpath`.
 
