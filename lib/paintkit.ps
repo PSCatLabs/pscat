@@ -6498,7 +6498,7 @@ systemdict /setalpha known /pwhasalpha exch def
 
 % @kind: Dial
 % @summary: The names of the 13 pigments in tube order (Pigments has no order of its own): white, black, the blues, alizarin, the greens, the yellows and ochre, the browns, bright red.
-% @example: PigmentNames { dup 20 20 moveto pigment setrgbcolor ... } forall
+% @example: PigmentNames { pigment setrgbcolor ... } forall
 /PigmentNames [
     /titaniumwhite /midnightblack /phthaloblue /prussianblue /alizarin
     /sapgreen /cadmiumyellow /indianyellow /yellowochre /vandykebrown
@@ -6540,8 +6540,9 @@ systemdict /setalpha known /pwhasalpha exch def
 % @example: [ /sapgreen 3 /cadmiumyellow 1 ] pigmix setrgbcolor
 /pigmix {
     /pgms exch def
-    pgms xcheck { pigmix-needs-an-array } if
-    pgms type /arraytype ne { pigmix-needs-an-array } if
+    % `load`, not the name: naming a procedure would run it.
+    /pgms load xcheck { pigmix-needs-an-array } if
+    /pgms load type /arraytype ne { pigmix-needs-an-array } if
     pgms length 2 mod 0 ne { pigmix-entries-come-in-pairs } if
     /pgmn 0 def /pgmsum 0 def /pgmk0 0 def /pgmk1 0 def /pgmk2 0 def
     0 2 pgms length 2 sub {
@@ -6583,7 +6584,9 @@ systemdict /setalpha known /pwhasalpha exch def
 % @example: /phthaloblue 0.25 pigtint setrgbcolor
 /pigtint {
     /pgmt exch def /pgmp exch def
-    pgmt pgmnum not { pigtint-amount-must-be-a-number } if
+    /pgmt load xcheck { pigtint-amount-must-not-be-a-procedure } if
+    /pgmp load xcheck { pigtint-pigment-must-not-be-a-procedure } if
+    /pgmt load pgmnum not { pigtint-amount-must-be-a-number } if
     pgmt 0 lt pgmt 1 gt or { pigtint-amount-must-be-0-to-1 } if
     [ pgmp 1 pgmt sub /titaniumwhite pgmt ] pigmix
 } bind def
@@ -6593,7 +6596,9 @@ systemdict /setalpha known /pwhasalpha exch def
 % @example: /sapgreen 0.1 pigshade setrgbcolor
 /pigshade {
     /pgmt exch def /pgmp exch def
-    pgmt pgmnum not { pigshade-amount-must-be-a-number } if
+    /pgmt load xcheck { pigshade-amount-must-not-be-a-procedure } if
+    /pgmp load xcheck { pigshade-pigment-must-not-be-a-procedure } if
+    /pgmt load pgmnum not { pigshade-amount-must-be-a-number } if
     pgmt 0 lt pgmt 1 gt or { pigshade-amount-must-be-0-to-1 } if
     [ pgmp 1 pgmt sub /midnightblack pgmt ] pigmix
 } bind def
@@ -6611,8 +6616,8 @@ systemdict /setalpha known /pwhasalpha exch def
 % @example: << /Colors [ /sapgreen [ /sapgreen 1 /cadmiumyellow 1 ] ] pigcolors >> pkfan
 /pigcolors {
     /pgmsrc exch def
-    pgmsrc xcheck { pigcolors-needs-an-array } if
-    pgmsrc type /arraytype ne { pigcolors-needs-an-array } if
+    /pgmsrc load xcheck { pigcolors-needs-an-array } if
+    /pgmsrc load type /arraytype ne { pigcolors-needs-an-array } if
     pgmsrc length array
     0 1 pgmsrc length 1 sub {
         /pgmj exch def
@@ -6701,6 +6706,8 @@ systemdict /setalpha known /pwhasalpha exch def
 %%SelfTest: pigmix-rejects-malformed-specs
 %   { 5 pigmix } /pigmix-needs-an-array (a number) mustguard
 %   { { /alizarin 1 } pigmix } /pigmix-needs-an-array (a procedure) mustguard
+%   % A procedure that would return a valid spec must be refused, not run.
+%   { { [ /alizarin 1 ] } pigmix } /pigmix-needs-an-array (a procedure returning a spec) mustguard
 %   { [ /alizarin ] pigmix } /pigmix-entries-come-in-pairs (a missing weight) mustguard
 %   { [ /alizarin 1 /sapgreen ] pigmix } /pigmix-entries-come-in-pairs (a trailing name) mustguard
 %   { [ /nothue 1 ] pigmix } /pigmix-unknown-pigment (an unknown pigment) mustguard
@@ -6715,9 +6722,14 @@ systemdict /setalpha known /pwhasalpha exch def
 %   { (alizarin) pigment } /pigment-needs-a-name (a string as a pigment) mustguard
 %   { /nothue pigment } /pigmix-unknown-pigment (an unknown pigment name) mustguard
 %   { /alizarin 1.5 pigtint } /pigtint-amount-must-be-0-to-1 (a tint of 1.5) mustguard
+%   { /alizarin { 0.5 } pigtint } /pigtint-amount-must-not-be-a-procedure (a procedure as the tint) mustguard
+%   { { /alizarin } 0.5 pigtint } /pigtint-pigment-must-not-be-a-procedure (a procedure as the pigment) mustguard
+%   { /alizarin { 0.5 } pigshade } /pigshade-amount-must-not-be-a-procedure (a procedure as the shade) mustguard
+%   { { /alizarin } 0.5 pigshade } /pigshade-pigment-must-not-be-a-procedure (a procedure as the shaded pigment) mustguard
 %   { /alizarin (x) pigtint } /pigtint-amount-must-be-a-number (a string tint) mustguard
 %   { /alizarin -0.1 pigshade } /pigshade-amount-must-be-0-to-1 (a shade of -0.1) mustguard
 %   { 5 pigcolors } /pigcolors-needs-an-array (a number as the list) mustguard
+%   { { [ /alizarin ] } pigcolors } /pigcolors-needs-an-array (a procedure as the list) mustguard
 %   { [ /nothue ] pigcolors } /pigmix-unknown-pigment (an unknown name in the list) mustguard
 %   { [ [ 0.1 0.2 ] ] pigcolors } /pigmix-entry-must-be-a-name-or-rgb-array (a short rgb array in the list) mustguard
 %%EndSelfTest

@@ -272,14 +272,16 @@ fn pigmix_takes_no_random_draws() {
 
 #[test]
 fn pigmix_is_cheap() {
+    // Load once, outside the timed closure: the budget is for the mixing, not
+    // for parsing the library.
+    let mut it = loaded();
     within_cpu_budget(
-        "2000 three-pigment mixes",
+        "20000 three-pigment mixes",
         Duration::from_secs(1),
         3,
         || {
-            let mut it = loaded();
             it.run_str(
-            "2000 { [ /phthaloblue 1 /alizarin 1 /titaniumwhite 4 ] pigmix pop pop pop } repeat",
+            "20000 { [ /phthaloblue 1 /alizarin 1 /titaniumwhite 4 ] pigmix pop pop pop } repeat",
         )
         .expect("run");
         },
