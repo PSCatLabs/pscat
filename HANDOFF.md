@@ -676,10 +676,19 @@ renders eight examples in both and compares block-downsampled output).
    Typewriter (epic #209): **read `docs/TYPEWRITER.md` and
    `docs/typewriter/REFERENCES.md` before starting #211–#215.** The
    #210 design (Courier Prime outlines embedded in a Type 3 `/Typewriter`,
-   keyed-hash variation, clip-based ribbon ink) waits on the maintainer's
-   approval. Its gotchas: `BuildChar` must use `setcharwidth` (gs replays a
-   `setcachedevice` glyph) and stay pure (`stringwidth` runs it), and
-   pscat's `def` rejects integer keys (#338; use `put`).
+   keyed-hash variation, clip-based ribbon ink) is approved. Its gotchas:
+   `BuildChar` must use `setcharwidth` (gs replays a `setcachedevice`
+   glyph) and stay pure (`stringwidth` runs it), and pscat's `def` rejects
+   integer keys (#338; use `put`).
+   #211 shipped `lib/typewriter.ps` (`tw-setup`, `tw-set`; state in the
+   `TWState` side dict, reached through the font's `/TWS`) over the
+   generated `lib/typewriter_outlines.ps` (`scripts/gen_typewriter_outlines.py`
+   from `fonts/catalog/CourierPrime`). The ink is flat: fill plus a spread
+   stroke of pressure x key weight x `/Ribbon`. The machine table already
+   holds each key's clog fraction and one-side angle and strength for #212
+   to draw (`tMbuild`). build.rs's catalog scan rejects `/x N dict def` and
+   sees every top-level `def`, so the side dict and the font are filled
+   inside `{ ... } exec` (`notes/211-typewriter-font.md`).
    #242 shipped the charcoal gallery piece, `gallery/lincoln_charcoal.ps`
    (*Study after Berger, 1864*), and `lib/etching.ps`'s `et-tonemap`, which
    returns a photo as a grid of darkness for any piece that wants a
@@ -905,6 +914,10 @@ renders eight examples in both and compares block-downsampled output).
   self-seeded scene without re-rolling its marks, log `rrand` at each
   painting step and restore it with `srand` on replay
   (`gallery/alpine_lake.ps`'s `lkdo`, issue #191).
+  An element that paints only in loaded colours and the inherited colour
+  needs none of that: `gallery/evening_stream.ps` (#187) pulls its whole
+  far wood into the stream in one directional pull. Don't mirror an element
+  that already holds a directional `pkwet` (its 64x nesting budget).
 - **Loaded colours: `pkbroad`, `pktrowel`, `pkfan` and `pkdab` adopt them, the rest do
   not yet** (issue #183, slices L1-L5b; design in `docs/PAINT_LOADING.md`).
   `lib/paintkit.ps`'s `pu-` section (`puparse`, `puat`, `puflips`, `puwet`,
