@@ -231,6 +231,7 @@ pub const ARTKIT_INTERNAL: &[&str] = &[
     "alintern",
     "apseg",
     "wkmeasure",
+    "wkmaxsegs",
     "wkseg",
     "wkend",
     "gethash",

@@ -234,6 +234,22 @@ end
 % The current path survives (flattened). The proc runs between
 % newpath-building stamps, so build your stamp inside gsave/grestore
 % or on a fresh path, and don't touch ap- names.
+%
+% Unlike walkpath, alongpath/alintern (and so pathtext, ctext and
+% ctextctr) carry no segment-count bound (issue #110, decided not to):
+% walkpath's bound exists because its callers are presets that promise
+% a deposit budget "checked before any drawing starts", and a source
+% segment that emits no stop slips past any such budget. alongpath
+% makes no such promise -- its stamp count is already bounded only by
+% the caller's pitch (a 0.0001 pitch on a 500 pt line is five million
+% stamps, and nothing refuses that either) -- so a segment bound here
+% would cap one cost of an interface whose main cost is uncapped, and
+% would break pathtext on legitimately dense charpath outlines for
+% nothing. The residual is that pathtext keeps walking segments after
+% its last glyph is placed: unbounded traversal, but bounded output,
+% and no contract says otherwise. lib/etching.ps's et-draw is not a
+% path walk at all (it samples a decoded image on a grid; no
+% pathforall), so it has nothing to bound.
 
 /alintern {                                      % pitchproc stampproc -
     /apstamp exch def /appitch exch def
@@ -323,21 +339,53 @@ end
 % preallocated array (count first, then fill -- same shape as this
 % file's own wkmeasure/wkseg split) instead.
 
+% Segment-count bound (issue #110). Every preset built on walkpath
+% (pkribbon, pknib, pkdry, pkspray, pkwash, ...) bounds what it
+% *deposits*, but a path of hundreds of thousands of tiny -- or
+% zero-length, which emit no pitch stops at all -- segments stays far
+% below any deposit budget while this traversal still visits every one
+% (about 1 s per 200,000 segments, paid again on each pass). The count
+% therefore has to be taken here, on source-segment visits, in the pass
+% that already walks them all: moveto, lineto and closepath each count
+% one. A path over wkmaxsegs raises `walkpath-segment-count-exceeds-
+% safety-limit` the moment the count passes it -- during this measuring
+% pass, so before the first stop is handed to the caller's proc and
+% before any preset has drawn anything. 50,000 is ~16x the largest
+% count any checked-in render feeds walkpath (3,167, examples/
+% paintkit_motion_demo.ps rendered at 288 dpi, i.e. flattened four
+% times finer than any shipped build; 1,726 at 72 dpi), and trips after
+% ~0.15 s of traversal. Counts are of the *flattened* path, which is in
+% device space, so a curve-heavy path counts more at a higher dpi.
+% alongpath/pathtext/ctext are deliberately not bounded the same way;
+% see alintern.
+/wkmaxsegs 50000 def
+
 /wkmeasure {                                     % - [len0 len1 ...]
     % One flattened-path traversal, mark-collecting each subpath's
     % total arc length in path order (handles any number of subpaths
     % without a fixed bound). Read a second time by walkpath itself.
+    % Also the segment-count guard (see wkmaxsegs above): the error
+    % fires inside pathforall with this procedure's `[` mark and the
+    % pathforall operands still on the stack, so it clears back to the
+    % mark first and a caller that catches it sees the same clean
+    % stack walkpath-pitch-must-be-positive leaves.
     /wkmx 0 def /wkmy 0 def /wkmsx 0 def /wkmsy 0 def
-    /wkmsum 0 def /wkmfirst true def
+    /wkmsum 0 def /wkmfirst true def /wkmn 0 def
     [
-        { /wkmy exch def /wkmx exch def
+        { /wkmn wkmn 1 add def
+          wkmn wkmaxsegs gt { cleartomark walkpath-segment-count-exceeds-safety-limit } if
+          /wkmy exch def /wkmx exch def
           wkmfirst { /wkmfirst false def } { wkmsum } ifelse
           /wkmsx wkmx def /wkmsy wkmy def /wkmsum 0 def }
-        { /wkmpy exch def /wkmpx exch def
+        { /wkmn wkmn 1 add def
+          wkmn wkmaxsegs gt { cleartomark walkpath-segment-count-exceeds-safety-limit } if
+          /wkmpy exch def /wkmpx exch def
           /wkmsum wkmsum wkmpx wkmx sub dup mul wkmpy wkmy sub dup mul add sqrt add def
           /wkmx wkmpx def /wkmy wkmpy def }
         { pop pop pop pop pop pop }
-        { /wkmsum wkmsum wkmsx wkmx sub dup mul wkmsy wkmy sub dup mul add sqrt add def
+        { /wkmn wkmn 1 add def
+          wkmn wkmaxsegs gt { cleartomark walkpath-segment-count-exceeds-safety-limit } if
+          /wkmsum wkmsum wkmsx wkmx sub dup mul wkmsy wkmy sub dup mul add sqrt add def
           /wkmx wkmsx def /wkmy wkmsy def }
         pathforall
         wkmfirst not { wkmsum } if
@@ -409,6 +457,40 @@ end
     pathforall
     wkstarted { wkend } if
 } def
+
+% Self-tests: `pscat --selftest lib/artkit.ps` (see docs/SELFTEST.md).
+% The segment-count bound is checked at its edge on both sides, with
+% zero-length segments (which emit no stop, so no deposit budget could
+% ever see them), and a refused call must not poison the next one.
+%
+%%SelfTest: walkpath-bounds-its-segment-count
+%   % A moveto plus (wkmaxsegs - 1) linetos is exactly wkmaxsegs visits.
+%   { newpath 0 0 moveto wkmaxsegs 1 sub { 0 0 rlineto } repeat
+%     1 { pop pop pop pop pop pop } walkpath }
+%   (exactly wkmaxsegs segments still walks) mustpass
+%   { newpath 0 0 moveto wkmaxsegs { 0 0 rlineto } repeat
+%     1 { pop pop pop pop pop pop } walkpath }
+%   /walkpath-segment-count-exceeds-safety-limit
+%   (one segment over wkmaxsegs) mustguard
+%   % Movetos count too: tens of thousands of one-segment subpaths is
+%   % still that many visits (consecutive bare movetos would collapse
+%   % in the path itself, so each gets a zero-length line).
+%   { newpath wkmaxsegs 2 idiv 1 add { 0 0 moveto 0 0 rlineto } repeat
+%     1 { pop pop pop pop pop pop } walkpath }
+%   /walkpath-segment-count-exceeds-safety-limit
+%   (wkmaxsegs / 2 + 1 two-segment subpaths) mustguard
+%   % The guard fires during measuring, so the proc never ran, and the
+%   % counter restarts on the next call.
+%   /tgot false def
+%   { newpath 0 0 moveto wkmaxsegs { 0 0 rlineto } repeat
+%     1 { pop pop pop pop pop pop /tgot true def } walkpath }
+%   /walkpath-segment-count-exceeds-safety-limit
+%   (refused before the proc is ever called) mustguard
+%   tgot not (the proc never ran) mustbe
+%   { newpath 0 0 moveto 10 0 rlineto
+%     1 { pop pop pop pop pop pop } walkpath }
+%   (a small path walks after a refused one) mustpass
+%%EndSelfTest
 
 % (string) pathtext -
 % Set a string along the current path in the current font: each glyph
