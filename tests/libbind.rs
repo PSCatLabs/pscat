@@ -1,4 +1,4 @@
-//! artkit, paintkit and drykit bind their procedures (issue #307).
+//! artkit, paintkit, drykit and drychalk bind their procedures (issues #307, #318).
 //!
 //! Ghostscript looks up every executable name in a procedure body at run
 //! time, through the dictionary stack, and a userdict that already holds
@@ -15,10 +15,20 @@
 //! resolves to an operator. A control procedure that is deliberately
 //! unbound proves the walk can tell. It runs in pscat always, and in
 //! Ghostscript when `gs` is installed (CI has none).
+//!
+//! drychalk gained 18% (examples/drychalk_specimen.ps, 2.77 s to 2.26 s).
+//! drycrayon gained under 2% and the older kits are too cheap in gs to
+//! measure, so they stay unbound (notes/318-bind-drychalk.md); drycharcoal
+//! is a follow-up.
 
 use pscat::Interp;
 
-const LIBS: [&str; 3] = ["lib/artkit.ps", "lib/paintkit.ps", "lib/drykit.ps"];
+const LIBS: [&str; 4] = [
+    "lib/artkit.ps",
+    "lib/paintkit.ps",
+    "lib/drykit.ps",
+    "lib/drychalk.ps",
+];
 
 /// Defines the walker, snapshots userdict, and leaves its checks for
 /// `EPILOGUE`. Everything it defines is defined before the snapshot, so
