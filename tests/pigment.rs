@@ -342,7 +342,11 @@ fn bare_names_in_colors_paint_the_same_pixels_as_pigcolors() {
     };
     let bare = render("[ /sapgreen /cadmiumyellow ]");
     assert_eq!(bare, render("[ /sapgreen /cadmiumyellow ] pigcolors"));
-    assert_ne!(bare, render("[ [ 0 0 0 ] [ 1 0 0 ] ]"), "and not the control");
+    assert_ne!(
+        bare,
+        render("[ [ 0 0 0 ] [ 1 0 0 ] ]"),
+        "and not the control"
+    );
     // Names and rgb arrays mix in one list.
     assert_eq!(
         render("[ /sapgreen [ 0.2 0.4 1 ] ]"),
@@ -362,7 +366,10 @@ fn bare_names_in_the_highlight_and_shadow_keys_match_pigcolor() {
         it.gfx().pixmap.data().to_vec()
     };
     for preset in ["pkoil", "pkdab"] {
-        let bare = render("/HighlightColor /cadmiumyellow /ShadowColor /prussianblue", preset);
+        let bare = render(
+            "/HighlightColor /cadmiumyellow /ShadowColor /prussianblue",
+            preset,
+        );
         let wrapped = render(
             "/HighlightColor /cadmiumyellow pigcolor /ShadowColor /prussianblue pigcolor",
             preset,
@@ -383,16 +390,34 @@ fn the_colour_keys_name_the_fix_for_an_unknown_name_or_a_spec() {
         it.error_report(&e)
     };
     let r = guard("<< /Colors [ /nothue ] >>", "pkfan");
-    assert!(r.contains("pkfan-colors-unknown-pigment-see-PigmentNames"), "{r}");
-    let r = guard("<< /Colors [ [ /sapgreen 1 /cadmiumyellow 1 ] ] >>", "pktrowel");
-    assert!(r.contains("pktrowel-colors-pigmix-spec-needs-pigcolors"), "{r}");
+    assert!(
+        r.contains("pkfan-colors-unknown-pigment-see-PigmentNames"),
+        "{r}"
+    );
+    let r = guard(
+        "<< /Colors [ [ /sapgreen 1 /cadmiumyellow 1 ] ] >>",
+        "pktrowel",
+    );
+    assert!(
+        r.contains("pktrowel-colors-pigmix-spec-needs-pigcolors"),
+        "{r}"
+    );
     let r = guard("<< /HighlightColor /nothue >>", "pkoil");
-    assert!(r.contains("pkoil-highlightcolor-unknown-pigment-see-PigmentNames"), "{r}");
+    assert!(
+        r.contains("pkoil-highlightcolor-unknown-pigment-see-PigmentNames"),
+        "{r}"
+    );
     let r = guard("<< /ShadowColor [ /alizarin 1 ] >>", "pkdab");
-    assert!(r.contains("pkdab-shadowcolor-pigmix-spec-needs-pigcolors"), "{r}");
+    assert!(
+        r.contains("pkdab-shadowcolor-pigmix-spec-needs-pigcolors"),
+        "{r}"
+    );
     // A name that is not a pigment but is an artkit palette: still an unknown pigment.
     let r = guard("<< /Colors [ /dusk ] >>", "pkbroad");
-    assert!(r.contains("pkbroad-colors-unknown-pigment-see-PigmentNames"), "{r}");
+    assert!(
+        r.contains("pkbroad-colors-unknown-pigment-see-PigmentNames"),
+        "{r}"
+    );
 }
 
 #[test]
