@@ -868,6 +868,263 @@ fn thin_near_axis_aligned_region_still_draws() {
     );
 }
 
+// ---- /Mark (#271): a path hook so another library can ink the lines ----
+
+fn pixels(it: &Interp) -> Vec<(u8, u8, u8, u8)> {
+    it.gfx()
+        .pixmap
+        .pixels()
+        .iter()
+        .map(|p| (p.red(), p.green(), p.blue(), p.alpha()))
+        .collect()
+}
+
+/// The next `rand` after running `src` from a fresh `7 srand`, and the page.
+fn next_rand_after(src: &str) -> (String, Vec<(u8, u8, u8, u8)>) {
+    let mut it = with_lib(100, 100);
+    run(&mut it, "0 0 100 100 rectclip 7 srand");
+    run(&mut it, src);
+    it.run_str("rand").expect("rand");
+    let r = it.operand_stack().last().map(|o| o.repr()).unwrap();
+    (r, pixels(&it))
+}
+
+const ALL_ROLLS: &str = "/BBox [5 5 95 95] /Angles [20 110] /Spacing 4 /Width [0.5 2] \
+     /Wobble 1.5 /Dropout 0.25 /Trim [0.05 0.3]";
+
+#[test]
+fn mark_does_not_change_the_number_of_random_draws() {
+    // HANDOFF's rule: keep the number of draws fixed. No /Seed here: a
+    // seeded call restores the caller's stream, which would make the
+    // comparison vacuous. /Mark appends instead of stroking, but every roll
+    // (dropout, wobble, trim, ranged width) happens as before.
+    let (base, _) = next_rand_after(&format!("<< {ALL_ROLLS} >> hatch"));
+    // The control: a different option really does move the stream.
+    let (moved, _) = next_rand_after(&format!("<< {ALL_ROLLS} /Dropout 0.5 >> hatch"));
+    assert_ne!(base, moved, "the control should change the next rand");
+    for mark in ["{ stroke }", "{ newpath }", "{ hatchwidths pop stroke }"] {
+        let (got, _) = next_rand_after(&format!("<< {ALL_ROLLS} /Mark {mark} >> hatch"));
+        assert_eq!(got, base, "/Mark {mark} changed the random stream");
+    }
+    // /Density: the run-splitting emission sites.
+    let dens = "/Density { exch pop 100 div } /Width [0.5 2] /Wobble 1 /Trim [0 0.2]";
+    let (base, _) = next_rand_after(&format!("<< /BBox [5 5 95 95] /Spacing 5 {dens} >> hatch"));
+    let (got, _) = next_rand_after(&format!(
+        "<< /BBox [5 5 95 95] /Spacing 5 {dens} /Mark {{ stroke }} >> hatch"
+    ));
+    assert_eq!(got, base, "/Mark changed the random stream under /Density");
+}
+
+#[test]
+fn mark_stroke_matches_the_default_render_when_widths_agree() {
+    // One angle, a numeric /Width equal to the caller's linewidth, no
+    // /Density: the appended path stroked once is the default render.
+    for opts in [
+        "/BBox [5 5 95 95] /Angle 30 /Spacing 4 /Width 1 /Wobble 1 /Dropout 0.2 /Trim [0.1 0.3]",
+        "/BBox [5 5 95 95] /Angle 0 /Spacing 7",
+    ] {
+        let (rand_a, page_a) =
+            next_rand_after(&format!("0 setgray 1 setlinewidth << {opts} >> hatch"));
+        let (rand_b, page_b) = next_rand_after(&format!(
+            "0 setgray 1 setlinewidth << {opts} /Mark {{ stroke }} >> hatch"
+        ));
+        assert_eq!(rand_a, rand_b);
+        assert!(page_a.iter().any(|p| p.0 < 128), "default drew nothing");
+        assert_eq!(page_a, page_b, "{opts}: /Mark {{ stroke }} differs");
+    }
+    // Several angles and a ranged width: crossings anti-alias differently
+    // in one stroke than in separate ones, so compare ink, not bytes.
+    let opts = format!("<< {ALL_ROLLS} >> hatch");
+    let (_, a) = next_rand_after(&format!("0 setgray 1 setlinewidth {opts}"));
+    let (_, b) = next_rand_after(&format!(
+        "0 setgray 1 setlinewidth << {ALL_ROLLS} /Mark {{ stroke }} >> hatch"
+    ));
+    let ink = |p: &[(u8, u8, u8, u8)]| p.iter().filter(|p| p.0 < 128).count() as f64;
+    let (ia, ib) = (ink(&a), ink(&b));
+    assert!(ia > 100.0 && ib > 100.0);
+    assert!((ia - ib).abs() / ia < 0.5, "ink {ia} vs {ib}");
+}
+
+#[test]
+fn mark_runs_once_and_hands_over_the_lines_not_the_region() {
+    let mut it = with_lib(100, 100);
+    run(
+        &mut it,
+        "/calls 0 def /box [0 0 0 0] def \
+         20 30 moveto 80 30 lineto 80 70 lineto 20 70 lineto closepath clip \
+         << /Angle 0 /Spacing 10 /Seed 2 /Mark { \
+              /calls calls 1 add def \
+              /widths hatchwidths def \
+              pathbbox 4 array astore /box exch def \
+              newpath } >> hatch \
+         pathbbox 4 array astore /after exch def",
+    );
+    // `/Mark` ran once. Its path was the hatch lines (inside the 20..80 x 30..70
+    // region, none of them the outline), and `hatch` gave the caller's region
+    // path back afterwards.
+    it.run_str("calls").unwrap();
+    assert_eq!(it.operand_stack().last().unwrap().repr(), "1");
+    it.run_str("widths length").unwrap();
+    assert_eq!(it.operand_stack().last().unwrap().repr(), "5");
+    for (i, want) in [20.0, 30.0, 80.0, 70.0].iter().enumerate() {
+        it.run_str(&format!("after {i} get")).unwrap();
+        let got: f64 = it.operand_stack().last().unwrap().repr().parse().unwrap();
+        assert!(
+            (got - want).abs() < 1e-6,
+            "region path not restored: {i} {got}"
+        );
+    }
+    // The hook's path spans the region's x extent, at y = lines only
+    // (four candidate lines from 30.0..70.0 inset by the centering).
+    it.run_str("box 1 get box 3 get").unwrap();
+    let st = it.operand_stack();
+    let hi: f64 = st[st.len() - 1].repr().parse().unwrap();
+    let lo: f64 = st[st.len() - 2].repr().parse().unwrap();
+    assert!(lo >= 30.0 && hi <= 70.0 && hi > lo, "{lo} {hi}");
+}
+
+#[test]
+fn mark_receives_one_width_per_appended_line() {
+    let mut it = with_lib(100, 100);
+    run(
+        &mut it,
+        "0 0 100 100 rectclip \
+         << /BBox [0 0 100 100] /Angle 0 /Spacing 2 /Width [1 3] /Seed 4 \
+            /Mark { /w hatchwidths def stroke } >> hatch",
+    );
+    it.run_str("w length w { dup 1 lt exch 3 gt or } forall")
+        .unwrap();
+    let st: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
+    // 100/2 + 1 candidate lines; more than 64, so the width array grew.
+    assert_eq!(st[0], "51", "{st:?}");
+    assert!(st[1..].iter().all(|b| b == "false"), "a width left [1 3]");
+    // A /Density call yields one width per constant-bucket run.
+    let mut it = with_lib(100, 100);
+    run(
+        &mut it,
+        "0 0 100 100 rectclip \
+         << /BBox [0 0 100 100] /Angle 0 /Spacing 25 /Width [1 3] \
+            /Density { pop 50 div } /Mark { /w hatchwidths def stroke } >> hatch",
+    );
+    it.run_str("w length").unwrap();
+    let n: i64 = it.operand_stack().last().unwrap().repr().parse().unwrap();
+    assert!(
+        n > 5,
+        "density runs should add runs beyond the 5 lines: {n}"
+    );
+}
+
+#[test]
+fn mark_with_no_surviving_line_still_runs_once_with_nothing() {
+    let mut it = with_lib(100, 100);
+    run(
+        &mut it,
+        "/calls 0 def 0 0 100 100 rectclip \
+         << /BBox [0 0 100 100] /Dropout 1 /Mark { /calls calls 1 add def \
+            /w hatchwidths def stroke } >> hatch",
+    );
+    it.run_str("calls w length").unwrap();
+    let st: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
+    assert_eq!(st, ["1", "0"]);
+    assert_eq!(ink_count(&it), 0);
+}
+
+#[test]
+fn mark_rolls_come_from_the_callers_restored_stream() {
+    // /Seed restores the caller's stream before /Mark runs, so a rand the
+    // hook calls is the caller's next rand and is not wiped by the restore.
+    let mut it = with_lib(100, 100);
+    it.run_str("5 srand << /BBox [0 0 50 50] /Seed 9 /Mark { rand pop } >> hatch rand")
+        .expect("run");
+    let hooked = it.operand_stack().last().unwrap().repr();
+    let mut it = with_lib(100, 100);
+    it.run_str("5 srand rand pop rand").expect("run");
+    let want = it.operand_stack().last().unwrap().repr();
+    assert_eq!(hooked, want);
+}
+
+#[test]
+fn a_bad_mark_is_rejected_before_the_stream_or_graphics_state_moves() {
+    for bad in [
+        "5",
+        "(s)",
+        "/stroke",
+        "[ 1 2 ]",
+        "/stroke load",
+        "/gotfn cvx",
+    ] {
+        assert_rejected_without_running(
+            &format!("<< /BBox [0 0 50 50] /Mark {bad} >> hatch"),
+            "hatch-mark-must-be-a-procedure",
+        );
+        // Checked before `srand` and `gsave`: the caller's stream is untouched.
+        let mut it = with_lib(100, 100);
+        it.run_str(&format!(
+            "3 srand << /BBox [0 0 50 50] /Seed 9 /Mark {bad} >> hatch"
+        ))
+        .unwrap_err();
+        it.run_str("rand").unwrap();
+        let after = it.operand_stack().last().unwrap().repr();
+        let mut it = with_lib(100, 100);
+        it.run_str("3 srand rand").unwrap();
+        assert_eq!(after, it.operand_stack().last().unwrap().repr(), "{bad}");
+    }
+    // Null is the same as unset.
+    let mut it = with_lib(100, 100);
+    run(
+        &mut it,
+        "0 0 100 100 rectclip << /BBox [0 0 100 100] /Mark null >> hatch",
+    );
+    assert!(ink_count(&it) > 0);
+}
+
+#[test]
+fn ghostscript_accepts_a_mark_procedure_under_packing() {
+    // Under `true setpacking` Ghostscript types a procedure literal
+    // `packedarraytype`, which the /Mark guard must accept (Codex review,
+    // PR #300). This interpreter never packs, so only real gs can show it.
+    let gs_ok = std::process::Command::new("gs")
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success());
+    if !gs_ok {
+        eprintln!("skipping gs packing check: gs not installed");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("pscat-hatch-mark-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let ps = dir.join("mark_packed.ps");
+    std::fs::write(
+        &ps,
+        "(lib/hatchkit.ps) run\n\
+         true setpacking\n\
+         /marks 0 def\n\
+         0 0 50 50 rectclip\n\
+         << /BBox [0 0 50 50] /Spacing 5 /Mark { /marks marks 1 add def stroke } >> hatch\n\
+         marks 1 ne { /marks_not_one_after_hatch undefined } if\n\
+         showpage\n",
+    )
+    .unwrap();
+    let out = std::process::Command::new("gs")
+        .args([
+            "-dNOSAFER",
+            "-dNOPAUSE",
+            "-dBATCH",
+            "-q",
+            "-sDEVICE=nullpage",
+        ])
+        .arg(&ps)
+        .output()
+        .expect("run gs");
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(
+        out.status.success(),
+        "gs rejected a packed /Mark procedure: {}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
 #[test]
 fn ghostscript_accepts_the_hatching_specimen_sheet() {
     // The acceptance criterion itself -- the specimen page runs

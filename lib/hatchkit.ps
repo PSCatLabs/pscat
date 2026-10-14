@@ -118,6 +118,31 @@
 %           `hatch-density-threshold-must-be-a-fraction-in-0-1`
 %           otherwise, since e.g. -1 would make even a density of 0
 %           count as ink)  see /Density (default 0).
+%   /Mark proc  (#271) optional path hook, so another library can ink
+%           the hatch lines instead of `hatch` stroking them. When given,
+%           `hatch` draws nothing itself: each line's segment, after
+%           /Wobble, /Trim and /Dropout have decided it, is appended to
+%           the current path, and `proc` runs once at the end with that
+%           path current. The path starts empty (`hatch` does a `newpath`
+%           inside its own gsave, so the caller's region path is neither
+%           inked nor lost: it is back after the call). The clip is
+%           still in force, so the lines are cut to the region.
+%           `hatchwidths` is bound (in the dictionary current when
+%           `hatch` was called) to an array of the line widths, one per
+%           appended segment, in the order they were appended; with
+%           /Density a segment is one constant-bucket run, as when
+%           stroking. No line width is set, so `proc` sees the caller's
+%           own: `/Mark { stroke }` draws the same geometry as the
+%           default, at the caller's width, which equals /Width only when
+%           the two agree. `proc` runs after the caller's random stream
+%           is restored, so a `rand` it calls advances the caller's
+%           stream; it must not touch an `h`-prefixed name. The random
+%           draws are exactly those of a call without /Mark. It runs even
+%           when no line survived (an empty path, an empty
+%           `hatchwidths`). Must be a procedure, else
+%           `hatch-mark-must-be-a-procedure`; `null` means unset. An error
+%           raised inside `proc` leaves `hatch`'s gsave open, as an error
+%           inside /Density does (the seed restore has already happened).
 %   /Seed n  seeds the sweep with `n srand`, restoring the caller's own
 %           random stream afterward via `rrand` — the same convention
 %           `lib/artkit.ps`'s `scatter` documents, including the same
@@ -230,6 +255,12 @@
   dup type /arraytype eq { xcheck not } { pop false } ifelse
 } def
 
+% v hkisproc -> bool  (an executable array, packed or not)
+% @internal
+/hkisproc {
+  dup xcheck exch type dup /arraytype eq exch /packedarraytype eq or and
+} def
+
 % array hkallnums -> bool  (every element a number; true when empty)
 % `forall` pushes each element and runs only its own body, never the
 % element itself, so a procedure inside the array is inspected, not run.
@@ -243,6 +274,41 @@
 /hkclamp01 {
   dup 0 lt { pop 0 } if
   dup 1 gt { pop 1 } if
+} def
+
+% w x0 y0 x1 y1 hkline -
+% Draws one hatch segment of width w. Unset /Mark: the same operators in
+% the same order `hatch` always used (setlinewidth, newpath, moveto,
+% lineto, stroke). Set /Mark (#271): appends the segment to the current
+% path instead and records w for `hatchwidths`; no line width is set.
+% @internal
+/hkline {
+  /hky1 exch def /hkx1 exch def /hky0 exch def /hkx0 exch def
+  hmarkon
+    {
+      hkpushw
+      hkx0 hky0 moveto
+      hkx1 hky1 lineto
+    }
+    {
+      setlinewidth
+      newpath
+      hkx0 hky0 moveto
+      hkx1 hky1 lineto
+      stroke
+    }
+  ifelse
+} def
+
+% w hkpushw -
+% Appends w to hmarkw, doubling its capacity when full (amortized O(1)).
+% @internal
+/hkpushw {
+  hmarkn hmarkw length ge
+    { /hmarkw hmarkw length 2 mul array dup 0 hmarkw putinterval def }
+  if
+  hmarkw hmarkn 3 -1 roll put
+  /hmarkn hmarkn 1 add def
 } def
 
 % a b t hklerp -> value, a + (b-a)*t
@@ -472,6 +538,38 @@
 %   tgot (a /Density callback still runs) mustbe
 %%EndSelfTest
 %
+%%SelfTest: hatch-mark-hook
+%   % /Mark (#271) must be a procedure, is checked before anything runs,
+%   % and is called once with the lines appended to the current path.
+%   /tgotfn { /tgot true def } def
+%   /tgot false def
+%   { << /BBox [0 0 50 50] /Mark 5 >> hatch }
+%   /hatch-mark-must-be-a-procedure
+%   (a number as /Mark) mustguard
+%   { << /BBox [0 0 50 50] /Mark /stroke >> hatch }
+%   /hatch-mark-must-be-a-procedure
+%   (a literal name as /Mark) mustguard
+%   { << /BBox [0 0 50 50] /Mark /tgotfn cvx >> hatch }
+%   /hatch-mark-must-be-a-procedure
+%   (an executable name as /Mark) mustguard
+%   tgot not (an executable name as /Mark: nothing ran) mustbe
+%   { << /BBox [0 0 50 50] /Mark /stroke load >> hatch }
+%   /hatch-mark-must-be-a-procedure
+%   (an operator as /Mark) mustguard
+%   { << /BBox [0 0 50 50] /Mark [ 1 2 ] >> hatch }
+%   /hatch-mark-must-be-a-procedure
+%   (a literal array as /Mark) mustguard
+%   % Called exactly once, with one width per appended line.
+%   /tcalls 0 def
+%   { 0 0 50 50 rectclip << /BBox [0 0 50 50] /Spacing 10 /Angle 0 /Mark { /tcalls tcalls 1 add def /twidths hatchwidths def stroke } >> hatch }
+%   (a /Mark hook runs) mustpass
+%   tcalls 1 eq (the hook runs once) mustbe
+%   twidths length 6 eq (one width per candidate line) mustbe
+%   % /Mark null is the same as unset.
+%   { << /BBox [0 0 50 50] /Mark null >> hatch }
+%   (a null /Mark is unset) mustpass
+%%EndSelfTest
+%
 
 % opts hatch -
 % @kind: Procedure
@@ -485,6 +583,7 @@
 % @param: /Wobble num >= 0 max random perpendicular offset per line (default 0)
 % @param: /Dropout num in [0,1] probability a candidate line is skipped (default 0)
 % @param: /Trim [lo hi] fraction of a line's in-region length to shorten by, split randomly between ends (default [0 0])
+% @param: /Mark [proc] procedure (not null); appends each line's path (after /Wobble, /Trim and /Dropout) to a fresh current path instead of stroking it, then runs once at the end, inside the gsave, with `hatchwidths` bound to the per-line widths; /Density runs count as lines
 % @param: /Density {x y -> d} optional per-sample tone callback in [0,1] (clamped); drives width buckets and a no-ink cutoff
 % @param: /DensityThreshold num in [0,1] samples at or below this draw no ink (default 0)
 % @param: /Seed n seeds with `n srand`, restores the caller's stream afterward via `rrand`
@@ -621,6 +720,23 @@
   hdensityopt 0 get null ne
     { hdensityopt 0 get xcheck not { hatch-density-must-be-callable } if }
   if
+  % /Mark (#271) is the second slot meant to run, so it is kept in a
+  % 1-element array like /Density. It must be a procedure (a literal
+  % name or an operator would run something unintended, or nothing);
+  % null means unset. Checked here, before `srand` and `gsave`.
+  hopts /Mark known { hopts /Mark get } { null } ifelse
+  dup null eq
+    { pop /hmarkon false def }
+    {
+      % Under `true setpacking` Ghostscript types a procedure literal
+      % `packedarraytype` (this interpreter never does), so accept both.
+      dup hkisproc not
+        { hatch-mark-must-be-a-procedure }
+      if
+      1 array astore /hmarkopt exch def
+      /hmarkon true def
+    }
+  ifelse
   hopts /DensityThreshold 0 hkgetdef
   dup hkisnum not { hatch-density-threshold-must-be-a-number } if
   /hdthresh exch def
@@ -696,6 +812,11 @@
   % with `stroke`'s ordinary implicit newpath, leaving nothing for a
   % second call's default to read.
   gsave
+  % /Mark (#271): the lines are collected into a fresh path of their own,
+  % so the hook inks the hatch lines and not the region outline the caller
+  % left as the current path (`pathbbox` above has already read it, and
+  % `grestore` below gives it back).
+  hmarkon { newpath /hmarkw 64 array def /hmarkn 0 def } if
   hangles {
     /hang exch def
     hang cos /hdx exch def
@@ -782,15 +903,11 @@
                     { hkfrnd hwidthhi hwidthlo sub mul hwidthlo add }
                     { hwidthlo }
                   ifelse
-                  setlinewidth
-                  newpath
                   hcx hnx hkk mul add hdx htlo2 mul add
                   hcy hny hkk mul add hdy htlo2 mul add
-                  moveto
                   hcx hnx hkk mul add hdx hthi2 mul add
                   hcy hny hkk mul add hdy hthi2 mul add
-                  lineto
-                  stroke
+                  hkline
                 }
                 {
                   /hrunb 0 def
@@ -816,15 +933,11 @@
                     hb hrunb ne {
                       hrunb 0 gt {
                         hwidthlo hwidthhi hrunb 1 sub hnbuckets 1 sub div hklerp
-                        setlinewidth
-                        newpath
                         hcx hnx hkk mul add hdx hrunt0 mul add
                         hcy hny hkk mul add hdy hrunt0 mul add
-                        moveto
                         hcx hnx hkk mul add hdx ht mul add
                         hcy hny hkk mul add hdy ht mul add
-                        lineto
-                        stroke
+                        hkline
                       } if
                       /hrunt0 ht def
                       /hrunb hb def
@@ -832,15 +945,11 @@
                   } for
                   hrunb 0 gt {
                     hwidthlo hwidthhi hrunb 1 sub hnbuckets 1 sub div hklerp
-                    setlinewidth
-                    newpath
                     hcx hnx hkk mul add hdx hrunt0 mul add
                     hcy hny hkk mul add hdy hrunt0 mul add
-                    moveto
                     hcx hnx hkk mul add hdx hthi2 mul add
                     hcy hny hkk mul add hdy hthi2 mul add
-                    lineto
-                    stroke
+                    hkline
                   } if
                 }
               ifelse
@@ -850,8 +959,16 @@
       ifelse
     } for
   } forall
-  grestore
 
+  % The caller's random stream comes back first, so a /Mark that rolls
+  % `rand` itself draws from the caller's stream and its draws are not
+  % wiped by the restore. /Mark runs once, still inside the gsave so the
+  % collected path is the current path, and before the grestore.
   hseeded { hsaved srand } if
+  hmarkon {
+    /hatchwidths hmarkw 0 hmarkn getinterval dup length array copy def
+    hmarkopt 0 get exec
+  } if
+  grestore
 } def
 %%EOF
