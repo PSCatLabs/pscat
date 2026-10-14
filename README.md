@@ -640,6 +640,49 @@ shorter than `/Pitch` (a pressed fan, a dab) is never flipped.
 
 ![The loading specimen](docs/paintkit_loading_demo.png)
 
+**Pigments** (issue #185) give a brush a palette that mixes like paint instead
+of like a lerp. `Pigments` is a named oil palette of thirteen colours
+(`PigmentNames` lists them in tube order: `titaniumwhite`, `midnightblack`,
+`phthaloblue`, `prussianblue`, `alizarin`, `sapgreen`, `cadmiumyellow`,
+`indianyellow`, `yellowochre`, `vandykebrown`, `darksienna`, `burntumber`,
+`brightred`), and `pigmix` takes name-and-weight pairs and returns `r g b` like
+`mix3`:
+
+```postscript
+[ /phthaloblue 1 /cadmiumyellow 1 ] pigmix setrgbcolor   % green, not grey
+[ /phthaloblue 1 /alizarin 1 ] pigmix setrgbcolor        % violet
+[ /phthaloblue 1 /alizarin 1 /titaniumwhite 6 ] pigmix setrgbcolor  % lavender
+/phthaloblue 0.25 pigtint setrgbcolor                    % 1 part white to 3
+/sapgreen 0.1 pigshade setrgbcolor                       % a little black
+```
+
+Weights are parts, so `[ /a 3 /b 1 ]` and `[ /a 30 /b 10 ]` are the same
+paint, and an entry may be a literal `[r g b]` array for any colour that is not
+a pigment. The model is Kubelka-Munk's two-constant theory, run per r/g/b
+channel (absorption over scatter, added by weight, then converted back to a
+reflectance), with each pigment's tinting strength as its weight: a few
+multiplies and three square roots per mix. Its limits are documented in
+`lib/paintkit.ps` ("Pigments"): three bands, not a spectrum, so complements go
+to a very dark neutral; mixed in encoded rather than linear rgb; a pot of paint,
+not a glaze.
+
+The presets take pigments through the colour keys they already have.
+`pigcolor` turns a pigment name or a `pigmix` spec into the `[r g b]` those
+keys want, and `pigcolors` does a whole `/Colors` list:
+
+```postscript
+<< /Colors [ /sapgreen [ /sapgreen 1 /cadmiumyellow 1 ] ] pigcolors >> pkfan
+<< /HighlightColor [ /cadmiumyellow 2 /sapgreen 1 ] pigcolor
+   /ShadowColor /prussianblue pigcolor >> pkdab
+```
+
+`examples/paintkit_pigment_demo.ps` is the specimen: every pigment with six
+tints beside the RGB lerp of the same recipe, three ramps (blue to yellow,
+blue to alizarin, blue to white), eight classic landscape mixes, and the
+palette driving a loaded broad brush, a bush and a fan-brush evergreen.
+
+![The pigment specimen](docs/paintkit_pigment_demo.png)
+
 `pkliner` (issue #116) is the liner/detail brush — the fine marks made
 last and over everything else: bare branches, trunks, grass stems,
 rigging, shoreline accents. The issue asks for the complement of
