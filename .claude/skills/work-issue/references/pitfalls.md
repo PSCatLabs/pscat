@@ -10,19 +10,20 @@ The line ranges drift when you edit the file: re-check them (the first and last 
 
 | Section | Lines |
 |---|---|
-| General pitfalls (a flat list of bullets) | 28-206 |
-| Added in #194 (friction from the #189 / PR #193 run, and #151) | 208-254 |
-| Waiting and timeouts | 256-269 |
-| Step 5 checklist | 271-300 |
-| CI wait (#199, from the #178 / PR #198 run; timings and pass/fail rule updated in #208) | 302-364 |
-| Main CI after merge (#257, #273) | 366-404 |
-| Pending-CI hand-back (only if you truly cannot wait) | 406-425 |
-| Resume paths (#208) | 427-468 |
-| Stop without merging when the dispatcher says so (#208) | 470-491 |
-| Rebase and merge rules (#208) | 493-531 |
-| Step 4 is a hard gate | 533-540 |
-| One scratch location | 542-554 |
-| Evidence runs and scratch hygiene (#273) | 556-579 |
+| General pitfalls (a flat list of bullets) | 29-207 |
+| Added in #194 (friction from the #189 / PR #193 run, and #151) | 209-255 |
+| Waiting and timeouts | 257-275 |
+| Step 5 checklist | 277-316 |
+| CI wait (#199, from the #178 / PR #198 run; timings and pass/fail rule updated in #208) | 318-386 |
+| Main CI after merge (#257, #273) | 388-426 |
+| Pending-CI hand-back (only if you truly cannot wait) | 428-447 |
+| Resume paths (#208) | 449-490 |
+| Stop without merging when the dispatcher says so (#208) | 492-516 |
+| Rebase and merge rules (#208) | 518-565 |
+| Step 4 is a hard gate | 567-575 |
+| One scratch location | 577-589 |
+| Evidence runs and scratch hygiene (#273) | 591-614 |
+| Added in #303 (round 7: friction from the #110, #271, #279, #281, #285, #293 runs) | 616-674 |
 <!-- /TOC -->
 
 - **Don't work in the main checkout.** The whole point of the worktree
@@ -256,6 +257,11 @@ The line ranges drift when you edit the file: re-check them (the first and last 
 ## Waiting and timeouts
 
 - macOS has no `timeout`. Use `perl -e 'alarm N; exec @ARGV' cmd args`.
+- **Long foreground commands (#303).** A foreground Bash call is capped at 600 s (`timeout`
+  600000) and is moved to the background past ~120 s by default. A gallery-piece timing loop,
+  an `identity_check.sh` over a big corpus, a sweep or a stress loop must run with
+  `run_in_background: true`, writing to a `<SCRATCH>` log, so the cap never kills it halfway
+  and leaves a half-written log.
 - Foreground `sleep` may be blocked. Wait with a background Bash task
   (`run_in_background: true`, you are notified when it exits) or a Python
   poll, `python3 -c 'import time; time.sleep(60)'`, kept under 115 s per call.
@@ -287,13 +293,23 @@ Cheapest first, before the long gate:
    sits at depth 1, as `lib/lettering.ps` and `lib/drykit.ps` do with `where`:
    `/name where { pop } { /name N dict def } ifelse`. Run `cargo build` before the long gate to
    see a panic in seconds.
-4. Paintkit and other `lib/` slices that promise "unset keys render byte-identically":
-   run `scripts/identity_check.sh BASE_WORKTREE` (see its header: one shared binary,
-   `--control FILE` negative control). Order matters: rebase first (step 5.5), then create the
-   base worktree from the rebased branch's base, `git worktree add --detach <path> "$(git -C
-   "$WORKTREE_DIR" merge-base HEAD origin/main)"`, then run the check. A rebase after the
-   check leaves a stale base: re-create the base and re-run. The control driver may live in
-   `<SCRATCH>`: pass it by absolute path.
+4. Any `lib/` change that must render byte-identically (a paintkit slice, but equally an artkit,
+   hatchkit or other library change, or a refactor): `scripts/identity_check.sh BASE_WORKTREE
+   --control FILE` (see its header: one shared binary, one negative control). Default files: those
+   that load `lib/paintkit.ps`. For any other lib add `--loader lib/<name>.ps` (repeatable; it also
+   picks files that reach the lib through another lib, so `lib/artkit.ps` covers about 63 files in
+   ~70 s) or `--files LIST` (tracked paths, one per line). Multi-page output (`page-001.png`, ...)
+   is compared page by page. Order matters: rebase LAST (step 5.5), then create the base worktree
+   from the rebased branch's base, `git worktree add --detach <path> "$(git -C "$WORKTREE_DIR"
+   merge-base HEAD origin/main)"`, then run the check. Pick `<path>` outside the repo and NOT ending
+   `-issue-<N>` (step 3 resumes on that suffix); write the exact path down for step 9. A rebase after
+   the check leaves a stale base: re-create the base and re-run (matrix in "Rebase and merge
+   rules"). The control driver may live in `<SCRATCH>`: pass it by absolute path. A pure
+   refactor has no new key to use as the control: append a marker (`printf '\n/probe true def\n' >>
+   BASE/lib/<name>.ps`, uncommitted, in the base) and let the control draw by `/probe where`. That
+   proves each tree loads its own lib; keep the marker out of the branch. The corpus can take
+   minutes at gallery resolution: run the check with `run_in_background: true` and a log
+   (pitfalls "Long foreground commands").
 5. Every pscat probe you run by hand needs `--headless`, or `-e`/`--png`. Without one of
    them pscat opens a window and the call blocks until it is closed:
    `pscat --headless -e '3 4 add ='`, `pscat --png <SCRATCH>/probe-<N>.png file.ps`.
@@ -320,6 +336,12 @@ again after any push, which restarts CI).
   burns turns) and **do not pipe through `tail`**: the pipeline's exit
   status becomes `tail`'s, which hides a failed check (#194's run hit this).
   The redirect plus the trailing `exit=` line keeps the watch's own status.
+- **Merge state settles late (#303).** Right after a watch ends, and again just before `gh pr
+  merge`, the eligibility query can briefly print `false` (or `mergeStateStatus` read `UNKNOWN`)
+  although every check is green. Re-run `git merge-tree --write-tree origin/main HEAD` and the
+  query a few seconds after the watch (a 10 s Python sleep) and again immediately before the
+  merge; re-query up to 3 times, ~10 s apart, before treating `false` as a real failure. Look
+  at the check list (`gh pr checks`) to tell a settling `false` from a red check.
 - **2-6 minutes is normal.** A task that has run 10 minutes is worth a
   look (`gh pr checks <PR#>`), but it is not necessarily hung.
 - **The `exit=` line proves nothing about pass/fail** (#208). It was `0`
@@ -478,6 +500,9 @@ the wrap-up) and stop **before** 8.12:
    you verified and how, what you did not or could not verify, what to look at first
    (renders, a risky function), and that merging is theirs to do (`/work-issue <N>` later
    finishes it). A body drafted for a self-merge ("CI is green, merging") misleads them.
+   A specimen or render PR commits its render and embeds it in the body, pinned to the head SHA
+   and rendered after the final rebase (demo-surfaces.md); a body with no picture sends the
+   maintainer off to run it themselves (#286).
 1. Release the lock: `rm -rf "$(git rev-parse --path-format=absolute --git-common-dir)/work-issue-lock-<N>"`.
 2. Keep the `in-review` label, the worktree and the branch. Do not run
    step 9.
@@ -492,9 +517,11 @@ then removes the worktree.
 
 ### Rebase and merge rules (#208)
 
-Rebase onto `origin/main` exactly once, at step 5.5 before the **first
+Rebase onto `origin/main` exactly once, as late as possible (#303): at step 5.5,
+right before the identity check and the full gate, and before the **first
 push** (commit first: a rebase refuses a dirty tree), so a break already on `main` (as #189's clippy failure was) does
-not fail an unrelated issue. After the PR exists, history is published:
+not fail an unrelated issue, and no check goes stale behind a later rebase. Finish the
+implementation, notes and renders first; rebase only when the branch is otherwise done. After the PR exists, history is published:
 never rebase it. Being `BEHIND` needs nothing (#257). Only real conflicts
 (`DIRTY`) bring `main` in, by merging locally: `git -C "$WORKTREE_DIR" fetch
 origin main && git -C "$WORKTREE_DIR" merge origin/main`, resolve, commit,
@@ -510,6 +537,13 @@ lists what `main` gained. If every path is `*.md`, under `docs/`, `notes/`, `.cl
 `.github/`, the gate stands. Anything else (`lib/`, `src/`, `tests/`, `selftest/`,
 `examples/`, `gallery/`, `scripts/`, `build.rs`, `Cargo.*`, `site/`) means re-run it.
 Either way, re-read the worktree's `SKILL.md` after a rebase that moved `HEAD`.
+
+What to redo after a rebase that pulled in changes (#303):
+
+| the rebase pulled in | redo |
+|---|---|
+| only `*.md`, `docs/`, `notes/`, `.claude/`, `.github/` | nothing (re-read SKILL.md) |
+| anything in `lib/`, `src/`, tests, `selftest/`, `examples/`, `gallery/`, `scripts/`, `build.rs`, `Cargo.*`, `site/` | (1) re-create the identity base from the new merge-base and remove the old one, (2) re-run `identity_check.sh`, (3) re-run the full gate, (4) re-render any committed specimen or still |
 
 **NOTES.md conflicts** should be rare since #273: new notes go in
 `notes/<issue>-<slug>.md`, one file per issue, so two PRs never touch the
@@ -536,7 +570,8 @@ The same run skipped the plan-review checkpoint without noticing. Step
 4.4 now says no code before the `advisor` call, and the final report has
 a `Plan review (step 4)` line that must read `done` or `skipped (small)`.
 Skipping is allowed only for a **small** change (step 4.2 is the one
-definition: 20 changed lines or fewer and no API change),
+definition: 20 changed lines or fewer and no API change; count tests and
+notes in the 20, as #293 skipped its plan review by counting only the fix),
 and the report must say so; for a full-size change the call is required.
 
 ### One scratch location
@@ -577,3 +612,63 @@ earlier run's files; resume decisions are made from GitHub state
 - **Run the gate in the foreground when the last one took under ~60 s**
   (a doc-only or tiny change); the background-and-wait routine costs more than
   it saves there. Anything longer, or unknown, stays in the background.
+
+### Added in #303 (round 7: friction from the #110, #271, #279, #281, #285, #293 runs)
+
+- **Never kill by a pattern.** `pkill -f release/pscat`, `killall pscat` and
+  `kill $(pgrep ...)` match every agent's processes on this machine, not yours: two
+  agents' pattern kills hit other agents' renders on 2026-10-13 (#259's run killed #110's).
+  Start the process, record `$!` (`cmd & PID=$!`, write the number in your reply since
+  shell state does not persist), and `kill "$PID"` only that. A process you did not start
+  is not yours to stop, even when it is wedged. A task started with `run_in_background` has no
+  `$!` in your shell: stop it with `TaskStop <task id>`, which is scoped to your own tasks.
+- **`gh --jq` runs gojq, not system `jq`.** Their regex flavours and some builtins differ
+  (see #293, the `scan` expression). Test every jq expression that
+  will run inside `gh ... --jq` through `gh` itself (`gh pr list --json body --jq '...'`
+  against real or fixture data), not through `echo ... | jq`. `.claude/skills/work-issue/scripts/test-scan.sh` is the model.
+  A plain `| jq` after `gh` is system jq; know which one a line uses.
+- **PostScript probe harnesses (executed names, `$error`).** In a hand-written probe, hold each
+  callable you want to run later in a 1-element array (`[ { ... } ]`, run it with `0 get exec`),
+  so storing and fetching it never executes it by accident; and stringify `$error /command` the
+  moment you read it (`$error /command get 64 string cvs`): it is an executable name, and left
+  as an object it executes (or errors) the next time it passes through the program flow. This
+  is the auto-execution trap.
+- **A new `xcheck`-array guard must accept `packedarraytype`** (from #271 / PR #300). Ghostscript's
+  `true setpacking` turns `{ ... }` procedures into packed arrays, and `type` then says
+  `packedarraytype`, not `arraytype`; a guard that tests `type /arraytype eq` rejects a valid
+  procedure there. Accept both (`dup type /arraytype eq 1 index type /packedarraytype eq or`),
+  and add a test that runs under a real Ghostscript with `true setpacking`, not only pscat's own
+  suite (a guard that has never seen gs's packed arrays passes every pscat test).
+- **zsh does not word-split `$FILES`.** A string holding several paths stays one word, so
+  `for f in $FILES` and `cmd $FILES` pass one broken argument (it works in bash, which is why
+  scripts pass). In an interactive Bash call use an array (`FILES=(a b c); for f in "${FILES[@]}"`),
+  `while read -r` over a file or heredoc, or `bash -c '...'`. The repo's scripts have a bash
+  shebang; the Bash tool's own shell is zsh.
+- **Timing assertions in tests.** Wall-clock thresholds flake under load, and a
+  timing test that cannot fail proves nothing. Take the best (minimum) of N runs, N >= 5, for
+  both the guarded case and a baseline of the same work in the same run, assert a bound
+  RELATIVE to the baseline (`guarded <= 4 * baseline`) rather than an absolute number of
+  milliseconds, and add a negative check: run the identical assertion with the guard disabled
+  (a flag, an env var, the old build) and require it to FAIL. If the unguarded run also passes,
+  the test is not measuring the guard.
+- **"Max value fed to X across all pieces" sweeps.** Questions such as "what is the
+  largest segment count `walkpath` sees across every gallery piece" go through
+  `bash .claude/skills/work-issue/scripts/sweep-max.sh --glob 'gallery/*.ps' -- <SCRATCH>/probe.sh`: it runs your per-file hook (any
+  command whose last stdout line is a number) over the tracked files in parallel and prints
+  `MAX <value> <file>`. Write the hook once (a pscat run with a counting probe), keep it in
+  `<SCRATCH>`, and run the sweep with `run_in_background: true`. `bash .claude/skills/work-issue/scripts/test-sweep.sh` tests it.
+- **Extra worktrees you create are yours to remove, by exact path.** An identity base or a
+  before/after tree from step 5 is cleaned in step 9 (finish.md) from the list of paths you
+  wrote down, never by matching `git worktree list`. Name them so the path does not end
+  `-issue-<N>` (step 3 resumes on that suffix) and keep them outside the repo.
+- **A "won't change" outcome needs its own path (#287/PR #304).** When measurement shows the issue's
+  change should not be made and the PR ships only comments and notes: the PR body says `Refs #<N>`
+  (never `Closes`, which closes the issue as COMPLETED on merge); the plan gate counts it small; step 9
+  closes the issue with `--reason "not planned"` and the `wontfix` label (finish.md). Comment the
+  measurement on the issue first (step 5.4).
+- **`gh pr checks --watch` logs a refresh every 10 s**, so `<SCRATCH>/ci-<N>.log` grows long. Read it
+  with `tail -n 25`, not whole (the `exit=` line is last).
+- **Never edit a shell script while it runs.** bash reads a script as it executes; an edit mid-run
+  gave a syntax error at a later line (seen while verifying #303). Wait for the run, or copy the script.
+- **Codex cannot run harnesses**; for concurrency or shell changes the advisor plus real load
+  runs are the review that counts (codex-review.md).
