@@ -23,14 +23,16 @@ a denser, smoother plane, not better enough to leave the old pitch.
 **The seed stream moved, and so did everything drawn after it in each range.** The plane draws
 a different number of values than the loop, and each range reseeds only at its top, so the snow
 pulls and foot mist of both ranges (and their reflections) are re-rolled: the picture is the
-same scene with different marks. A pixel diff of the old and new still puts every change at
-rows 144 to 683 (the ranges) and 799 to 1051 (their reflection); the sky above the peaks, the far
-forest and water band, and the foreground bank are untouched, so nothing leaked into the global
-stream.
+same scene with different marks. Every other scene element seeds itself, so nothing outside the
+two ranges can move through the shared stream. A pixel diff of the old and new 2x stills agrees:
+rows 0 to 143 (the sky above the peaks), 684 to 798 (apart from one row) and 1052 down (the
+foreground bank) are identical; the changes sit in the ranges and their reflection (and
+wherever their mist shows through the far forest's crest). The reflection was checked by
+flipping a near peak's mirror image against it: the shadow planes and their streaks line up.
 
 Ghostscript (`gs -dNOSAFER`) still renders it without error.
 
 ## Not done
 
 - `gallery/README.md`'s Alpine Lake entry still says "`pktrowel` snow and shadow planes clipped to
-  each ridge"; the gallery manifest work (#251) is rewriting that file, so it is left for it.
+  each ridge"; the gallery manifest work (#251) is rewriting that file, so it is left for it (https://github.com/jeromebanks/postscript_interpreter/issues/435).
