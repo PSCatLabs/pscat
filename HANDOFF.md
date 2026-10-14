@@ -716,6 +716,16 @@ renders eight examples in both and compares block-downsampled output).
 - `Interp` split-borrows fields in `next_item` (`estack`, `dstack`,
   `gfx`, `ostack`); new frame types plug in there and must decide
   their action before any stack mutation (the `Action` enum).
+- **`next_item` yields an `Item`, not an `Object`** (#323). A procedure
+  element is inspected in place with `PsArray::peek` (one borrow,
+  released before anything executes, so a `put` into the running
+  procedure still works): an executable operator comes back as its fn
+  pointer, an executable name as its interned id, and only the rest is
+  cloned. Don't turn the fetch back into `body.get(pc)`; that clone and
+  its drop were the largest cost of a bound library run. In the same
+  spirit, code holding a `PsName` must not go through `&str` (`define`,
+  `load`, `Dict::put`): that allocates and re-interns. Use
+  `define_name`, `load_id` and `put_name`.
 - Frames that hold external state (glyph contexts' graphics-state
   snapshot, paint suppression) must clean up in **three** unwind
   paths: normal pop, `do_stop`, and `unwind_all`. `ShowCtx::cleanup`
