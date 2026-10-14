@@ -182,12 +182,12 @@ if [ -n "$FILES_LIST" ]; then
         f="${f%%#*}"
         f=$(printf '%s' "$f" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
         [ -n "$f" ] || continue
-        git -C "$ROOT" ls-files --error-unmatch -- "$f" >/dev/null 2>&1 \
+        [ -f "$ROOT/$f" ] && git --literal-pathspecs -C "$ROOT" ls-files --error-unmatch -- "$f" >/dev/null 2>&1 \
             || die "--files: '$f' is not a tracked file in $ROOT"
     done < "$FILES_LIST"
 fi
 LOADER_DESC=$(printf '%s' "$LOADERS" | tr '\n' ' ' | sed 's/ *$//')
-[ -n "$LOADER_DESC" ] || LOADER_DESC="the --files list"
+[ -n "$LOADER_DESC" ] || LOADER_DESC="library"
 if [ "$BASE" = "$ROOT" ]; then
     die "BASE_WORKTREE is this tree itself; pass a separate checkout of the base commit"
 fi
