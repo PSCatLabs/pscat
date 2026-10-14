@@ -105,8 +105,10 @@
   looked bad at the low resolutions of screens and laser printers. Warnock's
   idea was to adjust each outline to the device's pixel grid before filling
   it, and he worked it out with Brotz and Paxton. Adobe kept the method a trade
-  secret rather than patent it. Adobe introduced PostScript in 1984
-  <a class="cite" href="#src-1">[1]</a>. In 2022 the Computer History Museum
+  secret rather than patent it. Adobe announced PostScript in 1984
+  <a class="cite" href="#src-1">[1]</a>, and it reached customers the
+  following year, inside the first PostScript printer
+  <a class="cite" href="#src-3">[3]</a>. In 2022 the Computer History Museum
   published the source code of a very early version, from late February 1984
   <a class="cite" href="#src-2">[2]</a>.</p>
 
@@ -137,14 +139,15 @@
   interpreter's special rasterizer uses to make text look good at small sizes
   and low resolutions. Type 1 fonts are also encrypted
   <a class="cite" href="#src-7">[7]</a>.</p>
-  <p>In 1989 Apple and Microsoft announced a joint plan to support Apple's own
-  font-scaling technology <a class="cite" href="#src-3">[3]</a>. That was
-  TrueType, which Apple designed to avoid paying per-font royalties to the
-  owners of other font technologies and to get past some limits of Type 1
-  <a class="cite" href="#src-8">[8]</a>. The same year Adobe released Adobe
-  Type Manager, which drew Type 1 fonts smoothly on screen, and made the Type 1
-  format an open standard <a class="cite" href="#src-3">[3]</a>; its
-  specification was published as a book in 1990
+  <p>Apple developed an outline font format of its own, TrueType, designed to
+  avoid paying per-font royalties to the owners of other font technologies
+  and to get past some limits of Type 1. Apple agreed to license it to
+  Microsoft <a class="cite" href="#src-8">[8]</a>, and the two companies
+  announced a joint plan to support it <a class="cite" href="#src-3">[3]</a>.
+  In 1989 Adobe released Adobe Type Manager, which drew Type 1 fonts smoothly
+  on screen, and made the Type 1 format an open standard
+  <a class="cite" href="#src-3">[3]</a>; its specification was published as
+  a book in 1990
   <a class="cite" href="#src-7">[7]</a>. TrueType shipped in Apple's System 7
   in May 1991 and in Microsoft Windows 3.1 in April 1992
   <a class="cite" href="#src-8">[8]</a>. This contest between the formats is
@@ -154,7 +157,7 @@
   <p>In 1988 Adobe introduced Display PostScript, which applies the same
   imaging model to computer screens, so that what is on screen matches what
   prints <a class="cite" href="#src-3">[3]</a>. NeXT's operating system,
-  NeXTSTEP, was built on it: its programming manuals give Display PostScript a
+  NeXTSTEP, used it: its programming manuals give Display PostScript a
   chapter of its own <a class="cite" href="#src-12">[12]</a>. The second
   edition of Adobe's reference manual documented the Display PostScript
   extensions, and the third edition took them out again
@@ -164,7 +167,7 @@
   <p>The language grew in three steps, which Adobe calls LanguageLevels. Each
   level includes everything in the levels before it
   <a class="cite" href="#src-6">[6]</a>. LanguageLevel 1 is the original
-  language, released in 1985 <a class="cite" href="#src-3">[3]</a>. Level 2
+  language, as it first shipped in 1985 <a class="cite" href="#src-3">[3]</a>. Level 2
   was released in 1990, adding support for colour separations among much else
   <a class="cite" href="#src-3">[3]</a>. LanguageLevel 3 is documented in the
   third edition of the <em>PostScript Language Reference</em>, published in
@@ -201,8 +204,8 @@
   <a href="https://www.ghostscript.com/">Ghostscript</a>, the open-source
   PostScript and PDF interpreter, is still developed, and pscat checks its own
   output against it. Type 1 fonts are fading: Adobe's applications stopped
-  supporting them in 2023, though the same kind of outlines lives on inside
-  OpenType fonts in the compact form called CFF
+  supporting them after January 2023, though Adobe still supports CFF, a
+  compact form of Type 1 used inside OpenType fonts
   <a class="cite" href="#src-11">[11]</a>. And the language is still a good
   way to draw with code, which is what the rest of this page is about.</p>
 
@@ -259,7 +262,7 @@
       32000-1:2008, <em>Document management — Portable document format — Part 1:
       PDF 1.7</em></a>, first edition, 1 July 2008 (Adobe's copy): introduction.</li>
     <li id="src-11">Adobe, <a href="https://helpx.adobe.com/fonts/kb/postscript-type-1-fonts-end-of-support.html">"PostScript
-      Type 1 fonts end of support"</a>.</li>
+      Type 1 fonts end of support"</a>, last updated 11 July 2023.</li>
     <li id="src-12">NeXT Computer, <a href="https://www.mirrorservice.org/sites/www.bitsavers.org/pdf/next/Release_3_Nov93/NeXTSTEP_Programming_Interface_Summary_Release_3_Nov93.pdf"><em>NeXTSTEP
       Programming Interface Summary</em>, Release 3</a> (1993), chapter 5,
       "Display PostScript".</li>
@@ -318,9 +321,10 @@
     <li>The <b>dictionary stack</b> decides what names mean. A dictionary is a
       table of names and values. When the interpreter meets a name such as
       <code>add</code> or <code>x</code>, it looks in the top dictionary first,
-      then the next one down, and so on. At the bottom are always
-      <code>systemdict</code>, which holds the built-in operators, and above it
-      <code>userdict</code>, where your own definitions go.</li>
+      then the next one down, and so on. The bottom of the stack always holds
+      <code>systemdict</code>, with the built-in operators, and
+      <code>userdict</code>, where your own definitions go; Level 2
+      interpreters add a third, <code>globaldict</code>, between them.</li>
     <li>The <b>execution stack</b> holds the interpreter's own work: the
       procedures it is in the middle of running, and where to carry on in each.
       You rarely touch it directly, but it is what lets a procedure call

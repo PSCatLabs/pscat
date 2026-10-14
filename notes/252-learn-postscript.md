@@ -58,8 +58,13 @@ Type 1 book, Microsoft's TrueType history, the EPSF 3.0 tech note, ISO
 32000-1's introduction, Adobe's Type 1 end-of-support page and NeXT's
 Release 3 programming summary. Left out for lack of a source I could check:
 exact LaserWriter announce/ship days and price, PageMaker's month, Ghostscript's
-first-release date, the Quartz-replaces-Display-PostScript story, and the
-"blue book"/"red book" nicknames. The CHM timeline dates the Type 1 open
+first-release date, the year of the Apple-Microsoft TrueType announcement
+(the CHM entry files it under 1989 but says "later"), the
+Quartz-replaces-Display-PostScript story, and the "blue book"/"red book"
+nicknames. PostScript's year is given as announced in 1984 (Warnock) and
+shipped in 1985 (CHM, PLRM), so the two don't read as a contradiction.
+Adobe's Type 1 page blocks scripted fetches; it was read through the
+Internet Archive's copy (last updated 11 July 2023). The CHM timeline dates the Type 1 open
 standard to 1989 and the spec book to 1990; the page gives both.
 
 ## Newcomer pass
