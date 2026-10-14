@@ -496,6 +496,9 @@ newpath 40 40 moveto 200 80 lineto << /Touch 0.7 >> dycrayon
 - `opts dhlift` — an eraser's track: `/Eraser /kneaded` (grey, soft, never
   back to paper) or `/hard` (a narrow, crisp line). `/Under` defaults to the
   current colour.
+- Smudges and lifts may sit inside a `dkbatch` (#393): they are drawn after
+  the batch's strokes, in call order, over all of them, even hatching made
+  later in the batch. To hatch over a lift, hatch in a later batch.
 - `opts dhsketch` — faint construction lines, laid `/Passes` times, each
   shifted by up to `/Shift`; draw the drawing over them.
 - None of them draws from your `rand` stream. **Cost:** hatching costs about

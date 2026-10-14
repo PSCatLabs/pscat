@@ -29,6 +29,10 @@ the stick's contact patch meets raised tooth.
   runs, and the strokes it makes keep that region inside a batch. So
   differently clipped strokes, such as overlapping hatched regions, can
   share one batch.
+- **`/After true`** on a `dkstroke` inside a batch draws that stroke on
+  its own after the batch has rendered, in call order, in its own colour.
+  It is how an eraser or a smudge can be drawn from inside a batch, over
+  everything the batch lays.
 
 drykit takes no draws from the caller's `rand` stream. Its surface and
 tool-side randomness come from private seeded generators, and fallout goes
@@ -106,6 +110,9 @@ grey and dusty; `/compressed`: dark and dense; `/pencil`: a sharp point) and a
 region to a value (a number, or a `{x y -> value}` callback), `dhsmudge` is a
 stump's or finger's track, `dhlift` is an eraser's track (kneaded or hard), and
 `dhsketch` lays faint construction lines. It needs hatchkit loaded.
+`dhsmudge` and `dhlift` may run inside a `dkbatch`: they are drawn after the
+batch's strokes, in call order, over all of them (even hatching made later
+in the batch), so to hatch over a lift, hatch in a later batch.
 `examples/drycharcoal_specimen.ps` is the specimen; the gallery piece *Study
 after Berger, 1864* is a charcoal portrait built with it.
 

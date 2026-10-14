@@ -612,7 +612,7 @@ renders eight examples in both and compares block-downsampled output).
    text is 25.2s in pscat against a 30s budget, after #307's `bind`
    (`notes/283-drykit-perf-remeasure.md`; levers in #324). `dkbatch` keeps each
    stroke's CTM, so hatch layers can be drawn rotated inside it. It allows
-   one pigment per batch.
+   one pigment per batch (an `/After` stroke may differ, #393).
    #241 shipped `lib/drycharcoal.ps` (`dhstroke`, `dhhatch`, `dhsmudge`,
    `dhlift`, `dhsketch`; `notes/241-drycharcoal.md`). `dhhatch` lays lines
    through hatchkit's `/Mark` hook and inks every layer in one `dkbatch`
@@ -621,6 +621,10 @@ renders eight examples in both and compares block-downsampled output).
    a `dkstroke` made inside `{ ... } dkclip` keeps that region when its
    batch renders later. A plain `clip` inside a batch is still not kept
    (pscat's `clippath` can't hand back a nested clip exactly).
+   #393: `dkstroke /After true` in a batch is drawn on its own after the
+   batch renders, in call order, in its own colour; `dhsmudge` and `dhlift`
+   use it, so they run inside a batch, over everything the batch lays
+   (`notes/393-smudge-lift-in-a-batch.md`).
    Hatching costs about 0.07 ms per square point per layer in pscat. In gs,
    drykit work after an artkit `scatter` (fallout) runs about 2x slower (#311).
    #313: `/drawing` paper's `/Mottle` is 1.5, so charcoal hatching breaks up in
