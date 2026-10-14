@@ -874,11 +874,16 @@ procedure for the backdrop at `/At` plus its own displacement:
 The procedure runs inside pkwet's frame, so it must be a pure function: no
 painting, no `pkwet`, no reliance on the operand stack, and exactly three
 numbers in 0..1 out (anything else is a named error). The question is per
-pass, not per pixel, so a mark tall against the gradient is better split into
-several calls, each with its own `/At`. A literal `[r g b]` behaves exactly
+pass, not per pixel. A mark tall against the gradient wants it per band
+(issue #359): `/Box [x y w h]` and `/Bands [cols rows]` in place of `/At`
+ask the procedure once per cell of a grid over the mark and paint each
+softening pass once per cell, clipped to it, with the random stream replayed
+so every cell lays the same marks. A literal `[r g b]` behaves exactly
 as before. `examples/paintkit_wet_under_demo.ps` sets one cloud over a strong
 sky gradient with a constant and a procedural `/Under`
-(`docs/paintkit_wet_under_demo.png`).
+(`docs/paintkit_wet_under_demo.png`);
+`examples/paintkit_wet_bands_demo.ps` sets a tall plume over one, per pass
+against per band (`docs/paintkit_wet_bands_demo.png`).
 
 `pkcanvas` and `/Touch` (issue #182) give light strokes one canvas to
 catch on. Every other "less paint" key in paintkit (`/Load`, `/Charge`,

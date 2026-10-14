@@ -5134,9 +5134,10 @@
 % a whole pass. What the procedure fixes is the shift the displacement
 % causes, the larger share of the rim at a generous /Offset. A mark that
 % is tall against the gradient still has the rest, so split it into
-% several pkwet calls, each with its own /At. /At is required with a
-% procedure (named error otherwise) and rejected with an [r g b], where it
-% would mean nothing. The coordinates are those of the user space pkwet is
+% several pkwet calls, each with its own /At, or give /Box and /Bands
+% instead (below). /At is required with a procedure unless /Box is given
+% (named error otherwise) and rejected with an [r g b], where it would mean
+% nothing. The coordinates are those of the user space pkwet is
 % called in, as /Direction's are: inside a mirror or a translate the
 % procedure sees shifted ones. A literal [r g b] takes exactly the code it
 % always did, with the same draws.
@@ -5150,6 +5151,59 @@
 % pkwet-under-procedure-must-return-3-numbers, -results-must-be-numbers or
 % -results-must-be-0-to-1, with the depth counter and the operand stack
 % put back first. Cost: at most Layers - 1 calls per pkwet call.
+%
+% A backdrop per band (issue #359)
+% --------------------------------
+% One colour per pass leaves the rim a tall mark's own height makes: over a
+% sky that changes down the mark, the top of a pass is right and the bottom
+% is not. pkwet still cannot see where the wrapped
+% procedure paints, so it cannot ask per fill or per pixel; what it can do is
+% cut the page into cells and paint each pass once per cell:
+%
+%   { ... } << /Soft 1 /Offset 30 /Layers 5
+%              /Box [ 120 20 60 110 ] /Bands [ 1 6 ]
+%              /Under { exch pop skyat } >> pkwet
+%
+% /Box says where the mark sits (x y w h, in the user space pkwet is called
+% in); /Bands is the grid, columns by rows. The grid covers the box grown by
+% /Offset on every side, because a pass is displaced by up to /Offset and its
+% rim lands there; the outer cells' clips run on outward, so none of it is
+% cut off. The procedure is asked once per cell, at its centre (not per pass,
+% and not displaced: a cell is a fixed piece of page, and the question is what
+% is under it), and each softening pass runs once per cell, clipped to the
+% cell, in the caller's colour mixed toward that cell's answer. The core is
+% laid once, whole, in the caller's own colour. /Box and /At are alternatives
+% (a named error for both, or for one of /Box and /Bands without the other,
+% or for either with a literal /Under).
+%
+% The wrapped procedure runs once per cell, and every run has to lay the same
+% marks or the pieces would not fit. So the random stream is saved when a
+% pass starts and put back (`rrand`, `srand`) before every cell after the
+% first: each cell draws the same mark and the clips cut it up, and when the
+% pass is done the stream stands where one unbanded run would have left it,
+% so no mark drawn after the call moves, and the number of cells never
+% re-rolls a thing. A procedure that reseeds itself replays its own seed in
+% every cell. The same replay is why a banded call over a backdrop that never
+% changes draws what the literal does, to the rounding of a clip's coverage
+% (`wet_bands_over_a_constant_backdrop_match_the_literal`); the cell edges
+% between cells are snapped to the device pixel grid, so neighbours share
+% one edge exactly and leave no seam (exact for an axis-aligned or quarter-turn
+% CTM; a page turned by another angle can show a faint hairline).
+%
+% Measured (tests/paintkit.rs, a 110pt column over a strong gradient,
+% /Offset 34): the residual rim is 186.7 with one backdrop per pass, 112.5
+% with 4 rows and 82.9 with 8, 2.25x less. On a short cloud per pass is
+% already near the answer, and 3 rows are worse than it (146.9 against 119.8)
+% where 6 are better (98.4). Pick rows so a cell is no taller than about half
+% /Offset; for a mark about as tall as /Offset, /At is as good and cheaper.
+%
+% Cost: the wrapped procedure runs (Layers - 1) x cells + 1 times, so it is
+% counted against the same 64-run budget as a directional call
+% (pkwet-too-many-passes, checked before any draw): 12 cells at 6 layers, 21
+% at 4. An unclipped procedure still does all its work in every cell, so a
+% spray at the specimen's density costs that many times as much. Not done,
+% and still open: asking the backdrop per fill inside a preset (a hook into
+% each preset's colour set), which would take no clipping at all.
 %
 % pkwash is deliberately *not* wrappable: it resets alpha and blend mode
 % itself, by design, so it will not honor a surrounding context. pkwet
@@ -5257,21 +5311,46 @@
 % depth pqdset -
 % @internal
 /pqdset { userdict /pqdepth 3 -1 roll put } bind def
-% -> frame   (this invocation's 8-slot frame; pkwet lists the slots)
+% -> frame   (this invocation's 9-slot frame; pkwet lists the slots)
 % @internal
 /pqmyframe { userdict /pqframes get pqdnow get } bind def
 
-% -> -   (procedural /Under, issue #179: evaluate the backdrop procedure
-% for every softening pass and re-mix that pass's colour toward the result)
-% Reads pqplan, pqks, pqbase, pqPickup, pqLayers, pqAt and pqUnderProc, and
-% leaves the per-pass backdrop arrays in pqunders (null at the core, which
-% has none). The procedure gets the pass's position, `At` plus the pass's
-% displacement from the plan, in the user space pkwet was called in. It
-% runs with nothing of this call's on the operand stack, so a procedure
+% x y -> [r g b]   (issue #179: ask the /Under procedure for the backdrop
+% at one point and check its answer)
+% It runs with nothing of this call's on the operand stack, so a procedure
 % that counts the stack sees only the caller's items, and it is the only
 % caller code that runs while the frame is half built: every way out
 % below first rolls the depth back, so a caught error or a rejected
 % result never leaves pqdepth raised (the nesting guard does the same).
+% Reads pqUnderProc. Draws no random number.
+% @internal
+/pqaskunder {
+    count 2 sub /pqc0 exch def
+    { pqUnderProc } stopped { pqdnow 1 sub pqdset stop } if
+    % Exactly three results, nothing more, nothing fewer. Anything
+    % else is dropped back to the entry count (if the procedure ate
+    % into the caller's items there is nothing to put back) and
+    % named, rather than left to fail inside mix3.
+    count pqc0 sub 3 ne {
+        count pqc0 sub dup 0 gt { { pop } repeat } { pop } ifelse
+        pqdnow 1 sub pqdset pkwet-under-procedure-must-return-3-numbers
+    } if
+    3 array astore /pqur exch def
+    0 1 2 {
+        pqur exch get dup type dup /integertype ne exch /realtype ne and
+            { pop pqdnow 1 sub pqdset pkwet-under-procedure-results-must-be-numbers } if
+        dup 0 lt exch 1 gt or
+            { pqdnow 1 sub pqdset pkwet-under-procedure-results-must-be-0-to-1 } if
+    } for
+    pqur
+} bind def
+
+% -> -   (procedural /Under, issue #179: evaluate the backdrop procedure
+% for every softening pass and re-mix that pass's colour toward the result)
+% Reads pqplan, pqks, pqbase, pqPickup, pqLayers and pqAt, and
+% leaves the per-pass backdrop arrays in pqunders (null at the core, which
+% has none). The procedure gets the pass's position, `At` plus the pass's
+% displacement from the plan, in the user space pkwet was called in.
 % Nothing here draws a random number.
 % @internal
 /pqwetunder {
@@ -5280,25 +5359,9 @@
         /pqi exch def
         pqplan pqi get dup length 2 gt {
             /pqent exch def
-            count /pqc0 exch def
             pqAt 0 get pqent 0 get add
             pqAt 1 get pqent 1 get add
-            { pqUnderProc } stopped { pqdnow 1 sub pqdset stop } if
-            % Exactly three results, nothing more, nothing fewer. Anything
-            % else is dropped back to the entry count (if the procedure ate
-            % into the caller's items there is nothing to put back) and
-            % named, rather than left to fail inside mix3.
-            count pqc0 sub 3 ne {
-                count pqc0 sub dup 0 gt { { pop } repeat } { pop } ifelse
-                pqdnow 1 sub pqdset pkwet-under-procedure-must-return-3-numbers
-            } if
-            3 array astore /pqur exch def
-            0 1 2 {
-                pqur exch get dup type dup /integertype ne exch /realtype ne and
-                    { pop pqdnow 1 sub pqdset pkwet-under-procedure-results-must-be-numbers } if
-                dup 0 lt exch 1 gt or
-                    { pqdnow 1 sub pqdset pkwet-under-procedure-results-must-be-0-to-1 } if
-            } for
+            pqaskunder /pqur exch def
             pqunders pqi pqur put
             pqplan pqi
             [
@@ -5307,6 +5370,133 @@
             ]
             put
         } { pop } ifelse
+    } for
+} bind def
+
+% x -> x'   /   y -> y'   (issue #359: a user-space coordinate moved to the
+% nearest device pixel edge along its own axis; exact when the CTM is
+% axis-aligned or a quarter turn, where one device coordinate is the whole
+% story, so both are rounded)
+% @internal
+/pqsx { 0 transform round exch round exch itransform pop } bind def
+% @internal
+/pqsy { 0 exch transform round exch round exch itransform exch pop } bind def
+
+% -> -   (banded /Under, issue #359: the grid of cells and what each one
+% is mixed toward)
+% Reads pqBox, pqCols, pqRows, pqSpread, pqplan, pqks, pqbase and
+% pqLayers and leaves pqbrec = [ rects backdrops mixed rng ] for the frame:
+%   rects      per cell, the [x y w h] its softening passes are clipped to
+%   backdrops  per cell, the colour the procedure answered at its centre
+%   mixed      per pass, null at the core, else per cell the pass colour
+%              (the caller's colour mixed toward that cell's backdrop)
+%   rng        the stream saved at the start of each pass (see pqwetbandpass)
+% The grid covers /Box grown by /Offset on every side, because a pass is
+% displaced by up to /Offset and its rim lands there; the edge cells' clips
+% run on outward without limit, so nothing of a displaced pass is cut off.
+% Cells are numbered row by row from the low corner, the order asked in.
+% @internal
+/pqwetbands {
+    /pqbx pqBox 0 get pqSpread sub def
+    /pqby pqBox 1 get pqSpread sub def
+    /pqbw pqBox 2 get pqSpread 2 mul add pqCols div def
+    /pqbh pqBox 3 get pqSpread 2 mul add pqRows div def
+    % The clip edges between cells, snapped to the device pixel grid: two
+    % clips that abut at a fractional pixel each cover part of the pixel, and
+    % two opaque fills at part coverage let the ground show through as a
+    % hairline (the seam pktrowel's lane overlap exists to avoid). Snapped, the
+    % neighbours share one edge exactly. A snap is exact when the CTM does
+    % rotate by other than a quarter turn or skew, which is every page here; a
+    % CTM turned by some other angle can show a faint seam. The first and last edges run on outward without limit.
+    /pqxe pqCols 1 add array def
+    /pqye pqRows 1 add array def
+    0 1 pqCols {
+        /pqbi exch def
+        pqxe pqbi
+        pqbi 0 eq { pqbx 100000 sub } {
+            pqbi pqCols eq { pqbx pqbw pqCols mul add 100000 add }
+                           { pqbx pqbi pqbw mul add pqsx } ifelse } ifelse
+        put
+    } for
+    0 1 pqRows {
+        /pqbj exch def
+        pqye pqbj
+        pqbj 0 eq { pqby 100000 sub } {
+            pqbj pqRows eq { pqby pqbh pqRows mul add 100000 add }
+                           { pqby pqbj pqbh mul add pqsy } ifelse } ifelse
+        put
+    } for
+    /pqrects pqCols pqRows mul array def
+    /pqbks pqCols pqRows mul array def
+    0 1 pqRows 1 sub {
+        /pqbj exch def
+        0 1 pqCols 1 sub {
+            /pqbi exch def
+            pqbx pqbi pqbw mul add pqbw 2 div add
+            pqby pqbj pqbh mul add pqbh 2 div add
+            pqaskunder /pqur exch def
+            pqbks pqbj pqCols mul pqbi add pqur put
+            pqrects pqbj pqCols mul pqbi add
+            [ pqxe pqbi get  pqye pqbj get
+              pqxe pqbi 1 add get pqxe pqbi get sub
+              pqye pqbj 1 add get pqye pqbj get sub ]
+            put
+        } for
+    } for
+    /pqmixed pqLayers array def
+    0 1 pqLayers 1 sub {
+        /pqi exch def
+        pqplan pqi get length 2 gt {
+            pqmixed pqi pqbks length array put
+            0 1 pqbks length 1 sub {
+                /pqbn exch def
+                pqmixed pqi get pqbn
+                [ pqbase pqbks pqbn get pqks pqi get mix3 ]
+                put
+            } for
+        } if
+    } for
+    /pqbrec [ pqrects pqbks pqmixed null ] def
+} bind def
+
+% -> -   (one banded softening pass, issue #359: the pass named by frame
+% slot 6, once per cell)
+% Each cell is its own gsave, clipped to the cell's rectangle in the user
+% space pkwet was called in, painting in that cell's mix, translated by the
+% pass's displacement, and running the wrapped procedure under `stopped`
+% exactly as an unbanded pass does. Slot 5 is pointed at the cell's backdrop
+% so a loaded colour (`puwet`) grades toward the same colour.
+%
+% The wrapped procedure runs once per cell, and each run must lay the same
+% marks, or the cells would not fit together. So the random stream is saved
+% when the pass starts and put back before every cell after the first
+% (`rrand`/`srand`, the convention hatchkit and artkit use): every cell
+% draws the same mark and the clips cut it into pieces, and when the pass is
+% done the stream is where one unbanded run would have left it, so no mark
+% after the call moves. A procedure that reseeds itself replays its own seed
+% in every cell anyway.
+%
+% Everything this reads is read from the frame, never from a global: the
+% wrapped procedure may itself call pkwet, which would overwrite them.
+% @internal
+/pqwetbandpass {
+    pqmyframe 8 get 3 rrand put
+    0 1 pqmyframe 8 get 0 get length 1 sub {
+        /pqwc exch def
+        pqmyframe 8 get /pqwr exch def
+        pqwr 0 get length 1 gt pqwc 0 gt and { pqwr 3 get srand } if
+        gsave
+            pqwr 0 get length 1 gt { pqwr 0 get pqwc get aload pop rectclip } if
+            pqwr 2 get pqmyframe 6 get get pqwc get aload pop setrgbcolor
+            pqmyframe 5 pqwr 1 get pqwc get put
+            pqmyframe 0 get pqmyframe 6 get get dup 0 get exch 1 get translate
+            { pqmyframe 1 get exec } stopped
+        {
+            grestore
+            pqdnow 1 sub pqdset
+            stop
+        } if
+        grestore
     } for
 } bind def
 
@@ -5487,12 +5677,111 @@
 %   pwul 0 get 5 sub abs 3 lt (x stays near /At) mustbe
 %%EndSelfTest
 %
+%%SelfTest: pkwet-rejects-malformed-bands
+%   % /Box and /Bands go together, instead of /At, with a procedural /Under.
+%   { { } << /Under { pop pop 0 0 0 } /Box [ 0 0 9 9 ] >> pkwet }
+%   /pkwet-box-needs-bands
+%   (/Box without /Bands) mustguard
+%
+%   { { } << /Under { pop pop 0 0 0 } /Bands [ 2 2 ] >> pkwet }
+%   /pkwet-bands-need-a-box
+%   (/Bands without /Box) mustguard
+%
+%   { { } << /Under { pop pop 0 0 0 } /Box [ 0 0 9 9 ] /Bands [ 2 2 ] /At [ 0 0 ] >> pkwet }
+%   /pkwet-at-and-box-are-exclusive
+%   (/At with /Box) mustguard
+%
+%   { { } << /Under [ 0 0 0 ] /Box [ 0 0 9 9 ] /Bands [ 2 2 ] >> pkwet }
+%   /pkwet-box-needs-an-under-procedure
+%   (/Box with a literal /Under) mustguard
+%
+%   { { } << /Under { pop pop 0 0 0 } /Box 5 /Bands [ 2 2 ] >> pkwet }
+%   /pkwet-box-must-be-x-y-w-h
+%   (a number as /Box) mustguard
+%
+%   { { } << /Under { pop pop 0 0 0 } /Box [ 0 0 9 ] /Bands [ 2 2 ] >> pkwet }
+%   /pkwet-box-must-be-x-y-w-h
+%   (a 3-element /Box) mustguard
+%
+%   { { } << /Under { pop pop 0 0 0 } /Box [ 0 0 0 9 ] /Bands [ 2 2 ] >> pkwet }
+%   /pkwet-box-must-be-x-y-w-h
+%   (a /Box with no width) mustguard
+%
+%   { { } << /Under { pop pop 0 0 0 } /Box { 0 0 9 9 } /Bands [ 2 2 ] >> pkwet }
+%   /pkwet-box-must-not-be-a-procedure
+%   (a procedure as /Box) mustguard
+%
+%   { { } << /Under { pop pop 0 0 0 } /Box [ 0 0 9 9 ] /Bands 4 >> pkwet }
+%   /pkwet-bands-must-be-cols-rows
+%   (a number as /Bands) mustguard
+%
+%   { { } << /Under { pop pop 0 0 0 } /Box [ 0 0 9 9 ] /Bands [ 2 ] >> pkwet }
+%   /pkwet-bands-must-be-cols-rows
+%   (a 1-element /Bands) mustguard
+%
+%   { { } << /Under { pop pop 0 0 0 } /Box [ 0 0 9 9 ] /Bands [ 2 1.5 ] >> pkwet }
+%   /pkwet-bands-must-be-cols-rows
+%   (a fractional /Bands) mustguard
+%
+%   { { } << /Under { pop pop 0 0 0 } /Box [ 0 0 9 9 ] /Bands { 2 2 } >> pkwet }
+%   /pkwet-bands-must-not-be-a-procedure
+%   (a procedure as /Bands) mustguard
+%
+%   { { } << /Under { pop pop 0 0 0 } /Box [ 0 0 9 9 ] /Bands [ 0 2 ] >> pkwet }
+%   /pkwet-bands-must-be-1-to-16
+%   (0 columns) mustguard
+%
+%   { { } << /Under { pop pop 0 0 0 } /Box [ 0 0 9 9 ] /Bands [ 2 17 ] >> pkwet }
+%   /pkwet-bands-must-be-1-to-16
+%   (17 rows) mustguard
+%
+%   % A banded call is asked once per cell, for the softening passes only,
+%   % and its answers are checked as an /At call's are.
+%   { { } << /Under { pop pop 0 0 2 } /Box [ 0 0 9 9 ] /Bands [ 1 2 ] >> pkwet }
+%   /pkwet-under-procedure-results-must-be-0-to-1
+%   (a result of 2 from a banded call) mustguard
+%
+%   pqdepth 0 eq (every rejection rolled the depth back) mustbe
+%
+%   % The pass budget counts every cell: (Layers - 1) * cells + 1 runs of
+%   % the mark. 5 * 12 + 1 = 61 is inside the 64 a chain of this kind may
+%   % multiply its mark by; 5 * 16 + 1 = 81 is not.
+%   userdict /pwbn 0 put
+%   { userdict /pwbn pwbn 1 add put }
+%   << /Layers 6 /Offset 0 /Under { pop pop 0 0 0 } /Box [ 0 0 9 9 ] /Bands [ 3 4 ] >> pkwet
+%   pwbn 61 eq (3 x 4 cells at 6 layers run the mark 61 times) mustbe
+%
+%   { { } << /Layers 6 /Under { pop pop 0 0 0 } /Box [ 0 0 9 9 ] /Bands [ 4 4 ] >> pkwet }
+%   /pkwet-too-many-passes
+%   (4 x 4 cells at 6 layers is 81 runs) mustguard
+%
+%   % One cell is no banding: the mark runs once per pass.
+%   userdict /pwbn 0 put
+%   { userdict /pwbn pwbn 1 add put }
+%   << /Layers 4 /Under { pop pop 0 0 0 } /Box [ 0 0 9 9 ] /Bands [ 1 1 ] >> pkwet
+%   pwbn 4 eq (one cell runs the mark once per pass) mustbe
+%
+%   % The procedure is asked once per cell, at its centre in the padded
+%   % grid: /Box grown by /Offset (here 4) on every side, 2 x 1 cells.
+%   userdict /pwul [ ] put
+%   { } << /Layers 2 /Offset 4 /Box [ 10 20 8 6 ] /Bands [ 2 1 ]
+%          /Under { /pwy exch def /pwx exch def
+%                   userdict /pwul [ pwul aload pop pwx pwy ] put
+%                   0.5 0.5 0.5 } >> pkwet
+%   pwul length 4 eq (asked once per cell, not per pass) mustbe
+%   pwul 0 get 10 sub abs 0.01 lt (the first cell's centre x) mustbe
+%   pwul 1 get 23 sub abs 0.01 lt (and y) mustbe
+%   pwul 2 get 18 sub abs 0.01 lt (the second cell's centre x) mustbe
+%%EndSelfTest
+%
 % @kind: Procedure
-% @summary: Runs a mark-drawing procedure several times, each pass displaced further and mixed further toward a declared backdrop color, so the mark's core stays solid while its edge grades away into the layer beneath. The wet-on-wet softener for skies, clouds, mist and distant forms; works with every stroke preset in this file. The procedure must build its own path: a path constructed before the call cannot be displaced, because PostScript paths are in device space once built, so every pass would land on the same geometry and nothing would soften. Pair it with a broken or particulate brush (pkspray, pkdry, pktrowel at low Coverage) -- a solid brush keeps its own hard silhouette and only gains a halo. With /Direction the passes line up along one axis instead: a reflection pulled down, a mountain foot lifted into mist, a sky swept across. /Under may be a procedure `x y -> r g b` (with /At) for a backdrop that varies across the mark, such as a graded sky. Uses no alpha, so unlike pkwash it needs no Ghostscript fallback.
+% @summary: Runs a mark-drawing procedure several times, each pass displaced further and mixed further toward a declared backdrop color, so the mark's core stays solid while its edge grades away into the layer beneath. The wet-on-wet softener for skies, clouds, mist and distant forms; works with every stroke preset in this file. The procedure must build its own path: a path constructed before the call cannot be displaced, because PostScript paths are in device space once built, so every pass would land on the same geometry and nothing would soften. Pair it with a broken or particulate brush (pkspray, pkdry, pktrowel at low Coverage) -- a solid brush keeps its own hard silhouette and only gains a halo. With /Direction the passes line up along one axis instead: a reflection pulled down, a mountain foot lifted into mist, a sky swept across. /Under may be a procedure `x y -> r g b` (with /At, or with /Box and /Bands for a mark that is tall against the backdrop) for a backdrop that varies across the mark, such as a graded sky. Uses no alpha, so unlike pkwash it needs no Ghostscript fallback.
 % @example: { newpath 40 120 moveto 260 150 lineto << /Width 40 >> pkribbon } << /Soft 0.7 /Under [0.62 0.72 0.86] >> pkwet
 % @param: /Soft [0..1] master softness; supplies the defaults for Layers and Offset. 0 is a single undisplaced pass that marks the page exactly as calling the proc directly would, random stream included; the procedure still runs inside a gsave, so a path or graphics state it leaves behind does not survive the call (default 0.6)
-% @param: /Under [rgb array] the color already on the canvas that this mark settles into; the outermost pass is nearly this color. May also be a procedure `x y -> r g b` (three numbers in 0..1, user space), the backdrop as a function: it is asked once per softening pass, at /At plus that pass's displacement, so the rim goes where the backdrop changes across the mark. It must be a pure function: no painting, no pkwet call, no reliance on the operand stack. A tall mark is better split into several calls, each with its own /At (default [1 1 1])
+% @param: /Under [rgb array] the color already on the canvas that this mark settles into; the outermost pass is nearly this color. May also be a procedure `x y -> r g b` (three numbers in 0..1, user space), the backdrop as a function: it is asked once per softening pass, at /At plus that pass's displacement, so the rim goes where the backdrop changes across the mark. It must be a pure function: no painting, no pkwet call, no reliance on the operand stack. A mark taller than the backdrop's change is better asked per band: see /Box and /Bands (default [1 1 1])
 % @param: /At [points] With a procedural /Under only (required there): [x y] where the mark sits, in the user space pkwet is called in, the point each pass's displacement is added to before the procedure is asked for the backdrop (default absent)
+% @param: /Box [array of points] With a procedural /Under and /Bands (instead of /At): [x y w h], where the mark sits, in the user space pkwet is called in. The /Under procedure is then asked once per cell of a grid over the box grown by /Offset on every side, at the cell's centre, and each softening pass is run once per cell, clipped to it and mixed toward that cell's answer, so the backdrop varies across a tall mark and not only from pass to pass. The grid's outer cells run on outward, so a displaced rim is not cut off (default absent)
+% @param: /Bands [array of count] With /Box (required with it): [columns rows] of the grid, each a whole number 1 to 16. A cell wants to be no taller than about half /Offset, and a short mark is as well served by /At. The wrapped procedure runs (Layers - 1) x columns x rows + 1 times, which a nest of such calls may multiply by at most 64 (a 6-layer call can have 12 cells, a 4-layer one 21); the random stream is replayed per cell, so every cell lays the same marks and the stream ends where one unbanded run leaves it (default absent)
 % @param: /Pickup [0..1] how far the outermost pass mixes toward Under; lower keeps the mark's own color out to its edge (default 0.85)
 % @param: /Layers [count] Passes to draw, outermost first; must be a whole number, hard cap 1..6, or 1..16 with /Direction (default 1 + round(Soft*5); with /Direction, raised to keep same-side passes at most 2pt apart, up to 16)
 % @param: /Offset [points] How far in points the outermost pass is displaced from the true path; inert at Layers 1, which has only a core pass. Formerly /Spread, still accepted as a deprecated alias; /Offset wins if both are given (default Soft*14)
@@ -5546,17 +5835,52 @@
     /pqUnder load xcheck {
         /pqUnder load type dup /arraytype eq exch /packedarraytype eq or not
             { pkwet-under-must-be-a-3-element-array } if
-        pqopts /At known not { pkwet-under-procedure-needs-at } if
-        /pqAt pqopts /At get def
-        /pqAt load type dup /arraytype eq exch /packedarraytype eq or not
-            { pkwet-at-must-be-an-x-y-pair } if
-        /pqAt load xcheck { pkwet-at-must-not-be-a-procedure } if
-        pqAt length 2 ne { pkwet-at-must-be-an-x-y-pair } if
-        0 1 1 {
-            pqAt exch get dup type dup /integertype ne exch /realtype ne and
+        % Where the mark sits: /At, one point asked per pass (issue #179), or
+        % /Box with /Bands, a grid of cells asked once each (issue #359).
+        pqopts /At known pqopts /Box known and { pkwet-at-and-box-are-exclusive } if
+        pqopts /Box known pqopts /Bands known xor {
+            pqopts /Box known { pkwet-box-needs-bands } { pkwet-bands-need-a-box } ifelse
+        } if
+        pqopts /Box known {
+            /pqBox pqopts /Box get def
+            /pqBox load type dup /arraytype eq exch /packedarraytype eq or not
+                { pkwet-box-must-be-x-y-w-h } if
+            /pqBox load xcheck { pkwet-box-must-not-be-a-procedure } if
+            pqBox length 4 ne { pkwet-box-must-be-x-y-w-h } if
+            0 1 3 {
+                pqBox exch get dup type dup /integertype ne exch /realtype ne and
+                    { pkwet-box-must-be-x-y-w-h } if
+                pop
+            } for
+            pqBox 2 get 0 le pqBox 3 get 0 le or { pkwet-box-must-be-x-y-w-h } if
+            /pqBands pqopts /Bands get def
+            /pqBands load type dup /arraytype eq exch /packedarraytype eq or not
+                { pkwet-bands-must-be-cols-rows } if
+            /pqBands load xcheck { pkwet-bands-must-not-be-a-procedure } if
+            pqBands length 2 ne { pkwet-bands-must-be-cols-rows } if
+            0 1 1 {
+                pqBands exch get dup type dup /integertype ne exch /realtype ne and
+                    { pkwet-bands-must-be-cols-rows } if
+                dup dup truncate ne { pkwet-bands-must-be-cols-rows } if
+                dup 1 lt exch 16 gt or { pkwet-bands-must-be-1-to-16 } if
+            } for
+            /pqCols pqBands 0 get cvi def
+            /pqRows pqBands 1 get cvi def
+            /pqbanded true def
+        } {
+            /pqbanded false def
+            pqopts /At known not { pkwet-under-procedure-needs-at } if
+            /pqAt pqopts /At get def
+            /pqAt load type dup /arraytype eq exch /packedarraytype eq or not
                 { pkwet-at-must-be-an-x-y-pair } if
-            pop
-        } for
+            /pqAt load xcheck { pkwet-at-must-not-be-a-procedure } if
+            pqAt length 2 ne { pkwet-at-must-be-an-x-y-pair } if
+            0 1 1 {
+                pqAt exch get dup type dup /integertype ne exch /realtype ne and
+                    { pkwet-at-must-be-an-x-y-pair } if
+                pop
+            } for
+        } ifelse
         /pqUnderProc /pqUnder load def
         /pqUnder [ 1 1 1 ] def
         /pqunderp true def
@@ -5569,6 +5893,8 @@
             dup 0 lt exch 1 gt or { pkwet-under-components-must-be-0-to-1 } if
         } for
         pqopts /At known { pkwet-at-needs-an-under-procedure } if
+        pqopts /Box known pqopts /Bands known or { pkwet-box-needs-an-under-procedure } if
+        /pqbanded false def
         /pqunderp false def
     } ifelse
     % /Stretch and /OneSided only mean anything along a direction; given
@@ -5638,17 +5964,22 @@
         { userdict /pqframes get pqdnow 1 sub get dup 2 get exch 3 get }
         { 1 false }
     ifelse
-    pqdir or /pqchaindir exch def
-    pqLayers mul /pqchain exch def
+    pqdir or pqbanded or /pqchaindir exch def
+    % A banded call (issue #359) runs the mark once per cell in every
+    % softening pass, so that is what it multiplies the chain by.
+    pqbanded { pqLayers 1 sub pqCols pqRows mul mul 1 add } { pqLayers } ifelse
+    mul /pqchain exch def
     pqchaindir pqchain 64 gt and
         { pqdnow 1 sub pqdset pkwet-too-many-passes } if
-    % Eight slots: 0 the plan, 1 the procedure, 2-3 the pass budget's
+    % Nine slots: 0 the plan, 1 the procedure, 2-3 the pass budget's
     % running product and flag, 4-6 the pass mix that loaded colours
     % read (issue #183 slice L3, below), and 7 the per-pass backdrop
     % colours of a procedural /Under (issue #179; null for a literal one,
-    % which is what keeps puwet's old path). The later slots go at the end
+    % which is what keeps puwet's old path), and 8 a banded call's record
+    % (issue #359: the cells' clips, backdrops, pass colours and the saved
+    % random stream; null for any other call). The later slots go at the end
     % so 0-3 keep the meaning the budget and the nesting machinery rely on.
-    userdict /pqframes get pqdnow 8 array put
+    userdict /pqframes get pqdnow 9 array put
     pqmyframe 1 /pqproc load put
     pqmyframe 2 pqchain put
     pqmyframe 3 pqchaindir put
@@ -5723,7 +6054,8 @@
     % after the plan's displacements are fixed and before any pass runs,
     % so the backdrop procedure sees the final geometry and the wrapped
     % procedure has not run yet.
-    pqunderp { pqwetunder } if
+    % (a single-layer call has only the core, which asks nothing, banded or not)
+    pqunderp { pqbanded { pqLayers 1 gt { pqwetbands } if } { pqwetunder } ifelse } if
     % Outermost pass first, so each subsequent (less displaced, less
     % mixed) pass is laid over it and the caller's own color lands last,
     % exactly on the path.
@@ -5752,7 +6084,10 @@
     pqmyframe 5 pqUnder aload pop 3 array astore put
     % A procedural /Under's per-pass colours, for puwet; pqwetunder left
     % them in pqunders. Slot 5 is then the unread white placeholder.
-    pqunderp { pqmyframe 7 pqunders put } if
+    pqunderp pqbanded not and { pqmyframe 7 pqunders put } if
+    % A banded call's cells, clips and colours (issue #359); slot 8 stays null
+    % for any other call, and the pass loop tests it.
+    pqbanded pqLayers 1 gt and { pqmyframe 8 pqbrec put } if
     % Each pass runs under `stopped`, which is what makes this wrapper
     % safe to abandon. Three separate review findings were all the same
     % missing unwind-protect: a caught error leaked one graphics-state
@@ -5795,6 +6130,11 @@
         % its colour is set.
         dup pqmyframe 6 3 -1 roll put
         pqmyframe 0 get exch get
+        % A banded softening pass (issue #359) goes cell by cell; the core,
+        % and every pass of any other call, takes the path that was here.
+        dup length 2 gt pqmyframe 8 get null ne and
+        { pop pqwetbandpass }
+        {
         gsave
             dup length 2 gt
                 { aload pop setrgbcolor translate }
@@ -5807,6 +6147,7 @@
             stop
         } if
         grestore
+        } ifelse
     } for
     pqdnow 1 sub pqdset
     % No trailing setrgbcolor: every pass ran inside its own

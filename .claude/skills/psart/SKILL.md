@@ -237,14 +237,17 @@ Which tool to pick:
   so 270 is down the page. `examples/paintkit_wet_pull_demo.ps` shows
   all three.
 
-  `/Under` can be a procedure `x y -> r g b` (with `/At [x y]`, required)
+  `/Under` can be a procedure `x y -> r g b` (with `/At [x y]`, required unless `/Box` is given)
   when the backdrop changes across the mark, such as a cloud over a graded
   sky: each pass is mixed toward the backdrop at `/At` plus its own
   displacement, so the pale/dark rim a single colour leaves goes away.
   It must be a pure function (no painting, no `pkwet`, no stack
   reliance) returning three numbers in 0..1; the answer is per pass, not
-  per pixel, so split a tall mark into several calls.
-  `examples/paintkit_wet_under_demo.ps` is the side-by-side.
+  per pixel; for a tall mark give `/Box [x y w h] /Bands [cols rows]` instead
+  of `/At` and it is asked per band (a cell no taller than about half
+  `/Offset`; the mark runs (Layers - 1) x cells + 1 times, at most 64).
+  `examples/paintkit_wet_under_demo.ps` is the side-by-side, and
+  `examples/paintkit_wet_bands_demo.ps` the tall-mark one.
 
 - **`pkcanvas` / `/Touch`** — a shared canvas under light strokes. Every
   other "less paint" key breaks one stroke up on its own; `/Touch` is the one
