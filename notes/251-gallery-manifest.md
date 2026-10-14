@@ -74,3 +74,17 @@ and `docs/dev/README.md`: new pieces add a manifest entry; nobody edits
   `check_site_links.py` verifies, so a move fails until the manifest's
   `libraries[*].guide` paths are updated.
 - Specimens have no per-piece pages (the plan's per-piece pages are for art).
+
+## After the merge with main (#430, #434, #436, #445, #440)
+
+- `playground.html?example=` came from #430 (Learn's "Try it"); the gallery's
+  link uses it as is (my own handler was dropped). `check_site_links.py` now
+  verifies each `?example=` target exists in `_site/examples/`, which checks
+  the manifest's `playground` flags end to end.
+- `build_site.sh` keeps both sets of steps: the manifest-driven gallery and
+  renders, and the Learn examples (`site/learn/`, `site_examples.py`).
+- Manifest text follows the art changes: Alpine Lake's shadow planes are
+  `pktrowelplane` and only the snow is `pktrowel` (this fixes #435), plus the
+  far range's banks of haze; Evening Stream's cloud undersides are lit by
+  `pkscumblein`'s `/Light`.
+- New specimen: `mathkit_structures` (#440), under Dry media.
