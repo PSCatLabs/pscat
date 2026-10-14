@@ -23,13 +23,17 @@ Epic #209's last ticket. Builds on #211–#214; read
   `typewriter_outlines` and `released` in its library registry (guide:
   `docs/guides/fonts.md`). The READMEs' tables are regenerated.
 - `docs/typewriter/tools/blind_compare.py` writes:
-  - `docs/typewriter/blind_grid.png`: six crops, A to F, in a fixed shuffled
-    order. Four are the board's T2, T4, T9 and T15 as committed, and two come
-    from the render. Each render crop takes the pixel size and the scale of one
-    scan (T4's crop is 600 dpi, as make_board.py enlarged it 2x; T9's is 144
-    dpi), is greyscale, and goes through JPEG at quality 85. The key is printed,
-    not committed: it is in the PR, so the maintainer can judge first.
-  - `docs/typewriter/memo_vs_real.png`: the page beside T1 at the same scale.
+  - `docs/typewriter/blind_grid.png`: six strips, A to F, in a fixed shuffled
+    order: four from real scans (T2, T9, T10 and T15; three documents) and two
+    from the render. Every strip is one typed line at one scale (240 dpi, the
+    Szilard scan's own) and one size (720 x 64 px), greyscale; the render's go
+    through JPEG at quality 85. So no tile can be told apart by size or type
+    scale. The real crops are resampled from their committed scale: T2 by 0.8,
+    T9 by 1.67 (the one real enlargement), T10 by 0.67, T15 by 1.14. T4, at
+    600 dpi, is too small for a strip at 240. The key is printed, not
+    committed: it is in the PR, so the maintainer can judge first.
+  - `docs/typewriter/memo_vs_real.png`: the page beside T1 at T1's scale
+    (75 dpi).
     T1 (a 1914 letter) is the board's only full typed page; it is not a
     released memo, but it is the closest real page in the repo.
 - Docs: a paragraph in `docs/guides/fonts.md` (the released-document section),
@@ -46,8 +50,13 @@ Epic #209's last ticket. Builds on #211–#214; read
   the guide.
 - **Elite, not pica.** Three of the four reference crops are elite; a pica crop
   would stand out by pitch alone.
-- **Crops of body text only.** The header carries invented names; the crops
-  also keep away from the redaction bars, since none of the real tiles has one.
+- **One scale, one size.** A first board gave each render crop the pixel size
+  and scale of one scan (T4's, T9's); that paired each render tile with exactly
+  one real tile and gave the answer away. Every strip now shares a size and a
+  scale.
+- **Crops of body text only.** The header carries invented names; the strips
+  also keep away from the redaction bars, the punch holes and the handwriting,
+  since no real strip has any of them.
 - **The judge is the maintainer.** The agent who built the piece has seen every
   reference, so its reading of the grid is not blind; the PR reports it as an
   assessment only.
@@ -55,18 +64,11 @@ Epic #209's last ticket. Builds on #211–#214; read
   (`-dNOSAFER`, `-g`); the page matches pscat's except for the paper grain (as
   #214 noted) and gs's thinner antialiased strokes at low resolution.
 
-## The comparison, as the author sees it (not blind)
+## The comparison
 
-At scan resolution the type itself holds up: the weave in the ink, the feathered
-edges, uneven strike weight and the occasional clogged counter sit well beside
-T2 and T4. What gives the render away is the page around the type:
-
-- the copied paper is flat white and spotless between the specks, where every
-  real tile (even the bitonal T15) has grain, haze or scanner noise (#466);
-- a punch hole and the handwriting (a clean, print-like hand) appear in the
-  larger crop, and no real tile has either;
-- one strike in the piece lands about 2.5pt high, more than the board's tails
-  (#467).
+The maintainer judges the grid (the issue's success criterion). The author's
+own reading, which is not blind (the author has seen every reference), is in
+the PR under the key, so that nothing in the repo gives the answer away first.
 
 ## Not done (filed, low priority)
 

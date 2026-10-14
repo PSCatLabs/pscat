@@ -207,7 +207,7 @@ the type `/Copies` equal to `/Generation`, which at 1 already fills most
 counters; set a smaller `/Copies` (0.35 there) in the `tw-type` dict to keep a
 first copy's type open while the page still goes through the copier.
 `docs/typewriter/tools/blind_compare.py` sets crops of it, unlabelled and
-shuffled, among four reference scans (`docs/typewriter/blind_grid.png`), and the
+shuffled, among strips from three reference scans (`docs/typewriter/blind_grid.png`), and the
 whole page beside T1 (`docs/typewriter/memo_vs_real.png`).
 
 ## The font catalog
