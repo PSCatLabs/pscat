@@ -72,10 +72,39 @@ the strokeglyphs missing-glyph selftest uses ⊕ and ℵ where it used ² and
 ∮; mathkit's unsupported list uses `\oplus`, `\aleph` and `\lceil` where
 it used `\iint`, `\star`, ∮ and `\langle`.
 
+## Behaviour change to know about
+
+A bare letter run in mathkit that is now a command name raises
+`mk-bare-word-needs-a-backslash:<word>` (three or more letters, as
+before): `(a star b)`, `sim`, `ast`, `perp`, `iota`, `circ`. Before, the
+letters drew as the letters. `\\text{a star}` is not affected (probed:
+it measures normally).
+
+## Follow-ups filed
+
+- #364: ASCII `*` and `^*` in mathkit (`\\psi^{\\ast}` works now).
+- #365: UTF-8 delimiters after `\\left`/`\\right`/`\\big`; today the error
+  name carries a raw lead byte.
+- #366: subscript digits and variant Greek.
+
 ## Evidence
 
-See the PR description: `scripts/identity_check.sh --loader
-lib/strokeglyphs.ps` and `--loader lib/mathkit.ps` against the merge
-base, plus `gallery/chalkboard_lecture.ps` (PR #353's branch) and
-`gallery/crayon_drawing.ps` (PR #336's branch) rendered with main's
-libraries and with these, byte for byte.
+All with a release binary built from this branch (no `src/` change).
+
+- `scripts/identity_check.sh BASE --loader lib/strokeglyphs.ps --loader
+  lib/mathkit.ps --control <driver drawing (x∮ℏ²) under a stopped>`
+  against a detached merge-base worktree: 12 of 12 pages identical
+  (drychalk, mathkit and strokeglyphs specimens, both selftest drivers);
+  the control differs, as it must; the new specimen is `new`, not
+  compared.
+- The two open gallery pieces, rendered in a worktree of each PR branch
+  with origin/main's `lib/strokeglyphs.ps` and `lib/mathkit.ps` swapped
+  in, then with this branch's, are byte-identical, at 72 and 144 dpi:
+  `gallery/chalkboard_lecture.ps` from #353's branch
+  (72 dpi sha1 1cb6eaea5adf...) and `gallery/crayon_drawing.ps` from #336's
+  (e7a33ce8ab6f...). A control driver using ∮ and ² renders differently in
+  both worktrees under the two arms, so the swap really happened. (An
+  earlier attempt had a shell-quoting slip that swapped nothing and
+  printed IDENTICAL; the control is what caught the need to check.)
+- `PSCAT_PROFILE=ci ./scripts/selftest.sh`, `cargo test --profile ci`
+  (gs installed, no gs test skipped), clippy and fmt clean.
