@@ -24,7 +24,7 @@ here is *written*, rendered, looked at, and refined.
    `gs -dBATCH -dNOPAUSE -sDEVICE=png16m -g<W>x<H> -o gs.png piece.ps`
 
 This file is a hand-written tour, not the source of truth — it can and
-does drift (see CAPABILITIES.md). `pscat --capabilities` prints the
+does drift (see docs/dev/CAPABILITIES.md). `pscat --capabilities` prints the
 real, structured inventory of every font, Type 3 face, palette,
 template, and major procedure this build actually has installed;
 prefer it over guessing a name from prose below.
@@ -294,7 +294,7 @@ Which tool to pick:
   whole region first, then a half-light (`/Reach 0.4`) and a core
   (`/Reach 0.15`, smaller circles) in loads close to the body's value; the
   shadow side is `/Light` turned round. Specimen:
-  `docs/paintkit_massing_demo.png`.
+  `docs/dev/design/paintkit_massing_demo.png`.
 
 - **Brushed edges** — `pkbrushedge` (and the motion under it, `pkfeather`).
   A filled mass (a meadow, a bank, a pond) has a ruled vector edge; fill it,
@@ -442,7 +442,7 @@ columns.
 ## Dry media: crayon (`lib/drycrayon.ps`)
 
 Chalk, crayon and charcoal sit on `lib/drykit.ps` (design:
-`docs/DRYMEDIA.md`): a stick catches only on the surface's tooth, so
+`docs/dev/design/DRYMEDIA.md`): a stick catches only on the surface's tooth, so
 light pressure breaks into streaks along the stroke. Crayon is a medium
 file over it. Load artkit, paintkit, drykit, then drycrayon:
 

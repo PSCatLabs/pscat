@@ -10,10 +10,10 @@ ribbon ink (`notes/212-ribbon-ink.md`; "As built" at the end of section 6).
 
 Read these first:
 
-- `docs/typewriter/REFERENCES.md`, the reference board. Observations T1–T15
+- `docs/dev/design/typewriter/REFERENCES.md`, the reference board. Observations T1–T15
   and the measurements table are cited below.
-- `docs/typewriter/prototypes/tw_proto.ps`, a working prototype of sections 4–6
-  (not library code). `docs/typewriter/prototype_vs_real.png` shows what it
+- `docs/dev/design/typewriter/prototypes/tw_proto.ps`, a working prototype of sections 4–6
+  (not library code). `docs/dev/design/typewriter/prototype_vs_real.png` shows what it
   draws next to a real scan.
 
 The user's guidance for this epic: aim for quality and a library an AI artist
@@ -50,7 +50,7 @@ PostScript path data, which is committed as a generated file with an OFL
 header (`lib/typewriter-outlines.ps`, say). `/Typewriter` draws those paths
 itself. It never calls `findfont` on a base face.
 
-`docs/typewriter/base_face_compare.png` sets each candidate at a real scan's
+`docs/dev/design/typewriter/base_face_compare.png` sets each candidate at a real scan's
 pitch, next to the scan:
 
 | Candidate | Verdict |
@@ -73,7 +73,7 @@ The generated file is 90 KB. It is derived font software, so it carries the OFL
 notice and the Courier Prime copyright. #211 also adds `CourierPrime-Regular.ttf`
 and `OFL.txt` to `fonts/catalog/CourierPrime/`: that gives the generator a
 reproducible input, and gives `/CourierPrime findfont` to anyone who wants the
-clean face. `docs/typewriter/prototypes/gen_glyphs.py` is the prototype generator.
+clean face. `docs/dev/design/typewriter/prototypes/gen_glyphs.py` is the prototype generator.
 
 ## 3. Pitch and size
 

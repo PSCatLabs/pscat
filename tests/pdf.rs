@@ -375,7 +375,7 @@ fn no_dsc_comments_still_gets_producer_but_no_title() {
 /// Issue #47's alpha/blend export, through the same
 /// rasterize-with-gs-and-compare gate every other PDF feature here
 /// goes through. This test is also the *answer* to the open question
-/// issue #46's spike left for #47 (`docs/WATERCOLOR.md`, "Public
+/// issue #46's spike left for #47 (`docs/dev/design/WATERCOLOR.md`, "Public
 /// contract"): whether PDF-path verification can substitute for the
 /// `ghostscript_accepts_*` pattern for alpha-bearing content, given
 /// gs has no PostScript-callable alpha operator at all. It can, and

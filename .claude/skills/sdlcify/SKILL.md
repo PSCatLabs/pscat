@@ -315,7 +315,7 @@ One table: item, before, after (or "unchanged"). Explicitly call out:
   a non-empty repo description.** The whole reason for the managed-block
   markers and the "only generate if absent" rule is that this skill will
   run against repos with real, valuable existing content (this repo's
-  `AGENTS.md`/`HANDOFF.md`/`ci.yml` predate sdlcify and are good) — never
+  `AGENTS.md`/`docs/dev/HANDOFF.md`/`ci.yml` predate sdlcify and are good) — never
   treat "sdlcify doesn't recognize this content" as license to replace
   it.
 - **`SDLC.md` is the one file that's fully owned and safe to

@@ -150,7 +150,7 @@ Commons, [File:Abraham Lincoln O-91 by Berger, 1864.png](https://commons.wikimed
 It is in the **public domain** (a US work published before 1929, and
 marked public domain by Commons and the LoC). The Commons/LoC description
 names it the model for the five-dollar bill's portrait. **Study after
-Berger, 1864** reads its tones from this file; `docs/drymedia/lincoln_compare.png`
+Berger, 1864** reads its tones from this file; `docs/dev/design/drymedia/lincoln_compare.png`
 sets the two side by side over real student studies from the #233
 reference board.
 

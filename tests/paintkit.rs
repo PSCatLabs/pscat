@@ -10170,7 +10170,7 @@ fn ghostscript_accepts_the_canvas_demo() {
 //
 // `/Colors`, `/ColorMix` and `/Light` on the presets that read a head
 // position per striation (`pmnc`), per lane (`ptnc`) or, from slice L4
-// (#224), per bristle (`pfub`). The design is docs/PAINT_LOADING.md; the
+// (#224), per bristle (`pfub`). The design is docs/dev/design/PAINT_LOADING.md; the
 // numbers below are its section 6 tests 1-6. `LOAD_PRESETS` lists the
 // presets the shared tests run on.
 // Every render goes left to right along y = 100 unless a test says
@@ -11184,7 +11184,7 @@ fn touch_box_contains_the_whole_mark() {
 //
 // `pkwet` publishes each pass's mix (frame slots 4-6) and `puwet` applies
 // it to a loaded colour, so a two-colour stroke inside a pull grades
-// toward `/Under` like an inherited-colour one. docs/PAINT_LOADING.md
+// toward `/Under` like an inherited-colour one. docs/dev/design/PAINT_LOADING.md
 // section 3.4; tests 9 and 10 of section 6.
 
 /// `body` (a mark that builds its own path) wrapped as `{ body } << wet >>
@@ -11621,7 +11621,7 @@ fn every_touch_adopter_advertises_touch_with_a_unit() {
 // `pkdab` takes `/Colors` (one colour per dab, at the position its existing
 // outline-phase draw gives it on the load), and `pkdab` and `pkoil` take
 // `/HighlightColor` and `/ShadowColor` in place of white and black. The
-// design is docs/PAINT_LOADING.md; the numbers below are its section 6 tests
+// design is docs/dev/design/PAINT_LOADING.md; the numbers below are its section 6 tests
 // 7 and 8.
 
 /// Scenarios that use none of the new keys, pinned against hashes taken from

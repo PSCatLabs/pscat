@@ -69,7 +69,7 @@ of general pitfalls.
   remove` first, then the branch delete, then `fetch --prune` to clear
   the now-dead remote-tracking ref.
 - **A Codex review at step 8 legitimately takes several minutes** — it
-  reads around the diff (NOTES.md, HANDOFF.md, prior commits) rather
+  reads around the diff (docs/archive/NOTES.md, docs/dev/HANDOFF.md, prior commits) rather
   than just pattern-matching the patch. Don't mistake a long-running
   `--wait` call for a hang. If the harness auto-backgrounds the Bash
   call itself (it may, past its own timeout), don't treat that as
@@ -574,15 +574,15 @@ What to redo after a rebase that pulled in changes (#303):
 | only `*.md`, `docs/`, `notes/`, `.claude/`, `.github/` | nothing (re-read SKILL.md) |
 | anything in `lib/`, `src/`, tests, `selftest/`, `examples/`, `gallery/`, `scripts/`, `build.rs`, `Cargo.*`, `site/` | (1) re-create the identity base from the new merge-base and remove the old one, (2) re-run `identity_check.sh`, (3) re-run the full gate, (4) re-render any committed specimen or still |
 
-**NOTES.md conflicts** should be rare since #273: new notes go in
+**docs/archive/NOTES.md conflicts** should be rare since #273: new notes go in
 `notes/<issue>-<slug>.md`, one file per issue, so two PRs never touch the
-same file. If you still conflict in `NOTES.md` (someone edited it, or an old
+same file. If you still conflict in `docs/archive/NOTES.md` (someone edited it, or an old
 PR predates #273), keep both sides; never drop either. Move your own new
-section out of `NOTES.md` into your `notes/` fragment rather than resolving
+section out of `docs/archive/NOTES.md` into your `notes/` fragment rather than resolving
 it in place.
 
 **Doc-only conflicts skip the re-review.** If every conflicted file in
-such a rebase or merge was plain documentation (`NOTES.md`, `HANDOFF.md`,
+such a rebase or merge was plain documentation (`docs/archive/NOTES.md`, `docs/dev/HANDOFF.md`,
 `README.md`, other `*.md`) and your resolution changed no other file
 (check, while still conflicted: `git diff --name-only --diff-filter=U`
 lists only `*.md` files), re-run the quality gate (5.5) but not

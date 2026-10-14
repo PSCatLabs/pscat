@@ -1,11 +1,11 @@
 """Compare the released-document look with the reference crops (issue #214).
 
-    python3 -I docs/typewriter/tools/release_compare.py [PSCAT] [OUT.png]
+    python3 -I docs/dev/design/typewriter/tools/release_compare.py [PSCAT] [OUT.png]
 
 Run from the repo root. It renders examples/released_specimen.ps at 300 dpi
 with pscat, cuts a crop of each sheet to the size of a reference crop in
 points, scales it to the reference's own resolution, and stacks the scan above
-it. The default output is docs/typewriter/release_vs_real.png.
+it. The default output is docs/dev/design/typewriter/release_vs_real.png.
 
 Panels (REFERENCES.md observation numbers):
   T14  stamps and a redaction bar, on a copy of a typed page (300 dpi)
@@ -26,7 +26,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TW = os.path.dirname(HERE)
-ROOT = os.path.abspath(os.path.join(TW, "..", ".."))
+ROOT = os.path.abspath(os.path.join(TW, "..", "..", "..", ".."))
 REFS = os.path.join(TW, "refs")
 
 DPI = 300

@@ -1,4 +1,4 @@
-//! drycharcoal (issue #241; design `docs/DRYMEDIA.md` 3.4): charcoal
+//! drycharcoal (issue #241; design `docs/dev/design/DRYMEDIA.md` 3.4): charcoal
 //! presets and techniques on drykit's `dkstroke`. Guards and "no draws
 //! from the caller's stream" are `%%SelfTest` blocks in
 //! `lib/drycharcoal.ps`; these tests check what the renders do.

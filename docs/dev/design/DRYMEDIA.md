@@ -10,12 +10,12 @@ and the gallery pieces are not built yet.
 
 Read these first:
 
-- `docs/drymedia/REFERENCES.md`, the reference board. Observations C1–C10
+- `docs/dev/design/drymedia/REFERENCES.md`, the reference board. Observations C1–C10
   (chalk), Y1–Y6 (crayon) and H1–H8 (charcoal) are cited by number below.
-- `docs/CANVAS_SURFACE.md`, the approved #182 design. This document builds on
+- `docs/dev/design/CANVAS_SURFACE.md`, the approved #182 design. This document builds on
   its surface and cites its sections (CS 3.1, CS 3.2, and so on) rather than
   restating them.
-- `docs/drymedia/prototypes/`, the prototypes behind the cost and look
+- `docs/dev/design/drymedia/prototypes/`, the prototypes behind the cost and look
   claims below. They are not library code.
 
 ## 1. What the references say
@@ -607,7 +607,7 @@ gallery tickets are unaffected. A cheaper vector form is open question Q7.
 
 ## 7. Prototypes
 
-All of these are in `docs/drymedia/prototypes/` and run from the repo root.
+All of these are in `docs/dev/design/drymedia/prototypes/` and run from the repo root.
 They read paintkit's internals and change nothing in it.
 
 - **`surface_cost.ps`** draws the board in section 6, in four modes: plain,

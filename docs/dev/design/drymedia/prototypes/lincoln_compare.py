@@ -1,22 +1,22 @@
-"""Build docs/drymedia/lincoln_compare.png for #242: the source photograph
+"""Build docs/dev/design/drymedia/lincoln_compare.png for #242: the source photograph
 beside the pscat render, over three real student charcoal studies from the
-#233 reference board (all public domain; see docs/drymedia/REFERENCES.md).
+#233 reference board (all public domain; see docs/dev/design/drymedia/REFERENCES.md).
 
-    python3 docs/drymedia/prototypes/lincoln_compare.py   # from the repo root
+    python3 docs/dev/design/drymedia/prototypes/lincoln_compare.py   # from the repo root
 """
 from PIL import Image, ImageDraw, ImageFont
 
 PHOTO = "gallery/references/lincoln_berger_1864.jpg"
 RENDER = "gallery/renders/lincoln_charcoal.png"
 STUDIES = [
-    ("docs/drymedia/refs/charcoal_student_portrait_1888.jpg",
+    ("docs/dev/design/drymedia/refs/charcoal_student_portrait_1888.jpg",
      "H3: Feilner, 3rd-year study, 1888"),
-    ("docs/drymedia/refs/charcoal_cast_study_1878.jpg",
+    ("docs/dev/design/drymedia/refs/charcoal_cast_study_1878.jpg",
      "Taklo (attr.), cast study, 1878"),
-    ("docs/drymedia/refs/charcoal_hatching_on_tone.jpg",
+    ("docs/dev/design/drymedia/refs/charcoal_hatching_on_tone.jpg",
      "H2: hatching on tone (1888, detail)"),
 ]
-OUT = "docs/drymedia/lincoln_compare.png"
+OUT = "docs/dev/design/drymedia/lincoln_compare.png"
 
 PAD, CAP = 16, 26
 TOP_H, LOW_H = 600, 330

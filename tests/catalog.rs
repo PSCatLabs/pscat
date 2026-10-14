@@ -148,7 +148,7 @@ fn dingbats_glyphs_paint() {
 
 // --- Unicode-mode faces (Korean/Japanese/Thai) ------------------------------
 //
-// Noto Sans KR/JP/Thai are CatalogEncoding::Unicode faces (FONTS.md's
+// Noto Sans KR/JP/Thai are CatalogEncoding::Unicode faces (docs/dev/FONTS.md's
 // "Unicode-mode catalog faces" addendum): `show` decodes the string as
 // UTF-8 and maps codepoints straight to glyphs via `cmap`, since Hangul
 // and kanji vastly exceed the 256-slot Encoding model everything else

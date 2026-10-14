@@ -94,7 +94,7 @@ Sources: TeX Gyre from CTAN (`fonts/tex-gyre`), URW faces from
 Hangul and kanji don't fit in the 256-slot Encoding model every other
 face here uses, so these three get a documented deviation instead:
 `show` decodes their strings as UTF-8 and maps codepoints straight to
-glyphs (see FONTS.md's "Unicode-mode catalog faces" addendum). Literal
+glyphs (see docs/dev/FONTS.md's "Unicode-mode catalog faces" addendum). Literal
 Korean/Japanese/Thai text in a `(...)` string just works — no custom
 Encoding array needed. Both are variable fonts pinned to their Regular
 weight (`wght` 400) at load time rather than the file's own default

@@ -1,15 +1,15 @@
-"""Build docs/drymedia/mottle_compare_313.png for #313: drykit's /drawing paper
+"""Build docs/dev/design/drymedia/mottle_compare_313.png for #313: drykit's /drawing paper
 before and after its /Mottle went from 6 to 1.5.
 
 Top row, the same fine pencil hatching and vine hatching drawn with
 dhhatch on (1) the old default (/Mottle 6), (2) the old workaround
 (/Relief 0.35) and (3) the new default, beside (4) a real charcoal
-hatching crop (H2, docs/drymedia/refs/charcoal_hatching_on_tone.jpg).
+hatching crop (H2, docs/dev/design/drymedia/refs/charcoal_hatching_on_tone.jpg).
 Bottom row, Lincoln's face (gallery/lincoln_charcoal.ps) as committed on
 main (/Relief 0.35, /Mottle 6) and now (the defaults).
 
     cargo build --release --bin pscat
-    python3 docs/drymedia/prototypes/mottle_compare_313.py [BEFORE_REF]   # from the repo root
+    python3 docs/dev/design/drymedia/prototypes/mottle_compare_313.py [BEFORE_REF]   # from the repo root
 
 BEFORE_REF is a git ref holding the old gallery still (default 2d605be, the
 commit before #313).
@@ -22,7 +22,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 BIN = "target/release/pscat"
 REF = sys.argv[1] if len(sys.argv) > 1 else "2d605be"
-OUT = "docs/drymedia/mottle_compare_313.png"
+OUT = "docs/dev/design/drymedia/mottle_compare_313.png"
 
 SWATCH = r"""%!PS
 (lib/artkit.ps) run (lib/paintkit.ps) run (lib/drykit.ps) run
@@ -61,7 +61,7 @@ before = Image.open(io.BytesIO(subprocess.run(
     ["git", "show", f"{REF}:gallery/renders/lincoln_charcoal.png"],
     check=True, capture_output=True).stdout)).convert("RGB")
 after = Image.open("gallery/renders/lincoln_charcoal.png").convert("RGB")
-ref = Image.open("docs/drymedia/refs/charcoal_hatching_on_tone.jpg").convert("RGB")
+ref = Image.open("docs/dev/design/drymedia/refs/charcoal_hatching_on_tone.jpg").convert("RGB")
 
 FACE = (300, 300, 700, 700)
 top = [

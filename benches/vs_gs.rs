@@ -8,7 +8,7 @@
 //!
 //! Run with `cargo bench --bench vs_gs`. Skips gs columns when gs
 //! isn't installed. Findings and the optimizations they justified are
-//! recorded in NOTES.md (Stage 11).
+//! recorded in docs/archive/NOTES.md (Stage 11).
 
 use std::process::Command;
 use std::time::Instant;

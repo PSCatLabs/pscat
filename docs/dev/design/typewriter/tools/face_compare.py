@@ -1,13 +1,13 @@
-"""Base-face comparison for docs/TYPEWRITER.md (issue #210).
+"""Base-face comparison for docs/dev/design/TYPEWRITER.md (issue #210).
 
-    python3 -I docs/typewriter/tools/face_compare.py CACHE_DIR FONT_DIR
+    python3 -I docs/dev/design/typewriter/tools/face_compare.py CACHE_DIR FONT_DIR
 
 CACHE_DIR is make_board.py's cache (duncan.png, szilard.png). FONT_DIR holds
 CourierPrime-Regular.ttf and CutiveMono-Regular.ttf from github.com/google/fonts
 (ofl/courierprime, ofl/cutivemono); Ghostscript's Nimbus Mono is read from
 GS_FONT (default: Homebrew's n022003l.pfb). Each face is set at the scan's own
 pitch, with the em scaled so the advance equals the pitch, in plain flat ink:
-this compares letterforms, not ink. Writes docs/typewriter/base_face_compare.png.
+this compares letterforms, not ink. Writes docs/dev/design/typewriter/base_face_compare.png.
 """
 import os
 import sys
@@ -16,7 +16,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TW = os.path.dirname(HERE)
-ROOT = os.path.abspath(os.path.join(TW, "..", ".."))
+ROOT = os.path.abspath(os.path.join(TW, "..", "..", "..", ".."))
 cache, fdir = sys.argv[1], sys.argv[2]
 GS_FONT = os.environ.get("GS_FONT", "/opt/homebrew/share/ghostscript/fonts/n022003l.pfb")
 FACES = [

@@ -1,9 +1,9 @@
 # Architecture
 
-The Stage 1 design writeup, per `INIT.md`. This documents the choices that
+The Stage 1 design writeup, per `docs/archive/INIT.md`. This documents the choices that
 are expensive to reverse; things that are cheap to change later are noted
 as deliberate deferrals rather than decisions. The Stage 6 font
-architecture has its own writeup in `FONTS.md`.
+architecture has its own writeup in `docs/dev/FONTS.md`.
 
 ## Object model (`src/object.rs`)
 
@@ -114,7 +114,7 @@ src/
   object.rs     Object / Value / Dict / Num
   interp.rs     the machine: three stacks, frames, name resolution
   gfx.rs        graphics state, device-space paths, tiny-skia painting
-  font.rs       font registry, FontState, glyph→path engine (see FONTS.md)
+  font.rs       font registry, FontState, glyph→path engine (see docs/dev/FONTS.md)
   encodings.rs  StandardEncoding/ISOLatin1Encoding tables, name→Unicode
   window.rs     winit event loop stepping the interpreter live
   ops/          operators, grouped like the PLRM operator summary
@@ -168,7 +168,7 @@ Graphics semantics worth knowing (`src/gfx.rs`):
 ## Known-hard things being deliberately deferred
 
 - **`save`/`restore`** — ~~deferred~~ landed in Stage 8 as an
-  object-granularity copy-on-write journal (design writeup: `VM.md`).
+  object-granularity copy-on-write journal (design writeup: `docs/dev/VM.md`).
   The feared reach into the object model amounted to one new `Value`
   variant (`Save`) and `Clone` on `Dict`; the `Rc<RefCell>` composite
   representation absorbed the rest unchanged.

@@ -2,8 +2,8 @@
 %%Title: drykit design prototype -- do opaque deposit levels survive layering across calls?
 %%BoundingBox: 0 0 400 200
 %%EndComments
-% Issue #233 prototype, NOT library code (docs/DRYMEDIA.md 3.3). Run from
-% the repo root:  pscat --dpi 144 --page 400x200 --png out.png docs/drymedia/prototypes/layering.ps
+% Issue #233 prototype, NOT library code (docs/dev/design/DRYMEDIA.md 3.3). Run from
+% the repo root:  pscat --dpi 144 --page 400x200 --png out.png docs/dev/design/drymedia/prototypes/layering.ps
 %
 % Two hatch layers, dark charcoal on light paper, at 45 and -45 degrees,
 % each line drawn with two opaque deposit levels (a dim, wider level lerped
@@ -17,7 +17,7 @@
 
 (lib/artkit.ps) run
 (lib/paintkit.ps) run
-(docs/drymedia/prototypes/dqcatch.ps) run
+(docs/dev/design/drymedia/prototypes/dqcatch.ps) run
 
 << /Seed 3 /Weave 0.6 >> pkcanvas
 /paper [0.95 0.94 0.90] def

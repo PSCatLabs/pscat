@@ -56,7 +56,7 @@ pub fn install(dict: &mut Dict) {
     op(dict, "currentgray", currentgray);
     op(dict, "currentlinewidth", currentlinewidth);
     // pscat extensions (issue #47) -- not PLRM operators; see their
-    // definitions below and docs/WATERCOLOR.md.
+    // definitions below and docs/dev/design/WATERCOLOR.md.
     op(dict, "setalpha", setalpha);
     op(dict, "currentalpha", currentalpha);
     op(dict, "setblendmode", setblendmode);
@@ -381,7 +381,7 @@ fn setlinewidth(it: &mut Interp) -> Result<(), PsError> {
 /// `num setalpha -` -- fill/stroke opacity, 0 (invisible) to 1
 /// (opaque). **A pscat extension, not a PLRM operator**: real
 /// Ghostscript exposes no PostScript-callable alpha operator at all
-/// (tested in issue #46's spike, `docs/WATERCOLOR.md`), so a program
+/// (tested in issue #46's spike, `docs/dev/design/WATERCOLOR.md`), so a program
 /// that calls this will not render the same way under plain `gs
 /// file.ps`. `lib/paintkit.ps`'s watercolor section probes for it with
 /// `systemdict /setalpha known` and falls back to flattening each wash

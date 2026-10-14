@@ -13,8 +13,8 @@
 % every mark here is verified against real Ghostscript (see
 % WATERCOLOR.md's portability section).
 %
-%   pscat --page 620x620 docs/watercolor_prototypes/approach_a_pure_ps.ps \
-%       --png docs/watercolor_prototypes/approach_a_pure_ps.png
+%   pscat --page 620x620 docs/dev/design/watercolor_prototypes/approach_a_pure_ps.ps \
+%       --png docs/dev/design/watercolor_prototypes/approach_a_pure_ps.png
 %
 % Ghostscript check (plain PS, no pscat-specific operators used;
 % -dNOSAFER is needed only because this program `run`s two sibling
@@ -23,11 +23,11 @@
 % PostScript program, not something specific to this file):
 %   gs -dNOPAUSE -dBATCH -dNOSAFER -sDEVICE=png16m \
 %       -sOutputFile=/tmp/gs_check.png \
-%       docs/watercolor_prototypes/approach_a_pure_ps.ps
+%       docs/dev/design/watercolor_prototypes/approach_a_pure_ps.ps
 
 (lib/artkit.ps) run
 (lib/paintkit.ps) run
-(docs/watercolor_prototypes/common_gesture.ps) run
+(docs/dev/design/watercolor_prototypes/common_gesture.ps) run
 
 1 1 1 setrgbcolor
 0 0 620 620 rectfill

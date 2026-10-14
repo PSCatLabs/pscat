@@ -1,7 +1,7 @@
 //! Proof that issue #95's Phase A mechanisms actually catch the defect
 //! classes they claim, rather than merely being wired up.
 //!
-//! `docs/PS_LIBRARY_COUPLING.md`'s Touchpoint 2 table classifies all 18
+//! `docs/dev/PS_LIBRARY_COUPLING.md`'s Touchpoint 2 table classifies all 18
 //! real defects cross-model review found on PR #76 and says which
 //! mechanism would have caught each. Asserting that mapping is easy;
 //! the acceptance criterion asks for something harder — a regression

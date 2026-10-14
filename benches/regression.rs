@@ -40,9 +40,9 @@ use std::time::Instant;
 /// Below this, a delta is noise — don't even mention it.
 const WARN_PCT: f64 = 20.0;
 /// Above this, a delta is implausible as pure CI noise for these
-/// workloads (see NOTES.md Stage 8/11 for stable same-hardware
+/// workloads (see docs/archive/NOTES.md Stage 8/11 for stable same-hardware
 /// numbers) — fail the job. Not wired into `required_status_checks`
-/// yet (see NOTES.md and the PR this bench shipped in); a failing job
+/// yet (see docs/archive/NOTES.md and the PR this bench shipped in); a failing job
 /// here is a strong signal, not an enforced merge block.
 const FAIL_PCT: f64 = 50.0;
 /// A workload whose *base* wall time is below this is dominated by

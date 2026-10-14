@@ -1,8 +1,8 @@
 # FONTS.md — font architecture (Stage 6; catalog addendum, Stage 18)
 
-The `ROADMAP.md` Stage 6 item 1 writeup: how fonts plug into the object
+The `docs/archive/ROADMAP.md` Stage 6 item 1 writeup: how fonts plug into the object
 model, the execution machine, and the rendering pipeline. Like
-`ARCHITECTURE.md`, this documents the decisions that are expensive to
+`docs/dev/ARCHITECTURE.md`, this documents the decisions that are expensive to
 reverse; cheap-to-change details are marked as deferrals.
 
 ## The shape of the problem
@@ -413,7 +413,7 @@ decoding UTF-8 (Hangul syllables are 3 bytes, not 1) with a uniform
 per-syllable advance (0.9em Hangul, 0.45em anything else) rather than a
 per-glyph width table. Full story, including two real bugs a render-
 and-look pass caught that reasoning about the PostScript wouldn't have,
-in NOTES.md's entry.
+in docs/archive/NOTES.md's entry.
 
 Tests: `tests/type3.rs`'s two `/UnicodeBuildChar` tests (flagged dict
 gets the full codepoint; unflagged dict still gets raw bytes);
@@ -497,5 +497,5 @@ like any catalog face; resolve them by file stem (`/Chewy-Regular`,
 `/BagelFatOne-Regular`, `ltfontcheck` compares `/FontName` to the stem).
 Both licences permit embedding and redistribution. The choice, the
 candidate sheet and the caveat that the photo does not identify the
-original font are in `docs/groovy_font_choice.md`; the specimen is
+original font are in `docs/archive/groovy_font_choice.md`; the specimen is
 `examples/groovy_faces.ps`, tested by `tests/groovy_faces.rs`.

@@ -2,7 +2,7 @@
 
 Design for #183, part of epic #112. Nothing here is implemented yet, and
 the maintainer approves it before any code is written. The companion
-design is `docs/CANVAS_SURFACE.md` (#182). The two docs share the
+design is `docs/dev/design/CANVAS_SURFACE.md` (#182). The two docs share the
 vocabulary below and the "interaction" sections check that they don't
 collide.
 

@@ -1,6 +1,6 @@
 # SELFTEST.md — checking a PS-only change without writing Rust
 
-Issue #95, Phase A of `docs/PS_LIBRARY_COUPLING.md`'s "Touchpoint 2".
+Issue #95, Phase A of `docs/dev/PS_LIBRARY_COUPLING.md`'s "Touchpoint 2".
 
 Adding a primitive to `lib/*.ps` used to mean writing Rust: 50–624
 lines of golden-image comparison and `ghostscript_accepts_*` driver per
@@ -148,7 +148,7 @@ Three separate `pkribbon` defects had exactly that shape.
 
 ## What Phase A covers
 
-Against `docs/PS_LIBRARY_COUPLING.md`'s classification of all 18 real
+Against `docs/dev/PS_LIBRARY_COUPLING.md`'s classification of all 18 real
 defects found across seven review rounds on PR #76:
 
 | Row | Defect | Mechanism | Proved by |
@@ -185,7 +185,7 @@ things is worse than one with a documented edge:
   the defect is about, however it is written. What covers it is the
   retained `ghostscript_accepts_*` checks run under real `gs`, six of
   which open with `true setpacking` for exactly this reason — see
-  `docs/GS_CHECK_INVENTORY.md`. **Phase A does not replace those.**
+  `docs/dev/GS_CHECK_INVENTORY.md`. **Phase A does not replace those.**
 - **Row 17 — `pathforall` missing implicit `moveto` after
   `closepath`.** A genuine interpreter defect, so only Rust/gs-parity
   testing (`tests/pathforall.rs`) reaches it. It was found *while
@@ -211,7 +211,7 @@ things is worse than one with a documented edge:
 - **The `ghostscript_accepts_*` extraction itself — issue #135.**
   Inventoried here (issue #95's acceptance criterion asks for the
   inventory "before any extraction"), not performed.
-  `docs/GS_CHECK_INVENTORY.md` explains what reading all 25 in full
+  `docs/dev/GS_CHECK_INVENTORY.md` explains what reading all 25 in full
   turned up that makes a uniform extraction script insufficient.
 - **Cross-model review.** Not weakened by any of this. Row 17 was found
   by a second model reading the code, and nothing here reads code the

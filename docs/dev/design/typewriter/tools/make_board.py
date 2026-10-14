@@ -1,12 +1,12 @@
 """Rebuild the typewriter reference board (issue #210).
 
-    python3 -I docs/typewriter/tools/make_board.py CACHE_DIR
+    python3 -I docs/dev/design/typewriter/tools/make_board.py CACHE_DIR
 
 Downloads each source scan into CACHE_DIR (once), cuts the crops listed in
-CROPS into docs/typewriter/refs/, and composes docs/typewriter/reference_board.jpg.
+CROPS into docs/dev/design/typewriter/refs/, and composes docs/dev/design/typewriter/reference_board.jpg.
 Every committed crop's source carries {{PD-USGov}} or {{PD-US-no notice}} on
 Wikimedia Commons, or is a JFK Assassination Records release PDF (a federal
-record). docs/typewriter/REFERENCES.md has the table. The O'Brien memo (T12)
+record). docs/dev/design/typewriter/REFERENCES.md has the table. The O'Brien memo (T12)
 is measured but not cropped: see REFERENCES.md.
 Needs Pillow, Ghostscript (for the PDF) and tesseract (for the letter tiles).
 """
@@ -21,7 +21,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TW = os.path.dirname(HERE)
-ROOT = os.path.abspath(os.path.join(TW, "..", ".."))
+ROOT = os.path.abspath(os.path.join(TW, "..", "..", "..", ".."))
 REFS = os.path.join(TW, "refs")
 UA = {"User-Agent": "pscat-reference-board/1.0 (github.com/jeromebanks/postscript_interpreter)"}
 

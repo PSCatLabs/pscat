@@ -1,7 +1,7 @@
 # PS_LIBRARY_COUPLING.md — reducing what a PS-only change must touch (issue #92)
 
 A time-boxed architecture spike, same shape as #46's watercolor spike
-(`docs/WATERCOLOR.md`), into the three coupling points issue #92 names:
+(`docs/dev/design/WATERCOLOR.md`), into the three coupling points issue #92 names:
 the hand-maintained `src/capabilities.rs` catalog, the Rust integration
 tests a new `lib/*.ps` primitive needs today, and the GHA `ci.yml` gate.
 This document is the decision record #92 asks for. It recommends

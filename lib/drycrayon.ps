@@ -1,6 +1,6 @@
 %!PS-Adobe-3.0
 %%Title: drycrayon.ps — wax crayon on paper, and a child's ways of drawing with it
-%%Creator: pscat — issue #239 (design: docs/DRYMEDIA.md)
+%%Creator: pscat — issue #239 (design: docs/dev/design/DRYMEDIA.md)
 %%EndComments
 % @requires: (lib/artkit.ps) run (lib/paintkit.ps) run (lib/drykit.ps) run
 
@@ -40,7 +40,7 @@
 % self-documenting guard.
 %
 % How the crayon presses (dycrayon), from the reference board
-% (docs/drymedia/REFERENCES.md, Y1-Y6):
+% (docs/dev/design/drymedia/REFERENCES.md, Y1-Y6):
 %
 % * Waxy coverage (Y1, Y2). The tip deposits only where it meets raised
 %   tooth, and a skipped valley streaks along the travel (drykit's oriented
@@ -294,7 +294,7 @@
 %%EndSelfTest
 %
 % @kind: Procedure
-% @summary: Sets up crayon paper as the drykit surface: drykit's construction-paper tooth made coarser and softer, on a white ground, tuned against the crayon reference crops (docs/drymedia/REFERENCES.md Y1, Y2) so a light scribble leaves a quarter to a third of the paper showing in streaks and a heavy one is nearly solid. Takes dksurface's keys, any of which replaces the default; paints nothing (paint the ground yourself) and takes no rand draws.
+% @summary: Sets up crayon paper as the drykit surface: drykit's construction-paper tooth made coarser and softer, on a white ground, tuned against the crayon reference crops (docs/dev/design/drymedia/REFERENCES.md Y1, Y2) so a light scribble leaves a quarter to a third of the paper showing in streaks and a heavy one is nearly solid. Takes dksurface's keys, any of which replaces the default; paints nothing (paint the ground yourself) and takes no rand draws.
 % @example: << /Seed 4 >> dypaper 0.97 0.96 0.93 setrgbcolor clippath fill
 % @param: /Surface [name] The drykit surface underneath, as dksurface; the other keys keep crayon paper's defaults unless given, so `<< /Surface /slate >> dypaper` is slate's ground with crayon paper's tooth and white ground (default /construction)
 % @param: /Seed [integer] Seed for the paper's tooth, as dksurface (default 1)

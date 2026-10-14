@@ -610,7 +610,7 @@ fn numbered_path(path: &str, n: usize) -> String {
 /// `Display`. This replaced an all-`f64` first draft after
 /// a cross-model review, empirically running the binary, found three
 /// distinct correctness bugs traceable to that single design choice
-/// (see NOTES.md's issue #21 entry) — worth fixing at the root rather
+/// (see docs/archive/NOTES.md's issue #21 entry) — worth fixing at the root rather
 /// than patching each symptom.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum SweepValue {

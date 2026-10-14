@@ -338,7 +338,7 @@ fn rectclip_clips_and_clears_the_path() {
 // PostScript-callable alpha operator at all — issue #46's spike tested
 // that directly), so there's no gs behavior to pin them against the way
 // the rest of this file pins its operators. What's asserted here is the
-// contract `docs/WATERCOLOR.md` recorded for them: clamping, graphics-
+// contract `docs/dev/design/WATERCOLOR.md` recorded for them: clamping, graphics-
 // state semantics, and a hard error on an unknown mode name.
 
 #[test]

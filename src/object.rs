@@ -230,7 +230,7 @@ impl PsString {
 /// lives in the interpreter's save stack; the handle only carries
 /// identity (restore finds its record by `Rc::ptr_eq`) and validity
 /// (restoring an outer save invalidates the inner handles — a later
-/// restore on one is `invalidrestore`). Design writeup: `VM.md`.
+/// restore on one is `invalidrestore`). Design writeup: `docs/dev/VM.md`.
 pub struct SaveHandle {
     pub(crate) valid: Cell<bool>,
 }
@@ -420,7 +420,7 @@ thread_local! {
 /// The impl lives on `PsArray`, not `Object`, so every non-array value
 /// (the overwhelming majority of drops — every popped operand) keeps
 /// the compiler's plain drop glue; profiling fib showed a custom
-/// `Drop for Object` taxing ~18% of the whole run (NOTES.md, Stage 11).
+/// `Drop for Object` taxing ~18% of the whole run (docs/archive/NOTES.md, Stage 11).
 impl Drop for PsArray {
     #[inline]
     fn drop(&mut self) {

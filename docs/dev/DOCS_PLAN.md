@@ -1,13 +1,19 @@
 # Docs and site plan (issue #247, epic #246)
 
-**Status: proposal. Nothing here has moved yet.** This page records the
-audit of every human-facing document and site page, and the target
-structure that #248 to #252 carry out. **The user approves it before #248 or
-#250 starts.** The audit was taken against `main` at `1e1168e`
+**Status: carried out.** The plan was approved and its moves have landed
+(#248 to #252 built the guides and the site; #249 moved the contributor and
+historical docs). The tables below describe the layout before and after the
+moves, so they still say "planned" in places, and the appendix is the
+reference map as it stood before the moves. This page records the audit of
+every human-facing document and site page, and the target structure that
+#248 to #252 carried out. The audit was taken against `main` at `1e1168e`
 (2026-10-13).
 
-Planned paths are written as `code`, not links, because most of them do
-not exist yet. Real links in this file are relative to `docs/dev/`.
+Paths are written as `code`, not links, because the tables describe the
+layout before and after the moves. Real links in this file are relative to
+`docs/dev/`. One difference from the plan as approved: the typewriter study
+(`TYPEWRITER.md` and `typewriter/`) and the loose evidence images that sat in
+`docs/` went to `design/` as well, by the plan's own rule for new design docs.
 
 ## The short version
 

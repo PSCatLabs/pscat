@@ -1,5 +1,5 @@
 //! save/restore — Stage 8 task 1. Every behavioral choice here is
-//! pinned against gs (the snippets and their gs output are in VM.md);
+//! pinned against gs (the snippets and their gs output are in docs/dev/VM.md);
 //! deviations are tested as deviations, deliberately.
 
 use pscat::{Interp, PsError};
@@ -162,7 +162,7 @@ fn grestoreall_without_save_pops_to_bottom() {
     assert_eq!(top_repr(&mut it), "3.0");
 }
 
-// --- documented deviations (VM.md) ----------------------------------
+// --- documented deviations (docs/dev/VM.md) ----------------------------------
 
 #[test]
 fn no_invalidrestore_scan_of_the_stacks() {

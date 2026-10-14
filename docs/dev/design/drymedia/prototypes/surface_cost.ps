@@ -2,13 +2,13 @@
 %%Title: drykit design prototype -- does the #182 surface carry chalk, and at what cost?
 %%BoundingBox: 0 0 720 480
 %%EndComments
-% Issue #233 prototype, NOT library code (see docs/DRYMEDIA.md section 7).
+% Issue #233 prototype, NOT library code (see docs/dev/design/DRYMEDIA.md section 7).
 % Run from the repo root. Settings are names defined before the file runs;
 % `--sweep` takes only one name, so prepend a line for several:
 %
-%   pscat --page 720x480 --png out.png docs/drymedia/prototypes/surface_cost.ps
+%   pscat --page 720x480 --png out.png docs/dev/design/drymedia/prototypes/surface_cost.ps
 %   { echo "/MODE 3 def /TOUCH 0.82 def /PEN 36 def /GRAIN 0.4 def"; \
-%     cat docs/drymedia/prototypes/surface_cost.ps; } \
+%     cat docs/dev/design/drymedia/prototypes/surface_cost.ps; } \
 %     | pscat --dpi 216 --page 720x480 --png out.png -
 %   (same prelude) | gs -dNOSAFER -dBATCH -dNOPAUSE -sDEVICE=png16m \
 %     -r216 -g2160x1440 -sOutputFile=out.png -
@@ -59,7 +59,7 @@
 (lib/paintkit.ps) run
 (lib/handscript.ps) run
 
-(docs/drymedia/prototypes/dqcatch.ps) run
+(docs/dev/design/drymedia/prototypes/dqcatch.ps) run
 (lib/drykit.ps) run
 % count every catch dkstroke builds (MODE 6)
 /dkcatch0 /dkcatch load def

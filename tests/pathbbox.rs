@@ -191,7 +191,7 @@ fn pathbbox_matches_ghostscript_over_a_matrix() {
     for (cname, ctm) in CTMS {
         // Stroke width is the scalar sqrt|det| (a round pen), so gs's
         // elliptical pen differs under anisotropic CTMs; those compare
-        // paths only. Known deviation, see HANDOFF.md.
+        // paths only. Known deviation, see docs/dev/HANDOFF.md.
         let aniso = matches!(
             *cname,
             "scale" | "scale then rotate" | "rotate then scale" | "skew" | "general matrix"

@@ -2,7 +2,7 @@
 
 This is the reference board for epic #232 (drykit). Each entry is a real
 photograph or scan, a short description of what it shows, and the
-mechanism the observation implies for drykit. `docs/DRYMEDIA.md` turns the
+mechanism the observation implies for drykit. `docs/dev/design/DRYMEDIA.md` turns the
 mechanisms into a design. The gallery tickets (#238, #240 and #242) compare
 their renders against the crops below.
 

@@ -1,5 +1,5 @@
 //! save / restore / vmstatus — VM snapshot semantics. The design (and
-//! the gs pins behind every choice here) is `VM.md`; the machinery
+//! the gs pins behind every choice here) is `docs/dev/VM.md`; the machinery
 //! lives on `Interp` (`do_save`/`do_restore`, the COW journal).
 //!
 //! Documented deviation: no invalidrestore scan of the stacks for

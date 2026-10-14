@@ -8,7 +8,7 @@ and drykit first (each example below shows the lines).
 
 ## The core: drykit
 
-`lib/drykit.ps` (design notes in `docs/DRYMEDIA.md`) is the core of
+`lib/drykit.ps` (design notes in `docs/dev/design/DRYMEDIA.md`) is the core of
 the dry media: chalk, crayon and charcoal. It draws the current path as a
 dry stick dragged across a toothed surface, and pigment lands only where
 the stick's contact patch meets raised tooth.
@@ -78,7 +78,7 @@ newpath 40 60 moveto 300 80 lineto
 - **`/name dcchalkcolor`** sets white or a soft yellow, pink, blue, green
   or orange.
 
-The defaults were tuned against the photographs in `docs/drymedia/refs/`.
+The defaults were tuned against the photographs in `docs/dev/design/drymedia/refs/`.
 Real chalk reads about halfway from the board to white, not white.
 `examples/drychalk_specimen.ps` shows `gallery/hundred_lines.ps`'s
 pen-stroke chalk before and after, on both boards.
@@ -194,7 +194,7 @@ Every TeX backslash is written twice in a PostScript string.
 `examples/mathkit_specimen.ps` is the specimen: the fixed test set, from
 the quadratic formula to Maxwell's equations, and a derivation in chalk.
 `examples/mathkit_structures.ps` shows the structures issue #340 added
-(`docs/drymedia/mathkit_structures.png`).
+(`docs/dev/design/drymedia/mathkit_structures.png`).
 The gallery piece `gallery/chalkboard_lecture.ps` fills a
 whole board with it: Euler's formula derived across three drychalk
 panels.

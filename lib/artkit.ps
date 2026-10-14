@@ -470,7 +470,7 @@ end
     wkstarted { wkend } if
 } bind def
 
-% Self-tests: `pscat --selftest lib/artkit.ps` (see docs/SELFTEST.md).
+% Self-tests: `pscat --selftest lib/artkit.ps` (see docs/dev/SELFTEST.md).
 % The segment-count bound is checked at its edge on both sides, with
 % zero-length segments (which emit no stop, so no deposit budget could
 % ever see them), and a refused call must not poison the next one.
@@ -1713,7 +1713,7 @@ end
     scpx scpy scsc scang scmark
 } bind def
 
-% Self-tests: `pscat --selftest lib/artkit.ps` (see docs/SELFTEST.md).
+% Self-tests: `pscat --selftest lib/artkit.ps` (see docs/dev/SELFTEST.md).
 % scatter validates its whole option dict before drawing a single
 % mark, and every one of these guards is load-bearing: a silently
 % accepted bad option produces a plausible-looking page with the wrong
@@ -2623,7 +2623,7 @@ ScatterState /placed 0 put
     % isn't tile-count-exact with this interpreter even here, the same
     % way it isn't for the *much* shallower {7,3} depth 2 (29 here, 30
     % under `gs`) or {6,4} depth 5 (1711 here, 1653 under `gs`) --
-    % see NOTES.md for why this is a documented, expected precision
+    % see docs/archive/NOTES.md for why this is a documented, expected precision
     % difference rather than a bug to keep chasing.
     /hocross hox1 hoy2 mul hoy1 hox2 mul sub def
     /honoise hox1 hoy2 mul abs hoy1 hox2 mul abs add def
@@ -2921,7 +2921,7 @@ ScatterState /placed 0 put
                 % distance-from-origin stays near 1 out there and badly
                 % under-tolerances, silently capping tile growth with
                 % depth -- caught by comparing against an independent
-                % Python prototype of this same BFS, see NOTES.md).
+                % Python prototype of this same BFS, see docs/archive/NOTES.md).
                 /htsc 0 def
                 0 1 htp 1 sub {
                     /htk exch def

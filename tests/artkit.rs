@@ -163,7 +163,7 @@ fn alongpath_stamps_at_pitch() {
 
 #[test]
 fn walkpath_regular_stops_match_alongpath_exactly() {
-    // The compatibility claim this file's header and NOTES.md make:
+    // The compatibility claim this file's header and docs/archive/NOTES.md make:
     // walkpath's regular (non-end-flagged) stops land exactly where
     // alongpath's would, on the same path. Mixes line and closepath
     // segments across a closed subpath so the walk crosses several
@@ -762,7 +762,7 @@ fn ghostscript_accepts_artkit() {
     // this interpreter's at *every* depth this suite has checked (29 vs
     // 30 at depth 2, 232 vs 233 at this depth 4, 1711 vs 1653 at {6,4}
     // depth 5) -- a real, inherent precision difference between the two
-    // interpreters' arithmetic, not a defect (see NOTES.md). The band
+    // interpreters' arithmetic, not a defect (see docs/archive/NOTES.md). The band
     // below exists to catch what actually matters under gs: a crash, a
     // collapse back toward the round-8 bug's 323, or growth toward
     // htmax -- not bit-for-bit parity with this interpreter, which
@@ -1028,7 +1028,7 @@ fn httile_circumradius_formula_matches_independently_verified_values() {
     // shared vertex (equal to the hyperbolic angle there, since the disk
     // model is conformal) -- confirmed to reproduce 360/q exactly for
     // both pairs below (and three others) in a standalone prototype
-    // before this formula went into artkit.ps (see NOTES.md).
+    // before this formula went into artkit.ps (see docs/archive/NOTES.md).
     for (p, q, expected_r) in [(7, 3, 0.300742618746379), (6, 4, 0.5176380902050418)] {
         let got = eval(&format!(
             "180 {p} div cos 180 {p} div sin div \
@@ -1095,7 +1095,7 @@ fn httile_generates_the_expected_tile_count_and_calls_proc_that_many_times() {
     // lattice_walks_the_expected_points pins lattice's exact points.
     // Cross-checked against an independent Python prototype of the same
     // algorithm, which agrees exactly at this and several other
-    // {p,q,depth} combinations (NOTES.md) -- this is a real invariant of
+    // {p,q,depth} combinations (docs/archive/NOTES.md) -- this is a real invariant of
     // the geometry, not an incidental snapshot of whatever the code
     // happened to produce.
     let got = eval("/n 0 def 100 100 90 7 3 2 { pop /n n 1 add def } httile n");
@@ -1122,7 +1122,7 @@ fn fundamental_polygon_edges_meet_at_the_expected_interior_angle() {
     // vertex on that edge (the arcs in play here are always < 180 deg,
     // so "closer to the straight chord" reliably picks the right one).
     // Reproduces this repo's own construction, so this is checking the
-    // same claim the Python prototype (see NOTES.md) checked
+    // same claim the Python prototype (see docs/archive/NOTES.md) checked
     // independently before this formula went into artkit.ps -- not a
     // duplicate of the circumradius test above, since a bug in vertex
     // ordering or the horthocircle/hreflect math itself (as opposed to
@@ -2345,7 +2345,7 @@ fn noise2_is_coherent_and_stays_within_its_empirical_range() {
     // flat, or just bounded random noise with no spatial correlation,
     // would pass a range-only check but fail this. Range bound is
     // empirical (~[-0.66, 0.66] measured over a 300x300 grid during
-    // development, see NOTES.md) with headroom, not a derived textbook
+    // development, see docs/archive/NOTES.md) with headroom, not a derived textbook
     // constant -- this repo's convention for gradient-table-dependent
     // bounds.
     let got = eval(

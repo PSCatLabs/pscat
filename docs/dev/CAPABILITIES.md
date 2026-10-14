@@ -11,7 +11,7 @@ which drifts. (It already had: `psart`'s `SKILL.md` was behind
 artkit's paragraph-flow,
 hyperbolic-geometry, noise/flow, and gradient sections by the time
 this catalog was built, and the first draft of this very catalog
-omitted the `HandScript`/`HangulScript` Type 3 faces — see NOTES.md's
+omitted the `HandScript`/`HangulScript` Type 3 faces — see docs/archive/NOTES.md's
 issue #39 entry, cross-model review on PR #74.)
 
 ## Payload shape
@@ -214,7 +214,7 @@ that `/Spread` and `/Load` keep their one shared meaning.
   palettes, style packs, page templates, and *artkit* procedures
   specifically; these are separate sibling libraries with their own
   independent APIs (graph.ps and dataviz.ps by design share nothing
-  with artkit, per NOTES.md's issues #13/#14 entries). `hangul.ps`
+  with artkit, per docs/archive/NOTES.md's issues #13/#14 entries). `hangul.ps`
   *is* cataloged despite being another sibling, since a cross-model
   review specifically flagged its face/procedures as "an installed
   agent-facing font" the catalog was silently omitting — the same

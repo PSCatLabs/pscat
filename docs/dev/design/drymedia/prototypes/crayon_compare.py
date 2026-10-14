@@ -1,13 +1,13 @@
-"""Builds docs/drymedia/crayon_compare.png and crayon_compare_figure.png (#239).
+"""Builds docs/dev/design/drymedia/crayon_compare.png and crayon_compare_figure.png (#239).
 
 Reference crops on the left, pscat renders on the right, at about the
 crops' scale (259 dpi, about 3.6 px per point). From the repo root:
 
     pscat --page 840x1000 --dpi 259 --png /tmp/spec259.png examples/drycrayon_specimen.ps
     pscat --page 840x760 --dpi 259 --png /tmp/motion259.png examples/drycrayon_motion_demo.ps
-    python3 -I docs/drymedia/prototypes/crayon_compare.py docs/drymedia/refs \
-        /tmp/spec259.png /tmp/motion259.png docs/drymedia/crayon_compare.png \
-        docs/drymedia/crayon_compare_figure.png "<licence caption for the figure panel>"
+    python3 -I docs/dev/design/drymedia/prototypes/crayon_compare.py docs/dev/design/drymedia/refs \
+        /tmp/spec259.png /tmp/motion259.png docs/dev/design/drymedia/crayon_compare.png \
+        docs/dev/design/drymedia/crayon_compare_figure.png "<licence caption for the figure panel>"
 
 Needs Pillow. The crop boxes follow the specimens' layout.
 """

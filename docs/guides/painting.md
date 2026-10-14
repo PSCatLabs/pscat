@@ -147,7 +147,7 @@ keep the rows from being machine-parallel. Above about `/Overlap 0.5` the rows
 also cover each other's `/Scrape` nicks. Deterministic under the caller's own
 `srand`, at most 4000 rows, the path left as the caller had it. It works
 under any CTM and in Ghostscript. `examples/paintkit_plane_demo.ps`
-(`docs/paintkit_plane_demo.png`) builds a mountain from planes in pigment
+(`docs/dev/design/paintkit_plane_demo.png`) builds a mountain from planes in pigment
 colours and sets out the direction and overlap.
 
 ## Brushed edges: pkbrushedge
@@ -176,9 +176,9 @@ survive; it works in Ghostscript. A mass built from several overlapping closed
 blobs (a cloud bank, a bush of ellipses) goes in as one path: an edge lying
 inside the others is hidden, so it is not brushed.
 `examples/paintkit_brushedge_demo.ps`
-(`docs/paintkit_brushedge_demo.png`) shows each case before and after.
+(`docs/dev/design/paintkit_brushedge_demo.png`) shows each case before and after.
 
-![Brushed edges, before and after](../paintkit_brushedge_demo.png)
+![Brushed edges, before and after](../dev/design/paintkit_brushedge_demo.png)
 
 ## Fan brush: pkfan
 
@@ -272,7 +272,7 @@ evergreen's reflection pulled down by a directional `pkwet`. Draw a branch as a
 real stroke out from the trunk when you want `/Light` to flip it: a chord
 shorter than `/Pitch` (a pressed fan, a dab) is never flipped.
 
-![The loading specimen](../paintkit_loading_demo.png)
+![The loading specimen](../dev/design/paintkit_loading_demo.png)
 
 ## Pigments
 
@@ -322,7 +322,7 @@ tints beside the RGB lerp of the same recipe, three ramps (blue to yellow,
 blue to alizarin, blue to white), eight classic landscape mixes, and the
 palette driving a loaded broad brush, a bush and a fan-brush evergreen.
 
-![The pigment specimen](../paintkit_pigment_demo.png)
+![The pigment specimen](../dev/design/paintkit_pigment_demo.png)
 
 ## Liner and detail brush: pkliner
 
@@ -472,9 +472,9 @@ softening pass once per cell, clipped to it, with the random stream replayed
 so every cell lays the same marks. A literal `[r g b]` behaves exactly
 as before. `examples/paintkit_wet_under_demo.ps` sets one cloud over a strong
 sky gradient with a constant and a procedural `/Under`
-(`docs/paintkit_wet_under_demo.png`);
+(`docs/dev/design/paintkit_wet_under_demo.png`);
 `examples/paintkit_wet_bands_demo.ps` sets a tall plume over one, per pass
-against per band (`docs/paintkit_wet_bands_demo.png`).
+against per band (`docs/dev/design/paintkit_wet_bands_demo.png`).
 
 ## Canvas surface: pkcanvas and /Touch
 
@@ -509,7 +509,7 @@ the crossing strokes full, on their own break-up and on the shared canvas,
 a `/Touch` sweep, touched strokes with a `/Colors` load and a touched
 stroke pulled down inside a directional `pkwet`.
 
-![The canvas surface specimen](../paintkit_canvas_demo.png)
+![The canvas surface specimen](../dev/design/paintkit_canvas_demo.png)
 
 ## Brush motions
 
@@ -570,7 +570,7 @@ bush << /Count 300 /Radius 3 /Light 135 /Reach 0.3 >> pkscumblein
 << /Size 4 /Scatter 5 >> pkdab
 ```
 
-![Light-aware massing: before and after](../paintkit_massing_demo.png)
+![Light-aware massing: before and after](../dev/design/paintkit_massing_demo.png)
 
 ## Putting it together: landscapes
 
@@ -636,6 +636,6 @@ PostScript-callable alpha operator at all. Rather than error there,
 painting each mark in its flattened-over-white equivalent — legible,
 but overlaps stop mixing. Verified alpha output goes through `--pdf`
 instead, which gs's own PDF interpreter renders correctly.
-`docs/WATERCOLOR.md` is the decision record behind all of it (the
+`docs/dev/design/WATERCOLOR.md` is the decision record behind all of it (the
 architecture study), `examples/paintkit_wash_demo.ps` is the
 specimen sheet, and the gallery's First Rain is the piece.

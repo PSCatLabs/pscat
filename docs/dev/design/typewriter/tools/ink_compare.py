@@ -1,13 +1,13 @@
 """Compare the /Typewriter ribbon ink with the reference crops (issue #212).
 
-    python3 -I docs/typewriter/tools/ink_compare.py [PSCAT] [OUT.png]
+    python3 -I docs/dev/design/typewriter/tools/ink_compare.py [PSCAT] [OUT.png]
 
 Run from the repo root. For each reference crop it types the same characters
 at the source scan's resolution (300 dpi; 240 for Szilard), with the pitch,
 preset and ink that match the source, in pscat and in Ghostscript. It then
 scales each render by the crop's own factor (make_board.py's CROPS), so the
 three rows of a panel are at one scale: the scan, pscat, gs. The default
-output is docs/typewriter/ink_vs_real.png.
+output is docs/dev/design/typewriter/ink_vs_real.png.
 
 Needs Pillow, gs on PATH and a release pscat (default target/release/pscat).
 The machines are picked for the quirk a crop shows: machine 4 has clogged
@@ -22,7 +22,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TW = os.path.dirname(HERE)
-ROOT = os.path.abspath(os.path.join(TW, "..", ".."))
+ROOT = os.path.abspath(os.path.join(TW, "..", "..", "..", ".."))
 REFS = os.path.join(TW, "refs")
 
 PICA = "/Pitch 10 /Size 12.5"

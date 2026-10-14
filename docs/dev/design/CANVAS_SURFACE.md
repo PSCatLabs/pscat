@@ -2,7 +2,7 @@
 
 Design for #182, part of epic #112. Nothing here is implemented yet, and
 the maintainer approves it before any code is written. The companion
-design is `docs/PAINT_LOADING.md` (#183). Both docs use the vocabulary
+design is `docs/dev/design/PAINT_LOADING.md` (#183). Both docs use the vocabulary
 below, and section 4 checks that they don't collide.
 
 ## Vocabulary shared with PAINT_LOADING.md

@@ -3,7 +3,7 @@
 A time-boxed comparison of three ways to get watercolor-like
 translucency, pooling, and bloom out of pscat: pure PostScript,
 a small renderer-level extension, and an external raster post-pass.
-All three render the same scene (`docs/watercolor_prototypes/
+All three render the same scene (`docs/dev/design/watercolor_prototypes/
 common_gesture.ps`) so the comparison is of the mechanism, not of
 three unrelated pieces of art. This document is the decision record
 issue #46 asks for; it recommends an architecture and a public
@@ -18,14 +18,14 @@ that exercises every interesting case (single-wash color, pairwise
 mixing, triple mixing) while staying small enough for Approach A's
 technique to do by hand (2³ = 8 regions, one empty). Every prototype
 below renders the exact same three circles and colors —
-`docs/watercolor_prototypes/common_gesture.ps` is the single source of
+`docs/dev/design/watercolor_prototypes/common_gesture.ps` is the single source of
 truth for PostScript; Approach B's Rust test transcribes the same
 numbers by hand (there's no shared build between Rust and PostScript
 here) with a comment pointing back at this file.
 
 ## Approach A — pure PostScript
 
-`docs/watercolor_prototypes/approach_a_pure_ps.ps`, built on `(lib/
+`docs/dev/design/watercolor_prototypes/approach_a_pure_ps.ps`, built on `(lib/
 artkit.ps)` and #41's `pkribbon`. Three techniques stacked:
 
 1. **Real overlap-color mixing via nested `clip`.** `clip` intersects
@@ -89,7 +89,7 @@ acceptance criteria say "existing PNG/SVG/PDF behavior remains
 unchanged" — a `setalpha` that only affects the PNG path (this
 prototype adds no SVG/PDF wiring) would make `--svg`/`--pdf` silently
 diverge from the raster the moment a program used it, the same bug
-class NOTES.md records fixing for stroke/PDF in issue #8. Landing that
+class docs/archive/NOTES.md records fixing for stroke/PDF in issue #8. Landing that
 now would hand #47 a broken public operator as its starting point.
 Instead, `alpha` is `pub(crate)` only — reachable from nowhere in the
 PostScript language — and exercised by a single `#[ignore]`d Rust test,
@@ -129,7 +129,7 @@ whether `gs` has an equivalent, PostScript-callable alpha operator:
 
 ```
 $ gs -dNOPAUSE -dBATCH -dNOSAFER -q -sDEVICE=nullpage \
-    docs/watercolor_prototypes/gs_alpha_check.ps
+    docs/dev/design/watercolor_prototypes/gs_alpha_check.ps
 .setfillconstantalpha: no
 .setopacityalpha: no
 .setstrokeconstantalpha: no
@@ -151,7 +151,7 @@ must be named explicitly rather than assumed away.
 
 ## Approach C — external raster post-pass
 
-`docs/watercolor_prototypes/common_base_opaque.ps` renders the
+`docs/dev/design/watercolor_prototypes/common_base_opaque.ps` renders the
 plainest possible base — three flat, opaque, unblended circles, no
 grain, no brush edges — specifically so the post-pass's contribution
 can be judged on its own, the same way Approach B's test isolates just

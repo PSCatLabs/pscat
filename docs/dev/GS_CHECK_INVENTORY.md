@@ -11,7 +11,7 @@ the function names.
 
 ## The count has drifted
 
-`docs/PS_LIBRARY_COUPLING.md` (issue #92, "Touchpoint 2") records **16**
+`docs/dev/PS_LIBRARY_COUPLING.md` (issue #92, "Touchpoint 2") records **16**
 of these across the suite. As of this commit there are **25**:
 
 ```
@@ -72,7 +72,7 @@ caught) but it is not a check on *output*.
 
 ## What the inventory changes about the extraction plan
 
-`docs/PS_LIBRARY_COUPLING.md` already corrected two wrong first
+`docs/dev/PS_LIBRARY_COUPLING.md` already corrected two wrong first
 impressions about this family (not one-per-file; not uniformly
 exit-code-only). Reading all 25 in full adds three more things an
 extraction has to handle, none of which a uniform
@@ -124,7 +124,7 @@ argument for keeping them separate: an extraction that treats the
 family as uniform would silently weaken checks 1, 4, 23 and 25, which
 is a worse outcome than not extracting yet.
 
-Tracked as **issue #135**, referenced from `docs/SELFTEST.md`'s "What
+Tracked as **issue #135**, referenced from `docs/dev/SELFTEST.md`'s "What
 Phase A does not cover". That issue treats this file as its spec: if
 the count or an assertion changes before it lands, update this file
 rather than the issue body.

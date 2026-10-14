@@ -143,7 +143,7 @@ the source of truth:
   yet (e.g. one long compile or one big edit in progress) — also
   refresh right before starting the quality-gate build below, and
   again if any single step within it runs long.
-- Update the notes fragment (`notes/`), `HANDOFF.md` and the matching `docs/guides/` page on the branch as
+- Update the notes fragment (`notes/`), `docs/dev/HANDOFF.md` and the matching `docs/guides/` page on the branch as
   capabilities land, per AGENTS.md — not as an afterthought.
 
 Refresh the heartbeat before this build (it's often the single
@@ -275,10 +275,10 @@ scratchpad but harness prompts do. (#208 reversed this: see below.)
 
 ## Added in #273: parallel-agent friction
 
-- **Notes fragments.** Every PR prepended a section to `NOTES.md`, so any two
+- **Notes fragments.** Every PR prepended a section to `docs/archive/NOTES.md`, so any two
   open PRs conflicted there (most DIRTY PRs on 2026-10-13 were NOTES-only).
   New entries go in `notes/<issue>-<slug>.md`. No regenerated index: it would
-  be a shared file again. `NOTES.md` stays as frozen history.
+  be a shared file again. `docs/archive/NOTES.md` stays as frozen history.
 - **`ci.yml` stops cancelling push runs.** The per-ref `cancel-in-progress`
   group cancelled each merge commit's run on the next merge, leaving agents
   to hunt for a later run. PR runs still cancel (their comment race is the

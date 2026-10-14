@@ -1,5 +1,5 @@
 %!PS
-% tw_proto.ps: the #210 prototype for docs/TYPEWRITER.md. Not library code.
+% tw_proto.ps: the #210 prototype for docs/dev/design/TYPEWRITER.md. Not library code.
 % It checks three things before #211 builds the real font:
 %   1. A Type 3 font whose BuildChar varies every strike works in pscat and gs
 %      (setcharwidth, never setcachedevice: gs would replay the first strike).
@@ -10,11 +10,11 @@
 % Generate the outlines first, from the repo root (TYPEWRITER.md's timings and
 % prototype_vs_real.png used Courier Prime; with no argument the generator
 % falls back to the bundled Liberation Mono):
-%   python3 docs/typewriter/prototypes/gen_glyphs.py path/to/CourierPrime-Regular.ttf
+%   python3 docs/dev/design/typewriter/prototypes/gen_glyphs.py path/to/CourierPrime-Regular.ttf
 % Then:
-%   pscat --dpi 300 --png /tmp/p.png docs/typewriter/prototypes/tw_proto.ps
+%   pscat --dpi 300 --png /tmp/p.png docs/dev/design/typewriter/prototypes/tw_proto.ps
 %   gs -q -dNOSAFER -dBATCH -dNOPAUSE -sDEVICE=pnggray -r300 -sOutputFile=/tmp/g.png \
-%      docs/typewriter/prototypes/tw_proto.ps
+%      docs/dev/design/typewriter/prototypes/tw_proto.ps
 % (gs needs -dNOSAFER, or -I., only because this file runs twglyphs.ps by a
 % relative path; the library will not.)
 % Knobs: /MODE 1 = a full page (cost), 2 = one sample paragraph (look);
@@ -23,7 +23,7 @@
 /MODE where { pop } { /MODE 1 def } ifelse
 /INK  where { pop } { /INK true def } ifelse
 
-(docs/typewriter/prototypes/twglyphs.ps) run
+(docs/dev/design/typewriter/prototypes/twglyphs.ps) run
 
 % gs dilates every fill and clip by part of a pixel, which closes 1-2 px
 % weave holes (DRYMEDIA.md 2.4). Guarded so pscat skips it.

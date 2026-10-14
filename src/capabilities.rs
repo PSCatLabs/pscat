@@ -345,7 +345,7 @@ impl GeneratedEntry {
 /// Exists so `tests/capabilities.rs` can run one generic cross-check
 /// against *every* migrated file without a new hand-written per-file
 /// test function each time one migrates -- the exact gap
-/// `docs/PS_LIBRARY_COUPLING.md` calls out (a near-duplicate
+/// `docs/dev/PS_LIBRARY_COUPLING.md` calls out (a near-duplicate
 /// `*_names_match_the_catalog_exactly` test is as easy to forget as
 /// the catalog registration itself). [`migrated_files`] returns the
 /// full list.
@@ -454,7 +454,7 @@ static ENTRIES: &[Entry] = &[
     entry!(
         "HangulScript",
         CapabilityKind::Type3Face,
-        "Procedural jittered-stroke Hangul face: composes each syllable from ~14 atomic jamo stroke shapes at BuildChar time (Unicode-mode Type 3 -- pscat-only, see FONTS.md). Modern Hangul only (U+AC00-U+D7A3); any other codepoint (ASCII letters, spaces, punctuation) gets a half-width advance and draws nothing -- a dedicated Hangul face, not mixed-script. Call via hg-write/hg-linecount below, not plain show, for correct word-wrapping.",
+        "Procedural jittered-stroke Hangul face: composes each syllable from ~14 atomic jamo stroke shapes at BuildChar time (Unicode-mode Type 3 -- pscat-only, see docs/dev/FONTS.md). Modern Hangul only (U+AC00-U+D7A3); any other codepoint (ASCII letters, spaces, punctuation) gets a half-width advance and draws nothing -- a dedicated Hangul face, not mixed-script. Call via hg-write/hg-linecount below, not plain show, for correct word-wrapping.",
         &[],
         HANGUL,
         "/HangulScript findfont 48 scalefont setfont",

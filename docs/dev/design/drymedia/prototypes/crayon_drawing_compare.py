@@ -1,4 +1,4 @@
-"""Builds docs/drymedia/crayon_drawing_compare.jpg (#240).
+"""Builds docs/dev/design/drymedia/crayon_drawing_compare.jpg (#240).
 
 A 6-year-old's whole crayon picture (REFERENCES.md Y5, CC0) beside
 gallery/crayon_drawing.ps, and three same-scale details under them: the sun's
@@ -6,9 +6,9 @@ yellow, a colour band across the top, and the ground. Only the CC0 rhino
 drawing is used, so the panel is CC0 apart from pscat's own render. From the
 repo root:
 
-    python3 -I docs/drymedia/prototypes/crayon_drawing_compare.py \
-        docs/drymedia/refs gallery/renders/crayon_drawing.png \
-        docs/drymedia/crayon_drawing_compare.jpg
+    python3 -I docs/dev/design/drymedia/prototypes/crayon_drawing_compare.py \
+        docs/dev/design/drymedia/refs gallery/renders/crayon_drawing.png \
+        docs/dev/design/drymedia/crayon_drawing_compare.jpg
 
 The still is the committed 2x render (1584x1224). Needs Pillow.
 """

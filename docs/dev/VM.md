@@ -3,7 +3,7 @@
 Written 2026-07-16, before implementation, per the task's
 [opus+review] tag. This is the feature flagged since Stage 1 as the
 one that could reach into the object model; the framing lives in
-`ARCHITECTURE.md` ("Known-hard things"). Everything here was pinned
+`docs/dev/ARCHITECTURE.md` ("Known-hard things"). Everything here was pinned
 against gs first (snippets below) and the PLRM second.
 
 ## What the feature actually is

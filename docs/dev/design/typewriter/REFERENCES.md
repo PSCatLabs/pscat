@@ -2,7 +2,7 @@
 
 This is the reference board for epic #209 (`lib/typewriter.ps`). Each entry
 is a real scan, what it shows, and what it means for the library.
-`docs/TYPEWRITER.md` turns these observations into a design. #211, #212 and #215
+`docs/dev/design/TYPEWRITER.md` turns these observations into a design. #211, #212 and #215
 compare their renders against the crops here.
 
 ![Reference board](reference_board.jpg)

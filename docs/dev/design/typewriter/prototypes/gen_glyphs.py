@@ -1,10 +1,10 @@
 """Generate twglyphs.ps: a monospace face's printable-ASCII outlines as
 PostScript path data, for the #210 prototype (tw_proto.ps).
 
-    python3 docs/typewriter/prototypes/gen_glyphs.py [FONT.ttf]
+    python3 docs/dev/design/typewriter/prototypes/gen_glyphs.py [FONT.ttf]
 
 FONT.ttf defaults to fonts/LiberationMono-Regular.ttf, so the script runs from
-a bare checkout. The design (docs/TYPEWRITER.md section 2) chose Courier Prime
+a bare checkout. The design (docs/dev/design/TYPEWRITER.md section 2) chose Courier Prime
 (github.com/google/fonts, ofl/courierprime/CourierPrime-Regular.ttf, SIL OFL
 1.1); prototype_vs_real.png was rendered from it. Output is derived font
 software under the source's licence (OFL 1.1 for both; Liberation reserves the

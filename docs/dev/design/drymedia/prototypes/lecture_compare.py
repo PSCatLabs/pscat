@@ -1,12 +1,12 @@
-"""Builds docs/drymedia/lecture_compare_238.png (#238).
+"""Builds docs/dev/design/drymedia/lecture_compare_238.png (#238).
 
 The gallery still of gallery/chalkboard_lecture.ps across the top, three
 real lecture boards from the #233 reference board under it, and 1:1
 details of the render beside real crops at a similar scale. From the
 repo root:
 
-    python3 -I docs/drymedia/prototypes/lecture_compare.py docs/drymedia/refs \
-        gallery/renders/chalkboard_lecture.png docs/drymedia/lecture_compare_238.png
+    python3 -I docs/dev/design/drymedia/prototypes/lecture_compare.py docs/dev/design/drymedia/refs \
+        gallery/renders/chalkboard_lecture.png docs/dev/design/drymedia/lecture_compare_238.png
 
 Needs Pillow. The detail boxes are pixel boxes in the 2x still
 (2880x1700).
@@ -68,7 +68,7 @@ H = (40 + top.height + lab + pad + sum(row_height(r) + pad for r in (row2, row3,
 canvas = Image.new('RGB', (W + 2 * pad, H), (248, 247, 243))
 d = ImageDraw.Draw(canvas)
 y = pad
-d.text((pad, y), 'gallery/chalkboard_lecture.ps (pscat, the 2x gallery still) against real lecture boards from docs/drymedia/refs', font=font, fill=ink)
+d.text((pad, y), 'gallery/chalkboard_lecture.ps (pscat, the 2x gallery still) against real lecture boards from docs/dev/design/drymedia/refs', font=font, fill=ink)
 y += 34
 canvas.paste(top, (pad, y))
 y += top.height + pad

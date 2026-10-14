@@ -6,7 +6,7 @@
 % prelude defining the case, e.g.
 %
 %   { echo "/MODE 2 def /WHICH 1 def /SEED 3 def"; \
-%     cat docs/drymedia/prototypes/crossing.ps; } | pscat --page 300x300 --png a.png -
+%     cat docs/dev/design/drymedia/prototypes/crossing.ps; } | pscat --page 300x300 --png a.png -
 %
 % Draws ONE wide band through a catch, black on white, so a script can
 % compare two renders pixel by pixel (CANVAS_SURFACE.md 3.3's phi test):
@@ -18,7 +18,7 @@
 
 (lib/artkit.ps) run
 (lib/paintkit.ps) run
-(docs/drymedia/prototypes/dqcatch.ps) run
+(docs/dev/design/drymedia/prototypes/dqcatch.ps) run
 
 /MODE where { pop } { /MODE 2 def } ifelse
 /WHICH where { pop } { /WHICH 1 def } ifelse
