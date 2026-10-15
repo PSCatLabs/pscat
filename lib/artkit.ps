@@ -1140,6 +1140,41 @@ end
 
 % --- regions ---------------------------------------------------------
 
+% region scbboxok -> bool       (#295)
+% region scedgesok -> bool
+% Is a region dict's /BBox a literal array of exactly four numbers, and
+% (for a path region) its /Edges a literal array of numbers whose
+% length is a multiple of four? "Literal" matters: an executable array
+% (`{ ... }`) in either slot would run on the next bare reference to
+% it -- `scatter` binds /BBox and `siscan` / `sqmeasure` bind /Edges --
+% so the slot itself is refused as well as every element. Everything is
+% inspected on the operand stack (`get`, `type`, `xcheck`, `forall`
+% never run what they touch) and nothing is bound to a name, so these
+% are safe to call from scatter (sc-) and scarea (sq-) alike. `screct`
+% and `scpath` never produce a region that fails either test; only a
+% hand-built one can.
+/scbboxok {
+    dup /BBox known not { pop false } {
+        /BBox get
+        dup type /arraytype ne { pop false } {
+        dup xcheck { pop false } {
+        dup length 4 ne { pop false } {
+            true exch { scisnum and } forall
+        } ifelse } ifelse } ifelse
+    } ifelse
+} bind def
+
+/scedgesok {
+    dup /Edges known not { pop false } {
+        /Edges get
+        dup type /arraytype ne { pop false } {
+        dup xcheck { pop false } {
+        dup length 4 mod 0 ne { pop false } {
+            true exch { scisnum and } forall
+        } ifelse } ifelse } ifelse
+    } ifelse
+} bind def
+
 /screct {                                        % x y w h -> region
 % Checked on the operand stack, *before* any `def`: a name bound to a
 % procedure (or an executable name, or an operator) runs on its next
@@ -1408,7 +1443,21 @@ end
 % the measurement entirely, since a stored /Area always wins -- and
 % `/Count` scatter over such a region needs no area at all.
 /scarea {
-    dup /Area known { /Area get } { sqmeasure } ifelse
+% Checked on the stack before anything is bound (#295): a stored /Area
+% that is a procedure would otherwise be handed back to the caller to
+% run on its next bare reference, and a non-dict raised a raw typecheck
+% from `known`. A stored /Area still wins and is never re-measured, so
+% `region /Area <num> put` stays the escape hatch it documents; /Edges
+% is only checked on the path that actually measures them.
+    dup type /dicttype ne { scarea-needs-a-region } if
+    dup /Area known {
+        /Area get
+        dup scisnum not { scarea-area-must-be-a-number } if
+    } {
+        dup scedgesok not { scarea-region-edges-must-be-numbers } if
+        dup /Rule known not { scarea-region-needs-a-rule } if
+        sqmeasure
+    } ifelse
 } bind def
 
 /sqainsert {                                     % y -
@@ -1873,6 +1922,126 @@ end
 %   (a rectangle still contains an interior point) mustbe
 %%EndSelfTest
 %
+%%SelfTest: scatter-and-scarea-never-execute-a-hand-built-region-slot
+%   % #295: a hand-built region dict is as untrusted as the options.
+%   % `scatter` bound /BBox and `siscan` / `sqmeasure` bound /Edges, so
+%   % a procedure in either slot -- or as one element of it -- ran on
+%   % the next bare reference (and again per reference). A stored /Area
+%   % that was a procedure ran in the caller after `scarea` handed it
+%   % back. Every case asserts the name AND that nothing ran.
+%   /tgotfn { /tgot true def } def
+%   /tgot false def
+%   { << /Kind /rect /BBox { /tgot true def 0 0 100 100 } /Area 1 >>
+%     << /Mark { pop pop pop pop } >> scatter }
+%   /scatter-region-bbox-must-be-four-numbers
+%   (a procedure as the region's /BBox) mustguard
+%   tgot not (a procedure as /BBox: nothing ran) mustbe
+%   /tgot false def
+%   { << /Kind /rect /BBox [ { /tgot true def 0 } 0 100 100 ] /Area 1 >>
+%     << /Mark { pop pop pop pop } >> scatter }
+%   /scatter-region-bbox-must-be-four-numbers
+%   (a procedure inside the region's /BBox) mustguard
+%   tgot not (a procedure inside /BBox: nothing ran) mustbe
+%   /tgot false def
+%   { << /Kind /rect /BBox [ /tgotfn cvx 0 100 100 ] /Area 1 >>
+%     << /Mark { pop pop pop pop } >> scatter }
+%   /scatter-region-bbox-must-be-four-numbers
+%   (an executable name inside the region's /BBox) mustguard
+%   tgot not (an executable name inside /BBox: nothing ran) mustbe
+%   /tgot false def
+%   { << /Kind /rect /BBox [ 0 0 100 ] /Area 1 >>
+%     << /Mark { pop pop pop pop } >> scatter }
+%   /scatter-region-bbox-must-be-four-numbers
+%   (a /BBox of three numbers) mustguard
+%   { << /Kind /rect /BBox [ 0 0 (wide) 100 ] /Area 1 >>
+%     << /Mark { pop pop pop pop } >> scatter }
+%   /scatter-region-bbox-must-be-four-numbers
+%   (a string inside the region's /BBox) mustguard
+%   { << /Kind { /tgot true def /rect } /BBox [ 0 0 100 100 ] /Area 1 >>
+%     << /Mark { pop pop pop pop } >> scatter }
+%   /scatter-region-kind-must-be-rect-or-path
+%   (a procedure as the region's /Kind) mustguard
+%   tgot not (a procedure as /Kind: nothing ran) mustbe
+%   /tgot false def
+%   { << /Kind /blob /BBox [ 0 0 100 100 ] >>
+%     << /Mark { pop pop pop pop } >> scatter }
+%   /scatter-region-kind-must-be-rect-or-path
+%   (a /Kind that is neither rect nor path) mustguard
+%   { << /Kind /path /BBox [ 0 0 100 100 ] /Rule /nonzero
+%        /Edges { /tgot true def 0 0 100 0 } >>
+%     << /Mark { pop pop pop pop } >> scatter }
+%   /scatter-region-edges-must-be-numbers
+%   (a procedure as the region's /Edges) mustguard
+%   tgot not (a procedure as /Edges: nothing ran) mustbe
+%   /tgot false def
+%   { << /Kind /path /BBox [ 0 0 100 100 ] /Rule /nonzero
+%        /Edges [ 0 { /tgot true def 0 } 100 0 ] >>
+%     << /Mark { pop pop pop pop } >> scatter }
+%   /scatter-region-edges-must-be-numbers
+%   (a procedure inside the region's /Edges) mustguard
+%   tgot not (a procedure inside /Edges: nothing ran) mustbe
+%   /tgot false def
+%   { << /Kind /path /BBox [ 0 0 100 100 ] /Rule /nonzero
+%        /Edges [ 0 0 100 0 100 ] >>
+%     << /Mark { pop pop pop pop } >> scatter }
+%   /scatter-region-edges-must-be-numbers
+%   (an /Edges array that is not a multiple of four) mustguard
+%   { << /Kind /path /BBox [ 0 0 100 100 ] /Rule /nonzero >>
+%     << /Mark { pop pop pop pop } >> scatter }
+%   /scatter-region-edges-must-be-numbers
+%   (a path region with no /Edges) mustguard
+%   { << /Kind /path /BBox [ 0 0 100 100 ] /Edges [ 0 0 100 0 ] >>
+%     << /Mark { pop pop pop pop } >> scatter }
+%   /scatter-region-needs-a-rule
+%   (a path region with no /Rule) mustguard
+%   { << /Kind /rect /BBox [ 0 0 100 100 ] /Area { /tgot true def 100 } >>
+%     << /Mark { pop pop pop pop } /Density 0.01 >> scatter }
+%   /scarea-area-must-be-a-number
+%   (a procedure as the region's /Area, reached through /Density) mustguard
+%   tgot not (a procedure as /Area: nothing ran) mustbe
+%   /tgot false def
+%   { { /tgot true def } scarea }
+%   /scarea-needs-a-region
+%   (a procedure as scarea's region) mustguard
+%   tgot not (a procedure as scarea's region: nothing ran) mustbe
+%   /tgot false def
+%   { 5 scarea }
+%   /scarea-needs-a-region
+%   (a number as scarea's region) mustguard
+%   { << /Kind /rect /BBox [ 0 0 100 100 ] /Area { /tgot true def 100 } >> scarea }
+%   /scarea-area-must-be-a-number
+%   (a procedure as scarea's /Area) mustguard
+%   tgot not (a procedure as scarea's /Area: nothing ran) mustbe
+%   /tgot false def
+%   { << /Kind /path /BBox [ 0 0 100 100 ] /Rule /nonzero
+%        /Edges [ 0 { /tgot true def 0 } 100 0  100 0 100 100  100 100 0 0 ] >>
+%     scarea }
+%   /scarea-region-edges-must-be-numbers
+%   (a procedure inside scarea's /Edges) mustguard
+%   tgot not (a procedure inside scarea's /Edges: nothing ran) mustbe
+%   /tgot false def
+%   { << /Kind /path /BBox [ 0 0 100 100 ] /Rule /nonzero
+%        /Edges { /tgot true def 0 0 100 0 } >> scarea }
+%   /scarea-region-edges-must-be-numbers
+%   (a procedure as scarea's /Edges) mustguard
+%   tgot not (a procedure as scarea's /Edges: nothing ran) mustbe
+%   /tgot false def
+%   { << /Kind /path /BBox [ 0 0 100 100 ] /Edges [ 0 0 100 0 ] >> scarea }
+%   /scarea-region-needs-a-rule
+%   (a path region with no /Rule) mustguard
+%   % What must keep working: a stored /Area wins even over junk edges,
+%   % and the regions screct / scpath build pass every check.
+%   << /Kind /path /BBox [ 0 0 100 100 ] /Edges { junk } /Area 42 >> scarea
+%   42 eq (a stored /Area is returned without looking at /Edges) mustbe
+%   0 0 100 50 screct scarea 5000 eq (a screct region still measures) mustbe
+%   { newpath 0 0 moveto 100 0 lineto 100 50 lineto closepath scpath
+%     << /Mark { pop pop pop pop } /Count 5 /Seed 3 >> scatter }
+%   (a scpath region still scatters) mustpass
+%   { newpath scpath << /Mark { pop pop pop pop } /Count 3 >> scatter }
+%   (an empty scpath region still scatters) mustpass
+%   newpath scpath scarea 0 eq (an empty scpath region has no area) mustbe
+%%EndSelfTest
+%
 /scatter {                                       % region opts -
     % Everything is validated before a single mark is drawn, the way
     % paintkit's presets validate their whole dict up front: a bad
@@ -1891,6 +2060,19 @@ end
     /screg exch def
     screg /BBox known screg /Kind known and not
         { scatter-needs-a-region } if
+    % A hand-built region is checked as thoroughly as scatter's options
+    % (#295): /BBox is bound below and /Edges by siscan, so a procedure
+    % in either slot -- or in an element of either -- would run there.
+    % `screct` and `scpath` regions always pass. A missing /Rule on a
+    % path region is the same class as a missing /Edges (a raw
+    % undefined from siscan), so it gets a name too.
+    screg /Kind get dup /rect eq exch /path eq or not
+        { scatter-region-kind-must-be-rect-or-path } if
+    screg scbboxok not { scatter-region-bbox-must-be-four-numbers } if
+    screg /Kind get /path eq {
+        screg scedgesok not { scatter-region-edges-must-be-numbers } if
+        screg /Rule known not { scatter-region-needs-a-rule } if
+    } if
 
     scopts /Mark known not { scatter-mark-is-required } if
     /scmark scopts /Mark get def
