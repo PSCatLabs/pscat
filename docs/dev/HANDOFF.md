@@ -831,7 +831,7 @@ renders eight examples in both and compares block-downsampled output).
    copy's paper a grey haze, mottle and grain (`rel-page /Haze`, default 0.6,
    applied after the copier curve in `rlSet`/`rlCol`; `/Haze 0` is the old white
    copy; `notes/466-copy-paper-haze.md`). #467 shipped (`notes/467-misstrike-y-tail.md`).
-   #554 made the mis-strike configurable: `/MisStrike` (rate, default 0.01) and
+   #451 redrew `/Clip` as a gem clip of one wire (outer loop on the sheet, inner loop a dent, a rust ghost, `notes/451-paper-clip.md`). #554 made the mis-strike configurable: `/MisStrike` (rate, default 0.01) and
    `/MisStrikeScale` (size multiple of the 4x/2x, default 1), byte-identical at the
    defaults and not set by the presets (`notes/554-misstrike-keys.md`).
    #468 searched for

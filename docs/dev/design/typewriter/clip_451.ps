@@ -1,0 +1,35 @@
+%!PS-Adobe-3.0
+%%Title: released: the paper clip, an original and two copies (issue #451)
+%%BoundingBox: 0 0 1260 270
+% Demo for #451: /Clip draws a gem clip (two loops of one wire, drawn with
+% arcs), the dent it presses into the sheet, its shadow and a rust mark. The
+% same memo and seed on three sheets: the original, one photocopy and three.
+% The marks are drawn in the original's frame, so a copy copies the clip too
+% (grey, and with the paper's own marks lost to the copier's curve).
+%   pscat --png out.png --page 1260x270 --dpi 144 docs/dev/design/typewriter/clip_451.ps
+% Run from the repo root: the libraries load by relative path.
+(lib/artkit.ps) run
+(lib/surfacekit.ps) run
+(lib/handscript.ps) run
+(lib/typewriter_outlines.ps) run
+(lib/typewriter.ps) run
+(lib/released.ps) run
+1 setgray clippath fill
+/cs {   % x generation -> -  one 400 x 250 sheet at x
+    /cg exch def /cx exch def
+    gsave cx 10 translate
+    {
+        << /Text (Dear Sir, the file is closed. The matter of the third floor log was raised with the Superintendent and is now settled; please destroy your copy of the earlier forms.)
+           /Width 400 /Height 250 /Margin 40 /MarginTop 54
+           /Machine 4 /Seed 9 /Wear 1 /Ink [0.2 0.18 0.18] >> tw-type
+    } <<
+        /Width 400 /Height 250 /Seed 21 /Generation cg
+        /Age 0.6 /EdgeDark 0.4 /Lamp 0.2 /Clip 2
+        /Haze cg 3 ge { 0.2 } { 0.6 } ifelse
+    >> rel-page
+    grestore
+} bind def
+20 0 cs
+430 1 cs
+840 3 cs
+showpage
