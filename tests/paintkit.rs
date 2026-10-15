@@ -8385,6 +8385,31 @@ fn wet_perfill_is_asked_in_the_callers_user_space() {
     }
 }
 
+/// `pkdab` resolves a loaded colour per dab, at the dab's centre, and is
+/// asked there like the strokes are: the same render over a constant
+/// backdrop, a different one over a gradient.
+#[test]
+fn wet_perfill_reaches_the_dabs_of_pkdab() {
+    let run = |opts: &str| {
+        let it = wet_loaded(
+            "0 0 0 setrgbcolor",
+            "newpath 200 190 moveto 200 30 lineto \
+             << /Size 8 /Scatter 20 /ColorJitter 0 /Colors [[1 0 0] [0 0 1]] >> pkdab",
+            &format!("/Direction 270 /OneSided true /Layers 3 /Offset 80 /At [ 200 190 ] {opts}"),
+        );
+        pixels(&it)
+    };
+    let flat = "/Under { pop pop 0 1 0 }";
+    assert_eq!(run(flat), run(&format!("{flat} /PerFill true")));
+    let ramp = "/Under { exch pop 200 div 0 max 1 min 0 exch 0 exch }";
+    let (a, b) = (run(ramp), run(&format!("{ramp} /PerFill true")));
+    let worst = a.iter().zip(&b).map(|(a, b)| a.abs_diff(*b)).max();
+    assert!(
+        worst > Some(30),
+        "pkdab: per fill must differ from per pass"
+    );
+}
+
 /// A single-layer call has only the core, which has no backdrop: nothing is
 /// asked, per fill included.
 #[test]

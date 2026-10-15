@@ -483,7 +483,7 @@ pass, not per pixel. A mark tall against the gradient wants it per band
 ask the procedure once per cell of a grid over the mark and paint each
 softening pass once per cell, clipped to it, with the random stream replayed
 so every cell lays the same marks. A mark painted in loaded colours
-(`/Colors` on `pkbroad`, `pktrowel` or `pkfan`) can instead ask it per fill:
+(`/Colors` on `pkbroad`, `pktrowel`, `pkfan` or `pkdab`) can instead ask it per fill:
 add `/PerFill true` beside `/At` and the procedure is asked again at each
 fill's own position (the middle of an inked run, in the user space you call
 pkwet in), with no clipping and no extra runs of the mark. A mark made of many

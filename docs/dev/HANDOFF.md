@@ -1020,12 +1020,12 @@ renders eight examples in both and compares block-downsampled output).
   call's `[ /Under procedure, CTM at entry ]`, null otherwise). A new
   adopter must call `puwetat` (`puwet` plus the fill's x y) on every loaded
   colour, or its marks go solid inside a pull. `puwetat` is what lets
-  `/PerFill true` ask the backdrop at each fill: the three adopters pass the
-  run's middle stop, and the point is taken to device space and back through
+  `/PerFill true` ask the backdrop at each fill: the four adopters pass the
+  run's middle stop (`pkdab`: the dab's centre), and the point is taken to device space and back through
   the slot-9 CTM, so it is in the user space `pkwet` was called in, pass
   displacement included. It never touches the depth counter (an error leaves
   through the pass's own `stopped`), unlike `pqaskunder`, which runs before the
-  passes. pkoil's ridge colours still use `puwet` (per pass). `pkfan` adopts it too (L4, `pfColorRec`): its colour is set
+  passes. The ridge and mix colours of `pkoil` and `pkdab` still use `puwet` (per pass). `pkfan` adopts it too (L4, `pfColorRec`): its colour is set
   per *run* (`pfrun`) and per pressed ray (`pfray`) by `pfcolor`, from the
   bristle's `pfub` and the stored `/ColorJitter` draw `pfcj` (taken where it
   always was, so the stream doesn't move), because a bristle's runs span every

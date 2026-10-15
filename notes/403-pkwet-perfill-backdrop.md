@@ -15,7 +15,8 @@ Design calls, and why:
   with `/Box` (a banded call already gives each cell an answer; combining them
   has no meaning), a non-boolean, a procedure.
 - **A fill is an inked run, asked at its middle stop.** `ptemit`, `pmemit`,
-  `pmstamp`, `pfrun` and `pfray` set one colour per run, so that is the
+  `pmstamp`, `pfrun` and `pfray` set one colour per run, and `pkdab` one per dab
+  (asked at the dab's centre, where slot 14 is resolved), so that is the
   granularity (the middle stop, since a run's first stop would bias a long run
   toward its start). The three `*color` procs gained a second argument (the
   run's last stop) and pass the stop's x y on to `puwetat`; the first argument
@@ -24,7 +25,7 @@ Design calls, and why:
   long unbroken run (a vertical stroke down a vertical gradient) is asked once.
 - **`puwetat` is `puwet` plus a position.** A depth without `/PerFill`, and the
   core pass, take the old code (core: factor 0, skipped), so every existing
-  render is unchanged. pkoil's ridge colours still call plain `puwet`, which
+  render is unchanged. `pkoil`'s and `pkdab`'s ridge/mix colours still call plain `puwet`, which
   reads the per-pass answers (slot 7 is still filled in a `/PerFill` call).
 - **Frame slot 9** holds `[ proc, CTM at entry ]` for a `/PerFill` call, null
   otherwise. Both are copied into the frame, never read from `pqUnderProc`,
