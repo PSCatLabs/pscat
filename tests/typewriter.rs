@@ -632,7 +632,11 @@ fn bleed_gap_leaves_a_white_stripe_at_the_boundary() {
     };
     let plain = page("/Bleed 1");
     // the default, and a gap that has no bleed to reach a letter, move nothing
-    assert_eq!(ink(&plain), ink(&page("/Bleed 1 /BleedGap 0")), "a gap of 0");
+    assert_eq!(
+        ink(&plain),
+        ink(&page("/Bleed 1 /BleedGap 0")),
+        "a gap of 0"
+    );
     assert_eq!(
         ink(&page("/Bleed 0")),
         ink(&page("/Bleed 0 /BleedGap 6")),
@@ -653,8 +657,14 @@ fn bleed_gap_leaves_a_white_stripe_at_the_boundary() {
     eprintln!("rows cut: 1 yarn {one}, 3 yarns {three}");
     // one yarn is 2 px, and the strip is bounded by the transition's weave
     assert!(three >= 4, "a 3-yarn gap cut {three} rows");
-    assert!(three > one, "a wider gap cut no more rows ({one} vs {three})");
-    assert!(ink(&plain) != ink(&page("/Bleed 1 /BleedGap 1")), "no stripe at 1");
+    assert!(
+        three > one,
+        "a wider gap cut no more rows ({one} vs {three})"
+    );
+    assert!(
+        ink(&plain) != ink(&page("/Bleed 1 /BleedGap 1")),
+        "no stripe at 1"
+    );
     // and on a red run (/above) the stripe is cut there too
     let head = |gap: &str| {
         ink(&render(&format!(

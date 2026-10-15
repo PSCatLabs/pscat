@@ -310,7 +310,13 @@ over the whole glyph. Ribbon ink only (no effect under `/InkModel false`).
   level there is higher by `tWornD` (0.5) x `/WornBand` (half that on 70-unit shoulders),
   which at `/WornBand 1` takes 15% of the ink out of the lane (measured on an `l`, tests).
   A photocopy adds the band after its contrast curve. Elsewhere on the glyph the ink is
-  identical to the page without it.
+  identical to the page without it. **An artistic option, not a measured one (#538):** the
+  sign (a grey middle, darker tops) has no scan behind it. `tools/lane.py` finds the tops
+  the same or slightly lighter in all three board scans (peak -2%, -4%, -5%; mean -1.5%,
+  +1%, -8%), and `/WornBand 1` takes about 15% of the lane's ink, more than any
+  difference seen and with the opposite sign. Keep realistic values small (`0.3` is about
+  4.5%); a large one is a look. The code is unchanged, so a page with it set is the same as
+  before.
 - **`/Bleed` `[0..1]`, `/BleedInk` `[rgb]`, `/BleedSide` `/below | /above`: two-colour bleed.**
   On a black/red ribbon the colour boundary sits at a fixed height, and the part of the
   type face past it prints in the OTHER colour. `/BleedSide /below` (the default) puts the
@@ -329,13 +335,25 @@ over the whole glyph. Ribbon ink only (no effect under `/InkModel false`).
   not reach is the page without `/Bleed`, to the byte. With both extras on, the other
   colour's ink wears with the lane too. Not done: a clogged counter's fill stays in the
   main ink.
+- **`/BleedGap` `[yarns]`: a white pin stripe (#538).** NBS C431 says some ribbons are inked
+  so that a white "pin stripe" is left between the two colours, and that it stays white. This
+  is a strip of no ink, `/BleedGap` x `tYarn` (0.48 pt) tall, so one yarn is 40 glyph units
+  at 12 pt (1000 x 0.48 / `/Size` in general), centred on the boundary and cut from both
+  inks and from the clogged-counter fill. It sits inside the 60-unit transition, so the
+  blend still shows either side. It does nothing unless `/Bleed` is above 0 and the
+  boundary reaches the letter (a strike it does not reach is the page without it), and it
+  defaults to 0, so a page without it is the same to the byte. At body size a yarn is
+  about a pixel at 144 dpi; `/BleedGap 2` or more, or a large `/Size`, makes it easy to see
+  (`docs/dev/design/typewriter/ribbon_extras_538.png`).
 - **Not sourced.** The board has no two-colour sample (REFERENCES.md; Q3), and two
   searches for one (#422's, then #468's, which hue-ranked about 700 colour scans and found
   no page typed in red) found only retail listings and a description of the selector
   ("slightly raises or lowers the ribbon"), nothing on colours mixing at the boundary.
   The one public-domain source is text: NBS C431 pp. 10-12 says most bichrome ribbons
   show no diffusion, that when they do black spreads into red, and that some leave a
-  white "pin stripe" between the colours. The model is the mechanism (a type face wider than the printing half of the ribbon, a
+  white "pin stripe" between the colours (`/BleedGap`, #538). So `/Bleed` stays 0 by
+  default, and a red foot on black text is the mechanism only; a black-tinted head or foot
+  on a red run has the text's support. The model is the mechanism (a type face wider than the printing half of the ribbon, a
   selector that is a little out), not a measurement; the depth, transition and
   rates are set by eye. The arrangement varies by ribbon (the selector picks the top or the
   bottom quarter inch of a half-inch ribbon), hence `/BleedSide`.
@@ -487,7 +505,7 @@ Each is phrased as a decision, with a recommendation.
   was searched and found. Two results touch the recommendations: C431's text says to keep
   `/Bleed` rare and small, and the stem profile (peak and mean darkness) shows no grey
   middle or dark tops in three scans, the tops being the same or lighter, where `/WornBand`
-  models dark tops. The path left is a photograph of a page
+  models dark tops (#538 documents that as a look, and adds `/BleedGap` for the pin stripe). The path left is a photograph of a page
   typed on a machine the project can name.
 - **Q4. Defaults that follow the measurements.** At body size and screen
   resolution, measured jitter is barely visible, and the default page may look
