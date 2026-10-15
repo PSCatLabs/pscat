@@ -821,8 +821,11 @@ renders eight examples in both and compares block-downsampled output).
    applied after the copier curve in `rlSet`/`rlCol`; `/Haze 0` is the old white
    copy; `notes/466-copy-paper-haze.md`). Leftovers: #467, #468. #474 brought the
    haze's fine grain to the scans' strength with two `imagemask` stencils per
-   12pt square (`rlHazeGrain`, on `rlFieldSet`'s field colour;
-   `notes/474-copy-paper-haze-grain.md`); the mottle's crumpled-paper wave is #528.
+   16pt square (`rlHazeGrain`, on `rlFieldSet`'s field colour;
+   `notes/474-copy-paper-haze-grain.md`). #528 gave the mottle a crumpled-paper
+   wave: four tilted, stretched noise octaves (no axis-aligned lattice), a few
+   long creases (`rlHzCrease`) laid before the grain, and the grain's squares
+   cut to 8pt (`notes/528-copy-paper-wave.md`).
    #423 tuned the ribbon ink toward T2, T4 and T7: a thinner body and feather
    (`wBodyW`, `fW` in `tInkStrike`), a higher base hole level, a steeper
    pressure-to-density slope, pressure sd 0.12 on `/manual` and `/worn`, and a

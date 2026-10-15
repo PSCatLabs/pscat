@@ -375,7 +375,7 @@ RelState begin {
 % a run of 4pt segments 45 to 155pt long that wanders a few degrees a segment,
 % tilted rlCrAng degrees (one in five takes any tilt); rlCrA is the depth at
 % /Haze 0.6. A segment's grey is the paper field's there, less or plus the depth.
-/rlCrD 6 def  /rlCrA 0.03 def  /rlCrAng -35 def
+/rlCrD 6 def  /rlCrA 0.045 def  /rlCrAng -35 def
 /rlHzCrease {
     rlHaze 0.6 div rlCrA mul /rcA exch def
     1 setlinecap
@@ -960,7 +960,7 @@ rlDefaults
 % @param: /Skew [degrees] The sheet's tilt on the scanner bed, within 10 degrees; the bed shows around it (default 0)
 % @param: /Backdrop [rgb array] The scanner bed or desk around a skewed sheet and showing through punch holes; any value draws it (default none, and light grey when the sheet is skewed)
 % @param: /Generation [count] Photocopy generations, 0 to 8: 0 is the original, 1 a copy, 3 a copy of a copy of a copy (default 0)
-% @param: /Haze [0..1] The grey of a photocopy's paper: toner fog that takes the copy's white down to a light grey (about 0.90 at the default, 0.84 at 1), with soft blotches of thicker and thinner toner and a fine grain of lighter and darker flecks under the type. Applies only when /Generation is above 0; 0 gives the plain white copy (default 0.6)
+% @param: /Haze [0..1] The grey of a photocopy's paper: toner fog that takes the copy's white down to a light grey (about 0.90 at the default, 0.84 at 1), with a crumpled-paper wave of thicker and thinner toner (soft blotches, tilted noise and a few long creases) and a fine grain of lighter and darker flecks under the type. Applies only when /Generation is above 0; 0 gives the plain white copy (default 0.6)
 % @param: /Speckle [0..1] Each copy's black specks and streaks (default 1)
 % @param: /CopyEdge [0..1] How dark the copier's lid and edge shadows are (default 0.6)
 % @param: /Punch [count] Punch holes down the left margin: 2 and 3 are the standard spacings (default 0)
