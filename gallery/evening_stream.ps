@@ -35,6 +35,9 @@
 %                    (a half-light, then its core) lights the lumpy
 %                    underside from the glow below, its load following
 %                    the same sun glow along each cloud (#462)
+%                    and the body worked wet into the sky asked at each
+%                    stroke's own place (pkwet /PerFill, #491), not one sky
+%                    colour per cloud
 %   one canvas       pkcanvas (#182) once, first: every light, dry mark
 %   (#182)           (water lines, foam, meadow, grass tips) catches on
 %                    the same weave via /Touch
@@ -270,6 +273,18 @@
     evcx evcw 0.15 mul add evcy evch 0.1 mul add
     evcx evcy curveto closepath
 } def
+
+% -> dict   pkwet's options for a cloud's body: the wet edge is worked into
+% the sky asked at each fill's own place (#491, /PerFill), so a stroke at the
+% cloud's top blends toward the dark sky up there and one lower down toward the
+% lighter sky there, not one sky colour for the whole cloud. The lit underside's
+% passes keep the one sky colour: per fill they lightened the fringe under the
+% cream without bringing it closer to the sky, and the top, where the gradient
+% shows, is the body's.
+/evcwet {
+    << /Soft 0.6 /Under { evskyat } /PerFill true
+       /At [ evcx evcw 2 div add evcy evch 0.5 mul add ] >>
+} bind def
 /evcloud {
     srand /evcw exch def /evcy exch def /evcx exch def
     /evch evcw 0.36 mul def
@@ -282,7 +297,7 @@
       << /Count evcn /Radius evcr /Squash 0.7 >> pkscumblein
       << /Width evcr 2.2 mul /Charge 0.75 /Depletion 0.5 /Edge 0.4 /ColorMix 0.8
          /Colors [ [ evcbody 1.12 shade ] [ evcbody 0.88 shade ] ] >> pkbroad }
-    << /Soft 0.6 /Under evcunder >> pkwet
+    evcwet pkwet
     % ... then the light the glow throws up under it: /Light 270 keeps only
     % the circles along the underside, in a band that follows every lump of
     % it. The cream-peach of the underside, toned toward the sky behind it,
