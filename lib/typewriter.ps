@@ -777,7 +777,8 @@ grestore
     % beyond: #477 moved a light strike's loss of ink from holes to thinning
     % (tE, below), so a light strike is faint, not a screen of pin-holes. A
     % photocopy keeps #423's slope of 3 and no thinning: its toner drops a
-    % light strike out in specks and fills a thin stroke in.
+    % light strike out in specks and fills a thin stroke in; it has no tE (the
+    % square erosion), but erodes in y alone, tEy below (#547).
     1 tRibbon sub dup 0.2 mul exch dup mul dup mul 0.45 mul add 0.15 add
     tCopyC 0 gt { } { tFaceK tEliteHole mul tRibbon mul add } ifelse       % not on a copy: the contrast curve would scale it
     1 tPr sub dup 0 gt {
@@ -1051,7 +1052,7 @@ end definefont pop } exec
 % @param: /Ribbon [0..1] Ribbon wetness: how far the ink spreads past the type face (0 for none), and how solid the ink is: a drier ribbon leaves more of the weave's voids open (default 0.7)
 % @param: /InkModel [boolean] true draws ribbon ink (the weave's voids, a feathered edge, clogged counters, a heavy side, density from pressure and /Ribbon); false draws flat ink, the glyph filled and stroked solid (default true)
 % @param: /Strike [integer] The strike index: a second strike at the same cell (a strikeover, a bold double strike) needs a new index to get its own variation (default 0)
-% @param: /Copies [count] Photocopy generations the type has been through, 0 for the original: each adds spread, fills the counters in and sharpens the contrast of the ink's coverage, so dark strikes close up and light ones drop out; 1 is a first copy, 3 a copy of a copy of a copy (default 0)
+% @param: /Copies [count] Photocopy generations the type has been through, 0 for the original: each adds spread, fills the counters in and sharpens the contrast of the ink's coverage, so dark strikes close up and light ones drop out, and erodes the thin horizontal strokes (the bars of e and E, the tops of bowls, serifs) while the stems stay, a light strike losing more; 1 is a first copy, 3 a copy of a copy of a copy (default 0)
 % @param: /WornBand [0..1] A worn lane of the ribbon (#422): the band of ribbon that every x-height strike hits has been used over and over, so the middle of each letter prints lighter than its ascender tops and descenders, at the same height in every strike (the band is fixed in the cell, so a bent slug moves against it). 0 is none, 1 is a lane worn to a screen (about 15% of the lane's ink). An artistic option, not a measured one (#538): three board scans show no grey middle or dark tops, the tops being the same or slightly lighter, so keep realistic values small (0.3 takes about 4.5%). Ribbon ink only (default 0)
 % @param: /Bleed [0..1] Two-colour ribbon bleed (#422): how far the boundary between a black/red ribbon's halves reaches into the type face; the part of a letter past it prints in /BleedInk, with a ragged edge, and the boundary wanders from strike to strike, so some strikes print clean and some take a coloured foot (or head). 0 is none. The boundary starts outside the face (360 units below the baseline, or 800 above it) and /Bleed 1 moves it in by up to 540 glyph units, a hashed fraction of that for each strike (so at most 180 units above the baseline on /below). Most bichrome ribbons show no diffusion (NBS C431), so keep it 0 or small; where there is any, black runs into red, so a red foot on black text is the mechanism only. Ribbon ink only (default 0)
 % @param: /BleedInk [rgb array] The colour of the ribbon's other half, for /Bleed: red under black text, black under a red run (default [0.62 0.12 0.10])
