@@ -199,6 +199,17 @@ agency's seal or marking.
 `docs/dev/design/typewriter/release_vs_real.png` sets crops of it beside the reference
 scans T14, T15 and T10.
 
+The gallery piece *Released in Part* (`gallery/released_memo.ps`, issue #215) is a
+whole page made this way: an elite manual (`/Pitch 12 /Size 11.5`), tabbed
+numbered paragraphs, a strikeover, an x-out, underscores, marker redactions, two
+stamps, initials and a note, through one copy. One tip from it: `rel-page` gives
+the type `/Copies` equal to `/Generation`, which at 1 already fills most
+counters; set a smaller `/Copies` (0.35 there) in the `tw-type` dict to keep a
+first copy's type open while the page still goes through the copier.
+`docs/dev/design/typewriter/tools/blind_compare.py` sets crops of it, unlabelled and
+shuffled, among strips from three reference scans (`docs/dev/design/typewriter/blind_grid.png`), and the
+whole page beside T1 (`docs/dev/design/typewriter/memo_vs_real.png`).
+
 ## The font catalog
 
 `fonts/catalog/` — 61 libre outline faces loaded from disk at

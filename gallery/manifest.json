@@ -118,6 +118,18 @@
   "jersey": {
    "title": "jersey",
    "guide": "docs/guides/lettering.md"
+  },
+  "typewriter": {
+   "title": "typewriter",
+   "guide": "docs/guides/fonts.md"
+  },
+  "typewriter_outlines": {
+   "title": "typewriter_outlines",
+   "guide": "docs/guides/fonts.md"
+  },
+  "released": {
+   "title": "released",
+   "guide": "docs/guides/fonts.md"
   }
  },
  "pieces": [
@@ -790,6 +802,34 @@
    "alt": "Evening Stream, an autumn evening with a glowing sky, a stream tumbling over a small fall between dark banks, autumn trees and a cabin with a lit window",
    "blurb": "An autumn evening: a stream comes out of the sunset glow, over a little fall, past a cabin with its lamp lit.",
    "technique": "Painted on one shared canvas (`pkcanvas`) with the newer paintkit tools and no landscape helper. A criss-cross sky comes from a broad brush loaded with two neighbouring sky colours; clouds are scumbled in tiny circles (`pkscumblein`) and lit along their lumpy undersides by the same brush's `/Light`, as from the glow below; a backlit wood is tapped in with `pktap` and a loaded `pkdab`, its reflection pulled down whole by one directional `pkwet`. Autumn trees take warm highlights and cool shadows, evergreens a fan loaded dark and lit with `/Light`, the rocks and cabin come from a palette knife, a `pkpull` fall and grass finish the bank, and `pkzigzag` light on the water is caught on the canvas weave. The stream's banks, its head, the far shore and the near banks' rims are brushed with `pkbrushedge`, so no big mass keeps a ruled vector edge: the far shore and the banks carry the meadow's own light to the edge (a procedural `/Mass`, lit under the glow and plain toward the viewer), and a near bank cuts the stream back in exactly where the stream runs behind it (a region list for `/Under`)."
+  },
+  {
+   "id": "released_memo",
+   "title": "Released in Part",
+   "category": "lettering",
+   "tags": [
+    "typewriter",
+    "document"
+   ],
+   "libraries": [
+    "artkit",
+    "handscript",
+    "released",
+    "surfacekit",
+    "typewriter",
+    "typewriter_outlines"
+   ],
+   "featured": false,
+   "playground": false,
+   "issue": 215,
+   "added": "2026-10-14",
+   "source": "gallery/released_memo.ps",
+   "render": "gallery/renders/released_memo.png",
+   "page": "612x792",
+   "speed": 1200,
+   "alt": "Released in Part, a typed 1962 office memorandum on a photocopied page: a memo header, numbered paragraphs, a strikeover, an x-out and underlined words, two names covered by marker bars, a received date stamp, a released-in-part stamp, punch holes and handwritten initials and a note",
+   "blurb": "A typed 1962 memo about two lost cans of aerial film, photocopied, stamped and released decades later with the names blacked out.",
+   "technique": "Typed with `tw-type` on the `/Typewriter` font: an elite manual (`/Pitch 12`) with a worn ribbon, so every strike is its own (the weave shows through the ink, edges feather, some counters clog, a few letters land high or light). The memo header, the tab stops, a strikeover (`<o>was|were</o>`), an x-out, underscores and the redactions (`<r>..</r>`, drawn by `rel-redact` as marker bars) are markup in one text string. `rel-page` wraps the typing: aged and folded paper, two punch holes, the scanner's tilt and lamp, then one photocopy generation, which turns the paper white, greys the stamps and closes the type up a little. The date stamp, the released-in-part stamp and the handwritten initials and note (`lib/handscript.ps`) are marks over the page, so the copy copies them. The office, people and project are invented."
   }
  ],
  "groups": [
@@ -1065,7 +1105,7 @@
    "title": "The specimen poster",
    "alt": "The Type 3 font library specimen poster",
    "blurb": "/Neon (glow by overdraw), /Marquee (bulbs, glints, burnouts), /Constellation (star charts) and /Lapidary (chiselled stone).",
-   "source": "lib/fonts",
+   "source": "examples/font_library.ps",
    "render": "lib/fonts/specimen.png"
   },
   {
@@ -1074,7 +1114,7 @@
    "title": "The second folio",
    "alt": "The Type 3 font library specimen, second folio",
    "blurb": "/Circuitry (copper traces, pads and vias), /Stitchwork (cross-stitch on the 45 degree grid) and /Confetti (a thrown handful, still falling).",
-   "source": "lib/fonts",
+   "source": "examples/font_library2.ps",
    "render": "lib/fonts/specimen2.png"
   },
   {
@@ -1093,7 +1133,7 @@
    "title": "The Standard Thirty-Five",
    "alt": "The standard 35 fonts specimen",
    "blurb": "Every classic name (Palatino, Bookman, Avant Garde, Zapf Chancery, Symbol, Dingbats) resolved to an open font.",
-   "source": "fonts/catalog",
+   "source": "examples/font_catalog.ps",
    "render": "fonts/catalog/specimen-1.png"
   },
   {
@@ -1102,7 +1142,7 @@
    "title": "The Catalog",
    "alt": "The font catalog specimen",
    "blurb": "A face for every occasion: 35 families across serif, sans, slab, script, blackletter, western, horror, pixel, sci-fi and more.",
-   "source": "fonts/catalog",
+   "source": "examples/font_catalog.ps",
    "render": "fonts/catalog/specimen-2.png"
   },
   {

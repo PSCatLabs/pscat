@@ -584,6 +584,8 @@ renders eight examples in both and compares block-downsampled output).
    adds an entry to `gallery/manifest.json` (#251: the one list behind
    the site gallery, the README highlights and `show.sh`; never edit
    `gallery.html`) and runs `python3 scripts/gallery.py sync`.
+   The entry's source gets its "View source" window on the site for free
+   (#461: staged to `_site/source/`, shown by `site/source-viewer.js`).
    `gallery/README.md` is the brief, and Hundred Lines
    (`gallery/hundred_lines.ps`) shows the /HandScript font reused.
    The Stage 15 faces (`lib/fonts/`) and the Stage 20 style packs
@@ -749,7 +751,11 @@ renders eight examples in both and compares block-downsampled output).
    identical in pscat and gs and never touches `rand`. Compare against
    `docs/dev/design/typewriter/release_vs_real.png`
    (`docs/dev/design/typewriter/tools/release_compare.py`); `notes/214-released-look.md`.
-   #215 builds the gallery specimen and blind comparison on it.
+   #215 shipped the gallery piece `gallery/released_memo.ps` (*Released in
+   Part*) and the blind boards `docs/dev/design/typewriter/blind_grid.png` and
+   `memo_vs_real.png` (`docs/dev/design/typewriter/tools/blind_compare.py`; the
+   key is in the PR, not the repo); `notes/215-released-memo.md`. Leftovers:
+   #466, #467, #468.
    #242 shipped the charcoal gallery piece, `gallery/lincoln_charcoal.ps`
    (*Study after Berger, 1864*), and `lib/etching.ps`'s `et-tonemap`, which
    returns a photo as a grid of darkness for any piece that wants a
