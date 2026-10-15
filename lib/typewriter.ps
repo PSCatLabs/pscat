@@ -451,11 +451,13 @@ TWState begin {
 % tFaceK is 0 at 10 and 1 at 12, set in tDerive from /Pitch.
 /tEliteHole 0.18 def  /tFaceK 0 def
 /tE 0 def  /tE0 0 def                           % the strike's erosion, and a saved copy
-/tEy 0 def  /tEr 0 def                          % a copy's erosion in y, and the spread's reach (#547)
+/tEy 0 def  /tEr 0 def  /tEry 0 def                          % a copy's erosion in y, and the spread's reach (#547)
 % a copy loses its thin horizontal strokes (#547): the erosion in y, in glyph
 % units, is tECopy x the copy loss x the strike's hole level (a light strike
-% loses more), so a stroke under 2 x tEy goes after the spread is counted in
-/tECopy 40 def
+% loses more). The clip grows the glyph by the spread's reach tEr in x but by
+% tEryK of it in y, and the body is as wide as the reach (stems stay fat), so a
+% stroke under about 2 x tEy thick goes and one a little thicker thins.
+/tECopy 50 def  /tEryK 0.5 def
 /tGrowOff [ [0 0] [1 0] [0.7071 0.7071] [0 1] [-0.7071 0.7071]
             [-1 0] [-0.7071 -0.7071] [0 -1] [0.7071 -0.7071] ] def
 /tYarn 0.48 def                                 % yarn pitch, points
@@ -574,10 +576,10 @@ grestore
     tE tE neg tShiftClip  tE neg tE neg tShiftClip
 } bind def
 % a copy's erosion (#547): the strike's ink is clipped to the glyph grown by the
-% spread's reach tEr (nine shifted copies in one path: a union under nonzero,
-% since every shifted contour winds the same way) and shrunk by tEy in y only,
-% the grown glyph shifted up and down and intersected. A stroke whose thickness
-% after the spread is under 2 x tEy goes, and a vertical stem keeps its width,
+% spread's reach (tEr in x, tEry in y: nine shifted copies in one path, a union
+% under nonzero since every shifted contour winds the same way) and shrunk by tEy
+% in y only, the grown glyph shifted up and down and intersected. A stroke
+% whose thickness is under about 2 x tEy goes, and a vertical stem keeps its width,
 % as in T15, whose thin horizontals are gone and whose stems stay. A clip only,
 % so the ink stays darken-only. Needs the CTM at tMat; leaves it there.
 % dy -> -
@@ -585,7 +587,7 @@ grestore
     /tGy exch def
     newpath
     tGrowOff {
-        aload pop tEr mul exch tEr mul exch tGy add
+        aload pop tEr mul exch tEry mul exch tGy add
         tMat setmatrix translate xS 1 scale tGlyph 0 get exec tGlyph 1 get exec
     } forall
     tMat setmatrix clip newpath
@@ -806,6 +808,8 @@ grestore
     /tEy 0 def
     tCopyC 0 gt {
         /tEr inkW fW add 2 div dup 0 lt { pop 0 } if def
+        /tEry tEr tEryK mul def
+        /wBodyW tEr 2 mul def                   % the body fills the clip's reach: stems stay fat
         /tEy tECopy tCopyC mul pBody dup 1 gt { pop 1 } if dup 0 lt { pop 0 } if mul def
     } if
     % the weave's frame: per strike, or per key when strikes do not vary

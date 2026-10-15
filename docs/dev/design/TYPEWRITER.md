@@ -522,13 +522,16 @@ No new page-scale CI test is added. #204's concern about CI time stands.
   a page cannot do. **#547** (`notes/547-copy-outline-erosion.md`) did it in
   `tInkStrike` and retired `/Dropout`, `rlDropClip` and the bar replay
   (`rlBarsAgain`): on a copy (`/Copies > 0`) the feather and the body are drawn
-  inside a clip of the glyph grown by the spread's reach (`tEr`, nine shifted
-  copies in one path) and shrunk by `tEy` in y only (shifted up and down and
-  intersected, `tGrowClip`). A stroke whose thickness after the spread is under
-  2 x `tEy` goes (the bars of `e` and `E`, the tops and bottoms of bowls, the
-  serifs and underscores), a stem is untouched. `tEy` is `tECopy` (40 glyph
-  units) x the copy loss x the strike's hole level, so a light strike loses more
-  and a darker one only thins. Y only, not `tErode`'s square, because the face is
+  inside a clip of the glyph grown by the spread's reach (`tEr` in x, half of it
+  in y, `tEryK`; nine shifted copies in one path) and shrunk by `tEy` in y only
+  (shifted up and down and intersected, `tGrowClip`); the body is as wide as the
+  reach, so the stems are fat. A stroke thinner than about 2 x `tEy` goes (the
+  bars of `e` and `E`, the tops and bottoms of bowls, the serifs and
+  underscores) and a thicker one thins, a stem is untouched. `tEy` is `tECopy`
+  (50 glyph units) x the copy loss x the strike's hole level, so a light strike
+  loses more and a darker one only thins. A copy is no longer heavier in total
+  ink than the original by dark pixels (the thin horizontals are most of a
+  letter's length), but its stems are fatter. Y only, not `tErode`'s square, because the face is
   near monoline (65 to 80 units everywhere): a square erosion thins the stems
   and kills the diagonals first, where T15's face has thin horizontals and heavy
   stems. **#450** (`notes/450-copier-softening-of-marks.md`):

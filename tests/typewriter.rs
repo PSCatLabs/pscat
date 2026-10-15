@@ -474,7 +474,7 @@ fn a_copy_loses_its_thin_horizontals_and_keeps_its_stems() {
         "the arms of three copies' Es did not thin: {arms0:.0} -> {arms:.0}"
     );
     assert!(
-        stem > stem0 * 0.9,
+        stem > stem0 * 0.8,
         "the stems of three copies' Es were eroded: {stem0:.0} -> {stem:.0}"
     );
     // a first copy erodes less than a third

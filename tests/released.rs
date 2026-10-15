@@ -154,11 +154,23 @@ fn a_copy_whitens_the_paper_and_the_type_gets_fatter() {
     };
     let (c0, c3) = (typed(""), typed("/Copies 3"));
     let dark = |p: &[u8]| p.iter().filter(|&&v| v < 128).count() as f64;
+    // the spread and the filled counters, without the erosion of the thin strokes (#547)
+    let fat = page(
+        "TWState /tECopy 0 put << /Text (Dear Sir, the file is closed. a e o) /Width 300 \
+         /Height 200 /Margin 30 /Machine 4 /Seed 3 /Copies 3 >> tw-type",
+    );
     assert!(
-        dark(&c3) > dark(&c0) * 1.1,
+        dark(&fat) > dark(&c0) * 1.1,
         "three copies put down more ink: {} against {} dark pixels",
-        dark(&c3),
+        dark(&fat),
         dark(&c0)
+    );
+    // the erosion takes the thin horizontals back out of that
+    assert!(
+        dark(&c3) < dark(&fat) * 0.8,
+        "the eroded copy keeps {} of {} dark pixels",
+        dark(&c3),
+        dark(&fat)
     );
     // /Copies 0 is the plain page, pixel for pixel
     assert_eq!(differing(&c0, &typed("/Copies 0")), 0);
@@ -169,10 +181,11 @@ fn a_copy_whitens_the_paper_and_the_type_gets_fatter() {
          /Machine 4 /Seed 3 /Copies 3 >> tw-type",
     );
     // the copy's paper and chain of skews differ, but the ink counts agree
-    // closely: both are the same fat type
+    // roughly (the eroded strokes are thin, so a sub-pixel shift moves their
+    // dark pixels more than a stem's): both are the same fat, eroded type
     let ink = |p: &[u8]| p.iter().filter(|&&v| v < 100).count() as f64;
     assert!(
-        (ink(&through) / ink(&by_hand) - 1.0).abs() < 0.12,
+        (ink(&through) / ink(&by_hand) - 1.0).abs() < 0.3,
         "{} against {} dark pixels",
         ink(&through),
         ink(&by_hand)
