@@ -4,7 +4,7 @@ Found while working #505 (see `notes/505-grestore-bottom-currentgray.md`).
 `currentcmykcolor`, `currentcolor`, `currentlinecap`, `currentlinejoin`,
 `currentmiterlimit` and `currentstrokeadjust` were undefined in pscat.
 Ghostscript 10.07.1 is the reference: each was probed in gs first, and
-`tests/readback_operators.rs` pins 21 programs to gs's output (plus a
+`tests/readback_operators.rs` pins 20 programs to gs's output (plus a
 local-only re-run in gs, `ghostscript_prints_the_pinned_lines`).
 
 ## What each reads back
