@@ -6,8 +6,8 @@
 //! `/HandScript` and `lib/hangul.ps`'s `/HangulScript` — two historical
 //! outliers that predate the `lib/fonts/` convention), artkit's mood
 //! palettes, the page templates (`lib/pagekit.ps`), and artkit's/the
-//! style packs'/handscript's/hangul's/paintkit's major procedures. It
-//! exists so an agent can discover what's
+//! style packs'/handscript's/hangul's/the tagged `lib/*.ps` kits' major
+//! procedures. It exists so an agent can discover what's
 //! *actually installed* in the running `pscat` without embedding
 //! prose documentation (which drifts — `psart`'s `SKILL.md` had
 //! already fallen behind artkit's paragraph-flow, hyperbolic-geometry,
@@ -23,7 +23,8 @@
 //! of two places depending on whether its `.ps` file has been migrated
 //! to the `% @...` doc-comment tag convention (issue #94):
 //!
-//! - **Migrated** (`lib/paintkit.ps` so far): `build.rs` parses
+//! - **Migrated** (any file carrying `% @` tags, e.g.
+//!   `lib/paintkit.ps`): `build.rs` parses
 //!   `% @kind:`/`% @summary:`/`% @example:`/`% @param:`/`% @internal`/
 //!   `% @requires:` tags directly out of the `.ps` source at build
 //!   time and generates [`GeneratedEntry`] rows plus the matching
@@ -52,16 +53,19 @@
 //! `tests/capabilities.rs` cross-check — migrating a file changes
 //! *where* its metadata comes from, not what's verified about it.
 //!
-//! Most procedures take positional PostScript stack arguments, not
-//! named ones — there's nothing here as clean as a template's
-//! content-dict keys to model as [`Param`]s, so a procedure's calling
-//! convention is carried in `example` (the stack-effect comment
-//! already written at its definition site) instead, and `parameters`
-//! stays empty. Templates, the handwriting pairs
-//! `hs-write`/`hs-linecount`/`hg-write`/`hg-linecount`, and artkit's
-//! `scatter` (whose calling convention genuinely *is* one dict with
-//! named, defaulted keys — same shape as a template's content dict)
-//! use `parameters` for real.
+//! `parameters` is populated for dict-driven APIs: an entry whose
+//! calling convention is one options (or content) dict with named
+//! keys. That covers the page templates, plus procedures such as the
+//! handwriting pairs and artkit's `scatter` (the same shape as a
+//! template's content dict), and many more across the migrated files.
+//! Their rows come from a migrated file's `% @param:` tags, or from a
+//! hand-written [`Param`] list in [`ENTRIES`] for an unmigrated file.
+//! Procedures that take positional PostScript stack arguments have no
+//! such structure, so a procedure's calling convention is carried in
+//! `example` (the stack-effect comment already written at its
+//! definition site) and `parameters` stays empty.
+//! `docs/dev/CAPABILITIES.md` has the full rules and a `jq` filter
+//! that lists which entries carry `parameters`.
 //!
 //! `example` alone isn't enough to actually run something, though — a
 //! page template errors `undefined: Palettes` unless `lib/artkit.ps`
@@ -2033,7 +2037,7 @@ static ENTRIES: &[Entry] = &[
 
 /// Builds the full catalog: [`ENTRIES`] (hand-maintained, unmigrated
 /// files) plus [`GENERATED_ENTRIES`] (`build.rs`-parsed from `% @...`
-/// tags in migrated files -- `lib/paintkit.ps` so far, issue #94) plus
+/// tags in migrated files, e.g. `lib/paintkit.ps`, issue #94) plus
 /// every font `findfont` can currently reach (from
 /// [`font::catalog_entries`], so this can't disagree with
 /// `--fonts`/`resolve` about what's installed).
