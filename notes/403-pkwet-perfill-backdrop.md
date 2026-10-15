@@ -50,5 +50,5 @@ Byte identity: `scripts/identity_check.sh` renders every file that loads
 lib/paintkit.ps`, and a control that opts in (`/PerFill true`) differs as it
 must. No committed render changed.
 
-Deferred: adopting `/PerFill` in a gallery piece (#TBD-gallery), and splitting a
-long run into per-stop fills so one unbroken stroke follows the backdrop too.
+Deferred: adopting `/PerFill` in a gallery piece (#491), and splitting a long
+run into per-stop fills so one unbroken stroke follows the backdrop too (#492).
