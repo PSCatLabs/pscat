@@ -43,12 +43,11 @@ impl Drop for Scratch {
 /// A wrapper that records its cwd in `log`, then runs the real pscat. With
 /// `shrink`, the dpi is halved for any file whose name contains `shrink`
 /// (so the PNG differs), which stands in for "this binary behaves differently".
-/// With `fail = Some((pattern, rc, only_in))`, a file whose name contains
-/// `pattern` still renders (so a canvas is written, as pscat does after an
-/// error) but the wrapper then prints a message naming the output path and
-/// exits `rc`; `only_in` limits that to runs whose cwd ends with it.
-fn wrapper(path: &Path, log: &Path, shrink: &str, fail: Option<(&str, i32, &str)>) {
-    let (fpat, frc, fin) = fail.unwrap_or(("", 0, ""));
+/// With `fail = Some((pattern, rc))`, a file whose name contains `pattern`
+/// still renders (so a canvas is written, as pscat does after an error) but
+/// the wrapper then prints a message naming the output path and exits `rc`.
+fn wrapper(path: &Path, log: &Path, shrink: &str, fail: Option<(&str, i32)>) {
+    let (fpat, frc) = fail.unwrap_or(("", 0));
     let script = format!(
         "#!/bin/bash\n\
          echo \"$PWD\" >> '{log}'\n\
@@ -60,17 +59,15 @@ fn wrapper(path: &Path, log: &Path, shrink: &str, fail: Option<(&str, i32, &str)
          fi\n\
          if [ -n '{fpat}' ]; then\n\
            case \"$*\" in *'{fpat}'*)\n\
-             case \"$PWD\" in *'{fin}') '{real}' \"${{args[@]}}\" >/dev/null 2>&1\n\
-               echo \"%%[ Error: undefinedfilename; wrote $*]%%\"\n\
-               exit {frc} ;;\n\
-             esac ;;\n\
+             '{real}' \"${{args[@]}}\" >/dev/null 2>&1\n\
+             echo \"%%[ Error: undefinedfilename; wrote $*]%%\"\n\
+             exit {frc} ;;\n\
            esac\n\
          fi\n\
          exec '{real}' \"${{args[@]}}\"\n",
         log = log.display(),
         shrink = shrink,
         fpat = fpat,
-        fin = fin,
         frc = frc,
         real = env!("CARGO_BIN_EXE_pscat"),
     );
@@ -105,8 +102,8 @@ fn setup(tag: &str, base_shrinks: &str) -> Setup {
 fn setup_with(
     tag: &str,
     base_shrinks: &str,
-    base_fail: Option<(&str, i32, &str)>,
-    head_fail: Option<(&str, i32, &str)>,
+    base_fail: Option<(&str, i32)>,
+    head_fail: Option<(&str, i32)>,
 ) -> Setup {
     let s = Scratch::new(tag);
     let base_tree = s.0.join("base_tree");
@@ -282,7 +279,7 @@ fn both_bins(su: &Setup) -> Vec<&str> {
 fn a_file_that_fails_identically_in_both_trees_is_skipped_with_a_warning() {
     // #504: tw_proto.ps fails the same way in both trees; that is the file's
     // own problem, not a difference, so the run must not exit 1 for it.
-    let fail = Some(("koch_snowflake", 3, ""));
+    let fail = Some(("koch_snowflake", 3));
     let su = setup_with("skip", "", fail, fail);
     let mut args = both_bins(&su);
     args.extend(["--control", su.control.to_str().unwrap()]);
@@ -304,7 +301,7 @@ fn a_file_that_fails_identically_in_both_trees_is_skipped_with_a_warning() {
 #[test]
 fn a_real_difference_still_exits_1_next_to_a_skipped_file() {
     // The control for the skip: the same skipped file, plus a page that really differs.
-    let fail = Some(("koch_snowflake", 3, ""));
+    let fail = Some(("koch_snowflake", 3));
     let su = setup_with("skipdiff", "sierpinski", fail, fail);
     let o = run(&su, &both_bins(&su));
     let t = text(&o);
@@ -315,7 +312,7 @@ fn a_real_difference_still_exits_1_next_to_a_skipped_file() {
 
 #[test]
 fn a_failure_in_one_tree_only_is_still_an_error() {
-    let su = setup_with("headonly", "", None, Some(("koch_snowflake", 3, "")));
+    let su = setup_with("headonly", "", None, Some(("koch_snowflake", 3)));
     let o = run(&su, &both_bins(&su));
     let t = text(&o);
     assert_eq!(o.status.code(), Some(1), "{t}");
@@ -324,7 +321,7 @@ fn a_failure_in_one_tree_only_is_still_an_error() {
         "{t}"
     );
     assert!(!t.contains("SKIPPED"), "{t}");
-    let su = setup_with("baseonly", "", Some(("koch_snowflake", 3, "")), None);
+    let su = setup_with("baseonly", "", Some(("koch_snowflake", 3)), None);
     let o = run(&su, &both_bins(&su));
     let t = text(&o);
     assert_eq!(o.status.code(), Some(1), "{t}");
@@ -340,8 +337,8 @@ fn failures_that_differ_between_the_trees_are_still_errors() {
     let su = setup_with(
         "otherrc",
         "",
-        Some(("koch_snowflake", 3, "")),
-        Some(("koch_snowflake", 4, "")),
+        Some(("koch_snowflake", 3)),
+        Some(("koch_snowflake", 4)),
     );
     let o = run(&su, &both_bins(&su));
     let t = text(&o);
@@ -352,7 +349,7 @@ fn failures_that_differ_between_the_trees_are_still_errors() {
 
 #[test]
 fn a_run_where_every_file_is_skipped_compared_nothing_and_exits_1() {
-    let fail = Some(("examples/", 3, ""));
+    let fail = Some(("examples/", 3));
     let su = setup_with("allskip", "", fail, fail);
     let o = run(&su, &both_bins(&su));
     let t = text(&o);

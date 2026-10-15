@@ -477,7 +477,8 @@ compare_one() {
     local brc hrc bl hl p i st=0
     brc=$(rc_of "$b"); hrc=$(rc_of "$h")
     bl=$(pngs_of "$b"); hl=$(pngs_of "$h")
-    if [ "$hrc" != "0" ] && [ "$brc" = "$hrc" ] && fails_identically "$b" "$h"; then
+    # A numeric status only: a missing rc file reads "?" in both trees and must stay an ERROR.
+    if [ "$hrc" != "0" ] && [ "$brc" = "$hrc" ] && [ -z "${hrc//[0-9]/}" ] && fails_identically "$b" "$h"; then
         echo "SKIPPED    $label (pscat exited $hrc identically in both trees, same log, same canvas: nothing to compare; see $h/log)"
         nskipped=$((nskipped + 1))
         SKIPPED_FILES="$SKIPPED_FILES  $label
