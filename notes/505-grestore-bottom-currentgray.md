@@ -106,5 +106,14 @@ filed as a follow-up.
   scale 1 and 2, and the read-then-set round trip.
 - `tests/clipsave.rs` prints `currentgray` directly (`0.5`) instead of
   rounding it.
+- Three older tests pinned the old behaviour and now pin gs's:
+  - `tests/vm.rs` `grestoreall_without_save_pops_to_bottom` expects `1.0`,
+    not `3.0`. It already said gs prints `1.0`. `docs/dev/VM.md` no longer
+    lists `grestore` at a save boundary as a deviation.
+  - `tests/drykit.rs`'s grestoreall case sets its colour again after the
+    `grestoreall`, as its initgraphics case does.
+  - `tests/headline.rs` `a_draw_proc_that_leaks_a_gsave_and_fails_is_fully_unwound`
+    used a bottom `grestore` being a no-op as its probe. It now puts a
+    sentinel `gsave` under the call.
 - Identity: see the PR (`scripts/identity_check.sh --base-bin/--head-bin`
   over every tracked `.ps`/`.eps`).
