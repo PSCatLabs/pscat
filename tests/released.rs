@@ -178,8 +178,10 @@ fn a_copy_whitens_the_paper_and_the_type_gets_fatter() {
     let through = rel_page(TYPED, "/Generation 3 /Speckle 0 /Haze 0");
     let by_hand = page(
         "<< /Text (Dear Sir, the file is closed.) /Width 300 /Height 200 /Margin 30 \
-         /Machine 4 /Seed 3 /Copies 3 >> tw-type",
+         /Machine 4 /Seed 3 /Copies 3 /Ink [0 0 0] >> tw-type",
     );
+    // (black ink: rel-page sends the ribbon through the copier's curve, which
+    // makes near-black pure black, #595)
     // the copy's paper and chain of skews differ, but the ink counts agree
     // roughly (the eroded strokes are thin, so a sub-pixel shift moves their
     // dark pixels more than a stem's): both are the same fat, eroded type
@@ -1075,4 +1077,102 @@ fn a_half_wired_paged_document_is_refused_and_leaves_the_frame_as_it_found_it() 
             it.error_report(&err)
         );
     }
+}
+
+// ---- #595: a copy takes the ribbon's colour through the copier's curve ------
+
+/// Pixels of the page that are clearly red: red exceeds blue by more than 60.
+fn red_pixels(it: &Interp) -> usize {
+    it.gfx()
+        .pixmap
+        .pixels()
+        .iter()
+        .filter(|p| i32::from(p.red()) - i32::from(p.blue()) > 60)
+        .count()
+}
+
+const RED_RIBBON: &str = "{ << /Text (RED RIBBON TEXT ON A COPY) /Ink [0.66 0.13 0.11] \
+                          /Width 300 /Height 200 /Margin 30 /Machine 4 /Seed 3 >> tw-type }";
+
+#[test]
+fn a_red_ribbon_goes_grey_on_a_copy_and_stays_red_on_an_original() {
+    let red = |generation: u32| {
+        red_pixels(&render(&format!(
+            "{RED_RIBBON} << {SHEET} /Generation {generation} >> rel-page"
+        )))
+    };
+    assert!(red(0) > 200, "an original keeps its red ribbon");
+    for generation in 1..=3 {
+        assert_eq!(
+            red(generation),
+            0,
+            "generation {generation}: the copier has no red"
+        );
+    }
+}
+
+#[test]
+fn a_bleed_ink_goes_grey_on_a_copy_too() {
+    let bled = |generation: u32| {
+        red_pixels(&render(&format!(
+            "{{ << /Text (Hxdlbkpg) /Width 300 /Height 200 /Margin 30 \
+                 /Machine 1 /Seed 2 /Wear 0 /Size 40 /Pitch 3.5 /Bleed 1 /BleedInk [0.9 0.1 0.1] >> tw-type }} \
+             << {SHEET} /Generation {generation} >> rel-page"
+        )))
+    };
+    assert!(bled(0) > 20, "an original shows the bleed's red");
+    assert_eq!(bled(2), 0, "a copy shows no red");
+}
+
+#[test]
+fn a_paged_rel_page_sends_the_ribbon_through_the_copier_too() {
+    let red = |generation: u32| {
+        let src = paged_src(
+            "/Ink [0.66 0.13 0.11]",
+            &format!("/Generation {generation}"),
+        );
+        let it = render(&src);
+        it.gfx()
+            .pages()
+            .iter()
+            .map(|p| {
+                p.pixels()
+                    .iter()
+                    .filter(|c| i32::from(c.red()) - i32::from(c.blue()) > 60)
+                    .count()
+            })
+            .collect::<Vec<_>>()
+    };
+    assert!(red(0).iter().all(|&n| n > 20), "originals keep the red");
+    assert_eq!(red(2), vec![0, 0], "every sheet of a copy is grey");
+}
+
+#[test]
+fn the_ink_map_is_put_back_after_a_page_and_a_page_outside_is_unmapped() {
+    // red type after a copy's rel-page is red again: the hook did not leak
+    let it = render(&format!(
+        "{RED_RIBBON} << {SHEET} /Generation 2 >> rel-page \
+         1 setgray clippath fill 0 setgray {RED_RIBBON} exec"
+    ));
+    assert!(red_pixels(&it) > 200, "type after a copy is not mapped");
+    // a caller's own map is kept across the page and restored
+    let it = render(
+        "<< /InkMap { pop pop pop 0 1 0 } >> tw-set \
+         { << /Text (X) >> tw-type } << /Width 300 /Height 200 /Generation 1 >> rel-page \
+         TWState /tInkMap get cvlit length 6 eq",
+    );
+    assert_eq!(it.operand_stack().last().unwrap().repr(), "true");
+}
+
+#[test]
+fn an_ink_map_of_a_nonprocedure_is_refused() {
+    let mut it = Interp::with_page(W, H).expect("page");
+    load(&mut it);
+    let err = it
+        .run_str("<< /InkMap 5 >> tw-set")
+        .expect_err("a number is not a procedure");
+    assert!(
+        it.error_report(&err)
+            .contains("tw-inkmap-must-be-a-procedure")
+    );
 }
