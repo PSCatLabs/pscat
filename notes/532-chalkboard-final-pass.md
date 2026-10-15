@@ -13,7 +13,7 @@ changed.
   `\underbrace`s under the first three terms labelled n=0, n=1 and n=2. That
   is the step a lecturer takes from the sum to the expanded series. cos and
   sin keep "even" and "odd". The powers of i become a two-pair `mkalign`
-  (`i^0 = 1, i^1 = i / i^2 = -1, i^3 = -i`) with `/ColumnWander 1.5`. Under
+  (`i^2 = -1, i^3 = -i / i^4 = 1, i^5 = i`) with `/ColumnWander 1.5`. Under
   it is the rule `i^n = i^m if n ≡ m (mod 4)` (`\pmod`).
 - **Middle.** The second line of the substitution is
   `&\overset{(*)}{=}`, and a pink "(*) i² = −1" beside the next heading
@@ -28,6 +28,12 @@ changed.
   left, and leads to the circled e^{iπ} + 1 = 0.
 
 ## Design calls
+
+- **The table runs from i² to i⁵, not from i⁰.** At board size, the
+  superscript 1 in `i^1` reads as a prime (i′), and i′ is a different
+  symbol on a maths board. The glyph is left alone, as the design intent
+  asks, and the content changes instead. i⁵ = i also shows the period-4
+  repeat right above the mod 4 rule.
 
 - **`\overset{(*)}{=}`, not `\overset{i^2=-1}{=}`.** The latter was tried
   first. At chalk size the label's own = sits right over the relation's =,
@@ -59,8 +65,9 @@ changed.
   `--lint` is clean.
 - Ghostscript (`-dNOSAFER`, 72 dpi) renders the piece without error. The
   layout matches by eye. This is a correctness check only.
-- drykit: no `dkcatch` overflow and no refusal. #324 measured the lecture's
-  largest catch at under 5% of `dkbudget`. This pass adds a few short
+- drykit: the render completes with no error or refusal. Since #324 an
+  overflowing catch is split silently, so that is what can be observed.
+  #324 measured the lecture's largest catch at under 5% of `dkbudget`. This pass adds a few short
   strokes per panel, and the render stays well within DRYMEDIA 6.2's 30 s
   board budget.
 - `lecture_compare_238.png` was rebuilt with
@@ -69,3 +76,6 @@ changed.
   the committed composite, the base tree's rebuild differed only in the
   header caption: #465 renamed the refs path in the script and never
   regenerated the image. So this rebuild also refreshes that caption.
+  The boxed-result crop moved down 18 px, to `(1000, 1198, 1760, 1458)`,
+  so that the cos/sin brace's "sin θ" label, which now sits just above
+  the box, isn't cut in half along its top edge.
