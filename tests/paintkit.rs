@@ -7239,6 +7239,43 @@ fn wet_directional_default_depth_keeps_the_steps_fine() {
     assert_eq!(passes("/Offset 22"), "4");
 }
 
+/// The explicit directional /Layers cap is 32 (issue #417: it was 16), so a
+/// pull can ask for 1pt steps over a long /Offset; the *default* depth stays
+/// capped at 16, which is what keeps every existing pull drawing as before.
+#[test]
+fn wet_directional_layers_cap_is_32_and_the_default_depth_is_unchanged() {
+    let passes = |opts: &str| {
+        let mut it = fresh(200, 120);
+        it.run_str(&format!(
+            "0 0 0 setrgbcolor 5 srand /n 0 def {{ /n n 1 add def }} << {opts} >> pkwet n"
+        ))
+        .unwrap_or_else(|e| panic!("{opts}: {}", it.error_report(&e)));
+        it.operand_stack().last().expect("n").repr().to_string()
+    };
+    assert_eq!(passes("/Direction 270 /OneSided true /Offset 28 /Layers 29"), "29");
+    assert_eq!(passes("/Direction 270 /Offset 28 /Layers 32"), "32");
+    // the default is untouched: a 28pt one-sided pull is 15 deep, and no
+    // /Offset takes it past 16
+    assert_eq!(passes("/Direction 270 /OneSided true /Offset 28"), "15");
+    assert_eq!(passes("/Direction 270 /Offset 500"), "16");
+    // 33 is past the cap, and the isotropic cap is still 6
+    let mut it = fresh(200, 120);
+    it.run_str("{ } << /Direction 270 /Layers 33 >> pkwet")
+        .expect_err("33 layers must be rejected");
+    let mut it = fresh(200, 120);
+    it.run_str("{ } << /Layers 17 >> pkwet")
+        .expect_err("17 isotropic layers must be rejected");
+    // a 32-layer pull grazed twice is exactly the 64-run budget
+    let mut it = fresh(200, 120);
+    it.run_str(
+        "/n 0 def \
+         { { /n n 1 add def } << /Direction 270 /Layers 32 >> pkwet } \
+         << /Direction 0 /Layers 2 >> pkwet n",
+    )
+    .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+    assert_eq!(it.operand_stack().last().expect("n").repr(), "64");
+}
+
 /// The step that reads as an echo is between neighbours on the *same
 /// side*, and a two-sided sweep alternates sides -- so its default depth
 /// has to be twice as fine (Codex review, round 2: /Offset 12 at 7
