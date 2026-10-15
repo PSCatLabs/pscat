@@ -335,7 +335,7 @@ over the whole glyph. Ribbon ink only (no effect under `/InkModel false`).
   not reach is the page without `/Bleed`, to the byte. With both extras on, the other
   colour's ink wears with the lane too. Not done: a clogged counter's fill stays in the
   main ink.
-- **`/BleedGap` `[yarns]`: a white pin stripe (#538).** NBS C431 says some ribbons are inked
+- **`/BleedGap` `[multiple of the yarn pitch]`: a white pin stripe (#538).** NBS C431 says some ribbons are inked
   so that a white "pin stripe" is left between the two colours, and that it stays white. This
   is a strip of no ink, `/BleedGap` x `tYarn` (0.48 pt) tall, so one yarn is 40 glyph units
   at 12 pt (1000 x 0.48 / `/Size` in general), centred on the boundary and cut from both

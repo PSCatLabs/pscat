@@ -1002,7 +1002,7 @@ end definefont pop } exec
 % @param: /Bleed [0..1] Two-colour ribbon bleed (#422): how far the boundary between a black/red ribbon's halves reaches into the type face; the part of a letter past it prints in /BleedInk, with a ragged edge, and the boundary wanders from strike to strike, so some strikes print clean and some take a coloured foot (or head). 0 is none, 1 is a boundary that reaches 540 glyph units into the face (a strike's own reach is a hashed fraction of that). Most bichrome ribbons show no diffusion (NBS C431), so keep it 0 or small; where there is any, black runs into red, so a red foot on black text is the mechanism only. Ribbon ink only (default 0)
 % @param: /BleedInk [rgb array] The colour of the ribbon's other half, for /Bleed: red under black text, black under a red run (default [0.62 0.12 0.10])
 % @param: /BleedSide [name] /below if the other half of the ribbon lies below the printing half, so /Bleed colours the feet of letters, /above if it lies above, so it colours the tops; which half is on top varies by ribbon (default /below)
-% @param: /BleedGap [yarns] A white pin stripe at the colour boundary (#538): a strip of no ink centred on it, this many yarns tall (one yarn is 0.48pt, 40 glyph units at 12pt), cut from both inks. NBS C431 says some ribbons are inked to leave one, and that it stays white. Does nothing unless /Bleed is above 0 and the boundary reaches a letter; 0 is none (default 0)
+% @param: /BleedGap [multiple of the yarn pitch] A white pin stripe at the colour boundary (#538): a strip of no ink centred on it, this many yarns tall (one yarn is 0.48pt, 40 glyph units at 12pt), cut from both inks. NBS C431 says some ribbons are inked to leave one, and that it stays white. Does nothing unless /Bleed is above 0 and the boundary reaches a letter; 0 is none (default 0)
 /tw-setup {
     TWState begin tApply tFrame end
     /Typewriter findfont TWState /tSize get scalefont setfont
@@ -1029,7 +1029,7 @@ end definefont pop } exec
 % @param: /Bleed [0..1] As tw-setup (no default: the current value stays)
 % @param: /BleedInk [rgb array] As tw-setup (no default: the current value stays)
 % @param: /BleedSide [name] As tw-setup (no default: the current value stays)
-% @param: /BleedGap [yarns] As tw-setup (no default: the current value stays)
+% @param: /BleedGap [multiple of the yarn pitch] As tw-setup (no default: the current value stays)
 /tw-set {
     dup type /dicttype eq { dup /Size known } { false } ifelse exch
     TWState begin tApply end
@@ -1614,7 +1614,7 @@ TWState begin {
 % @param: /Bleed [0..1] As tw-setup (no default: the current value stays)
 % @param: /BleedInk [rgb array] As tw-setup (no default: the current value stays)
 % @param: /BleedSide [name] As tw-setup (no default: the current value stays)
-% @param: /BleedGap [yarns] As tw-setup (no default: the current value stays)
+% @param: /BleedGap [multiple of the yarn pitch] As tw-setup (no default: the current value stays)
 /tw-type {
     TWState begin
     lySplit                                 % the layout keys read; the rest left
