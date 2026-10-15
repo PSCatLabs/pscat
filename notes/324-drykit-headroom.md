@@ -98,14 +98,14 @@ board that grows by hand should never meet it.
   wide: about 0.3 pt of 87 pt on slate at the default budget. A stroke in
   that sliver still raises at render, with the `gsave` given back. On main,
   earlier strokes and levels would already be drawn. In the hunt at tiny
-  budgets, 16 strokes fell in it. Such a stroke is slow to fail: each
+  budgets, 16 strokes fell in it. Every other failure there was refused
+  up front, and every stroke that used to raise only because its chunk
+  was too big now draws. A stroke in the sliver is slow to fail: each
   retry builds up to `dkbudget` cells before it is rejected, and it can
   take a dozen or so retries before the guard is raised. At the default
   budget that can take tens of seconds. It is not a hang.
 - **The dict stack needs no unwinding.** Nothing between `dkcatch` and the
-  overflow in `dkcell` does a `begin`. Every other failure there was refused
-  up front, and every stroke that used to raise only because its chunk
-  was too big now draws.
+  overflow in `dkcell` does a `begin`.
 
 ## Evidence
 
