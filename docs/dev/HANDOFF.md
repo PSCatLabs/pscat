@@ -655,6 +655,9 @@ renders eight examples in both and compares block-downsampled output).
    restore. Use `dkclip` in the callback, wrap the call in a `gsave ...
    grestore` the batch sees, or bind the wrapper inside the batch;
    `notes/459-bound-wrapper-grestore.md`, #488 for a pscat-only route).
+   Where the interpreter has `cliprestore` (gs; pscat has no
+   `clipsave`/`cliprestore`) `dkbatch` shadows it too and marks the batch
+   dirty (#454, `notes/454-cliprestore-in-a-batch.md`).
    #393: `dkstroke /After true` in a batch is drawn on its own after the
    batch renders, in call order, in its own colour; `dhsmudge` and `dhlift`
    use it, so they run inside a batch, over everything the batch lays
