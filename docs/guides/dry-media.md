@@ -61,8 +61,10 @@ the stick's contact patch meets raised tooth.
 - **Size.** A batch has no practical stroke limit: a 2,500-stroke
   derivation in one `dcchalk` draws. drykit cuts a batch into catches of a
   bounded size, and splits again any that turn out too big. The one stroke
-  it refuses has a single point too wide for any catch: on slate, a stick
-  more than about 170 pt wide. It is refused with
+  it refuses has a single point too wide for any catch: on slate at the
+  default budget, a point whose mark reaches more than about 87 pt from
+  its centerline (a `/Tilt` stroke spreads its width over lanes, so it
+  reaches less per lane). It is refused with
   `dkcatch-area-exceeds-safety-limit` when the stroke is made, before
   anything in its batch is drawn.
 - **`/After true`** on a `dkstroke` inside a batch draws that stroke on

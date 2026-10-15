@@ -33,9 +33,12 @@ dpi, with `dkband` wrapped to count catches and their unique cells.
   which is `dkZgroup`'s cut.
 - **The 2,562-stroke batch** is a 42-line derivation in a single `dcchalk`,
   so it is one `dkbatch`. It renders in pscat, and in Ghostscript as a
-  correctness check. Neither interpreter hit a stack or `limitcheck` error,
-  and walkpath's segment cap did not trip. A batch has no practical stroke
-  limit.
+  correctness check. Neither interpreter hit a stack or `limitcheck` error.
+  walkpath's segment cap (`wkmaxsegs`) can't trip on a long derivation
+  either: `dcchalk` reads the whole path with `pathforall` and calls
+  `dkstroke`, and so `walkpath`, once per subpath. Only one glyph stroke's
+  segments count against the cap, at any scale. A batch has no practical
+  stroke limit.
 - **The lecture** renders byte-identically on this branch. It takes about
   6.5 s CPU, against DRYMEDIA 6.2's 30 s. That is one run on a shared
   machine, offered as a guard, not a benchmark.
@@ -95,7 +98,12 @@ board that grows by hand should never meet it.
   wide: about 0.3 pt of 87 pt on slate at the default budget. A stroke in
   that sliver still raises at render, with the `gsave` given back. On main,
   earlier strokes and levels would already be drawn. In the hunt at tiny
-  budgets, 16 strokes fell in it. Every other failure there was refused
+  budgets, 16 strokes fell in it. Such a stroke is slow to fail: each
+  retry builds up to `dkbudget` cells before it is rejected, and it can
+  take a dozen or so retries before the guard is raised. At the default
+  budget that can take tens of seconds. It is not a hang.
+- **The dict stack needs no unwinding.** Nothing between `dkcatch` and the
+  overflow in `dkcell` does a `begin`. Every other failure there was refused
   up front, and every stroke that used to raise only because its chunk
   was too big now draws.
 
