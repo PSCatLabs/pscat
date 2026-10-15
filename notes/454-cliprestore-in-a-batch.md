@@ -32,7 +32,7 @@ them was the other way to close #454, and it was left out:
 - The issue allows "a gs-only test". The fix is tested in pscat through
   a stand-in pair (below) and in gs for real.
 
-Follow-up filed for the pscat operators (see the PR).
+Follow-up filed for the pscat operators: #494.
 
 ## What shipped (lib/drykit.ps)
 
