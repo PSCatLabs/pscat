@@ -387,7 +387,9 @@ RelState begin {
             rcX rcT cos 4 mul add /rcX2 exch def  rcY rcT sin 4 mul add /rcY2 exch def
             rcX2 0 lt rcX2 rlW gt or rcY2 0 lt or rcY2 rlH gt or { exit } if
             rcX rcX2 add 2 div rcY rcY2 add 2 div rlFieldSet currentgray /rcG exch def
+            0 setlinecap                            % butt: a round cap here would paint over the last segment's core
             rcG rcA 0.35 mul sub setgray 4.6 setlinewidth rcX rcY moveto rcX2 rcY2 lineto stroke
+            1 setlinecap
             rcG rcA sub setgray 1.8 setlinewidth rcX rcY moveto rcX2 rcY2 lineto stroke
             rcG rcA 0.6 mul add setgray 1.6 setlinewidth
             rcX rcT sin 3 mul sub rcY rcT cos 3 mul add moveto
