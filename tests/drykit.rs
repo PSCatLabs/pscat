@@ -1528,3 +1528,178 @@ fn ghostscript_keeps_a_plain_clip_in_a_batch() {
         );
     }
 }
+
+// ---------------------------------------------------------------------
+// #454: `cliprestore` inside a dkbatch, where the interpreter has it.
+// ---------------------------------------------------------------------
+
+/// The one line of `lib/drykit.ps` that adds `cliprestore` to the shadows,
+/// removed for the control runs.
+const CLIPRESTORE_SHADOW: &str =
+    "systemdict /cliprestore known { /cliprestore /dkPcliprestore load } if";
+
+/// drykit's source with the `cliprestore` shadow kept or taken out.
+fn drykit_source(shadow: bool) -> String {
+    let src = std::fs::read_to_string("lib/drykit.ps").expect("read drykit");
+    assert!(src.contains(CLIPRESTORE_SHADOW), "the shadow line moved");
+    if shadow {
+        src
+    } else {
+        src.replace(CLIPRESTORE_SHADOW, "")
+    }
+}
+
+/// Programs that clip, save the clip, clip more and give it back, then
+/// stroke: after the `cliprestore` the clip is the one `clipsave` saw.
+fn cliprestore_cases() -> [(&'static str, String); 3] {
+    // ring nested in a rotated square: two clip links, one even-odd
+    const RING: &str = "matrix currentmatrix 70 50 translate 20 rotate \
+                        newpath -40 -30 moveto 40 -30 lineto 40 30 lineto -40 30 lineto closepath clip \
+                        newpath 0 0 28 0 360 arc closepath 0 0 12 0 360 arc closepath eoclip \
+                        setmatrix newpath";
+    const CL: &str = "newpath 10 30 moveto 130 70 lineto 20 75 moveto 120 20 lineto \
+                      << /Width 5 /Levels 2 /Halo 1 /Lanes 2 /Fallout 0.6 /Drift 3 >> dkstroke";
+    const FREE: &str = "newpath 10 92 moveto 130 92 lineto << /Width 4 >> dkstroke";
+    // clear of CL's crossing strokes, so batching cannot reorder their ink
+    const LOW: &str = "newpath 32 22 moveto 55 24 lineto << /Width 4 >> dkstroke";
+    const MID: &str = "newpath 10 84 moveto 130 84 lineto << /Width 4 >> dkstroke";
+    [
+        (
+            "clip, stroke, cliprestore, stroke",
+            format!("clipsave {RING} {CL} cliprestore {FREE}"),
+        ),
+        (
+            "cliprestore back to an outer clip",
+            format!(
+                "gsave 30 20 70 50 rectclip clipsave {RING} {CL} cliprestore {LOW} grestore {FREE}"
+            ),
+        ),
+        (
+            "a stroke before the clip and one after the restore",
+            format!("{FREE} clipsave {RING} {CL} cliprestore {MID}"),
+        ),
+    ]
+}
+
+fn pixel_diff(a: &[u8], b: &[u8]) -> usize {
+    a.chunks(4).zip(b.chunks(4)).filter(|(p, q)| p != q).count()
+}
+
+/// drykit shadows `cliprestore` too, when the interpreter has one: a
+/// `cliprestore` gives back a clip drykit never saw, so the next stroke must
+/// take a fresh capture, or it stays under the inner clip (#454). pscat has
+/// no `clipsave`/`cliprestore`, so this stands a procedure pair in for them
+/// (a gstate saved and put back, which is exact while nothing else changes
+/// between the two), installed in systemdict before drykit loads. Each
+/// program renders byte-identically in a batch and drawn at once. Control:
+/// the same drykit with the shadow line taken out leaves the strokes after
+/// the restore under the ring.
+#[test]
+fn a_cliprestore_in_a_batch_renders_as_at_once() {
+    const PAIR: &str = "userdict /dtCS 16 array put userdict /dtN 0 put \
+        systemdict /clipsave { gstate userdict /dtCS get userdict /dtN get 3 -1 roll put \
+            userdict /dtN userdict /dtN get 1 add put } bind put \
+        systemdict /cliprestore { userdict /dtN userdict /dtN get 1 sub put \
+            userdict /dtCS get userdict /dtN get get setgstate } bind put ";
+    let run = |shadow: bool, batched: bool, body: &str| {
+        let mut it = Interp::with_page_scaled(140, 100, 2.0).expect("page");
+        it.run_str(PAIR).expect("stand-in clipsave/cliprestore");
+        for path in ["lib/artkit.ps", "lib/paintkit.ps"] {
+            let src = std::fs::read(path).expect("read lib");
+            it.run_source(&src).expect("load");
+        }
+        it.run_str(&drykit_source(shadow)).expect("load drykit");
+        let body = if batched {
+            format!("{{ {body} }} dkbatch")
+        } else {
+            body.to_string()
+        };
+        it.run_str(&format!(
+            "1 1 1 setrgbcolor clippath fill 0 0 0 setrgbcolor \
+             << /Surface /greenboard /Seed 3 >> dksurface \
+             userdict /dkGround get aload pop setrgbcolor clippath fill \
+             0.93 0.94 0.90 setrgbcolor {body}"
+        ))
+        .unwrap_or_else(|e| panic!("{body}: {}", it.error_report(&e)));
+        data(&it)
+    };
+    for (what, body) in &cliprestore_cases() {
+        let once = run(true, false, body);
+        let d = pixel_diff(&once, &run(true, true, body));
+        assert_eq!(
+            d, 0,
+            "{what}: the batch differs from drawing at once in {d} pixels"
+        );
+        let lost = pixel_diff(&once, &run(false, true, body));
+        assert!(
+            lost > 200,
+            "{what}: without the shadow only {lost} pixels changed: the check cannot see the restore"
+        );
+    }
+}
+
+/// #454 under Ghostscript, which has the real `clipsave`/`cliprestore`:
+/// the same programs, a batch against drawn at once, byte-identical at 144
+/// dpi; with the shadow line taken out they differ. Runs locally only.
+#[test]
+fn ghostscript_follows_a_cliprestore_in_a_batch() {
+    if !gs_available() {
+        eprintln!("skipping gs cliprestore check: gs not installed");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("pscat-drykit-clipsave-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let mut libs = String::new();
+    for path in ["lib/artkit.ps", "lib/paintkit.ps"] {
+        libs.push_str(&std::fs::read_to_string(path).expect("read lib"));
+        libs.push('\n');
+    }
+    let gs = |n: usize, shadow: bool, batched: bool, body: &str| {
+        let body = if batched {
+            format!("{{ {body} }} dkbatch")
+        } else {
+            body.to_string()
+        };
+        let file = dir.join(format!("c{n}.ps"));
+        let png = dir.join(format!("c{n}.png"));
+        std::fs::write(
+            &file,
+            format!(
+                "{libs}\n{}\n<< /Surface /greenboard /Seed 3 >> dksurface \
+                 userdict /dkGround get aload pop setrgbcolor clippath fill \
+                 0.93 0.94 0.90 setrgbcolor {body}\nshowpage\n",
+                drykit_source(shadow)
+            ),
+        )
+        .expect("write");
+        let status = std::process::Command::new("gs")
+            .args(["-dNOPAUSE", "-dBATCH", "-q", "-dNOSAFER", "-sDEVICE=png16m"])
+            .arg("-g280x200")
+            .arg("-r144")
+            .arg(format!("-o{}", png.display()))
+            .arg(&file)
+            .stdin(std::process::Stdio::null())
+            .status()
+            .expect("run gs");
+        assert!(status.success(), "gs rejected the cliprestore driver");
+        let img =
+            tiny_skia::Pixmap::decode_png(&std::fs::read(&png).expect("png")).expect("decode");
+        let _ = std::fs::remove_file(&file);
+        let _ = std::fs::remove_file(&png);
+        img.data().to_vec()
+    };
+    for (i, (what, body)) in cliprestore_cases().iter().enumerate() {
+        let once = gs(3 * i, true, false, body);
+        let d = pixel_diff(&once, &gs(3 * i + 1, true, true, body));
+        assert_eq!(
+            d, 0,
+            "gs, {what}: the batch differs from at once in {d} pixels"
+        );
+        let lost = pixel_diff(&once, &gs(3 * i + 2, false, true, body));
+        assert!(
+            lost > 200,
+            "gs, {what}: without the shadow only {lost} pixels changed"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
