@@ -35,3 +35,10 @@ Regenerated: `gallery/renders/released_memo.png`,
 `docs/dev/design/released_specimen.png` and `released_specimen_gs.png`.
 `tests/released.rs` `a_copy_whitens_the_paper_and_the_type_gets_fatter` now types its
 by-hand comparison in `/Ink [0 0 0]` for the same reason.
+
+Also regenerated, since they show the current look and reproduced byte for byte
+from `origin/main` before the change: `docs/dev/design/typewriter/release_vs_real.png`,
+`blind_grid.png` and `memo_vs_real.png` (`tools/release_compare.py`,
+`tools/blind_compare.py`). Before/after crops, with an amplified difference, are
+`notes/595-red-on-copy.png`, `595-memo-crop.png`, `595-specimen-crop.png` and
+`595-pages-crop.png`.

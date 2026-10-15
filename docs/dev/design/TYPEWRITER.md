@@ -410,6 +410,10 @@ over the whole glyph. Ribbon ink only (no effect under `/InkModel false`).
   selector that is a little out), not a measurement; the depth, transition and
   rates are set by eye. The arrangement varies by ribbon (the selector picks the top or the
   bottom quarter inch of a half-inch ribbon), hence `/BleedSide`.
+- **`/InkMap` `[proc]`: the colour on its way to the page (#595).** A procedure `r g b -> r g b`
+  that `/Ink` and `/BleedInk` go through just before `setrgbcolor`; the default `{ }` changes
+  nothing. `lib/released.ps` `rel-page` sets it, with `/Copies`, to the copier's grey curve for a
+  copy, so a coloured ribbon prints grey like the marks beside it (near-black comes out black).
 
 ## 7. Randomness that stays out of the caller's stream
 

@@ -1103,7 +1103,11 @@ fn a_red_ribbon_goes_grey_on_a_copy_and_stays_red_on_an_original() {
     };
     assert!(red(0) > 200, "an original keeps its red ribbon");
     for generation in 1..=3 {
-        assert_eq!(red(generation), 0, "generation {generation}: the copier has no red");
+        assert_eq!(
+            red(generation),
+            0,
+            "generation {generation}: the copier has no red"
+        );
     }
 }
 
@@ -1123,7 +1127,10 @@ fn a_bleed_ink_goes_grey_on_a_copy_too() {
 #[test]
 fn a_paged_rel_page_sends_the_ribbon_through_the_copier_too() {
     let red = |generation: u32| {
-        let src = paged_src("/Ink [0.66 0.13 0.11]", &format!("/Generation {generation}"));
+        let src = paged_src(
+            "/Ink [0.66 0.13 0.11]",
+            &format!("/Generation {generation}"),
+        );
         let it = render(&src);
         it.gfx()
             .pages()
@@ -1164,5 +1171,8 @@ fn an_ink_map_of_a_nonprocedure_is_refused() {
     let err = it
         .run_str("<< /InkMap 5 >> tw-set")
         .expect_err("a number is not a procedure");
-    assert!(it.error_report(&err).contains("tw-inkmap-must-be-a-procedure"));
+    assert!(
+        it.error_report(&err)
+            .contains("tw-inkmap-must-be-a-procedure")
+    );
 }
