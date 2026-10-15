@@ -159,7 +159,7 @@ TWState begin {
 /tInk [0.13 0.13 0.15] def  /tRibbon 0.7 def
 /tCopies 0 def  /tCopyC 0 def
 /tPSd 0.12 def  /tFinger true def  /tInkOn true def
-/tWorn 0 def  /tBleed 0 def  /tBleedInk [0.62 0.12 0.10] def  /tBleedSide /below def
+/tWorn 0 def  /tBleed 0 def  /tBleedInk [0.62 0.12 0.10] def  /tBleedSide /below def  /tBleedGap 0 def
 /tMat matrix def
 /tFillAdj /.setfilladjust2 where { pop true } { false } ifelse def
 /tMtabFor null def  /tDocFor null def  /tLineFor null def
@@ -247,6 +247,7 @@ TWState begin {
     /Bleed       [ /tBleed      /tIsUnit   /tw-bleed-must-be-0-to-1 ]
     /BleedInk    [ /tBleedInk   /tIsRgb    /tw-bleedink-must-be-an-rgb-array ]
     /BleedSide   [ /tBleedSide  /tIsSide   /tw-bleedside-must-be-below-or-above ]
+    /BleedGap    [ /tBleedGap   /tIsNonNeg /tw-bleedgap-must-be-a-non-negative-number ]
 >> def
 
 % opts -> -  (TWState is the current dict, begun by the caller). Every key
@@ -571,6 +572,7 @@ grestore
     exch dup 0 gt {
         gsave
             exch tLevel tWeaveClip
+            tZoned { tZGap null ne { tZGap rectclip } if } if   % the pin stripe stays blank (#538)
             tCx0 tCx1 add 2 div xS mul tCy0 tCy1 add 2 div translate tCAng rotate
             tR neg tR neg 3 -1 roll tR 2 mul mul tR 2 mul rectclip tMat setmatrix
             newpath xS 1 scale tGlyph 1 get exec tMat setmatrix fill
@@ -587,7 +589,10 @@ grestore
 % /WornBand: the lane of ribbon that every x-height strike hits is used over
 % and over and prints lighter (the body at tWornD x /WornBand more holes there,
 % with shoulders half that), while ascender tops and descenders hit fresh
-% ribbon. The body is drawn three times, each over a larger part of the glyph
+% ribbon. The SIGN of this (a grey middle, darker tops) is an artistic choice,
+% not a measurement (#538, from #468): the stems of three board scans are the
+% same or slightly lighter at the tops, never darker. Keep realistic values
+% small (/WornBand 0.3 takes about 4.5% of the lane's ink, 1 about 15%). The body is drawn three times, each over a larger part of the glyph
 % than the next but sparser, so the passes nest and no seam shows.
 %
 % /Bleed: on a black/red ribbon the colour boundary sits at a fixed height; the
@@ -596,11 +601,20 @@ grestore
 % under the line (black text picks up red at the bottom of its letters), /above
 % over it. Per strike the boundary wanders, from a hash (slot 22), so most
 % strikes print clean and some take a coloured foot; /Bleed is how far it
-% reaches into the face. The other colour is laid first, the main ink over it
-% through a sparser weave across the transition, so it shows through the voids.
+% reaches into the face: tBleed x 540 glyph units (not 350). The other colour is
+% laid first, the main ink over it through a sparser weave across the
+% transition, so it shows through the voids.
+%
+% /BleedGap (#538): NBS C431 says some ribbons are inked so that a white "pin
+% stripe" is left between the two colours, which stays white. It is a strip of
+% no ink, tBleedGap yarns tall (one yarn is 40 glyph units at 12pt), centred
+% on the boundary and cut from both inks (and the clogged-counter fill). It
+% needs /Bleed > 0 to reach a letter. C431 also says most bichrome ribbons show
+% no diffusion at all, so /Bleed stays 0 by default; where there is any, black
+% runs into red, so a red foot on black text is the mechanism only.
 /tWornLo 20 def  /tWornHi 410 def  /tWornSh 70 def  /tWornD 0.5 def
 /tBlTr 60 def  /tBlOv 20 def  /tBlSteps 0.55 def
-/tZoned false def  /tZFar null def
+/tZoned false def  /tZFar null def  /tZGap null def
 /tZW [ [ 0 null ] ] def  /tZB [ [ 0 null ] ] def
 % y0 y1 -> rectangles across the glyph frame: from y0 to y1, and outside it
 /tYRect { /zy1 exch def /zy0 exch def [ -2000 zy0 6000 zy1 zy0 sub ] } bind def
@@ -608,10 +622,21 @@ grestore
     /zy1 exch def /zy0 exch def
     [ -2000 -3000 6000 zy0 3000 add  -2000 zy1 6000 3000 zy1 sub ]
 } bind def
+% -> -  the pin stripe (/BleedGap, #538), from zbY (the boundary, glyph frame):
+% a strip of no ink centred on the boundary, tBleedGap yarns tall (a yarn is
+% tYarn points, so 1000 tYarn / /Size glyph units), kept as the rectangles
+% outside it; set only where the boundary reaches the face
+/tGapBuild {
+    tBleedGap 0 gt {
+        tBleedGap tYarn mul 500 mul tSize div /zgH exch def
+        zbY zgH sub zbY zgH add tYOut
+        /tZGap exch def
+    } if
+} bind def
 % builds this strike's zones (tZoned tells tRun whether to use them)
 /tZonesBuild {
     /tZW [ [ 0 null ] ] def  /tZB [ [ 0 null ] ] def  /tZFar null def
-    /tZoned false def
+    /tZGap null def  /tZoned false def
     tWorn 0 gt {
         /zwD tWorn tWornD mul def
         tWornLo tYoff sub /zwLo exch def
@@ -648,6 +673,7 @@ grestore
                     [ tBlSteps 5 div  zbY tBlTr sub tBlOv sub  zbY tBlTr 3 div sub tBlOv add tYRect ]
                     [ 0  -3000 zbY tBlTr sub tBlOv add tYRect ]
                 ] def
+                tGapBuild
             } if
         } {
             -360 zbD add tYoff sub /zbY exch def
@@ -659,6 +685,7 @@ grestore
                     [ tBlSteps 5 div  zbY tBlTr 3 div add tBlOv sub  zbY tBlTr add tBlOv add tYRect ]
                     [ 0  zbY tBlTr add tBlOv sub 3000 tYRect ]
                 ] def
+                tGapBuild
             } if
         } ifelse
         tZFar null ne { /tZoned true def } if
@@ -676,6 +703,7 @@ grestore
                 zdP 0.17 sub zdWD add dup 0 lt { pop 0 } if tLevel tWeaveClip
                 tZFar rectclip
                 zdWR null ne { zdWR rectclip } if
+                tZGap null ne { tZGap rectclip } if
                 /zdPr load exec
             grestore
         } forall
@@ -687,6 +715,7 @@ grestore
             gsave zdP zdBD add zdWD add tLevel tWeaveClip
                 zdBR null ne { zdBR rectclip } if
                 zdWR null ne { zdWR rectclip } if
+                tZGap null ne { tZGap rectclip } if
                 /zdPr load exec
             grestore
         } forall
@@ -891,6 +920,12 @@ end definefont pop } exec
 %   { << /BleedSide 3 >> tw-set } /tw-bleedside-must-be-below-or-above
 %   (a number for the side) mustguard
 %
+%   { << /BleedGap -1 >> tw-set } /tw-bleedgap-must-be-a-non-negative-number
+%   (a negative pin stripe) mustguard
+%
+%   { << /BleedGap (1) >> tw-set } /tw-bleedgap-must-be-a-non-negative-number
+%   (a string for the pin stripe) mustguard
+%
 %   { << /Machine 9 /Wear -1 >> tw-setup } /tw-wear-must-be-a-non-negative-number
 %   (one bad key among good ones) mustguard
 %   TWState /tMachine get 1 eq (and the good ones were not applied) mustbe
@@ -963,10 +998,11 @@ end definefont pop } exec
 % @param: /InkModel [boolean] true draws ribbon ink (the weave's voids, a feathered edge, clogged counters, a heavy side, density from pressure and /Ribbon); false draws flat ink, the glyph filled and stroked solid (default true)
 % @param: /Strike [integer] The strike index: a second strike at the same cell (a strikeover, a bold double strike) needs a new index to get its own variation (default 0)
 % @param: /Copies [count] Photocopy generations the type has been through, 0 for the original: each adds spread, fills the counters in and sharpens the contrast of the ink's coverage, so dark strikes close up and light ones drop out; 1 is a first copy, 3 a copy of a copy of a copy (default 0)
-% @param: /WornBand [0..1] A worn lane of the ribbon (#422): the band of ribbon that every x-height strike hits has been used over and over, so the middle of each letter prints lighter than its ascender tops and descenders, at the same height in every strike (the band is fixed in the cell, so a bent slug moves against it). 0 is none, 1 is a lane worn to a screen. Ribbon ink only (default 0)
-% @param: /Bleed [0..1] Two-colour ribbon bleed (#422): how far the boundary between a black/red ribbon's halves reaches into the type face; the part of a letter past it prints in /BleedInk, with a ragged edge, and the boundary wanders from strike to strike, so some strikes print clean and some take a coloured foot (or head). 0 is none, 1 is a ribbon far out of register. Ribbon ink only (default 0)
+% @param: /WornBand [0..1] A worn lane of the ribbon (#422): the band of ribbon that every x-height strike hits has been used over and over, so the middle of each letter prints lighter than its ascender tops and descenders, at the same height in every strike (the band is fixed in the cell, so a bent slug moves against it). 0 is none, 1 is a lane worn to a screen (about 15% of the lane's ink). An artistic option, not a measured one (#538): three board scans show no grey middle or dark tops, the tops being the same or slightly lighter, so keep realistic values small (0.3 takes about 4.5%). Ribbon ink only (default 0)
+% @param: /Bleed [0..1] Two-colour ribbon bleed (#422): how far the boundary between a black/red ribbon's halves reaches into the type face; the part of a letter past it prints in /BleedInk, with a ragged edge, and the boundary wanders from strike to strike, so some strikes print clean and some take a coloured foot (or head). 0 is none, 1 is a boundary that reaches 540 glyph units into the face (a strike's own reach is a hashed fraction of that). Most bichrome ribbons show no diffusion (NBS C431), so keep it 0 or small; where there is any, black runs into red, so a red foot on black text is the mechanism only. Ribbon ink only (default 0)
 % @param: /BleedInk [rgb array] The colour of the ribbon's other half, for /Bleed: red under black text, black under a red run (default [0.62 0.12 0.10])
 % @param: /BleedSide [name] /below if the other half of the ribbon lies below the printing half, so /Bleed colours the feet of letters, /above if it lies above, so it colours the tops; which half is on top varies by ribbon (default /below)
+% @param: /BleedGap [yarns] A white pin stripe at the colour boundary (#538): a strip of no ink centred on it, this many yarns tall (one yarn is 0.48pt, 40 glyph units at 12pt), cut from both inks. NBS C431 says some ribbons are inked to leave one, and that it stays white. Does nothing unless /Bleed is above 0 and the boundary reaches a letter; 0 is none (default 0)
 /tw-setup {
     TWState begin tApply tFrame end
     /Typewriter findfont TWState /tSize get scalefont setfont
@@ -993,6 +1029,7 @@ end definefont pop } exec
 % @param: /Bleed [0..1] As tw-setup (no default: the current value stays)
 % @param: /BleedInk [rgb array] As tw-setup (no default: the current value stays)
 % @param: /BleedSide [name] As tw-setup (no default: the current value stays)
+% @param: /BleedGap [yarns] As tw-setup (no default: the current value stays)
 /tw-set {
     dup type /dicttype eq { dup /Size known } { false } ifelse exch
     TWState begin tApply end
@@ -1577,6 +1614,7 @@ TWState begin {
 % @param: /Bleed [0..1] As tw-setup (no default: the current value stays)
 % @param: /BleedInk [rgb array] As tw-setup (no default: the current value stays)
 % @param: /BleedSide [name] As tw-setup (no default: the current value stays)
+% @param: /BleedGap [yarns] As tw-setup (no default: the current value stays)
 /tw-type {
     TWState begin
     lySplit                                 % the layout keys read; the rest left
