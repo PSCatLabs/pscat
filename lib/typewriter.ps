@@ -573,16 +573,19 @@ grestore
 } bind def
 
 % fraction p -> -  fills the clogged counters through the weave at p, over
-% the band from the dirt's side to the fraction of the counter's circle
+% the band from the dirt's side to the fraction of the counter's circle. It
+% runs under tRun as the feather and the body do (#539), so the fill takes the
+% bleed's other colour, the worn lane's lighter weave and the pin stripe where
+% the strike's zones put it (tZoned), not always the main ink. tCFr holds the
+% fraction: the zoned pass runs the proc once per zone.
 /tClogBand {
     exch dup 0 gt {
-        gsave
-            exch tLevel tWeaveClip
-            tZoned { tZGap null ne { tZGap rectclip } if } if   % the pin stripe stays blank (#538)
+        /tCFr exch def
+        {
             tCx0 tCx1 add 2 div xS mul tCy0 tCy1 add 2 div translate tCAng rotate
-            tR neg tR neg 3 -1 roll tR 2 mul mul tR 2 mul rectclip tMat setmatrix
+            tR neg tR neg tCFr tR 2 mul mul tR 2 mul rectclip tMat setmatrix
             newpath xS 1 scale tGlyph 1 get exec tMat setmatrix fill
-        grestore
+        } tRun
     } { pop pop } ifelse
 } bind def
 
