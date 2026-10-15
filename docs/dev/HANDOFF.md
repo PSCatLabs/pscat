@@ -564,6 +564,10 @@ renders eight examples in both and compares block-downsampled output).
 
 ## Working conventions that matter (beyond AGENTS.md)
 
+- **Test scratch paths: `common::scratch_dir(tag)` only** (#487). A fixed
+  temp name makes two parallel `cargo test` runs clobber each other;
+  `tests/scratch_paths.rs` enforces it.
+
 - **gs is the oracle.** Every semantics question in Stages 5–7 was
   settled by running the snippet in gs first and pinning the answer in
   a test comment. Keep doing that; it caught real design errors twice

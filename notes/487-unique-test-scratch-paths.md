@@ -31,5 +31,7 @@
 
 ## Check
 
-Two `cargo test --profile ci` runs at the same moment, in two worktrees at the
-same commit, both pass (see the PR for the times).
+Two `cargo test --profile ci` runs started at the same moment (18:24:33), in
+two worktrees at the same commit, both finished green at 18:29:24: 1746 passed,
+0 failed, 2 ignored each. The gs-backed tests (`corpus`, `golden`, `pdf`,
+`type1`, `etching`) ran with `--nocapture` and printed no "skipping" line.

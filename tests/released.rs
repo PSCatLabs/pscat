@@ -8,9 +8,9 @@
 //! stream and the dictionary stack come out untouched, and (locally, with gs
 //! installed) that Ghostscript draws the specimen.
 
-use pscat::Interp;
-
 mod common;
+
+use pscat::Interp;
 
 const LIBS: [&str; 6] = [
     "lib/artkit.ps",
