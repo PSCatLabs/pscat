@@ -158,6 +158,7 @@ TWState begin {
 /tInk [0.13 0.13 0.15] def  /tRibbon 0.7 def
 /tCopies 0 def  /tCopyC 0 def
 /tPSd 0.12 def  /tFinger true def  /tInkOn true def
+/tWorn 0 def  /tBleed 0 def  /tBleedInk [0.62 0.12 0.10] def  /tBleedSide /below def
 /tMat matrix def
 /tFillAdj /.setfilladjust2 where { pop true } { false } ifelse def
 /tMtabFor null def  /tDocFor null def  /tLineFor null def
@@ -222,6 +223,7 @@ TWState begin {
     } { pop false } ifelse
 } bind def
 /tIsBool { type /booleantype eq } bind def
+/tIsSide { dup /below eq exch /above eq or } bind def
 /tIsPreset { dup type /nametype eq { tPresets exch known } { pop false } ifelse } bind def
 
 % the option keys: internal name, check, guard
@@ -240,6 +242,10 @@ TWState begin {
     /Ribbon      [ /tRibbon     /tIsUnit   /tw-ribbon-must-be-0-to-1 ]
     /InkModel    [ /tInkOn      /tIsBool   /tw-inkmodel-must-be-a-boolean ]
     /Copies      [ /tCopies     /tIsNonNeg /tw-copies-must-be-a-non-negative-number ]
+    /WornBand    [ /tWorn       /tIsUnit   /tw-wornband-must-be-0-to-1 ]
+    /Bleed       [ /tBleed      /tIsUnit   /tw-bleed-must-be-0-to-1 ]
+    /BleedInk    [ /tBleedInk   /tIsRgb    /tw-bleedink-must-be-an-rgb-array ]
+    /BleedSide   [ /tBleedSide  /tIsSide   /tw-bleedside-must-be-below-or-above ]
 >> def
 
 % opts -> -  (TWState is the current dict, begun by the caller). Every key
@@ -350,6 +356,9 @@ TWState begin {
     tCopyC 0 gt { 1 tCopyC 1.1 mul add mul } if     % copies spread the toner
     /inkW exch def                                  % spread: 0.6pt x ribbon at 1
 
+    % the strike's vertical offset from the cell (a band fixed on the ribbon
+    % is fixed in the cell, not on the glyph: #422)
+    /tYoff lY mY wearM mul add sY add def
     % place: line + machine + strike offsets, the tilt's rise along the
     % line, then the rotations about the middle of the face
     lX mX wearM mul add sX add
@@ -564,6 +573,127 @@ grestore
     } { pop pop } ifelse
 } bind def
 
+% ---- worn band and two-colour bleed (#422) --------------------------------
+% Both are opt-in (/WornBand and /Bleed default to 0, which runs the code
+% above unchanged, to the byte) and both are a band at a fixed height in the
+% CELL, not on the glyph: the ribbon does not move with a bent slug or a high
+% strike, so the cell frame's offset (tYoff) is taken out of the band's edges.
+%
+% /WornBand: the lane of ribbon that every x-height strike hits is used over
+% and over and prints lighter (the body at tWornD x /WornBand more holes there,
+% with shoulders half that), while ascender tops and descenders hit fresh
+% ribbon. The body is drawn three times, each over a larger part of the glyph
+% than the next but sparser, so the passes nest and no seam shows.
+%
+% /Bleed: on a black/red ribbon the colour boundary sits at a fixed height; the
+% part of the type face past it prints in the OTHER colour (/BleedInk), and the
+% boundary is ragged at yarn scale. /BleedSide /below puts the other colour
+% under the line (black text picks up red at the bottom of its letters), /above
+% over it. Per strike the boundary wanders, from a hash (slot 22), so most
+% strikes print clean and some take a coloured foot; /Bleed is how far it
+% reaches into the face. The other colour is laid first, the main ink over it
+% through a sparser weave across the transition, so it shows through the voids.
+/tWornLo 20 def  /tWornHi 410 def  /tWornSh 70 def  /tWornD 0.5 def
+/tBlTr 60 def  /tBlOv 20 def  /tBlSteps 0.55 def
+/tZoned false def  /tZFar null def
+/tZW [ [ 0 null ] ] def  /tZB [ [ 0 null ] ] def
+% y0 y1 -> rectangles across the glyph frame: from y0 to y1, and outside it
+/tYRect { /zy1 exch def /zy0 exch def [ -2000 zy0 6000 zy1 zy0 sub ] } bind def
+/tYOut {
+    /zy1 exch def /zy0 exch def
+    [ -2000 -3000 6000 zy0 3000 add  -2000 zy1 6000 3000 zy1 sub ]
+} bind def
+% builds this strike's zones (tZoned tells tRun whether to use them)
+/tZonesBuild {
+    /tZW [ [ 0 null ] ] def  /tZB [ [ 0 null ] ] def  /tZFar null def
+    /tZoned false def
+    tWorn 0 gt {
+        /zwD tWorn tWornD mul def
+        tWornLo tYoff sub /zwLo exch def
+        tWornHi tYoff sub /zwHi exch def
+        % four bands, each overlapping the next by tBlOv, so no seam shows and
+        % a band's edge is not drawn twice over the whole glyph: the fresh
+        % ribbon outside the shoulders, a shoulder, the core, a shoulder
+        zwLo tWornSh sub /zwA exch def  zwHi tWornSh add /zwB exch def
+        /tZW [
+            [ 0  zwA tBlOv add zwB tBlOv sub tYOut ]
+            [ zwD 2 div  zwA tBlOv sub zwLo tBlOv add tYRect ]
+            [ zwD  zwLo tBlOv sub zwHi tBlOv add tYRect ]
+            [ zwD 2 div  zwHi tBlOv sub zwB tBlOv add tYRect ]
+        ] def
+        /tZoned true def
+    } if
+    tBleed 0 gt {
+        % the strike's reach, 0..1 skewed to small, from the strike (or the
+        % key when strikes do not vary); the generator is put back
+        /zhA hA def  /zhB hB def
+        sA sB 22 mix2 /hB exch def /hA exch def 1 uni /zuS exch def
+        tMA tMB kCode mix2 22 mix2 /hB exch def /hA exch def 1 uni /zuK exch def
+        /hA zhA def  /hB zhB def
+        wearS 0 gt { zuS 2 mul zuK add 3 div } { zuK } ifelse
+        tBleed mul 540 mul /zbD exch def
+        tGBox kCode 32 sub get /zbBox exch def
+        tBleedSide /above eq {
+            800 zbD sub tYoff sub /zbY exch def     % the boundary, glyph frame
+            zbY tBlTr sub tBlOv sub zbBox 3 get lt {
+                /tZFar zbY tBlTr sub tBlOv sub 3000 tYRect def
+                /tZB [
+                    [ tBlSteps  zbY tBlTr 3 div add tBlOv sub zbY tBlTr add tYRect ]
+                    [ tBlSteps 2 div  zbY tBlTr 3 div sub tBlOv sub  zbY tBlTr 3 div add tBlOv add tYRect ]
+                    [ tBlSteps 5 div  zbY tBlTr sub tBlOv sub  zbY tBlTr 3 div sub tBlOv add tYRect ]
+                    [ 0  -3000 zbY tBlTr sub tBlOv add tYRect ]
+                ] def
+            } if
+        } {
+            -360 zbD add tYoff sub /zbY exch def
+            zbY tBlTr add tBlOv add zbBox 1 get gt {
+                /tZFar -3000 zbY tBlTr add tBlOv add tYRect def
+                /tZB [
+                    [ tBlSteps  zbY tBlTr sub  zbY tBlTr 3 div sub tBlOv add tYRect ]
+                    [ tBlSteps 2 div  zbY tBlTr 3 div sub tBlOv sub  zbY tBlTr 3 div add tBlOv add tYRect ]
+                    [ tBlSteps 5 div  zbY tBlTr 3 div add tBlOv sub  zbY tBlTr add tBlOv add tYRect ]
+                    [ 0  zbY tBlTr add tBlOv sub 3000 tYRect ]
+                ] def
+            } if
+        } ifelse
+        tZFar null ne { /tZoned true def } if
+    } if
+} bind def
+% p proc -> -  runs proc under the weave at hole level p (the level that
+% would have been used), once per zone pass when a band is on
+/tZoneDo {
+    /zdPr exch def  /zdP exch def
+    tZFar null ne {
+        % the other colour's ink wears with the lane too
+        tZW {
+            aload pop /zdWR exch def /zdWD exch def
+            gsave tBleedInk aload pop setrgbcolor
+                zdP 0.17 sub zdWD add dup 0 lt { pop 0 } if tLevel tWeaveClip
+                tZFar rectclip
+                zdWR null ne { zdWR rectclip } if
+                /zdPr load exec
+            grestore
+        } forall
+    } if
+    tZB {
+        aload pop /zdBR exch def /zdBD exch def
+        tZW {
+            aload pop /zdWR exch def /zdWD exch def
+            gsave zdP zdBD add zdWD add tLevel tWeaveClip
+                zdBR null ne { zdBR rectclip } if
+                zdWR null ne { zdWR rectclip } if
+                /zdPr load exec
+            grestore
+        } forall
+    } forall
+} bind def
+/tRun {
+    tZoned { tZoneDo } {
+        /trPr exch def  /trP exch def
+        gsave trP tLevel tWeaveClip /trPr load exec grestore
+    } ifelse
+} bind def
+
 % -  draws the strike's ink (from tStrikeGlyph: the glyph frame is the CTM)
 /tInkStrike {
     tMat currentmatrix pop
@@ -630,12 +760,13 @@ grestore
     tMat setmatrix
 
     % feather (none at /Ribbon 0: a 0-width stroke is a 1-pixel hairline)
+    /tZoned false def
+    tWorn 0 gt tBleed 0 gt or { tZonesBuild } if
     inkW fW add 0 gt {
-        gsave
-            pBody 0.5 add tLevel tWeaveClip
+        pBody 0.5 add {
             % a thinned strike's fringe shrinks with it (#477)
             tGlyphPath inkW fW add 1 tE tECap div tFringe mul sub mul tPen stroke
-        grestore
+        } tRun
     } if
     % body; a one-side-heavy key's light side is sparser
     mSS wearM mul dup 1 gt { pop 1 } if /tSide exch def
@@ -645,16 +776,15 @@ grestore
         /tE0 tE def
         % (leaves the side's sparseness: 0.5 on a copy, 0.3 otherwise)
         tCopyC 0 gt { 0.5 } { 0.3 /tE tE tSide tESide mul add dup tECap gt { pop tECap } if def } ifelse
-        gsave pBody tSide 3 -1 roll mul add tLevel tWeaveClip tBody grestore
+        pBody tSide 3 -1 roll mul add { tBody } tRun
         /tE tE0 def
-        gsave
-            pBody tLevel tWeaveClip
+        pBody {
             tX0 tX1 add 2 div tY0 tY1 add 2 div translate mSA rotate
             0 -2000 2000 4000 rectclip tMat setmatrix
             tBody
-        grestore
+        } tRun
     } {
-        gsave pBody tLevel tWeaveClip tBody grestore
+        pBody { tBody } tRun
     } ifelse
     % a clogged counter: the dirt packs the counter from one side, over the
     % clog fraction (more on a more worn machine, less on a light strike)
@@ -741,6 +871,21 @@ end definefont pop } exec
 %   { << /Copies -1 >> tw-set } /tw-copies-must-be-a-non-negative-number
 %   (a negative number of copies) mustguard
 %
+%   { << /WornBand 1.5 >> tw-set } /tw-wornband-must-be-0-to-1
+%   (a worn band above 1) mustguard
+%
+%   { << /Bleed -0.1 >> tw-set } /tw-bleed-must-be-0-to-1
+%   (a negative bleed) mustguard
+%
+%   { << /BleedInk [1 0] >> tw-set } /tw-bleedink-must-be-an-rgb-array
+%   (two components for the bleed ink) mustguard
+%
+%   { << /BleedSide /left >> tw-set } /tw-bleedside-must-be-below-or-above
+%   (a side that is neither below nor above) mustguard
+%
+%   { << /BleedSide 3 >> tw-set } /tw-bleedside-must-be-below-or-above
+%   (a number for the side) mustguard
+%
 %   { << /Machine 9 /Wear -1 >> tw-setup } /tw-wear-must-be-a-non-negative-number
 %   (one bad key among good ones) mustguard
 %   TWState /tMachine get 1 eq (and the good ones were not applied) mustbe
@@ -813,6 +958,10 @@ end definefont pop } exec
 % @param: /InkModel [boolean] true draws ribbon ink (the weave's voids, a feathered edge, clogged counters, a heavy side, density from pressure and /Ribbon); false draws flat ink, the glyph filled and stroked solid (default true)
 % @param: /Strike [integer] The strike index: a second strike at the same cell (a strikeover, a bold double strike) needs a new index to get its own variation (default 0)
 % @param: /Copies [count] Photocopy generations the type has been through, 0 for the original: each adds spread, fills the counters in and sharpens the contrast of the ink's coverage, so dark strikes close up and light ones drop out; 1 is a first copy, 3 a copy of a copy of a copy (default 0)
+% @param: /WornBand [0..1] A worn lane of the ribbon (#422): the band of ribbon that every x-height strike hits has been used over and over, so the middle of each letter prints lighter than its ascender tops and descenders, at the same height in every strike (the band is fixed in the cell, so a bent slug moves against it). 0 is none, 1 is a lane worn to a screen. Ribbon ink only (default 0)
+% @param: /Bleed [0..1] Two-colour ribbon bleed (#422): how far the boundary between a black/red ribbon's halves reaches into the type face; the part of a letter past it prints in /BleedInk, with a ragged edge, and the boundary wanders from strike to strike, so some strikes print clean and some take a coloured foot (or head). 0 is none, 1 is a ribbon far out of register. Ribbon ink only (default 0)
+% @param: /BleedInk [rgb array] The colour of the ribbon's other half, for /Bleed: red under black text, black under a red run (default [0.62 0.12 0.10])
+% @param: /BleedSide [name] /below if the other half of the ribbon lies below the printing half, so /Bleed colours the feet of letters, /above if it lies above, so it colours the tops; which half is on top varies by ribbon (default /below)
 /tw-setup {
     TWState begin tApply tFrame end
     /Typewriter findfont TWState /tSize get scalefont setfont
@@ -835,6 +984,10 @@ end definefont pop } exec
 % @param: /InkModel [boolean] As tw-setup (no default: the current value stays)
 % @param: /Strike [integer] As tw-setup (no default: the current value stays)
 % @param: /Copies [count] As tw-setup (no default: the current value stays)
+% @param: /WornBand [0..1] As tw-setup (no default: the current value stays)
+% @param: /Bleed [0..1] As tw-setup (no default: the current value stays)
+% @param: /BleedInk [rgb array] As tw-setup (no default: the current value stays)
+% @param: /BleedSide [name] As tw-setup (no default: the current value stays)
 /tw-set {
     dup type /dicttype eq { dup /Size known } { false } ifelse exch
     TWState begin tApply end
@@ -1415,6 +1568,10 @@ TWState begin {
 % @param: /Ribbon [0..1] As tw-setup (no default: the current value stays)
 % @param: /InkModel [boolean] As tw-setup (no default: the current value stays)
 % @param: /Copies [count] As tw-setup (no default: the current value stays)
+% @param: /WornBand [0..1] As tw-setup (no default: the current value stays)
+% @param: /Bleed [0..1] As tw-setup (no default: the current value stays)
+% @param: /BleedInk [rgb array] As tw-setup (no default: the current value stays)
+% @param: /BleedSide [name] As tw-setup (no default: the current value stays)
 /tw-type {
     TWState begin
     lySplit                                 % the layout keys read; the rest left

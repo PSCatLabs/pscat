@@ -218,7 +218,7 @@ All of it is vector. Each strike draws, inside one `gsave`:
 Keys: `/Ink` (`[rgb array]`, default near-black `[0.13 0.13 0.15]`: M6; a
 purple or blue-black ribbon is just a colour) and `/Ribbon` (`[0..1]`, wetness,
 default 0.7). A red/black two-colour ribbon is `/Ink` switched per run. Bleed
-between the two halves of the ribbon is deferred (Q3).
+between the two halves of the ribbon is `/Bleed` (opt-in, "Added in #422" below).
 
 **gs fill adjust.** The weave holes are 1–2 device pixels at scan resolution,
 which is exactly what gs's default fill adjust closes up (DRYMEDIA.md 2.4). The
@@ -246,7 +246,7 @@ this.
   over clog × machine wear × pressure of its width. The band's edge is ragged.
 - `/StrikeWear 0` keys every ink draw by the key, not the strike, so a quirks-only
   page still repeats a key exactly. `/InkModel false` restores #211's flat ink.
-- Not built: the worn band and two-colour bleed (#422).
+- Not built here: the worn band and two-colour bleed (both added in #422, below).
 
 **Tuned in #423** (`notes/423-ink-lighter-uneven.md`), against T2, T4 and T7:
 
@@ -294,6 +294,48 @@ this.
 - Not done: T10 (worn elite on a grey-brown ribbon) is already well under its scan
   by this measure and a little lighter still; the Szilard machine and the FDR one
   disagree about elite, so a per-face constant is a compromise.
+
+**Added in #422** (`notes/422-ribbon-ink-extras.md`): two opt-in extras, both off by default
+(`/WornBand 0`, `/Bleed 0`), so a page without them is byte-identical to #511's. Both
+are a band at a fixed height **in the cell**, not on the glyph: the ribbon does not move
+with a bent slug or a high strike, so `tInkStrike` takes the strike's vertical offset
+(`tYoff`) out of the band's edges. Each runs the body (and the feather) once per band:
+bands overlap by 20 glyph units so no seam shows, and a pass's edge is not drawn twice
+over the whole glyph. Ribbon ink only (no effect under `/InkModel false`).
+
+- **`/WornBand` `[0..1]`: the worn lane.** The strip of ribbon that every x-height strike
+  hits (glyph heights 20 to 410) is used over and over and prints lighter; ascender tops and
+  descenders hit fresh ribbon, so each letter's middle is greyer than its ends, at the same
+  height in every strike and a line of text reads as one stripe along the line. The hole
+  level there is higher by `tWornD` (0.5) x `/WornBand` (half that on 70-unit shoulders),
+  which at `/WornBand 1` takes 15% of the ink out of the lane (measured on an `l`, tests).
+  A photocopy adds the band after its contrast curve. Elsewhere on the glyph the ink is
+  identical to the page without it.
+- **`/Bleed` `[0..1]`, `/BleedInk` `[rgb]`, `/BleedSide` `/below | /above`: two-colour bleed.**
+  On a black/red ribbon the colour boundary sits at a fixed height, and the part of the
+  type face past it prints in the OTHER colour. `/BleedSide /below` (the default) puts the
+  other half under the printing one, so black text takes a red foot (a descender's tail,
+  sometimes the baseline), `/above` puts it over, so a red run takes black heads on
+  ascenders. The boundary wanders per strike (strike slot 22, mixed with a per-key draw;
+  keyed by the key alone when `/StrikeWear` is 0): its distance from the face's far edge is
+  `/Bleed` x 540 x a hashed 0..1, from 360 units below the baseline (past every
+  descender, with the transition's reach and the strike's own vertical offset) or from 800
+  above it (past every ascender),
+  so a bleed of 0 or one too small to reach a letter is the page without it, so at `/Bleed 0.5` most strikes
+  are clean and the descenders take it first. The other colour is laid first, through the
+  weave; the main ink goes over it, through a sparser weave across a transition 60 units
+  either side of the boundary in three steps, so the other colour shows through the voids
+  and the edge is ragged at yarn scale rather than a ruled line. A strike the boundary does
+  not reach is the page without `/Bleed`, to the byte. With both extras on, the other
+  colour's ink wears with the lane too. Not done: a clogged counter's fill stays in the
+  main ink.
+- **Not sourced.** The board has no two-colour sample (REFERENCES.md; Q3), and a
+  search for one found only retail listings and a description of the selector
+  ("slightly raises or lowers the ribbon"), nothing on colours mixing at the boundary.
+  The model is the mechanism (a type face wider than the printing half of the ribbon, a
+  selector that is a little out), not a measurement; the depth, transition and
+  rates are set by eye. The arrangement varies by ribbon (the selector picks the top or the
+  bottom quarter inch of a half-inch ribbon), hence `/BleedSide`.
 
 ## 7. Randomness that stays out of the caller's stream
 
@@ -414,8 +456,8 @@ Each is phrased as a decision, with a recommendation.
   the epic's target is the typed memo.
 - **Q3. The unsourced traits:** two-colour ribbon bleed, punctuation embossing,
   and `xxxx` overtyping. Recommend:
-  - two-colour ribbon: a plain `/Ink` colour switch now, with bleed deferred
-    until a reference turns up;
+  - two-colour ribbon: a plain `/Ink` colour switch, and (#422) an opt-in `/Bleed`
+    built from the mechanism, since no reference turned up;
   - embossing: treat it as extra pressure on `. , ' "` (a darker, slightly
     larger dot), not as a lighting effect;
   - x-outs: build them from strikeovers, since they are the same mechanism;

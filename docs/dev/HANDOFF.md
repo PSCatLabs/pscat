@@ -838,6 +838,13 @@ renders eight examples in both and compares block-downsampled output).
    being about 6% heavy. Pica and a photocopy (`/Copies > 0`) are byte-identical.
    Only the typewriter specimen (pscat and gs) and `ink_vs_real.png` were redone;
    `notes/511-elite-ink-weight.md`.
+   #422 added two opt-in ribbon extras, both off by default so a page without them is
+   byte-identical: `/WornBand` (the lane every x-height strike hits prints lighter) and
+   `/Bleed` with `/BleedInk` and `/BleedSide` (a black/red ribbon's other colour past a
+   wandering boundary, ragged at the weave). Both are bands at a fixed height in the
+   cell (`tYoff` taken out), drawn as overlapping passes by `tRun` / `tZoneDo`. The
+   specimen has a new "ribbon extras" block; the bleed is unsourced (no two-colour
+   reference on the board); `notes/422-ribbon-ink-extras.md`.
    #242 shipped the charcoal gallery piece, `gallery/lincoln_charcoal.ps`
    (*Study after Berger, 1864*), and `lib/etching.ps`'s `et-tonemap`, which
    returns a photo as a grid of darkness for any piece that wants a
