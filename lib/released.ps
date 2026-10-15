@@ -1161,6 +1161,7 @@ RelState begin {
     rlGen 0 gt { gsave rlSeed 10 rlSeed2 0.985 1 rlHzB sub mul 0.985 1 rlHzB sub mul 0.975 1 rlHzB sub mul false false rlPaperField grestore } if
 } bind def
 /rlRun {
+    /rlPgLive false def  /rlPgOpen false def        % a paged run that raised an error left them
     /rlRecOn false def                              % a content that raised an error left it on
     rlGrabPath
     rlPrep
@@ -1200,7 +1201,7 @@ RelState begin {
 % Each sheet has its own seed (the page's /Seed plus 101 a sheet, the first
 % sheet's unchanged), so the specks, the shifts and the blotches differ from
 % page to page, and a one-page paged document is the same page as rel-page's.
-/rlPg 1 def  /rlPgLive false def  /rlSeed0 1 def
+/rlPg 1 def  /rlPgLive false def  /rlPgOpen false def  /rlSeed0 1 def
 /rlPgStart {
     grestore                                        % tw-type's gsave for the hook
     /rlPg rlPg 1 add def
@@ -1226,7 +1227,7 @@ RelState begin {
 } bind def
 /rlRunPaged {
     /rlRecOn false def
-    /rlSeed0 rlSeed def  /rlPg 0 def  /rlPgLive true def
+    /rlSeed0 rlSeed def  /rlPg 0 def  /rlPgLive true def  /rlPgOpen false def
     /tw-set where { pop rlGen 0 gt } { false } ifelse {
         TWState /tCopies get /rlOldC exch def
         << /Copies rlGen >> tw-set
@@ -1236,6 +1237,13 @@ RelState begin {
         /rlProc load end exec RelState begin
     } ifelse
     /rlPgLive false def
+    rlPgOpen {
+        % a start hook without its end: put back the levels the sheet left open
+        /rlPgOpen false def  /rlRecOn false def
+        rlDrOn { grestore } if grestore grestore
+        /rlHzB 0 def  /rlHzK 0 def
+        end rel-page-start-was-not-followed-by-rel-page-end
+    } if
     rlPg 0 eq { end rel-paged-content-never-called-the-page-hooks } if
     /rlHzB 0 def  /rlHzK 0 def
 } bind def
@@ -1348,7 +1356,9 @@ rlDefaults
 /rel-page-start {
     RelState begin
     rlPgLive not { end rel-page-start-needs-a-paged-rel-page } if
+    rlPgOpen { end rel-page-start-needs-rel-page-end-first } if
     rlPgStart
+    /rlPgOpen true def
     end
 } bind def
 
@@ -1358,7 +1368,9 @@ rlDefaults
 /rel-page-end {
     RelState begin
     rlPgLive not { end rel-page-end-needs-a-paged-rel-page } if
+    rlPgOpen not { end rel-page-end-needs-rel-page-start-first } if
     rlPgEnd
+    /rlPgOpen false def
     end
 } bind def
 

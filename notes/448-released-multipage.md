@@ -37,6 +37,14 @@ hooks must be the whole hook procedure and called by `tw-type` (a `gsave` before
 them would make the first `grestore` pop the wrong level). `showpage` between
 pages is at the caller's level, where the stack is balanced.
 
+A half-wired document is refused rather than left unbalanced: `rlPgOpen` says a
+sheet is open, so a second `rel-page-start`, an `rel-page-end` with none open, or
+a start with no end by the time the content returns each raise a named error
+(`rel-page-start-needs-rel-page-end-first`,
+`rel-page-end-needs-rel-page-start-first`,
+`rel-page-start-was-not-followed-by-rel-page-end`; the last first closes the open
+levels, so the caller's CTM and clip come back).
+
 ## Left alone
 
 - Marks repeat on every page unless a `/Page` is given; there is no per-page

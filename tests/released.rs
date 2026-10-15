@@ -1184,3 +1184,65 @@ fn a_mark_page_that_is_not_a_positive_integer_is_refused() {
         it.error_report(&err)
     );
 }
+
+/// The page frame and clip a rel-page found, as a PostScript test: true when
+/// the CTM is `m0` and the clip is the whole 300 x 200 page.
+const FRAME_BACK: &str = "true 0 1 5 { dup m0 exch get exch matrix currentmatrix exch get eq and } for \
+     clippath pathbbox 200 eq exch 300 eq and exch 0 eq and exch 0 eq and and";
+
+#[test]
+fn a_half_wired_paged_document_is_refused_and_leaves_the_frame_as_it_found_it() {
+    let long = "(1\\n2\\n3\\n4\\n5\\n6\\n7\\n8\\n9\\n10\\n11\\n12\\n13\\n14)";
+    let hooked = |text: &str, tw: &str| {
+        format!(
+            "{{ << /Text {text} \
+                 /Width 300 /Height 200 /Margin 30 {tw} >> tw-type }} \
+             << {SHEET} /Generation 2 /Age 0.5 /Paged true >> rel-page"
+        )
+    };
+    for (text, tw, want) in [
+        // one page, a start with no end: the open sheet is closed again
+        (
+            "(a)",
+            "/PageStart { rel-page-start }",
+            "rel-page-start-was-not-followed-by-rel-page-end",
+        ),
+        // two pages: the second start finds the first sheet still open
+        (
+            long,
+            "/PageStart { rel-page-start }",
+            "rel-page-start-needs-rel-page-end-first",
+        ),
+        // an end with no start
+        (
+            "(a)",
+            "/PageEnd { rel-page-end }",
+            "rel-page-end-needs-rel-page-start-first",
+        ),
+    ] {
+        let mut it = Interp::with_page(W, H).expect("page");
+        load(&mut it);
+        let src = format!(
+            "1 setgray clippath fill matrix currentmatrix /m0 exch def \
+             {} stopped {{ $error /errorname get = }} if",
+            hooked(text, tw)
+        );
+        let _ = it.run_str(&src);
+        let report = it
+            .run_str(&format!("{FRAME_BACK}"))
+            .map(|()| it.operand_stack().last().unwrap().repr())
+            .unwrap_or_else(|e| it.error_report(&e));
+        assert_eq!(report, "true", "{tw}: the frame or clip was left changed");
+        // and the refusal names the missing hook
+        let mut it = Interp::with_page(W, H).expect("page");
+        load(&mut it);
+        let err = it
+            .run_str(&format!("1 setgray clippath fill {}", hooked(text, tw)))
+            .expect_err(tw);
+        assert!(
+            it.error_report(&err).contains(want),
+            "{tw}: {}",
+            it.error_report(&err)
+        );
+    }
+}
