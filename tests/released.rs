@@ -580,6 +580,60 @@ fn grain_rms(p: &[u8], w: usize, h: usize) -> f64 {
     (sum / f64::from(n.max(1))).sqrt()
 }
 
+/// The standard deviation of the 48 pixel windows' means over the bare-paper
+/// windows (nothing darker than 150 of 255): the mottle measure of
+/// docs/dev/design/typewriter/tools/grain.py, in luminance 0..1.
+fn mottle_std(p: &[u8], w: usize, h: usize) -> f64 {
+    let mut means = Vec::new();
+    for wy in (0..h.saturating_sub(47)).step_by(48) {
+        for wx in (0..w.saturating_sub(47)).step_by(48) {
+            let v: Vec<f64> = (0..48 * 48)
+                .map(|i| f64::from(p[(wy + i / 48) * w + wx + i % 48]) / 255.0)
+                .collect();
+            if v.iter().any(|&x| x < 0.6) {
+                continue;
+            }
+            means.push(v.iter().sum::<f64>() / v.len() as f64);
+        }
+    }
+    let m = means.iter().sum::<f64>() / means.len().max(1) as f64;
+    (means.iter().map(|x| (x - m).powi(2)).sum::<f64>() / means.len().max(1) as f64).sqrt()
+}
+
+#[test]
+fn a_copys_mottle_is_at_the_scans_strength_and_has_creases() {
+    // issue #528: T14's mottle is 0.0087 at 48 pixels (300 dpi); the crumpled-paper
+    // wave is octaves of tilted noise and a few creases, not soft axis-aligned blocks
+    let sheet = |pre: &str| {
+        let mut it = Interp::with_page_scaled(W, H, 4.0).expect("page");
+        load(&mut it);
+        it.run_str(&format!(
+            "{pre} 1 setgray clippath fill {{ }} << {SHEET} /Generation 1 >> rel-page"
+        ))
+        .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+        lum(&it)
+    };
+    let (on, off) = (sheet(""), sheet("RelState /rlCrD 0 put"));
+    let (w, h) = ((W * 4) as usize, (H * 4) as usize);
+    let std = mottle_std(&on, w, h);
+    assert!(
+        (0.005..0.014).contains(&std),
+        "a copy's mottle is at the scans' strength: {std:.4} (T14 0.0087)"
+    );
+    // the creases show, and leave the paper's tone alone
+    assert!(
+        differing(&on, &off) > 3000,
+        "creases drew {} pixels",
+        differing(&on, &off)
+    );
+    assert!(
+        (mean(&on) - mean(&off)).abs() < 1.0,
+        "creases move the tone: {} against {}",
+        mean(&on),
+        mean(&off)
+    );
+}
+
 #[test]
 fn the_haze_grain_is_at_the_strength_of_the_scans() {
     // issue #474: T2, T9 and T14 are 0.007 to 0.009 at 300 dpi; at 4 pixels to
