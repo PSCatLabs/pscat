@@ -1028,7 +1028,8 @@
 % A plain clip inside a dkbatch (#444). While a batch's procedure runs,
 % dkbatch puts these into userdict in place of the clip operators and
 % gsave/grestore (only if every one of those names still resolves to
-% systemdict). The batch dict tracks /pc, the plain clip in force:
+% systemdict). Where the interpreter has Level 3's cliprestore (Ghostscript;
+% pscat has none) it is shadowed too (#454). The batch dict tracks /pc, the plain clip in force:
 %   null    no plain clip change (the #312 rule: the dkclip entry, if any)
 %   /dirty  changed since the last capture: the next dkstroke takes a gstate
 %   gstate  that capture, shared by every stroke until the clip changes
@@ -1084,6 +1085,13 @@ systemdict /.sameclip known /dkPsameok exch def
 /dkPgsave { dkPpush gsave } bind def
 % @internal
 /dkPgrestore { grestore dkPpop } bind def
+% cliprestore puts back a clip that clipsave saved, which may be any clip
+% (the batch's /pcs stack has no idea what clipsave saved), so it is a
+% change drykit cannot follow: /dirty. clipsave itself changes nothing.
+% systemdict get exec, not the bare name, so the shadow cannot call itself
+% if cliprestore is a procedure rather than an operator.
+% @internal
+/dkPcliprestore { systemdict /cliprestore get exec dkPdirty } bind def
 % @internal
 /dkPgrestoreall {
     grestoreall
@@ -1096,6 +1104,7 @@ systemdict /.sameclip known /dkPsameok exch def
     /initclip /dkPinitclip load /setgstate /dkPsetgstate load
     /initgraphics /dkPinitgraphics load /gsave /dkPgsave load
     /grestore /dkPgrestore load /grestoreall /dkPgrestoreall load
+    systemdict /cliprestore known { /cliprestore /dkPcliprestore load } if
 ] def
 % -   (puts the shadows into userdict, if every name resolves to systemdict)
 % @internal

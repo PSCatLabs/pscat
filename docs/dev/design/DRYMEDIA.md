@@ -301,7 +301,11 @@ replaces the clip, so the batch's own clip is not applied twice), then the
 record's colour and CTM. A batch that ends still under a clip it made
 renders in the state it opened in, so strokes made before that clip stay
 whole. The shadows install only when all nine names resolve to systemdict
-(a caller's own `gsave` in userdict leaves the old rule). A procedure bound
+(a caller's own `gsave` in userdict leaves the old rule). Where the
+interpreter has Level 3's `cliprestore` (Ghostscript; pscat has no
+`clipsave`/`cliprestore`) it is a tenth shadow: it gives back a clip drykit
+never saw, so it marks the batch dirty (#454; `clipsave` changes nothing and
+is not shadowed). A procedure bound
 before the batch reaches the operators directly, so drykit sees neither its
 clips nor its restores: a callback that clips and strokes inside a bound
 `gsave ... exec ... grestore` wrapper leaves the batch's later strokes under

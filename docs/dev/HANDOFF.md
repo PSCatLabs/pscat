@@ -666,6 +666,9 @@ renders eight examples in both and compares block-downsampled output).
    capture's clip is still in force and recaptures if not; drykit probes
    it at load (`dkPsameok`), so gs keeps the limit (#488,
    `notes/488-sameclip.md`).
+   Where the interpreter has `cliprestore` (gs; pscat has no
+   `clipsave`/`cliprestore`) `dkbatch` shadows it too and marks the batch
+   dirty (#454, `notes/454-cliprestore-in-a-batch.md`).
    #393: `dkstroke /After true` in a batch is drawn on its own after the
    batch renders, in call order, in its own colour; `dhsmudge` and `dhlift`
    use it, so they run inside a batch, over everything the batch lays
