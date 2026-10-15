@@ -203,6 +203,34 @@ fn a_copy_keeps_a_grey_haze_and_a_grain_unless_haze_is_zero() {
 }
 
 #[test]
+fn the_haze_grain_does_not_cover_a_punch_hole() {
+    // one hole at (34, 100) on the 300 x 200 sheet, radius 8.5 (the copy
+    // chain may move it by up to 3.2pt): the lid shows through it, near black on a copy (0.1), and the grain must stay off it.
+    // Rendered at 4 pixels to the point: at one the flecks average away.
+    let mut it = Interp::with_page_scaled(W, H, 4.0).expect("page");
+    load(&mut it);
+    it.run_str(&format!(
+        "1 setgray clippath fill {{ }} << {SHEET} /Generation 1 /Punch 1 >> rel-page"
+    ))
+    .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+    let p = lum(&it);
+    let w = (W * 4) as usize;
+    let mut brightest = 0u8;
+    for dy in -20i32..=20 {
+        for dx in -20i32..=20 {
+            if dx * dx + dy * dy <= 20 * 20 {
+                let (x, y) = ((34 * 4 + dx) as usize, (100 * 4 + dy) as usize);
+                brightest = brightest.max(p[y * w + x]);
+            }
+        }
+    }
+    assert!(
+        brightest < 60,
+        "a fleck of paper grey inside the hole: {brightest}"
+    );
+}
+
+#[test]
 fn a_redaction_bar_covers_its_whole_word() {
     // the hook gets x0 x1 baseline size of each run: <r>bcd</r> is 3 cells
     // of the 7.2pt pica advance, and a run that wraps comes as two

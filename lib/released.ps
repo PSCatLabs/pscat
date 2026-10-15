@@ -409,6 +409,7 @@ RelState begin {
 /rlPaperDraw {
     rlSeed 11 rlSeed2 rlTone true true rlPaperField
     rlTexture
+    rlCC 0 gt rlHzB 0 gt and { gsave rlHazeGrain grestore } if   % before the holes, which it must not cover
     rlSeed 14 rlSeed2 rlFoldLines
     rlSeed 15 rlSeed2 rlPunches
 } bind def
@@ -728,7 +729,6 @@ RelState begin {
     /rlCC 1 0.6 rlGen exp sub def
     rlHzB 0 gt { rlSeed 16 rlSeed2 rlHzInit } if
     rlPaint { gsave rlPaperDraw grestore } if
-    rlHzB 0 gt { gsave rlHazeGrain grestore } if
     rlRePath
     /tw-set where { pop rlGen 0 gt } { false } ifelse {
         TWState /tCopies get /rlOldC exch def
