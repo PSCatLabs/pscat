@@ -631,10 +631,10 @@ grestore
         tMA tMB kCode mix2 22 mix2 /hB exch def /hA exch def 1 uni /zuK exch def
         /hA zhA def  /hB zhB def
         wearS 0 gt { zuS 2 mul zuK add 3 div } { zuK } ifelse
-        tBleed mul 350 mul /zbD exch def
+        tBleed mul 540 mul /zbD exch def
         tGBox kCode 32 sub get /zbBox exch def
         tBleedSide /above eq {
-            690 zbD sub tYoff sub /zbY exch def     % the boundary, glyph frame
+            800 zbD sub tYoff sub /zbY exch def     % the boundary, glyph frame
             zbY tBlTr sub tBlOv sub zbBox 3 get lt {
                 /tZFar zbY tBlTr sub tBlOv sub 3000 tYRect def
                 /tZB [
@@ -645,7 +645,7 @@ grestore
                 ] def
             } if
         } {
-            -200 zbD add tYoff sub /zbY exch def
+            -360 zbD add tYoff sub /zbY exch def
             zbY tBlTr add tBlOv add zbBox 1 get gt {
                 /tZFar -3000 zbY tBlTr add tBlOv add tYRect def
                 /tZB [
@@ -955,7 +955,7 @@ end definefont pop } exec
 % @param: /WornBand [0..1] A worn lane of the ribbon (#422): the band of ribbon that every x-height strike hits has been used over and over, so the middle of each letter prints lighter than its ascender tops and descenders, at the same height in every strike (the band is fixed in the cell, so a bent slug moves against it). 0 is none, 1 is a lane worn to a screen. Ribbon ink only (default 0)
 % @param: /Bleed [0..1] Two-colour ribbon bleed (#422): how far the boundary between a black/red ribbon's halves reaches into the type face; the part of a letter past it prints in /BleedInk, with a ragged edge, and the boundary wanders from strike to strike, so some strikes print clean and some take a coloured foot (or head). 0 is none, 1 is a ribbon far out of register. Ribbon ink only (default 0)
 % @param: /BleedInk [rgb array] The colour of the ribbon's other half, for /Bleed: red under black text, black under a red run (default [0.62 0.12 0.10])
-% @param: /BleedSide [name] /below if the other half of the ribbon lies below the printing half, so /Bleed colours the feet of letters (the usual black-over-red ribbon), /above if it lies above, so it colours the tops (default /below)
+% @param: /BleedSide [name] /below if the other half of the ribbon lies below the printing half, so /Bleed colours the feet of letters, /above if it lies above, so it colours the tops; which half is on top varies by ribbon (default /below)
 /tw-setup {
     TWState begin tApply tFrame end
     /Typewriter findfont TWState /tSize get scalefont setfont

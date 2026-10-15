@@ -318,8 +318,10 @@ over the whole glyph. Ribbon ink only (no effect under `/InkModel false`).
   sometimes the baseline), `/above` puts it over, so a red run takes black heads on
   ascenders. The boundary wanders per strike (strike slot 22, mixed with a per-key draw;
   keyed by the key alone when `/StrikeWear` is 0): its distance from the face's far edge is
-  `/Bleed` x 350 x a hashed 0..1, from 200 units below the baseline (under every
-  descender) or from 690 above it (over every ascender), so at `/Bleed 0.5` most strikes
+  `/Bleed` x 540 x a hashed 0..1, from 360 units below the baseline (past every
+  descender, with the transition's reach and the strike's own vertical offset) or from 800
+  above it (past every ascender),
+  so a bleed of 0 or one too small to reach a letter is the page without it, so at `/Bleed 0.5` most strikes
   are clean and the descenders take it first. The other colour is laid first, through the
   weave; the main ink goes over it, through a sparser weave across a transition 60 units
   either side of the boundary in three steps, so the other colour shows through the voids
@@ -331,7 +333,8 @@ over the whole glyph. Ribbon ink only (no effect under `/InkModel false`).
   ("slightly raises or lowers the ribbon"), nothing on colours mixing at the boundary.
   The model is the mechanism (a type face wider than the printing half of the ribbon, a
   selector that is a little out), not a measurement; the depth, transition and
-  rates are set by eye. Which half is on top varies by ribbon, hence `/BleedSide`.
+  rates are set by eye. The arrangement varies by ribbon (the selector picks the top or the
+  bottom quarter inch of a half-inch ribbon), hence `/BleedSide`.
 
 ## 7. Randomness that stays out of the caller's stream
 

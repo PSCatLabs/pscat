@@ -575,21 +575,24 @@ fn bleed_prints_the_other_colour_below_the_boundary() {
     let above = red_rows(&format!("/BleedSide /above /Bleed 1 {ink_red}"), text);
     assert!(above.len() > 100, "no red head: {}", above.len());
     assert!(
-        above.iter().max().copied().unwrap() <= row_of(250),
-        "a head reached below 250 units"
+        above.iter().max().copied().unwrap() <= row_of(150),
+        "a head reached below 150 units"
     );
-    // a bleed that cannot reach a letter (no descender, the boundary far
-    // below) is the page without a bleed, to the byte
+    // a bleed too small to reach a letter (the boundary rests outside the
+    // face, past every descender and ascender) is the page without a bleed,
+    // to the byte: on descenders, ascenders and the baseline, on both sides
     let page = |opts: &str| {
         ink(&render(&format!(
-            "36 84 moveto << /Machine 1 /Seed 2 {opts} >> tw-setup (Hxdlbk) show"
+            "36 84 moveto << /Machine 1 /Seed 2 {opts} >> tw-setup (Hxdlbkpgyqj Hl) show"
         )))
     };
-    assert_eq!(
-        page("/Bleed 0"),
-        page("/Bleed 0.0001"),
-        "a bleed too small to reach a letter moved ink"
-    );
+    for side in ["/below", "/above"] {
+        assert_eq!(
+            page(&format!("/Bleed 0 /BleedSide {side}")),
+            page(&format!("/Bleed 0.0001 /BleedSide {side}")),
+            "a bleed too small to reach a letter moved ink on {side}"
+        );
+    }
 }
 
 #[test]

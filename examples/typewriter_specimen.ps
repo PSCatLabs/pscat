@@ -99,6 +99,7 @@ currentpoint (r) show moveto << /Strike 1 >> tw-set (t) show
 190 sprule
 (Ribbon extras, both opt-in \(#422\). /WornBand 0, 0.5, 1: the lane every x-height strike hits wears thin; ascender tops and tails stay fresh.) 54 178 splabel
 /spw { /spo exch def /spy exch def /spx exch def spx spy moveto spo tw-setup (Hxdlbkpy) show } def
+/spb { /spo exch def /spy exch def /spx exch def spx spy moveto spo tw-setup (Hpdlgbyq) show } def
 72  152 << /Preset /manual /Machine 7 /Seed 21 /Size 24 /Pitch 5 /Ink [0.13 0.13 0.15] /WornBand 0 /Bleed 0 >> spw
 216 152 << /WornBand 0.5 >> spw
 360 152 << /WornBand 1 >> spw
@@ -106,10 +107,10 @@ currentpoint (r) show moveto << /Strike 1 >> tw-set (t) show
 72 122 moveto << /Size 12.5 /Pitch 10 /Seed 22 /WornBand 0 >> tw-setup spline show
 72 110 moveto << /WornBand 0.8 >> tw-set spline show
 
-(/Bleed 0.6, 1 on a black/red ribbon, the other colour past a wandering boundary; then a red run with /BleedSide /above) 54 92 splabel
-72  64 << /Size 24 /Pitch 5 /Seed 23 /WornBand 0 /Bleed 0.6 /BleedSide /below >> spw
-216 64 << /Bleed 1 >> spw
-360 64 << /Ink [0.62 0.12 0.10] /BleedInk [0.13 0.13 0.15] /BleedSide /above >> spw
+(/Bleed 0.8, 1 on a black/red ribbon, the other colour past a wandering boundary; then a red run with /BleedSide /above) 54 92 splabel
+72  64 << /Size 24 /Pitch 5 /Seed 23 /WornBand 0 /Bleed 0.8 /BleedSide /below >> spb
+216 64 << /Bleed 1 >> spb
+360 64 << /Ink [0.62 0.12 0.10] /BleedInk [0.13 0.13 0.15] /BleedSide /above >> spb
 72 40 moveto << /Size 12.5 /Pitch 10 /Seed 24 /Ink [0.13 0.13 0.15] /BleedInk [0.62 0.12 0.10] /BleedSide /below /Bleed 1 >> tw-setup
 (Please note the ) show
 << /Ink [0.62 0.12 0.10] /BleedInk [0.13 0.13 0.15] /BleedSide /above >> tw-set (DEADLINE) show

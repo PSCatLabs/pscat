@@ -43,8 +43,13 @@ page is byte-identical (identity check below). They apply to ribbon ink only.
   +-30 units in one step read as a ruled line at /Size 40.)
 - **The boundary wanders** per strike from a hash (slot 22 of the strike prefix, mixed
   2:1 with a per-key draw 22 of the machine prefix; the key alone when `/StrikeWear` is
-  0). It starts 200 units below the baseline (below every descender; `/above`: 690,
-  above every ascender) and moves into the face by `/Bleed` x 350 x u. A strike the
+  0). It rests 360 units below the baseline (`/above`: 800), far enough that the
+  boundary plus its transition (80 units) and the strike's own vertical offset (tens of
+  units) is past every descender (ascender) tip, and moves into the face by
+  `/Bleed` x 540 x u. (A first version rested at -200 / 690:
+  the transition reached the descender tips, so every `/Bleed > 0` tinged every
+  descender; the advisor review caught it, and the byte-identity test now has
+  descenders and ascenders on both sides.) A strike the
   boundary does not reach takes the unzoned path: it is the page without `/Bleed` to
   the byte (a test: `/Bleed 0.0001` on `Hxdlbk` equals `/Bleed 0`).
 - The hash generator `hA hB` is saved and put back around the new draws, so turning a
@@ -58,9 +63,10 @@ page is byte-identical (identity check below). They apply to ribbon ink only.
 There is no two-colour sample on the reference board (REFERENCES.md; TYPEWRITER.md Q3).
 A bounded web search (retail listings, Wikipedia "Ink ribbon", a ribbon-care page) found
 only that a selector "slightly raises or lowers the ribbon" so the type face hits the
-chosen half, and nothing on colours mixing at the boundary; one source says black is
-usually the lower half and another leaves it open, so `/BleedSide` is a key and the
-default is `/below`. So the bleed is a model of the mechanism, tuned by eye, not
+chosen half, and nothing on colours mixing at the boundary; a ribbon-care page confirms the
+selector picks the top or the bottom quarter inch of the half-inch ribbon and does not
+say which colour is which (a search summary's claim that black is usually the lower half
+was not on the page), so `/BleedSide` is a key and the default `/below` is a guess. So the bleed is a model of the mechanism, tuned by eye, not
 measured against a scan. The worn band has the same standing: T10 (a worn grey-brown
 ribbon) is lighter overall; a lighter lane is not measured on a scan either. Gaps filed
 as p3 (below).
