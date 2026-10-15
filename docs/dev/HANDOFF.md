@@ -1020,7 +1020,7 @@ renders eight examples in both and compares block-downsampled output).
   the cells' clips, backdrops, pass colours and the saved random stream, null
   otherwise; the pass loop tests it, and each cell points slot 5 at its own
   backdrop, so `puwet` needs nothing new; slot 9, issue #403, is a `/PerFill`
-  call's `[ /Under procedure, CTM at entry ]`, null otherwise). A new
+  call's `[ /Under procedure, CTM at entry, /FillLength or 0 ]`, null otherwise; the third element, issue #492, is read by `pufilllen`). A new
   adopter must call `puwetat` (`puwet` plus the fill's x y) on every loaded
   colour, or its marks go solid inside a pull. `puwetat` is what lets
   `/PerFill true` ask the backdrop at each fill: the four adopters pass the
@@ -1028,7 +1028,17 @@ renders eight examples in both and compares block-downsampled output).
   the slot-9 CTM, so it is in the user space `pkwet` was called in, pass
   displacement included. It never touches the depth counter (an error leaves
   through the pass's own `stopped`), unlike `pqaskunder`, which runs before the
-  passes. The ridge and mix colours of `pkoil` and `pkdab` still use `puwet` (per pass). `pkfan` adopts it too (L4, `pfColorRec`): its colour is set
+  passes. The ridge and mix colours of `pkoil` and `pkdab` still use `puwet` (per pass).
+  `/FillLength` (#492) cuts one long run into several fills: `ptemit` (pktrowel)
+  and `pmemit` (pkbroad) ask `pufilllen` (the smallest positive length among the
+  levels running a softening pass, 0 otherwise) and, when it is positive and
+  `pusplit` returns more than one piece, take `ptsplitfill` / `pmsplitfill`
+  instead of the code they always had (a single piece, or no length, is that
+  code, so every old render is unchanged). `pmsplitfill` computes the whole
+  boundary first, with `pmemit`'s own draws in its own order, then fills
+  sub-polygons that overlap by one segment; `ptsplitfill` has no draws to keep.
+  `pkfan`'s `pfrun` is not cut (a pointed ribbon per run) and `pkdab` is one
+  fill per dab: a new adopter that fills a strip should do what `ptemit` does. `pkfan` adopts it too (L4, `pfColorRec`): its colour is set
   per *run* (`pfrun`) and per pressed ray (`pfray`) by `pfcolor`, from the
   bristle's `pfub` and the stored `/ColorJitter` draw `pfcj` (taken where it
   always was, so the stream doesn't move), because a bristle's runs span every

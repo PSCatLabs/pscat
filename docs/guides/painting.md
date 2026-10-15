@@ -488,7 +488,14 @@ add `/PerFill true` beside `/At` and the procedure is asked again at each
 fill's own position (the middle of an inked run, in the user space you call
 pkwet in), with no clipping and no extra runs of the mark. A mark made of many
 short fills follows the sky closely, and one long unbroken run is asked once.
-It costs one call of the procedure per fill per softening pass, so keep it
+Add `/FillLength 10` (points, with `/PerFill true`) and a long run of `pkbroad` or
+`pktrowel` is cut into fills about that far apart, each asked at its own middle,
+so one tall stroke down a vertical gradient follows it too: on a 110pt stroke
+the rim over a strong gradient fell from 240 to 72 at 10pt. The cut makes
+more fills, so more calls of the procedure (45 to 345 for that stroke), and it
+reaches only those two presets (`pkfan` ribbons and `pkdab` dabs are not cut). A
+length longer than the run, or no `/FillLength`, leaves the render as it was.
+The length is measured along the mark in the user space it is drawn in. It costs one call of the procedure per fill per softening pass, so keep it
 cheap, and an inherited-colour mark (`pkribbon`, `pkspray`) has no such site and
 is still asked per pass at `/At`. A literal `[r g b]` behaves exactly
 as before. `examples/paintkit_wet_under_demo.ps` sets one cloud over a strong

@@ -8562,6 +8562,253 @@ fn wet_perfill_rejects_what_it_cannot_mean() {
     }
 }
 
+// --- pkwet: /FillLength, a long loaded run cut into several fills (issue #492)
+//
+// /PerFill asks the backdrop once per inked run, so one long unbroken run (a
+// single tall pkbroad stroke) is asked once. /FillLength cuts such a run into
+// fills about that far apart, each asked at its own middle. What has to hold:
+// the cut follows a gradient the uncut run cannot, a run no longer than the
+// length is not touched at all, the random stream is the one an uncut call
+// leaves, and the key means nothing (and is an error) outside /PerFill.
+// Without the key nothing moves: the byte-identity half is
+// scripts/identity_check.sh.
+
+/// One vertical stroke of `preset` (x 150, y 20..130) over the 300x150
+/// gradient, softened with `wet`. `opts` are the preset's own keys.
+fn tall_stroke(preset: &str, opts: &str, wet: &str) -> Interp {
+    let mut it = fresh(300, 150);
+    it.run_str(&format!(
+        "/skyat {{ 150 div 0 max 1 min /skt exch def \
+           [ 0.98 0.86 0.68 ] [ 0.06 0.16 0.50 ] skt mix3 }} def \
+         0 1 149 {{ /gy exch def gy skyat setrgbcolor \
+           newpath 0 gy moveto 300 gy lineto 300 gy 2 add lineto 0 gy 2 add lineto \
+           closepath fill }} for \
+         41 srand \
+         {{ newpath 150 20 moveto 150 130 lineto \
+            << /Width 10 /Colors [[0.99 0.98 0.97]] {opts} >> {preset} }} \
+         << /Soft 1 /Offset 34 /Layers 6 /At [ 150 75 ] /Under {SKY_FN} /PerFill true \
+            {wet} >> pkwet"
+    ))
+    .unwrap_or_else(|e| panic!("{preset} {wet}: {}", it.error_report(&e)));
+    it
+}
+
+const BROAD_FLAT: &str = "/Charge 1 /Depletion 0 /Edge 0 /ColorJitter 0";
+const TROWEL_FLAT: &str = "/Coverage 1 /Scrape 0 /EdgeBuildup 0 /Jitter 0 /ColorJitter 0";
+
+/// The acceptance criterion: a single unbroken stroke down a vertical
+/// gradient is asked once per striation per pass by /PerFill alone, so its
+/// rim is the per-pass one; cut into 10pt fills it follows the gradient.
+/// Measured when this was written (rows 15..135): pkbroad /PerFill alone 239.6,
+/// /FillLength 10 71.6 (3.3x less); pktrowel 206.8 and 70.2 (2.9x).
+#[test]
+fn wet_filllength_makes_one_unbroken_stroke_follow_the_backdrop() {
+    for (preset, opts) in [("pkbroad", BROAD_FLAT), ("pktrowel", TROWEL_FLAT)] {
+        let whole = rim_residual(&tall_stroke(preset, opts, ""), 15..135);
+        let cut = rim_residual(&tall_stroke(preset, opts, "/FillLength 10"), 15..135);
+        assert!(
+            whole > 2.0 * cut,
+            "{preset}: whole {whole:.1}, cut {cut:.1}"
+        );
+    }
+}
+
+/// A length longer than the run cuts nothing, so it is the /PerFill render to
+/// the byte; so is a call with one layer, which is only a core pass. Each cut
+/// piece is also really a separate fill: the backdrop is asked more often.
+#[test]
+fn wet_filllength_leaves_a_short_run_and_a_core_pass_alone() {
+    for (preset, opts) in [("pkbroad", BROAD_FLAT), ("pktrowel", TROWEL_FLAT)] {
+        assert_eq!(
+            pixels(&tall_stroke(preset, opts, "")),
+            pixels(&tall_stroke(preset, opts, "/FillLength 1000")),
+            "{preset}: a length past the run's end"
+        );
+    }
+    // pkfan hands each run to pkribbon as one pointed ribbon, which cannot be
+    // cut at a stop without pointing every piece, so it is not cut.
+    let fan = LOAD_PRESETS[2];
+    assert_eq!(fan.0, "pkfan");
+    assert_eq!(
+        pixels(&tall_stroke(fan.0, fan.1, "")),
+        pixels(&tall_stroke(fan.0, fan.1, "/FillLength 10")),
+        "pkfan runs are not cut"
+    );
+    let one = |len: &str| {
+        pixels(&tall_stroke(
+            "pkbroad",
+            BROAD_FLAT,
+            &format!("/Layers 1 {len}"),
+        ))
+    };
+    assert_eq!(
+        one(""),
+        one("/FillLength 10"),
+        "one layer is a core pass only"
+    );
+}
+
+/// How many times the backdrop procedure is asked, and what the next random
+/// draw is, after a tall stroke softened with `wet`.
+fn filllength_asks(preset: &str, opts: &str, wet: &str) -> (i64, f64) {
+    let mut it = fresh(300, 150);
+    it.run_str(&format!(
+        "userdict /asked 0 put 7 srand \
+         {{ newpath 150 20 moveto 150 130 lineto \
+            << /Width 10 /Colors [[0.9 0.9 0.9]] {opts} >> {preset} }} \
+         << /Soft 1 /Offset 20 /Layers 4 /At [ 150 75 ] /PerFill true {wet} \
+            /Under {{ pop pop userdict /asked asked 1 add put 0.5 0.5 0.5 }} >> pkwet \
+         frnd asked exch"
+    ))
+    .unwrap_or_else(|e| panic!("{preset} {wet}: {}", it.error_report(&e)));
+    let st = it.operand_stack();
+    let num = |i: usize| st[st.len() - i].repr().parse::<f64>().expect("number");
+    (num(2) as i64, num(1))
+}
+
+/// The cut draws nothing and moves no draw: the random stream after the call
+/// is the one an uncut call leaves, for a preset that jitters its edge
+/// (pkbroad /Edge, pktrowel /Jitter and its ridge), while the number of
+/// asks grows with the number of fills.
+#[test]
+fn wet_filllength_cuts_the_fill_not_the_random_stream() {
+    for (preset, opts) in [
+        (
+            "pkbroad",
+            "/Charge 1 /Depletion 0.4 /Edge 0.6 /ColorJitter 0.2",
+        ),
+        (
+            "pktrowel",
+            "/Coverage 0.9 /Scrape 0.2 /EdgeBuildup 0.5 /Jitter 0.5 /ColorJitter 0.2",
+        ),
+    ] {
+        let (asks0, next0) = filllength_asks(preset, opts, "");
+        let (asks1, next1) = filllength_asks(preset, opts, "/FillLength 12");
+        assert_eq!(next0, next1, "{preset}: the stream after the call");
+        assert!(asks1 > 2 * asks0, "{preset}: asked {asks0} then {asks1}");
+        let (asks2, _) = filllength_asks(preset, opts, "/FillLength 1000");
+        assert_eq!(asks0, asks2, "{preset}: a length past the run");
+    }
+}
+
+/// Over a backdrop that never changes the cut fills are the same colour, so
+/// cutting is invisible: the render is the uncut one to the byte (the
+/// overlap between neighbours repaints the same colour).
+#[test]
+fn wet_filllength_over_a_constant_backdrop_is_invisible() {
+    for (preset, opts) in [("pkbroad", BROAD_FLAT), ("pktrowel", TROWEL_FLAT)] {
+        let run = |wet: &str| {
+            let mut it = fresh(300, 150);
+            it.run_str(&format!(
+                "7 srand {{ newpath 150 20 moveto 150 130 lineto \
+                    << /Width 10 /Colors [[0.9 0.2 0.2]] {opts} >> {preset} }} \
+                 << /Soft 1 /Offset 0 /Layers 3 /At [ 150 75 ] /PerFill true {wet} \
+                    /Under {{ pop pop 0.2 0.4 0.9 }} >> pkwet"
+            ))
+            .unwrap_or_else(|e| panic!("{preset} {wet}: {}", it.error_report(&e)));
+            pixels(&it)
+        };
+        let (a, b) = (run(""), run("/FillLength 9"));
+        let off = a
+            .iter()
+            .zip(&b)
+            .filter(|(a, b)| a.abs_diff(**b) > 2)
+            .count();
+        assert!(off * 200 < a.len(), "{preset}: {off} channel values differ");
+    }
+}
+
+/// Nested calls: the shortest positive length among the levels running a
+/// softening pass cuts the run, so either level's /FillLength alone does.
+#[test]
+fn wet_filllength_nests() {
+    let nest = |outer: &str, inner: &str| {
+        let mut it = fresh(300, 150);
+        it.run_str(&format!(
+            "userdict /asked 0 put 7 srand \
+             {{ {{ newpath 150 20 moveto 150 130 lineto \
+                  << /Width 10 /Colors [[0.9 0.9 0.9]] {BROAD_FLAT} >> pkbroad }} \
+                << /Soft 1 /Offset 10 /Layers 2 /At [ 150 75 ] /PerFill true {inner} \
+                   /Under {{ pop pop userdict /asked asked 1 add put 0.5 0.5 0.5 }} >> pkwet }} \
+             << /Soft 1 /Offset 10 /Layers 2 /At [ 150 75 ] /PerFill true {outer} \
+                /Under {{ pop pop userdict /asked asked 1 add put 0.5 0.5 0.5 }} >> pkwet \
+             asked"
+        ))
+        .unwrap_or_else(|e| panic!("{outer} / {inner}: {}", it.error_report(&e)));
+        it.operand_stack()
+            .last()
+            .expect("asks")
+            .repr()
+            .parse::<i64>()
+            .expect("int")
+    };
+    let none = nest("", "");
+    let inner_only = nest("", "/FillLength 15");
+    let outer_only = nest("/FillLength 15", "");
+    let both = nest("/FillLength 40", "/FillLength 15");
+    assert!(
+        inner_only > none && outer_only > none,
+        "{none} {inner_only} {outer_only}"
+    );
+    assert!(both >= inner_only && both >= outer_only, "{both}");
+}
+
+/// /FillLength is a length for /PerFill's fills: a positive number, and only
+/// with /PerFill true. Each wrong form is a named error that unwinds.
+#[test]
+fn wet_filllength_rejects_what_it_cannot_mean() {
+    let m = "{ newpath 10 10 moveto 100 10 lineto << /Width 10 >> pkribbon }";
+    let proc = "/Under { pop pop 0 0 0 } /At [ 0 0 ]";
+    for (opts, want) in [
+        (
+            "/Under [ 0 0 0 ] /FillLength 5".to_string(),
+            "pkwet-filllength-needs-perfill",
+        ),
+        (
+            format!("{proc} /FillLength 5"),
+            "pkwet-filllength-needs-perfill",
+        ),
+        (
+            format!("{proc} /PerFill false /FillLength 5"),
+            "pkwet-filllength-needs-perfill",
+        ),
+        (
+            format!("{proc} /PerFill true /FillLength (5)"),
+            "pkwet-filllength-must-be-a-number",
+        ),
+        (
+            format!("{proc} /PerFill true /FillLength {{ 5 }}"),
+            "pkwet-filllength-must-not-be-a-procedure",
+        ),
+        (
+            format!("{proc} /PerFill true /FillLength 0"),
+            "pkwet-filllength-must-be-positive",
+        ),
+        (
+            format!("{proc} /PerFill true /FillLength -3.5"),
+            "pkwet-filllength-must-be-positive",
+        ),
+    ] {
+        let mut it = fresh(120, 120);
+        let e = it
+            .run_str(&format!("{m} << /Soft 1 {opts} >> pkwet"))
+            .unwrap_err();
+        let report = it.error_report(&e).to_string();
+        assert!(report.contains(want), "{opts}: wanted {want}, got {report}");
+        let mut it = fresh(120, 120);
+        it.run_str(&format!(
+            "0 0 0 setrgbcolor 5 srand {{ {m} << /Soft 1 {opts} >> pkwet }} stopped pop \
+             pqdepth"
+        ))
+        .unwrap_or_else(|e| panic!("{opts}: {}", it.error_report(&e)));
+        assert_eq!(
+            it.operand_stack().last().expect("depth").repr(),
+            "0",
+            "{opts}"
+        );
+    }
+}
+
 // --- pkdab: the foliage / dab brush (issue #117) ----------------------
 //
 // What the tool is defined by: clustered irregular dabs; one set of
