@@ -12,11 +12,13 @@ pass of a lens therefore has its tip at the same x, and the 8 stacked, graded pa
 vertical cut with the core colour at its middle. The outline of one lens is not the cause.
 
 **What changed.** `lkmist` now runs two sibling `pkwet`s inside the same checkpoint: first a
-horizontal one (`/Direction 0 /Stretch 4 /Offset 24 /Layers 6`) over the four lenses alone, then the
+horizontal one (`/Direction 0 /Stretch 4 /Offset 20 /Layers 6`) over the four lenses alone, then the
 #407 vertical one over lenses plus spray, unchanged. The horizontal passes smear each lens sideways
-in graded colour, so the tips land 0 to 24pt apart and each bank trails off into the range instead of
+in graded colour, so the tips land 0 to 20pt apart and each bank trails off into the range instead of
 ending. The vertical one, laid second, covers the horizontal one's core, so the banks' bodies keep
-their #407 look. The four lens calls moved into `lkbanks` so both calls share them. They are
+their #407 look, with the same marks laid at a different spot in the random stream: the new wet
+draws before the old one, so its wobble and the spray grain are re-rolled, not moved. `lkmist`
+reseeds itself, so that stays inside the band. The four lens calls moved into `lkbanks` so both calls share them. They are
 siblings, not nested, so the reflection's chain is still 6 x 8 = 48 passes, under pkwet's 64x budget.
 
 **Variants tried at 2x** (in order):
@@ -26,10 +28,12 @@ siblings, not nested, so the reflection's chain is still 6 x 8 = 48 passes, unde
   and it is unavoidable while every tip shares an x.
 - `/Stretch 1` on the existing vertical call (the minimum: `/Stretch 0.5` raises
   `pkwet-stretch-must-be-at-least-1`): the ends stagger a little, not enough.
-- The sibling horizontal wet (shipped), `/Offset 24 /Layers 6`: banks end in a faint trail, the gaps
-  between them stay.
-- The same at `/Offset 40` (and `/Offset 32 /Stretch 2`): longer trails, but the first two banks
-  begin to join into one stripe, which loses the drifting-banks read #407 approved.
+- The sibling horizontal wet, `/Offset 24 /Layers 6`: banks end in a faint trail, but the trails
+  nearly closed the 15pt and 20pt gaps between banks 1 and 2 and banks 3 and 4, and #407 found
+  those gaps are what lets the planes and the grain show. `/Offset 16` kept the gaps and was subtler.
+- Shipped: `/Offset 20 /Layers 6`. The ends trail off and the gaps still show their grain.
+- At `/Offset 40` (and `/Offset 32 /Stretch 2`): longer trails, but the first two banks join into
+  one stripe, which loses the drifting-banks read #407 approved.
 
 **Containment.** `lkmist` reseeds itself, so only the band and its reflection move. A pixel diff of the
 old and new 2x stills agrees: only rows 406 to 509 (the band) and 946 to 1048 (its reflection) changed.
@@ -38,7 +42,9 @@ banks show in its render.
 
 ## Not done
 
-- **Shadow planes under a bank.** One idea was checked on paper and not built: a procedural `/Under`
+- **Shadow planes under a bank.** The smear carries a bank's flattening up to 20pt further along
+  a plane where an end sits on one (faint, since the outer passes are nearly the range's colour),
+  so this PR leaves that leftover about as it was, not better. One idea was checked on paper and not built: a procedural `/Under`
   with `/Box` and `/Bands`, so cells over a plane mix toward the plane's shade. The outer passes stay
   opaque, so that would turn a light bar into a flat dark one without keeping any streak, the plane
   edges are diagonal so column cells would leave vertical seams, and each cell reruns the pass. The

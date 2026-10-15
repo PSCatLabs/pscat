@@ -314,7 +314,8 @@
 % The far range's mist: a few banks of haze drifting across it, each a
 % filled lens, lifted both ways off its core with a two-sided
 % directional pkwet so it fades up into the range and down toward the
-% near one, with a little very fine spray tapped along it.
+% near one, with a little very fine spray tapped along it. A second,
+% horizontal pkwet smears each bank sideways first, so its ends trail off.
 % (Through #206 it was one curve of 1pt spray at Density 150 under an
 % isotropic pkwet: at 2x a granular streak, gravel more than haze, the
 % same fault #206 fixed in the near range's foot. #407: a full-width
@@ -355,7 +356,7 @@
     srand /lkmu exch def /lkmy exch def
     lkMC {
         { lkbanks }
-        << /Direction 0 /Stretch 4 /Offset 24 /Layers 6 /Pickup 0.9
+        << /Direction 0 /Stretch 4 /Offset 20 /Layers 6 /Pickup 0.9
            /Under lkmu >> pkwet
         { lkbanks
           newpath -20 lkmy moveto 250 lkmy 8 sub 6 lkj add
