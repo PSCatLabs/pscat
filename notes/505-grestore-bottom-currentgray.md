@@ -53,11 +53,22 @@ the widened `0.30000001192092896`. gs's reals are `f32`, so its sum rounds
 to `0.5` and `0.3` stays `0.3`.
 
 The fix is in the operators, not in real printing.
-`currentgray`, `currentrgbcolor` and `currenthsbcolor` round the value
-to `f32` and push the `f64` nearest that `f32`'s shortest decimal
-(`color_readback` in `src/ops/graphics.rs`). A read-then-set round trip
-lands on the same `f32` as before, so copying a colour changes nothing
-(tested). Rendering never goes through these readbacks.
+`currentgray` and `currenthsbcolor` round the value to `f32` and push
+the `f64` nearest that `f32`'s shortest decimal (`color_readback` in
+`src/ops/graphics.rs`). A read-then-set round trip lands on the same
+`f32` as before, so copying a colour changes nothing (tested). No
+library calls either operator.
+
+**`currentrgbcolor` is deliberately not rounded.** The first version of
+this change rounded it too, and gs prints `0.3 0.6 0.9 setrgbcolor
+currentrgbcolor` as `0.3 0.6 0.9` where pscat prints
+`0.30000001192092896 0.6000000238418579 0.8999999761581421`. But
+`lib/paintkit.ps` does arithmetic on `[ currentrgbcolor ]` (the brush
+base colours), and the rounding moved the committed
+`gallery/renders/alpine_lake.png` still by one LSB in one channel at one
+pixel, (759, 1016) at 2x. That is invisible, but the still is committed,
+so the change is left out here. Whether to accept a regenerated still is
+filed as a follow-up.
 
 ### Still different
 

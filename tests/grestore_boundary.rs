@@ -10,8 +10,10 @@
 //! - At the bottom (nothing saved, no `save` live), `grestore` and
 //!   `grestoreall` bring back the job's initial state.
 //! - Either way the level starts with an empty `clipsave` stack.
-//! - Colour readbacks print the short value gs prints (`0.5`, `0.3`), not
-//!   `0.49999999999999994` or `0.30000001192092896`.
+//! - `currentgray` and `currenthsbcolor` print the short value gs prints
+//!   (`0.5`, `0.3`), not `0.49999999999999994` or `0.30000001192092896`.
+//!   `currentrgbcolor` is deliberately left unrounded (see
+//!   `notes/505-grestore-bottom-currentgray.md`).
 
 use pscat::Interp;
 
@@ -108,10 +110,10 @@ const CASES: &[Case] = &[
         &["0.5", "0.5", "0.3", "0.362000018"],
     ),
     (
-        "currentrgbcolor",
-        "0.25 setgray currentrgbcolor 3 array astore == 0.3 0.6 0.9 setrgbcolor \
-         currentrgbcolor 3 array astore == 0 0 0 0.5 setcmykcolor currentrgbcolor 3 array astore ==",
-        &["[0.25 0.25 0.25]", "[0.3 0.6 0.9]", "[0.5 0.5 0.5]"],
+        "currentrgbcolor of values exact in f32 (it is not rounded: see the notes)",
+        "0.25 setgray currentrgbcolor 3 array astore == \
+         0 0 0 0.5 setcmykcolor currentrgbcolor 3 array astore ==",
+        &["[0.25 0.25 0.25]", "[0.5 0.5 0.5]"],
     ),
     (
         "currenthsbcolor",

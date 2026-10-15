@@ -521,10 +521,12 @@ renders eight examples in both and compares block-downsampled output).
   initial state (`Gfx::initial_state`, no font). Both start an empty
   `clipsave` level. pscat's own paired calls (`rectfill`, ...) use the
   plain popping `Gfx::grestore`; only the operator goes through
-  `Interp::do_grestore`. `currentgray`/`currentrgbcolor`/`currenthsbcolor`
-  report the `f32` colour's shortest decimal (`0.5`, not
-  `0.49999999999999994`); reals in general still print shortest-`f64`,
-  where gs prints 9 digits (`notes/505-grestore-bottom-currentgray.md`).
+  `Interp::do_grestore`. `currentgray`/`currenthsbcolor` report the
+  `f32` colour's shortest decimal (`0.5`, not `0.49999999999999994`).
+  `currentrgbcolor` still reports the widened `f32` on purpose: rounding
+  it moves the alpine_lake still by 1 LSB, because paintkit does
+  arithmetic on it. Reals in general still print shortest-`f64`, where
+  gs prints 9 digits (`notes/505-grestore-bottom-currentgray.md`).
 - `shfill` (issue #20): `FunctionType` restricted to 2 (exponential)
   and 3 (stitching) — 0 (sampled) and 4 (calculator) unsupported,
   since those would need the same `Frame::PostOp` reentrancy
