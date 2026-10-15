@@ -292,6 +292,65 @@ fn a_redaction_bar_covers_its_whole_word() {
     }
 }
 
+/// Runs of pixels darker than `below` along one row of `p` between two columns.
+fn dark_runs(p: &[u8], row: usize, cols: std::ops::Range<usize>, below: u8) -> usize {
+    let r = &p[row * W as usize..(row + 1) * W as usize];
+    let mut runs = 0;
+    let mut inside = false;
+    for &v in &r[cols] {
+        if v < below && !inside {
+            runs += 1;
+        }
+        inside = v < below;
+    }
+    runs
+}
+
+#[test]
+fn a_clip_is_a_gem_wire_at_the_top_edge_with_the_inner_loop_only_a_dent() {
+    // issue #451: it was three nested ellipses. Now the outer loop is wire on
+    // the sheet, hung from the top edge, and the inner loop is behind the
+    // sheet: the paper shows its dent, not its metal.
+    let blank = rel_page("{ }", "");
+    let one = rel_page("{ }", "/Clip 1");
+    let cols = 70..115;
+    let w = W as usize;
+    for (i, (a, b)) in blank.iter().zip(&one).enumerate() {
+        if a != b {
+            let (x, y) = (i % w, i / w);
+            assert!(
+                y < 56 && cols.contains(&x),
+                "the clip drew outside its box, at {x},{y}"
+            );
+        }
+    }
+    let wire = one
+        .iter()
+        .zip(&blank)
+        .filter(|(o, b)| **o < 200 && **b > 250)
+        .count();
+    assert!(wire > 40, "no wire: {wire} dark pixels");
+    // the dent and the rust are faint: changed, but nowhere near the wire's dark
+    let faint = one
+        .iter()
+        .zip(&blank)
+        .filter(|(o, b)| **o >= 200 && b.abs_diff(**o) > 2)
+        .count();
+    assert!(faint > 60, "no dent or shadow: {faint} faint pixels");
+    // across the middle of the clip the one loop's two sides are two wires;
+    // an ellipse stack would cross three or more
+    for row in [20, 28] {
+        assert_eq!(dark_runs(&one, row, cols.clone(), 170), 2, "row {row}");
+    }
+    // a second clip is another one, not a heavier one
+    let two = rel_page("{ }", "/Clip 2");
+    assert!(differing(&one, &two) > 100, "the second clip drew nothing");
+    // a clip on a copy is still there
+    let cb = rel_page("{ }", "/Generation 1");
+    let c1 = rel_page("{ }", "/Generation 1 /Clip 1");
+    assert!(differing(&cb, &c1) > 100, "a copy lost the clip");
+}
+
 #[test]
 fn the_callers_rand_stream_and_dictionary_stack_are_untouched() {
     let sheet = format!(

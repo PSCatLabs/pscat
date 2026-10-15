@@ -119,6 +119,6 @@ in `docs/typewriter/REFERENCES.md`.
   error the typewriter's `/Copies` stays set.
 - #449: thin-stroke dropout under a copy (T15).
 - #450: copier softening of stamps, notes and bars (T14).
-- #451: a paper clip that reads less like three ellipses.
+- #451 (done, `notes/451-paper-clip.md`): a paper clip that reads less like three ellipses.
 - `rel-note` depends on `hs-write`'s `/Pen`, `/Jitter` and `/StartWobble`
   (lib/handscript.ps, which #416 is changing): recheck after it lands.

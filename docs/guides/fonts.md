@@ -222,7 +222,8 @@ inside a stack of effects, each optional and each off at strength 0:
   their own `/Soften`.
 - **Marks** over the content: `/Stamps` (`rel-stamp`: ink through a clip with
   holes, so the page shows through), `/Notes` (`rel-note`: handwriting),
-  `/Staple`, `/Clip`.
+  `/Staple`, `/Clip` (a gem clip hung from the top edge: its outer loop on the
+  sheet, the inner loop as a dent in the paper, a rust ghost browner with `/Age`).
 - **Redactions**: `<r>words</r>` in a `tw-type` text; `/Redactor { rel-redact }`
   makes the bar a marker's, otherwise it is a plain black bar. The bar covers
   whole cells, so a word is always covered.
