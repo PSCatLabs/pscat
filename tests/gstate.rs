@@ -211,7 +211,7 @@ fn sameclip_tests_clip_identity() {
     // other graphics state does not count
     yes(&format!("{R} gstate 3 setlinewidth 0.5 setgray .sameclip"));
     assert_eq!(eval_err("1 .sameclip"), PsError::Typecheck);
-    assert_eq!(eval(&format!("{{ 1 .sameclip }} stopped")), ["1", "true"]);
+    assert_eq!(eval("{ 1 .sameclip } stopped"), ["1", "true"]);
     assert_eq!(eval_err(".sameclip"), PsError::StackUnderflow);
 }
 
