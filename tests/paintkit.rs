@@ -7239,6 +7239,85 @@ fn wet_directional_default_depth_keeps_the_steps_fine() {
     assert_eq!(passes("/Offset 22"), "4");
 }
 
+/// Where each pass of a one-sided pull of 31 layers lands: the wrapped
+/// procedure records its own origin in device space, so the passes' across
+/// offsets (device x, a pull down) can be read without any rasterising.
+fn pull_origins(opts: &str) -> Vec<f64> {
+    let mut it = fresh(400, 200);
+    it.run_str(&format!(
+        "5 srand /xs [ 31 {{ 0 }} repeat ] def /k 0 def \
+         {{ xs k 0 0 transform pop put /k k 1 add def }} \
+         << /Direction 270 /OneSided true /Offset 30 /Layers 31 /Stretch 3 \
+            {opts} >> pkwet xs"
+    ))
+    .unwrap_or_else(|e| panic!("{opts}: {}", it.error_report(&e)));
+    let top = it.operand_stack().last().expect("xs").clone();
+    top.repr()
+        .to_string()
+        .trim_matches(|c| c == '[' || c == ']')
+        .split_whitespace()
+        .map(|t| t.parse().expect("number"))
+        .collect()
+}
+
+/// Total step between neighbouring passes, in points: how much the edge
+/// of the pull staircases.
+fn pass_steps(xs: &[f64]) -> f64 {
+    xs.windows(2).map(|w| (w[1] - w[0]).abs()).sum()
+}
+
+/// Each pass of a pull is an identical copy of the mark with its own
+/// across-wobble, so with independent draws the pull's side edge
+/// staircases (issue #484). /Smooth low-passes the draws along the passes:
+/// neighbours sit far closer, /Smooth 0 is the old call exactly, and a
+/// smoothed call still takes one draw per pass, so the random stream after
+/// it is the same.
+#[test]
+fn wet_smooth_calms_the_pulls_side_edge_without_touching_the_stream() {
+    let plain = pull_origins("");
+    assert_eq!(plain.len(), 31);
+    assert_eq!(
+        plain,
+        pull_origins("/Smooth 0"),
+        "/Smooth 0 must be the unset call"
+    );
+    let (steps, calm) = (pass_steps(&plain), pass_steps(&pull_origins("/Smooth 0.9")));
+    assert!(
+        steps > 20.0,
+        "independent draws should stagger, got {steps}"
+    );
+    assert!(
+        calm * 2.0 < steps,
+        "/Smooth 0.9 should at least halve the steps: {calm} vs {steps}"
+    );
+    // /Smooth 1 holds the first draw: the pull shears, with no jumps between
+    // neighbours (the core pass, which never moves, excepted).
+    let held = pull_origins("/Smooth 1");
+    assert!(held[1..].windows(2).all(|w| (w[1] - w[0]).abs() < 1.0));
+
+    // the random stream and the pass count, one-sided and two-sided
+    let after = |opts: &str| {
+        let mut it = fresh(200, 120);
+        it.run_str(&format!(
+            "5 srand /n 0 def {{ /n n 1 add def }} \
+             << /Direction 270 /Layers 9 /Offset 20 {opts} >> pkwet n frnd"
+        ))
+        .unwrap_or_else(|e| panic!("{opts}: {}", it.error_report(&e)));
+        let st = it.operand_stack();
+        (
+            st[st.len() - 2].repr().to_string(),
+            st[st.len() - 1].repr().to_string(),
+        )
+    };
+    for sided in ["", "/OneSided true"] {
+        assert_eq!(
+            after(&format!("{sided} /Smooth 0.9")),
+            after(sided),
+            "{sided}: /Smooth changed the pass count or the stream"
+        );
+    }
+}
+
 /// The explicit directional /Layers cap is 32 (issue #417: it was 16), so a
 /// pull can ask for 1pt steps over a long /Offset; the *default* depth stays
 /// capped at 16, which is what keeps every existing pull drawing as before.

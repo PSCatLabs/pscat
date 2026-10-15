@@ -462,7 +462,16 @@ a flat ground still bands at 2pt, so for a smooth gradient over a long pull
 ask for about 1pt: `/Layers` one more than `/Offset` one-sided, twice
 `/Offset` plus one two-sided (the cap on an explicit `/Layers` is 32; the
 default depth stays at 16). The canvas
-specimen's pull is `/Offset 28 /Layers 29` (issue #417). Any
+specimen's pull is `/Offset 28 /Layers 29` (issue #417).
+
+A pull's side edges have their own tell. Each pass wobbles across the
+pull by its own draw, and with passes a point apart independent draws
+make the edge stagger in small steps (a larger `/Stretch` shrinks the
+steps along with the wobble, but they stay steps). `/Smooth` (0 to 1, default 0) low-passes the draws along
+the passes, so the edge drifts instead of stepping: the canvas specimen
+asks for `/Smooth 0.9` (issue #484). At 0 the call is exactly what it
+was, so nothing that leaves it out changes; 1 holds the first draw, and
+the pull shears one way. Any
 nest with a directional call in it may multiply its innermost
 procedure at most 64 times — enough to pull a reflection down and then
 graze it across. `examples/paintkit_wet_pull_demo.ps` shows a
