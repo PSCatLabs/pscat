@@ -862,6 +862,12 @@ renders eight examples in both and compares block-downsampled output).
    stepped rings (the outline stroked wider, in the ink mixed toward the paper),
    scaled by the copy loss; no randomness, an original is unchanged
    (`rlStampRings`, `rlBarRings`, `notes/450-copier-softening-of-marks.md`).
+   #595 added the typewriter's `/InkMap` (a proc `r g b -> r g b` run on `/Ink` and
+   `/BleedInk` just before `setrgbcolor`; default `{ }`), which `rel-page` sets, with
+   `/Copies`, to `{ RelState begin rlCol end }` for the content, so typed ribbon colour
+   goes through the copier's curve (`notes/595-copy-ribbon-colour.md`). It changed the
+   bytes of every committed render of a copied `rel-page` (near-black ink becomes pure
+   black under the curve).
    #448 made `rel-page` multi-page: `tw-type` has a `/PageEnd` hook (as `/PageStart`, after every page), and `rel-page /Paged true` with `/PageStart { rel-page-start } /PageEnd { rel-page-end }` draws each sheet whole (paper, copy layers, marks; the hooks leave the page's frame set by popping and re-pushing tw-type's own gsave); `notes/448-released-multipage.md`.
    #423 tuned the ribbon ink toward T2, T4 and T7: a thinner body and feather
    (`wBodyW`, `fW` in `tInkStrike`), a higher base hole level, a steeper

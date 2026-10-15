@@ -38,6 +38,9 @@
 %             /Copies key (fill the counters in, thicken the strokes, drop
 %             the light strikes, and erode its thin horizontal strokes away,
 %             #547); `rel-page` sets it to /Generation for the content.
+%             It also sets the typewriter's /InkMap to the copier's curve
+%             (rlCol), so a red ribbon (/Ink, /BleedInk) goes grey like the
+%             stamps beside it instead of staying red on a copy (#595).
 %             `<r>text</r>` in a tw-type text is a redaction, and
 %             `/Redactor { rel-redact }` makes the bar a marker's.
 %
@@ -1033,9 +1036,10 @@ RelState begin {
     rlRePath
     /tw-set where { pop rlGen 0 gt } { false } ifelse {
         TWState /tCopies get /rlOldC exch def
-        << /Copies rlGen >> tw-set
+        TWState /tInkMap get /rlOldM exch def
+        << /Copies rlGen /InkMap { RelState begin rlCol end } >> tw-set
         /rlProc load end exec RelState begin
-        << /Copies rlOldC >> tw-set
+        << /Copies rlOldC /InkMap /rlOldM load >> tw-set
     } {
         /rlProc load end exec RelState begin
     } ifelse
@@ -1133,9 +1137,10 @@ RelState begin {
     /rlSeed0 rlSeed def  /rlPg 0 def  /rlPgLive true def  /rlPgOpen false def
     /tw-set where { pop rlGen 0 gt } { false } ifelse {
         TWState /tCopies get /rlOldC exch def
-        << /Copies rlGen >> tw-set
+        TWState /tInkMap get /rlOldM exch def
+        << /Copies rlGen /InkMap { RelState begin rlCol end } >> tw-set
         /rlProc load end exec RelState begin
-        << /Copies rlOldC >> tw-set
+        << /Copies rlOldC /InkMap /rlOldM load >> tw-set
     } {
         /rlProc load end exec RelState begin
     } ifelse
@@ -1215,7 +1220,7 @@ rlDefaults
 %%EndSelfTest
 
 % @kind: Procedure
-% @summary: Draws a page the way a released document looks, around any content: `{ content } opts rel-page`. The content proc is run once, in the page's own frame; it draws the typed page (lib/typewriter.ps tw-type is the intended content, and gets /Copies set to /Generation unless it sets its own). Paper is painted under it (tone, blotches, grain and fibres, edge darkening, the scanner lamp, folds, punch holes); /Generation photocopies each add a small skew and shift, black specks and streaks, the copier's lid at the edges and the copier's grey, high-contrast curve; marks are drawn over it (notes, stamps, a staple, a clip). Every effect is off at strength 0, the default, so with no options the content is simply run. Deterministic under /Seed. The caller's rand stream is untouched. One page, unless /Paged is true: the content must fit on the sheet and must not showpage (tw-type does after a full page), or the copies' clips and transforms break. For a document of several pages set /Paged true and give tw-type `/PageStart { rel-page-start } /PageEnd { rel-page-end }`: each page is then a sheet of its own (paper, copies, dirt, marks), see rel-page-start. To age the pages of a long document without the copy layers, rel-paper in /PageStart does it. If the content raises an error, the typewriter's /Copies is left set, and so are the copy curve and the haze, which a later standalone rel-stamp or rel-note then draws through until the next rel-page.
+% @summary: Draws a page the way a released document looks, around any content: `{ content } opts rel-page`. The content proc is run once, in the page's own frame; it draws the typed page (lib/typewriter.ps tw-type is the intended content, and gets /Copies set to /Generation unless it sets its own). Paper is painted under it (tone, blotches, grain and fibres, edge darkening, the scanner lamp, folds, punch holes); /Generation photocopies each add a small skew and shift, black specks and streaks, the copier's lid at the edges and the copier's grey, high-contrast curve; marks are drawn over it (notes, stamps, a staple, a clip). Every effect is off at strength 0, the default, so with no options the content is simply run. Deterministic under /Seed. The caller's rand stream is untouched. One page, unless /Paged is true: the content must fit on the sheet and must not showpage (tw-type does after a full page), or the copies' clips and transforms break. For a document of several pages set /Paged true and give tw-type `/PageStart { rel-page-start } /PageEnd { rel-page-end }`: each page is then a sheet of its own (paper, copies, dirt, marks), see rel-page-start. To age the pages of a long document without the copy layers, rel-paper in /PageStart does it. If the content raises an error, the typewriter's /Copies and /InkMap are left set, and so are the copy curve and the haze, which a later standalone rel-stamp or rel-note then draws through until the next rel-page.
 % @example: (lib/artkit.ps) run (lib/surfacekit.ps) run (lib/released.ps) run { 100 600 moveto /Courier findfont 14 scalefont setfont (A typed line.) show } << /Age 0.6 /Generation 2 /Skew 0.4 /Stamps [ << /Lines [ (RECEIVED) (14 OCT 1964) ] /X 400 /Y 700 /Angle 8 >> ] >> rel-page showpage
 % @param: /Seed [integer] Seeds every random mark; the same seed draws the same page (default 1)
 % @param: /Width [points] The sheet's width (default 612)

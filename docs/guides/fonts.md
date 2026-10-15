@@ -216,7 +216,11 @@ inside a stack of effects, each optional and each off at strength 0:
   light strikes and thins the thin horizontal strokes by the glyph's outline
   (`rel-page` sets it for you): serifs and joins break and the bars of `e` and
   `E` thin on every strike alike, while the vertical stems stay fat, as in T15. (`rel-page /Dropout`, a field of holes that did this at random,
-  is gone: #547.) `/Soften`
+  is gone: #547.) The ribbon's colour goes through the copier's grey curve too:
+  `rel-page` sets the typewriter's `/InkMap` (a procedure `r g b -> r g b` applied to
+  `/Ink` and `/BleedInk` just before each is set), so a red ribbon typed on a copy
+  prints grey like the stamps beside it, and near-black ink comes out black (#595);
+  an original keeps its colours. `/Soften`
   (0 to 1, default 1) blurs the marks a copy copies (stamps, notes, redaction
   bars) with a soft fringe, more with each generation; an original is never
   blurred and 0 keeps a copy's marks crisp. `rel-stamp` and `rel-note` take
