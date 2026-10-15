@@ -756,6 +756,11 @@ renders eight examples in both and compares block-downsampled output).
    `memo_vs_real.png` (`docs/dev/design/typewriter/tools/blind_compare.py`; the
    key is in the PR, not the repo); `notes/215-released-memo.md`. Leftovers:
    #466, #467, #468.
+   #423 tuned the ribbon ink toward T2, T4 and T7: a thinner body and feather
+   (`wBodyW`, `fW` in `tInkStrike`), a higher base hole level, a steeper
+   pressure-to-density slope, pressure sd 0.12 on `/manual` and `/worn`, and a
+   very-light strike drawn from 0.3 to 0.7 deep. The defaults changed, so the
+   typewriter and released renders were redone; `notes/423-ink-lighter-uneven.md`.
    #242 shipped the charcoal gallery piece, `gallery/lincoln_charcoal.ps`
    (*Study after Berger, 1864*), and `lib/etching.ps`'s `et-tonemap`, which
    returns a photo as a grid of darkness for any piece that wants a
