@@ -20,7 +20,8 @@
 %   pktrowel (#111)  the knife: snow down the lit faces, shadow snow down
 %                    the dark ones
 %   pktrowelplane (#180)  the shadow planes: the dark faces laid with
-%                    overlapping pulls clipped to a triangle (#361)
+%                    overlapping pulls clipped to a triangle (#361), and
+%                    laid again, veiled, where the mist crosses them (#476)
 %   pkwet    (#113)  clouds, mist and the far forest's crest settled
 %                    into the paint beneath them instead of sitting on it;
 %            (#181)  directional, the near range's foot lifted into mist,
@@ -217,8 +218,23 @@
 % pts color snowreach foot seed -
 % One range: the silhouette, the knife, then (if foot) mist lifted up
 % from its foot, so the foot dissolves rather than ending.
+% px py rx2 d -   one shadow plane: a triangle hung off the right ridge
+% from the peak (px,py), laid with knife pulls. lkmist's lkghost lays the
+% far range's planes again from their logged seeds, so both draw here.
+/lkplane {
+    /lkgd exch def /lkgx2 exch def /lkgy exch def /lkgx exch def
+    newpath lkgx lkgy moveto lkgx2 lkgy lkgd sub lineto
+    lkgx lkgx2 lkgx sub 0.15 mul add lkgy lkgd 1.7 mul sub lineto
+    closepath
+    << /Width 12 /Direction -90 /Angle 12 /Coverage 0.85 /Overlap 0.34
+       /Viscosity 0.7 /Scrape 0.35 /Drag 0.5 /EdgeBuildup 0.15
+       /ColorJitter 0.03 >> pktrowelplane
+} bind def
+% the far range's planes: [ log-slot px py rx2 d ] each, lkpn of them
+/lkPLANES 20 array def
 /lkrange {
     srand /lkfoot exch def /lkreach exch def /lkrc exch def /lkpts exch def
+    /lkpn 0 def
     lkrc { lkpts lkrangepath fill } 1 lkdo
     % the knife: on every peak, snow pulled down the lit (left) face and
     % a bluer shadow snow down the right, a little steeper than the
@@ -247,14 +263,13 @@
             % clips to the triangle itself; the pulls run straight down.
             /lkd lkpy lkWL sub 0.35 mul def
             /lkrx2 lkpx lkd lkrs 1.4 min mul add def
-            [ lkrc 0.84 shade ] {
-                newpath lkpx lkpy moveto lkrx2 lkpy lkd sub lineto
-                lkpx lkrx2 lkpx sub 0.15 mul add lkpy lkd 1.7 mul sub lineto
-                closepath
-                << /Width 12 /Direction -90 /Angle 12 /Coverage 0.85 /Overlap 0.34
-                   /Viscosity 0.7 /Scrape 0.35 /Drag 0.5 /EdgeBuildup 0.15
-                   /ColorJitter 0.03 >> pktrowelplane
-            } 2 lkdo
+            % the far range's planes are noted (log slot and corners),
+            % so the mist can re-lay their marks where it crosses them
+            lkfoot not {
+                lkPLANES lkpn [ lkcur lkpx lkpy lkrx2 lkd ] put
+                /lkpn lkpn 1 add def
+            } if
+            [ lkrc 0.84 shade ] { lkpx lkpy lkrx2 lkd lkplane } 2 lkdo
             lkSNOW {
                 0 1 4 {
                     /lkk exch def
@@ -322,26 +337,63 @@
 % filled band read as a ruled stripe and flattened the shadow planes,
 % so the haze is broken into banks with gaps, where the planes and the
 % fine spray show through.) The core is mixed toward the range, as a
-% full-strength lkMIST core read as a white line.
+% full-strength lkMIST core read as a white line. A bank's outer passes
+% are opaque and nearly the range's colour, so where one crossed a
+% shadow plane it cut the plane's streaks off in a light bar; lkghosts
+% (#476) lays the planes again over the banks, veiled toward the mist.
 /lkMC [ lkMIST lkFAR 0.45 mix3 ] def
-% x0 x1 dy thick -   one bank: a lens from x0 to x1 at lkmy+dy, bulging
-% up by thick and down by about half that
-/lkwisp {
-    /lkwt exch def /lkwy exch lkmy add def /lkwx1 exch def /lkwx0 exch def
+% x0 x1 dy thick m -   one bank's outline as a path: a lens from x0 to
+% x1 at lkmy+dy, bulging up by thick and down by about half that, grown
+% by about m up and down and 2m at the ends (m 0 is the bank itself)
+/lkwispm {
+    /lkwm exch def /lkwt exch def /lkwy exch lkmy add def
+    /lkwx1 exch lkwm 2 mul add def /lkwx0 exch lkwm 2 mul sub def
     /lkwl lkwx1 lkwx0 sub def
-    newpath lkwx0 lkwy moveto
-    lkwx0 lkwl 0.3 mul add lkwy lkwt add
-    lkwx0 lkwl 0.7 mul add lkwy lkwt add 2 sub
+    lkwx0 lkwy moveto
+    lkwx0 lkwl 0.3 mul add lkwy lkwt add lkwm 1.33 mul add
+    lkwx0 lkwl 0.7 mul add lkwy lkwt add 2 sub lkwm 1.33 mul add
     lkwx1 lkwy 2 add curveto
-    lkwx0 lkwl 0.65 mul add lkwy lkwt 0.6 mul sub
-    lkwx0 lkwl 0.3 mul add lkwy lkwt 0.5 mul sub
+    lkwx0 lkwl 0.65 mul add lkwy lkwt 0.6 mul sub lkwm 1.33 mul sub
+    lkwx0 lkwl 0.3 mul add lkwy lkwt 0.5 mul sub lkwm 1.33 mul sub
     lkwx0 lkwy curveto
-    closepath fill
+    closepath
 } bind def
-% the four banks of haze: x0 x1 dy thick for each lkwisp
-/lkbanks {
-    -20 250 -4 10 lkwisp  265 460 5 7 lkwisp
-    420 525 -7 4 lkwisp   545 790 -1 9 lkwisp
+% the four banks of haze: x0 x1 dy thick for each
+/lkBANKS [ [ -20 250 -4 10 ] [ 265 460 5 7 ] [ 420 525 -7 4 ] [ 545 790 -1 9 ] ] def
+/lkbanks { lkBANKS { newpath aload pop 0 lkwispm fill } forall } bind def
+% m -   all four banks, grown by m, as one path (to clip to)
+/lkbanksm {
+    /lkbm exch def newpath
+    lkBANKS { aload pop lkbm lkwispm } forall
+} bind def
+% m -   the far range's shadow planes laid again, mark for mark (each
+% from its own logged seed), clipped to the range and to the banks
+% grown by m
+/lkghost {
+    /lkgm exch def
+    gsave lkFARPTS lkrangepath clip lkgm lkbanksm clip
+    0 1 lkpn 1 sub {
+        lkPLANES exch get aload pop
+        5 -1 roll lkLOG exch get srand
+        lkplane
+    } for
+    grestore
+} bind def
+% The shadow planes again, over the banks (#476): four layers, each the
+% far range's planes re-laid from their logged seeds and clipped to the
+% banks grown by m, from 9pt (just outside the haze, nearly the plane's
+% own colour) to 0 (the bank's core, nearly the mist's), each layer over
+% the last. The pulls fall exactly where the plane's did, and the gaps
+% between them show the mist, so the streaks run on through a bank,
+% fading in toward its core. Four steps of colour, not one, so the veil
+% has no edge. Parts 22 to 25 are not pulled into the lake: the reflected
+% band is blurred and mostly under the foreground bank.
+/lkPLANEC [ lkFAR 0.84 shade ] def
+/lkghosts {
+    [ lkPLANEC lkMC 0.3 mix3 ] { 9 lkghost } 2 lkdo
+    [ lkPLANEC lkMC 0.55 mix3 ] { 6 lkghost } 3 lkdo
+    [ lkPLANEC lkMC 0.75 mix3 ] { 3 lkghost } 4 lkdo
+    [ lkPLANEC lkMC 0.9 mix3 ] { 0 lkghost } 5 lkdo
 } bind def
 % y under seed -   the banks of mist, worked wet into whatever is under
 % them. Two sibling pkwets (not nested, so each stays inside the budget):
@@ -366,6 +418,7 @@
         << /Direction 90 /Stretch 8 /Offset 7 /Layers 8 /Pickup 0.9
            /Under lkmu >> pkwet
     } 1 lkdo
+    lkghosts
 } bind def
 
 % ---- the far tree line ----------------------------------------------
