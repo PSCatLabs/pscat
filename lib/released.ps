@@ -546,19 +546,19 @@ RelState begin {
 } bind def
 
 % ---- softening: a copier's blur on the marks (#450) --------------------------------
-% A copier has no sharp edge: T14's stamps, the handwriting and the marker bar all
-% fade over a pixel or two at the edge, where ours were crisp. There is no alpha
-% and no read-back, so the blur is a fringe of stepped rings drawn under the
-% crisp mark: the mark's outline stroked at three widths, outermost first, each in
-% the colour that ink of a growing share (rlSoA) would make laid over the paper
-% (the ink's own colour mixed toward the paper's tone), which antialiasing turns
-% into a gradient about rlSoR x the radius wide. The radius is 0.1 to 0.2pt plus 0.012 to
-% 0.07 of the mark's size, times the softness s. s is the page's /Soften times the
-% copy loss (an original is not blurred: s = 0 and none of this runs, no ring and no random number), or a stamp's or
-% note's own /Soften. A ring is opaque, so it lightens what lies under the fringe;
-% stamps' and notes' fringes are a point wide, so it is the type next to a mark's edge, which
-% the crisp mark covers just as hard.
-/rlSoR [ 1 0.6 0.28 ] def  /rlSoA [ 0.12 0.26 0.46 ] def
+% A copier has no sharp edge: T14's stamps, handwriting and marker bar all fade
+% over a pixel or two, where ours were crisp. There is no alpha and no read-back,
+% so the blur is a fringe of stepped rings drawn under the crisp mark: the mark's
+% outline stroked at five widths, widest first (rlSoR, as a share of the radius),
+% each in the colour that ink of a growing share (rlSoA) makes over the paper (the
+% ink mixed toward the paper's tone), which antialiasing turns into a gradient
+% about the radius wide. The radius is 0.1 to 0.4pt plus 0.012 to 0.14 of the
+% mark's size, times the softness s. s is the page's /Soften times 1.25 times the
+% copy loss (an original is not blurred: s is 0 and none of this runs), or a
+% stamp's or note's own /Soften. No ring draws a random number. A ring is opaque,
+% so it lightens what lies under the fringe: only the type within a point or two
+% of a mark's edge, which the crisp mark covers just as hard.
+/rlSoR [ 1 0.78 0.58 0.4 0.22 ] def  /rlSoA [ 0.06 0.14 0.27 0.44 0.66 ] def
 /rlSoftOf {                                         % -> s, the softness of the layer being drawn
     rlSoft rlCC mul 1.25 mul dup 1 gt { pop 1 } if
 } bind def
@@ -654,7 +654,7 @@ RelState begin {
     rsSize 0.055 mul 0.2 add rsSoft mul /rsR exch def
     gsave
     1 setlinejoin 1 setlinecap
-    0 1 2 {
+    0 1 4 {
         /rsK exch def
         rsK rlSoSet
         rsR rlSoR rsK get mul 2 mul /rsW exch def
@@ -779,7 +779,7 @@ RelState begin {
         rnCore rlSoCols
         [ 0 1 2 { /rnJ exch def rlSoI rnJ get rlSoP rnJ get rnSoft 0.2 mul rlLerp } for ] /rnCore exch def
         rnSize 0.012 mul 0.1 add rnSoft mul /rnR exch def
-        0 1 2 {
+        0 1 4 {
             /rnK exch def
             rnK rlSoSet currentrgbcolor 3 array astore /rnRc exch def
             << /Text rnD /Text get /Size rnSize /Width rnWidth /Height rnSize 0.75 mul /Margin 0
@@ -803,9 +803,9 @@ RelState begin {
 % the passes' paths as procedures.
 /rlBarRings {
     rlRInk rlSoCols
-    rdS 0.07 mul 0.2 add rdSoft mul /rdR exch def
+    rdS 0.14 mul 0.4 add rdSoft mul /rdR exch def
     1 setlinejoin 1 setlinecap
-    0 1 2 {
+    0 1 4 {
         /rdK exch def
         rdK rlSoSet
         rdR rlSoR rdK get mul 2 mul setlinewidth

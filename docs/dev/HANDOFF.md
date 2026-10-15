@@ -847,7 +847,11 @@ renders eight examples in both and compares block-downsampled output).
    (`rlBarsAgain`); a plain `tw-type` bar is cut like the type. It is a stand-in
    for per-glyph erosion on a copy, which would live in `tInkStrike` (`tE` is
    zeroed there when `tCopyC` is above 0; filed as #547);
-   `notes/449-thin-stroke-dropout.md`.
+   `notes/449-thin-stroke-dropout.md`. #450 added `rel-page /Soften` and a
+   per-stamp / per-note `/Soften`: inside a copy the marks get a fringe of three
+   stepped rings (the outline stroked wider, in the ink mixed toward the paper),
+   scaled by the copy loss; no randomness, an original is unchanged
+   (`rlStampRings`, `rlBarRings`, `notes/450-copier-softening-of-marks.md`).
    #423 tuned the ribbon ink toward T2, T4 and T7: a thinner body and feather
    (`wBodyW`, `fW` in `tInkStrike`), a higher base hole level, a steeper
    pressure-to-density slope, pressure sd 0.12 on `/manual` and `/worn`, and a

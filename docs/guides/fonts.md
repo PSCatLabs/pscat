@@ -200,7 +200,11 @@ inside a stack of effects, each optional and each off at strength 0:
   cut a hairline in two and only notch a stem, more of them at higher
   generations and unevenly across a line, as T15 does; a `rel-redact` bar
   stays solid (a plain bar from `tw-type` is cut like the type, so pass
-  `/Redactor { rel-redact }`), and 0 gives the copy without it.
+  `/Redactor { rel-redact }`), and 0 gives the copy without it. `/Soften`
+  (0 to 1, default 1) blurs the marks a copy copies (stamps, notes, redaction
+  bars) with a soft fringe, more with each generation; an original is never
+  blurred and 0 keeps a copy's marks crisp. `rel-stamp` and `rel-note` take
+  their own `/Soften`.
 - **Marks** over the content: `/Stamps` (`rel-stamp`: ink through a clip with
   holes, so the page shows through), `/Notes` (`rel-note`: handwriting),
   `/Staple`, `/Clip`.
