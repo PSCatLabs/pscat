@@ -33,7 +33,8 @@
 %   clouds with form the dark body scrubbed over the whole cloud and
 %   (#345, #384)     worked wet into the sky, then pkscumblein /Light 270
 %                    (a half-light, then its core) lights the lumpy
-%                    underside from the glow below
+%                    underside from the glow below, its load following
+%                    the same sun glow along each cloud (#462)
 %   one canvas       pkcanvas (#182) once, first: every light, dry mark
 %   (#182)           (water lines, foam, meadow, grass tips) catches on
 %                    the same weave via /Touch
@@ -144,11 +145,113 @@
     } for
 } def
 
+% ---- the clouds' light, graded along each cloud (#462) ---------------------
+%
+% A cloud's lit underside would be one load along its whole length unless
+% something told it where the glow is. The circles of a /Light pass are
+% grouped by how much of the glow reaches them (evglowat, the factor the
+% meadow's edges and fill use, taken relative to its mean over this cloud and
+% shifted by a hash of the circle's place so the groups interleave and no seam
+% shows) and each group is stroked in its own load: the lit colour dimmed
+% toward the cloud's body where less of the glow reaches, warmed toward the
+% raw peach where more does. No random draw is spent on it.
+
+/evcslope 0.4 def                                % how far a cloud's load follows the glow
+/evcLO 0.7 def /evcHI 1.25 def /evcK 12 def        % the load's range and its number of steps
+/evcjit 0.12 def
+
+% the current path as a flat array, 7 numbers an operation (code x1 y1 x2 y2
+% x3 y3; code 0 moveto, 1 curveto, 2 lineto, 3 closepath), in evcops; the
+% number of operations in evcnop. The curves are replayed as they are.
+/evcput { evcops evcoi 7 getinterval astore pop /evcoi evcoi 7 add def } bind def
+/evcflat {
+    /evcnop 0 def
+    { pop pop /evcnop evcnop 1 add def } { pop pop /evcnop evcnop 1 add def }
+    { 6 { pop } repeat /evcnop evcnop 1 add def } { /evcnop evcnop 1 add def } pathforall
+    /evcops evcnop 7 mul array def
+    /evcoi 0 def
+    { 0 3 1 roll 0 0 0 0 evcput } { 2 3 1 roll 0 0 0 0 evcput }
+    { 1 7 1 roll evcput } { 3 0 0 0 0 0 0 evcput } pathforall
+} bind def
+
+% x y -> a   the load at a circle (1 is the load the clouds always had)
+/evcload {
+    1 index 12.9898 mul 1 index 78.233 mul add sin 43758.5453 mul
+    dup floor sub 0.5 sub evcw mul evcjit mul   % a little of the cloud's length either way
+    3 -1 roll add evglowat evcgm div 1 sub evcslope mul 1 add
+    evcLO max evcHI min
+    exch pop
+} bind def
+
+% level -> a
+/evcla { evcHI evcLO sub mul evcK 1 sub div evcLO add 1000 mul round 1000 div } bind def
+
+% a -   the lit colour for a load a: dimmed toward the body below 1, toward the raw peach above
+/evcsetlit {
+    dup 1 le {
+        /evcl exch def [ evcbody evclit0 evcl mix3 ] /evclit exch def
+    } {
+        1 sub 3.5 mul 1 min /evcl exch def [ evclit0 evRIM evcl mix3 ] /evclit exch def
+    } ifelse
+} bind def
+
+% proc -   run proc (a pkbroad stroke in evclit) once for each level of load
+% over the current path's circles, the load nearest 1 last
+/evcgrouped {
+    /evcpass exch def
+    evcflat
+    /evcgrp evcnop array def
+    /evcseen evcK array def
+    0 1 evcK 1 sub { evcseen exch 0 put } for
+    0 1 evcnop 1 sub {
+        /evci exch def
+        evcops evci 7 mul 7 getinterval /evco exch def
+        evco 0 get 0 eq { /evcsx evco 1 get def /evcsy evco 2 get def /evcsn 1 def /evcs0 evci def } if
+        evco 0 get 1 eq { /evcsx evcsx evco 5 get add def /evcsy evcsy evco 6 get add def /evcsn evcsn 1 add def } if
+        evco 0 get 2 eq { /evcsx evcsx evco 1 get add def /evcsy evcsy evco 2 get add def /evcsn evcsn 1 add def } if
+        evco 0 get 3 eq {
+            evcsx evcsn div evcsy evcsn div evcload
+            evcLO sub evcHI evcLO sub div evcK 1 sub mul round cvi /evclv exch def
+            evcs0 1 evci { evcgrp exch evclv put } for
+            evcseen evclv 1 put
+        } if
+    } for
+    % the levels from the outside in, so the middle one is on top
+    /evclo 0 def /evchi evcK 1 sub def
+    evcK {
+        evclo evchi le {
+            evclo evcpaint
+            /evclo evclo 1 add def
+            evclo evchi le { evchi evcpaint /evchi evchi 1 sub def } if
+        } if
+    } repeat
+} bind def
+/evcpaint {                                      % level -
+    dup evcseen exch get 1 eq {
+        /evcl2 exch def
+        evcl2 evcla evcsetlit
+        newpath
+        0 1 evcnop 1 sub {
+            /evci exch def
+            evcgrp evci get evcl2 eq {
+                evcops evci 7 mul 7 getinterval /evco exch def
+                evco 0 get 0 eq { evco 1 get evco 2 get moveto } if
+                evco 0 get 1 eq { evco 1 get evco 2 get evco 3 get evco 4 get evco 5 get evco 6 get curveto } if
+                evco 0 get 2 eq { evco 1 get evco 2 get lineto } if
+                evco 0 get 3 eq { closepath } if
+            } if
+        } for
+        evcpass
+    } { pop } ifelse
+} bind def
+
 % x y w seed -   one cloud, painted the way the style paints one: tiny
 % circles scrubbed in with a broad brush loaded with two cloud colours,
 % worked wet into the sky, then the underside, where the glow from below
 % catches it, scrubbed again in a lighter load with pkscumblein /Light 270
 % (#345, #384), a soft half-light and then its core, and worked into the body.
+% The light's load is graded along the cloud (evcgrouped, #462): fullest under
+% the lump nearest the sun, cooling toward the far end.
 /evcloudpath {
     newpath evcx evcy moveto
     evcx evcw 0.1 mul add evcy evch 0.9 mul add
@@ -190,22 +293,28 @@
     % circle is one flat patch, not a bullseye of steps), and the wet
     % pass is as soft as the body's, so its halo covers the body's own and
     % no dark contour shows under the cream (#433).
-    /evclit [ evRIM evcunder 0.28 mix3 ] def
+    /evclit0 [ evRIM evcunder 0.28 mix3 ] def
+    /evcgm 0 def
+    0 1 8 { evcw mul 8 div evcx add evglowat evcgm add /evcgm exch def } for
+    /evcgm evcgm 9 div def
     { evcloudpath scpath
       << /Count evcn 3 mul /Radius evcr /Squash 0.7
          /Light 270 /Reach 0.28 /Feather 1 >> pkscumblein
-      << /Width evcr 2.2 mul /Charge 0.75 /Depletion 0.2 /Edge 0.25 /ColorMix 0.8
-         /Colors [ [ evcbody evclit 0.3 mix3 ] [ evcbody evclit 0.45 mix3 ] ] >> pkbroad
+      { << /Width evcr 2.2 mul /Charge 0.75 /Depletion 0.2 /Edge 0.25 /ColorMix 0.8
+           /Colors [ [ evcbody evclit 0.3 mix3 ] [ evcbody evclit 0.45 mix3 ] ] >> pkbroad }
+      evcgrouped
       evcloudpath scpath
       << /Count evcn 5 mul /Radius evcr 0.85 mul /Squash 0.7
          /Light 270 /Reach 0.1 /Feather 1 >> pkscumblein
-      << /Width evcr 2.3 mul /Charge 0.8 /Depletion 0.1 /Edge 0.05 /ColorMix 0.8
-         /Colors [ [ evcbody evclit 0.6 mix3 ] [ evcbody evclit 0.75 mix3 ] ] >> pkbroad
+      { << /Width evcr 2.3 mul /Charge 0.8 /Depletion 0.1 /Edge 0.05 /ColorMix 0.8
+           /Colors [ [ evcbody evclit 0.6 mix3 ] [ evcbody evclit 0.75 mix3 ] ] >> pkbroad }
+      evcgrouped
       evcloudpath scpath
       << /Count evcn 8 mul /Radius evcr /Squash 0.9
          /Light 270 /Reach 0.03 /Feather 0.6 >> pkscumblein
-      << /Width evcr 2.4 mul /Charge 0.8 /Depletion 0.1 /Edge 0 /ColorMix 0.8
-         /Colors [ [ evclit evRIM 0.25 mix3 ] [ evclit evcbody 0.15 mix3 ] ] >> pkbroad }
+      { << /Width evcr 2.4 mul /Charge 0.8 /Depletion 0.1 /Edge 0 /ColorMix 0.8
+           /Colors [ [ evclit evRIM 0.25 mix3 ] [ evclit evcbody 0.15 mix3 ] ] >> pkbroad }
+      evcgrouped }
     << /Soft 0.6 /Under evcunder >> pkwet
 } bind def
 
