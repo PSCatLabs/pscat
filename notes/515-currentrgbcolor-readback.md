@@ -38,3 +38,23 @@ prepended, `--page 1520x1120`) changes in **one pixel, one channel, by one
 level**: (759, 1016) of 1520x1120, G 111 to 110 (RGB 104,111,136 to
 104,110,136). The base binary's render by the README method equals the
 committed still, so the regeneration pulls in nothing else.
+
+Green channel of `alpine_lake.png` around the changed pixel (x 757 to 761
+across, y 1014 to 1018 down), before to after; only the middle pixel of
+row 1016 moves:
+
+| y \ x | 757 | 758 | 759 | 760 | 761 |
+|---|---|---|---|---|---|
+| 1014 | 116 | 116 | 116 | 116 | 116 |
+| 1015 | 115 | 114 | 113 | 112 | 111 |
+| 1016 | 111 | 112 | **111 to 110** | 111 | 111 |
+| 1017 | 114 | 114 | 116 | 116 | 117 |
+| 1018 | 116 | 116 | 115 | 115 | 115 |
+
+`notes/515-alpine-lake-crop-before-after.png` is a 33x33 crop around it,
+10x nearest-neighbour, before on the left and after on the right. A one
+level change is invisible there; the table is the reviewable form.
+
+Found while checking: `docs/guides/landscape/grass.png` already differs
+from its own snippet's render on `main` (7441 pixels, identical under both
+binaries), so it is stale independent of this change. Filed separately.
