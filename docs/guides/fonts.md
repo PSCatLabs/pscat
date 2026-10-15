@@ -147,7 +147,9 @@ showpage
   `/PageStart { ... }` runs before every page, the first included, inside a
   `gsave`: paint the paper there, so a page you composed is not cleared. Pages
   after the first follow a `showpage`, so they are typed in the default
-  graphics state, not a rotated or scaled one. The caller does the
+  graphics state, not a rotated or scaled one. `/PageEnd { ... }` runs the same
+  way after every page, the last included, with the page's frame still set:
+  draw over the page there. The caller does the
   last `showpage`, as with `hs-write`. `tw-type` leaves the carriage at the start
   of the next line, so `show` can carry on.
 - **Measuring:** `<< ... >> tw-linecount` returns the number of lines and
@@ -229,12 +231,21 @@ inside a stack of effects, each optional and each off at strength 0:
   makes the bar a marker's, otherwise it is a plain black bar. The bar covers
   whole cells, so a word is always covered.
 
-Use `rel-paper` alone as `tw-type`'s `/PageStart` to age every page of a long
-document (the copy layers need `rel-page`, one page). The same `/Seed` draws the
+A document of several pages is a paged `rel-page`: give it `/Paged true` and wire
+`tw-type`'s two hooks, `/PageStart { rel-page-start } /PageEnd { rel-page-end }`.
+Every sheet then gets the paper, its own copier dirt, the lid and edge shadow,
+the redaction bars and the marks; the staple and the clips go on the first sheet
+only, and a stamp or note with `/Page 2` goes on page 2 only
+(`examples/released_pages.ps`). Use `rel-paper` alone as `/PageStart` to age the
+pages of a long document without the copy layers. The same `/Seed` draws the
 same page. Every stamp, name and note in a piece must be invented: no real
 agency's seal or marking.
 
 <p><img src="../dev/design/released_specimen.png" alt="One memo through 0, 1 and 3 photocopy generations"/></p>
+
+A two-page memo through a paged `rel-page` (`examples/released_pages.ps`):
+
+<p><img src="../dev/design/released_pages_1.png" alt="Page 1: aged, photocopied, stapled, redacted, stamped" width="300"/> <img src="../dev/design/released_pages_2.png" alt="Page 2: the same copier, its own dirt, a note, no staple" width="300"/></p>
 
 `examples/released_specimen.ps` renders this (gs: [the same](../dev/design/released_specimen_gs.png));
 `docs/dev/design/typewriter/release_vs_real.png` sets crops of it beside the reference

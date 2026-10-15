@@ -734,3 +734,57 @@ fn ghostscript_types_the_memo_the_script_writes() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_page_end_runs_after_each_page_the_last_included_and_cannot_leak_state() {
+    // 9 lines at 4 a page: 3 pages. /PageEnd paints a block in the bottom-left
+    // corner, outside the margins, and must run on each of them.
+    let mut it = Interp::with_page_scaled(W, H, SCALE).expect("page");
+    load(&mut it);
+    let text = "(1\\n2\\n3\\n4\\n5\\n6\\n7\\n8\\n9)";
+    it.run_str(&format!(
+        "/ends 0 def 1 setgray clippath fill \
+         << /Text {text} /Width 288 /Height 120 /Margin 36 \
+            /PageEnd {{ /ends ends 1 add def 0 setgray 0 0 12 12 rectfill }} >> tw-type"
+    ))
+    .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+    it.run_str("ends").unwrap();
+    assert_eq!(
+        it.operand_stack().last().unwrap().repr(),
+        "3",
+        "PageEnd ran after each of the three pages"
+    );
+    let corner = |p: &tiny_skia::Pixmap| {
+        let y = p.height() - 5;
+        p.pixel(5, y).map_or(255, |c| c.red())
+    };
+    assert_eq!(it.gfx().pages().len(), 2);
+    for (i, p) in it.gfx().pages().iter().enumerate() {
+        assert!(corner(p) < 50, "page {} has no PageEnd block", i + 1);
+    }
+    assert!(corner(&it.gfx().pixmap) < 50, "the last page has none");
+
+    // a hook that moves the origin and clips, and paints nothing, leaves the
+    // typing of the next page and the caller's state as they were
+    let plain = typed("", "Dear Sir");
+    let with = typed(
+        "/PageEnd { 50 50 translate 10 rotate 0 0 5 5 rectclip newpath 3 3 moveto }",
+        "Dear Sir",
+    );
+    assert_eq!(plain, with, "PageEnd leaked its graphics state");
+
+    // the guard
+    let mut it = Interp::with_page(100, 100).expect("page");
+    load(&mut it);
+    let depth = it.dict_stack_len();
+    let err = it
+        .run_str("<< /PageEnd 5 >> tw-type")
+        .expect_err("a number for PageEnd is refused");
+    assert!(
+        it.error_report(&err)
+            .contains("tw-pageend-must-be-a-procedure"),
+        "{}",
+        it.error_report(&err)
+    );
+    assert_eq!(it.dict_stack_len(), depth);
+}

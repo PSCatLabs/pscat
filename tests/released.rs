@@ -1048,3 +1048,201 @@ fn a_note_with_a_soften_out_of_range_is_refused_and_leaves_the_dict_stack_alone(
     );
     assert_eq!(it.dict_stack_len(), depth);
 }
+
+// ---- a paged document (#448) ---------------------------------------------
+
+/// Two sheets of type (a page holds about 11 lines here), through a paged
+/// rel-page. `tw` is extra tw-type options, `opts` extra rel-page options.
+fn paged_src(tw: &str, opts: &str) -> String {
+    format!(
+        "{{ << /Text (1\\n2\\n3\\n4\\n5\\n6\\n7\\n8\\n9\\n10\\n11\\n12\\n13\\n14) \
+             /Width 300 /Height 200 /Margin 30 /Machine 4 /Seed 3 \
+             /PageStart {{ rel-page-start }} /PageEnd {{ rel-page-end }} {tw} >> tw-type }} \
+         << {SHEET} /Paged true {opts} >> rel-page showpage"
+    )
+}
+
+/// The completed pages' luminance, the last one included (the source ends in
+/// a showpage).
+fn pages_of(src: &str) -> Vec<Vec<u8>> {
+    let it = render(src);
+    it.gfx()
+        .pages()
+        .iter()
+        .map(|p| {
+            p.pixels()
+                .iter()
+                .map(|c| {
+                    ((u32::from(c.red()) + u32::from(c.green()) + u32::from(c.blue())) / 3) as u8
+                })
+                .collect()
+        })
+        .collect()
+}
+
+#[test]
+fn a_one_page_paged_rel_page_is_the_page_rel_page_draws() {
+    let opts = "/Age 0.6 /Generation 2 /Skew 0.5 /Punch 2 /Staple 1 /Clip 1 \
+                /Stamps [ << /Lines [ (SEEN) ] /X 150 /Y 100 /Size 24 >> ]";
+    let plain = rel_page(TYPED, opts);
+    let hooked = TYPED.replace(
+        "/Seed 3 >>",
+        "/Seed 3 /PageStart { rel-page-start } /PageEnd { rel-page-end } >>",
+    );
+    let paged = rel_page(&hooked, &format!("{opts} /Paged true"));
+    assert_eq!(
+        differing(&plain, &paged),
+        0,
+        "the first sheet of a paged document is rel-page's page"
+    );
+}
+
+#[test]
+fn every_page_of_a_paged_document_gets_its_own_sheet_and_the_copy_layers() {
+    let pages = pages_of(&paged_src("", "/Age 0.6 /Generation 2 /Punch 2"));
+    assert_eq!(pages.len(), 2, "14 lines on 11-line pages");
+    // the copier's paper, dirt and edge are on page 2, not only on page 1: it is
+    // grey where a bare page is white, and has black specks
+    let bare = pages_of(&paged_src("", ""));
+    assert!(
+        mean(&pages[1]) < mean(&bare[1]) - 5.0,
+        "page 2 is a bare page"
+    );
+    assert!(
+        pages[1].iter().filter(|&&v| v < 140).count()
+            > bare[1].iter().filter(|&&v| v < 140).count() + 40,
+        "no specks on page 2"
+    );
+    // and they are another sheet's: not page 1's specks again
+    assert!(differing(&pages[0], &pages[1]) > 1000);
+}
+
+#[test]
+fn a_staple_is_on_the_first_sheet_and_a_note_goes_where_its_page_says() {
+    let staple = pages_of(&paged_src("", "/Staple 2"));
+    let none = pages_of(&paged_src("", ""));
+    assert!(differing(&staple[0], &none[0]) > 20, "the staple, page 1");
+    assert_eq!(differing(&staple[1], &none[1]), 0, "no staple on page 2");
+    let note = "/Notes [ << /Text (see me) /X 60 /Y 100 /Size 20 /Page 2 >> ]";
+    let noted = pages_of(&paged_src("", note));
+    assert_eq!(differing(&noted[0], &none[0]), 0, "a note for page 2");
+    assert!(differing(&noted[1], &none[1]) > 20, "the note on page 2");
+    // a stamp with no /Page is on every page
+    let stamp = "/Stamps [ << /Lines [ (SEEN) ] /X 150 /Y 60 /Size 24 >> ]";
+    let stamped = pages_of(&paged_src("", stamp));
+    assert!(differing(&stamped[0], &none[0]) > 200);
+    assert!(differing(&stamped[1], &none[1]) > 200);
+}
+
+#[test]
+fn a_paged_rel_page_leaves_the_graphics_state_and_the_stacks_as_it_found_them() {
+    let it = render(&format!(
+        "matrix currentmatrix /m0 exch def countdictstack /d0 exch def \
+         {} \
+         true 0 1 5 {{ dup m0 exch get exch matrix currentmatrix exch get eq and }} for \
+         countdictstack d0 eq and \
+         clippath pathbbox 200 eq exch 300 eq and exch 0 eq and exch 0 eq and and",
+        paged_src("", "/Age 0.6 /Generation 3 /Skew 1 /Dropout 1").replace(" showpage", "")
+    ));
+    assert_eq!(it.operand_stack().last().unwrap().repr(), "true");
+}
+
+#[test]
+fn a_paged_rel_page_needs_its_hooks_and_the_hooks_need_a_paged_rel_page() {
+    for (src, want) in [
+        ("rel-page-start", "rel-page-start-needs-a-paged-rel-page"),
+        ("rel-page-end", "rel-page-end-needs-a-paged-rel-page"),
+        (
+            "{ } << /Paged true >> rel-page",
+            "rel-paged-content-never-called-the-page-hooks",
+        ),
+        (
+            "{ } << /Paged 1 >> rel-page",
+            "rel-paged-must-be-true-or-false",
+        ),
+    ] {
+        let mut it = Interp::with_page(W, H).expect("page");
+        load(&mut it);
+        let depth = it.dict_stack_len();
+        let err = it.run_str(src).expect_err(&format!("{src} is refused"));
+        let report = it.error_report(&err);
+        assert!(report.contains(want), "{src}: {report}");
+        assert_eq!(it.dict_stack_len(), depth, "{src}");
+    }
+}
+
+#[test]
+fn a_mark_page_that_is_not_a_positive_integer_is_refused() {
+    let mut it = Interp::with_page(W, H).expect("page");
+    load(&mut it);
+    let src = paged_src("", "/Stamps [ << /Lines [ (A) ] /Page 0 >> ]");
+    let err = it.run_str(&src).expect_err("page 0 is refused");
+    assert!(
+        it.error_report(&err)
+            .contains("rel-mark-page-must-be-a-positive-integer"),
+        "{}",
+        it.error_report(&err)
+    );
+}
+
+/// The page frame and clip a rel-page found, as a PostScript test: true when
+/// the CTM is `m0` and the clip is the whole 300 x 200 page.
+const FRAME_BACK: &str = "true 0 1 5 { dup m0 exch get exch matrix currentmatrix exch get eq and } for \
+     clippath pathbbox 200 eq exch 300 eq and exch 0 eq and exch 0 eq and and";
+
+#[test]
+fn a_half_wired_paged_document_is_refused_and_leaves_the_frame_as_it_found_it() {
+    let long = "(1\\n2\\n3\\n4\\n5\\n6\\n7\\n8\\n9\\n10\\n11\\n12\\n13\\n14)";
+    let hooked = |text: &str, tw: &str| {
+        format!(
+            "{{ << /Text {text} \
+                 /Width 300 /Height 200 /Margin 30 {tw} >> tw-type }} \
+             << {SHEET} /Generation 2 /Age 0.5 /Paged true >> rel-page"
+        )
+    };
+    for (text, tw, want) in [
+        // one page, a start with no end: the open sheet is closed again
+        (
+            "(a)",
+            "/PageStart { rel-page-start }",
+            "rel-page-start-was-not-followed-by-rel-page-end",
+        ),
+        // two pages: the second start finds the first sheet still open
+        (
+            long,
+            "/PageStart { rel-page-start }",
+            "rel-page-start-needs-rel-page-end-first",
+        ),
+        // an end with no start
+        (
+            "(a)",
+            "/PageEnd { rel-page-end }",
+            "rel-page-end-needs-rel-page-start-first",
+        ),
+    ] {
+        let mut it = Interp::with_page(W, H).expect("page");
+        load(&mut it);
+        let src = format!(
+            "1 setgray clippath fill matrix currentmatrix /m0 exch def \
+             {} stopped {{ $error /errorname get = }} if",
+            hooked(text, tw)
+        );
+        let _ = it.run_str(&src);
+        let report = it
+            .run_str(FRAME_BACK)
+            .map(|()| it.operand_stack().last().unwrap().repr())
+            .unwrap_or_else(|e| it.error_report(&e));
+        assert_eq!(report, "true", "{tw}: the frame or clip was left changed");
+        // and the refusal names the missing hook
+        let mut it = Interp::with_page(W, H).expect("page");
+        load(&mut it);
+        let err = it
+            .run_str(&format!("1 setgray clippath fill {}", hooked(text, tw)))
+            .expect_err(tw);
+        assert!(
+            it.error_report(&err).contains(want),
+            "{tw}: {}",
+            it.error_report(&err)
+        );
+    }
+}

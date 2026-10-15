@@ -1151,6 +1151,7 @@ TWState begin {
     /Tabs        [ /lyTabs /lyIsTabs    /tw-tabs-must-be-a-positive-integer-or-ascending-columns ]
     /PageNumbers [ /lyPN   /lyIsPN      /tw-pagenumbers-must-be-none-top-or-bottom ]
     /PageStart   [ /lyPS   /lyIsProc    /tw-pagestart-must-be-a-procedure ]
+    /PageEnd     [ /lyPE   /lyIsProc    /tw-pageend-must-be-a-procedure ]
     /Memo        [ /lyMemo /lyIsMemo    /tw-memo-must-be-a-dict-of-known-string-keys ]
     /Redactor    [ /lyRd   /lyIsProc    /tw-redactor-must-be-a-procedure ]
 >> def
@@ -1158,7 +1159,7 @@ TWState begin {
     /lyText () def  /lyW 612 def  /lyH 792 def  /lyM 72 def
     /lyML -1 def  /lyMR -1 def  /lyMT -1 def  /lyMB -1 def
     /lySp 1 def  /lyInd 0 def  /lyTabs 5 def  /lyPN /none def
-    /lyPS null def  /lyMemo null def  /lyRd null def
+    /lyPS null def  /lyPE null def  /lyMemo null def  /lyRd null def
 } bind def
 
 % opts -> typeOpts. Reads the layout keys into ly variables and returns a
@@ -1524,6 +1525,9 @@ TWState begin {
     lyNL lyR0 sub dup lyNLP gt { pop lyNLP } if /lyCnt exch def
     0 1 lyCnt 1 sub { lyR0 add lyDrawLine } for
     lyPageNum
+    % /PageEnd, as /PageStart: its own gsave, TWState ended. It runs on every
+    % page, the last included, before the showpage that starts the next one.
+    /lyPE load null ne { gsave /lyPE load end exec TWState begin grestore } if
 } bind def
 /lyDraw {
     /lyS0 tStrike def
@@ -1566,6 +1570,9 @@ TWState begin {
 %
 %   { << /PageStart 5 >> tw-type } /tw-pagestart-must-be-a-procedure
 %   (a number for PageStart) mustguard
+%
+%   { << /PageEnd 5 >> tw-type } /tw-pageend-must-be-a-procedure
+%   (a number for PageEnd) mustguard
 %
 %   { << /Redactor 5 >> tw-type } /tw-redactor-must-be-a-procedure
 %   (a number for the redactor) mustguard
@@ -1620,6 +1627,7 @@ TWState begin {
 % @param: /Tabs [count or array of count] A tab goes to the next stop: a number is a stop every N columns, an array lists ascending stop columns counted from the left margin (default 5)
 % @param: /PageNumbers [name] /none, /bottom (centred "- 2 -" on every page) or /top (right-aligned "2" from page 2) (default /none)
 % @param: /PageStart [proc] Run before each page is typed, the first included, inside a gsave: paint the paper here. Pages after the first follow a showpage, so they are typed in the default graphics state, not a rotated or scaled one (default none)
+% @param: /PageEnd [proc] Run after each page is typed, the last included, inside a gsave, before the showpage that starts the next page (the last page is still left to the caller): draw over the page here, as /PageStart paints under it. It is called as /PageStart is, with the typewriter's side dictionary ended, and the page's frame and clip are still in force (default none)
 % @param: /Memo [dict] A memo header typed above the text: /To /From /Cc /Subject /Date /Title (strings; /Title defaults to MEMORANDUM and is centred and underlined) and /Rule (boolean, the underscore line under the header, default true); a long field wraps hung under its text (default none)
 % @param: /Redactor [proc] Covers each run of <r>..</r> text on a line: called as x0 x1 baseline size [points], in the page frame inside a gsave, with the typewriter's side dictionary ended (lib/released.ps rel-redact is one); without it a plain black bar is drawn (default none)
 % @param: /Preset [name] As tw-setup: /manual, /electric or /worn (no default: the current options stay)
