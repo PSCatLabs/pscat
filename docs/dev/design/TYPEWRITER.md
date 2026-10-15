@@ -274,9 +274,11 @@ this.
   does not bleach it). The feather's width falls with `e`, by 60% at the cap.
   A one-side-heavy key's light side is eroded 16 x its lightness more.
 - The hole level's slope below pressure 1 falls from 3 to 0.6 (0.1 past a
-  0.15 shortfall), so the loss of ink moves from holes to thinning. A heavy strike
-  (pressure above 1) and `/Copies` (the toner fills a thin stroke in) are
-  not eroded, and `/electric` (sd 0.03) hardly is.
+  0.15 shortfall), so the loss of ink moves from holes to thinning. A one-side-heavy
+  key's light side is 0.3 of the side sparser (was 0.5) and eroded as above. A
+  heavy strike (pressure above 1) is not eroded, and `/electric` (sd 0.03)
+  hardly is. `/Copies > 0` is unchanged (slope 3, side 0.5, no erosion): the
+  toner fills a thin stroke in and the contrast curve drops a light strike out.
 - `/InkModel false` is unchanged.
 
 ## 7. Randomness that stays out of the caller's stream

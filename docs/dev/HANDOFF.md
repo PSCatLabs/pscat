@@ -803,7 +803,8 @@ renders eight examples in both and compares block-downsampled output).
    #477 made a light strike thin rather than only dot out: the body is clipped to
    the glyph shifted four ways (an erosion, `tErode`), by an amount that grows with
    the pressure shortfall, and the hole slope below pressure 1 fell from 3 to 0.6.
-   Typewriter and released renders were redone; `notes/477-light-strike-thins.md`.
+   A copy (`/Copies > 0`) is unchanged. The typewriter and released specimens were
+   redone; `notes/477-light-strike-thins.md`.
    #242 shipped the charcoal gallery piece, `gallery/lincoln_charcoal.ps`
    (*Study after Berger, 1864*), and `lib/etching.ps`'s `et-tonemap`, which
    returns a photo as a grid of darkness for any piece that wants a

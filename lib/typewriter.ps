@@ -569,16 +569,19 @@ grestore
     % 0.8 at /Ribbon 0; -1 per unit of pressure above 1. Below 1 it rises by
     % tLightSlope per unit up to tLightKnee of shortfall and by tLightTail
     % beyond: #477 moved a light strike's loss of ink from holes to thinning
-    % (tE, below), so a light strike is faint, not a screen of pin-holes
+    % (tE, below), so a light strike is faint, not a screen of pin-holes. A
+    % photocopy keeps #423's slope of 3 and no thinning: its toner drops a
+    % light strike out in specks and fills a thin stroke in.
     1 tRibbon sub dup 0.2 mul exch dup mul dup mul 0.45 mul add 0.15 add
     1 tPr sub dup 0 gt {
-        dup tLightKnee gt { tLightKnee sub tLightTail mul tLightKnee tLightSlope mul add } { tLightSlope mul } ifelse
+        tCopyC 0 gt { 3 mul } {                 % a copy drops a light strike out, as in #423
+            dup tLightKnee gt { tLightKnee sub tLightTail mul tLightKnee tLightSlope mul add } { tLightSlope mul } ifelse
+        } ifelse
     } { } ifelse add
     wearS 0 gt { tPageWear 0.06 mul wearS 1 2 copy gt { exch } if pop mul add } if
     dup 0 lt { pop 0 } if /pBody exch def
     % a light strike thins: the body is eroded by tELo glyph units per unit
-    % of pressure shortfall past tEDead, up to tECap (#477). A photocopy's
-    % toner fills the thin strike in again, so a copy is not eroded.
+    % of pressure shortfall past tEDead, up to tECap (#477), but not on a copy
     /tE 1 tPr sub tEDead sub tELo mul dup 0 lt { pop 0 } if dup tECap gt { pop tECap } if def
     tCopyC 0 gt { /tE 0 def } if
     % a photocopy's contrast curve (#214): a dark strike fills in (fewer
@@ -631,8 +634,9 @@ grestore
         % the light side thins as well as dots (#477): tE is a variable, not
         % graphics state, so it is put back after
         /tE0 tE def
-        /tE tE tSide tESide mul add dup tECap gt { pop tECap } if def
-        gsave pBody tSide 0.3 mul add tLevel tWeaveClip tBody grestore
+        % (leaves the side's sparseness: 0.5 on a copy, 0.3 otherwise)
+        tCopyC 0 gt { 0.5 } { 0.3 /tE tE tSide tESide mul add dup tECap gt { pop tECap } if def } ifelse
+        gsave pBody tSide 3 -1 roll mul add tLevel tWeaveClip tBody grestore
         /tE tE0 def
         gsave
             pBody tLevel tWeaveClip

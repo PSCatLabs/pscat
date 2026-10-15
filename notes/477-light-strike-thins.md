@@ -27,7 +27,12 @@ greyer with their edges intact.
 - The feather's width falls with `e` (by 60% at the cap).
 - A one-side-heavy key's light side: its extra sparseness 0.5 -> 0.3 of the
   side, and it is eroded 16 x the side more.
-- A photocopy (`/Copies > 0`) is not eroded: the toner fills a thin stroke in.
+- A photocopy (`/Copies > 0`) is unchanged: no erosion, the hole slope stays 3,
+  and a one-side-heavy key's light side keeps its 0.5. The toner fills a thin
+  stroke in and the contrast curve drops a light strike out in specks. (A first
+  version changed the copies too and the `e` mass sd/mean at `/Copies 1` fell
+  from 0.132 to 0.091: the lighter slope took away what the contrast curve
+  worked on. Now `/Copies 1` and `/Copies 3` give 0.132 and 0.132, as before.)
 - `/InkModel false` is unchanged. Elite is not given a base erosion (it would
   change every normal strike, which the scans do not support).
 
@@ -47,33 +52,36 @@ an edge. The `e` figures are 8 seeds x 30 `e`s, `/manual` machine 1.
 | `e`s below 0.75 of the mean mass | 4.6% | 5.8% |
 | mean `e` mass | 271 | 267 |
 
-The ink is nearly as heavy overall (mass -1.5%, coverage -5%) but its weight
-varies more, closer to T7 (the `e` sd/mean 0.104 -> 0.168). The darkness of an
+The ink is nearly as heavy overall (integrated mass -1.5% on both faces, coverage -5%
+on both) but its weight varies more, closer to T7 (the `e` sd/mean 0.104 -> 0.168). The darkness of an
 ink pixel rose a little (0.777 -> 0.792; the scans' 0.775), because the
 speckled light strikes that used to pull it down are now thin and solid. The
-elite excess against T4 was about 6% by coverage (#423); it is about 5% lower
-now, but pica (T2) is also about 5% lower, since both faces share the erosion
-(T2 was x0.98 of the scans before, so about x0.93 now).
+elite excess against T4 was about 6% by coverage (#423); by coverage it is about
+5% lower now, but by integrated mass elite moved only 1.5%, so most of the gap
+is still open, and pica (T2) lost as much as elite since the faces share the
+erosion (T2 was x0.98 of the scans by coverage before, about x0.93 now).
 
 Reading `ink_vs_real.png` (pscat and gs rows): the light `l` and `tt` of T2 and
 the light `e` of "the" in T10 are thin grey strokes with intact edges where
 they were a dotted screen; T7's light `e` looks like the scans' faint tiles.
-gs still shows some dotting on a light strike at 300 dpi (its clip edges are
-not antialiased as pscat's); it is much less than before.
+gs still shows some dotting on a light strike at 300 dpi (a guess: its clip
+edges are not antialiased as pscat's, though gs ran with `GraphicsAlphaBits=4`);
+it is much less than before.
 
 ## Renders redone
 
 `scripts/identity_check.sh --loader lib/typewriter.ps --loader lib/released.ps`
-(control: a driver that types a light strike): the same three files as #423
-differ and nothing else, `examples/typewriter_specimen.ps`,
-`examples/released_specimen.ps` and `gallery/released_memo.ps`. Regenerated
-with their committed commands (they reproduce byte for byte from the base tree):
-`docs/dev/design/typewriter_specimen*.png`, `typewriter_memo*.png` (via
-`scripts/typewrite.sh`, command in `docs/guides/fonts.md`),
-`released_specimen*.png`, `gallery/renders/released_memo.png`; and the composites
-`ink_vs_real.png`, `release_vs_real.png`, `memo_vs_real.png`, `blind_grid.png`
-by their tools. The manifest text is still right. The blind grid's key is in the
-PR, not here.
+(control: a driver that types a light strike): two of #423's three files
+differ, `examples/typewriter_specimen.ps` and `examples/released_specimen.ps` (its
+original sheet; the copies are unchanged). `gallery/released_memo.ps` is
+byte-identical, since it types through one photocopy generation. Regenerated
+with their committed commands (they reproduce byte for byte from the base
+tree): `docs/dev/design/typewriter_specimen*.png`, `typewriter_memo*.png` (via
+`scripts/typewrite.sh`, the command in `docs/guides/fonts.md`; the memo has no
+copy generation, and it differs), `released_specimen*.png`, and the composites
+`ink_vs_real.png`, `release_vs_real.png`. `memo_vs_real.png`, `blind_grid.png`
+and `gallery/renders/released_memo.png` regenerate to the same pixels. The
+manifest text is still right. The blind grid's key is in the PR, not here.
 
 ## Not done
 
