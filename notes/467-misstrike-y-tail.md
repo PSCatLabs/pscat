@@ -74,9 +74,14 @@ the repo.
 `notes/467-memo-misstrikes.png` is all nine of the memo's mis-struck letters,
 before above after.
 
-The `d` in "restricted" now sits about 0.8pt high: still a raised letter, no
-longer half an x-height.
+The `d` in "restricted" (Machine 11's `d`, strike at line 32) was 1.64pt up: the
+bent-slug share was -0.04pt and the strike's 1.68pt (4x). It is now 0.80pt up
+(strike 0.84pt): still a raised letter, no longer half an x-height. The line
+layer adds 0.08pt either way. The memo's other mis-strikes were 0.1 to 0.6pt
+(`b` 0.63pt up) and move by at most half of that.
 
 ## Not done
 
-Nothing filed: no leftover came out of this.
+#549 (p3): two tails the model still runs under, both before this change: x over 1pt
+at `/Wear 1` (0.15% against the board's 0.2 to 0.9%) and y over 0.5pt at `/Wear 1.5`
+(4.1% against Duncan's 6.6%).
