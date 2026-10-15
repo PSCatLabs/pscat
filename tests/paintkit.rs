@@ -8595,15 +8595,23 @@ fn tall_stroke(preset: &str, opts: &str, wet: &str) -> Interp {
 
 const BROAD_FLAT: &str = "/Charge 1 /Depletion 0 /Edge 0 /ColorJitter 0";
 const TROWEL_FLAT: &str = "/Coverage 1 /Scrape 0 /EdgeBuildup 0 /Jitter 0 /ColorJitter 0";
+/// A 10pt fan of 20 one-point bristles with nothing random and no flick.
+const FAN_FLAT: &str = "/Width 10 /Spread 1 /Splay 0 /Bristles 20 /BristleWidth 1 \
+     /WidthJitter 0 /Load 1 /Dropout 0 /Ragged 0 /Flick 0 /Jitter 0 /ColorJitter 0";
 
 /// The acceptance criterion: a single unbroken stroke down a vertical
 /// gradient is asked once per striation per pass by /PerFill alone, so its
 /// rim is the per-pass one; cut into 10pt fills it follows the gradient.
 /// Measured when this was written (rows 15..135): pkbroad /PerFill alone 239.6,
-/// /FillLength 10 71.6 (3.3x less); pktrowel 206.8 and 70.2 (2.9x).
+/// /FillLength 10 71.6 (3.3x less); pktrowel 206.8 and 70.2 (2.9x). pkfan
+/// (`FAN_FLAT`, #497) 252.7 and 73.5 (3.4x).
 #[test]
 fn wet_filllength_makes_one_unbroken_stroke_follow_the_backdrop() {
-    for (preset, opts) in [("pkbroad", BROAD_FLAT), ("pktrowel", TROWEL_FLAT)] {
+    for (preset, opts) in [
+        ("pkbroad", BROAD_FLAT),
+        ("pktrowel", TROWEL_FLAT),
+        ("pkfan", FAN_FLAT),
+    ] {
         let whole = rim_residual(&tall_stroke(preset, opts, ""), 15..135);
         let cut = rim_residual(&tall_stroke(preset, opts, "/FillLength 10"), 15..135);
         assert!(
@@ -8618,22 +8626,17 @@ fn wet_filllength_makes_one_unbroken_stroke_follow_the_backdrop() {
 /// piece is also really a separate fill: the backdrop is asked more often.
 #[test]
 fn wet_filllength_leaves_a_short_run_and_a_core_pass_alone() {
-    for (preset, opts) in [("pkbroad", BROAD_FLAT), ("pktrowel", TROWEL_FLAT)] {
+    for (preset, opts) in [
+        ("pkbroad", BROAD_FLAT),
+        ("pktrowel", TROWEL_FLAT),
+        ("pkfan", FAN_FLAT),
+    ] {
         assert_eq!(
             pixels(&tall_stroke(preset, opts, "")),
             pixels(&tall_stroke(preset, opts, "/FillLength 1000")),
             "{preset}: a length past the run's end"
         );
     }
-    // pkfan hands each run to pkribbon as one pointed ribbon, which cannot be
-    // cut at a stop without pointing every piece, so it is not cut.
-    let fan = LOAD_PRESETS[2];
-    assert_eq!(fan.0, "pkfan");
-    assert_eq!(
-        pixels(&tall_stroke(fan.0, fan.1, "")),
-        pixels(&tall_stroke(fan.0, fan.1, "/FillLength 10")),
-        "pkfan runs are not cut"
-    );
     let one = |len: &str| {
         pixels(&tall_stroke(
             "pkbroad",
@@ -8681,6 +8684,13 @@ fn wet_filllength_cuts_the_fill_not_the_random_stream() {
             "pktrowel",
             "/Coverage 0.9 /Scrape 0.2 /EdgeBuildup 0.5 /Jitter 0.5 /ColorJitter 0.2",
         ),
+        // pkfan's draws: per-stop /Jitter, bristle width, length and colour,
+        // and the contact chain's /Load and /Dropout.
+        (
+            "pkfan",
+            "/Width 10 /Spread 1 /Splay 0.3 /Bristles 8 /BristleWidth 1.5 /WidthJitter 0.3 \
+             /Load 0.8 /Dropout 0.1 /Ragged 0.4 /Flick 0.5 /Jitter 0.4 /ColorJitter 0.2",
+        ),
     ] {
         let (asks0, next0) = filllength_asks(preset, opts, "");
         let (asks1, next1) = filllength_asks(preset, opts, "/FillLength 12");
@@ -8695,10 +8705,20 @@ fn wet_filllength_cuts_the_fill_not_the_random_stream() {
 /// cutting is invisible: pkbroad is the uncut render to the byte (the
 /// overlap between neighbours repaints the same colour), and pktrowel differs
 /// in under 0.5% of channel values, where the overlap re-blends its lane
-/// edges' antialiasing.
+/// edges' antialiasing, and pkfan (#497) in about 0.05% (78 and 93 of 180000
+/// values, the second with the run's flick on: only the real end is pointed).
 #[test]
 fn wet_filllength_over_a_constant_backdrop_is_invisible() {
-    for (preset, opts) in [("pkbroad", BROAD_FLAT), ("pktrowel", TROWEL_FLAT)] {
+    for (preset, opts) in [
+        ("pkbroad", BROAD_FLAT),
+        ("pktrowel", TROWEL_FLAT),
+        ("pkfan", FAN_FLAT),
+        // the run's own flick: only the last piece may taper to a point
+        (
+            "pkfan",
+            "/Width 10 /Bristles 20 /BristleWidth 1 /Flick 0.5 /Ragged 0 /WidthJitter 0 /Jitter 0 /ColorJitter 0 /Dropout 0 /Splay 0",
+        ),
+    ] {
         let run = |wet: &str| {
             let mut it = fresh(300, 150);
             it.run_str(&format!(
@@ -8718,6 +8738,82 @@ fn wet_filllength_over_a_constant_backdrop_is_invisible() {
             .count();
         assert!(off * 200 < a.len(), "{preset}: {off} channel values differ");
     }
+}
+
+/// pkfan's cut pieces are ribbons: only the run's real ends are pointed, and
+/// the run's own flick taper stays the run's (#497). The ribbons handed to
+/// pkribbon are recorded (its caps, and the /Pressure at the piece's two
+/// ends), so this holds the shape of the pieces directly: a pixel comparison
+/// cannot, because the core pass underneath fills the notch a pointed interior
+/// end would leave.
+#[test]
+fn wet_filllength_pkfan_pieces_are_pointed_only_at_the_run_ends() {
+    // Every pkribbon call of one flicked stroke: [start-pointed end-pointed
+    // pressure(0) pressure(1)], pressure -1 where the call set none.
+    let calls = |wet: &str| -> Vec<[f64; 4]> {
+        let mut it = fresh(300, 150);
+        it.run_str(&format!(
+            "/pkribbon-real /pkribbon load def userdict /seen [ ] put \
+             /pkribbon {{ \
+                 dup /Pressure known {{ dup /Pressure get dup 0 exch exec exch 1 exch exec }} \
+                 {{ -1 -1 }} ifelse /pr1 exch def /pr0 exch def \
+                 dup /StartCap get /pointed eq {{ 1 }} {{ 0 }} ifelse /sc exch def \
+                 dup /EndCap get /pointed eq {{ 1 }} {{ 0 }} ifelse /ec exch def \
+                 userdict /seen [ seen aload pop [ sc ec pr0 pr1 ] ] put \
+                 pkribbon-real }} def \
+             7 srand {{ newpath 150 20 moveto 150 130 lineto \
+                 << /Width 10 /Colors [[0.9 0.2 0.2]] /Bristles 1 /BristleWidth 8 \
+                    /WidthJitter 0 /Splay 0 /Load 1 /Dropout 0 /Ragged 0 /Jitter 0 \
+                    /ColorJitter 0 /Flick 0.5 >> pkfan }} \
+             << /Soft 1 /Offset 0 /Layers 2 /At [ 150 75 ] /PerFill true {wet} \
+                /Under {{ pop pop 0.2 0.4 0.9 }} >> pkwet seen"
+        ))
+        .unwrap_or_else(|e| panic!("{wet}: {}", it.error_report(&e)));
+        let st = it.operand_stack();
+        let text = st.last().expect("seen").repr().to_string();
+        text.replace(['[', ']'], " ")
+            .split_whitespace()
+            .map(|w| w.parse::<f64>().expect("number"))
+            .collect::<Vec<_>>()
+            .chunks(4)
+            .map(|c| [c[0], c[1], c[2], c[3]])
+            .collect()
+    };
+    // Uncut: the core pass and the one softening pass are each one pointed
+    // ribbon with the run's own flick (no /Pressure of its own).
+    let whole = calls("");
+    assert_eq!(whole, vec![[1.0, 1.0, -1.0, -1.0]; 2]);
+    // Cut: the softening pass is pieces and the core pass (asked nothing)
+    // is the last, whole, call.
+    let cut = calls("/FillLength 9");
+    let (core, pieces) = cut.split_last().expect("calls");
+    assert_eq!(core, &[1.0, 1.0, -1.0, -1.0]);
+    assert!(pieces.len() > 4, "{} pieces", pieces.len());
+    let last = pieces.len() - 1;
+    for (k, p) in pieces.iter().enumerate() {
+        assert_eq!(p[0], if k == 0 { 1.0 } else { 0.0 }, "piece {k} start cap");
+        assert_eq!(p[1], if k == last { 1.0 } else { 0.0 }, "piece {k} end cap");
+        // the run's flick, not the piece's: full width until the taper starts
+        // half way along, never rising again, and a point at the run's end
+        assert!(
+            (0.0..=1.0).contains(&p[2]) && p[3] <= p[2] + 1e-9,
+            "piece {k} {p:?}"
+        );
+    }
+    assert_eq!(pieces[0][2], 1.0, "full width at the run's start");
+    assert_eq!(pieces[1][3], 1.0, "no taper in the first half");
+    assert!(pieces[last][3].abs() < 1e-9, "a point at the run's end");
+    // neighbours overlap: a piece starts inside the one before it
+    for w in pieces.windows(2) {
+        assert!(
+            w[0][3] - 1e-9 <= w[1][2] && w[1][2] <= w[0][2] + 1e-9,
+            "{w:?}"
+        );
+    }
+    assert!(
+        pieces[last][2] > 0.0 && pieces[last][2] < 0.5,
+        "the last piece starts partway down the ramp"
+    );
 }
 
 /// Nested calls: the shortest positive length among the levels running a
