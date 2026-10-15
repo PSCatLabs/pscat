@@ -1025,6 +1025,9 @@ renders eight examples in both and compares block-downsampled output).
   needs none of that: `gallery/evening_stream.ps` (#187) pulls its whole
   far wood into the stream in one directional pull. Don't mirror an element
   that already holds a directional `pkwet` (its 64x nesting budget).
+  A directional pull over a long `/Offset` that must fade as a smooth
+  gradient wants `/Layers` about `/Offset` + 1 one-sided, 2 x `/Offset` + 1 two-sided (1pt steps; issue #417): the
+  explicit cap is 32, the default depth is capped at 16 and has not moved.
 - **Loaded colours: `pkbroad`, `pktrowel`, `pkfan` and `pkdab` adopt them, the rest do
   not yet** (issue #183, slices L1-L5b; design in `docs/dev/design/PAINT_LOADING.md`).
   `lib/paintkit.ps`'s `pu-` section (`puparse`, `puat`, `puflips`, `puwet`,

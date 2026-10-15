@@ -456,7 +456,13 @@ in — keep a reflection's mirror inside the procedure. A directional
 call defaults to enough layers to keep the passes within 2pt of each
 other (up to 16), because identical copies further apart read as
 stepped echoes, so with `/Layers` left to default, `/Offset` also sets
-the depth and re-rolls what follows; pin `/Layers` while tuning. Any
+the depth and re-rolls what follows; pin `/Layers` while tuning. 2pt is
+where the echoes start, not where they stop: a flat stroke that fades into
+a flat ground still bands at 2pt, so for a smooth gradient over a long pull
+ask for about 1pt: `/Layers` one more than `/Offset` one-sided, twice
+`/Offset` plus one two-sided (the cap on an explicit `/Layers` is 32; the
+default depth stays at 16). The canvas
+specimen's pull is `/Offset 28 /Layers 29` (issue #417). Any
 nest with a directional call in it may multiply its innermost
 procedure at most 64 times — enough to pull a reflection down and then
 graze it across. `examples/paintkit_wet_pull_demo.ps` shows a
