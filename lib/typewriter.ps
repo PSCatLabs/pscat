@@ -15,7 +15,7 @@
 %            smooth error in the line advance, a slight tilt.
 %   strike   per strike, from /Seed, the cell, the key and the strike
 %            index: an offset, a rotation, the rare mis-strike (1%, 4x on
-%            x, 2x on y: #467),
+%            x, 2x on y: #467; /MisStrike and /MisStrikeScale, #554),
 %            and pressure (finger factor on the little-finger keys, 1% very
 %            light strikes, punctuation struck harder).
 %
@@ -159,6 +159,7 @@ TWState begin {
 /tInk [0.13 0.13 0.15] def  /tRibbon 0.7 def
 /tCopies 0 def  /tCopyC 0 def
 /tPSd 0.12 def  /tFinger true def  /tInkOn true def
+/tMisRate 0.01 def  /tMisScale 1 def
 /tWorn 0 def  /tBleed 0 def  /tBleedInk [0.62 0.12 0.10] def  /tBleedSide /below def  /tBleedGap 0 def
 /tMat matrix def
 /tFillAdj /.setfilladjust2 where { pop true } { false } ifelse def
@@ -248,6 +249,8 @@ TWState begin {
     /BleedInk    [ /tBleedInk   /tIsRgb    /tw-bleedink-must-be-an-rgb-array ]
     /BleedSide   [ /tBleedSide  /tIsSide   /tw-bleedside-must-be-below-or-above ]
     /BleedGap    [ /tBleedGap   /tIsNonNeg /tw-bleedgap-must-be-a-non-negative-number ]
+    /MisStrike      [ /tMisRate  /tIsUnit   /tw-misstrike-must-be-0-to-1 ]
+    /MisStrikeScale [ /tMisScale /tIsNonNeg /tw-misstrikescale-must-be-a-non-negative-number ]
 >> def
 
 % opts -> -  (TWState is the current dict, begun by the caller). Every key
@@ -347,8 +350,11 @@ TWState begin {
     % mis-strike: the board has horizontal tails (0.8-0.9% of strikes over 1pt)
     % but its vertical offsets are as a normal's (0.8% over 0.5pt at sd 0.19),
     % so x takes 4x and y only 2x: a lift stays under about 1pt at /Wear 1.3
-    % (4x gave 2pt, a letter half an x-height up: #467)
-    4 uni 0.01 lt { /sX sX 4 mul def /sY sY 2 mul def } if
+    % (4x gave 2pt, a letter half an x-height up: #467). The rate is the
+    % machine's looseness and the typist's hand (/MisStrike, 0.01 measured);
+    % the jump is /MisStrikeScale times the 4x/2x (#554). The draw is taken
+    % whatever the rate, so no other draw moves.
+    4 uni tMisRate lt { /sX sX 4 mul tMisScale mul def /sY sY 2 mul tMisScale mul def } if
     % pressure: a deviation from 1, scaled by the strike wear
     5 uni tPSd 6 div lt { 8 uni 0.4 mul 0.3 add neg } {   % very light: -0.3 to -0.7, 2% at sd 0.12
         6 gau tPSd mul
@@ -927,6 +933,18 @@ end definefont pop } exec
 %   { << /BleedGap (1) >> tw-set } /tw-bleedgap-must-be-a-non-negative-number
 %   (a string for the pin stripe) mustguard
 %
+%   { << /MisStrike 1.5 >> tw-set } /tw-misstrike-must-be-0-to-1
+%   (a mis-strike rate above 1) mustguard
+%
+%   { << /MisStrike -0.01 >> tw-set } /tw-misstrike-must-be-0-to-1
+%   (a negative mis-strike rate) mustguard
+%
+%   { << /MisStrikeScale -1 >> tw-set } /tw-misstrikescale-must-be-a-non-negative-number
+%   (a negative mis-strike size) mustguard
+%
+%   { << /MisStrikeScale (2) >> tw-set } /tw-misstrikescale-must-be-a-non-negative-number
+%   (a string for the mis-strike size) mustguard
+%
 %   { << /Machine 9 /Wear -1 >> tw-setup } /tw-wear-must-be-a-non-negative-number
 %   (one bad key among good ones) mustguard
 %   TWState /tMachine get 1 eq (and the good ones were not applied) mustbe
@@ -1004,6 +1022,8 @@ end definefont pop } exec
 % @param: /BleedInk [rgb array] The colour of the ribbon's other half, for /Bleed: red under black text, black under a red run (default [0.62 0.12 0.10])
 % @param: /BleedSide [name] /below if the other half of the ribbon lies below the printing half, so /Bleed colours the feet of letters, /above if it lies above, so it colours the tops; which half is on top varies by ribbon (default /below)
 % @param: /BleedGap [multiple of the yarn pitch] A white pin stripe at the colour boundary (#538): a strip of no ink centred on it, this many yarns tall (one yarn is 0.48pt, 40 glyph units at 12pt), cut from both inks. NBS C431 says some ribbons are inked to leave one, and that it stays white. Does nothing unless /Bleed is above 0 and the boundary reaches a letter; 0 is none (default 0)
+% @param: /MisStrike [0..1] The fraction of strikes that are mis-struck (#554): a letter that lands well off its place, the way a loose typebar, a sloppy segment or a hurried, uneven hand throws it. 0 is never, 1 is every strike; the measured board has about 1% (default 0.01). Still scaled by /Wear and /StrikeWear, so /Wear 0 has none; a /Preset does not reset it
+% @param: /MisStrikeScale [ratio] How far a mis-struck letter jumps, as a multiple of the measured jump (4x the normal strike's x offset and 2x its y, #467): 1 is the measured board, 2 is 8x and 4x (the y figure the board did not show, which #467 took out), 0.25 makes the x offset a normal strike's and 0.5 the y offset, below those a mis-strike is steadier than a normal strike, and 0 puts it dead on its cell with no offset at all. Does nothing at /MisStrike 0 (default 1)
 /tw-setup {
     TWState begin tApply tFrame end
     /Typewriter findfont TWState /tSize get scalefont setfont
@@ -1031,6 +1051,8 @@ end definefont pop } exec
 % @param: /BleedInk [rgb array] As tw-setup (no default: the current value stays)
 % @param: /BleedSide [name] As tw-setup (no default: the current value stays)
 % @param: /BleedGap [multiple of the yarn pitch] As tw-setup (no default: the current value stays)
+% @param: /MisStrike [0..1] As tw-setup (no default: the current value stays)
+% @param: /MisStrikeScale [ratio] As tw-setup (no default: the current value stays)
 /tw-set {
     dup type /dicttype eq { dup /Size known } { false } ifelse exch
     TWState begin tApply end
@@ -1616,6 +1638,8 @@ TWState begin {
 % @param: /BleedInk [rgb array] As tw-setup (no default: the current value stays)
 % @param: /BleedSide [name] As tw-setup (no default: the current value stays)
 % @param: /BleedGap [multiple of the yarn pitch] As tw-setup (no default: the current value stays)
+% @param: /MisStrike [0..1] As tw-setup (no default: the current value stays)
+% @param: /MisStrikeScale [ratio] As tw-setup (no default: the current value stays)
 /tw-type {
     TWState begin
     lySplit                                 % the layout keys read; the rest left

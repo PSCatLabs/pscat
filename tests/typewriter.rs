@@ -675,6 +675,49 @@ fn bleed_gap_leaves_a_white_stripe_at_the_boundary() {
     assert!(head("0") != head("3"), "no stripe on /above");
 }
 
+/// The mis-strike keys (#554): the defaults are the measured 1% at 4x/2x, to
+/// the byte, whether omitted or given; a rate of 0 or 1 is never or always; the
+/// size matters only where a letter is mis-struck.
+#[test]
+fn mis_strike_keys_default_to_the_measured_board() {
+    let page = |opts: &str| {
+        ink(&render(&format!(
+            "36 84 moveto << /Machine 3 /Seed 9 {opts} >> tw-setup ({PARAGRAPH}) show"
+        )))
+    };
+    let plain = page("");
+    assert_eq!(
+        plain,
+        page("/MisStrike 0.01 /MisStrikeScale 1"),
+        "the defaults, given"
+    );
+    assert!(plain != page("/MisStrike 1"), "every strike mis-struck");
+    assert!(plain != page("/MisStrike 0.2"), "a loose machine");
+    // with none mis-struck the size has nothing to move
+    assert_eq!(
+        page("/MisStrike 0"),
+        page("/MisStrike 0 /MisStrikeScale 5"),
+        "size with no mis-strikes"
+    );
+    // and a larger jump is a different page where there are some
+    assert!(
+        page("/MisStrike 1 /MisStrikeScale 1") != page("/MisStrike 1 /MisStrikeScale 2"),
+        "size with mis-strikes"
+    );
+    // a mis-strike still scales with /Wear: a perfect machine has none
+    assert_eq!(
+        page("/Wear 0"),
+        page("/Wear 0 /MisStrike 1 /MisStrikeScale 3"),
+        "no wear, no mis-strike"
+    );
+    // a preset does not reset them: tw-set carries them across it
+    let held = ink(&render(&format!(
+        "36 84 moveto << /MisStrike 0.2 /Machine 3 /Seed 9 >> tw-setup \
+         << /Preset /manual >> tw-set ({PARAGRAPH}) show"
+    )));
+    assert_eq!(held, page("/MisStrike 0.2"), "a preset reset the rate");
+}
+
 #[test]
 fn a_strip_types_within_the_cpu_budget() {
     let src = format!(
