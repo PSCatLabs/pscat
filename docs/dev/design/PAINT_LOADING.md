@@ -325,8 +325,8 @@ Everything else about `puwet` is unchanged, and `puwet` itself, still used for
 A fill is one inked run, so a long unbroken run is asked once. `/FillLength`
 (issue #492, the third element) cuts such a run into several fills about that
 far apart, each coloured, and so asked, at its own middle stop. It is the
-splitting 3.5 sketches for `/TipColor`, done for `pkbroad` and `pktrowel`, the
-two presets whose run is one filled strip:
+splitting 3.5 sketches for `/TipColor`, done for `pkbroad`, `pktrowel` and (#497) `pkfan`, the
+three presets whose run is one filled strip or ribbon (`pkbroad`, `pktrowel`, `pkfan`):
 
 - The cut points come from the stops' arc lengths alone: a cut at the first stop
   where the length since the last cut reaches `/FillLength`, never at the run's
@@ -342,8 +342,13 @@ two presets whose run is one filled strip:
 - `pufilllen` reads the shortest positive length among the nested `pkwet` levels
   that are running a softening pass (the core is asked nothing, so cutting it
   would only add fills).
-- `pkfan` is left alone: `pfrun` hands each run to `pkribbon` as one pointed
-  ribbon, and cutting it would point every piece. `pkdab` is one fill per dab.
+- `pkfan` (issue #497) cuts each bristle's run too, as `pkribbon` pieces: the
+  displaced centreline is drawn first, in `pfrun`'s own order (`pkribbon` draws
+  nothing without `/Jitter`), and each piece is a ribbon with `/pointed` caps only
+  at the run's real ends and `/flat` between. The run's `/Flick` taper is the
+  run's, not each piece's: a `/Pressure` procedure maps a piece's progress to the
+  run's arc-length fraction before applying the same ramp. A pressed ray and a
+  `pkdab` dab are one fill each.
 
 The rule in HANDOFF and the `pkwet` header becomes: the procedure must
 paint in the colour it inherits, *or* in loaded colours, which `pkwet`
@@ -364,7 +369,7 @@ gotcha). Where the preset has `/Depletion` (pkbroad), `/TipReach`
 defaults to `Depletion`-scaled reach rather than a constant (open
 question Q5). This slice is deliberately last: it is the only part of
 the design that changes how a run is filled. (Issue #492 has since cut `pkbroad`
-and `pktrowel` runs into overlapping sub-fills for `pkwet`'s `/FillLength`, with
+and `pktrowel` runs, and #497 `pkfan` runs, into overlapping sub-fills for `pkwet`'s `/FillLength`, with
 the boundary points computed first as described here and no new draw; see 3.4.
 `/TipColor` can reuse `pusplit`'s cuts, with progress breakpoints in place of
 a fixed length.)

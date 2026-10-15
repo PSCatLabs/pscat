@@ -1060,8 +1060,15 @@ renders eight examples in both and compares block-downsampled output).
   code, so every old render is unchanged). `pmsplitfill` computes the whole
   boundary first, with `pmemit`'s own draws in its own order, then fills
   sub-polygons that overlap by one segment; `ptsplitfill` has no draws to keep.
-  `pkfan`'s `pfrun` is not cut (a pointed ribbon per run) and `pkdab` is one
-  fill per dab: a new adopter that fills a strip should do what `ptemit` does. `pkfan` adopts it too (L4, `pfColorRec`): its colour is set
+  `pkfan`'s `pfrun` (#497) asks `pffillcuts` first and, for more than one piece,
+  takes `pfsplitrun` instead of `pfwholerun` (the old body, renamed): the run's
+  displaced centreline is drawn whole, in `pfwholerun`'s own order (`pkribbon` draws
+  nothing without `/Jitter`), then each piece, from the stop before its cut to the
+  next cut, goes to `pkribbon` with `/StartCap` `/pointed` only on the first, `/EndCap`
+  `/pointed` only on the last, `/flat` between, the whole run's pitch, and a
+  `/Pressure` (`pfpress`) that maps the piece's `t` to the run's so the `/Flick`
+  taper stays the run's. `pkfan`'s pressed rays and `pkdab` are one fill each: a new
+  adopter that fills a strip should do what `ptemit` does. `pkfan` adopts it too (L4, `pfColorRec`): its colour is set
   per *run* (`pfrun`) and per pressed ray (`pfray`) by `pfcolor`, from the
   bristle's `pfub` and the stored `/ColorJitter` draw `pfcj` (taken where it
   always was, so the stream doesn't move), because a bristle's runs span every

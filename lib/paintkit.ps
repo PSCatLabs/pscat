@@ -3332,10 +3332,13 @@
 %
 % Determinism: the caller's own `N srand`, same doctrine as its
 % siblings. Note this preset deliberately makes *no* fixed-draw-count
-% claim of the kind pktrowel documents: it calls pkribbon once per
-% inked run, and pkribbon consumes randomness of its own, so /Load and
-% /Dropout necessarily change total consumption by changing how many
-% runs there are. pkdry has the same property.
+% claim of the kind pktrowel documents: it takes one pkjit draw per inked
+% stop of every bristle's runs (pkribbon itself draws only with a /Jitter, which
+% pkfan never passes), so /Load and /Dropout necessarily change total
+% consumption by changing which stops are inked. pkdry has the same property.
+% pkwet's /FillLength cut (pfsplitrun, issue #497) relies on pkribbon drawing
+% nothing here: it takes the per-stop draws first and hands pkribbon pieces, so
+% a /Jitter added to that call later would move the stream when cut.
 %
 % Safety: /Bristles is capped 1..60 and Bristles * stopCount is checked
 % against 150000 inside the counting walk, before any allocation --
@@ -3415,10 +3418,20 @@
 
 % runstart runend islast pfrun -
 % Builds one contiguous inked run of the current bristle as a
-% centerline and hands it to pkribbon.
+% centerline and hands it to pkribbon. A run a live `pkwet /FillLength` wants
+% cut (issue #497) goes to pfsplitrun, as several overlapping ribbons; every
+% other run, and every call outside that, takes pfwholerun, the code it always
+% had.
 % @internal
 /pfrun {
     /pflast exch def /pfrend exch def /pfrstart exch def
+    /pfcuts pfColorRec null ne { pffillcuts } { null } ifelse def
+    pfcuts null ne { pfsplitrun } { pfwholerun } ifelse
+} bind def
+
+% - pfwholerun -   (the run pfrstart..pfrend as one pointed ribbon)
+% @internal
+/pfwholerun {
     /pflen 0 def
     newpath
     pfrstart 1 pfrend {
@@ -3460,6 +3473,100 @@
     pfColorRec null ne { pfrstart pfrend pfcolor } if
     << /Width pfrw /Pitch pfrp /StartCap /pointed /EndCap /pointed
        /EndTaper pflast { pfFlick } { 0 } ifelse >> pkribbon
+} bind def
+
+% - pffillcuts -> [cut ...] or null   (issue #497)
+% The current run's cut points, as absolute stop indices, when a live `pkwet
+% /FillLength` wants it cut into more than one fill, else null. Reads only the
+% stops' arc lengths; draws nothing.
+% @internal
+/pffillcuts {
+    pufilllen dup 0 gt {
+        /pffl exch def
+        [ pfrstart 1 pfrend { pfraw exch get 4 get } for ] pffl pusplit
+        dup length 2 gt {
+            /pffc exch def
+            0 1 pffc length 1 sub { /pffi exch def pffc pffi pffc pffi get pfrstart add put } for
+            pffc
+        } { pop null } ifelse
+    } { pop null } ifelse
+} bind def
+
+% t pfpress -> multiplier   (issue #497: the whole run's end flick, at a piece's t)
+% A piece's `t` is its own arc-length fraction; the flick (the run's last /Flick
+% of its length, tapering to a point) belongs to the run, so t is mapped to the
+% run's (pfpst0 + t * pfpsd) before the same ramp pkribbon's /EndTaper applies.
+% Read by pkribbon as its /Pressure, so it touches only pf- names.
+% @internal
+/pfpress {
+    pfpsd mul pfpst0 add
+    pfpend 0 gt {
+        dup 1 pfpend sub gt
+            { 1 exch sub pfpend div dup 0 lt { pop 0 } if }
+            { pop 1 }
+        ifelse
+    } { pop 1 } ifelse
+} bind def
+
+% - pfsplitrun -   (issue #497: pfwholerun's ribbon as several overlapping ribbons)
+% The same centreline pfwholerun builds, its per-stop jitter drawn in the same
+% order (pkribbon draws nothing here: no /Jitter), then handed to pkribbon in
+% the pieces `pfcuts` names. Piece k runs from the stop before cut k to cut k+1,
+% so neighbours share one segment. Only the run's real ends are pointed; the
+% interior ends are flat. The run's flick is the run's own, by /Pressure.
+% @internal
+/pfsplitrun {
+    /pfsn pfrend pfrstart sub 1 add def
+    /pfsx pfsn array def
+    /pfsy pfsn array def
+    /pfscum pfsn array def
+    /pflen 0 def
+    pfrstart 1 pfrend {
+        /pfri exch def
+        pfraw pfri get
+        dup 0 get /pfrx exch def
+        dup 1 get /pfry exch def
+        dup 2 get /pfra exch def
+        3 get pfopen /pfro exch def
+        /pfrd pfub pfhalf mul pfro mul pfJitter pkjit add def
+        /pfpx pfrx pfra 90 add cos pfrd mul add def
+        /pfpy pfry pfra 90 add sin pfrd mul add def
+        pfri pfrstart gt {
+            /pflen pflen
+                pfpx pfppx sub dup mul pfpy pfppy sub dup mul add sqrt
+            add def
+        } if
+        /pfppx pfpx def /pfppy pfpy def
+        pfsx pfri pfrstart sub pfpx put
+        pfsy pfri pfrstart sub pfpy put
+        pfscum pfri pfrstart sub pflen put
+    } for
+    % The same pitch floor as pfwholerun's, from the whole run.
+    /pfnpts pfsn def
+    /pfrp pflen 8 pfnpts mul div def
+    pfrp pfPitch lt { /pfrp pfPitch def } if
+    /pfpend pflast { pfFlick } { 0 } ifelse def
+    0 1 pfcuts length 2 sub {
+        /pfpk exch def
+        /pfpa pfpk 0 eq { pfrstart } { pfcuts pfpk get 1 sub } ifelse def
+        /pfpb pfcuts pfpk 1 add get def
+        % this piece's span of the run's length, for /Pressure
+        pflen 0 gt {
+            /pfpst0 pfscum pfpa pfrstart sub get pflen div def
+            /pfpsd pfscum pfpb pfrstart sub get pflen div pfpst0 sub def
+        } { /pfpst0 0 def /pfpsd 1 def } ifelse
+        pfpa pfpb pfcolor
+        newpath
+        pfpa 1 pfpb {
+            /pfri exch def
+            pfsx pfri pfrstart sub get pfsy pfri pfrstart sub get
+            pfri pfpa eq { moveto } { lineto } ifelse
+        } for
+        << /Width pfrw /Pitch pfrp
+           /StartCap pfpk 0 eq { /pointed } { /flat } ifelse
+           /EndCap pfpk pfcuts length 2 sub eq { /pointed } { /flat } ifelse
+           /Pressure { pfpress } >> pkribbon
+    } for
 } bind def
 
 % i pfray -   (the current bristle's ray of a *pressed* fan, at the
@@ -5425,13 +5532,16 @@
 % the run's real ends keep their extension, and the random stream is as it was:
 % pktrowel has no draw to keep, and pkbroad's boundary points are all drawn first,
 % in their own order, before any piece is filled. A run no longer than the length
-% is not cut, and a call without the key does exactly what it did. pkfan runs are
-% not cut (each is one pointed ribbon) and a pkdab dab is already one fill. Cost:
+% is not cut, and a call without the key does exactly what it did. pkfan cuts
+% each bristle's run into overlapping pkribbon pieces (issue #497): flat at the
+% interior ends, pointed only at the run's real ends, with the run's /Flick taper
+% kept the run's own; a pkdab dab (and a pressed fan's ray) is already one fill. Cost:
 % one call of /Under per fill per softening pass, so a 110pt stroke cut at 12pt
 % asks about eight times as often (pkbroad, 4 layers, /Offset 20: 45 asks whole,
 % 345 cut); the procedure must be cheap and must not draw random numbers. Over
 % a 150pt gradient (6 layers, /Offset 34) the rim of one 110pt pkbroad stroke
-% fell from 239.6 to 71.6 at /FillLength 10.
+% fell from 239.6 to 71.6 at /FillLength 10 (pkfan, a 10pt fan of 20 bristles:
+% 252.7 to 73.5).
 %
 % Measured (tests/paintkit.rs `loaded_column`, twelve stacked pkbroad strokes
 % over the strong gradient, /Offset 34, 6 layers): the residual rim is 384.4
@@ -6057,7 +6167,7 @@
 % @param: /Under [rgb array] the color already on the canvas that this mark settles into; the outermost pass is nearly this color. May also be a procedure `x y -> r g b` (three numbers in 0..1, user space), the backdrop as a function: it is asked once per softening pass, at /At plus that pass's displacement, so the rim goes where the backdrop changes across the mark. It must be a pure function: no painting, no pkwet call, no reliance on the operand stack. A mark taller than the backdrop's change is better asked per band: see /Box and /Bands (default [1 1 1])
 % @param: /At [points] With a procedural /Under only (required there, unless /Box is given): [x y] where the mark sits, in the user space pkwet is called in, the point each pass's displacement is added to before the procedure is asked for the backdrop. With /PerFill it is still where an inherited-colour mark is asked (default absent)
 % @param: /PerFill [boolean] With a procedural /Under and /At only: true asks the /Under procedure again at every loaded-colour fill's own position (a pkbroad striation's, a pktrowel run's, a pkfan bristle's run, a pkdab dab), instead of using the one answer its pass got, so a tall mark made of many fills follows a backdrop that changes down it, with no clipping and no more runs of the mark. Reaches only presets that paint in /Colors; an inherited-colour mark is still asked per pass. Costs one call of the procedure per fill per softening pass, so keep it cheap. Not with /Box (default false)
-% @param: /FillLength [points] With /PerFill true only: cut a long loaded run into fills about this far apart along the mark, each asked at its own middle, so one long unbroken stroke (a vertical pkbroad stroke down a vertical gradient) follows the backdrop too, not only a mark made of many runs. Reaches pkbroad and pktrowel (including its edge ridges); pkfan and pkdab fills are not cut. Neighbouring fills overlap by one stop and the random stream is unchanged, but each cut is another fill and so another call of the /Under procedure, which must not draw random numbers. The length is measured in the user space the mark is drawn in; a run no longer than it is not cut. Must be positive (default absent: one fill per run)
+% @param: /FillLength [points] With /PerFill true only: cut a long loaded run into fills about this far apart along the mark, each asked at its own middle, so one long unbroken stroke (a vertical pkbroad stroke down a vertical gradient) follows the backdrop too, not only a mark made of many runs. Reaches pkbroad, pktrowel (including its edge ridges) and pkfan (each bristle's run, as overlapping ribbons that are pointed only at the run's real ends); pkdab dabs and pkfan's pressed rays are not cut. A pkfan piece is a nested pkribbon call, at most one per inked stop per bristle per softening pass, and that is not counted by the deposit budget, so keep the length well above the stops' pitch. Neighbouring fills overlap by one stop and the random stream is unchanged, but each cut is another fill and so another call of the /Under procedure, which must not draw random numbers. The length is measured in the user space the mark is drawn in; a run no longer than it is not cut. Must be positive (default absent: one fill per run)
 % @param: /Box [array of points] With a procedural /Under and /Bands (instead of /At): [x y w h], where the mark sits, in the user space pkwet is called in. The /Under procedure is then asked once per cell of a grid over the box grown by /Offset on every side, at the cell's centre, and each softening pass is run once per cell, clipped to it and mixed toward that cell's answer, so the backdrop varies across a tall mark and not only from pass to pass. The grid's outer cells run on outward, so a displaced rim is not cut off (default absent)
 % @param: /Bands [array of count] With /Box (required with it): [columns rows] of the grid, each a whole number 1 to 16. A cell wants to be no taller than about half /Offset, and a short mark is as well served by /At. The wrapped procedure runs (Layers - 1) x columns x rows + 1 times, which a nest of such calls may multiply by at most 64 (a 6-layer call can have 12 cells, a 4-layer one 21); the random stream is replayed per cell, so every cell lays the same marks and the stream ends where one unbanded run leaves it (default absent)
 % @param: /Pickup [0..1] how far the outermost pass mixes toward Under; lower keeps the mark's own color out to its edge (default 0.85)
