@@ -576,6 +576,16 @@ pub(crate) struct IndexedTable {
 }
 
 impl IndexedTable {
+    /// The entry at `idx` as CMYK components when the base is DeviceCMYK
+    /// (so `currentcmykcolor` reads it back as the table holds it).
+    pub fn cmyk_at(&self, idx: usize) -> Option<[f32; 4]> {
+        (self.base_ncomp == 4).then(|| {
+            let comp =
+                |k: usize| f32::from(self.lookup.get(idx * 4 + k).copied().unwrap_or(0)) / 255.0;
+            [comp(0), comp(1), comp(2), comp(3)]
+        })
+    }
+
     /// The base-space color at `idx`, as RGB (CMYK converted the same
     /// way the image path converts it).
     pub fn rgb_at(&self, idx: usize) -> (f32, f32, f32) {
@@ -686,6 +696,19 @@ impl Composite {
 pub struct GraphicsState {
     pub ctm: Transform,
     pub rgb: (f32, f32, f32),
+    /// The CMYK components the current colour was set with (#513), for
+    /// `currentcmykcolor` and `currentcolor` to read back exactly; `rgb`
+    /// above is what paints. `set_rgb` clears it, `set_cmyk` sets it, so it
+    /// is `Some` only while it describes `rgb`.
+    cmyk: Option<[f32; 4]>,
+    /// The Indexed index or the Separation tint `setcolor` last set, for
+    /// `currentcolor` (#513). Meaningful only in those two spaces.
+    spot: f32,
+    /// `setstrokeadjust` flag (#513). Stored for round-tripping only:
+    /// stroke adjustment does not change pscat's rasteriser output, as
+    /// `tests/strokepath.rs` already assumes for gs with it off.
+    /// `initgraphics` leaves it alone, as in gs.
+    pub stroke_adjust: bool,
     /// Fill/stroke alpha, 0.0..1.0 — `setalpha`/`currentalpha`, the
     /// public contract issue #47 landed on top of issue #46's
     /// watercolor spike (`docs/dev/design/WATERCOLOR.md`). A pscat extension, not
@@ -1700,9 +1723,11 @@ impl Gfx {
     pub fn init_graphics(&mut self) {
         let font = self.state.font.take();
         let clip_stack = std::mem::take(&mut self.state.clip_stack);
+        let stroke_adjust = self.state.stroke_adjust;
         self.state = GraphicsState {
             font,
             clip_stack,
+            stroke_adjust,
             ..Self::initial_state(self.base_ctm)
         };
     }
@@ -1715,6 +1740,9 @@ impl Gfx {
         GraphicsState {
             ctm,
             rgb: (0.0, 0.0, 0.0),
+            cmyk: None,
+            spot: 0.0,
+            stroke_adjust: true,
             alpha: 1.0,
             blend: BlendMode::Normal,
             colorspace: ColorSpace::Gray,
@@ -1789,10 +1817,50 @@ impl Gfx {
 
     pub fn set_rgb(&mut self, r: f64, g: f64, b: f64) {
         self.state.rgb = (clamp01(r), clamp01(g), clamp01(b));
+        self.state.cmyk = None;
+    }
+
+    /// Record the Indexed index or Separation tint (`currentcolor`, #513).
+    pub(crate) fn set_spot(&mut self, v: f64) {
+        self.state.spot = v as f32;
+    }
+
+    /// The Indexed index or Separation tint last set.
+    pub(crate) fn spot(&self) -> f32 {
+        self.state.spot
+    }
+
+    /// Record the native CMYK components of the current colour without
+    /// changing what paints (`setcolorspace /DeviceCMYK`, an Indexed entry
+    /// in a CMYK base: #513).
+    pub(crate) fn set_native_cmyk(&mut self, cmyk: [f32; 4]) {
+        self.state.cmyk = Some(cmyk);
     }
 
     pub(crate) fn set_colorspace(&mut self, cs: ColorSpace) {
         self.state.colorspace = cs;
+    }
+
+    pub fn line_cap(&self) -> i64 {
+        match self.state.line_cap {
+            LineCap::Butt => 0,
+            LineCap::Round => 1,
+            LineCap::Square => 2,
+        }
+    }
+
+    pub fn line_join(&self) -> i64 {
+        match self.state.line_join {
+            LineJoin::Miter => 0,
+            LineJoin::Round => 1,
+            LineJoin::Bevel => 2,
+            // Never set by `setlinejoin`; only internal stroking uses it.
+            LineJoin::MiterClip => 0,
+        }
+    }
+
+    pub fn miter_limit(&self) -> f64 {
+        f64::from(self.state.miter_limit)
     }
 
     pub fn set_line_width(&mut self, w: f64) {
@@ -2359,6 +2427,29 @@ impl Gfx {
             (1.0 - m.clamp(0.0, 1.0)) * (1.0 - k),
             (1.0 - y.clamp(0.0, 1.0)) * (1.0 - k),
         );
+        self.state.cmyk = Some([clamp01(c), clamp01(m), clamp01(y), clamp01(k)]);
+    }
+
+    /// The current colour as CMYK components, as `currentcmykcolor`
+    /// reports it (#513, gs-pinned). In CMYK, Separation and Indexed spaces
+    /// a colour set as CMYK reads back as set. Otherwise a one-component
+    /// space (DeviceGray, or a Separation or Indexed space over DeviceGray)
+    /// gives `0 0 0 1-g`, and RGB gives `1-r 1-g 1-b 0` with no black
+    /// generation.
+    pub fn cmyk(&self) -> [f64; 4] {
+        let (r, g, b) = self.rgb();
+        let (gray_like, native_ok) = match &self.state.colorspace {
+            ColorSpace::Gray => (true, false),
+            ColorSpace::Rgb => (false, false),
+            ColorSpace::Cmyk => (false, true),
+            ColorSpace::Indexed { table, .. } => (table.base_ncomp == 1, true),
+            ColorSpace::Separation { alt_ncomp, .. } => (*alt_ncomp == 1, true),
+        };
+        match self.state.cmyk {
+            Some(c) if native_ok => c.map(f64::from),
+            _ if gray_like => [0.0, 0.0, 0.0, 1.0 - r],
+            _ => [1.0 - r, 1.0 - g, 1.0 - b, 0.0],
+        }
     }
 
     pub fn line_width(&self) -> f64 {
