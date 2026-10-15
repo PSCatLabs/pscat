@@ -99,6 +99,17 @@ the foot of the specimen (`/BleedGap` in `docs/dev/design/typewriter/ribbon_extr
 dark tops, so keep it small (0.3) if you want it realistic. `/Bleed` 1 moves the boundary in by up to 540 glyph
 units from outside the face, and most real two-colour ribbons show no bleed at all.
 
+Mis-strikes are the machine's and the typist's: a loose typebar or a sloppy
+segment, a hurried or uneven hand. `/MisStrike` (`0..1`, default `0.01`, the
+measured board) is the fraction of strikes that land well off their place (0 is
+never) and `/MisStrikeScale` (default `1`) is how far, as a multiple of the
+measured jump (4x the normal x offset, 2x the y; `2` is 8x and 4x). They
+scale with `/Wear`, so `/Wear 0` has none, the presets do not set them, and a
+page with the defaults is unchanged. `/MisStrike 0.05 /MisStrikeScale 2` against
+the defaults is in `docs/dev/design/typewriter/misstrike_554.png`:
+
+<p><img src="../dev/design/typewriter/misstrike_554.png" width="60%" alt="The same text with the default mis-strikes and with /MisStrike 0.05 /MisStrikeScale 2"/></p>
+
 ### Typing a page: `tw-type`
 
 `tw-type` takes one options dict and types a whole text the way a typist would,

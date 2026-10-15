@@ -1,0 +1,37 @@
+%!PS-Adobe-3.0
+%%Title: typewriter mis-strike rate and size (issue #554)
+%%BoundingBox: 0 0 612 440
+% Demo for #554: /MisStrike (the fraction of strikes that are mis-struck) and
+% /MisStrikeScale (how far one jumps). The same text, /Machine and /Seed in
+% both panels, set 2x so a fraction of a point shows. A strike's mis-strike
+% draw is the same in both, so every letter that is mis-struck at the default
+% 1% is mis-struck below too, with a bigger jump, and the other letters that
+% jump are the ones the 5% rate adds; every other letter is identical.
+% pscat --png out.png --page 612x440 docs/dev/design/typewriter/misstrike_554.ps
+(lib/typewriter_outlines.ps) run
+(lib/typewriter.ps) run
+/lab { /Helvetica findfont 11 scalefont setfont 0 setgray moveto show } def
+/panel {   % extra-opts -> -  (types 2x, one 306 x 105 page at the origin)
+    /pe exch def
+    gsave 2 2 scale
+    << /Text (It was the best of times, it was the worst of times, it was the age of wisdom, it was the age of foolishness, it was the epoch of belief, it was the epoch of incredulity, it was the season of Light, it was the season of Darkness.)
+       /Width 306 /Height 105 /Margin 10 /MarginTop 16 /MarginBottom 4
+       /Spacing 1 /Pitch 10 /Size 12.5 /Machine 7 /Seed 23 /Wear 1
+       /Preset /manual
+    >>
+    pe { 2 index 3 1 roll put } forall
+    tw-type
+    grestore
+} def
+0.97 0.96 0.92 setrgbcolor 0 0 612 440 rectfill
+gsave
+  0 220 translate
+  (The defaults, /MisStrike 0.01 /MisStrikeScale 1: the measured board) 20 202 lab
+  << >> panel
+grestore
+gsave
+  0 0 translate
+  (/MisStrike 0.05 /MisStrikeScale 2: a looser machine and a heavier hand) 20 202 lab
+  << /MisStrike 0.05 /MisStrikeScale 2 >> panel
+grestore
+showpage

@@ -831,6 +831,9 @@ renders eight examples in both and compares block-downsampled output).
    copy's paper a grey haze, mottle and grain (`rel-page /Haze`, default 0.6,
    applied after the copier curve in `rlSet`/`rlCol`; `/Haze 0` is the old white
    copy; `notes/466-copy-paper-haze.md`). #467 shipped (`notes/467-misstrike-y-tail.md`).
+   #554 made the mis-strike configurable: `/MisStrike` (rate, default 0.01) and
+   `/MisStrikeScale` (size multiple of the 4x/2x, default 1), byte-identical at the
+   defaults and not set by the presets (`notes/554-misstrike-keys.md`).
    #468 searched for
    two-colour, embossing, worn-lane and confirmed-electric scans and found none:
    `notes/468-typewriter-trait-references.md`. #474 brought the

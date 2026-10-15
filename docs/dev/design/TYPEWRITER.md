@@ -161,7 +161,7 @@ printable code:
 | offset x | normal, sd 0.2pt | 0.22–0.27pt within a letter (upper bound) |
 | offset y | normal, sd 0.15pt | 0.14–0.20pt |
 | rotation | normal, sd 0.25° | upper bound only (REFERENCES.md, Rotation) |
-| mis-strike | 1% of strikes take 4× the x offset above and 2× the y offset (#467; y was 4×) | x: the tails, 0.8–0.9% of strikes land more than 1pt off horizontally, which a normal of sd 0.2pt almost never gives. y: the vertical offsets are a normal's (Szilard sd 0.19pt gives 0.85% over 0.5pt, measured 0.8%), so a 4× y put a letter up to 2pt off at `/Wear 1.3`; at 2× it stays near 1pt |
+| mis-strike | 1% of strikes (`/MisStrike`) take 4× the x offset above and 2× the y offset (#467; y was 4×), times `/MisStrikeScale` (#554, default 1) | x: the tails, 0.8–0.9% of strikes land more than 1pt off horizontally, which a normal of sd 0.2pt almost never gives. y: the vertical offsets are a normal's (Szilard sd 0.19pt gives 0.85% over 0.5pt, measured 0.8%), so a 4× y put a letter up to 2pt off at `/Wear 1.3`; at 2× it stays near 1pt |
 | pressure | normal, mean 1, sd 0.12 (#423; 0.08 in #211), times a finger factor (0.9 on the little-finger keys `q a z p` and `; / -`); sd / 6 of strikes (2% at sd 0.12) are very light (0.3 to 0.7 below 1) | coverage CV 0.07–0.21; T7 |
 
 **One knob, `/Wear`** (`[ratio]`, default 1), multiplies every machine and
@@ -176,6 +176,46 @@ keys together:
 | `/manual` (default) | `/Wear 1`, pressure sd 0.12, `/Ribbon 0.7` |
 | `/electric` | `/Wear 0.7`, pressure sd 0.03 and no finger factor (M2; T11's evenness) |
 | `/worn` | `/Wear 1.5`, pressure sd 0.12, `/Ribbon 0.35` |
+
+**Mis-strike traits, `/MisStrike` and `/MisStrikeScale` (#554).** A mis-strike is
+physical: it comes from the machine (a loose or worn typebar, a sloppy segment)
+and from the typist (speed, and how hard and unevenly the keys are hit). Two keys
+name that, and nothing else about the measured model changes:
+
+- `/MisStrike` `[0..1]`, default 0.01: the fraction of strikes that are
+  mis-struck. 0 is never, 1 is every strike. 1% is what #467 calibrated to the
+  board's horizontal tail, which is a different quantity: the share of strikes
+  more than 1pt off, 0.8% (Duncan, a manual), 0.9% (Szilard, a manual with a
+  worn ribbon) and 0.2% (O'Brien, the only inferred-electric sample, one
+  document). At `/Wear 1` a mis-struck x has sd about 0.8pt, so only about a fifth
+  of mis-strikes clear 1pt and those percentages are not rates. O'Brien's tail is
+  about a quarter of the manuals', so a lower rate for an even-handed typist is
+  a judgement, not a calibration.
+  `/MisStrike` is a 0..1 check because a fraction above 1 means nothing (the
+  issue sketched a non-negative number; 0..1 is the same key with the nonsense cut off).
+- `/MisStrikeScale` `[ratio]`, default 1: how far a mis-struck letter jumps, as a
+  multiple of the measured jump (4x the strike's x offset, 2x its y). It is a
+  plain multiple of both, so 2 is 8x on x and 4x on y: only the y figure
+  matches the pre-#467 behaviour that #467 took out (a letter half an x-height
+  up at `/Wear 1.3`), and x is wider than the board ever showed. 0.25 makes
+  x a normal strike's and 0.5 makes y one; below those a mis-strike is steadier
+  than a normal strike, and 0 puts it dead on its cell. One scale, not separate
+  x and y knobs: the 4:2 ratio is the measurement.
+- Both are still multiplied by `/Wear` and `/StrikeWear` (they scale the strike's
+  offsets), so `/Wear 0` is a perfect machine with no mis-strikes at any setting.
+- The draw that decides a mis-strike is taken for every strike, whatever the
+  rate, so no other draw moves and the defaults are the page as it was, to the
+  byte. It also means the letters mis-struck at one rate are a subset of those
+  at a higher rate, and a larger scale moves the same letters further
+  (`docs/dev/design/typewriter/misstrike_554.png`).
+- **The presets do not set them.** A worn machine plausibly has looser typebars
+  and an electric one fewer mis-strikes, but nothing on the board measures a
+  rate for either (O'Brien's 0.2% is one inferred-electric document, and
+  `/electric`'s `/Wear 0.7` already shrinks its jumps), and changing a preset's
+  rate would change every existing `/worn` and `/electric` page. So a `/Preset`
+  neither sets nor resets these keys: a sloppy-typist setting persists across a
+  preset change, as `/Machine` and `/Seed` do. A preset that sets them is open
+  for a measured source.
 
 **Strike index.** A second strike at the same cell needs its own variation (T3,
 T5). The side dict holds a strike index, 0 by default, which is part of the
