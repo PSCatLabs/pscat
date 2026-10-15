@@ -207,7 +207,9 @@ a real `Interp` and checks the name set both ways -- every cataloged
 name still exists, and every name a source file actually defines is
 either cataloged or on an explicit internal-helper allowlist. See
 docs/dev/CAPABILITIES.md for the payload shape and how to register a new
-capability (docs/archive/NOTES.md's entry has the full story). Also done: issue
+capability (docs/archive/NOTES.md's entry has the full story). Since #94,
+files carrying `% @` tags are parsed by `build.rs` instead; see CAPABILITIES.md.
+Also done: issue
 #48, deterministic scatter and distribution primitives for artkit --
 the area-shaped counterpart to `alongpath`: `screct`/`scpath` build a
 region (a rectangle, or the current path flattened and closed the way

@@ -132,7 +132,17 @@ Which tool to pick:
   bars that read as paint, not vapour.
 - **`pkoil`** — loaded oil impasto. A solid base ribbon *plus* bristle
   ridges and a highlight/shadow lift. Use it when you want thickness
-  and an unbroken mass.
+  and an unbroken mass. It is a vector suggestion of impasto: no fluid
+  mixing, no physical paint thickness, no pigment simulation.
+
+  ```postscript
+  (lib/artkit.ps) run
+  (lib/paintkit.ps) run
+  1 srand
+  0.55 0.35 0.2 setrgbcolor
+  newpath 40 120 moveto 160 150 lineto 300 110 lineto
+  << /Width 16 /Ridges 12 /Load 0.9 >> pkoil
+  ```
 - **`pktrowel`** — palette knife / trowel. A rigid flat blade dragged
   across the surface: broad angular masses, lengthwise scrape streaks,
   ridges piled at the blade edges, and **no base pass**, so whatever is
@@ -203,7 +213,10 @@ Which tool to pick:
 
 - **`pkwash`** / **`pkpaper`** — watercolor and its ground. The only
   presets needing pscat's `setalpha`; under plain `gs` they fall back
-  to flattening against white and overlaps stop mixing.
+  to flattening against white and overlaps stop mixing, so verify real
+  alpha output with `pscat --pdf`, not `gs file.ps`. `pkpaper` is a
+  watercolor ground only; for paper, canvas or print surfaces in
+  general use `lib/surfacekit.ps`.
 - **`pkwet`** — not a brush: a *softener* that wraps any of the above.
   It re-runs your mark-drawing proc several times, each pass nudged
   further off the path and mixed further toward `/Under`, the color you
@@ -319,8 +332,8 @@ snippet that renders as it stands (360x240 pt: `pscat --page 360x240 --dpi 144
 --png out.png recipe.ps`), plus the order a wet-on-wet landscape is painted in.
 Copy a recipe and change the numbers rather than re-deriving the technique.
 
-(A fuller paintkit tour, and an audit of the parameter docs, is issue
-#99 — this section is the short orientation, not that sweep.)
+This section is the short orientation; `pscat --capabilities` is the
+full inventory of paintkit's presets and parameters.
 
 ## Dry media: chalk (`lib/drychalk.ps`, after artkit, paintkit and drykit)
 
