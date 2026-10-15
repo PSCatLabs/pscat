@@ -513,8 +513,10 @@ renders eight examples in both and compares block-downsampled output).
   level. So an unpaired `cliprestore` is not a no-op when a clip is in
   force. `initclip` and `initgraphics` keep the stack; `grestoreall`
   empties it. Only the clip
-  changes. Not modelled: a Type 3 `BuildChar` opening its own level (gs
-  runs it inside a `gsave`) (`notes/494-clipsave-cliprestore.md`).
+  changes. A Type 3 `BuildChar` opens its own level, as gs runs it inside
+  a `gsave` (#500, `Gfx::glyph_enter`): an empty-stack `cliprestore` or an
+  unmatched `grestore` there gives back the state at `show`
+  (`notes/494-clipsave-cliprestore.md`, `notes/500-cliprestore-in-buildchar.md`).
 - `grestore` with nothing to pop matches gs (#505): at a `save` boundary
   it brings back the save's state without popping (so it repeats); at the
   bottom it, and `grestoreall` with no `save`, bring back the job's

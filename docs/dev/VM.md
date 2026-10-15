@@ -149,9 +149,10 @@ VM", and 15 MB of headroom answers the latter. Documented constant.
   PLRM and gs say: it brings back the save's state without popping.
 - **Strings are exempt by spec**, not deviation — noted here because
   it surprises people (pinned: gs leaves `(Xbc)` mutated).
-- save/restore inside a Type 3 BuildChar or image data procedure is
-  untested territory (the glyph machinery snapshots graphics state
-  around glyphs); nothing guards it yet.
+- save/restore inside an image data procedure is untested territory.
+  Inside a Type 3 BuildChar the glyph machinery snapshots graphics state
+  and opens a `gsave` level, as gs does (#500); `save` there is pinned
+  in `tests/glyph_cliprestore.rs`.
 
 ## gs pins used above
 
