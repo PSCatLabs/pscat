@@ -524,11 +524,13 @@ renders eight examples in both and compares block-downsampled output).
   `clipsave` level. pscat's own paired calls (`rectfill`, ...) use the
   plain popping `Gfx::grestore`; only the operator goes through
   `Interp::do_grestore`. `currentgray`/`currenthsbcolor` report the
-  `f32` colour's shortest decimal (`0.5`, not `0.49999999999999994`).
-  `currentrgbcolor` still reports the widened `f32` on purpose: rounding
-  it moves the alpine_lake still by 1 LSB, because paintkit does
-  arithmetic on it. Reals in general still print shortest-`f64`, where
-  gs prints 9 digits (`notes/505-grestore-bottom-currentgray.md`).
+  `f32` colour's shortest decimal (`0.5`, not `0.49999999999999994`), and
+  so does `currentrgbcolor` since #515 (`0.3 0.6 0.9`, not the widened
+  `f32`s). Rounding it moved the alpine_lake still by 1 LSB, because
+  paintkit does arithmetic on it, so that still was regenerated
+  (`notes/515-currentrgbcolor-readback.md`). Reals in general still print
+  shortest-`f64`, where gs prints 9 digits
+  (`notes/505-grestore-bottom-currentgray.md`).
 - Readbacks added in #513: `currentcmykcolor`, `currentcolor`,
   `currentlinecap`, `currentlinejoin`, `currentmiterlimit` and
   `currentstrokeadjust`, plus a `setstrokeadjust` that only stores its flag

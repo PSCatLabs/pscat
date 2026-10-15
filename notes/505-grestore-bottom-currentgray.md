@@ -62,7 +62,7 @@ only in a `%%SelfTest` block, with a 0.001 tolerance). drykit's `grestore` shado
 `/pcs` stack and marks the batch `/dirty` on a pop it never saw pushed, so
 a `grestore` at a boundary is followed conservatively.
 
-**`currentrgbcolor` is deliberately not rounded.** The first version of
+**`currentrgbcolor` is deliberately not rounded (rounded later in #515, `notes/515-currentrgbcolor-readback.md`).** The first version of
 this change rounded it too, and gs prints `0.3 0.6 0.9 setrgbcolor
 currentrgbcolor` as `0.3 0.6 0.9` where pscat prints
 `0.30000001192092896 0.6000000238418579 0.8999999761581421`. But

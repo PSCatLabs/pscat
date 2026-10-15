@@ -48,7 +48,7 @@ operators; `rgb` is still what paints.
 
 ## Deliberately not changed
 
-- **`currentcolor` rounds in DeviceRGB, `currentrgbcolor` still does not**
+- **`currentcolor` rounds in DeviceRGB, `currentrgbcolor` did not** (it does since #515, `notes/515-currentrgbcolor-readback.md`)
   (#505, #515): the rounding moved `alpine_lake.png` by one LSB at one
   pixel through `lib/paintkit.ps`'s arithmetic on `[ currentrgbcolor ]`.
   Nothing calls `currentcolor`, so the new operator prints gs's value.

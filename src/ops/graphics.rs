@@ -572,13 +572,13 @@ fn currentcmykcolor(it: &mut Interp) -> Result<(), PsError> {
 }
 
 fn currentrgbcolor(it: &mut Interp) -> Result<(), PsError> {
-    // Not rounded like `currentgray` (#505): lib/paintkit.ps does
-    // arithmetic on these values, and rounding them moves the committed
-    // alpine_lake still by one LSB at one pixel.
+    // Rounded like `currentgray` (#515), so `0.3 0.6 0.9 setrgbcolor
+    // currentrgbcolor` reads back `0.3 0.6 0.9` as gs prints it, not the
+    // widened f32s.
     let (r, g, b) = it.gfx.rgb();
-    it.push(Object::real(r));
-    it.push(Object::real(g));
-    it.push(Object::real(b));
+    it.push(Object::real(f32_readback(r)));
+    it.push(Object::real(f32_readback(g)));
+    it.push(Object::real(f32_readback(b)));
     Ok(())
 }
 
@@ -588,8 +588,8 @@ fn currentgray(it: &mut Interp) -> Result<(), PsError> {
     Ok(())
 }
 
-/// A colour component as `currentgray` and `currenthsbcolor` report it
-/// (#505), and the other readbacks of values held in `f32` (the CMYK
+/// A colour component as `currentgray`, `currentrgbcolor` (#515) and
+/// `currenthsbcolor` report it (#505), and the other readbacks of values held in `f32` (the CMYK
 /// components, `currentmiterlimit`: #513).
 /// The colour is held in `f32`, and Ghostscript's reals are `f32` too, so
 /// the value is rounded to `f32` and then read back as the `f64` nearest
