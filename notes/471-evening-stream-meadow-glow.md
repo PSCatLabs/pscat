@@ -3,7 +3,7 @@
 #455's `evmeadowat` lit the far shore and the stream banks by a glow factor in x
 (strongest at the sun's x), but the meadow fill (`evmeadow`) graded its strokes in
 y only, so near the stream's mouth the brushed edges were lit well beyond the
-fill behind them (about 40 to 45% against 28 to 32% as rendered). Now the fill's
+fill behind them (about 40 to 45% against 28 to 32% as rendered, by the measure below). Now the fill's
 strokes carry the same glow. Only `gallery/evening_stream.ps`, the 2x still and
 one sentence of `docs/guides/painting.md` change; no `lib/` change, and `evcloud`
 is untouched.
@@ -11,6 +11,7 @@ is untouched.
 ![before (left) and after (right), full](471-before-after-full.png)
 ![before (top) and after (bottom), the meadow, y 180 to 262 pt](471-before-after-meadow.png)
 ![before (left) and after (right), the stream's mouth](471-before-after-mouth.png)
+![before (left) and after (right), the left meadow, where the fill goes darker](471-before-after-left.png)
 
 - **Two shared helpers.** `evglowat` (x -> factor, 0.25 at the far corners to
   2.15 under the sun; the old inline expression of `evmeadowat`) and `evlity`
@@ -42,17 +43,25 @@ is untouched.
   | 620-680 | n/a / 0.31 | n/a / 0.22 |
   | 710-760 (right corner) | 0.06 / 0.02 | 0.06 / 0.01 |
 
-  Tried first: fill 1.0, edge 0.5 (fill overshot the edge at the mouth, 0.46 / 0.35),
-  then fill 0.8 with edges 0.6, 0.8 and fill 1.0 with 0.75: the edge ran 0.07 to 0.2
-  above the fill at the mouth. Kept fill 0.8, edge 0.55.
+  The match is at the mouth, the case the issue named; at x 270-330 the edge is still
+  about twice the fill (few edge pixels pass the filter in that band, so it is a
+  coarse reading). Tried first (edge / fill at the mouth): fill 1.0, edge 0.5 gave
+  0.35 / 0.46, the fill overshooting; fill 0.8 with edge 0.6 gave 0.42 / 0.40 left
+  and 0.44 / 0.34 right; edge 0.8 gave 0.55 / 0.43; fill 1.0 with edge 0.75 gave
+  0.52 / 0.49. Kept fill 0.8, edge 0.55.
 - **A visible change to review.** The meadow is no longer one lit tone along the
-  shore: it brightens toward the mouth and the glow, and the left and right fill
-  go a little darker toward the corners (about 0.16 -> 0.08 at x 120-180).
-  Under the sun the fill's share was 0.5 flat and is now up to 0.8 x 0.5 x 2.15
-  clamped to 0.86; across the whole width the glow averages near 0.9, so the
-  overall tone is close to before.
+  shore: it brightens toward the mouth and the glow and is darker toward the
+  corners, so apart from near the mouth the meadow reads darker. Lit share of the
+  fill (0 to 40 pt below the shore, same measure as the table): whole width
+  0.091 -> 0.083, left of the mouth (x 0-340) 0.065 -> 0.044, right (x 560-760)
+  0.072 -> 0.060, mouth (x 340-560) 0.149 -> 0.166. Sharing the glow is what darkens
+  the corners (a fill gain of 1.0 still left 0.09 at x 120-180), so it was not
+  retuned away. This also changes the site's landing hero, which `build_site.sh`
+  renders from the still.
 - **Pixels** (2x, against the committed still): 43 804 pixels differ, all in the
-  meadows' strokes: x 0 to 760, y 187 to 255 pt. 0 differ at y >= 256 pt, in the
+  meadows' fill strokes and the brushed edges (the far shore's strokes on the
+  wood's foot, y up to 255.5 pt, and the stream banks' edges, which now fade out at
+  45 pt rather than 60): x 0 to 760, y 187 to 255.5 pt. 0 differ at y >= 256 pt, in the
   four cloud boxes (each cloud's extent plus 15 pt, the #433 boxes), the fall
   (x 352-436, y 150-180), the lower water (x 360-440, y 20-140), the right tree
   (x 590-700, y 262-420) or anywhere below y = 150 outside x 340-450. The cabin's box (x 160-230, y 196-241) has
