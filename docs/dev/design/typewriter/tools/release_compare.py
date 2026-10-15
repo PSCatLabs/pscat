@@ -12,6 +12,8 @@ Panels (REFERENCES.md observation numbers):
   T15  a bitonal release copy: filled counters, dropped hairlines, specks
        (300 dpi)
   T9   aged paper under typing (Szilard 1945, about 240 dpi)
+  T14b the paper of a copy (issue #466): the white copy of before /Haze (the
+       specimen with /Haze 0), then the grey one, under T14's header
 
 Needs Pillow and a release pscat (default target/release/pscat). The scans are
 real released documents and are references only: the specimen's own stamps,
@@ -40,15 +42,25 @@ PANELS = [
      300, [(1, 360, 30, 252, 60), (1, 70, 222, 252, 60)]),
     ("T15_jfk_release_copy.jpg", "T15 a bitonal release copy. Below: generation 3",
      300, [(3, 54, 112, 261, 77)]),
+    ("T14_nsam55_marks.jpg", "T14 again, the paper of a copy. Below: generation 1 with /Haze 0 (the white copy before #466), then with the default /Haze",
+     300, [(1, 60, 84, 252, 62, "white"), (1, 60, 84, 252, 62)]),
     ("T10_szilard_zoom.jpg", "T10 Szilard (1945), aged paper, about 240 dpi. Below: generation 0",
      240, [(0, 54, 110, 338, 103)]),
 ]
 
 
-def render(pscat, tmp):
-    out = os.path.join(tmp, "spec.png")
-    subprocess.run([pscat, "--page", "1876x520", "--dpi", str(DPI), "--png", out,
-                    os.path.join(ROOT, "examples", "released_specimen.ps")],
+def render(pscat, tmp, white=False):
+    """The specimen at 300 dpi; white=True with every /Haze set to 0."""
+    out = os.path.join(tmp, "spec_white.png" if white else "spec.png")
+    src = os.path.join(ROOT, "examples", "released_specimen.ps")
+    if white:
+        text = open(src).read()
+        needle = "/Haze srg 3 ge { 0.2 } { 0.6 } ifelse"
+        assert needle in text, "examples/released_specimen.ps no longer sets /Haze as this tool expects"
+        text = text.replace(needle, "/Haze 0")
+        src = os.path.join(tmp, "spec_white.ps")
+        open(src, "w").write(text)
+    subprocess.run([pscat, "--headless", "--page", "1876x520", "--dpi", str(DPI), "--png", out, src],
                    check=True, cwd=ROOT, stdout=subprocess.DEVNULL)
     return Image.open(out).convert("RGB")
 
@@ -67,10 +79,11 @@ def main():
     font = ImageFont.load_default()
     with tempfile.TemporaryDirectory() as tmp:
         spec = render(pscat, tmp)
+        spec_white = render(pscat, tmp, True)
     rows = []
     for ref, caption, ref_dpi, crops in PANELS:
         ims = [Image.open(os.path.join(REFS, ref)).convert("RGB")]
-        ims += [crop(spec, *c, ref_dpi) for c in crops]
+        ims += [crop(spec_white if len(c) > 5 else spec, *c[:5], ref_dpi) for c in crops]
         rows.append((caption, ims))
     width = max(im.width for _, ims in rows for im in ims) + 20
     height = sum(14 + sum(im.height + 6 for im in ims) + 10 for _, ims in rows)

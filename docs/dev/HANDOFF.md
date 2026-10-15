@@ -754,8 +754,10 @@ renders eight examples in both and compares block-downsampled output).
    #215 shipped the gallery piece `gallery/released_memo.ps` (*Released in
    Part*) and the blind boards `docs/dev/design/typewriter/blind_grid.png` and
    `memo_vs_real.png` (`docs/dev/design/typewriter/tools/blind_compare.py`; the
-   key is in the PR, not the repo); `notes/215-released-memo.md`. Leftovers:
-   #466, #467, #468.
+   key is in the PR, not the repo); `notes/215-released-memo.md`. #466 gave a
+   copy's paper a grey haze, mottle and grain (`rel-page /Haze`, default 0.6,
+   applied after the copier curve in `rlSet`/`rlCol`; `/Haze 0` is the old white
+   copy; `notes/466-copy-paper-haze.md`). Leftovers: #467, #468.
    #242 shipped the charcoal gallery piece, `gallery/lincoln_charcoal.ps`
    (*Study after Berger, 1864*), and `lib/etching.ps`'s `et-tonemap`, which
    returns a photo as a grid of darkness for any piece that wants a

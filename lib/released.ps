@@ -799,6 +799,9 @@ rlDefaults
 %   { { } << /Generation 1.5 >> rel-page } /rel-generation-must-be-an-integer-0-to-8
 %   (half a generation) mustguard
 %
+%   { { } << /Haze 1.5 >> rel-page } /rel-haze-must-be-0-to-1
+%   (a haze above 1) mustguard
+%
 %   { { } << /Skew 20 >> rel-page } /rel-skew-must-be-within-10-degrees
 %   (a skew of 20 degrees) mustguard
 %
@@ -821,7 +824,7 @@ rlDefaults
 %%EndSelfTest
 
 % @kind: Procedure
-% @summary: Draws a page the way a released document looks, around any content: `{ content } opts rel-page`. The content proc is run once, in the page's own frame; it draws the typed page (lib/typewriter.ps tw-type is the intended content, and gets /Copies set to /Generation unless it sets its own). Paper is painted under it (tone, blotches, grain and fibres, edge darkening, the scanner lamp, folds, punch holes); /Generation photocopies each add a small skew and shift, black specks and streaks, the copier's lid at the edges and the copier's grey, high-contrast curve; marks are drawn over it (notes, stamps, a staple, a clip). Every effect is off at strength 0, the default, so with no options the content is simply run. Deterministic under /Seed. The caller's rand stream is untouched. One page only: the content must fit on the sheet and must not showpage (tw-type does after a full page), or the copies' clips and transforms break; age every page of a long document with rel-paper in /PageStart instead. If the content raises an error, the typewriter's /Copies is left set.
+% @summary: Draws a page the way a released document looks, around any content: `{ content } opts rel-page`. The content proc is run once, in the page's own frame; it draws the typed page (lib/typewriter.ps tw-type is the intended content, and gets /Copies set to /Generation unless it sets its own). Paper is painted under it (tone, blotches, grain and fibres, edge darkening, the scanner lamp, folds, punch holes); /Generation photocopies each add a small skew and shift, black specks and streaks, the copier's lid at the edges and the copier's grey, high-contrast curve; marks are drawn over it (notes, stamps, a staple, a clip). Every effect is off at strength 0, the default, so with no options the content is simply run. Deterministic under /Seed. The caller's rand stream is untouched. One page only: the content must fit on the sheet and must not showpage (tw-type does after a full page), or the copies' clips and transforms break; age every page of a long document with rel-paper in /PageStart instead. If the content raises an error, the typewriter's /Copies is left set, and so are the copy curve and the haze, which a later standalone rel-stamp or rel-note then draws through until the next rel-page.
 % @example: (lib/artkit.ps) run (lib/surfacekit.ps) run (lib/released.ps) run { 100 600 moveto /Courier findfont 14 scalefont setfont (A typed line.) show } << /Age 0.6 /Generation 2 /Skew 0.4 /Stamps [ << /Lines [ (RECEIVED) (14 OCT 1964) ] /X 400 /Y 700 /Angle 8 >> ] >> rel-page showpage
 % @param: /Seed [integer] Seeds every random mark; the same seed draws the same page (default 1)
 % @param: /Width [points] The sheet's width (default 612)
