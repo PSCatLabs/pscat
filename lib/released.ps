@@ -304,7 +304,15 @@ RelState begin {
     } ifelse
 } bind def
 % the haze's mottle: soft blotches of denser and thinner toner, as a factor
-% on the haze (-0.5 to 0.5), and the fine grain of the copy paper
+% on the haze (-0.6 to 0.6), and the fine grain of the copy paper. The blotches
+% are the broad swell; over them lie four octaves of value noise, each on its
+% own tilted and stretched lattice (spacing in points, tilt in degrees, weight,
+% stretch along the tilt), so the paper has a crumpled wave of long soft
+% ridges and no grid (#528: one axis-aligned lattice made plateaus of its
+% spacing, the soft blocks of #466). None is finer than 9pt: the grain below
+% takes its grey from the field at the centre of an 8pt square, and a finer wave
+% would show as 8pt blocks. The creases (rlHzCrease) carry the rest.
+/rlHzOcts [ [ 48 35 0.10 1.6 ]  [ 24 25 0.10 1.6 ]  [ 12 40 0.15 1.6 ]  [ 9 -25 0.11 1.5 ] ] def
 /rlHzInit {
     /rlHzN 9 def  /rlHzC rlHzN 5 mul array def
     0 1 rlHzN 1 sub {
@@ -313,14 +321,17 @@ RelState begin {
         rlHzC rbi 1 add rlU rlH mul put
         rlHzC rbi 2 add rlU 90 mul 35 add put
         rlHzC rbi 3 add rlU 0.7 mul 0.8 add put
-        rlHzC rbi 4 add rlR 0.22 mul put
+        rlHzC rbi 4 add rlR 0.1 mul put
     } for
-    /rlHzS1 14 def  /rlHzS2 6 def
-    /rlHzNx1 rlW rlHzS1 div cvi 2 add def  /rlHzNx2 rlW rlHzS2 div cvi 2 add def
-    /rlHzA1 rlHzNx1 rlH rlHzS1 div cvi 2 add mul array def
-    /rlHzA2 rlHzNx2 rlH rlHzS2 div cvi 2 add mul array def
-    0 1 rlHzA1 length 1 sub { rlHzA1 exch rlR put } for
-    0 1 rlHzA2 length 1 sub { rlHzA2 exch rlR put } for
+    /rlHzSp rlW rlH add 60 add def                  % each octave's lattice is a square this long, so it holds the sheet at any tilt
+    /rlHzO rlHzOcts length array def
+    0 1 rlHzOcts length 1 sub {
+        /rzI exch def  /rzP rlHzOcts rzI get def
+        /rzNx rlHzSp rzP 0 get div cvi 3 add def
+        /rzA rzNx dup mul array def
+        0 1 rzA length 1 sub { rzA exch rlR put } for
+        rlHzO rzI [ rzP 0 get  rzP 1 get cos  rzP 1 get sin  rzP 2 get  rzA  rzNx  rzP 3 get ] put
+    } for
 } bind def
 % value noise, smoothly interpolated: x y array nx spacing -> -1..1
 /rlVN {
@@ -333,6 +344,18 @@ RelState begin {
     rvA rvIy 1 add rvNx mul rvIx add get  rvA rvIy 1 add rvNx mul rvIx add 1 add get  rvTx rlLerp
     rvTy rlLerp
 } bind def
+% x y -> the octaves' noise summed (each octave's lattice is turned about the
+% sheet's centre and stretched along its tilt)
+/rlHzFb {
+    rlH 2 div sub /rzY exch def  rlW 2 div sub /rzX exch def
+    0
+    rlHzO {
+        /rzO exch def
+        rzX rzO 1 get mul rzY rzO 2 get mul sub rzO 6 get div rlHzSp 2 div add
+        rzX rzO 2 get mul rzY rzO 1 get mul add rlHzSp 2 div add
+        rzO 4 get rzO 5 get rzO 0 get rlVN rzO 3 get mul add
+    } forall
+} bind def
 /rlHzMot {                                          % x y -> m
     /rbY exch def /rbX exch def
     0
@@ -342,9 +365,38 @@ RelState begin {
         rbY rlHzC rbi 1 add get sub rlHzC rbi 2 add get div dup mul add
         -1 mul 2.718282 exch exp rlHzC rbi 4 add get mul add
     } for
-    rbX rbY rlHzA1 rlHzNx1 rlHzS1 rlVN 0.2 mul add
-    rbX rbY rlHzA2 rlHzNx2 rlHzS2 rlVN 0.1 mul add
+    rbX rbY rlHzFb add
     dup 0.6 gt { pop 0.6 } if dup -0.6 lt { pop -0.6 } if
+} bind def
+% creases: the crumpled paper of a copy. Long, soft, mostly diagonal lines laid
+% over the haze field before the grain, which breaks them up as it does the rest
+% of the paper: a darker line with a lighter one beside it, as T14's creases
+% are. rlCrD of them per 100,000 square points (a memo sheet has about 30), each
+% a run of 4pt segments 45 to 155pt long that wanders a few degrees a segment,
+% tilted rlCrAng degrees (one in five takes any tilt); rlCrA is the depth at
+% /Haze 0.6. A segment's grey is the paper field's there, less or plus the depth.
+/rlCrD 6 def  /rlCrA 0.045 def  /rlCrAng -35 def
+/rlHzCrease {
+    rlHaze 0.6 div rlCrA mul /rcA exch def
+    1 setlinecap
+    rlW rlH mul 100000 div rlCrD mul round cvi {
+        rlU rlW mul /rcX exch def  rlU rlH mul /rcY exch def
+        rlU 0.2 lt { rlU 180 mul } { rlCrAng rlR 18 mul add } ifelse /rcT exch def
+        rlU 110 mul 45 add 4 div ceiling cvi {
+            rcT rlR 9 mul add /rcT exch def
+            rcX rcT cos 4 mul add /rcX2 exch def  rcY rcT sin 4 mul add /rcY2 exch def
+            rcX2 0 lt rcX2 rlW gt or rcY2 0 lt or rcY2 rlH gt or { exit } if
+            rcX rcX2 add 2 div rcY rcY2 add 2 div rlFieldSet currentgray /rcG exch def
+            0 setlinecap                            % butt: a round cap here would paint over the last segment's core
+            rcG rcA 0.35 mul sub setgray 4.6 setlinewidth rcX rcY moveto rcX2 rcY2 lineto stroke
+            1 setlinecap
+            rcG rcA sub setgray 1.8 setlinewidth rcX rcY moveto rcX2 rcY2 lineto stroke
+            rcG rcA 0.6 mul add setgray 1.6 setlinewidth
+            rcX rcT sin 3 mul sub rcY rcT cos 3 mul add moveto
+            rcX2 rcT sin 3 mul sub rcY2 rcT cos 3 mul add lineto stroke
+            /rcX rcX2 def  /rcY rcY2 def
+        } repeat
+    } repeat
 } bind def
 % grain: a copy's paper is not smooth at the pixel: a fine speckle of lighter
 % and darker toner (RMS 0.009 over 6px blocks at 300 dpi in the scans T2, T9
@@ -356,10 +408,12 @@ RelState begin {
 % 0.6; it scales with /Haze). A stencil row is a random row of a 64 x 128 byte
 % tile at a random byte shift, and the squares along a row of the sheet step
 % through it a square's own bytes at a time, so no two squares share bits
-% before the tile row wraps (64 squares, 1024pt, of 16pt). A cell is rlGrC
-% points and rlGrT is a multiple of 8 rlGrC (a whole number of bytes). Set
-% directly (the grey is already the copy's).
-/rlGrC 1 def  /rlGrT 16 def  /rlGrA 0.013 def  /rlGrAnd 2 def
+% before the tile row wraps (128 squares, 1024pt, of 8pt). A cell is rlGrC
+% points and rlGrT is a multiple of 8 rlGrC (a whole number of bytes). The
+% squares are 8pt (they were 16pt in #474) so that the field's wave, which the
+% square flattens to its centre's grey in the cells it paints, does not show as
+% blocks. Set directly (the grey is already the copy's).
+/rlGrC 1 def  /rlGrT 8 def  /rlGrA 0.0145 def  /rlGrAnd 2 def
 /rlGrTile {                                         % -> 64 strings of 256 bytes (a row of 128 and its copy)
     /rgT 64 array def
     0 1 63 {
@@ -393,6 +447,7 @@ RelState begin {
     /rgMs [ rlGrMask rlGrMask ] def                 % lighter, darker
     rlHaze 0.6 div rlGrA mul /rgA exch def
     gsave rlSheet clip newpath
+    rlHzCrease
     0 1 rlH rlGrT div ceiling cvi 1 sub {
         /rgJ exch def
         rgJ rlGrT mul /rgY exch def
@@ -907,7 +962,7 @@ rlDefaults
 % @param: /Skew [degrees] The sheet's tilt on the scanner bed, within 10 degrees; the bed shows around it (default 0)
 % @param: /Backdrop [rgb array] The scanner bed or desk around a skewed sheet and showing through punch holes; any value draws it (default none, and light grey when the sheet is skewed)
 % @param: /Generation [count] Photocopy generations, 0 to 8: 0 is the original, 1 a copy, 3 a copy of a copy of a copy (default 0)
-% @param: /Haze [0..1] The grey of a photocopy's paper: toner fog that takes the copy's white down to a light grey (about 0.90 at the default, 0.84 at 1), with soft blotches of thicker and thinner toner and a fine grain of lighter and darker flecks under the type. Applies only when /Generation is above 0; 0 gives the plain white copy (default 0.6)
+% @param: /Haze [0..1] The grey of a photocopy's paper: toner fog that takes the copy's white down to a light grey (about 0.90 at the default, 0.84 at 1), with a crumpled-paper wave of thicker and thinner toner (soft blotches, tilted noise and a few long creases) and a fine grain of lighter and darker flecks under the type. Applies only when /Generation is above 0; 0 gives the plain white copy (default 0.6)
 % @param: /Speckle [0..1] Each copy's black specks and streaks (default 1)
 % @param: /CopyEdge [0..1] How dark the copier's lid and edge shadows are (default 0.6)
 % @param: /Punch [count] Punch holes down the left margin: 2 and 3 are the standard spacings (default 0)
