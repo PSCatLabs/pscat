@@ -1623,6 +1623,32 @@ fn a_cliprestore_in_a_batch_renders_as_at_once() {
         .unwrap_or_else(|e| panic!("{body}: {}", it.error_report(&e)));
         data(&it)
     };
+    // The shadow is there while a batch runs, and taken back after it,
+    // also after one that fails: a leftover userdict name would switch every
+    // shadow off for the next batch.
+    {
+        let mut it = Interp::with_page_scaled(140, 100, 2.0).expect("page");
+        it.run_str(PAIR).expect("stand-in clipsave/cliprestore");
+        load(&mut it);
+        let mut probe = |src: &str| -> String {
+            it.run_str(src).expect("probe");
+            it.pop().expect("probe result").repr()
+        };
+        assert_eq!(
+            probe(
+                "<< /Surface /greenboard /Seed 3 >> dksurface \
+                 { /cliprestore where { userdict eq } { false } ifelse /dtin exch def } dkbatch dtin"
+            ),
+            "true",
+            "inside a batch, cliprestore is drykit's shadow"
+        );
+        probe("{ { clipsave 1 0 div } dkbatch } stopped pop true");
+        assert_eq!(
+            probe("userdict /cliprestore known userdict /clip known or userdict /gsave known or"),
+            "false",
+            "a shadow was left in userdict"
+        );
+    }
     for (what, body) in &cliprestore_cases() {
         let once = run(true, false, body);
         let d = pixel_diff(&once, &run(true, true, body));
@@ -1647,8 +1673,7 @@ fn ghostscript_follows_a_cliprestore_in_a_batch() {
         eprintln!("skipping gs cliprestore check: gs not installed");
         return;
     }
-    let dir = std::env::temp_dir().join(format!("pscat-drykit-clipsave-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("temp dir");
+    let dir = common::scratch_dir("pscat-drykit-clipsave");
     let mut libs = String::new();
     for path in ["lib/artkit.ps", "lib/paintkit.ps"] {
         libs.push_str(&std::fs::read_to_string(path).expect("read lib"));
