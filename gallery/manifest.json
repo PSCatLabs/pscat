@@ -1082,6 +1082,15 @@
    "page": "1000x1320"
   },
   {
+   "id": "mathkit_columns_braces",
+   "group": "dry",
+   "title": "mathkit columns and braces",
+   "alt": "A mathkit specimen: congruences with mod and pod, brace labels beside the brace, aligned columns that drift down the lines like a hand, alignat coefficients, and hand-drawn braces marking spans of formulas on a chalk board",
+   "blurb": "Congruences with \\mod and \\pod, brace labels set beside, align columns that wander down the lines as a hand does, alignat, and mkbrace, a hand-drawn brace between two points for marking a span on a board.",
+   "source": "examples/mathkit_columns_braces.ps",
+   "page": "1000x1180"
+  },
+  {
    "id": "graph_paper",
    "group": "charts",
    "title": "graph.ps",

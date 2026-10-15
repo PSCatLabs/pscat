@@ -717,6 +717,10 @@ renders eight examples in both and compares block-downsampled output).
    `\underset` `\stackrel` `\substack`, the style switches, `\not`,
    `\bmod` `\pmod`, and TeX align's columns in `mkalign` (several `&` a
    line, `/ColumnGap`): `notes/340-mathkit-structures.md`.
+   #439 added `\mod` `\pod`, `\nolimits` on a brace, mkalign's
+   `/ColumnWander` (off by default, so older layouts are unchanged) and
+   `/ColumnGap 0` as `alignat`, and the `mkbrace` annotation (the same
+   turned brace between two points): `notes/439-mathkit-columns-braces.md`.
    Chalk (#235) shipped `lib/drychalk.ps`. `dcchalk` is the chalk preset
    over `dkstroke`. `dcboard` dresses a slate or green board: haze,
    `/Ghost` writing, swipes, wipes, ledge dust and a tray. It was tuned

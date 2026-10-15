@@ -314,7 +314,7 @@ fn every_example_tag_runs_clean() {
         .filter_map(|l| l.strip_prefix("% @example:"))
         .map(str::trim)
         .collect();
-    assert_eq!(examples.len(), 6, "one example per public procedure");
+    assert_eq!(examples.len(), 7, "one example per public procedure");
     for example in examples {
         let mut it = Interp::with_page(300, 200).expect("page");
         it.run_str(example)
@@ -397,6 +397,12 @@ fn assert_gs_same_layout_and_path(tex: &str) {
          newpath ({tex}) 40 200 << /Size 30 /Seed 3 >> mkpath \
          {{ }} {{ }} {{ }} {{ }} pathforall"
     );
+    assert_gs_same_numbers(tex, &body);
+}
+
+/// Ghostscript and pscat run `body` (after loading mathkit) and leave the
+/// same numbers on the operand stack, to 0.02 pt.
+fn assert_gs_same_numbers(tex: &str, body: &str) {
     let probe = format!(
         "(lib/handscript.ps) run (lib/strokeglyphs.ps) run (lib/mathkit.ps) run {body} \
          count {{ 1000 mul round cvi = }} repeat"
@@ -484,4 +490,50 @@ fn the_structures_specimen_renders_with_ink_and_a_clean_stack() {
         .unwrap_or_else(|e| panic!("specimen failed: {}", it.error_report(&e)));
     assert!(it.operand_stack().is_empty(), "specimen leaked operands");
     assert!(ink_count(&it) > 20_000, "specimen drew too little ink");
+}
+
+/// Issue #439's additions in Ghostscript: the columns-and-braces specimen
+/// renders, and \mod, \pod and a brace's side label lay out to the same box
+/// and path as in pscat.
+#[test]
+fn ghostscript_builds_the_same_mod_pod_and_side_labels() {
+    if !gs_available() {
+        eprintln!("skipping gs compatibility check: gs not installed");
+        return;
+    }
+    assert_gs_renders("examples/mathkit_columns_braces.ps", "1000x1180");
+    assert_gs_same_layout_and_path(
+        r"a \\equiv b \\mod{n} \\pod{7} + \\underbrace{x + y}\\nolimits_{k} \\overbrace{z}\\nolimits^{2}",
+    );
+}
+
+/// Issue #439's columns-and-braces specimen: \mod and \pod, side labels,
+/// a column's wander, alignat and mkbrace on a chalk board.
+#[test]
+fn the_columns_and_braces_specimen_renders_with_ink_and_a_clean_stack() {
+    let src = std::fs::read("examples/mathkit_columns_braces.ps").expect("specimen present");
+    let mut it = Interp::with_page(1000, 1180).expect("page");
+    it.run_source(&src)
+        .unwrap_or_else(|e| panic!("specimen failed: {}", it.error_report(&e)));
+    assert!(it.operand_stack().is_empty(), "specimen leaked operands");
+    assert!(ink_count(&it) > 20_000, "specimen drew too little ink");
+}
+
+/// Issue #439's mkbrace in Ghostscript: braces turned to a diagonal and to
+/// the three other directions give the same paths and the same returned
+/// points as in pscat.
+#[test]
+fn ghostscript_builds_the_same_mkbrace() {
+    if !gs_available() {
+        eprintln!("skipping gs compatibility check: gs not installed");
+        return;
+    }
+    assert_gs_same_numbers(
+        "mkbrace",
+        "newpath 40 60 260 140 << /Size 30 /Seed 3 >> mkbrace \
+         300 200 300 40 << /Size 30 /Seed 4 >> mkbrace \
+         260 20 40 20 << /Size 30 /Seed 5 /Irregular 2 >> mkbrace \
+         60 40 60 240 << /Size 30 /Seed 6 /Jitter 0 >> mkbrace \
+         { } { } { } { } pathforall",
+    );
 }
