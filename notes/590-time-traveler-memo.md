@@ -24,9 +24,14 @@ Code". The only real names are in his quoted testimony.
   redactions. It is "Copy 1 of 3", the ribbon original kept by the registry: a
   carbon copy could not carry red typed banners (the advisor's catch).
 - **Red typed banners.** Typed after `tw-type` with `tw-set` on the same frame
-  (`/Strike 4`, red `/Ink`, `/Bleed 0.2` of black from `/above`), then the black
-  ink restored. The body has `/Bleed 0.12` of red from `/below`; at these values
-  the bleed is rare and small, as NBS C431 says most ribbons show none.
+  (`/Strike 4`, red `/Ink`, `/Bleed 0.85 /BleedInk` black `/BleedSide /above`),
+  then the black ink restored with `/Bleed 0`. The first try had `/Bleed 0.2` on
+  the banners and 0.12 of red under the body: a pixel diff against `/Bleed 0`
+  changed 105 pixels in the whole 2x still, because the `/above` boundary starts
+  800 glyph units up and moves in by at most `/Bleed` x 540, so 0.2 never
+  reaches a cap, and 0.12 from `/below` (-360 + 65) never reaches a descender.
+  0.85 gives a few banner letters a black top (the E of SECRET most), 0.6 almost
+  none. The body has no bleed, as NBS C431 says most ribbons show none.
 - **One legal page (612 x 1008), not two letter pages.** The gallery takes one
   still per piece, and the 2x still is rendered with `2 2 scale` prepended,
   which a second page (after `showpage`) does not keep. Legal-size paper was
@@ -44,8 +49,10 @@ Code". The only real names are in his quoted testimony.
 
 ## #547
 
-Renders do not depend on #547 (copy-body erosion): it acts on `/Copies` above 0,
-and a `/Generation 0` page types with `/Copies 0`.
+The renders predate #547 (copy-body erosion), which had no PR when they were
+made. #547 is described as acting on a copy's body (`tCopyC` above 0); a probe
+printed `TWState /tCopies` as 0 right after this piece's `tw-type`, so it is
+expected not to change this page, but that is to be checked when it lands.
 
 ## Commands
 

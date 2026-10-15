@@ -17,9 +17,9 @@
 %                      x-outs <x>, an underscore <u>, and the ribbon ink of a
 %                      worn elite manual; then tw-set on the same machine for
 %                      the control lines and the red half of a black/red
-%                      ribbon for the banners (/Ink red, /Bleed: the black
-%                      half creeps into the tops of a few red letters, and
-%                      the red into the feet of a few black ones)
+%                      ribbon for the banners (/Ink red, and /Bleed 0.85 from
+%                      /above: the black half creeps into the tops of a few
+%                      red letters)
 %   lib/released.ps    rel-page: an original, not a copy (/Generation 0):
 %                      aged paper, punch holes, a gem clip, the scanner's tilt
 %                      and lamp, and the stamps and notes over the type
@@ -55,7 +55,7 @@
 
 6.\tAsked to describe the year 2026, SUBJECT stated (a) that nearly everyone carries a slab of glass the size of a pocket notebook, and talks to it, and that it answers; (b) that few letters are typed, or written at all; and (c) that the machines he described can now produce a document such as this memorandum, down to the worn ribbon, the strikeovers and the grime of the copying machine, so that no one could tell it from the real thing. This statement could not be verified.
 
-7.\tThe glass object is held with SUBJECT's other effects at the Sheriff's <o>offcie|office</o>. It lights when pressed and shows the words "No Service." It could <u>not</u> be opened.
+7.\tThe glass object is held with SUBJECT's other effects at the Sheriff's <o>offcie|office</o>. It lights when pressed and shows the words "No Service." It is warm to the touch. It could <u>not</u> be opened.
 
 8.\tASSESSMENT. SUBJECT's account was consistent over four hours of questioning and detailed beyond the point of invention. It is also impossible. The writer recommends that SUBJECT be committed to the State Hospital at Merrin for psychiatric evaluation, that the glass object be sent to the Laboratory Division, and that this matter be closed.
 
@@ -75,7 +75,6 @@ Distribution:
     /Pitch 12 /Size 11.5 /Tabs 5
     /Machine 12 /Seed 1962 /Wear 1.3 /MachineWear 0.6
     /Ink ttblack /Ribbon 0.6
-    /Bleed 0.12 /BleedInk ttred /BleedSide /below
     /Memo << /Title (MEMORANDUM FOR THE RECORD)
              /Subject (Interview with a man held at Ardell who states that he is from the year 2026)
              /Date (23 August 1962)
@@ -96,21 +95,21 @@ Distribution:
     % count to the body's first baseline, the origin of the marks typed after
     currentpoint ttopts tw-linecount 12 mul add 2 array astore /ttorg exch def
     % the control lines, black, top right
-    << /Strike 3 /Bleed 0 >> tw-set
+    << /Strike 3 >> tw-set
     64 5 (OFI-TS-62-0118) ttat
     64 4 (Copy 1 of 3) ttat
     64 3 (Page 1 of 1) ttat
     % the banners: the ribbon lifted to its red half
-    << /Strike 4 /Ink ttred /Bleed 0.2 /BleedInk ttblack /BleedSide /above >> tw-set
+    << /Strike 4 /Ink ttred /Bleed 0.85 /BleedInk ttblack /BleedSide /above >> tw-set
     29 5 (T O P   S E C R E T) ttat
     29 -71 (T O P   S E C R E T) ttat
-    << /Strike 0 /Ink ttblack /Bleed 0.12 /BleedInk ttred /BleedSide /below >> tw-set
+    << /Strike 0 /Ink ttblack /Bleed 0 >> tw-set
 } <<
     /Width 612 /Height 1008 /Seed 118 /Generation 0
     /Age 0.5 /EdgeDark 0.4 /Lamp 0.2 /Skew 0.35 /Punch 2 /Clip 1
     /Stamps [
-        << /Lines [ (REGISTRY) (AUG 24 1962) (O F I) ] /X 150 /Y 922 /Angle -3
-           /Size 9 /Ink [0.32 0.18 0.42] /Frame /box /Font /Helvetica
+        << /Lines [ (REGISTRY) (AUG 24 1962) (OFFICE OF FIELD INQUIRY) ] /X 140 /Y 940 /Angle -3
+           /Size 8 /Ink [0.32 0.18 0.42] /Frame /box /Font /Helvetica
            /Tracking 1.2 /Seed 7 /Strength 0.6 >>
         << /Lines [ (OFI REG. 7) (NOT SUBJECT TO) (AUTOMATIC REGRADING) ]
            /X 500 /Y 60 /Size 6.5 /Ink [0.16 0.15 0.18] /Frame /box

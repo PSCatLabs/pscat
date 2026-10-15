@@ -830,7 +830,8 @@ renders eight examples in both and compares block-downsampled output).
    key is in the PR, not the repo); `notes/215-released-memo.md`. #590 added a second
    piece, `gallery/time_traveler_memo.ps` (*The Man from 2026*): a never-released
    TOP SECRET original (`/Generation 0`, legal paper), with the red banners and
-   control lines typed by `tw-set` after `tw-type` on the same frame;
+   control lines typed by `tw-set` after `tw-type` on the same frame
+   (the only real marking is TOP SECRET; the regrading box is invented);
    `notes/590-time-traveler-memo.md`. #466 gave a
    copy's paper a grey haze, mottle and grain (`rel-page /Haze`, default 0.6,
    applied after the copier curve in `rlSet`/`rlCol`; `/Haze 0` is the old white
