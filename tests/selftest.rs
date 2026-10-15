@@ -37,6 +37,8 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+mod common;
+
 const BIN: &str = env!("CARGO_BIN_EXE_pscat");
 
 fn repo_root() -> PathBuf {
@@ -46,8 +48,8 @@ fn repo_root() -> PathBuf {
 /// A scratch directory that cleans itself up.
 ///
 /// Hand-rolled rather than pulling in a `tempdir` crate: the rest of
-/// this suite already builds scratch paths out of `env::temp_dir()`
-/// plus the process id (see `tests/artkit.rs`), and one more dev
+/// this suite already builds scratch paths with `common::scratch_dir`
+/// (see `tests/artkit.rs`), and one more dev
 /// dependency for eight lines isn't worth it. `name` keeps concurrent
 /// tests in the same binary from colliding, which the pid alone
 /// wouldn't.
@@ -55,11 +57,7 @@ struct Scratch(PathBuf);
 
 impl Scratch {
     fn new(name: &str) -> Scratch {
-        let dir =
-            std::env::temp_dir().join(format!("pscat-selftest-{}-{name}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("scratch dir");
-        Scratch(dir)
+        Scratch(common::scratch_dir(&format!("pscat-selftest-{name}")))
     }
 
     fn path(&self) -> &Path {

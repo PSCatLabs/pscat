@@ -14,6 +14,8 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+mod common;
+
 const EXAMPLE: &str = "examples/sierpinski.ps";
 
 fn root() -> &'static Path {
@@ -25,14 +27,8 @@ fn root() -> &'static Path {
 struct Scratch(PathBuf);
 impl Scratch {
     fn new(tag: &str) -> Scratch {
-        // TMPDIR can point into target/ (some harnesses do), which is inside the head tree.
-        let mut tmp = std::env::temp_dir();
-        if tmp.starts_with(root()) {
-            tmp = PathBuf::from("/tmp");
-        }
-        let dir = tmp.join(format!("identity_check_{tag}_{}", std::process::id()));
-        let _ = fs::remove_dir_all(&dir);
-        fs::create_dir_all(&dir).unwrap();
+        // `scratch_dir` already steps out of target/ when TMPDIR points into it.
+        let dir = common::scratch_dir(&format!("identity_check_{tag}"));
         Scratch(dir.canonicalize().unwrap())
     }
 }

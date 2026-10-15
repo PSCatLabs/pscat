@@ -5,6 +5,8 @@
 
 use pscat::{Interp, PsError};
 
+mod common;
+
 fn run(src: &str) -> Interp {
     let mut it = Interp::with_page(120, 120).expect("test page");
     it.run_str(src)
@@ -204,7 +206,7 @@ fn ghostscript_agrees_on_a_replayed_nested_eoclip() {
          g setgstate {FULL} fill"
     );
     let direct = format!("{CLIPS} {FULL} fill");
-    let dir = std::env::temp_dir().join(format!("pscat-gstate-gs-{}", std::process::id()));
+    let dir = common::scratch_dir("pscat-gstate-gs");
     std::fs::create_dir_all(&dir).expect("temp dir");
     let gs_grey = |name: &str, src: &str| -> Vec<u8> {
         let file = dir.join(format!("{name}.ps"));

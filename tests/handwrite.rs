@@ -6,6 +6,8 @@
 
 use pscat::Interp;
 
+mod common;
+
 fn with_lib(w: u32, h: u32) -> Interp {
     let lib = std::fs::read("lib/handscript.ps").expect("library present");
     let mut it = Interp::with_page(w, h).expect("page");
@@ -108,7 +110,7 @@ fn ghostscript_accepts_the_library() {
     let driver = "/HandOpts << /Text (hello from ghostscript land)\n\
                   /Size 30 /Width 400 /Height 200 /Margin 20 /Paper /ruled >> def\n\
                   HandOpts hs-linecount pop HandOpts hs-write showpage\n";
-    let dir = std::env::temp_dir().join(format!("pscat-handwrite-{}", std::process::id()));
+    let dir = common::scratch_dir("pscat-handwrite");
     std::fs::create_dir_all(&dir).expect("temp dir");
     let path = dir.join("combined.ps");
     std::fs::write(&path, format!("{lib}\n{driver}")).expect("write combined file");

@@ -11,6 +11,8 @@
 
 use pscat::Interp;
 
+mod common;
+
 fn load(it: &mut Interp) {
     let src = std::fs::read("lib/dataviz.ps").expect("dataviz.ps present");
     it.run_source(&src)
@@ -444,7 +446,7 @@ fn ghostscript_accepts_dataviz() {
         newpath [3 7 2 9 5] 700 150 60 0 { pop dvcolor } piechart \
         newpath [3 7 2 9 5] 700 350 60 25 { pop dvcolor } piechart \
         showpage\n";
-    let dir = std::env::temp_dir().join(format!("pscat-dataviz-{}", std::process::id()));
+    let dir = common::scratch_dir("pscat-dataviz");
     std::fs::create_dir_all(&dir).expect("temp dir");
     let combined = dir.join("dataviz_gs.ps");
     std::fs::write(&combined, format!("{lib}\n{driver}")).expect("write");

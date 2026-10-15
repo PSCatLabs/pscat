@@ -719,7 +719,7 @@ fn ghostscript_accepts_paintkit() {
             << /Width 12 /Pressure { pkbell } /StartCap /pointed /EndCap /pointed >> pkribbon \
         newpath 220 40 moveto 280 40 lineto << /Width 8 /Jitter 3 >> pkribbon \
         newpath 300 30 moveto << /Width 10 >> pkribbon";
-    let dir = std::env::temp_dir().join(format!("pscat-paintkit-{}", std::process::id()));
+    let dir = common::scratch_dir("pscat-paintkit");
     std::fs::create_dir_all(&dir).expect("temp dir");
     let combined = dir.join("paintkit_gs.ps");
     std::fs::write(
@@ -1158,7 +1158,7 @@ fn ghostscript_accepts_paintkit_nib() {
             << /Width 10 /Angle 30 /StartTaper 0.2 /EndTaper 0.2 \
                /Pressure { pkbell } /Jitter 2 >> pknib \
         newpath 300 30 moveto << /Width 10 /Angle 20 >> pknib";
-    let dir = std::env::temp_dir().join(format!("pscat-paintkit-nib-{}", std::process::id()));
+    let dir = common::scratch_dir("pscat-paintkit-nib");
     std::fs::create_dir_all(&dir).expect("temp dir");
     let combined = dir.join("paintkit_nib_gs.ps");
     std::fs::write(
@@ -1801,7 +1801,7 @@ fn ghostscript_accepts_paintkit_dry() {
         newpath 220 10 moveto 240 60 260 60 280 10 curveto \
             << /Width 10 /Bristles 12 /Jitter 1.5 >> pkdry \
         newpath 300 30 moveto << /Width 10 /Bristles 10 >> pkdry";
-    let dir = std::env::temp_dir().join(format!("pscat-paintkit-dry-{}", std::process::id()));
+    let dir = common::scratch_dir("pscat-paintkit-dry");
     std::fs::create_dir_all(&dir).expect("temp dir");
     let combined = dir.join("paintkit_dry_gs.ps");
     std::fs::write(
@@ -2337,7 +2337,7 @@ fn ghostscript_accepts_paintkit_spray() {
         newpath 220 10 moveto 240 60 260 60 280 10 curveto \
             << /Nozzle 12 /Density 24 /StartBurst 1 >> pkspray \
         newpath 300 30 moveto << /Nozzle 10 /Density 18 >> pkspray";
-    let dir = std::env::temp_dir().join(format!("pscat-paintkit-spray-{}", std::process::id()));
+    let dir = common::scratch_dir("pscat-paintkit-spray");
     std::fs::create_dir_all(&dir).expect("temp dir");
     let combined = dir.join("paintkit_spray_gs.ps");
     std::fs::write(
@@ -2653,7 +2653,7 @@ fn ghostscript_accepts_oil_pressure() {
     let src = "(lib/artkit.ps) run (lib/paintkit.ps) run 1 1 1 setrgbcolor clippath fill \
         0.8 0.2 0.1 setrgbcolor 7 srand newpath 20 60 moveto 220 60 lineto \
         << /Width 30 /Pitch 4 /Pressure { pkbell } >> pkoil showpage";
-    let dir = std::env::temp_dir().join("pscat_oil_pressure_gs.ps");
+    let dir = common::scratch_dir("pscat_oil_pressure_gs").join("oil.ps");
     std::fs::write(&dir, src).unwrap();
     let out = std::process::Command::new("gs")
         .args([
@@ -3092,7 +3092,7 @@ fn ghostscript_accepts_paintkit_wash_via_the_fallback() {
         0.8 0.3 0.2 setrgbcolor \
         newpath 160 100 50 0 360 arc closepath \
         << /Alpha 0.3 /Layers 2 /Wet 5 /Blend /Multiply /Seed 4 >> pkwash";
-    let dir = std::env::temp_dir().join(format!("pscat-paintkit-wash-{}", std::process::id()));
+    let dir = common::scratch_dir("pscat-paintkit-wash");
     std::fs::create_dir_all(&dir).expect("temp dir");
     let combined = dir.join("paintkit_wash_gs.ps");
     std::fs::write(
@@ -10028,7 +10028,7 @@ fn ghostscript_agrees_on_the_surface() {
 
     let artkit = std::fs::read_to_string("lib/artkit.ps").expect("artkit");
     let paintkit = std::fs::read_to_string("lib/paintkit.ps").expect("paintkit");
-    let dir = std::env::temp_dir().join(format!("pscat-canvas-{}", std::process::id()));
+    let dir = common::scratch_dir("pscat-canvas");
     std::fs::create_dir_all(&dir).expect("temp dir");
     let src = dir.join("canvas_gs.ps");
     let png = dir.join("canvas_gs.png");
@@ -12056,7 +12056,7 @@ fn ghostscript_accepts_paint_loading() {
     }
     let artkit = std::fs::read_to_string("lib/artkit.ps").expect("artkit");
     let paintkit = std::fs::read_to_string("lib/paintkit.ps").expect("paintkit");
-    let dir = std::env::temp_dir().join(format!("pscat-loading-{}", std::process::id()));
+    let dir = common::scratch_dir("pscat-loading");
     std::fs::create_dir_all(&dir).expect("temp dir");
     let combined = dir.join("loading_gs.ps");
     std::fs::write(

@@ -6,6 +6,8 @@
 
 use std::process::Command;
 
+mod common;
+
 fn have(cmd: &str, args: &[&str], needle: &str) -> bool {
     Command::new(cmd)
         .args(args)
@@ -68,7 +70,7 @@ console.log('WASM_OK ' + blue);
         lib = root.join("web/pscat.js").display(),
         wasm = root.join("web/pscat.wasm").display(),
     );
-    let dir = std::env::temp_dir().join(format!("pscat-wasm-{}", std::process::id()));
+    let dir = common::scratch_dir("pscat-wasm");
     std::fs::create_dir_all(&dir).expect("temp dir");
     let script = dir.join("smoke.mjs");
     std::fs::write(&script, driver).expect("write driver");

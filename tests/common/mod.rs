@@ -1,4 +1,5 @@
-//! Helpers shared by integration tests that inspect PDF output.
+//! Helpers shared by the integration tests: PDF inspection, scratch
+//! paths, CPU-time budgets.
 #![allow(dead_code)] // each test crate that mounts this module uses a subset
 
 /// The document as text with every page content stream inflated in
@@ -48,6 +49,37 @@ pub fn pdf_text(pdf: &[u8]) -> String {
     }
     out.extend_from_slice(&pdf[at..]);
     String::from_utf8_lossy(&out).into_owned()
+}
+
+// ---------------------------------------------------------------------
+// Scratch paths (issue #487)
+//
+// Agents run `cargo test` in several worktrees at once, and the tests
+// of one binary run on parallel threads. A fixed temp path
+// (`pscat_corpus_x.png`) is then clobbered or deleted by a neighbour.
+// Every test that writes a file goes through `scratch_dir`, so no test
+// names a shared path. `tests/scratch_paths.rs` enforces it.
+// ---------------------------------------------------------------------
+
+/// A new, already created directory that no other call shares, in this
+/// process or any other: `<temp>/pscat-test-<pid>/<tag>-<n>`. `tag` only
+/// helps a human reading the temp dir; put a file under it with
+/// `.join(name)`. Nothing is cleaned up unless the caller does it.
+pub fn scratch_dir(tag: &str) -> std::path::PathBuf {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    let mut base = std::env::temp_dir();
+    // Some harnesses point TMPDIR into target/, which is inside the
+    // checkout; `identity_check.sh` refuses a scratch dir inside either tree.
+    if base.starts_with(env!("CARGO_MANIFEST_DIR")) {
+        base = std::path::PathBuf::from("/tmp");
+    }
+    let dir = base
+        .join(format!("pscat-test-{}", std::process::id()))
+        .join(format!("{tag}-{n}"));
+    std::fs::create_dir_all(&dir).expect("create scratch dir");
+    dir
 }
 
 // ---------------------------------------------------------------------

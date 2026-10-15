@@ -425,7 +425,7 @@ fn gs_ink(tag: &str, body: &str) -> Vec<u8> {
         src.push('\n');
     }
     src.push_str(&format!("1 setgray clippath fill {body}\nshowpage\n"));
-    let dir = std::env::temp_dir().join(format!("pscat-typewriter-{}-{tag}", std::process::id()));
+    let dir = common::scratch_dir(&format!("pscat-typewriter-{tag}"));
     std::fs::create_dir_all(&dir).expect("temp dir");
     let file = dir.join("tw.ps");
     let png = dir.join("tw.png");

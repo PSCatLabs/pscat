@@ -10,6 +10,8 @@
 
 use pscat::Interp;
 
+mod common;
+
 const LIBS: [&str; 6] = [
     "lib/artkit.ps",
     "lib/surfacekit.ps",
@@ -419,7 +421,7 @@ fn ghostscript_draws_the_specimen_the_way_pscat_does() {
         eprintln!("skipping gs released check: gs not installed");
         return;
     }
-    let dir = std::env::temp_dir().join(format!("pscat-released-{}", std::process::id()));
+    let dir = common::scratch_dir("pscat-released");
     std::fs::create_dir_all(&dir).unwrap();
     let png = dir.join("gs.png");
     let status = std::process::Command::new("gs")

@@ -34,6 +34,8 @@
 
 use pscat::Interp;
 
+mod common;
+
 const LIBS: [&str; 8] = [
     "lib/artkit.ps",
     "lib/paintkit.ps",
@@ -139,7 +141,7 @@ fn library_procedures_are_bound_in_ghostscript() {
     }
     src.push_str(EPILOGUE);
     src.push_str("\n==\n");
-    let file = std::env::temp_dir().join(format!("pscat-libbind-{}.ps", std::process::id()));
+    let file = common::scratch_dir("pscat-libbind").join("libbind.ps");
     std::fs::write(&file, src).expect("write");
     let out = std::process::Command::new("gs")
         .args(["-dNOPAUSE", "-dBATCH", "-q", "-sDEVICE=nullpage"])

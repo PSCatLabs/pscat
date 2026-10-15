@@ -9,6 +9,8 @@ use std::process::Command;
 
 use pscat::Interp;
 
+mod common;
+
 fn bbox(src: &str) -> Option<[f64; 4]> {
     let mut it = Interp::new();
     if it.run_str(&format!("{src} pathbbox")).is_err() {
@@ -34,10 +36,7 @@ fn gs_available() -> bool {
 }
 
 fn gs_bbox(src: &str) -> Option<[f64; 4]> {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    static NEXT: AtomicUsize = AtomicUsize::new(0);
-    let n = NEXT.fetch_add(1, Ordering::Relaxed);
-    let path = std::env::temp_dir().join(format!("pscat_pathbbox_{}_{n}.ps", std::process::id()));
+    let path = common::scratch_dir("pscat_pathbbox").join("bbox.ps");
     std::fs::write(
         &path,
         format!(

@@ -8,6 +8,8 @@
 
 use pscat::{Interp, PsError};
 
+mod common;
+
 fn with_lib(w: u32, h: u32) -> Interp {
     let lib = std::fs::read("lib/etching.ps").expect("library present");
     let mut it = Interp::with_page(w, h).expect("page");
@@ -42,7 +44,7 @@ fn et_dims_reads_known_fixtures() {
 #[test]
 fn et_dims_rejects_non_jpeg_data() {
     let mut it = with_lib(10, 10);
-    let tmp = std::env::temp_dir().join("etching_test_not_a_jpeg.jpg");
+    let tmp = common::scratch_dir("etching").join("not_a_jpeg.jpg");
     std::fs::write(&tmp, b"not a jpeg at all, just text").unwrap();
     let err = it
         .run_str(&format!("<< /Photo ({}) >> et-dims", tmp.to_str().unwrap()))
@@ -57,7 +59,7 @@ fn et_dims_rejects_non_jpeg_data() {
 #[test]
 fn et_dims_rejects_truncated_jpeg() {
     let mut it = with_lib(10, 10);
-    let tmp = std::env::temp_dir().join("etching_test_truncated.jpg");
+    let tmp = common::scratch_dir("etching").join("truncated.jpg");
     std::fs::write(&tmp, [0xFF, 0xD8, 0xFF]).unwrap();
     let err = it
         .run_str(&format!("<< /Photo ({}) >> et-dims", tmp.to_str().unwrap()))
@@ -77,7 +79,7 @@ fn et_dims_rejects_a_corrupt_segment_length() {
     // a raw rangecheck instead of a named, catchable JPEG error like
     // every other malformed-input case in this scan.
     let mut it = with_lib(10, 10);
-    let tmp = std::env::temp_dir().join("etching_test_bad_length.jpg");
+    let tmp = common::scratch_dir("etching").join("bad_length.jpg");
     std::fs::write(&tmp, [0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x01]).unwrap();
     let err = it
         .run_str(&format!("<< /Photo ({}) >> et-dims", tmp.to_str().unwrap()))

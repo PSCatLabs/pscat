@@ -575,7 +575,7 @@ fn gs_band_ink(prelude: &str, body: &str, px: (usize, usize), dpi: u32) -> f64 {
         src.push_str(&std::fs::read_to_string(path).expect("read lib"));
         src.push('\n');
     }
-    let dir = std::env::temp_dir().join(format!("pscat-drykit-{}", std::process::id()));
+    let dir = common::scratch_dir("pscat-drykit");
     std::fs::create_dir_all(&dir).expect("temp dir");
     // One name per call: the gs tests run on parallel threads of one
     // process, and two of them pass the same (empty) prelude.
@@ -1386,7 +1386,7 @@ fn ghostscript_agrees_on_a_stroke() {
         src.push_str(&std::fs::read_to_string(path).expect("read lib"));
         src.push('\n');
     }
-    let dir = std::env::temp_dir().join(format!("pscat-drykit-stroke-{}", std::process::id()));
+    let dir = common::scratch_dir("pscat-drykit-stroke");
     std::fs::create_dir_all(&dir).expect("temp dir");
     let file = dir.join("stroke.ps");
     let png = dir.join("stroke.png");

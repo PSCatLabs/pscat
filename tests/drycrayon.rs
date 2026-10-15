@@ -545,7 +545,7 @@ fn ghostscript_agrees_on_crayon() {
             .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
         blocks(&rgb(&it))
     };
-    let dir = std::env::temp_dir().join(format!("pscat-drycrayon-{}", std::process::id()));
+    let dir = common::scratch_dir("pscat-drycrayon");
     std::fs::create_dir_all(&dir).expect("temp dir");
     let file = dir.join("crayon.ps");
     let png = dir.join("crayon.png");
@@ -603,7 +603,7 @@ fn ghostscript_takes_packed_procedures_and_runs_every_motion() {
         50 10 80 << /Tadpole true /Hair 4 >> dyfigure 50 50 15 << >> dyrays \
         newpath 10 10 moveto 90 12 lineto << /Zigzag true >> dygrass (motions-ok) = \
         showpage";
-    let dir = std::env::temp_dir().join(format!("pscat-drycrayon-pk-{}", std::process::id()));
+    let dir = common::scratch_dir("pscat-drycrayon-pk");
     std::fs::create_dir_all(&dir).expect("temp dir");
     let file = dir.join("packed.ps");
     std::fs::write(&file, format!("{}\n{driver}\n", gs_libs())).expect("write");

@@ -9,6 +9,8 @@
 
 use pscat::{Interp, PsError};
 
+mod common;
+
 fn with_lib(w: u32, h: u32) -> Interp {
     let lib = std::fs::read("lib/hatchkit.ps").expect("library present");
     let mut it = Interp::with_page(w, h).expect("page");
@@ -1091,7 +1093,7 @@ fn ghostscript_accepts_a_mark_procedure_under_packing() {
         eprintln!("skipping gs packing check: gs not installed");
         return;
     }
-    let dir = std::env::temp_dir().join(format!("pscat-hatch-mark-{}", std::process::id()));
+    let dir = common::scratch_dir("pscat-hatch-mark");
     std::fs::create_dir_all(&dir).unwrap();
     let ps = dir.join("mark_packed.ps");
     std::fs::write(

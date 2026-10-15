@@ -596,7 +596,7 @@ fn ghostscript_draws_the_same_area() {
         "true setpacking 7 srand 0 0 0 setrgbcolor {TRI_PAGE} \
          << /Width 12 /Direction -80 /Angle 12 {SOLID} >> pktrowelplane"
     );
-    let dir = std::env::temp_dir().join(format!("pscat-plane-{}", std::process::id()));
+    let dir = common::scratch_dir("pscat-plane");
     std::fs::create_dir_all(&dir).expect("temp dir");
     let src = dir.join("plane_gs.ps");
     let out = dir.join("plane_gs.pgm");
