@@ -434,6 +434,164 @@ fn a_clogged_counter_fills_with_ink() {
     assert!(inked > flat, "the clogged counter added no ink");
 }
 
+/// (red, green, blue) per pixel.
+fn rgb(it: &Interp) -> Vec<(u8, u8, u8)> {
+    it.gfx()
+        .pixmap
+        .pixels()
+        .iter()
+        .map(|p| (p.red(), p.green(), p.blue()))
+        .collect()
+}
+
+/// Rows (device pixels) of a glyph-unit height at `/Size 40`: one unit is
+/// 0.04pt, so 1/6 px at this file's scale; the baseline is row `Y0`.
+fn row_of(units: i32) -> usize {
+    (Y0 as i32 - units / 6) as usize
+}
+
+/// The ribbon's extras (#422) are opt-in: a page with both keys at 0 is the
+/// page without them, to the byte, and with them on it is still a function
+/// of the seeds and leaves the caller's rand stream alone.
+#[test]
+fn the_ribbon_extras_are_off_by_default_and_deterministic() {
+    let page = |opts: &str| {
+        ink(&render(&format!(
+            "36 84 moveto << /Machine 7 /Seed 3 {opts} >> tw-setup ({PARAGRAPH}) show \
+             36 72 moveto ({PARAGRAPH}) show"
+        )))
+    };
+    let plain = page("");
+    assert_eq!(
+        plain,
+        page("/WornBand 0 /Bleed 0"),
+        "the keys at 0 moved ink"
+    );
+    let on = "/WornBand 0.8 /Bleed 0.8";
+    assert_ne!(plain, page(on), "the keys did nothing");
+    assert_eq!(page(on), page(on), "the extras are not deterministic");
+    // each key moves only its own effect: the worn band's page is not the bleed's
+    assert_ne!(page("/WornBand 0.8"), page("/Bleed 0.8"));
+    let draws = |src: &str| -> Vec<String> {
+        let mut it = Interp::with_page_scaled(W, H, SCALE).expect("page");
+        it.run_str("42 srand").expect("srand");
+        if !src.is_empty() {
+            load(&mut it);
+            it.run_str(src)
+                .unwrap_or_else(|e| panic!("{src}: {}", it.error_report(&e)));
+        }
+        it.run_str("rand rand rand").expect("rand");
+        it.operand_stack().iter().map(|o| o.repr()).collect()
+    };
+    assert_eq!(
+        draws(""),
+        draws(&format!(
+            "36 84 moveto << /Machine 5 /Seed 5 {on} /BleedInk [1 0 0] /BleedSide /above >> tw-setup \
+             ({PARAGRAPH}) show"
+        )),
+        "the extras drew from rand"
+    );
+}
+
+/// The worn band (#422) thins the ink in the lane every x-height strike
+/// hits (glyph heights 20 to 410) and leaves the ascender (480 to 640)
+/// alone; /InkModel false has no weave to wear.
+#[test]
+fn the_worn_band_lightens_the_lane_and_not_the_ascender() {
+    let page = |opts: &str| {
+        ink(&render(&format!(
+            "36 84 moveto << /Machine 1 /Seed 1 /Wear 0 /Size 40 /Pitch 6 {opts} >> tw-setup (lkl) show"
+        )))
+    };
+    let band_mass = |img: &[u8], lo: i32, hi: i32| -> f64 {
+        let w = width_px();
+        (row_of(hi)..row_of(lo))
+            .map(|y| {
+                img[y * w..(y + 1) * w]
+                    .iter()
+                    .map(|&p| f64::from(p))
+                    .sum::<f64>()
+            })
+            .sum()
+    };
+    let (off, on) = (page("/WornBand 0"), page("/WornBand 1"));
+    let lane = band_mass(&on, 20, 410) / band_mass(&off, 20, 410);
+    let top = band_mass(&on, 500, 640) / band_mass(&off, 500, 640);
+    eprintln!("worn band: lane keeps {lane:.3} of its ink, the ascender {top:.3}");
+    assert!(lane < 0.9, "the lane kept {lane:.3} of its ink");
+    assert!(top > 0.95, "the ascender lost ink: kept {top:.3}");
+    // no seam: with the lane no sparser than its surround the zones draw the
+    // same ink as one pass would (the three nest)
+    let flat = |opts: &str| {
+        ink(&render(&format!(
+            "36 84 moveto << /Machine 1 /Seed 1 /Wear 0 /Size 40 /Pitch 6 /InkModel false {opts} >> tw-setup (lkl) show"
+        )))
+    };
+    assert_eq!(
+        flat("/WornBand 0"),
+        flat("/WornBand 1"),
+        "flat ink was worn"
+    );
+}
+
+/// Two-colour bleed (#422): black text prints the ribbon's other colour in
+/// the part of a letter past the boundary, below the line on /below. A
+/// bleed too small to reach a letter leaves it as it was.
+#[test]
+fn bleed_prints_the_other_colour_below_the_boundary() {
+    let red_rows = |opts: &str, text: &str| -> Vec<usize> {
+        let it = render(&format!(
+            "36 84 moveto << /Machine 1 /Seed 2 /Size 40 /Pitch 3.5 {opts} >> tw-setup ({text}) show"
+        ));
+        let w = width_px();
+        rgb(&it)
+            .iter()
+            .enumerate()
+            .filter(|&(_, &(r, g, b))| r > g.saturating_add(50) && r > b.saturating_add(50))
+            .map(|(i, _)| i / w)
+            .collect()
+    };
+    let text = "Hxdlbkpgyqjpy";
+    let ink_red = "/BleedInk [0.9 0.1 0.1]";
+    assert!(
+        red_rows(&format!("/Bleed 0 {ink_red}"), text).is_empty(),
+        "red with no bleed"
+    );
+    assert!(
+        red_rows(&format!("/Bleed 1 {ink_red}"), "Hxdlbk").len() > 20,
+        "no red from a full bleed"
+    );
+    let rows = red_rows(&format!("/Bleed 1 {ink_red}"), text);
+    assert!(
+        rows.len() > 100,
+        "a full bleed coloured {} pixels",
+        rows.len()
+    );
+    // the boundary starts below the descender and reaches up at most to the
+    // x-height's middle: nothing red above 300 units
+    let top = rows.iter().min().copied().unwrap();
+    assert!(top >= row_of(300), "red reached row {top}, above 300 units");
+    // /above colours the other end: black text's red head
+    let above = red_rows(&format!("/BleedSide /above /Bleed 1 {ink_red}"), text);
+    assert!(above.len() > 100, "no red head: {}", above.len());
+    assert!(
+        above.iter().max().copied().unwrap() <= row_of(250),
+        "a head reached below 250 units"
+    );
+    // a bleed that cannot reach a letter (no descender, the boundary far
+    // below) is the page without a bleed, to the byte
+    let page = |opts: &str| {
+        ink(&render(&format!(
+            "36 84 moveto << /Machine 1 /Seed 2 {opts} >> tw-setup (Hxdlbk) show"
+        )))
+    };
+    assert_eq!(
+        page("/Bleed 0"),
+        page("/Bleed 0.0001"),
+        "a bleed too small to reach a letter moved ink"
+    );
+}
+
 #[test]
 fn a_strip_types_within_the_cpu_budget() {
     let src = format!(
