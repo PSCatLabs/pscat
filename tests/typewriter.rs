@@ -470,22 +470,97 @@ fn a_copy_loses_its_thin_horizontals_and_keeps_its_stems() {
     let (arms, stem) = e_arms_and_stems(3, 40);
     eprintln!("arms {arms0:.0} -> {arms:.0}, stems {stem0:.0} -> {stem:.0}");
     assert!(
-        arms < arms0 * 0.85,
+        arms < arms0 * 0.93,
         "the arms of three copies' Es did not thin: {arms0:.0} -> {arms:.0}"
     );
     assert!(
         stem > stem0 * 0.8,
         "the stems of three copies' Es were eroded: {stem0:.0} -> {stem:.0}"
     );
-    // a first copy erodes less than a third
+    // a first copy erodes its arms too (the cap evens the strength out from a
+    // first copy on, so it is no weaker than a third: that one is bolder)
     let (arms1, _) = e_arms_and_stems(1, 40);
     let (arms1_off, _) = e_arms_and_stems(1, 0);
     assert!(
-        arms1 / arms1_off > arms / arms0,
-        "one copy lost {:.2}, three {:.2}",
-        arms1 / arms1_off,
-        arms / arms0
+        arms1 < arms1_off * 0.95,
+        "one copy: {arms1_off:.0} -> {arms1:.0}"
     );
+}
+
+/// `text` typed at the default grid through `copies` photocopies after `puts`.
+fn copy_page(puts: &str, copies: u32, text: &str) -> Vec<u8> {
+    ink(&render(&format!(
+        "{puts} 36 84 moveto << /Machine 4 /Seed 3 /Copies {copies} >> tw-setup ({text}) show"
+    )))
+}
+
+/// A third copy is as heavy as its original and no letter fades out (#547,
+/// the review of #594): the erosion is capped, so every strike thins its
+/// horizontals about alike. Negative control: with no cap a light strike loses
+/// its bars and the weakest cell is a fraction of what it was.
+#[test]
+fn a_third_copy_is_as_heavy_as_its_original_and_no_letter_fades() {
+    let text = "EEEEEEEEEEEEEEEE";
+    let mass_of = |img: &[u8]| img.iter().map(|&v| f64::from(v)).sum::<f64>();
+    let orig = mass_of(&copy_page("", 0, text));
+    let copy = copy_page("", 3, text);
+    let kept = mass_of(&copy);
+    assert!(
+        kept >= orig,
+        "a third copy has {kept:.0} of the original's {orig:.0} ink"
+    );
+    // each cell's ink against the same cell with no erosion at all
+    let fat = copy_page("TWState /tECopy 0 put", 3, text);
+    let cell_ink = |img: &[u8], k: usize| -> f64 {
+        let w = width_px();
+        let mut sum = 0.0;
+        for y in 112..150 {
+            for x in 0..CELL {
+                sum += f64::from(img[y * w + X0 + k * CELL + x]);
+            }
+        }
+        sum
+    };
+    let weakest = |img: &[u8]| {
+        (0..16)
+            .map(|k| cell_ink(img, k) / cell_ink(&fat, k))
+            .fold(f64::MAX, f64::min)
+    };
+    let (capped, uncapped) = (
+        weakest(&copy),
+        weakest(&copy_page("TWState /tECopyCap 1000 put", 3, text)),
+    );
+    eprintln!("weakest cell keeps {capped:.2} capped, {uncapped:.2} uncapped");
+    assert!(
+        capped > 0.7,
+        "a letter faded: it keeps {capped:.2} of its ink"
+    );
+    assert!(
+        uncapped < capped - 0.1,
+        "the cap changed nothing: {uncapped:.2} against {capped:.2}"
+    );
+}
+
+/// An underscore rule stays continuous on a third copy (#547): its stroke is
+/// as thick as a letter's bars, so the erosion must not take it in dashes.
+#[test]
+fn an_underscore_rule_stays_continuous_on_a_third_copy() {
+    // the share of the rule's columns that carry ink
+    let covered = |puts: &str| {
+        let img = copy_page(puts, 3, "________________");
+        let w = width_px();
+        let cols = (0..16 * CELL)
+            .filter(|&x| (Y0..Y0 + 30).any(|y| img[y * w + X0 + x] > 100))
+            .count();
+        cols as f64 / (16 * CELL) as f64
+    };
+    let (capped, uncapped) = (covered(""), covered("TWState /tECopyCap 1000 put"));
+    eprintln!("rule columns inked: {capped:.2} capped, {uncapped:.2} uncapped");
+    assert!(
+        capped > 0.97,
+        "the rule broke into dashes: {capped:.2} of its columns inked"
+    );
+    assert!(uncapped < capped, "the cap changed nothing: {uncapped:.2}");
 }
 
 /// An original is not eroded: the key only reads on a copy (#547).

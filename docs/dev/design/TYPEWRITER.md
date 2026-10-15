@@ -525,13 +525,15 @@ No new page-scale CI test is added. #204's concern about CI time stands.
   inside a clip of the glyph grown by the spread's reach (`tEr` in x, half of it
   in y, `tEryK`; nine shifted copies in one path) and shrunk by `tEy` in y only
   (shifted up and down and intersected, `tGrowClip`); the body is as wide as the
-  reach, so the stems are fat. A stroke thinner than about 2 x `tEy` goes (the
-  bars of `e` and `E`, the tops and bottoms of bowls, the serifs and
-  underscores) and a thicker one thins, a stem is untouched. `tEy` is `tECopy`
-  (45 glyph units) x the copy loss x the strike's hole level, so a light strike
-  loses more and a darker one only thins. A copy is no longer heavier in total
-  ink than the original by dark pixels (the thin horizontals are most of a
-  letter's length), but its stems are fatter. Y only, not `tErode`'s square, because the face is
+  reach, so the stems are fat. A stroke thinner than about 2 x `tEy` goes
+  (serifs and joins) and a thicker one (the 65-unit bars, underscores) thins; a
+  stem is untouched. `tEy` is `tECopy` (45 glyph units) x the copy loss x the
+  strike's hole level, **capped at `tECopyCap` (18)**: round 1 let it reach 37, so
+  a light strike lost its bars and a word faded next to a heavy one, and the
+  underscore rule broke in dashes (the review of #594). With the cap every strike
+  erodes alike and the reach grows from the second copy on (`tEgrow`), so a third
+  copy is as heavy as the original or heavier, a first copy is as round 1 had it,
+  and #592 (a copy reading lighter than T15) is answered. Y only, not `tErode`'s square, because the face is
   near monoline (65 to 80 units everywhere): a square erosion thins the stems
   and kills the diagonals first, where T15's face has thin horizontals and heavy
   stems. **#450** (`notes/450-copier-softening-of-marks.md`):

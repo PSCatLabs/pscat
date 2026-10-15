@@ -59,9 +59,7 @@ Sweep on the specimen's third sheet at 300 dpi (`tECopy`; y reach; body):
 (legible, bars gone from light strikes). Without a full-reach body the copy had
 less ink than the original. The ink of the typed test line (72 dpi, dark pixels
 under 128 / ink mass): original 259 / 297; a copy before 418 / 442; after 266 / 267.
-So by dark pixels a third-generation copy is now about as heavy as its original, not
-1.6x, and lighter by mass: its stems are fatter, its horizontals thinner. It
-reads lighter than T15, which is bold throughout.
+This is round 1's weight; round 2 below restores it.
 
 Codex's review of the PR found the growth radii were applied to the wrong axes
 (x got `tEryK` of the reach and y the whole of it); the first sweeps above ran
@@ -100,5 +98,36 @@ Regenerated: `gallery/renders/released_memo.png` (144 dpi),
 ## Not done
 
 - `/InkModel false` (the flat ink) has no erosion on a copy; its fat strokes are #211's.
-- Weight: a copy reads lighter than T15; the underscore rule of the specimen's third
-  sheet breaks into dashes. Both follow from the erosion on this face.
+- Weight against T15 and the underscore dashes (#592) are answered in round 2.
+
+## Round 2 (review of PR #594; absorbs #592)
+
+The first version scaled the erosion by the strike's hole level up to 37 glyph
+units, and the user rejected the look: words next to each other were very
+different (`thir`, `visit`, `signs` nearly gone beside `book`, `floor`, `on`), the
+page was lighter than both the original and T15 (heavy and even), and the
+underscore rule broke into dashes (an underscore is 66 thick, as thick as a
+letter's bars, so a strike with `tEy` above 33 removed it). Changes:
+
+- `tEy` is capped at `tECopyCap` = 18. Nothing vanishes (2 x 18 is under the 79 the
+  clip leaves a bar), the bars thin, and what is under about 36 thick (serifs,
+  joins) breaks. A first copy's `tEy` is at most 20, so it is as it was.
+- The reach grows from the second copy on: `tEr` is multiplied by
+  `1 + tEgrow x (tCopyC - 0.45)` (1.6; 1 for a first copy, 1.56 for a third), so the
+  third copy's stems and bars are fatter.
+- A name clash found on the way: a first attempt called the cap `tECap`, which is
+  the light-strike cap of #477 and was in use; the copy cap is `tECopyCap`.
+
+Typed test line at 300 dpi (dark pixels under 128 / ink mass): original 37,701 /
+33,263; first copy 38,154 / 32,544 (round 1: 37,635 / 32,173); third copy 44,616 /
+37,651 (round 1: 35,164 / 30,021; no erosion at all: 47,889 / 40,702). The specimen's
+third sheet by ink mass: before #547 471,868, round 1 441,481, now 469,024; its first
+sheet's copy differs from round 1 in 3,426 pixels (over 30 grey levels) and has the same
+mass. Sixteen Es: arm ink 357,170 to 316,678 with the erosion, stems 265,887 to 280,444.
+The weakest of sixteen cells keeps 0.84 of its ink (0.58 with no cap); an underscore
+rule has 99% of its columns inked (20% with no cap at `tEy` 37).
+
+Tests: `a_third_copy_is_as_heavy_as_its_original_and_no_letter_fades` and
+`an_underscore_rule_stays_continuous_on_a_third_copy` (each with a negative control
+that lifts the cap), `a_copy_loses_its_thin_horizontals_and_keeps_its_stems` relaxed.
+`gallery/time_traveler_memo.ps` (#591, an original) is byte-identical.

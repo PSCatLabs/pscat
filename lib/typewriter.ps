@@ -453,11 +453,16 @@ TWState begin {
 /tE 0 def  /tE0 0 def                           % the strike's erosion, and a saved copy
 /tEy 0 def  /tEr 0 def  /tEry 0 def                          % a copy's erosion in y, and the spread's reach (#547)
 % a copy loses its thin horizontal strokes (#547): the erosion in y, in glyph
-% units, is tECopy x the copy loss x the strike's hole level (a light strike
-% loses more). The clip grows the glyph by the spread's reach tEr in x but by
-% tEryK of it in y, and the body is as wide as the reach (stems stay fat), so a
-% stroke under about 2 x tEy thick goes and one a little thicker thins.
-/tECopy 45 def  /tEryK 0.5 def
+% units, is tECopy x the copy loss x the strike's hole level, capped at
+% tECopyCap. The cap makes a third copy erode about as hard on every strike: no
+% letter fades out, the horizontals (65 thick) only thin and the thinner serifs
+% and joins break; without it a light strike lost its bars and a word faded next
+% to a heavy one (the review of #594, round 2). The clip grows the glyph by the
+% spread's reach tEr in x and by tEryK of it in y, and the body is as wide as the
+% reach (stems stay fat). The reach grows from the second copy on (by tEgrow per
+% unit of copy loss past a first copy's), so a third copy is as heavy as its
+% original; a first copy is as it was.
+/tECopy 45 def  /tECopyCap 18 def  /tEryK 0.5 def  /tEgrow 1.6 def
 /tGrowOff [ [0 0] [1 0] [0.7071 0.7071] [0 1] [-0.7071 0.7071]
             [-1 0] [-0.7071 -0.7071] [0 -1] [0.7071 -0.7071] ] def
 /tYarn 0.48 def                                 % yarn pitch, points
@@ -807,9 +812,10 @@ grestore
     /fW inkW -0.55 mul def
     /tEy 0 def
     tCopyC 0 gt {
-        /tEr inkW fW add 2 div dup 0 lt { pop 0 } if def
+        /tEr inkW fW add 2 div  1 tCopyC 0.45 sub dup 0 lt { pop 0 } if tEgrow mul add  mul dup 0 lt { pop 0 } if def
         /tEry tEr tEryK mul def
-        /tEy tECopy tCopyC mul pBody dup 1 gt { pop 1 } if dup 0 lt { pop 0 } if mul def
+        /tEy tECopy tCopyC mul pBody dup 1 gt { pop 1 } if dup 0 lt { pop 0 } if mul
+            dup tECopyCap gt { pop tECopyCap } if def
         tEy 0 gt { /wBodyW tEr 2 mul def } if   % the body fills the clip's reach: stems stay fat
     } if
     % the weave's frame: per strike, or per key when strikes do not vary

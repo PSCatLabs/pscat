@@ -167,7 +167,7 @@ fn a_copy_whitens_the_paper_and_the_type_gets_fatter() {
     );
     // the erosion takes the thin horizontals back out of that
     assert!(
-        dark(&c3) < dark(&fat) * 0.8,
+        dark(&c3) < dark(&fat) * 0.95,
         "the eroded copy keeps {} of {} dark pixels",
         dark(&c3),
         dark(&fat)

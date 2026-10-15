@@ -213,11 +213,9 @@ inside a stack of effects, each optional and each off at strength 0:
   `/Generation` above 0, and a high generation that should read bitonal, like
   T15, wants it low: the specimen's third sheet uses 0.2). The content's type gets the
   typewriter's `/Copies` key, which thickens strokes, closes counters and drops
-  light strikes and erodes the thin horizontal strokes by the glyph's outline
-  (`rel-page` sets it for you): the bars of `e` and `E`, the tops and bottoms of
-  bowls and the serifs go on a light strike and thin on a darker one, more at
-  higher generations and unevenly along a line, while the vertical stems stay,
-  as in T15. (`rel-page /Dropout`, a field of holes that did this at random,
+  light strikes and thins the thin horizontal strokes by the glyph's outline
+  (`rel-page` sets it for you): serifs and joins break and the bars of `e` and
+  `E` thin on every strike alike, while the vertical stems stay fat, as in T15. (`rel-page /Dropout`, a field of holes that did this at random,
   is gone: #547.) `/Soften`
   (0 to 1, default 1) blurs the marks a copy copies (stamps, notes, redaction
   bars) with a soft fringe, more with each generation; an original is never
