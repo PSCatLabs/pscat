@@ -29,6 +29,9 @@
 %   marks     over the content, in the original's frame, so a copy copies
 %             them too: staple, clip, notes, stamps. Stamp ink is a clip
 %             with holes, so the page shows through where a stamp is light.
+%             A copy blurs them (/Soften): stamps, notes and redaction bars
+%             get a soft fringe, stepped rings in the ink mixed toward the
+%             paper, wider with each generation (see "softening" below).
 %   typed     lib/typewriter.ps gives the type its own copy loss, its
 %             /Copies key (fill the counters in, thicken the strokes, drop
 %             the light strikes); `rel-page` sets it to /Generation for the
@@ -77,7 +80,7 @@ RelState begin {
     /rlSeed 1 def  /rlW 612 def  /rlH 792 def
     /rlAge 0 def  /rlEdge 0 def  /rlFolds 0 def  /rlFoldAt [ 0.333 0.667 ] def
     /rlLamp 0 def  /rlSkew 0 def  /rlBack null def
-    /rlGen 0 def  /rlHaze 0.6 def  /rlSpeck 1 def  /rlCEdge 0.6 def  /rlDrop 1 def
+    /rlGen 0 def  /rlHaze 0.6 def  /rlSpeck 1 def  /rlCEdge 0.6 def  /rlDrop 1 def  /rlSoft 1 def
     /rlPunch 0 def  /rlStaple 0 def  /rlClip 0 def  /rlShadow 0.6 def
     /rlStamps [ ] def  /rlNotes [ ] def
 } bind def
@@ -117,6 +120,7 @@ RelState begin {
     /Haze       [ /rlHaze   /rlIsUnit   /rel-haze-must-be-0-to-1 ]
     /Speckle    [ /rlSpeck  /rlIsUnit   /rel-speckle-must-be-0-to-1 ]
     /Dropout    [ /rlDrop   /rlIsUnit   /rel-dropout-must-be-0-to-1 ]
+    /Soften     [ /rlSoft   /rlIsUnit   /rel-soften-must-be-0-to-1 ]
     /CopyEdge   [ /rlCEdge  /rlIsUnit   /rel-copyedge-must-be-0-to-1 ]
     /Punch      [ /rlPunch  /rlIsCount  /rel-punch-must-be-an-integer-0-to-8 ]
     /Staple     [ /rlStaple /rlIsCount  /rel-staple-must-be-an-integer-0-to-8 ]
@@ -541,6 +545,39 @@ RelState begin {
     rlSeed 15 rlSeed2 rlPunches
 } bind def
 
+% ---- softening: a copier's blur on the marks (#450) --------------------------------
+% A copier has no sharp edge: T14's stamps, the handwriting and the marker bar all
+% fade over a pixel or two at the edge, where ours were crisp. There is no alpha
+% and no read-back, so the blur is a fringe of stepped rings drawn under the
+% crisp mark: the mark's outline stroked at three widths, outermost first, each in
+% the colour that ink of a growing share (rlSoA) would make laid over the paper
+% (the ink's own colour mixed toward the paper's tone), which antialiasing turns
+% into a gradient about rlSoR x the radius wide. The radius is 0.1 to 0.2pt plus 0.012 to
+% 0.07 of the mark's size, times the softness s. s is the page's /Soften times the
+% copy loss (an original is not blurred: s = 0 and none of this runs, no ring and no random number), or a stamp's or
+% note's own /Soften. A ring is opaque, so it lightens what lies under the fringe;
+% stamps' and notes' fringes are a point wide, so it is the type next to a mark's edge, which
+% the crisp mark covers just as hard.
+/rlSoR [ 1 0.6 0.28 ] def  /rlSoA [ 0.12 0.26 0.46 ] def
+/rlSoftOf {                                         % -> s, the softness of the layer being drawn
+    rlSoft rlCC mul 1.25 mul dup 1 gt { pop 1 } if
+} bind def
+/rlSoCols {                                         % ink-rgb-array -> -  keeps the ink and the paper under it
+    /rlSoI exch def
+    [ rlTone rlCol ] /rlSoP exch def
+} bind def
+/rlSoSet {                                          % ring k -> -  sets that ring's colour
+    rlSoA exch get /rlSoAl exch def
+    rlSoP 0 get rlSoI 0 get rlSoAl rlLerp
+    rlSoP 1 get rlSoI 1 get rlSoAl rlLerp
+    rlSoP 2 get rlSoI 2 get rlSoAl rlLerp
+    setrgbcolor
+} bind def
+/rlPathProc {                                       % the current path -> a procedure that draws it again; the path is cleared
+    mark { /moveto cvx } { /lineto cvx } { /curveto cvx } { /closepath cvx } pathforall
+    counttomark array astore exch pop cvx newpath
+} bind def
+
 % ---- marks over the content -------------------------------------------------
 % a staple: the bar, its shadow, a highlight and the dark of the prongs
 /rlStapleAt {                                       % x y angle -> -
@@ -586,7 +623,7 @@ RelState begin {
 % under it) shows through where the stamp is light
 /rlStampKeys <<
     /Lines 1 /Text 1 /X 1 /Y 1 /Angle 1 /Size 1 /Ink 1 /Frame 1 /Strength 1 /Seed 1
-    /Font 1 /Tracking 1
+    /Font 1 /Tracking 1 /Soften 1
 >> def
 /rlIsStamp {
     dup type /dicttype eq {
@@ -594,6 +631,43 @@ RelState begin {
             pop rlStampKeys exch known and
         } forall
     } { pop false } ifelse
+} bind def
+% the stamp's text as one path, a character at a time (the tracking is ashow's)
+/rlStampPath {
+    newpath
+    0 1 rsLines length 1 sub {
+        /rsI exch def
+        rsLines rsI get /rsT exch def
+        rsT dup stringwidth pop exch length 1 sub rsTrk mul add 2 div neg /rsPx exch def
+        rsLines length rsLH mul 2 div rsLH rsI 0.8 add mul sub /rsPy exch def
+        0 1 rsT length 1 sub {
+            /rsC exch def
+            rsT rsC 1 getinterval /rsCh exch def
+            rsPx rsPy moveto rsCh false charpath
+            /rsPx rsPx rsCh stringwidth pop add rsTrk add def
+        } for
+    } for
+} bind def
+% the fringe: the text and the frame stroked wider and wider under the ink
+/rlStampRings {
+    [ rsInk aload pop rlCol ] rlSoCols
+    rsSize 0.055 mul 0.2 add rsSoft mul /rsR exch def
+    gsave
+    1 setlinejoin 1 setlinecap
+    0 1 2 {
+        /rsK exch def
+        rsK rlSoSet
+        rsR rlSoR rsK get mul 2 mul /rsW exch def
+        rsW setlinewidth rlStampPath stroke
+        rsFrame /none ne {
+            rsSize 0.075 mul rsW add setlinewidth
+            rsBW 2 div neg rsBH 2 div neg rsBW rsBH rectstroke
+            rsFrame /double eq {
+                rsBW 2 div neg 2.4 add rsBH 2 div neg 2.4 add rsBW 4.8 sub rsBH 4.8 sub rectstroke
+            } if
+        } if
+    } for
+    grestore
 } bind def
 /rlStampDraw {
     dup rlIsStamp not { pop end rel-stamp-must-be-a-dict-of-known-keys } if
@@ -611,6 +685,7 @@ RelState begin {
     rsD /Seed known { rsD /Seed get } { 1 } ifelse /rsSeed exch def
     rsD /Font known { rsD /Font get } { /Helvetica-Bold } ifelse /rsFont exch def
     rsD /Tracking known { rsD /Tracking get } { 0 } ifelse /rsTrk exch def
+    rsD /Soften known { rsD /Soften get } { rlSoftOf } ifelse /rsSoft exch def
     rsX rlIsNum rsY rlIsNum and rsAng rlIsNum and not { end rel-stamp-x-y-and-angle-must-be-numbers } if
     rsSeed rlIsInt not { end rel-stamp-seed-must-be-an-integer } if
     rsLines type /arraytype ne { end rel-stamp-lines-must-be-an-array-of-strings } if
@@ -620,6 +695,7 @@ RelState begin {
     rsFrame dup /box eq exch dup /double eq exch /none eq or or not
     { end rel-stamp-frame-must-be-box-double-or-none } if
     rsTrk rlIsNum not { end rel-stamp-tracking-must-be-a-number } if
+    rsSoft rlIsUnit not { end rel-stamp-soften-must-be-0-to-1 } if
     rsFont type /nametype ne { end rel-stamp-font-must-be-a-name } if
     rsLines { type /stringtype ne { end rel-stamp-lines-must-be-an-array-of-strings } if } forall
     rsFont findfont pop
@@ -649,6 +725,7 @@ RelState begin {
         rlU 0.5 sub rsBW mul rlU 0.5 sub rsBH mul rlU 3 mul 1.5 add 8 0.35 rlBlob
     } for
     eoclip newpath
+    rsSoft 0 gt { rlStampRings } if
     rsInk aload pop rlSet
     rsFrame /none ne {
         rsSize 0.075 mul setlinewidth 1 setlinejoin
@@ -668,7 +745,7 @@ RelState begin {
 } bind def
 
 % margin notes: hs-write (lib/handscript.ps) at a place and an angle
-/rlNoteKeys << /Text 1 /X 1 /Y 1 /Angle 1 /Size 1 /Width 1 /Ink 1 /Seed 1 /Pen 1 >> def
+/rlNoteKeys << /Text 1 /X 1 /Y 1 /Angle 1 /Size 1 /Width 1 /Ink 1 /Seed 1 /Pen 1 /Soften 1 >> def
 /rlIsNote {
     dup type /dicttype eq {
         true exch { pop rlNoteKeys exch known and } forall
@@ -688,15 +765,32 @@ RelState begin {
     rnD /Ink known { rnD /Ink get } { [ 0.13 0.14 0.34 ] } ifelse /rnInk exch def
     rnD /Seed known { rnD /Seed get } { 1 } ifelse /rnSeed exch def
     rnD /Pen known { rnD /Pen get } { 36 } ifelse /rnPen exch def
+    rnD /Soften known { rnD /Soften get } { rlSoftOf } ifelse /rnSoft exch def
     rnX rlIsNum rnY rlIsNum and rnAng rlIsNum and not { end rel-note-x-y-and-angle-must-be-numbers } if
     rnSize rlIsPos not rnWidth rlIsPos not or { end rel-note-size-and-width-must-be-positive } if
     rnInk rlIsRgb not { end rel-note-ink-must-be-an-rgb-array } if
     rnSeed rlIsInt not { end rel-note-seed-must-be-an-integer } if
+    rnSoft rlIsUnit not { end rel-note-soften-must-be-0-to-1 } if
     gsave
     rnX rnY translate rnAng rotate
     rrand /rnOld exch def
+    [ rnInk aload pop rlCol ] /rnCore exch def
+    rnSoft 0 gt {
+        rnCore rlSoCols
+        [ 0 1 2 { /rnJ exch def rlSoI rnJ get rlSoP rnJ get rnSoft 0.2 mul rlLerp } for ] /rnCore exch def
+        rnSize 0.012 mul 0.1 add rnSoft mul /rnR exch def
+        0 1 2 {
+            /rnK exch def
+            rnK rlSoSet currentrgbcolor 3 array astore /rnRc exch def
+            << /Text rnD /Text get /Size rnSize /Width rnWidth /Height rnSize 0.75 mul /Margin 0
+               /Leading 1.25 /Ink rnRc /Seed rnSeed /StartWobble 0 /Jitter 18
+               /Pen rnPen rnR rlSoR rnK get mul 2000 mul rnSize div add >>
+            end hs-write RelState begin
+        } for
+    } if
+    % the pen's own pass: a blurred line gives up some of its darkness
     << /Text rnD /Text get /Size rnSize /Width rnWidth /Height rnSize 0.75 mul /Margin 0
-       /Leading 1.25 /Ink [ rnInk aload pop rlCol ] /Seed rnSeed /StartWobble 0 /Jitter 18 /Pen rnPen >>
+       /Leading 1.25 /Ink rnCore /Seed rnSeed /StartWobble 0 /Jitter 18 /Pen rnPen >>
     end hs-write RelState begin
     rnOld srand
     grestore
@@ -704,6 +798,22 @@ RelState begin {
 
 % a marker's redaction bar over x0..x1 at a baseline, `size` points type:
 % ragged edges, a slight tilt, a second streaky pass
+% the bar's fringe, under its crisp fill: each pass's outline stroked wider and
+% wider (outermost first, over every pass), then the passes filled. rdPaths holds
+% the passes' paths as procedures.
+/rlBarRings {
+    rlRInk rlSoCols
+    rdS 0.07 mul 0.2 add rdSoft mul /rdR exch def
+    1 setlinejoin 1 setlinecap
+    0 1 2 {
+        /rdK exch def
+        rdK rlSoSet
+        rdR rlSoR rdK get mul 2 mul setlinewidth
+        rdPaths { newpath exec stroke } forall
+    } for
+    rlRInk aload pop setrgbcolor
+    rdPaths { newpath exec fill } forall
+} bind def
 /rlRedactDraw {                                     % x0 x1 y size -> -
     /rdS exch def /rdY exch def /rdX1 exch def /rdX0 exch def
     rdX0 rlIsNum rdX1 rlIsNum and rdY rlIsNum and rdS rlIsNum and not
@@ -721,6 +831,7 @@ RelState begin {
     rlRInk aload pop setrgbcolor
     rdX0 rdY translate rlR 0.4 mul rotate rdX0 neg rdY neg translate
     rdY rdS 0.82 mul add /rdTop exch def
+    rlSoftOf /rdSoft exch def  /rdPaths [ ] def
     rdY rdS 0.27 mul sub /rdBot exch def
     360 rlU 40 mul 55 add div /rdK exch def
     rlU 360 mul /rdPh exch def
@@ -747,8 +858,10 @@ RelState begin {
         { dup rdXl 3 add le { pop exit } if
           dup dup rdK mul rdPh add sin rdA mul rdBot add rlRag 0.5 mul rlR mul add rdIn add lineto
           rlU 1.2 mul 1.6 add sub } loop
-        closepath fill
+        closepath
+        rdSoft 0 gt { rlPathProc /rdTmp exch def /rdPaths [ rdPaths aload pop /rdTmp load ] def } { fill } ifelse
     } for
+    rdSoft 0 gt { rlBarRings } if
     grestore
 } bind def
 
@@ -1021,6 +1134,12 @@ rlDefaults
 %   { { } << /Generation 1.5 >> rel-page } /rel-generation-must-be-an-integer-0-to-8
 %   (half a generation) mustguard
 %
+%   { { } << /Soften 1.5 >> rel-page } /rel-soften-must-be-0-to-1
+%   (a soften above 1) mustguard
+%
+%   { << /Lines [ (a) ] /Soften -0.1 >> rel-stamp } /rel-stamp-soften-must-be-0-to-1
+%   (a negative soften on a stamp) mustguard
+%
 %   { { } << /Haze 1.5 >> rel-page } /rel-haze-must-be-0-to-1
 %   (a haze above 1) mustguard
 %
@@ -1065,6 +1184,7 @@ rlDefaults
 % @param: /Haze [0..1] The grey of a photocopy's paper: toner fog that takes the copy's white down to a light grey (about 0.90 at the default, 0.84 at 1), with a crumpled-paper wave of thicker and thinner toner (soft blotches, tilted noise and a few long creases) and a fine grain of lighter and darker flecks under the type. Applies only when /Generation is above 0; 0 gives the plain white copy (default 0.6)
 % @param: /Speckle [0..1] Each copy's black specks and streaks (default 1)
 % @param: /Dropout [0..1] The thin strokes a copy loses: its content is drawn through small upright holes that cut a hairline in two and only notch a stem, commoner at higher /Generation and uneven along a line, as in a bitonal release copy; a bar drawn by rel-redact stays solid (a plain black bar from tw-type is cut like any content, so give tw-type /Redactor { rel-redact }); 0 gives the copy without them (default 1)
+% @param: /Soften [0..1] How far a copy blurs its marks: the stamps, notes and redaction bars get a soft fringe, wider with each /Generation (the page's value times the copy loss); an original is never blurred, and 0 keeps a copy's marks crisp (default 1)
 % @param: /CopyEdge [0..1] How dark the copier's lid and edge shadows are (default 0.6)
 % @param: /Punch [count] Punch holes down the left margin: 2 and 3 are the standard spacings (default 0)
 % @param: /Staple [count] Staples across the top corner (default 0)
@@ -1121,6 +1241,7 @@ rlDefaults
 % @param: /Font [name] The typeface, any findfont name (default /Helvetica-Bold)
 % @param: /Tracking [points] Extra space after each letter: the spaced capitals of a date stamp (default 0)
 % @param: /Seed [integer] Seeds the holes; the same dict presses the same stamp (default 1)
+% @param: /Soften [0..1] The soft fringe of a copier's blur around the text and frame; default is the page's /Soften times its copy loss, so a stamp outside rel-page, or in an original, is crisp (default none)
 /rel-stamp {
     RelState begin rlStampDraw end
 } bind def
@@ -1137,6 +1258,7 @@ rlDefaults
 % @param: /Ink [rgb array] The pen's colour (default a blue ballpoint)
 % @param: /Pen [count] The pen's width in glyph units, thousandths of an em, as lib/handscript.ps /Pen (default 36)
 % @param: /Seed [integer] Seeds the pen's wobble (default 1)
+% @param: /Soften [0..1] A copier's blur: a fringe of lighter, wider strokes around the pen's line, and the line itself a little lighter; default is the page's /Soften times its copy loss, so a note outside rel-page, or in an original, is crisp (default none)
 /rel-note {
     RelState begin rlNoteDraw end
 } bind def
@@ -1146,6 +1268,7 @@ rlDefaults
 % @example: (lib/artkit.ps) run (lib/surfacekit.ps) run (lib/released.ps) run 100 300 4 12 rel-redact 100 100 400 100 12 rel-redact showpage
 % @param: /Redact [0..1] How ragged the bar is, set through rel-page (default 0.5)
 % @param: /RedactInk [rgb array] The bar's colour, set through rel-page (default near black)
+% @param: /Soften [0..1] Set through rel-page: inside a copy the bar's edge fades over a point or two (see rel-page; default 1)
 /rel-redact {
     RelState begin rlRedactDraw end
 } bind def
