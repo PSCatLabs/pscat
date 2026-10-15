@@ -41,7 +41,7 @@ width (no read-back, no alpha).
   `tw-type` draws itself (no `/Redactor`) is cut like the type (slits in the bar,
   no word leaks: the word is cut too), so use `/Redactor { rel-redact }`; it is the
   gallery memo's and the specimen's. `rlRedactDraw` records
-  its operands and CTM while the content runs (`rlRecOn`), and `rlBarsAgain` draws
+  its operands, CTM and the bounds of the clip it was called under while the content runs (`rlRecOn`; the replay is clipped to those bounds, which a review found missing: a bar the content had clipped away was drawn whole), and `rlBarsAgain` draws
   the bars again whole after the clip is dropped (the generator is put back, so
   the stamps and notes that follow are the same). Other solid fills in the
   content get holes: dropout acts on whatever the content draws; `/Dropout 0`

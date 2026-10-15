@@ -708,7 +708,13 @@ RelState begin {
     /rdS exch def /rdY exch def /rdX1 exch def /rdX0 exch def
     rdX0 rlIsNum rdX1 rlIsNum and rdY rlIsNum and rdS rlIsNum and not
     { end rel-redact-operands-must-be-numbers } if
-    rlRecOn { /rlBars [ rlBars aload pop [ rdX0 rdX1 rdY rdS matrix currentmatrix ] ] def } if
+    % the bar's operands, its CTM and the bounds of the clip it was called under (a
+    % content may clip the bar to a region: the replay must not draw outside it)
+    rlRecOn {
+        gsave newpath clippath pathbbox grestore
+        4 array astore /rdCb exch def
+        /rlBars [ rlBars aload pop [ rdX0 rdX1 rdY rdS matrix currentmatrix rdCb ] ] def
+    } if
     gsave
     newpath
     rdX0 10 mul cvi rdY 3 mul cvi rlSeed2
@@ -898,8 +904,10 @@ RelState begin {
 /rlBarsAgain {
     rlSt /rlDcSt exch def
     rlBars {
-        aload pop /rlBm exch def
-        gsave rlBm setmatrix rlRedactDraw grestore
+        aload pop /rlBc exch def /rlBm exch def
+        gsave rlBm setmatrix
+        rlBc 0 get rlBc 1 get rlBc 2 get rlBc 0 get sub rlBc 3 get rlBc 1 get sub rectclip
+        rlRedactDraw grestore
     } forall
     /rlSt rlDcSt def
 } bind def

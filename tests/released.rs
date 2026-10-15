@@ -815,3 +815,32 @@ fn a_content_that_errors_does_not_leave_the_bar_recorder_on() {
         Some("false".to_string())
     );
 }
+
+#[test]
+fn a_redaction_bar_drawn_under_the_contents_own_clip_stays_inside_it() {
+    // review of #449: the bar is drawn again after the holes' clip is dropped, and
+    // must keep the clip the content had put on it
+    let p = {
+        let mut it = Interp::with_page_scaled(W, H, 4.0).expect("page");
+        load(&mut it);
+        it.run_str(&format!(
+            "1 setgray clippath fill {{ 100 0 100 200 rectclip 20 280 100 12 rel-redact }} \
+             << {SHEET} /Generation 3 /Speckle 0 /Haze 0 /CopyEdge 0 >> rel-page"
+        ))
+        .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+        lum(&it)
+    };
+    let w = (W * 4) as usize;
+    let dark = |x0: usize, x1: usize| {
+        (0..(H * 4) as usize)
+            .map(|y| {
+                p[y * w + 4 * x0..y * w + 4 * x1]
+                    .iter()
+                    .filter(|&&v| v < 100)
+                    .count()
+            })
+            .sum::<usize>()
+    };
+    assert!(dark(110, 190) > 300, "the bar shows inside the clip");
+    assert_eq!(dark(0, 90), 0, "and not outside it");
+}
