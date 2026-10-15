@@ -35,8 +35,9 @@
 %                    (a half-light, then its core) lights the lumpy
 %                    underside from the glow below, its load following
 %                    the same sun glow along each cloud (#462)
-%                    and worked wet into the sky asked at each stroke's own
-%                    place (pkwet /PerFill, #491), not one sky colour per cloud
+%                    and the body worked wet into the sky asked at each
+%                    stroke's own place (pkwet /PerFill, #491), not one sky
+%                    colour per cloud
 %   one canvas       pkcanvas (#182) once, first: every light, dry mark
 %   (#182)           (water lines, foam, meadow, grass tips) catches on
 %                    the same weave via /Touch
@@ -273,10 +274,13 @@
     evcx evcy curveto closepath
 } def
 
-% -> dict   pkwet's options for a cloud: the wet edge is worked into the sky
-% asked at each fill's own place (#491, /PerFill), so a stroke at the cloud's
-% top blends toward the sky up there and one at its foot toward the sky down
-% there, not one sky colour for the whole cloud
+% -> dict   pkwet's options for a cloud's body: the wet edge is worked into
+% the sky asked at each fill's own place (#491, /PerFill), so a stroke at the
+% cloud's top blends toward the dark sky up there and one lower down toward the
+% lighter sky there, not one sky colour for the whole cloud. The lit underside's
+% passes keep the one sky colour: per fill they lightened the fringe under the
+% cream without bringing it closer to the sky, and the top, where the gradient
+% shows, is the body's.
 /evcwet {
     << /Soft 0.6 /Under { evskyat } /PerFill true
        /At [ evcx evcw 2 div add evcy evch 0.5 mul add ] >>
@@ -326,7 +330,7 @@
       { << /Width evcr 2.4 mul /Charge 0.8 /Depletion 0.1 /Edge 0 /ColorMix 0.8
            /Colors [ [ evclit evRIM 0.25 mix3 ] [ evclit evcbody 0.15 mix3 ] ] >> pkbroad }
       evcgrouped }
-    evcwet pkwet
+    << /Soft 0.6 /Under evcunder >> pkwet
 } bind def
 
 % ---- the distant ridge -----------------------------------------------

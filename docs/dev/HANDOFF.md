@@ -1093,8 +1093,8 @@ renders eight examples in both and compares block-downsampled output).
   displacement included. It never touches the depth counter (an error leaves
   through the pass's own `stopped`), unlike `pqaskunder`, which runs before the
   passes. The ridge and mix colours of `pkoil` and `pkdab` still use `puwet` (per pass).
-  Evening Stream's clouds (`evcwet`, #491) are the one gallery adopter: `/PerFill true` with
-  `/Under { evskyat }`, no `/FillLength` (their strokes are short circles).
+  Evening Stream's cloud bodies (`evcwet`, #491) are the one gallery adopter: `/PerFill true` with
+  `/Under { evskyat }`, no `/FillLength` (their strokes are short circles); the lit passes stay on one sky colour.
   `/FillLength` (#492) cuts one long run into several fills: `ptemit` (pktrowel)
   and `pmemit` (pkbroad) ask `pufilllen` (the smallest positive length among the
   levels running a softening pass, 0 otherwise) and, when it is positive and
