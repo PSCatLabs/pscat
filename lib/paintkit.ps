@@ -5179,7 +5179,8 @@
 % the default is not: the default stays at 16, so a call that leaves
 % /Layers alone draws what it always did. The canvas specimen's pull
 % (examples/paintkit_canvas_demo.ps) is /Offset 28 /Layers 29 (issue #417;
-% /Layers 16 over the same 28pt, or /Offset 15 at 16 layers, still bands).
+% /Layers 16 over the same 28pt, or /Offset 20 at 16 layers, still bands;
+% /Offset 15 at 16 layers is better but leaves faint steps and a stubby pull).
 %
 % Cost, directional. A pull is up to 32x its procedure, and pulling a
 % reflection -- itself a second copy of the scene -- then grazing it
@@ -6012,8 +6013,8 @@
         % gets every other offset and its step is twice that (Codex
         % review: /Offset 12 at 7 layers put a sweep's copies 4pt apart).
         % Past the cap -- a one-sided Offset over 30, a two-sided one over
-        % 15 -- the step grows; pin /Layers lower and /Offset shorter, or
-        % accept it. Only the default: an explicit /Layers is honored as
+        % 15 -- the step grows; pin /Layers higher (up to 32) or /Offset
+        % shorter, or accept it. Only the default: an explicit /Layers is honored as
         % given, and a single-layer call (/Soft 0) stays the plain call it
         % is everywhere else.
         pqopts /Layers known not pqLayers 1 gt and {

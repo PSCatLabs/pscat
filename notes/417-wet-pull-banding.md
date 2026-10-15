@@ -55,12 +55,14 @@ graded tail). The pixel diff of the page is confined to that panel (x 1068..1490
 y 777..1071 at 2x). The base tree reproduced the committed PNG byte for byte
 first, with `--dpi 144 --page 780x640`.
 
-Renders regenerated: `docs/dev/design/paintkit_canvas_demo.png` only.
+Renders regenerated: `docs/dev/design/paintkit_canvas_demo.png` only. Before and
+after of the pull panel, side by side: `docs/dev/design/paintkit_canvas_pull_417_compare.png`
+(left before, right after; built from 2x renders of the base tree and this branch).
 
-## Not done
+## Not done (filed as p3)
 
 - Moving the default to 1pt steps would deepen every directional pull in the
-  gallery (alpine_lake, evening_stream and others) and move their renders. A
-  keyed opt-in costs nothing, and the default is a separate decision.
+  gallery (alpine_lake, evening_stream and others) and move their renders. The
+  default is a separate decision: #483.
 - The pull's left and right edges stagger (the `/Stretch` wobble, one draw per
-  pass, now 28 of them). They read as a worn edge, not as banding.
+  pass, now 28 of them). They read as a worn edge, not as banding: #484.
