@@ -31,7 +31,7 @@ What they settle:
   degrees each, three in turn, so a row of them is not a row of copies.
 - Layers, bottom to top: the rust ghost (the whole wire in a brown tone, heavier along
   the inner loop and in two small blots at the bottom turn and the apex; strength
-  0.16 + 0.3 /Age); the dent (the inner loop as a groove on the shadow side and a
+  0.05 + 0.45 /Age: rust takes time, so a fresh sheet shows the dent and hardly any rust); the dent (the inner loop as a groove on the shadow side and a
   pale lip on the light side); the outer loop's shadow; the wire (dark edge, mid
   grey, glint).
 - Everything goes through `rlSet`/`rlToneTo`/`rlToneX`, so a copy greys the clip and the
@@ -43,10 +43,10 @@ What they settle:
   no file as changed.
 - `tests/released.rs`: `a_clip_is_a_gem_wire_at_the_top_edge_with_the_inner_loop_only_a_dent`.
 
-## Not done
+## Decisions
 
-- The clip is not softened by a copy (`/Soften`, #450 covers stamps, notes and
-  bars). Under a copy the wire stays crisp, as the copier's lid image of a real
-  clip is.
+- The clip is not softened by a copy (`/Soften`, #450, covers stamps, notes and
+  bars). A clip is hard metal drawn crisp; a real copy of a clipped page shows its
+  edge sharp. Chosen, not deferred.
 - The clip's bend is drawn at the sheet's edge, inside the sheet: marks are clipped
   to the sheet, so the part of the wire that wraps over the edge is not shown.
