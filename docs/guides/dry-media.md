@@ -35,9 +35,16 @@ the stick's contact patch meets raised tooth.
   bound before the batch calls `clip`, `gsave` and `grestore` directly,
   so drykit sees neither its clips nor its restores. If you pass a
   callback that clips and strokes to a bound `gsave ... exec ... grestore`
-  wrapper, the batch's later strokes stay under that clip. Standard
-  PostScript gives drykit no way to see that `grestore` (why:
-  `notes/459-bound-wrapper-grestore.md`). Any of these three fixes it:
+  wrapper, pscat still draws it exactly: drykit asks pscat's
+  `.sameclip` (a pscat-only operator) whether the clip it captured is
+  still in force, and sees the wrapper's `grestore` that way. In pscat,
+  once a plain clip made in the batch has been captured, any later clip
+  change, bound or not, is picked up at the next stroke; a clip made by
+  bound code before any plain clip in the batch is still not kept
+  (`notes/488-sameclip.md`). Under Ghostscript the batch's later strokes
+  stay under that clip, since standard PostScript gives drykit no way to
+  see that `grestore` (why: `notes/459-bound-wrapper-grestore.md`). For a
+  program that must draw the same in both, any of these three fixes it:
 
   ```postscript
   /wrap { gsave exec grestore } bind def   % bound before the batch

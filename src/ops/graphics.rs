@@ -61,6 +61,9 @@ pub fn install(dict: &mut Dict) {
     op(dict, "currentalpha", currentalpha);
     op(dict, "setblendmode", setblendmode);
     op(dict, "currentblendmode", currentblendmode);
+    // pscat extension (issue #488): a clip identity query, dot-named as
+    // non-standard; lib/drykit.ps probes it with `where`.
+    op(dict, ".sameclip", sameclip);
     // Rectangle conveniences (Level 2)
     op(dict, "rectfill", rectfill);
     op(dict, "rectstroke", rectstroke);
@@ -332,6 +335,24 @@ fn setgstate(it: &mut Interp) -> Result<(), PsError> {
         return Err(PsError::Typecheck);
     };
     *it.gfx.state_mut() = g.borrow().clone();
+    Ok(())
+}
+
+/// `gstate .sameclip bool` (pscat extension, #488; not a PLRM operator
+/// and absent from Ghostscript): true when the clip in force is the very
+/// clip the gstate holds -- both none, or the same clip chain. Identity,
+/// not geometry: `gsave`/`grestore`, `setgstate` and `save`/`restore`
+/// keep it; any `clip`, `eoclip`, `rectclip` or `initclip` after a clip
+/// breaks it, even one with an identical path. `lib/drykit.ps` uses it
+/// to see a `grestore` it has no shadow for (a bound wrapper's).
+fn sameclip(it: &mut Interp) -> Result<(), PsError> {
+    let obj = it.pop()?;
+    let Value::GState(g) = &obj.value else {
+        it.push(obj);
+        return Err(PsError::Typecheck);
+    };
+    let same = it.gfx.state().same_clip(&g.borrow());
+    it.push(Object::bool(same));
     Ok(())
 }
 

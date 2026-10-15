@@ -233,6 +233,8 @@ that `/Spread` and `/Load` keep their one shared meaning.
   and README. The *library* built on them (`pkwash`, `pkpaper`,
   `pkalphaok`) is cataloged normally, and its summaries name the
   operators, so a catalog-only reader isn't left unaware they exist.
+  The same holds for `.sameclip` (#488), a clip identity query drykit
+  probes for (`dkbatch`'s summary names it).
 - **No `--capabilities <kind>` filter.** The CLI always prints the
   full payload; an agent that wants just palettes filters the JSON
   itself. Simpler for a first version — revisit if the payload size

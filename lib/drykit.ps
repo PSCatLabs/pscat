@@ -954,11 +954,15 @@
         % renders, and clipping to it twice would thin its edges.
         % A plain clip changed inside the batch (#444): the gstate taken at
         % the first stroke after the change, shared until the next one.
+        % In pscat a capture whose clip is no longer in force (a grestore
+        % drykit has no shadow for, #488) is taken again.
         dkSrec /clip
             dkBb /pc get null eq {
                 userdict /dkClip known { userdict /dkClip get } { null } ifelse
                 dup dkBb /base get eq { pop null } if
             } {
+                dkBb /pc get dup type /gstatetype eq
+                    { dkPsame not { dkBb /pc /dirty put } if } { pop } ifelse
                 dkBb /pc get /dirty eq { dkBb /pc gstate put } if
                 dkBb /pc get
             } ifelse
@@ -1035,9 +1039,17 @@
 % cannot follow goes to /dirty, never to null: /dirty only costs grouping.
 % Procedures bound before the batch reach the operators directly and are
 % not seen (the old behaviour: the clip in force when the batch ends). An
-% unseen grestore after a seen clip leaves /pc on a stale capture until the
-% next change drykit sees; standard PostScript cannot detect it (#459,
-% notes/459-bound-wrapper-grestore.md).
+% unseen grestore after a seen clip would leave /pc on a stale capture:
+% standard PostScript cannot detect it (#459,
+% notes/459-bound-wrapper-grestore.md), but pscat's .sameclip can, so
+% there dkstroke takes the capture again when its clip is no longer in
+% force (#488, notes/488-sameclip.md). Under Ghostscript the capture stays
+% stale until the next change drykit sees.
+% @internal
+systemdict /.sameclip known /dkPsameok exch def
+% gstate -> bool   (the clip in force is the gstate's; true without .sameclip)
+% @internal
+/dkPsame { dkPsameok { .sameclip } { pop true } ifelse } bind def
 % @internal
 /dkPdirty {
     userdict /dkBatch known { userdict /dkBatch get /pc /dirty put } if
@@ -1621,7 +1633,7 @@
 } bind def
 
 % @kind: Procedure
-% @summary: Runs a procedure whose dkstroke calls are drawn together, level-major: every stroke's faint level first, then every bright one, so crossing layers of hatching or re-stroked lines stay dark where they cross instead of the second layer's faint level greying the first's core. One pigment per batch: a stroke of another colour raises dkbatch-mixes-pigments unless it is an /After stroke, which is drawn on its own after the batch renders, in call order. Batches don't nest. Each stroke keeps the coordinate system it was given in, and the clip it was made under: the region of any dkclip, and a plain clip, eoclip or rectclip made inside the batch (strokes under one such clip still share their catches). A procedure bound before the batch reaches the clip operators and gsave/grestore directly, so drykit sees neither its clips nor its restores: a callback that clips and strokes inside a bound gsave ... exec ... grestore wrapper leaves the batch's later strokes under that clip, and standard PostScript gives drykit no way to see that grestore. Use dkclip inside the callback, call the bound wrapper inside a gsave ... grestore of your own, or bind the wrapper inside the batch.
+% @summary: Runs a procedure whose dkstroke calls are drawn together, level-major: every stroke's faint level first, then every bright one, so crossing layers of hatching or re-stroked lines stay dark where they cross instead of the second layer's faint level greying the first's core. One pigment per batch: a stroke of another colour raises dkbatch-mixes-pigments unless it is an /After stroke, which is drawn on its own after the batch renders, in call order. Batches don't nest. Each stroke keeps the coordinate system it was given in, and the clip it was made under: the region of any dkclip, and a plain clip, eoclip or rectclip made inside the batch (strokes under one such clip still share their catches). A procedure bound before the batch reaches the clip operators and gsave/grestore directly, so drykit does not see its clips or restores themselves. In pscat that matters only before the batch's first plain clip: once a plain clip made in the batch has been captured, pscat's .sameclip shows drykit any later clip change at the next stroke, bound or not, so a callback that clips and strokes inside a bound gsave ... exec ... grestore wrapper is exact. A clip made by bound code before any plain clip in the batch is still not kept. Under Ghostscript the wrapper leaves the batch's later strokes under that clip, since standard PostScript gives no way to see that grestore. For a program that must draw the same in both, use dkclip inside the callback, call the bound wrapper inside a gsave ... grestore of your own, or bind the wrapper inside the batch.
 % @example: 0.12 0.12 0.13 setrgbcolor { 0 6 120 { newpath dup 0 moveto 120 add 120 lineto << /Width 1.2 >> dkstroke } for } dkbatch
 /dkbatch {
     dup dkisproc not { pop dkbatch-needs-a-procedure } if

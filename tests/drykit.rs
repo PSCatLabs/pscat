@@ -999,7 +999,7 @@ fn a_plain_clip_in_a_batch_renders_as_at_once() {
     const FREE: &str = "newpath 10 92 moveto 130 92 lineto << /Width 4 >> dkstroke";
     const LIFT: &str = "0.2 0.3 0.25 setrgbcolor newpath 10 50 moveto 130 50 lineto \
                         << /Width 6 /After true >> dkstroke";
-    let cases: [(&str, String); 13] = [
+    let cases: [(&str, String); 15] = [
         (
             "a nested eoclip",
             format!("gsave {RING} {CL} grestore {FREE}"),
@@ -1051,9 +1051,25 @@ fn a_plain_clip_in_a_batch_renders_as_at_once() {
                 "/dktwrap2 {{ gsave exec grestore }} bind def {{ {RING} {CL} }} dktwrap2 {FREE}"
             ),
         ),
+        (
+            "a bare bound wrapper (pscat's .sameclip sees its grestore, #488)",
+            format!("{{ {RING} {CL} }} dktwrap {FREE}"),
+        ),
+        (
+            // strokes apart from each other: overlapping strokes under
+            // different clips layer differently in a batch whatever the clip
+            "a bound clip after a seen one (.sameclip sees it, #488)",
+            format!(
+                "gsave {RING} newpath 45 40 moveto 48 60 lineto << /Width 4 >> dkstroke \
+                 dktclip newpath 72 77 moveto 95 56 lineto << /Width 6 >> dkstroke \
+                 grestore {FREE}"
+            ),
+        ),
     ];
     // a wrapper bound before any batch: its gsave/grestore are unseen
-    const WRAP: &str = "/dktwrap { gsave exec grestore } bind def ";
+    // and a clip bound before any batch: unseen too
+    const WRAP: &str = "/dktwrap { gsave exec grestore } bind def \
+                        /dktclip { 30 20 70 50 rectclip } bind def ";
     let differ = |a: &[u8], b: &[u8]| a.chunks(4).zip(b.chunks(4)).filter(|(p, q)| p != q).count();
     let at_once = |body: &str| {
         // dkclip with no batch open is plain clip-and-run
@@ -1086,6 +1102,24 @@ fn a_plain_clip_in_a_batch_renders_as_at_once() {
         lost > 200,
         "with the shadows blocked only {lost} pixels changed: the check cannot see the clip"
     );
+    // Without .sameclip (drykit's Ghostscript path, forced here) the bound
+    // wrapper's grestore and the bound clip go unseen: the bare wrapper's
+    // clip leaks to FREE (the documented limit, #459), and the strokes after
+    // the bound clip miss it. The control that the last two rows are live.
+    for (what, body) in &cases[13..] {
+        let stale = data(&board(
+            140,
+            100,
+            2.0,
+            &format!("{WRAP}/dkPsameok false def {{ {body} }} dkbatch"),
+        ));
+        let d = differ(&at_once(body), &stale);
+        eprintln!("{what}, without .sameclip: {d} pixels differ");
+        assert!(
+            d > 200,
+            "{what}: without .sameclip only {d} pixels changed: the row cannot see the change"
+        );
+    }
 }
 
 /// #444: strokes under one plain clip share one gstate, so they group in
@@ -1592,8 +1626,10 @@ fn pixel_diff(a: &[u8], b: &[u8]) -> usize {
 /// (a gstate saved and put back, which is exact while nothing else changes
 /// between the two), installed in systemdict before drykit loads. Each
 /// program renders byte-identically in a batch and drawn at once. Control:
-/// the same drykit with the shadow line taken out leaves the strokes after
-/// the restore under the ring.
+/// the same drykit with the shadow line taken out, and `.sameclip` turned
+/// off (`dkPsameok false`, as under gs), leaves the strokes after the
+/// restore under the ring. In pscat `.sameclip` alone sees the restore too
+/// (#488): without the shadow but with it, the batch is still exact.
 #[test]
 fn a_cliprestore_in_a_batch_renders_as_at_once() {
     const PAIR: &str = "userdict /dtCS 16 array put userdict /dtN 0 put \
@@ -1601,7 +1637,7 @@ fn a_cliprestore_in_a_batch_renders_as_at_once() {
             userdict /dtN userdict /dtN get 1 add put } bind put \
         systemdict /cliprestore { userdict /dtN userdict /dtN get 1 sub put \
             userdict /dtCS get userdict /dtN get get setgstate } bind put ";
-    let run = |shadow: bool, batched: bool, body: &str| {
+    let run = |shadow: bool, sameclip: bool, batched: bool, body: &str| {
         let mut it = Interp::with_page_scaled(140, 100, 2.0).expect("page");
         it.run_str(PAIR).expect("stand-in clipsave/cliprestore");
         for path in ["lib/artkit.ps", "lib/paintkit.ps"] {
@@ -1609,6 +1645,10 @@ fn a_cliprestore_in_a_batch_renders_as_at_once() {
             it.run_source(&src).expect("load");
         }
         it.run_str(&drykit_source(shadow)).expect("load drykit");
+        if !sameclip {
+            it.run_str("/dkPsameok false def")
+                .expect("turn .sameclip off");
+        }
         let body = if batched {
             format!("{{ {body} }} dkbatch")
         } else {
@@ -1650,13 +1690,18 @@ fn a_cliprestore_in_a_batch_renders_as_at_once() {
         );
     }
     for (what, body) in &cliprestore_cases() {
-        let once = run(true, false, body);
-        let d = pixel_diff(&once, &run(true, true, body));
+        let once = run(true, true, false, body);
+        let d = pixel_diff(&once, &run(true, false, true, body));
         assert_eq!(
             d, 0,
             "{what}: the batch differs from drawing at once in {d} pixels"
         );
-        let lost = pixel_diff(&once, &run(false, true, body));
+        let d = pixel_diff(&once, &run(false, true, true, body));
+        assert_eq!(
+            d, 0,
+            "{what}: with .sameclip but no shadow the batch differs in {d} pixels"
+        );
+        let lost = pixel_diff(&once, &run(false, false, true, body));
         assert!(
             lost > 200,
             "{what}: without the shadow only {lost} pixels changed: the check cannot see the restore"
