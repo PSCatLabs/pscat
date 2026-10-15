@@ -456,6 +456,10 @@ renders eight examples in both and compares block-downsampled output).
      character (`lexer::eat_token_delimiter`);
    - `image` drains a filter-chain source layer-by-layer to each EOD
      marker on completion.
+   An image's footprint is ImageMatrix⁻¹ of its source rectangle, not
+   the unit square; only the `[w 0 0 ±h …]` idiom keeps the old
+   unit-square clip, for byte-identical edges (#534,
+   `notes/534-image-matrix-footprint.md`).
 
 3. **Every glyph source feeds one transform pipeline.** Glyph-space
    outline → FontMatrix (composed by scalefont/makefont, cached at

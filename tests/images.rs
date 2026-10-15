@@ -224,3 +224,167 @@ fn image_argument_errors() {
         "multi-source colorimage is a documented gap"
     );
 }
+
+// ---- #534: any invertible ImageMatrix, not only the `w h scale` idiom ----
+//
+// The PLRM maps the source rectangle [0,w]×[0,h] through ImageMatrix⁻¹
+// into user space, so `10 10 scale … [1 0 0 -1 0 8]` and `[0.1 0 0
+// -0.1 0 8]` with no scale at all cover the same 80×80 square as the
+// usual `80 80 scale … [8 0 0 -8 0 8]`. pscat used to clip every image
+// to the user unit square, which painted one cell. Every expectation
+// below was read off Ghostscript 10.07 at 72 dpi on the same 100×100
+// page (png16m, no anti-aliasing): ink counts are gs's, and each
+// unscaled form must be pixel-identical to its standard-idiom twin,
+// which gs renders identically too.
+
+/// An 8×8 asymmetric "F" in a frame, so a flip or transpose shows.
+const F_MASK: &str = "<FF 81 BD A1 B9 A1 A1 FF>";
+/// A 4×4 8-bit gray ramp.
+const RAMP: &str = "<00 40 80 c0 ff 00 40 80 c0 ff 00 40 80 c0 ff 20>";
+
+fn ink(it: &Interp) -> usize {
+    it.gfx()
+        .pixmap
+        .pixels()
+        .iter()
+        .filter(|p| (p.red(), p.green(), p.blue()) != WHITE)
+        .count()
+}
+
+fn assert_same_render(a: &str, b: &str, gs_ink: usize) {
+    let (ia, ib) = (run(a), run(b));
+    assert_eq!(ink(&ia), gs_ink, "gs ink count for {a}");
+    assert!(
+        ia.gfx().pixmap.data() == ib.gfx().pixmap.data(),
+        "{a}\n  must render as\n{b}"
+    );
+}
+
+#[test]
+fn imagemask_unscaled_matrices_cover_the_whole_mask() {
+    let std = format!("10 10 translate 80 80 scale 8 8 true [8 0 0 -8 0 8] {{{F_MASK}}} imagemask");
+    assert_eq!(ink(&run(&std)), 3800, "gs ink for the standard idiom");
+    for form in [
+        // one source pixel per user unit, then 10 10 scale (the issue)
+        format!("10 10 translate 10 10 scale 8 8 true [1 0 0 -1 0 8] {{{F_MASK}}} imagemask"),
+        // no scale at all: the matrix alone sizes the image
+        format!("10 10 translate 8 8 true [0.1 0 0 -0.1 0 8] {{{F_MASK}}} imagemask"),
+        // the Level 2 dict form of the same
+        format!(
+            "10 10 translate << /ImageType 1 /Width 8 /Height 8 /BitsPerComponent 1
+               /Decode [1 0] /ImageMatrix [0.1 0 0 -0.1 0 8] /DataSource {F_MASK} >> imagemask"
+        ),
+    ] {
+        assert_same_render(&form, &std, 3800);
+    }
+    // Unflipped (row 0 at the bottom).
+    assert_same_render(
+        &format!("10 10 translate 10 10 scale 8 8 true [1 0 0 1 0 0] {{{F_MASK}}} imagemask"),
+        &format!("10 10 translate 80 80 scale 8 8 true [8 0 0 8 0 0] {{{F_MASK}}} imagemask"),
+        3800,
+    );
+    // A rotated CTM: same pixels as the rotated standard idiom.
+    assert_same_render(
+        &format!(
+            "50 50 translate 30 rotate -40 -40 translate 10 10 scale
+             8 8 true [1 0 0 -1 0 8] {{{F_MASK}}} imagemask"
+        ),
+        &format!(
+            "50 50 translate 30 rotate -40 -40 translate 80 80 scale
+             8 8 true [8 0 0 -8 0 8] {{{F_MASK}}} imagemask"
+        ),
+        3700, // gs: 3701, the same one-pixel edge as the standard idiom
+    );
+}
+
+#[test]
+fn imagemask_offset_skew_color_and_polarity_match_gs() {
+    // Translated source: columns 0-1 fall left of the origin and are cut.
+    let it = run(&format!(
+        "10 10 translate 10 10 scale 8 8 true [1 0 0 -1 -2 8] {{{F_MASK}}} imagemask"
+    ));
+    assert_eq!(ink(&it), 3000);
+    assert_eq!(pixel(&it, 15, 15), WHITE);
+    assert_eq!(pixel(&it, 85, 15), BLACK);
+    // A skewed, non-unit matrix.
+    let it = run(&format!(
+        "20 10 translate 8 8 true [0.125 0 0.05 -0.125 0 8] {{{F_MASK}}} imagemask"
+    ));
+    assert_eq!(ink(&it), 2393);
+    assert_eq!(pixel(&it, 35, 45), BLACK);
+    assert_eq!(pixel(&it, 15, 15), WHITE);
+    // The current color, and polarity false (paints the 0s).
+    let it = run(&format!(
+        "10 10 translate 0 1 0 setrgbcolor 8 8 true [0.1 0 0 -0.1 0 8] {{{F_MASK}}} imagemask"
+    ));
+    assert_eq!(ink(&it), 3800);
+    assert_eq!(pixel(&it, 15, 15), (0, 255, 0));
+    let it = run(&format!(
+        "10 10 translate 8 8 false [0.1 0 0 -0.1 0 8] {{{F_MASK}}} imagemask"
+    ));
+    assert_eq!(ink(&it), 2600);
+    assert_eq!(pixel(&it, 15, 15), WHITE, "frame is 1s: masked out");
+}
+
+#[test]
+fn image_and_colorimage_unscaled_matrices_match_gs() {
+    let std = format!("10 10 translate 80 80 scale 4 4 8 [4 0 0 -4 0 4] {{{RAMP}}} image");
+    assert_eq!(ink(&run(&std)), 5200);
+    for form in [
+        format!("10 10 translate 20 20 scale 4 4 8 [1 0 0 -1 0 4] {{{RAMP}}} image"),
+        format!("10 10 translate 4 4 8 [0.05 0 0 -0.05 0 4] {{{RAMP}}} image"),
+        format!(
+            "10 10 translate /DeviceGray setcolorspace << /ImageType 1 /Width 4 /Height 4
+               /BitsPerComponent 8 /Decode [0 1] /ImageMatrix [0.05 0 0 -0.05 0 4]
+               /DataSource {RAMP} >> image"
+        ),
+    ] {
+        assert_same_render(&form, &std, 5200);
+    }
+    // Transposed, no scale: gs reads the ramp down columns.
+    assert_same_render(
+        &format!("10 10 translate 4 4 8 [0 0.05 0.05 0 0 0] {{{RAMP}}} image"),
+        &format!("10 10 translate 80 80 scale 4 4 8 [0 4 4 0 0 0] {{{RAMP}}} image"),
+        5200,
+    );
+    let it = run("10 10 translate 4 4 8 [0.05 0 0 -0.05 0 4]
+         {<ff0000 00ff00 0000ff 000000 808080 ff00ff 00ffff ffff00
+           ff0000 00ff00 0000ff 000000 808080 ff00ff 00ffff ffff00>}
+         false 3 colorimage");
+    assert_eq!(ink(&it), 6400);
+    assert_eq!(pixel(&it, 15, 15), (255, 0, 0));
+    assert_eq!(pixel(&it, 85, 85), (255, 255, 0));
+    assert_eq!(pixel(&it, 50, 50), (0, 0, 255));
+}
+
+#[test]
+fn singular_image_matrix_is_undefinedresult_before_any_data() {
+    // gs: undefinedresult, and the data procedure never runs.
+    for src in [
+        "/n 0 def 8 8 true [0 0 0 0 0 0] { /n n 1 add def <00> } imagemask",
+        "/n 0 def 4 4 8 [1 2 2 4 0 0] { /n n 1 add def <00> } image",
+        "/n 0 def << /ImageType 1 /Width 4 /Height 4 /BitsPerComponent 8 /Decode [0 1]
+           /ImageMatrix [0 0 0 0 0 0] /DataSource { /n n 1 add def <00> } >> image",
+    ] {
+        let mut it = Interp::with_page(100, 100).expect("page");
+        assert_eq!(it.run_str(src), Err(PsError::UndefinedResult), "{src}");
+        it.run_str("n 0 eq { } { (data proc ran) = stop } ifelse")
+            .expect("data proc must not run");
+    }
+    // gs quirk, matched: Level 1 image/colorimage with no samples return
+    // before the matrix check; imagemask and the dict form still check.
+    let mut it = Interp::with_page(100, 100).expect("page");
+    for ok in [
+        "0 4 8 [0 0 0 0 0 0] {} image",
+        "4 0 8 [0 0 0 0 0 0] {} false 3 colorimage",
+    ] {
+        assert_eq!(it.run_str(ok), Ok(()), "{ok}");
+    }
+    for bad in [
+        "0 0 true [0 0 0 0 0 0] {} imagemask",
+        "<< /ImageType 1 /Width 0 /Height 4 /BitsPerComponent 8 /Decode [0 1]
+           /ImageMatrix [0 0 0 0 0 0] /DataSource {} >> image",
+    ] {
+        assert_eq!(it.run_str(bad), Err(PsError::UndefinedResult), "{bad}");
+    }
+}
