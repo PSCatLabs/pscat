@@ -259,6 +259,7 @@ pub const ARTKIT_INTERNAL: &[&str] = &[
     "scokrange",
     "scbboxok",
     "scedgesok",
+    "scregionvet",
     "sccallable",
     "scworkmax",
     "ScatterState",

@@ -1189,6 +1189,7 @@ end
     << /Kind /rect
        /BBox [ sqrx sqry sqrx sqrw add sqry sqrh add ]
        /Area sqrw sqrh mul >>
+    dup /Checked 2 index put                     % scin's vetted stamp (#503)
 } bind def
 
 /sqpcollinear {                                  % x y -
@@ -1392,6 +1393,7 @@ end
        /BBox [ sqbx0 sqby0 sqbx1 sqby1 ]
        /Edges sqbuf 0 sqn getinterval
        /Rule /nonzero >>
+    dup /Checked 2 index put                     % scin's vetted stamp (#503)
 } bind def
 
 % region -> num
@@ -1698,12 +1700,43 @@ end
     ifelse
 } bind def
 
+/scregionvet {                                   % region -> region  (#503)
+% scin's whole-region check for a region that does not carry its own
+% stamp: the checks scatter makes on its region (#295), under scin-
+% names. Stack-only, nothing is bound, so a procedure in /Kind, /BBox or
+% /Edges is refused without running. A region that passes is not marked
+% (that would write into the caller's dict, and fail on a readonly
+% one): the next scin call checks it again, which costs O(edges) per
+% call for a region screct and scpath did not build.
+    dup /Kind known not { scin-region-kind-must-be-rect-or-path } if
+    dup /Kind get dup /rect eq exch /path eq or not
+        { scin-region-kind-must-be-rect-or-path } if
+    dup scbboxok not { scin-region-bbox-must-be-four-numbers } if
+    dup /Kind get /path eq {
+        dup scedgesok not { scin-region-edges-must-be-numbers } if
+        dup /Rule known not { scin-region-needs-a-rule } if
+    } if
+} bind def
+
 /scin {                                          % x y region -> bool
 % Operands are checked on the stack before they are bound -- see
 % screct (#123): all three of them would otherwise be run by name.
+%
+% The region is trusted without a look when it carries the stamp that
+% screct and scpath put on it (#503): /Checked holding the region dict
+% itself. That is `known`, `get` and `eq`, a handful of operators next
+% to the containment test, and it is identity, not a flag: `eq` on
+% dicts compares the object, so a copy of a built region (whose /Checked
+% still names the original) or a hand-written key does not pass, and
+% falls through to scregionvet's full check. The stamp is a promise
+% about the slots as built; a built region whose /BBox or /Edges is
+% replaced in place afterwards (`region /Edges {...} put`) keeps it and
+% is not looked at again -- `region /Checked undef` re-arms the check.
     dup type /dicttype ne { scin-needs-a-region } if
     1 index scisnum 3 index scisnum and
         not { scin-needs-two-numbers } if
+    dup /Checked known { dup /Checked get 1 index eq } { false } ifelse
+        not { scregionvet } if
     siinside
 } bind def
 
@@ -1920,6 +1953,88 @@ end
 %   tgot not (a procedure as scin's y: nothing ran) mustbe
 %   1 1 0 0 100 100 screct scin
 %   (a rectangle still contains an interior point) mustbe
+%%EndSelfTest
+%
+%%SelfTest: scin-never-executes-a-hand-built-region-slot
+%   % #503: scatter and scarea refuse a hand-built region whose slot holds
+%   % a procedure (#295); scin now does too, without a per-call walk of
+%   % /Edges for the regions screct and scpath build (they are stamped).
+%   % Every case asserts the name AND that nothing ran.
+%   /tgot false def
+%   { 5 5 << /Kind /path /BBox [ 0 0 100 100 ] /Rule /nonzero
+%        /Edges { /tgot true def 0 0 100 0 } >> scin }
+%   /scin-region-edges-must-be-numbers
+%   (a procedure as the region's /Edges) mustguard
+%   tgot not (a procedure as /Edges: nothing ran) mustbe
+%   /tgot false def
+%   { 5 5 << /Kind /path /BBox [ 0 0 100 100 ] /Rule /nonzero
+%        /Edges [ 0 { /tgot true def 0 } 100 0 ] >> scin }
+%   /scin-region-edges-must-be-numbers
+%   (a procedure inside the region's /Edges) mustguard
+%   tgot not (a procedure inside /Edges: nothing ran) mustbe
+%   /tgot false def
+%   { 5 5 << /Kind /rect /BBox { /tgot true def 0 0 100 100 } >> scin }
+%   /scin-region-bbox-must-be-four-numbers
+%   (a procedure as the region's /BBox) mustguard
+%   tgot not (a procedure as /BBox: nothing ran) mustbe
+%   /tgot false def
+%   { 5 5 << /Kind /rect /BBox [ { /tgot true def 0 } 0 100 100 ] >> scin }
+%   /scin-region-bbox-must-be-four-numbers
+%   (a procedure inside the region's /BBox) mustguard
+%   tgot not (a procedure inside /BBox: nothing ran) mustbe
+%   /tgot false def
+%   { 5 5 << /Kind { /tgot true def /rect } /BBox [ 0 0 100 100 ] >> scin }
+%   /scin-region-kind-must-be-rect-or-path
+%   (a procedure as the region's /Kind) mustguard
+%   tgot not (a procedure as /Kind: nothing ran) mustbe
+%   { 5 5 << /BBox [ 0 0 100 100 ] >> scin }
+%   /scin-region-kind-must-be-rect-or-path
+%   (a region with no /Kind) mustguard
+%   { 5 5 << /Kind /blob /BBox [ 0 0 100 100 ] >> scin }
+%   /scin-region-kind-must-be-rect-or-path
+%   (a /Kind that is neither rect nor path) mustguard
+%   { 5 5 << /Kind /rect /BBox [ 0 0 100 ] >> scin }
+%   /scin-region-bbox-must-be-four-numbers
+%   (a /BBox of three numbers) mustguard
+%   { 5 5 << /Kind /path /BBox [ 0 0 100 100 ] /Rule /nonzero >> scin }
+%   /scin-region-edges-must-be-numbers
+%   (a path region with no /Edges) mustguard
+%   { 5 5 << /Kind /path /BBox [ 0 0 100 100 ] /Edges [ 0 0 100 0 ] >> scin }
+%   /scin-region-needs-a-rule
+%   (a path region with no /Rule) mustguard
+%   % A hand-written /Checked is not the stamp: only the region dict
+%   % itself in that slot is, so a copied or invented key is still looked at.
+%   /tgot false def
+%   { 5 5 << /Kind /path /BBox [ 0 0 100 100 ] /Rule /nonzero /Checked true
+%        /Edges [ 0 { /tgot true def 0 } 100 0 ] >> scin }
+%   /scin-region-edges-must-be-numbers
+%   (a hand-written /Checked true does not skip the check) mustguard
+%   tgot not (a hand-written /Checked: nothing ran) mustbe
+%   /tgot false def
+%   { newpath 0 0 moveto 100 0 lineto 100 100 lineto closepath scpath
+%     dup length dict copy dup /Edges { /tgot true def 0 0 100 0 } put
+%     5 5 3 -1 roll scin }
+%   /scin-region-edges-must-be-numbers
+%   (a copy of a built region does not inherit its stamp) mustguard
+%   tgot not (a copied region with a procedure edge: nothing ran) mustbe
+%   % What must keep working: built regions pass without being walked,
+%   % and a valid hand-built one still answers.
+%   5 5 0 0 100 100 screct scin (a screct region contains an interior point) mustbe
+%   500 5 0 0 100 100 screct scin not (a screct region excludes an outside point) mustbe
+%   newpath 0 0 moveto 100 0 lineto 100 100 lineto closepath scpath
+%   dup 80 20 3 -1 roll scin (a scpath region contains an interior point) mustbe
+%   dup 20 80 3 -1 roll scin not (a scpath region excludes a point in its bbox) mustbe
+%   pop
+%   0 0 100 100 screct dup /Area 7 put 5 5 3 -1 roll scin
+%   (a screct region with an /Area put still answers) mustbe
+%   5 5 << /Kind /rect /BBox [ 0 0 100 100 ] >> scin
+%   (a valid hand-built rect region answers) mustbe
+%   80 20 << /Kind /path /BBox [ 0 0 100 100 ] /Rule /nonzero
+%     /Edges [ 0 0 100 0  100 0 100 100  100 100 0 0 ] >> scin
+%   (a valid hand-built path region answers) mustbe
+%   0 0 100 100 screct dup /Checked get 1 index eq
+%   (screct stamps /Checked with the region itself) mustbe
+%   pop
 %%EndSelfTest
 %
 %%SelfTest: scatter-and-scarea-never-execute-a-hand-built-region-slot

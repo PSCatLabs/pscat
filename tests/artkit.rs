@@ -4117,6 +4117,75 @@ fn screct_and_scin_never_execute_a_malformed_operand() {
     assert_eq!(eval("101 1 0 0 100 100 screct scin"), vec!["false"]);
 }
 
+// #503: `scin` refuses a hand-built region too, with no walk of the edges
+// for the regions screct and scpath build (they carry a stamp).
+#[test]
+fn scin_refuses_a_malformed_hand_built_region() {
+    let path = "/Kind /path /BBox [ 0 0 100 100 ] /Rule /nonzero";
+    let plant = "{ /gotexecuted true def 0 0 100 0 }";
+    for (region, expected) in [
+        (
+            format!("<< {path} /Edges {plant} >>"),
+            "scin-region-edges-must-be-numbers",
+        ),
+        (
+            format!("<< {path} /Edges [ 0 {{ /gotexecuted true def 0 }} 100 0 ] >>"),
+            "scin-region-edges-must-be-numbers",
+        ),
+        (
+            "<< /Kind /rect /BBox { /gotexecuted true def 0 0 100 100 } >>".to_string(),
+            "scin-region-bbox-must-be-four-numbers",
+        ),
+        (
+            "<< /Kind { /gotexecuted true def /rect } /BBox [ 0 0 100 100 ] >>".to_string(),
+            "scin-region-kind-must-be-rect-or-path",
+        ),
+        (
+            "<< /BBox [ 0 0 100 100 ] >>".to_string(),
+            "scin-region-kind-must-be-rect-or-path",
+        ),
+        (
+            "<< /Kind /path /BBox [ 0 0 100 100 ] /Edges [ 0 0 100 0 ] >>".to_string(),
+            "scin-region-needs-a-rule",
+        ),
+        // A hand-written /Checked is not the stamp.
+        (
+            format!("<< {path} /Checked true /Edges {plant} >>"),
+            "scin-region-edges-must-be-numbers",
+        ),
+    ] {
+        assert_rejected_without_running(&format!("5 5 {region} scin"), expected);
+    }
+    // A copy of a built region keeps /Checked naming the original, so it is
+    // looked at in full.
+    assert_rejected_without_running(
+        &format!(
+            "newpath 0 0 moveto 100 0 lineto 100 100 lineto closepath scpath \
+             dup length dict copy dup /Edges {plant} put 5 5 3 -1 roll scin"
+        ),
+        "scin-region-edges-must-be-numbers",
+    );
+    // A built region whose slot is replaced in place keeps its stamp (a
+    // documented limit); removing /Checked re-arms the check.
+    assert_rejected_without_running(
+        &format!("0 0 100 100 screct dup /Checked undef dup /BBox {plant} put 5 5 3 -1 roll scin"),
+        "scin-region-bbox-must-be-four-numbers",
+    );
+    // Built and valid hand-built regions answer as before.
+    assert_eq!(eval("5 5 0 0 100 100 screct scin"), vec!["true"]);
+    assert_eq!(
+        eval("5 5 << /Kind /rect /BBox [ 0 0 100 100 ] >> scin"),
+        vec!["true"]
+    );
+    assert_eq!(
+        eval(
+            "newpath 0 0 moveto 100 0 lineto 100 100 lineto closepath scpath \
+             dup 80 20 3 -1 roll scin exch 20 80 3 -1 roll scin"
+        ),
+        vec!["true", "false"]
+    );
+}
+
 #[test]
 fn scarea_merging_never_swallows_a_whole_component() {
     // Round six: merging coincident boundaries with an epsilon scaled
