@@ -844,3 +844,148 @@ fn a_redaction_bar_drawn_under_the_contents_own_clip_stays_inside_it() {
     assert!(dark(110, 190) > 300, "the bar shows inside the clip");
     assert_eq!(dark(0, 90), 0, "and not outside it");
 }
+
+// ---- #450: the copier's softening of the marks -----------------------------
+
+/// A page drawn at 4 pixels to the point, luminance.
+fn page4(src: &str) -> Vec<u8> {
+    let mut it = Interp::with_page_scaled(W, H, 4.0).expect("page");
+    load(&mut it);
+    it.run_str(&format!("1 setgray clippath fill 0 setgray {src}"))
+        .unwrap_or_else(|e| panic!("{src}: {}", it.error_report(&e)));
+    lum(&it)
+}
+
+/// Pixels strictly between ink and paper (30..225) along one row.
+fn grey_in_row(p: &[u8], y: usize) -> usize {
+    let w = (W * 4) as usize;
+    p[y * w..(y + 1) * w]
+        .iter()
+        .filter(|&&v| (30..225).contains(&v))
+        .count()
+}
+
+#[test]
+fn a_softened_stamp_fades_over_its_edge_and_a_crisp_one_does_not() {
+    // a black "I" at 60pt: its stem is two vertical edges
+    let stamp = |soften: &str| {
+        page4(&format!(
+            "<< /Lines [ (I) ] /X 150 /Y 90 /Size 60 /Ink [0 0 0] /Frame /none /Strength 1 \
+             /Seed 2 /Soften {soften} >> rel-stamp"
+        ))
+    };
+    let (crisp, soft) = (stamp("0"), stamp("1"));
+    // the middle of the stem: y = 200 - 90 - 10 = 100pt from the top
+    let y = 4 * 100;
+    let (a, b) = (grey_in_row(&crisp, y), grey_in_row(&soft, y));
+    assert!(
+        a <= 4,
+        "a crisp stem's two edges are an antialiased pixel each: {a}"
+    );
+    assert!(
+        b >= 3 * a.max(4),
+        "a softened edge is several pixels of grey: {b} against {a}"
+    );
+    // and the soft stamp still has its solid core
+    let w = (W * 4) as usize;
+    assert!(soft[y * w + 4 * 150] < 30, "the stem's centre is still ink");
+}
+
+#[test]
+fn softening_follows_the_copy_and_leaves_an_original_alone() {
+    let marks = "/Stamps [ << /Lines [ (SEEN) ] /X 150 /Y 60 /Size 24 /Seed 4 >> ] \
+                 /Notes [ << /Text (see me) /X 40 /Y 120 /Size 16 >> ]";
+    let draw = |opts: &str| page4(&format!("{{ }} << {SHEET} {marks} {opts} >> rel-page"));
+    // an original is not blurred: the page /Soften has nothing to act on
+    assert_eq!(draw("/Soften 1"), draw("/Soften 0"));
+    assert_eq!(draw(""), draw("/Soften 0"));
+    // a copy is, and /Soften 0 turns it off
+    let soft = draw("/Generation 1 /Speckle 0 /Haze 0 /CopyEdge 0");
+    let crisp = draw("/Generation 1 /Speckle 0 /Haze 0 /CopyEdge 0 /Soften 0");
+    assert_ne!(soft, crisp, "a copy's marks are softened");
+    let grey = |p: &[u8]| p.iter().filter(|&&v| (30..225).contains(&v)).count();
+    assert!(
+        grey(&soft) > grey(&crisp) + 500,
+        "more grey pixels with the fringe: {} against {}",
+        grey(&soft),
+        grey(&crisp)
+    );
+    // more copies, more blur
+    let g3 = draw("/Generation 3 /Speckle 0 /Haze 0 /CopyEdge 0");
+    let g3c = draw("/Generation 3 /Speckle 0 /Haze 0 /CopyEdge 0 /Soften 0");
+    assert!(grey(&g3) - grey(&g3c) > grey(&soft) - grey(&crisp));
+}
+
+#[test]
+fn a_softened_redaction_bar_fades_and_stays_under_its_clip() {
+    let bar = |opts: &str| {
+        page4(&format!(
+            "{{ 100 0 200 200 rectclip 120 280 100 14 rel-redact }} \
+             << {SHEET} /Generation 2 /Speckle 0 /Haze 0 /CopyEdge 0 /Dropout 0 {opts} >> rel-page"
+        ))
+    };
+    let (soft, crisp) = (bar(""), bar("/Soften 0"));
+    // a column through the bar, 60pt along it: the top edge is a short ramp
+    let w = (W * 4) as usize;
+    let ramp = |p: &[u8]| {
+        (0..(H * 4) as usize)
+            .filter(|&y| (30..225).contains(&p[y * w + 4 * 200]))
+            .count()
+    };
+    assert!(
+        ramp(&soft) >= ramp(&crisp) + 3,
+        "a softened bar's edge is wider: {} against {}",
+        ramp(&soft),
+        ramp(&crisp)
+    );
+    // nothing leaks to the left of the clip the bar was drawn under
+    let left_dark = (0..(H * 4) as usize)
+        .map(|y| {
+            soft[y * w..y * w + 4 * 95]
+                .iter()
+                .filter(|&&v| v < 200)
+                .count()
+        })
+        .sum::<usize>();
+    assert_eq!(left_dark, 0, "the fringe stays inside the clip");
+}
+
+#[test]
+fn softening_does_not_touch_the_callers_rand_stream_or_the_dict_stack() {
+    let mut it = Interp::with_page(W, H).expect("page");
+    load(&mut it);
+    let depth = it.dict_stack_len();
+    let run = |it: &mut Interp, opts: &str| {
+        it.run_str(&format!(
+            "11 srand {{ 20 100 140 12 rel-redact }} << {SHEET} /Generation 2 {opts} \
+             /Stamps [ << /Lines [ (OK) ] /X 100 /Y 100 >> ] \
+             /Notes [ << /Text (see me) /X 40 /Y 60 >> ] >> rel-page rand"
+        ))
+        .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+        it.operand_stack().last().expect("rand").repr()
+    };
+    let soft = run(&mut it, "");
+    let crisp = run(&mut it, "/Soften 0");
+    assert_eq!(
+        soft, crisp,
+        "the fringe draws no random numbers the caller sees"
+    );
+    assert_eq!(it.dict_stack_len(), depth);
+}
+
+#[test]
+fn a_note_with_a_soften_out_of_range_is_refused_and_leaves_the_dict_stack_alone() {
+    let mut it = Interp::with_page(W, H).expect("page");
+    load(&mut it);
+    let depth = it.dict_stack_len();
+    let err = it
+        .run_str("<< /Text (a) /Soften 2 >> rel-note")
+        .expect_err("a soften of 2 is refused");
+    assert!(
+        it.error_report(&err)
+            .contains("rel-note-soften-must-be-0-to-1"),
+        "{}",
+        it.error_report(&err)
+    );
+    assert_eq!(it.dict_stack_len(), depth);
+}
