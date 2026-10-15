@@ -1581,7 +1581,10 @@ fn a_chunk_past_the_budget_is_split_and_drawn() {
             ),
         );
         let (a, b) = (ink_count(&base), ink_count(&split));
-        assert!(a > 1000, "{budget}: the default budget drew almost nothing ({a})");
+        assert!(
+            a > 1000,
+            "{budget}: the default budget drew almost nothing ({a})"
+        );
         let rel = (a as f64 - b as f64).abs() / a as f64;
         assert!(
             rel < 0.03,
