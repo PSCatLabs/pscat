@@ -1,23 +1,34 @@
 %!PS-Adobe-3.0
-%%Title: Released in Part -- a typed 1962 memo, copied and released decades later
+%%Title: Released in Part -- a typed 1962 memo, reviewed, redacted and photocopied for release
 %%BoundingBox: 0 0 612 792
 %%EndComments
 
-% A one-page office memorandum from an invented survey office, typed on a
-% worn elite manual, then aged, folded, punched, stamped, annotated, redacted
-% and photocopied for release. Every name, office, project and place in it is
-% made up.
+% A one-page office memorandum from an invented survey office, typed on an
+% elite manual in 1962, then held in a file for decades: its office-use-only
+% marking ruled through by a reviewer, two names redacted under an invented
+% exemption scheme, a review stamp, a release stamp and a document number
+% added, and the whole sheet photocopied twice on the way out. It is the
+% released copy; *The Man from 2026* (gallery/time_traveler_memo.ps) is its
+% opposite, a ribbon original that never left the file. Every name, office,
+% project, place, stamp and code in it is made up.
 %
-%   lib/typewriter.ps  tw-type: the memo header, tab stops, strikeover <o>,
-%                      x-out <x>, underscore <u> and redaction <r> markup, and
-%                      the ribbon ink (weave voids, feathered edges, clogged
-%                      counters, a heavy side, light strikes)
-%   lib/released.ps    rel-page: aged paper, folds, punch holes, the scanner's
-%                      tilt and lamp, a photocopy generation (the type's
-%                      counters close and its strokes thicken), stamps, a
-%                      margin note and marker redaction bars
+%   lib/typewriter.ps  tw-type: the memo header, tab stops, a strikeover <o>,
+%                      an x-out <x>, underscores <u> and redactions <r>, and
+%                      the ribbon ink of an elite manual at an even hand
+%                      (/Wear 1.0 /MachineWear 0.4 /StrikeWear 0.5, as #590
+%                      settled; Machine 26 clogs only its 8 and q); then
+%                      tw-set on the same frame for the marking at the head
+%                      and foot. /Copies 0.35 keeps the type at a light
+%                      first-copy loss (#547's erosion of thin horizontals,
+%                      counters still open) while the page goes through two.
+%   lib/released.ps    rel-page: aged paper, folds, punch holes, a gem clip,
+%                      two copy generations (haze and grain, specks, the lid,
+%                      a soft fringe on every mark), the stamps, the margin
+%                      notes and marker redaction bars
+%   lib/handscript.ps  the initials, the reviewer's mark and the margin note
 %
-%   pscat --page 612x792 --png released_memo.png gallery/released_memo.ps
+%   { printf '2 2 scale\n'; cat gallery/released_memo.ps; } > /tmp/hi.ps
+%   pscat --page 1224x1584 --png released_memo.png /tmp/hi.ps
 %   gs -q -dNOSAFER -dBATCH -dNOPAUSE -sDEVICE=png16m -r144 -g1224x1584 \
 %      -dGraphicsAlphaBits=4 -dTextAlphaBits=4 \
 %      -sOutputFile=released_memo_gs.png gallery/released_memo.ps </dev/null
@@ -32,54 +43,106 @@
 1 setgray clippath fill
 
 % rm- prefix: piece-local.
+/rmink [0.16 0.15 0.17] def
+
 /rmtext (1.\tOn the morning of October 29 the Harlan Flats station reported that two cans of exposed film from the August flights over Section 9 could not be found. The cans were logged into the vault on September 4 by <r>Mr. R. T. Ashdown</r> and were last seen there on October 12, when the vault was opened for the quarterly count.
 
 2.\tA search of the vault, the drying room and the mail cage has turned up nothing. The film itself is <u>not</u> restricted, but the flight sheets packed in the same cans <o>was|were</o> marked for office use only, and they show the survey lines for the reservoir site.
 
-3.\tI have asked <r>the station chief</r> for a written account by November 16. Until the cans are found, no film is to leave the vault without two signatures in the log, <u>without exception</u>.
+3.\tThe vault log for October shows the door opened on three other days, the 3rd, the 17th and the 25th, each time with one signature only. Copies of those pages are enclosed.
 
-4.\tThe enclosed list gives the frame numbers of the <x>sixty</x> forty-two frames that cannot be flown again this season. The rest can be reflown in the spring if they must be.
+4.\tI have asked <r>the station chief</r> for a written account by November 16. Until the cans are found, no film is to leave the vault without two signatures in the log, <u>without exception</u>.
 
-5.\tPlease treat this matter as closed to inquiries from outside the office until the Division has replied.
+5.\tThe second enclosure gives the frame numbers of the <x>sixty</x> forty-two frames that cannot be flown again this season. The rest can be reflown in the spring if they must be.
 
+6.\tPlease treat this matter as closed to inquiries from outside the office until the Division has replied.
 
 
 \t\t\t\t\t\t\t\t\tE. W. Marchetti
 \t\t\t\t\t\t\t\t\tActing Director
 
 EWM:dlk
-Enclosure) def
+Enclosures (2)) def
+
+/rmopts <<
+    /Text rmtext
+    /Width 612 /Height 792 /Margin 72 /MarginTop 108 /MarginBottom 72
+    /Pitch 12 /Size 11.5 /Tabs 5
+    /Machine 26 /Seed 1962 /Wear 1.0 /MachineWear 0.4 /StrikeWear 0.5
+    /Ink rmink /Ribbon 0.75 /Copies 0.35
+    /Memo << /Title (MEMORANDUM)
+             /To (Chief, Records Division)
+             /From (Acting Director, Upper Basin Survey Office)
+             /Cc (Field Station 4, Harlan Flats)
+             /Subject (Loss of aerial film, Project GREYWING)
+             /Date (November 9, 1962) >>
+    /Redactor { rel-redact }
+>> def
+
+% col row string -> -  types the string at a column from the left margin and
+% a line counted in single lines (12pt) up from the body's first baseline,
+% on the frame tw-type left set: the same machine, the same cells.
+/rmat {
+    3 1 roll 12 mul exch 6 mul exch
+    rmorg aload pop 3 -1 roll add 3 1 roll add exch moveto show
+} bind def
+
+% x0 y0 x1 y1 -> -  a reviewer's ruled pen lines through a marking, drawn on
+% the original so the copier copies them: two passes of a ballpoint along a
+% ruler, a little apart and not quite parallel.
+/rmrule {
+    /rmy1 exch def /rmx1 exch def /rmy0 exch def /rmx0 exch def
+    gsave
+    0.12 0.13 0.2 setrgbcolor 1 setlinecap
+    0.9 setlinewidth
+    newpath rmx0 rmy0 1.4 add moveto rmx1 rmy1 1.6 add lineto stroke
+    0.75 setlinewidth
+    newpath rmx0 4 add rmy0 1.3 sub moveto rmx1 3 add rmy1 1.0 sub lineto stroke
+    grestore
+} bind def
 
 {
-    <<
-        /Text rmtext
-        /Width 612 /Height 792 /Margin 72 /MarginTop 84
-        /Pitch 12 /Size 11.5 /Tabs 5
-        /Machine 11 /Seed 1962 /Wear 1.3 /MachineWear 0.6
-        /Ink [0.17 0.16 0.17] /Ribbon 0.55 /Copies 0.35
-        /Memo << /Title (MEMORANDUM)
-                 /To (Chief, Records Division)
-                 /From (Acting Director, Upper Basin Survey Office)
-                 /Cc (Field Station 4, Harlan Flats)
-                 /Subject (Loss of aerial film, Project GREYWING)
-                 /Date (November 9, 1962) >>
-        /Redactor { rel-redact }
-    >> tw-type
+    rmopts tw-type
+    % tw-type leaves the carriage a line below its last: back up by the line
+    % count to the body's first baseline, the origin of the marks typed after
+    currentpoint rmopts tw-linecount 12 mul add 2 array astore /rmorg exch def
+    % the file's marking, head and foot, typed on the same machine
+    << /Strike 3 >> tw-set
+    25 4 (O F F I C E   U S E   O N L Y) rmat
+    25 -51 (O F F I C E   U S E   O N L Y) rmat
+    << /Strike 0 >> tw-set
+    % ... and ruled through by the reviewer, years later
+    rmorg aload pop /rmy exch def /rmx exch def
+    rmx 142 add rmy 51.5 add  rmx 330 add rmy 53 add rmrule
+    rmx 141 add rmy 608.5 sub  rmx 331 add rmy 607.5 sub rmrule
 } <<
-    /Width 612 /Height 792 /Seed 62 /Generation 1
-    /Age 0.55 /EdgeDark 0.45 /Folds 0.6 /Lamp 0.2 /Skew 0.4 /Punch 2
-    /Speckle 0.6 /Redact 0.6
+    /Width 612 /Height 792 /Seed 62 /Generation 2 /Haze 0.5
+    /Age 0.55 /EdgeDark 0.45 /Folds 0.6 /Lamp 0.2 /Skew 0.4 /Punch 2 /Clip 1
+    /Speckle 0.5 /Redact 0.6
     /Stamps [
-        << /Lines [ (RECEIVED) (NOV 13 1962) ] /X 470 /Y 718 /Angle 2 /Size 11
+        << /Lines [ (RECEIVED) (NOV 13 1962) ] /X 478 /Y 700 /Angle 2 /Size 11
            /Ink [0.12 0.12 0.16] /Frame /box /Font /Helvetica /Tracking 1.4
            /Seed 7 /Strength 0.55 >>
-        << /Lines [ (RELEASED) (IN PART) ] /X 430 /Y 132 /Angle -7 /Size 20
+        << /Lines [ (BASIN RECORDS REVIEW) (CASE 88-0193   DOC 7) (BY ________  DATE ________) ]
+           /X 160 /Y 138 /Angle -2 /Size 8 /Ink [0.15 0.15 0.18] /Frame /box
+           /Font /Helvetica /Tracking 0.5 /Seed 21 /Strength 0.85 >>
+        << /Text (R3) /X 566 /Y 551 /Angle -4 /Size 10 /Ink [0.12 0.12 0.15]
+           /Frame /none /Font /Helvetica-Bold /Seed 31 /Strength 0.85 >>
+        << /Text (R3) /X 46 /Y 396 /Angle 3 /Size 10 /Ink [0.12 0.12 0.15]
+           /Frame /none /Font /Helvetica-Bold /Seed 32 /Strength 0.85 >>
+        << /Lines [ (RELEASED) (IN PART) ] /X 456 /Y 142 /Angle -7 /Size 20
            /Ink [0.6 0.12 0.12] /Frame /double /Seed 4 /Strength 0.6 >>
+        << /Text (UBSO 000417) /X 540 /Y 28 /Size 8 /Ink [0.1 0.1 0.12]
+           /Frame /none /Font /Helvetica /Tracking 0.8 /Seed 9 /Strength 0.85 >>
     ]
-    /Notes [ << /Text (call harlan re cans) /X 300 /Y 228 /Angle -3 /Size 15
+    /Notes [ << /Text (ewm) /X 450 /Y 244 /Angle 8 /Size 26 /Pen 46 /Width 160
+                /Ink [0.1 0.12 0.3] /Seed 8 >>
+             << /Text (call harlan re cans) /X 96 /Y 262 /Angle -3 /Size 15
                 /Width 140 /Seed 3 >>
-             << /Text (ewm) /X 440 /Y 306 /Angle 8 /Size 26 /Pen 46 /Width 160
-                /Ink [0.1 0.12 0.3] /Seed 8 >> ]
+             << /Text (jt) /X 116 /Y 127 /Angle -2 /Size 13
+                /Width 60 /Seed 13 >>
+             << /Text (3-9-89) /X 182 /Y 125 /Angle -2 /Size 12
+                /Width 80 /Seed 14 >> ]
 >> rel-page
 
 showpage
