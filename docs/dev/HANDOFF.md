@@ -1202,6 +1202,12 @@ renders eight examples in both and compares block-downsampled output).
   base binary (`scripts/build_base_bin.sh BASE_WORKTREE OUT`), the head tree
   with the head one, and the control must use behaviour only the head binary
   has. `scripts/bench_compare.sh` is the matching CPU-time guard.
+  A file that fails identically in both trees (same nonzero exit, same log,
+  same canvas) is reported `SKIPPED`, not `ERROR` (issue #504:
+  `tw_proto.ps` needs an untracked generated `twglyphs.ps`), with a closing
+  WARNING; a failure that differs in any way is still an ERROR, and a run
+  that skips every file exits 1. A whole-corpus `--files` list of every
+  tracked `.ps` therefore exits 0 on an unchanged tree.
 - **A "collect stops, then draw runs" brush must not call the caller's
   `/Pressure` proc inside its per-lane/per-bristle loop.** A caller's
   proc is arbitrary code and may consume randomness (`{ frnd }` is a

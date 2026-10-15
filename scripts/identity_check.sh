@@ -50,10 +50,19 @@
 #     are 2x supersampled, so this is "the committed still's resolution".
 #   * The page comes from the file's `%%SelfTestPage: WxH` (drivers) or
 #     `%%BoundingBox: 0 0 W H`, as each file's own header documents.
-#   * One line per page: `identical`, `DIFFERS` or `ERROR`. A pscat run that
-#     exits nonzero in either tree is an ERROR even when both trees wrote the
-#     same partial canvas, because pscat writes the canvas after an error and a
-#     file that fails identically would otherwise read as identical.
+#   * One line per page: `identical`, `DIFFERS`, `ERROR` or `SKIPPED`. A pscat
+#     run that exits nonzero in either tree is an ERROR (pscat writes the
+#     canvas after an error, so a partly drawn page must not read as
+#     identical), with one exception: a file that fails IDENTICALLY in both
+#     trees is `SKIPPED` (#504). Identically means the same nonzero exit
+#     status, the same log (the scratch path aside) and byte-equal canvases.
+#     Such a failure is the file's own (tw_proto.ps runs a generated
+#     twglyphs.ps that is not tracked), not a difference between the trees,
+#     so it must not fail every whole-corpus run. It is never silent: the
+#     SKIPPED line, a closing WARNING listing every skipped file, and "K
+#     skipped" in the summary. A failure that differs in any way (one tree
+#     only, another status, another message, another canvas) stays an ERROR.
+#     If every file is skipped nothing was compared, and that exits 1.
 #   * Files come from `git ls-files` in the branch tree, so untracked scratch
 #     files never join in. A file absent from the base (a new demo) is listed
 #     as `new` and is not compared.
@@ -99,8 +108,8 @@
 #   --keep                keep the scratch directory
 #   -j N                  parallel renders (default: CPU count)
 #
-# Exit status: 0 all identical (and the control differed); 1 a page DIFFERS or
-# ERRORs; 2 the control did NOT differ (or was unusable), so the pages that
+# Exit status: 0 all identical or SKIPPED (and the control differed); 1 a page
+# DIFFERS or ERRORs, or nothing at all was compared; 2 the control did NOT differ (or was unusable), so the pages that
 # looked identical prove nothing; 64 a usage or harness error (bad arguments,
 # no binary, the render driver itself failed), not a result.
 #
@@ -445,11 +454,36 @@ rc_of() { cat "$1/rc" 2>/dev/null || echo "?"; }
 npages=0
 nident=0
 nbad=0
+SKIPPED_FILES=""
+nskipped=0
+
+# fails_identically BDIR HDIR: 0 when the two renders of one file failed the
+# same way (#504): same log with the scratch path masked, same PNG names, same
+# PNG bytes. The caller has already checked the exit statuses.
+fails_identically() {
+    local b=$1 h=$2 bl hl p bpat="$OUT/base/" hpat="$OUT/head/"
+    # (a variable holds the pattern: bash 3.2 mis-parses a quoted "$OUT/base/" inside ${..//..})
+    bl=$(cat "$b/log" 2>/dev/null || true); bl=${bl//"$bpat"/OUT/}
+    hl=$(cat "$h/log" 2>/dev/null || true); hl=${hl//"$hpat"/OUT/}
+    [ "$bl" = "$hl" ] || return 1
+    [ "$(pngs_of "$b")" = "$(pngs_of "$h")" ] || return 1
+    for p in $(pngs_of "$h"); do
+        cmp -s "$b/$p" "$h/$p" || return 1
+    done
+    return 0
+}
 compare_one() {
     local label=$1 key=$2 b="$OUT/base/$2" h="$OUT/head/$2"
     local brc hrc bl hl p i st=0
     brc=$(rc_of "$b"); hrc=$(rc_of "$h")
     bl=$(pngs_of "$b"); hl=$(pngs_of "$h")
+    if [ "$hrc" != "0" ] && [ "$brc" = "$hrc" ] && fails_identically "$b" "$h"; then
+        echo "SKIPPED    $label (pscat exited $hrc identically in both trees, same log, same canvas: nothing to compare; see $h/log)"
+        nskipped=$((nskipped + 1))
+        SKIPPED_FILES="$SKIPPED_FILES  $label
+"
+        return 0
+    fi
     if [ "$hrc" != "0" ]; then
         echo "ERROR      $label (pscat exited $hrc in the branch tree; see $h/log)"
         return 1
@@ -547,11 +581,24 @@ if [ -n "$CONTROL" ]; then
 fi
 
 ELAPSED=$(( $(date +%s) - START ))
+SKIP_NOTE=""
+if [ "$nskipped" -gt 0 ]; then
+    SKIP_NOTE=", $nskipped skipped"
+    echo >&2
+    echo "identity_check.sh: WARNING: $nskipped file(s) failed identically in both trees and were NOT compared:" >&2
+    printf '%s' "$SKIPPED_FILES" >&2
+    # Nothing compared is not a pass: every file failing the same way points at
+    # the harness (the binary, the page setup), not at the files.
+    if [ "$nident" -eq 0 ] && [ "$nbad" -eq 0 ] && [ "$FAILED" -eq 0 ]; then
+        echo "identity_check.sh: every file was skipped, so nothing was compared" >&2
+        FAILED=1
+    fi
+fi
 echo
 if [ "$FAILED" -eq 0 ]; then
-    echo "identity_check.sh: $nident of $npages page renders identical across $nfiles files (${ELAPSED}s)"
+    echo "identity_check.sh: $nident of $npages page renders identical across $nfiles files${SKIP_NOTE} (${ELAPSED}s)"
 else
-    echo "identity_check.sh: FAILED, $nbad pages differ, plus any ERROR lines above ($nident of $npages identical, ${ELAPSED}s)"
+    echo "identity_check.sh: FAILED, $nbad pages differ, plus any ERROR lines above ($nident of $npages identical${SKIP_NOTE}, ${ELAPSED}s)"
 fi
 if [ "$FAILED" -ne 0 ]; then
     exit 1

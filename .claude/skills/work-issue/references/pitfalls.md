@@ -310,7 +310,9 @@ Cheapest first, before the long gate:
    BASE/lib/<name>.ps`, uncommitted, in the base) and let the control draw by `/probe where`. That
    proves each tree loads its own lib; keep the marker out of the branch. The corpus can take
    minutes at gallery resolution: run the check with `run_in_background: true` and a log
-   (pitfalls "Long foreground commands").
+   (pitfalls "Long foreground commands"). A `SKIPPED` line (and the closing WARNING) is a file that
+   fails identically in both trees (#504: `tw_proto.ps` needs an untracked `twglyphs.ps`): not a
+   difference, so do not chase it; an `ERROR` still means a failure that differs between the trees.
    **A change under `src/` (interpreter, operators, rasteriser) is the standard case for the two-binary
    form (#335):** `scripts/identity_check.sh BASE_WORKTREE --base-bin BASE_BIN --head-bin HEAD_BIN
    --control FILE --loader lib/artkit.ps` (or `--files LIST`). The base tree renders with the base
