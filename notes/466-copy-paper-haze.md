@@ -39,7 +39,7 @@ On a plain copy the tone and the mottle match T14 (0.902 against 0.907, 0.0105
 against 0.011); the 48px figure of the specimen is larger only because its lamp,
 edge darkening and folds are on (T2 and T9 are scans of single sheets, so they
 are less mottled). The fine grain is about a third of the real scans' at every
-setting: denser grain costs hundreds of thousands of fills (follow-up #474).
+setting: denser grain costs hundreds of thousands of fills (follow-up #474, done: `notes/474-copy-paper-haze-grain.md`).
 T15 is bitonal and white, so the specimen's third sheet sets `/Haze 0.2`.
 
 ## Renders that changed

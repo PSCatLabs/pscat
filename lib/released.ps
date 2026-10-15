@@ -257,6 +257,24 @@ RelState begin {
     rlW dup mul rlH dup mul add sqrt div 0.5 add dup 0 lt { pop 0 } if dup 1 gt { pop 1 } if
     dup mul 0.15 mul 0.04 add rlLamp mul 1 exch sub
 } bind def
+% x y -> -  sets the colour the paper field has at (x, y) (the loop below, and
+% the copy's grain, which sits on it); reads the rlPaperField arguments
+/rlFieldSet {
+    /rpCy exch def /rpCx exch def
+    rpBl rlBn 0 gt and {
+        rpCx rpCy rlBlotAt 0.82 0.76 0.62 4 -1 roll rlToneTo
+    } { rpR rpG rpB } ifelse
+    rpCx rpCy rlLampAt /rpF exch def
+    rpF mul 3 1 roll rpF mul 3 1 roll rpF mul 3 1 roll
+    rlCC 0 gt rlHzB 0 gt and { rlHzB 1 rpCx rpCy rlHzMot add mul /rlHzK exch def } if
+    rpEd rlEdge 0 gt and {
+        rpCx rpCy rlEdgeAt /rpW exch def
+        1 rpW 0.4 mul sub mul 3 1 roll
+        1 rpW 0.27 mul sub mul 3 1 roll
+        1 rpW 0.2 mul sub mul 3 1 roll
+    } if
+    rlSet
+} bind def
 % r g b blot edge -> -  fills the sheet: this colour as the tone, with the
 % stains (blot true), the lamp (/Lamp) and the darkened edge (edge true)
 /rlPaperField {
@@ -277,19 +295,7 @@ RelState begin {
                 /rpJ exch def
                 rpYs rpJ get /rpY0 exch def  rpYs rpJ 1 add get /rpY1 exch def
                 rpY0 rpY1 add 2 div /rpCy exch def
-                rpBl rlBn 0 gt and {
-                    rpCx rpCy rlBlotAt 0.82 0.76 0.62 4 -1 roll rlToneTo
-                } { rpR rpG rpB } ifelse
-                rpCx rpCy rlLampAt /rpF exch def
-                rpF mul 3 1 roll rpF mul 3 1 roll rpF mul 3 1 roll
-                rlCC 0 gt rlHzB 0 gt and { rlHzB 1 rpCx rpCy rlHzMot add mul /rlHzK exch def } if
-                rpEd rlEdge 0 gt and {
-                    rpCx rpCy rlEdgeAt /rpW exch def
-                    1 rpW 0.4 mul sub mul 3 1 roll
-                    1 rpW 0.27 mul sub mul 3 1 roll
-                    1 rpW 0.2 mul sub mul 3 1 roll
-                } if
-                rlSet
+                rpCx rpCy rlFieldSet
                 rpX0 rpY0 rpX1 rpX0 sub 0.8 add rpY1 rpY0 sub 0.8 add rectfill
             } for
         } for
@@ -340,17 +346,81 @@ RelState begin {
     rbX rbY rlHzA2 rlHzNx2 rlHzS2 rlVN 0.1 mul add
     dup 0.6 gt { pop 0.6 } if dup -0.6 lt { pop -0.6 } if
 } bind def
-% grain: tiny lighter and darker flecks over the haze, under the content,
-% set directly (they are already the copy's grey)
+% grain: a copy's paper is not smooth at the pixel: a fine speckle of lighter
+% and darker toner (RMS 0.009 over 6px blocks at 300 dpi in the scans T2, T9
+% and T14; docs/dev/design/typewriter/tools/grain.py). Flecks that small cost
+% hundreds of thousands of fills (#474), so the speckle is stencils: two random
+% bit tiles (the lighter flecks, the darker; a quarter of the cells each) are
+% painted through imagemask, one square of rlGrT points at a time, in the grey
+% the paper field has at that square's centre plus or minus rlGrA (at /Haze
+% 0.6; it scales with /Haze). A stencil row is a random row of a 64 x 128 byte
+% tile at a random byte shift, and the squares along a row of the sheet step
+% through it a square's own bytes at a time, so no two squares share bits
+% before the tile row wraps (64 squares, 1024pt, of 16pt). A cell is rlGrC
+% points and rlGrT is a multiple of 8 rlGrC (a whole number of bytes). Set
+% directly (the grey is already the copy's).
+/rlGrC 1 def  /rlGrT 16 def  /rlGrA 0.013 def  /rlGrAnd 2 def
+/rlGrTile {                                         % -> 64 strings of 256 bytes (a row of 128 and its copy)
+    /rgT 64 array def
+    0 1 63 {
+        /rgJ exch def
+        /rgS 256 string def
+        0 1 127 {
+            /rgK exch def
+            rlU 256 mul cvi  rlGrAnd 1 sub { rlU 256 mul cvi and } repeat
+            /rgB exch def  rgS rgK rgB put
+        } for
+        rgS 128 rgS 0 128 getinterval putinterval
+        rgT rgJ rgS put
+    } for
+    rgT
+} bind def
+/rlGrRand {                                         % n m -> array of n random 0..m-1
+    /rgM exch def  /rgN exch def  /rgR rgN array def
+    0 1 rgN 1 sub { rgR exch rlU rgM mul cvi put } for
+    rgR
+} bind def
+/rlGrMask { [ rlGrTile rlGrN 64 rlGrRand rlGrN 128 rlGrRand ] } bind def   % tile, row picks, byte shifts
+/rlGrSrc {                                          % the next stencil row of the tile being painted
+    rlGrMk 0 get  rlGrMk 1 get rlGrRow get get
+    rlGrMk 2 get rlGrRow get rlGrBo add 128 mod rlGrNb getinterval
+    /rlGrRow rlGrRow 1 add def
+} bind def
 /rlHazeGrain {
     rlSeed 17 rlSeed2
-    rlHaze rlW mul rlH mul 0.2 mul cvi 0 1 3 -1 roll 1 sub {
-        pop
-        rlU rlW mul rlU rlH mul /rhY exch def /rhX exch def
-        rlU 1.3 exp rlR 0 lt { neg } if 0.05 mul rlHaze 0.5 add mul 1 add
-        1 rlHzB sub mul dup 1 gt { pop 1 } if setgray
-        rhX rhY rlU 0.6 mul 0.3 add rlU 0.4 mul 0.2 add rectfill
+    rlGrT rlGrC div cvi /rlGrNc exch def            % cells per tile side
+    /rlGrN rlH rlGrC div cvi rlGrNc add 2 add def
+    /rgMs [ rlGrMask rlGrMask ] def                 % lighter, darker
+    rlHaze 0.6 div rlGrA mul /rgA exch def
+    gsave rlSheet clip newpath
+    0 1 rlH rlGrT div ceiling cvi 1 sub {
+        /rgJ exch def
+        rgJ rlGrT mul /rgY exch def
+        rgY rlGrT add rlH 2 copy gt { exch } if pop /rgY1 exch def
+        rgY1 rgY sub rlGrC div ceiling cvi /rgNy exch def
+        0 1 rlW rlGrT div ceiling cvi 1 sub {
+            /rgI exch def
+            rgI rlGrT mul /rgX exch def
+            rgX rlGrT add rlW 2 copy gt { exch } if pop /rgX1 exch def
+            rgX1 rgX sub rlGrC div ceiling cvi /rgNx exch def
+            /rlGrNb rgNx 7 add 8 idiv def
+            /rlGrBo rgI rlGrNc 7 add 8 idiv mul def
+            rgX rgX1 add 2 div  rgY rgY1 add 2 div  rlFieldSet
+            currentgray /rgG exch def
+            0 1 1 {
+                /rgM exch def
+                rgG rgA rgM 0 eq { 1 } { -1 } ifelse mul add
+                dup 1 gt { pop 1 } if dup 0 lt { pop 0 } if setgray
+                /rlGrMk rgMs rgM get def
+                /rlGrRow rgJ rlGrNc mul def
+                gsave rgX rgY translate rgNx rlGrC mul rgNy rlGrC mul scale
+                rgNx rgNy true [ rgNx 0 0 rgNy neg 0 rgNy ] { rlGrSrc } imagemask
+                grestore
+            } for
+        } for
     } for
+    grestore
+    rlHzB /rlHzK exch def
 } bind def
 % surfacekit's grain (foxing) and fibres over the sheet; a copy has lost them
 /rlTexture {

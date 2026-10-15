@@ -814,7 +814,10 @@ renders eight examples in both and compares block-downsampled output).
    key is in the PR, not the repo); `notes/215-released-memo.md`. #466 gave a
    copy's paper a grey haze, mottle and grain (`rel-page /Haze`, default 0.6,
    applied after the copier curve in `rlSet`/`rlCol`; `/Haze 0` is the old white
-   copy; `notes/466-copy-paper-haze.md`). Leftovers: #467, #468.
+   copy; `notes/466-copy-paper-haze.md`). Leftovers: #467, #468. #474 brought the
+   haze's fine grain to the scans' strength with two `imagemask` stencils per
+   12pt square (`rlHazeGrain`, on `rlFieldSet`'s field colour;
+   `notes/474-copy-paper-haze-grain.md`); the mottle's crumpled-paper wave is #528.
    #423 tuned the ribbon ink toward T2, T4 and T7: a thinner body and feather
    (`wBodyW`, `fW` in `tInkStrike`), a higher base hole level, a steeper
    pressure-to-density slope, pressure sd 0.12 on `/manual` and `/worn`, and a

@@ -393,7 +393,11 @@ No new page-scale CI test is added. #204's concern about CI time stands.
   longer flat white. `rel-page /Haze` (default 0.6, 0 is the old white copy)
   multiplies everything drawn under the copy curve by a light grey
   (about 0.90, T14's tone), varying by place (soft blotches and value noise in
-  3pt cells) with a fine fleck grain, all opaque and under the type.
+  3pt cells) with a fine grain, all opaque and under the type. **#474**
+  (`notes/474-copy-paper-haze-grain.md`): the grain is `imagemask` stencils
+  (lighter and darker speckle in the field's grey, 1pt cells), at the scans'
+  strength (RMS 0.009 over 6px blocks at 300 dpi), measured with
+  `tools/grain.py`.
 - **#215, specimen.** A side-by-side against T1/T2 and T9/T10 crops at scan
   resolution. The user judges it.
 
