@@ -47,6 +47,11 @@ Ghostscript, which has no such operator, drykit behaves as before and the
   `rectclip` after a seen, captured clip now reaches the next stroke too
   (a test row). Before #488 that stroke kept the earlier capture. A clip
   made by bound code while `/pc` is still null is not kept (below).
+- #454 (merged while this was in review) shadows `cliprestore` where the
+  interpreter has it. In pscat `.sameclip` would catch an unshadowed
+  `cliprestore` too, so `a_cliprestore_in_a_batch_renders_as_at_once` now
+  checks three ways: the shadow alone (`dkPsameok false`) is exact,
+  `.sameclip` alone (no shadow) is exact, and neither (the control) leaks.
 - The `/pcs` stack needs nothing: the bound wrapper's `gsave` was unseen too,
   so the stack has no entry for it, and the next seen `grestore` pops the
   right one.
