@@ -496,7 +496,7 @@ No new page-scale CI test is added. #204's concern about CI time stands.
   `tw-linecount` and `tw-pageheight` in `lib/typewriter.ps`, one options dict
   for layout and `tw-setup` keys; `<u>`, `<x>` and `<o>old|new</o>` markup (`<r>` came with #214) (an
   x-out is a strikeover at strike index +1, an underline +2); `/Memo`;
-  `/PageNumbers`; `/PageStart` for paper; `scripts/typewrite.sh`; the
+  `/PageNumbers`; `/PageStart` for paper (and `/PageEnd` after each page, #448); `scripts/typewrite.sh`; the
   `Typewriter` catalog row.
 - **#214, released-document look.** T14 and T15: aging, photocopy and bitonal
   loss, stamps, redactions. Everything fictional.

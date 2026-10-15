@@ -1,0 +1,96 @@
+%!PS-Adobe-3.0
+%%Title: released.ps over two pages -- a typed memo that runs onto a second sheet (issue #448)
+%%BoundingBox: 0 0 396 612
+%%EndComments
+
+% A two-page memo through one paged rel-page (lib/released.ps /Paged true) and
+% tw-type's /PageStart and /PageEnd hooks. Each sheet is aged paper, one
+% photocopy and its own copier dirt, so what rel-page puts over the type lands
+% on page 2 as it does on page 1:
+%
+%   both pages   punch holes, folds, the scanner's tilt, the copy's grey, lid,
+%                edge shadow and specks (each sheet its own), the redaction bars,
+%                a RECEIVED stamp
+%   page 1 only  the staple (it holds the stack at the top sheet) and a
+%                RELEASED IN PART stamp, which are /Staple and a stamp with
+%                /Page 1
+%   page 2 only  the handwritten note, a note with /Page 2
+%
+% Every name, office and place in it is invented.
+%
+%   pscat --page 396x612 --png released_pages.png examples/released_pages.ps
+%       (writes released_pages-001.png and released_pages-002.png)
+%   gs -q -dNOSAFER -dBATCH -dNOPAUSE -sDEVICE=png16m -r144 -g792x1224 \
+%      -dGraphicsAlphaBits=4 -dTextAlphaBits=4 \
+%      -sOutputFile=released_pages_gs-%d.png examples/released_pages.ps </dev/null
+
+(lib/artkit.ps) run
+(lib/surfacekit.ps) run
+(lib/handscript.ps) run
+(lib/typewriter_outlines.ps) run
+(lib/typewriter.ps) run
+(lib/released.ps) run
+
+1 setgray clippath fill
+
+% rp- prefix: piece-local.
+/rptext (1.\tThe Division has asked for a count of the survey markers that were reset after the spring floods. Our own count, taken from the field books of the three crews, is forty-one, not the fifty-two reported in September.
+
+2.\tThe difference is eleven markers on the Calder Bench line. <r>Mr. D. A. Pruitt</r> reports that the crew set them in a single week in May and that the book for that week was never turned in. I have asked for it twice.
+
+3.\tUntil the book is found the office will carry the Calder Bench markers as <o>reset|unverified</o>, and will not certify the line to the county. This delays the plat by about a month.
+
+4.\tThree further matters, in order of weight.
+
+\t(a)\tThe station at Harlan Flats has no working level. The one on loan from the <x>county</x> state office was returned in June and has not been replaced.
+
+\t(b)\tThe vault copy of the 1958 benchmark list disagrees with the field copy at nine places. I have marked them in red on the enclosed sheet and have not tried to say which list is right.
+
+\t(c)\t<r>Mrs. Ellison</r> has asked whether the reset markers may be photographed for the file. I see no objection, provided the photographs are kept with the books and not with the plat.
+
+5.\tI recommend that the Division send a man to Calder Bench before the first snow, and that the cost be taken from the contingency line, not from the plat account. If the book turns up in the meantime, the visit can be cancelled and nothing is lost.
+
+6.\tThe plat account is carried at the figure approved in March. If the visit is made, the Division will need a revised figure by the end of the month, and I can give one on a day's notice.
+
+7.\tPlease treat this memorandum as closed to inquiries from outside the office until the Division has replied.
+
+
+
+\t\t\t\t\t\tM. K. Oyelaran
+\t\t\t\t\t\tChief Surveyor
+
+MKO:jdt) def
+
+{
+    <<
+        /Text rptext
+        /Width 396 /Height 612 /Margin 48 /MarginTop 62
+        /Pitch 12 /Size 10.5 /Tabs 5
+        /Machine 11 /Seed 1958 /Wear 1.3 /MachineWear 0.6
+        /Ink [0.17 0.16 0.17] /Ribbon 0.55 /Copies 0.35
+        /PageNumbers /bottom
+        /Memo << /Title (MEMORANDUM)
+                 /To (Assistant Director, Plats Division)
+                 /From (Chief Surveyor, Calder Survey Office)
+                 /Subject (Markers reset after the spring floods)
+                 /Date (October 3, 1958) >>
+        /Redactor { rel-redact }
+        /PageStart { rel-page-start }
+        /PageEnd { rel-page-end }
+    >> tw-type
+} <<
+    /Width 396 /Height 612 /Seed 58 /Generation 1 /Paged true
+    /Age 0.55 /EdgeDark 0.45 /Folds 0.6 /Lamp 0.2 /Skew 0.5 /Punch 2 /Staple 1
+    /Speckle 0.6 /Redact 0.6
+    /Stamps [
+        << /Lines [ (RECEIVED) (OCT 7 1958) ] /X 310 /Y 566 /Angle 2 /Size 9
+           /Ink [0.12 0.12 0.16] /Frame /box /Font /Helvetica /Tracking 1.2
+           /Seed 7 /Strength 0.55 >>
+        << /Lines [ (RELEASED) (IN PART) ] /X 270 /Y 128 /Angle -7 /Size 17
+           /Ink [0.6 0.12 0.12] /Frame /double /Seed 4 /Strength 0.6 /Page 1 >>
+    ]
+    /Notes [ << /Text (find that book before the snow) /X 150 /Y 250 /Angle -3
+                /Size 14 /Width 150 /Seed 3 /Page 2 >> ]
+>> rel-page
+
+showpage

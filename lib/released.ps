@@ -9,7 +9,9 @@
 % skew and lamp, photocopy generations (each adds its own skew, speckle and
 % edge shadow, and the type it holds closes up), punch holes, a staple, a
 % paper clip, rubber stamps, redaction bars and handwritten margin notes.
-% Written for lib/typewriter.ps, but `rel-page` wraps any drawing.
+% Written for lib/typewriter.ps, but `rel-page` wraps any drawing. A document of
+% several pages is a paged rel-page between tw-type's /PageStart and /PageEnd
+% (see "a paged document" below).
 %
 %   { ... draw the page ... } << /Age 0.6 /Generation 2 /Stamps [ ... ] >> rel-page
 %
@@ -82,7 +84,7 @@ RelState begin {
     /rlLamp 0 def  /rlSkew 0 def  /rlBack null def
     /rlGen 0 def  /rlHaze 0.6 def  /rlSpeck 1 def  /rlCEdge 0.6 def  /rlDrop 1 def  /rlSoft 1 def
     /rlPunch 0 def  /rlStaple 0 def  /rlClip 0 def  /rlShadow 0.6 def
-    /rlStamps [ ] def  /rlNotes [ ] def
+    /rlStamps [ ] def  /rlNotes [ ] def  /rlPaged false def
 } bind def
 /rlRag 0.5 def  /rlRInk [ 0.05 0.05 0.06 ] def    % redaction: kept between calls
 
@@ -104,6 +106,7 @@ RelState begin {
     } { pop false } ifelse
 } bind def
 /rlIsList { dup type /arraytype eq exch xcheck not and } bind def
+/rlIsBool { type /booleantype eq } bind def
 
 /rlKeys <<
     /Seed       [ /rlSeed   /rlIsInt    /rel-seed-must-be-an-integer ]
@@ -128,6 +131,7 @@ RelState begin {
     /Shadow     [ /rlShadow /rlIsUnit   /rel-shadow-must-be-0-to-1 ]
     /Stamps     [ /rlStamps /rlIsList   /rel-stamps-must-be-an-array-of-dicts ]
     /Notes      [ /rlNotes  /rlIsList   /rel-notes-must-be-an-array-of-dicts ]
+    /Paged      [ /rlPaged  /rlIsBool   /rel-paged-must-be-true-or-false ]
     /Redact     [ /rlRag    /rlIsUnit   /rel-redact-must-be-0-to-1 ]
     /RedactInk  [ /rlRInk   /rlIsRgb    /rel-redactink-must-be-an-rgb-array ]
 >> def
@@ -661,7 +665,7 @@ RelState begin {
 % under it) shows through where the stamp is light
 /rlStampKeys <<
     /Lines 1 /Text 1 /X 1 /Y 1 /Angle 1 /Size 1 /Ink 1 /Frame 1 /Strength 1 /Seed 1
-    /Font 1 /Tracking 1 /Soften 1
+    /Font 1 /Tracking 1 /Soften 1 /Page 1
 >> def
 /rlIsStamp {
     dup type /dicttype eq {
@@ -785,7 +789,7 @@ RelState begin {
 } bind def
 
 % margin notes: hs-write (lib/handscript.ps) at a place and an angle
-/rlNoteKeys << /Text 1 /X 1 /Y 1 /Angle 1 /Size 1 /Width 1 /Ink 1 /Seed 1 /Pen 1 /Soften 1 >> def
+/rlNoteKeys << /Text 1 /X 1 /Y 1 /Angle 1 /Size 1 /Width 1 /Ink 1 /Seed 1 /Pen 1 /Soften 1 /Page 1 >> def
 /rlIsNote {
     dup type /dicttype eq {
         true exch { pop rlNoteKeys exch known and } forall
@@ -1091,17 +1095,36 @@ RelState begin {
     rlFolds 0 gt or rlPunch 0 gt or
 } bind def
 % the layers' marks, over the content
-/rlMarks {
-    rlNotes { rlNoteDraw } forall
-    rlStamps { rlStampDraw } forall
-    rlStaples rlClips
+% a stamp or note with a /Page is for that page of a paged rel-page only
+/rlOnPage {                                         % dict -> bool
+    dup type /dicttype eq { dup /Page known } { false } ifelse {
+        /Page get dup rlIsInt not { end rel-mark-page-must-be-a-positive-integer } if
+        dup 1 lt { end rel-mark-page-must-be-a-positive-integer } if
+        rlPaged { rlPg eq } { pop true } ifelse
+    } { pop true } ifelse
 } bind def
-/rlOriginal {
+% a staple or a clip holds the whole stack at its top sheet: the first page
+/rlMarks {
+    rlNotes { dup rlOnPage { rlNoteDraw } { pop } ifelse } forall
+    rlStamps { dup rlOnPage { rlStampDraw } { pop } ifelse } forall
+    rlPaged not rlPg 1 eq or { rlStaples rlClips } if
+} bind def
+% the original's sheet: its copy loss, the paper, and the dropout clip
+/rlOrigHead {
     /rlCC 1 0.6 rlGen exp sub def
     rlHzB 0 gt { rlSeed 16 rlSeed2 rlHzInit } if
     rlPaint { gsave rlPaperDraw grestore } if
     /rlDrOn rlDrop 0 gt rlGen 0 gt and def
     rlDrOn { gsave rlDropClip /rlBars [ ] def /rlRecOn true def } if
+} bind def
+% what is drawn over the content: the redaction bars again, then the marks
+/rlOrigTail {
+    rlDrOn { /rlRecOn false def grestore rlBarsAgain } if
+    rlMarks
+    /rlCC 0 def
+} bind def
+/rlOriginal {
+    rlOrigHead
     rlRePath
     /tw-set where { pop rlGen 0 gt } { false } ifelse {
         TWState /tCopies get /rlOldC exch def
@@ -1111,9 +1134,7 @@ RelState begin {
     } {
         /rlProc load end exec RelState begin
     } ifelse
-    rlDrOn { /rlRecOn false def grestore rlBarsAgain } if
-    rlMarks
-    /rlCC 0 def
+    rlOrigTail
 } bind def
 % the caller's path, kept as a procedure while the sheets are clipped (a clip
 % needs the current path) and laid again, at the same device places, for the
@@ -1127,12 +1148,9 @@ RelState begin {
     matrix currentmatrix /rlMc exch def
     rlM0 setmatrix newpath rlPathP rlMc setmatrix
 } bind def
-/rlRun {
-    /rlRecOn false def                              % a content that raised an error left it on
-    rlGrabPath
-    rlPrep
-    rlGen 0 gt rlHaze 0 gt and { rlHaze 0.16 mul } { 0 } ifelse dup /rlHzB exch def /rlHzK exch def
-    gsave
+% the scanner bed and its tilt, and a copy's grey paper under everything: the
+% frame every layer of a page is drawn in. Opens no gsave of its own.
+/rlSheetUp {
     rlSkew 0 ne rlBack null ne or {
         gsave
         rlBackRgb aload pop setrgbcolor
@@ -1141,6 +1159,14 @@ RelState begin {
     } if
     rlSkew 0 ne { rlW 2 div rlH 2 div translate rlSkew rotate rlW 2 div neg rlH 2 div neg translate } if
     rlGen 0 gt { gsave rlSeed 10 rlSeed2 0.985 1 rlHzB sub mul 0.985 1 rlHzB sub mul 0.975 1 rlHzB sub mul false false rlPaperField grestore } if
+} bind def
+/rlRun {
+    /rlRecOn false def                              % a content that raised an error left it on
+    rlGrabPath
+    rlPrep
+    rlGen 0 gt rlHaze 0 gt and { rlHaze 0.16 mul } { 0 } ifelse dup /rlHzB exch def /rlHzK exch def
+    gsave
+    rlSheetUp
     0 1 rlGen {
         /rlJ exch def
         gsave rlJ rlEnter
@@ -1148,6 +1174,69 @@ RelState begin {
         grestore
     } for
     grestore
+    /rlHzB 0 def  /rlHzK 0 def
+} bind def
+
+% ---- a paged document (#448) -------------------------------------------------
+% tw-type ends a full page with showpage, which resets the CTM and the clip and
+% so cuts the copy chain of rlRun in two. A paged rel-page (/Paged true) draws
+% each sheet whole between tw-type's two page hooks instead:
+%
+%   << /PageStart { rel-page-start } /PageEnd { rel-page-end } ... >> tw-type
+%
+% rel-page-start opens the sheet's frame (the scanner bed and tilt, a copy's
+% grey, the sheet clips of every generation, the paper, the dropout clip) and
+% LEAVES it set for the page to be typed in; rel-page-end draws what goes over
+% the type (redaction bars, marks), closes the frame and draws the copy layers
+% (lid, edge shadow, specks), so the sheet is finished before the showpage.
+%
+% The frame survives because tw-type runs each hook as `gsave hook grestore`:
+% the start hook begins with a `grestore` (the hook's own gsave), builds the
+% frame, and ends with a `gsave` that tw-type's grestore pops, leaving the frame
+% in place; the end hook does the same the other way round. So a hook must be
+% called by tw-type and be the first thing its hook procedure does: a gsave
+% before it would make its first grestore pop the wrong level.
+%
+% Each sheet has its own seed (the page's /Seed plus 101 a sheet, the first
+% sheet's unchanged), so the specks, the shifts and the blotches differ from
+% page to page, and a one-page paged document is the same page as rel-page's.
+/rlPg 1 def  /rlPgLive false def  /rlSeed0 1 def
+/rlPgStart {
+    grestore                                        % tw-type's gsave for the hook
+    /rlPg rlPg 1 add def
+    /rlSeed rlSeed0 rlPg 1 sub 101 mul add def
+    rlPrep
+    rlGen 0 gt rlHaze 0 gt and { rlHaze 0.16 mul } { 0 } ifelse dup /rlHzB exch def /rlHzK exch def
+    gsave                                           % the sheet
+    rlSheetUp
+    gsave /rlJ 0 def 0 rlEnter                      % the original's frame
+    rlOrigHead
+    gsave                                           % popped by tw-type, as the hook's
+} bind def
+/rlPgEnd {
+    grestore                                        % tw-type's gsave for the hook
+    rlOrigTail
+    grestore                                        % the original's frame
+    1 1 rlGen {
+        /rlJ exch def
+        gsave rlJ rlEnter rlCopyLayer grestore
+    } for
+    grestore                                        % the sheet
+    gsave                                           % popped by tw-type
+} bind def
+/rlRunPaged {
+    /rlRecOn false def
+    /rlSeed0 rlSeed def  /rlPg 0 def  /rlPgLive true def
+    /tw-set where { pop rlGen 0 gt } { false } ifelse {
+        TWState /tCopies get /rlOldC exch def
+        << /Copies rlGen >> tw-set
+        /rlProc load end exec RelState begin
+        << /Copies rlOldC >> tw-set
+    } {
+        /rlProc load end exec RelState begin
+    } ifelse
+    /rlPgLive false def
+    rlPg 0 eq { end rel-paged-content-never-called-the-page-hooks } if
     /rlHzB 0 def  /rlHzK 0 def
 } bind def
 
@@ -1167,6 +1256,15 @@ rlDefaults
 %
 %   { << /Age 1.5 >> rel-paper } /rel-age-must-be-0-to-1
 %   (an age above 1) mustguard
+%
+%   { { } << /Paged 1 >> rel-page } /rel-paged-must-be-true-or-false
+%   (a number for Paged) mustguard
+%
+%   { rel-page-start } /rel-page-start-needs-a-paged-rel-page
+%   (the start hook outside a paged page) mustguard
+%
+%   { rel-page-end } /rel-page-end-needs-a-paged-rel-page
+%   (the end hook outside a paged page) mustguard
 %
 %   { { } << /Generation 9 >> rel-page } /rel-generation-must-be-an-integer-0-to-8
 %   (nine generations) mustguard
@@ -1208,7 +1306,7 @@ rlDefaults
 %%EndSelfTest
 
 % @kind: Procedure
-% @summary: Draws a page the way a released document looks, around any content: `{ content } opts rel-page`. The content proc is run once, in the page's own frame; it draws the typed page (lib/typewriter.ps tw-type is the intended content, and gets /Copies set to /Generation unless it sets its own). Paper is painted under it (tone, blotches, grain and fibres, edge darkening, the scanner lamp, folds, punch holes); /Generation photocopies each add a small skew and shift, black specks and streaks, the copier's lid at the edges and the copier's grey, high-contrast curve; marks are drawn over it (notes, stamps, a staple, a clip). Every effect is off at strength 0, the default, so with no options the content is simply run. Deterministic under /Seed. The caller's rand stream is untouched. One page only: the content must fit on the sheet and must not showpage (tw-type does after a full page), or the copies' clips and transforms break; age every page of a long document with rel-paper in /PageStart instead. If the content raises an error, the typewriter's /Copies is left set, and so are the copy curve and the haze, which a later standalone rel-stamp or rel-note then draws through until the next rel-page.
+% @summary: Draws a page the way a released document looks, around any content: `{ content } opts rel-page`. The content proc is run once, in the page's own frame; it draws the typed page (lib/typewriter.ps tw-type is the intended content, and gets /Copies set to /Generation unless it sets its own). Paper is painted under it (tone, blotches, grain and fibres, edge darkening, the scanner lamp, folds, punch holes); /Generation photocopies each add a small skew and shift, black specks and streaks, the copier's lid at the edges and the copier's grey, high-contrast curve; marks are drawn over it (notes, stamps, a staple, a clip). Every effect is off at strength 0, the default, so with no options the content is simply run. Deterministic under /Seed. The caller's rand stream is untouched. One page, unless /Paged is true: the content must fit on the sheet and must not showpage (tw-type does after a full page), or the copies' clips and transforms break. For a document of several pages set /Paged true and give tw-type `/PageStart { rel-page-start } /PageEnd { rel-page-end }`: each page is then a sheet of its own (paper, copies, dirt, marks), see rel-page-start. To age the pages of a long document without the copy layers, rel-paper in /PageStart does it. If the content raises an error, the typewriter's /Copies is left set, and so are the copy curve and the haze, which a later standalone rel-stamp or rel-note then draws through until the next rel-page.
 % @example: (lib/artkit.ps) run (lib/surfacekit.ps) run (lib/released.ps) run { 100 600 moveto /Courier findfont 14 scalefont setfont (A typed line.) show } << /Age 0.6 /Generation 2 /Skew 0.4 /Stamps [ << /Lines [ (RECEIVED) (14 OCT 1964) ] /X 400 /Y 700 /Angle 8 >> ] >> rel-page showpage
 % @param: /Seed [integer] Seeds every random mark; the same seed draws the same page (default 1)
 % @param: /Width [points] The sheet's width (default 612)
@@ -1232,6 +1330,7 @@ rlDefaults
 % @param: /Shadow [0..1] How dark the shadows of the staple, the clip and the punch holes are (default 0.6)
 % @param: /Stamps [array of dict] Rubber stamps over the content, each a dict for rel-stamp (default none)
 % @param: /Notes [array of dict] Handwritten margin notes over the content, each a dict for rel-note, which needs lib/handscript.ps (default none)
+% @param: /Paged [boolean] The content is a document of several pages that wires rel-page-start and rel-page-end into tw-type's /PageStart and /PageEnd; every sheet gets the paper, the copy layers and the marks, with its own seed. The staple and the clips go on the first sheet only, and a stamp or note with a /Page goes on that page only (default false)
 % @param: /Redact [0..1] How ragged rel-redact's bars are, kept for later rel-redact calls (default 0.5)
 % @param: /RedactInk [rgb array] The colour of rel-redact's bars, kept for later calls (default near black)
 /rel-page {
@@ -1239,7 +1338,27 @@ rlDefaults
     rlDefaults rlApply
     dup rlIsProc not { pop end rel-content-must-be-a-procedure } if
     /rlProc exch def
-    rlRun
+    rlPaged { rlRunPaged } { rlRun } ifelse
+    end
+} bind def
+
+% @kind: Procedure
+% @summary: tw-type's /PageStart for a paged rel-page (/Paged true): opens the sheet's frame and leaves it set, so the page is typed on the aged paper, through the copies' shifts and clips. It must be the whole /PageStart (`/PageStart { rel-page-start }`) and works only inside a paged rel-page, with rel-page-end as /PageEnd. See rel-page.
+% @example: (lib/artkit.ps) run (lib/surfacekit.ps) run (lib/typewriter_outlines.ps) run (lib/typewriter.ps) run (lib/released.ps) run { << /Text (A line.) /PageStart { rel-page-start } /PageEnd { rel-page-end } >> tw-type } << /Age 0.6 /Generation 1 /Paged true >> rel-page showpage
+/rel-page-start {
+    RelState begin
+    rlPgLive not { end rel-page-start-needs-a-paged-rel-page } if
+    rlPgStart
+    end
+} bind def
+
+% @kind: Procedure
+% @summary: tw-type's /PageEnd for a paged rel-page (/Paged true): draws the redaction bars and marks over the page, closes its frame and draws the copy layers (lid, edge shadow, specks). It must be the whole /PageEnd (`/PageEnd { rel-page-end }`) and works only inside a paged rel-page, after rel-page-start. See rel-page.
+% @example: (lib/artkit.ps) run (lib/surfacekit.ps) run (lib/typewriter_outlines.ps) run (lib/typewriter.ps) run (lib/released.ps) run { << /Text (A line.) /PageStart { rel-page-start } /PageEnd { rel-page-end } >> tw-type } << /Age 0.6 /Generation 1 /Paged true >> rel-page showpage
+/rel-page-end {
+    RelState begin
+    rlPgLive not { end rel-page-end-needs-a-paged-rel-page } if
+    rlPgEnd
     end
 } bind def
 
@@ -1282,6 +1401,7 @@ rlDefaults
 % @param: /Tracking [points] Extra space after each letter: the spaced capitals of a date stamp (default 0)
 % @param: /Seed [integer] Seeds the holes; the same dict presses the same stamp (default 1)
 % @param: /Soften [0..1] The soft fringe of a copier's blur around the text and frame; default is the page's /Soften times its copy loss, so a stamp outside rel-page, or in an original, is crisp (default none)
+% @param: /Page [count] The page of a paged rel-page (/Paged true) this stamp goes on, counted from 1; without it the stamp is on every page. rel-stamp itself ignores it (default every page)
 /rel-stamp {
     RelState begin rlStampDraw end
 } bind def
@@ -1299,6 +1419,7 @@ rlDefaults
 % @param: /Pen [count] The pen's width in glyph units, thousandths of an em, as lib/handscript.ps /Pen (default 36)
 % @param: /Seed [integer] Seeds the pen's wobble (default 1)
 % @param: /Soften [0..1] A copier's blur: a fringe of lighter, wider strokes around the pen's line, and the line itself a little lighter; default is the page's /Soften times its copy loss, so a note outside rel-page, or in an original, is crisp (default none)
+% @param: /Page [count] The page of a paged rel-page (/Paged true) this note goes on, counted from 1; without it the note is on every page. rel-note itself ignores it (default every page)
 /rel-note {
     RelState begin rlNoteDraw end
 } bind def
