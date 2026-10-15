@@ -81,8 +81,12 @@ Ghostscript, which has no such operator, drykit behaves as before and the
   pixels): the documented limit, unchanged. The same program in pscat at 144
   dpi: `dkPsameok` true, batch and at-once byte-identical.
 - Identity: `scripts/identity_check.sh` with `--base-bin`/`--head-bin`,
-  `--loader lib/drykit.ps --loader lib/artkit.ps`, and a control (the bare
-  bound wrapper in a batch) that must differ: 97 of 97 page renders
-  identical across 81 files (every file that loads drykit or artkit, the
-  dry-media libraries, gallery pieces and self-test drivers included); the
-  control differs between the trees, as it must.
+  `--loader` for drykit, artkit, drychalk, drycharcoal and drycrayon, and
+  `--files` for the six drymedia prototypes
+  (`docs/dev/design/drymedia/prototypes/*.ps`), with a control (the bare
+  bound wrapper in a batch) that must differ: 103 of 103 page renders
+  identical across 87 files (the dry-media gallery pieces and specimens, the
+  mathkit specimens, every artkit file and the self-test drivers included);
+  the control differs between the trees, as it must.
+- `ghostscript_keeps_a_plain_clip_in_a_batch` still passes: drykit loads and
+  batches under gs with the operator absent.
