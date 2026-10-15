@@ -64,6 +64,13 @@ study and the H2 crop. All the sources are public domain, so the panel is
 too, apart from pscat's own render. `prototypes/lincoln_compare.py`
 builds it.
 
+`drycharcoal_refs_compare.png` (#241, rebuilt in #418) puts five of the
+crops above (H1, H2, H4, H6, H7) beside crops of the current
+`examples/drycharcoal_specimen.ps`. `prototypes/drycharcoal_refs_compare.py`
+builds it. It includes `charcoal_stick_strokes` (H6), so the panel is CC BY-SA 4.0
+under that source's attribution (Tom Berlangero); the other four crops are public
+domain.
+
 These sources were viewed but no crop is committed. One is not free to
 reuse; the others add nothing the crops above lack:
 
