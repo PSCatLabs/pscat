@@ -827,7 +827,11 @@ renders eight examples in both and compares block-downsampled output).
    #215 shipped the gallery piece `gallery/released_memo.ps` (*Released in
    Part*) and the blind boards `docs/dev/design/typewriter/blind_grid.png` and
    `memo_vs_real.png` (`docs/dev/design/typewriter/tools/blind_compare.py`; the
-   key is in the PR, not the repo); `notes/215-released-memo.md`. #466 gave a
+   key is in the PR, not the repo); `notes/215-released-memo.md`. #590 added a second
+   piece, `gallery/time_traveler_memo.ps` (*The Man from 2026*): a never-released
+   TOP SECRET original (`/Generation 0`, legal paper), with the red banners and
+   control lines typed by `tw-set` after `tw-type` on the same frame;
+   `notes/590-time-traveler-memo.md`. #466 gave a
    copy's paper a grey haze, mottle and grain (`rel-page /Haze`, default 0.6,
    applied after the copier curve in `rlSet`/`rlCol`; `/Haze 0` is the old white
    copy; `notes/466-copy-paper-haze.md`). #467 shipped (`notes/467-misstrike-y-tail.md`).

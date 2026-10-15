@@ -830,6 +830,34 @@
    "alt": "Released in Part, a typed 1962 office memorandum on a photocopied page: a memo header, numbered paragraphs, a strikeover, an x-out and underlined words, two names covered by marker bars, a received date stamp, a released-in-part stamp, punch holes and handwritten initials and a note",
    "blurb": "A typed 1962 memo about two lost cans of aerial film, photocopied, stamped and released decades later with the names blacked out.",
    "technique": "Typed with `tw-type` on the `/Typewriter` font: an elite manual (`/Pitch 12`) with a worn ribbon, so every strike is its own (the weave shows through the ink, edges feather, some counters clog, a few letters land high or light). The memo header, the tab stops, a strikeover (`<o>was|were</o>`), an x-out, underscores and the redactions (`<r>..</r>`, drawn by `rel-redact` as marker bars) are markup in one text string. `rel-page` wraps the typing: aged and folded paper, two punch holes, the scanner's tilt and lamp, then one photocopy generation, which turns the paper white, greys the stamps and closes the type up a little. The date stamp, the released-in-part stamp and the handwritten initials and note (`lib/handscript.ps`) are marks over the page, so the copy copies them. The office, people and project are invented."
+  },
+  {
+   "id": "time_traveler_memo",
+   "title": "The Man from 2026",
+   "category": "lettering",
+   "tags": [
+    "typewriter",
+    "document"
+   ],
+   "libraries": [
+    "artkit",
+    "handscript",
+    "released",
+    "surfacekit",
+    "typewriter",
+    "typewriter_outlines"
+   ],
+   "featured": false,
+   "playground": false,
+   "issue": 590,
+   "added": "2026-10-15",
+   "source": "gallery/time_traveler_memo.ps",
+   "render": "gallery/renders/time_traveler_memo.png",
+   "page": "612x1008",
+   "speed": 1200,
+   "alt": "The Man from 2026, a typed 1962 TOP SECRET memorandum for the record on aged legal paper: red typed classification lines at the head and foot, a control number and copy line, a registry stamp, a paper clip and punch holes, numbered paragraphs with x-outs and a strikeover, a signature block and distribution list, a regrading box and handwritten initials and a margin note",
+   "blurb": "A TOP SECRET memorandum of 1962 that was never released: an interviewing officer's flat account of a man who says he came from 2026 and built his time machine by talking to another machine.",
+   "technique": "Typed with `tw-type` on the `/Typewriter` font, an elite manual with a worn ribbon (every strike its own: the weave in the ink, feathered edges, a few light or high letters, the `e` clogged on this machine). The memo-for-the-record header, tab stops, two x-outs, a strikeover (`<o>offcie|office</o>`) and an underscore are markup in one text string. The same machine then types the control lines in black and, with its ribbon lifted to the red half (`tw-set` with a red `/Ink` and a little `/Bleed` of black into the tops of the letters), the classification at the head and foot of the sheet. `rel-page` with `/Generation 0` makes it the ribbon original, never copied: aged legal paper, two punch holes, a gem clip, the scanner's tilt and lamp. The registry stamp, a regrading box, the routing initials and the margin note (`lib/handscript.ps`) are marks over the page. The office, people and places are invented; the only real names are in the man's own testimony."
   }
  ],
  "groups": [
