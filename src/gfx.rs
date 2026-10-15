@@ -1977,11 +1977,24 @@ impl Gfx {
         self.state.path.extend_from(path);
     }
 
-    /// Enter a Type 3 glyph context: remember where the gsave stack is
-    /// and what the state was, so the glyph can be sealed off no matter
-    /// what BuildChar does (unbalanced gsave/grestore included).
+    /// Remember where the gsave stack is and what the state was, so a Type 3
+    /// glyph (or a `save`) can be sealed off no matter what the procedure
+    /// does (unbalanced gsave/grestore included).
     pub(crate) fn glyph_snapshot(&self) -> (usize, Box<GraphicsState>) {
         (self.saved.len(), Box::new(self.state.clone()))
+    }
+
+    /// Open a Type 3 glyph context: [`glyph_snapshot`](Self::glyph_snapshot)
+    /// plus a `gsave` level, because Ghostscript runs a `BuildChar` or
+    /// `BuildGlyph` inside a `gsave` (#500). The level starts with no
+    /// `clipsave` entries, so a `cliprestore` with none of its own gives
+    /// back the clip at `show`, and an unmatched `grestore` gives back the
+    /// state at `show`. [`restore_glyph_snapshot`](Self::restore_glyph_snapshot)
+    /// still seals the glyph, whatever the procedure did to the stack.
+    pub(crate) fn glyph_enter(&mut self) -> (usize, Box<GraphicsState>) {
+        let snapshot = self.glyph_snapshot();
+        self.gsave();
+        snapshot
     }
 
     pub(crate) fn restore_glyph_snapshot(&mut self, depth: usize, state: Box<GraphicsState>) {

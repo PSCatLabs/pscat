@@ -1320,7 +1320,7 @@ impl ShowCtx {
                 return Err(PsError::InvalidFont);
             }
         };
-        let (depth, saved) = gfx.glyph_snapshot();
+        let (depth, saved) = gfx.glyph_enter();
         let suppressed = !matches!(self.mode, ShowMode::Paint);
         if suppressed {
             gfx.suppress_painting();
