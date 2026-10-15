@@ -37,10 +37,17 @@ per unit of pressure, so the mass moved about 4% per sd.
   `/Wear > 0`.
 - The very-light strike was a fixed -0.5 at 1%. Now its probability is
   sd / 6 (2% at 0.12, 0.5% on `/electric`) and its depth is drawn from 0.3 to
-  0.7 (strike slot 8, unused before). Draw slots used by a strike: 1-8, with
-  uni 5 sharing a slot with gau 1 as before.
+  0.7 (strike slot 8, unused before). The strike's draws are uni 4, 5 and 8
+  and gau 1, 2, 3 and 6 (slots 5-7, 9-11, 13-15, 25-27); uni 5 shares slot 5
+  with gau 1, as before.
 - Copies: the toner spread factor 0.7 -> 1.1, since the thinner feather made
   `/Copies 3` less fat (the released test expects 10% more dark pixels).
+
+Per-key means, measured on `/manual`, machine 1, 8 seeds x 24 strikes: the
+ink mass is 0.79-0.86 of the old mass on every key tried. The little-finger
+keys (`a q z p ;`) lost 0.78-0.83, against 0.86 for `e` and `o`: the steeper
+slope also scales the per-key terms (finger, `mWt`), a few percent more on the
+light keys, which is the direction the scans show. Not split into two slopes.
 
 ## Tests
 
@@ -61,7 +68,7 @@ all differ; the control, the specimen, differs as it must), plus the output of
 `gallery/renders/released_memo.png`, and the composites `ink_vs_real.png`,
 `memo_vs_real.png`, `blind_grid.png`, `release_vs_real.png`. The gallery
 manifest text is still right (`gallery.py check` passes). The blind grid's key
-was: A render, B T15, C T9, D render, E T10, F T2.
+is in the PR, not here.
 The author's reading is not blind (the author has seen every scan): the
 renders now look lighter and less regular, and still a little more regular than
 the scans.

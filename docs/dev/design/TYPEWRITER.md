@@ -252,7 +252,9 @@ this.
 
 - The body is stroked at 0.2 of the spread width (was 0.3), and the feather at
   0.45 (was 0.85). The spread itself (`/Ribbon` x pressure x 48) is unchanged, so
-  `/InkModel false` is #211's ink exactly.
+  `/InkModel false` is #211's ink at `/Wear 0` with no `/Copies` (specimen row 1).
+  At `/Wear > 0` flat ink's spread follows the wider pressure, and `/Copies`
+  spreads it further (the copies factor is 1.1, was 0.7).
 - The hole level is 0.21 at the default `/Ribbon 0.7` (was 0.16), 0.36 at `/worn`
   (was 0.31), and rises by 3 x (1 - pressure) on a light strike (was 0.55) and
   falls by 1 x (pressure - 1) on a heavy one (was 0.15). A hole's area is only a
