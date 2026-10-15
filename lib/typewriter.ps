@@ -587,7 +587,7 @@ grestore
     /tGy exch def
     newpath
     tGrowOff {
-        aload pop tEr mul exch tEry mul exch tGy add
+        aload pop tEry mul exch tEr mul exch tGy add
         tMat setmatrix translate xS 1 scale tGlyph 0 get exec tGlyph 1 get exec
     } forall
     tMat setmatrix clip newpath

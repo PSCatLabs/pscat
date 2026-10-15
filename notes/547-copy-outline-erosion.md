@@ -58,10 +58,15 @@ Sweep on the specimen's third sheet at 300 dpi (`tECopy`; y reach; body):
 70 broke words ("Vis:i!or"); 55 lost "the" to "t.he"; 40 to 50 read well
 (legible, bars gone from light strikes). Without a full-reach body the copy had
 less ink than the original. The ink of the typed test line (72 dpi, dark pixels
-under 128 / ink mass): original 259 / 297; a copy before 418 / 442; after 258 / 271.
+under 128 / ink mass): original 259 / 297; a copy before 418 / 442; after 266 / 267.
 So by dark pixels a third-generation copy is now about as heavy as its original, not
 1.6x, and lighter by mass: its stems are fatter, its horizontals thinner. It
 reads lighter than T15, which is bold throughout.
+
+Codex's review of the PR found the growth radii were applied to the wrong axes
+(x got `tEryK` of the reach and y the whole of it); the first sweeps above ran
+on that. Fixed, and the output compared again at 300 dpi: slightly stronger
+horizontal erosion, the same legibility, `tECopy` kept at 45.
 
 ## Cost
 
@@ -72,8 +77,8 @@ the gallery memo at 144 dpi 3.31 s before, 3.61 s after (+9%, a first copy). Gua
 ## Tests
 
 `tests/typewriter.rs`: `a_copy_loses_its_thin_horizontals_and_keeps_its_stems`
-(sixteen Es: arm ink 357,170 to 275,842 without and with erosion, stems 265,887 to
-247,553, with the negative control `TWState /tECopy 0 put`; a first copy loses less than
+(sixteen Es: arm ink 357,170 to 261,412 without and with erosion, stems 265,887 to
+252,714, with the negative control `TWState /tECopy 0 put`; a first copy loses less than
 three), `the_erosion_leaves_an_original_alone`. `tests/released.rs`: the three tests of
 `/Dropout`, the bar-replay and recorder tests went with it; `a_copy_whitens_the_paper_and_the_type_gets_fatter`
 now compares the spread with `/tECopy 0` and checks the erosion takes ink back out;
