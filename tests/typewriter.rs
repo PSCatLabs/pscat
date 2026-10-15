@@ -333,9 +333,11 @@ fn the_weave_opens_voids_and_a_dry_ribbon_opens_more() {
             "36 84 moveto << /Machine 1 /Seed 1 {opts} >> tw-setup ({PARAGRAPH}) show"
         )))
     };
-    // the share of flat ink's solid pixels that the weave leaves light
+    // the share of the bare face's solid pixels (no spread: /Ribbon 0, flat
+    // ink) that the weave leaves light, so the thinner edge of the ink (#423)
+    // is not counted as a void
+    let flat = line("/Ribbon 0 /InkModel false");
     let voids = |ribbon: f64| {
-        let flat = line(&format!("/Ribbon {ribbon} /InkModel false"));
         let inked = line(&format!("/Ribbon {ribbon}"));
         let solid = flat.iter().filter(|&&p| p >= 200).count();
         let open = flat

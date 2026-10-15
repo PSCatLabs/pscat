@@ -83,7 +83,9 @@ set from no variation to a battered machine:
 The ink is ribbon ink: the face pressed through inked fabric, so the weave's
 voids show in the letter, the edge feathers, clogged keys fill their counters,
 and density follows pressure and `/Ribbon` (wetness). `/InkModel false` gives
-flat ink. `docs/dev/design/typewriter/ink_vs_real.png` sets it beside the reference scans.
+flat ink. Strike weight varies as it does in the scans: most strikes are alike, a
+few are light, and a rare one is nearly blank (`/Preset /electric` is much more
+even). `docs/dev/design/typewriter/ink_vs_real.png` sets it beside the reference scans.
 
 ### Typing a page: `tw-type`
 

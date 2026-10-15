@@ -157,16 +157,16 @@ TWState begin {
 /tPitch 10 def  /tSize 12.5 def
 /tInk [0.13 0.13 0.15] def  /tRibbon 0.7 def
 /tCopies 0 def  /tCopyC 0 def
-/tPSd 0.08 def  /tFinger true def  /tInkOn true def
+/tPSd 0.12 def  /tFinger true def  /tInkOn true def
 /tMat matrix def
 /tFillAdj /.setfilladjust2 where { pop true } { false } ifelse def
 /tMtabFor null def  /tDocFor null def  /tLineFor null def
 
 % /Preset -> /Wear, /Ribbon and the pressure model (TYPEWRITER.md section 5)
 /tPresets <<
-    /manual   << /tWear 1   /tRibbon 0.7  /tPSd 0.08 /tFinger true >>
+    /manual   << /tWear 1   /tRibbon 0.7  /tPSd 0.12 /tFinger true >>
     /electric << /tWear 0.7 /tRibbon 0.7  /tPSd 0.03 /tFinger false >>
-    /worn     << /tWear 1.5 /tRibbon 0.35 /tPSd 0.08 /tFinger true >>
+    /worn     << /tWear 1.5 /tRibbon 0.35 /tPSd 0.12 /tFinger true >>
 >> def
 
 % pressure adjustments by code: the little-finger keys (q a z p ; / - and
@@ -337,7 +337,7 @@ TWState begin {
     /sR 3 gau 0.25 mul wearS mul def            % sd 0.25 degrees
     4 uni 0.01 lt { /sX sX 4 mul def /sY sY 4 mul def } if    % mis-strike
     % pressure: a deviation from 1, scaled by the strike wear
-    5 uni 0.01 lt { -0.5 } {                    % 1% very light
+    5 uni tPSd 6 div lt { 8 uni 0.4 mul 0.3 add neg } {   % very light: -0.3 to -0.7, 2% at sd 0.12
         6 gau tPSd mul
         tFinger { tFingerAdj kCode get add } if
         tEmbossAdj kCode get add
@@ -346,7 +346,7 @@ TWState begin {
     mWt wearM mul 1 add dup 0.1 lt { pop 0.1 } if mul
     /tPr exch def
     tPr 48 mul tRibbon mul
-    tCopyC 0 gt { 1 tCopyC 0.7 mul add mul } if     % copies spread the toner
+    tCopyC 0 gt { 1 tCopyC 1.1 mul add mul } if     % copies spread the toner
     /inkW exch def                                  % spread: 0.6pt x ribbon at 1
 
     % place: line + machine + strike offsets, the tilt's rise along the
@@ -540,10 +540,13 @@ grestore
     /tGlyph TWOutlines kCode get def
     /sA hA def /sB hB def                       % the strike's prefix
     % density: dryness, pressure (a heavy strike fills the weave in), and
-    % the slow ribbon wear across the page
-    % 0.16 at the default /Ribbon 0.7, 0.31 worn (0.35), 0.75 bone dry
-    1 tRibbon sub dup 0.2 mul exch dup mul dup mul 0.45 mul add 0.1 add
-    1 tPr sub dup 0 gt { 0.55 } { 0.15 } ifelse mul add
+    % the slow ribbon wear across the page (#423: the base is higher and the
+    % pressure slope steeper, so the ink thins and a light strike drops out
+    % as the references do; a hole's area is only a third of its level)
+    % 0.21 at the default /Ribbon 0.7 and mean pressure, 0.36 worn (0.35),
+    % 0.8 at /Ribbon 0; +3 per unit of pressure below 1, -1 per unit above
+    1 tRibbon sub dup 0.2 mul exch dup mul dup mul 0.45 mul add 0.15 add
+    1 tPr sub dup 0 gt { 3 } { 1 } ifelse mul add
     wearS 0 gt { tPageWear 0.06 mul wearS 1 2 copy gt { exch } if pop mul add } if
     dup 0 lt { pop 0 } if /pBody exch def
     % a photocopy's contrast curve (#214): a dark strike fills in (fewer
@@ -552,10 +555,11 @@ grestore
         /pBody pBody 0.18 sub 1 tCopyC 3 mul add mul 0.18 add tCopyC 0.14 mul add
         dup 0 lt { pop 0 } if def
     } if
-    % the spread is split: the body carries a third of it, the feather
-    % reaches to #211's spread through a sparse weave
-    /wBodyW inkW 0.3 mul def
-    /fW inkW -0.15 mul def
+    % the spread is split: the body carries a fifth of it, the feather
+    % reaches to 0.45 of it through a sparse weave (#423; #212 used a third
+    % and 0.85)
+    /wBodyW inkW 0.2 mul def
+    /fW inkW -0.55 mul def
     % the weave's frame: per strike, or per key when strikes do not vary
     wearS 0 eq { tMA tMB kCode mix2 } { sA sB } ifelse
     20 mix2 /hB exch def /hA exch def
