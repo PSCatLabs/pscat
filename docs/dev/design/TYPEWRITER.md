@@ -329,10 +329,13 @@ over the whole glyph. Ribbon ink only (no effect under `/InkModel false`).
   not reach is the page without `/Bleed`, to the byte. With both extras on, the other
   colour's ink wears with the lane too. Not done: a clogged counter's fill stays in the
   main ink.
-- **Not sourced.** The board has no two-colour sample (REFERENCES.md; Q3), and a
-  search for one found only retail listings and a description of the selector
+- **Not sourced.** The board has no two-colour sample (REFERENCES.md; Q3), and two
+  searches for one (#422's, then #468's, which hue-ranked about 700 colour scans and found
+  no page typed in red) found only retail listings and a description of the selector
   ("slightly raises or lowers the ribbon"), nothing on colours mixing at the boundary.
-  The model is the mechanism (a type face wider than the printing half of the ribbon, a
+  The one public-domain source is text: NBS C431 pp. 10-12 says most bichrome ribbons
+  show no diffusion, that when they do black spreads into red, and that some leave a
+  white "pin stripe" between the colours. The model is the mechanism (a type face wider than the printing half of the ribbon, a
   selector that is a little out), not a measurement; the depth, transition and
   rates are set by eye. The arrangement varies by ribbon (the selector picks the top or the
   bottom quarter inch of a half-inch ribbon), hence `/BleedSide`.
@@ -469,6 +472,14 @@ Each is phrased as a decision, with a recommendation.
     separate model.
   #215's agent looks for references to two-colour bleed, embossing and a
   confirmed electric (IBM Selectric) page before the comparison.
+  **#468 did that search and found no qualifying scan for any of them** (nor for #538's
+  two-colour red run or a worn-lane page), so these recommendations stand as design
+  choices, not measurements; REFERENCES.md, "Search for the unsourced traits", has what
+  was searched and found. Two results touch the recommendations: C431's text says to keep
+  `/Bleed` rare and small, and the stem profile (peak and mean darkness) shows no grey
+  middle or dark tops in three scans, the tops being the same or lighter, where `/WornBand`
+  models dark tops. The path left is a photograph of a page
+  typed on a machine the project can name.
 - **Q4. Defaults that follow the measurements.** At body size and screen
   resolution, measured jitter is barely visible, and the default page may look
   "too clean" at first glance. Recommend keeping the measured defaults
