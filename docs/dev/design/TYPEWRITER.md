@@ -161,7 +161,7 @@ printable code:
 | offset x | normal, sd 0.2pt | 0.22–0.27pt within a letter (upper bound) |
 | offset y | normal, sd 0.15pt | 0.14–0.20pt |
 | rotation | normal, sd 0.25° | upper bound only (REFERENCES.md, Rotation) |
-| mis-strike | 1% of strikes take 4× the offset above | the tails: 0.8–0.9% of strikes land more than 1pt off horizontally, which a normal of sd 0.2pt almost never gives |
+| mis-strike | 1% of strikes take 4× the x offset above and 2× the y offset (#467; y was 4×) | x: the tails, 0.8–0.9% of strikes land more than 1pt off horizontally, which a normal of sd 0.2pt almost never gives. y: the vertical offsets are a normal's (Szilard sd 0.19pt gives 0.85% over 0.5pt, measured 0.8%), so a 4× y put a letter up to 2pt off at `/Wear 1.3`; at 2× it stays near 1pt |
 | pressure | normal, mean 1, sd 0.12 (#423; 0.08 in #211), times a finger factor (0.9 on the little-finger keys `q a z p` and `; / -`); sd / 6 of strikes (2% at sd 0.12) are very light (0.3 to 0.7 below 1) | coverage CV 0.07–0.21; T7 |
 
 **One knob, `/Wear`** (`[ratio]`, default 1), multiplies every machine and

@@ -14,7 +14,8 @@
 %   line     per line, from /Seed: a carriage-return offset, a bounded
 %            smooth error in the line advance, a slight tilt.
 %   strike   per strike, from /Seed, the cell, the key and the strike
-%            index: an offset, a rotation, the rare mis-strike (1%, 4x),
+%            index: an offset, a rotation, the rare mis-strike (1%, 4x on
+%            x, 2x on y: #467),
 %            and pressure (finger factor on the little-finger keys, 1% very
 %            light strikes, punctuation struck harder).
 %
@@ -342,7 +343,11 @@ TWState begin {
     /sX 1 gau 16 mul wearS mul def              % sd 0.2pt
     /sY 2 gau 12 mul wearS mul def              % sd 0.15pt
     /sR 3 gau 0.25 mul wearS mul def            % sd 0.25 degrees
-    4 uni 0.01 lt { /sX sX 4 mul def /sY sY 4 mul def } if    % mis-strike
+    % mis-strike: the board has horizontal tails (0.8-0.9% of strikes over 1pt)
+    % but its vertical offsets are as a normal's (0.8% over 0.5pt at sd 0.19),
+    % so x takes 4x and y only 2x: a lift stays under about 1pt at /Wear 1.3
+    % (4x gave 2pt, a letter half an x-height up: #467)
+    4 uni 0.01 lt { /sX sX 4 mul def /sY sY 2 mul def } if
     % pressure: a deviation from 1, scaled by the strike wear
     5 uni tPSd 6 div lt { 8 uni 0.4 mul 0.3 add neg } {   % very light: -0.3 to -0.7, 2% at sd 0.12
         6 gau tPSd mul
