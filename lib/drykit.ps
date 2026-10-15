@@ -1033,7 +1033,10 @@
 % by gsave and popped by grestore ([rest pc] links). A change the shadows
 % cannot follow goes to /dirty, never to null: /dirty only costs grouping.
 % Procedures bound before the batch reach the operators directly and are
-% not seen (the old behaviour: the clip in force when the batch ends).
+% not seen (the old behaviour: the clip in force when the batch ends). An
+% unseen grestore after a seen clip leaves /pc on a stale capture until the
+% next change drykit sees; standard PostScript cannot detect it (#459,
+% notes/459-bound-wrapper-grestore.md).
 % @internal
 /dkPdirty {
     userdict /dkBatch known { userdict /dkBatch get /pc /dirty put } if
@@ -1609,7 +1612,7 @@
 } bind def
 
 % @kind: Procedure
-% @summary: Runs a procedure whose dkstroke calls are drawn together, level-major: every stroke's faint level first, then every bright one, so crossing layers of hatching or re-stroked lines stay dark where they cross instead of the second layer's faint level greying the first's core. One pigment per batch: a stroke of another colour raises dkbatch-mixes-pigments unless it is an /After stroke, which is drawn on its own after the batch renders, in call order. Batches don't nest. Each stroke keeps the coordinate system it was given in, and the clip it was made under: the region of any dkclip, and a plain clip, eoclip or rectclip made inside the batch (strokes under one such clip still share their catches). A procedure bound before the batch reaches the clip operators and gsave/grestore directly, so drykit sees neither its clips nor its restores: a callback that clips and strokes inside a bound gsave ... exec ... grestore wrapper leaves the batch's later strokes under that clip. Use dkclip inside callbacks passed to bound wrappers.
+% @summary: Runs a procedure whose dkstroke calls are drawn together, level-major: every stroke's faint level first, then every bright one, so crossing layers of hatching or re-stroked lines stay dark where they cross instead of the second layer's faint level greying the first's core. One pigment per batch: a stroke of another colour raises dkbatch-mixes-pigments unless it is an /After stroke, which is drawn on its own after the batch renders, in call order. Batches don't nest. Each stroke keeps the coordinate system it was given in, and the clip it was made under: the region of any dkclip, and a plain clip, eoclip or rectclip made inside the batch (strokes under one such clip still share their catches). A procedure bound before the batch reaches the clip operators and gsave/grestore directly, so drykit sees neither its clips nor its restores: a callback that clips and strokes inside a bound gsave ... exec ... grestore wrapper leaves the batch's later strokes under that clip, and standard PostScript gives drykit no way to see that grestore. Use dkclip inside the callback, call the bound wrapper inside a gsave ... grestore of your own, or bind the wrapper inside the batch.
 % @example: 0.12 0.12 0.13 setrgbcolor { 0 6 120 { newpath dup 0 moveto 120 add 120 lineto << /Width 1.2 >> dkstroke } for } dkbatch
 /dkbatch {
     dup dkisproc not { pop dkbatch-needs-a-procedure } if

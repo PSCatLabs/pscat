@@ -34,8 +34,22 @@ the stick's contact patch meets raised tooth.
   bound before the batch calls `clip`, `gsave` and `grestore` directly,
   so drykit sees neither its clips nor its restores. If you pass a
   callback that clips and strokes to a bound `gsave ... exec ... grestore`
-  wrapper, the batch's later strokes stay under that clip. Use `dkclip`
-  inside such callbacks.
+  wrapper, the batch's later strokes stay under that clip. Standard
+  PostScript gives drykit no way to see that `grestore` (why:
+  `notes/459-bound-wrapper-grestore.md`). Any of these three fixes it:
+
+  ```postscript
+  /wrap { gsave exec grestore } bind def   % bound before the batch
+  {
+      { region { line } dkclip } wrap        % dkclip inside the callback
+      gsave { region clip line } wrap grestore   % or: a gsave the batch sees
+      line                                   % drawn unclipped either way
+  } dkbatch
+  ```
+
+  The third: define and `bind` the wrapper inside the batch. There
+  `gsave` and `grestore` are drykit's tracking procedures, and `bind`
+  leaves procedures alone.
 - **`/After true`** on a `dkstroke` inside a batch draws that stroke on
   its own after the batch has rendered, in call order, in its own colour.
   It is how an eraser or a smudge can be drawn from inside a batch, over
