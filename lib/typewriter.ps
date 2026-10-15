@@ -809,8 +809,8 @@ grestore
     tCopyC 0 gt {
         /tEr inkW fW add 2 div dup 0 lt { pop 0 } if def
         /tEry tEr tEryK mul def
-        /wBodyW tEr 2 mul def                   % the body fills the clip's reach: stems stay fat
         /tEy tECopy tCopyC mul pBody dup 1 gt { pop 1 } if dup 0 lt { pop 0 } if mul def
+        tEy 0 gt { /wBodyW tEr 2 mul def } if   % the body fills the clip's reach: stems stay fat
     } if
     % the weave's frame: per strike, or per key when strikes do not vary
     wearS 0 eq { tMA tMB kCode mix2 } { sA sB } ifelse
