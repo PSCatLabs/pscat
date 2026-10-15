@@ -74,6 +74,11 @@ newpath 60 100 moveto 500 200 550 300 300 380 curveto
   variation, exact `/MinSpacing` enforcement, and a hard deposit budget (see
   *Firefly Census*, a night meadow in which every mark on the page is
   scattered rather than placed by hand).
+  A hand-built region dict (not one `screct`/`scpath` made) is checked
+  before it is used: `/Kind` must be `/rect` or `/path`, `/BBox` four numbers,
+  a path region's `/Edges` numbers in groups of four, and a stored `/Area` a
+  number, each in a literal array or value (never a procedure), or `scatter`
+  and `scarea` raise a `scatter-region-...` / `scarea-...` guard.
 - **Gradients.** `gradfn`, `axialsh`, `radialsh` and `gradfill` build shading
   dictionaries from a plain array of `[r g b]` colours; see
   `examples/gradients.ps`.

@@ -3301,6 +3301,70 @@ fn scatter_bounds_pathological_counts_densities_and_spacings() {
     }
 }
 
+// #295: a hand-built region is untrusted too. Each malformed slot gets
+// its named guard, and a procedure planted in one never runs.
+#[test]
+fn scatter_and_scarea_refuse_a_malformed_hand_built_region() {
+    let mark = "/Mark { pop pop pop pop }";
+    let path = "/Kind /path /BBox [ 0 0 100 100 ] /Rule /nonzero";
+    for (src, expected) in [
+        (
+            format!("<< /Kind /rect /BBox {{ 0 0 100 100 }} /Area 1 >> << {mark} >> scatter"),
+            "scatter-region-bbox-must-be-four-numbers",
+        ),
+        (
+            format!("<< /Kind /rect /BBox [ 0 0 (w) 100 ] /Area 1 >> << {mark} >> scatter"),
+            "scatter-region-bbox-must-be-four-numbers",
+        ),
+        (
+            format!("<< /Kind /blob /BBox [ 0 0 100 100 ] >> << {mark} >> scatter"),
+            "scatter-region-kind-must-be-rect-or-path",
+        ),
+        (
+            format!("<< {path} /Edges {{ 0 0 100 0 }} >> << {mark} >> scatter"),
+            "scatter-region-edges-must-be-numbers",
+        ),
+        (
+            format!("<< {path} /Edges [ 0 0 100 0 100 ] >> << {mark} >> scatter"),
+            "scatter-region-edges-must-be-numbers",
+        ),
+        (
+            format!("<< /Kind /path /BBox [ 0 0 1 1 ] /Edges [ ] >> << {mark} >> scatter"),
+            "scatter-region-needs-a-rule",
+        ),
+        (
+            format!(
+                "<< /Kind /rect /BBox [ 0 0 100 100 ] /Area {{ 100 }} >> \
+                 << {mark} /Density 0.01 >> scatter"
+            ),
+            "scarea-area-must-be-a-number",
+        ),
+        ("{ 1 } scarea".to_string(), "scarea-needs-a-region"),
+        ("5 scarea".to_string(), "scarea-needs-a-region"),
+        (
+            format!("<< {path} /Edges [ 0 /x 100 0 ] >> scarea"),
+            "scarea-region-edges-must-be-numbers",
+        ),
+        (
+            "<< /Kind /path /BBox [ 0 0 1 1 ] /Edges [ ] >> scarea".to_string(),
+            "scarea-region-needs-a-rule",
+        ),
+    ] {
+        assert_eq!(scatter_err(&src), expected, "for {src}");
+    }
+}
+
+#[test]
+fn scatter_and_scarea_still_accept_what_screct_and_scpath_build() {
+    // The empty path region is the edge case: no edges, a zero BBox.
+    let got = eval(
+        "newpath scpath scarea \
+         newpath scpath << /Mark { pop pop pop pop } /Count 3 >> scatter \
+         << /Kind /path /BBox [ 0 0 1 1 ] /Edges { junk } /Area 42 >> scarea",
+    );
+    assert_eq!(got, ["0", "42"]);
+}
+
 #[test]
 fn scatter_budget_is_checked_before_anything_is_drawn() {
     // paintkit's own precedent: an over-budget call must fail on a
