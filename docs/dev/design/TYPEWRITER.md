@@ -447,8 +447,8 @@ No new page-scale CI test is added. #204's concern about CI time stands.
   through a clip of the sheet minus small holes (one per cell of a 3.4 x 5.4pt
   grid, taller than wide, thicker with the copy loss, commoner or rarer by a slow
   noise), so a hairline is cut in two and a stem only notched. The holes are
-  `rlDropClip`'s; a redaction bar is drawn again whole after the content
-  (`rlBarsAgain`). A hole field cannot see a stroke's width, so it is a statistical
+  `rlDropClip`'s; a `rel-redact` bar is drawn again whole after the content
+  (`rlBarsAgain`; a plain `tw-type` bar is cut like the type). A hole field cannot see a stroke's width, so it is a statistical
   stand-in for the glyph-level erosion that the typewriter's `tE` is (#477), which
   `tInkStrike` zeroes on a copy.
 - **#215, specimen.** A side-by-side against T1/T2 and T9/T10 crops at scan

@@ -37,7 +37,10 @@ width (no read-back, no alpha).
   `1 + 1.6 m` with m a slow noise (anisotropic, 90 x 30pt and 28 x 14pt), so a
   line loses its thin strokes unevenly: a word, then a clear run. An original has
   none.
-- A redaction bar is content, so the holes would cut it. `rlRedactDraw` records
+- A redaction bar is content, so the holes would cut it. A plain black bar that
+  `tw-type` draws itself (no `/Redactor`) is cut like the type (slits in the bar,
+  no word leaks: the word is cut too), so use `/Redactor { rel-redact }`; it is the
+  gallery memo's and the specimen's. `rlRedactDraw` records
   its operands and CTM while the content runs (`rlRecOn`), and `rlBarsAgain` draws
   the bars again whole after the clip is dropped (the generator is put back, so
   the stamps and notes that follow are the same). Other solid fills in the
@@ -78,8 +81,10 @@ noise (6.0, kept) and 1.5 (6.1: the per-cell cap of 0.95 saturates, no gain).
 ## Cost (fill counts)
 
 A memo sheet (612 x 792) has 180 x 147 = 26,460 cells: one random draw each and a
-noise evaluation for the ones that pass the pre-test; about 6,000 holes of 8
-vertices at generation 3 in one `eoclip`, built once per page (not per glyph).
+noise evaluation for the ones that pass the pre-test. Counted (a counter wrapped
+round `rlDrHole`): the gallery memo (one copy) has 5,084 holes of 8 vertices, and
+the specimen (a 612 x 480 sheet at generation 1 and another at generation 3) 14,177
+between them, each in one `eoclip` built once per page, not per glyph.
 The paper field (53,856 rectfills) and the grain (15,246 `imagemask`) are
 unchanged. No timing was done.
 
@@ -96,7 +101,8 @@ binary: `docs/dev/design/released_specimen.png` (150 dpi) and `_gs.png`,
 (bytes, before to after): specimen 1,499,373 to 1,501,988; its gs render
 1,365,776 to 1,365,777; the memo 847,013 to 847,863; `release_vs_real.png`
 1,558,382 to 1,553,178; `memo_vs_real.png` 810,408 to 810,426; `blind_grid.png`
-160,968 to 160,987; the new `notes/449-dropout-compare.png` 847,241. Ghostscript
+160,968 to 160,987; the new `notes/449-dropout-compare.png` 847,241 and
+`notes/449-memo-compare.png` (T14 above the gallery memo before and after, 300 dpi) 560,096. Ghostscript
 clips are not antialiased, so its holes are fewer pixels than pscat's (2,278
 pixels differ from before, against 11,403).
 
@@ -113,4 +119,7 @@ stem now and then (in a first copy a stem is 1.2pt).
 
 - Glyph-level erosion on a copy, in `tInkStrike` (`tCopyC` above 0 sets `tE` to
   0): the outline-driven version that cuts every thin stroke and no stem. Needs
-  lib/typewriter.ps; filed as a follow-up (p3).
+  lib/typewriter.ps; filed as #547 (p3).
+- The gallery memo is one copy, so at 144 dpi its dropout is subtle (the
+  specimen's third sheet shows it). Raising the memo's generation is a choice for
+  the capstone (#531), not made here.

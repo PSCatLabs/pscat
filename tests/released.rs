@@ -798,3 +798,20 @@ fn a_redaction_bar_stays_solid_under_dropout() {
         "with the bar not drawn again, holes show in it"
     );
 }
+
+#[test]
+fn a_content_that_errors_does_not_leave_the_bar_recorder_on() {
+    // the content of a copy raised an error while its bars were being recorded;
+    // the next page starts with the recorder off
+    let mut it = Interp::with_page(W, H).expect("page");
+    load(&mut it);
+    it.run_str(&format!(
+        "mark {{ {{ 1 0 div }} << {SHEET} /Generation 1 >> rel-page }} stopped cleartomark \
+         {{ }} << {SHEET} >> rel-page RelState /rlRecOn get"
+    ))
+    .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+    assert_eq!(
+        it.operand_stack().last().map(|o| o.repr()),
+        Some("false".to_string())
+    );
+}

@@ -833,14 +833,15 @@ RelState begin {
 % it. So the original is drawn through a clip of the sheet minus a field of
 % small holes, taller than wide (they cut the horizontal strokes) and tilted a
 % little, and the paper under them shows through. There is one hole per cell of
-% a grid (rlDrCx x rlDrCy points), so none overlap (an overlap would be solid
-% under eoclip), and a slow noise makes them commoner or rarer from place to
+% a grid (rlDrCx x rlDrCy points), so almost none overlap (an overlap would be
+% solid under eoclip; two worst-case neighbours touch by under 0.1pt), and a slow noise makes them commoner or rarer from place to
 % place, so a line loses its thin strokes unevenly: a word, then a clear run.
 % The chance per cell is rlDrK x /Dropout x c^2, c the copy loss (0.4 at one
 % generation, 0.78 at three, 0.98 at eight): a first copy has a few holes and
-% an original none. A redaction bar must stay solid: rel-redact records its
-% operands while the content runs (rlRecOn) and the bars are drawn again, whole,
-% after it.
+% an original none. The holes cut whatever the content draws, so a bar from
+% rel-redact (the /Redactor of tw-type) is recorded while the content runs
+% (rlRecOn) and drawn again, whole, after it; a plain black bar that tw-type
+% draws itself is not, and is cut like the rest.
 /rlDrCx 3.4 def  /rlDrCy 5.4 def  /rlDrK 1.2 def
 /rlRecOn false def  /rlBars [ ] def
 /rlDrInit {
@@ -964,6 +965,7 @@ RelState begin {
     rlM0 setmatrix newpath rlPathP rlMc setmatrix
 } bind def
 /rlRun {
+    /rlRecOn false def                              % a content that raised an error left it on
     rlGrabPath
     rlPrep
     rlGen 0 gt rlHaze 0 gt and { rlHaze 0.16 mul } { 0 } ifelse dup /rlHzB exch def /rlHzK exch def
@@ -1052,7 +1054,7 @@ rlDefaults
 % @param: /Generation [count] Photocopy generations, 0 to 8: 0 is the original, 1 a copy, 3 a copy of a copy of a copy (default 0)
 % @param: /Haze [0..1] The grey of a photocopy's paper: toner fog that takes the copy's white down to a light grey (about 0.90 at the default, 0.84 at 1), with a crumpled-paper wave of thicker and thinner toner (soft blotches, tilted noise and a few long creases) and a fine grain of lighter and darker flecks under the type. Applies only when /Generation is above 0; 0 gives the plain white copy (default 0.6)
 % @param: /Speckle [0..1] Each copy's black specks and streaks (default 1)
-% @param: /Dropout [0..1] The thin strokes a copy loses: its content is drawn through small upright holes that cut a hairline in two and only notch a stem, commoner at higher /Generation and uneven along a line, as in a bitonal release copy; redaction bars stay solid; 0 gives the copy without them (default 1)
+% @param: /Dropout [0..1] The thin strokes a copy loses: its content is drawn through small upright holes that cut a hairline in two and only notch a stem, commoner at higher /Generation and uneven along a line, as in a bitonal release copy; a bar drawn by rel-redact stays solid (a plain black bar from tw-type is cut like any content, so give tw-type /Redactor { rel-redact }); 0 gives the copy without them (default 1)
 % @param: /CopyEdge [0..1] How dark the copier's lid and edge shadows are (default 0.6)
 % @param: /Punch [count] Punch holes down the left margin: 2 and 3 are the standard spacings (default 0)
 % @param: /Staple [count] Staples across the top corner (default 0)

@@ -198,8 +198,9 @@ inside a stack of effects, each optional and each off at strength 0:
   light strikes (`rel-page` sets it for you). `/Dropout` (0 to 1, default 1)
   breaks the thin strokes: a copy's content is drawn through small holes that
   cut a hairline in two and only notch a stem, more of them at higher
-  generations and unevenly across a line, as T15 does; redaction bars stay
-  solid, and 0 gives the copy without it.
+  generations and unevenly across a line, as T15 does; a `rel-redact` bar
+  stays solid (a plain bar from `tw-type` is cut like the type, so pass
+  `/Redactor { rel-redact }`), and 0 gives the copy without it.
 - **Marks** over the content: `/Stamps` (`rel-stamp`: ink through a clip with
   holes, so the page shows through), `/Notes` (`rel-note`: handwriting),
   `/Staple`, `/Clip`.
