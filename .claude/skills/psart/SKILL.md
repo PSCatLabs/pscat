@@ -230,7 +230,8 @@ Which tool to pick:
   true`), a mountain foot lifted into mist (`90`, one-sided), a sky
   swept across (`0`, both ways); `/Offset` is how far, in points, the
   outermost pass travels, and `/Stretch` sets how narrow it stays
-  across the axis. Two rules: the wrapped proc must paint in the color
+  across the axis (`/Smooth 0.9` keeps that wobble from stepping pass to
+  pass, so a long pull's side edges read as a clean drift). Two rules: the wrapped proc must paint in the color
   it *inherits* (wrap a scene element by element, each with the
   `/Under` really beneath it), and the direction is in the user space
   you call pkwet in — put a reflection's `1 -1 scale` *inside* the proc

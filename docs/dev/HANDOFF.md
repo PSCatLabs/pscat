@@ -1035,6 +1035,10 @@ renders eight examples in both and compares block-downsampled output).
   A directional pull over a long `/Offset` that must fade as a smooth
   gradient wants `/Layers` about `/Offset` + 1 one-sided, 2 x `/Offset` + 1 two-sided (1pt steps; issue #417): the
   explicit cap is 32, the default depth is capped at 16 and has not moved.
+  A pull's side edges staircase because each pass's across-wobble is an independent
+  draw; `/Smooth` (0..1, default 0, byte-identical when unset; issue #484) low-passes
+  the draws per side along the passes, still one draw per pass. It is opt-in: a default
+  would move alpine_lake, evening_stream and every other committed pull.
 - **Loaded colours: `pkbroad`, `pktrowel`, `pkfan` and `pkdab` adopt them, the rest do
   not yet** (issue #183, slices L1-L5b; design in `docs/dev/design/PAINT_LOADING.md`).
   `lib/paintkit.ps`'s `pu-` section (`puparse`, `puat`, `puflips`, `puwet`,

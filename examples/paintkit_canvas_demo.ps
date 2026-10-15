@@ -173,6 +173,9 @@
 % copies more than about 1pt apart read as stepped bands where a flat
 % stroke fades (issue #417): the default depth, 15 layers at 2pt, banded
 % horizontally at this size, and /Layers 16 or a shorter /Offset still did.
+% /Smooth 0.9 keeps the passes' across-wobble from changing in a jump from
+% one to the next, which is what staggered the stroke's side edges (issue
+% #484).
 % ======================================================================
 /pcdknifeat {                                % y touch -   one horizontal stroke
     /pcdkt exch def /pcdky exch def
@@ -183,7 +186,7 @@
 } def
 /pcdpull {                                   % proc -
     [ pcdKNIFE 0.9 shade ] pcdset
-    << /Direction 270 /OneSided true /Stretch 10 /Offset 28 /Layers 29 /Pickup 0.8
+    << /Direction 270 /OneSided true /Stretch 10 /Smooth 0.9 /Offset 28 /Layers 29 /Pickup 0.8
        /Under pcdGROUND >> pkwet
 } def
 /pcdwet {

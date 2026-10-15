@@ -5342,7 +5342,8 @@
 % /OneSided true puts every pass on the +Direction side (down only, up
 % only); otherwise passes alternate sides by depth, outermost on the
 % + side, so a sweep goes both ways. The grading toward /Under, the
-% frames, the unwinding and the draws are exactly the isotropic ones:
+% frames, the unwinding and the draws are exactly the isotropic ones
+% (/Smooth, below, only changes what each draw is turned into):
 % one draw per non-core pass either way, so *at a fixed /Layers*,
 % switching /Direction on or turning /Direction, /Stretch, /OneSided or
 % /Offset never re-rolls a later mark. With /Layers left to default,
@@ -5402,6 +5403,16 @@
 % (examples/paintkit_canvas_demo.ps) is /Offset 28 /Layers 29 (issue #417;
 % /Layers 16 over the same 28pt, or /Offset 20 at 16 layers, still bands;
 % /Offset 15 at 16 layers is better but leaves faint steps and a stubby pull).
+%
+% Edges. A pull's two side edges are the other place the identical copies
+% show. Each pass wobbles across the pull by its own seeded draw, and with
+% passes a point apart a run of independent draws makes the edge stagger in
+% steps up to twice the wobble's reach (/Offset / /Stretch). /Smooth (0..1,
+% default 0, which is the old behaviour exactly) low-passes the draws
+% along the passes, so the edge wanders instead of stepping: 0.9 over the
+% canvas specimen's 29 passes (issue #484; 0.97 leans visibly, and a larger
+% /Stretch alone only makes the steps smaller). It is opt-in because a
+% default would move every committed pull.
 %
 % Cost, directional. A pull is up to 32x its procedure, and pulling a
 % reflection -- itself a second copy of the scene -- then grazing it
@@ -5886,6 +5897,29 @@
 %   /pkwet-stretch-needs-a-direction
 %   (/Stretch without /Direction) mustguard
 %
+%   { { } << /Direction 270 /Smooth 1.5 >> pkwet }
+%   /pkwet-smooth-must-be-0-to-1
+%   (/Smooth 1.5) mustguard
+%
+%   { { } << /Direction 270 /Smooth -0.1 >> pkwet }
+%   /pkwet-smooth-must-be-0-to-1
+%   (/Smooth -0.1) mustguard
+%
+%   { { } << /Direction 270 /Smooth (x) >> pkwet }
+%   /pkwet-smooth-must-be-a-number
+%   (/Smooth as a string) mustguard
+%
+%   { { } << /Direction 270 /Smooth { 0.5 } >> pkwet }
+%   /pkwet-smooth-must-not-be-a-procedure
+%   (/Smooth { 0.5 }) mustguard
+%
+%   { { } << /Smooth 0.5 >> pkwet }
+%   /pkwet-smooth-needs-a-direction
+%   (/Smooth without /Direction) mustguard
+%
+%   { { } << /Direction 270 /Smooth 0.9 >> pkwet }
+%   (/Smooth 0.9 with /Direction) mustpass
+%
 %   { { } << /OneSided true >> pkwet }
 %   /pkwet-onesided-needs-a-direction
 %   (/OneSided without /Direction) mustguard
@@ -6192,6 +6226,7 @@
 % @param: /Offset [points] How far in points the outermost pass is displaced from the true path; inert at Layers 1, which has only a core pass. Formerly /Spread, still accepted as a deprecated alias; /Offset wins if both are given (default Soft*14)
 % @param: /Direction [degrees] Degrees, in the user space pkwet is called in: lines the passes up along this axis instead of scattering them, for a pulled-down reflection (270), a lifted mist (90) or a swept sky (0). The procedure must paint in the color it inherits, or in loaded colors (/Colors), which pkwet grades for you. A chain of nested calls containing a directional one may multiply its innermost procedure at most 64 times. Without an explicit /Layers its depth follows /Offset, so pin /Layers while tuning /Offset (default absent: isotropic)
 % @param: /Stretch [ratio] With /Direction only: along-to-across ratio, at least 1; the cross-axis wobble is the along-axis reach divided by this (default 8)
+% @param: /Smooth [0..1] With /Direction only: how smoothly the across-wobble changes from pass to pass. 0 draws each pass's wobble independently, so neighbouring passes sit up to /Stretch's reach apart and a pull's side edges stagger in steps (the default, exactly as before); toward 1 each pass keeps more of the one before it (per side, for a sweep), so the edge wanders slowly instead, as far as 1, where every pass keeps the first draw and the whole pull leans one way as a straight shifted copy. The wobble's size is still /Stretch's; 0.8 to 0.9 reads as a clean, slightly drifting edge on a pull of about 30 passes. It takes the same one draw per pass either way, so it never re-rolls a later mark (default 0)
 % @param: /OneSided [boolean] With /Direction only: true puts every pass on the +Direction side (a pull down, a lift up); false alternates sides, a sweep both ways (default false)
 /pkwet {
     /pqopts exch def
@@ -6339,6 +6374,11 @@
         /pqStretch load type dup /integertype ne exch /realtype ne and
             { pkwet-stretch-must-be-a-number } if
         pqStretch 1 lt { pkwet-stretch-must-be-at-least-1 } if
+        /pqSmooth pqopts /Smooth 0 pkgetdef def
+        /pqSmooth load xcheck { pkwet-smooth-must-not-be-a-procedure } if
+        /pqSmooth load type dup /integertype ne exch /realtype ne and
+            { pkwet-smooth-must-be-a-number } if
+        pqSmooth 0 lt pqSmooth 1 gt or { pkwet-smooth-must-be-0-to-1 } if
         /pqOneSided pqopts /OneSided false pkgetdef def
         /pqOneSided load type /booleantype ne { pkwet-onesided-must-be-a-boolean } if
         % Every pass is an identical copy of the mark (a procedure that
@@ -6367,6 +6407,7 @@
         } if
     } {
         pqopts /Stretch known { pkwet-stretch-needs-a-direction } if
+        pqopts /Smooth known { pkwet-smooth-needs-a-direction } if
         pqopts /OneSided known { pkwet-onesided-needs-a-direction } if
     } ifelse
     pqdnow 1 add pqdset
@@ -6422,6 +6463,7 @@
     % caller's brush happens to take.
     /pqplan pqLayers array def
     /pqks pqLayers array def
+    /pqwobp null def /pqwobm null def
     0 1 pqLayers 1 sub {
         /pqi exch def
         % 1.0 at the outermost pass, 0.0 at the core. A single-pass call
@@ -6453,9 +6495,32 @@
                     % Two-sided passes alternate by distance from the
                     % outermost, which is always on the + side whatever
                     % the depth's parity, so the sweep goes both ways.
-                    /pqalong pqOneSided pqLayers 1 sub pqi sub 2 mod 0 eq or
-                        { pqmag } { pqmag neg } ifelse def
-                    /pqacross pqmag pqStretch div pkjit def
+                    /pqplus pqOneSided pqLayers 1 sub pqi sub 2 mod 0 eq or def
+                    /pqalong pqplus { pqmag } { pqmag neg } ifelse def
+                    % The wobble is one draw per pass. By default each is
+                    % independent, so neighbouring passes (about a point
+                    % apart on a pull that wants a clean fade) sit up to
+                    % twice /Stretch's reach apart across the pull, and the
+                    % union of their edges staircases (issue #484). With
+                    % /Smooth the draw is low-passed along the passes, per
+                    % side (a sweep's two sides each read their own
+                    % neighbours): w = a*w + sqrt(1-a^2)*d, the first pass
+                    % on a side taking d as it comes. The draw is still taken
+                    % on every non-core pass, at the same place, so the
+                    % stream is the same either way; and the default never
+                    % enters this branch, so an unset call is byte-identical.
+                    pqSmooth 0 gt {
+                        frnd 2 mul 1 sub
+                        pqplus { pqwobp } { pqwobm } ifelse
+                        dup null eq { pop } {
+                            pqSmooth mul exch 1 pqSmooth dup mul sub sqrt mul add
+                        } ifelse
+                        dup pqplus { /pqwobp } { /pqwobm } ifelse exch def
+                        pqmag pqStretch div mul
+                    } {
+                        pqmag pqStretch div pkjit
+                    } ifelse
+                    /pqacross exch def
                     pqalong pqDirection cos mul pqacross pqDirection sin mul sub
                     pqalong pqDirection sin mul pqacross pqDirection cos mul add
                 } {
