@@ -240,7 +240,9 @@
             dksegbuf dkslot dkseg put
         } if
     } {
-        dkn dkcap ge { dkcatch-area-exceeds-safety-limit } if
+        % The flag tells dkZdraw this catch, not some other error, was too
+        % big, so it can split the chunk and try again (#324).
+        dkn dkcap ge { userdict /dkOver true put dkcatch-area-exceeds-safety-limit } if
         dkseen dkkey dkn put
         dkkeybuf dkn dkkey put
         dkdistbuf dkn dkd2 put
@@ -947,6 +949,30 @@
     ] put
     dkSrec /falls dkSfall 0 dkSfn getinterval put
 
+    % A stop whose reach alone holds more cells than dkbudget can't be
+    % drawn in any chunk, however dkZdraw splits it. Turn such a stroke
+    % away here, before a batch has drawn anything (#324). The bound is
+    % a true lower bound on what the stroke's top level would build: the
+    % widest resolved stop of a run that catches (touch below 1), its
+    % reach at that touch with no halo (dkband's dkK, without dkslack),
+    % less a cell's half-diagonal (every cell meeting that disc has its
+    % centre inside the reach). Skipped for the whole-page test mode,
+    % whose cap is not dkbudget.
+    userdict /pjWholePage known not {
+        /dkSW userdict /pjW get def
+        /dkSrm 0 def
+        dkSrec /runs get {
+            aload pop exch dup 1 lt {
+                0.8 sub 0.2 div dup 0 lt { pop 0 } if 0.25 mul 1 add
+                dkSstreak mul 0.88 mul 0.22 add 0.7072 sub dkSW mul
+                exch 0 exch { 2 get dkmax } forall dkSrec /sv get mul add
+                dkSrm dkmax /dkSrm exch def
+            } { pop pop } ifelse
+        } forall
+        dkSrm dup mul 3.1415 mul dkSW dup mul div 0.999 mul dkbudget gt
+            { dkcatch-area-exceeds-safety-limit } if
+    } if
+
     userdict /dkBatch known {
         userdict /dkBatch get /dkBb exch def
         % The dkclip region in force (#312), unless it is the one the batch
@@ -1156,6 +1182,7 @@ systemdict /.sameclip known /dkPsameok exch def
         dkZg 0 get dup 2 get exch dup 3 get exch 4 get setrgbcolor
         userdict /pjCTM get setmatrix
         /dkZKc dkZg 0 get 1 get 1.1 mul 0.22 add userdict /pjW get mul def
+        count /dkZn exch def
         [
             dkZg {
                 /dkZde exch def
@@ -1169,18 +1196,70 @@ systemdict /.sameclip known /dkPsameok exch def
                 } forall ] dkZthin
             } forall
         ]
-        % A run too wide for any chunk still reaches dkcatch, whose budget
-        % guard names the problem; the gsave is given back before it
-        % propagates (levels already drawn stay drawn).
+        % dkZgroup's estimate is made before dkZthin grows the reach, so a
+        % curvy or crowded chunk can still build more cells than dkbudget.
+        % The rejected band changed no graphics state, so the chunk is split
+        % in two (dkZsplit) and each half is drawn on its own (#324). What
+        % renders today never comes here, so it renders as before. Only a
+        % dot (or a segment within a cell) that still overflows raises
+        % dkcatch's own guard, with the gsave given back, and dkSrecord has
+        % already turned away, before anything was drawn, every stroke
+        % whose widest stop could not fit (but for a sliver of reach about
+        % one cell wide, where the two bounds part).
         dkZg 0 get 0 get dkZg 0 get 1 get
-        { dkcatch } stopped { grestore stop } if
-        dkZg {
-            /dkZde exch def
-            dkZde 5 get /ctm get setmatrix
-            /dkZha dkZde 7 get def
-            dkZde 6 get dkZink
-        } forall
-    grestore
+        userdict /dkOver false put
+        { dkcatch } stopped {
+            { count dkZn le { exit } if pop } loop
+            grestore
+            userdict /dkOver get { dkZg dkZsplit } { false } ifelse
+            { $error /newerror false put exch dkZdraw dkZdraw } { stop } ifelse
+        } {
+            dkZg {
+                /dkZde exch def
+                dkZde 5 get /ctm get setmatrix
+                /dkZha dkZde 7 get def
+                dkZde 6 get dkZink
+            } forall
+            grestore
+        } ifelse
+} bind def
+
+% entries -> entries-a entries-b true | false   (a rejected chunk in two)
+% Two or more entries split into halves. One entry splits its run into
+% two pieces that share the middle stop, as dkZgroup's pieces do, and a
+% run of one segment longer than a cell is cut at its midpoint. A dot, or
+% a segment within a cell, can't be split. Nothing here reads dkZgroup's
+% scratch, which is in use while dkZdraw runs.
+% @internal
+/dkZsplit {
+    dup length 2 ge {
+        dup 0 1 index length 2 idiv getinterval
+        exch dup length 2 idiv dup 2 index length exch sub getinterval
+        true
+    } {
+        0 get dup 6 get length 3 ge {
+            /dkZse exch def
+            /dkZsr dkZse 6 get def
+            /dkZsm dkZsr length 1 sub 2 idiv def
+            [ [ dkZse aload pop pop pop dkZsr 0 dkZsm 1 add getinterval dkZse 7 get ] ]
+            [ [ dkZse aload pop pop pop dkZsr dkZsm dkZsr length dkZsm sub getinterval dkZse 7 get ] ]
+            true
+        } {
+            dup 6 get length 2 eq {
+                % one segment longer than a cell: halve it at a stop between
+                % its ends, the half-width interpolated
+                /dkZse exch def
+                /dkZsa dkZse 6 get 0 get def /dkZsb dkZse 6 get 1 get def
+                dkZsb 0 get dkZsa 0 get sub dup mul dkZsb 1 get dkZsa 1 get sub dup mul add sqrt
+                dkZse 5 get /sv get mul userdict /pjW get gt {
+                    /dkZsm [ 0 1 2 { dup dkZsa exch get exch dkZsb exch get add 2 div } for ] def
+                    [ [ dkZse aload pop pop pop [ dkZsa dkZsm ] dkZse 7 get ] ]
+                    [ [ dkZse aload pop pop pop [ dkZsm dkZsb ] dkZse 7 get ] ]
+                    true
+                } { false } ifelse
+            } { pop false } ifelse
+        } ifelse
+    } ifelse
 } bind def
 
 % canvas-run -> canvas-run   (fewer stops for the catch, same reach)
@@ -1519,8 +1598,8 @@ systemdict /.sameclip known /dkPsameok exch def
 %%EndSelfTest
 %
 %%SelfTest: dkstroke-a-run-past-the-budget-raises-cleanly
-%   % A run too wide for any chunk reaches dkcatch's own budget guard, with
-%   % dkZdraw's gsave given back (the block checks the graphics stack).
+%   % A run too wide for any chunk is refused when the stroke is recorded,
+%   % before anything is drawn (#324), under dkcatch's own guard name.
 %   % Codex review of PR #286: the flush test once counted its own boolean
 %   % as a queued entry and raised rangecheck on an empty queue instead.
 %   << /Surface /drawing >> dksurface
@@ -1529,6 +1608,40 @@ systemdict /.sameclip known /dkPsameok exch def
 %   /dkcatch-area-exceeds-safety-limit (a run wider than any chunk) mustguard
 %   { gsave newpath 0 0 moveto 10 0 lineto << /Width 2 /Touch 0.5 >> dkstroke grestore }
 %   (a run inside the budget after a rejected one) mustpass
+%   % dkslack adds reach only at render, past the up-front check, so here
+%   % the refusal comes from dkcatch: dkZdraw splits the run down to pieces
+%   % within a cell, then gives its gsave back (the colour is the caller's).
+%   /dkslack 400 def
+%   0 0.5 1 setrgbcolor
+%   { newpath 0 0 moveto 10 0 lineto << /Width 2 /Touch 0.5 /Under [1 1 1] >> dkstroke }
+%   /dkcatch-area-exceeds-safety-limit (a reach past the budget only at render) mustguard
+%   /dkslack 0 def
+%   currentrgbcolor 1 eq exch 0.5 eq and exch 0 eq and
+%   (dkZdraw gives its gsave back after the last split) mustbe
+%%EndSelfTest
+%
+%%SelfTest: dkZsplit-halves-a-rejected-chunk
+%   % #324: the pieces dkZdraw tries again when a chunk's catch overflows.
+%   << /Surface /drawing >> dksurface
+%   /dkte [ 0.5 1.4 0 0 0 << /sv 1 >> [ [0 0 1] [5 0 1] [10 0 1] ] 0 ] def
+%   [ dkte dkte dkte ] dkZsplit
+%   3 1 roll length 2 eq exch length 1 eq and and
+%   (three entries split one and two) mustbe
+%   [ dkte ] dkZsplit
+%   3 1 roll 0 get 6 get exch 0 get 6 get
+%   dup length 2 eq exch 1 get 0 get 5 eq and
+%   exch dup length 2 eq exch 0 get 0 get 5 eq and and and
+%   (a three-stop run splits into two pieces that share the middle stop) mustbe
+%   /dkte [ 0.5 1.4 0 0 0 << /sv 1 >> [ [0 0 1] [10 0 3] ] 0 ] def
+%   [ dkte ] dkZsplit
+%   3 1 roll 0 get 6 get exch 0 get 6 get
+%   1 get dup 0 get 5 eq exch 2 get 2 eq and
+%   exch 0 get dup 0 get 5 eq exch 2 get 2 eq and and and
+%   (one long segment is cut at its midpoint, the half-width interpolated) mustbe
+%   /dkte [ 0.5 1.4 0 0 0 << /sv 1 >> [ [0 0 1] [0.3 0 1] ] 0 ] def
+%   [ dkte ] dkZsplit not (a segment within a cell is not split) mustbe
+%   /dkte [ 0.5 1.4 0 0 0 << /sv 1 >> [ [0 0 1] ] 0 ] def
+%   [ dkte ] dkZsplit not (a dot is not split) mustbe
 %%EndSelfTest
 %
 %%SelfTest: dkbatch-guards

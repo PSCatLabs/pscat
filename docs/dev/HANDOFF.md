@@ -672,7 +672,10 @@ renders eight examples in both and compares block-downsampled output).
    charcoal) are presets over `dkstroke`. Measured cost is in
    `notes/234-drykit-core.md` and DRYMEDIA.md 6.1. A full board plus ghost
    text is 25.2s in pscat against a 30s budget, after #307's `bind`
-   (`notes/283-drykit-perf-remeasure.md`; levers in #324). `dkbatch` keeps each
+   (`notes/283-drykit-perf-remeasure.md`). #324 made `dkbudget` a soft limit:
+   a chunk whose catch overflows is split and drawn again, and only a stroke
+   with a single stop too wide for any catch raises, at record time, before
+   anything is drawn (`notes/324-drykit-headroom.md`). `dkbatch` keeps each
    stroke's CTM, so hatch layers can be drawn rotated inside it. It allows
    one pigment per batch (an `/After` stroke may differ, #393).
    #241 shipped `lib/drycharcoal.ps` (`dhstroke`, `dhhatch`, `dhsmudge`,
