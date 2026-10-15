@@ -36,7 +36,10 @@ the stick's contact patch meets raised tooth.
   callback that clips and strokes to a bound `gsave ... exec ... grestore`
   wrapper, pscat still draws it exactly: drykit asks pscat's
   `.sameclip` (a pscat-only operator) whether the clip it captured is
-  still in force, and sees the wrapper's `grestore` that way
+  still in force, and sees the wrapper's `grestore` that way. In pscat,
+  once a plain clip made in the batch has been captured, any later clip
+  change, bound or not, is picked up at the next stroke; a clip made by
+  bound code before any plain clip in the batch is still not kept
   (`notes/488-sameclip.md`). Under Ghostscript the batch's later strokes
   stay under that clip, since standard PostScript gives drykit no way to
   see that `grestore` (why: `notes/459-bound-wrapper-grestore.md`). For a

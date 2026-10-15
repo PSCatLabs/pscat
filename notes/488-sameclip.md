@@ -35,13 +35,18 @@ Ghostscript, which has no such operator, drykit behaves as before and the
 
 - `dkPsameok` (`systemdict /.sameclip known`, at load) and `dkPsame`
   (`gstate -> bool`, `{ pop true }` without the operator). `dkPsame` is a
-  procedure, not the operator itself, so a caller (or a test) can set
-  `dkPsameok` false to preview the Ghostscript path.
+  procedure, not the operator itself, so a test can set `dkPsameok` false
+  to preview the Ghostscript path.
 - In `dkSrecord`'s batch branch, when `/pc` is a gstate and `dkPsame` says its
   clip is no longer in force, `/pc` goes to `/dirty`, and the existing line
   takes a new capture. Strokes under one clip still share one gstate, so
   grouping is unchanged (`plain_clips_in_a_batch_group_as_dkclip_regions_do`
   still counts 6 and 6 catches).
+- The check runs at every stroke whose `/pc` is a gstate, so it catches any
+  clip change drykit has no shadow for, not only a bound `grestore`: a bound
+  `rectclip` after a seen, captured clip now reaches the next stroke too
+  (a test row). Before #488 that stroke kept the earlier capture. A clip
+  made by bound code while `/pc` is still null is not kept (below).
 - The `/pcs` stack needs nothing: the bound wrapper's `gsave` was unseen too,
   so the stack has no entry for it, and the next seen `grestore` pops the
   right one.
@@ -64,7 +69,12 @@ Ghostscript, which has no such operator, drykit behaves as before and the
   fourteenth row, the bare bound wrapper `{ RING CL } dktwrap FREE`: now
   byte-identical in a batch to the same program drawn at once. Control in the
   test: with `dkPsameok false` (drykit's gs path) the same row leaks, 2,488
-  pixels, the figure #459 measured.
+  pixels, the figure #459 measured. A fifteenth row, a bound `rectclip`
+  after a seen clip and its stroke, is byte-identical too, and differs
+  without `.sameclip` (360 pixels). Its strokes are kept apart: two
+  overlapping strokes under different clips layer differently in a batch
+  (level-major) than drawn at once whatever the clip, which a first try
+  with the shared `CL` stroke showed (1,031 pixels with `.sameclip`).
 - Ghostscript (correctness only): the bare-wrapper program at 144 dpi, png16m,
   with artkit, paintkit and drykit prepended, runs without error,
   `dkPsameok` is false, and the batch differs from the at-once render (2,422

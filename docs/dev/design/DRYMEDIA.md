@@ -311,7 +311,9 @@ capture is lazy). Standard PostScript has no exact way to see that restore
 .sameclip bool`, a pscat-only operator, is true when the clip in force is
 the very chain the gstate holds. In a batch, `dkstroke` asks it of the
 current capture and takes a new one when it says false, so in pscat the
-bound wrapper is exact; drykit probes for it at load (`dkPsameok`), so under
+bound wrapper is exact, and so is any later clip change, bound or not,
+once a plain clip made in the batch has been captured (a bound clip before
+that, with `/pc` still null, is still not kept); drykit probes for it at load (`dkPsameok`), so under
 Ghostscript, which lacks it, the limit stands
 (`notes/488-sameclip.md`). For programs that must draw the same in both
 there are three workarounds, each byte-identical to drawing at once: use
