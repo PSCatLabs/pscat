@@ -269,7 +269,7 @@ fn the_positional_binary_still_renders_both_trees() {
     );
 }
 
-fn both_bins<'a>(su: &'a Setup) -> Vec<&'a str> {
+fn both_bins(su: &Setup) -> Vec<&str> {
     vec![
         "--base-bin",
         su.base_bin.to_str().unwrap(),
