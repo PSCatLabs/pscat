@@ -552,12 +552,13 @@ RelState begin {
 % outline stroked at five widths, widest first (rlSoR, as a share of the radius),
 % each in the colour that ink of a growing share (rlSoA) makes over the paper (the
 % ink mixed toward the paper's tone), which antialiasing turns into a gradient
-% about the radius wide. The radius is 0.1 to 0.4pt plus 0.012 to 0.14 of the
+% about the radius wide. The radius is 0.1 to 0.3pt plus 0.012 to 0.08 of the
 % mark's size, times the softness s. s is the page's /Soften times 1.25 times the
 % copy loss (an original is not blurred: s is 0 and none of this runs), or a
 % stamp's or note's own /Soften. No ring draws a random number. A ring is opaque,
-% so it lightens what lies under the fringe: only the type within a point or two
-% of a mark's edge, which the crisp mark covers just as hard.
+% so it lightens what lies under the fringe: type within a point or so of a mark's
+% edge (a few hundred pixels at 300 dpi on a whole generation-3 sheet; a bar's
+% radius is capped so that its fringe stops short of the line above: notes/450).
 /rlSoR [ 1 0.78 0.58 0.4 0.22 ] def  /rlSoA [ 0.06 0.14 0.27 0.44 0.66 ] def
 /rlSoftOf {                                         % -> s, the softness of the layer being drawn
     rlSoft rlCC mul 1.25 mul dup 1 gt { pop 1 } if
@@ -651,7 +652,6 @@ RelState begin {
 % the fringe: the text and the frame stroked wider and wider under the ink
 /rlStampRings {
     [ rsInk aload pop rlCol ] rlSoCols
-    rsSize 0.055 mul 0.2 add rsSoft mul /rsR exch def
     gsave
     1 setlinejoin 1 setlinecap
     0 1 4 {
@@ -711,8 +711,11 @@ RelState begin {
     rsSeed rsX cvi rsY cvi add rlSeed2
     % the clip: the stamp's box and holes
     newpath
-    rsBW 2 div 3 add neg rsBH 2 div 3 add neg moveto
-    rsBW 6 add 0 rlineto 0 rsBH 6 add rlineto rsBW 6 add neg 0 rlineto closepath
+    % the box and a margin (3pt, and the fringe's reach when the stamp is soft)
+    rsSize 0.055 mul 0.2 add rsSoft mul /rsR exch def
+    3 rsR add /rsM exch def
+    rsBW 2 div rsM add neg rsBH 2 div rsM add neg moveto
+    rsBW rsM 2 mul add 0 rlineto 0 rsBH rsM 2 mul add rlineto rsBW rsM 2 mul add neg 0 rlineto closepath
     rlU 0.5 lt /rsFlip exch def
     1 rsStr sub 0.55 mul 0.04 add rsBW mul rsBH mul 7 div cvi 0 1 3 -1 roll 1 sub {
         pop
@@ -803,7 +806,7 @@ RelState begin {
 % the passes' paths as procedures.
 /rlBarRings {
     rlRInk rlSoCols
-    rdS 0.14 mul 0.4 add rdSoft mul /rdR exch def
+    rdS 0.08 mul 0.3 add rdSoft mul /rdR exch def
     1 setlinejoin 1 setlinecap
     0 1 4 {
         /rdK exch def

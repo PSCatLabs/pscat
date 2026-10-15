@@ -26,11 +26,12 @@ gallery memo's marks, generation 1) and `notes/450-specimen-compare.png`
   the paper's tone (`rlTone rlCol`, so the copy's grey is in it). Antialiasing
   turns that into a gradient about the radius wide. The radius is
   `s x (0.2 + 0.055 size)` pt for a stamp, `s x (0.1 + 0.012 size)` for a note,
-  `s x (0.4 + 0.14 size)` for a bar (size in points).
+  `s x (0.3 + 0.08 size)` for a bar (size in points; the bar's is kept short so that
+    its fringe stops about at the baseline of the line above, see below).
   - stamp (`rlStampRings`): the text as `charpath` (a character at a time, so the
     tracking matches `ashow`) and the frame, inside the stamp's own hole clip, so a
     void stays a void. It closes thin cracks in the frame, as a copier does.
-  - note: three `hs-write` passes with a wider `/Pen` in the ring colours, under
+  - note: five `hs-write` passes with a wider `/Pen` in the ring colours, under
     the pen's own pass, which is lightened by `0.2 s` (a blurred line gives up
     darkness; without it a 0.5pt pen line doubled in weight and read as a
     marker). The same `/Seed`, so the line is the same line.
@@ -46,8 +47,16 @@ gallery memo's marks, generation 1) and `notes/450-specimen-compare.png`
   under antialiasing where a one-bit stencil is pixel noise (pscat samples an
   `imagemask` nearest-neighbour), and they cost 5 strokes a mark, not thousands of
   clip subpaths. The cost is that a ring is opaque and lightens the type it
-  crosses; only the type within a point or two of a mark's edge, which the crisp
-  mark covers as hard anyway.
+  crosses, which dither would not. Measured (a render of the base tree against
+  the head, 300 dpi, pixels more than 40 levels lighter in the head; the margin
+  notes excluded, since the note's own pass is lightened on purpose): 38 of 8.4M
+  pixels on the memo and 226 of 16.9M on the three specimen sheets. A first
+  version with a bigger bar radius (`0.4 + 0.14 size`) lifted 624 on the specimen,
+  clustered along the bar's top edge where its fringe reached the line above (the
+  baseline of "building" lost its serifs): the bar's radius was cut to
+  `0.3 + 0.08 size` for that, which stops about at that baseline.
+- The stamp's clip is the box plus 3pt plus the fringe's radius (it was a fixed 3pt),
+  so a large stamp's outer ring is not cut off straight (checked at 60pt, generation 3).
 
 ## Measured
 
@@ -56,14 +65,15 @@ gallery memo's marks, generation 1) and `notes/450-specimen-compare.png`
 
 | | /Soften 0 | /Soften 1 |
 |---|---|---|
-| generation 1 | 0.37pt | 0.88pt |
-| generation 3 | 0.35pt | 1.6pt |
+| generation 1 | 0.37pt | 0.62pt |
+| generation 3 | 0.35pt | 1.0pt |
 
 T14's own bar edge is about 6 px against a 22 px cap height (0.3 of the cap
-height: the marker's slope is in it); ours at generation 3 is 1.6pt against an 8pt
-cap height (0.2) and at generation 1 0.11. T14's stamp edges are nearer 0.14 of
-the cap height, which the stamps' generation 1 to 3 range covers. The bar is the
-softest thing in T14, so it stays the softest here.
+height: the marker's slope is in it); ours at generation 3 is 1.0pt against an 8pt
+cap height (0.125), at generation 1 0.08. So T14's bar is blurrier than ours by a
+factor of two or more; the bar's radius is held back because a larger one
+erases the type of the line above (above). T14's stamp edges are nearer 0.14 of
+the cap height, which the stamps' generation 1 to 3 range covers.
 
 CPU time (user + sys, same binary, base tree against head, three runs):
 specimen 6.4 s to 6.3-6.7 s, memo 3.26 s to 3.28-3.34 s (+2 percent at most).

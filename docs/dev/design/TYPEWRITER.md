@@ -456,8 +456,8 @@ No new page-scale CI test is added. #204's concern about CI time stands.
   `tInkStrike` zeroes on a copy. **#450** (`notes/450-copier-softening-of-marks.md`):
   T14's stamps, handwriting and bar fade over the edge. `rel-page /Soften` (0 to 1,
   default 1) times the copy loss (an original has none) draws each mark's outline
-  stroked at three widths under the crisp mark, in the ink mixed toward the paper
-  tone (`rlStampRings`, `rlBarRings` and the note's three wider-pen passes); a
+  stroked at five widths under the crisp mark, in the ink mixed toward the paper
+  tone (`rlStampRings`, `rlBarRings` and the note's five wider-pen passes); a
   stamp, note or bar has no random draws in it.
 - **#215, specimen.** A side-by-side against T1/T2 and T9/T10 crops at scan
   resolution. The user judges it.
