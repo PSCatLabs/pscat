@@ -830,7 +830,7 @@ renders eight examples in both and compares block-downsampled output).
    key is in the PR, not the repo); `notes/215-released-memo.md`. #466 gave a
    copy's paper a grey haze, mottle and grain (`rel-page /Haze`, default 0.6,
    applied after the copier curve in `rlSet`/`rlCol`; `/Haze 0` is the old white
-   copy; `notes/466-copy-paper-haze.md`). Leftovers: #467, #468. #474 brought the
+   copy; `notes/466-copy-paper-haze.md`). Leftovers: #468 (#467 shipped: `notes/467-misstrike-y-tail.md`). #474 brought the
    haze's fine grain to the scans' strength with two `imagemask` stencils per
    16pt square (`rlHazeGrain`, on `rlFieldSet`'s field colour;
    `notes/474-copy-paper-haze-grain.md`). #528 gave the mottle a crumpled-paper

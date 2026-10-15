@@ -73,7 +73,7 @@ the PR under the key, so that nothing in the repo gives the answer away first.
 ## Not done (filed, low priority)
 
 - #466: a copy's paper keeps no grey haze or grain.
-- #467: the 4x mis-strike on y lifts a letter beyond the measured tail.
+- #467 (done: `notes/467-misstrike-y-tail.md`): the 4x mis-strike on y lifted a letter beyond the measured tail.
 - #468: the reference search docs/dev/design/TYPEWRITER.md Q3 asked of this ticket
   (two-colour bleed, embossing, a confirmed electric page) was not done.
 - Already open: #448 (multi-page `rel-page`, so the piece is one page), #449,
