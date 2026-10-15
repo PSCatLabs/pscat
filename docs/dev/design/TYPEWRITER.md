@@ -383,8 +383,10 @@ over the whole glyph. Ribbon ink only (no effect under `/InkModel false`).
   either side of the boundary in three steps, so the other colour shows through the voids
   and the edge is ragged at yarn scale rather than a ruled line. A strike the boundary does
   not reach is the page without `/Bleed`, to the byte. With both extras on, the other
-  colour's ink wears with the lane too. Not done: a clogged counter's fill stays in the
-  main ink.
+  colour's ink wears with the lane too. A clogged counter's fill is ribbon ink like the
+  body (#539): it runs under the same zones, so where the boundary puts part of a counter
+  in the other colour, that part of the fill is the other colour (and the worn lane
+  lightens it, and the pin stripe cuts it). It was always the main ink before.
 - **`/BleedGap` `[multiple of the yarn pitch]`: a white pin stripe (#538).** NBS C431 says some ribbons are inked
   so that a white "pin stripe" is left between the two colours, and that it stays white. This
   is a strip of no ink, `/BleedGap` x `tYarn` (0.48 pt) tall, so one yarn is 40 glyph units

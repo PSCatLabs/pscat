@@ -884,6 +884,10 @@ renders eight examples in both and compares block-downsampled output).
    (a white pin stripe at the boundary, in yarns, default 0, byte-identical) and
    documented `/WornBand`'s dark-tops sign as a look, not a measurement; no scan
    was found, so nothing was tuned against one (`notes/538-bleed-gap-and-worn-band.md`).
+   #539 routed a clogged counter's fill (`tClogBand`) through `tRun` / `tZoneDo`
+   like the feather and body, so it takes the bleed colour, the worn lane's lighter
+   weave and the pin stripe where the zones put it; with both extras off the code is
+   the same operators (`notes/539-clog-bleed-zone.md`).
    #242 shipped the charcoal gallery piece, `gallery/lincoln_charcoal.ps`
    (*Study after Berger, 1864*), and `lib/etching.ps`'s `et-tonemap`, which
    returns a photo as a grid of darkness for any piece that wants a
