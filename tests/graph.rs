@@ -7,6 +7,8 @@
 
 use pscat::Interp;
 
+mod common;
+
 fn load(it: &mut Interp) {
     let src = std::fs::read("lib/graph.ps").expect("graph.ps present");
     it.run_source(&src)
@@ -212,7 +214,7 @@ fn ghostscript_accepts_graph() {
         newpath -4 4 -4 4 16 16 { dup mul exch dup mul add sqrt 60 mul cos } plotsurface stroke \
         newpath 4 4 4 axes3 stroke \
         showpage\n";
-    let dir = std::env::temp_dir().join(format!("pscat-graph-{}", std::process::id()));
+    let dir = common::scratch_dir("pscat-graph");
     std::fs::create_dir_all(&dir).expect("temp dir");
     let combined = dir.join("graph_gs.ps");
     std::fs::write(&combined, format!("{lib}\n{driver}")).expect("write");

@@ -505,6 +505,18 @@ renders eight examples in both and compares block-downsampled output).
   `invalidaccess` for a read-only gstate. A program that `setgstate`s an
   older clip back makes the exporters reopen that clip's `Rc`; SVG reuses
   its `clipPath` id.
+- `clipsave`/`cliprestore` (Level 3, #494), pinned against gs 10.07.1:
+  the clip stack is part of the graphics state (gstate objects carry it),
+  each `gsave` and each `save` starts a new, empty level, and a
+  `cliprestore` with no entry at its level gives back the clip the level
+  started with: the clip at that `gsave`/`save`, or no clip at the top
+  level. So an unpaired `cliprestore` is not a no-op when a clip is in
+  force. `initclip` and `initgraphics` keep the stack; `grestoreall`
+  empties it. Only the clip
+  changes. Not modelled: a Type 3 `BuildChar` opening its own level (gs
+  runs it inside a `gsave`); pscat's `grestore` at the bottom of the stack
+  or at a save boundary still differs from gs as before
+  (`notes/494-clipsave-cliprestore.md`).
 - `shfill` (issue #20): `FunctionType` restricted to 2 (exponential)
   and 3 (stitching) — 0 (sampled) and 4 (calculator) unsupported,
   since those would need the same `Frame::PostOp` reentrancy
@@ -552,6 +564,13 @@ renders eight examples in both and compares block-downsampled output).
   PDF's `ExtGState /BM`, and an exhaustive match on a local enum is
   what makes adding a third mode fail to compile until all three
   exporters learn about it.
+- `gstate .sameclip bool` (issue #488) is a third pscat extension, dot-named
+  because it is non-standard (gs has no `.sameclip`): true when the clip in
+  force is the very clip chain the gstate holds (both none, or the same
+  `Rc<ClipNode>`; `GraphicsState::same_clip`). Identity, not geometry: a
+  re-clip with an identical path is false. Library code probes it with
+  `systemdict /.sameclip known` (drykit's `dkPsameok`) and keeps the
+  standard behaviour without it (`notes/488-sameclip.md`).
 - `error_report`'s `Line: N` (issue #17) is best-effort, not exact
   source attribution: no `Object` carries a source position, so it
   reports the line of the most recent token scanned directly from the
@@ -563,6 +582,10 @@ renders eight examples in both and compares block-downsampled output).
   procedure's definition site.
 
 ## Working conventions that matter (beyond AGENTS.md)
+
+- **Test scratch paths: `common::scratch_dir(tag)` only** (#487). A fixed
+  temp name makes two parallel `cargo test` runs clobber each other;
+  `tests/scratch_paths.rs` enforces it.
 
 - **gs is the oracle.** Every semantics question in Stages 5–7 was
   settled by running the snippet in gs first and pinning the answer in
@@ -647,7 +670,17 @@ renders eight examples in both and compares block-downsampled output).
    the batch calls the operators directly, so neither its clips nor its
    restores are seen; a callback that clips and strokes inside a bound
    `gsave exec grestore` wrapper leaves later strokes under that clip
-   (#459; use `dkclip` in such callbacks).
+   under Ghostscript (#459, a documented limit: standard PostScript
+   cannot see that restore. Use `dkclip` in the callback, wrap the call in
+   a `gsave ... grestore` the batch sees, or bind the wrapper inside the
+   batch; `notes/459-bound-wrapper-grestore.md`). pscat is exact there:
+   `dkstroke` asks the pscat-only `gstate .sameclip bool` whether its
+   capture's clip is still in force and recaptures if not; drykit probes
+   it at load (`dkPsameok`), so gs keeps the limit (#488,
+   `notes/488-sameclip.md`).
+   Where the interpreter has `cliprestore` (gs, and pscat since #494)
+   `dkbatch` shadows it too and marks the batch dirty (#454,
+   `notes/454-cliprestore-in-a-batch.md`).
    #393: `dkstroke /After true` in a batch is drawn on its own after the
    batch renders, in call order, in its own colour; `dhsmudge` and `dhlift`
    use it, so they run inside a batch, over everything the batch lays
@@ -684,6 +717,10 @@ renders eight examples in both and compares block-downsampled output).
    `\underset` `\stackrel` `\substack`, the style switches, `\not`,
    `\bmod` `\pmod`, and TeX align's columns in `mkalign` (several `&` a
    line, `/ColumnGap`): `notes/340-mathkit-structures.md`.
+   #439 added `\mod` `\pod`, `\nolimits` on a brace, mkalign's
+   `/ColumnWander` (off by default, so older layouts are unchanged) and
+   `/ColumnGap 0` as `alignat`, and the `mkbrace` annotation (the same
+   turned brace between two points): `notes/439-mathkit-columns-braces.md`.
    Chalk (#235) shipped `lib/drychalk.ps`. `dcchalk` is the chalk preset
    over `dkstroke`. `dcboard` dresses a slate or green board: haze,
    `/Ghost` writing, swipes, wipes, ledge dust and a tray. It was tuned
@@ -754,8 +791,10 @@ renders eight examples in both and compares block-downsampled output).
    #215 shipped the gallery piece `gallery/released_memo.ps` (*Released in
    Part*) and the blind boards `docs/dev/design/typewriter/blind_grid.png` and
    `memo_vs_real.png` (`docs/dev/design/typewriter/tools/blind_compare.py`; the
-   key is in the PR, not the repo); `notes/215-released-memo.md`. Leftovers:
-   #466, #467, #468.
+   key is in the PR, not the repo); `notes/215-released-memo.md`. #466 gave a
+   copy's paper a grey haze, mottle and grain (`rel-page /Haze`, default 0.6,
+   applied after the copier curve in `rlSet`/`rlCol`; `/Haze 0` is the old white
+   copy; `notes/466-copy-paper-haze.md`). Leftovers: #467, #468.
    #423 tuned the ribbon ink toward T2, T4 and T7: a thinner body and feather
    (`wBodyW`, `fW` in `tInkStrike`), a higher base hole level, a steeper
    pressure-to-density slope, pressure sd 0.12 on `/manual` and `/worn`, and a
@@ -993,6 +1032,9 @@ renders eight examples in both and compares block-downsampled output).
   needs none of that: `gallery/evening_stream.ps` (#187) pulls its whole
   far wood into the stream in one directional pull. Don't mirror an element
   that already holds a directional `pkwet` (its 64x nesting budget).
+  A directional pull over a long `/Offset` that must fade as a smooth
+  gradient wants `/Layers` about `/Offset` + 1 one-sided, 2 x `/Offset` + 1 two-sided (1pt steps; issue #417): the
+  explicit cap is 32, the default depth is capped at 16 and has not moved.
 - **Loaded colours: `pkbroad`, `pktrowel`, `pkfan` and `pkdab` adopt them, the rest do
   not yet** (issue #183, slices L1-L5b; design in `docs/dev/design/PAINT_LOADING.md`).
   `lib/paintkit.ps`'s `pu-` section (`puparse`, `puat`, `puflips`, `puwet`,
@@ -1007,16 +1049,40 @@ renders eight examples in both and compares block-downsampled output).
   *inside the fill* (`pmemit`/`pmstamp`/`ptemit`, behind `ptk 0 gt`), from
   the head position (`pmnc`, `ptnc`, or +-1 for pktrowel's ridges) and the
   flip of the run's first stop, then passed through `puwet`, which grades it
-  by the running `pkwet` pass (L3): frames have 9 slots, and 4-6 are the
+  by the running `pkwet` pass (L3): frames have 10 slots, and 4-6 are the
   per-pass factors, a copy of `/Under` and the running pass index (slot 7,
   issue #179, holds one backdrop per pass for a procedural `/Under` and is
   null otherwise: `puwet` reads it first, so a loaded colour grades toward
   the pass's own backdrop; slot 8, issue #359, is a banded call's record:
   the cells' clips, backdrops, pass colours and the saved random stream, null
   otherwise; the pass loop tests it, and each cell points slot 5 at its own
-  backdrop, so `puwet` needs nothing new). A new
-  adopter must call `puwet` on every loaded colour, or its marks go solid
-  inside a pull. `pkfan` adopts it too (L4, `pfColorRec`): its colour is set
+  backdrop, so `puwet` needs nothing new; slot 9, issue #403, is a `/PerFill`
+  call's `[ /Under procedure, CTM at entry, /FillLength or 0 ]`, null otherwise; the third element, issue #492, is read by `pufilllen`). A new
+  adopter must call `puwetat` (`puwet` plus the fill's x y) on every loaded
+  colour, or its marks go solid inside a pull. `puwetat` is what lets
+  `/PerFill true` ask the backdrop at each fill: the four adopters pass the
+  run's middle stop (`pkdab`: the dab's centre), and the point is taken to device space and back through
+  the slot-9 CTM, so it is in the user space `pkwet` was called in, pass
+  displacement included. It never touches the depth counter (an error leaves
+  through the pass's own `stopped`), unlike `pqaskunder`, which runs before the
+  passes. The ridge and mix colours of `pkoil` and `pkdab` still use `puwet` (per pass).
+  `/FillLength` (#492) cuts one long run into several fills: `ptemit` (pktrowel)
+  and `pmemit` (pkbroad) ask `pufilllen` (the smallest positive length among the
+  levels running a softening pass, 0 otherwise) and, when it is positive and
+  `pusplit` returns more than one piece, take `ptsplitfill` / `pmsplitfill`
+  instead of the code they always had (a single piece, or no length, is that
+  code, so every old render is unchanged). `pmsplitfill` computes the whole
+  boundary first, with `pmemit`'s own draws in its own order, then fills
+  sub-polygons that overlap by one segment; `ptsplitfill` has no draws to keep.
+  `pkfan`'s `pfrun` (#497) asks `pffillcuts` first and, for more than one piece,
+  takes `pfsplitrun` instead of `pfwholerun` (the old body, renamed): the run's
+  displaced centreline is drawn whole, in `pfwholerun`'s own order (`pkribbon` draws
+  nothing without `/Jitter`), then each piece, from the stop before its cut to the
+  next cut, goes to `pkribbon` with `/StartCap` `/pointed` only on the first, `/EndCap`
+  `/pointed` only on the last, `/flat` between, the whole run's pitch, and a
+  `/Pressure` (`pfpress`) that maps the piece's `t` to the run's so the `/Flick`
+  taper stays the run's. `pkfan`'s pressed rays and `pkdab` are one fill each: a new
+  adopter that fills a strip should do what `ptemit` does. `pkfan` adopts it too (L4, `pfColorRec`): its colour is set
   per *run* (`pfrun`) and per pressed ray (`pfray`) by `pfcolor`, from the
   bristle's `pfub` and the stored `/ColorJitter` draw `pfcj` (taken where it
   always was, so the stream doesn't move), because a bristle's runs span every

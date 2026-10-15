@@ -313,6 +313,43 @@ finished call is never read. Error unwinding needs no new code for the
 same reason. `pkwet`'s own renders are unchanged: the writes are pure
 bookkeeping and nothing reads them except `puwet`.
 
+Slot 9 (issue #403) is `null`, or for a `pkwet` called with `/PerFill true` a
+three-element array `[ the /Under procedure, the CTM at entry, /FillLength or
+0 ]`. The
+colour sites then call `puwetat` (`puwet` with the fill's x y), which asks that
+procedure at the fill's own position, in the user space `pkwet` was called in
+(device point back through the saved CTM), in place of reading slot 7 or 5.
+Everything else about `puwet` is unchanged, and `puwet` itself, still used for
+`pkoil`'s ridge colours, reads slot 7 as before.
+
+A fill is one inked run, so a long unbroken run is asked once. `/FillLength`
+(issue #492, the third element) cuts such a run into several fills about that
+far apart, each coloured, and so asked, at its own middle stop. It is the
+splitting 3.5 sketches for `/TipColor`, done for `pkbroad`, `pktrowel` and (#497) `pkfan`, the
+three presets whose run is one filled strip or ribbon (`pkbroad`, `pktrowel`, `pkfan`):
+
+- The cut points come from the stops' arc lengths alone: a cut at the first stop
+  where the length since the last cut reaches `/FillLength`, never at the run's
+  last stop. A run no longer than the length is one piece and takes the old
+  code, so it renders as it did.
+- Each piece after the first starts one stop early, so neighbours share one
+  segment and the seam is covered rather than abutted. The run's real ends keep
+  their half-pitch and `/Drag` extension; an interior end is the plain stop edge.
+- The random stream does not move. `pktrowel`'s strip edges are already in
+  arrays when `ptemit` runs. `pkbroad`'s boundary points each draw a jitter, so
+  `pmsplitfill` computes the whole boundary first, in the order and with the
+  draws `pmemit` always made, and fills pieces from those points.
+- `pufilllen` reads the shortest positive length among the nested `pkwet` levels
+  that are running a softening pass (the core is asked nothing, so cutting it
+  would only add fills).
+- `pkfan` (issue #497) cuts each bristle's run too, as `pkribbon` pieces: the
+  displaced centreline is drawn first, in `pfrun`'s own order (`pkribbon` draws
+  nothing without `/Jitter`), and each piece is a ribbon with `/pointed` caps only
+  at the run's real ends and `/flat` between. The run's `/Flick` taper is the
+  run's, not each piece's: a `/Pressure` procedure maps a piece's progress to the
+  run's arc-length fraction before applying the same ramp. A pressed ray and a
+  `pkdab` dab are one fill each.
+
 The rule in HANDOFF and the `pkwet` header becomes: the procedure must
 paint in the colour it inherits, *or* in loaded colours, which `pkwet`
 grades for you.
@@ -331,7 +368,11 @@ overlapping its neighbour by one stop (the abutting-polygon seam
 gotcha). Where the preset has `/Depletion` (pkbroad), `/TipReach`
 defaults to `Depletion`-scaled reach rather than a constant (open
 question Q5). This slice is deliberately last: it is the only part of
-the design that changes how a run is filled.
+the design that changes how a run is filled. (Issue #492 has since cut `pkbroad`
+and `pktrowel` runs, and #497 `pkfan` runs, into overlapping sub-fills for `pkwet`'s `/FillLength`, with
+the boundary points computed first as described here and no new draw; see 3.4.
+`/TipColor` can reuse `pusplit`'s cuts, with progress breakpoints in place of
+a fixed length.)
 
 ## 4. Interactions
 

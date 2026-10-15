@@ -456,7 +456,13 @@ in — keep a reflection's mirror inside the procedure. A directional
 call defaults to enough layers to keep the passes within 2pt of each
 other (up to 16), because identical copies further apart read as
 stepped echoes, so with `/Layers` left to default, `/Offset` also sets
-the depth and re-rolls what follows; pin `/Layers` while tuning. Any
+the depth and re-rolls what follows; pin `/Layers` while tuning. 2pt is
+where the echoes start, not where they stop: a flat stroke that fades into
+a flat ground still bands at 2pt, so for a smooth gradient over a long pull
+ask for about 1pt: `/Layers` one more than `/Offset` one-sided, twice
+`/Offset` plus one two-sided (the cap on an explicit `/Layers` is 32; the
+default depth stays at 16). The canvas
+specimen's pull is `/Offset 28 /Layers 29` (issue #417). Any
 nest with a directional call in it may multiply its innermost
 procedure at most 64 times — enough to pull a reflection down and then
 graze it across. `examples/paintkit_wet_pull_demo.ps` shows a
@@ -482,7 +488,22 @@ pass, not per pixel. A mark tall against the gradient wants it per band
 : `/Box [x y w h]` and `/Bands [cols rows]` in place of `/At`
 ask the procedure once per cell of a grid over the mark and paint each
 softening pass once per cell, clipped to it, with the random stream replayed
-so every cell lays the same marks. A literal `[r g b]` behaves exactly
+so every cell lays the same marks. A mark painted in loaded colours
+(`/Colors` on `pkbroad`, `pktrowel`, `pkfan` or `pkdab`) can instead ask it per fill:
+add `/PerFill true` beside `/At` and the procedure is asked again at each
+fill's own position (the middle of an inked run, in the user space you call
+pkwet in), with no clipping and no extra runs of the mark. A mark made of many
+short fills follows the sky closely, and one long unbroken run is asked once.
+Add `/FillLength 10` (points, with `/PerFill true`) and a long run of `pkbroad`,
+`pktrowel` or `pkfan` is cut into fills about that far apart, each asked at its own middle,
+so one tall stroke down a vertical gradient follows it too: on a 110pt stroke
+the rim over a strong gradient fell from 240 to 72 at 10pt. The cut makes
+more fills, so more calls of the procedure (a 12pt cut asked it 345 times where
+the whole run asked 45), and it reaches only those three presets (`pkdab` dabs and a pressed fan's rays are one fill already). A
+length longer than the run, or no `/FillLength`, leaves the render as it was.
+The length is measured along the mark in the user space it is drawn in. It costs one call of the procedure per fill per softening pass, so keep it
+cheap, and an inherited-colour mark (`pkribbon`, `pkspray`) has no such site and
+is still asked per pass at `/At`. A literal `[r g b]` behaves exactly
 as before. `examples/paintkit_wet_under_demo.ps` sets one cloud over a strong
 sky gradient with a constant and a procedural `/Under`
 (`docs/dev/design/paintkit_wet_under_demo.png`);
@@ -617,7 +638,8 @@ loaded `pkdab` with warm highlight and cool shadow hues, evergreens on a
 fan loaded dark and lit with `/Light`, a `pkpull` fall, and
 `pkzigzag` light lines that catch on the canvas weave, and `pkbrushedge`
 on the stream banks, the far shore and the near banks, so no big mass has a
-ruled edge (issue #382).
+ruled edge (issue #382); the far shore and the stream banks pull out the
+meadow's own light with a procedural `/Mass`, lit under the glow (issue #455).
 
 ## Watercolor: pkwash and pkpaper
 

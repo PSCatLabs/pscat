@@ -76,7 +76,7 @@ RelState begin {
     /rlSeed 1 def  /rlW 612 def  /rlH 792 def
     /rlAge 0 def  /rlEdge 0 def  /rlFolds 0 def  /rlFoldAt [ 0.333 0.667 ] def
     /rlLamp 0 def  /rlSkew 0 def  /rlBack null def
-    /rlGen 0 def  /rlSpeck 1 def  /rlCEdge 0.6 def
+    /rlGen 0 def  /rlHaze 0.6 def  /rlSpeck 1 def  /rlCEdge 0.6 def
     /rlPunch 0 def  /rlStaple 0 def  /rlClip 0 def  /rlShadow 0.6 def
     /rlStamps [ ] def  /rlNotes [ ] def
 } bind def
@@ -113,6 +113,7 @@ RelState begin {
     /Skew       [ /rlSkew   /rlIsAngle  /rel-skew-must-be-within-10-degrees ]
     /Backdrop   [ /rlBack   /rlIsRgbOrNull /rel-backdrop-must-be-an-rgb-array ]
     /Generation [ /rlGen    /rlIsCount  /rel-generation-must-be-an-integer-0-to-8 ]
+    /Haze       [ /rlHaze   /rlIsUnit   /rel-haze-must-be-0-to-1 ]
     /Speckle    [ /rlSpeck  /rlIsUnit   /rel-speckle-must-be-0-to-1 ]
     /CopyEdge   [ /rlCEdge  /rlIsUnit   /rel-copyedge-must-be-0-to-1 ]
     /Punch      [ /rlPunch  /rlIsCount  /rel-punch-must-be-an-integer-0-to-8 ]
@@ -151,8 +152,21 @@ RelState begin {
     rmD sub rlCC 3 mul dup 1 gt { pop 1 } if mul rmD add
     1 exch sub dup dup
 } bind def
-/rlSet { rlCC 0 gt { rlMono } if setrgbcolor } bind def
-/rlCol { rlCC 0 gt { rlMono } if } bind def                % r g b -> r g b
+% The copier's haze: a copy is not white but a light grey (toner fog), the
+% curve's output times 1 - rlHzK. It comes after the curve (which sends paper
+% to white) and acts on everything drawn under the copy curve, so folds,
+% punch-hole rings and the texture land on the same grey as the field, and
+% dark things (type, stamp ink) barely change. rlHzK is 0 unless /Generation
+% is above 0 and /Haze above 0; the paper field varies it by place.
+/rlHzK 0 def  /rlHzB 0 def
+/rlHzMul {                                          % r g b -> r' g' b'
+    rlHzK 0 gt {
+        /rhM 1 rlHzK sub def
+        rhM mul 3 1 roll rhM mul 3 1 roll rhM mul 3 1 roll
+    } if
+} bind def
+/rlSet { rlCC 0 gt { rlMono rlHzMul } if setrgbcolor } bind def
+/rlCol { rlCC 0 gt { rlMono rlHzMul } if } bind def         % r g b -> r g b
 
 % the paper's tone: white at /Age 0, the ivory of the references (T9) at 0.6
 /rlTone {
@@ -192,6 +206,7 @@ RelState begin {
 % stain by the blotches, shaded by the scanner lamp and darkened toward the
 % edges. Everything that varies smoothly across the sheet is one opaque fill
 % per cell, so lamp, stains and edges never overpaint each other.
+/rlGMax 9 def
 /rlGrid {                                           % length -> array of cell edges
     /rgL exch def
     rgL 1.5 div cvi 8 add array /rgA exch def
@@ -200,6 +215,7 @@ RelState begin {
         rgX rgL ge { exit } if
         rgX rgL rgX sub 2 copy gt { exch } if pop
         dup 8 lt { pop 1.5 } { dup 20 lt { pop 3 } { dup 44 lt { pop 6 } { pop 9 } ifelse } ifelse } ifelse
+        dup rlGMax gt { pop rlGMax } if
         rgX add dup rgL gt { pop rgL } if /rgX exch def
         rgA rgN rgX put  /rgN rgN 1 add def
     } loop
@@ -246,11 +262,13 @@ RelState begin {
 /rlPaperField {
     /rpEd exch def /rpBl exch def /rpB exch def /rpG exch def /rpR exch def
     rlAge 0 gt rpBl and { rlBlotInit } { /rlBn 0 def } ifelse
-    rlLamp 0 le rlBn 0 le and rpEd rlEdge 0 gt and not and {
+    rlLamp 0 le rlBn 0 le and rpEd rlEdge 0 gt and not and rlCC 0 gt rlHzK 0 gt and not and {
         rpR rpG rpB rlSet rlSheet fill
     } {
         gsave rlSheet clip newpath
+        rlCC 0 gt rlHzB 0 gt and { /rlGMax 3 def } if
         rlW rlGrid /rpXs exch def  rlH rlGrid /rpYs exch def
+        /rlGMax 9 def
         0 1 rpXs length 2 sub {
             /rpI exch def
             rpXs rpI get /rpX0 exch def  rpXs rpI 1 add get /rpX1 exch def
@@ -264,6 +282,7 @@ RelState begin {
                 } { rpR rpG rpB } ifelse
                 rpCx rpCy rlLampAt /rpF exch def
                 rpF mul 3 1 roll rpF mul 3 1 roll rpF mul 3 1 roll
+                rlCC 0 gt rlHzB 0 gt and { rlHzB 1 rpCx rpCy rlHzMot add mul /rlHzK exch def } if
                 rpEd rlEdge 0 gt and {
                     rpCx rpCy rlEdgeAt /rpW exch def
                     1 rpW 0.4 mul sub mul 3 1 roll
@@ -274,12 +293,68 @@ RelState begin {
                 rpX0 rpY0 rpX1 rpX0 sub 0.8 add rpY1 rpY0 sub 0.8 add rectfill
             } for
         } for
+        rlCC 0 gt rlHzB 0 gt and { rlHzB /rlHzK exch def } if
         grestore
     } ifelse
 } bind def
+% the haze's mottle: soft blotches of denser and thinner toner, as a factor
+% on the haze (-0.5 to 0.5), and the fine grain of the copy paper
+/rlHzInit {
+    /rlHzN 9 def  /rlHzC rlHzN 5 mul array def
+    0 1 rlHzN 1 sub {
+        5 mul /rbi exch def
+        rlHzC rbi rlU rlW mul put
+        rlHzC rbi 1 add rlU rlH mul put
+        rlHzC rbi 2 add rlU 90 mul 35 add put
+        rlHzC rbi 3 add rlU 0.7 mul 0.8 add put
+        rlHzC rbi 4 add rlR 0.22 mul put
+    } for
+    /rlHzS1 14 def  /rlHzS2 6 def
+    /rlHzNx1 rlW rlHzS1 div cvi 2 add def  /rlHzNx2 rlW rlHzS2 div cvi 2 add def
+    /rlHzA1 rlHzNx1 rlH rlHzS1 div cvi 2 add mul array def
+    /rlHzA2 rlHzNx2 rlH rlHzS2 div cvi 2 add mul array def
+    0 1 rlHzA1 length 1 sub { rlHzA1 exch rlR put } for
+    0 1 rlHzA2 length 1 sub { rlHzA2 exch rlR put } for
+} bind def
+% value noise, smoothly interpolated: x y array nx spacing -> -1..1
+/rlVN {
+    /rvS exch def /rvNx exch def /rvA exch def
+    rvS div /rvY exch def rvS div /rvX exch def
+    rvX cvi /rvIx exch def  rvY cvi /rvIy exch def
+    rvX rvIx sub dup dup mul exch 2 mul 3 exch sub mul /rvTx exch def
+    rvY rvIy sub dup dup mul exch 2 mul 3 exch sub mul /rvTy exch def
+    rvA rvIy rvNx mul rvIx add get  rvA rvIy rvNx mul rvIx add 1 add get  rvTx rlLerp
+    rvA rvIy 1 add rvNx mul rvIx add get  rvA rvIy 1 add rvNx mul rvIx add 1 add get  rvTx rlLerp
+    rvTy rlLerp
+} bind def
+/rlHzMot {                                          % x y -> m
+    /rbY exch def /rbX exch def
+    0
+    0 1 rlHzN 1 sub {
+        5 mul /rbi exch def
+        rbX rlHzC rbi get sub rlHzC rbi 2 add get rlHzC rbi 3 add get mul div dup mul
+        rbY rlHzC rbi 1 add get sub rlHzC rbi 2 add get div dup mul add
+        -1 mul 2.718282 exch exp rlHzC rbi 4 add get mul add
+    } for
+    rbX rbY rlHzA1 rlHzNx1 rlHzS1 rlVN 0.2 mul add
+    rbX rbY rlHzA2 rlHzNx2 rlHzS2 rlVN 0.1 mul add
+    dup 0.6 gt { pop 0.6 } if dup -0.6 lt { pop -0.6 } if
+} bind def
+% grain: tiny lighter and darker flecks over the haze, under the content,
+% set directly (they are already the copy's grey)
+/rlHazeGrain {
+    rlSeed 17 rlSeed2
+    rlHaze rlW mul rlH mul 0.2 mul cvi 0 1 3 -1 roll 1 sub {
+        pop
+        rlU rlW mul rlU rlH mul /rhY exch def /rhX exch def
+        rlU 1.3 exp rlR 0 lt { neg } if 0.05 mul rlHaze 0.5 add mul 1 add
+        1 rlHzB sub mul dup 1 gt { pop 1 } if setgray
+        rhX rhY rlU 0.6 mul 0.3 add rlU 0.4 mul 0.2 add rectfill
+    } for
+} bind def
 % surfacekit's grain (foxing) and fibres over the sheet; a copy has lost them
 /rlTexture {
-    rlAge 0 gt {
+    rlAge 0 gt rlCC 0 gt rlHzK 0 gt and not and {
         0 0 rlW rlH screct /rlReg exch def
         rlReg << /Count rlAge 220 mul cvi 1 add /Color [ 0.55 0.42 0.26 rlCol ]
                  /Strength 0.5 1 rlCC sub mul /Radius 0.7 /Seed rlSeed 101 add >> grain
@@ -334,6 +409,7 @@ RelState begin {
 /rlPaperDraw {
     rlSeed 11 rlSeed2 rlTone true true rlPaperField
     rlTexture
+    rlCC 0 gt rlHzB 0 gt and { gsave rlHazeGrain grestore } if   % before the holes, which it must not cover
     rlSeed 14 rlSeed2 rlFoldLines
     rlSeed 15 rlSeed2 rlPunches
 } bind def
@@ -577,7 +653,7 @@ RelState begin {
     rlJ 1 eq {
         /rlCC 1 0.6 rlGen exp sub def rlTone rlCol
         /rlEb exch def /rlEg exch def /rlEr exch def /rlCC 0 def
-    } { /rlEr 1 def /rlEg 1 def /rlEb 1 def } ifelse
+    } { 1 rlHzB sub dup dup /rlEr exch def /rlEg exch def /rlEb exch def } ifelse
     1 rlCEdge 0.8 mul sub /rlEd exch def
     3 1.5 rlCEdge mul add 8 div /rlEs exch def
     0 1 7 {
@@ -629,9 +705,10 @@ RelState begin {
 % rel-paper may run inside the content of a rel-page (tw-type's /PageStart):
 % it keeps the enclosing page's options, copy level and generator state
 /rlSave {                                           % -> dict
-    rlKeys length 4 add dict /rsvD exch def
+    rlKeys length 6 add dict /rsvD exch def
     rlKeys { exch pop 0 get /rsvK exch def rsvD rsvK rsvK load put } forall
     rsvD /rlCC rlCC put  rsvD /rlSt rlSt put
+    rsvD /rlHzK rlHzK put  rsvD /rlHzB rlHzB put
     rsvD
 } bind def
 /rlRestore { { def } forall } bind def              % dict -> -
@@ -650,6 +727,7 @@ RelState begin {
 } bind def
 /rlOriginal {
     /rlCC 1 0.6 rlGen exp sub def
+    rlHzB 0 gt { rlSeed 16 rlSeed2 rlHzInit } if
     rlPaint { gsave rlPaperDraw grestore } if
     rlRePath
     /tw-set where { pop rlGen 0 gt } { false } ifelse {
@@ -678,6 +756,7 @@ RelState begin {
 /rlRun {
     rlGrabPath
     rlPrep
+    rlGen 0 gt rlHaze 0 gt and { rlHaze 0.16 mul } { 0 } ifelse dup /rlHzB exch def /rlHzK exch def
     gsave
     rlSkew 0 ne rlBack null ne or {
         gsave
@@ -686,7 +765,7 @@ RelState begin {
         grestore
     } if
     rlSkew 0 ne { rlW 2 div rlH 2 div translate rlSkew rotate rlW 2 div neg rlH 2 div neg translate } if
-    rlGen 0 gt { gsave rlSeed 10 rlSeed2 0.985 0.985 0.975 false false rlPaperField grestore } if
+    rlGen 0 gt { gsave rlSeed 10 rlSeed2 0.985 1 rlHzB sub mul 0.985 1 rlHzB sub mul 0.975 1 rlHzB sub mul false false rlPaperField grestore } if
     0 1 rlGen {
         /rlJ exch def
         gsave rlJ rlEnter
@@ -694,6 +773,7 @@ RelState begin {
         grestore
     } for
     grestore
+    /rlHzB 0 def  /rlHzK 0 def
 } bind def
 
 rlDefaults
@@ -719,6 +799,9 @@ rlDefaults
 %   { { } << /Generation 1.5 >> rel-page } /rel-generation-must-be-an-integer-0-to-8
 %   (half a generation) mustguard
 %
+%   { { } << /Haze 1.5 >> rel-page } /rel-haze-must-be-0-to-1
+%   (a haze above 1) mustguard
+%
 %   { { } << /Skew 20 >> rel-page } /rel-skew-must-be-within-10-degrees
 %   (a skew of 20 degrees) mustguard
 %
@@ -741,7 +824,7 @@ rlDefaults
 %%EndSelfTest
 
 % @kind: Procedure
-% @summary: Draws a page the way a released document looks, around any content: `{ content } opts rel-page`. The content proc is run once, in the page's own frame; it draws the typed page (lib/typewriter.ps tw-type is the intended content, and gets /Copies set to /Generation unless it sets its own). Paper is painted under it (tone, blotches, grain and fibres, edge darkening, the scanner lamp, folds, punch holes); /Generation photocopies each add a small skew and shift, black specks and streaks, the copier's lid at the edges and the copier's grey, high-contrast curve; marks are drawn over it (notes, stamps, a staple, a clip). Every effect is off at strength 0, the default, so with no options the content is simply run. Deterministic under /Seed. The caller's rand stream is untouched. One page only: the content must fit on the sheet and must not showpage (tw-type does after a full page), or the copies' clips and transforms break; age every page of a long document with rel-paper in /PageStart instead. If the content raises an error, the typewriter's /Copies is left set.
+% @summary: Draws a page the way a released document looks, around any content: `{ content } opts rel-page`. The content proc is run once, in the page's own frame; it draws the typed page (lib/typewriter.ps tw-type is the intended content, and gets /Copies set to /Generation unless it sets its own). Paper is painted under it (tone, blotches, grain and fibres, edge darkening, the scanner lamp, folds, punch holes); /Generation photocopies each add a small skew and shift, black specks and streaks, the copier's lid at the edges and the copier's grey, high-contrast curve; marks are drawn over it (notes, stamps, a staple, a clip). Every effect is off at strength 0, the default, so with no options the content is simply run. Deterministic under /Seed. The caller's rand stream is untouched. One page only: the content must fit on the sheet and must not showpage (tw-type does after a full page), or the copies' clips and transforms break; age every page of a long document with rel-paper in /PageStart instead. If the content raises an error, the typewriter's /Copies is left set, and so are the copy curve and the haze, which a later standalone rel-stamp or rel-note then draws through until the next rel-page.
 % @example: (lib/artkit.ps) run (lib/surfacekit.ps) run (lib/released.ps) run { 100 600 moveto /Courier findfont 14 scalefont setfont (A typed line.) show } << /Age 0.6 /Generation 2 /Skew 0.4 /Stamps [ << /Lines [ (RECEIVED) (14 OCT 1964) ] /X 400 /Y 700 /Angle 8 >> ] >> rel-page showpage
 % @param: /Seed [integer] Seeds every random mark; the same seed draws the same page (default 1)
 % @param: /Width [points] The sheet's width (default 612)
@@ -754,6 +837,7 @@ rlDefaults
 % @param: /Skew [degrees] The sheet's tilt on the scanner bed, within 10 degrees; the bed shows around it (default 0)
 % @param: /Backdrop [rgb array] The scanner bed or desk around a skewed sheet and showing through punch holes; any value draws it (default none, and light grey when the sheet is skewed)
 % @param: /Generation [count] Photocopy generations, 0 to 8: 0 is the original, 1 a copy, 3 a copy of a copy of a copy (default 0)
+% @param: /Haze [0..1] The grey of a photocopy's paper: toner fog that takes the copy's white down to a light grey (about 0.90 at the default, 0.84 at 1), with soft blotches of thicker and thinner toner and a fine grain of lighter and darker flecks under the type. Applies only when /Generation is above 0; 0 gives the plain white copy (default 0.6)
 % @param: /Speckle [0..1] Each copy's black specks and streaks (default 1)
 % @param: /CopyEdge [0..1] How dark the copier's lid and edge shadows are (default 0.6)
 % @param: /Punch [count] Punch holes down the left margin: 2 and 3 are the standard spacings (default 0)

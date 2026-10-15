@@ -6,6 +6,8 @@
 
 use pscat::Interp;
 
+mod common;
+
 // (file, font name, minimum inked pixels for the AWX9! probe — stars
 // are points, so Constellation legitimately inks far less than tubes)
 const FONTS: [(&str, &str, usize); 7] = [
@@ -163,7 +165,7 @@ fn ghostscript_accepts_every_font() {
         eprintln!("skipping gs compatibility check: gs not installed");
         return;
     }
-    let dir = std::env::temp_dir().join(format!("pscat-fontlib-{}", std::process::id()));
+    let dir = common::scratch_dir("pscat-fontlib");
     std::fs::create_dir_all(&dir).expect("temp dir");
     for (path, name, _) in FONTS {
         let lib = std::fs::read_to_string(path).expect("font file");

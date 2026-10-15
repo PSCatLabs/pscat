@@ -60,8 +60,9 @@ batch's later strokes stay under the stale capture (Codex review round 1;
 capture is lazy), and `dkclip` inside such a callback is exact (a test
 row). Standard PostScript cannot observe that `grestore`: a per-stroke
 `clippath pathbbox` guard would cost about 1.6 ms per stroke under a
-nested clip (a mask trace, what #312 avoided) and is still not exact;
-#459 lists the options. drykit's own media
+nested clip (a mask trace, what #312 avoided) and is still not exact.
+#459 closed this as a documented limit with three workarounds
+(`notes/459-bound-wrapper-grestore.md`). drykit's own media
 (`dhhatch` etc.) use `dkclip` and are unaffected. pscat has no
 `clipsave`/`cliprestore`; gs does, and they are not shadowed, so in gs a
 `cliprestore` after a stroke captured an inner clip leaves later strokes

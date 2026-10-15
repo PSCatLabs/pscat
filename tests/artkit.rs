@@ -825,7 +825,7 @@ fn ghostscript_accepts_artkit() {
             << /Density 0.004 /Seed 4 /Tries 20 /Weight { pop 200 div } \
                /Mark { pop pop pop pop } >> scatter \
         showpage\n";
-    let dir = std::env::temp_dir().join(format!("pscat-artkit-{}", std::process::id()));
+    let dir = common::scratch_dir("pscat-artkit");
     std::fs::create_dir_all(&dir).expect("temp dir");
     let combined = dir.join("artkit_gs.ps");
     std::fs::write(&combined, format!("{lib}\n{driver}")).expect("write");

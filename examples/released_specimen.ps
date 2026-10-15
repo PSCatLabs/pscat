@@ -11,10 +11,12 @@
 %           the scanner's tilt and lamp, with a "received" stamp, a margin
 %           note and redaction bars over two names (<r>..</r> in the text)
 %   middle  the same memo after one photocopy (/Generation 1): grey and
-%           contrasty, the copier's lid at the edge, specks and a streak,
-%           the type thicker with its counters closing, the punch holes black
+%           contrasty, on a light grey paper (/Haze, T14's tone, mottled and
+%           grainy), the copier's lid at the edge, specks and a streak, the
+%           type thicker with its counters closing, the punch holes black
 %   right   after three (/Generation 3): near bitonal, the type fat and
-%           broken, specks and spatter gathered at the edges
+%           broken, specks and spatter gathered at the edges, the paper
+%           nearly white again (/Haze 0.2: T15 is bitonal)
 %
 % Every stamp, note and name is invented. docs/dev/design/typewriter/release_vs_real.png
 % (docs/dev/design/typewriter/tools/release_compare.py) sets crops of this beside the
@@ -58,6 +60,7 @@ Questions about the forms should go to <r>Mrs. Okafor</r>, extension 214.) def
         /Width 612 /Height 480 /Seed 21 /Generation srg
         /Age 0.6 /EdgeDark 0.5 /Folds 0.5 /Lamp 0.25 /Skew 0.3 /Punch 3
         /Redact 0.7
+        /Haze srg 3 ge { 0.2 } { 0.6 } ifelse
         /Stamps [
             << /Lines [ (RECEIVED) (14 MAR 1964) ] /X 480 /Y 424 /Angle 3 /Size 13
                /Ink [0.1 0.1 0.12] /Frame /box /Font /Helvetica /Tracking 1.6 /Seed 3 /Strength 0.6 >>

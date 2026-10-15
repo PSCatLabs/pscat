@@ -80,5 +80,67 @@ class Links(unittest.TestCase):
         self.assertEqual(len(run({"a.md": "[x](../../etc/passwd)"})), 1)
 
 
+class SharedRepoRule(unittest.TestCase):
+    """The GitHub-URL-to-path rule (scripts/repo_url.py, #429), pinned per caller.
+
+    Each row is what the checkers answered before the rule was shared. The md
+    checker takes http and https with ref main; the site checker takes https
+    with any ref. Keep these rows unchanged: a difference is a behaviour change.
+    """
+
+    R = "https://github.com/jeromebanks/postscript_interpreter"
+
+    # url tail (after the repo URL), md resolve(), site repo_path_for()
+    ROWS = [
+        ("/blob/main/docs/a.md", ("docs/a.md", ""), "docs/a.md"),
+        ("/blob/main/docs/a.md#L10-L20", ("docs/a.md", "L10-L20"), "docs/a.md"),
+        ("/blob/main/docs/a.md?plain=1", ("docs/a.md?plain=1", ""), "docs/a.md"),
+        ("/blob/main/docs/a.md?x#frag", ("docs/a.md?x", "frag"), "docs/a.md"),
+        ("/blob/main/docs/a%20b.md#top", ("docs/a b.md", "top"), "docs/a b.md"),
+        ("/blob/main/docs/%C3%84.md", ("docs/\u00c4.md", ""), "docs/\u00c4.md"),
+        ("/blob/main/", ("", ""), ""),
+        ("/blob/main", ("", ""), None),
+        ("/tree/main", ("", ""), None),
+        ("/tree/main/", ("", ""), ""),
+        ("/tree/main/docs/", ("docs", ""), "docs"),
+        ("/blob/main/../x.md", ("../x.md", ""), "../x.md"),
+        ("/blob/mainline/x.md", (None, ""), "x.md"),  # ref "mainline" is not "main" (#481)
+        ("/blob/v0.5.1/docs/a.md", (None, ""), "docs/a.md"),
+        ("/blob/", (None, ""), None),
+        ("/blob//docs/a.md", (None, ""), None),
+        ("/blobmain/x.md", (None, ""), None),
+        ("/raw/main/docs/a.md", (None, ""), None),
+        ("/issues/47#issuecomment-1", (None, ""), None),
+        ("", (None, ""), None),
+    ]
+
+    def test_md_resolve_per_row(self):
+        for tail, md_expected, _ in self.ROWS:
+            with self.subTest(tail=tail):
+                self.assertEqual(c.resolve("docs/x.md", self.R + tail), md_expected)
+
+    def test_site_repo_path_per_row(self):
+        import check_site_links
+        for tail, _, site_expected in self.ROWS:
+            with self.subTest(tail=tail):
+                self.assertEqual(check_site_links.repo_path_for(self.R + tail), site_expected)
+
+    def test_scheme_and_host(self):
+        import check_site_links
+        http = self.R.replace("https", "http") + "/blob/main/docs/a.md"
+        self.assertEqual(c.resolve("x.md", http), ("docs/a.md", ""))  # md takes http
+        self.assertIsNone(check_site_links.repo_path_for(http))  # site takes https only
+        other = "https://github.com/jeromebanks/postscript_interpreter-issue-429/blob/main/x.md"
+        self.assertEqual(c.resolve("x.md", other), (None, ""))  # a different repo: external
+
+    def test_match_returns_scheme_ref_and_tail(self):
+        from repo_url import match
+        self.assertEqual(match(self.R + "/blob/v0.5.1/a.md#x"), ("https", "v0.5.1", "a.md#x"))
+        self.assertEqual(match(self.R + "/tree/main/d/", ref="main"), ("https", "main", "d/"))
+        self.assertIsNone(match(self.R + "/tree/v1/d/", ref="main"))
+        self.assertIsNone(match(self.R + "/blob/mainline/x.md", ref="main"))  # #481
+        self.assertIsNone(match("https://example.com/x"))
+
+
 if __name__ == "__main__":
     unittest.main()

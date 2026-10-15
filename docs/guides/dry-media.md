@@ -30,12 +30,34 @@ the stick's contact patch meets raised tooth.
   differently clipped strokes, such as overlapping hatched regions, can
   share one batch. A plain `clip` (or `eoclip`, `rectclip`) made inside
   the batch is kept the same way: `{ gsave region clip ... grestore }`
-  works, nested and even-odd clips included. One catch: a procedure
+  works, nested and even-odd clips included, and so does a
+  `clipsave ... cliprestore` pair. One catch: a procedure
   bound before the batch calls `clip`, `gsave` and `grestore` directly,
   so drykit sees neither its clips nor its restores. If you pass a
   callback that clips and strokes to a bound `gsave ... exec ... grestore`
-  wrapper, the batch's later strokes stay under that clip. Use `dkclip`
-  inside such callbacks.
+  wrapper, pscat still draws it exactly: drykit asks pscat's
+  `.sameclip` (a pscat-only operator) whether the clip it captured is
+  still in force, and sees the wrapper's `grestore` that way. In pscat,
+  once a plain clip made in the batch has been captured, any later clip
+  change, bound or not, is picked up at the next stroke; a clip made by
+  bound code before any plain clip in the batch is still not kept
+  (`notes/488-sameclip.md`). Under Ghostscript the batch's later strokes
+  stay under that clip, since standard PostScript gives drykit no way to
+  see that `grestore` (why: `notes/459-bound-wrapper-grestore.md`). For a
+  program that must draw the same in both, any of these three fixes it:
+
+  ```postscript
+  /wrap { gsave exec grestore } bind def   % bound before the batch
+  {
+      { region { line } dkclip } wrap        % dkclip inside the callback
+      gsave { region clip line } wrap grestore   % or: a gsave the batch sees
+      line                                   % drawn unclipped either way
+  } dkbatch
+  ```
+
+  The third: define and `bind` the wrapper inside the batch. There
+  `gsave` and `grestore` are drykit's tracking procedures, and `bind`
+  leaves procedures alone.
 - **`/After true`** on a `dkstroke` inside a batch draws that stroke on
   its own after the batch has rendered, in call order, in its own colour.
   It is how an eraser or a smudge can be drawn from inside a batch, over
@@ -173,10 +195,11 @@ skeletons with TeX's box model. The subset covers:
 - matrices and `cases`, accents and `\boxed`;
 - Greek and operator names;
 - `\overbrace{...}^{label}` and `\underbrace{...}_{label}` with a grown
-  brace, `\overset`, `\underset`, `\stackrel` and `\substack` limits;
+  brace (`\nolimits` after it sets the label beside it, as a script),
+  `\overset`, `\underset`, `\stackrel` and `\substack` limits;
 - `\displaystyle`, `\textstyle` and `\scriptstyle` mid-formula;
 - `\not` before a relation (`\not=` is ≠, `\not\in` is ∉, anything else
-  gets a slash), `\bmod` and `\pmod{n}`.
+  gets a slash), `\bmod`, `\pmod{n}`, `\mod{n}` and `\pod{n}`.
 
 Anything outside the subset fails with an error that names it. The
 layout is written with a lecturer's irregularity: sizes and gaps vary,
@@ -187,14 +210,23 @@ baseline slopes and drifts (`/Irregular`, where 0 is clean TeX).
   line, which `mkframe` and `mkunderline` follow along its slope. With
   several `&` on a line it sets TeX align's columns (right, left, right,
   left ...), each pair `/ColumnGap` (in multiples of `/Size`, default 2)
-  after the last.
+  after the last; `/ColumnGap 0` is amsmath's `alignat`. `/ColumnWander`
+  (default 0; 1 is as far as a line's own wander) lets each pair after
+  the first drift sideways down the lines, as a hand's columns do.
 - `mkarrow` points a side note at a term.
+- `x0 y0 x1 y1 opts mkbrace` draws a hand-drawn curly brace whose arms
+  end at the two points, its point to the right of the direction from
+  the first to the second (left to right points down), and returns that
+  point's x y, where its label goes.
 
 Every TeX backslash is written twice in a PostScript string.
 `examples/mathkit_specimen.ps` is the specimen: the fixed test set, from
 the quadratic formula to Maxwell's equations, and a derivation in chalk.
 `examples/mathkit_structures.ps` shows the structures issue #340 added
-(`docs/dev/design/drymedia/mathkit_structures.png`).
+(`docs/dev/design/drymedia/mathkit_structures.png`), and
+`examples/mathkit_columns_braces.ps` what issue #439 added: `\mod`,
+`\pod`, side labels, a column's wander, `alignat` and `mkbrace`
+(`docs/dev/design/drymedia/mathkit_columns_braces.png`).
 The gallery piece `gallery/chalkboard_lecture.ps` fills a
 whole board with it: Euler's formula derived across three drychalk
 panels.

@@ -32,7 +32,7 @@ fn pdf_and_canvas(src: &[u8]) -> (Vec<u8>, Pixmap) {
 }
 
 fn gs_rasterize(pdf: &[u8], name: &str) -> Pixmap {
-    let dir = std::env::temp_dir();
+    let dir = common::scratch_dir("pscat_pdftest");
     let pdf_path = dir.join(format!("pscat_pdftest_{name}.pdf"));
     let png_path = dir.join(format!("pscat_pdftest_{name}.png"));
     std::fs::write(&pdf_path, pdf).expect("write pdf");

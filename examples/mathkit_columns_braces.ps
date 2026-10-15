@@ -1,0 +1,156 @@
+%!PS-Adobe-3.0
+%%Title: mathkit columns and braces -- alignat, a column's wander, \mod and \pod, side labels, mkbrace (issue #439)
+%%BoundingBox: 0 0 1000 1180
+%%EndComments
+
+% Specimen for what issue #439 added to lib/mathkit.ps. Top to bottom:
+%
+%   congruence   \mod and \pod beside \pmod and \bmod
+%   side labels  \nolimits on a brace: its label beside it, as a script
+%   columns      the same lines without and with mkalign's
+%                /ColumnWander, so the second and third columns drift
+%                down the lines as a hand does; then /ColumnGap 0
+%                (amsmath's alignat), coefficients in columns
+%   mkbrace      hand-drawn braces between two points, on a drychalk
+%                board: under a span, over one, and down the side of a
+%                system of equations
+%
+%   pscat --page 1000x1180 --png mathkit_columns_braces.png examples/mathkit_columns_braces.ps
+%   gs -dNOSAFER -dBATCH -dNOPAUSE -sDEVICE=png16m -g1000x1180 -r72 \
+%      -sOutputFile=mathkit_columns_braces.png examples/mathkit_columns_braces.ps
+%
+% In a PostScript string every TeX backslash is written twice.
+
+(lib/artkit.ps) run
+(lib/paintkit.ps) run
+(lib/drykit.ps) run
+(lib/handscript.ps) run
+(lib/strokeglyphs.ps) run
+(lib/drychalk.ps) run
+(lib/mathkit.ps) run
+
+0.985 0.98 0.965 setrgbcolor clippath fill
+
+% sp- prefix: specimen-local.
+/spfont { /Helvetica findfont exch scalefont setfont } def
+/splabel { 0.42 0.42 0.40 setrgbcolor 11 spfont moveto show } def
+/spheading { 0.30 0.30 0.28 setrgbcolor 12 spfont moveto show } def
+/sppen {
+  0.10 0.12 0.30 setrgbcolor 1.5 setlinewidth 1 setlinecap 1 setlinejoin stroke
+} def
+/spsize 30 def
+
+% (label) (tex) x y seed -   one formula, its label on the left margin
+/spformula {
+  /spseed exch def /spy exch def /spx exch def /sptex exch def
+  40 spy 3 add splabel
+  newpath sptex spx spy << /Size spsize /Seed spseed >> mkpath sppen
+} def
+
+0.20 0.20 0.18 setrgbcolor 24 spfont
+40 1130 moveto (mathkit.ps: columns and braces) show
+0.42 0.42 0.40 setrgbcolor 12 spfont
+40 1110 moveto (Issue #439: \\mod and \\pod, labels beside a brace, alignat columns that wander, and mkbrace, at the default /Irregular 1.) show
+
+(CONGRUENCE) 40 1070 spheading
+(\\mod, \\pod)
+  (a \\equiv b \\mod{n} \\qquad x \\equiv 3 \\pod{7} \\qquad a^{p} \\equiv a \\pmod{p})
+  230 1025 1 spformula
+
+(BRACE LABELS BESIDE) 40 975 spheading
+(\\nolimits)
+  (\\underbrace{1 + 1 + \\cdots + 1}\\nolimits_{n} = n \\qquad \\overbrace{a + b}\\nolimits^{2} \\quad \\text{beside} \\qquad \\overbrace{a + b}^{2} \\quad \\text{over})
+  230 915 2 spformula
+
+% ------------------------------------------------------------- columns
+
+(COLUMNS: a column's wander, and alignat) 40 840 spheading
+/splines [
+  (x_1 &= 2t & y_1 &= t^2 & z_1 &= 1)
+  (x_2 &= 2t + 1 & y_2 &= t^2 - t & z_2 &= 2)
+  (x_3 &= 4 & y_3 &= 3t^2 + 2 & z_3 &= t)
+  (x_4 &= 2t - 5 & y_4 &= 1 & z_4 &= 3t + 4)
+  (x_5 &= t & y_5 &= t^2 + 2t & z_5 &= 0)
+] def
+(without /ColumnWander) 40 812 splabel
+newpath splines 110 780 << /Size 22 /Seed 21 /ColumnGap 1 /Leading 1.75 >> mkalign pop sppen
+(with /ColumnWander 1.5) 540 812 splabel
+newpath splines 610 780 << /Size 22 /Seed 21 /ColumnGap 1 /Leading 1.75 /ColumnWander 1.5 >>
+  mkalign pop sppen
+(/ColumnGap 0: alignat, coefficients in columns) 40 606 splabel
+newpath [ (10&x + {} & 3&y = 2) (3&x + {} & 13&y = 4) (&x - {} & 2&y = -1) ]
+  130 574 << /Size 22 /Seed 23 /ColumnGap 0 /Leading 1.6 >> mkalign pop sppen
+
+% ------------------------------------------------------------- mkbrace
+
+(MKBRACE: a brace between two points, on a board) 40 465 spheading
+/spboard [ 40 30 920 410 ] def
+0.42 0.29 0.17 setrgbcolor 32 22 936 426 rectfill
+spboard aload pop << /Surface /greenboard /Seed 31 /Haze 0.3 /Swipes 2 /Wipes 1 /Ledge 10 >> dcboard
+
+% (tex) x y opts -> -   a formula in white chalk
+/spchalk {
+  /spo exch def /spy exch def /spx exch def /sptex exch def
+  /white dcchalkcolor
+  newpath sptex spx spy spo mkpath << /Width 1.5 >> dcchalk
+} def
+% (tex) xt yt above? -> -   a small label centred at a brace's point
+/spbracelabel {
+  /spup exch def /spty exch def /sptx exch def /sptex exch def
+  sptex << /Size 20 /Seed 41 /Style /text >> mkmetrics /spm exch def
+  sptx spm /Width get 2 div sub
+  spup { spty 8 add spm /Depth get add } { spty 8 sub spm /Height get sub } ifelse
+  /spby exch def /spbx exch def
+  /yellow dcchalkcolor
+  newpath sptex spbx spby << /Size 20 /Seed 41 /Style /text >> mkpath << /Width 1.2 >> dcchalk
+} def
+% (tex) opts -> width   where a prefix of a formula ends
+/spw { mkmetrics /Width get } def
+
+% one expansion, a brace under its middle terms and one over its square
+/spo1 << /Size 30 /Seed 32 /Slope 0 >> def
+/spx1 90 def /spy1 330 def
+((a + b)^2 = a^2 + 2ab + b^2) spx1 spy1 spo1 spchalk
+/spa ((a + b)^2 = a^2 + ) spo1 spw spx1 add def
+/spb ((a + b)^2 = a^2 + 2ab) spo1 spw spx1 add def
+/pink dcchalkcolor
+newpath spa 2 sub spy1 12 sub spb 2 add spy1 12 sub << /Size 30 /Seed 33 >> mkbrace
+/spty exch def /sptx exch def << /Width 1.3 >> dcchalk
+(\\text{twice the product}) sptx spty false spbracelabel
+/spc ((a + b)^2) spo1 spw spx1 add def
+/pink dcchalkcolor
+newpath spc 2 add spy1 34 add spx1 2 sub spy1 34 add << /Size 30 /Seed 34 >> mkbrace
+/spty exch def /sptx exch def << /Width 1.3 >> dcchalk
+(\\text{a square}) sptx spty true spbracelabel
+
+% a system, its brace down the right side, pointing at what follows
+/spsys [ (2x + y &= 5) (x - y &= 1) ] def
+/white dcchalkcolor
+newpath spsys 620 345 << /Size 28 /Seed 35 /Leading 1.7
+  /Ink { pop << /Width 1.5 >> dcchalk } >> mkalign
+/sprecs exch def
+/sprx 0 sprecs { /BBox get 2 get max } forall 16 add def
+/pink dcchalkcolor
+% drawn upward, so its point faces right
+newpath sprx sprecs 1 get /BBox get 1 get 4 sub sprx sprecs 0 get /BBox get 3 get 4 add
+  << /Size 28 /Seed 36 >> mkbrace
+/spty exch def /sptx exch def << /Width 1.3 >> dcchalk
+/white dcchalkcolor
+newpath (\\Rightarrow x = 2,\\ y = 1) sptx 14 add spty 8 sub << /Size 24 /Seed 37 >> mkpath
+<< /Width 1.4 >> dcchalk
+
+% a sum's terms grouped by a brace drawn at a slant, as a hurried hand does
+/spo2 << /Size 28 /Seed 38 /Slope 0 >> def
+/spx2 120 def /spy2 150 def
+(S = 1 + 2 + 3 + \\cdots + 99 + 100) spx2 spy2 spo2 spchalk
+/spd (S = ) spo2 spw spx2 add def
+/spe (S = 1 + 2 + 3 + \\cdots + 99 + 100) spo2 spw spx2 add def
+/pink dcchalkcolor
+newpath spd spy2 14 sub spe spy2 10 sub << /Size 28 /Seed 39 /Irregular 2 >> mkbrace
+/spty exch def /sptx exch def << /Width 1.3 >> dcchalk
+(100 \\text{ terms}) sptx spty false spbracelabel
+/white dcchalkcolor
+newpath (S = \\frac{100 \\cdot 101}{2} = 5050) 620 150 << /Size 28 /Seed 40 >> mkpath
+<< /Width 1.5 >> dcchalk
+
+showpage

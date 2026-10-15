@@ -548,7 +548,7 @@ fn ghostscript_accepts_a_packed_value_procedure() {
         eprintln!("skipping gs packing check: gs not installed");
         return;
     }
-    let dir = std::env::temp_dir().join(format!("pscat-drycharcoal-pack-{}", std::process::id()));
+    let dir = common::scratch_dir("pscat-drycharcoal-pack");
     std::fs::create_dir_all(&dir).unwrap();
     let ps = dir.join("packed.ps");
     std::fs::write(
@@ -626,7 +626,7 @@ fn ghostscript_agrees_on_a_hatched_region() {
             .collect();
         blocks(&rgb)
     };
-    let dir = std::env::temp_dir().join(format!("pscat-drycharcoal-gs-{}", std::process::id()));
+    let dir = common::scratch_dir("pscat-drycharcoal-gs");
     std::fs::create_dir_all(&dir).expect("temp dir");
     let file = dir.join("hatch.ps");
     let png = dir.join("hatch.png");

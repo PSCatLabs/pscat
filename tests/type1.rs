@@ -10,6 +10,8 @@ use std::process::Command;
 
 use pscat::{Interp, Value};
 
+mod common;
+
 // --- Type 1 encryption (the inverse of src/file.rs's decoders) ---------
 
 fn crypt_step(p: u8, r: &mut u16) -> u8 {
@@ -294,7 +296,7 @@ fn ghostscript_accepts_the_same_bytes() {
         eprintln!("skipping gs cross-check: ghostscript not installed");
         return;
     }
-    let dir = std::env::temp_dir();
+    let dir = common::scratch_dir("pscat_minisquare");
     let pfa_path = dir.join("pscat_minisquare.pfa");
     std::fs::write(&pfa_path, mini_font()).expect("write pfa");
     let script = format!(

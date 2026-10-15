@@ -301,13 +301,31 @@ replaces the clip, so the batch's own clip is not applied twice), then the
 record's colour and CTM. A batch that ends still under a clip it made
 renders in the state it opened in, so strokes made before that clip stay
 whole. The shadows install only when all nine names resolve to systemdict
-(a caller's own `gsave` in userdict leaves the old rule). A procedure bound
+(a caller's own `gsave` in userdict leaves the old rule). Where the
+interpreter has Level 3's `cliprestore` (Ghostscript, and pscat since
+#494) it is a tenth shadow: it gives back a clip drykit
+never saw, so it marks the batch dirty (#454; `clipsave` changes nothing and
+is not shadowed). A procedure bound
 before the batch reaches the operators directly, so drykit sees neither its
 clips nor its restores: a callback that clips and strokes inside a bound
 `gsave ... exec ... grestore` wrapper leaves the batch's later strokes under
 that clip (a callback that clips but makes no stroke is harmless, since the
-capture is lazy). `dkclip` inside such callbacks works; #459 tracks
-noticing the restore. Two overlapping regions hatched
+capture is lazy). Standard PostScript has no exact way to see that restore
+(#459, closed as a documented limit). pscat has one (#488): `gstate
+.sameclip bool`, a pscat-only operator, is true when the clip in force is
+the very chain the gstate holds. In a batch, `dkstroke` asks it of the
+current capture and takes a new one when it says false, so in pscat the
+bound wrapper is exact, and so is any later clip change, bound or not,
+once a plain clip made in the batch has been captured (a bound clip before
+that, with `/pc` still null, is still not kept); drykit probes for it at load (`dkPsameok`), so under
+Ghostscript, which lacks it, the limit stands
+(`notes/488-sameclip.md`). For programs that must draw the same in both
+there are three workarounds, each byte-identical to drawing at once: use
+`dkclip` inside the callback, call the bound wrapper inside a `gsave ...
+grestore` the batch sees, or bind the wrapper inside the batch, where
+`gsave` and `grestore` are the shadows
+(`notes/459-bound-wrapper-grestore.md`).
+Two overlapping regions hatched
 under plain clips in one batch take the same 6 catches as the same regions
 in `dkclip` calls (96 with a fresh gstate per stroke), and render
 byte-identically to them (`notes/444-plain-clip-in-a-batch.md`).

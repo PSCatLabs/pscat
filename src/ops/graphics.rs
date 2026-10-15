@@ -61,6 +61,9 @@ pub fn install(dict: &mut Dict) {
     op(dict, "currentalpha", currentalpha);
     op(dict, "setblendmode", setblendmode);
     op(dict, "currentblendmode", currentblendmode);
+    // pscat extension (issue #488): a clip identity query, dot-named as
+    // non-standard; lib/drykit.ps probes it with `where`.
+    op(dict, ".sameclip", sameclip);
     // Rectangle conveniences (Level 2)
     op(dict, "rectfill", rectfill);
     op(dict, "rectstroke", rectstroke);
@@ -70,6 +73,9 @@ pub fn install(dict: &mut Dict) {
     op(dict, "eoclip", eoclip);
     op(dict, "clippath", clippath);
     op(dict, "initclip", initclip);
+    // Level 3 (#494)
+    op(dict, "clipsave", clipsave);
+    op(dict, "cliprestore", cliprestore);
     op(dict, "pathbbox", pathbbox);
     op(dict, "pathforall", pathforall);
     op(dict, "flattenpath", flattenpath);
@@ -332,6 +338,24 @@ fn setgstate(it: &mut Interp) -> Result<(), PsError> {
         return Err(PsError::Typecheck);
     };
     *it.gfx.state_mut() = g.borrow().clone();
+    Ok(())
+}
+
+/// `gstate .sameclip bool` (pscat extension, #488; not a PLRM operator
+/// and absent from Ghostscript): true when the clip in force is the very
+/// clip the gstate holds -- both none, or the same clip chain. Identity,
+/// not geometry: `gsave`/`grestore`, `setgstate` and `save`/`restore`
+/// keep it; any `clip`, `eoclip`, `rectclip` or `initclip` after a clip
+/// breaks it, even one with an identical path. `lib/drykit.ps` uses it
+/// to see a `grestore` it has no shadow for (a bound wrapper's).
+fn sameclip(it: &mut Interp) -> Result<(), PsError> {
+    let obj = it.pop()?;
+    let Value::GState(g) = &obj.value else {
+        it.push(obj);
+        return Err(PsError::Typecheck);
+    };
+    let same = it.gfx.state().same_clip(&g.borrow());
+    it.push(Object::bool(same));
     Ok(())
 }
 
@@ -640,6 +664,22 @@ fn clippath(it: &mut Interp) -> Result<(), PsError> {
 
 fn initclip(it: &mut Interp) -> Result<(), PsError> {
     it.gfx.initclip();
+    Ok(())
+}
+
+/// `- clipsave -` (Level 3, #494): save the clip in force on this `gsave`
+/// level's clip stack.
+fn clipsave(it: &mut Interp) -> Result<(), PsError> {
+    it.gfx.clipsave();
+    Ok(())
+}
+
+/// `- cliprestore -` (Level 3, #494): put back the clip the newest
+/// `clipsave` at this `gsave` level saved; with none, the clip the level
+/// started with (no clip at the top level). Semantics pinned against
+/// Ghostscript 10.07.1 (`notes/494-clipsave-cliprestore.md`).
+fn cliprestore(it: &mut Interp) -> Result<(), PsError> {
+    it.do_cliprestore();
     Ok(())
 }
 

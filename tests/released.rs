@@ -8,6 +8,8 @@
 //! stream and the dictionary stack come out untouched, and (locally, with gs
 //! installed) that Ghostscript draws the specimen.
 
+mod common;
+
 use pscat::Interp;
 
 const LIBS: [&str; 6] = [
@@ -161,7 +163,7 @@ fn a_copy_whitens_the_paper_and_the_type_gets_fatter() {
     // /Copies 0 is the plain page, pixel for pixel
     assert_eq!(differing(&c0, &typed("/Copies 0")), 0);
     // rel-page sets the type's copies for its content
-    let through = rel_page(TYPED, "/Generation 3 /Speckle 0");
+    let through = rel_page(TYPED, "/Generation 3 /Speckle 0 /Haze 0");
     let by_hand = page(
         "<< /Text (Dear Sir, the file is closed.) /Width 300 /Height 200 /Margin 30 \
          /Machine 4 /Seed 3 /Copies 3 >> tw-type",
@@ -174,6 +176,70 @@ fn a_copy_whitens_the_paper_and_the_type_gets_fatter() {
         "{} against {} dark pixels",
         ink(&through),
         ink(&by_hand)
+    );
+}
+
+/// The paper of a copy: the median of a page with no type on it.
+fn median(p: &[u8]) -> u8 {
+    let mut v = p.to_vec();
+    v.sort_unstable();
+    v[v.len() / 2]
+}
+
+#[test]
+fn a_copy_keeps_a_grey_haze_and_a_grain_unless_haze_is_zero() {
+    // issue #466: a copy's paper is not flat white
+    let blank = |opts: &str| rel_page("{ }", opts);
+    let white = blank("/Generation 1 /Haze 0");
+    assert!(median(&white) >= 250, "/Haze 0 is the plain white copy");
+    let (mid, high) = (blank("/Generation 1"), blank("/Generation 1 /Haze 1"));
+    // the default is T14's tone, about 0.9
+    assert!(
+        (215..=240).contains(&median(&mid)),
+        "the default copy paper is a light grey: {}",
+        median(&mid)
+    );
+    assert!(mean(&white) > mean(&mid) + 8.0 && mean(&mid) > mean(&high) + 3.0);
+    // it has a grain and a mottle: the paper is not one value
+    let m = median(&mid);
+    let lo = mid.iter().filter(|&&v| v < m - 2).count();
+    let hi = mid.iter().filter(|&&v| v > m + 2).count();
+    assert!(
+        lo > 500 && hi > 500,
+        "the grey varies: {lo} darker, {hi} lighter"
+    );
+    // an original has no haze: the key does nothing without a generation
+    assert_eq!(differing(&blank("/Haze 1"), &blank("")), 0);
+    // another seed moves it
+    let other = page("{ } << /Width 300 /Height 200 /Seed 8 /Generation 1 >> rel-page");
+    assert!(differing(&mid, &other) > 500);
+}
+
+#[test]
+fn the_haze_grain_does_not_cover_a_punch_hole() {
+    // one hole at (34, 100) on the 300 x 200 sheet, radius 8.5 (the copy
+    // chain may move it by up to 3.2pt): the lid shows through it, near black on a copy (0.1), and the grain must stay off it.
+    // Rendered at 4 pixels to the point: at one the flecks average away.
+    let mut it = Interp::with_page_scaled(W, H, 4.0).expect("page");
+    load(&mut it);
+    it.run_str(&format!(
+        "1 setgray clippath fill {{ }} << {SHEET} /Generation 1 /Punch 1 >> rel-page"
+    ))
+    .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+    let p = lum(&it);
+    let w = (W * 4) as usize;
+    let mut brightest = 0u8;
+    for dy in -20i32..=20 {
+        for dx in -20i32..=20 {
+            if dx * dx + dy * dy <= 20 * 20 {
+                let (x, y) = ((34 * 4 + dx) as usize, (100 * 4 + dy) as usize);
+                brightest = brightest.max(p[y * w + x]);
+            }
+        }
+    }
+    assert!(
+        brightest < 60,
+        "a fleck of paper grey inside the hole: {brightest}"
     );
 }
 
@@ -430,7 +496,7 @@ fn ghostscript_draws_the_specimen_the_way_pscat_does() {
         eprintln!("skipping gs released check: gs not installed");
         return;
     }
-    let dir = std::env::temp_dir().join(format!("pscat-released-{}", std::process::id()));
+    let dir = common::scratch_dir("pscat-released");
     std::fs::create_dir_all(&dir).unwrap();
     let png = dir.join("gs.png");
     let status = std::process::Command::new("gs")

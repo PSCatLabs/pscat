@@ -1313,6 +1313,7 @@ impl Interp {
 
     pub(crate) fn do_save(&mut self) -> Object {
         let (gfx_depth, gfx_state) = self.gfx.glyph_snapshot();
+        self.gfx.clear_clip_stack();
         let handle = Rc::new(SaveHandle {
             valid: Cell::new(true),
         });
@@ -1379,6 +1380,19 @@ impl Interp {
             }
             None => self.gfx.grestore_all_bottom(),
         }
+        // gs's grestoreall ends in a fresh gsave level, so no clipsave
+        // entries survive it (#494).
+        self.gfx.clear_clip_stack();
+    }
+
+    /// `cliprestore` (#494): this needs the innermost save's snapshot,
+    /// the clip a level opened by `save` started with.
+    pub(crate) fn do_cliprestore(&mut self) {
+        let boundary = self
+            .save_stack
+            .last()
+            .map(|rec| (rec.gfx_depth, &*rec.gfx_state));
+        self.gfx.cliprestore(boundary);
     }
 
     pub fn operand_stack(&self) -> &[Object] {

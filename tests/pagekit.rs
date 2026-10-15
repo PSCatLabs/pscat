@@ -13,6 +13,8 @@
 
 use pscat::Interp;
 
+mod common;
+
 fn load(it: &mut Interp) {
     for path in ["lib/artkit.ps", "lib/pagekit.ps"] {
         let src = std::fs::read(path).unwrap_or_else(|e| panic!("{path}: {e}"));
@@ -233,7 +235,7 @@ fn ghostscript_accepts_pagekit() {
         .map(|(_, call)| format!("{call} pop"))
         .collect::<Vec<_>>()
         .join(" ");
-    let dir = std::env::temp_dir().join(format!("pscat-pagekit-{}", std::process::id()));
+    let dir = common::scratch_dir("pscat-pagekit");
     std::fs::create_dir_all(&dir).expect("temp dir");
     let combined = dir.join("pagekit_gs.ps");
     std::fs::write(

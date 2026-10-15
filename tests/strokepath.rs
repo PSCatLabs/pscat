@@ -14,6 +14,8 @@ use std::process::Command;
 use pscat::Interp;
 use tiny_skia::Pixmap;
 
+mod common;
+
 const SIZE: u32 = 400;
 
 fn eval(src: &str) -> Vec<String> {
@@ -50,16 +52,9 @@ fn gs_available() -> bool {
         .is_ok_and(|o| o.status.success())
 }
 
-/// A scratch path unique per call: the tests run in parallel threads of
-/// one process, so the pid alone would collide.
+/// A scratch path unique per call, in this process and any other.
 fn scratch(name: &str) -> std::path::PathBuf {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    static NEXT: AtomicUsize = AtomicUsize::new(0);
-    let n = NEXT.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!(
-        "pscat_strokepath_{}_{n}_{name}",
-        std::process::id()
-    ))
+    common::scratch_dir("pscat_strokepath").join(name)
 }
 
 fn gs_bbox(src: &str) -> Option<[f64; 4]> {

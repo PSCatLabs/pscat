@@ -17,6 +17,8 @@ use std::process::Command;
 use pscat::Interp;
 use tiny_skia::Pixmap;
 
+mod common;
+
 const SIZE: u32 = 500;
 const BLOCK: u32 = 10;
 const BASE: &str = "https://raw.githubusercontent.com/ArtifexSoftware/ghostpdl/master/examples";
@@ -76,7 +78,7 @@ fn render_pscat(src: &[u8]) -> Result<Pixmap, String> {
 }
 
 fn render_gs(name: &str) -> Pixmap {
-    let out = std::env::temp_dir().join(format!("pscat_corpus_{}.png", name.replace('.', "_")));
+    let out = common::scratch_dir("pscat_corpus").join(format!("{}.png", name.replace('.', "_")));
     let status = Command::new("gs")
         .args([
             "-q",

@@ -719,7 +719,7 @@ fn ghostscript_accepts_paintkit() {
             << /Width 12 /Pressure { pkbell } /StartCap /pointed /EndCap /pointed >> pkribbon \
         newpath 220 40 moveto 280 40 lineto << /Width 8 /Jitter 3 >> pkribbon \
         newpath 300 30 moveto << /Width 10 >> pkribbon";
-    let dir = std::env::temp_dir().join(format!("pscat-paintkit-{}", std::process::id()));
+    let dir = common::scratch_dir("pscat-paintkit");
     std::fs::create_dir_all(&dir).expect("temp dir");
     let combined = dir.join("paintkit_gs.ps");
     std::fs::write(
@@ -1158,7 +1158,7 @@ fn ghostscript_accepts_paintkit_nib() {
             << /Width 10 /Angle 30 /StartTaper 0.2 /EndTaper 0.2 \
                /Pressure { pkbell } /Jitter 2 >> pknib \
         newpath 300 30 moveto << /Width 10 /Angle 20 >> pknib";
-    let dir = std::env::temp_dir().join(format!("pscat-paintkit-nib-{}", std::process::id()));
+    let dir = common::scratch_dir("pscat-paintkit-nib");
     std::fs::create_dir_all(&dir).expect("temp dir");
     let combined = dir.join("paintkit_nib_gs.ps");
     std::fs::write(
@@ -1801,7 +1801,7 @@ fn ghostscript_accepts_paintkit_dry() {
         newpath 220 10 moveto 240 60 260 60 280 10 curveto \
             << /Width 10 /Bristles 12 /Jitter 1.5 >> pkdry \
         newpath 300 30 moveto << /Width 10 /Bristles 10 >> pkdry";
-    let dir = std::env::temp_dir().join(format!("pscat-paintkit-dry-{}", std::process::id()));
+    let dir = common::scratch_dir("pscat-paintkit-dry");
     std::fs::create_dir_all(&dir).expect("temp dir");
     let combined = dir.join("paintkit_dry_gs.ps");
     std::fs::write(
@@ -2337,7 +2337,7 @@ fn ghostscript_accepts_paintkit_spray() {
         newpath 220 10 moveto 240 60 260 60 280 10 curveto \
             << /Nozzle 12 /Density 24 /StartBurst 1 >> pkspray \
         newpath 300 30 moveto << /Nozzle 10 /Density 18 >> pkspray";
-    let dir = std::env::temp_dir().join(format!("pscat-paintkit-spray-{}", std::process::id()));
+    let dir = common::scratch_dir("pscat-paintkit-spray");
     std::fs::create_dir_all(&dir).expect("temp dir");
     let combined = dir.join("paintkit_spray_gs.ps");
     std::fs::write(
@@ -2653,7 +2653,7 @@ fn ghostscript_accepts_oil_pressure() {
     let src = "(lib/artkit.ps) run (lib/paintkit.ps) run 1 1 1 setrgbcolor clippath fill \
         0.8 0.2 0.1 setrgbcolor 7 srand newpath 20 60 moveto 220 60 lineto \
         << /Width 30 /Pitch 4 /Pressure { pkbell } >> pkoil showpage";
-    let dir = std::env::temp_dir().join("pscat_oil_pressure_gs.ps");
+    let dir = common::scratch_dir("pscat_oil_pressure_gs").join("oil.ps");
     std::fs::write(&dir, src).unwrap();
     let out = std::process::Command::new("gs")
         .args([
@@ -3092,7 +3092,7 @@ fn ghostscript_accepts_paintkit_wash_via_the_fallback() {
         0.8 0.3 0.2 setrgbcolor \
         newpath 160 100 50 0 360 arc closepath \
         << /Alpha 0.3 /Layers 2 /Wet 5 /Blend /Multiply /Seed 4 >> pkwash";
-    let dir = std::env::temp_dir().join(format!("pscat-paintkit-wash-{}", std::process::id()));
+    let dir = common::scratch_dir("pscat-paintkit-wash");
     std::fs::create_dir_all(&dir).expect("temp dir");
     let combined = dir.join("paintkit_wash_gs.ps");
     std::fs::write(
@@ -7239,6 +7239,46 @@ fn wet_directional_default_depth_keeps_the_steps_fine() {
     assert_eq!(passes("/Offset 22"), "4");
 }
 
+/// The explicit directional /Layers cap is 32 (issue #417: it was 16), so a
+/// pull can ask for 1pt steps over a long /Offset; the *default* depth stays
+/// capped at 16, which is what keeps every existing pull drawing as before.
+#[test]
+fn wet_directional_layers_cap_is_32_and_the_default_depth_is_unchanged() {
+    let passes = |opts: &str| {
+        let mut it = fresh(200, 120);
+        it.run_str(&format!(
+            "0 0 0 setrgbcolor 5 srand /n 0 def {{ /n n 1 add def }} << {opts} >> pkwet n"
+        ))
+        .unwrap_or_else(|e| panic!("{opts}: {}", it.error_report(&e)));
+        it.operand_stack().last().expect("n").repr().to_string()
+    };
+    assert_eq!(
+        passes("/Direction 270 /OneSided true /Offset 28 /Layers 29"),
+        "29"
+    );
+    assert_eq!(passes("/Direction 270 /Offset 28 /Layers 32"), "32");
+    // the default is untouched: a 28pt one-sided pull is 15 deep, and no
+    // /Offset takes it past 16
+    assert_eq!(passes("/Direction 270 /OneSided true /Offset 28"), "15");
+    assert_eq!(passes("/Direction 270 /Offset 500"), "16");
+    // 33 is past the cap, and the isotropic cap is still 6
+    let mut it = fresh(200, 120);
+    it.run_str("{ } << /Direction 270 /Layers 33 >> pkwet")
+        .expect_err("33 layers must be rejected");
+    let mut it = fresh(200, 120);
+    it.run_str("{ } << /Layers 17 >> pkwet")
+        .expect_err("17 isotropic layers must be rejected");
+    // a 32-layer pull grazed twice is exactly the 64-run budget
+    let mut it = fresh(200, 120);
+    it.run_str(
+        "/n 0 def \
+         { { /n n 1 add def } << /Direction 270 /Layers 32 >> pkwet } \
+         << /Direction 0 /Layers 2 >> pkwet n",
+    )
+    .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+    assert_eq!(it.operand_stack().last().expect("n").repr(), "64");
+}
+
 /// The step that reads as an echo is between neighbours on the *same
 /// side*, and a two-sided sweep alternates sides -- so its default depth
 /// has to be twice as fine (Codex review, round 2: /Offset 12 at 7
@@ -8209,6 +8249,712 @@ fn ghostscript_accepts_paintkit_wet_under_demo() {
         "gs rejected examples/paintkit_wet_under_demo.ps: {}",
         String::from_utf8_lossy(&out.stdout)
     );
+}
+
+// --- pkwet: /PerFill, the backdrop asked at each loaded fill (issue #403) -
+//
+// `/PerFill true` (with a procedural /Under and /At) asks the /Under
+// procedure again at every loaded-colour fill's own position, instead of
+// mixing every fill toward the one answer its pass got. What has to hold:
+// without it nothing moves (the byte-identity half is
+// scripts/identity_check.sh), over a backdrop that never changes it draws what
+// per pass draws, over a gradient it leaves a smaller rim on a mark made of
+// many fills, the procedure is asked in the call's own user space, and a bad
+// answer is a named error that leaves pkwet usable.
+
+/// A column of twelve short loaded strokes stacked 9pt apart (y 25..124) over
+/// the 300x150 gradient of `graded_cloud`, softened with `under_opts`: a mark
+/// that is tall against the backdrop and made of many fills, which is what
+/// asking per fill can reach and /Bands pays a cell grid for.
+fn loaded_column(under_opts: &str) -> Interp {
+    let mut it = fresh(300, 150);
+    it.run_str(&format!(
+        "/skyat {{ 150 div 0 max 1 min /skt exch def \
+           [ 0.98 0.86 0.68 ] [ 0.06 0.16 0.50 ] skt mix3 }} def \
+         0 1 149 {{ /gy exch def gy skyat setrgbcolor \
+           newpath 0 gy moveto 300 gy lineto 300 gy 2 add lineto 0 gy 2 add lineto \
+           closepath fill }} for \
+         41 srand \
+         {{ 0 1 11 {{ 9 mul 25 add /ly exch def \
+              newpath 130 ly moveto 170 ly lineto \
+              << /Width 10 /Charge 1 /Depletion 0 /Edge 0 /ColorJitter 0 \
+                 /Colors [[0.99 0.98 0.97]] >> pkbroad }} for }} \
+         << /Soft 1 /Offset 34 /Layers 6 {under_opts} >> pkwet"
+    ))
+    .unwrap_or_else(|e| panic!("{under_opts}: {}", it.error_report(&e)));
+    it
+}
+
+/// The acceptance criterion: on a tall mark made of many loaded fills over
+/// a strong gradient, asking per fill leaves a smaller rim than the one
+/// backdrop per pass (#179) and than 8 rows of bands (#359), at six runs of
+/// the mark against /Bands' 41. Measured when this was written, rows 15..135
+/// of `loaded_column`: per pass 384.4, 1x4 bands 195.6, 1x8 bands 116.9, per
+/// fill 81.2 (4.7x less than per pass).
+#[test]
+fn wet_perfill_removes_more_of_the_rim_than_per_pass_or_bands() {
+    let per_pass = loaded_column(&format!("/At [ 150 75 ] /Under {SKY_FN}"));
+    let per_fill = loaded_column(&format!("/At [ 150 75 ] /Under {SKY_FN} /PerFill true"));
+    let banded = loaded_column(&format!(
+        "/Box [ 130 20 40 110 ] /Bands [ 1 8 ] /Under {SKY_FN}"
+    ));
+    let (p, f, b) = (
+        rim_residual(&per_pass, 15..135),
+        rim_residual(&per_fill, 15..135),
+        rim_residual(&banded, 15..135),
+    );
+    assert!(p > 3.0 * f, "per pass {p:.1}, per fill {f:.1}");
+    assert!(b > 1.2 * f, "8 bands {b:.1}, per fill {f:.1}");
+}
+
+/// Over a backdrop that never changes, asking per fill is asking per pass:
+/// the same render to the byte, for each loaded preset, and for an
+/// inherited-colour mark too (which has no per-fill site, so /PerFill does
+/// nothing to it).
+#[test]
+fn wet_perfill_over_a_constant_backdrop_matches_per_pass() {
+    for (preset, base) in LOAD_PRESETS {
+        let run = |opts: &str| {
+            let it = wet_loaded(
+                "0 0 0 setrgbcolor",
+                &format!(
+                    "newpath 50 160 moveto 350 160 lineto \
+                     << {base} /Colors [[1 0 0] [0 0 1]] /ColorMix 0 >> {preset}"
+                ),
+                &format!("/Direction 270 /OneSided true /Layers 3 /Offset 80 {opts}"),
+            );
+            pixels(&it)
+        };
+        assert_eq!(
+            run("/At [ 200 100 ] /Under { pop pop 0 1 0 }"),
+            run("/At [ 200 100 ] /Under { pop pop 0 1 0 } /PerFill true"),
+            "{preset}: a constant backdrop asked per fill"
+        );
+    }
+    let run = |opts: &str| {
+        let it = wet_loaded(
+            "1 0 0 setrgbcolor",
+            "newpath 50 160 moveto 350 160 lineto << /Width 20 >> pkribbon",
+            &format!("/Direction 270 /OneSided true /Layers 3 /Offset 60 /At [ 200 100 ] {opts}"),
+        );
+        pixels(&it)
+    };
+    let under = "/Under { exch pop 200 div 0 max 1 min 0 exch 0 exch }";
+    assert_eq!(
+        run(under),
+        run(&format!("{under} /PerFill true")),
+        "an inherited-colour mark is asked per pass whatever /PerFill says"
+    );
+}
+
+/// And it is really per fill: over a backdrop that changes down the page a
+/// loaded pull's fills are not the per-pass render (guards slot 9 and the
+/// per-fill read in `puwetat` against being a constant in disguise), for
+/// each preset that has a loaded colour site.
+#[test]
+fn wet_perfill_asks_each_loaded_fill_for_its_own_backdrop() {
+    for (preset, base) in LOAD_PRESETS {
+        let run = |opts: &str| {
+            let it = wet_loaded(
+                "0 0 0 setrgbcolor",
+                &format!(
+                    "newpath 200 190 moveto 200 30 lineto \
+                     << {base} /Colors [[1 0 0] [0 0 1]] /ColorMix 0 >> {preset}"
+                ),
+                &format!(
+                    "/Direction 270 /OneSided true /Layers 3 /Offset 80 /At [ 200 190 ] {opts}"
+                ),
+            );
+            pixels(&it)
+        };
+        let under = "/Under { exch pop 200 div 0 max 1 min 0 exch 0 exch }";
+        let (a, b) = (run(under), run(&format!("{under} /PerFill true")));
+        let worst = a.iter().zip(&b).map(|(a, b)| a.abs_diff(*b)).max();
+        assert!(
+            worst > Some(30),
+            "{preset}: per fill must differ from per pass"
+        );
+    }
+}
+
+/// What the procedure is asked, per fill: once for each softening pass's
+/// fill (never the core), at the run's own place in the user space the call
+/// was made in, whatever the CTM there, with only x y on the stack.
+#[test]
+fn wet_perfill_is_asked_in_the_callers_user_space() {
+    for ctm in ["", "100 50 translate", "100 50 translate 90 rotate"] {
+        let mut it = fresh(300, 300);
+        it.run_str(&format!(
+            "userdict /asked [ ] put userdict /depths [ ] put 3 srand {ctm} \
+             {{ newpath 20 50 moveto 60 50 lineto \
+                << /Width 6 /Charge 1 /Depletion 0 /Edge 0 /ColorJitter 0 \
+                   /Colors [[1 0 0]] >> pkbroad }} \
+             << /Direction 270 /OneSided true /Offset 12 /Layers 3 /At [ 5 150 ] /PerFill true \
+                /Under {{ count /c exch def /y exch def /x exch def \
+                         y 100 lt {{ userdict /asked [ asked aload pop x y ] put \
+                                    userdict /depths [ depths aload pop c ] put }} if \
+                         0.5 0.5 0.5 }} >> pkwet \
+             asked aload pop depths aload pop count"
+        ))
+        .unwrap_or_else(|e| panic!("{ctm}: {}", it.error_report(&e)));
+        let st: Vec<f64> = it
+            .operand_stack()
+            .iter()
+            .map(|o| o.repr().to_string().parse().expect("number"))
+            .collect();
+        // Every ask's x y, then each ask's stack count, then this probe's count
+        // (a stroke is several runs, and each is a fill).
+        let n = (st.len() - 1) / 3;
+        assert!(n >= 2 && st.len() == 3 * n + 1, "{ctm}: {st:?}");
+        let (xy, counts) = st[..3 * n].split_at(2 * n);
+        assert!(
+            xy.chunks(2).all(|p| (p[0] - 40.0).abs() < 8.0),
+            "{ctm}: {st:?}"
+        );
+        assert!(counts.iter().all(|c| *c == 2.0), "{ctm}: only x y: {st:?}");
+        // Two softening passes (Layers 3) and no core: two displaced rows.
+        let mut ys: Vec<f64> = xy.chunks(2).map(|p| p[1]).collect();
+        ys.dedup_by(|a, b| (*a - *b).abs() < 0.01);
+        ys.sort_by(f64::total_cmp);
+        ys.dedup_by(|a, b| (*a - *b).abs() < 0.01);
+        assert_eq!(ys.len(), 2, "{ctm}: {ys:?}");
+        assert!(
+            (ys[0] - 38.0).abs() < 0.01 && (ys[1] - 44.0).abs() < 0.01,
+            "{ctm}: displaced by each pass, in the call's space: {ys:?}"
+        );
+    }
+}
+
+/// `pkdab` resolves a loaded colour per dab, at the dab's centre, and is
+/// asked there like the strokes are: the same render over a constant
+/// backdrop, a different one over a gradient.
+#[test]
+fn wet_perfill_reaches_the_dabs_of_pkdab() {
+    let run = |opts: &str| {
+        let it = wet_loaded(
+            "0 0 0 setrgbcolor",
+            "newpath 200 190 moveto 200 30 lineto \
+             << /Size 8 /Scatter 20 /ColorJitter 0 /Colors [[1 0 0] [0 0 1]] >> pkdab",
+            &format!("/Direction 270 /OneSided true /Layers 3 /Offset 80 /At [ 200 190 ] {opts}"),
+        );
+        pixels(&it)
+    };
+    let flat = "/Under { pop pop 0 1 0 }";
+    assert_eq!(run(flat), run(&format!("{flat} /PerFill true")));
+    let ramp = "/Under { exch pop 200 div 0 max 1 min 0 exch 0 exch }";
+    let (a, b) = (run(ramp), run(&format!("{ramp} /PerFill true")));
+    let worst = a.iter().zip(&b).map(|(a, b)| a.abs_diff(*b)).max();
+    assert!(
+        worst > Some(30),
+        "pkdab: per fill must differ from per pass"
+    );
+}
+
+/// A single-layer call has only the core, which has no backdrop: nothing is
+/// asked, per fill included.
+#[test]
+fn wet_perfill_at_soft_zero_asks_nothing() {
+    let mut it = fresh(200, 200);
+    it.run_str(
+        "userdict /n 0 put \
+         { newpath 20 50 moveto 60 50 lineto \
+           << /Width 6 /Colors [[1 0 0]] >> pkbroad } \
+         << /Soft 0 /At [ 5 150 ] /PerFill true \
+            /Under { userdict /n n 1 add put 0 0 0 } >> pkwet n",
+    )
+    .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+    assert_eq!(it.operand_stack().last().expect("n").repr(), "0");
+}
+
+/// Two nested /PerFill calls each ask their own procedure, in their own
+/// user space: the inner one is called after a translate, so the same fill
+/// is 50pt to the right in the outer's.
+#[test]
+fn wet_perfill_nests_each_asked_in_its_own_space() {
+    let mut it = fresh(300, 200);
+    it.run_str(
+        "userdict /outer [ ] put userdict /inner [ ] put 3 srand \
+         { 50 0 translate \
+           { newpath 20 50 moveto 60 50 lineto \
+             << /Width 6 /Charge 1 /Depletion 0 /Edge 0 /ColorJitter 0 \
+                /Colors [[1 0 0]] >> pkbroad } \
+           << /Direction 270 /OneSided true /Offset 6 /Layers 2 /At [ 5 150 ] /PerFill true \
+              /Under { /y exch def /x exch def \
+                       y 100 lt { userdict /inner [ inner aload pop x ] put } if \
+                       0 0.5 0 } >> pkwet } \
+         << /Direction 270 /OneSided true /Offset 6 /Layers 2 /At [ 5 150 ] /PerFill true \
+            /Under { /y exch def /x exch def \
+                     y 100 lt { userdict /outer [ outer aload pop x ] put } if \
+                     0 0 0.5 } >> pkwet \
+         pqdepth outer aload pop inner aload pop count",
+    )
+    .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+    let st: Vec<f64> = it
+        .operand_stack()
+        .iter()
+        .map(|o| o.repr().to_string().parse().expect("number"))
+        .collect();
+    let (&n, rest) = st.split_last().expect("count");
+    assert_eq!(n as usize, st.len() - 1, "{st:?}");
+    assert_eq!(rest[0], 0.0, "depth back to 0");
+    let xs = &rest[1..];
+    assert!(xs.len() >= 2, "both asked: {st:?}");
+    // The outer's asks are all near x = 90 and the inner's near 40, as many
+    // of each: the outer is asked for every fill of both of the inner's
+    // passes while its own pass softens, the inner for its soft pass's fills
+    // in each of the outer's two.
+    let (hi, lo): (Vec<f64>, Vec<f64>) = xs.iter().partition(|x| **x > 70.0);
+    assert!(!hi.is_empty() && !lo.is_empty(), "{xs:?}");
+    assert!(hi.iter().all(|x| (x - 90.0).abs() < 12.0), "outer: {hi:?}");
+    assert!(lo.iter().all(|x| (x - 40.0).abs() < 12.0), "inner: {lo:?}");
+    assert_eq!(hi.len(), lo.len(), "outer {hi:?}, inner {lo:?}");
+}
+
+/// Every malformed per-fill answer is a named error, from inside the pass,
+/// and the depth counter is where it was, at one level and in a nest.
+#[test]
+fn wet_perfill_unwinds_on_a_bad_answer() {
+    // Fine at /At (y 150 and up) and wrong at the fills (y near 50).
+    let under =
+        |bad: &str| format!("/Under {{ exch pop 100 gt {{ 0.5 0.5 0.5 }} {{ {bad} }} ifelse }}");
+    for (bad, want) in [
+        ("1 2", "pkwet-under-procedure-must-return-3-numbers"),
+        ("1 2 3 4", "pkwet-under-procedure-must-return-3-numbers"),
+        ("(a) 0 0", "pkwet-under-procedure-results-must-be-numbers"),
+        ("0 -0.1 0", "pkwet-under-procedure-results-must-be-0-to-1"),
+        ("0 0 1.5", "pkwet-under-procedure-results-must-be-0-to-1"),
+    ] {
+        let mark = "{ newpath 20 50 moveto 60 50 lineto \
+                      << /Width 6 /Colors [[1 0 0]] >> pkbroad }";
+        let opts = format!("/Soft 1 /At [ 5 150 ] /PerFill true {}", under(bad));
+        let mut it = fresh(200, 200);
+        let e = it
+            .run_str(&format!("{mark} << {opts} >> pkwet"))
+            .unwrap_err();
+        let report = it.error_report(&e).to_string();
+        assert!(report.contains(want), "{bad}: wanted {want}, got {report}");
+        // Caught, at one level and from the inner of a nest: the depth is 0
+        // and the next call paints.
+        for wrapped in [
+            format!("{{ {mark} << {opts} >> pkwet }}"),
+            format!("{{ {{ {mark} << {opts} >> pkwet }} << /Soft 1 >> pkwet }}"),
+        ] {
+            let mut it = fresh(200, 200);
+            it.run_str(&format!(
+                "0 0 0 setrgbcolor 5 srand {wrapped} stopped pop pqdepth \
+                 {mark} << /Soft 1 /At [ 5 150 ] /Under {{ pop pop 0 0 0 }} /PerFill true >> pkwet"
+            ))
+            .unwrap_or_else(|e| panic!("{bad}: {}", it.error_report(&e)));
+            assert_eq!(
+                it.operand_stack().last().expect("depth").repr(),
+                "0",
+                "{bad}"
+            );
+            assert!(ink_count(&it) > 100, "{bad}: the next call painted nothing");
+        }
+    }
+}
+
+/// /PerFill is a flag that means nothing without a procedural /Under, and
+/// nothing beside /Box: each is a named error and unwinds.
+#[test]
+fn wet_perfill_rejects_what_it_cannot_mean() {
+    let m = "{ newpath 10 10 moveto 100 10 lineto << /Width 10 >> pkribbon }";
+    for (opts, want) in [
+        (
+            "/Under [ 0 0 0 ] /PerFill true",
+            "pkwet-perfill-needs-an-under-procedure",
+        ),
+        (
+            "/Under [ 0 0 0 ] /PerFill false",
+            "pkwet-perfill-needs-an-under-procedure",
+        ),
+        (
+            "/Under { pop pop 0 0 0 } /At [ 0 0 ] /PerFill 1",
+            "pkwet-perfill-must-be-a-boolean",
+        ),
+        (
+            "/Under { pop pop 0 0 0 } /At [ 0 0 ] /PerFill { true }",
+            "pkwet-perfill-must-not-be-a-procedure",
+        ),
+        (
+            "/Under { pop pop 0 0 0 } /Box [ 0 0 9 9 ] /Bands [ 1 2 ] /PerFill true",
+            "pkwet-perfill-and-box-are-exclusive",
+        ),
+    ] {
+        let mut it = fresh(120, 120);
+        let e = it
+            .run_str(&format!("{m} << /Soft 1 {opts} >> pkwet"))
+            .unwrap_err();
+        let report = it.error_report(&e).to_string();
+        assert!(report.contains(want), "{opts}: wanted {want}, got {report}");
+        let mut it = fresh(120, 120);
+        it.run_str(&format!(
+            "0 0 0 setrgbcolor 5 srand {{ {m} << /Soft 1 {opts} >> pkwet }} stopped pop \
+             pqdepth"
+        ))
+        .unwrap_or_else(|e| panic!("{opts}: {}", it.error_report(&e)));
+        assert_eq!(
+            it.operand_stack().last().expect("depth").repr(),
+            "0",
+            "{opts}"
+        );
+    }
+}
+
+// --- pkwet: /FillLength, a long loaded run cut into several fills (issue #492)
+//
+// /PerFill asks the backdrop once per inked run, so one long unbroken run (a
+// single tall pkbroad stroke) is asked once. /FillLength cuts such a run into
+// fills about that far apart, each asked at its own middle. What has to hold:
+// the cut follows a gradient the uncut run cannot, a run no longer than the
+// length is not touched at all, the random stream is the one an uncut call
+// leaves, and the key means nothing (and is an error) outside /PerFill.
+// Without the key nothing moves: the byte-identity half is
+// scripts/identity_check.sh.
+
+/// One vertical stroke of `preset` (x 150, y 20..130) over the 300x150
+/// gradient, softened with `wet`. `opts` are the preset's own keys.
+fn tall_stroke(preset: &str, opts: &str, wet: &str) -> Interp {
+    let mut it = fresh(300, 150);
+    it.run_str(&format!(
+        "/skyat {{ 150 div 0 max 1 min /skt exch def \
+           [ 0.98 0.86 0.68 ] [ 0.06 0.16 0.50 ] skt mix3 }} def \
+         0 1 149 {{ /gy exch def gy skyat setrgbcolor \
+           newpath 0 gy moveto 300 gy lineto 300 gy 2 add lineto 0 gy 2 add lineto \
+           closepath fill }} for \
+         41 srand \
+         {{ newpath 150 20 moveto 150 130 lineto \
+            << /Width 10 /Colors [[0.99 0.98 0.97]] {opts} >> {preset} }} \
+         << /Soft 1 /Offset 34 /Layers 6 /At [ 150 75 ] /Under {SKY_FN} /PerFill true \
+            {wet} >> pkwet"
+    ))
+    .unwrap_or_else(|e| panic!("{preset} {wet}: {}", it.error_report(&e)));
+    it
+}
+
+const BROAD_FLAT: &str = "/Charge 1 /Depletion 0 /Edge 0 /ColorJitter 0";
+const TROWEL_FLAT: &str = "/Coverage 1 /Scrape 0 /EdgeBuildup 0 /Jitter 0 /ColorJitter 0";
+/// A 10pt fan of 20 one-point bristles with nothing random and no flick.
+const FAN_FLAT: &str = "/Width 10 /Spread 1 /Splay 0 /Bristles 20 /BristleWidth 1 \
+     /WidthJitter 0 /Load 1 /Dropout 0 /Ragged 0 /Flick 0 /Jitter 0 /ColorJitter 0";
+
+/// The acceptance criterion: a single unbroken stroke down a vertical
+/// gradient is asked once per striation per pass by /PerFill alone, so its
+/// rim is the per-pass one; cut into 10pt fills it follows the gradient.
+/// Measured when this was written (rows 15..135): pkbroad /PerFill alone 239.6,
+/// /FillLength 10 71.6 (3.3x less); pktrowel 206.8 and 70.2 (2.9x). pkfan
+/// (`FAN_FLAT`, #497) 252.7 and 73.5 (3.4x).
+#[test]
+fn wet_filllength_makes_one_unbroken_stroke_follow_the_backdrop() {
+    for (preset, opts) in [
+        ("pkbroad", BROAD_FLAT),
+        ("pktrowel", TROWEL_FLAT),
+        ("pkfan", FAN_FLAT),
+    ] {
+        let whole = rim_residual(&tall_stroke(preset, opts, ""), 15..135);
+        let cut = rim_residual(&tall_stroke(preset, opts, "/FillLength 10"), 15..135);
+        assert!(
+            whole > 2.0 * cut,
+            "{preset}: whole {whole:.1}, cut {cut:.1}"
+        );
+    }
+}
+
+/// A length longer than the run cuts nothing, so it is the /PerFill render to
+/// the byte; so is a call with one layer, which is only a core pass. Each cut
+/// piece is also really a separate fill: the backdrop is asked more often.
+#[test]
+fn wet_filllength_leaves_a_short_run_and_a_core_pass_alone() {
+    for (preset, opts) in [
+        ("pkbroad", BROAD_FLAT),
+        ("pktrowel", TROWEL_FLAT),
+        ("pkfan", FAN_FLAT),
+    ] {
+        assert_eq!(
+            pixels(&tall_stroke(preset, opts, "")),
+            pixels(&tall_stroke(preset, opts, "/FillLength 1000")),
+            "{preset}: a length past the run's end"
+        );
+    }
+    let one = |len: &str| {
+        pixels(&tall_stroke(
+            "pkbroad",
+            BROAD_FLAT,
+            &format!("/Layers 1 {len}"),
+        ))
+    };
+    assert_eq!(
+        one(""),
+        one("/FillLength 10"),
+        "one layer is a core pass only"
+    );
+}
+
+/// How many times the backdrop procedure is asked, and what the next random
+/// draw is, after a tall stroke softened with `wet`.
+fn filllength_asks(preset: &str, opts: &str, wet: &str) -> (i64, f64) {
+    let mut it = fresh(300, 150);
+    it.run_str(&format!(
+        "userdict /asked 0 put 7 srand \
+         {{ newpath 150 20 moveto 150 130 lineto \
+            << /Width 10 /Colors [[0.9 0.9 0.9]] {opts} >> {preset} }} \
+         << /Soft 1 /Offset 20 /Layers 4 /At [ 150 75 ] /PerFill true {wet} \
+            /Under {{ pop pop userdict /asked asked 1 add put 0.5 0.5 0.5 }} >> pkwet \
+         frnd asked exch"
+    ))
+    .unwrap_or_else(|e| panic!("{preset} {wet}: {}", it.error_report(&e)));
+    let st = it.operand_stack();
+    let num = |i: usize| st[st.len() - i].repr().parse::<f64>().expect("number");
+    (num(2) as i64, num(1))
+}
+
+/// The cut draws nothing and moves no draw: the random stream after the call
+/// is the one an uncut call leaves, for a preset that jitters its edge
+/// (pkbroad /Edge, pktrowel /Jitter and its ridge), while the number of
+/// asks grows with the number of fills.
+#[test]
+fn wet_filllength_cuts_the_fill_not_the_random_stream() {
+    for (preset, opts) in [
+        (
+            "pkbroad",
+            "/Charge 1 /Depletion 0.4 /Edge 0.6 /ColorJitter 0.2",
+        ),
+        (
+            "pktrowel",
+            "/Coverage 0.9 /Scrape 0.2 /EdgeBuildup 0.5 /Jitter 0.5 /ColorJitter 0.2",
+        ),
+        // pkfan's draws: per-stop /Jitter, bristle width, length and colour,
+        // and the contact chain's /Load and /Dropout.
+        (
+            "pkfan",
+            "/Width 10 /Spread 1 /Splay 0.3 /Bristles 8 /BristleWidth 1.5 /WidthJitter 0.3 \
+             /Load 0.8 /Dropout 0.1 /Ragged 0.4 /Flick 0.5 /Jitter 0.4 /ColorJitter 0.2",
+        ),
+    ] {
+        let (asks0, next0) = filllength_asks(preset, opts, "");
+        let (asks1, next1) = filllength_asks(preset, opts, "/FillLength 12");
+        assert_eq!(next0, next1, "{preset}: the stream after the call");
+        assert!(asks1 > 2 * asks0, "{preset}: asked {asks0} then {asks1}");
+        let (asks2, _) = filllength_asks(preset, opts, "/FillLength 1000");
+        assert_eq!(asks0, asks2, "{preset}: a length past the run");
+    }
+}
+
+/// Over a backdrop that never changes the cut fills are the same colour, so
+/// cutting is invisible: pkbroad is the uncut render to the byte (the
+/// overlap between neighbours repaints the same colour), and pktrowel differs
+/// in under 0.5% of channel values, where the overlap re-blends its lane
+/// edges' antialiasing, and pkfan (#497) in about 0.05% (78 and 93 of 180000
+/// values, the second with the run's flick on: only the real end is pointed).
+#[test]
+fn wet_filllength_over_a_constant_backdrop_is_invisible() {
+    for (preset, opts) in [
+        ("pkbroad", BROAD_FLAT),
+        ("pktrowel", TROWEL_FLAT),
+        ("pkfan", FAN_FLAT),
+        // the run's own flick: only the last piece may taper to a point
+        (
+            "pkfan",
+            "/Width 10 /Bristles 20 /BristleWidth 1 /Flick 0.5 /Ragged 0 /WidthJitter 0 /Jitter 0 /ColorJitter 0 /Dropout 0 /Splay 0",
+        ),
+    ] {
+        let run = |wet: &str| {
+            let mut it = fresh(300, 150);
+            it.run_str(&format!(
+                "7 srand {{ newpath 150 20 moveto 150 130 lineto \
+                    << /Width 10 /Colors [[0.9 0.2 0.2]] {opts} >> {preset} }} \
+                 << /Soft 1 /Offset 0 /Layers 3 /At [ 150 75 ] /PerFill true {wet} \
+                    /Under {{ pop pop 0.2 0.4 0.9 }} >> pkwet"
+            ))
+            .unwrap_or_else(|e| panic!("{preset} {wet}: {}", it.error_report(&e)));
+            pixels(&it)
+        };
+        let (a, b) = (run(""), run("/FillLength 9"));
+        let off = a
+            .iter()
+            .zip(&b)
+            .filter(|(a, b)| a.abs_diff(**b) > 2)
+            .count();
+        assert!(off * 200 < a.len(), "{preset}: {off} channel values differ");
+    }
+}
+
+/// pkfan's cut pieces are ribbons: only the run's real ends are pointed, and
+/// the run's own flick taper stays the run's (#497). The ribbons handed to
+/// pkribbon are recorded (its caps, and the /Pressure at the piece's two
+/// ends), so this holds the shape of the pieces directly: a pixel comparison
+/// cannot, because the core pass underneath fills the notch a pointed interior
+/// end would leave.
+#[test]
+fn wet_filllength_pkfan_pieces_are_pointed_only_at_the_run_ends() {
+    // Every pkribbon call of one flicked stroke: [start-pointed end-pointed
+    // pressure(0) pressure(1)], pressure -1 where the call set none.
+    let calls = |wet: &str| -> Vec<[f64; 4]> {
+        let mut it = fresh(300, 150);
+        it.run_str(&format!(
+            "/pkribbon-real /pkribbon load def userdict /seen [ ] put \
+             /pkribbon {{ \
+                 dup /Pressure known {{ dup /Pressure get dup 0 exch exec exch 1 exch exec }} \
+                 {{ -1 -1 }} ifelse /pr1 exch def /pr0 exch def \
+                 dup /StartCap get /pointed eq {{ 1 }} {{ 0 }} ifelse /sc exch def \
+                 dup /EndCap get /pointed eq {{ 1 }} {{ 0 }} ifelse /ec exch def \
+                 userdict /seen [ seen aload pop [ sc ec pr0 pr1 ] ] put \
+                 pkribbon-real }} def \
+             7 srand {{ newpath 150 20 moveto 150 130 lineto \
+                 << /Width 10 /Colors [[0.9 0.2 0.2]] /Bristles 1 /BristleWidth 8 \
+                    /WidthJitter 0 /Splay 0 /Load 1 /Dropout 0 /Ragged 0 /Jitter 0 \
+                    /ColorJitter 0 /Flick 0.5 >> pkfan }} \
+             << /Soft 1 /Offset 0 /Layers 2 /At [ 150 75 ] /PerFill true {wet} \
+                /Under {{ pop pop 0.2 0.4 0.9 }} >> pkwet seen"
+        ))
+        .unwrap_or_else(|e| panic!("{wet}: {}", it.error_report(&e)));
+        let st = it.operand_stack();
+        let text = st.last().expect("seen").repr().to_string();
+        text.replace(['[', ']'], " ")
+            .split_whitespace()
+            .map(|w| w.parse::<f64>().expect("number"))
+            .collect::<Vec<_>>()
+            .chunks(4)
+            .map(|c| [c[0], c[1], c[2], c[3]])
+            .collect()
+    };
+    // Uncut: the core pass and the one softening pass are each one pointed
+    // ribbon with the run's own flick (no /Pressure of its own).
+    let whole = calls("");
+    assert_eq!(whole, vec![[1.0, 1.0, -1.0, -1.0]; 2]);
+    // Cut: the softening pass is pieces and the core pass (asked nothing)
+    // is the last, whole, call.
+    let cut = calls("/FillLength 9");
+    let (core, pieces) = cut.split_last().expect("calls");
+    assert_eq!(core, &[1.0, 1.0, -1.0, -1.0]);
+    assert!(pieces.len() > 4, "{} pieces", pieces.len());
+    let last = pieces.len() - 1;
+    for (k, p) in pieces.iter().enumerate() {
+        assert_eq!(p[0], if k == 0 { 1.0 } else { 0.0 }, "piece {k} start cap");
+        assert_eq!(p[1], if k == last { 1.0 } else { 0.0 }, "piece {k} end cap");
+        // the run's flick, not the piece's: full width until the taper starts
+        // half way along, never rising again, and a point at the run's end
+        assert!(
+            (0.0..=1.0).contains(&p[2]) && p[3] <= p[2] + 1e-9,
+            "piece {k} {p:?}"
+        );
+    }
+    assert_eq!(pieces[0][2], 1.0, "full width at the run's start");
+    assert_eq!(pieces[1][3], 1.0, "no taper in the first half");
+    assert!(pieces[last][3].abs() < 1e-9, "a point at the run's end");
+    // neighbours overlap: a piece starts inside the one before it
+    for w in pieces.windows(2) {
+        assert!(
+            w[0][3] - 1e-9 <= w[1][2] && w[1][2] <= w[0][2] + 1e-9,
+            "{w:?}"
+        );
+    }
+    assert!(
+        pieces[last][2] > 0.0 && pieces[last][2] < 0.5,
+        "the last piece starts partway down the ramp"
+    );
+}
+
+/// Nested calls: the shortest positive length among the levels running a
+/// softening pass cuts the run, so either level's /FillLength alone does.
+#[test]
+fn wet_filllength_nests() {
+    let nest = |outer: &str, inner: &str| {
+        let mut it = fresh(300, 150);
+        it.run_str(&format!(
+            "userdict /asked 0 put 7 srand \
+             {{ {{ newpath 150 20 moveto 150 130 lineto \
+                  << /Width 10 /Colors [[0.9 0.9 0.9]] {BROAD_FLAT} >> pkbroad }} \
+                << /Soft 1 /Offset 10 /Layers 2 /At [ 150 75 ] /PerFill true {inner} \
+                   /Under {{ pop pop userdict /asked asked 1 add put 0.5 0.5 0.5 }} >> pkwet }} \
+             << /Soft 1 /Offset 10 /Layers 2 /At [ 150 75 ] /PerFill true {outer} \
+                /Under {{ pop pop userdict /asked asked 1 add put 0.5 0.5 0.5 }} >> pkwet \
+             asked"
+        ))
+        .unwrap_or_else(|e| panic!("{outer} / {inner}: {}", it.error_report(&e)));
+        it.operand_stack()
+            .last()
+            .expect("asks")
+            .repr()
+            .parse::<i64>()
+            .expect("int")
+    };
+    let none = nest("", "");
+    let inner_only = nest("", "/FillLength 15");
+    let outer_only = nest("/FillLength 15", "");
+    assert!(
+        inner_only > none && outer_only > none,
+        "{none} {inner_only} {outer_only}"
+    );
+    // A length no run reaches adds no cut, so the other level's alone decides:
+    // the shortest wins, not the inner, the outer or the longest.
+    assert_eq!(
+        nest("/FillLength 15", "/FillLength 1000"),
+        outer_only,
+        "outer 15, inner 1000"
+    );
+    assert_eq!(
+        nest("/FillLength 1000", "/FillLength 15"),
+        inner_only,
+        "outer 1000, inner 15"
+    );
+}
+
+/// /FillLength is a length for /PerFill's fills: a positive number, and only
+/// with /PerFill true. Each wrong form is a named error that unwinds.
+#[test]
+fn wet_filllength_rejects_what_it_cannot_mean() {
+    let m = "{ newpath 10 10 moveto 100 10 lineto << /Width 10 >> pkribbon }";
+    let proc = "/Under { pop pop 0 0 0 } /At [ 0 0 ]";
+    for (opts, want) in [
+        (
+            "/Under [ 0 0 0 ] /FillLength 5".to_string(),
+            "pkwet-filllength-needs-perfill",
+        ),
+        (
+            format!("{proc} /FillLength 5"),
+            "pkwet-filllength-needs-perfill",
+        ),
+        (
+            format!("{proc} /PerFill false /FillLength 5"),
+            "pkwet-filllength-needs-perfill",
+        ),
+        (
+            format!("{proc} /PerFill true /FillLength (5)"),
+            "pkwet-filllength-must-be-a-number",
+        ),
+        (
+            format!("{proc} /PerFill true /FillLength {{ 5 }}"),
+            "pkwet-filllength-must-not-be-a-procedure",
+        ),
+        (
+            format!("{proc} /PerFill true /FillLength 0"),
+            "pkwet-filllength-must-be-positive",
+        ),
+        (
+            format!("{proc} /PerFill true /FillLength -3.5"),
+            "pkwet-filllength-must-be-positive",
+        ),
+    ] {
+        let mut it = fresh(120, 120);
+        let e = it
+            .run_str(&format!("{m} << /Soft 1 {opts} >> pkwet"))
+            .unwrap_err();
+        let report = it.error_report(&e).to_string();
+        assert!(report.contains(want), "{opts}: wanted {want}, got {report}");
+        let mut it = fresh(120, 120);
+        it.run_str(&format!(
+            "0 0 0 setrgbcolor 5 srand {{ {m} << /Soft 1 {opts} >> pkwet }} stopped pop \
+             pqdepth"
+        ))
+        .unwrap_or_else(|e| panic!("{opts}: {}", it.error_report(&e)));
+        assert_eq!(
+            it.operand_stack().last().expect("depth").repr(),
+            "0",
+            "{opts}"
+        );
+    }
 }
 
 // --- pkdab: the foliage / dab brush (issue #117) ----------------------
@@ -10028,7 +10774,7 @@ fn ghostscript_agrees_on_the_surface() {
 
     let artkit = std::fs::read_to_string("lib/artkit.ps").expect("artkit");
     let paintkit = std::fs::read_to_string("lib/paintkit.ps").expect("paintkit");
-    let dir = std::env::temp_dir().join(format!("pscat-canvas-{}", std::process::id()));
+    let dir = common::scratch_dir("pscat-canvas");
     std::fs::create_dir_all(&dir).expect("temp dir");
     let src = dir.join("canvas_gs.ps");
     let png = dir.join("canvas_gs.png");
@@ -12056,7 +12802,7 @@ fn ghostscript_accepts_paint_loading() {
     }
     let artkit = std::fs::read_to_string("lib/artkit.ps").expect("artkit");
     let paintkit = std::fs::read_to_string("lib/paintkit.ps").expect("paintkit");
-    let dir = std::env::temp_dir().join(format!("pscat-loading-{}", std::process::id()));
+    let dir = common::scratch_dir("pscat-loading");
     std::fs::create_dir_all(&dir).expect("temp dir");
     let combined = dir.join("loading_gs.ps");
     std::fs::write(
