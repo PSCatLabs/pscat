@@ -827,7 +827,11 @@ renders eight examples in both and compares block-downsampled output).
    #215 shipped the gallery piece `gallery/released_memo.ps` (*Released in
    Part*) and the blind boards `docs/dev/design/typewriter/blind_grid.png` and
    `memo_vs_real.png` (`docs/dev/design/typewriter/tools/blind_compare.py`; the
-   key is in the PR, not the repo); `notes/215-released-memo.md`. #590 added a second
+   key is in the PR, not the repo); `notes/215-released-memo.md`. #531 gave it its
+   final pass: #590's even hand, two copies, an office-use-only marking ruled
+   through, exemption codes, a review stamp, a document number and a gem clip, and
+   redrew the blind board with a new shuffle seed (`notes/531-released-in-part-final-pass.md`;
+   the new key is in a PR comment, not the repo). #590 added a second
    piece, `gallery/time_traveler_memo.ps` (*The Man from 2026*): a never-released
    TOP SECRET original (`/Generation 0`, legal paper), with the red banners and
    control lines typed by `tw-set` after `tw-type` on the same frame
