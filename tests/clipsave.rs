@@ -22,7 +22,11 @@ const CASES: &[Case] = &[
     (
         "a pair puts the clip back",
         "R clipsave 10 10 50 50 rectclip R cliprestore R",
-        &["[0.0 0.0 612.0 792.0]", "[10.0 10.0 60.0 60.0]", "[0.0 0.0 612.0 792.0]"],
+        &[
+            "[0.0 0.0 612.0 792.0]",
+            "[10.0 10.0 60.0 60.0]",
+            "[0.0 0.0 612.0 792.0]",
+        ],
     ),
     (
         "nested pairs pop newest first",
@@ -42,12 +46,24 @@ const CASES: &[Case] = &[
     (
         "a deeper gsave level does not see the outer entry",
         "10 10 300 300 rectclip clipsave 20 20 200 200 rectclip R gsave 30 30 100 100 rectclip R cliprestore R grestore R cliprestore R",
-        &["[20.0 20.0 220.0 220.0]", "[30.0 30.0 130.0 130.0]", "[20.0 20.0 220.0 220.0]", "[20.0 20.0 220.0 220.0]", "[10.0 10.0 310.0 310.0]"],
+        &[
+            "[20.0 20.0 220.0 220.0]",
+            "[30.0 30.0 130.0 130.0]",
+            "[20.0 20.0 220.0 220.0]",
+            "[20.0 20.0 220.0 220.0]",
+            "[10.0 10.0 310.0 310.0]",
+        ],
     ),
     (
         "grestore brings back the outer level entries",
         "clipsave 10 10 300 300 rectclip clipsave 20 20 200 200 rectclip gsave 30 30 100 100 rectclip cliprestore R cliprestore R grestore R cliprestore R cliprestore R",
-        &["[20.0 20.0 220.0 220.0]", "[20.0 20.0 220.0 220.0]", "[20.0 20.0 220.0 220.0]", "[10.0 10.0 310.0 310.0]", "[0.0 0.0 612.0 792.0]"],
+        &[
+            "[20.0 20.0 220.0 220.0]",
+            "[20.0 20.0 220.0 220.0]",
+            "[20.0 20.0 220.0 220.0]",
+            "[10.0 10.0 310.0 310.0]",
+            "[0.0 0.0 612.0 792.0]",
+        ],
     ),
     (
         "grestore drops the inner level entries",
@@ -57,7 +73,11 @@ const CASES: &[Case] = &[
     (
         "a cliprestore with no entry gives back the clip at gsave",
         "clipsave 10 10 50 50 rectclip gsave cliprestore R grestore R cliprestore R",
-        &["[10.0 10.0 60.0 60.0]", "[10.0 10.0 60.0 60.0]", "[0.0 0.0 612.0 792.0]"],
+        &[
+            "[10.0 10.0 60.0 60.0]",
+            "[10.0 10.0 60.0 60.0]",
+            "[0.0 0.0 612.0 792.0]",
+        ],
     ),
     (
         "restore drops entries made since save",
@@ -67,7 +87,11 @@ const CASES: &[Case] = &[
     (
         "save starts a new level",
         "clipsave 10 10 50 50 rectclip save cliprestore R restore R cliprestore R",
-        &["[10.0 10.0 60.0 60.0]", "[10.0 10.0 60.0 60.0]", "[0.0 0.0 612.0 792.0]"],
+        &[
+            "[10.0 10.0 60.0 60.0]",
+            "[10.0 10.0 60.0 60.0]",
+            "[0.0 0.0 612.0 792.0]",
+        ],
     ),
     (
         "restore brings back the save-time entries",
@@ -77,7 +101,11 @@ const CASES: &[Case] = &[
     (
         "inside a save, after a gsave pair, the empty fallback is the clip at save",
         "X 20 20 200 200 rectclip clipsave save 30 30 50 50 rectclip clipsave gsave grestore 40 40 5 5 rectclip cliprestore R cliprestore R restore R grestore",
-        &["[30.0 30.0 80.0 80.0]", "[20.0 20.0 220.0 220.0]", "[20.0 20.0 220.0 220.0]"],
+        &[
+            "[30.0 30.0 80.0 80.0]",
+            "[20.0 20.0 220.0 220.0]",
+            "[20.0 20.0 220.0 220.0]",
+        ],
     ),
     (
         "grestoreall at a save boundary",
@@ -87,12 +115,21 @@ const CASES: &[Case] = &[
     (
         "only the clip changes: CTM, colour, path stay",
         "X clipsave 2 2 scale 0.5 setgray newpath 5 5 moveto 50 5 lineto 50 50 lineto closepath clip 7 7 moveto cliprestore R matrix currentmatrix == currentgray 100 mul round cvi == currentpoint 2 array astore == grestore",
-        &["[5.0 5.0 155.0 155.0]", "[2.0 0.0 0.0 -2.0 0.0 792.0]", "50", "[7.0 7.0]"],
+        &[
+            "[5.0 5.0 155.0 155.0]",
+            "[2.0 0.0 0.0 -2.0 0.0 792.0]",
+            "50",
+            "[7.0 7.0]",
+        ],
     ),
     (
         "a gstate carries the stack",
         "X 20 20 200 200 rectclip clipsave 30 30 50 50 rectclip gstate /G exch def cliprestore R 40 40 100 100 rectclip G setgstate R cliprestore R grestore",
-        &["[20.0 20.0 220.0 220.0]", "[30.0 30.0 80.0 80.0]", "[20.0 20.0 220.0 220.0]"],
+        &[
+            "[20.0 20.0 220.0 220.0]",
+            "[30.0 30.0 80.0 80.0]",
+            "[20.0 20.0 220.0 220.0]",
+        ],
     ),
     (
         "setgstate of an empty-stack gstate empties the stack",
