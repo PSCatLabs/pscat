@@ -492,8 +492,8 @@ Add `/FillLength 10` (points, with `/PerFill true`) and a long run of `pkbroad` 
 `pktrowel` is cut into fills about that far apart, each asked at its own middle,
 so one tall stroke down a vertical gradient follows it too: on a 110pt stroke
 the rim over a strong gradient fell from 240 to 72 at 10pt. The cut makes
-more fills, so more calls of the procedure (45 to 345 for that stroke), and it
-reaches only those two presets (`pkfan` ribbons and `pkdab` dabs are not cut). A
+more fills, so more calls of the procedure (a 12pt cut asked it 345 times where
+the whole run asked 45), and it reaches only those two presets (`pkfan` ribbons and `pkdab` dabs are not cut). A
 length longer than the run, or no `/FillLength`, leaves the render as it was.
 The length is measured along the mark in the user space it is drawn in. It costs one call of the procedure per fill per softening pass, so keep it
 cheap, and an inherited-colour mark (`pkribbon`, `pkspray`) has no such site and

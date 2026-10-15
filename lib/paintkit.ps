@@ -5427,10 +5427,11 @@
 % in their own order, before any piece is filled. A run no longer than the length
 % is not cut, and a call without the key does exactly what it did. pkfan runs are
 % not cut (each is one pointed ribbon) and a pkdab dab is already one fill. Cost:
-% one call of /Under per fill per softening pass, so a 110pt stroke at 10pt asks
-% about eight times as often (pkbroad, 6 layers: 45 asks, 345 cut at 12pt in the
-% tests); the procedure must be cheap and must not draw random numbers. Over a
-% 150pt gradient the rim of one 110pt pkbroad stroke fell from 239.6 to 71.6.
+% one call of /Under per fill per softening pass, so a 110pt stroke cut at 12pt
+% asks about eight times as often (pkbroad, 4 layers, /Offset 20: 45 asks whole,
+% 345 cut); the procedure must be cheap and must not draw random numbers. Over
+% a 150pt gradient (6 layers, /Offset 34) the rim of one 110pt pkbroad stroke
+% fell from 239.6 to 71.6 at /FillLength 10.
 %
 % Measured (tests/paintkit.rs `loaded_column`, twelve stacked pkbroad strokes
 % over the strong gradient, /Offset 34, 6 layers): the residual rim is 384.4

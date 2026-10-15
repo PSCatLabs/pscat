@@ -37,7 +37,7 @@ Design calls, and why:
   `/EdgeBuildup` on for pktrowel). `puat`, `shade` and `puwetat` draw nothing.
 - **Not cut: `pkfan`, `pkdab`.** A `pfrun` run goes to `pkribbon` as one pointed
   ribbon, and cutting it would point every piece; a dab is one fill already.
-  Filed as a follow-up. `/TipColor` (#229) can reuse `pusplit`.
+  Filed as #497. `/TipColor` (#229) can reuse `pusplit`.
 - **Units.** The length is in the user space the mark is drawn in (walkpath's arc
   lengths), not pkwet's as `/At` is; they differ only if the mark scales inside
   the procedure.

@@ -8692,8 +8692,10 @@ fn wet_filllength_cuts_the_fill_not_the_random_stream() {
 }
 
 /// Over a backdrop that never changes the cut fills are the same colour, so
-/// cutting is invisible: the render is the uncut one to the byte (the
-/// overlap between neighbours repaints the same colour).
+/// cutting is invisible: pkbroad is the uncut render to the byte (the
+/// overlap between neighbours repaints the same colour), and pktrowel differs
+/// in under 0.5% of channel values, where the overlap re-blends its lane
+/// edges' antialiasing.
 #[test]
 fn wet_filllength_over_a_constant_backdrop_is_invisible() {
     for (preset, opts) in [("pkbroad", BROAD_FLAT), ("pktrowel", TROWEL_FLAT)] {
@@ -8745,12 +8747,22 @@ fn wet_filllength_nests() {
     let none = nest("", "");
     let inner_only = nest("", "/FillLength 15");
     let outer_only = nest("/FillLength 15", "");
-    let both = nest("/FillLength 40", "/FillLength 15");
     assert!(
         inner_only > none && outer_only > none,
         "{none} {inner_only} {outer_only}"
     );
-    assert!(both >= inner_only && both >= outer_only, "{both}");
+    // A length no run reaches adds no cut, so the other level's alone decides:
+    // the shortest wins, not the inner, the outer or the longest.
+    assert_eq!(
+        nest("/FillLength 15", "/FillLength 1000"),
+        outer_only,
+        "outer 15, inner 1000"
+    );
+    assert_eq!(
+        nest("/FillLength 1000", "/FillLength 15"),
+        inner_only,
+        "outer 1000, inner 15"
+    );
 }
 
 /// /FillLength is a length for /PerFill's fills: a positive number, and only
