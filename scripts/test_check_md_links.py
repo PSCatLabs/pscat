@@ -104,7 +104,7 @@ class SharedRepoRule(unittest.TestCase):
         ("/tree/main/", ("", ""), ""),
         ("/tree/main/docs/", ("docs", ""), "docs"),
         ("/blob/main/../x.md", ("../x.md", ""), "../x.md"),
-        ("/blob/mainline/x.md", ("line/x.md", ""), "x.md"),  # latent quirk, kept
+        ("/blob/mainline/x.md", (None, ""), "x.md"),  # ref "mainline" is not "main" (#481)
         ("/blob/v0.5.1/docs/a.md", (None, ""), "docs/a.md"),
         ("/blob/", (None, ""), None),
         ("/blob//docs/a.md", (None, ""), None),
@@ -138,6 +138,7 @@ class SharedRepoRule(unittest.TestCase):
         self.assertEqual(match(self.R + "/blob/v0.5.1/a.md#x"), ("https", "v0.5.1", "a.md#x"))
         self.assertEqual(match(self.R + "/tree/main/d/", ref="main"), ("https", "main", "d/"))
         self.assertIsNone(match(self.R + "/tree/v1/d/", ref="main"))
+        self.assertIsNone(match(self.R + "/blob/mainline/x.md", ref="main"))  # #481
         self.assertIsNone(match("https://example.com/x"))
 
 
