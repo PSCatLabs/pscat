@@ -7290,8 +7290,8 @@ fn wet_smooth_calms_the_pulls_side_edge_without_touching_the_stream() {
         calm * 2.0 < steps,
         "/Smooth 0.9 should at least halve the steps: {calm} vs {steps}"
     );
-    // /Smooth 1 holds the first draw: one shifted copy, no steps at all
-    // (the core pass, which never moves, excepted).
+    // /Smooth 1 holds the first draw: the pull shears, with no jumps between
+    // neighbours (the core pass, which never moves, excepted).
     let held = pull_origins("/Smooth 1");
     assert!(held[1..].windows(2).all(|w| (w[1] - w[0]).abs() < 1.0));
 

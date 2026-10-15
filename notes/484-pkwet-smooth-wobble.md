@@ -11,8 +11,10 @@ at `/Stretch 10`, `/Offset 28`), and where each copy's edge shows, the side of
 the stroke steps. Measured on a 31-pass pull (`/Offset 30 /Stretch 3`): the
 sum of neighbour-to-neighbour steps is 105pt for independent draws.
 
-A larger `/Stretch` makes the steps smaller but does not remove them, so a
-damping key was not the fix.
+A larger `/Stretch` (the existing damping knob) shrinks the wobble and the
+steps with it: at `/Stretch 25` against the specimen's 10 (2x render, scratch,
+not committed) the steps are about a point and the stroke loses its wobble, but
+they are still steps. `/Smooth` keeps the wobble's size and changes its texture.
 
 ## The change (opt-in)
 
@@ -24,8 +26,9 @@ sides each read their own neighbours):
     w = a*w + sqrt(1 - a^2) * d        (the first pass on a side takes d)
 
 with `a = /Smooth`. The variance of a uniform draw is kept, so `/Stretch`
-still sets the wobble's size. `/Smooth 1` holds the first draw (one straight
-shifted copy). Still exactly one draw per non-core pass, so the random stream
+still sets the wobble's size. `/Smooth 1` holds the first draw (the pull
+shears one way: the held draw is multiplied by a reach that grows with each
+pass, so the pull slants). Still exactly one draw per non-core pass, so the random stream
 after the call is the same with or without it (a test pins it). The default 0
 never enters the new branch: nothing that omits the key changes.
 
@@ -39,9 +42,16 @@ The canvas specimen picks 0.9 by eye from 0.8, 0.9, 0.97 (2x crops): 0.8 and
 A default of, say, 0.9 would move every committed directional pull, among them
 `gallery/alpine_lake.ps` and `gallery/evening_stream.ps`, which have other open
 work. Opt-in leaves them byte-identical (`scripts/identity_check.sh`, see the PR).
-Making it the default is a separate decision (filed as a follow-up).
+Making it the default is a separate decision: #516 (related: #483, the default depth).
 
 ## Renders
 
-Only `docs/dev/design/paintkit_canvas_demo.png` is regenerated; the PR lists
-before and after.
+Only `docs/dev/design/paintkit_canvas_demo.png` is regenerated. Before and after
+of the pull panel, side by side:
+`docs/dev/design/paintkit_canvas_pull_484_compare.png` (left the #417 render, right
+this branch). The result is steps reduced, not removed: the upper stroke's right
+edge still shows a jog where the smoothed drift turns. `scripts/identity_check.sh`
+against the merge-base tree (default pick and `--loader lib/paintkit.ps`, with a
+control that uses `/Smooth`, which the base ignores): 49 of 50 identical in each, the
+one difference `examples/paintkit_canvas_demo.ps`. `gallery/alpine_lake.ps` and
+`gallery/evening_stream.ps` are identical.

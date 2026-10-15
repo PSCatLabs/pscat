@@ -5411,7 +5411,8 @@
 % default 0, which is the old behaviour exactly) low-passes the draws
 % along the passes, so the edge wanders instead of stepping: 0.9 over the
 % canvas specimen's 29 passes (issue #484; 0.97 leans visibly, and a larger
-% /Stretch alone only makes the steps smaller). It is opt-in because a
+% /Stretch alone, 25 against the specimen's 10, shrinks the steps in
+% proportion and with them the wobble, but they are still steps). It is opt-in because a
 % default would move every committed pull.
 %
 % Cost, directional. A pull is up to 32x its procedure, and pulling a
@@ -6226,7 +6227,7 @@
 % @param: /Offset [points] How far in points the outermost pass is displaced from the true path; inert at Layers 1, which has only a core pass. Formerly /Spread, still accepted as a deprecated alias; /Offset wins if both are given (default Soft*14)
 % @param: /Direction [degrees] Degrees, in the user space pkwet is called in: lines the passes up along this axis instead of scattering them, for a pulled-down reflection (270), a lifted mist (90) or a swept sky (0). The procedure must paint in the color it inherits, or in loaded colors (/Colors), which pkwet grades for you. A chain of nested calls containing a directional one may multiply its innermost procedure at most 64 times. Without an explicit /Layers its depth follows /Offset, so pin /Layers while tuning /Offset (default absent: isotropic)
 % @param: /Stretch [ratio] With /Direction only: along-to-across ratio, at least 1; the cross-axis wobble is the along-axis reach divided by this (default 8)
-% @param: /Smooth [0..1] With /Direction only: how smoothly the across-wobble changes from pass to pass. 0 draws each pass's wobble independently, so neighbouring passes sit up to /Stretch's reach apart and a pull's side edges stagger in steps (the default, exactly as before); toward 1 each pass keeps more of the one before it (per side, for a sweep), so the edge wanders slowly instead, as far as 1, where every pass keeps the first draw and the whole pull leans one way as a straight shifted copy. The wobble's size is still /Stretch's; 0.8 to 0.9 reads as a clean, slightly drifting edge on a pull of about 30 passes. It takes the same one draw per pass either way, so it never re-rolls a later mark (default 0)
+% @param: /Smooth [0..1] With /Direction only: how smoothly the across-wobble changes from pass to pass. 0 draws each pass's wobble independently, so neighbouring passes sit up to /Stretch's reach apart and a pull's side edges stagger in steps (the default, exactly as before); toward 1 each pass keeps more of the one before it (per side, for a sweep), so the edge wanders slowly instead, as far as 1, where every pass keeps the first draw, so the whole pull shears one way. The wobble's size is still /Stretch's; 0.8 to 0.9 reads as a slowly drifting edge, with far fewer steps, on a pull of about 30 passes. It takes the same one draw per pass either way, so it never re-rolls a later mark (default 0)
 % @param: /OneSided [boolean] With /Direction only: true puts every pass on the +Direction side (a pull down, a lift up); false alternates sides, a sweep both ways (default false)
 /pkwet {
     /pqopts exch def

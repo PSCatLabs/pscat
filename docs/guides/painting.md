@@ -466,12 +466,12 @@ specimen's pull is `/Offset 28 /Layers 29` (issue #417).
 
 A pull's side edges have their own tell. Each pass wobbles across the
 pull by its own draw, and with passes a point apart independent draws
-make the edge stagger in small steps (a larger `/Stretch` only makes the
-steps smaller). `/Smooth` (0 to 1, default 0) low-passes the draws along
+make the edge stagger in small steps (a larger `/Stretch` shrinks the
+steps along with the wobble, but they stay steps). `/Smooth` (0 to 1, default 0) low-passes the draws along
 the passes, so the edge drifts instead of stepping: the canvas specimen
 asks for `/Smooth 0.9` (issue #484). At 0 the call is exactly what it
 was, so nothing that leaves it out changes; 1 holds the first draw, and
-the pull leans as one straight copy. Any
+the pull shears one way. Any
 nest with a directional call in it may multiply its innermost
 procedure at most 64 times — enough to pull a reflection down and then
 graze it across. `examples/paintkit_wet_pull_demo.ps` shows a
