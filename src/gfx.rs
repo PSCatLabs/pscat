@@ -729,6 +729,13 @@ pub struct GraphicsState {
     /// Current clip: an alpha mask (intersection of all active clips) and
     /// the most recent clip path, which `clippath` hands back.
     clip: Option<ClipState>,
+    /// Level 3 `clipsave` stack (#494), newest last: the clips `clipsave`
+    /// saved at this `gsave` level (`None` = no clip). Part of the state,
+    /// as in Ghostscript: a gstate object carries it and `setgstate` puts
+    /// it back; `gsave` leaves the copy it pushes holding it and starts the
+    /// new level empty (`Gfx::gsave`). Entries are `Rc` clones, so a save
+    /// costs no mask copy.
+    clip_stack: Vec<Option<ClipState>>,
 }
 
 impl GraphicsState {
@@ -837,6 +844,7 @@ impl Gfx {
                 font: None,
                 path: PsPath::default(),
                 clip: None,
+                clip_stack: Vec::new(),
             },
             saved: Vec::new(),
             base_ctm,
@@ -1702,9 +1710,12 @@ impl Gfx {
 
     /// Reset everything `initgraphics` resets, per the PLRM: CTM,
     /// path, clip, color (black, DeviceGray), line parameters. Not the
-    /// font — gs keeps it, and so do we.
+    /// font — gs keeps it, and so do we — nor the `clipsave` stack (gs
+    /// keeps that too: a `cliprestore` after `initgraphics` still gives
+    /// back what `clipsave` saved).
     pub fn init_graphics(&mut self) {
         let font = self.state.font.take();
+        let clip_stack = std::mem::take(&mut self.state.clip_stack);
         self.state = GraphicsState {
             ctm: self.base_ctm,
             rgb: (0.0, 0.0, 0.0),
@@ -1720,6 +1731,7 @@ impl Gfx {
             font,
             path: PsPath::default(),
             clip: None,
+            clip_stack,
         };
     }
 
@@ -1727,6 +1739,10 @@ impl Gfx {
 
     pub fn gsave(&mut self) {
         self.saved.push(self.state.clone());
+        // The new level starts with no `clipsave` entries; the pushed copy
+        // keeps them for the matching `grestore` (gs: case 2 in
+        // notes/494-clipsave-cliprestore.md).
+        self.state.clip_stack.clear();
     }
 
     /// How many `gsave`s haven't been matched by a `grestore` yet
@@ -1926,6 +1942,39 @@ impl Gfx {
 
     pub fn initclip(&mut self) {
         self.state.clip = None;
+    }
+
+    /// `clipsave` (#494): push the clip in force onto this `gsave`
+    /// level's stack. Nothing else changes.
+    pub fn clipsave(&mut self) {
+        let clip = self.state.clip.clone();
+        self.state.clip_stack.push(clip);
+    }
+
+    /// `cliprestore` (#494), matching Ghostscript: pop this level's newest
+    /// `clipsave` entry and make it the clip. With none at this level, the
+    /// clip becomes the one the level started with: the state the innermost
+    /// `save` snapshotted, if no `gsave` is open since it (`save_boundary`
+    /// is that save's gsave depth and state), else the newest `gsave`'s
+    /// copy, else no clip at all. Only the clip changes, never the CTM,
+    /// path or colour.
+    pub(crate) fn cliprestore(&mut self, save_boundary: Option<(usize, &GraphicsState)>) {
+        if let Some(clip) = self.state.clip_stack.pop() {
+            self.state.clip = clip;
+            return;
+        }
+        let outer = match save_boundary {
+            // `<=`: pscat's grestore can pop below a save's depth.
+            Some((depth, state)) if self.saved.len() <= depth => Some(state),
+            _ => self.saved.last(),
+        };
+        self.state.clip = outer.and_then(|s| s.clip.clone());
+    }
+
+    /// `save` starts a new `clipsave` level (gs's `save` is a `gsave`);
+    /// the snapshot it took keeps the entries for `restore`.
+    pub(crate) fn clear_clip_stack(&mut self) {
+        self.state.clip_stack.clear();
     }
 
     /// `clippath`: replace the current path with the clip boundary.
