@@ -1028,8 +1028,8 @@
 % A plain clip inside a dkbatch (#444). While a batch's procedure runs,
 % dkbatch puts these into userdict in place of the clip operators and
 % gsave/grestore (only if every one of those names still resolves to
-% systemdict). Where the interpreter has Level 3's cliprestore (Ghostscript;
-% pscat has none) it is shadowed too (#454). The batch dict tracks /pc, the plain clip in force:
+% systemdict). Where the interpreter has Level 3's cliprestore (Ghostscript,
+% and pscat since #494) it is shadowed too (#454). The batch dict tracks /pc, the plain clip in force:
 %   null    no plain clip change (the #312 rule: the dkclip entry, if any)
 %   /dirty  changed since the last capture: the next dkstroke takes a gstate
 %   gstate  that capture, shared by every stroke until the clip changes

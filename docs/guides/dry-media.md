@@ -30,8 +30,8 @@ the stick's contact patch meets raised tooth.
   differently clipped strokes, such as overlapping hatched regions, can
   share one batch. A plain `clip` (or `eoclip`, `rectclip`) made inside
   the batch is kept the same way: `{ gsave region clip ... grestore }`
-  works, nested and even-odd clips included (and, in Ghostscript, a
-  `clipsave ... cliprestore` pair; pscat has no such operators). One catch: a procedure
+  works, nested and even-odd clips included, and so does a
+  `clipsave ... cliprestore` pair. One catch: a procedure
   bound before the batch calls `clip`, `gsave` and `grestore` directly,
   so drykit sees neither its clips nor its restores. If you pass a
   callback that clips and strokes to a bound `gsave ... exec ... grestore`
