@@ -87,6 +87,14 @@ flat ink. Strike weight varies as it does in the scans: most strikes are alike, 
 few are light, and a rare one is nearly blank (`/Preset /electric` is much more
 even). `docs/dev/design/typewriter/ink_vs_real.png` sets it beside the reference scans.
 
+Two ribbon extras are opt-in. `/WornBand` (`0..1`) wears the lane of ribbon every
+x-height strike hits, so the middle of each letter prints lighter than its tops and
+tails, at the same height in every strike. `/Bleed` (`0..1`, with `/BleedInk` and
+`/BleedSide`) is a black/red ribbon a little out of register: the part of a letter
+past the colour boundary prints in the other colour, with a ragged edge, and the
+boundary wanders from strike to strike. Both default to 0 (nothing changes) and are
+shown at the foot of the specimen.
+
 ### Typing a page: `tw-type`
 
 `tw-type` takes one options dict and types a whole text the way a typist would,

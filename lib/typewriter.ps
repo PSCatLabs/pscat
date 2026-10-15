@@ -631,10 +631,10 @@ grestore
         tMA tMB kCode mix2 22 mix2 /hB exch def /hA exch def 1 uni /zuK exch def
         /hA zhA def  /hB zhB def
         wearS 0 gt { zuS 2 mul zuK add 3 div } { zuK } ifelse
-        tBleed mul 420 mul /zbD exch def
+        tBleed mul 350 mul /zbD exch def
         tGBox kCode 32 sub get /zbBox exch def
         tBleedSide /above eq {
-            660 zbD sub tYoff sub /zbY exch def     % the boundary, glyph frame
+            690 zbD sub tYoff sub /zbY exch def     % the boundary, glyph frame
             zbY tBlTr sub tBlOv sub zbBox 3 get lt {
                 /tZFar zbY tBlTr sub tBlOv sub 3000 tYRect def
                 /tZB [
@@ -645,7 +645,7 @@ grestore
                 ] def
             } if
         } {
-            -230 zbD add tYoff sub /zbY exch def
+            -200 zbD add tYoff sub /zbY exch def
             zbY tBlTr add tBlOv add zbBox 1 get gt {
                 /tZFar -3000 zbY tBlTr add tBlOv add tYRect def
                 /tZB [
