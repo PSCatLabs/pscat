@@ -169,7 +169,7 @@ TWState begin {
 /tPresets <<
     /manual   << /tWear 1   /tRibbon 0.7  /tPSd 0.12 /tFinger true >>
     /electric << /tWear 0.7 /tRibbon 0.7  /tPSd 0.03 /tFinger false >>
-    /worn     << /tWear 1.5 /tRibbon 0.35 /tPSd 0.12 /tFinger true >>
+    /worn     << /tWear 1.5 /tRibbon 0.55 /tPSd 0.12 /tFinger true >>
 >> def
 
 % pressure adjustments by code: the little-finger keys (q a z p ; / - and
@@ -744,7 +744,7 @@ grestore
     % the slow ribbon wear across the page (#423: the base is higher and the
     % pressure slope steeper, so the ink thins and a light strike drops out
     % as the references do; a hole's area is only a third of its level)
-    % 0.21 at the default /Ribbon 0.7 and mean pressure, 0.36 worn (0.35),
+    % 0.21 at the default /Ribbon 0.7 and mean pressure, 0.26 worn (0.55, #520),
     % 0.8 at /Ribbon 0; -1 per unit of pressure above 1. Below 1 it rises by
     % tLightSlope per unit up to tLightKnee of shortfall and by tLightTail
     % beyond: #477 moved a light strike's loss of ink from holes to thinning
@@ -980,7 +980,7 @@ end definefont pop } exec
 
 %%SelfTest: tw-setup-applies-presets-and-keys
 %   << /Preset /worn >> tw-setup
-%   TWState /tWear get 1.5 eq TWState /tRibbon get 0.35 eq and
+%   TWState /tWear get 1.5 eq TWState /tRibbon get 0.55 eq and
 %   (the worn preset) mustbe
 %
 %   << /Preset /electric /Ribbon 0.9 >> tw-setup

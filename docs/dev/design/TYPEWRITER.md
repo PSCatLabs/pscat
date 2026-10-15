@@ -175,7 +175,7 @@ keys together:
 |---|---|
 | `/manual` (default) | `/Wear 1`, pressure sd 0.12, `/Ribbon 0.7` |
 | `/electric` | `/Wear 0.7`, pressure sd 0.03 and no finger factor (M2; T11's evenness) |
-| `/worn` | `/Wear 1.5`, pressure sd 0.12, `/Ribbon 0.35` |
+| `/worn` | `/Wear 1.5`, pressure sd 0.12, `/Ribbon 0.55` (0.35 before #520) |
 
 **Mis-strike traits, `/MisStrike` and `/MisStrikeScale` (#554).** A mis-strike is
 physical: it comes from the machine (a loose or worn typebar, a sloppy segment)
@@ -333,7 +333,17 @@ this.
   curve would scale the bump 2 to 3.5 times), and so is `/InkModel false`.
 - Not done: T10 (worn elite on a grey-brown ribbon) is already well under its scan
   by this measure and a little lighter still; the Szilard machine and the FDR one
-  disagree about elite, so a per-face constant is a compromise.
+  disagree about elite, so a per-face constant is a compromise. #520 took it up
+  (below).
+
+**Tuned in #520** (`notes/520-worn-elite-weight.md`), against T10 (worn elite):
+`/worn`'s `/Ribbon` is 0.55 (was 0.35), so its hole level is 0.26 at mean pressure
+(was 0.36) and its spread 26 glyph units at full pressure (was 17).
+T10 goes from x0.66 to x0.76 by dark pixels per character; a dry ribbon was the
+only dry thing about the preset, so it stays below `/manual`'s 0.7. `/manual` and
+`/electric` are byte-identical. The remaining gap is not the preset's: it needs a
+darker grey-brown ink than the harness's, or an elite that does not drop light strikes
+out, and is filed as a follow-up.
 
 **Added in #422** (`notes/422-ribbon-ink-extras.md`): two opt-in extras, both off by default
 (`/WornBand 0`, `/Bleed 0`), so a page without them is byte-identical to #511's. Both
