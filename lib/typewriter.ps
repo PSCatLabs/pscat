@@ -391,6 +391,8 @@ TWState begin {
 %            through the strike's weave; a one-side-heavy key draws it
 %            through a sparser weave, then again through the normal one on
 %            its heavy half only
+%            (a light strike's body is also clipped to the glyph shifted four
+%            ways, so its strokes thin: #477)
 %   counter  a clogged key's counters filled through the weave, over the
 %            fraction of each counter the dirt has packed
 %
@@ -411,9 +413,15 @@ TWState begin {
 % page repeats a key exactly, ink and all). /InkModel false draws #211's
 % flat ink instead.
 
-/tLightSlope 0.6 def  /tLightKnee 0.15 def  /tLightTail 0.1 def                            % hole level per unit of pressure shortfall (#477)
-/tEDead 0.08 def  /tELo 60 def  /tECap 20 def   % light-strike erosion (#477)
-/tE 0 def  /tE0 0 def  /tESide 16 def  /tFringe 0.6 def
+% light strikes (#477): the hole level rises by tLightSlope per unit of
+% pressure shortfall up to tLightKnee, then by tLightTail; the body is eroded by
+% tELo glyph units per unit of shortfall past tEDead, to at most tECap; a
+% one-side-heavy key's light side is eroded tESide more per unit of its
+% lightness; the feather's width falls by up to tFringe of itself at tECap
+/tLightSlope 0.6 def  /tLightKnee 0.15 def  /tLightTail 0.1 def
+/tEDead 0.08 def  /tELo 60 def  /tECap 20 def
+/tESide 16 def  /tFringe 0.6 def
+/tE 0 def  /tE0 0 def                           % the strike's erosion, and a saved copy
 /tYarn 0.48 def                                 % yarn pitch, points
 /tPatch tYarn 8 mul def                         % patch side, points
 /tWeave [ 0 1 3 {
@@ -558,15 +566,19 @@ grestore
     % pressure slope steeper, so the ink thins and a light strike drops out
     % as the references do; a hole's area is only a third of its level)
     % 0.21 at the default /Ribbon 0.7 and mean pressure, 0.36 worn (0.35),
-    % 0.8 at /Ribbon 0; +3 per unit of pressure below 1, -1 per unit above
+    % 0.8 at /Ribbon 0; -1 per unit of pressure above 1. Below 1 it rises by
+    % tLightSlope per unit up to tLightKnee of shortfall and by tLightTail
+    % beyond: #477 moved a light strike's loss of ink from holes to thinning
+    % (tE, below), so a light strike is faint, not a screen of pin-holes
     1 tRibbon sub dup 0.2 mul exch dup mul dup mul 0.45 mul add 0.15 add
     1 tPr sub dup 0 gt {
         dup tLightKnee gt { tLightKnee sub tLightTail mul tLightKnee tLightSlope mul add } { tLightSlope mul } ifelse
-    } { 1 mul } ifelse add
+    } { } ifelse add
     wearS 0 gt { tPageWear 0.06 mul wearS 1 2 copy gt { exch } if pop mul add } if
     dup 0 lt { pop 0 } if /pBody exch def
     % a light strike thins: the body is eroded by tELo glyph units per unit
-    % of pressure shortfall past tEDead, up to tECap (#477)
+    % of pressure shortfall past tEDead, up to tECap (#477). A photocopy's
+    % toner fills the thin strike in again, so a copy is not eroded.
     /tE 1 tPr sub tEDead sub tELo mul dup 0 lt { pop 0 } if dup tECap gt { pop tECap } if def
     tCopyC 0 gt { /tE 0 def } if
     % a photocopy's contrast curve (#214): a dark strike fills in (fewer
