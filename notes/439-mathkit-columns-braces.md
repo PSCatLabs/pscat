@@ -10,7 +10,7 @@ render changed (see Evidence). One new specimen.
   and n, with no parentheses. `\pod{n}` is 18 mu and (n), with no "mod".
   amsmath uses 18 mu only in display math and 12 mu (8 mu for `\pod`)
   inline. mathkit's `\pmod` already used 18 mu everywhere, so these do
-  too, and `\pmod` is unchanged.
+  too, and `\pmod` is unchanged (a design call below).
 - **`\nolimits` (and `\limits`) on a brace.** `mkclimits` now accepts the
   `/brace` atom as well as `/op` and `/fn`. `\underbrace{x}\nolimits_{k}`
   sets the label beside the brace as a script, through `mkscripts`, as
@@ -67,6 +67,11 @@ render changed (see Evidence). One new specimen.
   Independent offsets read as noise. A hand writing a second column down
   a board creeps one way, then back. It does that because each line
   starts from where the eye left the last one.
+- **18 mu before `\mod`, `\pod` and `\pmod` in every style.** amsmath
+  switches on display *math* (`\if@display`), not on the style, and a
+  mathkit formula has no inline/display context of its own: `/Style
+  /text` is a style. A board formula is written like display math, so
+  18 mu it is; changing it would also move every committed `\pmod`.
 - **No `/Side` option on `mkbrace`.** To flip the brace, swap its two
   points, as you would reverse an arrow.
 - **No thicker brace for long spans.** The builder's thickness tops out
@@ -78,8 +83,10 @@ render changed (see Evidence). One new specimen.
 `mod` and `pod` are now command names. A bare run of those letters in
 math raises `mk-bare-word-needs-a-backslash:mod` (or `pod`), where it
 used to draw the letters. `\text{mod}` is unaffected. No tracked file
-writes either word bare (checked with `git grep` over examples, gallery,
-selftest drivers, tests and docs).
+writes either word bare in math: a `git grep -w` over every tracked file
+in examples, gallery, selftest and tests that loads `lib/mathkit.ps`
+finds only comments and PostScript's own `mod`, and all ten files that
+load mathkit render clean and identical (Evidence).
 
 ## Tests
 
@@ -123,7 +130,10 @@ as `docs/dev/design/drymedia/mathkit_columns_braces.png`, with a
 ## Evidence
 
 - `scripts/identity_check.sh <base worktree> --loader lib/mathkit.ps
-  --control <driver>`. See the PR for the exact counts. The control
+  --loader lib/strokeglyphs.ps --control <driver>`: 17 of 17 page
+  renders identical across 10 files (both mathkit specimens, the
+  strokeglyphs specimens, drychalk's, the chalkboard lecture and crayon
+  gallery pieces, both selftest drivers). The control
   draws `\mod`, `\pod`, a side label, a wandering column and an
   `mkbrace`, each under `stopped`, so the base tree doesn't error.
   Every committed mathkit render is byte-identical, and the control
