@@ -374,11 +374,24 @@ fn elite_takes_more_holes_than_pica_and_pica_is_untouched() {
     assert_eq!(pica, pica_off, "the elite constant moved a pica page");
     let (elite, elite_off) = (line("/Pitch 12", 0.18), line("/Pitch 12", 0.0));
     let (m, m0) = (mass(&elite), mass(&elite_off));
-    eprintln!("elite mass with the bump {m:.0}, without {m0:.0} ({:.3})", m / m0);
-    assert!(m < 0.99 * m0, "elite is not lighter ({m:.0} against {m0:.0})");
-    assert!(m > 0.8 * m0, "elite lost too much ink ({m:.0} against {m0:.0})");
+    eprintln!(
+        "elite mass with the bump {m:.0}, without {m0:.0} ({:.3})",
+        m / m0
+    );
+    assert!(
+        m < 0.99 * m0,
+        "elite is not lighter ({m:.0} against {m0:.0})"
+    );
+    assert!(
+        m > 0.8 * m0,
+        "elite lost too much ink ({m:.0} against {m0:.0})"
+    );
     let copy = |bump: f64| line("/Pitch 12 /Copies 1", bump);
-    assert_eq!(copy(0.18), copy(0.0), "the elite constant moved a photocopy");
+    assert_eq!(
+        copy(0.18),
+        copy(0.0),
+        "the elite constant moved a photocopy"
+    );
 }
 
 /// A clogged key's counter fills (TYPEWRITER.md section 6 step 4).
