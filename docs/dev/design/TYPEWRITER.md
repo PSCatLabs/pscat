@@ -342,6 +342,11 @@ No new page-scale CI test is added. #204's concern about CI time stands.
   (`rel-page`, `rel-paper`, `rel-stamp`, `rel-note`, `rel-redact`), the
   typewriter's `/Copies` key (copy loss in the ink: more spread, filled
   counters, a contrast curve on coverage) and `<r>..</r>` / `/Redactor`.
+  **As built (#466)** (`notes/466-copy-paper-haze.md`): a copy's paper is no
+  longer flat white. `rel-page /Haze` (default 0.6, 0 is the old white copy)
+  multiplies everything drawn under the copy curve by a light grey
+  (about 0.90, T14's tone), varying by place (soft blotches and value noise in
+  3pt cells) with a fine fleck grain, all opaque and under the type.
 - **#215, specimen.** A side-by-side against T1/T2 and T9/T10 crops at scan
   resolution. The user judges it.
 

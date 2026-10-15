@@ -178,7 +178,12 @@ inside a stack of effects, each optional and each off at strength 0:
 - **Photocopies**: `/Generation` 1 to 8. Each generation is a sheet the last
   one was copied onto, with its own small rotation and shift, black specks,
   streaks and a lid-dark sliver at the edge (`/Speckle`, `/CopyEdge`). A copy
-  is grey and contrasty: paper and stains go white. The content's type gets the
+  is grey and contrasty: paper and stains go white, but not to flat white:
+  `/Haze` (0 to 1, default 0.6) leaves the light grey of a real copy's toner
+  fog, with soft blotches and a fine grain, under the type (0.6 is about 0.90
+  against T14's 0.91; 1 is T2's 0.84; 0 is the old white copy; it needs
+  `/Generation` above 0, and a high generation that should read bitonal, like
+  T15, wants it low: the specimen's third sheet uses 0.2). The content's type gets the
   typewriter's `/Copies` key, which thickens strokes, closes counters and drops
   light strikes (`rel-page` sets it for you).
 - **Marks** over the content: `/Stamps` (`rel-stamp`: ink through a clip with
