@@ -4,13 +4,15 @@ A worn ribbon lane would show as stems that print grey in the middle of the
 x-height and darker toward the tops of ascenders. This takes the vertical
 stems of d, h, k, l and b (tesseract boxes), finds each line's baseline from
 the bottoms of the letters with no ascender or descender, and averages the
-stem's darkness at each height. Darkness is 255 minus the darkest of three
-adjacent columns, so it measures the stem and ignores the paper.
+stem's darkness at each height, two ways. "Peak" is 255 minus the darkest of
+three adjacent columns: the stem's core, which a thinned stem can keep. "Mean"
+is 255 minus the mean grey over a 7-column window centred on the stem: it falls
+when the stem loses ink (holes, thinner strokes), which is what /WornBand does.
 
     python3 -I lane.py PLOT.png IMG:DPI[:x0:y0:x1:y1] [IMG:DPI ...]
 
-Prints one table per scan (height in points, strikes, darkness) and saves a
-plot. Needs Pillow, NumPy, matplotlib and tesseract.
+Prints one table per scan (height in points, strikes, peak and mean darkness)
+and saves a two-panel plot. Needs Pillow, NumPy, matplotlib and tesseract.
 """
 import os
 import subprocess
@@ -66,17 +68,24 @@ def profile(path, dpi, box=None):
             rows = reg.shape[0]
             j = int(np.argmin(reg[int(rows * .3):int(rows * .7)].mean(axis=0)))
             col = reg[:, max(0, j - 1):j + 2].min(axis=1)
+            win = reg[:, max(0, j - 3):j + 4].mean(axis=1)
             n += 1
             for r in range(rows):
-                prof.setdefault(int(round(base - (t0 + r))), []).append(255 - col[r])
-    return n, {k: (len(v), float(np.mean(v))) for k, v in prof.items() if len(v) >= 8}
+                prof.setdefault(int(round(base - (t0 + r))), []).append(
+                    (255 - col[r], 255 - win[r]))
+    out = {}
+    for k, v in prof.items():
+        if len(v) >= 8:
+            v = np.array(v)
+            out[k] = (len(v), float(v[:, 0].mean()), float(v[:, 1].mean()))
+    return n, out
 
 
 def main():
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    fig, ax = plt.subplots(figsize=(5.2, 3.0), dpi=100)
+    fig, axs = plt.subplots(1, 2, figsize=(8.0, 3.0), dpi=100, sharey=False)
     for spec in sys.argv[2:]:
         parts = spec.split(":")
         path, dpi = parts[0], float(parts[1])
@@ -84,16 +93,18 @@ def main():
         n, p = profile(path, dpi, box)
         ks = sorted(p)
         pt = [k * 72 / dpi for k in ks]
-        dk = [p[k][1] for k in ks]
         label = os.path.basename(path).split(".")[0]
         print(f"{label}: {n} stems at {dpi:g} dpi")
         for k in ks:
-            print(f"  {k * 72 / dpi:5.2f} pt  n={p[k][0]:4d}  darkness {p[k][1]:6.1f}")
-        ax.plot(pt, dk, label=f"{label} ({n} stems)")
-    ax.set_xlabel("height above baseline (pt)")
-    ax.set_ylabel("stem darkness (0-255)")
-    ax.set_ylim(0, 255)
-    ax.legend(fontsize=7)
+            print(f"  {k * 72 / dpi:5.2f} pt  n={p[k][0]:4d}  peak {p[k][1]:6.1f}  mean {p[k][2]:6.1f}")
+        for ax, i in zip(axs, (1, 2)):
+            ax.plot(pt, [p[k][i] for k in ks], label=f"{label} ({n} stems)")
+    for ax, t in zip(axs, ("peak (darkest of 3 columns)", "mean (7-column window)")):
+        ax.set_title(t, fontsize=8)
+        ax.set_xlabel("height above baseline (pt)")
+        ax.set_ylabel("darkness (0-255)")
+        ax.set_ylim(0, 255)
+    axs[0].legend(fontsize=7)
     fig.tight_layout()
     fig.savefig(sys.argv[1])
 

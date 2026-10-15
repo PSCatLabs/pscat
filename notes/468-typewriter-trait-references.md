@@ -11,9 +11,12 @@ what to do next. No `lib/` file changed.
 
 - About 30 Wikimedia Commons file searches, three categories, the Library of
   Congress search API, Internet Archive metadata search and four web searches.
-- A hue scan of about 700 NARA/DPLA colour page thumbnails on Commons, ranked by
-  saturated-red fraction, top 40 or so inspected: every red mark was a stamp,
-  letterhead, form, pencil, seal or coloured sheet. None was typed in red.
+- A hue scan of about 700 NARA/DPLA colour page thumbnails on Commons (700 px wide,
+  R above 130, R-G above 70, R-B above 60), ranked by saturated-red fraction. All 44
+  above the threshold were viewed: every red mark was a stamp, letterhead, form,
+  pencil or crayon, seal, coloured sheet or photograph, and a third scored only
+  on a Kodak colour target. None was typed in red. It would miss faded or brownish
+  red on toned paper, and only reaches files whose titles matched the queries.
 - NBS circulars C431, C95 and C186 read in full text. C431 pp. 10-13 is the one
   public-domain statement about bichrome ribbons and the worn band (quoted in
   REFERENCES.md).
@@ -22,11 +25,13 @@ what to do next. No `lib/` file changed.
 
 ### Numbers for #538
 
-- Worn lane: stems are 2-5% **lighter** 6-7 pt up than at 2-4 pt (Szilard -2%, Duncan
-  -4%, MFR -5%; 395, 45 and 129 stems), not darker. No scan is grey in the middle.
-  `/WornBand` has nothing to be tuned against; a realistic preset should stay
-  within a few per cent (`/WornBand` 0.3 is about 4.5% of the lane's ink). The sign
-  of the model (dark tops) is a design choice.
+- Worn lane: on the peak statistic (darkest of three columns) stems are 1-5% lighter
+  6-7 pt up than at 2-4 pt (Szilard -2%, Duncan -4%, MFR -5%; 395, 45 and 129
+  stems); on the mean over a 7-column window (which falls when a stem loses ink) they
+  are -1.5%, +1% and -8%. No scan is grey in the middle with dark tops. `/WornBand` has
+  nothing to be tuned against; at 1 it takes about 15% of the lane's ink, more than any
+  difference seen, and with the opposite sign. Keep realistic presets small (0.3 is
+  about 4.5%). Dark tops are a design choice.
 - Two-colour: C431 says most bichrome ribbons show no diffusion; where there is
   any, black spreads into red; some ribbons leave a white "pin stripe". So keep
   `/Bleed` default 0 and small in presets, and try an opt-in boundary gap of one yarn
@@ -35,8 +40,8 @@ what to do next. No `lib/` file changed.
   the 350 in #538's text. For a red run, a black-tinted head or foot has
   support; a red foot on black text only has the mechanism.
 - Ink colour of a worn ribbon: Szilard's darkest 1% of pixels average RGB
-  (76, 68, 64), a neutral dark grey-brown, not purple. C431's purple is a property
-  of dye-heavy oily ink that was not seen on the board.
+  (76, 68, 64), a neutral dark grey-brown, not purple (the only colour scan on the
+  board with a worn ribbon). C431's purple is a property of dye-heavy oily ink.
 - Electric: MFR 1955 measures mean darkness 0.65, per-letter spread 0.019, coverage
   CV 0.17 at 200 dpi, no more even than manual Duncan, but the proportional face
   and the resolution make it a poor comparison. `/electric` is left as it is.

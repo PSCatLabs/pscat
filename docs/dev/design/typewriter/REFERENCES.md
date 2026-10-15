@@ -213,17 +213,23 @@ code changed in #468; numbers for #538 are in
   no text search inside images, so this finds titles and descriptions only.
 - A hue scan: about 700 colour page thumbnails (700 px wide) of NARA and DPLA
   scans on Commons (memoranda, letters, telegrams, reports, vouchers) were ranked
-  by the fraction of saturated red pixels, and the top 40 or so were looked at.
-  Every red thing was a rubber stamp ("SECRET", "TOP SECRET", declassification
-  stamps), a printed letterhead or form, red pencil, a wax seal, or a coloured
-  sheet. None was typed in red. `tools/` does not include this scanner: it was
+  by the fraction of saturated red pixels (R above 130, R-G above 70, R-B above
+  60), and all 44 thumbnails above the threshold were looked at in montages.
+  Every red mark was a rubber stamp ("SECRET", "TOP SECRET", declassification
+  stamps), a printed letterhead or form, red pencil or crayon, a wax seal, a coloured
+  sheet or a photograph; about a third (a series of typed copies of 1860s letters)
+  scored only because the scan includes a Kodak colour target. None was typed in
+  red. Limits: the threshold would miss faded or brownish red typing on toned
+  paper, thumbnails at 700 px would lose a thin red run, several queries (for
+  example "NARA report") returned mostly photographs, and the scan only reaches
+  files whose titles match, not the many thousands of undescribed pages. `tools/` does not include this scanner: it was
   throwaway, and the board's rule is that each crop comes from a named file.
 - The Library of Congress search API (three queries), the Internet Archive
   metadata search for typewriter-ribbon texts, and four general web searches.
   Those found retail listings, the IBM Selectric and IBM Electric articles on
   Wikipedia, CIA reading-room memoranda about *leasing* Selectric machines, and
-  the NBS circulars already on the board. The NBS circulars (C95, C186, C431)
-  have no figures of typed samples.
+  the NBS circulars already on the board. The text of the NBS circulars (C95,
+  C186, C431) refers to no figures of typed samples.
 
 ### Two-colour ribbon (black and red)
 
@@ -247,43 +253,45 @@ Implications for `lib/typewriter.ps` (not changed here):
 
 ### Worn lane
 
-**Not sourced as a page, and the board's scans argue against the model's
-direction.** `tools/lane.py` measures the darkness of the vertical stems of `d h k l b`
-against height above the baseline, so a worn lane (grey in the middle of the
-x-height, darker at ascender tops) would show as a dip in the middle.
+**Not sourced as a page, and the three board scans measured show no lane.**
+`tools/lane.py` measures the darkness of the vertical stems of `d h k l b` against
+height above the baseline, so a worn lane (grey in the middle of the x-height, darker
+at ascender tops) would show as a dip in the middle. It gives two statistics: the
+stem's peak (darkest of three columns) and the mean over a 7-column window, which falls
+when a stem loses ink, as `/WornBand`'s holes do.
 
 ![Stem darkness against height](refs/T16_stem_profile.png)
 
-*T16: mean stem darkness (0-255) at each height above the baseline; the table gives it by height band.*
+*T16: stem darkness (0-255) at each height above the baseline, by both statistics; the table gives it by height band.*
 
-| Scan | stems | 2-4 pt | 4-6 pt | 6-7 pt (just under the stem tip) |
-|---|---|---|---|---|
-| Szilard 1945 (worn, T10) | 395 | 171.5 | 168.8 | 167.6 (-2%) |
-| Duncan 1914 (fresh, T2) | 45 | 226.8 | 225.5 | 217.5 (-4%) |
-| MFR 1955 | 129 | 186.4 | 186.3 | 177.4 (-5%) |
+| Scan | stems | peak, 2-4 pt | peak, 4-6 pt | peak, 6-7 pt | mean, 2-4 pt | mean, 4-6 pt | mean, 6-7 pt |
+|---|---|---|---|---|---|---|---|
+| Szilard 1945 (worn, T10) | 395 | 171.5 | 168.8 | 167.6 | 101.8 | 105.9 | 100.3 |
+| Duncan 1914 (fresh, T2) | 45 | 226.8 | 225.5 | 217.5 | 160.1 | 167.9 | 161.3 |
+| MFR 1955 | 129 | 186.4 | 186.3 | 177.4 | 146.0 | 140.2 | 134.1 |
 
-No scan is lighter in the middle. The tops are 2-5% lighter than the x-height zone,
-the opposite of a worn lane, and the last point or two of each stem fall off with edge
-blur. The numbers are small, so this does not prove the machines had no lane, only that
+No scan is lighter in the middle than at 6-7 pt (just under the stem tips): on the
+peak statistic the tops are 1-5% lighter than the x-height zone, and on the mean they
+are within 2% for Szilard and Duncan and 8% lighter for MFR. Neither statistic has the
+sign a worn lane needs. The last point or two of each stem fall off with edge blur and
+serifs, and are left out. This does not prove the machines had no lane, only that
 none is visible at these resolutions (0.30-0.36 pt per pixel) and in these stems. The
 baseline comes from tesseract's boxes, and Duncan has few stems. C431 does support the
 mechanism: the type strikes a narrow band of the ribbon, and that band runs out
 of ink and recovers with rest.
 
-Implications: `/WornBand` has no measurement to tune against. If it is used for a
-realistic preset, keep the effect inside what the scans show, a few per cent: at
-`/WornBand 0.3` the lane loses about 4.5% of its ink (TYPEWRITER.md: 15% at
-`/WornBand 1`, scaling linearly), which is that size. Dark tops are a design choice
-for the gallery, not something the board shows.
+Implications: `/WornBand` has no measurement to tune against, and the one it can
+be compared with points the other way. At `/WornBand 1` the lane loses about 15% of
+its ink (TYPEWRITER.md), against differences of at most 8% here and none with the
+model's sign. A realistic preset should keep it small (0.3 takes about 4.5%); dark
+tops are a design choice for the gallery, not something the board shows.
 
 ### Embossed punctuation
 
 **Not sourced.** An embossed period shows only in raking light, on the back of the
 sheet, or on thin onionskin held to the light. Every scan on the board is a flat,
 front-lit scan of the face, and no NARA or DPLA scan seen in the search showed a
-verso or a transmitted-light view of typing. A throwaway blob finder put 24 periods on
-Szilard at about 1.5 pt across; the board has no reference period size, so that
-shows no oversize dot, and no undersize one. Q3's rule (extra pressure on `. , ' "`) stays a design choice.
+verso or a transmitted-light view of typing. Q3's rule (extra pressure on `. , ' "`) stays a design choice.
 
 ### Confirmed electric page
 
@@ -325,7 +333,7 @@ machine typed it.
 | feathered edges | T2, T4, and C431's "touch ... slightly beyond the sharp edges". |
 | filled counters | T4, T6, T15 |
 | wearing or drying ribbon | T10 (worn, grey-brown) against T2 (fresh, black). |
-| worn lane (#538) | **Not sourced** (#468). The stem profile (T16) shows no grey middle and no dark tops in Szilard, Duncan or MFR 1955. C431 p. 11-12 supports a narrow band that runs out of ink. |
+| worn lane (#538) | **Not sourced** (#468). The stem profile (T16) shows no grey middle and no dark tops in Szilard, Duncan or MFR 1955 (peak and mean statistics). C431 p. 11-12 supports a narrow band that runs out of ink. |
 | two-colour ribbon bleed | **Not sourced as a page** (#210's search, then #468's: about 700 colour scans hue-ranked, none typed in red). Text evidence: NBS C431 pp. 10-12 (bleed is rare, black into red, some ribbons leave a white pin stripe). |
 | baseline drift along a line | Measured: 0.06–0.10° sd per line. |
 | line-start wander after each carriage return | Measured: 0.17–0.38pt sd. |

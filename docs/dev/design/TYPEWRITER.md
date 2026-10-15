@@ -476,8 +476,9 @@ Each is phrased as a decision, with a recommendation.
   two-colour red run or a worn-lane page), so these recommendations stand as design
   choices, not measurements; REFERENCES.md, "Search for the unsourced traits", has what
   was searched and found. Two results touch the recommendations: C431's text says to keep
-  `/Bleed` rare and small, and the stem profile shows lighter ascender tops
-  (2-5%), not the dark tops `/WornBand` models. The path left is a photograph of a page
+  `/Bleed` rare and small, and the stem profile (peak and mean darkness) shows no grey
+  middle or dark tops in three scans, the tops being the same or lighter, where `/WornBand`
+  models dark tops. The path left is a photograph of a page
   typed on a machine the project can name.
 - **Q4. Defaults that follow the measurements.** At body size and screen
   resolution, measured jitter is barely visible, and the default page may look
