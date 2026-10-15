@@ -2343,6 +2343,11 @@
 % @internal
 /ptemit {
     ptk 0 gt {
+        % /PerFill /FillLength (issue #492): a long loaded run is cut into
+        % several fills, each coloured at its own middle. A run no longer than
+        % the length (and every run outside such a call) takes the code below.
+        /ptcuts ptColorRec null ne ptk 1 gt and { ptfillcuts } { null } ifelse def
+        ptcuts null ne { ptsplitfill } {
         ptColorRec null ne { ptri 0 get ptri ptk 1 sub get ptcolor } if
         /ptlast ptk 1 sub def
         /ptext0 ptDrag ptraw ptri 0 get get 6 get mul ptPitch 0.5 mul add def
@@ -2357,8 +2362,51 @@
             ptri ptei get ptub ptei get 0 ptpt lineto } for
         ptri 0 get ptub 0 get ptext0 neg ptpt lineto
         closepath fill
+        } ifelse
     } if
     /ptk 0 def
+} bind def
+
+% - ptfillcuts -> [cut ...] or null   (issue #492)
+% The accumulated run's cut points when a live `pkwet /FillLength` wants it
+% cut into more than one fill, else null. Reads only the stops' arc lengths.
+% @internal
+/ptfillcuts {
+    pufilllen dup 0 gt {
+        /ptfl exch def
+        [ 0 1 ptk 1 sub { ptri exch get ptraw exch get 4 get } for ] ptfl pusplit
+        dup length 2 gt { } { pop null } ifelse
+    } { pop null } ifelse
+} bind def
+
+% - ptsplitfill -   (issue #492: ptemit's strip as several overlapping fills)
+% The same polygon as ptemit builds, over the sub-range of stops a cut list
+% names. The half-pitch and /Drag extension is only at the run's real ends: an
+% interior end is the plain stop edge, covered by its neighbour. The strip's
+% edges come from the arrays ptemit has already filled, so no draw is made.
+% @internal
+/ptsplitfill {
+    /ptlast ptk 1 sub def
+    /ptext0 ptDrag ptraw ptri 0 get get 6 get mul ptPitch 0.5 mul add def
+    /ptext1 ptDrag ptraw ptri ptlast get get 6 get mul ptPitch 0.5 mul add def
+    0 1 ptcuts length 2 sub {
+        /ptfk exch def
+        /ptfa ptfk 0 eq { 0 } { ptcuts ptfk get 1 sub } ifelse def
+        /ptfb ptcuts ptfk 1 add get def
+        ptri ptfa get ptri ptfb get ptcolor
+        /ptfe0 ptfa 0 eq { ptext0 } { 0 } ifelse def
+        /ptfe1 ptfb ptlast eq { ptext1 } { 0 } ifelse def
+        newpath
+        ptri ptfa get ptua ptfa get ptfe0 neg ptpt moveto
+        ptfa 1 ptfb { /ptei exch def
+            ptri ptei get ptua ptei get 0 ptpt lineto } for
+        ptri ptfb get ptua ptfb get ptfe1 ptpt lineto
+        ptri ptfb get ptub ptfb get ptfe1 ptpt lineto
+        ptfb -1 ptfa { /ptei exch def
+            ptri ptei get ptub ptei get 0 ptpt lineto } for
+        ptri ptfa get ptub ptfa get ptfe0 neg ptpt lineto
+        closepath fill
+    } for
 } bind def
 
 % - ptgemit -   (ptemit, but only when there is a ridge to draw)
@@ -3964,6 +4012,11 @@
     /pmnbv exch def /pmnav exch def /pmend exch def /pmstart exch def
     pmend pmstart gt {
         /pmspan pmend pmstart sub def
+        % /PerFill /FillLength (issue #492): a long loaded run is cut into
+        % several fills, each coloured at its own middle. A run no longer than
+        % the length (and every run outside such a call) takes the code below.
+        /pmcuts pmColorRec null ne { pmfillcuts } { null } ifelse def
+        pmcuts null ne { pmsplitfill } {
         pmColorRec null ne { pmstart pmend pmcolor } if
         newpath
         pmstart 1 pmend {
@@ -3976,6 +4029,7 @@
             pmei pmnbv pmtaper pmhalf mul pmEdge pmedge mul pkjit add pmpt lineto
         } for
         closepath fill
+        } ifelse
     } {
         % A run one sample long has no strip -- a strip needs two stops
         % to have any area -- but it is a real deposit and has to leave a
@@ -3991,6 +4045,57 @@
         % run knows which way the brush was going.
         pmstart pmnav pmnbv 0 pmstart pmgap pmstamp
     } ifelse
+} bind def
+
+% - pmfillcuts -> [cut ...] or null   (issue #492)
+% The current run's cut points, as absolute stop indices, when a live `pkwet
+% /FillLength` wants it cut into more than one fill, else null. Reads only the
+% stops' arc lengths; draws nothing.
+% @internal
+/pmfillcuts {
+    pufilllen dup 0 gt {
+        /pmfl exch def
+        [ pmstart 1 pmend { pmraw exch get 4 get } for ] pmfl pusplit
+        dup length 2 gt {
+            /pmfc exch def
+            0 1 pmfc length 1 sub { /pmfi exch def pmfc pmfi pmfc pmfi get pmstart add put } for
+            pmfc
+        } { pop null } ifelse
+    } { pop null } ifelse
+} bind def
+
+% - pmsplitfill -   (issue #492: pmemit's strip as several overlapping fills)
+% The same polygon as pmemit builds, filled in the pieces `pmcuts` names. Its
+% boundary is taken first, whole, in pmemit's own order (the na side forward,
+% then the nb side back, each point's /Edge jitter drawn where it was) so the
+% random stream is what it would be unsplit, and then each piece is filled from
+% those points. The run-end taper is still the whole run's (pmstart, pmspan and
+% pmei are set as pmemit sets them).
+% @internal
+/pmsplitfill {
+    /pmfpa pmspan 1 add array def
+    /pmfpb pmspan 1 add array def
+    pmstart 1 pmend {
+        /pmei exch def
+        pmei pmnav pmtaper pmhalf mul pmEdge pmedge mul pkjit add pmpt
+        2 array astore pmfpa exch pmei pmstart sub exch put
+    } for
+    pmend -1 pmstart {
+        /pmei exch def
+        pmei pmnbv pmtaper pmhalf mul pmEdge pmedge mul pkjit add pmpt
+        2 array astore pmfpb exch pmei pmstart sub exch put
+    } for
+    0 1 pmcuts length 2 sub {
+        /pmfk exch def
+        /pmfa pmfk 0 eq { pmstart } { pmcuts pmfk get 1 sub } ifelse def
+        /pmfb pmcuts pmfk 1 add get def
+        pmfa pmfb pmcolor
+        newpath
+        pmfa pmstart sub pmfpa exch get aload pop moveto
+        pmfa 1 add 1 pmfb { pmstart sub pmfpa exch get aload pop lineto } for
+        pmfb -1 pmfa { pmstart sub pmfpb exch get aload pop lineto } for
+        closepath fill
+    } for
 } bind def
 
 % charge affinity pmwets -> bool   (does this striation deposit here?)
@@ -5297,7 +5402,7 @@
 % striation, a pktrowel run, a pkfan bristle's run) or one pkdab dab, asked at the
 % run's middle stop (the dab's centre), so a mark made of many short fills (stacked strokes, a broken
 % stroke) follows the backdrop closely and one long unbroken run is asked once,
-% as it would be per pass. The position is in the user space pkwet is called
+% as it would be per pass (/FillLength, below, cuts it). The position is in the user space pkwet is called
 % in, as /At and /Box are, however the CTM has moved inside the mark, and it
 % includes the pass's displacement: it is where the fill lands. The core is
 % asked nothing. Cost: one call of the procedure per fill per softening pass
@@ -5309,6 +5414,24 @@
 % addition to it, not a replacement. pkoil's and pkdab's /HighlightColor and
 % /ShadowColor are graded once per pass too. /PerFill is rejected with /Box (a banded call
 % already gives each cell its own answer) and with a literal /Under.
+%
+% A long run, cut (issue #492)
+% -----------------------------
+% `/FillLength 10` (points, with /PerFill true) cuts a long unbroken run of a
+% pkbroad or pktrowel mark into fills about 10pt apart along it, each coloured,
+% and so asked, at its own middle stop: one tall stroke down a vertical gradient
+% then follows it instead of getting its one middle answer. Each fill after the
+% first starts one stop early (neighbours share a segment, so there is no seam),
+% the run's real ends keep their extension, and the random stream is as it was:
+% pktrowel has no draw to keep, and pkbroad's boundary points are all drawn first,
+% in their own order, before any piece is filled. A run no longer than the length
+% is not cut, and a call without the key does exactly what it did. pkfan runs are
+% not cut (each is one pointed ribbon) and a pkdab dab is already one fill. Cost:
+% one call of /Under per fill per softening pass, so a 110pt stroke cut at 12pt
+% asks about eight times as often (pkbroad, 4 layers, /Offset 20: 45 asks whole,
+% 345 cut); the procedure must be cheap and must not draw random numbers. Over
+% a 150pt gradient (6 layers, /Offset 34) the rim of one 110pt pkbroad stroke
+% fell from 239.6 to 71.6 at /FillLength 10.
 %
 % Measured (tests/paintkit.rs `loaded_column`, twelve stacked pkbroad strokes
 % over the strong gradient, /Offset 34, 6 layers): the residual rim is 384.4
@@ -5906,6 +6029,25 @@
 %   % puwetat outside any pkwet is the colour it was given.
 %   0.2 0.4 0.6 3 4 puwetat 0.6 eq exch 0.4 eq and exch 0.2 eq and
 %   (puwetat outside pkwet is the identity) mustbe
+%
+%   % /FillLength (issue #492): the cut points of a run, and "no length" outside
+%   % any pkwet.
+%   [ 0 1 1 1 1 1 ] 2 pusplit dup length 4 eq
+%   exch dup 1 get 2 eq exch dup 2 get 4 eq exch 3 get 5 eq and and and
+%   (pusplit cuts where the arc length since the last cut reaches the length) mustbe
+%   [ 0 1 1 ] 10 pusplit dup length 2 eq exch 1 get 2 eq and
+%   (a run shorter than the length is one piece) mustbe
+%   pufilllen 0 eq (no cut length outside pkwet) mustbe
+%
+%   { { } << /Under { pop pop 0 0 0 } /At [ 0 0 ] /FillLength 5 >> pkwet }
+%   /pkwet-filllength-needs-perfill
+%   (/FillLength without /PerFill) mustguard
+%
+%   { { } << /Under { pop pop 0 0 0 } /At [ 0 0 ] /PerFill true /FillLength 0 >> pkwet }
+%   /pkwet-filllength-must-be-positive
+%   (a zero /FillLength) mustguard
+%
+%   pqdepth 0 eq (every rejection rolled the depth back) mustbe
 %%EndSelfTest
 %
 % @kind: Procedure
@@ -5915,6 +6057,7 @@
 % @param: /Under [rgb array] the color already on the canvas that this mark settles into; the outermost pass is nearly this color. May also be a procedure `x y -> r g b` (three numbers in 0..1, user space), the backdrop as a function: it is asked once per softening pass, at /At plus that pass's displacement, so the rim goes where the backdrop changes across the mark. It must be a pure function: no painting, no pkwet call, no reliance on the operand stack. A mark taller than the backdrop's change is better asked per band: see /Box and /Bands (default [1 1 1])
 % @param: /At [points] With a procedural /Under only (required there, unless /Box is given): [x y] where the mark sits, in the user space pkwet is called in, the point each pass's displacement is added to before the procedure is asked for the backdrop. With /PerFill it is still where an inherited-colour mark is asked (default absent)
 % @param: /PerFill [boolean] With a procedural /Under and /At only: true asks the /Under procedure again at every loaded-colour fill's own position (a pkbroad striation's, a pktrowel run's, a pkfan bristle's run, a pkdab dab), instead of using the one answer its pass got, so a tall mark made of many fills follows a backdrop that changes down it, with no clipping and no more runs of the mark. Reaches only presets that paint in /Colors; an inherited-colour mark is still asked per pass. Costs one call of the procedure per fill per softening pass, so keep it cheap. Not with /Box (default false)
+% @param: /FillLength [points] With /PerFill true only: cut a long loaded run into fills about this far apart along the mark, each asked at its own middle, so one long unbroken stroke (a vertical pkbroad stroke down a vertical gradient) follows the backdrop too, not only a mark made of many runs. Reaches pkbroad and pktrowel (including its edge ridges); pkfan and pkdab fills are not cut. Neighbouring fills overlap by one stop and the random stream is unchanged, but each cut is another fill and so another call of the /Under procedure, which must not draw random numbers. The length is measured in the user space the mark is drawn in; a run no longer than it is not cut. Must be positive (default absent: one fill per run)
 % @param: /Box [array of points] With a procedural /Under and /Bands (instead of /At): [x y w h], where the mark sits, in the user space pkwet is called in. The /Under procedure is then asked once per cell of a grid over the box grown by /Offset on every side, at the cell's centre, and each softening pass is run once per cell, clipped to it and mixed toward that cell's answer, so the backdrop varies across a tall mark and not only from pass to pass. The grid's outer cells run on outward, so a displaced rim is not cut off (default absent)
 % @param: /Bands [array of count] With /Box (required with it): [columns rows] of the grid, each a whole number 1 to 16. A cell wants to be no taller than about half /Offset, and a short mark is as well served by /At. The wrapped procedure runs (Layers - 1) x columns x rows + 1 times, which a nest of such calls may multiply by at most 64 (a 6-layer call can have 12 cells, a 4-layer one 21); the random stream is replayed per cell, so every cell lays the same marks and the stream ends where one unbanded run leaves it (default absent)
 % @param: /Pickup [0..1] how far the outermost pass mixes toward Under; lower keeps the mark's own color out to its edge (default 0.85)
@@ -6023,6 +6166,18 @@
         /pqperfill load xcheck { pkwet-perfill-must-not-be-a-procedure } if
         /pqperfill load type /booleantype ne { pkwet-perfill-must-be-a-boolean } if
         pqperfill pqbanded and { pkwet-perfill-and-box-are-exclusive } if
+        % /FillLength (issue #492): cut a long loaded run into fills about this
+        % far apart, each asked at its own middle. Only means anything with
+        % /PerFill; 0 here is the frame's "off".
+        /pqfilllen 0 def
+        pqopts /FillLength known {
+            pqperfill not { pkwet-filllength-needs-perfill } if
+            /pqfilllen pqopts /FillLength get def
+            /pqfilllen load xcheck { pkwet-filllength-must-not-be-a-procedure } if
+            /pqfilllen load type dup /integertype ne exch /realtype ne and
+                { pkwet-filllength-must-be-a-number } if
+            pqfilllen 0 le { pkwet-filllength-must-be-positive } if
+        } if
         /pqUnderProc /pqUnder load def
         /pqUnder [ 1 1 1 ] def
         /pqunderp true def
@@ -6037,6 +6192,8 @@
         pqopts /At known { pkwet-at-needs-an-under-procedure } if
         pqopts /Box known pqopts /Bands known or { pkwet-box-needs-an-under-procedure } if
         pqopts /PerFill known { pkwet-perfill-needs-an-under-procedure } if
+        pqopts /FillLength known { pkwet-filllength-needs-perfill } if
+        /pqfilllen 0 def
         /pqperfill false def
         /pqbanded false def
         /pqunderp false def
@@ -6122,8 +6279,9 @@
     % which is what keeps puwet's old path), and 8 a banded call's record
     % (issue #359: the cells' clips, backdrops, pass colours and the saved
     % random stream; null for any other call), and 9 a /PerFill call's
-    % [ backdrop procedure, CTM at entry ] (issue #403; null for any other
-    % call, which is what keeps puwetat on puwet's old path). The later slots go at the end
+    % [ backdrop procedure, CTM at entry, /FillLength or 0 ] (issues #403,
+    % #492; null for any other call, which is what keeps puwetat on puwet's
+    % old path). The later slots go at the end
     % so 0-3 keep the meaning the budget and the nesting machinery rely on.
     userdict /pqframes get pqdnow 10 array put
     pqmyframe 1 /pqproc load put
@@ -6240,7 +6398,7 @@
     % a `puwet` with no position (pkoil's ridge colours) still has its
     % per-pass answers to read.
     pqperfill pqLayers 1 gt and
-        { pqmyframe 9 [ /pqUnderProc load matrix currentmatrix ] put } if
+        { pqmyframe 9 [ /pqUnderProc load matrix currentmatrix pqfilllen ] put } if
     % Each pass runs under `stopped`, which is what makes this wrapper
     % safe to abandon. Three separate review findings were all the same
     % missing unwind-protect: a caught error leaked one graphics-state
@@ -8195,6 +8353,59 @@ systemdict /setalpha known /pwhasalpha exch def
         } for
         puwc aload pop
     } { pop pop } ifelse
+} bind def
+
+% - pufilllen -> length   (issue #492: how long a loaded run may be before it
+% is cut into several fills, or 0 for "do not cut")
+% The smallest positive /FillLength among the live `pkwet` calls that have one
+% (slot 9, third element) and are running a softening pass now (a nonzero pass
+% factor: the core is asked nothing, so cutting it would only add fills). 0
+% outside any `pkwet`, and in every call without /PerFill /FillLength, which is
+% what keeps a run on the code it always had. No draws.
+% @internal
+/pufilllen {
+    /pufnmin 0 def
+    pqdnow 0 gt {
+        1 1 pqdnow {
+            userdict /pqframes get exch get /pufnfr exch def
+            pufnfr 9 get dup null eq { pop } {
+                2 get dup 0 gt
+                pufnfr 4 get pufnfr 6 get get 0 ne and
+                    { /pufnv exch def
+                      pufnmin 0 eq pufnv pufnmin lt or { /pufnmin pufnv def } if }
+                    { pop }
+                ifelse
+            } ifelse
+        } for
+    } if
+    pufnmin
+} bind def
+
+% [sp ...] length pusplit -> [cut ...]   (issue #492)
+% Where to cut a run of n+1 stops into fills. `sp` is each stop's arc length
+% from the one before (the first is ignored). The result is the stop indices
+% 0 = c0 < c1 < ... < cm = n: a cut falls at the first stop where the arc
+% length since the last cut reaches `length`, and never at the last stop, so a
+% run no longer than `length` comes back as [ 0 n ] (one piece). Piece k is
+% stops c_k - 1 .. c_(k+1) (stops 0 .. c1 for the first), so neighbours share
+% one segment and the seam between two fills is covered, not abutted. No draws.
+% @internal
+/pusplit {
+    /puspl exch def /pusps exch def
+    /puspn pusps length 1 sub def
+    pusps length array /pusparr exch def
+    pusparr 0 0 put
+    /puspm 1 def
+    /puspacc 0 def
+    1 1 puspn {
+        /puspi exch def
+        /puspacc puspacc pusps puspi get add def
+        puspacc puspl ge puspi puspn lt and {
+            pusparr puspm puspi put /puspm puspm 1 add def /puspacc 0 def
+        } if
+    } for
+    pusparr puspm puspn put
+    pusparr 0 puspm 1 add getinterval
 } bind def
 
 %%SelfTest: puparse-rejects-malformed-loads
