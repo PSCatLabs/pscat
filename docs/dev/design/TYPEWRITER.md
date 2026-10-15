@@ -183,10 +183,14 @@ and from the typist (speed, and how hard and unevenly the keys are hit). Two key
 name that, and nothing else about the measured model changes:
 
 - `/MisStrike` `[0..1]`, default 0.01: the fraction of strikes that are
-  mis-struck. 0 is never, 1 is every strike. The board gives 0.8% (Duncan, a
-  manual), 0.9% (Szilard, a manual with a worn ribbon) and 0.2% (O'Brien, the only
-  inferred-electric sample, one document) of strikes more than 1pt off
-  horizontally, so 1% is the manual end and about 0.002 is the even-handed end.
+  mis-struck. 0 is never, 1 is every strike. 1% is what #467 calibrated to the
+  board's horizontal tail, which is a different quantity: the share of strikes
+  more than 1pt off, 0.8% (Duncan, a manual), 0.9% (Szilard, a manual with a
+  worn ribbon) and 0.2% (O'Brien, the only inferred-electric sample, one
+  document). At `/Wear 1` a mis-struck x has sd about 0.8pt, so only about a fifth
+  of mis-strikes clear 1pt and those percentages are not rates. O'Brien's tail is
+  about a quarter of the manuals', so a lower rate for an even-handed typist is
+  a judgement, not a calibration.
   `/MisStrike` is a 0..1 check because a fraction above 1 means nothing (the
   issue sketched a non-negative number; 0..1 is the same key with the nonsense cut off).
 - `/MisStrikeScale` `[ratio]`, default 1: how far a mis-struck letter jumps, as a
