@@ -528,7 +528,7 @@ No new page-scale CI test is added. #204's concern about CI time stands.
   reach, so the stems are fat. A stroke thinner than about 2 x `tEy` goes (the
   bars of `e` and `E`, the tops and bottoms of bowls, the serifs and
   underscores) and a thicker one thins, a stem is untouched. `tEy` is `tECopy`
-  (50 glyph units) x the copy loss x the strike's hole level, so a light strike
+  (45 glyph units) x the copy loss x the strike's hole level, so a light strike
   loses more and a darker one only thins. A copy is no longer heavier in total
   ink than the original by dark pixels (the thin horizontals are most of a
   letter's length), but its stems are fatter. Y only, not `tErode`'s square, because the face is
