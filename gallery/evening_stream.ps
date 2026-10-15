@@ -410,6 +410,17 @@
 
 % ---- banks and meadows -----------------------------------------------
 
+% x -> factor   how much of the sun's glow reaches a point along the meadow:
+% largest at the sun's x (evSX), a ninth of that at the far corners
+/evglowat {
+    evSX sub abs 340 div 1 exch sub 0 max 1.5 exp 1.9 mul 0.25 add
+} bind def
+% y -> share   the lit share of the meadow's colour before the glow acts:
+% a half on the far shore, fading to nothing 45 points toward the viewer
+/evlity {
+    evHZ exch sub 90 div 1 min 0.5 exch sub 0 max
+} bind def
+
 /evmeadow {                                      % path-proc seed -
     srand /evmp exch def
     evMEADOW evset evmp fill
@@ -419,11 +430,12 @@
             pop
             /evx 800 chance 20 sub def
             /evy evHZ 150 frnd 1.8 exp mul sub def
-            % the glow catches the far meadow, fading toward the viewer
-            /evf evHZ evy sub 90 div 1 min def
+            % the glow catches the far meadow: most under the sun, fading toward
+            % the corners and toward the viewer (the same light the edges pull out)
+            /evlit evy evlity evx 40 add evglowat mul 0.8 mul 1 min def
             evx evy evx 60 add 40 chance add evy 3 evj add evseg
             << /Width 12 /Charge 0.7 /Depletion 0.85 /Edge 0.3 /Touch 0.85 /ColorMix 0.6
-               /Colors [ [ evMEADOWLT evMEADOW evf 0.5 add 1 min mix3 ] evMEADOW ] >> pkbroad
+               /Colors [ [ evMEADOW evMEADOWLT evlit mix3 ] evMEADOW ] >> pkbroad
         } for
     grestore
 } def
@@ -578,17 +590,17 @@
     { evux evuy evwaterat } ifelse
 } bind def
 % x y -> r g b   the meadow's colour at a point along its edge, for /Mass:
-% plain meadow, lit with the yellow of its light by a share that is largest
-% right on the far shore and fades to nothing 60 points toward the viewer,
-% and that is strongest under the glow (x = evSX) and thins toward the
-% corners, so the shore catches the last light where the sun went down and
-% the banks beside the stream pick it up only at their far ends. It draws
-% nothing random: pkbrushedge asks it once per stroke.
+% plain meadow, lit with the yellow of its light by the same share as the
+% meadow's own strokes (evlity in y, evglowat in x: largest on the far shore
+% under the glow, nothing 45 points toward the viewer, a ninth of it at the
+% corners), a little less since an edge stroke is one colour and reads
+% brighter than the double-loaded fill. So the shore catches the last light
+% where the sun went down and the banks beside the stream pick it up only at
+% their far ends, matching the meadow behind them. It draws nothing random:
+% pkbrushedge asks it once per stroke.
 /evmeadowat {
     /evmay exch def /evmax exch def
-    evmax evSX sub abs 340 div 1 exch sub 0 max 1.5 exp 1.9 mul 0.25 add   % the glow's reach
-    1 evHZ evmay sub 60 div sub 0 max 0.3 mul mul                          % lit share
-    /evmal exch def
+    evmay evlity evmax evglowat mul 0.55 mul 1 min /evmal exch def
     evMEADOW evMEADOWLT evmal mix3
 } bind def
 
