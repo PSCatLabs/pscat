@@ -1,0 +1,124 @@
+%!PS-Adobe-3.0
+%%Title: The Man from 2026 -- a TOP SECRET memorandum of 1962 that was never released
+%%BoundingBox: 0 0 612 1008
+%%EndComments
+
+% A memorandum for the record from an invented inquiry office: an interviewing
+% officer's flat account of a man found in a culvert who says he came from the
+% year 2026, and built his machine by talking to another machine. It is the
+% ribbon original, kept as the record copy and never released: no release
+% stamps, no case numbers and no redactions, only the classification typed in
+% red at the head and foot of the sheet, the control number, the registry's
+% stamps, a paper clip and the initials and note of the people who read it.
+% Every office, person and place in it is made up; the only real names are in
+% the man's own testimony.
+%
+%   lib/typewriter.ps  tw-type: the memo header, tab stops, a strikeover <o>,
+%                      x-outs <x>, an underscore <u>, and the ribbon ink of an
+%                      elite manual at an even hand (/StrikeWear 0.5); then tw-set on the same machine for
+%                      the control lines and the red half of a black/red
+%                      ribbon for the banners (/Ink red, and /Bleed 0.85 from
+%                      /above: the black half creeps into the tops of a few
+%                      red letters)
+%   lib/released.ps    rel-page: an original, not a copy (/Generation 0):
+%                      aged paper, punch holes, a gem clip, the scanner's tilt
+%                      and lamp, and the stamps and notes over the type
+%   lib/handscript.ps  the routing initials and the margin note
+%
+%   pscat --page 612x1008 --png time_traveler_memo.png gallery/time_traveler_memo.ps
+%   gs -q -dNOSAFER -dBATCH -dNOPAUSE -sDEVICE=png16m -r144 -g1224x2016 \
+%      -dGraphicsAlphaBits=4 -dTextAlphaBits=4 \
+%      -sOutputFile=time_traveler_memo_gs.png gallery/time_traveler_memo.ps </dev/null
+
+(lib/artkit.ps) run
+(lib/surfacekit.ps) run
+(lib/handscript.ps) run
+(lib/typewriter_outlines.ps) run
+(lib/typewriter.ps) run
+(lib/released.ps) run
+
+1 setgray clippath fill
+
+% tt- prefix: piece-local.
+/ttblack [0.15 0.14 0.16] def
+/ttred [0.66 0.13 0.11] def
+
+/tttext (1.\tOn the morning of 21 August 1962 the Sheriff of Corriveau County telephoned this office about a man found at 0540 hours in a dry culvert under the county road east of Ardell. The man was unhurt and his clothing was dry. He carried no wallet. He had with him a flat glass object, a pair of canvas shoes of unusual make and three paper bills of a design not known to the Sheriff, dated 2017. He is held at the county jail on a vagrancy charge pending this inquiry. The writer interviewed him there on 22 August from 1300 to 1715 hours, with Deputy C. R. Wendt present.
+
+2.\tSUBJECT gives his name as Martin J. Halvorsen and his date of birth as 3 March 1989. He states that he is a "software engineer" and that he came here from the year <x>1962</x> 2026, "by accident, on the second try." He declined to name his home city, "so as not to change anything." He was calm and <x>friendly</x> courteous throughout, and asked twice whether the coffee was real.
+
+3.\tSUBJECT states that he built the apparatus himself, in a rented garage, over eleven weeks, and that he did not know how to build it. The programs that run it were written by a machine he calls "Claude Code," made by a company he calls "Anthropic." One speaks to this machine in plain English. It then writes the programs, runs them, and corrects them when they fail. SUBJECT calls this "pair programming." Asked who his partner had been, he said it was the machine.
+
+4.\tSUBJECT states that the machine asked his permission before it ran anything, "every single time," and that he grew <x>angry</x> tired of saying yes. After some hours of work it would "run out of context," by which he means that it forgot what had been done and had to be told everything again. For this reason he kept written notes for it. Asked for these notes, he stated that they are "in the repo," and could not explain the term.
+
+5.\tToward the end SUBJECT ran several such machines at once, which he calls "agents," each on a different part of the work. He limited them to three at a time, as more than three "stepped on each other." He states that one of them wrote the instructions for the other two.
+
+6.\tAsked to describe the year 2026, SUBJECT stated (a) that nearly everyone carries a slab of glass the size of a pocket notebook, and talks to it, and that it answers; (b) that few letters are typed, or written at all; and (c) that the machines he described can now produce a document such as this memorandum, down to the worn ribbon, the strikeovers and the grime of the copying machine, so that no one could tell it from the real thing. This statement could not be verified.
+
+7.\tThe glass object is held with SUBJECT's other effects at the Sheriff's <o>offcie|office</o>. It lights when pressed and shows the words "No Service." It is warm to the touch. It could <u>not</u> be opened.
+
+8.\tASSESSMENT. SUBJECT's account was consistent over four hours of questioning and detailed beyond the point of invention. It is also impossible. The writer recommends that SUBJECT be committed to the State Hospital at Merrin for psychiatric evaluation, that the glass object be sent to the Laboratory Division, and that this matter be closed.
+
+
+\t\t\t\t\t\t\t\tL. D. Kessner
+\t\t\t\t\t\t\t\tInterviewing Officer
+\t\t\t\t\t\t\t\tSpecial Cases Branch
+
+Distribution:
+  Copy 1 - Registry (record copy)
+  Copy 2 - Chief, Special Cases Branch
+  Copy 3 - Laboratory Division) def
+
+/ttopts <<
+    /Text tttext
+    /Width 612 /Height 1008 /Margin 72 /MarginTop 108 /MarginBottom 72
+    /Pitch 12 /Size 11.5 /Tabs 5
+    /Machine 12 /Seed 1962 /Wear 1.0 /MachineWear 0.4 /StrikeWear 0.5
+    /Ink ttblack /Ribbon 0.75
+    /Memo << /Title (MEMORANDUM FOR THE RECORD)
+             /Subject (Interview with a man held at Ardell who states that he is from the year 2026)
+             /Date (23 August 1962)
+             /Rule false >>
+>> def
+
+% col row string -> -  types the string at a column from the left margin and
+% a line counted in single lines (12pt) up from the body's first baseline,
+% on the frame tw-type left set: the same machine, the same cells.
+/ttat {
+    3 1 roll 12 mul exch 6 mul exch
+    ttorg aload pop 3 -1 roll add 3 1 roll add exch moveto show
+} bind def
+
+{
+    ttopts tw-type
+    % tw-type leaves the carriage a line below its last: back up by the line
+    % count to the body's first baseline, the origin of the marks typed after
+    currentpoint ttopts tw-linecount 12 mul add 2 array astore /ttorg exch def
+    % the control lines, black, top right
+    << /Strike 3 >> tw-set
+    64 5 (OFI-TS-62-0118) ttat
+    64 4 (Copy 1 of 3) ttat
+    64 3 (Page 1 of 1) ttat
+    % the banners: the ribbon lifted to its red half
+    << /Strike 4 /Ink ttred /Bleed 0.85 /BleedInk ttblack /BleedSide /above >> tw-set
+    29 5 (T O P   S E C R E T) ttat
+    29 -71 (T O P   S E C R E T) ttat
+    << /Strike 0 /Ink ttblack /Bleed 0 >> tw-set
+} <<
+    /Width 612 /Height 1008 /Seed 118 /Generation 0
+    /Age 0.5 /EdgeDark 0.4 /Lamp 0.2 /Skew 0.35 /Punch 2 /Clip 1
+    /Stamps [
+        << /Lines [ (REGISTRY) (AUG 24 1962) (OFFICE OF FIELD INQUIRY) ] /X 140 /Y 940 /Angle -3
+           /Size 8 /Ink [0.32 0.18 0.42] /Frame /box /Font /Helvetica
+           /Tracking 1.2 /Seed 7 /Strength 0.6 >>
+        << /Lines [ (OFI REG. 7) (NOT SUBJECT TO) (AUTOMATIC REGRADING) ]
+           /X 500 /Y 60 /Size 6.5 /Ink [0.16 0.15 0.18] /Frame /box
+           /Font /Helvetica /Seed 11 /Strength 0.85 /Angle -1 >>
+    ]
+    /Notes [ << /Text (seen. whb 8-27) /X 470 /Y 985 /Angle 4 /Size 15
+                /Width 160 /Seed 5 >>
+             << /Text (lab says it is still warm. not closed.  whb) /X 336
+                /Y 120 /Angle -4 /Size 16 /Width 220 /Seed 3 >> ]
+>> rel-page
+
+showpage
