@@ -16,7 +16,7 @@ PostScript operators (`findfont`, `scalefont`, `setfont`, `show`).
   suite generates, byte for byte.
 
 This guide covers the Type 3 display library, the typewriter, and the runtime
-catalog of 61 outline faces. For the handwriting font see
+catalog of 67 outline faces. For the handwriting font see
 [handwriting](handwriting.md). For the design behind all of it, see `docs/dev/FONTS.md`
 in the repo root.
 
@@ -201,7 +201,7 @@ scans T14, T15 and T10.
 
 ## The font catalog
 
-`fonts/catalog/` — 61 libre outline faces loaded from disk at
+`fonts/catalog/` — 67 libre outline faces loaded from disk at
 `findfont` time (never compiled in; the binary and wasm stay lean).
 With it, **every name in the classic LaserWriter 35 resolves to a
 metric-compatible libre face**: the bundled Liberation faces cover

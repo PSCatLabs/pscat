@@ -110,6 +110,6 @@ checkout with no configuration).
 ## Where next
 
 - [Handwriting](handwriting.md): turn a string into a handwritten PNG.
-- [Fonts](fonts.md): the font library and the 61-face catalog.
+- [Fonts](fonts.md): the font library and the 67-face catalog.
 - [artkit](artkit.md): the generative-art toolkit.
 - [All guides](README.md).
