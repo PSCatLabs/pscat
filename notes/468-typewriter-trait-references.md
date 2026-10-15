@@ -53,4 +53,4 @@ are from a US government publication (17 U.S.C. 105).
 
 A photograph or scan of a page typed by the project's owner on a named machine,
 with a two-colour ribbon and a known Selectric, would settle three of the four
-traits and has none of the licensing problems. Filed as an issue.
+traits and has none of the licensing problems. Filed as #551.
