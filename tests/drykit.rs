@@ -1512,7 +1512,8 @@ fn ghostscript_keeps_a_dkclip_region_in_a_batch() {
 /// Chunking estimates a run's cells before `dkZthin` grows the thinned
 /// stops' reach by the chord deviation, so a curvy run's catch is larger
 /// than estimated. On glyph-radius curves at the longest knuckles and a
-/// small budget, the chunks still fit: the stroke renders without raising.
+/// small budget, the chunks fit (and since #324 a chunk that doesn't is
+/// split and drawn again): the stroke renders without raising.
 #[test]
 fn a_curvy_run_at_long_knuckles_fits_its_chunks() {
     let it = render(
@@ -1528,6 +1529,104 @@ fn a_curvy_run_at_long_knuckles_fits_its_chunks() {
         inked(&it).iter().filter(|&&i| i).count() > 1000,
         "the curvy run drew almost nothing"
     );
+}
+
+/// The inked pixel count of a render.
+fn ink_count(it: &Interp) -> usize {
+    inked(it).iter().filter(|&&i| i).count()
+}
+
+/// #324: a chunk whose catch overflows `dkbudget` is split and drawn
+/// again, rather than raising. Each row renders at the default budget and
+/// at a small one; the small one must take the split (the `dkZsplit`
+/// counter says so, or the render raises) and land about the same ink (a
+/// split chunk orients the knuckles at its joints by its own pieces, so
+/// it is close, not identical). Before #324 every small-budget row raised
+/// `dkcatch-area-exceeds-safety-limit`.
+#[test]
+fn a_chunk_past_the_budget_is_split_and_drawn() {
+    const COUNT: &str = "userdict /dktNS 0 put /dktsplit /dkZsplit load def \
+         /dkZsplit { userdict /dktNS 2 copy get 1 add put dktsplit } def";
+    const CHECK: &str = "userdict /dktNS get 0 gt not { dkt-the-split-was-not-taken } if";
+    let rows = [
+        // one curvy run: its pieces are cut in two, down to single segments
+        (
+            "/dkbudget 3000 def",
+            "newpath 0 1 120 { /k exch def k 0.6 mul 10 add k 18 mul sin 4 mul 60 add \
+             k 0 eq { moveto } { lineto } ifelse } for \
+             << /Width 12 /Touch 0.95 /Streak 1 /Under [1 1 1] >> dkstroke",
+        ),
+        // many strokes in one chunk (dkZest made to see nothing): the
+        // entries are halved
+        (
+            "/dkbudget 2000 def /dkZest { pop pop 0 } def",
+            "{ newpath 0 1 5 { /i exch def 0 1 3 { /j exch def \
+             i 14 mul 20 add j 14 mul 20 add 4 0 350 arc } for } for \
+             << /Width 3 /Touch 0.95 /Streak 4 /Under [1 1 1] >> dkstroke } dkbatch",
+        ),
+    ];
+    for (budget, body) in rows {
+        let base = render(
+            100,
+            100,
+            2.0,
+            &format!("<< /Surface /slate >> dksurface 0 0 0 setrgbcolor {body}"),
+        );
+        let split = render(
+            100,
+            100,
+            2.0,
+            &format!(
+                "<< /Surface /slate >> dksurface 0 0 0 setrgbcolor {COUNT} {budget} {body} {CHECK}"
+            ),
+        );
+        let (a, b) = (ink_count(&base), ink_count(&split));
+        assert!(a > 1000, "{budget}: the default budget drew almost nothing ({a})");
+        let rel = (a as f64 - b as f64).abs() / a as f64;
+        assert!(
+            rel < 0.03,
+            "{budget}: the split render's ink {b} is not close to the whole one's {a}"
+        );
+    }
+}
+
+/// #324: a stroke with a stop too wide for any catch is refused when it
+/// is recorded, so nothing is drawn: not the strokes before it in the
+/// batch, and not the thin start of the stroke itself. Before #324 the
+/// batch drew the first stroke, and the stroke drawn at once its thin
+/// start, before the wide stop raised.
+#[test]
+fn a_stroke_too_wide_for_any_catch_is_refused_before_anything_draws() {
+    let rows = [
+        (
+            "a batch",
+            "{ newpath 10 20 moveto 100 20 lineto << /Width 2 /Under [1 1 1] >> dkstroke \
+             newpath 20 40 moveto 100 100 lineto << /Width 30 /Touch 0.9 /Under [1 1 1] >> dkstroke } dkbatch",
+        ),
+        (
+            "at once",
+            "newpath 10 60 moveto 110 60 lineto \
+             << /Width 2 /Pressure { 0.8 lt { 1 } { 15 } ifelse } /Under [1 1 1] >> dkstroke",
+        ),
+    ];
+    for (label, body) in rows {
+        let mut it = Interp::with_page_scaled(120, 120, 1.0).expect("page");
+        load(&mut it);
+        let err = it
+            .run_str(&format!(
+                "1 1 1 setrgbcolor clippath fill 0 0 0 setrgbcolor \
+                 << /Surface /slate >> dksurface /dkbudget 3000 def {body}"
+            ))
+            .expect_err(label);
+        let report = it.error_report(&err);
+        assert!(
+            report.contains("dkcatch-area-exceeds-safety-limit"),
+            "{label}: raised something else: {report}"
+        );
+        // any mark at all, the faint first level included
+        let marked = lumas(&it).iter().filter(|&&l| l < 250.0).count();
+        assert_eq!(marked, 0, "{label}: drew before refusing");
+    }
 }
 
 /// #444 under Ghostscript: the same middle third as above, but as a plain
