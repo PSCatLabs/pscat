@@ -31,7 +31,7 @@ Guards, so a skip cannot hide a break:
   alike points at the harness (the binary, the page setup), not at the files.
 - The negative control is untouched (exit 2 if it does not differ).
 
-Evidence (unchanged tree, `--files` = every tracked `.ps`, 194 files): before,
+Evidence (unchanged tree, `--files` = every tracked `.ps`, 195 files): before,
 exit 1 with 8 ERRORs; after, exit 0 with those 8 SKIPPED (tw_proto.ps plus
 7 `lib/*.ps` files that are libraries, not drivers, and error when run alone,
 identically in both trees). A control (an uncommitted draw appended to a
