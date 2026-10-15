@@ -8,10 +8,10 @@ lets it cool toward the far end. Now it does. Only `evcloud` and new helpers in
 paintkit feature might be needed; it was not).
 
 ![before (left) and after (right), full](462-before-after-full.png)
-![before (top) and after (bottom), the four clouds](462-cloud-compare.png)
+![before (left) and after (right), the four clouds](462-cloud-compare.png)
 
-Close-up, left to right: the left cloud, the middle one, the right-hand big one
-and the small one.
+Close-up, before left and after right, top to bottom: the left cloud, the middle
+one, the right-hand big one and the small one.
 
 - **The approach.** `pkscumblein /Light` builds each light pass's circles as a
   path and `pkbroad` strokes it. `evcflat` reads that path back with `pathforall`
@@ -39,11 +39,11 @@ and the small one.
   | left (x 100-310) | 172 / 173 / 173 | 157 / 164 / 187 | 172 / 169 |
   | right big (x 540-730) | 171 / 170 / 171 | 159 / 168 / 183 | 171 / 170 |
   | small right (x 620-740) | 177 / 177 / 176 | 169 / 176 / 185 | 177 / 177 |
-  | middle (x 300-450) | 177 / 177 / 177 | 185 / 177 / 184 | 177 / 182 |
+  | middle (x 320-450, below y 445 pt) | 180 / 180 / 180 | 176 / 181 / 188 | 180 / 182 |
 
-  The middle cloud's reading is contaminated by the left cloud's bright end in its
-  box's left third (the boxes overlap there); by eye it grades toward the sun on its
-  right like the others. Every row reads far end first, sun side last.
+  Every row reads far end first, sun side last. The middle cloud is measured on
+  x 320 to 450 pt and below y 445 pt, because the left cloud's bright end overlaps
+  the rest of its box.
 - **Tried.** Slope 0.5, range 0.6 to 1.4, 7 levels: the far end dropped nearly to
   the body and the sun end went yellow, and the level steps showed as separate
   discs. Slope 0.45 with 0.6 to 1.3 and 12 levels: a clear grade but still discs on
@@ -52,7 +52,7 @@ and the small one.
   the plain load last, so the extremes do not sit on top.
 - **K = 1 identity.** With the slope set to 0 every circle falls in one level and
   the render matches main in all but 22 pixels (largest channel difference 4 of 255),
-  all in the cloud boxes: the path is rebuilt from `pathforall`'s user-space
+  all in the cloud boxes: most likely the path rebuilt from `pathforall`'s user-space
   numbers, which round-trip through the 2x scale.
 - **Pixels.** 142 223 pixels differ against the still on main (2x), all inside the
   four cloud boxes (each cloud's outline extent plus 15 pt, the #433 boxes); 0
@@ -60,5 +60,8 @@ and the small one.
   renders the scene without errors (correctness only). The 2x still is the site's
   landing hero, so that changes too.
 - **Left alone.** The bullseye rings the brush stamps and the wet layers' polygonal
-  edges (#433's follow-up) are still faintly there, a little more visible at the
-  bright end.
+  edges (seen in #384 and #433) are still faintly there, and read a little more at the
+  bright end, where the tones differ more: filed as #519 (p3).
+- **State.** The piece's new `def`s (`evclit`, `evcops`, ...) go where every other
+  `ev` scratch name does: pkwet opens no dictionary, so they land in `userdict`, and
+  each cloud redefines them before reading them.
