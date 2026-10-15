@@ -262,6 +262,17 @@ first copy's type open while the page still goes through the copier.
 shuffled, among strips from three reference scans (`docs/dev/design/typewriter/blind_grid.png`), and the
 whole page beside T1 (`docs/dev/design/typewriter/memo_vs_real.png`).
 
+*The Man from 2026* (`gallery/time_traveler_memo.ps`, issue #590) is the other
+side: an original that was never copied (`/Generation 0`). After `tw-type`, the
+same machine types more on the same cell frame: `tw-set` with a fresh `/Strike`
+and a red `/Ink` (with `/Bleed 0.85 /BleedSide /above`, so a few letters take a
+black top) types the
+classification lines at the head and foot, as a typist would with the ribbon
+lifted to its red half; another `tw-set` puts the black ink back. For a one-page,
+single-spaced text, the carriage that `tw-type` leaves plus `tw-linecount` lines
+of 12pt gives the first baseline to place them from (on more pages the carriage
+is on the last page, and other spacings step by more).
+
 ## The font catalog
 
 `fonts/catalog/` — 67 libre outline faces loaded from disk at
