@@ -870,6 +870,9 @@ renders eight examples in both and compares block-downsampled output).
    being about 6% heavy. Pica and a photocopy (`/Copies > 0`) are byte-identical.
    Only the typewriter specimen (pscat and gs) and `ink_vs_real.png` were redone;
    `notes/511-elite-ink-weight.md`.
+   #520 raised `/worn`'s `/Ribbon` from 0.35 to 0.55 (T10's worn elite was x0.66 of
+   its scan by dark pixels per character, now x0.76); `/manual` and `/electric` are
+   byte-identical; `notes/520-worn-elite-weight.md`.
    #422 added two opt-in ribbon extras, both off by default so a page without them is
    byte-identical: `/WornBand` (the lane every x-height strike hits prints lighter) and
    `/Bleed` with `/BleedInk` and `/BleedSide` (a black/red ribbon's other colour past a
