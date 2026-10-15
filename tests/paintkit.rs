@@ -7252,7 +7252,8 @@ fn pull_origins(opts: &str) -> Vec<f64> {
     ))
     .unwrap_or_else(|e| panic!("{opts}: {}", it.error_report(&e)));
     let top = it.operand_stack().last().expect("xs").clone();
-    format!("{}", top.repr())
+    top.repr()
+        .to_string()
         .trim_matches(|c| c == '[' || c == ']')
         .split_whitespace()
         .map(|t| t.parse().expect("number"))
