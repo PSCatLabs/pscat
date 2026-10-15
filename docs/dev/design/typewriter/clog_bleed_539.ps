@@ -1,0 +1,7 @@
+% Demo for #539: a clogged counter in the bleed zone, before (black) and after (the bleed colour).
+% /Bleed is poked past 1 so the boundary crosses the o counter (see notes/539-clog-bleed-zone.md).
+% pscat --page 130x70 --dpi 400 --png out.png docs/dev/design/typewriter/clog_bleed_539.ps
+(lib/typewriter_outlines.ps) run (lib/typewriter.ps) run
+1 setgray clippath fill
+20 30 moveto << /Machine 4 /Seed 3 /Wear 1.5 /Size 40 /Pitch 3.5 /Bleed 1 /BleedSide /above /BleedInk [0.8 0.08 0.08] /Ink [0.1 0.1 0.12] >> tw-setup
+TWState /tBleed 1.6 put (oooooo) show
