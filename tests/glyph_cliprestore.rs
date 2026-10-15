@@ -120,6 +120,25 @@ const CASES: &[Case] = &[
         "/P { gsave 9 setlinewidth } def 3 setlinewidth gsave 4 setlinewidth go W grestore W",
         &["4.0", "3.0"],
     ),
+    (
+        "an error in the glyph leaves no level behind",
+        "/P { 9 setlinewidth nosuchop } def 3 setlinewidth { go } stopped pop W grestore W",
+        &["3.0", "1.0"],
+    ),
+    (
+        "an error in the glyph leaves the caller's gsave alone",
+        "gsave 4 setlinewidth /P { 9 setlinewidth nosuchop } def { go } stopped pop W grestore W",
+        &["4.0", "1.0"],
+    ),
+    (
+        "an error after a gsave in the glyph is sealed too",
+        "/P { gsave 40 40 5 5 rectclip nosuchop } def X 20 20 200 200 rectclip { go } stopped pop R grestore R clipsave cliprestore R",
+        &[
+            "[20.0 20.0 220.0 220.0]",
+            "[10.0 10.0 310.0 310.0]",
+            "[10.0 10.0 310.0 310.0]",
+        ],
+    ),
 ];
 
 fn pscat_lines(src: &str) -> Vec<String> {

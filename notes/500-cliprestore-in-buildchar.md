@@ -39,13 +39,15 @@ After a glyph whose procedure did an unmatched `grestore`, gs's state is
 what the glyph's pops left (the end-of-glyph `grestore` pops one level
 too many: the caller's line width came back as the job's initial `1.0` in
 the probe). pscat keeps sealing the glyph, so the caller's state is the
-one at `show`. Deliberate: the sealing is what makes a buggy
+one at `show`. The same goes for `grestoreall` in a glyph: gs leaves a
+page-wide clip after the `show`, pscat the clip at `show` (the pinned case
+stops printing inside the glyph). Deliberate: the sealing is what makes a buggy
 `BuildChar` harmless, and no committed file unbalances one.
 
 ## Evidence
 
-- `tests/glyph_cliprestore.rs`: 13 programs pinned to gs output, a
+- `tests/glyph_cliprestore.rs`: 17 programs pinned to gs output (including a glyph that errors under `stopped`: no level is left behind), a
   local-only gs re-run, and a painting check (the second fill after a
   glyph's `cliprestore` stays under the clip at `show`). Without the
-  change the first and last fail.
+  change the pinned-lines test and the painting test fail.
 - Identity: see the PR (`scripts/identity_check.sh --base-bin/--head-bin`).

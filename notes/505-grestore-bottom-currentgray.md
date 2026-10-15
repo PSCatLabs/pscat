@@ -91,7 +91,7 @@ filed as a follow-up.
   after a bottom `grestore`. pscat starts with none, so the same `show` is
   an `invalidfont`, as it is in a fresh pscat job. That was true at job
   start before this change; a bottom `grestore` now reaches the same state.
-- **Type 3 `BuildChar`** (#500): a glyph procedure's unmatched `grestore`
+- **Type 3 `BuildChar`** (done in #500, `notes/500-cliprestore-in-buildchar.md`): a glyph procedure's unmatched `grestore`
   now resets to the job's initial state rather than to the state at
   `show`. Nobody does this.
 - `currentcmykcolor`, `currentcolor`, `currentlinecap`, `currentlinejoin`,
