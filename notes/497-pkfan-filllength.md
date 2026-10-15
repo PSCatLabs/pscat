@@ -32,6 +32,13 @@ Design calls, and why:
   same `1 - (1-t)/Flick` ramp `pktaperf` does, only for a run that reaches the
   bristle's end (`pflast`). The pieces' pressures at their ends are tested to
   be continuous and to reach 0 only at the run's end.
+- **Cost.** Each piece is a nested `pkribbon` call, and the deposit budget
+  (`Bristles x stops <= 150000`) counts stops, not pieces. A piece is at least
+  one stop long, so a tiny `/FillLength` is at most one call per inked stop per
+  bristle per softening pass. Not charged to the budget (that would refuse
+  ordinary fans: charging a call like a ray's 32 stops caps a fan at about 4600
+  bristle-stops); the `@param` says to keep the length well above the pitch.
+  The fill count is what is reported (37 asks whole, 161 cut); no timing.
 - **Not cut:** a pressed fan's rays (`pfray`, one short ribbon each) and
   `pkdab` (one fill per dab).
 
