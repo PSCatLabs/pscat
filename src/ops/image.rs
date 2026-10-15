@@ -34,6 +34,16 @@ fn read_matrix6(obj: &Object) -> Result<[f64; 6], PsError> {
     Ok(m)
 }
 
+/// A singular ImageMatrix is `undefinedresult` before any data is read
+/// (gs-pinned, #534): the image would have no footprint. gs skips the
+/// check for a Level 1 `image`/`colorimage` with no samples.
+fn check_invertible(m: &[f64; 6]) -> Result<(), PsError> {
+    match crate::image::invert6(*m) {
+        Some(_) => Ok(()),
+        None => Err(PsError::UndefinedResult),
+    }
+}
+
 fn data_source(obj: &Object) -> Result<ImageSource, PsError> {
     Ok(match &obj.value {
         Value::Array(_) if obj.executable => ImageSource::Proc(obj.clone()),
@@ -75,6 +85,10 @@ fn image(it: &mut Interp) -> Result<(), PsError> {
     if !matches!(bits, 1 | 2 | 4 | 8) {
         return Err(PsError::Rangecheck);
     }
+    // gs skips the matrix check when there are no samples.
+    if w > 0 && h > 0 {
+        check_invertible(&matrix)?;
+    }
     it.begin_image(ImageCtx::new(
         w,
         h,
@@ -102,6 +116,7 @@ fn imagemask(it: &mut Interp) -> Result<(), PsError> {
         return Err(PsError::Typecheck);
     };
     let (w, h) = pop_dims(it)?;
+    check_invertible(&matrix)?;
     it.begin_image(ImageCtx::new(
         w,
         h,
@@ -135,6 +150,9 @@ fn colorimage(it: &mut Interp) -> Result<(), PsError> {
     let (w, h) = pop_dims(it)?;
     if !matches!(bits, 1 | 2 | 4 | 8) {
         return Err(PsError::Rangecheck);
+    }
+    if w > 0 && h > 0 {
+        check_invertible(&matrix)?; // as `image`
     }
     it.begin_image(ImageCtx::new(
         w,
@@ -177,6 +195,7 @@ fn dict_image(
         return Err(PsError::Rangecheck);
     }
     let matrix = read_matrix6(&d.get("ImageMatrix").ok_or(PsError::Typecheck)?)?;
+    check_invertible(&matrix)?;
     let source = data_source(&d.get("DataSource").ok_or(PsError::Typecheck)?)?;
     // Color interpretation comes from the current space (masks stencil
     // the current color and ignore it). Indexed images default Decode

@@ -86,16 +86,22 @@ procedure errors `undefined: Palettes` unless `lib/artkit.ps` loads
 first, a dependency `source` alone doesn't show (another cross-model
 review finding, same PR). Empty for fonts, which need no `run` at all.
 
-`parameters` is populated only where PostScript actually has named,
-defaulted arguments — the five page templates, whose content dict has
-optional keys with real defaults, and the four handwriting-family
-procedures (`hs-write`/`hs-linecount`/`hg-write`/`hg-linecount`),
-whose calling convention is likewise one options dict with named keys.
-Most procedures take positional stack arguments with no such
-structure, so their calling convention lives in `example` instead (the
-stack-effect comment already written at the proc's definition site,
-e.g. `x0 y0 v1 v2 n1 n2 {x y ...} lattice -`) and `parameters` stays
-empty. Fonts and Type 3 faces likewise carry no `parameters`.
+`parameters` is populated for dict-driven APIs: a template or procedure
+whose calling convention is one options (or content) dict with named
+keys. Each entry is one such key with its description and `default`;
+`default` is `null` for a required or mutually exclusive key (artkit's
+`scatter` `/Mark` and `/Density`, for instance). Units are bracketed at
+the start of each description in migrated `.ps` files; the unit test
+covers those files only. The rows come from a migrated file's
+`% @param:` lines, or, in an unmigrated file, from a hand-written
+`Param` list in `src/capabilities.rs`. Procedures that
+take positional stack arguments have no such structure, so their
+calling convention lives in `example` instead (the stack-effect
+comment already written at the proc's definition site, e.g.
+`x0 y0 v1 v2 n1 n2 {x y ...} lattice -`) and `parameters` stays empty.
+Fonts, palettes, dials and Type 3 faces never carry `parameters`. To
+list which entries do, filter the payload:
+`pscat --capabilities | jq -r '.capabilities[] | select((.parameters | length) > 0) | .name'`.
 
 ## How it's built (`src/capabilities.rs`)
 
@@ -109,7 +115,7 @@ Everything else (Type 3 faces, palettes, templates, procedures) comes
 from one of two places, depending on whether its `.ps` file has been
 migrated to the `% @...` doc-comment tag convention (issue #94):
 
-- **Migrated** (`lib/paintkit.ps` so far): `build.rs` parses
+- **Migrated** (any file carrying `% @` tags, e.g. `lib/paintkit.ps`): `build.rs` parses
   `% @kind:`/`% @summary:`/`% @example:`/`% @param:`/`% @internal`/
   `% @requires:` tags directly out of the `.ps` source at build time
   and generates the catalog rows into
@@ -175,12 +181,12 @@ set and compared.
 
 ## Registering a new capability
 
-**In a migrated file** (`lib/paintkit.ps` so far): add `% @kind:`/
+**In a migrated file** (e.g. `lib/paintkit.ps`): add `% @kind:`/
 `% @summary:`/`% @example:` (plus `% @param:` lines, if any) directly
 above the new `/name ... def`, or `% @internal` if it's a private
 helper — see `build.rs`'s module docs for the exact grammar. `cargo
 build` fails until one of those is done; no `capabilities.rs` edit
-needed at all. In `lib/paintkit.ps`, start each `@param` description
+needed at all. In a migrated file, start each `@param` description
 with its unit in brackets (`[points]`, `[degrees]`, `[count]`, `[0..1]`,
 `[fraction of /Width]`, `[per /Width]`, ...; issue #141) —
 `tests/capabilities.rs` rejects a parameter without one, and checks
@@ -239,8 +245,8 @@ that `/Spread` and `/Load` keep their one shared meaning.
   full payload; an agent that wants just palettes filters the JSON
   itself. Simpler for a first version — revisit if the payload size
   becomes a real problem in practice.
-- **Most procedures get no structured `parameters`.** See "Payload
-  shape" above — PostScript's positional stack arguments don't map
-  cleanly onto named/defaulted `Param`s the way a template's content
-  dict (or an options-dict procedure's) does, and forcing a fit would
-  mean inventing parameter names the source doesn't actually have.
+- **Positional-argument procedures get no structured `parameters`.**
+  See "Payload shape" above — PostScript's stack arguments don't map
+  onto named, defaulted `Param`s, and forcing a fit would mean
+  inventing parameter names the source doesn't actually have.
+  Dict-driven procedures and templates do carry them.

@@ -207,7 +207,9 @@ a real `Interp` and checks the name set both ways -- every cataloged
 name still exists, and every name a source file actually defines is
 either cataloged or on an explicit internal-helper allowlist. See
 docs/dev/CAPABILITIES.md for the payload shape and how to register a new
-capability (docs/archive/NOTES.md's entry has the full story). Also done: issue
+capability (docs/archive/NOTES.md's entry has the full story). Since #94,
+files carrying `% @` tags are parsed by `build.rs` instead; see CAPABILITIES.md.
+Also done: issue
 #48, deterministic scatter and distribution primitives for artkit --
 the area-shaped counterpart to `alongpath`: `screct`/`scpath` build a
 region (a rectangle, or the current path flattened and closed the way
@@ -454,6 +456,10 @@ renders eight examples in both and compares block-downsampled output).
      character (`lexer::eat_token_delimiter`);
    - `image` drains a filter-chain source layer-by-layer to each EOD
      marker on completion.
+   An image's footprint is ImageMatrix⁻¹ of its source rectangle, not
+   the unit square; only the `[w 0 0 ±h …]` idiom keeps the old
+   unit-square clip, for byte-identical edges (#534,
+   `notes/534-image-matrix-footprint.md`).
 
 3. **Every glyph source feeds one transform pipeline.** Glyph-space
    outline → FontMatrix (composed by scalefont/makefont, cached at
