@@ -555,3 +555,55 @@ fn ghostscript_draws_the_specimen_the_way_pscat_does() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// RMS over 6 x 6 pixel blocks of the within-block deviation, for the 48 pixel
+/// windows of bare paper (nothing darker than 150 of 255): the same measure as
+/// docs/dev/design/typewriter/tools/grain.py, in luminance 0..1.
+fn grain_rms(p: &[u8], w: usize, h: usize) -> f64 {
+    let (mut sum, mut n) = (0.0, 0u32);
+    for wy in (0..h.saturating_sub(47)).step_by(48) {
+        for wx in (0..w.saturating_sub(47)).step_by(48) {
+            let at = |x: usize, y: usize| f64::from(p[(wy + y) * w + wx + x]) / 255.0;
+            if (0..48).any(|y| (0..48).any(|x| at(x, y) < 0.6)) {
+                continue;
+            }
+            for by in (0..48).step_by(6) {
+                for bx in (0..48).step_by(6) {
+                    let v: Vec<f64> = (0..36).map(|i| at(bx + i % 6, by + i / 6)).collect();
+                    let m = v.iter().sum::<f64>() / 36.0;
+                    sum += v.iter().map(|x| (x - m).powi(2)).sum::<f64>() / 36.0;
+                    n += 1;
+                }
+            }
+        }
+    }
+    (sum / f64::from(n.max(1))).sqrt()
+}
+
+#[test]
+fn the_haze_grain_is_at_the_strength_of_the_scans() {
+    // issue #474: T2, T9 and T14 are 0.007 to 0.009 at 300 dpi; at 4 pixels to
+    // the point (288 dpi) a hazed copy must be near that, an original and a
+    // /Haze 0 copy only what the lid and the edge give (under 0.005), and the grain scales with /Haze
+    let on = |opts: &str| {
+        let mut it = Interp::with_page_scaled(W, H, 4.0).expect("page");
+        load(&mut it);
+        it.run_str(&format!(
+            "1 setgray clippath fill {{ }} << {SHEET} {opts} >> rel-page"
+        ))
+        .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+        grain_rms(&lum(&it), (W * 4) as usize, (H * 4) as usize)
+    };
+    let copy = on("/Generation 1");
+    let (white, orig) = (on("/Generation 1 /Haze 0"), on(""));
+    assert!(
+        (0.006..0.013).contains(&copy),
+        "a copy's grain is at the scans' strength: {copy:.4} (white copy {white:.4})"
+    );
+    assert!(white < 0.005, "/Haze 0 has no grain: {white:.4}");
+    assert!(orig < 0.005, "an original has no haze grain: {orig:.4}");
+    assert!(
+        on("/Generation 1 /Haze 0.3") < copy * 0.75,
+        "it scales with /Haze"
+    );
+}
