@@ -387,7 +387,12 @@ newpath (x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}) 60 500 << /Size 36 /Seed 1 >> 
   or colour can change down the board. Several `&` on a line give TeX
   align's columns (right, left, right, left ...), the pairs `/ColumnGap`
   apart (multiples of `/Size`, default 2): `(f(x) &= x^2 & f'(x) &= 2x)`.
-- **`mkframe`**, **`mkunderline`** and **`mkarrow`** draw the annotations.
+  `/ColumnGap 0` is `alignat`; `/ColumnWander 1` lets the later columns
+  drift down the lines as a hand's do (default 0).
+- **`mkframe`**, **`mkunderline`**, **`mkarrow`** and **`mkbrace`** draw the
+  annotations. `x0 y0 x1 y1 << >> mkbrace` is a curly brace whose arms
+  end at the two points, pointing right of the direction of travel (left
+  to right: down); it returns its point's `x y` for the label.
   `mkframe` makes a box with overshooting corners, or `/Shape /oval`.
   `mkunderline` takes `/Double`, and `mkarrow` takes `/Bend`. `mkframe`
   and `mkunderline` take a line record (`recs 2 get << >> mkframe`) and
@@ -407,9 +412,9 @@ Supported TeX:
 | Accents and frames | `\vec`, `\hat`, `\bar`, `\dot`, `\ddot`, `\tilde`, `\overline`, `\underline`, `\boxed` |
 | Text | `\text{...}`, `\mathrm{...}` |
 | Spacing | `\,` `\:` `\;` `\!` `\ ` `\quad` `\qquad` `~` (plain spaces are ignored, as in TeX) |
-| Braces and stacks | `\overbrace{...}^{label}`, `\underbrace{...}_{label}`, `\overset{a}{b}`, `\underset{a}{b}`, `\stackrel{a}{b}` (a relation), `\sum_{\substack{i<m \\ j<n}}` |
+| Braces and stacks | `\overbrace{...}^{label}`, `\underbrace{...}_{label}` (`\nolimits` after it: the label beside), `\overset{a}{b}`, `\underset{a}{b}`, `\stackrel{a}{b}` (a relation), `\sum_{\substack{i<m \\ j<n}}` |
 | Styles | `\displaystyle`, `\textstyle`, `\scriptstyle`, `\scriptscriptstyle`: the rest of the group in that style |
-| Negation and congruence | `\not=` (≠), `\not\in` (∉), `\not<` and any other symbol (a slash through it); `a \bmod b`, `a \equiv b \pmod{n}` |
+| Negation and congruence | `\not=` (≠), `\not\in` (∉), `\not<` and any other symbol (a slash through it); `a \bmod b`, `a \equiv b \pmod{n}`, `\mod{n}`, `\pod{n}` |
 | Symbols | Greek `\alpha` ... `\Omega`, `\infty`, `\partial`, `\nabla`, `\pm`, `\times`, `\cdot`, `\le`, `\ge`, `\ne`, `\approx`, `\to`, `\Rightarrow`, `\iff`, `\in`, `\subset`, `\cup`, `\cap`, `\forall`, `\exists`, `\cdots`, ...; Unicode symbols typed directly (α ∞ ≤ ∂) |
 
 Anything else fails with a name saying what it was, for example
@@ -437,7 +442,8 @@ Anything else fails with a name saying what it was, for example
 `examples/mathkit_specimen.ps` draws the test set, from the quadratic
 formula to Maxwell's equations, and a chalk derivation;
 `examples/mathkit_structures.ps` the braces, stacks, `\not` and align
-columns.
+columns; `examples/mathkit_columns_braces.ps` `\mod`, `\pod`, side
+labels, a column's wander, `alignat` and `mkbrace`.
 
 ## Dry media: crayon (`lib/drycrayon.ps`)
 

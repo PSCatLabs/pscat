@@ -173,10 +173,11 @@ skeletons with TeX's box model. The subset covers:
 - matrices and `cases`, accents and `\boxed`;
 - Greek and operator names;
 - `\overbrace{...}^{label}` and `\underbrace{...}_{label}` with a grown
-  brace, `\overset`, `\underset`, `\stackrel` and `\substack` limits;
+  brace (`\nolimits` after it sets the label beside it, as a script),
+  `\overset`, `\underset`, `\stackrel` and `\substack` limits;
 - `\displaystyle`, `\textstyle` and `\scriptstyle` mid-formula;
 - `\not` before a relation (`\not=` is ≠, `\not\in` is ∉, anything else
-  gets a slash), `\bmod` and `\pmod{n}`.
+  gets a slash), `\bmod`, `\pmod{n}`, `\mod{n}` and `\pod{n}`.
 
 Anything outside the subset fails with an error that names it. The
 layout is written with a lecturer's irregularity: sizes and gaps vary,
@@ -187,14 +188,23 @@ baseline slopes and drifts (`/Irregular`, where 0 is clean TeX).
   line, which `mkframe` and `mkunderline` follow along its slope. With
   several `&` on a line it sets TeX align's columns (right, left, right,
   left ...), each pair `/ColumnGap` (in multiples of `/Size`, default 2)
-  after the last.
+  after the last; `/ColumnGap 0` is amsmath's `alignat`. `/ColumnWander`
+  (default 0; 1 is as far as a line's own wander) lets each pair after
+  the first drift sideways down the lines, as a hand's columns do.
 - `mkarrow` points a side note at a term.
+- `x0 y0 x1 y1 opts mkbrace` draws a hand-drawn curly brace whose arms
+  end at the two points, its point to the right of the direction from
+  the first to the second (left to right points down), and returns that
+  point's x y, where its label goes.
 
 Every TeX backslash is written twice in a PostScript string.
 `examples/mathkit_specimen.ps` is the specimen: the fixed test set, from
 the quadratic formula to Maxwell's equations, and a derivation in chalk.
 `examples/mathkit_structures.ps` shows the structures issue #340 added
-(`docs/dev/design/drymedia/mathkit_structures.png`).
+(`docs/dev/design/drymedia/mathkit_structures.png`), and
+`examples/mathkit_columns_braces.ps` what issue #439 added: `\mod`,
+`\pod`, side labels, a column's wander, `alignat` and `mkbrace`
+(`docs/dev/design/drymedia/mathkit_columns_braces.png`).
 The gallery piece `gallery/chalkboard_lecture.ps` fills a
 whole board with it: Euler's formula derived across three drychalk
 panels.
