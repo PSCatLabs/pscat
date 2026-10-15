@@ -340,6 +340,23 @@ impl ImageCtx {
         );
     }
 
+    /// True when the ImageMatrix maps the user-space unit square's
+    /// corners exactly onto the source rectangle's corners: the usual
+    /// `[w 0 0 ±h …]` idiom (or a transposed/mirrored one). An
+    /// invertible affine map sending four corners into the rectangle's
+    /// four corners is onto them, so this is "footprint = unit square".
+    fn unit_footprint(&self) -> bool {
+        let m = self.matrix;
+        let (w, h) = (self.width as f64, self.height as f64);
+        [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)]
+            .into_iter()
+            .all(|(ux, uy)| {
+                let ix = m[0] * ux + m[2] * uy + m[4];
+                let iy = m[1] * ux + m[3] * uy + m[5];
+                (ix == 0.0 || ix == w) && (iy == 0.0 || iy == h)
+            })
+    }
+
     fn rasterize(&self, gfx: &mut Gfx) {
         if self.width == 0 || self.height == 0 || self.bits == 0 {
             return;
@@ -355,13 +372,35 @@ impl ImageCtx {
         if gfx.pdf_wanted() {
             self.record_pdf(gfx, ctm);
         }
-        // Device bounding box of the user-space unit square.
+        // The image's footprint in user space is ImageMatrix⁻¹ of the
+        // source rectangle [0,w]×[0,h] (PLRM 4.10.3): the unit square
+        // only for the usual `w h scale` + `[w 0 0 ±h …]` idiom. That
+        // idiom keeps its historical unit-square clip below, so its
+        // edge pixels stay exactly as before (#534); any other
+        // invertible matrix clips by the source rectangle alone.
+        let m = self.matrix;
+        let unit = self.unit_footprint();
+        let corners: [(f32, f32); 4] = if unit {
+            [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]
+        } else {
+            let Some(mi) = invert6(m) else {
+                return; // singular: refused at the operator, never here
+            };
+            let (w, h) = (self.width as f64, self.height as f64);
+            [(0.0, 0.0), (w, 0.0), (w, h), (0.0, h)].map(|(ix, iy)| {
+                (
+                    (mi[0] * ix + mi[2] * iy + mi[4]) as f32,
+                    (mi[1] * ix + mi[3] * iy + mi[5]) as f32,
+                )
+            })
+        };
+        // Device bounding box of that footprint.
         let (pw, ph) = (gfx.pixmap.width() as i64, gfx.pixmap.height() as i64);
         let mut x0 = f32::MAX;
         let mut y0 = f32::MAX;
         let mut x1 = f32::MIN;
         let mut y1 = f32::MIN;
-        for (ux, uy) in [(0.0f32, 0.0f32), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)] {
+        for (ux, uy) in corners {
             let dx = ctm.sx * ux + ctm.kx * uy + ctm.tx;
             let dy = ctm.ky * ux + ctm.sy * uy + ctm.ty;
             x0 = x0.min(dx);
@@ -374,7 +413,6 @@ impl ImageCtx {
         let px1 = (x1.ceil() as i64).min(pw);
         let py1 = (y1.ceil() as i64).min(ph);
 
-        let m = self.matrix;
         let paint_rgb = gfx.rgb();
         let mask_data = gfx.clip_mask_data();
         let width = gfx.pixmap.width() as usize;
@@ -386,7 +424,7 @@ impl ImageCtx {
                 let (cx, cy) = (px as f32 + 0.5, py as f32 + 0.5);
                 let ux = inv.sx * cx + inv.kx * cy + inv.tx;
                 let uy = inv.ky * cx + inv.sy * cy + inv.ty;
-                if !(0.0..1.0).contains(&ux) || !(0.0..1.0).contains(&uy) {
+                if unit && (!(0.0..1.0).contains(&ux) || !(0.0..1.0).contains(&uy)) {
                     continue;
                 }
                 let (ux, uy) = (f64::from(ux), f64::from(uy));
@@ -430,4 +468,15 @@ impl ImageCtx {
             gfx.dirty = true;
         }
     }
+}
+
+/// The inverse of a PostScript matrix `[a b c d tx ty]`, or None when
+/// it is singular (determinant exactly zero, as gs tests it).
+pub(crate) fn invert6(m: [f64; 6]) -> Option<[f64; 6]> {
+    let det = m[0] * m[3] - m[1] * m[2];
+    if det == 0.0 || !det.is_finite() {
+        return None;
+    }
+    let (a, b, c, d) = (m[3] / det, -m[1] / det, -m[2] / det, m[0] / det);
+    Some([a, b, c, d, -(m[4] * a + m[5] * c), -(m[4] * b + m[5] * d)])
 }
