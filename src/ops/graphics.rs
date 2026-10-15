@@ -73,6 +73,9 @@ pub fn install(dict: &mut Dict) {
     op(dict, "eoclip", eoclip);
     op(dict, "clippath", clippath);
     op(dict, "initclip", initclip);
+    // Level 3 (#494)
+    op(dict, "clipsave", clipsave);
+    op(dict, "cliprestore", cliprestore);
     op(dict, "pathbbox", pathbbox);
     op(dict, "pathforall", pathforall);
     op(dict, "flattenpath", flattenpath);
@@ -661,6 +664,22 @@ fn clippath(it: &mut Interp) -> Result<(), PsError> {
 
 fn initclip(it: &mut Interp) -> Result<(), PsError> {
     it.gfx.initclip();
+    Ok(())
+}
+
+/// `- clipsave -` (Level 3, #494): save the clip in force on this `gsave`
+/// level's clip stack.
+fn clipsave(it: &mut Interp) -> Result<(), PsError> {
+    it.gfx.clipsave();
+    Ok(())
+}
+
+/// `- cliprestore -` (Level 3, #494): put back the clip the newest
+/// `clipsave` at this `gsave` level saved; with none, the clip the level
+/// started with (no clip at the top level). Semantics pinned against
+/// Ghostscript 10.07.1 (`notes/494-clipsave-cliprestore.md`).
+fn cliprestore(it: &mut Interp) -> Result<(), PsError> {
+    it.do_cliprestore();
     Ok(())
 }
 

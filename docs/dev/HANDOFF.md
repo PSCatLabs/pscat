@@ -505,6 +505,18 @@ renders eight examples in both and compares block-downsampled output).
   `invalidaccess` for a read-only gstate. A program that `setgstate`s an
   older clip back makes the exporters reopen that clip's `Rc`; SVG reuses
   its `clipPath` id.
+- `clipsave`/`cliprestore` (Level 3, #494), pinned against gs 10.07.1:
+  the clip stack is part of the graphics state (gstate objects carry it),
+  each `gsave` and each `save` starts a new, empty level, and a
+  `cliprestore` with no entry at its level gives back the clip the level
+  started with: the clip at that `gsave`/`save`, or no clip at the top
+  level. So an unpaired `cliprestore` is not a no-op when a clip is in
+  force. `initclip` and `initgraphics` keep the stack; `grestoreall`
+  empties it. Only the clip
+  changes. Not modelled: a Type 3 `BuildChar` opening its own level (gs
+  runs it inside a `gsave`); pscat's `grestore` at the bottom of the stack
+  or at a save boundary still differs from gs as before
+  (`notes/494-clipsave-cliprestore.md`).
 - `shfill` (issue #20): `FunctionType` restricted to 2 (exponential)
   and 3 (stitching) — 0 (sampled) and 4 (calculator) unsupported,
   since those would need the same `Frame::PostOp` reentrancy
@@ -666,9 +678,9 @@ renders eight examples in both and compares block-downsampled output).
    capture's clip is still in force and recaptures if not; drykit probes
    it at load (`dkPsameok`), so gs keeps the limit (#488,
    `notes/488-sameclip.md`).
-   Where the interpreter has `cliprestore` (gs; pscat has no
-   `clipsave`/`cliprestore`) `dkbatch` shadows it too and marks the batch
-   dirty (#454, `notes/454-cliprestore-in-a-batch.md`).
+   Where the interpreter has `cliprestore` (gs, and pscat since #494)
+   `dkbatch` shadows it too and marks the batch dirty (#454,
+   `notes/454-cliprestore-in-a-batch.md`).
    #393: `dkstroke /After true` in a batch is drawn on its own after the
    batch renders, in call order, in its own colour; `dhsmudge` and `dhlift`
    use it, so they run inside a batch, over everything the batch lays

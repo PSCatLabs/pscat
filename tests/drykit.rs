@@ -1622,24 +1622,16 @@ fn pixel_diff(a: &[u8], b: &[u8]) -> usize {
 /// drykit shadows `cliprestore` too, when the interpreter has one: a
 /// `cliprestore` gives back a clip drykit never saw, so the next stroke must
 /// take a fresh capture, or it stays under the inner clip (#454). pscat has
-/// no `clipsave`/`cliprestore`, so this stands a procedure pair in for them
-/// (a gstate saved and put back, which is exact while nothing else changes
-/// between the two), installed in systemdict before drykit loads. Each
-/// program renders byte-identically in a batch and drawn at once. Control:
+/// the real operators since #494, so drykit installs the shadow here as it
+/// does under Ghostscript. Each program renders byte-identically in a batch and drawn at once. Control:
 /// the same drykit with the shadow line taken out, and `.sameclip` turned
 /// off (`dkPsameok false`, as under gs), leaves the strokes after the
 /// restore under the ring. In pscat `.sameclip` alone sees the restore too
 /// (#488): without the shadow but with it, the batch is still exact.
 #[test]
 fn a_cliprestore_in_a_batch_renders_as_at_once() {
-    const PAIR: &str = "userdict /dtCS 16 array put userdict /dtN 0 put \
-        systemdict /clipsave { gstate userdict /dtCS get userdict /dtN get 3 -1 roll put \
-            userdict /dtN userdict /dtN get 1 add put } bind put \
-        systemdict /cliprestore { userdict /dtN userdict /dtN get 1 sub put \
-            userdict /dtCS get userdict /dtN get get setgstate } bind put ";
     let run = |shadow: bool, sameclip: bool, batched: bool, body: &str| {
         let mut it = Interp::with_page_scaled(140, 100, 2.0).expect("page");
-        it.run_str(PAIR).expect("stand-in clipsave/cliprestore");
         for path in ["lib/artkit.ps", "lib/paintkit.ps"] {
             let src = std::fs::read(path).expect("read lib");
             it.run_source(&src).expect("load");
@@ -1668,7 +1660,6 @@ fn a_cliprestore_in_a_batch_renders_as_at_once() {
     // shadow off for the next batch.
     {
         let mut it = Interp::with_page_scaled(140, 100, 2.0).expect("page");
-        it.run_str(PAIR).expect("stand-in clipsave/cliprestore");
         load(&mut it);
         let mut probe = |src: &str| -> String {
             it.run_str(src).expect("probe");
