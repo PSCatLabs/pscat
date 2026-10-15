@@ -13,6 +13,7 @@
 
 use std::rc::Rc;
 
+use super::graphics::f32_readback;
 use crate::error::PsError;
 use crate::gfx::{ColorSpace, IndexedTable};
 use crate::interp::{Interp, PostOp};
@@ -23,6 +24,7 @@ pub fn install(dict: &mut Dict) {
     op(dict, "setcolorspace", setcolorspace);
     op(dict, "currentcolorspace", currentcolorspace);
     op(dict, "setcolor", setcolor);
+    op(dict, "currentcolor", currentcolor);
 }
 
 fn device_space(name: &str) -> Option<ColorSpace> {
@@ -55,7 +57,7 @@ fn setcolorspace(it: &mut Interp) -> Result<(), PsError> {
     match &obj.value {
         Value::Name(n) => {
             let cs = device_space(n).ok_or_else(|| PsError::Undefined(n.to_string()))?;
-            it.gfx.set_colorspace(cs);
+            set_device_space(it, cs);
             Ok(())
         }
         Value::Array(a) => {
@@ -65,8 +67,7 @@ fn setcolorspace(it: &mut Interp) -> Result<(), PsError> {
             };
             match &*family {
                 "DeviceGray" | "DeviceRGB" | "DeviceCMYK" => {
-                    it.gfx
-                        .set_colorspace(device_space(&family).expect("matched above"));
+                    set_device_space(it, device_space(&family).expect("matched above"));
                     Ok(())
                 }
                 "Indexed" => {
@@ -95,6 +96,10 @@ fn setcolorspace(it: &mut Interp) -> Result<(), PsError> {
                     // Initial color for Indexed is index 0, per the PLRM.
                     let (r, g, b) = table.rgb_at(0);
                     it.gfx.set_rgb(f64::from(r), f64::from(g), f64::from(b));
+                    if let Some(cmyk) = table.cmyk_at(0) {
+                        it.gfx.set_native_cmyk(cmyk);
+                    }
+                    it.gfx.set_spot(0.0);
                     it.gfx
                         .set_colorspace(ColorSpace::Indexed { table, src: obj });
                     Ok(())
@@ -117,6 +122,7 @@ fn setcolorspace(it: &mut Interp) -> Result<(), PsError> {
                     });
                     // Initial color is tint 1.0 (full colorant), per the
                     // PLRM — run the transform like any setcolor.
+                    it.gfx.set_spot(1.0);
                     it.begin_postop(
                         PostOp::SeparationColor { alt_ncomp: alt },
                         vec![Object::real(1.0)],
@@ -128,6 +134,45 @@ fn setcolorspace(it: &mut Interp) -> Result<(), PsError> {
         }
         _ => Err(PsError::Typecheck),
     }
+}
+
+/// A device space comes with its initial colour in gs; pscat leaves the
+/// painting colour alone (changing it would move renders), but a CMYK
+/// space reads back the PLRM's initial `0 0 0 1` (#513).
+fn set_device_space(it: &mut Interp, cs: ColorSpace) {
+    if matches!(cs, ColorSpace::Cmyk) {
+        it.gfx.set_native_cmyk([0.0, 0.0, 0.0, 1.0]);
+    }
+    it.gfx.set_colorspace(cs);
+}
+
+/// `- currentcolor comp1 ... compn` -- the components of the current
+/// colour in the current space (#513): one for Gray, three for RGB, four
+/// for CMYK, and the index (an integer) or the tint for Indexed and
+/// Separation. Rounded to the `f32` they are held as, as gs prints them.
+fn currentcolor(it: &mut Interp) -> Result<(), PsError> {
+    let out: Vec<Object> = match it.gfx.colorspace() {
+        ColorSpace::Gray => vec![Object::real(f32_readback(it.gfx.rgb().0))],
+        ColorSpace::Rgb => {
+            let (r, g, b) = it.gfx.rgb();
+            [r, g, b]
+                .into_iter()
+                .map(|v| Object::real(f32_readback(v)))
+                .collect()
+        }
+        ColorSpace::Cmyk => it
+            .gfx
+            .cmyk()
+            .into_iter()
+            .map(|v| Object::real(f32_readback(v)))
+            .collect(),
+        ColorSpace::Indexed { .. } => vec![Object::int(it.gfx.spot() as i64)],
+        ColorSpace::Separation { .. } => vec![Object::real(f32_readback(f64::from(it.gfx.spot())))],
+    };
+    for o in out {
+        it.push(o);
+    }
+    Ok(())
 }
 
 fn currentcolorspace(it: &mut Interp) -> Result<(), PsError> {
@@ -171,6 +216,10 @@ fn setcolor(it: &mut Interp) -> Result<(), PsError> {
             let idx = it.pop_int()?.clamp(0, i64::from(table.hival));
             let (r, g, b) = table.rgb_at(idx as usize);
             it.gfx.set_rgb(f64::from(r), f64::from(g), f64::from(b));
+            if let Some(cmyk) = table.cmyk_at(idx as usize) {
+                it.gfx.set_native_cmyk(cmyk);
+            }
+            it.gfx.set_spot(idx as f64);
             Ok(())
         }
         ColorSpace::Separation {
@@ -179,6 +228,7 @@ fn setcolor(it: &mut Interp) -> Result<(), PsError> {
             ..
         } => {
             let tint = it.pop_f64()?.clamp(0.0, 1.0);
+            it.gfx.set_spot(tint);
             it.begin_postop(
                 PostOp::SeparationColor { alt_ncomp },
                 vec![Object::real(tint)],

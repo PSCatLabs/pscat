@@ -47,11 +47,17 @@ pub fn install(dict: &mut Dict) {
     op(dict, "setlinecap", setlinecap);
     op(dict, "setlinejoin", setlinejoin);
     op(dict, "setmiterlimit", setmiterlimit);
+    op(dict, "currentlinecap", currentlinecap);
+    op(dict, "currentlinejoin", currentlinejoin);
+    op(dict, "currentmiterlimit", currentmiterlimit);
+    op(dict, "setstrokeadjust", setstrokeadjust);
+    op(dict, "currentstrokeadjust", currentstrokeadjust);
     op(dict, "setdash", setdash);
     op(dict, "currentdash", currentdash);
     op(dict, "sethsbcolor", sethsbcolor);
     op(dict, "currenthsbcolor", currenthsbcolor);
     op(dict, "setcmykcolor", setcmykcolor);
+    op(dict, "currentcmykcolor", currentcmykcolor);
     op(dict, "currentrgbcolor", currentrgbcolor);
     op(dict, "currentgray", currentgray);
     op(dict, "currentlinewidth", currentlinewidth);
@@ -472,6 +478,40 @@ fn setmiterlimit(it: &mut Interp) -> Result<(), PsError> {
     it.gfx.set_miter_limit(limit)
 }
 
+fn currentlinecap(it: &mut Interp) -> Result<(), PsError> {
+    it.push(Object::int(it.gfx.line_cap()));
+    Ok(())
+}
+
+fn currentlinejoin(it: &mut Interp) -> Result<(), PsError> {
+    it.push(Object::int(it.gfx.line_join()));
+    Ok(())
+}
+
+/// The miter limit is held as `f32`, so it reads back as the shortest
+/// decimal of that `f32` (`3.3 setmiterlimit currentmiterlimit` is `3.3`).
+fn currentmiterlimit(it: &mut Interp) -> Result<(), PsError> {
+    it.push(Object::real(f32_readback(it.gfx.miter_limit())));
+    Ok(())
+}
+
+/// `bool setstrokeadjust -` (#513). The flag is stored and read back, and
+/// saved by `gsave`; it does not change how pscat strokes.
+fn setstrokeadjust(it: &mut Interp) -> Result<(), PsError> {
+    let obj = it.pop()?;
+    let Value::Boolean(b) = obj.value else {
+        return Err(PsError::Typecheck);
+    };
+    it.gfx.state_mut().stroke_adjust = b;
+    Ok(())
+}
+
+fn currentstrokeadjust(it: &mut Interp) -> Result<(), PsError> {
+    let b = it.gfx.state().stroke_adjust;
+    it.push(Object::bool(b));
+    Ok(())
+}
+
 fn setdash(it: &mut Interp) -> Result<(), PsError> {
     let phase = it.pop_f64()?;
     let obj = it.pop()?;
@@ -508,9 +548,9 @@ fn sethsbcolor(it: &mut Interp) -> Result<(), PsError> {
 
 fn currenthsbcolor(it: &mut Interp) -> Result<(), PsError> {
     let (h, s, b) = it.gfx.hsb();
-    it.push(Object::real(color_readback(h)));
-    it.push(Object::real(color_readback(s)));
-    it.push(Object::real(color_readback(b)));
+    it.push(Object::real(f32_readback(h)));
+    it.push(Object::real(f32_readback(s)));
+    it.push(Object::real(f32_readback(b)));
     Ok(())
 }
 
@@ -521,6 +561,13 @@ fn setcmykcolor(it: &mut Interp) -> Result<(), PsError> {
     let c = it.pop_f64()?;
     it.gfx.set_cmyk(c, m, y, k);
     it.gfx.set_colorspace(crate::gfx::ColorSpace::Cmyk);
+    Ok(())
+}
+
+fn currentcmykcolor(it: &mut Interp) -> Result<(), PsError> {
+    for v in it.gfx.cmyk() {
+        it.push(Object::real(f32_readback(v)));
+    }
     Ok(())
 }
 
@@ -537,12 +584,13 @@ fn currentrgbcolor(it: &mut Interp) -> Result<(), PsError> {
 
 fn currentgray(it: &mut Interp) -> Result<(), PsError> {
     let g = it.gfx.gray();
-    it.push(Object::real(color_readback(g)));
+    it.push(Object::real(f32_readback(g)));
     Ok(())
 }
 
 /// A colour component as `currentgray` and `currenthsbcolor` report it
-/// (#505).
+/// (#505), and the other readbacks of values held in `f32` (the CMYK
+/// components, `currentmiterlimit`: #513).
 /// The colour is held in `f32`, and Ghostscript's reals are `f32` too, so
 /// the value is rounded to `f32` and then read back as the `f64` nearest
 /// that `f32`'s shortest decimal: `0.3 setgray currentgray` gives `0.3`
@@ -550,7 +598,7 @@ fn currentgray(it: &mut Interp) -> Result<(), PsError> {
 /// gives `0.5` (not the `0.49999999999999994` that `0.3r + 0.59g + 0.11b`
 /// sums to in `f64`), as gs prints. Setting the value again lands on the
 /// same `f32`, so a read-then-set round trip still changes nothing.
-fn color_readback(x: f64) -> f64 {
+pub(super) fn f32_readback(x: f64) -> f64 {
     (x as f32).to_string().parse().unwrap_or(x)
 }
 
