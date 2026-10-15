@@ -150,7 +150,7 @@ fn a_copy_whitens_the_paper_and_the_type_gets_fatter() {
     // /Copies 0 is the plain page, pixel for pixel
     assert_eq!(differing(&c0, &typed("/Copies 0")), 0);
     // rel-page sets the type's copies for its content
-    let through = rel_page(TYPED, "/Generation 3 /Speckle 0");
+    let through = rel_page(TYPED, "/Generation 3 /Speckle 0 /Haze 0");
     let by_hand = page(
         "<< /Text (Dear Sir, the file is closed.) /Width 300 /Height 200 /Margin 30 \
          /Machine 4 /Seed 3 /Copies 3 >> tw-type",
@@ -164,6 +164,42 @@ fn a_copy_whitens_the_paper_and_the_type_gets_fatter() {
         ink(&through),
         ink(&by_hand)
     );
+}
+
+/// The paper of a copy: the median of a page with no type on it.
+fn median(p: &[u8]) -> u8 {
+    let mut v = p.to_vec();
+    v.sort_unstable();
+    v[v.len() / 2]
+}
+
+#[test]
+fn a_copy_keeps_a_grey_haze_and_a_grain_unless_haze_is_zero() {
+    // issue #466: a copy's paper is not flat white
+    let blank = |opts: &str| rel_page("{ }", opts);
+    let white = blank("/Generation 1 /Haze 0");
+    assert!(median(&white) >= 250, "/Haze 0 is the plain white copy");
+    let (mid, high) = (blank("/Generation 1"), blank("/Generation 1 /Haze 1"));
+    // the default is T14's tone, about 0.9
+    assert!(
+        (215..=240).contains(&median(&mid)),
+        "the default copy paper is a light grey: {}",
+        median(&mid)
+    );
+    assert!(mean(&white) > mean(&mid) + 8.0 && mean(&mid) > mean(&high) + 3.0);
+    // it has a grain and a mottle: the paper is not one value
+    let m = median(&mid);
+    let lo = mid.iter().filter(|&&v| v < m - 2).count();
+    let hi = mid.iter().filter(|&&v| v > m + 2).count();
+    assert!(
+        lo > 500 && hi > 500,
+        "the grey varies: {lo} darker, {hi} lighter"
+    );
+    // an original has no haze: the key does nothing without a generation
+    assert_eq!(differing(&blank("/Haze 1"), &blank("")), 0);
+    // another seed moves it
+    let other = page("{ } << /Width 300 /Height 200 /Seed 8 /Generation 1 >> rel-page");
+    assert!(differing(&mid, &other) > 500);
 }
 
 #[test]
