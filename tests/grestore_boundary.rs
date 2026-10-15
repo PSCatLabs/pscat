@@ -10,10 +10,9 @@
 //! - At the bottom (nothing saved, no `save` live), `grestore` and
 //!   `grestoreall` bring back the job's initial state.
 //! - Either way the level starts with an empty `clipsave` stack.
-//! - `currentgray` and `currenthsbcolor` print the short value gs prints
-//!   (`0.5`, `0.3`), not `0.49999999999999994` or `0.30000001192092896`.
-//!   `currentrgbcolor` is deliberately left unrounded (see
-//!   `notes/505-grestore-bottom-currentgray.md`).
+//! - `currentgray`, `currenthsbcolor` and `currentrgbcolor` (#515) print the
+//!   short value gs prints (`0.5`, `0.3`), not `0.49999999999999994` or
+//!   `0.30000001192092896`.
 
 use pscat::Interp;
 
@@ -110,10 +109,16 @@ const CASES: &[Case] = &[
         &["0.5", "0.5", "0.3", "0.362000018"],
     ),
     (
-        "currentrgbcolor of values exact in f32 (it is not rounded: see the notes)",
+        "currentrgbcolor of values exact in f32",
         "0.25 setgray currentrgbcolor 3 array astore == \
          0 0 0 0.5 setcmykcolor currentrgbcolor 3 array astore ==",
         &["[0.25 0.25 0.25]", "[0.5 0.5 0.5]"],
+    ),
+    (
+        "currentrgbcolor rounds the f32s to their short decimals (#515)",
+        "0.3 0.6 0.9 setrgbcolor currentrgbcolor 3 array astore == \
+         0.123 0.456 0.789 setrgbcolor currentrgbcolor 3 array astore ==",
+        &["[0.3 0.6 0.9]", "[0.123 0.456 0.789]"],
     ),
     (
         "currenthsbcolor",
