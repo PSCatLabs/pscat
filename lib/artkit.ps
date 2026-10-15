@@ -1943,7 +1943,7 @@ end
 %   (a procedure inside the region's /BBox) mustguard
 %   tgot not (a procedure inside /BBox: nothing ran) mustbe
 %   /tgot false def
-%   { << /Kind /rect /BBox [ 0 0 100 /tgotfn cvx ] /Area 1 >>
+%   { << /Kind /rect /BBox [ /tgotfn cvx 0 100 100 ] /Area 1 >>
 %     << /Mark { pop pop pop pop } >> scatter }
 %   /scatter-region-bbox-must-be-four-numbers
 %   (an executable name inside the region's /BBox) mustguard

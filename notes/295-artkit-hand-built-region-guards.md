@@ -42,5 +42,17 @@ Filed as #503.
 **Cost.** One pass over `/Edges` per `scatter` call (twice with `/Density`),
 against `Count * Tries` candidate tests that each walk the same edges.
 
-**Identity.** No valid region changes: `scripts/identity_check.sh` default
-pick and `--loader lib/artkit.ps` byte-identical (see the PR for the numbers).
+A `/Kind /rect` dict with no `/Area` reaching `/Density` gets
+`scarea-region-edges-must-be-numbers` (it was a raw `undefined` on `/Edges`);
+the name is odd for a rectangle, the change is an improvement, and
+`screct` always sets `/Area`.
+
+**Identity.** No valid region changes. `scripts/identity_check.sh`, base at
+the merge-base: default pick 49 of 49 pages identical across 40 files;
+`--loader lib/artkit.ps` 97 of 97 pages across 81 files; the control (a
+hand-built region whose `/Area` procedure draws a square, under `/Density`:
+base draws it, head raises the guard) differed in both runs. The only
+`src/` edit is two names in `ARTKIT_INTERNAL` (`src/capabilities.rs`), no
+rendering effect, so one binary serves both trees. Ghostscript (correctness
+only): a valid and an empty `scpath` scatter run, and a procedure planted in
+`/Edges`, `/Area` or `/BBox` raises `undefined` without running.
