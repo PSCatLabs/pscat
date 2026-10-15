@@ -664,10 +664,16 @@ grestore
 /tZoneDo {
     /zdPr exch def  /zdP exch def
     tZFar null ne {
-        gsave tBleedInk aload pop setrgbcolor
-            zdP 0.17 sub dup 0 lt { pop 0 } if tLevel tWeaveClip
-            tZFar rectclip /zdPr load exec
-        grestore
+        % the other colour's ink wears with the lane too
+        tZW {
+            aload pop /zdWR exch def /zdWD exch def
+            gsave tBleedInk aload pop setrgbcolor
+                zdP 0.17 sub zdWD add dup 0 lt { pop 0 } if tLevel tWeaveClip
+                tZFar rectclip
+                zdWR null ne { zdWR rectclip } if
+                /zdPr load exec
+            grestore
+        } forall
     } if
     tZB {
         aload pop /zdBR exch def /zdBD exch def

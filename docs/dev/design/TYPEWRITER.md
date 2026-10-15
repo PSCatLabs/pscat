@@ -326,8 +326,9 @@ over the whole glyph. Ribbon ink only (no effect under `/InkModel false`).
   weave; the main ink goes over it, through a sparser weave across a transition 60 units
   either side of the boundary in three steps, so the other colour shows through the voids
   and the edge is ragged at yarn scale rather than a ruled line. A strike the boundary does
-  not reach is the page without `/Bleed`, to the byte. Not done: a clogged counter's fill
-  stays in the main ink.
+  not reach is the page without `/Bleed`, to the byte. With both extras on, the other
+  colour's ink wears with the lane too. Not done: a clogged counter's fill stays in the
+  main ink.
 - **Not sourced.** The board has no two-colour sample (REFERENCES.md; Q3), and a
   search for one found only retail listings and a description of the selector
   ("slightly raises or lowers the ribbon"), nothing on colours mixing at the boundary.

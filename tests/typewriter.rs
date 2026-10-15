@@ -595,6 +595,28 @@ fn bleed_prints_the_other_colour_below_the_boundary() {
     }
 }
 
+/// The extras compose (#422, Codex round 1): where the bleed's other colour
+/// lies in the worn lane it wears too, so a worn lane lightens the red foot.
+#[test]
+fn the_worn_lane_lightens_the_bleed_colour_too() {
+    // the lane is moved down over the descenders, where this bleed's red lies
+    let red_mass = |opts: &str| -> f64 {
+        let it = render(&format!(
+            "TWState /tWornLo -500 put TWState /tWornHi 100 put \
+             36 84 moveto << /Machine 1 /Seed 2 /Wear 0 /Size 40 /Pitch 3.5 /Bleed 1 \
+             /BleedInk [0.9 0.1 0.1] {opts} >> tw-setup (Hxdlbkpgyqjpy) show"
+        ));
+        rgb(&it)
+            .iter()
+            .map(|&(r, g, b)| f64::from(r.saturating_sub(g.max(b))))
+            .sum()
+    };
+    let (plain, worn) = (red_mass("/WornBand 0"), red_mass("/WornBand 1"));
+    eprintln!("red mass: lane intact {plain:.0}, worn {worn:.0}");
+    assert!(plain > 0.0, "no red at the foot");
+    assert!(worn < 0.95 * plain, "the worn lane left the red foot alone");
+}
+
 #[test]
 fn a_strip_types_within_the_cpu_budget() {
     let src = format!(
