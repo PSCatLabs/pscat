@@ -482,7 +482,15 @@ pass, not per pixel. A mark tall against the gradient wants it per band
 : `/Box [x y w h]` and `/Bands [cols rows]` in place of `/At`
 ask the procedure once per cell of a grid over the mark and paint each
 softening pass once per cell, clipped to it, with the random stream replayed
-so every cell lays the same marks. A literal `[r g b]` behaves exactly
+so every cell lays the same marks. A mark painted in loaded colours
+(`/Colors` on `pkbroad`, `pktrowel`, `pkfan` or `pkdab`) can instead ask it per fill:
+add `/PerFill true` beside `/At` and the procedure is asked again at each
+fill's own position (the middle of an inked run, in the user space you call
+pkwet in), with no clipping and no extra runs of the mark. A mark made of many
+short fills follows the sky closely, and one long unbroken run is asked once.
+It costs one call of the procedure per fill per softening pass, so keep it
+cheap, and an inherited-colour mark (`pkribbon`, `pkspray`) has no such site and
+is still asked per pass at `/At`. A literal `[r g b]` behaves exactly
 as before. `examples/paintkit_wet_under_demo.ps` sets one cloud over a strong
 sky gradient with a constant and a procedural `/Under`
 (`docs/dev/design/paintkit_wet_under_demo.png`);

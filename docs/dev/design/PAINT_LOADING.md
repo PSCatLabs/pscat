@@ -313,6 +313,14 @@ finished call is never read. Error unwinding needs no new code for the
 same reason. `pkwet`'s own renders are unchanged: the writes are pure
 bookkeeping and nothing reads them except `puwet`.
 
+Slot 9 (issue #403) is `null`, or for a `pkwet` called with `/PerFill true` a
+two-element array `[ the /Under procedure, the CTM at entry ]`. The
+colour sites then call `puwetat` (`puwet` with the fill's x y), which asks that
+procedure at the fill's own position, in the user space `pkwet` was called in
+(device point back through the saved CTM), in place of reading slot 7 or 5.
+Everything else about `puwet` is unchanged, and `puwet` itself, still used for
+`pkoil`'s ridge colours, reads slot 7 as before.
+
 The rule in HANDOFF and the `pkwet` header becomes: the procedure must
 paint in the colour it inherits, *or* in loaded colours, which `pkwet`
 grades for you.

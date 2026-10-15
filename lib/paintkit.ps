@@ -2300,17 +2300,20 @@
     ptpy ptpb sin ptpu mul add ptpa sin ptpe mul add
 } bind def
 
-% i ptcolor -   (set the loaded color for a run that starts at stop i; only
-% called with /Colors set)
+% i j ptcolor -   (set the loaded color for a run that starts at stop i and
+% ends at stop j; only called with /Colors set)
 % The head position ptcu and the shade ptcsh are set by the caller: a lane's
 % centre and its jitter, or an edge ridge's +-1 and its darkening. The flip is
 % the run's first stop's, because runs never cross a subpath.
 % @internal
 /ptcolor {
-    /ptcli exch def
+    /ptclj exch def /ptcli exch def
     ptColorRec ptcu
     ptColorRec 2 get { ptflips ptcli get } { false } ifelse
-    puat puwet 3 array astore ptcsh shade setrgbcolor
+    puat
+    % where the run sits, for a /PerFill backdrop (issue #403): its middle stop
+    ptraw ptcli ptclj add 2 idiv get dup 0 get exch 1 get
+    puwetat 3 array astore ptcsh shade setrgbcolor
 } bind def
 
 % - ptemit -   (fills the ptk accumulated stops as one strip, resets ptk)
@@ -2340,7 +2343,7 @@
 % @internal
 /ptemit {
     ptk 0 gt {
-        ptColorRec null ne { ptri 0 get ptcolor } if
+        ptColorRec null ne { ptri 0 get ptri ptk 1 sub get ptcolor } if
         /ptlast ptk 1 sub def
         /ptext0 ptDrag ptraw ptri 0 get get 6 get mul ptPitch 0.5 mul add def
         /ptext1 ptDrag ptraw ptri ptlast get get 6 get mul ptPitch 0.5 mul add def
@@ -3344,8 +3347,8 @@
     1 pfferrule sub mul pfferrule add
 } bind def
 
-% i pfcolor -   (set the loaded color of the current bristle for a run that
-% starts at stop i; only called with /Colors set)
+% i j pfcolor -   (set the loaded color of the current bristle for a run that
+% starts at stop i and ends at stop j; only called with /Colors set)
 % The head position is the bristle's pfub (+1 is the left of the travel, the
 % first colour) and the shade is the bristle's own stored /ColorJitter draw
 % pfcj, so every run of a bristle -- across every subpath -- is jittered
@@ -3353,10 +3356,13 @@
 % pressed ray is a degenerate subpath of its own (never flipped).
 % @internal
 /pfcolor {
-    /pfcli exch def
+    /pfclj exch def /pfcli exch def
     pfColorRec pfub
     pfColorRec 2 get { pfflips pfcli get } { false } ifelse
-    puat puwet 3 array astore 1 pfcj add shade setrgbcolor
+    puat
+    % where the run sits, for a /PerFill backdrop (issue #403): its middle stop
+    pfraw pfcli pfclj add 2 idiv get dup 0 get exch 1 get
+    puwetat 3 array astore 1 pfcj add shade setrgbcolor
 } bind def
 
 % runstart runend islast pfrun -
@@ -3403,7 +3409,7 @@
     /pfnpts pfrend pfrstart sub 1 add def
     /pfrp pflen 8 pfnpts mul div def
     pfrp pfPitch lt { /pfrp pfPitch def } if
-    pfColorRec null ne { pfrstart pfcolor } if
+    pfColorRec null ne { pfrstart pfrend pfcolor } if
     << /Width pfrw /Pitch pfrp /StartCap /pointed /EndCap /pointed
        /EndTaper pflast { pfFlick } { 0 } ifelse >> pkribbon
 } bind def
@@ -3436,7 +3442,7 @@
     newpath
     pfdx pfdy moveto
     pfdx pfda cos pfdl mul add  pfdy pfda sin pfdl mul add  lineto
-    pfColorRec null ne { pfrayi pfcolor } if
+    pfColorRec null ne { pfrayi dup pfcolor } if
     << /Width pfrw /Pitch pfrp /StartCap /pointed /EndCap /pointed
        /EndTaper pfFlick >> pkribbon
 } bind def
@@ -3862,17 +3868,20 @@
     pmpy pmpb sin pmpu mul add
 } bind def
 
-% i pmcolor -   (set the loaded color of the current striation for a run
-% that starts at stop i; only called with /Colors set)
+% i j pmcolor -   (set the loaded color of the current striation for a run
+% that starts at stop i and ends at stop j; only called with /Colors set)
 % The head position is the striation's centre pmnc, before any narrowing.
 % Runs never cross a subpath, so the flip of the run's first stop is the
 % run's. /ColorJitter is the striation's own draw, taken up front.
 % @internal
 /pmcolor {
-    /pmcli exch def
+    /pmclj exch def /pmcli exch def
     pmColorRec pmnc
     pmColorRec 2 get { pmflips pmcli get } { false } ifelse
-    puat puwet 3 array astore 1 pmcj add shade setrgbcolor
+    puat
+    % where the run sits, for a /PerFill backdrop (issue #403): its middle stop
+    pmraw pmcli pmclj add 2 idiv get dup 0 get exch 1 get
+    puwetat 3 array astore 1 pmcj add shade setrgbcolor
 } bind def
 
 % i na nb back fwd pmstamp -   (the brush's footprint at a single stop)
@@ -3900,7 +3909,7 @@
 /pmstamp {
     /pmsfwd exch def /pmsback exch def
     /pmsnb exch def /pmsna exch def /pmsi exch def
-    pmColorRec null ne { pmsi pmcolor } if
+    pmColorRec null ne { pmsi dup pmcolor } if
     % The footprint's long axis is the stop's own travel direction
     % turned by /Angle -- the same rotation pmpt applies across the
     % band. walkpath reports angle 0 at a degenerate stop, so there this
@@ -3955,7 +3964,7 @@
     /pmnbv exch def /pmnav exch def /pmend exch def /pmstart exch def
     pmend pmstart gt {
         /pmspan pmend pmstart sub def
-        pmColorRec null ne { pmstart pmcolor } if
+        pmColorRec null ne { pmstart pmend pmcolor } if
         newpath
         pmstart 1 pmend {
             /pmei exch def
@@ -5270,9 +5279,41 @@
 % counted against the same 64-run budget as a directional call
 % (pkwet-too-many-passes, checked before any draw): 12 cells at 6 layers, 21
 % at 4. An unclipped procedure still does all its work in every cell, so a
-% spray at the specimen's density costs that many times as much. Not done,
-% and still open: asking the backdrop per fill inside a preset (a hook into
-% each preset's colour set), which would take no clipping at all.
+% spray at the specimen's density costs that many times as much.
+%
+% A backdrop per fill (issue #403)
+% --------------------------------
+% A preset that paints in loaded colours (/Colors on pkbroad, pktrowel, pkfan
+% or pkdab) already has a place where it sets each fill's colour, and `puwet`
+% grades it there. With /PerFill true that place asks the /Under procedure
+% too, at the fill's own position, instead of using the one answer its pass
+% got:
+%
+%   { ... } << /Soft 1 /Offset 30 /Layers 5 /At [ 150 75 ]
+%              /Under { exch pop skyat } /PerFill true >> pkwet
+%
+% Nothing is clipped and no random stream is replayed: the mark runs once per
+% pass, as it does without /PerFill. A fill is one inked run (a pkbroad
+% striation, a pktrowel run, a pkfan bristle's run) or one pkdab dab, asked at the
+% run's middle stop (the dab's centre), so a mark made of many short fills (stacked strokes, a broken
+% stroke) follows the backdrop closely and one long unbroken run is asked once,
+% as it would be per pass. The position is in the user space pkwet is called
+% in, as /At and /Box are, however the CTM has moved inside the mark, and it
+% includes the pass's displacement: it is where the fill lands. The core is
+% asked nothing. Cost: one call of the procedure per fill per softening pass
+% (a stroke is dozens), so keep it cheap.
+%
+% It reaches only the loaded colours. A mark that paints in the colour it
+% inherits (pkribbon, pkspray, a plain fill) has no such place, so it is still
+% asked per pass, at /At, which is why /At stays required: /PerFill is an
+% addition to it, not a replacement. pkoil's and pkdab's /HighlightColor and
+% /ShadowColor are graded once per pass too. /PerFill is rejected with /Box (a banded call
+% already gives each cell its own answer) and with a literal /Under.
+%
+% Measured (tests/paintkit.rs `loaded_column`, twelve stacked pkbroad strokes
+% over the strong gradient, /Offset 34, 6 layers): the residual rim is 384.4
+% with one backdrop per pass, 116.9 with 8 bands (41 runs of the mark), 81.2
+% with /PerFill (6 runs).
 %
 % pkwash is deliberately *not* wrappable: it resets alpha and blend mode
 % itself, by design, so it will not honor a surrounding context. pkwet
@@ -5380,7 +5421,7 @@
 % depth pqdset -
 % @internal
 /pqdset { userdict /pqdepth 3 -1 roll put } bind def
-% -> frame   (this invocation's 9-slot frame; pkwet lists the slots)
+% -> frame   (this invocation's 10-slot frame; pkwet lists the slots)
 % @internal
 /pqmyframe { userdict /pqframes get pqdnow get } bind def
 
@@ -5842,13 +5883,38 @@
 %   pwul 1 get 23 sub abs 0.01 lt (and y) mustbe
 %   pwul 2 get 18 sub abs 0.01 lt (the second cell's centre x) mustbe
 %%EndSelfTest
+
+%%SelfTest: pkwet-rejects-malformed-perfill
+%   { { } << /Under [ 0 0 0 ] /PerFill true >> pkwet }
+%   /pkwet-perfill-needs-an-under-procedure
+%   (/PerFill beside a literal /Under) mustguard
+%
+%   { { } << /Under { pop pop 0 0 0 } /At [ 0 0 ] /PerFill 1 >> pkwet }
+%   /pkwet-perfill-must-be-a-boolean
+%   (a number as /PerFill) mustguard
+%
+%   { { } << /Under { pop pop 0 0 0 } /At [ 0 0 ] /PerFill { true } >> pkwet }
+%   /pkwet-perfill-must-not-be-a-procedure
+%   (a procedure as /PerFill) mustguard
+%
+%   { { } << /Under { pop pop 0 0 0 } /Box [ 0 0 9 9 ] /Bands [ 1 2 ] /PerFill true >> pkwet }
+%   /pkwet-perfill-and-box-are-exclusive
+%   (/PerFill with /Box) mustguard
+%
+%   pqdepth 0 eq (every rejection rolled the depth back) mustbe
+%
+%   % puwetat outside any pkwet is the colour it was given.
+%   0.2 0.4 0.6 3 4 puwetat 0.6 eq exch 0.4 eq and exch 0.2 eq and
+%   (puwetat outside pkwet is the identity) mustbe
+%%EndSelfTest
 %
 % @kind: Procedure
-% @summary: Runs a mark-drawing procedure several times, each pass displaced further and mixed further toward a declared backdrop color, so the mark's core stays solid while its edge grades away into the layer beneath. The wet-on-wet softener for skies, clouds, mist and distant forms; works with every stroke preset in this file. The procedure must build its own path: a path constructed before the call cannot be displaced, because PostScript paths are in device space once built, so every pass would land on the same geometry and nothing would soften. Pair it with a broken or particulate brush (pkspray, pkdry, pktrowel at low Coverage) -- a solid brush keeps its own hard silhouette and only gains a halo. With /Direction the passes line up along one axis instead: a reflection pulled down, a mountain foot lifted into mist, a sky swept across. /Under may be a procedure `x y -> r g b` (with /At, or with /Box and /Bands for a mark that is tall against the backdrop) for a backdrop that varies across the mark, such as a graded sky. Uses no alpha, so unlike pkwash it needs no Ghostscript fallback.
+% @summary: Runs a mark-drawing procedure several times, each pass displaced further and mixed further toward a declared backdrop color, so the mark's core stays solid while its edge grades away into the layer beneath. The wet-on-wet softener for skies, clouds, mist and distant forms; works with every stroke preset in this file. The procedure must build its own path: a path constructed before the call cannot be displaced, because PostScript paths are in device space once built, so every pass would land on the same geometry and nothing would soften. Pair it with a broken or particulate brush (pkspray, pkdry, pktrowel at low Coverage) -- a solid brush keeps its own hard silhouette and only gains a halo. With /Direction the passes line up along one axis instead: a reflection pulled down, a mountain foot lifted into mist, a sky swept across. /Under may be a procedure `x y -> r g b` (with /At, or with /Box and /Bands for a mark that is tall against the backdrop, or with /At and /PerFill to ask it at each loaded-colour fill) for a backdrop that varies across the mark, such as a graded sky. Uses no alpha, so unlike pkwash it needs no Ghostscript fallback.
 % @example: { newpath 40 120 moveto 260 150 lineto << /Width 40 >> pkribbon } << /Soft 0.7 /Under [0.62 0.72 0.86] >> pkwet
 % @param: /Soft [0..1] master softness; supplies the defaults for Layers and Offset. 0 is a single undisplaced pass that marks the page exactly as calling the proc directly would, random stream included; the procedure still runs inside a gsave, so a path or graphics state it leaves behind does not survive the call (default 0.6)
 % @param: /Under [rgb array] the color already on the canvas that this mark settles into; the outermost pass is nearly this color. May also be a procedure `x y -> r g b` (three numbers in 0..1, user space), the backdrop as a function: it is asked once per softening pass, at /At plus that pass's displacement, so the rim goes where the backdrop changes across the mark. It must be a pure function: no painting, no pkwet call, no reliance on the operand stack. A mark taller than the backdrop's change is better asked per band: see /Box and /Bands (default [1 1 1])
-% @param: /At [points] With a procedural /Under only (required there): [x y] where the mark sits, in the user space pkwet is called in, the point each pass's displacement is added to before the procedure is asked for the backdrop (default absent)
+% @param: /At [points] With a procedural /Under only (required there, unless /Box is given): [x y] where the mark sits, in the user space pkwet is called in, the point each pass's displacement is added to before the procedure is asked for the backdrop. With /PerFill it is still where an inherited-colour mark is asked (default absent)
+% @param: /PerFill [boolean] With a procedural /Under and /At only: true asks the /Under procedure again at every loaded-colour fill's own position (a pkbroad striation's, a pktrowel run's, a pkfan bristle's run, a pkdab dab), instead of using the one answer its pass got, so a tall mark made of many fills follows a backdrop that changes down it, with no clipping and no more runs of the mark. Reaches only presets that paint in /Colors; an inherited-colour mark is still asked per pass. Costs one call of the procedure per fill per softening pass, so keep it cheap. Not with /Box (default false)
 % @param: /Box [array of points] With a procedural /Under and /Bands (instead of /At): [x y w h], where the mark sits, in the user space pkwet is called in. The /Under procedure is then asked once per cell of a grid over the box grown by /Offset on every side, at the cell's centre, and each softening pass is run once per cell, clipped to it and mixed toward that cell's answer, so the backdrop varies across a tall mark and not only from pass to pass. The grid's outer cells run on outward, so a displaced rim is not cut off (default absent)
 % @param: /Bands [array of count] With /Box (required with it): [columns rows] of the grid, each a whole number 1 to 16. A cell wants to be no taller than about half /Offset, and a short mark is as well served by /At. The wrapped procedure runs (Layers - 1) x columns x rows + 1 times, which a nest of such calls may multiply by at most 64 (a 6-layer call can have 12 cells, a 4-layer one 21); the random stream is replayed per cell, so every cell lays the same marks and the stream ends where one unbanded run leaves it (default absent)
 % @param: /Pickup [0..1] how far the outermost pass mixes toward Under; lower keeps the mark's own color out to its edge (default 0.85)
@@ -5950,6 +6016,13 @@
                 pop
             } for
         } ifelse
+        % /PerFill (issue #403): ask this procedure again, at each loaded-colour
+        % fill's own position. /At stays required: it is still where the
+        % inherited-colour passes are asked.
+        /pqperfill pqopts /PerFill false pkgetdef def
+        /pqperfill load xcheck { pkwet-perfill-must-not-be-a-procedure } if
+        /pqperfill load type /booleantype ne { pkwet-perfill-must-be-a-boolean } if
+        pqperfill pqbanded and { pkwet-perfill-and-box-are-exclusive } if
         /pqUnderProc /pqUnder load def
         /pqUnder [ 1 1 1 ] def
         /pqunderp true def
@@ -5963,6 +6036,8 @@
         } for
         pqopts /At known { pkwet-at-needs-an-under-procedure } if
         pqopts /Box known pqopts /Bands known or { pkwet-box-needs-an-under-procedure } if
+        pqopts /PerFill known { pkwet-perfill-needs-an-under-procedure } if
+        /pqperfill false def
         /pqbanded false def
         /pqunderp false def
     } ifelse
@@ -6040,15 +6115,17 @@
     mul /pqchain exch def
     pqchaindir pqchain 64 gt and
         { pqdnow 1 sub pqdset pkwet-too-many-passes } if
-    % Nine slots: 0 the plan, 1 the procedure, 2-3 the pass budget's
+    % Ten slots: 0 the plan, 1 the procedure, 2-3 the pass budget's
     % running product and flag, 4-6 the pass mix that loaded colours
     % read (issue #183 slice L3, below), and 7 the per-pass backdrop
     % colours of a procedural /Under (issue #179; null for a literal one,
     % which is what keeps puwet's old path), and 8 a banded call's record
     % (issue #359: the cells' clips, backdrops, pass colours and the saved
-    % random stream; null for any other call). The later slots go at the end
+    % random stream; null for any other call), and 9 a /PerFill call's
+    % [ backdrop procedure, CTM at entry ] (issue #403; null for any other
+    % call, which is what keeps puwetat on puwet's old path). The later slots go at the end
     % so 0-3 keep the meaning the budget and the nesting machinery rely on.
-    userdict /pqframes get pqdnow 9 array put
+    userdict /pqframes get pqdnow 10 array put
     pqmyframe 1 /pqproc load put
     pqmyframe 2 pqchain put
     pqmyframe 3 pqchaindir put
@@ -6157,6 +6234,13 @@
     % A banded call's cells, clips and colours (issue #359); slot 8 stays null
     % for any other call, and the pass loop tests it.
     pqbanded pqLayers 1 gt and { pqmyframe 8 pqbrec put } if
+    % A /PerFill call's procedure and CTM (issue #403), for puwetat: copied
+    % into the frame now, because the globals are overwritten by a nested
+    % call before this one's fills run. Slot 7 stays filled either way, so
+    % a `puwet` with no position (pkoil's ridge colours) still has its
+    % per-pass answers to read.
+    pqperfill pqLayers 1 gt and
+        { pqmyframe 9 [ /pqUnderProc load matrix currentmatrix ] put } if
     % Each pass runs under `stopped`, which is what makes this wrapper
     % safe to abandon. Three separate review findings were all the same
     % missing unwind-protect: a caught error leaked one graphics-state
@@ -7377,11 +7461,13 @@ systemdict /setalpha known /pwhasalpha exch def
                 % This dab's colour, resolved once so all three layers read the same
                 % value: the caller's colour, or the load at the position the outline
                 % phase already drew (slot 5, 0..1 from the first colour to the last;
-                % `puat` takes u = 1 - 2p). No new draw. `puwet` grades it for any
+                % `puat` takes u = 1 - 2p). No new draw. `puwetat` grades it for any
                 % `pkwet` pass it is painted in.
                 pdd 14
                 pdColorRec null ne {
-                    pdColorRec 1 pdd 5 get 2 mul sub false puat puwet 3 array astore
+                    pdColorRec 1 pdd 5 get 2 mul sub false puat
+                    % at the dab's centre, for a /PerFill backdrop (issue #403)
+                    pdd 0 get pdd 1 get puwetat 3 array astore
                 } { pdbase } ifelse
                 put
                 pddabs pdn pdd put
@@ -8049,6 +8135,66 @@ systemdict /setalpha known /pwhasalpha exch def
         } for
         puwc aload pop
     } if
+} bind def
+
+% [proc ctm] puaskfill -> [r g b]   (issue #403: ask one frame's /PerFill
+% backdrop procedure for the fill at the device point puwdx puwdy)
+% The point is taken back to the user space that call was made in (`ctm` is
+% its CTM at entry), so it includes the pass's displacement and anything the
+% wrapped procedure did to the CTM. The procedure runs with only x y of its
+% own on the stack and is checked as pkwet's /At procedure is, with the same
+% error names. Unlike `pqaskunder` it never touches the depth counter: it runs
+% inside a pass, and an error leaves through that pass's `stopped`, which
+% rolls its own level back (a second rollback here would count it twice).
+% It reads the procedure from the frame it is handed, never a global that a
+% nested `pkwet` would have overwritten. Draws no random number.
+% @internal
+/puaskfill {
+    /puws exch def
+    puwdx puwdy puws 1 get itransform
+    count 2 sub /puwc0 exch def
+    puws 0 get exec
+    count puwc0 sub 3 ne {
+        count puwc0 sub dup 0 gt { { pop } repeat } { pop } ifelse
+        pkwet-under-procedure-must-return-3-numbers
+    } if
+    3 array astore /puwr exch def
+    0 1 2 {
+        puwr exch get dup type dup /integertype ne exch /realtype ne and
+            { pop pkwet-under-procedure-results-must-be-numbers } if
+        dup 0 lt exch 1 gt or
+            { pkwet-under-procedure-results-must-be-0-to-1 } if
+    } for
+    puwr
+} bind def
+
+% r g b x y puwetat -> r g b
+% `puwet` for a fill that knows where it lands (issue #403). x y is the fill's
+% position in the current user space. It is `puwet` exactly, except at a depth
+% whose `pkwet` was called with /PerFill true: there the backdrop is asked of
+% that call's /Under procedure at the fill's own position (in the user space
+% that call was made in) rather than read from the per-pass answers, and the
+% colour is mixed toward it by the same factor. A depth without /PerFill, and
+% the core pass of any depth, take the code `puwet` has; outside any `pkwet`
+% the colour is returned as it came. No draws.
+% @internal
+/puwetat {
+    pqdnow 0 gt {
+        transform /puwdy exch def /puwdx exch def
+        3 array astore /puwc exch def
+        1 1 pqdnow {
+            userdict /pqframes get exch get /puwf exch def
+            puwf 4 get puwf 6 get get /puwk exch def
+            puwk 0 ne {
+                puwf 9 get dup null eq {
+                    pop puwf 7 get dup null eq { pop puwf 5 get } { puwf 6 get get } ifelse
+                } { puaskfill } ifelse
+                /puwb exch def
+                /puwc [ puwc puwb puwk mix3 ] def
+            } if
+        } for
+        puwc aload pop
+    } { pop pop } ifelse
 } bind def
 
 %%SelfTest: puparse-rejects-malformed-loads

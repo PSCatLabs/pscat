@@ -8211,6 +8211,357 @@ fn ghostscript_accepts_paintkit_wet_under_demo() {
     );
 }
 
+// --- pkwet: /PerFill, the backdrop asked at each loaded fill (issue #403) -
+//
+// `/PerFill true` (with a procedural /Under and /At) asks the /Under
+// procedure again at every loaded-colour fill's own position, instead of
+// mixing every fill toward the one answer its pass got. What has to hold:
+// without it nothing moves (the byte-identity half is
+// scripts/identity_check.sh), over a backdrop that never changes it draws what
+// per pass draws, over a gradient it leaves a smaller rim on a mark made of
+// many fills, the procedure is asked in the call's own user space, and a bad
+// answer is a named error that leaves pkwet usable.
+
+/// A column of twelve short loaded strokes stacked 9pt apart (y 25..124) over
+/// the 300x150 gradient of `graded_cloud`, softened with `under_opts`: a mark
+/// that is tall against the backdrop and made of many fills, which is what
+/// asking per fill can reach and /Bands pays a cell grid for.
+fn loaded_column(under_opts: &str) -> Interp {
+    let mut it = fresh(300, 150);
+    it.run_str(&format!(
+        "/skyat {{ 150 div 0 max 1 min /skt exch def \
+           [ 0.98 0.86 0.68 ] [ 0.06 0.16 0.50 ] skt mix3 }} def \
+         0 1 149 {{ /gy exch def gy skyat setrgbcolor \
+           newpath 0 gy moveto 300 gy lineto 300 gy 2 add lineto 0 gy 2 add lineto \
+           closepath fill }} for \
+         41 srand \
+         {{ 0 1 11 {{ 9 mul 25 add /ly exch def \
+              newpath 130 ly moveto 170 ly lineto \
+              << /Width 10 /Charge 1 /Depletion 0 /Edge 0 /ColorJitter 0 \
+                 /Colors [[0.99 0.98 0.97]] >> pkbroad }} for }} \
+         << /Soft 1 /Offset 34 /Layers 6 {under_opts} >> pkwet"
+    ))
+    .unwrap_or_else(|e| panic!("{under_opts}: {}", it.error_report(&e)));
+    it
+}
+
+/// The acceptance criterion: on a tall mark made of many loaded fills over
+/// a strong gradient, asking per fill leaves a smaller rim than the one
+/// backdrop per pass (#179) and than 8 rows of bands (#359), at six runs of
+/// the mark against /Bands' 41. Measured when this was written, rows 15..135
+/// of `loaded_column`: per pass 384.4, 1x4 bands 195.6, 1x8 bands 116.9, per
+/// fill 81.2 (4.7x less than per pass).
+#[test]
+fn wet_perfill_removes_more_of_the_rim_than_per_pass_or_bands() {
+    let per_pass = loaded_column(&format!("/At [ 150 75 ] /Under {SKY_FN}"));
+    let per_fill = loaded_column(&format!("/At [ 150 75 ] /Under {SKY_FN} /PerFill true"));
+    let banded = loaded_column(&format!(
+        "/Box [ 130 20 40 110 ] /Bands [ 1 8 ] /Under {SKY_FN}"
+    ));
+    let (p, f, b) = (
+        rim_residual(&per_pass, 15..135),
+        rim_residual(&per_fill, 15..135),
+        rim_residual(&banded, 15..135),
+    );
+    assert!(p > 3.0 * f, "per pass {p:.1}, per fill {f:.1}");
+    assert!(b > 1.2 * f, "8 bands {b:.1}, per fill {f:.1}");
+}
+
+/// Over a backdrop that never changes, asking per fill is asking per pass:
+/// the same render to the byte, for each loaded preset, and for an
+/// inherited-colour mark too (which has no per-fill site, so /PerFill does
+/// nothing to it).
+#[test]
+fn wet_perfill_over_a_constant_backdrop_matches_per_pass() {
+    for (preset, base) in LOAD_PRESETS {
+        let run = |opts: &str| {
+            let it = wet_loaded(
+                "0 0 0 setrgbcolor",
+                &format!(
+                    "newpath 50 160 moveto 350 160 lineto \
+                     << {base} /Colors [[1 0 0] [0 0 1]] /ColorMix 0 >> {preset}"
+                ),
+                &format!("/Direction 270 /OneSided true /Layers 3 /Offset 80 {opts}"),
+            );
+            pixels(&it)
+        };
+        assert_eq!(
+            run("/At [ 200 100 ] /Under { pop pop 0 1 0 }"),
+            run("/At [ 200 100 ] /Under { pop pop 0 1 0 } /PerFill true"),
+            "{preset}: a constant backdrop asked per fill"
+        );
+    }
+    let run = |opts: &str| {
+        let it = wet_loaded(
+            "1 0 0 setrgbcolor",
+            "newpath 50 160 moveto 350 160 lineto << /Width 20 >> pkribbon",
+            &format!("/Direction 270 /OneSided true /Layers 3 /Offset 60 /At [ 200 100 ] {opts}"),
+        );
+        pixels(&it)
+    };
+    let under = "/Under { exch pop 200 div 0 max 1 min 0 exch 0 exch }";
+    assert_eq!(
+        run(under),
+        run(&format!("{under} /PerFill true")),
+        "an inherited-colour mark is asked per pass whatever /PerFill says"
+    );
+}
+
+/// And it is really per fill: over a backdrop that changes down the page a
+/// loaded pull's fills are not the per-pass render (guards slot 9 and the
+/// per-fill read in `puwetat` against being a constant in disguise), for
+/// each preset that has a loaded colour site.
+#[test]
+fn wet_perfill_asks_each_loaded_fill_for_its_own_backdrop() {
+    for (preset, base) in LOAD_PRESETS {
+        let run = |opts: &str| {
+            let it = wet_loaded(
+                "0 0 0 setrgbcolor",
+                &format!(
+                    "newpath 200 190 moveto 200 30 lineto \
+                     << {base} /Colors [[1 0 0] [0 0 1]] /ColorMix 0 >> {preset}"
+                ),
+                &format!(
+                    "/Direction 270 /OneSided true /Layers 3 /Offset 80 /At [ 200 190 ] {opts}"
+                ),
+            );
+            pixels(&it)
+        };
+        let under = "/Under { exch pop 200 div 0 max 1 min 0 exch 0 exch }";
+        let (a, b) = (run(under), run(&format!("{under} /PerFill true")));
+        let worst = a.iter().zip(&b).map(|(a, b)| a.abs_diff(*b)).max();
+        assert!(
+            worst > Some(30),
+            "{preset}: per fill must differ from per pass"
+        );
+    }
+}
+
+/// What the procedure is asked, per fill: once for each softening pass's
+/// fill (never the core), at the run's own place in the user space the call
+/// was made in, whatever the CTM there, with only x y on the stack.
+#[test]
+fn wet_perfill_is_asked_in_the_callers_user_space() {
+    for ctm in ["", "100 50 translate", "100 50 translate 90 rotate"] {
+        let mut it = fresh(300, 300);
+        it.run_str(&format!(
+            "userdict /asked [ ] put userdict /depths [ ] put 3 srand {ctm} \
+             {{ newpath 20 50 moveto 60 50 lineto \
+                << /Width 6 /Charge 1 /Depletion 0 /Edge 0 /ColorJitter 0 \
+                   /Colors [[1 0 0]] >> pkbroad }} \
+             << /Direction 270 /OneSided true /Offset 12 /Layers 3 /At [ 5 150 ] /PerFill true \
+                /Under {{ count /c exch def /y exch def /x exch def \
+                         y 100 lt {{ userdict /asked [ asked aload pop x y ] put \
+                                    userdict /depths [ depths aload pop c ] put }} if \
+                         0.5 0.5 0.5 }} >> pkwet \
+             asked aload pop depths aload pop count"
+        ))
+        .unwrap_or_else(|e| panic!("{ctm}: {}", it.error_report(&e)));
+        let st: Vec<f64> = it
+            .operand_stack()
+            .iter()
+            .map(|o| o.repr().to_string().parse().expect("number"))
+            .collect();
+        // Every ask's x y, then each ask's stack count, then this probe's count
+        // (a stroke is several runs, and each is a fill).
+        let n = (st.len() - 1) / 3;
+        assert!(n >= 2 && st.len() == 3 * n + 1, "{ctm}: {st:?}");
+        let (xy, counts) = st[..3 * n].split_at(2 * n);
+        assert!(
+            xy.chunks(2).all(|p| (p[0] - 40.0).abs() < 8.0),
+            "{ctm}: {st:?}"
+        );
+        assert!(counts.iter().all(|c| *c == 2.0), "{ctm}: only x y: {st:?}");
+        // Two softening passes (Layers 3) and no core: two displaced rows.
+        let mut ys: Vec<f64> = xy.chunks(2).map(|p| p[1]).collect();
+        ys.dedup_by(|a, b| (*a - *b).abs() < 0.01);
+        ys.sort_by(f64::total_cmp);
+        ys.dedup_by(|a, b| (*a - *b).abs() < 0.01);
+        assert_eq!(ys.len(), 2, "{ctm}: {ys:?}");
+        assert!(
+            (ys[0] - 38.0).abs() < 0.01 && (ys[1] - 44.0).abs() < 0.01,
+            "{ctm}: displaced by each pass, in the call's space: {ys:?}"
+        );
+    }
+}
+
+/// `pkdab` resolves a loaded colour per dab, at the dab's centre, and is
+/// asked there like the strokes are: the same render over a constant
+/// backdrop, a different one over a gradient.
+#[test]
+fn wet_perfill_reaches_the_dabs_of_pkdab() {
+    let run = |opts: &str| {
+        let it = wet_loaded(
+            "0 0 0 setrgbcolor",
+            "newpath 200 190 moveto 200 30 lineto \
+             << /Size 8 /Scatter 20 /ColorJitter 0 /Colors [[1 0 0] [0 0 1]] >> pkdab",
+            &format!("/Direction 270 /OneSided true /Layers 3 /Offset 80 /At [ 200 190 ] {opts}"),
+        );
+        pixels(&it)
+    };
+    let flat = "/Under { pop pop 0 1 0 }";
+    assert_eq!(run(flat), run(&format!("{flat} /PerFill true")));
+    let ramp = "/Under { exch pop 200 div 0 max 1 min 0 exch 0 exch }";
+    let (a, b) = (run(ramp), run(&format!("{ramp} /PerFill true")));
+    let worst = a.iter().zip(&b).map(|(a, b)| a.abs_diff(*b)).max();
+    assert!(
+        worst > Some(30),
+        "pkdab: per fill must differ from per pass"
+    );
+}
+
+/// A single-layer call has only the core, which has no backdrop: nothing is
+/// asked, per fill included.
+#[test]
+fn wet_perfill_at_soft_zero_asks_nothing() {
+    let mut it = fresh(200, 200);
+    it.run_str(
+        "userdict /n 0 put \
+         { newpath 20 50 moveto 60 50 lineto \
+           << /Width 6 /Colors [[1 0 0]] >> pkbroad } \
+         << /Soft 0 /At [ 5 150 ] /PerFill true \
+            /Under { userdict /n n 1 add put 0 0 0 } >> pkwet n",
+    )
+    .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+    assert_eq!(it.operand_stack().last().expect("n").repr(), "0");
+}
+
+/// Two nested /PerFill calls each ask their own procedure, in their own
+/// user space: the inner one is called after a translate, so the same fill
+/// is 50pt to the right in the outer's.
+#[test]
+fn wet_perfill_nests_each_asked_in_its_own_space() {
+    let mut it = fresh(300, 200);
+    it.run_str(
+        "userdict /outer [ ] put userdict /inner [ ] put 3 srand \
+         { 50 0 translate \
+           { newpath 20 50 moveto 60 50 lineto \
+             << /Width 6 /Charge 1 /Depletion 0 /Edge 0 /ColorJitter 0 \
+                /Colors [[1 0 0]] >> pkbroad } \
+           << /Direction 270 /OneSided true /Offset 6 /Layers 2 /At [ 5 150 ] /PerFill true \
+              /Under { /y exch def /x exch def \
+                       y 100 lt { userdict /inner [ inner aload pop x ] put } if \
+                       0 0.5 0 } >> pkwet } \
+         << /Direction 270 /OneSided true /Offset 6 /Layers 2 /At [ 5 150 ] /PerFill true \
+            /Under { /y exch def /x exch def \
+                     y 100 lt { userdict /outer [ outer aload pop x ] put } if \
+                     0 0 0.5 } >> pkwet \
+         pqdepth outer aload pop inner aload pop count",
+    )
+    .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+    let st: Vec<f64> = it
+        .operand_stack()
+        .iter()
+        .map(|o| o.repr().to_string().parse().expect("number"))
+        .collect();
+    let (&n, rest) = st.split_last().expect("count");
+    assert_eq!(n as usize, st.len() - 1, "{st:?}");
+    assert_eq!(rest[0], 0.0, "depth back to 0");
+    let xs = &rest[1..];
+    assert!(xs.len() >= 2, "both asked: {st:?}");
+    // The outer's asks are all near x = 90 and the inner's near 40, as many
+    // of each: the outer is asked for every fill of both of the inner's
+    // passes while its own pass softens, the inner for its soft pass's fills
+    // in each of the outer's two.
+    let (hi, lo): (Vec<f64>, Vec<f64>) = xs.iter().partition(|x| **x > 70.0);
+    assert!(!hi.is_empty() && !lo.is_empty(), "{xs:?}");
+    assert!(hi.iter().all(|x| (x - 90.0).abs() < 12.0), "outer: {hi:?}");
+    assert!(lo.iter().all(|x| (x - 40.0).abs() < 12.0), "inner: {lo:?}");
+    assert_eq!(hi.len(), lo.len(), "outer {hi:?}, inner {lo:?}");
+}
+
+/// Every malformed per-fill answer is a named error, from inside the pass,
+/// and the depth counter is where it was, at one level and in a nest.
+#[test]
+fn wet_perfill_unwinds_on_a_bad_answer() {
+    // Fine at /At (y 150 and up) and wrong at the fills (y near 50).
+    let under =
+        |bad: &str| format!("/Under {{ exch pop 100 gt {{ 0.5 0.5 0.5 }} {{ {bad} }} ifelse }}");
+    for (bad, want) in [
+        ("1 2", "pkwet-under-procedure-must-return-3-numbers"),
+        ("1 2 3 4", "pkwet-under-procedure-must-return-3-numbers"),
+        ("(a) 0 0", "pkwet-under-procedure-results-must-be-numbers"),
+        ("0 -0.1 0", "pkwet-under-procedure-results-must-be-0-to-1"),
+        ("0 0 1.5", "pkwet-under-procedure-results-must-be-0-to-1"),
+    ] {
+        let mark = "{ newpath 20 50 moveto 60 50 lineto \
+                      << /Width 6 /Colors [[1 0 0]] >> pkbroad }";
+        let opts = format!("/Soft 1 /At [ 5 150 ] /PerFill true {}", under(bad));
+        let mut it = fresh(200, 200);
+        let e = it
+            .run_str(&format!("{mark} << {opts} >> pkwet"))
+            .unwrap_err();
+        let report = it.error_report(&e).to_string();
+        assert!(report.contains(want), "{bad}: wanted {want}, got {report}");
+        // Caught, at one level and from the inner of a nest: the depth is 0
+        // and the next call paints.
+        for wrapped in [
+            format!("{{ {mark} << {opts} >> pkwet }}"),
+            format!("{{ {{ {mark} << {opts} >> pkwet }} << /Soft 1 >> pkwet }}"),
+        ] {
+            let mut it = fresh(200, 200);
+            it.run_str(&format!(
+                "0 0 0 setrgbcolor 5 srand {wrapped} stopped pop pqdepth \
+                 {mark} << /Soft 1 /At [ 5 150 ] /Under {{ pop pop 0 0 0 }} /PerFill true >> pkwet"
+            ))
+            .unwrap_or_else(|e| panic!("{bad}: {}", it.error_report(&e)));
+            assert_eq!(
+                it.operand_stack().last().expect("depth").repr(),
+                "0",
+                "{bad}"
+            );
+            assert!(ink_count(&it) > 100, "{bad}: the next call painted nothing");
+        }
+    }
+}
+
+/// /PerFill is a flag that means nothing without a procedural /Under, and
+/// nothing beside /Box: each is a named error and unwinds.
+#[test]
+fn wet_perfill_rejects_what_it_cannot_mean() {
+    let m = "{ newpath 10 10 moveto 100 10 lineto << /Width 10 >> pkribbon }";
+    for (opts, want) in [
+        (
+            "/Under [ 0 0 0 ] /PerFill true",
+            "pkwet-perfill-needs-an-under-procedure",
+        ),
+        (
+            "/Under [ 0 0 0 ] /PerFill false",
+            "pkwet-perfill-needs-an-under-procedure",
+        ),
+        (
+            "/Under { pop pop 0 0 0 } /At [ 0 0 ] /PerFill 1",
+            "pkwet-perfill-must-be-a-boolean",
+        ),
+        (
+            "/Under { pop pop 0 0 0 } /At [ 0 0 ] /PerFill { true }",
+            "pkwet-perfill-must-not-be-a-procedure",
+        ),
+        (
+            "/Under { pop pop 0 0 0 } /Box [ 0 0 9 9 ] /Bands [ 1 2 ] /PerFill true",
+            "pkwet-perfill-and-box-are-exclusive",
+        ),
+    ] {
+        let mut it = fresh(120, 120);
+        let e = it
+            .run_str(&format!("{m} << /Soft 1 {opts} >> pkwet"))
+            .unwrap_err();
+        let report = it.error_report(&e).to_string();
+        assert!(report.contains(want), "{opts}: wanted {want}, got {report}");
+        let mut it = fresh(120, 120);
+        it.run_str(&format!(
+            "0 0 0 setrgbcolor 5 srand {{ {m} << /Soft 1 {opts} >> pkwet }} stopped pop \
+             pqdepth"
+        ))
+        .unwrap_or_else(|e| panic!("{opts}: {}", it.error_report(&e)));
+        assert_eq!(
+            it.operand_stack().last().expect("depth").repr(),
+            "0",
+            "{opts}"
+        );
+    }
+}
+
 // --- pkdab: the foliage / dab brush (issue #117) ----------------------
 //
 // What the tool is defined by: clustered irregular dabs; one set of

@@ -243,7 +243,8 @@ Which tool to pick:
   displacement, so the pale/dark rim a single colour leaves goes away.
   It must be a pure function (no painting, no `pkwet`, no stack
   reliance) returning three numbers in 0..1; the answer is per pass, not
-  per pixel; for a tall mark give `/Box [x y w h] /Bands [cols rows]` instead
+  per pixel (for loaded-colour marks `/PerFill true` beside `/At` asks it at each fill);
+  for a tall mark give `/Box [x y w h] /Bands [cols rows]` instead
   of `/At` and it is asked per band (a cell no taller than about half
   `/Offset`; the mark runs (Layers - 1) x cells + 1 times, at most 64).
   `examples/paintkit_wet_under_demo.ps` is the side-by-side, and
