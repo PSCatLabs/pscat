@@ -324,7 +324,11 @@ fn a_clip_is_a_gem_wire_at_the_top_edge_with_the_inner_loop_only_a_dent() {
             );
         }
     }
-    let wire = one.iter().zip(&blank).filter(|(o, b)| **o < 200 && **b > 250).count();
+    let wire = one
+        .iter()
+        .zip(&blank)
+        .filter(|(o, b)| **o < 200 && **b > 250)
+        .count();
     assert!(wire > 40, "no wire: {wire} dark pixels");
     // the dent and the rust are faint: changed, but nowhere near the wire's dark
     let faint = one
