@@ -163,9 +163,7 @@ fn a_copy_whitens_the_paper_and_the_type_gets_fatter() {
     // /Copies 0 is the plain page, pixel for pixel
     assert_eq!(differing(&c0, &typed("/Copies 0")), 0);
     // rel-page sets the type's copies for its content
-    // (/Dropout 0: the holes of #449 take ink away from the type, which this
-    // comparison, of the copy's spread and fill, is not about)
-    let through = rel_page(TYPED, "/Generation 3 /Speckle 0 /Haze 0 /Dropout 0");
+    let through = rel_page(TYPED, "/Generation 3 /Speckle 0 /Haze 0");
     let by_hand = page(
         "<< /Text (Dear Sir, the file is closed.) /Width 300 /Height 200 /Margin 30 \
          /Machine 4 /Seed 3 /Copies 3 >> tw-type",
@@ -723,187 +721,6 @@ fn the_haze_grain_is_at_the_strength_of_the_scans() {
     );
 }
 
-/// A page of strokes at 4 pixels to the point: 8 hairlines (0.7pt) over 6
-/// bars (3.2pt), each 260pt long, through `opts`. Returns the luminance.
-fn strokes(opts: &str, tweak: &str) -> Vec<u8> {
-    let mut it = Interp::with_page_scaled(W, H, 4.0).expect("page");
-    load(&mut it);
-    it.run_str(&format!(
-        "{tweak} 1 setgray clippath fill \
-         {{ 0 setgray 0.7 setlinewidth 0 1 7 {{ 12 mul 14 add 20 exch moveto 260 0 rlineto stroke }} for \
-            3.2 setlinewidth 0 1 5 {{ 12 mul 112 add 20 exch moveto 260 0 rlineto stroke }} for }} \
-         << {SHEET} /Speckle 0 /Haze 0 /CopyEdge 0 {opts} >> rel-page"
-    ))
-    .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
-    lum(&it)
-}
-
-/// 4-connected dark (under 128) components in the pixel rows `rows` and
-/// columns `cols`.
-fn dark_components(p: &[u8], rows: std::ops::Range<usize>, cols: std::ops::Range<usize>) -> usize {
-    let w = (W * 4) as usize;
-    let mut seen = std::collections::HashSet::new();
-    let mut n = 0;
-    for y in rows.clone() {
-        for x in cols.clone() {
-            if p[y * w + x] >= 128 || !seen.insert((x, y)) {
-                continue;
-            }
-            n += 1;
-            let mut todo = vec![(x, y)];
-            while let Some((cx, cy)) = todo.pop() {
-                for (nx, ny) in [
-                    (cx + 1, cy),
-                    (cx.wrapping_sub(1), cy),
-                    (cx, cy + 1),
-                    (cx, cy.wrapping_sub(1)),
-                ] {
-                    if rows.contains(&ny)
-                        && cols.contains(&nx)
-                        && p[ny * w + nx] < 128
-                        && seen.insert((nx, ny))
-                    {
-                        todo.push((nx, ny));
-                    }
-                }
-            }
-        }
-    }
-    n
-}
-
-#[test]
-fn a_copy_breaks_its_thin_strokes_and_keeps_its_thick_ones() {
-    // issue #449: T15's copy has lost its hairlines and kept its stems. The page
-    // cannot read its strokes, but a small hole cuts a hairline in two and only
-    // notches a bar, so after dropout the hairlines are in many pieces and the
-    // bars are in few. 4 pixels to the point; the hairlines lie at y 14..98 and the bars at
-    // y 112..172 (pixel rows from the top are 4 x (200 - y))
-    let rows = |lo: usize, hi: usize| (4 * (200 - hi))..(4 * (200 - lo));
-    let (thin, thick) = (rows(10, 104), rows(108, 176));
-    let cols = 4 * 24..4 * 276;
-    let count = |p: &[u8]| {
-        (
-            dark_components(p, thin.clone(), cols.clone()),
-            dark_components(p, thick.clone(), cols.clone()),
-        )
-    };
-    let (t0, k0) = count(&strokes("/Generation 3 /Dropout 0", ""));
-    let (t1, k1) = count(&strokes("/Generation 3", ""));
-    let (g1t, _) = count(&strokes("/Generation 1", ""));
-    assert_eq!((t0, k0), (8, 6), "without dropout every stroke is whole");
-    assert!(
-        t1 >= t0 * 3,
-        "hairlines break into pieces: {t0} strokes in {t1} pieces"
-    );
-    assert!(
-        k1 * 2 <= t1,
-        "bars break less than hairlines: {k1} against {t1} pieces"
-    );
-    assert!(
-        g1t > t0 && g1t < t1,
-        "a first copy breaks fewer: {g1t} against {t1}"
-    );
-}
-
-#[test]
-fn dropout_leaves_an_original_alone_and_scales_with_its_strength() {
-    // an original has no copy loss: /Dropout is not a visible key at generation 0
-    let orig = rel_page(TYPED, "/Age 0.6");
-    assert_eq!(differing(&orig, &rel_page(TYPED, "/Age 0.6 /Dropout 1")), 0);
-    // a copy's holes come and go with the strength: 0 is the copy without them
-    let broken = |d: &str| {
-        let p = strokes(&format!("/Generation 3 /Dropout {d}"), "");
-        dark_components(&p, 4 * 30..4 * 190, 4 * 24..4 * 276)
-    };
-    let (none, half, full) = (broken("0"), broken("0.5"), broken("1"));
-    assert!(
-        none < half && half < full,
-        "{none} < {half} < {full} pieces"
-    );
-}
-
-#[test]
-fn a_redaction_bar_stays_solid_under_dropout() {
-    // the holes cut the content, and the bar is content: it is drawn again whole
-    // afterwards (rlBarsAgain). Without that, a bar of 21.6pt x 12pt takes a dozen holes.
-    let text = "{ << /Text (a <r>bcdefg</r> h) /Width 300 /Height 200 /Margin 30 /Machine 4 /Seed 3 \
-                 /Redactor { rel-redact } >> tw-type }";
-    let bar_gaps = |tweak: &str| {
-        let mut it = Interp::with_page_scaled(W, H, 4.0).expect("page");
-        load(&mut it);
-        it.run_str(&format!(
-            "{tweak} 1 setgray clippath fill {text} << {SHEET} /Generation 3 /Speckle 0 /Haze 0 /CopyEdge 0 >> rel-page"
-        ))
-        .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
-        let p = lum(&it);
-        let w = (W * 4) as usize;
-        // the bar covers x 44.4..87.6 (cells 2 to 7 of 7.2pt from the margin 30) and
-        // y 29..43 from the top; the copy's shift is up to 3pt, so take its middle
-        let (x0, x1) = (4 * 50, 4 * 82);
-        let y = 4 * 36;
-        (y - 8..y + 8)
-            .map(|py| {
-                p[py * w + x0..py * w + x1]
-                    .iter()
-                    .filter(|&&v| v > 100)
-                    .count()
-            })
-            .sum::<usize>()
-    };
-    assert_eq!(bar_gaps(""), 0, "the bar is solid under dropout");
-    assert!(
-        bar_gaps("RelState /rlBarsAgain { } put") > 20,
-        "with the bar not drawn again, holes show in it"
-    );
-}
-
-#[test]
-fn a_content_that_errors_does_not_leave_the_bar_recorder_on() {
-    // the content of a copy raised an error while its bars were being recorded;
-    // the next page starts with the recorder off
-    let mut it = Interp::with_page(W, H).expect("page");
-    load(&mut it);
-    it.run_str(&format!(
-        "mark {{ {{ 1 0 div }} << {SHEET} /Generation 1 >> rel-page }} stopped cleartomark \
-         {{ }} << {SHEET} >> rel-page RelState /rlRecOn get"
-    ))
-    .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
-    assert_eq!(
-        it.operand_stack().last().map(|o| o.repr()),
-        Some("false".to_string())
-    );
-}
-
-#[test]
-fn a_redaction_bar_drawn_under_the_contents_own_clip_stays_inside_it() {
-    // review of #449: the bar is drawn again after the holes' clip is dropped, and
-    // must keep the clip the content had put on it
-    let p = {
-        let mut it = Interp::with_page_scaled(W, H, 4.0).expect("page");
-        load(&mut it);
-        it.run_str(&format!(
-            "1 setgray clippath fill {{ 100 0 100 200 rectclip 20 280 100 12 rel-redact }} \
-             << {SHEET} /Generation 3 /Speckle 0 /Haze 0 /CopyEdge 0 >> rel-page"
-        ))
-        .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
-        lum(&it)
-    };
-    let w = (W * 4) as usize;
-    let dark = |x0: usize, x1: usize| {
-        (0..(H * 4) as usize)
-            .map(|y| {
-                p[y * w + 4 * x0..y * w + 4 * x1]
-                    .iter()
-                    .filter(|&&v| v < 100)
-                    .count()
-            })
-            .sum::<usize>()
-    };
-    assert!(dark(110, 190) > 300, "the bar shows inside the clip");
-    assert_eq!(dark(0, 90), 0, "and not outside it");
-}
-
 // ---- #450: the copier's softening of the marks -----------------------------
 
 /// A page drawn at 4 pixels to the point, luminance.
@@ -980,7 +797,7 @@ fn a_softened_redaction_bar_fades_and_stays_under_its_clip() {
     let bar = |opts: &str| {
         page4(&format!(
             "{{ 100 0 200 200 rectclip 120 280 100 14 rel-redact }} \
-             << {SHEET} /Generation 2 /Speckle 0 /Haze 0 /CopyEdge 0 /Dropout 0 {opts} >> rel-page"
+             << {SHEET} /Generation 2 /Speckle 0 /Haze 0 /CopyEdge 0 {opts} >> rel-page"
         ))
     };
     let (soft, crisp) = (bar(""), bar("/Soften 0"));
@@ -1142,7 +959,7 @@ fn a_paged_rel_page_leaves_the_graphics_state_and_the_stacks_as_it_found_them() 
          true 0 1 5 {{ dup m0 exch get exch matrix currentmatrix exch get eq and }} for \
          countdictstack d0 eq and \
          clippath pathbbox 200 eq exch 300 eq and exch 0 eq and exch 0 eq and and",
-        paged_src("", "/Age 0.6 /Generation 3 /Skew 1 /Dropout 1").replace(" showpage", "")
+        paged_src("", "/Age 0.6 /Generation 3 /Skew 1").replace(" showpage", "")
     ));
     assert_eq!(it.operand_stack().last().unwrap().repr(), "true");
 }

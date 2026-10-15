@@ -434,6 +434,69 @@ fn a_clogged_counter_fills_with_ink() {
     assert!(inked > flat, "the clogged counter added no ink");
 }
 
+/// Sixteen Es typed through `copies` photocopies, with the copy erosion of #547
+/// at `erode` glyph units (`tECopy`; 0 turns it off). Returns (the ink in the
+/// arms, the ink in the stem), summed over the cells: a stem is the long
+/// vertical stroke at the cell's left, an arm the thin horizontals that run off it.
+fn e_arms_and_stems(copies: u32, erode: u32) -> (f64, f64) {
+    let img = ink(&render(&format!(
+        "TWState /tECopy {erode} put 36 84 moveto << /Machine 4 /Seed 3 /Copies {copies} >> tw-setup \
+         (EEEEEEEEEEEEEEEE) show"
+    )));
+    let w = width_px();
+    let (mut arms, mut stem) = (0.0, 0.0);
+    for k in 0..16 {
+        let x0 = X0 + k * CELL;
+        // the stem lies between the arms (rows 124..140 of the glyph's 118..145);
+        // the arms are its top and bottom 6 rows, right of the stem
+        for y in 124..140 {
+            for x in 3..11 {
+                stem += f64::from(img[y * w + x0 + x]);
+            }
+        }
+        for y in (116..124).chain(140..147) {
+            for x in 12..26 {
+                arms += f64::from(img[y * w + x0 + x]);
+            }
+        }
+    }
+    (arms, stem)
+}
+
+/// A copy erodes its thin horizontal strokes and keeps its stems (#547).
+#[test]
+fn a_copy_loses_its_thin_horizontals_and_keeps_its_stems() {
+    let (arms0, stem0) = e_arms_and_stems(3, 0);
+    let (arms, stem) = e_arms_and_stems(3, 40);
+    eprintln!("arms {arms0:.0} -> {arms:.0}, stems {stem0:.0} -> {stem:.0}");
+    assert!(
+        arms < arms0 * 0.85,
+        "the arms of three copies' Es did not thin: {arms0:.0} -> {arms:.0}"
+    );
+    assert!(
+        stem > stem0 * 0.9,
+        "the stems of three copies' Es were eroded: {stem0:.0} -> {stem:.0}"
+    );
+    // a first copy erodes less than a third
+    let (arms1, _) = e_arms_and_stems(1, 40);
+    let (arms1_off, _) = e_arms_and_stems(1, 0);
+    assert!(
+        arms1 / arms1_off > arms / arms0,
+        "one copy lost {:.2}, three {:.2}",
+        arms1 / arms1_off,
+        arms / arms0
+    );
+}
+
+/// An original is not eroded: the key only reads on a copy (#547).
+#[test]
+fn the_erosion_leaves_an_original_alone() {
+    let (arms0, stem0) = e_arms_and_stems(0, 0);
+    let (arms, stem) = e_arms_and_stems(0, 40);
+    assert_eq!((arms0, stem0), (arms, stem));
+    assert!(arms0 > 0.0 && stem0 > 0.0);
+}
+
 /// (red, green, blue) per pixel.
 fn rgb(it: &Interp) -> Vec<(u8, u8, u8)> {
     it.gfx()

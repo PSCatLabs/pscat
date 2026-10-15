@@ -451,6 +451,13 @@ TWState begin {
 % tFaceK is 0 at 10 and 1 at 12, set in tDerive from /Pitch.
 /tEliteHole 0.18 def  /tFaceK 0 def
 /tE 0 def  /tE0 0 def                           % the strike's erosion, and a saved copy
+/tEy 0 def  /tEr 0 def                          % a copy's erosion in y, and the spread's reach (#547)
+% a copy loses its thin horizontal strokes (#547): the erosion in y, in glyph
+% units, is tECopy x the copy loss x the strike's hole level (a light strike
+% loses more), so a stroke under 2 x tEy goes after the spread is counted in
+/tECopy 40 def
+/tGrowOff [ [0 0] [1 0] [0.7071 0.7071] [0 1] [-0.7071 0.7071]
+            [-1 0] [-0.7071 -0.7071] [0 -1] [0.7071 -0.7071] ] def
 /tYarn 0.48 def                                 % yarn pitch, points
 /tPatch tYarn 8 mul def                         % patch side, points
 /tWeave [ 0 1 3 {
@@ -565,6 +572,23 @@ grestore
 /tErode {
     tE tE tShiftClip  tE neg tE tShiftClip
     tE tE neg tShiftClip  tE neg tE neg tShiftClip
+} bind def
+% a copy's erosion (#547): the strike's ink is clipped to the glyph grown by the
+% spread's reach tEr (nine shifted copies in one path: a union under nonzero,
+% since every shifted contour winds the same way) and shrunk by tEy in y only,
+% the grown glyph shifted up and down and intersected. A stroke whose thickness
+% after the spread is under 2 x tEy goes, and a vertical stem keeps its width,
+% as in T15, whose thin horizontals are gone and whose stems stay. A clip only,
+% so the ink stays darken-only. Needs the CTM at tMat; leaves it there.
+% dy -> -
+/tGrowClip {
+    /tGy exch def
+    newpath
+    tGrowOff {
+        aload pop tEr mul exch tEr mul exch tGy add
+        tMat setmatrix translate xS 1 scale tGlyph 0 get exec tGlyph 1 get exec
+    } forall
+    tMat setmatrix clip newpath
 } bind def
 /tBody {
     tE 0 gt { tErode } if
@@ -778,6 +802,11 @@ grestore
     % and 0.85)
     /wBodyW inkW 0.2 mul def
     /fW inkW -0.55 mul def
+    /tEy 0 def
+    tCopyC 0 gt {
+        /tEr inkW fW add 2 div dup 0 lt { pop 0 } if def
+        /tEy tECopy tCopyC mul pBody dup 1 gt { pop 1 } if dup 0 lt { pop 0 } if mul def
+    } if
     % the weave's frame: per strike, or per key when strikes do not vary
     wearS 0 eq { tMA tMB kCode mix2 } { sA sB } ifelse
     20 mix2 /hB exch def /hA exch def
@@ -803,6 +832,8 @@ grestore
     } repeat
     tMat setmatrix
 
+    % a copy's feather and body are drawn inside its erosion clip (#547)
+    tEy 0 gt { gsave tEy tGrowClip tEy neg tGrowClip } if
     % feather (none at /Ribbon 0: a 0-width stroke is a 1-pixel hairline)
     /tZoned false def
     tWorn 0 gt tBleed 0 gt or { tZonesBuild } if
@@ -830,6 +861,7 @@ grestore
     } {
         pBody { tBody } tRun
     } ifelse
+    tEy 0 gt { grestore } if
     % a clogged counter: the dirt packs the counter from one side, over the
     % clog fraction (more on a more worn machine, less on a light strike)
     mClog wearM mul dup 1 gt { pop 1 } if
