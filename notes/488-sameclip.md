@@ -72,4 +72,7 @@ Ghostscript, which has no such operator, drykit behaves as before and the
   dpi: `dkPsameok` true, batch and at-once byte-identical.
 - Identity: `scripts/identity_check.sh` with `--base-bin`/`--head-bin`,
   `--loader lib/drykit.ps --loader lib/artkit.ps`, and a control (the bare
-  bound wrapper in a batch) that must differ. See the PR.
+  bound wrapper in a batch) that must differ: 97 of 97 page renders
+  identical across 81 files (every file that loads drykit or artkit, the
+  dry-media libraries, gallery pieces and self-test drivers included); the
+  control differs between the trees, as it must.
