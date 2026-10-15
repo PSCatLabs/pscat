@@ -306,8 +306,13 @@ before the batch reaches the operators directly, so drykit sees neither its
 clips nor its restores: a callback that clips and strokes inside a bound
 `gsave ... exec ... grestore` wrapper leaves the batch's later strokes under
 that clip (a callback that clips but makes no stroke is harmless, since the
-capture is lazy). `dkclip` inside such callbacks works; #459 tracks
-noticing the restore. Two overlapping regions hatched
+capture is lazy). Standard PostScript has no exact way to see that restore
+(#459, closed as a documented limit). There are three workarounds, each
+byte-identical to drawing at once: use `dkclip` inside the callback, call
+the bound wrapper inside a `gsave ... grestore` the batch sees, or bind the
+wrapper inside the batch, where `gsave` and `grestore` are the shadows
+(`notes/459-bound-wrapper-grestore.md`; a pscat-only exact route is #488).
+Two overlapping regions hatched
 under plain clips in one batch take the same 6 catches as the same regions
 in `dkclip` calls (96 with a fresh gstate per stroke), and render
 byte-identically to them (`notes/444-plain-clip-in-a-batch.md`).

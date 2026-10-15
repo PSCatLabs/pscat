@@ -978,9 +978,13 @@ fn dkclip_keeps_a_strokes_region_in_a_batch() {
 /// plain clip inside a `dkclip` and a `dkclip` inside a plain clip,
 /// `setgstate`, a `save`/`restore` that takes a clip back, an /After
 /// stroke under a plain clip, `initgraphics`, `grestoreall`, and a
-/// `dkclip` inside a wrapper bound before the batch (the workaround for a
-/// plain clip there, whose restore drykit cannot see: #459). Control: with the shadows blocked (a
-/// caller's userdict `gsave`), the nested ring is lost.
+/// `dkclip` inside a wrapper bound before the batch, and the two other
+/// workarounds for a plain clip there, whose restore drykit cannot see
+/// (`notes/459-bound-wrapper-grestore.md`): the bound wrapper called inside
+/// a `gsave ... grestore` the batch sees, and a wrapper bound inside the
+/// batch. Without either, a plain clip in a callback passed to a bound
+/// wrapper leaks to `{FREE}` (2,488 pixels, #459). Control: with the shadows
+/// blocked (a caller's userdict `gsave`), the nested ring is lost.
 #[test]
 fn a_plain_clip_in_a_batch_renders_as_at_once() {
     // ring nested in a rotated square: two clip links, one even-odd
@@ -995,7 +999,7 @@ fn a_plain_clip_in_a_batch_renders_as_at_once() {
     const FREE: &str = "newpath 10 92 moveto 130 92 lineto << /Width 4 >> dkstroke";
     const LIFT: &str = "0.2 0.3 0.25 setrgbcolor newpath 10 50 moveto 130 50 lineto \
                         << /Width 6 /After true >> dkstroke";
-    let cases: [(&str, String); 11] = [
+    let cases: [(&str, String); 13] = [
         (
             "a nested eoclip",
             format!("gsave {RING} {CL} grestore {FREE}"),
@@ -1034,8 +1038,18 @@ fn a_plain_clip_in_a_batch_renders_as_at_once() {
             format!("gsave gsave {RING} {CL} grestoreall {FREE}"),
         ),
         (
-            "a dkclip inside a bound wrapper (the workaround for #459)",
+            "a dkclip inside a bound wrapper (a workaround, notes/459)",
             format!("{{ {OVAL} {{ {CL} }} dkclip }} dktwrap {FREE}"),
+        ),
+        (
+            "a bound wrapper inside a gsave the batch sees",
+            format!("gsave {{ {RING} {CL} }} dktwrap grestore {FREE}"),
+        ),
+        (
+            "a wrapper bound inside the batch",
+            format!(
+                "/dktwrap2 {{ gsave exec grestore }} bind def {{ {RING} {CL} }} dktwrap2 {FREE}"
+            ),
         ),
     ];
     // a wrapper bound before any batch: its gsave/grestore are unseen

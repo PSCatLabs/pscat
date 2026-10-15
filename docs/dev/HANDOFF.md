@@ -647,7 +647,10 @@ renders eight examples in both and compares block-downsampled output).
    the batch calls the operators directly, so neither its clips nor its
    restores are seen; a callback that clips and strokes inside a bound
    `gsave exec grestore` wrapper leaves later strokes under that clip
-   (#459; use `dkclip` in such callbacks).
+   (#459, a documented limit: standard PostScript cannot see that
+   restore. Use `dkclip` in the callback, wrap the call in a `gsave ...
+   grestore` the batch sees, or bind the wrapper inside the batch;
+   `notes/459-bound-wrapper-grestore.md`, #488 for a pscat-only route).
    #393: `dkstroke /After true` in a batch is drawn on its own after the
    batch renders, in call order, in its own colour; `dhsmudge` and `dhlift`
    use it, so they run inside a batch, over everything the batch lays
