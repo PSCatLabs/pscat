@@ -1380,6 +1380,9 @@ impl Interp {
             }
             None => self.gfx.grestore_all_bottom(),
         }
+        // gs's grestoreall ends in a fresh gsave level, so no clipsave
+        // entries survive it (#494).
+        self.gfx.clear_clip_stack();
     }
 
     /// `cliprestore` (#494): this needs the innermost save's snapshot,

@@ -1972,7 +1972,8 @@ impl Gfx {
     }
 
     /// `save` starts a new `clipsave` level (gs's `save` is a `gsave`);
-    /// the snapshot it took keeps the entries for `restore`.
+    /// the snapshot it took keeps the entries for `restore`. `grestoreall`
+    /// empties the stack too, as in gs.
     pub(crate) fn clear_clip_stack(&mut self) {
         self.state.clip_stack.clear();
     }

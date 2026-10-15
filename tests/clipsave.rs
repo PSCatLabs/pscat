@@ -108,6 +108,11 @@ const CASES: &[Case] = &[
         ],
     ),
     (
+        "grestoreall at a save boundary empties the stack",
+        "X 20 20 200 200 rectclip clipsave 25 25 100 100 rectclip save 30 30 50 50 rectclip grestoreall R cliprestore R restore grestore",
+        &["[25.0 25.0 125.0 125.0]", "[25.0 25.0 125.0 125.0]"],
+    ),
+    (
         "grestoreall at a save boundary",
         "X 20 20 200 200 rectclip clipsave save 30 30 50 50 rectclip clipsave 35 35 5 5 rectclip grestoreall R cliprestore R restore grestore",
         &["[20.0 20.0 220.0 220.0]", "[20.0 20.0 220.0 220.0]"],

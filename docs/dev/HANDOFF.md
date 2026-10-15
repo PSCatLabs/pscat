@@ -511,7 +511,8 @@ renders eight examples in both and compares block-downsampled output).
   `cliprestore` with no entry at its level gives back the clip the level
   started with: the clip at that `gsave`/`save`, or no clip at the top
   level. So an unpaired `cliprestore` is not a no-op when a clip is in
-  force. `initclip` and `initgraphics` keep the stack. Only the clip
+  force. `initclip` and `initgraphics` keep the stack; `grestoreall`
+  empties it. Only the clip
   changes. Not modelled: a Type 3 `BuildChar` opening its own level (gs
   runs it inside a `gsave`); pscat's `grestore` at the bottom of the stack
   or at a save boundary still differs from gs as before

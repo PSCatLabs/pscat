@@ -29,7 +29,10 @@ clones, so a `clipsave` copies no mask).
   every `cliprestore`, so the shadow was already right for this case.
 - The stack travels with gstate objects: `gstate` and `currentgstate`
   capture it, `setgstate` puts it back, including an empty one.
-- `initclip` and `initgraphics` keep the stack.
+- `initclip` and `initgraphics` keep the stack. `grestoreall` empties it
+  (gs's ends in a fresh `gsave` level); probed at a save boundary, where a
+  `cliprestore` after it gives back the clip at `save`, not the entry
+  `clipsave` made before the `save`.
 - Both are `operatortype` in systemdict.
 
 ## What shipped
