@@ -140,7 +140,7 @@ fn every_recipe_renders_clean_and_inside_its_budget() {
 }
 
 fn write_thumbnails(all: &[Recipe]) {
-    let dir = std::env::temp_dir().join(format!("landscape-cookbook-{}", std::process::id()));
+    let dir = common::scratch_dir("landscape-cookbook");
     std::fs::create_dir_all(&dir).expect("scratch dir");
     for r in all {
         let ps = dir.join(format!("{}.ps", r.name));

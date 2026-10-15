@@ -386,7 +386,7 @@ fn gs_rgb(body: &str, w: u32, h: u32, scale: u32, tag: &str) -> Vec<[u8; 3]> {
         src.push_str(&std::fs::read_to_string(path).expect("read lib"));
         src.push('\n');
     }
-    let dir = std::env::temp_dir().join(format!("pscat-drychalk-{tag}-{}", std::process::id()));
+    let dir = common::scratch_dir(&format!("pscat-drychalk-{tag}"));
     std::fs::create_dir_all(&dir).expect("temp dir");
     let file = dir.join("chalk.ps");
     let png = dir.join("chalk.png");

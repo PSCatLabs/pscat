@@ -73,6 +73,13 @@ predates it.
   structured a particular way).
 - Tests live alongside the code they test. Add integration or golden-image
   tests where `docs/archive/INIT.md`'s stages call for demonstrable rendering output.
+- **Test scratch files come only from `common::scratch_dir(tag)`**
+  (`tests/common/mod.rs`, `mod common;`), never from a bare temp-dir call or
+  a fixed `/tmp` name. Agents run `cargo test` in several worktrees at once
+  and a shared name gets clobbered by the other run. The helper returns a new
+  directory unique per call and per process; put a file under it with
+  `.join(name)`. `tests/scratch_paths.rs` fails on any other route
+  (`notes/487-unique-test-scratch-paths.md`).
 - **Timing assertions in `tests/` measure CPU time, never wall time**
   (`notes/329-cpu-time-render-budget-tests.md`). Wall time includes every
   slice the scheduler gave to other processes, so with several agents or a

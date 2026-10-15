@@ -5,6 +5,8 @@
 
 use pscat::Interp;
 
+mod common;
+
 const PACKS: [&str; 4] = ["steampunk", "psychedelic", "scifi", "toon"];
 
 fn load(it: &mut Interp, pack: &str) {
@@ -159,7 +161,7 @@ fn ghostscript_accepts_the_packs() {
             "newpath 200 260 50 100 11 burst [1 0.8 0.1] 4 celfill 40 60 150 70 14 320 240 bubble 200 260 105 150 20 0 360 speedlines 90 330 25 -60 eye newpath 30 120 340 60 6 dripbox [0.4 0.8 0.4] 4 celfill",
         ),
     ];
-    let dir = std::env::temp_dir().join(format!("pscat-styles-{}", std::process::id()));
+    let dir = common::scratch_dir("pscat-styles");
     std::fs::create_dir_all(&dir).expect("temp dir");
     for (pack, driver) in drivers {
         let lib = std::fs::read_to_string(format!("lib/styles/{pack}.ps")).expect(pack);

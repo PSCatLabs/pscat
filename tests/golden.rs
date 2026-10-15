@@ -11,6 +11,8 @@ use std::process::Command;
 use pscat::Interp;
 use tiny_skia::Pixmap;
 
+mod common;
+
 const SIZE: u32 = 500;
 const BLOCK: u32 = 10;
 
@@ -30,7 +32,8 @@ fn render_pscat(path: &str) -> Pixmap {
 }
 
 fn render_gs(path: &str) -> Pixmap {
-    let out = std::env::temp_dir().join(format!("pscat_gs_{}.png", path.replace(['/', '.'], "_")));
+    let out =
+        common::scratch_dir("pscat_gs").join(format!("{}.png", path.replace(['/', '.'], "_")));
     let status = Command::new("gs")
         .args([
             "-q",

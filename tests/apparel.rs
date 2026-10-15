@@ -5,6 +5,8 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 use tiny_skia::Pixmap;
 
+mod common;
+
 const BIN: &str = env!("CARGO_BIN_EXE_pscat");
 const ROOT: &str = env!("CARGO_MANIFEST_DIR");
 
@@ -77,7 +79,7 @@ fn manifest_records_size_dpi_background_and_fonts() {
 /// included) stays inside the configured margin -- the clipping check.
 #[test]
 fn artwork_is_transparent_and_stays_inside_its_margin() {
-    let dir = std::env::temp_dir().join(format!("pscat-apparel-{}", std::process::id()));
+    let dir = common::scratch_dir("pscat-apparel");
     std::fs::create_dir_all(&dir).unwrap();
     // (config, piece, page WxH pt, margin in) -- rendered at 72 dpi for speed
     for (config, piece, w, h, margin) in [
@@ -202,7 +204,7 @@ fn reported_pixel_size_matches_the_render_and_manifest_escapes_controls() {
     };
     let size = go("size", &[]);
     let f: Vec<&str> = size.split_whitespace().collect();
-    let png = std::env::temp_dir().join(format!("pscat-apparel-px-{}.png", std::process::id()));
+    let png = common::scratch_dir("pscat-apparel-px").join("px.png");
     go(
         "draw",
         &[
@@ -326,9 +328,10 @@ fn config_fill_options_reach_plasma_runs() {
         let src = std::fs::read_to_string(format!("{ROOT}/examples/keepin_it_real_shirt.ps"))
             .unwrap()
             .replace("/Turbulence 2 ", &format!("/Turbulence {turbulence} "));
-        let dir = std::env::temp_dir().join(format!("apparel_fill_{turbulence}.ps"));
+        let work = common::scratch_dir("apparel_fill");
+        let dir = work.join(format!("apparel_fill_{turbulence}.ps"));
         std::fs::write(&dir, &src).unwrap();
-        let png = std::env::temp_dir().join(format!("apparel_fill_{turbulence}.png"));
+        let png = work.join(format!("apparel_fill_{turbulence}.png"));
         let mut child = Command::new(BIN)
             .current_dir(ROOT)
             .args(["--headless", "--page", "864x1008", "--dpi", "30", "--png"])

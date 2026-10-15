@@ -9,6 +9,8 @@
 
 use pscat::{Interp, PsError};
 
+mod common;
+
 fn with_lib(w: u32, h: u32) -> Interp {
     let lib = std::fs::read("lib/halftonekit.ps").expect("library present");
     let mut it = Interp::with_page(w, h).expect("page");
@@ -1106,7 +1108,7 @@ fn ghostscript_accepts_packed_tone_callbacks() {
         newpath 0 60 moveto 50 60 lineto 50 110 lineto 0 110 lineto closepath clip \
         << /BBox [0 60 50 110] /Screen /cross /Frequency 12 /Angle 0 /Tone { exch pop 100 div } >> halftone \
         showpage";
-    let dir = std::env::temp_dir().join(format!("pscat-halftone-{}", std::process::id()));
+    let dir = common::scratch_dir("pscat-halftone");
     std::fs::create_dir_all(&dir).expect("temp dir");
     let combined = dir.join("halftone_gs.ps");
     std::fs::write(&combined, format!("{lib}\n{driver}\n")).expect("write");

@@ -14,6 +14,8 @@
 
 use pscat::Interp;
 
+mod common;
+
 const LIBS: [&str; 2] = ["lib/typewriter_outlines.ps", "lib/typewriter.ps"];
 
 /// 300 dpi: a pica cell (7.2pt) is 30 px and a 12pt line 50 px.
@@ -457,9 +459,7 @@ fn script(args: &[&str], dir: &std::path::Path) -> std::process::Output {
 }
 
 fn scratch(tag: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("pscat-typewrite-{}-{tag}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("temp dir");
-    dir
+    common::scratch_dir(&format!("pscat-typewrite-{tag}"))
 }
 
 const MEMO: &str = "1. Effective immediately every letter is typed in an original and two \

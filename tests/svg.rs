@@ -4,6 +4,8 @@
 
 use pscat::Interp;
 
+mod common;
+
 fn svg_pages(src: &str) -> Vec<String> {
     let mut it = Interp::with_page(100, 100).expect("test page");
     it.gfx_mut().enable_svg();
@@ -354,9 +356,8 @@ fn every_distinct_clip_gets_its_own_def_even_after_grestore() {
 }
 
 fn render_svg(args: &[&str]) -> String {
-    let out = std::env::temp_dir().join(format!(
-        "pscat-svg-det-{}-{}.svg",
-        std::process::id(),
+    let out = common::scratch_dir("pscat-svg-det").join(format!(
+        "{}.svg",
         args.last().unwrap().replace(['/', '.'], "_")
     ));
     let root = env!("CARGO_MANIFEST_DIR");

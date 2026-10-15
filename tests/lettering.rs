@@ -5,6 +5,8 @@
 
 use pscat::{Interp, PsError};
 
+mod common;
+
 fn with_lib(w: u32, h: u32) -> Interp {
     let mut it = Interp::with_page(w, h).expect("page");
     for f in ["lib/artkit.ps", "lib/lettering.ps"] {
@@ -342,7 +344,7 @@ fn ghostscript_accepts_lettering_on_a_builtin_face() {
         [/solid /transition /patches /mottled] { /t exch def\n\
         (Real) 300 300 << /Font /Times-Bold /Size 120 /Treatment t /Seed 7 >> psyletter\n\
         } forall showpage\n";
-    let dir = std::env::temp_dir().join(format!("lettering-gs-{}", std::process::id()));
+    let dir = common::scratch_dir("lettering-gs");
     std::fs::create_dir_all(&dir).expect("tmpdir");
     let ps = dir.join("lettering_gs.ps");
     std::fs::write(&ps, prog).expect("write");
@@ -378,7 +380,7 @@ fn ghostscript_refuses_a_catalog_face_instead_of_substituting_courier() {
         eprintln!("skipping gs compatibility check: gs not installed");
         return;
     }
-    let dir = std::env::temp_dir().join(format!("lettering-gsf-{}", std::process::id()));
+    let dir = common::scratch_dir("lettering-gsf");
     std::fs::create_dir_all(&dir).expect("tmpdir");
     let ps = dir.join("lettering_gsf.ps");
     std::fs::write(

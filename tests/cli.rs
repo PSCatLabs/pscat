@@ -7,12 +7,12 @@ use std::process::{Command, Stdio};
 
 use tiny_skia::Pixmap;
 
+mod common;
+
 const BIN: &str = env!("CARGO_BIN_EXE_pscat");
 
 fn tmp(name: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("pscat-cli-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("temp dir");
-    dir.join(name)
+    common::scratch_dir("pscat-cli").join(name)
 }
 
 /// Run pscat with `args`, feeding `stdin`, returning (status, stdout, stderr).

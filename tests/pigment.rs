@@ -476,7 +476,7 @@ fn ghostscript_agrees_on_the_numbers() {
         src.push_str(&format!("{s} 3 array astore == flush\n"));
     }
     src.push_str("quit\n");
-    let dir = std::env::temp_dir().join(format!("pscat-pigment-gs-{}", std::process::id()));
+    let dir = common::scratch_dir("pscat-pigment-gs");
     std::fs::create_dir_all(&dir).unwrap();
     let ps = dir.join("pigment.ps");
     std::fs::write(&ps, src).unwrap();
