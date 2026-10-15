@@ -411,6 +411,9 @@ TWState begin {
 % page repeats a key exactly, ink and all). /InkModel false draws #211's
 % flat ink instead.
 
+/tLightSlope 0.6 def  /tLightKnee 0.15 def  /tLightTail 0.1 def                            % hole level per unit of pressure shortfall (#477)
+/tEDead 0.08 def  /tELo 60 def  /tECap 20 def   % light-strike erosion (#477)
+/tE 0 def  /tE0 0 def  /tESide 16 def  /tFringe 0.6 def
 /tYarn 0.48 def                                 % yarn pitch, points
 /tPatch tYarn 8 mul def                         % patch side, points
 /tWeave [ 0 1 3 {
@@ -516,7 +519,18 @@ grestore
     newpath xS 1 scale tGlyph 0 get exec tGlyph 1 get exec tMat setmatrix
 } bind def
 /tPen { setlinewidth 1 setlinejoin 0 setlinecap [] 0 setdash } bind def
+% erodes the clip by tE (glyph units, squeezed frame): the glyph shifted
+% four ways, intersected. A clip only, so a light strike stays darken-only
+% (#477). Needs the CTM at tMat; leaves it there.
+/tShiftClip {
+    tMat setmatrix translate tGlyphPath clip newpath tMat setmatrix
+} bind def
+/tErode {
+    tE tE tShiftClip  tE neg tE tShiftClip
+    tE tE neg tShiftClip  tE neg tE neg tShiftClip
+} bind def
 /tBody {
+    tE 0 gt { tErode } if
     tGlyphPath
     wBodyW 0 gt { gsave fill grestore wBodyW tPen stroke } { fill } ifelse
 } bind def
@@ -546,9 +560,15 @@ grestore
     % 0.21 at the default /Ribbon 0.7 and mean pressure, 0.36 worn (0.35),
     % 0.8 at /Ribbon 0; +3 per unit of pressure below 1, -1 per unit above
     1 tRibbon sub dup 0.2 mul exch dup mul dup mul 0.45 mul add 0.15 add
-    1 tPr sub dup 0 gt { 3 } { 1 } ifelse mul add
+    1 tPr sub dup 0 gt {
+        dup tLightKnee gt { tLightKnee sub tLightTail mul tLightKnee tLightSlope mul add } { tLightSlope mul } ifelse
+    } { 1 mul } ifelse add
     wearS 0 gt { tPageWear 0.06 mul wearS 1 2 copy gt { exch } if pop mul add } if
     dup 0 lt { pop 0 } if /pBody exch def
+    % a light strike thins: the body is eroded by tELo glyph units per unit
+    % of pressure shortfall past tEDead, up to tECap (#477)
+    /tE 1 tPr sub tEDead sub tELo mul dup 0 lt { pop 0 } if dup tECap gt { pop tECap } if def
+    tCopyC 0 gt { /tE 0 def } if
     % a photocopy's contrast curve (#214): a dark strike fills in (fewer
     % voids), a light one drops out (more)
     tCopyC 0 gt {
@@ -589,13 +609,19 @@ grestore
     inkW fW add 0 gt {
         gsave
             pBody 0.5 add tLevel tWeaveClip
-            tGlyphPath inkW fW add tPen stroke
+            % a thinned strike's fringe shrinks with it (#477)
+            tGlyphPath inkW fW add 1 tE tECap div tFringe mul sub mul tPen stroke
         grestore
     } if
     % body; a one-side-heavy key's light side is sparser
     mSS wearM mul dup 1 gt { pop 1 } if /tSide exch def
     tSide 0 gt {
-        gsave pBody tSide 0.5 mul add tLevel tWeaveClip tBody grestore
+        % the light side thins as well as dots (#477): tE is a variable, not
+        % graphics state, so it is put back after
+        /tE0 tE def
+        /tE tE tSide tESide mul add dup tECap gt { pop tECap } if def
+        gsave pBody tSide 0.3 mul add tLevel tWeaveClip tBody grestore
+        /tE tE0 def
         gsave
             pBody tLevel tWeaveClip
             tX0 tX1 add 2 div tY0 tY1 add 2 div translate mSA rotate
