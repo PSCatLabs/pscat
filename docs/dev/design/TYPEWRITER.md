@@ -264,6 +264,23 @@ this.
   its depth is drawn from 0.3 to 0.7 (strike slot 8), so `/electric` has almost
   none.
 
+**Tuned in #477** (`notes/477-light-strike-thins.md`), against T2, T4 and T7:
+
+- A light strike thins as well as dots out. A body drawn at pressure below
+  `1 - tEDead` (0.92) is clipped to the glyph shifted by `+-e` in x and y and
+  intersected, an erosion by a square of half-width `e` glyph units:
+  `e = 60 x (1 - pressure - 0.08)`, at most 20. It is a clip, so the ink
+  still only darkens whatever is under it (a light strike over an earlier one
+  does not bleach it). The feather's width falls with `e`, by 60% at the cap.
+  A one-side-heavy key's light side is eroded 16 x its lightness more.
+- The hole level's slope below pressure 1 falls from 3 to 0.6 (0.1 past a
+  0.15 shortfall), so the loss of ink moves from holes to thinning. A one-side-heavy
+  key's light side is 0.3 of the side sparser (was 0.5) and eroded as above. A
+  heavy strike (pressure above 1) is not eroded, and `/electric` (sd 0.03)
+  hardly is. `/Copies > 0` is unchanged (slope 3, side 0.5, no erosion): the
+  toner fills a thin stroke in and the contrast curve drops a light strike out.
+- `/InkModel false` is unchanged.
+
 ## 7. Randomness that stays out of the caller's stream
 
 - The library never calls `rand` or `srand`.
