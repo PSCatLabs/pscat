@@ -119,11 +119,11 @@ const CASES: &[Case] = &[
     ),
     (
         "only the clip changes: CTM, colour, path stay",
-        "X clipsave 2 2 scale 0.5 setgray newpath 5 5 moveto 50 5 lineto 50 50 lineto closepath clip 7 7 moveto cliprestore R matrix currentmatrix == currentgray 100 mul round cvi == currentpoint 2 array astore == grestore",
+        "X clipsave 2 2 scale 0.5 setgray newpath 5 5 moveto 50 5 lineto 50 50 lineto closepath clip 7 7 moveto cliprestore R matrix currentmatrix == currentgray == currentpoint 2 array astore == grestore",
         &[
             "[5.0 5.0 155.0 155.0]",
             "[2.0 0.0 0.0 -2.0 0.0 792.0]",
-            "50",
+            "0.5",
             "[7.0 7.0]",
         ],
     ),
