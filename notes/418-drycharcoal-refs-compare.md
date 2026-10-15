@@ -24,8 +24,8 @@ The old panel mixed scales without saying so; each caption now states its px/pt.
 The three H2 cells are pasted side by side (the old panel kept the empty paper
 between them).
 
-**Faithfulness check.** The worktree's pscat at `--dpi 144` reproduces the
-committed `drycharcoal_specimen.png` byte for byte, and the 576 dpi render, box-
+**Faithfulness check.** The worktree's pscat at `--dpi 144` is pixel-identical (RGB) to the
+committed `drycharcoal_specimen.png`, and the 576 dpi render, box-
 downsampled to 144 dpi, differs from it by a mean of 0.56 of 255 per channel, so
 the crops show the approved look at a finer sampling, not a different one.
 
