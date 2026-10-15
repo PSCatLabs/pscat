@@ -847,7 +847,9 @@ RelState begin {
 % an original none. The holes cut whatever the content draws, so a bar from
 % rel-redact (the /Redactor of tw-type) is recorded while the content runs
 % (rlRecOn) and drawn again, whole, after it; a plain black bar that tw-type
-% draws itself is not, and is cut like the rest.
+% draws itself is not, and is cut like the rest. The replay is limited: a bar is
+% clipped to the bounds of the clip it was drawn under (not a round or rotated
+% one) and lands above content that was drawn after it.
 /rlDrCx 3.4 def  /rlDrCy 5.4 def  /rlDrK 1.2 def
 /rlRecOn false def  /rlBars [ ] def
 /rlDrInit {

@@ -55,6 +55,14 @@ width (no read-back, no alpha).
   ink away (190 against 217 dark pixels, 12.4% against its 12% bound) and the
   check is about spread and fill.
 
+The replay's limits (Codex review, round 2; not fixed): a bar is clipped to the
+bounds of the clip it was drawn under, not to a round or rotated clip, and it is
+drawn above whatever the content painted after it, so a white rectangle laid over
+a bar would not hide it. `tw-type` draws each line's bar after the line and no
+later line overlaps it, so the memo and the specimen are right. An order-preserving
+version needs the bars' places before the content is drawn, or no hole clip over
+the type at all, which is what #547 (erosion in `tInkStrike`) would give.
+
 ## Measurements
 
 Strokes page (`strokes()` in the tests: 8 hairlines of 0.7pt and 6 bars of 3.2pt,
