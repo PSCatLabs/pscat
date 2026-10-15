@@ -1189,7 +1189,7 @@ end
     << /Kind /rect
        /BBox [ sqrx sqry sqrx sqrw add sqry sqrh add ]
        /Area sqrw sqrh mul >>
-    dup /Checked 2 index put                     % scin's vetted stamp (#503)
+    dup /Checked 2 index /BBox get put           % scin's vetted stamp (#503)
 } bind def
 
 /sqpcollinear {                                  % x y -
@@ -1393,7 +1393,7 @@ end
        /BBox [ sqbx0 sqby0 sqbx1 sqby1 ]
        /Edges sqbuf 0 sqn getinterval
        /Rule /nonzero >>
-    dup /Checked 2 index put                     % scin's vetted stamp (#503)
+    dup /Checked 2 index /Edges get put          % scin's vetted stamp (#503)
 } bind def
 
 % region -> num
@@ -1723,19 +1723,26 @@ end
 % screct (#123): all three of them would otherwise be run by name.
 %
 % The region is trusted without a look when it carries the stamp that
-% screct and scpath put on it (#503): /Checked holding the region dict
-% itself. That is `known`, `get` and `eq`, a handful of operators next
-% to the containment test, and it is identity, not a flag: `eq` on
-% dicts compares the object, so a copy of a built region (whose /Checked
-% still names the original) or a hand-written key does not pass, and
-% falls through to scregionvet's full check. The stamp is a promise
-% about the slots as built; a built region whose /BBox or /Edges is
-% replaced in place afterwards (`region /Edges {...} put`) keeps it and
-% is not looked at again -- `region /Checked undef` re-arms the check.
+% screct and scpath put on it (#503): /Checked holding the very array
+% that is in the region's /Edges (a path region) or /BBox (a rect), the
+% slot a hand-built region could plant a procedure in. Arrays compare by
+% identity under `eq`, so this is not a flag a dict can hold by accident:
+% a hand-written key, or a built region copied and given a new /Edges or
+% /BBox, no longer matches and falls through to scregionvet's full
+% check. (The stamp does not point back at the region: a dict that holds
+% itself is never freed, and a render builds thousands of regions.) The
+% test is `known`, two `get`s and an `eq`, a constant handful of
+% operators next to the containment test. It is a promise about the slot
+% as built: the array edited in place afterwards (an element replaced) is
+% not looked at again, and nor is a path region's /BBox replaced in a
+% copy; `region /Checked undef` re-arms the check.
     dup type /dicttype ne { scin-needs-a-region } if
     1 index scisnum 3 index scisnum and
         not { scin-needs-two-numbers } if
-    dup /Checked known { dup /Checked get 1 index eq } { false } ifelse
+    dup /Checked known {
+        dup dup /Edges known { /Edges } { /BBox } ifelse get
+        1 index /Checked get eq
+    } { false } ifelse
         not { scregionvet } if
     siinside
 } bind def
@@ -2002,8 +2009,9 @@ end
 %   { 5 5 << /Kind /path /BBox [ 0 0 100 100 ] /Edges [ 0 0 100 0 ] >> scin }
 %   /scin-region-needs-a-rule
 %   (a path region with no /Rule) mustguard
-%   % A hand-written /Checked is not the stamp: only the region dict
-%   % itself in that slot is, so a copied or invented key is still looked at.
+%   % A hand-written /Checked is not the stamp: only the region's own
+%   % /Edges (or /BBox) array in that slot is, so a copied region given a
+%   % new slot, or an invented key, is still looked at.
 %   /tgot false def
 %   { 5 5 << /Kind /path /BBox [ 0 0 100 100 ] /Rule /nonzero /Checked true
 %        /Edges [ 0 { /tgot true def 0 } 100 0 ] >> scin }
@@ -2017,6 +2025,12 @@ end
 %   /scin-region-edges-must-be-numbers
 %   (a copy of a built region does not inherit its stamp) mustguard
 %   tgot not (a copied region with a procedure edge: nothing ran) mustbe
+%   /tgot false def
+%   { 0 0 100 100 screct dup length dict copy
+%     dup /BBox { /tgot true def 0 0 100 100 } put 5 5 3 -1 roll scin }
+%   /scin-region-bbox-must-be-four-numbers
+%   (a copy of a built rect given a procedure /BBox) mustguard
+%   tgot not (a copied rect with a procedure /BBox: nothing ran) mustbe
 %   % What must keep working: built regions pass without being walked,
 %   % and a valid hand-built one still answers.
 %   5 5 0 0 100 100 screct scin (a screct region contains an interior point) mustbe
@@ -2032,9 +2046,11 @@ end
 %   80 20 << /Kind /path /BBox [ 0 0 100 100 ] /Rule /nonzero
 %     /Edges [ 0 0 100 0  100 0 100 100  100 100 0 0 ] >> scin
 %   (a valid hand-built path region answers) mustbe
-%   0 0 100 100 screct dup /Checked get 1 index eq
-%   (screct stamps /Checked with the region itself) mustbe
-%   pop
+%   0 0 100 100 screct dup /Checked get exch /BBox get eq
+%   (screct stamps /Checked with its own /BBox array) mustbe
+%   newpath 0 0 moveto 100 0 lineto 100 100 lineto closepath scpath
+%   dup /Checked get exch /Edges get eq
+%   (scpath stamps /Checked with its own /Edges array) mustbe
 %%EndSelfTest
 %
 %%SelfTest: scatter-and-scarea-never-execute-a-hand-built-region-slot

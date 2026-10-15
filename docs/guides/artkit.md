@@ -81,10 +81,11 @@ newpath 60 100 moveto 500 200 550 300 300 380 curveto
   and `scarea` raise a `scatter-region-...` / `scarea-...` guard. `scin`
   makes the same check as a `scin-region-...` guard, but only for a region
   that does not carry the stamp `screct` and `scpath` put on theirs (a
-  `/Checked` entry holding the region itself), so a built region costs `scin`
-  a constant few operators and a hand-built one is re-checked on every call. A
-  built region whose `/BBox` or `/Edges` you replace in place afterwards keeps
-  its stamp; `region /Checked undef` makes `scin` look at it again.
+  `/Checked` entry holding the region's own `/BBox` or `/Edges` array), so a
+  built region costs `scin` a constant few operators and a hand-built one is
+  re-checked on every call. An element of a built region's array edited in place
+  afterwards keeps the stamp; `region /Checked undef` makes `scin` look at it
+  again.
 - **Gradients.** `gradfn`, `axialsh`, `radialsh` and `gradfill` build shading
   dictionaries from a plain array of `[r g b]` colours; see
   `examples/gradients.ps`.

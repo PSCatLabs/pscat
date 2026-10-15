@@ -1306,6 +1306,16 @@ renders eight examples in both and compares block-downsampled output).
   build. Change an example's output and you must change its `.out` and
   the prose around it. `playground.html?example=learn/NAME.ps` is how
   the "Try it" links open them.
+- **`screct`/`scpath` stamp their region, and `scin` trusts the stamp**
+  (#503, `notes/503-artkit-scin-region-stamp.md`). `/Checked` holds the very
+  array in the region's `/Edges` (path) or `/BBox` (rect); `scin` skips its
+  whole-region check (`scregionvet`) when `eq` says so, and checks a
+  hand-built or copied-and-edited region on every call. Don't make the stamp
+  point back at the region dict: pscat dicts are `Rc`, a self-referencing
+  one is never freed, and 20000 `scpath` regions cost 220 MB. A built
+  region's array edited in place after the build keeps the stamp
+  (`region /Checked undef` re-arms it). `siinside` has no check; paintkit's
+  direct callers are #526.
 
 ## Verification checklist before calling any future stage done
 

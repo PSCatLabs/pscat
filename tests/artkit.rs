@@ -4165,6 +4165,11 @@ fn scin_refuses_a_malformed_hand_built_region() {
         ),
         "scin-region-edges-must-be-numbers",
     );
+    assert_rejected_without_running(
+        "0 0 100 100 screct dup length dict copy \
+         dup /BBox { /gotexecuted true def 0 0 100 100 } put 5 5 3 -1 roll scin",
+        "scin-region-bbox-must-be-four-numbers",
+    );
     // A built region whose slot is replaced in place keeps its stamp (a
     // documented limit); removing /Checked re-arms the check.
     assert_rejected_without_running(
