@@ -1229,7 +1229,7 @@ fn a_half_wired_paged_document_is_refused_and_leaves_the_frame_as_it_found_it() 
         );
         let _ = it.run_str(&src);
         let report = it
-            .run_str(&format!("{FRAME_BACK}"))
+            .run_str(FRAME_BACK)
             .map(|()| it.operand_stack().last().unwrap().repr())
             .unwrap_or_else(|e| it.error_report(&e));
         assert_eq!(report, "true", "{tw}: the frame or clip was left changed");
