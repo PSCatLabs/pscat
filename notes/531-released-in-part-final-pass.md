@@ -58,8 +58,8 @@ Across the words, the spread of that mean:
 | *The Man from 2026* (an original) | 437 | 0.718 | 0.016 | 0.022 |
 
 A copy adds its own variation: the copy curve acts on each strike's level, and the
-specks add to it. With `/Copies 0` the cv is 0.035, and with `/StrikeWear 0.3` it is
-0.035. By eye, at 2x, 0.3 was indistinguishable from 0.5, so the piece keeps #590's 0.5.
+specks add to it. In a sweep at an earlier `/Haze 0.5`
+(cv 0.042 there), `/Copies 0` gave 0.035 and `/StrikeWear 0.3` gave 0.035. By eye, at 2x, 0.3 was indistinguishable from 0.5, so the piece keeps #590's 0.5.
 
 ## The blind board
 
