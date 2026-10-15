@@ -27,9 +27,9 @@ It fails (exit 1, one line per problem) when:
 Other external links (http://, https://, mailto:) are not fetched: a CI check
 that depends on third-party uptime goes red for reasons nobody can fix.
 
-For #248's Markdown link checker: the helpers (repo_path_for, in_repo,
-check_fragment) are plain functions, so it can import them rather than
-re-implement the GitHub-URL-to-path rule.
+The GitHub-URL-to-path rule lives in scripts/repo_url.py, shared with
+check_md_links.py (#429). repo_path_for, in_repo and check_fragment are plain
+functions, so other checkers can import them.
 """
 import os
 import posixpath
@@ -39,7 +39,8 @@ from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
-REPO_URL = "https://github.com/jeromebanks/postscript_interpreter"
+from repo_url import REPO_URL, match as repo_match
+
 # page-to-page links in these attributes
 LINK_ATTRS = {"a": "href", "link": "href", "img": "src", "script": "src",
               "source": "src", "video": "src", "iframe": "src"}
@@ -88,12 +89,10 @@ class Page(HTMLParser):
 
 def repo_path_for(url):
     """The repo-relative path a GitHub blob/tree URL of this repo names, or None."""
-    if not url.startswith(REPO_URL + "/"):
+    m = repo_match(url)
+    if m is None or m[0] != "https":  # this checker takes https links only
         return None
-    m = re.match(r"(?:blob|tree)/[^/]+/(.*)$", url[len(REPO_URL) + 1:])
-    if not m:
-        return None
-    return unquote(urlsplit(m.group(1)).path).rstrip("/")
+    return unquote(urlsplit(m[2]).path).rstrip("/")
 
 
 def exists_exact(root, rel):
