@@ -6,8 +6,8 @@
                                         gallery/README.md from the manifest
     scripts/gallery.py build OUT        write gallery.html and one gallery-<slug>.html per
                                         piece into OUT (scripts/build_site.sh calls this)
-    scripts/gallery.py stage OUT        copy the renders, reference photos and playground
-                                        sources the pages use into OUT
+    scripts/gallery.py stage OUT        copy the renders, reference photos, playground
+                                        sources and the View source files into OUT
     scripts/gallery.py renders          list the specimens build_site.sh must render
                                         ("source WxH id", one per line)
     scripts/gallery.py list             list the pieces for gallery/show.sh
@@ -23,6 +23,8 @@ there is no gallery.html in site/ any more. `check` fails when:
     differ from the (lib/x.ps) files the source loads;
   * an entry marked `playground` is not self-contained (the browser build has no
     filesystem), or two playground sources share a file name;
+  * a source is not a single file, or loads a library file that does not exist
+    (the View source window lists and links the libraries a program loads);
   * the text uses stage-era or issue-tracker wording a newcomer cannot follow;
   * the generated parts of README.md or gallery/README.md are out of date
     (run `scripts/gallery.py sync`).
@@ -44,6 +46,7 @@ MANIFEST = ROOT / "gallery" / "manifest.json"
 REPO_URL = "https://github.com/jeromebanks/postscript_interpreter"
 SITE_URL = "https://jeromebanks.github.io/postscript_interpreter"
 SOURCE_LINES = 40          # how much of the source a piece page shows inline
+SOURCE_DIR = "source"      # _site/source/<repo path>: what "View source" opens (#461)
 
 HIGHLIGHTS = ("README.md", "<!-- gallery:highlights:start -->", "<!-- gallery:highlights:end -->")
 TABLES = ("gallery/README.md", "<!-- gallery:table:start -->", "<!-- gallery:table:end -->")
@@ -115,6 +118,16 @@ def tracked(pattern):
 
 def loaded_libraries(source):
     return sorted(set(re.findall(r"\(lib/([a-z0-9_]+)\.ps\)", source)))
+
+
+def loaded_files(source):
+    """The library files a program runs, as repo paths: ["lib/artkit.ps", "lib/styles/toon.ps"]."""
+    return sorted(set(re.findall(r"\((lib/[A-Za-z0-9_/]+\.ps)\)\s*run\b", source)))
+
+
+def source_lines(text):
+    """A program's lines, ignoring the newline that ends the file (site/source-viewer.js agrees)."""
+    return text[:-1].split("\n") if text.endswith("\n") else text.split("\n")
 
 
 def self_contained(source):
@@ -199,6 +212,17 @@ def check(m):
                 add("%s: %s uses stage or issue wording a newcomer cannot follow: %r"
                     % (who, k, JARGON.search(p[k]).group(0)))
 
+    for e in m["pieces"] + m["specimens"]:
+        src = ROOT / e.get("source", "")
+        if e.get("source") and src.exists():
+            if not src.is_file():
+                add("%s %s: source %s is not a single file (View source opens one program)"
+                    % ("piece" if "technique" in e else "specimen", e["id"], e["source"]))
+                continue
+            for f in loaded_files(src.read_text(encoding="utf-8", errors="replace")):
+                if not (ROOT / f).is_file():
+                    add("%s: source loads %s, which does not exist" % (e["id"], f))
+
     for s in m["specimens"]:
         who = "specimen %s" % s["id"]
         for k in SPECIMEN_FIELDS:
@@ -207,8 +231,10 @@ def check(m):
         if s.get("group") not in group_ids:
             add("%s: unknown group %r" % (who, s.get("group")))
         has_render = bool(s.get("render"))
-        if not has_render and not (s.get("source") and re.fullmatch(r"\d+x\d+", s.get("page", ""))):
-            add("%s: needs a committed render, or a source and a page size to render at build time" % who)
+        if not s.get("source"):
+            add("%s: needs a source (every picture has a View source link)" % who)
+        elif not has_render and not re.fullmatch(r"\d+x\d+", s.get("page", "")):
+            add("%s: needs a committed render, or a page size to render the source at build time" % who)
         for k in ("render", "source"):
             if s.get(k) and not (ROOT / s[k]).exists():
                 add("%s: %s %s does not exist" % (who, k, s[k]))
@@ -315,24 +341,46 @@ def lib_chips(m):
     return chips, plain
 
 
+def view_source(e, label="View source"):
+    """The link that opens an entry's program in the source window (site/source-viewer.js).
+    Without JavaScript it is a plain link to the staged file."""
+    text = (ROOT / e["source"]).read_text(encoding="utf-8", errors="replace")
+    return ('<a class="view-source" href="%s/%s" data-name="%s" data-lines="%d" data-bytes="%d" '
+            'data-github="%s" data-libs="%s">%s</a>'
+            % (SOURCE_DIR, attr(e["source"]), attr(Path(e["source"]).name), len(source_lines(text)),
+               len(text.encode("utf-8")), attr(blob(e["source"])), attr(" ".join(loaded_files(text))), label))
+
+
+# one per page, after the footer; filled in by site/source-viewer.js
+SOURCE_DIALOG = """<dialog id="source-dialog" class="source-dialog" aria-labelledby="source-name" data-blob="%s/blob/main/">
+  <div class="source-head">
+    <div class="source-title"><p class="source-name" id="source-name"></p><p class="source-meta" id="source-meta"></p></div>
+    <div class="source-actions"><a id="source-github" href="%s">On GitHub</a><button type="button" id="source-close">Close</button></div>
+    <p class="source-libs" id="source-libs" hidden></p>
+  </div>
+  <div class="source-body" id="source-body" tabindex="0" role="region" aria-label="Source code"></div>
+</dialog>
+<script src="source-viewer.js" defer></script>""" % (REPO_URL, REPO_URL)
+
+
 def art_card(p):
     href = piece_page(p["id"])
     w, h = size(p["page"])
     libs = " ".join(p["libraries"]) or "plain"
     return ('    <div class="card" data-libs="%s"><a href="%s"><img src="assets/renders/%s.png" '
             'width="%d" height="%d" alt="%s" loading="lazy"></a>\n'
-            '      <div class="body"><b><a href="%s">%s</a></b><span>%s</span></div></div>'
-            % (libs, href, p["id"], w, h, attr(p["alt"]), href, html.escape(p["title"]), inline(p["blurb"])))
+            '      <div class="body"><b><a href="%s">%s</a></b><span>%s</span></div>\n'
+            '      <div class="meta">%s</div></div>'
+            % (libs, href, p["id"], w, h, attr(p["alt"]), href, html.escape(p["title"]), inline(p["blurb"]),
+               view_source(p)))
 
 
 def specimen_card(s):
-    links = []
-    if s.get("source"):
-        links.append('<a href="%s">source</a>' % blob(s["source"]))
+    links = [view_source(s)]
     if s.get("playground"):
         links.append('<a href="playground.html?example=%s">open in playground</a>'
                      % Path(s["source"]).name)
-    meta = '\n      <div class="meta">%s</div>' % " &middot; ".join(links) if links else ""
+    meta = '\n      <div class="meta">%s</div>' % " &middot; ".join(links)
     img = 'assets/renders/%s.png' % s["id"]
     return ('    <div class="card"><a href="%s"><img src="%s" alt="%s" loading="lazy"></a>\n'
             '      <div class="body"><b>%s</b><span>%s</span></div>%s</div>'
@@ -409,13 +457,13 @@ def gallery_html(m):
                    % (g["id"], html.escape(g["title"]), inline(g["blurb"]), blob(g["guide"])))
         out.extend(specimen_card(s) for s in ss)
         out.append("  </div>\n  </section>")
-    out.append("</main>\n<!--@footer-->\n" + FILTER_JS + "\n</body>\n</html>\n")
+    out.append("</main>\n<!--@footer-->\n" + SOURCE_DIALOG + "\n" + FILTER_JS + "\n</body>\n</html>\n")
     return "\n".join(out)
 
 
 def source_head(p):
     text = (ROOT / p["source"]).read_text(encoding="utf-8", errors="replace")
-    lines = text.splitlines()
+    lines = source_lines(text)
     return "\n".join(lines[:SOURCE_LINES]), len(lines)
 
 
@@ -459,10 +507,10 @@ def piece_html(m, p, prev, nxt):
     facts.append(("Page size", "%d × %d points" % (w, h)))
     o.append("  <h2>Details</h2>\n  <dl class=\"facts\">\n" +
              "\n".join("    <dt>%s</dt><dd>%s</dd>" % (k, v) for k, v in facts) + "\n  </dl>")
-    o.append('  <h2>Source</h2>\n  <p>The whole program is <a href="%s">%s</a> on GitHub. '
-             'To draw it yourself, from a checkout of the repository:</p>\n'
+    o.append('  <h2>Source</h2>\n  <p>%s the whole program in a scrolling window, or read '
+             '<a href="%s">%s</a> on GitHub. To draw it yourself, from a checkout of the repository:</p>\n'
              '  <pre><code>pscat --page %s %s</code></pre>'
-             % (blob(p["source"]), html.escape(p["source"]), p["page"], p["source"]))
+             % (view_source(p), blob(p["source"]), html.escape(p["source"]), p["page"], p["source"]))
     if p["playground"]:
         o.append('  <p><a class="open-pg" href="playground.html?example=%s">Open it in the playground</a> '
                  'and watch it draw in your browser: this piece reads no other file, so it runs there '
@@ -477,7 +525,7 @@ def piece_html(m, p, prev, nxt):
     if nxt:
         pager.append('<a rel="next" href="%s">%s &rarr;</a>' % (piece_page(nxt["id"]), html.escape(nxt["title"])))
     o.append('  <nav class="pager" aria-label="Neighbouring pieces">%s</nav>' % "".join(pager))
-    o.append("</main>\n<!--@footer-->\n</body>\n</html>\n")
+    o.append("</main>\n<!--@footer-->\n" + SOURCE_DIALOG + "\n</body>\n</html>\n")
     return "\n".join(o)
 
 
@@ -495,7 +543,7 @@ def build(m, out):
 
 def stage(m, out):
     out = Path(out)
-    for d in ("assets/renders", "assets/references", "examples"):
+    for d in ("assets/renders", "assets/references", "examples", SOURCE_DIR):
         (out / d).mkdir(parents=True, exist_ok=True)
     for e in m["pieces"] + m["specimens"]:
         if e.get("render"):
@@ -505,6 +553,10 @@ def stage(m, out):
             shutil.copyfile(ROOT / f, out / "assets/references" / Path(f).name)
         if e.get("playground") and e.get("source"):
             shutil.copyfile(ROOT / e["source"], out / "examples" / Path(e["source"]).name)
+        if e.get("source"):  # what "View source" fetches: the same path as in the repository
+            dest = out / SOURCE_DIR / e["source"]
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(ROOT / e["source"], dest)
 
 
 def main(argv):

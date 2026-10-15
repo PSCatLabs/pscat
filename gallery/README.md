@@ -10,6 +10,9 @@ shows them by category, with a page for each piece.
 the gallery shows. The site's gallery and its per-piece pages, the highlights
 grid in the top-level README, the table below and `./gallery/show.sh` are all
 generated from it. Nobody edits `gallery.html` by hand.
+Every picture there has a **View source** link that opens its whole program in
+a scrollable window (the site build stages each entry's `source`), so a new
+entry gets one with nothing more to do.
 
 ## Adding a piece
 

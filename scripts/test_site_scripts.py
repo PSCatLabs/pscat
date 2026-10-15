@@ -109,6 +109,36 @@ class SiteScripts(unittest.TestCase):
         self.assertEqual(len(probs), 1, probs)
         self.assertIn("learn/gone.ps", probs[0])
 
+    def test_gallery_cards_need_a_view_source_link(self):
+        ok = '<div class="card"><a class="view-source" href="source/a.ps">View source</a></div>'
+        bare = '<div class="card"><a href="gallery-a.html">b</a></div>'
+        piece = '<main><a class="view-source" href="source/a.ps">View source</a></main>'
+        pages = full(**{"gallery.html": ("gallery", "<main>" + ok + "</main>"),
+                        "gallery-a.html": ("gallery", piece)})
+        site = build(self.tmp.name, pages)
+        (site / "source").mkdir()
+        (site / "source" / "a.ps").write_text("1 ==")
+        (site / "index.html").write_text(
+            (site / "index.html").read_text().replace("</main>", '<a href="gallery.html">g</a>'
+                                                      '<a href="gallery-a.html">a</a></main>'))
+        self.assertEqual(run_check(site, self.repo), [])
+        # a card with no link, a piece page with none, and a link that leaves source/
+        (site / "gallery.html").write_text((site / "gallery.html").read_text().replace(
+            "</main>", bare + '<a class="view-source" href="https://example.com/a.ps">x</a></main>'))
+        (site / "gallery-a.html").write_text(
+            (site / "gallery-a.html").read_text().replace('class="view-source"', ""))
+        text = "\n".join(run_check(site, self.repo))
+        self.assertIn("gallery.html: 1 of 2 cards have no View source link", text)
+        self.assertIn("gallery-a.html: no View source link", text)
+        self.assertIn("does not point into source/", text)
+
+    def test_view_source_target_must_exist(self):
+        card = '<div class="card"><a class="view-source" href="source/gone.ps">View source</a></div>'
+        site = build(self.tmp.name, full(**{"gallery.html": ("gallery", "<main>" + card + "</main>")}))
+        (site / "index.html").write_text(
+            (site / "index.html").read_text().replace("</main>", '<a href="gallery.html">g</a></main>'))
+        self.assertTrue(any("source/gone.ps" in p for p in run_check(site, self.repo)))
+
     def test_example_markers_expand(self):
         ex = Path(self.tmp.name) / "ex"
         ex.mkdir()

@@ -16,6 +16,9 @@ It fails (exit 1, one line per problem) when:
     forgotten build_site.sh copy line causes), or a link to
     playground.html?example=x.ps (the Learn page's "Try it", #252) names
     an example that is not there;
+  * a gallery card (gallery.html) has no "View source" link, a gallery piece page
+    has none, or one does not point into source/ (#461). The link's target has
+    to exist like any other relative link, so the staged .ps files are checked too;
   * the files the pages load from script (pscat.js, pscat.wasm) are missing;
   * a page has no main navigation, or its navigation differs from the home
     page's, or it does not mark exactly one entry as the current page;
@@ -52,6 +55,8 @@ class Page(HTMLParser):
         self.nav_links = []    # hrefs inside <nav aria-label="Main">
         self.nav_current = 0   # entries marked aria-current="page"
         self.options = []      # <option value=...> values
+        self.cards = 0         # <div class="card"> (a gallery picture)
+        self.view_sources = [] # hrefs of <a class="view-source">
         self._in_nav = 0
 
     def handle_starttag(self, tag, attrs):
@@ -68,6 +73,11 @@ class Page(HTMLParser):
                 self.nav_links.append(url)
                 if a.get("aria-current") == "page":
                     self.nav_current += 1
+        classes = (a.get("class") or "").split()
+        if tag == "div" and "card" in classes:
+            self.cards += 1
+        if tag == "a" and "view-source" in classes:
+            self.view_sources.append(a.get("href") or "")
         if tag == "option" and a.get("value"):
             self.options.append(a["value"])
 
@@ -160,6 +170,19 @@ def check(site, repo):
         for v in page.options:
             if v.endswith(".ps") and not exists_exact(site, "examples/" + v):
                 problems.append("%s: <option> example %s is not in examples/" % (src, v))
+
+    # the gallery: every picture has a "View source" link into source/ (#461)
+    for src, page in pages.items():
+        good = [u for u in page.view_sources if u.startswith("source/")]
+        if src == "gallery.html":
+            if len(good) < page.cards:
+                problems.append("%s: %d of %d cards have no View source link"
+                                % (src, page.cards - len(good), page.cards))
+        elif re.fullmatch(r"gallery-.+\.html", src) and not good:
+            problems.append("%s: no View source link" % src)
+        for url in page.view_sources:
+            if url not in good:
+                problems.append("%s: View source link %r does not point into source/" % (src, url))
 
     for need in ("style.css", "pscat.js", "pscat.wasm"):
         if not exists_exact(site, need):
