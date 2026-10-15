@@ -57,7 +57,10 @@ The fix is in the operators, not in real printing.
 the `f64` nearest that `f32`'s shortest decimal (`color_readback` in
 `src/ops/graphics.rs`). A read-then-set round trip lands on the same
 `f32` as before, so copying a colour changes nothing (tested). No
-library calls either operator.
+library calls either operator (`lib/paintkit.ps` mentions `currentgray`
+only in a `%%SelfTest` block, with a 0.001 tolerance). drykit's `grestore` shadow pops its own
+`/pcs` stack and marks the batch `/dirty` on a pop it never saw pushed, so
+a `grestore` at a boundary is followed conservatively.
 
 **`currentrgbcolor` is deliberately not rounded.** The first version of
 this change rounded it too, and gs prints `0.3 0.6 0.9 setrgbcolor
