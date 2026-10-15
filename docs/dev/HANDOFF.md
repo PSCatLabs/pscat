@@ -830,13 +830,24 @@ renders eight examples in both and compares block-downsampled output).
    key is in the PR, not the repo); `notes/215-released-memo.md`. #466 gave a
    copy's paper a grey haze, mottle and grain (`rel-page /Haze`, default 0.6,
    applied after the copier curve in `rlSet`/`rlCol`; `/Haze 0` is the old white
-   copy; `notes/466-copy-paper-haze.md`). Leftovers: #468 (#467 shipped: `notes/467-misstrike-y-tail.md`). #474 brought the
+   copy; `notes/466-copy-paper-haze.md`). #467 shipped (`notes/467-misstrike-y-tail.md`).
+   #468 searched for
+   two-colour, embossing, worn-lane and confirmed-electric scans and found none:
+   `notes/468-typewriter-trait-references.md`. #474 brought the
    haze's fine grain to the scans' strength with two `imagemask` stencils per
    16pt square (`rlHazeGrain`, on `rlFieldSet`'s field colour;
    `notes/474-copy-paper-haze-grain.md`). #528 gave the mottle a crumpled-paper
    wave: four tilted, stretched noise octaves (no axis-aligned lattice), a few
    long creases (`rlHzCrease`) laid before the grain, and the grain's squares
-   cut to 8pt (`notes/528-copy-paper-wave.md`).
+   cut to 8pt (`notes/528-copy-paper-wave.md`). #449 added `rel-page /Dropout`:
+   a copy's content is drawn through a clip of the sheet minus small, upright
+   holes (`rlDropClip`, one per cell of a grid, so none overlap: an overlap is
+   solid under `eoclip`), which cuts thin strokes and only notches stems; the
+   `rel-redact` bars are recorded (`rlRecOn`) and drawn again whole
+   (`rlBarsAgain`); a plain `tw-type` bar is cut like the type. It is a stand-in
+   for per-glyph erosion on a copy, which would live in `tInkStrike` (`tE` is
+   zeroed there when `tCopyC` is above 0; filed as #547);
+   `notes/449-thin-stroke-dropout.md`.
    #423 tuned the ribbon ink toward T2, T4 and T7: a thinner body and feather
    (`wBodyW`, `fW` in `tInkStrike`), a higher base hole level, a steeper
    pressure-to-density slope, pressure sd 0.12 on `/manual` and `/worn`, and a
@@ -858,7 +869,8 @@ renders eight examples in both and compares block-downsampled output).
    wandering boundary, ragged at the weave). Both are bands at a fixed height in the
    cell (`tYoff` taken out), drawn as overlapping passes by `tRun` / `tZoneDo`. The
    specimen has a new "ribbon extras" block; the bleed is unsourced (no two-colour
-   reference on the board); `notes/422-ribbon-ink-extras.md`.
+   reference on the board, and #468's wider search found none; NBS C431's text is the
+   only source); `notes/422-ribbon-ink-extras.md`.
    #242 shipped the charcoal gallery piece, `gallery/lincoln_charcoal.ps`
    (*Study after Berger, 1864*), and `lib/etching.ps`'s `et-tonemap`, which
    returns a photo as a grid of darkness for any piece that wants a

@@ -70,6 +70,14 @@ and by their scripts `ink_vs_real.png`, `release_vs_real.png`, `memo_vs_real.png
 and `blind_grid.png`. The blind grid's key was printed to stdout and is not in
 the repo.
 
+After #548 (`/Dropout`, lib/released.ps) landed, main was merged in and every PNG above
+was regenerated from the merged tree with the same commands. Against main, each differs
+only at the mis-struck letters (a pixel-cluster diff: 10 clusters in the specimen, 6 in
+the released specimen, 12 in the typed memo, 8 in the gallery memo, 2 in
+`ink_vs_real.png`, 4 in `release_vs_real.png`, 8 in `memo_vs_real.png`, 1 in
+`blind_grid.png`). The two review crops below were cut before that merge, so their
+"after" rows lack #548's dropout.
+
 `notes/467-restricted-d.png` is the `d` before (top) and after (bottom), 6x;
 `notes/467-memo-misstrikes.png` is all nine of the memo's mis-struck letters,
 before above after.

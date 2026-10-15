@@ -22,7 +22,9 @@ Rules followed:
   allow them in specimens: specimens use fictional organizations.
 - `tools/make_board.py` rebuilds `refs/` and `reference_board.jpg` from the
   sources. `tools/measure.py`, `tools/mono.py` and `tools/stem.py` produce the
-  numbers below. They need Pillow, NumPy and tesseract.
+  numbers below, and `tools/lane.py` makes `refs/T16_stem_profile.png` (#468) from
+  the Szilard, Duncan and MFR 1955 scans. They need Pillow, NumPy and tesseract
+  (`lane.py` also matplotlib).
 
 ## Sources
 
@@ -111,6 +113,27 @@ cross-checked from the text:
 - Carbon copies are larger and blurrier, and each further sheet in the pack
   more so. Elite gives fewer legible carbons than pica.
 
+**Added in #468** (pp. 10-13 of the same circular, which also bears on two-colour
+ribbons and the worn lane; re-read from the Internet Archive text):
+
+- "Many ribbons have inks of two colors, for instance black and red, running side by
+  side." The inks "must be made ... so that the colors will not diffuse, or 'bleed',
+  into one another." "Sometimes a new ribbon is seen in which it is evident that
+  coloring matter from the black half has spread into the red. There is no easy way to
+  find out whether some of the red has gone into the black half. The majority of
+  bicolor ribbons received for test by the Bureau show no such diffusion of the
+  color. Some ribbons are so inked that a white 'pin stripe' is left between the two
+  colors. It seems to remain white indefinitely."
+- When a ribbon is in use, "the type hit it in a narrow band near the edge from one end
+  to the other. The ink in this band gradually becomes exhausted, a little each time it
+  is struck by the type." Twenty or thirty characters struck repeatedly on one stretch
+  of ribbon each print paler than the last. After a rest of about 20 minutes the next line prints darker than the ten or
+  twenty before it, because ink has flowed back in from the rest of the ribbon
+  (the "recovery").
+- An oily ink with too little carbon black gives lines with "the distinctly purplish
+  color of the toner" as they wear. If the ink has enough carbon, "the lines change from
+  intense black to light gray by degrees, and are not purplish."
+
 ## Measurements
 
 These come from `tools/measure.py`. Tesseract gives each character's identity
@@ -170,21 +193,148 @@ finger force produces exactly the variation that is missing here. Szilard's
 electric machine. The design therefore treats "electric" as a preset with low
 pressure variation, not as a separate model.
 
+## Search for the unsourced traits (#468)
+
+TYPEWRITER.md Q3 asked for public-domain scans of three traits the board had no
+image for: two-colour ribbon bleed, embossed punctuation and a confirmed electric
+page. #538 also wants a two-colour page with a red run, and a page showing a worn
+ribbon lane. The search was bounded. **It found no qualifying
+scan for any of the four, so no new crop of a page is committed.** What it did
+find is below, with what each result means for `lib/typewriter.ps`. No library
+code changed in #468; numbers for #538 are in
+`notes/468-typewriter-trait-references.md` and on that issue.
+
+### What was searched
+
+- Wikimedia Commons: its file search with about 30 phrasings (typewritten, red and
+  black ribbon, two-colour, typed in red, Selectric, reading copy, typewriter
+  exemplar, and so on), the categories *Typewritten documents*, *IBM Selectric* and
+  *Typewriter ribbons*, and file-page licence metadata through the API. Commons has
+  no text search inside images, so this finds titles and descriptions only.
+- A hue scan: about 700 colour page thumbnails (700 px wide) of NARA and DPLA
+  scans on Commons (memoranda, letters, telegrams, reports, vouchers) were ranked
+  by the fraction of saturated red pixels (R above 130, R-G above 70, R-B above
+  60), and all 44 thumbnails above the threshold were looked at in montages.
+  Every red mark was a rubber stamp ("SECRET", "TOP SECRET", declassification
+  stamps), a printed letterhead or form, red pencil or crayon, a wax seal, a coloured
+  sheet or a photograph; about a third (a series of typed copies of 1860s letters)
+  scored only because the scan includes a Kodak colour target. None was typed in
+  red. Limits: the threshold would miss faded or brownish red typing on toned
+  paper, thumbnails at 700 px would lose a thin red run, several queries (for
+  example "NARA report") returned mostly photographs, and the scan only reaches
+  files whose titles match, not the many thousands of undescribed pages. `tools/` does not include this scanner: it was
+  throwaway, and the board's rule is that each crop comes from a named file.
+- The Library of Congress search API (three queries), the Internet Archive
+  metadata search for typewriter-ribbon texts, and four general web searches.
+  Those found retail listings, the IBM Selectric and IBM Electric articles on
+  Wikipedia, CIA reading-room memoranda about *leasing* Selectric machines, and
+  the NBS circulars already on the board. The text of the NBS circulars (C95,
+  C186, C431) refers to no figures of typed samples.
+
+### Two-colour ribbon (black and red)
+
+**Not sourced as a page.** C431 (above) is the best public-domain evidence found,
+and it is text. It says that bichrome ribbons are common ("black and red, running
+side by side"), that bleed is rare ("the majority ... show no such diffusion"), that
+when it happens black spreads into red, that the reverse cannot easily be detected,
+and that some ribbons deliberately leave a white "pin stripe" between the colours.
+
+Implications for `lib/typewriter.ps` (not changed here):
+
+- `/Bleed` defaults to 0 and should stay there; a bichrome preset should use a
+  small value. Depth and rates still have no measurement behind them.
+- A real boundary may be a gap, not a blend: add an opt-in gap of about one yarn
+  (40 glyph units at 12 pt, from the 0.48 pt yarn pitch) to test against, rather than
+  widening the transition (`tBlTr`, 60 units each side, already about three yarns).
+- The documented direction is black into red. For a red run, a black-tinted
+  head or foot on the red letters has support; a red foot on black text has none
+  beyond the mechanism.
+- The "350 glyph units" in #538 is out of date: the code uses `tBleed` x 540.
+
+### Worn lane
+
+**Not sourced as a page, and the three board scans measured show no lane.**
+`tools/lane.py` measures the darkness of the vertical stems of `d h k l b` against
+height above the baseline, so a worn lane (grey in the middle of the x-height, darker
+at ascender tops) would show as a dip in the middle. It gives two statistics: the
+stem's peak (darkest of three columns) and the mean over a 7-column window, which falls
+when a stem loses ink, as `/WornBand`'s holes do.
+
+![Stem darkness against height](refs/T16_stem_profile.png)
+
+*T16: stem darkness (0-255) at each height above the baseline, by both statistics; the table gives it by height band.*
+
+| Scan | stems | peak, 2-4 pt | peak, 4-6 pt | peak, 6-7 pt | mean, 2-4 pt | mean, 4-6 pt | mean, 6-7 pt |
+|---|---|---|---|---|---|---|---|
+| Szilard 1945 (worn, T10) | 395 | 171.5 | 168.8 | 167.6 | 101.8 | 105.9 | 100.3 |
+| Duncan 1914 (fresh, T2) | 45 | 226.8 | 225.5 | 217.5 | 160.1 | 167.9 | 161.3 |
+| MFR 1955 | 129 | 186.4 | 186.3 | 177.4 | 146.0 | 140.2 | 134.1 |
+
+No scan is lighter in the middle than at 6-7 pt (just under the stem tips): on the
+peak statistic the tops are 1-5% lighter than the x-height zone, and on the mean they
+are within 2% for Szilard and Duncan and 8% lighter for MFR. Neither statistic has the
+sign a worn lane needs. The last point or two of each stem fall off with edge blur and
+serifs, and are left out. This does not prove the machines had no lane, only that
+none is visible at these resolutions (0.30-0.36 pt per pixel) and in these stems. The
+baseline comes from tesseract's boxes, and Duncan has few stems. C431 does support the
+mechanism: the type strikes a narrow band of the ribbon, and that band runs out
+of ink and recovers with rest.
+
+Implications: `/WornBand` has no measurement to tune against, and the one it can
+be compared with points the other way. At `/WornBand 1` the lane loses about 15% of
+its ink (TYPEWRITER.md), against differences of at most 8% here and none with the
+model's sign. A realistic preset should keep it small (0.3 takes about 4.5%); dark
+tops are a design choice for the gallery, not something the board shows.
+
+### Embossed punctuation
+
+**Not sourced.** An embossed period shows only in raking light, on the back of the
+sheet, or on thin onionskin held to the light. Every scan on the board is a flat,
+front-lit scan of the face, and no NARA or DPLA scan seen in the search showed a
+verso or a transmitted-light view of typing. Q3's rule (extra pressure on `. , ' "`) stays a design choice.
+
+### Confirmed electric page
+
+**Not sourced.** No scan on Commons or the archives searched states which
+machine typed it.
+
+- The MFR 1955 (proportional) and NSAM 55 (proportional, bold) pages were
+  typed on a proportional-spacing typewriter. In the 1950s and 60s that most likely means the
+  IBM Executive, which Wikipedia (*IBM Electric*) says was electric, introduced in
+  1944, with proportional spacing and four character widths. The NARA records for
+  both pages say nothing about the machine, so this stays an inference, and the
+  board's existing "IBM Executive type" is the same inference.
+- MFR 1955 ink, measured with `tools/measure.py` at 200 dpi: mean darkness 0.65,
+  per-letter spread of the mean 0.019, coverage CV 0.17. That is no more even than
+  Duncan's manual typing (0.023 and 0.12 at 300 dpi), but a proportional face
+  and 200 dpi make these numbers poor comparisons. So there is no new evidence for
+  or against `/electric`'s low pressure variation, and the O'Brien inference stands.
+- C431 says the Bureau's wear-down test used the "Electromatic", an electric typewriter
+  whose "keys have a trigger action and merely release the typebars", with the force set
+  by a motor-driven cylinder. That supports pressure being independent of the
+  finger: an electric typebar machine strikes with a set force. It has no image.
+- Pages in federal collections from the 1960s to the 80s were probably typed on
+  Selectrics, and the CIA reading room has memoranda about leasing them, but no page
+  found says what typed it, and the same type elements ran on later IBM electronic
+  machines. The one route that settles it is a photograph or scan of a page typed on a machine the
+  project's owner can name (see the follow-up in the notes).
+
 ## #210 traits
 
 | Trait in #210 | Status |
 |---|---|
-| manual and electric typewriters | Manual: T1–T10. Electric: **inferred only**, from the O'Brien measurements (see Electric, by inference). |
+| manual and electric typewriters | Manual: T1–T10. Electric: **inferred only**, from the O'Brien measurements (see Electric, by inference), and MFR 1955 and NSAM 55 as an IBM Executive (#468: probable, not stated on any page). |
 | pica and elite pitch | Pica: T1, T2. Elite: T3–T10. Both are verified from the line/character pitch ratio. |
 | per-machine quirks: high or low letters, lean, one side heavier | High/low letters are measured (0.07–0.11pt sd, at most about 0.23pt). The clogged `a` (T6). One side heavier: T12 (observed, not cropped). **Lean is not resolved** at these scans (see Rotation). |
 | per-strike offset, rotation, pressure | Offset is measured (0.2–0.3pt sd). Pressure: T2, T7 and coverage CV 0.07–0.21. Rotation: upper bound only. |
 | light strokes from weak fingers | T2, T7 |
-| punctuation that embosses the paper | **Not yet sourced.** Periods print dark and round (T1, T2), but no scan shows raking light, so embossing is not visible. |
+| punctuation that embosses the paper | **Not sourced** (#468 searched again). Periods print dark and round (T1, T2), but no scan shows raking light, a verso or transmitted light, so embossing is not visible. |
 | ribbon weave showing through | T4 at about 0.5pt, and NBS C431's description. |
 | feathered edges | T2, T4, and C431's "touch ... slightly beyond the sharp edges". |
 | filled counters | T4, T6, T15 |
 | wearing or drying ribbon | T10 (worn, grey-brown) against T2 (fresh, black). |
-| two-colour ribbon bleed | **Not yet sourced.** One bounded search on Commons and the web found no red/black typescript scan with a licence that could be checked. |
+| worn lane (#538) | **Not sourced** (#468). The stem profile (T16) shows no grey middle and no dark tops in Szilard, Duncan or MFR 1955 (peak and mean statistics). C431 p. 11-12 supports a narrow band that runs out of ink. |
+| two-colour ribbon bleed | **Not sourced as a page** (#210's search, then #468's: about 700 colour scans hue-ranked, none typed in red). Text evidence: NBS C431 pp. 10-12 (bleed is rare, black into red, some ribbons leave a white pin stripe). |
 | baseline drift along a line | Measured: 0.06–0.10° sd per line. |
 | line-start wander after each carriage return | Measured: 0.17–0.38pt sd. |
 | uneven platen advance | Measured: 0.16–0.43pt sd. |
