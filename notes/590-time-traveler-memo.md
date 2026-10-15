@@ -47,6 +47,19 @@ Code". The only real names are in his quoted testimony.
 - Handscript has no slash and draws a poor 4, so the routing date is "8-27" and
   the margin note ends with initials only.
 
+## Evenness (maintainer review)
+
+The first render (`/Wear 1.3 /MachineWear 0.6 /Ribbon 0.6`) swung too far from
+letter to letter: very dark strikes beside very light ones, hard to read. Light
+strikes come from the strike layer (pressure sd 0.12 and 2% very light, scaled by
+/Wear x /StrikeWear) and the key weights (/Wear x /MachineWear), and a dry ribbon
+opens the weave more on a light strike. The 2% rate of very light strikes does not
+scale with the wear (only their depth does), so a few light letters stay at any
+setting. `notes/590-evenness-board.png` sets paragraph 3 at 2x for the first
+render and three candidates; the piece now uses F, `/Wear 1.0 /MachineWear 0.4
+/StrikeWear 0.5 /Ribbon 0.75`. The line layer is at /Wear 1.0, so baselines and
+carriage returns still wander, and the page still reads as typed.
+
 ## #547
 
 The renders predate #547 (copy-body erosion), which had no PR when they were
