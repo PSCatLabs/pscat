@@ -1009,16 +1009,23 @@ renders eight examples in both and compares block-downsampled output).
   *inside the fill* (`pmemit`/`pmstamp`/`ptemit`, behind `ptk 0 gt`), from
   the head position (`pmnc`, `ptnc`, or +-1 for pktrowel's ridges) and the
   flip of the run's first stop, then passed through `puwet`, which grades it
-  by the running `pkwet` pass (L3): frames have 9 slots, and 4-6 are the
+  by the running `pkwet` pass (L3): frames have 10 slots, and 4-6 are the
   per-pass factors, a copy of `/Under` and the running pass index (slot 7,
   issue #179, holds one backdrop per pass for a procedural `/Under` and is
   null otherwise: `puwet` reads it first, so a loaded colour grades toward
   the pass's own backdrop; slot 8, issue #359, is a banded call's record:
   the cells' clips, backdrops, pass colours and the saved random stream, null
   otherwise; the pass loop tests it, and each cell points slot 5 at its own
-  backdrop, so `puwet` needs nothing new). A new
-  adopter must call `puwet` on every loaded colour, or its marks go solid
-  inside a pull. `pkfan` adopts it too (L4, `pfColorRec`): its colour is set
+  backdrop, so `puwet` needs nothing new; slot 9, issue #403, is a `/PerFill`
+  call's `[ /Under procedure, CTM at entry ]`, null otherwise). A new
+  adopter must call `puwetat` (`puwet` plus the fill's x y) on every loaded
+  colour, or its marks go solid inside a pull. `puwetat` is what lets
+  `/PerFill true` ask the backdrop at each fill: the three adopters pass the
+  run's middle stop, and the point is taken to device space and back through
+  the slot-9 CTM, so it is in the user space `pkwet` was called in, pass
+  displacement included. It never touches the depth counter (an error leaves
+  through the pass's own `stopped`), unlike `pqaskunder`, which runs before the
+  passes. pkoil's ridge colours still use `puwet` (per pass). `pkfan` adopts it too (L4, `pfColorRec`): its colour is set
   per *run* (`pfrun`) and per pressed ray (`pfray`) by `pfcolor`, from the
   bristle's `pfub` and the stored `/ColorJitter` draw `pfcj` (taken where it
   always was, so the stream doesn't move), because a bristle's runs span every
