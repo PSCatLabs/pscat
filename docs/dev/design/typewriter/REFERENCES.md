@@ -239,7 +239,8 @@ side by side"), that bleed is rare ("the majority ... show no such diffusion"), 
 when it happens black spreads into red, that the reverse cannot easily be detected,
 and that some ribbons deliberately leave a white "pin stripe" between the colours.
 
-Implications for `lib/typewriter.ps` (not changed here):
+Implications for `lib/typewriter.ps` (not changed by #468; #538 then added the opt-in `/BleedGap` and
+documented the worn band's sign as a look, see `notes/538-bleed-gap-and-worn-band.md`):
 
 - `/Bleed` defaults to 0 and should stay there; a bichrome preset should use a
   small value. Depth and rates still have no measurement behind them.

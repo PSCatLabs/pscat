@@ -1,0 +1,32 @@
+%!PS-Adobe-3.0
+%%Title: typewriter ribbon extras, the pin stripe and the worn lane (issue #538)
+%%BoundingBox: 0 0 612 792
+% Demo for #538: /BleedGap (a white pin stripe at a two-colour ribbon's colour
+% boundary) and /WornBand (an artistic option, not a measured one), set 7x so
+% that one yarn (0.48 pt) is wide enough to see. Same /Machine and /Seed in
+% every row, so a row differs from the one above it only by the option named.
+% pscat --png out.png --page 612x792 docs/dev/design/typewriter/ribbon_extras_538.ps
+(lib/typewriter_outlines.ps) run
+(lib/typewriter.ps) run
+/lab { /Helvetica findfont 11 scalefont setfont 0 setgray moveto show } def
+/row {   % y opts label
+    /rl exch def /ro exch def /ry exch def
+    gsave 7 7 scale
+      40 7 div ry 7 div moveto
+      << /Preset /manual /Machine 7 /Seed 23 /Size 12.5 /Pitch 10
+         /Ink [0.13 0.13 0.15] /BleedInk [0.62 0.12 0.10]
+         /WornBand 0 /Bleed 0 /BleedGap 0 >> tw-setup
+      ro tw-set (gypqjgyp) show
+    grestore
+    rl 40 ry 75 add lab
+} def
+0.97 0.96 0.92 setrgbcolor 0 0 612 792 rectfill
+(Black/red ribbon, /Bleed 1: the other colour past the boundary, set 7x so one yarn \(0.48 pt\) shows) 40 775 lab
+660 << /Bleed 1 >>              (/Bleed 1, no gap \(the default\): the red runs into the black) row
+545 << /Bleed 1 /BleedGap 1 >>  (/Bleed 1 /BleedGap 1: a one-yarn white pin stripe at the boundary) row
+430 << /Bleed 1 /BleedGap 3 >>  (/Bleed 1 /BleedGap 3: three yarns, so the cut is easy to see) row
+(Worn lane, no bleed: an artistic option, not a measured one) 40 380 lab
+280 << /Bleed 0 /BleedGap 0 /WornBand 0 >>  (/WornBand 0 \(the default\)) row
+170 << /WornBand 0.3 >>                      (/WornBand 0.3: small, the realistic end) row
+60  << /WornBand 1 >>                        (/WornBand 1: a worn middle and dark tops, a look not a measurement) row
+showpage

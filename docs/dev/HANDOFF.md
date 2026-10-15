@@ -870,7 +870,10 @@ renders eight examples in both and compares block-downsampled output).
    cell (`tYoff` taken out), drawn as overlapping passes by `tRun` / `tZoneDo`. The
    specimen has a new "ribbon extras" block; the bleed is unsourced (no two-colour
    reference on the board, and #468's wider search found none; NBS C431's text is the
-   only source); `notes/422-ribbon-ink-extras.md`.
+   only source); `notes/422-ribbon-ink-extras.md`. #538 added the opt-in `/BleedGap`
+   (a white pin stripe at the boundary, in yarns, default 0, byte-identical) and
+   documented `/WornBand`'s dark-tops sign as a look, not a measurement; no scan
+   was found, so nothing was tuned against one (`notes/538-bleed-gap-and-worn-band.md`).
    #242 shipped the charcoal gallery piece, `gallery/lincoln_charcoal.ps`
    (*Study after Berger, 1864*), and `lib/etching.ps`'s `et-tonemap`, which
    returns a photo as a grid of darkness for any piece that wants a

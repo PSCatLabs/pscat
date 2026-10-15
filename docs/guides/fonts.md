@@ -92,8 +92,12 @@ x-height strike hits, so the middle of each letter prints lighter than its tops 
 tails, at the same height in every strike. `/Bleed` (`0..1`, with `/BleedInk` and
 `/BleedSide`) is a black/red ribbon a little out of register: the part of a letter
 past the colour boundary prints in the other colour, with a ragged edge, and the
-boundary wanders from strike to strike. Both default to 0 (nothing changes) and are
-shown at the foot of the specimen.
+boundary wanders from strike to strike. `/BleedGap` (yarns, default 0) leaves a white
+pin stripe of that many yarns (one is 0.48 pt) at the boundary, as some ribbons are inked,
+and needs `/Bleed` above 0. `/WornBand`, `/Bleed` and `/BleedGap` default to 0 (nothing changes) and are shown at
+the foot of the specimen (`/BleedGap` in `docs/dev/design/typewriter/ribbon_extras_538.png`). `/WornBand` is a look, not a measurement: no scan shows a grey middle with
+dark tops, so keep it small (0.3) if you want it realistic. `/Bleed` 1 moves the boundary in by up to 540 glyph
+units from outside the face, and most real two-colour ribbons show no bleed at all.
 
 ### Typing a page: `tw-type`
 

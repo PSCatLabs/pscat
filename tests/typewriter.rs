@@ -617,6 +617,64 @@ fn the_worn_lane_lightens_the_bleed_colour_too() {
     assert!(worn < 0.95 * plain, "the worn lane left the red foot alone");
 }
 
+/// The pin stripe (#538): `/BleedGap` cuts a strip of no ink, centred on the
+/// colour boundary, from both inks; a gap of 0, or one with no bleed to reach a
+/// letter, is the page without it, to the byte.
+#[test]
+fn bleed_gap_leaves_a_white_stripe_at_the_boundary() {
+    // /Wear 0 and one key repeated: every strike has the same boundary. At
+    // /Size 40 a glyph unit is 1/6 px, so one yarn (0.48pt) is 12 units (2 px)
+    let page = |opts: &str| {
+        render(&format!(
+            "36 84 moveto << /Machine 1 /Seed 2 /Wear 0 /Size 40 /Pitch 3.5 \
+             /BleedInk [0.9 0.1 0.1] {opts} >> tw-setup (pppppp) show"
+        ))
+    };
+    let plain = page("/Bleed 1");
+    // the default, and a gap that has no bleed to reach a letter, move nothing
+    assert_eq!(
+        ink(&plain),
+        ink(&page("/Bleed 1 /BleedGap 0")),
+        "a gap of 0"
+    );
+    assert_eq!(
+        ink(&page("/Bleed 0")),
+        ink(&page("/Bleed 0 /BleedGap 6")),
+        "a gap with no bleed"
+    );
+    // rows (across the whole line) that hold ink without the gap and none with it
+    let rows_cut = |gap: &str| -> usize {
+        let (w, base) = (width_px(), ink(&plain));
+        let cut = ink(&page(&format!("/Bleed 1 /BleedGap {gap}")));
+        (row_of(500)..row_of(-600))
+            .filter(|&y| {
+                let row = |img: &[u8]| img[y * w..(y + 1) * w].iter().any(|&v| v > 60);
+                row(&base) && !row(&cut)
+            })
+            .count()
+    };
+    let (one, three) = (rows_cut("1"), rows_cut("3"));
+    eprintln!("rows cut: 1 yarn {one}, 3 yarns {three}");
+    // one yarn is 2 px, and the strip is bounded by the transition's weave
+    assert!(three >= 4, "a 3-yarn gap cut {three} rows");
+    assert!(
+        three > one,
+        "a wider gap cut no more rows ({one} vs {three})"
+    );
+    assert!(
+        ink(&plain) != ink(&page("/Bleed 1 /BleedGap 1")),
+        "no stripe at 1"
+    );
+    // and on a red run (/above) the stripe is cut there too
+    let head = |gap: &str| {
+        ink(&render(&format!(
+            "36 84 moveto << /Machine 1 /Seed 2 /Wear 0 /Size 40 /Pitch 3.5 /Bleed 1 \
+             /BleedSide /above /BleedGap {gap} >> tw-setup (dlbkdlbk) show"
+        )))
+    };
+    assert!(head("0") != head("3"), "no stripe on /above");
+}
+
 #[test]
 fn a_strip_types_within_the_cpu_budget() {
     let src = format!(
