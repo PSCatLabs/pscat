@@ -19,9 +19,9 @@ rows pass against the old checkers and the new ones. A differential run over
 every repo URL in the tracked Markdown and the built `_site` (145 URLs) gave
 identical output before and after.
 
-Kept on purpose: the md rule's `main/?` prefix means `blob/mainline/x.md`
-resolves to `line/x.md` (a latent bug, pinned in the test). Fixing it changes
-what the md checker reports, so it is a separate follow-up.
+The md rule's ref prefix matched `main` without a boundary, so
+`blob/mainline/x.md` resolved to `line/x.md`. Fixed in #481: the ref must now
+be followed by `/`, `?`, `#` or the end of the URL.
 
 `scripts/repo_url.py` is in the `site-check.yml` path filter. The md tests
 run in `links.yml`, which has no path filter.

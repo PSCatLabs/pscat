@@ -20,13 +20,14 @@ def match(url, ref=None):
     """Return (scheme, ref, tail) for a blob/tree URL into this repo, else None.
 
     ref=None accepts any ref and needs a "/" after it. A given ref is matched
-    literally with an optional "/" after it, so ref="main" also matches
-    "blob/mainline/x" with tail "line/x". The checkers keep that behaviour.
+    literally and must end there: followed by "/", "?", "#" or the end of the
+    URL. So ref="main" matches "blob/main/x" and "tree/main", but not
+    "blob/mainline/x" (#481).
     """
     if ref is None:
         m = re.match(_PREFIX + r"([^/]+)/(.*)", url)
     else:
-        m = re.match(_PREFIX + "(" + re.escape(ref) + r")/?(.*)", url)
+        m = re.match(_PREFIX + "(" + re.escape(ref) + r")(?:/|(?=[?#]|$))(.*)", url)
     if not m:
         return None
     return m.group(1), m.group(2), m.group(3)
