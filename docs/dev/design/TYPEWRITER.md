@@ -162,7 +162,7 @@ printable code:
 | offset y | normal, sd 0.15pt | 0.14–0.20pt |
 | rotation | normal, sd 0.25° | upper bound only (REFERENCES.md, Rotation) |
 | mis-strike | 1% of strikes take 4× the offset above | the tails: 0.8–0.9% of strikes land more than 1pt off horizontally, which a normal of sd 0.2pt almost never gives |
-| pressure | normal, mean 1, sd 0.08, times a finger factor (0.9 on the little-finger keys `q a z p` and `; / -`); 1% of strikes are very light (0.5) | coverage CV 0.07–0.21; T7 |
+| pressure | normal, mean 1, sd 0.12 (#423; 0.08 in #211), times a finger factor (0.9 on the little-finger keys `q a z p` and `; / -`); sd / 6 of strikes (2% at sd 0.12) are very light (0.3 to 0.7 below 1) | coverage CV 0.07–0.21; T7 |
 
 **One knob, `/Wear`** (`[ratio]`, default 1), multiplies every machine and
 strike magnitude above. 0 is a perfect machine, 1 is the measured
@@ -173,9 +173,9 @@ keys together:
 
 | `/Preset` | Settings |
 |---|---|
-| `/manual` (default) | `/Wear 1`, pressure sd 0.08, `/Ribbon 0.7` |
+| `/manual` (default) | `/Wear 1`, pressure sd 0.12, `/Ribbon 0.7` |
 | `/electric` | `/Wear 0.7`, pressure sd 0.03 and no finger factor (M2; T11's evenness) |
-| `/worn` | `/Wear 1.5`, `/Ribbon 0.35` |
+| `/worn` | `/Wear 1.5`, pressure sd 0.12, `/Ribbon 0.35` |
 
 **Strike index.** A second strike at the same cell needs its own variation (T3,
 T5). The side dict holds a strike index, 0 by default, which is part of the
@@ -247,6 +247,20 @@ this.
 - `/StrikeWear 0` keys every ink draw by the key, not the strike, so a quirks-only
   page still repeats a key exactly. `/InkModel false` restores #211's flat ink.
 - Not built: the worn band and two-colour bleed (#422).
+
+**Tuned in #423** (`notes/423-ink-lighter-uneven.md`), against T2, T4 and T7:
+
+- The body is stroked at 0.2 of the spread width (was 0.3), and the feather at
+  0.45 (was 0.85). The spread itself (`/Ribbon` x pressure x 48) is unchanged, so
+  `/InkModel false` is #211's ink exactly.
+- The hole level is 0.21 at the default `/Ribbon 0.7` (was 0.16), 0.36 at `/worn`
+  (was 0.31), and rises by 3 x (1 - pressure) on a light strike (was 0.55) and
+  falls by 1 x (pressure - 1) on a heavy one (was 0.15). A hole's area is only a
+  third of its level, so the old slope moved the ink mass by about 4% per sd.
+- Pressure sd is 0.12 on `/manual` and `/worn` (0.03 on `/electric`, as before).
+  The very-light strike is no longer a fixed -0.5: its probability is sd / 6 and
+  its depth is drawn from 0.3 to 0.7 (strike slot 8), so `/electric` has almost
+  none.
 
 ## 7. Randomness that stays out of the caller's stream
 

@@ -61,6 +61,14 @@ fn differing(a: &[u8], b: &[u8]) -> usize {
     a.iter().zip(b).filter(|(x, y)| x != y).count()
 }
 
+/// Pixels that differ by more than a rounding step: the ribbon ink drawn at
+/// another device origin rounds a clip edge one grey level differently (#423).
+/// For the "is off" checks, which compare the same type through two routes.
+fn differing_visibly(a: &[u8], b: &[u8]) -> usize {
+    assert_eq!(a.len(), b.len());
+    a.iter().zip(b).filter(|(x, y)| x.abs_diff(**y) > 2).count()
+}
+
 fn mean(p: &[u8]) -> f64 {
     p.iter().map(|&v| f64::from(v)).sum::<f64>() / p.len() as f64
 }
@@ -73,7 +81,7 @@ fn rel_page(content: &str, opts: &str) -> Vec<u8> {
 fn rel_page_with_no_options_runs_the_content_and_draws_nothing_else() {
     let plain = page(&format!("{TYPED} exec"));
     assert_eq!(
-        differing(&plain, &rel_page(TYPED, "")),
+        differing_visibly(&plain, &rel_page(TYPED, "")),
         0,
         "with no effect on, rel-page is the content alone"
     );
@@ -95,7 +103,7 @@ fn every_effect_is_off_at_zero_and_shows_when_on() {
         ("Clip", "1"),
     ] {
         let off = rel_page(TYPED, &format!("/{key} 0"));
-        assert_eq!(differing(&plain, &off), 0, "/{key} 0 is not off");
+        assert_eq!(differing_visibly(&plain, &off), 0, "/{key} 0 is not off");
         let shown = rel_page(TYPED, &format!("/{key} {on}"));
         assert!(
             differing(&plain, &shown) > 100,
@@ -105,7 +113,10 @@ fn every_effect_is_off_at_zero_and_shows_when_on() {
     }
     // the marks that take dicts
     let stamp = "/Stamps [ << /Lines [ (SEEN) ] /X 150 /Y 60 /Size 24 >> ]";
-    assert_eq!(differing(&plain, &rel_page(TYPED, "/Stamps [ ]")), 0);
+    assert_eq!(
+        differing_visibly(&plain, &rel_page(TYPED, "/Stamps [ ]")),
+        0
+    );
     assert!(differing(&plain, &rel_page(TYPED, stamp)) > 200, "a stamp");
 }
 
