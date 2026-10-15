@@ -32,7 +32,8 @@
 %   typed     lib/typewriter.ps gives the type its own copy loss, its
 %             /Copies key (fill the counters in, thicken the strokes, drop
 %             the light strikes); `rel-page` sets it to /Generation for the
-%             content. `<r>text</r>` in a tw-type text is a redaction, and
+%             content. /Dropout cuts the thin strokes: a copy's content is
+%             drawn through a clip with small upright holes (see below). `<r>text</r>` in a tw-type text is a redaction, and
 %             `/Redactor { rel-redact }` makes the bar a marker's.
 %
 % Every effect has a strength, and 0 (the default) turns it off: with no
@@ -1051,6 +1052,7 @@ rlDefaults
 % @param: /Generation [count] Photocopy generations, 0 to 8: 0 is the original, 1 a copy, 3 a copy of a copy of a copy (default 0)
 % @param: /Haze [0..1] The grey of a photocopy's paper: toner fog that takes the copy's white down to a light grey (about 0.90 at the default, 0.84 at 1), with a crumpled-paper wave of thicker and thinner toner (soft blotches, tilted noise and a few long creases) and a fine grain of lighter and darker flecks under the type. Applies only when /Generation is above 0; 0 gives the plain white copy (default 0.6)
 % @param: /Speckle [0..1] Each copy's black specks and streaks (default 1)
+% @param: /Dropout [0..1] The thin strokes a copy loses: its content is drawn through small upright holes that cut a hairline in two and only notch a stem, commoner at higher /Generation and uneven along a line, as in a bitonal release copy; redaction bars stay solid; 0 gives the copy without them (default 1)
 % @param: /CopyEdge [0..1] How dark the copier's lid and edge shadows are (default 0.6)
 % @param: /Punch [count] Punch holes down the left margin: 2 and 3 are the standard spacings (default 0)
 % @param: /Staple [count] Staples across the top corner (default 0)

@@ -442,6 +442,15 @@ No new page-scale CI test is added. #204's concern about CI time stands.
   `tools/grain.py`. **#528** (`notes/528-copy-paper-wave.md`): the mottle's wave
   is four tilted, stretched noise octaves (12 to 48pt) under a few long soft
   creases, with the grain's squares at 8pt, so the paper has no grid.
+  **#449** (`notes/449-thin-stroke-dropout.md`): T15's thin strokes break while
+  its stems stay. `rel-page /Dropout` (0 to 1, default 1) draws a copy's content
+  through a clip of the sheet minus small holes (one per cell of a 3.4 x 5.4pt
+  grid, taller than wide, thicker with the copy loss, commoner or rarer by a slow
+  noise), so a hairline is cut in two and a stem only notched. The holes are
+  `rlDropClip`'s; a redaction bar is drawn again whole after the content
+  (`rlBarsAgain`). A hole field cannot see a stroke's width, so it is a statistical
+  stand-in for the glyph-level erosion that the typewriter's `tE` is (#477), which
+  `tInkStrike` zeroes on a copy.
 - **#215, specimen.** A side-by-side against T1/T2 and T9/T10 crops at scan
   resolution. The user judges it.
 
