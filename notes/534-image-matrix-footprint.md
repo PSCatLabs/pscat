@@ -22,8 +22,10 @@ PDF recorders already used CTM ∘ ImageMatrix⁻¹ and were right.
   `image`/`imagemask`/`colorimage` (`examples/postcard.ps`, `lib/released.ps`'s
   haze grain, `lib/fillkit.ps`, `lib/drychalk.ps`) is this idiom.
 - A singular ImageMatrix is `undefinedresult` at the operator, before any data
-  is read (`Interp::begin_image`), as in gs. pscat used to paint sample (0,0)
-  over the unit square.
+  is read (`check_invertible` in `src/ops/image.rs`), as in gs. pscat used to paint sample (0,0)
+  over the unit square. One gs quirk is matched too: Level 1 `image` and
+  `colorimage` with a zero width or height return before the matrix check, while
+  `imagemask` and the dict form still raise.
 
 ### Pinned against Ghostscript 10.07.1
 

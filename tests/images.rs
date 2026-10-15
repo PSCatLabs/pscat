@@ -371,4 +371,20 @@ fn singular_image_matrix_is_undefinedresult_before_any_data() {
         it.run_str("n 0 eq { } { (data proc ran) = stop } ifelse")
             .expect("data proc must not run");
     }
+    // gs quirk, matched: Level 1 image/colorimage with no samples return
+    // before the matrix check; imagemask and the dict form still check.
+    let mut it = Interp::with_page(100, 100).expect("page");
+    for ok in [
+        "0 4 8 [0 0 0 0 0 0] {} image",
+        "4 0 8 [0 0 0 0 0 0] {} false 3 colorimage",
+    ] {
+        assert_eq!(it.run_str(ok), Ok(()), "{ok}");
+    }
+    for bad in [
+        "0 0 true [0 0 0 0 0 0] {} imagemask",
+        "<< /ImageType 1 /Width 0 /Height 4 /BitsPerComponent 8 /Decode [0 1]
+           /ImageMatrix [0 0 0 0 0 0] /DataSource {} >> image",
+    ] {
+        assert_eq!(it.run_str(bad), Err(PsError::UndefinedResult), "{bad}");
+    }
 }

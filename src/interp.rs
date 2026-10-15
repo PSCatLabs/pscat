@@ -1068,12 +1068,7 @@ impl Interp {
     }
 
     /// Queue an image (image/imagemask/colorimage) frame.
-    /// A singular ImageMatrix is `undefinedresult` before any data is
-    /// read (gs-pinned, #534): the image would have no footprint.
     pub(crate) fn begin_image(&mut self, ctx: ImageCtx) -> Result<(), PsError> {
-        if crate::image::invert6(ctx.matrix).is_none() {
-            return Err(PsError::UndefinedResult);
-        }
         self.push_frame(Frame::Image(Box::new(ctx)))
     }
 
