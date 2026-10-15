@@ -36,9 +36,9 @@
 %             paper, wider with each generation (see "softening" below).
 %   typed     lib/typewriter.ps gives the type its own copy loss, its
 %             /Copies key (fill the counters in, thicken the strokes, drop
-%             the light strikes); `rel-page` sets it to /Generation for the
-%             content. /Dropout cuts the thin strokes: a copy's content is
-%             drawn through a clip with small upright holes (see below). `<r>text</r>` in a tw-type text is a redaction, and
+%             the light strikes, and erode its thin horizontal strokes away,
+%             #547); `rel-page` sets it to /Generation for the content.
+%             `<r>text</r>` in a tw-type text is a redaction, and
 %             `/Redactor { rel-redact }` makes the bar a marker's.
 %
 % Every effect has a strength, and 0 (the default) turns it off: with no
@@ -82,7 +82,7 @@ RelState begin {
     /rlSeed 1 def  /rlW 612 def  /rlH 792 def
     /rlAge 0 def  /rlEdge 0 def  /rlFolds 0 def  /rlFoldAt [ 0.333 0.667 ] def
     /rlLamp 0 def  /rlSkew 0 def  /rlBack null def
-    /rlGen 0 def  /rlHaze 0.6 def  /rlSpeck 1 def  /rlCEdge 0.6 def  /rlDrop 1 def  /rlSoft 1 def
+    /rlGen 0 def  /rlHaze 0.6 def  /rlSpeck 1 def  /rlCEdge 0.6 def  /rlSoft 1 def
     /rlPunch 0 def  /rlStaple 0 def  /rlClip 0 def  /rlShadow 0.6 def
     /rlStamps [ ] def  /rlNotes [ ] def  /rlPaged false def
 } bind def
@@ -122,7 +122,6 @@ RelState begin {
     /Generation [ /rlGen    /rlIsCount  /rel-generation-must-be-an-integer-0-to-8 ]
     /Haze       [ /rlHaze   /rlIsUnit   /rel-haze-must-be-0-to-1 ]
     /Speckle    [ /rlSpeck  /rlIsUnit   /rel-speckle-must-be-0-to-1 ]
-    /Dropout    [ /rlDrop   /rlIsUnit   /rel-dropout-must-be-0-to-1 ]
     /Soften     [ /rlSoft   /rlIsUnit   /rel-soften-must-be-0-to-1 ]
     /CopyEdge   [ /rlCEdge  /rlIsUnit   /rel-copyedge-must-be-0-to-1 ]
     /Punch      [ /rlPunch  /rlIsCount  /rel-punch-must-be-an-integer-0-to-8 ]
@@ -862,13 +861,6 @@ RelState begin {
     /rdS exch def /rdY exch def /rdX1 exch def /rdX0 exch def
     rdX0 rlIsNum rdX1 rlIsNum and rdY rlIsNum and rdS rlIsNum and not
     { end rel-redact-operands-must-be-numbers } if
-    % the bar's operands, its CTM and the bounds of the clip it was called under (a
-    % content may clip the bar to a region: the replay must not draw outside it)
-    rlRecOn {
-        gsave newpath clippath pathbbox grestore
-        4 array astore /rdCb exch def
-        /rlBars [ rlBars aload pop [ rdX0 rdX1 rdY rdS matrix currentmatrix rdCb ] ] def
-    } if
     gsave
     newpath
     rdX0 10 mul cvi rdY 3 mul cvi rlSeed2
@@ -987,90 +979,6 @@ RelState begin {
         rlR 4 mul rlU 120 mul 40 add rlineto stroke
     } for
 } bind def
-% ---- dropout: the thin strokes a copier loses (#449) ------------------------------
-% A copier's threshold turns a stroke into toner only where it is dark enough
-% after the scanner's blur, so a hairline breaks where a heavy stem only thins
-% (T15: the crossbars and the thin parts of the bowls are gone, the stems are
-% left). A page cannot read its own strokes, but a hole cuts just as
-% selectively: a hole as wide as a stroke severs it, a narrower one only notches
-% it. So the original is drawn through a clip of the sheet minus a field of
-% small holes, taller than wide (they cut the horizontal strokes) and tilted a
-% little, and the paper under them shows through. There is one hole per cell of
-% a grid (rlDrCx x rlDrCy points), so almost none overlap (an overlap would be
-% solid under eoclip; two worst-case neighbours touch by under 0.1pt), and a slow noise makes them commoner or rarer from place to
-% place, so a line loses its thin strokes unevenly: a word, then a clear run.
-% The chance per cell is rlDrK x /Dropout x c^2, c the copy loss (0.4 at one
-% generation, 0.78 at three, 0.98 at eight): a first copy has a few holes and
-% an original none. The holes cut whatever the content draws, so a bar from
-% rel-redact (the /Redactor of tw-type) is recorded while the content runs
-% (rlRecOn) and drawn again, whole, after it; a plain black bar that tw-type
-% draws itself is not, and is cut like the rest. The replay is limited: a bar is
-% clipped to the bounds of the clip it was drawn under (not a round or rotated
-% one) and lands above content that was drawn after it.
-/rlDrCx 3.4 def  /rlDrCy 5.4 def  /rlDrK 1.2 def
-/rlRecOn false def  /rlBars [ ] def
-/rlDrInit {
-    rlSeed 18 rlSeed2
-    /rlDrNx rlW rlH 2 copy lt { exch } if pop 14 div cvi 3 add def
-    /rlDrA rlDrNx dup mul array def  0 1 rlDrA length 1 sub { rlDrA exch rlR put } for
-    /rlDrB rlDrNx dup mul array def  0 1 rlDrB length 1 sub { rlDrB exch rlR put } for
-} bind def
-/rlDrM {                                            % x y -> -1..1, the density's slow noise
-    /rlDmY exch def /rlDmX exch def
-    rlDmX 3 div rlDmY rlDrA rlDrNx 30 rlVN 0.7 mul
-    rlDmX 2 div rlDmY rlDrB rlDrNx 14 rlVN 0.3 mul add
-} bind def
-/rlDrHole {                                         % cx cy -> -  an eight-sided ellipse, taller than wide
-    /rlDhY exch def /rlDhX exch def
-    rlU 0.17 mul 0.18 add rlCC 0.2 mul add /rlDhA exch def   % half width, 0.26 to 0.55pt (a stem is wider)
-    rlU 1.2 mul 1 add /rlDhB exch def              % half height, 1 to 2.2pt
-    rlR 12 mul /rlDhT exch def                      % tilt from upright, degrees
-    0 1 7 {
-        /rlDhI exch def
-        rlDhI 45 mul /rlDhP exch def
-        rlDhP cos rlDhA mul 1 rlR 0.1 mul add mul /rlDhQx exch def
-        rlDhP sin rlDhB mul 1 rlR 0.1 mul add mul /rlDhQy exch def
-        rlDhX rlDhQx rlDhT cos mul add rlDhQy rlDhT sin mul sub
-        rlDhY rlDhQx rlDhT sin mul add rlDhQy rlDhT cos mul add
-        rlDhI 0 eq { moveto } { lineto } ifelse
-    } for
-    closepath
-} bind def
-% the sheet minus the holes, as the clip (the CTM is the original's frame)
-/rlDropClip {
-    rlSt /rlDcSt exch def
-    rlDrInit
-    rlCC dup mul rlDrop mul rlDrK mul /rlDcP exch def
-    newpath rlSheetP
-    0 rlDrCy rlH {
-        /rlDcY exch def
-        0 rlDrCx rlW {
-            /rlDcX exch def
-            rlU dup rlDcP 2.4 mul lt {
-                rlDcX rlDrCx 2 div add rlDcY rlDrCy 2 div add rlDrM
-                1.6 mul 1 add dup 0 lt { pop 0 } if rlDcP mul 0.95 2 copy gt { exch } if pop
-                lt {
-                    rlDcX rlDrCx 2 div add rlR 0.25 mul add
-                    rlDcY rlDrCy 2 div add rlR 0.25 mul add rlDrHole
-                } if
-            } { pop } ifelse
-        } for
-    } for
-    eoclip newpath
-    /rlSt rlDcSt def
-} bind def
-% the bars the content drew, drawn again whole (the RNG stream is put back)
-/rlBarsAgain {
-    rlSt /rlDcSt exch def
-    rlBars {
-        aload pop /rlBc exch def /rlBm exch def
-        gsave rlBm setmatrix
-        rlBc 0 get rlBc 1 get rlBc 2 get rlBc 0 get sub rlBc 3 get rlBc 1 get sub rectclip
-        rlRedactDraw grestore
-    } forall
-    /rlSt rlDcSt def
-} bind def
-
 /rlCopyLayer {
     /rlCC 1 0.6 rlGen rlJ sub exp sub def
     rlLid rlEdgeShadow rlSpecks
@@ -1109,17 +1017,14 @@ RelState begin {
     rlStamps { dup rlOnPage { rlStampDraw } { pop } ifelse } forall
     rlPaged not rlPg 1 eq or { rlStaples rlClips } if
 } bind def
-% the original's sheet: its copy loss, the paper, and the dropout clip
+% the original's sheet: its copy loss and the paper
 /rlOrigHead {
     /rlCC 1 0.6 rlGen exp sub def
     rlHzB 0 gt { rlSeed 16 rlSeed2 rlHzInit } if
     rlPaint { gsave rlPaperDraw grestore } if
-    /rlDrOn rlDrop 0 gt rlGen 0 gt and def
-    rlDrOn { gsave rlDropClip /rlBars [ ] def /rlRecOn true def } if
 } bind def
-% what is drawn over the content: the redaction bars again, then the marks
+% what is drawn over the content: the marks
 /rlOrigTail {
-    rlDrOn { /rlRecOn false def grestore rlBarsAgain } if
     rlMarks
     /rlCC 0 def
 } bind def
@@ -1162,7 +1067,6 @@ RelState begin {
 } bind def
 /rlRun {
     /rlPgLive false def  /rlPgOpen false def        % a paged run that raised an error left them
-    /rlRecOn false def                              % a content that raised an error left it on
     rlGrabPath
     rlPrep
     rlGen 0 gt rlHaze 0 gt and { rlHaze 0.16 mul } { 0 } ifelse dup /rlHzB exch def /rlHzK exch def
@@ -1186,7 +1090,7 @@ RelState begin {
 %   << /PageStart { rel-page-start } /PageEnd { rel-page-end } ... >> tw-type
 %
 % rel-page-start opens the sheet's frame (the scanner bed and tilt, a copy's
-% grey, the sheet clips of every generation, the paper, the dropout clip) and
+% grey, the sheet clips of every generation, the paper) and
 % LEAVES it set for the page to be typed in; rel-page-end draws what goes over
 % the type (redaction bars, marks), closes the frame and draws the copy layers
 % (lid, edge shadow, specks), so the sheet is finished before the showpage.
@@ -1226,7 +1130,6 @@ RelState begin {
     gsave                                           % popped by tw-type
 } bind def
 /rlRunPaged {
-    /rlRecOn false def
     /rlSeed0 rlSeed def  /rlPg 0 def  /rlPgLive true def  /rlPgOpen false def
     /tw-set where { pop rlGen 0 gt } { false } ifelse {
         TWState /tCopies get /rlOldC exch def
@@ -1239,8 +1142,8 @@ RelState begin {
     /rlPgLive false def
     rlPgOpen {
         % a start hook without its end: put back the levels the sheet left open
-        /rlPgOpen false def  /rlRecOn false def
-        rlDrOn { grestore } if grestore grestore
+        /rlPgOpen false def
+        grestore grestore
         /rlHzB 0 def  /rlHzK 0 def
         end rel-page-start-was-not-followed-by-rel-page-end
     } if
@@ -1289,8 +1192,6 @@ rlDefaults
 %   { { } << /Haze 1.5 >> rel-page } /rel-haze-must-be-0-to-1
 %   (a haze above 1) mustguard
 %
-%   { { } << /Dropout 1.5 >> rel-page } /rel-dropout-must-be-0-to-1
-%   (a dropout above 1) mustguard
 %
 %   { { } << /Skew 20 >> rel-page } /rel-skew-must-be-within-10-degrees
 %   (a skew of 20 degrees) mustguard
@@ -1329,7 +1230,6 @@ rlDefaults
 % @param: /Generation [count] Photocopy generations, 0 to 8: 0 is the original, 1 a copy, 3 a copy of a copy of a copy (default 0)
 % @param: /Haze [0..1] The grey of a photocopy's paper: toner fog that takes the copy's white down to a light grey (about 0.90 at the default, 0.84 at 1), with a crumpled-paper wave of thicker and thinner toner (soft blotches, tilted noise and a few long creases) and a fine grain of lighter and darker flecks under the type. Applies only when /Generation is above 0; 0 gives the plain white copy (default 0.6)
 % @param: /Speckle [0..1] Each copy's black specks and streaks (default 1)
-% @param: /Dropout [0..1] The thin strokes a copy loses: its content is drawn through small upright holes that cut a hairline in two and only notch a stem, commoner at higher /Generation and uneven along a line, as in a bitonal release copy; a bar drawn by rel-redact stays solid (a plain black bar from tw-type is cut like any content, so give tw-type /Redactor { rel-redact }); 0 gives the copy without them (default 1)
 % @param: /Soften [0..1] How far a copy blurs its marks: the stamps, notes and redaction bars get a soft fringe, wider with each /Generation (the page's value times the copy loss); an original is never blurred, and 0 keeps a copy's marks crisp (default 1)
 % @param: /CopyEdge [0..1] How dark the copier's lid and edge shadows are (default 0.6)
 % @param: /Punch [count] Punch holes down the left margin: 2 and 3 are the standard spacings (default 0)

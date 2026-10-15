@@ -317,8 +317,9 @@ this.
   0.15 shortfall), so the loss of ink moves from holes to thinning. A one-side-heavy
   key's light side is 0.3 of the side sparser (was 0.5) and eroded as above. A
   heavy strike (pressure above 1) is not eroded, and `/electric` (sd 0.03)
-  hardly is. `/Copies > 0` is unchanged (slope 3, side 0.5, no erosion): the
-  toner fills a thin stroke in and the contrast curve drops a light strike out.
+  hardly is. `/Copies > 0` is unchanged here (slope 3, side 0.5, no `tE`): the
+  toner fills a thin stroke in and the contrast curve drops a light strike out
+  (#547 later gave a copy its own erosion in y, `tEy`, below).
 - `/InkModel false` is unchanged.
 
 **Tuned in #511** (`notes/511-elite-ink-weight.md`), against T4 (elite) and T2 (pica):
@@ -329,7 +330,7 @@ this.
   when inked like pica, and +0.126 of hole level at the default ribbon takes
   it to x1.02 by dark pixels per character. The bump follows `/Ribbon` so a dry
   ribbon (T10, already light) gets less of it.
-- Pica is byte-identical to #477, so is any page with `/Copies > 0` (the contrast
+- Pica is byte-identical to #477, so was any page with `/Copies > 0` then (the contrast
   curve would scale the bump 2 to 3.5 times), and so is `/InkModel false`.
 - Not done: T10 (worn elite on a grey-brown ribbon) is already well under its scan
   by this measure and a little lighter still; the Szilard machine and the FDR one
@@ -516,14 +517,26 @@ No new page-scale CI test is added. #204's concern about CI time stands.
   is four tilted, stretched noise octaves (12 to 48pt) under a few long soft
   creases, with the grain's squares at 8pt, so the paper has no grid.
   **#449** (`notes/449-thin-stroke-dropout.md`): T15's thin strokes break while
-  its stems stay. `rel-page /Dropout` (0 to 1, default 1) draws a copy's content
-  through a clip of the sheet minus small holes (one per cell of a 3.4 x 5.4pt
-  grid, taller than wide, thicker with the copy loss, commoner or rarer by a slow
-  noise), so a hairline is cut in two and a stem only notched. The holes are
-  `rlDropClip`'s; a `rel-redact` bar is drawn again whole after the content
-  (`rlBarsAgain`; a plain `tw-type` bar is cut like the type). A hole field cannot see a stroke's width, so it is a statistical
-  stand-in for the glyph-level erosion that the typewriter's `tE` is (#477), which
-  `tInkStrike` zeroes on a copy. **#450** (`notes/450-copier-softening-of-marks.md`):
+  its stems stay. `rel-page /Dropout` drew a copy's content through a clip of the
+  sheet minus small holes, a statistical stand-in for glyph-level erosion, which
+  a page cannot do. **#547** (`notes/547-copy-outline-erosion.md`) did it in
+  `tInkStrike` and retired `/Dropout`, `rlDropClip` and the bar replay
+  (`rlBarsAgain`): on a copy (`/Copies > 0`) the feather and the body are drawn
+  inside a clip of the glyph grown by the spread's reach (`tEr` in x, half of it
+  in y, `tEryK`; nine shifted copies in one path) and shrunk by `tEy` in y only
+  (shifted up and down and intersected, `tGrowClip`); the body is as wide as the
+  reach, so the stems are fat. A stroke thinner than about 2 x `tEy` goes
+  (serifs and joins) and a thicker one (the 65-unit bars, underscores) thins; a
+  stem is untouched. `tEy` is `tECopy` (45 glyph units) x the copy loss x the
+  strike's hole level, **capped at `tECopyCap` (18)**: round 1 let it reach 37, so
+  a light strike lost its bars and a word faded next to a heavy one, and the
+  underscore rule broke in dashes (the review of #594). With the cap every strike
+  erodes alike and the reach grows from the second copy on (`tEgrow`), so a third
+  copy is as heavy as the original or heavier, a first copy is as round 1 had it,
+  and #592 (a copy reading lighter than T15) is answered. Y only, not `tErode`'s square, because the face is
+  near monoline (65 to 80 units everywhere): a square erosion thins the stems
+  and kills the diagonals first, where T15's face has thin horizontals and heavy
+  stems. **#450** (`notes/450-copier-softening-of-marks.md`):
   T14's stamps, handwriting and bar fade over the edge. `rel-page /Soften` (0 to 1,
   default 1) times the copy loss (an original has none) draws each mark's outline
   stroked at five widths under the crisp mark, in the ink mixed toward the paper
