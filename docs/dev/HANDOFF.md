@@ -825,6 +825,11 @@ renders eight examples in both and compares block-downsampled output).
    the pressure shortfall, and the hole slope below pressure 1 fell from 3 to 0.6.
    A copy (`/Copies > 0`) is unchanged. The typewriter and released specimens were
    redone; `notes/477-light-strike-thins.md`.
+   #511 gave elite its own ink weight: at `/Pitch` 12 the hole level is higher by
+   `tEliteHole` x `/Ribbon` (`tFaceK` is 0 at pitch 10, 1 at 12), against T4's elite
+   being about 6% heavy. Pica and a photocopy (`/Copies > 0`) are byte-identical.
+   Only the typewriter specimen (pscat and gs) and `ink_vs_real.png` were redone;
+   `notes/511-elite-ink-weight.md`.
    #242 shipped the charcoal gallery piece, `gallery/lincoln_charcoal.ps`
    (*Study after Berger, 1864*), and `lib/etching.ps`'s `et-tonemap`, which
    returns a photo as a grid of darkness for any piece that wants a

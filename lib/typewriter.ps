@@ -264,6 +264,7 @@ TWState begin {
 /tDerive {
     /advU 72000 tPitch div tSize div def        % the advance, glyph units
     /xS advU 600 div def                        % the face is drawn on 600
+    /tFaceK tPitch 10 sub 2 div dup 0 lt { pop 0 } if dup 1 gt { pop 1 } if def
     /wearM tWear tMWear mul def
     /wearL tWear tLWear mul def
     /wearS tWear tSWear mul def
@@ -421,6 +422,13 @@ TWState begin {
 /tLightSlope 0.6 def  /tLightKnee 0.15 def  /tLightTail 0.1 def
 /tEDead 0.08 def  /tELo 60 def  /tECap 20 def
 /tESide 16 def  /tFringe 0.6 def
+% the faces take the ink differently (#511): a face at 12 to the inch (elite)
+% is about 6% heavy against the scans (T4) when it is inked like pica, so its
+% hole level is higher by tEliteHole x /Ribbon (a dry ribbon is already thin, as
+% T10 is). 10 to the inch (pica) and coarser are untouched, to the byte, and so
+% is a photocopy (/Copies > 0), whose contrast curve would scale the bump.
+% tFaceK is 0 at 10 and 1 at 12, set in tDerive from /Pitch.
+/tEliteHole 0.18 def  /tFaceK 0 def
 /tE 0 def  /tE0 0 def                           % the strike's erosion, and a saved copy
 /tYarn 0.48 def                                 % yarn pitch, points
 /tPatch tYarn 8 mul def                         % patch side, points
@@ -573,6 +581,7 @@ grestore
     % photocopy keeps #423's slope of 3 and no thinning: its toner drops a
     % light strike out in specks and fills a thin stroke in.
     1 tRibbon sub dup 0.2 mul exch dup mul dup mul 0.45 mul add 0.15 add
+    tCopyC 0 gt { } { tFaceK tEliteHole mul tRibbon mul add } ifelse       % not on a copy: the contrast curve would scale it
     1 tPr sub dup 0 gt {
         tCopyC 0 gt { 3 mul } {                 % a copy drops a light strike out, as in #423
             dup tLightKnee gt { tLightKnee sub tLightTail mul tLightKnee tLightSlope mul add } { tLightSlope mul } ifelse

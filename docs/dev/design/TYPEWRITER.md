@@ -281,6 +281,20 @@ this.
   toner fills a thin stroke in and the contrast curve drops a light strike out.
 - `/InkModel false` is unchanged.
 
+**Tuned in #511** (`notes/511-elite-ink-weight.md`), against T4 (elite) and T2 (pica):
+
+- The faces take the ink differently. `tFaceK` is 0 at `/Pitch` 10 or coarser and
+  1 at 12 or finer (linear between, set in `tDerive`), and the hole level rises by
+  `tEliteHole` (0.18) x `tFaceK` x `/Ribbon`: elite is about 6% heavy against T4
+  when inked like pica, and +0.126 of hole level at the default ribbon takes
+  it to x1.02 by dark pixels per character. The bump follows `/Ribbon` so a dry
+  ribbon (T10, already light) gets less of it.
+- Pica is byte-identical to #477, so is any page with `/Copies > 0` (the contrast
+  curve would scale the bump 2 to 3.5 times), and so is `/InkModel false`.
+- Not done: T10 (worn elite on a grey-brown ribbon) is already well under its scan
+  by this measure and a little lighter still; the Szilard machine and the FDR one
+  disagree about elite, so a per-face constant is a compromise.
+
 ## 7. Randomness that stays out of the caller's stream
 
 - The library never calls `rand` or `srand`.
