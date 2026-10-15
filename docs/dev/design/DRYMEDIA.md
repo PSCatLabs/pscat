@@ -307,11 +307,18 @@ clips nor its restores: a callback that clips and strokes inside a bound
 `gsave ... exec ... grestore` wrapper leaves the batch's later strokes under
 that clip (a callback that clips but makes no stroke is harmless, since the
 capture is lazy). Standard PostScript has no exact way to see that restore
-(#459, closed as a documented limit). There are three workarounds, each
-byte-identical to drawing at once: use `dkclip` inside the callback, call
-the bound wrapper inside a `gsave ... grestore` the batch sees, or bind the
-wrapper inside the batch, where `gsave` and `grestore` are the shadows
-(`notes/459-bound-wrapper-grestore.md`; a pscat-only exact route is #488).
+(#459, closed as a documented limit). pscat has one (#488): `gstate
+.sameclip bool`, a pscat-only operator, is true when the clip in force is
+the very chain the gstate holds. In a batch, `dkstroke` asks it of the
+current capture and takes a new one when it says false, so in pscat the
+bound wrapper is exact; drykit probes for it at load (`dkPsameok`), so under
+Ghostscript, which lacks it, the limit stands
+(`notes/488-sameclip.md`). For programs that must draw the same in both
+there are three workarounds, each byte-identical to drawing at once: use
+`dkclip` inside the callback, call the bound wrapper inside a `gsave ...
+grestore` the batch sees, or bind the wrapper inside the batch, where
+`gsave` and `grestore` are the shadows
+(`notes/459-bound-wrapper-grestore.md`).
 Two overlapping regions hatched
 under plain clips in one batch take the same 6 catches as the same regions
 in `dkclip` calls (96 with a fresh gstate per stroke), and render

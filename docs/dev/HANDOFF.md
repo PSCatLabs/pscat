@@ -552,6 +552,13 @@ renders eight examples in both and compares block-downsampled output).
   PDF's `ExtGState /BM`, and an exhaustive match on a local enum is
   what makes adding a third mode fail to compile until all three
   exporters learn about it.
+- `gstate .sameclip bool` (issue #488) is a third pscat extension, dot-named
+  because it is non-standard (gs has no `.sameclip`): true when the clip in
+  force is the very clip chain the gstate holds (both none, or the same
+  `Rc<ClipNode>`; `GraphicsState::same_clip`). Identity, not geometry: a
+  re-clip with an identical path is false. Library code probes it with
+  `systemdict /.sameclip known` (drykit's `dkPsameok`) and keeps the
+  standard behaviour without it (`notes/488-sameclip.md`).
 - `error_report`'s `Line: N` (issue #17) is best-effort, not exact
   source attribution: no `Object` carries a source position, so it
   reports the line of the most recent token scanned directly from the
@@ -651,10 +658,14 @@ renders eight examples in both and compares block-downsampled output).
    the batch calls the operators directly, so neither its clips nor its
    restores are seen; a callback that clips and strokes inside a bound
    `gsave exec grestore` wrapper leaves later strokes under that clip
-   (#459, a documented limit: standard PostScript cannot see that
-   restore. Use `dkclip` in the callback, wrap the call in a `gsave ...
-   grestore` the batch sees, or bind the wrapper inside the batch;
-   `notes/459-bound-wrapper-grestore.md`, #488 for a pscat-only route).
+   under Ghostscript (#459, a documented limit: standard PostScript
+   cannot see that restore. Use `dkclip` in the callback, wrap the call in
+   a `gsave ... grestore` the batch sees, or bind the wrapper inside the
+   batch; `notes/459-bound-wrapper-grestore.md`). pscat is exact there:
+   `dkstroke` asks the pscat-only `gstate .sameclip bool` whether its
+   capture's clip is still in force and recaptures if not; drykit probes
+   it at load (`dkPsameok`), so gs keeps the limit (#488,
+   `notes/488-sameclip.md`).
    #393: `dkstroke /After true` in a batch is drawn on its own after the
    batch renders, in call order, in its own colour; `dhsmudge` and `dhlift`
    use it, so they run inside a batch, over everything the batch lays

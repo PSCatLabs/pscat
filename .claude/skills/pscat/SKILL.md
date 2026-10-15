@@ -189,6 +189,12 @@ worth planning around:
 on top of these; `pscat --capabilities` has their full option list, and
 `docs/dev/design/WATERCOLOR.md` explains why the mechanism is shaped this way.
 
+One more pscat extension, not in Ghostscript: `gstate .sameclip bool` is
+true when the clip in force is the very clip the gstate captured (both
+none, or the same clip chain; a re-clip with the same path is false).
+Probe it with `systemdict /.sameclip known`; `lib/drykit.ps` does, to see a
+bound wrapper's `grestore` inside a `dkbatch` (`notes/488-sameclip.md`).
+
 ## Watch it draw (needs a display)
 
 ```sh
