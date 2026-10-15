@@ -29,12 +29,16 @@ nothing else does.
 
 ## Checked
 
-- `tests/typewriter.rs` `a_clogged_counter_takes_the_bleed_colour_and_the_worn_lane`:
-  machine 4's clogged `o`, with `/Bleed` poked to 1.6 (at the option's 1 the
-  boundary never gets below 528 units, above the counter's top at 390), over
+- `tests/typewriter.rs` `a_clogged_counter_takes_the_bleed_colour` and
+  `the_worn_lane_lightens_a_clogged_counter`: machine 4's clogged `o`, with
+  `/Bleed` poked to 1.6 (at the option's 1 a strike can cross the counter, but
+  none of seeds 1..40 gets below about 354 units on `/above`, and main ink
+  stops about 80 above that, over the counter's top at 390). The first, over
   the seeds whose boundary lies at 150..300: no dark neutral pixel in the rows
-  past the blend, and red there; and the counter patch is lighter in the lane.
-  Fails on the base lib, passes on this one.
+  past the blend, and red there. The second: a patch in the middle of the
+  counter, which holds nothing but the clog, is lighter at `/WornBand 1`. Both
+  fail on the base lib (691 dark pixels past the boundary on seed 4; patch
+  86265 either way) and pass on this one.
 - Identity: `scripts/identity_check.sh --loader lib/typewriter.ps
   --loader lib/released.ps`, with a control that sets `/Bleed` (and differs).
   `released_specimen`, `released_memo` identical. `examples/typewriter_specimen.ps`
@@ -42,7 +46,10 @@ nothing else does.
   and `/Bleed`; the rest of the page is identical), so
   `docs/dev/design/typewriter_specimen.png` is regenerated (its committed copy
   matched the base render exactly; `ribbon_extras_538.png` is unchanged, it
-  has no clogged key in the zones).
+  has no clogged key in the zones). With `/WornBand` and `/Bleed` in the
+  specimen set to 0 (a sed copy), the base and head renders are byte-identical,
+  so the difference is the extras' own.
 - Demo: `docs/dev/design/typewriter/clog_bleed_539.ps` / `.png`, before and
   after. The boundary is poked past `/Bleed 1` (`TWState /tBleed 1.6 put`) so it
-  crosses the counter: at `/Bleed 1` it never gets below 528 units on `/above`.
+  crosses the counter (see the test above). The "before" is the same file
+  rendered from a pre-#539 checkout.

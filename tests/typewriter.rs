@@ -675,40 +675,33 @@ fn bleed_gap_leaves_a_white_stripe_at_the_boundary() {
     assert!(head("0") != head("3"), "no stripe on /above");
 }
 
+/// One strike of machine 4's clogged `o` (fill 1 at `/Wear 1.5`), `/Bleed` poked
+/// past its 0..1 so the boundary can cross the counter (62..390 units): at
+/// `/Bleed 1` it can too, but none of seeds 1..40 gets below about 354. The
+/// stack is left with the boundary's height in the cell frame, or -9999 if the
+/// strike's boundary misses the letter.
+fn clogged_o(seed: u32, opts: &str) -> Interp {
+    render(&format!(
+        "36 84 moveto << /Machine 4 /Seed {seed} /Wear 1.5 /Size 40 /Pitch 3.5 \
+         /BleedInk [0.9 0.1 0.1] /BleedSide /above {opts} >> tw-setup \
+         TWState /tBleed 1.6 put (o) show \
+         TWState /tZFar get null eq {{ -9999 }} \
+         {{ TWState /zbY get TWState /tYoff get add }} ifelse"
+    ))
+}
+
 /// The clogged counter is ribbon ink like the body (#539): where the bleed's
 /// boundary puts part of a letter in the other colour, the counter's fill there
-/// is the other colour too, and in the worn lane it is lighter, not the main ink
-/// at full weight.
+/// is the other colour too, not the main ink.
 #[test]
-fn a_clogged_counter_takes_the_bleed_colour_and_the_worn_lane() {
-    // machine 4 clogs its o (fill 1 at /Wear 1.5); /Bleed is poked past its
-    // 0..1 so the boundary (800 down to -280 units, /above) can cross the o's
-    // counter (62..390 units): at /Bleed 1 it never gets below 528
-    let strike = |seed: u32, opts: &str| {
-        render(&format!(
-            "36 84 moveto << /Machine 4 /Seed {seed} /Wear 1.5 /Size 40 /Pitch 3.5 \
-             /BleedInk [0.9 0.1 0.1] /BleedSide /above {opts} >> tw-setup \
-             TWState /tBleed 1.6 put (o) show \
-             TWState /tZFar get null eq {{ -9999 }} \
-             {{ TWState /zbY get TWState /tYoff get add }} ifelse"
-        ))
-    };
+fn a_clogged_counter_takes_the_bleed_colour() {
     let boundary = |it: &Interp| -> f64 {
         let st: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
         st.last().and_then(|v| v.parse().ok()).expect("a number")
     };
-    // main ink: dark and neutral; the other colour is red (r high)
-    let dark_neutral = |it: &Interp, y0: usize, y1: usize| -> usize {
-        let w = width_px();
-        let px = rgb(it);
-        (y0..y1)
-            .flat_map(|y| px[y * w..(y + 1) * w].iter())
-            .filter(|&&(r, g, b)| r.max(g).max(b) < 110 && r.abs_diff(g) < 40)
-            .count()
-    };
     let (mut checked, mut red_seen) = (0, 0usize);
     for seed in 1..=40 {
-        let it = strike(seed, "/Bleed 1");
+        let it = clogged_o(seed, "/Bleed 1");
         let b = boundary(&it);
         // a boundary through the counter: its upper part is past the blend
         if !(150.0..=300.0).contains(&b) {
@@ -717,21 +710,28 @@ fn a_clogged_counter_takes_the_bleed_colour_and_the_worn_lane() {
         checked += 1;
         // rows past the blend (60 + 20 units each side) and above the glyph's top
         let (y0, y1) = (row_of(600), row_of(b as i32 + 120));
-        let dark = dark_neutral(&it, y0, y1);
+        let (w, px) = (width_px(), rgb(&it));
+        // main ink is dark and neutral; the other colour is red
+        let dark = px[y0 * w..y1 * w]
+            .iter()
+            .filter(|&&(r, g, bl)| r.max(g).max(bl) < 110 && r.abs_diff(g) < 40)
+            .count();
         assert_eq!(dark, 0, "seed {seed}: main ink past the boundary ({b})");
-        let w = width_px();
-        red_seen += rgb(&it)[y0 * w..y1 * w]
+        red_seen += px[y0 * w..y1 * w]
             .iter()
             .filter(|&&(r, g, bl)| r > g.saturating_add(50) && r > bl.saturating_add(50))
             .count();
     }
     assert!(checked >= 3, "only {checked} strikes crossed the counter");
     assert!(red_seen > 200, "the counter showed no red ({red_seen})");
+}
 
-    // the worn lane lightens the clog (the counter holds nothing else): a patch
-    // in the middle of the counter, with no bleed
+/// And the worn lane lightens a clogged counter (#539): the counter holds
+/// nothing but the clog, so a patch in its middle loses ink.
+#[test]
+fn the_worn_lane_lightens_a_clogged_counter() {
     let patch = |opts: &str| -> u64 {
-        let it = strike(3, opts);
+        let it = clogged_o(3, opts);
         let (w, img) = (width_px(), ink(&it));
         (row_of(300)..row_of(150))
             .flat_map(|y| img[y * w + 185..y * w + 201].iter().map(|&v| u64::from(v)))

@@ -97,7 +97,8 @@ pin stripe of that many yarns (one is 0.48 pt) at the boundary, as some ribbons 
 and needs `/Bleed` above 0. `/WornBand`, `/Bleed` and `/BleedGap` default to 0 (nothing changes) and are shown at
 the foot of the specimen (`/BleedGap` in `docs/dev/design/typewriter/ribbon_extras_538.png`). `/WornBand` is a look, not a measurement: no scan shows a grey middle with
 dark tops, so keep it small (0.3) if you want it realistic. `/Bleed` 1 moves the boundary in by up to 540 glyph
-units from outside the face, and most real two-colour ribbons show no bleed at all.
+units from outside the face, and most real two-colour ribbons show no bleed at all. A clogged counter
+is ribbon ink like the rest of the letter, so it takes the other colour (and the worn lane's lighter weave) where the zones put it.
 
 Mis-strikes are the machine's and the typist's: a loose typebar or a sloppy
 segment, a hurried or uneven hand. `/MisStrike` (`0..1`, default `0.01`, the
