@@ -527,6 +527,14 @@ renders eight examples in both and compares block-downsampled output).
   it moves the alpine_lake still by 1 LSB, because paintkit does
   arithmetic on it. Reals in general still print shortest-`f64`, where
   gs prints 9 digits (`notes/505-grestore-bottom-currentgray.md`).
+- Readbacks added in #513: `currentcmykcolor`, `currentcolor`,
+  `currentlinecap`, `currentlinejoin`, `currentmiterlimit` and
+  `currentstrokeadjust`, plus a `setstrokeadjust` that only stores its flag
+  (`initgraphics` keeps it, as gs does). The state holds the CMYK
+  components a colour was set with (`GraphicsState::cmyk`, cleared by
+  `set_rgb`) and the Indexed index / Separation tint (`spot`), because the
+  painting `rgb` cannot give them back. `setcolorspace` still does not
+  reset the painting colour as gs does (`notes/513-readback-operators.md`).
 - `shfill` (issue #20): `FunctionType` restricted to 2 (exponential)
   and 3 (stitching) — 0 (sampled) and 4 (calculator) unsupported,
   since those would need the same `Frame::PostOp` reentrancy

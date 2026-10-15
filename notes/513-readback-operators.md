@@ -4,7 +4,7 @@ Found while working #505 (see `notes/505-grestore-bottom-currentgray.md`).
 `currentcmykcolor`, `currentcolor`, `currentlinecap`, `currentlinejoin`,
 `currentmiterlimit` and `currentstrokeadjust` were undefined in pscat.
 Ghostscript 10.07.1 is the reference: each was probed in gs first, and
-`tests/readback_operators.rs` pins 20 programs to gs's output (plus a
+`tests/readback_operators.rs` pins its programs to gs's output (plus a
 local-only re-run in gs, `ghostscript_prints_the_pinned_lines`).
 
 ## What each reads back
@@ -62,6 +62,10 @@ operators; `rgb` is still what paints.
 - **CMYK to RGB.** gs converts additively (`0.1 0.2 0.3 0.4 setcmykcolor
   currentrgbcolor` is `0.5 0.4 0.3`), pscat multiplicatively (`0.54 ...`).
   Not touched: it would move every CMYK render.
+- **A CMYK copy.** `currentcolor setcolor` in DeviceCMYK recomputes the
+  painting RGB from the `f32`-rounded components, so in principle it can
+  move the RGB by one `f32` ulp. A 1000-quadruple sweep found none, and
+  the round-trip test compares the RGB as well as the components.
 - **9-digit values.** gs prints `0.399999976` where pscat prints
   `0.39999998` for the same `f32` (see the #505 notes); the test compares
   the numbers inside a line as `f32`s.
