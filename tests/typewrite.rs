@@ -715,7 +715,9 @@ fn ghostscript_types_the_memo_the_script_writes() {
         let w = img.width() as usize;
         let mut rows = vec![0u32; img.height() as usize];
         for (i, px) in img.pixels().iter().enumerate() {
-            if px.red() < 128 {
+            // any visible ink: at 72 dpi the lighter ribbon ink (#423) leaves
+            // few pixels under 128 in pscat, where gs's strokes are darker
+            if px.red() < 200 {
                 rows[i / w] += 1;
             }
         }
