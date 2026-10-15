@@ -249,13 +249,20 @@ A two-page memo through a paged `rel-page` (`examples/released_pages.ps`):
 `docs/dev/design/typewriter/release_vs_real.png` sets crops of it beside the reference
 scans T14, T15 and T10.
 
-The gallery piece *Released in Part* (`gallery/released_memo.ps`, issue #215) is a
-whole page made this way: an elite manual (`/Pitch 12 /Size 11.5`), tabbed
-numbered paragraphs, a strikeover, an x-out, underscores, marker redactions, two
-stamps, initials and a note, through one copy. One tip from it: `rel-page` gives
-the type `/Copies` equal to `/Generation`, which at 1 already fills most
-counters; set a smaller `/Copies` (0.35 there) in the `tw-type` dict to keep a
-first copy's type open while the page still goes through the copier.
+The gallery piece *Released in Part* (`gallery/released_memo.ps`, issues #215 and
+#531) is a whole page made this way, the released copy where *The Man from 2026*
+below is the original that never left the file: an elite manual at the even hand
+that piece settled (`/Wear 1.0 /MachineWear 0.4 /StrikeWear 0.5 /Ribbon 0.75`),
+tabbed numbered paragraphs, a strikeover, an x-out, underscores, marker redactions
+with an exemption code stamped beside each, an office-use-only marking typed at the
+head and foot with `tw-set` and ruled through by a reviewer's pen (drawn in the
+content proc, so the copier copies it), received, records-review and released-in-part
+stamps, a document number, a gem clip, initials and a note, through two copies
+(`/Generation 2 /Haze 0.8`). Every office, code and name on it is invented. One tip
+from it: `rel-page` gives
+the type `/Copies` equal to `/Generation`; set a smaller `/Copies` (0.35 there) in the
+`tw-type` dict to keep the type at a light first-copy loss, counters open and only
+a little of #547's erosion, while the page itself goes through two generations.
 `docs/dev/design/typewriter/tools/blind_compare.py` sets crops of it, unlabelled and
 shuffled, among strips from three reference scans (`docs/dev/design/typewriter/blind_grid.png`), and the
 whole page beside T1 (`docs/dev/design/typewriter/memo_vs_real.png`).

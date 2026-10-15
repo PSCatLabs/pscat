@@ -1,4 +1,4 @@
-"""Blind comparison of the released-memo gallery piece with real scans (issue #215).
+"""Blind comparison of the released-memo gallery piece with real scans (issues #215, #531).
 
     python3 -I docs/dev/design/typewriter/tools/blind_compare.py [PSCAT]
 
@@ -60,14 +60,17 @@ REAL = [
 ]
 
 # Render strips: (left, top) in points from the page's top left. Body text
-# only, away from the header (invented names would be a tell either way) and
-# the redaction bars.
+# only, away from the header (invented names would be a tell either way), the
+# redaction bars and their margin codes, the marking ruled through, the
+# stamps and the handwriting: no real strip has any of them.
 RENDERED = [
-    (72, 280),
-    (150, 199),
+    (150, 337),
+    (100, 448),
 ]
 
-SHUFFLE_SEED = 215
+# #531 drew the board again for the final piece with a new seed, so #215's
+# published key does not answer it.
+SHUFFLE_SEED = 531
 
 
 def render(pscat, tmp):
