@@ -54,7 +54,7 @@ row3 = [
     ('C1 letters (CC BY 4.0)', fit_h(ref('chalk_crypto_letters'), det_h)),
 ]
 row4 = [
-    ('render 1:1: the boxed result, yellow chalk pressed hard', render.crop((1000, 1180, 1760, 1440))),
+    ('render 1:1: the boxed result, yellow chalk pressed hard', render.crop((1000, 1198, 1760, 1458))),
     ('render 1:2: the freehand unit circle', render.crop((1960, 280, 2700, 1020)).resize((360, 360), Image.LANCZOS)),
     ('C3 Einstein board fraction bars (decltype, CC BY-SA 3.0)', fit_h(ref('chalk_einstein_fraction_bars'), 260)),
 ]

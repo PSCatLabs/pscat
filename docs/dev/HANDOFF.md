@@ -763,7 +763,12 @@ renders eight examples in both and compares block-downsampled output).
    surface. A `/Ghost` proc that passes a procedure must `load` it. Never
    `def` an operator's name (`loop`, `lt`) in a piece: handscript and
    strokeglyphs aren't bound and will pick it up
-   (`notes/238-chalkboard-lecture.md`).
+   (`notes/238-chalkboard-lecture.md`). #532 gave it a final pass with
+   mathkit's structures (underbraces, a starred `\overset`, `\pmod`,
+   wandering columns, `mkbrace`): to place an `mkbrace` inside an `mkalign`
+   line, measure the prefix with `mkmetrics` under that line's own seed
+   (`/Seed` + 101 i) and add it to the record's `/Origin`
+   (`notes/532-chalkboard-final-pass.md`).
    #239 shipped `lib/drycrayon.ps` (`dy-`): `dycrayon` (a core and a rim
    `dkstroke` per subpath, one wax level each), `dypaper`, the crayon box
    (`dybox`, `dycolors`, `dycolor`) and six child motions with paintkit's

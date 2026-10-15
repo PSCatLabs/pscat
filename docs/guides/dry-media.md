@@ -238,7 +238,10 @@ the quadratic formula to Maxwell's equations, and a derivation in chalk.
 (`docs/dev/design/drymedia/mathkit_columns_braces.png`).
 The gallery piece `gallery/chalkboard_lecture.ps` fills a
 whole board with it: Euler's formula derived across three drychalk
-panels.
+panels, using the structures where a lecturer would. Underbraces name the
+Taylor terms, a starred `\overset{(*)}{=}` marks where the signs flip, and
+`mkbrace` names each regrouped bracket. The powers of i sit in wandering
+columns with a `\pmod` rule.
 
 ```postscript
 (lib/handscript.ps) run (lib/strokeglyphs.ps) run (lib/mathkit.ps) run
