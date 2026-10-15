@@ -337,14 +337,27 @@
     lkwx0 lkwy curveto
     closepath fill
 } bind def
+% the four banks of haze: x0 x1 dy thick for each lkwisp
+/lkbanks {
+    -20 250 -4 10 lkwisp  265 460 5 7 lkwisp
+    420 525 -7 4 lkwisp   545 790 -1 9 lkwisp
+} bind def
 % y under seed -   the banks of mist, worked wet into whatever is under
-% them. Nested in the reflection's 6-layer pull, the 8 layers here stay
-% under pkwet's 64x budget (past it, pkwet-too-many-passes).
+% them. Two sibling pkwets (not nested, so each stays inside the budget):
+% the banks are first smeared sideways with a horizontal one, so every
+% pass's tip lands at a different x and each end trails off into the
+% range instead of ending in a blunt nose (the vertical lift moves a
+% tip only up and down, so alone it stacks every pass's tip at one x);
+% the vertical one then lifts them both ways as before. Nested in the
+% reflection's 6-layer pull, the 8 layers here stay under pkwet's 64x
+% budget (past it, pkwet-too-many-passes).
 /lkmist {
     srand /lkmu exch def /lkmy exch def
     lkMC {
-        { -20 250 -4 10 lkwisp  265 460 5 7 lkwisp
-          420 525 -7 4 lkwisp   545 790 -1 9 lkwisp
+        { lkbanks }
+        << /Direction 0 /Stretch 4 /Offset 24 /Layers 6 /Pickup 0.9
+           /Under lkmu >> pkwet
+        { lkbanks
           newpath -20 lkmy moveto 250 lkmy 8 sub 6 lkj add
           520 lkmy 8 add 6 lkj add 780 lkmy 2 sub curveto
           << /Nozzle 10 /Density 60 /Falloff 1 /Speck 0.6 /Speckle 0.5
