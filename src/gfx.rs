@@ -731,6 +731,21 @@ pub struct GraphicsState {
     clip: Option<ClipState>,
 }
 
+impl GraphicsState {
+    /// Whether `other` holds the very clip in force here: both have none,
+    /// or both hold the same chain `Rc` (#488, `.sameclip`). Identity, not
+    /// geometry: a second `clip` with an identical path is a new chain and
+    /// compares false. Exact while `other` is alive, since it keeps its
+    /// chain alive and no new chain can reuse that allocation.
+    pub fn same_clip(&self, other: &GraphicsState) -> bool {
+        match (&self.clip, &other.clip) {
+            (None, None) => true,
+            (Some(a), Some(b)) => std::rc::Rc::ptr_eq(&a.node, &b.node),
+            _ => false,
+        }
+    }
+}
+
 #[derive(Clone)]
 struct ClipState {
     mask: std::rc::Rc<tiny_skia::Mask>,

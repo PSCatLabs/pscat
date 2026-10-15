@@ -999,7 +999,7 @@ fn a_plain_clip_in_a_batch_renders_as_at_once() {
     const FREE: &str = "newpath 10 92 moveto 130 92 lineto << /Width 4 >> dkstroke";
     const LIFT: &str = "0.2 0.3 0.25 setrgbcolor newpath 10 50 moveto 130 50 lineto \
                         << /Width 6 /After true >> dkstroke";
-    let cases: [(&str, String); 13] = [
+    let cases: [(&str, String); 14] = [
         (
             "a nested eoclip",
             format!("gsave {RING} {CL} grestore {FREE}"),
@@ -1051,6 +1051,10 @@ fn a_plain_clip_in_a_batch_renders_as_at_once() {
                 "/dktwrap2 {{ gsave exec grestore }} bind def {{ {RING} {CL} }} dktwrap2 {FREE}"
             ),
         ),
+        (
+            "a bare bound wrapper (pscat's .sameclip sees its grestore, #488)",
+            format!("{{ {RING} {CL} }} dktwrap {FREE}"),
+        ),
     ];
     // a wrapper bound before any batch: its gsave/grestore are unseen
     const WRAP: &str = "/dktwrap { gsave exec grestore } bind def ";
@@ -1085,6 +1089,22 @@ fn a_plain_clip_in_a_batch_renders_as_at_once() {
     assert!(
         lost > 200,
         "with the shadows blocked only {lost} pixels changed: the check cannot see the clip"
+    );
+    // Without .sameclip (drykit's Ghostscript path, forced here) the bare
+    // bound wrapper's grestore goes unseen and its clip leaks to FREE: the
+    // documented limit (#459), and the control that the row above is live.
+    let bare = &cases[13].1;
+    let leaked = data(&board(
+        140,
+        100,
+        2.0,
+        &format!("{WRAP}/dkPsameok false def {{ {bare} }} dkbatch"),
+    ));
+    let leak = differ(&at_once(bare), &leaked);
+    eprintln!("bare bound wrapper without .sameclip: {leak} pixels leak");
+    assert!(
+        leak > 200,
+        "without .sameclip only {leak} pixels changed: the bound wrapper row cannot see the leak"
     );
 }
 
