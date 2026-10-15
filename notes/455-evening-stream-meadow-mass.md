@@ -14,7 +14,7 @@ untouched.
 - **`evmeadowat`** (x y -> r g b), the new `/Mass` procedure: plain meadow lit
   with the yellow of its light by a share that is largest right on the far
   shore, fades to nothing 60 pt toward the viewer, and is scaled by the glow
-  (strongest at the sun's x, a quarter of that toward the corners). It draws
+  (strongest at the sun's x, about a ninth of that at the far corners). It draws
   nothing random. Used by the far shore (`evfaredges`) and both stream banks
   (`evbankedges`), so the shore catches the light under the glow and the banks
   pick it up only at their far ends, then match plain meadow (no yellow
@@ -40,10 +40,19 @@ untouched.
   to the state the old one left (`2133854749 srand`, read off the old file with
   `rrand`): the water, the reflection and the fall are byte-identical.
   `evbankedges` is followed by `evstreamhead`, which reseeds.
-- **Pixels** (2x, against the committed still): 24 004 pixels differ, all in
-  the far-shore band (y 244 to 256 pt), along the two stream banks, and at the
-  near banks' lower rim corners. 0 differ in the four cloud boxes (each cloud's
-  extent plus 10 pt) or in the whole sky above y = 262, in the stream's interior,
-  the fall, the cabin, the trees, and both near-bank bodies.
+- **Pixels** (2x, against the committed still): 24 004 pixels differ, in the
+  far-shore band (y 244 to 256 pt, the whole width), along the two stream banks'
+  edges, and at the near banks' lower rim corners. Counted in boxes clear of
+  those: 0 differ in the four cloud boxes (each cloud's extent plus 10 pt), in
+  the whole picture at y >= 258 pt, in the fall (x 352-436, y 150-180), the
+  stream's upper reach (x 395-440, y 185-205) and lower water (x 360-440,
+  y 20-140), the cabin's body (x 160-230, y 196-241), the left meadow
+  (x 40-250, y 60-230), the right tree (x 590-700, y 262-420) and everything
+  below y = 150 outside the stream's banks.
+- **Edge lit beyond the fill.** The meadow's own strokes carry no x term, so
+  near the stream's mouth the edge is deliberately lit more than the fill
+  behind it (about 60% against 20 to 25%): grass tips catching the glow. Putting
+  the glow into `evmeadow` itself would let the edge match the fill; that is a
+  wider change than the edges, filed as #471.
 - **Reproducibility.** Two 2x renders are byte-identical; `--lint` is clean;
   Ghostscript renders the scene without errors (correctness only).
