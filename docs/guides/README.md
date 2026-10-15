@@ -15,7 +15,7 @@ skimmed [artkit](artkit.md) (it is the base most of them load).
 
 ## Text and fonts
 
-- [Fonts](fonts.md): the Type 3 display faces, the typewriter and the 61-face
+- [Fonts](fonts.md): the Type 3 display faces, the typewriter and the 67-face
   catalog.
 - [Handwriting](handwriting.md): a string in, a handwritten PNG out, and the
   `/HandScript` font.
