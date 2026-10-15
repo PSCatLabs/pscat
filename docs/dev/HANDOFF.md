@@ -514,9 +514,19 @@ renders eight examples in both and compares block-downsampled output).
   force. `initclip` and `initgraphics` keep the stack; `grestoreall`
   empties it. Only the clip
   changes. Not modelled: a Type 3 `BuildChar` opening its own level (gs
-  runs it inside a `gsave`); pscat's `grestore` at the bottom of the stack
-  or at a save boundary still differs from gs as before
-  (`notes/494-clipsave-cliprestore.md`).
+  runs it inside a `gsave`) (`notes/494-clipsave-cliprestore.md`).
+- `grestore` with nothing to pop matches gs (#505): at a `save` boundary
+  it brings back the save's state without popping (so it repeats); at the
+  bottom it, and `grestoreall` with no `save`, bring back the job's
+  initial state (`Gfx::initial_state`, no font). Both start an empty
+  `clipsave` level. pscat's own paired calls (`rectfill`, ...) use the
+  plain popping `Gfx::grestore`; only the operator goes through
+  `Interp::do_grestore`. `currentgray`/`currenthsbcolor` report the
+  `f32` colour's shortest decimal (`0.5`, not `0.49999999999999994`).
+  `currentrgbcolor` still reports the widened `f32` on purpose: rounding
+  it moves the alpine_lake still by 1 LSB, because paintkit does
+  arithmetic on it. Reals in general still print shortest-`f64`, where
+  gs prints 9 digits (`notes/505-grestore-bottom-currentgray.md`).
 - `shfill` (issue #20): `FunctionType` restricted to 2 (exponential)
   and 3 (stitching) — 0 (sampled) and 4 (calculator) unsupported,
   since those would need the same `Frame::PostOp` reentrancy

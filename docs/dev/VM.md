@@ -118,10 +118,12 @@ restore truncates to the inner mark; the outer entry survives.
 5. Truncate `save_stack`.
 
 `grestoreall` (new operator) restores the innermost save's boundary
-state (which stays available for that save's restore), or pops to the
-bottom of the gsave stack when no save is live. (gs appears to differ
-in the no-save case only because its job server wraps every program
-in an implicit save.)
+state (which stays available for that save's restore). With no save
+live it pops everything and brings back the job's initial graphics
+state, as gs does (its job server wraps every program in an implicit
+save whose boundary is that state); before #505 pscat stopped at the
+oldest `gsave`'s copy. `grestore` with nothing to pop does the same
+(see `notes/505-grestore-bottom-currentgray.md`).
 
 ### vmstatus
 
@@ -143,9 +145,8 @@ VM", and 15 MB of headroom answers the latter. Documented constant.
 - **Files/fonts:** restore does not close files opened since the
   save, and does not undo `definefont` registry side effects beyond
   the font dict's own contents (the FID write *is* journaled).
-- **`grestore` at a save boundary** pops through it (PLRM says stop);
-  balanced gsave/grestore pairs — i.e. real programs — never notice.
-  `grestoreall` does respect the boundary.
+- **`grestore` at a save boundary** stops there since #505, as the
+  PLRM and gs say: it brings back the save's state without popping.
 - **Strings are exempt by spec**, not deviation — noted here because
   it surprises people (pinned: gs leaves `(Xbc)` mutated).
 - save/restore inside a Type 3 BuildChar or image data procedure is

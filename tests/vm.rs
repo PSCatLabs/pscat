@@ -153,13 +153,13 @@ fn grestoreall_respects_the_save_boundary() {
 
 #[test]
 fn grestoreall_without_save_pops_to_bottom() {
-    // PLRM bottom-of-stack semantics. gs prints 1.0 here, but only
-    // because its job server wraps every program in an implicit save
-    // whose boundary state is the default graphics state.
+    // gs prints 1.0: its job server wraps every program in an implicit
+    // save whose boundary state is the default graphics state, and pscat
+    // matches that since #505 (it used to stop at the oldest gsave, 3.0).
     let mut it = run(
         "3 setlinewidth gsave 5 setlinewidth gsave 7 setlinewidth grestoreall currentlinewidth",
     );
-    assert_eq!(top_repr(&mut it), "3.0");
+    assert_eq!(top_repr(&mut it), "1.0");
 }
 
 // --- documented deviations (docs/dev/VM.md) ----------------------------------

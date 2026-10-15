@@ -604,18 +604,25 @@ fn top_level_validation_failures_restore_the_operand_stack() {
 #[test]
 fn a_draw_proc_that_leaks_a_gsave_and_fails_is_fully_unwound() {
     let mut it = with_lib(400, 200);
-    it.run_str("0.5 setgray").expect("setup");
+    // A sentinel gsave (gray 0.5, line width 1) under the call: once the
+    // draw proc's leaked gsave is unwound, one grestore pops the sentinel.
+    // A grestore with nothing saved would bring back the job's initial
+    // state, as in gs (#505), so the sentinel is what tells them apart.
+    it.run_str("0.5 setgray gsave 0.25 setgray 17 setlinewidth")
+        .expect("setup");
     let r = it.run_str(
         "[ 0 0 300 200 ] [ << /Text (Real) /Size 50 /At [ 10 10 ]
             /Draw { pop pop pop gsave 0.1 setgray boom-in-draw } >> ] hllayout hldraw",
     );
     assert!(r.is_err());
-    it.run_str("clear 0.9 setgray grestore currentgray").ok();
-    let g: f64 = it.operand_stack().last().unwrap().repr().parse().unwrap();
-    assert!(
-        (g - 0.9).abs() < 1e-6,
-        "a leaked gsave was restored into: {g}"
-    );
+    it.run_str("clear 0.9 setgray grestore currentgray currentlinewidth")
+        .ok();
+    let stack = it.operand_stack();
+    let got: Vec<f64> = stack[stack.len() - 2..]
+        .iter()
+        .map(|o| o.repr().parse().unwrap())
+        .collect();
+    assert_eq!(got, [0.5, 1.0], "a leaked gsave was restored into: {got:?}");
 }
 
 #[test]

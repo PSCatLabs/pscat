@@ -359,8 +359,11 @@ fn sameclip(it: &mut Interp) -> Result<(), PsError> {
     Ok(())
 }
 
+/// Pop the newest `gsave`. At a `save` boundary the state the `save`
+/// took comes back without a pop; at the bottom of the stack, the job's
+/// initial state (Ghostscript's behaviour, #505).
 fn grestore(it: &mut Interp) -> Result<(), PsError> {
-    it.gfx.grestore();
+    it.do_grestore();
     Ok(())
 }
 
@@ -505,9 +508,9 @@ fn sethsbcolor(it: &mut Interp) -> Result<(), PsError> {
 
 fn currenthsbcolor(it: &mut Interp) -> Result<(), PsError> {
     let (h, s, b) = it.gfx.hsb();
-    it.push(Object::real(h));
-    it.push(Object::real(s));
-    it.push(Object::real(b));
+    it.push(Object::real(color_readback(h)));
+    it.push(Object::real(color_readback(s)));
+    it.push(Object::real(color_readback(b)));
     Ok(())
 }
 
@@ -522,6 +525,9 @@ fn setcmykcolor(it: &mut Interp) -> Result<(), PsError> {
 }
 
 fn currentrgbcolor(it: &mut Interp) -> Result<(), PsError> {
+    // Not rounded like `currentgray` (#505): lib/paintkit.ps does
+    // arithmetic on these values, and rounding them moves the committed
+    // alpine_lake still by one LSB at one pixel.
     let (r, g, b) = it.gfx.rgb();
     it.push(Object::real(r));
     it.push(Object::real(g));
@@ -531,8 +537,21 @@ fn currentrgbcolor(it: &mut Interp) -> Result<(), PsError> {
 
 fn currentgray(it: &mut Interp) -> Result<(), PsError> {
     let g = it.gfx.gray();
-    it.push(Object::real(g));
+    it.push(Object::real(color_readback(g)));
     Ok(())
+}
+
+/// A colour component as `currentgray` and `currenthsbcolor` report it
+/// (#505).
+/// The colour is held in `f32`, and Ghostscript's reals are `f32` too, so
+/// the value is rounded to `f32` and then read back as the `f64` nearest
+/// that `f32`'s shortest decimal: `0.3 setgray currentgray` gives `0.3`
+/// (not the widened `0.30000001192092896`) and the gray of a 50% gray RGB
+/// gives `0.5` (not the `0.49999999999999994` that `0.3r + 0.59g + 0.11b`
+/// sums to in `f64`), as gs prints. Setting the value again lands on the
+/// same `f32`, so a read-then-set round trip still changes nothing.
+fn color_readback(x: f64) -> f64 {
+    (x as f32).to_string().parse().unwrap_or(x)
 }
 
 fn currentlinewidth(it: &mut Interp) -> Result<(), PsError> {

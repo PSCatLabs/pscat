@@ -829,23 +829,7 @@ impl Gfx {
         let base_ctm = Transform::from_row(scale, 0.0, 0.0, -scale, 0.0, height as f32);
         Some(Gfx {
             pixmap,
-            state: GraphicsState {
-                ctm: base_ctm,
-                rgb: (0.0, 0.0, 0.0),
-                alpha: 1.0,
-                blend: BlendMode::Normal,
-                colorspace: ColorSpace::Gray,
-                line_width: 1.0,
-                flatness: 1.0,
-                line_cap: LineCap::Butt,
-                line_join: LineJoin::Miter,
-                miter_limit: 10.0,
-                dash: None,
-                font: None,
-                path: PsPath::default(),
-                clip: None,
-                clip_stack: Vec::new(),
-            },
+            state: Self::initial_state(base_ctm),
             saved: Vec::new(),
             base_ctm,
             dirty: false,
@@ -1717,7 +1701,19 @@ impl Gfx {
         let font = self.state.font.take();
         let clip_stack = std::mem::take(&mut self.state.clip_stack);
         self.state = GraphicsState {
-            ctm: self.base_ctm,
+            font,
+            clip_stack,
+            ..Self::initial_state(self.base_ctm)
+        };
+    }
+
+    /// The graphics state a job starts in: the device CTM, black
+    /// DeviceGray, default line parameters, no font, no clip, no current
+    /// path and no `clipsave` entries. `grestore` and `grestoreall` with
+    /// nothing saved come back to it (#505).
+    fn initial_state(ctm: Transform) -> GraphicsState {
+        GraphicsState {
+            ctm,
             rgb: (0.0, 0.0, 0.0),
             alpha: 1.0,
             blend: BlendMode::Normal,
@@ -1728,11 +1724,11 @@ impl Gfx {
             line_join: LineJoin::Miter,
             miter_limit: 10.0,
             dash: None,
-            font,
+            font: None,
             path: PsPath::default(),
             clip: None,
-            clip_stack,
-        };
+            clip_stack: Vec::new(),
+        }
     }
 
     // --- state ----------------------------------------------------------
@@ -1752,20 +1748,43 @@ impl Gfx {
         self.saved.len()
     }
 
+    /// Pop the newest `gsave`. For pscat's own paired `gsave`/`grestore`
+    /// (`rectfill` and the like); the `grestore` operator is
+    /// [`grestore_at`](Self::grestore_at). With nothing saved it does
+    /// nothing.
     pub fn grestore(&mut self) {
-        // grestore below the bottom of the stack is a no-op, per the PLRM.
         if let Some(s) = self.saved.pop() {
             self.state = s;
         }
     }
 
-    /// `grestoreall` with no save active: pop everything, ending in the
-    /// bottommost saved state.
-    pub(crate) fn grestore_all_bottom(&mut self) {
-        if let Some(first) = self.saved.first() {
-            self.state = first.clone();
-            self.saved.clear();
+    /// The `grestore` operator, matching Ghostscript (#505). `save_boundary`
+    /// is the innermost `save`'s gsave depth and state. With no `gsave` open
+    /// since that `save`, the state the `save` took comes back and nothing
+    /// is popped, so a second `grestore` does the same again. With no
+    /// `gsave` open and no `save` live, the job's initial state comes back.
+    /// Either way the level starts with an empty `clipsave` stack (gs's
+    /// `grestore` there ends in a fresh `gsave`), even though the `save`'s
+    /// snapshot holds the entries made before it.
+    pub(crate) fn grestore_at(&mut self, save_boundary: Option<(usize, &GraphicsState)>) {
+        match save_boundary {
+            Some((depth, state)) if self.saved.len() <= depth => {
+                self.state = state.clone();
+                self.state.clip_stack.clear();
+            }
+            _ => match self.saved.pop() {
+                Some(s) => self.state = s,
+                None => self.state = Self::initial_state(self.base_ctm),
+            },
         }
+    }
+
+    /// `grestoreall` with no save active: pop everything and come back to
+    /// the job's initial state, as gs does (#505), not to the oldest
+    /// `gsave`'s copy.
+    pub(crate) fn grestore_all_bottom(&mut self) {
+        self.saved.clear();
+        self.state = Self::initial_state(self.base_ctm);
     }
 
     pub fn set_rgb(&mut self, r: f64, g: f64, b: f64) {
@@ -1964,7 +1983,8 @@ impl Gfx {
             return;
         }
         let outer = match save_boundary {
-            // `<=`: pscat's grestore can pop below a save's depth.
+            // `<=` only as a guard: since #505 the `grestore` operator stops
+            // at a save's depth, so `==` is the case that happens.
             Some((depth, state)) if self.saved.len() <= depth => Some(state),
             _ => self.saved.last(),
         };

@@ -1385,6 +1385,16 @@ impl Interp {
         self.gfx.clear_clip_stack();
     }
 
+    /// `grestore` (#505): at the innermost save's boundary it restores
+    /// the save's state without popping; see [`Gfx::grestore_at`].
+    pub(crate) fn do_grestore(&mut self) {
+        let boundary = self
+            .save_stack
+            .last()
+            .map(|rec| (rec.gfx_depth, &*rec.gfx_state));
+        self.gfx.grestore_at(boundary);
+    }
+
     /// `cliprestore` (#494): this needs the innermost save's snapshot,
     /// the clip a level opened by `save` started with.
     pub(crate) fn do_cliprestore(&mut self) {

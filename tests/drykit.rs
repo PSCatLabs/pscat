@@ -1035,7 +1035,9 @@ fn a_plain_clip_in_a_batch_renders_as_at_once() {
         ),
         (
             "grestoreall",
-            format!("gsave gsave {RING} {CL} grestoreall {FREE}"),
+            // With no save, grestoreall comes back to the job's initial
+            // state (black), as in gs (#505), so the colour is set again.
+            format!("gsave gsave {RING} {CL} grestoreall 0.93 0.94 0.90 setrgbcolor {FREE}"),
         ),
         (
             "a dkclip inside a bound wrapper (a workaround, notes/459)",
