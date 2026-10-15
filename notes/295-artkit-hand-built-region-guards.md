@@ -37,7 +37,7 @@ callers' inner loops (paintkit's `scin` calls, drycrayon), so an O(edges)
 check per call would multiply their cost; `scatter` validates once and then
 calls `siinside` directly, which is why scatter is fully covered. A
 hand-built path region with a procedure edge still runs through `scin`.
-Filed as a follow-up.
+Filed as #503.
 
 **Cost.** One pass over `/Edges` per `scatter` call (twice with `/Density`),
 against `Count * Tries` candidate tests that each walk the same edges.
