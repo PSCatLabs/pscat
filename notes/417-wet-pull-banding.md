@@ -40,13 +40,22 @@ cap is still 6). The default depth is untouched, still
 
 - Only a call that names `/Layers` above 16 sees anything, and those raised an
   error before: no committed file can depend on the old behaviour.
-- Every other render is byte-identical. `scripts/identity_check.sh` (default
-  pick and `--loader lib/paintkit.ps`) shows only the canvas specimen differing;
-  see the PR.
+- Every other render is byte-identical. `scripts/identity_check.sh` against a
+  detached merge-base tree, one binary, with a control that pulls with
+  `/Layers 24` inside `stopped` (it errors on base, draws on head; it differed):
+  the default pick (paintkit loaders) and `--loader lib/paintkit.ps` (which also
+  reaches drykit, drychalk, drycharcoal, drycrayon) each rendered 40 files in
+  both trees, 39 identical and one DIFFERS: `examples/paintkit_canvas_demo.ps`.
+  `gallery/alpine_lake.ps` and `gallery/evening_stream.ps` are identical, so the
+  open work on them (#446, #472) is not affected.
 
 The specimen asks for `/Layers 29` (1pt). It is the only call site changed.
 Both strokes of the panel move (the touched one too: more passes, so a longer
-graded tail). Nothing outside that panel changes.
+graded tail). The pixel diff of the page is confined to that panel (x 1068..1490,
+y 777..1071 at 2x). The base tree reproduced the committed PNG byte for byte
+first, with `--dpi 144 --page 780x640`.
+
+Renders regenerated: `docs/dev/design/paintkit_canvas_demo.png` only.
 
 ## Not done
 

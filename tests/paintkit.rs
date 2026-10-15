@@ -7252,7 +7252,10 @@ fn wet_directional_layers_cap_is_32_and_the_default_depth_is_unchanged() {
         .unwrap_or_else(|e| panic!("{opts}: {}", it.error_report(&e)));
         it.operand_stack().last().expect("n").repr().to_string()
     };
-    assert_eq!(passes("/Direction 270 /OneSided true /Offset 28 /Layers 29"), "29");
+    assert_eq!(
+        passes("/Direction 270 /OneSided true /Offset 28 /Layers 29"),
+        "29"
+    );
     assert_eq!(passes("/Direction 270 /Offset 28 /Layers 32"), "32");
     // the default is untouched: a 28pt one-sided pull is 15 deep, and no
     // /Offset takes it past 16
