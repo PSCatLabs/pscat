@@ -79,6 +79,9 @@ cell steps on show; creases are the only fine detail the render can carry.
 - Voronoi facets (flat or tilted per-site values, with a darker crease at the
   cell edges, soft-blended edges): straight-edged crumple facets, which read as
   a quilt of patches, with too much fine-scale energy (grain 0.0104).
+- Creases with round caps on every stroke: the 4.6pt underlay's cap painted over
+  the last 1.4pt of the previous segment's core and beaded it (found in review at
+  600 dpi); the underlay now has butt caps.
 - Laying the field in 1.5pt cells: smoother clouds but 4x the fills (about
   215,000 for a memo) and no visible gain in the wave. Not done.
 - 16pt squares with the new field: slightly angular edges at the stretch; 8pt
@@ -109,20 +112,27 @@ after, plain and contrast-stretched (0.80 to 1.00, blurred 2px), for the
 text corner (as `notes/474-grain-compare.png`) and a bare patch with a crease;
 `notes/528-memo-compare.png` is the gallery memo before and after, at half size.
 
-PNG sizes (bytes, before to after): specimen 1,467,775 to 1,497,959; its gs
-render 1,325,778 to 1,365,045; `gallery/renders/released_memo.png` 827,186 to
-845,695; `release_vs_real.png` 1,547,036 to 1,557,934; `memo_vs_real.png` 803,736
-to 810,112; `blind_grid.png` 160,682 to 160,968; the new
-`notes/528-wave-compare.png` is 303,782 and `notes/528-memo-compare.png` 485,465.
+PNG sizes (bytes, before to after): specimen 1,467,775 to 1,499,373; its gs
+render 1,325,778 to 1,365,776; `gallery/renders/released_memo.png` 827,186 to
+847,013; `release_vs_real.png` 1,547,036 to 1,558,382; `memo_vs_real.png` 803,736
+to 810,408; `blind_grid.png` 160,682 to 160,968; the new
+`notes/528-wave-compare.png` is 304,013 and `notes/528-memo-compare.png` 485,582.
+The memo's committed render is 144 dpi (`--dpi 144`, 1224 x 1584), though the
+header of `gallery/released_memo.ps` gives the command without it.
 
 ## Reading it
 
-At plain contrast the two copies are hard to tell apart, and T14's own creases
-are faint there too; the after sheet shows a few diagonal creases at 300 dpi.
-Under the stretch the grid of soft blocks is gone and the paper has the cloudy,
-creased look of T14, with less fine crumple than T14 has (above).
+At plain contrast on the 300 dpi crop the two copies are hard to tell apart,
+and T14's own creases are faint there. On the gallery memo at 144 dpi the
+creases are visible, as a dozen or more long, faint diagonal lines across the
+sheet: that is more than T14 shows at plain contrast, and `rlCrA` (the depth,
+0.045 at /Haze 0.6) and `rlCrD` (how many per 100,000 square points, 6) are the
+knobs if the maintainer finds them too strong; at `rlCrD 0` the wave is the
+noise alone. Under the stretch the grid of soft blocks is gone and the paper has
+the cloudy, creased look of T14, with less fine crumple than T14 has (above).
+No crease crosses the blind grid's strips A and D.
 
 ## Not done
 
 - The 1 to 2pt crumple of T14's paper (the band above): it needs a finer field
-  (1.5pt cells, 4x the fills) or a stroke-based fine texture; filed as a p3.
+  (1.5pt cells, 4x the fills) or a stroke-based fine texture; filed as #541 (p3).
