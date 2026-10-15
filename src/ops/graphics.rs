@@ -576,9 +576,9 @@ fn currentrgbcolor(it: &mut Interp) -> Result<(), PsError> {
     // currentrgbcolor` reads back `0.3 0.6 0.9` as gs prints it, not the
     // widened f32s.
     let (r, g, b) = it.gfx.rgb();
-    it.push(Object::real(f32_readback(r as f64)));
-    it.push(Object::real(f32_readback(g as f64)));
-    it.push(Object::real(f32_readback(b as f64)));
+    it.push(Object::real(f32_readback(r)));
+    it.push(Object::real(f32_readback(g)));
+    it.push(Object::real(f32_readback(b)));
     Ok(())
 }
 
