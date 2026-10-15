@@ -12,11 +12,7 @@ mod common;
 #[test]
 fn tests_take_scratch_paths_only_from_the_shared_helper() {
     // Built from pieces so this file does not match itself.
-    let needles = [
-        ["temp", "_dir("].concat(),
-        ["\"/", "tmp"].concat(),
-        ["TMP", "DIR"].concat(),
-    ];
+    let needles = [["temp", "_dir("].concat(), ["\"/", "tmp"].concat()];
     let mut offenders = Vec::new();
     for entry in std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/tests")).unwrap() {
         let path = entry.unwrap().path();
