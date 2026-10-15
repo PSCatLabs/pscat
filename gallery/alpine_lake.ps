@@ -387,7 +387,9 @@
 % between them show the mist, so the streaks run on through a bank,
 % fading in toward its core. Four steps of colour, not one, so the veil
 % has no edge. Parts 22 to 25 are not pulled into the lake: the reflected
-% band is blurred and mostly under the foreground bank.
+% band is blurred and mostly under the foreground bank, and pulling all
+% four moved under 400 pixels at 2x by a few levels (#508 tried it, even
+% replayed sharp), so the reflection still replays only part 21.
 /lkPLANEC [ lkFAR 0.84 shade ] def
 /lkghosts {
     [ lkPLANEC lkMC 0.3 mix3 ] { 9 lkghost } 2 lkdo
