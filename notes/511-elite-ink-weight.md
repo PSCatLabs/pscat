@@ -69,5 +69,7 @@ not in the repo.
 
 ## Not done
 
-- T10 (worn elite) is about 30% light by dark pixels, and pica about 13% light by
-  this measure: filed as a p3 issue.
+- T10 (worn elite) is about 30% light by dark pixels: filed as a p3 issue (#520).
+- Pica reads about 13% light by this measure (x0.87). #511's title says so too, but the
+  maintainer reads pica as about right and pica was to stay byte-identical, so it is
+  left. `tFaceK` makes a pica factor one more constant if it is wanted.
