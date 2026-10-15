@@ -581,10 +581,15 @@ adds the walk, the per-stop resolution and the ink to D1's bare catches,
 and its catches cost about 13 µs per cell in pscat. #307 bound the
 libraries, which brought pscat to 25.2s, inside the budget with 4.8s left
 for board dressing (D1 had left about 8s). See
-`notes/283-drykit-perf-remeasure.md`. #324 carries the drykit levers
-(chiefly a reach band cut per orientation), and #323 carries pscat's
+`notes/283-drykit-perf-remeasure.md`. #323 carries pscat's
 interpreter cost, which is now most of the gap to gs. #238 is the real
-piece.
+piece: about 6.5 s in pscat, and its largest catch is 7,167 cells, 5% of
+`dkbudget`. #324 left the drykit levers (chiefly a reach band cut per
+orientation) undone, since the board doesn't need them and renders must
+stay byte-identical. It closed the budget's correctness gaps instead. A
+chunk whose catch overflows is split and drawn again, and a stroke that
+no catch could hold is refused before anything is drawn
+(`notes/324-drykit-headroom.md`).
 
 Two things scale beyond that:
 
