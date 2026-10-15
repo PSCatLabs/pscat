@@ -51,8 +51,8 @@ clones, so a `clipsave` copies no mask).
 - **Type 3 `BuildChar`.** gs runs it inside a `gsave`, so a `cliprestore`
   in a glyph procedure with no entry there gives back the clip at `show`.
   pscat's glyph context is a snapshot, not a `gsave`, so it falls back to
-  the newest outer `gsave` instead. Nobody calls `cliprestore` in a glyph,
-  so this is not filed.
+  the newest outer `gsave` instead. Nobody calls `cliprestore` in a glyph:
+  filed as #500 (p3).
 - **`grestore` at a boundary still differs from gs**, as it did before this
   change. At the bottom of the stack pscat's `grestore` is a no-op, while
   gs's restores the job's initial state. At a `save` boundary pscat pops
