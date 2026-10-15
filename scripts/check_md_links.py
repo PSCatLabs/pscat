@@ -33,9 +33,7 @@ import sys
 from pathlib import PurePosixPath
 from urllib.parse import unquote
 
-REPO_URL = re.compile(
-    r"^https?://github\.com/jeromebanks/postscript_interpreter/(?:blob|tree)/main/?(.*)$"
-)
+from repo_url import match as repo_match  # the GitHub-URL rule, shared with check_site_links.py
 
 # GitHub's own `#L10` / `#L10-L20` line anchors on file views.
 LINE_ANCHOR = re.compile(r"^L\d+(?:C\d+)?(?:-L\d+(?:C\d+)?)?$")
@@ -108,9 +106,9 @@ def extract_links(text):
 
 def resolve(src, target):
     """Turn a link target into (repo_path or None, fragment). None = skip it."""
-    m = REPO_URL.match(target)
+    m = repo_match(target, ref="main")
     if m:
-        path, _, frag = m.group(1).partition("#")
+        path, _, frag = m[2].partition("#")
         return unquote(path.rstrip("/")), frag
     if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*:", target) or target.startswith("//"):
         return None, ""  # external: mailto:, https:, ...

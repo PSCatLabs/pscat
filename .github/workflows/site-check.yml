@@ -22,6 +22,7 @@ on:
       - "scripts/site_examples.py"
       - "scripts/check_learn_examples.mjs"
       - "scripts/check_site_links.py"
+      - "scripts/repo_url.py"
       - "scripts/gallery.py"
       - "scripts/test_gallery.py"
       - "scripts/test_site_scripts.py"
