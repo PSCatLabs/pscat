@@ -714,9 +714,9 @@
    "render": "gallery/renders/chalkboard_lecture.png",
    "page": "1440x850",
    "speed": 600,
-   "alt": "Lecture 14, a slate chalkboard after a lecture deriving Euler's formula from the Taylor series, with a boxed result, a unit-circle sketch and erased ghost writing",
-   "blurb": "A chalkboard as the professor left it: Euler's formula derived from the Taylor series, boxed in yellow.",
-   "technique": "Three sliding slate panels show the Taylor series recalled, then x = iθ substituted and regrouped into its real and imaginary parts, the result boxed twice in yellow chalk, and a freehand unit circle with Euler's identity circled. Side notes, arrows, underlines and the homework fill the corners. The formulas are `lib/mathkit.ps` layouts inked with `lib/drychalk.ps`'s `dcchalk`, on `dcboard` panels that still carry the last lecture (the Gaussian integral and a bell curve) as ghost writing under eraser swipes. The hand leans further and loosens panel by panel."
+   "alt": "Lecture 14, a slate chalkboard after a lecture deriving Euler's formula from the Taylor series, with braces naming the terms, a boxed result, a unit-circle sketch and erased ghost writing",
+   "blurb": "A chalkboard as the professor left it: Euler's formula derived step by step from the Taylor series, braced, starred and boxed in yellow.",
+   "technique": "Three sliding slate panels carry one derivation. The Taylor series are recalled with braces under the first terms naming the n each comes from, and the powers of i set in two columns with a rule mod 4. Then x = iθ is substituted, the = where the signs flip starred and answered in pink, and the series regrouped, a blue brace under each bracket naming it cos θ or sin θ, before the result is boxed twice in yellow. A freehand unit circle, the quarter turns tabled in wandering columns, and Euler's identity circled finish it. The formulas are `lib/mathkit.ps` layouts (`\\underbrace`, `\\overset`, `\\pmod`, aligned columns with `/ColumnWander`, and `mkbrace`) inked with `lib/drychalk.ps`'s `dcchalk`, on `dcboard` panels that still carry the last lecture (the Gaussian integral and a bell curve) as ghost writing under eraser swipes. The hand leans further and loosens panel by panel."
   },
   {
    "id": "crayon_drawing",
