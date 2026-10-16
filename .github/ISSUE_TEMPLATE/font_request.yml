@@ -1,0 +1,40 @@
+name: Font request
+description: Ask for a typeface to be added to the catalog
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Only fonts whose licence allows redistribution can go in. Fonts keep their upstream licence. Please check it before you file.
+  - type: input
+    id: name
+    attributes:
+      label: Font name and family
+    validations:
+      required: true
+  - type: input
+    id: source
+    attributes:
+      label: Where it comes from
+      description: A link to the project page or the repository the files are released from.
+    validations:
+      required: true
+  - type: input
+    id: licence
+    attributes:
+      label: Licence
+      description: For example OFL-1.1, Apache-2.0. A link to the licence text is better still.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why this font
+      description: What it covers that the catalog (`pscat --fonts`) does not, such as a script, a style, a weight or a language.
+    validations:
+      required: true
+  - type: input
+    id: format
+    attributes:
+      label: Format
+      description: TrueType (.ttf), OpenType (.otf) or a collection (.ttc), and whether it is a variable font.

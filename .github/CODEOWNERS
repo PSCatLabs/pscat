@@ -1,0 +1,34 @@
+# Paths that change what gets built, shipped or trusted. A PR that touches any
+# of them is merged by the owner, not by an agent (SDLC.md, `merge_policy.
+# owner_merge_file`; scripts/codeowners_check.py is the check the work-issue
+# skill runs). GitHub does not enforce that on its own: with 0 required
+# approvals and PRs opened under the owner's account, "require review from
+# Code Owners" would deadlock merging, so the rule lives in the skill and this
+# file only requests the owner's review.
+#
+# A line ending in `# forward: <issue>` names a path that issue will create.
+# The rule goes in first so the file is protected from its first commit.
+# `python3 scripts/codeowners_check.py --check-paths` fails on any other line
+# that matches no tracked file.
+
+# The rule itself: dropping a line here must not be a self-merge.
+/.github/CODEOWNERS         @jeromebanks
+
+# CI and release automation
+/.github/workflows/         @jeromebanks
+/scripts/package_release.sh @jeromebanks
+/scripts/release.sh         @jeromebanks   # forward: #602 (publishing pipeline)
+
+# Build and dependency manifests (build.rs runs arbitrary code at build time)
+/Cargo.toml                 @jeromebanks
+/Cargo.lock                 @jeromebanks
+/build.rs                   @jeromebanks
+/deny.toml                  @jeromebanks   # forward: #601 (cargo-deny)
+
+# Plugin manifests
+# A plugin's manifest sits in <plugin dir>/.claude-plugin/, so no leading slash.
+.claude-plugin/             @jeromebanks   # forward: #569 (Claude Code plugin)
+
+# Licences
+/LICENSE*                   @jeromebanks   # forward: #563 (licence files)
+/THIRD_PARTY_NOTICES.md     @jeromebanks   # forward: #563

@@ -75,8 +75,11 @@ MCP server with four tools. See the [agents guide](docs/guides/agents.md).
 
 ## Contributing
 
-Start with [`AGENTS.md`](AGENTS.md) for conventions and [`SDLC.md`](SDLC.md)
-for how changes land. [`docs/dev/HANDOFF.md`](docs/dev/HANDOFF.md) orients you in the code,
+Start with [`CONTRIBUTING.md`](CONTRIBUTING.md) (including how contributions are
+licensed), then [`AGENTS.md`](AGENTS.md) for conventions and [`SDLC.md`](SDLC.md)
+for how changes land. Report security problems as [`SECURITY.md`](SECURITY.md)
+describes, and see [`docs/STABILITY.md`](docs/STABILITY.md) for what stays
+stable between releases. [`docs/dev/HANDOFF.md`](docs/dev/HANDOFF.md) orients you in the code,
 [`docs/dev/ARCHITECTURE.md`](docs/dev/ARCHITECTURE.md) explains the design, and
 [`docs/dev/`](docs/dev/README.md) has the contributor notes, such as how to
 preview the website. [`docs/archive/`](docs/archive/README.md) holds the project's history, including

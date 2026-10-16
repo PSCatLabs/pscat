@@ -126,6 +126,16 @@ write `true` and let the user flip it in the frontmatter. This repo sets
 update-and-rerun cycle on nearly every PR; #257). The merge queue is the
 real fix and needs an org-owned repo.
 
+**`merge_policy.owner_merge_file`** (optional frontmatter field, a path such
+as `.github/CODEOWNERS`; absent means no owner-merge rule) is read, not
+asked. When set, `SDLC.md` carries the "Who merges" section: in **every**
+`merge_policy.mode`, an agent does not merge a PR that touches a path matched
+by that file; the owner does. The check is `scripts/codeowners_check.py`
+(the `work-issue` skill runs it at step 8.10). It is a rule for agents, not a
+GitHub setting: sdlcify never turns on `require_code_owner_reviews`, because
+that needs a required approval, and the next paragraph says why that bricks a
+single-identity repo. (Added in #603.)
+
 **Never set `required_approving_review_count` to anything but `0`
 without asking first.** A solo-maintainer repo where the agent opens
 PRs under the owner's own credentials cannot satisfy a ≥1-approval
@@ -192,6 +202,11 @@ diff — don't print anything yet, don't mutate anything yet.
   `rebaseMergeAllowed`/`deleteBranchOnMerge` and `description` (only
   flag description as a gap if it's empty; never overwrite a
   human-written one without asking).
+- **Owner-merge file**: if `merge_policy.owner_merge_file` is set, does that
+  file exist, and does `python3 scripts/codeowners_check.py --check-paths`
+  pass (every rule matches a tracked file or carries a `# forward:` comment)?
+  Report a gap; do not write the file, which is hand-authored, nor change any
+  GitHub setting for it.
 - **Execution skill**: does a `.claude/skills/<something>/SKILL.md`
   exist that looks like the issue→branch→PR loop (grep skill
   descriptions for "issue" + "branch" + "PR")? Record present/absent

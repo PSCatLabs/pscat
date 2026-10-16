@@ -23,6 +23,7 @@ merge_policy:
   sensitive_paths:
     - <path glob>
     - <path glob>
+  owner_merge_file: .github/CODEOWNERS   # optional, any mode: PRs touching a path it lists are owner-merged
 required_status_checks:
   - <ci job name>
 branch_protection:
@@ -77,6 +78,9 @@ it to GitHub.
      files), and touches none of `sensitive_paths`. Otherwise, falls
      back to a human — and the agent should say explicitly which
      condition it missed.
+   - **Owner-merge paths (any mode, when `merge_policy.owner_merge_file` is
+     set):** a PR that touches a path matched by that file is never merged by
+     an agent; it is treated as `human-only`. See "Who merges" below.
 10. **Post-merge cleanup**: delete the remote branch, remove the local
     worktree if one was used, confirm the issue auto-closed.
 
@@ -104,6 +108,31 @@ and add a `merge_group:` trigger to the CI workflow.
 <!-- When require_up_to_date is true (or absent), say instead: "A PR must
 be up to date with `<default_branch>` before it merges (`strict` status
 checks)." -->
+
+<!-- Include this section only when merge_policy.owner_merge_file is set. -->
+## Who merges
+
+Whatever `merge_policy.mode` says, **agents don't self-merge PRs that touch
+`<owner_merge_file>` paths; the owner merges those.** The file lists the paths
+that change what gets built, shipped or trusted (CI workflows, dependency
+manifests, release scripts, licence files, plugin manifests, and the file
+itself). The agent finds out whether a PR touches one by running
+`python3 scripts/codeowners_check.py --base origin/<default_branch>`
+(exit status 1, and the matching paths on stdout, means it does); the check
+reads the file as it is on `<default_branch>` and in the PR, so a PR cannot
+exempt itself by deleting its own line. The agent still opens the PR, runs
+the independent review and waits for CI, then stops and reports the PR as
+awaiting the owner's merge.
+The rule in force is the one on `<default_branch>`: the agent reads `merge_policy.owner_merge_file`
+from `SDLC.md` as it is on `<default_branch>`, so a PR that removes the field is still
+owner-merged, and the PR that first adds the field is judged by the policy before it.
+
+This is enforced by the agent's skill, **not by GitHub**. Turning on "Require
+review from Code Owners" would need at least one required approval, which a
+repo whose agents open PRs under the owner's own account cannot satisfy (see
+the `required_approving_review_count` pitfall in the `sdlcify` skill), so
+`required_pull_request_reviews.require_code_owner_reviews` stays `false` and
+CODEOWNERS only requests the owner's review.
 
 ## Labels
 

@@ -615,6 +615,13 @@ renders eight examples in both and compares block-downsampled output).
   temp name makes two parallel `cargo test` runs clobber each other;
   `tests/scratch_paths.rs` enforces it.
 
+- **`SECURITY.md` states what untrusted PostScript and `pscat-mcp` can do
+  today, and was checked against the code** (#603). A change that adds or
+  removes a file, process, network or MCP capability, or a resource limit,
+  must update it in the same PR; the limits it lists as missing are the work of
+  #568 and #604. `docs/STABILITY.md` says which surfaces need a deprecation
+  period. `.github/CODEOWNERS` paths are owner-merged (`SDLC.md`, "Who merges").
+
 - **gs is the oracle.** Every semantics question in Stages 5–7 was
   settled by running the snippet in gs first and pinning the answer in
   a test comment. Keep doing that; it caught real design errors twice
