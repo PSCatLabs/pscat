@@ -49,6 +49,12 @@ class Matching(unittest.TestCase):
     def test_last_match_wins_and_ownerless_rule_unowns(self):
         self.assertFalse(c.owned(RULES, "docs/secret/public.md"))
 
+    def test_unanchored_directory_matches_at_any_depth(self):
+        r = c.parse(".claude-plugin/ @o")
+        self.assertTrue(c.owned(r, ".claude-plugin/plugin.json"))
+        self.assertTrue(c.owned(r, "plugins/pscat/.claude-plugin/plugin.json"))
+        self.assertFalse(c.owned(r, "plugins/pscat/claude-plugin/plugin.json"))
+
     def test_double_star(self):
         r = c.parse("/a/**/z.txt @o")
         self.assertTrue(c.owned(r, "a/z.txt"))

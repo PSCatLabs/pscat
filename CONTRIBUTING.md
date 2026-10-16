@@ -15,15 +15,21 @@ licenses the same kind of thing:
 
 | You contribute | Licence |
 |---|---|
-| Code: Rust, scripts, PostScript libraries (`lib/`), tests, build and CI files | **MIT OR Apache-2.0**, at the user's choice |
-| Original creative resources: gallery pieces (images and the `.ps` programs that draw them), examples, site assets, art you made for the project | **CC0-1.0** (public-domain dedication) |
-| Fonts | They **keep their upstream licence**; the font's own licence file travels with it |
-| Documentation | The same as code, unless it is an original creative piece (then CC0-1.0) |
+| Code: Rust, scripts, the PostScript libraries (`lib/*.ps`), tests, build and CI files, and documentation | **MIT OR Apache-2.0**, at the user's choice |
+| Original creative resources: gallery pieces (the images **and** the original `.ps` art programs that draw them), example and site assets | **CC0-1.0** (public-domain dedication) |
+| Fonts, and anything derived from a font | They **keep their upstream licence** (for example OFL-1.1); the licence file travels with them |
 
 By opening a pull request you state that you wrote the contribution (or have the
 right to submit it) and that you license it as in the table. There is no
 separate contributor agreement and no copyright assignment: you keep your
 copyright.
+
+CC0 covers only rights **you** hold. It does not relicense the `lib/*.ps`
+libraries that a gallery program calls (calling them is fine), and it does not
+cover copied library code, third-party reference images or photos, or fonts.
+If a piece uses any of those, say so in the PR so it can be listed as an
+exception with its own terms. No rights in the project's name or logo are
+granted.
 
 Please do not submit:
 

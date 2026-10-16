@@ -325,5 +325,9 @@ wants agents to merge. The rule is therefore a modifier on any mode:
 `scripts/codeowners_check.py`, which reads that file from `origin/main` and from
 the PR so a PR cannot delete its own protection. It is enforced here, not by
 GitHub: "Require review from Code Owners" needs a required approval, and a
-single-identity repo cannot give one (the sdlcify skill's pitfall). Exit status
+single-identity repo cannot give one (the sdlcify skill's pitfall). The field is read from
+`origin/main:SDLC.md`, the policy in force, for the same reason: `SDLC.md` is not
+itself an owner path, and a PR that deleted the field would otherwise switch the
+check off. (A consequence: the PR that introduces the rule is judged by the
+policy before it, so it merges under `agent-full`.) Exit status
 2 stops the run instead of merging, so a broken checker cannot read as "clear".

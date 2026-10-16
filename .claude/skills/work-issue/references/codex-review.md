@@ -247,7 +247,8 @@ raises, commit and push before any re-review, before continuing.
 With the review clean (nothing left unfixed without a stated reason,
 via whichever path ran), decide merge eligibility from the policy. Before the
 mode, apply the owner-merge rule (#603): when `merge_policy.owner_merge_file` is
-set, `python3 scripts/codeowners_check.py --base origin/main` run in the worktree
+set in `SDLC.md` as it is on `origin/main` (`git show origin/main:SDLC.md`, not
+the PR's copy, so a PR cannot drop the field), `python3 scripts/codeowners_check.py --base origin/main` run in the worktree
 exiting 1 (it prints the paths) makes this PR `human-only` in every mode, and
 the report says `awaiting owner merge` and names the paths. Exit 2 is an error:
 stop, never merge. Then:

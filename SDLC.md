@@ -99,6 +99,9 @@ matching paths on stdout, means it does); the check reads the file as it is on
 `main` and in the PR, so a PR cannot exempt itself by deleting its own line.
 The agent still opens the PR, runs the independent review and waits for CI,
 then stops and reports the PR as awaiting the owner's merge.
+The rule in force is the one on `main`: the agent reads `merge_policy.owner_merge_file` from
+`SDLC.md` as it is on `main`, so a PR that removes the field is still owner-merged, and the PR
+that first adds the field is judged by the policy before it.
 
 This is enforced by the agent's skill, **not by GitHub**. Turning on "Require
 review from Code Owners" would need at least one required approval, which a

@@ -4,8 +4,11 @@ pscat runs PostScript, which is a programming language. A `.ps` file is a
 program, and running one is running code, even though pscat is built so that
 the code cannot do much outside its own page. This file says what that
 program can and cannot do **today**, where pscat has no limit yet, and how to
-report a problem. Every claim below was checked against the code and by running
-a build; the "Checked with" notes name how.
+report a problem. Every claim was checked against the code, and the "Checked
+with" notes name how. The undefined and refused operators, the file reads, the
+resource-limit figures and the MCP behaviours below were also reproduced by
+running a build (a `ci`-profile build, October 2026); they are measurements,
+not guarantees.
 
 ## Reporting a vulnerability
 
@@ -100,8 +103,9 @@ profile build of this commit).
   exists.
 - The interpreter has no network code of its own, and no PostScript operator
   opens a connection. (The live window talks to the windowing system through
-  `winit`, as any GUI does.) The only `Command::new` calls in this repo are in
-  `src/bin/pscat_mcp.rs`.
+  `winit`, as any GUI does.) Of the shipped binaries, only `pscat-mcp`
+  (`src/bin/pscat_mcp.rs`) starts other programs. The other `Command::new` calls
+  in the repository are in benchmarks and tests.
 - Font names are matched against the font catalog's file *stems*
   (`src/font.rs`, `catalog_fid`); a name from a program is never joined into a
   path.
@@ -198,9 +202,12 @@ environment and working directory as the server. Checked with:
   receive the contents.
 - **A runaway program blocks the server.** The server handles one request at a
   time, waits for the child with no timeout, and buffers all of the child's
-  output in memory. One `{ } loop` hangs every later call until the server is
-  killed, and `{ (x) print } loop` fills the server's memory. The server has no
-  cancellation either.
+  output in memory. Measured: after an `eval_postscript` of `{ } loop`, a
+  following `ping` got no reply until the child process was killed by hand. A
+  program that prints in a loop (`{ (x...) print } loop`) writes about 45 MB a
+  second, all of it held by the server, whose address space grew by about 700 MB
+  in 6 seconds (its resident size under-reports on macOS, which compresses
+  repetitive text). The server has no cancellation either.
 - **Page size is bounded** because the server passes `width` and `height` to the
   CLI, which refuses anything over 8000 (it exits with its usage text, and the
   server reports "no output produced").
@@ -210,7 +217,14 @@ environment and working directory as the server. Checked with:
   future version narrows what those tools may do. `text` that begins with `-`
   is read as an option by the script and fails instead of rendering.
 - `handwrite` needs the repository's `scripts/` directory next to the server
-  (`PSCAT_ROOT` overrides where, and is trusted without checks).
+  (`PSCAT_ROOT` overrides where, and is trusted without checks). The script
+  then runs the first `pscat` it finds in this order: `pscat` in that
+  directory, `target/release/pscat` there, **the first `pscat` on `PATH`**, and
+  if none is found it runs **`cargo build --release`** in that directory. So
+  `handwrite` can run a different binary from the one the server runs for the
+  other tools, and can start a build (which runs `build.rs`). When the
+  server's own `pscat` and the repository are the same install, that is
+  harmless; it matters if `PATH` or `PSCAT_ROOT` is not under your control.
 - The server speaks only over stdin and stdout. It opens no port.
 
 If you register `pscat-mcp` with an agent, assume the agent can write any file

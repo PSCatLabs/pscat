@@ -203,8 +203,9 @@ Read `.claude/skills/work-issue/references/codex-review.md` now (full policy). T
 8. Post the round on the issue (`## Codex review, round <R>` template in codex-review.md).
 9. If you fixed anything: commit, `git push` (no force), re-run the gate (5.5), go back to 4
    with R+1. Exception for a doc-only merge/rebase: pitfalls.md "Rebase and merge rules".
-10. Merge eligibility, from `merge_policy.mode`. First, if `merge_policy.owner_merge_file` is set (#603),
-    run `python3 scripts/codeowners_check.py --base origin/main` in `$WORKTREE_DIR` (after the fetch):
+10. Merge eligibility, from `merge_policy.mode`. First, if `merge_policy.owner_merge_file` is set in `SDLC.md` **as it is on `origin/main`**
+    (`git show origin/main:SDLC.md`; the policy in force, not the PR's copy, so a PR cannot drop the field to exempt
+    itself; #603), run `python3 scripts/codeowners_check.py --base origin/main` in `$WORKTREE_DIR` (after the fetch):
     exit 1 (it prints the matching paths) means the PR touches an owner path, so treat it as `human-only`
     whatever the mode. Say which paths in the PR and issue comments, and report `awaiting owner merge`.
     Exit 2 is an error: stop and report, never merge on it.

@@ -26,7 +26,8 @@
 /deny.toml                  @jeromebanks   # forward: #601 (cargo-deny)
 
 # Plugin manifests
-/.claude-plugin/            @jeromebanks   # forward: #569 (Claude Code plugin)
+# A plugin's manifest sits in <plugin dir>/.claude-plugin/, so no leading slash.
+.claude-plugin/             @jeromebanks   # forward: #569 (Claude Code plugin)
 
 # Licences
 /LICENSE*                   @jeromebanks   # forward: #563 (licence files)
