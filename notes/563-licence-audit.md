@@ -13,8 +13,8 @@ accounted for. The decisions come from the "Resolved spec" at the top of
   CC0 boundary, exceptions, the provenance of the encoding tables, and all 51
   font catalog families with licence and copyright.
 - `licenses/assets.json`, the machine-readable form: ordered path globs, and
-  the first match wins. A throwaway check matched all 1009 tracked files
-  against it. Every entry is used, and every image or font that falls to the
+  the first match wins. A throwaway check matched all 1018 tracked files
+  against it. Every entry is used. Every image or font that falls to the
   code licence was looked at (pscat renders, `gs` renders, synthetic test
   JPEGs, the owner's shirt photo in `docs/archive/fonts/`). #601 owns turning
   that into CI.
@@ -30,9 +30,10 @@ accounted for. The decisions come from the "Resolved spec" at the top of
     build;
   - tests and benches are dropped from the packaged manifest, with a warning,
     as usual for an allowlist.
-- `fonts/catalog/URW-symbols/`: the mirror's `LICENSE.md` and `LICENSE.OFL`,
-  plus `PROVENANCE.md`. The original `LICENSE`/`COPYING` (AGPL) stay as
-  historical files. Neither font changed.
+- `fonts/catalog/URW-symbols/`: the mirror's `LICENSE.md`, `LICENSE.OFL` and
+  `LICENSE.LPPL` (so the statement's links resolve), plus `PROVENANCE.md`.
+  The original `LICENSE`/`COPYING` (AGPL) stay as the other options of the
+  triple licence. Neither font changed.
 - A Licence section in the README, and the stale "AGPL" and "dumped from
   Ghostscript" wording corrected in `fonts/catalog/README.md`,
   `docs/dev/FONTS.md`, `docs/guides/fonts.md` and the comment in

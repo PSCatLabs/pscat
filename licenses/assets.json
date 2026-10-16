@@ -50,7 +50,8 @@
       ],
       "license_files": [
         "fonts/catalog/URW-symbols/LICENSE.OFL",
-        "fonts/catalog/URW-symbols/LICENSE.md"
+        "fonts/catalog/URW-symbols/LICENSE.md",
+        "fonts/catalog/URW-symbols/PROVENANCE.md"
       ],
       "notes": "OFL-1.1 elected from URW++'s 2017 AGPL-3.0/LPPL-1.3c/OFL-1.1 triple licence; see fonts/catalog/URW-symbols/PROVENANCE.md."
     },

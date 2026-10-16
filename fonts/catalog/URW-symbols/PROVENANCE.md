@@ -56,10 +56,11 @@ files. No glyph, metric or encoding changed, and nothing renders differently.
 | `LICENSE.md` | The mirror's licence statement, as of its `main` branch (2026-10-16). |
 | `LICENSE` | The AGPL font-exception notice from the Artifex distribution, as originally shipped here. |
 | `COPYING` | The AGPL-3.0 text from the same distribution. |
+| `LICENSE.LPPL` | The LPPL-1.3c text, from the mirror, so that `LICENSE.md`'s links resolve. |
 
-`LICENSE` and `COPYING` are kept as the original files. They are not the terms
-pscat applies, and pscat ships no AGPL font pack. The LPPL text is not
-included, because we don't take that option.
+`LICENSE`, `COPYING` and `LICENSE.LPPL` are the other two options of the
+triple licence, kept so the record is complete. They are not the terms pscat
+applies, and pscat ships no AGPL font pack.
 
 **The wording changed over time.** The 2017 `LICENSE.md` (commit
 `a8265008`) read:
