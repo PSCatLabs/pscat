@@ -1,0 +1,158 @@
+# Third-party notices and licence inventory
+
+pscat's own code is dual-licensed **MIT OR Apache-2.0**, at your option
+([`LICENSE-MIT`](LICENSE-MIT), [`LICENSE-APACHE`](LICENSE-APACHE)). Some files
+in this repository are under other terms, and this page lists them all. The
+machine-readable form, one entry per path pattern, is
+[`licenses/assets.json`](licenses/assets.json). The first entry that matches a
+path applies to it, and every tracked file matches one.
+
+The licence expression in `Cargo.toml`, `(MIT OR Apache-2.0) AND OFL-1.1`,
+describes the **core package** (the crate, and later the npm package and the
+binaries). The OFL-1.1 term covers only the font data compiled into it. Font
+packs and assembled binary bundles carry per-file and per-dependency notices of
+their own: the font packs are tracked in #599, and `cargo-about` dependency
+notices in #602.
+
+## Components
+
+| Component | Paths | Licence | Copyright | Ships in |
+|---|---|---|---|---|
+| pscat code: Rust, `lib/*.ps` libraries (all but one file), scripts, tests, docs, the website's HTML/CSS/JS | everything not listed below | MIT OR Apache-2.0 | Jerome Banks and the pscat contributors | crate, npm, binaries, site |
+| Liberation Fonts 2.1.5, embedded by `include_bytes!` in `src/font.rs` | `fonts/Liberation*.ttf` | OFL-1.1 | Digitized data copyright (c) 2010 Google Corporation, with Reserved Font Arimo, Tinos and Cousine; copyright (c) 2012 Red Hat, Inc., with Reserved Font Name Liberation | crate, npm, binaries ([`fonts/LICENSE`](fonts/LICENSE), [`LICENSE-OFL`](LICENSE-OFL)) |
+| Typewriter outlines, generated from Courier Prime by `scripts/gen_typewriter_outlines.py` | `lib/typewriter_outlines.ps` | OFL-1.1 (Courier Prime has no Reserved Font Name) | Copyright 2015 The Courier Prime Project Authors | crate, npm, binaries ([`LICENSE-OFL`](LICENSE-OFL)) |
+| Symbol and Dingbats encoding tables | `src/encodings.rs` | factual glyph-name lists (see below) | none claimed | crate, npm, binaries |
+| Runtime font catalog | `fonts/catalog/*/` | each family's upstream licence, verbatim (table below) | each upstream | font pack only |
+| Original creative work: gallery and example programs and their renders, site tutorial programs, font specimen sheets | `gallery/*.ps`, `gallery/renders/`, `examples/`, `site/learn/*.ps`, `site/learn/*.out`, `fonts/catalog/specimen-*.png` | CC0-1.0 ([`LICENSE-CC0`](LICENSE-CC0)), except as listed under "Exceptions" | dedicated to the public domain by Jerome Banks and the pscat contributors | site |
+| Rust dependencies | `Cargo.lock` | their own licences | their authors | binaries (notices via `cargo-about`, #602) |
+
+### The CC0 boundary
+
+CC0 covers only rights the project holds. It does not relicense the `lib/*.ps`
+libraries that the gallery and example programs call: calling a library is
+fine, and the library stays MIT OR Apache-2.0. It does not cover the fonts a
+program renders with, third-party reference images, or copied library code (see
+"Exceptions"). It grants no trademark rights in the pscat name or logo.
+
+Code that lives in those directories but is not creative work is under the
+code licence: `gallery/manifest.json`, `gallery/show.sh`, `gallery/README.md`,
+and the site's `*.html`, `*.css`, `*.js` and `_partials/`.
+
+## Exceptions
+
+Files inside the CC0 directories, or under `docs/`, that are not covered by
+the default terms:
+
+| Path | Terms | Why |
+|---|---|---|
+| `gallery/hortus.ps`, `gallery/infinite_descent.ps`, `gallery/ripple_range.ps`, `gallery/woven_labyrinth.ps` | CC0-1.0, except the inlined "toolkit subset" section, which is MIT OR Apache-2.0 | Each carries a copy of procedures from `lib/artkit.ps` or `lib/graph.ps` so it runs on its own. |
+| `examples/dataviz.ps`, `examples/graphing.ps` | CC0-1.0, except the inlined `showctr` helper, which is MIT OR Apache-2.0 | A copied one-line library helper. |
+| `gallery/references/lincoln_berger_1864.jpg` | public domain | Anthony Berger's 1864 photograph of Lincoln (Library of Congress, via Wikimedia Commons). See `notes/242-lincoln-charcoal.md`. |
+| `gallery/references/mochi.jpg` | **no licence granted yet** | The reference photograph for *Mochi in Denim Blue*. It was supplied by the owner, but who took it is not recorded, so it is held back from CC0 until the owner confirms (#606). The painting made from it, `gallery/mochi_denim_blue.ps` and its render, is original work under CC0, but if the photo turns out not to be the owner's, those need a second look too. |
+| `art/` | **no licence granted yet** | The Keepin' It Real shirt print artwork, a recreation of the owner's own design. It is not one of the CC0 directories, and the owner has not chosen its terms (#606). Its source programs (`examples/keepin_it_real_shirt*.ps`, `gallery/keepin_it_real.ps`) are in the CC0 scope. |
+| `docs/dev/design/drymedia/refs/*` | each crop's source licence: CC BY 2.0, CC BY 2.5, CC BY 4.0, CC BY-SA 3.0, CC BY-SA 4.0, CC0 or public domain | Wikimedia Commons crops. The source, author and licence of every crop are in [`docs/dev/design/drymedia/REFERENCES.md`](docs/dev/design/drymedia/REFERENCES.md). |
+| `docs/dev/design/drymedia/chalk_compare_235.jpg`, `lecture_compare_238.png`, `drycharcoal_refs_compare.png` | CC BY-SA 4.0 | Comparison panels that contain CC BY-SA crops. Attributions are in the same REFERENCES.md. |
+| `docs/dev/design/drymedia/prototypes/chalk_compare.jpg`, `crayon_compare_figure.png` | CC BY-SA 3.0 | As above. |
+| `docs/dev/design/drymedia/crayon_compare.png`, `crayon_drawing_compare.jpg` | CC0-1.0 | Panels built only from CC0 crops and pscat renders. |
+| `docs/dev/design/drymedia/lincoln_compare.png`, `mottle_compare_313.png` | public domain | Panels built only from public-domain sources and pscat renders. |
+| `docs/dev/design/typewriter/refs/*`, `reference_board.jpg`, `*_vs_real.png` | public domain | Crops of US federal records and a 1945 petition published without a notice. Sources are in [`docs/dev/design/typewriter/REFERENCES.md`](docs/dev/design/typewriter/REFERENCES.md). Other comparison images under `docs/` and `notes/` that show crops of these scans include public-domain material. |
+
+None of the exceptions ship in the crate, npm package or binaries. The site
+shows the gallery's reference photographs beside the pieces made from them.
+
+## Symbol and Dingbats encoding tables
+
+`src/encodings.rs` holds the 256-entry SymbolEncoding and DingbatsEncoding
+arrays that the URW Symbol and Dingbats faces use. They were first dumped from
+Ghostscript's tables (Ghostscript is pscat's correctness oracle). For #563 they
+were checked against documented sources:
+
+- **SymbolEncoding** matches the PostScript Language Reference, third edition,
+  Appendix E.12 ("Symbol Character Set", every glyph name with its octal code)
+  and E.13 code for code: all 189 encoded names agree, and every other code is
+  `.notdef`. The PLRM is the authoritative source.
+- **DingbatsEncoding**: the PLRM's third edition has no Dingbats table.
+  The 188 codes encoded here match Adobe's ZapfDingbats encoding (Adobe's
+  `zdingbat.txt`, published by the Unicode Consortium under
+  `Public/MAPPINGS/VENDORS/ADOBE/`) code for code. Adobe's table also encodes
+  14 codes that are `.notdef` here and in Ghostscript 10.07: `\200`–`\215`
+  (`a89 a90 a93 a94 a91 a92 a205 a85 a206 a86 a87 a88 a95 a96`). Whether to add
+  them is #605.
+
+Both tables are factual lists of glyph names, and no copyright is claimed in
+them.
+
+## Font catalog
+
+These families load from disk at run time and are not compiled into pscat.
+Each directory keeps its upstream licence file, verbatim. They will ship as a
+separately versioned font pack (#599, #564), never inside the core package.
+The OFL-1.1 families may carry Reserved Font Names (listed in their notices),
+which a modified version must not use.
+
+| Directory | Licence | Copyright | Licence file |
+|---|---|---|---|
+| `URW-symbols` | OFL-1.1 | Copyright 2013,2014,2015 by (URW)++ Design & Development | `LICENSE.OFL`, `LICENSE.md` |
+| `AbrilFatface` | OFL-1.1 | Copyright (c) 2011, TypeTogether (www.type-together.com) | `OFL.txt` |
+| `AlfaSlabOne` | OFL-1.1 | Copyright 2016 The Alfa Slab One Project Authors (http://www.jmsole.cl / info@jmsole.cl), with Reserved Font Name "Alfa Slab". | `OFL.txt` |
+| `Anton` | OFL-1.1 | Copyright 2020 The Anton Project Authors (https://github.com/googlefonts/AntonFont.git) | `OFL.txt` |
+| `AtkinsonHyperlegible` | OFL-1.1 | Copyright 2020 Braille Institute of America, Inc. | `OFL.txt` |
+| `Audiowide` | OFL-1.1 | Copyright (c) 2012, Brian J. Bonislawsky DBA Astigmatic (AOETI) (astigma@astigmatic.com), with Reserved Font Names "Audiowide" | `OFL.txt` |
+| `BagelFatOne` | OFL-1.1 | Copyright 2022 The Bagel Fat Project Authors (https://github.com/JAMO-TYPEFACE/BagelFat) | `OFL.txt` |
+| `Bangers` | OFL-1.1 | Copyright 2010 The Bangers Project Authors (https://github.com/googlefonts/bangers) | `OFL.txt` |
+| `BebasNeue` | OFL-1.1 | Copyright © 2010 by Dharma Type. | `OFL.txt` |
+| `Bungee` | OFL-1.1 | Copyright 2023 The Bungee Project Authors (https://github.com/djrrb/Bungee) | `OFL.txt` |
+| `Caveat` | OFL-1.1 | Copyright 2014 The Caveat Project Authors (https://github.com/googlefonts/caveat) | `OFL.txt` |
+| `Chewy` | Apache-2.0 | Copyright (c) 2010 by Font Diner, Inc DBA Sideshow. All rights reserved. | `LICENSE.txt` |
+| `Cinzel` | OFL-1.1 | Copyright 2020 The Cinzel Project Authors (https://github.com/NDISCOVER/Cinzel) | `OFL.txt` |
+| `ComicNeue` | OFL-1.1 | Copyright 2014 The Comic Neue Project Authors (https://github.com/crozynski/comicneue) | `OFL.txt` |
+| `CourierPrime` | OFL-1.1 | Copyright 2015 The Courier Prime Project Authors (https://github.com/quoteunquoteapps/CourierPrime). | `OFL.txt` |
+| `Creepster` | OFL-1.1 | Copyright (c) 2011, Font Diner, Inc (diner@fontdiner.com) | `OFL.txt` |
+| `EBGaramond` | OFL-1.1 | Copyright 2017 The EB Garamond Project Authors (https://github.com/octaviopardo/EBGaramond12) | `OFL.txt` |
+| `Graduate` | OFL-1.1 | Copyright 2012 The Graduate Project Authors (https://github.com/etunni/graduate) with Reserved Font Name "Graduate" | `OFL.txt` |
+| `GreatVibes` | OFL-1.1 | Copyright 2015 The Great Vibes Pro Project Authors (https://github.com/googlefonts/great-vibes) | `OFL.txt` |
+| `HomemadeApple` | Apache-2.0 | Copyright (c) 2010 by Font Diner, Inc. All rights reserved. | `LICENSE.txt` |
+| `JetBrainsMono` | OFL-1.1 | Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono) | `OFL.txt` |
+| `Jost` | OFL-1.1 | Copyright 2020 The Jost Project Authors (https://github.com/indestructible-type) | `OFL.txt` |
+| `LibreBaskerville` | OFL-1.1 | Copyright 2012 The Libre Baskerville Project Authors (https://github.com/impallari/Libre-Baskerville) with Reserved Font Name Libre Baskerville. | `OFL.txt` |
+| `Limelight` | OFL-1.1 | Copyright (c) 2011 by Sorkin Type Co (www.sorkintype.com) | `OFL.txt` |
+| `Lora` | OFL-1.1 | Copyright 2011 The Lora Project Authors (https://github.com/cyrealtype/Lora-Cyrillic), with Reserved Font Name "Lora". | `OFL.txt` |
+| `MedievalSharp` | OFL-1.1 | Copyright (c) 2011, wmk69 (wmk69@o2.pl) | `OFL.txt` |
+| `Monoton` | OFL-1.1 | Copyright (c) 2011 by vernon adams (vern@newtypography.co.uk) | `OFL.txt` |
+| `NanumBrushScript` | OFL-1.1 | Copyright (c) 2010, NHN Corporation (http://www.nhncorp.com) | `OFL.txt` |
+| `NotoSansJP` | OFL-1.1 | Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source' | `OFL.txt` |
+| `NotoSansKR` | OFL-1.1 | Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source' | `OFL.txt` |
+| `NotoSansThai` | OFL-1.1 | Copyright 2022 The Noto Project Authors (https://github.com/notofonts/thai) | `OFL.txt` |
+| `Orbitron` | OFL-1.1 | Copyright 2018 The Orbitron Project Authors (https://github.com/theleagueof/orbitron), with Reserved Font Name: "Orbitron" | `OFL.txt` |
+| `Oswald` | OFL-1.1 | Copyright 2016 The Oswald Project Authors (https://github.com/googlefonts/OswaldFont) | `OFL.txt` |
+| `Pacifico` | OFL-1.1 | Copyright 2018 The Pacifico Project Authors (https://github.com/googlefonts/Pacifico) | `OFL.txt` |
+| `PermanentMarker` | Apache-2.0 | Copyright (c) 2010 by Font Diner, Inc. All rights reserved. | `LICENSE.txt` |
+| `PirataOne` | OFL-1.1 | Copyright (c) 2012, Rodrigo Fuenzalida, Nicolas Massi (www.taip.com.ar / abc.taip.com.ar), with Reserved Font Name 'Pirata' | `OFL.txt` |
+| `PlayfairDisplay` | OFL-1.1 | Copyright 2017 The Playfair Display Project Authors (https://github.com/clauseggers/Playfair-Display), with Reserved Font Name "Playfair Display" | `OFL.txt` |
+| `Poppins` | OFL-1.1 | Copyright 2020 The Poppins Project Authors (https://github.com/itfoundry/Poppins) | `OFL.txt` |
+| `PressStart2P` | OFL-1.1 | Copyright 2012 The Press Start 2P Project Authors (cody@zone38.net), with Reserved Font Name "Press Start 2P". | `OFL.txt` |
+| `Rye` | OFL-1.1 | Copyright (c) 2011 by Sorkin Type Co (www.sorkintype.com) | `OFL.txt` |
+| `SpecialElite` | Apache-2.0 | Copyright (c) 2010 by Brian J. Bonislawsky DBA Astigmatic (AOETI). All rights reserved. Available under the Apache 2.0 licence.
+http://www.apache.org/licenses/LICENSE-2.0.html | `LICENSE.txt` |
+| `StardosStencil` | OFL-1.1 | Copyright (c) 2011 by vernon adams (vern@newtypography.co.uk) | `OFL.txt` |
+| `TeXGyre-adventor` | LPPL-1.3c | Copyright 2007-2018 for TeX Gyre extensions by B. Jackowski, J.M. Nowacki, et al. (on behalf of TeX USERS GROUPS). Vietnamese characters were added by Han The Thanh. | `GUST-FONT-LICENSE.txt` |
+| `TeXGyre-bonum` | LPPL-1.3c | Copyright 2006, 2009 for TeX Gyre extensions by B. Jackowski and J.M. Nowacki (on behalf of TeX users groups). This work is released under the GUST Font License --  see http://tug.org/fonts/licenses/GUST-FONT-LICENSE.txt for details. | `GUST-FONT-LICENSE.txt` |
+| `TeXGyre-chorus` | LPPL-1.3c | Copyright 2006, 2009 for TeX Gyre extensions by B. Jackowski and J.M. Nowacki (on behalf of TeX users groups). This work is released under the GUST Font License --  see http://tug.org/fonts/licenses/GUST-FONT-LICENSE.txt for details. | `GUST-FONT-LICENSE.txt` |
+| `TeXGyre-heroscn` | LPPL-1.3c | Copyright 2006, 2009 for TeX Gyre extensions by B. Jackowski and J.M. Nowacki (on behalf of TeX users groups). This work is released under the GUST Font License --  see http://tug.org/fonts/licenses/GUST-FONT-LICENSE.txt for details. | `GUST-FONT-LICENSE.txt` |
+| `TeXGyre-pagella` | LPPL-1.3c | Copyright 2006-2018 for TeX Gyre extensions by B. Jackowski, J.M. Nowacki, et al. (on behalf of TeX USERS GROUPS). Vietnamese characters were added by Han The Thanh. | `GUST-FONT-LICENSE.txt` |
+| `TeXGyre-schola` | LPPL-1.3c | Copyright 2006, 2009 for TeX Gyre extensions by B. Jackowski and J.M. Nowacki (on behalf of TeX users groups). This work is released under the GUST Font License --  see http://tug.org/fonts/licenses/GUST-FONT-LICENSE.txt for details. | `GUST-FONT-LICENSE.txt` |
+| `UnifrakturMaguntia` | OFL-1.1 | Copyright (c) 2010, j. 'mach' wust, with Reserved Font Name UnifrakturMaguntia. | `OFL.txt` |
+| `VT323` | OFL-1.1 | Copyright 2011, The VT323 Project Authors (peter.hull@oikoi.com) | `OFL.txt` |
+| `ZillaSlab` | OFL-1.1 | Copyright 2017, The Mozilla Foundation | `OFL.txt` |
+
+`LPPL-1.3c` is the GUST Font License that TeX Gyre ships under. It is the
+LaTeX Project Public License 1.3c with a request, not a legal requirement,
+that derived works be renamed. The copy in each directory is the 2006
+preliminary text that came with the fonts.
+
+**URW Standard Symbols PS and D050000L** (the `Symbol` and `ZapfDingbats`
+names). URW++ released the Core 35 fonts under a choice of AGPL-3.0 (with a
+font-embedding exception), LPPL-1.3c or OFL-1.1. pscat takes them under
+**OFL-1.1**. Our two files are byte-identical to that release. The upstream
+chain, the licensing commits, file hashes and the residual risk are in
+[`fonts/catalog/URW-symbols/PROVENANCE.md`](fonts/catalog/URW-symbols/PROVENANCE.md).

@@ -1,0 +1,1290 @@
+{
+  "schema": "pscat-asset-licenses/1",
+  "about": "Licence of every tracked file in this repository (issue #563). Entries are checked in order and the first whose paths glob matches a file applies to it ('**' matches any number of directories, '*' stays within one). THIRD_PARTY_NOTICES.md is the readable form. ships_in: crate, npm, binaries (the core packages); font-pack (the separately distributed font catalog); site (the project website); repo-only.",
+  "package_license": "(MIT OR Apache-2.0) AND OFL-1.1",
+  "entries": [
+    {
+      "id": "embedded-liberation",
+      "paths": [
+        "fonts/Liberation*.ttf"
+      ],
+      "license": "OFL-1.1",
+      "copyright": "Digitized data copyright (c) 2010 Google Corporation, with Reserved Font Arimo, Tinos and Cousine; Copyright (c) 2012 Red Hat, Inc., with Reserved Font Name Liberation",
+      "ships_in": [
+        "crate",
+        "npm",
+        "binaries"
+      ],
+      "license_files": [
+        "fonts/LICENSE",
+        "LICENSE-OFL"
+      ],
+      "notes": "Liberation Fonts 2.1.5, compiled in with include_bytes! (src/font.rs)."
+    },
+    {
+      "id": "typewriter-outlines",
+      "paths": [
+        "lib/typewriter_outlines.ps"
+      ],
+      "license": "OFL-1.1",
+      "copyright": "Copyright 2015 The Courier Prime Project Authors",
+      "ships_in": [
+        "crate",
+        "npm",
+        "binaries"
+      ],
+      "license_files": [
+        "LICENSE-OFL"
+      ],
+      "notes": "Generated from fonts/catalog/CourierPrime/CourierPrime-Regular.ttf by scripts/gen_typewriter_outlines.py. Courier Prime has no Reserved Font Name."
+    },
+    {
+      "id": "font-URW-symbols",
+      "paths": [
+        "fonts/catalog/URW-symbols/**"
+      ],
+      "license": "OFL-1.1",
+      "copyright": "Copyright 2013,2014,2015 by (URW)++ Design & Development",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/URW-symbols/LICENSE.OFL",
+        "fonts/catalog/URW-symbols/LICENSE.md"
+      ],
+      "notes": "OFL-1.1 elected from URW++'s 2017 AGPL-3.0/LPPL-1.3c/OFL-1.1 triple licence; see fonts/catalog/URW-symbols/PROVENANCE.md."
+    },
+    {
+      "id": "font-AbrilFatface",
+      "paths": [
+        "fonts/catalog/AbrilFatface/**"
+      ],
+      "license": "OFL-1.1",
+      "copyright": "Copyright (c) 2011, TypeTogether (www.type-together.com)",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/AbrilFatface/OFL.txt"
+      ]
+    },
+    {
+      "id": "font-AlfaSlabOne",
+      "paths": [
+        "fonts/catalog/AlfaSlabOne/**"
+      ],
+      "license": "OFL-1.1",
+      "copyright": "Copyright 2016 The Alfa Slab One Project Authors (http://www.jmsole.cl | info@jmsole.cl), with Reserved Font Name \"Alfa Slab\".",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/AlfaSlabOne/OFL.txt"
+      ]
+    },
+    {
+      "id": "font-Anton",
+      "paths": [
+        "fonts/catalog/Anton/**"
+      ],
+      "license": "OFL-1.1",
+      "copyright": "Copyright 2020 The Anton Project Authors (https://github.com/googlefonts/AntonFont.git)",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/Anton/OFL.txt"
+      ]
+    },
+    {
+      "id": "font-AtkinsonHyperlegible",
+      "paths": [
+        "fonts/catalog/AtkinsonHyperlegible/**"
+      ],
+      "license": "OFL-1.1",
+      "copyright": "Copyright 2020 Braille Institute of America, Inc.",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/AtkinsonHyperlegible/OFL.txt"
+      ]
+    },
+    {
+      "id": "font-Audiowide",
+      "paths": [
+        "fonts/catalog/Audiowide/**"
+      ],
+      "license": "OFL-1.1",
+      "copyright": "Copyright (c) 2012, Brian J. Bonislawsky DBA Astigmatic (AOETI) (astigma@astigmatic.com), with Reserved Font Names \"Audiowide\"",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/Audiowide/OFL.txt"
+      ]
+    },
+    {
+      "id": "font-BagelFatOne",
+      "paths": [
+        "fonts/catalog/BagelFatOne/**"
+      ],
+      "license": "OFL-1.1",
+      "copyright": "Copyright 2022 The Bagel Fat Project Authors (https://github.com/JAMO-TYPEFACE/BagelFat)",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/BagelFatOne/OFL.txt"
+      ]
+    },
+    {
+      "id": "font-Bangers",
+      "paths": [
+        "fonts/catalog/Bangers/**"
+      ],
+      "license": "OFL-1.1",
+      "copyright": "Copyright 2010 The Bangers Project Authors (https://github.com/googlefonts/bangers)",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/Bangers/OFL.txt"
+      ]
+    },
+    {
+      "id": "font-BebasNeue",
+      "paths": [
+        "fonts/catalog/BebasNeue/**"
+      ],
+      "license": "OFL-1.1",
+      "copyright": "Copyright © 2010 by Dharma Type.",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/BebasNeue/OFL.txt"
+      ]
+    },
+    {
+      "id": "font-Bungee",
+      "paths": [
+        "fonts/catalog/Bungee/**"
+      ],
+      "license": "OFL-1.1",
+      "copyright": "Copyright 2023 The Bungee Project Authors (https://github.com/djrrb/Bungee)",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/Bungee/OFL.txt"
+      ]
+    },
+    {
+      "id": "font-Caveat",
+      "paths": [
+        "fonts/catalog/Caveat/**"
+      ],
+      "license": "OFL-1.1",
+      "copyright": "Copyright 2014 The Caveat Project Authors (https://github.com/googlefonts/caveat)",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/Caveat/OFL.txt"
+      ]
+    },
+    {
+      "id": "font-Chewy",
+      "paths": [
+        "fonts/catalog/Chewy/**"
+      ],
+      "license": "Apache-2.0",
+      "copyright": "Copyright (c) 2010 by Font Diner, Inc DBA Sideshow. All rights reserved.",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/Chewy/LICENSE.txt"
+      ]
+    },
+    {
+      "id": "font-Cinzel",
+      "paths": [
+        "fonts/catalog/Cinzel/**"
+      ],
+      "license": "OFL-1.1",
+      "copyright": "Copyright 2020 The Cinzel Project Authors (https://github.com/NDISCOVER/Cinzel)",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/Cinzel/OFL.txt"
+      ]
+    },
+    {
+      "id": "font-ComicNeue",
+      "paths": [
+        "fonts/catalog/ComicNeue/**"
+      ],
+      "license": "OFL-1.1",
+      "copyright": "Copyright 2014 The Comic Neue Project Authors (https://github.com/crozynski/comicneue)",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/ComicNeue/OFL.txt"
+      ]
+    },
+    {
+      "id": "font-CourierPrime",
+      "paths": [
+        "fonts/catalog/CourierPrime/**"
+      ],
+      "license": "OFL-1.1",
+      "copyright": "Copyright 2015 The Courier Prime Project Authors (https://github.com/quoteunquoteapps/CourierPrime).",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/CourierPrime/OFL.txt"
+      ]
+    },
+    {
+      "id": "font-Creepster",
+      "paths": [
+        "fonts/catalog/Creepster/**"
+      ],
+      "license": "OFL-1.1",
+      "copyright": "Copyright (c) 2011, Font Diner, Inc (diner@fontdiner.com)",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/Creepster/OFL.txt"
+      ]
+    },
+    {
+      "id": "font-EBGaramond",
+      "paths": [
+        "fonts/catalog/EBGaramond/**"
+      ],
+      "license": "OFL-1.1",
+      "copyright": "Copyright 2017 The EB Garamond Project Authors (https://github.com/octaviopardo/EBGaramond12)",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/EBGaramond/OFL.txt"
+      ]
+    },
+    {
+      "id": "font-Graduate",
+      "paths": [
+        "fonts/catalog/Graduate/**"
+      ],
+      "license": "OFL-1.1",
+      "copyright": "Copyright 2012 The Graduate Project Authors (https://github.com/etunni/graduate) with Reserved Font Name \"Graduate\"",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/Graduate/OFL.txt"
+      ]
+    },
+    {
+      "id": "font-GreatVibes",
+      "paths": [
+        "fonts/catalog/GreatVibes/**"
+      ],
+      "license": "OFL-1.1",
+      "copyright": "Copyright 2015 The Great Vibes Pro Project Authors (https://github.com/googlefonts/great-vibes)",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/GreatVibes/OFL.txt"
+      ]
+    },
+    {
+      "id": "font-HomemadeApple",
+      "paths": [
+        "fonts/catalog/HomemadeApple/**"
+      ],
+      "license": "Apache-2.0",
+      "copyright": "Copyright (c) 2010 by Font Diner, Inc. All rights reserved.",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/HomemadeApple/LICENSE.txt"
+      ]
+    },
+    {
+      "id": "font-JetBrainsMono",
+      "paths": [
+        "fonts/catalog/JetBrainsMono/**"
+      ],
+      "license": "OFL-1.1",
+      "copyright": "Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono)",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/JetBrainsMono/OFL.txt"
+      ]
+    },
+    {
+      "id": "font-Jost",
+      "paths": [
+        "fonts/catalog/Jost/**"
+      ],
+      "license": "OFL-1.1",
+      "copyright": "Copyright 2020 The Jost Project Authors (https://github.com/indestructible-type)",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/Jost/OFL.txt"
+      ]
+    },
+    {
+      "id": "font-LibreBaskerville",
+      "paths": [
+        "fonts/catalog/LibreBaskerville/**"
+      ],
+      "license": "OFL-1.1",
+      "copyright": "Copyright 2012 The Libre Baskerville Project Authors (https://github.com/impallari/Libre-Baskerville) with Reserved Font Name Libre Baskerville.",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/LibreBaskerville/OFL.txt"
+      ]
+    },
+    {
+      "id": "font-Limelight",
+      "paths": [
+        "fonts/catalog/Limelight/**"
+      ],
+      "license": "OFL-1.1",
+      "copyright": "Copyright (c) 2011 by Sorkin Type Co (www.sorkintype.com)",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/Limelight/OFL.txt"
+      ]
+    },
+    {
+      "id": "font-Lora",
+      "paths": [
+        "fonts/catalog/Lora/**"
+      ],
+      "license": "OFL-1.1",
+      "copyright": "Copyright 2011 The Lora Project Authors (https://github.com/cyrealtype/Lora-Cyrillic), with Reserved Font Name \"Lora\".",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/Lora/OFL.txt"
+      ]
+    },
+    {
+      "id": "font-MedievalSharp",
+      "paths": [
+        "fonts/catalog/MedievalSharp/**"
+      ],
+      "license": "OFL-1.1",
+      "copyright": "Copyright (c) 2011, wmk69 (wmk69@o2.pl)",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/MedievalSharp/OFL.txt"
+      ]
+    },
+    {
+      "id": "font-Monoton",
+      "paths": [
+        "fonts/catalog/Monoton/**"
+      ],
+      "license": "OFL-1.1",
+      "copyright": "Copyright (c) 2011 by vernon adams (vern@newtypography.co.uk)",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/Monoton/OFL.txt"
+      ]
+    },
+    {
+      "id": "font-NanumBrushScript",
+      "paths": [
+        "fonts/catalog/NanumBrushScript/**"
+      ],
+      "license": "OFL-1.1",
+      "copyright": "Copyright (c) 2010, NHN Corporation (http://www.nhncorp.com)",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/NanumBrushScript/OFL.txt"
+      ]
+    },
+    {
+      "id": "font-NotoSansJP",
+      "paths": [
+        "fonts/catalog/NotoSansJP/**"
+      ],
+      "license": "OFL-1.1",
+      "copyright": "Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/NotoSansJP/OFL.txt"
+      ]
+    },
+    {
+      "id": "font-NotoSansKR",
+      "paths": [
+        "fonts/catalog/NotoSansKR/**"
+      ],
+      "license": "OFL-1.1",
+      "copyright": "Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/NotoSansKR/OFL.txt"
+      ]
+    },
+    {
+      "id": "font-NotoSansThai",
+      "paths": [
+        "fonts/catalog/NotoSansThai/**"
+      ],
+      "license": "OFL-1.1",
+      "copyright": "Copyright 2022 The Noto Project Authors (https://github.com/notofonts/thai)",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/NotoSansThai/OFL.txt"
+      ]
+    },
+    {
+      "id": "font-Orbitron",
+      "paths": [
+        "fonts/catalog/Orbitron/**"
+      ],
+      "license": "OFL-1.1",
+      "copyright": "Copyright 2018 The Orbitron Project Authors (https://github.com/theleagueof/orbitron), with Reserved Font Name: \"Orbitron\"",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/Orbitron/OFL.txt"
+      ]
+    },
+    {
+      "id": "font-Oswald",
+      "paths": [
+        "fonts/catalog/Oswald/**"
+      ],
+      "license": "OFL-1.1",
+      "copyright": "Copyright 2016 The Oswald Project Authors (https://github.com/googlefonts/OswaldFont)",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/Oswald/OFL.txt"
+      ]
+    },
+    {
+      "id": "font-Pacifico",
+      "paths": [
+        "fonts/catalog/Pacifico/**"
+      ],
+      "license": "OFL-1.1",
+      "copyright": "Copyright 2018 The Pacifico Project Authors (https://github.com/googlefonts/Pacifico)",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/Pacifico/OFL.txt"
+      ]
+    },
+    {
+      "id": "font-PermanentMarker",
+      "paths": [
+        "fonts/catalog/PermanentMarker/**"
+      ],
+      "license": "Apache-2.0",
+      "copyright": "Copyright (c) 2010 by Font Diner, Inc. All rights reserved.",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/PermanentMarker/LICENSE.txt"
+      ]
+    },
+    {
+      "id": "font-PirataOne",
+      "paths": [
+        "fonts/catalog/PirataOne/**"
+      ],
+      "license": "OFL-1.1",
+      "copyright": "Copyright (c) 2012, Rodrigo Fuenzalida, Nicolas Massi (www.taip.com.ar / abc.taip.com.ar), with Reserved Font Name 'Pirata'",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/PirataOne/OFL.txt"
+      ]
+    },
+    {
+      "id": "font-PlayfairDisplay",
+      "paths": [
+        "fonts/catalog/PlayfairDisplay/**"
+      ],
+      "license": "OFL-1.1",
+      "copyright": "Copyright 2017 The Playfair Display Project Authors (https://github.com/clauseggers/Playfair-Display), with Reserved Font Name \"Playfair Display\"",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/PlayfairDisplay/OFL.txt"
+      ]
+    },
+    {
+      "id": "font-Poppins",
+      "paths": [
+        "fonts/catalog/Poppins/**"
+      ],
+      "license": "OFL-1.1",
+      "copyright": "Copyright 2020 The Poppins Project Authors (https://github.com/itfoundry/Poppins)",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/Poppins/OFL.txt"
+      ]
+    },
+    {
+      "id": "font-PressStart2P",
+      "paths": [
+        "fonts/catalog/PressStart2P/**"
+      ],
+      "license": "OFL-1.1",
+      "copyright": "Copyright 2012 The Press Start 2P Project Authors (cody@zone38.net), with Reserved Font Name \"Press Start 2P\".",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/PressStart2P/OFL.txt"
+      ]
+    },
+    {
+      "id": "font-Rye",
+      "paths": [
+        "fonts/catalog/Rye/**"
+      ],
+      "license": "OFL-1.1",
+      "copyright": "Copyright (c) 2011 by Sorkin Type Co (www.sorkintype.com)",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/Rye/OFL.txt"
+      ]
+    },
+    {
+      "id": "font-SpecialElite",
+      "paths": [
+        "fonts/catalog/SpecialElite/**"
+      ],
+      "license": "Apache-2.0",
+      "copyright": "Copyright (c) 2010 by Brian J. Bonislawsky DBA Astigmatic (AOETI). All rights reserved. Available under the Apache 2.0 licence.\rhttp://www.apache.org/licenses/LICENSE-2.0.html",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/SpecialElite/LICENSE.txt"
+      ]
+    },
+    {
+      "id": "font-StardosStencil",
+      "paths": [
+        "fonts/catalog/StardosStencil/**"
+      ],
+      "license": "OFL-1.1",
+      "copyright": "Copyright (c) 2011 by vernon adams (vern@newtypography.co.uk)",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/StardosStencil/OFL.txt"
+      ]
+    },
+    {
+      "id": "font-TeXGyre-adventor",
+      "paths": [
+        "fonts/catalog/TeXGyre-adventor/**"
+      ],
+      "license": "LPPL-1.3c",
+      "copyright": "Copyright 2007-2018 for TeX Gyre extensions by B. Jackowski, J.M. Nowacki, et al. (on behalf of TeX USERS GROUPS). Vietnamese characters were added by Han The Thanh.",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/TeXGyre-adventor/GUST-FONT-LICENSE.txt"
+      ],
+      "notes": "GUST Font License: LPPL-1.3c, with a request (not a legal requirement) that derived works be renamed."
+    },
+    {
+      "id": "font-TeXGyre-bonum",
+      "paths": [
+        "fonts/catalog/TeXGyre-bonum/**"
+      ],
+      "license": "LPPL-1.3c",
+      "copyright": "Copyright 2006, 2009 for TeX Gyre extensions by B. Jackowski and J.M. Nowacki (on behalf of TeX users groups). This work is released under the GUST Font License --  see http://tug.org/fonts/licenses/GUST-FONT-LICENSE.txt for details.",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/TeXGyre-bonum/GUST-FONT-LICENSE.txt"
+      ],
+      "notes": "GUST Font License: LPPL-1.3c, with a request (not a legal requirement) that derived works be renamed."
+    },
+    {
+      "id": "font-TeXGyre-chorus",
+      "paths": [
+        "fonts/catalog/TeXGyre-chorus/**"
+      ],
+      "license": "LPPL-1.3c",
+      "copyright": "Copyright 2006, 2009 for TeX Gyre extensions by B. Jackowski and J.M. Nowacki (on behalf of TeX users groups). This work is released under the GUST Font License --  see http://tug.org/fonts/licenses/GUST-FONT-LICENSE.txt for details.",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/TeXGyre-chorus/GUST-FONT-LICENSE.txt"
+      ],
+      "notes": "GUST Font License: LPPL-1.3c, with a request (not a legal requirement) that derived works be renamed."
+    },
+    {
+      "id": "font-TeXGyre-heroscn",
+      "paths": [
+        "fonts/catalog/TeXGyre-heroscn/**"
+      ],
+      "license": "LPPL-1.3c",
+      "copyright": "Copyright 2006, 2009 for TeX Gyre extensions by B. Jackowski and J.M. Nowacki (on behalf of TeX users groups). This work is released under the GUST Font License --  see http://tug.org/fonts/licenses/GUST-FONT-LICENSE.txt for details.",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/TeXGyre-heroscn/GUST-FONT-LICENSE.txt"
+      ],
+      "notes": "GUST Font License: LPPL-1.3c, with a request (not a legal requirement) that derived works be renamed."
+    },
+    {
+      "id": "font-TeXGyre-pagella",
+      "paths": [
+        "fonts/catalog/TeXGyre-pagella/**"
+      ],
+      "license": "LPPL-1.3c",
+      "copyright": "Copyright 2006-2018 for TeX Gyre extensions by B. Jackowski, J.M. Nowacki, et al. (on behalf of TeX USERS GROUPS). Vietnamese characters were added by Han The Thanh.",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/TeXGyre-pagella/GUST-FONT-LICENSE.txt"
+      ],
+      "notes": "GUST Font License: LPPL-1.3c, with a request (not a legal requirement) that derived works be renamed."
+    },
+    {
+      "id": "font-TeXGyre-schola",
+      "paths": [
+        "fonts/catalog/TeXGyre-schola/**"
+      ],
+      "license": "LPPL-1.3c",
+      "copyright": "Copyright 2006, 2009 for TeX Gyre extensions by B. Jackowski and J.M. Nowacki (on behalf of TeX users groups). This work is released under the GUST Font License --  see http://tug.org/fonts/licenses/GUST-FONT-LICENSE.txt for details.",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/TeXGyre-schola/GUST-FONT-LICENSE.txt"
+      ],
+      "notes": "GUST Font License: LPPL-1.3c, with a request (not a legal requirement) that derived works be renamed."
+    },
+    {
+      "id": "font-UnifrakturMaguntia",
+      "paths": [
+        "fonts/catalog/UnifrakturMaguntia/**"
+      ],
+      "license": "OFL-1.1",
+      "copyright": "Copyright (c) 2010, j. 'mach' wust, with Reserved Font Name UnifrakturMaguntia.",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/UnifrakturMaguntia/OFL.txt"
+      ]
+    },
+    {
+      "id": "font-VT323",
+      "paths": [
+        "fonts/catalog/VT323/**"
+      ],
+      "license": "OFL-1.1",
+      "copyright": "Copyright 2011, The VT323 Project Authors (peter.hull@oikoi.com)",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/VT323/OFL.txt"
+      ]
+    },
+    {
+      "id": "font-ZillaSlab",
+      "paths": [
+        "fonts/catalog/ZillaSlab/**"
+      ],
+      "license": "OFL-1.1",
+      "copyright": "Copyright 2017, The Mozilla Foundation",
+      "ships_in": [
+        "font-pack"
+      ],
+      "license_files": [
+        "fonts/catalog/ZillaSlab/OFL.txt"
+      ]
+    },
+    {
+      "id": "pending-owner-art",
+      "paths": [
+        "art/**"
+      ],
+      "license": "NOASSERTION",
+      "copyright": "Jerome Banks",
+      "ships_in": [
+        "repo-only"
+      ],
+      "notes": "The Keepin' It Real shirt artwork (a recreation of the owner's own design). Not one of the CC0 directories named in #563; the owner has not chosen its terms yet."
+    },
+    {
+      "id": "pending-owner-mochi",
+      "paths": [
+        "gallery/references/mochi.jpg"
+      ],
+      "license": "NOASSERTION",
+      "copyright": "the photographer (owner-supplied; authorship not recorded)",
+      "ships_in": [
+        "site"
+      ],
+      "notes": "Reference photograph for gallery/mochi_denim_blue.ps. Held back from CC0 until the owner confirms they took it."
+    },
+    {
+      "id": "public-domain-lincoln",
+      "paths": [
+        "gallery/references/lincoln_berger_1864.jpg"
+      ],
+      "license": "LicenseRef-Public-Domain",
+      "copyright": "none (Anthony Berger, 1864; US work published before 1929)",
+      "ships_in": [
+        "site"
+      ],
+      "notes": "Crop of the Library of Congress print via Wikimedia Commons; see notes/242-lincoln-charcoal.md."
+    },
+    {
+      "id": "cc0-with-library-code",
+      "paths": [
+        "gallery/hortus.ps",
+        "gallery/infinite_descent.ps",
+        "gallery/ripple_range.ps",
+        "gallery/woven_labyrinth.ps",
+        "examples/dataviz.ps",
+        "examples/graphing.ps"
+      ],
+      "license": "CC0-1.0 AND (MIT OR Apache-2.0)",
+      "copyright": "Jerome Banks and the pscat contributors",
+      "ships_in": [
+        "site"
+      ],
+      "notes": "Original programs (CC0-1.0) that carry inlined copies of lib/ procedures (the 'toolkit subset' sections, or the inlined showctr helper); those copied portions stay MIT OR Apache-2.0."
+    },
+    {
+      "id": "ref-chalk_FAKE_font_composite",
+      "paths": [
+        "docs/dev/design/drymedia/refs/chalk_FAKE_font_composite.jpg"
+      ],
+      "license": "CC0-1.0",
+      "copyright": "see docs/dev/design/drymedia/REFERENCES.md",
+      "ships_in": [
+        "repo-only"
+      ],
+      "notes": "Third-party reference crop (Wikimedia Commons); attribution in REFERENCES.md."
+    },
+    {
+      "id": "ref-chalk_crypto_arrow",
+      "paths": [
+        "docs/dev/design/drymedia/refs/chalk_crypto_arrow.jpg"
+      ],
+      "license": "CC-BY-4.0",
+      "copyright": "see docs/dev/design/drymedia/REFERENCES.md",
+      "ships_in": [
+        "repo-only"
+      ],
+      "notes": "Third-party reference crop (Wikimedia Commons); attribution in REFERENCES.md."
+    },
+    {
+      "id": "ref-chalk_crypto_board",
+      "paths": [
+        "docs/dev/design/drymedia/refs/chalk_crypto_board.jpg"
+      ],
+      "license": "CC-BY-4.0",
+      "copyright": "see docs/dev/design/drymedia/REFERENCES.md",
+      "ships_in": [
+        "repo-only"
+      ],
+      "notes": "Third-party reference crop (Wikimedia Commons); attribution in REFERENCES.md."
+    },
+    {
+      "id": "ref-chalk_crypto_letters",
+      "paths": [
+        "docs/dev/design/drymedia/refs/chalk_crypto_letters.jpg"
+      ],
+      "license": "CC-BY-4.0",
+      "copyright": "see docs/dev/design/drymedia/REFERENCES.md",
+      "ships_in": [
+        "repo-only"
+      ],
+      "notes": "Third-party reference crop (Wikimedia Commons); attribution in REFERENCES.md."
+    },
+    {
+      "id": "ref-chalk_double_underline",
+      "paths": [
+        "docs/dev/design/drymedia/refs/chalk_double_underline.jpg"
+      ],
+      "license": "CC-BY-2.5",
+      "copyright": "see docs/dev/design/drymedia/REFERENCES.md",
+      "ships_in": [
+        "repo-only"
+      ],
+      "notes": "Third-party reference crop (Wikimedia Commons); attribution in REFERENCES.md."
+    },
+    {
+      "id": "ref-chalk_einstein_fraction_bars",
+      "paths": [
+        "docs/dev/design/drymedia/refs/chalk_einstein_fraction_bars.jpg"
+      ],
+      "license": "CC-BY-SA-3.0",
+      "copyright": "see docs/dev/design/drymedia/REFERENCES.md",
+      "ships_in": [
+        "repo-only"
+      ],
+      "notes": "Third-party reference crop (Wikimedia Commons); attribution in REFERENCES.md."
+    },
+    {
+      "id": "ref-chalk_eraser_swipes",
+      "paths": [
+        "docs/dev/design/drymedia/refs/chalk_eraser_swipes.jpg"
+      ],
+      "license": "CC-BY-SA-4.0",
+      "copyright": "see docs/dev/design/drymedia/REFERENCES.md",
+      "ships_in": [
+        "repo-only"
+      ],
+      "notes": "Third-party reference crop (Wikimedia Commons); attribution in REFERENCES.md."
+    },
+    {
+      "id": "ref-chalk_fermi_circle",
+      "paths": [
+        "docs/dev/design/drymedia/refs/chalk_fermi_circle.jpg"
+      ],
+      "license": "LicenseRef-Public-Domain",
+      "copyright": "see docs/dev/design/drymedia/REFERENCES.md",
+      "ships_in": [
+        "repo-only"
+      ],
+      "notes": "Third-party reference crop (Wikimedia Commons); attribution in REFERENCES.md."
+    },
+    {
+      "id": "ref-chalk_full_board",
+      "paths": [
+        "docs/dev/design/drymedia/refs/chalk_full_board.jpg"
+      ],
+      "license": "CC-BY-2.5",
+      "copyright": "see docs/dev/design/drymedia/REFERENCES.md",
+      "ships_in": [
+        "repo-only"
+      ],
+      "notes": "Third-party reference crop (Wikimedia Commons); attribution in REFERENCES.md."
+    },
+    {
+      "id": "ref-chalk_ghosting_closeup",
+      "paths": [
+        "docs/dev/design/drymedia/refs/chalk_ghosting_closeup.jpg"
+      ],
+      "license": "CC-BY-2.0",
+      "copyright": "see docs/dev/design/drymedia/REFERENCES.md",
+      "ships_in": [
+        "repo-only"
+      ],
+      "notes": "Third-party reference crop (Wikimedia Commons); attribution in REFERENCES.md."
+    },
+    {
+      "id": "ref-chalk_ledge_erasers",
+      "paths": [
+        "docs/dev/design/drymedia/refs/chalk_ledge_erasers.jpg"
+      ],
+      "license": "CC-BY-2.5",
+      "copyright": "see docs/dev/design/drymedia/REFERENCES.md",
+      "ships_in": [
+        "repo-only"
+      ],
+      "notes": "Third-party reference crop (Wikimedia Commons); attribution in REFERENCES.md."
+    },
+    {
+      "id": "ref-chalk_sphere_passes",
+      "paths": [
+        "docs/dev/design/drymedia/refs/chalk_sphere_passes.jpg"
+      ],
+      "license": "CC-BY-SA-4.0",
+      "copyright": "see docs/dev/design/drymedia/REFERENCES.md",
+      "ships_in": [
+        "repo-only"
+      ],
+      "notes": "Third-party reference crop (Wikimedia Commons); attribution in REFERENCES.md."
+    },
+    {
+      "id": "ref-charcoal_cast_study_1878",
+      "paths": [
+        "docs/dev/design/drymedia/refs/charcoal_cast_study_1878.jpg"
+      ],
+      "license": "LicenseRef-Public-Domain",
+      "copyright": "see docs/dev/design/drymedia/REFERENCES.md",
+      "ships_in": [
+        "repo-only"
+      ],
+      "notes": "Third-party reference crop (Wikimedia Commons); attribution in REFERENCES.md."
+    },
+    {
+      "id": "ref-charcoal_compressed_mass",
+      "paths": [
+        "docs/dev/design/drymedia/refs/charcoal_compressed_mass.jpg"
+      ],
+      "license": "LicenseRef-Public-Domain",
+      "copyright": "see docs/dev/design/drymedia/REFERENCES.md",
+      "ships_in": [
+        "repo-only"
+      ],
+      "notes": "Third-party reference crop (Wikimedia Commons); attribution in REFERENCES.md."
+    },
+    {
+      "id": "ref-charcoal_fine_hatching",
+      "paths": [
+        "docs/dev/design/drymedia/refs/charcoal_fine_hatching.jpg"
+      ],
+      "license": "LicenseRef-Public-Domain",
+      "copyright": "see docs/dev/design/drymedia/REFERENCES.md",
+      "ships_in": [
+        "repo-only"
+      ],
+      "notes": "Third-party reference crop (Wikimedia Commons); attribution in REFERENCES.md."
+    },
+    {
+      "id": "ref-charcoal_hatching_on_tone",
+      "paths": [
+        "docs/dev/design/drymedia/refs/charcoal_hatching_on_tone.jpg"
+      ],
+      "license": "LicenseRef-Public-Domain",
+      "copyright": "see docs/dev/design/drymedia/REFERENCES.md",
+      "ships_in": [
+        "repo-only"
+      ],
+      "notes": "Third-party reference crop (Wikimedia Commons); attribution in REFERENCES.md."
+    },
+    {
+      "id": "ref-charcoal_rubbed_ground",
+      "paths": [
+        "docs/dev/design/drymedia/refs/charcoal_rubbed_ground.jpg"
+      ],
+      "license": "LicenseRef-Public-Domain",
+      "copyright": "see docs/dev/design/drymedia/REFERENCES.md",
+      "ships_in": [
+        "repo-only"
+      ],
+      "notes": "Third-party reference crop (Wikimedia Commons); attribution in REFERENCES.md."
+    },
+    {
+      "id": "ref-charcoal_stick_strokes",
+      "paths": [
+        "docs/dev/design/drymedia/refs/charcoal_stick_strokes.jpg"
+      ],
+      "license": "CC-BY-SA-4.0",
+      "copyright": "see docs/dev/design/drymedia/REFERENCES.md",
+      "ships_in": [
+        "repo-only"
+      ],
+      "notes": "Third-party reference crop (Wikimedia Commons); attribution in REFERENCES.md."
+    },
+    {
+      "id": "ref-charcoal_student_portrait_1888",
+      "paths": [
+        "docs/dev/design/drymedia/refs/charcoal_student_portrait_1888.jpg"
+      ],
+      "license": "LicenseRef-Public-Domain",
+      "copyright": "see docs/dev/design/drymedia/REFERENCES.md",
+      "ships_in": [
+        "repo-only"
+      ],
+      "notes": "Third-party reference crop (Wikimedia Commons); attribution in REFERENCES.md."
+    },
+    {
+      "id": "ref-charcoal_stumped_tone",
+      "paths": [
+        "docs/dev/design/drymedia/refs/charcoal_stumped_tone.jpg"
+      ],
+      "license": "LicenseRef-Public-Domain",
+      "copyright": "see docs/dev/design/drymedia/REFERENCES.md",
+      "ships_in": [
+        "repo-only"
+      ],
+      "notes": "Third-party reference crop (Wikimedia Commons); attribution in REFERENCES.md."
+    },
+    {
+      "id": "ref-crayon_child_rhino_6y",
+      "paths": [
+        "docs/dev/design/drymedia/refs/crayon_child_rhino_6y.jpg"
+      ],
+      "license": "CC0-1.0",
+      "copyright": "see docs/dev/design/drymedia/REFERENCES.md",
+      "ships_in": [
+        "repo-only"
+      ],
+      "notes": "Third-party reference crop (Wikimedia Commons); attribution in REFERENCES.md."
+    },
+    {
+      "id": "ref-crayon_child_tadpole_3y",
+      "paths": [
+        "docs/dev/design/drymedia/refs/crayon_child_tadpole_3y.jpg"
+      ],
+      "license": "CC-BY-SA-3.0",
+      "copyright": "see docs/dev/design/drymedia/REFERENCES.md",
+      "ships_in": [
+        "repo-only"
+      ],
+      "notes": "Third-party reference crop (Wikimedia Commons); attribution in REFERENCES.md."
+    },
+    {
+      "id": "ref-crayon_dense_fill",
+      "paths": [
+        "docs/dev/design/drymedia/refs/crayon_dense_fill.jpg"
+      ],
+      "license": "CC-BY-SA-4.0",
+      "copyright": "see docs/dev/design/drymedia/REFERENCES.md",
+      "ships_in": [
+        "repo-only"
+      ],
+      "notes": "Third-party reference crop (Wikimedia Commons); attribution in REFERENCES.md."
+    },
+    {
+      "id": "ref-crayon_fill_ground",
+      "paths": [
+        "docs/dev/design/drymedia/refs/crayon_fill_ground.jpg"
+      ],
+      "license": "CC0-1.0",
+      "copyright": "see docs/dev/design/drymedia/REFERENCES.md",
+      "ships_in": [
+        "repo-only"
+      ],
+      "notes": "Third-party reference crop (Wikimedia Commons); attribution in REFERENCES.md."
+    },
+    {
+      "id": "ref-crayon_fill_streaks",
+      "paths": [
+        "docs/dev/design/drymedia/refs/crayon_fill_streaks.jpg"
+      ],
+      "license": "CC0-1.0",
+      "copyright": "see docs/dev/design/drymedia/REFERENCES.md",
+      "ships_in": [
+        "repo-only"
+      ],
+      "notes": "Third-party reference crop (Wikimedia Commons); attribution in REFERENCES.md."
+    },
+    {
+      "id": "ref-crayon_tips",
+      "paths": [
+        "docs/dev/design/drymedia/refs/crayon_tips.jpg"
+      ],
+      "license": "CC0-1.0",
+      "copyright": "see docs/dev/design/drymedia/REFERENCES.md",
+      "ships_in": [
+        "repo-only"
+      ],
+      "notes": "Third-party reference crop (Wikimedia Commons); attribution in REFERENCES.md."
+    },
+    {
+      "id": "panel-chalk_compare_235",
+      "paths": [
+        "docs/dev/design/drymedia/chalk_compare_235.jpg"
+      ],
+      "license": "CC-BY-SA-4.0",
+      "copyright": "see docs/dev/design/drymedia/REFERENCES.md",
+      "ships_in": [
+        "repo-only"
+      ],
+      "notes": "Comparison panel containing third-party crops beside pscat renders; the pscat renders in it are the project's own."
+    },
+    {
+      "id": "panel-lecture_compare_238",
+      "paths": [
+        "docs/dev/design/drymedia/lecture_compare_238.png"
+      ],
+      "license": "CC-BY-SA-4.0",
+      "copyright": "see docs/dev/design/drymedia/REFERENCES.md",
+      "ships_in": [
+        "repo-only"
+      ],
+      "notes": "Comparison panel containing third-party crops beside pscat renders; the pscat renders in it are the project's own."
+    },
+    {
+      "id": "panel-chalk_compare",
+      "paths": [
+        "docs/dev/design/drymedia/prototypes/chalk_compare.jpg"
+      ],
+      "license": "CC-BY-SA-3.0",
+      "copyright": "see docs/dev/design/drymedia/REFERENCES.md",
+      "ships_in": [
+        "repo-only"
+      ],
+      "notes": "Comparison panel containing third-party crops beside pscat renders; the pscat renders in it are the project's own."
+    },
+    {
+      "id": "panel-crayon_compare_figure",
+      "paths": [
+        "docs/dev/design/drymedia/crayon_compare_figure.png"
+      ],
+      "license": "CC-BY-SA-3.0",
+      "copyright": "see docs/dev/design/drymedia/REFERENCES.md",
+      "ships_in": [
+        "repo-only"
+      ],
+      "notes": "Comparison panel containing third-party crops beside pscat renders; the pscat renders in it are the project's own."
+    },
+    {
+      "id": "panel-drycharcoal_refs_compare",
+      "paths": [
+        "docs/dev/design/drymedia/drycharcoal_refs_compare.png"
+      ],
+      "license": "CC-BY-SA-4.0",
+      "copyright": "see docs/dev/design/drymedia/REFERENCES.md",
+      "ships_in": [
+        "repo-only"
+      ],
+      "notes": "Comparison panel containing third-party crops beside pscat renders; the pscat renders in it are the project's own."
+    },
+    {
+      "id": "panel-crayon_compare",
+      "paths": [
+        "docs/dev/design/drymedia/crayon_compare.png"
+      ],
+      "license": "CC0-1.0",
+      "copyright": "see docs/dev/design/drymedia/REFERENCES.md",
+      "ships_in": [
+        "repo-only"
+      ],
+      "notes": "Comparison panel containing third-party crops beside pscat renders; the pscat renders in it are the project's own."
+    },
+    {
+      "id": "panel-crayon_drawing_compare",
+      "paths": [
+        "docs/dev/design/drymedia/crayon_drawing_compare.jpg"
+      ],
+      "license": "CC0-1.0",
+      "copyright": "see docs/dev/design/drymedia/REFERENCES.md",
+      "ships_in": [
+        "repo-only"
+      ],
+      "notes": "Comparison panel containing third-party crops beside pscat renders; the pscat renders in it are the project's own."
+    },
+    {
+      "id": "panel-lincoln_compare",
+      "paths": [
+        "docs/dev/design/drymedia/lincoln_compare.png"
+      ],
+      "license": "LicenseRef-Public-Domain",
+      "copyright": "see docs/dev/design/drymedia/REFERENCES.md",
+      "ships_in": [
+        "repo-only"
+      ],
+      "notes": "Comparison panel containing third-party crops beside pscat renders; the pscat renders in it are the project's own."
+    },
+    {
+      "id": "panel-mottle_compare_313",
+      "paths": [
+        "docs/dev/design/drymedia/mottle_compare_313.png"
+      ],
+      "license": "LicenseRef-Public-Domain",
+      "copyright": "see docs/dev/design/drymedia/REFERENCES.md",
+      "ships_in": [
+        "repo-only"
+      ],
+      "notes": "Comparison panel containing third-party crops beside pscat renders; the pscat renders in it are the project's own."
+    },
+    {
+      "id": "typewriter-refs",
+      "paths": [
+        "docs/dev/design/typewriter/refs/**",
+        "docs/dev/design/typewriter/reference_board.jpg",
+        "docs/dev/design/typewriter/*_vs_real.png"
+      ],
+      "license": "LicenseRef-Public-Domain",
+      "copyright": "none (US federal records and a pre-1978 no-notice petition)",
+      "ships_in": [
+        "repo-only"
+      ],
+      "notes": "Crops of public-domain typescripts; sources in docs/dev/design/typewriter/REFERENCES.md."
+    },
+    {
+      "id": "cc0-creative",
+      "paths": [
+        "gallery/*.ps",
+        "gallery/renders/**",
+        "examples/**",
+        "site/learn/*.ps",
+        "site/learn/*.out",
+        "fonts/catalog/specimen-*.png"
+      ],
+      "license": "CC0-1.0",
+      "copyright": "Jerome Banks and the pscat contributors (dedicated to the public domain)",
+      "ships_in": [
+        "site"
+      ],
+      "license_files": [
+        "LICENSE-CC0"
+      ],
+      "notes": "Owner-owned original creative expression. CC0 does not relicense the lib/ code these programs call, does not cover the fonts they render, and grants no trademark rights in the pscat name or logo."
+    },
+    {
+      "id": "code",
+      "paths": [
+        "**"
+      ],
+      "license": "MIT OR Apache-2.0",
+      "copyright": "Jerome Banks and the pscat contributors",
+      "ships_in": [
+        "crate",
+        "npm",
+        "binaries",
+        "site"
+      ],
+      "license_files": [
+        "LICENSE-MIT",
+        "LICENSE-APACHE"
+      ],
+      "notes": "Everything not matched above: Rust sources, lib/*.ps libraries, build and test scripts, tests and fixtures, docs, the website's HTML/CSS/JS, gallery/manifest.json and show.sh."
+    }
+  ]
+}
