@@ -13,8 +13,10 @@ patterns:
 `--base` lists the files changed between the merge base and HEAD (renames
 count as both the old and the new name) and prints each one that matches a
 CODEOWNERS rule, one per line. The rules are read from BOTH the base's copy
-and the working tree's copy of the file, so a PR cannot get out of the rule by
-deleting its own line from CODEOWNERS. Exit status 1 when anything matched
+and the working tree's copy of the file, each judged on its own, and a path is
+owned if EITHER copy owns it. So a PR cannot get out of the rule by deleting
+its own line from CODEOWNERS, nor by adding an ownerless line that un-owns a
+path. Exit status 1 when anything matched
 (the PR is owner-merged), 0 when nothing did, 2 on a usage or git error.
 
 `--check-paths` is the "CODEOWNERS paths exist" check: every rule must match a
@@ -98,11 +100,11 @@ def changed_files(base):
     return [p for p in out.split("\0") if p]
 
 
-def rules_from(text_sources):
-    rules = []
-    for text in text_sources:
-        rules.extend(parse(text))
-    return rules
+def owned_by_any(rule_sets, path):
+    """True when ANY rule set owns `path`. Each set is judged on its own: if the
+    base's and the PR's files were concatenated, later ownerless rules in the PR
+    could cancel the base's ownership (cross-model review, PR #607)."""
+    return any(owned(rules, path) for rules in rule_sets)
 
 
 def check_paths(rules, tracked):
@@ -139,11 +141,11 @@ def main(argv):
                     sources.append(f.read())
             except FileNotFoundError:
                 pass
-            rules = rules_from(sources)
+            rules = [parse(text) for text in sources]
             paths = changed_files(base)
         elif args and not args[0].startswith("-"):
             with open(CODEOWNERS, encoding="utf-8") as f:
-                rules = parse(f.read())
+                rules = [parse(f.read())]
             paths = args
         else:
             print(__doc__, file=sys.stderr)
@@ -151,7 +153,7 @@ def main(argv):
     except (subprocess.CalledProcessError, OSError) as e:
         print(f"codeowners_check: {e}", file=sys.stderr)
         return 2
-    hits = [p for p in paths if owned(rules, p)]
+    hits = [p for p in paths if owned_by_any(rules, p)]
     for p in hits:
         print(p)
     return 1 if hits else 0

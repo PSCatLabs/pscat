@@ -74,6 +74,27 @@ class Matching(unittest.TestCase):
         self.assertEqual(c.check_paths(rules, ["Cargo.toml"]), ["/gone.toml"])
 
 
+class BaseAndPr(unittest.TestCase):
+    """--base judges the base's rules and the PR's rules separately."""
+
+    def test_a_pr_cannot_unown_a_path_with_an_ownerless_rule(self):
+        base = c.parse("/Cargo.toml @o\n/.github/CODEOWNERS @o")
+        pr = c.parse("/Cargo.toml\n/.github/CODEOWNERS")  # ownerless: un-owns both
+        self.assertFalse(c.owned(pr, "Cargo.toml"))
+        self.assertTrue(c.owned_by_any([base, pr], "Cargo.toml"))
+        self.assertTrue(c.owned_by_any([base, pr], ".github/CODEOWNERS"))
+
+    def test_a_pr_cannot_unown_a_path_by_deleting_the_line(self):
+        base = c.parse("/Cargo.toml @o")
+        self.assertTrue(c.owned_by_any([base, []], "Cargo.toml"))
+
+    def test_a_path_neither_owns_is_free(self):
+        self.assertFalse(c.owned_by_any([c.parse("/a @o"), c.parse("/b @o")], "src/x.rs"))
+
+    def test_new_pr_rule_adds_protection(self):
+        self.assertTrue(c.owned_by_any([[], c.parse("/new.toml @o")], "new.toml"))
+
+
 class Repo(unittest.TestCase):
     """The checked-in CODEOWNERS file itself."""
 
