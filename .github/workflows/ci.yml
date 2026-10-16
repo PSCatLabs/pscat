@@ -231,3 +231,23 @@ jobs:
       - name: Fail job if regression check failed
         if: steps.perf.outcome == 'failure'
         run: exit 1
+
+  # Issue #598: pscat installed with `cargo install`, run with a clean
+  # HOME/CARGO_HOME from a directory outside the checkout, must render
+  # its mathkit/drychalk/typewriter examples from the lib/ embedded in
+  # the binary (the script asserts on the resolver trace). Its own job,
+  # not in required_status_checks yet; #601 extends the OS matrix.
+  clean-install:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Clean install and render outside the checkout
+        run: ./scripts/clean_install_test.sh

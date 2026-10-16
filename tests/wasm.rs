@@ -65,6 +65,10 @@ if (ps.run('0 0 50 50 rectfill', 100, 100) !== 0) {{ console.error('not reusable
 if (ps.output !== '') {{ console.error('output not cleared: ' + ps.output); process.exit(1); }}
 ps.run('3 4 add == (hi) print', 100, 100);
 if (ps.output !== '7\nhi') {{ console.error('wrong output: ' + JSON.stringify(ps.output)); process.exit(1); }}
+// The libraries are embedded (#598): wasm has no disk, yet run finds them.
+if (ps.run('(lib/artkit.ps) run (lib/fonts/neon.ps) run /frnd where {{ pop (ok) print }} if', 100, 100) !== 0 || ps.output !== 'ok') {{
+  console.error('embedded lib/ did not load: ' + ps.error + ' ' + JSON.stringify(ps.output)); process.exit(1);
+}}
 console.log('WASM_OK ' + blue);
 "#,
         lib = root.join("web/pscat.js").display(),

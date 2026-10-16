@@ -17,6 +17,10 @@
 # Then check it: scripts/check_site_links.py (CI runs it after this).
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+# Point pscat at this tree's lib/ and fonts/catalog/ (src/paths.rs): a
+# release binary has no checkout heuristics, and its embedded lib/ may be
+# older than the files beside this script.
+export PSCAT_HOME="${PSCAT_HOME:-${PSCAT_ROOT:-$ROOT}}"
 OUT="$ROOT/_site"
 
 rm -rf "$OUT"
