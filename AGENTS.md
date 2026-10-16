@@ -58,7 +58,9 @@ merge → cleanup, not straight onto `main`. The full lifecycle, and the
 current merge-authority policy (who/what may merge once CI is green
 and review is clean), is `SDLC.md` — read that, not this section, for
 the authoritative process; `.claude/skills/work-issue/` automates it
-end to end. This applies going forward; it doesn't retroactively
+end to end. A PR that touches a path in `.github/CODEOWNERS` is merged by the
+owner, never by an agent (`SDLC.md`, "Who merges"; check with
+`python3 scripts/codeowners_check.py --base origin/main`). This applies going forward; it doesn't retroactively
 obligate rewriting the stage-by-stage direct-to-`main` history that
 predates it.
 

@@ -12,3 +12,13 @@ _site/
 *.swo
 *~
 __pycache__/
+
+# Root-level scratch from local art and branding sessions (issue #603). Anchored
+# to the repository root so examples/, gallery/ and docs/ are unaffected, and a
+# deliberate root file is added with `git add -f`.
+/1
+/output/
+/*.png
+/*.ps
+/branding*/
+/.playwright-mcp/
