@@ -231,3 +231,119 @@ jobs:
       - name: Fail job if regression check failed
         if: steps.perf.outcome == 'failure'
         run: exit 1
+
+  # ---------------------------------------------------------------------------
+  # Cross-platform, MSRV, packaging and licence checks (issue #601, release
+  # epic #562). Everything below is additive and independent of the `test` job
+  # above, which stays exactly as it was: it is the one required status check
+  # (SDLC.md), so a matrix on it would rename it to `test (macos-latest)` and
+  # leave the required `test` check pending forever. These jobs report as their
+  # own checks; the owner decides which become required (see the PR for names).
+  # ---------------------------------------------------------------------------
+
+  # The same build/test pass on Linux and Windows. No PR comments here (the
+  # `test` job owns that), just the pass/fail. Performance is not the point:
+  # tests/common's CPU-time budgets are generous, and a miss on a slow runner
+  # is read as noise, not a finding.
+  cross-platform:
+    name: cross-platform (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # Windows checkouts default to core.autocrlf=true, which turns every
+      # tracked text file (lib/*.ps, test fixtures, goldens) into CRLF. The
+      # repo is LF everywhere, so check it out as it is.
+      - name: Keep line endings as committed
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: PS-native self-checks
+        env:
+          PSCAT_PROFILE: ci
+        run: ./scripts/selftest.sh
+      - name: Run tests
+        run: cargo test --profile ci
+
+  # The declared minimum supported Rust version (`rust-version` in Cargo.toml,
+  # issue #563) really builds the crate, tests included. Read from Cargo.toml
+  # so bumping it there is the only edit.
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read rust-version from Cargo.toml
+        id: msrv
+        run: |
+          v=$(sed -n 's/^rust-version *= *"\([0-9.]*\)".*/\1/p' Cargo.toml | head -1)
+          test -n "$v" || { echo "no rust-version in Cargo.toml" >&2; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --all-targets --locked
+
+  # `cargo package --list` against the licence allowlist, and a publish dry
+  # run, on PRs that touch what ends up in the crate. A bare push to main
+  # always runs it. The job always reports (green when skipped) so it could be
+  # made required without blocking unrelated PRs.
+  packaging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Does this change touch packaging?
+        id: touch
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if git diff --name-only "$BASE_SHA"...HEAD | grep -Eq \
+            '^(Cargo\.toml|Cargo\.lock|build\.rs|deny\.toml|lib/|fonts/|LICENSE|THIRD_PARTY_NOTICES\.md|licenses/|scripts/check_licences\.py|\.github/workflows/ci\.yml)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "No packaging paths changed; skipping." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.touch.outputs.run == 'true'
+      - uses: Swatinem/rust-cache@v2
+        if: steps.touch.outputs.run == 'true'
+      - name: Package file list matches the licence allowlist
+        if: steps.touch.outputs.run == 'true'
+        run: python3 scripts/check_licences.py package
+      - name: cargo publish --dry-run
+        if: steps.touch.outputs.run == 'true'
+        run: cargo publish --dry-run --locked
+
+  # Licence policy that needs no Rust build: every font directory carries a
+  # licence file, licenses/assets.json still describes the tracked assets, and
+  # the checker's own tests pass.
+  licences:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checker tests
+        run: python3 scripts/test_check_licences.py
+      - name: Font catalog and asset manifest
+        run: python3 scripts/check_licences.py all
+
+  # Dependency licences and security advisories (deny.toml).
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check licenses advisories bans sources

@@ -1,0 +1,62 @@
+# cargo-deny policy (issue #601): which licences and advisories the dependency
+# tree may carry. Run by the `deny` job in .github/workflows/ci.yml:
+#   cargo deny check licenses advisories bans sources
+[graph]
+# No `targets` list: cargo-deny then checks the dependencies of every target,
+# so a Windows-only or wasm-only dependency cannot slip past a Linux run.
+all-features = true
+
+[licenses]
+# Every licence a dependency may be under. Copyleft (GPL, LGPL, MPL, AGPL) is
+# deliberately absent: a PR that adds such a dependency fails the `deny` job.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "Zlib",
+    "Unicode-3.0",
+    "ISC",
+    "0BSD",
+    "Unlicense",
+]
+confidence-threshold = 0.9
+
+# Our own package is "(MIT OR Apache-2.0) AND OFL-1.1": the OFL term covers the
+# font data compiled in (THIRD_PARTY_NOTICES.md). cargo-deny checks workspace
+# members too, so the crate's own expression needs this exception.
+[[licenses.exceptions]]
+name = "pscat"
+allow = ["MIT", "Apache-2.0", "OFL-1.1"]
+
+[advisories]
+# Fail on a known vulnerability; unmaintained/yanked crates warn (they are
+# worth knowing about but are not a reason to block an unrelated PR).
+version = 2
+yanked = "warn"
+unmaintained = "workspace"
+# Each ignore names why and the issue that retires it; remove the entry when
+# that lands, so cargo-deny starts failing again if the advisory is still live.
+ignore = [
+    # quick-xml 0.39.4, reached only through wayland-scanner (a build-time proc
+    # macro in winit's Linux/Wayland stack). It parses the Wayland protocol XML
+    # shipped inside the wayland-protocols crates, never untrusted input, and
+    # wayland-scanner 0.31 pins quick-xml 0.39, so `cargo update` cannot move it.
+    # Retire when winit/wayland-scanner move to quick-xml >= 0.41 (issue #611).
+    { id = "RUSTSEC-2026-0194", reason = "quick-xml via wayland-scanner build-time protocol XML only; not upgradeable" },
+    { id = "RUSTSEC-2026-0195", reason = "quick-xml via wayland-scanner build-time protocol XML only; not upgradeable" },
+    # ttf-parser 0.25.1: unmaintained, no known vulnerability. It parses our
+    # embedded fonts and the catalog; replacing it (skrifa) is a project of its
+    # own. Retire with issue #610.
+    { id = "RUSTSEC-2026-0192", reason = "ttf-parser unmaintained, no vulnerability; replacement tracked in an issue" },
+]
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

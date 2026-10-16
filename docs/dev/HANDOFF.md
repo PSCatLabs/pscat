@@ -997,6 +997,14 @@ renders eight examples in both and compares block-downsampled output).
   `licenses/assets.json`, where the first matching entry wins and anything
   unmatched falls to the code licence. Gallery and example art is CC0, but
   code copied in from `lib/` keeps the code licence.
+- **CI checks beyond `test` (#601).** `cross-platform (ubuntu/windows)`,
+  `msrv`, `packaging`, `licences` and `deny` are separate jobs in
+  `ci.yml`; only `test` is required. `deny.toml` is the dependency licence
+  allowlist plus advisory ignores (each names the issue that retires it).
+  A new font directory under `fonts/catalog/` needs a licence file in it
+  and an `assets.json` entry (`python3 scripts/check_licences.py all`).
+  A file added to Cargo.toml's `include` must have an `assets.json` entry
+  that ships in `crate` (`python3 scripts/check_licences.py package`).
 - `PsArray` has a custom `Drop` (iterative teardown of last-handle
   storage; it moved off `Object` in Stage 11 for speed, so
   `obj.value` is movable these days). Don't reintroduce a
