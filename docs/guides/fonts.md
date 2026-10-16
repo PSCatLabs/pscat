@@ -303,7 +303,7 @@ cargo run -- --png sheets.png examples/font_catalog.ps   # the specimen sheets
 ```
 
 [`fonts/catalog/README.md`](../../fonts/catalog/README.md) is the manifest (families, genres,
-licenses — all OFL, Apache 2.0, GUST, or AGPL-with-font-exception;
+licenses — all OFL, Apache 2.0 or GUST, with the URW symbol faces taken under OFL;
 per-family license files ride alongside the fonts). Drop your own
 `.ttf`/`.otf` into any subdirectory and `/<FileStem> findfont`
 finds it. The [font gallery](https://jeromebanks.github.io/postscript_interpreter/fonts.html)
