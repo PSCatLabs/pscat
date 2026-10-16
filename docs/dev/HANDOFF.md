@@ -617,6 +617,13 @@ renders eight examples in both and compares block-downsampled output).
   temp name makes two parallel `cargo test` runs clobber each other;
   `tests/scratch_paths.rs` enforces it.
 
+- **`SECURITY.md` states what untrusted PostScript and `pscat-mcp` can do
+  today, and was checked against the code** (#603). A change that adds or
+  removes a file, process, network or MCP capability, or a resource limit,
+  must update it in the same PR; the limits it lists as missing are the work of
+  #568 and #604. `docs/STABILITY.md` says which surfaces need a deprecation
+  period. `.github/CODEOWNERS` paths are owner-merged (`SDLC.md`, "Who merges").
+
 - **gs is the oracle.** Every semantics question in Stages 5–7 was
   settled by running the snippet in gs first and pinning the answer in
   a test comment. Keep doing that; it caught real design errors twice
@@ -994,6 +1001,15 @@ renders eight examples in both and compares block-downsampled output).
   `scripts/` export `PSCAT_HOME` to their own tree for that reason.
   `PSCAT_TRACE_RESOURCES=1` shows which copy served each file. The
   order is documented once, in `docs/guides/getting-started.md`.
+- **Licensing (#563).** The code is MIT OR Apache-2.0. `Cargo.toml`'s
+  `include` is an allowlist, so a new `include_bytes!`/`include_str!`
+  target, or a file `build.rs` reads, must be added to it or the
+  published crate won't build (`cargo package` verifies the build). A new
+  tracked file under other terms (a font family, a reference photo, a
+  crop) needs a row in `THIRD_PARTY_NOTICES.md` and in
+  `licenses/assets.json`, where the first matching entry wins and anything
+  unmatched falls to the code licence. Gallery and example art is CC0, but
+  code copied in from `lib/` keeps the code licence.
 - `PsArray` has a custom `Drop` (iterative teardown of last-handle
   storage; it moved off `Object` in Stage 11 for speed, so
   `obj.value` is movable these days). Don't reintroduce a

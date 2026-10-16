@@ -203,8 +203,13 @@ Read `.claude/skills/work-issue/references/codex-review.md` now (full policy). T
 8. Post the round on the issue (`## Codex review, round <R>` template in codex-review.md).
 9. If you fixed anything: commit, `git push` (no force), re-run the gate (5.5), go back to 4
    with R+1. Exception for a doc-only merge/rebase: pitfalls.md "Rebase and merge rules".
-10. Merge eligibility, from `merge_policy.mode`:
-    - `human-only`, or `size-and-risk-bar` and over the bar: `rm -rf "$(git rev-parse
+10. Merge eligibility, from `merge_policy.mode`. First, if `merge_policy.owner_merge_file` is set in `SDLC.md` **as it is on `origin/main`**
+    (`git show origin/main:SDLC.md`; the policy in force, not the PR's copy, so a PR cannot drop the field to exempt
+    itself; #603), run `python3 scripts/codeowners_check.py --base origin/main` in `$WORKTREE_DIR` (after the fetch):
+    exit 1 (it prints the matching paths) means the PR touches an owner path, so treat it as `human-only`
+    whatever the mode. Say which paths in the PR and issue comments, and report `awaiting owner merge`.
+    Exit 2 is an error: stop and report, never merge on it.
+    - `human-only`, or `size-and-risk-bar` and over the bar, or an owner path: `rm -rf "$(git rev-parse
       --path-format=absolute --git-common-dir)/work-issue-lock-<N>"`, go to step 10 (awaiting merge). Stop.
     - `agent-full`, or under the bar: continue, unless the dispatcher said not to merge: do 11 and 12
       (wait for CI green), skip 13, release the lock as above, keep `in-review` and the worktree,

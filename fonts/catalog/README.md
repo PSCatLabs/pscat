@@ -14,9 +14,11 @@ The catalog root is found via `$PSCAT_ROOT`, the executable's
 location, the build-time checkout path, or the working directory — see
 `catalog_root()` in `src/font.rs`. Every family directory carries its
 own license text alongside its font files. Licenses here are the SIL
-Open Font License 1.1 (OFL), Apache 2.0, the GUST Font License (GFL),
-and AGPL-3.0-with-font-exception — all freely redistributable; none
-restrict rendering or embedding in documents.
+Open Font License 1.1 (OFL), Apache 2.0 and the GUST Font License
+(GFL). The URW symbol faces are taken under OFL from URW++'s
+AGPL/LPPL/OFL triple licence (`URW-symbols/PROVENANCE.md`). All are freely
+redistributable; none restrict rendering or embedding in documents.
+`THIRD_PARTY_NOTICES.md` at the repo root has the full inventory.
 
 ## The rest of the PostScript standard 35
 
@@ -32,10 +34,11 @@ a metric-compatible libre face (the alias table lives in
 | `TeXGyre-adventor` | AvantGarde-Book/-Demi/-BookOblique/-DemiOblique | TeX Gyre Adventor (GUST) | GFL |
 | `TeXGyre-chorus` | ZapfChancery-MediumItalic | TeX Gyre Chorus (GUST) | GFL |
 | `TeXGyre-heroscn` | Helvetica-Narrow (+Bold/Oblique/BoldOblique) | TeX Gyre Heros Cn (GUST) | GFL |
-| `URW-symbols` | Symbol, ZapfDingbats | URW Standard Symbols PS, D050000L | AGPL-3.0 + font exception |
+| `URW-symbols` | Symbol, ZapfDingbats | URW Standard Symbols PS, D050000L | OFL (chosen from AGPL/LPPL/OFL) |
 
-The URW faces ship with their own PLRM encodings (SymbolEncoding /
-DingbatsEncoding, dumped from Ghostscript — `src/encodings.rs`).
+The URW faces get their own encodings (SymbolEncoding /
+DingbatsEncoding, `src/encodings.rs`; provenance in
+`THIRD_PARTY_NOTICES.md`).
 
 ## Display, text, and mood faces (one style each)
 

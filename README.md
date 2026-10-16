@@ -75,8 +75,11 @@ MCP server with four tools. See the [agents guide](docs/guides/agents.md).
 
 ## Contributing
 
-Start with [`AGENTS.md`](AGENTS.md) for conventions and [`SDLC.md`](SDLC.md)
-for how changes land. [`docs/dev/HANDOFF.md`](docs/dev/HANDOFF.md) orients you in the code,
+Start with [`CONTRIBUTING.md`](CONTRIBUTING.md) (including how contributions are
+licensed), then [`AGENTS.md`](AGENTS.md) for conventions and [`SDLC.md`](SDLC.md)
+for how changes land. Report security problems as [`SECURITY.md`](SECURITY.md)
+describes, and see [`docs/STABILITY.md`](docs/STABILITY.md) for what stays
+stable between releases. [`docs/dev/HANDOFF.md`](docs/dev/HANDOFF.md) orients you in the code,
 [`docs/dev/ARCHITECTURE.md`](docs/dev/ARCHITECTURE.md) explains the design, and
 [`docs/dev/`](docs/dev/README.md) has the contributor notes, such as how to
 preview the website. [`docs/archive/`](docs/archive/README.md) holds the project's history, including
@@ -88,6 +91,21 @@ I used to write raw PostScript by hand in college and send it straight to
 a LaserWriter. This is a from-scratch Rust interpreter built to relive
 that — watching a hand-written recursive PostScript program draw itself,
 live, without depending on a decades-old C codebase to do it.
+
+## Licence
+
+pscat's code is dual-licensed under [MIT](LICENSE-MIT) or
+[Apache-2.0](LICENSE-APACHE), at your option. The package also embeds font
+data: the Liberation faces and the Courier Prime-derived typewriter outlines,
+both under the [SIL Open Font License 1.1](LICENSE-OFL). That's why
+`Cargo.toml` says `(MIT OR Apache-2.0) AND OFL-1.1`. The OFL term covers only
+the embedded font data, not pscat's code.
+
+The fonts in `fonts/catalog/` keep their own upstream licences. The original
+gallery and example art is dedicated to the public domain under
+[CC0-1.0](LICENSE-CC0), with a few exceptions. CC0 grants no rights in the
+pscat name or logo. [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) lists
+what is under which terms.
 
 <!-- sdlcify:managed:start -->
 ## SDLC

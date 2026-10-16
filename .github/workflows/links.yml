@@ -24,3 +24,8 @@ jobs:
         run: python3 scripts/test_check_md_links.py
       - name: Check Markdown links
         run: python3 scripts/check_md_links.py
+      # Not a link check, but the same shape (python3 only, no build): the
+      # CODEOWNERS matcher the work-issue skill uses for SDLC.md's owner-merge
+      # rule, and that every CODEOWNERS entry names a file that exists (#603).
+      - name: CODEOWNERS checker tests and paths
+        run: python3 scripts/test_codeowners_check.py

@@ -48,6 +48,11 @@ config is:
 { "mcpServers": { "pscat": { "command": "/path/to/target/release/pscat-mcp" } } }
 ```
 
+**Safety.** The tools run arbitrary PostScript as you, which can read any file you
+can read, and `out_path` writes (or overwrites) any path you can write. The server
+has no timeouts or confinement yet. Read [`SECURITY.md`](../../SECURITY.md) before
+you hand it to an agent you do not trust.
+
 The server shells out to the `pscat` CLI (found next to it), so the
 tools always match the CLI's behavior. `handwrite` also needs
 `scripts/handwrite.sh`, looked for in `$PSCAT_HOME` (or `$PSCAT_ROOT`),

@@ -2,10 +2,11 @@
 sdlcify_version: 1
 repo: jeromebanks/postscript_interpreter
 default_branch: main
-generated: 2026-10-14
+generated: 2026-10-16
 quality_gate: "PSCAT_PROFILE=ci ./scripts/selftest.sh && cargo test --profile ci && cargo clippy --all-targets -- -D warnings && cargo fmt --all -- --check"
 merge_policy:
   mode: agent-full
+  owner_merge_file: .github/CODEOWNERS
 required_status_checks:
   - test
 branch_protection:
@@ -55,11 +56,13 @@ policy, then re-run `sdlcify` to apply it to GitHub.
    cold. Must come back clean to proceed.
 9. **Merge — agent-full policy**: an agent may merge any PR once CI is
    green and independent review is clean, regardless of diff size or
-   which files it touches. There is currently no size/risk bar and no
-   sensitive-paths carve-out — if that turns out to be too permissive
-   (e.g. after a merge touching `src/interp.rs` or `Cargo.toml` lands
-   without a human look), tighten `merge_policy.mode` to
-   `size-and-risk-bar` in the frontmatter above and re-run `sdlcify`.
+   which files it touches, **except** a PR that touches a path in
+   `.github/CODEOWNERS` (`merge_policy.owner_merge_file`), which the owner
+   merges: see "Who merges" below. There is no size/risk bar — if
+   that turns out to be too permissive (e.g. after a merge touching
+   `src/interp.rs` lands without a human look), tighten
+   `merge_policy.mode` to `size-and-risk-bar` in the frontmatter above
+   and re-run `sdlcify`.
 10. **Post-merge cleanup**: delete the remote branch, remove the local
     worktree if one was used, confirm the issue auto-closed.
 
@@ -83,6 +86,29 @@ stops and reports if it did not (`.claude/skills/work-issue/`). The
 intended long-term replacement is a merge queue, which needs an
 organization-owned repo; when this repo moves to one, switch to the queue
 and add a `merge_group:` trigger to `.github/workflows/ci.yml`.
+
+## Who merges
+
+Whatever `merge_policy.mode` says, **agents don't self-merge PRs that touch
+`.github/CODEOWNERS` paths; the owner merges those.** The file lists the paths
+that change what gets built, shipped or trusted (CI workflows, dependency
+manifests, release scripts, licence files, plugin manifests, and the file
+itself). The agent finds out whether a PR touches one by running
+`python3 scripts/codeowners_check.py --base origin/main` (exit status 1, and the
+matching paths on stdout, means it does); the check reads the file as it is on
+`main` and in the PR, so a PR cannot exempt itself by deleting its own line.
+The agent still opens the PR, runs the independent review and waits for CI,
+then stops and reports the PR as awaiting the owner's merge.
+The rule in force is the one on `main`: the agent reads `merge_policy.owner_merge_file` from
+`SDLC.md` as it is on `main`, so a PR that removes the field is still owner-merged, and the PR
+that first adds the field is judged by the policy before it.
+
+This is enforced by the agent's skill, **not by GitHub**. Turning on "Require
+review from Code Owners" would need at least one required approval, which a
+repo whose agents open PRs under the owner's own account cannot satisfy (see
+the `required_approving_review_count` pitfall in the `sdlcify` skill), so
+`required_pull_request_reviews.require_code_owner_reviews` stays `false` and
+CODEOWNERS only requests the owner's review.
 
 ## Labels
 

@@ -246,8 +246,9 @@ the twelve builtins into a **runtime catalog** loaded from
   `outline_glyph`/`PathSink` pipeline as the builtins' glyf tables.
 - **Encodings**: catalog dicts get StandardEncoding except
   StandardSymbolsPS and D050000L, which carry SymbolEncoding and
-  DingbatsEncoding (dumped from Ghostscript into
-  `src/encodings.rs`) so `(a)` in `/Symbol` is α, per the PLRM.
+  DingbatsEncoding (`src/encodings.rs`: dumped from Ghostscript, then
+  checked against PLRM 3 Appendix E.12 for Symbol and Adobe's ZapfDingbats
+  table for Dingbats, #563) so `(a)` in `/Symbol` is α, per the PLRM.
 - **Discovery**: `$PSCAT_HOME` (or `$PSCAT_ROOT`), the per-user data
   directory, the exe's directory, the checkout (debug-assertion builds
   only), then the cwd (`paths::catalog_dir`; the full order is in

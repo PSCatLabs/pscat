@@ -1,0 +1,48 @@
+name: Bug report
+description: pscat gave a wrong picture, an error, a crash or a hang
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. If this is a **security problem** (a way to write files, run commands, or crash on a crafted file), do not file it here: see [SECURITY.md](https://github.com/jeromebanks/postscript_interpreter/blob/main/SECURITY.md).
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+      description: A render that looks wrong is easier to judge with the image attached.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Smallest PostScript program that shows it
+      description: Paste it, or attach the `.ps` file. Include the exact command you ran (for example `pscat --png out.png prog.ps`).
+      render: postscript
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: pscat version
+      description: The release you installed, or the commit hash if you built from source.
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - macOS (Apple silicon)
+        - macOS (Intel)
+        - Linux
+        - Windows
+        - Browser (WebAssembly)
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: gs
+    attributes:
+      label: Does Ghostscript do something different?
+      description: Optional. If you have `gs`, say what it prints or draws for the same program.

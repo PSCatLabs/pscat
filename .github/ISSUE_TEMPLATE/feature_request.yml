@@ -1,0 +1,28 @@
+name: Feature request
+description: An operator, a flag, a library procedure, a tool or a change in behaviour
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The problem first, then the change you have in mind.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like pscat to do?
+      description: Name the operator, flag or procedure if you can. A short PostScript example of how you would use it helps.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What have you tried instead?
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Contributing
+      options:
+        - label: I would like to try implementing this myself (see CONTRIBUTING.md)

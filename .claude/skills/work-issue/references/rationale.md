@@ -313,3 +313,21 @@ stop before 8.12, which left the maintainer a PR with CI possibly red or running
 green and stops before 8.13 only. Timing advice has one home (pitfalls "Prototypes and timing"),
 points at `bench_compare.sh` and the AGENTS.md CPU-time convention, and stays advisory. The
 pitfalls contents list is by section name because line numbers drifted on every edit.
+
+## Added in #603: owner-merge paths
+
+`SDLC.md` grants `agent-full` merge authority, with no carve-out. The release
+pipeline (#602) puts publishing, the dependency manifests and the licence files
+behind that policy, so a path-based exception was needed, but a size/risk bar
+(`size-and-risk-bar`) would also have stopped the many ordinary PRs this repo
+wants agents to merge. The rule is therefore a modifier on any mode:
+`merge_policy.owner_merge_file` names the CODEOWNERS file, and step 8.10 runs
+`scripts/codeowners_check.py`, which reads that file from `origin/main` and from
+the PR so a PR cannot delete its own protection. It is enforced here, not by
+GitHub: "Require review from Code Owners" needs a required approval, and a
+single-identity repo cannot give one (the sdlcify skill's pitfall). The field is read from
+`origin/main:SDLC.md`, the policy in force, for the same reason: `SDLC.md` is not
+itself an owner path, and a PR that deleted the field would otherwise switch the
+check off. (A consequence: the PR that introduces the rule is judged by the
+policy before it, so it merges under `agent-full`.) Exit status
+2 stops the run instead of merging, so a broken checker cannot read as "clear".

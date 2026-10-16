@@ -3,6 +3,41 @@ name = "pscat"
 version = "0.5.1"
 edition = "2024"
 description = "A PostScript interpreter for watching programs draw, live"
+# The code is MIT OR Apache-2.0. The OFL-1.1 term covers only the font data
+# compiled in: the Liberation faces (src/font.rs) and lib/typewriter_outlines.ps
+# (derived from Courier Prime). See THIRD_PARTY_NOTICES.md (issue #563).
+license = "(MIT OR Apache-2.0) AND OFL-1.1"
+authors = ["Jerome Banks"]
+repository = "https://github.com/jeromebanks/postscript_interpreter"
+homepage = "https://jeromebanks.github.io/postscript_interpreter/"
+documentation = "https://docs.rs/pscat"
+readme = "README.md"
+keywords = ["postscript", "interpreter", "graphics", "rendering", "vector"]
+categories = ["rendering", "graphics", "command-line-utilities", "wasm"]
+# Let chains (`if let ... && let ...`) need 1.88; checked with
+# `cargo +1.88 check --all-targets --locked`.
+rust-version = "1.88"
+# An allowlist, so the published crate carries only what the licence
+# expression above and THIRD_PARTY_NOTICES.md cover. build.rs reads lib/*.ps;
+# src/font.rs embeds the Liberation faces. The font catalog, gallery,
+# examples, site, docs and test data stay out (they have other terms).
+# Anything newly embedded with include_bytes!/include_str! must be added here.
+include = [
+    "/Cargo.toml",
+    "/Cargo.lock",
+    "/build.rs",
+    "/src/**",
+    "/lib/**/*.ps",
+    "/fonts/Liberation*.ttf",
+    "/fonts/LICENSE",
+    "/fonts/README.md",
+    "/README.md",
+    "/LICENSE-MIT",
+    "/LICENSE-APACHE",
+    "/LICENSE-OFL",
+    "/THIRD_PARTY_NOTICES.md",
+    "/licenses/assets.json",
+]
 
 [lib]
 # cdylib is the wasm32 build (scripts/build_wasm.sh); rlib is everything else.
