@@ -489,10 +489,19 @@ pub fn name_to_char(name: &str) -> Option<char> {
     char::from_u32(cp)
 }
 
-// Symbol and ZapfDingbats encodings (PLRM Appendix E), dumped from
-// Ghostscript's SymbolEncoding/DingbatsEncoding — gs as oracle, as
-// everywhere else in this codebase. Used by the font catalog for the
-// URW StandardSymbolsPS and D050000L faces.
+// Symbol and ZapfDingbats encodings, used by the font catalog for the URW
+// StandardSymbolsPS and D050000L faces. Both were first dumped from
+// Ghostscript's SymbolEncoding/DingbatsEncoding (gs as oracle, as everywhere
+// else in this codebase), then checked against documented sources (#563):
+// - SYMBOL_ENCODING matches PLRM 3rd ed. Appendix E.12/E.13 code for code
+//   (all 189 named codes; every other code is .notdef). The PLRM is the
+//   authoritative source.
+// - DINGBATS_ENCODING: PLRM 3 has no Dingbats table. Its 188 named codes
+//   match Adobe's ZapfDingbats encoding (Adobe's zdingbat.txt, Unicode
+//   Consortium MAPPINGS/VENDORS/ADOBE) code for code. Adobe also encodes
+//   \200-\215 (a89 ... a96, a205, a206), which are .notdef here and in
+//   Ghostscript 10.07 (#605).
+// Factual glyph-name lists; see THIRD_PARTY_NOTICES.md.
 static SYMBOL_ENCODING: [&str; 256] = [
     ".notdef",
     ".notdef",

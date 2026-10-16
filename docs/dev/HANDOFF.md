@@ -981,6 +981,15 @@ renders eight examples in both and compares block-downsampled output).
 
 ## Gotchas for the next implementer
 
+- **Licensing (#563).** The code is MIT OR Apache-2.0. `Cargo.toml`'s
+  `include` is an allowlist, so a new `include_bytes!`/`include_str!`
+  target, or a file `build.rs` reads, must be added to it or the
+  published crate won't build (`cargo package` verifies the build). A new
+  tracked file under other terms (a font family, a reference photo, a
+  crop) needs a row in `THIRD_PARTY_NOTICES.md` and in
+  `licenses/assets.json`, where the first matching entry wins and anything
+  unmatched falls to the code licence. Gallery and example art is CC0, but
+  code copied in from `lib/` keeps the code licence.
 - `PsArray` has a custom `Drop` (iterative teardown of last-handle
   storage; it moved off `Object` in Stage 11 for speed, so
   `obj.value` is movable these days). Don't reintroduce a
