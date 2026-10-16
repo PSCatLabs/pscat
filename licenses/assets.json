@@ -61,7 +61,7 @@
         "fonts/catalog/AbrilFatface/**"
       ],
       "license": "OFL-1.1",
-      "copyright": "Copyright (c) 2011, TypeTogether (www.type-together.com)",
+      "copyright": "Copyright (c) 2011, TypeTogether (www.type-together.com), with Reserved Font Names \"Abril\" and \"Abril Fatface\"",
       "ships_in": [
         "font-pack"
       ],
@@ -257,7 +257,7 @@
         "fonts/catalog/Creepster/**"
       ],
       "license": "OFL-1.1",
-      "copyright": "Copyright (c) 2011, Font Diner, Inc (diner@fontdiner.com)",
+      "copyright": "Copyright (c) 2011, Font Diner, Inc (diner@fontdiner.com), with Reserved Font Names \"Creepster\"",
       "ships_in": [
         "font-pack"
       ],
@@ -369,7 +369,7 @@
         "fonts/catalog/Limelight/**"
       ],
       "license": "OFL-1.1",
-      "copyright": "Copyright (c) 2011 by Sorkin Type Co (www.sorkintype.com)",
+      "copyright": "Copyright (c) 2011 by Sorkin Type Co (www.sorkintype.com), with Reserved Font Name \"Limelight\".",
       "ships_in": [
         "font-pack"
       ],
@@ -397,7 +397,7 @@
         "fonts/catalog/MedievalSharp/**"
       ],
       "license": "OFL-1.1",
-      "copyright": "Copyright (c) 2011, wmk69 (wmk69@o2.pl)",
+      "copyright": "Copyright (c) 2011, wmk69 (wmk69@o2.pl), with Reserved Font Name MedievalSharp.",
       "ships_in": [
         "font-pack"
       ],
@@ -411,7 +411,7 @@
         "fonts/catalog/Monoton/**"
       ],
       "license": "OFL-1.1",
-      "copyright": "Copyright (c) 2011 by vernon adams (vern@newtypography.co.uk)",
+      "copyright": "Copyright (c) 2011 by vernon adams (vern@newtypography.co.uk), with Reserved Font Names \"Monoton\"",
       "ships_in": [
         "font-pack"
       ],
@@ -425,7 +425,7 @@
         "fonts/catalog/NanumBrushScript/**"
       ],
       "license": "OFL-1.1",
-      "copyright": "Copyright (c) 2010, NHN Corporation (http://www.nhncorp.com)",
+      "copyright": "Copyright (c) 2010, NHN Corporation (http://www.nhncorp.com), with Reserved Font Name Nanum, Naver Nanum, NanumGothic, Naver NanumGothic, NanumMyeongjo, Naver NanumMyeongjo, NanumBrush, Naver NanumBrush, NanumPen, Naver NanumPen.",
       "ships_in": [
         "font-pack"
       ],
@@ -593,7 +593,7 @@
         "fonts/catalog/Rye/**"
       ],
       "license": "OFL-1.1",
-      "copyright": "Copyright (c) 2011 by Sorkin Type Co (www.sorkintype.com)",
+      "copyright": "Copyright (c) 2011 by Sorkin Type Co (www.sorkintype.com), with Reserved Font Name \"Rye\".",
       "ships_in": [
         "font-pack"
       ],
@@ -607,7 +607,7 @@
         "fonts/catalog/SpecialElite/**"
       ],
       "license": "Apache-2.0",
-      "copyright": "Copyright (c) 2010 by Brian J. Bonislawsky DBA Astigmatic (AOETI). All rights reserved. Available under the Apache 2.0 licence.\rhttp://www.apache.org/licenses/LICENSE-2.0.html",
+      "copyright": "Copyright (c) 2010 by Brian J. Bonislawsky DBA Astigmatic (AOETI). All rights reserved. Available under the Apache 2.0 licence. http://www.apache.org/licenses/LICENSE-2.0.html",
       "ships_in": [
         "font-pack"
       ],
@@ -621,7 +621,7 @@
         "fonts/catalog/StardosStencil/**"
       ],
       "license": "OFL-1.1",
-      "copyright": "Copyright (c) 2011 by vernon adams (vern@newtypography.co.uk)",
+      "copyright": "Copyright (c) 2011 by vernon adams (vern@newtypography.co.uk), with Reserved Font Names \"Stardos\" and \"Stardos Stencil\".",
       "ships_in": [
         "font-pack"
       ],
@@ -650,7 +650,7 @@
         "fonts/catalog/TeXGyre-bonum/**"
       ],
       "license": "LPPL-1.3c",
-      "copyright": "Copyright 2006, 2009 for TeX Gyre extensions by B. Jackowski and J.M. Nowacki (on behalf of TeX users groups). This work is released under the GUST Font License --  see http://tug.org/fonts/licenses/GUST-FONT-LICENSE.txt for details.",
+      "copyright": "Copyright 2006, 2009 for TeX Gyre extensions by B. Jackowski and J.M. Nowacki (on behalf of TeX users groups). This work is released under the GUST Font License -- see http://tug.org/fonts/licenses/GUST-FONT-LICENSE.txt for details.",
       "ships_in": [
         "font-pack"
       ],
@@ -665,7 +665,7 @@
         "fonts/catalog/TeXGyre-chorus/**"
       ],
       "license": "LPPL-1.3c",
-      "copyright": "Copyright 2006, 2009 for TeX Gyre extensions by B. Jackowski and J.M. Nowacki (on behalf of TeX users groups). This work is released under the GUST Font License --  see http://tug.org/fonts/licenses/GUST-FONT-LICENSE.txt for details.",
+      "copyright": "Copyright 2006, 2009 for TeX Gyre extensions by B. Jackowski and J.M. Nowacki (on behalf of TeX users groups). This work is released under the GUST Font License -- see http://tug.org/fonts/licenses/GUST-FONT-LICENSE.txt for details.",
       "ships_in": [
         "font-pack"
       ],
@@ -680,7 +680,7 @@
         "fonts/catalog/TeXGyre-heroscn/**"
       ],
       "license": "LPPL-1.3c",
-      "copyright": "Copyright 2006, 2009 for TeX Gyre extensions by B. Jackowski and J.M. Nowacki (on behalf of TeX users groups). This work is released under the GUST Font License --  see http://tug.org/fonts/licenses/GUST-FONT-LICENSE.txt for details.",
+      "copyright": "Copyright 2006, 2009 for TeX Gyre extensions by B. Jackowski and J.M. Nowacki (on behalf of TeX users groups). This work is released under the GUST Font License -- see http://tug.org/fonts/licenses/GUST-FONT-LICENSE.txt for details.",
       "ships_in": [
         "font-pack"
       ],
@@ -710,7 +710,7 @@
         "fonts/catalog/TeXGyre-schola/**"
       ],
       "license": "LPPL-1.3c",
-      "copyright": "Copyright 2006, 2009 for TeX Gyre extensions by B. Jackowski and J.M. Nowacki (on behalf of TeX users groups). This work is released under the GUST Font License --  see http://tug.org/fonts/licenses/GUST-FONT-LICENSE.txt for details.",
+      "copyright": "Copyright 2006, 2009 for TeX Gyre extensions by B. Jackowski and J.M. Nowacki (on behalf of TeX users groups). This work is released under the GUST Font License -- see http://tug.org/fonts/licenses/GUST-FONT-LICENSE.txt for details.",
       "ships_in": [
         "font-pack"
       ],
@@ -725,7 +725,7 @@
         "fonts/catalog/UnifrakturMaguntia/**"
       ],
       "license": "OFL-1.1",
-      "copyright": "Copyright (c) 2010, j. 'mach' wust, with Reserved Font Name UnifrakturMaguntia.",
+      "copyright": "Copyright (c) 2010, j. 'mach' wust, with Reserved Font Name UnifrakturMaguntia. Copyright (c) 2009, Peter Wiegel.",
       "ships_in": [
         "font-pack"
       ],

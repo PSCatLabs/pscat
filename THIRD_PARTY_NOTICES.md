@@ -93,7 +93,7 @@ which a modified version must not use.
 | Directory | Licence | Copyright | Licence file |
 |---|---|---|---|
 | `URW-symbols` | OFL-1.1 | Copyright 2013,2014,2015 by (URW)++ Design & Development | `LICENSE.OFL`, `LICENSE.md` |
-| `AbrilFatface` | OFL-1.1 | Copyright (c) 2011, TypeTogether (www.type-together.com) | `OFL.txt` |
+| `AbrilFatface` | OFL-1.1 | Copyright (c) 2011, TypeTogether (www.type-together.com), with Reserved Font Names "Abril" and "Abril Fatface" | `OFL.txt` |
 | `AlfaSlabOne` | OFL-1.1 | Copyright 2016 The Alfa Slab One Project Authors (http://www.jmsole.cl / info@jmsole.cl), with Reserved Font Name "Alfa Slab". | `OFL.txt` |
 | `Anton` | OFL-1.1 | Copyright 2020 The Anton Project Authors (https://github.com/googlefonts/AntonFont.git) | `OFL.txt` |
 | `AtkinsonHyperlegible` | OFL-1.1 | Copyright 2020 Braille Institute of America, Inc. | `OFL.txt` |
@@ -107,7 +107,7 @@ which a modified version must not use.
 | `Cinzel` | OFL-1.1 | Copyright 2020 The Cinzel Project Authors (https://github.com/NDISCOVER/Cinzel) | `OFL.txt` |
 | `ComicNeue` | OFL-1.1 | Copyright 2014 The Comic Neue Project Authors (https://github.com/crozynski/comicneue) | `OFL.txt` |
 | `CourierPrime` | OFL-1.1 | Copyright 2015 The Courier Prime Project Authors (https://github.com/quoteunquoteapps/CourierPrime). | `OFL.txt` |
-| `Creepster` | OFL-1.1 | Copyright (c) 2011, Font Diner, Inc (diner@fontdiner.com) | `OFL.txt` |
+| `Creepster` | OFL-1.1 | Copyright (c) 2011, Font Diner, Inc (diner@fontdiner.com), with Reserved Font Names "Creepster" | `OFL.txt` |
 | `EBGaramond` | OFL-1.1 | Copyright 2017 The EB Garamond Project Authors (https://github.com/octaviopardo/EBGaramond12) | `OFL.txt` |
 | `Graduate` | OFL-1.1 | Copyright 2012 The Graduate Project Authors (https://github.com/etunni/graduate) with Reserved Font Name "Graduate" | `OFL.txt` |
 | `GreatVibes` | OFL-1.1 | Copyright 2015 The Great Vibes Pro Project Authors (https://github.com/googlefonts/great-vibes) | `OFL.txt` |
@@ -115,11 +115,11 @@ which a modified version must not use.
 | `JetBrainsMono` | OFL-1.1 | Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono) | `OFL.txt` |
 | `Jost` | OFL-1.1 | Copyright 2020 The Jost Project Authors (https://github.com/indestructible-type) | `OFL.txt` |
 | `LibreBaskerville` | OFL-1.1 | Copyright 2012 The Libre Baskerville Project Authors (https://github.com/impallari/Libre-Baskerville) with Reserved Font Name Libre Baskerville. | `OFL.txt` |
-| `Limelight` | OFL-1.1 | Copyright (c) 2011 by Sorkin Type Co (www.sorkintype.com) | `OFL.txt` |
+| `Limelight` | OFL-1.1 | Copyright (c) 2011 by Sorkin Type Co (www.sorkintype.com), with Reserved Font Name "Limelight". | `OFL.txt` |
 | `Lora` | OFL-1.1 | Copyright 2011 The Lora Project Authors (https://github.com/cyrealtype/Lora-Cyrillic), with Reserved Font Name "Lora". | `OFL.txt` |
-| `MedievalSharp` | OFL-1.1 | Copyright (c) 2011, wmk69 (wmk69@o2.pl) | `OFL.txt` |
-| `Monoton` | OFL-1.1 | Copyright (c) 2011 by vernon adams (vern@newtypography.co.uk) | `OFL.txt` |
-| `NanumBrushScript` | OFL-1.1 | Copyright (c) 2010, NHN Corporation (http://www.nhncorp.com) | `OFL.txt` |
+| `MedievalSharp` | OFL-1.1 | Copyright (c) 2011, wmk69 (wmk69@o2.pl), with Reserved Font Name MedievalSharp. | `OFL.txt` |
+| `Monoton` | OFL-1.1 | Copyright (c) 2011 by vernon adams (vern@newtypography.co.uk), with Reserved Font Names "Monoton" | `OFL.txt` |
+| `NanumBrushScript` | OFL-1.1 | Copyright (c) 2010, NHN Corporation (http://www.nhncorp.com), with Reserved Font Name Nanum, Naver Nanum, NanumGothic, Naver NanumGothic, NanumMyeongjo, Naver NanumMyeongjo, NanumBrush, Naver NanumBrush, NanumPen, Naver NanumPen. | `OFL.txt` |
 | `NotoSansJP` | OFL-1.1 | Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source' | `OFL.txt` |
 | `NotoSansKR` | OFL-1.1 | Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source' | `OFL.txt` |
 | `NotoSansThai` | OFL-1.1 | Copyright 2022 The Noto Project Authors (https://github.com/notofonts/thai) | `OFL.txt` |
@@ -131,17 +131,16 @@ which a modified version must not use.
 | `PlayfairDisplay` | OFL-1.1 | Copyright 2017 The Playfair Display Project Authors (https://github.com/clauseggers/Playfair-Display), with Reserved Font Name "Playfair Display" | `OFL.txt` |
 | `Poppins` | OFL-1.1 | Copyright 2020 The Poppins Project Authors (https://github.com/itfoundry/Poppins) | `OFL.txt` |
 | `PressStart2P` | OFL-1.1 | Copyright 2012 The Press Start 2P Project Authors (cody@zone38.net), with Reserved Font Name "Press Start 2P". | `OFL.txt` |
-| `Rye` | OFL-1.1 | Copyright (c) 2011 by Sorkin Type Co (www.sorkintype.com) | `OFL.txt` |
-| `SpecialElite` | Apache-2.0 | Copyright (c) 2010 by Brian J. Bonislawsky DBA Astigmatic (AOETI). All rights reserved. Available under the Apache 2.0 licence.
-http://www.apache.org/licenses/LICENSE-2.0.html | `LICENSE.txt` |
-| `StardosStencil` | OFL-1.1 | Copyright (c) 2011 by vernon adams (vern@newtypography.co.uk) | `OFL.txt` |
+| `Rye` | OFL-1.1 | Copyright (c) 2011 by Sorkin Type Co (www.sorkintype.com), with Reserved Font Name "Rye". | `OFL.txt` |
+| `SpecialElite` | Apache-2.0 | Copyright (c) 2010 by Brian J. Bonislawsky DBA Astigmatic (AOETI). All rights reserved. Available under the Apache 2.0 licence. http://www.apache.org/licenses/LICENSE-2.0.html | `LICENSE.txt` |
+| `StardosStencil` | OFL-1.1 | Copyright (c) 2011 by vernon adams (vern@newtypography.co.uk), with Reserved Font Names "Stardos" and "Stardos Stencil". | `OFL.txt` |
 | `TeXGyre-adventor` | LPPL-1.3c | Copyright 2007-2018 for TeX Gyre extensions by B. Jackowski, J.M. Nowacki, et al. (on behalf of TeX USERS GROUPS). Vietnamese characters were added by Han The Thanh. | `GUST-FONT-LICENSE.txt` |
-| `TeXGyre-bonum` | LPPL-1.3c | Copyright 2006, 2009 for TeX Gyre extensions by B. Jackowski and J.M. Nowacki (on behalf of TeX users groups). This work is released under the GUST Font License --  see http://tug.org/fonts/licenses/GUST-FONT-LICENSE.txt for details. | `GUST-FONT-LICENSE.txt` |
-| `TeXGyre-chorus` | LPPL-1.3c | Copyright 2006, 2009 for TeX Gyre extensions by B. Jackowski and J.M. Nowacki (on behalf of TeX users groups). This work is released under the GUST Font License --  see http://tug.org/fonts/licenses/GUST-FONT-LICENSE.txt for details. | `GUST-FONT-LICENSE.txt` |
-| `TeXGyre-heroscn` | LPPL-1.3c | Copyright 2006, 2009 for TeX Gyre extensions by B. Jackowski and J.M. Nowacki (on behalf of TeX users groups). This work is released under the GUST Font License --  see http://tug.org/fonts/licenses/GUST-FONT-LICENSE.txt for details. | `GUST-FONT-LICENSE.txt` |
+| `TeXGyre-bonum` | LPPL-1.3c | Copyright 2006, 2009 for TeX Gyre extensions by B. Jackowski and J.M. Nowacki (on behalf of TeX users groups). This work is released under the GUST Font License -- see http://tug.org/fonts/licenses/GUST-FONT-LICENSE.txt for details. | `GUST-FONT-LICENSE.txt` |
+| `TeXGyre-chorus` | LPPL-1.3c | Copyright 2006, 2009 for TeX Gyre extensions by B. Jackowski and J.M. Nowacki (on behalf of TeX users groups). This work is released under the GUST Font License -- see http://tug.org/fonts/licenses/GUST-FONT-LICENSE.txt for details. | `GUST-FONT-LICENSE.txt` |
+| `TeXGyre-heroscn` | LPPL-1.3c | Copyright 2006, 2009 for TeX Gyre extensions by B. Jackowski and J.M. Nowacki (on behalf of TeX users groups). This work is released under the GUST Font License -- see http://tug.org/fonts/licenses/GUST-FONT-LICENSE.txt for details. | `GUST-FONT-LICENSE.txt` |
 | `TeXGyre-pagella` | LPPL-1.3c | Copyright 2006-2018 for TeX Gyre extensions by B. Jackowski, J.M. Nowacki, et al. (on behalf of TeX USERS GROUPS). Vietnamese characters were added by Han The Thanh. | `GUST-FONT-LICENSE.txt` |
-| `TeXGyre-schola` | LPPL-1.3c | Copyright 2006, 2009 for TeX Gyre extensions by B. Jackowski and J.M. Nowacki (on behalf of TeX users groups). This work is released under the GUST Font License --  see http://tug.org/fonts/licenses/GUST-FONT-LICENSE.txt for details. | `GUST-FONT-LICENSE.txt` |
-| `UnifrakturMaguntia` | OFL-1.1 | Copyright (c) 2010, j. 'mach' wust, with Reserved Font Name UnifrakturMaguntia. | `OFL.txt` |
+| `TeXGyre-schola` | LPPL-1.3c | Copyright 2006, 2009 for TeX Gyre extensions by B. Jackowski and J.M. Nowacki (on behalf of TeX users groups). This work is released under the GUST Font License -- see http://tug.org/fonts/licenses/GUST-FONT-LICENSE.txt for details. | `GUST-FONT-LICENSE.txt` |
+| `UnifrakturMaguntia` | OFL-1.1 | Copyright (c) 2010, j. 'mach' wust, with Reserved Font Name UnifrakturMaguntia. Copyright (c) 2009, Peter Wiegel. | `OFL.txt` |
 | `VT323` | OFL-1.1 | Copyright 2011, The VT323 Project Authors (peter.hull@oikoi.com) | `OFL.txt` |
 | `ZillaSlab` | OFL-1.1 | Copyright 2017, The Mozilla Foundation | `OFL.txt` |
 

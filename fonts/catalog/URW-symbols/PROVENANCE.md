@@ -63,12 +63,19 @@ triple licence, kept so the record is complete. They are not the terms pscat
 applies, and pscat ships no AGPL font pack.
 
 **The wording changed over time.** The 2017 `LICENSE.md` (commit
-`a8265008`) read:
+`a8265008`, the only 2017 commit to touch that file) read, verbatim:
 
-> The fonts and related files in this directory are distributed under the
-> following licenses:
-> AGPL-3.0 with an exemption, LPPL-1.3c, OFL-1.1.
-> Copyright 2013,2014,2015 by (URW)++ Design & Development
+```markdown
+# License information for URW Core 35 Fonts, Version 2.00
+
+The fonts and related files in this directory are distributed under the following licenses:
+
+* [GNU Affero General Public License, Version 3](./COPYING) with an [exemption](./LICENSE)
+* [The LaTeX Project Public License, Version 1.3c](./LICENSE.LPPL)
+* [SIL Open Font License, Version 1.1](./LICENSE.OFL)
+
+Copyright 2013,2014,2015 by (URW)++ Design & Development
+```
 
 The copy here has the wording that the mirror's maintainer added in 2026
 (commit `85a07f255f7e47f495d4e9967b9a040194fcdd55`, "Clarify license
