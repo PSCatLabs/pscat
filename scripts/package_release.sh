@@ -90,7 +90,7 @@ echo "==> Verifying the bundle resolves lib/ and fonts/catalog/ standalone"
 cd /tmp
 bare() { env -u PSCAT_ROOT -u PSCAT_HOME -u PSCAT_LIB PSCAT_TRACE_RESOURCES=1 "$@"; }
 FONTS=$(bare "$BUNDLE/pscat" --fonts)
-echo "$FONTS" | grep -q "Bangers" ||
+grep -q "Bangers" <<<"$FONTS" ||
   { echo "FAIL: fonts/catalog/ did not resolve standalone" >&2; exit 1; }
 for lib in lib/artkit.ps lib/etching.ps; do
   TRACE=$(bare "$BUNDLE/pscat" -e "($lib) run" 2>&1) || true

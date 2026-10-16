@@ -26,9 +26,10 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 # unnoticed (the build embeds lib/ from the package's own tree).
 PACKAGED=$(cargo package --list --allow-dirty --manifest-path "$ROOT/Cargo.toml" 2>/dev/null) ||
   fail "cargo package --list failed"
-for f in "$ROOT"/lib/*.ps; do
-  grep -qx "lib/$(basename "$f")" <<<"$PACKAGED" || fail "lib/$(basename "$f") missing from cargo package --list"
-done
+while IFS= read -r f; do
+  rel=${f#"$ROOT"/}
+  grep -qxF "$rel" <<<"$PACKAGED" || fail "$rel missing from cargo package --list"
+done < <(find "$ROOT/lib" -name '*.ps')
 
 SCRATCH=$(mktemp -d "${TMPDIR:-/tmp}/pscat-clean-install.XXXXXX")
 SCRATCH=$(cd "$SCRATCH" && pwd -P)

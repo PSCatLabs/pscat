@@ -26,10 +26,13 @@ Part of release epic #562 (split from #564; the design came out of the
   renders the mathkit/drychalk/typewriter specimens from an empty dir
   outside the checkout, and requires every trace line to say `embedded`
   (plus at least one line per example, so broken tracing can't pass it). It
-  also checks that `cargo package --list` still carries `lib/*.ps`.
+  also checks that `cargo package --list` still carries every `lib/**/*.ps`.
   `scripts/package_release.sh`'s bundle check now asserts `exe-dir` the same
   way: with an embedded copy, "it ran" no longer proved the bundle's lib/
   was found.
+  The script's catalog check also stops piping `echo` into `grep -q` under
+  `pipefail`: grep exiting early made it fail intermittently (it did on the
+  first run here, on unchanged code).
 
 **Decisions.**
 - **Checkout heuristics are gone from release builds, as the issue says**
@@ -44,6 +47,9 @@ Part of release epic #562 (split from #564; the design came out of the
   levels above its exe, used only to find `scripts/handwrite.sh`, so the
   documented `claude mcp add pscat -- $PWD/target/release/pscat-mcp`
   keeps working. It goes away with #600 (script ports).
+  There `$PSCAT_ROOT` is still trusted unconditionally, as before, but
+  `$PSCAT_HOME` is existence-checked, since #599 may point it at a font-pack
+  directory with no `scripts/`.
 - **`$PSCAT_HOME` is the new name; `$PSCAT_ROOT` is an alias** at the same
   step, so existing setups keep working. It comes before the cwd (as
   `$PSCAT_ROOT` always did) because setting it is an explicit choice.

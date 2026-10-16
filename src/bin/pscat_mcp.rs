@@ -397,13 +397,15 @@ fn pscat_bin() -> Result<PathBuf, String> {
     }
 }
 
-/// The pscat tree holding `scripts/handwrite.sh`: `$PSCAT_HOME` (or
-/// its older name `$PSCAT_ROOT`), trusted unconditionally (an explicit
-/// override that's wrong should fail loudly rather than silently fall
-/// through to some other root); otherwise the first of the resolver's
-/// install roots (`pscat::paths::install_roots`: per-user data dir,
-/// the exe's own directory, which is the bundle layout, and in
-/// debug-assertion builds the checkout) that has the script.
+/// The pscat tree holding `scripts/handwrite.sh`: `$PSCAT_ROOT`,
+/// trusted unconditionally as it always was (an explicit override
+/// that's wrong should fail loudly rather than silently fall through
+/// to some other root); otherwise the first of the resolver's install
+/// roots (`pscat::paths::install_roots`: `$PSCAT_HOME`, the per-user
+/// data dir, the exe's own directory, which is the bundle layout, and
+/// in debug-assertion builds the checkout) that has the script.
+/// `$PSCAT_HOME` is existence-checked like the rest because #599 may
+/// point it at a font-pack directory with no `scripts/`.
 ///
 /// One more fallback outlives the resolver's: three levels above the
 /// exe, so `target/release/pscat-mcp` registered from a checkout (the
@@ -412,12 +414,10 @@ fn pscat_bin() -> Result<PathBuf, String> {
 /// file or font, and it goes away when #600 ports handwrite.sh into
 /// the `pscat` binary. `handwrite.sh` points pscat at its own tree.
 fn repo_root() -> Result<PathBuf, String> {
-    for var in ["PSCAT_HOME", "PSCAT_ROOT"] {
-        if let Some(root) = std::env::var_os(var).filter(|v| !v.is_empty()) {
-            return Ok(PathBuf::from(root));
-        }
-    }
     const SCRIPT_REL: &str = "scripts/handwrite.sh";
+    if let Some(root) = std::env::var_os("PSCAT_ROOT").filter(|v| !v.is_empty()) {
+        return Ok(PathBuf::from(root));
+    }
     let dev_checkout = std::env::current_exe()
         .ok()
         .map(|p| std::fs::canonicalize(&p).unwrap_or(p))
