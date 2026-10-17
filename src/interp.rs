@@ -239,6 +239,11 @@ pub struct Interp {
     /// text, not the procedure's original definition site — this
     /// interpreter doesn't tag objects with a source position.
     last_line: Option<usize>,
+    /// A sentence for the user that `error_report` prints under the
+    /// error line, set by `findfont` for a face whose font pack is not
+    /// installed (issue #599). findfont clears it on every call, and a
+    /// `stopped` that catches the error clears it too.
+    pub(crate) error_hint: Option<String>,
     /// State for `rand`/`srand`/`rrand`. Deterministic by default —
     /// reproducible art is a feature here, not a bug.
     pub(crate) rand_state: i64,
@@ -346,6 +351,7 @@ impl Interp {
             caught_error: None,
             error_command: None,
             last_line: None,
+            error_hint: None,
             rand_state: 1,
             seed_override: None,
             seed_override_fired: false,
@@ -477,6 +483,9 @@ impl Interp {
             return Err(e);
         }
         self.record_error(&e, command);
+        // A caught error's findfont hint must not label a later,
+        // unrelated invalidfont (setfont on a bad dict, say).
+        self.error_hint = None;
         self.caught_error = Some(e);
         self.do_stop();
         self.push(Object::bool(true));
@@ -628,11 +637,17 @@ impl Interp {
                 .last_executed_name()
                 .unwrap_or_else(|| "--none--".to_string()),
         };
-        match self.last_line {
+        let report = match self.last_line {
             Some(line) => {
                 format!("%%[ Error: {kind}; OffendingCommand: {command}; Line: {line} ]%%")
             }
             None => format!("%%[ Error: {kind}; OffendingCommand: {command} ]%%"),
+        };
+        // On its own line, so tools matching the `%%[ ... ]%%` line
+        // still see exactly that.
+        match (&self.error_hint, err) {
+            (Some(hint), PsError::InvalidFont) => format!("{report}\n{hint}"),
+            _ => report,
         }
     }
 
@@ -1620,6 +1635,31 @@ fn scan_procedure(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_findfont_hint_goes_under_the_error_line_for_invalidfont_only() {
+        let mut it = Interp::new();
+        let err = it.run_str("1 0 div").unwrap_err();
+        it.error_hint = Some("pscat: install the pack".into());
+        assert!(!it.error_report(&err).contains("install the pack"));
+        let report = it.error_report(&PsError::InvalidFont);
+        let lines: Vec<&str> = report.lines().collect();
+        assert_eq!(lines.len(), 2, "{report}");
+        assert!(lines[0].starts_with("%%[ Error: invalidfont;") && lines[0].ends_with("]%%"));
+        assert_eq!(lines[1], "pscat: install the pack");
+    }
+
+    #[test]
+    fn a_caught_error_drops_the_findfont_hint() {
+        let mut it = Interp::new();
+        it.error_hint = Some("pscat: install the pack".into());
+        let err = it
+            .run_str("{ 1 0 div } stopped pop << >> setfont")
+            .unwrap_err();
+        assert_eq!(err, PsError::InvalidFont);
+        assert!(!it.error_report(&err).contains("install the pack"));
+    }
+
     use super::*;
 
     /// `break_permanent_dict_cycle` must actually free `userdict`, not

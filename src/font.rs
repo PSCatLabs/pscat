@@ -175,33 +175,79 @@ static ALIASES: &[(&str, &str)] = &[
 /// aliases and file stems), then the substitute face. The catalog is
 /// filesystem-backed, so wasm builds resolve builtins-or-substitute
 /// only.
-pub(crate) fn resolve(requested: &str) -> i64 {
+///
+/// A name that belongs to a font pack (`fonts/packs.json`, issue #599)
+/// but is not on disk is an error, never a substitute: the `Err` is the
+/// hint naming the pack to install, which findfont attaches to its
+/// `invalidfont`. That covers /Symbol and /ZapfDingbats, whose metrics a
+/// Helvetica stand-in would silently get wrong. Names no pack has
+/// still substitute, Ghostscript-style.
+pub(crate) fn resolve(requested: &str) -> Result<i64, String> {
     if let Some(fid) = builtin_index(requested) {
-        return fid;
+        return Ok(fid);
     }
     #[cfg(not(target_arch = "wasm32"))]
-    if let Some(fid) = catalog_fid(requested) {
-        return fid;
+    {
+        if let Some(fid) = catalog_fid(requested) {
+            return Ok(fid);
+        }
+        if let Some(hint) = missing_face_hint(requested) {
+            return Err(hint);
+        }
     }
-    SUBSTITUTE
+    Ok(SUBSTITUTE)
 }
 
+/// The file stems a requested name is looked up by: the alias target
+/// (or the name itself), then that with `-Regular`, so `/Bangers
+/// findfont` means the family's regular face. Shared by the lookup and
+/// the missing-pack check so the two cannot disagree.
 #[cfg(not(target_arch = "wasm32"))]
-fn catalog_root() -> Option<std::path::PathBuf> {
-    crate::paths::catalog_dir()
-}
-
-/// Find (loading if necessary) the catalog face for a requested name.
-/// Lookup: alias → stem, already-loaded (by key or PostScript name),
-/// then a directory scan for `<stem>.ttf`/`.otf`/`.ttc`, with a
-/// `-Regular` fallback so `/Bangers findfont` means the family's
-/// regular face.
-#[cfg(not(target_arch = "wasm32"))]
-fn catalog_fid(requested: &str) -> Option<i64> {
+fn wanted_stems(requested: &str) -> (&str, String) {
     let stem = ALIASES
         .iter()
         .find(|(k, _)| *k == requested)
         .map_or(requested, |(_, v)| *v);
+    (stem, format!("{stem}-Regular"))
+}
+
+/// The pack holding the face `requested` names, if any pack does.
+#[cfg(not(target_arch = "wasm32"))]
+fn missing_pack(requested: &str) -> Option<&'static str> {
+    let (stem, fallback) = wanted_stems(requested);
+    crate::fontpacks::pack_for_stem(stem).or_else(|| crate::fontpacks::pack_for_stem(&fallback))
+}
+
+/// The hint for a face whose pack is not installed, or `None` when no
+/// pack has it.
+#[cfg(not(target_arch = "wasm32"))]
+fn missing_face_hint(requested: &str) -> Option<String> {
+    missing_pack(requested).map(|pack| {
+        format!(
+            "pscat: font /{requested} is in the {pack} font pack, which is not installed; \
+             run `pscat fonts install` (or `pscat fonts install --pack {pack}`)"
+        )
+    })
+}
+
+/// The directories catalog faces load from, in priority order:
+/// `fonts/catalog/` overrides, then installed packs
+/// (`crate::fontpacks` module doc).
+#[cfg(not(target_arch = "wasm32"))]
+fn catalog_roots() -> Vec<std::path::PathBuf> {
+    crate::fontpacks::font_dirs()
+        .into_iter()
+        .map(|d| d.path)
+        .collect()
+}
+
+/// Find (loading if necessary) the catalog face for a requested name.
+/// Lookup: alias → stem, already-loaded (by key or PostScript name),
+/// then, root by root in priority order, a scan of its family
+/// directories for `<stem>.ttf`/`.otf`/`.ttc`, then `<stem>-Regular`.
+#[cfg(not(target_arch = "wasm32"))]
+fn catalog_fid(requested: &str) -> Option<i64> {
+    let (stem, fallback) = wanted_stems(requested);
     {
         let cat = CATALOG.read().unwrap();
         if let Some(i) = cat
@@ -211,25 +257,28 @@ fn catalog_fid(requested: &str) -> Option<i64> {
             return Some((BUILTINS.len() + i) as i64);
         }
     }
-    let root = catalog_root()?;
-    let fallback = format!("{stem}-Regular");
+    let roots = catalog_roots();
     let mut found: Option<std::path::PathBuf> = None;
-    'outer: for want in [stem, fallback.as_str()] {
-        for family in std::fs::read_dir(&root).ok()?.flatten() {
-            let dir = family.path();
-            if !dir.is_dir() {
-                continue;
-            }
-            for entry in std::fs::read_dir(&dir).ok()?.flatten() {
-                let path = entry.path();
-                let ext = path.extension().and_then(|e| e.to_str());
-                if !matches!(ext, Some("ttf" | "otf" | "ttc")) {
+    // Roots outer, stems inner: a higher-priority directory's
+    // `<stem>-Regular` beats a lower one's exact `<stem>`.
+    'outer: for root in &roots {
+        for want in [stem, fallback.as_str()] {
+            for family in std::fs::read_dir(root).into_iter().flatten().flatten() {
+                let dir = family.path();
+                if !dir.is_dir() {
                     continue;
                 }
-                let file_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-                if file_stem.eq_ignore_ascii_case(want) {
-                    found = Some(path);
-                    break 'outer;
+                for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+                    let path = entry.path();
+                    let ext = path.extension().and_then(|e| e.to_str());
+                    if !matches!(ext, Some("ttf" | "otf" | "ttc")) {
+                        continue;
+                    }
+                    let file_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+                    if file_stem.eq_ignore_ascii_case(want) {
+                        found = Some(path);
+                        break 'outer;
+                    }
                 }
             }
         }
@@ -376,9 +425,9 @@ pub struct FontEntry {
 /// builtins, then loadable catalog files (sorted), then aliases — same
 /// order `--fonts` has always printed in.
 ///
-/// Two known-and-accepted gaps against `catalog_fid`'s exact
-/// resolution behavior (both raised in cross-model review, PR #74,
-/// neither fixed — real installs don't hit either):
+/// One known-and-accepted gap against `catalog_fid`'s exact
+/// resolution behavior (raised in cross-model review, PR #74, not
+/// fixed — real installs don't hit it):
 /// - Two catalog files differing *only* by case (e.g. `foo.ttf` and
 ///   `Foo-Regular.ttf` in the same family dir) would make an implicit
 ///   alias here and `catalog_fid`'s fully case-insensitive stem match
@@ -386,15 +435,9 @@ pub struct FontEntry {
 ///   family does this; modeling it generally would mean making every
 ///   name comparison in this function case-insensitive-aware, a much
 ///   larger change for a scenario no real catalog produces.
-/// - An unreadable family subdirectory: `catalog_fid` (via `.ok()?`)
-///   aborts resolution entirely the instant it hits one, while this
-///   scan (via `.into_iter().flatten()`) just skips it and keeps
-///   listing everything else — a discrepancy that predates this
-///   catalog (`available_fonts`'s original directory scan already
-///   had it, before `catalog_entries` existed). Reconciling it means
-///   changing `catalog_fid`'s own error handling, which is font
-///   resolution proper, not this catalog — out of scope for issue
-///   #39; worth a dedicated follow-up if it ever matters in practice.
+///
+/// (An unreadable family subdirectory used to be a third: both scans
+/// now skip it, since issue #599 made them walk several roots.)
 pub fn catalog_entries() -> Vec<FontEntry> {
     let mut entries: Vec<FontEntry> = BUILTINS
         .iter()
@@ -405,9 +448,13 @@ pub fn catalog_entries() -> Vec<FontEntry> {
         })
         .collect();
     #[cfg(not(target_arch = "wasm32"))]
-    if let Some(root) = catalog_root() {
-        let mut stems = Vec::new();
-        for family in std::fs::read_dir(&root).into_iter().flatten().flatten() {
+    {
+        let mut stems: Vec<String> = Vec::new();
+        let mut stems_seen = std::collections::HashSet::new();
+        for family in catalog_roots()
+            .iter()
+            .flat_map(|root| std::fs::read_dir(root).into_iter().flatten().flatten())
+        {
             let dir = family.path();
             if !dir.is_dir() {
                 continue;
@@ -423,8 +470,12 @@ pub fn catalog_entries() -> Vec<FontEntry> {
                     // file in an otherwise-present catalog dir would
                     // otherwise get listed as installed while findfont
                     // silently substitutes Helvetica for it.
+                    // An earlier root's file shadows a same-named one
+                    // later (catalog_fid takes the first it finds).
+                    && !stems_seen.contains(&stem.to_ascii_lowercase())
                     && parses_as_font(&path)
                 {
+                    stems_seen.insert(stem.to_ascii_lowercase());
                     stems.push(stem.to_string());
                 }
             }
@@ -1354,5 +1405,33 @@ impl ShowCtx {
             operands: vec![Object::lit(Value::Dict(fs.dict.clone())), char_operand],
             target,
         })
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pack_faces_get_a_hint_naming_their_pack() {
+        for (name, pack) in [
+            ("Symbol", "extras"),
+            ("ZapfDingbats", "extras"),
+            ("Bangers", "extras"),
+            ("bangers-regular", "extras"),
+            ("Palatino-Roman", "texgyre"),
+            ("Helvetica-Narrow-Bold", "texgyre"),
+            ("NotoSansKR-Regular", "cjk-thai"),
+        ] {
+            let hint = missing_face_hint(name).unwrap_or_else(|| panic!("{name}: no hint"));
+            assert!(
+                hint.contains(&format!("/{name} is in the {pack} font pack"))
+                    && hint.contains(&format!("--pack {pack}")),
+                "{hint}"
+            );
+        }
+        for name in ["Helvetica", "Courier-Bold", "NoSuchFace", "Arial"] {
+            assert_eq!(missing_face_hint(name), None, "{name}");
+        }
     }
 }

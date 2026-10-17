@@ -42,6 +42,8 @@
 % resolved font's own /FontName and `lettering-font-not-found` is raised
 % on a mismatch. Ghostscript's own fallback (Courier) is rejected the
 % same way, so under gs only builtin faces work; catalog faces are pscat's.
+% A face from a font pack that is not installed never gets that far:
+% pscat's findfont itself raises invalidfont, naming the pack (#599).
 %
 % Fill treatments (issue #154): /plasma, /clouds (Perlin solid noise),
 % /diffclouds and /conical hand the glyph box to `lib/fillkit.ps` (GIMP's
@@ -326,7 +328,7 @@
 % @kind: Procedure
 % @summary: Add the outline of `text` in a catalog/builtin outline face to the current path, positioned and scaled exactly as psyletter would — the reusable geometry half of psyletter, for callers who want to fill, clip or stroke it themselves. Leaves the scaled font set in the current graphics state, so wrap it in gsave/grestore. Errors (never substitutes) on a missing face.
 % @example: gsave (Real) 306 300 << /Font /PermanentMarker /Size 220 >> psyletterpath fill grestore
-% @param: /Font [name] Installed outline face; missing faces raise lettering-font-not-found (default /PermanentMarker)
+% @param: /Font [name] Installed outline face; missing faces raise lettering-font-not-found, or invalidfont for a face whose font pack is not installed (default /PermanentMarker)
 % @param: /Size [points] Font size; must be > 0 (default 160)
 % @param: /Width [points] Fit the text to exactly this width; must be > 0, overrides /Size
 % @param: /Align [name] /left, /center or /right: which side of x the text is anchored to (default /center)
@@ -346,7 +348,7 @@
 % @kind: Procedure
 % @summary: Draw large psychedelic display lettering: `text` in an outline face, filled with a multicolor interior (solid, transition, patches, or mottled/worn) clipped to the glyphs and wrapped in a dark contour. Seeded and deterministic; the seed changes only texture, never metrics or placement. Draws inside its own gsave/grestore, so the caller's graphics state (colors, font, path) is untouched.
 % @example: (Real) 306 300 << /Size 220 /Treatment /mottled /Seed 7 >> psyletter
-% @param: /Font [name] Installed outline face; missing faces raise lettering-font-not-found (default /PermanentMarker)
+% @param: /Font [name] Installed outline face; missing faces raise lettering-font-not-found, or invalidfont for a face whose font pack is not installed (default /PermanentMarker)
 % @param: /Size [points] Font size; must be > 0 (default 160)
 % @param: /Width [points] Fit the text to exactly this width; must be > 0, overrides /Size
 % @param: /Align [name] /left, /center or /right: which side of x the text is anchored to (default /center)

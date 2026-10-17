@@ -26,7 +26,11 @@ done, unplanned/post-roadmap: Stage 21, standalone installability —
 serves a copy of `lib/**/*.ps` compiled into the binary, and a release
 build has no checkout heuristics),
 `scripts/package_release.sh`, and `.github/workflows/release.yml`,
-so pscat can be installed and run without a git checkout; and Stage
+so pscat can be installed and run without a git checkout (since #599
+the font catalog reaches installs as downloadable font packs on their
+own `fonts-YYYY.MM` release train: `src/fontpacks/`, `pscat fonts
+install`, `.github/workflows/release-fonts.yml`,
+`docs/dev/RELEASING-FONTS.md`); and Stage
 22, Korean/Japanese/Thai fonts — a `CatalogEncoding::Unicode` face
 variant (Noto Sans KR/JP/Thai) whose `show` decodes UTF-8 and maps
 codepoints straight to glyphs via `cmap`, since Hangul/kanji exceed
@@ -477,8 +481,10 @@ renders eight examples in both and compares block-downsampled output).
 - `FID` is integertype; unknown `findfont` substitutes Helvetica
   (gs-style) instead of erroring. Symbol/ZapfDingbats have real URW
   faces since Stage 18 — via the runtime catalog (`fonts/catalog/`,
-  `font::resolve`), so wasm and catalog-less installs still
-  substitute.
+  `font::resolve`). Since #599 a face from a font pack that is not
+  installed (Symbol and ZapfDingbats included) is `invalidfont` with a
+  hint naming the pack, never a substitute; wasm, which has no packs,
+  still substitutes.
 - `charpath` on Type 3 advances without capturing outlines; its bool
   operand is ignored for outline fonts.
 - Type 1 hints are ignored entirely; no `/Metrics`, no CID/CFF.

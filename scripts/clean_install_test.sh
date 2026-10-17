@@ -4,7 +4,9 @@
 # scratch root, with HOME and CARGO_HOME pointed at empty scratch
 # directories, then renders a mathkit, a drychalk and a typewriter
 # example, and runs the `handwrite`, `typewrite` and `photo-etch`
-# subcommands (issue #600), from an empty directory outside the checkout. The resolver
+# subcommands (issue #600), from an empty directory outside the checkout,
+# and checks that a font-pack face with no packs installed is an error
+# naming the pack (issue #599). The resolver
 # trace (PSCAT_TRACE_RESOURCES, src/paths.rs) must show every lib/ file
 # was served by the embedded copy: a pass that found a checkout, the
 # crates.io source tree or a stray lib/ on disk is a failure.
@@ -105,5 +107,18 @@ tool() { # NAME OUTPUT ARGS...
 tool handwrite hand.png "meet me at the bandshell at nine"
 tool typewrite typed.png note.txt
 tool photo-etch etched.png sphere.jpg
+# The font catalog is not part of an install (issue #599): a face from a
+# font pack must stop with an error naming the pack, never render with
+# a silent substitute.
+for pair in Symbol:extras ZapfDingbats:extras Palatino-Roman:texgyre; do
+  face=${pair%%:*} pack=${pair##*:}
+  # MSYS2_ARG_CONV_EXCL: Git Bash on Windows would otherwise rewrite an
+  # argument starting with / into a Windows path (/Symbol -> C:/.../Symbol).
+  if OUT=$(MSYS2_ARG_CONV_EXCL='*' "$PSCAT" -e "/$face findfont pop" 2>&1); then
+    fail "/$face resolved with no font packs installed"
+  fi
+  grep -q "is in the $pack font pack" <<<"$OUT" || { echo "$OUT" >&2; fail "/$face: no hint naming $pack"; }
+done
+echo "    pack faces without packs: invalidfont naming the pack"
 
 echo "==> clean install OK"

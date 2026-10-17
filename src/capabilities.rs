@@ -2108,6 +2108,9 @@ pub fn payload_json() -> Value {
     json!({
         "pscat_version": env!("CARGO_PKG_VERSION"),
         "catalog_signature": catalog_signature(&caps),
+        // Installed font packs and whether they are the pinned release
+        // (reproducible) or user-selected (issue #599).
+        "font_packs": crate::fontpacks::status_json(),
         "capabilities": caps.iter().map(Capability::to_json).collect::<Vec<_>>(),
     })
 }

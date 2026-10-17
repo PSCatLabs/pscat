@@ -1,0 +1,193 @@
+{
+  "schema": "pscat-font-packs/1",
+  "about": "Which downloadable font pack (issue #599) each fonts/catalog/ family ships in. Compiled into pscat so a missing face names the pack to install; scripts/font_packs.py builds the packs from it, taking each family's licence files, SPDX id and copyright from licenses/assets.json. Lists font files only. tests (fontpacks) check it against fonts/catalog/ exactly.",
+  "packs": [
+    {
+      "name": "extras",
+      "description": "Display, text and mood faces (OFL and Apache-2.0), Courier Prime, Special Elite, and the URW Symbol/ZapfDingbats faces.",
+      "families": {
+        "AbrilFatface": [
+          "AbrilFatface-Regular.ttf"
+        ],
+        "AlfaSlabOne": [
+          "AlfaSlabOne-Regular.ttf"
+        ],
+        "Anton": [
+          "Anton-Regular.ttf"
+        ],
+        "AtkinsonHyperlegible": [
+          "AtkinsonHyperlegible-Regular.ttf"
+        ],
+        "Audiowide": [
+          "Audiowide-Regular.ttf"
+        ],
+        "BagelFatOne": [
+          "BagelFatOne-Regular.ttf"
+        ],
+        "Bangers": [
+          "Bangers-Regular.ttf"
+        ],
+        "BebasNeue": [
+          "BebasNeue-Regular.ttf"
+        ],
+        "Bungee": [
+          "Bungee-Regular.ttf"
+        ],
+        "Caveat": [
+          "Caveat-Regular.ttf"
+        ],
+        "Chewy": [
+          "Chewy-Regular.ttf"
+        ],
+        "Cinzel": [
+          "Cinzel-Regular.ttf"
+        ],
+        "ComicNeue": [
+          "ComicNeue-Regular.ttf"
+        ],
+        "CourierPrime": [
+          "CourierPrime-Regular.ttf"
+        ],
+        "Creepster": [
+          "Creepster-Regular.ttf"
+        ],
+        "EBGaramond": [
+          "EBGaramond-Regular.ttf"
+        ],
+        "Graduate": [
+          "Graduate-Regular.ttf"
+        ],
+        "GreatVibes": [
+          "GreatVibes-Regular.ttf"
+        ],
+        "HomemadeApple": [
+          "HomemadeApple-Regular.ttf"
+        ],
+        "JetBrainsMono": [
+          "JetBrainsMono-Regular.ttf"
+        ],
+        "Jost": [
+          "Jost-Regular.ttf"
+        ],
+        "LibreBaskerville": [
+          "LibreBaskerville-Regular.ttf"
+        ],
+        "Limelight": [
+          "Limelight-Regular.ttf"
+        ],
+        "Lora": [
+          "Lora-Regular.ttf"
+        ],
+        "MedievalSharp": [
+          "MedievalSharp.ttf"
+        ],
+        "Monoton": [
+          "Monoton-Regular.ttf"
+        ],
+        "Orbitron": [
+          "Orbitron-Regular.ttf"
+        ],
+        "Oswald": [
+          "Oswald-Regular.ttf"
+        ],
+        "Pacifico": [
+          "Pacifico-Regular.ttf"
+        ],
+        "PermanentMarker": [
+          "PermanentMarker-Regular.ttf"
+        ],
+        "PirataOne": [
+          "PirataOne-Regular.ttf"
+        ],
+        "PlayfairDisplay": [
+          "PlayfairDisplay-Regular.ttf"
+        ],
+        "Poppins": [
+          "Poppins-Regular.ttf"
+        ],
+        "PressStart2P": [
+          "PressStart2P-Regular.ttf"
+        ],
+        "Rye": [
+          "Rye-Regular.ttf"
+        ],
+        "SpecialElite": [
+          "SpecialElite-Regular.ttf"
+        ],
+        "StardosStencil": [
+          "StardosStencil-Regular.ttf"
+        ],
+        "URW-symbols": [
+          "D050000L.otf",
+          "StandardSymbolsPS.otf"
+        ],
+        "UnifrakturMaguntia": [
+          "UnifrakturMaguntia-Book.ttf"
+        ],
+        "VT323": [
+          "VT323-Regular.ttf"
+        ],
+        "ZillaSlab": [
+          "ZillaSlab-Regular.ttf"
+        ]
+      }
+    },
+    {
+      "name": "texgyre",
+      "description": "TeX Gyre faces behind the standard-35 names Palatino, Bookman, New Century Schoolbook, Avant Garde, Zapf Chancery and Helvetica-Narrow (GUST Font License).",
+      "families": {
+        "TeXGyre-adventor": [
+          "texgyreadventor-bold.otf",
+          "texgyreadventor-bolditalic.otf",
+          "texgyreadventor-italic.otf",
+          "texgyreadventor-regular.otf"
+        ],
+        "TeXGyre-bonum": [
+          "texgyrebonum-bold.otf",
+          "texgyrebonum-bolditalic.otf",
+          "texgyrebonum-italic.otf",
+          "texgyrebonum-regular.otf"
+        ],
+        "TeXGyre-chorus": [
+          "texgyrechorus-mediumitalic.otf"
+        ],
+        "TeXGyre-heroscn": [
+          "texgyreheroscn-bold.otf",
+          "texgyreheroscn-bolditalic.otf",
+          "texgyreheroscn-italic.otf",
+          "texgyreheroscn-regular.otf"
+        ],
+        "TeXGyre-pagella": [
+          "texgyrepagella-bold.otf",
+          "texgyrepagella-bolditalic.otf",
+          "texgyrepagella-italic.otf",
+          "texgyrepagella-regular.otf"
+        ],
+        "TeXGyre-schola": [
+          "texgyreschola-bold.otf",
+          "texgyreschola-bolditalic.otf",
+          "texgyreschola-italic.otf",
+          "texgyreschola-regular.otf"
+        ]
+      }
+    },
+    {
+      "name": "cjk-thai",
+      "description": "Korean, Japanese and Thai Unicode-mode faces (OFL); large.",
+      "families": {
+        "NanumBrushScript": [
+          "NanumBrushScript-Regular.ttf"
+        ],
+        "NotoSansJP": [
+          "NotoSansJP-Regular.ttf"
+        ],
+        "NotoSansKR": [
+          "NotoSansKR-Regular.ttf"
+        ],
+        "NotoSansThai": [
+          "NotoSansThai-Regular.ttf"
+        ]
+      }
+    }
+  ]
+}

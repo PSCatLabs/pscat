@@ -10,6 +10,7 @@ pub mod encodings;
 pub mod error;
 pub mod file;
 pub mod font;
+pub mod fontpacks;
 pub mod gfx;
 pub mod halftone;
 pub(crate) mod image;

@@ -285,7 +285,9 @@ is on the last page, and other spacings step by more).
 ## The font catalog
 
 `fonts/catalog/` — 67 libre outline faces loaded from disk at
-`findfont` time (never compiled in; the binary and wasm stay lean).
+`findfont` time (never compiled in; the binary and wasm stay lean). In
+a checkout they are simply there; an installed pscat gets them as
+[font packs](#font-packs-the-catalog-outside-a-checkout).
 With it, **every name in the classic LaserWriter 35 resolves to a
 metric-compatible libre face**: the bundled Liberation faces cover
 Helvetica/Times/Courier, TeX Gyre covers Palatino, Bookman, New
@@ -310,3 +312,65 @@ finds it. The [font gallery](https://jeromebanks.github.io/postscript_interprete
 on the project site shows every face — Type 3 library included, with a card
 for `/Typewriter` (one key struck twenty times) beside Courier Prime's — one
 card at a time.
+
+### Font packs: the catalog outside a checkout
+
+An installed pscat (a release bundle, `cargo install`) carries only the
+twelve Liberation faces. The catalog comes as three separately
+versioned **font packs**, released on their own `fonts-YYYY.MM` train:
+
+| Pack | What | Size |
+|---|---|---|
+| `extras` | the display, text and mood faces, Courier Prime, Special Elite, and the URW Symbol/ZapfDingbats faces (OFL, Apache-2.0) | ~3 MB |
+| `texgyre` | the TeX Gyre faces behind Palatino, Bookman, New Century Schoolbook, Avant Garde, Zapf Chancery and Helvetica-Narrow (GUST) | ~1 MB |
+| `cjk-thai` | Noto Sans KR/JP/Thai and Nanum Brush Script (OFL) | ~10 MB |
+
+```sh
+pscat fonts install                    # the packs this pscat release pins
+pscat fonts install --pack texgyre     # just one
+pscat fonts install --version fonts-2026.11   # another release (user-selected)
+pscat fonts install --version latest   # the newest release (user-selected)
+pscat fonts install --from font-index.json    # offline, from downloaded assets
+pscat fonts list                       # what is installed, re-verified
+pscat fonts remove texgyre             # or no name: remove all
+```
+
+Packs go into `$PSCAT_HOME/fonts/packs/`, otherwise the per-user data
+directory (`~/.local/share/pscat`, `~/Library/Application Support/pscat`,
+`%APPDATA%\pscat`). `pscat fonts install` is the only command in pscat
+that uses the network (it runs `curl`), and only when you run it. Every
+pack carries a `manifest.json` giving each file's licence, copyright and
+SHA-256, alongside the upstream licence files themselves.
+
+**Checksums.** Each pscat release pins one pack index: its tag and the
+SHA-256 of its `font-index.json`. The index lists each pack's SHA-256,
+and each pack's manifest lists every file's. Plain `pscat fonts install`
+refuses an index that does not match the pin, a pack that does not match
+the index, and a file that does not match the manifest, and installs
+nothing at all unless everything checks out.
+
+**A missing face is an error.** `/Symbol findfont` (or any other pack
+face) with its pack not installed stops with `invalidfont` and a second
+line naming the pack to install; it never renders with a stand-in.
+Names no pack has (`/Arial`) still get the Helvetica substitute, as in
+Ghostscript.
+
+**Which fonts win.** A plain `fonts/catalog/` directory (in
+`$PSCAT_HOME`, the per-user data directory, beside the binary, in a
+checkout, or in the current directory) is an explicit override and wins
+over installed packs; among packs, `$PSCAT_HOME` wins over the per-user
+data directory. `pscat --fonts` ends with `#` lines saying what is in
+use, and `pscat --capabilities` has the same in `font_packs`.
+
+**The reproducibility contract.** The same pscat version, with the
+installed and verified pinned packs, and identical render settings,
+reproduces the golden pixels. A pack counts as **pinned** when the index
+it was installed from is the one this pscat pins, byte for byte (so
+`--version` naming the pinned tag, or `--from` the pinned
+`font-index.json`, is pinned too). Everything else is **user-selected**:
+another `--version`, `latest`, a lone `--from` pack file (it has no index
+to compare), and any `fonts/catalog/` override. Packs share a
+`manifest_schema` so newer packs install on older pscat, but that is a
+compatibility promise, not a promise of identical pixels. A bug report
+should paste the `#` lines from `pscat --fonts`.
+
