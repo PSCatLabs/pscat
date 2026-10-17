@@ -2,7 +2,6 @@
 //! rely on — `-` reads stdin, exit codes are honest, artifacts are
 //! announced on stdout and errors go to stderr.
 
-use std::io::Write;
 use std::process::{Command, Stdio};
 
 use tiny_skia::Pixmap;
@@ -24,12 +23,7 @@ fn run(args: &[&str], stdin: &str) -> (bool, String, String) {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn pscat");
-    child
-        .stdin
-        .as_mut()
-        .expect("stdin")
-        .write_all(stdin.as_bytes())
-        .expect("write stdin");
+    common::feed_stdin(&mut child, stdin.as_bytes());
     let out = child.wait_with_output().expect("wait");
     (
         out.status.success(),
@@ -616,6 +610,27 @@ fn contact_sheet_without_a_sweep_axis_errors() {
     assert!(!ok);
     assert!(stderr.contains("--sweep-seed or --sweep"), "{stderr}");
     assert!(!sheet.exists());
+}
+
+/// Regression for #630: pscat rejects bad arguments and exits without reading
+/// stdin. With more input than a pipe buffer holds the write cannot finish
+/// before the child exits, so `run()` always meets BrokenPipe here (it used to
+/// panic on it); the exit status and stderr must still be reported.
+#[test]
+fn run_tolerates_a_child_that_exits_before_reading_stdin() {
+    let sheet = tmp("orphan-sheet-big.png");
+    let big = "0 0 10 10 rectfill\n".repeat(64 * 1024);
+    let (ok, _out, stderr) = run(
+        &[
+            "--headless",
+            "--contact-sheet",
+            sheet.to_str().unwrap(),
+            "-",
+        ],
+        &big,
+    );
+    assert!(!ok);
+    assert!(stderr.contains("--sweep-seed or --sweep"), "{stderr}");
 }
 
 /// Regression (cross-model review, PR #66): an oversized contact

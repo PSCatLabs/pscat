@@ -193,13 +193,7 @@ fn typewrite_reads_stdin() {
         .stdout(Stdio::null())
         .spawn()
         .unwrap();
-    use std::io::Write as _;
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(b"from a pipe\n")
-        .unwrap();
+    common::feed_stdin(&mut child, b"from a pipe\n");
     assert!(child.wait().unwrap().success());
     ok(&pscat(
         &dir,
