@@ -38,9 +38,32 @@ with reasons: `quick-xml` 0.39 (RUSTSEC-2026-0194/0195; build-time proc macro
 via wayland-scanner, not upgradeable, #611) and `ttf-parser` unmaintained
 (RUSTSEC-2026-0192, #610). Retire each entry when its issue lands.
 
-**Windows fixes.** `scripts/selftest.sh` looked for `target/<profile>/pscat`;
-under Git Bash it needs `.exe`, and `cargo metadata` JSON-escapes backslashes.
-See the PR for test failures found by the first runs.
+**Windows fixes.** The first Windows run found real problems, all fixed:
+- `scripts/selftest.sh` looked for `target/<profile>/pscat`; under Git Bash it
+  needs `.exe`, and `cargo metadata` JSON-escapes backslashes.
+- `pscat-mcp` looked for a sibling binary named `pscat`, so on Windows
+  `render_postscript` and `eval_postscript` always failed (user-facing bug); it
+  now uses `EXE_SUFFIX`.
+- Tests that put a temp path inside a PostScript string literal lost it on
+  Windows (`C:\Users\x` reads as `C:Usersx`): `etching` and `selftest` now use
+  `common::ps_path`. `selftest`'s manifest check compared `lib\artkit.ps`.
+- `src/paths.rs`'s `/abs/x.ps` test is `C:/abs/x.ps` on Windows.
+- `scripts/clean_install_test.sh`: `pscat.exe`, and `cargo package --list`
+  prints `lib\x.ps` on Windows. `clean-install` gained a `windows-latest` leg.
 
-**Not done.** A Windows leg for #598's `clean-install` job: that job is in PR
-#609, not on main yet.
+**Skipped on Windows (#615).** Three tests drive `handwrite.sh`/`typewrite.sh`
+through bash and are `#[cfg_attr(windows, ignore)]`; #600 ports those scripts,
+and #615 re-enables them. One issue, not three, because #600 is the one fix.
+
+**Timing.** Full suite, no subset: macOS `test` ~6 min, ubuntu ~8 min, Windows
+~11 min (selftest ~1 min of it). `--no-fail-fast` on the new job so one bad
+test binary on a new platform does not hide the rest.
+
+**Demonstration.** Throwaway PR #613 (closed) added `sequoia-openpgp` (LGPL)
+and an unlicensed `fonts/catalog/DemoNoLicence/`: `deny` and `licences`
+failed (run 38984063204). `deny.toml` is an allowlist, so any GPL crate fails
+the same way.
+
+**Open.** `deny` pulls the live advisory database, so it can turn red on an
+unrelated PR the day an advisory lands; the owner may prefer to keep it
+non-required.

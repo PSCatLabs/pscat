@@ -1018,6 +1018,11 @@ renders eight examples in both and compares block-downsampled output).
   and an `assets.json` entry (`python3 scripts/check_licences.py all`).
   A file added to Cargo.toml's `include` must have an `assets.json` entry
   that ships in `crate` (`python3 scripts/check_licences.py package`).
+  Windows CI traps: a temp path inside a PostScript string literal loses its
+  backslashes (`C:\Users\x` reads as `C:Usersx`), so tests use
+  `common::ps_path`; a spawned pscat binary needs `EXE_SUFFIX`; and a
+  `/abs/x.ps` literal is not absolute there. The script-driven tests are
+  `ignore`d on Windows until #600 (issue #615).
 - `PsArray` has a custom `Drop` (iterative teardown of last-handle
   storage; it moved off `Object` in Stage 11 for speed, so
   `obj.value` is movable these days). Don't reintroduce a
