@@ -11,9 +11,10 @@
 # packs, is a dry run: it stops there and uploads the packs as a
 # workflow artifact.
 #
-# Publishing happens only for a pushed fonts-* tag, and only once the
-# repository variable FONTS_RELEASE_ENABLED is 'true' (set by #602 when
-# it creates the protected `release` environment). Tags and their
+# Publishing happens only for a pushed fonts-* tag, only once the
+# repository variable FONTS_RELEASE_ENABLED is 'true', and only after the
+# owner approves the protected `release` environment (the same one the
+# interpreter release uses; docs/dev/RELEASING.md, "One-time setup"). Tags and their
 # assets are immutable: the publish job refuses a tag that already has
 # a release, so a fix is always a new tag.
 name: release-fonts
