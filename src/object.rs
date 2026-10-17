@@ -447,30 +447,44 @@ impl Drop for PsArray {
     }
 }
 
-/// Free `roots` and everything only they hold, without one Rust stack frame
-/// per nesting level. `PsArray`'s own `Drop` is iterative for arrays inside
-/// arrays; this adds dictionaries, so a chain of dicts (or of dicts and
-/// arrays) 10000 levels deep cannot overflow the stack either. Used by
-/// `Drop for Interp`; `Object` still has no `Drop` of its own.
-pub(crate) fn teardown_iteratively(roots: &mut Dict, extra: Vec<Object>) {
-    let mut pending = extra;
-    roots.drain_into(&mut pending);
-    while let Some(obj) = pending.pop() {
-        match obj.value {
-            Value::Dict(rc) => {
-                if let Ok(cell) = Rc::try_unwrap(rc) {
-                    cell.into_inner().drain_into(&mut pending);
+/// A deep chain of dictionaries (10000 levels of `<< /n << ... >> >>`) would
+/// drop recursively, one Rust stack frame per level, and abort the process,
+/// exactly as `PsArray` guards against for arrays. Dict is the container
+/// that gets this guard rather than `Object` (HANDOFF: no `Drop for
+/// Object`), and it also covers a dict that holds arrays that hold dicts:
+/// the worklist below unwraps uniquely held dicts and arrays alike, so the
+/// stack depth stays constant however the chain alternates. It runs
+/// wherever a dictionary is freed, so `Drop for Interp` needs no list of
+/// the places a program could have hung a chain.
+impl Drop for Dict {
+    fn drop(&mut self) {
+        if self.names.is_empty() && self.exotic.is_empty() {
+            return;
+        }
+        let mut pending: Vec<Object> = Vec::new();
+        self.drain_nested_into(&mut pending);
+        while let Some(obj) = pending.pop() {
+            match obj.value {
+                Value::Dict(rc) => {
+                    if let Ok(cell) = Rc::try_unwrap(rc) {
+                        // Emptied here, so its own `drop` returns at once.
+                        cell.into_inner().drain_nested_into(&mut pending);
+                    }
                 }
-            }
-            Value::Array(mut inner) if Rc::strong_count(&inner.data) == 1 => {
-                let d = std::mem::replace(&mut inner.data, EMPTY_STORE.with(Rc::clone));
-                if let Ok(cell) = Rc::try_unwrap(d) {
-                    pending.extend(cell.into_inner());
+                Value::Array(mut inner) if Rc::strong_count(&inner.data) == 1 => {
+                    let d = std::mem::replace(&mut inner.data, EMPTY_STORE.with(Rc::clone));
+                    if let Ok(cell) = Rc::try_unwrap(d) {
+                        pending.extend(cell.into_inner().into_iter().filter(is_container));
+                    }
                 }
+                _ => {}
             }
-            _ => {}
         }
     }
+}
+
+fn is_container(o: &Object) -> bool {
+    matches!(o.value, Value::Dict(_) | Value::Array(_))
 }
 
 /// `{:?}` rather than `{}` so whole reals keep their decimal point
@@ -681,13 +695,17 @@ impl Dict {
         })
     }
 
-    /// Move every key and value into `out`, leaving the dictionary empty
-    /// (the worklist step of [`teardown_iteratively`]).
-    pub(crate) fn drain_into(&mut self, out: &mut Vec<Object>) {
-        out.extend(self.names.drain().map(|(_, v)| v));
+    /// Empty the dictionary, moving every key and value that can hold more
+    /// objects (a dict or an array) into `out`; the rest drop here.
+    fn drain_nested_into(&mut self, out: &mut Vec<Object>) {
+        out.extend(self.names.drain().map(|(_, v)| v).filter(is_container));
         for (_, e) in self.exotic.drain() {
-            out.push(e.key);
-            out.push(e.value);
+            if is_container(&e.key) {
+                out.push(e.key);
+            }
+            if is_container(&e.value) {
+                out.push(e.value);
+            }
         }
     }
 

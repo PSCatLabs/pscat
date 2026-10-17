@@ -1106,26 +1106,28 @@ renders eight examples in both and compares block-downsampled output).
   references to itself and to `userdict`, per the PLRM idiom), and the
   crate has no cycle collector. `impl Drop for Interp` empties systemdict
   and userdict (contents taken out first, freed after the borrow is
-  released), so dropping an `Interp` frees its dictionaries and everything a program
-  stored in them (issue #625; before that the CLI's sweep/spool/selftest
-  loops had to call a hidden `break_permanent_dict_cycle(self)`, which is
-  gone). The `Drop` is on `Interp`, never on `Object` (see the `PsArray`
-  note above). Proven by `dropping_an_interp_frees_its_dictionaries`
-  (`Weak` handles to systemdict, userdict, `$error`, `errordict`,
-  `FontDirectory`, user dicts after a program that uses `save`,
-  `stopped` and `findfont`, and `userdict /me userdict put`). Limits: a
-  program that builds its own cycle in a plain dict (`a /me a put`) still
-  leaks that dict; an `Object` for systemdict that a caller popped out of the
-  interpreter is emptied by the drop, since it is the same dictionary.
-  A new long-lived holder of a dict `Rc` (a cache on `Interp`) must be a
-  plain field so it drops with the `Interp`; a `thread_local` or `static`
-  holding one would make the test fail. Teardown walks the dictionaries, operand
-  stack, dict stack, journal and loop frames iteratively
-  (`object::teardown_iteratively`), so a 100000-deep dict chain is fine at
-  drop; freeing one mid-run (`undef`, `restore`) still recurses (#631). The `pscat` CLI's single-run path
-  calls the hidden `Interp::leave_dicts_to_process_exit` so exit does not
-  walk the graph (80 ms on a 600k-entry program); the sweep and spool loops
-  do not.
+  released), so dropping an `Interp` frees its dictionaries and everything
+  a program stored in them (issue #625; before that the CLI's
+  sweep/spool/selftest loops had to call a hidden
+  `break_permanent_dict_cycle(self)`, which is gone). Proven by
+  `dropping_an_interp_frees_its_dictionaries` (`Weak` handles to
+  systemdict, userdict, `$error`, `errordict`, `FontDirectory`, user dicts
+  after a program that uses `save`, `stopped` and `findfont`, and
+  `userdict /me userdict put`). Limits: a program that builds its own cycle
+  in a plain dict (`a /me a put`) still leaks that dict; an `Object` for
+  systemdict that a caller popped out of the interpreter is emptied by the
+  drop, since it is the same dictionary. A new long-lived holder of a dict
+  `Rc` (a cache on `Interp`) must be a plain field so it drops with the
+  `Interp`; a `thread_local` or `static` holding one would make the test
+  fail. The `pscat` CLI's single-run path calls the hidden
+  `Interp::leave_dicts_to_process_exit` so exit does not walk the graph
+  (80 ms on a 600k-entry program); the sweep and spool loops do not.
+- A deep dict chain frees iteratively: `impl Drop for Dict` (`object.rs`,
+  next to `PsArray`'s) moves nested uniquely held dicts and arrays to a
+  worklist, so a 100000-level chain neither overflows the stack at `Interp`
+  drop nor on a mid-run `undef`/`restore` (#631). The guard is on `Dict`,
+  never on `Object` (see the `PsArray` note above). It costs about 10% on a
+  loop that only creates and frees small dicts.
 - `build.rs`'s `% @...` tag scanner models the depth-0 operand stack
   with a **two-slot window**, so it only understands `def` whose key is
   exactly two objects back. `/name systemdict /other known def` is read
