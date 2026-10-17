@@ -820,13 +820,11 @@ fn run_block(
     // A failure in the prelude or in the library itself isn't a
     // statement about this block, so it aborts the whole run rather
     // than being reported as one block's failure.
-    // Every early return has to break the cycle too, not just the
-    // success path — an `Interp` dropped intact keeps its whole loaded
-    // library graph alive until the process exits (blank-context
-    // review, PR #136). `setup_failure` takes `interp` by value so
-    // forgetting is a compile error rather than a quiet leak.
+    // `setup_failure` drops the `Interp` (freeing its loaded library
+    // graph, `Drop for Interp`) and hands back the message, so an early
+    // return reads the same as before.
     let setup_failure = |interp: Interp, msg: String| -> String {
-        interp.break_permanent_dict_cycle();
+        drop(interp);
         msg
     };
     for (name, body) in prerequisites {
@@ -925,15 +923,11 @@ fn run_block(
         assertions: assertion_count(&interp),
     };
     // One `Interp` per block, each holding a fully loaded copy of the
-    // library under test. Dropping it isn't enough: systemdict and
-    // userdict reference each other, so the whole graph — several
-    // hundred KB of library dictionaries per block — would stay alive
-    // until the process exits, growing with the block count (Codex
-    // review, round 1). This is the same reason `--sweep` and `--spool`
-    // call it. Every field the caller needs is already extracted above,
-    // and taking `self` makes "nothing runs on it again" a compile-time
-    // guarantee.
-    interp.break_permanent_dict_cycle();
+    // library under test (several hundred KB of dictionaries). It drops
+    // here, and `Drop for Interp` frees them, so memory does not grow
+    // with the block count. Every field the caller needs is already
+    // extracted above.
+    drop(interp);
     Ok(result)
 }
 

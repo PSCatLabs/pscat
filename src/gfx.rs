@@ -762,6 +762,27 @@ pub struct GraphicsState {
 }
 
 impl GraphicsState {
+    /// Move the objects this state keeps alive (the current font's
+    /// dictionary, the colour space's operand objects) into `out`, for
+    /// `Drop for Dict`'s iterative teardown, which must not let a chain
+    /// recurse through them.
+    pub(crate) fn drain_objects_into(&mut self, out: &mut Vec<crate::object::Object>) {
+        use crate::object::{Object, Value};
+        if let Some(font) = self.font.take() {
+            out.push(Object::lit(Value::Dict(font.dict)));
+        }
+        match std::mem::replace(&mut self.colorspace, ColorSpace::Gray) {
+            ColorSpace::Indexed { src, .. } => out.push(src),
+            ColorSpace::Separation { tint_proc, src, .. } => {
+                out.push(tint_proc);
+                out.push(src);
+            }
+            ColorSpace::Gray | ColorSpace::Rgb | ColorSpace::Cmyk => {}
+        }
+    }
+}
+
+impl GraphicsState {
     /// Whether `other` holds the very clip in force here: both have none,
     /// or both hold the same chain `Rc` (#488, `.sameclip`). Identity, not
     /// geometry: a second `clip` with an identical path is a new chain and

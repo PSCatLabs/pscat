@@ -447,6 +447,55 @@ impl Drop for PsArray {
     }
 }
 
+/// A deep chain of dictionaries (10000 levels of `<< /n << ... >> >>`) would
+/// drop recursively, one Rust stack frame per level, and abort the process,
+/// exactly as `PsArray` guards against for arrays. Dict is the container
+/// that gets this guard rather than `Object` (HANDOFF: no `Drop for
+/// Object`), and it also covers a dict that holds arrays that hold dicts:
+/// the worklist below unwraps uniquely held dicts and arrays alike, so the
+/// stack depth stays constant however the chain alternates. It runs
+/// wherever a dictionary is freed, so `Drop for Interp` needs no list of
+/// the places a program could have hung a chain.
+impl Drop for Dict {
+    fn drop(&mut self) {
+        if self.names.is_empty() && self.exotic.is_empty() {
+            return;
+        }
+        let mut pending: Vec<Object> = Vec::new();
+        self.drain_nested_into(&mut pending);
+        while let Some(obj) = pending.pop() {
+            match obj.value {
+                Value::Dict(rc) => {
+                    if let Ok(cell) = Rc::try_unwrap(rc) {
+                        // Emptied here, so its own `drop` returns at once.
+                        cell.into_inner().drain_nested_into(&mut pending);
+                    }
+                }
+                Value::Array(mut inner) if Rc::strong_count(&inner.data) == 1 => {
+                    let d = std::mem::replace(&mut inner.data, EMPTY_STORE.with(Rc::clone));
+                    if let Ok(cell) = Rc::try_unwrap(d) {
+                        pending.extend(cell.into_inner().into_iter().filter(is_container));
+                    }
+                }
+                Value::GState(rc) => {
+                    // A gstate keeps the current font's dictionary and the
+                    // colour space's operand objects alive, so a chain can
+                    // run dict -> gstate -> font dict (or colour space
+                    // operand) -> gstate.
+                    if let Ok(cell) = Rc::try_unwrap(rc) {
+                        cell.into_inner().drain_objects_into(&mut pending);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+fn is_container(o: &Object) -> bool {
+    matches!(o.value, Value::Dict(_) | Value::Array(_) | Value::GState(_))
+}
+
 /// `{:?}` rather than `{}` so whole reals keep their decimal point
 /// (`2.0`, not `2`) — the type distinction is meaningful in PostScript.
 pub(crate) fn format_real(r: f64) -> String {
@@ -655,13 +704,18 @@ impl Dict {
         })
     }
 
-    /// Drop every entry. Not a PostScript-visible operation — used
-    /// only to break systemdict's self-referential `Rc` cycle right
-    /// before an `Interp` that's done running is discarded (see
-    /// `Interp::break_permanent_dict_cycle`).
-    pub(crate) fn clear(&mut self) {
-        self.names.clear();
-        self.exotic.clear();
+    /// Empty the dictionary, moving every key and value that can hold more
+    /// objects (a dict or an array) into `out`; the rest drop here.
+    fn drain_nested_into(&mut self, out: &mut Vec<Object>) {
+        out.extend(self.names.drain().map(|(_, v)| v).filter(is_container));
+        for (_, e) in self.exotic.drain() {
+            if is_container(&e.key) {
+                out.push(e.key);
+            }
+            if is_container(&e.value) {
+                out.push(e.value);
+            }
+        }
     }
 
     pub fn undef(&mut self, key: &Object) -> Result<(), PsError> {

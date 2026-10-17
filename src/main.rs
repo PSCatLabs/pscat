@@ -303,6 +303,13 @@ fn main() -> ExitCode {
         );
         return ExitCode::FAILURE;
     };
+    // The single-run paths below end the process right after the output is
+    // written, so tearing down the dictionary graph (which `Drop for Interp`
+    // does for library users and the sweep/spool loops) would only delay the
+    // exit: ~80 ms for a program holding 600k dictionary entries. Keep the
+    // old exit path: the dictionaries are left to the OS, everything else
+    // drops as before.
+    interp.leave_dicts_to_process_exit();
     if options.transparent {
         interp.gfx_mut().set_transparent_background();
     }
@@ -825,14 +832,9 @@ fn run_sweep(options: &Options, source: &[u8]) -> ExitCode {
                 last.clone()
             }
         };
-        // Done with this frame's Interp -- break systemdict's
-        // self-referential Rc cycle before it drops at the end of
-        // this iteration, or userdict (and anything this frame's
-        // program stored in it) outlives every dropped frame for the
-        // rest of the sweep instead of freeing with it (round-5
-        // cross-model review, PR #66; see break_permanent_dict_cycle's
-        // doc comment).
-        interp.break_permanent_dict_cycle();
+        // This frame's Interp drops at the end of the iteration, and
+        // `Drop for Interp` frees its dictionaries (they used to outlive
+        // every frame of the sweep, issues #21 and #625).
 
         let status = if ok { "" } else { " (failed)" };
         match &options.png {

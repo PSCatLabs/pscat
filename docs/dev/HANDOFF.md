@@ -1115,25 +1115,32 @@ renders eight examples in both and compares block-downsampled output).
   is the pattern; `Frame::Image` deliberately holds nothing.
 - `exit` must not cross Scanner/StopMark/Show/Image/PostOp frames
   (`invalidexit`) — extend that match if you add frame kinds.
-- The systemdict self-reference is an intentional Rc cycle (one leak
-  per Interp, process-lifetime object) — genuinely harmless for the
-  usual one-`Interp`-per-process pattern, but it also leaks `userdict`
-  (and everything a program stored there), since systemdict holds a
-  strong reference to it too. A caller that constructs many `Interp`s
-  in one process run must call `Interp::break_permanent_dict_cycle(self)`
-  on each one instead of just dropping it, or that stops being
-  bounded — confirmed empirically via `Rc::downgrade`/`strong_count`,
-  not just reasoned about (docs/archive/NOTES.md's issue #21 entry has the story).
-  It takes `self` by value specifically so a caller can't accidentally
-  keep using an `Interp` after its systemdict has been emptied — that
-  would be a compile error, not a silent `undefined` at runtime. Two
-  call sites do this today: issue #21's `--sweep-seed`/`--sweep` loop
-  (`main.rs::run_sweep`, one call per frame) and `--spool`'s per-job
-  loop (`window.rs::poll_spool`, via `mem::replace` to get the
-  outgoing job's `Interp` out of the struct field before the new one
-  overwrites it). Any future caller that constructs more than one
-  `Interp` in a long-running or high-iteration process should do the
-  same.
+- The systemdict self-reference is an Rc cycle (systemdict holds strong
+  references to itself and to `userdict`, per the PLRM idiom), and the
+  crate has no cycle collector. `impl Drop for Interp` empties systemdict
+  and userdict (contents taken out first, freed after the borrow is
+  released), so dropping an `Interp` frees its dictionaries and everything
+  a program stored in them (issue #625; before that the CLI's
+  sweep/spool/selftest loops had to call a hidden
+  `break_permanent_dict_cycle(self)`, which is gone). Proven by
+  `dropping_an_interp_frees_its_dictionaries` (`Weak` handles to
+  systemdict, userdict, `$error`, `errordict`, `FontDirectory`, user dicts
+  after a program that uses `save`, `stopped` and `findfont`, and
+  `userdict /me userdict put`). Limits: a program that builds its own cycle
+  in a plain dict (`a /me a put`) still leaks that dict; an `Object` for
+  systemdict that a caller popped out of the interpreter is emptied by the
+  drop, since it is the same dictionary. A new long-lived holder of a dict
+  `Rc` (a cache on `Interp`) must be a plain field so it drops with the
+  `Interp`; a `thread_local` or `static` holding one would make the test
+  fail. The `pscat` CLI's single-run path calls the hidden
+  `Interp::leave_dicts_to_process_exit` so exit does not walk the graph
+  (80 ms on a 600k-entry program); the sweep and spool loops do not.
+- A deep dict chain frees iteratively: `impl Drop for Dict` (`object.rs`,
+  next to `PsArray`'s) moves nested uniquely held dicts and arrays to a
+  worklist, so a 100000-level chain neither overflows the stack at `Interp`
+  drop nor on a mid-run `undef`/`restore` (#631). The guard is on `Dict`,
+  never on `Object` (see the `PsArray` note above). It costs about 10% on a
+  loop that only creates and frees small dicts.
 - `build.rs`'s `% @...` tag scanner models the depth-0 operand stack
   with a **two-slot window**, so it only understands `def` whose key is
   exactly two objects back. `/name systemdict /other known def` is read
