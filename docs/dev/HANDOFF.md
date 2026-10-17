@@ -21,8 +21,10 @@ specimen posters in `examples/style_*.ps` (20) — plus
 `--interactive` (the windowed
 REPL, Stage 8's last sliver) and the Level 2 rect operators. Also
 done, unplanned/post-roadmap: Stage 21, standalone installability —
-`src/paths.rs` (a consolidated, tested resource-root resolver used
-by the font catalog, `run`/`file`, and `pscat-mcp`'s handwrite path),
+`src/paths.rs` (the resource resolver used by the font catalog,
+`run`/`file`, and `pscat-mcp`'s handwrite path; since #598 it also
+serves a copy of `lib/**/*.ps` compiled into the binary, and a release
+build has no checkout heuristics),
 `scripts/package_release.sh`, and `.github/workflows/release.yml`,
 so pscat can be installed and run without a git checkout; and Stage
 22, Korean/Japanese/Thai fonts — a `CatalogEncoding::Unicode` face
@@ -988,6 +990,17 @@ renders eight examples in both and compares block-downsampled output).
 
 ## Gotchas for the next implementer
 
+- **A release `pscat` reads its compiled-in `lib/`, not the checkout's,
+  unless it runs from the checkout root** (#598). `(lib/x.ps) run`
+  tries `$PSCAT_LIB`, `$PSCAT_HOME`, the cwd, the user data dir and the
+  exe's dir before the embedded copy, and only debug-assertion builds
+  (debug, `--profile ci`) fall back to the checkout. So a lib edit is
+  live for anything run from the repo root (tests, `identity_check.sh`,
+  `gallery/show.sh`) but not for `target/release/pscat` run elsewhere
+  until you rebuild or set `PSCAT_HOME`/`PSCAT_LIB`; the scripts in
+  `scripts/` export `PSCAT_HOME` to their own tree for that reason.
+  `PSCAT_TRACE_RESOURCES=1` shows which copy served each file. The
+  order is documented once, in `docs/guides/getting-started.md`.
 - **Licensing (#563).** The code is MIT OR Apache-2.0. `Cargo.toml`'s
   `include` is an allowlist, so a new `include_bytes!`/`include_str!`
   target, or a file `build.rs` reads, must be added to it or the

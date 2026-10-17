@@ -11,6 +11,10 @@
 #   ./scripts/build_font_gallery.sh _site/assets/fonts
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+# Point pscat at this tree's lib/ and fonts/catalog/ (src/paths.rs): a
+# release binary has no checkout heuristics, and its embedded lib/ may be
+# older than the files beside this script.
+export PSCAT_HOME="${PSCAT_HOME:-${PSCAT_ROOT:-$ROOT}}"
 OUT=${1:?usage: build_font_gallery.sh OUTDIR}
 mkdir -p "$OUT/type3" "$OUT/catalog"
 

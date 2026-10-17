@@ -55,8 +55,11 @@ you hand it to an agent you do not trust.
 
 The server shells out to the `pscat` CLI (found next to it), so the
 tools always match the CLI's behavior. `handwrite` also needs
-`scripts/handwrite.sh` — resolved the same way as `pscat`/`lib`/
-`fonts/catalog` (see [Installing pscat without the repo](getting-started.md#installing-pscat-without-the-repo)), so
-a release bundle needs no extra setup; set `PSCAT_ROOT` only if
-you've moved the binaries away from their `lib`/`fonts`/`scripts`
-siblings.
+`scripts/handwrite.sh`, looked for in `$PSCAT_HOME` (or `$PSCAT_ROOT`),
+the per-user data directory, next to the binaries, and three levels above
+`pscat-mcp`, which is the checkout when it is `target/release/pscat-mcp`
+(see [Where pscat finds its files](getting-started.md#where-pscat-finds-its-files)).
+A release bundle or the checkout recipe above needs no extra setup; set
+`PSCAT_HOME` only if you've moved the binaries away from their
+`lib`/`fonts`/`scripts` siblings. (The script lookup moves into `pscat`
+itself with #600.)

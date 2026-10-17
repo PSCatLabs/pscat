@@ -12,7 +12,7 @@
 //! keeps the protocol safe, keeps the tools in lock-step with the CLI,
 //! and gets crash isolation for free. The pscat binary is found next
 //! to this one (same target dir); the repo root (for handwrite.sh) is
-//! two levels up from there, overridable with $PSCAT_ROOT.
+//! found by `repo_root` below, overridable with $PSCAT_HOME.
 
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -397,32 +397,40 @@ fn pscat_bin() -> Result<PathBuf, String> {
     }
 }
 
-/// The repo/bundle root: $PSCAT_ROOT (trusted unconditionally — an
-/// explicit override that's wrong should fail loudly rather than
-/// silently fall through to some other root), or the shared
-/// heuristics from `pscat::paths` (exe-sibling directory — the
-/// bundle layout, `scripts/handwrite.sh` next to the binaries —
-/// three levels up from the exe for a cargo dev build, or the crate
-/// root at compile time), filtered by `scripts/handwrite.sh`
-/// actually existing there.
+/// The pscat tree holding `scripts/handwrite.sh`: `$PSCAT_ROOT`,
+/// trusted unconditionally as it always was (an explicit override
+/// that's wrong should fail loudly rather than silently fall through
+/// to some other root); otherwise the first of the resolver's install
+/// roots (`pscat::paths::install_roots`: `$PSCAT_HOME`, the per-user
+/// data dir, the exe's own directory, which is the bundle layout, and
+/// in debug-assertion builds the checkout) that has the script.
+/// `$PSCAT_HOME` is existence-checked like the rest because #599 may
+/// point it at a font-pack directory with no `scripts/`.
+///
+/// One more fallback outlives the resolver's: three levels above the
+/// exe, so `target/release/pscat-mcp` registered from a checkout (the
+/// `docs/guides/agents.md` recipe) still finds the checkout's script
+/// in a release build. It names only a shell script, never a `lib/`
+/// file or font, and it goes away when #600 ports handwrite.sh into
+/// the `pscat` binary. `handwrite.sh` points pscat at its own tree.
 fn repo_root() -> Result<PathBuf, String> {
-    if let Ok(root) = std::env::var("PSCAT_ROOT") {
+    const SCRIPT_REL: &str = "scripts/handwrite.sh";
+    if let Some(root) = std::env::var_os("PSCAT_ROOT").filter(|v| !v.is_empty()) {
         return Ok(PathBuf::from(root));
     }
-    const SCRIPT_REL: &str = "scripts/handwrite.sh";
-    // first_existing resolves to the full winning path (root joined
-    // with SCRIPT_REL), not the root itself — walk back up exactly as
-    // many components as SCRIPT_REL has to recover it, rather than a
-    // hardcoded double `.parent()` that'd silently drift if the
-    // constant above ever changes.
-    let up = Path::new(SCRIPT_REL).components().count();
-    pscat::paths::first_existing(&pscat::paths::heuristic_roots(), SCRIPT_REL, &|p| {
-        p.exists()
-    })
-    .and_then(|p| p.ancestors().nth(up).map(Path::to_path_buf))
-    .ok_or_else(|| {
-        "repo root not found (set PSCAT_ROOT to the pscat checkout for handwrite)".into()
-    })
+    let dev_checkout = std::env::current_exe()
+        .ok()
+        .map(|p| std::fs::canonicalize(&p).unwrap_or(p))
+        .and_then(|p| p.ancestors().nth(3).map(Path::to_path_buf));
+    pscat::paths::install_roots()
+        .into_iter()
+        .map(|(_, root)| root)
+        .chain(dev_checkout)
+        .find(|root| root.join(SCRIPT_REL).exists())
+        .ok_or_else(|| {
+            "pscat tree not found (set PSCAT_HOME to the pscat bundle or checkout for handwrite)"
+                .into()
+        })
 }
 
 fn scratch_dir() -> Result<PathBuf, String> {

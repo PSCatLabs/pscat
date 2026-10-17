@@ -71,6 +71,10 @@ EOF2
 }
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+# Point pscat at this tree's lib/ and fonts/catalog/ (src/paths.rs): a
+# release binary has no checkout heuristics, and its embedded lib/ may be
+# older than the files beside this script.
+export PSCAT_HOME="${PSCAT_HOME:-${PSCAT_ROOT:-$ROOT}}"
 
 # BIN resolution covers the layouts this same script runs from unmodified:
 # an installed bundle (pscat at the bundle root, this script one level down),

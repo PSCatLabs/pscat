@@ -1,194 +1,472 @@
-//! Shared resource-root resolution, used by the font catalog
-//! (`font.rs`), the `run`/`file` operators (`ops/file.rs`), and
-//! `pscat-mcp`'s handwrite path. One place to reason about "where do
-//! pscat's runtime assets live" instead of drifting copies of
-//! similar logic in each caller.
+//! The resource resolver: one place that answers "where do pscat's
+//! runtime assets come from" (issue #598, replacing Stage 21's
+//! root-only lookup). Used by the `run`/`file` operators
+//! (`ops/file.rs`), the font catalog (`font.rs`, so `--fonts` and
+//! `--capabilities` too), `selftest`'s `% @requires:` loading, and
+//! `pscat-mcp`.
 //!
-//! Candidate roots, in the order each caller composes them:
-//! `$PSCAT_ROOT` (an explicit override, but still just a candidate —
-//! subject to the same existence check as everything else, so a
-//! misconfigured override falls through rather than hard-failing),
-//! the running executable's own directory (a bundle: the binary
-//! sits next to `lib/` and `fonts/catalog/`), three levels up from
-//! the executable (a cargo dev build: `target/release/pscat` →
-//! the checkout root), the crate root at compile time (dev builds
-//! only), and — for `run`/`file` specifically — the current
-//! directory, checked *before* the heuristics below (see
-//! `program_file`'s doc comment for why that one differs).
+//! The shared abstraction is a *name* (`lib/artkit.ps`) and the bytes
+//! it opens to, not a filesystem path: a resource can come from disk
+//! or from the copy of `lib/**/*.ps` compiled into the binary
+//! (`build.rs` writes the index). The wasm build has only that
+//! embedded backend; native builds search disk first.
+//!
+//! ## Search order
+//!
+//! Written down once, for users, in `docs/guides/getting-started.md`
+//! ("Where pscat finds its files"); keep the two in step. In short, a
+//! relative `run`/`file` name tries `$PSCAT_LIB` (lib/ names only),
+//! `$PSCAT_HOME`/`$PSCAT_ROOT`, the current directory, the per-user data
+//! directory, the executable's directory, the embedded copy, and, in
+//! debug-assertion builds only, the checkout heuristics. Those
+//! heuristics (three levels above the executable, and the compile-time
+//! crate root) never run in a release build, so an install test cannot
+//! pass by finding a checkout or the crates.io source tree that
+//! `CARGO_MANIFEST_DIR` points into. The font catalog skips the steps
+//! that make no sense for a directory and checks the current directory
+//! last.
+//!
+//! `PSCAT_TRACE_RESOURCES=1` prints one stderr line per resolved
+//! resource naming the backend that served it
+//! (`scripts/clean_install_test.sh` asserts on it).
 
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
-/// First candidate root under which `root.join(rel)` satisfies
-/// `exists`. Roots and the predicate are parameters, not read from
-/// the environment/filesystem directly here — that's what makes
-/// candidate ordering unit-testable without real I/O or env
-/// mutation (`std::env::set_var` is `unsafe` as of edition 2024, and
-/// mutating real env vars is fragile under a parallel test runner
-/// regardless).
-pub fn first_existing(
-    roots: &[Option<PathBuf>],
-    rel: &str,
-    exists: &dyn Fn(&Path) -> bool,
-) -> Option<PathBuf> {
-    roots
-        .iter()
-        .flatten()
-        .map(|root| root.join(rel))
-        .find(|p| exists(p))
+include!(concat!(env!("OUT_DIR"), "/embedded_lib.rs"));
+
+/// Which step of the search order served a resource.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Backend {
+    LibEnv,
+    Home,
+    Direct,
+    UserData,
+    ExeDir,
+    Embedded,
+    Checkout,
 }
 
-/// The heuristic roots shared by every caller here, independent of
-/// `$PSCAT_ROOT` and CWD (each caller decides where those two fit
-/// in its own order). Reads the real environment/executable path —
-/// not injectable, since nothing about *this* logic needs mocking;
-/// only candidate *ordering* (tested via `first_existing` above)
-/// does.
-#[cfg(not(target_arch = "wasm32"))]
-pub fn heuristic_roots() -> Vec<Option<PathBuf>> {
-    // current_exe()'s own docs warn it may return a non-canonical
-    // path — critically, invoking a *symlink* to the binary (e.g.
-    // one dropped in ~/.local/bin or /opt/homebrew/bin pointing at
-    // the real install) can return the symlink's own location, not
-    // the real binary's, which would put lib/fonts/catalog nowhere
-    // near where this then looks. canonicalize() resolves that;
-    // fall back to the raw path only if canonicalization itself
-    // fails (e.g. the binary was removed after the process started).
-    let exe = std::env::current_exe()
+impl Backend {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Backend::LibEnv => "pscat-lib",
+            Backend::Home => "pscat-home",
+            Backend::Direct => "cwd",
+            Backend::UserData => "user-data",
+            Backend::ExeDir => "exe-dir",
+            Backend::Embedded => "embedded",
+            Backend::Checkout => "checkout",
+        }
+    }
+}
+
+/// A resolved resource: its bytes and where they came from.
+#[derive(Debug)]
+pub struct Resource {
+    pub bytes: Cow<'static, [u8]>,
+    pub backend: Backend,
+    /// The file read, for disk backends; `None` for the embedded copy.
+    pub path: Option<PathBuf>,
+}
+
+/// The embedded copy of `name` (`lib/artkit.ps`), if there is one. A
+/// leading `./` is tolerated; nothing else is normalized.
+pub fn embedded(name: &str) -> Option<&'static [u8]> {
+    let name = name.strip_prefix("./").unwrap_or(name);
+    EMBEDDED_LIB
+        .binary_search_by(|(n, _)| (*n).cmp(name))
         .ok()
-        .map(|p| std::fs::canonicalize(&p).unwrap_or(p));
-    vec![
-        exe.as_deref().and_then(Path::parent).map(Path::to_path_buf),
-        exe.as_deref()
-            .and_then(|p| p.ancestors().nth(3))
-            .map(Path::to_path_buf),
-        Some(PathBuf::from(env!("CARGO_MANIFEST_DIR"))),
-    ]
+        .map(|i| EMBEDDED_LIB[i].1)
+}
+
+/// Every embedded name, sorted.
+pub fn embedded_names() -> impl Iterator<Item = &'static str> {
+    EMBEDDED_LIB.iter().map(|(n, _)| *n)
+}
+
+/// The on-disk places the search order consults, gathered once from
+/// the process environment, or built by hand in tests (`set_var` is
+/// `unsafe` in edition 2024 and racy under a parallel test runner).
+#[derive(Debug, Default, Clone)]
+pub struct Roots {
+    pub lib: Option<PathBuf>,
+    pub home: Option<PathBuf>,
+    pub user_data: Option<PathBuf>,
+    pub exe_dir: Option<PathBuf>,
+    pub checkout: Vec<PathBuf>,
+}
+
+impl Roots {
+    /// The real environment. Empty on wasm, where there is no disk.
+    pub fn from_process() -> Roots {
+        #[cfg(target_arch = "wasm32")]
+        {
+            Roots::default()
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let var = |k: &str| {
+                std::env::var_os(k)
+                    .filter(|v| !v.is_empty())
+                    .map(PathBuf::from)
+            };
+            // current_exe() may return a symlink's own location (one
+            // in ~/.local/bin pointing at a bundle); canonicalize so
+            // the exe-dir step looks beside the real binary.
+            let exe = std::env::current_exe()
+                .ok()
+                .map(|p| std::fs::canonicalize(&p).unwrap_or(p));
+            Roots {
+                lib: var("PSCAT_LIB"),
+                home: var("PSCAT_HOME").or_else(|| var("PSCAT_ROOT")),
+                user_data: user_data_dir(&var),
+                exe_dir: exe.as_deref().and_then(Path::parent).map(Path::to_path_buf),
+                checkout: checkout_roots(exe.as_deref()),
+            }
+        }
+    }
+
+    /// The disk candidates for a relative `name`, in search order
+    /// (steps 1-5; the embedded copy is step 6 and
+    /// [`Roots::checkout_candidates`] step 7).
+    pub fn disk_candidates(&self, name: &str) -> Vec<(Backend, PathBuf)> {
+        let mut out = Vec::new();
+        if let (Some(lib), Some(rest)) = (&self.lib, name.strip_prefix("lib/")) {
+            out.push((Backend::LibEnv, lib.join(rest)));
+        }
+        if let Some(home) = &self.home {
+            out.push((Backend::Home, home.join(name)));
+        }
+        out.push((Backend::Direct, PathBuf::from(name)));
+        if let Some(d) = &self.user_data {
+            out.push((Backend::UserData, d.join(name)));
+        }
+        if let Some(d) = &self.exe_dir {
+            out.push((Backend::ExeDir, d.join(name)));
+        }
+        out
+    }
+
+    /// Step 7's candidates for `name`.
+    pub fn checkout_candidates(&self, name: &str) -> Vec<(Backend, PathBuf)> {
+        self.checkout
+            .iter()
+            .map(|r| (Backend::Checkout, r.join(name)))
+            .collect()
+    }
+
+    /// Resolve `name` against these roots, reading through `read`
+    /// (a parameter so tests need no real files).
+    pub fn open_with(
+        &self,
+        name: &str,
+        read: &dyn Fn(&Path) -> Option<Vec<u8>>,
+    ) -> Option<Resource> {
+        let from_disk = |(backend, path): (Backend, PathBuf)| {
+            read(&path).map(|bytes| Resource {
+                bytes: Cow::Owned(bytes),
+                backend,
+                path: Some(path),
+            })
+        };
+        if Path::new(name).is_absolute() {
+            return from_disk((Backend::Direct, PathBuf::from(name)));
+        }
+        self.disk_candidates(name)
+            .into_iter()
+            .find_map(from_disk)
+            .or_else(|| {
+                embedded(name).map(|b| Resource {
+                    bytes: Cow::Borrowed(b),
+                    backend: Backend::Embedded,
+                    path: None,
+                })
+            })
+            .or_else(|| {
+                self.checkout_candidates(name)
+                    .into_iter()
+                    .find_map(from_disk)
+            })
+    }
+
+    /// The roots that hold whole pscat trees (`lib/`, `fonts/catalog/`,
+    /// `scripts/`), in search order, the current directory excluded.
+    pub fn install_roots(&self) -> Vec<(Backend, PathBuf)> {
+        let mut out = Vec::new();
+        if let Some(h) = &self.home {
+            out.push((Backend::Home, h.clone()));
+        }
+        if let Some(d) = &self.user_data {
+            out.push((Backend::UserData, d.clone()));
+        }
+        if let Some(d) = &self.exe_dir {
+            out.push((Backend::ExeDir, d.clone()));
+        }
+        out.extend(self.checkout.iter().map(|r| (Backend::Checkout, r.clone())));
+        out
+    }
+
+    /// The font catalog directory: the install roots, then the
+    /// current directory.
+    pub fn catalog_dir_with(&self, is_dir: &dyn Fn(&Path) -> bool) -> Option<PathBuf> {
+        self.install_roots()
+            .into_iter()
+            .map(|(_, r)| r)
+            .chain(std::iter::once(PathBuf::from(".")))
+            .map(|r| r.join("fonts/catalog"))
+            .find(|p| is_dir(p))
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn env_root() -> Option<PathBuf> {
-    std::env::var_os("PSCAT_ROOT").map(PathBuf::from)
+fn user_data_dir(var: &dyn Fn(&str) -> Option<PathBuf>) -> Option<PathBuf> {
+    if cfg!(windows) {
+        var("APPDATA").map(|d| d.join("pscat"))
+    } else if cfg!(target_os = "macos") {
+        var("HOME").map(|h| h.join("Library/Application Support/pscat"))
+    } else {
+        var("XDG_DATA_HOME")
+            .or_else(|| var("HOME").map(|h| h.join(".local/share")))
+            .map(|d| d.join("pscat"))
+    }
 }
 
-/// Find the font catalog directory: `$PSCAT_ROOT`, then the
-/// heuristics, then CWD — today's order, unchanged by this module's
-/// introduction (it previously lived, duplicated, in `font.rs`).
+/// Step 7, in debug-assertion builds only (`debug` and `--profile ci`,
+/// which is how the test suite runs): a release binary must not find
+/// resources by sitting inside a checkout or by remembering where its
+/// source was compiled.
+#[cfg(all(not(target_arch = "wasm32"), debug_assertions))]
+fn checkout_roots(exe: Option<&Path>) -> Vec<PathBuf> {
+    let mut v: Vec<PathBuf> = exe
+        .and_then(|p| p.ancestors().nth(3))
+        .map(Path::to_path_buf)
+        .into_iter()
+        .collect();
+    v.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")));
+    v
+}
+
+#[cfg(all(not(target_arch = "wasm32"), not(debug_assertions)))]
+fn checkout_roots(_exe: Option<&Path>) -> Vec<PathBuf> {
+    Vec::new()
+}
+
+fn trace_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| {
+        cfg!(not(target_arch = "wasm32"))
+            && std::env::var_os("PSCAT_TRACE_RESOURCES").is_some_and(|v| !v.is_empty() && v != "0")
+    })
+}
+
+fn roots() -> &'static Roots {
+    static ROOTS: std::sync::OnceLock<Roots> = std::sync::OnceLock::new();
+    ROOTS.get_or_init(Roots::from_process)
+}
+
+/// Resolve and read a program's `run`/`file` name through the search
+/// order (module doc).
+pub fn open(name: &str) -> Option<Resource> {
+    #[cfg(target_arch = "wasm32")]
+    let read = |_: &Path| None;
+    #[cfg(not(target_arch = "wasm32"))]
+    let read = |p: &Path| std::fs::read(p).ok();
+    let found = roots().open_with(name, &read);
+    if trace_enabled() {
+        match &found {
+            Some(r) => match &r.path {
+                Some(p) => eprintln!(
+                    "pscat: resource {name} <- {} ({})",
+                    r.backend.as_str(),
+                    p.display()
+                ),
+                None => eprintln!("pscat: resource {name} <- {}", r.backend.as_str()),
+            },
+            None => eprintln!("pscat: resource {name} <- not found"),
+        }
+    }
+    found
+}
+
+/// The pscat trees on disk, in search order (see [`Roots::install_roots`]).
+pub fn install_roots() -> Vec<(Backend, PathBuf)> {
+    roots().install_roots()
+}
+
+/// Find the font catalog directory (module doc, last paragraph).
 #[cfg(not(target_arch = "wasm32"))]
 pub fn catalog_dir() -> Option<PathBuf> {
-    let mut roots = vec![env_root()];
-    roots.extend(heuristic_roots());
-    roots.push(Some(PathBuf::from(".")));
-    first_existing(&roots, "fonts/catalog", &|p| p.is_dir())
-}
-
-/// Resolve a PostScript program's relative `run`/`file` path against
-/// pscat's install layout. `$PSCAT_ROOT` and CWD are checked before
-/// the heuristics — unlike `catalog_dir`, this path can shadow a
-/// file the caller actually meant relative to CWD (e.g. `(helper.ps)
-/// run` from a subdirectory), so the heuristics only kick in once a
-/// direct CWD-relative read has already failed. That keeps this
-/// change strictly additive for anyone not setting `$PSCAT_ROOT`:
-/// identical behavior to before this module existed, with bundle
-/// resolution only engaging on what would otherwise be an
-/// `undefinedfilename`.
-#[cfg(not(target_arch = "wasm32"))]
-pub fn program_file(rel: &str) -> Option<PathBuf> {
-    let mut roots = vec![env_root(), Some(PathBuf::from("."))];
-    roots.extend(heuristic_roots());
-    first_existing(&roots, rel, &|p| p.exists())
+    roots().catalog_dir_with(&|p| p.is_dir())
 }
 
 #[cfg(target_arch = "wasm32")]
 pub fn catalog_dir() -> Option<PathBuf> {
-    None
-}
-
-#[cfg(target_arch = "wasm32")]
-pub fn program_file(_rel: &str) -> Option<PathBuf> {
     None
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+
+    fn reader(files: &[(&str, &str)]) -> impl Fn(&Path) -> Option<Vec<u8>> {
+        let map: HashMap<PathBuf, Vec<u8>> = files
+            .iter()
+            .map(|(p, b)| (PathBuf::from(p), b.as_bytes().to_vec()))
+            .collect();
+        move |p: &Path| map.get(p).cloned()
+    }
+
+    fn full_roots() -> Roots {
+        Roots {
+            lib: Some(PathBuf::from("/envlib")),
+            home: Some(PathBuf::from("/home")),
+            user_data: Some(PathBuf::from("/data")),
+            exe_dir: Some(PathBuf::from("/exe")),
+            checkout: vec![PathBuf::from("/checkout")],
+        }
+    }
 
     #[test]
-    fn first_existing_returns_first_matching_root() {
-        let exists = |p: &Path| p == Path::new("/b/x.ps");
-        let roots = vec![
-            Some(PathBuf::from("/a")),
-            Some(PathBuf::from("/b")),
-            Some(PathBuf::from("/c")),
-        ];
+    fn embedded_index_matches_every_lib_file_on_disk() {
+        fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+            for e in std::fs::read_dir(dir).unwrap().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    walk(&p, out);
+                } else if p.extension().is_some_and(|x| x == "ps") {
+                    out.push(p);
+                }
+            }
+        }
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut on_disk = Vec::new();
+        walk(&root.join("lib"), &mut on_disk);
+        assert!(on_disk.len() > 20, "lib/ walk found too little");
+        assert_eq!(on_disk.len(), embedded_names().count());
+        for p in on_disk {
+            let rel = p
+                .strip_prefix(root)
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .replace('\\', "/");
+            let bytes = std::fs::read(&p).unwrap();
+            assert_eq!(embedded(&rel), Some(&bytes[..]), "{rel} differs from disk");
+        }
+        assert!(embedded("lib/fonts/neon.ps").is_some());
+        assert!(embedded("./lib/artkit.ps").is_some());
+        assert!(embedded("lib/styles/specimen_toon.png").is_none());
+        assert!(embedded("artkit.ps").is_none());
+    }
+
+    #[test]
+    fn embedded_serves_when_no_disk_copy_exists() {
+        let r = Roots::default()
+            .open_with("lib/artkit.ps", &|_: &Path| None)
+            .unwrap();
+        assert_eq!(r.backend, Backend::Embedded);
+        assert_eq!(&r.bytes[..], embedded("lib/artkit.ps").unwrap());
+        assert!(r.path.is_none());
+    }
+
+    #[test]
+    fn on_disk_lib_overrides_embedded() {
+        // A checkout's (or any directory's) own lib/ beside the program.
+        let read = reader(&[("lib/artkit.ps", "% dev copy")]);
+        let r = Roots::default().open_with("lib/artkit.ps", &read).unwrap();
+        assert_eq!(r.backend, Backend::Direct);
+        assert_eq!(&r.bytes[..], b"% dev copy");
+    }
+
+    #[test]
+    fn pscat_lib_overrides_embedded_and_cwd() {
+        let read = reader(&[
+            ("/envlib/artkit.ps", "% PSCAT_LIB"),
+            ("lib/artkit.ps", "% cwd"),
+        ]);
+        let r = full_roots().open_with("lib/artkit.ps", &read).unwrap();
+        assert_eq!(r.backend, Backend::LibEnv);
+        assert_eq!(&r.bytes[..], b"% PSCAT_LIB");
+        // PSCAT_LIB stands in for lib/ only, never for other names.
+        let read = reader(&[("/envlib/helper.ps", "x")]);
+        assert!(full_roots().open_with("helper.ps", &read).is_none());
+    }
+
+    #[test]
+    fn search_order_is_lib_home_cwd_data_exe_embedded_checkout() {
+        let roots = full_roots();
+        let order: Vec<_> = roots
+            .disk_candidates("lib/x.ps")
+            .into_iter()
+            .chain(roots.checkout_candidates("lib/x.ps"))
+            .collect();
         assert_eq!(
-            first_existing(&roots, "x.ps", &exists),
-            Some(PathBuf::from("/b/x.ps"))
+            order,
+            vec![
+                (Backend::LibEnv, PathBuf::from("/envlib/x.ps")),
+                (Backend::Home, PathBuf::from("/home/lib/x.ps")),
+                (Backend::Direct, PathBuf::from("lib/x.ps")),
+                (Backend::UserData, PathBuf::from("/data/lib/x.ps")),
+                (Backend::ExeDir, PathBuf::from("/exe/lib/x.ps")),
+                (Backend::Checkout, PathBuf::from("/checkout/lib/x.ps")),
+            ]
+        );
+        // The embedded copy sits between the exe dir and the checkout.
+        let read = reader(&[("/checkout/lib/artkit.ps", "% checkout")]);
+        let r = roots.open_with("lib/artkit.ps", &read).unwrap();
+        assert_eq!(r.backend, Backend::Embedded);
+        let read = reader(&[("/exe/lib/artkit.ps", "% bundle")]);
+        assert_eq!(
+            roots.open_with("lib/artkit.ps", &read).unwrap().backend,
+            Backend::ExeDir
         );
     }
 
     #[test]
-    fn first_existing_skips_none_candidates() {
-        let exists = |p: &Path| p == Path::new("/c/x.ps");
-        let roots = vec![None, Some(PathBuf::from("/c")), None];
+    fn non_lib_names_fall_through_to_checkout() {
+        let read = reader(&[("/checkout/examples/a.ps", "a")]);
+        let r = full_roots().open_with("examples/a.ps", &read).unwrap();
+        assert_eq!(r.backend, Backend::Checkout);
+        assert!(full_roots().open_with("nope.ps", &read).is_none());
+    }
+
+    #[test]
+    fn absolute_names_ignore_every_root() {
+        let read = reader(&[("/abs/x.ps", "yes")]);
+        let r = full_roots().open_with("/abs/x.ps", &read).unwrap();
+        assert_eq!(r.backend, Backend::Direct);
+        assert!(full_roots().open_with("/abs/y.ps", &read).is_none());
+    }
+
+    #[test]
+    fn catalog_checks_install_roots_before_cwd() {
+        let roots = full_roots();
+        let both =
+            |p: &Path| p == Path::new("./fonts/catalog") || p == Path::new("/exe/fonts/catalog");
         assert_eq!(
-            first_existing(&roots, "x.ps", &exists),
-            Some(PathBuf::from("/c/x.ps"))
+            roots.catalog_dir_with(&both),
+            Some(PathBuf::from("/exe/fonts/catalog"))
         );
-    }
-
-    #[test]
-    fn first_existing_none_when_nothing_matches() {
-        let exists = |_: &Path| false;
-        let roots = vec![Some(PathBuf::from("/a"))];
-        assert_eq!(first_existing(&roots, "x.ps", &exists), None);
-    }
-
-    #[test]
-    fn first_existing_absolute_rel_ignores_every_root() {
-        // PathBuf::join replaces the base entirely when the RHS is
-        // absolute — confirms run/file's absolute-path callers are
-        // unaffected by candidate order or count.
-        let exists = |p: &Path| p == Path::new("/abs/x.ps");
-        let roots = vec![Some(PathBuf::from("/a")), Some(PathBuf::from("/b"))];
+        let only_cwd = |p: &Path| p == Path::new("./fonts/catalog");
         assert_eq!(
-            first_existing(&roots, "/abs/x.ps", &exists),
-            Some(PathBuf::from("/abs/x.ps"))
-        );
-    }
-
-    #[test]
-    fn program_file_order_checks_cwd_before_heuristics() {
-        // Mirrors program_file's actual composition (env, cwd, then
-        // heuristics) so a regression in that order is caught here
-        // without needing a real filesystem or env mutation.
-        let cwd_has_it = |p: &Path| p == Path::new("./x.ps");
-        let roots = vec![
-            None, // no $PSCAT_ROOT
-            Some(PathBuf::from(".")),
-            Some(PathBuf::from("/heuristic/a")),
-            Some(PathBuf::from("/heuristic/b")),
-        ];
-        assert_eq!(
-            first_existing(&roots, "x.ps", &cwd_has_it),
-            Some(PathBuf::from("./x.ps")),
-            "cwd must win over heuristic roots when both would resolve"
-        );
-    }
-
-    #[test]
-    fn catalog_dir_order_checks_heuristics_before_cwd() {
-        // catalog_dir has the opposite order from program_file — no
-        // caller-supplied path to shadow, so heuristics come first.
-        let only_cwd_has_it = |p: &Path| p == Path::new("./fonts/catalog");
-        let heuristic_first_roots = vec![
-            None, // no $PSCAT_ROOT
-            Some(PathBuf::from("/heuristic/a")),
-            Some(PathBuf::from("/heuristic/b")),
-            Some(PathBuf::from(".")),
-        ];
-        assert_eq!(
-            first_existing(&heuristic_first_roots, "fonts/catalog", &only_cwd_has_it),
+            roots.catalog_dir_with(&only_cwd),
             Some(PathBuf::from("./fonts/catalog"))
         );
+        assert_eq!(Roots::default().catalog_dir_with(&|_| false), None);
+    }
+
+    #[test]
+    fn checkout_heuristics_follow_debug_assertions() {
+        // The suite runs with debug assertions (debug or --profile ci),
+        // so the heuristics are on here; a release build has none.
+        let r = checkout_roots(Some(Path::new("/c/target/release/pscat")));
+        if cfg!(debug_assertions) {
+            assert_eq!(r[0], PathBuf::from("/c"));
+            assert!(r.contains(&PathBuf::from(env!("CARGO_MANIFEST_DIR"))));
+        } else {
+            assert!(r.is_empty());
+        }
     }
 }
