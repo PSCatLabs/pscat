@@ -201,7 +201,11 @@ an installed build (October 2026, #568).
   directory (`create_new`, which never opens an existing file or link) and
   renamed over the target, so an existing **regular file inside the root is
   replaced**, and a symlink swapped in after the check is replaced rather than
-  followed. A multi-page render writes `name-001.ext`, `name-002.ext`, ...
+  followed. The directory is checked again just before the temp file is
+  created and before the rename; a process that can already write inside the
+  root and swaps a directory for a symlink at exactly that moment can still
+  redirect the write (std has no `openat`, and the race needs local write
+  access the tools themselves never give). A multi-page render writes `name-001.ext`, `name-002.ext`, ...
   beside it under the same rules. The bytes are a PNG, SVG or PDF, but an SVG
   or PDF contains text the PostScript program chose. Renders without
   `out_path` go to a private temp directory that is deleted after the call.

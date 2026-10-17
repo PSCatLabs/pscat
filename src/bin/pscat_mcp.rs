@@ -991,6 +991,23 @@ fn confine(cfg: &Config, raw: &str) -> Result<Dest, ToolError> {
 }
 
 impl Dest {
+    /// The checked directory still resolves to itself. `confine` ran
+    /// before the render, so a directory on the path swapped for a symlink
+    /// meanwhile would otherwise carry the write out of the root. Checked
+    /// just before the temp file is created and again before the rename,
+    /// which narrows that window to the two calls themselves; std has no
+    /// `openat`, so a process racing those exact calls can still win
+    /// (SECURITY.md).
+    fn still_inside(&self) -> std::io::Result<()> {
+        if std::fs::canonicalize(&self.dir)? == self.dir {
+            Ok(())
+        } else {
+            Err(std::io::Error::other(
+                "the directory changed during the render (now a symlink?)",
+            ))
+        }
+    }
+
     /// Copy the rendered pages in. One page keeps the exact name; more
     /// are numbered `name-001.ext`, ... (the CLI's convention). Each file
     /// is written to a fresh temp file in the same directory and renamed
@@ -1028,12 +1045,14 @@ impl Dest {
             let tmp = self.dir.join(format!(".{name}.{}.tmp", unique_suffix()));
             let copied = (|| -> std::io::Result<()> {
                 let mut src = std::fs::File::open(page)?;
+                self.still_inside()?;
                 let mut dst = std::fs::OpenOptions::new()
                     .write(true)
                     .create_new(true) // never through an existing file or link
                     .open(&tmp)?;
                 std::io::copy(&mut src, &mut dst)?;
                 dst.sync_all()?;
+                self.still_inside()?;
                 // Closed before the rename: Windows will not rename a file
                 // that is still open.
                 drop((src, dst));
