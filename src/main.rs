@@ -294,7 +294,8 @@ fn main() -> ExitCode {
         };
     }
 
-    let Some(interp) = Interp::with_page_scaled(options.page.0, options.page.1, options.dpi / 72.0)
+    let Some(mut interp) =
+        Interp::with_page_scaled(options.page.0, options.page.1, options.dpi / 72.0)
     else {
         eprintln!(
             "pscat: unusable page size {}x{}",
@@ -303,12 +304,12 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     };
     // The single-run paths below end the process right after the output is
-    // written, so tearing down the dictionary graph (`Drop for Interp`, which
-    // is for library users and the sweep/spool loops) would only delay the
-    // exit: ~80 ms for a program holding 600k dictionary entries. Skip it
-    // here, as the cycle always did. The windowed paths take the `Interp`
-    // back with `into_inner`.
-    let mut interp = std::mem::ManuallyDrop::new(interp);
+    // written, so tearing down the dictionary graph (which `Drop for Interp`
+    // does for library users and the sweep/spool loops) would only delay the
+    // exit: ~80 ms for a program holding 600k dictionary entries. Keep the
+    // old exit path: the dictionaries are left to the OS, everything else
+    // drops as before.
+    interp.leave_dicts_to_process_exit();
     if options.transparent {
         interp.gfx_mut().set_transparent_background();
     }
@@ -359,11 +360,7 @@ fn main() -> ExitCode {
             steps_per_frame: options.steps_per_frame,
             halftone: options.halftone,
         };
-        return match run_interactive(
-            std::mem::ManuallyDrop::into_inner(interp),
-            window_options,
-            prelude,
-        ) {
+        return match run_interactive(interp, window_options, prelude) {
             Ok(()) => ExitCode::SUCCESS,
             Err(msg) => {
                 eprintln!("pscat: {msg}");
@@ -411,7 +408,7 @@ fn main() -> ExitCode {
         steps_per_frame: options.steps_per_frame,
         halftone: options.halftone,
     };
-    match run_windowed(std::mem::ManuallyDrop::into_inner(interp), window_options) {
+    match run_windowed(interp, window_options) {
         Ok(()) => ExitCode::SUCCESS,
         Err(msg) => {
             eprintln!("pscat: {msg}");

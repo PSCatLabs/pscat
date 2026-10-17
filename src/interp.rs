@@ -288,6 +288,9 @@ pub struct Interp {
     /// Non-Font resource categories (ops/level2.rs). Font shares
     /// FontDirectory instead.
     resources: crate::ops::level2::CategoryMap,
+    /// Set by the CLI's single-run path: dropping this `Interp` leaves the
+    /// dictionary graph alone (see `Drop for Interp`).
+    keep_dicts_on_drop: bool,
     /// When set, `=`, `==`, `stack`, `pstack` and `print` append here
     /// instead of writing to the process's stdout (issue #252). The
     /// browser build turns it on, since a wasm32 module has no stdout,
@@ -381,6 +384,7 @@ impl Interp {
             packing: false,
             clock: crate::clock::Clock::start(),
             resources: Default::default(),
+            keep_dicts_on_drop: false,
             stdout_capture: None,
             stdout_truncated: false,
             gfx,
@@ -1505,6 +1509,15 @@ impl Interp {
         self.seed_override_fired
     }
 
+    /// Make dropping this `Interp` skip emptying its dictionaries, as it
+    /// did before issue #625. For a process that exits right after the run
+    /// (the `pscat` CLI): the OS reclaims the memory, and walking a large
+    /// graph first only delays the exit. Not for a long-lived process.
+    #[doc(hidden)]
+    pub fn leave_dicts_to_process_exit(&mut self) {
+        self.keep_dicts_on_drop = true;
+    }
+
     #[doc(hidden)]
     pub fn last_executed_name(&self) -> Option<String> {
         self.last_name
@@ -1651,10 +1664,14 @@ impl Interp {
 /// teardown of the dictionary graph when an `Interp` goes out of scope.
 ///
 /// An `Object` that a caller took out of the interpreter (`pop`) and that
-/// is the systemdict itself (`systemdict` then `pop`) is emptied by this
-/// too: it is the same dictionary.
+/// is systemdict or userdict itself (`systemdict` then `pop`) is emptied by
+/// this too: it is the same dictionary. The `pscat` CLI opts out with
+/// [`leave_dicts_to_process_exit`](Interp::leave_dicts_to_process_exit).
 impl Drop for Interp {
     fn drop(&mut self) {
+        if self.keep_dicts_on_drop {
+            return;
+        }
         // systemdict and userdict are `dstack[0..2]` for the Interp's whole
         // life. Take each one's contents out first, so the graph is freed
         // after the `RefMut` is released: a destructor can then never find
