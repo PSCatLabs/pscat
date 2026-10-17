@@ -112,7 +112,9 @@ tool photo-etch etched.png sphere.jpg
 # a silent substitute.
 for pair in Symbol:extras ZapfDingbats:extras Palatino-Roman:texgyre; do
   face=${pair%%:*} pack=${pair##*:}
-  if OUT=$("$PSCAT" -e "/$face findfont pop" 2>&1); then
+  # MSYS2_ARG_CONV_EXCL: Git Bash on Windows would otherwise rewrite an
+  # argument starting with / into a Windows path (/Symbol -> C:/.../Symbol).
+  if OUT=$(MSYS2_ARG_CONV_EXCL='*' "$PSCAT" -e "/$face findfont pop" 2>&1); then
     fail "/$face resolved with no font packs installed"
   fi
   grep -q "is in the $pack font pack" <<<"$OUT" || { echo "$OUT" >&2; fail "/$face: no hint naming $pack"; }
