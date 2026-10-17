@@ -5,7 +5,7 @@
 //!
 //! The seam between PostScript font *dicts* (which programs own and
 //! mutate) and Rust-side glyph data is the `FID` entry: an index into
-//! [`BUILTINS`]. Faces are re-parsed per show call rather than cached —
+//! `BUILTINS`. Faces are re-parsed per show call rather than cached —
 //! `ttf_parser::Face` borrows its data, and parsing is table-directory
 //! validation, not glyph work; the Stage 6 glyph-cache task measures
 //! whether even that matters.
@@ -352,7 +352,7 @@ pub enum FontOrigin {
     /// A file found under the catalog directory at findfont time —
     /// desktop/bundle only (`#[cfg(not(target_arch = "wasm32"))]`).
     Catalog,
-    /// A `findfont` name in [`ALIASES`] that resolves to a catalog
+    /// A `findfont` name in `ALIASES` that resolves to a catalog
     /// stem; same environment dependency as `Catalog`.
     Alias,
 }
@@ -368,7 +368,7 @@ pub struct FontEntry {
     /// Set only for `FontOrigin::Alias`: the catalog stem the alias
     /// resolves to. Owned (not `&'static str`) because an implicit
     /// `-Regular`-stripped alias's target is a stem discovered at
-    /// call time, not one of the fixed [`ALIASES`] entries.
+    /// call time, not one of the fixed `ALIASES` entries.
     pub alias_target: Option<String>,
 }
 

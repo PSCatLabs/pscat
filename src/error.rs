@@ -1,44 +1,73 @@
+//! The error type: [`PsError`].
+
 use thiserror::Error;
 
-/// Interpreter errors, named after the PLRM's standard error names so that
-/// behavior can track the spec as coverage grows. When the `errordict`
-/// machinery lands in a later stage, these map directly onto it.
+/// A PostScript error, named after the PLRM's standard error names.
+///
+/// A program can catch any of these itself with `stopped`; one that reaches
+/// the top level comes back from [`Interp::run_str`](crate::Interp::run_str)
+/// and friends. `Display` prints the PLRM name, plus the detail for
+/// [`Undefined`](Self::Undefined) and [`Syntax`](Self::Syntax);
+/// [`Interp::error_report`](crate::Interp::error_report) gives the full
+/// Ghostscript-style report.
+///
+/// New variants may be added as coverage of the PLRM grows, so the enum is
+/// `#[non_exhaustive]`: match on [`name`](Self::name) or keep a `_` arm.
 #[derive(Debug, Clone, PartialEq, Error)]
+#[non_exhaustive]
 pub enum PsError {
+    /// An operator needed more operands than the stack held (`stackunderflow`).
     #[error("stackunderflow")]
     StackUnderflow,
+    /// Procedure calls nested too deeply, usually runaway recursion (`execstackoverflow`).
     #[error("execstackoverflow")]
     ExecStackOverflow,
+    /// An operand had the wrong type (`typecheck`).
     #[error("typecheck")]
     Typecheck,
+    /// An operand was out of range (`rangecheck`).
     #[error("rangecheck")]
     Rangecheck,
+    /// A name was not found in any dictionary on the dictionary stack (`undefined`); holds the name.
     #[error("undefined in {0}")]
     Undefined(String),
+    /// A numeric result could not be represented, such as division by zero (`undefinedresult`).
     #[error("undefinedresult")]
     UndefinedResult,
+    /// `counttomark`, `]` or `>>` found no mark on the stack (`unmatchedmark`).
     #[error("unmatchedmark")]
     UnmatchedMark,
+    /// A path operator needed a current point and there was none (`nocurrentpoint`).
     #[error("nocurrentpoint")]
     NoCurrentPoint,
+    /// `exit` was used outside a loop (`invalidexit`).
     #[error("invalidexit")]
     InvalidExit,
+    /// `end` would have popped a permanent dictionary (`dictstackunderflow`).
     #[error("dictstackunderflow")]
     DictStackUnderflow,
+    /// A font dictionary was malformed or a font operation was invalid (`invalidfont`).
     #[error("invalidfont")]
     InvalidFont,
+    /// A file was opened with a mode that is not allowed (`invalidfileaccess`).
     #[error("invalidfileaccess")]
     InvalidFileAccess,
+    /// A file named by `run` or `file` was not found (`undefinedfilename`).
     #[error("undefinedfilename")]
     UndefinedFilename,
+    /// The scanner could not read the program text (`syntaxerror`); holds a detail message.
     #[error("syntaxerror: {0}")]
     Syntax(String),
+    /// An implementation limit was exceeded (`limitcheck`).
     #[error("limitcheck")]
     Limitcheck,
+    /// An input/output operation failed (`ioerror`).
     #[error("ioerror")]
     Io,
+    /// `restore` was given a save object it cannot restore to (`invalidrestore`).
     #[error("invalidrestore")]
     InvalidRestore,
+    /// `findresource` found no resource with that name (`undefinedresource`).
     #[error("undefinedresource")]
     UndefinedResource,
 }
@@ -79,6 +108,7 @@ impl PsError {
     /// `$error` keeps in its own `/command` entry. `syntaxerror`'s
     /// detail has nowhere to live in `$error`, so it comes back empty —
     /// callers that still hold the original should prefer it.
+    #[doc(hidden)]
     pub fn from_name(name: &str, command: Option<String>) -> Option<PsError> {
         Some(match name {
             "stackunderflow" => PsError::StackUnderflow,

@@ -108,7 +108,7 @@ pub struct BlockResult {
     pub line: usize,
     pub failures: Vec<Failure>,
     /// How many failures the block actually recorded, which can exceed
-    /// `failures.len()` once [`MAX_FAILURES`] is hit.
+    /// `failures.len()` once `MAX_FAILURES` is hit.
     pub failure_count: usize,
     /// An error that escaped the block body itself (as opposed to one
     /// an assertion caught and classified), already formatted by
@@ -656,7 +656,7 @@ pub fn parse_blocks(source: &[u8]) -> Result<Vec<SelfTestBlock>, String> {
 /// The tag's value is a literal PostScript snippet (`(lib/artkit.ps)
 /// run`), and this reads the paths back out of it rather than
 /// executing it, so resolution can be made independent of the current
-/// directory (see [`resolve_required`]). Anything but a run of
+/// directory (see `resolve_required`). Anything but a run of
 /// `(path) run` pairs is rejected: quietly ignoring a shape this
 /// doesn't understand would load the wrong prerequisites and blame the
 /// resulting failures on the library.

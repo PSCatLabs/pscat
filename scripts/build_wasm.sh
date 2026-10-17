@@ -6,7 +6,12 @@
 #   python3 -m http.server -d web      # then open http://localhost:8000
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-cargo build --lib --release --target wasm32-unknown-unknown \
+# The crate is an rlib for everyone else (issue #565: a `cdylib` in
+# Cargo.toml's crate-type made every downstream crate build one too), so ask
+# for the cdylib here only. `--no-default-features`: the `window` feature's
+# winit/softbuffer are native-only and skipped on wasm32 regardless.
+cargo rustc --lib --release --target wasm32-unknown-unknown \
+  --no-default-features --crate-type cdylib \
   --manifest-path "$ROOT/Cargo.toml"
 cp "$ROOT/target/wasm32-unknown-unknown/release/pscat.wasm" "$ROOT/web/pscat.wasm"
 ls -lh "$ROOT/web/pscat.wasm"
