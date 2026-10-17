@@ -137,6 +137,11 @@ fn runs_alone(mode: &str, options: &Options) -> Result<(), String> {
 }
 
 fn main() -> ExitCode {
+    // `pscat fonts ...` is its own small CLI (src/fontpacks/cli.rs).
+    let argv: Vec<String> = env::args().skip(1).collect();
+    if argv.first().is_some_and(|a| a == "fonts") {
+        return pscat::fontpacks::cli::main(&argv[1..]);
+    }
     // `pscat handwrite|typewrite|photo-etch ...`: self-contained subcommands
     // with their own options (subcmd/); everything else is the flag CLI.
     if let Some(code) = subcmd::dispatch(env::args().skip(1)) {
@@ -1236,6 +1241,10 @@ fn parse_args() -> Result<Options, String> {
                 for name in pscat::font::available_fonts() {
                     println!("{name}");
                 }
+                // Where they came from: `#` lines, never a face name.
+                for line in pscat::fontpacks::status_lines() {
+                    println!("{line}");
+                }
                 std::process::exit(0);
             }
             "--capabilities" => {
@@ -1370,6 +1379,7 @@ fn parse_args() -> Result<Options, String> {
 
 fn print_usage() {
     println!("usage: pscat [options] [file.ps | -]");
+    println!("       pscat fonts install|list|remove   (font packs; `pscat fonts help`)");
     println!();
     println!("Runs file.ps in a live window (watch it draw), or a REPL if no file.");
     println!("'-' reads the program from stdin (use with --png/--svg/--pdf/--headless).");
@@ -1398,6 +1408,9 @@ fn print_usage() {
     println!("      --selftest FILE run FILE's %%SelfTest blocks and exit (runs alone)");
     println!("      --selftest-list FILE   print FILE's %%SelfTest block names, then exit");
     println!("      --fonts         list every findfont-reachable face and alias, then exit");
+    println!(
+        "                      (`#` lines after: pinned pack release, installed packs, overrides)"
+    );
     println!(
         "      --capabilities  print the agent-usable art catalog (fonts, palettes, templates, procedures) as JSON, then exit"
     );

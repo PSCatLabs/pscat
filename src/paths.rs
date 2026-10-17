@@ -210,12 +210,43 @@ impl Roots {
     /// The font catalog directory: the install roots, then the
     /// current directory.
     pub fn catalog_dir_with(&self, is_dir: &dyn Fn(&Path) -> bool) -> Option<PathBuf> {
+        self.catalog_dirs_with(is_dir).into_iter().next()
+    }
+
+    /// Every plain `fonts/catalog/` directory, in [`Self::catalog_dir_with`]'s
+    /// order. Each is an explicit filesystem choice (an override, in
+    /// `pscat fonts`' terms), so all of them come before any installed
+    /// font pack (issue #599).
+    pub fn catalog_dirs_with(&self, is_dir: &dyn Fn(&Path) -> bool) -> Vec<PathBuf> {
         self.install_roots()
             .into_iter()
             .map(|(_, r)| r)
             .chain(std::iter::once(PathBuf::from(".")))
             .map(|r| r.join("fonts/catalog"))
-            .find(|p| is_dir(p))
+            .filter(|p| is_dir(p))
+            .collect()
+    }
+
+    /// The directories `pscat fonts install` puts packs in and font
+    /// lookup reads them from, in search order: `$PSCAT_HOME`, the
+    /// per-user data directory, the executable's directory. Never the
+    /// checkout or the current directory: an installed pack is a user
+    /// install, not a source tree.
+    pub fn pack_dirs(&self) -> Vec<PathBuf> {
+        [&self.home, &self.user_data, &self.exe_dir]
+            .into_iter()
+            .flatten()
+            .map(|r| r.join("fonts/packs"))
+            .collect()
+    }
+
+    /// Where `pscat fonts install` writes: `$PSCAT_HOME` (or
+    /// `$PSCAT_ROOT`), otherwise the per-user data directory.
+    pub fn pack_install_dir(&self) -> Option<PathBuf> {
+        self.home
+            .as_ref()
+            .or(self.user_data.as_ref())
+            .map(|r| r.join("fonts/packs"))
     }
 }
 
@@ -303,6 +334,17 @@ pub fn catalog_dir() -> Option<PathBuf> {
 #[cfg(target_arch = "wasm32")]
 pub fn catalog_dir() -> Option<PathBuf> {
     None
+}
+
+/// Every `fonts/catalog/` directory on disk (see [`Roots::catalog_dirs_with`]).
+#[cfg(not(target_arch = "wasm32"))]
+pub fn catalog_dirs() -> Vec<PathBuf> {
+    roots().catalog_dirs_with(&|p| p.is_dir())
+}
+
+/// The process's roots, for `pscat fonts` and the font-pack lookup.
+pub fn process_roots() -> &'static Roots {
+    roots()
 }
 
 #[cfg(test)]
@@ -455,6 +497,42 @@ mod tests {
             Some(PathBuf::from("./fonts/catalog"))
         );
         assert_eq!(Roots::default().catalog_dir_with(&|_| false), None);
+    }
+
+    #[test]
+    fn every_catalog_dir_is_listed_and_packs_live_in_user_roots() {
+        let roots = full_roots();
+        let some = |p: &Path| p != Path::new("/data/fonts/catalog");
+        assert_eq!(
+            roots.catalog_dirs_with(&some),
+            vec![
+                PathBuf::from("/home/fonts/catalog"),
+                PathBuf::from("/exe/fonts/catalog"),
+                PathBuf::from("/checkout/fonts/catalog"),
+                PathBuf::from("./fonts/catalog"),
+            ]
+        );
+        assert_eq!(
+            roots.pack_dirs(),
+            vec![
+                PathBuf::from("/home/fonts/packs"),
+                PathBuf::from("/data/fonts/packs"),
+                PathBuf::from("/exe/fonts/packs"),
+            ]
+        );
+        assert_eq!(
+            roots.pack_install_dir(),
+            Some(PathBuf::from("/home/fonts/packs"))
+        );
+        let no_home = Roots {
+            home: None,
+            ..full_roots()
+        };
+        assert_eq!(
+            no_home.pack_install_dir(),
+            Some(PathBuf::from("/data/fonts/packs"))
+        );
+        assert_eq!(Roots::default().pack_install_dir(), None);
     }
 
     #[test]

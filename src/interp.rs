@@ -239,6 +239,10 @@ pub struct Interp {
     /// text, not the procedure's original definition site — this
     /// interpreter doesn't tag objects with a source position.
     last_line: Option<usize>,
+    /// A sentence for the user that `error_report` prints under the
+    /// error line, set by `findfont` for a face whose font pack is not
+    /// installed (issue #599). findfont clears it on every call.
+    pub(crate) error_hint: Option<String>,
     /// State for `rand`/`srand`/`rrand`. Deterministic by default —
     /// reproducible art is a feature here, not a bug.
     pub(crate) rand_state: i64,
@@ -346,6 +350,7 @@ impl Interp {
             caught_error: None,
             error_command: None,
             last_line: None,
+            error_hint: None,
             rand_state: 1,
             seed_override: None,
             seed_override_fired: false,
@@ -628,11 +633,17 @@ impl Interp {
                 .last_executed_name()
                 .unwrap_or_else(|| "--none--".to_string()),
         };
-        match self.last_line {
+        let report = match self.last_line {
             Some(line) => {
                 format!("%%[ Error: {kind}; OffendingCommand: {command}; Line: {line} ]%%")
             }
             None => format!("%%[ Error: {kind}; OffendingCommand: {command} ]%%"),
+        };
+        // On its own line, so tools matching the `%%[ ... ]%%` line
+        // still see exactly that.
+        match (&self.error_hint, err) {
+            (Some(hint), PsError::InvalidFont) => format!("{report}\n{hint}"),
+            _ => report,
         }
     }
 
