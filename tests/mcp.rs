@@ -452,6 +452,187 @@ fn out_path_symlink_escapes_are_refused() {
     assert!(root.join("real/ok.png").is_file());
 }
 
+/// The refusal names the extension a retry needs.
+fn assert_refused_with_extension(result: &Value, ext: &str) {
+    assert_eq!(error_kind(result), "out_path_refused", "{result}");
+    assert_eq!(
+        result["structuredContent"]["error"]["required_extension"], ext,
+        "{result}"
+    );
+}
+
+#[test]
+fn out_path_needs_the_extension_of_the_output_format() {
+    let root = common::scratch_dir("mcp-ext");
+    let mut s = Server::start_in(&root, &[]);
+    initialized(&mut s);
+
+    // Wrong, missing, or no extension at all.
+    for bad in [
+        "Makefile",
+        ".envrc",
+        "pre-commit",
+        "x.txt",
+        "x.png.sh",
+        "x.svg",
+        ".png",
+        "x.",
+        "x.pdf",
+    ] {
+        let result = render_to(&mut s, bad);
+        assert_refused_with_extension(&result, ".png");
+        assert!(!root.join(bad).exists(), "{bad} must not be written");
+    }
+    // The extension follows the requested format, case aside.
+    let svg = |s: &mut Server, out_path: &str| {
+        s.tool(
+            "render_postscript",
+            json!({ "source": SQUARE, "width": 20, "height": 20, "format": "svg", "out_path": out_path }),
+        )
+    };
+    assert_refused_with_extension(&svg(&mut s, "x.png"), ".svg");
+    assert_eq!(svg(&mut s, "x.svg")["isError"], false);
+    assert_eq!(svg(&mut s, "Y.SVG")["isError"], false);
+    assert!(root.join("x.svg").is_file() && root.join("Y.SVG").is_file());
+    let pdf = s.tool(
+        "render_postscript",
+        json!({ "source": SQUARE, "width": 20, "height": 20, "format": "pdf", "out_path": "x.png" }),
+    );
+    assert_refused_with_extension(&pdf, ".pdf");
+    let pdf = s.tool(
+        "render_postscript",
+        json!({ "source": SQUARE, "width": 20, "height": 20, "format": "pdf", "out_path": "x.pdf" }),
+    );
+    assert_eq!(pdf["isError"], false, "{pdf}");
+    // handwrite makes PNGs.
+    let result = s.tool("handwrite", json!({ "text": "hi", "out_path": "note.svg" }));
+    assert_refused_with_extension(&result, ".png");
+    let result = s.tool("handwrite", json!({ "text": "hi", "out_path": "note.png" }));
+    assert_eq!(result["isError"], false, "{result}");
+    assert!(root.join("note.png").is_file());
+    // A multi-page render is checked on the name asked for.
+    let result = s.tool(
+        "render_postscript",
+        json!({ "source": "showpage showpage", "width": 20, "height": 20, "out_path": "pages" }),
+    );
+    assert_refused_with_extension(&result, ".png");
+    assert!(!root.join("pages-001").exists());
+    s.ping_ok();
+}
+
+#[test]
+fn out_path_refuses_dot_directories() {
+    let root = common::scratch_dir("mcp-dotdir");
+    // The directories exist, so a refusal is the rule, not a missing dir.
+    std::fs::create_dir_all(root.join(".git/hooks")).unwrap();
+    std::fs::create_dir_all(root.join("sub/.claude")).unwrap();
+    std::fs::create_dir(root.join("real")).unwrap();
+    let mut s = Server::start_in(&root, &[]);
+    initialized(&mut s);
+
+    for bad in [
+        ".git/hooks/x.png",
+        ".git/x.png",
+        "sub/.claude/x.png",
+        "./.git/x.png",
+    ] {
+        let result = render_to(&mut s, bad);
+        assert_eq!(error_kind(&result), "out_path_refused", "{bad}: {result}");
+        assert!(
+            texts(&result)[0].contains("dot-directory"),
+            "{bad}: {result}"
+        );
+    }
+    let abs = root.join(".git/hooks/y.png");
+    let result = render_to(&mut s, abs.to_str().unwrap());
+    assert_eq!(error_kind(&result), "out_path_refused", "{result}");
+    assert!(
+        std::fs::read_dir(root.join(".git/hooks"))
+            .unwrap()
+            .next()
+            .is_none()
+    );
+    assert!(
+        std::fs::read_dir(root.join("sub/.claude"))
+            .unwrap()
+            .next()
+            .is_none()
+    );
+
+    // A visible directory is fine.
+    assert_eq!(render_to(&mut s, "real/x.png")["isError"], false);
+
+    // A link to a dot-directory is judged by where it leads.
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(root.join(".git"), root.join("alias")).unwrap();
+        let result = render_to(&mut s, "alias/x.png");
+        assert_eq!(error_kind(&result), "out_path_refused", "{result}");
+        assert!(!root.join(".git/x.png").exists());
+    }
+}
+
+#[test]
+fn out_root_may_itself_sit_under_a_dot_directory() {
+    let base = common::scratch_dir("mcp-dotroot");
+    let root = base.join(".cache/renders");
+    std::fs::create_dir_all(&root).unwrap();
+    let mut s = Server::start_in(&base, &["--out-root", root.to_str().unwrap()]);
+    initialized(&mut s);
+    assert_eq!(render_to(&mut s, "x.png")["isError"], false);
+    assert!(root.join("x.png").is_file());
+}
+
+#[test]
+fn out_path_overwrites_only_existing_render_files() {
+    let root = common::scratch_dir("mcp-overwrite");
+    for (name, bytes) in [
+        ("Makefile", &b"all:\n"[..]),
+        (".envrc", b"export X=1\n"),
+        ("notes.txt", b"keep me"),
+        ("png", b"no dot"),
+    ] {
+        std::fs::write(root.join(name), bytes).unwrap();
+    }
+    std::fs::write(root.join("old.png"), b"old").unwrap();
+    let mut s = Server::start_in(&root, &[]);
+    initialized(&mut s);
+
+    // An existing render file of the same extension is replaced.
+    let result = render_to(&mut s, "old.png");
+    assert_eq!(result["isError"], false, "{result}");
+    assert!(
+        std::fs::read(root.join("old.png"))
+            .unwrap()
+            .starts_with(b"\x89PNG")
+    );
+
+    // Anything else is refused and left byte for byte as it was.
+    for (name, bytes) in [
+        ("Makefile", &b"all:\n"[..]),
+        (".envrc", b"export X=1\n"),
+        ("notes.txt", b"keep me"),
+        ("png", b"no dot"),
+    ] {
+        let result = render_to(&mut s, name);
+        assert_refused_with_extension(&result, ".png");
+        assert_eq!(std::fs::read(root.join(name)).unwrap(), bytes, "{name}");
+    }
+
+    // An existing file of another render extension is not replaced by a png
+    // render either (its name has the wrong extension).
+    std::fs::write(root.join("doc.pdf"), b"%PDF keep").unwrap();
+    let result = render_to(&mut s, "doc.pdf");
+    assert_refused_with_extension(&result, ".png");
+    assert_eq!(std::fs::read(root.join("doc.pdf")).unwrap(), b"%PDF keep");
+
+    // A directory named like a render is not a file to replace.
+    std::fs::create_dir(root.join("dir.png")).unwrap();
+    let result = render_to(&mut s, "dir.png");
+    assert_eq!(error_kind(&result), "out_path_refused", "{result}");
+    assert!(root.join("dir.png").is_dir());
+}
+
 #[test]
 fn out_root_flag_moves_the_root() {
     let cwd = common::scratch_dir("mcp-cwd2");

@@ -1026,7 +1026,8 @@ renders eight examples in both and compares block-downsampled output).
   really implemented (#621): -32022 there tells a dual-era client the server
   is modern. Every child goes through `run_child` (timeout, 4 MiB per stream)
   and every `out_path` through `confine` + `Dest::write_pages` (temp file +
-  rename); a new tool that writes files or runs a child must too, and gets
+  rename; `confine` also requires the render's extension and refuses
+  dot-directories, #627); a new tool that writes files or runs a child must too, and gets
   cases in `tests/mcp.rs`. Only JSON-RPC on stdout. Error results carry
   `structuredContent.error` beside the text; success results never do (some
   clients show `structuredContent` instead of `content`, and that would hide

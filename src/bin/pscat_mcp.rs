@@ -28,8 +28,8 @@
 //! **Bounds** (issue #568, `SECURITY.md`): every child run has a
 //! wall-clock timeout and a cap on captured output; `source`/`text` have
 //! a size cap; inline images have a byte and page cap; `out_path` is
-//! confined to one output root and written by rename, never by following
-//! a symlink. Nothing but JSON-RPC is ever written to stdout: diagnostics
+//! confined to one output root (render extensions only, no dot-directories)
+//! and written by rename, never by following a symlink. Nothing but JSON-RPC is ever written to stdout: diagnostics
 //! go to stderr, and child output is always captured through pipes.
 
 use std::io::{BufRead, Read, Write};
@@ -358,7 +358,9 @@ fn initialize_result(cfg: &Config, params: &Value) -> Result<Value, (String, Val
     };
     let out_path = match &cfg.out_root {
         Ok(root) => format!(
-            "out_path writes only inside {} (relative paths start there).",
+            "out_path writes only inside {} (relative paths start there), only to a name \
+             ending in the output format's extension (.png, .svg, .pdf), and never into \
+             a dot-directory.",
             root.display()
         ),
         Err(why) => why.clone(),
@@ -472,7 +474,9 @@ fn tool_list(cfg: &Config) -> Value {
     let out_path = match &cfg.out_root {
         Ok(root) => format!(
             "Also write the file here: a path inside {} (relative paths start there; \
-             the directory must exist; an existing file is replaced). ",
+             the directory must exist and not start with a dot; the name must end in the \
+             output format's extension, .png for handwrite; an existing file with that \
+             extension is replaced). ",
             root.display()
         ),
         Err(why) => format!("{why}. "),
@@ -653,7 +657,7 @@ fn render_postscript(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
     let halftone = optional_bool(args, "halftone")?.unwrap_or(false);
     // Checked before rendering, so a refused path costs nothing.
     let dest = optional_str(args, "out_path")?
-        .map(|p| confine(cfg, p))
+        .map(|p| confine(cfg, p, format))
         .transpose()?;
     if format == "pdf" && dest.is_none() {
         return Err(ToolError::invalid(
@@ -723,7 +727,7 @@ fn render_postscript(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
 fn handwrite(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
     let text = required_text(cfg, args, "text")?;
     let dest = optional_str(args, "out_path")?
-        .map(|p| confine(cfg, p))
+        .map(|p| confine(cfg, p, "png"))
         .transpose()?;
     let scratch = ScratchDir::new()?;
     let out = scratch.path().join("note.png");
@@ -938,7 +942,8 @@ fn split_lint_findings(stderr: &str) -> (String, String) {
 // --- out_path confinement --------------------------------------------
 
 /// A checked destination: a directory inside the output root (canonical,
-/// so no symlink in it leads out) and a plain file name.
+/// so no symlink in it leads out) and a plain file name that ends in the
+/// render's own extension.
 struct Dest {
     dir: PathBuf,
     name: String,
@@ -946,9 +951,15 @@ struct Dest {
 
 /// Resolve `raw` against the output root. Refused: any `..`, a path whose
 /// directory is missing or resolves (through symlinks) outside the root,
-/// and a name that is not a plain file name. Absolute paths are fine when
-/// they land inside the root.
-fn confine(cfg: &Config, raw: &str) -> Result<Dest, ToolError> {
+/// a name that is not a plain file name, a name that does not end in `.ext`
+/// (the render's format: `png`, `svg` or `pdf`), and a directory below the
+/// root with a name starting with a dot (`.git`, `.claude`, ...). Absolute
+/// paths are fine when they land inside the root.
+///
+/// The extension rule is also the overwrite rule: the target of a write is
+/// `name`, or `stem-NNN.ext` for several pages, so an existing file can
+/// only ever be replaced by a render of its own extension.
+fn confine(cfg: &Config, raw: &str, ext: &str) -> Result<Dest, ToolError> {
     let root = cfg
         .out_root
         .as_ref()
@@ -959,6 +970,7 @@ fn confine(cfg: &Config, raw: &str) -> Result<Dest, ToolError> {
             format!("out_path {raw:?} refused: {why}"),
         )
         .with("out_root", json!(root.display().to_string()))
+        .with("required_extension", json!(format!(".{ext}")))
     };
     if raw.is_empty() || raw.contains('\0') {
         return Err(refuse("not a usable path"));
@@ -972,6 +984,14 @@ fn confine(cfg: &Config, raw: &str) -> Result<Dest, ToolError> {
         (Some(name), false) => name.to_string_lossy().into_owned(),
         _ => return Err(refuse("it must name a file")),
     };
+    let has_ext = Path::new(&name)
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case(ext));
+    if !has_ext {
+        return Err(refuse(&format!(
+            "the name must end in .{ext}, the extension of the output format"
+        )));
+    }
     let parent = joined
         .parent()
         .ok_or_else(|| refuse("it must name a file"))?;
@@ -986,6 +1006,16 @@ fn confine(cfg: &Config, raw: &str) -> Result<Dest, ToolError> {
             "it is outside the output root {}",
             root.display()
         )));
+    }
+    // Judged on the resolved directory below the root, so a symlink to a
+    // dot-directory is caught too, and a root that is itself under one
+    // (`--out-root ~/.cache/renders`) still works.
+    let below = dir.strip_prefix(root).unwrap_or(Path::new(""));
+    if below
+        .components()
+        .any(|c| matches!(c, Component::Normal(n) if n.to_string_lossy().starts_with('.')))
+    {
+        return Err(refuse("writing into a dot-directory is not allowed"));
     }
     Ok(Dest { dir, name })
 }
@@ -1013,7 +1043,8 @@ impl Dest {
     /// is written to a fresh temp file in the same directory and renamed
     /// over the target: a rename replaces a symlink rather than following
     /// it, so a link swapped in after the check still cannot redirect the
-    /// write. A target that is a symlink or a directory is refused.
+    /// write. An existing target that is not a regular file (a symlink,
+    /// a directory, a device) is refused.
     fn write_pages(&self, pages: &[PathBuf]) -> Result<Vec<PathBuf>, ToolError> {
         let names: Vec<String> = if pages.len() == 1 {
             vec![self.name.clone()]
@@ -1028,12 +1059,12 @@ impl Dest {
         for name in &names {
             let target = self.dir.join(name);
             if let Ok(meta) = std::fs::symlink_metadata(&target)
-                && (meta.file_type().is_symlink() || meta.is_dir())
+                && !meta.is_file()
             {
                 return Err(ToolError::new(
                     "out_path_refused",
                     format!(
-                        "out_path refused: {} is a symlink or a directory",
+                        "out_path refused: {} exists and is not a regular file",
                         target.display()
                     ),
                 ));

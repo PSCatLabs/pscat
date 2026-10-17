@@ -190,7 +190,8 @@ written to `out_path`; adds a `Lint:` block when the page looks wrong),
 offending command and line), `handwrite`, and `describe_art_capabilities`.
 Each call has a time limit (default 60 s), `out_path` must be inside the
 server's output root (its working directory unless registered with
-`--out-root DIR`), and large inline images are refused: lower `dpi` or
+`--out-root DIR`), end in the output format's extension (`.png`, `.svg`,
+`.pdf`) and not sit in a dot-directory such as `.git/`, and large inline images are refused: lower `dpi` or
 pass `out_path`. Register it with
 `claude mcp add pscat -- pscat-mcp` (Claude Code) or
 `codex mcp add pscat -- pscat-mcp` (Codex).
