@@ -1119,7 +1119,8 @@ renders eight examples in both and compares block-downsampled output).
   interpreter is emptied by the drop, since it is the same dictionary.
   A new long-lived holder of a dict `Rc` (a cache on `Interp`) must be a
   plain field so it drops with the `Interp`; a `thread_local` or `static`
-  holding one would make the test fail. Teardown walks the dictionaries iteratively
+  holding one would make the test fail. Teardown walks the dictionaries, operand
+  stack, dict stack, journal and loop frames iteratively
   (`object::teardown_iteratively`), so a 100000-deep dict chain is fine at
   drop; freeing one mid-run (`undef`, `restore`) still recurses (#631). The `pscat` CLI's single-run path
   calls the hidden `Interp::leave_dicts_to_process_exit` so exit does not

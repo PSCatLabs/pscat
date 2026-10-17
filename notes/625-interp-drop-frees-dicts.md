@@ -38,11 +38,16 @@ method, so they leaked per render; they no longer do.)
 drop glue free the contents, which recurses once per nesting level of dict
 (only `PsArray` drops iteratively): about 10000 levels overflow a 2 MB thread,
 and for library, MCP and wasm callers that is a new input-triggered abort where
-dropping used to leak. `Drop for Interp` now hands the contents of systemdict,
-userdict and the operand stack to `object::teardown_iteratively`, a worklist
-that unwraps uniquely held dicts and arrays (so dict/array mixes are covered
-too). `dropping_an_interp_with_deeply_nested_dicts_does_not_overflow_the_stack`
-builds 100000-level chains (dicts, arrays, alternating; in userdict and on the
-operand stack) on a test thread and aborts without the fix. Not covered, and
+dropping used to leak. `Drop for Interp` now feeds a worklist, `object::teardown_iteratively`, that
+unwraps uniquely held dicts and arrays (so dict/array mixes are covered too).
+Round 2 widened the roots from systemdict and userdict to everything that can
+keep a user-built chain alive: the operand stack, extra dicts left on the dict
+stack by `begin` (the chain's last reference is otherwise released by field
+glue), the save journal, and the procedure and `forall` source of running
+loops. Left to drop glue: graphics-state snapshots and Show/Image frames
+(font and image data). `dropping_an_interp_with_deeply_nested_dicts_does_not_overflow_the_stack`
+builds 100000-level chains (dicts, arrays, alternating; in userdict, on the
+operand stack, open under `begin`, and held only by the journal) on a test
+thread; it aborts with either the dstack or journal handling removed. Not covered, and
 tracked in #631: a deep chain freed *during* a run (`undef`, `restore`,
 overwriting a key), and one held only by the save journal or execution stack.

@@ -1672,16 +1672,65 @@ impl Drop for Interp {
         if self.keep_dicts_on_drop {
             return;
         }
-        // systemdict and userdict are `dstack[0..2]` for the Interp's whole
-        // life. Take each one's contents out first, so the graph is freed
-        // after the `RefMut` is released (a destructor can then never find
-        // a permanent dictionary still borrowed), and free it iteratively:
-        // a program can nest dicts as deep as it likes, and a recursive
-        // teardown would overflow the host's stack.
-        let mut extra = std::mem::take(&mut self.ostack);
+        // A program can nest dicts and arrays as deep as it likes, so the
+        // graph is freed with a worklist, not by drop glue, which recurses
+        // once per level and would overflow the host's stack. Every field
+        // that can keep a dictionary or array alive feeds it: a chain left
+        // behind by `begin` (dstack), the operand stack, the save journal
+        // and the running loops' procedures and `forall` sources. What is
+        // left (graphics-state snapshots, Show/Image frames) holds
+        // font and image data, not user-built chains.
+        let mut pending: Vec<Object> = std::mem::take(&mut self.ostack);
+        // Everything above systemdict and userdict (`dstack[0..2]`, which
+        // stay alive for the Interp's whole life and are emptied below).
+        while self.dstack.len() > 2 {
+            if let Some(d) = self.dstack.pop() {
+                pending.push(Object::lit(Value::Dict(d)));
+            }
+        }
+        for entry in std::mem::take(&mut self.journal) {
+            match entry {
+                JEntry::Array { data, old } => {
+                    pending.extend(old);
+                    if let Ok(cell) = Rc::try_unwrap(data) {
+                        pending.extend(cell.into_inner());
+                    }
+                }
+                JEntry::Dict { dict, mut old } => {
+                    old.drain_into(&mut pending);
+                    pending.push(Object::lit(Value::Dict(dict)));
+                }
+                JEntry::GState { .. } => {}
+            }
+        }
+        for frame in std::mem::take(&mut self.estack) {
+            match frame {
+                Frame::Proc { body, .. }
+                | Frame::Repeat { body, .. }
+                | Frame::Loop { body }
+                | Frame::For { body, .. } => pending.push(Object::lit(Value::Array(body))),
+                Frame::Forall { body, src } => {
+                    pending.push(Object::lit(Value::Array(body)));
+                    match src {
+                        ForallSrc::Array(a, _) => pending.push(Object::lit(Value::Array(a))),
+                        ForallSrc::Pairs(pairs, _) => {
+                            for (k, v) in pairs {
+                                pending.push(k);
+                                pending.push(v);
+                            }
+                        }
+                        ForallSrc::Str(..) => {}
+                    }
+                }
+                _ => {}
+            }
+        }
+        // Take each permanent dictionary's contents out first, so the graph
+        // is freed after the `RefMut` is released (a destructor can then
+        // never find one still borrowed).
         for dict in self.dstack.iter().take(2) {
             let mut contents = std::mem::take(&mut *dict.borrow_mut());
-            crate::object::teardown_iteratively(&mut contents, std::mem::take(&mut extra));
+            crate::object::teardown_iteratively(&mut contents, std::mem::take(&mut pending));
         }
     }
 }
@@ -1833,7 +1882,8 @@ mod tests {
     /// program can nest as deep as it likes, and a library user's thread
     /// (this test's is 2 MB) would otherwise abort in `drop` (Codex review
     /// of #625). 100000 levels of dict, of array, and of both alternating,
-    /// one chain in userdict and one left on the operand stack.
+    /// chains in userdict, left on the operand stack, left open by `begin`,
+    /// and held only by the save journal (a `save` then an overwrite).
     #[test]
     fn dropping_an_interp_with_deeply_nested_dicts_does_not_overflow_the_stack() {
         let mut it = Interp::new();
@@ -1842,7 +1892,10 @@ mod tests {
              0 1 1 100000 { pop 1 array dup 0 4 -1 roll put } for userdict /arrays 3 -1 roll put
              0 1 1 100000 { pop 1 dict dup /n 4 -1 roll put 1 array dup 0 4 -1 roll put } for
              userdict /mixed 3 -1 roll put
-             0 1 1 100000 { pop 1 dict dup /n 4 -1 roll put } for",
+             0 1 1 100000 { pop 1 dict dup /n 4 -1 roll put } for
+             userdict /dicts get begin
+             0 1 1 100000 { pop 1 dict dup /n 4 -1 roll put } for
+             save pop userdict /arrays 0 put userdict /kept 3 -1 roll put",
         )
         .expect("build the chains");
         drop(it);

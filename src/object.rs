@@ -683,7 +683,7 @@ impl Dict {
 
     /// Move every key and value into `out`, leaving the dictionary empty
     /// (the worklist step of [`teardown_iteratively`]).
-    fn drain_into(&mut self, out: &mut Vec<Object>) {
+    pub(crate) fn drain_into(&mut self, out: &mut Vec<Object>) {
         out.extend(self.names.drain().map(|(_, v)| v));
         for (_, e) in self.exotic.drain() {
             out.push(e.key);
