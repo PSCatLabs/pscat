@@ -572,9 +572,14 @@ pub fn verify(p: &Installed) -> Result<usize, Vec<String>> {
         Some(m) => m,
         None => return Err(vec!["manifest.json is missing or unreadable".into()]),
     };
+    let schema = m["manifest_schema"].as_u64().unwrap_or(0);
+    let files = match m["files"].as_array() {
+        Some(f) if !f.is_empty() && schema != 0 && schema <= MANIFEST_SCHEMA => f,
+        _ => return Err(vec!["manifest.json is malformed or lists no files".into()]),
+    };
     let mut problems = Vec::new();
     let mut n = 0;
-    for f in m["files"].as_array().into_iter().flatten() {
+    for f in files {
         let path = f["path"].as_str().unwrap_or_default();
         let want = f["sha256"].as_str().unwrap_or_default();
         if !safe_path(path) {
@@ -832,6 +837,17 @@ pub(crate) mod tests {
             p.selection(Some(pin)),
             super::super::Selection::UserSelected
         );
+
+        // A gutted manifest must not verify as "0 files, all fine".
+        let p = super::super::installed_in(&dest).remove(0);
+        std::fs::write(p.dir.join("manifest.json"), "{}").unwrap();
+        assert!(verify(&p).is_err());
+        std::fs::write(
+            p.dir.join("manifest.json"),
+            r#"{"manifest_schema":1,"files":[]}"#,
+        )
+        .unwrap();
+        assert!(verify(&p).is_err());
 
         assert_eq!(remove(&dest, &[]).unwrap(), ["alpha"]);
         assert!(super::super::installed_in(&dest).is_empty());

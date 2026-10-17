@@ -241,7 +241,8 @@ pub struct Interp {
     last_line: Option<usize>,
     /// A sentence for the user that `error_report` prints under the
     /// error line, set by `findfont` for a face whose font pack is not
-    /// installed (issue #599). findfont clears it on every call.
+    /// installed (issue #599). findfont clears it on every call, and a
+    /// `stopped` that catches the error clears it too.
     pub(crate) error_hint: Option<String>,
     /// State for `rand`/`srand`/`rrand`. Deterministic by default —
     /// reproducible art is a feature here, not a bug.
@@ -482,6 +483,9 @@ impl Interp {
             return Err(e);
         }
         self.record_error(&e, command);
+        // A caught error's findfont hint must not label a later,
+        // unrelated invalidfont (setfont on a bad dict, say).
+        self.error_hint = None;
         self.caught_error = Some(e);
         self.do_stop();
         self.push(Object::bool(true));
@@ -1643,6 +1647,17 @@ mod tests {
         assert_eq!(lines.len(), 2, "{report}");
         assert!(lines[0].starts_with("%%[ Error: invalidfont;") && lines[0].ends_with("]%%"));
         assert_eq!(lines[1], "pscat: install the pack");
+    }
+
+    #[test]
+    fn a_caught_error_drops_the_findfont_hint() {
+        let mut it = Interp::new();
+        it.error_hint = Some("pscat: install the pack".into());
+        let err = it
+            .run_str("{ 1 0 div } stopped pop << >> setfont")
+            .unwrap_err();
+        assert_eq!(err, PsError::InvalidFont);
+        assert!(!it.error_report(&err).contains("install the pack"));
     }
 
     use super::*;
