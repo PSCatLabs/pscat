@@ -61,6 +61,13 @@ pub fn pdf_text(pdf: &[u8]) -> String {
 // names a shared path. `tests/scratch_paths.rs` enforces it.
 // ---------------------------------------------------------------------
 
+/// A path as it can sit inside a PostScript string literal: `/` separators.
+/// Windows temp paths contain `\`, which a PostScript string reads as an
+/// escape (`\U`, `\t`, ...), and Windows accepts `/` everywhere (issue #601).
+pub fn ps_path(p: &std::path::Path) -> String {
+    p.to_str().expect("utf-8 path").replace('\\', "/")
+}
+
 /// A new, already created directory that no other call shares, in this
 /// process or any other: `<temp>/pscat-test-<pid>/<tag>-<n>`. `tag` only
 /// helps a human reading the temp dir; put a file under it with

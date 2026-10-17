@@ -125,8 +125,8 @@ impl MutatedLib {
     fn run(&self, snippet: &str) -> (bool, String) {
         let program = format!(
             "({}) run ({}) run\n{snippet}\n",
-            self.dir.path().join("lib/artkit.ps").display(),
-            self.file.display(),
+            common::ps_path(&self.dir.path().join("lib/artkit.ps")),
+            common::ps_path(&self.file),
         );
         let out = Command::new(BIN)
             .args(["--headless", "-e", &program])
@@ -1021,7 +1021,7 @@ fn every_library_with_blocks_is_in_the_manifest() {
             .strip_prefix(repo_root())
             .expect("under the repo root")
             .to_string_lossy()
-            .into_owned();
+            .replace('\\', "/");
         assert!(
             listed.contains(&rel),
             "{rel} has %%SelfTest blocks but isn't listed in selftest/libraries.txt"

@@ -47,7 +47,7 @@ fn et_dims_rejects_non_jpeg_data() {
     let tmp = common::scratch_dir("etching").join("not_a_jpeg.jpg");
     std::fs::write(&tmp, b"not a jpeg at all, just text").unwrap();
     let err = it
-        .run_str(&format!("<< /Photo ({}) >> et-dims", tmp.to_str().unwrap()))
+        .run_str(&format!("<< /Photo ({}) >> et-dims", common::ps_path(&tmp)))
         .expect_err("garbage input must not parse as a JPEG");
     assert!(
         matches!(&err, PsError::Undefined(name) if name.contains("et-jpeg-not-a-jpeg")),
@@ -62,7 +62,7 @@ fn et_dims_rejects_truncated_jpeg() {
     let tmp = common::scratch_dir("etching").join("truncated.jpg");
     std::fs::write(&tmp, [0xFF, 0xD8, 0xFF]).unwrap();
     let err = it
-        .run_str(&format!("<< /Photo ({}) >> et-dims", tmp.to_str().unwrap()))
+        .run_str(&format!("<< /Photo ({}) >> et-dims", common::ps_path(&tmp)))
         .expect_err("a file cut off mid-header must not hang or panic");
     assert!(
         matches!(&err, PsError::Undefined(name) if name.contains("et-jpeg-truncated")),
@@ -82,7 +82,7 @@ fn et_dims_rejects_a_corrupt_segment_length() {
     let tmp = common::scratch_dir("etching").join("bad_length.jpg");
     std::fs::write(&tmp, [0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x01]).unwrap();
     let err = it
-        .run_str(&format!("<< /Photo ({}) >> et-dims", tmp.to_str().unwrap()))
+        .run_str(&format!("<< /Photo ({}) >> et-dims", common::ps_path(&tmp)))
         .expect_err("a marker with length < 2 must not raise a raw rangecheck");
     assert!(
         matches!(&err, PsError::Undefined(name) if name.contains("et-jpeg-bad-marker")),
