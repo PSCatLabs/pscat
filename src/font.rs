@@ -202,6 +202,7 @@ pub(crate) fn resolve(requested: &str) -> Result<i64, String> {
 /// (or the name itself), then that with `-Regular`, so `/Bangers
 /// findfont` means the family's regular face. Shared by the lookup and
 /// the missing-pack check so the two cannot disagree.
+#[cfg(not(target_arch = "wasm32"))]
 fn wanted_stems(requested: &str) -> (&str, String) {
     let stem = ALIASES
         .iter()
