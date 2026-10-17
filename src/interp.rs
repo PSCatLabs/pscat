@@ -354,9 +354,8 @@ impl Interp {
         let user = Rc::new(RefCell::new(Dict::new()));
         // The permanent dicts are reachable by name, per the PLRM —
         // found code writes `userdict /x get` and `systemdict begin`
-        // routinely. (systemdict referencing itself is an Rc cycle, so
-        // it outlives the Interp — one bounded allocation per
-        // interpreter, for an object with process lifetime anyway.)
+        // routinely. (systemdict referencing itself is an Rc cycle;
+        // `Drop for Interp` empties systemdict to break it.)
         system.borrow_mut().put(
             "systemdict".into(),
             Object::lit(Value::Dict(system.clone())),
@@ -1506,32 +1505,6 @@ impl Interp {
         self.seed_override_fired
     }
 
-    /// Break systemdict's self-referential `Rc` cycle and consume this
-    /// `Interp`. systemdict holds a strong reference to itself and to
-    /// `userdict` (per the PLRM's "found code writes `systemdict
-    /// begin`" idiom); with plain `Rc` and no cycle collector, that
-    /// means neither dict — nor anything a program stored in
-    /// `userdict` — is ever freed by simply dropping the `Interp` (see
-    /// `docs/dev/HANDOFF.md`'s "systemdict self-reference" gotcha). Normally
-    /// that's one small, bounded, process-lifetime leak and genuinely
-    /// doesn't matter. It stops being bounded for a caller that
-    /// constructs many `Interp`s within one process run (issue #21's
-    /// `--sweep-seed`/`--sweep` loop, and `--spool`'s one-`Interp`-
-    /// per-job pattern) — call this once a given `Interp` is done
-    /// running, in place of dropping it directly. Taking `self` by
-    /// value (not `&mut self`) makes "nothing runs PostScript on it
-    /// again" a compile-time guarantee rather than a documented
-    /// promise: emptying systemdict here removes every built-in
-    /// operator, so a caller that kept the `Interp` around and tried
-    /// to use it afterward would otherwise hit `undefined` errors at
-    /// runtime instead of a compile error.
-    #[doc(hidden)]
-    pub fn break_permanent_dict_cycle(self) {
-        if let Some(system) = self.dstack.first() {
-            system.borrow_mut().clear();
-        }
-    }
-
     #[doc(hidden)]
     pub fn last_executed_name(&self) -> Option<String> {
         self.last_name
@@ -1665,6 +1638,34 @@ impl Interp {
     }
 }
 
+/// systemdict holds a strong `Rc` to itself and to `userdict` (the PLRM's
+/// `systemdict begin` / `userdict /x get` idiom), and the crate has no cycle
+/// collector, so without this the dictionaries, and everything a program
+/// stored in them, would outlive every dropped `Interp` (issue #21 found it
+/// for the sweep loop; issue #625 for library users, who build one `Interp`
+/// per document). Emptying both permanent dictionaries breaks those
+/// references, and also a program's own `userdict /me userdict put`.
+///
+/// This is a `Drop` on `Interp`, not on `Object`: `Object` must stay
+/// `Drop`-free (docs/dev/HANDOFF.md, the `PsArray` note). The cost is one
+/// teardown of the dictionary graph when an `Interp` goes out of scope.
+///
+/// An `Object` that a caller took out of the interpreter (`pop`) and that
+/// is the systemdict itself (`systemdict` then `pop`) is emptied by this
+/// too: it is the same dictionary.
+impl Drop for Interp {
+    fn drop(&mut self) {
+        // systemdict and userdict are `dstack[0..2]` for the Interp's whole
+        // life. Take each one's contents out first, so the graph is freed
+        // after the `RefMut` is released: a destructor can then never find
+        // a permanent dictionary still borrowed.
+        for dict in self.dstack.iter().take(2) {
+            let contents = std::mem::take(&mut *dict.borrow_mut());
+            drop(contents);
+        }
+    }
+}
+
 impl Default for Interp {
     fn default() -> Self {
         Self::new()
@@ -1753,21 +1754,69 @@ mod tests {
 
     use super::*;
 
-    /// `break_permanent_dict_cycle` must actually free `userdict`, not
-    /// just reduce its strong count — verified with a `Weak` handle
-    /// rather than trusting the cycle is broken (issue #21's sweep
-    /// loop creates many `Interp`s in one process run; a cross-model
-    /// review confirmed via this exact technique, before the fix
-    /// existed, that `userdict` — and anything a swept program stored
-    /// in it — otherwise outlives every dropped frame for the rest of
-    /// the run, since systemdict's self-reference and its `/userdict`
-    /// entry are both strong `Rc`s with no cycle collector).
+    /// Dropping an `Interp` must free its dictionaries (issue #625):
+    /// systemdict holds strong `Rc`s to itself and to `userdict`, and a
+    /// program can hang more graph off both. `Weak` handles prove it,
+    /// rather than reasoning about the cycle: after a plain `drop` none
+    /// of them may upgrade. The program touches the places that could
+    /// keep a dict alive: user dicts, a restored and a still-open `save`
+    /// (journal), a caught error (`$error`, `errordict`), the font
+    /// machinery (`FontDirectory`), and `systemdict begin` left open.
+    fn weak_dicts_after_program() -> (Interp, Vec<(&'static str, std::rc::Weak<RefCell<Dict>>)>) {
+        let mut it = Interp::new();
+        it.run_str(
+            "userdict /held 3 dict put
+             userdict /nested << /a << /b 1 >> >> put
+             save userdict /tmp 1 put restore
+             save pop userdict /open 2 put
+             { 1 0 div } stopped pop
+             /Helvetica findfont 12 scalefont setfont 10 10 moveto (hi) show
+             systemdict begin
+             userdict /held get
+             userdict /nested get /a get
+             FontDirectory
+             errordict
+             $error",
+        )
+        .expect("probe program runs");
+        let mut weaks = vec![
+            ("systemdict", std::rc::Rc::downgrade(&it.dstack[0])),
+            ("userdict", std::rc::Rc::downgrade(&it.dstack[1])),
+        ];
+        for name in ["$error", "errordict", "FontDirectory", "nested /a", "held"] {
+            match it.pop().expect("dict on the operand stack").value {
+                Value::Dict(d) => weaks.push((name, std::rc::Rc::downgrade(&d))),
+                _ => panic!("{name}: expected a dict on the operand stack"),
+            }
+        }
+        (it, weaks)
+    }
+
     #[test]
-    fn break_permanent_dict_cycle_frees_userdict() {
+    fn dropping_an_interp_frees_its_dictionaries() {
+        for _ in 0..20 {
+            let (interp, weaks) = weak_dicts_after_program();
+            assert!(
+                weaks.iter().all(|(_, w)| w.upgrade().is_some()),
+                "dicts must stay alive while the Interp does"
+            );
+            drop(interp);
+            for (name, w) in &weaks {
+                assert!(w.upgrade().is_none(), "{name} leaked past the Interp");
+            }
+        }
+    }
+
+    #[test]
+    fn dropping_an_interp_with_no_program_frees_both_permanent_dicts() {
         let interp = Interp::new();
-        let weak = std::rc::Rc::downgrade(&interp.dstack[1]);
-        interp.break_permanent_dict_cycle();
-        assert!(weak.upgrade().is_none(), "userdict must be freed");
+        let (system, user) = (
+            std::rc::Rc::downgrade(&interp.dstack[0]),
+            std::rc::Rc::downgrade(&interp.dstack[1]),
+        );
+        drop(interp);
+        assert!(system.upgrade().is_none(), "systemdict must be freed");
+        assert!(user.upgrade().is_none(), "userdict must be freed");
     }
 
     #[test]
