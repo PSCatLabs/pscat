@@ -11,7 +11,7 @@
 # 3. The installed copy holds the three skills as real files (the cache
 #    copy follows plugin/skills -> ../skills) and nothing else of the repo.
 # 4. `claude mcp list` with only the given bin dir added to PATH: the
-#    plugin's server must connect. Without pscat-mcp on PATH it must fail
+#    plugin's server must connect. Then without pscat-mcp on PATH it must fail
 #    (the negative case the plugin's SessionStart hook explains).
 set -euo pipefail
 
@@ -56,6 +56,12 @@ extra=$(cd "$copy" && find . -mindepth 1 -maxdepth 1 ! -name skills ! -name .cla
 clean_path=$(dirname "$claude"):/usr/bin:/bin
 node=$(command -v node || true)
 [ -n "$node" ] && clean_path=$clean_path:$(dirname "$node")
+# Positive case first: Claude Code caches a failed connection for a while,
+# keyed to the server config, so a failure first could mask a success.
+out=$(PATH="$bin:$clean_path" "$claude" mcp list 2>&1 || true)
+echo "$out" | grep -q 'plugin:pscat:pscat.*Connected' \
+    && ok "with pscat-mcp on PATH the server connects" || bad "mcp list: $out"
+
 if PATH="$clean_path" command -v pscat-mcp >/dev/null; then
     bad "pscat-mcp is still on the stripped PATH; cannot run the negative case"
 else
@@ -63,8 +69,5 @@ else
     echo "$out" | grep -q 'plugin:pscat:pscat.*Failed' \
         && ok "without pscat-mcp the server fails to start" || bad "negative case: $out"
 fi
-out=$(PATH="$bin:$clean_path" "$claude" mcp list 2>&1 || true)
-echo "$out" | grep -q 'plugin:pscat:pscat.*Connected' \
-    && ok "with pscat-mcp on PATH the server connects" || bad "mcp list: $out"
 
 exit $fail
