@@ -22,7 +22,7 @@ crosshatch pass in the deep shadows. Both honor the file's own EXIF
 Orientation tag, so a portrait phone photo sizes and
 renders right-side up rather than sideways. Draws with ordinary
 `moveto`/`lineto`/`stroke`, so it renders to `--png`/`--svg`/`--pdf`
-alike. `scripts/photo_etch.sh` wraps it end to end (photo path in, PNG/
+alike. `pscat photo-etch` wraps it end to end (photo path in, PNG/
 SVG/PDF out — no PostScript required); `examples/etching_demo.ps` is a
 specimen sheet.
 `et-tonemap` returns the photo's tones as data instead: a

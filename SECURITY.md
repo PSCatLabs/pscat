@@ -117,7 +117,7 @@ says. PostScript cannot change that. (`quit` ends the run; it does not write.)
 **`--spool DIR` runs every `.ps` or `.eps` file that lands in `DIR`.** Only
 point it at a directory that people you trust can write to.
 
-**`pscat-mcp` and `scripts/handwrite.sh` are different. See the MCP section.**
+**`pscat-mcp` is different. See the MCP section.**
 
 **In the browser** (`web/pscat.js`, the website playground), pscat is a
 WebAssembly module with no filesystem: `file` and `run` find nothing, because
@@ -183,9 +183,9 @@ not shipped.
 `pscat-mcp` serves four tools over stdio to whatever agent or client launched
 it: `render_postscript`, `handwrite`, `describe_art_capabilities` and
 `eval_postscript`. It runs each call as a child process (`pscat`, and
-`scripts/handwrite.sh` for `handwrite`) as the same user, with the same
+`pscat handwrite` for `handwrite`) as the same user, with the same
 environment and working directory as the server. Checked with:
-`src/bin/pscat_mcp.rs`, `scripts/handwrite.sh`, and calls to a built server.
+`src/bin/pscat_mcp.rs`, `src/subcmd/handwrite.rs`, and calls to a built server.
 
 - **`out_path` is an unconfined file write.** `render_postscript` and
   `handwrite` write the artifact to whatever path the caller gives, create or
@@ -211,20 +211,24 @@ environment and working directory as the server. Checked with:
 - **Page size is bounded** because the server passes `width` and `height` to the
   CLI, which refuses anything over 8000 (it exits with its usage text, and the
   server reports "no output produced").
-- **`handwrite`'s `ink` is spliced into PostScript source** by
-  `scripts/handwrite.sh` without validation. It gives a caller nothing it does
-  not already have through `eval_postscript`, but it is an injection point if a
-  future version narrows what those tools may do. `text` that begins with `-`
-  is read as an option by the script and fails instead of rendering.
-- `handwrite` needs the repository's `scripts/` directory next to the server
-  (`PSCAT_ROOT` overrides where, and is trusted without checks). The script
-  then runs the first `pscat` it finds in this order: `pscat` in that
-  directory, `target/release/pscat` there, **the first `pscat` on `PATH`**, and
-  if none is found it runs **`cargo build --release`** in that directory. So
-  `handwrite` can run a different binary from the one the server runs for the
-  other tools, and can start a build (which runs `build.rs`). When the
-  server's own `pscat` and the repository are the same install, that is
-  harmless; it matters if `PATH` or `PSCAT_ROOT` is not under your control.
+- **`handwrite`'s options are validated before they reach PostScript.** Until
+  #600 `scripts/handwrite.sh` spliced `ink`, `size` and the other options into
+  PostScript source unchecked, and read a `text` that began with `-` as an
+  option. `pscat handwrite` now accepts only plain decimal numbers for the
+  numeric options (and exactly three for `ink`), `plain` or `ruled` for
+  `paper`, and escapes `text` as a PostScript string; the server passes `text`
+  after `--`, so it is always text. A value that is not a number fails with a
+  usage error and renders nothing. This gave a caller nothing it did not already
+  have through `eval_postscript`; it closes an injection point for a future
+  version that narrows what the tools may do.
+- `handwrite` runs `pscat handwrite`, found next to the server like the other
+  tools' `pscat` (the same file, so it cannot run a different binary), and needs
+  no checkout, no `scripts/` directory, no shell, and no `PSCAT_ROOT` (that
+  variable is no longer read by the server). It never starts a build. It does
+  read the PostScript library through the resource resolver, so a `lib/`
+  directory named by `PSCAT_HOME` or `PSCAT_LIB`, or in the server's working
+  directory, is used in place of the copy compiled into `pscat`; those variables
+  and that directory are trusted the same way they are for `render_postscript`.
 - The server speaks only over stdin and stdout. It opens no port.
 
 If you register `pscat-mcp` with an agent, assume the agent can write any file

@@ -72,9 +72,9 @@ codex mcp add pscat -- $PWD/target/release/pscat-mcp</code></pre>
   <p>For OpenClaw, Hermes, or any other MCP client, the generic
   stdio config:</p>
 <pre><code>{ "mcpServers": { "pscat": { "command": "/path/to/target/release/pscat-mcp" } } }</code></pre>
-  <p>Set <code>PSCAT_ROOT</code> to the checkout if you relocate the
-  binaries and still want the <code>handwrite</code> tool (it runs
-  <code>scripts/handwrite.sh</code>).</p>
+  <p>The server needs only the two binaries side by side: the
+  <code>handwrite</code> tool runs <code>pscat handwrite</code>, with no
+  checkout or shell script.</p>
 
   <h2>The CLI, for direct shelling</h2>
 <pre><code>pscat --png out.png file.ps              # render (also --svg / --pdf)
@@ -82,7 +82,7 @@ pscat --page 500x500 --dpi 300 ...       # canvas in points; dpi scales pixels
 generate | pscat --png out.png -         # '-' reads the program from stdin
 pscat --headless --pstack-on-error f.ps  # debug: error name + stack post-mortem
 pscat -e '3 4 add ='                     # one-liner eval
-./scripts/handwrite.sh "note text"       # string → handwritten PNG</code></pre>
+pscat handwrite "note text"               # string → handwritten PNG</code></pre>
   <p>Exit code 0 means a clean run; nonzero means a PostScript error,
   named on stderr. <code>--png</code> writes the partial canvas even
   after an error — usually exactly what you want when debugging.</p>

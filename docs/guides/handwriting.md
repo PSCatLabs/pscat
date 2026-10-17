@@ -20,8 +20,8 @@ reason.
 ## The handwrite tool
 
 ```sh
-./scripts/handwrite.sh "meet me at the bandshell at nine"
-./scripts/handwrite.sh --size 44 --paper ruled --ink 0.5,0.1,0.1 \
+pscat handwrite "meet me at the bandshell at nine"
+pscat handwrite --size 44 --paper ruled --ink 0.5,0.1,0.1 \
     --seed 7 -o note.png "buy milk
 call the bank about the thing"
 ```

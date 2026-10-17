@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # package_release.sh — build pscat + pscat-mcp and assemble a
 # standalone, installable bundle: the binaries plus the runtime
-# assets they need (lib/, fonts/catalog/, scripts/handwrite.sh,
-# scripts/typewrite.sh,
-# scripts/photo_etch.sh), with no git checkout or cargo required to
-# use it afterward.
+# assets they need (lib/ and fonts/catalog/), with no git checkout or
+# cargo required to use it afterward. The handwrite, typewrite and
+# photo-etch tools are `pscat` subcommands (issue #600), so the bundle
+# carries no scripts.
 #
 #   ./scripts/package_release.sh
 #   ./scripts/package_release.sh /tmp/out         # custom output dir
@@ -37,13 +37,6 @@ cp "$ROOT/target/release/pscat-mcp" "$BUNDLE/pscat-mcp"
 cp -R "$ROOT/lib" "$BUNDLE/lib"
 mkdir -p "$BUNDLE/fonts"
 cp -R "$ROOT/fonts/catalog" "$BUNDLE/fonts/catalog" # wholesale, license .txt files included
-mkdir -p "$BUNDLE/scripts"
-cp "$ROOT/scripts/handwrite.sh" "$BUNDLE/scripts/handwrite.sh"
-chmod +x "$BUNDLE/scripts/handwrite.sh"
-cp "$ROOT/scripts/typewrite.sh" "$BUNDLE/scripts/typewrite.sh"
-chmod +x "$BUNDLE/scripts/typewrite.sh"
-cp "$ROOT/scripts/photo_etch.sh" "$BUNDLE/scripts/photo_etch.sh"
-chmod +x "$BUNDLE/scripts/photo_etch.sh"
 
 cat > "$BUNDLE/README.md" <<EOF
 # pscat $VERSION ($OS/$ARCH)
@@ -57,8 +50,7 @@ Add this directory to your \`PATH\`, then run \`pscat\` from anywhere:
     export PATH="\$PWD:\$PATH"
     pscat --png out.png some_file.ps
 
-\`lib/\`, \`fonts/catalog/\`, \`scripts/handwrite.sh\`,
-\`scripts/typewrite.sh\`, and \`scripts/photo_etch.sh\` are found automatically as long as they stay
+\`lib/\` and \`fonts/catalog/\` are found automatically as long as they stay
 next to the \`pscat\` binary (this directory). If you move the binary
 elsewhere, set \`PSCAT_HOME\` to this directory instead. (The
 libraries are also compiled into \`pscat\`, so \`lib/\` keeps working
@@ -69,9 +61,10 @@ even then; the font catalog does not.)
 - \`pscat\`, \`pscat-mcp\` — the interpreter and its MCP server
 - \`lib/\` — artkit.ps, handscript.ps, etching.ps, the Type 3 font programs, style packs
 - \`fonts/catalog/\` — the bundled TrueType/OpenType font catalog
-- \`scripts/handwrite.sh\` — the handwritten-note tool
-- \`scripts/typewrite.sh\` — the typewritten-page tool
-- \`scripts/photo_etch.sh\` — the photo-to-line-etching tool
+
+The handwritten-note, typewritten-page and photo-to-line-etching tools are
+subcommands of the binary: \`pscat handwrite\`, \`pscat typewrite\` and
+\`pscat photo-etch\` (add \`--help\`). They need nothing but \`pscat\`.
 
 Full docs, source, and the \`examples/\`/\`gallery/\` demo material:
 https://github.com/jeromebanks/postscript_interpreter
@@ -97,6 +90,22 @@ for lib in lib/artkit.ps lib/etching.ps; do
   grep -q "resource $lib <- exe-dir" <<<"$TRACE" ||
     { echo "FAIL: $lib did not resolve from the bundle" >&2; exit 1; }
 done
+
+# The three tool subcommands need nothing but the binary (issue #600): no
+# scripts/ beside it, no checkout, no shell. The photo is test input from
+# the checkout, not an install dependency.
+TOOLS=$(mktemp -d)
+printf 'bundle check\n' > "$TOOLS/note.txt"
+bare "$BUNDLE/pscat" handwrite -o "$TOOLS/h.png" "bundle check" >/dev/null ||
+  { echo "FAIL: pscat handwrite did not run from the bundle" >&2; exit 1; }
+bare "$BUNDLE/pscat" typewrite -o "$TOOLS/t.png" "$TOOLS/note.txt" >/dev/null ||
+  { echo "FAIL: pscat typewrite did not run from the bundle" >&2; exit 1; }
+bare "$BUNDLE/pscat" photo-etch -o "$TOOLS/e.png" "$ROOT/tests/data/sphere.jpg" >/dev/null ||
+  { echo "FAIL: pscat photo-etch did not run from the bundle" >&2; exit 1; }
+for f in h t e; do
+  [[ -s "$TOOLS/$f.png" ]] || { echo "FAIL: a tool subcommand wrote no PNG ($f)" >&2; exit 1; }
+done
+rm -rf "$TOOLS"
 
 # The other realistic install shape: a symlink into some bin/ dir
 # pointing back at the bundle (what `brew`, and this project's own
