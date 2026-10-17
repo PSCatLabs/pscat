@@ -191,11 +191,8 @@ pub(crate) fn resolve(requested: &str) -> Result<i64, String> {
         if let Some(fid) = catalog_fid(requested) {
             return Ok(fid);
         }
-        if let Some(pack) = missing_pack(requested) {
-            return Err(format!(
-                "pscat: font /{requested} is in the {pack} font pack, which is not installed; \
-                 run `pscat fonts install` (or `pscat fonts install --pack {pack}`)"
-            ));
+        if let Some(hint) = missing_face_hint(requested) {
+            return Err(hint);
         }
     }
     Ok(SUBSTITUTE)
@@ -218,6 +215,18 @@ fn wanted_stems(requested: &str) -> (&str, String) {
 fn missing_pack(requested: &str) -> Option<&'static str> {
     let (stem, fallback) = wanted_stems(requested);
     crate::fontpacks::pack_for_stem(stem).or_else(|| crate::fontpacks::pack_for_stem(&fallback))
+}
+
+/// The hint for a face whose pack is not installed, or `None` when no
+/// pack has it.
+#[cfg(not(target_arch = "wasm32"))]
+fn missing_face_hint(requested: &str) -> Option<String> {
+    missing_pack(requested).map(|pack| {
+        format!(
+            "pscat: font /{requested} is in the {pack} font pack, which is not installed; \
+             run `pscat fonts install` (or `pscat fonts install --pack {pack}`)"
+        )
+    })
 }
 
 /// The directories catalog faces load from, in priority order:
@@ -1393,5 +1402,33 @@ impl ShowCtx {
             operands: vec![Object::lit(Value::Dict(fs.dict.clone())), char_operand],
             target,
         })
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pack_faces_get_a_hint_naming_their_pack() {
+        for (name, pack) in [
+            ("Symbol", "extras"),
+            ("ZapfDingbats", "extras"),
+            ("Bangers", "extras"),
+            ("bangers-regular", "extras"),
+            ("Palatino-Roman", "texgyre"),
+            ("Helvetica-Narrow-Bold", "texgyre"),
+            ("NotoSansKR-Regular", "cjk-thai"),
+        ] {
+            let hint = missing_face_hint(name).unwrap_or_else(|| panic!("{name}: no hint"));
+            assert!(
+                hint.contains(&format!("/{name} is in the {pack} font pack"))
+                    && hint.contains(&format!("--pack {pack}")),
+                "{hint}"
+            );
+        }
+        for name in ["Helvetica", "Courier-Bold", "NoSuchFace", "Arial"] {
+            assert_eq!(missing_face_hint(name), None, "{name}");
+        }
     }
 }

@@ -10,9 +10,14 @@ back to `<Family>-Regular`. `pscat --fonts` lists everything reachable.
 synthetic two-face collection, not just assumed; no collection is
 bundled today.)
 
-The catalog root is found via `$PSCAT_ROOT`, the executable's
-location, the build-time checkout path, or the working directory — see
-`catalog_root()` in `src/font.rs`. Every family directory carries its
+Font lookup checks every `fonts/catalog/` directory the resolver
+finds, then the installed font packs (`src/fontpacks/mod.rs` has the
+order; `docs/guides/getting-started.md` the user-facing version). This
+directory is the source of the packs: `fonts/packs.json` assigns each
+family to a pack (`extras`, `texgyre`, `cjk-thai`), and a new family
+must be added there too, or `cargo test` fails. Installed pscat builds
+get these faces with `pscat fonts install`; see
+`docs/guides/fonts.md`, "Font packs". Every family directory carries its
 own license text alongside its font files. Licenses here are the SIL
 Open Font License 1.1 (OFL), Apache 2.0 and the GUST Font License
 (GFL). The URW symbol faces are taken under OFL from URW++'s

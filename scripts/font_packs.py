@@ -157,7 +157,7 @@ def zstd(data):
     return r.stdout
 
 
-def build(packs, assets, tag, out_dir):
+def build(packs, assets, tag, out_dir, only=None):
     if not TAG_RE.match(tag):
         sys.exit(f"tag {tag!r} is not fonts-YYYY.MM or fonts-YYYY.MM.N")
     errors = check(packs, assets)
@@ -169,6 +169,8 @@ def build(packs, assets, tag, out_dir):
     sums = []
     for pack in packs["packs"]:
         name = pack["name"]
+        if only and name not in only:
+            continue
         members = []
         manifest_files = []
         for arc, repo, kind, entry in files[name]:
@@ -257,6 +259,7 @@ def main(argv):
     b = sub.add_parser("build")
     b.add_argument("--tag", required=True)
     b.add_argument("--out", required=True)
+    b.add_argument("--pack", action="append", help="build only this pack (repeatable)")
     p = sub.add_parser("pin")
     p.add_argument("--index", required=True)
     p.add_argument("--file", default=os.path.join(ROOT, PINNED_RS))
@@ -271,7 +274,11 @@ def main(argv):
         print("fonts/packs.json OK")
         return 0
     if args.cmd == "build":
-        build(packs, assets, args.tag, args.out)
+        if args.pack:
+            unknown = set(args.pack) - {p["name"] for p in packs["packs"]}
+            if unknown:
+                sys.exit(f"no such pack: {', '.join(sorted(unknown))}")
+        build(packs, assets, args.tag, args.out, args.pack)
         return 0
     pin(args.index, args.file)
     return 0

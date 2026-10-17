@@ -1631,6 +1631,20 @@ fn scan_procedure(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_findfont_hint_goes_under_the_error_line_for_invalidfont_only() {
+        let mut it = Interp::new();
+        let err = it.run_str("1 0 div").unwrap_err();
+        it.error_hint = Some("pscat: install the pack".into());
+        assert!(!it.error_report(&err).contains("install the pack"));
+        let report = it.error_report(&PsError::InvalidFont);
+        let lines: Vec<&str> = report.lines().collect();
+        assert_eq!(lines.len(), 2, "{report}");
+        assert!(lines[0].starts_with("%%[ Error: invalidfont;") && lines[0].ends_with("]%%"));
+        assert_eq!(lines[1], "pscat: install the pack");
+    }
+
     use super::*;
 
     /// `break_permanent_dict_cycle` must actually free `userdict`, not

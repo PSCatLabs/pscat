@@ -1,0 +1,134 @@
+# The font-pack release train (issue #599), separate from pscat's own
+# v* releases (release.yml): fonts-YYYY.MM tags (fonts-YYYY.MM.N for a
+# fix) publish the catalog as .tar.zst packs, a font-index.json and
+# SHA256SUMS on a GitHub Release, nothing else. The procedure, including
+# how a pscat release pins an index, is docs/dev/RELEASING-FONTS.md.
+#
+# Every run builds the packs, pins a throwaway copy of pscat to the
+# fresh index, and runs scripts/font_pack_smoke.sh against it (install,
+# verify, pinned status, refusal of a corrupted pack, pixel identity with
+# fonts/catalog). A workflow_dispatch run, or a pull request touching the
+# packs, is a dry run: it stops there and uploads the packs as a
+# workflow artifact.
+#
+# Publishing happens only for a pushed fonts-* tag, and only once the
+# repository variable FONTS_RELEASE_ENABLED is 'true' (set by #602 when
+# it creates the protected `release` environment). Tags and their
+# assets are immutable: the publish job refuses a tag that already has
+# a release, so a fix is always a new tag.
+name: release-fonts
+
+on:
+  push:
+    tags: ["fonts-*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag name to stamp into the dry-run packs (fonts-YYYY.MM or fonts-YYYY.MM.N)"
+        required: true
+        default: "fonts-0000.00"
+  # Dry run on any change that could break a pack build.
+  pull_request:
+    paths:
+      - ".github/workflows/release-fonts.yml"
+      - "fonts/catalog/**"
+      - "fonts/packs.json"
+      - "licenses/assets.json"
+      - "scripts/font_packs.py"
+      - "scripts/test_font_packs.py"
+      - "scripts/font_pack_smoke.sh"
+      - "src/fontpacks/**"
+      - "src/font.rs"
+      - "src/paths.rs"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-fonts-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Resolve the tag
+        id: tag
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          case "$EVENT" in
+            push) TAG="$REF_NAME" ;;
+            workflow_dispatch) TAG="$INPUT_TAG" ;;
+            *) TAG=fonts-0000.00 ;; # a pull request's dry run
+          esac
+          if ! printf '%s' "$TAG" | grep -Eq '^fonts-[0-9]{4}\.[0-9]{2}(\.[0-9]+)?$'; then
+            echo "::error::$TAG is not fonts-YYYY.MM or fonts-YYYY.MM.N"
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+      - name: Make sure the zstd CLI is there
+        run: command -v zstd || { sudo apt-get update && sudo apt-get install -y zstd; }
+      - name: Check the pack table against the catalog and licence audit
+        run: python3 scripts/font_packs.py check && python3 scripts/test_font_packs.py
+      - name: Build the packs
+        run: python3 scripts/font_packs.py build --tag "${{ steps.tag.outputs.tag }}" --out dist/fonts
+      - name: Build a pscat pinned to this index (throwaway; never committed)
+        run: |
+          python3 scripts/font_packs.py pin --index dist/fonts/font-index.json
+          cargo build --release --bin pscat
+      - name: Smoke test outside the checkout
+        run: EXPECT_PINNED=1 ./scripts/font_pack_smoke.sh target/release/pscat dist/fonts
+      - name: Summary
+        run: |
+          {
+            echo "### Font packs ${{ steps.tag.outputs.tag }}"
+            echo
+            echo '```'
+            ls -l dist/fonts
+            echo
+            cat dist/fonts/SHA256SUMS
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: font-packs-${{ steps.tag.outputs.tag }}
+          path: dist/fonts/
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/fonts-') && vars.FONTS_RELEASE_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: font-packs-${{ needs.build.outputs.tag }}
+          path: dist/fonts
+      - name: Refuse to touch an existing release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.build.outputs.tag }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::A release for $TAG already exists; font releases are immutable. Tag a fix as a new fonts-YYYY.MM.N."
+            exit 1
+          fi
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.build.outputs.tag }}
+        run: |
+          gh release create "$TAG" dist/fonts/* --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --title "Font packs $TAG" \
+            --notes "pscat font packs $TAG. Install with \`pscat fonts install --version $TAG\`, or plain \`pscat fonts install\` with a pscat release that pins this index. Each pack carries manifest.json with every file's licence, copyright and SHA-256; SHA256SUMS covers the packs and font-index.json."
