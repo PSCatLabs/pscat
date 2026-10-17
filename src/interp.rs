@@ -1,5 +1,7 @@
-//! The execution machine: operand stack, dictionary stack, and an explicit
-//! execution stack.
+//! The interpreter: [`Interp`].
+//!
+//! Internally, the execution machine: operand stack, dictionary stack, and
+//! an explicit execution stack.
 //!
 //! Execution uses an explicit stack of frames rather than host recursion,
 //! for three reasons that all pay off in later stages:
@@ -202,6 +204,25 @@ struct SaveRecord {
     gfx_state: Box<GraphicsState>,
 }
 
+/// A PostScript interpreter with its own page, stacks and virtual memory.
+///
+/// Run a program with [`run_str`](Self::run_str) or
+/// [`run_source`](Self::run_source), then read what it drew with
+/// [`pages`](Self::pages) (or [`svg_pages`](Self::svg_pages) /
+/// [`pdf_document`](Self::pdf_document) when those were enabled first).
+/// State persists between runs, the way it does in a REPL: a second
+/// `run_str` sees what the first one defined, and draws on the same page.
+///
+/// ```
+/// let mut interp = pscat::Interp::new(); // US Letter, 612x792 points, 72 dpi
+/// interp.run_str("/square { dup mul } def")?;
+/// interp.capture_stdout();
+/// interp.run_str("7 square ==")?;
+/// assert_eq!(interp.captured_stdout(), b"49\n");
+/// # Ok::<(), pscat::PsError>(())
+/// ```
+///
+/// Not `Send`: see the [crate docs](crate#threads).
 pub struct Interp {
     pub(crate) ostack: Vec<Object>,
     dstack: Vec<Rc<RefCell<Dict>>>,
@@ -285,19 +306,22 @@ pub const STDOUT_CAPTURE_LIMIT: usize = 64 * 1024;
 const STDOUT_TRUNCATED: &[u8] = b"\n%% output truncated: more than 64 KB\n";
 
 impl Interp {
+    /// An interpreter with a US Letter page (612x792 points) at 72 dpi.
     pub fn new() -> Self {
         // The default page size is a nonzero constant; this cannot fail.
         Self::with_page(DEFAULT_PAGE.0, DEFAULT_PAGE.1).expect("default page size is valid")
     }
 
-    /// `None` if the page dimensions are unusable (zero or too large for
-    /// a pixmap).
+    /// An interpreter with a `width`x`height`-point page at 72 dpi (one
+    /// pixel per point). `None` if the size is unusable: zero, or more than
+    /// 8000 pixels on a side.
     pub fn with_page(width: u32, height: u32) -> Option<Self> {
         Self::with_page_scaled(width, height, 1.0)
     }
 
     /// A page of `width`x`height` *points* rendered at `scale` device
-    /// pixels per point (`--dpi` divides by 72 to get this).
+    /// pixels per point: `scale` is dpi / 72, so 2.0 renders at 144 dpi.
+    /// `None` if the page is more than 8000 pixels on a side at that scale.
     pub fn with_page_scaled(width: u32, height: u32, scale: f32) -> Option<Self> {
         let px = |points: u32| ((points as f32 * scale).round() as u32).max(1);
         let (pw, ph) = (px(width), px(height));
@@ -364,10 +388,16 @@ impl Interp {
         })
     }
 
+    /// Run a whole program to completion. On error the program is aborted
+    /// and the error returned; the page and operand stack keep what it had
+    /// done so far (see [`error_report`](Self::error_report)). Text that
+    /// is not UTF-8 goes through [`run_source`](Self::run_source).
     pub fn run_str(&mut self, src: &str) -> Result<(), PsError> {
         self.run_source(src.as_bytes())
     }
 
+    /// [`run_str`](Self::run_str) for program text as bytes, which is what
+    /// PostScript files are: binary data and Latin-1 strings are fine.
     pub fn run_source(&mut self, src: &[u8]) -> Result<(), PsError> {
         self.begin_source(src);
         while self.step_n(4096)? {}
@@ -375,7 +405,8 @@ impl Interp {
     }
 
     /// Queue a program for execution without running it; drive it with
-    /// [`step_n`](Self::step_n). This is the live-rendering entry point.
+    /// [`step_n`](Self::step_n). This is the live-rendering entry point:
+    /// run a slice, look at the page, run the next.
     pub fn begin_source(&mut self, src: &[u8]) {
         self.quit_requested = false;
         self.last_name = None;
@@ -1188,6 +1219,7 @@ impl Interp {
             .unwrap_or_else(|| unreachable!("dict stack is never empty"))
     }
 
+    #[doc(hidden)]
     pub fn dict_stack_len(&self) -> usize {
         self.dstack.len()
     }
@@ -1223,6 +1255,7 @@ impl Interp {
     }
 
     /// Look a name up through the dictionary stack, top down.
+    #[doc(hidden)]
     pub fn load(&self, name: &str) -> Option<Object> {
         self.dstack.iter().rev().find_map(|d| d.borrow().get(name))
     }
@@ -1236,6 +1269,7 @@ impl Interp {
 
     /// Define a name in the topmost dictionary (what `def` will do once
     /// control flow lands; already used by tests and available to embedders).
+    #[doc(hidden)]
     pub fn define(&mut self, name: &str, obj: Object) {
         if let Some(top) = self.dstack.last().cloned() {
             self.journal_dict(&top);
@@ -1420,6 +1454,7 @@ impl Interp {
         self.gfx.cliprestore(boundary);
     }
 
+    #[doc(hidden)]
     pub fn operand_stack(&self) -> &[Object] {
         &self.ostack
     }
@@ -1427,6 +1462,7 @@ impl Interp {
     /// Self-check/lint mode (issue #17): heuristic checks for common
     /// silent-failure mistakes — see `crate::lint` for what's checked
     /// and why `render_checks` exists.
+    #[doc(hidden)]
     pub fn lint(&self, render_checks: bool) -> Vec<crate::lint::LintFinding> {
         crate::lint::check(self, render_checks)
     }
@@ -1436,6 +1472,7 @@ impl Interp {
     /// `crate::lint::scan_declared_pages` reads from the source. A
     /// separate method rather than an extra argument, so `lint`'s
     /// existing public signature keeps working.
+    #[doc(hidden)]
     pub fn lint_with_pages(
         &self,
         render_checks: bool,
@@ -1444,6 +1481,8 @@ impl Interp {
         crate::lint::check_with_pages(self, render_checks, declared_pages)
     }
 
+    /// Whether the program ran `quit`. [`run_str`](Self::run_str) returns
+    /// `Ok` either way; this tells the two apart.
     pub fn quit_requested(&self) -> bool {
         self.quit_requested
     }
@@ -1486,25 +1525,30 @@ impl Interp {
     /// operator, so a caller that kept the `Interp` around and tried
     /// to use it afterward would otherwise hit `undefined` errors at
     /// runtime instead of a compile error.
+    #[doc(hidden)]
     pub fn break_permanent_dict_cycle(self) {
         if let Some(system) = self.dstack.first() {
             system.borrow_mut().clear();
         }
     }
 
+    #[doc(hidden)]
     pub fn last_executed_name(&self) -> Option<String> {
         self.last_name
             .map(|id| crate::name::resolve(id).to_string())
     }
 
+    #[doc(hidden)]
     pub fn push(&mut self, obj: Object) {
         self.ostack.push(obj);
     }
 
+    #[doc(hidden)]
     pub fn pop(&mut self) -> Result<Object, PsError> {
         self.ostack.pop().ok_or(PsError::StackUnderflow)
     }
 
+    #[doc(hidden)]
     pub fn pop_num(&mut self) -> Result<Num, PsError> {
         match self.pop()?.value {
             Value::Integer(i) => Ok(Num::Int(i)),
@@ -1513,6 +1557,7 @@ impl Interp {
         }
     }
 
+    #[doc(hidden)]
     pub fn pop_int(&mut self) -> Result<i64, PsError> {
         match self.pop()?.value {
             Value::Integer(i) => Ok(i),
@@ -1520,6 +1565,7 @@ impl Interp {
         }
     }
 
+    #[doc(hidden)]
     pub fn pop_f64(&mut self) -> Result<f64, PsError> {
         Ok(self.pop_num()?.to_f64())
     }
@@ -1565,10 +1611,55 @@ impl Interp {
         Ok(())
     }
 
+    /// The pages the program has produced so far, oldest first: one per
+    /// `showpage` or `copypage`, plus the canvas as it stands if anything
+    /// was painted after the last `showpage` (or if there was none), as
+    /// `pscat --png` writes them.
+    pub fn pages(&self) -> Vec<crate::Page> {
+        let mut pages: Vec<crate::Page> = self
+            .gfx
+            .pages()
+            .iter()
+            .cloned()
+            .map(crate::Page::new)
+            .collect();
+        if pages.is_empty() || self.gfx.has_trailing_art() {
+            pages.push(crate::Page::new(self.gfx.pixmap.clone()));
+        }
+        pages
+    }
+
+    /// Start recording SVG. Call before running the program: only what is
+    /// drawn afterwards is recorded. Read the result with
+    /// [`svg_pages`](Self::svg_pages).
+    pub fn enable_svg(&mut self) {
+        self.gfx.enable_svg();
+    }
+
+    /// One SVG document per page (as [`pages`](Self::pages) counts them),
+    /// or `None` if [`enable_svg`](Self::enable_svg) was not called.
+    pub fn svg_pages(&self) -> Option<Vec<String>> {
+        self.gfx.svg_pages()
+    }
+
+    /// Start recording PDF. Call before running the program. Read the
+    /// result with [`pdf_document`](Self::pdf_document).
+    pub fn enable_pdf(&mut self) {
+        self.gfx.enable_pdf();
+    }
+
+    /// The whole document as one PDF file, a page per page, or `None` if
+    /// [`enable_pdf`](Self::enable_pdf) was not called.
+    pub fn pdf_document(&self) -> Option<Vec<u8>> {
+        self.gfx.pdf_document()
+    }
+
+    #[doc(hidden)]
     pub fn gfx(&self) -> &Gfx {
         &self.gfx
     }
 
+    #[doc(hidden)]
     pub fn gfx_mut(&mut self) -> &mut Gfx {
         &mut self.gfx
     }

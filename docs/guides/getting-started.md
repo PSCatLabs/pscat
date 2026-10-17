@@ -106,7 +106,8 @@ pscat --png out.png some_file.ps
 `pscat` binary. That is the point of the bundle layout. The libraries
 (`lib/artkit.ps` and the rest) are also compiled into the binary, so a
 bare `pscat` binary, or one from `cargo install`, runs them with nothing on
-disk. If you move the binary away from the bundle, set `PSCAT_HOME` to
+disk. (`cargo install pscat --no-default-features` builds a headless pscat
+without the live window; see [pscat as a Rust library](library.md#supported-builds).) If you move the binary away from the bundle, set `PSCAT_HOME` to
 wherever the bundle ended up.
 
 ### Where pscat finds its files

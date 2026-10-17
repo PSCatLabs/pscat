@@ -1060,6 +1060,24 @@ renders eight examples in both and compares block-downsampled output).
   backslashes (`C:\Users\x` reads as `C:Usersx`), so tests use
   `common::ps_path`; a spawned pscat binary needs `EXE_SUFFIX`; and a
   `/abs/x.ps` literal is not absolute there.
+- **The crate's public API is three types (#565).** `Interp`, `Page` and
+  `PsError` (modules `interp`, `page`, `error`) are the documented,
+  semver-tracked surface, and `#![deny(missing_docs)]` holds them to it.
+  Every other `pub mod` in `src/lib.rs` is `#[doc(hidden)]`: public only so
+  the binaries, the wasm build and the tests reach it. A new module goes in
+  hidden unless it is meant for library users. A new `pub fn` on `Interp`
+  needs a doc comment or `#[doc(hidden)]`, or the build fails. `missing_docs`
+  does not look inside hidden modules, and it does not check a re-export
+  of a hidden item either, so supported items must live in a visible module.
+  The `window` feature (default) gates `src/window.rs`; without it
+  `src/window_stub.rs` stands in with the same signatures, returning an
+  error. The crate is rlib-only: `scripts/build_wasm.sh` asks for the cdylib
+  with `cargo rustc --crate-type cdylib`, because a cdylib in `crate-type`
+  was also built by every downstream crate. `scripts/check_package.sh` runs
+  the crates.io checks against the packaged crate: the size, a dry run from
+  the unpacked tree, a `default-features = false` downstream build with no
+  winit, and `cargo install`. CI runs it as `crate (os)`, alongside `docs`
+  and the informational `semver` job.
 - `PsArray` has a custom `Drop` (iterative teardown of last-handle
   storage; it moved off `Object` in Stage 11 for speed, so
   `obj.value` is movable these days). Don't reintroduce a

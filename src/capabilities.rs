@@ -27,7 +27,7 @@
 //!   `lib/paintkit.ps`): `build.rs` parses
 //!   `% @kind:`/`% @summary:`/`% @example:`/`% @param:`/`% @internal`/
 //!   `% @requires:` tags directly out of the `.ps` source at build
-//!   time and generates [`GeneratedEntry`] rows plus the matching
+//!   time and generates `GeneratedEntry` rows plus the matching
 //!   `*_INTERNAL` constant into `$OUT_DIR/capabilities_generated.rs`
 //!   (spliced in below via `include!`) — zero hand-written Rust for a
 //!   new tagged procedure in a migrated file. See `build.rs`'s own
@@ -35,15 +35,15 @@
 //!   guarantees (a missing tag, or a whole new untagged `lib/*.ps`
 //!   file, fails `cargo build`, not just a later test).
 //! - **Not yet migrated** (everything else): hand-maintained in
-//!   [`ENTRIES`] below, same as before this issue. What keeps *that*
+//!   `ENTRIES` below, same as before this issue. What keeps *that*
 //!   from silently drifting is `tests/capabilities.rs`, which actually
 //!   loads each `.ps` source into a real `Interp` and checks the name
 //!   set both ways: every cataloged name must still be defined there,
 //!   and every name the file defines must be either cataloged or
 //!   listed in one of the `INTERNAL_*` allowlists below (scratch
 //!   helpers and internal state, not part of the public API).
-//!   **Registering a new capability**: add an [`Entry`] to the
-//!   matching section of [`ENTRIES`]; if it's a deliberately private
+//!   **Registering a new capability**: add an `Entry` to the
+//!   matching section of `ENTRIES`; if it's a deliberately private
 //!   helper instead, add its name to the relevant `INTERNAL_*` list.
 //!   Either way `cargo test capabilities` fails until one of those is
 //!   done, so a newly added public name in `lib/artkit.ps`/
@@ -59,7 +59,7 @@
 //! handwriting pairs and artkit's `scatter` (the same shape as a
 //! template's content dict), and many more across the migrated files.
 //! Their rows come from a migrated file's `% @param:` tags, or from a
-//! hand-written [`Param`] list in [`ENTRIES`] for an unmigrated file.
+//! hand-written [`Param`] list in `ENTRIES` for an unmigrated file.
 //! Procedures that take positional PostScript stack arguments have no
 //! such structure, so a procedure's calling convention is carried in
 //! `example` (the stack-effect comment already written at its
@@ -73,7 +73,7 @@
 //! alone (a gap a cross-model review caught on the first PR, #74). Each
 //! entry's `load` field carries the exact `run` sequence needed before
 //! `example` will work, derived from `(kind, source)` in
-//! [`load_sequence`] rather than duplicated per entry.
+//! `load_sequence` rather than duplicated per entry.
 
 use serde_json::{Value, json};
 
@@ -126,7 +126,7 @@ impl Param {
 }
 
 /// One catalog row, owned so fonts (built at call time from
-/// [`font::catalog_entries`]) and the static [`ENTRIES`] table can
+/// [`font::catalog_entries`]) and the static `ENTRIES` table can
 /// share the same output shape.
 pub struct Capability {
     pub name: String,
@@ -231,7 +231,7 @@ const LIB: &str = "library"; // availability: always present once its source is 
 /// as a `Procedure` below — internal scratch helpers (`ap-`, `tf-`,
 /// `n-` prefixed and friends) plus two dicts (`Palettes`, `TurtleState`)
 /// that are data, not procedures. `tests/capabilities.rs` uses this
-/// list (plus [`ENTRIES`]'s artkit procedure names) as the full
+/// list (plus `ENTRIES`'s artkit procedure names) as the full
 /// expected top-level name set for `lib/artkit.ps` alone, and as the
 /// baseline to subtract when checking what each style pack adds on
 /// top of it.
@@ -2035,8 +2035,8 @@ static ENTRIES: &[Entry] = &[
     ),
 ];
 
-/// Builds the full catalog: [`ENTRIES`] (hand-maintained, unmigrated
-/// files) plus [`GENERATED_ENTRIES`] (`build.rs`-parsed from `% @...`
+/// Builds the full catalog: `ENTRIES` (hand-maintained, unmigrated
+/// files) plus `GENERATED_ENTRIES` (`build.rs`-parsed from `% @...`
 /// tags in migrated files, e.g. `lib/paintkit.ps`, issue #94) plus
 /// every font `findfont` can currently reach (from
 /// [`font::catalog_entries`], so this can't disagree with
@@ -2098,7 +2098,7 @@ fn catalog_signature(caps: &[Capability]) -> String {
 }
 
 /// The full catalog as one JSON payload: `pscat_version` and
-/// `catalog_signature` (drift detection — see [`catalog_signature`])
+/// `catalog_signature` (drift detection — see `catalog_signature`)
 /// plus the deterministically name-then-kind-sorted capability list
 /// (so two dumps of the same release/install diff cleanly regardless
 /// of hashmap/readdir iteration order upstream).

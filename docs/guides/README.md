@@ -12,6 +12,8 @@ skimmed [artkit](artkit.md) (it is the base most of them load).
   quick start.
 - [pscat for AI agents](agents.md): the skills, the `pscat-mcp` server and how
   to register it.
+- [pscat as a Rust library](library.md): the crate's API, its `window`
+  feature, the supported builds and the stability policy.
 
 ## Text and fonts
 

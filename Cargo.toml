@@ -40,9 +40,32 @@ include = [
     "/licenses/assets.json",
 ]
 
-[lib]
-# cdylib is the wasm32 build (scripts/build_wasm.sh); rlib is everything else.
-crate-type = ["cdylib", "rlib"]
+# No `[lib] crate-type`: the library is an ordinary rlib. Listing `cdylib`
+# here made every downstream crate that depends on pscat also link a
+# libpscat.dylib/.so/.dll it never uses (issue #565).
+# scripts/build_wasm.sh asks for the cdylib only for the wasm32 build, with
+# `cargo rustc --crate-type cdylib`.
+
+[features]
+# `window` is the live window (`pscat file.ps`, `--interactive`, `--spool`).
+# It is on by default, so `cargo install pscat` gets the full CLI. A library
+# user who only renders to PNG/SVG/PDF writes
+# `pscat = { version = "...", default-features = false }` and gets no winit or
+# softbuffer in their dependency graph; scripts/check_package.sh asserts that
+# with `cargo tree`. Without it, the windowed CLI modes print an error and
+# exit, and every headless mode works as before.
+default = ["window"]
+window = ["dep:winit", "dep:softbuffer"]
+
+[package.metadata.docs.rs]
+# The documented API is the headless library; the window is a CLI concern
+# (its module is #[doc(hidden)]), so docs.rs skips building winit. One target
+# is enough: nothing in the public API is platform specific.
+# Check locally with:
+#   RUSTDOCFLAGS="--cfg docsrs -D warnings" cargo doc --no-deps --no-default-features
+no-default-features = true
+targets = ["x86_64-unknown-linux-gnu"]
+rustdoc-args = ["--cfg", "docsrs"]
 
 [[bin]]
 name = "pscat-mcp"
@@ -83,9 +106,10 @@ zune-jpeg = "0.5.15"
 
 # The live window is desktop-only; the wasm32 build (Stage 16) ships
 # the interpreter core and paints into a <canvas> instead.
+# Optional: only the `window` feature (on by default) pulls them in.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-softbuffer = "0.4.8"
-winit = "0.30.13"
+softbuffer = { version = "0.4.8", optional = true }
+winit = { version = "0.30.13", optional = true }
 # `pscat fonts` (issue #599): unpack and verify the .tar.zst font packs.
 # Pure Rust, no C toolchain; ruzstd's frame checksum (the `hash`
 # feature) is off because every file is checked against its SHA-256.
@@ -93,6 +117,7 @@ ruzstd = { version = "0.9.1", default-features = false, features = ["std"] }
 sha2 = "0.11.1"
 
 # tests/common's CPU-time clock (issue #329); already in the tree through
-# winit and friends, so this adds nothing new to the build.
+# winit and friends in a default build. A dev-dependency, so a library user
+# never sees it.
 [target.'cfg(unix)'.dev-dependencies]
 libc = "0.2"

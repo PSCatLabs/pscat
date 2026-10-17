@@ -348,9 +348,113 @@ jobs:
       - name: Package file list matches the licence allowlist
         if: steps.touch.outputs.run == 'true'
         run: python3 scripts/check_licences.py package
-      - name: cargo publish --dry-run
-        if: steps.touch.outputs.run == 'true'
-        run: cargo publish --dry-run --locked
+      # The publish dry run moved to the `crate` job below (issue #565), which
+      # runs it from the unpacked .crate rather than the checkout.
+
+  # The crates.io acceptance checks (issue #565), on every OS: the library and
+  # CLI without the default `window` feature (clippy and the full test suite),
+  # then scripts/check_package.sh against the packaged crate: size under
+  # 10 MB, `cargo publish --dry-run` from the unpacked .crate, a downstream
+  # `default-features = false` project with no winit/softbuffer in its graph
+  # that renders PS to PNG through the documented API, and `cargo install` of
+  # the packaged tree with the default features. Not path-filtered: a change
+  # anywhere in src/ can break the headless build. Not required yet; the owner
+  # decides (SDLC.md).
+  crate:
+    name: crate (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Keep line endings as committed
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Clippy without default features
+        run: cargo clippy --all-targets --no-default-features -- -D warnings
+      - name: Tests without default features
+        run: cargo test --profile ci --no-default-features --no-fail-fast
+      - name: Package, publish dry run, downstream build, install
+        run: ./scripts/check_package.sh
+
+  # rustdoc as docs.rs runs it (Cargo.toml's [package.metadata.docs.rs]:
+  # no default features, `--cfg docsrs`), with warnings as errors, so a broken
+  # intra-doc link fails here and not on docs.rs after a publish. The
+  # doctests themselves run in the `test` job.
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: rustdoc with the docs.rs flags
+        env:
+          RUSTDOCFLAGS: --cfg docsrs -D warnings
+        run: cargo doc --no-deps --no-default-features
+      - name: rustdoc with the default features
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --no-deps
+
+  # cargo-semver-checks (issue #565): the supported library API (Interp, Page,
+  # PsError; everything #[doc(hidden)] is out of scope) compared with the PR's
+  # base commit. Informational, never red: the step has continue-on-error and
+  # its findings go to the job summary. Why not a gate yet:
+  #   - pscat is not on crates.io, so there is no published baseline; the
+  #     base commit stands in for one.
+  #   - the version in Cargo.toml is bumped at release time, not per PR, so
+  #     any intentional API change would fail a blocking check until then.
+  #     Pre-1.0 a minor bump may break the API; the release (#602) is where
+  #     the version is chosen, and this summary is the input to that choice.
+  # Once 0.6.0 is published, the release workflow can run it blocking against
+  # the crates.io baseline with the version being released.
+  semver:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-semver-checks
+      - name: Public API against the PR base
+        id: semver
+        continue-on-error: true
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -o pipefail
+          cargo semver-checks check-release --baseline-rev "$BASE_SHA" 2>&1 | tee semver.log
+      - name: Job summary
+        if: "!cancelled()"
+        env:
+          OUTCOME: ${{ steps.semver.outcome }}
+        run: |
+          {
+            echo "## cargo-semver-checks against the PR base (informational)"
+            echo
+            if [ "$OUTCOME" = success ]; then
+              echo "No semver-relevant change to the supported API."
+            else
+              echo "Changes to the supported API that need a minor version bump"
+              echo "(pre-1.0) at the next release, or a tool failure:"
+            fi
+            echo
+            echo '```'
+            tail -n 200 semver.log 2>/dev/null || echo "(no log)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # Licence policy that needs no Rust build: every font directory carries a
   # licence file, licenses/assets.json still describes the tracked assets, and
