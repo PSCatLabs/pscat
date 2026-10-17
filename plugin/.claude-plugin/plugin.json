@@ -1,0 +1,37 @@
+{
+  "name": "pscat",
+  "version": "0.5.1",
+  "description": "PostScript rendering, generative art and paper-ready charts with the pscat interpreter: three skills plus the pscat-mcp server. Requires pscat installed separately.",
+  "author": {
+    "name": "Jerome Banks",
+    "url": "https://github.com/jeromebanks"
+  },
+  "homepage": "https://github.com/jeromebanks/postscript_interpreter",
+  "repository": "https://github.com/jeromebanks/postscript_interpreter",
+  "license": "MIT OR Apache-2.0",
+  "keywords": [
+    "postscript",
+    "rendering",
+    "generative-art",
+    "charts",
+    "handwriting",
+    "mcp"
+  ],
+  "mcpServers": {
+    "pscat": {
+      "command": "pscat-mcp"
+    }
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "command -v pscat >/dev/null 2>&1 && command -v pscat-mcp >/dev/null 2>&1 || printf '%s\\n' '{\"systemMessage\": \"pscat plugin: pscat / pscat-mcp not found on PATH, so the pscat MCP tools will not start. Install them: cargo install --git https://github.com/jeromebanks/postscript_interpreter (or a release binary from https://github.com/jeromebanks/postscript_interpreter/releases), then restart Claude Code.\"}'"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -27,7 +27,7 @@
 
 # Plugin manifests
 # A plugin's manifest sits in <plugin dir>/.claude-plugin/, so no leading slash.
-.claude-plugin/             @jeromebanks   # forward: #569 (Claude Code plugin)
+.claude-plugin/             @jeromebanks
 
 # Licences
 /LICENSE*                   @jeromebanks   # forward: #563 (licence files)

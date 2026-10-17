@@ -71,7 +71,10 @@ Everything else is in [`docs/guides/`](docs/guides/README.md):
 
 pscat works well from a coding agent. The skills in `skills/` (`pscat`,
 `psart`, `psviz`) are plain Markdown any agent can read, and `pscat-mcp` is an
-MCP server with four tools. See the [agents guide](docs/guides/agents.md).
+MCP server with four tools. In Claude Code, both come as one plugin:
+`/plugin install pscat --marketplace jeromebanks/postscript_interpreter`
+(after installing pscat; see [plugin/README.md](plugin/README.md)). See the
+[agents guide](docs/guides/agents.md).
 
 ## Contributing
 

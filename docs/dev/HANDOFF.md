@@ -1039,6 +1039,19 @@ renders eight examples in both and compares block-downsampled output).
   holds the repo-development skills plus symlinks to those three, so a
   checkout's Claude Code sessions still load them. psart keeps a short
   `SKILL.md` and puts each medium in `references/`; add new media there.
+- **The Claude Code plugin (#569).** The marketplace is
+  `.claude-plugin/marketplace.json` at the repo root; the plugin is
+  `plugin/` (`.claude-plugin/plugin.json`, a README, and `skills` as a
+  symlink to `../skills`, so there is one copy of the skill text). Install
+  copies only `plugin/` into the user's plugin cache, following the
+  symlink; a repo-root plugin would copy all 136 MB. The MCP server is
+  declared inline in plugin.json (`command: pscat-mcp`, found on PATH), not
+  in a root `.mcp.json`, which would also register it for every checkout
+  session. A SessionStart hook prints an install hint when `pscat` or
+  `pscat-mcp` is missing. plugin.json's `version` must equal `Cargo.toml`'s
+  (`scripts/plugin_check.py`, workflow `plugin`); the release script bumps
+  it, and the marketplace entry carries no version. A new skill needs only
+  a `skills/<name>/` directory. See `notes/569-claude-code-plugin.md`.
 - **Licensing (#563).** The code is MIT OR Apache-2.0. `Cargo.toml`'s
   `include` is an allowlist, so a new `include_bytes!`/`include_str!`
   target, or a file `build.rs` reads, must be added to it or the

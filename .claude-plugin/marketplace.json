@@ -1,0 +1,13 @@
+{
+  "name": "pscat",
+  "description": "The pscat PostScript interpreter's Claude Code plugin.",
+  "owner": { "name": "Jerome Banks", "url": "https://github.com/jeromebanks" },
+  "plugins": [
+    {
+      "name": "pscat",
+      "source": "./plugin",
+      "description": "PostScript rendering, generative art and paper-ready charts with the pscat interpreter: three skills plus the pscat-mcp server. Requires pscat installed separately.",
+      "category": "design"
+    }
+  ]
+}
