@@ -1674,11 +1674,14 @@ impl Drop for Interp {
         }
         // systemdict and userdict are `dstack[0..2]` for the Interp's whole
         // life. Take each one's contents out first, so the graph is freed
-        // after the `RefMut` is released: a destructor can then never find
-        // a permanent dictionary still borrowed.
+        // after the `RefMut` is released (a destructor can then never find
+        // a permanent dictionary still borrowed), and free it iteratively:
+        // a program can nest dicts as deep as it likes, and a recursive
+        // teardown would overflow the host's stack.
+        let mut extra = std::mem::take(&mut self.ostack);
         for dict in self.dstack.iter().take(2) {
-            let contents = std::mem::take(&mut *dict.borrow_mut());
-            drop(contents);
+            let mut contents = std::mem::take(&mut *dict.borrow_mut());
+            crate::object::teardown_iteratively(&mut contents, std::mem::take(&mut extra));
         }
     }
 }
@@ -1824,6 +1827,25 @@ mod tests {
                 assert!(w.upgrade().is_none(), "{name} leaked past the Interp");
             }
         }
+    }
+
+    /// Freeing the graph must not recurse once per nesting level: a
+    /// program can nest as deep as it likes, and a library user's thread
+    /// (this test's is 2 MB) would otherwise abort in `drop` (Codex review
+    /// of #625). 100000 levels of dict, of array, and of both alternating,
+    /// one chain in userdict and one left on the operand stack.
+    #[test]
+    fn dropping_an_interp_with_deeply_nested_dicts_does_not_overflow_the_stack() {
+        let mut it = Interp::new();
+        it.run_str(
+            "0 1 1 100000 { pop 1 dict dup /n 4 -1 roll put } for userdict /dicts 3 -1 roll put
+             0 1 1 100000 { pop 1 array dup 0 4 -1 roll put } for userdict /arrays 3 -1 roll put
+             0 1 1 100000 { pop 1 dict dup /n 4 -1 roll put 1 array dup 0 4 -1 roll put } for
+             userdict /mixed 3 -1 roll put
+             0 1 1 100000 { pop 1 dict dup /n 4 -1 roll put } for",
+        )
+        .expect("build the chains");
+        drop(it);
     }
 
     #[test]

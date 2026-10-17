@@ -447,6 +447,32 @@ impl Drop for PsArray {
     }
 }
 
+/// Free `roots` and everything only they hold, without one Rust stack frame
+/// per nesting level. `PsArray`'s own `Drop` is iterative for arrays inside
+/// arrays; this adds dictionaries, so a chain of dicts (or of dicts and
+/// arrays) 10000 levels deep cannot overflow the stack either. Used by
+/// `Drop for Interp`; `Object` still has no `Drop` of its own.
+pub(crate) fn teardown_iteratively(roots: &mut Dict, extra: Vec<Object>) {
+    let mut pending = extra;
+    roots.drain_into(&mut pending);
+    while let Some(obj) = pending.pop() {
+        match obj.value {
+            Value::Dict(rc) => {
+                if let Ok(cell) = Rc::try_unwrap(rc) {
+                    cell.into_inner().drain_into(&mut pending);
+                }
+            }
+            Value::Array(mut inner) if Rc::strong_count(&inner.data) == 1 => {
+                let d = std::mem::replace(&mut inner.data, EMPTY_STORE.with(Rc::clone));
+                if let Ok(cell) = Rc::try_unwrap(d) {
+                    pending.extend(cell.into_inner());
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 /// `{:?}` rather than `{}` so whole reals keep their decimal point
 /// (`2.0`, not `2`) — the type distinction is meaningful in PostScript.
 pub(crate) fn format_real(r: f64) -> String {
@@ -653,6 +679,16 @@ impl Dict {
             KeyClass::Name(n) => self.names.contains_key(&n.id()),
             KeyClass::Exotic(k) => self.exotic.contains_key(&k),
         })
+    }
+
+    /// Move every key and value into `out`, leaving the dictionary empty
+    /// (the worklist step of [`teardown_iteratively`]).
+    fn drain_into(&mut self, out: &mut Vec<Object>) {
+        out.extend(self.names.drain().map(|(_, v)| v));
+        for (_, e) in self.exotic.drain() {
+            out.push(e.key);
+            out.push(e.value);
+        }
     }
 
     pub fn undef(&mut self, key: &Object) -> Result<(), PsError> {

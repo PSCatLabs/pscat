@@ -34,8 +34,15 @@ and selftest loops, the library, MCP and wasm do free their dictionaries.
 (MCP and wasm replace their `Interp` per request and never called the old
 method, so they leaked per render; they no longer do.)
 
-**Known limit.** Freeing a very deeply nested dict chain recurses once per
-level (only `PsArray` drops iteratively); about 10000 levels overflow a 2 MB
-test thread. It already applied to `--sweep`, `--spool`, selftest and any
-`undef`, and is newly reachable for library users who used to leak such a
-graph. Follow-up: #631.
+**Deep nesting (Codex review, round 1).** A first version let the compiler's
+drop glue free the contents, which recurses once per nesting level of dict
+(only `PsArray` drops iteratively): about 10000 levels overflow a 2 MB thread,
+and for library, MCP and wasm callers that is a new input-triggered abort where
+dropping used to leak. `Drop for Interp` now hands the contents of systemdict,
+userdict and the operand stack to `object::teardown_iteratively`, a worklist
+that unwraps uniquely held dicts and arrays (so dict/array mixes are covered
+too). `dropping_an_interp_with_deeply_nested_dicts_does_not_overflow_the_stack`
+builds 100000-level chains (dicts, arrays, alternating; in userdict and on the
+operand stack) on a test thread and aborts without the fix. Not covered, and
+tracked in #631: a deep chain freed *during* a run (`undef`, `restore`,
+overwriting a key), and one held only by the save journal or execution stack.
