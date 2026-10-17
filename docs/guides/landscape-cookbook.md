@@ -2,7 +2,7 @@
 
 How to paint a sky, clouds, mountains, mist, a far forest, evergreens, bushes, water, a reflection, a foreground bank and grass with `lib/paintkit.ps`, in the order a wet-on-wet landscape is painted. Each recipe names the tools, the order, the settings that matter and the usual failure with its fix, and gives a complete snippet that renders as it stands, with a thumbnail of what it makes.
 
-The recipes come from two worked pieces: `gallery/alpine_lake.ps` (issue #118, a snow range over a lake) and Evening Stream (issue #187, `gallery/evening_stream.ps` and `notes/187-evening-stream.md`, pending in [PR #348](https://github.com/jeromebanks/postscript_interpreter/pull/348) and not on `main` yet). Nothing here is a library helper: every recipe is prose plus paintkit calls, so you copy a snippet, change the numbers and keep going. Parameter lists are in `pscat --capabilities`; the tools themselves are described in `README.md` and `.claude/skills/psart/SKILL.md`.
+The recipes come from two worked pieces: `gallery/alpine_lake.ps` (issue #118, a snow range over a lake) and Evening Stream (issue #187, `gallery/evening_stream.ps` and `notes/187-evening-stream.md`, pending in [PR #348](https://github.com/jeromebanks/postscript_interpreter/pull/348) and not on `main` yet). Nothing here is a library helper: every recipe is prose plus paintkit calls, so you copy a snippet, change the numbers and keep going. Parameter lists are in `pscat --capabilities`; the tools themselves are described in `README.md` and `skills/psart/SKILL.md`.
 
 ## Running a recipe
 

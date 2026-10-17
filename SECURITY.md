@@ -185,58 +185,79 @@ it: `render_postscript`, `handwrite`, `describe_art_capabilities` and
 `eval_postscript`. It runs each call as a child process (`pscat`, and
 `pscat handwrite` for `handwrite`) as the same user, with the same
 environment and working directory as the server. Checked with:
-`src/bin/pscat_mcp.rs`, `src/subcmd/handwrite.rs`, and calls to a built server.
+`src/bin/pscat_mcp.rs`, `tests/mcp.rs` (which tests every bound below),
+`scripts/mcp_inspector_check.sh`, and Claude Code and Codex sessions against
+an installed build (October 2026, #568).
 
-- **`out_path` is an unconfined file write.** `render_postscript` and
-  `handwrite` write the artifact to whatever path the caller gives, create or
-  **overwrite** it, and accept absolute paths and `..` (a call with a `..` path
-  wrote outside the scratch directory). The bytes are a PNG, SVG or PDF, but
-  an SVG or PDF contains text that the PostScript program chose, so the file
-  is not content the caller cannot influence. Any client that can call these
-  tools can therefore overwrite any file the server's user can write. There is
-  no allow-list, no confinement to a directory, and no refusal to overwrite.
-  The `out_path` of a multi-page render also writes `out-001.ext`, `out-002.ext`
-  and so on beside it.
+- **`out_path` writes are confined to one output root.** The root is the
+  directory given with `--out-root DIR` when the server is registered, or
+  else the server's working directory (Claude Code and Codex start it in the
+  project directory). If that working directory is the filesystem root,
+  `out_path` is switched off. A relative `out_path` starts at the root; an
+  absolute one must land inside it. Refused: any `..` component, a directory
+  that does not exist (the server creates none), a directory that resolves
+  outside the root through a symlink, and a target that is itself a symlink
+  or a directory. The bytes are written to a new temp file in the target's
+  directory (`create_new`, which never opens an existing file or link) and
+  renamed over the target, so an existing **regular file inside the root is
+  replaced**, and a symlink swapped in after the check is replaced rather than
+  followed. The directory is checked again just before the temp file is
+  created and before the rename; a process that can already write inside the
+  root and swaps a directory for a symlink at exactly that moment can still
+  redirect the write (std has no `openat`, and the race needs local write
+  access the tools themselves never give). A multi-page render writes `name-001.ext`, `name-002.ext`, ...
+  beside it under the same rules. The bytes are a PNG, SVG or PDF, but an SVG
+  or PDF contains text the PostScript program chose. Renders without
+  `out_path` go to a private temp directory that is deleted after the call.
 - **`eval_postscript` and `render_postscript` run arbitrary PostScript** with
-  the file-read behaviour above. A model that calls them can read files and
-  receive the contents.
-- **A runaway program blocks the server.** The server handles one request at a
-  time, waits for the child with no timeout, and buffers all of the child's
-  output in memory. Measured: after an `eval_postscript` of `{ } loop`, a
-  following `ping` got no reply until the child process was killed by hand. A
-  program that prints in a loop (`{ (x...) print } loop`) writes about 45 MB a
-  second, all of it held by the server, whose address space grew by about 700 MB
-  in 6 seconds (its resident size under-reports on macOS, which compresses
-  repetitive text). The server has no cancellation either.
-- **Page size is bounded** because the server passes `width` and `height` to the
-  CLI, which refuses anything over 8000 (it exits with its usage text, and the
-  server reports "no output produced").
-- **`handwrite`'s options are validated before they reach PostScript.** Until
-  #600 `scripts/handwrite.sh` spliced `ink`, `size` and the other options into
-  PostScript source unchecked, and read a `text` that began with `-` as an
-  option. `pscat handwrite` now accepts only plain decimal numbers for the
-  numeric options (and exactly three for `ink`), `plain` or `ruled` for
-  `paper`, and escapes `text` as a PostScript string; the server passes `text`
-  after `--`, so it is always text. A value that is not a number fails with a
-  usage error and renders nothing. This gave a caller nothing it did not already
-  have through `eval_postscript`; it closes an injection point for a future
-  version that narrows what the tools may do.
+  the file-read behaviour above. A model that calls them can read any file
+  the server's user can read and receive the contents. This is not confined:
+  it is the interpreter's file access, and the interpreter limits are #604.
+- **Every call is bounded in time and memory held by the server.** A
+  wall-clock limit per call (`--timeout`, default 60 s) kills the child and
+  returns a `timeout` tool error. Each child stream (stdout, stderr) is kept
+  up to 4 MiB; past that the child is killed and the call fails with
+  `output_too_large`. `source` and `text` are capped (`--max-input-bytes`,
+  default 1 MiB, `input_too_large`), and a request line far over that cap is
+  discarded without being buffered. Inline images are capped
+  (`--max-image-bytes`, default 3,750,000 bytes per call, and 20 pages); a
+  bigger render is refused inline, though a file asked for with `out_path` is
+  still written. The child's own memory is not limited: a program that
+  allocates without end grows until the timeout stops it (see "Limits that
+  do not exist yet").
+- **One call at a time.** A runaway program delays later requests, `ping`
+  included, until its timeout; there is no cancellation yet (#622).
+- **Bad input gets a bounded, structured answer, and stdout stays clean.**
+  Malformed JSON, invalid UTF-8, batches and non-object messages get JSON-RPC
+  errors (-32700, -32600) and the session continues; an unknown tool is
+  -32602; a bad argument (wrong type, out of range) is a tool error with
+  `structuredContent.error.kind` `invalid_argument`. Only JSON-RPC is written
+  to stdout: child output is captured through pipes and diagnostics go to
+  stderr.
+- **Protocol.** Only the revisions in the server's supported list (2025-11-25
+  and 2025-06-18) are ever answered; see
+  [the agents guide](docs/guides/agents.md#protocol).
+- **Page size is bounded** because the server checks `width` and `height`
+  (1..8000) and `dpi` (9..1200), and the CLI refuses a canvas over 8000 x 8000
+  device pixels.
+- **`handwrite`'s options are validated before they reach PostScript.**
+  `pscat handwrite` accepts only plain decimal numbers for the numeric
+  options (and exactly three for `ink`), `plain` or `ruled` for `paper`, and
+  escapes `text` as a PostScript string; the server checks types and ranges
+  first and passes `text` after `--`, so it is always text.
 - `handwrite` runs `pscat handwrite`, found next to the server like the other
   tools' `pscat` (the same file, so it cannot run a different binary), and needs
-  no checkout, no `scripts/` directory, no shell, and no `PSCAT_ROOT` (that
-  variable is no longer read by the server). It never starts a build. It does
-  read the PostScript library through the resource resolver, so a `lib/`
-  directory named by `PSCAT_HOME` or `PSCAT_LIB`, or in the server's working
-  directory, is used in place of the copy compiled into `pscat`; those variables
-  and that directory are trusted the same way they are for `render_postscript`.
+  no checkout, no `scripts/` directory, no shell, and no `PSCAT_ROOT`. It
+  never starts a build. It does read the PostScript library through the
+  resource resolver, so a `lib/` directory named by `PSCAT_HOME` or
+  `PSCAT_LIB`, or in the server's working directory, is used in place of the
+  copy compiled into `pscat`; those variables and that directory are trusted
+  the same way they are for `render_postscript`.
 - The server speaks only over stdin and stdout. It opens no port.
 
-If you register `pscat-mcp` with an agent, assume the agent can write any file
-you can and read any file you can, and run it somewhere that is acceptable. The
-bounds this section lists as missing (confinement of `out_path`, timeouts,
-output caps) are planned work in
-[#568](https://github.com/jeromebanks/postscript_interpreter/issues/568); this
-file will be updated when they ship, and not before.
+If you register `pscat-mcp` with an agent, assume the agent can read any file
+you can read and write files inside the output root, and run it somewhere that
+is acceptable.
 
 ### Other tools
 

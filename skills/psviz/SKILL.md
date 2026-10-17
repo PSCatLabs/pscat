@@ -5,7 +5,7 @@ description: Create paper-ready data visualizations with lib/graph.ps and lib/da
 
 # psviz — paper-ready charts with pscat
 
-Use `lib/graph.ps` (function/surface plotting) and `lib/dataviz.ps` (categorical charts) to produce attractive, embeddable figures. Both libs define into the current dict on `(lib/...) run`, draw nothing on load, and run unchanged in Ghostscript when file access is permitted (see Pitfalls — SAFER) — sibling libs to `lib/artkit.ps`, no dependency on each other.
+Use `lib/graph.ps` (function/surface plotting) and `lib/dataviz.ps` (categorical charts) to produce attractive, embeddable figures. Both are compiled into `pscat`, so `(lib/dataviz.ps) run` works from any directory with an installed pscat (the `pscat` skill has the command line; over MCP, `render_postscript` returns the PNG). Both libs define into the current dict on `(lib/...) run`, draw nothing on load, and run unchanged in Ghostscript when file access is permitted (see Pitfalls — SAFER) — sibling libs to `lib/artkit.ps`, no dependency on each other.
 
 ## When to use which
 
@@ -94,8 +94,8 @@ showpage
 
 ## Pitfalls
 
-- Ghostscript SAFER (the default since 9.50) blocks `(lib/...) run` with `/invalidfileaccess`. Allow file access with `--permit-file-read` or a search path, e.g. `gs '--permit-file-read=lib/*' '--permit-file-read=examples/*' -I lib -dBATCH -dNOPAUSE -sDEVICE=png16m -g612x792 -o out.png file.ps`, or `gs -dNOSAFER -dBATCH ...` if appropriate for your environment.
-- Don't use `(lib/...) run` in browser/wasm presets — the wasm build has no filesystem. Inline the needed procs or fetch the lib text and prepend at runtime (see `site/charts.html`).
+- Ghostscript cannot see pscat's built-in library: checking a figure in gs needs a pscat checkout (its `lib/` directory), run from the checkout root. SAFER (the default since 9.50) also blocks `(lib/...) run` with `/invalidfileaccess`. Allow file access with `--permit-file-read` or a search path, e.g. `gs '--permit-file-read=lib/*' '--permit-file-read=examples/*' -I lib -dBATCH -dNOPAUSE -sDEVICE=png16m -g612x792 -o out.png file.ps`, or `gs -dNOSAFER -dBATCH ...` if appropriate for your environment.
+- In the browser (the wasm build) `(lib/...) run` reads the library compiled into the module, so it works there too.
 - Wrap `setrgbcolor`/`dvcolor` callbacks in `gsave/newpath ... grestore` only if you also manage the path; the drivers already call the color proc before `newpath`.
 - `barchart`/`linechart` share `setdvframe`; don't mix with `setscatterframe` without resetting.
 - Surfaces are wireframe only — no hidden-line removal (see `graph.ps` header; `gallery/ripple_range.ps` shows the cheap per-row occlusion trick for height fields).
@@ -103,8 +103,8 @@ showpage
 ## Paper checklist
 
 - White page (`1 1 1 setrgbcolor clippath fill`), Palatino or Helvetica labels, `showctr` for centered titles.
-- `pscat --page 612x792 --png out.png file.ps` + `gs '--permit-file-read=lib/*' '--permit-file-read=examples/*' -I lib -dBATCH -dNOPAUSE -sDEVICE=png16m -g612x792 -o gs.png file.ps` both succeed (or `gs -dNOSAFER -dBATCH ...` — SAFER blocks `(lib/...) run` by default; see Pitfalls).
+- `pscat --page 612x792 --png out.png file.ps` succeeds; with a checkout and Ghostscript, `gs '--permit-file-read=lib/*' '--permit-file-read=examples/*' -I lib -dBATCH -dNOPAUSE -sDEVICE=png16m -g612x792 -o gs.png file.ps` succeeds too (or `gs -dNOSAFER -dBATCH ...` — SAFER blocks `(lib/...) run` by default; see Pitfalls).
 - Keep the figure self-contained with `%%BoundingBox` and a one-line `%%Title`.
 
-See `lib/graph.ps` and `lib/dataviz.ps` headers for the full procedure list, and `examples/graph_paper.ps` / `examples/dataviz_paper.ps` for complete paper-ready pages.
+`pscat --capabilities` and the `lib/graph.ps` / `lib/dataviz.ps` headers (in the [repository](https://github.com/jeromebanks/postscript_interpreter/tree/main/lib)) have the full procedure list; [`examples/graph_paper.ps`](https://github.com/jeromebanks/postscript_interpreter/blob/main/examples/graph_paper.ps) and [`examples/dataviz_paper.ps`](https://github.com/jeromebanks/postscript_interpreter/blob/main/examples/dataviz_paper.ps) are complete paper-ready pages.
 
