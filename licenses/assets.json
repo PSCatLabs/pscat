@@ -762,16 +762,19 @@
       ]
     },
     {
-      "id": "pending-owner-art",
+      "id": "cc0-art",
       "paths": [
         "art/**"
       ],
-      "license": "NOASSERTION",
-      "copyright": "Jerome Banks",
+      "license": "CC0-1.0",
+      "copyright": "Jerome Banks (dedicated to the public domain)",
       "ships_in": [
         "repo-only"
       ],
-      "notes": "The Keepin' It Real shirt artwork (a recreation of the owner's own design). Not one of the CC0 directories named in #563; the owner has not chosen its terms yet."
+      "license_files": [
+        "LICENSE-CC0"
+      ],
+      "notes": "The Keepin' It Real shirt print artwork, mocks and proofs (owner decision, #606). Dedicated to CC0 like the source programs it is rendered from. Grants no trademark rights in the pscat name or logo, and does not cover the fonts the artwork is set in."
     },
     {
       "id": "pending-owner-mochi",
@@ -783,7 +786,7 @@
       "ships_in": [
         "site"
       ],
-      "notes": "Reference photograph for gallery/mochi_denim_blue.ps. Held back from CC0 until the owner confirms they took it."
+      "notes": "Reference photograph for gallery/mochi_denim_blue.ps. Held back from CC0 until the owner confirms they took it (#606). The painting made from it is CC0."
     },
     {
       "id": "public-domain-lincoln",

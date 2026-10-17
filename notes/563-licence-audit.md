@@ -66,8 +66,10 @@ accounted for. The decisions come from the "Resolved spec" at the top of
   `/name {` definitions against `lib/` procedure names, plus a grep for
   "inlines".
 - Lincoln's reference photo is public domain.
-- `gallery/references/mochi.jpg` and `art/` are held back as `NOASSERTION`
-  pending the owner (#606).
+- `gallery/references/mochi.jpg` and `art/` were first held back as
+  `NOASSERTION` pending the owner (#606). Owner decision, 2026-10-16: `art/`
+  is CC0-1.0. The photo stays `NOASSERTION` until the owner confirms they took
+  it; the painting made from it is CC0 either way.
 - The memos' names and offices are invented (#214, #215, #590), and the poem
   in *Fugitive Pigments* is original. The site's HTML/CSS/JS,
   `gallery/manifest.json` and `show.sh` are code.

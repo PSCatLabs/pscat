@@ -102,7 +102,7 @@ both under the [SIL Open Font License 1.1](LICENSE-OFL). That's why
 the embedded font data, not pscat's code.
 
 The fonts in `fonts/catalog/` keep their own upstream licences. The original
-gallery and example art is dedicated to the public domain under
+gallery, example and shirt art is dedicated to the public domain under
 [CC0-1.0](LICENSE-CC0), with a few exceptions. CC0 grants no rights in the
 pscat name or logo. [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) lists
 what is under which terms.
