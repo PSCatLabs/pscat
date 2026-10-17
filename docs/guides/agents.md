@@ -18,8 +18,21 @@ and both work against an **installed** pscat (no checkout needed):
 - **MCP**: `pscat-mcp`, installed beside `pscat`, an MCP server over stdio
   with four tools (below).
 
-`skills/` is the single source for the plugin packaging in #569. The
-repository's own development skills (`work-issue`, `sdlcify`,
+In Claude Code the easiest route is the **plugin**, which installs the three
+skills and registers `pscat-mcp` in one step (install pscat first; the plugin
+uses the binaries on your PATH):
+
+```text
+/plugin install pscat --marketplace jeromebanks/postscript_interpreter
+```
+
+or `/plugin marketplace add jeromebanks/postscript_interpreter` and then
+`/plugin install pscat@pscat`. [`plugin/README.md`](../../plugin/README.md)
+has the details: requirements, example prompts, privacy, and what happens
+when pscat is missing.
+
+`skills/` is the single source for the plugin (`plugin/skills` is a symlink
+to it), so there is one copy of the skill text. The repository's own development skills (`work-issue`, `sdlcify`,
 `issue-summary`) live in `.claude/skills/` and are not published; that
 directory holds symlinks to the three user-facing skills so Claude Code
 sessions in a checkout still load them.
@@ -69,7 +82,9 @@ clearly better with it (#623).
   or the error (name, offending command, line) plus an operand-stack
   post-mortem.
 
-Register it (after installing pscat, so `pscat-mcp` is on your PATH):
+The Claude Code plugin registers it for you. To register it by hand instead
+(after installing pscat, so `pscat-mcp` is on your PATH; not both, or the
+tools are listed twice):
 
 ```sh
 claude mcp add pscat -- pscat-mcp          # Claude Code

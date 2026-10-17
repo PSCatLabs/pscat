@@ -1,0 +1,79 @@
+# Claude Code plugin (issue #569): the marketplace in .claude-plugin/ and
+# the plugin in plugin/ (skills/ plus the pscat-mcp server config).
+#
+# manifests: scripts/plugin_check.py and its tests (python3 only): the
+#   plugin's version equals Cargo.toml's, every path resolves inside the
+#   repo, skills have valid frontmatter, and nothing installed names a
+#   repo-relative path. A release bump that misses plugin.json fails here.
+# install: a Linux clean-machine install with no Claude login. The pinned
+#   `claude` CLI validates the manifests, installs the plugin into a
+#   throwaway config from this checkout, and `claude mcp list` checks the
+#   plugin's server connects with a freshly built pscat-mcp on PATH (and
+#   fails without it): scripts/plugin_install_check.sh. A model session
+#   using the skills needs a login, so that half is a manual check
+#   (notes/569-claude-code-plugin.md).
+#
+# Not in required_status_checks (SDLC.md); runs only when a plugin input
+# changes. Cargo.toml is in the list for the version check.
+name: plugin
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - ".claude-plugin/**"
+      - "plugin/**"
+      - "skills/**"
+      - "Cargo.toml"
+      - "src/bin/pscat_mcp.rs"
+      - "scripts/plugin_check.py"
+      - "scripts/test_plugin_check.py"
+      - "scripts/plugin_install_check.sh"
+      - ".github/workflows/plugin.yml"
+  pull_request:
+    paths:
+      - ".claude-plugin/**"
+      - "plugin/**"
+      - "skills/**"
+      - "Cargo.toml"
+      - "src/bin/pscat_mcp.rs"
+      - "scripts/plugin_check.py"
+      - "scripts/test_plugin_check.py"
+      - "scripts/plugin_install_check.sh"
+      - ".github/workflows/plugin.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: plugin-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checker tests
+        run: python3 scripts/test_plugin_check.py
+      - name: Check plugin manifests
+        run: python3 scripts/plugin_check.py
+
+  install:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install the Claude Code CLI (pinned)
+        run: npm install -g @anthropic-ai/claude-code@2.1.301
+      - name: Build pscat and pscat-mcp
+        run: cargo build --profile ci --bin pscat --bin pscat-mcp
+      - name: Install the plugin into a throwaway config
+        run: ./scripts/plugin_install_check.sh target/ci
