@@ -363,10 +363,13 @@ fn stage(
 
 /// Move staged packs into place. Each pack swaps in with renames
 /// (old aside, new in, old removed); a failed rename puts the old one
-/// back.
+/// back. Verification is all or nothing; this phase is per pack, so a
+/// rename failing on one pack keeps the packs already swapped in. The
+/// packs not yet reached stay in `staging`, whose drop removes them.
 fn commit(mut staging: Staging) -> Result<Vec<Installed>, String> {
     let mut done = Vec::new();
-    for s in std::mem::take(&mut staging.0) {
+    staging.0.reverse();
+    while let Some(s) = staging.0.pop() {
         let final_dir = s.installed.dir.clone();
         let aside = final_dir.with_file_name(format!(".old-{}-{}", s.name, std::process::id()));
         let had_old = final_dir.exists();

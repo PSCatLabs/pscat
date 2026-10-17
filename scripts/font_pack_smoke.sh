@@ -15,6 +15,8 @@
 #   3. `pscat fonts install --from <index>` installs every pack, `fonts
 #      list` re-verifies them, and they report pinned (EXPECT_PINNED=1) or
 #      user-selected;
+#   3b. a fonts/catalog/ override wins over the installed packs and is
+#      reported as user-selected;
 #   4. catalog-font examples render pixel-identically from the installed
 #      packs and from the checkout's fonts/catalog (PSCAT_HOME=<checkout>),
 #      the reproducibility contract in docs/guides/fonts.md;
@@ -86,6 +88,24 @@ assert names == ["cjk-thai", "extras", "texgyre"], names
 assert all(p["status"] == sys.argv[1] for p in fp["installed"]), fp
 assert fp["overrides"] == [], fp
 ' "$want" || fail "--capabilities font_packs is wrong"
+
+echo "==> 3b. a fonts/catalog override beats the installed (pinned) packs"
+# Bangers-Regular, overridden with Liberation Mono's bytes: "i" is then
+# 600/1000 em wide, where the real Bangers is much narrower.
+mkdir -p "$SCRATCH/ovr/fonts/catalog/Bangers"
+cp "$ROOT/fonts/LiberationMono-Regular.ttf" "$SCRATCH/ovr/fonts/catalog/Bangers/Bangers-Regular.ttf"
+W=$("$PSCAT" -e '/Bangers findfont 1000 scalefont setfont (i) stringwidth pop round cvi ==')
+[[ "$W" != 600 ]] || fail "the real Bangers already measures 600; pick another probe"
+W=$(PSCAT_HOME="$SCRATCH/ovr" "$PSCAT" -e '/Bangers findfont 1000 scalefont setfont (i) stringwidth pop round cvi ==')
+[[ "$W" == 600 ]] || fail "the override did not win over the installed pack (width $W)"
+# Here-strings, not pipes: `grep -q` exiting early would SIGPIPE pscat
+# and fail the pipeline under pipefail.
+OVR_LIST=$(PSCAT_HOME="$SCRATCH/ovr" "$PSCAT" fonts list)
+grep -q "^override: $SCRATCH/ovr/fonts/catalog " <<<"$OVR_LIST" ||
+  { echo "$OVR_LIST" >&2; fail "fonts list does not report the override"; }
+OVR_FONTS=$(PSCAT_HOME="$SCRATCH/ovr" "$PSCAT" --fonts)
+grep -q "^# font-override $SCRATCH/ovr/fonts/catalog user-selected" <<<"$OVR_FONTS" ||
+  fail "--fonts does not report the override as user-selected"
 
 echo "==> 4. pixels from the packs match pixels from the checkout catalog"
 mkdir -p pack checkout

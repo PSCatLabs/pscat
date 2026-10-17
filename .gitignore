@@ -22,3 +22,6 @@ __pycache__/
 /*.ps
 /branding*/
 /.playwright-mcp/
+
+# Font packs installed with PSCAT_HOME pointing at the checkout (#599).
+/fonts/packs/
