@@ -37,16 +37,16 @@ fn pop_ps_string(it: &mut Interp) -> Result<PsString, PsError> {
     }
 }
 
-/// Resolve a filename the way a program wrote it — plain relative,
-/// CWD-relative, or absolute — to the path it actually reads from.
-/// A CWD-relative name that already resolves is returned as-is
-/// (`std::fs::read` handles that natively; no behavior change from
-/// before pscat could run outside its checkout). Only once that
-/// would fail does this fall back to pscat's install layout — see
-/// `crate::paths::program_file` for the candidate order and why it
-/// checks CWD before those fallbacks.
-fn resolve(name: &str) -> std::path::PathBuf {
-    crate::paths::program_file(name).unwrap_or_else(|| std::path::PathBuf::from(name))
+/// Read a filename the way a program wrote it: absolute, or relative
+/// through the resource resolver (`crate::paths`, whose module doc has
+/// the search order). A name that resolves relative to the current
+/// directory reads exactly as it always did; the embedded `lib/` and
+/// the install locations only answer what would otherwise be an
+/// `undefinedfilename`.
+fn read_resource(name: &str) -> Result<Vec<u8>, PsError> {
+    crate::paths::open(name)
+        .map(|r| r.bytes.into_owned())
+        .ok_or(PsError::UndefinedFilename)
 }
 
 /// filename access file → file. Read-only access to real files (how a
@@ -57,7 +57,7 @@ fn file(it: &mut Interp) -> Result<(), PsError> {
     if access != b"r" {
         return Err(PsError::InvalidFileAccess);
     }
-    let data = std::fs::read(resolve(&name)).map_err(|_| PsError::UndefinedFilename)?;
+    let data = read_resource(&name)?;
     it.push(Object::lit(Value::File(PsFile::from_bytes(data))));
     Ok(())
 }
@@ -245,7 +245,7 @@ fn eexec(it: &mut Interp) -> Result<(), PsError> {
 /// filename run — execute a program file from disk.
 fn run(it: &mut Interp) -> Result<(), PsError> {
     let name = pop_ps_string(it)?.text();
-    let data = std::fs::read(resolve(&name)).map_err(|_| PsError::UndefinedFilename)?;
+    let data = read_resource(&name)?;
     let f = PsFile::from_bytes(data);
     it.exec_object(Object::exec(Value::File(f)))
 }

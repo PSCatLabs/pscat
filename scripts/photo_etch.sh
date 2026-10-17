@@ -37,6 +37,10 @@ EOF
 }
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
+# Point pscat at this tree's lib/ and fonts/catalog/ (src/paths.rs): a
+# release binary has no checkout heuristics, and its embedded lib/ may be
+# older than the files beside this script.
+export PSCAT_HOME="${PSCAT_HOME:-${PSCAT_ROOT:-$ROOT}}"
 LIB="$ROOT/lib/etching.ps"
 
 # BIN resolution covers two layouts this same script file runs from

@@ -12,7 +12,7 @@
 # The bundle layout is deliberate: pscat/pscat-mcp sit at the bundle
 # root so `src/paths.rs`'s exe-sibling resolution finds lib/ and
 # fonts/catalog/ with zero configuration — unzip, add the bundle dir
-# to PATH, done. $PSCAT_ROOT still works as an explicit override if
+# to PATH, done. $PSCAT_HOME (or $PSCAT_ROOT) still works as an explicit override if
 # the binaries get moved elsewhere. examples/ and gallery/ are left
 # out — nothing at runtime (lib/*.ps, src/) depends on them; they're
 # demo material for the checkout, not the installed tool.
@@ -60,7 +60,9 @@ Add this directory to your \`PATH\`, then run \`pscat\` from anywhere:
 \`lib/\`, \`fonts/catalog/\`, \`scripts/handwrite.sh\`,
 \`scripts/typewrite.sh\`, and \`scripts/photo_etch.sh\` are found automatically as long as they stay
 next to the \`pscat\` binary (this directory). If you move the binary
-elsewhere, set \`PSCAT_ROOT\` to this directory instead.
+elsewhere, set \`PSCAT_HOME\` to this directory instead. (The
+libraries are also compiled into \`pscat\`, so \`lib/\` keeps working
+even then; the font catalog does not.)
 
 ## What's here
 
@@ -80,18 +82,21 @@ mkdir -p "$OUT_BASE"
 tar -czf "$OUT_BASE/$NAME.tar.gz" -C "$OUT_BASE" "$NAME"
 
 echo "==> Verifying the bundle resolves lib/ and fonts/catalog/ standalone"
-# From /tmp (not the bundle, not the checkout) with no $PSCAT_ROOT set,
-# so the only thing that can make this work is exe-sibling resolution
-# (src/paths.rs) finding lib/ and fonts/catalog/ next to the binary —
-# exactly the scenario "unzip + add to PATH" puts a user in.
+# From /tmp (not the bundle, not the checkout) with no $PSCAT_HOME set,
+# so exe-sibling resolution (src/paths.rs) must find lib/ and
+# fonts/catalog/ next to the binary: the scenario "unzip + add to PATH"
+# puts a user in. The binary also carries an embedded lib/, so the lib
+# checks assert on the resolver trace that the bundle's copy served it.
 cd /tmp
-FONTS=$(env -u PSCAT_ROOT "$BUNDLE/pscat" --fonts)
-echo "$FONTS" | grep -q "Bangers" ||
+bare() { env -u PSCAT_ROOT -u PSCAT_HOME -u PSCAT_LIB PSCAT_TRACE_RESOURCES=1 "$@"; }
+FONTS=$(bare "$BUNDLE/pscat" --fonts)
+grep -q "Bangers" <<<"$FONTS" ||
   { echo "FAIL: fonts/catalog/ did not resolve standalone" >&2; exit 1; }
-env -u PSCAT_ROOT "$BUNDLE/pscat" -e '(lib/artkit.ps) run' ||
-  { echo "FAIL: lib/artkit.ps did not resolve standalone" >&2; exit 1; }
-env -u PSCAT_ROOT "$BUNDLE/pscat" -e '(lib/etching.ps) run' ||
-  { echo "FAIL: lib/etching.ps did not resolve standalone" >&2; exit 1; }
+for lib in lib/artkit.ps lib/etching.ps; do
+  TRACE=$(bare "$BUNDLE/pscat" -e "($lib) run" 2>&1) || true
+  grep -q "resource $lib <- exe-dir" <<<"$TRACE" ||
+    { echo "FAIL: $lib did not resolve from the bundle" >&2; exit 1; }
+done
 
 # The other realistic install shape: a symlink into some bin/ dir
 # pointing back at the bundle (what `brew`, and this project's own
@@ -102,7 +107,8 @@ env -u PSCAT_ROOT "$BUNDLE/pscat" -e '(lib/etching.ps) run' ||
 # non-symlinked case above.
 SYMLINK_DIR=$(mktemp -d)
 ln -s "$BUNDLE/pscat" "$SYMLINK_DIR/pscat"
-env -u PSCAT_ROOT "$SYMLINK_DIR/pscat" -e '(lib/artkit.ps) run' ||
+TRACE=$(bare "$SYMLINK_DIR/pscat" -e '(lib/artkit.ps) run' 2>&1) || true
+grep -q "resource lib/artkit.ps <- exe-dir" <<<"$TRACE" ||
   { echo "FAIL: lib/artkit.ps did not resolve via a symlinked pscat" >&2; exit 1; }
 rm -rf "$SYMLINK_DIR"
 cd "$ROOT"

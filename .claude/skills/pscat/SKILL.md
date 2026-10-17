@@ -9,6 +9,10 @@ description: Render, preview, and debug PostScript with the pscat interpreter â€
 `cargo build --release`; the binary is `target/release/pscat`.
 Everything below also works with `cargo run --release --` in place of
 the binary.
+Run it from the repo root, or set `PSCAT_HOME` to the repo: a release
+binary run elsewhere uses the `lib/` compiled into it (stale if you edited
+`lib/` since the build) and finds no font catalog, so catalog faces such as
+`/Bangers` silently fall back to a substitute.
 
 ## Render a file (the common case)
 

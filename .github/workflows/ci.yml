@@ -232,6 +232,29 @@ jobs:
         if: steps.perf.outcome == 'failure'
         run: exit 1
 
+  # Issue #598: pscat installed with `cargo install`, run with a clean
+  # HOME/CARGO_HOME from a directory outside the checkout, must render
+  # its mathkit/drychalk/typewriter examples from the lib/ embedded in
+  # the binary (the script asserts on the resolver trace). Its own job,
+  # not in required_status_checks yet; #601 extends the OS matrix.
+  clean-install:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # Windows (#601): check out LF files, as in cross-platform below.
+      - name: Keep line endings as committed
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Clean install and render outside the checkout
+        run: ./scripts/clean_install_test.sh
+
   # ---------------------------------------------------------------------------
   # Cross-platform, MSRV, packaging and licence checks (issue #601, release
   # epic #562). Everything below is additive and independent of the `test` job

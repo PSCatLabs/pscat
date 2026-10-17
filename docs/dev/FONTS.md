@@ -249,8 +249,10 @@ the twelve builtins into a **runtime catalog** loaded from
   DingbatsEncoding (`src/encodings.rs`: dumped from Ghostscript, then
   checked against PLRM 3 Appendix E.12 for Symbol and Adobe's ZapfDingbats
   table for Dingbats, #563) so `(a)` in `/Symbol` is α, per the PLRM.
-- **Discovery**: `$PSCAT_ROOT`, then exe-relative, then the
-  build-time checkout, then the cwd (`font::catalog_root`).
+- **Discovery**: `$PSCAT_HOME` (or `$PSCAT_ROOT`), the per-user data
+  directory, the exe's directory, the checkout (debug-assertion builds
+  only), then the cwd (`paths::catalog_dir`; the full order is in
+  `docs/guides/getting-started.md`, "Where pscat finds its files").
   `pscat --fonts` lists everything reachable.
 
 `fonts/catalog/README.md` is the curated manifest with licenses;

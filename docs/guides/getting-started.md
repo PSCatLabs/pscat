@@ -86,7 +86,8 @@ More on the less obvious ones:
 
 You don't need a git checkout or a Rust toolchain just to *use* pscat.
 `scripts/package_release.sh` builds `pscat` and `pscat-mcp` and bundles them
-with their runtime assets (`lib/`, `fonts/catalog/`, `scripts/handwrite.sh`, `scripts/typewrite.sh`)
+with their runtime assets (`lib/`, `fonts/catalog/`, `scripts/handwrite.sh`, `scripts/typewrite.sh`,
+`scripts/photo_etch.sh`)
 into a standalone directory. CI does this automatically and attaches the
 result to a
 [GitHub Release](https://github.com/jeromebanks/postscript_interpreter/releases)
@@ -100,12 +101,45 @@ export PATH="$PWD/pscat-<version>-<os>-<arch>:$PATH"
 pscat --png out.png some_file.ps
 ```
 
-`lib/artkit.ps` and the other libraries, and `fonts/catalog/`, resolve
-automatically as long as they stay next to the `pscat` binary. That is the
-point of the bundle layout. If you move the binary elsewhere, set
-`PSCAT_ROOT` to wherever the bundle ended up (`src/paths.rs` has the full
-resolution order, which also covers running from a `cargo build --release`
-checkout with no configuration).
+`fonts/catalog/` resolves automatically as long as it stays next to the
+`pscat` binary. That is the point of the bundle layout. The libraries
+(`lib/artkit.ps` and the rest) are also compiled into the binary, so a
+bare `pscat` binary, or one from `cargo install`, runs them with nothing on
+disk. If you move the binary away from the bundle, set `PSCAT_HOME` to
+wherever the bundle ended up.
+
+### Where pscat finds its files
+
+This is the one place the search order is written down (`src/paths.rs`
+implements it). For a relative name a program loads with `run` or `file`,
+such as `(lib/artkit.ps) run`, pscat uses the first of these that exists:
+
+1. `$PSCAT_LIB`, for `lib/...` names only: a directory that stands in for
+   `lib/`, so `$PSCAT_LIB/artkit.ps` serves `lib/artkit.ps`. Use it to try
+   edited libraries without rebuilding.
+2. `$PSCAT_HOME`, a pscat tree holding `lib/` and `fonts/catalog/`. Its old
+   name, `$PSCAT_ROOT`, still works.
+3. The name relative to the current directory. Inside a checkout this is
+   the checkout's own `lib/`, so edits there take effect immediately.
+4. The per-user data directory: `$XDG_DATA_HOME/pscat` (by default
+   `~/.local/share/pscat`) on Linux, `~/Library/Application Support/pscat`
+   on macOS, `%APPDATA%\pscat` on Windows.
+5. The directory holding the `pscat` binary (the release bundle).
+6. The copy of `lib/` compiled into the binary.
+7. Development builds only (a debug build, or `--profile ci`): the
+   checkout the binary was built in. A release build never looks there,
+   so `target/release/pscat` run from outside the checkout uses its
+   compiled-in `lib/` and finds no font catalog unless `$PSCAT_HOME`
+   points at the checkout. The repo's own scripts (`handwrite.sh`,
+   `typewrite.sh` and the others) set `$PSCAT_HOME` to their checkout
+   themselves.
+
+An absolute name is read as written. The font catalog (`fonts/catalog/`,
+not compiled in) is searched in steps 2, 4, 5 and 7, then the current
+directory.
+
+`PSCAT_TRACE_RESOURCES=1 pscat ...` prints one line per file to stderr,
+naming the step that served it (`pscat: resource lib/artkit.ps <- embedded`).
 
 ## Where next
 

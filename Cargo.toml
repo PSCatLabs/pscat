@@ -64,7 +64,9 @@ harness = false
 # slower unoptimized), but with the checks a debug build gives, so a
 # panic-on-overflow or a failed debug_assert still fails the test job.
 # Output lands in target/ci/, same depth as target/release/ and
-# target/debug/, so src/paths.rs's "three levels up" root lookup holds.
+# target/debug/, so src/paths.rs's "three levels up" checkout lookup
+# holds; that lookup exists only with debug-assertions on (#598), which
+# is one more reason this profile keeps them.
 [profile.ci]
 inherits = "release"
 debug-assertions = true

@@ -50,7 +50,7 @@
 //! after each block as well, so anything that does survive the
 //! cleanup is reported rather than silently carried forward.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::object::Value;
 use crate::{Interp, Object};
@@ -723,24 +723,35 @@ pub fn parse_requires(source: &[u8]) -> Result<Vec<String>, String> {
     }
 }
 
-/// Where a `% @requires:` path actually lives.
+/// Where a `% @requires:` path actually lives, as a label for
+/// messages and the bytes.
 ///
 /// The tag's paths are written repo-root-relative (`lib/artkit.ps`),
 /// so they're resolved against the ancestors of the file under test
-/// before falling back to [`crate::paths::program_file`]'s CWD and
-/// install-layout candidates. Ancestors come first deliberately: a
-/// self-test on `<worktree>/lib/paintkit.ps` must load
+/// before falling back to the resource resolver ([`crate::paths::open`]:
+/// CWD, install locations, the embedded `lib/`). Ancestors come first
+/// deliberately: a self-test on `<worktree>/lib/paintkit.ps` must load
 /// `<worktree>/lib/artkit.ps`, never the copy in whatever directory
-/// the command happened to be run from.
-fn resolve_required(under_test: &Path, rel: &str) -> Option<PathBuf> {
-    let start = under_test.parent()?;
+/// the command happened to be run from or the one compiled in.
+fn resolve_required(under_test: &Path, rel: &str) -> Result<Option<(String, Vec<u8>)>, String> {
+    let Some(start) = under_test.parent() else {
+        return Ok(None);
+    };
     for ancestor in start.ancestors() {
         let candidate = ancestor.join(rel);
         if candidate.exists() {
-            return Some(candidate);
+            let body = std::fs::read(&candidate)
+                .map_err(|e| format!("cannot read {}: {e}", candidate.display()))?;
+            return Ok(Some((candidate.display().to_string(), body)));
         }
     }
-    crate::paths::program_file(rel)
+    Ok(crate::paths::open(rel).map(|r| {
+        let label = match &r.path {
+            Some(p) => p.display().to_string(),
+            None => format!("{rel} (embedded)"),
+        };
+        (label, r.bytes.into_owned())
+    }))
 }
 
 /// The names of `path`'s `%%SelfTest` blocks, in file order.
@@ -770,16 +781,14 @@ pub fn run_file(path: &Path) -> Result<Report, String> {
 
     let mut prerequisites: Vec<(String, Vec<u8>)> = Vec::new();
     for rel in &requires {
-        let resolved = resolve_required(path, rel).ok_or_else(|| {
+        let resolved = resolve_required(path, rel)?.ok_or_else(|| {
             format!(
                 "{}: `% {REQUIRES_TAG}` names `{rel}`, which doesn't exist \
                  relative to the file or any of its parent directories",
                 path.display()
             )
         })?;
-        let body = std::fs::read(&resolved)
-            .map_err(|e| format!("cannot read {}: {e}", resolved.display()))?;
-        prerequisites.push((resolved.display().to_string(), body));
+        prerequisites.push(resolved);
     }
 
     let mut results = Vec::new();
