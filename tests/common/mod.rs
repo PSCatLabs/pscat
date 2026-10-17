@@ -61,6 +61,19 @@ pub fn pdf_text(pdf: &[u8]) -> String {
 // names a shared path. `tests/scratch_paths.rs` enforces it.
 // ---------------------------------------------------------------------
 
+/// Write `bytes` to a piped child's stdin, then close it. A child that
+/// rejects its arguments exits without reading stdin, so the write can
+/// hit a closed pipe (`BrokenPipe`); that is the child's business, and the
+/// caller still asserts on its exit status and stderr (issue #630). Any
+/// other write error is a real failure.
+pub fn feed_stdin(child: &mut std::process::Child, bytes: &[u8]) {
+    use std::io::Write;
+    let mut stdin = child.stdin.take().expect("child stdin is piped");
+    if let Err(e) = stdin.write_all(bytes) {
+        assert_eq!(e.kind(), std::io::ErrorKind::BrokenPipe, "write stdin: {e}");
+    }
+}
+
 /// A path as it can sit inside a PostScript string literal: `/` separators.
 /// Windows temp paths contain `\`, which a PostScript string reads as an
 /// escape (`\U`, `\t`, ...), and Windows accepts `/` everywhere (issue #601).

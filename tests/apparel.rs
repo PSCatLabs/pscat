@@ -1,7 +1,6 @@
 //! lib/apparel.ps (issue #146): configuration -> per-piece sizes, optional
 //! pieces, and clip-free, transparent artwork, checked through the real CLI.
 
-use std::io::Write;
 use std::process::{Command, Stdio};
 use tiny_skia::Pixmap;
 
@@ -26,12 +25,7 @@ fn pscat(config: &str, mode: &str, piece: &str, extra: &[&str]) -> (bool, String
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn pscat");
-    child
-        .stdin
-        .as_mut()
-        .unwrap()
-        .write_all(source.as_bytes())
-        .unwrap();
+    common::feed_stdin(&mut child, source.as_bytes());
     let out = child.wait_with_output().unwrap();
     (
         out.status.success(),
@@ -156,12 +150,10 @@ fn a_phrase_that_cannot_fit_fails_loudly_instead_of_clipping() {
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    child
-        .stdin
-        .as_mut()
-        .unwrap()
-        .write_all(format!("/ApparelMode /draw def /ApparelPiece /Front def {cfg}").as_bytes())
-        .unwrap();
+    common::feed_stdin(
+        &mut child,
+        format!("/ApparelMode /draw def /ApparelPiece /Front def {cfg}").as_bytes(),
+    );
     let out = child.wait_with_output().unwrap();
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("headline-run-outside-region"));
@@ -186,14 +178,10 @@ fn reported_pixel_size_matches_the_render_and_manifest_escapes_controls() {
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
-        child
-            .stdin
-            .as_mut()
-            .unwrap()
-            .write_all(
-                format!("/ApparelMode /{mode} def /ApparelPiece /Front def {cfg}").as_bytes(),
-            )
-            .unwrap();
+        common::feed_stdin(
+            &mut child,
+            format!("/ApparelMode /{mode} def /ApparelPiece /Front def {cfg}").as_bytes(),
+        );
         let out = child.wait_with_output().unwrap();
         assert!(
             out.status.success(),
@@ -250,12 +238,10 @@ fn manifest_names_are_valid_utf8_or_escaped() {
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
-        child
-            .stdin
-            .as_mut()
-            .unwrap()
-            .write_all(format!("/ApparelMode /manifest def {cfg}").as_bytes())
-            .unwrap();
+        common::feed_stdin(
+            &mut child,
+            format!("/ApparelMode /manifest def {cfg}").as_bytes(),
+        );
         let out = child.wait_with_output().unwrap();
         assert!(
             out.status.success(),
@@ -299,14 +285,10 @@ fn runs_cannot_escape_the_margin_or_be_empty() {
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
-        child
-            .stdin
-            .as_mut()
-            .unwrap()
-            .write_all(
-                format!("/ApparelMode /{mode} def /ApparelPiece /Front def {cfg}").as_bytes(),
-            )
-            .unwrap();
+        common::feed_stdin(
+            &mut child,
+            format!("/ApparelMode /{mode} def /ApparelPiece /Front def {cfg}").as_bytes(),
+        );
         let out = child.wait_with_output().unwrap();
         assert!(!out.status.success(), "{mode} {runs} should fail");
         String::from_utf8_lossy(&out.stderr).into_owned()
@@ -342,12 +324,7 @@ fn config_fill_options_reach_plasma_runs() {
             .spawn()
             .expect("spawn pscat");
         let prelude = "/ApparelMode /draw def /ApparelPiece /Front def\n";
-        child
-            .stdin
-            .as_mut()
-            .unwrap()
-            .write_all(format!("{prelude}{src}").as_bytes())
-            .unwrap();
+        common::feed_stdin(&mut child, format!("{prelude}{src}").as_bytes());
         let out = child.wait_with_output().unwrap();
         assert!(
             out.status.success(),
