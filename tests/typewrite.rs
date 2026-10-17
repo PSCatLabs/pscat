@@ -468,10 +468,6 @@ carbon copies. The <u>original</u> goes to the addressee.\n\n2. Corrections are 
 and it\u{2019}s fine \u{2014} caf\u{e9}.\n\n\tThank you.\n";
 
 #[test]
-#[cfg_attr(
-    windows,
-    ignore = "shell script; re-enable once #600 ports it (issue #615)"
-)]
 fn the_script_types_a_memo_to_png_and_pdf_and_sizes_a_page_to_fit() {
     let dir = scratch("png");
     let txt = dir.join("memo.txt");
@@ -555,10 +551,6 @@ fn the_script_types_a_memo_to_png_and_pdf_and_sizes_a_page_to_fit() {
 }
 
 #[test]
-#[cfg_attr(
-    windows,
-    ignore = "shell script; re-enable once #600 ports it (issue #615)"
-)]
 fn the_script_turns_typographic_characters_into_ascii_and_rejects_bad_input() {
     let dir = scratch("ascii");
     let ps = dir.join("drv.ps");

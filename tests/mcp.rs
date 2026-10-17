@@ -128,10 +128,6 @@ fn eval_reports_prints_and_errors() {
 }
 
 #[test]
-#[cfg_attr(
-    windows,
-    ignore = "shell script; re-enable once #600 ports it (issue #615)"
-)]
 fn handwrite_returns_a_note() {
     let mut s = Server::start();
     initialized(&mut s);

@@ -51,9 +51,11 @@ via wayland-scanner, not upgradeable, #611) and `ttf-parser` unmaintained
 - `scripts/clean_install_test.sh`: `pscat.exe`, and `cargo package --list`
   prints `lib\x.ps` on Windows. `clean-install` gained a `windows-latest` leg.
 
-**Skipped on Windows (#615).** Three tests drive `handwrite.sh`/`typewrite.sh`
-through bash and are `#[cfg_attr(windows, ignore)]`; #600 ports those scripts,
-and #615 re-enables them. One issue, not three, because #600 is the one fix.
+**Script tests (#615).** Three tests that drove `handwrite.sh`/`typewrite.sh`
+through bash were first `ignore`d on Windows. #600 then ported the scripts to
+`pscat` subcommands, so they run natively and the ignores are gone; #615 is
+closed. (`tests/subcommands.rs` runs on the Windows leg; only its
+bash-wrapper test is `cfg(unix)`.)
 
 **Timing.** Full suite, no subset: macOS `test` ~6 min, ubuntu ~8 min, Windows
 ~11 min (selftest ~1 min of it). `--no-fail-fast` on the new job so one bad
