@@ -23,7 +23,7 @@
 /Cargo.toml                 @jeromebanks
 /Cargo.lock                 @jeromebanks
 /build.rs                   @jeromebanks
-/deny.toml                  @jeromebanks   # forward: #601 (cargo-deny)
+/deny.toml                  @jeromebanks
 
 # Plugin manifests
 # A plugin's manifest sits in <plugin dir>/.claude-plugin/, so no leading slash.

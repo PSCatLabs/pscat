@@ -44,7 +44,12 @@ fi
 TARGET_DIR=$(cargo metadata --format-version 1 --no-deps \
     --manifest-path "$ROOT/Cargo.toml" 2>/dev/null \
     | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')
-BIN="${TARGET_DIR:-${CARGO_TARGET_DIR:-$ROOT/target}}/$PROFILE_DIR/pscat"
+# Windows (Git Bash, issue #601): cargo metadata prints `C:\\Users\\...` (JSON-
+# escaped backslashes) and the binary is pscat.exe.
+TARGET_DIR=$(printf '%s' "$TARGET_DIR" | sed 's|\\\\|/|g')
+EXE=""
+case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) EXE=.exe ;; esac
+BIN="${TARGET_DIR:-${CARGO_TARGET_DIR:-$ROOT/target}}/$PROFILE_DIR/pscat$EXE"
 if [ ! -x "$BIN" ]; then
     echo "selftest.sh: built pscat not found at $BIN" >&2
     exit 1

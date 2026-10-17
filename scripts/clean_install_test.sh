@@ -27,7 +27,8 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 # --path` never runs the packager, so an `include`/`exclude` in
 # Cargo.toml that dropped lib/ from the crates.io tarball would go
 # unnoticed (the build embeds lib/ from the package's own tree).
-PACKAGED=$(cargo package --list --allow-dirty --manifest-path "$ROOT/Cargo.toml" 2>/dev/null) ||
+# (cargo prints `lib\apparel.ps` on Windows, issue #601: normalise to `/`.)
+PACKAGED=$(cargo package --list --allow-dirty --manifest-path "$ROOT/Cargo.toml" 2>/dev/null | tr -d '\r' | tr '\\' '/') ||
   fail "cargo package --list failed"
 while IFS= read -r f; do
   rel=${f#"$ROOT"/}
@@ -56,7 +57,10 @@ unset PSCAT_HOME PSCAT_ROOT PSCAT_LIB XDG_DATA_HOME CARGO_TARGET_DIR
 echo "==> cargo install --path into $SCRATCH/root"
 cargo install --quiet --locked --path "$ROOT" --root "$SCRATCH/root" \
   --target-dir "$SCRATCH/target" --bin pscat
-PSCAT="$SCRATCH/root/bin/pscat"
+# Git Bash on Windows (issue #601): the installed binary is pscat.exe.
+EXE=""
+case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) EXE=.exe ;; esac
+PSCAT="$SCRATCH/root/bin/pscat$EXE"
 [[ -x "$PSCAT" ]] || fail "no installed binary at $PSCAT"
 
 for ex in "${EXAMPLES[@]}"; do
