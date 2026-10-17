@@ -1754,6 +1754,8 @@ mod tests {
 
     use super::*;
 
+    type WeakDict = (&'static str, std::rc::Weak<RefCell<Dict>>);
+
     /// Dropping an `Interp` must free its dictionaries (issue #625):
     /// systemdict holds strong `Rc`s to itself and to `userdict`, and a
     /// program can hang more graph off both. `Weak` handles prove it,
@@ -1762,7 +1764,7 @@ mod tests {
     /// keep a dict alive: user dicts, a restored and a still-open `save`
     /// (journal), a caught error (`$error`, `errordict`), the font
     /// machinery (`FontDirectory`), and `systemdict begin` left open.
-    fn weak_dicts_after_program() -> (Interp, Vec<(&'static str, std::rc::Weak<RefCell<Dict>>)>) {
+    fn weak_dicts_after_program() -> (Interp, Vec<WeakDict>) {
         let mut it = Interp::new();
         it.run_str(
             "userdict /held 3 dict put
