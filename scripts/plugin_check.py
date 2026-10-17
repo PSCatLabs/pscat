@@ -141,7 +141,13 @@ def check_plugin(root, plugin_dir, entry, version, errors):
         for a in cfg.get("args", []):
             _check_paths_in(a, f"{where}.args", errors)
 
-    for event, groups in (manifest.get("hooks") or {}).items():
+    hooks = manifest.get("hooks") or {}
+    if isinstance(hooks, str):  # a path to a hooks file
+        if not hooks.startswith("./") or not os.path.isfile(os.path.join(plugin_dir, hooks)):
+            errors.append(f"{rel}: hooks path {hooks!r} is missing or not ./")
+        hooks = (_load(os.path.join(plugin_dir, hooks), errors) or {}).get("hooks", {}) \
+            if os.path.isfile(os.path.join(plugin_dir, hooks)) else {}
+    for event, groups in hooks.items() if isinstance(hooks, dict) else []:
         for g in groups:
             for h in g.get("hooks", []):
                 if h.get("type") == "command":

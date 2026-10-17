@@ -87,6 +87,18 @@ class Fixture(unittest.TestCase):
         self.plugin["commands"] = "./commands"
         self.assertIn("missing", " ".join(self.errors()))
 
+    def test_hooks_as_path(self):
+        self.plugin["hooks"] = "./hooks.json"
+        self.assertIn("hooks path", " ".join(self.errors()))
+        self.write("plugin/hooks.json", json.dumps({"hooks": {"SessionStart": [
+            {"hooks": [{"type": "command", "command": "/usr/local/bin/x"}]}]}}))
+        self.assertIn("hooks.SessionStart", " ".join(self.errors()))
+
+    def test_hook_command_paths(self):
+        self.plugin["hooks"] = {"SessionStart": [
+            {"hooks": [{"type": "command", "command": "sh ../scripts/x.sh"}]}]}
+        self.assertIn("hooks.SessionStart", " ".join(self.errors()))
+
 
 class RealRepo(unittest.TestCase):
     def test_repo_manifests_are_clean(self):
