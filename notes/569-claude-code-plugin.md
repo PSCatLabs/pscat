@@ -65,8 +65,13 @@ release bump that misses `plugin/.claude-plugin/plugin.json` fails the
 - Linux: the `plugin` workflow's `install` job runs the same script on
   ubuntu-latest with a pinned `@anthropic-ai/claude-code`, from a fresh
   runner. A model session in CI needs a login and is not run.
-- From GitHub (`owner/repo`): see the PR for the run against the pushed
-  branch.
+- From GitHub, against the pushed branch, each in a fresh throwaway config
+  on macOS: `marketplace add jeromebanks/postscript_interpreter#<branch>` +
+  `install pscat@pscat` (marketplace clone 248 MB, cache copy 76 KB with
+  real SKILL.md files, `mcp list` connected); the same with `--sparse
+  .claude-plugin plugin skills` (clone 704 KB, symlink still resolved, 3
+  skills installed); and the one-line `plugin install pscat --marketplace
+  jeromebanks/postscript_interpreter#<branch>`.
 
 **Gotcha.** Claude Code caches a failed MCP connection for about 15
 minutes, keyed to the server config. After testing the missing-binary case,

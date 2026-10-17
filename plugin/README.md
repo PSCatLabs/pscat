@@ -53,9 +53,10 @@ From a shell, the same thing is
 then `claude plugin install pscat@pscat`. Restart Claude Code (or run
 `/reload-plugins`) to load it.
 
-Adding the marketplace clones the whole repository (about 140 MB with its
-fonts and gallery). Only the plugin itself (under 100 KB) is copied into
-the plugin cache. To skip most of the clone:
+Adding the marketplace clones the repository (about 250 MB on disk, fonts
+and gallery included); only the plugin itself (under 100 KB) is copied into
+the plugin cache. A sparse clone fetches just the three directories the
+plugin needs (under 1 MB):
 `claude plugin marketplace add jeromebanks/postscript_interpreter --sparse .claude-plugin plugin skills`.
 
 From a checkout, `claude plugin marketplace add /path/to/postscript_interpreter`
