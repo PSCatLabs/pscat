@@ -434,10 +434,17 @@ mod tests {
 
     #[test]
     fn absolute_names_ignore_every_root() {
-        let read = reader(&[("/abs/x.ps", "yes")]);
-        let r = full_roots().open_with("/abs/x.ps", &read).unwrap();
+        // `/abs/x.ps` has no drive letter, so it is not absolute on Windows.
+        let (x, y) = if cfg!(windows) {
+            ("C:/abs/x.ps", "C:/abs/y.ps")
+        } else {
+            ("/abs/x.ps", "/abs/y.ps")
+        };
+        let files = [(x, "yes")];
+        let read = reader(&files);
+        let r = full_roots().open_with(x, &read).unwrap();
         assert_eq!(r.backend, Backend::Direct);
-        assert!(full_roots().open_with("/abs/y.ps", &read).is_none());
+        assert!(full_roots().open_with(y, &read).is_none());
     }
 
     #[test]

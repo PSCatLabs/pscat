@@ -389,7 +389,7 @@ fn pipe_through(cmd: &mut Command, stdin: &[u8]) -> Result<RunOutput, String> {
 /// The pscat binary lives next to this one.
 fn pscat_bin() -> Result<PathBuf, String> {
     let me = std::env::current_exe().map_err(|e| format!("current_exe: {e}"))?;
-    let bin = me.with_file_name("pscat");
+    let bin = me.with_file_name(format!("pscat{}", std::env::consts::EXE_SUFFIX));
     if bin.exists() {
         Ok(bin)
     } else {
