@@ -268,8 +268,10 @@ jobs:
         env:
           PSCAT_PROFILE: ci
         run: ./scripts/selftest.sh
+      # --no-fail-fast: one failing test binary must not hide the rest on a
+      # platform where nothing has run before.
       - name: Run tests
-        run: cargo test --profile ci
+        run: cargo test --profile ci --no-fail-fast
 
   # The declared minimum supported Rust version (`rust-version` in Cargo.toml,
   # issue #563) really builds the crate, tests included. Read from Cargo.toml
