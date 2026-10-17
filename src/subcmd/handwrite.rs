@@ -222,7 +222,9 @@ mod tests {
         assert_eq!(auto_height(3.0, 54.0, 36.0, 1.5), 254);
         // an exact value is not bumped
         assert_eq!(auto_height(1.0, 10.0, 20.0, 1.0), 41);
-        assert_eq!(auto_height(2.0, 10.0, 10.0, 1.0), 40);
+        // 20 + 10.5 + 10 = 40.5 -> 41
+        assert_eq!(auto_height(2.0, 10.0, 10.0, 1.0), 41);
+        assert_eq!(auto_height(2.0, 10.0, 20.0, 1.5), 20 + 21 + 30);
     }
 
     #[test]
