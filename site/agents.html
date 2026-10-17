@@ -66,13 +66,15 @@ cargo build --release      # → target/release/pscat and target/release/pscat-m
 
   <h3>Registering it</h3>
 <pre><code># Claude Code
-claude mcp add pscat -- $PWD/target/release/pscat-mcp
+claude mcp add pscat -- pscat-mcp
 
 # Codex
-codex mcp add pscat -- $PWD/target/release/pscat-mcp</code></pre>
+codex mcp add pscat -- pscat-mcp</code></pre>
+  <p>(With a build from a checkout instead of an install, give the full
+  path: <code>$PWD/target/release/pscat-mcp</code>.)</p>
   <p>For OpenClaw, Hermes, or any other MCP client, the generic
   stdio config:</p>
-<pre><code>{ "mcpServers": { "pscat": { "command": "/path/to/target/release/pscat-mcp" } } }</code></pre>
+<pre><code>{ "mcpServers": { "pscat": { "command": "pscat-mcp", "args": ["--out-root", "/path/to/output"] } } }</code></pre>
   <p>The server needs only the two binaries side by side: the
   <code>handwrite</code> tool runs <code>pscat handwrite</code>, with no
   checkout or shell script.</p>

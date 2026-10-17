@@ -394,18 +394,19 @@ fn tools_call(cfg: &Config, id: Value, params: &Value) -> Value {
     let Some(name) = params.get("name").and_then(Value::as_str) else {
         return error(id, -32602, "tools/call needs a tool name", None);
     };
+    let tool: fn(&Config, &Value) -> Result<Value, ToolError> = match name {
+        "render_postscript" => render_postscript,
+        "handwrite" => handwrite,
+        "describe_art_capabilities" => |cfg, _| describe_art_capabilities(cfg),
+        "eval_postscript" => eval_postscript,
+        other => return error(id, -32602, &format!("unknown tool: {other}"), None),
+    };
     let empty = Value::Object(Map::new());
     let args = params.get("arguments").unwrap_or(&empty);
-    let result = if !args.is_object() {
-        Err(ToolError::invalid("arguments must be an object"))
+    let result = if args.is_object() {
+        tool(cfg, args)
     } else {
-        match name {
-            "render_postscript" => render_postscript(cfg, args),
-            "handwrite" => handwrite(cfg, args),
-            "describe_art_capabilities" => describe_art_capabilities(cfg),
-            "eval_postscript" => eval_postscript(cfg, args),
-            other => return error(id, -32602, &format!("unknown tool: {other}"), None),
-        }
+        Err(ToolError::invalid("arguments must be an object"))
     };
     match result {
         Ok(content) => ok(id, json!({ "content": content, "isError": false })),

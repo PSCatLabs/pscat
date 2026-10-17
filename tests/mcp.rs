@@ -673,6 +673,10 @@ fn malformed_input_corpus() {
             Some(-32602),
         ),
         (
+            br#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"nope","arguments":"x"}}"#,
+            Some(-32602),
+        ),
+        (
             br#"{"jsonrpc":"2.0","id":3,"method":"no/such"}"#,
             Some(-32601),
         ),
