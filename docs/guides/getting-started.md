@@ -86,9 +86,10 @@ More on the less obvious ones:
 
 You don't need a git checkout or a Rust toolchain just to *use* pscat.
 `scripts/package_release.sh` builds `pscat` and `pscat-mcp` and bundles them
-with their runtime assets (`lib/`, `fonts/catalog/`, `scripts/handwrite.sh`, `scripts/typewrite.sh`,
-`scripts/photo_etch.sh`)
-into a standalone directory. CI does this automatically and attaches the
+with their runtime assets (`lib/`, `fonts/catalog/`)
+into a standalone directory. The handwriting, typewriter and photo-etching
+tools are subcommands of `pscat` itself (`pscat handwrite`, `pscat typewrite`,
+`pscat photo-etch`), so they come with the binary. CI does this automatically and attaches the
 result to a
 [GitHub Release](https://github.com/jeromebanks/postscript_interpreter/releases)
 whenever a version tag is pushed (`.github/workflows/release.yml`).
@@ -130,9 +131,11 @@ such as `(lib/artkit.ps) run`, pscat uses the first of these that exists:
    checkout the binary was built in. A release build never looks there,
    so `target/release/pscat` run from outside the checkout uses its
    compiled-in `lib/` and finds no font catalog unless `$PSCAT_HOME`
-   points at the checkout. The repo's own scripts (`handwrite.sh`,
-   `typewrite.sh` and the others) set `$PSCAT_HOME` to their checkout
-   themselves.
+   points at the checkout. The repo's own scripts that read the font
+   catalog (`build_site.sh`, `build_font_gallery.sh`) set `$PSCAT_HOME` to
+   their checkout themselves; `handwrite`, `typewrite` and `photo-etch` need
+   neither (they are `pscat` subcommands now, and use only the compiled-in
+   `lib/`).
 
 An absolute name is read as written. The font catalog (`fonts/catalog/`,
 not compiled in) is searched in steps 2, 4, 5 and 7, then the current

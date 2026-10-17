@@ -3,7 +3,8 @@
 # (issue #598). It installs pscat with `cargo install --path` into a
 # scratch root, with HOME and CARGO_HOME pointed at empty scratch
 # directories, then renders a mathkit, a drychalk and a typewriter
-# example from an empty directory outside the checkout. The resolver
+# example, and runs the `handwrite`, `typewrite` and `photo-etch`
+# subcommands (issue #600), from an empty directory outside the checkout. The resolver
 # trace (PSCAT_TRACE_RESOURCES, src/paths.rs) must show every lib/ file
 # was served by the embedded copy: a pass that found a checkout, the
 # crates.io source tree or a stray lib/ on disk is a failure.
@@ -81,5 +82,28 @@ for ex in "${EXAMPLES[@]}"; do
   fi
   echo "    $LIB_LINES lib/ files, all embedded; $(wc -c <"$png" | tr -d ' ') bytes"
 done
+
+# The tool subcommands (issue #600): the same bare install, no scripts/.
+cp "$ROOT/tests/data/sphere.jpg" "$SCRATCH/work/sphere.jpg"
+printf 'Dear Sir,\n\nThis was typed from a bare install.\n' > "$SCRATCH/work/note.txt"
+tool() { # NAME OUTPUT ARGS...
+  local name=$1 out=$2; shift 2
+  echo "==> pscat $name"
+  if ! TRACE=$(PSCAT_TRACE_RESOURCES=1 "$PSCAT" "$name" -o "$out" "$@" 2>&1 >/dev/null); then
+    echo "$TRACE" >&2
+    fail "pscat $name did not run"
+  fi
+  [[ -s "$out" ]] || fail "pscat $name wrote no PNG"
+  LIB_LINES=$(grep -c '^pscat: resource lib/' <<<"$TRACE" || true)
+  [[ "$LIB_LINES" -ge 1 ]] || { echo "$TRACE" >&2; fail "pscat $name: no resolver trace for lib/"; }
+  # (the photo photo-etch reads is traced too, as a file from the cwd)
+  if grep '^pscat: resource lib/' <<<"$TRACE" | grep -v ' <- embedded$'; then
+    fail "pscat $name: a resource came from somewhere other than the embedded copy (above)"
+  fi
+  echo "    $LIB_LINES lib/ files, all embedded; $(wc -c <"$out" | tr -d ' ') bytes"
+}
+tool handwrite hand.png "meet me at the bandshell at nine"
+tool typewrite typed.png note.txt
+tool photo-etch etched.png sphere.jpg
 
 echo "==> clean install OK"

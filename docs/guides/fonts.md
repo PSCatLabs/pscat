@@ -160,17 +160,17 @@ showpage
   one PostScript string, so Ghostscript's 65,535-byte string limit caps it at
   about 30 pages.
 
-`scripts/typewrite.sh` does the same from a text file, to PNG or PDF:
+`pscat typewrite` does the same from a text file, to PNG or PDF:
 
 ```sh
-./scripts/typewrite.sh --reflow --memo-to "All Third Floor Staff" \
+pscat typewrite --reflow --memo-to "All Third Floor Staff" \
     --memo-from "R. M. Albright, Office Manager" \
     --memo-subject "Daily visitor log, beginning Monday" \
     --memo-date "March 6, 1964" --machine 6 --seed 21 --page-numbers bottom \
     --dpi 200 -o memo.png examples/typewriter_memo.txt
 ```
 
-<p><img src="../dev/design/typewriter_memo.png" width="50%" alt="A typed memo, rendered by scripts/typewrite.sh"/></p>
+<p><img src="../dev/design/typewriter_memo.png" width="50%" alt="A typed memo, rendered by pscat typewrite"/></p>
 
 `--height fit` sizes the page to its text, `--ps PATH` writes the driver for
 Ghostscript (`gs -dNOSAFER`; the render above beside the same page in

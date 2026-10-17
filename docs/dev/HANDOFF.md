@@ -22,7 +22,7 @@ specimen posters in `examples/style_*.ps` (20) — plus
 REPL, Stage 8's last sliver) and the Level 2 rect operators. Also
 done, unplanned/post-roadmap: Stage 21, standalone installability —
 `src/paths.rs` (the resource resolver used by the font catalog,
-`run`/`file`, and `pscat-mcp`'s handwrite path; since #598 it also
+`run`/`file`, and the `handwrite`/`typewrite`/`photo-etch` subcommands; since #598 it also
 serves a copy of `lib/**/*.ps` compiled into the binary, and a release
 build has no checkout heuristics),
 `scripts/package_release.sh`, and `.github/workflows/release.yml`,
@@ -114,7 +114,7 @@ whose width tracks local darkness, plus a perpendicular crosshatch
 pass in the shadows — quantized into a few width buckets with one
 stroke per constant-bucket run, not one stroke per sample, since
 stroke count (not sample count) is what actually costs render time.
-`scripts/photo_etch.sh` wraps it end to end; `examples/etching_demo.ps`
+`pscat photo-etch` (`scripts/photo_etch.sh` wraps it) does it end to end; `examples/etching_demo.ps`
 is the specimen sheet (docs/archive/NOTES.md's entry has the full story, including
 a real upside-down-photo bug the coverage tests caught: PostScript's
 y runs bottom-up but decoded JPEG rows run top-down, so the first
@@ -820,7 +820,7 @@ renders eight examples in both and compares block-downsampled output).
    `notes/212-ribbon-ink.md`.
    #213 shipped the layout (`tw-type`, `tw-linecount`, `tw-pageheight`; the
    "layout" block at the end of `lib/typewriter.ps`, private names `ly*`),
-   `scripts/typewrite.sh` (`PSCAT_BIN`, `--ps`, `--height fit`, `--reflow`),
+   `pscat typewrite` (`--ps`, `--height fit`, `--reflow`; since #600 `scripts/typewrite.sh` is a thin wrapper that honours `PSCAT_BIN`),
    the `Typewriter` catalog row (hand-written: build.rs rejects Type3Face)
    and `examples/typewriter_memo.txt`. One layout makes the line list both
    `tw-linecount` and `tw-type` use. `notes/213-typewriter-layout.md`.
@@ -998,9 +998,21 @@ renders eight examples in both and compares block-downsampled output).
   live for anything run from the repo root (tests, `identity_check.sh`,
   `gallery/show.sh`) but not for `target/release/pscat` run elsewhere
   until you rebuild or set `PSCAT_HOME`/`PSCAT_LIB`; the scripts in
-  `scripts/` export `PSCAT_HOME` to their own tree for that reason.
+  `scripts/` that read the font catalog (`build_site.sh`,
+  `build_font_gallery.sh`) export `PSCAT_HOME` to their own tree for that reason.
   `PSCAT_TRACE_RESOURCES=1` shows which copy served each file. The
   order is documented once, in `docs/guides/getting-started.md`.
+- **handwrite, typewrite and photo-etch are `pscat` subcommands (#600).**
+  `src/subcmd/` (one module each, dispatched from the top of `main`)
+  builds the PostScript driver (the library's bytes from `paths::open`,
+  then the options dict) and renders it through `run_headless` /
+  `finish_headless`, so the output is what `pscat --png driver.ps` makes.
+  Keep it that way: don't reimplement rendering there. A numeric option
+  must pass `subcmd::number` and its original text is what lands in the
+  driver (`36` and `36.0` differ in PostScript); never splice a raw
+  option. The `scripts/*.sh` of the same names are thin wrappers, and
+  `pscat-mcp`'s `handwrite` runs `pscat handwrite`. See
+  `notes/600-tool-subcommands.md`.
 - **Licensing (#563).** The code is MIT OR Apache-2.0. `Cargo.toml`'s
   `include` is an allowlist, so a new `include_bytes!`/`include_str!`
   target, or a file `build.rs` reads, must be added to it or the

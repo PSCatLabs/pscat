@@ -452,7 +452,7 @@ static ENTRIES: &[Entry] = &[
     entry!(
         "HandScript",
         CapabilityKind::Type3Face,
-        "Dynamic handwriting face: every glyph generated fresh with rand-driven jitter, so repeated characters never render identically. Lowercase Latin only (the font has no caps). Backs the `handwrite` tool/scripts/handwrite.sh; also directly callable via hs-write/hs-linecount below.",
+        "Dynamic handwriting face: every glyph generated fresh with rand-driven jitter, so repeated characters never render identically. Lowercase Latin only (the font has no caps). Backs the `handwrite` tool and `pscat handwrite`; also directly callable via hs-write/hs-linecount below.",
         &[],
         HANDSCRIPT,
         "/HandScript findfont 36 scalefont setfont",
@@ -473,7 +473,7 @@ static ENTRIES: &[Entry] = &[
     entry!(
         "Typewriter",
         CapabilityKind::Type3Face,
-        "Types like a real machine: Courier Prime outlines redrawn at every strike with a fixed quirk per key (a machine), a carriage-return offset and baseline drift per line, a hand's variation per strike, and ribbon ink (a woven weave of voids, a feathered edge, clogged counters). Printable ASCII only; charpath gives no outline (a Type 3 face). Set it up with tw-setup, type a whole page with tw-type (wrapping, tabs, spacing, underlines, strikeovers, memo header, page numbers), size a page with tw-linecount and tw-pageheight; scripts/typewrite.sh types a text file. The same /Machine and /Seed give the same page in pscat and Ghostscript.",
+        "Types like a real machine: Courier Prime outlines redrawn at every strike with a fixed quirk per key (a machine), a carriage-return offset and baseline drift per line, a hand's variation per strike, and ribbon ink (a woven weave of voids, a feathered edge, clogged counters). Printable ASCII only; charpath gives no outline (a Type 3 face). Set it up with tw-setup, type a whole page with tw-type (wrapping, tabs, spacing, underlines, strikeovers, memo header, page numbers), size a page with tw-linecount and tw-pageheight; `pscat typewrite` types a text file. The same /Machine and /Seed give the same page in pscat and Ghostscript.",
         &[],
         TYPEWRITER,
         "72 700 moveto << /Machine 7 /Seed 3 >> tw-setup (Dear Sir,) show",
