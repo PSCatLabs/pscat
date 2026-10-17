@@ -54,9 +54,10 @@ the journal) and `freeing_a_deeply_nested_dict_chain_mid_run_...` (`undef`);
 both abort with the `Dict` guard disabled. Rounds 4 and 5: `try_borrow_mut`
 in `Drop for Interp` (a caller holding a borrow of a popped userdict must not
 panic the drop), and gstates in the worklist, since a font dict can hold a
-gstate that holds a font dict (`..._through_gstates_...`). Not walked, and
-only reachable through a Separation/Indexed colour-space operand object or a
-Show/Image frame: those fall back to drop glue.
+gstate that holds a font dict (`..._through_gstates_...`). Round 6 added the
+colour-space operand objects of a gstate (`Separation`'s colorant is not
+type-checked, so a dict can sit there). Still on drop glue: the operands
+of a Show/Image frame.
 
 **Cost of the `Dict` guard.** Freeing a dict now moves its nested containers
 to a worklist instead of letting drop glue walk them. A microbenchmark that

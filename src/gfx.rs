@@ -762,12 +762,23 @@ pub struct GraphicsState {
 }
 
 impl GraphicsState {
-    /// Take the current font's dictionary out (for `Drop for Dict`'s
-    /// iterative teardown, which must not let a chain recurse through it).
-    pub(crate) fn take_font_dict(
-        &mut self,
-    ) -> Option<std::rc::Rc<std::cell::RefCell<crate::object::Dict>>> {
-        self.font.take().map(|f| f.dict)
+    /// Move the objects this state keeps alive (the current font's
+    /// dictionary, the colour space's operand objects) into `out`, for
+    /// `Drop for Dict`'s iterative teardown, which must not let a chain
+    /// recurse through them.
+    pub(crate) fn drain_objects_into(&mut self, out: &mut Vec<crate::object::Object>) {
+        use crate::object::{Object, Value};
+        if let Some(font) = self.font.take() {
+            out.push(Object::lit(Value::Dict(font.dict)));
+        }
+        match std::mem::replace(&mut self.colorspace, ColorSpace::Gray) {
+            ColorSpace::Indexed { src, .. } => out.push(src),
+            ColorSpace::Separation { tint_proc, src, .. } => {
+                out.push(tint_proc);
+                out.push(src);
+            }
+            ColorSpace::Gray | ColorSpace::Rgb | ColorSpace::Cmyk => {}
+        }
     }
 }
 

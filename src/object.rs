@@ -478,12 +478,12 @@ impl Drop for Dict {
                     }
                 }
                 Value::GState(rc) => {
-                    // A gstate holds the current font's dictionary, so a
-                    // chain can run dict -> gstate -> font dict -> gstate.
-                    if let Ok(cell) = Rc::try_unwrap(rc)
-                        && let Some(font) = cell.into_inner().take_font_dict()
-                    {
-                        pending.push(Object::lit(Value::Dict(font)));
+                    // A gstate keeps the current font's dictionary and the
+                    // colour space's operand objects alive, so a chain can
+                    // run dict -> gstate -> font dict (or colour space
+                    // operand) -> gstate.
+                    if let Ok(cell) = Rc::try_unwrap(rc) {
+                        cell.into_inner().drain_objects_into(&mut pending);
                     }
                 }
                 _ => {}

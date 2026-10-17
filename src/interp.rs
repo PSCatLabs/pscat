@@ -1902,6 +1902,23 @@ mod tests {
         drop(it);
     }
 
+    /// The same through a gstate's colour space: `Separation` keeps its
+    /// colorant operand (Codex review of #625).
+    #[test]
+    fn dropping_an_interp_with_a_chain_through_a_colour_space_does_not_overflow_the_stack() {
+        let mut it = Interp::new();
+        it.run_str(
+            "userdict /chain 1 dict put
+             1 1 100000 { pop
+               [/Separation userdict /chain get /DeviceGray { pop 0 }] setcolorspace
+               userdict /chain 1 dict dup /g gstate put put
+             } for
+             /DeviceGray setcolorspace",
+        )
+        .expect("build the chain");
+        drop(it);
+    }
+
     #[test]
     fn dropping_an_interp_with_no_program_frees_both_permanent_dicts() {
         let interp = Interp::new();
