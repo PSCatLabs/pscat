@@ -24,7 +24,8 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 # --path` never runs the packager, so an `include`/`exclude` in
 # Cargo.toml that dropped lib/ from the crates.io tarball would go
 # unnoticed (the build embeds lib/ from the package's own tree).
-PACKAGED=$(cargo package --list --allow-dirty --manifest-path "$ROOT/Cargo.toml" 2>/dev/null) ||
+# (cargo prints `lib\apparel.ps` on Windows, issue #601: normalise to `/`.)
+PACKAGED=$(cargo package --list --allow-dirty --manifest-path "$ROOT/Cargo.toml" 2>/dev/null | tr -d '\r' | tr '\\' '/') ||
   fail "cargo package --list failed"
 while IFS= read -r f; do
   rel=${f#"$ROOT"/}
