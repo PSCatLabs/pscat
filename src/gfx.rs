@@ -762,6 +762,16 @@ pub struct GraphicsState {
 }
 
 impl GraphicsState {
+    /// Take the current font's dictionary out (for `Drop for Dict`'s
+    /// iterative teardown, which must not let a chain recurse through it).
+    pub(crate) fn take_font_dict(
+        &mut self,
+    ) -> Option<std::rc::Rc<std::cell::RefCell<crate::object::Dict>>> {
+        self.font.take().map(|f| f.dict)
+    }
+}
+
+impl GraphicsState {
     /// Whether `other` holds the very clip in force here: both have none,
     /// or both hold the same chain `Rc` (#488, `.sameclip`). Identity, not
     /// geometry: a second `clip` with an identical path is a new chain and

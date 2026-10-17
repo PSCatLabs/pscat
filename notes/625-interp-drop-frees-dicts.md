@@ -51,7 +51,12 @@ mid-run case that #631 tracked. Tests:
 (100000-level dict, array and alternating chains in userdict, on the operand
 stack, open under `begin`, registered with `defineresource`, and held only by
 the journal) and `freeing_a_deeply_nested_dict_chain_mid_run_...` (`undef`);
-both abort with the `Dict` guard disabled.
+both abort with the `Dict` guard disabled. Rounds 4 and 5: `try_borrow_mut`
+in `Drop for Interp` (a caller holding a borrow of a popped userdict must not
+panic the drop), and gstates in the worklist, since a font dict can hold a
+gstate that holds a font dict (`..._through_gstates_...`). Not walked, and
+only reachable through a Separation/Indexed colour-space operand object or a
+Show/Image frame: those fall back to drop glue.
 
 **Cost of the `Dict` guard.** Freeing a dict now moves its nested containers
 to a worklist instead of letting drop glue walk them. A microbenchmark that

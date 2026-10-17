@@ -477,6 +477,15 @@ impl Drop for Dict {
                         pending.extend(cell.into_inner().into_iter().filter(is_container));
                     }
                 }
+                Value::GState(rc) => {
+                    // A gstate holds the current font's dictionary, so a
+                    // chain can run dict -> gstate -> font dict -> gstate.
+                    if let Ok(cell) = Rc::try_unwrap(rc)
+                        && let Some(font) = cell.into_inner().take_font_dict()
+                    {
+                        pending.push(Object::lit(Value::Dict(font)));
+                    }
+                }
                 _ => {}
             }
         }
@@ -484,7 +493,7 @@ impl Drop for Dict {
 }
 
 fn is_container(o: &Object) -> bool {
-    matches!(o.value, Value::Dict(_) | Value::Array(_))
+    matches!(o.value, Value::Dict(_) | Value::Array(_) | Value::GState(_))
 }
 
 /// `{:?}` rather than `{}` so whole reals keep their decimal point

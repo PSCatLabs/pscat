@@ -1882,6 +1882,26 @@ mod tests {
         drop(guard);
     }
 
+    /// A chain can also run through gstates, each holding the current
+    /// font's dictionary: font -> /prev gstate -> font -> ... (Codex review
+    /// of #625).
+    #[test]
+    fn dropping_an_interp_with_a_chain_through_gstates_does_not_overflow_the_stack() {
+        let mut it = Interp::new();
+        it.run_str(
+            "/Helvetica findfont 12 scalefont setfont
+             1 1 100000 { pop
+               currentfont dup length 2 add dict copy
+               gstate 1 index /prev 3 -1 roll put
+               setfont
+             } for
+             userdict /last currentfont put
+             /Helvetica findfont setfont",
+        )
+        .expect("build the chain");
+        drop(it);
+    }
+
     #[test]
     fn dropping_an_interp_with_no_program_frees_both_permanent_dicts() {
         let interp = Interp::new();
