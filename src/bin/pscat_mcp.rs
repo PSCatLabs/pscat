@@ -707,12 +707,7 @@ fn render_postscript(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
         content.push(text_content(&format!("Lint:\n{lint_findings}")));
     }
     if format != "pdf" {
-        let mut bodies = Vec::with_capacity(pages.len());
-        for page in &pages {
-            bodies.push(std::fs::read(page).map_err(|e| format!("read {page:?}: {e}"))?);
-        }
-        check_inline_size(cfg, &bodies, written.as_deref())?;
-        for body in bodies {
+        for body in read_inline(cfg, &pages, written.as_deref())? {
             content.push(match format {
                 "png" => image_content(&body),
                 _ => text_content(&String::from_utf8_lossy(&body)),
@@ -779,11 +774,7 @@ fn handwrite(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
         Some(dest) => Some(dest.write_pages(&pages)?),
         None => None,
     };
-    let mut bodies = Vec::new();
-    for page in &pages {
-        bodies.push(std::fs::read(page).map_err(|e| format!("read {page:?}: {e}"))?);
-    }
-    check_inline_size(cfg, &bodies, written.as_deref())?;
+    let bodies = read_inline(cfg, &pages, written.as_deref())?;
     let mut content: Vec<Value> = bodies.iter().map(|b| image_content(b)).collect();
     if let Some(written) = written {
         content.push(text_content(&wrote_message(&written)));
@@ -832,22 +823,36 @@ fn eval_postscript(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
     Err(e)
 }
 
-/// Inline content over the byte or page cap is an error, not a silent
-/// drop. The file the caller asked for is already written by then, and
-/// the message says where.
-fn check_inline_size(
+/// The pages' bytes for inline content, checked against the page and
+/// byte caps from the file sizes *before* anything is read, so a refused
+/// render never sits in the server's memory. Over a cap is an error, not a
+/// silent drop; the file the caller asked for is already written by then,
+/// and the message says where.
+fn read_inline(
     cfg: &Config,
-    bodies: &[Vec<u8>],
+    pages: &[PathBuf],
     written: Option<&[PathBuf]>,
-) -> Result<(), ToolError> {
-    let total: usize = bodies.iter().map(Vec::len).sum();
-    if total <= cfg.max_image && bodies.len() <= MAX_INLINE_PAGES {
-        return Ok(());
+) -> Result<Vec<Vec<u8>>, ToolError> {
+    let mut total = 0usize;
+    if pages.len() <= MAX_INLINE_PAGES {
+        for page in pages {
+            let len = std::fs::metadata(page)
+                .map_err(|e| format!("stat {page:?}: {e}"))?
+                .len();
+            total = total.saturating_add(usize::try_from(len).unwrap_or(usize::MAX));
+        }
     }
-    let what = if bodies.len() > MAX_INLINE_PAGES {
+    if total <= cfg.max_image && pages.len() <= MAX_INLINE_PAGES {
+        let mut bodies = Vec::with_capacity(pages.len());
+        for page in pages {
+            bodies.push(std::fs::read(page).map_err(|e| format!("read {page:?}: {e}"))?);
+        }
+        return Ok(bodies);
+    }
+    let what = if pages.len() > MAX_INLINE_PAGES {
         format!(
             "{} pages; at most {MAX_INLINE_PAGES} are returned inline",
-            bodies.len()
+            pages.len()
         )
     } else {
         format!(
@@ -863,7 +868,7 @@ fn check_inline_size(
         ToolError::new("output_too_large", format!("the render is {what}.{next}"))
             .with("limit_bytes", json!(cfg.max_image))
             .with("size_bytes", json!(total))
-            .with("pages", json!(bodies.len())),
+            .with("pages", json!(pages.len())),
     )
 }
 
@@ -1101,6 +1106,12 @@ fn run_child(cfg: &Config, cmd: &mut Command, stdin: &[u8]) -> Result<RunOutput,
     let _ = feeder.join();
     let stdout = out.join().unwrap_or_default();
     let stderr = err.join().unwrap_or_default();
+    // A program that floods and exits between two polls, or whose last
+    // bytes arrive while the readers are joined, has still overflowed.
+    let outcome = match outcome {
+        Ok(_) if overflow.load(Ordering::Relaxed) => Err("output".to_string()),
+        other => other,
+    };
     let text = |b: Vec<u8>| String::from_utf8_lossy(&b).into_owned();
     match outcome {
         Ok(success) => Ok(RunOutput {

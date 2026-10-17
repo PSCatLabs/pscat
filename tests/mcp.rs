@@ -728,3 +728,36 @@ fn stray_child_output_never_reaches_stdout() {
     assert_eq!(result["isError"], false);
     s.ping_ok();
 }
+
+#[test]
+fn a_finite_flood_that_exits_is_still_over_the_cap() {
+    // About 5 MB printed, then a clean exit: the overflow must be seen even
+    // when the child is gone before the server's next poll.
+    let mut s = Server::start();
+    initialized(&mut s);
+    let result = s.tool(
+        "eval_postscript",
+        json!({ "source": "1 1 100000 { pop (xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx) print } for" }),
+    );
+    assert_eq!(error_kind(&result), "output_too_large", "{result}");
+}
+
+#[test]
+fn more_pages_than_the_inline_cap_are_refused_before_reading() {
+    let root = common::scratch_dir("mcp-pagecap");
+    let mut s = Server::start_in(&root, &[]);
+    initialized(&mut s);
+    let source = "1 1 21 { pop showpage } for";
+    let result = s.tool(
+        "render_postscript",
+        json!({ "source": source, "width": 10, "height": 10 }),
+    );
+    assert_eq!(error_kind(&result), "output_too_large", "{result}");
+    assert_eq!(result["structuredContent"]["error"]["pages"], 21);
+    let result = s.tool(
+        "render_postscript",
+        json!({ "source": source, "width": 10, "height": 10, "out_path": "many.png" }),
+    );
+    assert_eq!(error_kind(&result), "output_too_large", "{result}");
+    assert!(root.join("many-021.png").is_file());
+}
