@@ -1118,8 +1118,9 @@ renders eight examples in both and compares block-downsampled output).
   leaks that dict; an `Object` for systemdict that a caller popped out of the
   interpreter is emptied by the drop, since it is the same dictionary.
   A new long-lived holder of a dict `Rc` (a cache on `Interp`) must be a
-  plain field so it drops with the `Interp`; freeing a ~10000-deep dict chain overflows a small stack (#631); a `thread_local` or `static`
-  holding one would make the test fail. The `pscat` CLI's single-run path
+  plain field so it drops with the `Interp`; a `thread_local` or `static`
+  holding one would make the test fail. Freeing a ~10000-deep dict chain
+  overflows a small stack (#631). The `pscat` CLI's single-run path
   calls the hidden `Interp::leave_dicts_to_process_exit` so exit does not
   walk the graph (80 ms on a 600k-entry program); the sweep and spool loops
   do not.
