@@ -199,7 +199,7 @@ an installed build (October 2026, #568).
   outside the root through a symlink, and an existing target that is not a
   regular file (a symlink, a directory, a device). Least privilege on top of
   that (#627): the file name must end in the extension of the output format
-  (`.png`, `.svg` or `.pdf`; `handwrite` makes `.png`), so a render cannot
+  (`.png`, `.svg` or `.pdf`, compared without regard to case; `handwrite` makes `.png`), so a render cannot
   be written as `Makefile`, `.envrc` or a git hook, and no directory below
   the root may start with a dot (`.git/`, `.claude/`, `.github/`), judged on
   the resolved path so a symlink to one is refused too. Both refusals are
