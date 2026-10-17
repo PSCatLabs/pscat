@@ -90,6 +90,8 @@ pub mod file;
 #[doc(hidden)]
 pub mod font;
 #[doc(hidden)]
+pub mod fontpacks;
+#[doc(hidden)]
 pub mod gfx;
 #[doc(hidden)]
 pub mod halftone;

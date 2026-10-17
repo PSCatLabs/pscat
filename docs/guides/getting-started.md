@@ -132,15 +132,18 @@ such as `(lib/artkit.ps) run`, pscat uses the first of these that exists:
    checkout the binary was built in. A release build never looks there,
    so `target/release/pscat` run from outside the checkout uses its
    compiled-in `lib/` and finds no font catalog unless `$PSCAT_HOME`
-   points at the checkout. The repo's own scripts that read the font
-   catalog (`build_site.sh`, `build_font_gallery.sh`) set `$PSCAT_HOME` to
-   their checkout themselves; `handwrite`, `typewrite` and `photo-etch` need
-   neither (they are `pscat` subcommands now, and use only the compiled-in
-   `lib/`).
+   points at the checkout or the font packs are installed. The repo's own
+   scripts that read the font catalog (`build_site.sh`,
+   `build_font_gallery.sh`) set `$PSCAT_HOME` to their checkout themselves;
+   `handwrite`, `typewrite` and `photo-etch` need neither (they are `pscat`
+   subcommands now, and use only the compiled-in `lib/`).
 
-An absolute name is read as written. The font catalog (`fonts/catalog/`,
-not compiled in) is searched in steps 2, 4, 5 and 7, then the current
-directory.
+An absolute name is read as written. A plain font catalog directory
+(`fonts/catalog/`, not compiled in) is looked for in steps 2, 4, 5 and
+7, then the current directory, and every one found is used. After those
+come the installed font packs (`fonts/packs/`, written by `pscat fonts
+install`) in `$PSCAT_HOME`, the per-user data directory and the binary's
+directory. See [Fonts](fonts.md#font-packs-the-catalog-outside-a-checkout).
 
 `PSCAT_TRACE_RESOURCES=1 pscat ...` prints one line per file to stderr,
 naming the step that served it (`pscat: resource lib/artkit.ps <- embedded`).

@@ -99,7 +99,7 @@ shows them all.
 `gallery/hortus.ps` is the worked example: three L-system plants grown by
 turtle, with blossoms stamped along each plant's own path.
 
-The `psart` skill ([`.claude/skills/psart/SKILL.md`](../../.claude/skills/psart/SKILL.md))
+The `psart` skill ([`skills/psart/SKILL.md`](../../skills/psart/SKILL.md))
 teaches the whole workflow to any agent: the render-look-refine loop, the
 toolkit, the style packs, type as material, and the composition habits that
 keep pieces good.

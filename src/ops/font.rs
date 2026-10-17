@@ -78,8 +78,13 @@ fn pop_string(it: &mut Interp) -> Result<PsString, PsError> {
 /// key findfont → font dict. Registered fonts come back identically;
 /// built-in names materialize on first use; unknown names substitute
 /// the default face rather than erroring, Ghostscript-style, so found
-/// files keep running (documented deviation).
+/// files keep running (documented deviation). A face from a font pack
+/// that is not installed is `invalidfont`, with a hint naming the pack
+/// (`font::resolve`, issue #599).
 pub(crate) fn findfont(it: &mut Interp) -> Result<(), PsError> {
+    // A hint belongs to the findfont that set it: clear it first, so a
+    // `stopped`-caught probe cannot label a later, unrelated error.
+    it.error_hint = None;
     let key = it.pop()?;
     let dir = font_directory(it)?;
     let existing = dir.borrow().get_obj(&key)?;
@@ -91,7 +96,13 @@ pub(crate) fn findfont(it: &mut Interp) -> Result<(), PsError> {
                 Value::String(s) => s.text(),
                 _ => String::new(),
             };
-            let fid = font::resolve(&requested);
+            let fid = match font::resolve(&requested) {
+                Ok(fid) => fid,
+                Err(hint) => {
+                    it.error_hint = Some(hint);
+                    return Err(PsError::InvalidFont);
+                }
+            };
             let d = font::build_builtin_dict(fid)?;
             it.journal_dict(&dir);
             dir.borrow_mut()

@@ -1,0 +1,42 @@
+# MCP conformance (issue #568): pscat-mcp driven over stdio by the
+# official MCP Inspector CLI, a client this repo did not write. It checks
+# the legacy handshake and the dual-era fallback (a server/discover probe,
+# then initialize), the inspector's --strict tool-schema portability
+# check, a render, an eval, a structured PostScript error, an out_path
+# refusal and handwrite. The protocol edge cases (version refusal,
+# malformed input, confinement, limits) are in tests/mcp.rs, which the
+# `test` job in ci.yml runs.
+#
+# A separate workflow rather than a job in ci.yml so it does not collide
+# with #601's ci.yml changes. Not in required_status_checks (SDLC.md).
+name: mcp
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mcp-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  inspector:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build pscat and pscat-mcp
+        run: cargo build --profile ci --bin pscat --bin pscat-mcp
+      - name: MCP Inspector over stdio
+        run: ./scripts/mcp_inspector_check.sh target/ci/pscat-mcp

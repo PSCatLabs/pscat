@@ -31,6 +31,7 @@ include = [
     "/fonts/Liberation*.ttf",
     "/fonts/LICENSE",
     "/fonts/README.md",
+    "/fonts/packs.json",
     "/README.md",
     "/LICENSE-MIT",
     "/LICENSE-APACHE",
@@ -109,6 +110,11 @@ zune-jpeg = "0.5.15"
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 softbuffer = { version = "0.4.8", optional = true }
 winit = { version = "0.30.13", optional = true }
+# `pscat fonts` (issue #599): unpack and verify the .tar.zst font packs.
+# Pure Rust, no C toolchain; ruzstd's frame checksum (the `hash`
+# feature) is off because every file is checked against its SHA-256.
+ruzstd = { version = "0.9.1", default-features = false, features = ["std"] }
+sha2 = "0.11.1"
 
 # tests/common's CPU-time clock (issue #329); already in the tree through
 # winit and friends in a default build. A dev-dependency, so a library user

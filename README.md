@@ -69,7 +69,7 @@ Everything else is in [`docs/guides/`](docs/guides/README.md):
 
 ## For AI agents
 
-pscat works well from a coding agent. The skills in `.claude/skills/` (`pscat`,
+pscat works well from a coding agent. The skills in `skills/` (`pscat`,
 `psart`, `psviz`) are plain Markdown any agent can read, and `pscat-mcp` is an
 MCP server with four tools. See the [agents guide](docs/guides/agents.md).
 

@@ -26,7 +26,11 @@ done, unplanned/post-roadmap: Stage 21, standalone installability —
 serves a copy of `lib/**/*.ps` compiled into the binary, and a release
 build has no checkout heuristics),
 `scripts/package_release.sh`, and `.github/workflows/release.yml`,
-so pscat can be installed and run without a git checkout; and Stage
+so pscat can be installed and run without a git checkout (since #599
+the font catalog reaches installs as downloadable font packs on their
+own `fonts-YYYY.MM` release train: `src/fontpacks/`, `pscat fonts
+install`, `.github/workflows/release-fonts.yml`,
+`docs/dev/RELEASING-FONTS.md`); and Stage
 22, Korean/Japanese/Thai fonts — a `CatalogEncoding::Unicode` face
 variant (Noto Sans KR/JP/Thai) whose `show` decodes UTF-8 and maps
 codepoints straight to glyphs via `cmap`, since Hangul/kanji exceed
@@ -477,8 +481,10 @@ renders eight examples in both and compares block-downsampled output).
 - `FID` is integertype; unknown `findfont` substitutes Helvetica
   (gs-style) instead of erroring. Symbol/ZapfDingbats have real URW
   faces since Stage 18 — via the runtime catalog (`fonts/catalog/`,
-  `font::resolve`), so wasm and catalog-less installs still
-  substitute.
+  `font::resolve`). Since #599 a face from a font pack that is not
+  installed (Symbol and ZapfDingbats included) is `invalidfont` with a
+  hint naming the pack, never a substitute; wasm, which has no packs,
+  still substitutes.
 - `charpath` on Type 3 advances without capturing outlines; its bool
   operand is ignored for outline fonts.
 - Type 1 hints are ignored entirely; no `/Metrics`, no CID/CFF.
@@ -620,8 +626,8 @@ renders eight examples in both and compares block-downsampled output).
 - **`SECURITY.md` states what untrusted PostScript and `pscat-mcp` can do
   today, and was checked against the code** (#603). A change that adds or
   removes a file, process, network or MCP capability, or a resource limit,
-  must update it in the same PR; the limits it lists as missing are the work of
-  #568 and #604. `docs/STABILITY.md` says which surfaces need a deprecation
+  must update it in the same PR; #568 added the MCP bounds, and the interpreter
+  limits it lists as missing are #604. `docs/STABILITY.md` says which surfaces need a deprecation
   period. `.github/CODEOWNERS` paths are owner-merged (`SDLC.md`, "Who merges").
 
 - **gs is the oracle.** Every semantics question in Stages 5–7 was
@@ -1013,6 +1019,25 @@ renders eight examples in both and compares block-downsampled output).
   option. The `scripts/*.sh` of the same names are thin wrappers, and
   `pscat-mcp`'s `handwrite` runs `pscat handwrite`. See
   `notes/600-tool-subcommands.md`.
+- **`pscat-mcp`'s contract (#568).** `SUPPORTED_VERSIONS` in
+  `src/bin/pscat_mcp.rs` lists only revisions tested against a real client
+  (2025-11-25: Claude Code, Inspector; 2025-06-18: Codex); never echo a
+  client's version. `server/discover` must stay -32601 until 2026-07-28 is
+  really implemented (#621): -32022 there tells a dual-era client the server
+  is modern. Every child goes through `run_child` (timeout, 4 MiB per stream)
+  and every `out_path` through `confine` + `Dest::write_pages` (temp file +
+  rename); a new tool that writes files or runs a child must too, and gets
+  cases in `tests/mcp.rs`. Only JSON-RPC on stdout. Error results carry
+  `structuredContent.error` beside the text; success results never do (some
+  clients show `structuredContent` instead of `content`, and that would hide
+  the image). `scripts/mcp_inspector_check.sh` (workflow `mcp`) is the
+  third-party client check. See `notes/568-mcp-skills-cleanup.md`.
+- **Published skills are `skills/<name>/SKILL.md`** (pscat, psart, psviz;
+  #568), written for an installed pscat: no `cargo`, `target/`, `scripts/`
+  or checkout-relative paths, repo files linked by GitHub URL. `.claude/skills/`
+  holds the repo-development skills plus symlinks to those three, so a
+  checkout's Claude Code sessions still load them. psart keeps a short
+  `SKILL.md` and puts each medium in `references/`; add new media there.
 - **Licensing (#563).** The code is MIT OR Apache-2.0. `Cargo.toml`'s
   `include` is an allowlist, so a new `include_bytes!`/`include_str!`
   target, or a file `build.rs` reads, must be added to it or the

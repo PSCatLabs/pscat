@@ -254,6 +254,16 @@ the twelve builtins into a **runtime catalog** loaded from
   only), then the cwd (`paths::catalog_dir`; the full order is in
   `docs/guides/getting-started.md`, "Where pscat finds its files").
   `pscat --fonts` lists everything reachable.
+- **Font packs (#599)**: outside a checkout the catalog arrives as
+  downloadable packs (`src/fontpacks/`, `pscat fonts install`), unpacked
+  to `<root>/fonts/packs/<pack>/` in the same `<Family>/<file>` layout.
+  `catalog_fid` scans every `fonts/catalog/` override first, then the
+  installed packs (`fontpacks::font_dirs`); the first file found wins.
+  `fonts/packs.json` (compiled in) maps every catalog file to its pack,
+  so a pack face that is on no disk is `invalidfont` with a hint naming
+  the pack (`font::missing_face_hint`, shown by `Interp::error_report` on
+  its own line) instead of the Helvetica substitute; names no pack lists
+  still substitute. Release procedure: `docs/dev/RELEASING-FONTS.md`.
 
 `fonts/catalog/README.md` is the curated manifest with licenses;
 `examples/font_catalog.ps` renders the specimen sheets. The library

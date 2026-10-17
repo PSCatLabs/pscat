@@ -20,16 +20,17 @@ cd postscript_interpreter
 cargo build --release      # → target/release/pscat and target/release/pscat-mcp</code></pre>
 
   <h2>Surface 1 — the docs path (skill)</h2>
-  <p><code>.claude/skills/pscat/SKILL.md</code> is a one-page tool
+  <p><code>skills/pscat/SKILL.md</code> is a one-page tool
   reference: command recipes for rendering (PNG/SVG/PDF, page size,
   dpi, halftone), debugging (<code>--headless</code>,
   <code>--pstack-on-error</code>, exit codes), handwritten-note
-  generation, and the pitfalls. Claude Code picks it up automatically
+  generation, typewritten pages, and the pitfalls, written for an installed
+  <code>pscat</code>. Claude Code picks it up automatically
   as a skill; it's plain markdown, so any docs-reading agent can use
   it — <code>AGENTS.md</code> points there, which is where Codex
   looks first.</p>
 
-  <p><code>.claude/skills/psviz/SKILL.md</code> is the paper-viz companion to <code>pscat</code>/<code>psart</code>: it teaches agents to reach for <code>lib/graph.ps</code> (plotfn/plotparam/plotpolar/plotsurface) and <code>lib/dataviz.ps</code> (bar/line/area/scatter/pie) for documents, with calling conventions and copy-paste templates — so a “make me a chart for my paper” request goes straight to a clean figure instead of the generative-art loop. The interactive counterpart lives at <a href="charts.html">Charts</a>.</p>
+  <p><code>skills/psviz/SKILL.md</code> is the paper-viz companion to <code>pscat</code>/<code>psart</code>: it teaches agents to reach for <code>lib/graph.ps</code> (plotfn/plotparam/plotpolar/plotsurface) and <code>lib/dataviz.ps</code> (bar/line/area/scatter/pie) for documents, with calling conventions and copy-paste templates — so a “make me a chart for my paper” request goes straight to a clean figure instead of the generative-art loop. The interactive counterpart lives at <a href="charts.html">Charts</a>.</p>
 
   <h2>Surface 2 — the MCP server</h2>
   <p><code>pscat-mcp</code> speaks MCP over stdio and exposes four
@@ -65,16 +66,25 @@ cargo build --release      # → target/release/pscat and target/release/pscat-m
 
   <h3>Registering it</h3>
 <pre><code># Claude Code
-claude mcp add pscat -- $PWD/target/release/pscat-mcp
+claude mcp add pscat -- pscat-mcp
 
 # Codex
-codex mcp add pscat -- $PWD/target/release/pscat-mcp</code></pre>
+codex mcp add pscat -- pscat-mcp</code></pre>
+  <p>(With a build from a checkout instead of an install, give the full
+  path: <code>$PWD/target/release/pscat-mcp</code>.)</p>
   <p>For OpenClaw, Hermes, or any other MCP client, the generic
   stdio config:</p>
-<pre><code>{ "mcpServers": { "pscat": { "command": "/path/to/target/release/pscat-mcp" } } }</code></pre>
+<pre><code>{ "mcpServers": { "pscat": { "command": "pscat-mcp", "args": ["--out-root", "/path/to/output"] } } }</code></pre>
   <p>The server needs only the two binaries side by side: the
   <code>handwrite</code> tool runs <code>pscat handwrite</code>, with no
   checkout or shell script.</p>
+  <p>Each call is bounded: a time limit (<code>--timeout</code>, default
+  60 s), capped input, output and inline image sizes, and
+  <code>out_path</code> confined to the server's output root (its working
+  directory, or <code>--out-root DIR</code>). It speaks MCP revisions
+  2025-11-25 and 2025-06-18. Limits, protocol and the use-case table:
+  <a href="https://github.com/jeromebanks/postscript_interpreter/blob/main/docs/guides/agents.md">the agents guide</a>;
+  what the tools can still do: <a href="https://github.com/jeromebanks/postscript_interpreter/blob/main/SECURITY.md">SECURITY.md</a>.</p>
 
   <h2>The CLI, for direct shelling</h2>
 <pre><code>pscat --png out.png file.ps              # render (also --svg / --pdf)
