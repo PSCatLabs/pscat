@@ -243,8 +243,8 @@ fn catalog_roots() -> Vec<std::path::PathBuf> {
 
 /// Find (loading if necessary) the catalog face for a requested name.
 /// Lookup: alias → stem, already-loaded (by key or PostScript name),
-/// then a scan of every catalog root's family directories for
-/// `<stem>.ttf`/`.otf`/`.ttc`, then the same for `<stem>-Regular`.
+/// then, root by root in priority order, a scan of its family
+/// directories for `<stem>.ttf`/`.otf`/`.ttc`, then `<stem>-Regular`.
 #[cfg(not(target_arch = "wasm32"))]
 fn catalog_fid(requested: &str) -> Option<i64> {
     let (stem, fallback) = wanted_stems(requested);
@@ -259,8 +259,10 @@ fn catalog_fid(requested: &str) -> Option<i64> {
     }
     let roots = catalog_roots();
     let mut found: Option<std::path::PathBuf> = None;
-    'outer: for want in [stem, fallback.as_str()] {
-        for root in &roots {
+    // Roots outer, stems inner: a higher-priority directory's
+    // `<stem>-Regular` beats a lower one's exact `<stem>`.
+    'outer: for root in &roots {
+        for want in [stem, fallback.as_str()] {
             for family in std::fs::read_dir(root).into_iter().flatten().flatten() {
                 let dir = family.path();
                 if !dir.is_dir() {
