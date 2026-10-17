@@ -1677,8 +1677,12 @@ impl Drop for Interp {
         // never find one still borrowed). A deep chain a program built is
         // freed iteratively by `Drop for Dict`, wherever it hangs from (the
         // operand stack, `begin`, the journal, a resource category...).
+        // `try_borrow_mut`: a caller that popped `userdict` and still holds
+        // a `borrow()` of it must not turn a drop into a panic (a second
+        // panic while unwinding aborts the process). That dictionary is
+        // simply left alone, as it was before #625.
         for dict in self.dstack.iter().take(2) {
-            let contents = std::mem::take(&mut *dict.borrow_mut());
+            let contents = dict.try_borrow_mut().map(|mut d| std::mem::take(&mut *d));
             drop(contents);
         }
     }
@@ -1862,6 +1866,20 @@ mod tests {
              userdict /deep undef",
         )
         .expect("build and free the chain");
+    }
+
+    /// A caller that popped `userdict` and still holds a borrow of it can
+    /// drop the `Interp` without a panic (Codex review of #625).
+    #[test]
+    fn dropping_an_interp_whose_userdict_is_borrowed_does_not_panic() {
+        let mut it = Interp::new();
+        it.run_str("userdict").expect("push userdict");
+        let Value::Dict(user) = it.pop().expect("userdict").value else {
+            panic!("userdict is a dict");
+        };
+        let guard = user.borrow();
+        drop(it);
+        drop(guard);
     }
 
     #[test]
