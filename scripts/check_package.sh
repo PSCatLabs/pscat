@@ -47,7 +47,7 @@ SIZE=$(wc -c <"$CRATE" | tr -d ' ')
 echo "    $NAME.crate is $SIZE bytes ($((SIZE / 1024)) KiB; limit $((LIMIT / 1024)) KiB)"
 [[ "$SIZE" -lt "$LIMIT" ]] || fail "$NAME.crate is over crates.io's 10 MB limit"
 
-BASE="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
+BASE="${TMPDIR:-/tmp}"
 SCRATCH=$(mktemp -d "$BASE/pscat-package.XXXXXX")
 SCRATCH=$(cd "$SCRATCH" && pwd -P)
 case "$SCRATCH/" in
