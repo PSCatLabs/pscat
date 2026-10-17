@@ -145,9 +145,9 @@ pub(crate) fn dpi(s: &str) -> Result<f32, String> {
 
 /// The bytes of a PostScript string literal's contents: `\`, `(` and `)`
 /// backslash-escaped, everything else (newlines included) as it is.
-/// Octal escapes are deliberately not used for control characters: a raw
-/// CR in a literal reads as a newline while `\015` stays a CR, so the
-/// output would change.
+/// Octal escapes are deliberately not used for control characters: pscat's
+/// lexer reads a raw CR (or CRLF) in a literal as a newline while `\015`
+/// stays a CR, so the string would change.
 pub(crate) fn ps_escape(bytes: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(bytes.len() + 8);
     for &b in bytes {

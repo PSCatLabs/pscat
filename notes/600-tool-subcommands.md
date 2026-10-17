@@ -19,7 +19,7 @@ embedded `lib/`). The MCP server and the published skills should need only
   scripts' separate `pscat --headless` did, so the real render does not
   inherit their random state.
 - `scripts/handwrite.sh`, `typewrite.sh` and `photo_etch.sh` are now
-  ten-line wrappers (find a binary, `exec pscat <sub> "$@"`; `$PSCAT_BIN`
+  thin wrappers (find a binary, `exec pscat <sub> "$@"`; `$PSCAT_BIN`
   overrides for all three). They no longer export `PSCAT_HOME`.
 - `pscat-mcp` runs `pscat handwrite ... -- <text>`; `repo_root`, the
   `PSCAT_ROOT` override and the three-levels-up fallback are deleted, and the
@@ -33,9 +33,10 @@ embedded `lib/`). The MCP server and the published skills should need only
 
 **Byte-identity with the old scripts.** Verified by hand against the
 `origin/main` scripts (copied to a scratch tree with a symlink to the new
-binary as `pscat`, so both ran the same renderer): 9 handwrite cases (defaults,
+binary as `pscat`, so both ran the same renderer): 9 handwrite cases, 8
+renders plus one matching failure (`--seed 1985.0`) (defaults,
 seeds, ruled, ink, `--halftone --dpi 144`, explicit height, newlines and blank
-lines, capitals and non-ASCII, `--`), 14 typewrite cases (memo fields with
+lines, capitals and non-ASCII, CRLF and bare CR, `--`), 14 typewrite cases (memo fields with
 parens and backslashes, `--height fit`, a 5-page document with page numbers,
 tabs/indent/pitch/margins, `--reflow`, trailing blank lines, a worn
 machine at 100 dpi, memo-only, stdin, CRLF, PDF, and the `--ps` driver itself)
@@ -59,9 +60,14 @@ subcommand with a driver `tests/subcommands.rs` assembles itself.
   scripts failed later, in `--page`).
 - `handwrite` lowercases ASCII only (`tr` lowercased by locale, so an accented
   capital became its lowercase twin; both are invisible in this font, so the
-  rendered page is the same). A bare CR in the text is a newline.
-- A text that starts with `-` goes after `--`; `-h` and unknown options fail
-  with the usage text on stderr, as before.
+  rendered page is the same). A CR or CRLF in the text is turned into a newline before escaping; pscat's
+  lexer reads a raw CR (or CRLF) in a string literal as a newline too, so the
+  string is the same (checked: `(a\rb)` and `(a\r\nb)` both give length 3 and
+  a 10 in the middle).
+- A text that starts with `-` goes after `--`; `--help` prints the usage to
+  stdout and exits 0, and an unknown option fails with the usage on stderr,
+  as before.
+- `pscat --help` now lists the subcommands.
 - `typewrite` on text with bytes that are not UTF-8: the script's second
   `sed` died with "illegal byte sequence" and typed a truncated page; the
   port types the page (a stray byte stays a stray byte, as in the first sed).
