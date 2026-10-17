@@ -62,6 +62,13 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # One exact toolchain for every job that builds or packages. cargo's
+  # normalized Cargo.toml inside the .crate changes between cargo releases,
+  # so `verify` and `publish` must package with the same cargo for the
+  # byte-equality fast path (the content check still matches across
+  # versions). Bump deliberately; the bootstrap publish in RELEASING.md uses
+  # this version too.
+  RELEASE_TOOLCHAIN: "1.96.1"
 
 jobs:
   verify:
@@ -135,7 +142,7 @@ jobs:
           echo "pinned $TAG verified against its release"
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master; toolchain below
         with:
-          toolchain: stable
+          toolchain: ${{ env.RELEASE_TOOLCHAIN }}
           components: clippy, rustfmt
       - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2
         with:
@@ -237,13 +244,14 @@ jobs:
     steps:
       - name: Keep line endings as committed
         run: git config --global core.autocrlf false
+      # Exactly the commit `verify` checked (release-manifest.json records it).
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ needs.verify.outputs.commit }}
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master; toolchain below
         with:
-          toolchain: stable
+          toolchain: ${{ env.RELEASE_TOOLCHAIN }}
           targets: ${{ matrix.target }}
       - name: musl tools
         if: contains(matrix.target, 'musl')
@@ -277,9 +285,10 @@ jobs:
       run:
         shell: bash
     steps:
+      # Exactly the commit `verify` checked (release-manifest.json records it).
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ needs.verify.outputs.commit }}
           persist-credentials: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -338,8 +347,10 @@ jobs:
     permissions:
       contents: write
     steps:
+      # Exactly the commit `verify` checked (release-manifest.json records it).
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: ${{ needs.verify.outputs.commit }}
           persist-credentials: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -374,12 +385,14 @@ jobs:
       contents: write
       id-token: write
     steps:
+      # Exactly the commit `verify` checked (release-manifest.json records it).
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: ${{ needs.verify.outputs.commit }}
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master; toolchain below
         with:
-          toolchain: stable
+          toolchain: ${{ env.RELEASE_TOOLCHAIN }}
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: release-dist

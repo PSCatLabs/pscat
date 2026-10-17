@@ -257,7 +257,7 @@ is a command for the owner, or a settings page where no API exists.
    ```sh
    git switch --detach v0.6.0            # exactly the tagged commit
    git status --porcelain                # must print nothing
-   cargo publish --locked                # with a crates.io API token (below)
+   cargo +1.96.1 publish --locked        # RELEASE_TOOLCHAIN in release.yml; token below
    ```
 
    Create the token at <https://crates.io/settings/tokens> with the
@@ -269,7 +269,9 @@ is a command for the owner, or a settings page where no API exists.
    Now approve the run. The `crates` stage finds `0.6.0` already on crates.io
    with the same contents from the same commit, skips it, and the release
    continues. A manual publish from any other commit, or from a dirty tree,
-   makes that stage halt, which is the point.
+   makes that stage halt, which is the point. (Use the workflow's
+   `RELEASE_TOOLCHAIN` so the `.crate` bytes match `verify`'s exactly. Another
+   cargo version still matches, through the contents-and-commit check.)
 
    The npm package name gets reserved the same way when #566 adds
    `npm/package.json`: `npm publish` by hand once, then add the trusted
@@ -393,6 +395,27 @@ README.
 | crates.io | always | `crates` |
 | npm (#566) | `npm/package.json` exists | `npm` |
 | Claude Code plugin (#569) | a `.claude-plugin/` manifest exists | `plugin`: the manifests must carry the release version, which `release.sh` sets |
+
+**The plugin stage checks the manifests; it does not change them.** The
+issue's stage 6 says "update the plugin manifests". Here `release.sh` sets
+their version in the release PR, so the merged and tagged commit already
+carries it. Nothing is pushed after the release, and the stage halts if a
+manifest disagrees. If #569's marketplace pins a release ref (a `ref:` or
+`version` that must point at the published tag), that update belongs in a
+step after `publish` that opens a PR. #569 decides.
+
+**What the npm stage expects from #566.** The stage runs `npm pack`
+in `npm/` and compares its integrity with the registry's. A rerun repacks,
+so the comparison holds only if packing is reproducible. npm fixes file
+mtimes, but a wasm build step is reproducible only if #566 makes it so. #566
+should:
+
+- build the package contents once, in `assemble`;
+- `npm pack` there and add the `.tgz` to `release-dist`;
+- have the npm stage publish that exact tarball and compare against its
+  integrity.
+
+That is one small change to this stage, and no other stage changes.
 
 A new channel is a new stage in `scripts/release_stages.py` (the same
 absent/same/different rule, with a fake backend and tests) and a step in
