@@ -1,10 +1,11 @@
 //! The typewriter's layout (issue #213): `tw-type`, `tw-linecount`,
-//! `tw-pageheight` and `scripts/typewrite.sh`.
+//! `tw-pageheight` and `pscat typewrite` (the subcommand `scripts/typewrite.sh`
+//! now wraps; the wrapper itself is smoke-tested in `tests/subcommands.rs`).
 //!
 //! The option guards and a few line counts are `%%SelfTest` blocks in
 //! `lib/typewriter.ps`. These tests need pixels or a process: wrapping,
 //! tab stops, markup, spacing, pagination, determinism, `tw-linecount`
-//! agreeing with `tw-type`, and the script, with a real `gs` run of its
+//! agreeing with `tw-type`, and the subcommand, with a real `gs` run of its
 //! driver when `gs` is installed.
 //!
 //! `tw-type` types each glyph at a cell of the grid its frame sets, and
@@ -445,14 +446,13 @@ fn tw_linecount_applies_no_option() {
     );
 }
 
-// ---- scripts/typewrite.sh ---------------------------------------------------
+// ---- pscat typewrite ---------------------------------------------------
 
 fn script(args: &[&str], dir: &std::path::Path) -> std::process::Output {
-    std::process::Command::new("bash")
-        .arg("scripts/typewrite.sh")
+    std::process::Command::new(env!("CARGO_BIN_EXE_pscat"))
+        .arg("typewrite")
         .args(args)
-        .env("PSCAT_BIN", env!("CARGO_BIN_EXE_pscat"))
-        .env("TMPDIR", dir)
+        .current_dir(dir)
         .stdin(std::process::Stdio::null())
         .output()
         .expect("run typewrite.sh")

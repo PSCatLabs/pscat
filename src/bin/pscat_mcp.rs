@@ -5,14 +5,15 @@
 //! Works with any MCP client — Claude Code, Codex, OpenClaw, Hermes;
 //! registration one-liners are in `docs/guides/agents.md`.
 //!
-//! Design choice: the server **shells out to the pscat CLI** (and
-//! `scripts/handwrite.sh`) rather than linking the interpreter.
+//! Design choice: the server **shells out to the pscat CLI** (its
+//! `handwrite` subcommand included) rather than linking the interpreter.
 //! PostScript programs print to stdout (`=`, `print`, `pstack`), and
 //! in-process that would corrupt the JSON-RPC channel; a subprocess
 //! keeps the protocol safe, keeps the tools in lock-step with the CLI,
 //! and gets crash isolation for free. The pscat binary is found next
-//! to this one (same target dir); the repo root (for handwrite.sh) is
-//! found by `repo_root` below, overridable with $PSCAT_HOME.
+//! to this one (same directory); nothing else is needed, no checkout, no
+//! `scripts/`, no shell (issue #600), so the server works from a bare
+//! install on Windows too.
 
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -255,9 +256,8 @@ fn handwrite(args: &Value) -> Result<Value, String> {
         None => dir.join("note.png"),
     };
 
-    let script = repo_root()?.join("scripts/handwrite.sh");
-    let mut cmd = Command::new(&script);
-    cmd.arg("-o").arg(&out);
+    let mut cmd = Command::new(pscat_bin()?);
+    cmd.arg("handwrite").arg("-o").arg(&out);
     for (flag, key) in [
         ("--size", "size"),
         ("--width", "width"),
@@ -281,7 +281,8 @@ fn handwrite(args: &Value) -> Result<Value, String> {
     if let Some(ink) = args["ink"].as_str() {
         cmd.arg("--ink").arg(ink);
     }
-    cmd.arg(text);
+    // `--` so a text that starts with `-` is text, not an option.
+    cmd.arg("--").arg(text);
     let run = pipe_through(&mut cmd, b"")?;
     if !run.success {
         return Err(format!("handwrite failed:\n{}", run.stderr));
@@ -389,48 +390,12 @@ fn pipe_through(cmd: &mut Command, stdin: &[u8]) -> Result<RunOutput, String> {
 /// The pscat binary lives next to this one.
 fn pscat_bin() -> Result<PathBuf, String> {
     let me = std::env::current_exe().map_err(|e| format!("current_exe: {e}"))?;
-    let bin = me.with_file_name("pscat");
+    let bin = me.with_file_name(format!("pscat{}", std::env::consts::EXE_SUFFIX));
     if bin.exists() {
         Ok(bin)
     } else {
         Err(format!("pscat binary not found at {}", bin.display()))
     }
-}
-
-/// The pscat tree holding `scripts/handwrite.sh`: `$PSCAT_ROOT`,
-/// trusted unconditionally as it always was (an explicit override
-/// that's wrong should fail loudly rather than silently fall through
-/// to some other root); otherwise the first of the resolver's install
-/// roots (`pscat::paths::install_roots`: `$PSCAT_HOME`, the per-user
-/// data dir, the exe's own directory, which is the bundle layout, and
-/// in debug-assertion builds the checkout) that has the script.
-/// `$PSCAT_HOME` is existence-checked like the rest because #599 may
-/// point it at a font-pack directory with no `scripts/`.
-///
-/// One more fallback outlives the resolver's: three levels above the
-/// exe, so `target/release/pscat-mcp` registered from a checkout (the
-/// `docs/guides/agents.md` recipe) still finds the checkout's script
-/// in a release build. It names only a shell script, never a `lib/`
-/// file or font, and it goes away when #600 ports handwrite.sh into
-/// the `pscat` binary. `handwrite.sh` points pscat at its own tree.
-fn repo_root() -> Result<PathBuf, String> {
-    const SCRIPT_REL: &str = "scripts/handwrite.sh";
-    if let Some(root) = std::env::var_os("PSCAT_ROOT").filter(|v| !v.is_empty()) {
-        return Ok(PathBuf::from(root));
-    }
-    let dev_checkout = std::env::current_exe()
-        .ok()
-        .map(|p| std::fs::canonicalize(&p).unwrap_or(p))
-        .and_then(|p| p.ancestors().nth(3).map(Path::to_path_buf));
-    pscat::paths::install_roots()
-        .into_iter()
-        .map(|(_, root)| root)
-        .chain(dev_checkout)
-        .find(|root| root.join(SCRIPT_REL).exists())
-        .ok_or_else(|| {
-            "pscat tree not found (set PSCAT_HOME to the pscat bundle or checkout for handwrite)"
-                .into()
-        })
 }
 
 fn scratch_dir() -> Result<PathBuf, String> {

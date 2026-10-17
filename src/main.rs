@@ -7,6 +7,8 @@ use pscat::spool::Watcher;
 use pscat::window::{WindowOptions, run_interactive, run_spool, run_windowed};
 use pscat::{Interp, gfx};
 
+mod subcmd;
+
 /// Interpreter steps per rendered frame in the windowed modes. Named
 /// so `--selftest`'s runs-alone check can tell "the user asked for a
 /// speed" from the default it would silently ignore.
@@ -75,6 +77,38 @@ struct Options {
     grid: Option<(u32, u32)>,
 }
 
+impl Options {
+    /// The defaults a bare `pscat` run starts from. The `handwrite`, `typewrite`
+    /// and `photo-etch` subcommands (`subcmd/`) start from the same place.
+    fn new() -> Self {
+        Options {
+            file: None,
+            eval: None,
+            headless: false,
+            png: None,
+            steps_per_frame: DEFAULT_STEPS_PER_FRAME,
+            page: gfx::DEFAULT_PAGE,
+            dpi: 72.0,
+            svg: None,
+            pdf: None,
+            pstack_on_error: false,
+            spool: None,
+            halftone: false,
+            transparent: false,
+            interactive: false,
+            lint: false,
+            lint_strict: false,
+            selftest: None,
+            selftest_list: None,
+            seen_flags: Vec::new(),
+            sweep_seed: None,
+            sweep_param: None,
+            contact_sheet: None,
+            grid: None,
+        }
+    }
+}
+
 /// The self-test modes take a file of their own and produce no page,
 /// so pairing them with anything else would silently ignore one of the
 /// two. Checked against the flags actually *supplied* rather than
@@ -103,6 +137,11 @@ fn runs_alone(mode: &str, options: &Options) -> Result<(), String> {
 }
 
 fn main() -> ExitCode {
+    // `pscat handwrite|typewrite|photo-etch ...`: self-contained subcommands
+    // with their own options (subcmd/); everything else is the flag CLI.
+    if let Some(code) = subcmd::dispatch(env::args().skip(1)) {
+        return code;
+    }
     let options = match parse_args() {
         Ok(o) => o,
         Err(msg) => {
@@ -1182,31 +1221,7 @@ fn format_sweep_value(v: SweepValue) -> String {
 }
 
 fn parse_args() -> Result<Options, String> {
-    let mut options = Options {
-        file: None,
-        eval: None,
-        headless: false,
-        png: None,
-        steps_per_frame: DEFAULT_STEPS_PER_FRAME,
-        page: gfx::DEFAULT_PAGE,
-        dpi: 72.0,
-        svg: None,
-        pdf: None,
-        pstack_on_error: false,
-        spool: None,
-        halftone: false,
-        transparent: false,
-        interactive: false,
-        lint: false,
-        lint_strict: false,
-        selftest: None,
-        selftest_list: None,
-        seen_flags: Vec::new(),
-        sweep_seed: None,
-        sweep_param: None,
-        contact_sheet: None,
-        grid: None,
-    };
+    let mut options = Options::new();
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
         if arg.starts_with('-') && arg != "-" {

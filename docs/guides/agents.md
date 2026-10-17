@@ -23,7 +23,7 @@ MCP server over stdio exposing four tools:
   unbalanced `gsave`, stuff left on the stack — so a whole class of
   silent failure shows up without eyeballing the PNG.
 - `handwrite` — text in, handwritten-note PNG back (the
-  `scripts/handwrite.sh` options: size, paper, ink, jitter, seed).
+  `pscat handwrite` options: size, paper, ink, jitter, seed).
 - `describe_art_capabilities` — the machine-readable catalog of what
   this build's creative toolkit actually has installed: fonts, Type 3
   program faces, mood palettes, page templates, and artkit/style-pack
@@ -54,12 +54,9 @@ has no timeouts or confinement yet. Read [`SECURITY.md`](../../SECURITY.md) befo
 you hand it to an agent you do not trust.
 
 The server shells out to the `pscat` CLI (found next to it), so the
-tools always match the CLI's behavior. `handwrite` also needs
-`scripts/handwrite.sh`, looked for in `$PSCAT_HOME` (or `$PSCAT_ROOT`),
-the per-user data directory, next to the binaries, and three levels above
-`pscat-mcp`, which is the checkout when it is `target/release/pscat-mcp`
-(see [Where pscat finds its files](getting-started.md#where-pscat-finds-its-files)).
-A release bundle or the checkout recipe above needs no extra setup; set
-`PSCAT_HOME` only if you've moved the binaries away from their
-`lib`/`fonts`/`scripts` siblings. (The script lookup moves into `pscat`
-itself with #600.)
+tools always match the CLI's behavior. `handwrite` runs `pscat handwrite`,
+so the server needs nothing but the two binaries: no checkout, no
+`scripts/`, no shell (it works on Windows). `lib/` is compiled into
+`pscat`; see
+[Where pscat finds its files](getting-started.md#where-pscat-finds-its-files)
+for the font catalog, which `handwrite` does not use.
