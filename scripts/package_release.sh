@@ -228,8 +228,10 @@ fi
 echo "==> Verifying the bundle resolves lib/ standalone, and needs font packs"
 # With an empty HOME (so no font packs the packager installed), a pack
 # face must stop with an error naming its pack, never substitute.
+# (The program does not start with "/": Git Bash on Windows would rewrite
+# an argument that looks like a POSIX path before pscat.exe saw it.)
 EMPTY_HOME=$(mktemp -d)
-OUT=$(HOME="$EMPTY_HOME" XDG_DATA_HOME="$EMPTY_HOME" APPDATA="$EMPTY_HOME" bare "$PSCAT" -e '/Bangers findfont pop' 2>&1) &&
+OUT=$(HOME="$EMPTY_HOME" XDG_DATA_HOME="$EMPTY_HOME" APPDATA="$EMPTY_HOME" bare "$PSCAT" -e '0 pop /Bangers findfont pop' 2>&1) &&
   { echo "FAIL: /Bangers resolved with no font packs installed" >&2; exit 1; }
 grep -q "is in the extras font pack" <<<"$OUT" ||
   { echo "$OUT" >&2; echo "FAIL: missing face did not name its font pack" >&2; exit 1; }

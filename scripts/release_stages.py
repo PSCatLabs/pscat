@@ -274,12 +274,22 @@ def archives_in(dist):
     return names
 
 
+# Members of a .crate that cargo writes at packaging time rather than copying
+# from the source tree. Their bytes depend on the cargo version (the
+# normalized Cargo.toml gains fields between releases), so the content digest
+# leaves them out: Cargo.toml.orig is the source manifest, verbatim, and the
+# VCS info's sha1 is compared on its own.
+GENERATED_CRATE_FILES = ("Cargo.toml", ".cargo_vcs_info.json")
+
+
 def crate_identity(path):
-    """(content digest, vcs sha1 or None) of a .crate: the digest covers each
-    regular file's path and SHA-256, not tar metadata (mtimes), so two
-    packagings of the same commit agree even when their bytes do not."""
+    """(content digest, vcs sha1 or None) of a .crate. The digest covers each
+    source file's path and SHA-256, not tar metadata (mtimes) and not the
+    files cargo generates, so two packagings of the same commit agree even
+    when their bytes do not, or when different cargo versions made them."""
     lines = []
     sha1 = None
+    has_orig = False
     try:
         with tarfile.open(path, "r:gz") as tar:
             for m in tar.getmembers():
@@ -287,14 +297,21 @@ def crate_identity(path):
                     continue
                 f = tar.extractfile(m)
                 data = f.read() if f else b""
-                lines.append(f"{m.name}\0{sha256_bytes(data)}\n")
-                if m.name.endswith("/.cargo_vcs_info.json") and m.name.count("/") == 1:
+                top, _, rel = m.name.partition("/")
+                if rel == ".cargo_vcs_info.json":
                     try:
                         sha1 = json.loads(data).get("git", {}).get("sha1")
                     except (ValueError, AttributeError):
                         sha1 = None
+                if rel == "Cargo.toml.orig":
+                    has_orig = True
+                if rel in GENERATED_CRATE_FILES:
+                    continue
+                lines.append(f"{m.name}\0{sha256_bytes(data)}\n")
     except (tarfile.TarError, OSError, EOFError) as e:
         raise Halt(f"{os.path.basename(path)} is not a readable .crate: {e}") from e
+    if not has_orig:
+        raise Halt(f"{os.path.basename(path)} has no Cargo.toml.orig; its source manifest cannot be compared")
     lines.sort()
     return sha256_bytes("".join(lines).encode()), sha1
 
@@ -975,7 +992,7 @@ def altered_crate(src, dest):
         changed = False
         for m in tin.getmembers():
             data = tin.extractfile(m).read() if m.isfile() else None
-            if data is not None and not changed and m.name.endswith("/Cargo.toml"):
+            if data is not None and not changed and m.name.endswith("/Cargo.toml.orig"):
                 data += b"\n# not the released crate\n"
                 m.size = len(data)
                 changed = True
