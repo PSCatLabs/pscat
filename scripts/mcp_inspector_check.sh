@@ -75,6 +75,12 @@ json=$(run --method tools/call --tool-name render_postscript \
     --tool-args-json '{"source":"showpage","out_path":"../escape.png"}')
 check "out_path outside the root is refused" \
     '.result.isError == true and .result.structuredContent.error.kind == "out_path_refused"' "$json"
+json=$(run --method tools/call --tool-name render_postscript \
+    --tool-args-json '{"source":"showpage","out_path":"Makefile"}')
+check "out_path without the render extension is refused" \
+    '.result.isError == true and .result.structuredContent.error.kind == "out_path_refused" and .result.structuredContent.error.required_extension == ".png"' "$json"
+[ ! -e "$work/Makefile" ] || { echo "FAIL a Makefile was written"; fail=1; }
+
 [ ! -e "$work/../escape.png" ] || { echo "FAIL a file escaped the root"; fail=1; }
 
 json=$(run --method tools/call --tool-name handwrite --tool-args-json '{"text":"hello","seed":3}')

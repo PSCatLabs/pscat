@@ -196,11 +196,18 @@ an installed build (October 2026, #568).
   `out_path` is switched off. A relative `out_path` starts at the root; an
   absolute one must land inside it. Refused: any `..` component, a directory
   that does not exist (the server creates none), a directory that resolves
-  outside the root through a symlink, and a target that is itself a symlink
-  or a directory. The bytes are written to a new temp file in the target's
+  outside the root through a symlink, and an existing target that is not a
+  regular file (a symlink, a directory, a device). Least privilege on top of
+  that (#627): the file name must end in the extension of the output format
+  (`.png`, `.svg` or `.pdf`, compared without regard to case; `handwrite` makes `.png`), so a render cannot
+  be written as `Makefile`, `.envrc` or a git hook, and no directory below
+  the root may start with a dot (`.git/`, `.claude/`, `.github/`), judged on
+  the resolved path so a symlink to one is refused too. Both refusals are
+  `out_path_refused` and name the `required_extension`. The bytes are written to a new temp file in the target's
   directory (`create_new`, which never opens an existing file or link) and
   renamed over the target, so an existing **regular file inside the root is
-  replaced**, and a symlink swapped in after the check is replaced rather than
+  replaced, but only one that already has the render's extension** (the name
+  must end in it, so nothing else can be targeted), and a symlink swapped in after the check is replaced rather than
   followed. The directory is checked again just before the temp file is
   created and before the rename; a process that can already write inside the
   root and swaps a directory for a symlink at exactly that moment can still

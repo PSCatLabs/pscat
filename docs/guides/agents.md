@@ -100,10 +100,14 @@ PostScript errors `ps_error`, `offending_command`, `line`).
 
 **`out_path`** is resolved against the output root (relative paths start
 there; an absolute path must land inside it). `..` is refused, the directory
-must already exist and must not resolve outside the root through a
-symlink, and a target that is a symlink or a directory is refused. The file
-is written to a temp file beside the target and renamed over it, so an
-existing regular file is replaced. Claude Code and Codex start servers in
+must already exist, must not resolve outside the root through a symlink and
+must not be (or sit below) a dot-directory such as `.git/`, and an existing
+target that is not a regular file is refused. The name must end in the
+extension of the output format (`.png`, `.svg`, `.pdf`; `.png` for
+`handwrite`); a wrong or missing extension is refused, naming the extension
+to use. The file is written to a temp file beside the target and renamed over
+it, so an existing regular file with that extension is replaced and nothing
+else can be overwritten. Claude Code and Codex start servers in
 the project directory, so by default an agent can write renders into the
 project and nowhere else.
 
