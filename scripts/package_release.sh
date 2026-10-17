@@ -73,7 +73,8 @@ WINDOWS=0
 case "$TARGET" in *windows*) EXE=".exe"; WINDOWS=1 ;; esac
 HEADLESS=0
 [[ ${#FEATURES[@]} -gt 0 ]] && HEADLESS=1
-PY=$(command -v python3 || command -v python)
+# On Windows runners `python3` can be the Microsoft Store stub; `python` is real.
+if [[ "$WINDOWS" == 1 ]]; then PY=$(command -v python || command -v python3); else PY=$(command -v python3 || command -v python); fi
 
 echo "==> Building pscat and pscat-mcp (release, $TARGET${FEATURES[*]:+, ${FEATURES[*]}})"
 cargo build --release --locked --target "$TARGET" ${FEATURES[@]+"${FEATURES[@]}"} --manifest-path "$ROOT/Cargo.toml"
@@ -103,6 +104,7 @@ if [[ "$WANT_NOTICES" == 1 ]]; then
   cp "$NOTICES" "$BUNDLE/THIRD_PARTY_LICENSES.html"
 fi
 
+# shellcheck disable=SC2016 # literal text for the README, not expansions
 if [[ "$WINDOWS" == 1 ]]; then
   PATH_HINT='    set PATH=%CD%;%PATH%          (cmd)
     $env:PATH = "$PWD;$env:PATH"  (PowerShell)'
