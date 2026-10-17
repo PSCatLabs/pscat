@@ -1,4 +1,4 @@
-# #602 — tag-driven publishing pipeline, resumable stages, release environment
+## Tag-driven publishing pipeline, resumable stages, release environment (issue #602, 2026-10-16)
 
 Part of release epic #562 (567b). This PR is owner-merged. The procedure is
 `docs/dev/RELEASING.md`.
