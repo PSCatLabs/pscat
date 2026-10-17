@@ -1028,6 +1028,9 @@ impl Dest {
                     .open(&tmp)?;
                 std::io::copy(&mut src, &mut dst)?;
                 dst.sync_all()?;
+                // Closed before the rename: Windows will not rename a file
+                // that is still open.
+                drop((src, dst));
                 std::fs::rename(&tmp, &target)
             })();
             if let Err(e) = copied {
