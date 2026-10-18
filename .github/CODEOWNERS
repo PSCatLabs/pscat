@@ -37,3 +37,10 @@
 # Licences
 /LICENSE*                   @jeromebanks   # forward: #563 (licence files)
 /THIRD_PARTY_NOTICES.md     @jeromebanks   # forward: #563
+
+# The SDLC policy, the skills that enforce it, and agent permissions:
+# an agent must not be able to loosen the rule and self-merge that.
+/SDLC.md                    @jeromebanks
+/.claude/skills/work-issue/ @jeromebanks
+/.claude/skills/sdlcify/    @jeromebanks
+/.claude/settings.json      @jeromebanks
