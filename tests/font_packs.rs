@@ -13,6 +13,7 @@ mod common;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use pscat::fontpacks::pinned::PINNED_INDEX;
 use sha2::{Digest, Sha256};
 
 const PSCAT: &str = env!("CARGO_BIN_EXE_pscat");
@@ -165,7 +166,13 @@ fn an_override_beats_an_installed_pack_and_status_is_reported() {
             .unwrap()
             .starts_with(home.to_str().unwrap())
     }));
-    assert_eq!(fp["pinned_index"], serde_json::Value::Null);
+    // The build's own pin, whatever it is (none until a fonts-* release
+    // is pinned): an index that doesn't match it stays user-selected.
+    let pinned = match PINNED_INDEX {
+        None => serde_json::Value::Null,
+        Some(p) => serde_json::json!({"tag": p.tag, "sha256": p.sha256}),
+    };
+    assert_eq!(fp["pinned_index"], pinned);
 
     // Without the override the pack serves again; without the pack a
     // name no pack table lists substitutes as before.
@@ -207,7 +214,24 @@ fn a_tampered_pack_is_refused_with_nothing_left_behind() {
 }
 
 #[test]
+fn fonts_list_reports_the_builds_pin() {
+    let home = common::scratch_dir("fontpack-pin");
+    let (ok, out, _) = pscat(&home, &["fonts", "list"]);
+    assert!(ok);
+    match PINNED_INDEX {
+        None => assert!(out.contains("pinned release: none"), "{out}"),
+        Some(p) => assert!(out.contains(p.tag), "{out}"),
+    }
+    assert!(out.contains("not installed: extras"), "{out}");
+}
+
+#[test]
 fn bare_install_without_a_pin_says_so_and_touches_nothing() {
+    // A pinned build would download the pinned release here; that path
+    // is covered by the release-fonts pinned smoke test, not offline tests.
+    if PINNED_INDEX.is_some() {
+        return;
+    }
     let home = common::scratch_dir("fontpack-nopin");
     let (ok, _, err) = pscat(&home, &["fonts", "install"]);
     assert!(!ok);
