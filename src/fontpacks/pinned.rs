@@ -21,4 +21,7 @@ pub struct Pinned {
     pub sha256: &'static str,
 }
 
-pub const PINNED_INDEX: Option<Pinned> = None;
+pub const PINNED_INDEX: Option<Pinned> = Some(Pinned {
+    tag: "fonts-2026.10",
+    sha256: "dc5800e32b4e9be319137c672fdaa2c0fa3993dca9c7dbe5a53477e8b179178d",
+});
