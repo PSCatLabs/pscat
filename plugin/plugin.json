@@ -1,0 +1,33 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "pscat",
+  "version": "0.6.0",
+  "description": "PostScript rendering, generative art and paper-ready charts with the pscat interpreter: three skills plus the pscat-mcp server. Requires pscat installed separately.",
+  "author": {
+    "name": "Jerome Banks",
+    "url": "https://github.com/jeromebanks"
+  },
+  "homepage": "https://github.com/jeromebanks/postscript_interpreter",
+  "repository": "https://github.com/jeromebanks/postscript_interpreter",
+  "license": "MIT OR Apache-2.0",
+  "keywords": [
+    "postscript",
+    "rendering",
+    "generative-art",
+    "charts",
+    "handwriting",
+    "mcp"
+  ],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "pscat",
+        "shortDescription": "Render PostScript to PNG, SVG and PDF; make generative art and charts.",
+        "developerName": "Jerome Banks",
+        "category": "Design",
+        "websiteURL": "https://github.com/jeromebanks/postscript_interpreter",
+        "defaultPrompt": "Draw a small generative art piece in PostScript with pscat and render it to PNG."
+      }
+    }
+  }
+}

@@ -1,10 +1,14 @@
-# Claude Code plugin (issue #569): the marketplace in .claude-plugin/ and
-# the plugin in plugin/ (skills/ plus the pscat-mcp server config).
+# Claude Code and Codex plugins (issue #569): the marketplaces in
+# .claude-plugin/ and .agents/plugins/, and the one plugin directory both
+# install, plugin/ (the skills as real files, the pscat-mcp server config and
+# the shared hooks/hooks.json).
 #
 # manifests: scripts/plugin_check.py and its tests (python3 only): the
 #   plugin's version equals Cargo.toml's, every path resolves inside the
 #   repo, skills have valid frontmatter, and nothing installed names a
-#   repo-relative path. A release bump that misses plugin.json fails here.
+#   repo-relative path; the Codex marketplace and plugin.json/mcp.json are
+#   well formed and the plugin directory holds no symlinks (Codex skips
+#   them). A release bump that misses a plugin.json fails here.
 # install: a Linux clean-machine install with no Claude login. The pinned
 #   `claude` CLI validates the manifests, installs the plugin into a
 #   throwaway config from this checkout, and `claude mcp list` checks the
@@ -12,6 +16,10 @@
 #   fails without it): scripts/plugin_install_check.sh. A model session
 #   using the skills needs a login, so that half is a manual check
 #   (notes/569-claude-code-plugin.md).
+# codex-install: the same for Codex with the pinned `codex` CLI and no
+#   login: marketplace add + plugin add into a throwaway CODEX_HOME, then the
+#   installed mcp.json's server answers tools/list
+#   (scripts/codex_plugin_install_check.sh, notes/569-codex-plugin.md).
 #
 # Not in required_status_checks (SDLC.md); runs only when a plugin input
 # changes. Cargo.toml is in the list for the version check.
@@ -22,6 +30,7 @@ on:
     branches: ["main"]
     paths:
       - ".claude-plugin/**"
+      - ".agents/**"
       - "plugin/**"
       - "skills/**"
       - "Cargo.toml"
@@ -29,10 +38,12 @@ on:
       - "scripts/plugin_check.py"
       - "scripts/test_plugin_check.py"
       - "scripts/plugin_install_check.sh"
+      - "scripts/codex_plugin_install_check.sh"
       - ".github/workflows/plugin.yml"
   pull_request:
     paths:
       - ".claude-plugin/**"
+      - ".agents/**"
       - "plugin/**"
       - "skills/**"
       - "Cargo.toml"
@@ -40,6 +51,7 @@ on:
       - "scripts/plugin_check.py"
       - "scripts/test_plugin_check.py"
       - "scripts/plugin_install_check.sh"
+      - "scripts/codex_plugin_install_check.sh"
       - ".github/workflows/plugin.yml"
 
 permissions:
@@ -79,3 +91,24 @@ jobs:
         run: cargo build --profile ci --bin pscat --bin pscat-mcp
       - name: Install the plugin into a throwaway config
         run: ./scripts/plugin_install_check.sh target/ci
+
+  codex-install:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master; toolchain below
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - name: Install the Codex CLI (pinned)
+        run: npm install -g @openai/codex@0.163.0
+      - name: Build pscat and pscat-mcp
+        run: cargo build --profile ci --bin pscat --bin pscat-mcp
+      - name: Install the plugin into a throwaway Codex home
+        run: ./scripts/codex_plugin_install_check.sh target/ci

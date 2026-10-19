@@ -4,13 +4,14 @@ pscat is easy to drive from a coding agent — Claude Code, Codex,
 OpenClaw, Hermes, or anything else. There are two integration surfaces,
 and both work against an **installed** pscat (no checkout needed):
 
-- **Skills**: plain Markdown in [`skills/`](../../skills/), one directory
+- **Skills**: plain Markdown in [`plugin/skills/`](../../plugin/skills/) (also
+  reachable as `skills/` in a checkout), one directory
   per skill, each with a `SKILL.md` (Claude Code's skill format; any agent
-  can read it). [`pscat`](../../skills/pscat/SKILL.md) is the tool
-  reference, [`psart`](../../skills/psart/SKILL.md) the render-look-refine
+  can read it). [`pscat`](../../plugin/skills/pscat/SKILL.md) is the tool
+  reference, [`psart`](../../plugin/skills/psart/SKILL.md) the render-look-refine
   loop for art (a short page plus `references/` for paint, dry media,
   board math and style packs, read only when needed), and
-  [`psviz`](../../skills/psviz/SKILL.md) paper-ready charts. They call the
+  [`psviz`](../../plugin/skills/psviz/SKILL.md) paper-ready charts. They call the
   `pscat` binary and its subcommands (`pscat handwrite`, `pscat typewrite`,
   `pscat photo-etch`) and load the library with `(lib/...) run`, which reads
   the copy compiled into `pscat`. [`AGENTS.md`](../../AGENTS.md) points
@@ -27,12 +28,24 @@ uses the binaries on your PATH):
 ```
 
 or `/plugin marketplace add jeromebanks/postscript_interpreter` and then
-`/plugin install pscat@pscat`. [`plugin/README.md`](../../plugin/README.md)
-has the details: requirements, example prompts, privacy, and what happens
-when pscat is missing.
+`/plugin install pscat@pscat`.
 
-`skills/` is the single source for the plugin (`plugin/skills` is a symlink
-to it), so there is one copy of the skill text. The repository's own development skills (`work-issue`, `sdlcify`,
+In Codex, the same plugin comes from the repository's Codex marketplace
+(`.agents/plugins/marketplace.json`):
+
+```sh
+codex plugin marketplace add jeromebanks/postscript_interpreter
+codex plugin add pscat@pscat
+```
+
+[`plugin/README.md`](../../plugin/README.md) has the details for both:
+requirements, example prompts, privacy, and what happens when pscat is
+missing.
+
+`plugin/skills/` is the single source of the skill text: both plugins
+install from `plugin/`, and the top-level `skills` is a symlink to it. The
+skills are real files there, not a symlink, because Codex skips symlinks
+when it copies a plugin into its cache. The repository's own development skills (`work-issue`, `sdlcify`,
 `issue-summary`) live in `.claude/skills/` and are not published; that
 directory holds symlinks to the three user-facing skills so Claude Code
 sessions in a checkout still load them.

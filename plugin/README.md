@@ -1,7 +1,7 @@
-# pscat plugin for Claude Code
+# pscat plugin for Claude Code and Codex
 
 Render, preview and debug PostScript, make generative art, and draw
-paper-ready charts from Claude Code, with the
+paper-ready charts from Claude Code or Codex, with the
 [pscat](https://github.com/jeromebanks/postscript_interpreter) PostScript
 interpreter. The plugin bundles:
 
@@ -10,8 +10,8 @@ interpreter. The plugin bundles:
   photo-to-engraving), `psart` (the render-look-refine loop for generative
   art, painting, dry media, chalkboard maths and style packs) and `psviz`
   (function plots and bar/line/area/scatter/pie charts for papers).
-- **The `pscat-mcp` server**, which gives Claude four tools:
-  `render_postscript` (pages come back as images Claude can look at),
+- **The `pscat-mcp` server**, which gives the agent four tools:
+  `render_postscript` (pages come back as images the agent can look at),
   `eval_postscript`, `handwrite` and `describe_art_capabilities`.
 
 ## Requirements: install pscat first
@@ -20,7 +20,7 @@ The plugin does not ship binaries. It runs the `pscat` and `pscat-mcp`
 you have installed, found on your `PATH`. Either:
 
 ```sh
-cargo install --git https://github.com/jeromebanks/postscript_interpreter
+cargo install pscat
 ```
 
 or download a release archive from
@@ -28,12 +28,13 @@ or download a release archive from
 `pscat` and `pscat-mcp` on your `PATH`. Check with `pscat --help`.
 
 If they are missing, the plugin still installs and the skills still load,
-but the MCP server cannot start: each session starts with a message
-saying `pscat`/`pscat-mcp` was not found and how to install it, and
-`/mcp` lists `plugin:pscat:pscat` as failed. Install pscat and restart
-Claude Code.
+but the MCP server cannot start. A SessionStart hook (`hooks/hooks.json`,
+read by both Claude Code and Codex) then starts each session with a
+message saying `pscat`/`pscat-mcp` was not found and how to install it.
+In Claude Code, `/mcp` lists `plugin:pscat:pscat` as failed. Install pscat
+and restart your agent.
 
-## Install the plugin
+## Install in Claude Code
 
 In Claude Code:
 
@@ -55,9 +56,9 @@ then `claude plugin install pscat@pscat`. Restart Claude Code (or run
 
 Adding the marketplace clones the repository (about 250 MB on disk, fonts
 and gallery included); only the plugin itself (under 100 KB) is copied into
-the plugin cache. A sparse clone fetches just the three directories the
+the plugin cache. A sparse clone fetches just the two directories the
 plugin needs (under 1 MB):
-`claude plugin marketplace add jeromebanks/postscript_interpreter --sparse .claude-plugin plugin skills`.
+`claude plugin marketplace add jeromebanks/postscript_interpreter --sparse .claude-plugin plugin`.
 
 From a checkout, `claude plugin marketplace add /path/to/postscript_interpreter`
 works the same way.
@@ -66,11 +67,39 @@ works the same way.
 `claude mcp add pscat -- pscat-mcp` before, remove it
 (`claude mcp remove pscat`) so the tools are not listed twice.
 
-**Windows:** the plugin's `skills` directory is a symbolic link into the
-repository's `skills/`. Git for Windows checks symlinks out as plain files
-unless symlink support is on (`git config --global core.symlinks true`
-with Developer Mode enabled), and without it the skills do not load. The
-MCP server works either way. Only macOS and Linux have been tested.
+## Install in Codex
+
+From a shell (Codex CLI 0.163 or later):
+
+```sh
+codex plugin marketplace add jeromebanks/postscript_interpreter
+codex plugin add pscat@pscat
+```
+
+The first command reads the Codex marketplace in
+`.agents/plugins/marketplace.json`; the second copies `plugin/` (under
+100 KB) into `~/.codex/plugins/cache/pscat/pscat/<version>/`. Start a new
+Codex session and the skills appear as `pscat:pscat`, `pscat:psart` and
+`pscat:psviz`, with the `pscat` MCP server's four tools. In the ChatGPT
+desktop app, the marketplace shows up in the plugin browser once added.
+A sparse clone works here too:
+`codex plugin marketplace add jeromebanks/postscript_interpreter --sparse .agents --sparse plugin`.
+`codex plugin marketplace upgrade pscat` picks up a new release.
+
+Depending on your approval settings, Codex asks before it calls an MCP
+tool (a non-interactive `codex exec` with approvals off refuses the call).
+Codex runs a plugin's hooks only after you trust them, so
+the missing-pscat message needs one review in `/hooks`; without it a
+missing `pscat-mcp` shows up only as the server's tools being absent.
+
+**Already registered pscat-mcp by hand?** If you ran
+`codex mcp add pscat -- pscat-mcp`, remove it (`codex mcp remove pscat`).
+
+## Platforms
+
+macOS and Linux are tested. The plugin directory has no symbolic links,
+so it installs the same on Windows; the missing-pscat hook is a POSIX
+`sh` command, though, so on Windows it needs a POSIX shell to run (#633).
 
 ## Try it
 
@@ -101,7 +130,18 @@ options.
 ## Versions
 
 The plugin's version is pscat's version: `plugin/.claude-plugin/plugin.json`
-carries the crate version and the release pipeline bumps both together
-(`scripts/plugin_check.py` fails CI if they differ). Use the plugin with a
-pscat of the same version; `pscat-mcp --version` prints yours.
-`/plugin update pscat@pscat` picks up a new release.
+(Claude Code) and `plugin/plugin.json` (Codex) carry the crate version, and
+the release pipeline bumps them together (`scripts/plugin_check.py` fails
+CI if any differ). Use the plugin with a pscat of the same version;
+`pscat-mcp --version` prints yours. `/plugin update pscat@pscat` (Claude
+Code) or `codex plugin marketplace upgrade pscat` (Codex) picks up a new
+release.
+
+## Layout
+
+One directory, `plugin/`, is the plugin for both agents. It holds the
+skills as real files in `skills/` (the repository's top-level `skills` is
+a symlink to `plugin/skills`, so there is one copy of the text), the
+shared `hooks/hooks.json`, Claude Code's `.claude-plugin/plugin.json`
+(which declares the MCP server inline), and Codex's portable `plugin.json`
+and `mcp.json`. Each agent ignores the other's files.
