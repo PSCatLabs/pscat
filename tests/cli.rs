@@ -846,3 +846,19 @@ fn usage_lists_the_new_flags() {
     assert!(out.contains("--selftest"), "{out}");
     assert!(out.contains("--selftest-list"), "{out}");
 }
+
+#[test]
+fn version_flag_prints_the_crate_version_and_exits_clean() {
+    let want = format!("pscat {}\n", env!("CARGO_PKG_VERSION"));
+    for flag in ["--version", "-V"] {
+        let (ok, out, err) = run(&[flag], "");
+        assert!(ok, "{flag} must exit 0; stderr: {err}");
+        assert_eq!(out, want, "{flag}");
+        assert!(err.is_empty(), "{flag} stderr: {err}");
+    }
+    let (_, usage, _) = run(&["--help"], "");
+    assert!(
+        usage.contains("--version"),
+        "usage lists --version: {usage}"
+    );
+}

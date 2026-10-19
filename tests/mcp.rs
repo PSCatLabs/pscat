@@ -942,3 +942,21 @@ fn more_pages_than_the_inline_cap_are_refused_before_reading() {
     assert_eq!(error_kind(&result), "output_too_large", "{result}");
     assert!(root.join("many-021.png").is_file());
 }
+
+#[test]
+fn version_flag_prints_the_crate_version_and_exits_without_serving() {
+    // A closed stdin: were the flag ignored the server would see EOF and
+    // exit with empty stdout, so the assertion fails instead of hanging.
+    let want = format!("pscat-mcp {}\n", env!("CARGO_PKG_VERSION"));
+    for flag in ["--version", "-V"] {
+        let out = Command::new(env!("CARGO_BIN_EXE_pscat-mcp"))
+            .arg(flag)
+            .current_dir(common::scratch_dir("mcp-version"))
+            .stdin(Stdio::null())
+            .output()
+            .expect("run pscat-mcp");
+        assert!(out.status.success(), "{flag} must exit 0");
+        assert_eq!(String::from_utf8_lossy(&out.stdout), want, "{flag}");
+        assert!(out.stderr.is_empty(), "{flag} stderr: {:?}", out.stderr);
+    }
+}

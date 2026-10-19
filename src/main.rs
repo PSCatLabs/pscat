@@ -1239,6 +1239,10 @@ fn parse_args() -> Result<Options, String> {
                 print_usage();
                 std::process::exit(0);
             }
+            "-V" | "--version" => {
+                println!("pscat {}", env!("CARGO_PKG_VERSION"));
+                std::process::exit(0);
+            }
             "--fonts" => {
                 for name in pscat::font::available_fonts() {
                     println!("{name}");
@@ -1386,6 +1390,8 @@ fn print_usage() {
     println!("Runs file.ps in a live window (watch it draw), or a REPL if no file.");
     println!("'-' reads the program from stdin (use with --png/--svg/--pdf/--headless).");
     println!();
+    println!("  -h, --help          show this text and exit");
+    println!("  -V, --version       print \"pscat X.Y.Z\" and exit");
     println!("  -e, --eval 'code'   evaluate a snippet headlessly and exit");
     println!("  -i, --interactive   REPL + live window: type PostScript, watch it draw");
     println!("                      (an optional file.ps runs first as a prelude)");
