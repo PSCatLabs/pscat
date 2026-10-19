@@ -33,6 +33,12 @@
 # Plugin manifests
 # A plugin's manifest sits in <plugin dir>/.claude-plugin/, so no leading slash.
 .claude-plugin/             @jeromebanks
+# Codex: the marketplace, and the plugin's manifest, MCP config and hooks
+# (hooks run commands on users' machines; Claude Code reads hooks.json too).
+/.agents/plugins/           @jeromebanks
+/plugin/plugin.json         @jeromebanks
+/plugin/mcp.json            @jeromebanks
+/plugin/hooks/              @jeromebanks
 
 # Licences
 /LICENSE*                   @jeromebanks   # forward: #563 (licence files)

@@ -235,7 +235,7 @@ that `/Spread` and `/Load` keep their one shared meaning.
   build time, or the hand-written `ENTRIES` rows), with no `kind` that
   means "interpreter operator", so adding one would mean a new
   discovery path, not a new row. An agent finds those two the way it
-  finds any other interpreter operator: `skills/pscat/SKILL.md`
+  finds any other interpreter operator: `plugin/skills/pscat/SKILL.md`
   and README. The *library* built on them (`pkwash`, `pkpaper`,
   `pkalphaok`) is cataloged normally, and its summaries name the
   operators, so a catalog-only reader isn't left unaware they exist.

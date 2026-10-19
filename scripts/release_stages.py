@@ -33,8 +33,8 @@ Stages, in release order:
 - `crates`: `cargo publish` to crates.io.
 - `npm`: `npm publish` of npm/; enabled only when npm/package.json exists.
 - `publish`: makes the draft GitHub Release public, after re-checking it.
-- `plugin`: checks every Claude Code plugin manifest carries the release
-  version; enabled only when a .claude-plugin/ manifest exists.
+- `plugin`: checks every plugin manifest (Claude Code and Codex) carries
+  the release version; enabled only when a plugin manifest exists.
 
 `--plan` runs the same checks without changing anything and reports what
 each stage would do. `--fake DIR` swaps every registry for a directory
@@ -145,7 +145,11 @@ def pinned_index(root=ROOT):
 
 
 def plugin_manifests(root=ROOT):
-    """Every Claude Code plugin manifest in the repo (#569 adds them)."""
+    """Every plugin manifest in the repo (#569): Claude Code's
+    `.claude-plugin/{plugin,marketplace}.json` anywhere, and Codex's
+    `.agents/plugins/marketplace.json` plus the `plugin.json` (portable, at
+    the plugin root) or `.codex-plugin/plugin.json` of each local plugin it
+    lists."""
     out = []
     for pattern in (".claude-plugin/*.json", "**/.claude-plugin/*.json"):
         for p in glob.glob(os.path.join(root, pattern), recursive=True):
@@ -154,6 +158,21 @@ def plugin_manifests(root=ROOT):
                 continue
             if os.path.basename(p) in ("plugin.json", "marketplace.json") and p not in out:
                 out.append(p)
+    codex_market = os.path.join(root, ".agents", "plugins", "marketplace.json")
+    if os.path.exists(codex_market):
+        out.append(codex_market)
+        with open(codex_market, encoding="utf-8") as f:
+            entries = json.load(f).get("plugins") or []
+        for entry in entries:
+            src = entry.get("source") if isinstance(entry, dict) else None
+            if isinstance(src, dict) and src.get("source") == "local":
+                src = src.get("path")
+            if not isinstance(src, str):
+                continue  # a git, url or npm source is not in this repo
+            for name in ("plugin.json", os.path.join(".codex-plugin", "plugin.json")):
+                p = os.path.normpath(os.path.join(root, src, name))
+                if os.path.exists(p) and p not in out:
+                    out.append(p)
     return sorted(out)
 
 
@@ -893,7 +912,7 @@ def stage_publish(ctx):
 def stage_plugin(ctx):
     files = plugin_manifests(ctx.root)
     if not files:
-        return "disabled", "no .claude-plugin/ manifest (the plugin channel is not enabled)"
+        return "disabled", "no plugin manifest (the plugin channel is not enabled)"
     wrong = []
     for p in files:
         _, found = json_versions(p)

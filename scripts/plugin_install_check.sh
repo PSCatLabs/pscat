@@ -6,10 +6,11 @@
 #
 # usage: scripts/plugin_install_check.sh path/to/dir-with-pscat-and-pscat-mcp
 #
-# 1. `claude plugin validate --strict` on the marketplace and on skills/.
+# 1. `claude plugin validate --strict` on the marketplace and on plugin/skills/.
 # 2. `plugin marketplace add <this checkout>` + `plugin install pscat@pscat`.
-# 3. The installed copy holds the three skills as real files (the cache
-#    copy follows plugin/skills -> ../skills) and nothing else of the repo.
+# 3. The installed copy holds the three skills as real files, the shared
+#    hooks/hooks.json, and nothing else of the repo (plugin/ also carries the
+#    Codex manifest and mcp.json; scripts/codex_plugin_install_check.sh).
 # 4. `claude mcp list` with only the given bin dir added to PATH: the
 #    plugin's server must connect. Then without pscat-mcp on PATH it must fail
 #    (the negative case the plugin's SessionStart hook explains).
@@ -32,7 +33,7 @@ ok() { echo "ok   $*"; }
 bad() { echo "FAIL $*" >&2; fail=1; }
 
 "$claude" plugin validate --strict "$repo" && ok "marketplace validates" || bad "marketplace validate"
-"$claude" plugin validate --strict "$repo/skills" && ok "skills validate" || bad "skills validate"
+"$claude" plugin validate --strict "$repo/plugin/skills" && ok "skills validate" || bad "skills validate"
 
 "$claude" plugin marketplace add "$repo"
 "$claude" plugin install pscat@pscat
@@ -47,7 +48,9 @@ for s in pscat psart psviz; do
         bad "installed copy lacks skills/$s/SKILL.md ($copy)"
     fi
 done
-extra=$(cd "$copy" && find . -mindepth 1 -maxdepth 1 ! -name skills ! -name .claude-plugin ! -name README.md)
+[ -f "$copy/hooks/hooks.json" ] && ok "installed copy has hooks/hooks.json" || bad "installed copy lacks hooks/hooks.json"
+extra=$(cd "$copy" && find . -mindepth 1 -maxdepth 1 ! -name skills ! -name .claude-plugin ! -name README.md \
+    ! -name hooks ! -name plugin.json ! -name mcp.json)
 [ -z "$extra" ] && ok "installed copy holds only the plugin" || bad "installed copy has extra entries: $extra"
 "$claude" plugin details pscat@pscat
 

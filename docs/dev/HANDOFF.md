@@ -1049,8 +1049,8 @@ renders eight examples in both and compares block-downsampled output).
   clients show `structuredContent` instead of `content`, and that would hide
   the image). `scripts/mcp_inspector_check.sh` (workflow `mcp`) is the
   third-party client check. See `notes/568-mcp-skills-cleanup.md`.
-- **Published skills are `skills/<name>/SKILL.md`** (pscat, psart, psviz;
-  #568), written for an installed pscat: no `cargo`, `target/`, `scripts/`
+- **Published skills are `plugin/skills/<name>/SKILL.md`** (pscat, psart,
+  psviz; #568; top-level `skills` is a symlink there since #569 part b), written for an installed pscat: no `cargo`, `target/`, `scripts/`
   or checkout-relative paths, repo files linked by GitHub URL. `.claude/skills/`
   holds the repo-development skills plus symlinks to those three, so a
   checkout's Claude Code sessions still load them. psart keeps a short
@@ -1067,7 +1067,21 @@ renders eight examples in both and compares block-downsampled output).
   `pscat-mcp` is missing. plugin.json's `version` must equal `Cargo.toml`'s
   (`scripts/plugin_check.py`, workflow `plugin`); the release script bumps
   it, and the marketplace entry carries no version. A new skill needs only
-  a `skills/<name>/` directory. See `notes/569-claude-code-plugin.md`.
+  a `plugin/skills/<name>/` directory. See `notes/569-claude-code-plugin.md`.
+- **The Codex plugin (#569 part b) is the same `plugin/` directory.** The
+  marketplace is `.agents/plugins/marketplace.json`; Codex reads
+  `plugin/plugin.json` (portable manifest, version = Cargo's) and
+  `plugin/mcp.json` (`type: "stdio"`, `command: pscat-mcp`); Claude Code
+  ignores both. **Codex skips symlinks when it copies a plugin**, so the
+  skills moved from `skills/` into `plugin/skills/` as real files (the
+  old `plugin/skills -> ../skills` symlink installed zero skills in
+  Codex); top-level `skills` and `.claude/skills/{pscat,psart,psviz}` are
+  now symlinks into it, and `scripts/plugin_check.py` rejects any symlink
+  inside a plugin directory. The missing-pscat SessionStart hook moved from
+  Claude's plugin.json to `plugin/hooks/hooks.json`, the default path both
+  agents read (never declare it in a manifest too: Claude loads both).
+  `scripts/codex_plugin_install_check.sh` (job `codex-install`) installs it
+  with the pinned codex CLI. See `notes/569-codex-plugin.md`.
 - **Licensing (#563).** The code is MIT OR Apache-2.0. `Cargo.toml`'s
   `include` is an allowlist, so a new `include_bytes!`/`include_str!`
   target, or a file `build.rs` reads, must be added to it or the

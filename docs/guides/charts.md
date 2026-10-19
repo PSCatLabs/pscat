@@ -65,7 +65,7 @@ function, and watch it render live.
 
 ## For agents
 
-The `psviz` skill ([`skills/psviz/SKILL.md`](../../skills/psviz/SKILL.md))
+The `psviz` skill ([`plugin/skills/psviz/SKILL.md`](../../plugin/skills/psviz/SKILL.md))
 teaches an agent the calling conventions and copy-paste templates, so a
 data-visualization request goes straight to `graph.ps` and `dataviz.ps`
 instead of the generative-art loop.

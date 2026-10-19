@@ -340,6 +340,31 @@ class Channels(Base):
         self.assertEqual((st, r["plugin"]), (rs.EXIT_OK, "skipped"))
 
 
+    def test_codex_plugin_manifest_versions(self):
+        os.makedirs(os.path.join(self.repo, ".agents", "plugins"))
+        os.makedirs(os.path.join(self.repo, "plugin"))
+        with open(os.path.join(self.repo, ".agents", "plugins", "marketplace.json"), "w", encoding="utf-8") as f:
+            json.dump({"name": "pscat", "plugins": [
+                {"name": "pscat", "source": {"source": "local", "path": "./plugin"}},
+                {"name": "far", "source": {"source": "url", "url": "https://example.com/x.git"}}]}, f)
+        with open(os.path.join(self.repo, "plugin", "plugin.json"), "w", encoding="utf-8") as f:
+            json.dump({"name": "pscat", "version": "0.0.1"}, f)
+        st, r, _ = self.run_all()
+        self.assertEqual((st, r["plugin"]), (rs.EXIT_HALT, "halted"))
+        changed = rs.bump_manifests_json_only(self.repo, VERSION)
+        self.assertEqual(changed, [os.path.join("plugin", "plugin.json")])
+        fake = rs.Fake(os.path.join(self.tmp, "fake-codex"))
+        fake.set_tag(TAG, COMMIT)
+        self.fake = fake
+        st, r, _ = self.run_all()
+        self.assertEqual((st, r["plugin"]), (rs.EXIT_OK, "skipped"))
+
+    def test_the_repo_codex_manifest_is_bumped(self):
+        files = [os.path.relpath(p, rs.ROOT) for p in rs.plugin_manifests()]
+        self.assertIn(os.path.join("plugin", "plugin.json"), files)
+        self.assertIn(os.path.join(".agents", "plugins", "marketplace.json"), files)
+
+
 class RepoFacts(unittest.TestCase):
     def test_pin_reader(self):
         with tempfile.TemporaryDirectory() as d:
