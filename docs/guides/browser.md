@@ -32,6 +32,6 @@ documented deviation). Works under node too — `tests/wasm.rs` drives
 the real module through the same JS library.
 
 For the full JavaScript API, see the
-[JavaScript page](https://jeromebanks.github.io/postscript_interpreter/javascript.html)
+[JavaScript page](https://pscatlabs.github.io/pscat/javascript.html)
 on the project site. To try the interpreter without building anything, open the
-[playground](https://jeromebanks.github.io/postscript_interpreter/playground.html).
+[playground](https://pscatlabs.github.io/pscat/playground.html).

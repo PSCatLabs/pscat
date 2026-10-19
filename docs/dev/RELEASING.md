@@ -171,7 +171,7 @@ is a command for the owner, or a settings page where no API exists.
    Only `v*` and `fonts-*` tags may deploy.
 
    ```sh
-   gh api -X PUT repos/jeromebanks/postscript_interpreter/environments/release --input - <<'EOF'
+   gh api -X PUT repos/PSCatLabs/pscat/environments/release --input - <<'EOF'
    {
      "reviewers": [{"type": "User", "id": 1081450}],
      "prevent_self_review": false,
@@ -179,8 +179,8 @@ is a command for the owner, or a settings page where no API exists.
      "deployment_branch_policy": {"protected_branches": false, "custom_branch_policies": true}
    }
    EOF
-   gh api -X POST repos/jeromebanks/postscript_interpreter/environments/release/deployment-branch-policies -f name='v*' -f type=tag
-   gh api -X POST repos/jeromebanks/postscript_interpreter/environments/release/deployment-branch-policies -f name='fonts-*' -f type=tag
+   gh api -X POST repos/PSCatLabs/pscat/environments/release/deployment-branch-policies -f name='v*' -f type=tag
+   gh api -X POST repos/PSCatLabs/pscat/environments/release/deployment-branch-policies -f name='fonts-*' -f type=tag
    ```
 
    (`1081450` is `gh api users/jeromebanks --jq .id`.) `release-fonts.yml`
@@ -191,7 +191,7 @@ is a command for the owner, or a settings page where no API exists.
    create them.
 
    ```sh
-   gh api -X POST repos/jeromebanks/postscript_interpreter/rulesets --input - <<'EOF'
+   gh api -X POST repos/PSCatLabs/pscat/rulesets --input - <<'EOF'
    {
      "name": "release tags",
      "target": "tag",
@@ -212,7 +212,7 @@ is a command for the owner, or a settings page where no API exists.
    reports:
 
    ```sh
-   gh api -X PATCH repos/jeromebanks/postscript_interpreter/branches/main/protection/required_status_checks --input - <<'EOF'
+   gh api -X PATCH repos/PSCatLabs/pscat/branches/main/protection/required_status_checks --input - <<'EOF'
    {
      "strict": false,
      "contexts": [
@@ -233,7 +233,7 @@ is a command for the owner, or a settings page where no API exists.
    [`RELEASING-FONTS.md`](RELEASING-FONTS.md) describes:
 
    ```sh
-   gh variable set FONTS_RELEASE_ENABLED --body true --repo jeromebanks/postscript_interpreter
+   gh variable set FONTS_RELEASE_ENABLED --body true --repo PSCatLabs/pscat
    git switch main && git pull
    git tag -a fonts-2026.10 -m "font packs 2026.10" && git push origin fonts-2026.10
    # approve the release environment for the release-fonts run, then:
@@ -245,7 +245,7 @@ is a command for the owner, or a settings page where no API exists.
 5. **Turn the interpreter pipeline on.**
 
    ```sh
-   gh variable set RELEASE_ENABLED --body true --repo jeromebanks/postscript_interpreter
+   gh variable set RELEASE_ENABLED --body true --repo PSCatLabs/pscat
    ```
 
 6. **crates.io bootstrap: the one documented exception to "no manual
@@ -264,8 +264,8 @@ is a command for the owner, or a settings page where no API exists.
    `publish-new` scope only, limited to `pscat`, with a short expiry. Pass it
    as `CARGO_REGISTRY_TOKEN` for that one command, then revoke the token.
    Then configure trusted publishing: crates.io → `pscat` → Settings →
-   Trusted Publishing → Add → GitHub, with owner `jeromebanks`, repository
-   `postscript_interpreter`, workflow `release.yml`, environment `release`.
+   Trusted Publishing → Add → GitHub, with owner `PSCatLabs`, repository
+   `pscat`, workflow `release.yml`, environment `release`.
    Now approve the run. The `crates` stage finds `0.6.0` already on crates.io
    with the same contents from the same commit, skips it, and the release
    continues. A manual publish from any other commit, or from a dirty tree,
@@ -335,8 +335,8 @@ Use a machine, or a container, that has never seen the repo, and follow
 # Binary, Linux, in a throwaway container:
 docker run --rm -it ubuntu:24.04 bash
 apt-get update && apt-get install -y curl ca-certificates
-curl -LO https://github.com/jeromebanks/postscript_interpreter/releases/download/vX.Y.Z/pscat-X.Y.Z-x86_64-unknown-linux-musl.tar.gz
-curl -LO https://github.com/jeromebanks/postscript_interpreter/releases/download/vX.Y.Z/SHA256SUMS
+curl -LO https://github.com/PSCatLabs/pscat/releases/download/vX.Y.Z/pscat-X.Y.Z-x86_64-unknown-linux-musl.tar.gz
+curl -LO https://github.com/PSCatLabs/pscat/releases/download/vX.Y.Z/SHA256SUMS
 sha256sum -c SHA256SUMS --ignore-missing
 tar xzf pscat-X.Y.Z-x86_64-unknown-linux-musl.tar.gz && export PATH="$PWD/pscat-X.Y.Z-x86_64-unknown-linux-musl:$PATH"
 echo '100 100 moveto 300 300 lineto stroke showpage' > t.ps && pscat --png t.png t.ps && ls -l t.png

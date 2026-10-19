@@ -43,8 +43,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = ROOT / "gallery" / "manifest.json"
-REPO_URL = "https://github.com/jeromebanks/postscript_interpreter"
-SITE_URL = "https://jeromebanks.github.io/postscript_interpreter"
+REPO_URL = "https://github.com/PSCatLabs/pscat"
+SITE_URL = "https://pscatlabs.github.io/pscat"
 SOURCE_LINES = 40          # how much of the source a piece page shows inline
 SOURCE_DIR = "source"      # _site/source/<repo path>: what "View source" opens (#461)
 

@@ -106,5 +106,5 @@ showpage
 - `pscat --page 612x792 --png out.png file.ps` succeeds; with a checkout and Ghostscript, `gs '--permit-file-read=lib/*' '--permit-file-read=examples/*' -I lib -dBATCH -dNOPAUSE -sDEVICE=png16m -g612x792 -o gs.png file.ps` succeeds too (or `gs -dNOSAFER -dBATCH ...` — SAFER blocks `(lib/...) run` by default; see Pitfalls).
 - Keep the figure self-contained with `%%BoundingBox` and a one-line `%%Title`.
 
-`pscat --capabilities` and the `lib/graph.ps` / `lib/dataviz.ps` headers (in the [repository](https://github.com/jeromebanks/postscript_interpreter/tree/main/lib)) have the full procedure list; [`examples/graph_paper.ps`](https://github.com/jeromebanks/postscript_interpreter/blob/main/examples/graph_paper.ps) and [`examples/dataviz_paper.ps`](https://github.com/jeromebanks/postscript_interpreter/blob/main/examples/dataviz_paper.ps) are complete paper-ready pages.
+`pscat --capabilities` and the `lib/graph.ps` / `lib/dataviz.ps` headers (in the [repository](https://github.com/PSCatLabs/pscat/tree/main/lib)) have the full procedure list; [`examples/graph_paper.ps`](https://github.com/PSCatLabs/pscat/blob/main/examples/graph_paper.ps) and [`examples/dataviz_paper.ps`](https://github.com/PSCatLabs/pscat/blob/main/examples/dataviz_paper.ps) are complete paper-ready pages.
 

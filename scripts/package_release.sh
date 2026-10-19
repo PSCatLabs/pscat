@@ -168,7 +168,7 @@ subcommands of the binary: \`pscat handwrite\`, \`pscat typewrite\` and
 \`pscat photo-etch\` (add \`--help\`). They need nothing but \`pscat\`.
 
 Full docs, source, and the \`examples/\`/\`gallery/\` demo material:
-https://github.com/jeromebanks/postscript_interpreter
+https://github.com/PSCatLabs/pscat
 EOF
 
 echo "==> Archiving"

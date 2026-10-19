@@ -404,7 +404,7 @@ three belong in the first version.
   criteria.
 
 This decision, and the contract sketch above, has been posted to
-[#47](https://github.com/jeromebanks/postscript_interpreter/issues/47#issuecomment-5414870305)
+[#47](https://github.com/PSCatLabs/pscat/issues/47#issuecomment-5414870305)
 as a comment, per #46's acceptance criterion to update it since this
 spike adds a hard new requirement to its scope (SVG/PDF export
 alongside the alpha operator, not after).

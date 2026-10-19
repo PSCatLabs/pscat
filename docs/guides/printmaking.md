@@ -157,5 +157,5 @@ newpath 40 40 moveto 260 40 lineto 260 260 lineto 40 260 lineto closepath
 
 The gallery's *Out of Register* is a three-plate risograph sunset built entirely
 from `halftonekit`, and *Nightfall, Three Cuts* puts the three printkit presets
-in one scene. The [gallery](https://jeromebanks.github.io/postscript_interpreter/gallery.html)
+in one scene. The [gallery](https://pscatlabs.github.io/pscat/gallery.html)
 shows both.

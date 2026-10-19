@@ -24,17 +24,17 @@ skills and registers `pscat-mcp` in one step (install pscat first; the plugin
 uses the binaries on your PATH):
 
 ```text
-/plugin install pscat --marketplace jeromebanks/postscript_interpreter
+/plugin install pscat --marketplace PSCatLabs/pscat
 ```
 
-or `/plugin marketplace add jeromebanks/postscript_interpreter` and then
+or `/plugin marketplace add PSCatLabs/pscat` and then
 `/plugin install pscat@pscat`.
 
 In Codex, the same plugin comes from the repository's Codex marketplace
 (`.agents/plugins/marketplace.json`):
 
 ```sh
-codex plugin marketplace add jeromebanks/postscript_interpreter
+codex plugin marketplace add PSCatLabs/pscat
 codex plugin add pscat@pscat
 ```
 

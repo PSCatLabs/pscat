@@ -2,7 +2,7 @@
 
 How to paint a sky, clouds, mountains, mist, a far forest, evergreens, bushes, water, a reflection, a foreground bank and grass with `lib/paintkit.ps`, in the order a wet-on-wet landscape is painted. Each recipe names the tools, the order, the settings that matter and the usual failure with its fix, and gives a complete snippet that renders as it stands, with a thumbnail of what it makes.
 
-The recipes come from two worked pieces: `gallery/alpine_lake.ps` (issue #118, a snow range over a lake) and Evening Stream (issue #187, `gallery/evening_stream.ps` and `notes/187-evening-stream.md`, pending in [PR #348](https://github.com/jeromebanks/postscript_interpreter/pull/348) and not on `main` yet). Nothing here is a library helper: every recipe is prose plus paintkit calls, so you copy a snippet, change the numbers and keep going. Parameter lists are in `pscat --capabilities`; the tools themselves are described in `README.md` and `skills/psart/SKILL.md`.
+The recipes come from two worked pieces: `gallery/alpine_lake.ps` (issue #118, a snow range over a lake) and Evening Stream (issue #187, `gallery/evening_stream.ps` and `notes/187-evening-stream.md`, pending in [PR #348](https://github.com/PSCatLabs/pscat/pull/348) and not on `main` yet). Nothing here is a library helper: every recipe is prose plus paintkit calls, so you copy a snippet, change the numbers and keep going. Parameter lists are in `pscat --capabilities`; the tools themselves are described in `README.md` and `skills/psart/SKILL.md`.
 
 ## Running a recipe
 
@@ -437,7 +437,7 @@ newpath -10 WL 2 add moveto 370 WL 2 add lineto
 
 **Failures.**
 - *Branches that all point the same way.* The load is not flipped: use `/Light`.
-- A lit tip on a dark stem for grass and fir needles would be [#229](https://github.com/jeromebanks/postscript_interpreter/issues/229), `/TipColor`.
+- A lit tip on a dark stem for grass and fir needles would be [#229](https://github.com/PSCatLabs/pscat/issues/229), `/TipColor`.
 
 ```postscript
 % recipe: evergreens
@@ -777,7 +777,7 @@ bankpath << /Under LAKE /Slant -30 /Length 12 /Lean 20 /Bow 0.15 >> pkbrushedge
 
 **Failures.**
 - *Grass, or a waterfall, like a picket fence hung from a rail.* Unset, `pkpull` starts every stroke exactly on the spine, and `/Wander` only slides a start *along* it. Set `/Scatter` to a few points (the rim here uses 3; a fall pulled down off a lip reads better at 4 to 6) so the starts spread across the line. Raise `/LengthJitter` too, so the tips do not line up either.
-- *Grass that is one flat colour.* A dark stem with a lit tip would be `/TipColor` ([#229](https://github.com/jeromebanks/postscript_interpreter/issues/229)); for now layer a darker pass under a lighter one.
+- *Grass that is one flat colour.* A dark stem with a lit tip would be `/TipColor` ([#229](https://github.com/PSCatLabs/pscat/issues/229)); for now layer a darker pass under a lighter one.
 - *`/Touch` that does nothing visible.* `/Touch 1` is full contact, the same as unset; take it down to 0.5 to 0.8.
 - *The canvas pattern moved.* `pkcanvas` must be called before any `translate`, `scale` or `rotate` the piece applies, and supersampling with `2 2 scale` goes before it.
 
@@ -820,10 +820,10 @@ A recipe is a workaround where one of these would be one call. When one lands, u
 
 | Issue | What it adds | Recipe it changes |
 |---|---|---|
-| [#229](https://github.com/jeromebanks/postscript_interpreter/issues/229) | `/TipColor` and `/TipReach`: a lit tip on a dark stem | 6 Evergreens, 11 Grass |
-| [#230](https://github.com/jeromebanks/postscript_interpreter/issues/230) | `/Colors` on `pkdry` and `pkoil`'s ridges | 4 Mist, 10 Bank, foam on water |
+| [#229](https://github.com/PSCatLabs/pscat/issues/229) | `/TipColor` and `/TipReach`: a lit tip on a dark stem | 6 Evergreens, 11 Grass |
+| [#230](https://github.com/PSCatLabs/pscat/issues/230) | `/Colors` on `pkdry` and `pkoil`'s ridges | 4 Mist, 10 Bank, foam on water |
 
-Evening Stream ([PR #348](https://github.com/jeromebanks/postscript_interpreter/pull/348), pending, `gallery/evening_stream.ps` on `feature/187-second-wet-on-wet-landscape`) is the second worked example once it merges: a dark sunset with a stream, a cabin and autumn trees. Its techniques are folded into recipes 2, 8, 9, 10 and 11. When it merges, link its still `gallery/renders/evening_stream.png` from this page.
+Evening Stream ([PR #348](https://github.com/PSCatLabs/pscat/pull/348), pending, `gallery/evening_stream.ps` on `feature/187-second-wet-on-wet-landscape`) is the second worked example once it merges: a dark sunset with a stream, a cabin and autumn trees. Its techniques are folded into recipes 2, 8, 9, 10 and 11. When it merges, link its still `gallery/renders/evening_stream.png` from this page.
 
 ## Keeping the recipes honest
 

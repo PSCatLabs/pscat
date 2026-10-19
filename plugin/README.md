@@ -2,7 +2,7 @@
 
 Render, preview and debug PostScript, make generative art, and draw
 paper-ready charts from Claude Code or Codex, with the
-[pscat](https://github.com/jeromebanks/postscript_interpreter) PostScript
+[pscat](https://github.com/PSCatLabs/pscat) PostScript
 interpreter. The plugin bundles:
 
 - **Three skills**: `pscat` (the tool reference: render to PNG/SVG/PDF,
@@ -24,7 +24,7 @@ cargo install pscat
 ```
 
 or download a release archive from
-<https://github.com/jeromebanks/postscript_interpreter/releases> and put
+<https://github.com/PSCatLabs/pscat/releases> and put
 `pscat` and `pscat-mcp` on your `PATH`. Check with `pscat --help`.
 
 If they are missing, the plugin still installs and the skills still load,
@@ -39,18 +39,18 @@ and restart your agent.
 In Claude Code:
 
 ```text
-/plugin marketplace add jeromebanks/postscript_interpreter
+/plugin marketplace add PSCatLabs/pscat
 /plugin install pscat@pscat
 ```
 
 On Claude Code 2.1.275 or later, one line does both:
 
 ```text
-/plugin install pscat --marketplace jeromebanks/postscript_interpreter
+/plugin install pscat --marketplace PSCatLabs/pscat
 ```
 
 From a shell, the same thing is
-`claude plugin marketplace add jeromebanks/postscript_interpreter` and
+`claude plugin marketplace add PSCatLabs/pscat` and
 then `claude plugin install pscat@pscat`. Restart Claude Code (or run
 `/reload-plugins`) to load it.
 
@@ -58,9 +58,9 @@ Adding the marketplace clones the repository (about 250 MB on disk, fonts
 and gallery included); only the plugin itself (under 100 KB) is copied into
 the plugin cache. A sparse clone fetches just the two directories the
 plugin needs (under 1 MB):
-`claude plugin marketplace add jeromebanks/postscript_interpreter --sparse .claude-plugin plugin`.
+`claude plugin marketplace add PSCatLabs/pscat --sparse .claude-plugin plugin`.
 
-From a checkout, `claude plugin marketplace add /path/to/postscript_interpreter`
+From a checkout, `claude plugin marketplace add /path/to/pscat`
 works the same way.
 
 **Already registered pscat-mcp by hand?** If you ran
@@ -72,7 +72,7 @@ works the same way.
 From a shell (Codex CLI 0.163 or later):
 
 ```sh
-codex plugin marketplace add jeromebanks/postscript_interpreter
+codex plugin marketplace add PSCatLabs/pscat
 codex plugin add pscat@pscat
 ```
 
@@ -84,7 +84,7 @@ Codex session and the skills appear as `pscat:pscat`, `pscat:psart` and
 Adding the marketplace clones the whole repository (about 360 MB on
 disk); a sparse clone of the two directories the plugin needs is under
 2 MB:
-`codex plugin marketplace add jeromebanks/postscript_interpreter --sparse .agents --sparse plugin`.
+`codex plugin marketplace add PSCatLabs/pscat --sparse .agents --sparse plugin`.
 For a new release, `codex plugin marketplace upgrade pscat` refreshes the
 marketplace and `codex plugin add pscat@pscat` installs the new version
 (untested until the next release ships).

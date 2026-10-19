@@ -175,7 +175,7 @@ brackets):
 Stopping a runaway run is the caller's job: use your shell's `ulimit`, a
 container's memory and CPU limits, or `timeout`. Resource limits for the
 interpreter and fuzzing are planned work
-([#604](https://github.com/jeromebanks/postscript_interpreter/issues/604)),
+([#604](https://github.com/PSCatLabs/pscat/issues/604)),
 not shipped.
 
 ### The MCP server (`pscat-mcp`)

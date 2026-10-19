@@ -9,8 +9,8 @@ description: Render, preview, and debug PostScript with the pscat interpreter â€
 PostScript library (`lib/*.ps`) compiled in, so `(lib/artkit.ps) run`
 works from any directory. Check it is installed with `pscat --help`; if
 it is not, install it: a release from
-<https://github.com/jeromebanks/postscript_interpreter/releases>, or
-`cargo install --git https://github.com/jeromebanks/postscript_interpreter`
+<https://github.com/PSCatLabs/pscat/releases>, or
+`cargo install --git https://github.com/PSCatLabs/pscat`
 (installs `pscat` and `pscat-mcp`).
 
 If the **pscat MCP tools** are connected (`render_postscript`,
@@ -211,5 +211,5 @@ pass `out_path`. Register it with
 - The interpreter targets Level 2 PostScript. If a construct misbehaves,
   compare against Ghostscript, the behavioural oracle.
 - Files the docs call `examples/...`, `gallery/...` or `docs/...` are in
-  the [repository](https://github.com/jeromebanks/postscript_interpreter),
+  the [repository](https://github.com/PSCatLabs/pscat),
   not in an install.

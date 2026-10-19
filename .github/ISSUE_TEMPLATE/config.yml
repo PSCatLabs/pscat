@@ -1,5 +1,8 @@
 blank_issues_enabled: true
 contact_links:
   - name: Security problem
-    url: https://github.com/jeromebanks/postscript_interpreter/blob/main/SECURITY.md
+    url: https://github.com/PSCatLabs/pscat/blob/main/SECURITY.md
     about: Please do not file security reports as public issues. Read SECURITY.md for how to report one.
+  - name: Question or show-and-tell
+    url: https://github.com/PSCatLabs/pscat/discussions
+    about: Ask how to do something, or share what you made with pscat. Issues are for bugs and feature requests.

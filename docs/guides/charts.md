@@ -59,7 +59,7 @@ line, pie and scatter panels on one white page).
 
 ## Interactive version
 
-The site's [charts page](https://jeromebanks.github.io/postscript_interpreter/charts.html)
+The site's [charts page](https://pscatlabs.github.io/pscat/charts.html)
 scopes the playground to these two libraries: pick a preset, edit the data or
 function, and watch it render live.
 
