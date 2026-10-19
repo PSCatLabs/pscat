@@ -48,6 +48,7 @@ cargo run                                 # terminal REPL (headless canvas)
 cargo run -- -i                           # REPL + live window: watch what you type draw
 cargo run -- -i lib/handscript.ps         # ...with a library preloaded
 cargo run -- -e '3 4 add ='               # evaluate a snippet
+cargo run -- --version                    # print "pscat X.Y.Z" (also -V; pscat-mcp too)
 cargo test                                # language + pixel-level render tests
 ```
 
