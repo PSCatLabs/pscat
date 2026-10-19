@@ -7,6 +7,27 @@ Font packs have their own `fonts-YYYY.MM` releases and are not listed here.
 
 ## [0.6.0] - 2026-10-19
 
+The first release published outside this repository.
+
+### Highlights
+
+- **Install without a checkout**: `cargo install pscat` from crates.io, or a
+  prebuilt binary from the GitHub Release (macOS arm64/x86_64, Linux
+  x86_64/arm64 musl, Windows x86_64). PostScript libraries (`lib/`) are
+  embedded in the binary.
+- **Font packs**: `pscat fonts install` downloads the extras, TeX Gyre and
+  CJK/Thai packs from the `fonts-2026.10` release, checked against a SHA-256
+  pinned in the binary.
+- **Subcommands**: `pscat handwrite`, `pscat typewrite` and `pscat photo-etch`
+  are built into the binary.
+- **pscat-mcp** declares its MCP protocol versions, enforces timeouts and size
+  limits, and confines `out_path`. A Claude Code plugin bundles the skills and
+  the server.
+- **Licensing**: code is MIT OR Apache-2.0, embedded fonts are OFL-1.1, and the
+  art is CC0-1.0 (THIRD_PARTY_NOTICES.md).
+- Plus paint and dry media kits, the typewriter's released-document look,
+  mathkit additions, Level 3 `clipsave`/`cliprestore`, and new gallery pieces.
+
 ### Fixes
 
 - Fix hollow centre when a tiny curve is stroked wider than its diameter (#170)
