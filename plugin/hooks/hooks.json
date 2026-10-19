@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "command -v pscat >/dev/null 2>&1 && command -v pscat-mcp >/dev/null 2>&1 || printf '%s\\n' '{\"systemMessage\": \"pscat plugin: pscat / pscat-mcp not found on PATH, so the pscat MCP tools will not start. Install them with `cargo install pscat` (or a release binary from https://github.com/jeromebanks/postscript_interpreter/releases), then restart your agent.\"}'"
+            "command": "command -v pscat >/dev/null 2>&1 && command -v pscat-mcp >/dev/null 2>&1 || printf '%s\\n' '{\"systemMessage\": \"pscat plugin: pscat / pscat-mcp not found on PATH, so the pscat MCP tools will not start. Install them with `cargo install pscat` (or a release binary from https://github.com/PSCatLabs/pscat/releases), then restart your agent.\"}'"
           }
         ]
       }

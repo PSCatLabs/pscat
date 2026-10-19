@@ -15,8 +15,8 @@
   nothing else.</p>
 
   <h2>Setup</h2>
-<pre><code>git clone https://github.com/jeromebanks/postscript_interpreter
-cd postscript_interpreter
+<pre><code>git clone https://github.com/PSCatLabs/pscat
+cd pscat
 rustup target add wasm32-unknown-unknown
 ./scripts/build_wasm.sh          # → web/pscat.wasm (~5.5 MB; mostly the bundled base fonts)
 python3 -m http.server -d web    # open http://localhost:8000</code></pre>

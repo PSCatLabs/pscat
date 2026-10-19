@@ -8,19 +8,19 @@ generative patterns, paint and watercolor, printmaking, lettering, charts and
 more. It was built for fun, not as a Ghostscript replacement, though it aims
 for broad PostScript coverage over time.
 
-**[jeromebanks.github.io/postscript_interpreter](https://jeromebanks.github.io/postscript_interpreter/)** has the docs, the full gallery, a specimen of every font,
+**[pscatlabs.github.io/pscat](https://pscatlabs.github.io/pscat/)** has the docs, the full gallery, a specimen of every font,
 and a live playground that runs the interpreter in your browser, no install.
 
 <!-- gallery:highlights:start -->
 <p>
-  <a href="https://jeromebanks.github.io/postscript_interpreter/gallery-cathedral-rose.html"><img src="gallery/renders/cathedral_rose.png" width="32%" alt="Cathedral Rose, a lace-like rosette woven from straight red and gold chords inside a gold ring on a dark purple ground"/></a>
-  <a href="https://jeromebanks.github.io/postscript_interpreter/gallery-ring-of-type.html"><img src="gallery/renders/ring_of_type.png" width="32%" alt="Ring of Type, a sentence repeated around eleven concentric rings that shrink toward a large ampersand at the centre"/></a>
-  <a href="https://jeromebanks.github.io/postscript_interpreter/gallery-hortus.html"><img src="gallery/renders/hortus.png" width="32%" alt="Hortus Machinalis, a herbarium plate with three branching plants labelled in Latin-style captions on cream paper"/></a>
+  <a href="https://pscatlabs.github.io/pscat/gallery-cathedral-rose.html"><img src="gallery/renders/cathedral_rose.png" width="32%" alt="Cathedral Rose, a lace-like rosette woven from straight red and gold chords inside a gold ring on a dark purple ground"/></a>
+  <a href="https://pscatlabs.github.io/pscat/gallery-ring-of-type.html"><img src="gallery/renders/ring_of_type.png" width="32%" alt="Ring of Type, a sentence repeated around eleven concentric rings that shrink toward a large ampersand at the centre"/></a>
+  <a href="https://pscatlabs.github.io/pscat/gallery-hortus.html"><img src="gallery/renders/hortus.png" width="32%" alt="Hortus Machinalis, a herbarium plate with three branching plants labelled in Latin-style captions on cream paper"/></a>
 </p>
 <p>
-  <a href="https://jeromebanks.github.io/postscript_interpreter/gallery-ripple-range.html"><img src="gallery/renders/ripple_range.png" width="32%" alt="Ripple Range, a three-dimensional surface drawn as stacked ridges that shade from orange at the back to blue at the front, with a pale dip where the ripples meet"/></a>
-  <a href="https://jeromebanks.github.io/postscript_interpreter/gallery-nightfall-triptych.html"><img src="gallery/renders/nightfall_triptych.png" width="32%" alt="Nightfall, Three Cuts, a moonlit ridge over water in three print styles: engraved sky and water, woodcut mountains and linocut reeds"/></a>
-  <a href="https://jeromebanks.github.io/postscript_interpreter/gallery-alpine-lake.html"><img src="gallery/renders/alpine_lake.png" width="32%" alt="Alpine Lake, snow-capped peaks reflected in a still lake under a criss-cross brushed sky, with evergreens in the foreground"/></a>
+  <a href="https://pscatlabs.github.io/pscat/gallery-ripple-range.html"><img src="gallery/renders/ripple_range.png" width="32%" alt="Ripple Range, a three-dimensional surface drawn as stacked ridges that shade from orange at the back to blue at the front, with a pale dip where the ripples meet"/></a>
+  <a href="https://pscatlabs.github.io/pscat/gallery-nightfall-triptych.html"><img src="gallery/renders/nightfall_triptych.png" width="32%" alt="Nightfall, Three Cuts, a moonlit ridge over water in three print styles: engraved sky and water, woodcut mountains and linocut reeds"/></a>
+  <a href="https://pscatlabs.github.io/pscat/gallery-alpine-lake.html"><img src="gallery/renders/alpine_lake.png" width="32%" alt="Alpine Lake, snow-capped peaks reflected in a still lake under a criss-cross brushed sky, with evergreens in the foreground"/></a>
 </p>
 <!-- gallery:highlights:end -->
 
@@ -32,7 +32,7 @@ pscat fonts install          # optional: the full font catalog, as font packs
 ```
 
 Or download a ready-built binary for macOS, Linux or Windows from the
-[releases page](https://github.com/jeromebanks/postscript_interpreter/releases)
+[releases page](https://github.com/PSCatLabs/pscat/releases)
 (no Rust needed). [Getting started](docs/guides/getting-started.md#installing-pscat-without-the-repo)
 has the details. Then:
 
@@ -64,8 +64,8 @@ PS<4> pstack
 ```
 
 To try it with nothing installed, open the
-[playground](https://jeromebanks.github.io/postscript_interpreter/playground.html). New to PostScript? Start with
-[Learn PostScript](https://jeromebanks.github.io/postscript_interpreter/learn.html). More sample programs live in `examples/`, and finished pieces in
+[playground](https://pscatlabs.github.io/pscat/playground.html). New to PostScript? Start with
+[Learn PostScript](https://pscatlabs.github.io/pscat/learn.html). More sample programs live in `examples/`, and finished pieces in
 [`gallery/`](gallery/README.md).
 
 ## Guides
@@ -86,9 +86,9 @@ Everything else is in [`docs/guides/`](docs/guides/README.md):
 pscat works well from a coding agent. The skills in `plugin/skills/` (`pscat`,
 `psart`, `psviz`) are plain Markdown any agent can read, and `pscat-mcp` is an
 MCP server with four tools. In Claude Code, both come as one plugin:
-`/plugin install pscat --marketplace jeromebanks/postscript_interpreter`
+`/plugin install pscat --marketplace PSCatLabs/pscat`
 (after installing pscat; see [plugin/README.md](plugin/README.md)). In Codex:
-`codex plugin marketplace add jeromebanks/postscript_interpreter`, then
+`codex plugin marketplace add PSCatLabs/pscat`, then
 `codex plugin add pscat@pscat`. See the
 [agents guide](docs/guides/agents.md).
 

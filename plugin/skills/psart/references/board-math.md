@@ -1,7 +1,7 @@
 # Board math: TeX formulas (`lib/mathkit.ps`, after handscript and strokeglyphs)
 
 Paths such as `examples/...`, `gallery/...` and `docs/...` name files in the
-[pscat repository](https://github.com/jeromebanks/postscript_interpreter); an
+[pscat repository](https://github.com/PSCatLabs/pscat); an
 installed pscat does not include them. Every `(lib/...) run` works anywhere:
 the library is compiled into `pscat`.
 

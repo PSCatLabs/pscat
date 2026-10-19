@@ -15,8 +15,8 @@
   MCP server for agents that call tools.</p>
 
   <h2>Build once</h2>
-<pre><code>git clone https://github.com/jeromebanks/postscript_interpreter
-cd postscript_interpreter
+<pre><code>git clone https://github.com/PSCatLabs/pscat
+cd pscat
 cargo build --release      # → target/release/pscat and target/release/pscat-mcp</code></pre>
 
   <h2>Surface 1 — the docs path (skill)</h2>
@@ -83,8 +83,8 @@ codex mcp add pscat -- pscat-mcp</code></pre>
   <code>out_path</code> confined to the server's output root (its working
   directory, or <code>--out-root DIR</code>). It speaks MCP revisions
   2025-11-25 and 2025-06-18. Limits, protocol and the use-case table:
-  <a href="https://github.com/jeromebanks/postscript_interpreter/blob/main/docs/guides/agents.md">the agents guide</a>;
-  what the tools can still do: <a href="https://github.com/jeromebanks/postscript_interpreter/blob/main/SECURITY.md">SECURITY.md</a>.</p>
+  <a href="https://github.com/PSCatLabs/pscat/blob/main/docs/guides/agents.md">the agents guide</a>;
+  what the tools can still do: <a href="https://github.com/PSCatLabs/pscat/blob/main/SECURITY.md">SECURITY.md</a>.</p>
 
   <h2>The CLI, for direct shelling</h2>
 <pre><code>pscat --png out.png file.ps              # render (also --svg / --pdf)

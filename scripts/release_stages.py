@@ -70,7 +70,7 @@ SUMS_NAME = "SHA256SUMS"
 ARCHIVE_EXTS = (".tar.gz", ".zip")
 SEMVER_RE = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 SHA1_RE = re.compile(r"^[0-9a-f]{40}$")
-USER_AGENT = "pscat-release (https://github.com/jeromebanks/postscript_interpreter)"
+USER_AGENT = "pscat-release (https://github.com/PSCatLabs/pscat)"
 STAGES = ("draft", "crates", "npm", "publish", "plugin")
 
 EXIT_OK = 0
@@ -403,7 +403,7 @@ def changelog_notes(version, root=ROOT):
         "THIRD_PARTY_NOTICES.md and the dependency notices (THIRD_PARTY_LICENSES.html). "
         f"{SUMS_NAME} has the SHA-256 of every archive; {MANIFEST_NAME} records the commit "
         "they were built from. Install guide: "
-        "https://github.com/jeromebanks/postscript_interpreter/blob/main/docs/guides/getting-started.md"
+        "https://github.com/PSCatLabs/pscat/blob/main/docs/guides/getting-started.md"
     )
 
 

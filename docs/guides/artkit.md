@@ -91,7 +91,7 @@ newpath 60 100 moveto 500 200 550 300 300 380 curveto
   `examples/gradients.ps`.
 
 The gallery pieces named above live in `gallery/`; the
-[gallery](https://jeromebanks.github.io/postscript_interpreter/gallery.html)
+[gallery](https://pscatlabs.github.io/pscat/gallery.html)
 shows them all.
 
 ## Where to go from here

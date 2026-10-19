@@ -8,8 +8,8 @@ description = "A PostScript interpreter for watching programs draw, live"
 # (derived from Courier Prime). See THIRD_PARTY_NOTICES.md (issue #563).
 license = "(MIT OR Apache-2.0) AND OFL-1.1"
 authors = ["Jerome Banks"]
-repository = "https://github.com/jeromebanks/postscript_interpreter"
-homepage = "https://jeromebanks.github.io/postscript_interpreter/"
+repository = "https://github.com/PSCatLabs/pscat"
+homepage = "https://pscatlabs.github.io/pscat/"
 documentation = "https://docs.rs/pscat"
 readme = "README.md"
 keywords = ["postscript", "interpreter", "graphics", "rendering", "vector"]

@@ -3,7 +3,7 @@
 pscat is a PostScript interpreter that draws as it runs. This guide covers
 building it, installing a ready-made bundle, and the command-line flags you
 will use most. If PostScript itself is new to you, skim the
-[site](https://jeromebanks.github.io/postscript_interpreter/) first; every
+[site](https://pscatlabs.github.io/pscat/) first; every
 example below is a plain `.ps` text file.
 
 ## Build and run
@@ -94,7 +94,7 @@ pscat fonts install                          # the font catalog, as font packs
 ```
 
 You don't need a git checkout or a Rust toolchain just to *use* pscat. Each
-[GitHub Release](https://github.com/jeromebanks/postscript_interpreter/releases)
+[GitHub Release](https://github.com/PSCatLabs/pscat/releases)
 carries a ready-built archive per platform, made by
 `scripts/package_release.sh` in the release workflow
 (`.github/workflows/release.yml`):

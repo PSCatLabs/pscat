@@ -2,7 +2,7 @@
 
     from repo_url import match
 
-`match(url, ref)` splits a `github.com/jeromebanks/postscript_interpreter/
+`match(url, ref)` splits a `github.com/PSCatLabs/pscat/
 blob|tree/<ref>/<tail>` URL into `(scheme, ref, tail)`, or returns None. The
 tail is the raw text after the ref, so `?query` and `#fragment` are still on it:
 each checker strips them the way it always has (check_md_links.py keeps the
@@ -10,7 +10,7 @@ fragment, check_site_links.py drops it). Standard library only.
 """
 import re
 
-REPO_SLUG = "jeromebanks/postscript_interpreter"
+REPO_SLUG = "PSCatLabs/pscat"
 REPO_URL = "https://github.com/" + REPO_SLUG
 
 _PREFIX = r"(https?)://github\.com/" + re.escape(REPO_SLUG) + r"/(?:blob|tree)/"

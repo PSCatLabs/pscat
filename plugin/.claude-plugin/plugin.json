@@ -6,8 +6,8 @@
     "name": "Jerome Banks",
     "url": "https://github.com/jeromebanks"
   },
-  "homepage": "https://github.com/jeromebanks/postscript_interpreter",
-  "repository": "https://github.com/jeromebanks/postscript_interpreter",
+  "homepage": "https://github.com/PSCatLabs/pscat",
+  "repository": "https://github.com/PSCatLabs/pscat",
   "license": "MIT OR Apache-2.0",
   "keywords": [
     "postscript",

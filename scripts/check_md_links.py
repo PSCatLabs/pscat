@@ -13,7 +13,7 @@ What it checks, for every tracked `*.md` file (except the skip list below):
   heading, using GitHub's slug rule (lower-case, punctuation dropped,
   spaces to hyphens, `-1`/`-2` for repeated headings), or an explicit
   `id=`/`name=` anchor;
-* absolute links into this repo (`github.com/jeromebanks/postscript_interpreter/
+* absolute links into this repo (`github.com/PSCatLabs/pscat/
   blob|tree/main/...`) resolve against the checkout, so a moved file is caught
   before the link goes live.
 

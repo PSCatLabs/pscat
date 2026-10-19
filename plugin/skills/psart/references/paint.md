@@ -1,7 +1,7 @@
 # Paint media: `lib/paintkit.ps` (load after artkit)
 
 Paths such as `examples/...`, `gallery/...` and `docs/...` name files in the
-[pscat repository](https://github.com/jeromebanks/postscript_interpreter); an
+[pscat repository](https://github.com/PSCatLabs/pscat); an
 installed pscat does not include them. Every `(lib/...) run` works anywhere:
 the library is compiled into `pscat`.
 
@@ -233,7 +233,7 @@ Which tool to pick:
   `examples/paintkit_brushedge_demo.ps` shows before and after.
 
 **Painting a landscape?** Read the landscape cookbook first
-([`docs/guides/landscape-cookbook.md`](https://github.com/jeromebanks/postscript_interpreter/blob/main/docs/guides/landscape-cookbook.md)): one
+([`docs/guides/landscape-cookbook.md`](https://github.com/PSCatLabs/pscat/blob/main/docs/guides/landscape-cookbook.md)): one
 recipe per element (sky, clouds, mountains, mist, far forest, evergreens,
 bushes, water, reflection, foreground bank, grass), each with the tools, the
 order, the settings that matter, the usual failure with its fix and a complete

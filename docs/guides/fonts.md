@@ -308,7 +308,7 @@ cargo run -- --png sheets.png examples/font_catalog.ps   # the specimen sheets
 licenses — all OFL, Apache 2.0 or GUST, with the URW symbol faces taken under OFL;
 per-family license files ride alongside the fonts). Drop your own
 `.ttf`/`.otf` into any subdirectory and `/<FileStem> findfont`
-finds it. The [font gallery](https://jeromebanks.github.io/postscript_interpreter/fonts.html)
+finds it. The [font gallery](https://pscatlabs.github.io/pscat/fonts.html)
 on the project site shows every face — Type 3 library included, with a card
 for `/Typewriter` (one key struck twenty times) beside Courier Prime's — one
 card at a time.

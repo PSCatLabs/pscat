@@ -1,6 +1,6 @@
 ---
 sdlcify_version: 1
-repo: jeromebanks/postscript_interpreter
+repo: PSCatLabs/pscat
 default_branch: main
 generated: 2026-10-16
 quality_gate: "PSCAT_PROFILE=ci ./scripts/selftest.sh && cargo test --profile ci && cargo clippy --all-targets -- -D warnings && cargo fmt --all -- --check"

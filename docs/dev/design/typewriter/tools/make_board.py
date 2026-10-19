@@ -23,7 +23,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 TW = os.path.dirname(HERE)
 ROOT = os.path.abspath(os.path.join(TW, "..", "..", "..", ".."))
 REFS = os.path.join(TW, "refs")
-UA = {"User-Agent": "pscat-reference-board/1.0 (github.com/jeromebanks/postscript_interpreter)"}
+UA = {"User-Agent": "pscat-reference-board/1.0 (github.com/PSCatLabs/pscat)"}
 
 C = "https://upload.wikimedia.org/wikipedia/commons/"
 SOURCES = {

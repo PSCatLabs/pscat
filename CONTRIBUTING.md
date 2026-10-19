@@ -42,7 +42,7 @@ Please do not submit:
 
 The licence files at the repository root and the notices file for third-party
 material are the authority on exact terms. The licensing work
-([#563](https://github.com/jeromebanks/postscript_interpreter/issues/563)) is
+([#563](https://github.com/PSCatLabs/pscat/issues/563)) is
 what puts them there.
 
 ## Getting started

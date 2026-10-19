@@ -2,7 +2,7 @@
 
 What pscat promises to keep working between releases, what it does not, and how
 a change that breaks something is announced. The release process
-([#602](https://github.com/jeromebanks/postscript_interpreter/issues/602))
+([#602](https://github.com/PSCatLabs/pscat/issues/602))
 refers to the headings below by name, so they are stable too.
 
 ## Starting point
@@ -69,7 +69,7 @@ Tags are `v<version>`. Font packs ship separately on a calendar-versioned train
 
 - **The npm / WebAssembly API** (`web/pscat.js`): stable from the release that
   first publishes it as a package
-  ([#566](https://github.com/jeromebanks/postscript_interpreter/issues/566)).
+  ([#566](https://github.com/PSCatLabs/pscat/issues/566)).
   The copy in the repo is Experimental until then.
 
 ### Experimental
@@ -77,7 +77,7 @@ Tags are `v<version>`. Font packs ship separately on a calendar-versioned train
 - **The Rust crate API** (`pscat` as a library: `Interp`, `Gfx` and the rest).
   No public Rust item is stable until the crate is published with a defined
   public API
-  ([#565](https://github.com/jeromebanks/postscript_interpreter/issues/565)).
+  ([#565](https://github.com/PSCatLabs/pscat/issues/565)).
 - **Rendered pixels.** The look of an art library's output (a brush, a paper, a
   font's rasterisation) can change in any release when it is improved. What is
   kept: the same program and seed give the same page *within one build*.
@@ -90,7 +90,7 @@ Tags are `v<version>`. Font packs ship separately on a calendar-versioned train
 
 - Repository scripts (`scripts/`), CI workflows, and the contributor tooling in
   `.claude/`. Some scripts become subcommands in 0.6.0
-  ([#600](https://github.com/jeromebanks/postscript_interpreter/issues/600));
+  ([#600](https://github.com/PSCatLabs/pscat/issues/600));
   the subcommands are then Stable and the scripts are gone.
 - The PostScript library's undocumented helpers, the on-disk layout of `lib/`
   and `fonts/`, and the Rust modules.
@@ -121,4 +121,4 @@ surface.
 ## Reporting a break
 
 If a patch release broke something marked Stable, that is a bug: please
-[open an issue](https://github.com/jeromebanks/postscript_interpreter/issues/new/choose).
+[open an issue](https://github.com/PSCatLabs/pscat/issues/new/choose).

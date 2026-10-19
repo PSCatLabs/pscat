@@ -56,9 +56,9 @@ History is in [`docs/archive/`](../archive/README.md): the original spec
 ## Previewing the website
 
 The project site is at
-**[jeromebanks.github.io/postscript_interpreter](https://jeromebanks.github.io/postscript_interpreter/)**:
+**[pscatlabs.github.io/pscat](https://pscatlabs.github.io/pscat/)**:
 architecture and extending guides, the full art/font/example gallery, a
-dedicated [font gallery](https://jeromebanks.github.io/postscript_interpreter/fonts.html)
+dedicated [font gallery](https://pscatlabs.github.io/pscat/fonts.html)
 (every Type 3 face and every catalog family, one card each), and a live
 playground running the wasm interpreter, all in the browser, no install.
 

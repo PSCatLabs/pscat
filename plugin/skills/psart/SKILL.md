@@ -137,8 +137,8 @@ showpage
 ```
 
 Worked examples live in the repository's
-[gallery](https://github.com/jeromebanks/postscript_interpreter/tree/main/gallery)
+[gallery](https://github.com/PSCatLabs/pscat/tree/main/gallery)
 (`hortus.ps`: L-systems, alongpath blossoms and letterpress) and
-[examples](https://github.com/jeromebanks/postscript_interpreter/tree/main/examples).
+[examples](https://github.com/PSCatLabs/pscat/tree/main/examples).
 Adding a piece to the gallery is a contributor task: see `gallery/README.md`
 in a checkout.

@@ -63,7 +63,7 @@ class Links(unittest.TestCase):
         self.assertEqual(run({"a.md": "# T\n[x](#t) [y](#u)\n"}), ["a.md:2: no heading '#u' in a.md (link: #u)"])
 
     def test_github_urls_resolve_against_checkout(self):
-        base = "https://github.com/jeromebanks/postscript_interpreter"
+        base = "https://github.com/PSCatLabs/pscat"
         files = {
             "a.md": f"[ok]({base}/blob/main/b.md#L10) [bad]({base}/blob/main/gone.md) [ext](https://example.com/x)",
             "b.md": "",
@@ -88,7 +88,7 @@ class SharedRepoRule(unittest.TestCase):
     with any ref. Keep these rows unchanged: a difference is a behaviour change.
     """
 
-    R = "https://github.com/jeromebanks/postscript_interpreter"
+    R = "https://github.com/PSCatLabs/pscat"
 
     # url tail (after the repo URL), md resolve(), site repo_path_for()
     ROWS = [
@@ -130,7 +130,7 @@ class SharedRepoRule(unittest.TestCase):
         http = self.R.replace("https", "http") + "/blob/main/docs/a.md"
         self.assertEqual(c.resolve("x.md", http), ("docs/a.md", ""))  # md takes http
         self.assertIsNone(check_site_links.repo_path_for(http))  # site takes https only
-        other = "https://github.com/jeromebanks/postscript_interpreter-issue-429/blob/main/x.md"
+        other = "https://github.com/PSCatLabs/pscat-issue-429/blob/main/x.md"
         self.assertEqual(c.resolve("x.md", other), (None, ""))  # a different repo: external
 
     def test_match_returns_scheme_ref_and_tail(self):
