@@ -70,6 +70,13 @@ The issue text says "root `plugin.json`". That matches the docs, with
 - The Codex hook could not be run end to end here: hooks need a trust
   review in `/hooks`, which a non-interactive session cannot give.
 
+- From GitHub (branch ref, throwaway `CODEX_HOME`, no login):
+  `codex plugin marketplace add jeromebanks/postscript_interpreter --ref
+  <branch>` cloned 361 MB and installed the same 88 KB plugin; with
+  `--sparse .agents --sparse plugin` the clone was 1.6 MB. Claude Code's
+  sparse form is now `--sparse .claude-plugin plugin` (no `skills`): 768 KB,
+  3 skills, 1 hook, 1 MCP server.
+
 ## Checks
 
 - `scripts/plugin_check.py` now checks the Codex marketplace and plugin too,

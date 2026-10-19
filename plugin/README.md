@@ -82,7 +82,9 @@ The first command reads the Codex marketplace in
 Codex session and the skills appear as `pscat:pscat`, `pscat:psart` and
 `pscat:psviz`, with the `pscat` MCP server's four tools. In the ChatGPT
 desktop app, the marketplace shows up in the plugin browser once added.
-A sparse clone works here too:
+Adding the marketplace clones the whole repository (about 360 MB on
+disk); a sparse clone of the two directories the plugin needs is under
+2 MB:
 `codex plugin marketplace add jeromebanks/postscript_interpreter --sparse .agents --sparse plugin`.
 `codex plugin marketplace upgrade pscat` picks up a new release.
 
