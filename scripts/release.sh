@@ -96,7 +96,9 @@ if [[ "$PUSH" == 0 ]]; then
 fi
 
 git push -u origin "$BRANCH"
-BODY=$(cat <<EOF
+# read, not $(cat <<EOF): macOS /bin/bash 3.2 misparses an apostrophe in a
+# heredoc inside $(...).
+read -r -d '' BODY <<EOF || true
 Release pscat $VERSION. Opened by \`scripts/release.sh $VERSION\`. The release
 procedure is [docs/dev/RELEASING.md](docs/dev/RELEASING.md).
 
@@ -115,5 +117,4 @@ tag \`$TAG\`, and that starts \`release.yml\`.
 - [ ] CHANGELOG.md reads well
 - [ ] After merging: tag, approve the \`release\` environment, then run the outsider install smoke test (RELEASING.md)
 EOF
-)
 gh pr create --base main --head "$BRANCH" --title "release: $VERSION" --body "$BODY"
