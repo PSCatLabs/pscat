@@ -84,6 +84,14 @@ More on the less obvious ones:
 
 ## Installing pscat without the repo
 
+With a Rust toolchain, install from [crates.io](https://crates.io/crates/pscat):
+
+```sh
+cargo install pscat                          # pscat and pscat-mcp, with the live window
+cargo install pscat --no-default-features    # headless: PNG/SVG/PDF only, no window
+pscat fonts install                          # the font catalog, as font packs
+```
+
 You don't need a git checkout or a Rust toolchain just to *use* pscat. Each
 [GitHub Release](https://github.com/jeromebanks/postscript_interpreter/releases)
 carries a ready-built archive per platform, made by

@@ -24,11 +24,25 @@ and a live playground that runs the interpreter in your browser, no install.
 </p>
 <!-- gallery:highlights:end -->
 
-## Quick start
+## Install
 
-You need a stable [Rust toolchain](https://rustup.rs). Or skip the build and
-download a bundle from the
-[releases page](https://github.com/jeromebanks/postscript_interpreter/releases).
+```sh
+cargo install pscat          # pscat and pscat-mcp, from crates.io
+pscat fonts install          # optional: the full font catalog, as font packs
+```
+
+Or download a ready-built binary for macOS, Linux or Windows from the
+[releases page](https://github.com/jeromebanks/postscript_interpreter/releases)
+(no Rust needed). [Getting started](docs/guides/getting-started.md#installing-pscat-without-the-repo)
+has the details. Then:
+
+```sh
+pscat --png out.png some_file.ps
+```
+
+## Quick start from a checkout
+
+You need a stable [Rust toolchain](https://rustup.rs).
 
 ```sh
 cargo run -- --page 500x500 examples/sierpinski.ps   # watch it draw, live
