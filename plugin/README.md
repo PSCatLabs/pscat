@@ -80,13 +80,14 @@ The first command reads the Codex marketplace in
 `.agents/plugins/marketplace.json`; the second copies `plugin/` (under
 100 KB) into `~/.codex/plugins/cache/pscat/pscat/<version>/`. Start a new
 Codex session and the skills appear as `pscat:pscat`, `pscat:psart` and
-`pscat:psviz`, with the `pscat` MCP server's four tools. In the ChatGPT
-desktop app, the marketplace shows up in the plugin browser once added.
+`pscat:psviz`, with the `pscat` MCP server's four tools.
 Adding the marketplace clones the whole repository (about 360 MB on
 disk); a sparse clone of the two directories the plugin needs is under
 2 MB:
 `codex plugin marketplace add jeromebanks/postscript_interpreter --sparse .agents --sparse plugin`.
-`codex plugin marketplace upgrade pscat` picks up a new release.
+For a new release, `codex plugin marketplace upgrade pscat` refreshes the
+marketplace and `codex plugin add pscat@pscat` installs the new version
+(untested until the next release ships).
 
 Depending on your approval settings, Codex asks before it calls an MCP
 tool (a non-interactive `codex exec` with approvals off refuses the call).
@@ -99,9 +100,10 @@ missing `pscat-mcp` shows up only as the server's tools being absent.
 
 ## Platforms
 
-macOS and Linux are tested. The plugin directory has no symbolic links,
-so it installs the same on Windows; the missing-pscat hook is a POSIX
-`sh` command, though, so on Windows it needs a POSIX shell to run (#633).
+macOS and Linux are tested; Windows is not. The plugin directory has no
+symbolic links, so a Windows checkout no longer loses the skills, but the
+missing-pscat hook is a POSIX `sh` command and needs a POSIX shell to run
+(#633).
 
 ## Try it
 
@@ -135,9 +137,8 @@ The plugin's version is pscat's version: `plugin/.claude-plugin/plugin.json`
 (Claude Code) and `plugin/plugin.json` (Codex) carry the crate version, and
 the release pipeline bumps them together (`scripts/plugin_check.py` fails
 CI if any differ). Use the plugin with a pscat of the same version;
-`pscat-mcp --version` prints yours. `/plugin update pscat@pscat` (Claude
-Code) or `codex plugin marketplace upgrade pscat` (Codex) picks up a new
-release.
+`pscat-mcp --version` prints yours. `/plugin update pscat@pscat` picks up
+a new release in Claude Code; for Codex, see above.
 
 ## Layout
 

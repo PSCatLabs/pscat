@@ -68,7 +68,7 @@ The issue text says "root `plugin.json`". That matches the docs, with
   (`plugin details`: Hooks (1)) and ignores `plugin.json`/`mcp.json`
   (MCP servers (1)); `scripts/plugin_install_check.sh` still passes.
 - The Codex hook could not be run end to end here: hooks need a trust
-  review in `/hooks`, which a non-interactive session cannot give.
+  review in `/hooks`, which a non-interactive session cannot give (#654).
 
 - From GitHub (branch ref, throwaway `CODEX_HOME`, no login):
   `codex plugin marketplace add jeromebanks/postscript_interpreter --ref
