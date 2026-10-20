@@ -14,7 +14,8 @@
 #              plan against the real registries
 #   draft      a draft GitHub Release with the archives          (real only)
 #   publish    environment `release` (owner approval): crates.io, npm when
-#              npm/package.json exists, publish the GitHub Release, check
+#              npm/package.json exists (the tarball `verify` packed), publish
+#              the GitHub Release, check
 #              the plugin manifests                               (real only)
 #
 # Every stage checks its registry first: skip on an identical artifact,
@@ -144,6 +145,7 @@ jobs:
         with:
           toolchain: ${{ env.RELEASE_TOOLCHAIN }}
           components: clippy, rustfmt
+          targets: wasm32-unknown-unknown
       - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2
         with:
           tool: cargo-about,cargo-semver-checks
@@ -204,6 +206,12 @@ jobs:
           # crates stage checks).
           cargo package --locked --no-verify
           cp "target/package/pscat-$VERSION.crate" release-inputs/
+      # The npm tarball, packed once here; the npm stage publishes exactly
+      # this file from release-inputs/ (#566). After the crate: it writes
+      # untracked build output.
+      - name: Package the npm module
+        if: hashFiles('npm/package.json') != ''
+        run: ./scripts/build_npm.sh --notices release-inputs/THIRD_PARTY_LICENSES.html --pack release-inputs
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-inputs

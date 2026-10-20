@@ -3,6 +3,7 @@ tests/corpus/
 web/pscat.wasm
 _site/
 /dist/
+/dist-npm/
 /test-output.log
 /test-summary.md
 

@@ -31,7 +31,9 @@ Stages, in release order:
   SHA256SUMS and release-manifest.json (the manifest goes last, so a draft
   without one is known to be incomplete).
 - `crates`: `cargo publish` to crates.io.
-- `npm`: `npm publish` of npm/; enabled only when npm/package.json exists.
+- `npm`: `npm publish` of the tarball scripts/build_npm.sh packed beside the
+  .crate (release-inputs/<name>-<version>.tgz); enabled only when
+  npm/package.json exists.
 - `publish`: makes the draft GitHub Release public, after re-checking it.
 - `plugin`: checks every plugin manifest (Claude Code and Codex) carries
   the release version; enabled only when a plugin manifest exists.
@@ -47,6 +49,7 @@ retry), 3 halted (a mismatch: do not retry until a human looks).
 """
 
 import argparse
+import base64
 import glob
 import hashlib
 import io
@@ -531,6 +534,30 @@ class RealCrates:
         return os.path.join(repo_root, "target", "package", os.path.basename(crate_path))
 
 
+def npm_tarball_name(name, version):
+    """`npm pack`'s file name: a scope's @ dropped and its / made a -."""
+    return f"{name.lstrip('@').replace('/', '-')}-{version}.tgz"
+
+
+def npm_integrity(path):
+    """npm's dist.integrity of a tarball: SHA-512 of its bytes, base64."""
+    h = hashlib.sha512()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return "sha512-" + base64.b64encode(h.digest()).decode()
+
+
+def npm_tarball_manifest(path):
+    """package/package.json from inside an npm tarball."""
+    try:
+        with tarfile.open(path, "r:gz") as tar:
+            f = tar.extractfile("package/package.json")
+            return json.loads(f.read()) if f else None
+    except (tarfile.TarError, KeyError, OSError, EOFError, ValueError):
+        return None
+
+
 class RealNpm:
     def view(self, name, version):
         p = run(["npm", "view", f"{name}@{version}", "dist.integrity", "--json"], check=False)
@@ -544,12 +571,17 @@ class RealNpm:
             return None
         raise StageError(f"npm view {name}@{version} failed: {text.strip()}")
 
-    def pack_integrity(self, pkg_dir):
-        out = run(["npm", "pack", "--dry-run", "--json"], cwd=pkg_dir).stdout
-        return json.loads(out)[0]["integrity"]
-
-    def publish(self, pkg_dir):
-        run(["npm", "publish", "--provenance", "--access", "public"], cwd=pkg_dir)
+    def publish(self, tarball):
+        # The exact tarball `verify` packed, so what is published is what
+        # was checked. Trusted publishing (OIDC) supplies the credential.
+        run(["npm", "publish", tarball, "--provenance", "--access", "public"])
+        # The registry can take a moment to list a new version; give it a
+        # minute before the stage's own check calls it missing.
+        pkg = npm_tarball_manifest(tarball) or {}
+        for attempt in range(6):
+            if self.view(pkg.get("name"), pkg.get("version")) is not None:
+                return
+            time.sleep(10)
 
 
 class Fake:
@@ -698,8 +730,7 @@ class FakeCrates:
 
 
 class FakeNpm:
-    """Integrity of the local package is the SHA-256 of package.json, which
-    is all a test needs to tell two packages apart."""
+    """The registry keeps each version's integrity, as npm's does."""
 
     def __init__(self, fake):
         self.fake = fake
@@ -707,13 +738,9 @@ class FakeNpm:
     def view(self, name, version):
         return self.fake.npm_view(name, version)
 
-    def pack_integrity(self, pkg_dir):
-        return "sha256-" + sha256_file(os.path.join(pkg_dir, "package.json"))
-
-    def publish(self, pkg_dir):
-        with open(os.path.join(pkg_dir, "package.json"), encoding="utf-8") as f:
-            pkg = json.load(f)
-        self.fake.npm_publish(pkg["name"], pkg["version"], self.pack_integrity(pkg_dir))
+    def publish(self, tarball):
+        pkg = npm_tarball_manifest(tarball)
+        self.fake.npm_publish(pkg["name"], pkg["version"], npm_integrity(tarball))
 
 
 # --------------------------------------------------------------------------
@@ -879,18 +906,35 @@ def stage_npm(ctx):
         meta = json.load(f)
     if meta.get("version") != ctx.m["version"]:
         raise Halt(f"npm/package.json is version {meta.get('version')}, this release is {ctx.m['version']}")
-    pkg_dir = os.path.dirname(pkg)
-    local = ctx.npm.pack_integrity(pkg_dir)
+    # The tarball verify packed (scripts/build_npm.sh --pack release-inputs),
+    # beside the .crate. Never packed here: a rebuilt wasm need not be
+    # byte-identical, and what is published must be what verify checked.
+    tarball = os.path.join(os.path.dirname(os.path.abspath(ctx.crate_path)),
+                           npm_tarball_name(meta["name"], ctx.m["version"]))
+    if not os.path.exists(tarball):
+        raise Halt(f"no npm tarball {os.path.basename(tarball)} beside the .crate; "
+                   "the verify job packs it (scripts/build_npm.sh --pack release-inputs)")
+    inner = npm_tarball_manifest(tarball)
+    if not inner or (inner.get("name"), inner.get("version")) != (meta["name"], ctx.m["version"]):
+        got = f"{inner.get('name')}@{inner.get('version')}" if inner else "no readable package.json"
+        raise Halt(f"{os.path.basename(tarball)} holds {got}, not {meta['name']}@{ctx.m['version']}")
+    local = npm_integrity(tarball)
     remote = ctx.npm.view(meta["name"], ctx.m["version"])
     if remote is not None:
         if remote["integrity"] != local:
             raise Halt(f"{meta['name']}@{ctx.m['version']} on npm has integrity {remote['integrity']}, "
-                       f"this release packs {local}")
+                       f"this release's tarball is {local}")
         return "skipped", f"{meta['name']}@{ctx.m['version']} already on npm (same integrity)"
     if ctx.plan:
         return "would publish", f"{meta['name']}@{ctx.m['version']} to npm"
-    ctx.npm.publish(pkg_dir)
-    return "published", f"{meta['name']}@{ctx.m['version']} to npm"
+    ctx.npm.publish(tarball)
+    remote = ctx.npm.view(meta["name"], ctx.m["version"])
+    if remote is None:
+        raise StageError(f"published {meta['name']}@{ctx.m['version']}, but npm does not list it yet; "
+                         "re-run to verify")
+    if remote["integrity"] != local:
+        raise Halt(f"npm's integrity for {meta['name']}@{ctx.m['version']} is not the tarball's")
+    return "published", f"{meta['name']}@{ctx.m['version']} to npm ({local[:19]}...)"
 
 
 def stage_publish(ctx):

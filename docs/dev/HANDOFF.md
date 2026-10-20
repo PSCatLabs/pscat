@@ -1523,6 +1523,19 @@ renders eight examples in both and compares block-downsampled output).
   `pscat.js` exposes the buffer as `ps.output`, which the playground
   shows. A new printing operator must use it too, or its output vanishes
   in the browser.
+- **The npm package (`npm/`, #566) is that wasm build plus a JS API.**
+  `scripts/build_npm.sh` runs `build_wasm.sh` and copies `web/pscat.js` in
+  as `core.js`, so a change to the C ABI (`src/wasm.rs`) or to
+  `web/pscat.js` ships in the package too: keep `npm/renderer.js` and
+  `npm/index.d.ts` in step, and run the `npm` workflow's steps
+  (`build_npm.sh --pack`, `npm test` in `npm/`, `cargo test --test wasm`,
+  `test_npm_tarball.sh`). Fonts beyond the Liberation core reach wasm only
+  through `ps_add_font` (`font::register_font_bytes`), keyed by font pack
+  file stem like the disk catalog. `npm/package.json` moves in lockstep with
+  `Cargo.toml` (`release_stages.py bump-manifests`; a test fails if they
+  differ), and the release publishes the tarball `verify` packed
+  (docs/dev/RELEASING.md). Something new embedded in the wasm shows up as
+  a size-budget failure in `build_npm.sh`.
 - **The Learn page's examples are files** (#252): `site/learn/NN-name.ps`,
   plus `NN-name.out` with exactly what it prints. `site/learn.html` names
   them with `<!--@example NAME "alt text"-->` markers that

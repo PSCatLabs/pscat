@@ -8,7 +8,7 @@ machine-readable form, one entry per path pattern, is
 path applies to it, and every tracked file matches one.
 
 The licence expression in `Cargo.toml`, `(MIT OR Apache-2.0) AND OFL-1.1`,
-describes the **core package** (the crate, and later the npm package and the
+describes the **core package** (the crate, the `pscat` npm package and the
 binaries). The OFL-1.1 term covers only the font data compiled into it. Font
 packs and assembled binary bundles carry per-file and per-dependency notices of
 their own: each font pack's `manifest.json` (#599), and in every release

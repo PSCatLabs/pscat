@@ -4,8 +4,8 @@ pscat has two release trains:
 
 - **Interpreter releases**, `vX.Y.Z` tags (this document). Each one publishes
   the `pscat` crate to crates.io and a GitHub Release with binaries for five
-  platforms. Later it will also publish npm (#566) and the Claude Code plugin
-  (#569).
+  platforms, the `pscat` npm package (#566; first published with 0.6.2), and
+  checks the Claude Code plugin manifests (#569).
 - **Font packs**, `fonts-YYYY.MM` tags. These are
   [`RELEASING-FONTS.md`](RELEASING-FONTS.md). An interpreter release pins one
   font-pack index, so the first font release comes before the first
@@ -35,11 +35,11 @@ run first:
 
 | Job | What it does | Credentials |
 |---|---|---|
-| `verify` | Checks that the tag matches `Cargo.toml` and is on `main`. Checks that `PINNED_INDEX` is set and that its `font-index.json` hashes to the pinned SHA-256. Runs the quality gate, the MCP Inspector check, the licence checks, `scripts/check_package.sh` (crate acceptance), the release-script tests, and `cargo semver-checks` against crates.io once pscat is published. Generates the `cargo-about` notices and packages the `.crate` from the clean commit. | read |
+| `verify` | Checks that the tag matches `Cargo.toml` and is on `main`. Checks that `PINNED_INDEX` is set and that its `font-index.json` hashes to the pinned SHA-256. Runs the quality gate, the MCP Inspector check, the licence checks, `scripts/check_package.sh` (crate acceptance), the release-script tests, and `cargo semver-checks` against crates.io once pscat is published. Generates the `cargo-about` notices and packages the `.crate` from the clean commit, then builds and packs the npm package (`scripts/build_npm.sh --pack release-inputs`). | read |
 | `binaries` | Builds and checks one archive per platform (below) with `scripts/package_release.sh`. | read |
 | `assemble` | Writes `SHA256SUMS` and `release-manifest.json` (version, tag, commit, every digest). Runs the rehearsal (below) on these exact artifacts. Runs a read-only plan against the real registries, which stops a real release on a mismatch before anything is created. | read |
 | `draft` | Creates a **draft** GitHub Release with the archives, `SHA256SUMS` and `release-manifest.json`, uploading the manifest last. | `contents: write` |
-| `publish` | Runs in the **`release` environment**, so it waits for the owner's approval. It publishes the crate to crates.io (trusted publishing), then npm once `npm/package.json` exists, then makes the GitHub Release public, then checks the plugin manifests once a `.claude-plugin/` manifest exists. | `contents: write`, `id-token: write` |
+| `publish` | Runs in the **`release` environment**, so it waits for the owner's approval. It publishes the crate to crates.io (trusted publishing), then npm once `npm/package.json` exists (the exact tarball `verify` packed), then makes the GitHub Release public, then checks the plugin manifests once a `.claude-plugin/` manifest exists. | `contents: write`, `id-token: write` |
 
 The draft exists before the approval prompt, so you can review it (assets,
 notes, checksums) before you approve.
@@ -81,8 +81,10 @@ It first asks the registry what is already there:
   Failing that, the published `.crate` has the same file contents and its
   `.cargo_vcs_info.json` names the release commit. A crate with no VCS info
   cannot be verified, so it halts.
-- **npm.** The registry's `dist.integrity` equals the local `npm pack`
-  integrity.
+- **npm.** The registry's `dist.integrity` equals the SHA-512 of the
+  tarball `verify` packed (`release-inputs/pscat-X.Y.Z.tgz`, beside the
+  `.crate`). The stage publishes that file, never a fresh `npm pack`, and
+  halts if it is missing or holds another name or version.
 
 Nothing ever overwrites, deletes or re-uploads a published version. To
 resume a failed release, use **Re-run failed jobs** on the same workflow run.
@@ -273,9 +275,36 @@ is a command for the owner, or a settings page where no API exists.
    `RELEASE_TOOLCHAIN` so the `.crate` bytes match `verify`'s exactly. Another
    cargo version still matches, through the contents-and-commit check.)
 
-   The npm package name gets reserved the same way when #566 adds
-   `npm/package.json`: `npm publish` by hand once, then add the trusted
-   publisher on npmjs.com (repository, `release.yml`, environment `release`).
+7. **npm bootstrap: the same exception, once.** npm, like crates.io, attaches
+   a trusted publisher only to a package that exists, and the name `pscat` is
+   not registered yet (it was free on 2026-10-20). Do this during the first
+   release whose commit has `npm/package.json` (0.6.2), at the same point:
+   after `draft` finishes, before you approve `publish`. Publish **the
+   tarball that run's `verify` packed**, not one packed from a checkout, so
+   the `npm` stage finds the same integrity and skips:
+
+   ```sh
+   gh run download <run-id> --repo PSCatLabs/pscat --name release-inputs --dir ri
+   tar -xzOf ri/pscat-0.6.2.tgz package/package.json | grep '"version"'   # 0.6.2
+   npm login                                  # an npm account with 2FA on
+   npm publish ri/pscat-0.6.2.tgz --access public
+   ```
+
+   (npm 11.5.1 or later; `--provenance` needs CI, so this one version has
+   none.) Then on npmjs.com → `pscat` → Settings → Trusted Publisher → GitHub
+   Actions: organization or user `PSCatLabs`, repository `pscat`, workflow
+   `release.yml`, environment `release`. Under "Publishing access", choose
+   "Require two-factor authentication and disallow tokens", so the trusted
+   publisher is the only way in. Now approve the run: the `npm` stage
+   reports `pscat@0.6.2 already on npm (same integrity)`, and every later
+   release publishes through OIDC with provenance. If the bootstrap is
+   skipped, the `npm` stage fails on its first publish (no credential) after
+   crates.io has published; bootstrap then, and **Re-run failed jobs**.
+
+   To only reserve the name ahead of time, publish a placeholder version
+   (`0.0.0`, then `npm deprecate pscat@0.0.0 "placeholder"`) the same way;
+   the trusted publisher can be added right away, and the first real release
+   then publishes through it.
 
 ## Cutting a release
 
@@ -404,18 +433,19 @@ manifest disagrees. If #569's marketplace pins a release ref (a `ref:` or
 `version` that must point at the published tag), that update belongs in a
 step after `publish` that opens a PR. #569 decides.
 
-**What the npm stage expects from #566.** The stage runs `npm pack`
-in `npm/` and compares its integrity with the registry's. A rerun repacks,
-so the comparison holds only if packing is reproducible. npm fixes file
-mtimes, but a wasm build step is reproducible only if #566 makes it so. #566
-should:
-
-- build the package contents once, in `assemble`;
-- `npm pack` there and add the `.tgz` to `release-dist`;
-- have the npm stage publish that exact tarball and compare against its
-  integrity.
-
-That is one small change to this stage, and no other stage changes.
+**How the npm package is built and published (#566).** `verify` runs
+`scripts/build_npm.sh --pack release-inputs` after packaging the crate: the
+same wasm build as the site (`scripts/build_wasm.sh`), `web/pscat.js` as the
+package's `core.js`, the licence files and the same `cargo-about` notices as
+the binaries. The script checks that `npm/package.json` carries
+`Cargo.toml`'s version, that the tarball holds exactly the expected files,
+and that it fits the size budget (4 MiB packed, 9 MiB unpacked). The
+tarball travels in the `release-inputs` artifact, so `assemble`'s plan and
+rehearsal and `publish`'s `npm` stage all see the same file, and a rerun
+publishes the same bytes instead of a rebuild that might differ. The
+`npm` workflow (`.github/workflows/npm.yml`) builds and packs it on every
+pull request that touches it, runs the API tests, compares wasm pages with
+native ones (`tests/wasm.rs`) and installs the tarball into a fresh project.
 
 A new channel is a new stage in `scripts/release_stages.py` (the same
 absent/same/different rule, with a fake backend and tests) and a step in
@@ -446,7 +476,9 @@ Nothing published is deleted or replaced.
 - **GitHub Release:** edit the release notes to start with "**Deprecated:**
   use X.Y.Z+1 (reason)". Do not delete the release or its assets, because
   `SHA256SUMS` and downstream pins refer to them.
-- **npm (once enabled):** `npm deprecate pscat-wasm@X.Y.Z "use X.Y.Z+1: reason"`.
+- **npm:** `npm deprecate pscat@X.Y.Z "use X.Y.Z+1: reason"`. npm allows
+  an unpublish only within 72 hours and never reuses the version; deprecate
+  instead.
 - **Font packs:** never deleted. A pscat release may pin them. Fix forward
   with a new `fonts-*` tag.
 

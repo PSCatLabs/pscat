@@ -29,6 +29,7 @@ and a live playground that runs the interpreter in your browser, no install.
 ```sh
 cargo install pscat          # pscat and pscat-mcp, from crates.io
 pscat fonts install          # optional: the full font catalog, as font packs
+npm install pscat            # from 0.6.2: the wasm renderer for browsers and Node
 ```
 
 Or download a ready-built binary for macOS, Linux or Windows from the
