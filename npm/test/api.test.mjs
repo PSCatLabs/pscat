@@ -7,6 +7,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import { createRenderer, PostScriptError, Renderer } from '../node.js';
 
@@ -145,6 +146,9 @@ test('createRenderer: each renderer is its own instance; wasm can be given', asy
   const a = await createRenderer({ wasm });
   const b = await createRenderer({ wasm: await readFile(wasm) });
   const c = await createRenderer({ wasm: await WebAssembly.compile(await readFile(wasm)) });
+  for (const form of [wasm.href, fileURLToPath(wasm)]) {
+    assert.equal((await createRenderer({ wasm: form })).render('', { width: 3, height: 2 }).width, 3);
+  }
   a.addFont('EBGaramond-Regular', await font('EBGaramond/EBGaramond-Regular.ttf'));
   const q = '/Garamond findfont /FontName get ==';
   assert.equal(a.render(q, { width: 10, height: 10 }).output, '/EBGaramond-Regular\n');

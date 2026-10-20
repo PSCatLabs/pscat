@@ -8,6 +8,7 @@ import { instantiate, once, toModule } from './renderer.js';
 export { PostScriptError, Renderer } from './renderer.js';
 
 async function load(src) {
+  if (typeof src === 'string' && /^file:/i.test(src)) src = new URL(src);
   if (src instanceof URL && src.protocol === 'file:') return toModule(await readFile(src));
   // A path, including a Windows drive path (a URL scheme here has two or more letters).
   if (typeof src === 'string' && !/^[a-z][a-z0-9+.-]+:/i.test(src)) return toModule(await readFile(src));
