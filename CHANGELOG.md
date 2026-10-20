@@ -5,6 +5,18 @@ request. Versions follow semantic versioning; before 1.0 a minor release
 may change the library API, a patch release does not (docs/STABILITY.md).
 Font packs have their own `fonts-YYYY.MM` releases and are not listed here.
 
+## [0.6.1] - 2026-10-20
+
+### Features and changes
+
+- Move to PSCatLabs/pscat: repository, homepage, Pages and marketplace URLs (#656)
+- plugin: Codex local plugin from the same plugin/ directory (#569 part b) (#655)
+- cli: pscat --version / -V (#637) (#653)
+
+### Documentation
+
+- docs: install from crates.io and the release binaries (0.6.0) (#651)
+
 ## [0.6.0] - 2026-10-19
 
 The first release published outside this repository.
