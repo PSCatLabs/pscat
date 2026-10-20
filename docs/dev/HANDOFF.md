@@ -32,8 +32,10 @@ release PR, a pushed `vX.Y.Z` tag builds five platform archives and the
 crate, drafts the GitHub Release and publishes from the approval-gated
 `release` environment; every publishing stage in
 `scripts/release_stages.py` skips an identical artifact and halts on a
-different one, so a failed release resumes by re-running; procedure and
-owner setup in `docs/dev/RELEASING.md`) (since #599
+different one, so a failed release resumes by re-running; since #635 the
+`publish` job signs build-provenance attestations, and since #638
+`release-check.yml` installs every published release from the public
+channels; procedure and owner setup in `docs/dev/RELEASING.md`) (since #599
 the font catalog reaches installs as downloadable font packs on their
 own `fonts-YYYY.MM` release train: `src/fontpacks/`, `pscat fonts
 install`, `.github/workflows/release-fonts.yml`,

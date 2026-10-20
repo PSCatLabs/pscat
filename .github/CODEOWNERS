@@ -16,6 +16,7 @@
 
 # CI and release automation
 /.github/workflows/         @jeromebanks
+/.github/dependabot.yml     @jeromebanks
 /scripts/package_release.sh @jeromebanks
 /scripts/release.sh         @jeromebanks
 /scripts/release_stages.py  @jeromebanks
