@@ -80,8 +80,10 @@ catch (e) { if (e instanceof PostScriptError) console.log(e.errorName); } // 'un
   licence.
 - Each `createRenderer()` is its own interpreter (its own wasm instance and
   fonts). `createRenderer({ wasm })` loads the module from a URL, a
-  `Response`, bytes or a compiled `WebAssembly.Module` instead; bundlers
-  resolve the default `new URL('./pscat.wasm', import.meta.url)`.
+  `Response`, bytes or a compiled `WebAssembly.Module` instead. The default
+  is `new URL('./pscat.wasm', import.meta.url)`; CI tests the package in
+  Node, and a bundler and headless-browser test is #660 (with Vite, add
+  `pscat` to `optimizeDeps.exclude`).
 - Licence: `(MIT OR Apache-2.0) AND OFL-1.1`, the crate's: the OFL covers
   the embedded font data (Liberation, and the Courier Prime outlines in
   `lib/typewriter_outlines.ps`). The package carries the licence texts,
