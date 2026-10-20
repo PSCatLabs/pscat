@@ -16,14 +16,16 @@ const DEFAULT_PAGE = { width: 612, height: 792, dpi: 72 };
 export class PostScriptError extends Error {
   constructor(report, output = '') {
     const m = /Error:\s*([A-Za-z]+)/.exec(report);
-    const cmd = /OffendingCommand:\s*([^;\]]*?)\s*(?:;|\]%%)/.exec(report);
+    // One unambiguous run of characters, trimmed after: no backtracking
+    // over the report's spaces.
+    const cmd = /OffendingCommand: ([^;\]]*)/.exec(report);
     const line = /Line:\s*(\d+)/.exec(report);
     super(report.split('\n')[0] || 'PostScript error');
     this.name = 'PostScriptError';
     /** The PostScript error name, e.g. 'undefined'. */
     this.errorName = m ? m[1] : 'unknown';
     /** The offending command, as the interpreter reports it. */
-    this.command = cmd ? cmd[1] : undefined;
+    this.command = cmd ? cmd[1].trim() : undefined;
     /** The source line the error happened on, when known. */
     this.line = line ? Number(line[1]) : undefined;
     /** The full report, `%%[ Error: ...; OffendingCommand: ... ]%%` plus any hint. */
