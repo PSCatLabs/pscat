@@ -1,0 +1,30 @@
+# Dependabot version updates (issue #636). Every action in .github/workflows/
+# is pinned to a commit SHA with the tag it stood for in a comment
+# (scripts/check_workflows.py enforces the pin); Dependabot moves the SHA and
+# the comment together, so its PRs keep passing the policy. Both ecosystems
+# touch CODEOWNERS paths (.github/workflows/, Cargo.lock), so the owner
+# merges these PRs.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
+  # Cargo.lock only: the version requirements in Cargo.toml stay as written
+  # (widening them is a deliberate API/MSRV decision, docs/STABILITY.md).
+  # A lockfile bump that raises the effective MSRV fails CI's `msrv` job.
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    versioning-strategy: lockfile-only
+    groups:
+      cargo:
+        patterns: ["*"]
+    commit-message:
+      prefix: deps

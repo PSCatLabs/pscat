@@ -21,9 +21,12 @@ Rules:
    environment job.
 4. No workflow uses `pull_request_target` (it runs with the base repo's
    secrets on a fork's code).
-5. The release workflows (release.yml, release-fonts.yml) grant no write
-   permission at workflow level, and every job in them declares its own
-   `permissions:`.
+5. The release workflows (release.yml, release-fonts.yml, and
+   release-check.yml, the post-publish install check release.yml calls)
+   grant no write permission at workflow level, and every job in them
+   declares its own `permissions:`. That includes a job that calls a
+   reusable workflow (`uses: ./.github/workflows/...`): the caller's
+   permissions are the ceiling for the called workflow's jobs.
 
 The parser is deliberately small and line based: it relies on the
 two-space layout every workflow here uses (jobs at column 2, job keys at
@@ -36,7 +39,7 @@ import re
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-RELEASE_WORKFLOWS = ("release.yml", "release-fonts.yml")
+RELEASE_WORKFLOWS = ("release.yml", "release-fonts.yml", "release-check.yml")
 OIDC_ENVIRONMENTS = ("release", "github-pages")
 USES_RE = re.compile(r"^\s*(?:-\s+)?uses:\s*['\"]?([^\s'\"#]+)")
 PINNED_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:/[^@\s]+)?@[0-9a-f]{40}$")

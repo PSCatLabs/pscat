@@ -39,7 +39,8 @@ run first:
 | `binaries` | Builds and checks one archive per platform (below) with `scripts/package_release.sh`. | read |
 | `assemble` | Writes `SHA256SUMS` and `release-manifest.json` (version, tag, commit, every digest). Runs the rehearsal (below) on these exact artifacts. Runs a read-only plan against the real registries, which stops a real release on a mismatch before anything is created. | read |
 | `draft` | Creates a **draft** GitHub Release with the archives, `SHA256SUMS` and `release-manifest.json`, uploading the manifest last. | `contents: write` |
-| `publish` | Runs in the **`release` environment**, so it waits for the owner's approval. It publishes the crate to crates.io (trusted publishing), then npm once `npm/package.json` exists, then makes the GitHub Release public, then checks the plugin manifests once a `.claude-plugin/` manifest exists. | `contents: write`, `id-token: write` |
+| `publish` | Runs in the **`release` environment**, so it waits for the owner's approval. It signs build-provenance attestations for every archive and the `.crate` (below), publishes the crate to crates.io (trusted publishing), then npm once `npm/package.json` exists, then makes the GitHub Release public, then checks the plugin manifests once a `.claude-plugin/` manifest exists. | `contents: write`, `id-token: write`, `attestations: write` |
+| `post-publish-check` | Calls `.github/workflows/release-check.yml`: installs the release from the public channels on Linux, macOS and Windows and fails if it does not install or run (below). | `contents: read`, `attestations: read` |
 
 The draft exists before the approval prompt, so you can review it (assets,
 notes, checksums) before you approve.
@@ -150,9 +151,17 @@ dependency under any other licence fails the build.
   cannot publish. The environment admits only `v*` and `fonts-*` tags and
   needs the owner's approval. Pull-request CI never reaches it.
 - **Actions are pinned to commit SHAs.** The tag each SHA stood for is
-  written in a comment. To update a pin, resolve the new tag with
+  written in a comment. Dependabot (`.github/dependabot.yml`, weekly, one
+  grouped PR for actions and one for `Cargo.lock`) moves the SHA and the
+  comment together; its PRs touch CODEOWNERS paths, so the owner merges
+  them. To update a pin by hand, resolve the new tag with
   `gh api repos/OWNER/REPO/commits/TAG --jq .sha`. Never type a SHA from
   memory.
+- **Signed provenance.** The `publish` job attests every archive and the
+  `.crate` with `actions/attest-build-provenance` before anything goes
+  public. The attestation is signed with the job's OIDC token, which is why
+  it lives in the `release` environment job and nowhere else. See
+  [Verifying a release](#verifying-a-release).
 - **Every job declares least-privilege `permissions:`**, and the workflow
   default is `{}`.
 
@@ -323,8 +332,39 @@ After publishing:
 - [ ] The GitHub Release is public with five archives, `SHA256SUMS` and
       `release-manifest.json`. crates.io shows the version, and docs.rs built
       it.
+- [ ] The `post-publish-check` job (below) is green.
 - [ ] **Outsider install smoke test** (below) passes.
 - [ ] The release issue is closed with a link to the run's release report.
+
+### Post-publish install check
+
+After `publish`, the `post-publish-check` job runs
+`.github/workflows/release-check.yml` with the version just released. It needs
+no credentials and no environment: it does what an outsider would.
+
+- **Archives** (Linux x86_64 and ARM64, macOS arm64, Windows x86_64): download
+  from the public release URL, check against `SHA256SUMS`, `gh attestation
+  verify` the archive, run `pscat --version` and `pscat-mcp --version` (must
+  print the release version), render a page and run `pscat handwrite` from an
+  empty directory with an empty home. On Linux x86_64 it also runs `pscat
+  fonts install` and renders a font-pack face.
+- **Crate** (Linux, macOS): wait up to 10 minutes for the version to reach
+  the crates.io index, `cargo install pscat --version X.Y.Z --locked`, run
+  `--version` and render a page. It also verifies the attestation of the
+  `.crate` crates.io serves; a mismatch there is a warning only, because the
+  crates stage also accepts a contents-equal crate from the same commit (see
+  [Safe resume](#safe-resume)).
+
+A failure means a published release does not install. Nothing can be
+unpublished: fix forward with a patch release. To re-run the check for any
+published version: Actions → release-check → Run workflow (empty version =
+crates.io's newest; tick `attested` only for releases published with
+attestations). A pull request that edits `release-check.yml` runs it against
+crates.io's newest version. Versions before 0.6.1 have no `--version`, so the
+check runs a program instead.
+
+It does not replace the manual smoke test below: that one also tests the
+README.
 
 ### Outsider install smoke test
 
@@ -339,6 +379,7 @@ curl -LO https://github.com/PSCatLabs/pscat/releases/download/vX.Y.Z/pscat-X.Y.Z
 curl -LO https://github.com/PSCatLabs/pscat/releases/download/vX.Y.Z/SHA256SUMS
 sha256sum -c SHA256SUMS --ignore-missing
 tar xzf pscat-X.Y.Z-x86_64-unknown-linux-musl.tar.gz && export PATH="$PWD/pscat-X.Y.Z-x86_64-unknown-linux-musl:$PATH"
+pscat --version && pscat-mcp --version           # must print pscat X.Y.Z, pscat-mcp X.Y.Z
 echo '100 100 moveto 300 300 lineto stroke showpage' > t.ps && pscat --png t.png t.ps && ls -l t.png
 pscat fonts install && pscat fonts list          # pinned packs, verified
 pscat handwrite -o note.png "hello"
@@ -346,14 +387,30 @@ pscat handwrite -o note.png "hello"
 # Crate, in a throwaway Rust container:
 docker run --rm -it rust:latest bash
 cargo install pscat --no-default-features
+pscat --version                                  # must print pscat X.Y.Z
 echo '100 100 moveto 300 300 lineto stroke showpage' > t.ps && pscat --png t.png t.ps && ls -l t.png
 ```
 
 On macOS and Windows, download the archive from the Releases page in a
-browser, unpack it, and run the same `pscat` commands. On macOS, a binary
+browser, unpack it, and run the same `pscat` commands, starting with `pscat
+--version`. On macOS, a binary
 downloaded by a browser is quarantined: `xattr -d com.apple.quarantine pscat
 pscat-mcp`. Write down anything the README did not tell you, and fix the
 README.
+
+### Verifying a release
+
+Every archive and `.crate` released after #635 carries a signed SLSA build
+provenance attestation (0.6.0 and earlier have none). With the GitHub CLI:
+
+```sh
+gh attestation verify pscat-X.Y.Z-<target>.tar.gz --repo PSCatLabs/pscat \
+  --signer-workflow PSCatLabs/pscat/.github/workflows/release.yml
+```
+
+It checks that the file's digest was attested by this repository's
+`release.yml`, and prints the tag and commit it was built from. `SHA256SUMS`
+and `release-manifest.json` record the same digests unsigned.
 
 ## Dry runs and tests
 
@@ -377,6 +434,9 @@ README.
   - a different archive in a published release (halts);
   - a draft built from another commit (halts);
   - a moved tag (halts before anything is created).
+- **The post-publish install check** runs on a pull request that edits
+  `release-check.yml`, against crates.io's newest version, and on demand
+  (Actions → release-check → Run workflow).
 - **Unit tests:** `python3 scripts/test_release_stages.py`. It covers the
   stage rules against the fake registry, `release.sh --no-push` in a scratch
   clone (needs git-cliff), and the channel switches. Run

@@ -125,6 +125,16 @@ pscat --png out.png some_file.ps
 pscat fonts install                               # the font catalog, as font packs
 ```
 
+Releases after 0.6.0 also carry a signed build-provenance attestation for
+every archive. To check that an archive was built by pscat's release workflow
+from a tagged commit (needs the [GitHub CLI](https://cli.github.com)):
+
+```sh
+gh attestation verify pscat-<version>-<target>.tar.gz --repo PSCatLabs/pscat
+```
+
+`pscat --version` prints the version you have installed.
+
 The Linux archives are fully static (musl), so they run on any distribution,
 but they are **headless**: they render to PNG, SVG and PDF and have no live
 window, because a static binary cannot load the system's X11/Wayland
