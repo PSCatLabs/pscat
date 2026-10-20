@@ -528,7 +528,19 @@ class RealCrates:
         if head != commit:
             raise Halt(f"the checkout is at {head}, not the release commit {commit}")
         run(["cargo", "publish", "--locked"], cwd=repo_root)
-        return os.path.join(repo_root, "target", "package", os.path.basename(crate_path))
+        return uploaded_crate_path(repo_root, os.path.basename(crate_path))
+
+
+def uploaded_crate_path(repo_root, name):
+    """Where `cargo publish` left the .crate it uploaded: target/package/tmp-crate/
+    on current cargo (1.96 at least), target/package/ on older ones. `cargo
+    package` still writes target/package/."""
+    for sub in (("tmp-crate",), ()):
+        path = os.path.join(repo_root, "target", "package", *sub, name)
+        if os.path.exists(path):
+            return path
+    raise StageError(f"cargo publish succeeded, but left no {name} under target/package; "
+                     "re-run to verify against crates.io")
 
 
 class RealNpm:
