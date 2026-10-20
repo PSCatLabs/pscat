@@ -38,7 +38,11 @@ function pageOf(options = {}) {
   const height = options.height ?? DEFAULT_PAGE.height;
   const dpi = options.dpi ?? DEFAULT_PAGE.dpi;
   for (const [k, v] of [['width', width], ['height', height]]) {
-    if (!Number.isInteger(v) || v <= 0) throw new RangeError(`pscat: ${k} must be a positive integer (points), got ${v}`);
+    // The ABI takes a u32: anything larger would wrap at the boundary
+    // instead of being refused (the 8000-pixel ceiling is checked inside).
+    if (!Number.isInteger(v) || v <= 0 || v > 0xffffffff) {
+      throw new RangeError(`pscat: ${k} must be a positive integer (points), got ${v}`);
+    }
   }
   if (!Number.isFinite(dpi) || dpi <= 0) throw new RangeError(`pscat: dpi must be a positive number, got ${dpi}`);
   return { width, height, scale: dpi / 72 };
@@ -78,6 +82,11 @@ export class Renderer {
    * work, false when the program has finished. Throws PostScriptError.
    */
   step(budget = 5000) {
+    // An i32 in the ABI: a larger budget would wrap (to 0 or negative,
+    // which runs nothing and never finishes).
+    if (!Number.isInteger(budget) || budget <= 0 || budget > 0x7fffffff) {
+      throw new RangeError(`pscat: budget must be a positive integer, got ${budget}`);
+    }
     const status = this.#ps.step(budget);
     if (status === 1) return true;
     if (status === 0) return false;

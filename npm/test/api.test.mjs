@@ -129,11 +129,15 @@ test('bad arguments throw before reaching the interpreter', async () => {
   assert.throws(() => r.render('', { width: 1.5 }), RangeError);
   assert.throws(() => r.render('', { dpi: -1 }), RangeError);
   assert.throws(() => r.render('', { width: 100000 }), RangeError);
+  assert.throws(() => r.render('', { width: 2 ** 32 + 10, height: 10 }), RangeError); // would wrap to 10
   assert.throws(() => r.render(42), TypeError);
   assert.throws(() => r.addFont('', new Uint8Array(4)), TypeError);
   assert.throws(() => r.addFont('Junk', 'not bytes'), TypeError);
   assert.throws(() => r.addFont('Junk', new Uint8Array([1, 2, 3, 4])), /not a TrueType\/OpenType font/);
   assert.throws(() => r.step(), /before begin/);
+  r.begin('1 1 add', { width: 10, height: 10 });
+  assert.throws(() => r.step(2 ** 32), RangeError);
+  assert.throws(() => r.step(0), RangeError);
 });
 
 test('createRenderer: each renderer is its own instance; wasm can be given', async () => {
