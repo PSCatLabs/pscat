@@ -13,9 +13,12 @@
 #              resume/mismatch rehearsal against fake registries; a read-only
 #              plan against the real registries
 #   draft      a draft GitHub Release with the archives          (real only)
-#   publish    environment `release` (owner approval): crates.io, npm when
-#              npm/package.json exists, publish the GitHub Release, check
-#              the plugin manifests                               (real only)
+#   publish    environment `release` (owner approval): provenance
+#              attestations, crates.io, npm when npm/package.json exists,
+#              publish the GitHub Release, check the plugin manifests
+#                                                                 (real only)
+#   post-publish-check  release-check.yml: install from the public channels
+#              on Linux, macOS and Windows, no credentials        (real only)
 #
 # Every stage checks its registry first: skip on an identical artifact,
 # halt (exit 3) on a different or unverifiable one, never overwrite
@@ -48,6 +51,7 @@ on:
       - "scripts/test_release_stages.py"
       - "scripts/release.sh"
       - "scripts/package_release.sh"
+      - ".github/workflows/release-check.yml"
       - "cliff.toml"
       - "about.toml"
       - "about.hbs"
@@ -381,9 +385,12 @@ jobs:
     # Owner approval happens here, once per attempt. The draft above is
     # already up for review when the approval is requested.
     environment: release
+    # id-token: write is for crates.io trusted publishing and for signing the
+    # provenance attestations below; attestations: write stores them.
     permissions:
       contents: write
       id-token: write
+      attestations: write
     steps:
       # Exactly the commit `verify` checked (release-manifest.json records it).
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -401,6 +408,16 @@ jobs:
         with:
           name: release-inputs
           path: release-inputs
+      # Signed SLSA build provenance for every archive and the .crate (#635),
+      # before anything goes public, so a published artifact always has one.
+      # `gh attestation verify FILE --repo PSCatLabs/pscat` checks it
+      # (RELEASING.md). A re-run attests the same digests again: harmless.
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.zip
+            release-inputs/pscat-*.crate
       # crates.io trusted publishing: a short-lived token for this job only,
       # revoked when the job ends. Needs the trusted publisher configured on
       # crates.io (RELEASING.md, "One-time setup").
@@ -427,3 +444,18 @@ jobs:
           name: release-report-${{ github.run_attempt }}
           path: report/
           if-no-files-found: ignore
+
+  # The outsider install check (#638): install from the real channels, now
+  # that they are public. Read-only, no environment, no secrets: it uses
+  # only what any user could. A failure here means a published release does
+  # not install; fix forward with a patch release (RELEASING.md).
+  post-publish-check:
+    needs: [verify, publish]
+    if: needs.verify.outputs.real == 'true' && vars.RELEASE_ENABLED == 'true'
+    permissions:
+      contents: read
+      attestations: read
+    uses: ./.github/workflows/release-check.yml
+    with:
+      version: ${{ needs.verify.outputs.version }}
+      attested: true

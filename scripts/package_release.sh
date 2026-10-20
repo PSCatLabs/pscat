@@ -215,7 +215,10 @@ done
 bare() { env -u PSCAT_ROOT -u PSCAT_HOME -u PSCAT_LIB PSCAT_TRACE_RESOURCES=1 "$@"; }
 PSCAT="$BUNDLE/pscat$EXE"
 cd "${TMPDIR:-/tmp}"
-if ! bare "$PSCAT" -e 'quit' >/dev/null 2>&1; then
+# Can it run at all? `--version` (issue #652) exits 0 without reading any
+# program. A cross target this host cannot execute is checked as an archive
+# only; anything else that fails to start is a failure.
+if ! GOT=$(bare "$PSCAT" --version 2>/dev/null); then
   if [[ "$TARGET" != "$HOST" ]]; then
     echo "==> WARNING: cannot run $TARGET binaries on $HOST; the archive is checked but its binaries were not run"
     echo "==> Done: $ARCHIVE"
@@ -224,6 +227,18 @@ if ! bare "$PSCAT" -e 'quit' >/dev/null 2>&1; then
   echo "FAIL: $PSCAT does not run" >&2
   exit 1
 fi
+# It runs, so it must be this version. A separate check: a wrong version on a
+# cross target that happens to run (x86_64 macOS under Rosetta) is a failure,
+# not "cannot run".
+GOT=${GOT//$'\r'/}
+[[ "$GOT" == "pscat $VERSION" ]] ||
+  { echo "FAIL: pscat --version printed '$GOT', expected 'pscat $VERSION'" >&2; exit 1; }
+GOT_MCP=$(bare "$BUNDLE/pscat-mcp$EXE" --version 2>/dev/null) ||
+  { echo "FAIL: pscat-mcp --version did not run" >&2; exit 1; }
+GOT_MCP=${GOT_MCP//$'\r'/}
+[[ "$GOT_MCP" == "pscat-mcp $VERSION" ]] ||
+  { echo "FAIL: pscat-mcp --version printed '$GOT_MCP', expected 'pscat-mcp $VERSION'" >&2; exit 1; }
+echo "==> $GOT and $GOT_MCP run from the bundle"
 
 echo "==> Verifying the bundle resolves lib/ standalone, and needs font packs"
 # With an empty HOME (so no font packs the packager installed), a pack
