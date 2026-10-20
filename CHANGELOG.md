@@ -17,6 +17,10 @@ Font packs have their own `fonts-YYYY.MM` releases and are not listed here.
 
 - docs: install from crates.io and the release binaries (0.6.0) (#651)
 
+### Build, CI and release
+
+- release: --version probe, provenance attestations, post-publish install check, Dependabot (#659)
+
 ## [0.6.0] - 2026-10-19
 
 The first release published outside this repository.
