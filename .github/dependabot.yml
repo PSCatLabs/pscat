@@ -10,9 +10,12 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # Minor and patch bumps in one PR; each major bump (checkout v4 -> v5)
+    # comes as its own PR so one breaking change cannot stall the rest.
     groups:
       github-actions:
         patterns: ["*"]
+        update-types: [minor, patch]
     commit-message:
       prefix: ci
   # Cargo.lock only: the version requirements in Cargo.toml stay as written

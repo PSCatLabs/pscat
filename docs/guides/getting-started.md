@@ -125,8 +125,8 @@ pscat --png out.png some_file.ps
 pscat fonts install                               # the font catalog, as font packs
 ```
 
-Releases after 0.6.0 also carry a signed build-provenance attestation for
-every archive. To check that an archive was built by pscat's release workflow
+Releases published since provenance was added (#635; not 0.6.0) also carry
+a signed build-provenance attestation for every archive. To check that an archive was built by pscat's release workflow
 from a tagged commit (needs the [GitHub CLI](https://cli.github.com)):
 
 ```sh

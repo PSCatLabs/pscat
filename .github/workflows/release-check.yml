@@ -52,7 +52,7 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  resolve:
+  install-version:
     runs-on: ubuntu-latest
     permissions: {}
     outputs:
@@ -82,9 +82,9 @@ jobs:
           { echo "version=$V"; echo "check_version=$CHECK"; echo "attested=$ATTESTED"; } >> "$GITHUB_OUTPUT"
           echo "### Install check for pscat $V (--version check: $CHECK, attestations: $ATTESTED)" >> "$GITHUB_STEP_SUMMARY"
 
-  archive:
-    needs: resolve
-    name: archive (${{ matrix.target }})
+  install-archive:
+    needs: install-version
+    name: install-archive (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -108,9 +108,9 @@ jobs:
     steps:
       - name: Download, verify, unpack and run
         env:
-          VERSION: ${{ needs.resolve.outputs.version }}
-          CHECK_VERSION: ${{ needs.resolve.outputs.check_version }}
-          ATTESTED: ${{ needs.resolve.outputs.attested }}
+          VERSION: ${{ needs.install-version.outputs.version }}
+          CHECK_VERSION: ${{ needs.install-version.outputs.check_version }}
+          ATTESTED: ${{ needs.install-version.outputs.attested }}
           TARGET: ${{ matrix.target }}
           FONTS: ${{ matrix.fonts && 'true' || 'false' }}
           GH_TOKEN: ${{ github.token }}
@@ -171,9 +171,9 @@ jobs:
           fi
           echo "- archive $NAME: downloaded, checksum ok$([ "$ATTESTED" = true ] && echo ', attestation ok'), runs, renders$([ "$FONTS" = true ] && echo ', font packs install')" >> "$GITHUB_STEP_SUMMARY"
 
-  crate:
-    needs: resolve
-    name: crate (${{ matrix.os }})
+  install-crate:
+    needs: install-version
+    name: install-crate (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -191,7 +191,7 @@ jobs:
           toolchain: stable
       - name: Wait for crates.io's index
         env:
-          VERSION: ${{ needs.resolve.outputs.version }}
+          VERSION: ${{ needs.install-version.outputs.version }}
         run: |
           # Right after `publish` the sparse index can lag by a minute or two.
           for i in $(seq 1 20); do
@@ -209,8 +209,8 @@ jobs:
           exit 1
       - name: cargo install pscat and run it
         env:
-          VERSION: ${{ needs.resolve.outputs.version }}
-          CHECK_VERSION: ${{ needs.resolve.outputs.check_version }}
+          VERSION: ${{ needs.install-version.outputs.version }}
+          CHECK_VERSION: ${{ needs.install-version.outputs.check_version }}
         run: |
           set -euo pipefail
           fail() { echo "::error::crate on $RUNNER_OS: $*"; exit 1; }
@@ -231,9 +231,9 @@ jobs:
           [ "$(head -c 4 t.png | tail -c 3)" = PNG ] || fail "pscat --png wrote no PNG"
           echo "- crate on $RUNNER_OS: cargo install --locked ok, runs, renders" >> "$GITHUB_STEP_SUMMARY"
       - name: Provenance of the crates.io .crate
-        if: needs.resolve.outputs.attested == 'true' && runner.os == 'Linux'
+        if: needs.install-version.outputs.attested == 'true' && runner.os == 'Linux'
         env:
-          VERSION: ${{ needs.resolve.outputs.version }}
+          VERSION: ${{ needs.install-version.outputs.version }}
           GH_TOKEN: ${{ github.token }}
         run: |
           # The attested .crate is the one `verify` packaged; crates.io serves
