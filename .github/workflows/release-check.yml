@@ -1,0 +1,252 @@
+# The post-publish install check (issue #638): install a published pscat
+# release from the real public channels, as an outsider would, and fail
+# loudly if it does not install or run. docs/dev/RELEASING.md, "Post-publish
+# install check".
+#
+#   - release.yml calls it after `publish` (its `post-publish-check` job),
+#     with the version it just released and attested: true.
+#   - Actions -> release-check -> Run workflow re-runs it for any published
+#     version (empty = crates.io's newest).
+#   - A pull request that edits this file runs it against crates.io's newest
+#     version, so the check itself is tested before a release depends on it.
+#
+# Per platform: download the archive from the GitHub Release, check it
+# against SHA256SUMS, run `pscat --version` and render a page from an empty
+# directory with no PSCAT_* variables; on Linux x86_64 also `pscat fonts
+# install` and a font-pack face. Separately `cargo install pscat --version X
+# --locked` on Linux and macOS. With `attested`, `gh attestation verify` the
+# archives (#635).
+#
+# It publishes nothing and reads no secrets, so it runs outside the `release`
+# environment with read-only permissions (scripts/check_workflows.py).
+name: release-check
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: "The published version, X.Y.Z"
+        type: string
+        required: true
+      attested:
+        description: "Also verify the provenance attestations (releases from #635 on)"
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Published version X.Y.Z (empty: crates.io's newest)"
+        required: false
+        default: ""
+      attested:
+        description: "Also verify the provenance attestations (releases published after #635)"
+        type: boolean
+        default: false
+  pull_request:
+    paths:
+      - ".github/workflows/release-check.yml"
+
+permissions: {}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  install-version:
+    runs-on: ubuntu-latest
+    permissions: {}
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      check_version: ${{ steps.v.outputs.check_version }}
+      attested: ${{ steps.v.outputs.attested }}
+    steps:
+      - name: Which version?
+        id: v
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          ATTESTED: ${{ inputs.attested && 'true' || 'false' }}
+        run: |
+          V="$INPUT_VERSION"
+          if [ -z "$V" ]; then
+            V=$(curl -fsS -A "pscat-release-check (github.com/$GITHUB_REPOSITORY)" https://crates.io/api/v1/crates/pscat |
+              python3 -c 'import json, sys; print(json.load(sys.stdin)["crate"]["max_stable_version"])')
+          fi
+          V="${V#v}"
+          if ! [[ "$V" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::not a version: '$V'"
+            exit 1
+          fi
+          # `pscat --version` exists from 0.6.1 on (#637); 0.6.0 is checked by
+          # running a program instead.
+          CHECK=$(python3 -c 'import sys; print(str(tuple(map(int, sys.argv[1].split("."))) >= (0, 6, 1)).lower())' "$V")
+          { echo "version=$V"; echo "check_version=$CHECK"; echo "attested=$ATTESTED"; } >> "$GITHUB_OUTPUT"
+          echo "### Install check for pscat $V (--version check: $CHECK, attestations: $ATTESTED)" >> "$GITHUB_STEP_SUMMARY"
+
+  install-archive:
+    needs: install-version
+    name: install-archive (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      attestations: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            fonts: true
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-24.04-arm
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Download, verify, unpack and run
+        env:
+          VERSION: ${{ needs.install-version.outputs.version }}
+          CHECK_VERSION: ${{ needs.install-version.outputs.check_version }}
+          ATTESTED: ${{ needs.install-version.outputs.attested }}
+          TARGET: ${{ matrix.target }}
+          FONTS: ${{ matrix.fonts && 'true' || 'false' }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$TARGET: $*"; exit 1; }
+          case "$TARGET" in *windows*) EXT=zip; EXE=.exe ;; *) EXT=tar.gz; EXE="" ;; esac
+          NAME="pscat-$VERSION-$TARGET"
+          BASE="https://github.com/$GITHUB_REPOSITORY/releases/download/v$VERSION"
+          W="$RUNNER_TEMP/release-check"
+          rm -rf "$W" && mkdir -p "$W/home" "$W/run" && cd "$W"
+
+          # The public download URLs, exactly as the install guide gives them.
+          curl -fsSL --retry 5 --retry-all-errors -o "$NAME.$EXT" "$BASE/$NAME.$EXT" || fail "cannot download $BASE/$NAME.$EXT"
+          curl -fsSL --retry 5 --retry-all-errors -o SHA256SUMS "$BASE/SHA256SUMS" || fail "cannot download SHA256SUMS"
+          grep -E "^[0-9a-f]{64}  $NAME\.$EXT\$" SHA256SUMS > mine.sum || fail "$NAME.$EXT is not listed in SHA256SUMS"
+          if command -v sha256sum >/dev/null; then sha256sum -c mine.sum; else shasum -a 256 -c mine.sum; fi ||
+            fail "$NAME.$EXT does not match SHA256SUMS"
+
+          if [ "$ATTESTED" = true ]; then
+            gh attestation verify "$NAME.$EXT" --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" ||
+              fail "no valid provenance attestation for $NAME.$EXT"
+          fi
+
+          if [ "$EXT" = zip ]; then 7z x -y "$NAME.zip" > /dev/null; else tar xzf "$NAME.tar.gz"; fi
+          P="$W/$NAME/pscat$EXE"
+          [ -x "$P" ] || fail "no pscat$EXE in the archive"
+
+          # An outsider's machine: no checkout, no PSCAT_*, an empty home
+          # (so no font packs), run from an empty directory.
+          unset PSCAT_HOME PSCAT_ROOT PSCAT_LIB
+          export HOME="$W/home" XDG_DATA_HOME="$W/home/.local/share" APPDATA="$W/home/AppData" LOCALAPPDATA="$W/home/AppData/Local"
+          mkdir -p "$APPDATA" "$LOCALAPPDATA"
+          cd "$W/run"
+
+          if [ "$CHECK_VERSION" = true ]; then
+            GOT=$("$P" --version | tr -d '\r') || fail "pscat --version failed"
+            [ "$GOT" = "pscat $VERSION" ] || fail "pscat --version printed '$GOT', expected 'pscat $VERSION'"
+            GOT=$("$W/$NAME/pscat-mcp$EXE" --version | tr -d '\r') || fail "pscat-mcp --version failed"
+            [ "$GOT" = "pscat-mcp $VERSION" ] || fail "pscat-mcp --version printed '$GOT', expected 'pscat-mcp $VERSION'"
+          else
+            echo "::notice::pscat $VERSION predates --version (#637); checking that it runs instead"
+            "$P" -e 'quit' || fail "pscat does not run"
+          fi
+
+          printf '100 100 moveto 300 300 lineto stroke showpage\n' > t.ps
+          "$P" --png t.png t.ps || fail "pscat --png failed"
+          [ "$(head -c 4 t.png | tail -c 3)" = PNG ] || fail "pscat --png wrote no PNG"
+          "$P" handwrite -o note.png "hello from the release check" || fail "pscat handwrite failed"
+          [ -s note.png ] || fail "pscat handwrite wrote nothing"
+
+          if [ "$FONTS" = true ]; then
+            "$P" fonts install || fail "pscat fonts install failed"
+            "$P" fonts list
+            printf '/Bangers findfont 40 scalefont setfont 72 72 moveto (pscat) show showpage\n' > f.ps
+            "$P" --png f.png f.ps || fail "a font-pack face did not render after pscat fonts install"
+          fi
+          echo "- archive $NAME: downloaded, checksum ok$([ "$ATTESTED" = true ] && echo ', attestation ok'), runs, renders$([ "$FONTS" = true ] && echo ', font packs install')" >> "$GITHUB_STEP_SUMMARY"
+
+  install-crate:
+    needs: install-version
+    name: install-crate (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      attestations: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master; toolchain below
+        with:
+          toolchain: stable
+      - name: Wait for crates.io's index
+        env:
+          VERSION: ${{ needs.install-version.outputs.version }}
+        run: |
+          # Right after `publish` the sparse index can lag by a minute or two.
+          for i in $(seq 1 20); do
+            # Into a variable first: `curl | grep -q` under pipefail can fail
+            # on curl's SIGPIPE when grep stops reading early.
+            INDEX=$(curl -fsS -A "pscat-release-check (github.com/$GITHUB_REPOSITORY)" https://index.crates.io/ps/ca/pscat || true)
+            if grep -q "\"vers\":\"$VERSION\"" <<<"$INDEX"; then
+              echo "pscat $VERSION is in the index"
+              exit 0
+            fi
+            echo "not in the index yet ($i/20)"
+            sleep 30
+          done
+          echo "::error::pscat $VERSION is not in the crates.io index after 10 minutes"
+          exit 1
+      - name: cargo install pscat and run it
+        env:
+          VERSION: ${{ needs.install-version.outputs.version }}
+          CHECK_VERSION: ${{ needs.install-version.outputs.check_version }}
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::crate on $RUNNER_OS: $*"; exit 1; }
+          W="$RUNNER_TEMP/release-check"
+          rm -rf "$W" && mkdir -p "$W/run"
+          cargo install pscat --version "$VERSION" --locked --root "$W/root" || fail "cargo install pscat --version $VERSION --locked failed"
+          P="$W/root/bin/pscat"
+          unset PSCAT_HOME PSCAT_ROOT PSCAT_LIB
+          cd "$W/run"
+          if [ "$CHECK_VERSION" = true ]; then
+            GOT=$("$P" --version) || fail "pscat --version failed"
+            [ "$GOT" = "pscat $VERSION" ] || fail "pscat --version printed '$GOT', expected 'pscat $VERSION'"
+            GOT=$("$W/root/bin/pscat-mcp" --version) || fail "pscat-mcp --version failed"
+            [ "$GOT" = "pscat-mcp $VERSION" ] || fail "pscat-mcp --version printed '$GOT', expected 'pscat-mcp $VERSION'"
+          fi
+          printf '100 100 moveto 300 300 lineto stroke showpage\n' > t.ps
+          "$P" --png t.png t.ps || fail "pscat --png failed"
+          [ "$(head -c 4 t.png | tail -c 3)" = PNG ] || fail "pscat --png wrote no PNG"
+          echo "- crate on $RUNNER_OS: cargo install --locked ok, runs, renders" >> "$GITHUB_STEP_SUMMARY"
+      - name: Provenance of the crates.io .crate
+        if: needs.install-version.outputs.attested == 'true' && runner.os == 'Linux'
+        env:
+          VERSION: ${{ needs.install-version.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The attested .crate is the one `verify` packaged; crates.io serves
+          # the one `cargo publish` packaged with the same toolchain, normally
+          # byte-identical. The crates stage also accepts a contents-equal
+          # crate from the same commit, so a mismatch here is a warning, not a
+          # failed release (RELEASING.md).
+          W="$RUNNER_TEMP/crate-attest" && mkdir -p "$W" && cd "$W"
+          curl -fsSL -A "pscat-release-check (github.com/$GITHUB_REPOSITORY)" -o "pscat-$VERSION.crate" \
+            "https://static.crates.io/crates/pscat/pscat-$VERSION.crate"
+          if gh attestation verify "pscat-$VERSION.crate" --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"; then
+            echo "- crates.io .crate: attestation ok" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning::crates.io's pscat-$VERSION.crate is not byte-identical to the attested one (see RELEASING.md)"
+          fi

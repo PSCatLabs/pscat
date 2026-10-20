@@ -85,6 +85,28 @@ class Rules(unittest.TestCase):
         text = GOOD.replace("name: release\n", "name: release\n# never use pull_request_target or id-token: write here\n")
         self.assertEqual(errors(text), [])
 
+    def test_reusable_workflow_call_job(self):
+        # release.yml's post-publish-check calls release-check.yml (#638).
+        call = (
+            "  check:\n"
+            "    needs: publish\n"
+            "    permissions:\n"
+            "      contents: read\n"
+            "    uses: ./.github/workflows/release-check.yml\n"
+            "    with:\n"
+            "      version: 1.2.3\n"
+        )
+        self.assertEqual(errors(GOOD + call), [])
+        e = errors(GOOD + call.replace("    permissions:\n      contents: read\n", ""))
+        self.assertTrue(any("job check declares no permissions" in x for x in e), e)
+        e = errors(GOOD + call.replace("      contents: read\n", "      contents: read\n      id-token: write\n"))
+        self.assertTrue(any("job check has id-token" in x for x in e), e)
+
+    def test_release_check_is_a_release_workflow(self):
+        text = GOOD.replace("    permissions:\n      contents: read\n", "", 1)
+        e = errors(text, ".github/workflows/release-check.yml")
+        self.assertTrue(any("job build declares no permissions" in x for x in e), e)
+
     def test_the_repo_passes(self):
         self.assertEqual(cw.main([]), 0)
 
