@@ -448,16 +448,21 @@ jobs:
           registry-url: https://registry.npmjs.org
       # Installed only; the registry stage logs in (`mcp-publisher login
       # github-oidc`, this job's OIDC token) right before it publishes, so
-      # a login failure cannot hold up crates.io or npm.
+      # a login failure cannot hold up crates.io or npm. A failed download
+      # or checksum is only a warning here for the same reason: without
+      # MCP_PUBLISHER the registry stage, which runs last, fails instead.
       - name: Install mcp-publisher (pinned)
         run: |
           D="$RUNNER_TEMP/mcp-publisher"
           mkdir -p "$D"
-          curl -fsSL -o "$D/mcp-publisher.tar.gz" \
-            "https://github.com/modelcontextprotocol/registry/releases/download/v${MCP_PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz"
-          echo "${MCP_PUBLISHER_SHA256}  $D/mcp-publisher.tar.gz" | sha256sum -c -
-          tar -xzf "$D/mcp-publisher.tar.gz" -C "$D" mcp-publisher
-          echo "MCP_PUBLISHER=$D/mcp-publisher" >> "$GITHUB_ENV"
+          if curl -fsSL -o "$D/mcp-publisher.tar.gz" \
+              "https://github.com/modelcontextprotocol/registry/releases/download/v${MCP_PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz" &&
+            echo "${MCP_PUBLISHER_SHA256}  $D/mcp-publisher.tar.gz" | sha256sum -c - &&
+            tar -xzf "$D/mcp-publisher.tar.gz" -C "$D" mcp-publisher; then
+            echo "MCP_PUBLISHER=$D/mcp-publisher" >> "$GITHUB_ENV"
+          else
+            echo "::warning::mcp-publisher ${MCP_PUBLISHER_VERSION} could not be installed and verified; the registry stage will fail"
+          fi
       - name: Publish (crates.io, npm, GitHub Release, plugin check, MCP Registry)
         env:
           GH_TOKEN: ${{ github.token }}

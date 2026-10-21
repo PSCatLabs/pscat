@@ -691,9 +691,12 @@ class RealRegistry:
             raise StageError(f"the MCP Registry: unreadable answer for {name} {version}: {e}") from e
 
     def publish(self, server_json):
-        exe = os.environ.get("MCP_PUBLISHER") or shutil.which("mcp-publisher")
+        # Only the pinned, checksum-verified copy release.yml installs, never
+        # whatever mcp-publisher happens to be on PATH.
+        exe = os.environ.get("MCP_PUBLISHER")
         if not exe:
-            raise StageError("mcp-publisher is not installed (release.yml's publish job installs the pinned one)")
+            raise StageError("MCP_PUBLISHER is not set: release.yml's publish job installs and verifies "
+                             "the pinned mcp-publisher (see that step's log)")
         # Logged in here, right before use, not in a workflow step of its
         # own: a failed OIDC exchange then fails only this stage, after
         # crates.io and npm are done, and a re-run retries just this.
