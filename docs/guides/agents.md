@@ -104,6 +104,10 @@ claude mcp add pscat -- pscat-mcp          # Claude Code
 codex mcp add pscat -- pscat-mcp           # Codex
 ```
 
+`pscat mcp` is the same server under the `pscat` binary, for clients that
+launch a crate by its name; the [MCP Registry](https://registry.modelcontextprotocol.io/)
+lists pscat as `io.github.PSCatLabs/pscat` (from 0.6.3) and runs it that way.
+
 For OpenClaw, Hermes, or any other MCP client, the generic stdio config:
 
 ```json

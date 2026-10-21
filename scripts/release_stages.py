@@ -7,7 +7,7 @@
         --dist dist --crate target/package/pscat-0.6.0.crate
     python3 scripts/release_stages.py run --dist dist --crate FILE \\
         --stage draft --stage crates --stage npm --stage publish --stage plugin \\
-        [--plan] [--fake DIR] [--report-dir DIR]
+        --stage registry [--plan] [--fake DIR] [--report-dir DIR]
     python3 scripts/release_stages.py rehearse --dist dist --crate FILE
 
 `.github/workflows/release.yml` drives these; docs/dev/RELEASING.md is the
@@ -37,6 +37,11 @@ Stages, in release order:
 - `publish`: makes the draft GitHub Release public, after re-checking it.
 - `plugin`: checks every plugin manifest (Claude Code and Codex) carries
   the release version; enabled only when a plugin manifest exists.
+- `registry`: `mcp-publisher publish` of server.json to the official MCP
+  Registry (#569), once crates.io serves this version's README with its
+  `mcp-name:` line; enabled only when server.json exists. Last, so a
+  registry outage leaves everything else released and only this stage to
+  re-run.
 
 `--plan` runs the same checks without changing anything and reports what
 each stage would do. `--fake DIR` swaps every registry for a directory
@@ -63,6 +68,7 @@ import tarfile
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -74,7 +80,8 @@ ARCHIVE_EXTS = (".tar.gz", ".zip")
 SEMVER_RE = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 SHA1_RE = re.compile(r"^[0-9a-f]{40}$")
 USER_AGENT = "pscat-release (https://github.com/PSCatLabs/pscat)"
-STAGES = ("draft", "crates", "npm", "publish", "plugin")
+STAGES = ("draft", "crates", "npm", "publish", "plugin", "registry")
+REGISTRY_API = "https://registry.modelcontextprotocol.io/v0.1/servers"
 
 EXIT_OK = 0
 EXIT_ERROR = 1
@@ -179,6 +186,12 @@ def plugin_manifests(root=ROOT):
     return sorted(out)
 
 
+def server_manifest(root=ROOT):
+    """The MCP Registry entry, server.json at the repo root (#569)."""
+    p = os.path.join(root, "server.json")
+    return p if os.path.exists(p) else None
+
+
 def npm_manifest(root=ROOT):
     p = os.path.join(root, "npm", "package.json")
     return p if os.path.exists(p) else None
@@ -275,9 +288,8 @@ def bump_manifests_json_only(root, version):
     others = plugin_manifests(root)
     if npm_manifest(root):
         others.append(npm_manifest(root))
-    server = os.path.join(root, "server.json")
-    if os.path.exists(server):
-        others.append(server)
+    if server_manifest(root):
+        others.append(server_manifest(root))
     for p in others:
         if set_json_versions(p, version):
             changed.append(os.path.relpath(p, root))
@@ -336,6 +348,41 @@ def crate_identity(path):
         raise Halt(f"{os.path.basename(path)} has no Cargo.toml.orig; its source manifest cannot be compared")
     lines.sort()
     return sha256_bytes("".join(lines).encode()), sha1
+
+
+def crate_readme(path):
+    """README.md from the top of a .crate, as text, or None."""
+    try:
+        with tarfile.open(path, "r:gz") as tar:
+            for m in tar.getmembers():
+                if m.isfile() and m.name.partition("/")[2] == "README.md":
+                    f = tar.extractfile(m)
+                    return f.read().decode("utf-8", "replace") if f else None
+    except (tarfile.TarError, OSError, EOFError):
+        return None
+    return None
+
+
+def has_mcp_name(text, name):
+    """Whether `text` carries the registry's ownership token `mcp-name: NAME`
+    as a whole token (not the prefix of a longer name), as the registry's
+    validator matches it."""
+    for m in re.finditer(re.escape(f"mcp-name: {name}"), text):
+        if not re.match(r"[A-Za-z0-9._/-]", text[m.end():m.end() + 1]):
+            return True
+    return False
+
+
+def registry_identity(server):
+    """What must agree between server.json and the registry's copy of a
+    version: the name, the version and each package's coordinates and
+    arguments (the registry adds its own metadata around them)."""
+    pkgs = []
+    for p in server.get("packages") or []:
+        args = [(a.get("type"), a.get("name"), a.get("value")) for a in p.get("packageArguments") or []]
+        pkgs.append((p.get("registryType"), p.get("identifier"), p.get("version"),
+                     (p.get("transport") or {}).get("type"), args))
+    return server.get("name"), server.get("version"), pkgs
 
 
 def build_manifest(tag, commit, dist, crate_path):
@@ -492,8 +539,11 @@ class RealCrates:
     API = "https://crates.io/api/v1/crates"
     STATIC = "https://static.crates.io/crates"
 
-    def _get(self, url):
-        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    def _get(self, url, accept=None):
+        headers = {"User-Agent": USER_AGENT}
+        if accept:
+            headers["Accept"] = accept
+        req = urllib.request.Request(url, headers=headers)
         try:
             with urllib.request.urlopen(req, timeout=60) as r:
                 return r.status, r.read()
@@ -525,6 +575,27 @@ class RealCrates:
                 return
             time.sleep(5 * (attempt + 1))
         raise StageError(f"cannot download {url} ({status})")
+
+    def readme(self, name, version):
+        """The README crates.io rendered for a version (HTML), which is what
+        the MCP Registry reads its `mcp-name:` token from; None if it is not
+        there yet. crates.io renders it in a background job after a publish,
+        so give it a few minutes."""
+        api = f"{self.API}/{name}/{version}/readme"
+        for attempt in range(8):
+            status, body = self._get(api, accept="application/json")
+            if status == 200:
+                try:
+                    url = json.loads(body)["url"]
+                except (ValueError, KeyError, TypeError) as e:
+                    raise StageError(f"crates.io: unreadable README pointer for {name} {version}: {e}") from e
+                status, body = self._get(url)
+                if status == 200:
+                    return body.decode("utf-8", "replace")
+            if status not in (403, 404):  # the CDN answers 403 for a missing object
+                raise StageError(f"crates.io answered {status} for the README of {name} {version}")
+            time.sleep(15 * (attempt + 1))
+        return None
 
     def publish(self, repo_root, commit, crate_path):
         head = run(["git", "rev-parse", "HEAD"], cwd=repo_root).stdout.strip()
@@ -596,8 +667,42 @@ class RealNpm:
             time.sleep(10)
 
 
+class RealRegistry:
+    """The official MCP Registry: its public API for lookups, the pinned
+    mcp-publisher that release.yml's publish job installs to publish."""
+
+    def version(self, name, version):
+        """The registry's server.json for that version, or None only on a
+        definite 404."""
+        url = f"{REGISTRY_API}/{urllib.parse.quote(name, safe='')}/versions/{urllib.parse.quote(version, safe='')}"
+        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                body = r.read()
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return None
+            raise StageError(f"the MCP Registry answered {e.code} for {name} {version}") from e
+        except (urllib.error.URLError, OSError) as e:
+            raise StageError(f"GET {url}: {e}") from e
+        try:
+            return json.loads(body)["server"]
+        except (ValueError, KeyError, TypeError) as e:
+            raise StageError(f"the MCP Registry: unreadable answer for {name} {version}: {e}") from e
+
+    def publish(self, server_json):
+        exe = os.environ.get("MCP_PUBLISHER") or shutil.which("mcp-publisher")
+        if not exe:
+            raise StageError("mcp-publisher is not installed (release.yml's publish job installs the pinned one)")
+        # Logged in here, right before use, not in a workflow step of its
+        # own: a failed OIDC exchange then fails only this stage, after
+        # crates.io and npm are done, and a re-run retries just this.
+        run([exe, "login", "github-oidc"])
+        run([exe, "publish", server_json])
+
+
 class Fake:
-    """A directory standing in for GitHub, crates.io and npm, with the
+    """A directory standing in for GitHub, crates.io, npm and the MCP Registry, with the
     semantics the stages rely on: drafts are found only by listing, a
     published release is immutable, a published crate or npm version is
     immutable, and each publish is logged. `fail-once` holds an operation
@@ -605,7 +710,7 @@ class Fake:
 
     def __init__(self, root):
         self.root = root
-        for d in ("github/assets", "crates", "npm"):
+        for d in ("github/assets", "crates", "npm", "mcp-registry"):
             os.makedirs(os.path.join(root, d), exist_ok=True)
 
     # -- plumbing
@@ -726,6 +831,21 @@ class Fake:
         self._save(f"npm/{name}-{version}.json", {"integrity": integrity})
         self.log(f"npm.publish {name}@{version}")
 
+    # -- MCP Registry (a published version is immutable there too)
+    def _registry_rel(self, name, version):
+        return f"mcp-registry/{name.replace('/', '__')}-{version}.json"
+
+    def registry_view(self, name, version):
+        return self._load(self._registry_rel(name, version), None)
+
+    def registry_publish(self, server):
+        self._maybe_fail("registry.publish")
+        rel = self._registry_rel(server["name"], server["version"])
+        if os.path.exists(self._path(rel)):
+            raise StageError("fake: server version already exists")
+        self._save(rel, server)
+        self.log(f"registry.publish {server['name']}@{server['version']}")
+
 
 class FakeCrates:
     def __init__(self, fake):
@@ -739,6 +859,11 @@ class FakeCrates:
 
     def publish(self, repo_root, commit, crate_path):
         return self.fake.publish_crate(crate_path)
+
+    def readme(self, name, version):
+        """crates.io's rendering, faked as the README inside the stored .crate."""
+        p = self.fake._path("crates", f"{name}-{version}.crate")
+        return crate_readme(p) if os.path.exists(p) else None
 
 
 class FakeNpm:
@@ -755,13 +880,32 @@ class FakeNpm:
         self.fake.npm_publish(pkg["name"], pkg["version"], npm_integrity(tarball))
 
 
+class FakeRegistry:
+    """Like the real registry, it refuses a cargo package that crates.io
+    does not have at that version."""
+
+    def __init__(self, fake):
+        self.fake = fake
+
+    def version(self, name, version):
+        return self.fake.registry_view(name, version)
+
+    def publish(self, server_json):
+        with open(server_json, encoding="utf-8") as f:
+            server = json.load(f)
+        for p in server.get("packages") or []:
+            if p.get("registryType") == "cargo" and self.fake.version(p["identifier"], p["version"]) is None:
+                raise StageError(f"fake: {p['identifier']} {p['version']} is not on crates.io")
+        self.fake.registry_publish(server)
+
+
 # --------------------------------------------------------------------------
 # Stages
 # --------------------------------------------------------------------------
 
 
 class Ctx:
-    def __init__(self, manifest, dist, crate_path, repo_root, github, crates, npm, plan):
+    def __init__(self, manifest, dist, crate_path, repo_root, github, crates, npm, plan, registry=None):
         self.m = manifest
         self.dist = dist
         self.crate_path = crate_path
@@ -770,6 +914,7 @@ class Ctx:
         self.crates = crates
         self.npm = npm
         self.plan = plan
+        self.registry = registry
         self.local = {a["name"]: a["sha256"] for a in manifest["assets"]}
         self.local[SUMS_NAME] = sha256_file(os.path.join(dist, SUMS_NAME))
         self.local[MANIFEST_NAME] = sha256_file(os.path.join(dist, MANIFEST_NAME))
@@ -980,12 +1125,55 @@ def stage_plugin(ctx):
     return "skipped", f"{len(files)} plugin manifest(s) already at {ctx.m['version']}"
 
 
+def stage_registry(ctx):
+    path = server_manifest(ctx.root)
+    if not path:
+        return "disabled", "no server.json (the MCP Registry channel is not enabled)"
+    data, found = json_versions(path)
+    v = ctx.m["version"]
+    wrong = [f"{key}={value}" for key, value in found if value != v]
+    if wrong or not found:
+        raise Halt("server.json does not carry the release version (run scripts/release.sh): "
+                   + ("; ".join(wrong) or "no version"))
+    pkgs = [(p.get("registryType"), p.get("identifier")) for p in data.get("packages") or []]
+    if pkgs != [("cargo", CRATE)]:
+        raise Halt(f"server.json must list one package, the cargo crate {CRATE}; it lists {pkgs}")
+    name = data.get("name")
+    # The registry checks ownership against the README crates.io serves for
+    # this version, which can never change once published: catch a missing
+    # token here, offline, before anything is published.
+    if not has_mcp_name(crate_readme(ctx.crate_path) or "", name):
+        raise Halt(f"the .crate's README.md has no visible `mcp-name: {name}` line")
+    remote = ctx.registry.version(name, v)
+    if remote is not None:
+        if registry_identity(remote) != registry_identity(data):
+            raise Halt(f"{name} {v} in the MCP Registry differs from server.json: "
+                       f"{registry_identity(remote)} vs {registry_identity(data)}")
+        return "skipped", f"{name} {v} already in the MCP Registry (same packages)"
+    if ctx.plan:
+        return "would publish", f"{name} {v} to the MCP Registry"
+    html = ctx.crates.readme(CRATE, v)
+    if html is None:
+        raise StageError(f"crates.io has no rendered README for {CRATE} {v} yet; re-run")
+    if not has_mcp_name(html, name):
+        raise Halt(f"the README crates.io serves for {CRATE} {v} has no `mcp-name: {name}`; "
+                   "that version can never be registered as a cargo package")
+    ctx.registry.publish(path)
+    remote = ctx.registry.version(name, v)
+    if remote is None:
+        raise StageError(f"published {name} {v}, but the MCP Registry does not list it yet; re-run to verify")
+    if registry_identity(remote) != registry_identity(data):
+        raise Halt(f"the MCP Registry's {name} {v} is not this server.json")
+    return "published", f"{name} {v} to the MCP Registry"
+
+
 STAGE_FUNCS = {
     "draft": stage_draft,
     "crates": stage_crates,
     "npm": stage_npm,
     "publish": stage_publish,
     "plugin": stage_plugin,
+    "registry": stage_registry,
 }
 
 
@@ -1048,11 +1236,11 @@ def make_ctx(args, fake_dir=None):
     manifest = load_manifest(args.dist)
     if fake_dir:
         fake = Fake(fake_dir)
-        github, crates, npm = fake, FakeCrates(fake), FakeNpm(fake)
+        github, crates, npm, registry = fake, FakeCrates(fake), FakeNpm(fake), FakeRegistry(fake)
     else:
         github = RealGitHub(args.repo or os.environ.get("GITHUB_REPOSITORY"))
-        crates, npm = RealCrates(), RealNpm()
-    return Ctx(manifest, args.dist, args.crate, args.repo_root, github, crates, npm, args.plan)
+        crates, npm, registry = RealCrates(), RealNpm(), RealRegistry()
+    return Ctx(manifest, args.dist, args.crate, args.repo_root, github, crates, npm, args.plan, registry)
 
 
 # --------------------------------------------------------------------------
@@ -1082,7 +1270,8 @@ def rehearse(dist, crate_path, repo_root, log=print):
 
     def ctx_for(d, plan=False):
         fake = Fake(d)
-        return fake, Ctx(m, dist, crate_path, repo_root, fake, FakeCrates(fake), FakeNpm(fake), plan)
+        return fake, Ctx(m, dist, crate_path, repo_root, fake, FakeCrates(fake), FakeNpm(fake), plan,
+                         FakeRegistry(fake))
 
     def results_of(results):
         return {r["stage"]: r["result"] for r in results}
