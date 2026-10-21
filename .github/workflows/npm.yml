@@ -1,0 +1,102 @@
+# The npm package (#566): build it the way the release does
+# (scripts/build_npm.sh, the same wasm build as the site's playground), run
+# its API tests, compare the wasm pages with the native renderer's
+# (tests/wasm.rs, which the `test` job skips for want of the wasm target),
+# then install the packed tarball into a fresh project and render with it.
+# build_npm.sh --pack also checks the tarball's file list and size budget.
+#
+# Not in `required_status_checks` (SDLC.md): it starts only when a pull
+# request touches something the package is built from.
+name: npm
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "npm/**"
+      - "src/**"
+      - "lib/**"
+      - "fonts/Liberation*.ttf"
+      - "web/pscat.js"
+      - "build.rs"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "scripts/build_wasm.sh"
+      - "scripts/build_npm.sh"
+      - "scripts/test_npm_tarball.sh"
+      - "scripts/release_stages.py"
+      - "tests/wasm.rs"
+      - "LICENSE-*"
+      - "THIRD_PARTY_NOTICES.md"
+      - "licenses/assets.json"
+      - "about.toml"
+      - "about.hbs"
+      - ".github/workflows/npm.yml"
+  pull_request:
+    paths:
+      - "npm/**"
+      - "src/**"
+      - "lib/**"
+      - "fonts/Liberation*.ttf"
+      - "web/pscat.js"
+      - "build.rs"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "scripts/build_wasm.sh"
+      - "scripts/build_npm.sh"
+      - "scripts/test_npm_tarball.sh"
+      - "scripts/release_stages.py"
+      - "tests/wasm.rs"
+      - "LICENSE-*"
+      - "THIRD_PARTY_NOTICES.md"
+      - "licenses/assets.json"
+      - "about.toml"
+      - "about.hbs"
+      - ".github/workflows/npm.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master; toolchain below
+        with:
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2
+        with:
+          tool: cargo-about
+      # The consumer floor (package.json engines).
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - name: Build and pack (file list, size budget, lockstep version)
+        run: ./scripts/build_npm.sh --pack pack
+      - name: API tests
+        working-directory: npm
+        run: npm test
+      - name: wasm pages match the native renderer
+        run: cargo test --profile ci --test wasm
+      - name: Install the tarball into a fresh project and render
+        run: ./scripts/test_npm_tarball.sh pack/pscat-*.tgz
+      - name: Size
+        run: |
+          {
+            echo '### npm package'
+            echo '```'
+            ls -l pack/*.tgz npm/pscat.wasm
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

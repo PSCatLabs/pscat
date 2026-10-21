@@ -20,6 +20,9 @@
 //
 // Works in node too (no canvas there — use pixels()/width/height):
 //   const ps = await Pscat.instantiate(fs.readFileSync('pscat.wasm'));
+//
+// The npm package (npm/, #566) ships this file as its core.js and wraps
+// it in the documented createRenderer() API.
 
 export class Pscat {
   /** Fetch and instantiate the wasm module (browser path). */
@@ -38,14 +41,43 @@ export class Pscat {
     this.ex = instance.exports;
   }
 
-  /** Queue a program on a fresh page. Throws on unusable page sizes. */
-  begin(source, width = 612, height = 792) {
-    const bytes = new TextEncoder().encode(source);
+  /**
+   * Queue a program (a string, or the bytes of one) on a fresh
+   * width x height point page, at `scale` device pixels per point
+   * (dpi / 72). Throws on unusable page sizes.
+   */
+  begin(source, width = 612, height = 792, scale = 1) {
+    const bytes = typeof source === 'string' ? new TextEncoder().encode(source) : source;
+    const ptr = this.#copyIn(bytes);
+    const rc = scale === 1
+      ? this.ex.ps_begin(ptr, bytes.length, width, height)
+      : this.ex.ps_begin_scaled(ptr, bytes.length, width, height, scale);
+    this.ex.ps_dealloc(ptr, bytes.length);
+    if (rc !== 0) throw new RangeError(`pscat: unusable page size ${width}x${height} at scale ${scale}`);
+  }
+
+  /**
+   * Register a TrueType/OpenType font file's bytes for findfont, under
+   * `name`: a font pack's file stem such as 'EBGaramond-Regular' (which
+   * /Garamond then finds too, as with the installed pack). The face's
+   * own PostScript name finds it as well. Throws if the bytes are not a
+   * font. Fonts stay registered for this module instance.
+   */
+  addFont(name, bytes) {
+    const n = new TextEncoder().encode(name);
+    const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+    const np = this.#copyIn(n);
+    const dp = this.#copyIn(data);
+    const rc = this.ex.ps_add_font(np, n.length, dp, data.length);
+    this.ex.ps_dealloc(np, n.length);
+    this.ex.ps_dealloc(dp, data.length);
+    if (rc !== 0) throw new Error(`pscat: addFont(${name}): ${this.error || 'invalid font name'}`);
+  }
+
+  #copyIn(bytes) {
     const ptr = this.ex.ps_alloc(bytes.length);
     new Uint8Array(this.ex.memory.buffer, ptr, bytes.length).set(bytes);
-    const rc = this.ex.ps_begin(ptr, bytes.length, width, height);
-    this.ex.ps_dealloc(ptr, bytes.length);
-    if (rc !== 0) throw new Error(`pscat: unusable page size ${width}x${height}`);
+    return ptr;
   }
 
   /**
@@ -57,8 +89,8 @@ export class Pscat {
   }
 
   /** begin + run to completion. Returns 0, or -1 with .error set. */
-  run(source, width = 612, height = 792) {
-    this.begin(source, width, height);
+  run(source, width = 612, height = 792, scale = 1) {
+    this.begin(source, width, height, scale);
     let status;
     do {
       status = this.step(1 << 16);

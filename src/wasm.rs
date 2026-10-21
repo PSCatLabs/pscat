@@ -17,7 +17,14 @@
 //!   -2 = no program begun;
 //! - `ps_pixels`/`ps_pixels_len`/`ps_width`/`ps_height` — the live
 //!   canvas, premultiplied RGBA (opaque page, so plain RGBA);
+//! - `ps_begin_scaled(src, len, w, h, scale)` — `ps_begin` at `scale`
+//!   device pixels per point (dpi / 72); -1 also for a scale that is
+//!   not finite and positive;
 //! - `ps_run(src, len, w, h)` — begin + drive to completion;
+//! - `ps_add_font(name, name_len, data, data_len)` — register a font
+//!   file's bytes under `name` (a font pack's file stem) for `findfont`;
+//!   0 = ok, -1 = name not UTF-8, -2 = not a font (report via
+//!   `ps_error_*`). Fonts are per module instance and outlive `ps_begin`;
 //! - `ps_output_ptr`/`ps_output_len` — what the program has printed so
 //!   far (`=`, `==`, `stack`, `pstack`, `print`), UTF-8 as written; a
 //!   wasm32 module has no stdout, so `ps_begin` captures it (#252).
@@ -54,14 +61,63 @@ pub unsafe extern "C" fn ps_dealloc(ptr: *mut u8, len: usize) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn ps_begin(src: *const u8, len: usize, w: u32, h: u32) -> i32 {
     let source = unsafe { std::slice::from_raw_parts(src, len) }.to_vec();
-    let Some(mut it) = Interp::with_page(w, h) else {
+    let Some(it) = Interp::with_page(w, h) else {
         return -1;
     };
+    install(it, &source);
+    0
+}
+
+/// # Safety
+/// Same contract as [`ps_begin`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ps_begin_scaled(
+    src: *const u8,
+    len: usize,
+    w: u32,
+    h: u32,
+    scale: f32,
+) -> i32 {
+    if !(scale.is_finite() && scale > 0.0) {
+        return -1;
+    }
+    let source = unsafe { std::slice::from_raw_parts(src, len) }.to_vec();
+    let Some(it) = Interp::with_page_scaled(w, h, scale) else {
+        return -1;
+    };
+    install(it, &source);
+    0
+}
+
+fn install(mut it: Interp, source: &[u8]) {
     it.capture_stdout();
-    it.begin_source(&source);
+    it.begin_source(source);
     INTERP.with(|s| *s.borrow_mut() = Some(it));
     ERROR.with(|e| e.borrow_mut().clear());
-    0
+}
+
+/// # Safety
+/// `name..name+name_len` and `data..data+data_len` must be readable
+/// (`ps_alloc` buffers the caller filled).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ps_add_font(
+    name: *const u8,
+    name_len: usize,
+    data: *const u8,
+    data_len: usize,
+) -> i32 {
+    let name = unsafe { std::slice::from_raw_parts(name, name_len) };
+    let Ok(name) = std::str::from_utf8(name) else {
+        return -1;
+    };
+    let data = unsafe { std::slice::from_raw_parts(data, data_len) }.to_vec();
+    match crate::font::register_font_bytes(name, data) {
+        Ok(_) => 0,
+        Err(msg) => {
+            ERROR.with(|e| *e.borrow_mut() = msg.into_bytes());
+            -2
+        }
+    }
 }
 
 #[unsafe(no_mangle)]

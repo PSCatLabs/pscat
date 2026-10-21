@@ -46,6 +46,17 @@ def make_crate(path, commit=COMMIT, extra=b"", mtime=0, generated=b"", orig=True
             tar.addfile(info, io.BytesIO(data))
 
 
+def make_npm_tarball(path, name="pscat-wasm", version=VERSION, extra=b""):
+    """A minimal npm tarball: package/package.json (+ `extra` in a file)."""
+    files = {"package/package.json": json.dumps({"name": name, "version": version}).encode(),
+             "package/index.js": b"export {};\n" + extra}
+    with tarfile.open(path, "w:gz") as tar:
+        for n, data in sorted(files.items()):
+            info = tarfile.TarInfo(n)
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+
+
 def make_dist(tmp, commit=COMMIT, payload=b"binary"):
     dist = os.path.join(tmp, "dist")
     os.makedirs(dist, exist_ok=True)
@@ -309,10 +320,15 @@ class Mismatch(Base):
 
 
 class Channels(Base):
-    def _npm(self, version=VERSION):
+    def _npm(self, version=VERSION, tarball=True, tarball_version=None):
         os.makedirs(os.path.join(self.repo, "npm"), exist_ok=True)
         with open(os.path.join(self.repo, "npm", "package.json"), "w", encoding="utf-8") as f:
             json.dump({"name": "pscat-wasm", "version": version}, f)
+        if tarball:  # where verify packs it: beside the .crate
+            make_npm_tarball(self._tarball(), version=tarball_version or version)
+
+    def _tarball(self):
+        return os.path.join(os.path.dirname(self.crate), f"pscat-wasm-{VERSION}.tgz")
 
     def test_npm_runs_only_when_npm_package_exists(self):
         st, r, _ = self.run_all()
@@ -336,6 +352,71 @@ class Channels(Base):
         self._npm("0.0.1")
         st, r, _ = self.run_all()
         self.assertEqual((st, r["npm"]), (rs.EXIT_HALT, "halted"))
+
+    def test_npm_publishes_the_tarball_beside_the_crate(self):
+        self._npm()
+        st, r, _ = self.run_all(plan=True)
+        self.assertEqual((st, r["npm"]), (rs.EXIT_OK, "would publish"))
+        self.assertEqual(self.fake.npm_view("pscat-wasm", VERSION), None)
+        st, r, _ = self.run_all()
+        self.assertEqual((st, r["npm"]), (rs.EXIT_OK, "published"))
+        self.assertEqual(self.fake.npm_view("pscat-wasm", VERSION)["integrity"], rs.npm_integrity(self._tarball()))
+        # A rebuilt tarball with other bytes at a published version halts.
+        make_npm_tarball(self._tarball(), extra=b"// rebuilt\n")
+        st, r, _ = self.run_all()
+        self.assertEqual((st, r["npm"]), (rs.EXIT_HALT, "halted"))
+
+    def test_npm_without_its_tarball_halts(self):
+        self._npm(tarball=False)
+        st, r, res = self.run_all()
+        self.assertEqual((st, r["npm"], r["publish"]), (rs.EXIT_HALT, "halted", "not run"))
+        self.assertIn("no npm tarball", {x["stage"]: x["detail"] for x in res}["npm"])
+
+    def test_npm_tarball_of_another_version_halts(self):
+        self._npm(tarball_version="0.0.1")
+        st, r, _ = self.run_all()
+        self.assertEqual((st, r["npm"]), (rs.EXIT_HALT, "halted"))
+
+    def test_npm_tarball_name(self):
+        self.assertEqual(rs.npm_tarball_name("pscat", "0.6.2"), "pscat-0.6.2.tgz")
+        self.assertEqual(rs.npm_tarball_name("@pscat/wasm", "1.0.0"), "pscat-wasm-1.0.0.tgz")
+
+    @unittest.skipUnless(shutil.which("npm"), "npm not installed")
+    def test_npm_integrity_is_what_npm_computes(self):
+        pkg = os.path.join(self.tmp, "pkg")
+        os.makedirs(pkg)
+        with open(os.path.join(pkg, "package.json"), "w", encoding="utf-8") as f:
+            json.dump({"name": "integrity-check", "version": "1.0.0"}, f)
+        out = subprocess.run(["npm", "pack", "--json", "--pack-destination", self.tmp], cwd=pkg,
+                             capture_output=True, text=True, check=True).stdout
+        info = json.loads(out)[0]
+        self.assertEqual(rs.npm_integrity(os.path.join(self.tmp, info["filename"])), info["integrity"])
+
+    def test_npm_manifest_is_bumped(self):
+        self._npm("0.0.1", tarball=False)
+        changed = rs.bump_manifests_json_only(self.repo, VERSION)
+        self.assertEqual(changed, [os.path.join("npm", "package.json")])
+        with open(os.path.join(self.repo, "npm", "package.json"), encoding="utf-8") as f:
+            self.assertEqual(json.load(f)["version"], VERSION)
+
+    def test_the_repo_npm_package_moves_in_lockstep(self):
+        # The real npm/package.json: Cargo.toml's version, and a bump
+        # rewrites only its version line (json.dump keeps its layout).
+        path = rs.npm_manifest()
+        self.assertIsNotNone(path)
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+        self.assertEqual(json.loads(text)["version"], rs.cargo_version(),
+                         "npm/package.json and Cargo.toml must carry the same version")
+        os.makedirs(os.path.join(self.repo, "npm"))
+        copy = os.path.join(self.repo, "npm", "package.json")
+        with open(copy, "w", encoding="utf-8") as f:
+            f.write(text)
+        rs.bump_manifests_json_only(self.repo, "99.0.0")
+        with open(copy, encoding="utf-8") as f:
+            bumped = f.read()
+        old_v = json.loads(text)["version"]
+        self.assertEqual(bumped, text.replace(f'"version": "{old_v}"', '"version": "99.0.0"', 1))
 
     def test_plugin_manifest_versions(self):
         d = os.path.join(self.repo, "plugins", "pscat", ".claude-plugin")
@@ -453,6 +534,11 @@ class ReleaseScript(unittest.TestCase):
         self.assertEqual(rs.cargo_version(self.clone), "99.0.0")
         with open(os.path.join(self.clone, "Cargo.lock"), encoding="utf-8") as f:
             self.assertIn('name = "pscat"\nversion = "99.0.0"', f.read())
+        with open(os.path.join(self.clone, "npm", "package.json"), encoding="utf-8") as f:
+            self.assertEqual(json.load(f)["version"], "99.0.0")
+        changed = subprocess.run(["git", "-C", self.clone, "show", "--name-only", "--format=", "HEAD"],
+                                 capture_output=True, text=True, check=True).stdout.split()
+        self.assertIn("npm/package.json", changed)
         with open(os.path.join(self.clone, "CHANGELOG.md"), encoding="utf-8") as f:
             text = f.read()
         self.assertIn("## [99.0.0]", text)

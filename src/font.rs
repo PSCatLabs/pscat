@@ -195,14 +195,34 @@ pub(crate) fn resolve(requested: &str) -> Result<i64, String> {
             return Err(hint);
         }
     }
+    // wasm has no disk catalog; its catalog is only the faces the caller
+    // registered with `register_font_bytes` (the npm package's
+    // `addFont`, #566). Same stems as the disk lookup, so an alias like
+    // `/Garamond` finds an `EBGaramond-Regular` registered under that name.
+    #[cfg(target_arch = "wasm32")]
+    {
+        let (stem, fallback) = wanted_stems(requested);
+        if let Some(fid) = loaded_fid(stem, requested).or_else(|| loaded_fid(&fallback, requested))
+        {
+            return Ok(fid);
+        }
+    }
     Ok(SUBSTITUTE)
+}
+
+/// The FID of an already-registered catalog face whose key is `want`
+/// (case-insensitively) or whose PostScript name is `requested`.
+fn loaded_fid(want: &str, requested: &str) -> Option<i64> {
+    let cat = CATALOG.read().unwrap();
+    cat.iter()
+        .position(|c| c.key.eq_ignore_ascii_case(want) || c.ps_name == requested)
+        .map(|i| (BUILTINS.len() + i) as i64)
 }
 
 /// The file stems a requested name is looked up by: the alias target
 /// (or the name itself), then that with `-Regular`, so `/Bangers
 /// findfont` means the family's regular face. Shared by the lookup and
 /// the missing-pack check so the two cannot disagree.
-#[cfg(not(target_arch = "wasm32"))]
 fn wanted_stems(requested: &str) -> (&str, String) {
     let stem = ALIASES
         .iter()
@@ -248,14 +268,8 @@ fn catalog_roots() -> Vec<std::path::PathBuf> {
 #[cfg(not(target_arch = "wasm32"))]
 fn catalog_fid(requested: &str) -> Option<i64> {
     let (stem, fallback) = wanted_stems(requested);
-    {
-        let cat = CATALOG.read().unwrap();
-        if let Some(i) = cat
-            .iter()
-            .position(|c| c.key.eq_ignore_ascii_case(stem) || c.ps_name == requested)
-        {
-            return Some((BUILTINS.len() + i) as i64);
-        }
+    if let Some(fid) = loaded_fid(stem, requested) {
+        return Some(fid);
     }
     let roots = catalog_roots();
     let mut found: Option<std::path::PathBuf> = None;
@@ -303,6 +317,38 @@ fn catalog_fid(requested: &str) -> Option<i64> {
 fn load_catalog_face(path: &std::path::Path) -> Option<i64> {
     let key = path.file_stem()?.to_str()?.to_string();
     let data: &'static [u8] = Box::leak(std::fs::read(path).ok()?.into_boxed_slice());
+    register_face(key, data)
+}
+
+/// Register a font file's bytes as a catalog face under `name`, the
+/// way a file `<name>.ttf` in a font pack would load: `name` is the
+/// lookup key (so the pack's file stem, e.g. `NotoSansKR-Regular`,
+/// gets the same aliases and encoding as the installed pack would),
+/// and the face's own PostScript name also finds it. This is how the
+/// wasm build, which has no disk, gets faces beyond the embedded
+/// Liberation core (`ps_add_font`, the npm package's `addFont`, #566).
+///
+/// Registering a name that is already loaded keeps the first face and
+/// returns its FID. `Err` when the bytes are not a font. The bytes are
+/// leaked like every catalog face's (process lifetime, loaded once).
+#[cfg_attr(not(any(target_arch = "wasm32", test)), allow(dead_code))]
+pub(crate) fn register_font_bytes(name: &str, data: Vec<u8>) -> Result<i64, String> {
+    if name.is_empty() {
+        return Err("empty font name".to_string());
+    }
+    if let Some(fid) = loaded_fid(name, name) {
+        return Ok(fid);
+    }
+    if Face::parse(&data, 0).is_err() {
+        return Err(format!("{name}: not a TrueType/OpenType font"));
+    }
+    let data: &'static [u8] = Box::leak(data.into_boxed_slice());
+    register_face(name.to_string(), data).ok_or_else(|| format!("{name}: cannot parse the font"))
+}
+
+/// Parse, pin a variable font to Regular, classify, register. Shared by
+/// the disk catalog and `register_font_bytes`.
+fn register_face(key: String, data: &'static [u8]) -> Option<i64> {
     let mut boxed = Box::new(Face::parse(data, 0).ok()?);
     // Some catalog files are variable fonts whose *default* named
     // instance isn't Regular — Noto Sans KR/JP ship with wght's default
@@ -1433,5 +1479,22 @@ mod tests {
         for name in ["Helvetica", "Courier-Bold", "NoSuchFace", "Arial"] {
             assert_eq!(missing_face_hint(name), None, "{name}");
         }
+    }
+
+    /// `register_font_bytes` (the wasm `ps_add_font`): a registered face
+    /// resolves by its key, a second registration keeps the first, and
+    /// bytes that are not a font are refused.
+    #[test]
+    fn registered_font_bytes_resolve_by_name() {
+        let bytes = BUILTINS[0].data.to_vec();
+        let fid = register_font_bytes("PscatRegisterTest-Regular", bytes.clone()).unwrap();
+        assert!(fid >= BUILTINS.len() as i64);
+        assert_eq!(resolve("PscatRegisterTest-Regular"), Ok(fid));
+        assert_eq!(
+            register_font_bytes("pscatregistertest-regular", bytes),
+            Ok(fid)
+        );
+        assert!(register_font_bytes("PscatRegisterJunk", b"not a font".to_vec()).is_err());
+        assert!(register_font_bytes("", BUILTINS[0].data.to_vec()).is_err());
     }
 }

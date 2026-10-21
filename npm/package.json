@@ -1,0 +1,59 @@
+{
+  "name": "pscat",
+  "version": "0.6.1",
+  "description": "A PostScript interpreter in WebAssembly: render PostScript to pixels in the browser or Node, step by step if you like",
+  "keywords": [
+    "postscript",
+    "interpreter",
+    "wasm",
+    "webassembly",
+    "canvas",
+    "graphics",
+    "generative-art"
+  ],
+  "homepage": "https://pscatlabs.github.io/pscat/",
+  "bugs": {
+    "url": "https://github.com/PSCatLabs/pscat/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PSCatLabs/pscat.git",
+    "directory": "npm"
+  },
+  "license": "(MIT OR Apache-2.0) AND OFL-1.1",
+  "author": "Jerome Banks",
+  "type": "module",
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "node": "./node.js",
+      "default": "./index.js"
+    },
+    "./pscat.wasm": "./pscat.wasm",
+    "./package.json": "./package.json"
+  },
+  "main": "./node.js",
+  "types": "./index.d.ts",
+  "files": [
+    "index.js",
+    "node.js",
+    "renderer.js",
+    "core.js",
+    "index.d.ts",
+    "pscat.wasm",
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+    "LICENSE-OFL",
+    "fonts/LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "THIRD_PARTY_LICENSES.html",
+    "licenses/assets.json"
+  ],
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
+}
