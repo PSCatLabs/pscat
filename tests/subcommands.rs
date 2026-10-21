@@ -340,12 +340,31 @@ fn typewrite_refuses_an_output_name_it_cannot_pick_a_format_for() {
         .current_dir(&dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    // stdin stays open: reading it first would block forever
-    assert_eq!(child.wait().unwrap().code(), Some(1));
-    drop(child.stdin.take());
+    // Held open: wait() would close it, and a read-first order would then see
+    // EOF and fail with another message. A hang is cut off after 10 s.
+    let stdin = child.stdin.take();
+    let start = std::time::Instant::now();
+    let status = loop {
+        if let Some(s) = child.try_wait().unwrap() {
+            break s;
+        }
+        if start.elapsed() > std::time::Duration::from_secs(10) {
+            let _ = child.kill();
+            panic!("typewrite blocked reading stdin before checking -o");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    };
+    assert_eq!(status.code(), Some(1));
+    let mut err = String::new();
+    std::io::Read::read_to_string(&mut child.stderr.take().unwrap(), &mut err).unwrap();
+    assert!(
+        err.contains("--out must end in .png, .svg, or .pdf"),
+        "{err}"
+    );
+    drop(stdin);
     let left: Vec<_> = std::fs::read_dir(&dir).unwrap().collect();
     assert!(left.is_empty(), "files written: {left:?}");
 

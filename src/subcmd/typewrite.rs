@@ -37,7 +37,7 @@ const USAGE: &str = r#"usage: pscat typewrite [options] [FILE | -]      (text fr
       --width N         page width in points (default 612)
       --height N|fit    page height in points, or "fit" to size the page to
                         its text (default 792); longer text runs onto more
-                        pages (PNG, SVG: out-001.png, out-002.png, ...)
+                        pages (PNG/SVG: out-001.png or out-001.svg, ...)
       --margin N        all four margins in points (default 72)
       --margin-left N  --margin-right N  --margin-top N  --margin-bottom N
       --spacing F       1 single, 1.5, 2 double (default 1)
