@@ -249,6 +249,12 @@ EXPECTED=""      # newline-separated --expect-diff paths
 if [ -n "$EXPECT_LIST" ]; then
     EXPECTED=$(read_list --expect-diff "$EXPECT_LIST") || exit 64
     [ -n "$EXPECTED" ] || die "--expect-diff list '$EXPECT_LIST' names no file"
+    # A file new in the branch has no base render, so it can never show its difference.
+    while IFS= read -r f; do
+        [ -f "$BASE/$f" ] || die "--expect-diff: $f is new in this branch (not in the base tree), so there is nothing to compare"
+    done <<EOF_EXPECTED
+$EXPECTED
+EOF_EXPECTED
 fi
 # No fork: this runs once per compared page.
 is_expected() {
@@ -341,10 +347,9 @@ mkdir -p "$OUT/base" "$OUT/head"
 
 FAILED=0
 CONTROL_FAILED=0
-DROP_SCRATCH=0   # a usage error found after the scratch exists: nothing rendered, keep nothing
 cleanup() {
     local rc=$?   # any nonzero exit (a diff, a bad control, a harness error) keeps the logs
-    if [ "$KEEP" -eq 0 ] && { [ "$rc" -eq 0 ] || [ "$DROP_SCRATCH" -eq 1 ]; }; then
+    if [ "$KEEP" -eq 0 ] && [ "$rc" -eq 0 ]; then
         rm -rf "$OUT"
     else
         echo "scratch renders kept in $OUT" >&2
@@ -453,21 +458,6 @@ queue() { # file
 while IFS= read -r f; do case "$f" in gallery/*) queue "$f" ;; esac; done < "$FILES"
 while IFS= read -r f; do case "$f" in gallery/*) ;; *) queue "$f" ;; esac; done < "$FILES"
 
-# An --expect-diff file that is new in the branch has no base render, so it can never
-# show its difference: a usage error.
-if [ -n "$EXPECTED" ]; then
-    DROP_SCRATCH=1
-    while IFS= read -r f; do
-        [ -n "$f" ] || continue
-        if grep -qxF -- "$f" "$NEWFILES"; then
-            die "--expect-diff: $f is new in this branch (not in the base tree), so there is nothing to compare"
-        fi
-    done <<EOF_EXPECTED
-$EXPECTED
-EOF_EXPECTED
-    DROP_SCRATCH=0
-fi
-
 CONTROL_KEY="__control__"
 if [ -n "$CONTROL" ]; then
     cpage=$CONTROL_PAGE
@@ -547,8 +537,9 @@ compare_one() {
         return 1
     fi
     if [ "$brc" != "0" ]; then
-        # A deliberate fix: the base failed, the branch renders. Expected, if listed.
-        if is_expected "$label" && [ -n "$hl" ] && [ -z "${brc//[0-9]/}" ]; then
+        # A deliberate fix: the base raised an error, the branch renders. Expected, if listed.
+        # Only a PostScript error in the base counts, not a crash or a broken base setup.
+        if is_expected "$label" && [ -n "$hl" ] && [ -z "${brc//[0-9]/}" ] && grep -q 'Error' "$b/log" 2>/dev/null; then
             echo "EXPECTED   $label (pscat exited $brc in the base tree and renders in the branch; --expect-diff)"
             nexpected=$((nexpected + 1))
             return 0

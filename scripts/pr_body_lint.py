@@ -52,7 +52,7 @@ BEFORE = re.compile(
 # "fix #12 isn't complete", "fixes #12's first half". Only at the start of what
 # follows, so "fixes #12 (curveto is not closed)" (the bug, not the fix) passes.
 AFTER = re.compile(
-    r"^(?:'s)?\W*(?:only\s+)?(?:partially|partly|in part|for now|halfway|"
+    r"^(?:'s)?\W*(?:only\s+)?(?:partial|partially|partly|in part|for now|halfway|"
     r"(?:is\s+)?not\s+(?:yet\s+)?(?:fully|completely|entirely|done|complete|finished)|"
     r"isn't\s+(?:yet\s+)?(?:fully\s+)?(?:done|complete|finished|fixed)|only\s+(?:some|part))\b",
     re.IGNORECASE,
@@ -105,8 +105,9 @@ def findings(text, source="body"):
     text = re.sub("[\u2018\u2019\u02bc]", "'", strip_hidden(text))
     prev = ""
     for lineno, line in enumerate(text.splitlines(), 1):
-        # A list item's text continues only on an indented line below it.
-        if BLOCK_START.match(line) or (BLOCK_START.match(prev) and not line[:1].isspace()):
+        # A new block never continues the line above; a list item's text may (Markdown's
+        # lazy continuation), and a cue must sit right before the keyword anyway.
+        if BLOCK_START.match(line):
             carry = ""
         else:
             carry = carried_tail(prev)

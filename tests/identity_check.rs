@@ -411,7 +411,7 @@ fn an_expected_file_with_no_base_render_is_a_usage_error() {
     let t = text(&o);
     assert_eq!(o.status.code(), Some(64), "{t}");
     assert!(t.contains("is new in this branch"), "{t}");
-    assert!(!t.contains("scratch renders kept"), "{t}");
+    assert!(!t.contains("scratch renders kept"), "{t}"); // refused before any scratch exists
     // Untracked: refused before anything renders.
     let list = expect_list(&su, &["examples/no_such_file.ps"]);
     let mut args = both_bins(&su);

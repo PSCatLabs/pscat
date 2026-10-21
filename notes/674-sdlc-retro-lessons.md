@@ -22,7 +22,8 @@ dispatcher run. Process and docs only, plus two small tools; no render changes.
   `SKILL.md` stays at 250 lines.
 - `scripts/identity_check.sh --expect-diff LIST`: listed files may differ
   (`EXPECTED`), a listed file that comes out identical fails (`UNCHANGED`), a
-  listed file outside the compared set is a usage error.
+  listed file is compared even when the pick leaves it out, and one that is new
+  in the branch (no base render) is a usage error.
 - `scripts/pr_body_lint.py` and the `pr-body` workflow: a closing keyword in a
   negated or partial sentence ("does not fix #N") fails. Run over the last 200
   PR bodies it flags one, and it is real (PR #438, whose merge closed an issue it said it left open).

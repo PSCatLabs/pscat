@@ -30,6 +30,8 @@ Mechanical first, judgement only for `src/`:
 - It changes a committed render output: `gallery/renders/`, or a specimen image under `docs/` that the
   gallery manifest or a guide shows. Illustrations in `notes/`, design evidence and the review log's own
   crops are not render outputs.
+- It touches anything under `lib/fonts/` or `lib/styles/` (faces, style packs, their `specimen*.png`):
+  visible. `--loader` does not search those subdirectories.
 - It touches `lib/<name>.ps`, `gallery/*.ps`, `examples/*.ps` or `selftest/drivers/`: visible, unless
   `scripts/identity_check.sh` (pitfalls.md "Step 5 checklist" item 4) reports every page identical
   **without** `--expect-diff`, over a pick that covers every file the change can reach: `--loader` for
@@ -37,7 +39,8 @@ Mechanical first, judgement only for `src/`:
   `--expect-diff` is visible by definition.
 - It touches `src/`: run the two-binary identity check (`--base-bin/--head-bin`) over the whole corpus,
   `--files` listing every tracked `examples/*.ps`, `gallery/*.ps` and `selftest/drivers/*.ps`, whatever
-  the change looks like. Identical means tier (a); anything else is visible. The implementer's belief
+  the change looks like, with a `--control` that only the head binary renders differently. Identical
+  with a holding control means tier (a); anything else, or a run without a control, is visible. The implementer's belief
   that a change cannot reach pixels is not a check.
 - It touches `fonts/`: visible. No loader picks the files a font reaches.
 

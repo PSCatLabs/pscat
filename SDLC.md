@@ -133,7 +133,8 @@ it is judged by.
   perceptual check, then merges per
   `merge_policy.mode`. The owner reads the whole log once, before the next
   release, and a rejected entry becomes a revert or a fix ticket. A PR that
-  fails the review twice goes to the owner as in (c).
+  fails the review twice goes to the owner: the agent waits for green CI,
+  puts a Decision block atop the PR body, and stops.
 - **(c) Owner paths.** A PR that touches a `.github/CODEOWNERS` path: the
   owner merges it. The agent waits for CI to go green, puts a **Decision**
   block at the top of the PR body (what to look at, the choice, a

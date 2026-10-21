@@ -331,7 +331,7 @@ Cheapest first, before the long gate:
    base worktree for step 9's `EXTRA_WORKTREES` (the binary in `<SCRATCH>` dies with the session).
    **An intended visible change (#674):** `--expect-diff LIST` (tracked paths, one per line) lets the listed
    files differ (`EXPECTED` lines) and fails if one of them comes out identical (`UNCHANGED`: the change did
-   not take effect) or is not in the compared set (exit 64). Every other file must still be identical. A run
+   not take effect). A listed file is compared even if the pick leaves it out; one new in the branch exits 64. Every other file must still be identical. A run
    that needed it is a tier (b) visible change (perceptual-review.md); without it, identical means tier (a).
    Timing guard (not a goal): `scripts/bench_compare.sh BASE_BIN HEAD_BIN FILE [N]` prints CPU
    min/median for base, head and an identical-binary control. It is fine to stop a running bench
