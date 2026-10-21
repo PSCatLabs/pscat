@@ -7,6 +7,7 @@ quality_gate: "PSCAT_PROFILE=ci ./scripts/selftest.sh && cargo test --profile ci
 merge_policy:
   mode: agent-full
   owner_merge_file: .github/CODEOWNERS
+  bot_merge_authors: [app/dependabot]
 required_status_checks:
   - test
 branch_protection:
@@ -106,6 +107,19 @@ then stops and reports the PR as awaiting the owner's merge.
 The rule in force is the one on `main`: the agent reads `merge_policy.owner_merge_file` from
 `SDLC.md` as it is on `main`, so a PR that removes the field is still owner-merged, and the PR
 that first adds the field is judged by the policy before it.
+
+**One standing exception: PRs opened by `app/dependabot`**
+(`merge_policy.bot_merge_authors`). The owner has authorised agents to merge
+these once CI is green, even when they touch `.github/CODEOWNERS` paths
+(`Cargo.lock`, `.github/workflows/`). The exception covers only the bot's
+own, unmodified commits; if an agent pushes a fix onto one, the owner merges
+it. Two timing rules apply:
+
+- Don't merge one between opening a release PR and pushing its tag, since
+  it would land on `main` without appearing in that release's changelog.
+- Merge bumps to actions the release workflows run (`setup-node`,
+  `upload-artifact`, `download-artifact`, and the like) when no release is
+  in flight, so a release never runs on actions that haven't run in CI first.
 
 This is enforced by the agent's skill, **not by GitHub**. Turning on "Require
 review from Code Owners" would need at least one required approval, which a

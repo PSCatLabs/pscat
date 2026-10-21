@@ -24,6 +24,7 @@ merge_policy:
     - <path glob>
     - <path glob>
   owner_merge_file: .github/CODEOWNERS   # optional, any mode: PRs touching a path it lists are owner-merged
+  bot_merge_authors: [app/dependabot]    # optional: bots whose PRs agents may merge despite owner_merge_file
 required_status_checks:
   - <ci job name>
 branch_protection:
@@ -130,6 +131,19 @@ awaiting the owner's merge.
 The rule in force is the one on `<default_branch>`: the agent reads `merge_policy.owner_merge_file`
 from `SDLC.md` as it is on `<default_branch>`, so a PR that removes the field is still
 owner-merged, and the PR that first adds the field is judged by the policy before it.
+
+<!-- Include this paragraph and list only when merge_policy.bot_merge_authors is set. -->
+**One standing exception: PRs opened by `<bot_merge_authors>`.** The owner
+has authorised agents to merge these once CI is green, even when they touch
+`<owner_merge_file>` paths. The exception covers only the bot's own,
+unmodified commits; if an agent pushes a fix onto one, the owner merges it.
+Two timing rules apply:
+
+- Don't merge one between opening a release PR and pushing its tag, since
+  it would land on `<default_branch>` without appearing in that release's
+  changelog.
+- Merge bumps to actions the release workflows run when no release is in
+  flight, so a release never runs on actions that haven't run in CI first.
 
 This is enforced by the agent's skill, **not by GitHub**. Turning on "Require
 review from Code Owners" would need at least one required approval, which a
