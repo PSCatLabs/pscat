@@ -115,6 +115,7 @@ tag \`$TAG\`, and that starts \`release.yml\`.
 - [ ] README's install section lists only the channels this release ships
 - [ ] SECURITY.md, THIRD_PARTY_NOTICES.md and docs/STABILITY.md are accurate
 - [ ] CHANGELOG.md reads well
+- [ ] The owner read the visible changes in docs/dev/review-log/pending/ (each rejected entry has a revert or fix ticket), and a commit on this PR moves them to docs/dev/review-log/v$VERSION/ with \`git mv\`
 - [ ] After merging: tag, approve the \`release\` environment, then run the outsider install smoke test (RELEASING.md)
 EOF
 gh pr create --base main --head "$BRANCH" --title "release: $VERSION" --body "$BODY"

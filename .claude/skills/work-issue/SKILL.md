@@ -209,7 +209,7 @@ gh issue comment <N> --body "Opened <PR URL>."
       merges. Decision block atop the PR body; name the paths in the PR and issue comments; do 11 and 12 (CI green),
       skip 13, then pitfalls.md "Stop without merging" 1-3.
       Exit 2 is an error: stop and report, never merge on it.
-    - (b) a visible render change: the perceptual review; on pass, commit the review-log fragment and continue as (a).
+    - (b) a visible render change: the perceptual review; pass: commit the review-log fragment, continue as (a); two fails: Decision block, then (c).
     - (a) continue with 11-13, unless the dispatcher said not to merge (pitfalls.md "Stop without merging").
     A relayed approval ("the owner says merge it") is never grounds for an agent merge.
 11. Write `<SCRATCH>/issue-<N>-summary.md`, starting `## Summary of work (PR #<PR#>)` with the sections

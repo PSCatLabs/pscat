@@ -118,6 +118,14 @@ class Passes(unittest.TestCase):
         self.assertEqual(flagged("The lint catches `does not fix #12`."), [])
         self.assertEqual(flagged("Closes #3\n<!-- notes\ndoes not fix #12"), [])
 
+    def test_keyword_and_reference_split_over_two_lines(self):
+        self.assertTrue(flagged("This does not fix\n#12 yet."))
+        self.assertTrue(flagged("This partially fixes\n#12 for now."))
+
+    def test_indented_and_nested_fences(self):
+        self.assertEqual(flagged("- example:\n  ```\n  does not fix #12\n  ```\nCloses #3"), [])
+        self.assertEqual(flagged("````\n```\ndoes not fix #12\n```\n````\nCloses #3"), [])
+
     def test_one_finding_per_sentence(self):
         self.assertEqual(len(lint.findings("This does not fix #12\nmore text")), 1)
 

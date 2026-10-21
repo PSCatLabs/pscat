@@ -341,9 +341,10 @@ mkdir -p "$OUT/base" "$OUT/head"
 
 FAILED=0
 CONTROL_FAILED=0
+DROP_SCRATCH=0   # a usage error found after the scratch exists: nothing rendered, keep nothing
 cleanup() {
     local rc=$?   # any nonzero exit (a diff, a bad control, a harness error) keeps the logs
-    if [ "$KEEP" -eq 0 ] && [ "$rc" -eq 0 ]; then
+    if [ "$KEEP" -eq 0 ] && { [ "$rc" -eq 0 ] || [ "$DROP_SCRATCH" -eq 1 ]; }; then
         rm -rf "$OUT"
     else
         echo "scratch renders kept in $OUT" >&2
@@ -453,6 +454,7 @@ while IFS= read -r f; do case "$f" in gallery/*) ;; *) queue "$f" ;; esac; done 
 # Every --expect-diff file must be one this run compares: a path the pick left out, or
 # one that is new in the branch, can never show its difference, so it is a usage error.
 if [ -n "$EXPECTED" ]; then
+    DROP_SCRATCH=1
     while IFS= read -r f; do
         [ -n "$f" ] || continue
         if grep -qxF -- "$f" "$NEWFILES"; then
@@ -463,6 +465,7 @@ if [ -n "$EXPECTED" ]; then
     done <<EOF_EXPECTED
 $EXPECTED
 EOF_EXPECTED
+    DROP_SCRATCH=0
 fi
 
 CONTROL_KEY="__control__"

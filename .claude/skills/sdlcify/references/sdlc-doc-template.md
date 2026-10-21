@@ -145,7 +145,8 @@ it is judged by.
 
 - **(a) No visible change.** A change proven not to alter any render (an
   identity check comes out byte-identical) or one that cannot reach a render
-  (docs, tests, scripts, code outside the render path): the agent merges it
+  (docs, tests, scripts, CI; a change to rendering code or assets counts only
+  when an identity check proves it): the agent merges it
   per `merge_policy.mode`, once CI is green and the independent review is
   clean.
 - **(b) Visible render change.** No owner approval mid-cycle. An

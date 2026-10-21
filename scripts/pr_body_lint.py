@@ -40,8 +40,8 @@ CLOSE_RE = re.compile(
 # overflow and fixes #12" closes #12 correctly and must pass.
 FILLER = r"(?:(?:fully|completely|entirely|yet|really|quite|actually|totally|all)\s+){0,2}"
 BEFORE = re.compile(
-    r"(?:\b(?:not|never|cannot|no longer|partially|partly|helps?|towards?|almost|nearly|half|in part"
-    r"|part of|some of|(?:begins?|starts?|helped|helps?) to)|n't)\s+" + FILLER + r"$",
+    r"(?:\b(?:not|never|cannot|no longer|partially|partly|help(?:s|ed)?(?:\s+to)?|towards?|almost|nearly|"
+    r"half|in part|part of|some of|(?:begins?|starts?)\s+to)|n't)\s+" + FILLER + r"$",
     re.IGNORECASE,
 )
 
@@ -69,7 +69,9 @@ def strip_hidden(text):
     HTML comments (an unterminated one hides the rest of the body), fenced code
     blocks and inline code. Line numbers are kept."""
     text = re.sub(r"<!--.*?(?:-->|\Z)", _blank, text, flags=re.S)
-    text = re.sub(r"^(```|~~~).*?(?:^\1[^\n]*$|\Z)", _blank, text, flags=re.S | re.M)
+    # A fence may be indented (inside a list item) and closes only on a fence of
+    # the same character at least as long, so ```` can wrap a ``` example.
+    text = re.sub(r"^[ \t]*(`{3,}|~{3,}).*?(?:^[ \t]*\1[`~]*[ \t]*$|\Z)", _blank, text, flags=re.S | re.M)
     return re.sub(r"`[^`\n]*`", _blank, text)
 
 
@@ -112,7 +114,7 @@ def findings(text, source="body"):
             if k == 0:
                 sentence, skip = carry + sentence, len(carry)
             for m in CLOSE_RE.finditer(sentence):
-                if m.start() < skip:  # the previous line's own closer: already checked there
+                if m.end() <= skip:  # the previous line's own closer: already checked there
                     continue
                 cue = BEFORE.search(sentence[: m.start()])
                 if cue:
