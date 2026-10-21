@@ -43,6 +43,7 @@ merge_button:
   delete_branch_on_merge: true
 light_gate:                  # optional: the local gate for a PR whose every changed path matches `paths`; CI still runs everything
   paths: ["*.md", "*.png", "*.jpg", "notes/*"]   # globs; `*` also matches `/`
+  exclude: [<globs of docs that tests execute>]  # optional: a match here needs the full gate
   command: <a fast check, e.g. a Markdown link check>
 dispatch_doc: <path>         # optional: how a dispatcher session runs many issues with agents
 release:                     # optional; absent means no release section
@@ -76,8 +77,8 @@ it to GitHub.
    own order; the string is what to run locally, with the same result.)
    <!-- Include this sentence only when light_gate is set. -->
    **Light gate:** a PR whose every changed path matches `light_gate.paths`
-   (`<paths>`) runs `<light_gate.command>` locally instead; CI still runs
-   the full gate on it.
+   (`<paths>`) and none matches `light_gate.exclude` (`<exclude>`) runs
+   `<light_gate.command>` locally instead; CI still runs the full gate on it.
 6. **Diff reviewed** before the PR is called done — a second look at the
    actual changes, not just the plan.
 7. **Open the PR**, referencing the issue (`Closes #N`; `Refs #N` for

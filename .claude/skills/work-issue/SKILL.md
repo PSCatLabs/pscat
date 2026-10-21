@@ -167,9 +167,8 @@ Closes #<N>
 - [x] PSCAT_PROFILE=ci ./scripts/selftest.sh && cargo test --profile ci && cargo clippy --all-targets -- -D warnings && cargo fmt --all -- --check
 <+ whatever else was actually run/verified>
 EOF
-python3 scripts/pr_body_lint.py <SCRATCH>/pr-body-<N>.md   # close keywords in a negated/partial sentence; CI runs it too
-git push -u origin "$BRANCH"   # explicit refspec, never a bare git push
-gh pr create --title "<summary>" --body-file <SCRATCH>/pr-body-<N>.md
+python3 scripts/pr_body_lint.py <SCRATCH>/pr-body-<N>.md && git push -u origin "$BRANCH" && \
+  gh pr create --title "<summary>" --body-file <SCRATCH>/pr-body-<N>.md   # lint exit 1: fix the body, rerun; explicit refspec
 ```
 The body must contain `Closes #<N>` on its own line even when you write it without this template.
 **Won't-change outcome or a partial fix**: write `Refs #<N>` instead, because merging `Closes #<N>` closes the issue as completed

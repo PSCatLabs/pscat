@@ -64,12 +64,37 @@ def strip_comments(text):
     return re.sub(r"<!--.*?-->", lambda m: re.sub(r"[^\n]", " ", m.group(0)), text, flags=re.S)
 
 
+# A line that starts a new block (list item, heading, quote, table row) never
+# continues the sentence of the line above it.
+BLOCK_START = re.compile(r"^\s*(?:[-*+>|#]|\d+[.)])\s")
+
+
+def carried_tail(prev):
+    """The end of the previous line, if the sentence runs on into the next line.
+
+    Hard-wrapped text (commit messages, wrapped Markdown) splits "does not" and
+    "fix #12" over two lines. Only the last few words of an unfinished line carry
+    over, so "Not in scope: X" above "Closes #12" stays a separate thought.
+    """
+    stripped = prev.rstrip()
+    if not stripped or stripped[-1] in ".;:!?" or stripped.endswith("-->"):
+        return ""
+    tail = SENTENCE_SPLIT.split(stripped)[-1]
+    return " ".join(tail.split()[-3:]) + " "
+
+
 def findings(text, source="body"):
     """(source, line number, sentence, why) for every negated or partial closer."""
     out = []
-    text = strip_comments(text)
+    # Curly apostrophes ("doesn’t") read as straight ones.
+    text = strip_comments(text).replace("\u2019", "'")
+    prev = ""
     for lineno, line in enumerate(text.splitlines(), 1):
-        for sentence in SENTENCE_SPLIT.split(line):
+        carry = "" if BLOCK_START.match(line) else carried_tail(prev)
+        prev = line
+        for k, sentence in enumerate(SENTENCE_SPLIT.split(line)):
+            if k == 0:
+                sentence = carry + sentence
             for m in CLOSE_RE.finditer(sentence):
                 before = sentence[: m.start()]
                 after = sentence[m.end() :]

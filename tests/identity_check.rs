@@ -379,7 +379,7 @@ fn an_expected_difference_passes_and_the_rest_must_still_be_identical() {
     assert_eq!(o.status.code(), Some(0), "{t}");
     assert!(t.contains("EXPECTED   examples/sierpinski.ps"), "{t}");
     assert!(t.contains("identical  examples/koch_snowflake.ps"), "{t}");
-    assert!(t.contains("1 expected differences"), "{t}");
+    assert!(t.contains("1 file(s) with expected differences"), "{t}");
     // The negative check: without the list the same run fails.
     let o = run(&su, &both_bins(&su));
     assert_eq!(o.status.code(), Some(1), "{}", text(&o));
@@ -417,4 +417,23 @@ fn an_expected_file_outside_the_compared_set_is_a_usage_error() {
     let o = run(&su, &args);
     assert_eq!(o.status.code(), Some(64), "{}", text(&o));
     assert!(text(&o).contains("is not a tracked file"), "{}", text(&o));
+}
+
+#[test]
+fn an_expected_fix_where_the_base_failed_and_the_branch_renders_passes() {
+    // A deliberate fix: the base binary errors on sierpinski, the head binary renders it.
+    let su = setup_with("expectfix", "", Some(("sierpinski", 3)), None);
+    let list = expect_list(&su, &[EXAMPLE]);
+    let mut args = both_bins(&su);
+    args.extend(["--expect-diff", list.to_str().unwrap()]);
+    let o = run(&su, &args);
+    let t = text(&o);
+    assert_eq!(o.status.code(), Some(0), "{t}");
+    assert!(
+        t.contains("EXPECTED   examples/sierpinski.ps (pscat exited 3 in the base tree"),
+        "{t}"
+    );
+    // Unlisted, the same base failure is still an error.
+    let o = run(&su, &both_bins(&su));
+    assert_eq!(o.status.code(), Some(1), "{}", text(&o));
 }

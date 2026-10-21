@@ -252,6 +252,9 @@ if [ -n "$EXPECT_LIST" ]; then
     [ -n "$EXPECTED" ] || die "--expect-diff list '$EXPECT_LIST' names no file"
 fi
 is_expected() { [ -n "$EXPECTED" ] && printf '%s\n' "$EXPECTED" | grep -qxF -- "$1"; }
+if [ "$GALLERY_STILL" -eq 1 ] && is_expected gallery/alpine_lake.ps; then
+    die "--gallery-still asserts alpine_lake is unchanged, and --expect-diff lists it as changing; drop one"
+fi
 LOADER_DESC=$(printf '%s' "$LOADERS" | tr '\n' ' ' | sed 's/ *$//')
 [ -n "$LOADER_DESC" ] || LOADER_DESC="library"
 if [ "$BASE" = "$ROOT" ]; then
@@ -522,11 +525,11 @@ compare_one() {
     brc=$(rc_of "$b"); hrc=$(rc_of "$h")
     bl=$(pngs_of "$b"); hl=$(pngs_of "$h")
     # A numeric status only: a missing rc file reads "?" in both trees and must stay an ERROR.
-    if [ "$hrc" != "0" ] && [ "$brc" = "$hrc" ] && [ -z "${hrc//[0-9]/}" ] && fails_identically "$b" "$h" && is_expected "$label"; then
-        echo "ERROR      $label (listed in --expect-diff, but pscat exited $hrc identically in both trees; see $h/log)"
-        return 1
-    fi
     if [ "$hrc" != "0" ] && [ "$brc" = "$hrc" ] && [ -z "${hrc//[0-9]/}" ] && fails_identically "$b" "$h"; then
+        if is_expected "$label"; then
+            echo "ERROR      $label (listed in --expect-diff, but pscat exited $hrc identically in both trees; see $h/log)"
+            return 1
+        fi
         echo "SKIPPED    $label (pscat exited $hrc identically in both trees, same log, same canvas: nothing to compare; see $h/log)"
         nskipped=$((nskipped + 1))
         SKIPPED_FILES="$SKIPPED_FILES  $label
@@ -538,6 +541,12 @@ compare_one() {
         return 1
     fi
     if [ "$brc" != "0" ]; then
+        # A deliberate fix: the base failed, the branch renders. Expected, if listed.
+        if is_expected "$label" && [ -n "$hl" ]; then
+            echo "EXPECTED   $label (pscat exited $brc in the base tree and renders in the branch; --expect-diff)"
+            nexpected=$((nexpected + 1))
+            return 0
+        fi
         echo "ERROR      $label (pscat exited $brc in the base tree; see $b/log)"
         return 1
     fi
@@ -564,7 +573,6 @@ compare_one() {
             nident=$((nident + 1))
         elif is_expected "$label"; then
             echo "EXPECTED   $label page $i (--expect-diff)"
-            nexpected=$((nexpected + 1))
             moved=1
         else
             echo "DIFFERS    $label page $i"
@@ -572,6 +580,7 @@ compare_one() {
             st=1
         fi
     done
+    [ "$moved" -eq 0 ] || nexpected=$((nexpected + 1))
     if is_expected "$label" && [ "$moved" -eq 0 ]; then
         echo "UNCHANGED  $label (listed in --expect-diff, but every page is identical: the change did not take effect)"
         st=1
@@ -645,7 +654,7 @@ fi
 
 ELAPSED=$(( $(date +%s) - START ))
 SKIP_NOTE=""
-[ "$nexpected" -eq 0 ] || SKIP_NOTE=", $nexpected expected differences (--expect-diff)"
+[ "$nexpected" -eq 0 ] || SKIP_NOTE=", $nexpected file(s) with expected differences (--expect-diff)"
 if [ "$nskipped" -gt 0 ]; then
     SKIP_NOTE="$SKIP_NOTE, $nskipped skipped"
     echo >&2

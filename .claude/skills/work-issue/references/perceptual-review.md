@@ -27,7 +27,9 @@ the PR, through the Decision block's images.
 
 Mechanical first, judgement only for `src/`:
 
-- It changes a committed image (`*.png`, `*.jpg`, `*.svg` anywhere, `gallery/renders/` included): visible.
+- It changes a committed render output: `gallery/renders/`, or a specimen image under `docs/` that the
+  gallery manifest or a guide shows. Illustrations in `notes/`, design evidence and the review log's own
+  crops are not render outputs.
 - It touches `lib/`, `fonts/`, `gallery/*.ps`, `examples/*.ps` or `selftest/drivers/`: visible, unless
   `scripts/identity_check.sh` (pitfalls.md "Step 5 checklist" item 4) reports every page identical
   **without** `--expect-diff`. A pass that needed `--expect-diff` is visible by definition.

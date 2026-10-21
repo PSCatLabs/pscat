@@ -155,9 +155,12 @@ is set, and always states tier (d): an approval relayed by another agent never
 authorizes an agent merge. (Added in #674.)
 
 **`light_gate`** (optional mapping: `paths`, a list of globs where `*` also
-matches `/`, and `command`; absent means every PR runs the full gate locally)
+matches `/`; `exclude`, optional globs for files tests read or run, such as
+guides whose code samples a test executes; and `command`; absent means every
+PR runs the full gate locally)
 is read, not asked. When set, step 5 of `SDLC.md` gets the template's
-light-gate sentence: a PR whose every changed path matches `paths` runs
+light-gate sentence: a PR whose every changed path matches `paths`, and none
+`exclude`, runs
 `command` locally instead of the quality gate, and CI still runs everything.
 (Added in #674.)
 

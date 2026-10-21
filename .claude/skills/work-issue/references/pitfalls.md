@@ -341,10 +341,10 @@ Cheapest first, before the long gate:
    `pscat --headless -e '3 4 add ='`, `pscat --png <SCRATCH>/probe-<N>.png file.ps`.
 6. Then the full gate in step 5.5.
 7. **Light path for a docs- or asset-only diff (#674).** If every changed path is in SDLC.md's
-   `light_gate.paths` (check: `git -C "$WORKTREE_DIR" diff --name-only origin/main...HEAD | grep -Ev '\.(md|png|jpg)$|^notes/'`
-   prints nothing), run `light_gate.command` from `SDLC.md` instead of the full gate, and write `quality gate light` in
-   the report. CI still runs everything, and a Rust test that reads a doc (`tests/headline.rs` reads
-   `docs/guides/lettering.md`) is caught there. A skill script, a workflow or any code file is not on the list.
+   `light_gate.paths` and none in `light_gate.exclude` (check: `git -C "$WORKTREE_DIR" diff --name-only origin/main...HEAD | grep -Ev '\.(md|png|jpg)$|^notes/' ; git -C "$WORKTREE_DIR" diff --name-only origin/main...HEAD | grep '^docs/guides/'`
+   both print nothing), run `light_gate.command` from `SDLC.md` instead of the full gate, and write `quality gate light`
+   in the report. CI still runs everything. `docs/guides/` is excluded because tests run its samples
+   (`tests/landscape_cookbook.rs`, `tests/headline.rs`). A skill script, a workflow or any code file is not on the list.
 
 ## CI wait (#199, from the #178 / PR #198 run; timings and pass/fail rule updated in #208)
 

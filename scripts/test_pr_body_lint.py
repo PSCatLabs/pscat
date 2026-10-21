@@ -49,6 +49,20 @@ class Flags(unittest.TestCase):
             self.assertTrue(flagged(f"This does not {kw.upper()} #12"), kw)
 
 
+class Wrapped(unittest.TestCase):
+    def test_negation_wrapped_onto_the_previous_line(self):
+        self.assertTrue(flagged("This change does not\nfix #12 yet."))
+        self.assertTrue(flagged("Body text that only\npartially fixes #12"))
+
+    def test_curly_apostrophe(self):
+        self.assertTrue(flagged("This doesn\u2019t fix #12"))
+
+    def test_a_finished_line_or_a_new_block_does_not_carry(self):
+        self.assertEqual(flagged("Not in scope: the parser.\nCloses #12"), [])
+        self.assertEqual(flagged("Not in scope: X\nCloses #12"), [])
+        self.assertEqual(flagged("- does not touch the renderer\n- Closes #12"), [])
+
+
 class Passes(unittest.TestCase):
     def test_plain_closers(self):
         for s in ["Closes #12", "Fixes: #12", "Resolves PSCatLabs/pscat#12", "Note: fixes #12"]:
