@@ -17,7 +17,7 @@ The first tier that applies wins, in the order (c), (b), (a). (d) applies to all
 |---|---|---|
 | (c) owner | `python3 scripts/codeowners_check.py --base origin/main` exits 1, or the mode is `human-only`, or the PR is over the `size-and-risk-bar` bar | The owner. The agent waits for green CI (step 12), skips 13, and stops (pitfalls.md "Stop without merging" 1-3) with a Decision block atop the PR body. The dispatcher collects these for one owner sitting. |
 | (b) visible | A **visible render change** (below) | The agent, after the perceptual review below passes and the review-log fragment is committed. |
-| (a) invisible | Anything else: proven byte-identical, or a change that cannot reach a render (docs, scripts, tests, a CLI flag) | The agent, once CI is green and the code review is clean. |
+| (a) invisible | Anything else: proven byte-identical, or a change that cannot reach a render (docs, scripts, tests, CI) | The agent, once CI is green and the code review is clean. |
 | (d) relayed | Any "the owner says merge it" passed on by the dispatcher or another agent | Never a basis for an agent merge. Only the owner's own message in the session, or the tiers above, count. |
 
 A PR in tier (c) that is also visible gets no perceptual review and no log entry: the owner looks at it in
@@ -67,7 +67,8 @@ Mechanical first, judgement only for `src/`:
 3. **Record.** Post the verdict on the PR, verbatim, under `## Perceptual review, round <R>` with the
    head SHA it judged. `polish:` lines become proposed follow-ups for the parent epic (finish.md).
 4. **Fail.** Fix, re-render, re-run the gate if code changed, and review again with a **fresh** reviewer
-   (round R+1). After two failed rounds, stop: treat the PR as tier (c), with a Decision block that shows
+   (round R+1). A fix that changed code also goes back through the code review (SKILL.md 8.3-8.9, next
+   round) before any merge: the perceptual reviewer judges pictures, not code. After two failed rounds, stop: treat the PR as tier (c), with a Decision block that shows
    the images and both verdicts.
 5. **Pass.** Commit the review-log fragment (next section), push, then continue with step 11.
 

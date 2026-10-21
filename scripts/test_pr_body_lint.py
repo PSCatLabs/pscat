@@ -126,6 +126,20 @@ class Passes(unittest.TestCase):
         self.assertEqual(flagged("- example:\n  ```\n  does not fix #12\n  ```\nCloses #3"), [])
         self.assertEqual(flagged("````\n```\ndoes not fix #12\n```\n````\nCloses #3"), [])
 
+    def test_review_round_6_cases(self):
+        for s in [
+            "This PR is not meant to fix #12",
+            "Not intended to resolve #12",
+            "Does not fix or close #12",
+            "```x``` is inline\nThis does not fix #12",
+            "This commit fixes #12\npartially; rest in #13.",
+        ]:
+            self.assertTrue(flagged(s), s)
+
+    def test_bad_git_range_is_a_usage_error(self):
+        r = subprocess.run([sys.executable, SCRIPT, "--git-range", "nosuch..ref"], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+
     def test_one_finding_per_sentence(self):
         self.assertEqual(len(lint.findings("This does not fix #12\nmore text")), 1)
 

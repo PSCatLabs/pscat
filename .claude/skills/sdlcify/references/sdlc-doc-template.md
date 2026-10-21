@@ -75,7 +75,8 @@ it to GitHub.
    language default>` — the same checks CI runs, so the PR isn't the
    first place a break shows up. (CI runs them as separate steps, in its
    own order; the string is what to run locally, with the same result.)
-   <!-- Include this sentence only when light_gate is set. -->
+   <!-- Include this sentence only when light_gate is set; drop the "and none
+   matches light_gate.exclude" clause when exclude is absent. -->
    **Light gate:** a PR whose every changed path matches `light_gate.paths`
    (`<paths>`) and none matches `light_gate.exclude` (`<exclude>`) runs
    `<light_gate.command>` locally instead; CI still runs the full gate on it.

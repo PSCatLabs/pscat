@@ -38,7 +38,10 @@ CLOSE_RE = re.compile(
 # between ("does not fix", "doesn't fully fix", "partially fixes", "helps fix").
 # A negation further back belongs to another verb: "draws arcs that no longer
 # overflow and fixes #12" closes #12 correctly and must pass.
-FILLER = r"(?:(?:fully|completely|entirely|yet|really|quite|actually|totally|all)\s+){0,2}"
+FILLER = (
+    r"(?:(?:fully|completely|entirely|yet|really|quite|actually|totally|all"
+    r"|(?:meant|intended|supposed|going|trying|able)\s+to|(?:fix|close|resolve)\s+or)\s+){0,2}"
+)
 BEFORE = re.compile(
     r"(?:\b(?:not|never|cannot|no longer|partially|partly|help(?:s|ed)?(?:\s+to)?|towards?|almost|nearly|"
     r"half|in part|part of|some of|(?:begins?|starts?)\s+to)|n't)\s+" + FILLER + r"$",
@@ -71,7 +74,8 @@ def strip_hidden(text):
     text = re.sub(r"<!--.*?(?:-->|\Z)", _blank, text, flags=re.S)
     # A fence may be indented (inside a list item) and closes only on a fence of
     # the same character at least as long, so ```` can wrap a ``` example.
-    text = re.sub(r"^[ \t]*(`{3,}|~{3,}).*?(?:^[ \t]*\1[`~]*[ \t]*$|\Z)", _blank, text, flags=re.S | re.M)
+    # An opener with a backtick later on its line ("```x``` is inline") is no fence.
+    text = re.sub(r"^[ \t]*(`{3,}(?![^\n]*`)|~{3,}).*?(?:^[ \t]*\1[`~]*[ \t]*$|\Z)", _blank, text, flags=re.S | re.M)
     return re.sub(r"`[^`\n]*`", _blank, text)
 
 
@@ -114,7 +118,16 @@ def findings(text, source="body"):
             if k == 0:
                 sentence, skip = carry + sentence, len(carry)
             for m in CLOSE_RE.finditer(sentence):
-                if m.end() <= skip:  # the previous line's own closer: already checked there
+                if m.end() <= skip:
+                    # The previous line's own closer: its "before" was checked there, but
+                    # a partial cue wrapped onto this line ("fixes #12\npartially") was not.
+                    # Only a cue that ends its phrase: "partially; rest in #13" is about
+                    # #12, "partially reverts #9" starts a new statement.
+                    rest = sentence[m.end() :]
+                    cue = AFTER.search(rest)
+                    if cue and re.match(r"\s*(?:[^\w\s]|$)", rest[cue.end() :]):
+                        why = f"'{cue.group(0).strip()}' after '{m.group(0)}'"
+                        out.append((source, lineno, sentence.strip(), why))
                     continue
                 cue = BEFORE.search(sentence[: m.start()])
                 if cue:
@@ -136,7 +149,8 @@ def commit_messages(rng):
         text=True,
     )
     if r.returncode != 0:
-        raise SystemExit(f"pr_body_lint.py: git log {rng} failed: {r.stderr.strip()}")
+        print(f"pr_body_lint.py: git log {rng} failed: {r.stderr.strip()}", file=sys.stderr)
+        sys.exit(2)  # a harness error, not a finding
     msgs = []
     for chunk in r.stdout.split("\x01"):
         chunk = chunk.strip("\n")

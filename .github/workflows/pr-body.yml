@@ -23,9 +23,6 @@ permissions:
 
 jobs:
   close-keywords:
-    # Dependabot bodies quote upstream release notes ("partially fixes
-    # actions/checkout#1234") that nobody here can edit.
-    if: github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -40,7 +37,17 @@ jobs:
       # PR's own commits, even after the branch merged main (the payload's
       # base.sha can be older, and would pull other PRs' commits into the range).
       # Full history so git can find the merge base of the two parents.
+      # Dependabot bodies quote upstream release notes ("partially fixes
+      # actions/checkout#1234") that nobody here can edit, so its PRs pass. The
+      # skip is inside the step, not a job-level `if:`: a skipped job reports
+      # SKIPPED, and the work-issue skill merges only when every check succeeded.
       - name: Lint the PR body and the branch's commit messages
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
-        run: python3 scripts/pr_body_lint.py --env PR_BODY --git-range "HEAD^1..HEAD^2"
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          if [ "$AUTHOR" = "dependabot[bot]" ]; then
+            echo "Dependabot PR: not linted."
+            exit 0
+          fi
+          python3 scripts/pr_body_lint.py --env PR_BODY --git-range "HEAD^1..HEAD^2"
