@@ -502,6 +502,15 @@ class Registry(Base):
         st, r, _ = self.run_all()
         self.assertEqual((st, r["crates"], r["registry"]), (rs.EXIT_OK, "skipped", "published"))
 
+    def test_an_unreachable_registry_does_not_fail_the_plan(self):
+        self._server()
+        self._fail("registry.view")
+        st, r, _ = self.run_all(plan=True)
+        self.assertEqual((st, r["registry"]), (rs.EXIT_OK, "would publish"))
+        self._fail("registry.view")
+        st, r, _ = self.run_all()
+        self.assertEqual((st, r["registry"]), (rs.EXIT_ERROR, "error"))
+
     def test_a_different_entry_at_the_version_halts(self):
         self.fake.registry_publish(self._server(args=("serve",)))
         self._server()

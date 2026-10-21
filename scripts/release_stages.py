@@ -836,6 +836,7 @@ class Fake:
         return f"mcp-registry/{name.replace('/', '__')}-{version}.json"
 
     def registry_view(self, name, version):
+        self._maybe_fail("registry.view")
         return self._load(self._registry_rel(name, version), None)
 
     def registry_publish(self, server):
@@ -1144,7 +1145,14 @@ def stage_registry(ctx):
     # token here, offline, before anything is published.
     if not has_mcp_name(crate_readme(ctx.crate_path) or "", name):
         raise Halt(f"the .crate's README.md has no visible `mcp-name: {name}` line")
-    remote = ctx.registry.version(name, v)
+    try:
+        remote = ctx.registry.version(name, v)
+    except StageError as e:
+        if not ctx.plan:
+            raise
+        # A real release stops at any plan failure in `assemble`, before
+        # crates.io and npm; a registry outage must not do that.
+        return "would publish", f"{name} {v} to the MCP Registry (not reachable for the plan: {e})"
     if remote is not None:
         if registry_identity(remote) != registry_identity(data):
             raise Halt(f"{name} {v} in the MCP Registry differs from server.json: "
