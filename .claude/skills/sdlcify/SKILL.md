@@ -136,6 +136,12 @@ GitHub setting: sdlcify never turns on `require_code_owner_reviews`, because
 that needs a required approval, and the next paragraph says why that bricks a
 single-identity repo. (Added in #603.)
 
+**`merge_policy.bot_merge_authors`** (optional list of PR authors as `gh`
+reports them, such as `app/dependabot`; absent means no exception) is read,
+not asked. It is the owner's standing permission for agents to merge those
+bots' PRs once CI is green, despite `owner_merge_file`. When set, the "Who
+merges" section carries the exception paragraph from the template.
+
 **`release`** (optional frontmatter mapping: `process_doc`, `environment`,
 `tag_pattern`; absent means no release section) is read, not asked. When set,
 `SDLC.md` carries the "Release lifecycle" section from the template, which
