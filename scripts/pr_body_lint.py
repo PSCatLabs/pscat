@@ -53,8 +53,8 @@ FILLER = (
     r"|(?:meant|intended|supposed|going|trying|able)\s+to|(?:fix|close|resolve)\s+or)\s+){0,2}"
 )
 BEFORE = re.compile(
-    r"(?:\b(?:not|never|cannot|no longer|partially|partly|help(?:s|ed)?(?:\s+to)?|towards?|almost|nearly|"
-    r"half|in part|part of|some of|(?:begins?|starts?)\s+to)|n't)\s+" + FILLER + r"$",
+    r"(?:\b(?:not|never|cannot|no longer|partially|partly|help(?:s|ed)?(?:\s+to)?|almost|nearly|"
+    r"in part|(?:begins?|starts?)\s+to)|n't)\s+" + FILLER + r"$",
     re.IGNORECASE,
 )
 
@@ -64,7 +64,10 @@ BEFORE = re.compile(
 AFTER = re.compile(
     r"^(?:'s)?\W*(?:only\s+)?(?:partial|partially|partly|in part|for now|halfway|"
     r"(?:is\s+)?not\s+(?:yet\s+)?(?:fully|completely|entirely|done|complete|finished)|"
-    r"isn't\s+(?:yet\s+)?(?:fully\s+)?(?:done|complete|finished|fixed)|only\s+(?:some|part))\b",
+    r"isn't\s+(?:yet\s+)?(?:fully\s+)?(?:done|complete|finished|fixed)|only\s+(?:some|part))\b"
+    # The cue ends its phrase: "(partial)" is about the fix, "(partial cherry-pick
+    # of #9 reverted)" describes something else.
+    r"(?=\s*(?:[^\w\s]|$)|\s+(?:fix|solution|implementation)\b)",
     re.IGNORECASE,
 )
 

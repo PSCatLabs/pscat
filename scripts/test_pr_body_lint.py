@@ -152,6 +152,11 @@ class Passes(unittest.TestCase):
         for s in ["Fixes #12 (partial)", "Fixes #12 - partial", "1. does not\nfix #12", "- This change does not\nfix #12"]:
             self.assertTrue(flagged(s), s)
 
+    def test_final_round_precision(self):
+        for s in ["The second half fixes #12.", "Closes #12 (partial cherry-pick of #9 reverted)"]:
+            self.assertEqual(flagged(s), [], s)
+        self.assertTrue(flagged("Fixes #12 (partial fix)"))
+
     def test_one_finding_per_sentence(self):
         self.assertEqual(len(lint.findings("This does not fix #12\nmore text")), 1)
 

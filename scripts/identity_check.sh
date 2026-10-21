@@ -538,8 +538,8 @@ compare_one() {
     fi
     if [ "$brc" != "0" ]; then
         # A deliberate fix: the base raised an error, the branch renders. Expected, if listed.
-        # Only a PostScript error in the base counts, not a crash or a broken base setup.
-        if is_expected "$label" && [ -n "$hl" ] && [ -z "${brc//[0-9]/}" ] && grep -q 'Error' "$b/log" 2>/dev/null; then
+        # Only pscat's own PostScript error report counts (`%%[ Error: ...`), not a crash.
+        if is_expected "$label" && [ -n "$hl" ] && [ -z "${brc//[0-9]/}" ] && grep -q '^%%\[ Error: ' "$b/log" 2>/dev/null; then
             echo "EXPECTED   $label (pscat exited $brc in the base tree and renders in the branch; --expect-diff)"
             nexpected=$((nexpected + 1))
             return 0
