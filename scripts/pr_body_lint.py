@@ -14,10 +14,20 @@ It reads the keyword, not the sentence, so "this does not fix #12" and "partiall
 fixes #12" close #12 on merge. This script fails on exactly that: a closing
 keyword whose sentence also says it is negated or partial. Write `Refs #12` there.
 
+The contract, deliberately narrow. It flags exactly two shapes:
+  1. a listed negation or partial cue right before the keyword, with at most two
+     of the listed softening words between ("does not fix", "doesn't fully
+     fix", "not meant to resolve", "partially fixes", "helps fix");
+  2. a listed partial cue right after the reference ("fixes #12 partially",
+     "(partial)", "(not fully)", "isn't complete").
+Anything else is out of scope by design: a negation elsewhere in the sentence
+is usually about something else ("no API change, and fixes #12"), and a false
+positive blocks agent merges (the work-issue skill merges only when every check
+passed), so precision comes first. The real defence is the convention: `Closes
+#N` alone on its line for complete work, `Refs #N` for anything partial.
 HTML comments and code (fenced blocks, inline backticks) are ignored: GitHub
-does not act on a reference there. A negation counts only right before the
-keyword or right after the reference, so a negation about something else in the
-same sentence ("no API change, and fixes #12") passes.
+does not act on a reference there. A sentence hard-wrapped over two lines is
+checked as one.
 
 Exit status: 0 clean, 1 at least one flagged sentence, 2 a usage error.
 """
