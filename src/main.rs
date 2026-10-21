@@ -7,6 +7,9 @@ use pscat::spool::Watcher;
 use pscat::window::{WindowOptions, run_interactive, run_spool, run_windowed};
 use pscat::{Interp, gfx};
 
+// The MCP server, shared with the pscat-mcp binary (#569).
+#[path = "mcp_server.rs"]
+mod mcp_server;
 mod subcmd;
 
 /// Interpreter steps per rendered frame in the windowed modes. Named
@@ -141,6 +144,11 @@ fn main() -> ExitCode {
     let argv: Vec<String> = env::args().skip(1).collect();
     if argv.first().is_some_and(|a| a == "fonts") {
         return pscat::fontpacks::cli::main(&argv[1..]);
+    }
+    // `pscat mcp ...` is pscat-mcp: the MCP Registry's cargo entry runs the
+    // crate's own binary, `pscat`, so the server answers here too (#569).
+    if argv.first().is_some_and(|a| a == "mcp") {
+        return mcp_server::run(argv.into_iter().skip(1));
     }
     // `pscat handwrite|typewrite|photo-etch ...`: self-contained subcommands
     // with their own options (subcmd/); everything else is the flag CLI.
@@ -1437,6 +1445,7 @@ fn print_usage() {
     println!("  pscat handwrite \"text\"       a string in, a handwritten PNG out");
     println!("  pscat typewrite [FILE]       a text file in, a typewritten PNG/PDF out");
     println!("  pscat photo-etch photo.jpg   a JPEG in, a line engraving (PNG/SVG/PDF) out");
+    println!("  pscat mcp                    the MCP server on stdin/stdout (same as pscat-mcp)");
 }
 
 fn repl(interp: &mut Interp, options: &Options) -> ExitCode {
