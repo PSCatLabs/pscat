@@ -544,8 +544,9 @@ who finds it red or still running has to babysit it. Stop **before** 8.13, the m
 2. Keep the `in-review` label, the worktree and the branch. Do not run
    step 9. If CI is red (a failed step, not infrastructure: "CI wait"), stop and report that
    instead; never hand over silently.
-3. Report `Merge: awaiting human merge (dispatcher said no merge; CI green)` with
-   the PR number, branch and worktree path.
+3. Report `Merge: awaiting human merge (dispatcher said no merge; CI green)`, or for an owner
+   path `Merge: awaiting owner merge (tier c: <paths>; CI green)`, with the PR number, branch and
+   worktree path.
 
 To merge later, `/work-issue <N>` again: the issue is `in-review` with an
 open PR, the lock is free (fresh claim), and the Resume table above lands
