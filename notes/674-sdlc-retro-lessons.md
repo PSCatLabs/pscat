@@ -18,7 +18,7 @@ dispatcher run. Process and docs only, plus two small tools; no render changes.
   timing, wait for CI), `references/perceptual-review.md` (tiers, the
   reviewer prompt, the log fragment, the Decision block), proposed follow-ups
   in the final report instead of `gh issue create`, the light gate for
-  docs/asset-only diffs, papercuts and render DPIs in `pitfalls.md`.
+  docs-only diffs, papercuts and render DPIs in `pitfalls.md`.
   `SKILL.md` stays at 250 lines.
 - `scripts/identity_check.sh --expect-diff LIST`: listed files may differ
   (`EXPECTED`), a listed file that comes out identical fails (`UNCHANGED`), a

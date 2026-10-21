@@ -100,6 +100,27 @@ class Passes(unittest.TestCase):
         self.assertEqual(flagged("Refs #12 (does not fix it)"), [])
         self.assertEqual(flagged("Does not fix part of #12"), [])  # no keyword+reference pair
 
+    def test_negation_about_something_else(self):
+        for s in [
+            "Closes #12\nThe old path is not used any more.",
+            "Fixes #12\npartially reverts #9",
+            "Fixes #12 (curveto is not closed)",
+            "Fixes #12: the parser is not closing paths",
+            "Fixes #12 where stroke isn't drawn",
+            "Behaviour unchanged for callers that do not opt in\nCloses #12",
+            "Not only speeds up X but also fixes #12",
+            "Draws arcs that no longer overflow and fixes #12",
+        ]:
+            self.assertEqual(flagged(s), [], s)
+
+    def test_code_is_ignored(self):
+        self.assertEqual(flagged("```\ndoes not fix #12\n```\nCloses #3"), [])
+        self.assertEqual(flagged("The lint catches `does not fix #12`."), [])
+        self.assertEqual(flagged("Closes #3\n<!-- notes\ndoes not fix #12"), [])
+
+    def test_one_finding_per_sentence(self):
+        self.assertEqual(len(lint.findings("This does not fix #12\nmore text")), 1)
+
     def test_html_comments_are_ignored(self):
         self.assertEqual(flagged("<!-- does not fix #12 -->\nCloses #<!-- issue number -->"), [])
 

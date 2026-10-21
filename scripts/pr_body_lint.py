@@ -14,8 +14,10 @@ It reads the keyword, not the sentence, so "this does not fix #12" and "partiall
 fixes #12" close #12 on merge. This script fails on exactly that: a closing
 keyword whose sentence also says it is negated or partial. Write `Refs #12` there.
 
-HTML comments are ignored (GitHub does not read them). Code is not: whether
-GitHub honours a keyword inside backticks is not something to rely on.
+HTML comments and code (fenced blocks, inline backticks) are ignored: GitHub
+does not act on a reference there. A negation counts only right before the
+keyword or right after the reference, so a negation about something else in the
+same sentence ("no API change, and fixes #12") passes.
 
 Exit status: 0 clean, 1 at least one flagged sentence, 2 a usage error.
 """
@@ -32,43 +34,43 @@ CLOSE_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Negation or partiality anywhere earlier in the same sentence: "does not fix",
-# "doesn't fully fix", "partially fixes", "this never closed".
-BEFORE_ANY = re.compile(
-    r"\b(?:not|never|no longer|cannot|partially|partly)\b|n't\b",
+# The cue must sit right before the keyword, with at most two softening words
+# between ("does not fix", "doesn't fully fix", "partially fixes", "helps fix").
+# A negation further back belongs to another verb: "draws arcs that no longer
+# overflow and fixes #12" closes #12 correctly and must pass.
+FILLER = r"(?:(?:fully|completely|entirely|yet|really|quite|actually|totally|all)\s+){0,2}"
+BEFORE = re.compile(
+    r"(?:\b(?:not|never|cannot|no longer|partially|partly|helps?|towards?|almost|nearly|half|in part"
+    r"|part of|some of|(?:begins?|starts?|helped|helps?) to)|n't)\s+" + FILLER + r"$",
     re.IGNORECASE,
 )
 
-# Partial wording only in the few words right before the keyword ("helps fix",
-# "a first step towards fixing" is no keyword): such words elsewhere in a sentence
-# ("adds help text and fixes #12") say nothing about the reference.
-BEFORE_NEAR = re.compile(
-    r"\b(?:helps?|help(?:s|ed)? to|towards?|begins? to|starts? to|almost|nearly|half|"
-    r"part of|some of|without|in part)\s+(?:\w+\s+)?$",
-    re.IGNORECASE,
-)
-
-# Words right after the reference that make it partial: "fixes #12 partially".
-AFTER_CUES = re.compile(
+# Right after the reference: "fixes #12 partially", "fixes #12 (not fully)",
+# "fix #12 isn't complete", "fixes #12's first half". Only at the start of what
+# follows, so "fixes #12 (curveto is not closed)" (the bug, not the fix) passes.
+AFTER = re.compile(
     r"^(?:'s)?\W*(?:only\s+)?(?:partially|partly|in part|for now|halfway|"
     r"(?:the\s+)?(?:first|second|third|next|last)\s+(?:half|part|step|slice)|"
     r"(?:part|step)\s+(?:\d+|one|two|three|four)|"
-    r"not\s+(?:fully|completely|entirely|yet|all)|only\s+(?:some|part))\b",
-    re.IGNORECASE,
-)
-
-# Anywhere later in the clause: "fix #12 isn't complete", "fixed: #12 is not done".
-AFTER_ANY = re.compile(
-    r"\b(?:is not|isn't|not (?:done|complete|finished|fully)|incomplete|unfinished)\b",
+    r"(?:is\s+)?not\s+(?:yet\s+)?(?:fully|completely|entirely|yet|all|done|complete|finished)|"
+    r"isn't\s+(?:yet\s+)?(?:fully\s+)?(?:done|complete|finished|fixed)|only\s+(?:some|part))\b",
     re.IGNORECASE,
 )
 
 SENTENCE_SPLIT = re.compile(r"(?<=[.;!?])\s+|\n")
 
 
-def strip_comments(text):
-    """Blank out HTML comments, keeping line numbers."""
-    return re.sub(r"<!--.*?-->", lambda m: re.sub(r"[^\n]", " ", m.group(0)), text, flags=re.S)
+def _blank(m):
+    return re.sub(r"[^\n]", " ", m.group(0))
+
+
+def strip_hidden(text):
+    """Blank what GitHub neither shows as prose nor reads for closing keywords:
+    HTML comments (an unterminated one hides the rest of the body), fenced code
+    blocks and inline code. Line numbers are kept."""
+    text = re.sub(r"<!--.*?(?:-->|\Z)", _blank, text, flags=re.S)
+    text = re.sub(r"^(```|~~~).*?(?:^\1[^\n]*$|\Z)", _blank, text, flags=re.S | re.M)
+    return re.sub(r"`[^`\n]*`", _blank, text)
 
 
 # A line that starts a new block (list item, heading, quote, table row) never
@@ -80,11 +82,11 @@ def carried_tail(prev):
     """The end of the previous line, if the sentence runs on into the next line.
 
     Hard-wrapped text (commit messages, wrapped Markdown) splits "does not" and
-    "fix #12" over two lines. Only the last few words of an unfinished line carry
-    over, so "Not in scope: X" above "Closes #12" stays a separate thought.
+    "fix #12" over two lines, so the last few words of an unfinished line are
+    checked with the next line's start.
     """
     stripped = prev.rstrip()
-    if not stripped or stripped[-1] in ".;:!?" or stripped.endswith("-->"):
+    if not stripped or stripped[-1] in ".;:!?":
         return ""
     if re.match(r"^\s*(?:#|\||<)", stripped):  # a heading, table row or HTML line ends where it is
         return ""
@@ -95,8 +97,8 @@ def carried_tail(prev):
 def findings(text, source="body"):
     """(source, line number, sentence, why) for every negated or partial closer."""
     out = []
-    # Curly apostrophes ("doesn’t") read as straight ones.
-    text = strip_comments(text).replace("\u2019", "'")
+    # Curly apostrophes ("doesn\u2019t") read as straight ones.
+    text = strip_hidden(text).replace("\u2019", "'")
     prev = ""
     for lineno, line in enumerate(text.splitlines(), 1):
         # A list item's text continues only on an indented line below it.
@@ -106,19 +108,17 @@ def findings(text, source="body"):
             carry = carried_tail(prev)
         prev = line
         for k, sentence in enumerate(SENTENCE_SPLIT.split(line)):
+            skip = 0
             if k == 0:
-                sentence = carry + sentence
+                sentence, skip = carry + sentence, len(carry)
             for m in CLOSE_RE.finditer(sentence):
-                before = sentence[: m.start()]
-                after = sentence[m.end() :]
-                # Only the keyword's own clause: in "No API change, and fixes #12" the
-                # negation belongs to the clause before the comma.
-                clause = re.split(r"[,\u2014\u2013()]", before)[-1]
-                cue = BEFORE_ANY.search(clause) or BEFORE_NEAR.search(clause)
+                if m.start() < skip:  # the previous line's own closer: already checked there
+                    continue
+                cue = BEFORE.search(sentence[: m.start()])
                 if cue:
                     why = f"'{cue.group(0).strip()}' before '{m.group(0)}'"
                 else:
-                    cue = AFTER_CUES.search(after) or AFTER_ANY.search(re.split(r"[,\u2014\u2013]", after)[0])
+                    cue = AFTER.search(sentence[m.end() :])
                     if not cue:
                         continue
                     why = f"'{cue.group(0).strip()}' after '{m.group(0)}'"

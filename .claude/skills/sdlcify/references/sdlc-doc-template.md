@@ -137,8 +137,9 @@ visible_change_review is set; tier (c) and the paragraphs after the list only
 when owner_merge_file is set. Added in #674. -->
 ## Who merges
 
-Every PR falls in one of the tiers below; the first that applies wins,
-highest letter first. Every policy field is read from `SDLC.md` as it is on
+Every PR falls in one of tiers (a) to (c) below, checked in the order (c),
+(b), (a) (skipping any tier not listed); the first that applies wins. Rule
+(d) applies to all of them. Every policy field is read from `SDLC.md` as it is on
 `<default_branch>`, never from the PR's copy, so a PR cannot change the rule
 it is judged by.
 

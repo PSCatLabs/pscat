@@ -136,7 +136,7 @@ Then re-read `$WORKTREE_DIR/.claude/skills/work-issue/SKILL.md` (it may have cha
    that brings those in after the gate: re-run it, or write "CI covers it". A `lib/` change that must render identically:
    `scripts/identity_check.sh --loader <lib>`; a `src/` one: add `--base-bin/--head-bin` (checklist item 4); an intended
    visible change: add `--expect-diff LIST` (tier b, 8.10). List its base worktree in step 9's `EXTRA_WORKTREES`.
-   A docs/asset-only diff runs SDLC.md's `light_gate` instead of the full gate (checklist item 7).
+   A diff entirely inside SDLC.md's `light_gate.paths` (docs, notes) runs its command instead of the full gate (checklist item 7).
    Do pitfalls.md "Step 5 checklist" (cheap checks first). Heartbeat, then run with
    `run_in_background: true` (over 120s; run it in the foreground if the last gate took under ~60 s):
    ```sh
