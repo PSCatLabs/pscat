@@ -27,7 +27,7 @@ merge_button:
 light_gate:
   paths: ["docs/*", "notes/*"]
   exclude: ["docs/guides/*"]
-  command: "python3 scripts/check_md_links.py && python3 scripts/gallery.py check"
+  command: "python3 scripts/check_md_links.py && python3 scripts/gallery.py check && python3 scripts/check_licences.py all"
 dispatch_doc: docs/dev/DISPATCH.md
 release:
   process_doc: docs/dev/RELEASING.md
@@ -63,7 +63,8 @@ policy, then re-run `sdlcify` to apply it to GitHub.
    **Light gate:** a PR whose every changed path matches `light_gate.paths`
    (`docs/*`, `notes/*`) and none matches
    `light_gate.exclude` (`docs/guides/*`) runs `python3
-   scripts/check_md_links.py && python3 scripts/gallery.py check` locally
+   scripts/check_md_links.py && python3 scripts/gallery.py check && python3
+   scripts/check_licences.py all` locally
    instead; CI still runs the full gate on it.
 6. **Diff reviewed** before the PR is called done — a second look at the
    actual changes, not just the plan.
@@ -127,10 +128,10 @@ it is judged by.
   independent, vision-capable reviewer agent with no implementation context
   compares the before and after images with the issue's perceptual
   acceptance check and `docs/dev/TASTE.md`, and returns pass or fail with reasons.
-  On a pass the agent merges, per `merge_policy.mode`, and adds an entry
-  under `docs/dev/review-log/`: the before and after image URLs pinned to commit
+  On a pass the agent commits an entry under `docs/dev/review-log/`: the before and after image URLs pinned to commit
   SHAs, the PR, one line on what changed and what to look at, and the
-  perceptual check. The owner reads the whole log once, before the next
+  perceptual check, then merges per
+  `merge_policy.mode`. The owner reads the whole log once, before the next
   release, and a rejected entry becomes a revert or a fix ticket. A PR that
   fails the review twice goes to the owner as in (c).
 - **(c) Owner paths.** A PR that touches a `.github/CODEOWNERS` path: the

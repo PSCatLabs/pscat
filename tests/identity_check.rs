@@ -401,8 +401,8 @@ fn an_expected_file_that_comes_out_identical_fails() {
 }
 
 #[test]
-fn an_expected_file_outside_the_compared_set_is_a_usage_error() {
-    // Tracked, but not in --files: a typo or a wrong pick must not pass silently.
+fn an_expected_file_with_no_base_render_is_a_usage_error() {
+    // Tracked here but absent from the base tree: nothing to compare against.
     let su = setup("notpicked", "");
     let list = expect_list(&su, &["examples/circular_text.ps"]);
     let mut args = both_bins(&su);
@@ -410,7 +410,7 @@ fn an_expected_file_outside_the_compared_set_is_a_usage_error() {
     let o = run(&su, &args);
     let t = text(&o);
     assert_eq!(o.status.code(), Some(64), "{t}");
-    assert!(t.contains("is not among the files compared"), "{t}");
+    assert!(t.contains("is new in this branch"), "{t}");
     assert!(!t.contains("scratch renders kept"), "{t}");
     // Untracked: refused before anything renders.
     let list = expect_list(&su, &["examples/no_such_file.ps"]);

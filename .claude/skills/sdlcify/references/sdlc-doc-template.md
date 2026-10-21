@@ -154,10 +154,10 @@ it is judged by.
   independent, vision-capable reviewer agent with no implementation context
   compares the before and after images with the issue's perceptual
   acceptance check and `<taste_doc>`, and returns pass or fail with reasons.
-  On a pass the agent merges, per `merge_policy.mode`, and adds an entry
-  under `<review_log>`: the before and after image URLs pinned to commit
+  On a pass the agent commits an entry under `<review_log>`: the before and after image URLs pinned to commit
   SHAs, the PR, one line on what changed and what to look at, and the
-  perceptual check. The owner reads the whole log once, before the next
+  perceptual check, then merges per
+  `merge_policy.mode`. The owner reads the whole log once, before the next
   release, and a rejected entry becomes a revert or a fix ticket. A PR that
   fails the review twice goes to the owner as in (c).
 - **(c) Owner paths.** A PR that touches a `<owner_merge_file>` path: the

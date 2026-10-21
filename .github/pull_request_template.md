@@ -1,15 +1,15 @@
 <!--
-Decision: keep this section, at the very top, only when the owner must act on this PR (it touches a
-.github/CODEOWNERS path, the reviewer agent failed a visible change twice, or a design choice is the
-owner's). Delete it otherwise. Put images inline, pinned to a commit SHA, never a branch:
+Only when the owner must act on this PR (it touches a .github/CODEOWNERS path, the reviewer agent
+failed a visible change twice, or a design choice is the owner's), copy this block to the very top,
+outside the comment. Put images inline, pinned to a commit SHA, never a branch:
 https://github.com/PSCatLabs/pscat/blob/<sha>/<path>?raw=true
--->
+
 ## Decision
 
-- **Look at:** <!-- the one thing to check, in plain words -->
-- **Choice:** <!-- merge as is | A or B | ... -->
-- **Recommendation:** <!-- what you recommend, and why, in one line -->
-
+- **Look at:** the one thing to check, in plain words
+- **Choice:** merge as is | A or B | ...
+- **Recommendation:** what you recommend, and why, in one line
+-->
 ## Summary
 
 <!-- What changed and why, in a few bullets. -->

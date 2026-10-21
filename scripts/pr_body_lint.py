@@ -53,9 +53,7 @@ BEFORE = re.compile(
 # follows, so "fixes #12 (curveto is not closed)" (the bug, not the fix) passes.
 AFTER = re.compile(
     r"^(?:'s)?\W*(?:only\s+)?(?:partially|partly|in part|for now|halfway|"
-    r"(?:the\s+)?(?:first|second|third|next|last)\s+(?:half|part|step|slice)|"
-    r"(?:part|step)\s+(?:\d+|one|two|three|four)|"
-    r"(?:is\s+)?not\s+(?:yet\s+)?(?:fully|completely|entirely|yet|all|done|complete|finished)|"
+    r"(?:is\s+)?not\s+(?:yet\s+)?(?:fully|completely|entirely|done|complete|finished)|"
     r"isn't\s+(?:yet\s+)?(?:fully\s+)?(?:done|complete|finished|fixed)|only\s+(?:some|part))\b",
     re.IGNORECASE,
 )
@@ -104,7 +102,7 @@ def findings(text, source="body"):
     """(source, line number, sentence, why) for every negated or partial closer."""
     out = []
     # Curly apostrophes ("doesn\u2019t") read as straight ones.
-    text = strip_hidden(text).replace("\u2019", "'")
+    text = re.sub("[\u2018\u2019\u02bc]", "'", strip_hidden(text))
     prev = ""
     for lineno, line in enumerate(text.splitlines(), 1):
         # A list item's text continues only on an indented line below it.
@@ -125,7 +123,8 @@ def findings(text, source="body"):
                     # #12, "partially reverts #9" starts a new statement.
                     rest = sentence[m.end() :]
                     cue = AFTER.search(rest)
-                    if cue and re.match(r"\s*(?:[^\w\s]|$)", rest[cue.end() :]):
+                    # The cue must lie on this line: one on the previous line was reported there.
+                    if cue and m.end() + cue.end() > skip and re.match(r"\s*(?:[^\w\s]|$)", rest[cue.end() :]):
                         why = f"'{cue.group(0).strip()}' after '{m.group(0)}'"
                         out.append((source, lineno, sentence.strip(), why))
                     continue

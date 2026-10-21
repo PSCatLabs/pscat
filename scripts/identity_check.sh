@@ -91,9 +91,9 @@
 #                         listed file that differs prints `EXPECTED` and does not fail
 #                         the run; a listed file that comes out identical prints
 #                         `UNCHANGED` and fails it (exit 1), since the change did not
-#                         take effect; a listed file outside the compared set (not
-#                         picked, or new in the branch) is a usage error (exit 64), so
-#                         a typo cannot pass silently. Every file NOT listed must still
+#                         take effect. Listed files are compared even if the pick
+#                         leaves them out; one that is new in the branch (nothing
+#                         to compare) is a usage error (exit 64). Every file NOT listed must still
 #                         be identical. A run that needs this flag is a visible change
 #                         (SDLC.md "Who merges", tier b), not a proof of identity.
 #   --control FILE        negative control. A tiny driver that uses a key only
@@ -407,8 +407,10 @@ EOF_SET2
 $(git -C "$ROOT" ls-files -- 'examples/*.ps' 'gallery/*.ps' 'selftest/drivers/*.ps')
 EOF_LIST
 fi
-if [ -n "$FILES_PATHS" ]; then
-    printf '%s\n' "$FILES_PATHS" >> "$FILES"
+# --expect-diff files are compared even when the pick leaves them out.
+if [ -n "$FILES_PATHS" ] || [ -n "$EXPECTED" ]; then
+    [ -z "$FILES_PATHS" ] || printf '%s\n' "$FILES_PATHS" >> "$FILES"
+    [ -z "$EXPECTED" ] || printf '%s\n' "$EXPECTED" >> "$FILES"
     # drop duplicates, keep order
     awk '!seen[$0]++' "$FILES" > "$FILES.u" && mv "$FILES.u" "$FILES"
 fi
@@ -451,8 +453,8 @@ queue() { # file
 while IFS= read -r f; do case "$f" in gallery/*) queue "$f" ;; esac; done < "$FILES"
 while IFS= read -r f; do case "$f" in gallery/*) ;; *) queue "$f" ;; esac; done < "$FILES"
 
-# Every --expect-diff file must be one this run compares: a path the pick left out, or
-# one that is new in the branch, can never show its difference, so it is a usage error.
+# An --expect-diff file that is new in the branch has no base render, so it can never
+# show its difference: a usage error.
 if [ -n "$EXPECTED" ]; then
     DROP_SCRATCH=1
     while IFS= read -r f; do
@@ -460,8 +462,6 @@ if [ -n "$EXPECTED" ]; then
         if grep -qxF -- "$f" "$NEWFILES"; then
             die "--expect-diff: $f is new in this branch (not in the base tree), so there is nothing to compare"
         fi
-        cut -d' ' -f1 "$COMPARE" | grep -qxF -- "$f" \
-            || die "--expect-diff: $f is not among the files compared (add it with --files, or check --loader)"
     done <<EOF_EXPECTED
 $EXPECTED
 EOF_EXPECTED
