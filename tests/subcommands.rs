@@ -290,6 +290,83 @@ fn text_that_looks_like_an_option_needs_the_double_dash() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// `-o` picks the format by its extension, as `photo-etch` does (#614):
+/// the bytes written match the name, in any case.
+#[test]
+fn typewrite_picks_its_format_by_the_extension() {
+    let dir = scratch("tw-ext");
+    let magic: [(&str, &[u8]); 5] = [
+        ("a.png", b"\x89PNG"),
+        ("b.PNG", b"\x89PNG"),
+        ("c.pdf", b"%PDF"),
+        ("d.PDF", b"%PDF"),
+        ("e.svg", b"<svg"),
+    ];
+    for (name, head) in magic {
+        let out = dir.join(name);
+        ok(&pscat(
+            &dir,
+            &["typewrite", "-o", path(&out), "--text", "Hello there.\n"],
+        ));
+        let bytes = std::fs::read(&out).unwrap();
+        assert!(
+            bytes.starts_with(head),
+            "{name} does not start with {head:?}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// An unknown or missing extension is an error that names the choices, and
+/// nothing is written: not a PNG in a file called memo.txt, nor a stray
+/// typed.png. The check runs before the text is read, so a stdin that never
+/// closes does not hang it.
+#[test]
+fn typewrite_refuses_an_output_name_it_cannot_pick_a_format_for() {
+    let dir = scratch("tw-bad-ext");
+    for name in ["memo.txt", "memo", "memo.jpg", "memo.png.bak"] {
+        let res = pscat(&dir, &["typewrite", "-o", name, "--text", "Hello there.\n"]);
+        assert_eq!(res.status.code(), Some(1), "{name} should be refused");
+        let err = String::from_utf8_lossy(&res.stderr);
+        assert!(
+            err.contains(&format!(
+                "--out must end in .png, .svg, or .pdf, got: {name}"
+            )),
+            "{name}: {err}"
+        );
+    }
+    let mut child = Command::new(PSCAT)
+        .args(["typewrite", "-o", "memo.txt", "-"])
+        .current_dir(&dir)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    // stdin stays open: reading it first would block forever
+    assert_eq!(child.wait().unwrap().code(), Some(1));
+    drop(child.stdin.take());
+    let left: Vec<_> = std::fs::read_dir(&dir).unwrap().collect();
+    assert!(left.is_empty(), "files written: {left:?}");
+
+    // --ps renders nothing, so -o is not looked at
+    let ps = dir.join("drv.ps");
+    ok(&pscat(
+        &dir,
+        &[
+            "typewrite",
+            "--ps",
+            path(&ps),
+            "-o",
+            "memo.txt",
+            "--text",
+            "hi\n",
+        ],
+    ));
+    assert!(ps.is_file());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn bad_arguments_fail_with_usage() {
     let dir = scratch("usage");
@@ -303,6 +380,7 @@ fn bad_arguments_fail_with_usage() {
         &["photo-etch", "nonexistent.jpg"][..],
         &["photo-etch", "-o", "x.gif", "nonexistent.jpg"][..],
         &["typewrite", "--bogus"][..],
+        &["typewrite", "-o", "x.txt", "--text", "hi"][..],
     ] {
         let res = pscat(&dir, args);
         assert!(!res.status.success(), "{args:?} should fail");

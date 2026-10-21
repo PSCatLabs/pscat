@@ -19,11 +19,14 @@
 
 use std::io::{IsTerminal, Read};
 
-use super::{Args, Failure, Format, dpi, library, measure, number, page_dim, ps_escape, render};
+use super::{
+    Args, Failure, dpi, library, measure, number, output_format, page_dim, ps_escape, render,
+};
 
 const USAGE: &str = r#"usage: pscat typewrite [options] [FILE | -]      (text from FILE, stdin, or --text)
 
-  -o, --out PATH        output: .png (default typed.png) or .pdf
+  -o, --out PATH        output file; format from extension: .png/.svg/.pdf
+                        (default typed.png; any other name is refused)
       --text STR        the text, instead of FILE
       --reflow          join the lines of each paragraph (a paragraph ends at
                         a blank line), for text wrapped by an editor
@@ -34,7 +37,7 @@ const USAGE: &str = r#"usage: pscat typewrite [options] [FILE | -]      (text fr
       --width N         page width in points (default 612)
       --height N|fit    page height in points, or "fit" to size the page to
                         its text (default 792); longer text runs onto more
-                        pages (PNG: out-001.png, out-002.png, ...)
+                        pages (PNG, SVG: out-001.png, out-002.png, ...)
       --margin N        all four margins in points (default 72)
       --margin-left N  --margin-right N  --margin-top N  --margin-bottom N
       --spacing F       1 single, 1.5, 2 double (default 1)
@@ -107,6 +110,13 @@ pub(super) fn run(args: Args) -> Result<(), Failure> {
         return Err(Failure::Done);
     };
 
+    // Before any input is read: a name that is not .png, .svg or .pdf is an
+    // error, not a PNG written into it. `--ps` renders nothing, so `-o` is
+    // not looked at then.
+    if o.ps_out.is_none() {
+        output_format(&o.out).map_err(usage)?;
+    }
+
     if !o.have_text {
         if let Some(file) = o.file.as_deref().filter(|f| *f != "-") {
             o.text =
@@ -172,11 +182,7 @@ pub(super) fn run(args: Args) -> Result<(), Failure> {
         return Ok(());
     }
 
-    let format = if o.out.ends_with(".pdf") || o.out.ends_with(".PDF") {
-        Format::Pdf
-    } else {
-        Format::Png
-    };
+    let format = output_format(&o.out).map_err(usage)?;
     render(&driver, (width, height), o.dpi, false, format, &o.out)
 }
 

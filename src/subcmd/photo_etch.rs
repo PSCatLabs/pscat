@@ -10,7 +10,7 @@
 //! `lib/etching.ps`'s header comment for why that is not a gap).
 
 use super::{
-    Args, Failure, Format, dpi, library, measure, number, page_dim, ps_escape, render, rgb,
+    Args, Failure, dpi, library, measure, number, output_format, page_dim, ps_escape, render, rgb,
 };
 
 const USAGE: &str = r#"usage: pscat photo-etch [options] photo.jpg
@@ -46,15 +46,7 @@ pub(super) fn run(args: Args) -> Result<(), Failure> {
         return Err(Failure::Done);
     };
     let max_dim = page_dim("--max-dim", &o.max_dim).map_err(usage)?;
-    let format = match output_format(&o.out) {
-        Some(f) => f,
-        None => {
-            return Err(usage(format!(
-                "--out must end in .png, .svg, or .pdf, got: {}",
-                o.out
-            )));
-        }
-    };
+    let format = output_format(&o.out).map_err(usage)?;
     if !std::path::Path::new(&o.photo).is_file() {
         return Err(Failure::Msg(format!("no such file: {}", o.photo)));
     }
@@ -120,19 +112,6 @@ fn page_for(w: f64, h: f64, max_dim: f64) -> (u64, u64) {
     }
 }
 
-fn output_format(out: &str) -> Option<Format> {
-    let ext = std::path::Path::new(out)
-        .extension()?
-        .to_str()?
-        .to_ascii_lowercase();
-    match ext.as_str() {
-        "png" => Some(Format::Png),
-        "svg" => Some(Format::Svg),
-        "pdf" => Some(Format::Pdf),
-        _ => None,
-    }
-}
-
 fn parse(mut args: Args) -> Result<Option<Opts>, String> {
     let mut o = Opts {
         photo: String::new(),
@@ -186,14 +165,5 @@ mod tests {
         assert_eq!(page_for(3.0, 1.0, 480.0), (480, 160));
         // an extreme ratio still gets a 1-point short side
         assert_eq!(page_for(1000.0, 1.0, 480.0), (480, 1));
-    }
-
-    #[test]
-    fn the_output_format_comes_from_the_extension() {
-        assert_eq!(output_format("a.png"), Some(Format::Png));
-        assert_eq!(output_format("a.SVG"), Some(Format::Svg));
-        assert_eq!(output_format("dir.d/a.pdf"), Some(Format::Pdf));
-        assert_eq!(output_format("a.jpg"), None);
-        assert_eq!(output_format("png"), None);
     }
 }

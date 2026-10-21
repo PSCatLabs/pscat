@@ -187,6 +187,23 @@ pub(crate) enum Format {
     Pdf,
 }
 
+/// The output format a `-o`/`--out` path asks for, from its extension
+/// (case-insensitive): `.png`, `.svg` or `.pdf`. Anything else, or no
+/// extension, is an error naming the choices, rather than a guess that
+/// writes one format's bytes into a file named for another.
+pub(crate) fn output_format(out: &str) -> Result<Format, String> {
+    let ext = std::path::Path::new(out)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase);
+    match ext.as_deref() {
+        Some("png") => Ok(Format::Png),
+        Some("svg") => Ok(Format::Svg),
+        Some("pdf") => Ok(Format::Pdf),
+        _ => Err(format!("--out must end in .png, .svg, or .pdf, got: {out}")),
+    }
+}
+
 /// Render `source` on a `page`-point canvas at `dpi` and write it to
 /// `out`, as `pscat --page WxH --dpi D [--halftone] --png|--svg|--pdf OUT
 /// file.ps` does. The file is written even after a PostScript error (a
@@ -234,6 +251,27 @@ pub(crate) fn render(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_output_format_comes_from_the_extension() {
+        assert_eq!(output_format("a.png"), Ok(Format::Png));
+        assert_eq!(output_format("a.SVG"), Ok(Format::Svg));
+        assert_eq!(output_format("dir.d/a.pdf"), Ok(Format::Pdf));
+        assert_eq!(output_format("a.PDF"), Ok(Format::Pdf));
+        for bad in [
+            "a.jpg",
+            "png",
+            "memo",
+            "a.txt",
+            "a.png.bak",
+            "dir.png/a",
+            "",
+        ] {
+            let e = output_format(bad).unwrap_err();
+            assert!(e.contains(".png, .svg, or .pdf"), "{bad:?}: {e}");
+            assert!(e.ends_with(&format!("got: {bad}")), "{bad:?}: {e}");
+        }
+    }
 
     #[test]
     fn number_accepts_only_plain_decimals() {
