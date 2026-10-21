@@ -33,9 +33,9 @@ Mechanical first, judgement only for `src/`:
 - It touches `lib/`, `fonts/`, `gallery/*.ps`, `examples/*.ps` or `selftest/drivers/`: visible, unless
   `scripts/identity_check.sh` (pitfalls.md "Step 5 checklist" item 4) reports every page identical
   **without** `--expect-diff`. A pass that needed `--expect-diff` is visible by definition.
-- It touches `src/`: visible unless the change cannot reach pixels (argument parsing, MCP plumbing, the
-  resource resolver, error text) and the PR says why in one line. When unsure, run the two-binary
-  identity check; identical means tier (a).
+- It touches `src/`: run the two-binary identity check (`--base-bin/--head-bin --loader lib/artkit.ps`)
+  whatever the change looks like; identical means tier (a), anything else is visible. The implementer's
+  own belief that a change cannot reach pixels is not a check.
 
 ## The perceptual review (tier b)
 

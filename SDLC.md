@@ -25,7 +25,7 @@ merge_button:
   rebase_merge: false
   delete_branch_on_merge: true
 light_gate:
-  paths: ["*.md", "*.png", "*.jpg", "notes/*"]
+  paths: ["docs/*", "notes/*"]
   exclude: ["docs/guides/*"]
   command: "python3 scripts/check_md_links.py && python3 scripts/gallery.py check"
 dispatch_doc: docs/dev/DISPATCH.md
@@ -61,7 +61,7 @@ policy, then re-run `sdlcify` to apply it to GitHub.
    first place a break shows up. The string is `quality_gate` in the
    frontmatter above.
    **Light gate:** a PR whose every changed path matches `light_gate.paths`
-   (`*.md`, `*.png`, `*.jpg`, `notes/*`) and none matches
+   (`docs/*`, `notes/*`) and none matches
    `light_gate.exclude` (`docs/guides/*`) runs `python3
    scripts/check_md_links.py && python3 scripts/gallery.py check` locally
    instead; CI still runs the full gate on it.

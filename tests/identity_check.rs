@@ -371,7 +371,8 @@ fn expect_list(su: &Setup, paths: &[&str]) -> PathBuf {
 fn an_expected_difference_passes_and_the_rest_must_still_be_identical() {
     // #674: the base binary renders sierpinski differently, and the list says it should.
     let su = setup("expect", "sierpinski");
-    let list = expect_list(&su, &[EXAMPLE]);
+    // A leading `./` names the same file.
+    let list = expect_list(&su, &["./examples/sierpinski.ps"]);
     let mut args = both_bins(&su);
     args.extend(["--expect-diff", list.to_str().unwrap()]);
     let o = run(&su, &args);

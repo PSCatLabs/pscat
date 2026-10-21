@@ -32,9 +32,12 @@ jobs:
         run: python3 scripts/test_pr_body_lint.py
       # The body goes through an environment variable, never into the script
       # text, so nothing in it can run as shell.
+      # The checkout is GitHub's test merge of the PR into its base, so HEAD^1 is
+      # the base branch tip and HEAD^2 the PR head: HEAD^1..HEAD^2 is exactly the
+      # PR's own commits, even after the branch merged main (the payload's
+      # base.sha can be older, and would pull other PRs' commits into the range).
+      # Full history so git can find the merge base of the two parents.
       - name: Lint the PR body and the branch's commit messages
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: python3 scripts/pr_body_lint.py --env PR_BODY --git-range "$BASE_SHA..$HEAD_SHA"
+        run: python3 scripts/pr_body_lint.py --env PR_BODY --git-range "HEAD^1..HEAD^2"

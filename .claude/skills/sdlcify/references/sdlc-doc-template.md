@@ -42,7 +42,7 @@ merge_button:
   rebase_merge: false
   delete_branch_on_merge: true
 light_gate:                  # optional: the local gate for a PR whose every changed path matches `paths`; CI still runs everything
-  paths: ["*.md", "*.png", "*.jpg", "notes/*"]   # globs; `*` also matches `/`
+  paths: ["docs/*", "notes/*"]   # globs; `*` also matches `/`. Only paths no test, lint or build reads
   exclude: [<globs of docs that tests execute>]  # optional: a match here needs the full gate
   command: <a fast check, e.g. a Markdown link check>
 dispatch_doc: <path>         # optional: how a dispatcher session runs many issues with agents

@@ -52,7 +52,8 @@ BEFORE_NEAR = re.compile(
 AFTER_CUES = re.compile(
     r"^\W*(?:only\s+)?(?:partially|partly|in part|for now|halfway|"
     r"(?:the\s+)?(?:first|second|third|next|last)\s+(?:half|part|step|slice)|"
-    r"part\s+\d+|step\s+\d+)\b",
+    r"(?:part|step)\s+(?:\d+|one|two|three|four)|"
+    r"not\s+(?:fully|completely|entirely|yet|all)|only\s+(?:some|part))\b",
     re.IGNORECASE,
 )
 
@@ -79,6 +80,8 @@ def carried_tail(prev):
     stripped = prev.rstrip()
     if not stripped or stripped[-1] in ".;:!?" or stripped.endswith("-->"):
         return ""
+    if re.match(r"^\s*(?:#|\||<)", stripped):  # a heading, table row or HTML line ends where it is
+        return ""
     tail = SENTENCE_SPLIT.split(stripped)[-1]
     return " ".join(tail.split()[-3:]) + " "
 
@@ -98,7 +101,10 @@ def findings(text, source="body"):
             for m in CLOSE_RE.finditer(sentence):
                 before = sentence[: m.start()]
                 after = sentence[m.end() :]
-                cue = BEFORE_ANY.search(before) or BEFORE_NEAR.search(before)
+                # Only the keyword's own clause: in "No API change, and fixes #12" the
+                # negation belongs to the clause before the comma.
+                clause = re.split(r"[,\u2014\u2013()]", before)[-1]
+                cue = BEFORE_ANY.search(clause) or BEFORE_NEAR.search(clause)
                 if cue:
                     why = f"'{cue.group(0).strip()}' before '{m.group(0)}'"
                 else:

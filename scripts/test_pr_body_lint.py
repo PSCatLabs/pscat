@@ -54,6 +54,17 @@ class Wrapped(unittest.TestCase):
         self.assertTrue(flagged("This change does not\nfix #12 yet."))
         self.assertTrue(flagged("Body text that only\npartially fixes #12"))
 
+    def test_a_heading_does_not_carry(self):
+        self.assertEqual(flagged("## Not in scope\nCloses #12"), [])
+
+    def test_negation_in_another_clause(self):
+        self.assertEqual(flagged("Does not change the API, and fixes #12"), [])
+        self.assertEqual(flagged("No API change \u2014 fixes #12"), [])
+
+    def test_partial_wording_after_the_reference(self):
+        self.assertTrue(flagged("Fixes #12 (not fully)"))
+        self.assertTrue(flagged("Fix #12, part two"))
+
     def test_curly_apostrophe(self):
         self.assertTrue(flagged("This doesn\u2019t fix #12"))
 

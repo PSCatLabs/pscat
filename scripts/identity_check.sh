@@ -225,33 +225,41 @@ while IFS= read -r l; do
 done <<EOF_LOADERS
 $LOADERS
 EOF_LOADERS
-if [ -n "$FILES_LIST" ]; then
-    [ -f "$FILES_LIST" ] || die "--files list '$FILES_LIST' not found"
-    FILES_LIST="$(cd "$(dirname "$FILES_LIST")" && pwd -P)/$(basename "$FILES_LIST")"
-    # Check the paths now, before any scratch directory exists, so a typo leaves nothing behind.
+# read_list FLAG LIST: the paths in a --files / --expect-diff list, one per line,
+# with `#` comments, blank lines and a leading `./` dropped, each checked to be a
+# tracked file. Checked now, before any scratch directory exists, so a typo leaves
+# nothing behind. Call it as X=$(read_list ...) || exit 64.
+read_list() {
+    local flag=$1 list=$2 f
+    [ -f "$list" ] || die "$flag list '$list' not found"
     while IFS= read -r f || [ -n "$f" ]; do
         f="${f%%#*}"
-        f=$(printf '%s' "$f" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+        f=$(printf '%s' "$f" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; s|^\./||')
         [ -n "$f" ] || continue
         [ -f "$ROOT/$f" ] && git --literal-pathspecs -C "$ROOT" ls-files --error-unmatch -- "$f" >/dev/null 2>&1 \
-            || die "--files: '$f' is not a tracked file in $ROOT"
-    done < "$FILES_LIST"
+            || die "$flag: '$f' is not a tracked file in $ROOT"
+        printf '%s\n' "$f"
+    done < "$list"
+}
+FILES_PATHS=""
+if [ -n "$FILES_LIST" ]; then
+    FILES_PATHS=$(read_list --files "$FILES_LIST") || exit 64
 fi
 EXPECTED=""      # newline-separated --expect-diff paths
 if [ -n "$EXPECT_LIST" ]; then
-    [ -f "$EXPECT_LIST" ] || die "--expect-diff list '$EXPECT_LIST' not found"
-    while IFS= read -r f || [ -n "$f" ]; do
-        f="${f%%#*}"
-        f=$(printf '%s' "$f" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
-        [ -n "$f" ] || continue
-        [ -f "$ROOT/$f" ] && git --literal-pathspecs -C "$ROOT" ls-files --error-unmatch -- "$f" >/dev/null 2>&1 \
-            || die "--expect-diff: '$f' is not a tracked file in $ROOT"
-        EXPECTED="${EXPECTED:+$EXPECTED
-}$f"
-    done < "$EXPECT_LIST"
+    EXPECTED=$(read_list --expect-diff "$EXPECT_LIST") || exit 64
     [ -n "$EXPECTED" ] || die "--expect-diff list '$EXPECT_LIST' names no file"
 fi
-is_expected() { [ -n "$EXPECTED" ] && printf '%s\n' "$EXPECTED" | grep -qxF -- "$1"; }
+# No fork: this runs once per compared page.
+is_expected() {
+    [ -n "$EXPECTED" ] || return 1
+    case "
+$EXPECTED
+" in *"
+$1
+"*) return 0 ;; esac
+    return 1
+}
 if [ "$GALLERY_STILL" -eq 1 ] && is_expected gallery/alpine_lake.ps; then
     die "--gallery-still asserts alpine_lake is unchanged, and --expect-diff lists it as changing; drop one"
 fi
@@ -398,13 +406,8 @@ EOF_SET2
 $(git -C "$ROOT" ls-files -- 'examples/*.ps' 'gallery/*.ps' 'selftest/drivers/*.ps')
 EOF_LIST
 fi
-if [ -n "$FILES_LIST" ]; then
-    while IFS= read -r f || [ -n "$f" ]; do
-        f="${f%%#*}"
-        f=$(printf '%s' "$f" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
-        [ -n "$f" ] || continue
-        printf '%s\n' "$f" >> "$FILES"
-    done < "$FILES_LIST"
+if [ -n "$FILES_PATHS" ]; then
+    printf '%s\n' "$FILES_PATHS" >> "$FILES"
     # drop duplicates, keep order
     awk '!seen[$0]++' "$FILES" > "$FILES.u" && mv "$FILES.u" "$FILES"
 fi
