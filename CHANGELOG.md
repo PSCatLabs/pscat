@@ -5,6 +5,16 @@ request. Versions follow semantic versioning; before 1.0 a minor release
 may change the library API, a patch release does not (docs/STABILITY.md).
 Font packs have their own `fonts-YYYY.MM` releases and are not listed here.
 
+## [0.6.2] - 2026-10-21
+
+### Features and changes
+
+- npm: the pscat package for the wasm renderer (JS/TS API, addFont, tarball tests, release stage) (#661)
+
+### Build, CI and release
+
+- release: find the .crate cargo publish uploaded under target/package/tmp-crate (#670) (#671)
+
 ## [0.6.1] - 2026-10-20
 
 ### Features and changes
