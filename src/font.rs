@@ -485,6 +485,8 @@ pub struct FontEntry {
 /// (An unreadable family subdirectory used to be a third: both scans
 /// now skip it, since issue #599 made them walk several roots.)
 pub fn catalog_entries() -> Vec<FontEntry> {
+    // Only the non-wasm catalog scan below pushes more entries.
+    #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
     let mut entries: Vec<FontEntry> = BUILTINS
         .iter()
         .map(|b| FontEntry {
