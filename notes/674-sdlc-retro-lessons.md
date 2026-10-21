@@ -25,7 +25,7 @@ dispatcher run. Process and docs only, plus two small tools; no render changes.
   listed file outside the compared set is a usage error.
 - `scripts/pr_body_lint.py` and the `pr-body` workflow: a closing keyword in a
   negated or partial sentence ("does not fix #N") fails. Run over the last 200
-  PR bodies it flags two, both real (PR #438, PR #304).
+  PR bodies it flags one, and it is real (PR #438, whose merge closed an issue it said it left open).
 - Templates: a Decision block and `Refs #N` guidance in the PR template; "Why /
   design intent" and "Perceptual acceptance check" in the feature request
   form (the dispatcher's `gh issue create` bodies carry the same headings,

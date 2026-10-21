@@ -65,6 +65,15 @@ class Wrapped(unittest.TestCase):
         self.assertTrue(flagged("Fixes #12 (not fully)"))
         self.assertTrue(flagged("Fix #12, part two"))
 
+    def test_negation_later_in_the_clause(self):
+        self.assertTrue(flagged("Fix #12 isn't complete"))
+        self.assertTrue(flagged("Fixed: #12 is not done"))
+        self.assertTrue(flagged("Fixes #12\u2019s first half"))
+
+    def test_list_items(self):
+        self.assertEqual(flagged("- Not in scope\nCloses #12"), [])
+        self.assertTrue(flagged("- This change does not\n  fix #12"))
+
     def test_curly_apostrophe(self):
         self.assertTrue(flagged("This doesn\u2019t fix #12"))
 

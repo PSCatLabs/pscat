@@ -17,12 +17,15 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: pr-body-${{ github.ref }}
-  cancel-in-progress: true
+# No cancel-in-progress: a cancelled run would stay on the head commit as a
+# CANCELLED check, and the work-issue skill merges only when every check passed.
+# The job takes seconds, so overlapping runs cost nothing.
 
 jobs:
   close-keywords:
+    # Dependabot bodies quote upstream release notes ("partially fixes
+    # actions/checkout#1234") that nobody here can edit.
+    if: github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

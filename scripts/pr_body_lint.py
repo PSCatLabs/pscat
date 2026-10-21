@@ -50,10 +50,16 @@ BEFORE_NEAR = re.compile(
 
 # Words right after the reference that make it partial: "fixes #12 partially".
 AFTER_CUES = re.compile(
-    r"^\W*(?:only\s+)?(?:partially|partly|in part|for now|halfway|"
+    r"^(?:'s)?\W*(?:only\s+)?(?:partially|partly|in part|for now|halfway|"
     r"(?:the\s+)?(?:first|second|third|next|last)\s+(?:half|part|step|slice)|"
     r"(?:part|step)\s+(?:\d+|one|two|three|four)|"
     r"not\s+(?:fully|completely|entirely|yet|all)|only\s+(?:some|part))\b",
+    re.IGNORECASE,
+)
+
+# Anywhere later in the clause: "fix #12 isn't complete", "fixed: #12 is not done".
+AFTER_ANY = re.compile(
+    r"\b(?:is not|isn't|not (?:done|complete|finished|fully)|incomplete|unfinished)\b",
     re.IGNORECASE,
 )
 
@@ -93,7 +99,11 @@ def findings(text, source="body"):
     text = strip_comments(text).replace("\u2019", "'")
     prev = ""
     for lineno, line in enumerate(text.splitlines(), 1):
-        carry = "" if BLOCK_START.match(line) else carried_tail(prev)
+        # A list item's text continues only on an indented line below it.
+        if BLOCK_START.match(line) or (BLOCK_START.match(prev) and not line[:1].isspace()):
+            carry = ""
+        else:
+            carry = carried_tail(prev)
         prev = line
         for k, sentence in enumerate(SENTENCE_SPLIT.split(line)):
             if k == 0:
@@ -108,7 +118,7 @@ def findings(text, source="body"):
                 if cue:
                     why = f"'{cue.group(0).strip()}' before '{m.group(0)}'"
                 else:
-                    cue = AFTER_CUES.search(after)
+                    cue = AFTER_CUES.search(after) or AFTER_ANY.search(re.split(r"[,\u2014\u2013]", after)[0])
                     if not cue:
                         continue
                     why = f"'{cue.group(0).strip()}' after '{m.group(0)}'"

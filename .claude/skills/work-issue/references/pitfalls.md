@@ -340,8 +340,9 @@ Cheapest first, before the long gate:
    them pscat opens a window and the call blocks until it is closed:
    `pscat --headless -e '3 4 add ='`, `pscat --png <SCRATCH>/probe-<N>.png file.ps`.
 6. Then the full gate in step 5.5.
-7. **Light path for a docs- or asset-only diff (#674).** If every changed path is in SDLC.md's
-   `light_gate.paths` and none in `light_gate.exclude` (check: `git -C "$WORKTREE_DIR" diff --name-only origin/main...HEAD | grep -Ev '^(docs|notes)/' ; git -C "$WORKTREE_DIR" diff --name-only origin/main...HEAD | grep '^docs/guides/'`
+7. **Light path for a docs- or asset-only diff (#674).** Read `light_gate` from `git show origin/main:SDLC.md`
+   (the policy in force). If every changed path is in its `paths` and none in its `exclude` (for today's
+   values, `docs/*` and `notes/*` excluding `docs/guides/*`, the check is: `git -C "$WORKTREE_DIR" diff --name-only origin/main...HEAD | grep -Ev '^(docs|notes)/' ; git -C "$WORKTREE_DIR" diff --name-only origin/main...HEAD | grep '^docs/guides/'`
    both print nothing), run `light_gate.command` from `SDLC.md` instead of the full gate, and write `quality gate light`
    in the report. CI still runs everything. `docs/guides/` is excluded because tests run its samples
    (`tests/landscape_cookbook.rs`, `tests/headline.rs`). Root Markdown, skills, test data and fonts are not on the

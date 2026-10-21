@@ -167,8 +167,8 @@ Closes #<N>
 - [x] PSCAT_PROFILE=ci ./scripts/selftest.sh && cargo test --profile ci && cargo clippy --all-targets -- -D warnings && cargo fmt --all -- --check
 <+ whatever else was actually run/verified>
 EOF
-python3 scripts/pr_body_lint.py <SCRATCH>/pr-body-<N>.md && git push -u origin "$BRANCH" && \
-  gh pr create --title "<summary>" --body-file <SCRATCH>/pr-body-<N>.md   # lint exit 1: fix the body, rerun; explicit refspec
+python3 scripts/pr_body_lint.py <SCRATCH>/pr-body-<N>.md --git-range origin/main..HEAD && git push -u origin "$BRANCH" && \
+  gh pr create --title "<summary>" --body-file <SCRATCH>/pr-body-<N>.md   # lint exit 1: fix the body (or reword the commit: nothing is pushed yet), rerun
 ```
 The body must contain `Closes #<N>` on its own line even when you write it without this template.
 **Won't-change outcome or a partial fix**: write `Refs #<N>` instead, because merging `Closes #<N>` closes the issue as completed
@@ -206,7 +206,8 @@ gh issue comment <N> --body "Opened <PR URL>."
 10. **Merge tier. Read `.claude/skills/work-issue/references/perceptual-review.md` now.** Every policy field comes from
     `git show origin/main:SDLC.md` (the policy in force, not the PR's copy). Precedence (c) > (b) > (a):
     - (c) `python3 scripts/codeowners_check.py --base origin/main` exits 1, or `human-only`, or over the bar: the owner
-      merges. Decision block atop the PR body, do 12 (CI green), skip 13, then pitfalls.md "Stop without merging" 1-3.
+      merges. Decision block atop the PR body; name the paths in the PR and issue comments; do 11 and 12 (CI green),
+      skip 13, then pitfalls.md "Stop without merging" 1-3.
       Exit 2 is an error: stop and report, never merge on it.
     - (b) a visible render change: the perceptual review; on pass, commit the review-log fragment and continue as (a).
     - (a) continue with 11-13, unless the dispatcher said not to merge (pitfalls.md "Stop without merging").

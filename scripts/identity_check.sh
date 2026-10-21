@@ -545,7 +545,7 @@ compare_one() {
     fi
     if [ "$brc" != "0" ]; then
         # A deliberate fix: the base failed, the branch renders. Expected, if listed.
-        if is_expected "$label" && [ -n "$hl" ]; then
+        if is_expected "$label" && [ -n "$hl" ] && [ -z "${brc//[0-9]/}" ]; then
             echo "EXPECTED   $label (pscat exited $brc in the base tree and renders in the branch; --expect-diff)"
             nexpected=$((nexpected + 1))
             return 0
