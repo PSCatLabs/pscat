@@ -85,6 +85,17 @@
 #                         listed in LIST: one repo-relative path per line, blank
 #                         lines and `#` comments ignored, each tracked in the
 #                         branch tree. Use it for a slice no loader describes.
+#   --expect-diff LIST    files that are MEANT to render differently (issue #674): an
+#                         opt-in change, a new default, a deliberate fix. Same format
+#                         as --files (tracked paths, one per line, `#` comments). A
+#                         listed file that differs prints `EXPECTED` and does not fail
+#                         the run; a listed file that comes out identical prints
+#                         `UNCHANGED` and fails it (exit 1), since the change did not
+#                         take effect; a listed file outside the compared set (not
+#                         picked, or new in the branch) is a usage error (exit 64), so
+#                         a typo cannot pass silently. Every file NOT listed must still
+#                         be identical. A run that needs this flag is a visible change
+#                         (SDLC.md "Who merges", tier b), not a proof of identity.
 #   --control FILE        negative control. A tiny driver that uses a key only
 #                         the branch has. It is rendered from both trees and the
 #                         PNGs must DIFFER, which proves each tree really loaded
@@ -108,8 +119,8 @@
 #   --keep                keep the scratch directory
 #   -j N                  parallel renders (default: CPU count)
 #
-# Exit status: 0 all identical or SKIPPED (and the control differed); 1 a page
-# DIFFERS or ERRORs, or nothing at all was compared; 2 the control did NOT differ (or was unusable), so the pages that
+# Exit status: 0 all identical, SKIPPED or EXPECTED (and the control differed); 1 a page
+# DIFFERS or ERRORs, an --expect-diff file is UNCHANGED, or nothing at all was compared; 2 the control did NOT differ (or was unusable), so the pages that
 # looked identical prove nothing; 64 a usage or harness error (bad arguments,
 # no binary, the render driver itself failed), not a result.
 #
@@ -152,6 +163,7 @@ CONTROL=""
 CONTROL_PAGE=""
 LOADERS=""       # newline-separated --loader libs (empty = lib/paintkit.ps)
 FILES_LIST=""    # --files LIST
+EXPECT_LIST=""   # --expect-diff LIST
 GALLERY_STILL=0
 DPI=72
 GALLERY_DPI=144
@@ -166,6 +178,7 @@ while [ $# -gt 0 ]; do
                          LOADERS="${LOADERS:+$LOADERS
 }$2"; shift 2 ;;
         --files)         [ $# -ge 2 ] || die "--files needs a list file"; FILES_LIST=$2; shift 2 ;;
+        --expect-diff)   [ $# -ge 2 ] || die "--expect-diff needs a list file"; EXPECT_LIST=$2; shift 2 ;;
         --base-bin)      [ $# -ge 2 ] || die "--base-bin needs a pscat binary"; BASE_BIN=$2; shift 2 ;;
         --head-bin)      [ $# -ge 2 ] || die "--head-bin needs a pscat binary"; HEAD_BIN=$2; shift 2 ;;
         --control)       [ $# -ge 2 ] || die "--control needs a file"; CONTROL=$2; shift 2 ;;
@@ -224,6 +237,21 @@ if [ -n "$FILES_LIST" ]; then
             || die "--files: '$f' is not a tracked file in $ROOT"
     done < "$FILES_LIST"
 fi
+EXPECTED=""      # newline-separated --expect-diff paths
+if [ -n "$EXPECT_LIST" ]; then
+    [ -f "$EXPECT_LIST" ] || die "--expect-diff list '$EXPECT_LIST' not found"
+    while IFS= read -r f || [ -n "$f" ]; do
+        f="${f%%#*}"
+        f=$(printf '%s' "$f" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+        [ -n "$f" ] || continue
+        [ -f "$ROOT/$f" ] && git --literal-pathspecs -C "$ROOT" ls-files --error-unmatch -- "$f" >/dev/null 2>&1 \
+            || die "--expect-diff: '$f' is not a tracked file in $ROOT"
+        EXPECTED="${EXPECTED:+$EXPECTED
+}$f"
+    done < "$EXPECT_LIST"
+    [ -n "$EXPECTED" ] || die "--expect-diff list '$EXPECT_LIST' names no file"
+fi
+is_expected() { [ -n "$EXPECTED" ] && printf '%s\n' "$EXPECTED" | grep -qxF -- "$1"; }
 LOADER_DESC=$(printf '%s' "$LOADERS" | tr '\n' ' ' | sed 's/ *$//')
 [ -n "$LOADER_DESC" ] || LOADER_DESC="library"
 if [ "$BASE" = "$ROOT" ]; then
@@ -416,6 +444,21 @@ queue() { # file
 while IFS= read -r f; do case "$f" in gallery/*) queue "$f" ;; esac; done < "$FILES"
 while IFS= read -r f; do case "$f" in gallery/*) ;; *) queue "$f" ;; esac; done < "$FILES"
 
+# Every --expect-diff file must be one this run compares: a path the pick left out, or
+# one that is new in the branch, can never show its difference, so it is a usage error.
+if [ -n "$EXPECTED" ]; then
+    while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        if grep -qxF -- "$f" "$NEWFILES"; then
+            die "--expect-diff: $f is new in this branch (not in the base tree), so there is nothing to compare"
+        fi
+        cut -d' ' -f1 "$COMPARE" | grep -qxF -- "$f" \
+            || die "--expect-diff: $f is not among the files compared (add it with --files, or check --loader)"
+    done <<EOF_EXPECTED
+$EXPECTED
+EOF_EXPECTED
+fi
+
 CONTROL_KEY="__control__"
 if [ -n "$CONTROL" ]; then
     cpage=$CONTROL_PAGE
@@ -456,6 +499,7 @@ nident=0
 nbad=0
 SKIPPED_FILES=""
 nskipped=0
+nexpected=0
 
 # fails_identically BDIR HDIR: 0 when the two renders of one file failed the
 # same way (#504): same log with the scratch path masked, same PNG names, same
@@ -478,6 +522,10 @@ compare_one() {
     brc=$(rc_of "$b"); hrc=$(rc_of "$h")
     bl=$(pngs_of "$b"); hl=$(pngs_of "$h")
     # A numeric status only: a missing rc file reads "?" in both trees and must stay an ERROR.
+    if [ "$hrc" != "0" ] && [ "$brc" = "$hrc" ] && [ -z "${hrc//[0-9]/}" ] && fails_identically "$b" "$h" && is_expected "$label"; then
+        echo "ERROR      $label (listed in --expect-diff, but pscat exited $hrc identically in both trees; see $h/log)"
+        return 1
+    fi
     if [ "$hrc" != "0" ] && [ "$brc" = "$hrc" ] && [ -z "${hrc//[0-9]/}" ] && fails_identically "$b" "$h"; then
         echo "SKIPPED    $label (pscat exited $hrc identically in both trees, same log, same canvas: nothing to compare; see $h/log)"
         nskipped=$((nskipped + 1))
@@ -498,9 +546,15 @@ compare_one() {
         return 1
     fi
     if [ "$bl" != "$hl" ]; then
+        if is_expected "$label"; then
+            echo "EXPECTED   $label (page count: base $(printf '%s\n' "$bl" | wc -l | tr -d ' '), branch $(printf '%s\n' "$hl" | wc -l | tr -d ' '); --expect-diff)"
+            nexpected=$((nexpected + 1))
+            return 0
+        fi
         echo "DIFFERS    $label (page count: base $(printf '%s\n' "$bl" | wc -l | tr -d ' '), branch $(printf '%s\n' "$hl" | wc -l | tr -d ' '))"
         return 1
     fi
+    local moved=0
     i=0
     for p in $hl; do
         i=$((i + 1))
@@ -508,12 +562,20 @@ compare_one() {
         if cmp -s "$b/$p" "$h/$p"; then
             echo "identical  $label page $i"
             nident=$((nident + 1))
+        elif is_expected "$label"; then
+            echo "EXPECTED   $label page $i (--expect-diff)"
+            nexpected=$((nexpected + 1))
+            moved=1
         else
             echo "DIFFERS    $label page $i"
             nbad=$((nbad + 1))
             st=1
         fi
     done
+    if is_expected "$label" && [ "$moved" -eq 0 ]; then
+        echo "UNCHANGED  $label (listed in --expect-diff, but every page is identical: the change did not take effect)"
+        st=1
+    fi
     return $st
 }
 
@@ -583,14 +645,15 @@ fi
 
 ELAPSED=$(( $(date +%s) - START ))
 SKIP_NOTE=""
+[ "$nexpected" -eq 0 ] || SKIP_NOTE=", $nexpected expected differences (--expect-diff)"
 if [ "$nskipped" -gt 0 ]; then
-    SKIP_NOTE=", $nskipped skipped"
+    SKIP_NOTE="$SKIP_NOTE, $nskipped skipped"
     echo >&2
     echo "identity_check.sh: WARNING: $nskipped file(s) failed identically in both trees and were NOT compared:" >&2
     printf '%s' "$SKIPPED_FILES" >&2
     # Nothing compared is not a pass: every file failing the same way points at
     # the harness (the binary, the page setup), not at the files.
-    if [ "$nident" -eq 0 ] && [ "$nbad" -eq 0 ] && [ "$FAILED" -eq 0 ]; then
+    if [ "$nident" -eq 0 ] && [ "$nbad" -eq 0 ] && [ "$nexpected" -eq 0 ] && [ "$FAILED" -eq 0 ]; then
         echo "identity_check.sh: every file was skipped, so nothing was compared" >&2
         FAILED=1
     fi
@@ -599,7 +662,7 @@ echo
 if [ "$FAILED" -eq 0 ]; then
     echo "identity_check.sh: $nident of $npages page renders identical across $nfiles files${SKIP_NOTE} (${ELAPSED}s)"
 else
-    echo "identity_check.sh: FAILED, $nbad pages differ, plus any ERROR lines above ($nident of $npages identical${SKIP_NOTE}, ${ELAPSED}s)"
+    echo "identity_check.sh: FAILED, $nbad pages differ, plus any ERROR or UNCHANGED lines above ($nident of $npages identical${SKIP_NOTE}, ${ELAPSED}s)"
 fi
 if [ "$FAILED" -ne 0 ]; then
     exit 1

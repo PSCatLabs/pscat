@@ -355,6 +355,10 @@ Before tagging:
 - [ ] `SECURITY.md`, `THIRD_PARTY_NOTICES.md` and `docs/STABILITY.md` are
       accurate for this release.
 - [ ] `CHANGELOG.md` reads well.
+- [ ] The owner read the visible changes merged since the last release
+      ([`review-log/pending/`](review-log/README.md), #674); each rejected
+      entry has a revert PR or a fix ticket. The release PR moves
+      `pending/*` to `review-log/vX.Y.Z/` (`git mv`).
 
 After publishing:
 

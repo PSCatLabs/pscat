@@ -331,3 +331,26 @@ itself an owner path, and a PR that deleted the field would otherwise switch the
 check off. (A consequence: the PR that introduces the rule is judged by the
 policy before it, so it merges under `agent-full`.) Exit status
 2 stops the run instead of merging, so a broken checker cannot read as "clear".
+
+## Added in #674: merge tiers, the perceptual review, proposed follow-ups
+
+From the dispatcher retrospective after the October 2026 cycle. Render PRs used to stop for the owner
+one at a time, which made the owner the bottleneck; the owner asked to "minimize any visual inspection
+that I need to perform, or at least delay any approval needed by me until the very end". So a visible
+change now gets an independent, vision-capable reviewer with no implementation context (it sees only
+the issue, `docs/dev/TASTE.md` and the images), and the owner reads one review log before the release.
+The reviewer is deliberately cold: an implementer judging their own render sees what they meant to draw.
+
+Owner-path PRs (tier c) now wait for green CI before stopping: the owner merges in one batched
+sitting, and a PR still running CI at that sitting wastes it. A relayed approval is never a basis
+for an agent merge (tier d): the auto-mode classifier already refused those merges, and an approval
+should come from the owner, not through a chain of agents.
+
+Agents stopped filing issues: many follow-ups filed during a run were polish nobody asked for, and
+the backlog grew faster than it drained. Agents now propose; the dispatcher files only what has a
+user-visible impact and parks polish on the epic. `pr_body_lint.py` exists because a PR body that
+said a PR "does not fix #N" closed #N on merge: GitHub reads the keyword, not the sentence.
+
+The goals preamble is at the top of `SKILL.md`, not in a reference, because every agent must read it
+and several earlier runs optimised a timing or a byte count at the expense of the picture.
+`SKILL.md` stays at 250 lines (#276's cap); the detail is in `perceptual-review.md`.

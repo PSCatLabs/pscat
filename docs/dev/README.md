@@ -25,6 +25,9 @@ on it with them. For conventions start with [`AGENTS.md`](../../AGENTS.md) and
 | [`SELFTEST.md`](SELFTEST.md) | Checking a PostScript-only change without writing Rust. |
 | [`GS_CHECK_INVENTORY.md`](GS_CHECK_INVENTORY.md) | Every Ghostscript cross-check test, and what each one asserts. |
 | [`DOCS_PLAN.md`](DOCS_PLAN.md) | How the documentation is organized, and why. |
+| [`TASTE.md`](TASTE.md) | The owner's taste in renders: what the perceptual reviewer checks a visible change against. |
+| [`DISPATCH.md`](DISPATCH.md) | Running many issues with agents: waves, the concurrency cap, file lanes, follow-ups. |
+| [`review-log/`](review-log/README.md) | Visible changes merged after a perceptual review, for the owner's read before each release. |
 | [`../STABILITY.md`](../STABILITY.md) | Which surfaces are stable, experimental or internal, pre-1.0 semver and the deprecation rule. |
 | [`../../SECURITY.md`](../../SECURITY.md) | The threat model: what untrusted PostScript and the MCP server can do today, and the limits that do not exist yet. Update it with any change to file, process or MCP behaviour. |
 

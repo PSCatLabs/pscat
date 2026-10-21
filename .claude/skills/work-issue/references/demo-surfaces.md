@@ -33,6 +33,8 @@ look at.
     PNG under `docs/` (the specimen render) plus an optional `specimens` entry in
     `gallery/manifest.json` per the rules above.
 
+  A specimen or render change is a visible change: it merges as tier (b) after the perceptual review, or
+  stops for the owner as tier (c) (perceptual-review.md, #674). Either way the images are pinned as below.
   A specimen PR that stops at the no-merge path (pitfalls.md "Stop without merging") must **commit
   its render and embed it** (`![...](docs/<name>.png)` in the PR body or a comment, with an absolute
   `https://github.com/<owner>/<repo>/blob/<head sha>/docs/<name>.png?raw=true` URL), pinned to the
