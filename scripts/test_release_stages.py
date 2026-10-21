@@ -110,6 +110,19 @@ class Manifest(Base):
         with self.assertRaises(SystemExit):
             rs.build_manifest("9.8.7", COMMIT, self.dist, self.crate)
 
+    def test_uploaded_crate_path_prefers_cargo_publish_tmp_crate(self):
+        with tempfile.TemporaryDirectory() as root:
+            pkg = os.path.join(root, "target", "package")
+            os.makedirs(os.path.join(pkg, "tmp-crate"))
+            with self.assertRaises(rs.StageError):
+                rs.uploaded_crate_path(root, "pscat-1.0.0.crate")
+            open(os.path.join(pkg, "pscat-1.0.0.crate"), "wb").close()
+            self.assertEqual(rs.uploaded_crate_path(root, "pscat-1.0.0.crate"),
+                             os.path.join(pkg, "pscat-1.0.0.crate"))
+            open(os.path.join(pkg, "tmp-crate", "pscat-1.0.0.crate"), "wb").close()
+            self.assertEqual(rs.uploaded_crate_path(root, "pscat-1.0.0.crate"),
+                             os.path.join(pkg, "tmp-crate", "pscat-1.0.0.crate"))
+
     def test_crate_identity_ignores_tar_metadata(self):
         a = os.path.join(self.tmp, "a.crate")
         b = os.path.join(self.tmp, "b.crate")
