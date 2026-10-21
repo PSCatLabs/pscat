@@ -17,6 +17,16 @@ body:
     validations:
       required: true
   - type: textarea
+    id: intent
+    attributes:
+      label: Why / design intent
+      description: Optional. What the change is for, and the idea behind its design. Agents read this to make the calls the issue does not spell out.
+  - type: textarea
+    id: perceptual
+    attributes:
+      label: Perceptual acceptance check
+      description: Optional. How a person would judge the result by eye, for example "reads easily at gallery size". If the issue also has a metric (a size, a time, a count), put the check next to it; the check wins when the two disagree.
+  - type: textarea
     id: alternatives
     attributes:
       label: What have you tried instead?

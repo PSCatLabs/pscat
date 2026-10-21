@@ -142,6 +142,30 @@ not asked. It is the owner's standing permission for agents to merge those
 bots' PRs once CI is green, despite `owner_merge_file`. When set, the "Who
 merges" section carries the exception paragraph from the template.
 
+**`merge_policy.visible_change_review`** (optional mapping: `taste_doc`,
+`review_log`; absent means a visible render change merges like any other PR)
+is read, not asked. When set, the "Who merges" section carries tier (b) from
+the template: a PR that changes how something renders is merged by the agent
+only after an independent, vision-capable reviewer agent with no
+implementation context passes its before/after images against the issue's
+perceptual acceptance check and `taste_doc`, and the agent adds an entry
+under `review_log`, which the owner reads once before each release. The
+template's "Who merges" section is included when this or `owner_merge_file`
+is set, and always states tier (d): an approval relayed by another agent never
+authorizes an agent merge. (Added in #674.)
+
+**`light_gate`** (optional mapping: `paths`, a list of globs where `*` also
+matches `/`, and `command`; absent means every PR runs the full gate locally)
+is read, not asked. When set, step 5 of `SDLC.md` gets the template's
+light-gate sentence: a PR whose every changed path matches `paths` runs
+`command` locally instead of the quality gate, and CI still runs everything.
+(Added in #674.)
+
+**`dispatch_doc`** (optional path; absent means no section) is read, not
+asked. When set, `SDLC.md` carries the template's short "Dispatching many
+issues" section pointing at it. sdlcify does not write that doc. (Added in
+#674.)
+
 **`release`** (optional frontmatter mapping: `process_doc`, `environment`,
 `tag_pattern`; absent means no release section) is read, not asked. When set,
 `SDLC.md` carries the "Release lifecycle" section from the template, which
@@ -220,6 +244,9 @@ diff — don't print anything yet, don't mutate anything yet.
   pass (every rule matches a tracked file or carries a `# forward:` comment)?
   Report a gap; do not write the file, which is hand-authored, nor change any
   GitHub setting for it.
+- **Docs the policy names**: if `merge_policy.visible_change_review` is set,
+  do `taste_doc` and the `review_log` directory exist? If `dispatch_doc` is
+  set, does it exist? Report a gap; do not write them (they are hand-authored).
 - **Execution skill**: does a `.claude/skills/<something>/SKILL.md`
   exist that looks like the issue→branch→PR loop (grep skill
   descriptions for "issue" + "branch" + "PR")? Record present/absent

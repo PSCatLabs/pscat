@@ -639,6 +639,14 @@ renders eight examples in both and compares block-downsampled output).
   limits it lists as missing are #604. `docs/STABILITY.md` says which surfaces need a deprecation
   period. `.github/CODEOWNERS` paths are owner-merged (`SDLC.md`, "Who merges").
 
+- **Visible changes merge without the owner mid-cycle** (#674). A PR that
+  changes how something renders is checked by an independent perceptual
+  reviewer agent against the issue's perceptual acceptance check and
+  `docs/dev/TASTE.md`, merged by the agent on a pass, and logged in
+  `docs/dev/review-log/pending/` for the owner's read before the release
+  (`SDLC.md`, "Who merges"). Agents propose follow-ups instead of filing
+  them; running many issues at once is `docs/dev/DISPATCH.md`.
+
 - **gs is the oracle.** Every semantics question in Stages 5–7 was
   settled by running the snippet in gs first and pinning the answer in
   a test comment. Keep doing that; it caught real design errors twice
