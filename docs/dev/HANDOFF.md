@@ -836,6 +836,7 @@ renders eight examples in both and compares block-downsampled output).
    #213 shipped the layout (`tw-type`, `tw-linecount`, `tw-pageheight`; the
    "layout" block at the end of `lib/typewriter.ps`, private names `ly*`),
    `pscat typewrite` (`--ps`, `--height fit`, `--reflow`; since #600 `scripts/typewrite.sh` is a thin wrapper that honours `PSCAT_BIN`),
+   `-o` picks PNG/SVG/PDF by extension like `photo-etch` and refuses any other name (#614; `output_format` in `src/subcmd/mod.rs`),
    the `Typewriter` catalog row (hand-written: build.rs rejects Type3Face)
    and `examples/typewriter_memo.txt`. One layout makes the line list both
    `tw-linecount` and `tw-type` use. `notes/213-typewriter-layout.md`.

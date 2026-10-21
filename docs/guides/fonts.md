@@ -160,7 +160,7 @@ showpage
   one PostScript string, so Ghostscript's 65,535-byte string limit caps it at
   about 30 pages.
 
-`pscat typewrite` does the same from a text file, to PNG or PDF:
+`pscat typewrite` does the same from a text file, to PNG, SVG or PDF:
 
 ```sh
 pscat typewrite --reflow --memo-to "All Third Floor Staff" \
@@ -172,7 +172,10 @@ pscat typewrite --reflow --memo-to "All Third Floor Staff" \
 
 <p><img src="../dev/design/typewriter_memo.png" width="50%" alt="A typed memo, rendered by pscat typewrite"/></p>
 
-`--height fit` sizes the page to its text, `--ps PATH` writes the driver for
+`-o` picks the format by its extension (`.png`, `.svg`, `.pdf`, any case; any other
+name is an error, not a PNG in a misnamed file). An SVG page is large (the ribbon's
+weave is vector clipping: roughly 40 KB a character), so prefer PNG or PDF for a
+full page. `--height fit` sizes the page to its text, `--ps PATH` writes the driver for
 Ghostscript (`gs -dNOSAFER`; the render above beside the same page in
 [gs](../dev/design/typewriter_memo_gs.png)), `--reflow` joins each paragraph's lines.
 Typographic quotes and dashes become ASCII; any other non-ASCII letter becomes

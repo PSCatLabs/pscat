@@ -87,6 +87,9 @@ header).
 
 ## Typewritten pages (text → PNG/PDF)
 
+`-o` takes `.png`, `.svg` or `.pdf` (format by extension; anything else is an
+error). SVG pages are large (~40 KB a character): prefer PNG or PDF.
+
 ```sh
 pscat typewrite letter.txt -o letter.png
 pscat typewrite --text "Dear Sir," -o short.png
