@@ -165,7 +165,7 @@ jobs:
           cargo clippy --all-targets -- -D warnings
           ./scripts/selftest.sh
           cargo test --profile ci
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: github.event_name != 'pull_request'
         with:
           node-version: 22
@@ -432,7 +432,7 @@ jobs:
         id: crates-auth
       # The npm channel turns on when npm/package.json exists (#566); npm
       # trusted publishing needs npm >= 11.5, which Node 24 ships.
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: hashFiles('npm/package.json') != ''
         with:
           node-version: 24
