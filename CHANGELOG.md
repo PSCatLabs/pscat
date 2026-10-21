@@ -5,6 +5,23 @@ request. Versions follow semantic versioning; before 1.0 a minor release
 may change the library API, a patch release does not (docs/STABILITY.md).
 Font packs have their own `fonts-YYYY.MM` releases and are not listed here.
 
+## [0.6.3] - 2026-10-21
+
+### Features and changes
+
+- typewrite: -o picks png/svg/pdf by extension and refuses other names (#614) (#676)
+- font: silence unused_mut on wasm32 in catalog_entries (#626) (#675)
+
+### Build, CI and release
+
+- deps: bump the cargo group across 1 directory with 4 updates (#662)
+- ci: bump actions/download-artifact from 4.3.0 to 8.0.2 (#665)
+- ci: bump actions/upload-artifact from 4.6.2 to 7.0.2 (#664)
+- ci: bump actions/setup-node from 4.4.0 to 7.1.0 (#663)
+- ci: bump actions/upload-pages-artifact from 3.0.1 to 5.0.0 (#667)
+- ci: bump actions/deploy-pages from 4.0.5 to 5.0.1 (#666)
+- SDLC: agents may merge Dependabot PRs once CI is green (merge_policy.bot_merge_authors) (#673)
+
 ## [0.6.2] - 2026-10-21
 
 ### Features and changes
