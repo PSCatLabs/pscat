@@ -1,6 +1,6 @@
 {
   "name": "pscat",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "description": "PostScript rendering, generative art and paper-ready charts with the pscat interpreter: three skills plus the pscat-mcp server. Requires pscat installed separately.",
   "author": {
     "name": "Jerome Banks",
