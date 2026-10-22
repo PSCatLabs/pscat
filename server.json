@@ -8,12 +8,12 @@
     "source": "github"
   },
   "websiteUrl": "https://pscatlabs.github.io/pscat/",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "packages": [
     {
       "registryType": "cargo",
       "identifier": "pscat",
-      "version": "0.6.2",
+      "version": "0.6.3",
       "transport": {
         "type": "stdio"
       },

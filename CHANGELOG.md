@@ -5,10 +5,11 @@ request. Versions follow semantic versioning; before 1.0 a minor release
 may change the library API, a patch release does not (docs/STABILITY.md).
 Font packs have their own `fonts-YYYY.MM` releases and are not listed here.
 
-## [0.6.3] - 2026-10-21
+## [0.6.3] - 2026-10-22
 
 ### Features and changes
 
+- release: MCP Registry entry, pscat mcp, and a registry stage (#569 part c) (#679)
 - typewrite: -o picks png/svg/pdf by extension and refuses other names (#614) (#676)
 - font: silence unused_mut on wasm32 in catalog_entries (#626) (#675)
 
