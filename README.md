@@ -91,7 +91,11 @@ MCP server with four tools. In Claude Code, both come as one plugin:
 (after installing pscat; see [plugin/README.md](plugin/README.md)). In Codex:
 `codex plugin marketplace add PSCatLabs/pscat`, then
 `codex plugin add pscat@pscat`. See the
-[agents guide](docs/guides/agents.md).
+[agents guide](docs/guides/agents.md). Any other MCP client can run
+`pscat mcp` (the same server as `pscat-mcp`), and pscat is listed in the
+[MCP Registry](https://registry.modelcontextprotocol.io/) from 0.6.3:
+
+- MCP Registry name: `mcp-name: io.github.PSCatLabs/pscat`
 
 ## Contributing
 

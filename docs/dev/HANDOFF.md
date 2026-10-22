@@ -1038,8 +1038,10 @@ renders eight examples in both and compares block-downsampled output).
   option. The `scripts/*.sh` of the same names are thin wrappers, and
   `pscat-mcp`'s `handwrite` runs `pscat handwrite`. See
   `notes/600-tool-subcommands.md`.
-- **`pscat-mcp`'s contract (#568).** `SUPPORTED_VERSIONS` in
-  `src/bin/pscat_mcp.rs` lists only revisions tested against a real client
+- **`pscat-mcp`'s contract (#568).** The server lives in
+  `src/mcp_server.rs`, pulled into both binaries with `#[path]` (not the
+  library): `pscat-mcp` and `pscat mcp` are the same server (#569).
+  `SUPPORTED_VERSIONS` there lists only revisions tested against a real client
   (2025-11-25: Claude Code, Inspector; 2025-06-18: Codex); never echo a
   client's version. `server/discover` must stay -32601 until 2026-07-28 is
   really implemented (#621): -32022 there tells a dual-era client the server
@@ -1085,6 +1087,14 @@ renders eight examples in both and compares block-downsampled output).
   agents read (never declare it in a manifest too: Claude loads both).
   `scripts/codex_plugin_install_check.sh` (job `codex-install`) installs it
   with the pinned codex CLI. See `notes/569-codex-plugin.md`.
+- **The MCP Registry entry (#569 part c) is root `server.json`**
+  (`io.github.PSCatLabs/pscat`, case-sensitive: it must match the GitHub
+  owner login, the README's visible `mcp-name:` line and the OIDC grant).
+  One cargo package run as `pscat mcp`. The README line must stay visible
+  text (crates.io strips HTML comments) and is frozen per crate version.
+  The `registry` release stage publishes it last with the pinned
+  `mcp-publisher`; `release.sh` bumps both version fields. See
+  `notes/569-mcp-registry.md` and RELEASING.md.
 - **Licensing (#563).** The code is MIT OR Apache-2.0. `Cargo.toml`'s
   `include` is an allowlist, so a new `include_bytes!`/`include_str!`
   target, or a file `build.rs` reads, must be added to it or the

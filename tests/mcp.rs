@@ -24,7 +24,19 @@ impl Server {
     }
 
     fn start_in(cwd: &Path, args: &[&str]) -> Self {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_pscat-mcp"))
+        Self::spawn(Command::new(env!("CARGO_BIN_EXE_pscat-mcp")), cwd, args)
+    }
+
+    /// The same server reached as `pscat mcp`, the command the MCP
+    /// Registry's cargo entry runs (#569).
+    fn start_subcommand() -> Self {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_pscat"));
+        cmd.arg("mcp");
+        Self::spawn(cmd, &common::scratch_dir("mcp-sub-cwd"), &[])
+    }
+
+    fn spawn(mut cmd: Command, cwd: &Path, args: &[&str]) -> Self {
+        let mut child = cmd
             .args(args)
             .current_dir(cwd)
             .stdin(Stdio::piped())
@@ -203,6 +215,17 @@ fn handshake_and_tool_list() {
             "every tool declares required params"
         );
     }
+}
+
+#[test]
+fn pscat_mcp_subcommand_is_the_same_server() {
+    let mut s = Server::start_subcommand();
+    initialized(&mut s);
+    let resp = s.call(json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }));
+    assert_eq!(resp["result"]["tools"].as_array().expect("tools").len(), 4);
+    // A tool call works too: the subcommand finds pscat (itself) to shell out to.
+    let result = s.tool("eval_postscript", json!({ "source": "(hi) =" }));
+    assert_eq!(result["isError"], false, "{result}");
 }
 
 #[test]
