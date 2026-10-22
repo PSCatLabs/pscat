@@ -103,8 +103,8 @@ profile build of this commit).
   exists.
 - The interpreter has no network code of its own, and no PostScript operator
   opens a connection. (The live window talks to the windowing system through
-  `winit`, as any GUI does.) Of the shipped binaries, only `pscat-mcp`
-  (`src/bin/pscat_mcp.rs`) starts other programs. The other `Command::new` calls
+  `winit`, as any GUI does.) Only the MCP server (`pscat-mcp`, or
+  `pscat mcp`; `src/mcp_server.rs`) starts other programs. The other `Command::new` calls
   in the repository are in benchmarks and tests.
 - Font names are matched against the font catalog's file *stems*
   (`src/font.rs`, `catalog_fid`); a name from a program is never joined into a
@@ -185,7 +185,7 @@ it: `render_postscript`, `handwrite`, `describe_art_capabilities` and
 `eval_postscript`. It runs each call as a child process (`pscat`, and
 `pscat handwrite` for `handwrite`) as the same user, with the same
 environment and working directory as the server. Checked with:
-`src/bin/pscat_mcp.rs`, `tests/mcp.rs` (which tests every bound below),
+`src/mcp_server.rs`, `tests/mcp.rs` (which tests every bound below),
 `scripts/mcp_inspector_check.sh`, and Claude Code and Codex sessions against
 an installed build (October 2026, #568).
 

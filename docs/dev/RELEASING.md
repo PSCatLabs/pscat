@@ -4,8 +4,9 @@ pscat has two release trains:
 
 - **Interpreter releases**, `vX.Y.Z` tags (this document). Each one publishes
   the `pscat` crate to crates.io and a GitHub Release with binaries for five
-  platforms, the `pscat` npm package (#566; first published with 0.6.2), and
-  checks the Claude Code plugin manifests (#569).
+  platforms, the `pscat` npm package (#566; first published with 0.6.2),
+  checks the Claude Code plugin manifests, and registers the version in the
+  MCP Registry (#569; from 0.6.3).
 - **Font packs**, `fonts-YYYY.MM` tags. These are
   [`RELEASING-FONTS.md`](RELEASING-FONTS.md). An interpreter release pins one
   font-pack index, so the first font release comes before the first
@@ -39,7 +40,7 @@ run first:
 | `binaries` | Builds and checks one archive per platform (below) with `scripts/package_release.sh`. | read |
 | `assemble` | Writes `SHA256SUMS` and `release-manifest.json` (version, tag, commit, every digest). Runs the rehearsal (below) on these exact artifacts. Runs a read-only plan against the real registries, which stops a real release on a mismatch before anything is created. | read |
 | `draft` | Creates a **draft** GitHub Release with the archives, `SHA256SUMS` and `release-manifest.json`, uploading the manifest last. | `contents: write` |
-| `publish` | Runs in the **`release` environment**, so it waits for the owner's approval. It signs build-provenance attestations for every archive and the `.crate` (below), publishes the crate to crates.io (trusted publishing), then npm once `npm/package.json` exists (the exact tarball `verify` packed), then makes the GitHub Release public, then checks the plugin manifests once a `.claude-plugin/` manifest exists. | `contents: write`, `id-token: write`, `attestations: write` |
+| `publish` | Runs in the **`release` environment**, so it waits for the owner's approval. It signs build-provenance attestations for every archive and the `.crate` (below), publishes the crate to crates.io (trusted publishing), then npm once `npm/package.json` exists (the exact tarball `verify` packed), then makes the GitHub Release public, then checks the plugin manifests once a `.claude-plugin/` manifest exists, then publishes `server.json` to the MCP Registry with the pinned `mcp-publisher`. | `contents: write`, `id-token: write`, `attestations: write` |
 | `post-publish-check` | Calls `.github/workflows/release-check.yml`: installs the release from the public channels on Linux, macOS and Windows and fails if it does not install or run (below). | `contents: read`, `attestations: read` |
 
 The draft exists before the approval prompt, so you can review it (assets,
@@ -86,6 +87,10 @@ It first asks the registry what is already there:
   tarball `verify` packed (`release-inputs/pscat-X.Y.Z.tgz`, beside the
   `.crate`). The stage publishes that file, never a fresh `npm pack`, and
   halts if it is missing or holds another name or version.
+- **MCP Registry.** The registry's entry for the name and version
+  (`GET /v0.1/servers/{name}/versions/{version}`) lists the same packages
+  as `server.json`: registry type, identifier, version, transport and
+  arguments.
 
 Nothing ever overwrites, deletes or re-uploads a published version. To
 resume a failed release, use **Re-run failed jobs** on the same workflow run.
@@ -104,6 +109,11 @@ The job log and the report say which artifact differs and how.
   ships as the next patch version.
 - **crates.io holds a different `X.Y.Z`.** crates.io versions are permanent.
   Yank it if it is broken, and release `X.Y.Z+1`.
+- **The MCP Registry stage halts.** Registry versions are immutable too. A
+  different entry at the version, or a README without the `mcp-name:` line
+  (crates.io serves each version's README as published, so that version
+  can never be registered as a cargo package): fix it for `X.Y.Z+1`. The
+  rest of the release is already out, because this stage runs last.
 - **Two drafts for one tag.** Delete the extra one.
 - **The tag points elsewhere.** Tags are immutable (see the tag ruleset
   below). Never move one. Release the next version.
@@ -145,7 +155,19 @@ dependency under any other licence fails the build.
 - **No long-lived publishing secrets.** crates.io and npm use trusted
   publishing: inside the `publish` job, the job's OIDC token is exchanged for
   a short-lived registry token (`rust-lang/crates-io-auth-action`, and
-  `npm publish --provenance`).
+  `npm publish --provenance`). The MCP Registry does the same with
+  `mcp-publisher login github-oidc`, which needs no setup: the token's
+  `repository_owner` claim (`PSCatLabs`, case and all) grants the
+  `io.github.PSCatLabs/*` namespace. Unlike crates.io and npm, the registry
+  does not check the environment or even the repository, so any job in a
+  PSCatLabs repository with `id-token: write` could publish there; in this
+  repository `check_workflows.py` keeps that to the `release` and
+  `github-pages` environment jobs.
+- **`mcp-publisher` is pinned.** `release.yml` names an exact release and
+  the SHA-256 of its `linux_amd64` archive (`MCP_PUBLISHER_VERSION`,
+  `MCP_PUBLISHER_SHA256`; 1.7.9 or later for CVE-2026-44428 and
+  CVE-2026-45781). To move it, take the digest from that release's
+  `registry_<version>_checksums.txt` and check it against a download.
 - **Only the `release` environment can mint that token.** `id-token: write`
   appears in no other job, apart from the GitHub Pages deploy, which runs in
   its own `github-pages` environment. The crates.io and npm trusted publishers
@@ -484,6 +506,7 @@ and `release-manifest.json` record the same digests unsigned.
 | crates.io | always | `crates` |
 | npm (#566) | `npm/package.json` exists | `npm` |
 | Claude Code plugin (#569) | a `.claude-plugin/` manifest exists | `plugin`: the manifests must carry the release version, which `release.sh` sets |
+| MCP Registry (#569) | `server.json` exists | `registry`, last |
 
 **The plugin stage checks the manifests; it does not change them.** The
 issue's stage 6 says "update the plugin manifests". Here `release.sh` sets
@@ -506,6 +529,32 @@ publishes the same bytes instead of a rebuild that might differ. The
 `npm` workflow (`.github/workflows/npm.yml`) builds and packs it on every
 pull request that touches it, runs the API tests, compares wasm pages with
 native ones (`tests/wasm.rs`) and installs the tarball into a fresh project.
+
+**How the MCP Registry entry is published (#569).** `server.json` names
+`io.github.PSCatLabs/pscat` with one cargo package, `pscat`, run as
+`pscat mcp` (a cargo package is launched by its crate name, so the server
+answers to the `mcp` subcommand as well as `pscat-mcp`). The registry
+proves ownership from a visible `mcp-name: io.github.PSCatLabs/pscat` line
+in the README crates.io serves for the version (crates.io strips HTML
+comments). README.md carries it from 0.6.3 on; earlier versions cannot be
+registered. The `registry` stage:
+
+1. checks that `server.json` carries the release version (`release.sh`
+   bumps it) and that the `.crate`'s README has the token, offline, so the
+   plan in `assemble` catches a missing one before anything is published;
+2. asks the registry for the version: present and the same skips, present
+   and different halts;
+3. waits (a few minutes at most) for crates.io to render the README of the
+   version the `crates` stage just published, and checks the token there;
+4. runs `mcp-publisher login github-oidc`, then `mcp-publisher publish
+   server.json`, and reads the entry back.
+
+It runs last, after `publish` and `plugin`, so a registry outage or a
+failed login leaves everything else released; **Re-run failed jobs** then
+retries only this stage. `mcp-publisher validate` is not used: it posts to
+the registry, so `test_release_stages.py` checks the same structure
+offline instead (the current schema URL, the description's 100-character
+limit, the package and the README token).
 
 A new channel is a new stage in `scripts/release_stages.py` (the same
 absent/same/different rule, with a fake backend and tests) and a step in

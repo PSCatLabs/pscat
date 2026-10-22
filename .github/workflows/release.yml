@@ -16,7 +16,8 @@
 #   publish    environment `release` (owner approval): provenance
 #              attestations, crates.io, npm when npm/package.json exists
 #              (the tarball `verify` packed), publish the GitHub Release,
-#              check the plugin manifests                         (real only)
+#              check the plugin manifests, then the MCP Registry
+#              entry (server.json, #569)                          (real only)
 #   post-publish-check  release-check.yml: install from the public channels
 #              on Linux, macOS and Windows, no credentials        (real only)
 #
@@ -57,6 +58,7 @@ on:
       - "about.hbs"
       - "Cargo.toml"
       - "Cargo.lock"
+      - "server.json"
 
 permissions: {}
 
@@ -73,6 +75,12 @@ env:
   # versions). Bump deliberately; the bootstrap publish in RELEASING.md uses
   # this version too.
   RELEASE_TOOLCHAIN: "1.96.1"
+  # The MCP Registry's publisher CLI (#569), an exact release checked by
+  # SHA-256, never releases/latest. 1.7.9 or later (CVE-2026-44428,
+  # CVE-2026-45781). The digest is the linux_amd64 archive's, as listed in
+  # that release's registry_<version>_checksums.txt.
+  MCP_PUBLISHER_VERSION: "1.8.1"
+  MCP_PUBLISHER_SHA256: "a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc"
 
 jobs:
   verify:
@@ -340,7 +348,8 @@ jobs:
         run: |
           set +e
           python3 scripts/release_stages.py run --plan --dist dist --crate "release-inputs/pscat-$VERSION.crate" \
-            --stage draft --stage crates --stage npm --stage publish --stage plugin --report-dir plan
+            --stage draft --stage crates --stage npm --stage publish --stage plugin \
+            --stage registry --report-dir plan
           STATUS=$?
           set -e
           if [ "$REAL" = true ] && [ "$STATUS" -ne 0 ]; then exit "$STATUS"; fi
@@ -437,14 +446,32 @@ jobs:
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
-      - name: Publish (crates.io, npm, GitHub Release, plugin check)
+      # Installed only; the registry stage logs in (`mcp-publisher login
+      # github-oidc`, this job's OIDC token) right before it publishes, so
+      # a login failure cannot hold up crates.io or npm. A failed download
+      # or checksum is only a warning here for the same reason: without
+      # MCP_PUBLISHER the registry stage, which runs last, fails instead.
+      - name: Install mcp-publisher (pinned)
+        run: |
+          D="$RUNNER_TEMP/mcp-publisher"
+          mkdir -p "$D"
+          if curl -fsSL -o "$D/mcp-publisher.tar.gz" \
+              "https://github.com/modelcontextprotocol/registry/releases/download/v${MCP_PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz" &&
+            echo "${MCP_PUBLISHER_SHA256}  $D/mcp-publisher.tar.gz" | sha256sum -c - &&
+            tar -xzf "$D/mcp-publisher.tar.gz" -C "$D" mcp-publisher; then
+            echo "MCP_PUBLISHER=$D/mcp-publisher" >> "$GITHUB_ENV"
+          else
+            echo "::warning::mcp-publisher ${MCP_PUBLISHER_VERSION} could not be installed and verified; the registry stage will fail"
+          fi
+      - name: Publish (crates.io, npm, GitHub Release, plugin check, MCP Registry)
         env:
           GH_TOKEN: ${{ github.token }}
           CARGO_REGISTRY_TOKEN: ${{ steps.crates-auth.outputs.token }}
           VERSION: ${{ needs.verify.outputs.version }}
         run: |
           python3 scripts/release_stages.py run --dist dist --crate "release-inputs/pscat-$VERSION.crate" \
-            --stage draft --stage crates --stage npm --stage publish --stage plugin --report-dir report
+            --stage draft --stage crates --stage npm --stage publish --stage plugin \
+            --stage registry --report-dir report
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
