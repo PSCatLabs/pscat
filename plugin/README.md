@@ -127,8 +127,8 @@ releases. The plugin collects nothing and sends nothing anywhere.
 
 The MCP tools run arbitrary PostScript as you, so a program can read any
 file you can read; writes are confined to the project directory. See
-[SECURITY.md](../SECURITY.md) and the
-[agents guide](../docs/guides/agents.md) for the server's limits and
+[SECURITY.md](https://github.com/PSCatLabs/pscat/blob/main/SECURITY.md) and the
+[agents guide](https://pscatlabs.github.io/pscat/agents.html) for the server's limits and
 options.
 
 ## Versions
