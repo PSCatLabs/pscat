@@ -1,0 +1,76 @@
+%!PS-Adobe-3.0
+%%Title: pscat logo, candidate C (engraved cat)
+%%BoundingBox: 0 0 384 384
+%%EndComments
+% Render (from the repo root; 384 pt page, size set by --dpi):
+%   pscat --page 384x384 --dpi 96  --png art/logo/renders/pscat-logo-c-512.png  art/logo/pscat-logo-c.ps
+%   pscat --page 384x384 --dpi 9   --png art/logo/renders/pscat-logo-c-48.png   art/logo/pscat-logo-c.ps
+%   pscat --page 384x384 --dpi 192 --png art/logo/renders/pscat-logo-c-1024.png art/logo/pscat-logo-c.ps
+%
+% A sitting cat cut like a banknote engraving: one silhouette, clipped,
+% and ruled with horizontal lines that swell where the light falls
+% away, so the shading is nothing but line weight. A heavy outline
+% carries the shape when the rules blur together at icon size.
+% CC0 1.0 (see LICENSE-CC0): dedicated to the public domain.
+
+/paper { 0.953 0.925 0.863 setrgbcolor } def
+/ink   { 0.114 0.169 0.310 setrgbcolor } def
+
+% The silhouette as overlapping subpaths, every one clockwise so the
+% nonzero rule unions them (filled, stroked and clipped).
+/cat {
+  newpath
+  % body: a pear from the shoulders to the floor
+  192 236 moveto
+  246 236 276 176 288 120 curveto
+  298 76 270 56 192 56 curveto
+  114 56 86 76 96 120 curveto
+  108 176 138 236 192 236 curveto closepath
+  % head
+  258 252 moveto 192 252 66 0 -360 arcn closepath
+  % ears
+  136 284 moveto 128 352 lineto 178 312 lineto closepath
+  248 284 moveto 206 312 lineto 256 352 lineto closepath
+  % tail, wrapping round the front paws
+  280 104 moveto
+  316 104 328 136 316 174 curveto
+  312 190 328 192 334 176 curveto
+  350 130 330 84 280 84 curveto
+  closepath
+} def
+
+paper 0 0 384 384 rectfill
+
+% outline: stroke the union, then fill it back to paper so only the
+% outer half of the stroke shows
+ink 16 setlinewidth 1 setlinejoin cat stroke
+paper cat fill
+
+% engraving: rules whose weight follows the shading
+gsave
+  cat clip
+  ink
+  /lx 250 def /ly 300 def            % where the light comes from
+  52 6 344 {
+    /y exch def
+    56 3 344 {
+      /x exch def
+      x lx sub dup mul y ly sub dup mul add sqrt 220 div
+      dup 1 gt { pop 1 } if            % 0 lit .. 1 dark
+      dup mul 5.2 mul 0.4 add /w exch def
+      x y w 2 div sub 3.2 w rectfill
+    } for
+  } for
+grestore
+
+% eyes: paper almonds with slit pupils, and a small nose
+paper
+/eye { % x: an almond in paper with a slit pupil, centred at x 262
+  gsave 262 translate
+  paper newpath -24 0 moveto -10 30 10 30 24 0 curveto 10 -30 -10 -30 -24 0 curveto fill
+  ink newpath 0 -22 moveto 7 0 7 0 0 22 curveto -7 0 -7 0 0 -22 curveto fill
+  grestore } def
+164 eye 220 eye
+ink
+newpath 184 228 moveto 200 228 lineto 192 218 lineto closepath fill
+showpage

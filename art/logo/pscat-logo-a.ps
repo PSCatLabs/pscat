@@ -1,0 +1,39 @@
+%!PS-Adobe-3.0
+%%Title: pscat logo, candidate A (one-line cat)
+%%BoundingBox: 0 0 384 384
+%%EndComments
+% Render (from the repo root; 384 pt page, size set by --dpi):
+%   pscat --page 384x384 --dpi 96  --png art/logo/renders/pscat-logo-a-512.png  art/logo/pscat-logo-a.ps
+%   pscat --page 384x384 --dpi 9   --png art/logo/renders/pscat-logo-a-48.png   art/logo/pscat-logo-a.ps
+%   pscat --page 384x384 --dpi 192 --png art/logo/renders/pscat-logo-a-1024.png art/logo/pscat-logo-a.ps
+%
+% A cat's head in one continuous pen line, the way you'd sign it: the
+% line starts under the chin, climbs over both ears, comes back round
+% the chin and flicks up as a tail. Two amber eyes are the only other marks.
+% CC0 1.0 (see LICENSE-CC0): dedicated to the public domain.
+
+% ground: night indigo, full bleed
+0.122 0.165 0.267 setrgbcolor
+0 0 384 384 rectfill
+
+% the line
+0.957 0.918 0.835 setrgbcolor
+24 setlinewidth 1 setlinecap 1 setlinejoin
+newpath
+  166 66 moveto                      % start under the chin
+  230 66 278 100 278 160 curveto     % round the right cheek
+  278 210 266 260 258 314 curveto    % up to the right ear tip
+  228 284 208 264 190 256 curveto    % down the inner ear
+  174 260 158 260 142 256 curveto    % across the crown
+  124 264 104 284 74 314 curveto     % up to the left ear tip
+  66 260 54 210 54 160 curveto       % down the left side
+  54 100 102 66 166 66 curveto       % round the chin, over the start
+  230 66 300 60 330 92 curveto       % past it, and out as a tail
+  352 116 350 156 326 168 curveto
+stroke
+
+% eyes
+0.973 0.690 0.208 setrgbcolor
+newpath 126 172 17 0 360 arc fill
+newpath 206 172 17 0 360 arc fill
+showpage

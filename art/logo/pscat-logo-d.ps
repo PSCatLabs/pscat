@@ -1,0 +1,53 @@
+%!PS-Adobe-3.0
+%%Title: pscat logo, candidate D (the %! page with ears)
+%%BoundingBox: 0 0 384 384
+%%EndComments
+% Render (from the repo root; 384 pt page, size set by --dpi):
+%   pscat --page 384x384 --dpi 96  --png art/logo/renders/pscat-logo-d-512.png  art/logo/pscat-logo-d.ps
+%   pscat --page 384x384 --dpi 9   --png art/logo/renders/pscat-logo-d-48.png   art/logo/pscat-logo-d.ps
+%   pscat --page 384x384 --dpi 192 --png art/logo/renders/pscat-logo-d-1024.png art/logo/pscat-logo-d.ps
+%
+% Every PostScript file starts with %!. Here the page itself has grown
+% cat ears, and the magic number is its face: a dog-eared sheet that is
+% also a cat. Courier-Bold is one of the LaserWriter 35, so the type
+% resolves on any pscat install.
+% CC0 1.0 (see LICENSE-CC0): dedicated to the public domain.
+
+/bg    { 0.910 0.718 0.188 setrgbcolor } def
+/sheet { 0.984 0.965 0.918 setrgbcolor } def
+/ink   { 0.110 0.106 0.118 setrgbcolor } def
+/fold  { 0.851 0.812 0.722 setrgbcolor } def
+
+bg 0 0 384 384 rectfill
+
+% the sheet, ears and all, with its bottom-right corner turned up
+/sheetpath {
+  newpath
+  84 52 moveto
+  84 300 lineto
+  100 352 lineto 152 300 lineto      % left ear
+  232 300 lineto
+  284 352 lineto 300 300 lineto      % right ear
+  300 104 lineto
+  248 52 lineto
+  closepath
+} def
+ink 14 setlinewidth 1 setlinejoin sheetpath stroke
+sheet sheetpath fill
+
+% the turned corner
+newpath 300 104 moveto 248 104 lineto 248 52 lineto closepath
+gsave fold fill grestore ink 8 setlinewidth stroke
+
+% inner ears
+ink
+newpath 104 300 moveto 108 326 lineto 130 300 lineto closepath fill
+newpath 280 300 moveto 276 326 lineto 254 300 lineto closepath fill
+
+% the face: %!
+/Courier-Bold findfont 132 scalefont setfont
+% Courier is monospaced, so close the gap between the two glyphs by hand
+/gap -12 def
+(%) stringwidth pop 2 mul gap add 2 div 186 exch sub 140 moveto
+(%) show gap 0 rmoveto (!) show
+showpage

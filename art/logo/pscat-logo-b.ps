@@ -1,0 +1,75 @@
+%!PS-Adobe-3.0
+%%Title: pscat logo, candidate B (cat on the drawing board)
+%%BoundingBox: 0 0 384 384
+%%EndComments
+% Render (from the repo root; 384 pt page, size set by --dpi):
+%   pscat --page 384x384 --dpi 96  --png art/logo/renders/pscat-logo-b-512.png  art/logo/pscat-logo-b.ps
+%   pscat --page 384x384 --dpi 9   --png art/logo/renders/pscat-logo-b-48.png   art/logo/pscat-logo-b.ps
+%   pscat --page 384x384 --dpi 192 --png art/logo/renders/pscat-logo-b-1024.png art/logo/pscat-logo-b.ps
+%
+% A cat's head built the way PostScript builds everything: moveto,
+% lineto, curveto, fill. The same point list that fills the head also
+% draws its own construction, square anchors and round Bezier handles,
+% as a vector editor would show it. At icon size the handles fall away
+% and the head carries the mark.
+% CC0 1.0 (see LICENSE-CC0): dedicated to the public domain.
+
+/bg   { 0.149 0.157 0.180 setrgbcolor } def
+/head { 0.247 0.749 0.678 setrgbcolor } def
+/ink  { 0.965 0.957 0.925 setrgbcolor } def
+
+% The head: a start point, then segments. [x y] is a lineto,
+% [x1 y1 x2 y2 x3 y3] a curveto.
+/start [192 58] def
+/segs [
+  [262 58 318 98 318 168]          % right cheek
+  [318 222 306 268 300 330]        % up to the right ear tip
+  [240 282]                        % inner ear
+  [214 290 170 290 144 282]        % the crown
+  [84 330]                         % left ear tip
+  [78 268 66 222 66 168]           % down the left side
+  [66 98 122 58 192 58]            % back round the chin
+] def
+
+/headpath {
+  newpath start aload pop moveto
+  segs { dup length 2 eq { aload pop lineto } { aload pop curveto } ifelse } forall
+  closepath
+} def
+
+bg 0 0 384 384 rectfill
+head headpath fill
+
+% eyes and nose, cut back to the ground
+bg
+gsave 162 176 translate 1.25 1.25 scale
+  newpath -22 0 moveto -4 24 20 20 20 0 curveto 20 -18 -4 -22 -22 0 curveto fill grestore
+gsave 222 176 translate 1.25 1.25 scale
+  newpath 22 0 moveto 4 24 -20 20 -20 0 curveto -20 -18 4 -22 22 0 curveto fill grestore
+newpath 180 136 moveto 204 136 lineto 192 122 lineto closepath fill
+
+% construction: handles from each curve's ends to its control points
+% (heavy enough to stay a line, not speckle, at 48 px)
+ink 5 setlinewidth 1 setlinecap
+/px start 0 get def /py start 1 get def
+segs {
+  dup length 6 eq {
+    aload pop /y3 exch def /x3 exch def /y2 exch def /x2 exch def /y1 exch def /x1 exch def
+    newpath px py moveto x1 y1 lineto stroke
+    newpath x3 y3 moveto x2 y2 lineto stroke
+    newpath x1 y1 9 0 360 arc fill
+    newpath x2 y2 9 0 360 arc fill
+    /px x3 def /py y3 def
+  } { aload pop /py exch def /px exch def } ifelse
+} forall
+
+% anchors: hollow squares on every on-curve point
+/anchor { % x y
+  newpath 12 sub exch 12 sub exch 24 24 rectpath
+  gsave bg fill grestore ink 5 setlinewidth stroke
+} def
+/rectpath { 4 dict begin /h exch def /w exch def /y exch def /x exch def
+  x y moveto w 0 rlineto 0 h rlineto w neg 0 rlineto closepath end } def
+start aload pop anchor
+segs { dup length 2 sub 2 getinterval aload pop anchor } forall
+showpage
