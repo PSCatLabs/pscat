@@ -1,0 +1,53 @@
+# Close-keyword lint (issue #674): fail a pull request whose body, or one of
+# whose commit messages, puts a closing keyword in a negated or partial sentence
+# ("does not fix #12", "partially fixes #12"). GitHub closes the issue on merge
+# whatever the sentence says. scripts/pr_body_lint.py has the rule.
+#
+# Its own workflow, not a job in ci.yml: it must re-run when the body is edited
+# (the `edited` type), and an edit must not re-run the whole Rust suite. It needs
+# only python3. Not a required status check; a red run is a signal to fix the
+# body (write `Refs #N`), which the work-issue skill also checks before opening
+# the PR.
+name: pr-body
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+# No cancel-in-progress: a cancelled run would stay on the head commit as a
+# CANCELLED check, and the work-issue skill merges only when every check passed.
+# The job takes seconds, so overlapping runs cost nothing.
+
+jobs:
+  close-keywords:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Unit tests for the lint
+        run: python3 scripts/test_pr_body_lint.py
+      # The body goes through an environment variable, never into the script
+      # text, so nothing in it can run as shell.
+      # The checkout is GitHub's test merge of the PR into its base, so HEAD^1 is
+      # the base branch tip and HEAD^2 the PR head: HEAD^1..HEAD^2 is exactly the
+      # PR's own commits, even after the branch merged main (the payload's
+      # base.sha can be older, and would pull other PRs' commits into the range).
+      # Full history so git can find the merge base of the two parents.
+      # Dependabot bodies quote upstream release notes ("partially fixes
+      # actions/checkout#1234") that nobody here can edit, so its PRs pass. The
+      # skip is inside the step, not a job-level `if:`: a skipped job reports
+      # SKIPPED, and the work-issue skill merges only when every check succeeded.
+      - name: Lint the PR body and the branch's commit messages
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          if [ "$AUTHOR" = "dependabot[bot]" ]; then
+            echo "Dependabot PR: not linted."
+            exit 0
+          fi
+          python3 scripts/pr_body_lint.py --env PR_BODY --git-range "HEAD^1..HEAD^2"

@@ -49,6 +49,16 @@ the original vision and staged milestones are history, kept in
 - Make judgment calls on genuine coin-flip decisions and note them; don't
   stall waiting for input on things you're equipped to decide. Do flag
   decisions that are hard to reverse later.
+- Goals, in order: correctness and output quality first, then finishing the
+  ticket. pscat performance is a guard, not a goal; Ghostscript is a
+  correctness reference only, never timed. A render is judged against the
+  issue's perceptual acceptance check and `docs/dev/TASTE.md`, never traded
+  for a metric.
+- Don't file new issues while working one. List proposed follow-ups, each
+  with its user-visible impact, in your final report; the dispatcher files
+  the ones that matter and puts polish on the parked parent epic
+  (`docs/dev/DISPATCH.md`). Never file anything that assigns physical work
+  to the owner.
 
 ## Software development lifecycle
 
@@ -61,7 +71,10 @@ the authoritative process; `.claude/skills/work-issue/` automates it
 end to end. A PR that touches a path in `.github/CODEOWNERS` is merged by the
 owner, never by an agent (`SDLC.md`, "Who merges"; check with
 `python3 scripts/codeowners_check.py --base origin/main`). The one exception is
-Dependabot PRs, which agents may merge once CI is green (same section). This applies going forward; it doesn't retroactively
+Dependabot PRs, which agents may merge once CI is green (same section). A
+visible render change is merged by the agent after an independent perceptual
+review, and logged for the owner's read before the release (same section,
+tier (b)). This applies going forward; it doesn't retroactively
 obligate rewriting the stage-by-stage direct-to-`main` history that
 predates it.
 

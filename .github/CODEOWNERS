@@ -53,3 +53,6 @@
 /.claude/skills/work-issue/ @jeromebanks
 /.claude/skills/sdlcify/    @jeromebanks
 /.claude/settings.json      @jeromebanks
+# The taste the perceptual reviewer judges visible changes by (SDLC.md "Who merges",
+# tier b, #674): loosening it would loosen what an agent may self-merge.
+/docs/dev/TASTE.md          @jeromebanks

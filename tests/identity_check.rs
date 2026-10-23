@@ -359,3 +359,83 @@ fn a_run_where_every_file_is_skipped_compared_nothing_and_exits_1() {
         "{t}"
     );
 }
+
+/// Writes an `--expect-diff` list into the setup's scratch directory.
+fn expect_list(su: &Setup, paths: &[&str]) -> PathBuf {
+    let list = su.s.0.join("expect.txt");
+    fs::write(&list, format!("# meant to change\n{}\n", paths.join("\n"))).unwrap();
+    list
+}
+
+#[test]
+fn an_expected_difference_passes_and_the_rest_must_still_be_identical() {
+    // #674: the base binary renders sierpinski differently, and the list says it should.
+    let su = setup("expect", "sierpinski");
+    // A leading `./` names the same file.
+    let list = expect_list(&su, &["./examples/sierpinski.ps"]);
+    let mut args = both_bins(&su);
+    args.extend(["--expect-diff", list.to_str().unwrap()]);
+    let o = run(&su, &args);
+    let t = text(&o);
+    assert_eq!(o.status.code(), Some(0), "{t}");
+    assert!(t.contains("EXPECTED   examples/sierpinski.ps"), "{t}");
+    assert!(t.contains("identical  examples/koch_snowflake.ps"), "{t}");
+    assert!(t.contains("1 file(s) with expected differences"), "{t}");
+    // The negative check: without the list the same run fails.
+    let o = run(&su, &both_bins(&su));
+    assert_eq!(o.status.code(), Some(1), "{}", text(&o));
+}
+
+#[test]
+fn an_expected_file_that_comes_out_identical_fails() {
+    // koch_snowflake is listed but nothing changes it: the change did not take effect.
+    let su = setup("unchanged", "sierpinski");
+    let list = expect_list(&su, &[EXAMPLE, OTHER]);
+    let mut args = both_bins(&su);
+    args.extend(["--expect-diff", list.to_str().unwrap()]);
+    let o = run(&su, &args);
+    let t = text(&o);
+    assert_eq!(o.status.code(), Some(1), "{t}");
+    assert!(t.contains("EXPECTED   examples/sierpinski.ps"), "{t}");
+    assert!(t.contains("UNCHANGED  examples/koch_snowflake.ps"), "{t}");
+}
+
+#[test]
+fn an_expected_file_with_no_base_render_is_a_usage_error() {
+    // Tracked here but absent from the base tree: nothing to compare against.
+    let su = setup("notpicked", "");
+    let list = expect_list(&su, &["examples/circular_text.ps"]);
+    let mut args = both_bins(&su);
+    args.extend(["--expect-diff", list.to_str().unwrap()]);
+    let o = run(&su, &args);
+    let t = text(&o);
+    assert_eq!(o.status.code(), Some(64), "{t}");
+    assert!(t.contains("is new in this branch"), "{t}");
+    assert!(!t.contains("scratch renders kept"), "{t}"); // refused before any scratch exists
+    // Untracked: refused before anything renders.
+    let list = expect_list(&su, &["examples/no_such_file.ps"]);
+    let mut args = both_bins(&su);
+    args.extend(["--expect-diff", list.to_str().unwrap()]);
+    let o = run(&su, &args);
+    assert_eq!(o.status.code(), Some(64), "{}", text(&o));
+    assert!(text(&o).contains("is not a tracked file"), "{}", text(&o));
+}
+
+#[test]
+fn an_expected_fix_where_the_base_failed_and_the_branch_renders_passes() {
+    // A deliberate fix: the base binary errors on sierpinski, the head binary renders it.
+    let su = setup_with("expectfix", "", Some(("sierpinski", 3)), None);
+    let list = expect_list(&su, &[EXAMPLE]);
+    let mut args = both_bins(&su);
+    args.extend(["--expect-diff", list.to_str().unwrap()]);
+    let o = run(&su, &args);
+    let t = text(&o);
+    assert_eq!(o.status.code(), Some(0), "{t}");
+    assert!(
+        t.contains("EXPECTED   examples/sierpinski.ps (pscat exited 3 in the base tree"),
+        "{t}"
+    );
+    // Unlisted, the same base failure is still an error.
+    let o = run(&su, &both_bins(&su));
+    assert_eq!(o.status.code(), Some(1), "{}", text(&o));
+}

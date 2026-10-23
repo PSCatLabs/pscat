@@ -245,7 +245,13 @@ table). Same rule as above: fix or explicitly disposition everything it
 raises, commit and push before any re-review, before continuing.
 
 With the review clean (nothing left unfixed without a stated reason,
-via whichever path ran), decide merge eligibility from the policy. Before the
+via whichever path ran), decide merge eligibility from the policy. Since #674
+this is the merge tiers in `perceptual-review.md` (precedence (c), (b), (a);
+a relayed approval never counts); what follows is tier (c)'s owner-path check
+and the mode rules it builds on. Two changes from the text below: an owner-path
+or `human-only` PR now waits for green CI (SKILL.md 8.12) before stopping, with a
+Decision block atop the body, and a visible render change merges only after the
+perceptual review passes. Before the
 mode, apply the owner-merge rule (#603): when `merge_policy.owner_merge_file` is
 set in `SDLC.md` as it is on `origin/main` (`git show origin/main:SDLC.md`, not
 the PR's copy, so a PR cannot drop the field), `python3 scripts/codeowners_check.py --base origin/main` run in the worktree
@@ -287,7 +293,8 @@ not from the plan. Start it with the exact heading
   finding/response comments above; list defects found and how each was
   fixed.
 - **Known deviations / open points** — what still differs from the spec
-  or the original, and any follow-up worth filing.
+  or the original, and any proposed follow-up (also listed in the final
+  report; agents do not file issues, finish.md "Proposed follow-ups").
 
 ```sh
 gh issue comment <N> --body-file <SCRATCH>/issue-<N>-summary.md

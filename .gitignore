@@ -26,3 +26,6 @@ __pycache__/
 
 # Font packs installed with PSCAT_HOME pointing at the checkout (#599).
 /fonts/packs/
+
+# The dispatcher's per-wave handoff file (docs/dev/DISPATCH.md, #674).
+/.dispatch/

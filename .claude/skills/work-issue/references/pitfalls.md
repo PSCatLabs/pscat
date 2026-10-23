@@ -25,6 +25,8 @@ of general pitfalls.
 - [Evidence runs and scratch hygiene (#273)](#evidence-runs-and-scratch-hygiene-273)
 - [Added in #303 (round 7: friction from the #110, #271, #279, #281, #285, #293 runs)](#added-in-303-round-7-friction-from-the-110-271-279-281-285-293-runs)
 - [Prototypes and timing (#331, from the #316 and #329 runs)](#prototypes-and-timing-331-from-the-316-and-329-runs)
+- [Papercuts (#674, from the dispatcher retrospective)](#papercuts-674-from-the-dispatcher-retrospective)
+- [Render DPIs](#render-dpis)
 <!-- /TOC -->
 
 - **Don't work in the main checkout.** The whole point of the worktree
@@ -327,6 +329,10 @@ Cheapest first, before the long gate:
    (`--loader lib/artkit.ps`, about 63 files), since the default paintkit pick is narrow. If the
    change touches both `src/` and `lib/`, the base tree is still the merge-base worktree. List the
    base worktree for step 9's `EXTRA_WORKTREES` (the binary in `<SCRATCH>` dies with the session).
+   **An intended visible change (#674):** `--expect-diff LIST` (tracked paths, one per line) lets the listed
+   files differ (`EXPECTED` lines) and fails if one of them comes out identical (`UNCHANGED`: the change did
+   not take effect). A listed file is compared even if the pick leaves it out; one new in the branch exits 64. Every other file must still be identical. A run
+   that needed it is a tier (b) visible change (perceptual-review.md); without it, identical means tier (a).
    Timing guard (not a goal): `scripts/bench_compare.sh BASE_BIN HEAD_BIN FILE [N]` prints CPU
    min/median for base, head and an identical-binary control. It is fine to stop a running bench
    and report a partial sample when the coordinator narrows the scope, or just use a small N.
@@ -334,6 +340,14 @@ Cheapest first, before the long gate:
    them pscat opens a window and the call blocks until it is closed:
    `pscat --headless -e '3 4 add ='`, `pscat --png <SCRATCH>/probe-<N>.png file.ps`.
 6. Then the full gate in step 5.5.
+7. **Light path for a docs-only diff (#674).** The gate choice only: a specimen PNG under `docs/` takes the light
+   gate here and is still a visible change at step 8.10. Gallery renders and fonts are outside `docs/`: full gate. Read `light_gate` from `git show origin/main:SDLC.md`
+   (the policy in force). If every changed path is in its `paths` and none in its `exclude` (for today's
+   values, `docs/*` and `notes/*` excluding `docs/guides/*`, the check is: `git -C "$WORKTREE_DIR" diff --name-only origin/main...HEAD | grep -Ev '^(docs|notes)/' ; git -C "$WORKTREE_DIR" diff --name-only origin/main...HEAD | grep '^docs/guides/'`
+   both print nothing), run `light_gate.command` from `SDLC.md` instead of the full gate, and write `quality gate light`
+   in the report. CI still runs everything. `docs/guides/` is excluded because tests run its samples
+   (`tests/landscape_cookbook.rs`, `tests/headline.rs`). Root Markdown, skills, test data and fonts are not on the
+   list either: tests and checkers read some of them (`plugin_check.py`, `check_licences.py`, `tests/data/`).
 
 ## CI wait (#199, from the #178 / PR #198 run; timings and pass/fail rule updated in #208)
 
@@ -513,8 +527,10 @@ and `## Fallback review, round` comments, not from this session.
 
 ### Stop without merging when the dispatcher says so (#208)
 
-Some dispatches say not to merge (a gallery render waiting on the
-maintainer's eye, a human who wants the last look). Run steps 1-8.9 as
+Some dispatches say not to merge (a human who wants the last look). A render no
+longer waits on the maintainer's eye: since #674 a visible change goes through the
+perceptual review and merges as tier (b) (perceptual-review.md). The same stop is
+tier (c)'s (an owner path): green CI, then stop, with a Decision block atop the body. Run steps 1-8.9 as
 usual, then at 8.10 do step 11 (the summary is posted so the issue carries
 the wrap-up), then step 12 (the `merge-tree` check, the "no checks reported" retry and the CI
 watch) until 8.12's query prints `true` (#331). Hand over a PR whose CI is green: a maintainer
@@ -531,8 +547,9 @@ who finds it red or still running has to babysit it. Stop **before** 8.13, the m
 2. Keep the `in-review` label, the worktree and the branch. Do not run
    step 9. If CI is red (a failed step, not infrastructure: "CI wait"), stop and report that
    instead; never hand over silently.
-3. Report `Merge: awaiting human merge (dispatcher said no merge; CI green)` with
-   the PR number, branch and worktree path.
+3. Report `Merge: awaiting human merge (dispatcher said no merge; CI green)`, or for an owner
+   path `Merge: awaiting owner merge (tier c: <paths>; CI green)`, with the PR number, branch and
+   worktree path.
 
 To merge later, `/work-issue <N>` again: the issue is `in-review` with an
 open PR, the lock is free (fresh claim), and the Resume table above lands
@@ -728,3 +745,33 @@ earlier run's files; resume decisions are made from GitHub state
     `PSCAT_TEST_BUDGET_SCALE=0.001 cargo test --profile ci --test <file> <name>` must fail (apply
     `scale_budget` to a hand-rolled bound). If the unguarded run passes, the test does not measure the guard.
 
+### Papercuts (#674, from the dispatcher retrospective)
+
+- **macOS `sed -i` needs an empty suffix: `sed -i '' 's/a/b/' file`.** GNU's `sed -i 's/a/b/' file`
+  on macOS takes the script as the backup suffix and the file name as the script, and fails. Inside
+  an `&&` chain that failure silently skips every later step (a commit, a push), and the call's
+  output may not make it obvious. Prefer the Edit tool, or `python3` for a scripted replacement;
+  after any chain, check the last step's effect (`git log -1`, `git status`), not just "no error shown".
+- **The `@param` unit vocabulary is closed.** A `lib/` `@param` description starts with a unit from
+  the list in `tests/capabilities.rs` (`unit_is_known`: `points`, `degrees`, `count`, `0..1`, `ratio`,
+  ... and the `fraction of`/`per`/`array of`/`U or V` forms). Check a new parameter's unit against it
+  before the gate: `cargo test --profile ci --test capabilities` takes seconds, and the full gate
+  fails on it minutes later (`notes/195-units-on-every-param.md`).
+- Already covered above, and still the most common slips: zsh does not word-split `$FILES`
+  ("Added in #303"), and a foreground call past about 115 s is moved to the background ("Waiting and
+  timeouts"): write poll loops to finish under that, or run them with `run_in_background: true`.
+
+### Render DPIs
+
+Render at the resolution the output is judged at, or a before/after comparison and an identity check
+disagree with what the owner sees. Where each number comes from:
+
+| Output | DPI and page | Source |
+|---|---|---|
+| `gallery/*.ps` stills (`gallery/renders/*.png`) | 2x supersampled: 144 effective; page from the file's `%%BoundingBox: 0 0 W H` (the manifest's `page` matches) | `gallery/README.md` "Re-rendering the stills"; `identity_check.sh --gallery-dpi` (default 144) |
+| `examples/*.ps` | 72; page from the file's `%%BoundingBox: 0 0 W H` | `identity_check.sh --dpi` (default 72) |
+| `selftest/drivers/*.ps` | 72; page from `%%SelfTestPage: WxH` | `docs/dev/SELFTEST.md`; `identity_check.sh` |
+| Site "Learn" examples | 144 | `scripts/build_site.sh` |
+| A test's own render | whatever the test passes (`--dpi` in `tests/*.rs`) | the test |
+
+A file with none of these headers renders on pscat's default page; `identity_check.sh` warns about it.

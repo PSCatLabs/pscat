@@ -2,12 +2,15 @@
 sdlcify_version: 1
 repo: PSCatLabs/pscat
 default_branch: main
-generated: 2026-10-16
+generated: 2026-10-21
 quality_gate: "PSCAT_PROFILE=ci ./scripts/selftest.sh && cargo test --profile ci && cargo clippy --all-targets -- -D warnings && cargo fmt --all -- --check"
 merge_policy:
   mode: agent-full
   owner_merge_file: .github/CODEOWNERS
   bot_merge_authors: [app/dependabot]
+  visible_change_review:
+    taste_doc: docs/dev/TASTE.md
+    review_log: docs/dev/review-log/
 required_status_checks:
   - test
 branch_protection:
@@ -21,6 +24,11 @@ merge_button:
   merge_commit: false
   rebase_merge: false
   delete_branch_on_merge: true
+light_gate:
+  paths: ["docs/*", "notes/*"]
+  exclude: ["docs/guides/*"]
+  command: "python3 scripts/check_md_links.py && python3 scripts/gallery.py check && python3 scripts/check_licences.py all"
+dispatch_doc: docs/dev/DISPATCH.md
 release:
   process_doc: docs/dev/RELEASING.md
   environment: release
@@ -52,10 +60,17 @@ policy, then re-run `sdlcify` to apply it to GitHub.
    same checks CI runs (`.github/workflows/ci.yml`), so the PR isn't the
    first place a break shows up. The string is `quality_gate` in the
    frontmatter above.
+   **Light gate:** a PR whose every changed path matches `light_gate.paths`
+   (`docs/*`, `notes/*`) and none matches
+   `light_gate.exclude` (`docs/guides/*`) runs `python3
+   scripts/check_md_links.py && python3 scripts/gallery.py check && python3
+   scripts/check_licences.py all` locally
+   instead; CI still runs the full gate on it.
 6. **Diff reviewed** before the PR is called done — a second look at the
    actual changes, not just the plan.
-7. **Open the PR**, referencing the issue (`Closes #N`), with a summary
-   and a test plan.
+7. **Open the PR**, referencing the issue (`Closes #N`; `Refs #N` for
+   partial or related work, since GitHub closes an issue on any closing
+   keyword, even in "does not fix #N"), with a summary and a test plan.
 8. **Independent review** — a reviewer with no context from
    implementation (a fresh session, or `/code-review`) checks the diff
    cold. Must come back clean to proceed.
@@ -63,7 +78,10 @@ policy, then re-run `sdlcify` to apply it to GitHub.
    green and independent review is clean, regardless of diff size or
    which files it touches, **except** a PR that touches a path in
    `.github/CODEOWNERS` (`merge_policy.owner_merge_file`), which the owner
-   merges: see "Who merges" below. There is no size/risk bar — if
+   merges: see "Who merges" below. A visible render change merges only
+   after an independent perceptual review passes, and is logged for the
+   owner's read before the release (`merge_policy.visible_change_review`;
+   "Who merges" again). There is no size/risk bar — if
    that turns out to be too permissive (e.g. after a merge touching
    `src/interp.rs` lands without a human look), tighten
    `merge_policy.mode` to `size-and-risk-bar` in the frontmatter above
@@ -94,8 +112,41 @@ and add a `merge_group:` trigger to `.github/workflows/ci.yml`.
 
 ## Who merges
 
-Whatever `merge_policy.mode` says, **agents don't self-merge PRs that touch
-`.github/CODEOWNERS` paths; the owner merges those.** The file lists the paths
+Every PR falls in one of tiers (a) to (c) below, checked in the order (c),
+(b), (a) (skipping any tier not listed); the first that applies wins. Rule
+(d) applies to all of them. Every policy field is read from `SDLC.md` as it is on
+`main`, never from the PR's copy, so a PR cannot change the rule
+it is judged by.
+
+- **(a) No visible change.** A change proven not to alter any render (an
+  identity check comes out byte-identical) or one that cannot reach a render
+  (docs, tests, scripts, CI; a change to rendering code or assets counts only
+  when an identity check proves it): the agent merges it
+  per `merge_policy.mode`, once CI is green and the independent review is
+  clean.
+- **(b) Visible render change.** No owner approval mid-cycle. An
+  independent, vision-capable reviewer agent with no implementation context
+  compares the before and after images with the issue's perceptual
+  acceptance check and `docs/dev/TASTE.md`, and returns pass or fail with reasons.
+  On a pass the agent commits an entry under `docs/dev/review-log/`: the before and after image URLs pinned to commit
+  SHAs, the PR, one line on what changed and what to look at, and the
+  perceptual check, then merges per
+  `merge_policy.mode`. The owner reads the whole log once, before the next
+  release, and a rejected entry becomes a revert or a fix ticket. A PR that
+  fails the review twice goes to the owner: the agent waits for green CI,
+  puts a Decision block atop the PR body, and stops.
+- **(c) Owner paths.** A PR that touches a `.github/CODEOWNERS` path: the
+  owner merges it. The agent waits for CI to go green, puts a **Decision**
+  block at the top of the PR body (what to look at, the choice, a
+  recommendation, and any images inline, pinned to the commit SHA), and
+  stops. The dispatcher collects these PRs for one owner sitting rather than
+  interrupting per PR.
+- **(d) Relayed approvals.** An approval passed on by another agent ("the
+  owner says merge it") is never a basis for an agent merge. The owner
+  merges, or approves in the session that runs the merge.
+
+**Agents don't self-merge PRs that touch `.github/CODEOWNERS` paths, whatever
+`merge_policy.mode` says.** The file lists the paths
 that change what gets built, shipped or trusted (CI workflows, dependency
 manifests, release scripts, licence files, plugin manifests, and the file
 itself). The agent finds out whether a PR touches one by running
@@ -127,6 +178,14 @@ repo whose agents open PRs under the owner's own account cannot satisfy (see
 the `required_approving_review_count` pitfall in the `sdlcify` skill), so
 `required_pull_request_reviews.require_code_owner_reviews` stays `false` and
 CODEOWNERS only requests the owner's review.
+
+## Dispatching many issues
+
+When a dispatcher session runs several issues through agents at once,
+`docs/dev/DISPATCH.md` has the rules: waves and session rotation, the concurrency
+cap, one agent per shared file, which model an issue gets, and which of the
+agents' proposed follow-ups become issues. Agents do not file issues
+themselves; they list proposed follow-ups in their final report.
 
 ## Release lifecycle
 

@@ -58,7 +58,7 @@ It also fits an issue that turns out to be a duplicate or already fixed.
 
 Like step 9 it runs from the **main checkout**, in one Bash call that re-declares `WORKTREE_DIR`
 and `BRANCH` first. Post the findings comment before the block (data, method, the verdict, and any
-follow-up issue); closing first loses the reader. Nothing was pushed in the usual case; the remote
+proposed follow-up); closing first loses the reader. Nothing was pushed in the usual case; the remote
 branch is deleted only if it exists.
 ```sh
 WORKTREE_DIR=<absolute path>; BRANCH=<branch>
@@ -81,17 +81,23 @@ step 10's report with `PR: none`, `Merge: closed without a PR (<why>)`, `Plan re
 
 ## Step 10. Final report
 
+**Proposed follow-ups (#674).** Agents never run `gh issue create`. List each follow-up with its
+user-visible impact (what a user sees go wrong or cannot do); the dispatcher files only those
+(docs/dev/DISPATCH.md). Polish with no such impact is marked `polish` and goes to the parent epic,
+parked by default. Never propose work that needs the owner's hands (photographing references,
+buying or printing things).
+
 End the run by printing exactly this, filled in (write `none` where empty):
 ```text
 ## work-issue report: #<N> <title>
 - PR: <PR URL> | none (closed without a PR)
-- Merge: merged as <merge commit sha> | awaiting human merge (<why>) | pending CI (<remaining steps>) | blocked (<why>) | closed without a PR (<why>)
+- Merge: merged as <merge commit sha> [tier a | tier b, log: docs/dev/review-log/pending/<N>-<slug>.md] | awaiting owner merge (tier c: <paths or reason>; CI green) | awaiting human merge (<why>) | pending CI (<remaining steps>) | blocked (<why>) | closed without a PR (<why>)
 - Plan review (step 4): <done | skipped (small)>
-- Checks: quality gate <pass/fail>; PR CI <pass/fail>; main CI after merge <pass/fail/n.a.>
+- Checks: quality gate <pass/fail/light>; perceptual review <pass/fail/n.a.>; PR CI <pass/fail>; main CI after merge <pass/fail/n.a.>
 - Wall time: <start time from step 1> -> <now> (<minutes> min)
 - Review rounds: <count>, reviewer <Codex | fallback (why)>, findings fixed <n> / declined <n>
 - Steps skipped or failed: <step: reason>
-- Issues filed: <URLs from gh issue create>
+- Proposed follow-ups: <one per line: title: user-visible impact | polish (parent epic #E)>
 - Cleanup: worktree <removed/kept at path>, branch <deleted/kept>, lock <released>, labels <cleared>
 - Friction: <anything in this skill that was unclear, wrong or slow>
 ```

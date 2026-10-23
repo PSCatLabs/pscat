@@ -29,6 +29,7 @@ body:
         - label: The MCP safety tests (tests/mcp.rs) and the mcp workflow's Inspector check pass
         - label: README's install section lists only the channels this release ships
         - label: SECURITY.md, THIRD_PARTY_NOTICES.md and docs/STABILITY.md are accurate
+        - label: "The owner read docs/dev/review-log/pending/ (each rejected entry has a revert or fix ticket); the release PR moves it to review-log/vX.Y.Z/"
         - label: CHANGELOG.md reads well; the owner merged the release PR
   - type: checkboxes
     id: publish
