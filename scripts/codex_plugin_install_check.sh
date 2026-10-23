@@ -10,8 +10,11 @@
 #    .agents/plugins/marketplace.json; `codex plugin add pscat@pscat`.
 # 2. The installed copy sits under plugins/cache/pscat/pscat/<version> with
 #    the version from plugin/plugin.json, holds the three skills as real
-#    files (Codex skips symlinks when it copies a plugin), mcp.json and
-#    hooks/hooks.json, and nothing else of the repo.
+#    files (Codex skips symlinks when it copies a plugin), mcp.json,
+#    hooks/hooks.json and the hook script hooks/check-pscat.sh, and nothing
+#    else of the repo. The hook command is run with CLAUDE_PLUGIN_ROOT set
+#    (Codex sets it for compatibility): the missing-pscat message on a PATH
+#    without pscat, nothing with it.
 # 3. The installed mcp.json's pscat server, started the way Codex starts it
 #    (its command on PATH, stdio), answers initialize and tools/list. Codex
 #    has no login-free command that starts a plugin's MCP server, so this
@@ -48,14 +51,32 @@ for s in pscat psart psviz; do
     [ -f "$copy/skills/$s/SKILL.md" ] && ok "installed copy has skills/$s/SKILL.md" \
         || bad "installed copy lacks skills/$s/SKILL.md"
 done
-for f in plugin.json mcp.json hooks/hooks.json; do
+for f in plugin.json mcp.json hooks/hooks.json hooks/check-pscat.sh; do
     [ -f "$copy/$f" ] && ok "installed copy has $f" || bad "installed copy lacks $f"
 done
+echo "info hooks/check-pscat.sh mode in the Codex cache: $(ls -l "$copy/hooks/check-pscat.sh" 2>&1 | cut -c1-10)"
 links=$(find "$copy" -type l 2>/dev/null)
 [ -z "$links" ] && ok "installed copy has no symlinks" || bad "symlinks in installed copy: $links"
 extra=$(cd "$copy" 2>/dev/null && find . -mindepth 1 -maxdepth 1 ! -name skills ! -name hooks \
     ! -name plugin.json ! -name mcp.json ! -name README.md ! -name .claude-plugin ! -name .codex-plugin)
 [ -z "$extra" ] && ok "installed copy holds only the plugin" || bad "installed copy has extra entries: $extra"
+
+# The SessionStart hook, run as the agent runs it: the command string from
+# the installed hooks.json with CLAUDE_PLUGIN_ROOT set to the installed copy
+# (Claude Code and Codex both set it; a real Codex hook run needs the /hooks
+# trust review, #654, so this stands in for it). #684.
+hook_cmd=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["hooks"]["SessionStart"][0]["hooks"][0]["command"])' \
+    "$copy/hooks/hooks.json")
+hook_out() { CLAUDE_PLUGIN_ROOT="$copy" PATH="$1" sh -c "$hook_cmd"; }
+hook_clean=/usr/bin:/bin
+if PATH="$hook_clean" command -v pscat-mcp >/dev/null; then
+    bad "pscat-mcp is still on the stripped PATH; cannot run the hook's negative case"
+else
+    out=$(hook_out "$hook_clean") && printf '%s' "$out" | python3 -c 'import json,sys; assert "pscat-mcp" in json.load(sys.stdin)["systemMessage"]' \
+        && ok "hook without pscat on PATH prints the systemMessage" || bad "hook negative case: $out"
+fi
+out=$(hook_out "$bin:$hook_clean") && [ -z "$out" ] \
+    && ok "hook with pscat and pscat-mcp on PATH prints nothing" || bad "hook positive case: $out"
 
 # Start the server as the installed mcp.json describes it.
 handshake() {

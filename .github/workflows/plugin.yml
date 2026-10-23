@@ -1,7 +1,7 @@
 # Claude Code and Codex plugins (issue #569): the marketplaces in
 # .claude-plugin/ and .agents/plugins/, and the one plugin directory both
 # install, plugin/ (the skills as real files, the pscat-mcp server config and
-# the shared hooks/hooks.json).
+# the shared hooks/hooks.json and its script hooks/check-pscat.sh).
 #
 # manifests: scripts/plugin_check.py and its tests (python3 only): the
 #   plugin's version equals Cargo.toml's, every path resolves inside the

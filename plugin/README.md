@@ -28,8 +28,8 @@ or download a release archive from
 `pscat` and `pscat-mcp` on your `PATH`. Check with `pscat --help`.
 
 If they are missing, the plugin still installs and the skills still load,
-but the MCP server cannot start. A SessionStart hook (`hooks/hooks.json`,
-read by both Claude Code and Codex) then starts each session with a
+but the MCP server cannot start. A SessionStart hook (`hooks/hooks.json`, which
+runs `hooks/check-pscat.sh`; both Claude Code and Codex read it) then starts each session with a
 message saying `pscat`/`pscat-mcp` was not found and how to install it.
 In Claude Code, `/mcp` lists `plugin:pscat:pscat` as failed. Install pscat
 and restart your agent.
@@ -92,8 +92,10 @@ marketplace and `codex plugin add pscat@pscat` installs the new version
 Depending on your approval settings, Codex asks before it calls an MCP
 tool (a non-interactive `codex exec` with approvals off refuses the call).
 Codex runs a plugin's hooks only after you trust them, so
-the missing-pscat message needs one review in `/hooks`; without it a
-missing `pscat-mcp` shows up only as the server's tools being absent.
+the missing-pscat message (the `hooks/check-pscat.sh` script, which Codex
+runs as `${CLAUDE_PLUGIN_ROOT}/hooks/check-pscat.sh` because it sets that
+variable too) needs one review in `/hooks`; without it a missing
+`pscat-mcp` shows up only as the server's tools being absent.
 
 **Already registered pscat-mcp by hand?** If you ran
 `codex mcp add pscat -- pscat-mcp`, remove it (`codex mcp remove pscat`).
@@ -102,8 +104,8 @@ missing `pscat-mcp` shows up only as the server's tools being absent.
 
 macOS and Linux are tested; Windows is not. The plugin directory has no
 symbolic links, so a Windows checkout no longer loses the skills, but the
-missing-pscat hook is a POSIX `sh` command and needs a POSIX shell to run
-(#633).
+missing-pscat hook is a POSIX `sh` script (`hooks/check-pscat.sh`) and
+needs a POSIX shell to run (#633).
 
 ## Try it
 
@@ -145,6 +147,6 @@ a new release in Claude Code; for Codex, see above.
 One directory, `plugin/`, is the plugin for both agents. It holds the
 skills as real files in `skills/` (the repository's top-level `skills` is
 a symlink to `plugin/skills`, so there is one copy of the text), the
-shared `hooks/hooks.json`, Claude Code's `.claude-plugin/plugin.json`
+shared `hooks/hooks.json` and `hooks/check-pscat.sh`, Claude Code's `.claude-plugin/plugin.json`
 (which declares the MCP server inline), and Codex's portable `plugin.json`
 and `mcp.json`. Each agent ignores the other's files.

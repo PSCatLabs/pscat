@@ -118,6 +118,8 @@ class Fixture(unittest.TestCase):
         self.assertIn("hooks.SessionStart", " ".join(self.errors()))
         self.write("plugin/hooks/hooks.json", json.dumps({"hooks": {"SessionStart": [
             {"hooks": [{"type": "command", "command": "sh ${PLUGIN_ROOT}/x.sh"}]}]}}))
+        self.assertIn("'x.sh' is not a file", " ".join(self.errors()))
+        self.write("plugin/x.sh", "#!/bin/sh\n")
         self.assertEqual(self.errors(), [])
         self.plugin["hooks"] = {"SessionStart": []}
         self.assertIn("loads both", " ".join(self.errors()))

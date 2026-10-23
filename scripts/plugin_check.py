@@ -153,7 +153,13 @@ def _check_hooks(plugin_dir, rel, hooks, errors):
         for g in groups:
             for h in g.get("hooks", []):
                 if h.get("type") == "command":
-                    _check_paths_in(h.get("command", ""), f"{rel}: hooks.{event}", errors)
+                    cmd = h.get("command", "")
+                    _check_paths_in(cmd, f"{rel}: hooks.{event}", errors)
+                    # A script named from the plugin root must ship in the plugin.
+                    for m in re.finditer(r"\$\{(?:CLAUDE_)?PLUGIN_ROOT\}/(\S+)", cmd):
+                        if not os.path.isfile(os.path.join(plugin_dir, m.group(1))):
+                            errors.append(f"{rel}: hooks.{event}: {m.group(1)!r} is not a file "
+                                          "in the plugin directory")
 
 
 def check_plugin(root, plugin_dir, entry, version, errors):

@@ -1092,7 +1092,11 @@ renders eight examples in both and compares block-downsampled output).
   now symlinks into it, and `scripts/plugin_check.py` rejects any symlink
   inside a plugin directory. The missing-pscat SessionStart hook moved from
   Claude's plugin.json to `plugin/hooks/hooks.json`, the default path both
-  agents read (never declare it in a manifest too: Claude loads both).
+  agents read (never declare it in a manifest too: Claude loads both). Its
+  logic lives in `plugin/hooks/check-pscat.sh`, run as `sh
+  ${CLAUDE_PLUGIN_ROOT}/hooks/check-pscat.sh` (the directory portal blocks
+  an inline command in a subfolder plugin; Codex sets that variable too;
+  #684, `notes/684-plugin-hook-script.md`).
   `scripts/codex_plugin_install_check.sh` (job `codex-install`) installs it
   with the pinned codex CLI. See `notes/569-codex-plugin.md`.
 - **The MCP Registry entry (#569 part c) is root `server.json`**
