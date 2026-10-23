@@ -12,4 +12,4 @@
 | cases, green board | ![cases](https://github.com/PSCatLabs/pscat/blob/48d608c0ceb2390ffaafcc4db897a711392647c8/docs/dev/review-log/pending/555-chalk-latex-cli/cases-after.png?raw=true) |
 | two-row align, irregular 0 | ![align](https://github.com/PSCatLabs/pscat/blob/48d608c0ceb2390ffaafcc4db897a711392647c8/docs/dev/review-log/pending/555-chalk-latex-cli/align-clean-after.png?raw=true) |
 | --no-board, on a dark ground | ![no board](https://github.com/PSCatLabs/pscat/blob/48d608c0ceb2390ffaafcc4db897a711392647c8/docs/dev/review-log/pending/555-chalk-latex-cli/noboard-on-dark-after.png?raw=true) |
-| guide image | ![demo](https://github.com/PSCatLabs/pscat/blob/26276b3adocs/dev/design/drymedia/chalk_cli_demo.png?raw=true) |
+| guide image | ![demo](https://github.com/PSCatLabs/pscat/blob/26276b35600253e9742d1c716d7daf65f65f7105/docs/dev/design/drymedia/chalk_cli_demo.png?raw=true) |
