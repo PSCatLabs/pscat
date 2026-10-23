@@ -91,11 +91,10 @@ marketplace and `codex plugin add pscat@pscat` installs the new version
 
 Depending on your approval settings, Codex asks before it calls an MCP
 tool (a non-interactive `codex exec` with approvals off refuses the call).
-Codex runs a plugin's hooks only after you trust them, so
-the missing-pscat message (the `hooks/check-pscat.sh` script, which Codex
-runs as `${CLAUDE_PLUGIN_ROOT}/hooks/check-pscat.sh` because it sets that
-variable too) needs one review in `/hooks`; without it a missing
-`pscat-mcp` shows up only as the server's tools being absent.
+Codex runs a plugin's hooks only after you trust them, so the
+missing-pscat message (the `hooks/check-pscat.sh` script) needs one review
+in `/hooks`; without it a missing `pscat-mcp` shows up only as the
+server's tools being absent.
 
 **Already registered pscat-mcp by hand?** If you ran
 `codex mcp add pscat -- pscat-mcp`, remove it (`codex mcp remove pscat`).
