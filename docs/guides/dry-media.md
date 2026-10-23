@@ -249,3 +249,86 @@ newpath (\\int_{-\\infty}^{\\infty} e^{-x^2}\\,dx = \\sqrt{\\pi}) 40 300
   << /Size 36 /Seed 3 >> mkpath
 1.6 setlinewidth 1 setlinecap 1 setlinejoin stroke
 ```
+
+### From LaTeX to a board: `pscat chalk`
+
+`pscat chalk` writes a formula on a board with no PostScript at all. Type the
+LaTeX as you would in a document (single backslashes, `\\` between rows, `&`
+to align them) and quote it for the shell:
+
+```sh
+pscat chalk 'x = \frac{-b \pm \sqrt{b^2-4ac}}{2a}' -o quadratic.png
+pscat chalk 'f(x) &= \int_0^x \frac{dt}{1+t^2} \\ &= \arctan x' --seed 7 -o board.png
+pscat chalk --file eq.tex --config chalk.json -o eq.pdf     # or - for stdin
+pscat chalk 'e^{i\pi} + 1 = 0' --no-board --color yellow -o overlay.png
+```
+
+![f(x) = the integral of dt/(1+t^2), = arctan x, in chalk on a slate board](../dev/design/drymedia/chalk_cli_demo.png)
+
+The input may carry `%` comments and newlines, and a display wrapper around
+the whole (`$...$`, `$$...$$`, `\[...\]`, or an `align`, `align*`, `aligned`,
+`gather`, `equation` ... environment); `\label{}`, `\notag` and `\nonumber`
+are dropped. Each top-level `\\` starts a row (those inside `pmatrix`,
+`cases` or `\substack{}` stay where they are), and the rows are set with
+`mkalign`. The supported subset is mathkit's, listed above and in full at
+the top of `lib/mathkit.ps`. Anything else fails with one line naming it,
+exits non-zero and writes no file:
+
+```text
+pscat chalk: unsupported LaTeX command \oplus (the supported subset is listed at the top of lib/mathkit.ps)
+pscat chalk: unsupported character: @
+```
+
+The block is measured first and shrunk, if it must be, to fit inside the
+margins and above the ledge, then centred (or set at the left margin). Same
+LaTeX, same config, same seed: the same bytes, every time. `-o` takes
+`.png`, `.svg` or `.pdf`; a full board is several megabytes as SVG or PDF
+(every chalk catch is its own small fill), so prefer PNG. `--print-ps` prints
+the generated program instead of rendering it.
+
+The config is JSON. Every key is optional and an unknown key is an error;
+flags (`--seed`, `--size`, `--irregular`, `--color`, `--width`,
+`--height`, `--dpi`, `--no-board`) override it, and `--json '{...}'` takes it
+inline.
+
+```json
+{
+  "layout": {"size": 64, "irregular": 1, "align": "center", "margin": 40,
+             "width": 800, "height": 400, "dpi": 144},
+  "chalk":  {"color": "white", "strength": 0.55, "pressure": 0.68,
+             "tilt": 0, "dust": 0.5},
+  "board":  {"tone": "slate", "haze": 0.4, "ghosting": 0.4,
+             "swipes": 6, "wipes": 2, "smudges": 3, "ledge": 18},
+  "seed": 1
+}
+```
+
+| key | default | meaning |
+|---|---|---|
+| `layout.size` | 64 | writing size in points, before any shrink to fit |
+| `layout.irregular` | 1 | mathkit's `/Irregular`: 0 is a clean, untilted layout, 2 a hurried hand |
+| `layout.slope` | random | the baselines' tilt in degrees (-45..45) |
+| `layout.jitter` | 0.016 | each glyph's wobble, a fraction of the size |
+| `layout.align` | `center` | `center` or `left` |
+| `layout.margin` | 40 | clear space in points round the writing |
+| `layout.width`, `layout.height` | 800, 400 | the page in points |
+| `layout.dpi` | 144 | PNG resolution |
+| `chalk.color` | `white` | `white`, `yellow`, `pink`, `blue`, `green`, `orange` |
+| `chalk.strength` | 0.55 | how far the brightest chalk reads from the board toward the stick's colour |
+| `chalk.pressure` | 0.68 (0.34 with no board) | drychalk's `/Touch`: how much of the tooth catches |
+| `chalk.tilt` | 0 | degrees; toward 90 the stick lies on its side |
+| `chalk.dust` | 0.5 | loose dust beside each stroke |
+| `chalk.width` | 0.048 × size | stroke width in points |
+| `board.tone` | `slate` | `slate`, `greenboard`, or `[r, g, b]` |
+| `board.haze` | 0.4 | the dust film, 0 (freshly washed) to 1 |
+| `board.ghosting` | 0.4 | an earlier lecture's erased writing: `false`/0 for none, `true`, or 0..1 |
+| `board.swipes`, `.wipes`, `.smudges` | 6, 2, 3 | eraser arcs, finger wipes, dust smears |
+| `board.ledge` | 18 | the dusty band along the bottom, in points |
+| `board` | | `false` for chalk alone on a transparent page |
+| `seed` | 1 | the layout, chalk and board all follow it |
+| `hand` | `strokeglyphs` | reserved: the only hand there is |
+
+The generator is `pscat::chalk` (`src/chalk.rs`), plain Rust with no file or
+environment access, so other front ends share it: `chalk::render(latex,
+&config, Format::Png)` returns the bytes, and a TeX error comes back as
+`ChalkError::Latex { kind, token }`.

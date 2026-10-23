@@ -5,6 +5,11 @@ Paths such as `examples/...`, `gallery/...` and `docs/...` name files in the
 installed pscat does not include them. Every `(lib/...) run` works anywhere:
 the library is compiled into `pscat`.
 
+A single formula on a plain board needs no PostScript: `pscat chalk
+'x = \frac{1}{2}' -o board.png` (single backslashes; see the pscat skill).
+Use mathkit directly for a composed piece: several formulas, words,
+annotations, a board of your own.
+
 For formulas on a board, use `lib/mathkit.ps`, not hand-placed `sgpath`
 calls. It lays out a subset of TeX with TeX's box model and appends the
 strokeglyphs skeletons as a path. It paints nothing, so a plain `stroke`

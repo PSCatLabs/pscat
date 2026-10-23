@@ -80,6 +80,8 @@ pub mod page;
 // and out of cargo-semver-checks' view of the API (issue #565).
 #[doc(hidden)]
 pub mod capabilities;
+#[doc(hidden)]
+pub mod chalk;
 pub(crate) mod clock;
 #[doc(hidden)]
 pub mod contact_sheet;
