@@ -470,7 +470,53 @@ impl Config {
     }
 
     /// The page and margins leave room to write in.
-    fn check(&self) -> Result<(), ChalkError> {
+    /// Every field is in its documented range (a `Config` built or edited
+    /// in Rust skips `apply`'s checks), and the page and margins leave
+    /// room to write in. The same validators as the JSON reader, so a
+    /// non-finite number is refused too.
+    pub fn check(&self) -> Result<(), ChalkError> {
+        positive("layout.size", &Value::from(self.size), 1000.0)?;
+        num("layout.irregular", &Value::from(self.irregular), 0.0, 5.0)?;
+        if let Some(v) = self.slope {
+            num("layout.slope", &Value::from(v), -45.0, 45.0)?;
+        }
+        if let Some(v) = self.jitter {
+            num("layout.jitter", &Value::from(v), 0.0, 0.5)?;
+        }
+        num("layout.margin", &Value::from(self.margin), 0.0, 4000.0)?;
+        int("layout.width", &Value::from(self.width), 1, 8000)?;
+        int("layout.height", &Value::from(self.height), 1, 8000)?;
+        num("layout.dpi", &Value::from(self.dpi), 9.0, 1200.0)?;
+        if chalk_color(self.color).is_none() {
+            return Err(bad(format!(
+                "chalk.color must be one of {}, got {:?}",
+                CHALK_COLORS.join(", "),
+                self.color
+            )));
+        }
+        num("chalk.strength", &Value::from(self.strength), 0.0, 1.0)?;
+        if let Some(v) = self.pressure {
+            num("chalk.pressure", &Value::from(v), 0.0, 1.0)?;
+        }
+        num("chalk.tilt", &Value::from(self.tilt), 0.0, 90.0)?;
+        num("chalk.dust", &Value::from(self.dust), 0.0, 1.0)?;
+        if let Some(v) = self.stroke_width {
+            positive("chalk.width", &Value::from(v), 100.0)?;
+        }
+        if let Some(b) = &self.board {
+            if let Tone::Rgb(rgb) = b.tone {
+                for c in rgb {
+                    num("board.tone", &Value::from(c), 0.0, 1.0)?;
+                }
+            }
+            num("board.haze", &Value::from(b.haze), 0.0, 1.0)?;
+            num("board.ghosting", &Value::from(b.ghosting), 0.0, 1.0)?;
+            int("board.swipes", &Value::from(b.swipes), 0, 40)?;
+            int("board.wipes", &Value::from(b.wipes), 0, 20)?;
+            int("board.smudges", &Value::from(b.smudges), 0, 20)?;
+            num("board.ledge", &Value::from(b.ledge), 0.0, 4000.0)?;
+        }
+        int("seed", &Value::from(self.seed), -MAX_SEED, MAX_SEED)?;
         let (aw, ah) = self.writing_box_size();
         if aw <= 0.0 || ah <= 0.0 {
             return Err(bad(format!(
@@ -1209,6 +1255,54 @@ mod tests {
             let e = Config::from_json(bad).unwrap_err().to_string();
             assert!(e.contains(says), "{bad}: {e}");
         }
+    }
+
+    #[test]
+    fn a_config_built_in_rust_is_checked_too() {
+        for (cfg, says) in [
+            (
+                Config {
+                    color: "red",
+                    ..Config::default()
+                },
+                "chalk.color",
+            ),
+            (
+                Config {
+                    size: f64::NAN,
+                    ..Config::default()
+                },
+                "layout.size",
+            ),
+            (
+                Config {
+                    tilt: f64::INFINITY,
+                    ..Config::default()
+                },
+                "chalk.tilt",
+            ),
+            (
+                Config {
+                    seed: i64::MAX,
+                    ..Config::default()
+                },
+                "seed",
+            ),
+            (
+                Config {
+                    board: Some(Board {
+                        tone: Tone::Rgb([0.0, 2.0, 0.0]),
+                        ..Board::default()
+                    }),
+                    ..Config::default()
+                },
+                "board.tone",
+            ),
+        ] {
+            let e = driver("x", &cfg).unwrap_err().to_string();
+            assert!(e.contains(says), "{says}: {e}");
+        }
+        assert!(Config::default().check().is_ok());
     }
 
     #[test]
