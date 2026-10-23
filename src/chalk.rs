@@ -219,7 +219,14 @@ impl fmt::Display for ChalkError {
                     f,
                     "unsupported LaTeX command {token} (the supported subset is listed at the top of lib/mathkit.ps)"
                 ),
-                "unsupported-character" => write!(f, "unsupported character: {token}"),
+                "unsupported-character" => {
+                    write!(f, "unsupported character: {token}")?;
+                    // name an invisible or non-ASCII one by its code point
+                    match token.chars().next() {
+                        Some(c) if !c.is_ascii_graphic() => write!(f, " (U+{:04X})", c as u32),
+                        _ => Ok(()),
+                    }
+                }
                 "unsupported-environment" => {
                     write!(f, "unsupported environment: \\begin{{{token}}}")
                 }
@@ -540,13 +547,11 @@ const DROPPED: [&str; 3] = ["\\nonumber", "\\notag", "\\label"];
 pub fn lines(latex: &str) -> Result<Vec<String>, ChalkError> {
     let mut s = strip_comments(latex)
         .chars()
-        .map(|c| {
-            if matches!(c, '\n' | '\r' | '\t') {
-                ' '
-            } else {
-                c
-            }
-        })
+        // pasted LaTeX: a BOM and zero-width characters go, and every kind
+        // of space (newlines, tabs, NBSP, thin spaces) is a plain space,
+        // which mathkit ignores as TeX does
+        .filter(|c| !matches!(c, '\u{feff}' | '\u{200b}'..='\u{200d}' | '\u{2060}'))
+        .map(|c| if c.is_whitespace() { ' ' } else { c })
         .collect::<String>();
     s = drop_labels(&s);
     loop {
@@ -1064,6 +1069,9 @@ pub fn run(d: &Driver, format: Format) -> Result<Vec<u8>, ChalkError> {
     if d.transparent {
         interp.gfx_mut().set_transparent_background();
     }
+    // Nothing the program prints may reach the caller's stdout: an MCP
+    // server speaks JSON-RPC on it.
+    interp.capture_stdout();
     if let Err(e) = interp.run_source(d.source.as_bytes()) {
         return Err(explain(&e).unwrap_or_else(|| ChalkError::Render(interp.error_report(&e))));
     }
@@ -1133,6 +1141,8 @@ mod tests {
             [r"\begin{aligned} a \end{aligned} + \begin{aligned} b \end{aligned}"]
         );
         assert_eq!(lines("  % only a comment\n \\\\ "), Err(ChalkError::Empty));
+        // pasted text: a BOM, zero-width and non-breaking spaces
+        assert_eq!(l("\u{feff}x\u{a0}=\u{2009}1\u{200b}"), ["x = 1"]);
         assert_eq!(lines(""), Err(ChalkError::Empty));
     }
 
@@ -1220,6 +1230,11 @@ mod tests {
         assert_eq!(e.to_string(), "unsupported character: @");
         let e = explain(&PsError::Undefined("mk-missing-closing-brace".into())).unwrap();
         assert_eq!(e.to_string(), "LaTeX error: missing closing brace");
+        let e = explain(&PsError::Undefined(
+            "mk-unsupported-character:\u{2603}".into(),
+        ))
+        .unwrap();
+        assert_eq!(e.to_string(), "unsupported character: \u{2603} (U+2603)");
         assert!(explain(&PsError::Undefined("foo".into())).is_none());
         assert!(explain(&PsError::Typecheck).is_none());
     }
