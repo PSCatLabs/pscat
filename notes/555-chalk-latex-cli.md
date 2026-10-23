@@ -55,7 +55,9 @@ to prefer PNG.
 integral with limits, a `pmatrix`, a `cases`, a two-row `align`) on a
 400x200 board at 72 dpi by an FNV hash of the pixels. Any change to
 mathkit, strokeglyphs, drychalk, drykit or the generator that moves a pixel
-moves them: look at the boards, then re-pin from the failure message.
+moves them: look at the boards, then re-pin from the failure message. macOS and Linux agree on all five; Windows renders the `cases` board a
+few pixels differently (its C runtime's transcendentals round differently
+in the last place), so that one has a Windows pin of its own.
 
 **Deferred.** A web demo page (the generator is wasm-safe, but no wasm
 export is wired), configurable hands (`hand` is reserved), and the MCP tool
