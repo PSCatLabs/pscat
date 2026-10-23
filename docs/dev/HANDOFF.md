@@ -1060,7 +1060,11 @@ renders eight examples in both and compares block-downsampled output).
   cases in `tests/mcp.rs`. Only JSON-RPC on stdout. Error results carry
   `structuredContent.error` beside the text; success results never do (some
   clients show `structuredContent` instead of `content`, and that would hide
-  the image). `scripts/mcp_inspector_check.sh` (workflow `mcp`) is the
+  the image). Every tool carries all five annotation hints (#687) through the
+  `annotations()` helper; `tests/mcp.rs` `every_tool_has_annotations` has a
+  per-tool table and fails for a tool missing from it, so a new tool states
+  its `readOnlyHint` (conservative `false` when an argument such as `out_path`
+  decides). `scripts/mcp_inspector_check.sh` (workflow `mcp`) is the
   third-party client check. See `notes/568-mcp-skills-cleanup.md`.
 - **Published skills are `plugin/skills/<name>/SKILL.md`** (pscat, psart,
   psviz; #568; top-level `skills` is a symlink there since #569 part b), written for an installed pscat: no `cargo`, `target/`, `scripts/`

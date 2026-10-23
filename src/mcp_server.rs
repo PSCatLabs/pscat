@@ -480,6 +480,27 @@ fn image_content(png: &[u8]) -> Value {
     json!({ "type": "image", "data": base64(png), "mimeType": "image/png" })
 }
 
+/// MCP tool annotations (#687). All five fields are set explicitly: the spec's
+/// defaults (`readOnlyHint` false, `destructiveHint` true, `openWorldHint`
+/// true) are the pessimistic ones, so leaving a field out is not neutral.
+/// `destructiveHint` is false even for the writers: `out_path` is confined to
+/// the output root and replaces only an existing render file of the same
+/// extension. `idempotentHint` is true everywhere: the same arguments produce
+/// the same output, and a repeated write replaces the same file. `openWorldHint`
+/// is false: no tool touches the network. The hints are static per tool, so a
+/// tool whose behaviour depends on an argument (`out_path`) gets the
+/// conservative `readOnlyHint: false`. A new tool must call this and add its
+/// row to the table in `tests/mcp.rs`.
+fn annotations(title: &str, read_only: bool) -> Value {
+    json!({
+        "title": title,
+        "readOnlyHint": read_only,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+    })
+}
+
 fn tool_list(cfg: &Config) -> Value {
     let out_path = match &cfg.out_root {
         Ok(root) => format!(
@@ -500,12 +521,16 @@ fn tool_list(cfg: &Config) -> Value {
         {
             "name": "render_postscript",
             "title": "Render PostScript",
+            "annotations": annotations("Render PostScript", false),
             "description": format!("Render a PostScript program. Returns the page(s) as PNG images \
                 (default), or SVG text, or writes a PDF to out_path. Partial renders are \
                 returned even when the program errors, with the error text alongside, plus \
                 a Lint: block when the page looks wrong (blank page, unbalanced gsave, \
                 leftover stack). {limits} Inline images are capped at {} bytes in total \
-                and {MAX_INLINE_PAGES} pages; past that, lower dpi/size or use out_path.",
+                and {MAX_INLINE_PAGES} pages; past that, lower dpi/size or use out_path. \
+                Writes a file only when out_path is given (then it replaces an existing render \
+                file of that extension), which is why this tool is not marked read-only. The \
+                program can read any local file you can.",
                 cfg.max_image),
             "inputSchema": {
                 "type": "object",
@@ -524,9 +549,12 @@ fn tool_list(cfg: &Config) -> Value {
         {
             "name": "handwrite",
             "title": "Handwritten note",
+            "annotations": annotations("Handwritten note", false),
             "description": format!("Render text as a handwritten note (PNG): a dynamic pen-written \
                 font with per-letter variation, word-wrapped, auto-sized page. \
-                Lowercase letters, digits and .,-'!? only; anything else is invisible. {limits}"),
+                Lowercase letters, digits and .,-'!? only; anything else is invisible. \
+                Writes a file only when out_path is given (then it replaces an existing .png), \
+                which is why this tool is not marked read-only. {limits}"),
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -546,6 +574,7 @@ fn tool_list(cfg: &Config) -> Value {
         {
             "name": "describe_art_capabilities",
             "title": "List art capabilities",
+            "annotations": annotations("List art capabilities", true),
             "description": "List the creative capabilities this pscat build actually has installed: fonts, \
                 Type 3 program faces, mood palettes, page templates, and artkit/style-pack procedures. \
                 Structured JSON, safe to call instead of assuming names from documentation, which can \
@@ -559,10 +588,11 @@ fn tool_list(cfg: &Config) -> Value {
         {
             "name": "eval_postscript",
             "title": "Run PostScript",
+            "annotations": annotations("Run PostScript", true),
             "description": format!("Run a PostScript program headlessly and return what it printed \
                 (=, print, pstack). On error: the standard PostScript error name, the offending \
                 command and line, plus a gs-style operand-stack post-mortem. The debugging \
-                loop. {limits}"),
+                loop. Writes nothing, but the program can read any local file you can. {limits}"),
             "inputSchema": {
                 "type": "object",
                 "properties": {
