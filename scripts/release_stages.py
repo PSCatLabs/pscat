@@ -643,7 +643,10 @@ def npm_tarball_manifest(path):
 
 class RealNpm:
     def view(self, name, version):
-        p = run(["npm", "view", f"{name}@{version}", "dist.integrity", "--json"], check=False)
+        # --prefer-online: npm caches packuments, and a cached miss from
+        # before the publish would hide the new version.
+        p = run(["npm", "view", f"{name}@{version}", "dist.integrity", "--json", "--prefer-online"],
+                check=False)
         if p.returncode == 0:
             out = p.stdout.strip()
             if not out:  # npm prints nothing for a version that does not exist
@@ -658,13 +661,14 @@ class RealNpm:
         # The exact tarball `verify` packed, so what is published is what
         # was checked. Trusted publishing (OIDC) supplies the credential.
         run(["npm", "publish", tarball, "--provenance", "--access", "public"])
-        # The registry can take a moment to list a new version; give it a
-        # minute before the stage's own check calls it missing.
+        # The registry can take minutes to list a new version (0.6.3 took
+        # more than one); back off for about five before the stage's own
+        # check calls it missing.
         pkg = npm_tarball_manifest(tarball) or {}
         for attempt in range(6):
             if self.view(pkg.get("name"), pkg.get("version")) is not None:
                 return
-            time.sleep(10)
+            time.sleep(15 * (attempt + 1))
 
 
 class RealRegistry:
