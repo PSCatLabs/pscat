@@ -95,6 +95,29 @@ clearly better with it (#623).
   or the error (name, offending command, line) plus an operand-stack
   post-mortem.
 
+### Tool annotations
+
+Every tool declares the MCP `annotations` hints, so a client can decide when
+to ask before calling it (and a directory review can check them). All five
+fields are set on every tool:
+
+| Tool | `readOnlyHint` | `destructiveHint` | `idempotentHint` | `openWorldHint` |
+|---|---|---|---|---|
+| `describe_art_capabilities` | true | false | true | false |
+| `eval_postscript` | true | false | true | false |
+| `render_postscript` | false | false | true | false |
+| `handwrite` | false | false | true | false |
+
+The hints are static per tool, so the two render tools take the conservative
+value: they write a file only when `out_path` is given, but without a way to
+say "read-only unless this argument is set" they are marked `readOnlyHint:
+false`. They are not destructive: `out_path` is confined to the output root and
+replaces only an existing render file of the same extension (see below).
+`openWorldHint` is false everywhere because no tool reaches the network.
+`read-only` here means the tool writes nothing; `eval_postscript`'s program (and
+a render's) can still *read* any local file you can, which each description says.
+`tests/mcp.rs` keeps the same table and fails for a tool missing from it.
+
 The Claude Code plugin registers it for you. To register it by hand instead
 (after installing pscat, so `pscat-mcp` is on your PATH; not both, or the
 tools are listed twice):

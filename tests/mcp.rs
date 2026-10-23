@@ -217,6 +217,53 @@ fn handshake_and_tool_list() {
     }
 }
 
+/// Every tool carries all five annotation hints (#687). The table is the
+/// contract: a tool missing from it fails this test, so a new tool must say
+/// whether it is read-only before it ships. `destructive` is false for the
+/// writers on purpose (see `annotations` in src/mcp_server.rs).
+#[test]
+fn every_tool_has_annotations() {
+    // (name, readOnlyHint)
+    let expected = [
+        ("render_postscript", false),
+        ("handwrite", false),
+        ("describe_art_capabilities", true),
+        ("eval_postscript", true),
+    ];
+    let mut s = Server::start();
+    initialized(&mut s);
+    let resp = s.call(json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }));
+    let tools = resp["result"]["tools"].as_array().expect("tools array");
+    assert_eq!(
+        tools.len(),
+        expected.len(),
+        "a tool with no row in this table"
+    );
+    for tool in tools {
+        let name = tool["name"].as_str().expect("name");
+        let &(_, read_only) = expected
+            .iter()
+            .find(|(n, _)| *n == name)
+            .unwrap_or_else(|| panic!("{name} has no row in the annotations table"));
+        let a = tool["annotations"]
+            .as_object()
+            .unwrap_or_else(|| panic!("{name}: annotations must be an object"));
+        for key in [
+            "readOnlyHint",
+            "destructiveHint",
+            "idempotentHint",
+            "openWorldHint",
+        ] {
+            assert!(a[key].is_boolean(), "{name}: {key} must be set explicitly");
+        }
+        assert_eq!(a["readOnlyHint"], read_only, "{name}: readOnlyHint");
+        assert_eq!(a["destructiveHint"], false, "{name}: destructiveHint");
+        assert_eq!(a["idempotentHint"], true, "{name}: idempotentHint");
+        assert_eq!(a["openWorldHint"], false, "{name}: no network, ever");
+        assert_eq!(a["title"], tool["title"], "{name}: annotations.title");
+    }
+}
+
 #[test]
 fn pscat_mcp_subcommand_is_the_same_server() {
     let mut s = Server::start_subcommand();
