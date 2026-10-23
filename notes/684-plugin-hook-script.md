@@ -15,8 +15,10 @@ files. The old `hooks.json` command was an inline `command -v ... || printf`.
   now it reads "Install them with: cargo install pscat"), no other files.
   Committed with LF endings and mode 100755. No `.gitattributes` rule: the
   checklist stops validation for attributes that rewrite file contents.
-- `plugin/hooks/hooks.json`: `sh ${CLAUDE_PLUGIN_ROOT}/hooks/check-pscat.sh`.
-  The `sh` prefix means a copy that loses the exec bit still runs.
+- `plugin/hooks/hooks.json`: `sh "${CLAUDE_PLUGIN_ROOT}/hooks/check-pscat.sh"`.
+  The `sh` prefix means a copy that loses the exec bit still runs. The
+  quotes are what `claude plugin validate` asks for (an unquoted
+  placeholder splits on a space in the install path).
 - One shared file still serves both agents. Codex documents that it sets
   `PLUGIN_ROOT` and, "for compatibility with existing plugin hooks",
   `CLAUDE_PLUGIN_ROOT` and `CLAUDE_PLUGIN_DATA`
