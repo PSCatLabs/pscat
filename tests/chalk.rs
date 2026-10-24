@@ -206,6 +206,45 @@ fn irregular_zero_is_a_clean_untilted_layout() {
     );
 }
 
+/// LaTeX centres each `gather` row on its own width (issue #699); `align`
+/// keeps its rows on one relation column, and its driver never asks for the
+/// centring.
+#[test]
+fn gather_rows_are_centred_and_align_is_not() {
+    let rows = r"a = b \\ ccc + dd = eeee \\ f";
+    let gather = format!("\\begin{{gather*}} {rows} \\end{{gather*}}");
+    let align = format!("\\begin{{align*}} {rows} \\end{{align*}}");
+    let mut clean = small();
+    clean.irregular = 0.0;
+
+    let recs = records(&gather, &clean);
+    assert_eq!(recs.len(), 3);
+    for r in &recs {
+        assert!(
+            (r.1 - recs[0].1).abs() < 1e-6,
+            "a gather row is off the centre line: {recs:?}"
+        );
+    }
+    // the rows have different widths, so a shared centre means ragged edges
+    let starts = records(&align, &clean);
+    assert!(
+        (starts[0].1 - starts[1].1).abs() < 1e-6,
+        "align lost its relation column: {starts:?}"
+    );
+
+    let has = |tex: &str| {
+        chalk::driver(tex, &clean)
+            .unwrap()
+            .source
+            .contains("/LineAlign /center")
+    };
+    assert!(has(&gather));
+    assert!(!has(&align));
+    assert!(!has(rows));
+    // one row is centred by the block already: its driver is the plain one
+    assert!(!has(r"\begin{gather} a = b \end{gather}"));
+}
+
 /// The writing fits the board: a long formula is shrunk to stay inside
 /// the margins, and a short one is centred.
 #[test]

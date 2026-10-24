@@ -612,6 +612,25 @@ const DROPPED: [&str; 3] = ["\\nonumber", "\\notag", "\\label"];
 /// those inside braces or inside an environment such as `pmatrix` or
 /// `cases`). Blank rows are dropped; none left is [`ChalkError::Empty`].
 pub fn lines(latex: &str) -> Result<Vec<String>, ChalkError> {
+    layout(latex).map(|(rows, _)| rows)
+}
+
+/// How the rows of a display sit against each other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RowAlign {
+    /// On the first `&` or relation of each row: `align`, and whatever has
+    /// no wrapper of its own.
+    Relation,
+    /// Each row centred on its own width: `gather`, as LaTeX sets it.
+    Center,
+}
+
+/// [`lines`], and how its rows align. The innermost stripped environment
+/// that sets rows decides (`equation` only holds a display): `gather`,
+/// `gather*` and `gathered` centre each row, as LaTeX does; every other
+/// wrapper, or none, aligns the rows on their relations.
+fn layout(latex: &str) -> Result<(Vec<String>, RowAlign), ChalkError> {
+    let mut row_align = RowAlign::Relation;
     let mut s = strip_comments(latex)
         .chars()
         // pasted LaTeX: a BOM and zero-width characters go, and every kind
@@ -625,7 +644,16 @@ pub fn lines(latex: &str) -> Result<Vec<String>, ChalkError> {
         let t = s.trim();
         let inner = match unwrap_math(t)? {
             Some(i) => Some(i),
-            None => strip_env(t).map(str::to_string),
+            None => strip_env(t).map(|(name, body)| {
+                if !matches!(name, "equation" | "equation*" | "displaymath" | "math") {
+                    row_align = if matches!(name, "gather" | "gather*" | "gathered") {
+                        RowAlign::Center
+                    } else {
+                        RowAlign::Relation
+                    };
+                }
+                body.to_string()
+            }),
         };
         match inner {
             Some(i) => s = i,
@@ -643,7 +671,7 @@ pub fn lines(latex: &str) -> Result<Vec<String>, ChalkError> {
     if rows.is_empty() {
         return Err(ChalkError::Empty);
     }
-    Ok(rows)
+    Ok((rows, row_align))
 }
 
 /// `%` to the end of the line goes; `\%` (and the `%` of `\\%`'s row
@@ -882,9 +910,9 @@ fn env_name(s: &str, i: usize) -> Option<(&str, usize)> {
     Some((&inner[..close], start + 1 + close + 1))
 }
 
-/// The inside of a wrapper environment, when its `\begin` opens the input
-/// and its matching `\end` closes it.
-fn strip_env(t: &str) -> Option<&str> {
+/// The name and the inside of a wrapper environment, when its `\begin`
+/// opens the input and its matching `\end` closes it.
+fn strip_env(t: &str) -> Option<(&str, &str)> {
     let b = t.as_bytes();
     if !t.starts_with("\\begin") || word_at(b, 1) != b"begin" {
         return None;
@@ -906,7 +934,7 @@ fn strip_env(t: &str) -> Option<&str> {
                 if depth == 0 {
                     let (end_name, after) = env_name(t, i + 4)?;
                     if end_name == name && t[after..].trim().is_empty() {
-                        return Some(&t[body_start..i]);
+                        return Some((name, &t[body_start..i]));
                     }
                     return None;
                 }
@@ -1055,7 +1083,7 @@ const COLORS_RGB: [(&str, [f64; 3]); 6] = [
 /// The PostScript program that writes `latex` on a board as `cfg` says.
 pub fn driver(latex: &str, cfg: &Config) -> Result<Driver, ChalkError> {
     cfg.check()?;
-    let rows = lines(latex)?;
+    let (rows, row_align) = layout(latex)?;
     let (w, h) = (f64::from(cfg.width), f64::from(cfg.height));
     let (aw, ah) = cfg.writing_box_size();
     let bx = cfg.margin;
@@ -1081,6 +1109,10 @@ pub fn driver(latex: &str, cfg: &Config) -> Result<Driver, ChalkError> {
     p.push_str("] def\n");
     p.push_str(&format!("/cksize {} def\n", n(cfg.size)));
     let mut opts = format!("/Size cksize /Seed {seed} /Irregular {}", n(cfg.irregular));
+    // a single row is centred by the block already: leave its layout alone
+    if row_align == RowAlign::Center && rows.len() > 1 {
+        opts.push_str(" /LineAlign /center");
+    }
     if let Some(s) = cfg.slope {
         opts.push_str(&format!(" /Slope {}", n(s)));
     }
@@ -1334,6 +1366,55 @@ mod tests {
         // pasted text: a BOM, zero-width and non-breaking spaces
         assert_eq!(l("\u{feff}x\u{a0}=\u{2009}1\u{200b}"), ["x = 1"]);
         assert_eq!(lines(""), Err(ChalkError::Empty));
+    }
+
+    #[test]
+    fn gather_rows_centre_and_everything_else_aligns() {
+        let a = |s: &str| layout(s).unwrap().1;
+        let gather = "a = b \\\\ ccc + d = e";
+        for env in ["gather", "gather*", "gathered"] {
+            assert_eq!(
+                a(&format!("\\begin{{{env}}} {gather} \\end{{{env}}}")),
+                RowAlign::Center
+            );
+        }
+        // equation only holds a display; math delimiters go first
+        assert_eq!(
+            a(&format!(
+                "\\begin{{equation}}\\begin{{gathered}} {gather} \\end{{gathered}}\\end{{equation}}"
+            )),
+            RowAlign::Center
+        );
+        assert_eq!(
+            a(&format!(
+                "$$\\begin{{gathered}} {gather} \\end{{gathered}}$$"
+            )),
+            RowAlign::Center
+        );
+        // the innermost environment that sets rows decides
+        assert_eq!(
+            a(&format!(
+                "\\begin{{gather}}\\begin{{aligned}} {gather} \\end{{aligned}}\\end{{gather}}"
+            )),
+            RowAlign::Relation
+        );
+        assert_eq!(
+            a(&format!(
+                "\\begin{{aligned}}\\begin{{gathered}} {gather} \\end{{gathered}}\\end{{aligned}}"
+            )),
+            RowAlign::Center
+        );
+        // align, aligned, split, none, and a gather that does not wrap the input
+        for tex in [
+            format!("\\begin{{align*}} {gather} \\end{{align*}}"),
+            format!("\\begin{{aligned}} {gather} \\end{{aligned}}"),
+            format!("\\begin{{split}} {gather} \\end{{split}}"),
+            format!("\\begin{{equation}} {gather} \\end{{equation}}"),
+            gather.to_string(),
+            r"\begin{gather} a \end{gather} + b \\ c".to_string(),
+        ] {
+            assert_eq!(a(&tex), RowAlign::Relation, "{tex}");
+        }
     }
 
     #[test]

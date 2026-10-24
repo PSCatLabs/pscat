@@ -222,6 +222,9 @@ baseline slopes and drifts (`/Irregular`, where 0 is clean TeX).
   after the last; `/ColumnGap 0` is amsmath's `alignat`. `/ColumnWander`
   (default 0; 1 is as far as a line's own wander) lets each pair after
   the first drift sideways down the lines, as a hand's columns do.
+  `/LineAlign /center` centres each line on its own width at `x`, as TeX
+  `gather` sets its rows (the default, `/relation`, is `align`'s: on the
+  `&` or the first relation).
 - `mkarrow` points a side note at a term.
 - `x0 y0 x1 y1 opts mkbrace` draws a hand-drawn curly brace whose arms
   end at the two points, its point to the right of the direction from
@@ -273,7 +276,9 @@ one formula with the delimiters removed. Words outside the pairs, or a
 delimiter that is never closed or closes nothing, fail with a one-line error
 naming it. Each top-level `\\` starts a row (those inside `pmatrix`,
 `cases` or `\substack{}` stay where they are), and the rows are set with
-`mkalign`. The supported subset is mathkit's, listed above and in full at
+`mkalign`: on their relations (or `&`), as `align` sets them, except inside a
+`gather`, `gather*` or `gathered` wrapper, where each row is centred on its
+own width, as LaTeX does. The supported subset is mathkit's, listed above and in full at
 the top of `lib/mathkit.ps`. Anything else fails with one line naming it,
 exits non-zero and writes no file:
 
