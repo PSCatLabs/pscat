@@ -7,7 +7,6 @@ mod common;
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::{Child, ChildStdout, Command, Stdio};
-use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
@@ -833,12 +832,15 @@ fn a_program_stuck_in_one_operator_is_killed_by_the_timeout_backstop() {
     );
     let mut s = Server::start_in(&dir, &["--timeout", "2"]);
     initialized(&mut s);
-    let started = Instant::now();
+    let started = std::time::Instant::now();
     let source = format!("({}) (r) file pop", common::ps_path(&fifo));
     let result = s.tool("eval_postscript", json!({ "source": source }));
     let took = started.elapsed();
     assert_eq!(error_kind(&result), "timeout", "{result}");
-    assert!(took < Duration::from_secs(15), "stopped promptly: {took:?}");
+    assert!(
+        took < std::time::Duration::from_secs(15),
+        "stopped promptly: {took:?}"
+    );
     s.ping_ok();
 }
 

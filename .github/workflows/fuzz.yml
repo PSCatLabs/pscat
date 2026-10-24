@@ -58,6 +58,10 @@ jobs:
         run: cargo install cargo-fuzz --locked --version 0.13.2
       - name: Fuzz ${{ matrix.target }}
         env:
+          # LeakSanitizer also checks once more when the process exits, which
+          # -detect_leaks=0 below does not stop; this does. See the comment
+          # in the step.
+          ASAN_OPTIONS: detect_leaks=0
           SECONDS_PER_TARGET: ${{ github.event_name == 'pull_request' && '30' || inputs.seconds || '600' }}
         run: |
           mkdir -p "fuzz/corpus/${{ matrix.target }}"
