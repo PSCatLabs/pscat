@@ -232,6 +232,19 @@ impl fmt::Display for ChalkError {
                 }
                 "unsupported-delimiter" => write!(f, "unsupported delimiter: {token}"),
                 "missing-argument" => write!(f, "{token} is missing an argument"),
+                "unclosed-math-delimiter" => write!(
+                    f,
+                    "math delimiter {token} is never closed: end it with {}",
+                    closer(token)
+                ),
+                "unmatched-math-delimiter" => write!(
+                    f,
+                    "math delimiter {token} closes nothing: each \\( needs a \\) and each \\[ a \\], in order"
+                ),
+                "text-outside-math" => write!(
+                    f,
+                    "text outside the math delimiters ({token}...): a board sets only the formula, so write one formula, or move the words out"
+                ),
                 _ => {
                     let what = kind.replace('-', " ");
                     if token.is_empty() {
@@ -247,6 +260,14 @@ impl fmt::Display for ChalkError {
 }
 
 impl std::error::Error for ChalkError {}
+
+/// The closing delimiter for an opening one.
+fn closer(open: &str) -> &'static str {
+    MATH_DELIMS
+        .iter()
+        .find(|d| d.0 == open)
+        .map_or("its closer", |d| d.1)
+}
 
 /// A mathkit error (`undefined` naming `mk-<kind>:<token>`) as a
 /// [`ChalkError::Latex`]; `None` for any other error.
@@ -586,8 +607,8 @@ const WRAPPERS: [&str; 16] = [
 const DROPPED: [&str; 3] = ["\\nonumber", "\\notag", "\\label"];
 
 /// The LaTeX as the lines of a display: comments, newlines, display
-/// wrappers (`$...$`, `\[...\]`, an `align`/`gather`/... environment around
-/// the whole) and labels removed, split at top-level `\\` row breaks (not
+/// wrappers (`$...$`, `\[...\]`, `\(...\)`, one pair or several; an
+/// `align`/`gather`/... environment around the whole) and labels removed, split at top-level `\\` row breaks (not
 /// those inside braces or inside an environment such as `pmatrix` or
 /// `cases`). Blank rows are dropped; none left is [`ChalkError::Empty`].
 pub fn lines(latex: &str) -> Result<Vec<String>, ChalkError> {
@@ -602,9 +623,12 @@ pub fn lines(latex: &str) -> Result<Vec<String>, ChalkError> {
     s = drop_labels(&s);
     loop {
         let t = s.trim();
-        let inner = strip_delims(t).or_else(|| strip_env(t));
+        let inner = match unwrap_math(t)? {
+            Some(i) => Some(i),
+            None => strip_env(t).map(str::to_string),
+        };
         match inner {
-            Some(i) => s = i.to_string(),
+            Some(i) => s = i,
             None => {
                 s = t.to_string();
                 break;
@@ -704,18 +728,138 @@ fn drop_labels(s: &str) -> String {
     out
 }
 
-/// The inside of `$$...$$`, `$...$`, `\[...\]` or `\(...\)` around the whole.
-fn strip_delims(t: &str) -> Option<&str> {
-    for (open, close) in [("$$", "$$"), ("\\[", "\\]"), ("\\(", "\\)"), ("$", "$")] {
-        if t.len() >= open.len() + close.len()
-            && t.starts_with(open)
-            && t.ends_with(close)
-            && !t.ends_with(&format!("\\{close}"))
-        {
-            return Some(&t[open.len()..t.len() - close.len()]);
-        }
+/// The opening and closing math delimiters, longest opener first.
+const MATH_DELIMS: [(&str, &str); 4] = [("$$", "$$"), ("\\[", "\\]"), ("\\(", "\\)"), ("$", "$")];
+
+/// A `ChalkError::Latex` for a delimiter problem (`kind` without `mk-`).
+fn delim_error(kind: &str, token: &str) -> ChalkError {
+    ChalkError::Latex {
+        kind: kind.into(),
+        token: token.into(),
     }
-    None
+}
+
+/// `\left`, `\right` and the `\big` family name a fence, so a `\(` or `\]`
+/// right after one is a (mathkit-unsupported) delimiter, not a math pair.
+fn is_fence(word: &str) -> bool {
+    matches!(word, "left" | "right")
+}
+
+/// The length of the control word (`\alpha`) or backslash-and-one-character
+/// (`\\`, `\$`, `\(`) at the start of `rest`, which begins with a backslash.
+fn escape_len(rest: &str) -> usize {
+    let word = rest[1..]
+        .chars()
+        .take_while(char::is_ascii_alphabetic)
+        .count();
+    if word > 0 {
+        1 + word
+    } else {
+        1 + rest[1..].chars().next().map_or(0, char::len_utf8)
+    }
+}
+
+/// Whether `t` has an unescaped `\(`, `\)`, `\[` or `\]` that is not
+/// right after `\left` or `\right`: never valid mathkit input, so always a
+/// delimiter. (`\\(` is a row break and `(`.)
+fn has_backslash_delim(t: &str) -> bool {
+    let mut rest = t;
+    let mut after_fence = false;
+    while let Some(c) = rest.chars().next() {
+        if c != '\\' {
+            after_fence &= c == ' ';
+            rest = &rest[c.len_utf8()..];
+            continue;
+        }
+        if !after_fence
+            && ["\\(", "\\)", "\\[", "\\]"]
+                .iter()
+                .any(|d| rest.starts_with(d))
+        {
+            return true;
+        }
+        let len = escape_len(rest);
+        after_fence = is_fence(&rest[1..len]);
+        rest = &rest[len..];
+    }
+    false
+}
+
+/// The input with its math delimiters (`$$..$$`, `$..$`, `\[..\]`,
+/// `\(..\)`, one or several pairs, nested or side by side) replaced by
+/// spaces; `None` when it has none to remove. Each backslash is paired with
+/// the character after it, so `\\(`, `\$` and `\right)` are not
+/// delimiters, nor is a `\(` right after `\left` (mathkit names that one).
+/// A `$` in the middle of plain input is left to mathkit, which
+/// ignores it: the scan starts only for input that begins with `$` or holds a
+/// backslash delimiter. Pieces between pairs are joined (`\(a\) + \(b\)` is
+/// `a + b`), but a letter outside any pair and any `{...}` group is an
+/// error: TeX sets it as text, which a board does not (`\text{and}` is fine).
+fn unwrap_math(t: &str) -> Result<Option<String>, ChalkError> {
+    if !t.starts_with('$') && !has_backslash_delim(t) {
+        return Ok(None);
+    }
+    let mut out = String::with_capacity(t.len());
+    // the open pairs, innermost last, as `MATH_DELIMS` indexes
+    let mut open: Vec<usize> = Vec::new();
+    // the depth of `{` groups outside every pair
+    let mut braces = 0usize;
+    let mut after_fence = false;
+    let mut rest = t;
+    while let Some(c) = rest.chars().next() {
+        let fenced = after_fence;
+        after_fence &= c == ' ';
+        if c == '\\' {
+            // a control word or a backslash and one character; a delimiter
+            // unless right after `\left`/`\right`
+            let len = escape_len(rest);
+            let word = &rest[..len];
+            if !fenced
+                && matches!(word, "\\)" | "\\]")
+                && open.last().is_none_or(|&i| MATH_DELIMS[i].1 != word)
+            {
+                return Err(delim_error("unmatched-math-delimiter", word));
+            }
+            if fenced || !matches!(word, "\\(" | "\\[" | "\\)" | "\\]") {
+                after_fence = is_fence(&word[1..]);
+                out.push_str(word);
+                rest = &rest[len..];
+                continue;
+            }
+        }
+        let closes = open
+            .last()
+            .map(|&i| MATH_DELIMS[i].1)
+            .filter(|cl| rest.starts_with(cl));
+        if let Some(cl) = closes {
+            open.pop();
+            out.push(' ');
+            rest = &rest[cl.len()..];
+            continue;
+        }
+        if let Some(i) = MATH_DELIMS.iter().position(|d| rest.starts_with(d.0)) {
+            open.push(i);
+            out.push(' ');
+            rest = &rest[MATH_DELIMS[i].0.len()..];
+            continue;
+        }
+        if open.is_empty() {
+            match c {
+                '{' => braces += 1,
+                '}' => braces = braces.saturating_sub(1),
+                _ if braces == 0 && c.is_ascii_alphabetic() => {
+                    return Err(delim_error("text-outside-math", &rest[..1]));
+                }
+                _ => {}
+            }
+        }
+        out.push(c);
+        rest = &rest[c.len_utf8()..];
+    }
+    if let Some(&i) = open.last() {
+        return Err(delim_error("unclosed-math-delimiter", MATH_DELIMS[i].0));
+    }
+    Ok(Some(out))
 }
 
 /// The control word starting at byte `i` (just after a backslash), if any.
@@ -1190,6 +1334,49 @@ mod tests {
         // pasted text: a BOM, zero-width and non-breaking spaces
         assert_eq!(l("\u{feff}x\u{a0}=\u{2009}1\u{200b}"), ["x = 1"]);
         assert_eq!(lines(""), Err(ChalkError::Empty));
+    }
+
+    #[test]
+    fn several_math_pairs_are_joined_and_bad_ones_named() {
+        // the issue's input, in each delimiter form
+        assert_eq!(l(r"\(a\) + \(b\)"), ["a  +  b"]);
+        assert_eq!(l(r"\[a\] \[b\]"), ["a   b"]);
+        assert_eq!(l("$a$ + $b$"), ["a  +  b"]);
+        assert_eq!(l("$$a$$ + $$b$$"), ["a  +  b"]);
+        // adjacent pairs stay apart: `\alpha` + `b`, not `\alphab`
+        assert_eq!(l(r"\(\alpha\)\(b\)"), [r"\alpha  b"]);
+        // single pairs and nesting come out as before
+        assert_eq!(l(r"\(a\)"), ["a"]);
+        assert_eq!(l("$$x$$"), ["x"]);
+        assert_eq!(l(r"\[ \(x\) \]"), ["x"]);
+        assert_eq!(l(r"\[ x \\ y \]"), ["x", "y"]);
+        // not delimiters: a row break then a bracket, `\right)`, an escaped dollar
+        assert_eq!(l(r"\( a \\ (b) \)"), ["a", "(b)"]);
+        assert_eq!(l(r"\[ \left( a \right) \]"), [r"\left( a \right)"]);
+        assert_eq!(l(r"\( a \$ \)"), [r"a \$"]);
+        // plain input with no delimiter at its start is left alone
+        assert_eq!(l("a $ b"), ["a $ b"]);
+        assert_eq!(l(r"a \\(b)"), ["a", "(b)"]);
+        let e = |s: &str| lines(s).unwrap_err();
+        let msg = |s: &str| e(s).to_string();
+        assert_eq!(e(r"\(a\) + \(b").code(), "unclosed_math_delimiter");
+        assert_eq!(
+            msg(r"\(a\) + \(b"),
+            r"math delimiter \( is never closed: end it with \)"
+        );
+        assert_eq!(e("$a$ + $b").code(), "unclosed_math_delimiter");
+        assert_eq!(e(r"1 + 2\)").code(), "unmatched_math_delimiter");
+        assert_eq!(e(r"\(a\]").code(), "unmatched_math_delimiter");
+        assert_eq!(e(r"\(x\) where \(y\)").code(), "text_outside_math");
+        assert!(msg(r"\(x\) where \(y\)").starts_with("text outside the math delimiters (w"));
+        // `\left\(` is mathkit's to name, not a pair; `\text{..}` outside a pair is fine
+        assert_eq!(l(r"\left\( b \right\)"), [r"\left\( b \right\)"]);
+        assert_eq!(l(r"a \left\( b"), [r"a \left\( b"]);
+        assert_eq!(l(r"\(a\) \text{and} \(b\)"), [r"a  \text{and}  b"]);
+        assert_eq!(l(r"\(x\) = α"), ["x  = α"]);
+        // control words outside a pair are math, not text
+        assert_eq!(l(r"\(a\) \quad \(b\)"), [r"a  \quad  b"]);
+        assert_eq!(msg("$$a$$ $b").lines().count(), 1);
     }
 
     #[test]

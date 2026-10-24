@@ -266,9 +266,12 @@ pscat chalk 'e^{i\pi} + 1 = 0' --no-board --color yellow -o overlay.png
 ![f(x) = the integral of dt/(1+t^2), = arctan x, in chalk on a slate board](../dev/design/drymedia/chalk_cli_demo.png)
 
 The input may carry `%` comments and newlines, and a display wrapper around
-the whole (`$...$`, `$$...$$`, `\[...\]`, or an `align`, `align*`, `aligned`,
-`gather`, `equation` ... environment); `\label{}`, `\notag` and `\nonumber`
-are dropped. Each top-level `\\` starts a row (those inside `pmatrix`,
+the whole (`$...$`, `$$...$$`, `\[...\]`, `\(...\)`, or an `align`, `align*`,
+`aligned`, `gather`, `equation` ... environment); `\label{}`, `\notag` and
+`\nonumber` are dropped. Several math pairs, as in `\(a\) + \(b\)`, are
+one formula with the delimiters removed. Words outside the pairs, or a
+delimiter that is never closed or closes nothing, fail with a one-line error
+naming it. Each top-level `\\` starts a row (those inside `pmatrix`,
 `cases` or `\substack{}` stay where they are), and the rows are set with
 `mkalign`. The supported subset is mathkit's, listed above and in full at
 the top of `lib/mathkit.ps`. Anything else fails with one line naming it,
