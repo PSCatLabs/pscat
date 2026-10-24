@@ -811,8 +811,8 @@ renders eight examples in both and compares block-downsampled output).
    backslashes, `\\` rows, a JSON config). The driver generator is
    `pscat::chalk` (`src/chalk.rs`, pure Rust, wasm-safe); the CLI
    (`src/subcmd/chalk.rs`) only writes what `chalk::render` returns, so the
-   MCP tool (#688) and a web demo should call the library, not re-derive
-   the driver. It measures with `mkalign` (ink thrown away) before loading
+   MCP tool (`chalkboard_math`, #688, shipped) and a web demo call the
+   library, not re-derive the driver. It measures with `mkalign` (ink thrown away) before loading
    drychalk, so a TeX error costs no board, and maps mathkit's
    `mk-<kind>:<token>` to `ChalkError::Latex`. `tests/chalk.rs` pins five
    boards by pixel hash: any mathkit/strokeglyphs/drychalk/drykit change
@@ -1111,6 +1111,16 @@ renders eight examples in both and compares block-downsampled output).
   its `readOnlyHint` (conservative `false` when an argument such as `out_path`
   decides). `scripts/mcp_inspector_check.sh` (workflow `mcp`) is the
   third-party client check. See `notes/568-mcp-skills-cleanup.md`.
+  `chalkboard_math` (#688) is the pattern for a data-in tool: the program is
+  generated in-process (`pscat::chalk::driver`, pure), then run in a `pscat`
+  child through `run_child` with `interpreter_args`, never in the server
+  (a program's stdout would corrupt JSON-RPC, and the child keeps the limits
+  and crash isolation). Its fixed caps (`MAX_LATEX_BYTES` 4096,
+  `MAX_CHALK_PIXELS` 40 M) are checked before the child starts; the canvas is
+  allocated before `--max-memory` counts, so a render path that takes a page
+  size needs a pixel cap of its own. A TeX error is mapped back from the
+  child's `mk-*` offending command with `chalk::explain`. The output is
+  byte-identical to `pscat chalk` and `chalk::render` (`tests/mcp.rs` pins it).
 - **Published skills are `plugin/skills/<name>/SKILL.md`** (pscat, psart,
   psviz; #568; top-level `skills` is a symlink there since #569 part b), written for an installed pscat: no `cargo`, `target/`, `scripts/`
   or checkout-relative paths, repo files linked by GitHub URL. `.claude/skills/`
