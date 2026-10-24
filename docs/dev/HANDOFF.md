@@ -1116,9 +1116,9 @@ renders eight examples in both and compares block-downsampled output).
   child through `run_child` with `interpreter_args`, never in the server
   (a program's stdout would corrupt JSON-RPC, and the child keeps the limits
   and crash isolation). Its fixed caps (`MAX_LATEX_BYTES` 4096,
-  `MAX_CHALK_PIXELS` 40 M) are checked before the child starts; the canvas is
-  allocated before `--max-memory` counts, so a render path that takes a page
-  size needs a pixel cap of its own. A TeX error is mapped back from the
+  `MAX_CHALK_PIXELS` 40 M) are checked before the child starts. The canvas
+  (4 bytes a pixel) is allocated before `--max-memory` counts, so the pixel
+  cap is what bounds it below the interpreter's 8000-a-side ceiling. A TeX error is mapped back from the
   child's `mk-*` offending command with `chalk::explain`. The output is
   byte-identical to `pscat chalk` and `chalk::render` (`tests/mcp.rs` pins it).
 - **Published skills are `plugin/skills/<name>/SKILL.md`** (pscat, psart,

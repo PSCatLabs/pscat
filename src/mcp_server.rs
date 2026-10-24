@@ -915,14 +915,17 @@ fn handwrite(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
 /// The longest `latex` `chalkboard_math` takes, in bytes. A ten-row
 /// derivation is about 1 KB and a board that size is already crowded; four
 /// times that (about 40 rows of a Taylor expansion) rendered in 25 s on the
-/// machine it was measured on, inside the default time limit (#688).
+/// machine it was measured on with the default board, inside the default
+/// time limit (#688); past that the time limit stops it.
 const MAX_LATEX_BYTES: usize = 4096;
 
 /// The largest `chalkboard_math` board, in device pixels (width x height at
 /// the chosen dpi). An 8K screen (7680x4320) or an A2 poster at 300 dpi
 /// (about 35 million) fits; a 1920x1200 pt board at 300 dpi (40 million)
 /// peaked at 0.63 GB resident under the server's limits (#688). The
-/// interpreter's own ceiling, 8000 pixels a side, still applies.
+/// interpreter's own ceiling, 8000 pixels a side (64 million), still applies;
+/// this cap is headroom on memory and time below it (the canvas is allocated
+/// before `--max-memory` starts counting).
 const MAX_CHALK_PIXELS: u64 = 40_000_000;
 
 /// The flat `chalkboard_math` keys that map onto one key of the #555 config:

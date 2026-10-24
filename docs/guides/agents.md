@@ -166,7 +166,7 @@ Fixed by whoever registers the server; no tool argument can change them.
 
 `chalkboard_math` has two fixed caps of its own, checked before anything
 runs: `latex` at most 4096 bytes (`input_too_large`; about 40 rows, four
-times a long derivation, and still inside the default time limit), and the
+times a long derivation; the time limit stops anything slower), and the
 board at most 40,000,000 device pixels and 8000 a side (`output_too_large`
 with `limit_pixels`; an 8K screen or an A2 poster at 300 dpi fits). Both are
 in `SECURITY.md`.

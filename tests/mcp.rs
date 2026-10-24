@@ -1220,6 +1220,12 @@ fn chalkboard_math_errors_are_one_line_and_structured() {
     assert!(!text.contains('\n') && !text.contains("%%["), "{text}");
     assert_eq!(result["content"].as_array().unwrap().len(), 1, "no image");
 
+    // A multi-byte character survives the trip through the child's report.
+    let result = s.tool("chalkboard_math", small_board("x = \u{2603}"));
+    assert_eq!(error_kind(&result), "latex_error", "{result}");
+    assert_eq!(result["structuredContent"]["error"]["token"], "\u{2603}");
+    assert!(texts(&result)[0].ends_with("(U+2603)"), "{result}");
+
     let result = s.tool("chalkboard_math", json!({ "latex": "% nothing" }));
     assert_eq!(error_kind(&result), "latex_error");
     assert_eq!(result["structuredContent"]["error"]["code"], "empty");

@@ -365,14 +365,17 @@ an installed build (October 2026, #568).
   - `latex` is at most **4096 bytes** (`input_too_large`, with `limit` and
     `size`), on top of `--max-input-bytes`. A ten-row derivation is about
     1 KB; 4 KB (about 40 rows) rendered in 25 s on the machine it was
-    measured on, inside the default time limit, so every accepted input can
-    finish. The step and time limits still stop anything slower.
+    measured on with the default board, inside the default time limit. A
+    long formula on a large board can take longer; the time limit then stops
+    it with `limit_exceeded`.
   - The board is at most **40,000,000 device pixels** (width and height in
     points times dpi/72), and 8000 a side (`output_too_large`, with
-    `limit_pixels`, `pixels`, `width_px`, `height_px`). The canvas is
-    allocated before the memory limit starts counting, so without this cap a
-    request for an 8000 x 8000 px board would cost over a gigabyte before
-    `--max-memory` could see it. 40 million covers an 8K screen (7680 x
+    `limit_pixels`, `pixels`, `width_px`, `height_px`). The interpreter
+    already refuses more than 8000 pixels a side (64 million), so this cap
+    bounds memory and render time with headroom rather than preventing an
+    out-of-memory: the canvas (4 bytes a pixel, 256 MB at 64 million) is
+    allocated before `--max-memory` starts counting; the rest of a board's
+    memory is counted. 40 million covers an 8K screen (7680 x
     4320) or an A2 poster at 300 dpi; a 1920 x 1200 pt board at 300 dpi (40
     million) peaked at 0.63 GB resident under the default limits, and a
     36-million-pixel board took 8 s. A board that big is a PNG of several

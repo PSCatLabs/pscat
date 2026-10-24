@@ -43,13 +43,17 @@ error names the flat key the caller sent (`size must be ...`, not
 - `latex` at most 4096 bytes. A ten-row derivation is about 1 KB. Render
   time grows with length (1 row: 1.9 s, 10 rows: 5.6 s, 40 rows / 4 KB: 25 s
   on the default board, release build, this machine), so 4 KB is four times
-  a long derivation and still inside the default 55 s interpreter clock.
+  a long derivation and, on the default board, inside the default 55 s
+  interpreter clock. A long formula on a large board may hit the clock; that
+  is a structured `limit_exceeded`, not measured further.
 - The board at most 40,000,000 device pixels, and 8000 a side, rounded the
   way `Interp::with_page_scaled` rounds. Resident memory is about 17 bytes a
   pixel (1.3 Mpx: 0.11 GB; 5.8 Mpx: 0.24 GB; 36 Mpx: 0.66 GB, 8 s; 40 Mpx
-  under the MCP limits: 0.63 GB, 12 s). The canvas is allocated before
-  `--max-memory` starts counting, so the cap is what keeps a big board in
-  bounds. 40 M covers an 8K screen and an A2 poster at 300 dpi.
+  under the MCP limits: 0.63 GB, 12 s). The #555 hand-off worried about
+  tens of GB, but `Interp::with_page_scaled` already refuses more than
+  8000 px a side (64 Mpx), so this cap is about headroom and latency, not
+  out-of-memory. The canvas (4 B/px, 256 MB at 64 Mpx) is allocated before
+  `--max-memory` starts counting; the rest is counted. 40 M covers an 8K screen and an A2 poster at 300 dpi.
 - svg and pdf need `out_path`: the default board is 20 MB of SVG (9 MB at
   400x200 pt, 16 MB without a board) and 5 MB of PDF. Every grain mark is a
   path, so neither fits inline.
@@ -72,6 +76,6 @@ Expected output: one PNG, white chalk on slate. A miss is a
 
 **Not done**
 - `render_postscript` and `handwrite` have no pixel cap below the
-  interpreter's 8000 px a side (64 Mpx, over 1 GB). Proposed as a follow-up.
+  interpreter's 8000 px a side (64 Mpx). Proposed as a follow-up.
 - `plugin/README.md` still lists four tools. Left for #686, which rewords
   that file.
