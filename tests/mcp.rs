@@ -734,19 +734,21 @@ fn out_path_is_off_when_started_in_the_filesystem_root() {
 
 #[test]
 fn a_runaway_program_is_stopped_by_the_interpreter_with_a_structured_error() {
-    // Issue #604: the interpreter's own limits stop `{ } loop` well inside the
+    // Issue #604: the interpreter's own limits stop `{ } loop` inside the
     // server's timeout, with a `limit_exceeded` error naming the limit, not
     // the `timeout` kill. (The test asserts the error, not the elapsed time.)
-    let mut s = Server::start_in(&common::scratch_dir("mcp-limit"), &["--timeout", "2"]);
+    // A low step cap and a long timeout make the step limit trip first and
+    // deterministically; the clock has its own test below.
+    let mut s = Server::start_in(
+        &common::scratch_dir("mcp-limit"),
+        &["--timeout", "30", "--max-steps", "1000000"],
+    );
     initialized(&mut s);
     let result = s.tool("eval_postscript", json!({ "source": "{ } loop" }));
     assert_eq!(error_kind(&result), "limit_exceeded", "{result}");
     let err = &result["structuredContent"]["error"];
     assert_eq!(err["ps_error"], "limitexceeded");
-    assert!(
-        matches!(err["limit"].as_str(), Some("time" | "steps")),
-        "the limit is named: {err}"
-    );
+    assert_eq!(err["limit"], "steps", "the limit is named: {err}");
     // `stopped` cannot swallow it.
     let result = s.tool(
         "eval_postscript",
@@ -790,13 +792,20 @@ fn step_and_memory_limits_are_server_flags() {
         json!({ "source": "1 1 1000 { pop } for (ok) =" }),
     );
     assert_eq!(result["isError"], false, "{result}");
-    // 0 turns a limit off.
+}
+
+#[test]
+fn zero_turns_a_limit_off_and_the_clock_still_stops_the_program() {
+    // `--timeout 6` gives the child 4.5 s (a quarter, at most 5 s, is kept
+    // back for the child's start and exit), a margin wide enough for a loaded
+    // CI runner. Only the clock is left once the other two are off.
     let mut s = Server::start_in(
         &common::scratch_dir("mcp-limit-off"),
-        &["--max-steps", "0", "--max-memory", "0", "--timeout", "1"],
+        &["--max-steps", "0", "--max-memory", "0", "--timeout", "6"],
     );
     initialized(&mut s);
     let result = s.tool("eval_postscript", json!({ "source": "{ 1 pop } loop" }));
+    assert_eq!(error_kind(&result), "limit_exceeded", "{result}");
     assert_eq!(
         result["structuredContent"]["error"]["limit"], "time",
         "only the clock is left: {result}"

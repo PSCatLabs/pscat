@@ -143,7 +143,7 @@ Fixed by whoever registers the server; no tool argument can change them.
 
 | Option | Default | What it bounds |
 |---|---|---|
-| `--timeout SECS` | 60 | Wall-clock time per tool call. The interpreter stops a program at three quarters of it (`limit_exceeded`, `limit: "time"`, and a render keeps the partial page); the child is killed at the full time, for a program stuck inside one long operator, and the call fails with `timeout`. |
+| `--timeout SECS` | 60 | Wall-clock time per tool call. The interpreter stops a program a margin before it (a quarter of it, at most 5 s: 55 s by default; `limit_exceeded`, `limit: "time"`, and a render keeps the partial page); the child is killed at the full time, for a program stuck inside one long operator, and the call fails with `timeout`. |
 | `--max-steps N` | 25000000000 | Interpreter steps per program (objects executed, plus loop iterations). Past it the interpreter stops and the call fails with `limit_exceeded`, `limit: "steps"`. `0` = off. |
 | `--max-memory MIB` | 1024 | Heap the program may grow by, in MiB (`limit_exceeded`, `limit: "memory"`). `0` = off. |
 | `--max-input-bytes N` | 1048576 | `source` / `text` size (`input_too_large`). |

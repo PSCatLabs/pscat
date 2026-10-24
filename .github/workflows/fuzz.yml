@@ -64,10 +64,14 @@ jobs:
           # The working corpus is first (libFuzzer writes new inputs there);
           # the committed seeds are read-only extras. -timeout and
           # -rss_limit_mb turn a hang or a runaway allocation into a crash
-          # report instead of a stuck job.
+          # report instead of a stuck job. -detect_leaks=0: LeakSanitizer is
+          # on by default on Linux, and a PostScript program that puts a
+          # dictionary into itself builds an Rc cycle, which is a leak of the
+          # program's own making (the interpreter frees nothing in a cycle),
+          # not a memory-safety bug, so it must not count as a crash.
           cargo fuzz run "${{ matrix.target }}" \
             "fuzz/corpus/${{ matrix.target }}" "fuzz/seeds/${{ matrix.target }}" \
-            -- -max_total_time="$SECONDS_PER_TARGET" -timeout=10 -rss_limit_mb=2048
+            -- -max_total_time="$SECONDS_PER_TARGET" -timeout=10 -rss_limit_mb=2048 -detect_leaks=0
       - name: Upload crashing inputs
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

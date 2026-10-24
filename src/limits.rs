@@ -142,7 +142,7 @@ impl Limits {
 /// limit is raised.
 pub const UNTRUSTED_MAX_STEPS: u64 = 25_000_000_000;
 /// Wall-clock time in [`Limits::untrusted`].
-pub const UNTRUSTED_MAX_TIME: Duration = Duration::from_secs(45);
+pub const UNTRUSTED_MAX_TIME: Duration = Duration::from_secs(55);
 /// Heap growth in [`Limits::untrusted`]: 1 GiB.
 pub const UNTRUSTED_MAX_MEMORY: usize = 1 << 30;
 

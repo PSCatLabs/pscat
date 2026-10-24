@@ -148,7 +148,7 @@ output is cut off at 64 KiB.
 | Canvas size | at most 8000 x 8000 device pixels (about 256 MB), `--page` 1..8000 points, `--dpi` 9..1200 | `src/main.rs`, `src/interp.rs` |
 | Captured output (browser, `capture_stdout`) | 64 KiB | `src/interp.rs` |
 | Interpreter steps per program (opt in: `--max-steps N`, `Limits::max_steps`) | none by default; MCP 25,000,000,000 | `src/interp.rs` |
-| Wall-clock time per program (opt in: `--max-time SECS`, `Limits::max_time`) | none by default; MCP three quarters of `--timeout` (45 s) | `src/interp.rs` |
+| Wall-clock time per program (opt in: `--max-time SECS`, `Limits::max_time`) | none by default; MCP `--timeout` less a quarter, at most 5 s (55 s) | `src/interp.rs` |
 | Heap growth per run (opt in: `--max-memory MIB`, `Limits::max_memory`) | none by default; MCP 1024 MiB | `src/interp.rs`, `src/memtrack.rs` |
 
 A tail call such as `/f { f } def f` does not grow the execution stack, so the
@@ -166,10 +166,10 @@ command line and in the library, and on by default in the MCP server:
   defaults the clock stops a runaway first; the step cap is the bound that
   does not depend on machine speed.
 - **Time.** `--max-time SECS`, or `Limits::max_time`. Measured from the start
-  of the program on the real clock. The MCP server passes three quarters of
-  its `--timeout` (45 s of the default 60 s), so the interpreter stops first
-  and the render keeps its partial page; the server kills the child at the
-  full `--timeout`.
+  of the program on the real clock. The MCP server passes its `--timeout` less a
+  quarter of it, at most 5 s (55 s of the default 60 s), so the interpreter
+  stops first and the render keeps its partial page; the server kills the
+  child at the full `--timeout`.
 - **Memory.** `--max-memory MIB`, or `Limits::max_memory`. Counts **heap
   bytes the process has gained** since the limit was set, from a counting
   global allocator (`pscat::TrackingAllocator`, installed by the `pscat`
@@ -257,7 +257,12 @@ harness turned up one panic, now fixed and kept as a regression input:
 `9223372036854775807 packedarray` aborted with `capacity overflow`. A
 first local run of each target (one and a half minutes for `interp`,
 a minute for `lexer`, 600,000 inputs for the lexer) found nothing more; that
-is a smoke test, not a clean bill.
+is a smoke test, not a clean bill. Two things the fuzzing does not report on
+purpose: leaks (a program that puts a dictionary into itself builds a
+reference cycle that is never freed; LeakSanitizer is switched off, and that
+is the program's own doing, not memory unsafety) and the unbounded whole-file
+read above, which a mutated `file` path could reach and the harness does not
+fence off.
 
 What is **not** fuzzed yet: the Type 1 and TrueType font loaders, the image
 decoders (JPEG, Flate, LZW and the rest) other than as the interpreter
@@ -318,7 +323,7 @@ an installed build (October 2026, #568).
 - **Every call is bounded in time and memory held by the server.** The
   interpreter's own limits are on in the child (#604): a step limit
   (`--max-steps`, default 25 billion), a heap-growth limit (`--max-memory`
-  in MiB, default 1024) and a time limit of three quarters of `--timeout`;
+  in MiB, default 1024) and a time limit of `--timeout` less a margin (a quarter, at most 5 s);
   past one the call fails with `limit_exceeded` and a `limit` field
   (`steps`, `time` or `memory`), and `render_postscript` still returns the
   partial page. `0` turns the step or memory limit off. A wall-clock limit per

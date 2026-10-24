@@ -94,12 +94,15 @@ struct Config {
 
 impl Config {
     /// The flags that put the interpreter's own limits on a child run. The
-    /// time limit is three quarters of `--timeout`: the interpreter stops
-    /// first, with a structured `limit_exceeded` error and the partial page,
-    /// and the hard kill at `--timeout` is only the backstop for a child
-    /// stuck inside one long operator.
+    /// time limit is `--timeout` less a margin of a quarter of it, at most
+    /// 5 s (55 s of the default 60): the interpreter stops first, with a
+    /// structured `limit_exceeded` error and the partial page, and the hard
+    /// kill at `--timeout` is only the backstop for a child stuck inside one
+    /// long operator. The margin pays for starting the child, writing the
+    /// canvas and the lint pass after the limit fires.
     fn interpreter_args(&self, cmd: &mut Command) {
-        let secs = self.timeout.as_secs_f64() * 0.75;
+        let total = self.timeout.as_secs_f64();
+        let secs = total - (total / 4.0).min(5.0);
         cmd.arg("--max-time").arg(format!("{secs:.3}"));
         cmd.arg("--max-steps").arg(self.max_steps.to_string());
         cmd.arg("--max-memory").arg(self.max_memory_mib.to_string());
