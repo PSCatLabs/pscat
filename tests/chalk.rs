@@ -254,6 +254,11 @@ fn unsupported_input_fails_with_the_named_error() {
             "unclosed_math_delimiter",
         ),
         (
+            r"a \left\( b \right\)",
+            "unsupported delimiter: \\(",
+            "unsupported_delimiter",
+        ),
+        (
             r"1 + 2\)",
             r"math delimiter \) closes nothing",
             "unmatched_math_delimiter",

@@ -739,14 +739,48 @@ fn delim_error(kind: &str, token: &str) -> ChalkError {
     }
 }
 
-/// Whether `t` has an unescaped `\(`, `\)`, `\[` or `\]`: never valid
-/// mathkit input, so always a delimiter. (`\\(` is a row break and `(`.)
+/// `\left`, `\right` and the `\big` family name a fence, so a `\(` or `\]`
+/// right after one is a (mathkit-unsupported) delimiter, not a math pair.
+fn is_fence(word: &str) -> bool {
+    matches!(word, "left" | "right")
+}
+
+/// The length of the control word (`\alpha`) or backslash-and-one-character
+/// (`\\`, `\$`, `\(`) at the start of `rest`, which begins with a backslash.
+fn escape_len(rest: &str) -> usize {
+    let word = rest[1..]
+        .chars()
+        .take_while(char::is_ascii_alphabetic)
+        .count();
+    if word > 0 {
+        1 + word
+    } else {
+        1 + rest[1..].chars().next().map_or(0, char::len_utf8)
+    }
+}
+
+/// Whether `t` has an unescaped `\(`, `\)`, `\[` or `\]` that is not
+/// right after `\left` or `\right`: never valid mathkit input, so always a
+/// delimiter. (`\\(` is a row break and `(`.)
 fn has_backslash_delim(t: &str) -> bool {
-    let mut it = t.chars();
-    while let Some(c) = it.next() {
-        if c == '\\' && matches!(it.next(), Some('(' | ')' | '[' | ']')) {
+    let mut rest = t;
+    let mut after_fence = false;
+    while let Some(c) = rest.chars().next() {
+        if c != '\\' {
+            after_fence &= c == ' ';
+            rest = &rest[c.len_utf8()..];
+            continue;
+        }
+        if !after_fence
+            && ["\\(", "\\)", "\\[", "\\]"]
+                .iter()
+                .any(|d| rest.starts_with(d))
+        {
             return true;
         }
+        let len = escape_len(rest);
+        after_fence = is_fence(&rest[1..len]);
+        rest = &rest[len..];
     }
     false
 }
@@ -755,11 +789,12 @@ fn has_backslash_delim(t: &str) -> bool {
 /// `\(..\)`, one or several pairs, nested or side by side) replaced by
 /// spaces; `None` when it has none to remove. Each backslash is paired with
 /// the character after it, so `\\(`, `\$` and `\right)` are not
-/// delimiters. A `$` in the middle of plain input is left to mathkit, which
+/// delimiters, nor is a `\(` right after `\left` (mathkit names that one).
+/// A `$` in the middle of plain input is left to mathkit, which
 /// ignores it: the scan starts only for input that begins with `$` or holds a
 /// backslash delimiter. Pieces between pairs are joined (`\(a\) + \(b\)` is
-/// `a + b`), but letters outside any pair are an error: TeX sets them as
-/// text, which a board does not.
+/// `a + b`), but a letter outside any pair and any `{...}` group is an
+/// error: TeX sets it as text, which a board does not (`\text{and}` is fine).
 fn unwrap_math(t: &str) -> Result<Option<String>, ChalkError> {
     if !t.starts_with('$') && !has_backslash_delim(t) {
         return Ok(None);
@@ -767,8 +802,31 @@ fn unwrap_math(t: &str) -> Result<Option<String>, ChalkError> {
     let mut out = String::with_capacity(t.len());
     // the open pairs, innermost last, as `MATH_DELIMS` indexes
     let mut open: Vec<usize> = Vec::new();
+    // the depth of `{` groups outside every pair
+    let mut braces = 0usize;
+    let mut after_fence = false;
     let mut rest = t;
     while let Some(c) = rest.chars().next() {
+        let fenced = after_fence;
+        after_fence &= c == ' ';
+        if c == '\\' {
+            // a control word or a backslash and one character; a delimiter
+            // unless right after `\left`/`\right`
+            let len = escape_len(rest);
+            let word = &rest[..len];
+            if !fenced
+                && matches!(word, "\\)" | "\\]")
+                && open.last().is_none_or(|&i| MATH_DELIMS[i].1 != word)
+            {
+                return Err(delim_error("unmatched-math-delimiter", word));
+            }
+            if fenced || !matches!(word, "\\(" | "\\[" | "\\)" | "\\]") {
+                after_fence = is_fence(&word[1..]);
+                out.push_str(word);
+                rest = &rest[len..];
+                continue;
+            }
+        }
         let closes = open
             .last()
             .map(|&i| MATH_DELIMS[i].1)
@@ -785,27 +843,15 @@ fn unwrap_math(t: &str) -> Result<Option<String>, ChalkError> {
             rest = &rest[MATH_DELIMS[i].0.len()..];
             continue;
         }
-        // a `\)` or `\]` that closes nothing, or not the innermost pair
-        if rest.starts_with("\\)") || rest.starts_with("\\]") {
-            return Err(delim_error("unmatched-math-delimiter", &rest[..2]));
-        }
-        if c == '\\' {
-            // a control word or a backslash and one character, kept whole
-            let word = rest[1..]
-                .chars()
-                .take_while(char::is_ascii_alphabetic)
-                .count();
-            let len = if word > 0 {
-                1 + word
-            } else {
-                1 + rest[1..].chars().next().map_or(0, char::len_utf8)
-            };
-            out.push_str(&rest[..len]);
-            rest = &rest[len..];
-            continue;
-        }
-        if open.is_empty() && c.is_alphabetic() {
-            return Err(delim_error("text-outside-math", &rest[..c.len_utf8()]));
+        if open.is_empty() {
+            match c {
+                '{' => braces += 1,
+                '}' => braces = braces.saturating_sub(1),
+                _ if braces == 0 && c.is_ascii_alphabetic() => {
+                    return Err(delim_error("text-outside-math", &rest[..1]));
+                }
+                _ => {}
+            }
         }
         out.push(c);
         rest = &rest[c.len_utf8()..];
@@ -1323,6 +1369,11 @@ mod tests {
         assert_eq!(e(r"\(a\]").code(), "unmatched_math_delimiter");
         assert_eq!(e(r"\(x\) where \(y\)").code(), "text_outside_math");
         assert!(msg(r"\(x\) where \(y\)").starts_with("text outside the math delimiters (w"));
+        // `\left\(` is mathkit's to name, not a pair; `\text{..}` outside a pair is fine
+        assert_eq!(l(r"\left\( b \right\)"), [r"\left\( b \right\)"]);
+        assert_eq!(l(r"a \left\( b"), [r"a \left\( b"]);
+        assert_eq!(l(r"\(a\) \text{and} \(b\)"), [r"a  \text{and}  b"]);
+        assert_eq!(l(r"\(x\) = α"), ["x  = α"]);
         // control words outside a pair are math, not text
         assert_eq!(l(r"\(a\) \quad \(b\)"), [r"a  \quad  b"]);
         assert_eq!(msg("$$a$$ $b").lines().count(), 1);
