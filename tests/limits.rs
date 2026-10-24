@@ -223,6 +223,25 @@ mod file_reads {
     }
 
     #[test]
+    fn a_read_costs_one_step_per_kib() {
+        let dir = common::scratch_dir("limits-kib");
+        let path = dir.join("f.bin");
+        std::fs::write(&path, vec![7u8; 300 * 1024]).unwrap();
+        let src = format!("({}) (r) file pop", ps(&path));
+
+        // The charge itself: 300 KiB is about 300 steps, plus the few objects
+        // of the program (not 5 steps, as a count per 64 KiB chunk would be).
+        let mut it = limited(steps(1_000_000));
+        it.run_str(&src).unwrap();
+        let used = it.steps_used();
+        assert!((300..=400).contains(&used), "steps used: {used}");
+
+        // And the cap: a 300 KiB file passes a 1000-step cap, fails a 100 one.
+        let mut it = limited(steps(100));
+        assert_eq!(it.run_str(&src), Err(PsError::StepsExceeded));
+    }
+
+    #[test]
     fn a_limit_in_a_read_cannot_be_caught() {
         let mut it = limited(steps(5_000));
         assert_eq!(

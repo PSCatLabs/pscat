@@ -629,10 +629,8 @@ impl Interp {
     /// step, so a step cap bounds a read too; `will_alloc` is heap the buffer
     /// is about to take, refused before it is made.
     #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) fn poll_read(&mut self, bytes: usize, will_alloc: usize) -> Result<(), PsError> {
-        self.steps_used = self
-            .steps_used
-            .saturating_add((bytes as u64).div_ceil(1024));
+    pub(crate) fn poll_read(&mut self, kib: usize, will_alloc: usize) -> Result<(), PsError> {
+        self.steps_used = self.steps_used.saturating_add(kib as u64);
         if let Some(max) = self.limits.max_steps
             && self.steps_used > max
         {
