@@ -462,6 +462,7 @@ impl Interp {
         self.limits = limits;
         self.mem_base = crate::memtrack::live_bytes();
         self.steps_used = 0;
+        self.poll_in = POLL_PERIOD;
         self.run_clock = crate::clock::Clock::start();
         Ok(())
     }
@@ -488,6 +489,7 @@ impl Interp {
         self.last_line = None;
         if !self.limits.is_none() {
             self.steps_used = 0;
+            self.poll_in = POLL_PERIOD;
             self.run_clock = crate::clock::Clock::start();
         }
         self.estack
@@ -544,13 +546,23 @@ impl Interp {
         Ok(n)
     }
 
-    /// After a slice under `Limits`: count its steps, and look at the clock
-    /// and the heap again, so a program that passes the time or memory cap in
-    /// its last slice is reported too, not let through as a clean run.
+    /// After a slice under `Limits`: count the loop iterations `tick` has not
+    /// charged yet, so a program that finishes inside a poll period is held
+    /// to the step cap too; add the slice's steps; and look at the clock and
+    /// the heap again, so a program that passes the time or memory cap in its
+    /// last slice is reported, not let through as a clean run.
     #[cold]
     #[inline(never)]
     fn after_slice(&mut self, result: Result<bool, PsError>, n: usize) -> Result<bool, PsError> {
         let more = result?;
+        let pending = u64::from(POLL_PERIOD - self.poll_in);
+        self.poll_in = POLL_PERIOD;
+        self.steps_used = self.steps_used.saturating_add(pending);
+        if let Some(max) = self.limits.max_steps
+            && self.steps_used > max
+        {
+            return Err(PsError::StepsExceeded);
+        }
         if more {
             self.steps_used = self.steps_used.saturating_add(n as u64);
         }

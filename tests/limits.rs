@@ -151,3 +151,16 @@ fn a_step_limit_of_u64_max_is_just_no_practical_limit() {
     let mut it = limited(steps(u64::MAX));
     it.run_str("1 1 10000 { pop } for").unwrap();
 }
+
+#[test]
+fn a_program_that_finishes_inside_a_poll_period_is_still_held_to_the_cap() {
+    // 1000 empty iterations is fewer than one poll period of the loop counter
+    // and ends in the first slice; it must still pass a cap of 10 (Codex
+    // review of #604, round 2). A cap that fits it is fine.
+    let mut it = limited(steps(10));
+    assert_eq!(it.run_str("1000 { } repeat"), Err(PsError::StepsExceeded));
+    let mut it = limited(steps(5_000));
+    it.run_str("1000 { } repeat").unwrap();
+    let mut it = limited(steps(10));
+    it.run_str("1 2 add pop").unwrap();
+}
