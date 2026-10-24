@@ -17,7 +17,7 @@ and both work against an **installed** pscat (no checkout needed):
   the copy compiled into `pscat`. [`AGENTS.md`](../../AGENTS.md) points
   Codex at the pscat skill.
 - **MCP**: `pscat-mcp`, installed beside `pscat`, an MCP server over stdio
-  with four tools (below).
+  with five tools (below).
 
 In Claude Code the easiest route is the **plugin**, which installs the three
 skills and registers `pscat-mcp` in one step (install pscat first; the plugin
@@ -62,7 +62,8 @@ sessions in a checkout still load them.
 | Typed letter or memo | `render_postscript` with `tw-type` | `pscat typewrite` | pscat: Typewritten pages |
 | "Released" / declassified document look | `render_postscript` with `rel-page` | — | pscat: Typewritten pages |
 | Chart or plot for a paper | `render_postscript` | `pscat --png` | psviz |
-| Formula on a chalkboard | `render_postscript` with `mkpath` + `dcchalk` | — | psart: references/board-math.md, references/dry-media.md |
+| Formula or equation on a chalkboard (LaTeX in) | `chalkboard_math` | `pscat chalk` | pscat: LaTeX on a chalkboard |
+| Chalk formula inside a larger picture | `render_postscript` with `mkpath` + `dcchalk` | — | psart: references/board-math.md, references/dry-media.md |
 | Generative art (turtle, L-systems, scatter, tiling, fractals) | `render_postscript` | `pscat --png` | psart: The toolkit |
 | Painting (oil, knife, watercolor, wet-on-wet, landscapes) | `render_postscript` | — | psart: references/paint.md |
 | Chalk, crayon, charcoal drawing | `render_postscript` | — | psart: references/dry-media.md |
@@ -72,12 +73,13 @@ sessions in a checkout still load them.
 | Style packs (steampunk, psychedelic, sci-fi, toon), Type 3 faces | `render_postscript` | — | psart: references/styles-and-type.md |
 | Korean, Japanese, Thai text | `render_postscript` (needs the font catalog) | — | pscat: Fonts |
 | What fonts, palettes, templates, procedures exist | `describe_art_capabilities` | `pscat --capabilities`, `--fonts` | pscat: Capabilities |
-| LaTeX → chalkboard, PDF retype | planned (#555, #559, #560) | — | — |
+| PDF retype | planned (#559, #560) | — | — |
 
-Task-level MCP tools (a one-call typewriter or chart, say) are deliberately
-not added yet: `render_postscript` with the skill's snippet does each job,
-and a dedicated tool is only worth it where an eval shows agents doing
-clearly better with it (#623).
+Task-level MCP tools are added only where agents clearly do better with
+one than with `render_postscript` plus the skill's snippet (#623).
+`chalkboard_math` is the first: LaTeX in, one call, instead of a PostScript
+program with every backslash doubled. A one-call typewriter or chart is not
+added yet.
 
 ## The MCP server
 
@@ -88,6 +90,16 @@ clearly better with it (#623).
   (a blank page, an unbalanced `gsave`, stuff left on the stack).
 - `handwrite` — text in, handwritten-note PNG back (the `pscat handwrite`
   options: size, width, paper, ink, jitter, seed, dpi).
+- `chalkboard_math` — a LaTeX formula in (single backslashes, `\\` rows,
+  `&` alignment), a chalkboard PNG back: the `pscat chalk` board (#555), with
+  its config keys as optional arguments (`size`, `irregular`, `slope`,
+  `jitter`, `align`, `color`, `board` or `false` for a transparent page,
+  `ghosting`, `seed`, `width`/`height`, `dpi`, `format`, and `config` for the
+  full `--json` schema). Same input and seed, the same bytes. A command
+  outside mathkit's subset is a one-line `latex_error` naming it (`code`
+  `unsupported_command`, `token` `\oplus`). The input is LaTeX, never
+  PostScript. `latex` is capped at 4096 bytes and the board at 40 million
+  pixels (see the limits below); svg and pdf go to `out_path` only.
 - `describe_art_capabilities` — the machine-readable catalog of what this
   build has: fonts, Type 3 faces, palettes, page templates, procedures
   (`--capabilities` on the CLI; see
@@ -108,8 +120,9 @@ fields are set on every tool:
 | `eval_postscript` | true | false | true | false |
 | `render_postscript` | false | false | true | false |
 | `handwrite` | false | false | true | false |
+| `chalkboard_math` | false | false | true | false |
 
-The hints are static per tool, so the two render tools take the conservative
+The hints are static per tool, so the three render tools take the conservative
 value: they write a file only when `out_path` is given, but without a way to
 say "read-only unless this argument is set" they are marked `readOnlyHint:
 false`. They are not destructive: `out_path` is confined to the output root and
@@ -151,8 +164,15 @@ Fixed by whoever registers the server; no tool argument can change them.
 | `--max-image-bytes N` | 3750000 | Inline image bytes per call, about 5 MB once base64-encoded; also at most 20 pages inline (`output_too_large`; a file asked for with `out_path` is still written). |
 | `--out-root DIR` | the working directory | Where `out_path` may write. Off when the server starts in `/`. |
 
+`chalkboard_math` has two fixed caps of its own, checked before anything
+runs: `latex` at most 4096 bytes (`input_too_large`; about 40 rows, four
+times a long derivation; the time limit stops anything slower), and the
+board at most 40,000,000 device pixels and 8000 a side (`output_too_large`
+with `limit_pixels`; an 8K screen or an A2 poster at 300 dpi fits). Both are
+in `SECURITY.md`.
+
 The three interpreter limits (steps, time, memory) are on by default for
-`render_postscript` and `eval_postscript`; a program cannot catch them with
+`render_postscript`, `eval_postscript` and `chalkboard_math`; a program cannot catch them with
 `stopped`. They are read between interpreter steps, so one operator that runs
 for a long time (an enormous fill, a read of a device file) is outside them;
 `SECURITY.md` lists what each limit can and cannot stop. `handwrite` runs

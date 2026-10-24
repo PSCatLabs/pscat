@@ -203,6 +203,7 @@ fn handshake_and_tool_list() {
         [
             "render_postscript",
             "handwrite",
+            "chalkboard_math",
             "describe_art_capabilities",
             "eval_postscript"
         ],
@@ -226,6 +227,7 @@ fn every_tool_has_annotations() {
     let expected = [
         ("render_postscript", false),
         ("handwrite", false),
+        ("chalkboard_math", false),
         ("describe_art_capabilities", true),
         ("eval_postscript", true),
     ];
@@ -268,7 +270,7 @@ fn pscat_mcp_subcommand_is_the_same_server() {
     let mut s = Server::start_subcommand();
     initialized(&mut s);
     let resp = s.call(json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }));
-    assert_eq!(resp["result"]["tools"].as_array().expect("tools").len(), 4);
+    assert_eq!(resp["result"]["tools"].as_array().expect("tools").len(), 5);
     // A tool call works too: the subcommand finds pscat (itself) to shell out to.
     let result = s.tool("eval_postscript", json!({ "source": "(hi) =" }));
     assert_eq!(result["isError"], false, "{result}");
@@ -1127,4 +1129,167 @@ fn version_flag_prints_the_crate_version_and_exits_without_serving() {
         assert_eq!(String::from_utf8_lossy(&out.stdout), want, "{flag}");
         assert!(out.stderr.is_empty(), "{flag} stderr: {:?}", out.stderr);
     }
+}
+
+// --- chalkboard_math (#688) ----------------------------------------------------
+
+/// FNV-1a, as `tests/chalk.rs` pins its boards: a hash of the pixels, not of
+/// the PNG bytes, so an encoder change does not move it.
+fn fnv1a(data: &[u8]) -> u64 {
+    data.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, &b| {
+        (h ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3)
+    })
+}
+
+const QUADRATIC: &str = r"x = \frac{-b \pm \sqrt{b^2-4ac}}{2a}";
+
+/// `tests/chalk.rs`'s small board, as flat tool arguments.
+fn small_board(latex: &str) -> Value {
+    json!({ "latex": latex, "width": 400, "height": 200, "dpi": 72, "size": 40, "seed": 1 })
+}
+
+/// The quadratic formula at seed 1 comes back as the same board the library
+/// and `pscat chalk` draw (`tests/chalk.rs` pins the same hash), from a
+/// server whose working directory is not a checkout, and twice the same.
+#[test]
+fn chalkboard_math_draws_the_pinned_board() {
+    let root = common::scratch_dir("mcp-chalk");
+    let mut s = Server::start_in(&root, &[]);
+    initialized(&mut s);
+    let mut args = small_board(QUADRATIC);
+    args["out_path"] = json!("q1.png");
+    let result = s.tool("chalkboard_math", args.clone());
+    assert_eq!(result["isError"], false, "{result}");
+    assert_eq!(result["content"][0]["type"], "image");
+    assert_eq!(result["content"][0]["mimeType"], "image/png");
+    assert!(texts(&result)[0].contains("q1.png"), "{result}");
+    args["out_path"] = json!("q2.png");
+    assert_eq!(s.tool("chalkboard_math", args)["isError"], false);
+
+    let png = std::fs::read(root.join("q1.png")).unwrap();
+    assert_eq!(
+        png,
+        std::fs::read(root.join("q2.png")).unwrap(),
+        "same seed"
+    );
+    let pm = tiny_skia::Pixmap::decode_png(&png).expect("decode");
+    assert_eq!((pm.width(), pm.height()), (400, 200));
+    assert_eq!(fnv1a(pm.data()), 0xba9ec8c0d6b5ce8b, "the board moved");
+    let cfg = pscat::chalk::Config::from_json(
+        r#"{"layout": {"width": 400, "height": 200, "dpi": 72, "size": 40}, "seed": 1}"#,
+    )
+    .unwrap();
+    let lib = pscat::chalk::render(QUADRATIC, &cfg, pscat::chalk::Format::Png).unwrap();
+    assert_eq!(png, lib, "the tool draws exactly what the library does");
+}
+
+/// No board: chalk alone on a transparent page; `config` carries the keys
+/// that have no flat argument.
+#[test]
+fn chalkboard_math_without_a_board_is_transparent() {
+    let root = common::scratch_dir("mcp-chalk-clear");
+    let mut s = Server::start_in(&root, &[]);
+    initialized(&mut s);
+    let mut args = small_board("x^2");
+    args["board"] = json!(false);
+    args["config"] = json!({ "chalk": { "dust": 0 } });
+    args["out_path"] = json!("clear.png");
+    let result = s.tool("chalkboard_math", args);
+    assert_eq!(result["isError"], false, "{result}");
+    let pm = tiny_skia::Pixmap::decode_png(&std::fs::read(root.join("clear.png")).unwrap())
+        .expect("decode");
+    assert_eq!(pm.pixel(0, 0).unwrap().alpha(), 0, "a transparent corner");
+    assert!(pm.pixels().iter().any(|p| p.alpha() > 0), "some chalk");
+}
+
+#[test]
+fn chalkboard_math_errors_are_one_line_and_structured() {
+    let mut s = Server::start();
+    initialized(&mut s);
+    // TeX outside mathkit's subset: the command, named, in one line.
+    let result = s.tool("chalkboard_math", small_board(r"a \oplus b"));
+    assert_eq!(error_kind(&result), "latex_error", "{result}");
+    let err = &result["structuredContent"]["error"];
+    assert_eq!(err["code"], "unsupported_command");
+    assert_eq!(err["token"], r"\oplus");
+    let text = &texts(&result)[0];
+    assert!(
+        text.starts_with(r"unsupported LaTeX command \oplus"),
+        "{text}"
+    );
+    assert!(!text.contains('\n') && !text.contains("%%["), "{text}");
+    assert_eq!(result["content"].as_array().unwrap().len(), 1, "no image");
+
+    // A multi-byte character survives the trip through the child's report.
+    let result = s.tool("chalkboard_math", small_board("x = \u{2603}"));
+    assert_eq!(error_kind(&result), "latex_error", "{result}");
+    assert_eq!(result["structuredContent"]["error"]["token"], "\u{2603}");
+    assert!(texts(&result)[0].ends_with("(U+2603)"), "{result}");
+
+    let result = s.tool("chalkboard_math", json!({ "latex": "% nothing" }));
+    assert_eq!(error_kind(&result), "latex_error");
+    assert_eq!(result["structuredContent"]["error"]["code"], "empty");
+
+    // The caps (#688): checked before anything renders.
+    let result = s.tool("chalkboard_math", json!({ "latex": "x+".repeat(3000) }));
+    assert_eq!(error_kind(&result), "input_too_large", "{result}");
+    assert_eq!(result["structuredContent"]["error"]["limit"], 4096);
+    for (w, h, dpi) in [(8000, 8000, 72), (1920, 1200, 301), (8000, 100, 144)] {
+        let args = json!({ "latex": "x", "width": w, "height": h, "dpi": dpi });
+        let result = s.tool("chalkboard_math", args);
+        assert_eq!(error_kind(&result), "output_too_large", "{w}x{h}@{dpi}");
+        assert_eq!(
+            result["structuredContent"]["error"]["limit_pixels"],
+            40_000_000
+        );
+    }
+
+    // Bad arguments name the key the caller sent.
+    for (args, says) in [
+        (json!({ "latex": "x", "size": 0 }), "size must be"),
+        (
+            json!({ "latex": "x", "color": "mauve" }),
+            "color must be one of",
+        ),
+        (json!({ "latex": "x", "board": "chalk" }), "board must be"),
+        (json!({ "latex": "x", "board": 3 }), "board must be"),
+        (json!({ "latex": "x", "seed": 1.5 }), "seed must be"),
+        (
+            json!({ "latex": "x", "board": false, "ghosting": 0.3 }),
+            "ghosting needs a board",
+        ),
+        (
+            json!({ "latex": "x", "config": { "colour": "red" } }),
+            "unknown key colour",
+        ),
+        (
+            json!({ "latex": "x", "config": [] }),
+            "config must be an object",
+        ),
+        (json!({ "latex": "x", "format": "svg" }), "needs out_path"),
+        (json!({ "latex": "x", "format": "gif" }), "format must be"),
+        (
+            json!({ "latex": "x", "width": 60, "config": { "layout": { "margin": 40 } } }),
+            "no room",
+        ),
+        (json!({ "latex": 7 }), "latex must be a string"),
+    ] {
+        let result = s.tool("chalkboard_math", args.clone());
+        assert_eq!(error_kind(&result), "invalid_argument", "{args}: {result}");
+        assert!(texts(&result)[0].contains(says), "{args}: {result}");
+    }
+    s.ping_ok();
+}
+
+/// The board runs under the server's interpreter limits, as every render does.
+#[test]
+fn chalkboard_math_runs_under_the_interpreter_limits() {
+    let mut s = Server::start_in(
+        &common::scratch_dir("mcp-chalk-lim"),
+        &["--max-steps", "100000"],
+    );
+    initialized(&mut s);
+    let result = s.tool("chalkboard_math", small_board(QUADRATIC));
+    assert_eq!(error_kind(&result), "limit_exceeded", "{result}");
+    assert_eq!(result["structuredContent"]["error"]["limit"], "steps");
 }

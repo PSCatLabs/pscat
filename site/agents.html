@@ -33,7 +33,7 @@ cargo build --release      # → target/release/pscat and target/release/pscat-m
   <p><code>skills/psviz/SKILL.md</code> is the paper-viz companion to <code>pscat</code>/<code>psart</code>: it teaches agents to reach for <code>lib/graph.ps</code> (plotfn/plotparam/plotpolar/plotsurface) and <code>lib/dataviz.ps</code> (bar/line/area/scatter/pie) for documents, with calling conventions and copy-paste templates — so a “make me a chart for my paper” request goes straight to a clean figure instead of the generative-art loop. The interactive counterpart lives at <a href="charts.html">Charts</a>.</p>
 
   <h2>Surface 2 — the MCP server</h2>
-  <p><code>pscat-mcp</code> speaks MCP over stdio and exposes four
+  <p><code>pscat-mcp</code> speaks MCP over stdio and exposes five
   tools. It shells out to the pscat CLI (found next to it) rather
   than linking the interpreter — PostScript's <code>=</code> and
   <code>print</code> write to stdout, which is the JSON-RPC channel,
@@ -52,6 +52,13 @@ cargo build --release      # → target/release/pscat and target/release/pscat-m
         "r,g,b", jitter, seed, dpi, out_path</td>
         <td>a handwritten-note PNG — the /HandScript dynamic font,
         word-wrapped and auto-sized; same seed, same page</td></tr>
+    <tr><td><code>chalkboard_math</code></td>
+        <td>latex (single backslashes); optional size, irregular, slope,
+        jitter, align, color, board (or false), ghosting, seed,
+        width/height, dpi, format, config, out_path</td>
+        <td>a chalkboard PNG of the formula, the <code>pscat chalk</code>
+        board; same seed, same image. A command outside the TeX subset
+        comes back as a one-line error naming it</td></tr>
     <tr><td><code>describe_art_capabilities</code></td>
         <td>none</td>
         <td>structured JSON listing the fonts, Type 3 faces, palettes,

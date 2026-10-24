@@ -14,7 +14,7 @@ it is not, install it: a release from
 (installs `pscat` and `pscat-mcp`).
 
 If the **pscat MCP tools** are connected (`render_postscript`,
-`eval_postscript`, `handwrite`, `describe_art_capabilities`), they do the
+`eval_postscript`, `handwrite`, `chalkboard_math`, `describe_art_capabilities`), they do the
 same jobs with images returned inline; see "MCP" below.
 
 ## Render a file (the common case)
@@ -123,6 +123,13 @@ TeX outside mathkit's subset fails with one line naming it
 `"board": false`, `seed`); `pscat chalk --help` and the dry-media guide list
 every key. `--print-ps` prints the generated PostScript.
 
+With the MCP tools connected, use **`chalkboard_math`** for a chalkboard or
+an equation on a board: `{"latex": "x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}", "seed": 7}`
+(JSON escaping only; the LaTeX itself has single backslashes) returns the
+PNG inline. The same keys as flat arguments (`size`, `color`, `board` or
+`false`, `ghosting`, `width`/`height`, `dpi`, ...), `config` for the rest; a
+TeX error is a one-line `latex_error` naming the command.
+
 ## Typewritten pages (text → PNG/PDF)
 
 `-o` takes `.png`, `.svg` or `.pdf` (format by extension; anything else is an
@@ -224,11 +231,12 @@ whatever lands in `DIR`: only point it at a directory you trust.
 
 ## MCP
 
-`pscat-mcp` (installed beside `pscat`) serves four tools over stdio:
+`pscat-mcp` (installed beside `pscat`) serves five tools over stdio:
 `render_postscript` (source → PNG images inline, or SVG text, or a PDF
 written to `out_path`; adds a `Lint:` block when the page looks wrong),
 `eval_postscript` (what the program printed, or the error with the
-offending command and line), `handwrite`, and `describe_art_capabilities`.
+offending command and line), `handwrite`, `chalkboard_math` (LaTeX → a
+chalkboard PNG; above), and `describe_art_capabilities`.
 Each call has a time limit (default 60 s) and the interpreter stops a runaway
 program itself, with a `limit_exceeded` error whose `limit` field says `steps`,
 `time` or `memory` (a render still returns the partial page); `stopped` cannot

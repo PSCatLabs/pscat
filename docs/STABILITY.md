@@ -55,8 +55,9 @@ Tags are `v<version>`. Font packs ship separately on a calendar-versioned train
   described in a page of [`docs/guides/`](guides/README.md). Its name, its
   stack effect and its meaning are kept. A procedure marked `% @internal` in the
   library source, or in neither the catalog nor a guide, is Internal.
-- **MCP tool names and input schemas.** The four tools `render_postscript`,
-  `handwrite`, `describe_art_capabilities` and `eval_postscript`, their
+- **MCP tool names and input schemas.** The five tools `render_postscript`,
+  `handwrite`, `chalkboard_math`, `describe_art_capabilities` and
+  `eval_postscript`, their
   argument names, types and enumerations. A new optional argument or a new
   tool is not a break; renaming or removing one, or making an optional
   argument required, is.

@@ -293,10 +293,12 @@ use your shell's `ulimit`, a container's memory and CPU limits, or `timeout`.
 
 ### The MCP server (`pscat-mcp`)
 
-`pscat-mcp` serves four tools over stdio to whatever agent or client launched
-it: `render_postscript`, `handwrite`, `describe_art_capabilities` and
-`eval_postscript`. It runs each call as a child process (`pscat`, and
-`pscat handwrite` for `handwrite`) as the same user, with the same
+`pscat-mcp` serves five tools over stdio to whatever agent or client launched
+it: `render_postscript`, `handwrite`, `chalkboard_math`,
+`describe_art_capabilities` and `eval_postscript`. It runs each call as a
+child process (`pscat`, and `pscat handwrite` for `handwrite`; for
+`chalkboard_math` the server writes the PostScript itself and runs it in a
+`pscat` child) as the same user, with the same
 environment and working directory as the server. Checked with:
 `src/mcp_server.rs`, `tests/mcp.rs` (which tests every bound below),
 `scripts/mcp_inspector_check.sh`, and Claude Code and Codex sessions against
@@ -353,6 +355,36 @@ an installed build (October 2026, #568).
   still written. The child's heap growth is limited by `--max-memory`
   (default 1024 MiB); what that cannot see, such as a read of `/dev/zero`,
   grows until the timeout stops it (see "Limits that cannot be enforced").
+- **`chalkboard_math` takes LaTeX, never PostScript, and has two caps of its
+  own (#688).** The server turns the LaTeX into a program with the
+  `pscat::chalk` generator (#555), in-process and without file or
+  environment access: the TeX goes in as an escaped string literal and every
+  other value is checked and printed by Rust, so the input cannot add
+  PostScript. The program runs in a `pscat` child under the limits above,
+  like `render_postscript`. Checked before anything runs:
+  - `latex` is at most **4096 bytes** (`input_too_large`, with `limit` and
+    `size`), on top of `--max-input-bytes`. A ten-row derivation is about
+    1 KB; 4 KB (about 40 rows) rendered in 25 s on the machine it was
+    measured on with the default board, inside the default time limit. A
+    long formula on a large board can take longer; the time limit then stops
+    it with `limit_exceeded`.
+  - The board is at most **40,000,000 device pixels** (width and height in
+    points times dpi/72), and 8000 a side (`output_too_large`, with
+    `limit_pixels`, `pixels`, `width_px`, `height_px`). The interpreter
+    already refuses more than 8000 pixels a side (64 million), so this cap
+    bounds memory and render time with headroom rather than preventing an
+    out-of-memory: the canvas (4 bytes a pixel, 256 MB at 64 million) is
+    allocated before `--max-memory` starts counting; the rest of a board's
+    memory is counted. 40 million covers an 8K screen (7680 x
+    4320) or an A2 poster at 300 dpi; a 1920 x 1200 pt board at 300 dpi (40
+    million) peaked at 0.63 GB resident under the default limits, and a
+    36-million-pixel board took 8 s. A board that big is a PNG of several
+    MB, over the inline image cap: ask for it with `out_path`.
+  - SVG and PDF boards are written only to `out_path`: a board is tens of
+    thousands of grain marks, 9 to 20 MB of SVG, too big to return inline.
+  A TeX error comes back as `latex_error` with a stable `code`
+  (`unsupported_command`, `unsupported_character`, `missing_argument`, ...)
+  and the `token` it named, in one line, never a PostScript stack dump.
 - **One call at a time.** A runaway program delays later requests, `ping`
   included, until its limit or timeout stops it; there is no cancellation yet
   (#622).
@@ -368,7 +400,8 @@ an installed build (October 2026, #568).
   [the agents guide](docs/guides/agents.md#protocol).
 - **Page size is bounded** because the server checks `width` and `height`
   (1..8000) and `dpi` (9..1200), and the CLI refuses a canvas over 8000 x 8000
-  device pixels.
+  device pixels. `render_postscript` and `handwrite` have no smaller pixel
+  cap yet; `chalkboard_math` has one (above).
 - **`handwrite`'s options are validated before they reach PostScript.**
   `pscat handwrite` accepts only plain decimal numbers for the numeric
   options (and exactly three for `ink`), `plain` or `ruled` for `paper`, and
