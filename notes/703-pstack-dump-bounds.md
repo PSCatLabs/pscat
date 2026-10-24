@@ -31,3 +31,9 @@ by the dump. `repr()` and `==` are unchanged.
 **Not covered.** The `pstack`, `stack` and `==` operators (src/ops/misc.rs)
 still print unbounded. A program's own output can still trip MCP's
 `output_too_large`.
+
+**Evidence.** Identity check (two binaries, `--loader lib/artkit.ps`): 101 of
+101 page renders identical across 84 files, exit 0. It ran without a
+`--control`, since a stderr-only change has no render-visible key. The two
+binaries differ (cmp). `1000000 array foo` dumps 5,000,078 bytes on the base
+binary and 1,372 on the head binary.

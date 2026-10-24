@@ -1634,6 +1634,10 @@ renders eight examples in both and compares block-downsampled output).
   `pscat.js` exposes the buffer as `ps.output`, which the playground
   shows. A new printing operator must use it too, or its output vanishes
   in the browser.
+- **The `--pstack-on-error` CLI dump is bounded (#703)**: it goes through
+  `object::stack_repr_bounded` with `STACK_DUMP_LIMITS`. `repr()`, `==` and
+  the `pstack` operator stay unbounded, so a program's own output can still
+  hit MCP's 4 MiB cap.
 - **The npm package (`npm/`, #566) is that wasm build plus a JS API.**
   `scripts/build_npm.sh` runs `build_wasm.sh` and copies `web/pscat.js` in
   as `core.js`, so a change to the C ABI (`src/wasm.rs`) or to

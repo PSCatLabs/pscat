@@ -597,16 +597,13 @@ fn sweep_frame_error_honors_pstack_on_error() {
 fn pstack_dump_small_output_is_pinned() {
     let (ok, _out, stderr) = run(
         &["--headless", "--pstack-on-error", "-"],
-        "1 (a\n) /n [1 2 {3}] null 1 0 div",
+        "1 (a\n) /n [1 2 {3}] null mark << >> /add load 1 0 div",
     );
     assert!(!ok);
-    assert!(
-        stderr.starts_with("%%[ Error: undefinedresult; OffendingCommand: div;"),
-        "the error line comes first: {stderr}"
-    );
-    assert!(
-        stderr.ends_with("Operand stack (5): 1 (a\\n) /n [1 2 {3}] null\n"),
-        "exact small dump: {stderr}"
+    assert_eq!(
+        stderr,
+        "%%[ Error: undefinedresult; OffendingCommand: div; Line: 2 ]%%\n\
+         Operand stack (8): 1 (a\\n) /n [1 2 {3}] null -mark- -dict- --add--\n",
     );
 }
 
