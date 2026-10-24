@@ -31,7 +31,7 @@ the #683 logo sheet, both ways).
 the cells at most 40M pixels in all (before zoom), a cell at most 8000 px a side
 even enlarged, the sheet at most 40M pixels and 8000 a side, labels at most 200
 characters, all sources together at most `--max-input-bytes`. One time budget
-for the call: each child gets what is left of `--timeout`, and under one second
+for the call: each child gets what is left of `--timeout`, and under a tenth of a second
 left is a `timeout` error before the next spawn (never `--max-time 0`, which
 means no limit). The sheet is composed in the server (4 bytes a pixel, 160 MB at
 the cap), allocated before `--max-memory` counts.

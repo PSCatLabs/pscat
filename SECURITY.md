@@ -394,7 +394,7 @@ an installed build (October 2026, #568).
   the server only composes the finished pictures, in-process, with the
   `pscat::contact_sheet` layout and label code (pure drawing, no files). All
   the cells share the one `--timeout`: each child gets what is left of it,
-  and the call fails with `timeout` when under a second remains. A cell that
+  and the call fails with `timeout` when under a tenth of a second remains. A cell that
   stops at a limit is drawn as far as it got and named in the text beside the
   sheet. Caps, checked before any program runs, all `output_too_large`:
   - at most **32 cells** (`limit_cells`), each a child process;

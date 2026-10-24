@@ -1570,6 +1570,19 @@ fn review_sheet_has_one_time_budget_for_all_cells() {
     s.ping_ok();
 }
 
+/// `--timeout 1` is a supported value: a small sheet still draws, and the
+/// budget left for a cell is never rounded to "no limit".
+#[test]
+fn review_sheet_works_under_the_smallest_timeout() {
+    let mut s = Server::start_in(&common::scratch_dir("mcp-sheet-1s"), &["--timeout", "1"]);
+    initialized(&mut s);
+    let result = s.tool(
+        "review_sheet",
+        json!({ "entries": [{ "source": mark("0.8 0.2 0.1"), "label": "x" }], "width": 50, "height": 50 }),
+    );
+    assert_eq!(sheet_png(&result)[..4], [0x89, b'P', b'N', b'G']);
+}
+
 #[test]
 fn review_sheet_caps_are_structured_errors_before_anything_runs() {
     let mut s = Server::start();

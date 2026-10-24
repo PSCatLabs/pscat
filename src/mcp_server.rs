@@ -1228,6 +1228,12 @@ const MAX_SHEET_ZOOM: u32 = 16;
 const SHEET_LABEL_PX: u32 = 16;
 const SHEET_CAPTION_PX: u32 = 12;
 
+/// The least time worth giving a cell. Anything positive keeps the child's
+/// own `--max-time` from rounding to zero (which means no limit), and a
+/// `--timeout 1` server still draws a small sheet; under this the call stops
+/// with `timeout` instead of starting a cell it cannot finish.
+const MIN_CELL_BUDGET: Duration = Duration::from_millis(100);
+
 /// The longest error text kept per failed cell.
 const MAX_CELL_NOTE: usize = 2000;
 
@@ -1511,7 +1517,7 @@ fn review_sheet(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
         for (c, &(dpi, zoom)) in e.cells.iter().enumerate() {
             n += 1;
             let left = cfg.timeout.saturating_sub(started.elapsed());
-            if left < Duration::from_secs(1) {
+            if left < MIN_CELL_BUDGET {
                 return Err(sheet_timeout(cfg));
             }
             let budget = Config {
