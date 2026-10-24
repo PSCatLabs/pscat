@@ -485,13 +485,16 @@ fn run_headless(interp: &mut Interp, source: &[u8], options: &Options) -> bool {
 
 /// gs-style post-mortem: the operand stack, bottom to top, in `==`
 /// syntax — exactly what you want when a found file dies mid-run.
+/// Bounded (#703): a huge or deeply nested operand prints a `... truncated`
+/// marker, and the header keeps the true depth.
 fn print_pstack(interp: &Interp) {
     let stack = interp.operand_stack();
-    eprint!("Operand stack ({}):", stack.len());
-    for obj in stack {
-        eprint!(" {}", obj.repr());
+    let text = pscat::object::stack_repr_bounded(stack, &pscat::object::STACK_DUMP_LIMITS);
+    if text.is_empty() {
+        eprintln!("Operand stack ({}):", stack.len());
+    } else {
+        eprintln!("Operand stack ({}): {text}", stack.len());
     }
-    eprintln!();
 }
 
 /// Write the PNG(s) (if requested) even after an error — a partial
