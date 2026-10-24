@@ -625,9 +625,9 @@ impl Interp {
 
     /// The limits' look during a whole-file read (issue #702, `file::
     /// read_path_limited`), once per chunk and while waiting on a stalled
-    /// source. `bytes` just arrived (charged as one step per KiB, so a step
-    /// cap bounds a read too); `will_alloc` is heap the buffer is about to
-    /// take, refused before it is.
+    /// source. Each of the `kib` whole KiB read since the last look is one
+    /// step, so a step cap bounds a read too; `will_alloc` is heap the buffer
+    /// is about to take, refused before it is made.
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn poll_read(&mut self, bytes: usize, will_alloc: usize) -> Result<(), PsError> {
         self.steps_used = self

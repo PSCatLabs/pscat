@@ -69,8 +69,7 @@ fn read_resource_limited(it: &mut Interp, name: &str) -> Result<Vec<u8>, PsError
         if stopped.borrow().is_some() {
             return None;
         }
-        let mut poll =
-            |bytes: usize, will_alloc: usize| it.borrow_mut().poll_read(bytes, will_alloc);
+        let mut poll = |kib: usize, will_alloc: usize| it.borrow_mut().poll_read(kib, will_alloc);
         match crate::file::read_path_limited(path, &mut poll) {
             Ok(data) => data,
             Err(e) => {

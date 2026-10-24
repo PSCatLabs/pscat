@@ -693,8 +693,9 @@ const READ_CHUNK: usize = 64 * 1024;
 const READ_POLL: std::time::Duration = std::time::Duration::from_millis(10);
 
 /// The interpreter's look at its limits during a whole-file read
-/// (`Interp::poll_read`): the bytes that just arrived (0 while waiting) and
-/// the heap the buffer is about to take (0 for none).
+/// (`Interp::poll_read`): the whole KiB read since the last look (0 while
+/// waiting; see [`read_path_limited`]) and the heap the buffer is about to
+/// take (0 for none).
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) type ReadPoll<'a> = &'a mut dyn FnMut(usize, usize) -> Result<(), PsError>;
 
@@ -734,6 +735,16 @@ pub(crate) fn read_path_limited(
     let Ok(meta) = std::fs::metadata(path) else {
         return Ok(None);
     };
+    // Steps are charged per whole KiB read, however the source splits its
+    // reads: a pipe that returns one byte at a time costs the same as one
+    // that returns 64 KiB (the remainder under a KiB is never charged).
+    let mut carry = 0usize;
+    let mut kib = |n: usize| {
+        carry += n;
+        let k = carry / 1024;
+        carry %= 1024;
+        k
+    };
     let mut data: Vec<u8> = Vec::new();
     if meta.is_file() {
         let size = usize::try_from(meta.len()).unwrap_or(usize::MAX);
@@ -756,7 +767,7 @@ pub(crate) fn read_path_limited(
             let room = (data.capacity() - data.len()).min(READ_CHUNK);
             match f.by_ref().take(room as u64).read_to_end(&mut data) {
                 Ok(0) => return Ok(Some(data)),
-                Ok(n) => poll(n, 0)?,
+                Ok(n) => poll(kib(n), 0)?,
                 Err(_) => return Ok(None),
             }
         }
@@ -798,7 +809,7 @@ pub(crate) fn read_path_limited(
             Ok(Ok(chunk)) => {
                 make_room(&mut data, chunk.len(), poll)?;
                 data.extend_from_slice(&chunk);
-                poll(chunk.len(), 0)?;
+                poll(kib(chunk.len()), 0)?;
             }
             Ok(Err(_)) => return Ok(None),
             Err(RecvTimeoutError::Timeout) => poll(0, 0)?,
@@ -880,5 +891,36 @@ mod tests {
             enc.push(c);
         }
         assert_eq!(decrypt_charstring(&enc, 4), vec![13, 14]);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn limited_reads_charge_whole_kib_and_return_every_byte() {
+        let path = std::env::temp_dir().join(format!("pscat-file-kib-{}.bin", std::process::id()));
+        let body: Vec<u8> = (0..(3 * READ_CHUNK + 1500))
+            .map(|i| (i % 251) as u8)
+            .collect();
+        std::fs::write(&path, &body).unwrap();
+        let mut kib_total = 0usize;
+        let got = read_path_limited(&path, &mut |k, _| {
+            kib_total += k;
+            Ok(())
+        });
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(got, Ok(Some(body.clone())));
+        assert_eq!(kib_total, body.len() / 1024, "whole KiB only");
+        // A limit from the poll stops the read and is what comes back.
+        let path = std::env::temp_dir().join(format!("pscat-file-kib2-{}.bin", std::process::id()));
+        std::fs::write(&path, &body).unwrap();
+        let got = read_path_limited(&path, &mut |_, _| Err(PsError::TimeExceeded));
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(got, Err(PsError::TimeExceeded));
+        // Not there: unreadable, not an error.
+        assert_eq!(
+            read_path_limited(std::path::Path::new("/no/such/pscat/file"), &mut |_, _| Ok(
+                ()
+            )),
+            Ok(None)
+        );
     }
 }
