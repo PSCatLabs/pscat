@@ -1445,7 +1445,9 @@ fn print_usage() {
     println!("  pscat handwrite \"text\"       a string in, a handwritten PNG out");
     println!("  pscat typewrite [FILE]       a text file in, a typewritten PNG/PDF out");
     println!("  pscat photo-etch photo.jpg   a JPEG in, a line engraving (PNG/SVG/PDF) out");
-    println!("  pscat sheet a.ps b.ps ...    labelled review sheet: files at several sizes, one PNG");
+    println!(
+        "  pscat sheet a.ps b.ps ...    labelled review sheet: files at several sizes, one PNG"
+    );
     println!("  pscat mcp                    the MCP server on stdin/stdout (same as pscat-mcp)");
 }
 

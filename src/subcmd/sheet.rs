@@ -46,8 +46,8 @@ const MAX_CELLS: usize = 256;
 /// Largest `--dpi` zoom factor.
 const MAX_ZOOM: u32 = 16;
 /// Row label and caption type sizes, in pixels.
-const LABEL_PX: u32 = 15;
-const CAPTION_PX: u32 = 11;
+const LABEL_PX: u32 = 16;
+const CAPTION_PX: u32 = 12;
 
 struct Entry {
     path: String,
