@@ -248,6 +248,21 @@ fn unsupported_input_fails_with_the_named_error() {
             "unsupported_command",
         ),
         ("a @ b", "unsupported character: @", "unsupported_character"),
+        (
+            r"\(a\) + \(b",
+            r"math delimiter \( is never closed: end it with \)",
+            "unclosed_math_delimiter",
+        ),
+        (
+            r"1 + 2\)",
+            r"math delimiter \) closes nothing",
+            "unmatched_math_delimiter",
+        ),
+        (
+            r"\(x\) where \(y\)",
+            "text outside the math delimiters (w",
+            "text_outside_math",
+        ),
     ] {
         let out = pscat(&dir, &["chalk", tex, "-o", "bad.png"], None);
         assert!(!out.status.success(), "{tex} succeeded");
@@ -262,6 +277,23 @@ fn unsupported_input_fails_with_the_named_error() {
 
         let e = chalk::render(tex, &small(), Format::Png).unwrap_err();
         assert_eq!(e.code(), code);
+    }
+}
+
+/// Separate inline pairs (the issue's `\(a\) + \(b\)`, in all four delimiter
+/// forms) are one formula with the delimiters gone: the same board as the
+/// bare formula, not a mathkit error about a stray `\)`.
+#[test]
+fn separate_inline_pairs_render_as_one_formula() {
+    let bare = chalk::render("a + b", &small(), Format::Png).unwrap();
+    for tex in [
+        r"\(a\) + \(b\)",
+        r"\[a\] + \[b\]",
+        "$a$ + $b$",
+        "$$a$$ + $$b$$",
+    ] {
+        let png = chalk::render(tex, &small(), Format::Png).unwrap();
+        assert_eq!(png, bare, "{tex}: not the board of `a + b`");
     }
 }
 

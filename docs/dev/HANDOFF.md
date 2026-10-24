@@ -817,7 +817,10 @@ renders eight examples in both and compares block-downsampled output).
    `mk-<kind>:<token>` to `ChalkError::Latex`. `tests/chalk.rs` pins five
    boards by pixel hash: any mathkit/strokeglyphs/drychalk/drykit change
    that moves a pixel moves them (re-pin after looking)
-   (`notes/555-chalk-latex-cli.md`).
+   (`notes/555-chalk-latex-cli.md`). #700: `chalk::lines` removes every math
+   delimiter pair (several side by side, nested), and a stray, unclosed or
+   mismatched one, or words outside the pairs, is a one-line `ChalkError::Latex`
+   (`notes/700-chalk-separate-inline-pairs.md`).
    #239 shipped `lib/drycrayon.ps` (`dy-`): `dycrayon` (a core and a rim
    `dkstroke` per subpath, one wax level each), `dypaper`, the crayon box
    (`dybox`, `dycolors`, `dycolor`) and six child motions with paintkit's
