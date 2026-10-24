@@ -11,9 +11,10 @@ stopped it, and the CLI had nothing.
   `run`) reads through `file::read_path_limited` and
   `paths::open_with_reader`; with none set it is the old `std::fs::read`.
 - A regular file is read on the calling thread in 64 KiB chunks. Its length is
-  checked against the memory cap first (`check_alloc`), the up-front reserve is
-  capped at 64 MiB, and the buffer's next growth (`max(2 * capacity, len +
-  chunk)`) is announced to the check before it is made.
+  checked against the memory cap first (`check_alloc`) and the buffer is sized
+  once from it (`try_reserve_exact`), so no doubling can be refused halfway
+  for a file that passed the check; a file that grows past its reported size
+  (`/proc`) has the next growth announced to the check before it is made.
 - Anything else (device, FIFO, socket, terminal) is read on a helper thread
   through a 2-slot channel, so the open and the read may block while the main
   thread wakes every 10 ms to look at the limits. A limit abandons the helper
