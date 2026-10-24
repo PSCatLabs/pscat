@@ -399,6 +399,81 @@ impl Object {
     }
 }
 
+impl Object {
+    /// `repr()` under `limits`, appended to `out`. Once `out` holds `cap`
+    /// bytes no further element is started, so the output and the work
+    /// are bounded whatever the object's size (shared arrays can hold
+    /// exponentially many leaves). True if anything was elided.
+    fn write_bounded(&self, depth: usize, lim: &DumpLimits, cap: usize, out: &mut String) -> bool {
+        match &self.value {
+            Value::Name(n) => {
+                let text = if self.executable {
+                    n.to_string()
+                } else {
+                    format!("/{n}")
+                };
+                push_cut(out, &text, lim.max_string)
+            }
+            Value::String(s) => {
+                let bytes = s.borrow_bytes();
+                let shown = &bytes[..bytes.len().min(lim.max_string)];
+                out.push('(');
+                out.push_str(&escape_string(shown));
+                let cut = bytes.len() > shown.len();
+                if cut {
+                    out.push(' ');
+                    out.push_str(TRUNCATED);
+                }
+                out.push(')');
+                cut
+            }
+            Value::Array(a) => {
+                if depth >= lim.max_depth {
+                    out.push_str(TRUNCATED);
+                    return true;
+                }
+                let (open, close) = if self.executable {
+                    ("{", "}")
+                } else {
+                    ("[", "]")
+                };
+                out.push_str(open);
+                let mut cut = false;
+                for i in 0..a.len() {
+                    if i > 0 {
+                        out.push(' ');
+                    }
+                    if i >= lim.max_elements || out.len() >= cap {
+                        out.push_str(TRUNCATED);
+                        cut = true;
+                        break;
+                    }
+                    if let Some(item) = a.get(i)
+                        && item.write_bounded(depth + 1, lim, cap, out)
+                    {
+                        cut = true;
+                        // Budget spent inside the child: stop here, and
+                        // mark this level's own elision if siblings remain.
+                        if out.len() >= cap {
+                            if i + 1 < a.len() {
+                                out.push(' ');
+                                out.push_str(TRUNCATED);
+                            }
+                            break;
+                        }
+                    }
+                }
+                out.push_str(close);
+                cut
+            }
+            _ => {
+                out.push_str(&self.repr());
+                false
+            }
+        }
+    }
+}
+
 impl fmt::Debug for Object {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.repr())
@@ -519,6 +594,70 @@ pub(crate) fn escape_string(bytes: &[u8]) -> String {
         }
     }
     out
+}
+
+/// Bounds for the `--pstack-on-error` operand-stack dump (issue #703).
+/// `repr()` and `==` stay unbounded; only the post-mortem dump uses these.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DumpLimits {
+    /// Container nesting shown; a deeper container prints `... truncated`.
+    pub max_depth: usize,
+    /// Elements shown per array; the rest are elided.
+    pub max_elements: usize,
+    /// Bytes of a string or name shown, cut before escaping.
+    pub max_string: usize,
+    /// Approximate bytes for the whole stack dump.
+    pub max_bytes: usize,
+}
+
+/// The limits `--pstack-on-error` uses. Ordinary stacks print unchanged.
+pub const STACK_DUMP_LIMITS: DumpLimits = DumpLimits {
+    max_depth: 32,
+    max_elements: 256,
+    max_string: 512,
+    max_bytes: 8192,
+};
+
+const TRUNCATED: &str = "... truncated";
+
+/// The operand stack in `==` syntax, bottom to top, under `limits`.
+/// Elements are taken from the top down, so the newest operands survive a
+/// cut; when bottom elements are elided the text starts with `... truncated`.
+/// Empty for an empty stack. Under the limits this equals `repr()` per element.
+pub fn stack_repr_bounded(stack: &[Object], limits: &DumpLimits) -> String {
+    let mut kept: Vec<String> = Vec::new();
+    let mut used = 0;
+    for obj in stack.iter().rev() {
+        if used >= limits.max_bytes {
+            break;
+        }
+        let mut text = String::new();
+        obj.write_bounded(0, limits, limits.max_bytes - used, &mut text);
+        used += text.len() + 1;
+        kept.push(text);
+    }
+    let mut parts: Vec<String> = Vec::new();
+    if kept.len() < stack.len() {
+        parts.push(TRUNCATED.to_string());
+    }
+    parts.extend(kept.into_iter().rev());
+    parts.join(" ")
+}
+
+/// Push `text`, cut at a char boundary to `max` bytes; true if cut.
+fn push_cut(out: &mut String, text: &str, max: usize) -> bool {
+    if text.len() <= max {
+        out.push_str(text);
+        return false;
+    }
+    let mut end = max;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    out.push_str(&text[..end]);
+    out.push(' ');
+    out.push_str(TRUNCATED);
+    true
 }
 
 /// A numeric operand: most arithmetic operators accept either integer or

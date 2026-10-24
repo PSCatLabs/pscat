@@ -592,6 +592,60 @@ fn sweep_frame_error_honors_pstack_on_error() {
     );
 }
 
+/// The error dump for an ordinary stack is unchanged by the #703 bounds.
+#[test]
+fn pstack_dump_small_output_is_pinned() {
+    let (ok, _out, stderr) = run(
+        &["--headless", "--pstack-on-error", "-"],
+        "1 (a\n) /n [1 2 {3}] null 1 0 div",
+    );
+    assert!(!ok);
+    assert!(
+        stderr.starts_with("%%[ Error: undefinedresult; OffendingCommand: div;"),
+        "the error line comes first: {stderr}"
+    );
+    assert!(
+        stderr.ends_with("Operand stack (5): 1 (a\\n) /n [1 2 {3}] null\n"),
+        "exact small dump: {stderr}"
+    );
+}
+
+/// #703: a huge or deeply nested operand must not flood the error dump.
+/// Each case prints a few KB, keeps the error line first and marks the cut.
+#[test]
+fn pstack_dump_bounds_huge_operands() {
+    let cases: [(&str, String); 5] = [
+        ("1M-element array", "1000000 array foo".to_string()),
+        ("100k-byte string", format!("({}) foo", "a".repeat(100_000))),
+        (
+            "10k-deep nesting",
+            format!("{}{} foo", "[".repeat(10_000), "]".repeat(10_000)),
+        ),
+        (
+            "shared references (2^40 leaves)",
+            "/a [0] def 40 { [a a] /a exch def } repeat a foo".to_string(),
+        ),
+        ("1M-item stack", "1000000 { 1 } repeat foo".to_string()),
+    ];
+    for (label, source) in &cases {
+        let (ok, _out, stderr) = run(&["--headless", "--pstack-on-error", "-"], source);
+        assert!(!ok, "{label} fails as written");
+        assert!(
+            stderr.starts_with("%%[ Error: undefined"),
+            "{label}: the error line comes first"
+        );
+        assert!(
+            stderr.len() < 16 * 1024,
+            "{label}: dump is {} bytes",
+            stderr.len()
+        );
+        assert!(
+            stderr.contains("... truncated"),
+            "{label}: marker: {stderr}"
+        );
+    }
+}
+
 /// Regression (cross-model review, PR #66): `--contact-sheet`/`--grid`
 /// with no sweep axis used to validate cleanly and then silently do
 /// nothing (no file written, since no code path ever consumed them).
