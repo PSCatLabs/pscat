@@ -622,6 +622,27 @@ impl Interp {
         crate::memtrack::live_bytes().saturating_sub(self.mem_base)
     }
 
+    /// The limits' look during a whole-file read (issue #702, `file::
+    /// read_path_limited`), once per chunk and while waiting on a stalled
+    /// source. `bytes` just arrived (charged as one step per KiB, so a step
+    /// cap bounds a read too); `will_alloc` is heap the buffer is about to
+    /// take, refused before it is.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn poll_read(&mut self, bytes: usize, will_alloc: usize) -> Result<(), PsError> {
+        self.steps_used = self
+            .steps_used
+            .saturating_add((bytes as u64).div_ceil(1024));
+        if let Some(max) = self.limits.max_steps
+            && self.steps_used > max
+        {
+            return Err(PsError::StepsExceeded);
+        }
+        if will_alloc > 0 {
+            self.check_alloc(will_alloc)?;
+        }
+        self.check_time_and_memory()
+    }
+
     /// Refuse an allocation of `bytes` that would pass the memory cap,
     /// before making it. For the operators that can ask for megabytes in
     /// one step (`array`, `string`); everything else is caught by the

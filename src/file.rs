@@ -682,6 +682,126 @@ fn is_ps_whitespace(b: u8) -> bool {
     matches!(b, b' ' | b'\t' | b'\r' | b'\n' | b'\x0c' | b'\0')
 }
 
+/// Bytes per read when a whole file is read under execution limits
+/// ([`read_path_limited`]): the limits are looked at once per chunk.
+#[cfg(not(target_arch = "wasm32"))]
+const READ_CHUNK: usize = 64 * 1024;
+
+/// The most a regular file's size reserves up front. A bigger file grows its
+/// buffer as the bytes arrive, so the limits are read before the memory is.
+#[cfg(not(target_arch = "wasm32"))]
+const READ_RESERVE_MAX: usize = 64 << 20;
+
+/// How often the limits are looked at while a read waits for a FIFO, a
+/// terminal or a socket to produce bytes.
+#[cfg(not(target_arch = "wasm32"))]
+const READ_POLL: std::time::Duration = std::time::Duration::from_millis(10);
+
+/// The interpreter's look at its limits during a whole-file read
+/// (`Interp::poll_read`): the bytes that just arrived (0 while waiting) and
+/// the heap the buffer is about to take (0 for none).
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) type ReadPoll<'a> = &'a mut dyn FnMut(usize, usize) -> Result<(), PsError>;
+
+/// Make room for `chunk` more bytes in `data`, telling `poll` first how much
+/// heap that takes: `Vec::reserve` grows to `max(2 * capacity, len + chunk)`.
+#[cfg(not(target_arch = "wasm32"))]
+fn make_room(data: &mut Vec<u8>, chunk: usize, poll: ReadPoll<'_>) -> Result<(), PsError> {
+    if data.len() + chunk > data.capacity() {
+        poll(0, (2 * data.capacity()).max(data.len() + chunk))?;
+        data.reserve(chunk);
+    }
+    Ok(())
+}
+
+/// Read the whole of `path` the way `std::fs::read` does (`Ok(None)` when it
+/// cannot be opened or read), but look at the execution limits as the bytes
+/// arrive instead of after the last one (issue #702). An `Err` from `poll`
+/// stops the read and is returned.
+///
+/// - A regular file is read on the calling thread, `READ_CHUNK` bytes at a
+///   time, into a buffer sized from its length when the limits allow it.
+/// - Anything else (`/dev/zero`, a FIFO, a terminal, a socket) may never end
+///   or never produce a byte, and the open itself can block, so it is read on
+///   a helper thread that hands over chunks through a small channel while
+///   this thread waits `READ_POLL` at a time and looks at the limits between
+///   waits. When a limit stops the read, the helper is left behind: it exits
+///   as soon as its next send fails, or stays blocked in the kernel until the
+///   process ends.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn read_path_limited(
+    path: &std::path::Path,
+    poll: ReadPoll<'_>,
+) -> Result<Option<Vec<u8>>, PsError> {
+    use std::io::Read;
+    use std::sync::mpsc::{RecvTimeoutError, sync_channel};
+
+    let Ok(meta) = std::fs::metadata(path) else {
+        return Ok(None);
+    };
+    let mut data: Vec<u8> = Vec::new();
+    if meta.is_file() {
+        let size = usize::try_from(meta.len()).unwrap_or(usize::MAX);
+        poll(0, size)?;
+        data.reserve_exact(size.saturating_add(1).min(READ_RESERVE_MAX));
+        let Ok(mut f) = std::fs::File::open(path) else {
+            return Ok(None);
+        };
+        loop {
+            make_room(&mut data, READ_CHUNK, poll)?;
+            match f.by_ref().take(READ_CHUNK as u64).read_to_end(&mut data) {
+                Ok(0) => return Ok(Some(data)),
+                Ok(n) => poll(n, 0)?,
+                Err(_) => return Ok(None),
+            }
+        }
+    }
+    let (tx, rx) = sync_channel::<std::io::Result<Vec<u8>>>(2);
+    let owned = path.to_path_buf();
+    let spawned = std::thread::Builder::new()
+        .name("pscat-read".into())
+        .spawn(move || {
+            let mut f = match std::fs::File::open(&owned) {
+                Ok(f) => f,
+                Err(e) => {
+                    let _ = tx.send(Err(e));
+                    return;
+                }
+            };
+            let mut buf = vec![0u8; READ_CHUNK];
+            loop {
+                match f.read(&mut buf) {
+                    Ok(0) => return,
+                    Ok(n) => {
+                        if tx.send(Ok(buf[..n].to_vec())).is_err() {
+                            return;
+                        }
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+                    Err(e) => {
+                        let _ = tx.send(Err(e));
+                        return;
+                    }
+                }
+            }
+        });
+    if spawned.is_err() {
+        return Ok(None);
+    }
+    loop {
+        match rx.recv_timeout(READ_POLL) {
+            Ok(Ok(chunk)) => {
+                make_room(&mut data, chunk.len(), poll)?;
+                data.extend_from_slice(&chunk);
+                poll(chunk.len(), 0)?;
+            }
+            Ok(Err(_)) => return Ok(None),
+            Err(RecvTimeoutError::Timeout) => poll(0, 0)?,
+            Err(RecvTimeoutError::Disconnected) => return Ok(Some(data)),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

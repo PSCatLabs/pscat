@@ -43,8 +43,50 @@ fn pop_ps_string(it: &mut Interp) -> Result<PsString, PsError> {
 /// directory reads exactly as it always did; the embedded `lib/` and
 /// the install locations only answer what would otherwise be an
 /// `undefinedfilename`.
-fn read_resource(name: &str) -> Result<Vec<u8>, PsError> {
+///
+/// Under execution limits (`Interp::set_limits`) the read looks at them as
+/// the bytes arrive, so `(/dev/zero) (r) file` or a FIFO ends in a limit
+/// error instead of running on inside this one operator (issue #702).
+fn read_resource(it: &mut Interp, name: &str) -> Result<Vec<u8>, PsError> {
+    #[cfg(not(target_arch = "wasm32"))]
+    if !it.limits().is_none() {
+        return read_resource_limited(it, name);
+    }
+    // The wasm build has no disk to poll a read of.
+    #[cfg(target_arch = "wasm32")]
+    let _ = &it;
     crate::paths::open(name)
+        .map(|r| r.bytes.into_owned())
+        .ok_or(PsError::UndefinedFilename)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn read_resource_limited(it: &mut Interp, name: &str) -> Result<Vec<u8>, PsError> {
+    use std::cell::RefCell;
+    let it = RefCell::new(it);
+    let stopped: RefCell<Option<PsError>> = RefCell::new(None);
+    let read = |path: &std::path::Path| {
+        if stopped.borrow().is_some() {
+            return None;
+        }
+        let mut poll =
+            |bytes: usize, will_alloc: usize| it.borrow_mut().poll_read(bytes, will_alloc);
+        match crate::file::read_path_limited(path, &mut poll) {
+            Ok(data) => data,
+            Err(e) => {
+                *stopped.borrow_mut() = Some(e);
+                None
+            }
+        }
+    };
+    let found = crate::paths::open_with_reader(name, &read);
+    // A limit wins over whatever the search found after it: a later place
+    // (the embedded copy of `lib/`) must not turn a stopped read into a
+    // successful one.
+    if let Some(e) = stopped.take() {
+        return Err(e);
+    }
+    found
         .map(|r| r.bytes.into_owned())
         .ok_or(PsError::UndefinedFilename)
 }
@@ -57,7 +99,7 @@ fn file(it: &mut Interp) -> Result<(), PsError> {
     if access != b"r" {
         return Err(PsError::InvalidFileAccess);
     }
-    let data = read_resource(&name)?;
+    let data = read_resource(it, &name)?;
     it.push(Object::lit(Value::File(PsFile::from_bytes(data))));
     Ok(())
 }
@@ -245,7 +287,7 @@ fn eexec(it: &mut Interp) -> Result<(), PsError> {
 /// filename run — execute a program file from disk.
 fn run(it: &mut Interp) -> Result<(), PsError> {
     let name = pop_ps_string(it)?.text();
-    let data = read_resource(&name)?;
+    let data = read_resource(it, &name)?;
     let f = PsFile::from_bytes(data);
     it.exec_object(Object::exec(Value::File(f)))
 }

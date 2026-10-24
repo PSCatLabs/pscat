@@ -27,8 +27,9 @@
 //!
 //! What a limit can and cannot stop is spelled out in `SECURITY.md`: steps
 //! are counted between objects, so a single long-running operator (one
-//! enormous fill, a whole-file read) finishes before the time or step limit
-//! is looked at.
+//! enormous fill) finishes before the time or step limit is looked at. A
+//! whole-file read (`file`, `run`) is the exception: it looks at the limits
+//! after each 64 KiB it reads.
 //!
 //! [`Interp::begin_source`]: crate::Interp::begin_source
 

@@ -891,6 +891,26 @@ fn max_time_and_max_memory_stop_a_runaway() {
     assert!(stderr.contains("limitexceeded (memory)"), "{stderr}");
 }
 
+#[cfg(unix)]
+#[test]
+fn limits_stop_a_whole_file_read_of_dev_zero() {
+    // Issue #702: the read happens inside one operator, so the limits are
+    // looked at as the bytes arrive.
+    let src = "(/dev/zero) (r) file pop";
+    for (flag, value, limit) in [
+        ("--max-time", "0.3", "time"),
+        ("--max-memory", "50", "memory"),
+        ("--max-steps", "5000", "steps"),
+    ] {
+        let (ok, _out, stderr) = run(&["--headless", flag, value, "-e", src], "");
+        assert!(!ok, "{flag}");
+        assert!(
+            stderr.contains(&format!("limitexceeded ({limit})")),
+            "{flag}: {stderr}"
+        );
+    }
+}
+
 #[test]
 fn stopped_cannot_catch_a_cli_limit() {
     let (ok, out, stderr) = run(

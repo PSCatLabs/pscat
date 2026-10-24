@@ -94,9 +94,11 @@ profile build of this commit).
   `eval_postscript` tool.
 - `run` on a file that is not PostScript fails with an error that names the
   first token it could not execute. That also discloses a little of the file.
-- Reads are whole-file (`std::fs::read`) before the program sees a byte: a huge
-  file, a FIFO or a device node such as `/dev/zero` stalls the run and grows
-  memory without end (`(/dev/zero) (r) file` reached about 1 GB in 3 seconds).
+- Reads are whole-file, before the program sees a byte. With no limit set, a
+  huge file, a FIFO or a device node such as `/dev/zero` stalls the run and
+  grows memory without end (`(/dev/zero) (r) file` reached about 1 GB in 3
+  seconds). With a limit set, the read looks at the limits as the bytes arrive
+  and stops with `limitexceeded` (see "Whole-file reads and the limits").
 
 **Cannot write, delete, rename, list or stat files.**
 
@@ -199,6 +201,36 @@ passed about 250 MB resident: `{ 1 } loop`, `{ gsave } loop`,
 `/d 1 dict def { 16000000 array /k 1 index def } loop` and
 `/a 16000000 array def { a aload pop } loop`.
 
+**Whole-file reads and the limits (issue #702).** `file` and `run` read the
+whole file before the program sees a byte. When any limit is set, that read is
+done in 64 KiB chunks and the limits are looked at after each one:
+
+- **Time and memory** are checked as for any step. A regular file bigger than
+  the memory cap is refused from its length before a byte is read, and the
+  buffer's growth is checked before it is made. `(/dev/zero) (r) file pop`
+  stops with `limitexceeded (memory)` at the cap (about 100 MB resident under
+  `--max-memory 100`), or `(time)` first, where only a time limit is set.
+- **Steps.** A kilobyte read counts as one step, so `--max-steps N` also bounds
+  a read, to about N KiB. Nothing else about the step count changes.
+- **FIFOs, terminals, sockets and other devices** can block in the open or in
+  the read, so they are read on a helper thread while the interpreter waits
+  10 ms at a time and looks at the limits between waits. A FIFO that nobody
+  writes to ends in `limitexceeded (time)` at the time limit. Each read the
+  limit cut short leaves that one helper thread behind (it exits on its next
+  chunk, or stays blocked in the kernel until the process ends). The CLI and
+  the MCP child exit and reclaim it; a long-lived program that embeds the
+  library and reads a stalled FIFO under a limit over and over leaks a thread
+  per read.
+- **With no limit set nothing changes**: the read is the plain `std::fs::read`.
+  With only `--max-steps` set (no time or memory cap), a FIFO with no writer
+  still blocks for good, because no bytes arrive to be charged; set a time limit
+  too. With only a time limit, `/dev/zero` is read as fast as the machine allows
+  (about 1 GB a second) until the clock stops it, so set a memory cap as well,
+  as the MCP defaults do.
+
+Checked with: `tests/limits.rs` (`file_reads`), `tests/limits_memory.rs`,
+`tests/cli.rs` and `tests/mcp.rs`.
+
 ### Limits that cannot be enforced
 
 These are the gaps. A hostile program can still use all of them, with or
@@ -207,14 +239,12 @@ without the limits above:
 - **One long operator runs to completion.** The limits are read between
   interpreter steps (and every 1024 loop iterations inside one), never inside
   an operator. `array`, `string` and `aload`, the operators that can ask for
-  hundreds of megabytes in a step, check a memory limit before allocating.
-  Everything else is looked at only afterwards. The clearest case is a
-  whole-file read: `(/dev/zero) (r) file pop` reads before the program sees a
-  byte, never finishes, and went to 1.07 GB resident in 6 seconds under
-  `--max-memory 100`; a FIFO that nobody writes to blocks the same way
-  forever. For a hosted service the answer is the outer kill: the MCP server
-  kills its child at `--timeout` (tested with a FIFO), and anything else
-  should run the process under `ulimit`, a container's limits or `timeout`.
+  hundreds of megabytes in a step, check a memory limit before allocating, and
+  a whole-file read looks at the limits as it goes ("Whole-file reads and the
+  limits", above). Everything else is looked at only afterwards. For a hosted
+  service the answer to anything that gets through is the outer kill: the MCP
+  server kills its child at `--timeout`, and anything else should run the
+  process under `ulimit`, a container's limits or `timeout`.
 - **Memory is looked at once per slice**, so a program can pass its cap by
   what 512 steps (when a time or memory limit is set) can allocate before the
   next look. With a 256 MiB cap, an operand-stack, graphics-state-stack and
@@ -353,8 +383,8 @@ an installed build (October 2026, #568).
   (`--max-image-bytes`, default 3,750,000 bytes per call, and 20 pages); a
   bigger render is refused inline, though a file asked for with `out_path` is
   still written. The child's heap growth is limited by `--max-memory`
-  (default 1024 MiB); what that cannot see, such as a read of `/dev/zero`,
-  grows until the timeout stops it (see "Limits that cannot be enforced").
+  (default 1024 MiB); a whole-file read of `/dev/zero` or a FIFO is stopped by
+  those limits too (see "Whole-file reads and the limits").
 - **`chalkboard_math` takes LaTeX, never PostScript, and has two caps of its
   own (#688).** The server turns the LaTeX into a program with the
   `pscat::chalk` generator (#555), in-process and without file or

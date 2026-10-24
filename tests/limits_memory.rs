@@ -60,4 +60,36 @@ fn memory_growth_is_capped() {
     it.run_str("1 1 2000 { pop 10000 array pop } for (done) print")
         .unwrap();
     assert_eq!(it.captured_stdout(), b"done");
+
+    // A whole-file read counts as it grows (issue #702): `/dev/zero` never
+    // ends, so the cap is what stops it, well short of a gigabyte.
+    #[cfg(unix)]
+    {
+        let mut it = limited(100);
+        let before = pscat::memtrack::live_bytes();
+        assert_eq!(
+            it.run_str("(/dev/zero) (r) file pop"),
+            Err(PsError::MemoryExceeded)
+        );
+        // Overshoot is at most one buffer doubling: the cap is 100 MiB.
+        let peak_growth = pscat::memtrack::live_bytes().saturating_sub(before);
+        assert!(peak_growth < 100 * MIB, "the read's buffer is freed again");
+
+        // A regular file bigger than the cap is refused up front, from its
+        // length, before any of it is read.
+        let path =
+            std::env::temp_dir().join(format!("pscat-limits-mem-{}.bin", std::process::id()));
+        std::fs::File::create(&path)
+            .unwrap()
+            .set_len(200 * MIB as u64)
+            .unwrap();
+        let mut it = limited(100);
+        let src = format!(
+            "({}) (r) file pop",
+            path.to_str().unwrap().replace('\\', "/")
+        );
+        let result = it.run_str(&src);
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(result, Err(PsError::MemoryExceeded));
+    }
 }
