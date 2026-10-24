@@ -216,7 +216,7 @@ impl Layout {
         // Per row, the cell indices of each column, then cut into lines.
         let mut lines: Vec<Vec<Vec<Vec<usize>>>> = Vec::with_capacity(rows.len());
         for row in rows {
-            if row.column_len.iter().any(|&n| n == 0)
+            if row.column_len.contains(&0)
                 || row.column_len.iter().sum::<usize>() != row.cells.len()
             {
                 return Err("contact sheet: column sizes do not add up to the cells".to_string());
