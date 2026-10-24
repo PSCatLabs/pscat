@@ -687,11 +687,6 @@ fn is_ps_whitespace(b: u8) -> bool {
 #[cfg(not(target_arch = "wasm32"))]
 const READ_CHUNK: usize = 64 * 1024;
 
-/// The most a regular file's size reserves up front. A bigger file grows its
-/// buffer as the bytes arrive, so the limits are read before the memory is.
-#[cfg(not(target_arch = "wasm32"))]
-const READ_RESERVE_MAX: usize = 64 << 20;
-
 /// How often the limits are looked at while a read waits for a FIFO, a
 /// terminal or a socket to produce bytes.
 #[cfg(not(target_arch = "wasm32"))]
@@ -743,7 +738,12 @@ pub(crate) fn read_path_limited(
     if meta.is_file() {
         let size = usize::try_from(meta.len()).unwrap_or(usize::MAX);
         poll(0, size)?;
-        data.reserve_exact(size.saturating_add(1).min(READ_RESERVE_MAX));
+        // The whole file's room in one go: no doubling to be refused halfway
+        // for a file that passed the check above. A size that cannot be had
+        // reads as unreadable, as `std::fs::read` fails on it.
+        if data.try_reserve_exact(size.saturating_add(1)).is_err() {
+            return Ok(None);
+        }
         let Ok(mut f) = std::fs::File::open(path) else {
             return Ok(None);
         };

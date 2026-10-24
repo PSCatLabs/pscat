@@ -90,5 +90,22 @@ fn memory_growth_is_capped() {
         let result = it.run_str(&src);
         let _ = std::fs::remove_file(&path);
         assert_eq!(result, Err(PsError::MemoryExceeded));
+
+        // One that fits reads through in full, however many chunks it takes:
+        // its buffer is sized once, so no doubling is refused halfway.
+        let path = common::scratch_dir("limits-mem").join("fits.bin");
+        std::fs::File::create(&path)
+            .unwrap()
+            .set_len(150 * MIB as u64)
+            .unwrap();
+        let mut it = limited(200);
+        let src = format!(
+            "({}) (r) file 1 string readstring pop length =",
+            common::ps_path(&path)
+        );
+        it.capture_stdout();
+        let result = it.run_str(&src);
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(result, Ok(()));
     }
 }

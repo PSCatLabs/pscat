@@ -473,7 +473,8 @@ impl Interp {
     }
 
     /// Interpreter steps the current program has run, counted only while
-    /// some [`Limits`] are set (otherwise 0). The count moves in slices (up
+    /// some [`Limits`] are set (otherwise 0). A KiB read by `file` or `run`
+    /// counts as one step. The count moves in slices (up
     /// to 4096 steps, 512 with a time or memory limit), so it can trail the
     /// true figure by a slice.
     pub fn steps_used(&self) -> u64 {

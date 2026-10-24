@@ -77,7 +77,8 @@ impl std::fmt::Display for Limit {
 #[non_exhaustive]
 pub struct Limits {
     /// The most interpreter steps (objects executed, including every pass
-    /// round a loop body) a program may run.
+    /// round a loop body, and one for each KiB a `file` or `run` reads) a
+    /// program may run.
     pub max_steps: Option<u64>,
     /// The longest wall-clock time a program may run. Not enforced in the
     /// WebAssembly build, which has no clock.
