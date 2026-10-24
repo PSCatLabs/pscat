@@ -9,8 +9,11 @@
 # 1. `claude plugin validate --strict` on the marketplace and on plugin/skills/.
 # 2. `plugin marketplace add <this checkout>` + `plugin install pscat@pscat`.
 # 3. The installed copy holds the three skills as real files, the shared
-#    hooks/hooks.json, and nothing else of the repo (plugin/ also carries the
-#    Codex manifest and mcp.json; scripts/codex_plugin_install_check.sh).
+#    hooks/hooks.json and the hook script hooks/check-pscat.sh, and nothing
+#    else of the repo (plugin/ also carries the Codex manifest and mcp.json;
+#    scripts/codex_plugin_install_check.sh). The hook command from the
+#    installed hooks.json is run with CLAUDE_PLUGIN_ROOT set: it prints the
+#    missing-pscat message on a PATH without pscat and nothing with it.
 # 4. `claude mcp list` with only the given bin dir added to PATH: the
 #    plugin's server must connect. Then without pscat-mcp on PATH it must fail
 #    (the negative case the plugin's SessionStart hook explains).
@@ -49,10 +52,28 @@ for s in pscat psart psviz; do
     fi
 done
 [ -f "$copy/hooks/hooks.json" ] && ok "installed copy has hooks/hooks.json" || bad "installed copy lacks hooks/hooks.json"
+[ -f "$copy/hooks/check-pscat.sh" ] && ok "installed copy has hooks/check-pscat.sh (mode $(ls -l "$copy/hooks/check-pscat.sh" | cut -c1-10))" || bad "installed copy lacks hooks/check-pscat.sh"
 extra=$(cd "$copy" && find . -mindepth 1 -maxdepth 1 ! -name skills ! -name .claude-plugin ! -name README.md \
     ! -name hooks ! -name plugin.json ! -name mcp.json)
 [ -z "$extra" ] && ok "installed copy holds only the plugin" || bad "installed copy has extra entries: $extra"
 "$claude" plugin details pscat@pscat
+
+# The SessionStart hook, run as the agent runs it: the command string from
+# the installed hooks.json with CLAUDE_PLUGIN_ROOT set to the installed copy
+# (Claude Code and Codex both set it; a real Codex hook run needs the /hooks
+# trust review, #654, so this stands in for it). #684.
+hook_cmd=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["hooks"]["SessionStart"][0]["hooks"][0]["command"])' \
+    "$copy/hooks/hooks.json")
+hook_out() { CLAUDE_PLUGIN_ROOT="$copy" PATH="$1" sh -c "$hook_cmd"; }
+hook_clean=/usr/bin:/bin
+if PATH="$hook_clean" command -v pscat-mcp >/dev/null; then
+    bad "pscat-mcp is still on the stripped PATH; cannot run the hook's negative case"
+else
+    out=$(hook_out "$hook_clean") && printf '%s' "$out" | python3 -c 'import json,sys; assert "pscat-mcp" in json.load(sys.stdin)["systemMessage"]' \
+        && ok "hook without pscat on PATH prints the systemMessage" || bad "hook negative case: $out"
+fi
+out=$(hook_out "$bin:$hook_clean") && [ -z "$out" ] \
+    && ok "hook with pscat and pscat-mcp on PATH prints nothing" || bad "hook positive case: $out"
 
 # Any other pscat on PATH (~/.cargo/bin, say) is dropped so the result is
 # about the given binaries.
