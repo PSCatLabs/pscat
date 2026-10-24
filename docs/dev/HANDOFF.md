@@ -1153,6 +1153,18 @@ renders eight examples in both and compares block-downsampled output).
   cap is what bounds it below the interpreter's 8000-a-side ceiling. A TeX error is mapped back from the
   child's `mk-*` offending command with `chalk::explain`. The output is
   byte-identical to `pscat chalk` and `chalk::render` (`tests/mcp.rs` pins it).
+  `review_sheet` (#708) is the pattern for a tool whose CLI twin has no limits:
+  `pscat sheet` runs its programs in-process with no step, time or memory
+  limit, so the tool does not shell out to it. It renders each cell in its
+  own child (`--page --dpi --png -` under `interpreter_args`, each child given
+  what is left of the one `--timeout`) and composes the pictures in-process
+  with `pscat::contact_sheet` (`Layout`, `render_text`, `blit_at`, `frame`,
+  `zoom_nearest`). It repeats `src/subcmd/sheet.rs`'s composition loop and its
+  two type sizes (`SHEET_LABEL_PX`, `SHEET_CAPTION_PX`), so a change to the CLI
+  sheet's look must change both; `tests/mcp.rs`
+  `review_sheet_is_byte_identical_to_pscat_sheet` fails when they drift. The
+  fix that removes the copy is `--max-*` flags on `pscat sheet` and a shared
+  composer in the library (see `notes/708-mcp-review-sheet.md`).
 - **Published skills are `plugin/skills/<name>/SKILL.md`** (pscat, psart,
   psviz; #568; top-level `skills` is a symlink there since #569 part b), written for an installed pscat: no `cargo`, `target/`, `scripts/`
   or checkout-relative paths, repo files linked by GitHub URL. `.claude/skills/`
