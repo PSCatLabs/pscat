@@ -331,6 +331,7 @@ fn array(it: &mut Interp) -> Result<(), PsError> {
     if n > ALLOC_LIMIT {
         return Err(PsError::Limitcheck);
     }
+    it.check_alloc(n as usize * std::mem::size_of::<Object>())?;
     it.push(Object::array(vec![Object::lit(Value::Null); n as usize]));
     Ok(())
 }
@@ -343,6 +344,7 @@ fn string(it: &mut Interp) -> Result<(), PsError> {
     if n > ALLOC_LIMIT {
         return Err(PsError::Limitcheck);
     }
+    it.check_alloc(n as usize)?;
     it.push(Object::string(vec![0u8; n as usize]));
     Ok(())
 }
@@ -352,6 +354,9 @@ fn aload(it: &mut Interp) -> Result<(), PsError> {
     let Value::Array(a) = &obj.value else {
         return Err(PsError::Typecheck);
     };
+    // `aload` multiplies memory in one step (a 16M-element array pushes 16M
+    // operands), so it is checked against a memory limit like `array` is.
+    it.check_alloc(a.len() * std::mem::size_of::<Object>())?;
     for el in a.snapshot() {
         it.push(el);
     }

@@ -5,7 +5,12 @@ use std::process::ExitCode;
 use pscat::repl::LineBuffer;
 use pscat::spool::Watcher;
 use pscat::window::{WindowOptions, run_interactive, run_spool, run_windowed};
-use pscat::{Interp, gfx};
+use pscat::{Interp, Limits, gfx};
+
+// Counts live heap bytes so `--max-memory` can be enforced (issue #604). One
+// relaxed atomic add or subtract per allocation or free.
+#[global_allocator]
+static ALLOC: pscat::TrackingAllocator = pscat::TrackingAllocator;
 
 // The MCP server, shared with the pscat-mcp binary (#569).
 #[path = "mcp_server.rs"]
@@ -78,6 +83,9 @@ struct Options {
     /// Explicit (cols, rows) for --contact-sheet; default is a
     /// square-ish grid sized to the sweep count.
     grid: Option<(u32, u32)>,
+    /// `--max-steps`, `--max-time`, `--max-memory` (issue #604): none by
+    /// default, so a bare run is unlimited exactly as before.
+    limits: Limits,
 }
 
 impl Options {
@@ -108,7 +116,17 @@ impl Options {
             sweep_param: None,
             contact_sheet: None,
             grid: None,
+            limits: Limits::none(),
         }
+    }
+
+    /// Put `--max-steps`/`--max-time`/`--max-memory` on a fresh interpreter.
+    fn apply_limits(&self, interp: &mut Interp) {
+        // `set_limits` refuses only when the tracking allocator is missing,
+        // and this binary declares it.
+        interp
+            .set_limits(self.limits)
+            .expect("pscat installs the tracking allocator");
     }
 }
 
@@ -281,6 +299,13 @@ fn main() -> ExitCode {
             eprintln!("pscat: --spool runs alone (no file argument or other mode flags)");
             return ExitCode::FAILURE;
         }
+        if !options.limits.is_none() {
+            eprintln!(
+                "pscat: --max-steps/--max-time/--max-memory don't apply to --spool yet \
+                 (the spool runs each file without limits)"
+            );
+            return ExitCode::FAILURE;
+        }
         let watcher = match Watcher::new(std::path::Path::new(dir)) {
             Ok(w) => w,
             Err(e) => {
@@ -311,6 +336,7 @@ fn main() -> ExitCode {
         );
         return ExitCode::FAILURE;
     };
+    options.apply_limits(&mut interp);
     // The single-run paths below end the process right after the output is
     // written, so tearing down the dictionary graph (which `Drop for Interp`
     // does for library users and the sweep/spool loops) would only delay the
@@ -784,6 +810,7 @@ fn run_sweep(options: &Options, source: &[u8]) -> ExitCode {
             );
             return ExitCode::FAILURE;
         };
+        options.apply_limits(&mut interp);
         if options.transparent {
             interp.gfx_mut().set_transparent_background();
         }
@@ -1278,6 +1305,34 @@ fn parse_args() -> Result<Options, String> {
                     .filter(|&d: &f32| (9.0..=1200.0).contains(&d))
                     .ok_or_else(|| format!("invalid --dpi value: {n} (expected 9..1200)"))?;
             }
+            "--max-steps" => {
+                let n = args.next().ok_or("missing value after --max-steps")?;
+                let steps: u64 = n.parse().map_err(|_| {
+                    format!(
+                        "invalid --max-steps value: {n} (expected a whole number; 0 = no limit)"
+                    )
+                })?;
+                options.limits.max_steps = (steps > 0).then_some(steps);
+            }
+            "--max-time" => {
+                let n = args.next().ok_or("missing value after --max-time")?;
+                let secs: f64 = n
+                    .parse()
+                    .ok()
+                    .filter(|s: &f64| s.is_finite() && (0.0..=31_536_000.0).contains(s))
+                    .ok_or_else(|| {
+                        format!("invalid --max-time value: {n} (expected seconds; 0 = no limit)")
+                    })?;
+                options.limits.max_time =
+                    (secs > 0.0).then(|| std::time::Duration::from_secs_f64(secs));
+            }
+            "--max-memory" => {
+                let n = args.next().ok_or("missing value after --max-memory")?;
+                let mib: usize = n.parse().ok().filter(|m| *m <= 1 << 30).ok_or_else(|| {
+                    format!("invalid --max-memory value: {n} (expected MiB; 0 = no limit)")
+                })?;
+                options.limits.max_memory = (mib > 0).then_some(mib << 20);
+            }
             "--png" => {
                 options.png = Some(args.next().ok_or("missing path after --png")?);
             }
@@ -1416,6 +1471,11 @@ fn print_usage() {
     );
     println!("      --halftone      screen the raster like a mono laser printer (window/PNG)");
     println!("      --pstack-on-error  print the operand stack after an error");
+    println!("      --max-steps N   stop a program after N interpreter steps (0 = no limit)");
+    println!("      --max-time SECS stop a program after SECS of wall-clock time (0 = no limit)");
+    println!("      --max-memory MIB  stop a program that grows the heap by more than MIB");
+    println!("                      (0 = no limit). A stopped run exits non-zero with");
+    println!("                      `limitexceeded (steps|time|memory)`; `stopped` can't catch it");
     println!("      --lint          check the finished run for common mistakes (implies");
     println!("                      --headless); a blank page, an unbalanced gsave, stuff");
     println!("                      left on the stack — printed to stderr, doesn't affect");

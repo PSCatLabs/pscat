@@ -1,0 +1,105 @@
+# Scheduled fuzzing (issue #604): the lexer and the whole interpreter, under
+# cargo-fuzz (libFuzzer), a time-boxed run per target every week. A crash
+# fails the run, uploads the crashing input as an artifact, and opens an
+# issue (unless one is already open) so it does not sit unseen in the Actions
+# tab. Fix the bug, then commit the input to fuzz/regressions/<target>/: the
+# ordinary test suite (tests/fuzz_corpus.rs) replays it from then on.
+#
+# Targets and seeds live in fuzz/ (its own workspace, so the root build never
+# needs nightly). A pull request that touches fuzz/ or this file runs a short
+# smoke run, so the workflow itself is exercised before the first scheduled
+# run, which a branch cannot trigger. `workflow_dispatch` runs it by hand.
+#
+# Not in required_status_checks (SDLC.md): fuzzing finds new bugs, which must
+# not block an unrelated merge.
+name: fuzz
+
+on:
+  schedule:
+    # Sundays, 05:17 UTC.
+    - cron: "17 5 * * 0"
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: "Seconds to fuzz each target"
+        default: "600"
+  pull_request:
+    paths:
+      - "fuzz/**"
+      - ".github/workflows/fuzz.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuzz-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [lexer, interp]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master; toolchain below
+        with:
+          toolchain: nightly
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: fuzz
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked --version 0.13.2
+      - name: Fuzz ${{ matrix.target }}
+        env:
+          SECONDS_PER_TARGET: ${{ github.event_name == 'pull_request' && '30' || inputs.seconds || '600' }}
+        run: |
+          mkdir -p "fuzz/corpus/${{ matrix.target }}"
+          # The working corpus is first (libFuzzer writes new inputs there);
+          # the committed seeds are read-only extras. -timeout and
+          # -rss_limit_mb turn a hang or a runaway allocation into a crash
+          # report instead of a stuck job.
+          cargo fuzz run "${{ matrix.target }}" \
+            "fuzz/corpus/${{ matrix.target }}" "fuzz/seeds/${{ matrix.target }}" \
+            -- -max_total_time="$SECONDS_PER_TARGET" -timeout=10 -rss_limit_mb=2048
+      - name: Upload crashing inputs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: fuzz-crash-${{ matrix.target }}
+          path: fuzz/artifacts/${{ matrix.target }}
+          if-no-files-found: ignore
+
+  # Opens one issue for a scheduled run that crashed. Its own job, so only it
+  # holds `issues: write`, and the fuzzing job (which runs the code under
+  # test) holds none.
+  report:
+    needs: fuzz
+    if: ${{ always() && github.event_name == 'schedule' && needs.fuzz.result == 'failure' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Open an issue unless one is already open
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          open=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
+            --search 'in:title "Fuzzing found a crash"' --json number --jq 'length')
+          if [ "$open" != "0" ]; then
+            echo "an issue about a fuzz crash is already open; not filing another"
+            exit 0
+          fi
+          gh issue create --repo "$GITHUB_REPOSITORY" \
+            --title "Fuzzing found a crash" \
+            --body "The scheduled fuzz run failed: $RUN_URL
+
+          The crashing input is in that run's artifacts (\`fuzz-crash-<target>\`). To reproduce, download it and run \`cargo +nightly fuzz run <target> <file>\` in \`fuzz/\`. After the fix, commit the input to \`fuzz/regressions/<target>/\`, where \`tests/fuzz_corpus.rs\` replays it. See SECURITY.md (\"Fuzzing\")."

@@ -862,3 +862,145 @@ fn version_flag_prints_the_crate_version_and_exits_clean() {
         "usage lists --version: {usage}"
     );
 }
+
+// --- execution limits (issue #604) ---------------------------------------
+
+#[test]
+fn max_steps_stops_a_runaway_loop_with_a_structured_error() {
+    let (ok, _out, stderr) = run(
+        &["--headless", "--max-steps", "100000", "-e", "{ } loop"],
+        "",
+    );
+    assert!(!ok, "a stopped run exits nonzero");
+    assert!(
+        stderr.contains("%%[ Error: limitexceeded (steps);"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn max_time_and_max_memory_stop_a_runaway() {
+    let (ok, _out, stderr) = run(&["--headless", "--max-time", "0.3", "-e", "{ } loop"], "");
+    assert!(!ok);
+    assert!(stderr.contains("limitexceeded (time)"), "{stderr}");
+    let (ok, _out, stderr) = run(
+        &["--headless", "--max-memory", "50", "-e", "{ 1 } loop"],
+        "",
+    );
+    assert!(!ok);
+    assert!(stderr.contains("limitexceeded (memory)"), "{stderr}");
+}
+
+#[test]
+fn stopped_cannot_catch_a_cli_limit() {
+    let (ok, out, stderr) = run(
+        &[
+            "--headless",
+            "--max-steps",
+            "50000",
+            "-e",
+            "{ { { } loop } stopped pop } loop (survived) print",
+        ],
+        "",
+    );
+    assert!(!ok && !out.contains("survived"), "{out} {stderr}");
+    assert!(stderr.contains("limitexceeded (steps)"), "{stderr}");
+}
+
+#[test]
+fn a_limited_run_still_writes_the_partial_canvas() {
+    let png = tmp("limit-partial.png");
+    let (ok, _out, stderr) = run(
+        &[
+            "--page",
+            "20x20",
+            "--max-steps",
+            "50000",
+            "--png",
+            png.to_str().unwrap(),
+            "-",
+        ],
+        "0 0 20 20 rectfill { } loop",
+    );
+    assert!(!ok, "{stderr}");
+    let img =
+        Pixmap::load_png(&png).expect("the canvas is written after a limit, as after any error");
+    assert_eq!(img.pixel(5, 5).unwrap().alpha(), 255);
+    assert_eq!(img.pixel(5, 5).unwrap().red(), 0, "the fill is there");
+}
+
+#[test]
+fn limits_are_off_by_default_and_zero_means_off() {
+    let (ok, out, stderr) = run(
+        &[
+            "--headless",
+            "--max-steps",
+            "0",
+            "--max-time",
+            "0",
+            "--max-memory",
+            "0",
+            "-e",
+            "1 1 10000 { pop } for 3 4 add =",
+        ],
+        "",
+    );
+    assert!(ok, "{stderr}");
+    assert_eq!(out.trim(), "7");
+}
+
+#[test]
+fn a_program_inside_its_limits_prints_what_it_did_without_them() {
+    let prog = "0 1 1 50000 { add } for =";
+    let (_, free, _) = run(&["--headless", "-e", prog], "");
+    let (ok, limited, stderr) = run(
+        &[
+            "--headless",
+            "--max-steps",
+            "5000000",
+            "--max-time",
+            "60",
+            "--max-memory",
+            "500",
+            "-e",
+            prog,
+        ],
+        "",
+    );
+    assert!(ok, "{stderr}");
+    assert_eq!(free, limited);
+}
+
+#[test]
+fn bad_limit_values_are_refused() {
+    for args in [
+        &["--max-steps", "many"][..],
+        &["--max-steps", "-5"],
+        &["--max-time", "soon"],
+        &["--max-time", "-1"],
+        &["--max-time", "inf"],
+        &["--max-memory", "lots"],
+        &["--max-steps"],
+    ] {
+        let mut full = vec!["--headless"];
+        full.extend_from_slice(args);
+        full.extend(["-e", "1 pop"]);
+        let (ok, _out, stderr) = run(&full, "");
+        assert!(!ok, "{args:?} should be refused");
+        assert!(stderr.contains("--max-"), "{args:?}: {stderr}");
+    }
+}
+
+#[test]
+fn limits_do_not_combine_with_modes_that_cannot_honour_them() {
+    // The spool builds its own interpreters; refusing beats ignoring.
+    let dir = tmp("limit-spool-dir");
+    std::fs::create_dir_all(&dir).unwrap();
+    let (ok, _out, stderr) = run(&["--spool", dir.to_str().unwrap(), "--max-steps", "9"], "");
+    assert!(!ok);
+    assert!(stderr.contains("--spool"), "{stderr}");
+    // The self-test modes run alone.
+    let (ok, _out, stderr) = run(&["--selftest", "lib/artkit.ps", "--max-steps", "9"], "");
+    assert!(!ok);
+    assert!(stderr.contains("runs alone"), "{stderr}");
+}

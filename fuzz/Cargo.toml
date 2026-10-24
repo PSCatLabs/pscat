@@ -1,0 +1,32 @@
+[package]
+name = "pscat-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "cargo-fuzz targets for pscat (issue #604). Not part of the published crate."
+
+[package.metadata]
+cargo-fuzz = true
+
+# Its own workspace: the root package neither builds nor lists this crate, so
+# `cargo build`/`cargo test` at the root never need nightly or libFuzzer.
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+# No `window` feature: the fuzz build has no use for winit.
+pscat = { path = "..", default-features = false }
+
+[[bin]]
+name = "lexer"
+path = "fuzz_targets/lexer.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "interp"
+path = "fuzz_targets/interp.rs"
+test = false
+doc = false
+bench = false

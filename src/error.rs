@@ -70,6 +70,13 @@ pub enum PsError {
     /// `findresource` found no resource with that name (`undefinedresource`).
     #[error("undefinedresource")]
     UndefinedResource,
+    /// The program passed one of its [`Limits`](crate::Limits): too many
+    /// steps, too long, or too much memory (`limitexceeded`). Unlike every
+    /// error above, a program **cannot catch this one**: `stopped` does not
+    /// see it, so a runaway program cannot loop around the limit. It is also
+    /// never written to `$error`.
+    #[error("limitexceeded: {0}")]
+    LimitExceeded(crate::Limit),
 }
 
 impl PsError {
@@ -95,6 +102,7 @@ impl PsError {
             PsError::Io => "ioerror",
             PsError::InvalidRestore => "invalidrestore",
             PsError::UndefinedResource => "undefinedresource",
+            PsError::LimitExceeded(_) => "limitexceeded",
         }
     }
 
@@ -129,6 +137,8 @@ impl PsError {
             "ioerror" => PsError::Io,
             "invalidrestore" => PsError::InvalidRestore,
             "undefinedresource" => PsError::UndefinedResource,
+            // Not here: `limitexceeded` is never caught, so `$error` never
+            // holds it and there is nothing to rebuild.
             _ => return None,
         })
     }
@@ -164,6 +174,7 @@ mod tests {
             PsError::Io => PsError::Io,
             PsError::InvalidRestore => PsError::InvalidRestore,
             PsError::UndefinedResource => PsError::UndefinedResource,
+            PsError::LimitExceeded(l) => PsError::LimitExceeded(*l),
         }
     }
 
@@ -206,6 +217,21 @@ mod tests {
             );
         }
         assert_eq!(PsError::from_name("notanerror", None), None);
+    }
+
+    /// A limit error (issue #604) is not a catchable error: `stopped` never
+    /// records it, so `$error` never names it and there is nothing to
+    /// rebuild or re-raise.
+    #[test]
+    fn a_limit_error_has_a_name_but_no_errordict_handler() {
+        let e = PsError::LimitExceeded(crate::Limit::Memory);
+        assert_eq!(e.name(), "limitexceeded");
+        assert_eq!(e.to_string(), "limitexceeded: memory");
+        assert_eq!(PsError::from_name("limitexceeded", None), None);
+        assert!(sample_of(&e) == e);
+        let mut errordict = crate::object::Dict::new();
+        crate::ops::misc::install_errordict(&mut errordict);
+        assert!(errordict.get("limitexceeded").is_none());
     }
 
     /// `errordict` has a handler for every error the interpreter can

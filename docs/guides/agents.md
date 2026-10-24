@@ -143,15 +143,25 @@ Fixed by whoever registers the server; no tool argument can change them.
 
 | Option | Default | What it bounds |
 |---|---|---|
-| `--timeout SECS` | 60 | Wall-clock time per tool call; the child is killed past it and the call fails with `timeout`. |
+| `--timeout SECS` | 60 | Wall-clock time per tool call. The interpreter stops a program at three quarters of it (`limit_exceeded`, `limit: "time"`, and a render keeps the partial page); the child is killed at the full time, for a program stuck inside one long operator, and the call fails with `timeout`. |
+| `--max-steps N` | 25000000000 | Interpreter steps per program (objects executed, plus loop iterations). Past it the interpreter stops and the call fails with `limit_exceeded`, `limit: "steps"`. `0` = off. |
+| `--max-memory MIB` | 1024 | Heap the program may grow by, in MiB (`limit_exceeded`, `limit: "memory"`). `0` = off. |
 | `--max-input-bytes N` | 1048576 | `source` / `text` size (`input_too_large`). |
 | `--max-image-bytes N` | 3750000 | Inline image bytes per call, about 5 MB once base64-encoded; also at most 20 pages inline (`output_too_large`; a file asked for with `out_path` is still written). |
 | `--out-root DIR` | the working directory | Where `out_path` may write. Off when the server starts in `/`. |
 
+The three interpreter limits (steps, time, memory) are on by default for
+`render_postscript` and `eval_postscript`; a program cannot catch them with
+`stopped`. They are read between interpreter steps, so one operator that runs
+for a long time (an enormous fill, a read of a device file) is outside them;
+`SECURITY.md` lists what each limit can and cannot stop. `handwrite` runs
+trusted library code on escaped text and is bounded by `--timeout`.
+
 Program output is capped at 4 MiB per stream (`output_too_large`). A failed
 call is an MCP tool error (`isError: true`) whose text says what happened,
 with the same facts as `structuredContent.error` (`kind`, `message`, and for
-PostScript errors `ps_error`, `offending_command`, `line`).
+PostScript errors `ps_error`, `offending_command`, `line`; a program stopped by
+an interpreter limit has kind `limit_exceeded` and a `limit` field).
 
 **`out_path`** is resolved against the output root (relative paths start
 there; an absolute path must land inside it). `..` is refused, the directory

@@ -635,8 +635,8 @@ renders eight examples in both and compares block-downsampled output).
 - **`SECURITY.md` states what untrusted PostScript and `pscat-mcp` can do
   today, and was checked against the code** (#603). A change that adds or
   removes a file, process, network or MCP capability, or a resource limit,
-  must update it in the same PR; #568 added the MCP bounds, and the interpreter
-  limits it lists as missing are #604. `docs/STABILITY.md` says which surfaces need a deprecation
+  must update it in the same PR; #568 added the MCP bounds and #604 the
+  interpreter limits (below). `docs/STABILITY.md` says which surfaces need a deprecation
   period. `.github/CODEOWNERS` paths are owner-merged (`SDLC.md`, "Who merges").
 
 - **Visible changes merge without the owner mid-cycle** (#674). A PR that
@@ -1057,6 +1057,29 @@ renders eight examples in both and compares block-downsampled output).
   option. The `scripts/*.sh` of the same names are thin wrappers, and
   `pscat-mcp`'s `handwrite` runs `pscat handwrite`. See
   `notes/600-tool-subcommands.md`.
+- **Interpreter execution limits (#604).** `Limits` (`src/limits.rs`) via
+  `Interp::set_limits`; CLI `--max-steps/--max-time/--max-memory`; on by default
+  in `pscat-mcp`. The design points that are easy to break:
+  - The step cap costs nothing per step: `step_n_limited` shrinks the budget it
+    hands `step_n_inner` and adds it to the count afterwards. A loop with an
+    empty body never yields an object, so `next_item` calls `tick()` on every
+    `Iterate*` action to poll the limits itself; a new loop-like frame must tick
+    too, or `{ } loop` hangs again.
+  - `PsError::LimitExceeded` must stay uncatchable: `recover` returns it before
+    looking for a `stopped` frame, and it is never written to `$error`. A new
+    place that swallows operator errors must let it through.
+  - The memory cap counts process heap growth from `pscat::TrackingAllocator`
+    (`src/memtrack.rs`, `#[global_allocator]` in `main.rs`). A new binary or test
+    that wants a memory limit installs it; `set_limits` refuses otherwise.
+    Memory tests live alone in `tests/limits_memory.rs` because the count is
+    process-wide. An operator that can allocate a lot in one step should call
+    `Interp::check_alloc(bytes)` first, as `array`, `string` and `aload` do.
+  - Time reads `crate::clock`, never `Instant` (wasm32), so it is a no-op there.
+  - Fuzzing: `fuzz/` (own workspace; `cargo +nightly fuzz run interp fuzz/corpus/interp fuzz/seeds/interp`),
+    harness bodies in `src/fuzzing.rs`, seeds and crash regressions replayed by
+    `tests/fuzz_corpus.rs`, weekly in `.github/workflows/fuzz.yml`. A fixed crash's
+    input goes in `fuzz/regressions/<target>/`.
+  - `--spool` and the subcommands take no limits yet (SECURITY.md says so).
 - **`pscat-mcp`'s contract (#568).** The server lives in
   `src/mcp_server.rs`, pulled into both binaries with `#[path]` (not the
   library): `pscat-mcp` and `pscat mcp` are the same server (#569).
