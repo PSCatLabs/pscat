@@ -204,6 +204,7 @@ fn handshake_and_tool_list() {
             "render_postscript",
             "handwrite",
             "chalkboard_math",
+            "review_sheet",
             "describe_art_capabilities",
             "eval_postscript"
         ],
@@ -228,6 +229,7 @@ fn every_tool_has_annotations() {
         ("render_postscript", false),
         ("handwrite", false),
         ("chalkboard_math", false),
+        ("review_sheet", false),
         ("describe_art_capabilities", true),
         ("eval_postscript", true),
     ];
@@ -270,7 +272,7 @@ fn pscat_mcp_subcommand_is_the_same_server() {
     let mut s = Server::start_subcommand();
     initialized(&mut s);
     let resp = s.call(json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }));
-    assert_eq!(resp["result"]["tools"].as_array().expect("tools").len(), 5);
+    assert_eq!(resp["result"]["tools"].as_array().expect("tools").len(), 6);
     // A tool call works too: the subcommand finds pscat (itself) to shell out to.
     let result = s.tool("eval_postscript", json!({ "source": "(hi) =" }));
     assert_eq!(result["isError"], false, "{result}");
@@ -1292,4 +1294,485 @@ fn chalkboard_math_runs_under_the_interpreter_limits() {
     let result = s.tool("chalkboard_math", small_board(QUADRATIC));
     assert_eq!(error_kind(&result), "limit_exceeded", "{result}");
     assert_eq!(result["structuredContent"]["error"]["limit"], "steps");
+}
+
+// --- review_sheet (#708) --------------------------------------------------------
+
+/// Standard base64, as an image content carries its PNG.
+fn unbase64(text: &str) -> Vec<u8> {
+    let value = |c: u8| match c {
+        b'A'..=b'Z' => c - b'A',
+        b'a'..=b'z' => c - b'a' + 26,
+        b'0'..=b'9' => c - b'0' + 52,
+        b'+' => 62,
+        b'/' => 63,
+        _ => panic!("not base64: {c}"),
+    };
+    let mut out = Vec::new();
+    for chunk in text.trim_end_matches('=').as_bytes().chunks(4) {
+        let n = chunk
+            .iter()
+            .fold(0u32, |n, &c| n << 6 | u32::from(value(c)))
+            << (6 * (4 - chunk.len()));
+        out.extend_from_slice(&n.to_be_bytes()[1..chunk.len()]);
+    }
+    out
+}
+
+/// The PNG an image content of a result carries.
+fn sheet_png(result: &Value) -> Vec<u8> {
+    assert_eq!(result["isError"], false, "{result}");
+    let images: Vec<&Value> = result["content"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|c| c["type"] == "image")
+        .collect();
+    assert_eq!(images.len(), 1, "one sheet: {result}");
+    assert_eq!(images[0]["mimeType"], "image/png");
+    unbase64(images[0]["data"].as_str().unwrap())
+}
+
+/// A logo-like program: a square and a disc in `rgb`, at the page's size.
+fn mark(rgb: &str) -> String {
+    format!(
+        "{rgb} setrgbcolor 0.1 0.1 scale 100 100 translate 0 0 800 800 rectfill 1 setgray 500 500 200 0 360 arc fill"
+    )
+}
+
+const BAD_PROGRAM: &str = "0 0 1 setrgbcolor 0 0 30 30 rectfill nosuchoperator";
+const TWO_PAGES: &str =
+    "1 0 0 setrgbcolor 0 0 40 40 rectfill showpage 0 0.6 0 setrgbcolor 0 0 20 40 rectfill showpage";
+
+/// `pscat sheet` over the programs as files, in a scratch directory the same
+/// way a user would run it. Returns the PNG and whether it exited cleanly.
+fn cli_sheet(tag: &str, files: &[(&str, &str)], flags: &[&[&str]]) -> (Vec<u8>, bool) {
+    let dir = common::scratch_dir(tag);
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_pscat"));
+    cmd.current_dir(&dir).arg("sheet").arg("-o").arg("cli.png");
+    for ((name, source), flags) in files.iter().zip(flags) {
+        std::fs::write(dir.join(name), source).unwrap();
+        cmd.args(*flags).arg(name);
+    }
+    let out = cmd.output().expect("run pscat sheet");
+    (
+        std::fs::read(dir.join("cli.png")).expect("the sheet"),
+        out.status.success(),
+    )
+}
+
+/// The acceptance check of #708: the tool's sheet is the CLI's, byte for
+/// byte, for the same programs. Mixed page sizes and dpis, an enlarged cell,
+/// accented labels, and the options that turn the labels and captions off.
+#[test]
+fn review_sheet_is_byte_identical_to_pscat_sheet() {
+    let (a, b, c) = (
+        mark("0.8 0.2 0.1"),
+        mark("0.1 0.3 0.7"),
+        mark("0.2 0.6 0.3"),
+    );
+    let mut s = Server::start();
+    initialized(&mut s);
+    let cases: [(&str, bool, bool); 3] = [
+        ("all", true, true),
+        ("bare", false, false),
+        ("sizes", false, true),
+    ];
+    for (tag, labels, sizes) in cases {
+        let mut extra: Vec<&str> = Vec::new();
+        if !labels {
+            extra.push("--no-labels");
+        }
+        if !sizes {
+            extra.push("--no-sizes");
+        }
+        let dir = common::scratch_dir(&format!("mcp-sheet-{tag}"));
+        for (name, source) in [("a.ps", &a), ("b.ps", &b), ("c.ps", &c)] {
+            std::fs::write(dir.join(name), source).unwrap();
+        }
+        let out = Command::new(env!("CARGO_BIN_EXE_pscat"))
+            .current_dir(&dir)
+            .arg("sheet")
+            .args(["-o", "cli.png"])
+            .args(&extra)
+            .args([
+                "--page",
+                "120x120",
+                "--dpi",
+                "96,9,9x4",
+                "--label",
+                "Café ñandú",
+                "a.ps",
+            ])
+            .args([
+                "--page",
+                "60x90",
+                "--dpi",
+                "72,200",
+                "--label",
+                "B: second",
+                "b.ps",
+            ])
+            .args(["--dpi", "40", "--label", "program 3", "c.ps"])
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let cli = std::fs::read(dir.join("cli.png")).unwrap();
+        let result = s.tool(
+            "review_sheet",
+            json!({
+                "entries": [
+                    { "source": a, "label": "Café ñandú", "width": 120, "height": 120,
+                      "dpi": [96, 9, { "dpi": 9, "zoom": 4 }] },
+                    { "source": b, "label": "B: second", "width": 60, "height": 90, "dpi": [72, 200] },
+                    // No width or height here: the top-level page is the CLI's
+                    // sticky `--page`, the one the file before it gave.
+                    { "source": c, "label": "program 3", "width": 60, "height": 90, "dpi": [40] },
+                ],
+                "labels": labels,
+                "sizes": sizes,
+            }),
+        );
+        let mine = sheet_png(&result);
+        assert_eq!(
+            mine, cli,
+            "{tag}: the tool's sheet differs from pscat sheet's"
+        );
+        let pm = tiny_skia::Pixmap::decode_png(&mine).expect("decode");
+        assert!(pm.width() > 100 && pm.height() > 100);
+    }
+}
+
+/// Defaults: the page 612x792 at 72 dpi, row labels `program N`, the
+/// top-level page and dpi list for entries that give none.
+#[test]
+fn review_sheet_defaults_match_the_cli_defaults() {
+    let (a, b) = (mark("0.8 0.2 0.1"), mark("0.1 0.3 0.7"));
+    let (cli, ok) = cli_sheet(
+        "mcp-sheet-defaults",
+        &[("a.ps", &a), ("b.ps", &b)],
+        &[
+            &["--label", "program 1", "--page", "50x50", "--dpi", "72,144"],
+            &["--label", "program 2"],
+        ],
+    );
+    assert!(ok);
+    let mut s = Server::start();
+    initialized(&mut s);
+    let result = s.tool(
+        "review_sheet",
+        json!({ "entries": [{ "source": a }, { "source": b }], "width": 50, "height": 50, "dpi": [72, 144] }),
+    );
+    assert_eq!(sheet_png(&result), cli);
+}
+
+/// A cell whose program fails is drawn as far as it got and the error comes
+/// back beside the sheet, as the CLI does (it exits non-zero, with the file
+/// written); a multi-page program contributes its last page.
+#[test]
+fn review_sheet_draws_a_failing_cell_and_a_multi_page_cell_like_the_cli() {
+    let (cli, ok) = cli_sheet(
+        "mcp-sheet-fail",
+        &[("bad.ps", BAD_PROGRAM), ("two.ps", TWO_PAGES)],
+        &[
+            &["--page", "40x40", "--label", "bad"],
+            &["--label", "two pages"],
+        ],
+    );
+    assert!(!ok, "the CLI exits non-zero when a cell fails");
+    let mut s = Server::start();
+    initialized(&mut s);
+    let result = s.tool(
+        "review_sheet",
+        json!({
+            "entries": [
+                { "source": BAD_PROGRAM, "label": "bad" },
+                { "source": TWO_PAGES, "label": "two pages" },
+            ],
+            "width": 40, "height": 40,
+        }),
+    );
+    assert_eq!(sheet_png(&result), cli);
+    let said = texts(&result).join("\n");
+    assert!(
+        said.contains("PostScript error in bad at 72 dpi failed"),
+        "{said}"
+    );
+    assert!(said.contains("nosuchoperator"), "{said}");
+    assert!(
+        !said.contains("two pages"),
+        "only the failing cell is reported: {said}"
+    );
+}
+
+/// The cells run under the interpreter's limits: a runaway cell is stopped,
+/// drawn as far as it got, and named, and the server carries on.
+#[test]
+fn review_sheet_cells_run_under_the_interpreter_limits() {
+    let mut s = Server::start_in(
+        &common::scratch_dir("mcp-sheet-lim"),
+        &["--timeout", "30", "--max-steps", "1000000"],
+    );
+    initialized(&mut s);
+    let result = s.tool(
+        "review_sheet",
+        json!({
+            "entries": [
+                { "source": "1 0 0 setrgbcolor 0 0 30 30 rectfill { } loop", "label": "loops" },
+                { "source": "0 0 1 setrgbcolor 0 0 30 30 rectfill", "label": "fine" },
+            ],
+            "width": 40, "height": 40, "dpi": [72],
+        }),
+    );
+    let png = sheet_png(&result);
+    assert!(
+        texts(&result)
+            .iter()
+            .any(|t| t.contains("limitexceeded") && t.contains("loops")),
+        "{result}"
+    );
+    let pm = tiny_skia::Pixmap::decode_png(&png).expect("decode");
+    // The red the runaway cell drew before it was stopped is on the sheet.
+    assert!(
+        pm.pixels()
+            .iter()
+            .any(|p| p.red() == 255 && p.green() == 0 && p.blue() == 0),
+        "the partial cell is drawn"
+    );
+    s.ping_ok();
+}
+
+/// One time budget for the whole sheet, not one per cell: cells that each
+/// run to their own clock limit cannot stretch a call past `--timeout`.
+#[test]
+fn review_sheet_has_one_time_budget_for_all_cells() {
+    let mut s = Server::start_in(
+        &common::scratch_dir("mcp-sheet-budget"),
+        &["--max-steps", "0", "--max-memory", "0", "--timeout", "3"],
+    );
+    initialized(&mut s);
+    let started = std::time::Instant::now();
+    let entry = json!({ "source": "{ 1 pop } loop" });
+    let result = s.tool(
+        "review_sheet",
+        json!({ "entries": [entry, entry, entry, entry], "width": 20, "height": 20 }),
+    );
+    assert_eq!(error_kind(&result), "timeout", "{result}");
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(12),
+        "{:?}",
+        started.elapsed()
+    );
+    s.ping_ok();
+}
+
+#[test]
+fn review_sheet_caps_are_structured_errors_before_anything_runs() {
+    let mut s = Server::start();
+    initialized(&mut s);
+    // Too many cells.
+    let dpi: Vec<u32> = vec![72; 33];
+    let result = s.tool(
+        "review_sheet",
+        json!({ "entries": [{ "source": "" }], "dpi": dpi }),
+    );
+    assert_eq!(error_kind(&result), "output_too_large", "{result}");
+    assert_eq!(result["structuredContent"]["error"]["limit_cells"], 32);
+    // A cell past 8000 px on a side, and one past it only once enlarged.
+    for (args, says) in [
+        (
+            json!({ "entries": [{ "source": "" }], "width": 8000, "height": 100, "dpi": [100] }),
+            "8000 pixels on a side",
+        ),
+        (
+            json!({ "entries": [{ "source": "" }], "width": 800, "height": 100, "dpi": [{ "dpi": 720, "zoom": 2 }] }),
+            "shown at 2x",
+        ),
+    ] {
+        let result = s.tool("review_sheet", args.clone());
+        assert_eq!(error_kind(&result), "output_too_large", "{args}: {result}");
+        assert!(texts(&result)[0].contains(says), "{args}: {result}");
+    }
+    // The cells' own pixels in all: 5 cells of 3000x3000 are 45 million.
+    let big = json!({ "source": "", "width": 3000, "height": 3000 });
+    let result = s.tool(
+        "review_sheet",
+        json!({ "entries": [big, big, big, big, big] }),
+    );
+    assert_eq!(error_kind(&result), "output_too_large", "{result}");
+    assert_eq!(
+        result["structuredContent"]["error"]["limit_pixels"],
+        40_000_000
+    );
+    // A sheet past the pixel cap whose cells are small: a wide strip over a
+    // tall one makes the sheet their bounding box, over 40 million pixels.
+    let result = s.tool(
+        "review_sheet",
+        json!({ "entries": [
+            { "source": "", "width": 7000, "height": 50 },
+            { "source": "", "width": 50, "height": 7000 },
+        ] }),
+    );
+    assert_eq!(error_kind(&result), "output_too_large", "{result}");
+    let err = &result["structuredContent"]["error"];
+    assert_eq!(err["limit_pixels"], 40_000_000);
+    assert!(err["width_px"].as_u64().unwrap() > 7000, "{err}");
+    // The sheet past 8000 px a side is Layout's own refusal, same kind.
+    let wide = json!({ "source": "", "width": 6000, "height": 10 });
+    let result = s.tool(
+        "review_sheet",
+        json!({ "entries": [wide], "dpi": [72, 72] }),
+    );
+    assert_eq!(error_kind(&result), "output_too_large", "{result}");
+    assert_eq!(result["structuredContent"]["error"]["limit_side_px"], 8000);
+    s.ping_ok();
+}
+
+#[test]
+fn review_sheet_bad_arguments_are_structured_tool_errors() {
+    let mut s = Server::start_in(
+        &common::scratch_dir("mcp-sheet-bad"),
+        &["--max-input-bytes", "100"],
+    );
+    initialized(&mut s);
+    let one = json!([{ "source": "0 setgray" }]);
+    for (args, says) in [
+        (json!({}), "entries must be a non-empty list"),
+        (json!({ "entries": [] }), "entries must be a non-empty list"),
+        (
+            json!({ "entries": "x" }),
+            "entries must be a non-empty list",
+        ),
+        (json!({ "entries": [7] }), "entries[0] must be an object"),
+        (json!({ "entries": [{}] }), "entries[0].source is required"),
+        (
+            json!({ "entries": [{ "source": 7 }] }),
+            "entries[0].source must be a string",
+        ),
+        (
+            json!({ "entries": [{ "source": "x", "label": 7 }] }),
+            "label must be a string",
+        ),
+        (
+            json!({ "entries": [{ "source": "x", "label": "a".repeat(201) }] }),
+            "over 200 characters",
+        ),
+        (
+            json!({ "entries": [{ "source": "x", "width": 0 }] }),
+            "width must be a whole number",
+        ),
+        (
+            json!({ "entries": one, "height": 9000 }),
+            "height must be a whole number",
+        ),
+        (
+            json!({ "entries": one, "dpi": 72 }),
+            "dpi must be a non-empty list",
+        ),
+        (
+            json!({ "entries": one, "dpi": [] }),
+            "dpi must be a non-empty list",
+        ),
+        (json!({ "entries": one, "dpi": [8] }), "from 9 to 1200"),
+        (json!({ "entries": one, "dpi": [1201] }), "from 9 to 1200"),
+        (
+            json!({ "entries": one, "dpi": ["96"] }),
+            "a cell is a dpi number",
+        ),
+        (
+            json!({ "entries": one, "dpi": [{ "zoom": 2 }] }),
+            "a dpi must be a number",
+        ),
+        (
+            json!({ "entries": one, "dpi": [{ "dpi": 9, "zoom": 1 }] }),
+            "zoom must be a whole number from 2 to 16",
+        ),
+        (
+            json!({ "entries": one, "dpi": [{ "dpi": 9, "zoom": 17 }] }),
+            "zoom must be a whole number from 2 to 16",
+        ),
+        (
+            json!({ "entries": [{ "source": "x", "dpi": [5] }] }),
+            "entries[0].dpi",
+        ),
+        (
+            json!({ "entries": one, "labels": "yes" }),
+            "labels must be true or false",
+        ),
+        (
+            json!({ "entries": one, "sizes": 1 }),
+            "sizes must be true or false",
+        ),
+    ] {
+        let result = s.tool("review_sheet", args.clone());
+        assert_eq!(error_kind(&result), "invalid_argument", "{args}: {result}");
+        assert!(texts(&result)[0].contains(says), "{args}: {result}");
+    }
+    // The sources together, not each, are held to the input cap.
+    let result = s.tool(
+        "review_sheet",
+        json!({ "entries": [{ "source": "a".repeat(60) }, { "source": "a".repeat(60) }] }),
+    );
+    assert_eq!(error_kind(&result), "input_too_large", "{result}");
+    assert_eq!(result["structuredContent"]["error"]["size"], 120);
+    // Programs are inline: a file name is a program, never a file to read.
+    let result = s.tool(
+        "review_sheet",
+        json!({ "entries": [{ "path": "/etc/passwd" }] }),
+    );
+    assert_eq!(error_kind(&result), "invalid_argument", "{result}");
+    s.ping_ok();
+}
+
+/// `out_path` is the server's usual one: confined to the root, `.png` only,
+/// checked before anything renders; the file holds the inline image's bytes.
+#[test]
+fn review_sheet_out_path_follows_the_server_rules() {
+    let root = common::scratch_dir("mcp-sheet-out");
+    let mut s = Server::start_in(&root, &[]);
+    initialized(&mut s);
+    let entries =
+        json!([{ "source": mark("0.8 0.2 0.1"), "label": "x", "width": 50, "height": 50 }]);
+    let result = s.tool(
+        "review_sheet",
+        json!({ "entries": entries, "out_path": "sheet.png" }),
+    );
+    assert!(texts(&result)[0].contains("sheet.png"), "{result}");
+    assert_eq!(
+        std::fs::read(root.join("sheet.png")).unwrap(),
+        sheet_png(&result)
+    );
+    for bad in ["../x.png", "sheet.svg", "nodir/x.png", ".git/x.png"] {
+        let result = s.tool(
+            "review_sheet",
+            json!({ "entries": entries, "out_path": bad }),
+        );
+        assert_eq!(error_kind(&result), "out_path_refused", "{bad}: {result}");
+    }
+    assert!(!root.join("x.png").exists());
+}
+
+/// A server started where `out_path` is off still returns the sheet inline.
+#[test]
+fn review_sheet_over_the_inline_byte_cap_is_refused_and_out_path_keeps_it() {
+    let root = common::scratch_dir("mcp-sheet-cap");
+    let mut s = Server::start_in(&root, &["--max-image-bytes", "2000"]);
+    initialized(&mut s);
+    let entries = json!([{ "source": mark("0.8 0.2 0.1"), "width": 200, "height": 200 }]);
+    let result = s.tool("review_sheet", json!({ "entries": entries }));
+    assert_eq!(error_kind(&result), "output_too_large", "{result}");
+    assert_eq!(result["structuredContent"]["error"]["limit_bytes"], 2000);
+    let result = s.tool(
+        "review_sheet",
+        json!({ "entries": entries, "out_path": "kept.png" }),
+    );
+    assert_eq!(error_kind(&result), "output_too_large", "{result}");
+    assert!(
+        root.join("kept.png").exists(),
+        "the file is written before the cap speaks"
+    );
 }
