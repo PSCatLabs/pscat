@@ -748,8 +748,13 @@ pub(crate) fn read_path_limited(
             return Ok(None);
         };
         loop {
-            make_room(&mut data, READ_CHUNK, poll)?;
-            match f.by_ref().take(READ_CHUNK as u64).read_to_end(&mut data) {
+            // Fill the room the size gave (no growth for a file that is what
+            // `metadata` said); make more only once it is full.
+            if data.len() == data.capacity() {
+                make_room(&mut data, READ_CHUNK, poll)?;
+            }
+            let room = (data.capacity() - data.len()).min(READ_CHUNK);
+            match f.by_ref().take(room as u64).read_to_end(&mut data) {
                 Ok(0) => return Ok(Some(data)),
                 Ok(n) => poll(n, 0)?,
                 Err(_) => return Ok(None),
