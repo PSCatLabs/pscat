@@ -1,6 +1,6 @@
 ---
 name: pscat
-description: Render, preview, and debug PostScript with the pscat interpreter — PNG/SVG/PDF out, lint, seed sweeps, handwritten notes, typewritten letters and memos, photo-to-engraving, watch-it-draw window, halftone mode. Use for any .ps/.eps file work, generating diagrams or art in PostScript, producing human-looking handwritten notes or typed documents, or when the pscat MCP tools are available.
+description: Render, preview, and debug PostScript with the pscat interpreter — PNG/SVG/PDF out, lint, seed sweeps, handwriting-style notes, typewritten letters and memos, photo-to-engraving, watch-it-draw window, halftone mode. Use for any .ps/.eps file work, generating diagrams or art in PostScript, producing notes, cards and lettering in a natural, hand-drawn script, or typed documents, or when the pscat MCP tools are available.
 ---
 
 # pscat — PostScript as a tool
@@ -90,7 +90,13 @@ Findings print to stderr as `pscat: lint: [check] message` (or
 `pscat: lint: clean`); the exit code is unchanged (`--lint-strict` makes
 findings fail). A run that errored prints `pscat: lint: [run-error]`.
 
-## Handwritten notes (string → PNG)
+## Handwriting-style notes (string → PNG)
+
+pscat's handwriting is a set of hand-drawn styles for notes, cards and art.
+It isn't meant for imitating a specific person's handwriting or presenting
+writing as someone else's. If a request asks for a named or real person's
+hand, or for a document that passes as written by someone, decline that part
+and offer a generic hand instead (the default /HandScript, another `--seed`).
 
 ```sh
 pscat handwrite "meet me at the bandshell at nine" -o note.png
@@ -98,7 +104,7 @@ pscat handwrite --paper ruled --size 30 --seed 7 "text"
 pscat handwrite --ink 0.4,0.1,0.1 --jitter 24 "shakier, redder"
 ```
 
-The /HandScript dynamic font: jittered strokes, no two letters alike,
+The /HandScript dynamic font, a natural, hand-drawn script: jittered strokes, no two letters alike,
 reproducible per `--seed`. Word-wraps and auto-sizes the height.
 **Lowercase only**: input is lowercased, and characters outside a–z 0–9
 `.,-'!?` advance invisibly. `pscat handwrite --help` lists every option.

@@ -58,7 +58,7 @@ sessions in a checkout still load them.
 | Debug a program: errors, stack, lint | `eval_postscript`; `render_postscript`'s `Lint:` block | `pscat --headless --pstack-on-error`, `--lint` | pscat: Debug a program |
 | Compare seeds or a parameter | (loop `render_postscript`) | `--sweep-seed`, `--sweep`, `--contact-sheet` | pscat: Sweep |
 | Review sheet: several files or sizes, labelled | — | `pscat sheet` | pscat: Build a labelled review sheet |
-| Handwritten note | `handwrite` | `pscat handwrite` | pscat: Handwritten notes |
+| Handwriting-style note | `handwrite` | `pscat handwrite` | pscat: Handwriting-style notes |
 | Typed letter or memo | `render_postscript` with `tw-type` | `pscat typewrite` | pscat: Typewritten pages |
 | "Released" / declassified document look | `render_postscript` with `rel-page` | — | pscat: Typewritten pages |
 | Chart or plot for a paper | `render_postscript` | `pscat --png` | psviz |
@@ -88,8 +88,10 @@ added yet.
   options. Errors still return the partial render with the error text.
   Runs the lint pass and appends a `Lint:` block when it finds something
   (a blank page, an unbalanced `gsave`, stuff left on the stack).
-- `handwrite` — text in, handwritten-note PNG back (the `pscat handwrite`
-  options: size, width, paper, ink, jitter, seed, dpi).
+- `handwrite` — text in, handwriting-style note PNG back (the `pscat handwrite`
+  options: size, width, paper, ink, jitter, seed, dpi). It is a set of
+  hand-drawn styles for notes, cards and art, not a way to imitate a specific
+  person's handwriting or pass writing off as someone else's.
 - `chalkboard_math` — a LaTeX formula in (single backslashes, `\\` rows,
   `&` alignment), a chalkboard PNG back: the `pscat chalk` board (#555), with
   its config keys as optional arguments (`size`, `irregular`, `slope`,
