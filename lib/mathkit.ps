@@ -73,6 +73,9 @@
 %                                 right, left ..., pairs /ColumnGap apart
 %                                 (0 is alignat); /ColumnWander lets
 %                                 the later columns drift down the lines
+%   mkalign /LineAlign /center    each line centred on its own width at x,
+%                                 as TeX gather sets its rows (the default,
+%                                 /relation, is align's: on the & or relation)
 % Anything else fails with an undefined name that says what it was:
 % `mk-unsupported-command:\oplus`, `mk-unsupported-character:@`, and so
 % on. Nothing is dropped silently. `$` is ignored, so ($x^2$) works.
@@ -2099,6 +2102,10 @@
   mkao /ColumnWander 0 mkopt dup mkisnum { dup 0 lt } { true } ifelse
     { mk-columnwander-must-be-a-non-negative-number } if
   /mkCwan exch def
+  mkao /LineAlign /relation mkopt
+  dup /relation eq 1 index /center eq or not
+    { mk-linealign-must-be-relation-or-center } if
+  /mkLinealign exch def
   mkao /Ink null mkopt
   dup null ne {
     dup xcheck 1 index type dup /arraytype eq exch /packedarraytype eq or and
@@ -2127,6 +2134,10 @@
     } for
   ] def
   mkcolumns
+  % /LineAlign /center: TeX gather, every line centred on its own width
+  mkLinealign /center eq {
+    mkjobs { dup /Box get 0 get 2 div /Ax exch put } forall
+  } if
   % baselines: each below the last by the leading or by what they hold,
   % the = column a little off from line to line
   /mkpy mkay0 def /mkpd 0 def
@@ -2929,6 +2940,28 @@
 %   { (a mod b) 0 0 << >> mkpath } /mk-bare-word-needs-a-backslash:mod (a bare mod) mustguard
 %%EndSelfTest
 %
+%%SelfTest: mkalign-line-align-centres-each-line
+%   % issue #699: /LineAlign /center is TeX gather, each line centred at x
+%   /mkt-o << /Size 30 /Irregular 0 /Seed 2 >> def
+%   /mkt-oc << /Size 30 /Irregular 0 /Seed 2 /LineAlign /center >> def
+%   /mkt-or << /Size 30 /Irregular 0 /Seed 2 /LineAlign /relation >> def
+%   /mkt-mid { dup /Origin get 0 get exch /Width get 2 div add } def
+%   /mkt-l [ (a) (x = yyyy) (b + c) ] def
+%   newpath mkt-l 200 300 mkt-oc mkalign /mkt-c exch def
+%   0 1 2 { mkt-c exch get mkt-mid 200 sub abs 0.01 lt
+%     (each line is centred at x, whatever its relation) mustbe } for
+%   % the default and /relation are the layout it always was
+%   newpath mkt-l 200 300 mkt-o mkalign /mkt-d exch def
+%   newpath mkt-l 200 300 mkt-or mkalign /mkt-r exch def
+%   0 1 2 { dup mkt-d exch get /Origin get 0 get exch mkt-r exch get /Origin get 0 get
+%     sub abs 0.001 lt (/relation is the default) mustbe } for
+%   mkt-d 1 get /Origin get 0 get mkt-d 0 get /Origin get 0 get sub abs 0.5 gt
+%   (the default lines do not share one start) mustbe
+%   { [ (a) ] 0 0 << /LineAlign /left >> mkalign }
+%   /mk-linealign-must-be-relation-or-center (/LineAlign /left) mustguard
+%   newpath
+%%EndSelfTest
+%
 %%SelfTest: mkalign-alignat-and-column-wander
 %   % issue #439: /ColumnGap 0 is amsmath's alignat, and /ColumnWander lets
 %   % each pair after the first drift on its own
@@ -3067,6 +3100,7 @@
 % @param: /Leading [multiple of /Size] The least distance from one baseline to the next; taller lines push further (default 1.9)
 % @param: /ColumnGap [multiple of /Size] With more than one & on a line (TeX align's columns: right, left, right, left ...), the space between one right-left pair of columns and the next; 0 is amsmath's alignat, the pairs butting (default 2)
 % @param: /ColumnWander [ratio] How far each right-left pair after the first drifts sideways on its own, a walk down the lines (each line keeps most of the last one's offset), as a hand's later columns do; 1 is as far as a line's own wander, and it scales with /Irregular (default 0: no drift)
+% @param: /LineAlign [name] /relation aligns every line on its & or first relation, as TeX align does; /center centres each line on its own width at x, as TeX gather does, whatever its & or relations (default /relation)
 % @param: /Ink [proc] Called after each line's path is appended, with the line's index on the stack, to paint it (for example { pop << /Width 2 >> dcchalk }), so each line can be inked differently; it must consume the index and paint or clear the path (default none: every line stays on the current path)
 % @param: /Size [points] As for mkpath (default 36)
 % @param: /Style [name] As for mkpath (default /display)

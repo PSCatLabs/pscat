@@ -7,8 +7,8 @@
 //! part of the library.
 //!
 //! An MCP server over stdio (newline-delimited JSON-RPC 2.0) exposing
-//! five tools: `render_postscript`, `handwrite`, `chalkboard_math`,
-//! `describe_art_capabilities`, `eval_postscript`. Works with any MCP
+//! six tools: `render_postscript`, `handwrite`, `chalkboard_math`,
+//! `review_sheet`, `describe_art_capabilities`, `eval_postscript`. Works with any MCP
 //! client — Claude Code, Codex, OpenClaw, Hermes; registration
 //! one-liners are in `docs/guides/agents.md`.
 //!
@@ -79,6 +79,7 @@ An MCP server on stdin/stdout (launched by an MCP client, not by hand).
 
 /// The limits and the output root, fixed for the server's lifetime by
 /// whoever registered it. No tool argument can change them.
+#[derive(Clone)]
 struct Config {
     /// Canonical output root, or why `out_path` is unavailable.
     out_root: Result<PathBuf, String>,
@@ -445,6 +446,7 @@ fn tools_call(cfg: &Config, id: Value, params: &Value) -> Value {
         "render_postscript" => render_postscript,
         "handwrite" => handwrite,
         "chalkboard_math" => chalkboard_math,
+        "review_sheet" => review_sheet,
         "describe_art_capabilities" => |cfg, _| describe_art_capabilities(cfg),
         "eval_postscript" => eval_postscript,
         other => return error(id, -32602, &format!("unknown tool: {other}"), None),
@@ -659,6 +661,62 @@ fn tool_list(cfg: &Config) -> Value {
                     "out_path": { "type": "string", "description": out_path.trim_end() }
                 },
                 "required": ["latex"]
+            }
+        },
+        {
+            "name": "review_sheet",
+            "title": "Review sheet",
+            "annotations": annotations("Review sheet", false),
+            "description": format!("Compose a labelled review sheet: each PostScript program is a row \
+                and each entry of its dpi list a cell, drawn at its own true pixel size (a 48 px \
+                render stays 48 px beside a 512 px one), centred in its column with a hairline \
+                around it, the row label above and a pixel-size caption (`48x48 px`) under each \
+                cell. For comparing candidates (logos, icons, a seed's variants) at several \
+                sizes in one image. Returns one PNG: for the same programs, pages, dpis and labels, byte for byte what \
+                `pscat sheet` writes. A dpi entry {{\"dpi\": 9, \"zoom\": 4}} draws \
+                the 9 dpi render again enlarged 4x with no smoothing (whole factors 2..16), so a \
+                small icon can be read pixel by pixel. Programs are given inline as `source`, \
+                never as file names. Each cell runs in its own child under the interpreter's \
+                limits; a cell whose program fails is still drawn as far as it got, with the \
+                error text alongside. Labels in Latin (accents included), Korean, Japanese, \
+                Chinese and Thai are drawn in a face for the script (the last three need the \
+                cjk-thai font pack). Writes a file only when out_path is given (then it replaces \
+                an existing .png), which is why this tool is not marked read-only. Limits: \
+                {MAX_SHEET_CELLS} cells; the sheet at most {MAX_SHEET_PIXELS} pixels and 8000 a \
+                side, and the cells rendered at most {MAX_SHEET_PIXELS} pixels in all; labels at \
+                most {MAX_SHEET_LABEL} characters; {}s for the whole sheet, {} bytes of source in \
+                all; the interpreter's step, time and memory limits per cell (limit_exceeded). \
+                The inline image is capped at {} bytes: past that, lower the dpi list or use \
+                out_path. The programs can read any local file you can.",
+                cfg.timeout.as_secs(), cfg.max_input, cfg.max_image),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "entries": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": MAX_SHEET_CELLS,
+                        "description": "The rows, top to bottom, one program each",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "source": { "type": "string", "description": "The PostScript program" },
+                                "label": { "type": "string", "maxLength": MAX_SHEET_LABEL, "description": "The row label (default: \"program N\", N counting from 1)" },
+                                "width": { "type": "integer", "minimum": 1, "maximum": 8000, "description": "Page width in points (default: the top-level width)" },
+                                "height": { "type": "integer", "minimum": 1, "maximum": 8000, "description": "Page height in points (default: the top-level height)" },
+                                "dpi": sheet_dpi_schema("The cells of this row: one per item, left to right (default: the top-level dpi)")
+                            },
+                            "required": ["source"]
+                        }
+                    },
+                    "width": { "type": "integer", "minimum": 1, "maximum": 8000, "description": "Page width in points for entries that give none (default 612)" },
+                    "height": { "type": "integer", "minimum": 1, "maximum": 8000, "description": "Page height in points for entries that give none (default 792)" },
+                    "dpi": sheet_dpi_schema("One cell per item, left to right: a dpi (9..1200), or {\"dpi\": 9, \"zoom\": 4} to also draw it enlarged 4x. The default for entries that give no list (default [72])"),
+                    "labels": { "type": "boolean", "description": "Draw the row labels (default true)" },
+                    "sizes": { "type": "boolean", "description": "Draw the pixel-size caption under each cell (default true)" },
+                    "out_path": { "type": "string", "description": out_path.trim_end() }
+                },
+                "required": ["entries"]
             }
         },
         {
@@ -1146,6 +1204,431 @@ fn chalkboard_math(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
         content.push(text_content(&wrote_message(&written)));
     }
     Ok(Value::Array(content))
+}
+
+// --- review_sheet (#708) ----------------------------------------------
+
+/// Most cells (dpi entries, over all rows) one sheet may ask for. Each is a
+/// child process under the call's one time budget; the logo sheet is 12.
+const MAX_SHEET_CELLS: usize = 32;
+
+/// The sheet at most this many pixels, and the cells rendered for it at most
+/// this many in all (before any zoom): the same figure as a chalkboard, so
+/// one call costs about what one board does in memory.
+const MAX_SHEET_PIXELS: u64 = 40_000_000;
+
+/// Longest row label, in characters.
+const MAX_SHEET_LABEL: usize = 200;
+
+/// Largest `zoom`, as `pscat sheet --dpi 9x16`.
+const MAX_SHEET_ZOOM: u32 = 16;
+
+/// Row label and caption type sizes in pixels: `pscat sheet`'s own
+/// (`src/subcmd/sheet.rs`), so the two tools draw the same sheet.
+const SHEET_LABEL_PX: u32 = 16;
+const SHEET_CAPTION_PX: u32 = 12;
+
+/// The least time worth giving a cell. Anything positive keeps the child's
+/// own `--max-time` from rounding to zero (which means no limit), and a
+/// `--timeout 1` server still draws a small sheet; under this the call stops
+/// with `timeout` instead of starting a cell it cannot finish.
+const MIN_CELL_BUDGET: Duration = Duration::from_millis(100);
+
+/// The longest error text kept per failed cell.
+const MAX_CELL_NOTE: usize = 2000;
+
+struct SheetEntry<'a> {
+    source: &'a str,
+    label: String,
+    page: (u32, u32),
+    /// `(dpi, zoom)` per cell; zoom 1 is no enlargement.
+    cells: Vec<(f32, u32)>,
+}
+
+/// The schema of a dpi list, spelled out where it is used rather than as a
+/// `$ref`: some clients do not resolve references in a tool's input schema.
+fn sheet_dpi_schema(description: &str) -> Value {
+    json!({
+        "type": "array",
+        "minItems": 1,
+        "description": description,
+        "items": {
+            "anyOf": [
+                { "type": "number", "minimum": 9, "maximum": 1200 },
+                {
+                    "type": "object",
+                    "properties": {
+                        "dpi": { "type": "number", "minimum": 9, "maximum": 1200 },
+                        "zoom": { "type": "integer", "minimum": 2, "maximum": MAX_SHEET_ZOOM }
+                    },
+                    "required": ["dpi"]
+                }
+            ]
+        }
+    })
+}
+
+/// A dpi list: `[96, {"dpi": 9, "zoom": 4}]`.
+fn sheet_cells(key: &str, v: &Value) -> Result<Vec<(f32, u32)>, ToolError> {
+    let items = v
+        .as_array()
+        .filter(|a| !a.is_empty())
+        .ok_or_else(|| ToolError::invalid(format!("{key} must be a non-empty list of cells")))?;
+    let dpi = |v: Option<&Value>| match v.and_then(Value::as_f64) {
+        Some(d) if (9.0..=1200.0).contains(&d) => Ok(d as f32),
+        _ => Err(ToolError::invalid(format!(
+            "{key}: a dpi must be a number from 9 to 1200, got {}",
+            v.map_or("nothing".to_string(), Value::to_string)
+        ))),
+    };
+    items
+        .iter()
+        .map(|item| match item {
+            Value::Number(_) => Ok((dpi(Some(item))?, 1)),
+            Value::Object(o) => {
+                let zoom = match o.get("zoom") {
+                    None | Some(Value::Null) => 1,
+                    Some(z) => z
+                        .as_u64()
+                        .filter(|z| (2..=u64::from(MAX_SHEET_ZOOM)).contains(z))
+                        .ok_or_else(|| {
+                            ToolError::invalid(format!(
+                                "{key}: zoom must be a whole number from 2 to {MAX_SHEET_ZOOM}, got {z}"
+                            ))
+                        })? as u32,
+                };
+                Ok((dpi(o.get("dpi"))?, zoom))
+            }
+            other => Err(ToolError::invalid(format!(
+                "{key}: a cell is a dpi number or {{\"dpi\", \"zoom\"}}, got {other}"
+            ))),
+        })
+        .collect()
+}
+
+/// The pixel size a page of `page` points renders at `dpi`: the interpreter's
+/// own rounding (`Interp::with_page_scaled`), repeated here so that a sheet
+/// over a cap is refused before any program runs. A child's PNG that comes
+/// back at another size is an internal error, so the two cannot drift apart
+/// unnoticed.
+fn sheet_pixels(page: (u32, u32), dpi: f32) -> (u64, u64) {
+    let px = |pt: u32| ((pt as f32 * (dpi / 72.0)).round() as u64).max(1);
+    (px(page.0), px(page.1))
+}
+
+fn review_sheet(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
+    use pscat::contact_sheet::{self as sheet, CellSize, Layout, RowSize};
+
+    let started = Instant::now();
+    let items = match args.get("entries") {
+        Some(Value::Array(a)) if !a.is_empty() => a,
+        _ => return Err(ToolError::invalid("entries must be a non-empty list")),
+    };
+    let default_page = (
+        optional_int(args, "width", 1, 8000)?.unwrap_or(612) as u32,
+        optional_int(args, "height", 1, 8000)?.unwrap_or(792) as u32,
+    );
+    let default_cells = match args.get("dpi") {
+        None | Some(Value::Null) => vec![(72.0, 1)],
+        Some(v) => sheet_cells("dpi", v)?,
+    };
+    let labels = optional_bool(args, "labels")?.unwrap_or(true);
+    let sizes = optional_bool(args, "sizes")?.unwrap_or(true);
+    let dest = optional_str(args, "out_path")?
+        .map(|p| confine(cfg, p, "png"))
+        .transpose()?;
+
+    let mut entries = Vec::with_capacity(items.len());
+    let mut source_bytes = 0usize;
+    for (i, item) in items.iter().enumerate() {
+        let which = format!("entries[{i}]");
+        if !item.is_object() {
+            return Err(ToolError::invalid(format!("{which} must be an object")));
+        }
+        let source = match item.get("source") {
+            Some(Value::String(s)) => s.as_str(),
+            None | Some(Value::Null) => {
+                return Err(ToolError::invalid(format!("{which}.source is required")));
+            }
+            Some(_) => {
+                return Err(ToolError::invalid(format!(
+                    "{which}.source must be a string"
+                )));
+            }
+        };
+        source_bytes = source_bytes.saturating_add(source.len());
+        let label = match optional_str(item, "label")? {
+            Some(l) if l.chars().count() > MAX_SHEET_LABEL => {
+                return Err(ToolError::invalid(format!(
+                    "{which}.label is over {MAX_SHEET_LABEL} characters"
+                )));
+            }
+            Some(l) => l.to_string(),
+            None => format!("program {}", i + 1),
+        };
+        let page = (
+            optional_int(item, "width", 1, 8000)?.map_or(default_page.0, |w| w as u32),
+            optional_int(item, "height", 1, 8000)?.map_or(default_page.1, |h| h as u32),
+        );
+        let cells = match item.get("dpi") {
+            None | Some(Value::Null) => default_cells.clone(),
+            Some(v) => sheet_cells(&format!("{which}.dpi"), v)?,
+        };
+        entries.push(SheetEntry {
+            source,
+            label,
+            page,
+            cells,
+        });
+    }
+    if source_bytes > cfg.max_input {
+        return Err(ToolError::new(
+            "input_too_large",
+            format!(
+                "the sources are {source_bytes} bytes in all; this server accepts at most {}",
+                cfg.max_input
+            ),
+        )
+        .with("limit", json!(cfg.max_input))
+        .with("size", json!(source_bytes)));
+    }
+    let n_cells: usize = entries.iter().map(|e| e.cells.len()).sum();
+    if n_cells > MAX_SHEET_CELLS {
+        return Err(ToolError::new(
+            "output_too_large",
+            format!("{n_cells} cells is over this tool's limit of {MAX_SHEET_CELLS}"),
+        )
+        .with("limit_cells", json!(MAX_SHEET_CELLS))
+        .with("cells", json!(n_cells)));
+    }
+
+    // Every size is known before a program runs, so a sheet over a cap
+    // fails at once and costs nothing: the cells' own sizes by arithmetic,
+    // the text by the label renderer, the sheet by `Layout`.
+    let too_large = |message: String, pixels: u64| {
+        ToolError::new("output_too_large", message)
+            .with("limit_pixels", json!(MAX_SHEET_PIXELS))
+            .with("pixels", json!(pixels))
+    };
+    let text = |t: &str, px: u32, bold: bool| {
+        sheet::render_text(t, px, bold).map_err(|e| ToolError::new("internal", e))
+    };
+    let mut rendered_pixels = 0u64;
+    let mut headers = Vec::new();
+    let mut captions = Vec::new();
+    let mut row_sizes = Vec::new();
+    for e in &entries {
+        let header = if labels {
+            text(&e.label, SHEET_LABEL_PX, true)?
+        } else {
+            None
+        };
+        let dims = |p: Option<&tiny_skia::Pixmap>| p.map_or((0, 0), |p| (p.width(), p.height()));
+        let mut row = RowSize {
+            header: dims(header.as_ref()),
+            cells: Vec::new(),
+        };
+        let mut row_captions = Vec::new();
+        for &(dpi, zoom) in &e.cells {
+            let (w, h) = sheet_pixels(e.page, dpi);
+            let side = u64::from(sheet::MAX_SIDE_PX);
+            if w * u64::from(zoom) > side || h * u64::from(zoom) > side {
+                return Err(too_large(
+                    format!(
+                        "{}: a {}x{} pt page at {dpi} dpi is {w}x{h} pixels{}; a cell is at most \
+                         {side} pixels on a side",
+                        e.label,
+                        e.page.0,
+                        e.page.1,
+                        if zoom > 1 {
+                            format!(
+                                ", {}x{} shown at {zoom}x",
+                                w * u64::from(zoom),
+                                h * u64::from(zoom)
+                            )
+                        } else {
+                            String::new()
+                        }
+                    ),
+                    w * h,
+                ));
+            }
+            rendered_pixels += w * h;
+            if rendered_pixels > MAX_SHEET_PIXELS {
+                return Err(too_large(
+                    format!(
+                        "the cells are over {MAX_SHEET_PIXELS} pixels in all, this tool's limit. \
+                         Lower a dpi, a page size or the number of cells."
+                    ),
+                    rendered_pixels,
+                ));
+            }
+            let caption = if sizes {
+                let note = if zoom > 1 {
+                    format!(" (shown at {zoom}x)")
+                } else {
+                    String::new()
+                };
+                text(&format!("{w}x{h} px{note}"), SHEET_CAPTION_PX, false)?
+            } else {
+                None
+            };
+            row.cells.push(CellSize {
+                image: ((w as u32) * zoom, (h as u32) * zoom),
+                caption: dims(caption.as_ref()),
+            });
+            row_captions.push(caption);
+        }
+        headers.push(header);
+        captions.push(row_captions);
+        row_sizes.push(row);
+    }
+    let layout = Layout::new(&row_sizes)
+        .map_err(|m| too_large(m, 0).with("limit_side_px", json!(sheet::MAX_SIDE_PX)))?;
+    let sheet_pixels_total = u64::from(layout.width) * u64::from(layout.height);
+    if sheet_pixels_total > MAX_SHEET_PIXELS {
+        return Err(too_large(
+            format!(
+                "the sheet would be {}x{} pixels; this tool draws at most {MAX_SHEET_PIXELS} \
+                 pixels. Lower a dpi, a page size or the number of cells.",
+                layout.width, layout.height
+            ),
+            sheet_pixels_total,
+        )
+        .with("width_px", json!(layout.width))
+        .with("height_px", json!(layout.height)));
+    }
+    let mut out = layout
+        .new_sheet()
+        .map_err(|m| ToolError::new("internal", m))?;
+
+    // Cells stream into the sheet, one frame in memory at a time. Each is
+    // rendered by its own child under the interpreter's limits, and every
+    // child gets what is left of the one call's time budget.
+    let scratch = ScratchDir::new()?;
+    let bin = pscat_bin()?;
+    let mut notes = Vec::new();
+    let mut n = 0usize;
+    for (r, e) in entries.iter().enumerate() {
+        if let Some(h) = &headers[r] {
+            let (x, y) = layout.header_xy[r];
+            sheet::blit_at(&mut out, x, y, h);
+        }
+        for (c, &(dpi, zoom)) in e.cells.iter().enumerate() {
+            n += 1;
+            let left = cfg.timeout.saturating_sub(started.elapsed());
+            if left < MIN_CELL_BUDGET {
+                return Err(sheet_timeout(cfg));
+            }
+            let budget = Config {
+                timeout: left,
+                ..cfg.clone()
+            };
+            let png = scratch.path().join(format!("cell-{n}.png"));
+            let mut cmd = Command::new(&bin);
+            budget.interpreter_args(&mut cmd);
+            cmd.arg("--page")
+                .arg(format!("{}x{}", e.page.0, e.page.1))
+                .arg("--dpi")
+                .arg(number_arg(f64::from(dpi)))
+                .arg("--png")
+                .arg(&png)
+                .arg("-");
+            let run = match run_child(&budget, &mut cmd, e.source.as_bytes()) {
+                Ok(run) => run,
+                Err(t) if t.kind == "timeout" => return Err(sheet_timeout(cfg)),
+                Err(other) => return Err(other),
+            };
+            // The last page, as `pscat sheet` takes it: a program that shows
+            // several pages contributes its final one.
+            let Some(page) = collect_pages(&png).pop() else {
+                return Err(failed_run(
+                    "render_failed",
+                    format!(
+                        "{} at {dpi} dpi produced no page:\n{}",
+                        e.label,
+                        run.stderr.trim_end()
+                    ),
+                    &run.stderr,
+                ));
+            };
+            if !run.success {
+                let mut why = run.stderr.trim_end().to_string();
+                if why.len() > MAX_CELL_NOTE {
+                    let mut end = MAX_CELL_NOTE;
+                    while !why.is_char_boundary(end) {
+                        end -= 1;
+                    }
+                    why.truncate(end);
+                    why.push_str("...");
+                }
+                notes.push(format!("{} at {dpi} dpi failed:\n{why}", e.label));
+            }
+            let bytes = std::fs::read(&page).map_err(|er| format!("read {page:?}: {er}"))?;
+            let _ = std::fs::remove_file(&page);
+            let frame = tiny_skia::Pixmap::decode_png(&bytes)
+                .map_err(|er| format!("decode the cell for {}: {er}", e.label))?;
+            let want = sheet_pixels(e.page, dpi);
+            if (u64::from(frame.width()), u64::from(frame.height())) != want {
+                return Err(ToolError::new(
+                    "internal",
+                    format!(
+                        "{} at {dpi} dpi came back {}x{} pixels, not the {}x{} planned",
+                        e.label,
+                        frame.width(),
+                        frame.height(),
+                        want.0,
+                        want.1
+                    ),
+                ));
+            }
+            let frame = if zoom > 1 {
+                sheet::zoom_nearest(&frame, zoom)
+                    .ok_or_else(|| ToolError::new("internal", "cell too large to zoom"))?
+            } else {
+                frame
+            };
+            let (x, y) = layout.image_xy[r][c];
+            sheet::frame(&mut out, x, y, frame.width(), frame.height());
+            sheet::blit_at(&mut out, x, y, &frame);
+            if let Some(cap) = &captions[r][c] {
+                let (cx, cy) = layout.caption_xy[r][c];
+                sheet::blit_at(&mut out, cx, cy, cap);
+            }
+        }
+    }
+    let sheet_png = scratch.path().join("sheet.png");
+    out.save_png(&sheet_png)
+        .map_err(|e| format!("write the sheet: {e}"))?;
+    drop(out);
+    let pages = [sheet_png];
+    let written = match &dest {
+        Some(dest) => Some(dest.write_pages(&pages)?),
+        None => None,
+    };
+    let mut content = Vec::new();
+    for note in notes {
+        content.push(text_content(&format!("PostScript error in {note}")));
+    }
+    for body in read_inline(cfg, &pages, written.as_deref())? {
+        content.push(image_content(&body));
+    }
+    if let Some(written) = written {
+        content.push(text_content(&wrote_message(&written)));
+    }
+    Ok(Value::Array(content))
+}
+
+fn sheet_timeout(cfg: &Config) -> ToolError {
+    ToolError::new(
+        "timeout",
+        format!(
+            "the sheet was not finished in {}s, this server's limit per call. Use fewer or \
+             cheaper cells.",
+            cfg.timeout.as_secs()
+        ),
+    )
+    .with("limit_seconds", json!(cfg.timeout.as_secs()))
 }
 
 fn describe_art_capabilities(cfg: &Config) -> Result<Value, ToolError> {

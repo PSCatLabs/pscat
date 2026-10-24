@@ -323,12 +323,12 @@ use your shell's `ulimit`, a container's memory and CPU limits, or `timeout`.
 
 ### The MCP server (`pscat-mcp`)
 
-`pscat-mcp` serves five tools over stdio to whatever agent or client launched
-it: `render_postscript`, `handwrite`, `chalkboard_math`,
+`pscat-mcp` serves six tools over stdio to whatever agent or client launched
+it: `render_postscript`, `handwrite`, `chalkboard_math`, `review_sheet`,
 `describe_art_capabilities` and `eval_postscript`. It runs each call as a
 child process (`pscat`, and `pscat handwrite` for `handwrite`; for
 `chalkboard_math` the server writes the PostScript itself and runs it in a
-`pscat` child) as the same user, with the same
+`pscat` child; for `review_sheet` one `pscat` child per cell) as the same user, with the same
 environment and working directory as the server. Checked with:
 `src/mcp_server.rs`, `tests/mcp.rs` (which tests every bound below),
 `scripts/mcp_inspector_check.sh`, and Claude Code and Codex sessions against
@@ -361,7 +361,7 @@ an installed build (October 2026, #568).
   beside it under the same rules. The bytes are a PNG, SVG or PDF, but an SVG
   or PDF contains text the PostScript program chose. Renders without
   `out_path` go to a private temp directory that is deleted after the call.
-- **`eval_postscript` and `render_postscript` run arbitrary PostScript** with
+- **`eval_postscript`, `render_postscript` and `review_sheet` run arbitrary PostScript** with
   the file-read behaviour above. A model that calls them can read any file
   the server's user can read and receive the contents. This is not confined:
   it is the interpreter's file access; the interpreter's step, time and memory
@@ -415,6 +415,30 @@ an installed build (October 2026, #568).
   A TeX error comes back as `latex_error` with a stable `code`
   (`unsupported_command`, `unsupported_character`, `missing_argument`, ...)
   and the `token` it named, in one line, never a PostScript stack dump.
+- **`review_sheet` runs every cell in its own child, under the same limits,
+  and reads no file by name (#708).** `pscat sheet` itself runs its programs
+  in-process with no step, time or memory limit, so the server does not call
+  it: each program goes in inline (`source`, never a path, so the tool opens
+  no file the caller named) and each cell is rendered by a `pscat` child with
+  `--max-steps`, `--max-time` and `--max-memory`, as `render_postscript` does;
+  the server only composes the finished pictures, in-process, with the
+  `pscat::contact_sheet` layout and label code (pure drawing, no files). All
+  the cells share the one `--timeout`: each child gets what is left of it,
+  and the call fails with `timeout` when under a tenth of a second remains. A cell that
+  stops at a limit is drawn as far as it got and named in the text beside the
+  sheet. Caps, checked before any program runs, all `output_too_large`:
+  - at most **32 cells** (`limit_cells`), each a child process;
+  - the cells at most **40,000,000 pixels** in all (`limit_pixels`, `pixels`),
+    before any enlargement, and a cell at most 8000 pixels on a side even
+    enlarged;
+  - the sheet at most **40,000,000 pixels** (`limit_pixels`, `width_px`,
+    `height_px`) and 8000 a side (`limit_side_px`): the sheet is 4 bytes a
+    pixel in the server, allocated before `--max-memory` counts, as for
+    `chalkboard_math`;
+  - the sources together at most `--max-input-bytes`, and a label at most 200
+    characters (the label text is drawn in the server process, so its length
+    is bounded). The inline image is capped by `--max-image-bytes`; ask for a
+    big sheet with `out_path`, which follows the rules above (`.png` only).
 - **One call at a time.** A runaway program delays later requests, `ping`
   included, until its limit or timeout stops it; there is no cancellation yet
   (#622).

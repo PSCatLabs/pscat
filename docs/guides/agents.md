@@ -17,7 +17,7 @@ and both work against an **installed** pscat (no checkout needed):
   the copy compiled into `pscat`. [`AGENTS.md`](../../AGENTS.md) points
   Codex at the pscat skill.
 - **MCP**: `pscat-mcp`, installed beside `pscat`, an MCP server over stdio
-  with five tools (below).
+  with six tools (below).
 
 In Claude Code the easiest route is the **plugin**, which installs the three
 skills and registers `pscat-mcp` in one step (install pscat first; the plugin
@@ -57,7 +57,7 @@ sessions in a checkout still load them.
 | Render a PostScript file or snippet, see the page | `render_postscript` | `pscat --png/--svg/--pdf` | pscat: Render a file |
 | Debug a program: errors, stack, lint | `eval_postscript`; `render_postscript`'s `Lint:` block | `pscat --headless --pstack-on-error`, `--lint` | pscat: Debug a program |
 | Compare seeds or a parameter | (loop `render_postscript`) | `--sweep-seed`, `--sweep`, `--contact-sheet` | pscat: Sweep |
-| Review sheet: several files or sizes, labelled | — | `pscat sheet` | pscat: Build a labelled review sheet |
+| Review sheet: several files or sizes, labelled | `review_sheet` | `pscat sheet` | pscat: Build a labelled review sheet |
 | Handwriting-style note | `handwrite` | `pscat handwrite` | pscat: Handwriting-style notes |
 | Typed letter or memo | `render_postscript` with `tw-type` | `pscat typewrite` | pscat: Typewritten pages |
 | "Released" / declassified document look | `render_postscript` with `rel-page` | — | pscat: Typewritten pages |
@@ -78,8 +78,9 @@ sessions in a checkout still load them.
 Task-level MCP tools are added only where agents clearly do better with
 one than with `render_postscript` plus the skill's snippet (#623).
 `chalkboard_math` is the first: LaTeX in, one call, instead of a PostScript
-program with every backslash doubled. A one-call typewriter or chart is not
-added yet.
+program with every backslash doubled. `review_sheet` is the second: several
+programs in, one labelled sheet out, instead of a render call per size and a
+PIL composite. A one-call typewriter or chart is not added yet.
 
 ## The MCP server
 
@@ -102,6 +103,23 @@ added yet.
   `unsupported_command`, `token` `\oplus`). The input is LaTeX, never
   PostScript. `latex` is capped at 4096 bytes and the board at 40 million
   pixels (see the limits below); svg and pdf go to `out_path` only.
+- `review_sheet` — several programs in, one labelled PNG out: the
+  `pscat sheet` sheet (#693), byte for byte. `entries` is a list of rows,
+  each `{source, label, width, height, dpi}` (`source` is the program, never
+  a file name; `label` defaults to `program N`); `width`, `height` and `dpi`
+  at the top level are the defaults for rows that give none. `dpi` is a list
+  of cells, left to right, each a number (9..1200) or `{"dpi": 9, "zoom": 4}`
+  to draw that render again enlarged 4x with no smoothing, so a small icon
+  can be read pixel by pixel. Every cell is drawn at its true pixel size,
+  centred in its column, with the row label above and a `48x48 px` caption
+  below (`labels: false`, `sizes: false` drop them). A program that errors is
+  drawn as far as it got, with its error text beside the image. Each cell is
+  its own `pscat` child under the interpreter limits and the one call
+  `--timeout`. At most 32 cells, the cells and the sheet at most 40 million
+  pixels, 8000 a side (`output_too_large`); see the limits below. The #683
+  logo sheet is one call:
+  `{"entries": [{"source": "<a.ps>", "label": "A: one-line cat"}, ...],
+  "width": 384, "height": 384, "dpi": [96, 9, {"dpi": 9, "zoom": 4}]}`.
 - `describe_art_capabilities` — the machine-readable catalog of what this
   build has: fonts, Type 3 faces, palettes, page templates, procedures
   (`--capabilities` on the CLI; see
@@ -123,8 +141,9 @@ fields are set on every tool:
 | `render_postscript` | false | false | true | false |
 | `handwrite` | false | false | true | false |
 | `chalkboard_math` | false | false | true | false |
+| `review_sheet` | false | false | true | false |
 
-The hints are static per tool, so the three render tools take the conservative
+The hints are static per tool, so the four tools that can write a file take the conservative
 value: they write a file only when `out_path` is given, but without a way to
 say "read-only unless this argument is set" they are marked `readOnlyHint:
 false`. They are not destructive: `out_path` is confined to the output root and
@@ -172,6 +191,13 @@ times a long derivation; the time limit stops anything slower), and the
 board at most 40,000,000 device pixels and 8000 a side (`output_too_large`
 with `limit_pixels`; an 8K screen or an A2 poster at 300 dpi fits). Both are
 in `SECURITY.md`.
+
+`review_sheet` has fixed caps too, checked before any program runs
+(`output_too_large`): 32 cells (`limit_cells`), the cells at most 40,000,000
+pixels in all and the sheet at most 40,000,000 pixels and 8000 a side
+(`limit_pixels`), a label at most 200 characters, and the sources together at
+most `--max-input-bytes`. The cells share the one `--timeout`. Also in
+`SECURITY.md`.
 
 The three interpreter limits (steps, time, memory) are on by default for
 `render_postscript`, `eval_postscript` and `chalkboard_math`; a program cannot catch them with

@@ -86,6 +86,15 @@ grammar as the flag CLI. A `--dpi` cell is `DPI[xZOOM][@MAT]`: `@#222` (or
 to judge an icon on dark and light. `+` joins cells into one stacked column.
 `--cols N` wraps a row after N columns. Quote a `--dpi` list with `#` or `+`.
 
+With only the MCP server connected, call `review_sheet` instead: the programs
+go inline as `entries: [{source, label, width, height, dpi}]` (never file
+names), `dpi` is a list of cells, each a number or `{"dpi": 9, "zoom": 4}`, and
+`width`, `height` and `dpi` at the top level are the defaults for entries that
+give none. The sheet comes back as one PNG, the same bytes the CLI writes;
+`labels: false` and `sizes: false` drop the text. A failing program is drawn as
+far as it got, with its error beside the image. At most 32 cells and 40 million
+pixels; each cell runs under the server's interpreter limits.
+
 ## Debug a program
 
 ```sh
@@ -254,12 +263,14 @@ whatever lands in `DIR`: only point it at a directory you trust.
 
 ## MCP
 
-`pscat-mcp` (installed beside `pscat`) serves five tools over stdio:
+`pscat-mcp` (installed beside `pscat`) serves six tools over stdio:
 `render_postscript` (source → PNG images inline, or SVG text, or a PDF
 written to `out_path`; adds a `Lint:` block when the page looks wrong),
 `eval_postscript` (what the program printed, or the error with the
 offending command and line), `handwrite`, `chalkboard_math` (LaTeX → a
-chalkboard PNG; above), and `describe_art_capabilities`.
+chalkboard PNG; above), `review_sheet` (the review sheet above, from inline
+programs: byte for byte what `pscat sheet` writes) and
+`describe_art_capabilities`.
 Each call has a time limit (default 60 s) and the interpreter stops a runaway
 program itself, with a `limit_exceeded` error whose `limit` field says `steps`,
 `time` or `memory` (a render still returns the partial page); `stopped` cannot

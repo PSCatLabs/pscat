@@ -21,9 +21,11 @@ and the toolkit.
 3. Refine and re-render. Small seeds, big differences: `N srand` at
    the top makes every run reproducible (same seed, same picture).
    `pscat piece.ps --sweep-seed 1:12 --contact-sheet grid.png` compares
-   twelve seeds in one run. For labelled cells (`seed=7` under each) that
-   wrap at a width you choose: `pscat sheet --sweep-seed 1:12 --cols 4
-   --page WxH --dpi 36 piece.ps`.
+   twelve seeds in one run. To compare different programs, or one at
+   several sizes (a 48 px icon beside its 512 px original), with labels:
+   `pscat sheet`, or `review_sheet` over MCP (see the `pscat` skill). A seed
+   sweep with `seed=7` under each cell, wrapped at a width you choose:
+   `pscat sheet --sweep-seed 1:12 --cols 4 --page WxH --dpi 36 piece.ps`.
 4. Optional, if Ghostscript is installed: `gs` is the behavioural
    oracle, but it cannot find `lib/` on its own (pscat's copy is inside
    the binary), so this check needs a pscat checkout:
