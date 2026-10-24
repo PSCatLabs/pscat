@@ -90,7 +90,7 @@ pub(super) fn run(args: Args) -> Result<(), Failure> {
     // Everything the layout needs is known before any cell renders, so an
     // oversized sheet fails fast: pixel sizes from a probe interpreter,
     // text from the label renderer.
-    let text = |t: &str, px: u32, bold: bool| sheet::render_text(t, px, bold).map_err(&msg);
+    let text = |t: &str, px: u32, bold: bool| sheet::render_text(t, px, bold).map_err(msg);
     let mut headers: Vec<Option<Pixmap>> = Vec::new();
     let mut captions: Vec<Vec<Option<Pixmap>>> = Vec::new();
     let mut sizes: Vec<RowSize> = Vec::new();
@@ -141,8 +141,8 @@ pub(super) fn run(args: Args) -> Result<(), Failure> {
         captions.push(row_captions);
         sizes.push(row);
     }
-    let layout = Layout::new(&sizes).map_err(&msg)?;
-    let mut out = layout.new_sheet().map_err(&msg)?;
+    let layout = Layout::new(&sizes).map_err(msg)?;
+    let mut out = layout.new_sheet().map_err(msg)?;
 
     // Cells stream into the sheet, one frame in memory at a time.
     let mut any_failed = false;
