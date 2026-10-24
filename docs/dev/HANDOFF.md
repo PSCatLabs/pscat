@@ -22,7 +22,7 @@ specimen posters in `examples/style_*.ps` (20) — plus
 REPL, Stage 8's last sliver) and the Level 2 rect operators. Also
 done, unplanned/post-roadmap: Stage 21, standalone installability —
 `src/paths.rs` (the resource resolver used by the font catalog,
-`run`/`file`, and the `handwrite`/`typewrite`/`photo-etch` subcommands; since #598 it also
+`run`/`file`, and the `handwrite`/`typewrite`/`photo-etch` subcommands (and `chalk`, #555); since #598 it also
 serves a copy of `lib/**/*.ps` compiled into the binary, and a release
 build has no checkout heuristics),
 `scripts/package_release.sh`, and `.github/workflows/release.yml`,
@@ -807,6 +807,17 @@ renders eight examples in both and compares block-downsampled output).
    line, measure the prefix with `mkmetrics` under that line's own seed
    (`/Seed` + 101 i) and add it to the record's `/Origin`
    (`notes/532-chalkboard-final-pass.md`).
+   #555 is the front door: `pscat chalk 'LaTeX' -o board.png` (single
+   backslashes, `\\` rows, a JSON config). The driver generator is
+   `pscat::chalk` (`src/chalk.rs`, pure Rust, wasm-safe); the CLI
+   (`src/subcmd/chalk.rs`) only writes what `chalk::render` returns, so the
+   MCP tool (#688) and a web demo should call the library, not re-derive
+   the driver. It measures with `mkalign` (ink thrown away) before loading
+   drychalk, so a TeX error costs no board, and maps mathkit's
+   `mk-<kind>:<token>` to `ChalkError::Latex`. `tests/chalk.rs` pins five
+   boards by pixel hash: any mathkit/strokeglyphs/drychalk/drykit change
+   that moves a pixel moves them (re-pin after looking)
+   (`notes/555-chalk-latex-cli.md`).
    #239 shipped `lib/drycrayon.ps` (`dy-`): `dycrayon` (a core and a rim
    `dkstroke` per subpath, one wax level each), `dypaper`, the crayon box
    (`dybox`, `dycolors`, `dycolor`) and six child motions with paintkit's

@@ -85,6 +85,24 @@ reproducible per `--seed`. Word-wraps and auto-sizes the height.
 From PostScript: `(lib/handscript.ps) run` (one options dict; see its
 header).
 
+## LaTeX on a chalkboard (formula → PNG/SVG/PDF)
+
+```sh
+pscat chalk 'x = \frac{-b \pm \sqrt{b^2-4ac}}{2a}' -o board.png
+pscat chalk 'f(x) &= (x+1)^2 \\ &= x^2 + 2x + 1' --seed 7 --color yellow -o derivation.png
+pscat chalk --file eq.tex --json '{"board": {"tone": "greenboard"}}' -o eq.png
+pscat chalk 'e^{i\pi} + 1 = 0' --no-board -o overlay.png    # transparent, chalk only
+```
+
+Raw LaTeX with **single** backslashes (unlike mathkit from PostScript),
+`\\` between rows, `&` to align; `$...$` or an `align` wrapper is fine.
+Deterministic per `--seed`. The block is shrunk to fit the board and centred.
+TeX outside mathkit's subset fails with one line naming it
+(`unsupported LaTeX command \oplus`) and writes nothing. `--config FILE` /
+`--json TEXT` take the JSON config (`layout`, `chalk`, `board` or
+`"board": false`, `seed`); `pscat chalk --help` and the dry-media guide list
+every key. `--print-ps` prints the generated PostScript.
+
 ## Typewritten pages (text → PNG/PDF)
 
 `-o` takes `.png`, `.svg` or `.pdf` (format by extension; anything else is an

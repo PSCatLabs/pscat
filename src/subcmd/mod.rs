@@ -1,6 +1,7 @@
 //! The tool subcommands: `pscat handwrite`, `pscat typewrite` and
 //! `pscat photo-etch` (issue #600), ports of `scripts/handwrite.sh`,
-//! `scripts/typewrite.sh` and `scripts/photo_etch.sh`.
+//! `scripts/typewrite.sh` and `scripts/photo_etch.sh`; and `pscat chalk`
+//! (issue #555), a front over the `pscat::chalk` driver generator.
 //!
 //! Each builds a PostScript *driver* (the library's bytes followed by an
 //! options dictionary and one call into the library) and renders it
@@ -24,6 +25,7 @@ use pscat::Interp;
 
 use crate::Options;
 
+mod chalk;
 mod handwrite;
 mod photo_etch;
 mod typewrite;
@@ -37,6 +39,7 @@ pub(crate) fn dispatch(mut args: impl Iterator<Item = String>) -> Option<ExitCod
         "handwrite" => handwrite::run,
         "typewrite" => typewrite::run,
         "photo-etch" => photo_etch::run,
+        "chalk" => chalk::run,
         _ => return None,
     };
     let cmd = first;

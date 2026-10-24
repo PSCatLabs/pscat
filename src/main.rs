@@ -150,7 +150,7 @@ fn main() -> ExitCode {
     if argv.first().is_some_and(|a| a == "mcp") {
         return mcp_server::run(argv.into_iter().skip(1));
     }
-    // `pscat handwrite|typewrite|photo-etch ...`: self-contained subcommands
+    // `pscat handwrite|typewrite|photo-etch|chalk ...`: self-contained subcommands
     // with their own options (subcmd/); everything else is the flag CLI.
     if let Some(code) = subcmd::dispatch(env::args().skip(1)) {
         return code;
