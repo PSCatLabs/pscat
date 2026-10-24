@@ -236,7 +236,7 @@ mod file_reads {
         let used = it.steps_used();
         assert!((300..=400).contains(&used), "steps used: {used}");
 
-        // And the cap: a 300 KiB file passes a 1000-step cap, fails a 100 one.
+        // And the cap: the same file passes a million-step cap, fails a 100-step one.
         let mut it = limited(steps(100));
         assert_eq!(it.run_str(&src), Err(PsError::StepsExceeded));
     }
