@@ -585,10 +585,12 @@ fn tool_list(cfg: &Config) -> Value {
         },
         {
             "name": "handwrite",
-            "title": "Handwritten note",
-            "annotations": annotations("Handwritten note", false),
-            "description": format!("Render text as a handwritten note (PNG): a dynamic pen-written \
-                font with per-letter variation, word-wrapped, auto-sized page. \
+            "title": "Handwriting-style note",
+            "annotations": annotations("Handwriting-style note", false),
+            "description": format!("Render text as a handwriting-style note (PNG): a natural, hand-drawn \
+                script with per-letter variation, word-wrapped, auto-sized page. \
+                A set of hand-drawn styles for notes, cards and art; not for imitating a \
+                specific person's handwriting or presenting writing as someone else's. \
                 Lowercase letters, digits and .,-'!? only; anything else is invisible. \
                 Writes a file only when out_path is given (then it replaces an existing .png), \
                 which is why this tool is not marked read-only. {limits}"),

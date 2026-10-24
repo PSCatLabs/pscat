@@ -1,6 +1,9 @@
 # Handwriting
 
-pscat can write a note in a believable human hand. Two pieces make that work:
+pscat can write a note, card or piece of lettering in a natural, hand-drawn
+script. Its handwriting is a set of hand-drawn styles for notes, cards and art.
+It isn't meant for imitating a specific person's handwriting or presenting
+writing as someone else's. Two pieces make it work:
 the `handwrite` command, which turns a string into a PNG, and `/HandScript`,
 the dynamic font underneath it. Both are pure PostScript, so the same file runs
 in Ghostscript too.

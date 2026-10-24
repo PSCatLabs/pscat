@@ -6,13 +6,18 @@ paper-ready charts from Claude Code or Codex, with the
 interpreter. The plugin bundles:
 
 - **Three skills**: `pscat` (the tool reference: render to PNG/SVG/PDF,
-  debug, lint, seed sweeps, handwritten notes, typed letters and memos,
+  debug, lint, seed sweeps, handwriting-style notes, typed letters and memos,
   photo-to-engraving), `psart` (the render-look-refine loop for generative
   art, painting, dry media, chalkboard maths and style packs) and `psviz`
   (function plots and bar/line/area/scatter/pie charts for papers).
-- **The `pscat-mcp` server**, which gives the agent four tools:
+- **The `pscat-mcp` server**, which gives the agent five tools:
   `render_postscript` (pages come back as images the agent can look at),
-  `eval_postscript`, `handwrite` and `describe_art_capabilities`.
+  `eval_postscript`, `handwrite`, `chalkboard_math` (LaTeX in, a chalkboard
+  PNG back) and `describe_art_capabilities`.
+
+pscat's handwriting is a set of hand-drawn styles for notes, cards and art.
+It isn't meant for imitating a specific person's handwriting or presenting
+writing as someone else's.
 
 ## Requirements: install pscat first
 
@@ -80,7 +85,7 @@ The first command reads the Codex marketplace in
 `.agents/plugins/marketplace.json`; the second copies `plugin/` (under
 100 KB) into `~/.codex/plugins/cache/pscat/pscat/<version>/`. Start a new
 Codex session and the skills appear as `pscat:pscat`, `pscat:psart` and
-`pscat:psviz`, with the `pscat` MCP server's four tools.
+`pscat:psviz`, with the `pscat` MCP server's five tools.
 Adding the marketplace clones the whole repository (about 360 MB on
 disk); a sparse clone of the two directories the plugin needs is under
 2 MB:
@@ -109,7 +114,7 @@ needs a POSIX shell to run (#633).
 ## Try it
 
 - "Render a PostScript poster of a spiral galaxy and show me the result."
-- "Write me a handwritten thank-you note to Sam, on lined paper."
+- "Write me a thank-you note to Sam in a hand-drawn script, on lined paper."
 - "Make a bar chart of these quarterly numbers for my paper, as a PDF:
   Q1 12, Q2 18, Q3 15, Q4 22."
 - "This .ps file draws a blank page. Why?"

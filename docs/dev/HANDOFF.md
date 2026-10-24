@@ -1025,6 +1025,17 @@ renders eight examples in both and compares block-downsampled output).
 
 ## Gotchas for the next implementer
 
+- **Handwriting is worded as a style, not as passing for real** (#686).
+  Say "handwriting-style notes" or "a natural, hand-drawn script" in the
+  skills, the plugin README and the MCP tool description, never
+  "human-looking" or anything about passing as real handwriting, and keep the
+  one purpose statement (hand-drawn styles for notes, cards and art; not for
+  imitating a specific person's handwriting or presenting writing as someone
+  else's). The `pscat` skill tells the agent to decline a named person's hand
+  and offer a generic one. The sloppy-but-legible glyph guidance in
+  `docs/guides/handwriting.md` and `lib/handscript.ps` is unchanged on purpose.
+  The `plugin.json` manifests carry no such claim, so they were not edited.
+
 - **Workflows: every action is pinned to a commit SHA, and only the
   `release` environment may hold `id-token: write`** (#602).
   `python3 scripts/check_workflows.py` (CI's `release-policy` job) fails a
