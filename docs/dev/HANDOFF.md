@@ -820,7 +820,12 @@ renders eight examples in both and compares block-downsampled output).
    (`notes/555-chalk-latex-cli.md`). #700: `chalk::lines` removes every math
    delimiter pair (several side by side, nested), and a stray, unclosed or
    mismatched one, or words outside the pairs, is a one-line `ChalkError::Latex`
-   (`notes/700-chalk-separate-inline-pairs.md`).
+   (`notes/700-chalk-separate-inline-pairs.md`). #699: a `gather` wrapper
+   (`gather`, `gather*`, `gathered`; the innermost stripped row environment
+   decides) centres each row, via mathkit's `mkalign /LineAlign /center`
+   (default `/relation`, so `align` and every other caller is unchanged); one
+   row, or any other wrapper, never gets the option
+   (`notes/699-chalk-gather-centred.md`).
    #239 shipped `lib/drycrayon.ps` (`dy-`): `dycrayon` (a core and a rim
    `dkstroke` per subpath, one wax level each), `dypaper`, the crayon box
    (`dybox`, `dycolors`, `dycolor`) and six child motions with paintkit's

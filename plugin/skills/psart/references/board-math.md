@@ -37,7 +37,10 @@ newpath (x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}) 60 500 << /Size 36 /Seed 1 >> 
   align's columns (right, left, right, left ...), the pairs `/ColumnGap`
   apart (multiples of `/Size`, default 2): `(f(x) &= x^2 & f'(x) &= 2x)`.
   `/ColumnGap 0` is `alignat`; `/ColumnWander 1` lets the later columns
-  drift down the lines as a hand's do (default 0).
+  drift down the lines as a hand's do (default 0). `/LineAlign /center`
+  centres each line on its own width at x, as TeX `gather` does (default
+  `/relation`: align's `&` or first `=`). `pscat chalk` sets it for a
+  `gather`, `gather*` or `gathered` wrapper.
 - **`mkframe`**, **`mkunderline`**, **`mkarrow`** and **`mkbrace`** draw the
   annotations. `x0 y0 x1 y1 << >> mkbrace` is a curly brace whose arms
   end at the two points, pointing right of the direction of travel (left
