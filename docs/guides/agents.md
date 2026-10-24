@@ -57,6 +57,7 @@ sessions in a checkout still load them.
 | Render a PostScript file or snippet, see the page | `render_postscript` | `pscat --png/--svg/--pdf` | pscat: Render a file |
 | Debug a program: errors, stack, lint | `eval_postscript`; `render_postscript`'s `Lint:` block | `pscat --headless --pstack-on-error`, `--lint` | pscat: Debug a program |
 | Compare seeds or a parameter | (loop `render_postscript`) | `--sweep-seed`, `--sweep`, `--contact-sheet` | pscat: Sweep |
+| Review sheet: several files or sizes, labelled | — | `pscat sheet` | pscat: Build a labelled review sheet |
 | Handwritten note | `handwrite` | `pscat handwrite` | pscat: Handwritten notes |
 | Typed letter or memo | `render_postscript` with `tw-type` | `pscat typewrite` | pscat: Typewritten pages |
 | "Released" / declassified document look | `render_postscript` with `rel-page` | — | pscat: Typewritten pages |

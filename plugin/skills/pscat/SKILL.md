@@ -49,6 +49,26 @@ Needs `--png` (numbered frames) and/or `--contact-sheet PATH` (one grid
 PNG; `--grid COLSxROWS` sets the layout). A frame that errors still
 writes its partial canvas; the exit code is nonzero if any frame failed.
 
+## Build a labelled review sheet (several files, several sizes)
+
+`--contact-sheet` is for one program's same-size sweep frames. To compare
+different files, or one file at different sizes (logo candidates at 512 px
+and 48 px, say), with names under them, use `pscat sheet` instead of reaching
+for PIL:
+
+```sh
+pscat sheet -o sheet.png --page 384x384 --dpi 96,9,9x4 \
+    --label "A: one-line cat" a.ps --label "B: drawing board" b.ps
+```
+
+Each file is a row; each entry in `--dpi` is a cell in it, drawn at its own
+true pixel size and centred in its column, with the row label above and a
+`512x512 px` caption below. `9x4` adds the 9 dpi render again enlarged 4x with
+no smoothing, to read a small icon pixel by pixel. `--page` and `--dpi` apply
+to the files after them, so one sheet can mix page sizes. `--no-labels` and
+`--no-sizes` drop the text; the sheet is at most 8000 px a side. An erroring
+file is still drawn, as far as it got, and the exit code is nonzero.
+
 ## Debug a program
 
 ```sh

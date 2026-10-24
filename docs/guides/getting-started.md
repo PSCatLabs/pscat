@@ -70,6 +70,16 @@ More on the less obvious ones:
   grid PNG instead (`--grid COLSxROWS` overrides the layout). Use either or
   both. `examples/sweep_demo.ps` is the specimen. Sweeps are CLI-only; the
   `pscat-mcp` server does not expose one.
+- **Review sheets.** `pscat sheet -o sheet.png --page 384x384 --dpi 96,9
+  a.ps b.ps` lays several files out as labelled rows, each at several sizes:
+  every cell at its own true pixel size, centred in its column, with the row
+  label (the file name, or `--label TEXT`) above and a `WxH px` caption
+  below. A `--dpi` entry such as `9x4` adds an exact, unsmoothed 4x
+  enlargement of the 9 dpi render. `--page` and `--dpi` apply to the files
+  after them, so one sheet can mix page sizes. Where `--contact-sheet` can
+  only grid same-size sweep frames, this builds icon-size comparisons and
+  candidate review sheets without an imaging library; `pscat sheet --help`
+  has the rest.
 - **Gradients.** `shfill` paints axial and radial gradients (`ShadingType`
   2 and 3, with exponential and stitching functions, so multi-stop ramps
   work). Raster and window output use real gradients, SVG uses native
