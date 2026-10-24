@@ -4,6 +4,9 @@
 
 use pscat::{Interp, Limits, PsError};
 
+#[cfg(unix)]
+mod common;
+
 #[global_allocator]
 static ALLOC: pscat::TrackingAllocator = pscat::TrackingAllocator;
 
@@ -77,17 +80,13 @@ fn memory_growth_is_capped() {
 
         // A regular file bigger than the cap is refused up front, from its
         // length, before any of it is read.
-        let path =
-            std::env::temp_dir().join(format!("pscat-limits-mem-{}.bin", std::process::id()));
+        let path = common::scratch_dir("limits-mem").join("big.bin");
         std::fs::File::create(&path)
             .unwrap()
             .set_len(200 * MIB as u64)
             .unwrap();
         let mut it = limited(100);
-        let src = format!(
-            "({}) (r) file pop",
-            path.to_str().unwrap().replace('\\', "/")
-        );
+        let src = format!("({}) (r) file pop", common::ps_path(&path));
         let result = it.run_str(&src);
         let _ = std::fs::remove_file(&path);
         assert_eq!(result, Err(PsError::MemoryExceeded));
