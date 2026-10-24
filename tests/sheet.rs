@@ -1,7 +1,9 @@
 //! `pscat sheet` (issue #693): labelled review sheets of files at mixed
 //! sizes. The geometry is checked against numbers worked out here from
-//! the documented layout (12 px margin, 14 px column gap, 1 px border),
-//! not by calling the layout code under test.
+//! the documented layout (12 px margin, 14 px column gap, 1 px border,
+//! and for issue #706 a 10 px mat pad, 10 px between stacked cells and
+//! between the lines of a wrapped row), not by calling the layout code
+//! under test.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -223,6 +225,240 @@ fn a_failing_cell_is_drawn_and_the_run_fails() {
     assert_eq!(px(&p, 13, 13), [255, 0, 0, 255]);
 }
 
+const GREY: [u8; 4] = [190, 190, 190, 255];
+
+/// `@MAT` sets a cell on a padded mat: opaque art is framed by it, and a
+/// page that paints nothing shows the mat through (it is drawn on a
+/// transparent page). The cell is not scaled.
+#[test]
+fn a_mat_pads_the_cell_and_shows_through_a_transparent_page() {
+    let d = dir();
+    let a = write(&d, "a.ps", RED);
+    let blank = write(&d, "blank.ps", "% paints nothing");
+    let out = d.join("mat.png");
+    let (ok, _, stderr) = sheet(&[
+        "-o",
+        out.to_str().unwrap(),
+        "--no-labels",
+        "--no-sizes",
+        "--page",
+        "100x100",
+        "--dpi",
+        "72@#222,72@fff",
+        &a,
+        &blank,
+    ]);
+    assert!(ok, "{stderr}");
+    let p = Pixmap::load_png(&out).unwrap();
+    // Each cell is 100 + 2*10 pad + 2 border = 122 px; two rows.
+    assert_eq!(
+        (p.width(), p.height()),
+        (12 + 122 + 14 + 122 + 12, 12 + 122 + 18 + 122 + 12)
+    );
+    let dark = [0x22, 0x22, 0x22, 255];
+    // Row one, first cell: hairline at x 12, mat from 13, art from 23.
+    assert_eq!(px(&p, 12, 13), GREY);
+    assert_eq!(px(&p, 13, 13), dark);
+    assert_eq!(px(&p, 22, 22), dark);
+    assert_eq!(px(&p, 23, 23), [255, 0, 0, 255]);
+    assert_eq!(px(&p, 122, 122), [255, 0, 0, 255]);
+    assert_eq!(px(&p, 123, 123), dark);
+    // Row one, second cell (white mat, same red art): x starts 12+122+14.
+    let x2 = 12 + 122 + 14 + 1;
+    assert_eq!(px(&p, x2, 13), WHITE);
+    assert_eq!(px(&p, x2 + 10, 23), [255, 0, 0, 255]);
+    // Row two, the blank page: all mat, dark then white.
+    let y2 = 12 + 122 + 18 + 1;
+    assert_eq!(px(&p, 13 + 60, y2 + 60), dark);
+    assert_eq!(px(&p, x2 + 60, y2 + 60), WHITE);
+}
+
+/// `+` stacks cells in one column: the column is as wide as its widest,
+/// the row as tall as its tallest stack, and a lone cell is centred.
+#[test]
+fn a_plus_stacks_cells_in_one_column() {
+    let d = dir();
+    let a = write(&d, "a.ps", RED);
+    let out = d.join("stack.png");
+    let (ok, _, stderr) = sheet(&[
+        "-o",
+        out.to_str().unwrap(),
+        "--no-labels",
+        "--no-sizes",
+        "--page",
+        "100x100",
+        "--dpi",
+        "72,36+36",
+        &a,
+    ]);
+    assert!(ok, "{stderr}");
+    let p = Pixmap::load_png(&out).unwrap();
+    // Stack: 52 + 10 + 52 = 114 high; the 102 px cell is centred in it.
+    assert_eq!(
+        (p.width(), p.height()),
+        (12 + 102 + 14 + 52 + 12, 12 + 114 + 12)
+    );
+    let red = [255, 0, 0, 255];
+    assert_eq!(px(&p, 13, 12 + 6 + 1), red);
+    assert_eq!(px(&p, 13, 12 + 6), GREY);
+    // The stack starts at the top of the band, x 12+102+14 = 128.
+    assert_eq!(px(&p, 129, 13), red);
+    assert_eq!(px(&p, 129, 12), GREY);
+    assert_eq!(px(&p, 129 + 49, 13 + 49), red);
+    // Second stacked cell: 12 + 52 + 10 = 74, image at 75.
+    assert_eq!(px(&p, 129, 75), red);
+    assert_eq!(px(&p, 129, 74), GREY);
+    assert_eq!(px(&p, 129, 73), WHITE);
+}
+
+/// `--cols N` continues a long row on the next line, under the same
+/// column slots, with the label only above the first line.
+#[test]
+fn cols_wraps_a_long_row_onto_further_lines() {
+    let d = dir();
+    let a = write(&d, "a.ps", RED);
+    let out = d.join("wrap.png");
+    let run = |extra: &[&str]| {
+        let mut args = vec![
+            "-o",
+            out.to_str().unwrap(),
+            "--no-labels",
+            "--no-sizes",
+            "--page",
+            "50x50",
+            "--dpi",
+            "72,72,72,72,72",
+        ];
+        args.extend_from_slice(extra);
+        args.push(&a);
+        let (ok, _, stderr) = sheet(&args);
+        assert!(ok, "{stderr}");
+        Pixmap::load_png(&out).unwrap()
+    };
+    let flat = run(&[]);
+    assert_eq!(
+        (flat.width(), flat.height()),
+        (12 + 5 * 52 + 4 * 14 + 12, 76)
+    );
+    let p = run(&["--cols", "2"]);
+    // Two slots wide, three lines (2+2+1) 10 px apart.
+    assert_eq!(
+        (p.width(), p.height()),
+        (12 + 52 + 14 + 52 + 12, 12 + 3 * 52 + 2 * 10 + 12)
+    );
+    let red = [255, 0, 0, 255];
+    for (x, y) in [
+        (13, 13),
+        (13 + 66, 13),
+        (13, 13 + 62),
+        (13 + 66, 13 + 62),
+        (13, 13 + 124),
+    ] {
+        assert_eq!(px(&p, x, y), red, "({x},{y})");
+    }
+    // The fifth cell is alone on its line: nothing in the second slot.
+    assert_eq!(px(&p, 13 + 66, 13 + 124), WHITE);
+}
+
+/// A sweep makes one cell per value, each with its value as the caption;
+/// `--sweep` defines the name before the program runs.
+#[test]
+fn a_parameter_sweep_draws_one_labelled_cell_per_value() {
+    let d = dir();
+    let prog = write(
+        &d,
+        "w.ps",
+        "/W where { pop } { /W 1 def } ifelse 1 0 0 setrgbcolor 0 0 W 50 rectfill",
+    );
+    let out = d.join("param.png");
+    let (ok, stdout, stderr) = sheet(&[
+        "-o",
+        out.to_str().unwrap(),
+        "--no-labels",
+        "--no-sizes",
+        "--page",
+        "100x50",
+        "--sweep",
+        "W=20,60",
+        &prog,
+    ]);
+    assert!(ok, "{stderr}");
+    assert!(stdout.contains("wrote"), "{stdout}");
+    let p = Pixmap::load_png(&out).unwrap();
+    assert_eq!(p.width(), 12 + 102 + 14 + 102 + 12);
+    let red = [255, 0, 0, 255];
+    // First cell (W=20): red at x 13..33, white beyond; second (W=60).
+    assert_eq!(px(&p, 13 + 10, 30), red);
+    assert_eq!(px(&p, 13 + 40, 30), WHITE);
+    let x2 = 12 + 102 + 14 + 1;
+    assert_eq!(px(&p, x2 + 40, 30), red);
+    assert_eq!(px(&p, x2 + 70, 30), WHITE);
+    // The value labels are the only text: a strip under the cells.
+    let ink = |x0: u32, x1: u32| {
+        (12 + 52 + 5..p.height()).any(|y| (x0..x1).any(|x| px(&p, x, y)[0] < 100))
+    };
+    assert!(ink(12, 114) && ink(x2, x2 + 100));
+    // Without the sweep the same program is one cell with no caption.
+    let out2 = d.join("param-none.png");
+    let (ok, _, _) = sheet(&[
+        "-o",
+        out2.to_str().unwrap(),
+        "--no-labels",
+        "--no-sizes",
+        "--page",
+        "100x50",
+        &prog,
+    ]);
+    assert!(ok);
+    assert_eq!(Pixmap::load_png(&out2).unwrap().height(), 12 + 52 + 12);
+}
+
+/// `--sweep-seed` reseeds each cell; a program that never seeds is told so.
+#[test]
+fn a_seed_sweep_reseeds_each_cell_and_warns_when_nothing_seeds() {
+    let d = dir();
+    let seeded = write(
+        &d,
+        "seeded.ps",
+        "1 srand rand 2 mod 0 eq { 1 0 0 } { 0 0 1 } ifelse setrgbcolor 0 0 20 20 rectfill",
+    );
+    let out = d.join("seeds.png");
+    let (ok, _, stderr) = sheet(&[
+        "-o",
+        out.to_str().unwrap(),
+        "--no-labels",
+        "--no-sizes",
+        "--page",
+        "20x20",
+        "--sweep-seed",
+        "1:8",
+        &seeded,
+    ]);
+    assert!(ok, "{stderr}");
+    assert!(!stderr.contains("srand"), "{stderr}");
+    let p = Pixmap::load_png(&out).unwrap();
+    // The captions widen the columns, so look along a row through the
+    // cells for the two colours the program can draw.
+    let colours: std::collections::HashSet<[u8; 4]> = (0..p.width())
+        .map(|x| px(&p, x, 23))
+        .filter(|c| *c == [255, 0, 0, 255] || *c == [0, 0, 255, 255])
+        .collect();
+    assert_eq!(colours.len(), 2, "eight seeds should give both colours");
+
+    let plain = write(&d, "plain.ps", RED);
+    let (ok, _, stderr) = sheet(&[
+        "-o",
+        out.to_str().unwrap(),
+        "--page",
+        "20x20",
+        "--sweep-seed",
+        "1:3",
+        &plain,
+    ]);
+    assert!(ok);
+    assert!(stderr.contains("never called srand"), "{stderr}");
+}
+
 #[test]
 fn bad_input_is_refused_with_a_message() {
     let d = dir();
@@ -237,10 +473,25 @@ fn bad_input_is_refused_with_a_message() {
         (&["-o", out, "--page", "0x5", &a], "--page"),
         (&["-o", out, "--bogus", &a], "unknown option"),
         (&["-o", out, &a, "--label", "x"], "no file after"),
+        (&["-o", out, &a, "--sweep-seed", "1:3"], "no file after"),
+        (
+            &["-o", out, "--sweep-seed", "1:3", "--sweep", "A=1,2", &a],
+            "mutually exclusive",
+        ),
+        (&["-o", out, "--sweep", "a;b=1,2", &a], "identifier"),
+        (&["-o", out, "--sweep", "nope", &a], "NAME=SPEC"),
+        (&["-o", out, "--sweep-seed", "x", &a], "seed"),
+        (&["-o", out, "--cols", "0", &a], "--cols"),
+        (&["-o", out, "--dpi", "72@red", &a], "mat colour"),
+        (&["-o", out, "--dpi", "72+", &a], "--dpi"),
         // 8000 px of page at 72 dpi, twice across: past the sheet's limit.
         (
             &["-o", out, "--page", "5000x100", "--dpi", "72,72", &a],
             "limit",
+        ),
+        (
+            &["-o", out, "--page", "5000x100", "--dpi", "72,72", &a],
+            "--cols",
         ),
     ];
     for (args, want) in cases {

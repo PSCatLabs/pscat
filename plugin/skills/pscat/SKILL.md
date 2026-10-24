@@ -69,6 +69,23 @@ to the files after them, so one sheet can mix page sizes. `--no-labels` and
 `--no-sizes` drop the text; the sheet is at most 8000 px a side. An erroring
 file is still drawn, as far as it got, and the exit code is nonzero.
 
+Sweeps, mats, stacks and wrapping (all in the one command):
+
+```sh
+# logo candidates: 96 dpi, then a column of the 9 dpi render and its dark-mat copy
+pscat sheet -o logos.png --page 384x384 --dpi '96,9+9@#222' a.ps b.ps
+# twelve seeds of one piece, labelled seed=1 .. seed=12, four to a line
+pscat sheet -o seeds.png --page 640x640 --dpi 36 --cols 4 --sweep-seed 1:12 piece.ps
+# a parameter sweep, labelled Density=10 and so on
+pscat sheet -o d.png --page 300x300 --dpi 72 --sweep Density=10,20,40,80 piece.ps
+```
+
+`--sweep-seed` and `--sweep NAME=` take the next file only and use the same
+grammar as the flag CLI. A `--dpi` cell is `DPI[xZOOM][@MAT]`: `@#222` (or
+`@white`) draws the page transparent, sets it on that colour and pads it 10 px,
+to judge an icon on dark and light. `+` joins cells into one stacked column.
+`--cols N` wraps a row after N columns. Quote a `--dpi` list with `#` or `+`.
+
 ## Debug a program
 
 ```sh

@@ -885,6 +885,117 @@ mod tests {
         assert_eq!(l.caption_xy[0][0], (12, 12 + 20 + 12 + 5));
     }
 
+    fn packed(cells: Vec<CellSize>, column_len: Vec<usize>) -> PackedRow {
+        PackedRow {
+            header: (0, 0),
+            cells,
+            column_len,
+        }
+    }
+
+    /// Single-cell columns with no wrap are `Layout::new`, field for field.
+    #[test]
+    fn packed_with_single_columns_is_new() {
+        let rows = [
+            RowSize {
+                header: (80, 14),
+                cells: vec![cell(100, 100, (60, 12)), cell(20, 30, (90, 12))],
+            },
+            RowSize {
+                header: (0, 0),
+                cells: vec![cell(60, 40, (0, 0))],
+            },
+        ];
+        let a = Layout::new(&rows).unwrap();
+        let rows: Vec<PackedRow> = rows
+            .iter()
+            .map(|r| PackedRow {
+                header: r.header,
+                cells: r.cells.clone(),
+                column_len: vec![1; r.cells.len()],
+            })
+            .collect();
+        let b = Layout::packed(&rows, None).unwrap();
+        assert_eq!((a.width, a.height), (b.width, b.height));
+        assert_eq!(a.header_xy, b.header_xy);
+        assert_eq!(a.image_xy, b.image_xy);
+        assert_eq!(a.caption_xy, b.caption_xy);
+    }
+
+    #[test]
+    fn a_stacked_column_puts_each_caption_under_its_cell() {
+        let row = packed(
+            vec![
+                cell(100, 100, (40, 10)),
+                cell(20, 20, (30, 10)),
+                cell(20, 20, (30, 10)),
+            ],
+            vec![1, 2],
+        );
+        let l = Layout::packed(&[row], None).unwrap();
+        // Stack: (22 + 5 + 10) * 2 + 10 = 84 high; the single is 102 high
+        // with its caption strip (10 + 5) below it.
+        assert_eq!(
+            (l.width, l.height),
+            (12 + 102 + 14 + 30 + 12, 12 + 102 + 15 + 12)
+        );
+        // Column two starts at x 128, 30 wide, images 22 wide: offset 4.
+        // The stack is centred in the 102 px band: top = 12 + 9.
+        assert_eq!(l.image_xy[0][1], (128 + 4 + 1, 12 + 9 + 1));
+        assert_eq!(l.caption_xy[0][1], (128, 12 + 9 + 22 + 5));
+        assert_eq!(l.image_xy[0][2], (128 + 4 + 1, 12 + 9 + 37 + 10 + 1));
+        // The single's caption sits under the band, as it always has.
+        assert_eq!(l.caption_xy[0][0], (12 + 31, 12 + 102 + 5));
+    }
+
+    #[test]
+    fn wrap_continues_a_row_under_the_same_slots() {
+        let row = packed(vec![cell(10, 10, (0, 0)); 5], vec![1; 5]);
+        let l = Layout::packed(&[row], Some(2)).unwrap();
+        assert_eq!(l.width, 12 + 12 + 14 + 12 + 12);
+        assert_eq!(l.height, 12 + 3 * 12 + 2 * LINE_GAP + 12);
+        assert_eq!(l.image_xy[0][2], (13, 12 + 12 + LINE_GAP + 1));
+        assert_eq!(l.image_xy[0][3], (13 + 26, 12 + 12 + LINE_GAP + 1));
+        assert_eq!(l.image_xy[0][4], (13, 12 + 2 * (12 + LINE_GAP) + 1));
+        // A header sits above the first line only.
+        let mut row = packed(vec![cell(10, 10, (0, 0)); 3], vec![1; 3]);
+        row.header = (50, 14);
+        let l = Layout::packed(&[row], Some(2)).unwrap();
+        assert_eq!(l.header_xy.len(), 1);
+        assert_eq!(l.height, 12 + 19 + 12 + LINE_GAP + 12 + 12);
+    }
+
+    #[test]
+    fn packed_refuses_bad_columns_and_a_zero_wrap() {
+        let c = || vec![cell(10, 10, (0, 0)); 3];
+        assert!(Layout::packed(&[packed(c(), vec![1, 1])], None).is_err());
+        assert!(Layout::packed(&[packed(c(), vec![3, 0])], None).is_err());
+        assert!(Layout::packed(&[packed(c(), vec![3])], Some(0)).is_err());
+        assert!(Layout::packed(&[packed(c(), vec![2, 1])], Some(1)).is_ok());
+    }
+
+    #[test]
+    fn a_mat_pads_and_lets_a_transparent_frame_show_through() {
+        let mut frame = Pixmap::new(4, 3).unwrap();
+        frame.fill(tiny_skia::Color::TRANSPARENT);
+        let out = composite_on_mat(&frame, [10, 20, 30], 5).unwrap();
+        assert_eq!((out.width(), out.height()), (14, 13));
+        assert!(
+            out.pixels()
+                .iter()
+                .all(|p| (p.red(), p.green(), p.blue(), p.alpha()) == (10, 20, 30, 255))
+        );
+        let red = solid(4, 3, [255, 0, 0, 255]);
+        let out = composite_on_mat(&red, [10, 20, 30], 5).unwrap();
+        let px = |x: u32, y: u32| out.pixel(x, y).unwrap();
+        assert_eq!(
+            (px(0, 0).red(), px(4, 4).red(), px(5, 5).red()),
+            (10, 10, 255)
+        );
+        assert_eq!(px(8, 7).red(), 255);
+        assert_eq!(px(9, 7).red(), 10);
+    }
+
     #[test]
     fn layout_errors_on_empty_and_oversized_sheets() {
         assert!(Layout::new(&[]).is_err());
