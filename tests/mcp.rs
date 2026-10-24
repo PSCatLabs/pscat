@@ -1756,7 +1756,8 @@ fn review_sheet_out_path_follows_the_server_rules() {
     assert!(!root.join("x.png").exists());
 }
 
-/// A server started where `out_path` is off still returns the sheet inline.
+/// The inline byte cap: over it the sheet is refused, and a file asked for
+/// with `out_path` is still written first.
 #[test]
 fn review_sheet_over_the_inline_byte_cap_is_refused_and_out_path_keeps_it() {
     let root = common::scratch_dir("mcp-sheet-cap");
@@ -1775,4 +1776,38 @@ fn review_sheet_over_the_inline_byte_cap_is_refused_and_out_path_keeps_it() {
         root.join("kept.png").exists(),
         "the file is written before the cap speaks"
     );
+}
+
+/// A label is the model's text, drawn by an interpreter inside the server.
+/// It is a string literal there, escaped; a label that tries to close the
+/// literal and run something draws as text, prints nothing on the protocol's
+/// stdout, and gives the CLI's sheet for the same `--label`.
+#[test]
+fn review_sheet_labels_cannot_inject_postscript() {
+    let hostile = [
+        ") print (b",
+        r"\) = (x",
+        "(((",
+        r"a\",
+        "line one\nline two\r(\u{7}",
+        ") pstack (",
+        ") {} loop (",
+    ];
+    let a = mark("0.8 0.2 0.1");
+    let mut s = Server::start();
+    initialized(&mut s);
+    for (i, label) in hostile.iter().enumerate() {
+        let (cli, ok) = cli_sheet(
+            &format!("mcp-sheet-inject-{i}"),
+            &[("a.ps", &a)],
+            &[&["--page", "50x50", "--label", label]],
+        );
+        assert!(ok);
+        let result = s.tool(
+            "review_sheet",
+            json!({ "entries": [{ "source": a, "label": label }], "width": 50, "height": 50 }),
+        );
+        assert_eq!(sheet_png(&result), cli, "{label:?}");
+    }
+    s.ping_ok();
 }

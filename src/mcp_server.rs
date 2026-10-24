@@ -672,8 +672,8 @@ fn tool_list(cfg: &Config) -> Value {
                 render stays 48 px beside a 512 px one), centred in its column with a hairline \
                 around it, the row label above and a pixel-size caption (`48x48 px`) under each \
                 cell. For comparing candidates (logos, icons, a seed's variants) at several \
-                sizes in one image. Returns one PNG; the output is byte for byte what `pscat \
-                sheet` writes for the same programs. A dpi entry {{\"dpi\": 9, \"zoom\": 4}} draws \
+                sizes in one image. Returns one PNG: for the same programs, pages, dpis and labels, byte for byte what \
+                `pscat sheet` writes. A dpi entry {{\"dpi\": 9, \"zoom\": 4}} draws \
                 the 9 dpi render again enlarged 4x with no smoothing (whole factors 2..16), so a \
                 small icon can be read pixel by pixel. Programs are given inline as `source`, \
                 never as file names. Each cell runs in its own child under the interpreter's \
