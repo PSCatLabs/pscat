@@ -329,49 +329,312 @@ pub fn zoom_nearest(src: &Pixmap, k: u32) -> Option<Pixmap> {
     Some(out)
 }
 
-/// Text as a tight, opaque strip: black-ish `text` in `Helvetica`
-/// (`Helvetica-Bold` if `bold`) at `pt` pixels on white, drawn by pscat's
-/// own interpreter and fonts, one point per pixel. Characters outside
-/// printable ASCII show as `?` (the strip is set in the standard Latin
-/// encoding). `None` for an empty `text`.
-pub fn render_text(text: &str, pt: u32, bold: bool) -> Result<Option<Pixmap>, String> {
-    if text.is_empty() {
-        return Ok(None);
+/// The face a run of a label is set in. Nothing in pscat picked a face
+/// by script before (the Stage 22/23 faces are chosen by name in the
+/// program), so this is the one place that maps a codepoint to a face:
+/// Latin in the built-in Helvetica (accents too, through
+/// `ISOLatin1Encoding`), and Hangul, kana/kanji and Thai in the
+/// Unicode-mode Noto Sans catalog faces from the `cjk-thai` font pack.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Face {
+    Latin,
+    Hangul,
+    Japanese,
+    Thai,
+}
+
+impl Face {
+    /// The catalog face's name; `None` for the built-in Latin face.
+    fn catalog_name(self) -> Option<&'static str> {
+        match self {
+            Face::Latin => None,
+            Face::Hangul => Some("NotoSansKR-Regular"),
+            Face::Japanese => Some("NotoSansJP-Regular"),
+            Face::Thai => Some("NotoSansThai-Regular"),
+        }
     }
-    let mut lit = String::with_capacity(text.len());
+}
+
+/// How one character takes part in splitting a label into runs.
+enum Class {
+    /// Space and ASCII punctuation: joins the run before it, so a `(` or
+    /// a space does not flip the face.
+    Neutral,
+    /// A character with a face of its own.
+    Strong(Face),
+    /// No face covers it: drawn as `?`, and neutral.
+    Missing,
+}
+
+fn classify(c: char) -> Class {
+    match c as u32 {
+        0x20..=0x2f | 0x3a..=0x40 | 0x5b..=0x60 | 0x7b..=0x7e => Class::Neutral,
+        0x30..=0x39 | 0x41..=0x5a | 0x61..=0x7a | 0xa1..=0xff => Class::Strong(Face::Latin),
+        // Jamo, compatibility jamo, Hangul syllables.
+        0x1100..=0x11ff | 0x3130..=0x318f | 0xa960..=0xa97f | 0xac00..=0xd7ff => {
+            Class::Strong(Face::Hangul)
+        }
+        // CJK punctuation, kana, ideographs (Han is set in the Japanese
+        // face: pscat ships no Chinese-specific one), fullwidth forms.
+        0x3000..=0x30ff
+        | 0x31f0..=0x31ff
+        | 0x3400..=0x4dbf
+        | 0x4e00..=0x9fff
+        | 0xf900..=0xfaff
+        | 0xff00..=0xff9f => Class::Strong(Face::Japanese),
+        0x0e00..=0x0e7f => Class::Strong(Face::Thai),
+        _ => Class::Missing,
+    }
+}
+
+/// Base letter then combining mark, as the Latin-1 letter they compose
+/// to: `(mark, "<base><composed>" pairs)`.
+const LATIN1_COMPOSE: [(char, &str); 7] = [
+    (
+        '\u{300}',
+        "A\u{c0}E\u{c8}I\u{cc}O\u{d2}U\u{d9}a\u{e0}e\u{e8}i\u{ec}o\u{f2}u\u{f9}",
+    ),
+    (
+        '\u{301}',
+        "A\u{c1}E\u{c9}I\u{cd}O\u{d3}U\u{da}Y\u{dd}a\u{e1}e\u{e9}i\u{ed}o\u{f3}u\u{fa}y\u{fd}",
+    ),
+    (
+        '\u{302}',
+        "A\u{c2}E\u{ca}I\u{ce}O\u{d4}U\u{db}a\u{e2}e\u{ea}i\u{ee}o\u{f4}u\u{fb}",
+    ),
+    ('\u{303}', "A\u{c3}N\u{d1}O\u{d5}a\u{e3}n\u{f1}o\u{f5}"),
+    (
+        '\u{308}',
+        "A\u{c4}E\u{cb}I\u{cf}O\u{d6}U\u{dc}a\u{e4}e\u{eb}i\u{ef}o\u{f6}u\u{fc}y\u{ff}",
+    ),
+    ('\u{30a}', "A\u{c5}a\u{e5}"),
+    ('\u{327}', "C\u{c7}c\u{e7}"),
+];
+
+/// `text` with the decomposed forms macOS file names use composed: a
+/// Latin letter plus a combining mark becomes its Latin-1 letter, and
+/// Hangul jamo become syllables, so the default label of `café.ps` or
+/// `한글.ps` (stored decomposed) shows. Only what the faces here can
+/// draw is composed; any other sequence is left for [`classify`].
+fn precompose(text: &str) -> String {
+    let mut out: Vec<char> = Vec::with_capacity(text.len());
     for c in text.chars() {
+        let composed = out.last().and_then(|&last| match (last as u32, c as u32) {
+            // Leading consonant + vowel, then + trailing consonant.
+            (l @ 0x1100..=0x1112, v @ 0x1161..=0x1175) => {
+                char::from_u32(0xac00 + ((l - 0x1100) * 21 + (v - 0x1161)) * 28)
+            }
+            (s @ 0xac00..=0xd7a3, t @ 0x11a8..=0x11c2) if (s - 0xac00) % 28 == 0 => {
+                char::from_u32(s + (t - 0x11a7))
+            }
+            _ => LATIN1_COMPOSE
+                .iter()
+                .find(|(mark, _)| *mark == c)
+                .and_then(|(_, pairs)| {
+                    let pairs: Vec<char> = pairs.chars().collect();
+                    pairs.chunks(2).find(|p| p[0] == last).map(|p| p[1])
+                }),
+        });
+        match composed {
+            Some(x) => *out.last_mut().unwrap() = x,
+            None => out.push(c),
+        }
+    }
+    out.into_iter().collect()
+}
+
+/// `text` split into runs of one face each. Neutral characters join the
+/// run before them (or, at the start, the first run). Controls and
+/// characters no face covers become `?`.
+fn segment(text: &str) -> Vec<(Face, String)> {
+    let mut runs: Vec<(Face, String)> = Vec::new();
+    // Neutrals seen before any strong character.
+    let mut lead = String::new();
+    for c in text.chars() {
+        let (face, c) = match classify(c) {
+            Class::Strong(f) => (Some(f), c),
+            Class::Neutral => (None, c),
+            Class::Missing => (None, '?'),
+        };
+        match (face, runs.last_mut()) {
+            (Some(f), Some((last, run))) if *last == f => run.push(c),
+            (Some(f), _) => {
+                let mut run = std::mem::take(&mut lead);
+                run.push(c);
+                runs.push((f, run));
+            }
+            (None, Some((_, run))) => run.push(c),
+            (None, None) => lead.push(c),
+        }
+    }
+    if !lead.is_empty() {
+        runs.push((Face::Latin, lead));
+    }
+    runs
+}
+
+/// A PostScript string literal body for `run`. A Latin run is one byte
+/// per character (`ISOLatin1Encoding` for the accented ones, as octal
+/// escapes); the Unicode-mode faces take the UTF-8 text as it is.
+fn literal(face: Face, run: &str) -> String {
+    let mut lit = String::with_capacity(run.len());
+    for c in run.chars() {
         match c {
             '\\' | '(' | ')' => {
                 lit.push('\\');
                 lit.push(c);
             }
             ' '..='~' => lit.push(c),
-            _ => lit.push('?'),
+            _ if face == Face::Latin => lit.push_str(&format!("\\{:03o}", c as u32)),
+            _ => lit.push(c),
         }
     }
-    let font = if bold { "Helvetica-Bold" } else { "Helvetica" };
-    let setup = format!("/{font} findfont {pt} scalefont setfont");
+    lit
+}
+
+/// Redefines `Helvetica`/`Helvetica-Bold` under `ISOLatin1Encoding` as
+/// `/PscatSheetLatin1[Bold]`, for a label with accented letters.
+/// The copy keeps `FID`: pscat finds the outlines through it, and
+/// `definefont` gives a dict without one the substitute (regular) face.
+const LATIN1_PRELUDE: &str = "/Helvetica /PscatSheetLatin1 /Helvetica-Bold /PscatSheetLatin1Bold \
+     2 { exch findfont dup length dict begin \
+         { def } forall \
+         /Encoding ISOLatin1Encoding def currentdict end definefont pop } repeat";
+
+/// Text as a tight, opaque strip: black-ish `text` at `pt` pixels on
+/// white, drawn by pscat's own interpreter and fonts, one point per
+/// pixel. The face is picked per character by script (see `Face`):
+/// `Helvetica` (`Helvetica-Bold` if `bold`) for Latin, accents included;
+/// Noto Sans KR, JP or Thai for Hangul, kana/kanji or Thai. Those three
+/// live in the `cjk-thai` font pack: when it is not installed the
+/// characters are drawn as `?` and one warning per face names the pack,
+/// on stderr. Any other character is drawn as `?`. `None` for an empty
+/// `text`.
+pub fn render_text(text: &str, pt: u32, bold: bool) -> Result<Option<Pixmap>, String> {
+    if text.is_empty() {
+        return Ok(None);
+    }
+    let mut runs = segment(&precompose(text));
+    // A face from a pack that is not installed: its characters are `?`
+    // (the ASCII spaces and punctuation that joined the run stay).
+    for face in [Face::Hangul, Face::Japanese, Face::Thai] {
+        if runs.iter().any(|(f, _)| *f == face) && !face_available(face) {
+            for (f, run) in &mut runs {
+                if *f == face {
+                    *run = unavailable(run);
+                    *f = Face::Latin;
+                }
+            }
+        }
+    }
+    // A character its face has no glyph for (a Simplified-only Han
+    // character in the Japanese face) would draw as nothing: `?` instead.
+    for (face, run) in &mut runs {
+        if let Some(name) = face.catalog_name() {
+            *run = run
+                .chars()
+                .map(|c| {
+                    if c.is_ascii() || crate::font::has_glyph(name, c) {
+                        c
+                    } else {
+                        '?'
+                    }
+                })
+                .collect();
+        }
+    }
+    // (setup, literal) per run.
+    let latin = if bold { "Helvetica-Bold" } else { "Helvetica" };
+    let mut prelude = "";
+    let parts: Vec<(String, String)> = runs
+        .iter()
+        .map(|(face, run)| {
+            let font = match face.catalog_name() {
+                Some(name) => name,
+                None if run.is_ascii() => latin,
+                None => {
+                    prelude = LATIN1_PRELUDE;
+                    if bold {
+                        "PscatSheetLatin1Bold"
+                    } else {
+                        "PscatSheetLatin1"
+                    }
+                }
+            };
+            (
+                format!("/{font} findfont {pt} scalefont setfont"),
+                literal(*face, run),
+            )
+        })
+        .collect();
     // Measure first, then draw on a page of exactly the text's size.
     let mut probe = crate::Interp::new();
     probe.capture_stdout();
+    let measure: String = parts
+        .iter()
+        .map(|(setup, lit)| format!("{setup} ({lit}) stringwidth pop =\n"))
+        .collect();
     probe
-        .run_source(format!("{setup} ({lit}) stringwidth pop =").as_bytes())
+        .run_source(format!("{prelude}\n{measure}").as_bytes())
         .map_err(|e| format!("label: {}", probe.error_report(&e)))?;
     let width: f32 = String::from_utf8_lossy(probe.captured_stdout())
-        .trim()
-        .parse()
+        .lines()
+        .map(|l| l.trim().parse::<f32>())
+        .sum::<Result<f32, _>>()
         .map_err(|_| "label: could not measure the text".to_string())?;
-    // Ascent ~0.72 em, descent ~0.21 em: a 1.3 em strip with the
-    // baseline 0.3 em up clips neither.
+    // Latin: ascent ~0.72 em, descent ~0.21 em, so a 1.3 em strip with
+    // the baseline 0.3 em up clips neither. The Noto faces reach ~0.84 em
+    // up and ~0.26 em down (Thai below-vowels), so a strip with one gets
+    // 0.1 em more of room.
+    let (tall, low) = if runs.iter().any(|(f, _)| *f != Face::Latin) {
+        (1.4, 0.36)
+    } else {
+        (1.3, 0.3)
+    };
     let w = (width.ceil() as u32 + 2).clamp(1, MAX_SIDE_PX);
-    let h = (pt as f32 * 1.3).ceil() as u32;
-    let base = (pt as f32 * 0.3).ceil() as u32;
+    let h = (pt as f32 * tall).ceil() as u32;
+    let base = (pt as f32 * low).ceil() as u32;
     let mut interp = crate::Interp::with_page(w, h)
         .ok_or_else(|| "label: unusable text strip size".to_string())?;
+    let mut draw = format!("{prelude}\n0.1 setgray 1 {base} moveto\n");
+    for (setup, lit) in &parts {
+        draw.push_str(&format!("{setup} ({lit}) show\n"));
+    }
     interp
-        .run_source(format!("{setup} 0.1 setgray 1 {base} moveto ({lit}) show").as_bytes())
+        .run_source(draw.as_bytes())
         .map_err(|e| format!("label: {}", interp.error_report(&e)))?;
     Ok(Some(interp.gfx().pixmap.clone()))
+}
+
+/// `run` for a face that is not installed: every non-ASCII character is
+/// `?`; the ASCII spaces and punctuation that joined the run stay.
+fn unavailable(run: &str) -> String {
+    run.chars()
+        .map(|c| if c.is_ascii() { c } else { '?' })
+        .collect()
+}
+
+/// Whether `face`'s font loads; when it does not, warns once per face
+/// per process with pscat's own hint naming the font pack.
+fn face_available(face: Face) -> bool {
+    use std::sync::{Mutex, OnceLock};
+    static WARNED: OnceLock<Mutex<Vec<Face>>> = OnceLock::new();
+    let Some(name) = face.catalog_name() else {
+        return true;
+    };
+    let mut probe = crate::Interp::new();
+    let Err(e) = probe.run_source(format!("/{name} findfont pop").as_bytes()) else {
+        return true;
+    };
+    let mut warned = WARNED.get_or_init(Default::default).lock().unwrap();
+    if !warned.contains(&face) {
+        warned.push(face);
+        let report = probe.error_report(&e);
+        // The hint is the report's last line, already prefixed `pscat: `.
+        let hint = report.lines().last().unwrap_or(&report);
+        eprintln!("pscat sheet: {}", hint.trim_start_matches("pscat: "));
+    }
+    false
 }
 
 #[cfg(test)]
@@ -535,6 +798,207 @@ mod tests {
         // Metacharacters and non-ASCII cannot break the literal.
         assert!(render_text("a) (b \\ \u{e9}", 11, false).unwrap().is_some());
         assert!(render_text("%! (", 11, false).unwrap().is_some());
+    }
+
+    fn dark(p: &Pixmap) -> usize {
+        p.data().chunks(4).filter(|p| p[0] < 128).count()
+    }
+
+    /// The pre-#707 pipeline for printable ASCII, kept as the reference
+    /// a Latin-only label must still match to the byte.
+    fn ascii_reference(text: &str, pt: u32, bold: bool) -> Pixmap {
+        let mut lit = String::new();
+        for c in text.chars() {
+            if matches!(c, '\\' | '(' | ')') {
+                lit.push('\\');
+            }
+            lit.push(c);
+        }
+        let font = if bold { "Helvetica-Bold" } else { "Helvetica" };
+        let setup = format!("/{font} findfont {pt} scalefont setfont");
+        let mut probe = crate::Interp::new();
+        probe.capture_stdout();
+        probe
+            .run_source(format!("{setup} ({lit}) stringwidth pop =").as_bytes())
+            .unwrap();
+        let width: f32 = String::from_utf8_lossy(probe.captured_stdout())
+            .trim()
+            .parse()
+            .unwrap();
+        let w = width.ceil() as u32 + 2;
+        let h = (pt as f32 * 1.3).ceil() as u32;
+        let base = (pt as f32 * 0.3).ceil() as u32;
+        let mut interp = crate::Interp::with_page(w, h).unwrap();
+        interp
+            .run_source(format!("{setup} 0.1 setgray 1 {base} moveto ({lit}) show").as_bytes())
+            .unwrap();
+        interp.gfx().pixmap.clone()
+    }
+
+    #[test]
+    fn latin_only_labels_are_unchanged() {
+        for (text, pt, bold) in [
+            ("A: one-line cat", 16, true),
+            ("128x128 px (shown at 4x)", 12, false),
+            ("a) (b \\ %! ~", 16, true),
+            ("logo_v2-final.final", 12, false),
+        ] {
+            let strip = render_text(text, pt, bold).unwrap().unwrap();
+            let want = ascii_reference(text, pt, bold);
+            assert_eq!(
+                (strip.width(), strip.height()),
+                (want.width(), want.height()),
+                "{text}"
+            );
+            assert_eq!(strip.data(), want.data(), "{text}");
+        }
+    }
+
+    fn runs(text: &str) -> Vec<(Face, &str)> {
+        segment(text)
+            .into_iter()
+            .map(|(f, r)| (f, Box::leak(r.into_boxed_str()) as &str))
+            .collect()
+    }
+
+    #[test]
+    fn segment_splits_by_script_and_neutrals_join_the_run_before() {
+        assert_eq!(runs("logo (a)"), [(Face::Latin, "logo (a)")]);
+        assert_eq!(runs("caf\u{e9}"), [(Face::Latin, "caf\u{e9}")]);
+        assert_eq!(
+            runs("A: \u{d55c}\u{ae00} B"),
+            [
+                (Face::Latin, "A: "),
+                (Face::Hangul, "\u{d55c}\u{ae00} "),
+                (Face::Latin, "B"),
+            ]
+        );
+        assert_eq!(
+            runs("\u{65e5}\u{672c}\u{8a9e} \u{3072}\u{3089}"),
+            [(Face::Japanese, "\u{65e5}\u{672c}\u{8a9e} \u{3072}\u{3089}")]
+        );
+        assert_eq!(
+            runs("\u{e44}\u{e17}\u{e22}"),
+            [(Face::Thai, "\u{e44}\u{e17}\u{e22}")]
+        );
+        // Leading neutrals go with the first run; no strong character is Latin.
+        assert_eq!(runs("(\u{d55c}"), [(Face::Hangul, "(\u{d55c}")]);
+        assert_eq!(runs("%! ("), [(Face::Latin, "%! (")]);
+        // Controls and uncovered scripts are `?`.
+        assert_eq!(runs("a\tb\u{1f600}\u{0416}"), [(Face::Latin, "a?b??")]);
+    }
+
+    #[test]
+    fn a_missing_pack_keeps_ascii_punctuation_and_questions_the_rest() {
+        assert_eq!(unavailable("(\u{d55c}\u{ae00}) 1"), "(??) 1");
+    }
+
+    #[test]
+    fn precompose_joins_decomposed_latin_and_hangul() {
+        assert_eq!(precompose("cafe\u{301} Nin\u{303}o"), "caf\u{e9} Ni\u{f1}o");
+        assert_eq!(precompose("u\u{308}ber A\u{30a}"), "\u{fc}ber \u{c5}");
+        assert_eq!(precompose("plain ASCII"), "plain ASCII");
+        // L+V+T jamo, as macOS stores `\u{d55c}\u{ae00}`; LV without a T.
+        assert_eq!(
+            precompose("\u{1112}\u{1161}\u{11ab}\u{1100}\u{1173}\u{11af}"),
+            "\u{d55c}\u{ae00}"
+        );
+        assert_eq!(precompose("\u{1100}\u{1161}"), "\u{ac00}");
+        // A mark with no Latin-1 letter stays, and is drawn as `?`.
+        assert_eq!(precompose("z\u{301}"), "z\u{301}");
+    }
+
+    #[test]
+    fn a_decomposed_label_draws_like_the_composed_one() {
+        for (nfd, nfc) in [
+            ("cafe\u{301}", "caf\u{e9}"),
+            (
+                "\u{1112}\u{1161}\u{11ab}\u{1100}\u{1173}\u{11af}",
+                "\u{d55c}\u{ae00}",
+            ),
+        ] {
+            let a = render_text(nfd, 16, true).unwrap().unwrap();
+            let b = render_text(nfc, 16, true).unwrap().unwrap();
+            assert_eq!(a.data(), b.data(), "{nfd:?}");
+        }
+    }
+
+    #[test]
+    fn literal_escapes_metacharacters_and_latin1() {
+        assert_eq!(literal(Face::Latin, "a(b)\\c"), "a\\(b\\)\\\\c");
+        assert_eq!(literal(Face::Latin, "caf\u{e9}"), "caf\\351");
+        assert_eq!(literal(Face::Hangul, "(\u{d55c})"), "\\(\u{d55c}\\)");
+    }
+
+    #[test]
+    fn accented_latin_labels_show_the_accent() {
+        let plain = render_text("cafe", 16, true).unwrap().unwrap();
+        let accent = render_text("caf\u{e9}", 16, true).unwrap().unwrap();
+        let query = render_text("caf?", 16, true).unwrap().unwrap();
+        assert_ne!(accent.data(), plain.data());
+        assert_ne!(accent.data(), query.data());
+        // The acute adds ink above the x-height and keeps the width.
+        assert_eq!(accent.width(), plain.width());
+        assert!(dark(&accent) > dark(&plain));
+        // Every Latin-1 letter draws (none is the `?` fallback).
+        for c in "\u{c0}\u{c7}\u{d1}\u{dc}\u{df}\u{e5}\u{f8}\u{ff}".chars() {
+            let strip = render_text(&c.to_string(), 16, false).unwrap().unwrap();
+            let q = render_text("?", 16, false).unwrap().unwrap();
+            assert_ne!(strip.data(), q.data(), "{c}");
+        }
+    }
+
+    #[test]
+    fn korean_japanese_chinese_and_thai_labels_draw() {
+        let q = render_text("???", 16, true).unwrap().unwrap();
+        for text in [
+            "\u{d55c}\u{ae00}",
+            "\u{65e5}\u{672c}\u{8a9e}",
+            "\u{3072}\u{3089}\u{304c}\u{306a}",
+            "\u{4e2d}\u{6587}",
+            "\u{e44}\u{e17}\u{e22}",
+            // Stacked Thai marks and a below-baseline vowel stay in the strip.
+            "\u{e1f}\u{e37}\u{e49}\u{e19} \u{e1b}\u{e38}",
+        ] {
+            let strip = render_text(text, 16, true).unwrap().unwrap();
+            assert_eq!(strip.height(), 23, "{text}");
+            assert!(dark(&strip) > 40, "{text}: {} dark px", dark(&strip));
+            assert_ne!(strip.data(), q.data(), "{text}");
+            // The strip's top and bottom rows stay clear of ink.
+            let row = strip.width() as usize * 4;
+            let top = &strip.data()[..row];
+            let bottom = &strip.data()[strip.data().len() - row..];
+            assert!(
+                top.chunks(4).all(|p| p[0] > 200),
+                "{text}: ink clipped at top"
+            );
+            assert!(
+                bottom.chunks(4).all(|p| p[0] > 200),
+                "{text}: ink clipped at bottom"
+            );
+        }
+    }
+
+    #[test]
+    fn scripts_mix_in_one_label() {
+        let mixed = render_text(
+            "A \u{d55c}\u{ae00} \u{65e5}\u{672c} caf\u{e9} \u{e44}\u{e17}\u{e22}",
+            16,
+            true,
+        )
+        .unwrap()
+        .unwrap();
+        let a = render_text("A", 16, true).unwrap().unwrap();
+        assert!(mixed.width() > a.width() * 8);
+        assert!(dark(&mixed) > 150);
+    }
+
+    /// A Han character the Japanese face lacks (Simplified-only) must
+    /// not vanish: it draws as `?`.
+    #[test]
+    fn a_character_its_face_lacks_draws_as_a_question_mark() {
+        let strip = render_text("\u{7b80}", 16, false).unwrap().unwrap();
+        assert!(dark(&strip) > 10, "blank strip");
     }
 
     #[test]

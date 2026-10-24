@@ -7,8 +7,9 @@
 //! and dpis, and needs captions. Each file given here is a row; each of
 //! its dpis is a cell, drawn at its own pixel size (a 48 px render stays
 //! 48 px beside a 512 px one) and centred in its column. Labels are set
-//! with pscat's own text rendering (`pscat::contact_sheet::render_text`),
-//! and the geometry is `pscat::contact_sheet::Layout`.
+//! with pscat's own text rendering (`pscat::contact_sheet::render_text`;
+//! the face is picked per character by script), and the geometry is
+//! `pscat::contact_sheet::Layout`.
 
 use pscat::Interp;
 use pscat::contact_sheet::{self as sheet, CellSize, Layout, RowSize};
@@ -26,7 +27,10 @@ Render each FILE as a row of cells and compose them into one labelled PNG.
                      (default 72): 96,9 draws each file at 96 and at 9 dpi; 9x4
                      draws the 9 dpi render again enlarged 4x with no smoothing
                      (whole factors 2..16), so a small icon can be read pixel by pixel
-      --label TEXT   the next file's row label (default: its file name without .ps)
+      --label TEXT   the next file's row label (default: its file name without .ps);
+                     Latin with accents, Korean, Japanese, Chinese and Thai are
+                     drawn in a face for the script (the last three need the
+                     cjk-thai font pack: `pscat fonts install`)
       --no-labels    omit the row labels
       --no-sizes     omit the pixel-size caption under each cell
   -h, --help         this text

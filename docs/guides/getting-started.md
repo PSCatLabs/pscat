@@ -76,7 +76,9 @@ More on the less obvious ones:
   label (the file name, or `--label TEXT`) above and a `WxH px` caption
   below. A `--dpi` entry such as `9x4` adds an exact, unsmoothed 4x
   enlargement of the 9 dpi render. `--page` and `--dpi` apply to the files
-  after them, so one sheet can mix page sizes. Where `--contact-sheet` can
+  after them, so one sheet can mix page sizes. Labels can be accented Latin,
+  Korean, Japanese, Chinese or Thai (the face follows the script; Korean,
+  Japanese and Thai need the `cjk-thai` font pack). Where `--contact-sheet` can
   only grid same-size sweep frames, this builds icon-size comparisons and
   candidate review sheets without an imaging library; `pscat sheet --help`
   has the rest.

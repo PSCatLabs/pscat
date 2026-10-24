@@ -210,6 +210,17 @@ pub(crate) fn resolve(requested: &str) -> Result<i64, String> {
     Ok(SUBSTITUTE)
 }
 
+/// Whether the face `requested` names has a glyph for `c`, by the
+/// face's `cmap`. For the Unicode-mode catalog faces, which draw a
+/// missing character as nothing at all; `false` when the face does not
+/// resolve.
+pub(crate) fn has_glyph(requested: &str, c: char) -> bool {
+    resolve(requested)
+        .ok()
+        .and_then(|fid| face_for(fid).ok())
+        .is_some_and(|face| face.glyph_index(c).is_some())
+}
+
 /// The FID of an already-registered catalog face whose key is `want`
 /// (case-insensitively) or whose PostScript name is `requested`.
 fn loaded_fid(want: &str, requested: &str) -> Option<i64> {
