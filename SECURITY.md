@@ -226,8 +226,17 @@ without the limits above:
   that allocates and drops it again within 512 steps passes. Measured: a
   100,000-element procedure literal that is scanned and then `pop`ped (4 MB)
   runs clean under `--max-memory 1`; kept with `def`, it fails.
-- **The step count trails by a slice** and is not kept at all when no limit is
-  set.
+- **A step limit is approximate by up to a slice.** Objects are held to the cap
+  (the inner loop is given no more steps than the program has left). Loop
+  iterations are charged in blocks of 1024, and a program that ends inside its
+  last slice is not charged for that slice's objects, so a finishing program
+  can pass the cap by under one slice (4096 steps, 512 with a time or memory
+  limit) plus 1023 loop iterations: `9 {} repeat 1 2 3` runs clean under
+  `--max-steps 10`. A program that does not finish is stopped within a slice,
+  and within 1024 iterations inside a loop. The count is not kept at all when no
+  limit is set. Counting every step exactly means returning the executed count
+  from the interpreter's inner loop; a version that did cost 1.9% in
+  instructions retired on `fillkit.ps`.
 - **No limit on output volume** on the command line: a program can print as
   much as it likes, bounded only by the steps and time it is allowed. The MCP
   server caps each child stream at 4 MiB.

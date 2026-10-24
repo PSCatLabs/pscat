@@ -164,3 +164,17 @@ fn a_program_that_finishes_inside_a_poll_period_is_still_held_to_the_cap() {
     let mut it = limited(steps(10));
     it.run_str("1 2 add pop").unwrap();
 }
+
+#[test]
+fn a_cap_binds_the_objects_of_a_program_that_ends_in_one_slice() {
+    // The inner loop is handed no more than the steps the program has left, so
+    // a short program cannot run past a small cap just because it ends inside
+    // one slice. (Loop iterations are charged in blocks, see SECURITY.md.)
+    let mut it = limited(steps(10));
+    assert_eq!(
+        it.run_str("1 2 add pop 3 4 add pop 5 6 7 8 9"),
+        Err(PsError::StepsExceeded)
+    );
+    let mut it = limited(steps(10));
+    it.run_str("1 2 add pop 3 4 add pop 5 6").unwrap(); // exactly 10 objects
+}
