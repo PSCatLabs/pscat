@@ -229,7 +229,10 @@ whatever lands in `DIR`: only point it at a directory you trust.
 written to `out_path`; adds a `Lint:` block when the page looks wrong),
 `eval_postscript` (what the program printed, or the error with the
 offending command and line), `handwrite`, and `describe_art_capabilities`.
-Each call has a time limit (default 60 s), `out_path` must be inside the
+Each call has a time limit (default 60 s) and the interpreter stops a runaway
+program itself, with a `limit_exceeded` error whose `limit` field says `steps`,
+`time` or `memory` (a render still returns the partial page); `stopped` cannot
+catch it. `out_path` must be inside the
 server's output root (its working directory unless registered with
 `--out-root DIR`), end in the output format's extension (`.png`, `.svg`,
 `.pdf`) and not sit in a dot-directory such as `.git/`, and large inline images are refused: lower `dpi` or
@@ -247,8 +250,10 @@ pass `out_path`. Register it with
   page use `--dpi 144`, not `--page 1224x1584`. Canvases are capped at
   8000×8000 device pixels.
 - pscat is not a sandbox: a program can read any file you can read
-  (`(path) (r) file`), and nothing stops an infinite loop on the command
-  line. Run untrusted PostScript as you would an untrusted script.
+  (`(path) (r) file`), and on the command line nothing stops an infinite
+  loop unless you ask: `--max-steps N`, `--max-time SECS` and `--max-memory
+  MIB` stop a runaway with a `limitexceeded` error. Run untrusted PostScript
+  as you would an untrusted script.
 - The interpreter targets Level 2 PostScript. If a construct misbehaves,
   compare against Ghostscript, the behavioural oracle.
 - Files the docs call `examples/...`, `gallery/...` or `docs/...` are in

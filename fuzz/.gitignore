@@ -1,0 +1,6 @@
+target/
+# libFuzzer's working corpus and crash files. The committed seeds are in
+# seeds/, and a fixed crash is committed to regressions/.
+corpus/
+artifacts/
+coverage/

@@ -79,7 +79,8 @@ codex mcp add pscat -- pscat-mcp</code></pre>
   <code>handwrite</code> tool runs <code>pscat handwrite</code>, with no
   checkout or shell script.</p>
   <p>Each call is bounded: a time limit (<code>--timeout</code>, default
-  60 s), capped input, output and inline image sizes, and
+  60 s), interpreter step and memory limits, capped input, output and inline
+  image sizes, and
   <code>out_path</code> confined to the server's output root (its working
   directory, or <code>--out-root DIR</code>). It speaks MCP revisions
   2025-11-25 and 2025-06-18. Limits, protocol and the use-case table:

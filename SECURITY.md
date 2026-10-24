@@ -6,9 +6,9 @@ the code cannot do much outside its own page. This file says what that
 program can and cannot do **today**, where pscat has no limit yet, and how to
 report a problem. Every claim was checked against the code, and the "Checked
 with" notes name how. The undefined and refused operators, the file reads, the
-resource-limit figures and the MCP behaviours below were also reproduced by
-running a build (a `ci`-profile build, October 2026); they are measurements,
-not guarantees.
+resource-limit figures, the limit flags and the MCP behaviours below were also
+reproduced by running a build (a `ci`- or `release`-profile build, October
+2026); they are measurements, not guarantees.
 
 ## Reporting a vulnerability
 
@@ -39,9 +39,11 @@ pscat's job is to run a PostScript program you chose. So these are **not**
 vulnerabilities on their own:
 
 - A program that runs forever, uses all your memory, or fills the disk with
-  output. pscat has no limit on these yet (see "Limits that do not exist").
-  Reports of a *new* way to do it are welcome as bugs, not as security
-  reports.
+  output, where no limit was asked for. The command line and the library
+  apply none unless you pass one (`--max-steps`, `--max-time`,
+  `--max-memory`), and "Limits that cannot be enforced" lists what a limit
+  cannot stop even when it is on. Reports of a *new* way to exhaust resources
+  there are welcome as bugs, not as security reports.
 - A program that reads a file the pscat process can read (see below).
 
 These are:
@@ -49,6 +51,10 @@ These are:
 - A program that **writes, deletes or renames** a file, starts a process, opens
   a network connection or reads the environment, from inside the interpreter.
   None of these operators exist today, so any way to get one is a bug.
+- A way for a program to get **past a limit that is set**: catching a limit
+  error with `stopped`, or growing memory, steps or time without bound
+  between the checks described in "Limits that exist". The MCP server sets
+  them by default, so there this is a vulnerability.
 - A crash, hang or memory-safety fault in the parser, the font loaders (Type 1,
   TrueType/OpenType), the image decoders (JPEG, Flate, LZW and the rest) or the
   PDF/SVG writers from a *crafted file* that should have been an ordinary
@@ -62,8 +68,9 @@ These are:
 
 **Treat a `.ps` file from a stranger like a shell script from a stranger:
 only run it where you would be happy to run that script.** pscat is not a
-sandbox. It has no process isolation, no seccomp or similar, and no resource
-limits of its own. What it has is a small, mostly read-only operator set. The
+sandbox. It has no process isolation and no seccomp or similar. It has resource limits
+you can turn on (the CLI and library: off by default; the MCP server: on by
+default), and a small, mostly read-only operator set. The
 sections below separate what the operators allow from what the process around
 them allows.
 
@@ -140,43 +147,149 @@ output is cut off at 64 KiB.
 | Name-resolution cycles | detected, `limitcheck` | `src/interp.rs` |
 | Canvas size | at most 8000 x 8000 device pixels (about 256 MB), `--page` 1..8000 points, `--dpi` 9..1200 | `src/main.rs`, `src/interp.rs` |
 | Captured output (browser, `capture_stdout`) | 64 KiB | `src/interp.rs` |
+| Interpreter steps per program (opt in: `--max-steps N`, `Limits::max_steps`) | none by default; MCP 25,000,000,000 | `src/interp.rs` |
+| Wall-clock time per program (opt in: `--max-time SECS`, `Limits::max_time`) | none by default; MCP `--timeout` less a quarter, at most 5 s (55 s) | `src/interp.rs` |
+| Heap growth per run (opt in: `--max-memory MIB`, `Limits::max_memory`) | none by default; MCP 1024 MiB | `src/interp.rs`, `src/memtrack.rs` |
 
 A tail call such as `/f { f } def f` does not grow the execution stack, so the
 stack limit does not stop it.
 
-### Limits that do not exist yet
+**The execution limits (issue #604).** Three caps, off by default on the
+command line and in the library, and on by default in the MCP server:
 
-These are the gaps. A hostile program can use all of them today. Checked by
-running each for a few seconds and watching the process (resident memory in
-brackets):
+- **Steps.** `--max-steps N`, or `Limits::max_steps` with
+  `Interp::set_limits`. A step is one object executed, and each loop
+  iteration also counts as one. The heaviest gallery piece (`alpine_lake.ps`
+  at 144 dpi) takes 2.3 billion; the MCP default is 25 billion, about ten
+  times that. At the interpreter's speed (about 60 million steps a second on
+  the machine it was measured on) that is minutes, so under the MCP
+  defaults the clock stops a runaway first; the step cap is the bound that
+  does not depend on machine speed.
+- **Time.** `--max-time SECS`, or `Limits::max_time`. Measured from the start
+  of the program on the real clock. The MCP server passes its `--timeout` less a
+  quarter of it, at most 5 s (55 s of the default 60 s), so the interpreter
+  stops first and the render keeps its partial page; the server kills the
+  child at the full `--timeout`.
+- **Memory.** `--max-memory MIB`, or `Limits::max_memory`. Counts **heap
+  bytes the process has gained** since the limit was set, from a counting
+  global allocator (`pscat::TrackingAllocator`, installed by the `pscat`
+  binary; a library user installs it too, and `set_limits` refuses a memory
+  limit without it rather than ignoring it). It covers everything that
+  reaches the heap: arrays, strings, dictionaries, the operand, dictionary
+  and graphics-state stacks, paths, recorded SVG and PDF output. It is the
+  process's heap, not the resident set and not one interpreter's share, so
+  another thread's allocations count too. The MCP default is 1024 MiB; the
+  heaviest gallery piece peaked at 0.4 GiB resident, canvas included.
 
-- **No step, instruction or wall-clock limit.** `{ } loop` never finishes.
-- **No total memory limit.** The 16 M cap is per object, not per program: a
-  loop that keeps allocating arrays reached about 3 GB in 3 seconds
-  (`/d 1 dict def { 16000000 array /k 1 index def } loop`).
-- **No operand-stack depth limit.** `{ 1 } loop` grew to about 800 MB in 4
-  seconds.
-- **No graphics-state stack limit.** `{ gsave } loop` reached about 770 MB in 3
-  seconds.
-- **No path-length limit.** `0 0 moveto { 1 1 rlineto } loop` reached about
-  1.8 GB in 4 seconds.
-- **No cap on total decoded bytes from filters** (`FlateDecode`, `LZWDecode`,
-  `RunLengthDecode`, ...). They decode as the program reads, so a small
-  stream costs only what the program chooses to pull from it, but nothing stops
-  a program from pulling without end.
+A program stopped by a limit gets the error `limitexceeded (steps)`,
+`(time)` or `(memory)` (`PsError::StepsExceeded`, `TimeExceeded` or `MemoryExceeded` in the library; `%%[ Error:
+limitexceeded (steps); ... ]%%` on stderr and a non-zero exit from the CLI;
+`kind: limit_exceeded` with a `limit` field from the MCP server). **`stopped`
+cannot catch it**, so a program cannot loop around the limit, and it is
+never written to `$error`. The page drawn so far is kept and written, as
+after any other error. The limits apply to one program: the step count and
+the clock restart with each `begin_source`/`run_str`; the memory cap counts
+growth from `set_limits`.
+
+Checked with: `tests/limits.rs`, `tests/limits_memory.rs`, `tests/cli.rs` and
+`tests/mcp.rs`, and each of these run against a `release` build with
+`--max-memory 256`, which stopped every one of them before the process
+passed about 250 MB resident: `{ 1 } loop`, `{ gsave } loop`,
+`0 0 moveto { 1 1 rlineto } loop`, and (refused before allocating)
+`/d 1 dict def { 16000000 array /k 1 index def } loop` and
+`/a 16000000 array def { a aload pop } loop`.
+
+### Limits that cannot be enforced
+
+These are the gaps. A hostile program can still use all of them, with or
+without the limits above:
+
+- **One long operator runs to completion.** The limits are read between
+  interpreter steps (and every 1024 loop iterations inside one), never inside
+  an operator. `array`, `string` and `aload`, the operators that can ask for
+  hundreds of megabytes in a step, check a memory limit before allocating.
+  Everything else is looked at only afterwards. The clearest case is a
+  whole-file read: `(/dev/zero) (r) file pop` reads before the program sees a
+  byte, never finishes, and went to 1.07 GB resident in 6 seconds under
+  `--max-memory 100`; a FIFO that nobody writes to blocks the same way
+  forever. For a hosted service the answer is the outer kill: the MCP server
+  kills its child at `--timeout` (tested with a FIFO), and anything else
+  should run the process under `ulimit`, a container's limits or `timeout`.
+- **Memory is looked at once per slice**, so a program can pass its cap by
+  what 512 steps (when a time or memory limit is set) can allocate before the
+  next look. With a 256 MiB cap, an operand-stack, graphics-state-stack and
+  path-growth loop each stopped at about the cap (peak resident 217 to 243
+  MB), so for those the overshoot is small; an operator that allocates a lot
+  per step and is not one of the three that check first could overshoot more.
+- **A spike that is freed again inside one slice is not seen.** Memory is
+  read between slices, so only what is still allocated then counts; a program
+  that allocates and drops it again within 512 steps passes. Measured: a
+  100,000-element procedure literal that is scanned and then `pop`ped (4 MB)
+  runs clean under `--max-memory 1`; kept with `def`, it fails.
+- **A step limit is approximate by up to a slice.** Objects are held to the cap
+  (the inner loop is given no more steps than the program has left). Loop
+  iterations are charged in blocks of 1024, and a program that ends inside its
+  last slice is not charged for that slice's objects, so a finishing program
+  can pass the cap by under one slice (4096 steps, 512 with a time or memory
+  limit) plus 1023 loop iterations: `9 {} repeat 1 2 3` runs clean under
+  `--max-steps 10`. A program that does not finish is stopped within a slice,
+  and within 1024 iterations inside a loop. The count is not kept at all when no
+  limit is set. Counting every step exactly means returning the executed count
+  from the interpreter's inner loop; a version that did cost 1.9% in
+  instructions retired on `fillkit.ps`.
 - **No limit on output volume** on the command line: a program can print as
-  much as it likes.
-- **No fuzzing.** The parser, font loaders and image decoders have unit and
-  golden tests, but have not been fuzzed. The interpreter's own code contains
-  no `unsafe` apart from the WebAssembly export functions in `src/wasm.rs`;
-  the dependencies (`tiny-skia`, `ttf-parser`, `zune-jpeg`, `flate2`, `winit`,
-  `softbuffer`) have their own, and are not audited here.
+  much as it likes, bounded only by the steps and time it is allowed. The MCP
+  server caps each child stream at 4 MiB.
+- **No cap on total decoded bytes from filters** (`FlateDecode`,
+  `LZWDecode`, `RunLengthDecode`, ...) as such. They decode as the program
+  reads, so what a program keeps counts against the memory limit and what it
+  pulls and discards costs steps and time.
+- **No time limit in the browser build**, which has no clock: the `wasm32`
+  module reads time as 0. A step limit applies (`Interp::set_limits`), but
+  the playground does not set one; it runs in slices (`begin` and `step` in
+  `web/pscat.js`) so a runaway does not freeze the tab.
+- **`--spool` takes no limits yet**: the flags are refused with it, and the
+  spool runs each file without a cap.
+- **`pscat handwrite` and the other subcommands take no limit flags.** The MCP
+  `handwrite` tool runs trusted library code on escaped text, bounded by
+  `--timeout`.
+- The memory limit needs the counting allocator, so a library user who has
+  not installed it gets only steps and time (and an error if they ask for
+  memory).
 
-Stopping a runaway run is the caller's job: use your shell's `ulimit`, a
-container's memory and CPU limits, or `timeout`. Resource limits for the
-interpreter and fuzzing are planned work
-([#604](https://github.com/PSCatLabs/pscat/issues/604)),
-not shipped.
+### Fuzzing
+
+The scanner and the whole interpreter are fuzzed with
+[cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz) (`fuzz/`, targets
+`lexer` and `interp`; the interpreter target runs under tight limits). A
+seed corpus is committed (`fuzz/seeds/`) and replayed by `cargo test`
+(`tests/fuzz_corpus.rs`), as is every crash once fixed
+(`fuzz/regressions/`). The `fuzz` workflow
+(`.github/workflows/fuzz.yml`) runs both targets for ten minutes each every
+week, and on request; a crash opens an issue and uploads the input. Writing the
+harness turned up one panic, now fixed and kept as a regression input:
+`9223372036854775807 packedarray` aborted with `capacity overflow`. A
+first local run of each target (one and a half minutes for `interp`,
+a minute for `lexer`, 600,000 inputs for the lexer) found nothing more; that
+is a smoke test, not a clean bill. Two things the fuzzing does not report on
+purpose: leaks (a program that puts a dictionary into itself builds a
+reference cycle that is never freed; LeakSanitizer is switched off, and that
+is the program's own doing, not memory unsafety) and the unbounded whole-file
+read above, which a mutated `file` path could reach and the harness does not
+fence off.
+
+What is **not** fuzzed yet: the Type 1 and TrueType font loaders, the image
+decoders (JPEG, Flate, LZW and the rest) other than as the interpreter
+reaches them through a program, and the PDF and SVG writers. A reader for PDF
+files does not exist yet, so there is no target for it. The dependencies
+(`tiny-skia`, `ttf-parser`, `zune-jpeg`, `flate2`, `winit`, `softbuffer`) have
+their own fuzzing and are not audited here. The interpreter's own code contains
+no `unsafe` apart from the WebAssembly export functions in `src/wasm.rs` and
+the counting allocator in `src/memtrack.rs`, which forwards every call to the
+system allocator and adds two atomic counters.
+
+Stopping a runaway run that a limit cannot reach is still the caller's job:
+use your shell's `ulimit`, a container's memory and CPU limits, or `timeout`.
 
 ### The MCP server (`pscat-mcp`)
 
@@ -219,21 +332,30 @@ an installed build (October 2026, #568).
 - **`eval_postscript` and `render_postscript` run arbitrary PostScript** with
   the file-read behaviour above. A model that calls them can read any file
   the server's user can read and receive the contents. This is not confined:
-  it is the interpreter's file access, and the interpreter limits are #604.
-- **Every call is bounded in time and memory held by the server.** A
-  wall-clock limit per call (`--timeout`, default 60 s) kills the child and
-  returns a `timeout` tool error. Each child stream (stdout, stderr) is kept
+  it is the interpreter's file access; the interpreter's step, time and memory
+  limits (below) do not confine what a program can read.
+- **Every call is bounded in time and memory held by the server.** The
+  interpreter's own limits are on in the child (#604): a step limit
+  (`--max-steps`, default 25 billion), a heap-growth limit (`--max-memory`
+  in MiB, default 1024) and a time limit of `--timeout` less a margin (a quarter, at most 5 s);
+  past one the call fails with `limit_exceeded` and a `limit` field
+  (`steps`, `time` or `memory`), and `render_postscript` still returns the
+  partial page. `0` turns the step or memory limit off. A wall-clock limit per
+  call (`--timeout`, default 60 s) kills the child and returns a `timeout`
+  tool error, the backstop for a program the limits cannot reach ("Limits
+  that cannot be enforced"). Each child stream (stdout, stderr) is kept
   up to 4 MiB; past that the child is killed and the call fails with
   `output_too_large`. `source` and `text` are capped (`--max-input-bytes`,
   default 1 MiB, `input_too_large`), and a request line far over that cap is
   discarded without being buffered. Inline images are capped
   (`--max-image-bytes`, default 3,750,000 bytes per call, and 20 pages); a
   bigger render is refused inline, though a file asked for with `out_path` is
-  still written. The child's own memory is not limited: a program that
-  allocates without end grows until the timeout stops it (see "Limits that
-  do not exist yet").
+  still written. The child's heap growth is limited by `--max-memory`
+  (default 1024 MiB); what that cannot see, such as a read of `/dev/zero`,
+  grows until the timeout stops it (see "Limits that cannot be enforced").
 - **One call at a time.** A runaway program delays later requests, `ping`
-  included, until its timeout; there is no cancellation yet (#622).
+  included, until its limit or timeout stops it; there is no cancellation yet
+  (#622).
 - **Bad input gets a bounded, structured answer, and stdout stays clean.**
   Malformed JSON, invalid UTF-8, batches and non-object messages get JSON-RPC
   errors (-32700, -32600) and the session continues; an unknown tool is

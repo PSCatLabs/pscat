@@ -7,7 +7,6 @@ mod common;
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::{Child, ChildStdout, Command, Stdio};
-use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
@@ -733,16 +732,115 @@ fn out_path_is_off_when_started_in_the_filesystem_root() {
 // --- resource bounds ---------------------------------------------------------
 
 #[test]
-fn a_runaway_program_times_out_and_the_server_keeps_serving() {
-    let mut s = Server::start_in(&common::scratch_dir("mcp-timeout"), &["--timeout", "2"]);
+fn a_runaway_program_is_stopped_by_the_interpreter_with_a_structured_error() {
+    // Issue #604: the interpreter's own limits stop `{ } loop` inside the
+    // server's timeout, with a `limit_exceeded` error naming the limit, not
+    // the `timeout` kill. (The test asserts the error, not the elapsed time.)
+    // A low step cap and a long timeout make the step limit trip first and
+    // deterministically; the clock has its own test below.
+    let mut s = Server::start_in(
+        &common::scratch_dir("mcp-limit"),
+        &["--timeout", "30", "--max-steps", "1000000"],
+    );
     initialized(&mut s);
-    let started = Instant::now();
     let result = s.tool("eval_postscript", json!({ "source": "{ } loop" }));
+    assert_eq!(error_kind(&result), "limit_exceeded", "{result}");
+    let err = &result["structuredContent"]["error"];
+    assert_eq!(err["ps_error"], "limitexceeded");
+    assert_eq!(err["limit"], "steps", "the limit is named: {err}");
+    // `stopped` cannot swallow it.
+    let result = s.tool(
+        "eval_postscript",
+        json!({ "source": "{ { { } loop } stopped pop } loop" }),
+    );
+    assert_eq!(error_kind(&result), "limit_exceeded", "{result}");
+    // A render keeps the partial canvas, with the error beside it.
+    let result = s.tool(
+        "render_postscript",
+        json!({ "source": "1 0 0 setrgbcolor 0 0 50 50 rectfill { } loop", "width": 60, "height": 60 }),
+    );
+    assert_eq!(result["isError"], false, "{result}");
+    let content = result["content"].as_array().unwrap();
+    assert!(content.iter().any(|c| c["type"] == "image"), "{result}");
+    assert!(
+        texts(&result).iter().any(|t| t.contains("limitexceeded")),
+        "{result}"
+    );
+    s.ping_ok();
+}
+
+#[test]
+fn step_and_memory_limits_are_server_flags() {
+    let mut s = Server::start_in(
+        &common::scratch_dir("mcp-limit-flags"),
+        &["--max-steps", "100000", "--max-memory", "100"],
+    );
+    initialized(&mut s);
+    let result = s.tool("eval_postscript", json!({ "source": "{ 1 pop } loop" }));
+    assert_eq!(error_kind(&result), "limit_exceeded", "{result}");
+    assert_eq!(result["structuredContent"]["error"]["limit"], "steps");
+    let result = s.tool(
+        "eval_postscript",
+        json!({ "source": "/d 100000 dict def 0 1 99999 { d exch 100000 array put } for" }),
+    );
+    assert_eq!(error_kind(&result), "limit_exceeded", "{result}");
+    assert_eq!(result["structuredContent"]["error"]["limit"], "memory");
+    // A program inside the limits is unaffected.
+    let result = s.tool(
+        "eval_postscript",
+        json!({ "source": "1 1 1000 { pop } for (ok) =" }),
+    );
+    assert_eq!(result["isError"], false, "{result}");
+}
+
+#[test]
+fn zero_turns_a_limit_off_and_the_clock_still_stops_the_program() {
+    // `--timeout 6` gives the child 4.5 s (a quarter, at most 5 s, is kept
+    // back for the child's start and exit), a margin wide enough for a loaded
+    // CI runner. Only the clock is left once the other two are off.
+    let mut s = Server::start_in(
+        &common::scratch_dir("mcp-limit-off"),
+        &["--max-steps", "0", "--max-memory", "0", "--timeout", "6"],
+    );
+    initialized(&mut s);
+    let result = s.tool("eval_postscript", json!({ "source": "{ 1 pop } loop" }));
+    assert_eq!(error_kind(&result), "limit_exceeded", "{result}");
+    assert_eq!(
+        result["structuredContent"]["error"]["limit"], "time",
+        "only the clock is left: {result}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_program_stuck_in_one_operator_is_killed_by_the_timeout_backstop() {
+    // The interpreter's limits are read between steps, so a program stuck
+    // inside one operator (here: opening a FIFO nobody writes to, which blocks
+    // in the file read) is outside them. The server's own timeout kills the
+    // child and the server keeps serving (SECURITY.md, "Limits that cannot be
+    // enforced").
+    let dir = common::scratch_dir("mcp-backstop");
+    let fifo = dir.join("stuck.fifo");
+    let _ = std::fs::remove_file(&fifo);
+    assert!(
+        Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .expect("mkfifo")
+            .success(),
+        "make a FIFO"
+    );
+    let mut s = Server::start_in(&dir, &["--timeout", "2"]);
+    initialized(&mut s);
+    let started = std::time::Instant::now();
+    let source = format!("({}) (r) file pop", common::ps_path(&fifo));
+    let result = s.tool("eval_postscript", json!({ "source": source }));
     let took = started.elapsed();
     assert_eq!(error_kind(&result), "timeout", "{result}");
-    assert!(took < Duration::from_secs(15), "stopped promptly: {took:?}");
-    let result = s.tool("render_postscript", json!({ "source": "{ } loop" }));
-    assert_eq!(error_kind(&result), "timeout", "{result}");
+    assert!(
+        took < std::time::Duration::from_secs(15),
+        "stopped promptly: {took:?}"
+    );
     s.ping_ok();
 }
 

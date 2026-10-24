@@ -41,6 +41,14 @@
 //! [`Interp::enable_pdf`] before running the program, then read
 //! [`Interp::svg_pages`] or [`Interp::pdf_document`].
 //!
+//! # Running a program you do not trust
+//!
+//! Nothing limits a program by default. [`Interp::set_limits`] takes a
+//! [`Limits`] that stops one with [`PsError::StepsExceeded`] (or `TimeExceeded`, `MemoryExceeded`) after too many
+//! steps, too long, or too much memory; a program cannot catch that error
+//! with `stopped`. See the [`limits`] module for what each limit can and cannot
+//! stop.
+//!
 //! # Threads
 //!
 //! An [`Interp`] is neither `Send` nor `Sync`: PostScript objects share
@@ -61,8 +69,8 @@
 //!
 //! # Supported API and stability
 //!
-//! The supported API is what this documentation shows: [`Interp`], [`Page`]
-//! and [`PsError`]. The crate has other public modules that the `pscat` and
+//! The supported API is what this documentation shows: [`Interp`], [`Page`],
+//! [`PsError`] and [`Limits`]. The crate has other public modules that the `pscat` and
 //! `pscat-mcp` binaries, the browser build and the test suite use; they are
 //! hidden from the documentation and can change in any release. Before 1.0,
 //! a minor version (0.6 to 0.7) may break the supported API and a patch
@@ -73,6 +81,8 @@
 // The supported surface: documented, and checked by `missing_docs`.
 pub mod error;
 pub mod interp;
+pub mod limits;
+pub mod memtrack;
 pub mod page;
 
 // Everything below is public only so the binaries, the wasm build and the
@@ -93,6 +103,8 @@ pub mod file;
 pub mod font;
 #[doc(hidden)]
 pub mod fontpacks;
+#[doc(hidden)]
+pub mod fuzzing;
 #[doc(hidden)]
 pub mod gfx;
 #[doc(hidden)]
@@ -141,6 +153,8 @@ pub mod window;
 
 pub use error::PsError;
 pub use interp::Interp;
+pub use limits::{Limit, Limits, LimitsError};
+pub use memtrack::TrackingAllocator;
 #[doc(hidden)]
 pub use object::{Object, Value};
 pub use page::Page;

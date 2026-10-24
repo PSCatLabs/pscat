@@ -1,0 +1,1 @@
+/Helvetica findfont 12 scalefont setfont 10 10 moveto (Hello) show (Hi) stringwidth pop 2 div 0 rmoveto (x) true charpath

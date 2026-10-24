@@ -1,0 +1,5 @@
+% comment
+%%Comment
+%!PS-Adobe-3.0
+%%BoundingBox: 0 0 100 100
+1 2 add % trailing

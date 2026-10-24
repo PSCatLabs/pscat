@@ -70,6 +70,10 @@ An MCP server on stdin/stdout (launched by an MCP client, not by hand).
   --max-input-bytes N    largest source/text accepted (default 1048576)
   --max-image-bytes N    largest total of inline image bytes per call
                          (default 3750000, about 5 MB once base64-encoded)
+  --max-steps N          stop a program after N interpreter steps (default
+                         25000000000; 0 = no step limit)
+  --max-memory MIB       stop a program that grows the heap by more than MIB
+                         (default 1024; 0 = no memory limit)
   -h, --help             this text
   -V, --version          print the version";
 
@@ -81,15 +85,37 @@ struct Config {
     timeout: Duration,
     max_input: usize,
     max_image: usize,
+    /// Interpreter limits passed to every `pscat` child (issue #604); 0 is
+    /// off. The child's time limit is derived from `timeout`, see
+    /// `Config::interpreter_args`.
+    max_steps: u64,
+    max_memory_mib: u64,
 }
 
 impl Config {
+    /// The flags that put the interpreter's own limits on a child run. The
+    /// time limit is `--timeout` less a margin of a quarter of it, at most
+    /// 5 s (55 s of the default 60): the interpreter stops first, with a
+    /// structured `limit_exceeded` error and the partial page, and the hard
+    /// kill at `--timeout` is only the backstop for a child stuck inside one
+    /// long operator. The margin pays for starting the child, writing the
+    /// canvas and the lint pass after the limit fires.
+    fn interpreter_args(&self, cmd: &mut Command) {
+        let total = self.timeout.as_secs_f64();
+        let secs = total - (total / 4.0).min(5.0);
+        cmd.arg("--max-time").arg(format!("{secs:.3}"));
+        cmd.arg("--max-steps").arg(self.max_steps.to_string());
+        cmd.arg("--max-memory").arg(self.max_memory_mib.to_string());
+    }
+
     /// `Ok(None)`: `--help`/`--version` was handled, exit 0.
     fn from_args(args: impl Iterator<Item = String>) -> Result<Option<Config>, String> {
         let mut out_root: Option<String> = None;
         let mut timeout = 60u64;
         let mut max_input = 1usize << 20;
         let mut max_image = 3_750_000usize;
+        let mut max_steps = pscat::limits::UNTRUSTED_MAX_STEPS;
+        let mut max_memory_mib = (pscat::limits::UNTRUSTED_MAX_MEMORY >> 20) as u64;
         let mut args = args;
         while let Some(arg) = args.next() {
             let mut value = |name: &str| args.next().ok_or_else(|| format!("{name} needs a value"));
@@ -122,6 +148,12 @@ impl Config {
                         number("--max-image-bytes", value("--max-image-bytes")?, 1, 1 << 30)?
                             as usize
                 }
+                "--max-steps" => {
+                    max_steps = number("--max-steps", value("--max-steps")?, 0, u64::MAX)?
+                }
+                "--max-memory" => {
+                    max_memory_mib = number("--max-memory", value("--max-memory")?, 0, 1 << 30)?
+                }
                 other => return Err(format!("unknown option {other:?}")),
             }
         }
@@ -141,6 +173,8 @@ impl Config {
             timeout: Duration::from_secs(timeout),
             max_input,
             max_image,
+            max_steps,
+            max_memory_mib,
         }))
     }
 }
@@ -513,7 +547,8 @@ fn tool_list(cfg: &Config) -> Value {
         Err(why) => format!("{why}. "),
     };
     let limits = format!(
-        "Limits: {}s per call, {} bytes of input.",
+        "Limits: {}s per call, {} bytes of input. The interpreter stops a runaway program \
+         (a limit_exceeded error naming steps, time or memory); stopped cannot catch it.",
         cfg.timeout.as_secs(),
         cfg.max_input
     );
@@ -708,6 +743,7 @@ fn render_postscript(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
     let scratch = ScratchDir::new()?;
     let out = scratch.path().join(format!("page.{format}"));
     let mut cmd = Command::new(pscat_bin()?);
+    cfg.interpreter_args(&mut cmd);
     cmd.arg("--page").arg(format!("{width}x{height}"));
     if let Some(dpi) = dpi {
         cmd.arg("--dpi").arg(number_arg(dpi));
@@ -721,17 +757,14 @@ fn render_postscript(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
 
     let pages = collect_pages(&out);
     if pages.is_empty() {
-        let mut e = ToolError::new(
+        return Err(failed_run(
             "no_output",
             format!(
                 "no output produced\nstdout: {}\nstderr: {}",
                 run.stdout, run.stderr
             ),
-        );
-        if let Some(fields) = ps_error_fields(&run.stderr) {
-            e.fields.extend(fields);
-        }
-        return Err(e);
+            &run.stderr,
+        ));
     }
     let written = match &dest {
         Some(dest) => Some(dest.write_pages(&pages)?),
@@ -842,6 +875,7 @@ fn describe_art_capabilities(cfg: &Config) -> Result<Value, ToolError> {
 fn eval_postscript(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
     let source = required_text(cfg, args, "source")?;
     let mut cmd = Command::new(pscat_bin()?);
+    cfg.interpreter_args(&mut cmd);
     cmd.arg("--headless").arg("--pstack-on-error").arg("-");
     let run = run_child(cfg, &mut cmd, source.as_bytes())?;
     let mut report = String::new();
@@ -860,11 +894,7 @@ fn eval_postscript(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
     if run.success {
         return Ok(Value::Array(vec![text_content(&report)]));
     }
-    let mut e = ToolError::new("postscript_error", report);
-    if let Some(fields) = ps_error_fields(&run.stderr) {
-        e.fields.extend(fields);
-    }
-    Err(e)
+    Err(failed_run("postscript_error", report, &run.stderr))
 }
 
 /// The pages' bytes for inline content, checked against the page and
@@ -930,6 +960,21 @@ fn wrote_message(written: &[PathBuf]) -> String {
     }
 }
 
+/// A tool error for a child run that failed, with the PostScript error's
+/// fields from its stderr. A run the interpreter stopped at one of its limits
+/// (steps, time or memory) is `limit_exceeded` with a `limit` field, whatever
+/// `kind` the caller would otherwise use: the caller can tell it from a
+/// program bug, and from the server's own `timeout` kill.
+fn failed_run(kind: &'static str, message: String, stderr: &str) -> ToolError {
+    let fields = ps_error_fields(stderr);
+    let limited = fields.as_ref().is_some_and(|f| f.contains_key("limit"));
+    let mut e = ToolError::new(if limited { "limit_exceeded" } else { kind }, message);
+    if let Some(fields) = fields {
+        e.fields.extend(fields);
+    }
+    e
+}
+
 /// The fields of pscat's `%%[ Error: NAME; OffendingCommand: CMD; Line: N ]%%`.
 fn ps_error_fields(stderr: &str) -> Option<Map<String, Value>> {
     let line = stderr.lines().find(|l| l.contains("%%[ Error: "))?;
@@ -941,6 +986,11 @@ fn ps_error_fields(stderr: &str) -> Option<Map<String, Value>> {
             continue;
         };
         match key {
+            // `limitexceeded (steps)`: the interpreter's own limits (#604).
+            "Error" if value.starts_with("limitexceeded (") && value.ends_with(')') => {
+                fields.insert("limit".into(), json!(&value[15..value.len() - 1]));
+                fields.insert("ps_error".into(), json!("limitexceeded"))
+            }
             "Error" => fields.insert("ps_error".into(), json!(value)),
             "OffendingCommand" => fields.insert("offending_command".into(), json!(value)),
             "Line" => fields.insert(
@@ -1394,5 +1444,25 @@ mod tests {
         assert_eq!(f["offending_command"], "bogus");
         assert_eq!(f["line"], 3);
         assert!(ps_error_fields("all fine").is_none());
+    }
+
+    #[test]
+    fn limit_error_line_names_the_limit() {
+        let f = ps_error_fields(
+            "%%[ Error: limitexceeded (steps); OffendingCommand: loop; Line: 1 ]%%",
+        )
+        .unwrap();
+        assert_eq!(f["ps_error"], "limitexceeded");
+        assert_eq!(f["limit"], "steps");
+        assert_eq!(f["offending_command"], "loop");
+        let e = failed_run(
+            "postscript_error",
+            "m".into(),
+            "%%[ Error: limitexceeded (time) ]%%",
+        );
+        assert_eq!(e.kind, "limit_exceeded");
+        assert_eq!(e.fields["limit"], "time");
+        let e = failed_run("postscript_error", "m".into(), "%%[ Error: undefined ]%%");
+        assert_eq!(e.kind, "postscript_error");
     }
 }

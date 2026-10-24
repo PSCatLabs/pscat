@@ -36,6 +36,13 @@ fn packedarray(it: &mut Interp) -> Result<(), PsError> {
     if n < 0 {
         return Err(PsError::Rangecheck);
     }
+    // The operands come off the stack, so a count past its depth is an
+    // underflow; checked first, `with_capacity` below would otherwise try
+    // to reserve `n` slots (found by fuzzing, issue #604: a huge `n` panicked
+    // with "capacity overflow").
+    if n as usize > it.operand_stack().len() {
+        return Err(PsError::StackUnderflow);
+    }
     let mut items = Vec::with_capacity(n as usize);
     for _ in 0..n {
         items.push(it.pop()?);

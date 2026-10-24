@@ -24,6 +24,7 @@ use crate::font::{ShowCtx, ShowStep};
 use crate::gfx::{DEFAULT_PAGE, Gfx, GraphicsState};
 use crate::image::{ImageCtx, ImageStep};
 use crate::lexer::{Lexer, Token};
+use crate::limits::{Limits, LimitsError};
 use crate::object::{Dict, Num, Object, PsArray, PsString, SaveHandle, Value};
 use crate::ops;
 
@@ -300,12 +301,33 @@ pub struct Interp {
     /// Set once the capture buffer has dropped output and carries the
     /// truncation note; later writes are discarded.
     stdout_truncated: bool,
+    /// Caps on the running program (issue #604); `Limits::none()` unless
+    /// `set_limits` was called, and then every limit check is skipped.
+    limits: Limits,
+    /// Steps run by the current program (`begin_source` zeroes it).
+    steps_used: u64,
+    /// Starts when the current program does; read only when `limits` has a
+    /// time cap.
+    run_clock: crate::clock::Clock,
+    /// Process heap bytes when `set_limits` ran: the memory cap counts
+    /// growth from here.
+    mem_base: usize,
+    /// Loop iterations until the next `poll_slow` (see `tick`).
+    poll_in: u32,
     pub(crate) gfx: Gfx,
 }
 
 /// The most a captured stdout keeps (see [`Interp::capture_stdout`]): a
 /// runaway `{ 1 == } loop` in a browser tab must not grow without limit.
 pub const STDOUT_CAPTURE_LIMIT: usize = 64 * 1024;
+
+/// Steps per `step_n` call in `run_source` when a time or memory limit is
+/// set: small enough to notice a runaway within milliseconds, large enough
+/// that the clock read is lost in the noise.
+const LIMITED_SLICE: usize = 512;
+
+/// Loop iterations between looks at the limits from inside `next_item`.
+const POLL_PERIOD: u32 = 1024;
 const STDOUT_TRUNCATED: &[u8] = b"\n%% output truncated: more than 64 KB\n";
 
 impl Interp {
@@ -387,6 +409,11 @@ impl Interp {
             keep_dicts_on_drop: false,
             stdout_capture: None,
             stdout_truncated: false,
+            limits: Limits::none(),
+            steps_used: 0,
+            run_clock: crate::clock::Clock::start(),
+            mem_base: 0,
+            poll_in: POLL_PERIOD,
             gfx,
         })
     }
@@ -403,8 +430,54 @@ impl Interp {
     /// PostScript files are: binary data and Latin-1 strings are fine.
     pub fn run_source(&mut self, src: &[u8]) -> Result<(), PsError> {
         self.begin_source(src);
-        while self.step_n(4096)? {}
+        // Time and memory are looked at once per `step_n` call, so a run
+        // with either limit takes smaller slices to notice sooner.
+        let slice = if self.limits.max_time.is_some() || self.limits.max_memory.is_some() {
+            LIMITED_SLICE
+        } else {
+            4096
+        };
+        while self.step_n(slice)? {}
         Ok(())
+    }
+
+    /// Put [`Limits`] on the programs this interpreter runs from now on.
+    /// `Limits::none()` takes them off again. The step count and the clock
+    /// restart with each program ([`begin_source`](Self::begin_source),
+    /// [`run_str`](Self::run_str)); the memory cap counts heap growth from
+    /// this call. Fails, and changes nothing, if `max_memory` is set and
+    /// [`TrackingAllocator`](crate::TrackingAllocator) is not installed.
+    ///
+    /// ```
+    /// use pscat::{Interp, Limits};
+    /// let mut interp = Interp::new();
+    /// interp.set_limits(Limits::none().with_max_steps(1_000))?;
+    /// assert!(interp.run_str("1 2 add pop").is_ok());
+    /// # Ok::<(), pscat::LimitsError>(())
+    /// ```
+    pub fn set_limits(&mut self, limits: Limits) -> Result<(), LimitsError> {
+        if limits.max_memory.is_some() && !crate::memtrack::installed() {
+            return Err(LimitsError::AllocatorNotInstalled);
+        }
+        self.limits = limits;
+        self.mem_base = crate::memtrack::live_bytes();
+        self.steps_used = 0;
+        self.poll_in = POLL_PERIOD;
+        self.run_clock = crate::clock::Clock::start();
+        Ok(())
+    }
+
+    /// The limits in force ([`Limits::none`] by default).
+    pub fn limits(&self) -> Limits {
+        self.limits
+    }
+
+    /// Interpreter steps the current program has run, counted only while
+    /// some [`Limits`] are set (otherwise 0). The count moves in slices (up
+    /// to 4096 steps, 512 with a time or memory limit), so it can trail the
+    /// true figure by a slice.
+    pub fn steps_used(&self) -> u64 {
+        self.steps_used
     }
 
     /// Queue a program for execution without running it; drive it with
@@ -414,6 +487,11 @@ impl Interp {
         self.quit_requested = false;
         self.last_name = None;
         self.last_line = None;
+        if !self.limits.is_none() {
+            self.steps_used = 0;
+            self.poll_in = POLL_PERIOD;
+            self.run_clock = crate::clock::Clock::start();
+        }
         self.estack
             .push(Frame::Scanner(Lexer::main_program(src.to_vec())));
     }
@@ -422,11 +500,139 @@ impl Interp {
     /// error (or `quit`) the execution stack is cleared — the program is
     /// aborted — but the operand stack and canvas are left for inspection.
     pub fn step_n(&mut self, budget: usize) -> Result<bool, PsError> {
-        let result = self.step_n_inner(budget);
+        // One call site for `step_n_inner`, so the compiler inlines the hot
+        // loop here as it always did; the limits are all in the cold
+        // `limit_budget` and `after_slice` (issue #604).
+        let limited = !self.limits.is_none();
+        let budget = if limited {
+            match self.limit_budget(budget) {
+                Ok(n) => n,
+                Err(e) => {
+                    self.unwind_all();
+                    return Err(e);
+                }
+            }
+        } else {
+            budget
+        };
+        let mut result = self.step_n_inner(budget);
+        if limited {
+            result = self.after_slice(result, budget);
+        }
         if result.is_err() || self.quit_requested {
             self.unwind_all();
         }
         result
+    }
+
+    /// Before a slice under `Limits`: refuse if one is already passed, and
+    /// return the budget to run, no bigger than the steps the program has
+    /// left. The step cap costs nothing per step: the inner loop gets a
+    /// smaller budget and `after_slice` adds it to the count afterwards.
+    #[cold]
+    #[inline(never)]
+    fn limit_budget(&mut self, budget: usize) -> Result<usize, PsError> {
+        self.check_time_and_memory()?;
+        let mut n = budget;
+        if let Some(max) = self.limits.max_steps {
+            // One step past the cap is allowed, so a program of exactly
+            // `max` steps is not refused for the pass that finds it done.
+            if self.steps_used > max {
+                return Err(PsError::StepsExceeded);
+            }
+            let left = (max - self.steps_used).saturating_add(1);
+            n = n.min(usize::try_from(left).unwrap_or(usize::MAX));
+        }
+        Ok(n)
+    }
+
+    /// After a slice under `Limits`: count the loop iterations `tick` has not
+    /// charged yet, so a program that finishes inside a poll period is held
+    /// to the step cap too; add the slice's steps; and look at the clock and
+    /// the heap again, so a program that passes the time or memory cap in its
+    /// last slice is reported, not let through as a clean run.
+    #[cold]
+    #[inline(never)]
+    fn after_slice(&mut self, result: Result<bool, PsError>, n: usize) -> Result<bool, PsError> {
+        let more = result?;
+        let pending = u64::from(POLL_PERIOD - self.poll_in);
+        self.poll_in = POLL_PERIOD;
+        self.steps_used = self.steps_used.saturating_add(pending);
+        if let Some(max) = self.limits.max_steps
+            && self.steps_used > max
+        {
+            return Err(PsError::StepsExceeded);
+        }
+        if more {
+            self.steps_used = self.steps_used.saturating_add(n as u64);
+        }
+        self.check_time_and_memory()?;
+        Ok(more)
+    }
+
+    fn check_time_and_memory(&self) -> Result<(), PsError> {
+        if let Some(max) = self.limits.max_time
+            && self.run_clock.elapsed_ms() as u128 >= max.as_millis()
+        {
+            return Err(PsError::TimeExceeded);
+        }
+        if let Some(max) = self.limits.max_memory
+            && self.heap_growth() > max
+        {
+            return Err(PsError::MemoryExceeded);
+        }
+        Ok(())
+    }
+
+    /// Called once per loop iteration, from inside `next_item`. A loop whose
+    /// body is empty (`{ } loop`, `1 1 1000000000 { } for`) never yields an
+    /// object, so it never returns to `step_n` where the limits are read;
+    /// this counts the iterations itself. One decrement and a branch per
+    /// iteration; the slow part runs once per `POLL_PERIOD`.
+    #[inline]
+    fn tick(&mut self) -> Result<(), PsError> {
+        self.poll_in -= 1;
+        if self.poll_in == 0 {
+            self.poll_slow()
+        } else {
+            Ok(())
+        }
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn poll_slow(&mut self) -> Result<(), PsError> {
+        self.poll_in = POLL_PERIOD;
+        if self.limits.is_none() {
+            return Ok(());
+        }
+        // A loop iteration counts as a step, on top of the objects its body
+        // executes.
+        self.steps_used = self.steps_used.saturating_add(u64::from(POLL_PERIOD));
+        if let Some(max) = self.limits.max_steps
+            && self.steps_used > max
+        {
+            return Err(PsError::StepsExceeded);
+        }
+        self.check_time_and_memory()
+    }
+
+    /// Heap bytes the process has gained since `set_limits`.
+    fn heap_growth(&self) -> usize {
+        crate::memtrack::live_bytes().saturating_sub(self.mem_base)
+    }
+
+    /// Refuse an allocation of `bytes` that would pass the memory cap,
+    /// before making it. For the operators that can ask for megabytes in
+    /// one step (`array`, `string`); everything else is caught by the
+    /// per-slice check in `step_n_limited`.
+    pub(crate) fn check_alloc(&self, bytes: usize) -> Result<(), PsError> {
+        if let Some(max) = self.limits.max_memory
+            && self.heap_growth().saturating_add(bytes) > max
+        {
+            return Err(PsError::MemoryExceeded);
+        }
+        Ok(())
     }
 
     /// Per-frame teardown shared by every unwind path — `unwind_all`
@@ -513,7 +719,9 @@ impl Interp {
     /// Otherwise propagate; the front end reports it.
     fn recover(&mut self, e: PsError) -> Result<(), PsError> {
         let command = self.error_command.take();
-        if !self.estack.iter().any(|f| matches!(f, Frame::StopMark)) {
+        // A limit error is never catchable: `stopped` would otherwise let a
+        // runaway program swallow it and carry on (issue #604).
+        if e.limit().is_some() || !self.estack.iter().any(|f| matches!(f, Frame::StopMark)) {
             return Err(e);
         }
         self.record_error(&e, command);
@@ -663,7 +871,10 @@ impl Interp {
     pub fn error_report(&self, err: &PsError) -> String {
         let kind = match err {
             PsError::Syntax(detail) => format!("syntaxerror ({detail})"),
-            _ => err.name().to_string(),
+            _ => match err.limit() {
+                Some(limit) => format!("limitexceeded ({limit})"),
+                None => err.name().to_string(),
+            },
         };
         let command = match err {
             PsError::Undefined(name) => name.clone(),
@@ -891,12 +1102,17 @@ impl Interp {
                     self.push(a);
                     self.push(b);
                 }
-                Action::Iterate(body) => self.push_proc_frame(body)?,
+                Action::Iterate(body) => {
+                    self.tick()?;
+                    self.push_proc_frame(body)?;
+                }
                 Action::IterateWith(v, body) => {
+                    self.tick()?;
                     self.push(v);
                     self.push_proc_frame(body)?;
                 }
                 Action::IterateWith2(a, b, body) => {
+                    self.tick()?;
                     self.push(a);
                     self.push(b);
                     self.push_proc_frame(body)?;

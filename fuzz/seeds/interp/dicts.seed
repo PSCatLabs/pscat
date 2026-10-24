@@ -1,0 +1,1 @@
+10 dict begin /x 1 def /y { x 1 add } def y end 5 dict dup /k 3 put /k get = currentdict length
