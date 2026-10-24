@@ -9,6 +9,9 @@ use std::time::Duration;
 
 use pscat::{Interp, Limits, PsError};
 
+#[cfg(unix)]
+mod common;
+
 fn limited(limits: Limits) -> Interp {
     let mut it = Interp::new();
     it.set_limits(limits)
@@ -177,4 +180,163 @@ fn a_cap_binds_the_objects_of_a_program_that_ends_in_one_slice() {
     );
     let mut it = limited(steps(10));
     it.run_str("1 2 add pop 3 4 add pop 5 6").unwrap(); // exactly 10 objects
+}
+
+// Whole-file reads (issue #702): `file` and `run` read before the program sees
+// a byte, so the limits are looked at while the bytes arrive.
+#[cfg(unix)]
+mod file_reads {
+    use super::*;
+    use std::io::Write;
+    use std::process::Command;
+
+    use crate::common;
+
+    fn fifo(tag: &str) -> std::path::PathBuf {
+        let dir = common::scratch_dir(tag);
+        let path = dir.join("f.fifo");
+        assert!(
+            Command::new("mkfifo")
+                .arg(&path)
+                .status()
+                .expect("mkfifo")
+                .success()
+        );
+        path
+    }
+
+    fn ps(path: &std::path::Path) -> String {
+        common::ps_path(path)
+    }
+
+    #[test]
+    fn a_step_limit_stops_a_read_of_dev_zero() {
+        // A KiB read is a step, so the cap bounds the read to about 5 MB here.
+        let mut it = limited(steps(5_000));
+        assert_eq!(
+            it.run_str("(/dev/zero) (r) file pop"),
+            Err(PsError::StepsExceeded)
+        );
+        // `run` reads the same way.
+        let mut it = limited(steps(5_000));
+        assert_eq!(it.run_str("(/dev/zero) run"), Err(PsError::StepsExceeded));
+    }
+
+    #[test]
+    fn a_read_costs_one_step_per_kib() {
+        let dir = common::scratch_dir("limits-kib");
+        let path = dir.join("f.bin");
+        std::fs::write(&path, vec![7u8; 300 * 1024]).unwrap();
+        let src = format!("({}) (r) file pop", ps(&path));
+
+        // The charge itself: 300 KiB is about 300 steps, plus the few objects
+        // of the program (not 5 steps, as a count per 64 KiB chunk would be).
+        let mut it = limited(steps(1_000_000));
+        it.run_str(&src).unwrap();
+        let used = it.steps_used();
+        assert!((300..=400).contains(&used), "steps used: {used}");
+
+        // And the cap: the same file passes a million-step cap, fails a 100-step one.
+        let mut it = limited(steps(100));
+        assert_eq!(it.run_str(&src), Err(PsError::StepsExceeded));
+    }
+
+    #[test]
+    fn a_limit_in_a_read_cannot_be_caught() {
+        let mut it = limited(steps(5_000));
+        assert_eq!(
+            it.run_str("{ (/dev/zero) (r) file pop } stopped pop /survived true def"),
+            Err(PsError::StepsExceeded)
+        );
+    }
+
+    #[test]
+    fn a_time_limit_stops_a_read_of_a_fifo_nobody_writes_to() {
+        // The open itself blocks; the limits are still looked at.
+        let path = fifo("limits-fifo-stuck");
+        let mut it = limited(Limits::none().with_max_time(Duration::from_millis(300)));
+        let src = format!("({}) (r) file pop", ps(&path));
+        assert_eq!(it.run_str(&src), Err(PsError::TimeExceeded));
+        // A second program on the same interpreter is not affected by the
+        // abandoned reader.
+        assert_eq!(it.run_str("1 2 add pop"), Ok(()));
+    }
+
+    #[test]
+    fn a_time_limit_stops_a_fifo_whose_writer_stalls() {
+        let path = fifo("limits-fifo-stall");
+        let p = path.clone();
+        let writer = std::thread::spawn(move || {
+            let mut f = std::fs::OpenOptions::new().write(true).open(&p).unwrap();
+            f.write_all(b"some bytes").unwrap();
+            // Keep the pipe open and say nothing more: the read has bytes but
+            // no end. The limit has to stop it.
+            std::thread::sleep(Duration::from_secs(2));
+        });
+        let mut it = limited(Limits::none().with_max_time(Duration::from_millis(300)));
+        let src = format!("({}) (r) file pop", ps(&path));
+        assert_eq!(it.run_str(&src), Err(PsError::TimeExceeded));
+        writer.join().unwrap();
+    }
+
+    #[test]
+    fn files_still_read_under_limits() {
+        let limits = Limits::none()
+            .with_max_steps(1_000_000)
+            .with_max_time(Duration::from_secs(60));
+
+        // A FIFO with a writer that finishes: every byte arrives, in order.
+        let path = fifo("limits-fifo-ok");
+        let body: Vec<u8> = (0..200_000u32).map(|i| (i % 251) as u8).collect();
+        let (p, b) = (path.clone(), body.clone());
+        let writer = std::thread::spawn(move || {
+            let mut f = std::fs::OpenOptions::new().write(true).open(&p).unwrap();
+            f.write_all(&b).unwrap();
+        });
+        let mut it = limited(limits);
+        it.capture_stdout();
+        let src = format!(
+            "({}) (r) file 300000 string readstring pop length =",
+            ps(&path)
+        );
+        it.run_str(&src).unwrap();
+        writer.join().unwrap();
+        assert_eq!(it.captured_stdout(), b"200000\n");
+
+        // A regular file bigger than one chunk, and an empty one.
+        let dir = common::scratch_dir("limits-regular");
+        let big = dir.join("big.bin");
+        std::fs::write(&big, &body).unwrap();
+        let mut it = limited(limits);
+        it.capture_stdout();
+        let src = format!(
+            "({}) (r) file 300000 string readstring pop dup length = 123457 get =",
+            ps(&big)
+        );
+        it.run_str(&src).unwrap();
+        assert_eq!(
+            it.captured_stdout(),
+            format!("200000\n{}\n", body[123_457]).as_bytes()
+        );
+        let mut it = limited(limits);
+        it.capture_stdout();
+        it.run_str("(/dev/null) (r) file read =").unwrap();
+        assert_eq!(it.captured_stdout(), b"false\n");
+
+        // A missing file is still `undefinedfilename`, a directory too.
+        for src in ["(/no/such/file) (r) file", "(/) (r) file"] {
+            let mut it = limited(limits);
+            assert_eq!(it.run_str(src), Err(PsError::UndefinedFilename), "{src}");
+        }
+    }
+
+    #[test]
+    fn a_library_file_still_loads_under_limits() {
+        let mut it = limited(
+            Limits::none()
+                .with_max_steps(100_000_000)
+                .with_max_time(Duration::from_secs(60)),
+        );
+        it.run_str("(lib/artkit.ps) run").unwrap();
+    }
 }

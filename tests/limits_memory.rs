@@ -4,6 +4,9 @@
 
 use pscat::{Interp, Limits, PsError};
 
+#[cfg(unix)]
+mod common;
+
 #[global_allocator]
 static ALLOC: pscat::TrackingAllocator = pscat::TrackingAllocator;
 
@@ -60,4 +63,77 @@ fn memory_growth_is_capped() {
     it.run_str("1 1 2000 { pop 10000 array pop } for (done) print")
         .unwrap();
     assert_eq!(it.captured_stdout(), b"done");
+
+    // A whole-file read counts as it grows (issue #702): `/dev/zero` never
+    // ends, so the cap is what stops it, well short of a gigabyte.
+    #[cfg(unix)]
+    {
+        let mut it = limited(100);
+        let before = pscat::memtrack::live_bytes();
+        assert_eq!(
+            it.run_str("(/dev/zero) (r) file pop"),
+            Err(PsError::MemoryExceeded)
+        );
+        // Overshoot is at most one buffer doubling: the cap is 100 MiB.
+        let peak_growth = pscat::memtrack::live_bytes().saturating_sub(before);
+        assert!(peak_growth < 100 * MIB, "the read's buffer is freed again");
+
+        // A regular file bigger than the cap is refused up front, from its
+        // length, before any of it is read.
+        let path = common::scratch_dir("limits-mem").join("big.bin");
+        std::fs::File::create(&path)
+            .unwrap()
+            .set_len(200 * MIB as u64)
+            .unwrap();
+        let mut it = limited(100);
+        let src = format!("({}) (r) file pop", common::ps_path(&path));
+        let result = it.run_str(&src);
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(result, Err(PsError::MemoryExceeded));
+
+        // One that fits reads through in full, however many chunks it takes:
+        // its buffer is sized once, so no doubling is refused halfway.
+        let path = common::scratch_dir("limits-mem").join("fits.bin");
+        std::fs::File::create(&path)
+            .unwrap()
+            .set_len(150 * MIB as u64)
+            .unwrap();
+        let mut it = limited(200);
+        let src = format!(
+            "({}) (r) file 1 string readstring pop length =",
+            common::ps_path(&path)
+        );
+        it.capture_stdout();
+        let result = it.run_str(&src);
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(result, Ok(()));
+
+        // A stream that has to double its buffer is held to the growth it
+        // really makes: 40 MiB through a pipe, buffer 32 -> 64 MiB, fits 90.
+        let fifo = common::scratch_dir("limits-mem").join("s.fifo");
+        assert!(
+            std::process::Command::new("mkfifo")
+                .arg(&fifo)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let p = fifo.clone();
+        let writer = std::thread::spawn(move || {
+            use std::io::Write;
+            let mut f = std::fs::OpenOptions::new().write(true).open(&p).unwrap();
+            let block = vec![1u8; MIB];
+            for _ in 0..40 {
+                f.write_all(&block).unwrap();
+            }
+        });
+        let mut it = limited(90);
+        let src = format!(
+            "({}) (r) file 1 string readstring pop length =",
+            common::ps_path(&fifo)
+        );
+        let result = it.run_str(&src);
+        writer.join().unwrap();
+        assert_eq!(result, Ok(()));
+    }
 }

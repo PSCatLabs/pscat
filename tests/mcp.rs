@@ -815,12 +815,12 @@ fn zero_turns_a_limit_off_and_the_clock_still_stops_the_program() {
 
 #[cfg(unix)]
 #[test]
-fn a_program_stuck_in_one_operator_is_killed_by_the_timeout_backstop() {
-    // The interpreter's limits are read between steps, so a program stuck
-    // inside one operator (here: opening a FIFO nobody writes to, which blocks
-    // in the file read) is outside them. The server's own timeout kills the
-    // child and the server keeps serving (SECURITY.md, "Limits that cannot be
-    // enforced").
+fn a_whole_file_read_that_never_ends_hits_the_limits_not_the_timeout_kill() {
+    // Issue #702. A read of a FIFO nobody writes to, or of `/dev/zero`, used
+    // to sit inside one operator, past every limit, until the server's own
+    // timeout killed the child. The read now looks at the limits as it goes,
+    // so the call fails with `limit_exceeded` (the render keeps its partial
+    // page) and the kill stays only as the backstop.
     let dir = common::scratch_dir("mcp-backstop");
     let fifo = dir.join("stuck.fifo");
     let _ = std::fs::remove_file(&fifo);
@@ -838,11 +838,22 @@ fn a_program_stuck_in_one_operator_is_killed_by_the_timeout_backstop() {
     let source = format!("({}) (r) file pop", common::ps_path(&fifo));
     let result = s.tool("eval_postscript", json!({ "source": source }));
     let took = started.elapsed();
-    assert_eq!(error_kind(&result), "timeout", "{result}");
+    assert_eq!(error_kind(&result), "limit_exceeded", "{result}");
+    assert_eq!(
+        result["structuredContent"]["error"]["limit"], "time",
+        "{result}"
+    );
     assert!(
         took < std::time::Duration::from_secs(15),
         "stopped promptly: {took:?}"
     );
+    // `/dev/zero` ends at the memory cap or the clock, whichever comes first:
+    // either way it is a limit.
+    let result = s.tool(
+        "eval_postscript",
+        json!({ "source": "(/dev/zero) (r) file pop" }),
+    );
+    assert_eq!(error_kind(&result), "limit_exceeded", "{result}");
     s.ping_ok();
 }
 

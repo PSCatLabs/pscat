@@ -473,7 +473,8 @@ impl Interp {
     }
 
     /// Interpreter steps the current program has run, counted only while
-    /// some [`Limits`] are set (otherwise 0). The count moves in slices (up
+    /// some [`Limits`] are set (otherwise 0). A KiB read by `file` or `run`
+    /// counts as one step. The count moves in slices (up
     /// to 4096 steps, 512 with a time or memory limit), so it can trail the
     /// true figure by a slice.
     pub fn steps_used(&self) -> u64 {
@@ -620,6 +621,25 @@ impl Interp {
     /// Heap bytes the process has gained since `set_limits`.
     fn heap_growth(&self) -> usize {
         crate::memtrack::live_bytes().saturating_sub(self.mem_base)
+    }
+
+    /// The limits' look during a whole-file read (issue #702, `file::
+    /// read_path_limited`), once per chunk and while waiting on a stalled
+    /// source. Each of the `kib` whole KiB read since the last look is one
+    /// step, so a step cap bounds a read too; `will_alloc` is heap the buffer
+    /// is about to take, refused before it is made.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn poll_read(&mut self, kib: usize, will_alloc: usize) -> Result<(), PsError> {
+        self.steps_used = self.steps_used.saturating_add(kib as u64);
+        if let Some(max) = self.limits.max_steps
+            && self.steps_used > max
+        {
+            return Err(PsError::StepsExceeded);
+        }
+        if will_alloc > 0 {
+            self.check_alloc(will_alloc)?;
+        }
+        self.check_time_and_memory()
     }
 
     /// Refuse an allocation of `bytes` that would pass the memory cap,
