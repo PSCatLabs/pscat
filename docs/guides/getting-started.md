@@ -80,8 +80,16 @@ More on the less obvious ones:
   Korean, Japanese, Chinese or Thai (the face follows the script; Korean,
   Japanese and Thai need the `cjk-thai` font pack). Where `--contact-sheet` can
   only grid same-size sweep frames, this builds icon-size comparisons and
-  candidate review sheets without an imaging library; `pscat sheet --help`
-  has the rest.
+  candidate review sheets without an imaging library. Four more controls
+  (#706). `--sweep-seed 1:12` or `--sweep NAME=10,20,40` before a file turns it
+  into one cell per seed or value, each captioned `seed=7` or `NAME=20`, with
+  the flag CLI's own sweep grammar. A `--dpi` cell takes a mat, `9@#222`: it is
+  drawn on a transparent page, set on a dark (or `white`) tile padded 10 px,
+  to judge an icon on both backgrounds. `+` stacks cells in one column
+  (`'96,9+9@#222'`: a 96 dpi cell, then the 9 dpi render over its dark-mat
+  copy), so small cells stop taking a wide column each. `--cols N` wraps a long
+  row onto more lines, for sweeps and sheets that would pass 8000 px. Quote a
+  `--dpi` list that has `#` or `+`. `pscat sheet --help` has the rest.
 - **Gradients.** `shfill` paints axial and radial gradients (`ShadingType`
   2 and 3, with exponential and stitching functions, so multi-stop ramps
   work). Raster and window output use real gradients, SVG uses native
