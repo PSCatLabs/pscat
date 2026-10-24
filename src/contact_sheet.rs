@@ -387,6 +387,62 @@ fn classify(c: char) -> Class {
     }
 }
 
+/// Base letter then combining mark, as the Latin-1 letter they compose
+/// to: `(mark, "<base><composed>" pairs)`.
+const LATIN1_COMPOSE: [(char, &str); 7] = [
+    (
+        '\u{300}',
+        "A\u{c0}E\u{c8}I\u{cc}O\u{d2}U\u{d9}a\u{e0}e\u{e8}i\u{ec}o\u{f2}u\u{f9}",
+    ),
+    (
+        '\u{301}',
+        "A\u{c1}E\u{c9}I\u{cd}O\u{d3}U\u{da}Y\u{dd}a\u{e1}e\u{e9}i\u{ed}o\u{f3}u\u{fa}y\u{fd}",
+    ),
+    (
+        '\u{302}',
+        "A\u{c2}E\u{ca}I\u{ce}O\u{d4}U\u{db}a\u{e2}e\u{ea}i\u{ee}o\u{f4}u\u{fb}",
+    ),
+    ('\u{303}', "A\u{c3}N\u{d1}O\u{d5}a\u{e3}n\u{f1}o\u{f5}"),
+    (
+        '\u{308}',
+        "A\u{c4}E\u{cb}I\u{cf}O\u{d6}U\u{dc}a\u{e4}e\u{eb}i\u{ef}o\u{f6}u\u{fc}y\u{ff}",
+    ),
+    ('\u{30a}', "A\u{c5}a\u{e5}"),
+    ('\u{327}', "C\u{c7}c\u{e7}"),
+];
+
+/// `text` with the decomposed forms macOS file names use composed: a
+/// Latin letter plus a combining mark becomes its Latin-1 letter, and
+/// Hangul jamo become syllables, so the default label of `café.ps` or
+/// `한글.ps` (stored decomposed) shows. Only what the faces here can
+/// draw is composed; any other sequence is left for [`classify`].
+fn precompose(text: &str) -> String {
+    let mut out: Vec<char> = Vec::with_capacity(text.len());
+    for c in text.chars() {
+        let composed = out.last().and_then(|&last| match (last as u32, c as u32) {
+            // Leading consonant + vowel, then + trailing consonant.
+            (l @ 0x1100..=0x1112, v @ 0x1161..=0x1175) => {
+                char::from_u32(0xac00 + ((l - 0x1100) * 21 + (v - 0x1161)) * 28)
+            }
+            (s @ 0xac00..=0xd7a3, t @ 0x11a8..=0x11c2) if (s - 0xac00) % 28 == 0 => {
+                char::from_u32(s + (t - 0x11a7))
+            }
+            _ => LATIN1_COMPOSE
+                .iter()
+                .find(|(mark, _)| *mark == c)
+                .and_then(|(_, pairs)| {
+                    let pairs: Vec<char> = pairs.chars().collect();
+                    pairs.chunks(2).find(|p| p[0] == last).map(|p| p[1])
+                }),
+        });
+        match composed {
+            Some(x) => *out.last_mut().unwrap() = x,
+            None => out.push(c),
+        }
+    }
+    out.into_iter().collect()
+}
+
 /// `text` split into runs of one face each. Neutral characters join the
 /// run before them (or, at the start, the first run). Controls and
 /// characters no face covers become `?`.
@@ -458,16 +514,14 @@ pub fn render_text(text: &str, pt: u32, bold: bool) -> Result<Option<Pixmap>, St
     if text.is_empty() {
         return Ok(None);
     }
-    let mut runs = segment(text);
-    // A face from a pack that is not installed: its characters are `?`.
+    let mut runs = segment(&precompose(text));
+    // A face from a pack that is not installed: its characters are `?`
+    // (the ASCII spaces and punctuation that joined the run stay).
     for face in [Face::Hangul, Face::Japanese, Face::Thai] {
         if runs.iter().any(|(f, _)| *f == face) && !face_available(face) {
             for (f, run) in &mut runs {
                 if *f == face {
-                    *run = run
-                        .chars()
-                        .map(|c| if c == ' ' { c } else { '?' })
-                        .collect();
+                    *run = unavailable(run);
                     *f = Face::Latin;
                 }
             }
@@ -480,7 +534,7 @@ pub fn render_text(text: &str, pt: u32, bold: bool) -> Result<Option<Pixmap>, St
             *run = run
                 .chars()
                 .map(|c| {
-                    if c == ' ' || crate::font::has_glyph(name, c) {
+                    if c.is_ascii() || crate::font::has_glyph(name, c) {
                         c
                     } else {
                         '?'
@@ -550,6 +604,14 @@ pub fn render_text(text: &str, pt: u32, bold: bool) -> Result<Option<Pixmap>, St
         .run_source(draw.as_bytes())
         .map_err(|e| format!("label: {}", interp.error_report(&e)))?;
     Ok(Some(interp.gfx().pixmap.clone()))
+}
+
+/// `run` for a face that is not installed: every non-ASCII character is
+/// `?`; the ASCII spaces and punctuation that joined the run stay.
+fn unavailable(run: &str) -> String {
+    run.chars()
+        .map(|c| if c.is_ascii() { c } else { '?' })
+        .collect()
 }
 
 /// Whether `face`'s font loads; when it does not, warns once per face
@@ -824,6 +886,41 @@ mod tests {
         assert_eq!(runs("%! ("), [(Face::Latin, "%! (")]);
         // Controls and uncovered scripts are `?`.
         assert_eq!(runs("a\tb\u{1f600}\u{0416}"), [(Face::Latin, "a?b??")]);
+    }
+
+    #[test]
+    fn a_missing_pack_keeps_ascii_punctuation_and_questions_the_rest() {
+        assert_eq!(unavailable("(\u{d55c}\u{ae00}) 1"), "(??) 1");
+    }
+
+    #[test]
+    fn precompose_joins_decomposed_latin_and_hangul() {
+        assert_eq!(precompose("cafe\u{301} Nin\u{303}o"), "caf\u{e9} Ni\u{f1}o");
+        assert_eq!(precompose("u\u{308}ber A\u{30a}"), "\u{fc}ber \u{c5}");
+        assert_eq!(precompose("plain ASCII"), "plain ASCII");
+        // L+V+T jamo, as macOS stores `\u{d55c}\u{ae00}`; LV without a T.
+        assert_eq!(
+            precompose("\u{1112}\u{1161}\u{11ab}\u{1100}\u{1173}\u{11af}"),
+            "\u{d55c}\u{ae00}"
+        );
+        assert_eq!(precompose("\u{1100}\u{1161}"), "\u{ac00}");
+        // A mark with no Latin-1 letter stays, and is drawn as `?`.
+        assert_eq!(precompose("z\u{301}"), "z\u{301}");
+    }
+
+    #[test]
+    fn a_decomposed_label_draws_like_the_composed_one() {
+        for (nfd, nfc) in [
+            ("cafe\u{301}", "caf\u{e9}"),
+            (
+                "\u{1112}\u{1161}\u{11ab}\u{1100}\u{1173}\u{11af}",
+                "\u{d55c}\u{ae00}",
+            ),
+        ] {
+            let a = render_text(nfd, 16, true).unwrap().unwrap();
+            let b = render_text(nfc, 16, true).unwrap().unwrap();
+            assert_eq!(a.data(), b.data(), "{nfd:?}");
+        }
     }
 
     #[test]

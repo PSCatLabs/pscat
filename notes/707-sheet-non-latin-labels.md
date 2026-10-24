@@ -18,6 +18,13 @@ one; pure ASCII uses the unmodified face). Hangul: Noto Sans KR. Kana, Han and C
 punctuation: Noto Sans JP. Thai: Noto Sans Thai. Space and ASCII punctuation join the run
 before them, so `日本語 (logo)` does not flip faces at the space.
 
+**Decomposed input.** The default label is the file stem, and macOS stores names decomposed
+(`cafe` + U+0301, Hangul as conjoining jamo). `precompose` joins the Latin letter + mark
+pairs that exist in Latin-1 and the jamo into syllables before the script split, so a file
+named `café.ps` or `한글.ps` labels correctly. It is a hand table, not full NFC (no
+`unicode-normalization` crate: `Cargo.toml`/`Cargo.lock` are owner paths). Any other mark
+sequence (`z` + U+0301) still draws `?`.
+
 **Caveats, all deliberate.**
 - Noto Sans has one weight here, so a CJK/Thai label is regular while a Latin one is bold.
 - No Simplified-Chinese face ships. Han is set in the Japanese face, whose cmap lacks some
