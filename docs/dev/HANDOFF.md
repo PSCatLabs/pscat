@@ -1065,7 +1065,7 @@ renders eight examples in both and compares block-downsampled output).
     empty body never yields an object, so `next_item` calls `tick()` on every
     `Iterate*` action to poll the limits itself; a new loop-like frame must tick
     too, or `{ } loop` hangs again.
-  - `PsError::LimitExceeded` must stay uncatchable: `recover` returns it before
+  - `PsError::StepsExceeded`/`TimeExceeded`/`MemoryExceeded` must stay uncatchable: `recover` returns it before
     looking for a `stopped` frame, and it is never written to `$error`. A new
     place that swallows operator errors must let it through.
   - The memory cap counts process heap growth from `pscat::TrackingAllocator`

@@ -2,7 +2,7 @@
 //! lives in a test binary of its own with one test: nothing else allocates
 //! alongside it. Installs the tracking allocator, as the `pscat` binary does.
 
-use pscat::{Interp, Limit, Limits, PsError};
+use pscat::{Interp, Limits, PsError};
 
 #[global_allocator]
 static ALLOC: pscat::TrackingAllocator = pscat::TrackingAllocator;
@@ -26,7 +26,7 @@ fn memory_growth_is_capped() {
     let mut it = limited(50);
     assert_eq!(
         it.run_str("10000000 array pop"),
-        Err(PsError::LimitExceeded(Limit::Memory))
+        Err(PsError::MemoryExceeded)
     );
     let mut it = limited(50);
     assert_eq!(
@@ -39,7 +39,7 @@ fn memory_growth_is_capped() {
     let mut it = limited(100);
     assert_eq!(
         it.run_str("/keep 100000 array def 0 1 99999 { keep exch 100000 array put } for"),
-        Err(PsError::LimitExceeded(Limit::Memory))
+        Err(PsError::MemoryExceeded)
     );
 
     // The operand stack, the graphics-state stack and the path.
@@ -50,11 +50,7 @@ fn memory_growth_is_capped() {
         "1 1 100000000 { } for",
     ] {
         let mut it = limited(100);
-        assert_eq!(
-            it.run_str(src),
-            Err(PsError::LimitExceeded(Limit::Memory)),
-            "{src}"
-        );
+        assert_eq!(it.run_str(src), Err(PsError::MemoryExceeded), "{src}");
     }
 
     // A program that stays under the cap runs normally, and temporary

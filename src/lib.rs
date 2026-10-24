@@ -44,7 +44,7 @@
 //! # Running a program you do not trust
 //!
 //! Nothing limits a program by default. [`Interp::set_limits`] takes a
-//! [`Limits`] that stops one with [`PsError::LimitExceeded`] after too many
+//! [`Limits`] that stops one with [`PsError::StepsExceeded`] (or `TimeExceeded`, `MemoryExceeded`) after too many
 //! steps, too long, or too much memory; a program cannot catch that error
 //! with `stopped`. See the [`limits`] module for what each limit can and cannot
 //! stop.

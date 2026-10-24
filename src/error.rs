@@ -70,16 +70,48 @@ pub enum PsError {
     /// `findresource` found no resource with that name (`undefinedresource`).
     #[error("undefinedresource")]
     UndefinedResource,
-    /// The program passed one of its [`Limits`](crate::Limits): too many
-    /// steps, too long, or too much memory (`limitexceeded`). Unlike every
-    /// error above, a program **cannot catch this one**: `stopped` does not
-    /// see it, so a runaway program cannot loop around the limit. It is also
-    /// never written to `$error`.
-    #[error("limitexceeded: {0}")]
-    LimitExceeded(crate::Limit),
+    /// The program ran more steps than [`Limits::max_steps`](crate::Limits::max_steps)
+    /// allows (`limitexceeded`; see [`limit`](Self::limit)). Unlike every error
+    /// above, a program **cannot catch this one**: `stopped` does not see it, so
+    /// a runaway program cannot loop around the limit. It is also never written
+    /// to `$error`.
+    #[error("limitexceeded: steps")]
+    StepsExceeded,
+    /// The program ran longer than [`Limits::max_time`](crate::Limits::max_time)
+    /// (`limitexceeded`). Uncatchable, like [`StepsExceeded`](Self::StepsExceeded).
+    #[error("limitexceeded: time")]
+    TimeExceeded,
+    /// The program grew the heap by more than
+    /// [`Limits::max_memory`](crate::Limits::max_memory) (`limitexceeded`).
+    /// Uncatchable, like [`StepsExceeded`](Self::StepsExceeded).
+    #[error("limitexceeded: memory")]
+    MemoryExceeded,
 }
 
 impl PsError {
+    /// Which [`Limit`](crate::Limit) a program passed, if this error is a
+    /// limit error ([`StepsExceeded`](Self::StepsExceeded),
+    /// [`TimeExceeded`](Self::TimeExceeded) or
+    /// [`MemoryExceeded`](Self::MemoryExceeded)); `None` for every other error.
+    /// A limit error is never catchable with `stopped`.
+    ///
+    /// ```
+    /// use pscat::{Interp, Limit, Limits};
+    /// let mut interp = Interp::new();
+    /// interp.set_limits(Limits::none().with_max_steps(1_000))?;
+    /// let err = interp.run_str("{ } loop").unwrap_err();
+    /// assert_eq!(err.limit(), Some(Limit::Steps));
+    /// # Ok::<(), pscat::LimitsError>(())
+    /// ```
+    pub fn limit(&self) -> Option<crate::Limit> {
+        match self {
+            PsError::StepsExceeded => Some(crate::Limit::Steps),
+            PsError::TimeExceeded => Some(crate::Limit::Time),
+            PsError::MemoryExceeded => Some(crate::Limit::Memory),
+            _ => None,
+        }
+    }
+
     /// The bare PLRM error name, without any payload detail — what a real
     /// interpreter would report as the error's name.
     pub fn name(&self) -> &'static str {
@@ -102,7 +134,9 @@ impl PsError {
             PsError::Io => "ioerror",
             PsError::InvalidRestore => "invalidrestore",
             PsError::UndefinedResource => "undefinedresource",
-            PsError::LimitExceeded(_) => "limitexceeded",
+            PsError::StepsExceeded | PsError::TimeExceeded | PsError::MemoryExceeded => {
+                "limitexceeded"
+            }
         }
     }
 
@@ -174,7 +208,9 @@ mod tests {
             PsError::Io => PsError::Io,
             PsError::InvalidRestore => PsError::InvalidRestore,
             PsError::UndefinedResource => PsError::UndefinedResource,
-            PsError::LimitExceeded(l) => PsError::LimitExceeded(*l),
+            PsError::StepsExceeded => PsError::StepsExceeded,
+            PsError::TimeExceeded => PsError::TimeExceeded,
+            PsError::MemoryExceeded => PsError::MemoryExceeded,
         }
     }
 
@@ -224,9 +260,11 @@ mod tests {
     /// rebuild or re-raise.
     #[test]
     fn a_limit_error_has_a_name_but_no_errordict_handler() {
-        let e = PsError::LimitExceeded(crate::Limit::Memory);
+        let e = PsError::MemoryExceeded;
         assert_eq!(e.name(), "limitexceeded");
         assert_eq!(e.to_string(), "limitexceeded: memory");
+        assert_eq!(e.limit(), Some(crate::Limit::Memory));
+        assert_eq!(PsError::Typecheck.limit(), None);
         assert_eq!(PsError::from_name("limitexceeded", None), None);
         assert!(sample_of(&e) == e);
         let mut errordict = crate::object::Dict::new();

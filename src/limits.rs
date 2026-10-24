@@ -3,19 +3,20 @@
 //! A [`Limits`] caps how much work and memory one program may use. Give it
 //! to an interpreter with [`Interp::set_limits`](crate::Interp::set_limits);
 //! when a program passes a cap, the run stops with
-//! [`PsError::LimitExceeded`](crate::PsError::LimitExceeded) and the page it
+//! [`PsError::StepsExceeded`](crate::PsError::StepsExceeded) (or `TimeExceeded`,
+//! `MemoryExceeded`) and the page it
 //! had drawn so far is still there to read. Nothing is limited by default:
 //! `Limits::default()` changes nothing, so existing programs and renders are
 //! unaffected.
 //!
 //! ```
-//! use pscat::{Interp, Limit, Limits, PsError};
+//! use pscat::{Interp, Limits, PsError};
 //!
 //! let mut interp = Interp::new();
 //! interp.set_limits(Limits::none().with_max_steps(10_000))?;
 //! // A runaway loop stops with a structured error instead of hanging.
 //! let err = interp.run_str("{ } loop").unwrap_err();
-//! assert_eq!(err, PsError::LimitExceeded(Limit::Steps));
+//! assert_eq!(err, PsError::StepsExceeded);
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
@@ -35,8 +36,8 @@ use std::time::Duration;
 
 use thiserror::Error;
 
-/// Which limit a program passed. Carried by
-/// [`PsError::LimitExceeded`](crate::PsError::LimitExceeded).
+/// Which limit a program passed: [`PsError::limit`](crate::PsError::limit)
+/// returns it for a limit error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Limit {

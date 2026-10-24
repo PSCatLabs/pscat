@@ -182,7 +182,7 @@ command line and in the library, and on by default in the MCP server:
   heaviest gallery piece peaked at 0.4 GiB resident, canvas included.
 
 A program stopped by a limit gets the error `limitexceeded (steps)`,
-`(time)` or `(memory)` (`PsError::LimitExceeded` in the library; `%%[ Error:
+`(time)` or `(memory)` (`PsError::StepsExceeded`, `TimeExceeded` or `MemoryExceeded` in the library; `%%[ Error:
 limitexceeded (steps); ... ]%%` on stderr and a non-zero exit from the CLI;
 `kind: limit_exceeded` with a `limit` field from the MCP server). **`stopped`
 cannot catch it**, so a program cannot loop around the limit, and it is

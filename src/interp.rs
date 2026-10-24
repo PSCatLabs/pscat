@@ -24,7 +24,7 @@ use crate::font::{ShowCtx, ShowStep};
 use crate::gfx::{DEFAULT_PAGE, Gfx, GraphicsState};
 use crate::image::{ImageCtx, ImageStep};
 use crate::lexer::{Lexer, Token};
-use crate::limits::{Limit, Limits, LimitsError};
+use crate::limits::{Limits, LimitsError};
 use crate::object::{Dict, Num, Object, PsArray, PsString, SaveHandle, Value};
 use crate::ops;
 
@@ -498,10 +498,17 @@ impl Interp {
     /// error (or `quit`) the execution stack is cleared — the program is
     /// aborted — but the operand stack and canvas are left for inspection.
     pub fn step_n(&mut self, budget: usize) -> Result<bool, PsError> {
-        let result = if self.limits.is_none() {
-            self.step_n_inner(budget)
+        // One call site for `step_n_inner`, so the compiler inlines the hot
+        // loop here as it always did; the limits are all in the cold
+        // `limit_budget` (issue #604).
+        let limited = !self.limits.is_none();
+        let result = if limited {
+            self.limit_budget(budget).and_then(|n| {
+                self.step_n_inner(n)
+                    .inspect(|&more| self.count_steps(more, n))
+            })
         } else {
-            self.step_n_limited(budget)
+            self.step_n_inner(budget)
         };
         if result.is_err() || self.quit_requested {
             self.unwind_all();
@@ -509,39 +516,45 @@ impl Interp {
         result
     }
 
-    /// `step_n_inner` under `Limits` (issue #604). The step cap costs
-    /// nothing per step: this call hands the inner loop a budget no bigger
-    /// than the steps the program has left and adds it to the count
-    /// afterwards. Time and memory are read once per call.
-    fn step_n_limited(&mut self, budget: usize) -> Result<bool, PsError> {
+    /// Before a slice under `Limits`: refuse if one is already passed, and
+    /// return the budget to run, no bigger than the steps the program has
+    /// left. The step cap costs nothing per step: the inner loop gets a
+    /// smaller budget and `count_steps` adds it to the count afterwards.
+    #[cold]
+    #[inline(never)]
+    fn limit_budget(&mut self, budget: usize) -> Result<usize, PsError> {
         self.check_time_and_memory()?;
         let mut n = budget;
         if let Some(max) = self.limits.max_steps {
             // One step past the cap is allowed, so a program of exactly
             // `max` steps is not refused for the pass that finds it done.
             if self.steps_used > max {
-                return Err(PsError::LimitExceeded(Limit::Steps));
+                return Err(PsError::StepsExceeded);
             }
             let left = max - self.steps_used + 1;
             n = n.min(usize::try_from(left).unwrap_or(usize::MAX));
         }
-        let more = self.step_n_inner(n)?;
+        Ok(n)
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn count_steps(&mut self, more: bool, n: usize) {
         if more {
             self.steps_used = self.steps_used.saturating_add(n as u64);
         }
-        Ok(more)
     }
 
     fn check_time_and_memory(&self) -> Result<(), PsError> {
         if let Some(max) = self.limits.max_time
             && self.run_clock.elapsed_ms() as u128 >= max.as_millis()
         {
-            return Err(PsError::LimitExceeded(Limit::Time));
+            return Err(PsError::TimeExceeded);
         }
         if let Some(max) = self.limits.max_memory
             && self.heap_growth() > max
         {
-            return Err(PsError::LimitExceeded(Limit::Memory));
+            return Err(PsError::MemoryExceeded);
         }
         Ok(())
     }
@@ -574,7 +587,7 @@ impl Interp {
         if let Some(max) = self.limits.max_steps
             && self.steps_used > max
         {
-            return Err(PsError::LimitExceeded(Limit::Steps));
+            return Err(PsError::StepsExceeded);
         }
         self.check_time_and_memory()
     }
@@ -592,7 +605,7 @@ impl Interp {
         if let Some(max) = self.limits.max_memory
             && self.heap_growth().saturating_add(bytes) > max
         {
-            return Err(PsError::LimitExceeded(Limit::Memory));
+            return Err(PsError::MemoryExceeded);
         }
         Ok(())
     }
@@ -683,9 +696,7 @@ impl Interp {
         let command = self.error_command.take();
         // A limit error is never catchable: `stopped` would otherwise let a
         // runaway program swallow it and carry on (issue #604).
-        if matches!(e, PsError::LimitExceeded(_))
-            || !self.estack.iter().any(|f| matches!(f, Frame::StopMark))
-        {
+        if e.limit().is_some() || !self.estack.iter().any(|f| matches!(f, Frame::StopMark)) {
             return Err(e);
         }
         self.record_error(&e, command);
@@ -835,8 +846,10 @@ impl Interp {
     pub fn error_report(&self, err: &PsError) -> String {
         let kind = match err {
             PsError::Syntax(detail) => format!("syntaxerror ({detail})"),
-            PsError::LimitExceeded(limit) => format!("limitexceeded ({limit})"),
-            _ => err.name().to_string(),
+            _ => match err.limit() {
+                Some(limit) => format!("limitexceeded ({limit})"),
+                None => err.name().to_string(),
+            },
         };
         let command = match err {
             PsError::Undefined(name) => name.clone(),

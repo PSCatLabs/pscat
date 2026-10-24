@@ -3,7 +3,7 @@
 **What shipped**
 - `Limits { max_steps, max_time, max_memory }` (`src/limits.rs`), applied with
   `Interp::set_limits`. Default: none. `Limits::untrusted()` is the MCP preset.
-- A limit stops the run with `PsError::LimitExceeded(Limit)`. A program cannot
+- A limit stops the run with `PsError::StepsExceeded` / `TimeExceeded` / `MemoryExceeded` (`PsError::limit()` names the `Limit`). A program cannot
   catch it with `stopped`, and it is not recorded in `$error`.
 - CLI: `--max-steps N`, `--max-time SECS`, `--max-memory MIB` (0 = off).
   Refused with `--spool` (it builds its own interpreters), and by the

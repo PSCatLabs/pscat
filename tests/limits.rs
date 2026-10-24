@@ -7,7 +7,7 @@
 
 use std::time::Duration;
 
-use pscat::{Interp, Limit, Limits, PsError};
+use pscat::{Interp, Limits, PsError};
 
 fn limited(limits: Limits) -> Interp {
     let mut it = Interp::new();
@@ -24,7 +24,7 @@ fn steps(n: u64) -> Limits {
 fn a_runaway_loop_stops_with_a_structured_step_error() {
     let mut it = limited(steps(10_000));
     let err = it.run_str("{ 1 pop } loop").unwrap_err();
-    assert_eq!(err, PsError::LimitExceeded(Limit::Steps));
+    assert_eq!(err, PsError::StepsExceeded);
     assert_eq!(err.name(), "limitexceeded");
     let report = it.error_report(&err);
     assert!(
@@ -46,11 +46,7 @@ fn loops_with_empty_bodies_are_counted_too() {
         "{ { } loop } loop",
     ] {
         let mut it = limited(steps(5_000));
-        assert_eq!(
-            it.run_str(src),
-            Err(PsError::LimitExceeded(Limit::Steps)),
-            "{src}"
-        );
+        assert_eq!(it.run_str(src), Err(PsError::StepsExceeded), "{src}");
     }
 }
 
@@ -60,14 +56,14 @@ fn stopped_cannot_catch_a_limit() {
     let mut it = limited(steps(5_000));
     assert_eq!(
         it.run_str("{ { } loop } stopped pop /survived true def"),
-        Err(PsError::LimitExceeded(Limit::Steps))
+        Err(PsError::StepsExceeded)
     );
     assert!(it.load("survived").is_none(), "the program was cut off");
 
     let mut it = limited(steps(5_000));
     assert_eq!(
         it.run_str("{ { { } loop } stopped pop } loop"),
-        Err(PsError::LimitExceeded(Limit::Steps)),
+        Err(PsError::StepsExceeded),
         "a loop around `stopped` still terminates"
     );
     // And nothing was recorded for `$error` to replay.
@@ -115,15 +111,9 @@ fn no_limits_changes_nothing() {
 #[test]
 fn a_time_limit_stops_a_loop() {
     let mut it = limited(Limits::none().with_max_time(Duration::from_millis(50)));
-    assert_eq!(
-        it.run_str("{ } loop"),
-        Err(PsError::LimitExceeded(Limit::Time))
-    );
+    assert_eq!(it.run_str("{ } loop"), Err(PsError::TimeExceeded));
     let mut it = limited(Limits::none().with_max_time(Duration::from_millis(50)));
-    assert_eq!(
-        it.run_str("{ 1 pop } loop"),
-        Err(PsError::LimitExceeded(Limit::Time))
-    );
+    assert_eq!(it.run_str("{ 1 pop } loop"), Err(PsError::TimeExceeded));
 }
 
 #[test]
@@ -144,7 +134,7 @@ fn the_page_survives_a_limit() {
     let err = it
         .run_str("1 0 0 setrgbcolor 0 0 200 200 rectfill { } loop")
         .unwrap_err();
-    assert_eq!(err, PsError::LimitExceeded(Limit::Steps));
+    assert_eq!(err, PsError::StepsExceeded);
     let px = it.gfx().pixmap.pixel(10, 780).expect("pixel");
     assert_eq!((px.red(), px.green(), px.blue()), (255, 0, 0));
 }
