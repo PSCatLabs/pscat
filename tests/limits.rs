@@ -145,3 +145,9 @@ fn the_untrusted_preset_is_on() {
     assert!(l.max_steps.is_some() && l.max_time.is_some() && l.max_memory.is_some());
     assert!(!l.is_none());
 }
+
+#[test]
+fn a_step_limit_of_u64_max_is_just_no_practical_limit() {
+    let mut it = limited(steps(u64::MAX));
+    it.run_str("1 1 10000 { pop } for").unwrap();
+}

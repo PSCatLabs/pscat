@@ -500,16 +500,23 @@ impl Interp {
     pub fn step_n(&mut self, budget: usize) -> Result<bool, PsError> {
         // One call site for `step_n_inner`, so the compiler inlines the hot
         // loop here as it always did; the limits are all in the cold
-        // `limit_budget` (issue #604).
+        // `limit_budget` and `after_slice` (issue #604).
         let limited = !self.limits.is_none();
-        let result = if limited {
-            self.limit_budget(budget).and_then(|n| {
-                self.step_n_inner(n)
-                    .inspect(|&more| self.count_steps(more, n))
-            })
+        let budget = if limited {
+            match self.limit_budget(budget) {
+                Ok(n) => n,
+                Err(e) => {
+                    self.unwind_all();
+                    return Err(e);
+                }
+            }
         } else {
-            self.step_n_inner(budget)
+            budget
         };
+        let mut result = self.step_n_inner(budget);
+        if limited {
+            result = self.after_slice(result, budget);
+        }
         if result.is_err() || self.quit_requested {
             self.unwind_all();
         }
@@ -519,7 +526,7 @@ impl Interp {
     /// Before a slice under `Limits`: refuse if one is already passed, and
     /// return the budget to run, no bigger than the steps the program has
     /// left. The step cap costs nothing per step: the inner loop gets a
-    /// smaller budget and `count_steps` adds it to the count afterwards.
+    /// smaller budget and `after_slice` adds it to the count afterwards.
     #[cold]
     #[inline(never)]
     fn limit_budget(&mut self, budget: usize) -> Result<usize, PsError> {
@@ -531,18 +538,24 @@ impl Interp {
             if self.steps_used > max {
                 return Err(PsError::StepsExceeded);
             }
-            let left = max - self.steps_used + 1;
+            let left = (max - self.steps_used).saturating_add(1);
             n = n.min(usize::try_from(left).unwrap_or(usize::MAX));
         }
         Ok(n)
     }
 
+    /// After a slice under `Limits`: count its steps, and look at the clock
+    /// and the heap again, so a program that passes the time or memory cap in
+    /// its last slice is reported too, not let through as a clean run.
     #[cold]
     #[inline(never)]
-    fn count_steps(&mut self, more: bool, n: usize) {
+    fn after_slice(&mut self, result: Result<bool, PsError>, n: usize) -> Result<bool, PsError> {
+        let more = result?;
         if more {
             self.steps_used = self.steps_used.saturating_add(n as u64);
         }
+        self.check_time_and_memory()?;
+        Ok(more)
     }
 
     fn check_time_and_memory(&self) -> Result<(), PsError> {

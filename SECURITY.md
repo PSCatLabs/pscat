@@ -221,6 +221,11 @@ without the limits above:
   path-growth loop each stopped at about the cap (peak resident 217 to 243
   MB), so for those the overshoot is small; an operator that allocates a lot
   per step and is not one of the three that check first could overshoot more.
+- **A spike that is freed again inside one slice is not seen.** Memory is
+  read between slices, so only what is still allocated then counts; a program
+  that allocates and drops it again within 512 steps passes. Measured: a
+  100,000-element procedure literal that is scanned and then `pop`ped (4 MB)
+  runs clean under `--max-memory 1`; kept with `def`, it fails.
 - **The step count trails by a slice** and is not kept at all when no limit is
   set.
 - **No limit on output volume** on the command line: a program can print as

@@ -1004,3 +1004,35 @@ fn limits_do_not_combine_with_modes_that_cannot_honour_them() {
     assert!(!ok);
     assert!(stderr.contains("runs alone"), "{stderr}");
 }
+
+#[test]
+fn a_limit_passed_in_the_final_slice_still_fails_the_run() {
+    // A program that is over its memory cap when it ends, having never reached
+    // a second slice, is not a clean run (Codex review of #604, round 1). The
+    // procedure is kept (`def`): memory freed again within the slice is not
+    // seen, which SECURITY.md says.
+    let big = format!("/p {{ {} }} def", "0 ".repeat(100_000));
+    let (ok, _out, stderr) = run(&["--headless", "--max-memory", "1", "-"], &big);
+    assert!(!ok, "{stderr}");
+    assert!(stderr.contains("limitexceeded (memory)"), "{stderr}");
+    // The same program with room to spare is fine.
+    let (ok, _out, stderr) = run(&["--headless", "--max-memory", "200", "-"], &big);
+    assert!(ok, "{stderr}");
+}
+
+#[test]
+fn the_largest_step_limit_does_not_overflow() {
+    // u64::MAX once panicked (overflow checks) or wrapped the budget to zero.
+    let (ok, out, stderr) = run(
+        &[
+            "--headless",
+            "--max-steps",
+            "18446744073709551615",
+            "-e",
+            "1 pop 7 =",
+        ],
+        "",
+    );
+    assert!(ok, "{stderr}");
+    assert_eq!(out.trim(), "7");
+}
