@@ -700,11 +700,12 @@ const READ_POLL: std::time::Duration = std::time::Duration::from_millis(10);
 pub(crate) type ReadPoll<'a> = &'a mut dyn FnMut(usize, usize) -> Result<(), PsError>;
 
 /// Make room for `chunk` more bytes in `data`, telling `poll` first how much
-/// heap that takes: `Vec::reserve` grows to `max(2 * capacity, len + chunk)`.
+/// more heap that takes (the live count already holds the old capacity): `Vec::reserve` grows to `max(2 * capacity, len + chunk)`.
 #[cfg(not(target_arch = "wasm32"))]
 fn make_room(data: &mut Vec<u8>, chunk: usize, poll: ReadPoll<'_>) -> Result<(), PsError> {
     if data.len() + chunk > data.capacity() {
-        poll(0, (2 * data.capacity()).max(data.len() + chunk))?;
+        let grown = (2 * data.capacity()).max(data.len() + chunk);
+        poll(0, grown - data.capacity())?;
         data.reserve(chunk);
     }
     Ok(())

@@ -107,5 +107,33 @@ fn memory_growth_is_capped() {
         let result = it.run_str(&src);
         let _ = std::fs::remove_file(&path);
         assert_eq!(result, Ok(()));
+
+        // A stream that has to double its buffer is held to the growth it
+        // really makes: 40 MiB through a pipe, buffer 32 -> 64 MiB, fits 90.
+        let fifo = common::scratch_dir("limits-mem").join("s.fifo");
+        assert!(
+            std::process::Command::new("mkfifo")
+                .arg(&fifo)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let p = fifo.clone();
+        let writer = std::thread::spawn(move || {
+            use std::io::Write;
+            let mut f = std::fs::OpenOptions::new().write(true).open(&p).unwrap();
+            let block = vec![1u8; MIB];
+            for _ in 0..40 {
+                f.write_all(&block).unwrap();
+            }
+        });
+        let mut it = limited(90);
+        let src = format!(
+            "({}) (r) file 1 string readstring pop length =",
+            common::ps_path(&fifo)
+        );
+        let result = it.run_str(&src);
+        writer.join().unwrap();
+        assert_eq!(result, Ok(()));
     }
 }
