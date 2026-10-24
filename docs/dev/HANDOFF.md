@@ -1057,6 +1057,13 @@ renders eight examples in both and compares block-downsampled output).
   option. The `scripts/*.sh` of the same names are thin wrappers, and
   `pscat-mcp`'s `handwrite` runs `pscat handwrite`. See
   `notes/600-tool-subcommands.md`.
+- **`pscat sheet` composes finished renders (#693).** Unlike the subcommands above it
+  builds no driver: it renders each file itself (a probe `Interp` gives every cell's
+  pixel size first), lays the cells out with `contact_sheet::Layout` (pure geometry, so
+  an oversized sheet fails before any cell renders), and draws labels with
+  `contact_sheet::render_text`, which is PostScript run through `Interp`. The old
+  `--contact-sheet` path (`run_sweep` in `main.rs`, `new_sheet`/`blit_cell`) is untouched
+  and must stay byte-identical. See `notes/693-contact-sheet-labels.md`.
 - **`pscat-mcp`'s contract (#568).** The server lives in
   `src/mcp_server.rs`, pulled into both binaries with `#[path]` (not the
   library): `pscat-mcp` and `pscat mcp` are the same server (#569).

@@ -440,6 +440,103 @@ mod tests {
         assert!(new_sheet(u32::MAX / 2, 1, 3, 1, 0).is_err());
     }
 
+    fn cell(w: u32, h: u32, cap: (u32, u32)) -> CellSize {
+        CellSize {
+            image: (w, h),
+            caption: cap,
+        }
+    }
+
+    #[test]
+    fn layout_centres_cells_in_columns_as_wide_as_the_widest() {
+        let rows = [
+            RowSize {
+                header: (0, 0),
+                cells: vec![cell(100, 100, (0, 0)), cell(20, 20, (0, 0))],
+            },
+            RowSize {
+                header: (0, 0),
+                cells: vec![cell(60, 40, (0, 0))],
+            },
+        ];
+        let l = Layout::new(&rows).unwrap();
+        // 12 + 102 + 14 + 22 + 12, and 12 + 102 + 18 + 42 + 12.
+        assert_eq!((l.width, l.height), (162, 186));
+        assert_eq!(l.image_xy[0][0], (13, 13));
+        // 20 px cell: column starts 12+102+14 = 128, slot 22, so no offset.
+        assert_eq!(l.image_xy[0][1], (129, 13 + 40));
+        // Row two's 60 px cell, in the 102 px first column: (102-62)/2 = 20.
+        assert_eq!(l.image_xy[1][0].0, 12 + 20 + 1);
+    }
+
+    #[test]
+    fn layout_widens_a_column_for_its_caption_and_the_sheet_for_a_header() {
+        let rows = [RowSize {
+            header: (300, 15),
+            cells: vec![cell(10, 10, (50, 11))],
+        }];
+        let l = Layout::new(&rows).unwrap();
+        assert_eq!(l.width, 12 + 300 + 12);
+        // header 15 + 5 gap, image band 12, caption 11 + 5 gap.
+        assert_eq!(l.height, 12 + 20 + 12 + 16 + 12);
+        // Image centred in the 50 px caption column: (50-12)/2 + 1.
+        assert_eq!(l.image_xy[0][0].0, 12 + 19 + 1);
+        assert_eq!(l.caption_xy[0][0], (12, 12 + 20 + 12 + 5));
+    }
+
+    #[test]
+    fn layout_errors_on_empty_and_oversized_sheets() {
+        assert!(Layout::new(&[]).is_err());
+        let wide = RowSize {
+            header: (0, 0),
+            cells: vec![cell(5000, 10, (0, 0)), cell(5000, 10, (0, 0))],
+        };
+        let err = Layout::new(&[wide]).unwrap_err();
+        assert!(err.contains("over the"), "{err}");
+        let huge = RowSize {
+            header: (0, 0),
+            cells: vec![cell(u32::MAX, u32::MAX, (u32::MAX, u32::MAX)); 2],
+        };
+        assert!(Layout::new(&[huge.clone(), huge]).is_err());
+    }
+
+    #[test]
+    fn blit_at_clips_to_the_sheet() {
+        let mut sheet = solid(4, 4, [255, 255, 255, 255]);
+        let red = solid(3, 3, [255, 0, 0, 255]);
+        blit_at(&mut sheet, 3, 3, &red);
+        blit_at(&mut sheet, 9, 9, &red); // wholly outside: ignored
+        let px = |x: usize, y: usize| sheet.data()[(y * 4 + x) * 4];
+        assert_eq!((px(3, 3), px(2, 3), px(3, 2)), (255, 255, 255));
+        let g = |x: usize, y: usize| sheet.data()[(y * 4 + x) * 4 + 1];
+        assert_eq!((g(3, 3), g(2, 2)), (0, 255));
+    }
+
+    #[test]
+    fn zoom_makes_exact_blocks_and_refuses_oversize() {
+        let mut p = solid(2, 1, [255, 255, 255, 255]);
+        p.data_mut()[0..4].copy_from_slice(&[0, 0, 0, 255]);
+        let z = zoom_nearest(&p, 3).unwrap();
+        assert_eq!((z.width(), z.height()), (6, 3));
+        let r = |x: usize, y: usize| z.data()[(y * 6 + x) * 4];
+        assert_eq!((r(0, 0), r(2, 2), r(3, 0), r(5, 2)), (0, 0, 255, 255));
+        let big = solid(MAX_SIDE_PX / 2 + 1, 1, [0, 0, 0, 255]);
+        assert!(zoom_nearest(&big, 2).is_none());
+    }
+
+    #[test]
+    fn render_text_makes_a_tight_inked_strip() {
+        let strip = render_text("A: one-line cat", 15, true).unwrap().unwrap();
+        assert!((60..200).contains(&strip.width()), "{}", strip.width());
+        assert_eq!(strip.height(), 20);
+        let dark = strip.data().chunks(4).filter(|p| p[0] < 100).count();
+        assert!(dark > 40, "{dark} dark pixels");
+        assert!(render_text("", 11, false).unwrap().is_none());
+        // Metacharacters and non-ASCII cannot break the literal.
+        assert!(render_text("a) (b \\ \u{e9}", 11, false).unwrap().is_some());
+        assert!(render_text("%! (", 11, false).unwrap().is_some());
+    }
+
     #[test]
     fn empty_pages_errors() {
         let err = compose(&[], 1, 1, 0).unwrap_err();
