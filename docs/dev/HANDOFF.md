@@ -1091,6 +1091,11 @@ renders eight examples in both and compares block-downsampled output).
   `contact_sheet::render_text`, which is PostScript run through `Interp`. The old
   `--contact-sheet` path (`run_sweep` in `main.rs`, `new_sheet`/`blit_cell`) is untouched
   and must stay byte-identical. See `notes/693-contact-sheet-labels.md`.
+  `render_text` picks the face per character by script (#707): Latin in Helvetica
+  (accents through `ISOLatin1Encoding`), Hangul/kana-kanji/Thai in the Unicode-mode Noto
+  faces of the `cjk-thai` pack (missing pack: `?` and one stderr warning, not a failed
+  sheet). A Latin-only label keeps the pre-#707 pipeline to the byte. See
+  `notes/707-sheet-non-latin-labels.md`.
 - **`pscat-mcp`'s contract (#568).** The server lives in
   `src/mcp_server.rs`, pulled into both binaries with `#[path]` (not the
   library): `pscat-mcp` and `pscat mcp` are the same server (#569).
