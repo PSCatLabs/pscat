@@ -303,7 +303,19 @@ pub fn open(name: &str) -> Option<Resource> {
     let read = |_: &Path| None;
     #[cfg(not(target_arch = "wasm32"))]
     let read = |p: &Path| std::fs::read(p).ok();
-    let found = roots().open_with(name, &read);
+    open_with_reader(name, &read)
+}
+
+/// [`open`] reading disk candidates through `read` instead of
+/// `std::fs::read` (issue #702: the file operators read under the
+/// interpreter's execution limits when it has any). `read` returning `None`
+/// means "not here, try the next place", so a reader that stops for a limit
+/// must remember why and make the caller discard whatever this returns.
+pub(crate) fn open_with_reader(
+    name: &str,
+    read: &dyn Fn(&Path) -> Option<Vec<u8>>,
+) -> Option<Resource> {
+    let found = roots().open_with(name, read);
     if trace_enabled() {
         match &found {
             Some(r) => match &r.path {

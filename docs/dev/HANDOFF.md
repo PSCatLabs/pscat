@@ -1083,6 +1083,14 @@ renders eight examples in both and compares block-downsampled output).
     empty body never yields an object, so `next_item` calls `tick()` on every
     `Iterate*` action to poll the limits itself; a new loop-like frame must tick
     too, or `{ } loop` hangs again.
+  - A whole-file read (`file`, `run`) is inside one operator, so it polls the
+    limits itself (#702): `ops/file.rs` `read_resource` takes
+    `file::read_path_limited` (64 KiB chunks, a helper thread for anything that
+    is not a regular file) through `paths::open_with_reader` whenever limits
+    are set, and `Interp::poll_read` charges a step per KiB and checks time and
+    memory. A new operator that reads an unbounded source must do the same;
+    with no limits the plain `std::fs::read` path is untouched. See
+    `notes/702-whole-file-reads-and-limits.md`.
   - `PsError::StepsExceeded`/`TimeExceeded`/`MemoryExceeded` must stay uncatchable: `recover` returns it before
     looking for a `stopped` frame, and it is never written to `$error`. A new
     place that swallows operator errors must let it through.

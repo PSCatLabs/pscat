@@ -682,6 +682,143 @@ fn is_ps_whitespace(b: u8) -> bool {
     matches!(b, b' ' | b'\t' | b'\r' | b'\n' | b'\x0c' | b'\0')
 }
 
+/// Bytes per read when a whole file is read under execution limits
+/// ([`read_path_limited`]): the limits are looked at once per chunk.
+#[cfg(not(target_arch = "wasm32"))]
+const READ_CHUNK: usize = 64 * 1024;
+
+/// How often the limits are looked at while a read waits for a FIFO, a
+/// terminal or a socket to produce bytes.
+#[cfg(not(target_arch = "wasm32"))]
+const READ_POLL: std::time::Duration = std::time::Duration::from_millis(10);
+
+/// The interpreter's look at its limits during a whole-file read
+/// (`Interp::poll_read`): the whole KiB read since the last look (0 while
+/// waiting; see [`read_path_limited`]) and the heap the buffer is about to
+/// take (0 for none).
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) type ReadPoll<'a> = &'a mut dyn FnMut(usize, usize) -> Result<(), PsError>;
+
+/// Make room for `chunk` more bytes in `data`, telling `poll` first how much
+/// more heap that takes (the live count already holds the old capacity): `Vec::reserve` grows to `max(2 * capacity, len + chunk)`.
+#[cfg(not(target_arch = "wasm32"))]
+fn make_room(data: &mut Vec<u8>, chunk: usize, poll: ReadPoll<'_>) -> Result<(), PsError> {
+    if data.len() + chunk > data.capacity() {
+        let grown = (2 * data.capacity()).max(data.len() + chunk);
+        poll(0, grown - data.capacity())?;
+        data.reserve(chunk);
+    }
+    Ok(())
+}
+
+/// Read the whole of `path` the way `std::fs::read` does (`Ok(None)` when it
+/// cannot be opened or read), but look at the execution limits as the bytes
+/// arrive instead of after the last one (issue #702). An `Err` from `poll`
+/// stops the read and is returned.
+///
+/// - A regular file is read on the calling thread, `READ_CHUNK` bytes at a
+///   time, into a buffer sized from its length when the limits allow it.
+/// - Anything else (`/dev/zero`, a FIFO, a terminal, a socket) may never end
+///   or never produce a byte, and the open itself can block, so it is read on
+///   a helper thread that hands over chunks through a small channel while
+///   this thread waits `READ_POLL` at a time and looks at the limits between
+///   waits. When a limit stops the read, the helper is left behind: it exits
+///   as soon as its next send fails, or stays blocked in the kernel until the
+///   process ends.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn read_path_limited(
+    path: &std::path::Path,
+    poll: ReadPoll<'_>,
+) -> Result<Option<Vec<u8>>, PsError> {
+    use std::io::Read;
+    use std::sync::mpsc::{RecvTimeoutError, sync_channel};
+
+    let Ok(meta) = std::fs::metadata(path) else {
+        return Ok(None);
+    };
+    // Steps are charged per whole KiB read, however the source splits its
+    // reads: a pipe that returns one byte at a time costs the same as one
+    // that returns 64 KiB (the remainder under a KiB is never charged).
+    let mut carry = 0usize;
+    let mut kib = |n: usize| {
+        carry += n;
+        let k = carry / 1024;
+        carry %= 1024;
+        k
+    };
+    let mut data: Vec<u8> = Vec::new();
+    if meta.is_file() {
+        let size = usize::try_from(meta.len()).unwrap_or(usize::MAX);
+        poll(0, size)?;
+        // The whole file's room in one go: no doubling to be refused halfway
+        // for a file that passed the check above. A size that cannot be had
+        // reads as unreadable, as `std::fs::read` fails on it.
+        if data.try_reserve_exact(size.saturating_add(1)).is_err() {
+            return Ok(None);
+        }
+        let Ok(mut f) = std::fs::File::open(path) else {
+            return Ok(None);
+        };
+        loop {
+            // Fill the room the size gave (no growth for a file that is what
+            // `metadata` said); make more only once it is full.
+            if data.len() == data.capacity() {
+                make_room(&mut data, READ_CHUNK, poll)?;
+            }
+            let room = (data.capacity() - data.len()).min(READ_CHUNK);
+            match f.by_ref().take(room as u64).read_to_end(&mut data) {
+                Ok(0) => return Ok(Some(data)),
+                Ok(n) => poll(kib(n), 0)?,
+                Err(_) => return Ok(None),
+            }
+        }
+    }
+    let (tx, rx) = sync_channel::<std::io::Result<Vec<u8>>>(2);
+    let owned = path.to_path_buf();
+    let spawned = std::thread::Builder::new()
+        .name("pscat-read".into())
+        .spawn(move || {
+            let mut f = match std::fs::File::open(&owned) {
+                Ok(f) => f,
+                Err(e) => {
+                    let _ = tx.send(Err(e));
+                    return;
+                }
+            };
+            let mut buf = vec![0u8; READ_CHUNK];
+            loop {
+                match f.read(&mut buf) {
+                    Ok(0) => return,
+                    Ok(n) => {
+                        if tx.send(Ok(buf[..n].to_vec())).is_err() {
+                            return;
+                        }
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+                    Err(e) => {
+                        let _ = tx.send(Err(e));
+                        return;
+                    }
+                }
+            }
+        });
+    if spawned.is_err() {
+        return Ok(None);
+    }
+    loop {
+        match rx.recv_timeout(READ_POLL) {
+            Ok(Ok(chunk)) => {
+                make_room(&mut data, chunk.len(), poll)?;
+                data.extend_from_slice(&chunk);
+                poll(kib(chunk.len()), 0)?;
+            }
+            Ok(Err(_)) => return Ok(None),
+            Err(RecvTimeoutError::Timeout) => poll(0, 0)?,
+            Err(RecvTimeoutError::Disconnected) => return Ok(Some(data)),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -755,5 +892,36 @@ mod tests {
             enc.push(c);
         }
         assert_eq!(decrypt_charstring(&enc, 4), vec![13, 14]);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn limited_reads_charge_whole_kib_and_return_every_byte() {
+        let path = std::env::temp_dir().join(format!("pscat-file-kib-{}.bin", std::process::id()));
+        let body: Vec<u8> = (0..(3 * READ_CHUNK + 1500))
+            .map(|i| (i % 251) as u8)
+            .collect();
+        std::fs::write(&path, &body).unwrap();
+        let mut kib_total = 0usize;
+        let got = read_path_limited(&path, &mut |k, _| {
+            kib_total += k;
+            Ok(())
+        });
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(got, Ok(Some(body.clone())));
+        assert_eq!(kib_total, body.len() / 1024, "whole KiB only");
+        // A limit from the poll stops the read and is what comes back.
+        let path = std::env::temp_dir().join(format!("pscat-file-kib2-{}.bin", std::process::id()));
+        std::fs::write(&path, &body).unwrap();
+        let got = read_path_limited(&path, &mut |_, _| Err(PsError::TimeExceeded));
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(got, Err(PsError::TimeExceeded));
+        // Not there: unreadable, not an error.
+        assert_eq!(
+            read_path_limited(std::path::Path::new("/no/such/pscat/file"), &mut |_, _| Ok(
+                ()
+            )),
+            Ok(None)
+        );
     }
 }

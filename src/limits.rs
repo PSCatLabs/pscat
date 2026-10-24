@@ -27,8 +27,9 @@
 //!
 //! What a limit can and cannot stop is spelled out in `SECURITY.md`: steps
 //! are counted between objects, so a single long-running operator (one
-//! enormous fill, a whole-file read) finishes before the time or step limit
-//! is looked at.
+//! enormous fill) finishes before the time or step limit is looked at. A
+//! whole-file read (`file`, `run`) is the exception: it looks at the limits
+//! after each 64 KiB it reads.
 //!
 //! [`Interp::begin_source`]: crate::Interp::begin_source
 
@@ -76,7 +77,8 @@ impl std::fmt::Display for Limit {
 #[non_exhaustive]
 pub struct Limits {
     /// The most interpreter steps (objects executed, including every pass
-    /// round a loop body) a program may run.
+    /// round a loop body, and one for each KiB a `file` or `run` reads) a
+    /// program may run.
     pub max_steps: Option<u64>,
     /// The longest wall-clock time a program may run. Not enforced in the
     /// WebAssembly build, which has no clock.
