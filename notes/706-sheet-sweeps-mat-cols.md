@@ -40,9 +40,11 @@ sweeps, whose cells are equal, rather than mixed-size rows.
 
 **Library API (additions only).** `contact_sheet::{PackedRow, Layout::packed, composite_on_mat,
 MAT_PAD, STACK_GAP, LINE_GAP}`. `Layout::new` now builds a `PackedRow` per row and calls
-`packed(rows, None)`; a unit test pins that to the old output and a base-vs-head byte comparison of
+`packed(rows, None)`. What pins that: `single_column_layouts_match_the_documented_geometry` (positions
+worked out by hand, for two rows with headers, mixed caption heights and an uncaptioned cell), the older
+hard-coded layout tests, the exact-geometry tests in `tests/sheet.rs`, and a base-vs-head byte comparison of
 `pscat sheet` and `--contact-sheet` runs (labels, no labels, zoom, mixed pages, a failing file,
-accented/Korean/Thai labels, seed/param sweeps, `--grid`, `--transparent`) was identical.
+accented/Korean/Thai labels, seed/param sweeps, `--grid`, `--transparent`), which was identical.
 
 **Not done.** Sweeping several files at once (repeat the flag per file), two sweep axes at once, an
 automatic packer (a greedy "fits under the tallest cell" pass would reorder cells the user wrote),

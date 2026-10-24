@@ -134,6 +134,12 @@ struct Planned {
 }
 
 impl Entry {
+    /// How many cells [`Entry::plan`] makes, without making them.
+    fn cell_count(&self) -> usize {
+        let per_value: usize = self.columns.iter().map(Vec::len).sum();
+        per_value * self.sweep.as_ref().map_or(1, Sweep::len)
+    }
+
     /// Every cell in order (value by value, then `--dpi` order), and how they
     /// group into columns.
     fn plan(&self) -> (Vec<Planned>, Vec<usize>) {
@@ -170,13 +176,13 @@ pub(super) fn run(args: Args) -> Result<(), Failure> {
     if opts.entries.is_empty() {
         return Err(usage("no files given".into()));
     }
-    let plans: Vec<(Vec<Planned>, Vec<usize>)> = opts.entries.iter().map(Entry::plan).collect();
-    let n_cells: usize = plans.iter().map(|(cells, _)| cells.len()).sum();
+    let n_cells: usize = opts.entries.iter().map(Entry::cell_count).sum();
     if n_cells > MAX_CELLS {
         return Err(Failure::Msg(format!(
             "{n_cells} cells is over the {MAX_CELLS}-cell limit"
         )));
     }
+    let plans: Vec<(Vec<Planned>, Vec<usize>)> = opts.entries.iter().map(Entry::plan).collect();
     let msg = Failure::Msg;
     let mut sources = Vec::with_capacity(opts.entries.len());
     for e in &opts.entries {
@@ -508,7 +514,7 @@ fn parse(mut args: Args) -> Result<Option<Opts>, String> {
             "--sweep-seed" | "--sweep" => {
                 if pending.sweep.is_some() {
                     return Err(
-                        "--sweep-seed and --sweep are mutually exclusive (one sweep axis per file)"
+                        "one sweep per file: --sweep-seed and --sweep cannot be combined or repeated"
                             .into(),
                     );
                 }
@@ -651,6 +657,7 @@ mod tests {
             sweep: Some(Sweep::Seed(vec![3, 4])),
         };
         let (cells, column_len) = e.plan();
+        assert_eq!(e.cell_count(), cells.len());
         assert_eq!(column_len, vec![1, 2, 1, 2]);
         assert_eq!(cells.len(), 6);
         assert_eq!(cells[3].value, Some(1));

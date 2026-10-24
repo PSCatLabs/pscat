@@ -893,21 +893,23 @@ mod tests {
         }
     }
 
-    /// Single-cell columns with no wrap are `Layout::new`, field for field.
+    /// Single-cell columns with no wrap are `Layout::new`: the numbers are
+    /// worked out by hand from the documented geometry (12 px margin, 14
+    /// column gap, 18 row gap, 5 text gap, 1 px border), for two rows with
+    /// headers, mixed caption heights and a cell with no caption.
     #[test]
-    fn packed_with_single_columns_is_new() {
+    fn single_column_layouts_match_the_documented_geometry() {
         let rows = [
             RowSize {
                 header: (80, 14),
                 cells: vec![cell(100, 100, (60, 12)), cell(20, 30, (90, 12))],
             },
             RowSize {
-                header: (0, 0),
+                header: (40, 10),
                 cells: vec![cell(60, 40, (0, 0))],
             },
         ];
-        let a = Layout::new(&rows).unwrap();
-        let rows: Vec<PackedRow> = rows
+        let packed_rows: Vec<PackedRow> = rows
             .iter()
             .map(|r| PackedRow {
                 header: r.header,
@@ -915,11 +917,19 @@ mod tests {
                 column_len: vec![1; r.cells.len()],
             })
             .collect();
-        let b = Layout::packed(&rows, None).unwrap();
-        assert_eq!((a.width, a.height), (b.width, b.height));
-        assert_eq!(a.header_xy, b.header_xy);
-        assert_eq!(a.image_xy, b.image_xy);
-        assert_eq!(a.caption_xy, b.caption_xy);
+        let new = Layout::new(&rows).unwrap();
+        let via_packed = Layout::packed(&packed_rows, None).unwrap();
+        for l in [&new, &via_packed] {
+            // Columns 102 and 90 wide (the caption), so 12 + 102 + 14 + 90 + 12.
+            assert_eq!(l.width, 230);
+            // Row one: 19 header + 102 image + 17 caption; 18 gap; row two:
+            // 15 header + 42 image; 12 margins.
+            assert_eq!(l.height, 12 + 138 + 18 + 57 + 12);
+            assert_eq!(l.header_xy, vec![(12, 12), (12, 168)]);
+            assert_eq!(l.image_xy[0], vec![(13, 32), (163, 67)]);
+            assert_eq!(l.caption_xy[0], vec![(33, 138), (128, 138)]);
+            assert_eq!(l.image_xy[1], vec![(33, 184)]);
+        }
     }
 
     #[test]

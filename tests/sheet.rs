@@ -234,7 +234,7 @@ const GREY: [u8; 4] = [190, 190, 190, 255];
 fn a_mat_pads_the_cell_and_shows_through_a_transparent_page() {
     let d = dir();
     let a = write(&d, "a.ps", RED);
-    let blank = write(&d, "blank.ps", "% paints nothing");
+    let blank = write(&d, "blank.ps", "showpage");
     let out = d.join("mat.png");
     let (ok, _, stderr) = sheet(&[
         "-o",
@@ -476,7 +476,7 @@ fn bad_input_is_refused_with_a_message() {
         (&["-o", out, &a, "--sweep-seed", "1:3"], "no file after"),
         (
             &["-o", out, "--sweep-seed", "1:3", "--sweep", "A=1,2", &a],
-            "mutually exclusive",
+            "one sweep per file",
         ),
         (&["-o", out, "--sweep", "a;b=1,2", &a], "identifier"),
         (&["-o", out, "--sweep", "nope", &a], "NAME=SPEC"),
