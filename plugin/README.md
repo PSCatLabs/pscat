@@ -10,10 +10,11 @@ interpreter. The plugin bundles:
   photo-to-engraving), `psart` (the render-look-refine loop for generative
   art, painting, dry media, chalkboard maths and style packs) and `psviz`
   (function plots and bar/line/area/scatter/pie charts for papers).
-- **The `pscat-mcp` server**, which gives the agent five tools:
+- **The `pscat-mcp` server**, which gives the agent six tools:
   `render_postscript` (pages come back as images the agent can look at),
   `eval_postscript`, `handwrite`, `chalkboard_math` (LaTeX in, a chalkboard
-  PNG back) and `describe_art_capabilities`.
+  PNG back), `review_sheet` (several programs at several sizes, labelled, on
+  one PNG) and `describe_art_capabilities`.
 
 pscat's handwriting is a set of hand-drawn styles for notes, cards and art.
 It isn't meant for imitating a specific person's handwriting or presenting
@@ -85,7 +86,7 @@ The first command reads the Codex marketplace in
 `.agents/plugins/marketplace.json`; the second copies `plugin/` (under
 100 KB) into `~/.codex/plugins/cache/pscat/pscat/<version>/`. Start a new
 Codex session and the skills appear as `pscat:pscat`, `pscat:psart` and
-`pscat:psviz`, with the `pscat` MCP server's five tools.
+`pscat:psviz`, with the `pscat` MCP server's six tools.
 Adding the marketplace clones the whole repository (about 360 MB on
 disk); a sparse clone of the two directories the plugin needs is under
 2 MB:
