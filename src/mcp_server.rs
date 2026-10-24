@@ -7,7 +7,7 @@
 //! part of the library.
 //!
 //! An MCP server over stdio (newline-delimited JSON-RPC 2.0) exposing
-//! four tools: `render_postscript`, `handwrite`,
+//! five tools: `render_postscript`, `handwrite`, `chalkboard_math`,
 //! `describe_art_capabilities`, `eval_postscript`. Works with any MCP
 //! client — Claude Code, Codex, OpenClaw, Hermes; registration
 //! one-liners are in `docs/guides/agents.md`.
@@ -419,7 +419,8 @@ fn initialize_result(cfg: &Config, params: &Value) -> Result<Value, (String, Val
         },
         "instructions": format!(
             "Render and debug PostScript. render_postscript returns pages as PNG; \
-             eval_postscript returns what a program printed or its PostScript error. \
+             eval_postscript returns what a program printed or its PostScript error; \
+             chalkboard_math writes a LaTeX formula on a chalkboard. \
              Each call is limited to {}s. {out_path}",
             cfg.timeout.as_secs()
         ),
@@ -443,6 +444,7 @@ fn tools_call(cfg: &Config, id: Value, params: &Value) -> Value {
     let tool: fn(&Config, &Value) -> Result<Value, ToolError> = match name {
         "render_postscript" => render_postscript,
         "handwrite" => handwrite,
+        "chalkboard_math" => chalkboard_math,
         "describe_art_capabilities" => |cfg, _| describe_art_capabilities(cfg),
         "eval_postscript" => eval_postscript,
         other => return error(id, -32602, &format!("unknown tool: {other}"), None),
@@ -604,6 +606,57 @@ fn tool_list(cfg: &Config) -> Value {
                     "out_path": { "type": "string", "description": out_path.trim_end() }
                 },
                 "required": ["text"]
+            }
+        },
+        {
+            "name": "chalkboard_math",
+            "title": "Chalkboard math",
+            "annotations": annotations("Chalkboard math", false),
+            "description": format!("Write a LaTeX formula on a chalkboard: hand-drawn chalk \
+                strokes on a slate with eraser marks and the ghost of an earlier lecture. \
+                Returns the board as a PNG image. Type the LaTeX as in a document, single \
+                backslashes: \\\\ breaks rows, & aligns them, and an align*/equation \
+                wrapper or $...$ is fine. The subset is mathkit's (fractions, roots, sums, \
+                integrals, Greek, matrices, cases, accents...); a command outside it is a \
+                latex_error naming it. Same input and seed: the same image, byte for byte. \
+                The input is LaTeX only, never PostScript. svg and pdf (megabytes: tens of \
+                thousands of grain marks) are written to out_path only. Writes a file only \
+                when out_path is given (then it replaces an existing file of that \
+                extension), which is why this tool is not marked read-only. Limits: \
+                latex at most {MAX_LATEX_BYTES} bytes; the board at most {MAX_CHALK_PIXELS} \
+                pixels (width and height in points times dpi/72) and 8000 a side; \
+                {}s per call; the interpreter's step, time and memory limits \
+                (limit_exceeded). Inline images are capped at {} bytes: past that, lower \
+                dpi or use out_path.", cfg.timeout.as_secs(), cfg.max_image),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "latex": { "type": "string", "description": format!("The formula, as typed in a LaTeX document (single backslashes); at most {MAX_LATEX_BYTES} bytes") },
+                    "size": { "type": "number", "exclusiveMinimum": 0, "maximum": 1000, "description": "Writing size in points, before any shrink to fit the board (default 64)" },
+                    "irregular": { "type": "number", "minimum": 0, "maximum": 5, "description": "How far the layout departs from clean TeX: 0 clean and level, 1 a steady hand (default 1)" },
+                    "slope": { "type": "number", "minimum": -45, "maximum": 45, "description": "Baseline tilt in degrees (default: a small one picked from the seed)" },
+                    "jitter": { "type": "number", "minimum": 0, "maximum": 0.5, "description": "Each glyph's wobble as a fraction of the size (default 0.016)" },
+                    "align": { "type": "string", "enum": ["center", "left"], "description": "Where the lines sit across the board (default center)" },
+                    "color": { "type": "string", "enum": pscat::chalk::CHALK_COLORS, "description": "Chalk colour (default white)" },
+                    "board": {
+                        "description": "The board: true (default, a slate), false (chalk alone on a transparent page), \"slate\", \"greenboard\", [r, g, b] in 0..1, or an object of board keys (tone, haze, ghosting, swipes, wipes, smudges, ledge)",
+                        "anyOf": [
+                            { "type": "boolean" },
+                            { "type": "string", "enum": ["slate", "greenboard"] },
+                            { "type": "array", "items": { "type": "number", "minimum": 0, "maximum": 1 }, "minItems": 3, "maxItems": 3 },
+                            { "type": "object" }
+                        ]
+                    },
+                    "ghosting": { "type": ["number", "boolean"], "minimum": 0, "maximum": 1, "description": "How much of an earlier lecture's erased writing shows, 0..1 (default 0.4; false = none). Needs a board" },
+                    "seed": { "type": "integer", "minimum": -1_000_000_000, "maximum": 1_000_000_000, "description": "Seed for the layout, the chalk and the board; same seed, same image (default 1)" },
+                    "width": { "type": "integer", "minimum": 1, "maximum": 8000, "description": "Board width in points (default 800)" },
+                    "height": { "type": "integer", "minimum": 1, "maximum": 8000, "description": "Board height in points (default 400)" },
+                    "dpi": { "type": "number", "minimum": 9, "maximum": 1200, "description": "Resolution (default 144: the default board is 1600x800 pixels)" },
+                    "format": { "type": "string", "enum": ["png", "svg", "pdf"], "description": "Output format (default png; svg and pdf need out_path)" },
+                    "config": { "type": "object", "description": "The full board config, as pscat chalk --json takes it: groups layout (size, irregular, slope, jitter, align, margin, width, height, dpi), chalk (color, strength, pressure, tilt, dust, width), board (or false), and seed. The keys above are laid over it" },
+                    "out_path": { "type": "string", "description": out_path.trim_end() }
+                },
+                "required": ["latex"]
             }
         },
         {
@@ -853,6 +906,237 @@ fn handwrite(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
     };
     let bodies = read_inline(cfg, &pages, written.as_deref())?;
     let mut content: Vec<Value> = bodies.iter().map(|b| image_content(b)).collect();
+    if let Some(written) = written {
+        content.push(text_content(&wrote_message(&written)));
+    }
+    Ok(Value::Array(content))
+}
+
+/// The longest `latex` `chalkboard_math` takes, in bytes. A ten-row
+/// derivation is about 1 KB and a board that size is already crowded; four
+/// times that (about 40 rows of a Taylor expansion) rendered in 25 s on the
+/// machine it was measured on, inside the default time limit (#688).
+const MAX_LATEX_BYTES: usize = 4096;
+
+/// The largest `chalkboard_math` board, in device pixels (width x height at
+/// the chosen dpi). An 8K screen (7680x4320) or an A2 poster at 300 dpi
+/// (about 35 million) fits; a 1920x1200 pt board at 300 dpi (40 million)
+/// peaked at 0.63 GB resident under the server's limits (#688). The
+/// interpreter's own ceiling, 8000 pixels a side, still applies.
+const MAX_CHALK_PIXELS: u64 = 40_000_000;
+
+/// The flat `chalkboard_math` keys that map onto one key of the #555 config:
+/// (argument, group, key).
+const CHALK_FLAT_KEYS: [(&str, &str, &str); 9] = [
+    ("size", "layout", "size"),
+    ("irregular", "layout", "irregular"),
+    ("slope", "layout", "slope"),
+    ("jitter", "layout", "jitter"),
+    ("align", "layout", "align"),
+    ("width", "layout", "width"),
+    ("height", "layout", "height"),
+    ("dpi", "layout", "dpi"),
+    ("color", "chalk", "color"),
+];
+
+fn present<'a>(args: &'a Value, key: &str) -> Option<&'a Value> {
+    args.get(key).filter(|v| !v.is_null())
+}
+
+/// The board's config: `config` (the `pscat chalk --json` schema) first,
+/// then the flat keys over it. A flat key's error names the flat key.
+fn chalk_config(args: &Value) -> Result<pscat::chalk::Config, ToolError> {
+    use pscat::chalk::{ChalkError, Config};
+    let mut cfg = match present(args, "config") {
+        None => Config::default(),
+        Some(v @ Value::Object(_)) => {
+            Config::from_value(v).map_err(|e| ToolError::invalid(e.to_string()))?
+        }
+        Some(_) => return Err(ToolError::invalid("config must be an object")),
+    };
+    // `path` is how the config reader names the key; the message says `arg`.
+    fn overlay(cfg: &mut Config, arg: &str, path: &str, v: Value) -> Result<(), ToolError> {
+        cfg.apply(&v).map_err(|e| match e {
+            ChalkError::Config(m) => ToolError::invalid(m.replace(path, arg)),
+            e => ToolError::invalid(e.to_string()),
+        })
+    }
+    for (arg, group, key) in CHALK_FLAT_KEYS {
+        if let Some(v) = present(args, arg) {
+            overlay(
+                &mut cfg,
+                arg,
+                &format!("{group}.{key}"),
+                json!({ group: { key: v } }),
+            )?;
+        }
+    }
+    if let Some(b) = present(args, "board") {
+        match b {
+            Value::String(_) | Value::Array(_) => overlay(
+                &mut cfg,
+                "board",
+                "board.tone",
+                json!({ "board": { "tone": b } }),
+            )?,
+            Value::Bool(_) | Value::Object(_) => {
+                overlay(&mut cfg, "board", "board", json!({ "board": b }))?
+            }
+            _ => {
+                return Err(ToolError::invalid(format!(
+                    "board must be true, false, \"slate\", \"greenboard\", [r, g, b] or an \
+                     object, got {b}"
+                )));
+            }
+        }
+    }
+    if let Some(g) = present(args, "ghosting") {
+        // Laid over no board, the config reader would bring a default one
+        // back: refuse the contradiction instead.
+        if cfg.board.is_none() {
+            return Err(ToolError::invalid(
+                "ghosting needs a board; drop it or the board: false",
+            ));
+        }
+        overlay(
+            &mut cfg,
+            "ghosting",
+            "board.ghosting",
+            json!({ "board": { "ghosting": g } }),
+        )?;
+    }
+    if let Some(s) = present(args, "seed") {
+        overlay(&mut cfg, "seed", "seed", json!({ "seed": s }))?;
+    }
+    Ok(cfg)
+}
+
+/// A chalk error as a tool error: the one-line message, and its stable
+/// code (`unsupported_command`, ...) and token as fields.
+fn chalk_error(e: pscat::chalk::ChalkError) -> ToolError {
+    use pscat::chalk::ChalkError;
+    let code = e.code();
+    let err = match &e {
+        ChalkError::Config(_) => ToolError::invalid(e.to_string()),
+        ChalkError::Empty => ToolError::new("latex_error", e.to_string()),
+        ChalkError::Latex { token, .. } => {
+            ToolError::new("latex_error", e.to_string()).with("token", json!(token))
+        }
+        ChalkError::Render(_) => ToolError::new("render_failed", e.to_string()),
+    };
+    err.with("code", json!(code))
+}
+
+/// The board's size in device pixels, rounded as the interpreter rounds
+/// (`Interp::with_page_scaled`).
+fn chalk_pixels(cfg: &pscat::chalk::Config) -> (u64, u64) {
+    let px = |pt: u32| ((pt as f32 * (cfg.dpi / 72.0)).round() as u64).max(1);
+    (px(cfg.width), px(cfg.height))
+}
+
+fn chalkboard_math(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
+    let latex = required_text(cfg, args, "latex")?;
+    if latex.len() > MAX_LATEX_BYTES {
+        return Err(ToolError::new(
+            "input_too_large",
+            format!(
+                "latex is {} bytes; this tool takes at most {MAX_LATEX_BYTES} (a board that \
+                 full is unreadable: split it over several boards)",
+                latex.len()
+            ),
+        )
+        .with("limit", json!(MAX_LATEX_BYTES))
+        .with("size", json!(latex.len())));
+    }
+    let format = optional_str(args, "format")?.unwrap_or("png");
+    let flag = match format {
+        "png" => "--png",
+        "svg" => "--svg",
+        "pdf" => "--pdf",
+        other => {
+            return Err(ToolError::invalid(format!(
+                "format must be png, svg or pdf, got {other:?}"
+            )));
+        }
+    };
+    let dest = optional_str(args, "out_path")?
+        .map(|p| confine(cfg, p, format))
+        .transpose()?;
+    if format != "png" && dest.is_none() {
+        return Err(ToolError::invalid(format!(
+            "{format} output needs out_path: a chalk board is tens of thousands of grain \
+             marks, megabytes of {format}, too big to return inline"
+        )));
+    }
+    let board = chalk_config(args)?;
+    let (w, h) = chalk_pixels(&board);
+    if w > 8000 || h > 8000 || w * h > MAX_CHALK_PIXELS {
+        return Err(ToolError::new(
+            "output_too_large",
+            format!(
+                "the board would be {w}x{h} pixels; this tool draws at most \
+                 {MAX_CHALK_PIXELS} pixels and 8000 a side. Lower dpi, width or height."
+            ),
+        )
+        .with("limit_pixels", json!(MAX_CHALK_PIXELS))
+        .with("pixels", json!(w * h))
+        .with("width_px", json!(w))
+        .with("height_px", json!(h)));
+    }
+    // The program is generated here, in-process (pure, no files); the
+    // interpreter runs it in a child, under the same limits as
+    // render_postscript, so a board costs at most one call's limits.
+    let driver = pscat::chalk::driver(latex, &board).map_err(chalk_error)?;
+
+    let scratch = ScratchDir::new()?;
+    let out = scratch.path().join(format!("board.{format}"));
+    let mut cmd = Command::new(pscat_bin()?);
+    cfg.interpreter_args(&mut cmd);
+    cmd.arg("--page")
+        .arg(format!("{}x{}", driver.width, driver.height))
+        .arg("--dpi")
+        .arg(number_arg(f64::from(driver.dpi)));
+    if driver.transparent {
+        cmd.arg("--transparent");
+    }
+    cmd.arg(flag).arg(&out).arg("-");
+    let run = run_child(cfg, &mut cmd, driver.source.as_bytes())?;
+    if !run.success {
+        // A TeX error is mathkit's `undefined` naming `mk-<kind>:<token>`:
+        // the one-line message, never the PostScript report. The page drawn
+        // so far is blank (the error comes from the measuring pass), so no
+        // partial image goes back.
+        let fields = ps_error_fields(&run.stderr).unwrap_or_default();
+        if !fields.contains_key("limit")
+            && fields.get("ps_error").and_then(Value::as_str) == Some("undefined")
+            && let Some(cmd) = fields.get("offending_command").and_then(Value::as_str)
+            && let Some(e) = pscat::chalk::explain(&pscat::PsError::Undefined(cmd.into()))
+        {
+            return Err(chalk_error(e));
+        }
+        return Err(failed_run(
+            "render_failed",
+            format!("the chalkboard did not render:\n{}", run.stderr.trim_end()),
+            &run.stderr,
+        ));
+    }
+    let pages = collect_pages(&out);
+    if pages.is_empty() {
+        return Err(ToolError::new(
+            "no_output",
+            "the chalkboard produced no page",
+        ));
+    }
+    let written = match &dest {
+        Some(dest) => Some(dest.write_pages(&pages)?),
+        None => None,
+    };
+    let mut content = Vec::new();
+    if format == "png" {
+        for body in read_inline(cfg, &pages, written.as_deref())? {
+            content.push(image_content(&body));
+        }
+    }
     if let Some(written) = written {
         content.push(text_content(&wrote_message(&written)));
     }
