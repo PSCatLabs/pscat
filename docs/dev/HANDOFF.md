@@ -1060,8 +1060,12 @@ renders eight examples in both and compares block-downsampled output).
 - **Interpreter execution limits (#604).** `Limits` (`src/limits.rs`) via
   `Interp::set_limits`; CLI `--max-steps/--max-time/--max-memory`; on by default
   in `pscat-mcp`. The design points that are easy to break:
-  - The step cap costs nothing per step: `step_n_limited` shrinks the budget it
-    hands `step_n_inner` and adds it to the count afterwards. A loop with an
+  - The step cap costs nothing per step: `step_n` (via `limit_budget`) shrinks
+    the budget it hands `step_n_inner` and `after_slice` adds it to the count
+    afterwards. Keep `step_n_inner` with ONE call site and the new `PsError`
+    variants payload-free: either change cost 2 to 12% in instructions retired
+    (bisected on `fillkit.ps`, `/usr/bin/time -l`); compare instruction counts,
+    not wall time, when you touch that function. A loop with an
     empty body never yields an object, so `next_item` calls `tick()` on every
     `Iterate*` action to poll the limits itself; a new loop-like frame must tick
     too, or `{ } loop` hangs again.
@@ -1080,6 +1084,13 @@ renders eight examples in both and compares block-downsampled output).
     `tests/fuzz_corpus.rs`, weekly in `.github/workflows/fuzz.yml`. A fixed crash's
     input goes in `fuzz/regressions/<target>/`.
   - `--spool` and the subcommands take no limits yet (SECURITY.md says so).
+- **`pscat sheet` composes finished renders (#693).** Unlike the subcommands above it
+  builds no driver: it renders each file itself (a probe `Interp` gives every cell's
+  pixel size first), lays the cells out with `contact_sheet::Layout` (pure geometry, so
+  an oversized sheet fails before any cell renders), and draws labels with
+  `contact_sheet::render_text`, which is PostScript run through `Interp`. The old
+  `--contact-sheet` path (`run_sweep` in `main.rs`, `new_sheet`/`blit_cell`) is untouched
+  and must stay byte-identical. See `notes/693-contact-sheet-labels.md`.
 - **`pscat-mcp`'s contract (#568).** The server lives in
   `src/mcp_server.rs`, pulled into both binaries with `#[path]` (not the
   library): `pscat-mcp` and `pscat mcp` are the same server (#569).

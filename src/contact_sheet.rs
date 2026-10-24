@@ -107,6 +107,273 @@ pub fn compose(pages: &[Pixmap], cols: u32, rows: u32, gap: u32) -> Result<Pixma
     Ok(sheet)
 }
 
+// ---------------------------------------------------------------
+// Labelled sheets with mixed cell sizes (issue #693, `pscat sheet`).
+//
+// The grid above is for a sweep's same-sized frames. A review sheet --
+// logo candidates each at 512 px and at 48 px, with names -- needs rows
+// of cells of different sizes, and text. `Layout` is the pure geometry
+// (it knows sizes, never pixels, so a caller can reject an oversized
+// sheet before rendering a single cell); the `blit_at`/`frame` helpers
+// and `render_text` do the drawing, with the labels set by pscat's own
+// PostScript text rendering rather than a second imaging stack.
+// ---------------------------------------------------------------
+
+/// White margin around the whole sheet, in pixels.
+pub const MARGIN: u32 = 12;
+/// Horizontal gap between columns.
+pub const COL_GAP: u32 = 14;
+/// Vertical gap between rows.
+pub const ROW_GAP: u32 = 18;
+/// Gap between a cell's border and the text above or below it.
+pub const TEXT_GAP: u32 = 5;
+/// Width of the hairline drawn just outside each image, so a pale image
+/// is still visible against the white sheet. It is added to the cell's
+/// footprint, never drawn over the image.
+pub const BORDER: u32 = 1;
+
+/// One cell's footprint: the image, and its caption (`(0, 0)` for none).
+#[derive(Clone, Copy, Debug)]
+pub struct CellSize {
+    pub image: (u32, u32),
+    pub caption: (u32, u32),
+}
+
+/// One row: an optional header line above it and its cells, left to right.
+#[derive(Clone, Debug)]
+pub struct RowSize {
+    pub header: (u32, u32),
+    pub cells: Vec<CellSize>,
+}
+
+/// Where everything goes, from [`Layout::new`]. Columns are as wide as
+/// their widest cell or caption, and each cell is centred in its slot,
+/// so a 48 px render sits at true size beside a 512 px one.
+#[derive(Debug)]
+pub struct Layout {
+    pub width: u32,
+    pub height: u32,
+    /// Top-left of each row's header text.
+    pub header_xy: Vec<(u32, u32)>,
+    /// Top-left of each image (inside its border), by row then column.
+    pub image_xy: Vec<Vec<(u32, u32)>>,
+    /// Top-left of each caption, by row then column.
+    pub caption_xy: Vec<Vec<(u32, u32)>>,
+}
+
+impl Layout {
+    /// Place `rows`. Errors, rather than allocating, past
+    /// [`MAX_SIDE_PX`] on a side, or for an empty sheet.
+    pub fn new(rows: &[RowSize]) -> Result<Layout, String> {
+        if rows.is_empty() || rows.iter().all(|r| r.cells.is_empty()) {
+            return Err("contact sheet: no cells to lay out".to_string());
+        }
+        let too_large = || "contact sheet dimensions overflow".to_string();
+        let ncols = rows.iter().map(|r| r.cells.len()).max().unwrap_or(0);
+        let b2 = 2 * BORDER as u64;
+        let mut col_w = vec![0u64; ncols];
+        for row in rows {
+            for (c, cell) in row.cells.iter().enumerate() {
+                let w = (cell.image.0 as u64 + b2).max(cell.caption.0 as u64);
+                col_w[c] = col_w[c].max(w);
+            }
+        }
+        let header_w = rows.iter().map(|r| r.header.0 as u64).max().unwrap_or(0);
+        let cols_total: u64 = col_w.iter().sum::<u64>() + COL_GAP as u64 * (ncols as u64 - 1);
+        let width = (cols_total.max(header_w))
+            .checked_add(2 * MARGIN as u64)
+            .ok_or_else(too_large)?;
+
+        // Row bands, top to bottom.
+        let mut y = MARGIN as u64;
+        let mut bands = Vec::with_capacity(rows.len());
+        for (i, row) in rows.iter().enumerate() {
+            if i > 0 {
+                y = y.checked_add(ROW_GAP as u64).ok_or_else(too_large)?;
+            }
+            let header_h = if row.header.1 > 0 {
+                row.header.1 as u64 + TEXT_GAP as u64
+            } else {
+                0
+            };
+            let image_h = row
+                .cells
+                .iter()
+                .map(|c| c.image.1 as u64 + b2)
+                .max()
+                .unwrap_or(0);
+            let caption_h = row
+                .cells
+                .iter()
+                .map(|c| c.caption.1 as u64)
+                .max()
+                .unwrap_or(0);
+            let caption_h = if caption_h > 0 {
+                caption_h + TEXT_GAP as u64
+            } else {
+                0
+            };
+            bands.push((y, header_h, image_h));
+            y = y
+                .checked_add(header_h + image_h + caption_h)
+                .ok_or_else(too_large)?;
+        }
+        let height = y.checked_add(MARGIN as u64).ok_or_else(too_large)?;
+        if width > MAX_SIDE_PX as u64 || height > MAX_SIDE_PX as u64 {
+            return Err(format!(
+                "contact sheet would be {width}x{height}px, over the {MAX_SIDE_PX}px-per-side \
+                 limit -- use fewer cells, a lower --dpi, or a smaller --page"
+            ));
+        }
+
+        let mut col_x = Vec::with_capacity(ncols);
+        let mut x = MARGIN as u64;
+        for w in &col_w {
+            col_x.push(x);
+            x += w + COL_GAP as u64;
+        }
+        let mut layout = Layout {
+            width: width as u32,
+            height: height as u32,
+            header_xy: Vec::new(),
+            image_xy: Vec::new(),
+            caption_xy: Vec::new(),
+        };
+        for (row, &(top, header_h, image_h)) in rows.iter().zip(&bands) {
+            layout.header_xy.push((MARGIN, top as u32));
+            let band_top = top + header_h;
+            let mut images = Vec::new();
+            let mut captions = Vec::new();
+            for (c, cell) in row.cells.iter().enumerate() {
+                let slot = col_w[c];
+                let outer_w = cell.image.0 as u64 + b2;
+                let outer_h = cell.image.1 as u64 + b2;
+                let ix = col_x[c] + (slot - outer_w) / 2 + BORDER as u64;
+                let iy = band_top + (image_h - outer_h) / 2 + BORDER as u64;
+                images.push((ix as u32, iy as u32));
+                let cx = col_x[c] + slot.saturating_sub(cell.caption.0 as u64) / 2;
+                let cy = band_top + image_h + TEXT_GAP as u64;
+                captions.push((cx as u32, cy as u32));
+            }
+            layout.image_xy.push(images);
+            layout.caption_xy.push(captions);
+        }
+        Ok(layout)
+    }
+
+    /// A blank white sheet of this layout's size.
+    pub fn new_sheet(&self) -> Result<Pixmap, String> {
+        let mut sheet = Pixmap::new(self.width, self.height).ok_or_else(|| {
+            format!(
+                "cannot allocate a {}x{}px contact sheet",
+                self.width, self.height
+            )
+        })?;
+        sheet.fill(tiny_skia::Color::WHITE);
+        Ok(sheet)
+    }
+}
+
+/// Copy `src` onto `sheet` with its top-left at `(x, y)`, clipped to the
+/// sheet. A straight byte copy, as [`blit_cell`] is: pages and the text
+/// strips from [`render_text`] are opaque.
+pub fn blit_at(sheet: &mut Pixmap, x: u32, y: u32, src: &Pixmap) {
+    let (sw, sh) = (sheet.width(), sheet.height());
+    if x >= sw || y >= sh {
+        return;
+    }
+    let w = src.width().min(sw - x) as usize;
+    let rows = src.height().min(sh - y);
+    let (src_stride, dst_stride) = (src.width() as usize * 4, sw as usize * 4);
+    let sdata = sheet.data_mut();
+    let pdata = src.data();
+    for row in 0..rows as usize {
+        let s = row * src_stride;
+        let d = (y as usize + row) * dst_stride + x as usize * 4;
+        sdata[d..d + w * 4].copy_from_slice(&pdata[s..s + w * 4]);
+    }
+}
+
+/// Draw the hairline [`BORDER`] around the `w`x`h` image whose top-left
+/// is `(x, y)`: the ring of pixels just outside it. Call before
+/// [`blit_at`]ing the image, so the border never covers a pixel of it.
+pub fn frame(sheet: &mut Pixmap, x: u32, y: u32, w: u32, h: u32) {
+    let (x0, y0) = (x.saturating_sub(BORDER), y.saturating_sub(BORDER));
+    let (outer_w, outer_h) = (w + (x - x0) + BORDER, h + (y - y0) + BORDER);
+    let mut ring = Pixmap::new(outer_w, outer_h).expect("a border is never empty");
+    ring.fill(tiny_skia::Color::from_rgba8(190, 190, 190, 255));
+    blit_at(sheet, x0, y0, &ring);
+}
+
+/// Scale `src` up by the whole factor `k` with nearest-neighbour
+/// sampling: every source pixel becomes a `k`x`k` block, so a 48 px
+/// icon can be inspected pixel by pixel. `None` if the result would
+/// be past [`MAX_SIDE_PX`] on a side.
+pub fn zoom_nearest(src: &Pixmap, k: u32) -> Option<Pixmap> {
+    let (w, h) = (src.width().checked_mul(k)?, src.height().checked_mul(k)?);
+    if w > MAX_SIDE_PX || h > MAX_SIDE_PX {
+        return None;
+    }
+    let mut out = Pixmap::new(w, h)?;
+    let (sw, k) = (src.width() as usize, k as usize);
+    let sdata = src.data();
+    let odata = out.data_mut();
+    for oy in 0..h as usize {
+        let srow = (oy / k) * sw;
+        for ox in 0..w as usize {
+            let s = (srow + ox / k) * 4;
+            let d = (oy * w as usize + ox) * 4;
+            odata[d..d + 4].copy_from_slice(&sdata[s..s + 4]);
+        }
+    }
+    Some(out)
+}
+
+/// Text as a tight, opaque strip: black-ish `text` in `Helvetica`
+/// (`Helvetica-Bold` if `bold`) at `pt` pixels on white, drawn by pscat's
+/// own interpreter and fonts, one point per pixel. Characters outside
+/// printable ASCII show as `?` (the strip is set in the standard Latin
+/// encoding). `None` for an empty `text`.
+pub fn render_text(text: &str, pt: u32, bold: bool) -> Result<Option<Pixmap>, String> {
+    if text.is_empty() {
+        return Ok(None);
+    }
+    let mut lit = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '\\' | '(' | ')' => {
+                lit.push('\\');
+                lit.push(c);
+            }
+            ' '..='~' => lit.push(c),
+            _ => lit.push('?'),
+        }
+    }
+    let font = if bold { "Helvetica-Bold" } else { "Helvetica" };
+    let setup = format!("/{font} findfont {pt} scalefont setfont");
+    // Measure first, then draw on a page of exactly the text's size.
+    let mut probe = crate::Interp::new();
+    probe.capture_stdout();
+    probe
+        .run_source(format!("{setup} ({lit}) stringwidth pop =").as_bytes())
+        .map_err(|e| format!("label: {}", probe.error_report(&e)))?;
+    let width: f32 = String::from_utf8_lossy(probe.captured_stdout())
+        .trim()
+        .parse()
+        .map_err(|_| "label: could not measure the text".to_string())?;
+    // Ascent ~0.72 em, descent ~0.21 em: a 1.3 em strip with the
+    // baseline 0.3 em up clips neither.
+    let w = (width.ceil() as u32 + 2).clamp(1, MAX_SIDE_PX);
+    let h = (pt as f32 * 1.3).ceil() as u32;
+    let base = (pt as f32 * 0.3).ceil() as u32;
+    let mut interp = crate::Interp::with_page(w, h)
+        .ok_or_else(|| "label: unusable text strip size".to_string())?;
+    interp
+        .run_source(format!("{setup} 0.1 setgray 1 {base} moveto ({lit}) show").as_bytes())
+        .map_err(|e| format!("label: {}", interp.error_report(&e)))?;
+    Ok(Some(interp.gfx().pixmap.clone()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -171,6 +438,103 @@ mod tests {
     fn extreme_dimensions_error_instead_of_overflowing() {
         assert!(new_sheet(u32::MAX, 2, u32::MAX, 2, u32::MAX).is_err());
         assert!(new_sheet(u32::MAX / 2, 1, 3, 1, 0).is_err());
+    }
+
+    fn cell(w: u32, h: u32, cap: (u32, u32)) -> CellSize {
+        CellSize {
+            image: (w, h),
+            caption: cap,
+        }
+    }
+
+    #[test]
+    fn layout_centres_cells_in_columns_as_wide_as_the_widest() {
+        let rows = [
+            RowSize {
+                header: (0, 0),
+                cells: vec![cell(100, 100, (0, 0)), cell(20, 20, (0, 0))],
+            },
+            RowSize {
+                header: (0, 0),
+                cells: vec![cell(60, 40, (0, 0))],
+            },
+        ];
+        let l = Layout::new(&rows).unwrap();
+        // 12 + 102 + 14 + 22 + 12, and 12 + 102 + 18 + 42 + 12.
+        assert_eq!((l.width, l.height), (162, 186));
+        assert_eq!(l.image_xy[0][0], (13, 13));
+        // 20 px cell: column starts 12+102+14 = 128, slot 22, so no offset.
+        assert_eq!(l.image_xy[0][1], (129, 13 + 40));
+        // Row two's 60 px cell, in the 102 px first column: (102-62)/2 = 20.
+        assert_eq!(l.image_xy[1][0].0, 12 + 20 + 1);
+    }
+
+    #[test]
+    fn layout_widens_a_column_for_its_caption_and_the_sheet_for_a_header() {
+        let rows = [RowSize {
+            header: (300, 15),
+            cells: vec![cell(10, 10, (50, 11))],
+        }];
+        let l = Layout::new(&rows).unwrap();
+        assert_eq!(l.width, 12 + 300 + 12);
+        // header 15 + 5 gap, image band 12, caption 11 + 5 gap.
+        assert_eq!(l.height, 12 + 20 + 12 + 16 + 12);
+        // Image centred in the 50 px caption column: (50-12)/2 + 1.
+        assert_eq!(l.image_xy[0][0].0, 12 + 19 + 1);
+        assert_eq!(l.caption_xy[0][0], (12, 12 + 20 + 12 + 5));
+    }
+
+    #[test]
+    fn layout_errors_on_empty_and_oversized_sheets() {
+        assert!(Layout::new(&[]).is_err());
+        let wide = RowSize {
+            header: (0, 0),
+            cells: vec![cell(5000, 10, (0, 0)), cell(5000, 10, (0, 0))],
+        };
+        let err = Layout::new(&[wide]).unwrap_err();
+        assert!(err.contains("over the"), "{err}");
+        let huge = RowSize {
+            header: (0, 0),
+            cells: vec![cell(u32::MAX, u32::MAX, (u32::MAX, u32::MAX)); 2],
+        };
+        assert!(Layout::new(&[huge.clone(), huge]).is_err());
+    }
+
+    #[test]
+    fn blit_at_clips_to_the_sheet() {
+        let mut sheet = solid(4, 4, [255, 255, 255, 255]);
+        let red = solid(3, 3, [255, 0, 0, 255]);
+        blit_at(&mut sheet, 3, 3, &red);
+        blit_at(&mut sheet, 9, 9, &red); // wholly outside: ignored
+        let px = |x: usize, y: usize| sheet.data()[(y * 4 + x) * 4];
+        assert_eq!((px(3, 3), px(2, 3), px(3, 2)), (255, 255, 255));
+        let g = |x: usize, y: usize| sheet.data()[(y * 4 + x) * 4 + 1];
+        assert_eq!((g(3, 3), g(2, 2)), (0, 255));
+    }
+
+    #[test]
+    fn zoom_makes_exact_blocks_and_refuses_oversize() {
+        let mut p = solid(2, 1, [255, 255, 255, 255]);
+        p.data_mut()[0..4].copy_from_slice(&[0, 0, 0, 255]);
+        let z = zoom_nearest(&p, 3).unwrap();
+        assert_eq!((z.width(), z.height()), (6, 3));
+        let r = |x: usize, y: usize| z.data()[(y * 6 + x) * 4];
+        assert_eq!((r(0, 0), r(2, 2), r(3, 0), r(5, 2)), (0, 0, 255, 255));
+        let big = solid(MAX_SIDE_PX / 2 + 1, 1, [0, 0, 0, 255]);
+        assert!(zoom_nearest(&big, 2).is_none());
+    }
+
+    #[test]
+    fn render_text_makes_a_tight_inked_strip() {
+        let strip = render_text("A: one-line cat", 15, true).unwrap().unwrap();
+        assert!((60..200).contains(&strip.width()), "{}", strip.width());
+        assert_eq!(strip.height(), 20);
+        let dark = strip.data().chunks(4).filter(|p| p[0] < 100).count();
+        assert!(dark > 40, "{dark} dark pixels");
+        assert!(render_text("", 11, false).unwrap().is_none());
+        // Metacharacters and non-ASCII cannot break the literal.
+        assert!(render_text("a) (b \\ \u{e9}", 11, false).unwrap().is_some());
+        assert!(render_text("%! (", 11, false).unwrap().is_some());
     }
 
     #[test]
