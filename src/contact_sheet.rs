@@ -503,7 +503,7 @@ const LATIN1_PRELUDE: &str = "/Helvetica /PscatSheetLatin1 /Helvetica-Bold /Psca
 
 /// Text as a tight, opaque strip: black-ish `text` at `pt` pixels on
 /// white, drawn by pscat's own interpreter and fonts, one point per
-/// pixel. The face is picked per character by script (see [`Face`]):
+/// pixel. The face is picked per character by script (see `Face`):
 /// `Helvetica` (`Helvetica-Bold` if `bold`) for Latin, accents included;
 /// Noto Sans KR, JP or Thai for Hangul, kana/kanji or Thai. Those three
 /// live in the `cjk-thai` font pack: when it is not installed the
