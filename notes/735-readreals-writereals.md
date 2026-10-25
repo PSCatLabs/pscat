@@ -51,6 +51,9 @@ little-endian. Implementation: `src/ops/realsio.rs`.
   validation pass polls too. Without limits there is no cost. On wasm there is no poll and no
   disk: every write path is `invalidfileaccess`.
 
+- A limit that stops a long write leaves the (already truncated) file short, so a later
+  `readreals` of the full count is `rangecheck`, not a silently wrong array.
+
 **Evidence** (release build, CPU time user+sys, best of 7, 1M reals `sqrt(i+1)`, Apple
 silicon). The build of the array is about 148 ms and is in every row.
 

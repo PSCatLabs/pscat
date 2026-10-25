@@ -31,6 +31,10 @@
 //! - `limitcheck`: `n` over the 16M-element `array` cap.
 //! - `ioerror`: the OS refused a write.
 //!
+//! A limit that stops a long write leaves the file as far as it got (it was
+//! truncated when opened): short, so a later `readreals` of the full count
+//! is `rangecheck` rather than a silently wrong array.
+//!
 //! Bytes past the first `n` values (a longer file, or a trailing partial
 //! value) are ignored. The values are preserved bit for bit: NaN, infinities,
 //! `-0.0` and subnormals round-trip through `/f64`. Integers are written as
