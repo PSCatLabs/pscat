@@ -20,12 +20,12 @@ fn setup(tag: &str) -> (PathBuf, Interp) {
     (root, it)
 }
 
-/// A PostScript string literal for a path (scratch paths have no parens
-/// or backslashes).
+/// A PostScript string literal for a path (scratch paths have no
+/// parens; Windows backslashes are escaped).
 fn ps(p: &Path) -> String {
     let s = p.to_str().unwrap();
-    assert!(!s.contains(['(', ')', '\\']), "{s}");
-    format!("({s})")
+    assert!(!s.contains(['(', ')']), "{s}");
+    format!("({})", s.replace('\\', "\\\\"))
 }
 
 #[test]
@@ -100,7 +100,8 @@ fn bad_modes_and_names_are_refused() {
     );
     assert!(!root.parent().unwrap().join("escaped.txt").exists());
     // Not UTF-8: refused rather than converted to some other name.
-    let mut src = format!("({}/", root.display()).into_bytes();
+    let dir = ps(&root);
+    let mut src = format!("{}/", &dir[..dir.len() - 1]).into_bytes();
     src.extend_from_slice(b"\xff) (w) file");
     assert_eq!(it.run_source(&src), Err(PsError::InvalidFileAccess));
     assert_eq!(
@@ -214,6 +215,9 @@ fn symlink_escapes_through_postscript() {
     assert!(outside.join("victim.txt").exists());
 }
 
+// Unix only: `\\` is filenameforall's quoting character, so a template
+// spelled with Windows separators is not a path pattern.
+#[cfg(unix)]
 #[test]
 fn filenameforall_lists_matches_in_order() {
     let (root, mut it) = setup("fw-forall");

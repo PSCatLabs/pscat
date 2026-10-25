@@ -108,7 +108,8 @@ impl WriteRoots {
         // `Path` drops a trailing `/` or `/.`, which would turn `(d/) (w)
         // file` into the file `d` (POSIX refuses it), or make the existence
         // test below look at a different entry than the OS would open.
-        if name == "." || name.ends_with('/') || name.ends_with("/.") {
+        let sep_end = name.ends_with('/') || (cfg!(windows) && name.ends_with('\\'));
+        if name == "." || sep_end || name.ends_with("/.") {
             return Err(PsError::InvalidFileAccess);
         }
         let p = Path::new(name);
