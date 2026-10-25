@@ -8,7 +8,9 @@
 //! lowercase-only, so ASCII capitals are lowercased; unknown characters
 //! advance invisibly rather than erroring.
 
-use super::{Args, Failure, Format, library, measure, number, page_dim, ps_escape, render, rgb};
+use super::{
+    Args, Failure, Format, library, max_pixels, measure, number, page_dim, ps_escape, render, rgb,
+};
 
 const USAGE: &str = r#"usage: pscat handwrite [options] "text to write"
 
@@ -25,6 +27,9 @@ const USAGE: &str = r#"usage: pscat handwrite [options] "text to write"
       --seed N       rand seed; same seed, same page (default 1985)
       --dpi N        render resolution (default 72)
       --halftone     screen the output like a mono laser printer
+      --max-pixels N refuse a page of more than N device pixels (width x
+                     height at --dpi), before drawing; 1..64000000
+                     (default: only the 8000-a-side limit)
   -h, --help         this text
 
 Newlines in the text force line breaks; blank lines are kept. A text that
@@ -45,6 +50,7 @@ struct Opts {
     seed: String,
     dpi: f32,
     halftone: bool,
+    max_pixels: Option<u64>,
 }
 
 pub(super) fn run(args: Args) -> Result<(), Failure> {
@@ -77,6 +83,15 @@ pub(super) fn run(args: Args) -> Result<(), Failure> {
             page_dim("the computed page height", &h.to_string()).map_err(usage)?
         }
     };
+
+    if let Some(limit) = opts.max_pixels {
+        // The interpreter's own rounding (`Interp::with_page_scaled`).
+        let px = |pt: u32| ((pt as f32 * (opts.dpi / 72.0)).round() as u64).max(1);
+        let (w, h) = (px(width), px(height));
+        if w * h > limit {
+            return Err(Failure::Msg(pscat::limits::pixel_cap_message(w, h, limit)));
+        }
+    }
 
     let mut driver = lib;
     driver.extend(opts_dict(&opts, &height.to_string()));
@@ -120,6 +135,7 @@ fn parse(mut args: Args) -> Result<Option<Opts>, String> {
         seed: "1985".into(),
         dpi: 72.0,
         halftone: false,
+        max_pixels: None,
     };
     let mut have_text = false;
     let num = |flag: &str, v: String| number(flag, &v).map(str::to_string);
@@ -145,6 +161,7 @@ fn parse(mut args: Args) -> Result<Option<Opts>, String> {
             "--seed" => o.seed = num(&arg, args.value(&arg)?)?,
             "--dpi" => o.dpi = super::dpi(&args.value(&arg)?)?,
             "--halftone" => o.halftone = true,
+            "--max-pixels" => o.max_pixels = Some(max_pixels(&args.value(&arg)?)?),
             "--" => {
                 // The text follows; anything after it is ignored.
                 o.text = args.next().unwrap_or_default();

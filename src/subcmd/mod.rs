@@ -142,6 +142,15 @@ pub(crate) fn page_dim(flag: &str, s: &str) -> Result<u32, String> {
         .ok_or_else(|| format!("{flag} must be a whole number of points, 1..8000, got: {s}"))
 }
 
+/// `--max-pixels N`: a whole number, 1..=64000000 (8000 x 8000, the
+/// interpreter's own ceiling, so a larger value could never matter).
+pub(crate) fn max_pixels(s: &str) -> Result<u64, String> {
+    s.parse::<u64>()
+        .ok()
+        .filter(|n| (1..=64_000_000).contains(n))
+        .ok_or_else(|| format!("--max-pixels must be a whole number 1..64000000, got: {s}"))
+}
+
 /// `--dpi`, with the flag CLI's own range.
 pub(crate) fn dpi(s: &str) -> Result<f32, String> {
     s.parse::<f32>()
@@ -308,6 +317,12 @@ mod tests {
         ] {
             assert!(rgb("--ink", bad).is_err(), "{bad:?} must be refused");
         }
+    }
+
+    #[test]
+    fn max_pixels_keeps_its_range() {
+        assert!(max_pixels("0").is_err() && max_pixels("64000001").is_err());
+        assert_eq!(max_pixels("64000000"), Ok(64_000_000));
     }
 
     #[test]

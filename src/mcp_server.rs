@@ -70,6 +70,11 @@ An MCP server on stdin/stdout (launched by an MCP client, not by hand).
   --max-input-bytes N    largest source/text accepted (default 1048576)
   --max-image-bytes N    largest total of inline image bytes per call
                          (default 3750000, about 5 MB once base64-encoded)
+  --max-pixels N         largest page or board in device pixels, width x
+                         height at the dpi, for render_postscript, handwrite,
+                         chalkboard_math and review_sheet (default 40000000;
+                         at most 64000000, and 8000 a side always)
+  --max-latex-bytes N    largest LaTeX chalkboard_math takes (default 4096)
   --max-steps N          stop a program after N interpreter steps (default
                          25000000000; 0 = no step limit)
   --max-memory MIB       stop a program that grows the heap by more than MIB
@@ -86,6 +91,11 @@ struct Config {
     timeout: Duration,
     max_input: usize,
     max_image: usize,
+    /// Largest page, board or sheet in device pixels (issue #711): one cap
+    /// for every tool that allocates a canvas. See [`DEFAULT_MAX_PIXELS`].
+    max_pixels: u64,
+    /// Longest `latex` for `chalkboard_math`, in bytes.
+    max_latex: usize,
     /// Interpreter limits passed to every `pscat` child (issue #604); 0 is
     /// off. The child's time limit is derived from `timeout`, see
     /// `Config::interpreter_args`.
@@ -115,6 +125,8 @@ impl Config {
         let mut timeout = 60u64;
         let mut max_input = 1usize << 20;
         let mut max_image = 3_750_000usize;
+        let mut max_pixels = DEFAULT_MAX_PIXELS;
+        let mut max_latex = DEFAULT_MAX_LATEX_BYTES;
         let mut max_steps = pscat::limits::UNTRUSTED_MAX_STEPS;
         let mut max_memory_mib = (pscat::limits::UNTRUSTED_MAX_MEMORY >> 20) as u64;
         let mut args = args;
@@ -149,6 +161,14 @@ impl Config {
                         number("--max-image-bytes", value("--max-image-bytes")?, 1, 1 << 30)?
                             as usize
                 }
+                "--max-pixels" => {
+                    max_pixels = number("--max-pixels", value("--max-pixels")?, 1, 64_000_000)?
+                }
+                "--max-latex-bytes" => {
+                    max_latex =
+                        number("--max-latex-bytes", value("--max-latex-bytes")?, 1, 1 << 30)?
+                            as usize
+                }
                 "--max-steps" => {
                     max_steps = number("--max-steps", value("--max-steps")?, 0, u64::MAX)?
                 }
@@ -174,6 +194,8 @@ impl Config {
             timeout: Duration::from_secs(timeout),
             max_input,
             max_image,
+            max_pixels,
+            max_latex,
             max_steps,
             max_memory_mib,
         }))
@@ -422,8 +444,12 @@ fn initialize_result(cfg: &Config, params: &Value) -> Result<Value, (String, Val
             "Render and debug PostScript. render_postscript returns pages as PNG; \
              eval_postscript returns what a program printed or its PostScript error; \
              chalkboard_math writes a LaTeX formula on a chalkboard. \
-             Each call is limited to {}s. {out_path}",
-            cfg.timeout.as_secs()
+             Each call is limited to {}s: this server's --timeout, 60 by default, which \
+             whoever registered it can raise (up to 86400; the MCP client's own tool-call \
+             timeout must be raised too). A page, board or sheet is limited to {} pixels. \
+             {out_path}",
+            cfg.timeout.as_secs(),
+            cfg.max_pixels
         ),
     }))
 }
@@ -550,9 +576,13 @@ fn tool_list(cfg: &Config) -> Value {
         ),
         Err(why) => format!("{why}. "),
     };
+    let max_pixels = cfg.max_pixels;
+    let max_latex = cfg.max_latex;
     let limits = format!(
-        "Limits: {}s per call, {} bytes of input. The interpreter stops a runaway program \
-         (a limit_exceeded error naming steps, time or memory); stopped cannot catch it.",
+        "Limits: {}s per call (the server's --timeout; its default is 60), {} bytes of input, \
+         a page of at most {max_pixels} pixels (width and height in points times dpi/72) and \
+         8000 a side. The interpreter stops a runaway program (a limit_exceeded error naming \
+         steps, time or memory); stopped cannot catch it.",
         cfg.timeout.as_secs(),
         cfg.max_input
     );
@@ -627,15 +657,15 @@ fn tool_list(cfg: &Config) -> Value {
                 thousands of grain marks) are written to out_path only. Writes a file only \
                 when out_path is given (then it replaces an existing file of that \
                 extension), which is why this tool is not marked read-only. Limits: \
-                latex at most {MAX_LATEX_BYTES} bytes; the board at most {MAX_CHALK_PIXELS} \
+                latex at most {max_latex} bytes; the board at most {max_pixels} \
                 pixels (width and height in points times dpi/72) and 8000 a side; \
-                {}s per call; the interpreter's step, time and memory limits \
+                {}s per call (the server's --timeout; its default is 60); the interpreter's step, time and memory limits \
                 (limit_exceeded). Inline images are capped at {} bytes: past that, lower \
                 dpi or use out_path.", cfg.timeout.as_secs(), cfg.max_image),
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "latex": { "type": "string", "description": format!("The formula, as typed in a LaTeX document (single backslashes); at most {MAX_LATEX_BYTES} bytes") },
+                    "latex": { "type": "string", "description": format!("The formula, as typed in a LaTeX document (single backslashes); at most {max_latex} bytes") },
                     "size": { "type": "number", "exclusiveMinimum": 0, "maximum": 1000, "description": "Writing size in points, before any shrink to fit the board (default 64)" },
                     "irregular": { "type": "number", "minimum": 0, "maximum": 5, "description": "How far the layout departs from clean TeX: 0 clean and level, 1 a steady hand (default 1)" },
                     "slope": { "type": "number", "minimum": -45, "maximum": 45, "description": "Baseline tilt in degrees (default: a small one picked from the seed)" },
@@ -682,9 +712,9 @@ fn tool_list(cfg: &Config) -> Value {
                 Chinese and Thai are drawn in a face for the script (the last three need the \
                 cjk-thai font pack). Writes a file only when out_path is given (then it replaces \
                 an existing .png), which is why this tool is not marked read-only. Limits: \
-                {MAX_SHEET_CELLS} cells; the sheet at most {MAX_SHEET_PIXELS} pixels and 8000 a \
-                side, and the cells rendered at most {MAX_SHEET_PIXELS} pixels in all; labels at \
-                most {MAX_SHEET_LABEL} characters; {}s for the whole sheet, {} bytes of source in \
+                {MAX_SHEET_CELLS} cells; the sheet at most {max_pixels} pixels and 8000 a \
+                side, and the cells rendered at most {max_pixels} pixels in all; labels at \
+                most {MAX_SHEET_LABEL} characters; {}s for the whole sheet (the server's --timeout; its default is 60), {} bytes of source in \
                 all; the interpreter's step, time and memory limits per cell (limit_exceeded). \
                 The inline image is capped at {} bytes: past that, lower the dpi list or use \
                 out_path. The programs can read any local file you can.",
@@ -843,6 +873,13 @@ fn render_postscript(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
     let height = optional_int(args, "height", 1, 8000)?.unwrap_or(792);
     let dpi = optional_number(args, "dpi", 9.0, 1200.0)?;
     let halftone = optional_bool(args, "halftone")?.unwrap_or(false);
+    // The canvas is allocated before `--max-memory` counts, so a page over
+    // the pixel cap is refused before a child starts (#711). Every format
+    // draws on the same raster.
+    let (w_px, h_px) = device_pixels((width as u32, height as u32), dpi.unwrap_or(72.0) as f32);
+    if !pixels_allowed(cfg, w_px, h_px) {
+        return Err(too_many_pixels(cfg, "the page", w_px, h_px));
+    }
     // Checked before rendering, so a refused path costs nothing.
     let dest = optional_str(args, "out_path")?
         .map(|p| confine(cfg, p, format))
@@ -918,8 +955,28 @@ fn handwrite(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
     let scratch = ScratchDir::new()?;
     let out = scratch.path().join("note.png");
 
+    // The note's height is auto-sized inside the child, so the width is
+    // checked here and the area there (`--max-pixels`, #711); an area over
+    // the cap comes back as a recognisable refusal, mapped below.
+    let dpi = optional_number(args, "dpi", 9.0, 1200.0)?.unwrap_or(72.0);
+    let width = optional_int(args, "width", 1, 8000)?.unwrap_or(612);
+    let (w_px, _) = device_pixels((width as u32, 1), dpi as f32);
+    if w_px > 8000 || w_px > cfg.max_pixels {
+        return Err(ToolError::new(
+            "output_too_large",
+            format!(
+                "the note would be {w_px} pixels wide; this server draws at most 8000 a side \
+                 and {} pixels in all (--max-pixels). Lower dpi or width.",
+                cfg.max_pixels
+            ),
+        )
+        .with("limit_pixels", json!(cfg.max_pixels))
+        .with("width_px", json!(w_px)));
+    }
+
     let mut cmd = Command::new(pscat_bin()?);
     cmd.arg("handwrite").arg("-o").arg(&out);
+    cmd.arg("--max-pixels").arg(cfg.max_pixels.to_string());
     for (flag, key, lo, hi) in [
         ("--size", "size", 0.0, 2000.0),
         ("--jitter", "jitter", 0.0, 10_000.0),
@@ -951,6 +1008,9 @@ fn handwrite(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
     cmd.arg("--").arg(text);
     let run = run_child(cfg, &mut cmd, b"")?;
     if !run.success {
+        if let Some((w, h, _)) = pscat::limits::parse_pixel_cap_message(&run.stderr) {
+            return Err(too_many_pixels(cfg, "the note", w, h));
+        }
         return Err(ToolError::new(
             "handwrite_failed",
             format!("handwrite failed:\n{}", run.stderr),
@@ -972,21 +1032,56 @@ fn handwrite(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
     Ok(Value::Array(content))
 }
 
-/// The longest `latex` `chalkboard_math` takes, in bytes. A ten-row
-/// derivation is about 1 KB and a board that size is already crowded; four
-/// times that (about 40 rows of a Taylor expansion) rendered in 25 s on the
-/// machine it was measured on with the default board, inside the default
-/// time limit (#688); past that the time limit stops it.
-const MAX_LATEX_BYTES: usize = 4096;
+/// The default for `--max-latex-bytes`: the longest `latex` `chalkboard_math`
+/// takes, in bytes. A ten-row derivation is about 1 KB and a board that size
+/// is already crowded; four times that (about 40 rows of a Taylor expansion)
+/// rendered in 25 s on the machine it was measured on with the default
+/// board, inside the default time limit (#688); past that the time limit
+/// stops it.
+const DEFAULT_MAX_LATEX_BYTES: usize = 4096;
 
-/// The largest `chalkboard_math` board, in device pixels (width x height at
-/// the chosen dpi). An 8K screen (7680x4320) or an A2 poster at 300 dpi
-/// (about 35 million) fits; a 1920x1200 pt board at 300 dpi (40 million)
-/// peaked at 0.63 GB resident under the server's limits (#688). The
-/// interpreter's own ceiling, 8000 pixels a side (64 million), still applies;
-/// this cap is headroom on memory and time below it (the canvas is allocated
-/// before `--max-memory` starts counting).
-const MAX_CHALK_PIXELS: u64 = 40_000_000;
+/// The default for `--max-pixels` (#688, #711): the largest page, board or
+/// sheet in device pixels (width x height at the chosen dpi), for every tool
+/// that allocates a canvas. An 8K screen (7680x4320) or an A2 poster at 300
+/// dpi (about 35 million) fits; a 1920x1200 pt board at 300 dpi (40
+/// million) peaked at 0.63 GB resident under the server's limits (#688). The
+/// interpreter's own ceiling, 8000 pixels a side (64 million), still applies
+/// and is the flag's maximum; this cap is headroom on memory and time below
+/// it (the canvas is allocated before `--max-memory` starts counting).
+const DEFAULT_MAX_PIXELS: u64 = 40_000_000;
+
+/// The pixel size a page of `page` points renders at `dpi`: the interpreter's
+/// own rounding (`Interp::with_page_scaled`), repeated here so that a page
+/// over the cap is refused before any program runs. A child's PNG that comes
+/// back at another size is an internal error, so the two cannot drift apart
+/// unnoticed.
+fn device_pixels(page: (u32, u32), dpi: f32) -> (u64, u64) {
+    let px = |pt: u32| ((pt as f32 * (dpi / 72.0)).round() as u64).max(1);
+    (px(page.0), px(page.1))
+}
+
+/// `output_too_large` for a `w`x`h`-pixel canvas the server will not draw:
+/// over `--max-pixels` or 8000 pixels a side. `what` is "the page", "the
+/// board"...; the fields are the same for every tool.
+fn too_many_pixels(cfg: &Config, what: &str, w: u64, h: u64) -> ToolError {
+    ToolError::new(
+        "output_too_large",
+        format!(
+            "{what} would be {w}x{h} pixels; this server draws at most {} pixels and 8000 a \
+             side (--max-pixels). Lower dpi, width or height.",
+            cfg.max_pixels
+        ),
+    )
+    .with("limit_pixels", json!(cfg.max_pixels))
+    .with("pixels", json!(w * h))
+    .with("width_px", json!(w))
+    .with("height_px", json!(h))
+}
+
+/// Whether a `w`x`h`-pixel canvas is within the caps.
+fn pixels_allowed(cfg: &Config, w: u64, h: u64) -> bool {
+    w <= 8000 && h <= 8000 && w * h <= cfg.max_pixels
+}
 
 /// The flat `chalkboard_math` keys that map onto one key of the #555 config:
 /// (argument, group, key).
@@ -1090,25 +1185,20 @@ fn chalk_error(e: pscat::chalk::ChalkError) -> ToolError {
     err.with("code", json!(code))
 }
 
-/// The board's size in device pixels, rounded as the interpreter rounds
-/// (`Interp::with_page_scaled`).
-fn chalk_pixels(cfg: &pscat::chalk::Config) -> (u64, u64) {
-    let px = |pt: u32| ((pt as f32 * (cfg.dpi / 72.0)).round() as u64).max(1);
-    (px(cfg.width), px(cfg.height))
-}
-
 fn chalkboard_math(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
     let latex = required_text(cfg, args, "latex")?;
-    if latex.len() > MAX_LATEX_BYTES {
+    let max_latex = cfg.max_latex;
+    if latex.len() > max_latex {
         return Err(ToolError::new(
             "input_too_large",
             format!(
-                "latex is {} bytes; this tool takes at most {MAX_LATEX_BYTES} (a board that \
-                 full is unreadable: split it over several boards)",
+                "latex is {} bytes; this server takes at most {max_latex} (a board that \
+                 full is unreadable: split it over several boards, or raise \
+                 --max-latex-bytes)",
                 latex.len()
             ),
         )
-        .with("limit", json!(MAX_LATEX_BYTES))
+        .with("limit", json!(max_latex))
         .with("size", json!(latex.len())));
     }
     let format = optional_str(args, "format")?.unwrap_or("png");
@@ -1132,19 +1222,9 @@ fn chalkboard_math(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
         )));
     }
     let board = chalk_config(args)?;
-    let (w, h) = chalk_pixels(&board);
-    if w > 8000 || h > 8000 || w * h > MAX_CHALK_PIXELS {
-        return Err(ToolError::new(
-            "output_too_large",
-            format!(
-                "the board would be {w}x{h} pixels; this tool draws at most \
-                 {MAX_CHALK_PIXELS} pixels and 8000 a side. Lower dpi, width or height."
-            ),
-        )
-        .with("limit_pixels", json!(MAX_CHALK_PIXELS))
-        .with("pixels", json!(w * h))
-        .with("width_px", json!(w))
-        .with("height_px", json!(h)));
+    let (w, h) = device_pixels((board.width, board.height), board.dpi);
+    if !pixels_allowed(cfg, w, h) {
+        return Err(too_many_pixels(cfg, "the board", w, h));
     }
     // The program is generated here, in-process (pure, no files); the
     // interpreter runs it in a child, under the same limits as
@@ -1211,11 +1291,6 @@ fn chalkboard_math(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
 /// Most cells (dpi entries, over all rows) one sheet may ask for. Each is a
 /// child process under the call's one time budget; the logo sheet is 12.
 const MAX_SHEET_CELLS: usize = 32;
-
-/// The sheet at most this many pixels, and the cells rendered for it at most
-/// this many in all (before any zoom): the same figure as a chalkboard, so
-/// one call costs about what one board does in memory.
-const MAX_SHEET_PIXELS: u64 = 40_000_000;
 
 /// Longest row label, in characters.
 const MAX_SHEET_LABEL: usize = 200;
@@ -1306,20 +1381,11 @@ fn sheet_cells(key: &str, v: &Value) -> Result<Vec<(f32, u32)>, ToolError> {
         .collect()
 }
 
-/// The pixel size a page of `page` points renders at `dpi`: the interpreter's
-/// own rounding (`Interp::with_page_scaled`), repeated here so that a sheet
-/// over a cap is refused before any program runs. A child's PNG that comes
-/// back at another size is an internal error, so the two cannot drift apart
-/// unnoticed.
-fn sheet_pixels(page: (u32, u32), dpi: f32) -> (u64, u64) {
-    let px = |pt: u32| ((pt as f32 * (dpi / 72.0)).round() as u64).max(1);
-    (px(page.0), px(page.1))
-}
-
 fn review_sheet(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
     use pscat::contact_sheet::{self as sheet, CellSize, Layout, RowSize};
 
     let started = Instant::now();
+    let max_pixels = cfg.max_pixels;
     let items = match args.get("entries") {
         Some(Value::Array(a)) if !a.is_empty() => a,
         _ => return Err(ToolError::invalid("entries must be a non-empty list")),
@@ -1407,7 +1473,7 @@ fn review_sheet(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
     // the text by the label renderer, the sheet by `Layout`.
     let too_large = |message: String, pixels: u64| {
         ToolError::new("output_too_large", message)
-            .with("limit_pixels", json!(MAX_SHEET_PIXELS))
+            .with("limit_pixels", json!(max_pixels))
             .with("pixels", json!(pixels))
     };
     let text = |t: &str, px: u32, bold: bool| {
@@ -1430,7 +1496,7 @@ fn review_sheet(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
         };
         let mut row_captions = Vec::new();
         for &(dpi, zoom) in &e.cells {
-            let (w, h) = sheet_pixels(e.page, dpi);
+            let (w, h) = device_pixels(e.page, dpi);
             let side = u64::from(sheet::MAX_SIDE_PX);
             if w * u64::from(zoom) > side || h * u64::from(zoom) > side {
                 return Err(too_large(
@@ -1454,10 +1520,10 @@ fn review_sheet(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
                 ));
             }
             rendered_pixels += w * h;
-            if rendered_pixels > MAX_SHEET_PIXELS {
+            if rendered_pixels > max_pixels {
                 return Err(too_large(
                     format!(
-                        "the cells are over {MAX_SHEET_PIXELS} pixels in all, this tool's limit. \
+                        "the cells are over {max_pixels} pixels in all, this tool's limit. \
                          Lower a dpi, a page size or the number of cells."
                     ),
                     rendered_pixels,
@@ -1486,10 +1552,10 @@ fn review_sheet(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
     let layout = Layout::new(&row_sizes)
         .map_err(|m| too_large(m, 0).with("limit_side_px", json!(sheet::MAX_SIDE_PX)))?;
     let sheet_pixels_total = u64::from(layout.width) * u64::from(layout.height);
-    if sheet_pixels_total > MAX_SHEET_PIXELS {
+    if sheet_pixels_total > max_pixels {
         return Err(too_large(
             format!(
-                "the sheet would be {}x{} pixels; this tool draws at most {MAX_SHEET_PIXELS} \
+                "the sheet would be {}x{} pixels; this tool draws at most {max_pixels} \
                  pixels. Lower a dpi, a page size or the number of cells.",
                 layout.width, layout.height
             ),
@@ -1568,7 +1634,7 @@ fn review_sheet(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
             let _ = std::fs::remove_file(&page);
             let frame = tiny_skia::Pixmap::decode_png(&bytes)
                 .map_err(|er| format!("decode the cell for {}: {er}", e.label))?;
-            let want = sheet_pixels(e.page, dpi);
+            let want = device_pixels(e.page, dpi);
             if (u64::from(frame.width()), u64::from(frame.height())) != want {
                 return Err(ToolError::new(
                     "internal",
