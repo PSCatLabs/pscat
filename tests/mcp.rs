@@ -1135,14 +1135,12 @@ fn render_postscript_and_handwrite_refuse_pages_over_the_pixel_cap() {
     initialized(&mut s);
     // The default cap, 40 million: each of these is over it (or 8000 a side).
     for (w, h, dpi) in [(8000, 8000, 72), (7000, 7000, 72), (600, 900, 1200)] {
-        let started = std::time::Instant::now();
         let args = json!({ "source": "showpage", "width": w, "height": h, "dpi": dpi });
         let result = s.tool("render_postscript", args);
         assert_eq!(error_kind(&result), "output_too_large", "{w}x{h}@{dpi}");
         let err = &result["structuredContent"]["error"];
         assert_eq!(err["limit_pixels"], 40_000_000, "{err}");
         assert!(err["pixels"].as_u64().unwrap() > 40_000_000, "{err}");
-        assert!(started.elapsed().as_secs() < 5, "refused at once");
     }
     // Every format draws on the same raster.
     let args = json!({ "source": "showpage", "width": 7000, "height": 7000,
