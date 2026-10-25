@@ -343,6 +343,29 @@ fn stand_in_for(requested: &str) -> &'static str {
     }
 }
 
+/// The hint for a face that no installed pack or override provides but a
+/// font pack lists, or `None` when the face loads (builtin, catalog or
+/// installed pack) or no pack has it. For callers that must know a face
+/// is truly missing rather than stood in for: `pscat sheet`'s script
+/// check.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn uninstalled_pack_hint(requested: &str) -> Option<String> {
+    if builtin_index(requested).is_some() || catalog_fid(requested).is_some() {
+        return None;
+    }
+    missing_pack(requested).map(|pack| {
+        format!(
+            "pscat: font /{requested} is in the {pack} font pack, which is not installed; \
+             run `pscat fonts install` (or `pscat fonts install --pack {pack}`)"
+        )
+    })
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn uninstalled_pack_hint(_requested: &str) -> Option<String> {
+    None
+}
+
 /// The one-line note for a face whose pack is not installed.
 #[cfg(not(target_arch = "wasm32"))]
 fn stand_in_note(requested: &str, pack: &str, stand_in: &str) -> String {

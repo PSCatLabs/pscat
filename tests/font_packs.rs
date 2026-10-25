@@ -391,6 +391,38 @@ fn a_stand_in_renders_exactly_as_the_builtin_does() {
     );
 }
 
+/// `pscat sheet` draws a Hangul label as `?` and warns once about the pack
+/// (issue #707). It must not take the #728 stand-in for the real face:
+/// that would silently draw nothing, and the warning would be lost.
+#[test]
+fn sheet_still_warns_about_a_missing_cjk_pack() {
+    let home = common::scratch_dir("fontpack-sheet");
+    let ps = home.join("cell.ps");
+    std::fs::write(&ps, "0.9 0.2 0.2 setrgbcolor 0 0 50 50 rectfill").unwrap();
+    let out = home.join("sheet.png");
+    let (ok, _, err) = pscat_bare(
+        &home,
+        &[
+            "sheet",
+            "--label",
+            "\u{d55c}\u{ae00}",
+            "--page",
+            "50x50",
+            "-o",
+            out.to_str().unwrap(),
+            ps.to_str().unwrap(),
+        ],
+    );
+    assert!(ok, "{err}");
+    assert_eq!(
+        err.matches("pscat sheet: font /NotoSansKR-Regular is in the cjk-thai font pack")
+            .count(),
+        1,
+        "{err}"
+    );
+    assert!(!err.contains("pscat: warning"), "{err}");
+}
+
 /// Issue #728: the font-checking libraries still refuse a face that is
 /// not really there. A Times stand-in is none of the two names they used
 /// to reject (Helvetica, Courier), so each must say so by name.

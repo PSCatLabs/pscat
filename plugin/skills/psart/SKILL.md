@@ -114,8 +114,9 @@ Also in the library, documented in each file's header and in
 - Asking for a face that is not there never fails the render, in two ways:
   a name from an uninstalled pack falls back to the closest built-in face
   (Palatino, Bookman and NewCenturySchlbk to Times, keeping weight and
-  slant; AvantGarde to Helvetica; ZapfChancery to Times-Italic; Symbol,
-  ZapfDingbats and the display faces to Helvetica) with a one-line
+  slant; AvantGarde to Helvetica; ZapfChancery to Times-Italic; the
+  monospaced extras to Courier; Symbol, ZapfDingbats and the display
+  faces to Helvetica) with a one-line
   `pscat: warning: font … is in the … font pack` on stderr; **a name
   nothing knows silently becomes Helvetica**. Either way the piece is not
   set in the face you meant, so check `--fonts`.
