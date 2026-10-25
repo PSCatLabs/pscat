@@ -1,0 +1,283 @@
+%!PS
+% noiseref.ps -- the PostScript reference for pscat's native noise
+% operators (issue #734): noiseseed, gnoise2, gnoise3, gnoise2d,
+% vnoise2, vnoise3, fbm2, fbm3, vfbm2, vfbm3, ridged2, ridged3.
+%
+% Each `nr<op>` here returns exactly the bits of the native `<op>` (same
+% seed, same operands): the same IEEE-754 double adds, subtracts and
+% multiplies in the same order, `floor`, and table lookups -- no
+% division, no transcendental. tests/noise.rs holds the two to that.
+% The native code is many times faster; this file is the specification
+% in runnable form, and a fallback for an interpreter without the
+% operators. It is pscat-only as written: the seed shuffle multiplies
+% a 31-bit state by 1103515245, which needs 64-bit integers (pscat's),
+% not Ghostscript's 32-bit ones.
+%
+%   seed nrseed -                 own table; does not touch `rand`
+%   x y nrgnoise2 n               x y z nrgnoise3 n
+%   x y nrgnoise2d n dx dy
+%   x y nrvnoise2 v               x y z nrvnoise3 v
+%   x y oct gain lac nrfbm2 v     (nrfbm3 nrvfbm2 nrvfbm3 alike)
+%   x y oct gain lac nrridged2 v  (nrridged3 alike)
+%
+% The algorithm, in prose (src/ops/noise.rs's header says the same):
+% - Seed: P = 0..255; s = seed and 2^31-1; for i = 255 down to 1:
+%   s = (s*1103515245 + 12345) and 2^31-1, j = (s >> 16) mod (i+1),
+%   swap P[i] and P[j]. A fresh interpreter's native table is seed 0.
+% - Lattice: xi = floor(x) as an integer, xf = x - xi, index xi and 255.
+%   Hashes h2(i,j) = P[(P[i]+j) and 255], h3(i,j,k) = P[(h2(i,j)+k) and 255].
+% - fade(t) = ((t3*10) - (t3*t)*15) + (t3*t2)*6, t2 = t*t, t3 = t2*t;
+%   lerp(a,b,t) = (b-a)*t + a.
+% - gnoise2: artkit's noise2 formula exactly (gradients nrG2 by h and 7,
+%   dot gx*x + gy*y, lerp in x then y). gnoise3: Perlin's improved
+%   noise (gradients nrG3 by h and 15, dot (gx*x + gy*y) + gz*z, lerp
+%   in x, y, then z). Value noise: lattice value (h - 127.5)*0.0078125.
+% - fBm: sum 0, amp 1, freq 1; octave k (from 0) samples at
+%   x*freq + k*17.3203125, y*freq + k*11.4140625, z*freq + k*7.6015625;
+%   sum = sum + amp*n; amp = amp*gain; freq = freq*lac. Ridged takes
+%   n = 1 - |n|, n = n*n first. oct is an integer, 0..32 natively.
+% All operands are converted to reals first (`cvr`), as the native
+% operators do. Scratch names are plain globals with an `nr` prefix.
+
+% @internal
+/nrG2 [ 1 0  -1 0  0 1  0 -1
+        0.70710678 0.70710678  -0.70710678 0.70710678
+        0.70710678 -0.70710678  -0.70710678 -0.70710678 ] def
+
+% @internal
+/nrG3 [ 1 1 0  -1 1 0  1 -1 0  -1 -1 0
+        1 0 1  -1 0 1  1 0 -1  -1 0 -1
+        0 1 1  0 -1 1  0 1 -1  0 -1 -1
+        1 1 0  0 -1 1  -1 1 0  0 -1 -1 ] def
+
+% @kind: Procedure
+% @summary: Seed noiseref's own permutation table; the reference twin of the native noiseseed (does not touch rand).
+% @example: 42 nrseed
+/nrseed {                                        % seed -> -
+    2147483647 and /nrs exch def
+    /nrP [ 0 1 255 { } for ] def
+    255 -1 1 {
+        /nri exch def
+        /nrs nrs 1103515245 mul 12345 add 2147483647 and def
+        /nrj nrs -16 bitshift nri 1 add mod def
+        /nrt nrP nri get def
+        nrP nri nrP nrj get put
+        nrP nrj nrt put
+    } for
+} bind def
+
+% @internal
+/nrlat {                                         % x -> xi xf
+    dup floor cvi exch 1 index sub exch 255 and exch
+} bind def
+
+% @internal
+/nrh2 {                                          % i j -> P[(P[i]+j) and 255]
+    exch nrP exch get add 255 and nrP exch get
+} bind def
+
+% @internal
+/nrh3 {                                          % i j k -> h
+    3 1 roll nrh2 add 255 and nrP exch get
+} bind def
+
+% @internal
+/nrfade {                                        % t -> fade(t)
+    /nrft exch def
+    /nrft2 nrft nrft mul def
+    /nrft3 nrft2 nrft mul def
+    nrft3 10 mul nrft3 nrft mul 15 mul sub nrft3 nrft2 mul 6 mul add
+} bind def
+
+% @internal
+/nrlerp {                                        % a b t -> (b-a)*t + a
+    /nrlt exch def exch dup 3 1 roll sub nrlt mul add
+} bind def
+
+% @internal
+/nrval { 127.5 sub 0.0078125 mul } bind def     % h -> lattice value
+
+% @internal
+/nrgr2 {                                         % h x y -> dot
+    /nrgy exch def /nrgx exch def
+    7 and 2 mul /nrgi exch def
+    nrG2 nrgi get nrgx mul nrG2 nrgi 1 add get nrgy mul add
+} bind def
+
+% @internal
+/nrgr3 {                                         % h x y z -> dot
+    /nrgz exch def /nrgy exch def /nrgx exch def
+    15 and 3 mul /nrgi exch def
+    nrG3 nrgi get nrgx mul nrG3 nrgi 1 add get nrgy mul add
+    nrG3 nrgi 2 add get nrgz mul add
+} bind def
+
+% @internal
+/nrcell2 {                                       % x y -> -  (sets nr2*)
+    cvr nrlat /nr2yf exch def /nr2yi exch def
+    cvr nrlat /nr2xf exch def /nr2xi exch def
+    /nr2xi1 nr2xi 1 add 255 and def
+    /nr2yi1 nr2yi 1 add 255 and def
+    /nr2h00 nr2xi nr2yi nrh2 def
+    /nr2h10 nr2xi1 nr2yi nrh2 def
+    /nr2h01 nr2xi nr2yi1 nrh2 def
+    /nr2h11 nr2xi1 nr2yi1 nrh2 def
+    /nr2u nr2xf nrfade def
+    /nr2v nr2yf nrfade def
+} bind def
+
+% @kind: Procedure
+% @summary: 2D gradient noise in plain PostScript, bit-identical to the native gnoise2 under the same seed (nrseed / noiseseed).
+% @example: 1.3 2.7 nrgnoise2
+/nrgnoise2 {                                     % x y -> n
+    nrcell2
+    nr2h00 nr2xf nr2yf nrgr2
+    nr2h10 nr2xf 1 sub nr2yf nrgr2
+    nr2u nrlerp
+    nr2h01 nr2xf nr2yf 1 sub nrgr2
+    nr2h11 nr2xf 1 sub nr2yf 1 sub nrgr2
+    nr2u nrlerp
+    nr2v nrlerp
+} bind def
+
+% @kind: Procedure
+% @summary: 2D value noise in plain PostScript, bit-identical to the native vnoise2.
+% @example: 1.3 2.7 nrvnoise2
+/nrvnoise2 {                                     % x y -> v
+    nrcell2
+    nr2h00 nrval nr2h10 nrval nr2u nrlerp
+    nr2h01 nrval nr2h11 nrval nr2u nrlerp
+    nr2v nrlerp
+} bind def
+
+% @internal
+/nrgv { 7 and 2 mul dup nrG2 exch get exch 1 add nrG2 exch get } bind def  % h -> gx gy
+
+% @internal
+/nrdfade {                                       % t -> ((t*t)*30)*((t-1)*(t-1))
+    dup dup mul 30 mul exch 1 sub dup mul mul
+} bind def
+
+% @kind: Procedure
+% @summary: 2D gradient noise and its analytic gradient in plain PostScript, bit-identical to the native gnoise2d.
+% @example: 1.3 2.7 nrgnoise2d
+/nrgnoise2d {                                    % x y -> n dx dy
+    2 copy nrgnoise2 /nrdn exch def
+    nrcell2
+    nr2h00 nrgv /nray exch def /nrax exch def
+    nr2h10 nrgv /nrby exch def /nrbx exch def
+    nr2h01 nrgv /nrcy exch def /nrcx exch def
+    nr2h11 nrgv /nrdy exch def /nrdx exch def
+    /nrda nrax nr2xf mul nray nr2yf mul add def
+    /nrdb nrbx nr2xf 1 sub mul nrby nr2yf mul add def
+    /nrdc nrcx nr2xf mul nrcy nr2yf 1 sub mul add def
+    /nrdd nrdx nr2xf 1 sub mul nrdy nr2yf 1 sub mul add def
+    /nrk1 nrdb nrda sub def
+    /nrk2 nrdc nrda sub def
+    /nrk3 nrda nrdb sub nrdc sub nrdd add def
+    nrdn
+    nrax nr2u nrbx nrax sub mul add
+    nr2v nrcx nrax sub mul add
+    nr2u nr2v mul nrax nrbx sub nrcx sub nrdx add mul add
+    nr2xf nrdfade nrk1 nrk3 nr2v mul add mul add
+    nray nr2u nrby nray sub mul add
+    nr2v nrcy nray sub mul add
+    nr2u nr2v mul nray nrby sub nrcy sub nrdy add mul add
+    nr2yf nrdfade nrk2 nrk3 nr2u mul add mul add
+} bind def
+
+% @internal
+/nrcell3 {                                       % x y z {corner} -> n
+    /nr3c exch def
+    cvr nrlat /nr3zf exch def /nr3zi exch def
+    cvr nrlat /nr3yf exch def /nr3yi exch def
+    cvr nrlat /nr3xf exch def /nr3xi exch def
+    /nr3xi1 nr3xi 1 add 255 and def
+    /nr3yi1 nr3yi 1 add 255 and def
+    /nr3zi1 nr3zi 1 add 255 and def
+    /nr3x1 nr3xf 1 sub def /nr3y1 nr3yf 1 sub def /nr3z1 nr3zf 1 sub def
+    /nr3u nr3xf nrfade def /nr3v nr3yf nrfade def /nr3w nr3zf nrfade def
+    nr3xi nr3yi nr3zi nrh3 nr3xf nr3yf nr3zf nr3c
+    nr3xi1 nr3yi nr3zi nrh3 nr3x1 nr3yf nr3zf nr3c
+    nr3u nrlerp
+    nr3xi nr3yi1 nr3zi nrh3 nr3xf nr3y1 nr3zf nr3c
+    nr3xi1 nr3yi1 nr3zi nrh3 nr3x1 nr3y1 nr3zf nr3c
+    nr3u nrlerp
+    nr3v nrlerp
+    nr3xi nr3yi nr3zi1 nrh3 nr3xf nr3yf nr3z1 nr3c
+    nr3xi1 nr3yi nr3zi1 nrh3 nr3x1 nr3yf nr3z1 nr3c
+    nr3u nrlerp
+    nr3xi nr3yi1 nr3zi1 nrh3 nr3xf nr3y1 nr3z1 nr3c
+    nr3xi1 nr3yi1 nr3zi1 nrh3 nr3x1 nr3y1 nr3z1 nr3c
+    nr3u nrlerp
+    nr3v nrlerp
+    nr3w nrlerp
+} bind def
+
+% @kind: Procedure
+% @summary: 3D gradient (Perlin improved) noise in plain PostScript, bit-identical to the native gnoise3.
+% @example: 1.3 2.7 0.4 nrgnoise3
+/nrgnoise3 { { nrgr3 } nrcell3 } bind def       % x y z -> n
+
+% @kind: Procedure
+% @summary: 3D value noise in plain PostScript, bit-identical to the native vnoise3.
+% @example: 1.3 2.7 0.4 nrvnoise3
+/nrvnoise3 { { pop pop pop nrval } nrcell3 } bind def   % x y z -> v
+
+% @internal
+/nrshift [ 17.3203125 11.4140625 7.6015625 ] def
+
+% @internal
+/nroctaves {                    % x.. dims oct gain lac {sample} ridged -> sum
+    /nrfr exch def /nrfs exch def
+    /nrflac exch cvr def /nrfgain exch cvr def /nrfoct exch def
+    /nrfdim exch def
+    /nrfpt nrfdim array def
+    nrfdim 1 sub -1 0 { nrfpt exch 3 -1 roll cvr put } for
+    /nrfsum 0.0 def /nramp 1.0 def /nrfreq 1.0 def
+    0 1 nrfoct 1 sub {
+        /nrfk exch def
+        0 1 nrfdim 1 sub {
+            /nrfi exch def
+            nrfpt nrfi get nrfreq mul nrfk nrshift nrfi get mul add
+        } for
+        nrfs
+        nrfr { abs 1 exch sub dup mul } if
+        nramp exch mul nrfsum exch add /nrfsum exch def
+        /nramp nramp nrfgain mul def
+        /nrfreq nrfreq nrflac mul def
+    } for
+    nrfsum
+} bind def
+
+% @kind: Procedure
+% @summary: fBm of 2D gradient noise in plain PostScript (oct octaves, amplitude times gain and frequency times lac per octave), bit-identical to the native fbm2.
+% @example: 1.3 2.7 5 0.5 2 nrfbm2
+/nrfbm2 { 2 4 1 roll { nrgnoise2 } false nroctaves } bind def
+
+% @kind: Procedure
+% @summary: fBm of 3D gradient noise in plain PostScript, bit-identical to the native fbm3.
+% @example: 1.3 2.7 0.4 5 0.5 2 nrfbm3
+/nrfbm3 { 3 4 1 roll { nrgnoise3 } false nroctaves } bind def
+
+% @kind: Procedure
+% @summary: fBm of 2D value noise in plain PostScript, bit-identical to the native vfbm2.
+% @example: 1.3 2.7 5 0.5 2 nrvfbm2
+/nrvfbm2 { 2 4 1 roll { nrvnoise2 } false nroctaves } bind def
+
+% @kind: Procedure
+% @summary: fBm of 3D value noise in plain PostScript, bit-identical to the native vfbm3.
+% @example: 1.3 2.7 0.4 5 0.5 2 nrvfbm3
+/nrvfbm3 { 3 4 1 roll { nrvnoise3 } false nroctaves } bind def
+
+% @kind: Procedure
+% @summary: Ridged multifractal sum of 2D gradient noise in plain PostScript ((1-|n|) squared per octave), bit-identical to the native ridged2.
+% @example: 1.3 2.7 5 0.5 2 nrridged2
+/nrridged2 { 2 4 1 roll { nrgnoise2 } true nroctaves } bind def
+
+% @kind: Procedure
+% @summary: Ridged sum of 3D gradient noise in plain PostScript, bit-identical to the native ridged3.
+% @example: 1.3 2.7 0.4 5 0.5 2 nrridged3
+/nrridged3 { 3 4 1 roll { nrgnoise3 } true nroctaves } bind def
+
+0 nrseed

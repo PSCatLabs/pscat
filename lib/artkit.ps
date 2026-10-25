@@ -3428,6 +3428,14 @@ ScatterState /placed 0 put
     n2v nlerp
 } bind def
 
+% #734: on pscat, the same formula runs natively. `.permnoise2` reads
+% `Perm` (looked up on each call, as above) and does the arithmetic with
+% PostScript's own integer/real promotion, so every result is
+% bit-identical to the procedure above, type included (tests/noise.rs),
+% several times faster. It no longer leaves the n2*/nft*/g2* scratch
+% names behind. Ghostscript has no `.permnoise2` and keeps the procedure.
+systemdict /.permnoise2 known { /noise2 { Perm .permnoise2 } bind def } if
+
 % x y eps {x y -> n} curl2 -> dx dy
 % Curl noise: the field's perpendicular gradient (dPsi/dy, -dPsi/dx),
 % central-differenced at +-eps and normalized to a unit vector (see the

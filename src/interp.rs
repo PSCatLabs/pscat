@@ -280,6 +280,10 @@ pub struct Interp {
     /// sweep over a script that never calls `srand` can be flagged
     /// instead of silently producing identical frames.
     pub(crate) seed_override: Option<i64>,
+    /// The permutation table the noise operators sample (`noiseseed`,
+    /// issue #734). Separate from `rand_state`, so noise never moves a
+    /// `rand` sequence.
+    pub(crate) noise_perm: [u8; 256],
     pub(crate) seed_override_fired: bool,
     /// `setpacking` flag — tracked, but packed arrays are ordinary
     /// arrays here (ops/level2.rs).
@@ -402,6 +406,7 @@ impl Interp {
             error_hint: None,
             rand_state: 1,
             seed_override: None,
+            noise_perm: crate::ops::noise::perm_from_seed(0),
             seed_override_fired: false,
             packing: false,
             clock: crate::clock::Clock::start(),
