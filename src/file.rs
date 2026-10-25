@@ -48,6 +48,21 @@ enum Kind {
         out: VecDeque<u8>,
         eod: bool,
     },
+    /// A file opened for writing (issue #740). Reading one is an
+    /// `ioerror`. `None` once closed (a disk file's handle is dropped).
+    Output(Option<Sink>),
+}
+
+/// Where an output file's bytes go. The write operators dispatch on it:
+/// `%stdout` goes through the interpreter (`Interp::write_stdout`), so a
+/// captured stdout (the browser build, tests) sees file writes in order
+/// with `print`.
+pub enum Sink {
+    Stdout,
+    Stderr,
+    /// A disk file, written through unbuffered: the CLI ends the process
+    /// without dropping the interpreter, so nothing may sit in a buffer.
+    Disk(std::fs::File),
 }
 
 impl PsFile {
@@ -59,6 +74,30 @@ impl PsFile {
             line: 1,
             last_was_cr: false,
         }))
+    }
+
+    /// A file for writing to `sink`.
+    pub fn output(sink: Sink) -> FileHandle {
+        Rc::new(RefCell::new(PsFile {
+            kind: Kind::Output(Some(sink)),
+            closed: false,
+            consumed: 0,
+            line: 1,
+            last_was_cr: false,
+        }))
+    }
+
+    /// An open output file's sink; `None` for an input file or a closed one.
+    pub fn sink_mut(&mut self) -> Option<&mut Sink> {
+        match &mut self.kind {
+            Kind::Output(sink) if !self.closed => sink.as_mut(),
+            _ => None,
+        }
+    }
+
+    /// Whether this is an output file (open or closed).
+    pub fn is_output(&self) -> bool {
+        matches!(self.kind, Kind::Output(_))
     }
 
     /// The PLRM's "invalid file object" — what `currentfile` returns
@@ -105,6 +144,7 @@ impl PsFile {
                 Self::ensure_output(source, dec, out, eod)?;
                 out.pop_front()
             }
+            Kind::Output(_) => return Err(PsError::Io),
         };
         if let Some(byte) = b {
             self.consumed += 1;
@@ -142,6 +182,7 @@ impl PsFile {
                 Self::ensure_output(source, dec, out, eod)?;
                 out.front().copied()
             }
+            Kind::Output(_) => return Err(PsError::Io),
         })
     }
 
@@ -159,6 +200,11 @@ impl PsFile {
 
     pub fn close(&mut self) {
         self.closed = true;
+        // Drop a disk file's handle now; `%stdout`/`%stderr` only mark
+        // this file object closed, never the process's streams.
+        if let Kind::Output(sink) = &mut self.kind {
+            *sink = None;
+        }
     }
 
     pub fn is_open(&self) -> bool {
@@ -172,7 +218,7 @@ impl PsFile {
         }
         match &self.kind {
             Kind::Bytes { data, pos } => Some(data.len() - pos),
-            Kind::Filter { .. } => None,
+            Kind::Filter { .. } | Kind::Output(_) => None,
         }
     }
 
@@ -199,7 +245,7 @@ impl PsFile {
     pub fn filter_source(&self) -> Option<FileHandle> {
         match &self.kind {
             Kind::Filter { source, .. } => Some(source.clone()),
-            Kind::Bytes { .. } => None,
+            Kind::Bytes { .. } | Kind::Output(_) => None,
         }
     }
 

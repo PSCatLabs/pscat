@@ -2,7 +2,7 @@
 //! scanner (see `src/file.rs`) — that's what `currentfile` is for.
 
 use crate::error::PsError;
-use crate::file::{Decoder, FileHandle, PsFile};
+use crate::file::{Decoder, FileHandle, PsFile, Sink};
 use crate::interp::Interp;
 use crate::object::{Dict, Object, PsString, Value};
 
@@ -21,6 +21,13 @@ pub fn install(dict: &mut Dict) {
     op(dict, "filter", filter);
     op(dict, "eexec", eexec);
     op(dict, "run", run);
+    op(dict, "write", write);
+    op(dict, "writestring", writestring);
+    op(dict, "writehexstring", writehexstring);
+    op(dict, "flush", flush);
+    op(dict, "renamefile", renamefile);
+    op(dict, "deletefile", deletefile);
+    op(dict, "filenameforall", filenameforall);
 }
 
 fn pop_file(it: &mut Interp) -> Result<FileHandle, PsError> {
@@ -90,17 +97,176 @@ fn read_resource_limited(it: &mut Interp, name: &str) -> Result<Vec<u8>, PsError
         .ok_or(PsError::UndefinedFilename)
 }
 
-/// filename access file → file. Read-only access to real files (how a
-/// program pulls in data or another program); write modes are refused.
+/// filename access file → file. `(r)` reads a file through the resource
+/// search order. `(w)` (truncate or create) and `(a)` (append or create)
+/// write `%stdout`, `%stderr`, or a disk file inside the interpreter's
+/// write roots (`Interp::set_write_roots`, the CLI's `--allow-write`;
+/// none by default, so every disk path is `invalidfileaccess`). Other
+/// modes (`r+`, `w+`, `a+`) are refused.
 fn file(it: &mut Interp) -> Result<(), PsError> {
     let access = pop_ps_string(it)?.to_vec();
-    let name = pop_ps_string(it)?.text();
-    if access != b"r" {
-        return Err(PsError::InvalidFileAccess);
-    }
-    let data = read_resource(it, &name)?;
-    it.push(Object::lit(Value::File(PsFile::from_bytes(data))));
+    let name = pop_ps_string(it)?;
+    let mode = match access.as_slice() {
+        b"r" => {
+            let data = read_resource(it, &name.text())?;
+            it.push(Object::lit(Value::File(PsFile::from_bytes(data))));
+            return Ok(());
+        }
+        b"w" => crate::write_roots::WriteMode::Truncate,
+        b"a" => crate::write_roots::WriteMode::Append,
+        _ => return Err(PsError::InvalidFileAccess),
+    };
+    let name = name.to_vec();
+    let sink = match name.as_slice() {
+        b"%stdout" => Sink::Stdout,
+        b"%stderr" => Sink::Stderr,
+        // Other `%device` names (`%lineedit`, `%printer`) aren't files here.
+        [b'%', ..] => return Err(PsError::UndefinedFilename),
+        _ => {
+            let name = writable_name(&name)?;
+            Sink::Disk(it.write_policy().open(name, mode)?)
+        }
+    };
+    it.push(Object::lit(Value::File(PsFile::output(sink))));
     Ok(())
+}
+
+/// A filename to write, rename or delete, as text. Only exact UTF-8: a
+/// lossy conversion would act on a different name than the program gave.
+fn writable_name(bytes: &[u8]) -> Result<&str, PsError> {
+    std::str::from_utf8(bytes).map_err(|_| PsError::InvalidFileAccess)
+}
+
+/// Send bytes to an output file. Writing to an input file or a closed
+/// one is an `ioerror`.
+fn write_bytes(it: &mut Interp, f: &FileHandle, bytes: &[u8]) -> Result<(), PsError> {
+    use std::io::Write;
+    match f.borrow_mut().sink_mut() {
+        None => return Err(PsError::Io),
+        Some(Sink::Disk(d)) => return d.write_all(bytes).map_err(|_| PsError::Io),
+        Some(Sink::Stderr) => {
+            return std::io::stderr().write_all(bytes).map_err(|_| PsError::Io);
+        }
+        // Through the interpreter, outside the borrow.
+        Some(Sink::Stdout) => {}
+    }
+    it.write_stdout(bytes, false).map_err(|_| PsError::Io)
+}
+
+/// Flush an output file (`flushfile` on one, and `closefile`).
+fn flush_output(it: &mut Interp, f: &FileHandle) -> Result<(), PsError> {
+    use std::io::Write;
+    let mut file = f.borrow_mut();
+    match file.sink_mut() {
+        None => Ok(()),
+        Some(Sink::Disk(d)) => d.flush().map_err(|_| PsError::Io),
+        Some(Sink::Stderr) => std::io::stderr().flush().map_err(|_| PsError::Io),
+        Some(Sink::Stdout) => {
+            drop(file);
+            it.write_stdout(&[], true).map_err(|_| PsError::Io)
+        }
+    }
+}
+
+/// file int write → (one byte, the integer's low 8 bits).
+fn write(it: &mut Interp) -> Result<(), PsError> {
+    let n = it.pop_int()?;
+    let f = pop_file(it)?;
+    write_bytes(it, &f, &[n.rem_euclid(256) as u8])
+}
+
+/// file string writestring →
+fn writestring(it: &mut Interp) -> Result<(), PsError> {
+    let s = pop_ps_string(it)?;
+    let f = pop_file(it)?;
+    // Straight from the string's storage: no copy that the memory limit
+    // wouldn't see.
+    let bytes = s.borrow_bytes();
+    write_bytes(it, &f, &bytes)
+}
+
+/// file string writehexstring → (two lowercase hex digits per byte, as
+/// Ghostscript writes them).
+fn writehexstring(it: &mut Interp) -> Result<(), PsError> {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let s = pop_ps_string(it)?;
+    let f = pop_file(it)?;
+    // In fixed-size pieces, so a long string never needs a buffer twice
+    // its size outside the memory limit's view.
+    if s.is_empty() {
+        // Still an error on a closed or input file.
+        return write_bytes(it, &f, &[]);
+    }
+    let mut buf = [0u8; 8192];
+    for chunk in s.borrow_bytes().chunks(buf.len() / 2) {
+        for (i, &b) in chunk.iter().enumerate() {
+            buf[2 * i] = HEX[usize::from(b >> 4)];
+            buf[2 * i + 1] = HEX[usize::from(b & 15)];
+        }
+        write_bytes(it, &f, &buf[..2 * chunk.len()])?;
+    }
+    Ok(())
+}
+
+/// flush — push `print` and `%stdout` output out now.
+fn flush(it: &mut Interp) -> Result<(), PsError> {
+    it.write_stdout(&[], true).map_err(|_| PsError::Io)
+}
+
+/// oldname newname renamefile → (both inside the write roots).
+fn renamefile(it: &mut Interp) -> Result<(), PsError> {
+    let new = pop_ps_string(it)?.to_vec();
+    let old = pop_ps_string(it)?.to_vec();
+    it.write_policy()
+        .rename(writable_name(&old)?, writable_name(&new)?)
+}
+
+/// filename deletefile → (inside the write roots).
+fn deletefile(it: &mut Interp) -> Result<(), PsError> {
+    let name = pop_ps_string(it)?.to_vec();
+    it.write_policy().delete(writable_name(&name)?)
+}
+
+/// template proc scratch filenameforall → . Calls `proc` with each file
+/// name matching `template` (`*` any run, `?` one character, `\` quotes
+/// the next), copied into `scratch` (`rangecheck` when it doesn't fit).
+/// Names are listed where `run` and `(r) file` would look
+/// (`crate::filenames::matching_names`), so it can list what a program could
+/// read, nothing more; wildcards match within the last path component.
+fn filenameforall(it: &mut Interp) -> Result<(), PsError> {
+    let scratch = it.pop()?;
+    if !matches!(scratch.value, Value::String(_)) {
+        return Err(PsError::Typecheck);
+    }
+    let proc = it.pop()?;
+    if !(proc.executable && matches!(proc.value, Value::Array(_))) {
+        return Err(PsError::Typecheck);
+    }
+    let template = pop_ps_string(it)?.to_vec();
+    // Under execution limits each entry looked at is a step, and each
+    // match's bytes are checked against the memory cap as it is added.
+    #[cfg(not(target_arch = "wasm32"))]
+    let limited = !it.limits().is_none();
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut poll = |n: usize| if limited { it.poll_read(1, n) } else { Ok(()) };
+    #[cfg(target_arch = "wasm32")]
+    let mut poll = |_: usize| Ok(());
+    let names = crate::filenames::matching_names(&template, &mut poll)?;
+    let names: Vec<Object> = names.into_iter().map(Object::string).collect();
+    // `{ scratch copy proc exec }` over the names, with the operators
+    // themselves rather than their names, so a program that redefines
+    // `copy` or `exec` doesn't change this one. `forall` gives `exit` its
+    // usual meaning inside `proc`.
+    let opr = |name, func| Object::exec(Value::Operator(crate::object::Operator { name, func }));
+    let body = Object::procedure(vec![
+        scratch,
+        opr("copy", super::data::copy),
+        proc,
+        opr("exec", super::control::exec),
+    ]);
+    it.push(Object::array(names));
+    it.push(body);
+    super::data::forall(it)
 }
 
 /// The file the interpreter is currently executing — or the PLRM's
@@ -207,8 +373,9 @@ fn readline(it: &mut Interp) -> Result<(), PsError> {
 
 fn closefile(it: &mut Interp) -> Result<(), PsError> {
     let f = pop_file(it)?;
+    let flushed = flush_output(it, &f);
     f.borrow_mut().close();
-    Ok(())
+    flushed
 }
 
 fn bytesavailable(it: &mut Interp) -> Result<(), PsError> {
@@ -218,9 +385,13 @@ fn bytesavailable(it: &mut Interp) -> Result<(), PsError> {
     Ok(())
 }
 
-/// For an input file, flushfile reads and discards to EOF, per the PLRM.
+/// For an input file, flushfile reads and discards to EOF, per the PLRM;
+/// an output file's pending bytes go out.
 fn flushfile(it: &mut Interp) -> Result<(), PsError> {
     let f = pop_file(it)?;
+    if f.borrow().is_output() {
+        return flush_output(it, &f);
+    }
     while f.borrow_mut().read_byte()?.is_some() {}
     Ok(())
 }
