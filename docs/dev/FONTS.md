@@ -260,10 +260,10 @@ the twelve builtins into a **runtime catalog** loaded from
   `catalog_fid` scans every `fonts/catalog/` override first, then the
   installed packs (`fontpacks::font_dirs`); the first file found wins.
   `fonts/packs.json` (compiled in) maps every catalog file to its pack,
-  so a pack face that is on no disk is `invalidfont` with a hint naming
-  the pack (`font::missing_face_hint`, shown by `Interp::error_report` on
-  its own line) instead of the Helvetica substitute; names no pack lists
-  still substitute. Release procedure: `docs/dev/RELEASING-FONTS.md`.
+  so a pack face that is on no disk stands in as the closest built-in
+  face with one stderr note naming the pack (`font::resolve`,
+  `font::stand_in_for`; #728 replaced the `invalidfont` this used to
+  raise); names no pack lists substitute Helvetica silently. Release procedure: `docs/dev/RELEASING-FONTS.md`.
 
 `fonts/catalog/README.md` is the curated manifest with licenses;
 `examples/font_catalog.ps` renders the specimen sheets. The library

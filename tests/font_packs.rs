@@ -268,24 +268,175 @@ fn fonts_subcommand_rejects_bad_usage() {
     assert!(ok && out.contains("pscat fonts install"));
 }
 
-/// findfont clears its hint on every call, so a missing face caught by
-/// `stopped` cannot label a later, unrelated error. (In a checkout every
-/// pack face is on disk; the hint itself is unit-tested in src/font.rs
-/// and src/interp.rs, and end to end by scripts/font_pack_smoke.sh.)
+/// `pscat` as a bare install runs it: no packs, and the checkout's
+/// `fonts/catalog/` hidden (`PSCAT_NO_CHECKOUT`, debug-assertion builds).
+fn pscat_bare(home: &Path, args: &[&str]) -> (bool, String, String) {
+    let work = home.join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    let out = Command::new(PSCAT)
+        .args(args)
+        .current_dir(&work)
+        .env("PSCAT_HOME", home)
+        .env("HOME", home.join("user"))
+        .env("XDG_DATA_HOME", home.join("user/data"))
+        .env("PSCAT_NO_CHECKOUT", "1")
+        .env_remove("PSCAT_ROOT")
+        .env_remove("PSCAT_LIB")
+        .env_remove("APPDATA")
+        .output()
+        .expect("run pscat");
+    (
+        out.status.success(),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+/// Issue #728: a face from a pack that is not installed stands in as the
+/// closest built-in face, the run exits 0, and one stderr line names the
+/// pack and the install command.
 #[test]
-fn a_caught_missing_face_leaves_no_hint_on_a_later_error() {
-    let home = common::scratch_dir("fontpack-hint");
-    let (ok, out, err) = pscat(
+fn a_missing_pack_face_stands_in_and_says_which_pack() {
+    let home = common::scratch_dir("fontpack-standin");
+    for (face, pack, stand_in) in [
+        ("Palatino-Italic", "texgyre", "Times-Italic"),
+        ("Bookman-Demi", "texgyre", "Times-Bold"),
+        ("NewCenturySchlbk-BoldItalic", "texgyre", "Times-BoldItalic"),
+        ("AvantGarde-DemiOblique", "texgyre", "Helvetica-BoldOblique"),
+        ("ZapfChancery", "texgyre", "Times-Italic"),
+        ("Symbol", "extras", "Helvetica"),
+        ("ZapfDingbats", "extras", "Helvetica"),
+        ("NotoSansKR-Regular", "cjk-thai", "Helvetica"),
+    ] {
+        let (ok, out, err) = pscat_bare(
+            &home,
+            &["-e", &format!("/{face} findfont /FontName get ==")],
+        );
+        assert!(ok, "{face}: {err}");
+        assert_eq!(out.trim(), format!("/{stand_in}"), "{face}");
+        assert_eq!(err.trim().lines().count(), 1, "{face}: one line: {err}");
+        assert!(
+            err.contains(&format!("/{face} is in the {pack} font pack"))
+                && err.contains(&format!("`pscat fonts install --pack {pack}`")),
+            "{face}: {err}"
+        );
+    }
+    // A name no pack has is Ghostscript-style, as before: Helvetica, no note.
+    let (ok, out, err) = pscat_bare(&home, &["-e", "/NoSuchFont-Bold findfont /FontName get =="]);
+    assert!(
+        ok && out.trim() == "/Helvetica" && err.is_empty(),
+        "{out}{err}"
+    );
+}
+
+/// With the face on disk (a checkout's catalog stands in for an installed
+/// pack) nothing changes: the real face, and silence.
+#[test]
+fn an_available_pack_face_is_unchanged() {
+    let home = common::scratch_dir("fontpack-present");
+    let (ok, out, err) = pscat(&home, &["-e", "/Palatino-Italic findfont /FontName get =="]);
+    assert!(ok, "{err}");
+    assert_eq!(out.trim(), "/texgyrepagella-italic");
+    assert!(err.is_empty(), "{err}");
+}
+
+/// The note prints once per name per run, even when `restore` journals
+/// the font directory entry away between calls.
+#[test]
+fn the_stand_in_note_prints_once_per_name() {
+    let home = common::scratch_dir("fontpack-once");
+    let (ok, _, err) = pscat_bare(
         &home,
         &[
             "-e",
-            "{ /Symbol findfont } stopped pop /Helvetica findfont pop 1 0 div",
+            "1 1 5 { pop save /Palatino-Italic findfont pop /Bookman-Demi findfont pop restore } for",
         ],
     );
-    assert!(!ok);
-    let report = format!("{out}{err}");
-    assert!(report.contains("undefinedresult"), "{report}");
-    assert!(!report.contains("font pack"), "{report}");
+    assert!(ok, "{err}");
+    assert_eq!(err.matches("/Palatino-Italic is in").count(), 1, "{err}");
+    assert_eq!(err.matches("/Bookman-Demi is in").count(), 1, "{err}");
+}
+
+/// The substitution is visible, so the render is pinned: text in a missing
+/// pack face is drawn exactly as its stand-in draws it.
+#[test]
+fn a_stand_in_renders_exactly_as_the_builtin_does() {
+    let home = common::scratch_dir("fontpack-render");
+    let render = |face: &str| {
+        let png = home.join(format!("{face}.png"));
+        let prog = format!(
+            "/{face} findfont 40 scalefont setfont 20 30 moveto (Hello, Real) show showpage"
+        );
+        let (ok, _, err) = pscat_bare(
+            &home,
+            &[
+                "--page",
+                "300x90",
+                "--png",
+                common::ps_path(&png).as_str(),
+                "-e",
+                &prog,
+            ],
+        );
+        assert!(ok, "{face}: {err}");
+        std::fs::read(png).unwrap()
+    };
+    assert_eq!(render("Palatino-Italic"), render("Times-Italic"));
+    assert_eq!(render("Bookman-Demi"), render("Times-Bold"));
+    assert_eq!(render("AvantGarde-Book"), render("Helvetica"));
+    assert_ne!(
+        render("Times-Italic"),
+        render("Helvetica"),
+        "the comparison can differ"
+    );
+}
+
+/// Issue #728: the font-checking libraries still refuse a face that is
+/// not really there. A Times stand-in is none of the two names they used
+/// to reject (Helvetica, Courier), so each must say so by name.
+#[test]
+fn the_libraries_still_reject_a_stand_in_face() {
+    let home = common::scratch_dir("fontpack-libs");
+    for (lib, call, named) in [
+        (
+            "headline",
+            "(Palatino-Italic) hlfontcheck",
+            "headline-font-not-found",
+        ),
+        (
+            "lettering",
+            "(Bookman-Demi) ltfontcheck",
+            "lettering-font-not-found",
+        ),
+        (
+            "jersey",
+            "/ZapfChancery jyfontcheck",
+            "jersey-font-not-found",
+        ),
+        (
+            "headline",
+            "(NoSuchFace) hlfontcheck",
+            "headline-font-not-found",
+        ),
+    ] {
+        let prog = format!("(lib/{lib}.ps) run {call} clear");
+        let (ok, _, err) = pscat_bare(&home, &["-e", &prog]);
+        assert!(!ok, "{call} passed");
+        assert!(
+            err.contains(&format!("OffendingCommand: {named}")),
+            "{call}: {err}"
+        );
+    }
+    // Faces that are what was asked for still pass.
+    for (lib, call) in [
+        ("headline", "(Times-Italic) hlfontcheck"),
+        ("lettering", "(Helvetica-Bold) ltfontcheck"),
+        ("jersey", "/Courier jyfontcheck"),
+    ] {
+        let prog = format!("(lib/{lib}.ps) run {call} clear");
+        let (ok, _, err) = pscat_bare(&home, &["-e", &prog]);
+        assert!(ok, "{call}: {err}");
+    }
 }
 
 #[test]

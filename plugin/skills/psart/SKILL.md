@@ -2,6 +2,7 @@
 name: psart
 description: Make generative art with the pscat PostScript interpreter — the artkit library (turtle, L-systems, palettes, path brushes, scatter, tiling, fractals), paint and dry media (watercolor, oil, chalk, crayon, charcoal), chalkboard TeX formulas, style packs and type, and the render-look-refine loop. Use when asked to create art, posters, generative pieces, paintings, chalkboards, or decorative graphics in PostScript.
 ---
+<!-- Contributors: tests/skill_blocks.rs runs every postscript code fence under plugin/skills on a bare install (no font packs) and fails on any error or font-pack warning. A fragment that cannot run alone is fenced as "postscript partial". -->
 
 # psart — making art with pscat
 
@@ -102,12 +103,22 @@ Also in the library, documented in each file's header and in
 
 ## Type is material
 
-- `pscat --fonts` lists what this install can find. The LaserWriter 35
-  always resolve (Palatino, Bookman, ZapfChancery, Symbol,
-  ZapfDingbats…). The ~35 display families (`/Bangers`,
-  `/GreatVibes-Regular`, `/PressStart2P-Regular`, …) come from the font
-  catalog, which a bare install may not have: **an unknown name silently
-  becomes Helvetica**, so check `--fonts` before designing around a face.
+- A bare install, which is what plugin users have, has 12 faces:
+  Helvetica, Times and Courier. **Design with those.** The rest of the
+  LaserWriter 35 (Palatino, Bookman, NewCenturySchlbk, AvantGarde,
+  ZapfChancery) come from `pscat fonts install --pack texgyre`; Symbol,
+  ZapfDingbats and the ~35 display families (`/Bangers`,
+  `/GreatVibes-Regular`, `/PressStart2P-Regular`, …) from
+  `--pack extras`; Korean/Japanese/Thai from `--pack cjk-thai`.
+  `pscat --fonts` lists what this install can reach.
+- Asking for a face that is not there never fails the render, in two ways:
+  a name from an uninstalled pack falls back to the closest built-in face
+  (Palatino, Bookman and NewCenturySchlbk to Times, keeping weight and
+  slant; AvantGarde to Helvetica; ZapfChancery to Times-Italic; Symbol,
+  ZapfDingbats and the display faces to Helvetica) with a one-line
+  `pscat: warning: font … is in the … font pack` on stderr; **a name
+  nothing knows silently becomes Helvetica**. Either way the piece is not
+  set in the face you meant, so check `--fonts`.
 - Type 3 program faces load from the library anywhere:
   `(lib/fonts/neon.ps) run` — /Neon, /Marquee, /Constellation,
   /Lapidary, /Circuitry, /Stitchwork, /Confetti.
@@ -134,7 +145,7 @@ Also in the library, documented in each file's header and in
 newpath 306 200 90 thome
 (F) << (F) 0 get (FF-[-F+F+F]+[+F-F-F]) >> 3 lsys 6 22.5 ldraw
 /dusk pal 4 get aload pop setrgbcolor 1.2 setlinewidth stroke
-/Palatino-Italic findfont 18 scalefont setfont
+/Times-Italic findfont 18 scalefont setfont
 /dusk pal 3 get aload pop setrgbcolor
 (grown, not drawn) 306 60 showctr
 showpage

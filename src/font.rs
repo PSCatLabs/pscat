@@ -171,28 +171,51 @@ static ALIASES: &[(&str, &str)] = &[
     ("UnifrakturMaguntia", "UnifrakturMaguntia-Book"),
 ];
 
+/// What `findfont` found for a name: the face's `FID`, and, when the
+/// name belongs to a font pack that is not installed, the note
+/// `findfont` prints about the stand-in it used.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct Resolved {
+    pub fid: i64,
+    pub stand_in_note: Option<String>,
+}
+
+impl Resolved {
+    fn found(fid: i64) -> Self {
+        Resolved {
+            fid,
+            stand_in_note: None,
+        }
+    }
+}
+
 /// findfont's name resolution: builtins, then the disk catalog (via
-/// aliases and file stems), then the substitute face. The catalog is
+/// aliases and file stems), then a stand-in face. The catalog is
 /// filesystem-backed, so wasm builds resolve builtins-or-substitute
 /// only.
 ///
 /// A name that belongs to a font pack (`fonts/packs.json`, issue #599)
-/// but is not on disk is an error, never a substitute: the `Err` is the
-/// hint naming the pack to install, which findfont attaches to its
-/// `invalidfont`. That covers /Symbol and /ZapfDingbats, whose metrics a
-/// Helvetica stand-in would silently get wrong. Names no pack has
-/// still substitute, Ghostscript-style.
-pub(crate) fn resolve(requested: &str) -> Result<i64, String> {
+/// but is not on disk gets the closest built-in face instead of an error
+/// (issue #728; see [`stand_in_for`] for the table), with a note naming
+/// the pack to install; installed, the pack's own face is used and
+/// nothing changes. Names no pack has substitute Helvetica without a
+/// note, Ghostscript-style.
+pub(crate) fn resolve(requested: &str) -> Resolved {
     if let Some(fid) = builtin_index(requested) {
-        return Ok(fid);
+        return Resolved::found(fid);
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
         if let Some(fid) = catalog_fid(requested) {
-            return Ok(fid);
+            return Resolved::found(fid);
         }
-        if let Some(hint) = missing_face_hint(requested) {
-            return Err(hint);
+        if let Some(pack) = missing_pack(requested) {
+            let stand_in = stand_in_for(requested);
+            let fid = builtin_index(stand_in).unwrap_or(SUBSTITUTE);
+            return Resolved {
+                fid,
+                stand_in_note: Some(stand_in_note(requested, pack, stand_in)),
+            };
         }
     }
     // wasm has no disk catalog; its catalog is only the faces the caller
@@ -204,21 +227,23 @@ pub(crate) fn resolve(requested: &str) -> Result<i64, String> {
         let (stem, fallback) = wanted_stems(requested);
         if let Some(fid) = loaded_fid(stem, requested).or_else(|| loaded_fid(&fallback, requested))
         {
-            return Ok(fid);
+            return Resolved::found(fid);
         }
     }
-    Ok(SUBSTITUTE)
+    Resolved::found(SUBSTITUTE)
 }
 
 /// Whether the face `requested` names has a glyph for `c`, by the
 /// face's `cmap`. For the Unicode-mode catalog faces, which draw a
 /// missing character as nothing at all; `false` when the face does not
-/// resolve.
+/// resolve, including a face whose pack is not installed (its stand-in
+/// has no say about the real face's coverage).
 pub(crate) fn has_glyph(requested: &str, c: char) -> bool {
-    resolve(requested)
-        .ok()
-        .and_then(|fid| face_for(fid).ok())
-        .is_some_and(|face| face.glyph_index(c).is_some())
+    let r = resolve(requested);
+    r.stand_in_note.is_none()
+        && face_for(r.fid)
+            .ok()
+            .is_some_and(|face| face.glyph_index(c).is_some())
 }
 
 /// The FID of an already-registered catalog face whose key is `want`
@@ -249,16 +274,84 @@ fn missing_pack(requested: &str) -> Option<&'static str> {
     crate::fontpacks::pack_for_stem(stem).or_else(|| crate::fontpacks::pack_for_stem(&fallback))
 }
 
-/// The hint for a face whose pack is not installed, or `None` when no
-/// pack has it.
+/// The built-in face standing in for `requested`, a name whose font
+/// pack is not installed (issue #728). The closest family keeping the
+/// weight and slant, the way Ghostscript's Fontmap does:
+///
+/// - serif faces (Palatino, Bookman, New Century Schoolbook) become
+///   Times;
+/// - Avant Garde and Helvetica Narrow become Helvetica;
+/// - Zapf Chancery, which has one face, becomes Times-Italic;
+/// - the typewriter faces (Courier Prime, Special Elite) become Courier,
+///   so column layouts hold;
+/// - Symbol and ZapfDingbats become Helvetica: no built-in face has
+///   their glyphs, so the same character codes draw Latin letters, not
+///   Greek letters or dingbats (the note says so);
+/// - every other pack face (display, Korean, Japanese, Thai) becomes
+///   Helvetica, as an unknown name does.
 #[cfg(not(target_arch = "wasm32"))]
-fn missing_face_hint(requested: &str) -> Option<String> {
-    missing_pack(requested).map(|pack| {
-        format!(
-            "pscat: font /{requested} is in the {pack} font pack, which is not installed; \
-             run `pscat fonts install` (or `pscat fonts install --pack {pack}`)"
+fn stand_in_for(requested: &str) -> &'static str {
+    let (stem, _) = wanted_stems(requested);
+    let stem = stem.to_ascii_lowercase();
+    let bold = stem.contains("bold") || stem.contains("demi");
+    let italic = stem.ends_with("italic") || stem.ends_with("oblique");
+    let pick = |plain, b, i, bi| match (bold, italic) {
+        (false, false) => plain,
+        (true, false) => b,
+        (false, true) => i,
+        (true, true) => bi,
+    };
+    let times = || {
+        pick(
+            "Times-Roman",
+            "Times-Bold",
+            "Times-Italic",
+            "Times-BoldItalic",
         )
-    })
+    };
+    let courier = || {
+        pick(
+            "Courier",
+            "Courier-Bold",
+            "Courier-Oblique",
+            "Courier-BoldOblique",
+        )
+    };
+    let helvetica = || {
+        pick(
+            "Helvetica",
+            "Helvetica-Bold",
+            "Helvetica-Oblique",
+            "Helvetica-BoldOblique",
+        )
+    };
+    if ["pagella", "bonum", "schola"]
+        .iter()
+        .any(|f| stem.contains(f))
+    {
+        times()
+    } else if stem.contains("chorus") {
+        "Times-Italic"
+    } else if stem.starts_with("courierprime") || stem.starts_with("specialelite") {
+        courier()
+    } else {
+        // adventor, heroscn, Symbol, Dingbats, display and CJK faces.
+        helvetica()
+    }
+}
+
+/// The one-line note for a face whose pack is not installed.
+#[cfg(not(target_arch = "wasm32"))]
+fn stand_in_note(requested: &str, pack: &str, stand_in: &str) -> String {
+    let glyphs = if matches!(requested, "Symbol" | "ZapfDingbats") {
+        " (its glyphs differ: letters, not symbols)"
+    } else {
+        ""
+    };
+    format!(
+        "pscat: warning: font /{requested} is in the {pack} font pack, which is not installed; \
+         using {stand_in}{glyphs}. Run `pscat fonts install --pack {pack}` (or `pscat fonts install`) for the real face"
+    )
 }
 
 /// The directories catalog faces load from, in priority order:
@@ -1471,26 +1564,61 @@ impl ShowCtx {
 mod tests {
     use super::*;
 
+    /// The stand-in table (issue #728): weight and slant survive, and
+    /// each pack names itself in the note.
     #[test]
-    fn pack_faces_get_a_hint_naming_their_pack() {
-        for (name, pack) in [
-            ("Symbol", "extras"),
-            ("ZapfDingbats", "extras"),
-            ("Bangers", "extras"),
-            ("bangers-regular", "extras"),
-            ("Palatino-Roman", "texgyre"),
-            ("Helvetica-Narrow-Bold", "texgyre"),
-            ("NotoSansKR-Regular", "cjk-thai"),
+    fn pack_faces_stand_in_with_the_closest_builtin() {
+        for (name, pack, stand_in) in [
+            ("Palatino-Roman", "texgyre", "Times-Roman"),
+            ("Palatino", "texgyre", "Times-Roman"),
+            ("Palatino-Italic", "texgyre", "Times-Italic"),
+            ("Palatino-BoldItalic", "texgyre", "Times-BoldItalic"),
+            ("Bookman-Demi", "texgyre", "Times-Bold"),
+            ("Bookman-LightItalic", "texgyre", "Times-Italic"),
+            ("NewCenturySchlbk-Bold", "texgyre", "Times-Bold"),
+            ("NewCenturySchoolbook", "texgyre", "Times-Roman"),
+            ("AvantGarde-Book", "texgyre", "Helvetica"),
+            ("AvantGarde-DemiOblique", "texgyre", "Helvetica-BoldOblique"),
+            ("ZapfChancery", "texgyre", "Times-Italic"),
+            ("ZapfChancery-MediumItalic", "texgyre", "Times-Italic"),
+            ("Helvetica-Narrow-Bold", "texgyre", "Helvetica-Bold"),
+            ("Helvetica-Narrow-Oblique", "texgyre", "Helvetica-Oblique"),
+            ("TeXGyrePagella-Bold", "texgyre", "Times-Bold"),
+            ("Symbol", "extras", "Helvetica"),
+            ("ZapfDingbats", "extras", "Helvetica"),
+            ("Bangers", "extras", "Helvetica"),
+            ("bangers-regular", "extras", "Helvetica"),
+            ("CourierPrime", "extras", "Courier"),
+            ("CourierPrime-BoldItalic", "extras", "Courier-BoldOblique"),
+            ("NotoSansKR-Regular", "cjk-thai", "Helvetica"),
         ] {
-            let hint = missing_face_hint(name).unwrap_or_else(|| panic!("{name}: no hint"));
+            assert_eq!(missing_pack(name), Some(pack), "{name}");
+            assert_eq!(stand_in_for(name), stand_in, "{name}");
+            let note = stand_in_note(name, pack, stand_in);
             assert!(
-                hint.contains(&format!("/{name} is in the {pack} font pack"))
-                    && hint.contains(&format!("--pack {pack}")),
-                "{hint}"
+                !note.contains('\n')
+                    && note.contains(&format!("/{name} is in the {pack} font pack"))
+                    && note.contains(&format!("using {stand_in}"))
+                    && note.contains(&format!("`pscat fonts install --pack {pack}`")),
+                "{note}"
             );
         }
         for name in ["Helvetica", "Courier-Bold", "NoSuchFace", "Arial"] {
-            assert_eq!(missing_face_hint(name), None, "{name}");
+            assert_eq!(missing_pack(name), None, "{name}");
+        }
+    }
+
+    /// Every stand-in is one of the twelve built-ins, so `resolve` never
+    /// lands on the generic substitute by accident.
+    #[test]
+    fn every_stand_in_is_a_builtin() {
+        for name in crate::fontpacks::packs()
+            .iter()
+            .flat_map(|p| p.families.iter().flat_map(|(_, f)| f))
+            .map(|f| f.rsplit_once('.').map_or(f.as_str(), |(s, _)| s))
+            .chain(ALIASES.iter().map(|(k, _)| *k))
+        {
+            assert!(builtin_index(stand_in_for(name)).is_some(), "{name}");
         }
     }
 
@@ -1502,7 +1630,7 @@ mod tests {
         let bytes = BUILTINS[0].data.to_vec();
         let fid = register_font_bytes("PscatRegisterTest-Regular", bytes.clone()).unwrap();
         assert!(fid >= BUILTINS.len() as i64);
-        assert_eq!(resolve("PscatRegisterTest-Regular"), Ok(fid));
+        assert_eq!(resolve("PscatRegisterTest-Regular").fid, fid);
         assert_eq!(
             register_font_bytes("pscatregistertest-regular", bytes),
             Ok(fid)

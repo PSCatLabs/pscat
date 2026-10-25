@@ -239,16 +239,22 @@
 % @internal
 /hlfontcheck {
   /hlreq exch def
-  % An unknown face raises invalidfont in pscat and substitutes in some
-  % other interpreters; both must end as the same named error.
+  % A face that cannot be resolved raises invalidfont (a broken font
+  % directory, say) and substitutes in pscat and other interpreters; all
+  % must end as the same named error. That includes a face whose font pack
+  % is not installed: pscat answers a built-in stand-in (#728), which the
+  % FontName check below rejects.
   { hlreq cvn findfont } stopped { headline-font-not-found } if
   /hlfd exch def
   hlfd /FontType get 3 eq { headline-type3-faces-have-no-outlines } if
   /hlgot hlfd /FontName get 96 string cvs def
   /hlgotreg hlreq length 8 add string dup 0 hlreq putinterval
     dup hlreq length (-Regular) putinterval def
-  hlgot hlreq eq hlgot hlgotreg eq or
-  hlgot (Helvetica) ne hlgot (Courier) ne and or not { headline-font-not-found } if
+  hlgot hlreq eq hlgot hlgotreg eq or not {
+    false [ (Helvetica) (Times) (Courier) ]
+    { hlgot exch anchorsearch { pop pop pop true } { pop } ifelse } forall
+    { headline-font-not-found } if
+  } if
   hlfd
 } def
 

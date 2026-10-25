@@ -490,10 +490,20 @@ renders eight examples in both and compares block-downsampled output).
 - `FID` is integertype; unknown `findfont` substitutes Helvetica
   (gs-style) instead of erroring. Symbol/ZapfDingbats have real URW
   faces since Stage 18 — via the runtime catalog (`fonts/catalog/`,
-  `font::resolve`). Since #599 a face from a font pack that is not
-  installed (Symbol and ZapfDingbats included) is `invalidfont` with a
-  hint naming the pack, never a substitute; wasm, which has no packs,
-  still substitutes.
+  `font::resolve`). Since #599 pscat knows which pack a face is in; a
+  face from a pack that is not installed (Symbol and ZapfDingbats
+  included) was `invalidfont` with a hint naming the pack. Since #728 it
+  stands in as the closest built-in face (`font::stand_in_for`: serifs to
+  Times, AvantGarde to Helvetica, ZapfChancery to Times-Italic, Symbol and
+  ZapfDingbats to Helvetica) with one stderr note per name naming the pack
+  (`Interp::font_notes_shown`), and the run exits 0. `lettering`,
+  `headline` and `jersey` still reject a stand-in with their own
+  `*-font-not-found`. wasm, which has no packs, substitutes Helvetica
+  silently. `tests/skill_blocks.rs` runs the plugin skills' `postscript`
+  blocks on a bare install (`PSCAT_NO_CHECKOUT=1`, a debug-build switch that
+  hides the checkout's `lib/` and `fonts/catalog/`) and fails on a
+  font-pack note, so a skill example cannot need a pack; a fragment is
+  fenced `postscript partial`.
 - `charpath` on Type 3 advances without capturing outlines; its bool
   operand is ignored for outline fonts.
 - Type 1 hints are ignored entirely; no `/Metrics`, no CID/CFF.
