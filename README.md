@@ -120,9 +120,11 @@ live, without depending on a decades-old C codebase to do it.
 
 pscat's code is dual-licensed under [MIT](LICENSE-MIT) or
 [Apache-2.0](LICENSE-APACHE), at your option. The package also embeds font
-data: the Liberation faces and the Courier Prime-derived typewriter outlines,
-both under the [SIL Open Font License 1.1](LICENSE-OFL). That's why
-`Cargo.toml` says `(MIT OR Apache-2.0) AND OFL-1.1`. The OFL term covers only
+data: the Liberation faces, the URW Symbol and ZapfDingbats faces and the
+Courier Prime-derived typewriter outlines, under the
+[SIL Open Font License 1.1](LICENSE-OFL), and the TeX Gyre faces, under the
+GUST Font License (LPPL-1.3c). That's why `Cargo.toml` says
+`(MIT OR Apache-2.0) AND OFL-1.1 AND LPPL-1.3c`. The font terms cover only
 the embedded font data, not pscat's code.
 
 The fonts in `fonts/catalog/` keep their own upstream licences. The original

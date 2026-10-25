@@ -15,7 +15,7 @@ import font_packs as fp  # noqa: E402
 
 class Globs(unittest.TestCase):
     def test_assets_json_glob_semantics(self):
-        self.assertTrue(fp.glob_match("fonts/catalog/URW-symbols/**", "fonts/catalog/URW-symbols/a.otf"))
+        self.assertTrue(fp.glob_match("fonts/base35/URW-symbols/**", "fonts/base35/URW-symbols/a.otf"))
         self.assertTrue(fp.glob_match("fonts/Liberation*.ttf", "fonts/LiberationSans-Bold.ttf"))
         self.assertFalse(fp.glob_match("fonts/*.ttf", "fonts/catalog/x.ttf"))
         self.assertFalse(fp.glob_match("fonts/catalog/A/**", "fonts/catalog/AB/x.ttf"))
@@ -28,21 +28,13 @@ class Repo(unittest.TestCase):
     def test_packs_carry_the_audited_licence_files_only(self):
         files, errors = fp.pack_files(fp.load_json("fonts/packs.json"), fp.load_json("licenses/assets.json"))
         self.assertEqual(errors, [])
-        urw = sorted(a for a, _, _, _ in files["extras"] if a.startswith("URW-symbols/"))
-        self.assertEqual(
-            urw,
-            [
-                "URW-symbols/D050000L.otf",
-                "URW-symbols/LICENSE.OFL",
-                "URW-symbols/LICENSE.md",
-                "URW-symbols/PROVENANCE.md",
-                "URW-symbols/StandardSymbolsPS.otf",
-            ],
-        )
+        # Compiled into pscat since issue #757: no pack carries them.
+        every = [a for files_ in files.values() for a, _, _, _ in files_]
+        self.assertFalse([a for a in every if a.startswith(("URW-symbols/", "TeXGyre-"))])
+        self.assertNotIn("texgyre", files)
         elite = {a: e["license"] for a, _, _, e in files["extras"] if a.startswith("SpecialElite/")}
         self.assertEqual(set(elite.values()), {"Apache-2.0"})
         self.assertIn("SpecialElite/LICENSE.txt", elite)
-        self.assertTrue(all(e["license"] == "LPPL-1.3c" for _, _, _, e in files["texgyre"]))
 
     def test_a_family_missing_from_the_table_is_reported(self):
         packs = fp.load_json("fonts/packs.json")

@@ -110,8 +110,8 @@ tool photo-etch etched.png sphere.jpg
 # The font catalog is not part of an install (issue #599): a face from a
 # font pack stands in as the closest built-in face (issue #728), with a
 # stderr note naming the pack and the install command, and the run
-# succeeds. Palatino -> Times, Symbol/ZapfDingbats -> Helvetica.
-for triple in Symbol:extras:Helvetica ZapfDingbats:extras:Helvetica Palatino-Italic:texgyre:Times-Italic ZapfChancery:texgyre:Times-Italic; do
+# succeeds. Bangers -> Helvetica, Courier Prime -> Courier.
+for triple in Bangers:extras:Helvetica CourierPrime:extras:Courier; do
   IFS=: read -r face pack stand_in <<<"$triple"
   # MSYS2_ARG_CONV_EXCL: Git Bash on Windows would otherwise rewrite an
   # argument starting with / into a Windows path (/Symbol -> C:/.../Symbol).
@@ -123,5 +123,15 @@ for triple in Symbol:extras:Helvetica ZapfDingbats:extras:Helvetica Palatino-Ita
   grep -q "pscat fonts install --pack $pack" <<<"$ERR" || { echo "$ERR" >&2; fail "/$face: note lacks the install command"; }
 done
 echo "    pack faces without packs: built-in stand-in and a note naming the pack"
+# The standard 35 are compiled in (issue #757): their own faces, no note.
+for pair in Palatino-Italic:texgyrepagella-italic ZapfChancery:texgyrechorus-mediumitalic Symbol:StandardSymbolsPS ZapfDingbats:D050000L; do
+  IFS=: read -r face font_name <<<"$pair"
+  ERR=$(MSYS2_ARG_CONV_EXCL='*' "$PSCAT" -e "/$face findfont /FontName get ==" 2>&1 >"$SCRATCH/stdout.txt") ||
+    { echo "$ERR" >&2; fail "/$face findfont failed"; }
+  [[ $(tr -d '\r' <"$SCRATCH/stdout.txt") == "/$font_name" ]] ||
+    fail "/$face is not the compiled-in $font_name: $(cat "$SCRATCH/stdout.txt")"
+  [[ -z "$ERR" ]] || { echo "$ERR" >&2; fail "/$face printed a note"; }
+done
+echo "    the standard 35: compiled in, no packs needed"
 
 echo "==> clean install OK"

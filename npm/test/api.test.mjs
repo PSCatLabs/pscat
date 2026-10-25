@@ -96,8 +96,13 @@ test('the libraries in lib/ are embedded', async () => {
   assert.equal(img.output, 'ok');
 });
 
-test('the Liberation base fonts are built in; other faces come from addFont', async () => {
+test('the standard 35 are built in; other faces come from addFont', async () => {
   const r = await createRenderer();
+  const std = '/Palatino-Italic findfont /FontName get == /Symbol findfont /FontName get == /ZapfDingbats findfont /FontName get ==';
+  assert.equal(
+    r.render(std, { width: 10, height: 10 }).output,
+    '/texgyrepagella-italic\n/StandardSymbolsPS\n/D050000L\n',
+  );
   const name = '/Helvetica findfont /FontName get == /Garamond findfont /FontName get ==';
   assert.equal(r.render(name, { width: 10, height: 10 }).output, '/Helvetica\n/Helvetica\n');
   r.addFont('EBGaramond-Regular', await font('EBGaramond/EBGaramond-Regular.ttf'));

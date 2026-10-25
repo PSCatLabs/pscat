@@ -3,9 +3,13 @@
 pscat has three kinds of fonts, and they all work through the ordinary
 PostScript operators (`findfont`, `scalefont`, `setfont`, `show`).
 
-- **Standard fonts.** Helvetica, Times and Courier, backed by bundled,
-  metric-compatible Liberation faces. The other LaserWriter names come
-  through the catalog below, which an installed pscat gets as font packs.
+- **Standard fonts.** All of the LaserWriter 35, compiled into pscat
+  (native and wasm alike): Helvetica, Times and Courier from the
+  metric-compatible Liberation faces; Palatino, Bookman, New Century
+  Schoolbook, Avant Garde, Zapf Chancery and Helvetica-Narrow from TeX
+  Gyre; Symbol and ZapfDingbats from URW, with their PLRM encodings.
+  Everything else comes through the catalog below, which an installed
+  pscat gets as font packs.
 - **Type 3 fonts.** Glyphs that are programs. pscat's own display faces, its
   handwriting font and its typewriter font are all Type 3. Because a glyph is
   code, it can be different every time it is drawn (`examples/type3_ransom.ps`
@@ -287,19 +291,23 @@ is on the last page, and other spacings step by more).
 
 ## The font catalog
 
-`fonts/catalog/` — 67 libre outline faces loaded from disk at
-`findfont` time (never compiled in; the binary and wasm stay lean). In
-a checkout they are simply there; an installed pscat gets them as
-[font packs](#font-packs-the-catalog-outside-a-checkout).
-With it, **every name in the classic LaserWriter 35 resolves to a
-metric-compatible libre face**: the bundled Liberation faces cover
-Helvetica/Times/Courier, TeX Gyre covers Palatino, Bookman, New
-Century Schoolbook, Avant Garde, Zapf Chancery, and
-Helvetica-Narrow, and the URW symbol faces give `/Symbol` and
-`/ZapfDingbats` real glyphs with their proper PLRM encodings. On
-top of that: 38 curated display and text families — Garamond to
-Playfair, Poppins to Oswald, Great Vibes to Permanent Marker,
-fraktur, western, horror, arcade, terminal, sci-fi, stencil, comic.
+**Every name in the classic LaserWriter 35 resolves to a
+metric-compatible libre face with nothing installed** (issue #757): the
+Liberation faces cover Helvetica/Times/Courier, TeX Gyre covers
+Palatino, Bookman, New Century Schoolbook, Avant Garde, Zapf Chancery
+and Helvetica-Narrow, and the URW symbol faces give `/Symbol` and
+`/ZapfDingbats` real glyphs with their proper PLRM encodings. All 35
+are compiled in; the TeX Gyre and URW files live in `fonts/base35/`,
+with their licences.
+
+`fonts/catalog/` adds 44 libre outline faces loaded from disk at
+`findfont` time (never compiled in). In a checkout they are simply
+there; an installed pscat gets them as
+[font packs](#font-packs-the-catalog-outside-a-checkout): 38 curated
+display and text families — Garamond to Playfair, Poppins to Oswald,
+Great Vibes to Permanent Marker, fraktur, western, horror, arcade,
+terminal, sci-fi, stencil, comic — and the Korean, Japanese and Thai
+faces.
 
 ```sh
 cargo run -- --fonts                 # list every reachable face and alias
@@ -308,7 +316,7 @@ cargo run -- --png sheets.png examples/font_catalog.ps   # the specimen sheets
 ```
 
 [`fonts/catalog/README.md`](../../fonts/catalog/README.md) is the manifest (families, genres,
-licenses — all OFL, Apache 2.0 or GUST, with the URW symbol faces taken under OFL;
+licenses — all OFL or Apache 2.0;
 per-family license files ride alongside the fonts). Drop your own
 `.ttf`/`.otf` into any subdirectory and `/<FileStem> findfont`
 finds it. The [font gallery](https://pscatlabs.github.io/pscat/fonts.html)
@@ -318,24 +326,31 @@ card at a time.
 
 ### Font packs: the catalog outside a checkout
 
-An installed pscat (a release bundle, `cargo install`) carries only the
-twelve Liberation faces. The catalog comes as three separately
-versioned **font packs**, released on their own `fonts-YYYY.MM` train:
+An installed pscat (a release bundle, `cargo install`, the npm package)
+carries the standard 35 and nothing else. The catalog comes as
+separately versioned **font packs**, released on their own
+`fonts-YYYY.MM` train:
 
 | Pack | What | Size |
 |---|---|---|
-| `extras` | the display, text and mood faces, Courier Prime, Special Elite, and the URW Symbol/ZapfDingbats faces (OFL, Apache-2.0) | ~3 MB |
-| `texgyre` | the TeX Gyre faces behind Palatino, Bookman, New Century Schoolbook, Avant Garde, Zapf Chancery and Helvetica-Narrow (GUST) | ~1 MB |
+| `extras` | the display, text and mood faces, Courier Prime and Special Elite (OFL, Apache-2.0) | ~3 MB |
 | `cjk-thai` | Noto Sans KR/JP/Thai and Nanum Brush Script (OFL) | ~10 MB |
+
+The `texgyre` pack is retired: its faces are compiled in.
+`pscat fonts install --pack texgyre` says so and exits 0 without
+fetching anything, and a plain `pscat fonts install` from an older index
+that still lists it (the `fonts-2026.10` index, pinned by pscat 0.6.x
+and 0.7.0) skips it. That index's `extras` pack still carries the URW
+symbol faces; installed, they are the same bytes as the built-in copies.
 
 ```sh
 pscat fonts install                    # the packs this pscat release pins
-pscat fonts install --pack texgyre     # just one
+pscat fonts install --pack extras      # just one
 pscat fonts install --version fonts-2026.11   # another release (user-selected)
 pscat fonts install --version latest   # the newest release (user-selected)
 pscat fonts install --from font-index.json    # offline, from downloaded assets
 pscat fonts list                       # what is installed, re-verified
-pscat fonts remove texgyre             # or no name: remove all
+pscat fonts remove extras              # or no name: remove all
 ```
 
 Packs go into `$PSCAT_HOME/fonts/packs/`, otherwise the per-user data
@@ -352,37 +367,34 @@ refuses an index that does not match the pin, a pack that does not match
 the index, and a file that does not match the manifest, and installs
 nothing at all unless everything checks out.
 
-**A missing pack face stands in (issue #728).** `/Palatino-Italic findfont`
-with the `texgyre` pack not installed does not fail: it gets the closest
-built-in face and prints one line on stderr naming the pack and the
-`pscat fonts install --pack texgyre` command; the run exits 0. The choice
+**A missing pack face stands in (issue #728).** `/Bangers findfont`
+with the `extras` pack not installed does not fail: it gets a built-in
+face and prints one line on stderr naming the pack and the
+`pscat fonts install --pack extras` command; the run exits 0. The choice
 keeps weight and slant, as Ghostscript's font substitution does:
 
 | Not installed | Stands in as |
 |---|---|
-| Palatino, Bookman, NewCenturySchlbk (`texgyre`) | Times (Roman, Bold, Italic, BoldItalic) |
-| AvantGarde, Helvetica-Narrow (`texgyre`) | Helvetica (Bold, Oblique, BoldOblique) |
-| ZapfChancery (`texgyre`) | Times-Italic |
 | Courier Prime, Special Elite, JetBrains Mono (`extras`) | Courier |
-| Symbol, ZapfDingbats (`extras`) | Helvetica |
 | every other `extras` face, the `cjk-thai` faces | Helvetica |
 
-Symbol and ZapfDingbats get Helvetica because no built-in face has their
-glyphs: the same character codes draw plain letters, not Greek letters or
-dingbats, and the note says so. The Korean, Japanese and Thai faces become
-a face that cannot draw those scripts. With the pack installed (or a
-`fonts/catalog/` override present) the real face is used and nothing
-changes. The note prints once per name per run. The libraries that verify
-their `/Font` (`lettering`, `headline`, `jersey`) still raise their own
-`*-font-not-found` for a stand-in, since an asked-for face that is not
-there should not ship in another type. Names no pack has (`/Arial`) get the
-Helvetica substitute with no note, as in Ghostscript.
+The Korean, Japanese and Thai faces become a face that cannot draw those
+scripts. With the pack installed (or a `fonts/catalog/` override
+present) the real face is used and nothing changes. The note prints once
+per name per run. The libraries that verify their `/Font` (`lettering`,
+`headline`, `jersey`) still raise their own `*-font-not-found` for a
+stand-in, since an asked-for face that is not there should not ship in
+another type. Names no pack has (`/Arial`) get the Helvetica substitute
+with no note, as in Ghostscript. The wasm build has no packs and no
+stderr, so there a pack face becomes its stand-in silently.
 
 **Which fonts win.** A plain `fonts/catalog/` directory (in
 `$PSCAT_HOME`, the per-user data directory, beside the binary, in a
 checkout, or in the current directory) is an explicit override and wins
 over installed packs; among packs, `$PSCAT_HOME` wins over the per-user
-data directory. `pscat --fonts` ends with `#` lines saying what is in
+data directory. The compiled-in TeX Gyre and URW faces come after both,
+so a file with the same name on disk (`texgyrepagella-regular.otf`) is
+used instead; the twelve Liberation faces always win. `pscat --fonts` ends with `#` lines saying what is in
 use, and `pscat --capabilities` has the same in `font_packs`.
 
 **The reproducibility contract.** The same pscat version, with the

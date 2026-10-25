@@ -24,9 +24,11 @@ NPM="$ROOT/npm"
 
 # Size budget (bytes). Measured for 0.6.0: tarball ~3.4 MB, unpacked ~7.9 MB,
 # almost all of it the embedded Liberation fonts (4.2 MB) and lib/ (2.6 MB).
+# #757 compiled in the rest of the standard 35 (TeX Gyre and URW, 3.4 MB of
+# CFF fonts): tarball ~5.3 MB, unpacked ~11.4 MB.
 # A breach means something new got embedded; decide on purpose, then raise it.
-MAX_TARBALL=$((4 * 1024 * 1024))
-MAX_UNPACKED=$((9 * 1024 * 1024))
+MAX_TARBALL=$((6 * 1024 * 1024))
+MAX_UNPACKED=$((13 * 1024 * 1024))
 
 NOTICES=""
 NO_NOTICES=0
@@ -58,6 +60,14 @@ cp "$ROOT/web/pscat.js" "$NPM/core.js"
 mkdir -p "$NPM/fonts" "$NPM/licenses"
 cp "$ROOT/LICENSE-MIT" "$ROOT/LICENSE-APACHE" "$ROOT/LICENSE-OFL" "$ROOT/THIRD_PARTY_NOTICES.md" "$NPM/"
 cp "$ROOT/fonts/LICENSE" "$NPM/fonts/LICENSE"
+# The compiled-in TeX Gyre and URW faces' licence files (#757), the same set
+# scripts/package_release.sh bundles.
+rm -rf "$NPM/fonts/base35"
+for f in "$ROOT"/fonts/base35/*/GUST-FONT-LICENSE.txt "$ROOT"/fonts/base35/URW-symbols/{LICENSE.md,LICENSE.OFL,PROVENANCE.md}; do
+  rel=${f#"$ROOT/"}
+  mkdir -p "$NPM/$(dirname "$rel")"
+  cp "$f" "$NPM/$rel"
+done
 cp "$ROOT/licenses/assets.json" "$NPM/licenses/assets.json"
 
 if [[ -n "$NOTICES" ]]; then
@@ -75,15 +85,20 @@ fi
 mkdir -p "$PACK_DIR"
 PACK_DIR=$(cd "$PACK_DIR" && pwd)
 PACK_JSON=$(cd "$NPM" && npm pack --json --pack-destination "$PACK_DIR")
-python3 - "$PACK_JSON" "$PACK_DIR" "$MAX_TARBALL" "$MAX_UNPACKED" <<'EOF'
-import json, os, sys
+python3 - "$PACK_JSON" "$PACK_DIR" "$MAX_TARBALL" "$MAX_UNPACKED" "$ROOT" <<'EOF'
+import glob, json, os, sys
 info = json.loads(sys.argv[1])[0]
 pack_dir, max_tar, max_unpacked = sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
+root = sys.argv[5]
+base35 = {
+    os.path.relpath(p, root)
+    for p in glob.glob(os.path.join(root, "fonts/base35/*/GUST-FONT-LICENSE.txt"))
+} | {f"fonts/base35/URW-symbols/{n}" for n in ("LICENSE.md", "LICENSE.OFL", "PROVENANCE.md")}
 expected = {
     "package.json", "README.md", "index.js", "node.js", "renderer.js", "core.js", "index.d.ts",
     "pscat.wasm", "LICENSE-MIT", "LICENSE-APACHE", "LICENSE-OFL", "fonts/LICENSE",
     "THIRD_PARTY_NOTICES.md", "THIRD_PARTY_LICENSES.html", "licenses/assets.json",
-}
+} | base35
 got = {f["path"] for f in info["files"]}
 problems = []
 if got - expected:

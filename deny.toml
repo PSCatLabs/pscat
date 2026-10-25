@@ -23,12 +23,13 @@ allow = [
 ]
 confidence-threshold = 0.9
 
-# Our own package is "(MIT OR Apache-2.0) AND OFL-1.1": the OFL term covers the
-# font data compiled in (THIRD_PARTY_NOTICES.md). cargo-deny checks workspace
-# members too, so the crate's own expression needs this exception.
+# Our own package is "(MIT OR Apache-2.0) AND OFL-1.1 AND LPPL-1.3c": the OFL
+# and LPPL (GUST Font License, issue #757) terms cover the font data compiled in
+# (THIRD_PARTY_NOTICES.md). cargo-deny checks workspace members too, so the
+# crate's own expression needs this exception.
 [[licenses.exceptions]]
 name = "pscat"
-allow = ["MIT", "Apache-2.0", "OFL-1.1"]
+allow = ["MIT", "Apache-2.0", "OFL-1.1", "LPPL-1.3c"]
 
 [advisories]
 # Fail on a known vulnerability; unmaintained/yanked crates warn (they are

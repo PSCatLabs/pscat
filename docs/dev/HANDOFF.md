@@ -1715,13 +1715,23 @@ renders eight examples in both and compares block-downsampled output).
   `web/pscat.js` ships in the package too: keep `npm/renderer.js` and
   `npm/index.d.ts` in step, and run the `npm` workflow's steps
   (`build_npm.sh --pack`, `npm test` in `npm/`, `cargo test --test wasm`,
-  `test_npm_tarball.sh`). Fonts beyond the Liberation core reach wasm only
-  through `ps_add_font` (`font::register_font_bytes`), keyed by font pack
-  file stem like the disk catalog. `npm/package.json` moves in lockstep with
+  `test_npm_tarball.sh`). The standard 35 are compiled in (#757: the
+  Liberation core plus `fonts/base35/`, `font::EMBEDDED`); fonts beyond
+  them reach wasm only through `ps_add_font` (`font::register_font_bytes`),
+  keyed by font pack file stem like the disk catalog. `npm/package.json` moves in lockstep with
   `Cargo.toml` (`release_stages.py bump-manifests`; a test fails if they
   differ), and the release publishes the tarball `verify` packed
   (docs/dev/RELEASING.md). Something new embedded in the wasm shows up as
   a size-budget failure in `build_npm.sh`.
+- **The standard 35 are all compiled in (#757), but not all in
+  `BUILTINS`.** The twelve Liberation faces are builtins (fixed FIDs,
+  StandardEncoding, `FontName` = the PostScript name). The other 23
+  (`fonts/base35/`, `font::EMBEDDED`) register as catalog faces on first
+  use, after the disk lookup, so they keep the encodings and `FontName`
+  the `texgyre`/`extras` packs gave them; routing them through
+  `BUILTINS` would break Symbol's encoding and every render that names
+  them. `fonts/base35/` is in the crate's `include`; `fonts/catalog/` must
+  never be (`scripts/check_licences.py package`).
 - **The Learn page's examples are files** (#252): `site/learn/NN-name.ps`,
   plus `NN-name.out` with exactly what it prints. `site/learn.html` names
   them with `<!--@example NAME "alt text"-->` markers that

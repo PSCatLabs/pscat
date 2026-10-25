@@ -1,9 +1,9 @@
 # fonts/catalog — the runtime font catalog
 
 A wide shelf of libre faces that `findfont` loads **from disk on first
-use** — nothing here is compiled into the binary (the twelve Liberation
-faces in `fonts/` stay the only bundled ones, so the binary and the
-wasm build stay lean). Drop a `.ttf`/`.otf`/`.ttc` into any subdirectory
+use** — nothing here is compiled into the binary. The standard 35 are:
+the twelve Liberation faces in `fonts/` and the TeX Gyre and URW faces
+in `fonts/base35/` (issue #757). Drop a `.ttf`/`.otf`/`.ttc` into any subdirectory
 here and `/<FileStem> findfont` finds it; `/<Family> findfont` falls
 back to `<Family>-Regular`. `pscat --fonts` lists everything reachable.
 (`.ttc` collections always load face index 0 — verified against a
@@ -14,36 +14,14 @@ Font lookup checks every `fonts/catalog/` directory the resolver
 finds, then the installed font packs (`src/fontpacks/mod.rs` has the
 order; `docs/guides/getting-started.md` the user-facing version). This
 directory is the source of the packs: `fonts/packs.json` assigns each
-family to a pack (`extras`, `texgyre`, `cjk-thai`), and a new family
+family to a pack (`extras`, `cjk-thai`), and a new family
 must be added there too, or `cargo test` fails. Installed pscat builds
 get these faces with `pscat fonts install`; see
 `docs/guides/fonts.md`, "Font packs". Every family directory carries its
 own license text alongside its font files. Licenses here are the SIL
-Open Font License 1.1 (OFL), Apache 2.0 and the GUST Font License
-(GFL). The URW symbol faces are taken under OFL from URW++'s
-AGPL/LPPL/OFL triple licence (`URW-symbols/PROVENANCE.md`). All are freely
+Open Font License 1.1 (OFL) and Apache 2.0. All are freely
 redistributable; none restrict rendering or embedding in documents.
 `THIRD_PARTY_NOTICES.md` at the repo root has the full inventory.
-
-## The rest of the PostScript standard 35
-
-With these, every one of the classic LaserWriter 35 names resolves to
-a metric-compatible libre face (the alias table lives in
-`src/font.rs`):
-
-| Directory | Standard names covered | Face | License |
-|---|---|---|---|
-| `TeXGyre-pagella` | Palatino-Roman/-Bold/-Italic/-BoldItalic | TeX Gyre Pagella (GUST) | GFL |
-| `TeXGyre-bonum` | Bookman-Light/-Demi/-LightItalic/-DemiItalic | TeX Gyre Bonum (GUST) | GFL |
-| `TeXGyre-schola` | NewCenturySchlbk-Roman/-Bold/-Italic/-BoldItalic | TeX Gyre Schola (GUST) | GFL |
-| `TeXGyre-adventor` | AvantGarde-Book/-Demi/-BookOblique/-DemiOblique | TeX Gyre Adventor (GUST) | GFL |
-| `TeXGyre-chorus` | ZapfChancery-MediumItalic | TeX Gyre Chorus (GUST) | GFL |
-| `TeXGyre-heroscn` | Helvetica-Narrow (+Bold/Oblique/BoldOblique) | TeX Gyre Heros Cn (GUST) | GFL |
-| `URW-symbols` | Symbol, ZapfDingbats | URW Standard Symbols PS, D050000L | OFL (chosen from AGPL/LPPL/OFL) |
-
-The URW faces get their own encodings (SymbolEncoding /
-DingbatsEncoding, `src/encodings.rs`; provenance in
-`THIRD_PARTY_NOTICES.md`).
 
 ## Display, text, and mood faces (one style each)
 
@@ -93,9 +71,7 @@ family's `OFL.txt` or Apache `LICENSE.txt`.
 | MedievalSharp | carved medieval lettering | OFL |
 | PermanentMarker | felt-tip marker | Apache 2.0 |
 
-Sources: TeX Gyre from CTAN (`fonts/tex-gyre`), URW faces from
-`github.com/ArtifexSoftware/urw-base35-fonts`, everything else from
-`github.com/google/fonts` (`ofl/` and `apache/` trees).
+Sources: `github.com/google/fonts` (`ofl/` and `apache/` trees).
 
 ## Korean, Japanese, and Thai (Unicode-mode)
 

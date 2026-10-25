@@ -4,9 +4,11 @@ version = "0.6.3"
 edition = "2024"
 description = "A PostScript interpreter for watching programs draw, live"
 # The code is MIT OR Apache-2.0. The OFL-1.1 term covers only the font data
-# compiled in: the Liberation faces (src/font.rs) and lib/typewriter_outlines.ps
-# (derived from Courier Prime). See THIRD_PARTY_NOTICES.md (issue #563).
-license = "(MIT OR Apache-2.0) AND OFL-1.1"
+# compiled in: the Liberation faces (src/font.rs), the URW Symbol/ZapfDingbats
+# faces and lib/typewriter_outlines.ps (derived from Courier Prime). LPPL-1.3c
+# (the GUST Font License) covers the embedded TeX Gyre faces (issue #757).
+# See THIRD_PARTY_NOTICES.md (issue #563).
+license = "(MIT OR Apache-2.0) AND OFL-1.1 AND LPPL-1.3c"
 authors = ["Jerome Banks"]
 repository = "https://github.com/PSCatLabs/pscat"
 homepage = "https://pscatlabs.github.io/pscat/"
@@ -29,6 +31,11 @@ include = [
     "/src/**",
     "/lib/**/*.ps",
     "/fonts/Liberation*.ttf",
+    "/fonts/base35/*/*.otf",
+    "/fonts/base35/*/GUST-FONT-LICENSE.txt",
+    "/fonts/base35/URW-symbols/LICENSE.md",
+    "/fonts/base35/URW-symbols/LICENSE.OFL",
+    "/fonts/base35/URW-symbols/PROVENANCE.md",
     "/fonts/LICENSE",
     "/fonts/README.md",
     "/fonts/packs.json",
