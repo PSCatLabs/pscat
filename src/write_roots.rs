@@ -105,6 +105,12 @@ impl WriteRoots {
         if name.contains('\0') {
             return Err(PsError::InvalidFileAccess);
         }
+        // `Path` drops a trailing `/` or `/.`, which would turn `(d/) (w)
+        // file` into the file `d` (POSIX refuses it), or make the existence
+        // test below look at a different entry than the OS would open.
+        if name == "." || name.ends_with('/') || name.ends_with("/.") {
+            return Err(PsError::InvalidFileAccess);
+        }
         let p = Path::new(name);
         if p.components().any(|c| matches!(c, Component::ParentDir)) {
             return Err(PsError::InvalidFileAccess);
@@ -140,11 +146,16 @@ impl WriteRoots {
     /// This is the one place a writable path is decided; every operator
     /// that writes to disk goes through it or [`Self::open`].
     pub fn resolve_open(&self, name: &str) -> Result<PathBuf, PsError> {
+        self.resolve(name).map(|(path, _)| path)
+    }
+
+    /// [`Self::resolve_open`], plus whether the target already existed.
+    fn resolve(&self, name: &str) -> Result<(PathBuf, bool), PsError> {
         let (abs, file) = self.absolute(name)?;
         match std::fs::symlink_metadata(&abs) {
-            Ok(_) => self.check_existing(&abs),
+            Ok(_) => Ok((self.check_existing(&abs)?, true)),
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
-                Ok(self.checked_parent(&abs)?.join(file))
+                Ok((self.checked_parent(&abs)?.join(file), false))
             }
             Err(_) => Err(PsError::InvalidFileAccess),
         }
@@ -158,13 +169,15 @@ impl WriteRoots {
             return Err(PsError::InvalidFileAccess);
         }
         let meta = std::fs::metadata(&canon).map_err(|_| PsError::InvalidFileAccess)?;
-        if meta.is_dir() {
+        // Regular files only: a directory can't be opened for writing, and
+        // a FIFO or device would block or reach outside the disk.
+        if !meta.is_file() {
             return Err(PsError::InvalidFileAccess);
         }
         #[cfg(unix)]
         {
             use std::os::unix::fs::MetadataExt;
-            if meta.is_file() && meta.nlink() > 1 {
+            if meta.nlink() > 1 {
                 return Err(PsError::InvalidFileAccess);
             }
         }
@@ -172,22 +185,25 @@ impl WriteRoots {
     }
 
     /// Open `name` for writing, checked by [`Self::resolve_open`]. A new
-    /// file is created with `create_new`, which refuses to follow a symlink
-    /// that appeared since the check; losing that race to a regular file
-    /// re-checks it as an existing one.
+    /// file is created with `create_new` (`O_EXCL`), which never follows a
+    /// final-component symlink; losing that race to a regular file
+    /// re-checks it as an existing one. An existing file is re-checked
+    /// right before it is opened, and the open never creates anything, so
+    /// a symlink swapped in by another process is the module doc's only
+    /// remaining window.
     pub fn open(&self, name: &str, mode: WriteMode) -> Result<std::fs::File, PsError> {
-        let path = self.resolve_open(name)?;
+        let (path, existed) = self.resolve(name)?;
         let mut opts = std::fs::OpenOptions::new();
         match mode {
             WriteMode::Truncate => opts.write(true),
             WriteMode::Append => opts.append(true),
         };
-        let existing = std::fs::symlink_metadata(&path).is_ok();
-        let opened = if existing {
+        let opened = if existed {
+            let path = self.check_existing(&path)?;
             if mode == WriteMode::Truncate {
                 opts.truncate(true);
             }
-            opts.open(&path)
+            opts.open(path)
         } else {
             let mut fresh = opts.clone();
             fresh.create_new(true);
@@ -238,7 +254,9 @@ impl WriteRoots {
     pub fn rename(&self, old: &str, new: &str) -> Result<(), PsError> {
         let from = self.resolve_entry(old, true)?;
         let to = self.resolve_entry(new, false)?;
-        if std::fs::symlink_metadata(&to).is_ok_and(|m| m.is_dir()) {
+        // Files, as the PLRM says, and as `deletefile` treats them.
+        let is_dir = |p: &Path| std::fs::symlink_metadata(p).is_ok_and(|m| m.is_dir());
+        if is_dir(&from) || is_dir(&to) {
             return Err(PsError::InvalidFileAccess);
         }
         std::fs::rename(&from, &to).map_err(io_error)
@@ -542,6 +560,46 @@ mod tests {
         w.open(&s(&t.root.join("b.txt")), WriteMode::Truncate)
             .unwrap();
         assert!(t.root.join("a.txt").exists() && t.root.join("b.txt").exists());
+    }
+
+    #[test]
+    fn trailing_slash_or_dot_is_refused() {
+        let t = tree("trailing");
+        symlink(t.outside.join("new"), t.root.join("dangle")).unwrap();
+        let w = roots(&t);
+        for name in ["d/", "dotnew/.", "dangle/", "dangle/."] {
+            let name = format!("{}/{name}", t.root.display());
+            assert_eq!(
+                w.open(&name, WriteMode::Truncate).err(),
+                Some(PsError::InvalidFileAccess),
+                "{name}"
+            );
+        }
+        assert!(!t.root.join("d").exists() && !t.root.join("dotnew").exists());
+        assert!(!t.outside.join("new").exists());
+    }
+
+    #[test]
+    fn fifo_and_directory_targets_are_refused() {
+        let t = tree("fifo");
+        let fifo = t.root.join("fifo");
+        let made = std::process::Command::new("mkfifo").arg(&fifo).status();
+        let w = roots(&t);
+        if made.is_ok_and(|s| s.success()) {
+            assert_eq!(
+                w.open(&s(&fifo), WriteMode::Truncate).err(),
+                Some(PsError::InvalidFileAccess)
+            );
+        }
+        assert_eq!(
+            w.open(&s(&t.root.join("sub")), WriteMode::Append).err(),
+            Some(PsError::InvalidFileAccess)
+        );
+        assert_eq!(
+            w.rename(&s(&t.root.join("sub")), &s(&t.root.join("sub2"))),
+            Err(PsError::InvalidFileAccess)
+        );
+        assert!(t.root.join("sub").is_dir());
     }
 
     #[test]

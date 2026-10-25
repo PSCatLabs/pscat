@@ -25,6 +25,10 @@ policy for the agent-facing layer. So the interpreter gained write roots, empty 
 - An existing target is canonicalised in full (following symlinks). A new file's parent is
   canonicalised. The result must be strictly inside a canonical root; `Path::starts_with`
   compares whole components, so `/out` doesn't contain `/outside`.
+- A name ending in `/` or `/.` is refused. `Path` drops those endings, which would turn `(d/) (w) file`
+  into a file named `d`.
+- An existing target must be a regular file, so FIFOs, devices and directories are refused. An
+  existing file is re-checked just before it is opened, and that open never creates anything.
 - A dangling symlink is refused. Opening it would create its target, wherever that is.
 - On Unix, an existing regular file with `nlink > 1` is refused for writing, because another of
   its names may be outside. This goes beyond the issue's spec, and applies to opening only.
@@ -33,7 +37,7 @@ policy for the agent-facing layer. So the interpreter gained write roots, empty 
   re-checked as an existing one.
 - `renamefile` and `deletefile` act on the directory entry. Only the parent is canonicalised and
   the last component is taken as given, so deleting an in-root symlink removes the link, never
-  its target. Directories are refused as delete targets and as rename destinations.
+  its target. Directories are refused at either end of a rename and as a delete target.
 - Names that aren't UTF-8 are `invalidfileaccess`, so the check never runs on a lossily
   converted name.
 
