@@ -23,8 +23,8 @@
 //! in the WASM build.
 //!
 //! **Seed.** `noiseseed` fills a private 256-entry permutation by a
-//! Fisher-Yates shuffle of 0..255 (i from 255 down to 1, swap P[i] with
-//! P[j]) driven by its own LCG, `s = (s * 1103515245 + 12345) & 2^31-1`
+//! Fisher-Yates shuffle of 0..255 (`i` from 255 down to 1, swap `P[i]`
+//! with `P[j]`) driven by its own LCG, `s = (s * 1103515245 + 12345) & 2^31-1`
 //! starting from `s = seed & 2^31-1`, with `j = (s >> 16) mod (i + 1)`
 //! after each step. It never reads or advances `rand`'s state, and
 //! `--sweep-seed` does not reach it. A fresh interpreter behaves as if
@@ -52,7 +52,7 @@
 //!   same lattice points), `sum = sum + amp·n`, then `amp = amp·gain`,
 //!   `freq = freq·lac`. Not normalized. Ridged uses `n = 1 − |g|`,
 //!   `n = n·n` per octave. `oct` is an integer in 0..=32.
-//! - gnoise2d's derivatives: see [`gnoise2_derivs`].
+//! - gnoise2d's derivatives: see `gnoise2_derivs` below.
 //!
 //! `.permnoise2` is artkit's `noise2` kept bit-identical, integer
 //! operands and all: it does its arithmetic with PostScript's own
