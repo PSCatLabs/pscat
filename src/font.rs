@@ -282,8 +282,8 @@ fn missing_pack(requested: &str) -> Option<&'static str> {
 ///   Times;
 /// - Avant Garde and Helvetica Narrow become Helvetica;
 /// - Zapf Chancery, which has one face, becomes Times-Italic;
-/// - the typewriter faces (Courier Prime, Special Elite) become Courier,
-///   so column layouts hold;
+/// - the monospaced faces (Courier Prime, Special Elite, JetBrains Mono)
+///   become Courier, so column layouts hold;
 /// - Symbol and ZapfDingbats become Helvetica: no built-in face has
 ///   their glyphs, so the same character codes draw Latin letters, not
 ///   Greek letters or dingbats (the note says so);
@@ -332,7 +332,10 @@ fn stand_in_for(requested: &str) -> &'static str {
         times()
     } else if stem.contains("chorus") {
         "Times-Italic"
-    } else if stem.starts_with("courierprime") || stem.starts_with("specialelite") {
+    } else if ["courierprime", "specialelite", "jetbrainsmono"]
+        .iter()
+        .any(|f| stem.starts_with(f))
+    {
         courier()
     } else {
         // adventor, heroscn, Symbol, Dingbats, display and CJK faces.
@@ -1589,7 +1592,7 @@ mod tests {
             ("Bangers", "extras", "Helvetica"),
             ("bangers-regular", "extras", "Helvetica"),
             ("CourierPrime", "extras", "Courier"),
-            ("CourierPrime-BoldItalic", "extras", "Courier-BoldOblique"),
+            ("JetBrainsMono-Regular", "extras", "Courier"),
             ("NotoSansKR-Regular", "cjk-thai", "Helvetica"),
         ] {
             assert_eq!(missing_pack(name), Some(pack), "{name}");

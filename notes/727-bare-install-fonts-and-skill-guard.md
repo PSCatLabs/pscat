@@ -10,8 +10,8 @@ answers the closest built-in face and prints one stderr line naming the pack and
 `pscat fonts install --pack <pack>`; the run exits 0. Standard followed: Ghostscript
 substitutes through its Fontmap and warns. Table (`font::stand_in_for`), weight and slant
 kept: Palatino/Bookman/NewCenturySchlbk to Times; AvantGarde and Helvetica-Narrow to
-Helvetica; ZapfChancery to Times-Italic (it has one face); Courier Prime and Special Elite
-to Courier (a proportional stand-in breaks column layouts); every other `extras` face and
+Helvetica; ZapfChancery to Times-Italic (it has one face); Courier Prime, Special Elite and JetBrains
+Mono to Courier (a proportional stand-in breaks column layouts); every other `extras` face and
 the `cjk-thai` faces to Helvetica, as an unknown name already is. Symbol and ZapfDingbats
 also go to Helvetica, the only choice with no built-in that has the glyphs: the same codes
 draw Latin letters. #599's comment gave exactly that as the reason to raise instead; the

@@ -363,7 +363,7 @@ keeps weight and slant, as Ghostscript's font substitution does:
 | Palatino, Bookman, NewCenturySchlbk (`texgyre`) | Times (Roman, Bold, Italic, BoldItalic) |
 | AvantGarde, Helvetica-Narrow (`texgyre`) | Helvetica (Bold, Oblique, BoldOblique) |
 | ZapfChancery (`texgyre`) | Times-Italic |
-| Courier Prime, Special Elite (`extras`) | Courier (Bold, Oblique, BoldOblique) |
+| Courier Prime, Special Elite, JetBrains Mono (`extras`) | Courier |
 | Symbol, ZapfDingbats (`extras`) | Helvetica |
 | every other `extras` face, the `cjk-thai` faces | Helvetica |
 

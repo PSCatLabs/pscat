@@ -226,7 +226,8 @@ render. Two cases:
   back to the closest built-in face, keeping weight and slant: Palatino,
   Bookman and NewCenturySchlbk become Times; AvantGarde and
   Helvetica-Narrow become Helvetica; ZapfChancery becomes Times-Italic;
-  Courier Prime becomes Courier. Symbol and ZapfDingbats become Helvetica,
+  the monospaced extras (Courier Prime, Special Elite, JetBrains Mono)
+  become Courier. Symbol and ZapfDingbats become Helvetica,
   so their character codes draw plain letters, not Greek letters or
   dingbats. The other `extras` faces and the Korean/Japanese/Thai faces
   become Helvetica too, which cannot draw those scripts. pscat prints one
