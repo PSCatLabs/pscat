@@ -60,10 +60,15 @@ THIRD_PARTY_NOTICES.md has a "Standard 35 faces (compiled in)" section.
 | | before | after | delta |
 |---|---|---|---|
 | `cargo package --list` | 132 files | 164 files | +32 |
-| `.crate` | 3,364,084 B | 5,167,056 B | +1,802,972 B (+1.72 MiB) |
-| release `pscat` | 10,602,080 B | 14,058,704 B | +3,456,624 B (+3.30 MiB) |
-| `pscat.wasm` | 7,914,083 B | 11,304,785 B | +3,390,702 B |
-| npm tarball | 3,528,765 B | see PR | |
+| `.crate` (verified build) | 3,364,084 B | 5,168,916 B | +1,804,832 B (+1.72 MiB) |
+| release `pscat` | 10,602,080 B | 14,058,768 B | +3,456,688 B (+3.30 MiB) |
+| release `pscat-mcp` | 9,080,288 B | 12,519,552 B | +3,439,264 B (+3.28 MiB) |
+| release archive (`.tar.gz`, both binaries) | 10,187,207 B | 13,821,468 B | +3,634,261 B |
+| `pscat.wasm` | 7,914,083 B | 11,304,816 B | +3,390,733 B |
+| npm tarball, packed | 3,528,765 B | 5,348,362 B | +1,819,597 B |
+| npm tarball, unpacked | 8,016,677 B | 11,429,126 B | +3,412,449 B |
+
+Each binary carries its own copy, so the archive grows by about twice the compressed fonts.
 
 The raw fonts are 3,410,892 B. gzip -9 takes them to 1.78 MB and zstd -19 to 1.18 MB. Storing
 them compressed would have saved about 2.2 MB of binary, at the cost of a decompressor on
