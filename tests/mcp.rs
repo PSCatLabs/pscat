@@ -1277,6 +1277,64 @@ fn the_cap_flags_reject_values_out_of_range() {
     }
 }
 
+/// A render that succeeds can still have something to say on stderr (a font
+/// falling back to a built-in face, #728, exits 0): it comes back as a
+/// `Warnings:` text item, once per distinct line, and not the child's own
+/// receipt. The line here is a caught error that the program reports with
+/// `handleerror`, a generic stderr line that needs no font pack.
+#[test]
+fn render_postscript_returns_stderr_warnings_on_success() {
+    let mut s = Server::start();
+    initialized(&mut s);
+    let source =
+        "3 { { 1 0 div } stopped { handleerror } if } repeat 100 100 50 50 rectfill showpage";
+    let result = s.tool(
+        "render_postscript",
+        json!({ "source": source, "width": 200, "height": 200 }),
+    );
+    assert_eq!(result["isError"], false, "{result}");
+    let warnings: Vec<_> = texts(&result)
+        .into_iter()
+        .filter(|t| t.starts_with("Warnings:"))
+        .collect();
+    assert_eq!(warnings.len(), 1, "{result}");
+    assert_eq!(
+        warnings[0].matches("undefinedresult").count(),
+        1,
+        "three identical lines shown once: {}",
+        warnings[0]
+    );
+    assert!(!warnings[0].contains("pscat: wrote"), "{}", warnings[0]);
+    assert!(
+        result["content"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["type"] == "image"),
+        "the image is still there"
+    );
+
+    // A quiet render has no Warnings item.
+    let result = s.tool(
+        "render_postscript",
+        json!({ "source": "0 0 50 50 rectfill showpage", "width": 100, "height": 100 }),
+    );
+    assert!(
+        texts(&result).iter().all(|t| !t.starts_with("Warnings:")),
+        "{result}"
+    );
+
+    // review_sheet: the same, from a cell that succeeds.
+    let args = json!({ "entries": [{ "source": source, "width": 100, "height": 100 }],
+                       "dpi": [72] });
+    let result = s.tool("review_sheet", args);
+    assert_eq!(result["isError"], false, "{result}");
+    assert!(
+        texts(&result).iter().any(|t| t.starts_with("Warnings:")),
+        "{result}"
+    );
+}
+
 #[test]
 fn version_flag_prints_the_crate_version_and_exits_without_serving() {
     // A closed stdin: were the flag ignored the server would see EOF and
