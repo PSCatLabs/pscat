@@ -218,6 +218,98 @@ fn handshake_and_tool_list() {
     }
 }
 
+/// Walk a schema, calling `f` on every object that is itself a schema node
+/// (the root, `properties` values, `items`, `anyOf` branches).
+fn schema_nodes<'a>(node: &'a Value, f: &mut dyn FnMut(&'a Value)) {
+    f(node);
+    if let Some(props) = node.get("properties").and_then(Value::as_object) {
+        props.values().for_each(|p| schema_nodes(p, f));
+    }
+    if let Some(items) = node.get("items") {
+        schema_nodes(items, f);
+    }
+    if let Some(branches) = node.get("anyOf").and_then(Value::as_array) {
+        branches.iter().for_each(|b| schema_nodes(b, f));
+    }
+}
+
+/// The shape of the input schemas clients have to accept (#712). Codex
+/// 0.164.0 and Claude Code 2.1.309 both took `chalkboard_math`'s `board`
+/// and `ghosting` unions as written; the MCP Inspector's `--strict` check
+/// warns on a `type` array, which some clients map onto a single-`type`
+/// dialect (Gemini's), so unions are `anyOf` branches that each carry one
+/// `type`. Pinned so a "tidy" does not bring back what a client may reject.
+#[test]
+fn tool_schemas_use_only_the_portable_union_shape() {
+    let mut s = Server::start();
+    initialized(&mut s);
+    let resp = s.call(json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }));
+    let tools = resp["result"]["tools"].as_array().expect("tools array");
+
+    for tool in tools {
+        schema_nodes(&tool["inputSchema"], &mut |n| {
+            let name = tool["name"].as_str().unwrap();
+            assert!(!n["type"].is_array(), "{name}: a `type` array in {n}");
+            for key in ["$ref", "$defs", "oneOf", "allOf", "not"] {
+                assert!(n.get(key).is_none(), "{name}: `{key}` in {n}");
+            }
+            if let Some(branches) = n.get("anyOf").and_then(Value::as_array) {
+                for b in branches {
+                    assert!(
+                        b["type"].is_string(),
+                        "{name}: anyOf branch without one type: {b}"
+                    );
+                }
+            }
+        });
+    }
+
+    let chalk = tools
+        .iter()
+        .find(|t| t["name"] == "chalkboard_math")
+        .expect("chalkboard_math is listed");
+    let props = &chalk["inputSchema"]["properties"];
+    assert_eq!(
+        props["board"]["anyOf"],
+        json!([
+            { "type": "boolean" },
+            { "type": "string", "enum": ["slate", "greenboard"] },
+            { "type": "array", "items": { "type": "number", "minimum": 0, "maximum": 1 }, "minItems": 3, "maxItems": 3 },
+            { "type": "object" }
+        ]),
+        "board: bool, name, [r, g, b] or an object"
+    );
+    assert_eq!(
+        props["ghosting"]["anyOf"],
+        json!([
+            { "type": "number", "minimum": 0, "maximum": 1 },
+            { "type": "boolean" }
+        ]),
+        "ghosting: a number or a bool"
+    );
+    assert!(
+        props["ghosting"].get("type").is_none() && props["board"].get("type").is_none(),
+        "the unions carry no outer `type`"
+    );
+
+    // review_sheet's dpi lists take a number or a {dpi, zoom} object per item.
+    let sheet = tools.iter().find(|t| t["name"] == "review_sheet").unwrap();
+    let item = &sheet["inputSchema"]["properties"]["dpi"]["items"];
+    let kinds: Vec<&str> = item["anyOf"]
+        .as_array()
+        .expect("dpi items are an anyOf")
+        .iter()
+        .map(|b| b["type"].as_str().unwrap())
+        .collect();
+    assert_eq!(kinds, ["number", "object"]);
+
+    // The description must not claim `&` aligns every multi-row input
+    // (#699: gather rows are centred).
+    let desc = chalk["description"].as_str().unwrap();
+    assert!(desc.contains("gather") && desc.contains("centre"), "{desc}");
+    assert!(!desc.contains("& aligns them"), "{desc}");
+}
+
 /// Every tool carries all five annotation hints (#687). The table is the
 /// contract: a tool missing from it fails this test, so a new tool must say
 /// whether it is read-only before it ships. `destructive` is false for the

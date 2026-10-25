@@ -1172,6 +1172,10 @@ renders eight examples in both and compares block-downsampled output).
   its `readOnlyHint` (conservative `false` when an argument such as `out_path`
   decides). `scripts/mcp_inspector_check.sh` (workflow `mcp`) is the
   third-party client check. See `notes/568-mcp-skills-cleanup.md`.
+  Input schemas keep unions as `anyOf` branches with one `type` each, never a
+  `type` array; Codex and Claude Code were checked for real and
+  `tool_schemas_use_only_the_portable_union_shape` pins it (#712,
+  `notes/712-mcp-schema-codex.md`).
   `chalkboard_math` (#688) is the pattern for a data-in tool: the program is
   generated in-process (`pscat::chalk::driver`, pure), then run in a `pscat`
   child through `run_child` with `interpreter_args`, never in the server

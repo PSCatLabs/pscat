@@ -53,6 +53,17 @@ check "tools/list names the six tools" "[.result.tools[].name] == $names" "$json
 # error-severity problem, which run() reports).
 json=$(run --strict --method tools/list)
 check "tool schemas pass the inspector's --strict check" "[.result.tools[].name] == $names" "$json"
+# --strict also prints portability warnings (exit 0) on stderr: a type array
+# on chalkboard_math's `ghosting` was one (#712), now an anyOf. None may return.
+warnings=$(npx -y "$inspector" --cli "$server" --format json --strict --method tools/list 2>&1 >/dev/null || true)
+if grep -q '^Warning:' <<<"$warnings"; then
+    echo "FAIL --strict warns about a tool schema"
+    echo "$warnings" | head -c 2000
+    echo
+    fail=1
+else
+    echo "ok   --strict reports no schema warnings"
+fi
 
 # The dual-era handshake Claude Code uses: probe 2026-07-28's
 # server/discover, fall back to initialize on "method not found".
@@ -85,6 +96,30 @@ check "out_path without the render extension is refused" \
 
 json=$(run --method tools/call --tool-name handwrite --tool-args-json '{"text":"hello","seed":3}')
 check "handwrite returns a PNG" '.result.isError == false and .result.content[0].type == "image"' "$json"
+
+# chalkboard_math's anyOf `board` and `ghosting` (#712): each form a client
+# may send, on a tiny board (the default one is 1600x800 with grain).
+chalk='"latex":"x^2","width":200,"height":100,"dpi":36'
+for args in \
+    '"board":"slate","ghosting":0' \
+    '"board":false' \
+    '"board":[0.1,0.2,0.3],"ghosting":true' \
+    '"board":{"tone":"greenboard"}' \
+    '"board":"greenboard","ghosting":0.8'; do
+    json=$(run --method tools/call --tool-name chalkboard_math --tool-args-json "{$chalk,$args}")
+    check "chalkboard_math takes {$args}" \
+        '.result.isError == false and .result.content[0].type == "image" and .result.content[0].mimeType == "image/png"' "$json"
+done
+json=$(run --method tools/call --tool-name chalkboard_math \
+    --tool-args-json "{$chalk,\"board\":false,\"ghosting\":0.5}")
+check "chalkboard_math refuses ghosting without a board" \
+    '.result.isError == true and (.result.content[0].text | contains("ghosting needs a board"))' "$json"
+
+# review_sheet's dpi lists hold numbers and {dpi, zoom} objects (anyOf items).
+json=$(run --method tools/call --tool-name review_sheet --tool-args-json \
+    '{"entries":[{"source":"0 0 40 40 rectfill showpage","label":"square"}],"width":60,"height":60,"dpi":[72,{"dpi":9,"zoom":2}]}')
+check "review_sheet takes a dpi list of numbers and {dpi, zoom} objects" \
+    '.result.isError == false and .result.content[0].type == "image" and .result.content[0].mimeType == "image/png"' "$json"
 
 [ ! -e "$work/inspector-failed" ] || fail=1
 exit "$fail"
