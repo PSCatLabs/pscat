@@ -1897,6 +1897,8 @@ const MAX_WARNING_CHARS: usize = 300;
 /// error instead.
 fn warnings_content(stderr: &str) -> Option<Value> {
     let mut seen: Vec<String> = Vec::new();
+    // Every distinct line, shown or not, so `more` counts distinct ones.
+    let mut distinct = std::collections::HashSet::new();
     let mut more = 0usize;
     for line in stderr.lines() {
         let line = line.trim();
@@ -1908,7 +1910,7 @@ fn warnings_content(stderr: &str) -> Option<Value> {
             Some((end, _)) => format!("{}...", &line[..end]),
             None => line.to_string(),
         };
-        if seen.contains(&line) {
+        if !distinct.insert(line.clone()) {
             continue;
         }
         if seen.len() < MAX_WARNING_LINES {
@@ -2385,6 +2387,14 @@ mod tests {
             .as_str()
             .unwrap()
             .to_string();
+        // Repeats of an omitted line are one omitted warning.
+        let tail = format!("{many}{}", "w99\n".repeat(50));
+        assert!(
+            warnings_content(&tail).unwrap()["text"]
+                .as_str()
+                .unwrap()
+                .ends_with("... and 23 more")
+        );
         assert!(text.chars().count() < 330, "{}", text.chars().count());
     }
 }
