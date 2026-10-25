@@ -8,7 +8,9 @@
 //! lowercase-only, so ASCII capitals are lowercased; unknown characters
 //! advance invisibly rather than erroring.
 
-use super::{Args, Failure, Format, library, measure, number, page_dim, ps_escape, render, rgb};
+use super::{
+    Args, Failure, Format, library, max_pixels, measure, number, page_dim, ps_escape, render, rgb,
+};
 
 const USAGE: &str = r#"usage: pscat handwrite [options] "text to write"
 
@@ -25,6 +27,9 @@ const USAGE: &str = r#"usage: pscat handwrite [options] "text to write"
       --seed N       rand seed; same seed, same page (default 1985)
       --dpi N        render resolution (default 72)
       --halftone     screen the output like a mono laser printer
+      --max-pixels N refuse a page of more than N device pixels (width x
+                     height at --dpi) or over 8000 a side, before drawing;
+                     1..64000000 (default: no cap beyond the page limits)
   -h, --help         this text
 
 Newlines in the text force line breaks; blank lines are kept. A text that
@@ -45,6 +50,7 @@ struct Opts {
     seed: String,
     dpi: f32,
     halftone: bool,
+    max_pixels: Option<u64>,
 }
 
 pub(super) fn run(args: Args) -> Result<(), Failure> {
@@ -55,8 +61,26 @@ pub(super) fn run(args: Args) -> Result<(), Failure> {
     };
     let lib = library("lib/handscript.ps")?;
     let width = page_dim("--width", &opts.width).map_err(usage)?;
+    // `--max-pixels`: refuse a page over the cap, or over 8000 pixels a side
+    // at this dpi, before the height is range-checked or anything is drawn.
+    // The interpreter's own rounding (`Interp::with_page_scaled`).
+    let too_big = |w_pt: u64, h_pt: u64| -> Result<(), Failure> {
+        let Some(limit) = opts.max_pixels else {
+            return Ok(());
+        };
+        let px = |pt: u64| ((pt as f32 * (opts.dpi / 72.0)).round() as u64).max(1);
+        let (w, h) = (px(w_pt), px(h_pt));
+        if w > 8000 || h > 8000 || w * h > limit {
+            return Err(Failure::Msg(pscat::limits::pixel_cap_message(w, h, limit)));
+        }
+        Ok(())
+    };
     let height = match &opts.height {
-        Some(h) => page_dim("--height", h).map_err(usage)?,
+        Some(h) => {
+            let h = page_dim("--height", h).map_err(usage)?;
+            too_big(width.into(), h.into())?;
+            h
+        }
         None => {
             // Height doesn't affect wrapping, so a placeholder is fine here.
             let mut count = lib.clone();
@@ -74,6 +98,7 @@ pub(super) fn run(args: Args) -> Result<(), Failure> {
                 opts.size.parse().unwrap_or(0.0),
                 opts.leading.parse().unwrap_or(0.0),
             );
+            too_big(width.into(), h)?;
             page_dim("the computed page height", &h.to_string()).map_err(usage)?
         }
     };
@@ -120,6 +145,7 @@ fn parse(mut args: Args) -> Result<Option<Opts>, String> {
         seed: "1985".into(),
         dpi: 72.0,
         halftone: false,
+        max_pixels: None,
     };
     let mut have_text = false;
     let num = |flag: &str, v: String| number(flag, &v).map(str::to_string);
@@ -145,6 +171,7 @@ fn parse(mut args: Args) -> Result<Option<Opts>, String> {
             "--seed" => o.seed = num(&arg, args.value(&arg)?)?,
             "--dpi" => o.dpi = super::dpi(&args.value(&arg)?)?,
             "--halftone" => o.halftone = true,
+            "--max-pixels" => o.max_pixels = Some(max_pixels(&args.value(&arg)?)?),
             "--" => {
                 // The text follows; anything after it is ignored.
                 o.text = args.next().unwrap_or_default();

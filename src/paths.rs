@@ -267,8 +267,22 @@ fn user_data_dir(var: &dyn Fn(&str) -> Option<PathBuf>) -> Option<PathBuf> {
 /// which is how the test suite runs): a release binary must not find
 /// resources by sitting inside a checkout or by remembering where its
 /// source was compiled.
+///
+/// `PSCAT_NO_CHECKOUT=1` turns the heuristics off in those builds too,
+/// so a test can run against what a bare install has (no checkout
+/// `lib/` or `fonts/catalog/`): `tests/skill_blocks.rs`. Release builds
+/// ignore it, since they have no heuristics to turn off.
 #[cfg(all(not(target_arch = "wasm32"), debug_assertions))]
 fn checkout_roots(exe: Option<&Path>) -> Vec<PathBuf> {
+    let off = std::env::var_os("PSCAT_NO_CHECKOUT").is_some_and(|v| !v.is_empty() && v != "0");
+    checkout_roots_unless(exe, off)
+}
+
+#[cfg(all(not(target_arch = "wasm32"), debug_assertions))]
+fn checkout_roots_unless(exe: Option<&Path>, off: bool) -> Vec<PathBuf> {
+    if off {
+        return Vec::new();
+    }
     let mut v: Vec<PathBuf> = exe
         .and_then(|p| p.ancestors().nth(3))
         .map(Path::to_path_buf)
@@ -565,5 +579,13 @@ mod tests {
         } else {
             assert!(r.is_empty());
         }
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn no_checkout_switch_empties_the_heuristics() {
+        let exe = Some(Path::new("/c/target/release/pscat"));
+        assert!(checkout_roots_unless(exe, true).is_empty());
+        assert!(!checkout_roots_unless(exe, false).is_empty());
     }
 }

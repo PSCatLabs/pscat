@@ -490,10 +490,20 @@ renders eight examples in both and compares block-downsampled output).
 - `FID` is integertype; unknown `findfont` substitutes Helvetica
   (gs-style) instead of erroring. Symbol/ZapfDingbats have real URW
   faces since Stage 18 — via the runtime catalog (`fonts/catalog/`,
-  `font::resolve`). Since #599 a face from a font pack that is not
-  installed (Symbol and ZapfDingbats included) is `invalidfont` with a
-  hint naming the pack, never a substitute; wasm, which has no packs,
-  still substitutes.
+  `font::resolve`). Since #599 pscat knows which pack a face is in; a
+  face from a pack that is not installed (Symbol and ZapfDingbats
+  included) was `invalidfont` with a hint naming the pack. Since #728 it
+  stands in as the closest built-in face (`font::stand_in_for`: serifs to
+  Times, AvantGarde to Helvetica, ZapfChancery to Times-Italic, Symbol and
+  ZapfDingbats to Helvetica) with one stderr note per name naming the pack
+  (`Interp::font_notes_shown`), and the run exits 0. `lettering`,
+  `headline` and `jersey` still reject a stand-in with their own
+  `*-font-not-found`. wasm, which has no packs, substitutes Helvetica
+  silently. `tests/skill_blocks.rs` runs the plugin skills' `postscript`
+  blocks on a bare install (`PSCAT_NO_CHECKOUT=1`, a debug-build switch that
+  hides the checkout's `lib/` and `fonts/catalog/`) and fails on a
+  font-pack note, so a skill example cannot need a pack; a fragment is
+  fenced `postscript partial`.
 - `charpath` on Type 3 advances without capturing outlines; its bool
   operand is ignored for outline fonts.
 - Type 1 hints are ignored entirely; no `/Metrics`, no CID/CFF.
@@ -616,6 +626,19 @@ renders eight examples in both and compares block-downsampled output).
   re-clip with an identical path is false. Library code probes it with
   `systemdict /.sameclip known` (drykit's `dkPsameok`) and keeps the
   standard behaviour without it (`notes/488-sameclip.md`).
+- The noise operators (issue #734, `src/ops/noise.rs`: `noiseseed`,
+  `gnoise2`/`gnoise3`, `vnoise2`/`vnoise3`, `gnoise2d`, `fbm2`/`fbm3`,
+  `vfbm2`/`vfbm3`, `ridged2`/`ridged3`) are pscat extensions with a
+  frozen algorithm: f64 add/sub/mul in a fixed order, `floor` and table
+  lookups only, so every platform and WASM give the same bits.
+  `lib/noiseref.ps` is the PostScript reference, and `tests/noise.rs`
+  holds every operator bit-equal to it and pins a few exact values.
+  **Changing any constant or operation order changes every seeded render
+  that uses them.** The table lives in `Interp::noise_perm`, apart from
+  `rand_state`. `x y perm .permnoise2` is artkit's `noise2` formula
+  computed with PostScript's int/real promotion, so artkit's `noise2`
+  (now `{ Perm .permnoise2 }` when the operator exists) stays
+  bit-identical, type included (`notes/734-native-noise.md`).
 - `error_report`'s `Line: N` (issue #17) is best-effort, not exact
   source attribution: no `Object` carries a source position, so it
   reports the line of the most recent token scanned directly from the
@@ -1163,8 +1186,12 @@ renders eight examples in both and compares block-downsampled output).
   generated in-process (`pscat::chalk::driver`, pure), then run in a `pscat`
   child through `run_child` with `interpreter_args`, never in the server
   (a program's stdout would corrupt JSON-RPC, and the child keeps the limits
-  and crash isolation). Its fixed caps (`MAX_LATEX_BYTES` 4096,
-  `MAX_CHALK_PIXELS` 40 M) are checked before the child starts. The canvas
+  and crash isolation). Its caps (`--max-latex-bytes`, default 4096, and
+  `--max-pixels`, default 40 M, shared with `render_postscript`, `handwrite`
+  and `review_sheet`, #711; `Config::max_latex`/`max_pixels`) are checked
+  before the child starts (`handwrite`'s height is auto-sized in the child, so
+  the server passes `pscat handwrite --max-pixels` and maps its refusal,
+  `pscat::limits::parse_pixel_cap_message`, to `output_too_large`). The canvas
   (4 bytes a pixel) is allocated before `--max-memory` counts, so the pixel
   cap is what bounds it below the interpreter's 8000-a-side ceiling. A TeX error is mapped back from the
   child's `mk-*` offending command with `chalk::explain`. The output is

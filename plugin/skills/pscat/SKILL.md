@@ -2,6 +2,7 @@
 name: pscat
 description: Render, preview, and debug PostScript with the pscat interpreter — PNG/SVG/PDF out, lint, seed sweeps, handwriting-style notes, typewritten letters and memos, photo-to-engraving, watch-it-draw window, halftone mode. Use for any .ps/.eps file work, generating diagrams or art in PostScript, producing notes, cards and lettering in a natural, hand-drawn script, or typed documents, or when the pscat MCP tools are available.
 ---
+<!-- Contributors: tests/skill_blocks.rs runs every postscript code fence under plugin/skills on a bare install (no font packs) and fails on any error or font-pack warning. A fragment that cannot run alone is fenced as "postscript partial". -->
 
 # pscat — PostScript as a tool
 
@@ -206,13 +207,40 @@ pscat photo-etch --spacing 4 --angle 30 photo.jpg -o etch.svg
 pscat --fonts                          # every findfont-reachable face
 ```
 
-The LaserWriter 35 always resolve (Palatino, Bookman, AvantGarde,
-ZapfChancery, NewCenturySchlbk, Symbol, ZapfDingbats, …). The ~35
-display families (`/EBGaramond-Regular`, `/Bangers`, `/GreatVibes-Regular`,
-…) and the Korean/Japanese/Thai faces come from the font catalog, which
-a bare install may not have. **Unknown names substitute Helvetica rather
-than erroring**, so check `--fonts` before relying on one. The Type 3
-program faces load from the built-in library anywhere:
+**A bare install has 12 faces: Helvetica, Times and Courier** (regular,
+bold, oblique/italic, bold-oblique each). Everything else is a font pack,
+installed with `pscat fonts install` (all packs) or `--pack <name>`:
+
+| Pack | Faces |
+|---|---|
+| `texgyre` | the rest of the LaserWriter 35: Palatino, Bookman, NewCenturySchlbk, AvantGarde, ZapfChancery, Helvetica-Narrow |
+| `extras` | Symbol and ZapfDingbats, the display families (`/EBGaramond-Regular`, `/Bangers`, `/GreatVibes-Regular`, …), Courier Prime |
+| `cjk-thai` | the Korean, Japanese and Thai faces |
+
+`pscat --fonts` lists what this install can reach. Plugin installs have no
+packs, so **design with Helvetica, Times and Courier** unless the user has
+run `pscat fonts install`. A name that is not available never fails the
+render. Two cases:
+
+- **A name from a pack that is not installed** (`/Palatino-Italic`) falls
+  back to the closest built-in face, keeping weight and slant: Palatino,
+  Bookman and NewCenturySchlbk become Times; AvantGarde and
+  Helvetica-Narrow become Helvetica; ZapfChancery becomes Times-Italic;
+  the monospaced extras (Courier Prime, Special Elite, JetBrains Mono)
+  become Courier. Symbol and ZapfDingbats become Helvetica,
+  so their character codes draw plain letters, not Greek letters or
+  dingbats. The other `extras` faces and the Korean/Japanese/Thai faces
+  become Helvetica too, which cannot draw those scripts. pscat prints one
+  line on stderr per name, `pscat: warning: font /Palatino-Italic is in
+  the texgyre font pack, which is not installed; using Times-Italic. Run
+  ...` with the `pscat fonts install --pack texgyre` command, and the run
+  exits 0. Treat that line as a defect in a sketch meant to work on a bare
+  install.
+- **A name nothing knows** (`/NoSuchFont`) becomes Helvetica with no
+  warning, so check `--fonts` before relying on a face.
+
+With the pack installed the real face is used and nothing changes. The Type
+3 program faces load from the built-in library anywhere:
 `(lib/fonts/neon.ps) run` (/Neon, /Marquee, /Constellation, /Lapidary,
 /Circuitry, /Stitchwork, /Confetti).
 
@@ -250,6 +278,21 @@ operators**: Ghostscript has no PostScript-level alpha, so hand someone a
 known` in code that must run in both. Also pscat-only: `gstate .sameclip
 bool` (is the clip in force the one the gstate captured).
 
+## Noise: gnoise2 / fbm2 / ... (pscat extensions)
+
+```postscript
+42 noiseseed              % own table; never touches rand (default: 0)
+x y gnoise2 n             % gradient noise ~[-0.71,0.71]; x y z gnoise3 ~[-1,1]
+x y vnoise2 v             % value noise ~[-0.996,0.996]; x y z vnoise3
+x y gnoise2d n dx dy      % with its analytic gradient
+x y 5 0.5 2 fbm2 v        % oct gain lacunarity; fbm3 vfbm2 vfbm3 ridged2 ridged3
+```
+
+Native, about as cheap as an empty loop step, and bit-identical on every
+platform. `lib/noiseref.ps` (`nrgnoise2` ...) is the same algorithm in
+PostScript for Ghostscript-bound code; probe with `systemdict /gnoise2
+known`. artkit's `noise2` already runs natively.
+
 ## Watch it draw (needs a display)
 
 ```sh
@@ -271,7 +314,9 @@ offending command and line), `handwrite`, `chalkboard_math` (LaTeX → a
 chalkboard PNG; above), `review_sheet` (the review sheet above, from inline
 programs: byte for byte what `pscat sheet` writes) and
 `describe_art_capabilities`.
-Each call has a time limit (default 60 s) and the interpreter stops a runaway
+Each call has a time limit (60 s by default; whoever registers the server raises it with
+`pscat-mcp --timeout SECS`, and the client's own tool timeout must allow it too) and the
+interpreter stops a runaway
 program itself, with a `limit_exceeded` error whose `limit` field says `steps`,
 `time` or `memory` (a render still returns the partial page); `stopped` cannot
 catch it. `out_path` must be inside the

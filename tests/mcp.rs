@@ -1126,6 +1126,215 @@ fn more_pages_than_the_inline_cap_are_refused_before_reading() {
     assert!(root.join("many-021.png").is_file());
 }
 
+/// The pixel cap (#711): `render_postscript` and `handwrite` refuse a page
+/// over `--max-pixels` with `output_too_large` and the numbers, before any
+/// canvas is allocated.
+#[test]
+fn render_postscript_and_handwrite_refuse_pages_over_the_pixel_cap() {
+    let mut s = Server::start();
+    initialized(&mut s);
+    // The default cap, 40 million: each of these is over it (or 8000 a side).
+    for (w, h, dpi) in [(8000, 8000, 72), (7000, 7000, 72), (600, 900, 1200)] {
+        let args = json!({ "source": "showpage", "width": w, "height": h, "dpi": dpi });
+        let result = s.tool("render_postscript", args);
+        assert_eq!(error_kind(&result), "output_too_large", "{w}x{h}@{dpi}");
+        let err = &result["structuredContent"]["error"];
+        assert_eq!(err["limit_pixels"], 40_000_000, "{err}");
+        assert!(err["pixels"].as_u64().unwrap() > 40_000_000, "{err}");
+    }
+    // Every format draws on the same raster.
+    let args = json!({ "source": "showpage", "width": 7000, "height": 7000,
+                       "format": "svg" });
+    let result = s.tool("render_postscript", args);
+    assert_eq!(error_kind(&result), "output_too_large", "{result}");
+    // A page under the cap still renders.
+    let result = s.tool(
+        "render_postscript",
+        json!({ "source": "showpage", "width": 100, "height": 100 }),
+    );
+    assert_eq!(result["isError"], false, "{result}");
+
+    // handwrite: the width is checked in the server, the area in the child.
+    let result = s.tool(
+        "handwrite",
+        json!({ "text": "hi", "width": 8000, "dpi": 100 }),
+    );
+    assert_eq!(error_kind(&result), "output_too_large", "{result}");
+    let result = s.tool(
+        "handwrite",
+        json!({ "text": "hi", "width": 700, "dpi": 1200 }),
+    );
+    assert_eq!(error_kind(&result), "output_too_large", "{result}");
+    assert_eq!(
+        result["structuredContent"]["error"]["limit_pixels"],
+        40_000_000
+    );
+
+    // A long note at 144 dpi is under the area cap (about 13 million pixels)
+    // but over 8000 pixels tall: refused by name, not as a failed render.
+    let long = "a b c d e f g h i j ".repeat(200);
+    let result = s.tool("handwrite", json!({ "text": long, "dpi": 144 }));
+    assert_eq!(error_kind(&result), "output_too_large", "{result}");
+    let err = &result["structuredContent"]["error"];
+    assert_eq!(err["width_px"], 1224, "{err}");
+    assert!(err["height_px"].as_u64().unwrap() > 8000, "{err}");
+}
+
+#[test]
+fn a_lowered_pixel_cap_applies_to_every_canvas_tool() {
+    let mut s = Server::start_in(
+        &common::scratch_dir("mcp-pixcap"),
+        &["--max-pixels", "300000"],
+    );
+    initialized(&mut s);
+    // 612 x 792 is 484,704 pixels; 400 x 700 is 280,000.
+    let result = s.tool("render_postscript", json!({ "source": "showpage" }));
+    assert_eq!(error_kind(&result), "output_too_large", "{result}");
+    let err = &result["structuredContent"]["error"];
+    assert_eq!(err["limit_pixels"], 300_000);
+    assert_eq!(err["pixels"], 484_704);
+    assert_eq!(
+        (err["width_px"].clone(), err["height_px"].clone()),
+        (json!(612), json!(792))
+    );
+    let ok = json!({ "source": "showpage", "width": 400, "height": 700 });
+    assert_eq!(s.tool("render_postscript", ok)["isError"], false);
+
+    // A short note fits; a long one is auto-sized taller than the cap.
+    let result = s.tool("handwrite", json!({ "text": "hi" }));
+    assert_eq!(result["isError"], false, "{result}");
+    let long = "a b c d e f g h i j ".repeat(40);
+    let result = s.tool("handwrite", json!({ "text": long }));
+    assert_eq!(error_kind(&result), "output_too_large", "{result}");
+    let err = &result["structuredContent"]["error"];
+    assert_eq!(err["limit_pixels"], 300_000);
+    assert_eq!(err["width_px"], 612);
+    assert!(err["pixels"].as_u64().unwrap() > 300_000, "{err}");
+
+    // chalkboard_math and review_sheet use the same cap.
+    let args = json!({ "latex": "x", "width": 800, "height": 400, "dpi": 72 });
+    let result = s.tool("chalkboard_math", args);
+    assert_eq!(error_kind(&result), "output_too_large", "{result}");
+    assert_eq!(
+        result["structuredContent"]["error"]["limit_pixels"],
+        300_000
+    );
+    let args = json!({ "entries": [{ "source": "showpage", "width": 800, "height": 400 }] });
+    let result = s.tool("review_sheet", args);
+    assert_eq!(error_kind(&result), "output_too_large", "{result}");
+    assert_eq!(
+        result["structuredContent"]["error"]["limit_pixels"],
+        300_000
+    );
+
+    // The limit is in the tool descriptions.
+    let list = s.call(json!({ "jsonrpc": "2.0", "id": 5, "method": "tools/list" }));
+    let text = list["result"]["tools"].to_string();
+    assert!(text.contains("300000 pixels"), "{text}");
+}
+
+#[test]
+fn max_latex_bytes_is_a_server_flag() {
+    let mut s = Server::start_in(
+        &common::scratch_dir("mcp-latexcap"),
+        &["--max-latex-bytes", "10"],
+    );
+    initialized(&mut s);
+    let result = s.tool("chalkboard_math", small_board("x+x+x+x+x+x"));
+    assert_eq!(error_kind(&result), "input_too_large", "{result}");
+    assert_eq!(result["structuredContent"]["error"]["limit"], 10);
+    let result = s.tool("chalkboard_math", small_board("x^2"));
+    assert_eq!(result["isError"], false, "{result}");
+
+    // Raised above the 4096 default, a long input is no longer refused for
+    // its length (a comment-only one is an empty formula, at once).
+    let mut s = Server::start_in(
+        &common::scratch_dir("mcp-latexcap2"),
+        &["--max-latex-bytes", "8192"],
+    );
+    initialized(&mut s);
+    let result = s.tool("chalkboard_math", small_board(&"% ".repeat(2100)));
+    assert_eq!(error_kind(&result), "latex_error", "{result}");
+}
+
+#[test]
+fn the_cap_flags_reject_values_out_of_range() {
+    for args in [
+        &["--max-pixels", "0"][..],
+        &["--max-pixels", "64000001"],
+        &["--max-pixels", "many"],
+        &["--max-latex-bytes", "0"],
+        &["--max-latex-bytes"],
+    ] {
+        let out = Command::new(env!("CARGO_BIN_EXE_pscat-mcp"))
+            .args(args)
+            .current_dir(common::scratch_dir("mcp-badflag"))
+            .stdin(Stdio::null())
+            .output()
+            .expect("run pscat-mcp");
+        assert!(!out.status.success(), "{args:?} must be refused");
+        assert!(out.stdout.is_empty(), "{args:?}: nothing on stdout");
+    }
+}
+
+/// A render that succeeds can still have something to say on stderr (a font
+/// falling back to a built-in face, #728, exits 0): it comes back as a
+/// `Warnings:` text item, once per distinct line, and not the child's own
+/// receipt. The line here is a caught error that the program reports with
+/// `handleerror`, a generic stderr line that needs no font pack.
+#[test]
+fn render_postscript_returns_stderr_warnings_on_success() {
+    let mut s = Server::start();
+    initialized(&mut s);
+    let source =
+        "3 { { 1 0 div } stopped { handleerror } if } repeat 100 100 50 50 rectfill showpage";
+    let result = s.tool(
+        "render_postscript",
+        json!({ "source": source, "width": 200, "height": 200 }),
+    );
+    assert_eq!(result["isError"], false, "{result}");
+    let warnings: Vec<_> = texts(&result)
+        .into_iter()
+        .filter(|t| t.starts_with("Warnings:"))
+        .collect();
+    assert_eq!(warnings.len(), 1, "{result}");
+    assert_eq!(
+        warnings[0].matches("undefinedresult").count(),
+        1,
+        "three identical lines shown once: {}",
+        warnings[0]
+    );
+    assert!(!warnings[0].contains("pscat: wrote"), "{}", warnings[0]);
+    assert!(
+        result["content"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["type"] == "image"),
+        "the image is still there"
+    );
+
+    // A quiet render has no Warnings item.
+    let result = s.tool(
+        "render_postscript",
+        json!({ "source": "0 0 50 50 rectfill showpage", "width": 100, "height": 100 }),
+    );
+    assert!(
+        texts(&result).iter().all(|t| !t.starts_with("Warnings:")),
+        "{result}"
+    );
+
+    // review_sheet: the same, from a cell that succeeds.
+    let args = json!({ "entries": [{ "source": source, "width": 100, "height": 100 }],
+                       "dpi": [72] });
+    let result = s.tool("review_sheet", args);
+    assert_eq!(result["isError"], false, "{result}");
+    assert!(
+        texts(&result).iter().any(|t| t.starts_with("Warnings:")),
+        "{result}"
+    );
+}
+
 #[test]
 fn version_flag_prints_the_crate_version_and_exits_without_serving() {
     // A closed stdin: were the flag ignored the server would see EOF and

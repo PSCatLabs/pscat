@@ -752,24 +752,23 @@ fn unavailable(run: &str) -> String {
         .collect()
 }
 
-/// Whether `face`'s font loads; when it does not, warns once per face
-/// per process with pscat's own hint naming the font pack.
+/// Whether `face`'s font loads (findfont would stand in for a missing
+/// pack face, which draws these scripts as nothing); when it does not,
+/// warns once per face per process with pscat's own hint naming the
+/// font pack.
 fn face_available(face: Face) -> bool {
     use std::sync::{Mutex, OnceLock};
     static WARNED: OnceLock<Mutex<Vec<Face>>> = OnceLock::new();
     let Some(name) = face.catalog_name() else {
         return true;
     };
-    let mut probe = crate::Interp::new();
-    let Err(e) = probe.run_source(format!("/{name} findfont pop").as_bytes()) else {
+    let Some(hint) = crate::font::uninstalled_pack_hint(name) else {
         return true;
     };
     let mut warned = WARNED.get_or_init(Default::default).lock().unwrap();
     if !warned.contains(&face) {
         warned.push(face);
-        let report = probe.error_report(&e);
-        // The hint is the report's last line, already prefixed `pscat: `.
-        let hint = report.lines().last().unwrap_or(&report);
+        // The hint is already prefixed `pscat: `.
         eprintln!("pscat sheet: {}", hint.trim_start_matches("pscat: "));
     }
     false

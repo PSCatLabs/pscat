@@ -64,7 +64,13 @@ newpath 60 100 moveto 500 200 550 300 300 380 curveto
   `srand`-shuffled permutation table. `curl2` turns any scalar field into a
   unit-vector flow by taking its normalized perpendicular gradient. `advect`
   traces a particle through a vector field as a sequence of `lineto`s (see
-  *Lodestone*, iron filings curling around a magnetic stone).
+  *Lodestone*, iron filings curling around a magnetic stone). On pscat,
+  `noise2` runs natively with bit-identical output. For new work, the
+  interpreter also has its own noise operators, independent of `srand`:
+  `noiseseed`, `gnoise2`/`gnoise3` (gradient), `vnoise2`/`vnoise3`
+  (value), `gnoise2d` (with derivatives) and the fBm sums `fbm2`, `fbm3`,
+  `vfbm2`, `vfbm3`, `ridged2`, `ridged3`. `lib/noiseref.ps` documents the
+  algorithm and reproduces every operator bit for bit in plain PostScript.
 - **Scatter.** The area-shaped counterpart to `alongpath`. `screct` and
   `scpath` build a region from a rectangle or from the current path (flattened
   and closed the way `fill` sees it; `clippath scpath` captures the clip

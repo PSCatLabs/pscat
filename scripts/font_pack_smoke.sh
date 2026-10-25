@@ -10,7 +10,8 @@
 # From an empty directory, with HOME pointed at an empty scratch dir and
 # no PSCAT_* set, it checks:
 #   1. a pack face (/Symbol, /Palatino-Roman, /NotoSansKR-Regular) with no
-#      packs installed is an invalidfont naming the pack, not a substitute;
+#      packs installed stands in as a built-in face, with a note naming the
+#      pack (issue #728), and the run succeeds;
 #   2. a corrupted pack is refused and leaves nothing installed;
 #   3. `pscat fonts install --from <index>` installs every pack, `fonts
 #      list` re-verifies them, and they report pinned (EXPECT_PINNED=1) or
@@ -43,12 +44,14 @@ PACKDIR=$("$PSCAT" fonts list | sed -n 's/^install directory: //p')
 [[ -n "$PACKDIR" ]] || fail "fonts list printed no install directory"
 case "$PACKDIR/" in "$SCRATCH"/*) ;; *) fail "install directory $PACKDIR is outside the scratch HOME" ;; esac
 
-echo "==> 1. missing packs are errors that name the pack"
-for pair in Symbol:extras ZapfDingbats:extras Palatino-Roman:texgyre NotoSansKR-Regular:cjk-thai; do
-  face=${pair%%:*} pack=${pair##*:}
-  if out=$("$PSCAT" -e "/$face findfont pop" 2>&1); then fail "/$face findfont succeeded with no packs"; fi
-  grep -q "invalidfont" <<<"$out" || { echo "$out" >&2; fail "/$face: no invalidfont"; }
-  grep -q "is in the $pack font pack" <<<"$out" || { echo "$out" >&2; fail "/$face: hint does not name $pack"; }
+echo "==> 1. missing packs stand in as a built-in face and name the pack"
+for triple in Symbol:extras:Helvetica ZapfDingbats:extras:Helvetica Palatino-Roman:texgyre:Times-Roman NotoSansKR-Regular:cjk-thai:Helvetica; do
+  IFS=: read -r face pack stand_in <<<"$triple"
+  err=$("$PSCAT" -e "/$face findfont /FontName get ==" 2>&1 >"$SCRATCH/stdout.txt") ||
+    { echo "$err" >&2; fail "/$face findfont failed with no packs"; }
+  [[ $(cat "$SCRATCH/stdout.txt") == "/$stand_in" ]] || fail "/$face did not stand in as $stand_in"
+  grep -q "is in the $pack font pack" <<<"$err" || { echo "$err" >&2; fail "/$face: note does not name $pack"; }
+  grep -q "pscat fonts install --pack $pack" <<<"$err" || { echo "$err" >&2; fail "/$face: note lacks the install command"; }
 done
 [[ $("$PSCAT" -e "/NoSuchFace findfont /FontName get ==") == "/Helvetica" ]] ||
   fail "an unknown non-pack name no longer substitutes"
@@ -121,9 +124,11 @@ echo "    $(ls pack | wc -l | tr -d ' ') pages from ${#EXAMPLES[@]} examples, by
 
 echo "==> 5. remove and reinstall one pack"
 "$PSCAT" fonts remove texgyre
-if "$PSCAT" -e "/Palatino-Roman findfont pop" 2>/dev/null; then fail "Palatino still resolves after removing texgyre"; fi
+[[ $("$PSCAT" -e "/Palatino-Roman findfont /FontName get ==" 2>/dev/null) == "/Times-Roman" ]] ||
+  fail "Palatino does not stand in as Times-Roman after removing texgyre"
 "$PSCAT" fonts install --from "$PACKS/font-index.json" --pack texgyre
-"$PSCAT" -e "/Palatino-Roman findfont pop" || fail "Palatino does not resolve after reinstalling"
+[[ $("$PSCAT" -e "/Palatino-Roman findfont /FontName get ==" 2>&1) != "/Times-Roman" ]] ||
+  fail "Palatino still stands in as Times-Roman after reinstalling"
 "$PSCAT" fonts list >/dev/null || fail "fonts list verification failed after reinstall"
 
 echo "==> font pack smoke OK"

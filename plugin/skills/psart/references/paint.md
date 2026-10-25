@@ -133,6 +133,7 @@ Which tool to pick:
   vocabulary: skies, clouds, mist, distant planes.
 
   ```postscript
+  (lib/artkit.ps) run (lib/paintkit.ps) run
   { newpath 40 400 moveto 200 430 380 390 560 420 curveto
     << /Nozzle 22 /Density 70 >> pkspray }
   << /Soft 0.8 /Under [0.62 0.72 0.86] >> pkwet
