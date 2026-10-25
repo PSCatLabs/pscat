@@ -339,8 +339,8 @@ separately versioned **font packs**, released on their own
 The `texgyre` pack is retired: its faces are compiled in.
 `pscat fonts install --pack texgyre` says so and exits 0 without
 fetching anything, and a plain `pscat fonts install` from an older index
-that still lists it (the `fonts-2026.10` index, pinned by pscat 0.6.x
-and 0.7.0) skips it. That index's `extras` pack still carries the URW
+that still lists it (`fonts-2026.10`, the index pinned when the faces
+moved in) skips it. That index's `extras` pack still carries the URW
 symbol faces; installed, they are the same bytes as the built-in copies.
 
 ```sh
