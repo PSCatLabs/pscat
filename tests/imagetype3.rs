@@ -127,6 +127,47 @@ fn both_data_sources_can_be_procedures() {
 }
 
 #[test]
+fn a_filtered_mask_is_drained_before_the_image_reads() {
+    // The mask is `currentfile /ASCIIHexDecode filter`, the image reads the
+    // same file through its own filter. The mask has only 1 byte of
+    // samples, so its filter has not seen its `>` yet when the image starts.
+    let it = run("10 40 translate 80 20 scale /DeviceRGB setcolorspace
+         << /ImageType 3 /InterleaveType 3
+            /DataDict << /ImageType 1 /Width 2 /Height 1 /BitsPerComponent 8
+               /ImageMatrix [2 0 0 -1 0 1] /DataSource currentfile /ASCIIHexDecode filter >>
+            /MaskDict << /ImageType 1 /Width 2 /Height 1 /BitsPerComponent 1
+               /Decode [1 0] /ImageMatrix [2 0 0 -1 0 1]
+               /DataSource currentfile /ASCIIHexDecode filter >> >> image
+         80> ff000000ff00>");
+    assert_eq!(
+        pixel(&it, 30, 50),
+        (255, 0, 0),
+        "image data not eaten by the mask's EOD"
+    );
+    assert_eq!(pixel(&it, 70, 50), BG);
+}
+
+#[test]
+fn svg_keeps_a_mask_edge_that_falls_inside_an_image_cell() {
+    // A solid 1x1 image under a 1x1 mask shifted half a cell: only the
+    // right half of the image shows. Equal densities, so the composite
+    // must still be finer than 1x1 to say so.
+    let src = "10 10 translate 80 80 scale /DeviceRGB setcolorspace
+        << /ImageType 3 /InterleaveType 3
+           /DataDict << /ImageType 1 /Width 1 /Height 1 /BitsPerComponent 8
+              /ImageMatrix [1 0 0 -1 0 1] /DataSource <ff0000> >>
+           /MaskDict << /ImageType 1 /Width 1 /Height 1 /BitsPerComponent 1
+              /Decode [1 0] /ImageMatrix [1 0 0 -1 -0.5 1] /DataSource <80> >> >> image";
+    let mut it = Interp::with_page(100, 100).expect("page");
+    it.gfx_mut().enable_svg();
+    it.run_str(src).expect("runs");
+    let svg = &it.gfx().svg_pages().expect("recording")[0];
+    assert!(svg.contains("<image width=\"4\" height=\"4\""), "{svg}");
+    assert_eq!(pixel(&it, 20, 50), BG, "left half is masked on the canvas");
+    assert_eq!(pixel(&it, 80, 50), (255, 0, 0));
+}
+
+#[test]
 fn interleave_types_1_and_2_are_a_documented_gap() {
     for (ty, want) in [(1, PsError::Limitcheck), (2, PsError::Limitcheck)] {
         let mut it = Interp::with_page(100, 100).expect("page");

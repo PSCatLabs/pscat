@@ -54,6 +54,17 @@ Found by ArtColony/fractal_clouds (a ray-marched landscape library): an
 - Source order matches gs (probed with two data procedures that print): the
   mask's source is read in full, then the image's. Two sources sharing one
   `currentfile` or one filter chain therefore see the mask bytes first.
+  The mask's filter chain is drained to its EOD before the image starts
+  reading (unless both planes hold the very same file object), so
+  `currentfile /ASCIIHexDecode filter` for the mask followed by the image's
+  own source on `currentfile` works. gs's colours for two filters on one
+  `currentfile` came out as a different colour in a probe (a 1-pixel and a
+  2-pixel image both read back blue for red data), so that case is pinned to
+  the PLRM's filter-to-EOD rule, not to gs.
+- When the stencil's grid is not on the image's (rotation, or an offset that
+  is not a whole number of mask cells) the SVG/PDF composite is expanded at
+  least 4x, so a mask edge inside an image cell survives to quarter-cell
+  accuracy.
 - A MaskDict `/BitsPerComponent` other than 1 is `rangecheck`.
 - Limits: no `InterleaveType` 1/2, no `ImageType 4`, the stencil does not
   extend the image's footprint (it only removes pixels), and

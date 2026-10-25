@@ -180,10 +180,22 @@ impl ImageCtx {
         // gs reads the mask's source first, then the image's (probed with
         // two data procedures, #739), so a shared file or one procedure
         // counter sees the same order.
-        if let Some(st) = &mut self.stencil
-            && let Some(exec) = st.fill()?
-        {
-            return Ok(exec);
+        if let Some(st) = &mut self.stencil {
+            if let Some(exec) = st.fill()? {
+                return Ok(exec);
+            }
+            // Finish the mask's filter chain before the image starts
+            // reading, or the image would take the mask's EOD marker for
+            // data (`currentfile /ASCIIHexDecode filter` ... `80>` then
+            // the image bytes). Not when both planes read the very same
+            // file object: they then share its position.
+            let shared = matches!(
+                (&st.source, &self.source),
+                (ImageSource::File(a), ImageSource::File(b)) if std::rc::Rc::ptr_eq(a, b)
+            );
+            if !shared {
+                st.drain_filters()?;
+            }
         }
         if let Some(exec) = self.fill()? {
             return Ok(exec);
@@ -352,9 +364,26 @@ impl ImageCtx {
         let axes = |m: &[f64; 6]| (m[0].hypot(m[1]), m[2].hypot(m[3]));
         let ((dx, dy), (sx, sy)) = (axes(&self.matrix), axes(&st.matrix));
         let ratio = |s: f64, d: f64| if d > 0.0 { (s / d - 1e-6).ceil() } else { 1.0 };
-        let want = ratio(sx, dx)
+        let mut want = ratio(sx, dx)
             .max(ratio(sy, dy))
             .clamp(1.0, MAX_STENCIL_SCALE);
+        // Where the stencil's cell grid does not sit on the image's (a
+        // rotation, or an offset that is not a whole number of mask
+        // cells), mask edges fall inside image cells: expand enough to
+        // keep them, to quarter-cell accuracy.
+        let (m, i) = (&st.matrix, &inv);
+        let rel = [
+            m[0] * i[0] + m[2] * i[1],
+            m[1] * i[0] + m[3] * i[1],
+            m[0] * i[2] + m[2] * i[3],
+            m[1] * i[2] + m[3] * i[3],
+            m[0] * i[4] + m[2] * i[5] + m[4],
+            m[1] * i[4] + m[3] * i[5] + m[5],
+        ];
+        let off_grid = |v: f64| (v - v.round()).abs() > 1e-6;
+        if rel[1].abs() > 1e-9 || rel[2].abs() > 1e-9 || off_grid(rel[4]) || off_grid(rel[5]) {
+            want = want.max(4.0);
+        }
         let k = expansion(self.width, self.height, want as usize);
         let (w, h) = (self.width * k, self.height * k);
         if w == 0 || h == 0 {
