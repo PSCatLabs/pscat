@@ -4,6 +4,11 @@
 numbers, mood palettes, turtle graphics, L-systems, shapes, layout and text
 helpers, and a set of "brushes" that walk along a path. Everything is
 deterministic under `srand`, and everything runs unchanged in Ghostscript.
+The same seed gives the same pixels on macOS, Linux and in the browser build:
+pscat does its own trigonometry, exponentials and logarithms (`src/fmath/`)
+instead of using each platform's libm. (Rare exception: stroking an almost
+straight curve can still differ in a pixel or two between platforms, because
+the rasteriser does its own math.)
 
 ## A first example
 

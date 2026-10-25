@@ -23,6 +23,10 @@
 //! jitter's determinism, and corners/a direction reversal rendering
 //! without crashing.
 
+// Reference values for geometry checks, not pixels: the platform libm is fine here
+// (production math goes through src/fmath.rs, issue #738).
+#![allow(clippy::disallowed_methods)]
+
 mod common;
 
 use common::within_cpu_budget;

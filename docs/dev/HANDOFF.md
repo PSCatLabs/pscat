@@ -1056,6 +1056,24 @@ renders eight examples in both and compares block-downsampled output).
 
 ## Gotchas for the next implementer
 
+- **Transcendental math goes through `src/fmath/`, never `f64::sin` and
+  friends** (#738). The platform libm rounds differently on macOS, Linux and
+  wasm, and seeded noise/erosion grows that last bit into visible pixels
+  (`gallery/mountains.ps` in fractal_clouds: 25,000 of 64,000 pixels differed
+  between a Mac and Linux). `fmath` is musl 1.2.5's math on every target: the
+  pure-Rust `libm` crate (pinned exactly in `Cargo.toml`) for trig, `log10`,
+  `hypot` and the `f32` ones, and a port in `src/fmath/musl.rs` for `exp`, `ln`
+  and `powf`, because the crate has the older FreeBSD versions of those three.
+  `clippy.toml` bans the direct methods and `Transform::from_rotate`, so clippy
+  fails a new one (a test that only needs a reference value may
+  `#![allow(clippy::disallowed_methods)]`). Need another function? Check it bit
+  for bit against musl first (`scripts/fmath_check.sh`): `libm`'s `cosh`,
+  `cbrt`, `log2` and `exp2` do not match, so they are not offered. Not covered:
+  tiny-skia's own f32 `acos`/`cos`/`powf` (the cubic-root finder in stroking of
+  nearly straight cubics, gamma stages), which use the platform libm; see
+  `notes/738-fmath-one-libm.md`. `src/fmath/tables.rs` is generated
+  (`scripts/gen_fmath_tables.py`), do not edit it.
+
 - **Handwriting is worded as a style, not as passing for real** (#686).
   Say "handwriting-style notes" or "a natural, hand-drawn script" in the
   skills, the plugin README and the MCP tool description, never

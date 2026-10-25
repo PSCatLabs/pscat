@@ -773,7 +773,7 @@ fn run_sweep(options: &Options, source: &[u8]) -> ExitCode {
                     (c, r)
                 }
                 None => {
-                    let cols = (n as f64).sqrt().ceil() as u32;
+                    let cols = pscat::fmath::sqrt(n as f64).ceil() as u32;
                     (cols, (n as u32).div_ceil(cols))
                 }
             };

@@ -6,6 +6,7 @@
 //! integer-only. Trig operates in degrees.
 
 use crate::error::PsError;
+use crate::fmath;
 use crate::interp::Interp;
 use crate::object::{Dict, Num, Object};
 
@@ -259,17 +260,17 @@ fn sqrt(it: &mut Interp) -> Result<(), PsError> {
         if x < 0.0 {
             Err(PsError::Rangecheck)
         } else {
-            Ok(x.sqrt())
+            Ok(fmath::sqrt(x))
         }
     })
 }
 
 fn sin(it: &mut Interp) -> Result<(), PsError> {
-    unary_real(it, |x| Ok(x.to_radians().sin()))
+    unary_real(it, |x| Ok(fmath::sin(x.to_radians())))
 }
 
 fn cos(it: &mut Interp) -> Result<(), PsError> {
-    unary_real(it, |x| Ok(x.to_radians().cos()))
+    unary_real(it, |x| Ok(fmath::cos(x.to_radians())))
 }
 
 fn ln(it: &mut Interp) -> Result<(), PsError> {
@@ -277,7 +278,7 @@ fn ln(it: &mut Interp) -> Result<(), PsError> {
         if x <= 0.0 {
             Err(PsError::Rangecheck)
         } else {
-            Ok(x.ln())
+            Ok(fmath::ln(x))
         }
     })
 }
@@ -287,7 +288,7 @@ fn log(it: &mut Interp) -> Result<(), PsError> {
         if x <= 0.0 {
             Err(PsError::Rangecheck)
         } else {
-            Ok(x.log10())
+            Ok(fmath::log10(x))
         }
     })
 }
@@ -299,7 +300,7 @@ fn atan(it: &mut Interp) -> Result<(), PsError> {
         return Err(PsError::UndefinedResult);
     }
     // PLRM specifies degrees in [0, 360); atan2 gives (-180, 180].
-    let mut angle = num.atan2(den).to_degrees();
+    let mut angle = fmath::atan2(num, den).to_degrees();
     if angle < 0.0 {
         angle += 360.0;
     }
@@ -310,7 +311,7 @@ fn atan(it: &mut Interp) -> Result<(), PsError> {
 fn exp(it: &mut Interp) -> Result<(), PsError> {
     let exponent = it.pop_num()?.to_f64();
     let base = it.pop_num()?.to_f64();
-    let r = base.powf(exponent);
+    let r = fmath::powf(base, exponent);
     // NaN here means a negative base with a non-integral exponent.
     if r.is_nan() {
         return Err(PsError::UndefinedResult);

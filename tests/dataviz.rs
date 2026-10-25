@@ -9,6 +9,10 @@
 //! (same amount of ink either way), which is exactly why they're
 //! pinned to specific pixels instead.
 
+// Reference values for geometry checks, not pixels: the platform libm is fine here
+// (production math goes through src/fmath.rs, issue #738).
+#![allow(clippy::disallowed_methods)]
+
 use pscat::Interp;
 
 mod common;

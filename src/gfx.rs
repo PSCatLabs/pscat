@@ -21,6 +21,7 @@ use tiny_skia::{
 };
 
 use crate::error::PsError;
+use crate::fmath;
 use crate::font::FontState;
 
 /// US Letter in points — the default page when none is specified.
@@ -149,10 +150,10 @@ impl PsPath {
             let (dx, dy) = (b.x - a.x, b.y - a.y);
             let len2 = dx * dx + dy * dy;
             if len2 < 1e-12 {
-                return (p.x - a.x).hypot(p.y - a.y);
+                return crate::fmath::hypotf(p.x - a.x, p.y - a.y);
             }
             let t = (((p.x - a.x) * dx + (p.y - a.y) * dy) / len2).clamp(0.0, 1.0);
-            (p.x - (a.x + t * dx)).hypot(p.y - (a.y + t * dy))
+            crate::fmath::hypotf(p.x - (a.x + t * dx), p.y - (a.y + t * dy))
         }
         // De Casteljau: split at t=1/2 until the control points hug the
         // chord, then emit the chord.
@@ -1047,7 +1048,7 @@ impl Gfx {
             }
         }
 
-        let point_at = |a: f64| (cx + r * a.cos(), cy + r * a.sin());
+        let point_at = |a: f64| (cx + r * fmath::cos(a), cy + r * fmath::sin(a));
         let start = point_at(a1);
         // Arc connects to an existing path with a line, else starts one.
         if self.state.path.current().is_some() {
@@ -1063,11 +1064,11 @@ impl Gfx {
         for _ in 0..n {
             let b = a + step;
             // Standard cubic approximation of a circular arc segment.
-            let k = 4.0 / 3.0 * (step / 4.0).tan();
+            let k = 4.0 / 3.0 * fmath::tan(step / 4.0);
             let (x0, y0) = point_at(a);
             let (x3, y3) = point_at(b);
-            let c1 = (x0 - k * r * a.sin(), y0 + k * r * a.cos());
-            let c2 = (x3 + k * r * b.sin(), y3 - k * r * b.cos());
+            let c1 = (x0 - k * r * fmath::sin(a), y0 + k * r * fmath::cos(a));
+            let c2 = (x3 + k * r * fmath::sin(b), y3 - k * r * fmath::cos(b));
             let c1 = self.user_to_device(c1.0, c1.1);
             let c2 = self.user_to_device(c2.0, c2.1);
             let p = self.user_to_device(x3, y3);
@@ -1244,7 +1245,7 @@ impl Gfx {
         let shader = match shading.kind {
             crate::shading::ShadingKind::Axial { x0, y0, x1, y1 } => {
                 let (x0, y0, x1, y1) = (x0 as f32, y0 as f32, x1 as f32, y1 as f32);
-                let len = (x1 - x0).hypot(y1 - y0);
+                let len = fmath::hypotf(x1 - x0, y1 - y0);
                 let k = if len > 0.0 && len < SAFE_LEN {
                     SAFE_LEN / len
                 } else {
@@ -1269,7 +1270,7 @@ impl Gfx {
                 let (x0, y0, r0, x1, y1, r1) = (
                     x0 as f32, y0 as f32, r0 as f32, x1 as f32, y1 as f32, r1 as f32,
                 );
-                let char_len = r0.max(r1).max((x1 - x0).hypot(y1 - y0));
+                let char_len = r0.max(r1).max(fmath::hypotf(x1 - x0, y1 - y0));
                 let k = if char_len > 0.0 && char_len < SAFE_LEN {
                     SAFE_LEN / char_len
                 } else {
@@ -1564,7 +1565,7 @@ impl Gfx {
     /// lengths; see the module comment for why this approximation.
     fn ctm_scale(&self) -> f64 {
         let m = &self.state.ctm;
-        f64::from(m.sx * m.sy - m.kx * m.ky).abs().sqrt()
+        fmath::sqrt(f64::from(m.sx * m.sy - m.kx * m.ky).abs())
     }
 
     fn device_line_width(&self) -> f32 {

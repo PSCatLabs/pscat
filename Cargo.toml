@@ -103,6 +103,10 @@ flate2 = "1"
 tiny-skia = "0.12.0"
 ttf-parser = "0.25"
 zune-jpeg = "0.5.15"
+# Pure-Rust libm: every transcendental in src/ goes through src/fmath.rs, so
+# seeded renders match across macOS, Linux and wasm (issue #738). Pinned
+# exactly: a new libm release can change the last bit of a result.
+libm = { version = "=0.2.16", default-features = false }
 
 # The live window is desktop-only; the wasm32 build (Stage 16) ships
 # the interpreter core and paints into a <canvas> instead.

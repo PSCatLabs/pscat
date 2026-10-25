@@ -100,6 +100,8 @@ pub mod encodings;
 #[doc(hidden)]
 pub mod file;
 #[doc(hidden)]
+pub mod fmath;
+#[doc(hidden)]
 pub mod font;
 #[doc(hidden)]
 pub mod fontpacks;
