@@ -71,6 +71,12 @@ name from prose.
   `/MinSpacing` for blue noise, `/Seed` for a self-contained arrangement.
   Candidates outside are rejected, not clipped. Foliage, stars, debris,
   stipple, print specks: reach for this before a random placement loop.
+- **Noise** (native operators, no library): `seed noiseseed` (own table,
+  leaves `rand` alone), `x y gnoise2`, `x y z gnoise3`, `vnoise2`/`vnoise3`
+  (value noise), `x y gnoise2d -> n dx dy`, and `x y oct gain lac fbm2`
+  (also `fbm3`, `vfbm2`, `vfbm3`, `ridged2`, `ridged3`). Cheap enough for
+  per-pixel terrain, clouds and domain warping. artkit's `noiseinit`/`noise2`
+  (rand-seeded) is unchanged, and now native too.
 - **Tiling**: `x0 y0 v1 v2 n1 n2 {x y ...} lattice` (any basis);
   `hex`/`tri` shapes; `hexgrid`/`trigrid`; `truchet` (a grid with each
   cell turned a random quarter, one motif becomes a maze). A `hex`/`tri`
