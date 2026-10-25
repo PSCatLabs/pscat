@@ -82,8 +82,13 @@ slightly, to musl's, and now equal macOS and Linux.
    pages at gallery 144 dpi), control differs as it must: 95 identical, 6 differ
    by 1 to 167 pixels (`gallery/mochi_denim_blue` 167 of 2.6M, max 12 levels;
    `flying_white_reeds` 47, `paintkit_motion_demo` 7, `paintkit_dry_demo` 6,
-   `paintkit_canvas_demo` 3, `evening_stream` 1). The repo's own tests are
-   statistical and CI runs on macOS, so no golden moved.
+   `paintkit_canvas_demo` 3, `evening_stream` 1). The repo's own tests are mostly
+   statistical and CI's `test` job runs on macOS. Exactly one pinned hash moved:
+   `tests/paintkit.rs` `dab_and_oil_unset_loading_keys_are_byte_identical`, its
+   curveto oil scenario (`0x407b12e6fb63aeef` to `0x5beb8a707c78323e`). The old
+   value is what Apple's libm and glibc (the ubuntu and windows CI jobs) gave;
+   musl gave the new one already, and the same test failed on Alpine before this
+   change. Now macOS, Linux musl and wasm agree on it.
 
 5. Speed: a 1.5M-iteration PostScript loop of `sin`, `ln` and `exp` took 0.67 s
    before and 0.76 s after on a loaded laptop (about 12% on pure math, which is

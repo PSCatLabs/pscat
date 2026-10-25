@@ -12496,8 +12496,9 @@ fn dab_and_oil_unset_loading_keys_are_byte_identical() {
         0x4afeceacd6e421ce,
         0xe659b4013bfc5106,
         // The curveto/Ridges/ColorJitter oil mark. Was 0x407b12e6fb63aeef under
-        // Apple's libm; it moved when math went through src/fmath (#738), whose
-        // exp/ln/sin/cos are musl's. The same on macOS, Linux and wasm now.
+        // Apple's libm and glibc's (musl's gave this value already); it moved
+        // when math went through src/fmath (#738), whose results are musl's on
+        // every platform.
         0x5beb8a707c78323e,
     ];
     let got: Vec<u64> = scenarios

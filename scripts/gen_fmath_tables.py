@@ -3,12 +3,13 @@
 
     curl -sLO https://musl.libc.org/releases/musl-1.2.5.tar.gz && tar xzf musl-1.2.5.tar.gz
     python3 scripts/gen_fmath_tables.py musl-1.2.5/src/math src/fmath/tables.rs
+    cargo fmt --all
 
 The C sources write their constants as hexadecimal float literals (some times
 an exact small integer). This converts each one with Python's exact
 `float.fromhex` and writes the IEEE-754 bit pattern, so no digit is retyped.
-The output is committed; musl's licence (MIT, Arm Limited 2018) is in the file
-header. Output must be unchanged by re-running this.
+The output is committed (after `cargo fmt`); musl's licence (MIT, Arm Limited
+2018) is in the file header. Re-running this and formatting must change nothing.
 """
 import re
 import struct
@@ -47,7 +48,8 @@ def main(musl_math, dest):
     out = [
         "//! Data tables for the exp, log and pow in `musl.rs`, copied bit for bit\n"
         "//! from musl 1.2.5 (`src/math/exp_data.c`, `log_data.c`, `pow_data.c`; MIT\n"
-        "//! licence, Copyright (c) 2018, Arm Limited, from ARM's optimized-routines).\n"
+        "//! licence, Copyright (c) 2018, Arm Limited, from ARM's optimized-routines;\n"
+        "//! the full text is under \"Math: musl libm port\" in THIRD_PARTY_NOTICES.md).\n"
         "//! Every double is stored as its IEEE-754 bit pattern, converted from the\n"
         "//! C source's hexadecimal float literals by scripts/gen_fmath_tables.py, so\n"
         "//! no digit is retyped. Generated; do not edit by hand.\n\n"

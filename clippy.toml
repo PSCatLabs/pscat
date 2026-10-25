@@ -57,4 +57,8 @@ disallowed-methods = [
     { path = "f32::atanh", reason = "use crate::fmath: one libm on every platform (issue #738)" },
     { path = "tiny_skia::Transform::from_rotate", reason = "its sin/cos are the platform libm: use crate::fmath::rotation (issue #738)" },
     { path = "tiny_skia::Transform::from_rotate_at", reason = "its sin/cos are the platform libm: build it from crate::fmath::rotation (issue #738)" },
+    { path = "tiny_skia::Transform::pre_rotate", reason = "its sin/cos are the platform libm: build the matrix from crate::fmath::rotation (issue #738)" },
+    { path = "tiny_skia::Transform::pre_rotate_at", reason = "its sin/cos are the platform libm: build the matrix from crate::fmath::rotation (issue #738)" },
+    { path = "tiny_skia::Transform::post_rotate", reason = "its sin/cos are the platform libm: build the matrix from crate::fmath::rotation (issue #738)" },
+    { path = "tiny_skia::Transform::post_rotate_at", reason = "its sin/cos are the platform libm: build the matrix from crate::fmath::rotation (issue #738)" },
 ]

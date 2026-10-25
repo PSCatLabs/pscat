@@ -1,6 +1,7 @@
 //! `exp`, `log` and `pow` as in musl 1.2.5 (`src/math/exp.c`, `log.c`,
 //! `pow.c`), which are ARM's optimized-routines versions
-//! (MIT licence, Copyright (c) 2018, Arm Limited). Ported line for line, the
+//! (MIT licence, Copyright (c) 2018, Arm Limited; the full text is under
+//! "Math: musl libm port" in THIRD_PARTY_NOTICES.md). Ported line for line, the
 //! generic variant: no fused multiply-add, the table-based argument
 //! reduction. The tables are in `tables.rs`.
 //!

@@ -1,6 +1,7 @@
 //! Data tables for the exp, log and pow in `musl.rs`, copied bit for bit
 //! from musl 1.2.5 (`src/math/exp_data.c`, `log_data.c`, `pow_data.c`; MIT
-//! licence, Copyright (c) 2018, Arm Limited, from ARM's optimized-routines).
+//! licence, Copyright (c) 2018, Arm Limited, from ARM's optimized-routines;
+//! the full text is under "Math: musl libm port" in THIRD_PARTY_NOTICES.md).
 //! Every double is stored as its IEEE-754 bit pattern, converted from the
 //! C source's hexadecimal float literals by scripts/gen_fmath_tables.py, so
 //! no digit is retyped. Generated; do not edit by hand.
