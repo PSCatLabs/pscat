@@ -9,9 +9,9 @@
 % division, no transcendental. tests/noise.rs holds the two to that.
 % The native code is many times faster; this file is the specification
 % in runnable form, and a fallback for an interpreter without the
-% operators. It is pscat-only as written: the seed shuffle multiplies
-% a 31-bit state by 1103515245, which needs 64-bit integers (pscat's),
-% not Ghostscript's 32-bit ones.
+% operators. It also runs in Ghostscript (the seed step splits its
+% multiply so no integer passes 2^31), where it gives the same noise to
+% the precision of Ghostscript's 32-bit reals rather than bit for bit.
 %
 %   seed nrseed -                 own table; does not touch `rand`
 %   x y nrgnoise2 n               x y z nrgnoise3 n
@@ -62,15 +62,30 @@
 % @internal
 /nrt 0 def
 
+% @internal
+/nrlcg {                        % s -> (s*1103515245 + 12345) and 2^31-1
+    % 1103515245 = 16838*65536 + 20077 and s = sh*65536 + sl; the
+    % sh*16838*2^32 term vanishes mod 2^31, and every partial stays
+    % below 2^31, so 32-bit interpreters get the same integer.
+    dup -16 bitshift exch 65535 and              % sh sl
+    dup 20077 mul                                % sh sl p
+    dup -16 bitshift exch 65535 and 12345 add    % sh sl ph q
+    4 2 roll                                     % ph q sh sl
+    exch 20077 mul exch 16838 mul add            % ph q sh*al+sl*ah
+    3 -1 roll add                                % q S
+    1 index -16 bitshift add 32767 and 65536 mul % q hi*65536
+    exch 65535 and add
+} bind def
+
 % @kind: Procedure
-% @summary: Seed noiseref's own permutation table; the reference twin of the native noiseseed (does not touch rand).
+% @summary: Plain-PostScript twin of the native noiseseed operator; on pscat call noiseseed itself (dozens of times faster). Seeds noiseref's own table and never touches rand.
 % @example: 42 nrseed
 /nrseed {                                        % seed -> -
     2147483647 and /nrs exch def
     0 1 255 { nrP exch dup put } for
     255 -1 1 {
         /nri exch def
-        /nrs nrs 1103515245 mul 12345 add 2147483647 and def
+        /nrs nrs nrlcg def
         /nrj nrs -16 bitshift nri 1 add mod def
         /nrt nrP nri get def
         nrP nri nrP nrj get put
@@ -139,7 +154,7 @@
 } bind def
 
 % @kind: Procedure
-% @summary: 2D gradient noise in plain PostScript, bit-identical to the native gnoise2 under the same seed (nrseed / noiseseed).
+% @summary: Plain-PostScript twin of the native gnoise2 operator; on pscat call gnoise2 itself (dozens of times faster). 2D gradient noise, bit-identical to the native gnoise2 under the same seed (nrseed / noiseseed).
 % @example: 1.3 2.7 nrgnoise2
 /nrgnoise2 {                                     % x y -> n
     nrcell2
@@ -153,7 +168,7 @@
 } bind def
 
 % @kind: Procedure
-% @summary: 2D value noise in plain PostScript, bit-identical to the native vnoise2.
+% @summary: Plain-PostScript twin of the native vnoise2 operator; on pscat call vnoise2 itself (dozens of times faster). 2D value noise, bit-identical to the native vnoise2.
 % @example: 1.3 2.7 nrvnoise2
 /nrvnoise2 {                                     % x y -> v
     nrcell2
@@ -171,7 +186,7 @@
 } bind def
 
 % @kind: Procedure
-% @summary: 2D gradient noise and its analytic gradient in plain PostScript, bit-identical to the native gnoise2d.
+% @summary: Plain-PostScript twin of the native gnoise2d operator; on pscat call gnoise2d itself (dozens of times faster). 2D gradient noise and its analytic gradient, bit-identical to the native gnoise2d.
 % @example: 1.3 2.7 nrgnoise2d
 /nrgnoise2d {                                    % x y -> n dx dy
     2 copy nrgnoise2 /nrdn exch def
@@ -227,12 +242,12 @@
 } bind def
 
 % @kind: Procedure
-% @summary: 3D gradient (Perlin improved) noise in plain PostScript, bit-identical to the native gnoise3.
+% @summary: Plain-PostScript twin of the native gnoise3 operator; on pscat call gnoise3 itself (dozens of times faster). 3D gradient (Perlin improved) noise, bit-identical to the native gnoise3.
 % @example: 1.3 2.7 0.4 nrgnoise3
 /nrgnoise3 { { nrgr3 } nrcell3 } bind def       % x y z -> n
 
 % @kind: Procedure
-% @summary: 3D value noise in plain PostScript, bit-identical to the native vnoise3.
+% @summary: Plain-PostScript twin of the native vnoise3 operator; on pscat call vnoise3 itself (dozens of times faster). 3D value noise, bit-identical to the native vnoise3.
 % @example: 1.3 2.7 0.4 nrvnoise3
 /nrvnoise3 { { pop pop pop nrval } nrcell3 } bind def   % x y z -> v
 
@@ -263,32 +278,32 @@
 } bind def
 
 % @kind: Procedure
-% @summary: fBm of 2D gradient noise in plain PostScript (oct octaves, amplitude times gain and frequency times lac per octave), bit-identical to the native fbm2.
+% @summary: Plain-PostScript twin of the native fbm2 operator; on pscat call fbm2 itself (dozens of times faster). fBm of 2D gradient noise (oct octaves, amplitude times gain and frequency times lac per octave), bit-identical to the native fbm2.
 % @example: 1.3 2.7 5 0.5 2 nrfbm2
 /nrfbm2 { 2 4 1 roll { nrgnoise2 } false nroctaves } bind def
 
 % @kind: Procedure
-% @summary: fBm of 3D gradient noise in plain PostScript, bit-identical to the native fbm3.
+% @summary: Plain-PostScript twin of the native fbm3 operator; on pscat call fbm3 itself (dozens of times faster). fBm of 3D gradient noise, bit-identical to the native fbm3.
 % @example: 1.3 2.7 0.4 5 0.5 2 nrfbm3
 /nrfbm3 { 3 4 1 roll { nrgnoise3 } false nroctaves } bind def
 
 % @kind: Procedure
-% @summary: fBm of 2D value noise in plain PostScript, bit-identical to the native vfbm2.
+% @summary: Plain-PostScript twin of the native vfbm2 operator; on pscat call vfbm2 itself (dozens of times faster). fBm of 2D value noise, bit-identical to the native vfbm2.
 % @example: 1.3 2.7 5 0.5 2 nrvfbm2
 /nrvfbm2 { 2 4 1 roll { nrvnoise2 } false nroctaves } bind def
 
 % @kind: Procedure
-% @summary: fBm of 3D value noise in plain PostScript, bit-identical to the native vfbm3.
+% @summary: Plain-PostScript twin of the native vfbm3 operator; on pscat call vfbm3 itself (dozens of times faster). fBm of 3D value noise, bit-identical to the native vfbm3.
 % @example: 1.3 2.7 0.4 5 0.5 2 nrvfbm3
 /nrvfbm3 { 3 4 1 roll { nrvnoise3 } false nroctaves } bind def
 
 % @kind: Procedure
-% @summary: Ridged multifractal sum of 2D gradient noise in plain PostScript ((1-|n|) squared per octave), bit-identical to the native ridged2.
+% @summary: Plain-PostScript twin of the native ridged2 operator; on pscat call ridged2 itself (dozens of times faster). Ridged multifractal sum of 2D gradient noise ((1-|n|) squared per octave), bit-identical to the native ridged2.
 % @example: 1.3 2.7 5 0.5 2 nrridged2
 /nrridged2 { 2 4 1 roll { nrgnoise2 } true nroctaves } bind def
 
 % @kind: Procedure
-% @summary: Ridged sum of 3D gradient noise in plain PostScript, bit-identical to the native ridged3.
+% @summary: Plain-PostScript twin of the native ridged3 operator; on pscat call ridged3 itself (dozens of times faster). Ridged sum of 3D gradient noise, bit-identical to the native ridged3.
 % @example: 1.3 2.7 0.4 5 0.5 2 nrridged3
 /nrridged3 { 3 4 1 roll { nrgnoise3 } true nroctaves } bind def
 

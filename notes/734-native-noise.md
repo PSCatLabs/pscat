@@ -72,3 +72,14 @@ so the "empty" row is the floor.
 A native call costs about as much as an empty loop step, as the issue
 hoped. The reference fBm is slow because it is written for clarity (an
 array of coordinates, a generic octave loop), not speed.
+
+## Cross-platform evidence
+
+- The WASM build (`cargo rustc --lib --target wasm32-unknown-unknown
+  --crate-type cdylib`, driven through `web/pscat.js` under node) prints
+  exactly the reprs `tests/noise.rs::pinned_values_hold_on_every_platform`
+  pins on aarch64 macOS. CI runs the same test on x86_64 Linux.
+- `lib/noiseref.ps` also runs in Ghostscript. The seed step splits its
+  multiply so every integer stays below 2^31, and gs builds the same
+  table. gs's reals are 32-bit, so its noise values match pscat only to
+  about 6 digits. Within pscat the match is bit for bit.
