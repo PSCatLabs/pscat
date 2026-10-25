@@ -100,6 +100,8 @@ pub mod encodings;
 #[doc(hidden)]
 pub mod file;
 #[doc(hidden)]
+pub mod filenames;
+#[doc(hidden)]
 pub mod fmath;
 #[doc(hidden)]
 pub mod font;
@@ -152,6 +154,8 @@ pub mod window;
 #[doc(hidden)]
 #[path = "window_stub.rs"]
 pub mod window;
+#[doc(hidden)]
+pub mod write_roots;
 
 pub use error::PsError;
 pub use interp::Interp;

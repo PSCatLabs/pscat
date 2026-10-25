@@ -652,7 +652,8 @@ fn tool_list(cfg: &Config) -> Value {
             "description": format!("Write a LaTeX formula on a chalkboard: hand-drawn chalk \
                 strokes on a slate with eraser marks and the ghost of an earlier lecture. \
                 Returns the board as a PNG image. Type the LaTeX as in a document, single \
-                backslashes: \\\\ breaks rows, & aligns them, and an align*/equation \
+                backslashes: \\\\ breaks rows, & marks where align, aligned and split rows line up, \
+                gather, gather* and gathered centre each row instead, and an align*/equation \
                 wrapper or $...$ is fine. The subset is mathkit's (fractions, roots, sums, \
                 integrals, Greek, matrices, cases, accents...); a command outside it is a \
                 latex_error naming it. Same input and seed: the same image, byte for byte. \
@@ -684,7 +685,13 @@ fn tool_list(cfg: &Config) -> Value {
                             { "type": "object" }
                         ]
                     },
-                    "ghosting": { "type": ["number", "boolean"], "minimum": 0, "maximum": 1, "description": "How much of an earlier lecture's erased writing shows, 0..1 (default 0.4; false = none). Needs a board" },
+                    "ghosting": {
+                        "description": "How much of an earlier lecture's erased writing shows, 0..1 (default 0.4; false = none). Needs a board",
+                        "anyOf": [
+                            { "type": "number", "minimum": 0, "maximum": 1 },
+                            { "type": "boolean" }
+                        ]
+                    },
                     "seed": { "type": "integer", "minimum": -1_000_000_000, "maximum": 1_000_000_000, "description": "Seed for the layout, the chalk and the board; same seed, same image (default 1)" },
                     "width": { "type": "integer", "minimum": 1, "maximum": 8000, "description": "Board width in points (default 800)" },
                     "height": { "type": "integer", "minimum": 1, "maximum": 8000, "description": "Board height in points (default 400)" },

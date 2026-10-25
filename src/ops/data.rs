@@ -243,7 +243,7 @@ fn putinterval(it: &mut Interp) -> Result<(), PsError> {
 /// `copy` is polymorphic: `n copy` duplicates the top n stack entries;
 /// composite copy fills the second operand from the first and returns
 /// the filled prefix (a view, for arrays/strings).
-fn copy(it: &mut Interp) -> Result<(), PsError> {
+pub(crate) fn copy(it: &mut Interp) -> Result<(), PsError> {
     let top = it.pop()?;
     match &top.value {
         Value::Integer(n) => copy_n(it, *n),
@@ -311,7 +311,7 @@ fn copy(it: &mut Interp) -> Result<(), PsError> {
     }
 }
 
-fn forall(it: &mut Interp) -> Result<(), PsError> {
+pub(crate) fn forall(it: &mut Interp) -> Result<(), PsError> {
     let body = pop_proc(it)?;
     let obj = it.pop()?;
     let src = match &obj.value {
