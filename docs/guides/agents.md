@@ -174,27 +174,30 @@ For OpenClaw, Hermes, or any other MCP client, the generic stdio config:
 
 ### Limits and options
 
-Fixed by whoever registers the server; no tool argument can change them.
+Set by whoever registers the server; no tool argument can change them.
 
 | Option | Default | What it bounds |
 |---|---|---|
-| `--timeout SECS` | 60 | Wall-clock time per tool call. The interpreter stops a program a margin before it (a quarter of it, at most 5 s: 55 s by default; `limit_exceeded`, `limit: "time"`, and a render keeps the partial page); the child is killed at the full time, for a program stuck inside one long operator, and the call fails with `timeout`. |
+| `--timeout SECS` | 60 | Wall-clock time per tool call, 1 to 86400 (the 60 is only the default; see "Raising the time limit" below). The interpreter stops a program a margin before it (a quarter of it, at most 5 s: 55 s by default; `limit_exceeded`, `limit: "time"`, and a render keeps the partial page); the child is killed at the full time, for a program stuck inside one long operator, and the call fails with `timeout`. |
 | `--max-steps N` | 25000000000 | Interpreter steps per program (objects executed, plus loop iterations). Past it the interpreter stops and the call fails with `limit_exceeded`, `limit: "steps"`. `0` = off. |
 | `--max-memory MIB` | 1024 | Heap the program may grow by, in MiB (`limit_exceeded`, `limit: "memory"`). `0` = off. |
 | `--max-input-bytes N` | 1048576 | `source` / `text` size (`input_too_large`). |
+| `--max-pixels N` | 40000000 | The largest page, board or sheet in device pixels (width and height in points times dpi/72) for `render_postscript`, `handwrite`, `chalkboard_math` and `review_sheet`, checked before a canvas is allocated (`output_too_large`, with `limit_pixels`, `pixels`, `width_px`, `height_px`). 1 to 64000000; 8000 pixels a side always applies. An 8K screen or an A2 poster at 300 dpi fits the default. |
+| `--max-latex-bytes N` | 4096 | `chalkboard_math`'s `latex` size (`input_too_large`, with `limit`); about 40 rows. |
 | `--max-image-bytes N` | 3750000 | Inline image bytes per call, about 5 MB once base64-encoded; also at most 20 pages inline (`output_too_large`; a file asked for with `out_path` is still written). |
 | `--out-root DIR` | the working directory | Where `out_path` may write. Off when the server starts in `/`. |
 
-`chalkboard_math` has two fixed caps of its own, checked before anything
-runs: `latex` at most 4096 bytes (`input_too_large`; about 40 rows, four
-times a long derivation; the time limit stops anything slower), and the
-board at most 40,000,000 device pixels and 8000 a side (`output_too_large`
-with `limit_pixels`; an 8K screen or an A2 poster at 300 dpi fits). Both are
-in `SECURITY.md`.
+`chalkboard_math` checks its caps before anything runs: `latex` at most
+`--max-latex-bytes` (default 4096: about 40 rows, four times a long
+derivation; the time limit stops anything slower), and the board at most
+`--max-pixels` (default 40,000,000) and 8000 a side. `render_postscript` and
+`handwrite` take the same pixel cap: a `render_postscript` page is refused
+before a child starts, and a `handwrite` note, whose height is sized from its
+text, before it is drawn. All are in `SECURITY.md`.
 
-`review_sheet` has fixed caps too, checked before any program runs
-(`output_too_large`): 32 cells (`limit_cells`), the cells at most 40,000,000
-pixels in all and the sheet at most 40,000,000 pixels and 8000 a side
+`review_sheet` has caps too, checked before any program runs
+(`output_too_large`): 32 cells (`limit_cells`), the cells at most
+`--max-pixels` in all and the sheet at most `--max-pixels` and 8000 a side
 (`limit_pixels`), a label at most 200 characters, and the sources together at
 most `--max-input-bytes`. The cells share the one `--timeout`. Also in
 `SECURITY.md`.
@@ -204,7 +207,8 @@ The three interpreter limits (steps, time, memory) are on by default for
 `stopped`. They are read between interpreter steps, so one operator that runs
 for a long time (an enormous fill, a read of a device file) is outside them;
 `SECURITY.md` lists what each limit can and cannot stop. `handwrite` runs
-trusted library code on escaped text and is bounded by `--timeout`.
+trusted library code on escaped text and is bounded by `--timeout` and
+`--max-pixels`.
 
 Program output is capped at 4 MiB per stream (`output_too_large`). A failed
 call is an MCP tool error (`isError: true`) whose text says what happened,
@@ -224,6 +228,53 @@ it, so an existing regular file with that extension is replaced and nothing
 else can be overwritten. Claude Code and Codex start servers in
 the project directory, so by default an agent can write renders into the
 project and nowhere else.
+
+### Raising the time limit
+
+The 60 s is a default, not a fixed limit, and three things have to allow a
+long render. A call that takes minutes (a ray-marched landscape) works over
+MCP once all three do; a job you want to poll or cancel, or one past the
+server's 24-hour cap, is the async-jobs work still open in #741.
+
+1. **The server's `--timeout SECS`** (1 to 86400), the time limit above.
+   Register the server with it, for example
+   `claude mcp add pscat -- pscat-mcp --timeout 1800 --max-steps 0`.
+   The interpreter's own stop moves with it (a quarter of it, at most 5 s,
+   before `--timeout`).
+2. **The other interpreter limits.** `--max-steps` defaults to 25 billion,
+   which at about 60 million steps a second is roughly seven minutes: a long
+   `--timeout` alone ends in `limit_exceeded` with `limit: "steps"` long
+   before the time is up. Raise it, or `--max-steps 0` for none. A big canvas
+   may also want `--max-memory` (MiB, default 1024) and `--max-pixels`.
+3. **The MCP client's own tool-call timeout**, which cuts a call off whatever
+   the server allows:
+   - *Claude Code*: `MCP_TOOL_TIMEOUT`, in milliseconds, defaults to about 28
+     hours, so it rarely binds. A per-server `timeout` field in milliseconds
+     (in `.mcp.json`, or via `claude mcp add-json`) overrides it for one
+     server. A stdio server that sends no response and no progress
+     notification for 30 minutes is aborted by an idle timeout, and
+     `pscat-mcp` sends no progress notifications, so for a call past 30 minutes
+     also set `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT` (milliseconds; `0` turns it
+     off) or a per-server `timeout` of at least that long. (`MCP_TIMEOUT` is
+     the server *startup* timeout, a different setting.)
+   - *Codex*: `tool_timeout_sec` in the server's `[mcp_servers.pscat]` table
+     of `config.toml`. Its default is **60**, so under Codex the client cuts a
+     call at 60 s even when `--timeout` is higher. For example:
+     ```toml
+     [mcp_servers.pscat]
+     command = "pscat-mcp"
+     args = ["--timeout", "1800", "--max-steps", "0"]
+     tool_timeout_sec = 1800
+     ```
+   - *Any other client*: look for its tool-call or request timeout.
+
+The Claude Code plugin's bundled server is registered without options, so it
+keeps the 60 s default. To raise it, register the server by hand as above and
+toggle the plugin's server off in `/mcp`, so the tools are not listed twice.
+The settings above are from the Claude Code
+([MCP](https://code.claude.com/docs/en/mcp),
+[environment variables](https://code.claude.com/docs/en/env-vars)) and Codex
+([MCP](https://developers.openai.com/codex/mcp)) docs as of October 2026.
 
 ### Protocol
 

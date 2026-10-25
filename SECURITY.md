@@ -373,7 +373,8 @@ an installed build (October 2026, #568).
   past one the call fails with `limit_exceeded` and a `limit` field
   (`steps`, `time` or `memory`), and `render_postscript` still returns the
   partial page. `0` turns the step or memory limit off. A wall-clock limit per
-  call (`--timeout`, default 60 s) kills the child and returns a `timeout`
+  call (`--timeout`, 60 s by default and up to 86400; the MCP client's own tool-call
+  timeout may also need raising, see the agents guide) kills the child and returns a `timeout`
   tool error, the backstop for a program the limits cannot reach ("Limits
   that cannot be enforced"). Each child stream (stdout, stderr) is kept
   up to 4 MiB; past that the child is killed and the call fails with
@@ -386,20 +387,21 @@ an installed build (October 2026, #568).
   (default 1024 MiB); a whole-file read of `/dev/zero` or a FIFO is stopped by
   those limits too (see "Whole-file reads and the limits").
 - **`chalkboard_math` takes LaTeX, never PostScript, and has two caps of its
-  own (#688).** The server turns the LaTeX into a program with the
+  own (#688), both server flags (#711).** The server turns the LaTeX into a program with the
   `pscat::chalk` generator (#555), in-process and without file or
   environment access: the TeX goes in as an escaped string literal and every
   other value is checked and printed by Rust, so the input cannot add
   PostScript. The program runs in a `pscat` child under the limits above,
   like `render_postscript`. Checked before anything runs:
-  - `latex` is at most **4096 bytes** (`input_too_large`, with `limit` and
-    `size`), on top of `--max-input-bytes`. A ten-row derivation is about
+  - `latex` is at most **4096 bytes** by default, `--max-latex-bytes`
+    (`input_too_large`, with `limit` and `size`), on top of `--max-input-bytes`. A ten-row derivation is about
     1 KB; 4 KB (about 40 rows) rendered in 25 s on the machine it was
     measured on with the default board, inside the default time limit. A
     long formula on a large board can take longer; the time limit then stops
     it with `limit_exceeded`.
-  - The board is at most **40,000,000 device pixels** (width and height in
-    points times dpi/72), and 8000 a side (`output_too_large`, with
+  - The board is at most **40,000,000 device pixels** by default,
+    `--max-pixels` (width and height in points times dpi/72), and 8000 a side
+    (`output_too_large`, with
     `limit_pixels`, `pixels`, `width_px`, `height_px`). The interpreter
     already refuses more than 8000 pixels a side (64 million), so this cap
     bounds memory and render time with headroom rather than preventing an
@@ -428,10 +430,10 @@ an installed build (October 2026, #568).
   stops at a limit is drawn as far as it got and named in the text beside the
   sheet. Caps, checked before any program runs, all `output_too_large`:
   - at most **32 cells** (`limit_cells`), each a child process;
-  - the cells at most **40,000,000 pixels** in all (`limit_pixels`, `pixels`),
-    before any enlargement, and a cell at most 8000 pixels on a side even
-    enlarged;
-  - the sheet at most **40,000,000 pixels** (`limit_pixels`, `width_px`,
+  - the cells at most **`--max-pixels`** (default 40,000,000) in all
+    (`limit_pixels`, `pixels`), before any enlargement, and a cell at most
+    8000 pixels on a side even enlarged;
+  - the sheet at most **`--max-pixels`** (`limit_pixels`, `width_px`,
     `height_px`) and 8000 a side (`limit_side_px`): the sheet is 4 bytes a
     pixel in the server, allocated before `--max-memory` counts, as for
     `chalkboard_math`;
@@ -454,8 +456,16 @@ an installed build (October 2026, #568).
   [the agents guide](docs/guides/agents.md#protocol).
 - **Page size is bounded** because the server checks `width` and `height`
   (1..8000) and `dpi` (9..1200), and the CLI refuses a canvas over 8000 x 8000
-  device pixels. `render_postscript` and `handwrite` have no smaller pixel
-  cap yet; `chalkboard_math` has one (above).
+  device pixels. Under that ceiling (64 million pixels, a canvas of 256 MB
+  allocated before `--max-memory` counts) every tool that allocates a canvas
+  shares one cap, `--max-pixels` (#711, default 40,000,000, at most
+  64,000,000), and answers `output_too_large` with `limit_pixels`, `pixels`,
+  `width_px` and `height_px`: `render_postscript` before the child starts (the
+  page size is fixed by its arguments; a program cannot resize it), `handwrite`
+  after the note's height is sized from its text and before it is drawn (the
+  server passes `pscat handwrite --max-pixels`, and refuses a width over 8000
+  pixels itself), `chalkboard_math` and `review_sheet` as above. An operator
+  who raises `--max-pixels` should raise `--max-memory` with it.
 - **`handwrite`'s options are validated before they reach PostScript.**
   `pscat handwrite` accepts only plain decimal numbers for the numeric
   options (and exactly three for `ink`), `plain` or `ruled` for `paper`, and
