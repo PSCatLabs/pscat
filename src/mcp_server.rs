@@ -445,8 +445,8 @@ fn initialize_result(cfg: &Config, params: &Value) -> Result<Value, (String, Val
              eval_postscript returns what a program printed or its PostScript error; \
              chalkboard_math writes a LaTeX formula on a chalkboard. \
              Each call is limited to {}s: this server's --timeout, 60 by default, which \
-             whoever registered it can raise (up to 86400; the MCP client's own tool-call \
-             timeout must be raised too). A page, board or sheet is limited to {} pixels. \
+             whoever registered it can raise (up to 86400); the MCP client's own tool-call \
+             timeout can also cut a call off (Codex's default is 60 s). A page, board or sheet is limited to {} pixels. \
              {out_path}",
             cfg.timeout.as_secs(),
             cfg.max_pixels
@@ -952,9 +952,6 @@ fn handwrite(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
     let dest = optional_str(args, "out_path")?
         .map(|p| confine(cfg, p, "png"))
         .transpose()?;
-    let scratch = ScratchDir::new()?;
-    let out = scratch.path().join("note.png");
-
     // The note's height is auto-sized inside the child, so the width is
     // checked here and the area there (`--max-pixels`, #711); an area over
     // the cap comes back as a recognisable refusal, mapped below.
@@ -974,6 +971,8 @@ fn handwrite(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
         .with("width_px", json!(w_px)));
     }
 
+    let scratch = ScratchDir::new()?;
+    let out = scratch.path().join("note.png");
     let mut cmd = Command::new(pscat_bin()?);
     cmd.arg("handwrite").arg("-o").arg(&out);
     cmd.arg("--max-pixels").arg(cfg.max_pixels.to_string());

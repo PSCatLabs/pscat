@@ -164,7 +164,8 @@ pub enum LimitsError {
 /// for an auto-sized page of `w`x`h` device pixels over the cap `limit`.
 /// The MCP server reads it back with [`parse_pixel_cap_message`] to answer
 /// `output_too_large` with the numbers; the one definition keeps the two in
-/// step.
+/// step. Internal: not part of the library's stable surface.
+#[doc(hidden)]
 pub fn pixel_cap_message(w: u64, h: u64, limit: u64) -> String {
     format!(
         "output too large: {w}x{h} pixels ({}) is over --max-pixels {limit}",
@@ -173,7 +174,8 @@ pub fn pixel_cap_message(w: u64, h: u64, limit: u64) -> String {
 }
 
 /// `(width_px, height_px, limit)` from a stderr that holds a
-/// [`pixel_cap_message`], or `None`.
+/// [`pixel_cap_message`], or `None`. Internal, like it.
+#[doc(hidden)]
 pub fn parse_pixel_cap_message(stderr: &str) -> Option<(u64, u64, u64)> {
     let rest = stderr.split_once("output too large: ")?.1;
     let (dims, rest) = rest.split_once(" pixels (")?;

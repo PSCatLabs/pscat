@@ -90,7 +90,8 @@ PIL composite. A one-call typewriter or chart is not added yet.
   Runs the lint pass and appends a `Lint:` block when it finds something
   (a blank page, an unbalanced `gsave`, stuff left on the stack).
 - `handwrite` — text in, handwriting-style note PNG back (the `pscat handwrite`
-  options: size, width, paper, ink, jitter, seed, dpi). It is a set of
+  options: size, width, paper, ink, jitter, seed, dpi; the note is refused
+  past `--max-pixels`, see the limits below). It is a set of
   hand-drawn styles for notes, cards and art, not a way to imitate a specific
   person's handwriting or pass writing off as someone else's.
 - `chalkboard_math` — a LaTeX formula in (single backslashes, `\\` rows,
@@ -101,8 +102,8 @@ PIL composite. A one-call typewriter or chart is not added yet.
   full `--json` schema). Same input and seed, the same bytes. A command
   outside mathkit's subset is a one-line `latex_error` naming it (`code`
   `unsupported_command`, `token` `\oplus`). The input is LaTeX, never
-  PostScript. `latex` is capped at 4096 bytes and the board at 40 million
-  pixels (see the limits below); svg and pdf go to `out_path` only.
+  PostScript. By default `latex` is capped at 4096 bytes and the board at 40
+  million pixels (`--max-latex-bytes`, `--max-pixels`; see the limits below); svg and pdf go to `out_path` only.
 - `review_sheet` — several programs in, one labelled PNG out: the
   `pscat sheet` sheet (#693), byte for byte. `entries` is a list of rows,
   each `{source, label, width, height, dpi}` (`source` is the program, never
@@ -115,8 +116,8 @@ PIL composite. A one-call typewriter or chart is not added yet.
   below (`labels: false`, `sizes: false` drop them). A program that errors is
   drawn as far as it got, with its error text beside the image. Each cell is
   its own `pscat` child under the interpreter limits and the one call
-  `--timeout`. At most 32 cells, the cells and the sheet at most 40 million
-  pixels, 8000 a side (`output_too_large`); see the limits below. The #683
+  `--timeout`. At most 32 cells, the cells and the sheet at most `--max-pixels`
+  (40 million by default), 8000 a side (`output_too_large`); see the limits below. The #683
   logo sheet is one call:
   `{"entries": [{"source": "<a.ps>", "label": "A: one-line cat"}, ...],
   "width": 384, "height": 384, "dpi": [96, 9, {"dpi": 9, "zoom": 4}]}`.
@@ -268,9 +269,10 @@ server's 24-hour cap, is the async-jobs work still open in #741.
      ```
    - *Any other client*: look for its tool-call or request timeout.
 
-The Claude Code plugin's bundled server is registered without options, so it
-keeps the 60 s default. To raise it, register the server by hand as above and
-toggle the plugin's server off in `/mcp`, so the tools are not listed twice.
+The plugins' bundled server is registered without options, so it keeps the
+60 s default. To raise it, register the server by hand as above and, so the
+tools are not listed twice, toggle the plugin's server off in `/mcp` (Claude
+Code) or remove it (Codex).
 The settings above are from the Claude Code
 ([MCP](https://code.claude.com/docs/en/mcp),
 [environment variables](https://code.claude.com/docs/en/env-vars)) and Codex
