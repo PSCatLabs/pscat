@@ -2633,14 +2633,15 @@ fn a_killed_server_leaves_no_render_behind() {
 
 /// Several starts in one write, below `--max-jobs`: every job runs. (Taking
 /// a slot makes the next job first in line; without a wake-up then, a job
-/// sat queued beside a free slot.)
+/// sat queued beside a free slot. Without the wake-up this failed about one
+/// run in ten here; with it, never.)
 #[test]
 fn jobs_started_together_all_run_up_to_the_cap() {
     let mut s = Server::start_in(
         &common::scratch_dir("mcp-job-together"),
         &[
             "--max-jobs",
-            "3",
+            "4",
             "--job-timeout",
             "600",
             "--max-steps",
@@ -2648,11 +2649,11 @@ fn jobs_started_together_all_run_up_to_the_cap() {
         ],
     );
     initialized(&mut s);
-    for i in 0..3 {
+    for i in 0..4 {
         s.request(json!(i), "start_render", json!({ "source": "{ } loop" }));
     }
     let mut jobs = Vec::new();
-    for _ in 0..3 {
+    for _ in 0..4 {
         let reply = s.read();
         jobs.push(
             job_facts(&reply["result"])["job_id"]
