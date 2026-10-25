@@ -76,6 +76,12 @@ fn image(it: &mut Interp) -> Result<(), PsError> {
     let top = it.pop()?;
     if let Value::Dict(d) = &top.value {
         let ncomp = it.gfx.colorspace_ncomp();
+        if matches!(
+            d.borrow().get("ImageType").as_ref().map(|o| &o.value),
+            Some(Value::Integer(3))
+        ) {
+            return image_type3(it, d.clone(), ncomp);
+        }
         return dict_image(it, d.clone(), ncomp, None);
     }
     let source = data_source(&top)?;
@@ -174,7 +180,53 @@ fn dict_image(
     ncomp: u32,
     mask: Option<bool>,
 ) -> Result<(), PsError> {
+    let ctx = image_ctx(it, &d.borrow(), ncomp, mask)?;
+    it.begin_image(ctx)
+}
+
+/// Level 3 `ImageType 3` (#739): an image gated by a 1-bit stencil.
+/// Only `InterleaveType 3` (separate DataDict and MaskDict sources) is
+/// implemented; types 1 and 2 (mask samples interleaved into the data
+/// source) raise `limitcheck`, as `colorimage` with `multi true` does.
+/// The stencil keeps its own size, Decode and ImageMatrix, so mask and
+/// image may differ in resolution; MaskDict's Decode picks the polarity
+/// as for `imagemask` (`[1 0]` paints the image where the mask sample is
+/// 1, `[0 1]` where it is 0; absent, gs paints the 1s and so do we).
+fn image_type3(
+    it: &mut Interp,
+    d: std::rc::Rc<std::cell::RefCell<Dict>>,
+    ncomp: u32,
+) -> Result<(), PsError> {
     let d = d.borrow();
+    match d.get("InterleaveType").as_ref().map(|o| &o.value) {
+        Some(Value::Integer(3)) => {}
+        Some(Value::Integer(1 | 2)) => return Err(PsError::Limitcheck),
+        Some(Value::Integer(_)) => return Err(PsError::Rangecheck),
+        _ => return Err(PsError::Typecheck),
+    }
+    let sub = |key: &str| match d.get(key).as_ref().map(|o| &o.value) {
+        Some(Value::Dict(sub)) => Ok(sub.clone()),
+        _ => Err(PsError::Typecheck),
+    };
+    let (data_dict, mask_dict) = (sub("DataDict")?, sub("MaskDict")?);
+    // A mask has one bit per sample; image_ctx would force it and misread.
+    if let Some(Value::Integer(b)) = mask_dict.borrow().get("BitsPerComponent").map(|o| o.value)
+        && b != 1
+    {
+        return Err(PsError::Rangecheck);
+    }
+    let image = image_ctx(it, &data_dict.borrow(), ncomp, None)?;
+    let mut stencil = image_ctx(it, &mask_dict.borrow(), 1, Some(true))?;
+    if mask_dict.borrow().get("Decode").is_none() {
+        // gs-pinned: a MaskDict with no Decode paints the 1s, unlike a
+        // plain `imagemask` dict, whose default [0 1] paints the 0s.
+        stencil.mask = Some(true);
+    }
+    it.begin_image(image.with_stencil(stencil))
+}
+
+/// Build the engine context for one Level 2 image dictionary.
+fn image_ctx(it: &Interp, d: &Dict, ncomp: u32, mask: Option<bool>) -> Result<ImageCtx, PsError> {
     let geti = |k: &str| -> Result<i64, PsError> {
         match d.get(k).as_ref().map(|o| &o.value) {
             Some(Value::Integer(n)) => Ok(*n),
@@ -227,7 +279,7 @@ fn dict_image(
     // Mask polarity from Decode: [1 0] paints the 1s (≡ operand true);
     // the default [0 1] paints the 0s.
     let mask = mask.map(|_| decode.first().copied().unwrap_or(0.0) == 1.0);
-    it.begin_image(ImageCtx::new(
+    Ok(ImageCtx::new(
         w as usize,
         h as usize,
         bits as u32,

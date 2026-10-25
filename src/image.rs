@@ -45,6 +45,45 @@ pub(crate) enum ImageStep {
     Done,
 }
 
+/// Upper bounds on the stencil composite's expansion (#739): at most 64x
+/// per axis and 16 Mpixel in all, so a tiny image under a huge mask cannot
+/// blow up memory; past that the stencil is sampled at the image's cells.
+const MAX_STENCIL_SCALE: f64 = 64.0;
+const MAX_COMPOSITE_PIXELS: usize = 16 << 20;
+
+/// The integer expansion actually used: `want`, lowered until the raster
+/// fits `MAX_COMPOSITE_PIXELS`. The cap limits only the expansion: at 1 the
+/// image is always emitted, as a plain image of that size would be.
+fn expansion(width: usize, height: usize, want: usize) -> usize {
+    let cells = |k: usize| {
+        width
+            .saturating_mul(k)
+            .saturating_mul(height.saturating_mul(k))
+    };
+    let mut k = want.max(1);
+    while k > 1 && cells(k) > MAX_COMPOSITE_PIXELS {
+        k -= 1;
+    }
+    k
+}
+
+/// A stenciled image flattened to RGBA at `k`x the image's resolution.
+struct Composite {
+    w: usize,
+    h: usize,
+    k: usize,
+    rgba: Vec<u8>,
+}
+
+impl Composite {
+    /// Device transform for the composite's pixel coordinates, given the
+    /// image-sample-to-device transform `t`.
+    fn transform(&self, t: tiny_skia::Transform) -> [f32; 6] {
+        let k = self.k as f32;
+        [t.sx / k, t.ky / k, t.kx / k, t.sy / k, t.tx, t.ty]
+    }
+}
+
 pub(crate) struct ImageCtx {
     pub width: usize,
     pub height: usize,
@@ -59,6 +98,10 @@ pub(crate) struct ImageCtx {
     pub color: ImageColor,
     pub source: ImageSource,
     pub data: Vec<u8>,
+    /// `ImageType 3` (#739): the 1-bit stencil that gates this image's
+    /// pixels, with its own source, resolution and ImageMatrix. Fed after
+    /// this image's own data (InterleaveType 3: separate sources).
+    pub stencil: Option<Box<ImageCtx>>,
     waiting: bool,
     eod: bool,
 }
@@ -88,9 +131,15 @@ impl ImageCtx {
             color,
             source,
             data: Vec::new(),
+            stencil: None,
             waiting: false,
             eod: false,
         }
+    }
+
+    pub(crate) fn with_stencil(mut self, stencil: ImageCtx) -> Self {
+        self.stencil = Some(Box::new(stencil));
+        self
     }
 
     fn row_bytes(&self) -> usize {
@@ -102,11 +151,17 @@ impl ImageCtx {
     }
 
     pub(crate) fn waiting(&self) -> bool {
-        self.waiting
+        self.waiting || self.stencil.as_ref().is_some_and(|s| s.waiting())
     }
 
-    /// The data-source procedure's result, handed over by the machine.
+    /// The data-source procedure's result, handed over by the machine
+    /// (to whichever of the image and its stencil asked for it).
     pub(crate) fn supply(&mut self, obj: Object) -> Result<(), PsError> {
+        if !self.waiting
+            && let Some(st) = &mut self.stencil
+        {
+            return st.supply(obj);
+        }
         self.waiting = false;
         match &obj.value {
             crate::object::Value::String(s) => {
@@ -122,6 +177,41 @@ impl ImageCtx {
     }
 
     pub(crate) fn step(&mut self, gfx: &mut Gfx) -> Result<ImageStep, PsError> {
+        // gs reads the mask's source first, then the image's (probed with
+        // two data procedures, #739), so a shared file or one procedure
+        // counter sees the same order.
+        if let Some(st) = &mut self.stencil {
+            if let Some(exec) = st.fill()? {
+                return Ok(exec);
+            }
+            // Finish the mask's filter chain before the image starts
+            // reading, or the image would take the mask's EOD marker for
+            // data (`currentfile /ASCIIHexDecode filter` ... `80>` then
+            // the image bytes). Not when both planes read the very same
+            // file object: they then share its position.
+            let shared = matches!(
+                (&st.source, &self.source),
+                (ImageSource::File(a), ImageSource::File(b)) if std::rc::Rc::ptr_eq(a, b)
+            );
+            if !shared {
+                st.drain_filters()?;
+            }
+        }
+        if let Some(exec) = self.fill()? {
+            return Ok(exec);
+        }
+        self.drain_filters()?;
+        if let Some(st) = &mut self.stencil {
+            st.drain_filters()?;
+        }
+        // Premature EOD renders what arrived; missing samples read as 0.
+        self.rasterize(gfx);
+        Ok(ImageStep::Done)
+    }
+
+    /// Read this plane's own source until it has all its samples (or
+    /// hits EOD). `Some(Exec)` means a data procedure must run first.
+    fn fill(&mut self) -> Result<Option<ImageStep>, PsError> {
         while self.data.len() < self.needed() && !self.eod {
             match &self.source {
                 ImageSource::Bytes(_) => {
@@ -148,14 +238,18 @@ impl ImageCtx {
                 }
                 ImageSource::Proc(p) => {
                     self.waiting = true;
-                    return Ok(ImageStep::Exec(p.clone()));
+                    return Ok(Some(ImageStep::Exec(p.clone())));
                 }
             }
         }
-        // A filter source is drained to its own EOD marker — every
-        // layer of the chain — so the underlying file (usually the
-        // program) resumes right after the encoded data. gs-pinned
-        // inline-image behavior.
+        Ok(None)
+    }
+
+    /// A filter source is drained to its own EOD marker — every
+    /// layer of the chain — so the underlying file (usually the
+    /// program) resumes right after the encoded data. gs-pinned
+    /// inline-image behavior.
+    fn drain_filters(&mut self) -> Result<(), PsError> {
         if let ImageSource::File(f) = &self.source {
             let mut layer = f.clone();
             while layer.borrow().is_filter() {
@@ -166,9 +260,31 @@ impl ImageCtx {
                 layer = next;
             }
         }
-        // Premature EOD renders what arrived; missing samples read as 0.
-        self.rasterize(gfx);
-        Ok(ImageStep::Done)
+        Ok(())
+    }
+
+    /// The sample cell of this plane that user-space point (ux, uy) falls
+    /// in (nearest neighbour: the cell containing the point), or None
+    /// outside the source rectangle. The one place a point becomes a
+    /// sample position, so a smoother filter (#730 /Interpolate) has a
+    /// single seam to replace.
+    fn cell_at(&self, ux: f64, uy: f64) -> Option<(usize, usize)> {
+        let m = self.matrix;
+        let ix = (m[0] * ux + m[2] * uy + m[4]).floor();
+        let iy = (m[1] * ux + m[3] * uy + m[5]).floor();
+        if ix < 0.0 || iy < 0.0 {
+            return None;
+        }
+        let (ix, iy) = (ix as usize, iy as usize);
+        (ix < self.width && iy < self.height).then_some((ix, iy))
+    }
+
+    /// Whether this stencil plane (an imagemask-style 1-bit plane) lets
+    /// the point through: its cell exists and carries the paint polarity.
+    fn stencil_passes(&self, ux: f64, uy: f64) -> bool {
+        let paint_ones = self.mask.unwrap_or(true);
+        self.cell_at(ux, uy)
+            .is_some_and(|(ix, iy)| (self.sample(ix, iy, 0) != 0) == paint_ones)
     }
 
     /// One sample component, MSB-first within each byte, rows padded to
@@ -236,6 +352,89 @@ impl ImageCtx {
         }
     }
 
+    /// The masked image as one straight-alpha RGBA raster (#739), the
+    /// form the SVG and PDF backends take (a PNG alpha channel, a PDF
+    /// /SMask). The image's samples are expanded by an integer factor
+    /// large enough for the stencil's own resolution, and every cell is
+    /// gated by the stencil exactly as the rasterizer gates a pixel, so
+    /// mask and image may differ in size and ImageMatrix.
+    fn composite(&self, st: &ImageCtx) -> Option<Composite> {
+        let inv = invert6(self.matrix)?;
+        // Samples per user unit along each axis, image vs stencil.
+        let axes = |m: &[f64; 6]| (m[0].hypot(m[1]), m[2].hypot(m[3]));
+        let ((dx, dy), (sx, sy)) = (axes(&self.matrix), axes(&st.matrix));
+        let ratio = |s: f64, d: f64| if d > 0.0 { (s / d - 1e-6).ceil() } else { 1.0 };
+        let mut want = ratio(sx, dx)
+            .max(ratio(sy, dy))
+            .clamp(1.0, MAX_STENCIL_SCALE);
+        // Where the stencil's cell grid does not sit on the image's (a
+        // rotation, or an offset that is not a whole number of mask
+        // cells), mask edges fall inside image cells: expand enough to
+        // keep them, to quarter-cell accuracy.
+        let (m, i) = (&st.matrix, &inv);
+        let rel = [
+            m[0] * i[0] + m[2] * i[1],
+            m[1] * i[0] + m[3] * i[1],
+            m[0] * i[2] + m[2] * i[3],
+            m[1] * i[2] + m[3] * i[3],
+            m[0] * i[4] + m[2] * i[5] + m[4],
+            m[1] * i[4] + m[3] * i[5] + m[5],
+        ];
+        let off_grid = |v: f64| (v - v.round()).abs() > 1e-6;
+        if rel[1].abs() > 1e-9 || rel[2].abs() > 1e-9 || off_grid(rel[4]) || off_grid(rel[5]) {
+            want = want.max(4.0);
+        }
+        let k = expansion(self.width, self.height, want as usize);
+        let (w, h) = (self.width * k, self.height * k);
+        if w == 0 || h == 0 {
+            return None;
+        }
+        let mut rgba = Vec::with_capacity(w * h * 4);
+        for cy in 0..h {
+            for cx in 0..w {
+                let (r, g, b) = self.rgb_at(cx / k, cy / k);
+                // Centre of this raster cell in image space, then user space.
+                let (px, py) = ((cx as f64 + 0.5) / k as f64, (cy as f64 + 0.5) / k as f64);
+                let ux = inv[0] * px + inv[2] * py + inv[4];
+                let uy = inv[1] * px + inv[3] * py + inv[5];
+                let a = if st.stencil_passes(ux, uy) { 255 } else { 0 };
+                rgba.extend([
+                    (r * 255.0).round() as u8,
+                    (g * 255.0).round() as u8,
+                    (b * 255.0).round() as u8,
+                    a,
+                ]);
+            }
+        }
+        Some(Composite { w, h, k, rgba })
+    }
+
+    fn record_svg_stenciled(&self, gfx: &mut Gfx, st: &ImageCtx, t: tiny_skia::Transform) {
+        let Some(c) = self.composite(st) else { return };
+        let Some(mut pm) = tiny_skia::Pixmap::new(c.w as u32, c.h as u32) else {
+            return;
+        };
+        for (dst, px) in pm
+            .pixels_mut()
+            .iter_mut()
+            .zip(c.rgba.as_chunks::<4>().0.iter())
+        {
+            let a = u32::from(px[3]);
+            let pre = |v: u8| ((u32::from(v) * a + 127) / 255) as u8;
+            if let Some(p) = tiny_skia::PremultipliedColorU8::from_rgba(
+                pre(px[0]),
+                pre(px[1]),
+                pre(px[2]),
+                px[3],
+            ) {
+                *dst = p;
+            }
+        }
+        if let Ok(png) = pm.encode_png() {
+            gfx.svg_image(&png, c.w, c.h, c.transform(t));
+        }
+    }
+
     /// Mirror this image into the SVG recorder: the source samples as
     /// an embedded PNG plus the exact device transform the rasterizer
     /// applies (CTM ∘ ImageMatrix⁻¹, mapping sample coordinates to
@@ -252,6 +451,10 @@ impl ImageCtx {
         );
         let Some(inv) = img.invert() else { return };
         let t = inv.post_concat(ctm);
+        if let Some(st) = &self.stencil {
+            self.record_svg_stenciled(gfx, st, t);
+            return;
+        }
         let Some(mut pm) =
             tiny_skia::Pixmap::new(self.width.max(1) as u32, self.height.max(1) as u32)
         else {
@@ -314,6 +517,23 @@ impl ImageCtx {
         );
         let Some(inv) = img.invert() else { return };
         let t = inv.post_concat(ctm);
+        if let Some(st) = &self.stencil {
+            if let Some(c) = self.composite(st) {
+                let mut rgb = Vec::with_capacity(c.w * c.h * 3);
+                let mut alpha = Vec::with_capacity(c.w * c.h);
+                for px in c.rgba.as_chunks::<4>().0.iter() {
+                    rgb.extend_from_slice(&px[..3]);
+                    alpha.push(px[3]);
+                }
+                gfx.pdf_image(
+                    c.w,
+                    c.h,
+                    crate::pdf::ImageData::RgbA { rgb, alpha },
+                    c.transform(t),
+                );
+            }
+            return;
+        }
         let data = match self.mask {
             Some(paint_ones) => crate::pdf::ImageData::Mask {
                 bits: self.data.clone(),
@@ -358,8 +578,8 @@ impl ImageCtx {
     }
 
     fn rasterize(&self, gfx: &mut Gfx) {
-        if self.width == 0 || self.height == 0 || self.bits == 0 {
-            return;
+        if self.width == 0 || self.height == 0 || self.bits == 0 || gfx.is_null_device() {
+            return; // nothing to paint, or `nulldevice` discards it (#739)
         }
         let ctm = gfx.ctm();
         let Some(inv) = ctm.invert() else {
@@ -428,13 +648,12 @@ impl ImageCtx {
                     continue;
                 }
                 let (ux, uy) = (f64::from(ux), f64::from(uy));
-                let ix = (m[0] * ux + m[2] * uy + m[4]).floor();
-                let iy = (m[1] * ux + m[3] * uy + m[5]).floor();
-                if ix < 0.0 || iy < 0.0 {
+                let Some((ix, iy)) = self.cell_at(ux, uy) else {
                     continue;
-                }
-                let (ix, iy) = (ix as usize, iy as usize);
-                if ix >= self.width || iy >= self.height {
+                };
+                if let Some(st) = &self.stencil
+                    && !st.stencil_passes(ux, uy)
+                {
                     continue;
                 }
                 let rgb = match self.mask {
@@ -479,4 +698,18 @@ pub(crate) fn invert6(m: [f64; 6]) -> Option<[f64; 6]> {
     }
     let (a, b, c, d) = (m[3] / det, -m[1] / det, -m[2] / det, m[0] / det);
     Some([a, b, c, d, -(m[4] * a + m[5] * c), -(m[4] * b + m[5] * d)])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::expansion;
+
+    #[test]
+    fn expansion_is_capped_but_never_below_one() {
+        assert_eq!(expansion(2, 2, 8), 8);
+        assert_eq!(expansion(2000, 2000, 64), 2, "16 Mpixel cap");
+        assert_eq!(expansion(5000, 4000, 8), 1, "over the cap still emits");
+        assert_eq!(expansion(usize::MAX, usize::MAX, 8), 1, "no overflow");
+        assert_eq!(expansion(0, 0, 8), 8);
+    }
 }
