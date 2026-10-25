@@ -414,7 +414,11 @@ impl ImageCtx {
         let Some(mut pm) = tiny_skia::Pixmap::new(c.w as u32, c.h as u32) else {
             return;
         };
-        for (dst, px) in pm.pixels_mut().iter_mut().zip(c.rgba.chunks_exact(4)) {
+        for (dst, px) in pm
+            .pixels_mut()
+            .iter_mut()
+            .zip(c.rgba.as_chunks::<4>().0.iter())
+        {
             let a = u32::from(px[3]);
             let pre = |v: u8| ((u32::from(v) * a + 127) / 255) as u8;
             if let Some(p) = tiny_skia::PremultipliedColorU8::from_rgba(
@@ -517,7 +521,7 @@ impl ImageCtx {
             if let Some(c) = self.composite(st) {
                 let mut rgb = Vec::with_capacity(c.w * c.h * 3);
                 let mut alpha = Vec::with_capacity(c.w * c.h);
-                for px in c.rgba.chunks_exact(4) {
+                for px in c.rgba.as_chunks::<4>().0.iter() {
                     rgb.extend_from_slice(&px[..3]);
                     alpha.push(px[3]);
                 }
