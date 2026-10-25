@@ -339,21 +339,31 @@ pub(crate) fn open_with_reader(
 /// doc), the embedded `lib/` copy included, and yields the relative name.
 /// Wildcards (`*`, `?`, `\` to quote) match within the last component;
 /// a template with one in a directory part matches nothing.
-pub fn matching_names(template: &[u8]) -> Vec<Vec<u8>> {
+///
+/// `poll` is called once per directory entry looked at, with the bytes the
+/// entry adds to the result (0 when it doesn't match), so an interpreter
+/// under execution limits can stop a listing of a huge directory.
+pub fn matching_names(
+    template: &[u8],
+    poll: &mut dyn FnMut(usize) -> Result<(), crate::error::PsError>,
+) -> Result<Vec<Vec<u8>>, crate::error::PsError> {
     let Ok(template) = std::str::from_utf8(template) else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
     let first_wild = template.find(['*', '?', '\\']).unwrap_or(template.len());
     let dir_end = template[..first_wild].rfind('/').map_or(0, |i| i + 1);
     let (dir, pattern) = template.split_at(dir_end);
     if pattern.is_empty() || pattern.contains('/') {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     let mut found = std::collections::BTreeSet::new();
     let mut take = |file: &str| {
-        if glob_match(pattern.as_bytes(), file.as_bytes()) {
+        let hit = glob_match(pattern.as_bytes(), file.as_bytes());
+        poll(if hit { dir.len() + file.len() } else { 0 })?;
+        if hit {
             found.insert(format!("{dir}{file}").into_bytes());
         }
+        Ok::<(), crate::error::PsError>(())
     };
     let dirs: Vec<PathBuf> = if Path::new(dir).is_absolute() {
         vec![PathBuf::from(dir)]
@@ -376,18 +386,18 @@ pub fn matching_names(template: &[u8]) -> Vec<Vec<u8>> {
                 continue;
             }
             if let Some(file) = e.file_name().to_str() {
-                take(file);
+                take(file)?;
             }
         }
     }
     if !Path::new(dir).is_absolute() {
         for name in embedded_names() {
             if let Some(file) = name.strip_prefix(dir).filter(|f| !f.contains('/')) {
-                take(file);
+                take(file)?;
             }
         }
     }
-    found.into_iter().collect()
+    Ok(found.into_iter().collect())
 }
 
 /// PostScript filename matching: `*` any run, `?` one byte, `\\` quotes
@@ -682,12 +692,15 @@ mod tests {
 
     #[test]
     fn matching_names_needs_wildcards_in_the_last_component_only() {
-        assert!(matching_names(b"li*/artkit.ps").is_empty());
-        assert!(matching_names(b"lib/").is_empty());
-        assert!(matching_names(b"\xff*").is_empty());
-        assert_eq!(
-            matching_names(b"lib/artkit.ps"),
-            vec![b"lib/artkit.ps".to_vec()]
-        );
+        let names = |t: &[u8]| matching_names(t, &mut |_| Ok(())).unwrap();
+        assert!(names(b"li*/artkit.ps").is_empty());
+        assert!(names(b"lib/").is_empty());
+        assert!(names(b"\xff*").is_empty());
+        assert_eq!(names(b"lib/artkit.ps"), vec![b"lib/artkit.ps".to_vec()]);
+        // A poll that refuses stops the listing with its error.
+        let stopped = matching_names(b"lib/*.ps", &mut |_| {
+            Err(crate::error::PsError::StepsExceeded)
+        });
+        assert_eq!(stopped, Err(crate::error::PsError::StepsExceeded));
     }
 }

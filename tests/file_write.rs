@@ -383,3 +383,30 @@ fn writehexstring_of_a_long_string_is_whole() {
     assert!(got[..19998].iter().all(|&b| b == b'0'));
     assert_eq!(&got[19998..], b"ff");
 }
+
+#[test]
+fn empty_writehexstring_still_checks_the_file() {
+    let mut it = Interp::with_page(50, 50).unwrap();
+    assert_eq!(
+        it.run_str("(%stdout) (w) file dup closefile () writehexstring"),
+        Err(PsError::Io)
+    );
+}
+
+// Unix only, like the other on-disk filenameforall test.
+#[cfg(unix)]
+#[test]
+fn filenameforall_listing_counts_against_the_step_limit() {
+    let (root, _) = setup("fw-forall-limit");
+    for i in 0..200 {
+        std::fs::write(root.join(format!("f{i}.txt")), b"").unwrap();
+    }
+    let mut it = Interp::with_page(50, 50).unwrap();
+    it.set_limits(pscat::Limits::none().with_max_steps(50))
+        .unwrap();
+    let dir = ps(&root.join("*"));
+    assert_eq!(
+        it.run_str(&format!("{dir} {{ pop }} 300 string filenameforall")),
+        Err(PsError::StepsExceeded)
+    );
+}

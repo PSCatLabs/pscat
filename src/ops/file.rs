@@ -193,6 +193,10 @@ fn writehexstring(it: &mut Interp) -> Result<(), PsError> {
     let f = pop_file(it)?;
     // In fixed-size pieces, so a long string never needs a buffer twice
     // its size outside the memory limit's view.
+    if s.is_empty() {
+        // Still an error on a closed or input file.
+        return write_bytes(it, &f, &[]);
+    }
     let mut buf = [0u8; 8192];
     for chunk in s.borrow_bytes().chunks(buf.len() / 2) {
         for (i, &b) in chunk.iter().enumerate() {
@@ -239,8 +243,15 @@ fn filenameforall(it: &mut Interp) -> Result<(), PsError> {
         return Err(PsError::Typecheck);
     }
     let template = pop_ps_string(it)?.to_vec();
-    let names = crate::paths::matching_names(&template);
-    it.check_alloc(names.iter().map(|n| n.len()).sum())?;
+    // Under execution limits each entry looked at is a step, and each
+    // match's bytes are checked against the memory cap as it is added.
+    #[cfg(not(target_arch = "wasm32"))]
+    let limited = !it.limits().is_none();
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut poll = |n: usize| if limited { it.poll_read(1, n) } else { Ok(()) };
+    #[cfg(target_arch = "wasm32")]
+    let mut poll = |_: usize| Ok(());
+    let names = crate::paths::matching_names(&template, &mut poll)?;
     let names: Vec<Object> = names.into_iter().map(Object::string).collect();
     // `{ scratch copy proc exec }` over the names, with the operators
     // themselves rather than their names, so a program that redefines
