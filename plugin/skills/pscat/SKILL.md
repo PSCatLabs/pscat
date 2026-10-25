@@ -271,7 +271,9 @@ offending command and line), `handwrite`, `chalkboard_math` (LaTeX → a
 chalkboard PNG; above), `review_sheet` (the review sheet above, from inline
 programs: byte for byte what `pscat sheet` writes) and
 `describe_art_capabilities`.
-Each call has a time limit (default 60 s) and the interpreter stops a runaway
+Each call has a time limit (60 s by default; whoever registers the server raises it with
+`pscat-mcp --timeout SECS`, and the client's own tool timeout must allow it too) and the
+interpreter stops a runaway
 program itself, with a `limit_exceeded` error whose `limit` field says `steps`,
 `time` or `memory` (a render still returns the partial page); `stopped` cannot
 catch it. `out_path` must be inside the
