@@ -341,6 +341,11 @@ pass `out_path`. Register it with
   loop unless you ask: `--max-steps N`, `--max-time SECS` and `--max-memory
   MIB` stop a runaway with a `limitexceeded` error. Run untrusted PostScript
   as you would an untrusted script.
+- Writing files is off by default. On the command line, `--allow-write DIR`
+  (repeatable) lets a program write inside DIR with `(DIR/f) (w) file`,
+  `(a) file`, `renamefile` and `deletefile`; anything outside is
+  `invalidfileaccess`. `(%stdout) (w) file` needs no flag. The MCP tools
+  never write from PostScript: use their `out_path` instead.
 - The interpreter targets Level 2 PostScript. If a construct misbehaves,
   compare against Ghostscript, the behavioural oracle.
 - Files the docs call `examples/...`, `gallery/...` or `docs/...` are in

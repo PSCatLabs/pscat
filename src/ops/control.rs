@@ -50,7 +50,7 @@ fn ifelse(it: &mut Interp) -> Result<(), PsError> {
     it.exec_object(if cond { proc_true } else { proc_false })
 }
 
-fn exec(it: &mut Interp) -> Result<(), PsError> {
+pub(crate) fn exec(it: &mut Interp) -> Result<(), PsError> {
     let obj = it.pop()?;
     it.exec_object(obj)
 }

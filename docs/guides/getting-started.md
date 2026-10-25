@@ -48,6 +48,7 @@ cargo run                                 # terminal REPL (headless canvas)
 cargo run -- -i                           # REPL + live window: watch what you type draw
 cargo run -- -i lib/handscript.ps         # ...with a library preloaded
 cargo run -- -e '3 4 add ='               # evaluate a snippet
+cargo run -- --allow-write cache/ f.ps    # let f.ps write files in cache/
 cargo run -- --version                    # print "pscat X.Y.Z" (also -V; pscat-mcp too)
 cargo test                                # language + pixel-level render tests
 ```
@@ -100,6 +101,14 @@ More on the less obvious ones:
   corner of the lab. It idles, watches the directory, and renders each
   `.ps`/`.eps` that lands there, page by page, each job in a fresh
   interpreter.
+- **Writing files.** A program writes nothing to disk unless you name a
+  directory with `--allow-write DIR` (repeatable). Then `(DIR/f) (w) file`
+  (or `(a)` to append), `writestring`, `writehexstring`, `renamefile` and
+  `deletefile` work inside it; any path outside it, a `..`, or a symlink
+  leading out is `invalidfileaccess`. A relative name is relative to the
+  current directory. `(%stdout) (w) file` and `(%stderr) (w) file` need no
+  flag. `filenameforall` lists files where `run` would look for them.
+  `pscat-mcp` never lets a program write.
 - **Halftone.** `--halftone` screens the raster like a mono laser printer's
   RIP: classic dots on a 45° lattice, with coverage tracking darkness.
 
