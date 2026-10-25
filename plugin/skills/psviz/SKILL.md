@@ -2,6 +2,7 @@
 name: psviz
 description: Create paper-ready data visualizations with lib/graph.ps and lib/dataviz.ps — function plots, surfaces, and bar/line/area/scatter/pie charts for papers and documents.
 ---
+<!-- Contributors: tests/skill_blocks.rs runs every postscript code fence under plugin/skills on a bare install (no font packs) and fails on any error or font-pack warning. A fragment that cannot run alone is fenced as "postscript partial". -->
 
 # psviz — paper-ready charts with pscat
 
@@ -61,7 +62,7 @@ DVColors   i dvcolor -> r g b
 ## Minimal templates
 
 ### Clean line chart (paper)
-```
+```postscript
 %!PS
 (lib/dataviz.ps) run
 1 1 1 setrgbcolor clippath fill
@@ -73,7 +74,7 @@ showpage
 ```
 
 ### Clean bar chart (paper)
-```
+```postscript
 %!PS
 (lib/dataviz.ps) run
 0 0 24 72 320 468 170 setdvframe
@@ -83,7 +84,7 @@ showpage
 ```
 
 ### Clean function plot (paper)
-```
+```postscript
 %!PS
 (lib/graph.ps) run
 0 -1.2 360 1.2 72 120 468 260 setframe

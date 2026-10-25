@@ -4,8 +4,8 @@ pscat has three kinds of fonts, and they all work through the ordinary
 PostScript operators (`findfont`, `scalefont`, `setfont`, `show`).
 
 - **Standard fonts.** Helvetica, Times and Courier, backed by bundled,
-  metric-compatible Liberation faces, plus the other LaserWriter names
-  through the catalog below.
+  metric-compatible Liberation faces. The other LaserWriter names come
+  through the catalog below, which an installed pscat gets as font packs.
 - **Type 3 fonts.** Glyphs that are programs. pscat's own display faces, its
   handwriting font and its typewriter font are all Type 3. Because a glyph is
   code, it can be different every time it is drawn (`examples/type3_ransom.ps`
@@ -352,11 +352,31 @@ refuses an index that does not match the pin, a pack that does not match
 the index, and a file that does not match the manifest, and installs
 nothing at all unless everything checks out.
 
-**A missing face is an error.** `/Symbol findfont` (or any other pack
-face) with its pack not installed stops with `invalidfont` and a second
-line naming the pack to install; it never renders with a stand-in.
-Names no pack has (`/Arial`) still get the Helvetica substitute, as in
-Ghostscript.
+**A missing pack face stands in (issue #728).** `/Palatino-Italic findfont`
+with the `texgyre` pack not installed does not fail: it gets the closest
+built-in face and prints one line on stderr naming the pack and the
+`pscat fonts install --pack texgyre` command; the run exits 0. The choice
+keeps weight and slant, as Ghostscript's font substitution does:
+
+| Not installed | Stands in as |
+|---|---|
+| Palatino, Bookman, NewCenturySchlbk (`texgyre`) | Times (Roman, Bold, Italic, BoldItalic) |
+| AvantGarde, Helvetica-Narrow (`texgyre`) | Helvetica (Bold, Oblique, BoldOblique) |
+| ZapfChancery (`texgyre`) | Times-Italic |
+| Courier Prime, Special Elite, JetBrains Mono (`extras`) | Courier |
+| Symbol, ZapfDingbats (`extras`) | Helvetica |
+| every other `extras` face, the `cjk-thai` faces | Helvetica |
+
+Symbol and ZapfDingbats get Helvetica because no built-in face has their
+glyphs: the same character codes draw plain letters, not Greek letters or
+dingbats, and the note says so. The Korean, Japanese and Thai faces become
+a face that cannot draw those scripts. With the pack installed (or a
+`fonts/catalog/` override present) the real face is used and nothing
+changes. The note prints once per name per run. The libraries that verify
+their `/Font` (`lettering`, `headline`, `jersey`) still raise their own
+`*-font-not-found` for a stand-in, since an asked-for face that is not
+there should not ship in another type. Names no pack has (`/Arial`) get the
+Helvetica substitute with no note, as in Ghostscript.
 
 **Which fonts win.** A plain `fonts/catalog/` directory (in
 `$PSCAT_HOME`, the per-user data directory, beside the binary, in a

@@ -151,8 +151,9 @@ font packs:
     pscat fonts install      # the packs this pscat release pins
     pscat fonts list
 
-A program that asks for a face from a pack that is not installed stops
-with an error naming the pack.
+A program that asks for a face from a pack that is not installed gets the
+closest built-in face (Palatino becomes Times, say) and one line on stderr
+naming the pack; the render still succeeds.
 
 ## What's here
 
@@ -242,12 +243,13 @@ echo "==> $GOT and $GOT_MCP run from the bundle"
 
 echo "==> Verifying the bundle resolves lib/ standalone, and needs font packs"
 # With an empty HOME (so no font packs the packager installed), a pack
-# face must stop with an error naming its pack, never substitute.
+# face must stand in as a built-in face (issue #728) and name its pack on
+# stderr, and the run must succeed.
 # (The program does not start with "/": Git Bash on Windows would rewrite
 # an argument that looks like a POSIX path before pscat.exe saw it.)
 EMPTY_HOME=$(mktemp -d)
-OUT=$(HOME="$EMPTY_HOME" XDG_DATA_HOME="$EMPTY_HOME" APPDATA="$EMPTY_HOME" bare "$PSCAT" -e '0 pop /Bangers findfont pop' 2>&1) &&
-  { echo "FAIL: /Bangers resolved with no font packs installed" >&2; exit 1; }
+OUT=$(HOME="$EMPTY_HOME" XDG_DATA_HOME="$EMPTY_HOME" APPDATA="$EMPTY_HOME" bare "$PSCAT" -e '0 pop /Bangers findfont pop' 2>&1) ||
+  { echo "$OUT" >&2; echo "FAIL: /Bangers stopped the run with no font packs installed" >&2; exit 1; }
 grep -q "is in the extras font pack" <<<"$OUT" ||
   { echo "$OUT" >&2; echo "FAIL: missing face did not name its font pack" >&2; exit 1; }
 rm -rf "$EMPTY_HOME"

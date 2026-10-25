@@ -163,8 +163,11 @@
   /jygotreg jyrs length 8 add string def
   jygotreg 0 jyrs putinterval
   jygotreg jyrs length (-Regular) putinterval
-  jygot jyrs eq jygot jygotreg eq or
-  jygot (Helvetica) ne jygot (Courier) ne and or not { jersey-font-not-found } if
+  jygot jyrs eq jygot jygotreg eq or not {
+    false [ (Helvetica) (Times) (Courier) ]
+    { jygot exch anchorsearch { pop pop pop true } { pop } ifelse } forall
+    { jersey-font-not-found } if
+  } if
   jyfd
 } def
 
