@@ -441,9 +441,23 @@ an installed build (October 2026, #568).
     characters (the label text is drawn in the server process, so its length
     is bounded). The inline image is capped by `--max-image-bytes`; ask for a
     big sheet with `out_path`, which follows the rules above (`.png` only).
-- **One call at a time.** A runaway program delays later requests, `ping`
-  included, until its limit or timeout stops it; there is no cancellation yet
-  (#622).
+- **Calls run side by side, and can be cancelled** (#622). Each tool call
+  but the job tools runs on its own thread, at most 4 at once (more are
+  refused with `busy`), so a runaway program no longer delays `ping` or other
+  calls, and `notifications/cancelled` kills that call's child.
+- **Render jobs are bounded too** (#741). `start_render` runs
+  `render_postscript` in the background under `--job-timeout` (default 3600
+  s, up to 86400) instead of `--timeout`, with the same step, memory, pixel,
+  output and `out_path` rules; at most `--max-jobs` (default 2) run at once,
+  at most 16 are kept, and a finished one's result (in the server's memory, up
+  to the inline caps) is dropped after `--job-ttl` (default 3600 s). No job
+  outlives a clean shutdown: when stdin closes, every call and job is
+  cancelled and its child killed and reaped before the server exits. A server
+  killed outright cannot do that; on Unix each child is started with
+  `--exit-with-parent` and stops itself within about half a second, while on
+  Windows such a child runs on until its own time limit (`--job-timeout` less
+  the margin). Job ids are sequential, which is fine for one local client and
+  is why the hosted server does not offer jobs.
 - **Bad input gets a bounded, structured answer, and stdout stays clean.**
   Malformed JSON, invalid UTF-8, batches and non-object messages get JSON-RPC
   errors (-32700, -32600) and the session continues; an unknown tool is

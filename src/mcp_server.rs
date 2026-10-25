@@ -7,8 +7,10 @@
 //! part of the library.
 //!
 //! An MCP server over stdio (newline-delimited JSON-RPC 2.0) exposing
-//! six tools: `render_postscript`, `handwrite`, `chalkboard_math`,
-//! `review_sheet`, `describe_art_capabilities`, `eval_postscript`. Works with any MCP
+//! ten tools: `render_postscript`, `handwrite`, `chalkboard_math`,
+//! `review_sheet`, `describe_art_capabilities`, `eval_postscript`, and the
+//! render jobs `start_render`, `render_status`, `render_result`,
+//! `cancel_render`. Works with any MCP
 //! client — Claude Code, Codex, OpenClaw, Hermes; registration
 //! one-liners are in `docs/guides/agents.md`.
 //!

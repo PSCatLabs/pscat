@@ -2348,13 +2348,23 @@ fn concurrent_replies_never_interleave() {
 /// and `ping` meanwhile with its pages so far, and its result is what
 /// `render_postscript` returns for the same program. The program waits on a
 /// FIFO between its two pages, so it is still running for as long as the
-/// test keeps the FIFO shut.
+/// test keeps the FIFO's write end open.
 #[cfg(unix)]
 #[test]
 fn a_render_job_outlives_the_call_limit_and_is_polled_and_fetched() {
     let dir = common::scratch_dir("mcp-job-gate");
     let fifo = dir.join("gate.fifo");
     mkfifo(&fifo);
+    // The write end is held open from the start, read-write so the open does
+    // not wait for a reader: the render's open then returns at once and its
+    // read waits for the end of the file, which is this handle's close. (A
+    // writer that opens after the reader and closes at once can be missed by
+    // a reader still waking in `open` on macOS, which then waits for good.)
+    let gate_writer = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&fifo)
+        .expect("hold the FIFO open");
     let mut s = Server::start_in(&dir, &["--timeout", "1", "--job-timeout", "120"]);
     initialized(&mut s);
     let first = "0 0 1 setrgbcolor 10 10 50 50 rectfill showpage 0 1 3000 { pop } for";
@@ -2376,23 +2386,13 @@ fn a_render_job_outlives_the_call_limit_and_is_polled_and_fetched() {
     assert_eq!(facts["state"], "running", "{facts}");
     let early = s.tool("render_result", json!({ "job_id": job }));
     assert_eq!(error_kind(&early), "job_not_finished", "{early}");
-    // Open the gate: a writer that closes at once is the end of the file.
-    // On a thread, since the open waits for the reader.
-    let opener = {
-        let fifo = fifo.clone();
-        std::thread::spawn(move || {
-            std::fs::OpenOptions::new()
-                .write(true)
-                .open(&fifo)
-                .map(drop)
-        })
-    };
+    // Open the gate: closing the only writer is the end of the file.
+    drop(gate_writer);
     assert!(
         eventually(600, || status(&mut s, &job)["state"] == "done"),
         "the job finishes once the gate opens: {}",
         status(&mut s, &job)
     );
-    opener.join().unwrap().expect("open the gate");
     let facts = status(&mut s, &job);
     assert_eq!(facts["pages_done"], 2, "{facts}");
     let result = s.tool("render_result", json!({ "job_id": job }));
