@@ -86,6 +86,9 @@ struct Options {
     /// `--max-steps`, `--max-time`, `--max-memory` (issue #604): none by
     /// default, so a bare run is unlimited exactly as before.
     limits: Limits,
+    /// `--allow-write DIR`, repeatable (issue #740): the directories a
+    /// program may write files in. None by default.
+    allow_write: Vec<String>,
 }
 
 impl Options {
@@ -117,16 +120,21 @@ impl Options {
             contact_sheet: None,
             grid: None,
             limits: Limits::none(),
+            allow_write: Vec::new(),
         }
     }
 
-    /// Put `--max-steps`/`--max-time`/`--max-memory` on a fresh interpreter.
-    fn apply_limits(&self, interp: &mut Interp) {
+    /// Put `--max-steps`/`--max-time`/`--max-memory` and `--allow-write`
+    /// on a fresh interpreter.
+    fn apply_limits(&self, interp: &mut Interp) -> Result<(), String> {
         // `set_limits` refuses only when the tracking allocator is missing,
         // and this binary declares it.
         interp
             .set_limits(self.limits)
             .expect("pscat installs the tracking allocator");
+        interp
+            .set_write_roots(&self.allow_write)
+            .map_err(|e| format!("--allow-write: {e}"))
     }
 }
 
@@ -306,6 +314,12 @@ fn main() -> ExitCode {
             );
             return ExitCode::FAILURE;
         }
+        if !options.allow_write.is_empty() {
+            eprintln!(
+                "pscat: --allow-write doesn't apply to --spool (spooled jobs never write files)"
+            );
+            return ExitCode::FAILURE;
+        }
         let watcher = match Watcher::new(std::path::Path::new(dir)) {
             Ok(w) => w,
             Err(e) => {
@@ -336,7 +350,10 @@ fn main() -> ExitCode {
         );
         return ExitCode::FAILURE;
     };
-    options.apply_limits(&mut interp);
+    if let Err(msg) = options.apply_limits(&mut interp) {
+        eprintln!("pscat: {msg}");
+        return ExitCode::FAILURE;
+    }
     // The single-run paths below end the process right after the output is
     // written, so tearing down the dictionary graph (which `Drop for Interp`
     // does for library users and the sweep/spool loops) would only delay the
@@ -813,7 +830,10 @@ fn run_sweep(options: &Options, source: &[u8]) -> ExitCode {
             );
             return ExitCode::FAILURE;
         };
-        options.apply_limits(&mut interp);
+        if let Err(msg) = options.apply_limits(&mut interp) {
+            eprintln!("pscat: {msg}");
+            return ExitCode::FAILURE;
+        }
         if options.transparent {
             interp.gfx_mut().set_transparent_background();
         }
@@ -1336,6 +1356,10 @@ fn parse_args() -> Result<Options, String> {
                 })?;
                 options.limits.max_memory = (mib > 0).then_some(mib << 20);
             }
+            "--allow-write" => {
+                let dir = args.next().ok_or("missing directory after --allow-write")?;
+                options.allow_write.push(dir);
+            }
             "--png" => {
                 options.png = Some(args.next().ok_or("missing path after --png")?);
             }
@@ -1479,6 +1503,10 @@ fn print_usage() {
     println!("      --max-memory MIB  stop a program that grows the heap by more than MIB");
     println!("                      (0 = no limit). A stopped run exits non-zero with");
     println!("                      `limitexceeded (steps|time|memory)`; `stopped` can't catch it");
+    println!("      --allow-write DIR  let the program write files inside DIR (repeatable):");
+    println!("                      `(DIR/f) (w) file`, `(a) file`, renamefile, deletefile.");
+    println!("                      Off by default; paths outside, `..` and symlinks out");
+    println!("                      are invalidfileaccess. %stdout/%stderr need no flag");
     println!("      --lint          check the finished run for common mistakes (implies");
     println!("                      --headless); a blank page, an unbalanced gsave, stuff");
     println!("                      left on the stack — printed to stderr, doesn't affect");

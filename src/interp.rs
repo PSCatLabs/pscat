@@ -314,6 +314,9 @@ pub struct Interp {
     mem_base: usize,
     /// Loop iterations until the next `poll_slow` (see `tick`).
     poll_in: u32,
+    /// Directories the program may write files in (issue #740); empty
+    /// unless `set_write_roots` was called.
+    write_roots: crate::write_roots::WriteRoots,
     pub(crate) gfx: Gfx,
 }
 
@@ -414,6 +417,7 @@ impl Interp {
             run_clock: crate::clock::Clock::start(),
             mem_base: 0,
             poll_in: POLL_PERIOD,
+            write_roots: Default::default(),
             gfx,
         })
     }
@@ -470,6 +474,43 @@ impl Interp {
     /// The limits in force ([`Limits::none`] by default).
     pub fn limits(&self) -> Limits {
         self.limits
+    }
+
+    /// Let programs write files inside `dirs` (issue #740; the CLI's
+    /// `--allow-write DIR`): `(path) (w) file`, `(a) file`, `renamefile`
+    /// and `deletefile` work on paths that resolve inside one of them, and
+    /// refuse every other disk path with `invalidfileaccess`, `..` and
+    /// symlink escapes included (`src/write_roots.rs`). None by default;
+    /// an empty slice takes them away again. Fails, changing nothing, if a
+    /// directory doesn't exist.
+    ///
+    /// ```no_run
+    /// let mut interp = pscat::Interp::new();
+    /// interp.set_write_roots(&["out"])?;
+    /// interp.run_str("(out/hello.txt) (w) file dup (hi) writestring closefile").unwrap();
+    /// # Ok::<(), String>(())
+    /// ```
+    pub fn set_write_roots<P: AsRef<std::path::Path>>(&mut self, dirs: &[P]) -> Result<(), String> {
+        self.write_roots = crate::write_roots::WriteRoots::new(dirs)?;
+        Ok(())
+    }
+
+    /// The canonical write roots (empty by default).
+    pub fn write_roots(&self) -> &[std::path::PathBuf] {
+        self.write_roots.dirs()
+    }
+
+    /// The write policy, for the operators that write to disk.
+    pub(crate) fn write_policy(&self) -> &crate::write_roots::WriteRoots {
+        &self.write_roots
+    }
+
+    /// Where writing to `name` would go: a path inside the write roots, or
+    /// the PostScript error the program gets (`invalidfileaccess` outside
+    /// them or with none set). Operators that open files for writing use
+    /// this check, through [`crate::write_roots::WriteRoots::open`].
+    pub fn writable_path(&self, name: &str) -> Result<std::path::PathBuf, PsError> {
+        self.write_roots.resolve_open(name)
     }
 
     /// Interpreter steps the current program has run, counted only while

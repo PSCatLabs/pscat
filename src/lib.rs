@@ -150,6 +150,8 @@ pub mod window;
 #[doc(hidden)]
 #[path = "window_stub.rs"]
 pub mod window;
+#[doc(hidden)]
+pub mod write_roots;
 
 pub use error::PsError;
 pub use interp::Interp;

@@ -149,6 +149,9 @@ say "read-only unless this argument is set" they are marked `readOnlyHint:
 false`. They are not destructive: `out_path` is confined to the output root and
 replaces only an existing render file of the same extension (see below).
 `openWorldHint` is false everywhere because no tool reaches the network.
+The PostScript itself can never write a file: the server never passes the CLI's
+`--allow-write`, so `(path) (w) file`, `renamefile` and `deletefile` fail with
+`invalidfileaccess` (#740). `%stdout` writes come back as printed output.
 `read-only` here means the tool writes nothing; `eval_postscript`'s program (and
 a render's) can still *read* any local file you can, which each description says.
 `tests/mcp.rs` keeps the same table and fails for a tool missing from it.

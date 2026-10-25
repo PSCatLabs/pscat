@@ -1111,6 +1111,16 @@ renders eight examples in both and compares block-downsampled output).
     `tests/fuzz_corpus.rs`, weekly in `.github/workflows/fuzz.yml`. A fixed crash's
     input goes in `fuzz/regressions/<target>/`.
   - `--spool` and the subcommands take no limits yet (SECURITY.md says so).
+- **File writing (#740).** Off by default: `Interp::set_write_roots` (CLI
+  `--allow-write DIR`) names the directories, and `src/write_roots.rs` is the
+  one place that decides whether a path is writable (`WriteRoots::open`,
+  `resolve_entry`; `Interp::writable_path` for new writers such as #733/#735).
+  Never open a file for writing anywhere else, and never add an env-var form of
+  the flag: `pscat-mcp`'s children inherit the environment, and the MCP layer
+  must never write from PostScript (`tests/file_write.rs` asserts it). Output
+  files are `file::Sink`s; `%stdout` goes through `Interp::write_stdout` so a
+  captured stdout keeps order with `print`. Disk writes are unbuffered because
+  the CLI exits without dropping the interpreter. See `notes/740-file-writing.md`.
 - **`pscat sheet` composes finished renders (#693).** Unlike the subcommands above it
   builds no driver: it renders each file itself (a probe `Interp` gives every cell's
   pixel size first), lays the cells out with `contact_sheet::Layout` (pure geometry, so
