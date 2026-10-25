@@ -1153,8 +1153,12 @@ renders eight examples in both and compares block-downsampled output).
   generated in-process (`pscat::chalk::driver`, pure), then run in a `pscat`
   child through `run_child` with `interpreter_args`, never in the server
   (a program's stdout would corrupt JSON-RPC, and the child keeps the limits
-  and crash isolation). Its fixed caps (`MAX_LATEX_BYTES` 4096,
-  `MAX_CHALK_PIXELS` 40 M) are checked before the child starts. The canvas
+  and crash isolation). Its caps (`--max-latex-bytes`, default 4096, and
+  `--max-pixels`, default 40 M, shared with `render_postscript`, `handwrite`
+  and `review_sheet`, #711; `Config::max_latex`/`max_pixels`) are checked
+  before the child starts (`handwrite`'s height is auto-sized in the child, so
+  the server passes `pscat handwrite --max-pixels` and maps its refusal,
+  `pscat::limits::parse_pixel_cap_message`, to `output_too_large`). The canvas
   (4 bytes a pixel) is allocated before `--max-memory` counts, so the pixel
   cap is what bounds it below the interpreter's 8000-a-side ceiling. A TeX error is mapped back from the
   child's `mk-*` offending command with `chalk::explain`. The output is

@@ -38,7 +38,8 @@ lines are kept, and input is lowercased (the font has no capitals).
 Options: `--size`, `--width`, `--height`, `--margin`, `--leading`
 (line spacing × size), `--jitter` (0 = a calm hand), `--pen`,
 `--ink R,G,B`, `--paper plain|ruled`, `--seed` (same seed, same
-page), `--dpi`, `--halftone`, `--transparent`, `-o out.png`. Run with `--help` for
+page), `--dpi`, `--halftone`, `--transparent`, `--max-pixels N` (refuse a
+page over N device pixels or 8000 a side before drawing), `-o out.png`. Run with `--help` for
 the full list.
 
 The business logic lives in `lib/handscript.ps` — the font plus a
