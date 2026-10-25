@@ -1206,8 +1206,8 @@ renders eight examples in both and compares block-downsampled output).
   polls with the timeout; spawns are serialised by `SPAWN_LOCK` (macOS pipes
   are not created close-on-exec atomically). Jobs live in `JobTable` behind
   one mutex and the `job_wake` condvar (notify under the lock); `JobSlot`'s
-  drop releases a slot even on a panic. `shut_down` cancels everything and
-  joins every thread when stdin closes, and children get
+  drop releases a slot even on a panic. `shut_down` cancels every job (calls
+  in flight finish and answer) and joins every thread when stdin closes, and children get
   `--exit-with-parent <server pid>` for a server killed outright. Locks are
   never nested. Tests avoid elapsed-time assertions: they gate a render on a
   FIFO and count children with `ps` (macOS `pgrep -P` hides zombies). See

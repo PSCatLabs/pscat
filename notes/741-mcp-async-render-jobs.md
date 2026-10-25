@@ -40,8 +40,12 @@ path in `run_child` changed.
   reported: `image` is a single operator, so reporting them would need a hook
   inside it.
 - **No job outlives the server.**
-  - When stdin closes, `shut_down` cancels every call and job and joins every
-    thread, so children are reaped and scratch dirs removed.
+  - When stdin closes, `shut_down` cancels every job and joins every
+    thread, so children are reaped and scratch dirs removed. Calls already
+    in flight are *not* cancelled: they finish (within `--timeout`) and
+    answer. A one-shot client (`printf '...' | pscat-mcp`) then still gets
+    its reply, as it did before #622. The first version cancelled them, and
+    the race review caught it as a regression.
   - For a server that is killed outright, every child gets
     `--exit-with-parent <server pid>`. A thread in the child exits once its
     parent pid is no longer that one. The pid is passed explicitly because the
@@ -67,6 +71,19 @@ path in `run_child` changed.
 - **A PostScript error is a `done` job.** `render_postscript` returns the
   partial page with the error text, not an error result. `failed` is for
   renders with no output, an output cap hit, a timeout, and similar.
+- **A lost wakeup**, found by the independent race review. Taking a slot makes
+  the next queued job first in line, so it has to `notify_all` as well. The
+  first version notified only when a slot was released or a job was
+  cancelled, which left a job queued beside a free slot whenever several
+  starts arrived together. With `--max-jobs 4`, 4 pipelined starts showed it in
+  a third of trials. `jobs_started_together_all_run_up_to_the_cap` pins it.
+- **Accepted risks** (from the same review):
+  - A client that closes stdin but neither reads nor closes stdout can leave
+    a call blocked in its write, and `shut_down`'s join then waits forever.
+    The old serial server blocked the same way.
+  - A panic between `spawn` and the kill/wait in `run_child` would drop a
+    live `Child`. Only an `expect` on a piped stream sits there, and it
+    cannot fail.
 
 ## Tests
 

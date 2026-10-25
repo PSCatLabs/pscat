@@ -42,9 +42,10 @@
 //! go through one writer ([`Server::send`]): the whole line is written
 //! under the stdout lock, so two threads never interleave. Render jobs
 //! (`start_render` and friends) run on threads of their own, in a job table
-//! with a cap on running and kept jobs. When stdin closes, every call and
-//! job is cancelled and every thread joined before the server exits, so no
-//! child outlives a clean shutdown; each child also gets
+//! with a cap on running and kept jobs. When stdin closes, every job is
+//! cancelled, the calls already asked for finish and answer, and every
+//! thread is joined before the server exits, so no child outlives a clean
+//! shutdown; each child also gets
 //! `--exit-with-parent`, which stops it if the server is killed outright
 //! (Unix).
 //!
@@ -369,8 +370,6 @@ struct Server {
     job_wake: Condvar,
     /// Every call and job thread not yet joined.
     threads: Mutex<Vec<JoinHandle<()>>>,
-    /// Set once stdin has closed: nothing more is written.
-    shutting_down: AtomicBool,
 }
 
 impl Server {
@@ -381,7 +380,6 @@ impl Server {
             jobs: Mutex::new(JobTable::default()),
             job_wake: Condvar::new(),
             threads: Mutex::new(Vec::new()),
-            shutting_down: AtomicBool::new(false),
         }
     }
 
@@ -390,9 +388,6 @@ impl Server {
     /// never interleave. serde_json escapes every control character, so one
     /// reply is one line.
     fn send(&self, reply: &Value) {
-        if self.shutting_down.load(Ordering::SeqCst) {
-            return;
-        }
         let line = format!("{reply}\n");
         let mut out = std::io::stdout().lock();
         let _ = out.write_all(line.as_bytes());
@@ -495,14 +490,14 @@ impl Server {
         }
     }
 
-    /// Stdin closed: cancel every call and job, then join every thread, so
-    /// each child is killed and reaped and each scratch directory removed
-    /// before the process exits.
+    /// Stdin closed: cancel every job, let the calls already asked for
+    /// finish and answer (each is bounded by `--timeout`; a client that
+    /// pipes one request and closes stdin still gets its reply, as it did
+    /// when requests were handled one at a time), then join every thread, so
+    /// each child is reaped and each scratch directory removed before the
+    /// process exits. A client that wants a call stopped sends
+    /// `notifications/cancelled` first.
     fn shut_down(&self) {
-        self.shutting_down.store(true, Ordering::SeqCst);
-        for flag in lock(&self.inflight).values() {
-            flag.store(true, Ordering::SeqCst);
-        }
         {
             let jobs = lock(&self.jobs);
             for job in jobs.jobs.values() {
@@ -1482,6 +1477,9 @@ fn run_job(server: Arc<Server>, id: String, plan: RenderPlan) {
         if let Some(job) = jobs.jobs.get_mut(&id) {
             job.state = JobState::Running;
         }
+        // Leaving the queue makes the next job first in line, and a slot may
+        // still be free for it: wake it, or it would wait for a job to end.
+        server.job_wake.notify_all();
         (cancel, pages)
     };
     let slot = JobSlot {

@@ -451,8 +451,9 @@ an installed build (October 2026, #568).
   output and `out_path` rules; at most `--max-jobs` (default 2) run at once,
   at most 16 are kept, and a finished one's result (in the server's memory, up
   to the inline caps) is dropped after `--job-ttl` (default 3600 s). No job
-  outlives a clean shutdown: when stdin closes, every call and job is
-  cancelled and its child killed and reaped before the server exits. A server
+  outlives a clean shutdown: when stdin closes, every job is cancelled and its
+  child killed and reaped, and the calls already asked for finish (each within
+  `--timeout`) and answer, before the server exits. A server
   killed outright cannot do that; on Unix each child is started with
   `--exit-with-parent` and stops itself within about half a second, while on
   Windows such a child runs on until its own time limit (`--job-timeout` less

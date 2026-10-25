@@ -2630,3 +2630,67 @@ fn a_killed_server_leaves_no_render_behind() {
         "the orphaned render stopped itself"
     );
 }
+
+/// Several starts in one write, below `--max-jobs`: every job runs. (Taking
+/// a slot makes the next job first in line; without a wake-up then, a job
+/// sat queued beside a free slot.)
+#[test]
+fn jobs_started_together_all_run_up_to_the_cap() {
+    let mut s = Server::start_in(
+        &common::scratch_dir("mcp-job-together"),
+        &[
+            "--max-jobs",
+            "3",
+            "--job-timeout",
+            "600",
+            "--max-steps",
+            "0",
+        ],
+    );
+    initialized(&mut s);
+    for i in 0..3 {
+        s.request(json!(i), "start_render", json!({ "source": "{ } loop" }));
+    }
+    let mut jobs = Vec::new();
+    for _ in 0..3 {
+        let reply = s.read();
+        jobs.push(
+            job_facts(&reply["result"])["job_id"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+        );
+    }
+    for job in &jobs {
+        assert!(
+            eventually(400, || status(&mut s, job)["state"] == "running"),
+            "{job} runs: {}",
+            status(&mut s, job)
+        );
+    }
+    for job in &jobs {
+        s.tool("cancel_render", json!({ "job_id": job }));
+    }
+    for job in &jobs {
+        assert!(eventually(400, || status(&mut s, job)["state"] == "cancelled"));
+    }
+}
+
+/// A one-shot client (one request piped in, then stdin closed) still gets
+/// its reply: calls in flight finish and answer at shutdown.
+#[test]
+fn a_call_in_flight_at_shutdown_is_still_answered() {
+    let mut s = Server::start();
+    initialized(&mut s);
+    s.request(
+        json!("last"),
+        "eval_postscript",
+        json!({ "source": "(bye) =" }),
+    );
+    let rest = s.close_and_drain();
+    let reply = rest
+        .iter()
+        .find(|m| m["id"] == "last")
+        .unwrap_or_else(|| panic!("no reply for the last call: {rest:?}"));
+    assert_eq!(texts(&reply["result"]), ["bye\n"], "{reply}");
+}
