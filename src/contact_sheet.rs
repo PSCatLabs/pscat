@@ -132,6 +132,13 @@ pub const TEXT_GAP: u32 = 5;
 /// footprint, never drawn over the image.
 pub const BORDER: u32 = 1;
 
+/// Vertical gap between the cells of one stacked column ([`Layout::packed`]).
+pub const STACK_GAP: u32 = 10;
+/// Vertical gap between the lines of a wrapped row ([`Layout::packed`]).
+pub const LINE_GAP: u32 = 10;
+/// Padding a matted cell gets on every side, in pixels ([`composite_on_mat`]).
+pub const MAT_PAD: u32 = 10;
+
 /// One cell's footprint: the image, and its caption (`(0, 0)` for none).
 #[derive(Clone, Copy, Debug)]
 pub struct CellSize {
@@ -144,6 +151,17 @@ pub struct CellSize {
 pub struct RowSize {
     pub header: (u32, u32),
     pub cells: Vec<CellSize>,
+}
+
+/// A row for [`Layout::packed`]: [`RowSize`] plus how its cells group into
+/// columns. `column_len` lists the cell count of each column in order
+/// (all at least 1, summing to `cells.len()`); a column of more than one
+/// cell stacks them top to bottom.
+#[derive(Clone, Debug)]
+pub struct PackedRow {
+    pub header: (u32, u32),
+    pub cells: Vec<CellSize>,
+    pub column_len: Vec<usize>,
 }
 
 /// Where everything goes, from [`Layout::new`]. Columns are as wide as
@@ -165,17 +183,65 @@ impl Layout {
     /// Place `rows`. Errors, rather than allocating, past
     /// [`MAX_SIDE_PX`] on a side, or for an empty sheet.
     pub fn new(rows: &[RowSize]) -> Result<Layout, String> {
+        let packed: Vec<PackedRow> = rows
+            .iter()
+            .map(|r| PackedRow {
+                header: r.header,
+                cells: r.cells.clone(),
+                column_len: vec![1; r.cells.len()],
+            })
+            .collect();
+        Layout::packed(&packed, None)
+    }
+
+    /// Place `rows` like [`Layout::new`], with two more controls (issue
+    /// #706). Each row's cells are grouped into columns by `column_len`:
+    /// a column of several cells stacks them top to bottom, each with its
+    /// own caption under it, so small cells share a column instead of
+    /// each taking a slot as wide as the largest. And `wrap`, if given,
+    /// is the most columns on one line: a longer row continues on the
+    /// next line (the header only above the first), under the same
+    /// column slots. The position vectors are still indexed by row, then
+    /// by cell in the order given. With every column one cell and no
+    /// `wrap` this is exactly [`Layout::new`].
+    pub fn packed(rows: &[PackedRow], wrap: Option<usize>) -> Result<Layout, String> {
         if rows.is_empty() || rows.iter().all(|r| r.cells.is_empty()) {
             return Err("contact sheet: no cells to lay out".to_string());
         }
+        if wrap == Some(0) {
+            return Err("contact sheet: a line needs at least one column".to_string());
+        }
         let too_large = || "contact sheet dimensions overflow".to_string();
-        let ncols = rows.iter().map(|r| r.cells.len()).max().unwrap_or(0);
         let b2 = 2 * BORDER as u64;
-        let mut col_w = vec![0u64; ncols];
+        // Per row, the cell indices of each column, then cut into lines.
+        let mut lines: Vec<Vec<Vec<Vec<usize>>>> = Vec::with_capacity(rows.len());
         for row in rows {
-            for (c, cell) in row.cells.iter().enumerate() {
-                let w = (cell.image.0 as u64 + b2).max(cell.caption.0 as u64);
-                col_w[c] = col_w[c].max(w);
+            if row.column_len.contains(&0)
+                || row.column_len.iter().sum::<usize>() != row.cells.len()
+            {
+                return Err("contact sheet: column sizes do not add up to the cells".to_string());
+            }
+            let mut cols: Vec<Vec<usize>> = Vec::with_capacity(row.column_len.len());
+            let mut next = 0;
+            for &n in &row.column_len {
+                cols.push((next..next + n).collect());
+                next += n;
+            }
+            let per_line = wrap.unwrap_or(usize::MAX).max(1);
+            lines.push(cols.chunks(per_line).map(<[_]>::to_vec).collect());
+        }
+        let ncols = lines.iter().flatten().map(|l| l.len()).max().unwrap_or(0);
+        let outer_w = |cell: &CellSize| cell.image.0 as u64 + b2;
+        let outer_h = |cell: &CellSize| cell.image.1 as u64 + b2;
+        let mut col_w = vec![0u64; ncols];
+        for (row, row_lines) in rows.iter().zip(&lines) {
+            for line in row_lines {
+                for (slot, col) in line.iter().enumerate() {
+                    for &i in col {
+                        let cell = &row.cells[i];
+                        col_w[slot] = col_w[slot].max(outer_w(cell).max(cell.caption.0 as u64));
+                    }
+                }
             }
         }
         let header_w = rows.iter().map(|r| r.header.0 as u64).max().unwrap_or(0);
@@ -184,39 +250,56 @@ impl Layout {
             .checked_add(2 * MARGIN as u64)
             .ok_or_else(too_large)?;
 
-        // Row bands, top to bottom.
+        // Bands top to bottom: one per line. `band_h` is the tallest
+        // single image or stack; the captions of single cells share one
+        // strip under it, as they always have.
+        struct Band {
+            top: u64,
+            band_h: u64,
+        }
         let mut y = MARGIN as u64;
-        let mut bands = Vec::with_capacity(rows.len());
-        for (i, row) in rows.iter().enumerate() {
+        let mut bands: Vec<Vec<Band>> = Vec::with_capacity(rows.len());
+        let mut header_tops = Vec::with_capacity(rows.len());
+        for (i, (row, row_lines)) in rows.iter().zip(&lines).enumerate() {
             if i > 0 {
                 y = y.checked_add(ROW_GAP as u64).ok_or_else(too_large)?;
             }
+            header_tops.push(y);
             let header_h = if row.header.1 > 0 {
                 row.header.1 as u64 + TEXT_GAP as u64
             } else {
                 0
             };
-            let image_h = row
-                .cells
-                .iter()
-                .map(|c| c.image.1 as u64 + b2)
-                .max()
-                .unwrap_or(0);
-            let caption_h = row
-                .cells
-                .iter()
-                .map(|c| c.caption.1 as u64)
-                .max()
-                .unwrap_or(0);
-            let caption_h = if caption_h > 0 {
-                caption_h + TEXT_GAP as u64
-            } else {
-                0
-            };
-            bands.push((y, header_h, image_h));
-            y = y
-                .checked_add(header_h + image_h + caption_h)
-                .ok_or_else(too_large)?;
+            let mut row_bands = Vec::with_capacity(row_lines.len());
+            for (l, line) in row_lines.iter().enumerate() {
+                if l > 0 {
+                    y = y.checked_add(LINE_GAP as u64).ok_or_else(too_large)?;
+                }
+                let lead = if l == 0 { header_h } else { 0 };
+                let (mut band_h, mut caption_h) = (0u64, 0u64);
+                for col in line {
+                    if let [only] = col[..] {
+                        let cell = &row.cells[only];
+                        band_h = band_h.max(outer_h(cell));
+                        caption_h = caption_h.max(cell.caption.1 as u64);
+                    } else {
+                        band_h = band_h.max(stack_height(row, col));
+                    }
+                }
+                let caption_h = if caption_h > 0 {
+                    caption_h + TEXT_GAP as u64
+                } else {
+                    0
+                };
+                row_bands.push(Band {
+                    top: y + lead,
+                    band_h,
+                });
+                y = y
+                    .checked_add(lead + band_h + caption_h)
+                    .ok_or_else(too_large)?;
+            }
+            bands.push(row_bands);
         }
         let height = y.checked_add(MARGIN as u64).ok_or_else(too_large)?;
         if width > MAX_SIDE_PX as u64 || height > MAX_SIDE_PX as u64 {
@@ -235,25 +318,41 @@ impl Layout {
         let mut layout = Layout {
             width: width as u32,
             height: height as u32,
-            header_xy: Vec::new(),
+            header_xy: header_tops.iter().map(|&t| (MARGIN, t as u32)).collect(),
             image_xy: Vec::new(),
             caption_xy: Vec::new(),
         };
-        for (row, &(top, header_h, image_h)) in rows.iter().zip(&bands) {
-            layout.header_xy.push((MARGIN, top as u32));
-            let band_top = top + header_h;
-            let mut images = Vec::new();
-            let mut captions = Vec::new();
-            for (c, cell) in row.cells.iter().enumerate() {
-                let slot = col_w[c];
-                let outer_w = cell.image.0 as u64 + b2;
-                let outer_h = cell.image.1 as u64 + b2;
-                let ix = col_x[c] + (slot - outer_w) / 2 + BORDER as u64;
-                let iy = band_top + (image_h - outer_h) / 2 + BORDER as u64;
-                images.push((ix as u32, iy as u32));
-                let cx = col_x[c] + slot.saturating_sub(cell.caption.0 as u64) / 2;
-                let cy = band_top + image_h + TEXT_GAP as u64;
-                captions.push((cx as u32, cy as u32));
+        for (r, row) in rows.iter().enumerate() {
+            let mut images = vec![(0u32, 0u32); row.cells.len()];
+            let mut captions = vec![(0u32, 0u32); row.cells.len()];
+            for (line, band) in lines[r].iter().zip(&bands[r]) {
+                for (slot, col) in line.iter().enumerate() {
+                    let slot_w = col_w[slot];
+                    let centred = |w: u64| col_x[slot] + slot_w.saturating_sub(w) / 2;
+                    if let [only] = col[..] {
+                        let cell = &row.cells[only];
+                        let iy = band.top + (band.band_h - outer_h(cell)) / 2 + BORDER as u64;
+                        images[only] = ((centred(outer_w(cell)) + BORDER as u64) as u32, iy as u32);
+                        let cy = band.top + band.band_h + TEXT_GAP as u64;
+                        captions[only] = (centred(cell.caption.0 as u64) as u32, cy as u32);
+                    } else {
+                        let mut cy = band.top + (band.band_h - stack_height(row, col)) / 2;
+                        for &i in col {
+                            let cell = &row.cells[i];
+                            images[i] = (
+                                (centred(outer_w(cell)) + BORDER as u64) as u32,
+                                (cy + BORDER as u64) as u32,
+                            );
+                            cy += outer_h(cell);
+                            if cell.caption.1 > 0 {
+                                cy += TEXT_GAP as u64;
+                                captions[i] = (centred(cell.caption.0 as u64) as u32, cy as u32);
+                                cy += cell.caption.1 as u64;
+                            }
+                            cy += STACK_GAP as u64;
+                        }
+                    }
+                }
             }
             layout.image_xy.push(images);
             layout.caption_xy.push(captions);
@@ -272,6 +371,45 @@ impl Layout {
         sheet.fill(tiny_skia::Color::WHITE);
         Ok(sheet)
     }
+}
+
+/// Height of a stacked column: each cell's outer height, its caption and
+/// the gap above it, and [`STACK_GAP`] between cells.
+fn stack_height(row: &PackedRow, col: &[usize]) -> u64 {
+    let mut h = 0u64;
+    for (n, &i) in col.iter().enumerate() {
+        let cell = &row.cells[i];
+        if n > 0 {
+            h += STACK_GAP as u64;
+        }
+        h += cell.image.1 as u64 + 2 * BORDER as u64;
+        if cell.caption.1 > 0 {
+            h += TEXT_GAP as u64 + cell.caption.1 as u64;
+        }
+    }
+    h
+}
+
+/// `frame` on a mat: a copy of it, `pad` pixels bigger on every side, with
+/// the new margin filled `rgb` and the frame drawn over it source-over, so
+/// a frame rendered with a transparent background shows the mat through.
+/// Nothing is scaled. `None` if the result would not fit a [`Pixmap`].
+pub fn composite_on_mat(frame: &Pixmap, rgb: [u8; 3], pad: u32) -> Option<Pixmap> {
+    let (w, h) = (
+        frame.width().checked_add(pad.checked_mul(2)?)?,
+        frame.height().checked_add(pad.checked_mul(2)?)?,
+    );
+    let mut out = Pixmap::new(w, h)?;
+    out.fill(tiny_skia::Color::from_rgba8(rgb[0], rgb[1], rgb[2], 255));
+    out.draw_pixmap(
+        pad as i32,
+        pad as i32,
+        frame.as_ref(),
+        &tiny_skia::PixmapPaint::default(),
+        tiny_skia::Transform::identity(),
+        None,
+    );
+    Some(out)
 }
 
 /// Copy `src` onto `sheet` with its top-left at `(x, y)`, clipped to the
@@ -745,6 +883,127 @@ mod tests {
         // Image centred in the 50 px caption column: (50-12)/2 + 1.
         assert_eq!(l.image_xy[0][0].0, 12 + 19 + 1);
         assert_eq!(l.caption_xy[0][0], (12, 12 + 20 + 12 + 5));
+    }
+
+    fn packed(cells: Vec<CellSize>, column_len: Vec<usize>) -> PackedRow {
+        PackedRow {
+            header: (0, 0),
+            cells,
+            column_len,
+        }
+    }
+
+    /// Single-cell columns with no wrap are `Layout::new`: the numbers are
+    /// worked out by hand from the documented geometry (12 px margin, 14
+    /// column gap, 18 row gap, 5 text gap, 1 px border), for two rows with
+    /// headers, mixed caption heights and a cell with no caption.
+    #[test]
+    fn single_column_layouts_match_the_documented_geometry() {
+        let rows = [
+            RowSize {
+                header: (80, 14),
+                cells: vec![cell(100, 100, (60, 12)), cell(20, 30, (90, 12))],
+            },
+            RowSize {
+                header: (40, 10),
+                cells: vec![cell(60, 40, (0, 0))],
+            },
+        ];
+        let packed_rows: Vec<PackedRow> = rows
+            .iter()
+            .map(|r| PackedRow {
+                header: r.header,
+                cells: r.cells.clone(),
+                column_len: vec![1; r.cells.len()],
+            })
+            .collect();
+        let new = Layout::new(&rows).unwrap();
+        let via_packed = Layout::packed(&packed_rows, None).unwrap();
+        for l in [&new, &via_packed] {
+            // Columns 102 and 90 wide (the caption), so 12 + 102 + 14 + 90 + 12.
+            assert_eq!(l.width, 230);
+            // Row one: 19 header + 102 image + 17 caption; 18 gap; row two:
+            // 15 header + 42 image; 12 margins.
+            assert_eq!(l.height, 12 + 138 + 18 + 57 + 12);
+            assert_eq!(l.header_xy, vec![(12, 12), (12, 168)]);
+            assert_eq!(l.image_xy[0], vec![(13, 32), (163, 67)]);
+            assert_eq!(l.caption_xy[0], vec![(33, 138), (128, 138)]);
+            assert_eq!(l.image_xy[1], vec![(33, 184)]);
+        }
+    }
+
+    #[test]
+    fn a_stacked_column_puts_each_caption_under_its_cell() {
+        let row = packed(
+            vec![
+                cell(100, 100, (40, 10)),
+                cell(20, 20, (30, 10)),
+                cell(20, 20, (30, 10)),
+            ],
+            vec![1, 2],
+        );
+        let l = Layout::packed(&[row], None).unwrap();
+        // Stack: (22 + 5 + 10) * 2 + 10 = 84 high; the single is 102 high
+        // with its caption strip (10 + 5) below it.
+        assert_eq!(
+            (l.width, l.height),
+            (12 + 102 + 14 + 30 + 12, 12 + 102 + 15 + 12)
+        );
+        // Column two starts at x 128, 30 wide, images 22 wide: offset 4.
+        // The stack is centred in the 102 px band: top = 12 + 9.
+        assert_eq!(l.image_xy[0][1], (128 + 4 + 1, 12 + 9 + 1));
+        assert_eq!(l.caption_xy[0][1], (128, 12 + 9 + 22 + 5));
+        assert_eq!(l.image_xy[0][2], (128 + 4 + 1, 12 + 9 + 37 + 10 + 1));
+        // The single's caption sits under the band, as it always has.
+        assert_eq!(l.caption_xy[0][0], (12 + 31, 12 + 102 + 5));
+    }
+
+    #[test]
+    fn wrap_continues_a_row_under_the_same_slots() {
+        let row = packed(vec![cell(10, 10, (0, 0)); 5], vec![1; 5]);
+        let l = Layout::packed(&[row], Some(2)).unwrap();
+        assert_eq!(l.width, 12 + 12 + 14 + 12 + 12);
+        assert_eq!(l.height, 12 + 3 * 12 + 2 * LINE_GAP + 12);
+        assert_eq!(l.image_xy[0][2], (13, 12 + 12 + LINE_GAP + 1));
+        assert_eq!(l.image_xy[0][3], (13 + 26, 12 + 12 + LINE_GAP + 1));
+        assert_eq!(l.image_xy[0][4], (13, 12 + 2 * (12 + LINE_GAP) + 1));
+        // A header sits above the first line only.
+        let mut row = packed(vec![cell(10, 10, (0, 0)); 3], vec![1; 3]);
+        row.header = (50, 14);
+        let l = Layout::packed(&[row], Some(2)).unwrap();
+        assert_eq!(l.header_xy.len(), 1);
+        assert_eq!(l.height, 12 + 19 + 12 + LINE_GAP + 12 + 12);
+    }
+
+    #[test]
+    fn packed_refuses_bad_columns_and_a_zero_wrap() {
+        let c = || vec![cell(10, 10, (0, 0)); 3];
+        assert!(Layout::packed(&[packed(c(), vec![1, 1])], None).is_err());
+        assert!(Layout::packed(&[packed(c(), vec![3, 0])], None).is_err());
+        assert!(Layout::packed(&[packed(c(), vec![3])], Some(0)).is_err());
+        assert!(Layout::packed(&[packed(c(), vec![2, 1])], Some(1)).is_ok());
+    }
+
+    #[test]
+    fn a_mat_pads_and_lets_a_transparent_frame_show_through() {
+        let mut frame = Pixmap::new(4, 3).unwrap();
+        frame.fill(tiny_skia::Color::TRANSPARENT);
+        let out = composite_on_mat(&frame, [10, 20, 30], 5).unwrap();
+        assert_eq!((out.width(), out.height()), (14, 13));
+        assert!(
+            out.pixels()
+                .iter()
+                .all(|p| (p.red(), p.green(), p.blue(), p.alpha()) == (10, 20, 30, 255))
+        );
+        let red = solid(4, 3, [255, 0, 0, 255]);
+        let out = composite_on_mat(&red, [10, 20, 30], 5).unwrap();
+        let px = |x: u32, y: u32| out.pixel(x, y).unwrap();
+        assert_eq!(
+            (px(0, 0).red(), px(4, 4).red(), px(5, 5).red()),
+            (10, 10, 255)
+        );
+        assert_eq!(px(8, 7).red(), 255);
+        assert_eq!(px(9, 7).red(), 10);
     }
 
     #[test]

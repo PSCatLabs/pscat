@@ -1123,6 +1123,12 @@ renders eight examples in both and compares block-downsampled output).
   faces of the `cjk-thai` pack (missing pack: `?` and one stderr warning, not a failed
   sheet). A Latin-only label keeps the pre-#707 pipeline to the byte. See
   `notes/707-sheet-non-latin-labels.md`.
+  #706 added sweeps (`--sweep-seed`/`--sweep`, which call the flag CLI's private
+  `parse_seed_spec`/`parse_sweep_spec`/`format_sweep_value` in `main.rs` from the child
+  module), a per-cell mat (`DPI@COLOR`, `composite_on_mat`), stacked columns (`+`) and
+  `--cols` wrapping, through `Layout::packed` and `PackedRow` (`Layout::new` delegates to
+  it and is unchanged for single-cell columns). With none of the new options the sheet is
+  byte-identical to before. See `notes/706-sheet-sweeps-mat-cols.md`.
 - **`pscat-mcp`'s contract (#568).** The server lives in
   `src/mcp_server.rs`, pulled into both binaries with `#[path]` (not the
   library): `pscat-mcp` and `pscat mcp` are the same server (#569).
