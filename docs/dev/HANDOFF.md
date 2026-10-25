@@ -1151,6 +1151,15 @@ renders eight examples in both and compares block-downsampled output).
   files are `file::Sink`s; `%stdout` goes through `Interp::write_stdout` so a
   captured stdout keeps order with `print`. Disk writes are unbuffered because
   the CLI exits without dropping the interpreter. See `notes/740-file-writing.md`.
+- **`writereals` / `readreals` (#735).** Packed little-endian float64 (or `/f32`) save and
+  load of a numeric array, in `src/ops/realsio.rs` (module doc has the error table and the
+  `/f32` rules). The writer opens through `WriteRoots::open` like `file` does, and checks every
+  element before opening, so a typecheck never truncates. It reads elements with
+  `PsArray::peek` (never `snapshot`, which would be an unaccounted copy) and encodes through
+  one fixed 64 KiB buffer; the reader `check_alloc`s file plus array before reading. A short file
+  is `rangecheck`, not `ioerror` (the PLRM keeps `ioerror` for non-EOF failures). Tests:
+  `tests/realsio.rs`, and `tests/realsio_memory.rs` (own binary, tracking allocator). See
+  `notes/735-readreals-writereals.md`.
 - **`pscat sheet` composes finished renders (#693).** Unlike the subcommands above it
   builds no driver: it renders each file itself (a probe `Interp` gives every cell's
   pixel size first), lays the cells out with `contact_sheet::Layout` (pure geometry, so
