@@ -119,3 +119,17 @@ fn drawing_state_is_not_lost_inside_nulldevice() {
     );
     same(&plain, &nulled, "state restored");
 }
+
+#[test]
+fn the_null_device_has_an_empty_clip_that_initclip_keeps() {
+    let mut it = Interp::with_page(100, 100).expect("page");
+    it.run_str(
+        "gsave nulldevice clippath pathbbox 4 array astore /a exch def
+         initclip clippath pathbbox 4 array astore /b exch def grestore
+         clippath pathbbox 4 array astore /c exch def
+         a aload pop 0 eq 4 1 roll 0 eq 4 1 roll 0 eq 4 1 roll 0 eq and and and
+         b aload pop 0 eq 4 1 roll 0 eq 4 1 roll 0 eq 4 1 roll 0 eq and and and and
+         c 2 get 100 eq and { } { 1 0 div } ifelse",
+    )
+    .expect("null clip is empty, the page clip is back after grestore");
+}

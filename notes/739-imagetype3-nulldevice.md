@@ -20,6 +20,7 @@ Found by ArtColony/fractal_clouds (a ray-marched landscape library): an
   `setdevice` does both); `base_ctm()` is identity on it, so
   `initmatrix`, `defaultmatrix` and `initgraphics` (also `showpage`'s)
   stay on the null device.
+- `clippath` on the null device is a degenerate path at the origin (`pathbbox` gives `0 0 0 0`, as gs does), through `initclip` too.
 - `showpage`/`copypage` return before pushing a page, ending an SVG/PDF
   page or arming the lazy erase. Their `initgraphics` still runs.
 

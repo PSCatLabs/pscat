@@ -2160,6 +2160,13 @@ impl Gfx {
     /// — a documented residual approximation, not the unbounded
     /// "newest clip only" error this replaces.
     pub fn set_path_to_clip(&mut self) {
+        if self.state.null_device {
+            // The null device has no area: gs reports a degenerate clip at
+            // the origin (`clippath pathbbox` is `0 0 0 0`), also after
+            // `initclip` (#739).
+            self.state.path = Self::rect_path(0.0, 0.0, 0.0, 0.0);
+            return;
+        }
         match &self.state.clip {
             Some(c) if c.node.parent.is_none() => self.state.path = c.node.path.clone(),
             Some(c) => {
