@@ -178,6 +178,9 @@ fn hash2<T: Table + ?Sized>(p: &T, i: i64, j: i64) -> Result<i64, PsError> {
     p.at(s & 255)
 }
 
+/// artkit's `Grad2` writes the diagonal as `0.70710678`; the same
+/// truncated value, not `FRAC_1_SQRT_2`, keeps `noise2` bit-identical.
+#[allow(clippy::approx_constant)]
 const D: f64 = 0.707_106_78;
 const G2: [Num; 16] = [
     Num::Int(1),
