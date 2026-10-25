@@ -55,7 +55,7 @@ write them in a few calls.
 **`filenameforall`.** Reads are unrestricted (any path the user can read), so listing follows the
 same policy:
 - An absolute template lists its directory.
-- A relative template lists the directory in every place `run` looks (`paths::matching_names`),
+- A relative template lists the directory in every place `run` looks (`filenames::matching_names`, in `src/filenames.rs`),
   plus the embedded `lib/` names, so `(lib/*.ps)` works in an install with no `lib/` on disk.
 - Results are sorted and deduplicated, regular files only.
 - Wildcards (`*`, `?`, `\` quoting) match within the last component. A wildcard in a directory

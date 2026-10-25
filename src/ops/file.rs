@@ -231,7 +231,7 @@ fn deletefile(it: &mut Interp) -> Result<(), PsError> {
 /// name matching `template` (`*` any run, `?` one character, `\` quotes
 /// the next), copied into `scratch` (`rangecheck` when it doesn't fit).
 /// Names are listed where `run` and `(r) file` would look
-/// (`crate::paths::matching_names`), so it can list what a program could
+/// (`crate::filenames::matching_names`), so it can list what a program could
 /// read, nothing more; wildcards match within the last path component.
 fn filenameforall(it: &mut Interp) -> Result<(), PsError> {
     let scratch = it.pop()?;
@@ -251,7 +251,7 @@ fn filenameforall(it: &mut Interp) -> Result<(), PsError> {
     let mut poll = |n: usize| if limited { it.poll_read(1, n) } else { Ok(()) };
     #[cfg(target_arch = "wasm32")]
     let mut poll = |_: usize| Ok(());
-    let names = crate::paths::matching_names(&template, &mut poll)?;
+    let names = crate::filenames::matching_names(&template, &mut poll)?;
     let names: Vec<Object> = names.into_iter().map(Object::string).collect();
     // `{ scratch copy proc exec }` over the names, with the operators
     // themselves rather than their names, so a program that redefines
