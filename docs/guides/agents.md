@@ -306,8 +306,9 @@ For a render longer than one call may take (#741). A job is
    refused here, before a job exists.
 2. `render_status` (`job_id`) answers at once, even while renders run:
    `state` (`queued`, `running`, `done`, `failed`, `cancelled`),
-   `elapsed_seconds`, `pages_done` (pages finished so far; one long page
-   shows 0 until it is done), `cancel_requested` after a cancel, and a failed
+   `elapsed_seconds`, `pages_done` (pages ended by `showpage` so far; a
+   single page shows 0 while it is drawn, and a program that never calls
+   `showpage` shows 0 throughout), `cancel_requested` after a cancel, and a failed
    job's `error`. Poll it at whatever pace suits the client.
 3. `render_result` (`job_id`) returns exactly what `render_postscript` would
    have: the images, a `PostScript error:` block with a partial page,

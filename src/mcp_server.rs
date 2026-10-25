@@ -1098,8 +1098,8 @@ fn tool_list(cfg: &Config) -> Value {
             "title": "Render job status",
             "annotations": annotations("Render job status", true),
             "description": "The state of a start_render job: queued, running, done, failed or \
-                cancelled, with elapsed_seconds and pages_done (pages finished so far; one \
-                long page shows 0 until it is done). Answers at once, even while renders run. \
+                cancelled, with elapsed_seconds and pages_done (pages ended by showpage so \
+                far; a single page shows 0 while it is drawn). Answers at once, even while renders run. \
                 A failed job's error is included.",
             "inputSchema": job_id_schema("The job_id start_render returned")
         },

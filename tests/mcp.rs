@@ -91,6 +91,7 @@ impl Server {
         self.send_raw(msg.to_string().as_bytes());
     }
 
+    #[cfg(unix)]
     fn pid(&self) -> u32 {
         self.child.id()
     }
@@ -2208,10 +2209,20 @@ fn children(pid: u32) -> Vec<(u32, String)> {
         .collect()
 }
 
+/// Whether `pid` is a live process. A zombie is not: on Linux `kill(pid, 0)`
+/// succeeds on one, which would make a test wait on init's reaping.
 #[cfg(unix)]
 fn process_exists(pid: u32) -> bool {
     // Signal 0 only asks whether the process is there.
-    unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
+    if unsafe { libc::kill(pid as libc::pid_t, 0) } != 0 {
+        return false;
+    }
+    let out = Command::new("ps")
+        .args(["-o", "stat=", "-p", &pid.to_string()])
+        .output()
+        .expect("ps");
+    let stat = String::from_utf8_lossy(&out.stdout);
+    !stat.trim().is_empty() && !stat.trim_start().starts_with('Z')
 }
 
 #[cfg(unix)]
