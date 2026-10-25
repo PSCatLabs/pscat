@@ -179,7 +179,9 @@ fn write(it: &mut Interp) -> Result<(), PsError> {
 fn writestring(it: &mut Interp) -> Result<(), PsError> {
     let s = pop_ps_string(it)?;
     let f = pop_file(it)?;
-    let bytes = s.to_vec();
+    // Straight from the string's storage: no copy that the memory limit
+    // wouldn't see.
+    let bytes = s.borrow_bytes();
     write_bytes(it, &f, &bytes)
 }
 
@@ -189,12 +191,17 @@ fn writehexstring(it: &mut Interp) -> Result<(), PsError> {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let s = pop_ps_string(it)?;
     let f = pop_file(it)?;
-    let hex: Vec<u8> = s
-        .borrow_bytes()
-        .iter()
-        .flat_map(|&b| [HEX[usize::from(b >> 4)], HEX[usize::from(b & 15)]])
-        .collect();
-    write_bytes(it, &f, &hex)
+    // In fixed-size pieces, so a long string never needs a buffer twice
+    // its size outside the memory limit's view.
+    let mut buf = [0u8; 8192];
+    for chunk in s.borrow_bytes().chunks(buf.len() / 2) {
+        for (i, &b) in chunk.iter().enumerate() {
+            buf[2 * i] = HEX[usize::from(b >> 4)];
+            buf[2 * i + 1] = HEX[usize::from(b & 15)];
+        }
+        write_bytes(it, &f, &buf[..2 * chunk.len()])?;
+    }
+    Ok(())
 }
 
 /// flush — push `print` and `%stdout` output out now.

@@ -368,3 +368,18 @@ fn pscat_mcp_never_writes_files() {
     let _ = child.wait();
     assert!(!cwd.join("rel.txt").exists() && !abs.exists());
 }
+
+#[test]
+fn writehexstring_of_a_long_string_is_whole() {
+    // Longer than one 4096-byte encoding chunk.
+    let (root, mut it) = setup("fw-hexlong");
+    let f = ps(&root.join("h.txt"));
+    it.run_str(&format!(
+        "{f} (w) file dup 10000 string dup 9999 255 put writehexstring closefile"
+    ))
+    .unwrap();
+    let got = std::fs::read(root.join("h.txt")).unwrap();
+    assert_eq!(got.len(), 20000);
+    assert!(got[..19998].iter().all(|&b| b == b'0'));
+    assert_eq!(&got[19998..], b"ff");
+}
