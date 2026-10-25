@@ -89,6 +89,10 @@ PIL composite. A one-call typewriter or chart is not added yet.
   options. Errors still return the partial render with the error text.
   Runs the lint pass and appends a `Lint:` block when it finds something
   (a blank page, an unbalanced `gsave`, stuff left on the stack).
+  `render_postscript`, `handwrite`, `chalkboard_math` and `review_sheet` also
+  return what a *successful* run wrote to stderr (a font falling back to a
+  built-in face, say) as a `Warnings:` text item: each distinct line once, at
+  most 8 lines of 300 characters, without the child's own receipt.
 - `handwrite` — text in, handwriting-style note PNG back (the `pscat handwrite`
   options: size, width, paper, ink, jitter, seed, dpi; the note is refused
   past `--max-pixels`, see the limits below). It is a set of

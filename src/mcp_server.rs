@@ -936,6 +936,10 @@ fn render_postscript(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
     if !lint_findings.is_empty() {
         content.push(text_content(&format!("Lint:\n{lint_findings}")));
     }
+    // A failed run's stderr is the `PostScript error:` block above.
+    if run.success {
+        content.extend(warnings_content(&other_stderr));
+    }
     if format != "pdf" {
         for body in read_inline(cfg, &pages, written.as_deref())? {
             content.push(match format {
@@ -1028,6 +1032,7 @@ fn handwrite(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
     };
     let bodies = read_inline(cfg, &pages, written.as_deref())?;
     let mut content: Vec<Value> = bodies.iter().map(|b| image_content(b)).collect();
+    content.extend(warnings_content(&run.stderr));
     if let Some(written) = written {
         content.push(text_content(&wrote_message(&written)));
     }
@@ -1282,6 +1287,7 @@ fn chalkboard_math(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
             content.push(image_content(&body));
         }
     }
+    content.extend(warnings_content(&run.stderr));
     if let Some(written) = written {
         content.push(text_content(&wrote_message(&written)));
     }
@@ -1576,6 +1582,8 @@ fn review_sheet(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
     let scratch = ScratchDir::new()?;
     let bin = pscat_bin()?;
     let mut notes = Vec::new();
+    // Stderr of the cells that succeeded (see `warnings_content`).
+    let mut cell_stderr = String::new();
     let mut n = 0usize;
     for (r, e) in entries.iter().enumerate() {
         if let Some(h) = &headers[r] {
@@ -1631,6 +1639,9 @@ fn review_sheet(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
                     why.push_str("...");
                 }
                 notes.push(format!("{} at {dpi} dpi failed:\n{why}", e.label));
+            } else {
+                cell_stderr.push_str(&run.stderr);
+                cell_stderr.push('\n');
             }
             let bytes = std::fs::read(&page).map_err(|er| format!("read {page:?}: {er}"))?;
             let _ = std::fs::remove_file(&page);
@@ -1678,6 +1689,7 @@ fn review_sheet(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
     for note in notes {
         content.push(text_content(&format!("PostScript error in {note}")));
     }
+    content.extend(warnings_content(&cell_stderr));
     for body in read_inline(cfg, &pages, written.as_deref())? {
         content.push(image_content(&body));
     }
@@ -1867,6 +1879,52 @@ fn split_lint_findings(stderr: &str) -> (String, String) {
         }
     }
     (findings.join("\n"), rest.join("\n"))
+}
+
+/// The most warning lines one call returns, and the longest one.
+const MAX_WARNING_LINES: usize = 8;
+const MAX_WARNING_CHARS: usize = 300;
+
+/// What a child that *succeeded* wrote to stderr, as one text content item
+/// (`Warnings:` and the lines), or `None` when there is nothing to say: a
+/// note such as a font falling back to a built-in face (#728) exits 0, and
+/// would otherwise never reach the caller. Blank lines, `pscat: wrote ...`
+/// (the child's own receipt, which names a scratch path) and lint lines (the
+/// tools that run `--lint` report those under `Lint:`) are dropped; repeats
+/// are shown once, in first-seen order; at most [`MAX_WARNING_LINES`] lines
+/// of [`MAX_WARNING_CHARS`] characters each, so the reply stays bounded
+/// however chatty a program is. A failed run reports its whole stderr in the
+/// error instead.
+fn warnings_content(stderr: &str) -> Option<Value> {
+    let mut seen: Vec<String> = Vec::new();
+    let mut more = 0usize;
+    for line in stderr.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with("pscat: wrote ") || line.starts_with("pscat: lint: ")
+        {
+            continue;
+        }
+        let line = match line.char_indices().nth(MAX_WARNING_CHARS) {
+            Some((end, _)) => format!("{}...", &line[..end]),
+            None => line.to_string(),
+        };
+        if seen.contains(&line) {
+            continue;
+        }
+        if seen.len() < MAX_WARNING_LINES {
+            seen.push(line);
+        } else {
+            more += 1;
+        }
+    }
+    if seen.is_empty() {
+        return None;
+    }
+    let mut text = format!("Warnings:\n{}", seen.join("\n"));
+    if more > 0 {
+        text.push_str(&format!("\n... and {more} more"));
+    }
+    Some(text_content(&text))
 }
 
 // --- out_path confinement --------------------------------------------
@@ -2304,5 +2362,29 @@ mod tests {
         assert_eq!(e.fields["limit"], "time");
         let e = failed_run("postscript_error", "m".into(), "%%[ Error: undefined ]%%");
         assert_eq!(e.kind, "postscript_error");
+    }
+
+    #[test]
+    fn warnings_are_deduplicated_bounded_and_skip_the_childs_own_lines() {
+        assert!(warnings_content("").is_none());
+        assert!(
+            warnings_content("pscat: wrote /tmp/x/page.png\npscat: lint: [blank-page] x\n\n")
+                .is_none()
+        );
+        let w = warnings_content("note: a\nnote: b\nnote: a\npscat: wrote /tmp/p.png\n").unwrap();
+        assert_eq!(w["text"], "Warnings:\nnote: a\nnote: b");
+        let many: String = (0..30).map(|i| format!("w{i}\n")).collect();
+        let text = warnings_content(&many).unwrap()["text"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert_eq!(text.lines().count(), 1 + MAX_WARNING_LINES + 1);
+        assert!(text.ends_with("... and 22 more"), "{text}");
+        let long = "\u{2603}".repeat(1000);
+        let text = warnings_content(&long).unwrap()["text"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(text.chars().count() < 330, "{}", text.chars().count());
     }
 }
