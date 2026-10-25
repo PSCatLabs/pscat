@@ -398,8 +398,9 @@ fn empty_writehexstring_still_checks_the_file() {
 #[test]
 fn filenameforall_listing_counts_against_the_step_limit() {
     let (root, _) = setup("fw-forall-limit");
+    // Directories are skipped, but looking at each still counts.
     for i in 0..200 {
-        std::fs::write(root.join(format!("f{i}.txt")), b"").unwrap();
+        std::fs::create_dir(root.join(format!("d{i}"))).unwrap();
     }
     let mut it = Interp::with_page(50, 50).unwrap();
     it.set_limits(pscat::Limits::none().with_max_steps(50))

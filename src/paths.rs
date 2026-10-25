@@ -357,7 +357,12 @@ pub fn matching_names(
         return Ok(Vec::new());
     }
     let mut found = std::collections::BTreeSet::new();
-    let mut take = |file: &str| {
+    // Every entry looked at goes through here, skipped ones as `None`, so
+    // each one is polled.
+    let mut take = |file: Option<&str>| {
+        let Some(file) = file else {
+            return poll(0);
+        };
         let hit = glob_match(pattern.as_bytes(), file.as_bytes());
         poll(if hit { dir.len() + file.len() } else { 0 })?;
         if hit {
@@ -380,20 +385,19 @@ pub fn matching_names(
         let Ok(entries) = std::fs::read_dir(&d) else {
             continue;
         };
-        for e in entries.flatten() {
+        for e in entries {
             // Regular files, through symlinks, as `run` would read them.
-            if !std::fs::metadata(e.path()).is_ok_and(|m| m.is_file()) {
-                continue;
-            }
-            if let Some(file) = e.file_name().to_str() {
-                take(file)?;
-            }
+            let name = e
+                .ok()
+                .filter(|e| std::fs::metadata(e.path()).is_ok_and(|m| m.is_file()))
+                .map(|e| e.file_name());
+            take(name.as_ref().and_then(|n| n.to_str()))?;
         }
     }
     if !Path::new(dir).is_absolute() {
         for name in embedded_names() {
             if let Some(file) = name.strip_prefix(dir).filter(|f| !f.contains('/')) {
-                take(file)?;
+                take(Some(file))?;
             }
         }
     }
