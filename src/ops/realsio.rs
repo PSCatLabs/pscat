@@ -185,12 +185,12 @@ fn readreals(it: &mut Interp) -> Result<(), PsError> {
         match fmt {
             Fmt::F64 => items.extend(
                 chunk
-                    .chunks_exact(8)
+                    .chunks(8)
                     .map(|b| Object::real(f64::from_le_bytes(b.try_into().unwrap()))),
             ),
             Fmt::F32 => items.extend(
                 chunk
-                    .chunks_exact(4)
+                    .chunks(4)
                     .map(|b| Object::real(f64::from(f32::from_le_bytes(b.try_into().unwrap())))),
             ),
         }
