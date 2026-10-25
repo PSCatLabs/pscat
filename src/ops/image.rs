@@ -209,6 +209,12 @@ fn image_type3(
         _ => Err(PsError::Typecheck),
     };
     let (data_dict, mask_dict) = (sub("DataDict")?, sub("MaskDict")?);
+    // A mask has one bit per sample; image_ctx would force it and misread.
+    if let Some(Value::Integer(b)) = mask_dict.borrow().get("BitsPerComponent").map(|o| o.value)
+        && b != 1
+    {
+        return Err(PsError::Rangecheck);
+    }
     let image = image_ctx(it, &data_dict.borrow(), ncomp, None)?;
     let mut stencil = image_ctx(it, &mask_dict.borrow(), 1, Some(true))?;
     if mask_dict.borrow().get("Decode").is_none() {

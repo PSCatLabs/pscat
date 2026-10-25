@@ -44,13 +44,17 @@ Found by ArtColony/fractal_clouds (a ray-marched landscape library): an
   BitsPerComponent is forced to 1, as for `imagemask`.
 - SVG and PDF: both take one straight-alpha RGBA raster
   (`ImageCtx::composite`): the image's cells expanded by an integer factor
-  (at most 64 per axis and 16 Mpixel) so a finer mask is not lost, each cell
+  (at most 64 per axis and 16 Mpixel; the cap limits the expansion only, so a huge image is still emitted at 1x) so a finer mask is not lost, each cell
   gated by the same stencil test the rasterizer uses. SVG embeds it as a
   PNG with alpha; PDF writes an RGB image plus a DeviceGray `/SMask`
   (`pdf::ImageData::RgbA`; the soft mask is its own image entry, not a
   page resource, referenced through `PdfImage::smask` because object
   numbers are only fixed in `finish`). A stencil `/Mask` would need both
   planes to share one footprint; the composite does not.
+- Source order matches gs (probed with two data procedures that print): the
+  mask's source is read in full, then the image's. Two sources sharing one
+  `currentfile` or one filter chain therefore see the mask bytes first.
+- A MaskDict `/BitsPerComponent` other than 1 is `rangecheck`.
 - Limits: no `InterleaveType` 1/2, no `ImageType 4`, the stencil does not
   extend the image's footprint (it only removes pixels), and
   `setalpha`/blend still do not reach images.

@@ -108,16 +108,18 @@ fn mask_and_image_may_differ_in_resolution() {
 
 #[test]
 fn both_data_sources_can_be_procedures() {
+    // gs reads the mask's source first, then the image's (probed with
+    // two procedures). One shared counter makes that order the spec.
     let it = run(
         "/n 0 def
          10 40 translate 80 20 scale /DeviceRGB setcolorspace
          << /ImageType 3 /InterleaveType 3
             /DataDict << /ImageType 1 /Width 2 /Height 1 /BitsPerComponent 8
                /ImageMatrix [2 0 0 -1 0 1]
-               /DataSource { /n n 1 add def n 1 eq { <ff0000> } { n 2 eq { <00ff00> } { () } ifelse } ifelse } >>
+               /DataSource { /n n 1 add def n 2 eq { <ff0000> } { n 3 eq { <00ff00> } { () } ifelse } ifelse } >>
             /MaskDict << /ImageType 1 /Width 2 /Height 1 /BitsPerComponent 1
                /Decode [1 0] /ImageMatrix [2 0 0 -1 0 1]
-               /DataSource { /n n 1 add def n 3 eq { <c0> } { () } ifelse } >> >>
+               /DataSource { /n n 1 add def n 1 eq { <c0> } { () } ifelse } >> >>
          image",
     );
     assert_eq!(pixel(&it, 30, 50), (255, 0, 0));
@@ -146,6 +148,13 @@ fn interleave_types_1_and_2_are_a_documented_gap() {
         it.run_str("<< /ImageType 3 /InterleaveType 3 /DataDict 1 >> image"),
         Err(PsError::Typecheck)
     );
+    // A mask has one bit per sample.
+    let src = "/DeviceRGB setcolorspace << /ImageType 3 /InterleaveType 3
+        /DataDict << /ImageType 1 /Width 1 /Height 1 /BitsPerComponent 8
+           /ImageMatrix [1 0 0 -1 0 1] /DataSource <ff0000> >>
+        /MaskDict << /ImageType 1 /Width 1 /Height 1 /BitsPerComponent 8
+           /ImageMatrix [1 0 0 -1 0 1] /DataSource <80> >> >> image";
+    assert_eq!(it.run_str(src), Err(PsError::Rangecheck));
 }
 
 // ---- backends ----------------------------------------------------------

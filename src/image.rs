@@ -51,6 +51,22 @@ pub(crate) enum ImageStep {
 const MAX_STENCIL_SCALE: f64 = 64.0;
 const MAX_COMPOSITE_PIXELS: usize = 16 << 20;
 
+/// The integer expansion actually used: `want`, lowered until the raster
+/// fits `MAX_COMPOSITE_PIXELS`. The cap limits only the expansion: at 1 the
+/// image is always emitted, as a plain image of that size would be.
+fn expansion(width: usize, height: usize, want: usize) -> usize {
+    let cells = |k: usize| {
+        width
+            .saturating_mul(k)
+            .saturating_mul(height.saturating_mul(k))
+    };
+    let mut k = want.max(1);
+    while k > 1 && cells(k) > MAX_COMPOSITE_PIXELS {
+        k -= 1;
+    }
+    k
+}
+
 /// A stenciled image flattened to RGBA at `k`x the image's resolution.
 struct Composite {
     w: usize,
@@ -161,12 +177,15 @@ impl ImageCtx {
     }
 
     pub(crate) fn step(&mut self, gfx: &mut Gfx) -> Result<ImageStep, PsError> {
-        if let Some(exec) = self.fill()? {
-            return Ok(exec);
-        }
+        // gs reads the mask's source first, then the image's (probed with
+        // two data procedures, #739), so a shared file or one procedure
+        // counter sees the same order.
         if let Some(st) = &mut self.stencil
             && let Some(exec) = st.fill()?
         {
+            return Ok(exec);
+        }
+        if let Some(exec) = self.fill()? {
             return Ok(exec);
         }
         self.drain_filters()?;
@@ -333,14 +352,12 @@ impl ImageCtx {
         let axes = |m: &[f64; 6]| (m[0].hypot(m[1]), m[2].hypot(m[3]));
         let ((dx, dy), (sx, sy)) = (axes(&self.matrix), axes(&st.matrix));
         let ratio = |s: f64, d: f64| if d > 0.0 { (s / d - 1e-6).ceil() } else { 1.0 };
-        let mut k = ratio(sx, dx)
+        let want = ratio(sx, dx)
             .max(ratio(sy, dy))
-            .clamp(1.0, MAX_STENCIL_SCALE) as usize;
-        while k > 1 && self.width * k * self.height * k > MAX_COMPOSITE_PIXELS {
-            k -= 1;
-        }
+            .clamp(1.0, MAX_STENCIL_SCALE);
+        let k = expansion(self.width, self.height, want as usize);
         let (w, h) = (self.width * k, self.height * k);
-        if w == 0 || h == 0 || w * h > MAX_COMPOSITE_PIXELS {
+        if w == 0 || h == 0 {
             return None;
         }
         let mut rgba = Vec::with_capacity(w * h * 4);
@@ -648,4 +665,18 @@ pub(crate) fn invert6(m: [f64; 6]) -> Option<[f64; 6]> {
     }
     let (a, b, c, d) = (m[3] / det, -m[1] / det, -m[2] / det, m[0] / det);
     Some([a, b, c, d, -(m[4] * a + m[5] * c), -(m[4] * b + m[5] * d)])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::expansion;
+
+    #[test]
+    fn expansion_is_capped_but_never_below_one() {
+        assert_eq!(expansion(2, 2, 8), 8);
+        assert_eq!(expansion(2000, 2000, 64), 2, "16 Mpixel cap");
+        assert_eq!(expansion(5000, 4000, 8), 1, "over the cap still emits");
+        assert_eq!(expansion(usize::MAX, usize::MAX, 8), 1, "no overflow");
+        assert_eq!(expansion(0, 0, 8), 8);
+    }
 }
