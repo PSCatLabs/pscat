@@ -578,10 +578,13 @@ fn tool_list(cfg: &Config) -> Value {
     };
     let max_pixels = cfg.max_pixels;
     let max_latex = cfg.max_latex;
+    let canvas = format!(
+        "A page is at most {max_pixels} pixels (width and height in points times dpi/72) and \
+         8000 a side (output_too_large)."
+    );
     let limits = format!(
         "Limits: {}s per call (the server's --timeout; its default is 60), {} bytes of input, \
-         a page of at most {max_pixels} pixels (width and height in points times dpi/72) and \
-         8000 a side. The interpreter stops a runaway program (a limit_exceeded error naming \
+         The interpreter stops a runaway program (a limit_exceeded error naming \
          steps, time or memory); stopped cannot catch it.",
         cfg.timeout.as_secs(),
         cfg.max_input
@@ -595,7 +598,7 @@ fn tool_list(cfg: &Config) -> Value {
                 (default), or SVG text, or writes a PDF to out_path. Partial renders are \
                 returned even when the program errors, with the error text alongside, plus \
                 a Lint: block when the page looks wrong (blank page, unbalanced gsave, \
-                leftover stack). {limits} Inline images are capped at {} bytes in total \
+                leftover stack). {limits} {canvas} Inline images are capped at {} bytes in total \
                 and {MAX_INLINE_PAGES} pages; past that, lower dpi/size or use out_path. \
                 Writes a file only when out_path is given (then it replaces an existing render \
                 file of that extension), which is why this tool is not marked read-only. The \
@@ -625,7 +628,7 @@ fn tool_list(cfg: &Config) -> Value {
                 specific person's handwriting or presenting writing as someone else's. \
                 Lowercase letters, digits and .,-'!? only; anything else is invisible. \
                 Writes a file only when out_path is given (then it replaces an existing .png), \
-                which is why this tool is not marked read-only. {limits}"),
+                which is why this tool is not marked read-only. {limits} {canvas}"),
             "inputSchema": {
                 "type": "object",
                 "properties": {

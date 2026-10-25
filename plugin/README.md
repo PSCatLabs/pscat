@@ -138,7 +138,8 @@ limit: a long render needs the server's `--timeout` (up to 86400), a raised
 bundled server takes no options, so register `pscat-mcp --timeout SECS` by
 hand (Claude Code: `claude mcp add`, then toggle the plugin's server off in
 `/mcp`; Codex: an `[mcp_servers.<name>]` table in `config.toml` with `args` and
-`tool_timeout_sec`, whose default is 60, and remove the plugin's server). The
+`tool_timeout_sec`, whose default is 60, and `enabled = false` under
+`[plugins."pscat@pscat".mcp_servers.pscat]` for the plugin's own). The
 [agents guide](https://github.com/PSCatLabs/pscat/blob/main/docs/guides/agents.md#raising-the-time-limit)
 has the settings, including Claude Code's `MCP_TOOL_TIMEOUT` and
 `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT`.

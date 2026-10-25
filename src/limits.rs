@@ -168,7 +168,7 @@ pub enum LimitsError {
 #[doc(hidden)]
 pub fn pixel_cap_message(w: u64, h: u64, limit: u64) -> String {
     format!(
-        "output too large: {w}x{h} pixels ({}) is over --max-pixels {limit}",
+        "output too large: {w}x{h} pixels ({}); at most 8000 a side and --max-pixels {limit}",
         w * h
     )
 }
@@ -193,7 +193,7 @@ mod pixel_cap_tests {
         let m = pixel_cap_message(1700, 4000, 5_000_000);
         assert_eq!(
             m,
-            "output too large: 1700x4000 pixels (6800000) is over --max-pixels 5000000"
+            "output too large: 1700x4000 pixels (6800000); at most 8000 a side and --max-pixels 5000000"
         );
         assert_eq!(
             parse_pixel_cap_message(&format!("pscat handwrite: {m}\n")),

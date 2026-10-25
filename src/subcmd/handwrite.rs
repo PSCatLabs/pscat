@@ -28,8 +28,8 @@ const USAGE: &str = r#"usage: pscat handwrite [options] "text to write"
       --dpi N        render resolution (default 72)
       --halftone     screen the output like a mono laser printer
       --max-pixels N refuse a page of more than N device pixels (width x
-                     height at --dpi), before drawing; 1..64000000
-                     (default: only the 8000-a-side limit)
+                     height at --dpi) or over 8000 a side, before drawing;
+                     1..64000000 (default: no cap beyond the page limits)
   -h, --help         this text
 
 Newlines in the text force line breaks; blank lines are kept. A text that
@@ -61,8 +61,26 @@ pub(super) fn run(args: Args) -> Result<(), Failure> {
     };
     let lib = library("lib/handscript.ps")?;
     let width = page_dim("--width", &opts.width).map_err(usage)?;
+    // `--max-pixels`: refuse a page over the cap, or over 8000 pixels a side
+    // at this dpi, before the height is range-checked or anything is drawn.
+    // The interpreter's own rounding (`Interp::with_page_scaled`).
+    let too_big = |w_pt: u64, h_pt: u64| -> Result<(), Failure> {
+        let Some(limit) = opts.max_pixels else {
+            return Ok(());
+        };
+        let px = |pt: u64| ((pt as f32 * (opts.dpi / 72.0)).round() as u64).max(1);
+        let (w, h) = (px(w_pt), px(h_pt));
+        if w > 8000 || h > 8000 || w * h > limit {
+            return Err(Failure::Msg(pscat::limits::pixel_cap_message(w, h, limit)));
+        }
+        Ok(())
+    };
     let height = match &opts.height {
-        Some(h) => page_dim("--height", h).map_err(usage)?,
+        Some(h) => {
+            let h = page_dim("--height", h).map_err(usage)?;
+            too_big(width.into(), h.into())?;
+            h
+        }
         None => {
             // Height doesn't affect wrapping, so a placeholder is fine here.
             let mut count = lib.clone();
@@ -80,18 +98,10 @@ pub(super) fn run(args: Args) -> Result<(), Failure> {
                 opts.size.parse().unwrap_or(0.0),
                 opts.leading.parse().unwrap_or(0.0),
             );
+            too_big(width.into(), h)?;
             page_dim("the computed page height", &h.to_string()).map_err(usage)?
         }
     };
-
-    if let Some(limit) = opts.max_pixels {
-        // The interpreter's own rounding (`Interp::with_page_scaled`).
-        let px = |pt: u32| ((pt as f32 * (opts.dpi / 72.0)).round() as u64).max(1);
-        let (w, h) = (px(width), px(height));
-        if w * h > limit {
-            return Err(Failure::Msg(pscat::limits::pixel_cap_message(w, h, limit)));
-        }
-    }
 
     let mut driver = lib;
     driver.extend(opts_dict(&opts, &height.to_string()));

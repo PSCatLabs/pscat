@@ -1171,6 +1171,15 @@ fn render_postscript_and_handwrite_refuse_pages_over_the_pixel_cap() {
         result["structuredContent"]["error"]["limit_pixels"],
         40_000_000
     );
+
+    // A long note at 144 dpi is under the area cap (about 13 million pixels)
+    // but over 8000 pixels tall: refused by name, not as a failed render.
+    let long = "a b c d e f g h i j ".repeat(200);
+    let result = s.tool("handwrite", json!({ "text": long, "dpi": 144 }));
+    assert_eq!(error_kind(&result), "output_too_large", "{result}");
+    let err = &result["structuredContent"]["error"];
+    assert_eq!(err["width_px"], 1224, "{err}");
+    assert!(err["height_px"].as_u64().unwrap() > 8000, "{err}");
 }
 
 #[test]

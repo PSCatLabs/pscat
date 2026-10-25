@@ -272,7 +272,10 @@ server's 24-hour cap, is the async-jobs work still open in #741.
 The plugins' bundled server is registered without options, so it keeps the
 60 s default. To raise it, register the server by hand as above and, so the
 tools are not listed twice, toggle the plugin's server off in `/mcp` (Claude
-Code) or remove it (Codex).
+Code), or in Codex's `config.toml` set `enabled = false` under
+`[plugins."pscat@pscat".mcp_servers.pscat]` (documented by Codex for plugin
+servers; user config cannot change a plugin server's command, so its
+arguments stay the plugin's).
 The settings above are from the Claude Code
 ([MCP](https://code.claude.com/docs/en/mcp),
 [environment variables](https://code.claude.com/docs/en/env-vars)) and Codex
