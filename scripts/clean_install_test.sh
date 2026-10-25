@@ -5,8 +5,8 @@
 # directories, then renders a mathkit, a drychalk and a typewriter
 # example, and runs the `handwrite`, `typewrite` and `photo-etch`
 # subcommands (issue #600), from an empty directory outside the checkout,
-# and checks that a font-pack face with no packs installed is an error
-# naming the pack (issue #599). The resolver
+# and checks that a font-pack face with no packs installed stands in as a
+# built-in face and names the pack on stderr (issues #599, #728). The resolver
 # trace (PSCAT_TRACE_RESOURCES, src/paths.rs) must show every lib/ file
 # was served by the embedded copy: a pass that found a checkout, the
 # crates.io source tree or a stray lib/ on disk is a failure.

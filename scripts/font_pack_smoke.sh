@@ -124,9 +124,11 @@ echo "    $(ls pack | wc -l | tr -d ' ') pages from ${#EXAMPLES[@]} examples, by
 
 echo "==> 5. remove and reinstall one pack"
 "$PSCAT" fonts remove texgyre
-if "$PSCAT" -e "/Palatino-Roman findfont pop" 2>/dev/null; then fail "Palatino still resolves after removing texgyre"; fi
+[[ $("$PSCAT" -e "/Palatino-Roman findfont /FontName get ==" 2>/dev/null) == "/Times-Roman" ]] ||
+  fail "Palatino does not stand in as Times-Roman after removing texgyre"
 "$PSCAT" fonts install --from "$PACKS/font-index.json" --pack texgyre
-"$PSCAT" -e "/Palatino-Roman findfont pop" || fail "Palatino does not resolve after reinstalling"
+[[ $("$PSCAT" -e "/Palatino-Roman findfont /FontName get ==" 2>&1) != "/Times-Roman" ]] ||
+  fail "Palatino still stands in as Times-Roman after reinstalling"
 "$PSCAT" fonts list >/dev/null || fail "fonts list verification failed after reinstall"
 
 echo "==> font pack smoke OK"
