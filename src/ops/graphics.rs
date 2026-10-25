@@ -30,6 +30,7 @@ pub fn install(dict: &mut Dict) {
     op(dict, "erasepage", erasepage);
     op(dict, "showpage", showpage);
     op(dict, "copypage", copypage);
+    op(dict, "nulldevice", nulldevice);
     op(dict, "initgraphics", initgraphics);
     // Graphics state
     op(dict, "gsave", gsave);
@@ -284,6 +285,13 @@ fn showpage(it: &mut Interp) -> Result<(), PsError> {
 /// Level 1 copypage: emit the page, keep canvas and graphics state.
 fn copypage(it: &mut Interp) -> Result<(), PsError> {
     it.gfx.copypage();
+    Ok(())
+}
+
+/// Level 1 nulldevice (#739): install a device that discards all marking.
+/// `gsave nulldevice ... grestore` is the idiom; the flag is graphics state.
+fn nulldevice(it: &mut Interp) -> Result<(), PsError> {
+    it.gfx.nulldevice();
     Ok(())
 }
 

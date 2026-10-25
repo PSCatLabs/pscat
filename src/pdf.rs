@@ -59,7 +59,7 @@ pub struct PdfRecorder {
     pages: Vec<String>,
     /// Image XObjects (raw stream bytes, already entity-complete),
     /// document-global; pages reference them by index.
-    images: Vec<Vec<u8>>,
+    images: Vec<PdfImage>,
     /// Which images each finished page references.
     page_images: Vec<Vec<usize>>,
     current_images: Vec<usize>,
@@ -280,11 +280,14 @@ Q",
         fill_rgb: (f32, f32, f32),
         chain: &Chain,
     ) {
-        use flate2::{Compression, write::ZlibEncoder};
-        use std::io::Write as _;
-
-        let (dict_extra, raw): (String, Vec<u8>) = match data {
-            ImageData::Rgb(px) => ("/ColorSpace /DeviceRGB /BitsPerComponent 8".to_string(), px),
+        // A soft mask is its own image entry (never in a page's XObject
+        // resources), referenced from the main image by index.
+        let (dict_extra, raw, smask): (String, Vec<u8>, Option<usize>) = match data {
+            ImageData::Rgb(px) => (
+                "/ColorSpace /DeviceRGB /BitsPerComponent 8".to_string(),
+                px,
+                None,
+            ),
             ImageData::Mask { bits, paint_ones } => (
                 format!(
                     "/ImageMask true /BitsPerComponent 1 /Decode [{} {}]",
@@ -292,21 +295,28 @@ Q",
                     if paint_ones { 0 } else { 1 }
                 ),
                 bits,
+                None,
             ),
+            ImageData::RgbA { rgb, alpha } => {
+                let mask = Self::image_object(
+                    w,
+                    h,
+                    "/ColorSpace /DeviceGray /BitsPerComponent 8",
+                    alpha,
+                    None,
+                );
+                let at = self.images.len();
+                self.images.push(mask);
+                (
+                    "/ColorSpace /DeviceRGB /BitsPerComponent 8".to_string(),
+                    rgb,
+                    Some(at),
+                )
+            }
         };
-        let mut enc = ZlibEncoder::new(Vec::new(), Compression::default());
-        let _ = enc.write_all(&raw);
-        let compressed = enc.finish().unwrap_or(raw);
-        let mut obj = format!(
-            "<< /Type /XObject /Subtype /Image /Width {w} /Height {h} {dict_extra} \
-             /Filter /FlateDecode /Length {} >>\nstream\n",
-            compressed.len()
-        )
-        .into_bytes();
-        obj.extend_from_slice(&compressed);
-        obj.extend_from_slice(b"\nendstream");
         let idx = self.images.len();
-        self.images.push(obj);
+        self.images
+            .push(Self::image_object(w, h, &dict_extra, raw, smask));
         self.current_images.push(idx);
 
         // cm maps the unit square to device space: sample→device `t`
@@ -331,6 +341,33 @@ Q",
             f(m.tx),
             f(m.ty),
         );
+    }
+
+    /// Build one Flate-compressed image XObject around `raw`.
+    fn image_object(
+        w: usize,
+        h: usize,
+        dict_extra: &str,
+        raw: Vec<u8>,
+        smask: Option<usize>,
+    ) -> PdfImage {
+        use flate2::{Compression, write::ZlibEncoder};
+        use std::io::Write as _;
+
+        let mut enc = ZlibEncoder::new(Vec::new(), Compression::default());
+        let _ = enc.write_all(&raw);
+        let compressed = enc.finish().unwrap_or(raw);
+        let head =
+            format!("<< /Type /XObject /Subtype /Image /Width {w} /Height {h} {dict_extra} ")
+                .into_bytes();
+        let mut tail = format!(
+            "/Filter /FlateDecode /Length {} >>\nstream\n",
+            compressed.len()
+        )
+        .into_bytes();
+        tail.extend_from_slice(&compressed);
+        tail.extend_from_slice(b"\nendstream");
+        PdfImage { head, smask, tail }
     }
 
     pub(crate) fn erase(&mut self) {
@@ -440,7 +477,12 @@ Q",
             objects.push(stream);
         }
         for img in &self.images {
-            objects.push(img.clone());
+            let mut obj = img.head.clone();
+            if let Some(at) = img.smask {
+                obj.extend_from_slice(format!("/SMask {} 0 R ", image_base + at).as_bytes());
+            }
+            obj.extend_from_slice(&img.tail);
+            objects.push(obj);
         }
 
         // /Info is appended last, after every page/image object, so it
@@ -484,11 +526,23 @@ Q",
     }
 }
 
+/// One image XObject. `smask` names another entry of `images` whose
+/// object number is only known in `finish`, so the stream is kept in two
+/// halves around the `/SMask` reference.
+struct PdfImage {
+    head: Vec<u8>,
+    smask: Option<usize>,
+    tail: Vec<u8>,
+}
+
 pub(crate) enum ImageData {
     /// Interleaved 8-bit RGB, W*H*3 bytes.
     Rgb(Vec<u8>),
     /// Packed 1-bit rows (byte-aligned), stencil polarity included.
     Mask { bits: Vec<u8>, paint_ones: bool },
+    /// 8-bit RGB plus a same-size 8-bit alpha plane, written as an
+    /// `/SMask` (`ImageType 3`, #739).
+    RgbA { rgb: Vec<u8>, alpha: Vec<u8> },
 }
 
 /// Zlib-compress the concatenation of `parts` (PDF `FlateDecode`).

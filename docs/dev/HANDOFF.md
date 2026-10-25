@@ -510,13 +510,20 @@ renders eight examples in both and compares block-downsampled output).
 - Access control (`executeonly` etc.) is not modeled — identities.
 - Filter parameter dicts accepted and ignored; no encode filters.
 - Images: nearest-neighbor, no `/Interpolate`, no 12-bit samples, no
-  MultipleDataSources colorimage (limitcheck). DCTDecode buffers one
+  MultipleDataSources colorimage (limitcheck). `ImageType 3` has
+  `InterleaveType 3` only (types 1 and 2 are limitcheck) and no
+  `ImageType 4` (#739, `notes/739-imagetype3-nulldevice.md`). DCTDecode buffers one
   whole JPEG (marker-aware, stops exactly at EOI); CCITTFax absent;
   Adobe inverted-CMYK JPEGs untested.
 - errordict holds a handler per error name (#372, so `errordict /name
   get exec` re-raises), but a handler a program installs there is not
   consulted on a real error; error-time operand-stack restoration not
   done (PLRM handlers see pre-error operands).
+- `nulldevice` is a flag in the graphics state (#739): marking operators
+  consume their operands and paint and record nothing, `showpage`/
+  `copypage` emit no page, the CTM and `defaultmatrix` are identity.
+  There is no `setdevice`/`currentdevice`, so nothing else can install a
+  device.
 - Stroke width ≈ √|det CTM| (anisotropic pens wrong; `strokepath`
   inherits it, since it shares `stroke`'s parameters); `showpage`
   doesn't erase; ints are i64; `flattenpath` uses a fixed

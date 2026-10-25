@@ -759,6 +759,11 @@ pub struct GraphicsState {
     /// new level empty (`Gfx::gsave`). Entries are `Rc` clones, so a save
     /// costs no mask copy.
     clip_stack: Vec<Option<ClipState>>,
+    /// `nulldevice` is the current device (#739): every marking operator
+    /// consumes its operands but paints nothing and records nothing.
+    /// Part of the graphics state, so `grestore` (or `setgstate`) brings
+    /// back the page device the matching `gsave` had.
+    null_device: bool,
 }
 
 impl GraphicsState {
@@ -952,7 +957,11 @@ impl Gfx {
     }
 
     pub fn base_ctm(&self) -> Transform {
-        self.base_ctm
+        if self.state.null_device {
+            Transform::identity()
+        } else {
+            self.base_ctm
+        }
     }
 
     // --- path construction ---------------------------------------------
@@ -1126,7 +1135,7 @@ impl Gfx {
     }
 
     pub fn fill(&mut self, rule: FillRule) {
-        if self.suppress_paint == 0
+        if !self.painting_off()
             && let Some(path) = self.state.path.to_skia()
         {
             self.prepare_paint();
@@ -1180,7 +1189,7 @@ impl Gfx {
     /// so the only visible effect of implementing `false` would be an
     /// edge case nobody's `clip shfill` triggers. Documented deviation.
     pub(crate) fn shfill(&mut self, shading: crate::shading::Shading) -> Result<(), PsError> {
-        if self.suppress_paint > 0 {
+        if self.painting_off() {
             return Ok(());
         }
         let stops: Vec<GradientStop> = shading
@@ -1431,7 +1440,7 @@ impl Gfx {
     }
 
     pub fn stroke(&mut self) {
-        if self.suppress_paint > 0 {
+        if self.painting_off() {
             self.newpath();
             return;
         }
@@ -1592,7 +1601,7 @@ impl Gfx {
     }
 
     pub fn erase(&mut self) {
-        if self.suppress_paint > 0 {
+        if self.painting_off() {
             return;
         }
         self.pending_erase = false;
@@ -1613,6 +1622,9 @@ impl Gfx {
     /// The graphics-state reset (initgraphics, pinned against gs) is
     /// the operator's job.
     pub fn showpage(&mut self) {
+        if self.state.null_device {
+            return; // the null device emits no page (#739)
+        }
         self.completed.push(self.pixmap.clone());
         self.completed_had_ink.push(self.painted_since_page);
         if let Some(svg) = &mut self.svg {
@@ -1628,6 +1640,9 @@ impl Gfx {
 
     /// `copypage` (Level 1): emit the page but keep canvas and state.
     pub fn copypage(&mut self) {
+        if self.state.null_device {
+            return;
+        }
         self.completed.push(self.pixmap.clone());
         self.completed_had_ink.push(self.painted_since_page);
         if let Some(svg) = &mut self.svg {
@@ -1684,7 +1699,7 @@ impl Gfx {
     }
 
     pub(crate) fn svg_wanted(&self) -> bool {
-        self.svg.is_some() && self.suppress_paint == 0
+        self.svg.is_some() && !self.painting_off()
     }
 
     /// Turn on PDF recording (`--pdf`).
@@ -1712,7 +1727,7 @@ impl Gfx {
     }
 
     pub(crate) fn pdf_wanted(&self) -> bool {
-        self.pdf.is_some() && self.suppress_paint == 0
+        self.pdf.is_some() && !self.painting_off()
     }
 
     pub(crate) fn pdf_image(
@@ -1745,11 +1760,15 @@ impl Gfx {
         let font = self.state.font.take();
         let clip_stack = std::mem::take(&mut self.state.clip_stack);
         let stroke_adjust = self.state.stroke_adjust;
+        // The device is not part of what initgraphics resets (#739): under
+        // `nulldevice` the default matrix is identity and stays so.
+        let null_device = self.state.null_device;
         self.state = GraphicsState {
             font,
             clip_stack,
             stroke_adjust,
-            ..Self::initial_state(self.base_ctm)
+            null_device,
+            ..Self::initial_state(self.base_ctm())
         };
     }
 
@@ -1777,6 +1796,7 @@ impl Gfx {
             path: PsPath::default(),
             clip: None,
             clip_stack: Vec::new(),
+            null_device: false,
         }
     }
 
@@ -1959,7 +1979,7 @@ impl Gfx {
     /// paint and clip, leaving the current path alone. TrueType outlines
     /// are wound for nonzero filling.
     pub(crate) fn fill_path_direct(&mut self, path: &PsPath) {
-        if self.suppress_paint > 0 {
+        if self.painting_off() {
             return;
         }
         if let Some(p) = path.to_skia() {
@@ -2021,6 +2041,28 @@ impl Gfx {
     pub(crate) fn restore_glyph_snapshot(&mut self, depth: usize, state: Box<GraphicsState>) {
         self.saved.truncate(depth);
         self.state = *state;
+    }
+
+    /// True while marking operators must leave page and recorders alone:
+    /// a metrics-only Type 3 run, or `nulldevice` (#739).
+    pub(crate) fn painting_off(&self) -> bool {
+        self.suppress_paint > 0 || self.state.null_device
+    }
+
+    /// Whether `nulldevice` is current (the image engine consults this).
+    pub(crate) fn is_null_device(&self) -> bool {
+        self.state.null_device
+    }
+
+    /// `nulldevice` (#739, Level 1): install a device that discards every
+    /// mark. The CTM becomes the (identity) default matrix and the clip is
+    /// reset, as `setdevice` does; the current path, color, font and the
+    /// rest of the state stay. Scoped by `gsave`/`grestore` because the
+    /// flag lives in the graphics state.
+    pub(crate) fn nulldevice(&mut self) {
+        self.state.null_device = true;
+        self.state.ctm = Transform::identity();
+        self.state.clip = None;
     }
 
     pub(crate) fn suppress_painting(&mut self) {
