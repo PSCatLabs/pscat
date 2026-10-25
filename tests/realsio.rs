@@ -179,9 +179,9 @@ fn errors() {
         format!("[1 [2] 3] {p} writereals"),
         format!("[1 null] {p} /f32 writereals"),
         format!("3 {p} writereals"),
-        format!("[1] 5 writereals"),
+        "[1] 5 writereals".to_string(),
         format!("{p} (3) readreals"),
-        format!("5 5 readreals"),
+        "5 5 readreals".to_string(),
     ] {
         assert_eq!(it.run_str(&src), Err(PsError::Typecheck), "{src}");
     }
