@@ -616,6 +616,19 @@ renders eight examples in both and compares block-downsampled output).
   re-clip with an identical path is false. Library code probes it with
   `systemdict /.sameclip known` (drykit's `dkPsameok`) and keeps the
   standard behaviour without it (`notes/488-sameclip.md`).
+- The noise operators (issue #734, `src/ops/noise.rs`: `noiseseed`,
+  `gnoise2`/`gnoise3`, `vnoise2`/`vnoise3`, `gnoise2d`, `fbm2`/`fbm3`,
+  `vfbm2`/`vfbm3`, `ridged2`/`ridged3`) are pscat extensions with a
+  frozen algorithm: f64 add/sub/mul in a fixed order, `floor` and table
+  lookups only, so every platform and WASM give the same bits.
+  `lib/noiseref.ps` is the PostScript reference, and `tests/noise.rs`
+  holds every operator bit-equal to it and pins a few exact values.
+  **Changing any constant or operation order changes every seeded render
+  that uses them.** The table lives in `Interp::noise_perm`, apart from
+  `rand_state`. `x y perm .permnoise2` is artkit's `noise2` formula
+  computed with PostScript's int/real promotion, so artkit's `noise2`
+  (now `{ Perm .permnoise2 }` when the operator exists) stays
+  bit-identical, type included (`notes/734-native-noise.md`).
 - `error_report`'s `Line: N` (issue #17) is best-effort, not exact
   source attribution: no `Object` carries a source position, so it
   reports the line of the most recent token scanned directly from the

@@ -50,12 +50,24 @@
         0 1 1  0 -1 1  0 1 -1  0 -1 -1
         1 1 0  0 -1 1  -1 1 0  0 -1 -1 ] def
 
+% @internal
+/nrP [ 0 1 255 { } for ] def                    % the table nrseed fills
+
+% @internal
+/nrs 0 def                                       % nrseed's scratch
+% @internal
+/nri 0 def
+% @internal
+/nrj 0 def
+% @internal
+/nrt 0 def
+
 % @kind: Procedure
 % @summary: Seed noiseref's own permutation table; the reference twin of the native noiseseed (does not touch rand).
 % @example: 42 nrseed
 /nrseed {                                        % seed -> -
     2147483647 and /nrs exch def
-    /nrP [ 0 1 255 { } for ] def
+    0 1 255 { nrP exch dup put } for
     255 -1 1 {
         /nri exch def
         /nrs nrs 1103515245 mul 12345 add 2147483647 and def

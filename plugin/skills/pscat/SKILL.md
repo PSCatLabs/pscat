@@ -250,6 +250,21 @@ operators**: Ghostscript has no PostScript-level alpha, so hand someone a
 known` in code that must run in both. Also pscat-only: `gstate .sameclip
 bool` (is the clip in force the one the gstate captured).
 
+## Noise: gnoise2 / fbm2 / ... (pscat extensions)
+
+```postscript
+42 noiseseed              % own table; never touches rand (default: 0)
+x y gnoise2 n             % gradient noise ~[-0.71,0.71]; x y z gnoise3 ~[-1,1]
+x y vnoise2 v             % value noise [-1,1); x y z vnoise3
+x y gnoise2d n dx dy      % with its analytic gradient
+x y 5 0.5 2 fbm2 v        % oct gain lacunarity; fbm3 vfbm2 vfbm3 ridged2 ridged3
+```
+
+Native, about as cheap as an empty loop step, and bit-identical on every
+platform. `lib/noiseref.ps` (`nrgnoise2` ...) is the same algorithm in
+PostScript for Ghostscript-bound code; probe with `systemdict /gnoise2
+known`. artkit's `noise2` already runs natively.
+
 ## Watch it draw (needs a display)
 
 ```sh

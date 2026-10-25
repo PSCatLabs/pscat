@@ -108,8 +108,16 @@ fn native_operators_match_the_postscript_reference_bit_for_bit() {
                  bad nchk"
             ),
         );
-        assert_eq!(got[0], "0", "seed {seed}: {} of {} samples differ", got[0], got[1]);
-        assert!(got[1].parse::<u32>().unwrap() > 2000, "too few samples: {}", got[1]);
+        assert_eq!(
+            got[0], "0",
+            "seed {seed}: {} of {} samples differ",
+            got[0], got[1]
+        );
+        assert!(
+            got[1].parse::<u32>().unwrap() > 2000,
+            "too few samples: {}",
+            got[1]
+        );
     }
 }
 
@@ -134,7 +142,15 @@ fn artkit_noise2_is_bit_identical_to_its_old_procedure() {
     // Integer operands (exact lattice points: the procedure returns
     // `0` or `0.0` depending on the gradients) and mixed int/real.
     let pairs = [
-        "0 0", "3 4", "-3 4", "255 -256", "1000 7", "5 0.25", "-0.75 9", "-1 -1", "16#7fffffff 2",
+        "0 0",
+        "3 4",
+        "-3 4",
+        "255 -256",
+        "1000 7",
+        "5 0.25",
+        "-0.75 9",
+        "-1 -1",
+        "16#7fffffff 2",
     ];
     let ints: String = pairs
         .iter()
@@ -153,7 +169,11 @@ fn artkit_noise2_is_bit_identical_to_its_old_procedure() {
                  bad nchk"
             ),
         );
-        assert_eq!(got[0], "0", "seed {seed}: {} of {} samples differ", got[0], got[1]);
+        assert_eq!(
+            got[0], "0",
+            "seed {seed}: {} of {} samples differ",
+            got[0], got[1]
+        );
     }
     // The integer-lattice results really do come in both types, so the
     // check above is exercising the typing, not just the values.
@@ -193,11 +213,19 @@ fn pinned_values_hold_on_every_platform() {
     );
     assert_eq!(
         eval("0.3 0.6 5 0.5 2 fbm2 0.3 0.6 5 0.5 2 ridged2 7 noiseseed 1.3 2.7 gnoise2"),
-        ["-0.42842675311827244", "1.1799289968579727", "-0.236458318191376"]
+        [
+            "-0.42842675311827244",
+            "1.1799289968579727",
+            "-0.236458318191376"
+        ]
     );
     assert_eq!(
         eval("1.3 2.7 gnoise2d"),
-        ["0.28568276281029065", "1.315410716647", "0.5754354505289996"]
+        [
+            "0.28568276281029065",
+            "1.315410716647",
+            "0.5754354505289996"
+        ]
     );
     // An unseeded interpreter is seed 0.
     assert_eq!(
@@ -224,9 +252,8 @@ fn noise_never_touches_the_rand_stream() {
 
 #[test]
 fn seeds_differ_and_reseeding_repeats() {
-    let got = eval(
-        "1 noiseseed 1.3 2.7 gnoise2 2 noiseseed 1.3 2.7 gnoise2 1 noiseseed 1.3 2.7 gnoise2",
-    );
+    let got =
+        eval("1 noiseseed 1.3 2.7 gnoise2 2 noiseseed 1.3 2.7 gnoise2 1 noiseseed 1.3 2.7 gnoise2");
     assert_ne!(got[0], got[1]);
     assert_eq!(got[0], got[2]);
 }
@@ -271,15 +298,25 @@ fn gnoise2d_derivatives_match_finite_differences() {
         let v: Vec<f64> = got.iter().map(|s| s.parse().unwrap()).collect();
         let fdx = (v[3] - v[4]) / (2.0 * h);
         let fdy = (v[5] - v[6]) / (2.0 * h);
-        assert!((v[1] - fdx).abs() < 1e-5, "dx at ({x},{y}): {} vs {fdx}", v[1]);
-        assert!((v[2] - fdy).abs() < 1e-5, "dy at ({x},{y}): {} vs {fdy}", v[2]);
+        assert!(
+            (v[1] - fdx).abs() < 1e-5,
+            "dx at ({x},{y}): {} vs {fdx}",
+            v[1]
+        );
+        assert!(
+            (v[2] - fdy).abs() < 1e-5,
+            "dy at ({x},{y}): {} vs {fdy}",
+            v[2]
+        );
     }
 }
 
 #[test]
 fn fbm_with_one_octave_is_the_base_noise() {
     assert_eq!(
-        eval("1.3 2.7 1 0.5 2 fbm2 1.3 2.7 gnoise2 eq 1.3 2.7 0.4 1 0.5 2 vfbm3 1.3 2.7 0.4 vnoise3 eq 1 2 0 0.5 2 fbm2"),
+        eval(
+            "1.3 2.7 1 0.5 2 fbm2 1.3 2.7 gnoise2 eq 1.3 2.7 0.4 1 0.5 2 vfbm3 1.3 2.7 0.4 vnoise3 eq 1 2 0 0.5 2 fbm2"
+        ),
         ["true", "true", "0.0"]
     );
 }
@@ -297,6 +334,9 @@ fn bad_operands_raise_the_usual_errors() {
     assert!(matches!(err("1e300 0 gnoise2"), PsError::Rangecheck));
     assert!(matches!(err("(a) 0 gnoise2"), PsError::Typecheck));
     assert!(matches!(err("1 2 gnoise3"), PsError::StackUnderflow));
-    assert!(matches!(err("1.5 2.5 [ 1 2 3 ] .permnoise2"), PsError::Rangecheck));
+    assert!(matches!(
+        err("1.5 2.5 [ 1 2 3 ] .permnoise2"),
+        PsError::Rangecheck
+    ));
     assert!(matches!(err("1.5 2.5 5 .permnoise2"), PsError::Typecheck));
 }
