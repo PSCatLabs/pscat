@@ -324,6 +324,11 @@ impl ImageCtx {
                 .filter(|&i| open(&self.planes[i]))
                 .min_by_key(|&i| self.planes[i].data.len())
             else {
+                // Every plane has its data: finish any filter chain left
+                // undrained because planes shared one file object.
+                for p in &mut self.planes {
+                    p.drain_filters()?;
+                }
                 return Ok(None);
             };
             if let Some(exec) = self.planes[i].fill()? {

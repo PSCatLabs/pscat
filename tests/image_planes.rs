@@ -283,6 +283,19 @@ fn inline_filters_are_read_one_after_another_from_the_program() {
 }
 
 #[test]
+fn one_filter_shared_by_every_plane_is_drained_to_its_eod() {
+    // The same filter object feeds all three planes, one byte each; its `>`
+    // must be consumed so the program resumes after the data (gs prints OK).
+    let mut it = page();
+    it.run_str(
+        "1 1 8 [1 0 0 -1 0 1] currentfile /ASCIIHexDecode filter dup dup true 3 colorimage
+         ff0000> (OK)",
+    )
+    .expect("runs");
+    assert_eq!(it.pop().expect("string").repr(), "(OK)");
+}
+
+#[test]
 fn short_planes_read_as_zero_like_a_short_single_source() {
     let mut it = page();
     it.run_str("10 10 translate 80 80 scale 2 1 8 [2 0 0 -1 0 1] <ff> <ff> <> true 3 colorimage")
