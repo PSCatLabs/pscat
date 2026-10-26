@@ -405,7 +405,11 @@ fn read_roots_bind_every_band() {
     let dir = common::scratch_dir("bands-reads");
     let secret = write_source(&dir, "secret.ps", "/Secret 1 def\n");
     let png = dir.join("r.png");
-    let prog = format!("({}) run", secret.display());
+    // Backslashes in a Windows path are escapes in a PostScript string.
+    let prog = format!(
+        "({}) run",
+        secret.display().to_string().replace('\\', "\\\\")
+    );
     let (ok, _, e) = pscat(&[
         "--page",
         "20x20",
