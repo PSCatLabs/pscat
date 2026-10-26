@@ -445,8 +445,7 @@ fn fileposition(it: &mut Interp) -> Result<(), PsError> {
 fn setfileposition(it: &mut Interp) -> Result<(), PsError> {
     let pos = it.pop_int()?;
     let f = pop_file(it)?;
-    let r = f.borrow_mut().set_file_position(pos);
-    r
+    f.borrow_mut().set_file_position(pos)
 }
 
 /// file resetfile → . An output file throws away what is buffered and not
