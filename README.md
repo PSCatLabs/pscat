@@ -69,6 +69,23 @@ To try it with nothing installed, open the
 [Learn PostScript](https://pscatlabs.github.io/pscat/learn.html). More sample programs live in `examples/`, and finished pieces in
 [`gallery/`](gallery/README.md).
 
+## LaTeX on a chalkboard
+
+`pscat chalk` writes a formula on a chalkboard from plain LaTeX, with no
+PostScript. The same LaTeX and seed give the same picture:
+
+```sh
+pscat chalk 'x = \frac{-b \pm \sqrt{b^2-4ac}}{2a}' -o quadratic.png
+```
+
+<img src="https://pscatlabs.github.io/pscat/assets/chalk/quadratic.png" width="640" alt="x = (-b plus or minus the square root of b squared minus 4ac) over 2a, in white chalk on a slate board"/>
+
+More boards, each with its command, are
+[on the site](https://pscatlabs.github.io/pscat/#chalkboard); the options and
+the supported LaTeX are in the
+[dry-media guide](docs/guides/dry-media.md#from-latex-to-a-board-pscat-chalk).
+MCP clients get the same board from the `chalkboard_math` tool.
+
 ## Guides
 
 Everything else is in [`docs/guides/`](docs/guides/README.md):

@@ -303,6 +303,15 @@ a.try::after { content: " ▸"; }
 .result pre.output { margin: 0; }
 .result img { display: block; background: #fff; border: 1px solid var(--edge); border-radius: 3px; }
 
+/* the `pscat chalk` showcase (scripts/site_chalk.py): a board, its name, its command */
+.chalk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(420px, 100%), 1fr)); gap: 22px; margin: 20px 0; }
+figure.chalk-board { margin: 0; min-width: 0; }
+figure.chalk-board img { display: block; width: 100%; height: auto; border-radius: 6px; border: 1px solid var(--edge); }
+figure.chalk-board .chalk-dark { background: #181c24; border-radius: 6px; }
+figure.chalk-board figcaption { margin: 8px 0 4px; color: var(--dim); font-size: 14px; }
+/* wrap, never scroll: the whole command stays on screen (copying it still gives one line) */
+figure.chalk-board pre { margin: 0; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+
 /* ------- footer ------- */
 .site-footer {
   border-top: 1px solid var(--edge); color: var(--dim);
