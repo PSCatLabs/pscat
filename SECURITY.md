@@ -5,10 +5,11 @@ program, and running one is running code, even though pscat is built so that
 the code cannot do much outside its own page. This file says what that
 program can and cannot do **today**, where pscat has no limit yet, and how to
 report a problem. Every claim was checked against the code, and the "Checked
-with" notes name how. The undefined and refused operators, the file reads, the
-resource-limit figures, the limit flags and the MCP behaviours below were also
-reproduced by running a build (a `ci`- or `release`-profile build, October
-2026); they are measurements, not guarantees.
+with" notes name how. The undefined and refused operators, the file reads and
+writes, the read and write roots, the resource-limit figures, the limit flags
+and the MCP behaviours below were also reproduced by running a build (a `ci`-
+or `release`-profile build, October 2026); they are measurements, not
+guarantees.
 
 ## Reporting a vulnerability
 
@@ -44,13 +45,23 @@ vulnerabilities on their own:
   `--max-memory`), and "Limits that cannot be enforced" lists what a limit
   cannot stop even when it is on. Reports of a *new* way to exhaust resources
   there are welcome as bugs, not as security reports.
-- A program that reads a file the pscat process can read (see below).
+- A program that reads a file the pscat process can read, on the command line
+  and in the library, where reads are open unless you confine them (see
+  below). The MCP server does confine them.
+- A program that writes a file inside a directory you named with
+  `--allow-write`. That is what the flag is for.
 
 These are:
 
-- A program that **writes, deletes or renames** a file, starts a process, opens
-  a network connection or reads the environment, from inside the interpreter.
-  None of these operators exist today, so any way to get one is a bug.
+- A program that **writes, deletes or renames** a file outside the directories
+  `--allow-write` named, from inside the interpreter. With no `--allow-write`
+  (the default, and always under the MCP server) that is any file on disk.
+- A program that starts a process, opens a network connection or reads the
+  environment, from inside the interpreter. None of these operators exist
+  today, so any way to get one is a bug.
+- A way for a program that runs under **read roots** (`--read-root`,
+  `--confine-reads`, and every MCP call) to read, or list with
+  `filenameforall`, a file outside them.
 - A way for a program to get **past a limit that is set**: catching a limit
   error with `stopped`, or growing memory, steps or time without bound
   between the checks described in "Limits that exist". The MCP server sets
@@ -59,8 +70,9 @@ These are:
   TrueType/OpenType), the image decoders (JPEG, Flate, LZW and the rest) or the
   PDF/SVG writers from a *crafted file* that should have been an ordinary
   PostScript error.
-- A way for the MCP server to write outside what its documentation promises, or
-  to run a command the caller did not ask for.
+- A way for the MCP server to write outside what its documentation promises
+  (the `out_path` files and a private scratch directory per call, described
+  below), or to run a command the caller did not ask for.
 - A way for a page on the website's playground or `web/` demo to run script in
   the visitor's page.
 
@@ -70,28 +82,41 @@ These are:
 only run it where you would be happy to run that script.** pscat is not a
 sandbox. It has no process isolation and no seccomp or similar. It has resource limits
 you can turn on (the CLI and library: off by default; the MCP server: on by
-default), and a small, mostly read-only operator set. The
+default), file access you can narrow (reads: open by default on the command
+line and in the library, confined under the MCP server; writes: off unless you
+name a directory), and a small operator set with no process, network or
+environment access. The
 sections below separate what the operators allow from what the process around
 them allows.
 
 ### What PostScript can and cannot do today
 
-Checked with: `src/ops/file.rs`, `src/file.rs`, the operator tables in
-`src/ops/`, and each line below run through `pscat --headless -` (a `ci`
-profile build of this commit).
+Checked with: `src/ops/file.rs`, `src/ops/realsio.rs`, `src/file.rs`,
+`src/write_roots.rs`, `src/read_roots.rs`, `src/filenames.rs`, the operator
+tables in `src/ops/`, and each line below run through `pscat --headless -` (a
+`release` profile build of this commit).
 
-**Reads files, anywhere the pscat process can read.**
+**Reads files, by default anywhere the pscat process can read.**
 
 - `(path) (r) file` opens any readable file. `(path) run` executes one as
-  PostScript. Absolute paths and `..` are not restricted. A relative path is
-  tried against the current directory first, then against pscat's own install
-  directory (`lib/`, fonts).
+  PostScript, and `(path) n readreals` reads `n` numbers from one
+  ("Writes files", below). By default absolute paths and `..` are not
+  restricted. A relative path is tried against the current directory first,
+  then against pscat's own install directory (`lib/`, fonts).
 - The bytes come back to the program, which can print them: `(/etc/hosts) (r)
   file 100 string readstring pop print` prints the first lines of
   `/etc/hosts`. So **a PostScript program can disclose the contents of any file
   you can read**, to wherever the output goes. That is your terminal for the
   CLI, and **the tool result sent back to the model** for the MCP
-  `eval_postscript` tool.
+  `eval_postscript` tool. Under the MCP server that is narrowed to the read
+  roots below, but not to nothing.
+- `(template) proc scratch filenameforall` lists file names, which is
+  disclosure too. It lists regular files only (directories are not yielded),
+  in every place a relative name would be looked up, and an absolute template
+  such as `(/etc/*)` lists that directory. `*` and `?` match within the last
+  path component only, and a wildcard in a directory part matches nothing.
+  `(path) status` still answers `false` for any name and so does not say
+  whether a file exists.
 - `run` on a file that is not PostScript fails with an error that names the
   first token it could not execute. That also discloses a little of the file.
 - Reads are whole-file, before the program sees a byte. With no limit set, a
@@ -100,39 +125,133 @@ profile build of this commit).
   seconds). With a limit set, the read looks at the limits as the bytes arrive
   and stops with `limitexceeded` (see "Whole-file reads and the limits").
 
-**Cannot write, delete, rename, list or stat files.**
+**Confining reads: read roots.** `--read-root DIR` (repeatable) on the command
+line, `--confine-reads` (the same with no directory: only the copy of `lib/`
+compiled into pscat), and `Interp::set_read_roots` in the library. They are
+**off by default**, so the CLI and the library read anywhere, as above. Under
+them (`src/read_roots.rs`, used by `file`, `run`, `readreals` and
+`filenameforall`; `pscat handwrite` takes both flags too):
 
-- `file` accepts only the access string `r`. `w`, `a`, `r+` and so on give
-  `invalidfileaccess`, including for `%stdout`.
-- `deletefile`, `renamefile`, `filenameforall`, `setfileposition` and
-  `fileposition`, `writestring` and `writehexstring` are **not defined**. Neither
-  are `%pipe%`, `%stdin`/`%stdout` device names, `getenv`, `putenv`,
-  `setpagedevice`, or any operator that starts a process or opens a socket.
-  `(path) status` always answers `false`, so it does not even say whether a file
-  exists.
+- A `..` component anywhere in a name or a `filenameforall` template is
+  `invalidfileaccess`, before any lookup.
+- Every file the search order tries is resolved first (a symlink is followed to
+  where it really points) and is read only if it lies inside a root; the
+  resolved path is what is read. So a symlink inside a root that points out
+  is refused too.
+- An absolute name outside the roots is `invalidfileaccess` whether or not the
+  file exists, so the error does not say what exists there. A place in the
+  search order that is outside the roots (pscat's install directory, say) is
+  skipped as if it had no file, so `(lib/artkit.ps) run` still finds the copy
+  compiled into pscat.
+- `filenameforall` lists only directories inside the roots and yields only
+  names that would open, so outside them it yields nothing and raises no error.
+- The roots decide *where*, not *what*. Inside a root a FIFO or a hard link
+  somebody else made is read as it would be without roots (under the
+  execution limits, "Whole-file reads and the limits"). `/dev/zero` is outside
+  every root unless one names `/dev`, and a symlink to it inside a root
+  resolves outside and is refused.
+- Fonts are not read by path: `findfont` matches a name against the file stems
+  in the font directories and never joins a program's string into a path, so
+  roots do not gate it.
+- The check and the read are not atomic. A *different* local process that can
+  already write inside a root could swap a directory for a symlink in between.
+
+**Writes files, only inside write roots, which are empty by default.**
+`--allow-write DIR` (repeatable) on the command line and `Interp::set_write_roots`
+in the library name the directories a program may write. With none, every disk
+path is `invalidfileaccess`: `(path) (w) file`, `(a) file`, `renamefile`,
+`deletefile` and `writereals` all fail the same way. The flag works for a run,
+`-i`, the REPL and the live window, and is refused with `--spool` (spooled jobs
+never write). `pscat-mcp` never sets a write root ("The MCP server").
+
+- `file` takes `r`, `w` (truncate or create) and `a` (append or create). `r+`,
+  `w+`, `a+` and anything else are `invalidfileaccess`. `(%stdout)` and
+  `(%stderr)` are the only names that need no root: they are the run's own
+  standard output (the stream `print` writes to) and standard error. Any other `%device` name (`%pipe%`, `%stdin`, `%lineedit`) is
+  `undefinedfilename`.
+- The operators are `write`, `writestring`, `writehexstring`, `flush`,
+  `flushfile`, `closefile`, `renamefile`, `deletefile` and, for numbers,
+  `array (path) [/f32] writereals` and `(path) n [/f32] readreals` (packed
+  little-endian binary, `/f64` by default). `writereals` opens the file as
+  `(path) (w) file` does, so every check below applies, and it checks every
+  element before it opens the file, so a bad array never truncates the target.
+  `fileposition`, `setfileposition`, `getenv` and `putenv` are **not defined**.
+- The path check (`src/write_roots.rs`; the one place that decides) works on
+  the name as the program gave it: a relative name is relative to the current
+  directory only, never the search order for reads, so it cannot reach pscat's
+  install directory. It refuses:
+  - any `..` component, even one that would stay inside;
+  - a path that, resolved in full (an existing file through its symlinks, a
+    new file through its parent directory), is not strictly inside a root. A
+    root itself is never a file;
+  - a name ending in `/` or `/.`, an existing target that is not a regular file
+    (a directory, FIFO or device), a symlink that points nowhere (opening it
+    would create its target, wherever that is), and on Unix an existing file
+    with more than one hard link (another of its names may be outside the
+    roots);
+  - a name that is not valid UTF-8, and a NUL.
+  A new file is created with `O_EXCL`, which never follows a final-component
+  symlink, and an existing one is checked again just before it is opened.
+- `renamefile` and `deletefile` act on the directory entry: only the parent
+  directory is resolved, so deleting a symlink that sits inside a root removes
+  the link and never what it points to. Both names must be inside a root, and
+  directories are refused at either end, so only files are renamed or removed.
+- No operator makes a symlink or a hard link, so any link a program could abuse
+  was already inside a root. As with the read roots, a *different* local
+  process that can already write inside a root could swap a directory for a
+  symlink between the check and the open. `std` has no `openat`, so this is
+  accepted rather than closed.
+- Disk writes are not buffered, so a run that ends without `closefile` loses
+  nothing. **A limit that stops a long write leaves the file as short as it got**
+  (it was truncated when it was opened). A program given a write root can fill
+  that disk ("Limits that cannot be enforced").
+- `(path) n readreals` follows the *read* policy (read roots, whole-file read,
+  the limits), with two limits of its own: it refuses before it reads when the
+  array would pass the memory limit, and `n` over the 16,777,216-element array
+  cap is `limitcheck`. A file shorter than `n` values is `rangecheck`.
+
+**Cannot do the rest of what a shell does.**
+
+- `%pipe%`, `%stdin`, `setpagedevice`, `getenv`, `putenv`, and any operator that
+  starts a process or opens a socket are **not defined** (or, for the device
+  names, `undefinedfilename`).
 - The interpreter has no network code of its own, and no PostScript operator
   opens a connection. (The live window talks to the windowing system through
-  `winit`, as any GUI does.) Only the MCP server (`pscat-mcp`, or
-  `pscat mcp`; `src/mcp_server.rs`) starts other programs. The other `Command::new` calls
-  in the repository are in benchmarks and tests.
+  `winit`, as any GUI does.) Two things in the pscat program start other
+  programs, neither reachable from PostScript: the MCP server (`pscat-mcp`, or
+  `pscat mcp`; `src/mcp_server.rs`) runs `pscat` children, and **`pscat fonts
+  install`**, a command you run yourself, runs `curl` (HTTPS only, redirects
+  included) to download font packs, and checks every byte against a SHA-256
+  chain before it installs anything (`src/fontpacks/install.rs`). The other
+  `Command::new` calls in the repository are in benchmarks and tests.
 - Font names are matched against the font catalog's file *stems*
   (`src/font.rs`, `catalog_fid`); a name from a program is never joined into a
-  path.
+  path. The standard 35 faces are compiled into the binary and are found the
+  same way (#757), so a bare install needs no font files, and no font is read
+  from a path a program names.
 
 **Output files are chosen by the person running pscat, not by the program.**
 `--png`, `--svg`, `--pdf` and `--contact-sheet` write where the command line
 says. PostScript cannot change that. (`quit` ends the run; it does not write.)
+A program that is given `--allow-write` can write other files, but still not
+the rendered output.
 
 **`--spool DIR` runs every `.ps` or `.eps` file that lands in `DIR`.** Only
-point it at a directory that people you trust can write to.
+point it at a directory that people you trust can write to. A spooled program
+reads anywhere the process can (the read-root flags are refused with `--spool`)
+and writes no file (`--allow-write` is refused too).
 
 **`pscat-mcp` is different. See the MCP section.**
 
 **In the browser** (`web/pscat.js`, the website playground), pscat is a
-WebAssembly module with no filesystem: `file` and `run` find nothing, because
-`std::fs` is unavailable on `wasm32-unknown-unknown`, and `src/paths.rs` and the
-font catalog are compiled out. A program can draw and print into the page's
-own output box; the playground sets text with `textContent` and stepped
+WebAssembly module with no filesystem: `file` and `run` read no disk file,
+because `std::fs` is unavailable on `wasm32-unknown-unknown`, and the search
+order's disk places and the font catalog are compiled out. The one thing they
+find is the copy of `lib/` compiled into the module (`(lib/artkit.ps) run`,
+and `filenameforall` lists those names), which is public library code, and
+the standard 35 faces. Every disk write is `invalidfileaccess` (there are no
+write roots to name), and `(%stdout)` writes land in the captured output. A
+program can draw and print into the page's own output box; the playground sets text with `textContent` and stepped
 execution means a runaway loop does not freeze the tab. The `run()` helper in
 `web/pscat.js` runs to completion in one call and *will* block the tab on an
 infinite loop, so a page that accepts untrusted programs should use `begin()`
@@ -148,9 +267,10 @@ output is cut off at 64 KiB.
 | Procedure `{ }` nesting while scanning | 500 (`limitcheck`) | `src/interp.rs` |
 | Name-resolution cycles | detected, `limitcheck` | `src/interp.rs` |
 | Canvas size | at most 8000 x 8000 device pixels (about 256 MB), `--page` 1..8000 points, `--dpi` 9..1200 | `src/main.rs`, `src/interp.rs` |
+| Canvas, sheet or board size under the MCP server | at most 40,000,000 device pixels by default (`--max-pixels`, at most 64,000,000) | `src/mcp_server.rs` |
 | Captured output (browser, `capture_stdout`) | 64 KiB | `src/interp.rs` |
 | Interpreter steps per program (opt in: `--max-steps N`, `Limits::max_steps`) | none by default; MCP 25,000,000,000 | `src/interp.rs` |
-| Wall-clock time per program (opt in: `--max-time SECS`, `Limits::max_time`) | none by default; MCP `--timeout` less a quarter, at most 5 s (55 s) | `src/interp.rs` |
+| Wall-clock time per program (opt in: `--max-time SECS`, `Limits::max_time`) | none by default; MCP `--timeout` less a quarter, at most 5 s (55 s); a render job `--job-timeout` less the same margin (3600 s default) | `src/interp.rs` |
 | Heap growth per run (opt in: `--max-memory MIB`, `Limits::max_memory`) | none by default; MCP 1024 MiB | `src/interp.rs`, `src/memtrack.rs` |
 
 A tail call such as `/f { f } def f` does not grow the execution stack, so the
@@ -226,7 +346,14 @@ done in 64 KiB chunks and the limits are looked at after each one:
   still blocks for good, because no bytes arrive to be charged; set a time limit
   too. With only a time limit, `/dev/zero` is read as fast as the machine allows
   (about 1 GB a second) until the clock stops it, so set a memory cap as well,
-  as the MCP defaults do.
+  as the MCP defaults do. (Under the MCP server the read roots refuse
+  `/dev/zero` before any of this: it is outside every root.)
+- **`readreals` and `filenameforall` follow the same rules.** `readreals` is a
+  whole-file read, charged as above, and refuses before it reads when the array
+  it would build passes the memory cap. `filenameforall` charges one step per
+  directory entry it looks at and checks the bytes of each name it keeps, so
+  listing a huge directory stops on a limit. `writereals` polls the limits once
+  per 8,192 elements it writes (64 KiB as `/f64`, 32 KiB as `/f32`).
 
 Checked with: `tests/limits.rs` (`file_reads`), `tests/limits_memory.rs`,
 `tests/cli.rs` and `tests/mcp.rs`.
@@ -269,7 +396,15 @@ without the limits above:
   instructions retired on `fillkit.ps`.
 - **No limit on output volume** on the command line: a program can print as
   much as it likes, bounded only by the steps and time it is allowed. The MCP
-  server caps each child stream at 4 MiB.
+  server caps each child stream at 4 MiB. Writing to `%stdout` or `%stderr` is
+  printing, and counts the same.
+- **No limit on bytes written to a write root.** The memory limit counts the
+  heap, not the disk. A program that has been given `--allow-write` can fill
+  that disk, bounded only by the steps and time it is allowed; one `string`
+  or `array` holds at most 16,777,216 elements, so one `writereals` writes at
+  most 128 MiB (`/f64`) and one `writestring` at most 16 MiB. Name only a
+  directory you would let a program fill, and put a quota or a separate
+  volume under it if the program is a stranger's.
 - **No cap on total decoded bytes from filters** (`FlateDecode`,
   `LZWDecode`, `RunLengthDecode`, ...) as such. They decode as the program
   reads, so what a program keeps counts against the memory limit and what it
@@ -306,7 +441,10 @@ purpose: leaks (a program that puts a dictionary into itself builds a
 reference cycle that is never freed; LeakSanitizer is switched off, and that
 is the program's own doing, not memory unsafety) and the unbounded whole-file
 read above, which a mutated `file` path could reach and the harness does not
-fence off.
+fence off. The harness names no write root and no read root, so a mutated
+program's disk writes are all refused, and what the write-root and read-root
+checks do on a hostile name is covered by their unit tests
+(`src/write_roots.rs`, `src/read_roots.rs`) and `tests/`, not by fuzzing.
 
 What is **not** fuzzed yet: the Type 1 and TrueType font loaders, the image
 decoders (JPEG, Flate, LZW and the rest) other than as the interpreter
@@ -323,9 +461,10 @@ use your shell's `ulimit`, a container's memory and CPU limits, or `timeout`.
 
 ### The MCP server (`pscat-mcp`)
 
-`pscat-mcp` serves six tools over stdio to whatever agent or client launched
+`pscat-mcp` serves ten tools over stdio to whatever agent or client launched
 it: `render_postscript`, `handwrite`, `chalkboard_math`, `review_sheet`,
-`describe_art_capabilities` and `eval_postscript`. It runs each call as a
+`describe_art_capabilities` and `eval_postscript`, and the four job tools
+`start_render`, `render_status`, `render_result` and `cancel_render`. It runs each call as a
 child process (`pscat`, and `pscat handwrite` for `handwrite`; for
 `chalkboard_math` the server writes the PostScript itself and runs it in a
 `pscat` child; for `review_sheet` one `pscat` child per cell) as the same user, with the same
@@ -361,11 +500,51 @@ an installed build (October 2026, #568).
   beside it under the same rules. The bytes are a PNG, SVG or PDF, but an SVG
   or PDF contains text the PostScript program chose. Renders without
   `out_path` go to a private temp directory that is deleted after the call.
-- **`eval_postscript`, `render_postscript` and `review_sheet` run arbitrary PostScript** with
-  the file-read behaviour above. A model that calls them can read any file
-  the server's user can read and receive the contents. This is not confined:
-  it is the interpreter's file access; the interpreter's step, time and memory
-  limits (below) do not confine what a program can read.
+- **`pscat-mcp` never writes from PostScript (#740).** It gives no child a
+  write root: `--allow-write` is never passed, and no tool argument or server
+  flag can add one. In a child, `(path) (w) file`, `renamefile`, `deletefile`
+  and `writereals` on any disk path are `invalidfileaccess`. What the server
+  itself writes is the `out_path` files above, and each call's private scratch
+  directory (where a render without `out_path` goes), removed after the call;
+  both are paths the server chose, never ones the PostScript program named. `(%stdout)` and
+  `(%stderr)` work, since they are the child's own streams, which the server
+  captures: stdout is the tool's text result (or `eval_postscript`'s output),
+  capped at 4 MiB like any child stream, and stderr comes back as a bounded
+  `Warnings:` item after a successful render (at most 8 distinct lines of 300
+  characters, #752) or whole in the error after a failure; `eval_postscript`
+  does not return it on success. A program can therefore put any text
+  in front of the model, as it always could by printing. It can also write a
+  line `pscat: progress pages=N` to `%stderr` to set its own job's
+  `pages_done` while it runs: that counter is only a status display, nothing
+  is decided by it, and the line is removed from the stderr returned.
+- **Programs read files only inside the read roots (#763).**
+  `eval_postscript`, `render_postscript`, `review_sheet`, `start_render` and
+  `handwrite` run arbitrary PostScript (or, for `handwrite`, trusted library
+  code), and every child that runs a program gets `--confine-reads` and one
+  `--read-root` per root
+  ("Confining reads: read roots", above, has the rules). The roots are:
+  - the server's **working directory** (Claude Code and Codex start it in the
+    project directory), unless it is the filesystem root;
+  - `$PSCAT_HOME` and the per-user pscat data directory, when they exist (and
+    are not the filesystem root);
+  - each `--allow-read DIR` the person who registered the server named
+    (repeatable; a bad one stops the server at startup). `--allow-read /`
+    is taken as asked.
+  No tool argument can add a root, and an empty list still confines: every
+  child gets `--confine-reads` first, so it can read nothing on disk but the
+  copy of `lib/` compiled into pscat. `/dev/zero`, `/etc/hosts` and `../` names
+  are `invalidfileaccess`, `filenameforall` outside the roots yields nothing,
+  and a symlink inside a root that points out is refused. The model can still
+  read **every file inside the roots**, and the working directory is often a
+  whole project, so a `.env` or a key file there is readable, and a client
+  that starts servers in your home directory makes all of it readable
+  (`~/.ssh` included; only `/` is excluded); start the server in a directory
+  that holds nothing you would mind it reading, and add other
+  directories deliberately with `--allow-read DIR`.
+  `PSCAT_LIB` is honoured only when it lies inside a root, and a `lib/` in the
+  working directory or under `PSCAT_HOME` replaces the compiled-in copy.
+  The interpreter's step, time and memory limits (below) bound what a
+  program does with its reads, not what it may read; the roots do that.
 - **Every call is bounded in time and memory held by the server.** The
   interpreter's own limits are on in the child (#604): a step limit
   (`--max-steps`, default 25 billion), a heap-growth limit (`--max-memory`
@@ -384,8 +563,9 @@ an installed build (October 2026, #568).
   (`--max-image-bytes`, default 3,750,000 bytes per call, and 20 pages); a
   bigger render is refused inline, though a file asked for with `out_path` is
   still written. The child's heap growth is limited by `--max-memory`
-  (default 1024 MiB); a whole-file read of `/dev/zero` or a FIFO is stopped by
-  those limits too (see "Whole-file reads and the limits").
+  (default 1024 MiB); a whole-file read of a FIFO inside a root is stopped by
+  those limits too (see "Whole-file reads and the limits"; `/dev/zero` is
+  outside every root).
 - **`chalkboard_math` takes LaTeX, never PostScript, and has two caps of its
   own (#688), both server flags (#711).** The server turns the LaTeX into a program with the
   `pscat::chalk` generator (#555), in-process and without file or
@@ -453,12 +633,19 @@ an installed build (October 2026, #568).
   to the inline caps) is dropped after `--job-ttl` (default 3600 s). No job
   outlives a clean shutdown: when stdin closes, every job is cancelled and its
   child killed and reaped, and the calls already asked for finish (each within
-  `--timeout`) and answer, before the server exits. A server
-  killed outright cannot do that; on Unix each child is started with
-  `--exit-with-parent` and stops itself within about half a second, while on
-  Windows such a child runs on until its own time limit (`--job-timeout` less
-  the margin). Job ids are sequential, which is fine for one local client and
-  is why the hosted server does not offer jobs.
+  `--timeout`) and answer, before the server exits. A server killed outright
+  cannot do that; on Unix each child (of a call or a job) is started with
+  `--exit-with-parent PID` and stops itself, from a thread of its own that
+  looks twice a second, within about half a second of the server's death, even
+  when the program is stuck inside one long operator. On Windows the flag is
+  accepted and does nothing: an orphaned child runs on until its own time
+  limit (`--timeout`, or `--job-timeout` for a job, less the margin), which
+  for a job, by default, nearly an hour of CPU. A job's child is started with
+  `--progress`, which prints `pscat: progress pages=N` to its stderr after each
+  slice in which a page was finished; the server reads those lines for
+  `render_status` and removes them from the stderr it returns. Job ids are
+  sequential, which is fine for one local client and not for a shared server:
+  a hosted one (#689) would need unguessable ids.
 - **Bad input gets a bounded, structured answer, and stdout stays clean.**
   Malformed JSON, invalid UTF-8, batches and non-object messages get JSON-RPC
   errors (-32700, -32600) and the session continues; an unknown tool is
@@ -490,15 +677,18 @@ an installed build (October 2026, #568).
   tools' `pscat` (the same file, so it cannot run a different binary), and needs
   no checkout, no `scripts/` directory, no shell, and no `PSCAT_ROOT`. It
   never starts a build. It does read the PostScript library through the
-  resource resolver, so a `lib/` directory named by `PSCAT_HOME` or
-  `PSCAT_LIB`, or in the server's working directory, is used in place of the
-  copy compiled into `pscat`; those variables and that directory are trusted
-  the same way they are for `render_postscript`.
+  resource resolver, so a `lib/` directory under `PSCAT_HOME` or in the
+  server's working directory (both read roots), or named by `PSCAT_LIB` when
+  that lies inside a root, is used in place of the copy compiled into `pscat`;
+  those variables and that directory are trusted the same way they are for
+  `render_postscript`.
 - The server speaks only over stdin and stdout. It opens no port.
 
 If you register `pscat-mcp` with an agent, assume the agent can read any file
-you can read and write files inside the output root, and run it somewhere that
-is acceptable.
+inside its read roots (the working directory, which is often a whole project,
+the pscat data directories, and each `--allow-read` directory) and receive the
+contents, can write rendered images inside the output root, and can write
+nothing else. Run it somewhere that is acceptable.
 
 ### Other tools
 
