@@ -109,6 +109,13 @@ More on the less obvious ones:
   current directory. `(%stdout) (w) file` and `(%stderr) (w) file` need no
   flag. `filenameforall` lists files where `run` would look for them.
   `pscat-mcp` never lets a program write.
+- **Confining reads.** Reading is open by default. `--read-root DIR`
+  (repeatable) confines `(f) (r) file`, `run`, `readreals` and
+  `filenameforall` to files inside the named directories: a path outside, a
+  `..`, a symlink leading out or `/dev/zero` is `invalidfileaccess`, and
+  `filenameforall` lists nothing outside. The embedded `lib/` still works.
+  `--confine-reads` alone allows only that. `pscat-mcp` always confines its
+  renders this way (see the [agents guide](agents.md)).
 - **Saving numeric arrays.** `array (path) writereals` writes the numbers as
   packed little-endian binary64 (8 bytes each), and `(path) n readreals` reads
   `n` of them back into a new array, bit for bit (`-0.0`, infinities and NaN
