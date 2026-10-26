@@ -540,7 +540,7 @@ static ENTRIES: &[Entry] = &[
         "pscat extension, not PLRM and absent from Ghostscript. Blend mode for fills and strokes: /Normal (default) or /Multiply; any other name is rangecheck. Part of the graphics state.",
         &[],
         SYSTEMDICT,
-        "/Multiply setblendmode -",
+        "name setblendmode -",
         BUILTIN
     ),
     entry!(
@@ -549,7 +549,7 @@ static ENTRIES: &[Entry] = &[
         "pscat extension. The current blend mode name set by setblendmode.",
         &[],
         SYSTEMDICT,
-        "- currentblendmode /Normal",
+        "- currentblendmode name",
         BUILTIN
     ),
     entry!(

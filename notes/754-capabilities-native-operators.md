@@ -26,7 +26,7 @@ every cataloged operator is a real `operatortype` in `systemdict` (so a
 library procedure shadowing the name cannot pass); each `nr*` procedure's
 summary names its native operator and that operator is cataloged.
 
-The payload grew from about 280 KB to 293 KB, well under pscat-mcp's 4 MiB
+The payload is about 293 KB, well under pscat-mcp's 4 MiB
 child-stream cap. The `describe_art_capabilities` tool description in
 `src/mcp_server.rs` still lists only fonts, faces, palettes, templates and
 procedures: a one-word follow-up (another lane's file, not touched here).
