@@ -180,6 +180,15 @@ More on the less obvious ones:
   each thread takes the next band from a queue when it finishes one. So a
   scene whose cost is uneven down the page, a cheap sky over expensive
   terrain, doesn't wait on the one thread that drew the expensive strip.
+  The queue can't get under the cost of the hottest band, though. If you
+  know where the cost is, `--band-cuts F1,F2,...` puts the band edges at
+  those fractions of the page height, from the top (each rounded to the
+  nearest device row): thin bands where rows are costly, tall ones where
+  they are cheap. Cuts of equal cost run about as fast as separate
+  processes over the same cuts would, and they carry across `--dpi`. One
+  way to find them is to time a few single-thread runs with `/BandBBox` set
+  by hand, then cut the cumulative cost into equal parts
+  (`notes/869-bands-tail-gap.md`).
   Each band is a full run of the program with
   `/BandIndex` (0 is the top band), `/BandCount` and `/BandBBox
   [llx lly urx ury]` (the band's area in default user space, points) defined
@@ -192,7 +201,7 @@ More on the less obvious ones:
   and is slower than one; only image rasterization skips the other bands'
   rows. Each band also repeats the program's setup and any margin rows, which
   is why the default doesn't cut finer. Band `i` of `K` keeps device rows
-  `floor(i*H/K)` to `floor((i+1)*H/K)`. `clippath` and the rest of the
+  `floor(i*H/K)` to `floor((i+1)*H/K)`, or the rows between its cuts. `clippath` and the rest of the
   graphics state still see the whole page. Every page of a multi-page program
   is banded, and every band must emit the same number of pages. PNG only: it
   refuses `--svg`, `--pdf`, `--lint`, sweeps, `--progress`, `--profile` and
@@ -204,7 +213,8 @@ More on the less obvious ones:
   budget for the whole render, counted from before the threads start; each
   running thread holds its own canvas (N times a plain render's), which the
   budget leaves out as a plain render's leaves out its one canvas. Only the top band's
-  stdout is printed, but writes to `(%stderr)` appear once per band; an error is reported once, from the first band that hit
+  stdout and stderr are printed (`(%stderr)` writes, `handleerror`); a font
+  stand-in note that only a lower band raised is printed once at the end. An error is reported once, from the first band that hit
   it, and the stitched partial page is still written. A piece seeded from
   `realtime` or `usertime` can tear at the seams, since the bands read
   different clocks.

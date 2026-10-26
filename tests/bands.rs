@@ -388,6 +388,48 @@ fn refuses_what_it_cannot_honour() {
             vec!["--bands", "2", "--band-rows", "0", "--png", png, "-e", "0"],
             "invalid --band-rows",
         ),
+        (
+            vec!["--band-cuts", "0.5", "--png", png, "-e", "0"],
+            "--band-cuts needs --bands",
+        ),
+        (
+            vec!["--bands", "2", "--band-cuts", "0.6,0.4", "--png", png, "-e", "0"],
+            "invalid --band-cuts",
+        ),
+        (
+            vec!["--bands", "2", "--band-cuts", "1.5", "--png", png, "-e", "0"],
+            "invalid --band-cuts",
+        ),
+        (
+            vec![
+                "--bands",
+                "2",
+                "--page",
+                "100x100",
+                "--band-cuts",
+                "0.5,0.502",
+                "--png",
+                png,
+                "-e",
+                "0",
+            ],
+            "empty band",
+        ),
+        (
+            vec![
+                "--bands",
+                "2",
+                "--band-rows",
+                "4",
+                "--band-cuts",
+                "0.5",
+                "--png",
+                png,
+                "-e",
+                "0",
+            ],
+            "give one",
+        ),
     ] {
         let (ok, _, e) = pscat(&args);
         assert!(!ok, "{args:?} must fail");
@@ -642,4 +684,98 @@ showpage
         render("plain.png", &[]) == render("banded.png", &["--bands", "1", "--band-rows", "50"]),
         "the bottom band's forall order differs from a plain run's"
     );
+}
+
+/// `--band-cuts` (#869) puts the band edges where the caller says, as
+/// fractions of the page height from the top, and the result is still the
+/// plain render byte for byte, whether there are fewer bands than threads,
+/// as many, or more (queued).
+#[test]
+fn band_cuts_match_byte_for_byte() {
+    let dir = common::scratch_dir("bands-cuts");
+    let file = write_source(&dir, "fbm.ps", FBM_AWARE);
+    let file = file.to_str().expect("utf-8 path");
+    let page = ["--page", "280x210", "--dpi", "100"];
+    let render = |out: &Path, more: &[&str]| {
+        let out = out.to_str().expect("utf-8 path");
+        let mut args = page.to_vec();
+        args.extend(more);
+        args.extend(["--png", out, file]);
+        let (ok, _, e) = pscat(&args);
+        assert!(ok, "{more:?}: {e}");
+        std::fs::read(out).expect("png")
+    };
+    let want = render(&dir.join("plain.png"), &[]);
+    for (threads, cuts) in [
+        ("4", "0.5"),
+        ("3", "0.3,0.42,0.5"),
+        ("2", "0.05,0.1,0.33,0.34,0.6,0.9"),
+    ] {
+        let got = render(
+            &dir.join(format!("cuts{threads}.png")),
+            &["--bands", threads, "--band-cuts", cuts],
+        );
+        assert!(got == want, "--band-cuts {cuts} differs from the plain render");
+    }
+}
+
+/// The band names follow the cuts: `/BandCount` is the cut count plus one,
+/// and band 0's box ends at the first cut.
+#[test]
+fn band_names_follow_the_cuts() {
+    let png = common::scratch_dir("bands-cut-names").join("n.png");
+    let (ok, out, e) = pscat(&[
+        "--page",
+        "100x200",
+        "--bands",
+        "2",
+        "--band-cuts",
+        "0.25,0.5,0.6",
+        "--png",
+        png.to_str().unwrap(),
+        "-e",
+        "BandIndex = BandCount = BandBBox ==",
+    ]);
+    assert!(ok, "{e}");
+    assert!(out.starts_with("0\n4\n[0 150 100 200]"), "{out}");
+}
+
+/// Only the top band writes stderr (#869): a `(%stderr)` line, which every
+/// band used to print, comes out once, and so does a stand-in font note,
+/// including one that only a lower band reached.
+#[test]
+fn stderr_and_font_notes_print_once() {
+    let home = common::scratch_dir("bands-stderr");
+    let work = home.join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    let png = home.join("s.png");
+    let out = Command::new(BIN)
+        .args([
+            "--bands",
+            "4",
+            "--page",
+            "100x100",
+            "--png",
+            png.to_str().unwrap(),
+            "-e",
+            "(%stderr) (w) file (to-stderr\\n) writestring \
+             /Bangers findfont pop \
+             BandIndex 2 eq { /CourierPrime findfont pop } if",
+        ])
+        .current_dir(&work)
+        .env("PSCAT_HOME", &home)
+        .env("HOME", home.join("user"))
+        .env("XDG_DATA_HOME", home.join("user/data"))
+        .env("PSCAT_NO_CHECKOUT", "1")
+        .env_remove("PSCAT_ROOT")
+        .env_remove("PSCAT_LIB")
+        .env_remove("APPDATA")
+        .stdin(Stdio::null())
+        .output()
+        .expect("spawn pscat");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{err}");
+    assert_eq!(err.matches("to-stderr").count(), 1, "{err}");
+    assert_eq!(err.matches("/Bangers is in").count(), 1, "{err}");
+    assert_eq!(err.matches("/CourierPrime is in").count(), 1, "{err}");
 }

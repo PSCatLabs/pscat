@@ -15,6 +15,12 @@
 //! expensive terrain) no longer waits on the one thread that drew the
 //! expensive strip, and a slow efficiency core holds up less of the page.
 //!
+//! When the caller knows where the cost is, `--band-cuts` (#869) sets the
+//! band edges instead, as fractions of the page height from the top:
+//! thin bands where rows are expensive, tall ones where they are cheap, so
+//! the bands cost about the same. Equal-height bands can't get under the
+//! cost of the hottest one, however they are queued.
+//!
 //! Before the program runs, userdict holds `/BandIndex` (0 is the top band),
 //! `/BandCount` and `/BandBBox [llx lly urx ury]`, the band's area in default
 //! user space: the queued band's, not the thread's. A program that knows
@@ -28,7 +34,10 @@
 //! PNG, anti-aliased edges across the seams included.
 //!
 //! Band `i` of `K` on a canvas `H` pixels tall owns rows
-//! `floor(i*H/K) .. floor((i+1)*H/K)`.
+//! `floor(i*H/K) .. floor((i+1)*H/K)`, or, with `--band-cuts`, the rows
+//! between its cuts, each rounded to the nearest device row. [`Plan`]
+//! holds the edges, and everything (the band's rows, `/BandBBox`, the
+//! stitch) reads them from there.
 //!
 //! Limits: `--max-steps` and `--max-time` apply to each band on its own (an
 //! unaware program takes as many steps in every band as in a single run, so
@@ -39,6 +48,12 @@
 //! it, so the partial page is the one a plain render leaves. `--max-memory` is one budget for the whole render:
 //! every band counts from one heap level, taken before the workers start,
 //! that leaves out one fresh interpreter per worker ([`MemoryBase`]).
+//!
+//! Output: only the top band writes stdout and stderr. The others capture
+//! their stdout and drop their stderr (`(%stderr)` files, `handleerror`),
+//! so an unaware program prints once. `findfont`'s stand-in notes from the
+//! other bands are printed at the end, each once, unless band 0 printed
+//! them already.
 
 use std::io::Write;
 use std::process::ExitCode;
@@ -99,6 +114,9 @@ fn check_options(options: &Options) -> Result<(), String> {
         // Every band runs the whole program, so each would write the file.
         return Err("--bands doesn't combine with --allow-write".to_string());
     }
+    if options.band_rows.is_some() && options.band_cuts.is_some() {
+        return Err("--band-rows and --band-cuts each choose the bands; give one".to_string());
+    }
     if options.png.is_none() {
         return Err("--bands needs --png".to_string());
     }
@@ -122,15 +140,46 @@ struct BandOutput {
     /// stops, so a runaway program is stopped after about one band's
     /// budget, not one per queued band.
     hit_limit: bool,
+    /// `findfont`'s stand-in notes, newline-joined.
+    font_notes: String,
 }
 
-/// How a render is cut up: `count` bands on a canvas `height` rows tall,
-/// run by `threads` workers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// How a render is cut up: bands on a canvas `height` rows tall, run by
+/// `threads` workers. Band `i` owns device rows `edges[i]..edges[i + 1]`.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Plan {
     pub threads: u32,
-    pub count: u32,
     pub height: u32,
+    edges: Vec<u32>,
+}
+
+impl Plan {
+    /// Bands of equal height (rows differ by at most one), as [`rows`] cuts them.
+    fn equal(threads: u32, height: u32, count: u32) -> Plan {
+        let count = count.clamp(1, height.max(1));
+        let mut edges: Vec<u32> = (0..count).map(|i| rows(i, count, height).0).collect();
+        edges.push(height);
+        Plan::with_edges(threads, height, edges)
+    }
+
+    fn with_edges(threads: u32, height: u32, edges: Vec<u32>) -> Plan {
+        let count = (edges.len() - 1) as u32;
+        Plan {
+            threads: threads.min(count).max(1),
+            height,
+            edges,
+        }
+    }
+
+    /// How many bands there are (`/BandCount`).
+    pub fn count(&self) -> u32 {
+        (self.edges.len() - 1) as u32
+    }
+
+    /// The device rows band `index` owns: `top..bottom`.
+    pub fn rows(&self, index: u32) -> (u32, u32) {
+        (self.edges[index as usize], self.edges[index as usize + 1])
+    }
 }
 
 /// The split `--bands threads` uses when `--band-rows` doesn't choose one
@@ -142,13 +191,49 @@ pub fn plan(threads: u32, height: u32, band_rows: Option<u32>) -> Plan {
         Some(r) => height.div_ceil(r.max(1)),
         None if threads <= 1 => 1,
         None => (threads * PER_THREAD).min(height / MIN_ROWS).max(threads),
+    };
+    Plan::equal(threads, height, count)
+}
+
+/// `--band-cuts`' split: a band edge at each cut, a fraction of the page
+/// height from the top, rounded to the nearest device row. Fails if a cut
+/// rounds to the top or bottom edge, or onto the row of the one before.
+pub fn plan_cuts(threads: u32, height: u32, cuts: &[f64]) -> Result<Plan, String> {
+    let mut edges = vec![0];
+    for &cut in cuts {
+        let row = (cut * f64::from(height)).round() as u32;
+        let prev = *edges.last().unwrap_or(&0);
+        if row == 0 || row >= height || row <= prev {
+            return Err(format!(
+                "--band-cuts: the cut at {cut} falls on device row {row} of {height}, \
+                 leaving an empty band; use fewer or farther-apart cuts"
+            ));
+        }
+        edges.push(row);
     }
-    .clamp(1, height.max(1));
-    Plan {
-        threads: threads.min(count).max(1),
-        count,
-        height,
+    edges.push(height);
+    Ok(Plan::with_edges(threads, height, edges))
+}
+
+/// `--band-cuts F1,F2,...`'s value: fractions of the page height from the
+/// top, each strictly between 0 and 1, in increasing order.
+pub fn parse_cuts(list: &str) -> Result<Vec<f64>, String> {
+    let bad = || {
+        format!(
+            "invalid --band-cuts value: {list} (expected increasing fractions of the page \
+             height between 0 and 1, comma-separated, e.g. 0.4,0.45,0.5)"
+        )
+    };
+    let cuts: Vec<f64> = list
+        .split(',')
+        .map(|c| c.trim().parse::<f64>().map_err(|_| bad()))
+        .collect::<Result<_, _>>()?;
+    let in_range = cuts.iter().all(|c| *c > 0.0 && *c < 1.0);
+    let increasing = cuts.windows(2).all(|w| w[0] < w[1]);
+    if cuts.is_empty() || !in_range || !increasing {
+        return Err(bad());
     }
+    Ok(cuts)
 }
 
 /// Bands per thread in the default split.
@@ -199,13 +284,22 @@ pub fn run(options: &Options, threads: u32) -> ExitCode {
     let per_band = pscat::memtrack::live_bytes().saturating_sub(before);
     let (width, height) = (probe.gfx().pixmap.width(), probe.gfx().pixmap.height());
     drop(probe);
-    if options.band_rows.is_none() && threads > height {
+    if options.band_rows.is_none() && options.band_cuts.is_none() && threads > height {
         eprintln!("pscat: --bands {threads} is more bands than the page has pixel rows ({height})");
         return ExitCode::FAILURE;
     }
-    let plan = plan(threads, height, options.band_rows);
+    let plan = match &options.band_cuts {
+        Some(cuts) => match plan_cuts(threads, height, cuts) {
+            Ok(p) => p,
+            Err(msg) => {
+                eprintln!("pscat: {msg}");
+                return ExitCode::FAILURE;
+            }
+        },
+        None => plan(threads, height, options.band_rows),
+    };
 
-    let outputs = match render(options, &source, plan, width, per_band) {
+    let outputs = match render(options, &source, &plan, width, per_band) {
         Ok(o) => o,
         Err(msg) => {
             eprintln!("pscat: {msg}");
@@ -218,11 +312,12 @@ pub fn run(options: &Options, threads: u32) -> ExitCode {
         .enumerate()
         .find_map(|(i, o)| o.as_ref()?.error.as_ref().map(|e| (i, e)))
     {
-        eprintln!("pscat: band {}/{} failed:", i + 1, plan.count);
+        eprintln!("pscat: band {}/{} failed:", i + 1, plan.count());
         eprintln!("{report}");
         failed = true;
     }
-    let pages = match stitch(&outputs, width, height, options.transparent) {
+    print_font_notes(&outputs);
+    let pages = match stitch(&outputs, &plan, width, options.transparent) {
         Ok(p) => p,
         Err(msg) => {
             eprintln!("pscat: {msg}");
@@ -238,6 +333,22 @@ pub fn run(options: &Options, threads: u32) -> ExitCode {
         ExitCode::FAILURE
     } else {
         ExitCode::SUCCESS
+    }
+}
+
+/// The stand-in notes the bands other than 0 found, each once, leaving out
+/// the ones band 0 printed as it ran. Their stderr is dropped, and a
+/// band-aware program can reach a font in some bands only.
+fn print_font_notes(outputs: &[Option<BandOutput>]) {
+    let mut seen = std::collections::HashSet::new();
+    let mut ran = outputs.iter().flatten();
+    if let Some(top) = ran.next() {
+        seen.extend(top.font_notes.lines());
+    }
+    for line in ran.flat_map(|o| o.font_notes.lines()) {
+        if seen.insert(line) {
+            eprintln!("{line}");
+        }
     }
 }
 
@@ -278,20 +389,20 @@ struct MemoryBase(usize);
 fn render(
     options: &Options,
     source: &[u8],
-    plan: Plan,
+    plan: &Plan,
     width: u32,
     per_band: usize,
 ) -> Result<Vec<Option<BandOutput>>, String> {
     let queue = Queue {
         next: AtomicU32::new(0),
         stop: AtomicBool::new(false),
-        count: plan.count,
+        count: plan.count(),
     };
     let base = MemoryBase(
         pscat::memtrack::live_bytes()
             .saturating_add(per_band.saturating_mul(plan.threads as usize)),
     );
-    let slots: Vec<Mutex<Option<BandOutput>>> = (0..plan.count).map(|_| Mutex::new(None)).collect();
+    let slots: Vec<Mutex<Option<BandOutput>>> = (0..plan.count()).map(|_| Mutex::new(None)).collect();
     let failure: Mutex<Option<String>> = Mutex::new(None);
     let fail = |msg: String| {
         queue.stop.store(true, Relaxed);
@@ -343,11 +454,11 @@ fn render(
                                 }
                             }
                             Ok(Err(msg)) => {
-                                fail(format!("band {}/{}: {msg}", index + 1, plan.count));
+                                fail(format!("band {}/{}: {msg}", index + 1, plan.count()));
                                 break;
                             }
                             Err(_) => {
-                                fail(format!("band {}/{} crashed", index + 1, plan.count));
+                                fail(format!("band {}/{} crashed", index + 1, plan.count()));
                                 break;
                             }
                         }
@@ -374,16 +485,16 @@ fn render(
     if !outputs.iter().flatten().any(|o| o.hit_limit)
         && let Some(i) = outputs.iter().position(Option::is_none)
     {
-        return Err(format!("band {}/{} produced nothing", i + 1, plan.count));
+        return Err(format!("band {}/{} produced nothing", i + 1, plan.count()));
     }
     Ok(outputs)
 }
 
 /// One band of a plan.
 #[derive(Clone, Copy)]
-struct Band {
+struct Band<'a> {
     index: u32,
-    plan: Plan,
+    plan: &'a Plan,
     width: u32,
 }
 
@@ -392,7 +503,7 @@ struct Band {
 fn run_band(
     options: &Options,
     source: &[u8],
-    band: Band,
+    band: Band<'_>,
     base: MemoryBase,
     queue: &Queue,
 ) -> Result<BandOutput, String> {
@@ -404,18 +515,20 @@ fn run_band(
         interp.gfx_mut().set_transparent_background();
     }
     let height = plan.height;
-    let (top, bottom) = rows(index, plan.count, height);
+    let (top, bottom) = plan.rows(index);
     interp.gfx_mut().set_band_rows(top, bottom);
-    // Only the top band's output reaches stdout; the others' is kept in a
-    // bounded buffer and dropped, so an unaware program prints once.
+    // Only the top band's output reaches stdout and stderr; the others'
+    // stdout is kept in a bounded buffer and dropped, and their stderr is
+    // dropped, so an unaware program prints once.
     if index > 0 {
         interp.capture_stdout();
+        interp.quiet_stderr();
     }
     let width_pt = width as f32 / scale;
     let user_y = |row: u32| (height - row) as f32 / scale;
     let preamble = format!(
         "/BandIndex {index} def /BandCount {} def /BandBBox [0 {} {} {}] def",
-        plan.count,
+        plan.count(),
         user_y(bottom),
         width_pt,
         user_y(top)
@@ -479,6 +592,7 @@ fn run_band(
         rows,
         error,
         hit_limit,
+        font_notes: interp.font_warnings().to_string(),
     })
 }
 
@@ -487,11 +601,11 @@ fn run_band(
 /// its rows blank: the page background, white or `transparent`.
 fn stitch(
     outputs: &[Option<BandOutput>],
+    plan: &Plan,
     width: u32,
-    height: u32,
     transparent: bool,
 ) -> Result<Vec<Pixmap>, String> {
-    let count = outputs.len() as u32;
+    let (count, height) = (plan.count(), plan.height);
     let ran = || {
         outputs
             .iter()
@@ -516,7 +630,7 @@ fn stitch(
             }
             let data = page.data_mut();
             for (i, out) in ran() {
-                let (top, bottom) = rows(i as u32, count, height);
+                let (top, bottom) = plan.rows(i as u32);
                 let span = top as usize * row_bytes..bottom as usize * row_bytes;
                 let band = &out.rows[k];
                 if band.len() != span.len() {
@@ -553,7 +667,7 @@ mod tests {
     fn the_default_plan_queues_two_bands_a_thread() {
         let p = |threads, height, rows| {
             let p = plan(threads, height, rows);
-            (p.threads, p.count)
+            (p.threads, p.count())
         };
         assert_eq!(p(1, 200, None), (1, 1), "one thread, nothing to balance");
         assert_eq!(p(10, 200, None), (10, 20));
@@ -566,6 +680,43 @@ mod tests {
         assert_eq!(p(4, 200, Some(60)), (4, 4));
         assert_eq!(p(4, 200, Some(500)), (1, 1));
         assert_eq!(p(1, 200, Some(10)), (1, 20));
+    }
+
+    #[test]
+    fn the_equal_plan_uses_the_row_formula() {
+        for (threads, height, rows_) in [(4, 792, None), (10, 200, None), (3, 101, Some(7))] {
+            let p = plan(threads, height, rows_);
+            for i in 0..p.count() {
+                assert_eq!(p.rows(i), rows(i, p.count(), height));
+            }
+        }
+    }
+
+    #[test]
+    fn band_cuts_round_to_rows_and_tile_the_canvas() {
+        let p = plan_cuts(4, 200, &[0.41, 0.455, 0.5]).unwrap();
+        assert_eq!(p.count(), 4);
+        assert_eq!(p.threads, 4);
+        let edges: Vec<_> = (0..4).map(|i| p.rows(i)).collect();
+        assert_eq!(edges, [(0, 82), (82, 91), (91, 100), (100, 200)]);
+        // More bands than threads: the queue takes them in turn.
+        let p = plan_cuts(2, 200, &[0.1, 0.2, 0.3, 0.4]).unwrap();
+        assert_eq!((p.threads, p.count()), (2, 5));
+        // Fewer bands than threads: no idle workers.
+        let p = plan_cuts(8, 200, &[0.5]).unwrap();
+        assert_eq!((p.threads, p.count()), (2, 2));
+        // A cut that rounds onto an edge or onto the cut before is refused.
+        assert!(plan_cuts(4, 200, &[0.001]).is_err());
+        assert!(plan_cuts(4, 200, &[0.999]).is_err());
+        assert!(plan_cuts(4, 200, &[0.5, 0.501]).is_err());
+    }
+
+    #[test]
+    fn band_cuts_parse() {
+        assert_eq!(parse_cuts("0.4,0.45, 0.5"), Ok(vec![0.4, 0.45, 0.5]));
+        for bad in ["", "0", "1", "0.5,0.4", "0.4,0.4", "-0.1", "half", "0.2,,0.3", "NaN"] {
+            assert!(parse_cuts(bad).is_err(), "{bad:?}");
+        }
     }
 
     #[test]

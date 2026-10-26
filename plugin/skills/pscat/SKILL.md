@@ -36,7 +36,8 @@ Multi-page documents number their pages: `out.png` → `out-001.png`,
 
 `pscat --bands N --png out.png f.ps` (N is 1..64) renders on N threads, which
 take horizontal bands (2 per thread by default; `--band-rows R` for R-row
-bands) from a queue, and gives the same PNG bytes as a plain render. It is only
+bands; `--band-cuts 0.4,0.45,0.5` for edges at those fractions of the height,
+thin where rows cost most) from a queue, and gives the same PNG bytes as a plain render. It is only
 faster for a program that reads `/BandBBox [llx lly urx ury]` (also `/BandIndex`,
 0 = top, and `/BandCount`) and skips work outside it, e.g. a costly `colorimage`
 procedure that computes only those rows plus a margin: the `psart` skill has a

@@ -1253,7 +1253,14 @@ renders eight examples in both and compares block-downsampled output).
   (`MemoryBase`), which replaced #736's two start gates. The tracking
   allocator batches its count per thread (`memtrack.rs`, 64 KiB): a shared
   atomic per allocation cost band threads ~2.8x CPU. Don't put a per-allocation
-  shared atomic back. See `notes/844-bands-work-queue.md`.
+  shared atomic back. See `notes/844-bands-work-queue.md`. Since #869 a
+  `Plan` holds the band edges (`Plan::rows`), and `--band-cuts` sets them as
+  fractions of the height; everything (the band rows, `/BandBBox`, the stitch)
+  must read them from the plan, never re-derive them from the formula. Bands
+  above 0 also drop stderr (`Interp::quiet_stderr`), and their font notes are
+  printed once at the end. Backup copies of the slowest band were tried and
+  dropped: slower and 40% more CPU on a loaded machine, and a copy can't get
+  under the hot band's own cost (`notes/869-bands-tail-gap.md`).
 - **`--profile` (#737).** Per-procedure call counts and inclusive/exclusive time
   on stderr (`src/profile.rs`, a `Profiler` on `Interp`). `execute_resolved` takes
   the name a body was reached through (`via`, `NO_NAME` for `exec`/`if`) and, with

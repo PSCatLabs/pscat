@@ -115,6 +115,9 @@ struct Options {
     /// `--band-rows R` (issue #844): the height of each queued band in
     /// device rows, instead of `bands.rs`'s default split.
     band_rows: Option<u32>,
+    /// `--band-cuts F1,F2,...` (issue #869): band edges as fractions of the
+    /// page height from the top, instead of bands of equal height.
+    band_cuts: Option<Vec<f64>>,
     /// `--profile` (issue #737): a headless run reports, on stderr, each
     /// named procedure's call count and inclusive and exclusive time.
     profile: bool,
@@ -170,6 +173,7 @@ impl Options {
             exit_with_parent: None,
             bands: None,
             band_rows: None,
+            band_cuts: None,
             profile: false,
             profile_top: None,
             profile_json: false,
@@ -342,6 +346,10 @@ fn main() -> ExitCode {
     }
     if options.band_rows.is_some() {
         eprintln!("pscat: --band-rows needs --bands");
+        return ExitCode::FAILURE;
+    }
+    if options.band_cuts.is_some() {
+        eprintln!("pscat: --band-cuts needs --bands");
         return ExitCode::FAILURE;
     }
 
@@ -1738,6 +1746,10 @@ fn parse_args() -> Result<Options, String> {
                 let n = args.next().ok_or("missing value after --band-rows")?;
                 options.band_rows = Some(bands::parse_rows(&n)?);
             }
+            "--band-cuts" => {
+                let list = args.next().ok_or("missing value after --band-cuts")?;
+                options.band_cuts = Some(bands::parse_cuts(&list)?);
+            }
             "--read-root" => {
                 let dir = args.next().ok_or("missing directory after --read-root")?;
                 options.read_roots.get_or_insert_with(Vec::new).push(dir);
@@ -1939,6 +1951,9 @@ fn print_usage() {
     println!("                      to hit a limit stops the queue");
     println!("      --band-rows R   with --bands, cut the page into bands about R device rows");
     println!("                      tall instead (ceil(height/R) bands of equal height)");
+    println!("      --band-cuts F1,F2,...  with --bands, put the band edges at these fractions");
+    println!("                      of the page height, from the top (e.g. 0.4,0.45,0.5):");
+    println!("                      thin bands where rows are costly, so bands cost the same");
     println!("      --read-root DIR let the program read files only inside DIR (repeatable):");
     println!("                      `(f) (r) file`, run, readreals, filenameforall. Reads are");
     println!("                      open by default; with this, paths outside, `..` and");
