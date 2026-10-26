@@ -12,6 +12,7 @@
 
 use crate::error::PsError;
 use crate::file::FileHandle;
+use crate::fmath;
 use crate::gfx::{Gfx, IndexedTable};
 use crate::object::Object;
 
@@ -361,7 +362,7 @@ impl ImageCtx {
     fn composite(&self, st: &ImageCtx) -> Option<Composite> {
         let inv = invert6(self.matrix)?;
         // Samples per user unit along each axis, image vs stencil.
-        let axes = |m: &[f64; 6]| (m[0].hypot(m[1]), m[2].hypot(m[3]));
+        let axes = |m: &[f64; 6]| (fmath::hypot(m[0], m[1]), fmath::hypot(m[2], m[3]));
         let ((dx, dy), (sx, sy)) = (axes(&self.matrix), axes(&st.matrix));
         let ratio = |s: f64, d: f64| if d > 0.0 { (s / d - 1e-6).ceil() } else { 1.0 };
         let mut want = ratio(sx, dx)
