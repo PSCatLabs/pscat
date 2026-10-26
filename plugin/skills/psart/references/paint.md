@@ -217,8 +217,9 @@ Which tool to pick:
   light (`/Reach` how deep, `/Feather` how graded). Paint the body over the
   whole region first, then a half-light (`/Reach 0.4`) and a core
   (`/Reach 0.15`, smaller circles) in loads close to the body's value; the
-  shadow side is `/Light` turned round. Specimen:
-  `docs/dev/design/paintkit_massing_demo.png`.
+  shadow side is `/Light` turned round. Specimen: the
+  [massing demo](https://github.com/PSCatLabs/pscat/blob/main/docs/dev/design/paintkit_massing_demo.png)
+  in the pscat repository.
 
 - **Brushed edges** — `pkbrushedge` (and the motion under it, `pkfeather`).
   A filled mass (a meadow, a bank, a pond) has a ruled vector edge; fill it,

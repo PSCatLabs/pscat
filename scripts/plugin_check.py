@@ -28,6 +28,11 @@ Claude's schema; Codex has no validator. This checks what neither does:
   server's `command` is a bare executable name found on the user's PATH
   (`pscat-mcp`), and its args and hook commands use no `./`, `../` or
   absolute paths except under `${CLAUDE_PLUGIN_ROOT}` / `${PLUGIN_ROOT}`;
+- no plugin Markdown file (README, SKILL.md, references) writes the path of
+  a bundled image or font in backticks or a code block, or any
+  slash-containing image or font path (which points outside the bundle).
+  The directory's pre-submission checklist holds a version for review
+  otherwise (#848). A bare output name such as `out.png` is allowed;
 - the hooks both tools discover by default (`hooks/hooks.json`) follow the
   same path rule;
 - Codex: the marketplace entry has `policy.installation`,
@@ -44,6 +49,10 @@ import sys
 import tomllib
 
 COMPONENT_KEYS = ("skills", "commands", "agents", "outputStyles", "workflows")
+ASSET_EXT = "png|jpe?g|gif|webp|svg|ttf|otf|ttc|woff2?"
+ASSET_TOKEN = re.compile(r"[^\s`'\"()<>=,;|\[\]{}]+\.(?:%s)(?![\w.-])" % ASSET_EXT, re.I)
+INLINE_CODE = re.compile(r"(`+)(.+?)(?<!`)\1(?!`)")
+FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
 PATHY = re.compile(r"(^|[\s'\"=])(\.\.?/|/(?!dev/null)[A-Za-z])")
 
 
@@ -93,6 +102,59 @@ def _check_skill(skill_dir, rel, errors):
                       f"{os.path.basename(skill_dir)!r}")
     if not front.get("description", "").strip():
         errors.append(f"{rel}/SKILL.md: no description")
+
+
+def _code_lines(text):
+    """Yield (line number, code text) for each fenced-block line and each inline
+    backtick span. A 4-space indented block is not treated as code: list
+    continuation lines in the skills are indented that deep."""
+    fence = None
+    for n, line in enumerate(text.splitlines(), 1):
+        m = FENCE.match(line)
+        if fence:
+            if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence):
+                fence = None
+            else:
+                yield n, line
+        elif m:
+            fence = m.group(1)
+        else:
+            for span in INLINE_CODE.finditer(line):
+                yield n, span.group(2)
+
+
+def _check_asset_paths(root, plugin_dir, errors):
+    """The directory checklist (https://claude.com/docs/plugins/pre-submission-checklist,
+    "Files in the plugin folder") says: "To show a bundled image in the README, use
+    Markdown image syntax. Don't refer to bundled images or fonts from commands,
+    hooks, or scripts, or write their paths in backticks or a code block." A bare
+    output name (`out.png`) is not a bundled file and passes. A token that names a
+    bundled file (by path or basename), or has a `/` (a repo or absolute path that
+    is not in the bundle), is reported (#848)."""
+    ext = re.compile(r"\.(?:%s)$" % ASSET_EXT, re.I)
+    bundled = set()
+    for dirpath, _, filenames in os.walk(plugin_dir):
+        bundled.update(f.lower() for f in filenames if ext.search(f))
+    for dirpath, _, filenames in sorted(os.walk(plugin_dir)):
+        for name in sorted(filenames):
+            if not name.endswith(".md"):
+                continue
+            path = os.path.join(dirpath, name)
+            with open(path, encoding="utf-8") as f:
+                text = f.read()
+            for n, code in _code_lines(text):
+                for tok in ASSET_TOKEN.findall(code):
+                    if "://" in tok:
+                        continue
+                    base = os.path.basename(tok).lower()
+                    if "/" in tok or base in bundled:
+                        why = ("names a bundled file" if base in bundled
+                               else "is a path outside the bundle")
+                        errors.append(
+                            f"{os.path.relpath(path, root)}:{n}: `{tok}` {why} in "
+                            "backticks or a code block; the directory checklist holds the "
+                            "version for review (show a bundled image with Markdown image "
+                            "syntax, link a repo file by URL)")
 
 
 def _check_no_symlinks(root, plugin_dir, errors):
@@ -189,6 +251,7 @@ def check_plugin(root, plugin_dir, entry, version, errors):
                 errors.append(f"{rel}: {key} path {p!r} is missing or escapes")
 
     _check_skills(plugin_dir, rel, errors)
+    _check_asset_paths(root, plugin_dir, errors)
 
     servers = manifest.get("mcpServers") or {}
     if os.path.exists(os.path.join(plugin_dir, ".mcp.json")):
