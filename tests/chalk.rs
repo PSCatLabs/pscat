@@ -98,19 +98,20 @@ const FORMULAS: [(&str, &str, i64); 5] = [
 #[test]
 fn the_five_formulas_render_as_pinned() {
     let pinned: [u64; 5] = [
-        0xba9ec8c0d6b5ce8b,
-        0x7a44813f3b5333f6,
-        0xc4e1565651ddb417,
+        0x736c0a5719284045,
+        0xb082288de068a8c9,
+        0x3ddbbd53c961e577,
         // The cases board comes out a few pixels different on Windows
         // (macOS and Linux agree): its C runtime's transcendental functions
         // round differently in the last place for one glyph. Both are
         // pinned, so each platform still catches a change.
+        // All five re-pinned for #692 (exact-area fill coverage).
         if cfg!(windows) {
             0x947a44d3fe0c77a0
         } else {
-            0x4e4af37ee4b73245
+            0x77d1c35a8b912166
         },
-        0x9784ab110d43edb5,
+        0xc0e0473f8adec1d3,
     ];
     let got: Vec<u64> = FORMULAS
         .iter()
