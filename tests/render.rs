@@ -770,3 +770,78 @@ fn shfill_honors_a_domain_span_far_smaller_than_the_old_epsilon() {
     assert_eq!(pixel(&it, 10, 50), (255, 0, 0), "first leg: red");
     assert_eq!(pixel(&it, 90, 50), (0, 0, 255), "second leg: blue");
 }
+
+/// Mean of the red channel over the whole canvas.
+fn mean_red(it: &Interp) -> f64 {
+    let px = it.gfx().pixmap.pixels();
+    px.iter().map(|p| p.red() as f64).sum::<f64>() / px.len() as f64
+}
+
+/// Issue #692: a filled shape thinner than a pixel keeps a coverage
+/// proportional to its area. tiny-skia's 4x4 supersampler dropped rules
+/// under a quarter pixel and drew every rule from 0.25 to 0.5 px the same
+/// gray. Rules every 4 px, so no two share a pixel.
+#[test]
+fn thin_fills_cover_their_area() {
+    for &(h, op) in &[
+        (0.05, "rectfill"),
+        (0.1, "rectfill"),
+        (0.2, "rectfill"),
+        (0.3, "rectfill"),
+        (0.45, "rectfill"),
+        (0.6, "rectfill"),
+        (0.3, "path"),
+        (0.3, "eopath"),
+    ] {
+        let body = match op {
+            "rectfill" => format!("0 exch 100 {h} rectfill"),
+            "path" => {
+                format!("0 exch moveto 100 0 rlineto 0 {h} rlineto -100 0 rlineto closepath fill")
+            }
+            _ => {
+                format!("0 exch moveto 100 0 rlineto 0 {h} rlineto -100 0 rlineto closepath eofill")
+            }
+        };
+        let it = render(&format!("0 setgray 0.37 4 99 {{ {body} }} for"));
+        let expected = 255.0 * (1.0 - h / 4.0);
+        let got = mean_red(&it);
+        assert!(
+            (got - expected).abs() < 1.0,
+            "{op} h={h}: mean {got:.2}, area says {expected:.2}"
+        );
+    }
+}
+
+/// The same thin rules under a clip: coverage is the rule's area times
+/// the clip's, and nothing outside the clip is touched.
+#[test]
+fn thin_fills_respect_the_clip() {
+    let it = render("0 0 50 100 rectclip 0 setgray 0.37 4 99 { 0 exch 100 0.3 rectfill } for");
+    let px = it.gfx().pixmap.pixels();
+    let (mut left, mut right) = (0.0, 0.0);
+    for (i, p) in px.iter().enumerate() {
+        if i % 100 < 50 {
+            left += p.red() as f64;
+        } else {
+            right += p.red() as f64;
+        }
+    }
+    let n = (px.len() / 2) as f64;
+    assert!(
+        (left / n - 255.0 * (1.0 - 0.3 / 4.0)).abs() < 1.0,
+        "{}",
+        left / n
+    );
+    assert_eq!(right / n, 255.0);
+}
+
+/// Even-odd and nonzero still differ on a self-overlapping path.
+#[test]
+fn fill_rules_still_differ() {
+    let ring = "newpath 50 50 40 0 360 arc 50 50 20 0 360 arc";
+    let nz = render(&format!("{ring} fill"));
+    let eo = render(&format!("{ring} eofill"));
+    assert_eq!(pixel(&nz, 50, 50), BLACK);
+    assert_eq!(pixel(&eo, 50, 50), WHITE);
+    assert_eq!(pixel(&eo, 50, 20), BLACK);
+}

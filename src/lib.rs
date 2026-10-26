@@ -95,6 +95,7 @@ pub mod chalk;
 pub(crate) mod clock;
 #[doc(hidden)]
 pub mod contact_sheet;
+pub(crate) mod coverage;
 #[doc(hidden)]
 pub mod encodings;
 #[doc(hidden)]
