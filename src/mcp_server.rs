@@ -3338,6 +3338,22 @@ mod tests {
     }
 
     #[test]
+    fn capped_offending_name_still_parses() {
+        // The interpreter cuts a pathological name to 512 bytes plus a
+        // marker with no `; ` or ` ]%%`, so the fields stay separable (#745).
+        let mut it = pscat::Interp::new();
+        let e = it.run_str(&"n".repeat(600)).unwrap_err();
+        let line = it.error_report(&e);
+        let f = ps_error_fields(&line).unwrap();
+        assert_eq!(f["ps_error"], "undefined");
+        assert_eq!(
+            f["offending_command"],
+            format!("{} ... truncated", "n".repeat(512))
+        );
+        assert_eq!(f["line"], 1);
+    }
+
+    #[test]
     fn limit_error_line_names_the_limit() {
         let f = ps_error_fields(
             "%%[ Error: limitexceeded (steps); OffendingCommand: loop; Line: 1 ]%%",

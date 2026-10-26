@@ -1769,10 +1769,17 @@ renders eight examples in both and compares block-downsampled output).
   `pscat.js` exposes the buffer as `ps.output`, which the playground
   shows. A new printing operator must use it too, or its output vanishes
   in the browser.
-- **The `--pstack-on-error` CLI dump is bounded (#703)**: it goes through
-  `object::stack_repr_bounded` with `STACK_DUMP_LIMITS`. `repr()`, `==` and
-  the `pstack` operator stay unbounded, so a program's own output can still
-  hit MCP's 4 MiB cap.
+- **Printed stack and operand output is bounded (#703, #745)**: one writer,
+  `Object::write_repr` in src/object.rs, spells every `==`-syntax value, so
+  `repr()` (unbounded but for depth 32, `UNBOUNDED_LIMITS`), `==` and
+  `pstack` (`OPERATOR_LIMITS`: depth 32, 1024 elements, 4096 bytes per
+  string/name, 16 KiB per operand; `OPERATOR_STACK_BYTES` 32 KiB across the
+  stack, then one `... truncated` line) and the `--pstack-on-error` dump
+  (`stack_repr_bounded`, `STACK_DUMP_LIMITS`) cannot drift. `stack` cuts
+  strings via `text_bounded`. `=` and `print` are deliberately not bounded
+  (a program's own text output). The undefined/offending name in an error
+  line is cut to `ERROR_NAME_LIMIT` (512) by `cap_text`. `cvs` and
+  `format_real` digits are untouched. Notes: `notes/745-bound-operator-output.md`.
 - **The npm package (`npm/`, #566) is that wasm build plus a JS API.**
   `scripts/build_npm.sh` runs `build_wasm.sh` and copies `web/pscat.js` in
   as `core.js`, so a change to the C ABI (`src/wasm.rs`) or to

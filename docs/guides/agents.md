@@ -234,7 +234,10 @@ for a long time (an enormous fill, a read of a device file) is outside them;
 trusted library code on escaped text and is bounded by `--timeout` and
 `--max-pixels`.
 
-Program output is capped at 4 MiB per stream (`output_too_large`). A failed
+Program output is capped at 4 MiB per stream (`output_too_large`). `==`, `pstack`
+and `stack` truncate their own output well below that (1024 elements per array,
+4096 bytes per string, 16 KiB per operand, 32 KiB for a whole stack, ending in
+`... truncated`), and an error's `offending_command` is cut at 512 bytes. A failed
 call is an MCP tool error (`isError: true`) whose text says what happened,
 with the same facts as `structuredContent.error` (`kind`, `message`, and for
 PostScript errors `ps_error`, `offending_command`, `line`; a program stopped by
