@@ -77,9 +77,26 @@ Found by reading the code while writing the targets, then reproduced:
   `fonts/` (`pyftsubset`) in the working corpus: Liberation Sans, TeX Gyre
   Pagella (CFF), Caveat, Noto Sans KR, Oswald, Noto Sans Thai, EB Garamond.
 
-**Local runs** (7 minutes each, release build with ASan and debug
-assertions, `-timeout=10 -rss_limit_mb=2048 -detect_leaks=0`): see the PR
-body for the final table.
+**Local runs** (aarch64 macOS, release build with ASan, debug assertions and
+overflow checks, `-timeout=10 -rss_limit_mb=2048 -detect_leaks=0`; working
+corpus seeded from the committed seeds, `truetype` also from `pyftsubset`
+subsets of seven repo fonts, `-max_len=262144`). The last run of each target,
+after every fix below, found nothing:
+
+| target | time | runs | exec/s | cov (edges) | ft | corpus | peak RSS |
+|---|---|---|---|---|---|---|---|
+| `truetype` | 8 min | 964,836 | 2,005 | 5,751 | 26,223 | 1,991 | 749 MB |
+| `type1_charstring` | 7 min | 13,359,989 | 31,733 | 399 | 2,181 | 517 | 430 MB |
+| `type1_font` | 7 min | 66,131 (five targets shared the CPU) | 155 | 4,433 | 13,610 | 1,112 | 542 MB |
+| `filters` | 7 min | 475,534 | 1,129 | 3,833 | 15,196 | 1,746 | 717 MB |
+| `image` | 7 min | 92,678 | 220 | 7,979 | 30,757 | 1,793 | 1,123 MB |
+
+Earlier runs of the same targets (about two more 7-minute runs each, on
+older builds) are what found items 1 to 4 above; `type1_font` ran 354,270
+inputs at 841/s (cov 4,189) before the CPU was shared. `image` peaks at 1.1 to
+1.7 GB RSS, mostly AddressSanitizer's quarantine of the 256 MB memory-limit
+allocations the `big` recipes make; the workflow's `-rss_limit_mb=2048` is
+close to it, so watch the first scheduled run.
 
 **Not done / follow-ups**: the `ttf-parser` and `zune-jpeg` panics above
 are worth reporting upstream; an `.pfb` reader (no Type 1 binary container
