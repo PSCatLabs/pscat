@@ -87,8 +87,11 @@ byte-identical.
   them count against a shared `--max-memory` budget.
 - **`--max-memory`:** one budget for the whole render. The base is the heap
   before the workers start, plus one fresh interpreter (measured from the
-  canvas-size probe) per worker, and each band's `set_limits` gets the budget
-  rebased onto that shared base (`MemoryBase::rebase`). This replaces #736's
+  canvas-size probe) per worker, and every band counts from it
+  (`Interp::set_memory_base`, new, called after `set_limits`). A first
+  version rebased each band's budget from a second heap reading instead,
+  which another band's allocation between the two readings could slip past
+  (Codex round 1). This replaces #736's
   two start gates: they existed only so that per-band bases taken at
   different times counted each other's canvases (gate 1) and allocations
   (gate 2, Codex round 2). With bands starting at any time on a queue, a

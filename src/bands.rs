@@ -272,27 +272,6 @@ impl Queue {
 #[derive(Clone, Copy)]
 struct MemoryBase(usize);
 
-impl MemoryBase {
-    /// `limits` rebased for an interpreter whose `set_limits` reads the heap
-    /// now: its own base is the heap now, so its budget is the shared
-    /// budget less what the process has grown past the shared base since
-    /// (or plus what is still unused of the workers' allowance).
-    fn rebase(self, limits: pscat::Limits) -> pscat::Limits {
-        let Some(max) = limits.max_memory else {
-            return limits;
-        };
-        let now = pscat::memtrack::live_bytes();
-        let max = if now >= self.0 {
-            max.saturating_sub(now - self.0)
-        } else {
-            max.saturating_add(self.0 - now)
-        };
-        let mut limits = limits;
-        limits.max_memory = Some(max);
-        limits
-    }
-}
-
 /// Run the plan's bands on its worker threads and collect what each band
 /// produced, in band order: `None` for a band never run because another
 /// hit a limit.
@@ -449,8 +428,9 @@ fn run_band(
     // plain render. Memory is counted from the base all bands share, so the
     // bands running at once stay within one budget.
     interp
-        .set_limits(base.rebase(options.limits))
+        .set_limits(options.limits)
         .map_err(|e| format!("limits: {e}"))?;
+    interp.set_memory_base(base.0);
     // `--read-root`/`--confine-reads` (#763) bind every band, as they bind a
     // plain render.
     if let Some(dirs) = &options.read_roots {

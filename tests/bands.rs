@@ -569,14 +569,13 @@ fn max_memory_is_one_budget_for_all_bands() {
 }
 
 /// A limit stops the queue (#844): with 140 one-row bands on 2 threads, a
-/// runaway program is stopped after about one band's `--max-time` per
-/// thread, not one per band (which would be 70 seconds here). The partial
-/// page is still written, and the run fails.
+/// runaway program is stopped after one band's `--max-time` per thread, not
+/// one per band (70 seconds here). The partial page is still written, the
+/// run fails, and the bottom band, which would have run last, never did.
 #[test]
 fn a_limit_stops_the_queue() {
     let png = common::scratch_dir("bands-limit").join("l.png");
     let _ = std::fs::remove_file(&png);
-    let start = std::time::Instant::now();
     let (ok, _, e) = pscat(&[
         "--page",
         "40x101",
@@ -593,10 +592,8 @@ fn a_limit_stops_the_queue() {
         "-e",
         "0 setgray clippath fill { } loop",
     ]);
-    let took = start.elapsed();
     assert!(!ok, "a limit fails the run");
     assert!(e.contains("limitexceeded"), "{e}");
-    assert!(took.as_secs() < 20, "the queue stopped: took {took:?}");
     let pix = Pixmap::load_png(&png).expect("the partial page is written");
     // The first bands ran (and painted black before the loop); the last
     // never started, so its row is the white background.

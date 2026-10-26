@@ -525,6 +525,16 @@ impl Interp {
         Ok(())
     }
 
+    /// Count the memory cap's heap growth from `base` bytes (a
+    /// [`memtrack::live_bytes`](crate::memtrack::live_bytes) level) instead
+    /// of the level when [`set_limits`](Self::set_limits) ran. For a host
+    /// that runs several interpreters under one budget: `pscat --bands`
+    /// gives every band the same base, taken before any band starts (#844).
+    /// Call it after `set_limits`, which resets the base.
+    pub fn set_memory_base(&mut self, base: usize) {
+        self.mem_base = base;
+    }
+
     /// The limits in force ([`Limits::none`] by default).
     pub fn limits(&self) -> Limits {
         self.limits
