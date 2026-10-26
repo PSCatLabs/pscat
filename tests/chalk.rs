@@ -98,9 +98,9 @@ const FORMULAS: [(&str, &str, i64); 5] = [
 #[test]
 fn the_five_formulas_render_as_pinned() {
     let pinned: [u64; 5] = [
-        0xba9ec8c0d6b5ce8b,
-        0x7a44813f3b5333f6,
-        0xc4e1565651ddb417,
+        0xb9c0a5c1f1bfc72d,
+        0x658dcdf1855675c1,
+        0x67d8fc5d47c67adb,
         // The cases board comes out a few pixels different on Windows
         // (macOS and Linux agree): its C runtime's transcendental functions
         // round differently in the last place for one glyph. Both are
@@ -108,9 +108,9 @@ fn the_five_formulas_render_as_pinned() {
         if cfg!(windows) {
             0x947a44d3fe0c77a0
         } else {
-            0x4e4af37ee4b73245
+            0x0887ec79ab468cc7
         },
-        0x9784ab110d43edb5,
+        0x552c80b30e7a9af2,
     ];
     let got: Vec<u64> = FORMULAS
         .iter()
@@ -272,6 +272,82 @@ fn the_block_is_fitted_inside_the_margins() {
         v[2] <= f64::from(cfg.width) - cfg.margin + 0.5,
         "right edge {} past the margin",
         v[2]
+    );
+}
+
+/// The ghost writing never touches the formula (issue #698): the driver is
+/// run up to the board, which is when the ghosts are placed, and each
+/// placed ghost's real path box is compared with the formula's box. The
+/// board keeps a margin of 0.3 of the writing size around the maths, so a
+/// faint fragment can never pass for a superscript. Many seeds on formulas
+/// that fill the board and ones that do not; no render.
+#[test]
+fn ghost_writing_keeps_clear_of_the_formula() {
+    let cases: [(&str, &str, u32, u32, f64); 5] = [
+        ("x = 1", "x = 1", 800, 400, 64.0),
+        ("F = ma", "F = ma", 800, 400, 64.0),
+        ("f(x)", r"f(x) = \int_0^1 g(t)\,dt", 800, 400, 64.0),
+        (
+            "quadratic",
+            r"x = \frac{-b \pm \sqrt{b^2-4ac}}{2a}",
+            600,
+            300,
+            64.0,
+        ),
+        ("small", r"e^{i\pi} + 1 = 0", 400, 200, 40.0),
+    ];
+    let mut placed_total = 0;
+    for (name, tex, w, h, size) in cases {
+        for seed in 1..=12 {
+            let mut cfg = small();
+            cfg.width = w;
+            cfg.height = h;
+            cfg.size = size;
+            cfg.seed = seed;
+            let d = chalk::driver(tex, &cfg).unwrap();
+            let end = d.source.find("dcboard\n").expect("the board line");
+            let cut = d.source[..end].rfind('\n').expect("a line before it") + 1;
+            let mut src = d.source[..cut].to_string();
+            src.push_str(
+                "ckdict begin
+                 cksize =
+                 gsave newpath cklines ckox ckoy ckopts mkalign pop pathbbox grestore
+                 4 { = } repeat
+                 ckgplaced {
+                   aload pop /ckgsd exch def /ckgsz exch def
+                   gsave newpath << /Size ckgsz /Seed ckgsd /Irregular 1.3 >> mkpath
+                   pathbbox grestore 4 { = } repeat
+                 } forall end",
+            );
+            let mut it = Interp::new();
+            it.capture_stdout();
+            it.run_str(&src)
+                .unwrap_or_else(|e| panic!("{name} {seed}: {}", it.error_report(&e)));
+            let v: Vec<f64> = String::from_utf8_lossy(it.captured_stdout())
+                .split_whitespace()
+                .map(|t| t.parse().unwrap())
+                .collect();
+            // the writing's path box, printed from the top of the stack down
+            let (cksize, f) = (v[0], [v[4], v[2], v[3], v[1]]);
+            for g in v[5..].chunks(4) {
+                // `=` printed the bbox from the top of the stack down
+                let (ury, urx, lly, llx) = (g[0], g[1], g[2], g[3]);
+                let gap_x = (f[0] - urx).max(llx - f[1]).max(0.0);
+                let gap_y = (f[2] - ury).max(lly - f[3]).max(0.0);
+                let gap = gap_x.max(gap_y);
+                assert!(
+                    gap >= 0.3 * cksize,
+                    "{name} seed {seed}: a ghost at [{llx} {lly} {urx} {ury}] is {gap:.1} from \
+                     the formula {f:?} (writing size {cksize})"
+                );
+                placed_total += 1;
+            }
+        }
+    }
+    // the board is still used: most boards keep some ghosts
+    assert!(
+        placed_total >= 40,
+        "ghosts all but vanished: {placed_total}"
     );
 }
 
