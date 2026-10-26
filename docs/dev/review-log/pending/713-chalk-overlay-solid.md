@@ -1,8 +1,8 @@
-## chalk: the no-board overlay's radical bar and small strokes stay solid (PR #PRNUM, issue #713, 2026-10-26)
+## chalk: the no-board overlay's radical bar and small strokes stay solid (PR #821, issue #713, 2026-10-26)
 
 - **What changed / what to look at:** drychalk's new `/Firm` (default 0, byte-identical) holds a long stroke's weight to its end and presses short strokes harder; `pscat chalk --no-board` and the MCP `board: false` turn it on. Look at the √ (bar and diagonal) and the superscript. Boards are byte-identical.
 - **Perceptual check:** "On the quadratic formula with `board:false` at seed 1 and a few other seeds, the superscript and the radical tail read as solid chalk strokes at the same apparent weight as the main symbols. Boards with a background look no worse."
-- **Reviewer:** PASS, round 1 (PRURL). polish: the 2 is still slightly lighter than b, a, c, and the √ tail a touch thinner than the main strokes.
+- **Reviewer:** PASS, round 1 (https://github.com/PSCatLabs/pscat/pull/821#issuecomment-6410857928). polish: the 2 is still slightly lighter than b, a, c, and the √ tail a touch thinner than the main strokes.
 
 | before | after |
 |---|---|
