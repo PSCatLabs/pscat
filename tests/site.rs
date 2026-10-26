@@ -83,8 +83,14 @@ fn build_site_assembles_everything() {
     }
     // The `pscat chalk` boards on the front page (#849) must be drawn.
     let index = std::fs::read_to_string(out.join("index.html")).expect("read");
-    assert!(index.contains("<pre><code>pscat chalk "), "no chalk commands");
-    assert!(!index.contains("<!--@chalk-showcase-->"), "chalk marker left");
+    assert!(
+        index.contains("<pre><code>pscat chalk "),
+        "no chalk commands"
+    );
+    assert!(
+        !index.contains("<!--@chalk-showcase-->"),
+        "chalk marker left"
+    );
     let boards = index.split("assets/chalk/").skip(1).count();
     assert!(boards >= 3, "front page shows only {boards} chalk boards");
     for piece in index.split("assets/chalk/").skip(1) {
