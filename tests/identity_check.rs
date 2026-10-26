@@ -477,3 +477,142 @@ fn the_image_drivers_join_every_two_binary_run_and_a_single_binary_run_skips_the
     assert_eq!(o.status.code(), Some(0), "{t}");
     assert!(ALWAYS.iter().all(|f| !t.contains(f)), "{t}");
 }
+
+/// A wrapper that logs every call's argv (one `CALL` line, then one word per
+/// line) and then runs the real pscat. With `limit_only`, the base copy also
+/// halves the dpi of the control, but only when the argv has `--max-steps`:
+/// a stand-in for a change to the limit paths (#604) that only shows under
+/// that flag. Nothing else differs, so the control is the only file that can.
+fn flag_wrapper(path: &Path, log: &Path, limit_only: bool) {
+    let script = format!(
+        "#!/bin/bash\n\
+         {{ echo CALL; printf '%s\\n' \"$@\"; }} >> '{log}'\n\
+         args=(\"$@\")\n\
+         if [ '{on}' = 1 ]; then\n\
+           case \"$*\" in *'--max-steps'*'control.ps'*)\n\
+             for i in \"${{!args[@]}}\"; do [ \"${{args[$i]}}\" = 72 ] && args[$i]=36; done ;;\n\
+           esac\n\
+         fi\n\
+         exec '{real}' \"${{args[@]}}\"\n",
+        log = log.display(),
+        on = u8::from(limit_only),
+        real = env!("CARGO_BIN_EXE_pscat"),
+    );
+    fs::write(path, script).unwrap();
+    fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+/// `setup` with the logging wrappers; the base one is the limit-only stand-in.
+fn flag_setup(tag: &str) -> Setup {
+    let su = setup(tag, "");
+    flag_wrapper(&su.base_bin, &su.base_log, true);
+    flag_wrapper(&su.head_bin, &su.head_log, false);
+    su
+}
+
+#[test]
+fn a_negative_control_for_a_limit_path_needs_pscat_args() {
+    // Without the flag the limit-only difference cannot show: the control is
+    // identical and the run exits 2.
+    let su = flag_setup("limit_off");
+    let mut args = both_bins(&su);
+    args.extend(["--control", su.control.to_str().unwrap()]);
+    let o = run(&su, &args);
+    assert_eq!(o.status.code(), Some(2), "{}", text(&o));
+    assert!(
+        !fs::read_to_string(&su.base_log)
+            .unwrap_or_default()
+            .contains("--max-steps")
+    );
+
+    // With `--pscat-args`, the flag reaches the base and the head renders and the
+    // control: the control differs, the examples stay identical, exit 0.
+    let su = flag_setup("limit_on");
+    let mut args = both_bins(&su);
+    args.extend([
+        "--control",
+        su.control.to_str().unwrap(),
+        "--pscat-args",
+        "--max-steps 10000000",
+    ]);
+    let o = run(&su, &args);
+    let t = text(&o);
+    assert_eq!(o.status.code(), Some(0), "{t}");
+    assert!(
+        t.contains("control    differs between the trees, as it must"),
+        "{t}"
+    );
+    assert!(t.contains("identical  examples/sierpinski.ps"), "{t}");
+    // Two examples + control: the flag is on each render, in both trees.
+    for log in [&su.base_log, &su.head_log] {
+        let calls = fs::read_to_string(log).unwrap();
+        assert_eq!(calls.matches("CALL").count(), 3, "{calls}");
+        assert_eq!(
+            calls.lines().filter(|l| *l == "--max-steps").count(),
+            3,
+            "{calls}"
+        );
+        assert_eq!(
+            calls.lines().filter(|l| *l == "10000000").count(),
+            3,
+            "{calls}"
+        );
+    }
+}
+
+#[test]
+fn pscat_args_are_split_like_xargs_and_never_executed() {
+    let su = flag_setup("quoting");
+    let pwned = su.s.0.join("pwned");
+    // Quoted words group, `$(...)` stays literal and runs nothing, and a quoted
+    // value with a space is one argv word. The substitution sits inside DOUBLE
+    // quotes on purpose: `eval` would run it there, so this catches a parser that
+    // evaluates its input (single quotes would pass either way).
+    let pscat_args = format!(
+        "--max-steps '1000' --allow-write \"x $(touch {})\"",
+        pwned.display()
+    );
+    let mut args = both_bins(&su);
+    args.extend(["--pscat-args", pscat_args.as_str()]);
+    let _ = run(&su, &args);
+    assert!(!pwned.exists(), "the --pscat-args value was executed");
+    let calls = fs::read_to_string(&su.head_log).unwrap();
+    assert!(calls.lines().any(|l| l == "1000"), "{calls}");
+    let literal = format!("x $(touch {})", pwned.display());
+    assert!(calls.lines().any(|l| l == literal), "{calls}");
+}
+
+#[test]
+fn pscat_args_refuse_an_unbalanced_quote_and_the_script_owned_flags() {
+    let su = flag_setup("refuse");
+    let mut args = both_bins(&su);
+    args.extend(["--pscat-args", "--max-steps 'unclosed"]);
+    let o = run(&su, &args);
+    assert_eq!(o.status.code(), Some(64), "{}", text(&o));
+    assert!(text(&o).contains("unbalanced quote"), "{}", text(&o));
+    // Refused before any scratch directory or render exists.
+    assert!(!su.s.0.join("out").exists());
+    assert!(lines(&su.base_log).is_empty() && lines(&su.head_log).is_empty());
+
+    for owned in ["--png x.png", "--dpi 144", "--page 10x10"] {
+        let su = flag_setup("owned");
+        let mut args = both_bins(&su);
+        args.extend(["--pscat-args", owned]);
+        let o = run(&su, &args);
+        assert_eq!(o.status.code(), Some(64), "{owned}: {}", text(&o));
+        assert!(
+            text(&o).contains("owned by this script"),
+            "{owned}: {}",
+            text(&o)
+        );
+    }
+
+    // Whitespace only means no extra flags: the run is the plain one.
+    let su = flag_setup("blank");
+    let mut args = both_bins(&su);
+    args.extend(["--pscat-args", "   "]);
+    let o = run(&su, &args);
+    assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+    let calls = fs::read_to_string(&su.head_log).unwrap();
+    assert!(!calls.contains("--max-steps"), "{calls}");
+}

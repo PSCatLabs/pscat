@@ -1743,6 +1743,9 @@ renders eight examples in both and compares block-downsampled output).
   commit. Exit 1 = a page differs or pscat errored; exit 2 = the negative
   control rendered identically, so the pages prove nothing. Write the
   control as a tiny driver using a key only the branch has.
+  A change to the limit paths (`--max-time`/`--max-memory`/`--max-steps`,
+  #604) acts only under those flags: pass them with `--pscat-args "--max-steps
+  10000000"` (#724), which goes to the base, head and control renders alike.
   Since #303 it fits any lib change that must render identically:
   `--loader lib/<name>.ps` (repeatable, transitive through the libs built on
   it) or `--files LIST` picks the files, and multi-page output
