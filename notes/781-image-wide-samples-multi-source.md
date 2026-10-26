@@ -53,8 +53,9 @@ ASCIIHex filters, 12-bit gray. Differences, none ours:
   naive formula, gs's is not. 12-bit CMYK equals the equivalent 8-bit CMYK
   exactly (`tests/image_planes.rs`), so wide samples add no CMYK error.
 - **Indexed, no `/Decode`**: gs 10.07 paints palette entry 0 for every sample
-  (it seems to default Decode to `[0 1]`); pscat follows the PLRM default
-  `[0 2^n-1]`, as before this change. With an explicit `/Decode` gs agrees,
+  (it falls back to Decode `[0 1]`); pscat defaults Indexed to
+  `[0 2^n-1]` (the rule PDF states; the PostScript dict form lists Decode as
+  required, so neither is wrong), as before this change. With an explicit `/Decode` gs agrees,
   except at 16 bits, where it loses the low bit of the index.
 - **ImageType 3** left cell: gs paints black where pscat paints the image,
   with or without `/MultipleDataSources` (so not this change).

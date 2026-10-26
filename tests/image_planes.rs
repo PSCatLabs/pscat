@@ -97,6 +97,16 @@ fn sixteen_bit_dict_image_reads_big_endian_pairs_in_every_space() {
 }
 
 #[test]
+fn level_one_image_operand_takes_sixteen_bits() {
+    // width height bits matrix datasrc image (gs accepts 16 here too).
+    let mut it = page();
+    it.run_str("10 10 translate 80 80 scale 2 1 16 [2 0 0 -1 0 1] <0000ffff> image")
+        .expect("runs");
+    assert_eq!(pixel(&it, 30, 50), (0, 0, 0));
+    assert_eq!(pixel(&it, 70, 50), (255, 255, 255));
+}
+
+#[test]
 fn sixteen_bit_cmyk_and_indexed_and_twelve_bit() {
     same(
         "/DeviceCMYK setcolorspace 10 10 translate 80 80 scale

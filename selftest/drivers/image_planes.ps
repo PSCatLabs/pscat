@@ -24,10 +24,9 @@
 %   1. multi-source `colorimage`: RGB strings at 8 bits, RGB at 16 bits, CMYK
 %      (four sources), Gray (one source), RGB from three row procedures
 %      (called red, green, blue, red, green, blue, ...)
-%   2. dict `image`: /MultipleDataSources over procedures, with an inverted
-%      Decode, over an Indexed space (one source), 12-bit RGB interleaved,
-%      16-bit with /Interpolate true, and ImageType 3 whose DataDict has
-%      separate sources
+%   2. dict `image`: /MultipleDataSources over procedures, over strings with
+%      an inverted Decode, over an Indexed space (one source), 12-bit RGB
+%      interleaved, and ImageType 3 whose DataDict has separate sources
 %
 % CMYK cells differ from Ghostscript by pscat's own CMYK conversion, not by
 % anything here; every other cell matches Ghostscript 10.07 pixel for pixel,
@@ -60,9 +59,11 @@
   _ip
 } def
 
-% Three row procedures with their own counters: one W-byte row per call,
-% each logs nothing; the order they are called in decides which row each
-% component gets, so a wrong order shows as a wrong picture.
+% Three row procedures with their own counters: one W-byte row per call.
+% (Each keeps its own counter and plane, so the picture does not depend on
+% the order they are called in; that order, red 0 green 0 blue 0 red 1 ...,
+% is pinned by the shared `currentfile readhexstring` cell on page 3 of
+% image_sources.ps and by tests/image_planes.rs.)
 /_cR 0 def  /_cG 0 def  /_cB 0 def
 /_dR () def /_dG () def /_dB () def
 /pR { _cR H ge { () } { _dR _cR W mul W getinterval /_cR _cR 1 add def } ifelse } def
@@ -109,7 +110,7 @@ gsave 5 cell     % /MultipleDataSources with procedures
     /DataSource [ /pR load /pG load /pB load ] def
   currentdict end image
 grestore
-gsave 55 cell    % the same, Decode inverting red and blue
+gsave 55 cell    % three strings, Decode inverting red and blue
   8 dict begin
     /ImageType 1 def /Width W def /Height H def /BitsPerComponent 8 def
     /MultipleDataSources true def
@@ -124,7 +125,7 @@ gsave 105 cell
   8 dict begin
     /ImageType 1 def /Width W def /Height H def /BitsPerComponent 8 def
     /MultipleDataSources true def
-    /Decode [0 255] def   % explicit, so Ghostscript agrees (it ignores the PLRM default here)
+    /Decode [0 255] def   % explicit, so Ghostscript agrees (without it gs reads the sample as 0..1)
     /ImageMatrix [W 0 0 H neg 0 H] def
     /DataSource [ 0 W H mul idxplane ] def
   currentdict end image
