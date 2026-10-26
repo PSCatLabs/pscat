@@ -429,3 +429,33 @@ fn translucent_image_on_a_transparent_page_stays_translucent() {
     let p = it.gfx().pixmap.pixel(30, 30).unwrap();
     assert!((126..=129).contains(&p.alpha()), "alpha {}", p.alpha());
 }
+
+#[test]
+fn bitmap_glyph_stamp_takes_alpha_and_does_not_leak_it() {
+    // A bitmap-font glyph (imagemask in a Type 3 BuildChar) is text, and
+    // text takes alpha: 0.5 gives mid grey, and the same glyph shown at
+    // alpha 1 straight after is fully black (nothing cached or kept).
+    let font = "/BitFont 6 dict def
+         BitFont begin
+           /FontType 3 def
+           /FontMatrix [0.001 0 0 0.001 0 0] def
+           /Encoding 256 array def 0 1 255 { Encoding exch /.notdef put } for
+           Encoding 97 /blk put
+           /BuildChar {
+             exch begin
+               1000 0 0 0 800 800 setcachedevice
+               800 800 scale
+               2 2 true [2 0 0 -2 0 2] {<c0 00>} imagemask
+             end
+           } def
+         end
+         /BitFont BitFont definefont pop
+         /BitFont findfont 40 scalefont setfont";
+    let it = run(&format!("{font} 0.5 setalpha 10 10 moveto (a) show"));
+    let (r, g, b) = pixel(&it, 25, 100 - 35);
+    assert!((126..=129).contains(&r) && r == g && g == b, "{r} {g} {b}");
+    let it = run(&format!(
+        "{font} 0.5 setalpha 10 10 moveto (a) show 1 setalpha 10 10 moveto (a) show"
+    ));
+    assert_eq!(pixel(&it, 25, 100 - 35), BLACK);
+}
