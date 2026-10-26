@@ -2284,6 +2284,30 @@ impl Interp {
         self.ostack.pop().ok_or(PsError::StackUnderflow)
     }
 
+    /// The top two operands, if both are numbers (deeper one first). The
+    /// arithmetic and comparison operators' fast path (#863): it looks
+    /// without popping, so when it says no, the operator's general path
+    /// runs on an untouched stack and fails exactly as it always has.
+    #[inline(always)]
+    pub(crate) fn top2_nums(&self) -> Option<(Num, Num)> {
+        let [.., a, b] = self.ostack.as_slice() else {
+            return None;
+        };
+        Some((a.num()?, b.num()?))
+    }
+
+    /// Replace the top two operands with the literal `v`. For the fast
+    /// paths above, once `top2_nums` has said both are numbers.
+    #[inline(always)]
+    pub(crate) fn replace_top2(&mut self, v: Value) {
+        if let Some(b) = self.ostack.pop() {
+            b.drop_inline();
+        }
+        if let Some(a) = self.ostack.last_mut() {
+            std::mem::replace(a, Object::lit(v)).drop_inline();
+        }
+    }
+
     #[doc(hidden)]
     pub fn pop_num(&mut self) -> Result<Num, PsError> {
         match self.pop()?.value {

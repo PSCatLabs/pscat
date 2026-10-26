@@ -326,6 +326,34 @@ impl Object {
         }
     }
 
+    /// `drop`, with the plain-data case decided inline. The compiler's
+    /// drop glue for `Value` is an out-of-line call that switches on the
+    /// variant; nearly every operand an operator pops is a number, which
+    /// owns nothing, so the stack and arithmetic operators skip that call
+    /// for them (#863). Every other value is dropped as usual.
+    #[inline(always)]
+    pub(crate) fn drop_inline(self) {
+        match self.value {
+            Value::Integer(_)
+            | Value::Real(_)
+            | Value::Boolean(_)
+            | Value::Mark
+            | Value::Null
+            | Value::Operator(_) => std::mem::forget(self),
+            _ => drop(self),
+        }
+    }
+
+    /// The number this object holds, if it is one.
+    #[inline(always)]
+    pub(crate) fn num(&self) -> Option<Num> {
+        match self.value {
+            Value::Integer(i) => Some(Num::Int(i)),
+            Value::Real(r) => Some(Num::Real(r)),
+            _ => None,
+        }
+    }
+
     /// The `type` operator's name for this object.
     pub fn type_name(&self) -> &'static str {
         match &self.value {

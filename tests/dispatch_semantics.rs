@@ -122,6 +122,30 @@ const CASES: &[(&str, &str, &str)] = &[
         "0 /undefinedresult mod true",
         "0 /undefinedresult pre true",
     ),
+    // Edge values the number fast paths must treat as the general path does.
+    (
+        "1e308 10 mul dup sub 1 lt",
+        "0 /undefinedresult lt true",
+        "0 /undefinedresult pre true",
+    ),
+    (
+        "1e308 10 mul dup sub dup eq",
+        "0 false false",
+        "0 false false",
+    ),
+    ("-0.0 0 eq", "0 true false", "0 true false"),
+    (
+        "1 -0.0 div",
+        "0 /undefinedresult div true",
+        "0 /undefinedresult pre true",
+    ),
+    ("3 -0.0 mul", "0 -0.0 false", "0 -0.0 false"),
+    ("1 cvx 2 add xcheck", "0 false false", "0 false false"),
+    (
+        "1 2 cvx 0 index xcheck",
+        "0 1 2 true false",
+        "0 1 2 true false",
+    ),
     // Comparisons.
     (
         "1 2 lt 2 1 gt 1.5 1 ge 1 1.0 le",

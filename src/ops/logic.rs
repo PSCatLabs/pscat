@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use crate::error::PsError;
 use crate::interp::Interp;
-use crate::object::{Dict, Object, Value};
+use crate::object::{Dict, Num, Object, Value};
 
 pub fn install(dict: &mut Dict) {
     use super::op;
@@ -46,7 +46,21 @@ fn objects_equal(a: &Object, b: &Object) -> bool {
     }
 }
 
+/// `eq` on two numbers, as `objects_equal` decides it.
+#[inline(always)]
+fn nums_equal(a: Num, b: Num) -> bool {
+    match (a, b) {
+        (Num::Int(x), Num::Int(y)) => x == y,
+        (Num::Real(x), Num::Real(y)) => x == y,
+        (Num::Int(x), Num::Real(y)) | (Num::Real(y), Num::Int(x)) => x as f64 == y,
+    }
+}
+
 fn eq(it: &mut Interp) -> Result<(), PsError> {
+    if let Some((a, b)) = it.top2_nums() {
+        it.replace_top2(Value::Boolean(nums_equal(a, b)));
+        return Ok(());
+    }
     let b = it.pop()?;
     let a = it.pop()?;
     it.push(Object::lit(Value::Boolean(objects_equal(&a, &b))));
@@ -54,9 +68,36 @@ fn eq(it: &mut Interp) -> Result<(), PsError> {
 }
 
 fn ne(it: &mut Interp) -> Result<(), PsError> {
+    if let Some((a, b)) = it.top2_nums() {
+        it.replace_top2(Value::Boolean(!nums_equal(a, b)));
+        return Ok(());
+    }
     let b = it.pop()?;
     let a = it.pop()?;
     it.push(Object::lit(Value::Boolean(!objects_equal(&a, &b))));
+    Ok(())
+}
+
+/// `compare` for two numbers on top of the stack, or `None` (stack
+/// untouched) for anything else, including a NaN, which `compare` reports.
+#[inline(always)]
+fn compare_nums(it: &Interp) -> Option<Ordering> {
+    match it.top2_nums()? {
+        (Num::Int(x), Num::Int(y)) => Some(x.cmp(&y)),
+        (a, b) => a.to_f64().partial_cmp(&b.to_f64()),
+    }
+}
+
+/// A relational operator: the number fast path in place (#863), else the
+/// general `compare`, which pops and fails as it always has.
+#[inline(always)]
+fn relational(it: &mut Interp, test: fn(Ordering) -> bool) -> Result<(), PsError> {
+    if let Some(ord) = compare_nums(it) {
+        it.replace_top2(Value::Boolean(test(ord)));
+        return Ok(());
+    }
+    let ord = compare(it)?;
+    it.push(Object::lit(Value::Boolean(test(ord))));
     Ok(())
 }
 
@@ -87,27 +128,19 @@ fn num_of(o: &Object) -> f64 {
 }
 
 fn gt(it: &mut Interp) -> Result<(), PsError> {
-    let ord = compare(it)?;
-    it.push(Object::lit(Value::Boolean(ord == Ordering::Greater)));
-    Ok(())
+    relational(it, |o| o == Ordering::Greater)
 }
 
 fn ge(it: &mut Interp) -> Result<(), PsError> {
-    let ord = compare(it)?;
-    it.push(Object::lit(Value::Boolean(ord != Ordering::Less)));
-    Ok(())
+    relational(it, |o| o != Ordering::Less)
 }
 
 fn lt(it: &mut Interp) -> Result<(), PsError> {
-    let ord = compare(it)?;
-    it.push(Object::lit(Value::Boolean(ord == Ordering::Less)));
-    Ok(())
+    relational(it, |o| o == Ordering::Less)
 }
 
 fn le(it: &mut Interp) -> Result<(), PsError> {
-    let ord = compare(it)?;
-    it.push(Object::lit(Value::Boolean(ord != Ordering::Greater)));
-    Ok(())
+    relational(it, |o| o != Ordering::Greater)
 }
 
 /// and/or/xor are boolean on booleans, bitwise on integers.

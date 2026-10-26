@@ -8,7 +8,7 @@
 use crate::error::PsError;
 use crate::fmath;
 use crate::interp::Interp;
-use crate::object::{Dict, Num, Object};
+use crate::object::{Dict, Num, Object, Value};
 
 pub fn install(dict: &mut Dict) {
     use super::op;
@@ -121,20 +121,37 @@ fn pop2(it: &mut Interp) -> Result<(Num, Num), PsError> {
 }
 
 /// Integer op that promotes to real on overflow, real op otherwise.
+#[inline(always)]
 fn binary(
     it: &mut Interp,
     int_op: fn(i64, i64) -> Option<i64>,
     real_op: fn(f64, f64) -> f64,
 ) -> Result<(), PsError> {
+    // Two numbers on top cannot fail: compute in place (#863). Anything
+    // else takes the general path below, which pops and checks one
+    // operand at a time, so a failure leaves the stack as it always has.
+    if let Some((a, b)) = it.top2_nums() {
+        it.replace_top2(num_result(a, b, int_op, real_op));
+        return Ok(());
+    }
     let (a, b) = pop2(it)?;
-    let result = match (a, b) {
-        (Num::Int(x), Num::Int(y)) => int_op(x, y)
-            .map(Object::int)
-            .unwrap_or_else(|| Object::real(real_op(x as f64, y as f64))),
-        _ => Object::real(real_op(a.to_f64(), b.to_f64())),
-    };
-    it.push(result);
+    it.push(Object::lit(num_result(a, b, int_op, real_op)));
     Ok(())
+}
+
+#[inline(always)]
+fn num_result(
+    a: Num,
+    b: Num,
+    int_op: fn(i64, i64) -> Option<i64>,
+    real_op: fn(f64, f64) -> f64,
+) -> Value {
+    match (a, b) {
+        (Num::Int(x), Num::Int(y)) => int_op(x, y)
+            .map(Value::Integer)
+            .unwrap_or_else(|| Value::Real(real_op(x as f64, y as f64))),
+        _ => Value::Real(real_op(a.to_f64(), b.to_f64())),
+    }
 }
 
 fn min(it: &mut Interp) -> Result<(), PsError> {
@@ -158,6 +175,13 @@ fn mul(it: &mut Interp) -> Result<(), PsError> {
 }
 
 fn div(it: &mut Interp) -> Result<(), PsError> {
+    if let Some((a, b)) = it.top2_nums() {
+        let d = b.to_f64();
+        if d != 0.0 {
+            it.replace_top2(Value::Real(a.to_f64() / d));
+            return Ok(());
+        }
+    }
     let (a, b) = pop2(it)?;
     let d = b.to_f64();
     if d == 0.0 {
