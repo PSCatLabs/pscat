@@ -17,3 +17,12 @@ packs, so `/Bangers findfont` silently became Helvetica.
   interpreter; readable after a `PostScriptError`.
 - Not changed: names no pack lists still fall back to Helvetica silently,
   as on native.
+- The libraries' font checks (`hlfontcheck`, `ltfontcheck`, `jyfontcheck`)
+  already rejected a stand-in on native (#728); the wasm build now resolves
+  to the same stand-in, and rejects the same faces the same way (probed
+  through `npm/node.js`). `font::has_glyph`, which treats a stand-in as
+  missing, has only a native caller (`pscat sheet`).
+- Size: the wasm grows 50,545 bytes (the pack table is now live there);
+  the packed tarball is 5,414,704 bytes (budget 6 MiB), unpacked 11,903,334
+  (budget 13 MiB).
+- Possible follow-up: show `ps.warnings` next to errors in `web/index.html`.
