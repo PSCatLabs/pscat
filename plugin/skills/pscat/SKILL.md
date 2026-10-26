@@ -259,7 +259,7 @@ With the pack installed the real face is used and nothing changes. The Type
 ## Capabilities (structured, for agents)
 
 ```sh
-pscat --capabilities                   # fonts, palettes, templates, procedures as JSON
+pscat --capabilities                   # fonts, palettes, templates, procedures, native pscat operators as JSON
 ```
 
 The machine-readable inventory of what this build actually has: fonts,
