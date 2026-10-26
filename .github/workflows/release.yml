@@ -21,6 +21,15 @@
 #   post-publish-check  release-check.yml: install from the public channels
 #              on Linux, macOS and Windows, no credentials        (real only)
 #
+# Release candidates (#854): a tag vX.Y.Z-rc.N (Cargo.toml says
+# X.Y.Z-rc.N; scripts/release.sh X.Y.Z-rc.N opens its PR) runs the same
+# jobs, gates and approval, but `draft` makes a GitHub pre-release and
+# `publish` runs only the draft, publish and plugin stages: no crates.io
+# token is minted, nothing goes to crates.io, npm or the MCP Registry, and
+# the release never becomes "latest". release_stages.py refuses those
+# channels for an rc version whatever stages it is given. The
+# post-publish check installs the archives and skips the crate.
+#
 # Every stage checks its registry first: skip on an identical artifact,
 # halt (exit 3) on a different or unverifiable one, never overwrite
 # (scripts/release_stages.py). A failed run is resumed with "Re-run failed
@@ -92,6 +101,8 @@ jobs:
       tag: ${{ steps.what.outputs.tag }}
       version: ${{ steps.what.outputs.version }}
       commit: ${{ steps.what.outputs.commit }}
+      prerelease: ${{ steps.what.outputs.prerelease }}
+      stages: ${{ steps.what.outputs.stages }}
     defaults:
       run:
         shell: bash
@@ -126,10 +137,15 @@ jobs:
             REAL=false
             TAG="v$VERSION"
           fi
+          # prerelease=true|false and the publish stages (#854): a release
+          # candidate X.Y.Z-rc.N is a GitHub pre-release only.
+          INFO=$(python3 scripts/release_stages.py version-info "$VERSION")
           {
             echo "real=$REAL"; echo "tag=$TAG"; echo "version=$VERSION"; echo "commit=$COMMIT"
+            echo "$INFO"
           } >> "$GITHUB_OUTPUT"
-          echo "### ${TAG} at ${COMMIT}: $([ "$REAL" = true ] && echo 'real release' || echo 'dry run')" >> "$GITHUB_STEP_SUMMARY"
+          KIND=$(grep -qx 'prerelease=true' <<<"$INFO" && echo 'release candidate, GitHub pre-release only' || echo 'release')
+          echo "### ${TAG} at ${COMMIT}: $([ "$REAL" = true ] && echo "real $KIND" || echo "dry run ($KIND)")" >> "$GITHUB_STEP_SUMMARY"
       - name: Pinned font index (#616)
         env:
           REAL: ${{ steps.what.outputs.real }}
@@ -345,11 +361,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REAL: ${{ needs.verify.outputs.real }}
           VERSION: ${{ needs.verify.outputs.version }}
+          STAGES: ${{ needs.verify.outputs.stages }}
         run: |
           set +e
+          # shellcheck disable=SC2086 # STAGES is "--stage a --stage b ..."
           python3 scripts/release_stages.py run --plan --dist dist --crate "release-inputs/pscat-$VERSION.crate" \
-            --stage draft --stage crates --stage npm --stage publish --stage plugin \
-            --stage registry --report-dir plan
+            $STAGES --report-dir plan
           STATUS=$?
           set -e
           if [ "$REAL" = true ] && [ "$STATUS" -ne 0 ]; then exit "$STATUS"; fi
@@ -398,8 +415,9 @@ jobs:
     needs: [verify, draft]
     if: needs.verify.outputs.real == 'true' && vars.RELEASE_ENABLED == 'true'
     runs-on: ubuntu-latest
-    # Owner approval happens here, once per attempt. The draft above is
-    # already up for review when the approval is requested.
+    # Owner approval happens here, once per attempt, release candidates
+    # included (they publish public binaries). The draft above is already up
+    # for review when the approval is requested.
     environment: release
     # id-token: write is for crates.io trusted publishing and for signing the
     # provenance attestations below; attestations: write stores them.
@@ -436,13 +454,15 @@ jobs:
             release-inputs/pscat-*.crate
       # crates.io trusted publishing: a short-lived token for this job only,
       # revoked when the job ends. Needs the trusted publisher configured on
-      # crates.io (RELEASING.md, "One-time setup").
+      # crates.io (RELEASING.md, "One-time setup"). Never minted for a
+      # release candidate.
       - uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1
+        if: needs.verify.outputs.prerelease != 'true'
         id: crates-auth
       # The npm channel turns on when npm/package.json exists (#566); npm
       # trusted publishing needs npm >= 11.5, which Node 24 ships.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        if: hashFiles('npm/package.json') != ''
+        if: needs.verify.outputs.prerelease != 'true' && hashFiles('npm/package.json') != ''
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
@@ -452,6 +472,7 @@ jobs:
       # or checksum is only a warning here for the same reason: without
       # MCP_PUBLISHER the registry stage, which runs last, fails instead.
       - name: Install mcp-publisher (pinned)
+        if: needs.verify.outputs.prerelease != 'true'
         run: |
           D="$RUNNER_TEMP/mcp-publisher"
           mkdir -p "$D"
@@ -463,15 +484,19 @@ jobs:
           else
             echo "::warning::mcp-publisher ${MCP_PUBLISHER_VERSION} could not be installed and verified; the registry stage will fail"
           fi
-      - name: Publish (crates.io, npm, GitHub Release, plugin check, MCP Registry)
+      # A release: crates.io, npm, GitHub Release, plugin check, MCP
+      # Registry. A release candidate: the GitHub pre-release and the plugin
+      # check only (verify's `stages` output).
+      - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
           CARGO_REGISTRY_TOKEN: ${{ steps.crates-auth.outputs.token }}
           VERSION: ${{ needs.verify.outputs.version }}
+          STAGES: ${{ needs.verify.outputs.stages }}
         run: |
+          # shellcheck disable=SC2086 # STAGES is "--stage a --stage b ..."
           python3 scripts/release_stages.py run --dist dist --crate "release-inputs/pscat-$VERSION.crate" \
-            --stage draft --stage crates --stage npm --stage publish --stage plugin \
-            --stage registry --report-dir report
+            $STAGES --report-dir report
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -482,7 +507,8 @@ jobs:
   # The outsider install check (#638): install from the real channels, now
   # that they are public. Read-only, no environment, no secrets: it uses
   # only what any user could. A failure here means a published release does
-  # not install; fix forward with a patch release (RELEASING.md).
+  # not install; fix forward with a patch release (RELEASING.md). For a
+  # release candidate it checks the archives and skips the crate.
   post-publish-check:
     needs: [verify, publish]
     if: needs.verify.outputs.real == 'true' && vars.RELEASE_ENABLED == 'true'

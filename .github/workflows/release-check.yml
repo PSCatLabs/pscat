@@ -17,6 +17,9 @@
 # --locked` on Linux and macOS. With `attested`, `gh attestation verify` the
 # archives (#635).
 #
+# A release candidate X.Y.Z-rc.N (#854) is a GitHub pre-release only, so for
+# one the archive checks run and the crate checks are skipped.
+#
 # It publishes nothing and reads no secrets, so it runs outside the `release`
 # environment with read-only permissions (scripts/check_workflows.py).
 name: release-check
@@ -25,7 +28,7 @@ on:
   workflow_call:
     inputs:
       version:
-        description: "The published version, X.Y.Z"
+        description: "The published version, X.Y.Z or X.Y.Z-rc.N"
         type: string
         required: true
       attested:
@@ -35,7 +38,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Published version X.Y.Z (empty: crates.io's newest)"
+        description: "Published version X.Y.Z or X.Y.Z-rc.N (empty: crates.io's newest)"
         required: false
         default: ""
       attested:
@@ -59,6 +62,7 @@ jobs:
       version: ${{ steps.v.outputs.version }}
       check_version: ${{ steps.v.outputs.check_version }}
       attested: ${{ steps.v.outputs.attested }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
     steps:
       - name: Which version?
         id: v
@@ -72,15 +76,18 @@ jobs:
               python3 -c 'import json, sys; print(json.load(sys.stdin)["crate"]["max_stable_version"])')
           fi
           V="${V#v}"
-          if ! [[ "$V" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          if ! [[ "$V" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-rc\.[1-9][0-9]*)?$ ]]; then
             echo "::error::not a version: '$V'"
             exit 1
           fi
+          # A release candidate is on GitHub only, not crates.io (#854).
+          PRE=false
+          [[ "$V" == *-rc.* ]] && PRE=true
           # `pscat --version` exists from 0.6.1 on (#637); 0.6.0 is checked by
           # running a program instead.
-          CHECK=$(python3 -c 'import sys; print(str(tuple(map(int, sys.argv[1].split("."))) >= (0, 6, 1)).lower())' "$V")
-          { echo "version=$V"; echo "check_version=$CHECK"; echo "attested=$ATTESTED"; } >> "$GITHUB_OUTPUT"
-          echo "### Install check for pscat $V (--version check: $CHECK, attestations: $ATTESTED)" >> "$GITHUB_STEP_SUMMARY"
+          CHECK=$(python3 -c 'import sys; print(str(tuple(map(int, sys.argv[1].split("-")[0].split("."))) >= (0, 6, 1)).lower())' "$V")
+          { echo "version=$V"; echo "check_version=$CHECK"; echo "attested=$ATTESTED"; echo "prerelease=$PRE"; } >> "$GITHUB_OUTPUT"
+          echo "### Install check for pscat $V (--version check: $CHECK, attestations: $ATTESTED, release candidate: $PRE)" >> "$GITHUB_STEP_SUMMARY"
 
   install-archive:
     needs: install-version
@@ -173,6 +180,8 @@ jobs:
 
   install-crate:
     needs: install-version
+    # A release candidate is not on crates.io (#854).
+    if: needs.install-version.outputs.prerelease != 'true'
     name: install-crate (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     permissions:
