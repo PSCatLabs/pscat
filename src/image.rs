@@ -396,6 +396,19 @@ impl ImageCtx {
         if let Some(plane) = self.planes.get(comp) {
             return plane.sample(ix, iy, 0);
         }
+        // Byte-aligned depths (#793): the sample is one or two whole bytes,
+        // so read them directly instead of bit by bit. Bytes past the end
+        // of `data` read as 0, exactly as the general path does.
+        if self.bits == 8 || self.bits == 16 {
+            let nbytes = self.bits as usize / 8;
+            let at = iy * self.row_bytes() + (ix * self.ncomp as usize + comp) * nbytes;
+            let byte = |i: usize| u32::from(self.data.get(at + i).copied().unwrap_or(0));
+            return if nbytes == 1 {
+                byte(0)
+            } else {
+                (byte(0) << 8) | byte(1)
+            };
+        }
         let bitpos =
             iy * self.row_bytes() * 8 + (ix * self.ncomp as usize + comp) * self.bits as usize;
         let mut v: u32 = 0;
