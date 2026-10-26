@@ -1413,6 +1413,9 @@ renders eight examples in both and compares block-downsampled output).
   "${CLAUDE_PLUGIN_ROOT}/hooks/check-pscat.sh"` (the directory portal blocks
   an inline command in a subfolder plugin; Codex sets that variable too;
   #684, `notes/684-plugin-hook-script.md`).
+  `plugin_check.py` also fails a plugin `.md` that writes a bundled or
+  repo-relative image/font path in backticks or a code block (the
+  directory checklist holds those; #848, `notes/848-plugin-no-image-paths-in-backticks.md`).
   `scripts/codex_plugin_install_check.sh` (job `codex-install`) installs it
   with the pinned codex CLI. See `notes/569-codex-plugin.md`.
 - **The MCP Registry entry (#569 part c) is root `server.json`**

@@ -127,6 +127,35 @@ class Fixture(unittest.TestCase):
         self.plugin["hooks"] = {"SessionStart": []}
         self.assertIn("loads both", " ".join(self.errors()))
 
+    def asset_errors(self):
+        return [e for e in self.errors() if "backticks or a code block" in e]
+
+    def test_asset_paths_in_backticks(self):
+        self.write("plugin/skills/demo/logo.png", "x")
+        self.write("plugin/README.md", "Run `pscat --png out.png f.ps`, "
+                   "see ![logo](skills/demo/logo.png) and https://x.org/a.png.\n")
+        self.write("plugin/skills/demo/ref.md", "Bare `.png`, `out-001.png`, "
+                   "`https://x.org/a.png` and an indented block:\n\n    docs/a.png\n")
+        self.assertEqual(self.asset_errors(), [])
+        # A bundled file named by basename, by path, with double backticks.
+        for body in ("See `logo.png`.", "See ``skills/demo/logo.png``."):
+            self.write("plugin/README.md", body + "\n")
+            errs = self.asset_errors()
+            self.assertEqual(len(errs), 1, errs)
+            self.assertIn("plugin/README.md:1", errs[0])
+            self.assertIn("names a bundled file", errs[0])
+
+    def test_asset_paths_outside_bundle_and_fences(self):
+        self.write("plugin/skills/demo/ref.md", "x\n\n```sh\nopen ../x.png\n```\n"
+                   "~~~\ncp /tmp/f.ttf .\n~~~\nafter `out.png`\n")
+        errs = self.asset_errors()
+        self.assertEqual(len(errs), 2, errs)
+        self.assertIn("ref.md:4", errs[0])
+        self.assertIn("path outside the bundle", errs[0])
+        self.assertIn("ref.md:7", errs[1])
+        self.write("plugin/skills/demo/ref.md", "[massing](https://github.com/o/r/blob/main/a.png)\n")
+        self.assertEqual(self.asset_errors(), [])
+
     def test_codex_version_must_match_cargo(self):
         self.codex_plugin["version"] = "1.2.4"
         self.assertIn("plugin/plugin.json: version", " ".join(self.errors()))
