@@ -1261,7 +1261,8 @@ fn tool_list(cfg: &Config) -> Value {
             "title": "List art capabilities",
             "annotations": annotations("List art capabilities", true),
             "description": "List the creative capabilities this pscat build actually has installed: fonts, \
-                Type 3 program faces, mood palettes, page templates, and artkit/style-pack procedures. \
+                Type 3 program faces, mood palettes, page templates, artkit/style-pack procedures, and \
+                native pscat operators. \
                 Structured JSON, safe to call instead of assuming names from documentation, which can \
                 drift from what's really loadable.",
             "inputSchema": {
