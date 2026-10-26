@@ -130,6 +130,17 @@ More on the less obvious ones:
   are ignored. `readreals` reads the whole file, then keeps the first `n`
   values, so for a huge file it is as costly as `(path) (r) file`. Both honour
   `--max-steps`, `--max-time` and `--max-memory`.
+- **Limits on every run.** `--max-steps N`, `--max-time SECS` and
+  `--max-memory MIB` (0 = no limit, the default) apply to one program run, and
+  `--spool` and the tool subcommands take them too (`pscat handwrite`,
+  `typewrite`, `photo-etch`, `chalk`, `sheet`). A stopped run exits non-zero
+  with `limitexceeded (steps|time|memory)`. The unit is the run, not the page:
+  a multi-page program is one run; each `--spool` job, `--sweep` frame
+  and `pscat sheet` cell is its own run with the whole budget (so is each
+  `--bands` band, for steps and time; memory is shared by the bands);
+  `handwrite`, `typewrite` and `photo-etch` run a measuring pass and then the
+  render and give each the full limits. Reading a whole file (`file`, `run`)
+  charges one step per KiB.
 - **Parallel bands.** `--bands N` (1 to 64) renders a PNG as N horizontal
   bands on N threads and stitches them into one page; the PNG is byte for
   byte the plain `--png` render. Each band is a full run of the program with

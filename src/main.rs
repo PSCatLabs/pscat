@@ -4,7 +4,7 @@ use std::process::ExitCode;
 
 use pscat::repl::LineBuffer;
 use pscat::spool::Watcher;
-use pscat::window::{WindowOptions, run_interactive, run_spool, run_windowed};
+use pscat::window::{WindowOptions, run_interactive, run_spool_with_limits, run_windowed};
 use pscat::{Interp, Limits, gfx};
 
 // Counts live heap bytes so `--max-memory` can be enforced (issue #604). One
@@ -357,13 +357,6 @@ fn main() -> ExitCode {
             eprintln!("pscat: --spool runs alone (no file argument or other mode flags)");
             return ExitCode::FAILURE;
         }
-        if !options.limits.is_none() {
-            eprintln!(
-                "pscat: --max-steps/--max-time/--max-memory don't apply to --spool yet \
-                 (the spool runs each file without limits)"
-            );
-            return ExitCode::FAILURE;
-        }
         if !options.allow_write.is_empty() {
             eprintln!(
                 "pscat: --allow-write doesn't apply to --spool (spooled jobs never write files)"
@@ -386,7 +379,13 @@ fn main() -> ExitCode {
             steps_per_frame: options.steps_per_frame,
             halftone: options.halftone,
         };
-        return match run_spool(watcher, options.page, options.dpi / 72.0, window_options) {
+        return match run_spool_with_limits(
+            watcher,
+            options.page,
+            options.dpi / 72.0,
+            window_options,
+            options.limits,
+        ) {
             Ok(()) => ExitCode::SUCCESS,
             Err(msg) => {
                 eprintln!("pscat: {msg}");
@@ -542,6 +541,51 @@ fn read_source(path: &str) -> Result<Vec<u8>, String> {
     } else {
         std::fs::read(path).map_err(|e| format!("cannot read {path}: {e}"))
     }
+}
+
+/// `--max-steps`, `--max-time` and `--max-memory` (issue #604): the three
+/// flags the flag CLI and every tool subcommand (`pscat handwrite`,
+/// `typewrite`, `photo-etch`, `chalk`, `sheet`; issue #701) take, parsed in
+/// one place so `0 = no limit` and the ranges are the same everywhere.
+/// `flag` must be one of the three ([`is_limit_flag`]).
+pub(crate) fn limit_flag(limits: &mut Limits, flag: &str, value: &str) -> Result<(), String> {
+    match flag {
+        "--max-steps" => {
+            let steps: u64 = value.parse().map_err(|_| {
+                format!(
+                    "invalid --max-steps value: {value} (expected a whole number; 0 = no limit)"
+                )
+            })?;
+            limits.max_steps = (steps > 0).then_some(steps);
+        }
+        "--max-time" => {
+            let secs: f64 = value
+                .parse()
+                .ok()
+                .filter(|s: &f64| s.is_finite() && (0.0..=31_536_000.0).contains(s))
+                .ok_or_else(|| {
+                    format!("invalid --max-time value: {value} (expected seconds; 0 = no limit)")
+                })?;
+            limits.max_time = (secs > 0.0).then(|| std::time::Duration::from_secs_f64(secs));
+        }
+        "--max-memory" => {
+            let mib: usize = value
+                .parse()
+                .ok()
+                .filter(|m| *m <= 1 << 30)
+                .ok_or_else(|| {
+                    format!("invalid --max-memory value: {value} (expected MiB; 0 = no limit)")
+                })?;
+            limits.max_memory = (mib > 0).then_some(mib << 20);
+        }
+        other => unreachable!("not a limit flag: {other}"),
+    }
+    Ok(())
+}
+
+/// Whether `arg` is one of the three flags [`limit_flag`] takes.
+pub(crate) fn is_limit_flag(arg: &str) -> bool {
+    matches!(arg, "--max-steps" | "--max-time" | "--max-memory")
 }
 
 /// `--exit-with-parent`'s value (also taken by `pscat handwrite`).
@@ -1540,33 +1584,11 @@ fn parse_args() -> Result<Options, String> {
                     .filter(|&d: &f32| (9.0..=1200.0).contains(&d))
                     .ok_or_else(|| format!("invalid --dpi value: {n} (expected 9..1200)"))?;
             }
-            "--max-steps" => {
-                let n = args.next().ok_or("missing value after --max-steps")?;
-                let steps: u64 = n.parse().map_err(|_| {
-                    format!(
-                        "invalid --max-steps value: {n} (expected a whole number; 0 = no limit)"
-                    )
-                })?;
-                options.limits.max_steps = (steps > 0).then_some(steps);
-            }
-            "--max-time" => {
-                let n = args.next().ok_or("missing value after --max-time")?;
-                let secs: f64 = n
-                    .parse()
-                    .ok()
-                    .filter(|s: &f64| s.is_finite() && (0.0..=31_536_000.0).contains(s))
-                    .ok_or_else(|| {
-                        format!("invalid --max-time value: {n} (expected seconds; 0 = no limit)")
-                    })?;
-                options.limits.max_time =
-                    (secs > 0.0).then(|| std::time::Duration::from_secs_f64(secs));
-            }
-            "--max-memory" => {
-                let n = args.next().ok_or("missing value after --max-memory")?;
-                let mib: usize = n.parse().ok().filter(|m| *m <= 1 << 30).ok_or_else(|| {
-                    format!("invalid --max-memory value: {n} (expected MiB; 0 = no limit)")
-                })?;
-                options.limits.max_memory = (mib > 0).then_some(mib << 20);
+            flag @ ("--max-steps" | "--max-time" | "--max-memory") => {
+                let n = args
+                    .next()
+                    .ok_or_else(|| format!("missing value after {flag}"))?;
+                limit_flag(&mut options.limits, flag, &n)?;
             }
             "--allow-write" => {
                 let dir = args.next().ok_or("missing directory after --allow-write")?;
@@ -1733,11 +1755,20 @@ fn print_usage() {
     println!("      --profile-json  --profile as one line of JSON");
     println!("      --exit-with-parent PID  stop once PID is no longer pscat's parent");
     println!("                      (Unix; pscat-mcp passes its own pid to every render)");
-    println!("      --max-steps N   stop a program after N interpreter steps (0 = no limit)");
+    println!("      --max-steps N   stop a program after N interpreter steps (0 = no limit).");
+    println!("                      Reading a whole file (`file`, `run`) charges one step per KiB");
     println!("      --max-time SECS stop a program after SECS of wall-clock time (0 = no limit)");
     println!("      --max-memory MIB  stop a program that grows the heap by more than MIB");
     println!("                      (0 = no limit). A stopped run exits non-zero with");
-    println!("                      `limitexceeded (steps|time|memory)`; `stopped` can't catch it");
+    println!(
+        "                      `limitexceeded (steps|time|memory)`; `stopped` can't catch it."
+    );
+    println!("                      The limits apply to each program run: every --spool job");
+    println!("                      and sweep frame gets the whole budget, and so does every");
+    println!("                      --bands band for steps and time (the tool");
+    println!("                      subcommands, e.g. `pscat handwrite`, take them too). A job");
+    println!("                      in the window or spool runs at the window's pace, so");
+    println!("                      --max-time counts that pace, not just compute");
     println!("      --allow-write DIR  let the program write files inside DIR (repeatable):");
     println!("                      `(DIR/f) (w) file`, `(a) file`, writereals, renamefile,");
     println!("                      deletefile.");

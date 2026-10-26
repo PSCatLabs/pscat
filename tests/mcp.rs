@@ -1143,6 +1143,32 @@ fn step_and_memory_limits_are_server_flags() {
 }
 
 #[test]
+fn handwrite_is_bounded_by_the_step_limit_not_only_the_timeout() {
+    // Issue #701 (found by #711): `pscat handwrite` did not get the server's
+    // step, time and memory limits, so only `--timeout`'s kill bounded it. A
+    // library that never finishes stands in for `lib/handscript.ps`
+    // (`$PSCAT_LIB`, which the child inherits); the step limit must stop it
+    // long before the 60 s kill, with the structured `limit_exceeded`.
+    let dir = common::scratch_dir("mcp-handwrite-limit");
+    let lib = dir.join("runaway-lib");
+    std::fs::create_dir_all(&lib).unwrap();
+    std::fs::write(lib.join("handscript.ps"), "{ } loop\n").unwrap();
+    let mut s = Server::start_with_env(
+        &dir,
+        &["--timeout", "60", "--max-steps", "100000"],
+        &[("PSCAT_LIB", lib.to_str().unwrap())],
+    );
+    initialized(&mut s);
+    let result = s.tool("handwrite", json!({ "text": "hello" }));
+    // The 60 s kill would be a `timeout` error, so `limit_exceeded` naming
+    // the steps is what shows the interpreter's own limit stopped it.
+    assert_eq!(error_kind(&result), "limit_exceeded", "{result}");
+    let err = &result["structuredContent"]["error"];
+    assert_eq!(err["limit"], "steps", "the step limit stopped it: {err}");
+    s.ping_ok();
+}
+
+#[test]
 fn zero_turns_a_limit_off_and_the_clock_still_stops_the_program() {
     // `--timeout 6` gives the child 4.5 s (a quarter, at most 5 s, is kept
     // back for the child's start and exit), a margin wide enough for a loaded

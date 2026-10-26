@@ -23,7 +23,7 @@
 
 use std::process::ExitCode;
 
-use pscat::Interp;
+use pscat::{Interp, Limits};
 
 use crate::Options;
 
@@ -182,22 +182,65 @@ pub(crate) fn library(name: &str) -> Result<Vec<u8>, Failure> {
         .ok_or_else(|| Failure::Msg(format!("missing library file: {name}")))
 }
 
+/// What a subcommand puts on every interpreter it builds: the execution
+/// limits (`--max-steps`, `--max-time`, `--max-memory`; issue #701) and the
+/// read confinement (`--read-root`, `--confine-reads`; issue #763).
+///
+/// The limits are **per program run**, as the flag CLI's are: each
+/// interpreter a subcommand builds gets the whole budget, and the step
+/// count, the clock and the heap baseline start again with the next. A run
+/// is not a page, so a multi-page document is one run. `handwrite`,
+/// `typewrite` and `photo-etch` run two programs (a measuring pass that
+/// sizes the page, then the render) and give each the full limits, so their
+/// worst case is about twice `--max-time`; `sheet` runs one program per cell.
+#[derive(Clone, Default)]
+pub(crate) struct Confine {
+    /// `Some` confines reads to these directories (none: only the embedded
+    /// `lib/`); `None` leaves reads open.
+    pub(crate) read_roots: Option<Vec<String>>,
+    /// None by default (a bare run is unlimited, as ever).
+    pub(crate) limits: Limits,
+}
+
+impl Confine {
+    /// Put the limits and the read confinement on a fresh `interp`.
+    pub(crate) fn apply(&self, interp: &mut Interp) -> Result<(), Failure> {
+        // `set_limits` refuses only when the tracking allocator is missing,
+        // and this binary declares it.
+        interp
+            .set_limits(self.limits)
+            .map_err(|e| Failure::Msg(e.to_string()))?;
+        match &self.read_roots {
+            Some(dirs) => interp
+                .set_read_roots(dirs)
+                .map_err(|e| Failure::Msg(format!("--read-root: {e}"))),
+            None => Ok(()),
+        }
+    }
+}
+
+/// Take `arg` as `--max-steps`, `--max-time` or `--max-memory` (the value
+/// is the next argument), updating `limits`. `Ok(false)`: not a limit flag.
+pub(crate) fn take_limit_flag(
+    limits: &mut Limits,
+    arg: &str,
+    args: &mut Args,
+) -> Result<bool, String> {
+    if !crate::is_limit_flag(arg) {
+        return Ok(false);
+    }
+    crate::limit_flag(limits, arg, &args.value(arg)?)?;
+    Ok(true)
+}
+
 /// Run a measuring program (`hs-linecount`, `tw-pageheight`, `et-dims`)
 /// headlessly on a fresh default page and return what it printed. A fresh
 /// interpreter, as the scripts' separate `pscat --headless` run was: the
-/// real render must not inherit its random state.
-pub(crate) fn measure(source: &[u8]) -> Result<String, Failure> {
-    measure_confined(source, None)
-}
-
-/// [`measure`], with reads confined to `read_roots` when given (issue #763,
-/// `pscat handwrite --read-root`, which pscat-mcp passes).
-pub(crate) fn measure_confined(
-    source: &[u8],
-    read_roots: Option<&[String]>,
-) -> Result<String, Failure> {
+/// real render must not inherit its random state. `confine` is its own run:
+/// the limits and read roots apply to it as to the render after it.
+pub(crate) fn measure(source: &[u8], confine: &Confine) -> Result<String, Failure> {
     let mut interp = Interp::new();
-    confine_reads(&mut interp, read_roots)?;
+    confine.apply(&mut interp)?;
     interp.capture_stdout();
     if let Err(e) = interp.run_source(source) {
         eprintln!("{}", interp.error_report(&e));
@@ -230,21 +273,12 @@ pub(crate) fn output_format(out: &str) -> Result<Format, String> {
     }
 }
 
-/// Confine `interp`'s reads to `read_roots` when given (issue #763).
-fn confine_reads(interp: &mut Interp, read_roots: Option<&[String]>) -> Result<(), Failure> {
-    match read_roots {
-        Some(dirs) => interp
-            .set_read_roots(dirs)
-            .map_err(|e| Failure::Msg(format!("--read-root: {e}"))),
-        None => Ok(()),
-    }
-}
-
 /// Render `source` on a `page`-point canvas at `dpi` and write it to
 /// `out`, as `pscat --page WxH --dpi D [--halftone] --png|--svg|--pdf OUT
 /// file.ps` does. The file is written even after a PostScript error (a
-/// partial canvas), and the run then fails. `read_roots` confines the
-/// program's reads (issue #763), as `pscat --read-root` does.
+/// partial canvas), and the run then fails. `confine` puts the read roots
+/// (issue #763) and the execution limits (issue #701) on the program, as
+/// `pscat --read-root` and `--max-steps` do.
 pub(crate) fn render(
     source: &[u8],
     page: (u32, u32),
@@ -252,7 +286,7 @@ pub(crate) fn render(
     halftone: bool,
     format: Format,
     out: &str,
-    read_roots: Option<&[String]>,
+    confine: &Confine,
 ) -> Result<(), Failure> {
     let mut options = Options::new();
     options.page = page;
@@ -269,7 +303,7 @@ pub(crate) fn render(
             page.0, page.1
         )));
     };
-    confine_reads(&mut interp, read_roots)?;
+    confine.apply(&mut interp)?;
     match format {
         Format::Png => {}
         Format::Svg => interp.gfx_mut().enable_svg(),

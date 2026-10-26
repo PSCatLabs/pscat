@@ -418,11 +418,17 @@ without the limits above:
   module reads time as 0. A step limit applies (`Interp::set_limits`), but
   the playground does not set one; it runs in slices (`begin` and `step` in
   `web/pscat.js`) so a runaway does not freeze the tab.
-- **`--spool` takes no limits yet**: the flags are refused with it, and the
-  spool runs each file without a cap.
-- **`pscat handwrite` and the other subcommands take no limit flags.** The MCP
-  `handwrite` tool runs trusted library code on escaped text, bounded by
-  `--timeout`.
+- **`--spool` and the tool subcommands take the limits (#701), one budget per
+  program run.** Every `--spool` job, `pscat sheet` cell, `--sweep` frame and
+  `--bands` band (steps and time; the bands share `--max-memory`) is its own
+  run with the whole of `--max-steps` and `--max-time`; a page is not a run, so a multi-page program is one. `pscat
+  handwrite`, `typewrite` and `photo-etch` run two programs (a measuring pass,
+  then the render) and give each the full limits, so their worst case is about
+  twice `--max-time`; `pscat chalk` is one run. A spool job or a window run is
+  paced by the window (`steps_per_frame` per frame), so a time limit counts
+  that pace as well as compute. The MCP `handwrite` tool passes the same
+  `--max-steps`, `--max-time` and `--max-memory` as every other tool, so
+  `--timeout`'s kill is only the backstop for it.
 - The memory limit needs the counting allocator, so a library user who has
   not installed it gets only steps and time (and an error if they ask for
   memory).
@@ -612,9 +618,10 @@ an installed build (October 2026, #568).
   (`unsupported_command`, `unsupported_character`, `missing_argument`, ...)
   and the `token` it named, in one line, never a PostScript stack dump.
 - **`review_sheet` runs every cell in its own child, under the same limits,
-  and reads no file by name (#708).** `pscat sheet` itself runs its programs
-  in-process with no step, time or memory limit, so the server does not call
-  it: each program goes in inline (`source`, never a path, so the tool opens
+  and reads no file by name (#708).** `pscat sheet` runs its programs
+  in-process, one run per cell, under the limits it takes since #701, but
+  those would be per cell of one process and the server wants one shared
+  `--timeout` budget, so the server does not call it: each program goes in inline (`source`, never a path, so the tool opens
   no file the caller named) and each cell is rendered by a `pscat` child with
   `--max-steps`, `--max-time` and `--max-memory`, as `render_postscript` does;
   the server only composes the finished pictures, in-process, with the

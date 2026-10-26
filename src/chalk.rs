@@ -29,7 +29,7 @@ use std::fmt;
 
 use serde_json::{Map, Value};
 
-use crate::{Interp, PsError};
+use crate::{Interp, Limits, PsError};
 
 /// The chalk colours drychalk's `dcchalkcolor` knows.
 pub const CHALK_COLORS: [&str; 6] = ["white", "yellow", "pink", "blue", "green", "orange"];
@@ -1273,8 +1273,27 @@ pub fn render(latex: &str, cfg: &Config, format: Format) -> Result<Vec<u8>, Chal
     run(&d, format)
 }
 
+/// [`render`] under `limits` (issue #701): the whole board is one program
+/// run, so the limits cover it as they cover one `pscat` render. A program
+/// that passes one comes back as [`ChalkError::Render`] carrying the
+/// interpreter's `limitexceeded (steps|time|memory)` report.
+pub fn render_with_limits(
+    latex: &str,
+    cfg: &Config,
+    format: Format,
+    limits: Limits,
+) -> Result<Vec<u8>, ChalkError> {
+    let d = driver(latex, cfg)?;
+    run_with_limits(&d, format, limits)
+}
+
 /// Run a generated program and return the page in `format`.
 pub fn run(d: &Driver, format: Format) -> Result<Vec<u8>, ChalkError> {
+    run_with_limits(d, format, Limits::none())
+}
+
+/// [`run`] under `limits` (issue #701).
+pub fn run_with_limits(d: &Driver, format: Format, limits: Limits) -> Result<Vec<u8>, ChalkError> {
     let mut interp =
         Interp::with_page_scaled(d.width, d.height, d.dpi / 72.0).ok_or_else(|| {
             ChalkError::Config(format!("unusable page size {}x{}", d.width, d.height))
@@ -1291,6 +1310,9 @@ pub fn run(d: &Driver, format: Format) -> Result<Vec<u8>, ChalkError> {
     if d.transparent {
         interp.gfx_mut().set_transparent_background();
     }
+    interp
+        .set_limits(limits)
+        .map_err(|e| ChalkError::Config(e.to_string()))?;
     // Nothing the program prints may reach the caller's stdout: an MCP
     // server speaks JSON-RPC on it.
     interp.capture_stdout();

@@ -17,11 +17,11 @@
 //! `format_sweep_value` in `main.rs`, which a child module can call), a
 //! per-cell mat, stacked columns and `--cols` wrapping.
 
-use pscat::Interp;
 use pscat::contact_sheet::{self as sheet, CellSize, Layout, PackedRow};
+use pscat::{Interp, Limits};
 use tiny_skia::Pixmap;
 
-use super::{Args, Failure, dpi, page_dim};
+use super::{Args, Failure, dpi, page_dim, take_limit_flag};
 use crate::{SweepValue, format_sweep_value, parse_seed_spec, parse_sweep_spec};
 
 const USAGE: &str = r#"usage: pscat sheet [options] FILE.ps [FILE.ps ...]
@@ -62,6 +62,15 @@ Render each FILE as a row of cells and compose them into one labelled PNG.
                      cjk-thai font pack: `pscat fonts install`)
       --no-labels    omit the row labels
       --no-sizes     omit the pixel size from each caption (a sweep's value stays)
+      --max-steps N  stop a cell's program after N interpreter steps (0 = no limit)
+      --max-time SECS  stop a cell's program after SECS of wall-clock time (0 = no limit)
+      --max-memory MIB  stop a cell's program that grows the heap by more than MIB
+                     (0 = no limit). The limits apply to each cell, one program
+                     run, as to each frame of the flag CLI's sweeps: every cell
+                     gets the whole budget, so a sheet's worst case is the cell
+                     count times it. A cell that passes one is drawn as far as it
+                     got, reported as `limitexceeded (steps|time|memory)`, and
+                     the run exits non-zero
   -h, --help         this text
 
 --page and --dpi stay in force for every file after them until given again, so
@@ -165,6 +174,8 @@ struct Opts {
     labels: bool,
     sizes: bool,
     cols: Option<usize>,
+    /// `--max-steps`, `--max-time`, `--max-memory` (issue #701), per cell.
+    limits: Limits,
 }
 
 pub(super) fn run(args: Args) -> Result<(), Failure> {
@@ -278,8 +289,15 @@ pub(super) fn run(args: Args) -> Result<(), Failure> {
         for (c, planned) in cells.iter().enumerate() {
             let CellSpec { dpi: d, zoom, mat } = planned.spec;
             let sweep = e.sweep.as_ref().zip(planned.value);
-            let (frame, ok, fired) =
-                render_cell(&sources[r], &e.path, e.page, d, mat.is_some(), sweep)?;
+            let (frame, ok, fired) = render_cell(
+                &sources[r],
+                &e.path,
+                e.page,
+                d,
+                mat.is_some(),
+                sweep,
+                opts.limits,
+            )?;
             any_failed |= !ok;
             seed_fired |= fired;
             let frame = if zoom > 1 {
@@ -352,6 +370,8 @@ fn probe(page: (u32, u32), dpi: f32) -> Result<(u32, u32), Failure> {
 /// `transparent` draws on a transparent page, for a cell that goes on a
 /// mat. `sweep` is the sweep and the index of the value this cell takes:
 /// a seed overrides `srand`, a parameter is defined before the program.
+/// `limits` (issue #701) cover this cell's program alone: a fresh
+/// interpreter, so each cell has the whole budget.
 fn render_cell(
     source: &[u8],
     path: &str,
@@ -359,9 +379,15 @@ fn render_cell(
     dpi: f32,
     transparent: bool,
     sweep: Option<(&Sweep, usize)>,
+    limits: Limits,
 ) -> Result<(Pixmap, bool, bool), Failure> {
     let mut interp = Interp::with_page_scaled(page.0, page.1, dpi / 72.0)
         .ok_or_else(|| Failure::Msg(format!("{path}: unusable page size")))?;
+    // `set_limits` refuses only when the tracking allocator is missing, and
+    // this binary declares it.
+    interp
+        .set_limits(limits)
+        .map_err(|e| Failure::Msg(e.to_string()))?;
     if transparent {
         interp.gfx_mut().set_transparent_background();
     }
@@ -493,6 +519,7 @@ fn parse(mut args: Args) -> Result<Option<Opts>, String> {
         labels: true,
         sizes: true,
         cols: None,
+        limits: Limits::none(),
     };
     let mut pending = Pending {
         page: pscat::gfx::DEFAULT_PAGE,
@@ -528,6 +555,7 @@ fn parse(mut args: Args) -> Result<Option<Opts>, String> {
             "--cols" => o.cols = Some(parse_cols(&args.value(&arg)?)?),
             "--no-labels" => o.labels = false,
             "--no-sizes" => o.sizes = false,
+            _ if take_limit_flag(&mut o.limits, &arg, &mut args)? => {}
             "--" => {
                 for rest in args.remaining() {
                     push(&mut o, rest, &mut pending);
