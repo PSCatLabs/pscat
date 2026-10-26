@@ -372,7 +372,7 @@ pub(crate) fn has_glyph(requested: &str, c: char) -> bool {
     r.stand_in_note.is_none()
         && face_for(r.fid)
             .ok()
-            .is_some_and(|face| face.glyph_index(c).is_some())
+            .is_some_and(|face| glyph_for_char(face, c).is_some())
 }
 
 /// The FID of an already-registered catalog face whose key is `want`
@@ -650,6 +650,14 @@ fn register_face(key: String, data: &'static [u8]) -> Option<i64> {
 /// so the fuzz target (`fuzzing::truetype`) can run it on every input
 /// without growing the process.
 fn prepare_face<'a>(key: &str, data: &'a [u8]) -> Option<(Face<'a>, CatalogEncoding, String)> {
+    // The axis, name and variation calls below read the same hostile tables.
+    crate::guard::catch(|| prepare_face_unguarded(key, data)).flatten()
+}
+
+fn prepare_face_unguarded<'a>(
+    key: &str,
+    data: &'a [u8],
+) -> Option<(Face<'a>, CatalogEncoding, String)> {
     let mut face = parse_face(data, 0)?;
     // Some catalog files are variable fonts whose *default* named
     // instance isn't Regular — Noto Sans KR/JP ship with wght's default
@@ -747,7 +755,7 @@ fn exercise_face(gfx: &mut Gfx, face: &Face, encoding: CatalogEncoding) {
         '\u{0e01}',
         '\u{10ffff}',
     ] {
-        let gid = face.glyph_index(c);
+        let gid = glyph_for_char(face, c);
         if matches!(encoding, CatalogEncoding::Unicode) || gid.is_some() {
             paint_resolved_glyph(
                 gfx,
@@ -1248,8 +1256,20 @@ fn resolve_glyph(face: &Face, name: &str) -> Option<GlyphId> {
     if name == ".notdef" {
         return None;
     }
-    face.glyph_index_by_name(name)
-        .or_else(|| encodings::name_to_char(name).and_then(|c| face.glyph_index(c)))
+    crate::guard::catch(|| face.glyph_index_by_name(name))
+        .flatten()
+        .or_else(|| encodings::name_to_char(name).and_then(|c| glyph_for_char(face, c)))
+}
+
+/// `Face::glyph_index`, for a face from a file we did not ship: a panic in
+/// the `cmap` parser (see [`parse_face`]) is a missing glyph.
+fn glyph_for_char(face: &Face, c: char) -> Option<GlyphId> {
+    crate::guard::catch(|| face.glyph_index(c)).flatten()
+}
+
+/// `Face::glyph_hor_advance`, likewise guarded.
+fn advance_of(face: &Face, gid: GlyphId) -> Option<u16> {
+    crate::guard::catch(|| face.glyph_hor_advance(gid)).flatten()
 }
 
 /// CTM linear part in f64 (tiny-skia rows: sx ky kx sy tx ty), applied
@@ -1336,8 +1356,8 @@ fn paint_resolved_glyph(
     // interpreter showing an unencoded character. Width is in raw glyph
     // units; `g` already carries the em normalization.
     let w = f64::from(
-        gid.and_then(|g| crate::guard::catch(|| face.glyph_hor_advance(g)).flatten())
-            .or_else(|| face.glyph_hor_advance(GlyphId(0)))
+        gid.and_then(|g| advance_of(face, g))
+            .or_else(|| advance_of(face, GlyphId(0)))
             .unwrap_or(0),
     );
     (g[0] * w, g[1] * w)
@@ -1371,7 +1391,7 @@ fn unicode_glyph(
     pen: DevPoint,
 ) -> Result<(f64, f64), PsError> {
     let face = face_for(fs.fid)?;
-    let gid = char::from_u32(code).and_then(|c| face.glyph_index(c));
+    let gid = char::from_u32(code).and_then(|c| glyph_for_char(face, c));
     Ok(paint_resolved_glyph(gfx, face, fs.matrix, gid, mode, pen))
 }
 
