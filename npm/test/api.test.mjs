@@ -128,9 +128,9 @@ test('a pack face that was not added is reported in warnings, once, naming the s
   assert.deepEqual(r.warnings, img.warnings);
   // One note per face, however often the program asks, and a face with a
   // different stand-in (the typewriter faces become Courier) gets its own.
-  const again = r.render(`${name} ${name} /CourierPrime-Bold findfont pop /Bangers findfont pop`, page);
+  const again = r.render(`${name} ${name} /CourierPrime findfont pop /Bangers findfont pop`, page);
   assert.equal(again.warnings.length, 2);
-  assert.match(again.warnings[1], /\/CourierPrime-Bold is in the extras font pack.*using Courier-Bold/);
+  assert.match(again.warnings[1], /\/CourierPrime is in the extras font pack.*using Courier\. Load.*addFont\('CourierPrime-Regular', bytes\)/);
   // Each run starts clean, and programs that need nothing warn about nothing.
   assert.deepEqual(r.render('/Palatino-Italic findfont pop /Nonesuch findfont pop', page).warnings, []);
   assert.deepEqual(r.warnings, []);
