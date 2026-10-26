@@ -1650,13 +1650,17 @@ impl Interp {
     }
 
     /// Execute the executable name with interned id `id`: look it up on
-    /// the dictionary stack and run what it resolves to.
+    /// the dictionary stack and run what it resolves to. Numbers come out
+    /// of the dictionary copied inline (#863).
     #[inline]
     fn execute_name(&mut self, id: u32) -> Result<(), PsError> {
         self.last_name = Some(id);
         let resolved = self
-            .load_id(id)
-            .ok_or_else(|| PsError::Undefined(crate::name::resolve(id).to_string()))?;
+            .dstack
+            .iter()
+            .rev()
+            .find_map(|d| d.borrow().get_id_ref(id).map(Object::clone_inline))
+            .ok_or_else(|| undefined(id))?;
         self.execute_resolved(resolved, id)
     }
 
@@ -2016,6 +2020,14 @@ impl Interp {
     /// `Rc<str>` and re-intern it (a SipHash probe and a free) on every
     /// `def`, which profiled at ~15% of a bound drykit run (#323).
     pub(crate) fn define_name(&mut self, name: &crate::name::PsName, obj: Object) {
+        // With no save open there is nothing to journal, so the top dict
+        // is borrowed where it is, without an `Rc` clone (#863).
+        if self.save_stack.is_empty() {
+            if let Some(top) = self.dstack.last() {
+                top.borrow_mut().put_name(name, obj);
+            }
+            return;
+        }
         if let Some(top) = self.dstack.last().cloned() {
             self.journal_dict(&top);
             top.borrow_mut().put_name(name, obj);
@@ -2476,6 +2488,13 @@ impl Default for Interp {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// The `undefined` error for name `id`, out of the name lookup's way.
+#[cold]
+#[inline(never)]
+fn undefined(id: u32) -> PsError {
+    PsError::Undefined(crate::name::resolve(id).to_string())
 }
 
 fn token_to_object(tok: Token) -> Object {

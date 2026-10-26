@@ -883,6 +883,13 @@ impl Dict {
         self.names.get(&key.id()).cloned()
     }
 
+    /// [`get_id`](Self::get_id) by reference, for a caller that only
+    /// needs to look (name execution, #863).
+    #[inline(always)]
+    pub(crate) fn get_id_ref(&self, id: u32) -> Option<&Object> {
+        self.names.get(&id)
+    }
+
     #[inline]
     pub(crate) fn get_id(&self, id: u32) -> Option<Object> {
         self.names.get(&id).cloned()
