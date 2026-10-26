@@ -79,7 +79,7 @@ impl PsArray {
     /// before this returns (so `f` must not try to execute anything).
     /// The interpreter's procedure fetch uses it to avoid cloning
     /// elements it only needs to look at (#323).
-    #[inline]
+    #[inline(always)]
     pub(crate) fn peek<R>(&self, i: usize, f: impl FnOnce(&Object) -> R) -> Option<R> {
         if i < self.len {
             Some(f(&self.data.borrow()[self.off + i]))
@@ -309,6 +309,51 @@ impl Object {
         Self::lit(Value::String(PsString::from_bytes(bytes)))
     }
 
+    /// `clone`, with the numbers copied inline. The derived `clone` is an
+    /// out-of-line call that switches on the variant; the step loop and the
+    /// stack operators copy numbers far more often than anything else, so
+    /// they skip that call (#863). Same result as `clone` for every value.
+    #[inline(always)]
+    pub(crate) fn clone_inline(&self) -> Object {
+        let value = match self.value {
+            Value::Integer(i) => Value::Integer(i),
+            Value::Real(r) => Value::Real(r),
+            _ => return self.clone(),
+        };
+        Object {
+            value,
+            executable: self.executable,
+        }
+    }
+
+    /// `drop`, with the plain-data case decided inline. The compiler's
+    /// drop glue for `Value` is an out-of-line call that switches on the
+    /// variant; nearly every operand an operator pops is a number, which
+    /// owns nothing, so the stack and arithmetic operators skip that call
+    /// for them (#863). Every other value is dropped as usual.
+    #[inline(always)]
+    pub(crate) fn drop_inline(self) {
+        match self.value {
+            Value::Integer(_)
+            | Value::Real(_)
+            | Value::Boolean(_)
+            | Value::Mark
+            | Value::Null
+            | Value::Operator(_) => std::mem::forget(self),
+            _ => drop(self),
+        }
+    }
+
+    /// The number this object holds, if it is one.
+    #[inline(always)]
+    pub(crate) fn num(&self) -> Option<Num> {
+        match self.value {
+            Value::Integer(i) => Some(Num::Int(i)),
+            Value::Real(r) => Some(Num::Real(r)),
+            _ => None,
+        }
+    }
+
     /// The `type` operator's name for this object.
     pub fn type_name(&self) -> &'static str {
         match &self.value {
@@ -522,11 +567,21 @@ thread_local! {
 /// the compiler's plain drop glue; profiling fib showed a custom
 /// `Drop for Object` taxing ~18% of the whole run (docs/archive/NOTES.md, Stage 11).
 impl Drop for PsArray {
-    #[inline]
+    /// The shared-storage check is inline, so dropping one of several
+    /// handles (a procedure frame's body, every loop iteration) costs no
+    /// call (#863); the last handle's teardown is out of line.
+    #[inline(always)]
     fn drop(&mut self) {
         if Rc::strong_count(&self.data) != 1 {
             return;
         }
+        self.teardown_last();
+    }
+}
+
+impl PsArray {
+    #[inline(never)]
+    fn teardown_last(&mut self) {
         let data = std::mem::replace(&mut self.data, EMPTY_STORE.with(Rc::clone));
         let Ok(cell) = Rc::try_unwrap(data) else {
             return;
@@ -836,6 +891,13 @@ impl Dict {
     /// Interned fast path (name execution, `load`).
     pub fn get_name(&self, key: &PsName) -> Option<Object> {
         self.names.get(&key.id()).cloned()
+    }
+
+    /// [`get_id`](Self::get_id) by reference, for a caller that only
+    /// needs to look (name execution, #863).
+    #[inline(always)]
+    pub(crate) fn get_id_ref(&self, id: u32) -> Option<&Object> {
+        self.names.get(&id)
     }
 
     #[inline]

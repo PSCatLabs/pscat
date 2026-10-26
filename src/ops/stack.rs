@@ -22,7 +22,7 @@ pub fn install(dict: &mut Dict) {
 }
 
 fn pop(it: &mut Interp) -> Result<(), PsError> {
-    it.pop()?;
+    it.pop()?.drop_inline();
     Ok(())
 }
 
@@ -36,7 +36,11 @@ fn exch(it: &mut Interp) -> Result<(), PsError> {
 }
 
 fn dup(it: &mut Interp) -> Result<(), PsError> {
-    let top = it.ostack.last().cloned().ok_or(PsError::StackUnderflow)?;
+    let top = it
+        .ostack
+        .last()
+        .map(Object::clone_inline)
+        .ok_or(PsError::StackUnderflow)?;
     it.push(top);
     Ok(())
 }
@@ -55,6 +59,17 @@ pub(crate) fn copy_n(it: &mut Interp, n: i64) -> Result<(), PsError> {
 }
 
 fn index(it: &mut Interp) -> Result<(), PsError> {
+    // An integer in range on top: replace it in place (#863). Anything else
+    // takes the general path, which fails as it always has.
+    let len = it.ostack.len();
+    if let Some(Value::Integer(n)) = it.ostack.last().map(|o| &o.value)
+        && *n >= 0
+        && (*n as u64) < (len as u64).saturating_sub(1)
+    {
+        let el = it.ostack[len - 2 - *n as usize].clone_inline();
+        std::mem::replace(&mut it.ostack[len - 1], el).drop_inline();
+        return Ok(());
+    }
     let n = it.pop_int()?;
     if n < 0 {
         return Err(PsError::Rangecheck);

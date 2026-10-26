@@ -88,29 +88,28 @@ enum Frame {
     ProfReturn,
 }
 
-/// One unit of work `next_item` hands the step loop. A procedure's
-/// operators and executable names, almost every element a bound
-/// library runs, arrive as a plain fn pointer or name id: no `Object`
-/// clone, no refcount traffic, no drop (#323).
+/// What `next_item` hands the step loop.
 enum Item {
-    Op(crate::object::OpFn),
-    Name(u32),
+    /// An object scanned from source, to execute (or push).
     Obj(Object),
+    /// A procedure frame with an element left is on top: the step loop
+    /// runs that element with [`Interp::proc_step`], in this same step
+    /// (#863). Procedure elements never pass through `next_item`'s
+    /// `Action` machinery.
+    Proc,
 }
 
-impl Item {
-    /// Decide what a procedure element is, from a borrow of it.
-    #[inline]
-    fn fetch(o: &Object) -> Item {
-        if o.executable {
-            match &o.value {
-                Value::Operator(op) => return Item::Op(op.func),
-                Value::Name(n) => return Item::Name(n.id()),
-                _ => {}
-            }
-        }
-        Item::Obj(o.clone())
-    }
+/// What [`Interp::proc_step`] did with the top of the execution stack.
+enum ProcStep {
+    /// A procedure element that is an operator: call it.
+    Op(crate::object::OpFn),
+    /// A procedure element that is an executable name: look it up and run it.
+    Name(u32),
+    /// A procedure element that is pushed (a literal, or a procedure body
+    /// met inside a procedure): already on the operand stack.
+    Pushed,
+    /// The top frame is not a procedure: take the general path.
+    Other,
 }
 
 pub(crate) enum PostOp {
@@ -964,26 +963,36 @@ impl Interp {
             if self.quit_requested {
                 return Ok(false);
             }
-            let item = match self.next_item() {
-                Ok(None) => return Ok(false),
-                Ok(Some(item)) => item,
-                Err(e) => {
-                    self.sync_scan_line();
-                    self.recover(e)?;
-                    continue;
-                }
-            };
-            let done = match item {
-                Item::Op(func) => self.timed_op(func),
-                Item::Name(id) => self.execute_name_timed(id),
-                Item::Obj(obj) => match (&obj.value, obj.executable) {
-                    (Value::Name(n), true) => self.execute_name_timed(n.id()),
-                    (Value::Operator(op), true) => {
-                        let func = op.func;
-                        self.timed_op(func)
+            let mut step = self.proc_step();
+            if let ProcStep::Other = step {
+                match self.next_item() {
+                    Ok(None) => return Ok(false),
+                    Ok(Some(Item::Proc)) => step = self.proc_step(),
+                    Ok(Some(Item::Obj(obj))) => {
+                        let done = match (&obj.value, obj.executable) {
+                            (Value::Name(n), true) => self.execute_name_timed(n.id()),
+                            (Value::Operator(op), true) => {
+                                let func = op.func;
+                                self.timed_op(func)
+                            }
+                            _ => self.execute_element(obj),
+                        };
+                        if let Err(e) = done {
+                            self.recover(e)?;
+                        }
+                        continue;
                     }
-                    _ => self.execute_element(obj),
-                },
+                    Err(e) => {
+                        self.sync_scan_line();
+                        self.recover(e)?;
+                        continue;
+                    }
+                }
+            }
+            let done = match step {
+                ProcStep::Op(func) => self.timed_op(func),
+                ProcStep::Name(id) => self.execute_name_timed(id),
+                ProcStep::Pushed | ProcStep::Other => continue,
             };
             if let Err(e) = done {
                 self.recover(e)?;
@@ -1023,28 +1032,83 @@ impl Interp {
             if self.quit_requested {
                 return Ok(false);
             }
-            let item = match self.next_item() {
-                Ok(None) => return Ok(false),
-                Ok(Some(item)) => item,
-                Err(e) => {
-                    // A scan/syntax error short-circuits out of
-                    // next_item before any Action ran, so the failing
-                    // Scanner frame is still on top with its line set.
-                    self.sync_scan_line();
-                    self.recover(e)?;
-                    continue;
-                }
-            };
-            let done = match item {
-                Item::Op(func) => func(self),
-                Item::Name(id) => self.execute_name(id),
-                Item::Obj(obj) => self.execute_element(obj),
+            // A procedure element (nearly every step of a bound library)
+            // is dispatched straight from the frame. Anything else goes
+            // through `next_item`, which hands back `Item::Proc` when a
+            // loop iteration (or a frame finishing) leaves a procedure on
+            // top: its first element runs in this same step, as it always
+            // has.
+            let done = match self.proc_step() {
+                ProcStep::Op(func) => func(self),
+                ProcStep::Name(id) => self.execute_name(id),
+                ProcStep::Pushed => continue,
+                ProcStep::Other => match self.next_item() {
+                    Ok(None) => return Ok(false),
+                    Ok(Some(Item::Obj(obj))) => self.execute_element(obj),
+                    Ok(Some(Item::Proc)) => match self.proc_step() {
+                        ProcStep::Op(func) => func(self),
+                        ProcStep::Name(id) => self.execute_name(id),
+                        // `Other` is not reached: `next_item` checked the
+                        // frame has an element left.
+                        ProcStep::Pushed | ProcStep::Other => continue,
+                    },
+                    Err(e) => {
+                        // A scan/syntax error short-circuits out of
+                        // next_item before any Action ran, so the failing
+                        // Scanner frame is still on top with its line set.
+                        self.sync_scan_line();
+                        self.recover(e)?;
+                        continue;
+                    }
+                },
             };
             if let Err(e) = done {
                 self.recover(e)?;
             }
         }
         Ok(!self.estack.is_empty())
+    }
+
+    /// One step of a procedure frame on top of the execution stack, taken
+    /// without going through `next_item` (#863): the element is looked at
+    /// in place (one momentary borrow, released before anything executes,
+    /// so a `put` into the running procedure is still seen, #323). A
+    /// literal is pushed right here, numbers copied without the
+    /// out-of-line `clone`; an operator or executable name comes back for
+    /// the caller to run. As in `next_item`, the frame is popped as it
+    /// yields its last element, before that element runs (tail calls).
+    /// `sync_scan_line` is not needed: the top frame is not a scanner.
+    #[inline(always)]
+    fn proc_step(&mut self) -> ProcStep {
+        let Interp { estack, ostack, .. } = self;
+        let Some(Frame::Proc { body, pc }) = estack.last_mut() else {
+            return ProcStep::Other;
+        };
+        let i = *pc;
+        let Some(step) = body.peek(i, |o| {
+            if o.executable {
+                match &o.value {
+                    Value::Operator(op) => return ProcStep::Op(op.func),
+                    Value::Name(n) => return ProcStep::Name(n.id()),
+                    _ => {}
+                }
+            }
+            ostack.push(o.clone_inline());
+            ProcStep::Pushed
+        }) else {
+            // Not reached (an exhausted frame is popped as it yields its
+            // last element), but `next_item` knows what to do with one.
+            return ProcStep::Other;
+        };
+        *pc = i + 1;
+        if *pc >= body.len() {
+            // Known to be this `Proc` frame: drop just its body, not
+            // through the general frame drop glue.
+            if let Some(Frame::Proc { body, .. }) = self.estack.pop() {
+                drop(body);
+            }
+        }
+        step
     }
 
     /// If a `stopped` context encloses the error, record it in `$error`,
@@ -1230,7 +1294,6 @@ impl Interp {
         // each pass decides on an action first, then applies it.
         enum Action {
             Yield(Item),
-            PopThenYield(Item),
             Pop,
             PopThenPush(Object),
             PopThenPush2(Object, Object),
@@ -1283,25 +1346,16 @@ impl Interp {
                         }
                         Some(tok) => Action::Yield(Item::Obj(token_to_object(tok))),
                     },
-                    // The element is inspected in place (one momentary
-                    // borrow, released before it executes, so a `put`
-                    // into the running procedure still works): an
-                    // operator or executable name yields without
-                    // cloning the object (#323).
-                    Frame::Proc { body, pc } => match body.peek(*pc, Item::fetch) {
-                        None => Action::Pop,
-                        Some(o) => {
-                            *pc += 1;
-                            // Tail call: the frame is finished the moment
-                            // it yields its last element, so drop it
-                            // before executing.
-                            if *pc >= body.len() {
-                                Action::PopThenYield(o)
-                            } else {
-                                Action::Yield(o)
-                            }
+                    // The step loop runs procedure elements itself
+                    // (`proc_step`, #863). An exhausted frame is popped
+                    // as it yields its last element, so this `Pop` is
+                    // only a safeguard.
+                    Frame::Proc { body, pc } => {
+                        if *pc < body.len() {
+                            return Ok(Some(Item::Proc));
                         }
-                    },
+                        Action::Pop
+                    }
                     Frame::Repeat { body, remaining } => {
                         if *remaining <= 0 {
                             Action::Pop
@@ -1414,10 +1468,6 @@ impl Interp {
             match action {
                 Action::Yield(o) => {
                     self.sync_scan_line();
-                    return Ok(Some(o));
-                }
-                Action::PopThenYield(o) => {
-                    self.estack.pop();
                     return Ok(Some(o));
                 }
                 Action::Pop => {
@@ -1578,13 +1628,17 @@ impl Interp {
     }
 
     /// Execute the executable name with interned id `id`: look it up on
-    /// the dictionary stack and run what it resolves to.
+    /// the dictionary stack and run what it resolves to. Numbers come out
+    /// of the dictionary copied inline (#863).
     #[inline]
     fn execute_name(&mut self, id: u32) -> Result<(), PsError> {
         self.last_name = Some(id);
         let resolved = self
-            .load_id(id)
-            .ok_or_else(|| PsError::Undefined(crate::name::resolve(id).to_string()))?;
+            .dstack
+            .iter()
+            .rev()
+            .find_map(|d| d.borrow().get_id_ref(id).map(Object::clone_inline))
+            .ok_or_else(|| undefined(id))?;
         self.execute_resolved(resolved, id)
     }
 
@@ -1944,6 +1998,14 @@ impl Interp {
     /// `Rc<str>` and re-intern it (a SipHash probe and a free) on every
     /// `def`, which profiled at ~15% of a bound drykit run (#323).
     pub(crate) fn define_name(&mut self, name: &crate::name::PsName, obj: Object) {
+        // With no save open there is nothing to journal, so the top dict
+        // is borrowed where it is, without an `Rc` clone (#863).
+        if self.save_stack.is_empty() {
+            if let Some(top) = self.dstack.last() {
+                top.borrow_mut().put_name(name, obj);
+            }
+            return;
+        }
         if let Some(top) = self.dstack.last().cloned() {
             self.journal_dict(&top);
             top.borrow_mut().put_name(name, obj);
@@ -2212,6 +2274,30 @@ impl Interp {
         self.ostack.pop().ok_or(PsError::StackUnderflow)
     }
 
+    /// The top two operands, if both are numbers (deeper one first). The
+    /// arithmetic and comparison operators' fast path (#863): it looks
+    /// without popping, so when it says no, the operator's general path
+    /// runs on an untouched stack and fails exactly as it always has.
+    #[inline(always)]
+    pub(crate) fn top2_nums(&self) -> Option<(Num, Num)> {
+        let [.., a, b] = self.ostack.as_slice() else {
+            return None;
+        };
+        Some((a.num()?, b.num()?))
+    }
+
+    /// Replace the top two operands with the literal `v`. For the fast
+    /// paths above, once `top2_nums` has said both are numbers.
+    #[inline(always)]
+    pub(crate) fn replace_top2(&mut self, v: Value) {
+        if let Some(b) = self.ostack.pop() {
+            b.drop_inline();
+        }
+        if let Some(a) = self.ostack.last_mut() {
+            std::mem::replace(a, Object::lit(v)).drop_inline();
+        }
+    }
+
     #[doc(hidden)]
     pub fn pop_num(&mut self) -> Result<Num, PsError> {
         match self.pop()?.value {
@@ -2380,6 +2466,13 @@ impl Default for Interp {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// The `undefined` error for name `id`, out of the name lookup's way.
+#[cold]
+#[inline(never)]
+fn undefined(id: u32) -> PsError {
+    PsError::Undefined(crate::name::resolve(id).to_string())
 }
 
 fn token_to_object(tok: Token) -> Object {
