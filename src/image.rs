@@ -940,7 +940,7 @@ pub(crate) fn invert6(m: [f64; 6]) -> Option<[f64; 6]> {
 
 #[cfg(test)]
 mod tests {
-    use super::{blend_pixel, expansion};
+    use super::{ImageColor, ImageCtx, ImageSource, blend_pixel, expansion};
     use crate::gfx::BlendMode;
 
     /// An image pixel must composite as a fill of the same colour does
@@ -971,6 +971,53 @@ mod tests {
                             "{blend:?} alpha {alpha} ground {ground}: {mine:?} vs {:?}",
                             pm.data()
                         );
+                    }
+                }
+            }
+        }
+    }
+
+    /// The byte-aligned fast path in `sample()` (#793) must agree with the
+    /// bit-by-bit definition at every sample, including past the end of a
+    /// short buffer (missing bytes read as 0) and with odd row padding.
+    #[test]
+    fn sample_fast_path_matches_the_bitwise_read() {
+        for bits in [1u32, 2, 4, 8, 12, 16] {
+            for ncomp in [1u32, 3, 4] {
+                let (w, h) = (5usize, 4usize);
+                let mut img = ImageCtx::new(
+                    w,
+                    h,
+                    bits,
+                    ncomp,
+                    vec![],
+                    [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+                    None,
+                    ImageColor::Direct,
+                    ImageSource::Bytes(vec![]),
+                );
+                let full = img.row_bytes() * h;
+                // Longer than needed, exact, and cut short mid-row.
+                for len in [full + 3, full, full * 2 / 3, 1, 0] {
+                    img.data = (0..len).map(|i| (i * 37 + 11) as u8).collect();
+                    for iy in 0..h + 1 {
+                        for ix in 0..w + 1 {
+                            for comp in 0..ncomp as usize {
+                                let bitpos = iy * img.row_bytes() * 8
+                                    + (ix * ncomp as usize + comp) * bits as usize;
+                                let mut want = 0u32;
+                                for i in 0..bits as usize {
+                                    let bit = bitpos + i;
+                                    let byte = img.data.get(bit / 8).copied().unwrap_or(0);
+                                    want = (want << 1) | u32::from((byte >> (7 - bit % 8)) & 1);
+                                }
+                                assert_eq!(
+                                    img.sample(ix, iy, comp),
+                                    want,
+                                    "{bits} bits, {ncomp} comps, len {len}, ({ix},{iy}) c{comp}"
+                                );
+                            }
+                        }
                     }
                 }
             }
