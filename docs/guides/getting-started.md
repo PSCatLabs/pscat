@@ -185,7 +185,8 @@ More on the less obvious ones:
   those fractions of the page height, from the top (each rounded to the
   nearest device row): thin bands where rows are costly, tall ones where
   they are cheap. Cuts of equal cost run about as fast as separate
-  processes over the same cuts would, and they carry across `--dpi`. One
+  processes over the same cuts would, and they carry across `--dpi`
+  (cuts closer together than a device row at the chosen dpi are refused). One
   way to find them is to time a few single-thread runs with `/BandBBox` set
   by hand, then cut the cumulative cost into equal parts
   (`notes/869-bands-tail-gap.md`).

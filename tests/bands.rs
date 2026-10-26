@@ -393,11 +393,29 @@ fn refuses_what_it_cannot_honour() {
             "--band-cuts needs --bands",
         ),
         (
-            vec!["--bands", "2", "--band-cuts", "0.6,0.4", "--png", png, "-e", "0"],
+            vec![
+                "--bands",
+                "2",
+                "--band-cuts",
+                "0.6,0.4",
+                "--png",
+                png,
+                "-e",
+                "0",
+            ],
             "invalid --band-cuts",
         ),
         (
-            vec!["--bands", "2", "--band-cuts", "1.5", "--png", png, "-e", "0"],
+            vec![
+                "--bands",
+                "2",
+                "--band-cuts",
+                "1.5",
+                "--png",
+                png,
+                "-e",
+                "0",
+            ],
             "invalid --band-cuts",
         ),
         (
@@ -715,7 +733,10 @@ fn band_cuts_match_byte_for_byte() {
             &dir.join(format!("cuts{threads}.png")),
             &["--bands", threads, "--band-cuts", cuts],
         );
-        assert!(got == want, "--band-cuts {cuts} differs from the plain render");
+        assert!(
+            got == want,
+            "--band-cuts {cuts} differs from the plain render"
+        );
     }
 }
 

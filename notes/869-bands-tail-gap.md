@@ -29,8 +29,10 @@ its next 512-step slice. The bytes were identical either way. Backups ran on
 the same N workers, so the shared `--max-memory` base still covered them.
 They were turned off under `--max-memory` anyway, because a copy of the
 hottest band doubles that band's heap. A backup that hit a limit gave up
-without reporting it. The backups did fire and sometimes won (traced: at
-N=10 bands 16-18 were backed up, and the backups won).
+without reporting it. In one traced run (on the default page, not the timed
+320x200 one), backups fired for bands 6, 16, 17 and 18 at N=10, and the
+copies of 17 and 18 won. At N=4 only band 7 was backed up. So the backups
+mostly went to the bottom bands, which started last and were cheap.
 
 Five interleaved rounds, load average 21-23 on the shared 10-core machine,
 wall times in seconds:
@@ -50,9 +52,7 @@ reasons:
 - A copy re-runs the whole band. At best it recovers the penalty of an
   efficiency core, but it can never get under the hot band's own cost, and
   that cost is the gap that cuts close.
-- On a machine with no idle cores, the copy takes CPU from the original. The
-  median gate didn't help either: the cheap sky bands pull the median down,
-  so nearly every hot band qualified.
+- On a machine with no idle cores, the copy takes CPU from the original.
 
 The prototype is not in the tree.
 

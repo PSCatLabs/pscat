@@ -402,7 +402,8 @@ fn render(
         pscat::memtrack::live_bytes()
             .saturating_add(per_band.saturating_mul(plan.threads as usize)),
     );
-    let slots: Vec<Mutex<Option<BandOutput>>> = (0..plan.count()).map(|_| Mutex::new(None)).collect();
+    let slots: Vec<Mutex<Option<BandOutput>>> =
+        (0..plan.count()).map(|_| Mutex::new(None)).collect();
     let failure: Mutex<Option<String>> = Mutex::new(None);
     let fail = |msg: String| {
         queue.stop.store(true, Relaxed);
@@ -714,7 +715,9 @@ mod tests {
     #[test]
     fn band_cuts_parse() {
         assert_eq!(parse_cuts("0.4,0.45, 0.5"), Ok(vec![0.4, 0.45, 0.5]));
-        for bad in ["", "0", "1", "0.5,0.4", "0.4,0.4", "-0.1", "half", "0.2,,0.3", "NaN"] {
+        for bad in [
+            "", "0", "1", "0.5,0.4", "0.4,0.4", "-0.1", "half", "0.2,,0.3", "NaN",
+        ] {
             assert!(parse_cuts(bad).is_err(), "{bad:?}");
         }
     }
