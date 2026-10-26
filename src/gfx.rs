@@ -1144,9 +1144,10 @@ impl Gfx {
     /// coverage computed analytically by [`crate::coverage`] rather than
     /// by tiny-skia's 4x4 supersampler, so a shape thinner than a pixel
     /// keeps a coverage proportional to its area (issue #692). The
-    /// coverage mask is composited through `fill_rect` with AA off: the
-    /// mask already holds the edge coverage, and colour, alpha and blend
-    /// still go through tiny-skia's pipeline as before.
+    /// coverage mask is composited through `fill_rect` with AA off, one
+    /// rectangle per run of [`crate::coverage::runs`]: the mask already
+    /// holds the edge coverage, and colour, alpha and blend still go
+    /// through tiny-skia's pipeline as before.
     fn fill_coverage(&mut self, path: &tiny_skia::Path, rule: FillRule) {
         let (w, h) = (self.pixmap.width(), self.pixmap.height());
         let mut cov = match self.coverage.take() {
@@ -1159,14 +1160,22 @@ impl Gfx {
         let clip = self
             .clip_mask()
             .filter(|c| c.width() == w && c.height() == h);
-        if let Some(r) = crate::coverage::rasterize(path, rule.into(), &mut cov, clip.as_deref())
-            && let Some(rect) =
-                tiny_skia::Rect::from_ltrb(r.x0 as f32, r.y0 as f32, r.x1 as f32, r.y1 as f32)
-        {
+        let runs = crate::coverage::rasterize(path, rule.into(), &mut cov, clip.as_deref());
+        if !runs.is_empty() {
             let mut paint = self.paint();
             paint.anti_alias = false;
-            self.pixmap
-                .fill_rect(rect, &paint, Transform::identity(), Some(&cov));
+            // Fully covered runs go through tiny-skia without the mask (its
+            // opaque fast path), so a page-sized fill costs what it did.
+            for run in runs {
+                let r = run.rect;
+                if let Some(rect) =
+                    tiny_skia::Rect::from_ltrb(r.x0 as f32, r.y0 as f32, r.x1 as f32, r.y1 as f32)
+                {
+                    let mask = if run.solid { None } else { Some(&cov) };
+                    self.pixmap
+                        .fill_rect(rect, &paint, Transform::identity(), mask);
+                }
+            }
         }
         self.coverage = Some(cov);
     }

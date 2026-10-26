@@ -71,16 +71,36 @@ struct Line {
     y1: f32,
 }
 
-/// Rasterise `path` (device coordinates) into `mask`, writing coverage
-/// for every pixel of the returned rectangle and touching nothing outside
-/// it. Coverage is multiplied by `clip` (same size as `mask`) when given.
-/// Returns `None` when the path covers no pixel of the mask.
-pub(crate) fn rasterize(
-    path: &Path,
-    rule: Rule,
-    mask: &mut Mask,
-    clip: Option<&Mask>,
-) -> Option<PixRect> {
+/// A rectangle of the mask to composite: `solid` means every pixel in it
+/// has full coverage, so it is painted without the mask; otherwise the
+/// mask holds each pixel's coverage.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct Run {
+    pub rect: PixRect,
+    pub solid: bool,
+}
+
+/// Shortest run of full coverage worth painting on its own; shorter ones
+/// join the neighbouring masked run.
+const MIN_SOLID: u32 = 16;
+/// A path whose pixel bounds are at most this many pixels comes back as
+/// one masked run over its bounds: for a small shape one compositing call
+/// beats several.
+const SMALL_AREA: usize = 4096;
+
+/// Rasterise `path` (device coordinates) and return the rectangles to
+/// composite, which never overlap and cover every pixel with nonzero
+/// coverage. The mask bytes of every masked run are written; nothing else
+/// in `mask` is touched (a small path's whole bounds count as one masked
+/// run, uncovered pixels zeroed). Coverage is multiplied by `clip` (same size as
+/// `mask`) when given, and then no run is solid.
+///
+/// Work is proportional to the path's edges and its partly covered
+/// pixels, not its area: between two cells an edge touched, a row's
+/// coverage is constant, so a big interior becomes one solid span (and,
+/// merged with the identical spans of the rows below, one rectangle).
+pub(crate) fn rasterize(path: &Path, rule: Rule, mask: &mut Mask, clip: Option<&Mask>) -> Vec<Run> {
+    let mut out = Vec::new();
     let (mw, mh) = (mask.width(), mask.height());
     let b = path.bounds();
     let x0 = b.left().floor().max(0.0);
@@ -88,16 +108,11 @@ pub(crate) fn rasterize(
     let x1 = b.right().ceil().min(mw as f32);
     let y1 = b.bottom().ceil().min(mh as f32);
     if !(x0 < x1 && y0 < y1) {
-        return None;
+        return out;
     }
-    let rect = PixRect {
-        x0: x0 as u32,
-        y0: y0 as u32,
-        x1: x1 as u32,
-        y1: y1 as u32,
-    };
-    let w = (rect.x1 - rect.x0) as usize;
-    let h = (rect.y1 - rect.y0) as usize;
+    let (ox, oy) = (x0 as u32, y0 as u32);
+    let w = (x1 - x0) as usize;
+    let h = (y1 - y0) as usize;
 
     // Edges relative to the rectangle's origin, x clipped to [0, w]: an
     // edge left of the rectangle still adds its winding to every pixel
@@ -106,40 +121,172 @@ pub(crate) fn rasterize(
     let mut lines = Vec::new();
     flatten(path, x0, y0, |l| push_clipped(&mut lines, l, w as f32));
     if lines.is_empty() {
-        return None;
+        return out;
     }
 
+    let small = w * h <= SMALL_AREA;
+    if small {
+        let mstride = mw as usize;
+        for py in oy as usize..oy as usize + h {
+            mask.data_mut()[py * mstride + ox as usize..][..w].fill(0);
+        }
+    }
     let stride = w + 2;
     let band = (BAND_FLOATS / stride).clamp(1, h);
-    let mut acc = vec![0.0f32; stride * band];
+    let mut acc = Acc {
+        vals: vec![0.0; stride * band],
+        hit: vec![false; stride * band],
+        list: Vec::new(),
+    };
+    let mut merger = Merger::default();
+    let mut spans: Vec<(u32, u32, bool)> = Vec::new();
     let mstride = mw as usize;
     let mut by = 0;
     while by < h {
         let bh = band.min(h - by);
-        acc[..stride * bh].fill(0.0);
         for l in &lines {
             accumulate(&mut acc, stride, by, bh, l);
         }
+        acc.list.sort_unstable();
+        let mut cells = std::mem::take(&mut acc.list);
+        let mut k = 0;
         for row in 0..bh {
-            let py = rect.y0 as usize + by + row;
-            let start = py * mstride + rect.x0 as usize;
-            let out = &mut mask.data_mut()[start..start + w];
-            let src = &acc[row * stride..row * stride + w];
+            let py = oy as usize + by + row;
+            let line = &mut mask.data_mut()[py * mstride..][..mstride];
+            let cl = clip.map(|c| &c.data()[py * mstride..][..mstride]);
+            spans.clear();
+            // Paint pixels [a, b) of this row (rectangle-relative) at `alpha`.
+            let mut span = |a: usize, b: usize, alpha: u8| {
+                if a >= b || alpha == 0 {
+                    return;
+                }
+                let (pa, pb) = (ox + a as u32, ox + b as u32);
+                let solid = alpha == 255 && cl.is_none() && !small;
+                if !solid {
+                    let dst = &mut line[pa as usize..pb as usize];
+                    match cl {
+                        Some(c) => {
+                            for (d, c) in dst.iter_mut().zip(&c[pa as usize..pb as usize]) {
+                                *d = mul255(alpha, *c);
+                            }
+                        }
+                        None => dst.fill(alpha),
+                    }
+                }
+                match spans.last_mut() {
+                    Some(last) if last.1 == pa && last.2 == solid => last.1 = pb,
+                    _ => spans.push((pa, pb, solid)),
+                }
+            };
+            let row_start = row * stride;
             let mut sum = 0.0f32;
-            for (o, a) in out.iter_mut().zip(src) {
-                sum += *a;
-                *o = to_alpha(sum, rule);
+            let mut prev = 0usize;
+            while k < cells.len() && (cells[k] as usize) < row_start + stride {
+                let i = cells[k] as usize;
+                k += 1;
+                let x = i - row_start;
+                let v = acc.vals[i];
+                acc.vals[i] = 0.0;
+                acc.hit[i] = false;
+                if x >= w {
+                    continue;
+                }
+                span(prev, x, to_alpha(sum, rule));
+                sum += v;
+                span(x, x + 1, to_alpha(sum, rule));
+                prev = x + 1;
             }
-            if let Some(c) = clip {
-                let cl = &c.data()[start..start + w];
-                for (o, c) in out.iter_mut().zip(cl) {
-                    *o = mul255(*o, *c);
+            span(prev, w, to_alpha(sum, rule));
+            // Short solid spans aren't worth a call of their own: write
+            // their coverage and fold them into the masked neighbours.
+            let mut merged: Vec<(u32, u32, bool)> = Vec::with_capacity(spans.len());
+            for &(a, b, solid) in &spans {
+                let short = solid && b - a < MIN_SOLID;
+                if short {
+                    line[a as usize..b as usize].fill(255);
+                }
+                let solid = solid && !short;
+                match merged.last_mut() {
+                    Some(last) if last.1 == a && last.2 == solid => last.1 = b,
+                    _ => merged.push((a, b, solid)),
                 }
             }
+            merger.row(oy + (by + row) as u32, &merged, &mut out);
         }
+        cells.clear();
+        acc.list = cells;
         by += bh;
     }
-    Some(rect)
+    merger.finish(oy + h as u32, &mut out);
+    if small && !out.is_empty() {
+        out.clear();
+        out.push(Run {
+            rect: PixRect {
+                x0: ox,
+                y0: oy,
+                x1: ox + w as u32,
+                y1: oy + h as u32,
+            },
+            solid: false,
+        });
+    }
+    out
+}
+
+/// The accumulation buffer for one band, with the cells touched so far:
+/// only those are read back and reset, so a band costs its edges, not
+/// its area.
+struct Acc {
+    vals: Vec<f32>,
+    hit: Vec<bool>,
+    list: Vec<u32>,
+}
+
+impl Acc {
+    #[inline]
+    fn add(&mut self, i: usize, v: f32) {
+        self.vals[i] += v;
+        if !self.hit[i] {
+            self.hit[i] = true;
+            self.list.push(i as u32);
+        }
+    }
+}
+
+/// Merges identical spans on consecutive rows into taller rectangles.
+#[derive(Default)]
+struct Merger {
+    /// Open rectangles: (x0, x1, solid, first row).
+    open: Vec<(u32, u32, bool, u32)>,
+    next: Vec<(u32, u32, bool, u32)>,
+}
+
+impl Merger {
+    fn row(&mut self, y: u32, spans: &[(u32, u32, bool)], out: &mut Vec<Run>) {
+        self.next.clear();
+        for &(a, b, solid) in spans {
+            let y0 = match self
+                .open
+                .iter()
+                .position(|o| o.0 == a && o.1 == b && o.2 == solid)
+            {
+                Some(i) => self.open.swap_remove(i).3,
+                None => y,
+            };
+            self.next.push((a, b, solid, y0));
+        }
+        self.finish(y, out);
+        std::mem::swap(&mut self.open, &mut self.next);
+    }
+
+    fn finish(&mut self, y: u32, out: &mut Vec<Run>) {
+        for (x0, x1, solid, y0) in self.open.drain(..) {
+            out.push(Run {
+                rect: PixRect { x0, y0, x1, y1: y },
+                solid,
+            });
+        }
+    }
 }
 
 /// Winding-weighted coverage to an 8-bit alpha under `rule`.
@@ -290,7 +437,7 @@ fn push_clipped(out: &mut Vec<Line>, l: Line, w: f32) {
 /// `[0, stride - 2]`. After a running sum along a row, each cell holds
 /// the winding-weighted area of its pixel the path covers. The per-row
 /// arithmetic is font-rs's (Raph Levien, Apache-2.0/MIT).
-fn accumulate(acc: &mut [f32], stride: usize, by: usize, bh: usize, l: &Line) {
+fn accumulate(acc: &mut Acc, stride: usize, by: usize, bh: usize, l: &Line) {
     let (dir, a, b) = if l.y0 < l.y1 {
         (1.0f32, (l.x0, l.y0), (l.x1, l.y1))
     } else {
@@ -324,27 +471,27 @@ fn accumulate(acc: &mut [f32], stride: usize, by: usize, bh: usize, l: &Line) {
         let x1i = x1ceil as usize;
         if x1i <= x0i + 1 {
             let xmf = 0.5 * (x + xnext) - x0floor;
-            acc[row + x0i] += d - d * xmf;
-            acc[row + x0i + 1] += d * xmf;
+            acc.add(row + x0i, d - d * xmf);
+            acc.add(row + x0i + 1, d * xmf);
         } else {
             let s = 1.0 / (x1 - x0);
             let x0f = x0 - x0floor;
             let a0 = 0.5 * s * (1.0 - x0f) * (1.0 - x0f);
             let x1f = x1 - x1ceil + 1.0;
             let am = 0.5 * s * x1f * x1f;
-            acc[row + x0i] += d * a0;
+            acc.add(row + x0i, d * a0);
             if x1i == x0i + 2 {
-                acc[row + x0i + 1] += d * (1.0 - a0 - am);
+                acc.add(row + x0i + 1, d * (1.0 - a0 - am));
             } else {
                 let a1 = s * (1.5 - x0f);
-                acc[row + x0i + 1] += d * (a1 - a0);
+                acc.add(row + x0i + 1, d * (a1 - a0));
                 for xi in x0i + 2..x1i - 1 {
-                    acc[row + xi] += d * s;
+                    acc.add(row + xi, d * s);
                 }
                 let a2 = a1 + (x1i - x0i - 3) as f32 * s;
-                acc[row + x1i - 1] += d * (1.0 - a2 - am);
+                acc.add(row + x1i - 1, d * (1.0 - a2 - am));
             }
-            acc[row + x1i] += d * am;
+            acc.add(row + x1i, d * am);
         }
         x = xnext;
     }
@@ -355,10 +502,31 @@ mod tests {
     use super::*;
     use tiny_skia::{PathBuilder, Rect};
 
+    /// What the caller composites: solid runs at full coverage, masked
+    /// runs from the working mask (pre-filled with junk, which no run may
+    /// show), each pixel at most once.
+    fn render_clipped(path: &Path, rule: Rule, w: u32, h: u32, clip: Option<&Mask>) -> Mask {
+        let mut work = Mask::new(w, h).unwrap();
+        work.data_mut().fill(77);
+        let runs = rasterize(path, rule, &mut work, clip);
+        let mut out = Mask::new(w, h).unwrap();
+        let mut seen = vec![false; (w * h) as usize];
+        for r in &runs {
+            assert!(r.rect.x0 < r.rect.x1 && r.rect.y0 < r.rect.y1, "{r:?}");
+            for y in r.rect.y0..r.rect.y1 {
+                for x in r.rect.x0..r.rect.x1 {
+                    let i = (y * w + x) as usize;
+                    assert!(!seen[i], "pixel {x},{y} painted twice");
+                    seen[i] = true;
+                    out.data_mut()[i] = if r.solid { 255 } else { work.data()[i] };
+                }
+            }
+        }
+        out
+    }
+
     fn render(path: &Path, rule: Rule, w: u32, h: u32) -> Mask {
-        let mut m = Mask::new(w, h).unwrap();
-        rasterize(path, rule, &mut m, None);
-        m
+        render_clipped(path, rule, w, h, None)
     }
 
     fn mean(m: &Mask) -> f64 {
@@ -448,25 +616,42 @@ mod tests {
     }
 
     #[test]
+    fn big_shapes_become_few_runs() {
+        let mut m = Mask::new(90, 70).unwrap();
+        let runs = rasterize(&rect(2.5, 3.5, 80.0, 60.0), Rule::NonZero, &mut m, None);
+        assert!(
+            runs.len() <= 6,
+            "{} runs for a rectangle: {runs:?}",
+            runs.len()
+        );
+        assert!(runs.iter().any(|r| r.solid));
+        let disc = PathBuilder::from_circle(40.0, 30.0, 25.3).unwrap();
+        let runs = rasterize(&disc, Rule::NonZero, &mut m, None);
+        assert!(runs.len() < 200, "{} runs for a disc", runs.len());
+        let total: f64 = render(&disc, Rule::NonZero, 90, 70)
+            .data()
+            .iter()
+            .map(|&v| v as f64 / 255.0)
+            .sum();
+        let expected = std::f64::consts::PI * 25.3f64 * 25.3;
+        assert!(
+            (total / expected - 1.0).abs() < 0.003,
+            "{total} vs {expected}"
+        );
+    }
+
+    #[test]
     fn clip_scales_coverage() {
-        let mut clip = Mask::new(4, 1).unwrap();
-        clip.data_mut().copy_from_slice(&[255, 128, 0, 255]);
-        let mut m = Mask::new(4, 1).unwrap();
-        let r = rasterize(
-            &rect(0.0, 0.0, 4.0, 1.0),
+        let mut clip = Mask::new(20, 1).unwrap();
+        clip.data_mut().fill(255);
+        clip.data_mut()[..4].copy_from_slice(&[255, 128, 0, 255]);
+        let m = render_clipped(
+            &rect(0.0, 0.0, 20.0, 1.0),
             Rule::NonZero,
-            &mut m,
+            20,
+            1,
             Some(&clip),
         );
-        assert_eq!(
-            r,
-            Some(PixRect {
-                x0: 0,
-                y0: 0,
-                x1: 4,
-                y1: 1
-            })
-        );
-        assert_eq!(m.data(), &[255, 128, 0, 255]);
+        assert_eq!(m.data(), clip.data());
     }
 }

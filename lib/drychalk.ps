@@ -991,7 +991,11 @@
         0 1 7 {
             8 div /dctk exch def
             dcG [0.74 0.74 0.71] 0.85 dctk 0.5 mul sub dclerp3 aload pop setrgbcolor
-            dcBx dcBy dcTray dctk 0.125 add mul sub dcBw dcTray 8 div 0.01 add rectfill
+            % each strip overlaps the one above by 0.01pt to hide the seam,
+            % but the first stops at the board's edge: with exact-area
+            % coverage (#692) even that sliver would tint the board's last row
+            dcBx dcBy dcTray dctk 0.125 add mul sub dcBw dcTray 8 div
+            dctk 0 gt { 0.01 add } if rectfill
         } for
         % the lip: a lighter edge catching the light
         [0.80 0.80 0.77] aload pop setrgbcolor
