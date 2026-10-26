@@ -1597,6 +1597,42 @@ fn render_postscript_returns_stderr_warnings_on_success() {
     );
 }
 
+/// `eval_postscript` returns a successful run's stderr as a `Warnings:` item
+/// after the output: the program's own `%stderr` writes, once per distinct
+/// line. A quiet run, and one that only prints, has none; a failed run keeps
+/// its stderr in the error.
+#[test]
+fn eval_postscript_returns_stderr_warnings_on_success() {
+    let mut s = Server::start();
+    initialized(&mut s);
+    let source = "(hello) = (%stderr) (w) file 3 { dup (note: careful\\n) writestring } repeat pop \
+                  3 { { 1 0 div } stopped { handleerror } if } repeat";
+    let result = s.tool("eval_postscript", json!({ "source": source }));
+    assert_eq!(result["isError"], false, "{result}");
+    let all = texts(&result);
+    assert_eq!(all[0].trim(), "hello", "{result}");
+    let warnings: Vec<_> = all.iter().filter(|t| t.starts_with("Warnings:")).collect();
+    assert_eq!(warnings.len(), 1, "{result}");
+    assert_eq!(
+        warnings[0].matches("note: careful").count(),
+        1,
+        "{}",
+        warnings[0]
+    );
+    assert_eq!(
+        warnings[0].matches("undefinedresult").count(),
+        1,
+        "{}",
+        warnings[0]
+    );
+    assert!(!warnings[0].contains("pscat:"), "{}", warnings[0]);
+
+    let result = s.tool("eval_postscript", json!({ "source": "(hi) =" }));
+    assert_eq!(texts(&result).len(), 1, "{result}");
+    let result = s.tool("eval_postscript", json!({ "source": "1 2 add" }));
+    assert_eq!(texts(&result), ["(ran clean, printed nothing)"], "{result}");
+}
+
 #[test]
 fn version_flag_prints_the_crate_version_and_exits_without_serving() {
     // A closed stdin: were the flag ignored the server would see EOF and
