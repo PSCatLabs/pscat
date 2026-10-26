@@ -34,21 +34,22 @@ generate | pscat --png out.png -       # `-` reads the program from stdin
 Multi-page documents number their pages: `out.png` → `out-001.png`,
 `out-002.png`, … SVG does the same; PDF is naturally multi-page.
 
-`pscat --bands N --png out.png f.ps` renders on N threads, one horizontal band
-each, and gives the same PNG bytes as a plain render. It is only faster for a
-program that reads `/BandBBox [llx lly urx ury]` (also `/BandIndex`,
-`/BandCount`) and skips work outside it, e.g. a costly `colorimage` procedure
-that computes only those rows plus one row of margin. PNG only.
+`pscat --bands N --png out.png f.ps` (N is 1..64) renders on N threads, one
+horizontal band each, and gives the same PNG bytes as a plain render. It is only
+faster for a program that reads `/BandBBox [llx lly urx ury]` (also `/BandIndex`,
+0 = top, and `/BandCount`) and skips work outside it, e.g. a costly `colorimage`
+procedure that computes only those rows plus a margin: the `psart` skill has a
+runnable one ("Heavy noise renders"). PNG only; it refuses `--svg`, `--pdf`,
+`--lint`, sweeps, `--profile` and `--allow-write`. `--max-steps` and `--max-time`
+apply to each band. Command line only: `pscat-mcp` has no bands.
 
 `pscat --profile --headless f.ps` (or with `--png`) prints, on stderr, each
 named procedure's call count and exclusive and inclusive wall time, slowest
 exclusive first (`--profile-top N`, `--profile-json`). Use it to find where a
-slow render went. Not with `--bands`.
-
-`pscat --profile --headless f.ps` (or with `--png`) prints, on stderr, each
-named procedure's call count and exclusive and inclusive wall time, slowest
-exclusive first (`--profile-top N`, `--profile-json`). Use it to find where a
-slow render went. Not with `--bands`.
+slow render went. It lists only named procedures: work in an anonymous data
+procedure shows up as "0 of 0", so add `--profile-ops` for time per built-in
+operator (`fbm2` against `mul`; about 3x slower) or move the work into a named
+procedure. `--profile-graph` adds caller -> callee edges. Not with `--bands`.
 
 ## Sweep a seed or parameter (explore a design space in one run)
 
@@ -376,7 +377,12 @@ pass `out_path`. Register it with
   read. Writing needs `--allow-write DIR` like `(w) file`. `(path) /all
   readreals` reads every value, `(path) 100 50 readreals` is 50 values from
   value 100, and `array file writereals` / `file n readreals` take an open
-  file (`%stdout`, an `(a)` append file).
+  file (`%stdout`, an `(a)` append file). With `pscat --allow-write out f.ps`:
+
+  ```postscript partial
+  [ 0 1 99 { 0.1 mul dup 5 0.5 2 fbm2 } for ] (out/field.bin) /f32 writereals
+  (out/field.bin) /all /f32 readreals length =      % 100
+  ```
 - The interpreter targets Level 2 PostScript. If a construct misbehaves,
   compare against Ghostscript, the behavioural oracle.
 - `cvs` (and `=`, `==`) on a real prints the shortest digits that read back
