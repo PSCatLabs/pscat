@@ -111,6 +111,7 @@ pub mod fontpacks;
 pub mod fuzzing;
 #[doc(hidden)]
 pub mod gfx;
+pub(crate) mod guard;
 #[doc(hidden)]
 pub mod halftone;
 pub(crate) mod image;

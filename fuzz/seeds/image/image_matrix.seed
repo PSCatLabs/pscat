@@ -1,0 +1,112 @@
+%!PS-Adobe-3.0
+%%Title: image /Interpolate, rotated and skewed matrix driver (issue #776)
+%%Pages: 4
+%%BoundingBox: 0 0 260 50
+%%SelfTestPage: 260x50
+%%IdentityCorpus: always
+%%EndComments
+
+% Run with:  pscat --page 260x50 --lint-strict selftest/drivers/image_matrix.ps
+%
+% One of the five image_*.ps drivers (see image_formats.ps for why they exist
+% and how scripts/identity_check.sh picks them up). This one covers how
+% samples are placed and smoothed:
+%
+%   1. /Interpolate absent, false and true on a magnified 4x3 RGB image, then
+%      true on an Indexed and on a CMYK image
+%   2. where /Interpolate must NOT change anything or only partly applies: a
+%      minified image with true and with false (the same pixels), an image
+%      magnified in x only, an imagemask (ignores the key), and ImageType 3
+%   3. rotated and skewed CTMs on the unit-square idiom, with and without
+%      /Interpolate, and a mirrored CTM
+%   4. ImageMatrix that is not the unit idiom: rotated (false and true),
+%      skewed, a positive-y matrix, and a rotated CTM over a rotated
+%      ImageMatrix under a circular clip with /Interpolate
+%
+% The identity check compares PNG output only. The SVG and PDF writers share
+% this code but are not compared by it.
+
+/_n 0 def
+/mk { % n -> a string of n bytes (a fixed, busy pattern)
+  /_n exch def
+  _n string
+  0 1 _n 1 sub {
+    dup dup 97 mul exch 5 idiv 41 mul add 11 add 256 mod
+    2 index 3 1 roll put
+  } for
+} def
+
+% A 4x3 colour ramp: corners and edges, so smoothing has something to blend.
+/rgb43 <ff0000 ffff00 00ff00 00ffff
+        ff00ff 0000ff ffffff 000000
+        808080 ff8000 8000ff 00ff80> def
+/M43 [4 0 0 -3 0 3] def
+
+% w h bits matrix source interpolate-or-null -> dict image (current space)
+/img {
+  /_i exch def /_s exch def /_m exch def /_b exch def /_h exch def /_w exch def
+  << /ImageType 1 /Width _w /Height _h /BitsPerComponent _b
+     /ImageMatrix _m /DataSource _s >>
+  _i null ne { dup /Interpolate _i put } if
+  image
+} def
+/at { 5 translate 40 40 scale } def % x -> a 40-pt cell at x
+
+% ---- 1. magnified: absent, false, true; Indexed and CMYK true ------------------------
+/DeviceRGB setcolorspace
+gsave   5 at 4 3 8 M43 rgb43 null  img grestore
+gsave  55 at 4 3 8 M43 rgb43 false img grestore
+gsave 105 at 4 3 8 M43 rgb43 true  img grestore
+[/Indexed /DeviceRGB 255 768 mk] setcolorspace
+gsave 155 at 4 3 8 M43 12 mk true img grestore
+/DeviceCMYK setcolorspace
+gsave 205 at 4 3 8 M43 48 mk true img grestore
+showpage
+
+% ---- 2. the key where it does little or nothing --------------------------------------
+/DeviceGray setcolorspace
+gsave   5 5 translate 12 12 scale % 64x48 into 12 pt: minified, true == false
+  64 48 8 [64 0 0 -48 0 48] 3072 mk true img grestore
+gsave  25 5 translate 12 12 scale
+  64 48 8 [64 0 0 -48 0 48] 3072 mk false img grestore
+gsave  55 at 2 40 8 [2 0 0 -40 0 40] 80 mk true img grestore % magnified in x only
+0.1 0.5 0.2 setrgbcolor
+gsave 105 at << /ImageType 1 /Width 8 /Height 8 /ImageMatrix [8 0 0 -8 0 8]
+  /DataSource <3c 7e ff ff ff ff 7e 3c> /BitsPerComponent 1 /Decode [1 0]
+  /Interpolate true >> imagemask grestore
+/DeviceRGB setcolorspace
+gsave 155 at
+  << /ImageType 3 /InterleaveType 3
+     /DataDict << /ImageType 1 /Width 4 /Height 3 /BitsPerComponent 8
+                  /ImageMatrix M43 /DataSource rgb43 /Interpolate true >>
+     /MaskDict << /ImageType 1 /Width 8 /Height 8 /BitsPerComponent 1
+                  /ImageMatrix [8 0 0 -8 0 8] /Decode [1 0]
+                  /DataSource <3c 7e ff ff ff ff 7e 3c> >>
+  >> image
+grestore
+showpage
+
+% ---- 3. rotated and skewed CTM, unit idiom -----------------------------------------------
+/DeviceRGB setcolorspace
+gsave 22 8 translate 30 rotate 30 30 scale 4 3 8 M43 rgb43 false img grestore
+gsave 75 8 translate 30 rotate 30 30 scale 4 3 8 M43 rgb43 true  img grestore
+gsave 95 5 translate [1 0 0.5 1 0 0] concat 35 40 scale
+  4 3 8 M43 rgb43 false img grestore
+gsave 150 5 translate [1 0 0.5 1 0 0] concat 35 40 scale
+  4 3 8 M43 rgb43 true img grestore
+gsave 255 5 translate [-40 0 0 40 0 0] concat % mirrored in x
+  4 3 8 M43 rgb43 true img grestore
+showpage
+
+% ---- 4. ImageMatrix that is not the unit idiom -----------------------------------------------
+/DeviceRGB setcolorspace
+gsave 5 at 4 3 8 [2.5 2.5 -2.5 2.5 2 -1] rgb43 false img grestore  % rotated 45
+gsave 55 at 4 3 8 [2.5 2.5 -2.5 2.5 2 -1] rgb43 true  img grestore
+gsave 105 at 4 3 8 [4 0 1.5 -3 -0.75 3] rgb43 true img grestore   % skewed
+gsave 155 at 4 3 8 [4 0 0 3 0 0] rgb43 true img grestore          % positive y
+gsave 225 25 translate % rotated CTM, rotated ImageMatrix, circular clip, smoothed
+  newpath 0 0 20 0 360 arc clip
+  20 rotate -20 -20 translate 40 40 scale
+  4 3 8 [2.5 2.5 -2.5 2.5 2 -1] rgb43 true img
+grestore
+showpage

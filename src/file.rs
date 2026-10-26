@@ -737,9 +737,17 @@ impl Decoder {
                             return Err(PsError::Io);
                         };
                         if let Some(prev) = st.prev.take() {
-                            let mut new = prev;
-                            new.push(entry[0]);
-                            st.table.push(new);
+                            // A 12-bit code names 4096 entries at most, so a
+                            // full table takes no more: without this a stream
+                            // that never sends a clear code grows the table
+                            // for as long as it runs, each entry up to ~4 KB
+                            // for a 1.5-byte code (found reading the decoder
+                            // for the `filters` fuzz target, issue #704).
+                            if st.table.len() + 258 < 4096 {
+                                let mut new = prev;
+                                new.push(entry[0]);
+                                st.table.push(new);
+                            }
                         }
                         // EarlyChange=1: widen one code early.
                         let filled = st.table.len() + 258;
@@ -753,25 +761,19 @@ impl Decoder {
                 }
             },
             Decoder::Dct { done } => {
-                use zune_jpeg::zune_core::{colorspace::ColorSpace, options::DecoderOptions};
                 if *done {
                     *eod = true;
                     return Ok(());
                 }
                 *done = true;
                 let data = buffer_jpeg(source)?;
-                let mut dec = zune_jpeg::JpegDecoder::new(std::io::Cursor::new(data));
-                dec.decode_headers().map_err(|_| PsError::Io)?;
-                // One output byte per PostScript sample: grayscale JPEGs
-                // yield 1 component, CMYK/YCCK 4; everything else (the
-                // usual YCbCr) converts to RGB triples.
-                let want = match dec.input_colorspace() {
-                    Some(ColorSpace::Luma) => ColorSpace::Luma,
-                    Some(ColorSpace::CMYK | ColorSpace::YCCK) => ColorSpace::CMYK,
-                    _ => ColorSpace::RGB,
-                };
-                dec.set_options(DecoderOptions::default().jpeg_set_out_colorspace(want));
-                out.extend(dec.decode().map_err(|_| PsError::Io)?);
+                // zune-jpeg is third-party code on untrusted bytes, and a
+                // crafted progressive JPEG can trip an `assert!` in its NEON
+                // upsampler (aarch64; found by the `filters` fuzz target,
+                // issue #704). A panic there must be an `ioerror` like any
+                // other undecodable image, not the end of the process.
+                let decoded = crate::guard::catch(|| decode_jpeg(data)).ok_or(PsError::Io)??;
+                out.extend(decoded);
                 *eod = true;
                 Ok(())
             }
@@ -817,6 +819,22 @@ impl Decoder {
             }
         }
     }
+}
+
+/// Decode one buffered JPEG to one byte per PostScript sample: grayscale
+/// yields 1 component, CMYK/YCCK 4, and everything else (the usual YCbCr)
+/// RGB triples.
+fn decode_jpeg(data: Vec<u8>) -> Result<Vec<u8>, PsError> {
+    use zune_jpeg::zune_core::{colorspace::ColorSpace, options::DecoderOptions};
+    let mut dec = zune_jpeg::JpegDecoder::new(std::io::Cursor::new(data));
+    dec.decode_headers().map_err(|_| PsError::Io)?;
+    let want = match dec.input_colorspace() {
+        Some(ColorSpace::Luma) => ColorSpace::Luma,
+        Some(ColorSpace::CMYK | ColorSpace::YCCK) => ColorSpace::CMYK,
+        _ => ColorSpace::RGB,
+    };
+    dec.set_options(DecoderOptions::default().jpeg_set_out_colorspace(want));
+    dec.decode().map_err(|_| PsError::Io)
 }
 
 /// Read one complete JPEG from `source`, consuming exactly through its
@@ -1174,6 +1192,65 @@ mod tests {
         let f = PsFile::filtered(src.clone(), Decoder::RunLength);
         assert_eq!(drain(&f), b"abcccc");
         assert_eq!(src.borrow_mut().read_byte().expect("read"), Some(b'X'));
+    }
+
+    /// Pack LZW codes MSB-first at the widths the decoder expects (9 bits,
+    /// widening one code early as the table fills, EarlyChange=1).
+    fn lzw_pack(codes: &[u32]) -> Vec<u8> {
+        let (mut acc, mut nbits, mut width, mut entries) = (0u64, 0u32, 9u32, 0usize);
+        let mut first = true;
+        let mut out = Vec::new();
+        for &c in codes {
+            acc = (acc << width) | u64::from(c);
+            nbits += width;
+            while nbits >= 8 {
+                out.push((acc >> (nbits - 8)) as u8);
+                nbits -= 8;
+            }
+            acc &= (1 << nbits) - 1;
+            if c == 256 {
+                (width, entries, first) = (9, 0, true);
+            } else if c != 257 {
+                if first {
+                    first = false;
+                } else {
+                    entries += 1;
+                }
+                if entries + 258 + 1 >= 1 << width && width < 12 {
+                    width += 1;
+                }
+            }
+        }
+        if nbits > 0 {
+            out.push((acc << (8 - nbits)) as u8);
+        }
+        out
+    }
+
+    #[test]
+    fn lzw_table_stops_growing_when_full() {
+        // 'a', then each next code is the slot about to be defined, so every
+        // entry is one byte longer than the last; then the longest valid
+        // code, over and over, with no clear code in sight.
+        let mut codes = vec![256, 97];
+        codes.extend(258..4096);
+        codes.extend(std::iter::repeat_n(4095, 500));
+        let f = PsFile::filtered(PsFile::from_bytes(lzw_pack(&codes)), Decoder::lzw());
+        let out = drain(&f);
+        // 'a' + entries of length 2..=3839 for the ramp + 500 x 3839.
+        assert!(out.len() > 500 * 3800, "decoded {} bytes", out.len());
+        let Kind::Filter {
+            dec: Decoder::Lzw(st),
+            ..
+        } = &f.borrow().kind
+        else {
+            panic!("not an LZW filter");
+        };
+        assert_eq!(
+            st.table.len(),
+            4096 - 258,
+            "the table is capped at 4096 codes"
+        );
     }
 
     #[test]
