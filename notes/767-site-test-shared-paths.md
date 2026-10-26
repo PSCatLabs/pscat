@@ -9,14 +9,22 @@ base by starting two `cargo test --profile ci --test site` at once in one
 worktree: one passed, one failed with that message.
 
 What it was not: the test has no timeouts and reads no clock, and cargo's
-"Blocking waiting for file lock" lines only delay a run. Different worktrees
-share no output path (each has its own `target/` and `_site/`), so a build
-in another worktree could not clobber it; the proof loop in the PR checks
-that anyway.
+"Blocking waiting for file lock" lines only delay a run. A `cargo build` in
+another worktree with its own target dir did not make base fail: 3 single
+runs of base in one worktree, with a rebuild loop (native and wasm) running
+in a second worktree, passed 3 of 3. So the reported flake most likely came
+from two runs overlapping in one worktree (#739 ran extra builds there).
+
+Evidence, rounds of two concurrent `cargo test --profile ci --test site`
+in one worktree:
+- base: 3 rounds, run beside the rebuild loop: 3 of 6 runs failed, one per round;
+- fixed: 3 rounds beside the rebuild loop, 6 of 6 passed; 3 more rounds
+  before the loop got going (weak load), 6 of 6 passed.
 
 Fix:
 - `build_site.sh` takes `PSCAT_SITE_OUT` (output directory, default
-  `<repo>/_site`) and `PSCAT_BIN` (a built binary; skips
+  `<repo>/_site`) and `PSCAT_BIN` (a built binary, the name
+  `scripts/typewrite.sh` and its siblings already use; skips
   `cargo build --release` here and in `build_font_gallery.sh`).
 - The test builds into `common::scratch_dir("site")`, renders with
   `env!("CARGO_BIN_EXE_pscat")`, and removes the directory when it passes.
