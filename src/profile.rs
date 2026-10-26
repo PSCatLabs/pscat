@@ -56,7 +56,9 @@ impl Profiler {
     /// Does one of the top `k` open calls belong to `id`? Those are the
     /// procedures currently in tail position (see `Interp::prof_call`).
     pub(crate) fn tail_has(&self, k: usize, id: u32) -> bool {
-        self.active[self.active.len().saturating_sub(k)..].iter().any(|a| a.id == id)
+        self.active[self.active.len().saturating_sub(k)..]
+            .iter()
+            .any(|a| a.id == id)
     }
 
     /// Count a call that reuses an open marker (a tail call).

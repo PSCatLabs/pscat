@@ -126,7 +126,10 @@ fn mutual_tail_recursion_stays_shallow_too() {
          50000 ping",
     );
     result.expect("runs");
-    assert_eq!(row(&report, "ping").calls + row(&report, "pong").calls, 50001);
+    assert_eq!(
+        row(&report, "ping").calls + row(&report, "pong").calls,
+        50001
+    );
     assert_consistent(&report);
 }
 
@@ -212,9 +215,7 @@ fn an_empty_procedure_is_counted() {
 
 #[test]
 fn a_procedure_run_without_its_name_belongs_to_its_caller() {
-    let (result, report) = profile(&format!(
-        "/f {{ {{ {BURN} }} exec 1 pop }} def f"
-    ));
+    let (result, report) = profile(&format!("/f {{ {{ {BURN} }} exec 1 pop }} def f"));
     result.expect("runs");
     let f = row(&report, "f");
     assert_eq!(report.rows.len(), 1);
@@ -264,17 +265,31 @@ fn the_flag_prints_the_report_on_stderr() {
         "/sq { dup mul } def 3 sq pop 4 sq pop",
     );
     assert!(ok, "{stderr}");
-    assert!(!stdout.contains("calls"), "report belongs on stderr: {stdout}");
+    assert!(
+        !stdout.contains("calls"),
+        "report belongs on stderr: {stdout}"
+    );
     assert!(stderr.contains("pscat: profile"), "{stderr}");
-    assert!(stderr.lines().any(|l| l.trim_end().ends_with("sq") && l.contains(" 2 ")), "{stderr}");
+    assert!(
+        stderr
+            .lines()
+            .any(|l| l.trim_end().ends_with("sq") && l.contains(" 2 ")),
+        "{stderr}"
+    );
 }
 
 #[test]
 fn the_flag_reports_after_a_failed_run_too() {
     let (ok, _, stderr) = pscat(&["--profile", "-e", "/f { 1 0 div } def f"], "");
     assert!(!ok);
-    assert!(stderr.contains("undefinedresult") || stderr.contains("Error"), "{stderr}");
-    assert!(stderr.contains("pscat: profile") && stderr.contains(" f"), "{stderr}");
+    assert!(
+        stderr.contains("undefinedresult") || stderr.contains("Error"),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("pscat: profile") && stderr.contains(" f"),
+        "{stderr}"
+    );
 }
 
 #[test]
@@ -299,8 +314,24 @@ fn profile_json_is_one_json_line() {
 #[test]
 fn modes_without_a_single_headless_run_refuse_it() {
     for args in [
-        &["--profile", "--bands", "2", "--png", "/dev/null", "-e", "1 pop"][..],
-        &["--profile", "-e", "1 pop", "--sweep-seed", "1:2", "--png", "/dev/null"][..],
+        &[
+            "--profile",
+            "--bands",
+            "2",
+            "--png",
+            "/dev/null",
+            "-e",
+            "1 pop",
+        ][..],
+        &[
+            "--profile",
+            "-e",
+            "1 pop",
+            "--sweep-seed",
+            "1:2",
+            "--png",
+            "/dev/null",
+        ][..],
         &["--profile", "--spool", "/tmp"][..],
         &["--profile", "--interactive"][..],
         &["--profile", "--headless"][..],
