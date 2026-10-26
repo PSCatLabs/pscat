@@ -1936,7 +1936,10 @@ fn print_usage() {
     println!("                      result is identical to a plain --png render unless the");
     println!("                      program reads the clock. Steps and time limits apply per");
     println!("                      band, --max-memory to all bands together; the first band");
-    println!("                      to hit a limit stops the queue");
+    println!("                      to hit a limit stops the queue. The band names are in");
+    println!("                      userdict and differ per band: leave them out of anything");
+    println!("                      that hashes or serialises userdict (a cache key) or");
+    println!("                      walks it with forall");
     println!("      --band-rows R   with --bands, cut the page into bands about R device rows");
     println!("                      tall instead (ceil(height/R) bands of equal height)");
     println!("      --read-root DIR let the program read files only inside DIR (repeatable):");

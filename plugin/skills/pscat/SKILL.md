@@ -42,7 +42,11 @@ faster for a program that reads `/BandBBox [llx lly urx ury]` (also `/BandIndex`
 procedure that computes only those rows plus a margin: the `psart` skill has a
 runnable one ("Heavy noise renders"). PNG only; it refuses `--svg`, `--pdf`,
 `--lint`, sweeps, `--profile` and `--allow-write`. `--max-steps` and `--max-time`
-apply to each band. An unaware program pays for the whole run once per band. Command line only: `pscat-mcp` has no bands.
+apply to each band. An unaware program pays for the whole run once per band.
+The band names are in `userdict` and differ per band: a program that hashes,
+serialises or `forall`s `userdict` (e.g. to build a cache key) must leave
+`/BandIndex`, `/BandCount` and `/BandBBox` out, or every band computes a
+different key (#868 is the related `forall`-order issue). Command line only: `pscat-mcp` has no bands.
 
 `pscat --profile --headless f.ps` (or with `--png`) prints, on stderr, each
 named procedure's call count and exclusive and inclusive wall time, slowest

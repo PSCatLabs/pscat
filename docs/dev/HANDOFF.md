@@ -1253,7 +1253,15 @@ renders eight examples in both and compares block-downsampled output).
   (`MemoryBase`), which replaced #736's two start gates. The tracking
   allocator batches its count per thread (`memtrack.rs`, 64 KiB): a shared
   atomic per allocation cost band threads ~2.8x CPU. Don't put a per-allocation
-  shared atomic back. See `notes/844-bands-work-queue.md`.
+  shared atomic back. See `notes/844-bands-work-queue.md`. The band names are
+  plain `userdict` entries, so a program that hashes, serialises or `forall`s
+  userdict sees per-band values: fractal_clouds' bake cache keyed on userdict
+  and missed in every band ([#844 re-test](https://github.com/PSCatLabs/pscat/issues/844#issuecomment-6429744992)).
+  The docs tell programs to leave them out of such keys. The preamble's
+  interning can also shift `forall` order against a plain run (#868). The
+  backup-task / `--band-cuts` work for the tail (#869) was measured, then
+  shelved once the re-test showed the queue already beats a cost-balanced
+  split there (data on #869).
 - **`--profile` (#737).** Per-procedure call counts and inclusive/exclusive time
   on stderr (`src/profile.rs`, a `Profiler` on `Interp`). `execute_resolved` takes
   the name a body was reached through (`via`, `NO_NAME` for `exec`/`if`) and, with

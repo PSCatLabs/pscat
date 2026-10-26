@@ -184,7 +184,15 @@ More on the less obvious ones:
   `/BandIndex` (0 is the top band), `/BandCount` and `/BandBBox
   [llx lly urx ury]` (the band's area in default user space, points) defined
   in `userdict`, all describing the queued band: `/BandCount` is the number
-  of bands, not threads. A program that reads them can skip the work outside its band:
+  of bands, not threads. They are ordinary `userdict` entries, visible to the
+  program, and their values differ from band to band. A program that hashes or
+  serialises `userdict` (a cache key, a state snapshot) or walks it with
+  `forall` sees different contents in each band, so leave the three names out
+  of such keys. One project's bake cache missed in every band but one for this
+  reason ([#844](https://github.com/PSCatLabs/pscat/issues/844#issuecomment-6429744992)).
+  A related issue is that defining the names can change the `forall` order of
+  other name-keyed dicts against a plain run
+  ([#868](https://github.com/PSCatLabs/pscat/issues/868)). A program that reads them can skip the work outside its band:
   an expensive `colorimage` procedure computes only the image rows that reach
   `BandBBox`, plus a row of margin. That is where the speed comes from. A
   program that doesn't read them still renders correctly, but every band runs
