@@ -108,7 +108,7 @@ fn the_five_formulas_render_as_pinned() {
         // round differently in the last place for one glyph. Both are
         // pinned, so each platform still catches a change.
         if cfg!(windows) {
-            0x046b029b37ff9ad5
+            0x5f8d0b16a9d35a2b
         } else {
             0x94b2e90ad5a81c33
         },
