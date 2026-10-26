@@ -1,7 +1,5 @@
-# Scheduled fuzzing (issues #604, #704): the lexer, the whole interpreter, the
-# font loaders (TrueType/OpenType, Type 1 charstrings and whole Type 1 fonts),
-# the decode filters and the image operators, under cargo-fuzz (libFuzzer), a
-# time-boxed run per target every week. A crash
+# Scheduled fuzzing (issue #604): the lexer and the whole interpreter, under
+# cargo-fuzz (libFuzzer), a time-boxed run per target every week. A crash
 # fails the run, uploads the crashing input as an artifact, and opens an
 # issue (unless one is already open) so it does not sit unseen in the Actions
 # tab. Fix the bug, then commit the input to fuzz/regressions/<target>/: the
@@ -44,7 +42,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [lexer, interp, truetype, type1_charstring, type1_font, filters, image]
+        target: [lexer, interp]
     defaults:
       run:
         shell: bash

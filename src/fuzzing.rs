@@ -266,7 +266,11 @@ fn image_recipe(data: &[u8]) -> Vec<u8> {
     let space = c.u8() % 6;
     let big = c.u8() & 1 == 1;
     let (w, h) = if big {
-        (u32::from(c.u16()), u32::from(c.u16()))
+        // Up to 255 square: past every row and plane buffer boundary the
+        // small recipes reach, but one input never allocates hundreds of MB
+        // (with the full 16-bit range, and then with 2047, the runs peaked at
+        // 1.1 to 1.7 GB RSS). The memory limit's checks are `interp`'s.
+        (u32::from(c.u16() % 256), u32::from(c.u16() % 256))
     } else {
         (u32::from(c.u8() % 40), u32::from(c.u8() % 40))
     };

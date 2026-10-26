@@ -89,14 +89,18 @@ after every fix below, found nothing:
 | `type1_charstring` | 7 min | 13,359,989 | 31,733 | 399 | 2,181 | 517 | 430 MB |
 | `type1_font` | 7 min | 66,131 (five targets shared the CPU) | 155 | 4,433 | 13,610 | 1,112 | 542 MB |
 | `filters` | 7 min | 475,534 | 1,129 | 3,833 | 15,196 | 1,746 | 717 MB |
-| `image` | 7 min | 92,678 | 220 | 7,979 | 30,757 | 1,793 | 1,123 MB |
+| `image` (dimensions < 256, fresh corpus) | 7 min | 356,079 | 845 | 8,246 | 32,049 | 2,355 | 604 MB |
 
 Earlier runs of the same targets (about two more 7-minute runs each, on
 older builds) are what found items 1 to 4 above; `type1_font` ran 354,270
-inputs at 841/s (cov 4,189) before the CPU was shared. `image` peaks at 1.1 to
-1.7 GB RSS, mostly AddressSanitizer's quarantine of the 256 MB memory-limit
-allocations the `big` recipes make; the workflow's `-rss_limit_mb=2048` is
-close to it, so watch the first scheduled run.
+inputs at 841/s (cov 4,189) before the CPU was shared. `image` peaked at 1.1 to 1.7 GB RSS with `big` recipe dimensions over the full
+16-bit range (mostly AddressSanitizer's quarantine of up to 256 MB
+allocations), too close to the workflow's `-rss_limit_mb=2048`; the
+recipe dimensions are now below 256 (2047 still peaked at 1.4 GB; 256 held a
+fresh corpus at about 460 MB after 95,000 inputs). AddressSanitizer's
+quarantine is about half of what is left: `ASAN_OPTIONS=quarantine_size_mb=16`
+halved the replay RSS, if the workflow ever needs it. The workflow
+matrix change is a separate owner PR.
 
 **Not done / follow-ups**: the `ttf-parser` and `zune-jpeg` panics above
 are worth reporting upstream; an `.pfb` reader (no Type 1 binary container
