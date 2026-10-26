@@ -47,3 +47,6 @@ the ramp ends.
   DeviceRGB/CMYK is the colour path this covers.
 - Smoothing Separation images through their tint transform: they keep the
   existing gray approximation and are blended in gray.
+- CMYK images blend after the naive CMYK to RGB conversion the engine already
+  uses; gs blends in CMYK. Indistinguishable for ordinary data, unequal near
+  saturated inks.
