@@ -1175,6 +1175,14 @@ renders eight examples in both and compares block-downsampled output).
   files are `file::Sink`s; `%stdout` goes through `Interp::write_stdout` so a
   captured stdout keeps order with `print`. Disk writes are unbuffered because
   the CLI exits without dropping the interpreter. See `notes/740-file-writing.md`.
+- **`pscat-mcp` limits from the environment (#756).** Every numeric flag has a
+  `PSCAT_MCP_<FLAG>` variable, from one table (`NUMERIC_OPTIONS` in
+  `src/mcp_server.rs`) that also holds the ranges and defaults, so the two
+  cannot drift. Env is read after the flags (so `--help` ignores it), a flag
+  wins, a bad value is a startup error. Never add a variable for
+  `--allow-read` or `--out-root` (same rule as #740); a hosted server (#689)
+  must not read these. Tests build a `Config` with an injected lookup, never
+  `std::env::set_var`. See `notes/756-mcp-env-limits.md`.
 - **`--bands N` (#736).** One PNG rendered as N horizontal bands on N threads
   (`src/bands.rs`, a binary module), each a full run with `/BandIndex`,
   `/BandCount`, `/BandBBox` in userdict, stitched by whole device rows. Byte

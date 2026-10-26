@@ -548,6 +548,10 @@ an installed build (October 2026, #568).
   directories deliberately with `--allow-read DIR`.
   `PSCAT_LIB` is honoured only when it lies inside a root, and a `lib/` in the
   working directory or under `PSCAT_HOME` replaces the compiled-in copy.
+  There is no environment variable for `--allow-read` (or for `--out-root`,
+  #740, #756): the `PSCAT_MCP_*` variables set only numeric limits, so what a
+  program may read is never changed by a settings file or a project's
+  environment.
   The interpreter's step, time and memory limits (below) bound what a
   program does with its reads, not what it may read; the roots do that.
 - **Every call is bounded in time and memory held by the server.** The

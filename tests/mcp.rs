@@ -15,6 +15,20 @@ struct Server {
     reader: BufReader<ChildStdout>,
 }
 
+/// Every environment variable `pscat-mcp` reads for a limit (#756).
+const LIMIT_ENV_VARS: &[&str] = &[
+    "PSCAT_MCP_TIMEOUT",
+    "PSCAT_MCP_JOB_TIMEOUT",
+    "PSCAT_MCP_MAX_JOBS",
+    "PSCAT_MCP_JOB_TTL",
+    "PSCAT_MCP_MAX_INPUT_BYTES",
+    "PSCAT_MCP_MAX_IMAGE_BYTES",
+    "PSCAT_MCP_MAX_PIXELS",
+    "PSCAT_MCP_MAX_LATEX_BYTES",
+    "PSCAT_MCP_MAX_STEPS",
+    "PSCAT_MCP_MAX_MEMORY",
+];
+
 impl Server {
     /// A server whose working directory (so its default output root) is a
     /// fresh scratch directory.
@@ -34,7 +48,22 @@ impl Server {
         Self::spawn(cmd, &common::scratch_dir("mcp-sub-cwd"), &[])
     }
 
+    /// A server started with these environment variables (issue #756).
+    fn start_with_env(cwd: &Path, args: &[&str], env: &[(&str, &str)]) -> Self {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_pscat-mcp"));
+        cmd.envs(env.iter().copied());
+        Self::spawn(cmd, cwd, args)
+    }
+
     fn spawn(mut cmd: Command, cwd: &Path, args: &[&str]) -> Self {
+        // A developer's own PSCAT_MCP_* settings must not change what a test
+        // sees; a test that wants one sets it through `start_with_env`
+        // (after this, so it is not removed).
+        for var in LIMIT_ENV_VARS {
+            if cmd.get_envs().all(|(k, _)| k != *var) {
+                cmd.env_remove(var);
+            }
+        }
         let mut child = cmd
             .args(args)
             .current_dir(cwd)
@@ -943,6 +972,64 @@ fn reads_are_confined_to_the_working_directory_and_allow_read() {
     assert!(!out.contains("away"), "{out}");
     let up = list(&mut s, "../outside/*");
     assert!(!up.contains("away"), "{up}");
+}
+
+/// `pscat-mcp` run to completion with these arguments and environment (and no
+/// other `PSCAT_MCP_*` variable).
+fn run_server(args: &[&str], env: &[(&str, &str)]) -> std::process::Output {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_pscat-mcp"));
+    for var in LIMIT_ENV_VARS {
+        cmd.env_remove(var);
+    }
+    cmd.envs(env.iter().copied())
+        .args(args)
+        .stdin(Stdio::null())
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn an_env_var_raises_a_limit_and_a_flag_overrides_it() {
+    // Issue #756: PSCAT_MCP_MAX_STEPS is read at startup like --max-steps.
+    let cwd = common::scratch_dir("mcp-env-steps");
+    let mut s = Server::start_with_env(&cwd, &[], &[("PSCAT_MCP_MAX_STEPS", "1000000")]);
+    initialized(&mut s);
+    let result = s.tool("eval_postscript", json!({ "source": "{ } loop" }));
+    assert_eq!(error_kind(&result), "limit_exceeded", "{result}");
+    assert_eq!(
+        result["structuredContent"]["error"]["limit"], "steps",
+        "{result}"
+    );
+    // The flag wins: a loop of 5 million iterations passes under a flag of
+    // 0 (no limit) although the variable says 1 million.
+    let mut s = Server::start_with_env(
+        &cwd,
+        &["--max-steps", "0"],
+        &[("PSCAT_MCP_MAX_STEPS", "1000000")],
+    );
+    initialized(&mut s);
+    let result = s.tool(
+        "eval_postscript",
+        json!({ "source": "0 1 5000000 { pop } for (done) =" }),
+    );
+    assert_eq!(result["isError"], false, "{result}");
+}
+
+#[test]
+fn a_bad_env_var_is_a_startup_error_but_help_still_works() {
+    for (var, bad) in [
+        ("PSCAT_MCP_TIMEOUT", "soon"),
+        ("PSCAT_MCP_MAX_PIXELS", "99999999999"),
+    ] {
+        let out = run_server(&[], &[(var, bad)]);
+        assert_eq!(out.status.code(), Some(2), "{var}={bad}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains(var) && err.contains("whole number"), "{err}");
+        // `--help` is not blocked by it.
+        let out = run_server(&["--help"], &[(var, bad)]);
+        assert!(out.status.success(), "{var}={bad}");
+        assert!(String::from_utf8_lossy(&out.stdout).contains("PSCAT_MCP_"));
+    }
 }
 
 #[test]
