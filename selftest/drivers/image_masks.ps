@@ -22,8 +22,10 @@
 %   4. ImageType 3 from inline `currentfile` filters (the mask's data comes
 %      first), under a rotated mask ImageMatrix, a CMYK image, an Indexed image
 %
-% The InterleaveType 1 cell is a refusal today (`limitcheck`); it is caught
-% and cleared, on a page with live images beside it.
+% The InterleaveType 1 cell only pins today's refusal (`limitcheck`, raised
+% before the dictionary is read, so it is a bare dict); it is caught and
+% cleared, on a page with live images beside it. It cannot start to draw:
+% when type 1 lands, replace it with a well-formed dictionary.
 
 /_n 0 def
 /mk { % n -> a string of n bytes (a fixed, busy pattern)

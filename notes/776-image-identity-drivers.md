@@ -39,10 +39,12 @@ writers' image paths are not covered by it.
 
 ## Not renderable yet, pinned as probes
 
-The engine refuses three things today; each is wrapped in a `stopped`
+The engine refuses four things today; each is wrapped in a `stopped`
 probe on a page with live images, so when someone implements one the cell
 starts to draw and the check reports DIFFERS (review it with
-`--expect-diff`):
+`--expect-diff`). The last one is a bare dict that only pins today's
+`limitcheck`; it cannot start to draw and needs a well-formed dict when type 1
+lands:
 
 - `BitsPerComponent 16` (`rangecheck`) in `image_formats.ps`, all four spaces.
 - `colorimage` with `multi true`, separate component sources (`limitcheck`).
@@ -59,7 +61,7 @@ drivers, a negative control that rotates a gray image):
 - `cell_at`: `.floor()` to `.round()` on `ix`. All 16 pages of the four
   drivers DIFFER; `sierpinski.ps` (no image) stays identical; control differs.
 - `smooth_rgb`: the bilinear sample position `f - 0.5` to `f - 0.4`. Only the
-  four pages of `image_matrix.ps` DIFFER (the only driver that uses
-  `/Interpolate true` outside the mask or ImageType 3 cases); the control does
-  not use `/Interpolate`, so it reports CONTROL FAILED, as it should.
+  four pages of `image_matrix.ps` DIFFER (the only driver that sets
+  `/Interpolate true` on colour data, its ImageType 3 cell included); the
+  control does not use `/Interpolate`, so it reports CONTROL FAILED, as it should.
 - Two identical binaries: 17 of 17 identical (the renders are deterministic).
