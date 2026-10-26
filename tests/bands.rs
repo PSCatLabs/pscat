@@ -567,3 +567,82 @@ fn max_memory_is_one_budget_for_all_bands() {
     assert!(!ok, "a big one is stopped");
     assert!(e.contains("memory"), "{e}");
 }
+
+/// A limit stops the queue (#844): with 140 one-row bands on 2 threads, a
+/// runaway program is stopped after about one band's `--max-time` per
+/// thread, not one per band (which would be 70 seconds here). The partial
+/// page is still written, and the run fails.
+#[test]
+fn a_limit_stops_the_queue() {
+    let png = common::scratch_dir("bands-limit").join("l.png");
+    let _ = std::fs::remove_file(&png);
+    let start = std::time::Instant::now();
+    let (ok, _, e) = pscat(&[
+        "--page",
+        "40x101",
+        "--dpi",
+        "100",
+        "--bands",
+        "2",
+        "--band-rows",
+        "1",
+        "--max-time",
+        "1",
+        "--png",
+        png.to_str().unwrap(),
+        "-e",
+        "0 setgray clippath fill { } loop",
+    ]);
+    let took = start.elapsed();
+    assert!(!ok, "a limit fails the run");
+    assert!(e.contains("limitexceeded"), "{e}");
+    assert!(took.as_secs() < 20, "the queue stopped: took {took:?}");
+    let pix = Pixmap::load_png(&png).expect("the partial page is written");
+    // The first bands ran (and painted black before the loop); the last
+    // never started, so its row is the white background.
+    assert_eq!(pix.pixel(0, 0).expect("pixel").red(), 0);
+    assert_eq!(pix.pixel(0, 139).expect("pixel").red(), 255);
+}
+
+/// `forall` order over name keys follows the names' interned ids, and the
+/// interner is per thread. Each band runs on a fresh thread (#844), so it
+/// starts from the ids a plain run starts from, not the ones an earlier band
+/// on the same worker left behind. Here the top band interns one extra name
+/// before the dictionary is built; its own rows don't show the dictionary,
+/// but on a reused thread the bottom band's `forall` order would shift.
+/// (The first line interns the band names where the band preamble does, so
+/// the plain run's ids line up with a band's.)
+#[test]
+fn a_band_does_not_inherit_an_earlier_bands_names() {
+    let dir = common::scratch_dir("bands-names-ids");
+    let file = write_source(
+        &dir,
+        "ids.ps",
+        "%!PS
+/BandIndex /BandCount /BandBBox pop pop pop
+/BandIndex where { pop BandIndex 0 eq } { false } ifelse
+  { (only_in_the_top_band) cvn pop } if
+/d 40 dict def
+0 1 39 { /k exch def d (key00) 5 string copy dup 3 k 10 idiv 48 add put
+         dup 4 k 10 mod 48 add put cvn k put } for
+/c 0 def
+d { exch pop 255 div setgray c 3 mul 0 3 40 rectfill /c c 1 add def } forall
+showpage
+",
+    );
+    let file = file.to_str().expect("utf-8 path");
+    let render = |name: &str, more: &[&str]| {
+        let out = dir.join(name);
+        let mut args = vec!["--page", "120x100"];
+        args.extend(more);
+        args.extend(["--png", out.to_str().unwrap(), file]);
+        let (ok, _, e) = pscat(&args);
+        assert!(ok, "{e}");
+        std::fs::read(out).unwrap()
+    };
+    // One thread, two bands: the bottom band follows the top one.
+    assert!(
+        render("plain.png", &[]) == render("banded.png", &["--bands", "1", "--band-rows", "50"]),
+        "the bottom band's forall order differs from a plain run's"
+    );
+}

@@ -64,12 +64,27 @@ byte-identical.
   memory is N canvases (one per running thread) plus the finished rows (one
   page's worth per page), not K canvases.
 - **Errors:** a PostScript error in a band doesn't stop the queue. Every band
-  still runs, so the partial page is the same as before, and the error is
-  reported once, from the lowest band that failed. Internal failures (a thread
-  that can't start, a panic) stop the queue.
+  still runs, so the partial page is the one a plain render leaves, and the
+  error is reported once, from the lowest band that failed. A *limit* error
+  (`--max-steps`, `--max-time`, `--max-memory`) does stop it (advisor): with
+  per-band limits and K bands queued on N threads, a runaway program would
+  otherwise take about K/N times the limit to stop (2x by default, 70x with
+  `--band-rows 1` on 140 rows), where #736's N parallel bands took 1x. Bands
+  already running finish; rows of bands never run stay the page background.
+  Internal failures (a thread that can't start, a panic) stop it too.
+- **A fresh thread per band.** `forall` over name keys follows the names'
+  interned ids, and the interner is thread-local. A worker that ran a second
+  band on its own thread would start it with the first band's names already
+  interned, so a name only the earlier band made shifts the later band's ids
+  and can reorder its `forall` (`tests/bands.rs`
+  `a_band_does_not_inherit_an_earlier_bands_names` fails with thread reuse).
+  So each worker spawns one scoped thread per band, which also catches a
+  band's panic. A thread costs microseconds next to an interpreter run.
 - **Dictionaries:** a worker's last band leaves its dictionaries to the
   process exit, as a plain render does; earlier bands free theirs, so a long
-  queue doesn't pile up dead interpreters (advisor).
+  queue doesn't pile up dead interpreters (advisor). Those last-band
+  interpreters stay in the heap, so near the end of a render up to N-1 of
+  them count against a shared `--max-memory` budget.
 - **`--max-memory`:** one budget for the whole render. The base is the heap
   before the workers start, plus one fresh interpreter (measured from the
   canvas-size probe) per worker, and each band's `set_limits` gets the budget
@@ -121,7 +136,10 @@ The cost-balanced reference is fractal_clouds' method applied by hand: the
 row-cost profile came from single-thread runs of growing top slices
 (`/BandBBox` defined by a wrapper), and the 10 cuts at rows
 81/86/91/97/107/116/134/150/167 split it into equal-cost parts, one process
-each. All banded PNGs were byte-identical to the plain render.
+each. All banded PNGs were byte-identical to the plain render. The profile
+was taken under the same load (the full-frame slice took 4.21 s of user time
+against 2.55 s on a quieter machine), so the cuts are a little off true equal
+cost, and the real cost-balanced time may be somewhat lower than 0.92 s.
 
 Against main's equal bands, the queue's default is 1.19x faster (minimum
 times; 1.16x by median), and the cost-balanced split 1.46x (1.49x by
@@ -167,6 +185,16 @@ fractal_clouds' own runs were single runs with load drifting from 3 to 12.
 
 ### Follow-ups (not done)
 
+- **Pre-existing (#736): the band preamble can shift name ids.** The
+  preamble interns `BandIndex`, `BandCount` and `BandBBox` before the
+  program, so a program that first mentions one of them partway through (or
+  never) gets different ids for its later names than a plain run, and a
+  `forall` over a name-keyed dict can come out in another order. Repro: a
+  file starting `/BandIndex pop`, then building a 40-name dict with `cvn` and
+  painting in `forall` order, differs between a plain render and `--bands 1`
+  on main too. The identity corpus never hits it. A fix must not change plain
+  renders' ids (e.g. pre-intern the three names in every interpreter only
+  after checking the corpus), so it is left for its own issue.
 - Cost-aware cuts, to close the rest of the gap to a cost-balanced split:
   a caller-given `--band-cuts`, or a pscat-side cost estimate. A low-dpi
   probe like fractal_clouds' only works when the program's sample grid

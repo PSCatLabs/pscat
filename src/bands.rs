@@ -32,7 +32,11 @@
 //!
 //! Limits: `--max-steps` and `--max-time` apply to each band on its own (an
 //! unaware program takes as many steps in every band as in a single run, so
-//! the same limit fits). `--max-memory` is one budget for the whole render:
+//! the same limit fits). The first band to hit any limit stops the queue:
+//! bands already running finish, none start, and the rows of those never run
+//! stay blank in the partial page, so a runaway program costs about one
+//! band's budget per thread, not one per queued band. Other errors don't stop
+//! it, so the partial page is the one a plain render leaves. `--max-memory` is one budget for the whole render:
 //! every band counts from one heap level, taken before the workers start,
 //! that leaves out one fresh interpreter per worker ([`MemoryBase`]).
 
@@ -114,6 +118,10 @@ struct BandOutput {
     /// The error report (and operand stack under `--pstack-on-error`) if
     /// the run failed.
     error: Option<String>,
+    /// The run hit `--max-steps`, `--max-time` or `--max-memory`: the queue
+    /// stops, so a runaway program is stopped after about one band's
+    /// budget, not one per queued band.
+    hit_limit: bool,
 }
 
 /// How a render is cut up: `count` bands on a canvas `height` rows tall,
@@ -208,13 +216,13 @@ pub fn run(options: &Options, threads: u32) -> ExitCode {
     if let Some((i, report)) = outputs
         .iter()
         .enumerate()
-        .find_map(|(i, o)| o.error.as_ref().map(|e| (i, e)))
+        .find_map(|(i, o)| o.as_ref()?.error.as_ref().map(|e| (i, e)))
     {
         eprintln!("pscat: band {}/{} failed:", i + 1, plan.count);
         eprintln!("{report}");
         failed = true;
     }
-    let pages = match stitch(&outputs, width, height) {
+    let pages = match stitch(&outputs, width, height, options.transparent) {
         Ok(p) => p,
         Err(msg) => {
             eprintln!("pscat: {msg}");
@@ -286,14 +294,15 @@ impl MemoryBase {
 }
 
 /// Run the plan's bands on its worker threads and collect what each band
-/// produced, in band order.
+/// produced, in band order: `None` for a band never run because another
+/// hit a limit.
 fn render(
     options: &Options,
     source: &[u8],
     plan: Plan,
     width: u32,
     per_band: usize,
-) -> Result<Vec<BandOutput>, String> {
+) -> Result<Vec<Option<BandOutput>>, String> {
     let queue = Queue {
         next: AtomicU32::new(0),
         stop: AtomicBool::new(false),
@@ -316,17 +325,41 @@ fn render(
             let (queue, slots, fail) = (&queue, &slots, &fail);
             let spawned = std::thread::Builder::new()
                 .name(format!("band-worker-{worker}"))
-                .stack_size(BAND_STACK)
                 .spawn_scoped(scope, move || {
                     while let Some(index) = queue.take() {
                         let band = Band { index, plan, width };
-                        // A panic in one band is that band's failure; the
-                        // worker stops, and the others stop taking bands.
-                        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            run_band(options, source, band, base, queue)
-                        }));
+                        // Each band gets a fresh thread of its own. The
+                        // name interner is per thread, and `forall` over
+                        // name keys follows the interned ids, so a band
+                        // must start from the ids a plain run starts from,
+                        // not the ones an earlier band left behind. A
+                        // panic is that band's failure: the worker stops,
+                        // and the others stop taking bands.
+                        let result = std::thread::scope(|band_scope| {
+                            std::thread::Builder::new()
+                                .name(format!("band-{index}"))
+                                .stack_size(BAND_STACK)
+                                .spawn_scoped(band_scope, || {
+                                    let out = run_band(options, source, band, base, queue);
+                                    // Count everything this band did before
+                                    // its thread exits.
+                                    pscat::memtrack::fold_thread();
+                                    out
+                                })
+                                .map(|h| h.join())
+                        });
+                        let result = match result {
+                            Ok(joined) => joined,
+                            Err(e) => {
+                                fail(format!("cannot start a band thread: {e}"));
+                                break;
+                            }
+                        };
                         match result {
                             Ok(Ok(out)) => {
+                                if out.hit_limit {
+                                    queue.stop.store(true, Relaxed);
+                                }
                                 if let Ok(mut slot) = slots[index as usize].lock() {
                                     *slot = Some(out);
                                 }
@@ -341,8 +374,6 @@ fn render(
                             }
                         }
                     }
-                    // Count everything this worker did before it exits.
-                    pscat::memtrack::fold_thread();
                 });
             if let Err(e) = spawned {
                 // The workers already running finish the queue on their
@@ -357,16 +388,17 @@ fn render(
     if let Some(msg) = failure.into_inner().ok().flatten() {
         return Err(msg);
     }
-    slots
+    let outputs: Vec<Option<BandOutput>> = slots
         .into_iter()
-        .enumerate()
-        .map(|(i, slot)| {
-            slot.into_inner()
-                .ok()
-                .flatten()
-                .ok_or_else(|| format!("band {}/{} produced nothing", i + 1, plan.count))
-        })
-        .collect()
+        .map(|slot| slot.into_inner().ok().flatten())
+        .collect();
+    // Only a limit stops the queue early; without one, every band ran.
+    if !outputs.iter().flatten().any(|o| o.hit_limit)
+        && let Some(i) = outputs.iter().position(Option::is_none)
+    {
+        return Err(format!("band {}/{} produced nothing", i + 1, plan.count));
+    }
+    Ok(outputs)
 }
 
 /// One band of a plan.
@@ -426,9 +458,11 @@ fn run_band(
             .set_read_roots(dirs)
             .map_err(|e| format!("--read-root: {e}"))?;
     }
+    let mut hit_limit = false;
     let error = match interp.run_source(source) {
         Ok(()) => None,
         Err(e) => {
+            hit_limit = e.limit().is_some();
             let mut report = interp.error_report(&e);
             if options.pstack_on_error {
                 report.push('\n');
@@ -462,21 +496,33 @@ fn run_band(
     if queue.drained() {
         interp.leave_dicts_to_process_exit();
     }
-    Ok(BandOutput { rows, error })
+    Ok(BandOutput {
+        rows,
+        error,
+        hit_limit,
+    })
 }
 
 /// Page `k` of the result is band `i`'s rows of its page `k`, in band
-/// `i`'s rows.
-fn stitch(outputs: &[BandOutput], width: u32, height: u32) -> Result<Vec<Pixmap>, String> {
+/// `i`'s rows. A band that never ran (the queue stopped at a limit) leaves
+/// its rows blank: the page background, white or `transparent`.
+fn stitch(
+    outputs: &[Option<BandOutput>],
+    width: u32,
+    height: u32,
+    transparent: bool,
+) -> Result<Vec<Pixmap>, String> {
     let count = outputs.len() as u32;
-    let pages = outputs.first().map_or(0, |o| o.rows.len());
-    if let Some((i, o)) = outputs
-        .iter()
-        .enumerate()
-        .find(|(_, o)| o.rows.len() != pages)
-    {
+    let ran = || {
+        outputs
+            .iter()
+            .enumerate()
+            .filter_map(|(i, o)| Some((i, o.as_ref()?)))
+    };
+    let pages = ran().next().map_or(0, |(_, o)| o.rows.len());
+    if let Some((i, o)) = ran().find(|(_, o)| o.rows.len() != pages) {
         return Err(format!(
-            "band {}/{count} produced {} page(s) but band 1 produced {pages}; \
+            "band {}/{count} produced {} page(s) but the first band produced {pages}; \
              a banded program must emit the same pages in every band",
             i + 1,
             o.rows.len()
@@ -486,8 +532,11 @@ fn stitch(outputs: &[BandOutput], width: u32, height: u32) -> Result<Vec<Pixmap>
     (0..pages)
         .map(|k| {
             let mut page = Pixmap::new(width, height).ok_or("cannot allocate the page")?;
+            if !transparent {
+                page.fill(tiny_skia::Color::WHITE);
+            }
             let data = page.data_mut();
-            for (i, out) in outputs.iter().enumerate() {
+            for (i, out) in ran() {
                 let (top, bottom) = rows(i as u32, count, height);
                 let span = top as usize * row_bytes..bottom as usize * row_bytes;
                 let band = &out.rows[k];

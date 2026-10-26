@@ -198,7 +198,9 @@ More on the less obvious ones:
   refuses `--svg`, `--pdf`, `--lint`, sweeps, `--progress`, `--profile` and
   `--allow-write`, since every band would write the same file (or, for
   `--profile`, report N copies of the same calls: profile a plain run). `--max-steps`
-  and `--max-time` apply to each band on its own. `--max-memory` is one
+  and `--max-time` apply to each band on its own, and the first band to hit
+  any limit stops the queue: bands already running finish, no new one starts,
+  and the rows of bands that never ran are left blank in the partial page. `--max-memory` is one
   budget for the whole render, counted from before the threads start; each
   running thread holds its own canvas (N times a plain render's), which the
   budget leaves out as a plain render's leaves out its one canvas. Only the top band's
