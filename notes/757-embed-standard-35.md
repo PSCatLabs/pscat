@@ -56,14 +56,14 @@ files the packs carried. URW's AGPL/LPPL texts stay in the repo only, as before.
 THIRD_PARTY_NOTICES.md has a "Standard 35 faces (compiled in)" section.
 
 **Sizes** (before → after, macOS arm64). First measured against `7dcd6c7`, then
-re-measured after merging `b47f23e` (#735, #758, #760, #769) for the crate and binaries:
+re-measured after merging `64c62f9` (#735, #758, #760, #769, #771) for the crate and binaries:
 
 | | before | after | delta |
 |---|---|---|---|
 | `cargo package --list` | 136 files | 168 files | +32 |
-| `.crate` (verified build) | 3,400,499 B | 5,205,674 B | +1,805,175 B (+1.72 MiB) |
-| release `pscat` | 10,755,600 B | 14,194,784 B | +3,439,184 B (+3.28 MiB) |
-| release `pscat-mcp` | 9,216,576 B | 12,654,096 B | +3,437,520 B (+3.28 MiB) |
+| `.crate` (verified build) | 3,402,098 B | 5,207,278 B | +1,805,180 B (+1.72 MiB) |
+| release `pscat` | 10,756,224 B | 14,211,712 B | +3,455,488 B (+3.30 MiB) |
+| release `pscat-mcp` | 9,217,072 B | 12,654,352 B | +3,437,280 B (+3.28 MiB) |
 | release archive (`.tar.gz`, both binaries; at `7dcd6c7`) | 10,187,207 B | 13,821,468 B | +3,634,261 B |
 | `pscat.wasm` (at `7dcd6c7`) | 7,914,083 B | 11,304,816 B | +3,390,733 B |
 | npm tarball, packed (at `7dcd6c7`) | 3,528,765 B | 5,348,362 B | +1,819,597 B |
