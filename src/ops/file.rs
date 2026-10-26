@@ -54,7 +54,7 @@ fn pop_ps_string(it: &mut Interp) -> Result<PsString, PsError> {
 /// Under execution limits (`Interp::set_limits`) the read looks at them as
 /// the bytes arrive, so `(/dev/zero) (r) file` or a FIFO ends in a limit
 /// error instead of running on inside this one operator (issue #702).
-fn read_resource(it: &mut Interp, name: &str) -> Result<Vec<u8>, PsError> {
+pub(super) fn read_resource(it: &mut Interp, name: &str) -> Result<Vec<u8>, PsError> {
     #[cfg(not(target_arch = "wasm32"))]
     if !it.limits().is_none() {
         return read_resource_limited(it, name);

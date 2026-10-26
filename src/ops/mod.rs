@@ -16,6 +16,7 @@ pub mod logic;
 pub mod matrix;
 pub mod misc;
 pub mod noise;
+pub mod realsio;
 pub mod shading;
 pub mod stack;
 pub mod vm;
@@ -42,6 +43,7 @@ pub fn install_all(dict: &mut Dict) {
     matrix::install(dict);
     font::install(dict);
     file::install(dict);
+    realsio::install(dict);
     image::install(dict);
     logic::install(dict);
     misc::install(dict);

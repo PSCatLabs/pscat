@@ -89,7 +89,7 @@ impl PsFunction {
         match self {
             PsFunction::Exponential { domain, c0, c1, n } => {
                 let x = x.clamp(domain.0.min(domain.1), domain.0.max(domain.1));
-                let xn = x.powf(*n);
+                let xn = crate::fmath::powf(x, *n);
                 c0.iter().zip(c1).map(|(a, b)| a + xn * (b - a)).collect()
             }
             PsFunction::Stitching {

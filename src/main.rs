@@ -89,6 +89,15 @@ struct Options {
     /// `--allow-write DIR`, repeatable (issue #740): the directories a
     /// program may write files in. None by default.
     allow_write: Vec<String>,
+    /// `--progress` (issue #741): a headless run prints
+    /// `pscat: progress pages=N` to stderr each time a page is finished,
+    /// which is how pscat-mcp's `render_status` counts pages.
+    progress: bool,
+    /// `--exit-with-parent PID` (issue #741, Unix): exit as soon as PID is
+    /// no longer this process's parent, so a pscat-mcp server that is
+    /// killed leaves no render running behind it. The parent names itself
+    /// because it can die before this process first looks.
+    exit_with_parent: Option<u32>,
 }
 
 impl Options {
@@ -121,6 +130,8 @@ impl Options {
             grid: None,
             limits: Limits::none(),
             allow_write: Vec::new(),
+            progress: false,
+            exit_with_parent: None,
         }
     }
 
@@ -189,6 +200,9 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    if let Some(parent) = options.exit_with_parent {
+        exit_with_parent(parent);
+    }
 
     if let Some(path) = &options.selftest_list {
         if let Err(msg) = runs_alone("--selftest-list", &options) {
@@ -487,8 +501,66 @@ fn read_source(path: &str) -> Result<Vec<u8>, String> {
     }
 }
 
+/// `--exit-with-parent`'s value (also taken by `pscat handwrite`).
+fn parent_pid_arg(n: &str) -> Result<u32, String> {
+    n.parse()
+        .map_err(|_| format!("invalid --exit-with-parent value: {n} (expected a process id)"))
+}
+
+/// `--exit-with-parent PID`: a thread that ends the process once `parent`
+/// is no longer its parent (it died and this process was re-parented).
+/// Looked at once at the start, then twice a second, on its own thread, so
+/// a program stuck inside one long operator is stopped too. Unix only;
+/// elsewhere the flag is accepted and does nothing.
+fn exit_with_parent(parent: u32) {
+    #[cfg(not(unix))]
+    let _ = parent;
+    #[cfg(unix)]
+    {
+        std::thread::spawn(move || {
+            loop {
+                if std::os::unix::process::parent_id() != parent {
+                    // Not `eprintln!`: stderr is often a pipe to the parent
+                    // that just died, and a failed write would panic this
+                    // thread instead of ending the process.
+                    let _ = writeln!(io::stderr(), "pscat: the parent process is gone; stopping");
+                    std::process::exit(1);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+        });
+    }
+}
+
+/// Run `source` to the end, under `--progress` slice by slice so each
+/// finished page is reported as soon as the slice it ends in returns.
+fn run_progress(interp: &mut Interp, source: &[u8]) -> Result<(), pscat::PsError> {
+    // The slice `run_source` takes under limits: small, so a page is
+    // reported soon after its `showpage`.
+    const SLICE: usize = 512;
+    let mut reported = 0usize;
+    interp.begin_source(source);
+    loop {
+        let more = interp.step_n(SLICE);
+        let pages = interp.gfx().pages().len();
+        if pages != reported {
+            reported = pages;
+            // A closed stderr must not stop the render.
+            let _ = writeln!(io::stderr(), "pscat: progress pages={pages}");
+        }
+        if !more? {
+            return Ok(());
+        }
+    }
+}
+
 fn run_headless(interp: &mut Interp, source: &[u8], options: &Options) -> bool {
-    match interp.run_source(source) {
+    let run = if options.progress {
+        run_progress(interp, source)
+    } else {
+        interp.run_source(source)
+    };
+    match run {
         Ok(()) => true,
         Err(e) => {
             eprintln!("{}", interp.error_report(&e));
@@ -790,7 +862,7 @@ fn run_sweep(options: &Options, source: &[u8]) -> ExitCode {
                     (c, r)
                 }
                 None => {
-                    let cols = (n as f64).sqrt().ceil() as u32;
+                    let cols = pscat::fmath::sqrt(n as f64).ceil() as u32;
                     (cols, (n as u32).div_ceil(cols))
                 }
             };
@@ -1320,6 +1392,11 @@ fn parse_args() -> Result<Options, String> {
             }
             "--headless" => options.headless = true,
             "--pstack-on-error" => options.pstack_on_error = true,
+            "--progress" => options.progress = true,
+            "--exit-with-parent" => {
+                let n = args.next().ok_or("missing PID after --exit-with-parent")?;
+                options.exit_with_parent = Some(parent_pid_arg(&n)?);
+            }
             "--dpi" => {
                 let n = args.next().ok_or("missing value after --dpi")?;
                 options.dpi = n
@@ -1498,13 +1575,18 @@ fn print_usage() {
     );
     println!("      --halftone      screen the raster like a mono laser printer (window/PNG)");
     println!("      --pstack-on-error  print the operand stack after an error");
+    println!("      --progress      print `pscat: progress pages=N` to stderr as each page");
+    println!("                      is finished (headless runs)");
+    println!("      --exit-with-parent PID  stop once PID is no longer pscat's parent");
+    println!("                      (Unix; pscat-mcp passes its own pid to every render)");
     println!("      --max-steps N   stop a program after N interpreter steps (0 = no limit)");
     println!("      --max-time SECS stop a program after SECS of wall-clock time (0 = no limit)");
     println!("      --max-memory MIB  stop a program that grows the heap by more than MIB");
     println!("                      (0 = no limit). A stopped run exits non-zero with");
     println!("                      `limitexceeded (steps|time|memory)`; `stopped` can't catch it");
     println!("      --allow-write DIR  let the program write files inside DIR (repeatable):");
-    println!("                      `(DIR/f) (w) file`, `(a) file`, renamefile, deletefile.");
+    println!("                      `(DIR/f) (w) file`, `(a) file`, writereals, renamefile,");
+    println!("                      deletefile.");
     println!("                      Off by default; paths outside, `..` and symlinks out");
     println!("                      are invalidfileaccess. %stdout/%stderr need no flag");
     println!("      --lint          check the finished run for common mistakes (implies");

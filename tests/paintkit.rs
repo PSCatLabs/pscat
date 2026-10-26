@@ -23,6 +23,10 @@
 //! jitter's determinism, and corners/a direction reversal rendering
 //! without crashing.
 
+// Reference values for geometry checks, not pixels: the platform libm is fine here
+// (production math goes through src/fmath.rs, issue #738).
+#![allow(clippy::disallowed_methods)]
+
 mod common;
 
 use common::within_cpu_budget;
@@ -12491,7 +12495,11 @@ fn dab_and_oil_unset_loading_keys_are_byte_identical() {
         0x46cf174a8c23e026,
         0x4afeceacd6e421ce,
         0xe659b4013bfc5106,
-        0x407b12e6fb63aeef,
+        // The curveto/Ridges/ColorJitter oil mark. Was 0x407b12e6fb63aeef under
+        // Apple's libm and glibc's (musl's gave this value already); it moved
+        // when math went through src/fmath (#738), whose results are musl's on
+        // every platform.
+        0x5beb8a707c78323e,
     ];
     let got: Vec<u64> = scenarios
         .iter()
