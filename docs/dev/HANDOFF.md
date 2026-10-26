@@ -1193,7 +1193,8 @@ renders eight examples in both and compares block-downsampled output).
   frame is popped *before* its last element runs, so the frame itself cannot mark
   the return), and `cleanup_unwound_frame` / `exit_loop` close it on `stop`,
   errors, `exit` and `quit`. A call to a name already among the markers on top of
-  the exec stack plants none (tail recursion stays at constant depth). Keep the
+  the exec stack plants none (tail recursion stays at constant depth; non-tail recursion overflows the exec
+  stack at about half the plain depth, since a marker takes a slot). Keep the
   hot path as it is: the only cost off is one `profile.is_some()` in
   `execute_resolved`'s `Array` arm, and everything else is `#[cold]`. A first
   version that made `step_n_inner` generic, or added a second caller of

@@ -25,8 +25,15 @@ call are done. `cleanup_unwound_frame` (used by `do_stop` and `unwind_all`) and
 (constant exec-stack depth in a plain run) into `execstackoverflow`. The
 markers contiguous on top of the exec stack are exactly the procedures in tail
 position, so a call to a name already among them counts but plants no marker.
-Cost: with mutual tail recursion the chain is one open call, and its time goes
-to the first procedure of it.
+Cost: with mutual tail recursion (`ping` <-> `pong`) the chain is one open call
+under the last marker planted, so the bodies of both count as `pong`'s
+exclusive time (tested).
+
+**Exec-stack depth.** Each open named call holds two slots (marker and body
+frame) against one, so non-tail recursion overflows at about half the depth:
+about 5,000 levels under `--profile` against about 10,000 plain
+(`execstackoverflow`, and the report still prints). Making the push sites
+subtract the markers would put a cost on the hot path; not done.
 
 **Accounting.** Each open call has a start time and the inclusive time of its
 children. On close: `exclusive += duration - children`, the parent's children

@@ -119,18 +119,38 @@ fn deep_tail_recursion_still_runs_and_is_counted() {
 }
 
 #[test]
-fn mutual_tail_recursion_stays_shallow_too() {
+fn mutual_tail_recursion_stays_shallow_and_the_time_goes_to_the_innermost() {
     let (result, report) = profile(
         "/ping { dup 0 gt { 1 sub pong } { pop } ifelse } def
-         /pong { dup 0 gt { 1 sub ping } { pop } ifelse } def
-         50000 ping",
+         /pong { 0 1 500 { pop } for dup 0 gt { 1 sub ping } { pop } ifelse } def
+         20000 ping",
     );
     result.expect("runs");
-    assert_eq!(
-        row(&report, "ping").calls + row(&report, "pong").calls,
-        50001
-    );
+    let (ping, pong) = (row(&report, "ping"), row(&report, "pong"));
+    assert_eq!(ping.calls + pong.calls, 20001);
     assert_consistent(&report);
+    // One open `ping` and one open `pong` cover the whole chain; the bodies
+    // all ran under `pong`'s.
+    assert!(pong.exclusive > ping.exclusive * 10, "{report:?}");
+    assert!(ping.inclusive >= pong.inclusive);
+}
+
+#[test]
+fn deep_non_tail_recursion_fails_cleanly_and_still_reports() {
+    // About 10,000 levels fit in a plain run, about 5,000 with the markers.
+    let src =
+        |n: u32| format!("/r {{ dup 0 gt {{ 1 sub r 1 add }} {{ pop 0 }} ifelse }} def {n} r pop");
+    let mut plain = Interp::new();
+    plain
+        .run_str(&src(9000))
+        .expect("9000 levels fit without --profile");
+    let (result, report) = profile(&src(3000));
+    result.expect("3000 levels fit with it");
+    assert_eq!(row(&report, "r").calls, 3001);
+    let (result, report) = profile(&src(9000));
+    assert!(matches!(result, Err(pscat::PsError::ExecStackOverflow)));
+    assert_consistent(&report);
+    assert!(row(&report, "r").inclusive > std::time::Duration::ZERO);
 }
 
 #[test]

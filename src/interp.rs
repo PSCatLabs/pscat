@@ -1277,8 +1277,13 @@ impl Interp {
     /// of the exec stack, one per procedure in tail position. A call to a
     /// name already in that run counts but plants no new marker, which keeps
     /// tail recursion at constant depth, as it is without `--profile`. (The
-    /// time then belongs to the one open call: with mutual tail recursion
-    /// some exclusive time lands on the first procedure of the chain.)
+    /// time then belongs to the innermost open call, the last procedure of
+    /// the chain to plant a marker: with mutual tail recursion `ping` <->
+    /// `pong`, the body of both counts as `pong`'s exclusive time.)
+    ///
+    /// Each open call holds two exec-stack slots (marker and body frame),
+    /// so non-tail recursion runs out at about half the depth it does in a
+    /// plain run (`execstackoverflow`, about 5,000 levels instead of 10,000).
     #[cold]
     #[inline(never)]
     fn prof_call(&mut self, id: u32, body: PsArray) -> Result<(), PsError> {

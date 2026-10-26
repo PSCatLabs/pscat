@@ -173,7 +173,12 @@ More on the less obvious ones:
     so a run that dies still reports where its time went.
   - With mutual tail recursion (`a` ends by calling `b`, `b` by calling `a`)
     the chain stays one call deep, as it does without `--profile`; the calls
-    are all counted, and the time goes to the first procedure of the chain.
+    are all counted, and the time goes to the last one to open a call (with
+    `ping`/`pong`, to `pong`; `ping` keeps the time before its first call).
+  - Each open call holds one more exec-stack slot than a plain call, so
+    non-tail recursion that runs about 10,000 levels deep in a plain run
+    stops with `execstackoverflow` at about 5,000 under `--profile`. The
+    report still prints.
   - It costs time: about 55 ns per named procedure call (the clock is read
     twice), so `fib 30` runs about a third slower and a typical piece 5%.
     Times include that cost, so small procedures read high. Without the flag
