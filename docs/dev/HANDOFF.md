@@ -1175,8 +1175,15 @@ renders eight examples in both and compares block-downsampled output).
   the flag: `pscat-mcp`'s children inherit the environment, and the MCP layer
   must never write from PostScript (`tests/file_write.rs` asserts it). Output
   files are `file::Sink`s; `%stdout` goes through `Interp::write_stdout` so a
-  captured stdout keeps order with `print`. Disk writes are unbuffered because
-  the CLI exits without dropping the interpreter. See `notes/740-file-writing.md`.
+  captured stdout keeps order with `print`. Disk writes are buffered (#762,
+  `file::DiskSink`, 64 KiB): the interpreter keeps weak handles to the open
+  files (`Interp::flush_outputs`, cap `MAX_OPEN_OUTPUT_FILES` = 64) and the CLI
+  flushes them on every exit path (`flush_outputs_or_report` in `main.rs`,
+  `window.rs`), because it never tears down the dictionary graph that may hold
+  an open file. A new CLI exit path must flush too; `Drop for Interp` is only the
+  backstop. `--max-write-bytes` is `Interp::set_max_write_bytes` (1 GiB with
+  `--allow-write`). See `notes/740-file-writing.md` and
+  `notes/762-file-hardening.md`.
 - **`pscat-mcp` limits from the environment (#756).** Every numeric flag has a
   `PSCAT_MCP_<FLAG>` variable, from one table (`NUMERIC_OPTIONS` in
   `src/mcp_server.rs`) that also holds the ranges and defaults, so the two

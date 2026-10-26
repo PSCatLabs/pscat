@@ -14,6 +14,16 @@ use crate::error::PsError;
 /// Wildcards (`*`, `?`, `\` to quote) match within the last component;
 /// a template with one in a directory part matches nothing.
 ///
+/// **Windows.** `\` is always the escape character, on every platform
+/// (PLRM), so it cannot also separate directories: write `C:/dir/*.ps`, not
+/// `C:\dir\*.ps` (each `\` quotes the next character, and the whole is one
+/// name with no directory part, which matches nothing). `/` is the separator everywhere: the template is split
+/// at its `/`s, Windows accepts them in paths, and the names come back with
+/// the `/` they were given (a drive letter and a UNC `//server/share/` form
+/// work as the directory part). Names match case-sensitively on every
+/// platform. Patterns across several directories (`*/*.ps`) are not
+/// supported, on any platform.
+///
 /// `poll` is called once per directory entry looked at, with the bytes the
 /// entry adds to the result (0 when it doesn't match), so an interpreter
 /// under execution limits can stop a listing of a huge directory.
@@ -155,6 +165,34 @@ mod tests {
         assert!(m("a*b*c", "aXbYbZc") && !m("a*b*c", "aXbY"));
         assert!(m("\\*", "*") && !m("\\*", "x") && !m("a\\", "a"));
         assert!(m("", "") && !m("", "a"));
+    }
+
+    /// On Windows a template uses `/` between directories, drive letter
+    /// included, and the names come back with it (issue #762).
+    #[cfg(windows)]
+    #[test]
+    fn windows_templates_use_forward_slashes() {
+        let dir = std::env::temp_dir().join(format!("pscat-fnfa-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a.txt"), b"x").unwrap();
+        std::fs::write(dir.join("b.txt"), b"x").unwrap();
+        let base = dir.to_str().unwrap().replace('\\', "/");
+        let names =
+            matching_names(format!("{base}/*.txt").as_bytes(), None, &mut |_| Ok(())).unwrap();
+        let want: Vec<Vec<u8>> = ["a.txt", "b.txt"]
+            .iter()
+            .map(|n| format!("{base}/{n}").into_bytes())
+            .collect();
+        assert_eq!(names, want);
+        // The backslash form is the escape, so it names nothing.
+        let bs = format!("{}\\*.txt", dir.to_str().unwrap());
+        assert!(
+            matching_names(bs.as_bytes(), None, &mut |_| Ok(()))
+                .unwrap()
+                .is_empty()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

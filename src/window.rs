@@ -67,10 +67,13 @@ pub fn run_windowed(interp: Interp, options: WindowOptions) -> Result<(), String
     event_loop
         .run_app(&mut app)
         .map_err(|e| format!("event loop error: {e}"))?;
+    // Files the program left open go to disk before the process exits
+    // (issue #762).
+    let flushed = app.interp.flush_outputs();
     if app.had_error {
         return Err("program stopped with an error (canvas left on screen)".to_string());
     }
-    Ok(())
+    flushed.map_err(|e| format!("could not write a file the program left open: {e}"))
 }
 
 /// The `--interactive` mode: the terminal REPL and the live window at
@@ -139,7 +142,9 @@ pub fn run_interactive(
     event_loop
         .run_app(&mut app)
         .map_err(|e| format!("event loop error: {e}"))?;
-    Ok(())
+    app.interp
+        .flush_outputs()
+        .map_err(|e| format!("could not write a file the program left open: {e}"))
 }
 
 struct InteractiveState {

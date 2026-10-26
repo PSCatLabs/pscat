@@ -28,7 +28,10 @@
 //!   failure that is not end-of-file, and a short file is end-of-file, so
 //!   it is not `ioerror`; asking for more values than exist is a range
 //!   error, like `getinterval` past the end.
-//! - `limitcheck`: `n` over the 16M-element `array` cap.
+//! - `limitcheck`: `n` over the 16M-element `array` cap; or, for writing,
+//!   the whole array would pass the write-bytes cap (`--max-write-bytes`,
+//!   `Interp::set_max_write_bytes`), which is checked before the file is
+//!   opened, so the target is left as it was.
 //! - `ioerror`: the OS refused a write.
 //!
 //! A limit that stops a long write leaves the file as far as it got (it was
@@ -128,6 +131,9 @@ fn writereals(it: &mut Interp) -> Result<(), PsError> {
         return Err(PsError::UndefinedFilename);
     }
     let name = std::str::from_utf8(&name).map_err(|_| PsError::InvalidFileAccess)?;
+    // The whole write against the byte cap before the file is opened, so a
+    // refusal leaves the target as it was (issue #762).
+    it.check_write_bytes((len * fmt.width()) as u64)?;
     let mut file = it
         .write_policy()
         .open(name, crate::write_roots::WriteMode::Truncate)?;
@@ -149,6 +155,7 @@ fn writereals(it: &mut Interp) -> Result<(), PsError> {
             }
         }
         poll(it, buf.len())?;
+        it.charge_write_bytes(buf.len() as u64)?;
         file.write_all(&buf).map_err(|_| PsError::Io)?;
     }
     Ok(())

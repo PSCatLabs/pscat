@@ -2,7 +2,7 @@
 //! scanner (see `src/file.rs`) — that's what `currentfile` is for.
 
 use crate::error::PsError;
-use crate::file::{Decoder, FileHandle, PsFile, Sink};
+use crate::file::{Decoder, DiskSink, FileHandle, PsFile, Sink};
 use crate::interp::Interp;
 use crate::object::{Dict, Object, PsString, Value};
 
@@ -28,6 +28,9 @@ pub fn install(dict: &mut Dict) {
     op(dict, "renamefile", renamefile);
     op(dict, "deletefile", deletefile);
     op(dict, "filenameforall", filenameforall);
+    op(dict, "fileposition", fileposition);
+    op(dict, "setfileposition", setfileposition);
+    op(dict, "resetfile", resetfile);
 }
 
 fn pop_file(it: &mut Interp) -> Result<FileHandle, PsError> {
@@ -55,6 +58,8 @@ fn pop_ps_string(it: &mut Interp) -> Result<PsString, PsError> {
 /// the bytes arrive, so `(/dev/zero) (r) file` or a FIFO ends in a limit
 /// error instead of running on inside this one operator (issue #702).
 pub(super) fn read_resource(it: &mut Interp, name: &str) -> Result<Vec<u8>, PsError> {
+    // A program reads back what it wrote, closed or not (issue #762).
+    it.flush_outputs()?;
     #[cfg(not(target_arch = "wasm32"))]
     if !it.limits().is_none() {
         return read_resource_limited(it, name);
@@ -106,7 +111,9 @@ fn read_resource_limited(it: &mut Interp, name: &str) -> Result<Vec<u8>, PsError
 /// write `%stdout`, `%stderr`, or a disk file inside the interpreter's
 /// write roots (`Interp::set_write_roots`, the CLI's `--allow-write`;
 /// none by default, so every disk path is `invalidfileaccess`). Other
-/// modes (`r+`, `w+`, `a+`) are refused.
+/// modes (`r+`, `w+`, `a+`) are refused. At most `MAX_OPEN_OUTPUT_FILES`
+/// disk files can be open at once (`limitcheck`); disk writes are
+/// buffered, and flushed as `Interp::flush_outputs` says.
 fn file(it: &mut Interp) -> Result<(), PsError> {
     let access = pop_ps_string(it)?.to_vec();
     let name = pop_ps_string(it)?;
@@ -121,6 +128,7 @@ fn file(it: &mut Interp) -> Result<(), PsError> {
         _ => return Err(PsError::InvalidFileAccess),
     };
     let name = name.to_vec();
+    let mut disk = false;
     let sink = match name.as_slice() {
         b"%stdout" => Sink::Stdout,
         b"%stderr" => Sink::Stderr,
@@ -128,10 +136,17 @@ fn file(it: &mut Interp) -> Result<(), PsError> {
         [b'%', ..] => return Err(PsError::UndefinedFilename),
         _ => {
             let name = writable_name(&name)?;
-            Sink::Disk(it.write_policy().open(name, mode)?)
+            // The cap is looked at first: a refused open truncates nothing.
+            it.check_output_slot()?;
+            disk = true;
+            Sink::Disk(DiskSink::new(it.write_policy().open(name, mode)?))
         }
     };
-    it.push(Object::lit(Value::File(PsFile::output(sink))));
+    let f = PsFile::output(sink);
+    if disk {
+        it.register_output(&f);
+    }
+    it.push(Object::lit(Value::File(f)));
     Ok(())
 }
 
@@ -145,16 +160,24 @@ fn writable_name(bytes: &[u8]) -> Result<&str, PsError> {
 /// one is an `ioerror`.
 fn write_bytes(it: &mut Interp, f: &FileHandle, bytes: &[u8]) -> Result<(), PsError> {
     use std::io::Write;
-    match f.borrow_mut().sink_mut() {
+    let disk = match f.borrow_mut().sink_mut() {
         None => return Err(PsError::Io),
-        Some(Sink::Disk(d)) => return d.write_all(bytes).map_err(|_| PsError::Io),
+        Some(Sink::Disk(_)) => true,
         Some(Sink::Stderr) => {
             return std::io::stderr().write_all(bytes).map_err(|_| PsError::Io);
         }
+        Some(Sink::Stdout) => false,
+    };
+    if !disk {
         // Through the interpreter, outside the borrow.
-        Some(Sink::Stdout) => {}
+        return it.write_stdout(bytes, false).map_err(|_| PsError::Io);
     }
-    it.write_stdout(bytes, false).map_err(|_| PsError::Io)
+    // A disk file: count the bytes against the write cap first (issue #762).
+    it.charge_write_bytes(bytes.len() as u64)?;
+    match f.borrow_mut().sink_mut() {
+        Some(Sink::Disk(d)) => d.write(bytes),
+        _ => Err(PsError::Io),
+    }
 }
 
 /// Flush an output file (`flushfile` on one, and `closefile`).
@@ -163,7 +186,7 @@ fn flush_output(it: &mut Interp, f: &FileHandle) -> Result<(), PsError> {
     let mut file = f.borrow_mut();
     match file.sink_mut() {
         None => Ok(()),
-        Some(Sink::Disk(d)) => d.flush().map_err(|_| PsError::Io),
+        Some(Sink::Disk(d)) => d.flush(),
         Some(Sink::Stderr) => std::io::stderr().flush().map_err(|_| PsError::Io),
         Some(Sink::Stdout) => {
             drop(file);
@@ -212,9 +235,11 @@ fn writehexstring(it: &mut Interp) -> Result<(), PsError> {
     Ok(())
 }
 
-/// flush — push `print` and `%stdout` output out now.
+/// flush — push `print` and `%stdout` output out now, and the buffered
+/// bytes of every disk file the program has open.
 fn flush(it: &mut Interp) -> Result<(), PsError> {
-    it.write_stdout(&[], true).map_err(|_| PsError::Io)
+    it.write_stdout(&[], true).map_err(|_| PsError::Io)?;
+    it.flush_outputs()
 }
 
 /// oldname newname renamefile → (both inside the write roots).
@@ -399,6 +424,36 @@ fn flushfile(it: &mut Interp) -> Result<(), PsError> {
         return flush_output(it, &f);
     }
     while f.borrow_mut().read_byte()?.is_some() {}
+    Ok(())
+}
+
+/// file fileposition → position. The byte offset of the next read or
+/// write. `ioerror` for a file that has no position (a filter, `%stdout`,
+/// `%stderr`) or is closed.
+fn fileposition(it: &mut Interp) -> Result<(), PsError> {
+    let f = pop_file(it)?;
+    let pos = f.borrow_mut().file_position()?;
+    it.push(Object::int(pos as i64));
+    Ok(())
+}
+
+/// file position setfileposition → . Moves the next read or write to
+/// `position`: `rangecheck` unless it is within `0..=length` (so a write
+/// file never gets a hole), `ioerror` as for `fileposition`. An input
+/// file, `currentfile` included, can be rewound or skipped ahead; a disk
+/// file opened for append still writes at its end.
+fn setfileposition(it: &mut Interp) -> Result<(), PsError> {
+    let pos = it.pop_int()?;
+    let f = pop_file(it)?;
+    let r = f.borrow_mut().set_file_position(pos);
+    r
+}
+
+/// file resetfile → . An output file throws away what is buffered and not
+/// yet written, and forgets an earlier write error; an input file has no
+/// buffer here, so it is unchanged. A closed file is not an error.
+fn resetfile(it: &mut Interp) -> Result<(), PsError> {
+    pop_file(it)?.borrow_mut().reset();
     Ok(())
 }
 

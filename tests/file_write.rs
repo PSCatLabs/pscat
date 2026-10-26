@@ -75,10 +75,11 @@ fn write_then_append_then_read_back() {
 fn write_low_byte_and_unclosed_file_is_on_disk() {
     let (root, mut it) = setup("fw-byte");
     let f = ps(&root.join("b.bin"));
-    // No closefile: writes go straight through, since the CLI exits
-    // without dropping the interpreter.
+    // No closefile: the interpreter's drop writes the buffered bytes out
+    // (the CLI's exit paths flush explicitly, `tests/file_hardening.rs`).
     it.run_str(&format!("{f} (w) file dup 321 write -1 write"))
         .unwrap();
+    drop(it);
     assert_eq!(std::fs::read(root.join("b.bin")).unwrap(), [65, 255]);
 }
 
