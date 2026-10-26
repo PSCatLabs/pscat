@@ -1122,6 +1122,14 @@ impl Gfx {
         paint.set_color_rgba8(to_u8(r), to_u8(g), to_u8(b), to_u8(self.state.alpha));
         paint.blend_mode = self.state.blend.to_skia();
         paint.anti_alias = true;
+        // tiny-skia's f32 pipeline rounds each blend to the nearest level.
+        // Its default lowp one divides by 255 as `(v+255)>>8` and lost more
+        // than 8-bit storage forces on every stack of faint layers, whether
+        // from a low `setalpha` or a sub-pixel shape's coverage (#731). The
+        // alpha byte stays quantised: at 8-bit storage that stalls later
+        // than an exact f32 alpha would. No measurable cost
+        // (notes/731-hq-compositing-pipeline.md).
+        paint.force_hq_pipeline = true;
         paint
     }
 
@@ -1413,6 +1421,8 @@ impl Gfx {
                 shader,
                 anti_alias: true,
                 blend_mode: self.state.blend.to_skia(),
+                // As in `paint()` (#731); gradients mostly run f32 anyway.
+                force_hq_pipeline: true,
                 ..Default::default()
             };
             let comp = self.composite();
@@ -2762,6 +2772,57 @@ mod tests {
             paint_pair(BlendMode::Normal, a, b),
             paint_pair(BlendMode::Normal, b, a),
         );
+    }
+
+    /// Issue #731 part 1: stacked faint `setalpha` fills must lose no more
+    /// than 8-bit storage forces. The reference is that 8-bit model: alpha
+    /// quantised to 1/255 (the byte tiny-skia receives) and each blend
+    /// rounded once to the nearest level. tiny-skia's lowp pipeline rounded
+    /// worse (`div255` as `(v+255)>>8`): white at 0.01 x 200 stalled at 192
+    /// where the model reaches 213. A second column composites through the
+    /// coverage mask (a half-covered pixel column), the path every
+    /// anti-aliased edge and glyph takes since #692.
+    #[test]
+    fn stacked_low_alpha_matches_the_8bit_model() {
+        let model = |alpha: f32, coverage: f32, layers: u32| -> u8 {
+            let a = f32::from(to_u8(alpha)) / 255.0 * coverage;
+            let mut v = 0.0_f32;
+            for _ in 0..layers {
+                v = (v + (255.0 - v) * a).round();
+            }
+            v as u8
+        };
+        let rect = |gfx: &mut Gfx, w: f64| {
+            gfx.newpath();
+            gfx.moveto(0.0, 0.0);
+            gfx.lineto(w, 0.0).expect("lineto");
+            gfx.lineto(w, 2.0).expect("lineto");
+            gfx.lineto(0.0, 2.0).expect("lineto");
+            gfx.closepath();
+            gfx.fill(FillRule::Winding);
+        };
+        for (alpha, layers) in [(0.01_f32, 200_u32), (0.05, 40), (0.002, 1000)] {
+            let mut gfx = Gfx::new(4, 2).expect("pixmap");
+            gfx.set_rgb(0.0, 0.0, 0.0);
+            rect(&mut gfx, 4.0);
+            gfx.set_rgb(1.0, 1.0, 1.0);
+            gfx.state_mut().alpha = alpha;
+            for _ in 0..layers {
+                // Columns 0-1 fully covered, column 2 half covered.
+                rect(&mut gfx, 2.5);
+            }
+            let full = gfx.pixmap.pixel(0, 0).expect("pixel").red();
+            let half = gfx.pixmap.pixel(2, 0).expect("pixel").red();
+            let (want_full, want_half) = (model(alpha, 1.0, layers), model(alpha, 0.5, layers));
+            assert!(
+                full.abs_diff(want_full) <= 1,
+                "alpha {alpha} x {layers}, full coverage: {full}, 8-bit model {want_full}"
+            );
+            assert!(
+                half.abs_diff(want_half) <= 2,
+                "alpha {alpha} x {layers}, half coverage: {half}, 8-bit model {want_half}"
+            );
+        }
     }
 
     #[test]
