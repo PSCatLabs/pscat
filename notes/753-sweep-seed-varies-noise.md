@@ -26,5 +26,4 @@ leave the obvious command quietly doing nothing for noise art.
   (checked with a base binary against the head binary, `cmp` on the PNGs). No
   tracked lib, gallery or example file samples native noise yet, so no
   existing sheet changes.
-- `review_sheet` (MCP) has no sweep input; its cells run `pscat sheet`
-  children, so it picks this up whenever #744 adds seed sweeps there.
+- `review_sheet` (MCP) has no sweep input today: out of scope here, tracked in #744.

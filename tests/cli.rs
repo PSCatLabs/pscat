@@ -291,6 +291,39 @@ fn sweep_seed_produces_different_frames_from_a_hardcoded_srand() {
     assert_ne!(a, b, "different seeds must render different pixels");
 }
 
+/// Issue #753: the flag CLI's sweep also seeds the native noise table, so a
+/// noise-only piece (no `srand`) differs per seed and repeats per seed, and
+/// does not trigger the "had no effect" warning.
+#[test]
+fn sweep_seed_varies_native_noise() {
+    let out = tmp("sweep-noise.png");
+    let source = "0 1 9 { /i exch def 0 1 9 { /j exch def \
+        i 0.37 mul j 0.37 mul 3 0.5 2 fbm2 0.5 add setgray \
+        i 2 mul j 2 mul 2 2 rectfill } for } for";
+    let (ok, _out_text, stderr) = run(
+        &[
+            "--page",
+            "20x20",
+            "--sweep-seed",
+            "1,2,1",
+            "--png",
+            out.to_str().unwrap(),
+            "-",
+        ],
+        source,
+    );
+    assert!(ok, "stderr: {stderr}");
+    assert!(!stderr.contains("never called"), "stderr: {stderr}");
+    let frame =
+        |n: u32| std::fs::read(out.with_file_name(format!("sweep-noise-00{n}.png"))).unwrap();
+    assert_ne!(
+        frame(1),
+        frame(2),
+        "different seeds must give different noise"
+    );
+    assert_eq!(frame(1), frame(3), "the same seed must give the same frame");
+}
+
 /// The reproducible-art doctrine, through a sweep: the same seed
 /// listed twice must render byte-identical frames.
 #[test]
