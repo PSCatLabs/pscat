@@ -1688,6 +1688,10 @@ renders eight examples in both and compares block-downsampled output).
   `--loader lib/<name>.ps` (repeatable, transitive through the libs built on
   it) or `--files LIST` picks the files, and multi-page output
   (`page-001.png`, ...) is compared page by page.
+  Two-binary runs (`--base-bin/--head-bin`) also always compare the
+  `selftest/drivers/image_*.ps` drivers (header `%%IdentityCorpus: always`,
+  #776), the only tracked programs that call `image`, `colorimage` and
+  `imagemask`, so an image-code change is checked whatever `--loader` was.
   **An interpreter (`src/`) change uses `--base-bin PATH --head-bin PATH`**
   (issue #335) instead of the shared binary: the base tree renders with the
   base binary (`scripts/build_base_bin.sh BASE_WORKTREE OUT`), the head tree
