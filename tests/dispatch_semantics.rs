@@ -44,6 +44,8 @@ fn uncaught(src: &str) -> String {
 /// operator's own name; bound, an operator fetched as a fn pointer does not
 /// update it, so it stays `pre` (or the last name executed, like `true`).
 /// Pinned as it is: a fast path must not change either.
+const STEP_CAP_NEED: u64 = 756;
+
 const CASES: &[(&str, &str, &str)] = &[
     // Arithmetic: operands come off one at a time, each checked as it is
     // popped, so a failure leaves the stack partly consumed.
@@ -219,6 +221,75 @@ const CASES: &[(&str, &str, &str)] = &[
     ),
     ("/v 3 def v v mul", "0 9 false", "0 9 false"),
     ("/f { 2 mul } def 5 f f", "0 20 false", "0 20 false"),
+    // A procedure literal followed by `if` or `ifelse` (#864 fuses these
+    // into one step when the condition is a boolean; anything else must
+    // fail exactly as the two separate elements do).
+    ("1 2 lt { 5 } if", "0 5 false", "0 5 false"),
+    ("2 1 lt { 5 } if", "0 false", "0 false"),
+    ("true { } if", "0 false", "0 false"),
+    ("false { } if", "0 false", "0 false"),
+    ("3 dup 0 lt { pop 0 } if", "0 3 false", "0 3 false"),
+    ("-3 dup 0 lt { pop 0 } if", "0 0 false", "0 0 false"),
+    ("true { false { 1 } if 2 } if", "0 2 false", "0 2 false"),
+    (
+        "clear { 5 } if",
+        "/stackunderflow if true",
+        "/stackunderflow pre true",
+    ),
+    (
+        "(a) { 5 } if",
+        "0 /typecheck if true",
+        "0 /typecheck pre true",
+    ),
+    (
+        "null { 5 } if",
+        "0 /typecheck if true",
+        "0 /typecheck null true",
+    ),
+    ("true { 1 } { 2 } ifelse", "0 1 false", "0 1 false"),
+    ("false { 1 } { 2 } ifelse", "0 2 false", "0 2 false"),
+    ("true { } { 2 } ifelse", "0 false", "0 false"),
+    ("false { 1 } { } ifelse", "0 false", "0 false"),
+    (
+        "1 { 1 } { 2 } ifelse",
+        "0 /typecheck ifelse true",
+        "0 /typecheck pre true",
+    ),
+    (
+        "clear { 1 } { 2 } ifelse",
+        "/stackunderflow ifelse true",
+        "/stackunderflow pre true",
+    ),
+    ("true { 1 } 2 ifelse", "0 1 false", "0 1 false"),
+    // The true branch fails: its own error, raised inside the branch.
+    (
+        "true { 1 (a) add } if",
+        "0 1 /typecheck add true",
+        "0 1 /typecheck true true",
+    ),
+    (
+        "false { 1 } { (a) 1 sub } ifelse",
+        "0 /typecheck sub true",
+        "0 /typecheck false true",
+    ),
+    // A redefined `if` or `ifelse` is what an unbound body runs; a bound
+    // one already holds the operator.
+    (
+        "1 dict begin /if { pop pop 7 } def true { 1 } if end",
+        "0 7 false",
+        "0 1 false",
+    ),
+    (
+        "1 dict begin /ifelse { pop pop pop 8 } def true { 1 } { 2 } ifelse end",
+        "0 8 false",
+        "0 1 false",
+    ),
+    // `if` reached as a name that resolves to another name.
+    (
+        "/myif /if load def true { 9 } myif",
+        "0 9 false",
+        "0 9 false",
+    ),
 ];
 
 #[test]
@@ -312,6 +383,16 @@ fn step_granularity_is_one_element_per_step() {
         ("3 { 1 pop } bind repeat", 10),
         ("true { 1 pop } bind if", 6),
         ("/p { 1 pop } def 4 { p } repeat", 18),
+        // Procedure literal + `if`/`ifelse` inside a procedure: one step per
+        // element whether or not the pair runs fused (#864).
+        ("{ true { 1 pop } if } bind exec", 8),
+        ("{ false { 1 pop } if } bind exec", 6),
+        ("{ true { 1 pop } if } exec", 7),
+        ("{ false { 1 pop } if } exec", 5),
+        ("{ true { 1 } { 2 } ifelse pop } bind exec", 9),
+        ("{ false { 1 } { 2 } ifelse pop } bind exec", 9),
+        ("{ true { } if 1 pop } bind exec", 8),
+        ("3 { 2 dup 0 lt { pop 0 } if pop } bind repeat", 25),
     ];
     let mut failures = Vec::new();
     for (src, want) in cases {
@@ -330,4 +411,173 @@ fn a_put_into_a_running_bound_procedure_is_seen_by_the_same_run() {
         .expect("runs");
     let stack: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
     assert_eq!(stack, ["6"]);
+}
+
+/// The operand stack, as `==` text, after each `step_n(budget)` call until
+/// the program ends.
+fn trace(src: &str, budget: usize) -> Vec<String> {
+    let mut it = Interp::new();
+    it.begin_source(src.as_bytes());
+    let mut out = Vec::new();
+    loop {
+        let more = it.step_n(budget).unwrap_or_else(|e| panic!("{src}: {e}"));
+        let stack: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
+        out.push(stack.join(" "));
+        if !more {
+            return out;
+        }
+        assert!(out.len() < 1_000_000, "{src}: runaway");
+    }
+}
+
+#[test]
+fn a_slice_of_n_steps_ends_where_n_single_steps_do() {
+    // A fused pair or triple (#864) is never split across a slice: a slice
+    // with fewer steps left runs the elements one at a time. So after
+    // every `step_n(b)` the stack is the one `b` single steps reach.
+    let programs = [
+        "{ 1 1 6 { dup 3 lt { pop 0 } if dup 4 gt { 10 } { 20 } ifelse } for } bind exec",
+        "{ 1 1 6 { dup 3 lt { pop 0 } if dup 4 gt { 10 } { 20 } ifelse } for } exec",
+        "/p { dup 2 mod 0 eq { 1 add } { 3 mul } ifelse } bind def 1 8 { p } repeat",
+    ];
+    for src in programs {
+        let singles = trace(src, 1);
+        for b in [2, 3, 4, 5, 7] {
+            let sliced = trace(src, b);
+            let want: Vec<String> = singles
+                .iter()
+                .skip(b - 1)
+                .step_by(b)
+                .cloned()
+                .chain(std::iter::once(singles.last().unwrap().clone()))
+                .collect();
+            // The last slice can end early: compare all but the final entry
+            // against the sampled single-step trace, then the final stacks.
+            let n = sliced.len();
+            assert_eq!(&sliced[..n - 1], &want[..n - 1], "{src}: budget {b}");
+            assert_eq!(sliced.last(), singles.last(), "{src}: budget {b}");
+        }
+    }
+}
+
+#[test]
+fn the_step_cap_counts_every_element_of_a_fused_run() {
+    use pscat::{Limits, PsError};
+    let src =
+        "{ 1 1 50 { dup 25 lt { pop 0 } if dup 40 gt { 1 } { 2 } ifelse pop pop } for } bind exec";
+    let run = |max: u64| {
+        let mut it = Interp::new();
+        it.set_limits(Limits::none().with_max_steps(max))
+            .expect("limits apply");
+        it.run_str(src)
+    };
+    // Pinned on the tree before #864: the smallest cap the program passes.
+    let need = STEP_CAP_NEED;
+    assert_eq!(run(need), Ok(()));
+    assert_eq!(run(need - 1), Err(PsError::StepsExceeded));
+}
+
+#[test]
+fn a_view_that_ends_before_the_operator_is_not_fused_with_it() {
+    // The storage holds `if` (or `ifelse`) right after the view's last
+    // element; the view must not reach it.
+    for src in [
+        "{ true { 1 } if } 0 2 getinterval cvx exec",
+        "{ true { 1 } if } bind 0 2 getinterval cvx exec",
+        "{ true { 1 } { 2 } ifelse } bind 0 3 getinterval cvx exec",
+        "{ true { 1 } { 2 } ifelse } bind 0 2 getinterval cvx exec",
+    ] {
+        let mut it = Interp::new();
+        it.run_str(src).unwrap_or_else(|e| panic!("{src}: {e}"));
+        let stack: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
+        let want = if src.contains("0 3 getinterval") {
+            "true {1} {2}"
+        } else {
+            "true {1}"
+        };
+        assert_eq!(stack.join(" "), want, "{src}");
+    }
+}
+
+#[test]
+fn a_changed_body_runs_its_new_elements() {
+    // Nothing about a fused pair is remembered between runs (#864): every
+    // run reads the body as it is now. In `{ true { 1 } if }` the element
+    // indices are: 0 true, 1 { 1 }, 2 if.
+    let cases: &[(&str, &str)] = &[
+        // Replace `if` after one run.
+        (
+            "/p { true { 1 } if } bind def p /p load 2 /pop load put p",
+            "1 true",
+        ),
+        // Replace the procedure literal.
+        (
+            "/p { true { 1 } if } bind def p /p load 1 { 2 } put p",
+            "1 2",
+        ),
+        // Through a `getinterval` view onto the same storage.
+        (
+            "/p { true { 1 } if } bind def p /p load 2 1 getinterval 0 /pop load put p",
+            "1 true",
+        ),
+        // `putinterval` over the pair.
+        (
+            "/p { true { 1 } if } bind def p /p load 1 [ 3 /pop load ] putinterval p",
+            "1 true",
+        ),
+        // A `restore` puts the old element back.
+        (
+            "/p { true { 1 } if } bind def save /p load 2 /pop load put p exch restore p",
+            "true 1",
+        ),
+        // The running procedure overwrites its own `if` before reaching it:
+        // elements 0 /p 1 load 2 8 3 /pop 4 load 5 put 6 true 7 { 1 } 8 if.
+        (
+            "/p { /p load 8 /pop load put true { 1 } if } bind def p",
+            "true",
+        ),
+        // Or its `ifelse`: 0 /p 1 load 2 9 3 /pop 4 load 5 put 6 true
+        // 7 { 1 } 8 { 2 } 9 ifelse.
+        (
+            "/p { /p load 9 /pop load put true { 1 } { 2 } ifelse } bind def p",
+            "true {1}",
+        ),
+        // `if` redefined between runs of an unbound body.
+        (
+            "/p { true { 1 } if } def p 1 dict begin /if { pop pop 5 } def p end",
+            "1 5",
+        ),
+    ];
+    for (src, want) in cases {
+        let mut it = Interp::new();
+        it.run_str(src).unwrap_or_else(|e| panic!("{src}: {e}"));
+        let stack: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
+        assert_eq!(stack.join(" "), *want, "{src}");
+    }
+}
+
+#[test]
+fn a_true_branch_that_overflows_the_execution_stack_fails_as_if_does() {
+    // Non-tail recursion through `true { r 1 } if` until the execution
+    // stack is full: the error, its command and the operand stack must be
+    // what the separate `if` gives.
+    for (src, want) in [
+        (
+            "/r { true { r 1 } if } def { r } stopped $error /errorname get $error /command get count",
+            "true /execstackoverflow r 3",
+        ),
+        (
+            "/r { true { r 1 } if } bind def { r } stopped $error /errorname get $error /command get count",
+            "true /execstackoverflow r 3",
+        ),
+        (
+            "/r { true { r 1 } { } ifelse } bind def { r } stopped $error /errorname get $error /command get count",
+            "true /execstackoverflow r 3",
+        ),
+    ] {
+        let mut it = Interp::new();
+        it.run_str(src).unwrap_or_else(|e| panic!("{src}: {e}"));
+        let stack: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
+        assert_eq!(stack.join(" "), want, "{src}");
+    }
 }
