@@ -181,7 +181,7 @@ predates it.
 ## Using pscat as a tool (not working on it)
 
 If you're an agent that just needs to *run* PostScript — render a
-file, debug one, generate a handwritten note — read
+file, debug one, generate a handwriting-style note — read
 `plugin/skills/pscat/SKILL.md`: it has the command recipes and
 pitfalls in one page, regardless of which agent runtime you are.
 MCP-wired agents can use `pscat-mcp` instead (`docs/guides/agents.md`).
