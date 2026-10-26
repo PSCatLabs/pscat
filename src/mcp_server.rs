@@ -3081,6 +3081,7 @@ fn base64(data: &[u8]) -> String {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
     fn test_config(args: &[&str]) -> Config {
         Config::from_args(args.iter().map(|a| a.to_string()))
             .expect("valid flags")
