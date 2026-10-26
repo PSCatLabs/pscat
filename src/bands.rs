@@ -271,9 +271,6 @@ fn run_band(
         return Err("abandoned".to_string());
     }
     let mut interp = interp.ok_or("unusable page size")?;
-    interp
-        .set_limits(options.limits)
-        .map_err(|e| format!("limits: {e}"))?;
     // The process exits right after the stitch: leave the dictionaries to
     // it, as the single-run path does (`main`).
     interp.leave_dicts_to_process_exit();
@@ -298,6 +295,12 @@ fn run_band(
     interp
         .run_source(preamble.as_bytes())
         .map_err(|e| format!("internal error defining the band names: {e}"))?;
+    // Limits after the band names, so they bound the program alone, as in a
+    // plain render; still after the start gate, so the heap base counts
+    // every band's canvas.
+    interp
+        .set_limits(options.limits)
+        .map_err(|e| format!("limits: {e}"))?;
     let error = match interp.run_source(source) {
         Ok(()) => None,
         Err(e) => {

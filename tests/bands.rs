@@ -378,3 +378,23 @@ fn refuses_what_it_cannot_honour() {
         assert!(e.contains(want), "{args:?}: {e}");
     }
 }
+
+/// A step budget that fits the program fits it under `--bands` too: the
+/// band names are defined before the limit starts counting.
+#[test]
+fn step_limit_covers_the_program_not_the_band_names() {
+    let png = common::scratch_dir("bands-steps").join("s.png");
+    let (ok, _, e) = pscat(&[
+        "--page",
+        "20x20",
+        "--max-steps",
+        "3",
+        "--bands",
+        "2",
+        "--png",
+        png.to_str().unwrap(),
+        "-e",
+        "0 pop",
+    ]);
+    assert!(ok, "{e}");
+}
