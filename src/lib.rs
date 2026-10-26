@@ -112,6 +112,8 @@ pub mod fuzzing;
 #[doc(hidden)]
 pub mod gfx;
 #[doc(hidden)]
+pub mod guard;
+#[doc(hidden)]
 pub mod halftone;
 pub(crate) mod image;
 #[doc(hidden)]

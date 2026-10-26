@@ -36,6 +36,13 @@ pub(crate) struct FontData<'a> {
 
 const CALL_DEPTH_LIMIT: usize = 30;
 
+/// Charstring operators one glyph may execute, subroutines and `seac`
+/// components included. Real glyphs run tens to a few hundred. The depth
+/// limit alone does not bound the work: a subroutine that calls itself twice
+/// is 2^30 operators at depth 30 (a hostile font found by the
+/// `type1_charstring` fuzz target, issue #704).
+const OP_BUDGET: usize = 100_000;
+
 pub(crate) fn run(code: &[u8], font: &FontData) -> Result<Glyph, PsError> {
     let mut exec = Exec {
         stack: Vec::new(),
@@ -48,6 +55,7 @@ pub(crate) fn run(code: &[u8], font: &FontData) -> Result<Glyph, PsError> {
         offset: (0.0, 0.0),
         flex: None,
         done: false,
+        budget: OP_BUDGET,
     };
     exec.run(code, font, 0)?;
     Ok(Glyph {
@@ -71,6 +79,8 @@ struct Exec {
     /// here instead of emitting moves.
     flex: Option<Vec<(f64, f64)>>,
     done: bool,
+    /// Operators left for this glyph; shared with `seac` components.
+    budget: usize,
 }
 
 impl Exec {
@@ -133,6 +143,7 @@ impl Exec {
         }
         let mut i = 0;
         while i < code.len() && !self.done {
+            self.budget = self.budget.checked_sub(1).ok_or(PsError::InvalidFont)?;
             let v = code[i];
             i += 1;
             match v {
@@ -268,8 +279,11 @@ impl Exec {
                         offset,
                         flex: None,
                         done: false,
+                        budget: self.budget,
                     };
-                    child.run(&cs, font, depth + 1)?;
+                    let ran = child.run(&cs, font, depth + 1);
+                    self.budget = child.budget;
+                    ran?;
                     self.cmds = child.cmds;
                     Ok(())
                 };
@@ -349,6 +363,11 @@ impl Exec {
                         self.ps_stack.extend(args.into_iter().rev());
                     }
                 }
+                // The PostScript stack is 24 deep in the spec; the operand
+                // stack's own limit (48) is plenty here.
+                if self.ps_stack.len() > 48 {
+                    return Err(PsError::InvalidFont);
+                }
             }
             17 => {
                 let v = self.ps_stack.pop().unwrap_or(0.0);
@@ -363,5 +382,50 @@ impl Exec {
             _ => return Err(PsError::InvalidFont),
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn run_code(code: &[u8], subrs: &[Vec<u8>]) -> Result<Glyph, PsError> {
+        let by_name = |_: &str| -> Option<Vec<u8>> { None };
+        run(
+            code,
+            &FontData {
+                subrs,
+                charstring_by_name: &by_name,
+            },
+        )
+    }
+
+    /// 30 subroutines, each calling the next twice (the 30th returns), the last returning:
+    /// 2^30 operators within the depth limit (a self-call would hit the
+    /// limit and abort, which is why this shape needs a call tree). Must stop
+    /// on the operator budget, quickly (issue #704).
+    #[test]
+    fn a_call_tree_hits_the_operator_budget() {
+        let mut subrs: Vec<Vec<u8>> = (0..29u8)
+            .map(|i| {
+                let next = 139 + i + 1; // the number i + 1
+                vec![next, 10, next, 10, 11]
+            })
+            .collect();
+        subrs.push(vec![11]);
+        let started = std::time::Instant::now();
+        let r = run_code(&[139, 10, 14], &subrs);
+        assert!(matches!(r, Err(PsError::InvalidFont)));
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+    }
+
+    #[test]
+    fn an_ordinary_glyph_is_far_inside_the_budget() {
+        // 50 600 hsbw 50 0 rmoveto 400 hlineto 700 vlineto closepath endchar
+        let code = [
+            189, 248, 236, 13, 189, 139, 21, 248, 36, 6, 249, 80, 7, 9, 14,
+        ];
+        let g = run_code(&code, &[]).expect("runs");
+        assert_eq!(g.width, 600.0);
     }
 }

@@ -600,17 +600,57 @@ pub(crate) fn register_font_bytes(name: &str, data: Vec<u8>) -> Result<i64, Stri
     if let Some(fid) = loaded_fid(name, name) {
         return Ok(fid);
     }
-    if Face::parse(&data, 0).is_err() {
+    if parse_face(&data, 0).is_none() {
         return Err(format!("{name}: not a TrueType/OpenType font"));
     }
     let data: &'static [u8] = Box::leak(data.into_boxed_slice());
     register_face(name.to_string(), data).ok_or_else(|| format!("{name}: cannot parse the font"))
 }
 
+/// `Face::parse` for bytes we did not ship (a found font file, `addFont`).
+///
+/// A collection (`ttcf`) header that claims more offsets than the file has
+/// bytes is refused here, before ttf-parser sees it: its offset-table read
+/// carries a `debug_assert!` that a hostile count trips (found by the
+/// `truetype` fuzz target, issue #704). A release build would return `None`
+/// anyway; a debug build, which is what `cargo test` and the fuzzer run,
+/// panicked.
+fn parse_face(data: &[u8], index: u32) -> Option<Face<'_>> {
+    if data.starts_with(b"ttcf") {
+        let count = data.get(8..12)?;
+        let count = u64::from(u32::from_be_bytes([count[0], count[1], count[2], count[3]]));
+        if 12 + 4 * count > data.len() as u64 {
+            return None;
+        }
+    }
+    // A panic inside the parser (a `debug_assert!` on an offset in a debug
+    // build; the fuzzer found several) is a font that does not load, not a
+    // dead interpreter. Release builds compile those asserts out.
+    crate::guard::catch(|| Face::parse(data, index).ok()).flatten()
+}
+
 /// Parse, pin a variable font to Regular, classify, register. Shared by
 /// the disk catalog and `register_font_bytes`.
 fn register_face(key: String, data: &'static [u8]) -> Option<i64> {
-    let mut boxed = Box::new(Face::parse(data, 0).ok()?);
+    let (face, encoding, ps_name) = prepare_face(&key, data)?;
+    let face: &'static Face<'static> = Box::leak(Box::new(face));
+    let mut cat = CATALOG.write().unwrap();
+    cat.push(CatalogFace {
+        key,
+        ps_name,
+        face,
+        encoding,
+    });
+    Some((BUILTINS.len() + cat.len() - 1) as i64)
+}
+
+/// The pure half of [`register_face`]: parse `data` as face 0, pin a
+/// variable font's `wght` axis to Regular, and work out the encoding mode
+/// and `FontName` for the file stem `key`. Nothing is leaked or registered,
+/// so the fuzz target (`fuzzing::truetype`) can run it on every input
+/// without growing the process.
+fn prepare_face<'a>(key: &str, data: &'a [u8]) -> Option<(Face<'a>, CatalogEncoding, String)> {
+    let mut face = parse_face(data, 0)?;
     // Some catalog files are variable fonts whose *default* named
     // instance isn't Regular — Noto Sans KR/JP ship with wght's default
     // at Thin (100), not 400. Without pinning it, the catalog would
@@ -618,15 +658,16 @@ fn register_face(key: String, data: &'static [u8]) -> Option<i64> {
     // than the Regular cut the `-Regular` filename promises. This is a
     // general policy for any variable-font catalog addition, not
     // special-cased to today's three files.
-    if boxed.is_variable() {
+    if face.is_variable() {
         let wght = ttf_parser::Tag::from_bytes(b"wght");
-        if let Some(axis) = boxed.variation_axes().into_iter().find(|a| a.tag == wght) {
-            let target = 400.0f32.clamp(axis.min_value, axis.max_value);
-            boxed.set_variation(wght, target);
+        if let Some(axis) = face.variation_axes().into_iter().find(|a| a.tag == wght) {
+            // Not `f32::clamp`: it panics when a hostile `fvar` has min > max
+            // (or a NaN bound). Taking the bounds one at a time cannot.
+            let target = 400.0f32.max(axis.min_value).min(axis.max_value);
+            face.set_variation(wght, target);
         }
     }
-    let face: &'static Face<'static> = Box::leak(boxed);
-    let encoding = match key.as_str() {
+    let encoding = match key {
         "StandardSymbolsPS" => CatalogEncoding::Symbol,
         "D050000L" => CatalogEncoding::Dingbats,
         "NotoSansKR-Regular"
@@ -642,22 +683,86 @@ fn register_face(key: String, data: &'static [u8]) -> Option<i64> {
     // stem (our own naming convention) is the honest `FontName` for
     // those; everything else keeps trusting the face's own name table.
     let ps_name = if matches!(encoding, CatalogEncoding::Unicode) {
-        key.clone()
+        key.to_string()
     } else {
         face.names()
             .into_iter()
             .find(|n| n.name_id == ttf_parser::name_id::POST_SCRIPT_NAME)
             .and_then(|n| n.to_string())
-            .unwrap_or_else(|| key.clone())
+            .unwrap_or_else(|| key.to_string())
     };
-    let mut cat = CATALOG.write().unwrap();
-    cat.push(CatalogFace {
-        key,
-        ps_name,
-        face,
-        encoding,
-    });
-    Some((BUILTINS.len() + cat.len() - 1) as i64)
+    Some((face, encoding, ps_name))
+}
+
+/// What the `truetype` fuzz target runs on a font file's bytes: the load
+/// path (`prepare_face`, as `register_font_bytes` and the catalog do it),
+/// then glyph lookup by name, by code point and by id, widths, and every
+/// outline painted, stroked into a path and measured through the same
+/// pipeline `show`, `charpath` and `stringwidth` use. Registers nothing.
+pub(crate) fn fuzz_exercise_face(gfx: &mut Gfx, data: &[u8], key: &str) {
+    if let Some((face, encoding, _name)) = prepare_face(key, data) {
+        exercise_face(gfx, &face, encoding);
+    }
+    // `prepare_face` loads face 0 only, as the catalog does; the other
+    // faces of a collection get the plain parse.
+    for index in 1..ttf_parser::fonts_in_collection(data).unwrap_or(1).min(4) {
+        if let Some(face) = parse_face(data, index) {
+            exercise_face(gfx, &face, CatalogEncoding::Standard);
+        }
+    }
+}
+
+fn exercise_face(gfx: &mut Gfx, face: &Face, encoding: CatalogEncoding) {
+    let n = face.number_of_glyphs();
+    let step = (n / 24).max(1);
+    let fm = [0.01, 0.0, 0.0, 0.01, 0.0, 0.0];
+    for (i, g) in (0..n).step_by(usize::from(step)).enumerate() {
+        let mode = match i % 3 {
+            0 => ShowMode::Paint,
+            1 => ShowMode::Charpath,
+            _ => ShowMode::Width,
+        };
+        let pen = DevPoint { x: 8.0, y: 40.0 };
+        paint_resolved_glyph(gfx, face, fm, Some(GlyphId(g)), &mode, pen);
+        let _ = face.glyph_name(GlyphId(g));
+        let _ = face.glyph_bounding_box(GlyphId(g));
+        let _ = face.glyph_ver_advance(GlyphId(g));
+    }
+    // Names the encodings resolve, and code points through the cmap.
+    for name in ["A", "space", "eacute", "uni0041", "g12", ".notdef", "fi"] {
+        let gid = resolve_glyph(face, name);
+        paint_resolved_glyph(
+            gfx,
+            face,
+            fm,
+            gid,
+            &ShowMode::Charpath,
+            DevPoint { x: 8.0, y: 40.0 },
+        );
+    }
+    for c in [
+        'A',
+        'z',
+        '\u{e9}',
+        '\u{3042}',
+        '\u{ac00}',
+        '\u{0e01}',
+        '\u{10ffff}',
+    ] {
+        let gid = face.glyph_index(c);
+        if matches!(encoding, CatalogEncoding::Unicode) || gid.is_some() {
+            paint_resolved_glyph(
+                gfx,
+                face,
+                fm,
+                gid,
+                &ShowMode::Paint,
+                DevPoint { x: 8.0, y: 40.0 },
+            );
+        }
+    }
+    let _ = (face.ascender(), face.descender(), face.units_per_em());
+    let _ = (face.is_variable(), face.variation_axes().len());
 }
 
 /// Whether `fid` names a Unicode-mode catalog face (see the
@@ -918,7 +1023,7 @@ pub fn catalog_entries() -> Vec<FontEntry> {
 /// `load_catalog_face`'s own convention.
 #[cfg(not(target_arch = "wasm32"))]
 fn parses_as_font(path: &std::path::Path) -> bool {
-    std::fs::read(path).is_ok_and(|data| Face::parse(&data, 0).is_ok())
+    std::fs::read(path).is_ok_and(|data| parse_face(&data, 0).is_some())
 }
 
 /// Names of every face findfont can currently reach without

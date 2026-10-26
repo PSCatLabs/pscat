@@ -487,34 +487,59 @@ without the limits above:
 
 ### Fuzzing
 
-The scanner and the whole interpreter are fuzzed with
-[cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz) (`fuzz/`, targets
-`lexer` and `interp`; the interpreter target runs under tight limits). A
-seed corpus is committed (`fuzz/seeds/`) and replayed by `cargo test`
+The scanner, the whole interpreter, the font loaders, the decode filters and
+the image operators are fuzzed with
+[cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz) (`fuzz/`). Seven targets:
+
+| Target | What it feeds |
+|---|---|
+| `lexer` | the scanner, token by token |
+| `interp` | the whole interpreter, under tight limits |
+| `truetype` | a font file (TrueType, OpenType/CFF, a `.ttc` collection, a variable font) through the loader `findfont` and `addFont` use, then every glyph outline |
+| `type1_charstring` | one decrypted Type 1 charstring plus its subroutines and `seac` components |
+| `type1_font` | a complete Type 1 font program (`eexec`, `RD`, `definefont`), then text shown in every font it defined |
+| `filters` | ASCIIHex, ASCII85, RunLength, eexec, Flate, LZW and DCT (JPEG), alone and chained |
+| `image` | a PostScript program (the `selftest/drivers/image_*.ps` programs are the seeds), or a recipe that builds `image`, `imagemask`, `colorimage` (interleaved and one source per component), the dictionary forms, `/MultipleDataSources` and `ImageType 3` calls at 1 to 16 bits, in every colour space, from strings, procedures, inline data or any decode filter |
+
+A seed corpus is committed (`fuzz/seeds/`) and replayed by `cargo test`
 (`tests/fuzz_corpus.rs`), as is every crash once fixed
-(`fuzz/regressions/`). The `fuzz` workflow
-(`.github/workflows/fuzz.yml`) runs both targets for ten minutes each every
-week, and on request; a crash opens an issue and uploads the input. Writing the
-harness turned up one panic, now fixed and kept as a regression input:
-`9223372036854775807 packedarray` aborted with `capacity overflow`. A
-first local run of each target (one and a half minutes for `interp`,
-a minute for `lexer`, 600,000 inputs for the lexer) found nothing more; that
-is a smoke test, not a clean bill. Two things the fuzzing does not report on
-purpose: leaks (a program that puts a dictionary into itself builds a
-reference cycle that is never freed; LeakSanitizer is switched off, and that
-is the program's own doing, not memory unsafety) and the unbounded whole-file
-read above, which a mutated `file` path could reach and the harness does not
-fence off. The harness names no write root and no read root, so a mutated
-program's disk writes are all refused, and what the write-root and read-root
-checks do on a hostile name is covered by their unit tests
+(`fuzz/regressions/`). The replay runs every input under a thirty-second
+deadline, so a hang fails the test instead of stalling CI, and checks that a
+`/dev/zero` seed and a FIFO nobody writes to end on a limit. The `fuzz`
+workflow (`.github/workflows/fuzz.yml`) runs every target for ten minutes
+each every week, and on request; a crash opens an issue and uploads the
+input.
+
+What fuzzing found so far, all fixed and kept as regression inputs:
+`9223372036854775807 packedarray` aborted with `capacity overflow`; a Type 1
+font whose subroutines each call the next one twice ran 2^30 operators within
+the depth limit (42 seconds for one glyph; a charstring now has an operator
+budget); an LZW stream that never sends a clear code grew its table without
+end, about 4 KB for every 12-bit code (the table is now capped at the 4096
+codes a 12-bit code can name); a crafted progressive JPEG tripped an `assert!`
+in `zune-jpeg`'s NEON upsampler on aarch64, and a `ttf-parser`
+`debug_assert!` fires on a hostile `.ttc` header or `GSUB` table in a debug
+build (both are now caught where pscat calls them, and become an `ioerror` or
+a font that does not load). The first local runs were seven minutes per
+target; that is a smoke test, not a clean bill. Two things the fuzzing does
+not report on purpose: leaks (a program that puts a dictionary into itself
+builds a reference cycle that is never freed; LeakSanitizer is switched off,
+and that is the program's own doing, not memory unsafety) and the
+`ttf-parser`/`zune-jpeg` panics above, which the fuzz targets let through
+because pscat catches them. The harness names no write root and no read root,
+so a mutated program's disk writes are all refused, and what the write-root
+and read-root checks do on a hostile name is covered by their unit tests
 (`src/write_roots.rs`, `src/read_roots.rs`) and `tests/`, not by fuzzing.
 
-What is **not** fuzzed yet: the Type 1 and TrueType font loaders, the image
-decoders (JPEG, Flate, LZW and the rest) other than as the interpreter
-reaches them through a program, and the PDF and SVG writers. A reader for PDF
-files does not exist yet, so there is no target for it. The dependencies
+What is **not** fuzzed yet: the PDF and SVG writers; `readreals` (it takes a
+file path, and its parser is `from_le_bytes` over exact-size chunks, so the
+hostile surface is the whole-file read that `interp` and the replay tests
+already cover); the `ImageType 3` `InterleaveType` 1 and 2 forms (not
+implemented); the `.pfb` Type 1 container (not read). A reader for PDF files
+does not exist yet, so there is no target for it. The dependencies
 (`tiny-skia`, `ttf-parser`, `zune-jpeg`, `flate2`, `winit`, `softbuffer`) have
-their own fuzzing and are not audited here. The interpreter's own code contains
+their own fuzzing and are not audited here, though the targets above do run
+them on hostile input. The interpreter's own code contains
 no `unsafe` apart from the WebAssembly export functions in `src/wasm.rs` and
 the counting allocator in `src/memtrack.rs`, which forwards every call to the
 system allocator and adds two atomic counters.
