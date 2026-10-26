@@ -226,7 +226,7 @@ fn rotate(it: &mut Interp) -> Result<(), PsError> {
     match &top.value {
         Value::Array(_) => {
             let angle = it.pop_f64()?;
-            write_matrix(it, &top, Transform::from_rotate(angle as f32))?;
+            write_matrix(it, &top, crate::fmath::rotation(angle as f32))?;
             it.push(top.clone());
         }
         Value::Integer(_) | Value::Real(_) => {
@@ -235,7 +235,7 @@ fn rotate(it: &mut Interp) -> Result<(), PsError> {
                 Value::Real(r) => r,
                 _ => unreachable!("matched numeric above"),
             };
-            it.gfx.concat_ctm(Transform::from_rotate(angle as f32));
+            it.gfx.concat_ctm(crate::fmath::rotation(angle as f32));
         }
         _ => return Err(PsError::Typecheck),
     }

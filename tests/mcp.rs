@@ -82,6 +82,34 @@ impl Server {
             .clone()
     }
 
+    /// Send a `tools/call` without reading its reply.
+    fn request(&mut self, id: Value, name: &str, arguments: Value) {
+        let msg = json!({
+            "jsonrpc": "2.0", "id": id, "method": "tools/call",
+            "params": { "name": name, "arguments": arguments }
+        });
+        self.send_raw(msg.to_string().as_bytes());
+    }
+
+    #[cfg(unix)]
+    fn pid(&self) -> u32 {
+        self.child.id()
+    }
+
+    /// Close stdin, as a client does to stop a stdio server, and read what
+    /// is left on stdout up to its end.
+    fn close_and_drain(&mut self) -> Vec<Value> {
+        drop(self.child.stdin.take());
+        let mut rest = Vec::new();
+        loop {
+            let mut line = String::new();
+            if self.reader.read_line(&mut line).expect("read") == 0 {
+                return rest;
+            }
+            rest.push(serde_json::from_str(&line).expect("JSON line"));
+        }
+    }
+
     fn ping_ok(&mut self) {
         let resp = self.call(json!({ "jsonrpc": "2.0", "id": "ping-1", "method": "ping" }));
         assert_eq!(resp["id"], "ping-1");
@@ -206,7 +234,11 @@ fn handshake_and_tool_list() {
             "chalkboard_math",
             "review_sheet",
             "describe_art_capabilities",
-            "eval_postscript"
+            "eval_postscript",
+            "start_render",
+            "render_status",
+            "render_result",
+            "cancel_render"
         ],
         "the advertised tool set"
     );
@@ -316,14 +348,19 @@ fn tool_schemas_use_only_the_portable_union_shape() {
 /// writers on purpose (see `annotations` in src/mcp_server.rs).
 #[test]
 fn every_tool_has_annotations() {
-    // (name, readOnlyHint)
+    // (name, readOnlyHint, idempotentHint): only start_render is not
+    // idempotent, since each call starts another job.
     let expected = [
-        ("render_postscript", false),
-        ("handwrite", false),
-        ("chalkboard_math", false),
-        ("review_sheet", false),
-        ("describe_art_capabilities", true),
-        ("eval_postscript", true),
+        ("render_postscript", false, true),
+        ("handwrite", false, true),
+        ("chalkboard_math", false, true),
+        ("review_sheet", false, true),
+        ("describe_art_capabilities", true, true),
+        ("eval_postscript", true, true),
+        ("start_render", false, false),
+        ("render_status", true, true),
+        ("render_result", true, true),
+        ("cancel_render", false, true),
     ];
     let mut s = Server::start();
     initialized(&mut s);
@@ -336,9 +373,9 @@ fn every_tool_has_annotations() {
     );
     for tool in tools {
         let name = tool["name"].as_str().expect("name");
-        let &(_, read_only) = expected
+        let &(_, read_only, idempotent) = expected
             .iter()
-            .find(|(n, _)| *n == name)
+            .find(|(n, _, _)| *n == name)
             .unwrap_or_else(|| panic!("{name} has no row in the annotations table"));
         let a = tool["annotations"]
             .as_object()
@@ -353,7 +390,7 @@ fn every_tool_has_annotations() {
         }
         assert_eq!(a["readOnlyHint"], read_only, "{name}: readOnlyHint");
         assert_eq!(a["destructiveHint"], false, "{name}: destructiveHint");
-        assert_eq!(a["idempotentHint"], true, "{name}: idempotentHint");
+        assert_eq!(a["idempotentHint"], idempotent, "{name}: idempotentHint");
         assert_eq!(a["openWorldHint"], false, "{name}: no network, ever");
         assert_eq!(a["title"], tool["title"], "{name}: annotations.title");
     }
@@ -364,7 +401,7 @@ fn pscat_mcp_subcommand_is_the_same_server() {
     let mut s = Server::start_subcommand();
     initialized(&mut s);
     let resp = s.call(json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }));
-    assert_eq!(resp["result"]["tools"].as_array().expect("tools").len(), 6);
+    assert_eq!(resp["result"]["tools"].as_array().expect("tools").len(), 10);
     // A tool call works too: the subcommand finds pscat (itself) to shell out to.
     let result = s.tool("eval_postscript", json!({ "source": "(hi) =" }));
     assert_eq!(result["isError"], false, "{result}");
@@ -2135,4 +2172,537 @@ fn review_sheet_labels_cannot_inject_postscript() {
         assert_eq!(sheet_png(&result), cli, "{label:?}");
     }
     s.ping_ok();
+}
+
+// --- concurrency, cancellation and render jobs (#622, #741) ---------------
+//
+// No assertion here is on elapsed time. Waits are a bounded number of looks
+// (`eventually`), each bound far beyond what is waited for, and a render
+// that must still be running is held at a FIFO the test opens, not raced.
+
+/// Look at `cond` up to `tries` times, 50 ms apart.
+fn eventually(tries: usize, mut cond: impl FnMut() -> bool) -> bool {
+    for _ in 0..tries {
+        if cond() {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    cond()
+}
+
+/// The children of `pid` as (pid, state), zombies included: `ps`, because
+/// macOS's `pgrep -P` leaves zombies out.
+#[cfg(unix)]
+fn children(pid: u32) -> Vec<(u32, String)> {
+    let out = Command::new("ps")
+        .args(["-A", "-o", "pid=,ppid=,stat="])
+        .output()
+        .expect("ps");
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| {
+            let f: Vec<&str> = l.split_whitespace().collect();
+            (f.len() >= 3 && f[1].parse::<u32>().ok() == Some(pid))
+                .then(|| (f[0].parse().expect("pid"), f[2].to_string()))
+        })
+        .collect()
+}
+
+/// Whether `pid` is a live process. A zombie is not: on Linux `kill(pid, 0)`
+/// succeeds on one, which would make a test wait on init's reaping.
+#[cfg(unix)]
+fn process_exists(pid: u32) -> bool {
+    // Signal 0 only asks whether the process is there.
+    if unsafe { libc::kill(pid as libc::pid_t, 0) } != 0 {
+        return false;
+    }
+    let out = Command::new("ps")
+        .args(["-o", "stat=", "-p", &pid.to_string()])
+        .output()
+        .expect("ps");
+    let stat = String::from_utf8_lossy(&out.stdout);
+    !stat.trim().is_empty() && !stat.trim_start().starts_with('Z')
+}
+
+#[cfg(unix)]
+fn mkfifo(path: &Path) {
+    let _ = std::fs::remove_file(path);
+    assert!(
+        Command::new("mkfifo")
+            .arg(path)
+            .status()
+            .expect("mkfifo")
+            .success(),
+        "make a FIFO"
+    );
+}
+
+fn job_facts(result: &Value) -> Value {
+    assert_eq!(result["isError"], false, "{result}");
+    let facts = result["structuredContent"].clone();
+    let text: Value = serde_json::from_str(&texts(result)[0]).expect("the text is the JSON");
+    assert_eq!(text, facts, "text and structuredContent say the same");
+    facts
+}
+
+fn start_job(s: &mut Server, arguments: Value) -> String {
+    let facts = job_facts(&s.tool("start_render", arguments));
+    assert_eq!(facts["state"], "queued", "{facts}");
+    facts["job_id"].as_str().expect("job_id").to_string()
+}
+
+fn status(s: &mut Server, job: &str) -> Value {
+    job_facts(&s.tool("render_status", json!({ "job_id": job })))
+}
+
+fn images(result: &Value) -> Vec<String> {
+    result["content"]
+        .as_array()
+        .expect("content")
+        .iter()
+        .filter(|c| c["type"] == "image")
+        .map(|c| c["data"].as_str().expect("data").to_string())
+        .collect()
+}
+
+/// #622: a call that runs for minutes no longer holds the server: `ping`
+/// and another call are answered beside it, and `notifications/cancelled`
+/// kills its child (reaped: no zombie) long before its 600 s limit. The
+/// cancelled call is never answered, as the spec asks.
+#[test]
+fn ping_and_other_calls_answer_during_a_long_call_and_cancel_kills_it() {
+    let mut s = Server::start_in(
+        &common::scratch_dir("mcp-cancel-call"),
+        &["--timeout", "600", "--max-steps", "0"],
+    );
+    initialized(&mut s);
+    s.request(
+        json!("long"),
+        "eval_postscript",
+        json!({ "source": "{ } loop" }),
+    );
+    s.ping_ok();
+    let beside = s.tool("eval_postscript", json!({ "source": "(beside) =" }));
+    assert_eq!(texts(&beside), ["beside\n"], "{beside}");
+    #[cfg(unix)]
+    {
+        let pid = s.pid();
+        assert!(
+            eventually(400, || children(pid).len() == 1),
+            "the long call's child runs: {:?}",
+            children(pid)
+        );
+    }
+    s.send_raw(
+        br#"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":"long","reason":"test"}}"#,
+    );
+    #[cfg(unix)]
+    {
+        let pid = s.pid();
+        assert!(
+            eventually(400, || children(pid).is_empty()),
+            "the cancel killed and reaped the child: {:?}",
+            children(pid)
+        );
+    }
+    s.ping_ok();
+    let rest = s.close_and_drain();
+    assert!(
+        rest.iter().all(|m| m["id"] != "long"),
+        "a cancelled call is not answered: {rest:?}"
+    );
+}
+
+/// Replies from several threads at once are whole lines: renders whose
+/// replies are hundreds of KB, with pings in between, all come back as
+/// clean JSON-RPC (`Server::read` checks each line), each id exactly once.
+#[test]
+fn concurrent_replies_never_interleave() {
+    let mut s = Server::start();
+    initialized(&mut s);
+    let noisy = "1 1 3000 { pop rand 100 mod 100 div rand 100 mod 100 div rand 100 mod 100 div \
+                 setrgbcolor rand 600 mod rand 780 mod 9 9 rectfill } for showpage";
+    let mut want = std::collections::BTreeSet::new();
+    for i in 0..3 {
+        let id = format!("render-{i}");
+        s.request(json!(id), "render_postscript", json!({ "source": noisy }));
+        want.insert(id);
+        for j in 0..10 {
+            let id = format!("ping-{i}-{j}");
+            s.send_raw(
+                json!({ "jsonrpc": "2.0", "id": id, "method": "ping" })
+                    .to_string()
+                    .as_bytes(),
+            );
+            want.insert(id);
+        }
+    }
+    let mut got = std::collections::BTreeSet::new();
+    let mut big = 0;
+    for _ in 0..want.len() {
+        let reply = s.read();
+        let id = reply["id"].as_str().expect("string id").to_string();
+        if id.starts_with("render-") {
+            assert_eq!(reply["result"]["isError"], false, "{reply}");
+            big += 1;
+        }
+        assert!(got.insert(id.clone()), "{id} answered twice");
+    }
+    assert_eq!(got, want);
+    assert_eq!(big, 3);
+    s.ping_ok();
+}
+
+/// #741's acceptance, on a short time scale: a render that outlasts the
+/// per-call `--timeout` (1 s here) runs as a job, answers `render_status`
+/// and `ping` meanwhile with its pages so far, and its result is what
+/// `render_postscript` returns for the same program. The program waits on a
+/// FIFO between its two pages, so it is still running for as long as the
+/// test keeps the FIFO's write end open.
+#[cfg(unix)]
+#[test]
+fn a_render_job_outlives_the_call_limit_and_is_polled_and_fetched() {
+    let dir = common::scratch_dir("mcp-job-gate");
+    let fifo = dir.join("gate.fifo");
+    mkfifo(&fifo);
+    // The write end is held open from the start, read-write so the open does
+    // not wait for a reader: the render's open then returns at once and its
+    // read waits for the end of the file, which is this handle's close. (A
+    // writer that opens after the reader and closes at once can be missed by
+    // a reader still waking in `open` on macOS, which then waits for good.)
+    let gate_writer = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&fifo)
+        .expect("hold the FIFO open");
+    let mut s = Server::start_in(&dir, &["--timeout", "1", "--job-timeout", "120"]);
+    initialized(&mut s);
+    let first = "0 0 1 setrgbcolor 10 10 50 50 rectfill showpage 0 1 3000 { pop } for";
+    let second = "1 0 0 setrgbcolor 20 20 40 40 rectfill showpage";
+    let gate = format!("({}) (r) file pop", common::ps_path(&fifo));
+    let job = start_job(
+        &mut s,
+        json!({ "source": format!("{first} {gate} {second}"), "width": 100, "height": 100 }),
+    );
+    assert!(
+        eventually(400, || status(&mut s, &job)["pages_done"] == 1),
+        "the first page is counted while the job waits"
+    );
+    assert_eq!(status(&mut s, &job)["state"], "running");
+    s.ping_ok();
+    // Past the per-call limit: a job has its own.
+    std::thread::sleep(std::time::Duration::from_millis(1500));
+    let facts = status(&mut s, &job);
+    assert_eq!(facts["state"], "running", "{facts}");
+    let early = s.tool("render_result", json!({ "job_id": job }));
+    assert_eq!(error_kind(&early), "job_not_finished", "{early}");
+    // Open the gate: closing the only writer is the end of the file.
+    drop(gate_writer);
+    assert!(
+        eventually(600, || status(&mut s, &job)["state"] == "done"),
+        "the job finishes once the gate opens: {}",
+        status(&mut s, &job)
+    );
+    let facts = status(&mut s, &job);
+    assert_eq!(facts["pages_done"], 2, "{facts}");
+    let result = s.tool("render_result", json!({ "job_id": job }));
+    assert_eq!(result["isError"], false, "{result}");
+    let direct = s.tool(
+        "render_postscript",
+        json!({ "source": format!("{first} {second}"), "width": 100, "height": 100 }),
+    );
+    assert_eq!(images(&result).len(), 2, "{result}");
+    assert_eq!(
+        images(&result),
+        images(&direct),
+        "the same pages as render_postscript"
+    );
+    // The result can be fetched again until it expires.
+    let again = s.tool("render_result", json!({ "job_id": job }));
+    assert_eq!(images(&again), images(&result));
+}
+
+/// #741: `cancel_render` stops a running job's child long before its 600 s
+/// limit; the job reads `cancelled` only once the child is reaped.
+#[test]
+fn cancel_render_stops_the_child() {
+    let mut s = Server::start_in(
+        &common::scratch_dir("mcp-job-cancel"),
+        &["--job-timeout", "600", "--max-steps", "0"],
+    );
+    initialized(&mut s);
+    let job = start_job(&mut s, json!({ "source": "{ } loop" }));
+    assert!(eventually(400, || status(&mut s, &job)["state"] == "running"));
+    #[cfg(unix)]
+    {
+        let pid = s.pid();
+        assert!(
+            eventually(400, || children(pid).len() == 1),
+            "the job's child runs"
+        );
+    }
+    let facts = job_facts(&s.tool("cancel_render", json!({ "job_id": job })));
+    assert_eq!(facts["job_id"], json!(job));
+    assert!(
+        eventually(400, || status(&mut s, &job)["state"] == "cancelled"),
+        "cancelled: {}",
+        status(&mut s, &job)
+    );
+    #[cfg(unix)]
+    assert!(
+        children(s.pid()).is_empty(),
+        "cancelled means killed and reaped: {:?}",
+        children(s.pid())
+    );
+    let result = s.tool("render_result", json!({ "job_id": job }));
+    assert_eq!(error_kind(&result), "cancelled", "{result}");
+    s.ping_ok();
+}
+
+/// `--max-jobs 1`: a second job waits, queued, while the first runs; a
+/// queued job can be cancelled without ever starting; the slot passes on.
+#[test]
+fn jobs_past_the_running_cap_queue_and_can_be_cancelled_there() {
+    let mut s = Server::start_in(
+        &common::scratch_dir("mcp-job-queue"),
+        &[
+            "--max-jobs",
+            "1",
+            "--job-timeout",
+            "600",
+            "--max-steps",
+            "0",
+        ],
+    );
+    initialized(&mut s);
+    let small = json!({ "source": "0 0 10 10 rectfill showpage", "width": 20, "height": 20 });
+    let forever = start_job(&mut s, json!({ "source": "{ } loop" }));
+    assert!(eventually(400, || status(&mut s, &forever)["state"] == "running"));
+    let waiting = start_job(&mut s, small.clone());
+    let after = start_job(&mut s, small.clone());
+    assert_eq!(status(&mut s, &waiting)["state"], "queued");
+    assert_eq!(status(&mut s, &after)["state"], "queued");
+    let facts = job_facts(&s.tool("cancel_render", json!({ "job_id": waiting })));
+    assert_eq!(facts["cancel_requested"], true, "{facts}");
+    assert!(eventually(400, || status(&mut s, &waiting)["state"] == "cancelled"));
+    assert_eq!(
+        status(&mut s, &after)["state"],
+        "queued",
+        "still behind the first"
+    );
+    s.tool("cancel_render", json!({ "job_id": forever }));
+    assert!(
+        eventually(600, || status(&mut s, &after)["state"] == "done"),
+        "the freed slot goes to the next in line: {}",
+        status(&mut s, &after)
+    );
+    // Cancelling a finished job leaves it as it is.
+    let facts = job_facts(&s.tool("cancel_render", json!({ "job_id": after })));
+    assert_eq!(facts["state"], "done", "{facts}");
+    assert_eq!(
+        images(&s.tool("render_result", json!({ "job_id": after }))).len(),
+        1
+    );
+}
+
+#[test]
+fn job_tools_refuse_bad_arguments_and_unknown_jobs_at_once() {
+    let mut s = Server::start_in(
+        &common::scratch_dir("mcp-job-args"),
+        &["--max-image-bytes", "100"],
+    );
+    initialized(&mut s);
+    // `render_postscript`'s checks run before a job exists.
+    for (args, kind) in [
+        (json!({}), "invalid_argument"),
+        (
+            json!({ "source": "showpage", "format": "pdf" }),
+            "invalid_argument",
+        ),
+        (
+            json!({ "source": "showpage", "format": "tiff" }),
+            "invalid_argument",
+        ),
+        (
+            json!({ "source": "showpage", "dpi": 1200, "width": 8000 }),
+            "output_too_large",
+        ),
+        (
+            json!({ "source": "showpage", "out_path": "../x.png" }),
+            "out_path_refused",
+        ),
+    ] {
+        let result = s.tool("start_render", args.clone());
+        assert_eq!(error_kind(&result), kind, "{args}: {result}");
+    }
+    for tool in ["render_status", "render_result", "cancel_render"] {
+        let result = s.tool(tool, json!({}));
+        assert_eq!(error_kind(&result), "invalid_argument", "{tool}: {result}");
+        let result = s.tool(tool, json!({ "job_id": "job-99" }));
+        assert_eq!(error_kind(&result), "unknown_job", "{tool}: {result}");
+    }
+    // A program that errors is a done job, as render_postscript returns
+    // its partial page with the error text.
+    let job = start_job(
+        &mut s,
+        json!({ "source": "nosuchop", "width": 20, "height": 20 }),
+    );
+    assert!(eventually(600, || status(&mut s, &job)["state"] == "done"));
+    let result = s.tool("render_result", json!({ "job_id": job }));
+    assert_eq!(result["isError"], false, "{result}");
+    assert!(
+        texts(&result)[0].starts_with("PostScript error:"),
+        "{result}"
+    );
+    // A render that fails (here: past the inline image cap) is a failed
+    // job, its error in the status, its result the same error.
+    let noisy =
+        "1 1 200 { pop rand 255 mod 255 div setgray rand 90 mod rand 90 mod 7 7 rectfill } for";
+    let job = start_job(
+        &mut s,
+        json!({ "source": noisy, "width": 100, "height": 100 }),
+    );
+    assert!(eventually(600, || status(&mut s, &job)["state"] == "failed"));
+    assert_eq!(status(&mut s, &job)["error"]["kind"], "output_too_large");
+    let result = s.tool("render_result", json!({ "job_id": job }));
+    assert_eq!(error_kind(&result), "output_too_large", "{result}");
+}
+
+/// `--job-ttl 1`: a finished job is gone a second after it finished.
+#[test]
+fn a_finished_job_expires_after_the_ttl() {
+    let mut s = Server::start_in(&common::scratch_dir("mcp-job-ttl"), &["--job-ttl", "1"]);
+    initialized(&mut s);
+    let job = start_job(
+        &mut s,
+        json!({ "source": "showpage", "width": 20, "height": 20 }),
+    );
+    // Each look either sees the job still there or, once done, gone after
+    // its second: it is never seen in any other state.
+    assert!(
+        eventually(600, || {
+            let result = s.tool("render_status", json!({ "job_id": job }));
+            if result["isError"] == true {
+                assert_eq!(error_kind(&result), "unknown_job", "{result}");
+                return true;
+            }
+            let state = &result["structuredContent"]["state"];
+            assert!(
+                state == "queued" || state == "running" || state == "done",
+                "{result}"
+            );
+            false
+        }),
+        "the finished job expires"
+    );
+}
+
+/// No job outlives the server: closing stdin (how a client stops a stdio
+/// server) cancels and reaps every job before the server exits.
+#[cfg(unix)]
+#[test]
+fn closing_stdin_stops_every_job() {
+    let mut s = Server::start_in(
+        &common::scratch_dir("mcp-job-shutdown"),
+        &["--job-timeout", "600", "--max-steps", "0"],
+    );
+    initialized(&mut s);
+    start_job(&mut s, json!({ "source": "{ } loop" }));
+    let pid = s.pid();
+    assert!(eventually(400, || children(pid).len() == 1));
+    let child = children(pid)[0].0;
+    s.close_and_drain();
+    assert!(
+        eventually(400, || matches!(s.child.try_wait(), Ok(Some(_)))),
+        "the server exits once stdin closes"
+    );
+    assert!(!process_exists(child), "the job's child went with it");
+}
+
+/// ... and a server killed outright (no chance to cancel) takes its jobs
+/// with it too: each child runs with `--exit-with-parent`.
+#[cfg(unix)]
+#[test]
+fn a_killed_server_leaves_no_render_behind() {
+    let mut s = Server::start_in(
+        &common::scratch_dir("mcp-job-killed"),
+        &["--job-timeout", "600", "--max-steps", "0"],
+    );
+    initialized(&mut s);
+    start_job(&mut s, json!({ "source": "{ } loop" }));
+    let pid = s.pid();
+    assert!(eventually(400, || children(pid).len() == 1));
+    let child = children(pid)[0].0;
+    s.child.kill().expect("SIGKILL the server");
+    s.child.wait().expect("reap the server");
+    assert!(
+        eventually(400, || !process_exists(child)),
+        "the orphaned render stopped itself"
+    );
+}
+
+/// Several starts in one write, below `--max-jobs`: every job runs. (Taking
+/// a slot makes the next job first in line; without a wake-up then, a job
+/// sat queued beside a free slot. Without the wake-up this failed about one
+/// run in ten here; with it, never.)
+#[test]
+fn jobs_started_together_all_run_up_to_the_cap() {
+    let mut s = Server::start_in(
+        &common::scratch_dir("mcp-job-together"),
+        &[
+            "--max-jobs",
+            "4",
+            "--job-timeout",
+            "600",
+            "--max-steps",
+            "0",
+        ],
+    );
+    initialized(&mut s);
+    for i in 0..4 {
+        s.request(json!(i), "start_render", json!({ "source": "{ } loop" }));
+    }
+    let mut jobs = Vec::new();
+    for _ in 0..4 {
+        let reply = s.read();
+        jobs.push(
+            job_facts(&reply["result"])["job_id"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+        );
+    }
+    for job in &jobs {
+        assert!(
+            eventually(400, || status(&mut s, job)["state"] == "running"),
+            "{job} runs: {}",
+            status(&mut s, job)
+        );
+    }
+    for job in &jobs {
+        s.tool("cancel_render", json!({ "job_id": job }));
+    }
+    for job in &jobs {
+        assert!(eventually(400, || status(&mut s, job)["state"] == "cancelled"));
+    }
+}
+
+/// A one-shot client (one request piped in, then stdin closed) still gets
+/// its reply: calls in flight finish and answer at shutdown.
+#[test]
+fn a_call_in_flight_at_shutdown_is_still_answered() {
+    let mut s = Server::start();
+    initialized(&mut s);
+    s.request(
+        json!("last"),
+        "eval_postscript",
+        json!({ "source": "(bye) =" }),
+    );
+    let rest = s.close_and_drain();
+    let reply = rest
+        .iter()
+        .find(|m| m["id"] == "last")
+        .unwrap_or_else(|| panic!("no reply for the last call: {rest:?}"));
+    assert_eq!(texts(&reply["result"]), ["bye\n"], "{reply}");
 }

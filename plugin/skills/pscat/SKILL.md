@@ -306,16 +306,22 @@ whatever lands in `DIR`: only point it at a directory you trust.
 
 ## MCP
 
-`pscat-mcp` (installed beside `pscat`) serves six tools over stdio:
+`pscat-mcp` (installed beside `pscat`) serves ten tools over stdio:
 `render_postscript` (source → PNG images inline, or SVG text, or a PDF
 written to `out_path`; adds a `Lint:` block when the page looks wrong),
 `eval_postscript` (what the program printed, or the error with the
 offending command and line), `handwrite`, `chalkboard_math` (LaTeX → a
 chalkboard PNG; above), `review_sheet` (the review sheet above, from inline
 programs: byte for byte what `pscat sheet` writes) and
-`describe_art_capabilities`.
+`describe_art_capabilities`, plus render jobs for anything slow.
 Each call has a time limit (60 s by default; whoever registers the server raises it with
-`pscat-mcp --timeout SECS`, and the client's own tool timeout must allow it too) and the
+`pscat-mcp --timeout SECS`, and the client's own tool timeout must allow it too). A render
+that may take longer goes through **`start_render`** (same arguments as `render_postscript`,
+returns a `job_id` at once), then **`render_status`** (`queued`, `running`, `done`, `failed`,
+`cancelled`, with `pages_done`) until it is finished, then **`render_result`** (exactly what
+`render_postscript` returns); **`cancel_render`** stops one. A job may run an hour by default
+(`--job-timeout`), two at once (`--max-jobs`). Raise `--max-steps` (or `0`) too, or the step
+limit stops a long render first. The
 interpreter stops a runaway
 program itself, with a `limit_exceeded` error whose `limit` field says `steps`,
 `time` or `memory` (a render still returns the partial page); `stopped` cannot
@@ -346,6 +352,10 @@ pass `out_path`. Register it with
   `(a) file`, `renamefile` and `deletefile`; anything outside is
   `invalidfileaccess`. `(%stdout) (w) file` needs no flag. The MCP tools
   never write from PostScript: use their `out_path` instead.
+- To save or reload a big numeric array, use `array (path) writereals` and
+  `(path) n readreals` (packed binary64; add `/f32` before the operator for
+  binary32), not printing and `run`ning text: exact, and about 10x faster to
+  read. Writing needs `--allow-write DIR` like `(w) file`.
 - The interpreter targets Level 2 PostScript. If a construct misbehaves,
   compare against Ghostscript, the behavioural oracle.
 - Files the docs call `examples/...`, `gallery/...` or `docs/...` are in

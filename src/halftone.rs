@@ -33,7 +33,7 @@ pub fn screen(src: &Pixmap) -> Pixmap {
 pub fn screen_with(src: &Pixmap, cell: f32, angle_deg: f32) -> Pixmap {
     let (w, h) = (src.width(), src.height());
     let mut out = Pixmap::new(w, h).expect("same nonzero size as src");
-    let (sin, cos) = angle_deg.to_radians().sin_cos();
+    let (sin, cos) = crate::fmath::sin_cos_f32(angle_deg.to_radians());
     let data = src.data();
     let odata = out.data_mut();
     for y in 0..h {

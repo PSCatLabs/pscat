@@ -350,18 +350,21 @@ fn pscat_mcp_never_writes_files() {
         ("render_postscript", json!({"width": 20, "height": 20})),
     ] {
         for target in ["(rel.txt)".to_string(), ps(&abs)] {
-            let mut args = extra.clone();
-            args["source"] = json!(format!("{target} (w) file (x) writestring"));
-            let resp = call(json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
-                "params": {"name": tool, "arguments": args}}));
-            // eval fails as a tool error; render still returns its page
-            // with the PostScript error as text.
-            let result = &resp["result"];
-            let text = result["content"][0]["text"].as_str().unwrap_or_default();
-            assert!(
-                text.contains("invalidfileaccess"),
-                "{tool} {target}: {resp}"
-            );
+            for src in [
+                format!("{target} (w) file (x) writestring"),
+                // #735: the binary writer goes through the same policy.
+                format!("[1 2] {target} writereals"),
+            ] {
+                let mut args = extra.clone();
+                args["source"] = json!(src);
+                let resp = call(json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                    "params": {"name": tool, "arguments": args}}));
+                // eval fails as a tool error; render still returns its page
+                // with the PostScript error as text.
+                let result = &resp["result"];
+                let text = result["content"][0]["text"].as_str().unwrap_or_default();
+                assert!(text.contains("invalidfileaccess"), "{tool} {src}: {resp}");
+            }
         }
     }
     let _ = child.kill();

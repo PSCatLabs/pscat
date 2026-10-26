@@ -109,6 +109,19 @@ More on the less obvious ones:
   current directory. `(%stdout) (w) file` and `(%stderr) (w) file` need no
   flag. `filenameforall` lists files where `run` would look for them.
   `pscat-mcp` never lets a program write.
+- **Saving numeric arrays.** `array (path) writereals` writes the numbers as
+  packed little-endian binary64 (8 bytes each), and `(path) n readreals` reads
+  `n` of them back into a new array, bit for bit (`-0.0`, infinities and NaN
+  included). It is far faster than printing the numbers (about 10x to read, and much more to write) and
+  `run`ning the text, and exact where text is not (`inf` has no literal).
+  `array (path) /f32 writereals` and `(path) n /f32 readreals` use binary32
+  (4 bytes each; lossy on the way in, exact on the way out). Writing needs
+  `--allow-write` like `(w) file`; reading follows the `(r) file` rules.
+  Integers are written as reals; any other element is `typecheck` (before the
+  file is touched). A file shorter than `n` values is `rangecheck`; extra bytes
+  are ignored. `readreals` reads the whole file, then keeps the first `n`
+  values, so for a huge file it is as costly as `(path) (r) file`. Both honour
+  `--max-steps`, `--max-time` and `--max-memory`.
 - **Halftone.** `--halftone` screens the raster like a mono laser printer's
   RIP: classic dots on a 45° lattice, with coverage tracking darkness.
 

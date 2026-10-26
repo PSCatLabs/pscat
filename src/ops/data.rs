@@ -11,7 +11,7 @@ use super::stack::copy_n;
 
 /// Implementation limit for `array`/`string` allocation — keeps a typo'd
 /// `1e9 string` from attempting a gigabyte.
-const ALLOC_LIMIT: i64 = 16_777_216;
+pub(super) const ALLOC_LIMIT: i64 = 16_777_216;
 
 pub fn install(dict: &mut Dict) {
     use super::op;

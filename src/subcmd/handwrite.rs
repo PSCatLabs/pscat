@@ -30,6 +30,8 @@ const USAGE: &str = r#"usage: pscat handwrite [options] "text to write"
       --max-pixels N refuse a page of more than N device pixels (width x
                      height at --dpi) or over 8000 a side, before drawing;
                      1..64000000 (default: no cap beyond the page limits)
+      --exit-with-parent PID  stop once PID is no longer pscat's parent
+                     (Unix; pscat-mcp passes its own pid)
   -h, --help         this text
 
 Newlines in the text force line breaks; blank lines are kept. A text that
@@ -51,6 +53,7 @@ struct Opts {
     dpi: f32,
     halftone: bool,
     max_pixels: Option<u64>,
+    exit_with_parent: Option<u32>,
 }
 
 pub(super) fn run(args: Args) -> Result<(), Failure> {
@@ -59,6 +62,9 @@ pub(super) fn run(args: Args) -> Result<(), Failure> {
         println!("{USAGE}");
         return Err(Failure::Done);
     };
+    if let Some(parent) = opts.exit_with_parent {
+        crate::exit_with_parent(parent);
+    }
     let lib = library("lib/handscript.ps")?;
     let width = page_dim("--width", &opts.width).map_err(usage)?;
     // `--max-pixels`: refuse a page over the cap, or over 8000 pixels a side
@@ -146,6 +152,7 @@ fn parse(mut args: Args) -> Result<Option<Opts>, String> {
         dpi: 72.0,
         halftone: false,
         max_pixels: None,
+        exit_with_parent: None,
     };
     let mut have_text = false;
     let num = |flag: &str, v: String| number(flag, &v).map(str::to_string);
@@ -172,6 +179,9 @@ fn parse(mut args: Args) -> Result<Option<Opts>, String> {
             "--dpi" => o.dpi = super::dpi(&args.value(&arg)?)?,
             "--halftone" => o.halftone = true,
             "--max-pixels" => o.max_pixels = Some(max_pixels(&args.value(&arg)?)?),
+            "--exit-with-parent" => {
+                o.exit_with_parent = Some(crate::parent_pid_arg(&args.value(&arg)?)?)
+            }
             "--" => {
                 // The text follows; anything after it is ignored.
                 o.text = args.next().unwrap_or_default();
@@ -238,6 +248,15 @@ mod tests {
                 .collect::<Vec<_>>()
                 .into_iter(),
         })
+    }
+
+    #[test]
+    fn exit_with_parent_takes_a_pid() {
+        let o = parsed(&["--exit-with-parent", "4242", "hi"])
+            .unwrap()
+            .unwrap();
+        assert_eq!(o.exit_with_parent, Some(4242));
+        assert!(parsed(&["--exit-with-parent", "me", "hi"]).is_err());
     }
 
     #[test]
