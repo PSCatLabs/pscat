@@ -111,6 +111,39 @@ test('the standard 35 are built in; other faces come from addFont', async () => 
   assert.ok(count(r.render(text, { width: 300, height: 80 }), dark) > 500);
 });
 
+test('a pack face that was not added is reported in warnings, once, naming the stand-in', async () => {
+  const r = await createRenderer();
+  const page = { width: 10, height: 10 };
+  const name = '/Bangers findfont /FontName get ==';
+  const img = r.render(name, page);
+  assert.equal(img.output, '/Helvetica\n');
+  assert.equal(img.warnings.length, 1);
+  const [note] = img.warnings;
+  assert.match(note, /^pscat: warning: font \/Bangers is in the extras font pack/);
+  assert.match(note, /using Helvetica/);
+  assert.match(note, /addFont\('Bangers-Regular', bytes\)/);
+  // A browser cannot run `pscat fonts install`: the note must not say to.
+  assert.doesNotMatch(note, /fonts install/);
+  assert.ok(!note.includes('\n'));
+  assert.deepEqual(r.warnings, img.warnings);
+  // One note per face, however often the program asks, and a face with a
+  // different stand-in (the typewriter faces become Courier) gets its own.
+  const again = r.render(`${name} ${name} /CourierPrime-Bold findfont pop /Bangers findfont pop`, page);
+  assert.equal(again.warnings.length, 2);
+  assert.match(again.warnings[1], /\/CourierPrime-Bold is in the extras font pack.*using Courier-Bold/);
+  // Each run starts clean, and programs that need nothing warn about nothing.
+  assert.deepEqual(r.render('/Palatino-Italic findfont pop /Nonesuch findfont pop', page).warnings, []);
+  assert.deepEqual(r.warnings, []);
+  // The notes survive a PostScript error, like the page.
+  assert.throws(() => r.render('/Bangers findfont pop bogus', page), PostScriptError);
+  assert.equal(r.warnings.length, 1);
+  // With the face added there is nothing to say, and it is the real face.
+  r.addFont('Bangers-Regular', await font('Bangers/Bangers-Regular.ttf'));
+  const real = r.render(name, page);
+  assert.deepEqual(real.warnings, []);
+  assert.equal(real.output, '/Bangers-Regular\n');
+});
+
 test('addFont: a Unicode-mode face (Thai) shows UTF-8 text by its pack name', async () => {
   // The pack stem picks the encoding, as on disk: under NotoSansThai-Regular
   // the UTF-8 string is six Thai glyphs; under another name the same face

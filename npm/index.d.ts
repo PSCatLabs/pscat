@@ -41,6 +41,13 @@ export interface RenderResult {
   data: Uint8ClampedArray;
   /** What the program printed with =, ==, print, stack or pstack. */
   output: string;
+  /**
+   * One note per font the program asked for that was replaced: a pack face
+   * (Bangers, a Korean face, ...) not given to addFont stands in as Helvetica
+   * or Courier. Each names the face, the stand-in and the addFont call that
+   * supplies it. Empty when nothing was replaced.
+   */
+  warnings: string[];
 }
 
 /** A PostScript error raised by render() or step(). The renderer stays usable. */
@@ -82,9 +89,11 @@ export class Renderer {
   readonly height: number;
   /** What the program has printed since begin(). */
   readonly output: string;
+  /** Font substitution notes since begin(), as in RenderResult.warnings. */
+  readonly warnings: string[];
   /** A copy of the page as RGBA bytes. */
   pixels(): Uint8ClampedArray;
-  /** The page as width, height, RGBA data and output. */
+  /** The page as width, height, RGBA data, output and warnings. */
   image(): RenderResult;
   /** The page as an ImageData (needs a global ImageData: browsers, workers). */
   imageData(): ImageData;
@@ -93,7 +102,8 @@ export class Renderer {
   /**
    * Make a TrueType/OpenType font available to findfont, under `name`: the
    * font pack's file stem, e.g. 'EBGaramond-Regular' (/Garamond then finds it
-   * too). The PostScript standard 35 are built in.
+   * too). The PostScript standard 35 are built in; other faces stand in until
+   * added, and say so in `warnings`.
    */
   addFont(name: string, bytes: ArrayBuffer | ArrayBufferView): void;
 }

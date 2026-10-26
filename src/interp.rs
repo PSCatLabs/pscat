@@ -275,6 +275,10 @@ pub struct Interp {
     /// (issue #728), so a `save`/`restore` loop warns once per name per
     /// interpreter, not once per call.
     pub(crate) font_notes_shown: std::collections::HashSet<String>,
+    /// The notes `findfont` raised for substituted pack faces this run,
+    /// one per name, newline-joined. The wasm build has no stderr, so
+    /// the npm package reads them here (`Renderer.warnings`, issue #750).
+    pub(crate) font_warnings: String,
     /// State for `rand`/`srand`/`rrand`. Deterministic by default —
     /// reproducible art is a feature here, not a bug.
     pub(crate) rand_state: i64,
@@ -422,6 +426,7 @@ impl Interp {
             error_command: None,
             last_line: None,
             font_notes_shown: std::collections::HashSet::new(),
+            font_warnings: String::new(),
             rand_state: 1,
             seed_override: None,
             noise_perm: crate::ops::noise::perm_from_seed(0),
@@ -1984,6 +1989,13 @@ impl Interp {
     /// capture is off.
     pub fn captured_stdout(&self) -> &[u8] {
         self.stdout_capture.as_deref().unwrap_or(&[])
+    }
+
+    /// The one-line notes `findfont` raised for pack faces it replaced
+    /// with a built-in one, newline-joined, once per name (the lines the
+    /// native binary prints on stderr); empty when nothing was replaced.
+    pub fn font_warnings(&self) -> &str {
+        &self.font_warnings
     }
 
     /// Program output: to the capture buffer when one is on, else stdout

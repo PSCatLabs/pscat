@@ -98,7 +98,14 @@ pub(crate) fn findfont(it: &mut Interp) -> Result<(), PsError> {
             if let Some(note) = resolved.stand_in_note
                 && it.font_notes_shown.insert(requested)
             {
+                // The wasm build has no stderr; its host reads the notes
+                // from `Interp::font_warnings` (issue #750).
+                #[cfg(not(target_arch = "wasm32"))]
                 eprintln!("{note}");
+                if !it.font_warnings.is_empty() {
+                    it.font_warnings.push('\n');
+                }
+                it.font_warnings.push_str(&note);
             }
             let d = font::build_builtin_dict(resolved.fid)?;
             it.journal_dict(&dir);

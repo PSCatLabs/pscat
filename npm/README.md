@@ -77,8 +77,9 @@ describe them.
 All of the PostScript standard 35 are built in: Helvetica, Times and
 Courier (Liberation), Palatino, Bookman, New Century Schoolbook, Avant
 Garde, Zapf Chancery and Helvetica-Narrow (TeX Gyre), and Symbol and
-ZapfDingbats (URW). Any other font is loaded with `addFont`, named by its
-font pack file stem:
+ZapfDingbats (URW). Those are the only faces in the browser build: a
+browser has no font packs and no `pscat fonts install`. Any other font is
+loaded with `addFont`, named by its font pack file stem:
 
 ```js
 const bytes = await (await fetch('/fonts/EBGaramond-Regular.ttf')).arrayBuffer();
@@ -95,19 +96,35 @@ files come from the `fonts-*` pack archives on the
 [releases page](https://github.com/PSCatLabs/pscat/releases), each with its
 own licence. Fonts are registered per renderer.
 
+A face from a pack that you have not added does not fail: `findfont`
+substitutes Helvetica (Courier for the typewriter faces), as the
+command-line tool does, and the result's `warnings` says so, once per face:
+
+```js
+const page = r.render('/Bangers findfont 36 scalefont setfont 72 72 moveto (Pow!) show');
+page.warnings;
+// ['pscat: warning: font /Bangers is in the extras font pack, which is not built into
+//   the browser build; using Helvetica. Load the real face with addFont('Bangers-Regular', bytes)']
+r.warnings; // the same list, also readable during a step() run or after a PostScriptError
+```
+
+Names that no pack has (a typo, say) fall back to Helvetica without a note,
+as Ghostscript does.
+
 ## API
 
 | | |
 |---|---|
 | `createRenderer({ wasm }?)` | Load the interpreter and return a `Renderer`. Each one is a separate interpreter. `wasm` overrides where the module comes from: a URL, a `Response`, bytes or a `WebAssembly.Module` (in Node, also a file path). By default it is the package's `pscat.wasm`, found through `new URL('./pscat.wasm', import.meta.url)`. Bundlers that rewrite that pattern handle it; if yours does not (Vite's dependency pre-bundling, for one: add `pscat` to `optimizeDeps.exclude`), pass `wasm` the module's URL. |
-| `render(source, { width, height, dpi }?)` | Run a program to completion on a fresh page and return `{ width, height, data, output }`. `source` is a string or a `Uint8Array`. The page is in points (default 612x792, US Letter) at `dpi` (default 72, one pixel per point). |
+| `render(source, { width, height, dpi }?)` | Run a program to completion on a fresh page and return `{ width, height, data, output, warnings }`. `source` is a string or a `Uint8Array`. The page is in points (default 612x792, US Letter) at `dpi` (default 72, one pixel per point). |
 | `begin(source, options?)` | Queue a program on a fresh page. |
 | `step(budget = 5000)` | Run up to `budget` objects. Returns `true` while there is more to do. |
 | `frames(source, { budget, ...page }?)` | A generator of `begin` plus one `step` per iteration. |
 | `width`, `height` | The page size in pixels. |
 | `output` | What the program has printed since `begin`. |
 | `pixels()` | A copy of the page as RGBA bytes. |
-| `image()` | `{ width, height, data, output }` for the page as it is now. |
+| `warnings` | Notes about pack faces that were replaced since `begin` (an array of strings, empty when none). |
+| `image()` | `{ width, height, data, output, warnings }` for the page as it is now. |
 | `imageData()` | The page as an `ImageData` (browsers and workers). |
 | `paintTo(canvas)` | Draw the page into a canvas or `OffscreenCanvas`. |
 | `addFont(name, bytes)` | Make a TrueType or OpenType font available to `findfont`. |

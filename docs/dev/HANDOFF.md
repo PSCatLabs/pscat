@@ -1818,7 +1818,11 @@ renders eight examples in both and compares block-downsampled output).
   `test_npm_tarball.sh`). The standard 35 are compiled in (#757: the
   Liberation core plus `fonts/base35/`, `font::EMBEDDED`); fonts beyond
   them reach wasm only through `ps_add_font` (`font::register_font_bytes`),
-  keyed by font pack file stem like the disk catalog. `npm/package.json` moves in lockstep with
+  keyed by font pack file stem like the disk catalog. A pack face not added
+  that way gets the same stand-in as native (#728) and its note, worded for
+  `addFont`, goes to `Interp::font_warnings` (no stderr in wasm):
+  `ps_warnings_*` in `src/wasm.rs`, `Renderer.warnings` in npm (#750).
+  `npm/package.json` moves in lockstep with
   `Cargo.toml` (`release_stages.py bump-manifests`; a test fails if they
   differ), and the release publishes the tarball `verify` packed
   (docs/dev/RELEASING.md). Something new embedded in the wasm shows up as

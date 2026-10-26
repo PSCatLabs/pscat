@@ -77,7 +77,10 @@ catch (e) { if (e instanceof PostScriptError) console.log(e.errorName); } // 'un
   it, exactly as with the installed pack. The font files are in the
   `fonts-*` pack archives on the
   [releases page](https://github.com/PSCatLabs/pscat/releases), each with its
-  licence.
+  licence. A pack face you have not added stands in (Helvetica, or Courier
+  for the typewriter faces) and `render()`'s result, and `r.warnings`, carry
+  the same one-line note the command-line tool prints on stderr, naming the
+  face, the stand-in and the `addFont` call that supplies it (#750).
 - Each `createRenderer()` is its own interpreter (its own wasm instance and
   fonts). `createRenderer({ wasm })` loads the module from a URL, a
   `Response`, bytes or a compiled `WebAssembly.Module` instead. The default
