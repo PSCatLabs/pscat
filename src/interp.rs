@@ -289,14 +289,20 @@ pub struct Interp {
     /// `srand` of a value `rrand` handed out under the override (a
     /// saved stream coming back, issue #202), which restores it exactly.
     /// `seed_override_fired`
-    /// records whether an override actually intercepted a call, so a
-    /// sweep over a script that never calls `srand` can be flagged
-    /// instead of silently producing identical frames.
+    /// records whether an override actually intercepted a call (or
+    /// sampled the override-seeded noise table, see `noise_from_override`),
+    /// so a sweep over a script that never calls `srand` or samples noise
+    /// can be flagged instead of silently producing identical frames.
     pub(crate) seed_override: Option<i64>,
     /// The permutation table the noise operators sample (`noiseseed`,
     /// issue #734). Separate from `rand_state`, so noise never moves a
     /// `rand` sequence.
     pub(crate) noise_perm: [u8; 256],
+    /// `noise_perm` was built from the seed override (issue #753), and the
+    /// program has not called `noiseseed` since. A program's own
+    /// `noiseseed` clears it and keeps its own table; sampling the table
+    /// while it is set counts as the override firing.
+    pub(crate) noise_from_override: bool,
     pub(crate) seed_override_fired: bool,
     /// `setpacking` flag — tracked, but packed arrays are ordinary
     /// arrays here (ops/level2.rs).
@@ -430,6 +436,7 @@ impl Interp {
             rand_state: 1,
             seed_override: None,
             noise_perm: crate::ops::noise::perm_from_seed(0),
+            noise_from_override: false,
             seed_override_fired: false,
             packing: false,
             clock: crate::clock::Clock::start(),
@@ -1916,15 +1923,34 @@ impl Interp {
     /// leaves `srand` and `rrand` alone. Also clears the fired flag, so a caller
     /// re-arming this on a fresh `Interp` starts from a clean read of
     /// [`seed_override_fired`](Self::seed_override_fired).
+    ///
+    /// The seed also builds the noise table (issue #753), as `seed
+    /// noiseseed` would, so art built on the native noise operators
+    /// varies with the sweep too. A program that calls `noiseseed`
+    /// itself keeps its own table. `None` puts the default table back,
+    /// but only while the table is still the override's.
     pub fn set_seed_override(&mut self, seed: Option<i64>) {
         self.seed_override = seed;
         self.seed_override_fired = false;
+        match seed {
+            Some(s) => {
+                self.noise_perm = crate::ops::noise::perm_from_seed(s);
+                self.noise_from_override = true;
+            }
+            None if self.noise_from_override => {
+                self.noise_perm = crate::ops::noise::perm_from_seed(0);
+                self.noise_from_override = false;
+            }
+            None => {}
+        }
     }
 
     /// Whether [`set_seed_override`](Self::set_seed_override)'s
-    /// override has actually intercepted a `srand` call since it was
-    /// set. `false` means the source never called `srand`, so the
-    /// override had no effect on this run.
+    /// override has actually taken effect since it was set: it
+    /// intercepted a `srand` call, or a noise operator sampled the table
+    /// it built (issue #753). `false` means the source never called
+    /// `srand` and never sampled override-seeded noise, so the override
+    /// had no effect on this run.
     pub fn seed_override_fired(&self) -> bool {
         self.seed_override_fired
     }

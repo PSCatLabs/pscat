@@ -76,6 +76,8 @@ newpath 60 100 moveto 500 200 550 300 300 380 curveto
   (value), `gnoise2d` (with derivatives) and the fBm sums `fbm2`, `fbm3`,
   `vfbm2`, `vfbm3`, `ridged2`, `ridged3`. `lib/noiseref.ps` documents the
   algorithm and reproduces every operator bit for bit in plain PostScript.
+  `--sweep-seed` seeds the noise table too (as `N noiseseed`), unless the
+  program calls `noiseseed` itself.
 - **Scatter.** The area-shaped counterpart to `alongpath`. `screct` and
   `scpath` build a region from a rectangle or from the current path (flattened
   and closed the way `fill` sees it; `clippath scpath` captures the clip

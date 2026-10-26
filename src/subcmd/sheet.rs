@@ -47,7 +47,9 @@ Render each FILE as a row of cells and compose them into one labelled PNG.
                      the 9 dpi render over its dark-mat copy.
       --sweep-seed SPEC
                      the next file only: one cell per seed, as the flag CLI's
-                     --sweep-seed (N, A:B, A:B:STEP, or A,B,C)
+                     --sweep-seed (N, A:B, A:B:STEP, or A,B,C). The seed
+                     also seeds noise (noiseseed), unless the program calls
+                     noiseseed itself
       --sweep NAME=SPEC
                      the next file only: one cell per value of /NAME, which is
                      defined before the file runs (--sweep's own grammar, e.g.
@@ -321,7 +323,7 @@ pub(super) fn run(args: Args) -> Result<(), Failure> {
         }
         if matches!(e.sweep, Some(Sweep::Seed(_))) && !seed_fired {
             eprintln!(
-                "pscat sheet: warning: {} never called srand -- --sweep-seed had no effect, \
+                "pscat sheet: warning: {} never called srand or sampled noise -- --sweep-seed had no effect, \
                  every cell is identical",
                 e.path
             );
