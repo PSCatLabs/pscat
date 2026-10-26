@@ -398,11 +398,10 @@ without the limits above:
   them is bounded (#745): containers nest to depth 32, an array shows 1024
   elements, a string or name 4 KiB, one operand 16 KiB, and a whole stack
   32 KiB, with `... truncated` marking the cut. **`=` and `print` stay
-  unbounded**, as do `show`-style writes to `%stdout` and `%stderr`: on the
-  command line a program can print as much as it likes with them, bounded
-  only by the steps and time it is allowed. The MCP server caps each child
-  stream at 4 MiB. Writing to `%stdout` or `%stderr` is printing, and counts
-  the same.
+  unbounded**, as do writes to `%stdout` and `%stderr` (printing, and counted
+  the same): on the command line a program can print as much as it likes
+  with them, bounded only by the steps and time it is allowed. The MCP server
+  caps each child stream at 4 MiB.
 - **No limit on bytes written to a write root.** The memory limit counts the
   heap, not the disk. A program that has been given `--allow-write` can fill
   that disk, bounded only by the steps and time it is allowed; one `string`
