@@ -203,6 +203,10 @@ class Launcher(unittest.TestCase):
         r = self.run_launcher("z", env=self.env(PSCAT_MCP_BIN=os.path.join(other, "pscat-mcp")))
         self.assertEqual(r.stdout, f"INSTALLED-{MARKER} z\n", r.stderr)
         self.assertIn("other/pscat-mcp", r.stderr)
+        # PSCAT_MCP_BIN naming a file not called pscat-mcp is run as named.
+        os.rename(os.path.join(other, "pscat-mcp"), os.path.join(other, "pscat-mcp-10"))
+        r = self.run_launcher("z", env=self.env(PSCAT_MCP_BIN=os.path.join(other, "pscat-mcp-10")))
+        self.assertEqual((r.returncode, r.stdout), (0, f"INSTALLED-{MARKER} z\n"), r.stderr)
 
     def test_installed_pscat_mcp_too_old_is_passed_over(self):
         inst = self.fake_install("0.6.3")

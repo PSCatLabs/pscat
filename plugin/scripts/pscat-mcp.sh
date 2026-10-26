@@ -90,6 +90,7 @@ version_ok() {
 }
 
 FOUND_DIR=
+FOUND_BIN=
 FOUND_HOW=
 OLD_SEEN=
 # try_candidate PATH HOW: accept PATH (a pscat-mcp) if it runs and is new enough.
@@ -102,6 +103,7 @@ try_candidate() {
     OLD_SEEN="$1 (${v:-unknown version})"
     return 1
   fi
+  FOUND_BIN=$1 # as given: PSCAT_MCP_BIN may name pscat-mcp-0.6.3, say
   FOUND_DIR=$(cd "$(dirname "$1")" && pwd -P)
   FOUND_HOW=$2
 }
@@ -122,6 +124,7 @@ lookup() {
   done
   if [ -z "$FOUND_DIR" ] && d=$(cached_dir); then
     FOUND_DIR=$d
+    FOUND_BIN=$d/pscat-mcp
     FOUND_HOW=cache
   fi
   [ -n "$FOUND_DIR" ]
@@ -277,6 +280,7 @@ ensure() {
   if install && lookup; then return 0; fi
   if [ -x "$CACHE/bin/pscat-mcp" ]; then
     FOUND_DIR=$(cd "$(dirname "$(readlink "$CACHE/bin/pscat-mcp" 2>/dev/null || echo "$CACHE/bin/pscat-mcp")")" && pwd -P)
+    FOUND_BIN=$FOUND_DIR/pscat-mcp
     FOUND_HOW=cache
     say "using the previously downloaded pscat in $FOUND_DIR instead"
     return 0
@@ -324,6 +328,6 @@ if ! ensure; then
   say "pscat-mcp is not available, so the pscat tools cannot start"
   exit 1
 fi
-[ "$FOUND_HOW" = cache ] || [ "$FOUND_HOW" = PATH ] || say "using $FOUND_DIR/pscat-mcp"
+[ "$FOUND_HOW" = cache ] || [ "$FOUND_HOW" = PATH ] || say "using $FOUND_BIN"
 unset PSCAT_PLUGIN_LAUNCHER
-exec "$FOUND_DIR/pscat-mcp" "$@"
+exec "$FOUND_BIN" "$@"
