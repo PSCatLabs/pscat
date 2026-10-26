@@ -862,6 +862,122 @@ fn out_path_is_off_when_started_in_the_filesystem_root() {
     assert_eq!(result["isError"], false);
 }
 
+// --- read roots (issue #763) -------------------------------------------------
+
+/// The PostScript error `eval_postscript` reported, or "" for success.
+fn eval_error(s: &mut Server, source: &str) -> String {
+    let result = s.tool("eval_postscript", json!({ "source": source }));
+    if result["isError"] == false {
+        return String::new();
+    }
+    result["structuredContent"]["error"]["ps_error"]
+        .as_str()
+        .unwrap_or_else(|| panic!("no ps_error: {result}"))
+        .to_string()
+}
+
+#[test]
+fn reads_are_confined_to_the_working_directory_and_allow_read() {
+    let base = common::scratch_dir("mcp-read-roots");
+    let cwd = base.join("project");
+    let extra = base.join("extra");
+    let outside = base.join("outside");
+    for d in [&cwd, &extra, &outside] {
+        std::fs::create_dir_all(d).unwrap();
+    }
+    std::fs::write(cwd.join("a.ps"), "(in cwd) =").unwrap();
+    std::fs::write(extra.join("b.ps"), "(in extra) =").unwrap();
+    std::fs::write(outside.join("secret.ps"), "(leaked) =").unwrap();
+    let extra_arg = extra.to_str().unwrap();
+    let mut s = Server::start_in(&cwd, &["--allow-read", extra_arg]);
+    let init = initialize(&mut s, json!("2025-11-25"));
+    let instructions = init["result"]["instructions"].as_str().unwrap();
+    assert!(instructions.contains("read roots"), "{instructions}");
+    assert!(instructions.contains("extra"), "{instructions}");
+    s.send_raw(br#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#);
+
+    let p = |d: &Path, f: &str| common::ps_path(&d.join(f));
+    // Inside: relative, absolute, and an --allow-read directory.
+    assert_eq!(eval_error(&mut s, "(a.ps) run"), "");
+    assert_eq!(eval_error(&mut s, &format!("({}) run", p(&cwd, "a.ps"))), "");
+    assert_eq!(eval_error(&mut s, &format!("({}) run", p(&extra, "b.ps"))), "");
+    // The bundled lib/ is always there.
+    assert_eq!(eval_error(&mut s, "(lib/artkit.ps) run"), "");
+    // Outside, `..`, a missing file outside, and readreals.
+    let secret = p(&outside, "secret.ps");
+    for src in [
+        format!("({secret}) run"),
+        format!("({secret}) (r) file"),
+        format!("({}) (r) file", p(&outside, "missing.ps")),
+        "(../outside/secret.ps) run".to_string(),
+        format!("({secret}) 1 readreals"),
+    ] {
+        assert_eq!(eval_error(&mut s, &src), "invalidfileaccess", "{src}");
+    }
+    // A symlink in the working directory pointing out.
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(outside.join("secret.ps"), cwd.join("door.ps")).unwrap();
+        assert_eq!(eval_error(&mut s, "(door.ps) run"), "invalidfileaccess");
+    }
+    // filenameforall lists inside, and nothing outside.
+    let list = |s: &mut Server, template: &str| {
+        let src = format!("({template}) {{ = }} 400 string filenameforall (end) =");
+        let result = s.tool("eval_postscript", json!({ "source": src }));
+        assert_eq!(result["isError"], false, "{result}");
+        texts(&result)[0].clone()
+    };
+    let inside = list(&mut s, &p(&cwd, "*.ps"));
+    assert!(inside.contains("a.ps"), "{inside}");
+    assert!(!inside.contains("door.ps"), "the symlink out isn't listed: {inside}");
+    let out = list(&mut s, &p(&outside, "*"));
+    assert!(!out.contains("secret"), "{out}");
+    let up = list(&mut s, "../outside/*");
+    assert!(!up.contains("secret"), "{up}");
+}
+
+#[test]
+fn a_bad_allow_read_is_a_startup_error() {
+    let missing = common::scratch_dir("mcp-allow-read").join("nope");
+    let out = Command::new(env!("CARGO_BIN_EXE_pscat-mcp"))
+        .arg("--allow-read")
+        .arg(&missing)
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("--allow-read"));
+}
+
+#[cfg(unix)]
+#[test]
+fn the_filesystem_root_is_never_a_read_root() {
+    // Started in `/` (some desktop apps do), the working directory is not a
+    // read root, so an absolute path anywhere is refused.
+    let mut s = Server::start_in(Path::new("/"), &[]);
+    initialized(&mut s);
+    assert_eq!(
+        eval_error(&mut s, "(/etc/hosts) (r) file"),
+        "invalidfileaccess"
+    );
+    assert_eq!(eval_error(&mut s, "(etc/hosts) (r) file"), "invalidfileaccess");
+    assert_eq!(eval_error(&mut s, "(lib/artkit.ps) run"), "");
+}
+
+#[test]
+fn handwrite_and_chalk_still_render_under_read_roots() {
+    // A scratch working directory: the libraries come from the bundled copy.
+    let mut s = Server::start();
+    initialized(&mut s);
+    let result = s.tool("handwrite", json!({ "text": "roots", "size": 18 }));
+    assert_eq!(result["isError"], false, "{result}");
+    let result = s.tool(
+        "chalkboard_math",
+        json!({ "latex": "x", "width": 400, "height": 200, "dpi": 72 }),
+    );
+    assert_eq!(result["isError"], false, "{result}");
+}
+
 // --- resource bounds ---------------------------------------------------------
 
 #[test]
@@ -978,13 +1094,17 @@ fn a_whole_file_read_that_never_ends_hits_the_limits_not_the_timeout_kill() {
         took < std::time::Duration::from_secs(15),
         "stopped promptly: {took:?}"
     );
-    // `/dev/zero` ends at the memory cap or the clock, whichever comes first:
-    // either way it is a limit.
+    // `/dev/zero` is outside the read roots (issue #763), so it is refused
+    // before any read; the CLI-side limit tests still read it to the cap.
     let result = s.tool(
         "eval_postscript",
         json!({ "source": "(/dev/zero) (r) file pop" }),
     );
-    assert_eq!(error_kind(&result), "limit_exceeded", "{result}");
+    assert_eq!(error_kind(&result), "postscript_error", "{result}");
+    assert_eq!(
+        result["structuredContent"]["error"]["ps_error"], "invalidfileaccess",
+        "{result}"
+    );
     s.ping_ok();
 }
 
