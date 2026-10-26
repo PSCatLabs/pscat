@@ -332,7 +332,7 @@ fn modes_without_a_single_headless_run_refuse_it() {
             "--png",
             "/dev/null",
         ][..],
-        &["--profile", "--spool", "/tmp"][..],
+        &["--profile", "--spool", "no-such-spool-dir"][..],
         &["--profile", "--interactive"][..],
         &["--profile", "--headless"][..],
         &["--profile", "somefile.ps"][..],
