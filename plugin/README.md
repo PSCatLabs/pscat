@@ -146,8 +146,9 @@ hand (Claude Code: `claude mcp add`, then toggle the plugin's server off in
 has the settings, including Claude Code's `MCP_TOOL_TIMEOUT` and
 `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT`.
 
-The MCP tools run arbitrary PostScript as you, so a program can read any
-file you can read; writes are confined to the project directory. See
+The MCP tools run arbitrary PostScript as you. A program reads files only in
+the project directory, the pscat data directories and any `--allow-read DIR`
+the server was given; writes are confined to the project directory. See
 [SECURITY.md](https://github.com/PSCatLabs/pscat/blob/main/SECURITY.md) and the
 [agents guide](https://pscatlabs.github.io/pscat/agents.html) for the server's limits and
 options.

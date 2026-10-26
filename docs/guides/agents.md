@@ -158,10 +158,22 @@ replaces only an existing render file of the same extension (see below).
 The PostScript itself can never write a file: the server never passes the CLI's
 `--allow-write`, so `(path) (w) file`, `writereals`, `renamefile` and `deletefile` fail with
 `invalidfileaccess` (#740). `%stdout` writes come back as printed output.
-Reading follows the CLI's policy (any file the server's user can read), and so does
-`filenameforall`: a program can list a readable directory, not just guess names in it.
-`read-only` here means the tool writes nothing; `eval_postscript`'s program (and
-a render's) can still *read* any local file you can, which each description says.
+Reading is confined to the server's **read roots** (#763): its working directory
+(unless that is `/`), the pscat data directories (`$PSCAT_HOME` and the per-user one,
+where font packs install) when they exist, and each `--allow-read DIR`.
+`(path) (r) file`, `run`, `readreals` and image or data sources opened by name
+read only files that resolve inside one of them; anything else, a `..` anywhere in
+the name, a symlink leading out, or `/dev/zero`, is `invalidfileaccess`, and so is
+a missing file named by an absolute path outside (the error never says whether
+it exists). `filenameforall`
+lists only inside the roots: an absolute template elsewhere, or one with `..`,
+yields no names (no error; the PLRM gives it no `invalidfileaccess`, and
+Ghostscript's `-dSAFER` skips files it may not open the same way). The bundled
+`lib/` is not a disk read and always works. The server passes the roots to each
+render as the CLI's `--confine-reads` and `--read-root DIR`; the CLI itself reads
+openly unless given those. `read-only` here means the tool writes nothing.
+No tool takes an input file path: `review_sheet` and the rest take PostScript
+source, not files, so the roots are the only way in.
 `tests/mcp.rs` keeps the same table and fails for a tool missing from it.
 
 The Claude Code plugin registers it for you. To register it by hand instead
@@ -197,6 +209,7 @@ Set by whoever registers the server; no tool argument can change them.
 | `--max-latex-bytes N` | 4096 | `chalkboard_math`'s `latex` size (`input_too_large`, with `limit`); about 40 rows. |
 | `--max-image-bytes N` | 3750000 | Inline image bytes per call, about 5 MB once base64-encoded; also at most 20 pages inline (`output_too_large`; a file asked for with `out_path` is still written). |
 | `--out-root DIR` | the working directory | Where `out_path` may write. Off when the server starts in `/`. |
+| `--allow-read DIR` | none (repeatable) | Another directory programs may read from, besides the working directory (not `/`) and the pscat data directories. A directory that doesn't exist stops the server at startup. |
 
 `chalkboard_math` checks its caps before anything runs: `latex` at most
 `--max-latex-bytes` (default 4096: about 40 rows, four times a long
@@ -373,8 +386,8 @@ signal to fall back to `initialize`. CI drives the server with the
 official MCP Inspector CLI (`.github/workflows/mcp.yml`,
 `scripts/mcp_inspector_check.sh`).
 
-**Safety.** The tools run arbitrary PostScript as you, which can read any
-file you can read, and return what it printed. Writes are confined as
+**Safety.** The tools run arbitrary PostScript as you and return what it
+printed. Reads are confined to the read roots and writes to `out_path`, as
 above. Read [`SECURITY.md`](../../SECURITY.md) before you hand the server
 to an agent you do not trust.
 

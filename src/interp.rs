@@ -320,6 +320,9 @@ pub struct Interp {
     /// Directories the program may write files in (issue #740); empty
     /// unless `set_write_roots` was called.
     write_roots: crate::write_roots::WriteRoots,
+    /// Directories the program may read files from (issue #763); `None`
+    /// (the default) reads wherever the search order finds a file.
+    read_roots: Option<crate::read_roots::ReadRoots>,
     pub(crate) gfx: Gfx,
 }
 
@@ -422,6 +425,7 @@ impl Interp {
             mem_base: 0,
             poll_in: POLL_PERIOD,
             write_roots: Default::default(),
+            read_roots: None,
             gfx,
         })
     }
@@ -507,6 +511,42 @@ impl Interp {
     /// The write policy, for the operators that write to disk.
     pub(crate) fn write_policy(&self) -> &crate::write_roots::WriteRoots {
         &self.write_roots
+    }
+
+    /// Confine reads to `dirs` (issue #763; the CLI's `--read-root DIR`,
+    /// and what `pscat-mcp` always does): `(path) (r) file`, `run`,
+    /// `readreals` and `filenameforall` read and list only files that
+    /// resolve inside one of them, and refuse the rest with
+    /// `invalidfileaccess`, `..` and symlink escapes included
+    /// (`src/read_roots.rs`). The embedded copy of `lib/` stays available.
+    /// An empty slice confines reads to that embedded copy alone. Fails,
+    /// changing nothing, if a directory doesn't exist.
+    ///
+    /// ```no_run
+    /// let mut interp = pscat::Interp::new();
+    /// interp.set_read_roots(&["."])?;
+    /// assert!(interp.run_str("(/etc/hosts) (r) file").is_err());
+    /// # Ok::<(), String>(())
+    /// ```
+    pub fn set_read_roots<P: AsRef<std::path::Path>>(&mut self, dirs: &[P]) -> Result<(), String> {
+        self.read_roots = Some(crate::read_roots::ReadRoots::new(dirs)?);
+        Ok(())
+    }
+
+    /// Lift the read confinement again: reads are open, the default.
+    pub fn clear_read_roots(&mut self) {
+        self.read_roots = None;
+    }
+
+    /// The canonical read roots, or `None` when reads are open (the
+    /// default).
+    pub fn read_roots(&self) -> Option<&[std::path::PathBuf]> {
+        self.read_roots.as_ref().map(|r| r.dirs())
+    }
+
+    /// The read policy, for the operators that read from disk.
+    pub(crate) fn read_policy(&self) -> Option<&crate::read_roots::ReadRoots> {
+        self.read_roots.as_ref()
     }
 
     /// Where writing to `name` would go: a path inside the write roots, or

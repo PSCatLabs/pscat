@@ -53,7 +53,10 @@
 //! wall-clock timeout and a cap on captured output; `source`/`text` have
 //! a size cap; inline images have a byte and page cap; `out_path` is
 //! confined to one output root (render extensions only, no dot-directories)
-//! and written by rename, never by following a symlink. Nothing but JSON-RPC is ever written to stdout: diagnostics
+//! and written by rename, never by following a symlink; programs read files only
+//! inside the read roots (issue #763: the working directory, the pscat data
+//! directories, `--allow-read`), passed to every child as `--confine-reads`
+//! and `--read-root`. Nothing but JSON-RPC is ever written to stdout: diagnostics
 //! go to stderr, and child output is always captured through pipes.
 
 use std::collections::HashMap;
@@ -96,6 +99,10 @@ An MCP server on stdin/stdout (launched by an MCP client, not by hand).
 
   --out-root DIR         directory out_path is confined to (default: the
                          working directory; out_path is off when that is /)
+  --allow-read DIR       also let programs read files inside DIR
+                         (repeatable); they always may in the working
+                         directory (unless that is /) and the pscat data
+                         directories ($PSCAT_HOME, the per-user one)
   --timeout SECS         wall-clock limit per tool call (default 60)
   --job-timeout SECS     wall-clock limit per render job, start_render
                          (default 3600)
@@ -126,6 +133,12 @@ An MCP server on stdin/stdout (launched by an MCP client, not by hand).
 struct Config {
     /// Canonical output root, or why `out_path` is unavailable.
     out_root: Result<PathBuf, String>,
+    /// Canonical directories every child's program may read from (issue
+    /// #763): the working directory (not `/`), `$PSCAT_HOME` and the
+    /// per-user data directory when they exist, and each `--allow-read`.
+    /// Always passed, so an empty list still confines reads (to the
+    /// embedded `lib/`).
+    read_roots: Vec<PathBuf>,
     timeout: Duration,
     /// `--job-timeout`: the wall-clock limit of one render job.
     job_timeout: Duration,
@@ -187,15 +200,27 @@ impl Config {
         cmd.arg("--max-time").arg(format!("{secs:.3}"));
         cmd.arg("--max-steps").arg(self.max_steps.to_string());
         cmd.arg("--max-memory").arg(self.max_memory_mib.to_string());
+        self.read_root_args(cmd);
         // A server that is killed (no chance to cancel) takes its renders
         // with it.
         cmd.arg("--exit-with-parent")
             .arg(std::process::id().to_string());
     }
 
+    /// The flags that confine a child's reads to the read roots (issue
+    /// #763). `--confine-reads` comes first so that no roots at all still
+    /// means confined, never open. `pscat` and `pscat handwrite` take both.
+    fn read_root_args(&self, cmd: &mut Command) {
+        cmd.arg("--confine-reads");
+        for dir in &self.read_roots {
+            cmd.arg("--read-root").arg(dir);
+        }
+    }
+
     /// `Ok(None)`: `--help`/`--version` was handled, exit 0.
     fn from_args(args: impl Iterator<Item = String>) -> Result<Option<Config>, String> {
         let mut out_root: Option<String> = None;
+        let mut allow_read: Vec<String> = Vec::new();
         let mut timeout = 60u64;
         let mut job_timeout = 3600u64;
         let mut max_jobs = 2u64;
@@ -227,6 +252,7 @@ impl Config {
                     return Ok(None);
                 }
                 "--out-root" => out_root = Some(value("--out-root")?),
+                "--allow-read" => allow_read.push(value("--allow-read")?),
                 "--timeout" => timeout = number("--timeout", value("--timeout")?, 1, 86_400)?,
                 "--job-timeout" => {
                     job_timeout = number("--job-timeout", value("--job-timeout")?, 1, 86_400)?
@@ -271,8 +297,10 @@ impl Config {
         {
             return Err(format!("--out-root {} is not a directory", root.display()));
         }
+        let read_roots = read_roots(&allow_read)?;
         Ok(Some(Config {
             out_root,
+            read_roots,
             timeout: Duration::from_secs(timeout),
             job_timeout: Duration::from_secs(job_timeout),
             max_jobs: max_jobs as usize,
@@ -287,6 +315,44 @@ impl Config {
             max_memory_mib,
         }))
     }
+}
+
+/// The read roots (issue #763; see [`Config::read_roots`]). A bad
+/// `--allow-read` is a startup error; a default directory that doesn't
+/// exist (no per-user data directory yet) is left out.
+fn read_roots(allow_read: &[String]) -> Result<Vec<PathBuf>, String> {
+    let mut roots: Vec<PathBuf> = Vec::new();
+    let mut add = |p: PathBuf| {
+        if !roots.contains(&p) {
+            roots.push(p);
+        }
+    };
+    // As for out_path: a client that starts servers in `/` (or a
+    // `PSCAT_HOME=/`) must not make the whole disk readable, so no default
+    // root is the filesystem root.
+    let mut add_default = |d: &Path| {
+        if let Ok(canon) = std::fs::canonicalize(d)
+            && canon.is_dir()
+            && canon.parent().is_some()
+        {
+            add(canon);
+        }
+    };
+    if let Ok(cwd) = std::env::current_dir() {
+        add_default(&cwd);
+    }
+    let dirs = pscat::paths::process_roots();
+    for d in [&dirs.home, &dirs.user_data].into_iter().flatten() {
+        add_default(d);
+    }
+    for d in allow_read {
+        let canon = std::fs::canonicalize(d).map_err(|e| format!("--allow-read {d:?}: {e}"))?;
+        if !canon.is_dir() {
+            return Err(format!("--allow-read {d:?} is not a directory"));
+        }
+        add(canon);
+    }
+    Ok(roots)
 }
 
 /// The working directory the client started us in (Claude Code and Codex
@@ -305,6 +371,32 @@ fn default_out_root() -> Result<PathBuf, String> {
         ));
     }
     Ok(cwd)
+}
+
+/// What the tool descriptions say about reads (issue #763); the server
+/// instructions list the actual directories ([`read_roots_note`]).
+const READS_BRIEF: &str = "Programs read files ((path) (r) file, run, filenameforall) only inside \
+    this server's read roots: its working directory, the pscat data directories and any \
+    --allow-read directory; elsewhere is invalidfileaccess. The bundled lib/ is always available.";
+
+/// The server instructions' sentence on reads, naming the read roots.
+fn read_roots_note(cfg: &Config) -> String {
+    let dirs: Vec<String> = cfg
+        .read_roots
+        .iter()
+        .map(|d| d.display().to_string())
+        .collect();
+    let dirs = if dirs.is_empty() {
+        "none (only the bundled lib/)".to_string()
+    } else {
+        dirs.join(", ")
+    };
+    format!(
+        "Programs read files ((path) (r) file, run, readreals, filenameforall) only inside \
+         these read roots: {dirs}. Anything else, `..` and symlinks out included, is \
+         invalidfileaccess; the bundled lib/ is always available. Whoever registered the \
+         server can add a directory with --allow-read DIR."
+    )
 }
 
 /// Serve MCP on stdin/stdout until stdin closes. `args` are the options
@@ -707,10 +799,11 @@ fn initialize_result(cfg: &Config, params: &Value) -> Result<Value, (String, Val
              take longer, use start_render: it returns a job_id at once, render_status polls \
              it, render_result fetches the pages, cancel_render stops it; a job may run {}s. \
              A page, board or sheet is limited to {} pixels. \
-             {out_path}",
+             {out_path} {reads}",
             cfg.timeout.as_secs(),
             cfg.job_timeout.as_secs(),
-            cfg.max_pixels
+            cfg.max_pixels,
+            reads = read_roots_note(cfg),
         ),
     }))
 }
@@ -902,8 +995,8 @@ fn tool_list(cfg: &Config) -> Value {
                 leftover stack). {limits} {canvas} Inline images are capped at {} bytes in total \
                 and {MAX_INLINE_PAGES} pages; past that, lower dpi/size or use out_path. \
                 Writes a file only when out_path is given (then it replaces an existing render \
-                file of that extension), which is why this tool is not marked read-only. The \
-                program can read any local file you can.",
+                file of that extension), which is why this tool is not marked read-only. \
+                {READS_BRIEF}",
                 cfg.max_image),
             "inputSchema": render_schema.clone()
         },
@@ -1016,7 +1109,7 @@ fn tool_list(cfg: &Config) -> Value {
                 most {MAX_SHEET_LABEL} characters; {}s for the whole sheet (the server's --timeout; its default is 60), {} bytes of source in \
                 all; the interpreter's step, time and memory limits per cell (limit_exceeded). \
                 The inline image is capped at {} bytes: past that, lower the dpi list or use \
-                out_path. The programs can read any local file you can.",
+                out_path. {READS_BRIEF}",
                 cfg.timeout.as_secs(), cfg.max_input, cfg.max_image),
             "inputSchema": {
                 "type": "object",
@@ -1069,7 +1162,7 @@ fn tool_list(cfg: &Config) -> Value {
             "description": format!("Run a PostScript program headlessly and return what it printed \
                 (=, print, pstack). On error: the standard PostScript error name, the offending \
                 command and line, plus a gs-style operand-stack post-mortem. The debugging \
-                loop. Writes nothing, but the program can read any local file you can. {limits}"),
+                loop. Writes nothing. {READS_BRIEF} {limits}"),
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -1695,6 +1788,7 @@ fn handwrite(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
     let mut cmd = Command::new(pscat_bin()?);
     cmd.arg("handwrite").arg("-o").arg(&out);
     cmd.arg("--max-pixels").arg(cfg.max_pixels.to_string());
+    cfg.read_root_args(&mut cmd);
     // As `interpreter_args` gives every other child: a killed server takes
     // this render with it.
     cmd.arg("--exit-with-parent")

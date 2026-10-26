@@ -398,3 +398,39 @@ fn step_limit_covers_the_program_not_the_band_names() {
     ]);
     assert!(ok, "{e}");
 }
+
+/// `--confine-reads` (#763) binds every band, not just a plain render.
+#[test]
+fn read_roots_bind_every_band() {
+    let dir = common::scratch_dir("bands-reads");
+    let secret = write_source(&dir, "secret.ps", "/Secret 1 def\n");
+    let png = dir.join("r.png");
+    let prog = format!("({}) run", secret.display());
+    let (ok, _, e) = pscat(&[
+        "--page",
+        "20x20",
+        "--confine-reads",
+        "--bands",
+        "3",
+        "--png",
+        png.to_str().unwrap(),
+        "-e",
+        &prog,
+    ]);
+    assert!(!ok, "a confined band must not read outside the roots");
+    assert!(
+        e.contains("invalidfileaccess") || e.contains("undefinedfilename"),
+        "{e}"
+    );
+    let (ok, _, e) = pscat(&[
+        "--page",
+        "20x20",
+        "--bands",
+        "3",
+        "--png",
+        png.to_str().unwrap(),
+        "-e",
+        &prog,
+    ]);
+    assert!(ok, "unconfined, the read works: {e}");
+}

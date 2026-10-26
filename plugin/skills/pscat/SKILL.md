@@ -345,7 +345,8 @@ pass `out_path`. Register it with
   page use `--dpi 144`, not `--page 1224x1584`. Canvases are capped at
   8000×8000 device pixels.
 - pscat is not a sandbox: a program can read any file you can read
-  (`(path) (r) file`), and on the command line nothing stops an infinite
+  (`(path) (r) file`; the MCP tools confine reads to the working directory,
+  the pscat data directories and `--allow-read DIR`), and on the command line nothing stops an infinite
   loop unless you ask: `--max-steps N`, `--max-time SECS` and `--max-memory
   MIB` stop a runaway with a `limitexceeded` error. Run untrusted PostScript
   as you would an untrusted script.

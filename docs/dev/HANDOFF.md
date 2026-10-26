@@ -1182,6 +1182,17 @@ renders eight examples in both and compares block-downsampled output).
   new shortcut (e.g. culling fills whose bbox misses the band) needs a provably
   conservative bound and a run of `tests/bands.rs`. See
   `notes/736-bands-parallel-render.md`.
+- **Read roots (#763).** Reads are open by default (the CLI). `Interp::set_read_roots`
+  (CLI `--read-root DIR`, `--confine-reads` for none) confines them, and
+  `src/read_roots.rs` decides: `open_confined` wraps the search order's reader so a
+  disk candidate outside the roots is skipped (the embedded `lib/` still answers) and
+  a name that only resolved outside is `invalidfileaccess`; `filenameforall` filters
+  through `ReadRoots::admit`. Every operator that reads a program-named path must go
+  through `ops::file::read_resource` (or `open_confined`), never `std::fs` directly.
+  `pscat-mcp` always passes `--confine-reads` plus its roots (cwd unless `/`,
+  `$PSCAT_HOME`, the per-user data dir, `--allow-read`) to `pscat` and `pscat
+  handwrite` children. Font lookup matches names against file stems and isn't gated.
+  See `notes/763-read-roots.md`.
 - **`writereals` / `readreals` (#735).** Packed little-endian float64 (or `/f32`) save and
   load of a numeric array, in `src/ops/realsio.rs` (module doc has the error table and the
   `/f32` rules). The writer opens through `WriteRoots::open` like `file` does, and checks every

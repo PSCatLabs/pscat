@@ -326,6 +326,13 @@ fn run_band(
     interp
         .set_limits(options.limits)
         .map_err(|e| format!("limits: {e}"))?;
+    // `--read-root`/`--confine-reads` (#763) bind every band, as they bind a
+    // plain render.
+    if let Some(dirs) = &options.read_roots {
+        interp
+            .set_read_roots(dirs)
+            .map_err(|e| format!("--read-root: {e}"))?;
+    }
     // No band runs the program until every band has its base: a band that
     // started early would put its allocations under a later band's base,
     // out of every check.

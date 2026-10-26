@@ -53,6 +53,9 @@ A drop guard aborts both gates however a band ends, so a failure or panic never
 leaves the others waiting. The limits go on after the band names are defined,
 so a tight `--max-steps` bounds the program alone (Codex round 1).
 
+`--read-root`/`--confine-reads` (#763, merged while this was open) are set on
+every band's interpreter, as on a plain render.
+
 **Evidence** (10-core Apple M-series laptop: 4 performance + 6 efficiency
 cores; wall time, median of 5 interleaved rounds after a warm-up round, pscat
 only). The piece is a band-aware 1600x1200 fbm2 `colorimage` procedure
