@@ -30,3 +30,38 @@ path = "fuzz_targets/interp.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "truetype"
+path = "fuzz_targets/truetype.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "type1_charstring"
+path = "fuzz_targets/type1_charstring.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "type1_font"
+path = "fuzz_targets/type1_font.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "filters"
+path = "fuzz_targets/filters.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "image"
+path = "fuzz_targets/image.rs"
+test = false
+doc = false
+bench = false

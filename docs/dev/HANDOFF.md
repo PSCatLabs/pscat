@@ -1180,7 +1180,18 @@ renders eight examples in both and compares block-downsampled output).
   - Fuzzing: `fuzz/` (own workspace; `cargo +nightly fuzz run interp fuzz/corpus/interp fuzz/seeds/interp`),
     harness bodies in `src/fuzzing.rs`, seeds and crash regressions replayed by
     `tests/fuzz_corpus.rs`, weekly in `.github/workflows/fuzz.yml`. A fixed crash's
-    input goes in `fuzz/regressions/<target>/`.
+    input goes in `fuzz/regressions/<target>/`. Seven targets (#604, #704): `lexer`,
+    `interp`, `truetype` (the font-file loader and glyph outlines; `font::prepare_face`),
+    `type1_charstring` (decrypted charstring bytes into `type1::run`), `type1_font` (a
+    whole PFA through `eexec`/`definefont`, then text in every defined font), `filters`
+    (ASCIIHex/85, RunLength, eexec, Flate, LZW, DCT, chained) and `image` (a `%!`
+    program runs as PostScript; anything else is a recipe that builds an
+    `image`/`colorimage`/dict/multi-source/ImageType 3 call). A new loader gets a
+    function in `src/fuzzing.rs`, a `fuzz/fuzz_targets/` file, a `[[bin]]`, seeds,
+    a replay test, and a line in the workflow's matrix (an owner path). The replay
+    runs each input on a thread under a 30 s deadline, so a hang fails the test.
+    A font loader must use `font::parse_face`, not `Face::parse`. Not fuzzed:
+    `readreals` (a path API; its parser is `from_le_bytes` on exact chunks).
   - `--spool` and the subcommands take the limits (#701): one budget per
     program run (`subcmd::Confine`, `take_limit_flag`, `limit_flag` in
     `main.rs`, `window::run_spool_with_limits`, `chalk::run_with_limits`).
