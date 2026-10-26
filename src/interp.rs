@@ -600,13 +600,26 @@ impl Interp {
         self.open_outputs.push(Rc::downgrade(f));
     }
 
-    /// Write out the buffered bytes of every open disk file. Called at
-    /// `showpage`, `quit` and `flush`, before a disk file is read (so a
-    /// program sees what it wrote), and by every exit path of the `pscat`
-    /// binary (and, as a last resort, when the `Interp` drops). A file whose
-    /// earlier write failed reports `ioerror` here (and again from its own
-    /// `closefile`); every file is flushed regardless.
+    /// Write out the buffered bytes of every open disk file, and report a
+    /// failure: a file whose write failed, or one that was dropped without
+    /// being closed and could not write (disk full), is `ioerror`. Every
+    /// file is flushed regardless. The `pscat` binary calls this on every
+    /// exit path, so a program that lost data exits non-zero; an embedder
+    /// that leaves files open should call it before it drops the `Interp`
+    /// (the drop flushes too, but cannot tell anyone). The note about a
+    /// dropped file is cleared by this call.
     pub fn flush_outputs(&mut self) -> Result<(), PsError> {
+        let flushed = self.flush_files();
+        if crate::file::take_lost_write() {
+            return Err(PsError::Io);
+        }
+        flushed
+    }
+
+    /// [`Interp::flush_outputs`] for the places that cannot raise (`showpage`,
+    /// `quit`, `flush`, before a read): the bytes go out, and a failure stays
+    /// on the file (or in the dropped-file note) for the exit flush to report.
+    pub(crate) fn flush_files(&mut self) -> Result<(), PsError> {
         let mut result = Ok(());
         for w in &self.open_outputs {
             if let Some(f) = w.upgrade()
@@ -2185,7 +2198,7 @@ impl Drop for Interp {
     fn drop(&mut self) {
         // Before the early return below: a file kept alive by the leaked
         // dictionary graph would otherwise never be flushed.
-        let _ = self.flush_outputs();
+        let _ = self.flush_files();
         if self.keep_dicts_on_drop {
             return;
         }

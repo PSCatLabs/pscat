@@ -60,7 +60,7 @@ fn pop_ps_string(it: &mut Interp) -> Result<PsString, PsError> {
 pub(super) fn read_resource(it: &mut Interp, name: &str) -> Result<Vec<u8>, PsError> {
     // A program reads back what it wrote, closed or not (issue #762). A
     // file whose write failed reports that itself, not through this read.
-    let _ = it.flush_outputs();
+    let _ = it.flush_files();
     #[cfg(not(target_arch = "wasm32"))]
     if !it.limits().is_none() {
         return read_resource_limited(it, name);
@@ -141,7 +141,7 @@ fn file(it: &mut Interp) -> Result<(), PsError> {
             it.check_output_slot()?;
             // What an open handle still holds goes to disk before this open
             // can truncate the file, as it did when writes were unbuffered.
-            let _ = it.flush_outputs();
+            let _ = it.flush_files();
             disk = true;
             Sink::Disk(DiskSink::new(it.write_policy().open(name, mode)?))
         }
@@ -250,7 +250,7 @@ fn flush(it: &mut Interp) -> Result<(), PsError> {
     it.write_stdout(&[], true).map_err(|_| PsError::Io)?;
     // A file whose write failed reports that from its own `closefile`, not
     // from every `flush` in the program.
-    let _ = it.flush_outputs();
+    let _ = it.flush_files();
     Ok(())
 }
 

@@ -136,7 +136,7 @@ fn writereals(it: &mut Interp) -> Result<(), PsError> {
     it.check_write_bytes((len * fmt.width()) as u64)?;
     // What an open handle still holds goes to disk before this open
     // truncates the file (as when writes were unbuffered).
-    let _ = it.flush_outputs();
+    let _ = it.flush_files();
     let mut file = it
         .write_policy()
         .open(name, crate::write_roots::WriteMode::Truncate)?;

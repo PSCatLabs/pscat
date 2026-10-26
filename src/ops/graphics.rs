@@ -278,7 +278,7 @@ fn erasepage(it: &mut Interp) -> Result<(), PsError> {
 fn showpage(it: &mut Interp) -> Result<(), PsError> {
     // Buffered disk files go out with each page (issue #762); a failure is
     // kept on the file and reported by its own `closefile`.
-    let _ = it.flush_outputs();
+    let _ = it.flush_files();
     it.gfx.showpage();
     it.gfx.init_graphics();
     it.gfx.dirty = true;

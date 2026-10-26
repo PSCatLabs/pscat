@@ -230,7 +230,9 @@ never write). `pscat-mcp` never sets a write root ("The MCP server").
   by name (so a program reads back what it wrote), and when the file goes away.
   Every exit path of `pscat` (run, `-e`, `--png`, each `--sweep` frame, the
   REPL, `-i` and the window) flushes the files a program left open, on an error exit too, and a failure
-  then exits non-zero; dropping an `Interp` is the last resort. A failed write
+  then exits non-zero (that includes a file the program dropped unclosed
+  whose last bytes could not be written); dropping an `Interp` is the last
+  resort, and cannot report anything. A failed write
   stays on the file, and its next write or `closefile` is `ioerror`
   (`resetfile` clears it). What can still lose buffered bytes is the process
   ending in no way the interpreter sees: `SIGKILL`, a crash, power loss, or

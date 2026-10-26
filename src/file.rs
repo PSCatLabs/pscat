@@ -164,8 +164,23 @@ impl DiskSink {
 
 impl Drop for DiskSink {
     fn drop(&mut self) {
-        let _ = self.flush();
+        // Nobody can be told now, so remember it: the final
+        // `Interp::flush_outputs` reports it (`take_lost_write`).
+        if self.flush().is_err() {
+            LOST_WRITE.with(|l| l.set(true));
+        }
     }
+}
+
+thread_local! {
+    /// Set when a disk file was dropped with bytes it could not write.
+    static LOST_WRITE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether a disk file lost bytes when it was dropped unflushed (disk
+/// full, a quota) on this thread since the last call; clears the note.
+pub fn take_lost_write() -> bool {
+    LOST_WRITE.with(|l| l.replace(false))
 }
 
 impl PsFile {
@@ -1050,6 +1065,20 @@ mod tests {
             out.push(b);
         }
         out
+    }
+
+    #[test]
+    fn a_dropped_file_that_could_not_write_leaves_a_note() {
+        let path = std::env::temp_dir().join(format!("pscat-lost-{}", std::process::id()));
+        std::fs::write(&path, b"x").unwrap();
+        // A read-only handle: buffering succeeds, the flush at drop cannot.
+        let mut sink = DiskSink::new(std::fs::File::open(&path).unwrap());
+        sink.write(b"data").unwrap();
+        assert!(!take_lost_write());
+        drop(sink);
+        assert!(take_lost_write());
+        assert!(!take_lost_write());
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
