@@ -40,6 +40,16 @@ program that reads `/BandBBox [llx lly urx ury]` (also `/BandIndex`,
 `/BandCount`) and skips work outside it, e.g. a costly `colorimage` procedure
 that computes only those rows plus one row of margin. PNG only.
 
+`pscat --profile --headless f.ps` (or with `--png`) prints, on stderr, each
+named procedure's call count and exclusive and inclusive wall time, slowest
+exclusive first (`--profile-top N`, `--profile-json`). Use it to find where a
+slow render went. Not with `--bands`.
+
+`pscat --profile --headless f.ps` (or with `--png`) prints, on stderr, each
+named procedure's call count and exclusive and inclusive wall time, slowest
+exclusive first (`--profile-top N`, `--profile-json`). Use it to find where a
+slow render went. Not with `--bands`.
+
 ## Sweep a seed or parameter (explore a design space in one run)
 
 ```sh
