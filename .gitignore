@@ -1,6 +1,7 @@
 /target
 tests/corpus/
 web/pscat.wasm
+web/.pscat.wasm.*
 _site/
 /dist/
 /dist-npm/
