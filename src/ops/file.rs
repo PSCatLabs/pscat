@@ -30,7 +30,7 @@ pub fn install(dict: &mut Dict) {
     op(dict, "filenameforall", filenameforall);
 }
 
-fn pop_file(it: &mut Interp) -> Result<FileHandle, PsError> {
+pub(crate) fn pop_file(it: &mut Interp) -> Result<FileHandle, PsError> {
     match &it.pop()?.value {
         Value::File(f) => Ok(f.clone()),
         _ => Err(PsError::Typecheck),
@@ -139,7 +139,7 @@ fn writable_name(bytes: &[u8]) -> Result<&str, PsError> {
 
 /// Send bytes to an output file. Writing to an input file or a closed
 /// one is an `ioerror`.
-fn write_bytes(it: &mut Interp, f: &FileHandle, bytes: &[u8]) -> Result<(), PsError> {
+pub(crate) fn write_bytes(it: &mut Interp, f: &FileHandle, bytes: &[u8]) -> Result<(), PsError> {
     use std::io::Write;
     match f.borrow_mut().sink_mut() {
         None => return Err(PsError::Io),

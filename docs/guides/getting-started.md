@@ -122,6 +122,20 @@ More on the less obvious ones:
   are ignored. `readreals` reads the whole file, then keeps the first `n`
   values, so for a huge file it is as costly as `(path) (r) file`. Both honour
   `--max-steps`, `--max-time` and `--max-memory`.
+- **Binary object sequences.** The Level 2 operators `setobjectformat`,
+  `currentobjectformat`, `printobject` and `writeobject` write one object (a
+  number, boolean, name, string, `null`, `mark` or an array of those, nested)
+  in the PLRM's compact binary form, and the scanner reads it back: `run`,
+  `token` and `cvx exec` all accept a token that starts with byte 128 to 131.
+  `obj tag printobject` writes to stdout and `file obj tag writeobject` to an
+  output file from `(path) (w) file`, so it needs `--allow-write` like any
+  write. Reals are stored as binary32 (`0.1` comes back as
+  `0.10000000149011612`), integers as 32 bits, and a string, name or array is at
+  most 65535 long; past any of those, or for a dictionary, file or operator,
+  the operator raises `limitcheck` or `typecheck`. For a long numeric array use
+  `writereals`. The default format is 2 (IEEE, low byte first), as in
+  Ghostscript; format 0 makes both operators `undefined`. The byte-for-byte
+  layout matches Ghostscript's.
 - **Halftone.** `--halftone` screens the raster like a mono laser printer's
   RIP: classic dots on a 45° lattice, with coverage tracking darkness.
 

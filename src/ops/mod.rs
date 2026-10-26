@@ -2,6 +2,7 @@
 //! groups them. Each module installs its operators into systemdict.
 
 pub mod arith;
+pub mod binobj;
 pub mod color;
 pub mod control;
 pub mod convert;
@@ -44,6 +45,7 @@ pub fn install_all(dict: &mut Dict) {
     font::install(dict);
     file::install(dict);
     realsio::install(dict);
+    binobj::install(dict);
     image::install(dict);
     logic::install(dict);
     misc::install(dict);

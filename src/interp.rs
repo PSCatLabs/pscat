@@ -287,6 +287,10 @@ pub struct Interp {
     /// `setpacking` flag — tracked, but packed arrays are ordinary
     /// arrays here (ops/level2.rs).
     pub(crate) packing: bool,
+    /// `setobjectformat` (#733): 0 off, 1 to 4 the binary object sequence
+    /// byte order. Starts at 2 (IEEE, low byte first) on every platform,
+    /// which is Ghostscript's default on a little-endian host.
+    pub(crate) object_format: u8,
     /// `usertime`'s zero point.
     pub(crate) clock: crate::clock::Clock,
     /// Non-Font resource categories (ops/level2.rs). Font shares
@@ -411,6 +415,7 @@ impl Interp {
             noise_perm: crate::ops::noise::perm_from_seed(0),
             seed_override_fired: false,
             packing: false,
+            object_format: 2,
             clock: crate::clock::Clock::start(),
             resources: Default::default(),
             keep_dicts_on_drop: false,
@@ -974,6 +979,9 @@ impl Interp {
             /// An eexec source finished: it carried a systemdict push
             /// that ends with it.
             PopScannerAndDict,
+            /// A binary object sequence was scanned: run its top-level
+            /// objects in order, as if each had been a token (#733).
+            RunSequence(PsArray),
         }
         loop {
             let action = {
@@ -1007,6 +1015,9 @@ impl Interp {
                         }
                         Some(Token::ImmediateName(n)) => {
                             Action::Yield(Item::Obj(resolve_immediate(&n, dstack)?))
+                        }
+                        Some(Token::BinarySeq(bytes)) => {
+                            Action::RunSequence(PsArray::from_vec(decode_sequence(&bytes, dstack)?))
                         }
                         Some(tok) => Action::Yield(Item::Obj(token_to_object(tok))),
                     },
@@ -1185,6 +1196,7 @@ impl Interp {
                         self.cleanup_unwound_frame(frame);
                     }
                 }
+                Action::RunSequence(body) => self.push_proc_frame(body)?,
             }
         }
     }
@@ -1342,6 +1354,9 @@ impl Interp {
             }
             Some(Token::LBrace) => scan_procedure(lexer, 0, &self.dstack)?,
             Some(Token::ImmediateName(n)) => resolve_immediate(&n, &self.dstack)?,
+            Some(Token::BinarySeq(bytes)) => {
+                Object::procedure(decode_sequence(&bytes, &self.dstack)?)
+            }
             Some(tok) => token_to_object(tok),
         };
         Ok(Some((obj, lexer.pos())))
@@ -1975,7 +1990,7 @@ fn token_to_object(tok: Token) -> Object {
         Token::LiteralName(n) => Object::lit(Value::Name(crate::name::intern(&n))),
         // All callers consume brace and immediate-name tokens before
         // converting, so these cannot reach here.
-        Token::LBrace | Token::RBrace | Token::ImmediateName(_) => {
+        Token::LBrace | Token::RBrace | Token::ImmediateName(_) | Token::BinarySeq(_) => {
             unreachable!("structural tokens handled by the scanner")
         }
     }
@@ -1990,6 +2005,11 @@ fn resolve_immediate(name: &str, dicts: &[Rc<RefCell<Dict>>]) -> Result<Object, 
         }
     }
     Err(PsError::Undefined(name.to_string()))
+}
+
+/// The top-level objects of a scanned binary object sequence (#733).
+fn decode_sequence(bytes: &[u8], dicts: &[Rc<RefCell<Dict>>]) -> Result<Vec<Object>, PsError> {
+    crate::binobj::decode(bytes, &mut |n| resolve_immediate(n, dicts))
 }
 
 /// Collect tokens up to the matching `}` into a procedure object. Called
@@ -2013,6 +2033,9 @@ fn scan_procedure(
             Some(Token::RBrace) => break,
             Some(Token::LBrace) => items.push(scan_procedure(lexer, depth + 1, dicts)?),
             Some(Token::ImmediateName(n)) => items.push(resolve_immediate(&n, dicts)?),
+            Some(Token::BinarySeq(bytes)) => {
+                items.push(Object::procedure(decode_sequence(&bytes, dicts)?));
+            }
             Some(tok) => items.push(token_to_object(tok)),
         }
     }

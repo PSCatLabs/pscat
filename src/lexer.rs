@@ -27,6 +27,11 @@ pub enum Token {
     ImmediateName(String),
     LBrace,
     RBrace,
+    /// A binary object sequence (token types 128 to 131, PLRM 3.14.4),
+    /// header included. The scanner only frames the bytes; the interpreter
+    /// decodes them (`binobj::decode`) because immediately evaluated names
+    /// need the dictionary stack.
+    BinarySeq(Vec<u8>),
 }
 
 /// The scanner reads through a shared [`FileHandle`], so a program can
@@ -166,6 +171,11 @@ impl Lexer {
         let Some(b) = self.peek()? else {
             return Ok(None);
         };
+        // A token that starts with 128 to 131 is a binary object sequence.
+        // (Inside a name such a byte is still an ordinary character.)
+        if (128..=131).contains(&b) {
+            return Ok(Some(Token::BinarySeq(self.read_binary_sequence()?)));
+        }
         if is_regular(b) {
             // Number-or-name words dispatch on their whole run; the
             // first byte must not be consumed before reading it.
@@ -217,6 +227,28 @@ impl Lexer {
             // is_regular handled above; whitespace/comments skipped above.
             _ => unreachable!("delimiter byte {b} not dispatched"),
         }
+    }
+
+    /// Read one whole binary object sequence, header included. Nothing
+    /// after it is consumed (no token delimiter), and nothing is
+    /// preallocated from the length the header claims: a short input that
+    /// claims 4 GB is a truncated sequence, not an allocation.
+    fn read_binary_sequence(&mut self) -> Result<Vec<u8>, PsError> {
+        let truncated = || syntax("binary object sequence is truncated");
+        let mut bytes: Vec<u8> = Vec::with_capacity(8);
+        let mut want = 4;
+        while bytes.len() < want {
+            bytes.push(self.bump()?.ok_or_else(truncated)?);
+            if bytes.len() == 4 && crate::binobj::header_is_long(&bytes) {
+                want = 8;
+            }
+        }
+        let (_, total, _) = crate::binobj::parse_header(&bytes)?;
+        bytes.reserve(total.saturating_sub(bytes.len()).min(1 << 20));
+        while bytes.len() < total {
+            bytes.push(self.bump()?.ok_or_else(truncated)?);
+        }
+        Ok(bytes)
     }
 
     /// A token terminated *by* whitespace consumes that one whitespace
