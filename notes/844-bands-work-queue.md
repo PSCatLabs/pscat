@@ -41,8 +41,15 @@ so single-threaded readers (every plain render, the memory tests) still see an
 exact number. Other threads' counts can lag by up to 64 KiB each. The shared
 count is now an `AtomicIsize` and `live_bytes()` clamps at 0: memory that one
 thread allocated (not yet folded) and another freed shows up as a free first,
-which would have wrapped a `usize` to about 2^64 (advisor). `fold_thread()` is
-called at the end of each band worker so nothing it did is left out.
+which would have wrapped a `usize` to about 2^64 (advisor). Each band's
+thread calls `fold_at_thread_exit()` first: it registers a thread-local
+whose destructor folds the count once more, and since destructors run in
+reverse order of registration, that is after the thread's other
+thread-locals (the name interner) are freed. A plain `fold_thread()` at the
+end of the band closure missed those frees, so each band's thread left up
+to 64 KiB of frees uncounted and a long queue would drift towards a false
+`--max-memory` stop (Codex round 2; the test in `tests/limits_memory.rs`
+fails without the guard).
 Single-threaded cost: no change measured (a PostScript-only loop, `fib` plus
 `sin`/`cos`/arrays, 1.15-1.21 s against main's 1.19-1.31 s).
 

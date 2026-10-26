@@ -319,11 +319,10 @@ fn render(
                                 .name(format!("band-{index}"))
                                 .stack_size(BAND_STACK)
                                 .spawn_scoped(band_scope, || {
-                                    let out = run_band(options, source, band, base, queue);
-                                    // Count everything this band did before
-                                    // its thread exits.
-                                    pscat::memtrack::fold_thread();
-                                    out
+                                    // Count everything this band's thread
+                                    // frees, its thread-locals included.
+                                    pscat::memtrack::fold_at_thread_exit();
+                                    run_band(options, source, band, base, queue)
                                 })
                                 .map(|h| h.join())
                         });

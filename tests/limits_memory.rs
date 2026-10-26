@@ -167,4 +167,29 @@ fn memory_growth_is_capped() {
         (leaked..leaked + 4096).contains(&grew),
         "the leaked 10 kB is counted: {grew}"
     );
+
+    // Frees made while a thread's thread-locals are destroyed are counted
+    // too, with `fold_at_thread_exit` (`--bands` runs every band on a fresh
+    // thread whose name interner is freed that way). Each thread here
+    // folds, then frees 20 kB as it exits; 200 of them, uncounted, would
+    // read as 4 MB.
+    thread_local! {
+        static HELD: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+    let before = pscat::memtrack::live_bytes();
+    for _ in 0..200 {
+        std::thread::spawn(|| {
+            pscat::memtrack::fold_at_thread_exit();
+            HELD.with(|h| *h.borrow_mut() = vec![3u8; 20_000]);
+            // As a band does at its end; the 20 kB is freed after this.
+            pscat::memtrack::fold_thread();
+        })
+        .join()
+        .unwrap();
+    }
+    let after = pscat::memtrack::live_bytes();
+    assert!(
+        after < before + 256 * 1024,
+        "thread-exit frees are counted: {before} -> {after}"
+    );
 }

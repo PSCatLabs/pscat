@@ -24,7 +24,7 @@
 //! that allocate a lot (`pscat --bands`) fight over one cache line: four
 //! band threads used about 2.8 times the CPU of four processes. So the
 //! shared count can lag by up to 64 KiB per thread that is running, or that
-//! exited without calling [`fold_thread`]. [`live_bytes`] folds the calling
+//! exited without [`fold_at_thread_exit`]. [`live_bytes`] folds the calling
 //! thread first, so a single-threaded host reads an exact number. The cost
 //! is a thread-local add per allocation or free, which the `pscat` binary
 //! pays and a library user who does not install the allocator does not.
@@ -132,6 +132,25 @@ pub fn fold_thread() {
     if d != 0 {
         LIVE.fetch_add(d, Relaxed);
     }
+}
+
+/// Fold the calling thread's count once more when the thread exits, after
+/// its other thread-locals are destroyed (the name interner, for one),
+/// whose frees would otherwise be left out. Call it early in a thread, before
+/// those thread-locals are first used: destructors run in reverse order of
+/// registration, so this one runs after theirs. `pscat --bands` calls it
+/// first thing on every band's thread (#844).
+pub fn fold_at_thread_exit() {
+    struct FoldOnDrop;
+    impl Drop for FoldOnDrop {
+        fn drop(&mut self) {
+            fold_thread();
+        }
+    }
+    thread_local! {
+        static GUARD: FoldOnDrop = const { FoldOnDrop };
+    }
+    GUARD.with(|_| {});
 }
 
 /// True once [`TrackingAllocator`] is the global allocator. It becomes true
