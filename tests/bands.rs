@@ -235,6 +235,10 @@ fn each_band_lands_on_its_own_rows_top_down() {
         "100",
         "--bands",
         &n.to_string(),
+        // 140 rows / 20 = 7 bands, one per thread: the compositor, not the
+        // default split, is under test here.
+        "--band-rows",
+        "20",
         "--png",
         png.to_str().unwrap(),
         "-e",
@@ -265,6 +269,8 @@ fn band_names_are_defined_in_userdict() {
         "100x200",
         "--bands",
         "2",
+        "--band-rows",
+        "100",
         "--png",
         common::scratch_dir("bands-names")
             .join("n.png")
@@ -297,6 +303,8 @@ fn an_error_still_writes_the_stitched_partial_page_and_fails() {
         "80x80",
         "--bands",
         "3",
+        "--band-rows",
+        "27",
         "--png",
         banded.to_str().unwrap(),
         file,
@@ -372,6 +380,14 @@ fn refuses_what_it_cannot_honour() {
             vec!["--bands", "9", "--page", "8x8", "--png", png, "-e", "0"],
             "pixel rows",
         ),
+        (
+            vec!["--band-rows", "4", "--png", png, "-e", "0"],
+            "--band-rows needs --bands",
+        ),
+        (
+            vec!["--bands", "2", "--band-rows", "0", "--png", png, "-e", "0"],
+            "invalid --band-rows",
+        ),
     ] {
         let (ok, _, e) = pscat(&args);
         assert!(!ok, "{args:?} must fail");
@@ -437,4 +453,117 @@ fn read_roots_bind_every_band() {
         &prog,
     ]);
     assert!(ok, "unconfined, the read works: {e}");
+}
+
+/// Many more bands than threads (#844): the work queue hands out 140
+/// one-row bands to 2 threads, more than `--bands` itself allows (64), and
+/// every row still lands where it belongs.
+#[test]
+fn a_queue_of_many_small_bands_lands_every_row() {
+    let png = common::scratch_dir("bands-queue").join("q.png");
+    let (ok, _, e) = pscat(&[
+        "--page",
+        "40x101",
+        "--dpi",
+        "100",
+        "--bands",
+        "2",
+        "--band-rows",
+        "1",
+        "--png",
+        png.to_str().unwrap(),
+        "-e",
+        "BandCount 140 ne { stop } if BandIndex 255 div setgray clippath fill",
+    ]);
+    assert!(ok, "{e}");
+    let pix = Pixmap::load_png(&png).expect("png");
+    assert_eq!(pix.height(), 140);
+    for y in 0..pix.height() {
+        let px = pix.pixel(0, y).expect("pixel");
+        assert_eq!(u32::from(px.red()), y, "row {y} is band {y}'s");
+    }
+}
+
+/// The default split (#844) cuts the page into more bands than threads,
+/// and the band names say so; one thread gets one band.
+#[test]
+fn band_names_describe_the_queued_band() {
+    let png = common::scratch_dir("bands-default").join("d.png");
+    let names = |threads: &str| {
+        let (ok, out, e) = pscat(&[
+            "--page",
+            "100x200",
+            "--bands",
+            threads,
+            "--png",
+            png.to_str().unwrap(),
+            "-e",
+            "BandIndex = BandCount = BandBBox ==",
+        ]);
+        assert!(ok, "{e}");
+        out
+    };
+    // 200 rows, 1 thread: one band, the whole page.
+    assert!(
+        names("1").starts_with("0\n1\n[0 0 100 200]"),
+        "{}",
+        names("1")
+    );
+    // 200 rows, 3 threads: 6 bands, the top one 33 rows tall.
+    let out = names("3");
+    assert!(out.starts_with("0\n6\n[0 167 100 200]"), "{out}");
+}
+
+#[test]
+fn explicit_band_rows_match_byte_for_byte() {
+    let dir = common::scratch_dir("bands-rows");
+    let file = write_source(&dir, "fbm.ps", FBM_AWARE);
+    let file = file.to_str().expect("utf-8 path");
+    let page = ["--page", "280x210", "--dpi", "100"];
+    let render = |out: &Path, more: &[&str]| {
+        let out = out.to_str().expect("utf-8 path");
+        let mut args = page.to_vec();
+        args.extend(more);
+        args.extend(["--png", out, file]);
+        let (ok, _, e) = pscat(&args);
+        assert!(ok, "{more:?}: {e}");
+        std::fs::read(out).expect("png")
+    };
+    let want = render(&dir.join("plain.png"), &[]);
+    for rows in ["1", "5", "37"] {
+        let got = render(
+            &dir.join(format!("rows{rows}.png")),
+            &["--bands", "3", "--band-rows", rows],
+        );
+        assert!(
+            got == want,
+            "--band-rows {rows} differs from the plain render"
+        );
+    }
+}
+
+/// `--max-memory` is one budget for the whole banded render: a program
+/// that fits it plainly fits it banded, and one that doesn't is stopped.
+#[test]
+fn max_memory_is_one_budget_for_all_bands() {
+    let png = common::scratch_dir("bands-mem").join("m.png");
+    let run = |prog: &str| {
+        pscat(&[
+            "--page",
+            "200x200",
+            "--max-memory",
+            "40",
+            "--bands",
+            "4",
+            "--png",
+            png.to_str().unwrap(),
+            "-e",
+            prog,
+        ])
+    };
+    let (ok, _, e) = run("/a 100000 array def 1 1 10 { pop 10000 string pop } for");
+    assert!(ok, "a small program fits: {e}");
+    let (ok, _, e) = run("/keep 100000 array def 0 1 99999 { keep exch 1000 array put } for");
+    assert!(!ok, "a big one is stopped");
+    assert!(e.contains("memory"), "{e}");
 }

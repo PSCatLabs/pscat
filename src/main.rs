@@ -7,8 +7,9 @@ use pscat::spool::Watcher;
 use pscat::window::{WindowOptions, run_interactive, run_spool_with_limits, run_windowed};
 use pscat::{Interp, Limits, gfx};
 
-// Counts live heap bytes so `--max-memory` can be enforced (issue #604). One
-// relaxed atomic add or subtract per allocation or free.
+// Counts live heap bytes so `--max-memory` can be enforced (issue #604). A
+// thread-local add per allocation or free, folded into one shared count
+// every 64 KiB (#844).
 #[global_allocator]
 static ALLOC: pscat::TrackingAllocator = pscat::TrackingAllocator;
 
@@ -108,9 +109,12 @@ struct Options {
     /// killed leaves no render running behind it. The parent names itself
     /// because it can die before this process first looks.
     exit_with_parent: Option<u32>,
-    /// `--bands N` (issue #736): render N horizontal bands on N threads
-    /// and stitch them into one PNG (`bands.rs`).
+    /// `--bands N` (issue #736): render the PNG on N threads, as horizontal
+    /// bands taken from a work queue (#844), and stitch them (`bands.rs`).
     bands: Option<u32>,
+    /// `--band-rows R` (issue #844): the height of each queued band in
+    /// device rows, instead of `bands.rs`'s default split.
+    band_rows: Option<u32>,
     /// `--profile` (issue #737): a headless run reports, on stderr, each
     /// named procedure's call count and inclusive and exclusive time.
     profile: bool,
@@ -165,6 +169,7 @@ impl Options {
             progress: false,
             exit_with_parent: None,
             bands: None,
+            band_rows: None,
             profile: false,
             profile_top: None,
             profile_json: false,
@@ -332,8 +337,12 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    if let Some(count) = options.bands {
-        return bands::run(&options, count);
+    if let Some(threads) = options.bands {
+        return bands::run(&options, threads);
+    }
+    if options.band_rows.is_some() {
+        eprintln!("pscat: --band-rows needs --bands");
+        return ExitCode::FAILURE;
     }
 
     if options.sweep_seed.is_some() || options.sweep_param.is_some() {
@@ -1725,6 +1734,10 @@ fn parse_args() -> Result<Options, String> {
                 let n = args.next().ok_or("missing value after --bands")?;
                 options.bands = Some(bands::parse_count(&n)?);
             }
+            "--band-rows" => {
+                let n = args.next().ok_or("missing value after --band-rows")?;
+                options.band_rows = Some(bands::parse_rows(&n)?);
+            }
             "--read-root" => {
                 let dir = args.next().ok_or("missing directory after --read-root")?;
                 options.read_roots.get_or_insert_with(Vec::new).push(dir);
@@ -1913,13 +1926,18 @@ fn print_usage() {
     println!("                      than N bytes to files: N is bytes or takes a k, m or g");
     println!("                      suffix (1g = 1 GiB, the default); 0 = no limit. The");
     println!("                      write raises `limitcheck`, which `stopped` can catch");
-    println!("      --bands N       render the PNG as N horizontal bands on N threads and");
-    println!("                      stitch them (1..64; PNG only). Each band runs the whole");
-    println!("                      program with /BandIndex, /BandCount and /BandBBox defined,");
-    println!("                      so it can skip work outside its rows; the result is");
-    println!("                      identical to a plain --png render unless the program");
-    println!("                      reads the clock. Steps and time limits");
-    println!("                      apply per band, --max-memory to all bands together");
+    println!("      --bands N       render the PNG on N threads (1..64; PNG only). The page");
+    println!("                      is cut into horizontal bands, by default 2 per thread and");
+    println!("                      none under 8 rows, that the threads take from a queue,");
+    println!("                      then stitched. Each band runs the whole program with");
+    println!("                      /BandIndex, /BandCount and /BandBBox (that band's) defined,");
+    println!("                      so a program that reads them skips work outside its rows;");
+    println!("                      one that doesn't pays for the whole program per band. The");
+    println!("                      result is identical to a plain --png render unless the");
+    println!("                      program reads the clock. Steps and time limits apply per");
+    println!("                      band, --max-memory to all bands together");
+    println!("      --band-rows R   with --bands, cut the page into bands about R device rows");
+    println!("                      tall instead (ceil(height/R) bands of equal height)");
     println!("      --read-root DIR let the program read files only inside DIR (repeatable):");
     println!("                      `(f) (r) file`, run, readreals, filenameforall. Reads are");
     println!("                      open by default; with this, paths outside, `..` and");

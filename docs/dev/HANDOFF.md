@@ -1240,7 +1240,14 @@ renders eight examples in both and compares block-downsampled output).
   `image.rs`). Never add a PostScript-visible clip or a tiny-skia mask for it. A
   new shortcut (e.g. culling fills whose bbox misses the band) needs a provably
   conservative bound and a run of `tests/bands.rs`. See
-  `notes/736-bands-parallel-render.md`.
+  `notes/736-bands-parallel-render.md`. Since #844 bands are queued work units,
+  not threads: `bands::plan` cuts K bands (default 2 per thread, min 8 rows;
+  `--band-rows`) and the N threads pull them from an atomic counter, so the
+  band names describe the queued band. `--max-memory` uses one shared base
+  (`MemoryBase`), which replaced #736's two start gates. The tracking
+  allocator batches its count per thread (`memtrack.rs`, 64 KiB): a shared
+  atomic per allocation cost band threads ~2.8x CPU. Don't put a per-allocation
+  shared atomic back. See `notes/844-bands-work-queue.md`.
 - **`--profile` (#737).** Per-procedure call counts and inclusive/exclusive time
   on stderr (`src/profile.rs`, a `Profiler` on `Interp`). `execute_resolved` takes
   the name a body was reached through (`via`, `NO_NAME` for `exec`/`if`) and, with

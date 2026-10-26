@@ -1,34 +1,45 @@
-//! `pscat --bands N` (issue #736): render one PNG as N horizontal bands on
-//! N threads, then stitch the bands together.
+//! `pscat --bands N` (issues #736, #844): render one PNG on N threads as
+//! horizontal bands, then stitch the bands together.
 //!
 //! Each band is a separate, complete run of the program in its own
-//! [`Interp`] on its own thread. Nothing PostScript-visible is shared: the
-//! name interner is thread-local, and the process-wide state (font catalog,
-//! resource roots, font packs) is behind `OnceLock`/`RwLock`. Threads are
-//! cheaper than spawning N copies of pscat and need no temporary files.
+//! [`Interp`]. Nothing PostScript-visible is shared: the name interner is
+//! thread-local, and the process-wide state (font catalog, resource roots,
+//! font packs) is behind `OnceLock`/`RwLock`. Threads are cheaper than
+//! spawning copies of pscat and need no temporary files.
+//!
+//! The bands are work, not threads (#844). The page is cut into
+//! [`plan`]'s count of equal-height bands (by default two per thread, none
+//! under eight rows; `--band-rows R` picks the height), and the N worker
+//! threads take them from a shared queue, top band first, until none are
+//! left. A scene whose cost is uneven down the page (a cheap sky over
+//! expensive terrain) no longer waits on the one thread that drew the
+//! expensive strip, and a slow efficiency core holds up less of the page.
 //!
 //! Before the program runs, userdict holds `/BandIndex` (0 is the top band),
 //! `/BandCount` and `/BandBBox [llx lly urx ury]`, the band's area in default
-//! user space. A program that knows about bands can skip work outside its
-//! box. One that doesn't still renders correctly: every band paints the
-//! whole page, pscat keeps only the band's own device rows, and image
-//! rasterization (`image`, `colorimage`, `imagemask`) skips the other rows.
-//! The rows are whole device pixels and every band's pixels inside them are
-//! the ones a single run paints, so the stitched PNG is byte-for-byte the
-//! single-run PNG, anti-aliased edges across the seams included.
+//! user space: the queued band's, not the thread's. A program that knows
+//! about bands can skip work outside its box. One that doesn't still renders
+//! correctly: every band paints the whole page, pscat keeps only the band's
+//! own device rows, and image rasterization (`image`, `colorimage`,
+//! `imagemask`) skips the other rows. But it then pays for the whole program
+//! once per band, so `--bands` is for programs that read the names. The rows
+//! are whole device pixels and every band's pixels inside them are the ones
+//! a single run paints, so the stitched PNG is byte-for-byte the single-run
+//! PNG, anti-aliased edges across the seams included.
 //!
-//! Band `i` of `N` on a canvas `H` pixels tall owns rows
-//! `floor(i*H/N) .. floor((i+1)*H/N)`.
+//! Band `i` of `K` on a canvas `H` pixels tall owns rows
+//! `floor(i*H/K) .. floor((i+1)*H/K)`.
 //!
 //! Limits: `--max-steps` and `--max-time` apply to each band on its own (an
 //! unaware program takes as many steps in every band as in a single run, so
-//! the same limit fits). `--max-memory` reads the process heap, so it caps
-//! all bands together; every band's canvas is allocated before any band
-//! starts counting.
+//! the same limit fits). `--max-memory` is one budget for the whole render:
+//! every band counts from one heap level, taken before the workers start,
+//! that leaves out one fresh interpreter per worker ([`MemoryBase`]).
 
 use std::io::Write;
 use std::process::ExitCode;
-use std::sync::{Condvar, Mutex};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering::Relaxed};
 
 use pscat::Interp;
 use tiny_skia::Pixmap;
@@ -93,74 +104,60 @@ fn check_options(options: &Options) -> Result<(), String> {
     Ok(())
 }
 
-/// What one band hands back. Strings, not `PsError`s: those hold `Rc`s and
-/// cannot leave the band's thread.
+/// What one band hands back: its own rows of every page it produced, and
+/// its error report. Strings, not `PsError`s: those hold `Rc`s and cannot
+/// leave the band's thread.
 struct BandOutput {
-    pages: Vec<Pixmap>,
+    /// Per page, the band's device rows (RGBA, premultiplied, as the
+    /// page's own bytes).
+    rows: Vec<Vec<u8>>,
     /// The error report (and operand stack under `--pstack-on-error`) if
     /// the run failed.
     error: Option<String>,
 }
 
-/// Holds every band at a line until all N reach it. `run_band` passes two:
-/// one once every canvas exists, so `--max-memory`'s base (taken when a band
-/// sets its limits) counts all of them, and one once every band has its
-/// base, so no program's allocations escape the shared budget. A `Barrier` would leave the others waiting forever if one
-/// thread failed to spawn; `abort` releases them instead.
-struct StartGate {
-    state: Mutex<(u32, bool)>,
-    ready: Condvar,
-    count: u32,
+/// How a render is cut up: `count` bands on a canvas `height` rows tall,
+/// run by `threads` workers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Plan {
+    pub threads: u32,
+    pub count: u32,
+    pub height: u32,
 }
 
-impl StartGate {
-    fn new(count: u32) -> Self {
-        StartGate {
-            state: Mutex::new((0, false)),
-            ready: Condvar::new(),
-            count,
-        }
+/// The split `--bands threads` uses when `--band-rows` doesn't choose one
+/// (`notes/844-bands-work-queue.md` has the measurements): `PER_THREAD`
+/// bands for each thread, none shorter than `MIN_ROWS` rows, and one band
+/// for one thread (there is nothing to balance).
+pub fn plan(threads: u32, height: u32, band_rows: Option<u32>) -> Plan {
+    let count = match band_rows {
+        Some(r) => height.div_ceil(r.max(1)),
+        None if threads <= 1 => 1,
+        None => (threads * PER_THREAD).min(height / MIN_ROWS).max(threads),
     }
-
-    /// Arrive and wait for the others. False when the render was abandoned
-    /// before all of them arrived; an abort after that changes nothing.
-    fn arrive(&self) -> bool {
-        let Ok(mut state) = self.state.lock() else {
-            return false;
-        };
-        state.0 += 1;
-        self.ready.notify_all();
-        while state.0 < self.count && !state.1 {
-            state = match self.ready.wait(state) {
-                Ok(s) => s,
-                Err(_) => return false,
-            };
-        }
-        state.0 >= self.count
-    }
-
-    fn abort(&self) {
-        if let Ok(mut state) = self.state.lock() {
-            state.1 = true;
-        }
-        self.ready.notify_all();
+    .clamp(1, height.max(1));
+    Plan {
+        threads: threads.min(count).max(1),
+        count,
+        height,
     }
 }
 
-/// Aborts both gates when dropped; see `run_band`.
-struct AbortOnDrop<'a>(&'a [StartGate; 2]);
+/// Bands per thread in the default split.
+const PER_THREAD: u32 = 2;
+/// The shortest band the default split makes, in device rows.
+const MIN_ROWS: u32 = 8;
 
-impl Drop for AbortOnDrop<'_> {
-    fn drop(&mut self) {
-        self.0.iter().for_each(StartGate::abort);
-    }
+/// `--band-rows R`'s value.
+pub fn parse_rows(n: &str) -> Result<u32, String> {
+    n.parse()
+        .ok()
+        .filter(|r| *r >= 1)
+        .ok_or_else(|| format!("invalid --band-rows value: {n} (expected 1 or more rows)"))
 }
-
-/// Said by a band released from a gate because another band failed.
-const ABANDONED: &str = "abandoned";
 
 /// `pscat --bands N`: check the options, run the bands, stitch and write.
-pub fn run(options: &Options, count: u32) -> ExitCode {
+pub fn run(options: &Options, threads: u32) -> ExitCode {
     if let Err(msg) = check_options(options) {
         eprintln!("pscat: {msg}");
         return ExitCode::FAILURE;
@@ -179,7 +176,11 @@ pub fn run(options: &Options, count: u32) -> ExitCode {
     let scale = options.dpi / 72.0;
     // The canvas size, from a probe rather than a copy of
     // `with_page_scaled`'s formula (as `run_sweep` does). Checked here, on
-    // the main thread, so no band can fail to build its canvas.
+    // the main thread, so no band can fail to build its canvas. The heap the
+    // probe takes is what one band's fresh interpreter costs: the memory
+    // budget leaves that much out for every worker, as a plain render's
+    // budget leaves out its own interpreter.
+    let before = pscat::memtrack::live_bytes();
     let Some(probe) = Interp::with_page_scaled(options.page.0, options.page.1, scale) else {
         eprintln!(
             "pscat: unusable page size {}x{}",
@@ -187,14 +188,16 @@ pub fn run(options: &Options, count: u32) -> ExitCode {
         );
         return ExitCode::FAILURE;
     };
+    let per_band = pscat::memtrack::live_bytes().saturating_sub(before);
     let (width, height) = (probe.gfx().pixmap.width(), probe.gfx().pixmap.height());
     drop(probe);
-    if count > height {
-        eprintln!("pscat: --bands {count} is more bands than the page has pixel rows ({height})");
+    if options.band_rows.is_none() && threads > height {
+        eprintln!("pscat: --bands {threads} is more bands than the page has pixel rows ({height})");
         return ExitCode::FAILURE;
     }
+    let plan = plan(threads, height, options.band_rows);
 
-    let outputs = match render(options, &source, count, height) {
+    let outputs = match render(options, &source, plan, width, per_band) {
         Ok(o) => o,
         Err(msg) => {
             eprintln!("pscat: {msg}");
@@ -207,7 +210,7 @@ pub fn run(options: &Options, count: u32) -> ExitCode {
         .enumerate()
         .find_map(|(i, o)| o.error.as_ref().map(|e| (i, e)))
     {
-        eprintln!("pscat: band {}/{count} failed:", i + 1);
+        eprintln!("pscat: band {}/{} failed:", i + 1, plan.count);
         eprintln!("{report}");
         failed = true;
     }
@@ -230,92 +233,179 @@ pub fn run(options: &Options, count: u32) -> ExitCode {
     }
 }
 
-/// Run the N bands, one thread each, and collect what they produced.
+/// What the workers share: the next band to take, and a flag that stops
+/// them taking more after an internal failure.
+struct Queue {
+    next: AtomicU32,
+    stop: AtomicBool,
+    count: u32,
+}
+
+impl Queue {
+    /// The next band nobody has taken, if any are left.
+    fn take(&self) -> Option<u32> {
+        if self.stop.load(Relaxed) {
+            return None;
+        }
+        let i = self.next.fetch_add(1, Relaxed);
+        (i < self.count).then_some(i)
+    }
+
+    /// True once every band has been handed out: a worker that has
+    /// finished its band now will take no other.
+    fn drained(&self) -> bool {
+        self.stop.load(Relaxed) || self.next.load(Relaxed) >= self.count
+    }
+}
+
+/// The process heap level that `--max-memory` is counted from, shared by
+/// every band: what was live before the workers started, plus one fresh
+/// interpreter per worker.
+#[derive(Clone, Copy)]
+struct MemoryBase(usize);
+
+impl MemoryBase {
+    /// `limits` rebased for an interpreter whose `set_limits` reads the heap
+    /// now: its own base is the heap now, so its budget is the shared
+    /// budget less what the process has grown past the shared base since
+    /// (or plus what is still unused of the workers' allowance).
+    fn rebase(self, limits: pscat::Limits) -> pscat::Limits {
+        let Some(max) = limits.max_memory else {
+            return limits;
+        };
+        let now = pscat::memtrack::live_bytes();
+        let max = if now >= self.0 {
+            max.saturating_sub(now - self.0)
+        } else {
+            max.saturating_add(self.0 - now)
+        };
+        let mut limits = limits;
+        limits.max_memory = Some(max);
+        limits
+    }
+}
+
+/// Run the plan's bands on its worker threads and collect what each band
+/// produced, in band order.
 fn render(
     options: &Options,
     source: &[u8],
-    count: u32,
-    height: u32,
+    plan: Plan,
+    width: u32,
+    per_band: usize,
 ) -> Result<Vec<BandOutput>, String> {
-    let gates = [StartGate::new(count), StartGate::new(count)];
+    let queue = Queue {
+        next: AtomicU32::new(0),
+        stop: AtomicBool::new(false),
+        count: plan.count,
+    };
+    let base = MemoryBase(
+        pscat::memtrack::live_bytes()
+            .saturating_add(per_band.saturating_mul(plan.threads as usize)),
+    );
+    let slots: Vec<Mutex<Option<BandOutput>>> = (0..plan.count).map(|_| Mutex::new(None)).collect();
+    let failure: Mutex<Option<String>> = Mutex::new(None);
+    let fail = |msg: String| {
+        queue.stop.store(true, Relaxed);
+        if let Ok(mut f) = failure.lock() {
+            f.get_or_insert(msg);
+        }
+    };
     std::thread::scope(|scope| {
-        let mut handles = Vec::with_capacity(count as usize);
-        for index in 0..count {
-            let gates = &gates;
+        for worker in 0..plan.threads {
+            let (queue, slots, fail) = (&queue, &slots, &fail);
             let spawned = std::thread::Builder::new()
-                .name(format!("band-{index}"))
+                .name(format!("band-worker-{worker}"))
                 .stack_size(BAND_STACK)
                 .spawn_scoped(scope, move || {
-                    run_band(options, source, index, count, height, gates)
+                    while let Some(index) = queue.take() {
+                        let band = Band { index, plan, width };
+                        // A panic in one band is that band's failure; the
+                        // worker stops, and the others stop taking bands.
+                        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            run_band(options, source, band, base, queue)
+                        }));
+                        match result {
+                            Ok(Ok(out)) => {
+                                if let Ok(mut slot) = slots[index as usize].lock() {
+                                    *slot = Some(out);
+                                }
+                            }
+                            Ok(Err(msg)) => {
+                                fail(format!("band {}/{}: {msg}", index + 1, plan.count));
+                                break;
+                            }
+                            Err(_) => {
+                                fail(format!("band {}/{} crashed", index + 1, plan.count));
+                                break;
+                            }
+                        }
+                    }
+                    // Count everything this worker did before it exits.
+                    pscat::memtrack::fold_thread();
                 });
-            match spawned {
-                Ok(h) => handles.push(h),
-                Err(e) => {
-                    gates.iter().for_each(StartGate::abort);
-                    return Err(format!("cannot start band thread: {e}"));
+            if let Err(e) = spawned {
+                // The workers already running finish the queue on their
+                // own; a render with no worker at all has failed.
+                if worker == 0 {
+                    fail(format!("cannot start a band thread: {e}"));
                 }
+                break;
             }
         }
-        // Join every band before looking at any result: a handle left
-        // unjoined after a panic would make `scope` itself panic.
-        let joined: Vec<_> = handles.into_iter().map(|h| h.join()).collect();
-        // Report the band that failed, not one it left abandoned.
-        let failure = |(i, r): (usize, &std::thread::Result<Result<BandOutput, String>>)| match r {
-            Ok(Ok(_)) => None,
-            Ok(Err(msg)) if msg == ABANDONED => None,
-            Ok(Err(msg)) => Some(format!("band {}/{count}: {msg}", i + 1)),
-            Err(_) => Some(format!("band {}/{count} crashed", i + 1)),
-        };
-        if let Some(msg) = joined.iter().enumerate().find_map(failure) {
-            return Err(msg);
-        }
-        joined
-            .into_iter()
-            .map(|r| match r {
-                Ok(Ok(out)) => Ok(out),
-                _ => Err("a band was abandoned".to_string()),
-            })
-            .collect()
-    })
+    });
+    if let Some(msg) = failure.into_inner().ok().flatten() {
+        return Err(msg);
+    }
+    slots
+        .into_iter()
+        .enumerate()
+        .map(|(i, slot)| {
+            slot.into_inner()
+                .ok()
+                .flatten()
+                .ok_or_else(|| format!("band {}/{} produced nothing", i + 1, plan.count))
+        })
+        .collect()
+}
+
+/// One band of a plan.
+#[derive(Clone, Copy)]
+struct Band {
+    index: u32,
+    plan: Plan,
+    width: u32,
 }
 
 /// One band: a full run of the program with the band names defined, its
-/// pages handed back as pixmaps.
+/// own rows of every page handed back.
 fn run_band(
     options: &Options,
     source: &[u8],
-    index: u32,
-    count: u32,
-    height: u32,
-    gates: &[StartGate; 2],
+    band: Band,
+    base: MemoryBase,
+    queue: &Queue,
 ) -> Result<BandOutput, String> {
-    // However this band ends (an error, a panic), release the others
-    // still waiting at a gate it never reached.
-    let _release = AbortOnDrop(gates);
+    let Band { index, plan, width } = band;
     let scale = options.dpi / 72.0;
-    let interp = Interp::with_page_scaled(options.page.0, options.page.1, scale);
-    // Arrive whether or not the canvas was built, so no band is left waiting.
-    if !gates[0].arrive() {
-        return Err(ABANDONED.to_string());
-    }
-    let mut interp = interp.ok_or("unusable page size")?;
-    // The process exits right after the stitch: leave the dictionaries to
-    // it, as the single-run path does (`main`).
-    interp.leave_dicts_to_process_exit();
+    let mut interp = Interp::with_page_scaled(options.page.0, options.page.1, scale)
+        .ok_or("unusable page size")?;
     if options.transparent {
         interp.gfx_mut().set_transparent_background();
     }
-    let (top, bottom) = rows(index, count, height);
+    let height = plan.height;
+    let (top, bottom) = rows(index, plan.count, height);
     interp.gfx_mut().set_band_rows(top, bottom);
     // Only the top band's output reaches stdout; the others' is kept in a
     // bounded buffer and dropped, so an unaware program prints once.
     if index > 0 {
         interp.capture_stdout();
     }
-    let width_pt = interp.gfx().pixmap.width() as f32 / scale;
+    let width_pt = width as f32 / scale;
     let user_y = |row: u32| (height - row) as f32 / scale;
     let preamble = format!(
-        "/BandIndex {index} def /BandCount {count} def /BandBBox [0 {} {} {}] def",
+        "/BandIndex {index} def /BandCount {} def /BandBBox [0 {} {} {}] def",
+        plan.count,
         user_y(bottom),
         width_pt,
         user_y(top)
@@ -324,10 +414,10 @@ fn run_band(
         .run_source(preamble.as_bytes())
         .map_err(|e| format!("internal error defining the band names: {e}"))?;
     // Limits after the band names, so they bound the program alone, as in a
-    // plain render; after the first gate, so the heap base counts every
-    // band's canvas.
+    // plain render. Memory is counted from the base all bands share, so the
+    // bands running at once stay within one budget.
     interp
-        .set_limits(options.limits)
+        .set_limits(base.rebase(options.limits))
         .map_err(|e| format!("limits: {e}"))?;
     // `--read-root`/`--confine-reads` (#763) bind every band, as they bind a
     // plain render.
@@ -335,12 +425,6 @@ fn run_band(
         interp
             .set_read_roots(dirs)
             .map_err(|e| format!("--read-root: {e}"))?;
-    }
-    // No band runs the program until every band has its base: a band that
-    // started early would put its allocations under a later band's base,
-    // out of every check.
-    if !gates[1].arrive() {
-        return Err(ABANDONED.to_string());
     }
     let error = match interp.run_source(source) {
         Ok(()) => None,
@@ -354,31 +438,48 @@ fn run_band(
         }
     };
     let _ = std::io::stdout().flush();
-    // The pages `--png` writes, chosen as `finish_headless` chooses them.
-    let mut pages: Vec<Pixmap> = interp.gfx().pages().to_vec();
-    if pages.is_empty() || interp.gfx().has_trailing_art() {
-        // Moved out rather than cloned: the run is over, and a band holds
-        // a whole canvas.
-        let empty = Pixmap::new(1, 1).ok_or("cannot allocate a pixmap")?;
-        pages.push(std::mem::replace(&mut interp.gfx_mut().pixmap, empty));
+    // The pages `--png` writes, chosen as `finish_headless` chooses them;
+    // only this band's rows of each are kept.
+    let span = top as usize * width as usize * 4..bottom as usize * width as usize * 4;
+    let take = |page: &Pixmap| -> Result<Vec<u8>, String> {
+        page.data()
+            .get(span.clone())
+            .map(<[u8]>::to_vec)
+            .ok_or_else(|| "a band's page has the wrong size".to_string())
+    };
+    let mut rows = interp
+        .gfx()
+        .pages()
+        .iter()
+        .map(take)
+        .collect::<Result<Vec<_>, _>>()?;
+    if rows.is_empty() || interp.gfx().has_trailing_art() {
+        rows.push(take(&interp.gfx().pixmap)?);
     }
-    Ok(BandOutput { pages, error })
+    // The last band a worker runs leaves its dictionaries to the process
+    // exit, as a plain render does (`main`); earlier ones free theirs, so
+    // a long queue doesn't pile up dead interpreters.
+    if queue.drained() {
+        interp.leave_dicts_to_process_exit();
+    }
+    Ok(BandOutput { rows, error })
 }
 
-/// Page `k` of the result is band `i`'s page `k` in band `i`'s rows.
+/// Page `k` of the result is band `i`'s rows of its page `k`, in band
+/// `i`'s rows.
 fn stitch(outputs: &[BandOutput], width: u32, height: u32) -> Result<Vec<Pixmap>, String> {
     let count = outputs.len() as u32;
-    let pages = outputs.first().map_or(0, |o| o.pages.len());
+    let pages = outputs.first().map_or(0, |o| o.rows.len());
     if let Some((i, o)) = outputs
         .iter()
         .enumerate()
-        .find(|(_, o)| o.pages.len() != pages)
+        .find(|(_, o)| o.rows.len() != pages)
     {
         return Err(format!(
             "band {}/{count} produced {} page(s) but band 1 produced {pages}; \
              a banded program must emit the same pages in every band",
             i + 1,
-            o.pages.len()
+            o.rows.len()
         ));
     }
     let row_bytes = width as usize * 4;
@@ -389,11 +490,11 @@ fn stitch(outputs: &[BandOutput], width: u32, height: u32) -> Result<Vec<Pixmap>
             for (i, out) in outputs.iter().enumerate() {
                 let (top, bottom) = rows(i as u32, count, height);
                 let span = top as usize * row_bytes..bottom as usize * row_bytes;
-                let band = out.pages[k].data();
-                if band.len() != data.len() {
+                let band = &out.rows[k];
+                if band.len() != span.len() {
                     return Err("a band's page has the wrong size".to_string());
                 }
-                data[span.clone()].copy_from_slice(&band[span]);
+                data[span].copy_from_slice(band);
             }
             Ok(page)
         })
@@ -421,31 +522,22 @@ mod tests {
     }
 
     #[test]
-    fn a_gate_releases_everyone_or_aborts_the_waiters() {
-        let gate = StartGate::new(3);
-        let all = std::thread::scope(|s| {
-            let hs: Vec<_> = (0..3).map(|_| s.spawn(|| gate.arrive())).collect();
-            hs.into_iter()
-                .map(|h| h.join().unwrap())
-                .collect::<Vec<_>>()
-        });
-        assert_eq!(all, [true; 3]);
-        gate.abort(); // after everyone arrived: changes nothing
-        assert!(gate.state.lock().unwrap().0 >= 3);
-
-        let gate = StartGate::new(3);
-        let waited = std::thread::scope(|s| {
-            let h = s.spawn(|| gate.arrive());
-            while gate.state.lock().unwrap().0 == 0 {
-                std::thread::yield_now();
-            }
-            gate.abort();
-            h.join().unwrap()
-        });
-        assert!(
-            !waited,
-            "a waiter is released, told the render was abandoned"
-        );
+    fn the_default_plan_queues_two_bands_a_thread() {
+        let p = |threads, height, rows| {
+            let p = plan(threads, height, rows);
+            (p.threads, p.count)
+        };
+        assert_eq!(p(1, 200, None), (1, 1), "one thread, nothing to balance");
+        assert_eq!(p(10, 200, None), (10, 20));
+        assert_eq!(p(4, 792, None), (4, 8));
+        // No band shorter than MIN_ROWS, but at least one per thread.
+        assert_eq!(p(10, 100, None), (10, 12));
+        assert_eq!(p(10, 40, None), (10, 10));
+        // --band-rows: ceil(height / rows) bands, never more threads.
+        assert_eq!(p(4, 200, Some(1)), (4, 200));
+        assert_eq!(p(4, 200, Some(60)), (4, 4));
+        assert_eq!(p(4, 200, Some(500)), (1, 1));
+        assert_eq!(p(1, 200, Some(10)), (1, 20));
     }
 
     #[test]
@@ -454,5 +546,7 @@ mod tests {
         assert!(parse_count("0").is_err());
         assert!(parse_count("65").is_err());
         assert!(parse_count("two").is_err());
+        assert_eq!(parse_rows("16"), Ok(16));
+        assert!(parse_rows("0").is_err());
     }
 }
