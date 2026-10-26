@@ -64,14 +64,16 @@ gives 161 / 140 / 92, matching the after column.
 ## Scope across the corpus
 
 Two-binary `identity_check.sh` over every tracked `examples/`, `gallery/` and
-`selftest/drivers/` file (154 pages), with the issue's ramp as the control:
-136 pages differ and 18 are identical. The 18 identical pages are all
-stroke-only pieces: cathedral_rose, hundred_lines, silk_waves, golden_spiral,
-handwriting, koch_snowflake, and the artkit, mathkit and strokeglyphs drivers.
+`selftest/drivers/` file (173 pages, re-measured after merging main on
+2026-10-26), with the issue's ramp as the control: 137 pages differ and 36 are
+identical. The identical pages are the stroke-only pieces (cathedral_rose,
+hundred_lines, silk_waves, golden_spiral, handwriting, koch_snowflake, and the
+artkit, mathkit and strokeglyphs drivers) and the 18 pages of the
+`selftest/drivers/image_*.ps` drivers, since images don't go through fills.
 
 Percentage of pixels that moved by more than 16 levels:
 
-- under 0.1% on 65 pages;
+- under 0.1% on 66 pages;
 - 0.1-1% on 61;
 - 1-3.4% on 10: lincoln_charcoal, paintkit trowel/broad/fan/wet-under
   demos, the drycrayon specimen and motion demo, crayon_drawing, the font
