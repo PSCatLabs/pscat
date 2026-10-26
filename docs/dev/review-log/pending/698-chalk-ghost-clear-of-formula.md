@@ -6,16 +6,16 @@
 
 | integral before | integral after |
 |---|---|
-| ![before](https://github.com/PSCatLabs/pscat/blob/256c3d49779b1827a5ea82410bc31e6f98d9e1ee/docs/dev/review-log/pending/698-chalk-ghost-clear-of-formula/integral-before.png?raw=true) | ![after](https://github.com/PSCatLabs/pscat/blob/256c3d49779b1827a5ea82410bc31e6f98d9e1ee/docs/dev/review-log/pending/698-chalk-ghost-clear-of-formula/integral-after.png?raw=true) |
+| ![before](https://github.com/PSCatLabs/pscat/blob/ad6d388a76c8a01df5536d7bb330bd1b396638d6/docs/dev/review-log/pending/698-chalk-ghost-clear-of-formula/integral-before.png?raw=true) | ![after](https://github.com/PSCatLabs/pscat/blob/ad6d388a76c8a01df5536d7bb330bd1b396638d6/docs/dev/review-log/pending/698-chalk-ghost-clear-of-formula/integral-after.png?raw=true) |
 
 | small align before | small align after |
 |---|---|
-| ![before](https://github.com/PSCatLabs/pscat/blob/256c3d49779b1827a5ea82410bc31e6f98d9e1ee/docs/dev/review-log/pending/698-chalk-ghost-clear-of-formula/align-small-before.png?raw=true) | ![after](https://github.com/PSCatLabs/pscat/blob/256c3d49779b1827a5ea82410bc31e6f98d9e1ee/docs/dev/review-log/pending/698-chalk-ghost-clear-of-formula/align-small-after.png?raw=true) |
+| ![before](https://github.com/PSCatLabs/pscat/blob/ad6d388a76c8a01df5536d7bb330bd1b396638d6/docs/dev/review-log/pending/698-chalk-ghost-clear-of-formula/align-small-before.png?raw=true) | ![after](https://github.com/PSCatLabs/pscat/blob/ad6d388a76c8a01df5536d7bb330bd1b396638d6/docs/dev/review-log/pending/698-chalk-ghost-clear-of-formula/align-small-after.png?raw=true) |
 
 | quadratic before | quadratic after |
 |---|---|
-| ![before](https://github.com/PSCatLabs/pscat/blob/256c3d49779b1827a5ea82410bc31e6f98d9e1ee/docs/dev/review-log/pending/698-chalk-ghost-clear-of-formula/quadratic-before.png?raw=true) | ![after](https://github.com/PSCatLabs/pscat/blob/256c3d49779b1827a5ea82410bc31e6f98d9e1ee/docs/dev/review-log/pending/698-chalk-ghost-clear-of-formula/quadratic-after.png?raw=true) |
+| ![before](https://github.com/PSCatLabs/pscat/blob/ad6d388a76c8a01df5536d7bb330bd1b396638d6/docs/dev/review-log/pending/698-chalk-ghost-clear-of-formula/quadratic-before.png?raw=true) | ![after](https://github.com/PSCatLabs/pscat/blob/ad6d388a76c8a01df5536d7bb330bd1b396638d6/docs/dev/review-log/pending/698-chalk-ghost-clear-of-formula/quadratic-after.png?raw=true) |
 
 The tightest case, the small 400 x 200 align, 20 seeds after the change:
 
-![sweep](https://github.com/PSCatLabs/pscat/blob/256c3d49779b1827a5ea82410bc31e6f98d9e1ee/docs/dev/review-log/pending/698-chalk-ghost-clear-of-formula/sweep-align-small-after.png?raw=true)
+![sweep](https://github.com/PSCatLabs/pscat/blob/ad6d388a76c8a01df5536d7bb330bd1b396638d6/docs/dev/review-log/pending/698-chalk-ghost-clear-of-formula/sweep-align-small-after.png?raw=true)
