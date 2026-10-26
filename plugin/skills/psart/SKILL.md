@@ -129,6 +129,24 @@ Also in the library, documented in each file's header and in
   /Lapidary, /Circuitry, /Stitchwork, /Confetti.
 - Text as geometry: `(word) true charpath` then fill/stroke/clip it, or
   walk it with `alongpath`.
+- Pair the built-in faces on purpose: a Palatino-Italic title over
+  Helvetica captions, a Bookman-Demi headline over Times-Roman body, and
+  Courier for data labels. The `extras` pack adds display faces on top.
+
+```postscript
+%!PS-Adobe-3.0
+/Palatino-Italic findfont 36 scalefont setfont
+72 600 moveto (Tide Tables) show
+/Helvetica findfont 9 scalefont setfont
+72 580 moveto (station, date, height) show
+/Bookman-Demi findfont 14 scalefont setfont
+72 540 moveto (Low water at dawn) show
+/Times-Roman findfont 11 scalefont setfont
+72 522 moveto (The bar uncovers for two hours before the turn.) show
+/Courier findfont 10 scalefont setfont
+72 480 moveto (06:12  0.4 m  |  12:48  2.1 m) show
+showpage
+```
 
 ## Composition habits that keep pieces good
 
