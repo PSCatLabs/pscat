@@ -574,6 +574,26 @@
    "technique": "The star field is a weight procedure (a Milky Way band times coherent `noise2`), the hill's stipple is scattered into the silhouette's own outline captured with `scpath`, the meadow is minimum-spaced grass anchors whose height and tone come from their own height on the page, and the fireflies are two passes over one seed: halos first, then cores, so every core lands inside its own halo."
   },
   {
+   "id": "basin_and_range",
+   "title": "Basin and Range",
+   "category": "generative",
+   "tags": [
+    "landscape"
+   ],
+   "libraries": [],
+   "featured": false,
+   "playground": true,
+   "issue": 755,
+   "added": "2026-10-25",
+   "source": "gallery/basin_and_range.ps",
+   "render": "gallery/renders/basin_and_range.png",
+   "page": "720x480",
+   "speed": 200,
+   "alt": "Basin and Range, a shaded-relief map of an invented land: blue seas and lakes, pale shores, green lowlands with faint contour lines, and brown and white mountain ranges lit from the north-west",
+   "blurb": "A shaded-relief map of a country that does not exist, every pixel computed from pscat's native noise.",
+   "technique": "One `colorimage` data procedure computes each row of the map. Heights are `fbm2` for the broad shape of land and sea, plus `ridged2` for the mountain crests, switched on by a slow second `fbm2` so the ranges form belts. Each height is looked up in a colour ramp (water, shore, lowland, upland, rock, snow), lit from the north-west by the slope to the neighbouring samples, and crossed by anti-aliased contour lines. `noiseseed` fixes the table, so the same seed draws the same map. The program reads `/BandBBox` when `pscat --bands N` defines it and computes only the rows its band shows: about 1.6 seconds plain, 0.6 with `--bands 4`, the same pixels either way."
+  },
+  {
    "id": "out_of_register",
    "title": "Out of Register",
    "category": "printmaking",
