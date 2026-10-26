@@ -646,7 +646,7 @@ pub const STACK_DUMP_LIMITS: DumpLimits = DumpLimits {
 
 /// What `repr()` uses: no size cap, but the depth cap that keeps a
 /// pathologically nested array from overflowing the Rust stack.
-pub const UNBOUNDED_LIMITS: DumpLimits = DumpLimits {
+pub(crate) const UNBOUNDED_LIMITS: DumpLimits = DumpLimits {
     max_depth: 32,
     max_elements: usize::MAX,
     max_string: usize::MAX,
@@ -666,14 +666,14 @@ pub const OPERATOR_LIMITS: DumpLimits = DumpLimits {
 
 /// Total bytes `pstack` and `stack` print across the whole stack (top
 /// first); items below the budget are elided with one `... truncated` line.
-/// Half of `STDOUT_CAPTURE_LIMIT`, so a captured run keeps the whole dump.
-pub const OPERATOR_STACK_BYTES: usize = 32 * 1024;
+/// Half of `STDOUT_CAPTURE_LIMIT`, so a captured run normally keeps the whole dump.
+pub(crate) const OPERATOR_STACK_BYTES: usize = 32 * 1024;
 
 /// Bytes of an offending name an error line prints.
-pub const ERROR_NAME_LIMIT: usize = 512;
+pub(crate) const ERROR_NAME_LIMIT: usize = 512;
 
 /// The elision marker every bounded print uses.
-pub const TRUNCATED: &str = "... truncated";
+pub(crate) const TRUNCATED: &str = "... truncated";
 
 /// The operand stack in `==` syntax, bottom to top, under `limits`.
 /// Elements are taken from the top down, so the newest operands survive a
@@ -701,7 +701,7 @@ pub fn stack_repr_bounded(stack: &[Object], limits: &DumpLimits) -> String {
 
 /// `text` cut at a char boundary to `max` bytes, then ` ... truncated`.
 /// The marker has no `; ` or ` ]%%`, so an error line stays parseable.
-pub fn cap_text(text: &str, max: usize) -> String {
+pub(crate) fn cap_text(text: &str, max: usize) -> String {
     let mut out = String::new();
     push_cut(&mut out, text, max);
     out
