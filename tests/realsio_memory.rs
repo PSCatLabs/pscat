@@ -11,6 +11,15 @@ static ALLOC: pscat::TrackingAllocator = pscat::TrackingAllocator;
 
 const MIB: usize = 1 << 20;
 
+/// The limit counts the whole process's heap, so these tests must not run
+/// side by side: one's big arrays would count against another's limit
+/// (a flake on CI's push-to-main run of #773). Each takes this lock first.
+static ONE_AT_A_TIME: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn serial() -> std::sync::MutexGuard<'static, ()> {
+    ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 fn limited(mib: usize, root: &std::path::Path) -> Interp {
     let mut it = Interp::new();
     it.set_write_roots(&[root]).unwrap();
@@ -21,6 +30,7 @@ fn limited(mib: usize, root: &std::path::Path) -> Interp {
 
 #[test]
 fn realsio_respects_the_memory_limit() {
+    let _one = serial();
     let root = common::scratch_dir("rr-mem");
     let f = root.join("m.bin");
     let p = format!("({})", f.to_str().unwrap().replace('\\', "\\\\"));
@@ -57,6 +67,7 @@ fn realsio_respects_the_memory_limit() {
 /// limits: the result is `check_alloc`ed before it is made.
 #[test]
 fn count_less_and_file_reads_respect_the_limits() {
+    let _one = serial();
     let root = common::scratch_dir("rr-mem-all");
     let f = root.join("m.bin");
     let p = format!("({})", f.to_str().unwrap().replace('\\', "\\\\"));
@@ -122,6 +133,7 @@ fn count_less_and_file_reads_respect_the_limits() {
 /// array, however the values are asked for.
 #[test]
 fn all_over_the_array_cap_is_limitcheck() {
+    let _one = serial();
     let root = common::scratch_dir("rr-cap");
     let f = root.join("c.bin");
     // One value over 16,777,216 binary32 values; zeros, and sparse on disk.
