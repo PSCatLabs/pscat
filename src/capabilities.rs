@@ -576,7 +576,7 @@ static ENTRIES: &[Entry] = &[
         "pscat extension. Loads reals written by writereals (/f64 default or /f32) as an array: (path) n from the start, (path) offset n or (path) offset /all from an element offset, (path) /all to the end, or file n|/all from an open input file's position (which moves past the values). rangecheck if the file is short; limitcheck over the 16M array cap. A path follows the read policy of (path) (r) file; no filesystem on wasm.",
         &[],
         SYSTEMDICT,
-        "(path) [offset] n|/all [/f32] readreals array",
+        "(path) [offset] n|/all [/f32] readreals array | file n|/all [/f32] readreals array",
         BUILTIN_FILE
     ),
     // --- Type 3 program faces (lib/fonts/, Stages 15 & 18) ---------

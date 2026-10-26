@@ -419,6 +419,7 @@ fn cli_appends_and_flushes_at_exit() {
 #[test]
 fn step_limits_stop_the_new_forms() {
     let (root, mut it) = setup("rrf-steps");
+    it.capture_stdout();
     let p = ps(&root.join("big.bin"));
     // 200k reals is 1.5 MiB: well over 100 steps (one per KiB).
     it.run_str(&format!(

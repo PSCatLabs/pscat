@@ -152,7 +152,7 @@ More on the less obvious ones:
   Both operators also take an open file. `array file writereals` writes at the
   file's position, so it works with `(%stdout) (w) file`, an `(a)` append file
   (two calls give two arrays back to back) and `setfileposition`, and it
-  counts against `--max-write-bytes`; it does not close the file, and a
+  counts a disk file's bytes against `--max-write-bytes`, as `writestring` does; it does not close the file, and a
   closed or input file is an `ioerror`. `file n readreals` (or `file /all
   readreals`) reads from an input file's position and leaves it just after
   the values, so a file can be read in pieces, `setfileposition` (in bytes)
