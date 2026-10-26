@@ -96,7 +96,7 @@ fn time_in_a_tail_call_belongs_to_the_caller_too() {
 }
 
 #[test]
-fn an_expensive_last_operator_is_the_procedure's_own_time() {
+fn an_expensive_last_operator_is_the_procedures_own_time() {
     // `for` is the last element, so the proc's frame is gone while it runs.
     let (result, report) = profile(&format!("/f {{ 1 pop {BURN} }} def f"));
     result.expect("runs");

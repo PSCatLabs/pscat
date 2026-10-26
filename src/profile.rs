@@ -13,8 +13,10 @@
 //! body, a Type 3 glyph) has no name of its own: its time is part of the
 //! procedure that ran it.
 //!
-//! Off by default and then costless: the exec loop is compiled twice
-//! (`step_n_inner::<PROFILE>`) and the plain copy has none of this.
+//! Off by default. Then a procedure call pays one test of `Interp::profile`
+//! (in `execute_resolved`, only where a body is about to run), and nothing
+//! else changes: the profiled work is in `#[cold]` functions the plain run
+//! never reaches.
 
 use std::collections::HashMap;
 use std::time::Duration;

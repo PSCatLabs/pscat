@@ -39,6 +39,10 @@ const EXEC_STACK_LIMIT: usize = 10_000;
 /// nesting level, so this bounds Rust stack use on malicious input.
 const PROC_NESTING_LIMIT: usize = 500;
 
+/// `execute_resolved`'s `via` for an object that was not reached through a
+/// name. No interned name has this id.
+const NO_NAME: u32 = u32::MAX;
+
 enum Frame {
     /// Tokens being scanned incrementally from program source.
     Scanner(Lexer),
@@ -611,11 +615,7 @@ impl Interp {
         } else {
             budget
         };
-        let mut result = if self.profile.is_some() {
-            self.step_n_profiled(budget)
-        } else {
-            self.step_n_inner::<false>(budget)
-        };
+        let mut result = self.step_n_inner(budget);
         if limited {
             result = self.after_slice(result, budget);
         }
@@ -807,14 +807,7 @@ impl Interp {
         }
     }
 
-    /// The profiled copy of the hot loop, kept out of line so the plain
-    /// copy in `step_n` is exactly what it was.
-    #[inline(never)]
-    fn step_n_profiled(&mut self, budget: usize) -> Result<bool, PsError> {
-        self.step_n_inner::<true>(budget)
-    }
-
-    fn step_n_inner<const PROFILE: bool>(&mut self, budget: usize) -> Result<bool, PsError> {
+    fn step_n_inner(&mut self, budget: usize) -> Result<bool, PsError> {
         for _ in 0..budget {
             if self.quit_requested {
                 return Ok(false);
@@ -833,9 +826,7 @@ impl Interp {
             };
             let done = match item {
                 Item::Op(func) => func(self),
-                Item::Name(id) if PROFILE => self.execute_name_prof(id),
                 Item::Name(id) => self.execute_name(id),
-                Item::Obj(obj) if PROFILE => self.execute_element_prof(obj),
                 Item::Obj(obj) => self.execute_element(obj),
             };
             if let Err(e) = done {
@@ -1278,31 +1269,6 @@ impl Interp {
         }
     }
 
-    /// `execute_element` for a profiled run: names go through
-    /// `execute_name_prof`.
-    fn execute_element_prof(&mut self, obj: Object) -> Result<(), PsError> {
-        match (&obj.value, obj.executable) {
-            (Value::Name(n), true) => self.execute_name_prof(n.id()),
-            _ => self.execute_element(obj),
-        }
-    }
-
-    /// `execute_name` for a profiled run: a name that resolves to a
-    /// procedure body is a profiled call, attributed to this name.
-    fn execute_name_prof(&mut self, id: u32) -> Result<(), PsError> {
-        self.last_name = Some(id);
-        let resolved = self
-            .load_id(id)
-            .ok_or_else(|| PsError::Undefined(crate::name::resolve(id).to_string()))?;
-        if resolved.executable && matches!(resolved.value, Value::Array(_)) {
-            let Value::Array(body) = resolved.value else {
-                unreachable!()
-            };
-            return self.prof_call(id, body);
-        }
-        self.execute_resolved(resolved)
-    }
-
     /// Run procedure `body` as a call of `id`: plant a [`Frame::ProfReturn`]
     /// below its frame and open the call in the profiler.
     ///
@@ -1313,6 +1279,8 @@ impl Interp {
     /// tail recursion at constant depth, as it is without `--profile`. (The
     /// time then belongs to the one open call: with mutual tail recursion
     /// some exclusive time lands on the first procedure of the chain.)
+    #[cold]
+    #[inline(never)]
     fn prof_call(&mut self, id: u32, body: PsArray) -> Result<(), PsError> {
         let run = self
             .estack
@@ -1370,12 +1338,16 @@ impl Interp {
         let resolved = self
             .load_id(id)
             .ok_or_else(|| PsError::Undefined(crate::name::resolve(id).to_string()))?;
-        self.execute_resolved(resolved)
+        self.execute_resolved(resolved, id)
     }
 
     /// Execute the object a name resolved to. Unlike `execute_element`,
     /// an executable array here *runs* — this is a procedure call.
-    fn execute_resolved(&mut self, mut obj: Object) -> Result<(), PsError> {
+    ///
+    /// `via` is the name the object was reached through, or [`NO_NAME`]
+    /// (`exec`, a conditional's branch): `--profile` attributes a
+    /// procedure body to the name it ran through (#737).
+    fn execute_resolved(&mut self, mut obj: Object, via: u32) -> Result<(), PsError> {
         // A name may resolve to another executable name; follow the chain
         // with a budget so `a -> b -> a` cycles error out instead of
         // spinning forever.
@@ -1393,6 +1365,9 @@ impl Interp {
                     let Value::Array(body) = obj.value else {
                         unreachable!()
                     };
+                    if via != NO_NAME && self.profile.is_some() {
+                        return self.prof_call(via, body);
+                    }
                     return self.push_proc_frame(body);
                 }
                 // An executable string runs as source — the `(...) cvx
@@ -1469,7 +1444,7 @@ impl Interp {
     /// `exec` and the conditional operators: run an object with full
     /// executable semantics (procedures run rather than being pushed).
     pub(crate) fn exec_object(&mut self, obj: Object) -> Result<(), PsError> {
-        self.execute_resolved(obj)
+        self.execute_resolved(obj, NO_NAME)
     }
 
     /// The `token` operator on a file: one token scanned in place — the
