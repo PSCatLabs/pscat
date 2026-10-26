@@ -85,6 +85,12 @@
 #                         listed in LIST: one repo-relative path per line, blank
 #                         lines and `#` comments ignored, each tracked in the
 #                         branch tree. Use it for a slice no loader describes.
+#   (always on)           with --base-bin/--head-bin, every tracked
+#                         selftest/drivers/*.ps whose header has the line
+#                         `%%IdentityCorpus: always` is also compared (#776): the
+#                         image_*.ps drivers, so a change to the image code is
+#                         always checked whatever --loader picked. Not used with
+#                         a single BIN, where only the files differ between trees.
 #   --expect-diff LIST    files that are MEANT to render differently (issue #674): an
 #                         opt-in change, a new default, a deliberate fix. Same format
 #                         as --files (tracked paths, one per line, `#` comments). A
@@ -411,6 +417,23 @@ EOF_SET2
     done <<EOF_LIST
 $(git -C "$ROOT" ls-files -- 'examples/*.ps' 'gallery/*.ps' 'selftest/drivers/*.ps')
 EOF_LIST
+fi
+# Two binaries (a change under src/): the always-on corpus (#776). A tracked
+# selftest/drivers/*.ps whose header says `%%IdentityCorpus: always` is
+# compared whatever --loader/--files picked, since it exercises the interpreter
+# itself (the image_*.ps drivers load no lib, so no loader would find them).
+# One binary renders both trees otherwise, so a difference there could only come
+# from the files and these never differ: they join in two-binary mode only.
+if [ "$TWO_BINS" -eq 1 ]; then
+    while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        if grep -q '^%%IdentityCorpus:[[:space:]]*always' "$ROOT/$f"; then
+            printf '%s\n' "$f" >> "$FILES"
+        fi
+    done <<EOF_ALWAYS
+$(git -C "$ROOT" ls-files -- 'selftest/drivers/*.ps')
+EOF_ALWAYS
+    awk '!seen[$0]++' "$FILES" > "$FILES.u" && mv "$FILES.u" "$FILES"
 fi
 # --expect-diff files are compared even when the pick leaves them out.
 if [ -n "$FILES_PATHS" ] || [ -n "$EXPECTED" ]; then

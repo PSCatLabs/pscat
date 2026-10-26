@@ -439,3 +439,41 @@ fn an_expected_fix_where_the_base_failed_and_the_branch_renders_passes() {
     let o = run(&su, &both_bins(&su));
     assert_eq!(o.status.code(), Some(1), "{}", text(&o));
 }
+
+/// The tracked drivers marked `%%IdentityCorpus: always` (#776): the image set.
+const ALWAYS: [&str; 4] = [
+    "selftest/drivers/image_formats.ps",
+    "selftest/drivers/image_sources.ps",
+    "selftest/drivers/image_masks.ps",
+    "selftest/drivers/image_matrix.ps",
+];
+
+#[test]
+fn the_image_drivers_join_every_two_binary_run_and_a_single_binary_run_skips_them() {
+    let su = setup("always", "control.ps");
+    // The base tree has the drivers (so they are compared, not "new") and one
+    // unmarked driver, which must not join.
+    let unmarked = "selftest/drivers/mathkit.ps";
+    fs::create_dir_all(su.base_tree.join("selftest/drivers")).unwrap();
+    for f in ALWAYS.iter().chain([&unmarked]) {
+        fs::copy(root().join(f), su.base_tree.join(f)).unwrap();
+    }
+    let mut args = both_bins(&su);
+    args.extend(["--control", su.control.to_str().unwrap()]);
+    let o = run(&su, &args);
+    let t = text(&o);
+    assert_eq!(o.status.code(), Some(0), "{t}");
+    for f in ALWAYS {
+        // Every page of every driver is compared, so each shows up as `identical`.
+        assert!(t.contains(&format!("identical  {f}")), "{f}: {t}");
+    }
+    assert!(!t.contains(unmarked), "{t}");
+    // Two examples + four drivers (4 pages each, one render per file) + control.
+    assert_eq!(lines(&su.base_log).len(), 7, "{t}");
+
+    // One shared binary: the always-on files never differ, so they stay out.
+    let o = run(&su, &[su.head_bin.to_str().unwrap()]);
+    let t = text(&o);
+    assert_eq!(o.status.code(), Some(0), "{t}");
+    assert!(ALWAYS.iter().all(|f| !t.contains(f)), "{t}");
+}
