@@ -81,6 +81,25 @@ fn build_site_assembles_everything() {
             "gallery shows {name} but it wasn't rendered"
         );
     }
+    // The `pscat chalk` boards on the front page (#849) must be drawn.
+    let index = std::fs::read_to_string(out.join("index.html")).expect("read");
+    assert!(
+        index.contains("<pre><code>pscat chalk "),
+        "no chalk commands"
+    );
+    assert!(
+        !index.contains("<!--@chalk-showcase-->"),
+        "chalk marker left"
+    );
+    let boards = index.split("assets/chalk/").skip(1).count();
+    assert!(boards >= 3, "front page shows only {boards} chalk boards");
+    for piece in index.split("assets/chalk/").skip(1) {
+        let name = piece.split('"').next().expect("img src");
+        assert!(
+            out.join("assets/chalk").join(name).exists(),
+            "front page shows chalk board {name} but it wasn't rendered"
+        );
+    }
     // One generated page per gallery piece (#251), linked from the gallery.
     let pieces = std::fs::read_to_string(root.join("gallery/manifest.json")).expect("manifest");
     let manifest: serde_json::Value = serde_json::from_str(&pieces).expect("manifest is JSON");

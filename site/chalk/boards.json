@@ -1,0 +1,41 @@
+[
+  {
+    "id": "quadratic",
+    "title": "The quadratic formula",
+    "alt": "x = (-b plus or minus the square root of b squared minus 4ac) over 2a, written in white chalk on a slate board",
+    "latex": "x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}",
+    "args": []
+  },
+  {
+    "id": "derivation",
+    "title": "An aligned derivation",
+    "alt": "f(x) = the integral from 0 to x of dt over 1 plus t squared, on the next row = arctan x, aligned on the equals signs, in white chalk on a slate board",
+    "latex": "f(x) &= \\int_0^x \\frac{dt}{1+t^2} \\\\ &= \\arctan x",
+    "args": [
+      "--seed",
+      "7"
+    ]
+  },
+  {
+    "id": "matrix",
+    "title": "A matrix product, in yellow chalk",
+    "alt": "A two by two matrix a b c d times the column x y equals the column ax + by, cx + dy, in yellow chalk on a slate board",
+    "latex": "\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}\\begin{pmatrix} x \\\\ y \\end{pmatrix} = \\begin{pmatrix} ax+by \\\\ cx+dy \\end{pmatrix}",
+    "args": [
+      "--color",
+      "yellow"
+    ]
+  },
+  {
+    "id": "overlay",
+    "title": "Chalk alone, with no board",
+    "alt": "The curl of E equals minus the partial derivative of B over the partial derivative of t, in yellow chalk on a transparent page, shown here on a dark background",
+    "latex": "\\nabla \\times \\vec{E} = -\\frac{\\partial \\vec{B}}{\\partial t}",
+    "args": [
+      "--no-board",
+      "--color",
+      "yellow"
+    ],
+    "backdrop": "dark"
+  }
+]

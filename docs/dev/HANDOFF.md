@@ -1936,6 +1936,16 @@ renders eight examples in both and compares block-downsampled output).
   build. Change an example's output and you must change its `.out` and
   the prose around it. `playground.html?example=learn/NAME.ps` is how
   the "Try it" links open them.
+- **The front page's `pscat chalk` boards are a list plus a build step**
+  (#849). `site/chalk/boards.json` holds each board's id, LaTeX and extra
+  flags; `scripts/site_chalk.py render` draws them with the release binary
+  into `_site/assets/chalk/` (the exact argv the page prints), and `expand`
+  fills `<!--@chalk-showcase-->` in `index.html` with a figure and the
+  `shlex`-quoted command per board, before `site_pages.py` runs. No PNG is
+  committed, so the boards re-render with every renderer change. The
+  README's picture is `assets/chalk/quadratic.png` on the Pages site (an
+  absolute URL, as crates.io needs; the crate's `include` has no images).
+  Add a board by adding an entry; `tests/site.rs` checks each is drawn.
 - **`tests/site.rs` builds into its own scratch dir** (#767). `build_site.sh`
   wipes and rebuilds its output directory, so two runs in one worktree (the
   gate beside a hand-run `cargo test`) used to delete each other's `_site/`

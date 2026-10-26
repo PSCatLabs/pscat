@@ -11,7 +11,8 @@
 # playground example sources (self-contained files only — the wasm build has
 # no filesystem), the Learn page's examples (site/learn/, placed into the
 # page by scripts/site_examples.py and checked in the wasm build by
-# scripts/check_learn_examples.mjs), and PNG renders of every gallery piece
+# scripts/check_learn_examples.mjs), the `pscat chalk` boards on the front
+# page (site/chalk/boards.json, drawn here by scripts/site_chalk.py), and PNG renders of every gallery piece
 # and example, produced by pscat itself.
 #
 # Then check it: scripts/check_site_links.py (CI runs it after this).
@@ -81,6 +82,12 @@ done
 
 # 6. the Learn page's examples: source, "Try it" link and result
 python3 "$ROOT/scripts/site_examples.py" "$OUT"
+
+# 6b. the `pscat chalk` showcase on the front page (#849): pscat draws each
+# board from the command the page prints under it (site/chalk/boards.json)
+mkdir -p "$OUT/assets/chalk"
+python3 "$ROOT/scripts/site_chalk.py" render "$BIN" "$OUT/assets/chalk"
+python3 "$ROOT/scripts/site_chalk.py" expand "$OUT"
 
 # 7. the shared shell, last, so pages generated above get it too
 python3 "$ROOT/scripts/site_pages.py" "$OUT"
