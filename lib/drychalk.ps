@@ -315,7 +315,9 @@
     dcFirm 0 gt dcdot not and {
         /dcTtw 10 dcw mul dcL 1e-6 dcmax div 0.3 dcmin 0.3 sub dcFirm mul 0.3 add def
         /dcTt0 1 dcTtw sub def
-        /dcTl0 dcTt0 0.05 add def /dcTlw 1 dcTl0 sub def
+        % the touch lift covers the last 5/6 of the taper, so it stays inside
+        % the stroke however long it is
+        /dcTlw dcTtw 5 mul 6 div def /dcTl0 1 dcTlw sub def
         /dcTdip 0.5 1 dcFirm 1 1 24 dcw mul dcL 1e-6 dcmax div dcmin sub mul sub mul def
         % pressed harder: small strokes by up to two bands, long ones by up to
         % one and a fifth (their body is otherwise the faintest part)

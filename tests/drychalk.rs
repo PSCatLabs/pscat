@@ -292,6 +292,25 @@ fn firm_holds_a_long_stroke_to_its_end() {
     );
 }
 
+/// #713 (Codex review): the lift's interval stays positive and inside the
+/// stroke at any length, including exactly 200 widths, where it once closed
+/// to nothing and the endpoint divided by zero.
+#[test]
+fn firm_survives_strokes_of_any_length() {
+    for len in [3.0, 40.0, 399.0, 400.0, 401.0, 900.0] {
+        let it = on_board(
+            200,
+            40,
+            1.0,
+            &format!(
+                "newpath 0 20 moveto {len} 20 lineto 0 30 moveto {len} 22 lineto \
+                 << /Width 2 /Firm 1 /Dust 0 >> dcchalk"
+            ),
+        );
+        assert!(data(&it).iter().any(|&b| b != 0), "length {len}");
+    }
+}
+
 /// C3: a worn stick on its side presses at the edges of its contact, so a
 /// broad mark has brighter edges than its granular face.
 #[test]
