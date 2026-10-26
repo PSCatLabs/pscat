@@ -58,8 +58,9 @@ fn pop_ps_string(it: &mut Interp) -> Result<PsString, PsError> {
 /// the bytes arrive, so `(/dev/zero) (r) file` or a FIFO ends in a limit
 /// error instead of running on inside this one operator (issue #702).
 pub(super) fn read_resource(it: &mut Interp, name: &str) -> Result<Vec<u8>, PsError> {
-    // A program reads back what it wrote, closed or not (issue #762).
-    it.flush_outputs()?;
+    // A program reads back what it wrote, closed or not (issue #762). A
+    // file whose write failed reports that itself, not through this read.
+    let _ = it.flush_outputs();
     #[cfg(not(target_arch = "wasm32"))]
     if !it.limits().is_none() {
         return read_resource_limited(it, name);
