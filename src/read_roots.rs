@@ -237,7 +237,11 @@ mod tests {
         let t = tree("dotdot");
         let r = roots(&t);
         for name in ["../x", "sub/../in.txt", "/a/../b"] {
-            assert_eq!(r.check_name(name), Err(PsError::InvalidFileAccess), "{name}");
+            assert_eq!(
+                r.check_name(name),
+                Err(PsError::InvalidFileAccess),
+                "{name}"
+            );
         }
         assert_eq!(r.check_name("a\0b"), Err(PsError::InvalidFileAccess));
         assert_eq!(r.check_name("sub/in.txt"), Ok(()));
@@ -282,7 +286,10 @@ mod tests {
         symlink(&t.root, &alias).unwrap();
         let r = ReadRoots::new(&[&alias]).unwrap();
         assert!(matches!(r.admit(&alias.join("sub/in.txt")), Admit::Open(_)));
-        assert!(matches!(r.admit(&t.root.join("sub/in.txt")), Admit::Open(_)));
+        assert!(matches!(
+            r.admit(&t.root.join("sub/in.txt")),
+            Admit::Open(_)
+        ));
         assert!(ReadRoots::new(&[t.base.join("missing")]).is_err());
     }
 }

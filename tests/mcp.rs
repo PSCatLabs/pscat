@@ -899,8 +899,14 @@ fn reads_are_confined_to_the_working_directory_and_allow_read() {
     let p = |d: &Path, f: &str| common::ps_path(&d.join(f));
     // Inside: relative, absolute, and an --allow-read directory.
     assert_eq!(eval_error(&mut s, "(a.ps) run"), "");
-    assert_eq!(eval_error(&mut s, &format!("({}) run", p(&cwd, "a.ps"))), "");
-    assert_eq!(eval_error(&mut s, &format!("({}) run", p(&extra, "b.ps"))), "");
+    assert_eq!(
+        eval_error(&mut s, &format!("({}) run", p(&cwd, "a.ps"))),
+        ""
+    );
+    assert_eq!(
+        eval_error(&mut s, &format!("({}) run", p(&extra, "b.ps"))),
+        ""
+    );
     // The bundled lib/ is always there.
     assert_eq!(eval_error(&mut s, "(lib/artkit.ps) run"), "");
     // Outside, `..`, a missing file outside, and readreals.
@@ -929,7 +935,10 @@ fn reads_are_confined_to_the_working_directory_and_allow_read() {
     };
     let inside = list(&mut s, &p(&cwd, "*.ps"));
     assert!(inside.contains("a.ps"), "{inside}");
-    assert!(!inside.contains("door.ps"), "the symlink out isn't listed: {inside}");
+    assert!(
+        !inside.contains("door.ps"),
+        "the symlink out isn't listed: {inside}"
+    );
     let out = list(&mut s, &p(&outside, "*"));
     assert!(!out.contains("secret"), "{out}");
     let up = list(&mut s, "../outside/*");
@@ -960,7 +969,10 @@ fn the_filesystem_root_is_never_a_read_root() {
         eval_error(&mut s, "(/etc/hosts) (r) file"),
         "invalidfileaccess"
     );
-    assert_eq!(eval_error(&mut s, "(etc/hosts) (r) file"), "invalidfileaccess");
+    assert_eq!(
+        eval_error(&mut s, "(etc/hosts) (r) file"),
+        "invalidfileaccess"
+    );
     assert_eq!(eval_error(&mut s, "(lib/artkit.ps) run"), "");
 }
 

@@ -259,7 +259,10 @@ impl WriteRoots {
 /// Canonicalise each directory (shared with `crate::read_roots`). Fails,
 /// naming the first bad one as `<what> <dir>: ...`, if a directory doesn't
 /// exist or isn't a directory.
-pub(crate) fn canonical_dirs<P: AsRef<Path>>(dirs: &[P], what: &str) -> Result<Vec<PathBuf>, String> {
+pub(crate) fn canonical_dirs<P: AsRef<Path>>(
+    dirs: &[P],
+    what: &str,
+) -> Result<Vec<PathBuf>, String> {
     let mut roots = Vec::with_capacity(dirs.len());
     for d in dirs {
         let d = d.as_ref();
