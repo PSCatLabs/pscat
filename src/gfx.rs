@@ -859,6 +859,11 @@ pub struct Gfx {
     svg: Option<Box<crate::svg::SvgRecorder>>,
     /// PDF export recorder (`--pdf`); same seams, PDF syntax.
     pdf: Option<Box<crate::pdf::PdfRecorder>>,
+    /// `pscat --bands` (#736): the device rows `top..bottom` this run's
+    /// page is composited from. Work that only touches other rows may be
+    /// skipped; today only image rasterization does. Not a PostScript
+    /// clip: `clippath` and every other operator still see the full page.
+    band_rows: Option<(u32, u32)>,
 }
 
 impl Gfx {
@@ -892,7 +897,21 @@ impl Gfx {
             svg: None,
             pdf: None,
             suppress_paint: 0,
+            band_rows: None,
         })
+    }
+
+    /// Mark this run as one band of a `pscat --bands` render (#736): only
+    /// device rows `top..bottom` of each page will be kept, so painting
+    /// that falls wholly outside them may be skipped. Pixels inside the
+    /// rows come out exactly as without a band.
+    pub fn set_band_rows(&mut self, top: u32, bottom: u32) {
+        self.band_rows = Some((top, bottom));
+    }
+
+    /// The rows set by [`set_band_rows`](Self::set_band_rows), if any.
+    pub(crate) fn band_rows(&self) -> Option<(u32, u32)> {
+        self.band_rows
     }
 
     pub fn state(&self) -> &GraphicsState {

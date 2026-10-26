@@ -706,9 +706,16 @@ impl ImageCtx {
             y1 = y1.max(dy);
         }
         let px0 = (x0.floor() as i64).max(0);
-        let py0 = (y0.floor() as i64).max(0);
+        let mut py0 = (y0.floor() as i64).max(0);
         let px1 = (x1.ceil() as i64).min(pw);
-        let py1 = (y1.ceil() as i64).min(ph);
+        let mut py1 = (y1.ceil() as i64).min(ph);
+        // `pscat --bands` (#736): rows outside the band are thrown away, and
+        // every pixel below is computed on its own, so skipping them leaves
+        // the band's rows exactly as a full render paints them.
+        if let Some((top, bottom)) = gfx.band_rows() {
+            py0 = py0.max(i64::from(top));
+            py1 = py1.min(i64::from(bottom));
+        }
 
         // `/Interpolate true` on a colour image (#730): which axes are
         // magnified, i.e. get bilinear sampling. None keeps nearest.
