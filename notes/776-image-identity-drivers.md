@@ -51,6 +51,15 @@ starts to draw and the check reports DIFFERS (review it with
 
 ## Bite test
 
-See the PR description for the run: two mutants of `src/image.rs`, one line
-each, were built in a scratch worktree and compared against the unmodified
-binary with `--base-bin/--head-bin`.
+Two one-line mutants of `src/image.rs`, each built in a scratch worktree of the
+branch and run as the base side of `identity_check.sh --base-bin/--head-bin`
+against the branch binary (only `examples/sierpinski.ps` plus the always-on
+drivers, a negative control that rotates a gray image):
+
+- `cell_at`: `.floor()` to `.round()` on `ix`. All 16 pages of the four
+  drivers DIFFER; `sierpinski.ps` (no image) stays identical; control differs.
+- `smooth_rgb`: the bilinear sample position `f - 0.5` to `f - 0.4`. Only the
+  four pages of `image_matrix.ps` DIFFER (the only driver that uses
+  `/Interpolate true` outside the mask or ImageType 3 cases); the control does
+  not use `/Interpolate`, so it reports CONTROL FAILED, as it should.
+- Two identical binaries: 17 of 17 identical (the renders are deterministic).
