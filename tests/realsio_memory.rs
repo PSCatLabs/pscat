@@ -106,7 +106,13 @@ fn count_less_and_file_reads_respect_the_limits() {
     assert_eq!(it.pop_f64().unwrap(), 2_999_999.0);
     assert_eq!(it.pop_int().unwrap(), 3_000_000);
     // Writing the array to a file object never copies it.
-    let copy = format!("({})", root.join("copy.bin").to_str().unwrap());
+    let copy = format!(
+        "({})",
+        root.join("copy.bin")
+            .to_str()
+            .unwrap()
+            .replace('\\', "\\\\")
+    );
     it.run_str(&format!("{p} /all readreals {copy} (w) file writereals"))
         .unwrap();
     assert_eq!(std::fs::read(root.join("copy.bin")).unwrap(), big);
