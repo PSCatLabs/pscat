@@ -138,8 +138,10 @@ unfinished download is discarded and redone on the next start.
   `sh` on PATH. The launcher's lookup works under Git Bash, but it downloads
   nothing there. The README tells them to register `pscat-mcp` by hand. A
   PowerShell twin can't be selected per OS from one manifest entry.
-- **`scripts/release.sh`** (#854's lane, owner file) should bump
-  `plugin/pscat-release` with the other manifests. Until it does, a release
+- **`release_stages.py bump-manifests`** (used by `scripts/release.sh`;
+  #854's lane, owner files) should bump `plugin/pscat-release` with the
+  other manifests. #854 (PR #856) puts rc versions in Cargo.toml as
+  `0.7.0-rc.1` with tag `v0.7.0-rc.1`; the pin rule accepts that pair. Until it does, a release
   bump PR fails `plugin_check` on the pin (a release pin must equal the
   crate version), which is the reminder. An rc pin of the version being
   released still passes, so after a trial set the pin back by hand.
