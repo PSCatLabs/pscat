@@ -16,6 +16,8 @@ static ALLOC: pscat::TrackingAllocator = pscat::TrackingAllocator;
 #[path = "mcp_server.rs"]
 mod mcp_server;
 mod subcmd;
+// `--bands N` (#736).
+mod bands;
 
 /// Interpreter steps per rendered frame in the windowed modes. Named
 /// so `--selftest`'s runs-alone check can tell "the user asked for a
@@ -102,6 +104,9 @@ struct Options {
     /// killed leaves no render running behind it. The parent names itself
     /// because it can die before this process first looks.
     exit_with_parent: Option<u32>,
+    /// `--bands N` (issue #736): render N horizontal bands on N threads
+    /// and stitch them into one PNG (`bands.rs`).
+    bands: Option<u32>,
 }
 
 impl Options {
@@ -137,6 +142,7 @@ impl Options {
             read_roots: None,
             progress: false,
             exit_with_parent: None,
+            bands: None,
         }
     }
 
@@ -261,6 +267,10 @@ fn main() -> ExitCode {
             eprintln!("pscat: --transparent needs --png, --svg, --pdf or --contact-sheet output");
             return ExitCode::FAILURE;
         }
+    }
+
+    if let Some(count) = options.bands {
+        return bands::run(&options, count);
     }
 
     if options.sweep_seed.is_some() || options.sweep_param.is_some() {
@@ -591,12 +601,17 @@ fn run_headless(interp: &mut Interp, source: &[u8], options: &Options) -> bool {
 /// Bounded (#703): a huge or deeply nested operand prints a `... truncated`
 /// marker, and the header keeps the true depth.
 fn print_pstack(interp: &Interp) {
+    eprintln!("{}", pstack_text(interp));
+}
+
+/// The `Operand stack (N): ...` line [`print_pstack`] prints.
+fn pstack_text(interp: &Interp) -> String {
     let stack = interp.operand_stack();
     let text = pscat::object::stack_repr_bounded(stack, &pscat::object::STACK_DUMP_LIMITS);
     if text.is_empty() {
-        eprintln!("Operand stack ({}):", stack.len());
+        format!("Operand stack ({}):", stack.len())
     } else {
-        eprintln!("Operand stack ({}): {text}", stack.len());
+        format!("Operand stack ({}): {text}", stack.len())
     }
 }
 
@@ -643,34 +658,8 @@ fn finish_headless(
         if pages.is_empty() || gfx.has_trailing_art() {
             pages.push(&gfx.pixmap);
         }
-        // --halftone screens the raster on the way out, like a mono
-        // printer's RIP; the vector targets below stay contone.
-        let save = |page: &tiny_skia::Pixmap, path: &str| -> bool {
-            let screened;
-            let page = if options.halftone {
-                screened = pscat::halftone::screen(page);
-                &screened
-            } else {
-                page
-            };
-            if let Err(e) = page.save_png(path) {
-                eprintln!("pscat: cannot write {path}: {e}");
-                false
-            } else {
-                println!("pscat: wrote {path}");
-                true
-            }
-        };
-        if pages.len() == 1 {
-            if !save(pages[0], path) {
-                return ExitCode::FAILURE;
-            }
-        } else {
-            for (i, page) in pages.iter().enumerate() {
-                if !save(page, &numbered_path(path, i + 1)) {
-                    return ExitCode::FAILURE;
-                }
-            }
+        if !write_pngs(&pages, path, options.halftone) {
+            return ExitCode::FAILURE;
         }
     }
     if let Some(path) = &options.svg
@@ -710,6 +699,37 @@ fn finish_headless(
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE
+    }
+}
+
+/// Write `pages` as `--png PATH` does: one page to PATH itself, several to
+/// PATH-001.png, PATH-002.png, ... False once a write fails.
+fn write_pngs(pages: &[&tiny_skia::Pixmap], path: &str, halftone: bool) -> bool {
+    // --halftone screens the raster on the way out, like a mono
+    // printer's RIP; the vector targets stay contone.
+    let save = |page: &tiny_skia::Pixmap, path: &str| -> bool {
+        let screened;
+        let page = if halftone {
+            screened = pscat::halftone::screen(page);
+            &screened
+        } else {
+            page
+        };
+        if let Err(e) = page.save_png(path) {
+            eprintln!("pscat: cannot write {path}: {e}");
+            false
+        } else {
+            println!("pscat: wrote {path}");
+            true
+        }
+    };
+    if pages.len() == 1 {
+        save(pages[0], path)
+    } else {
+        pages
+            .iter()
+            .enumerate()
+            .all(|(i, page)| save(page, &numbered_path(path, i + 1)))
     }
 }
 
@@ -1451,6 +1471,10 @@ fn parse_args() -> Result<Options, String> {
                 let dir = args.next().ok_or("missing directory after --allow-write")?;
                 options.allow_write.push(dir);
             }
+            "--bands" => {
+                let n = args.next().ok_or("missing value after --bands")?;
+                options.bands = Some(bands::parse_count(&n)?);
+            }
             "--read-root" => {
                 let dir = args.next().ok_or("missing directory after --read-root")?;
                 options.read_roots.get_or_insert_with(Vec::new).push(dir);
@@ -1610,6 +1634,13 @@ fn print_usage() {
     println!("                      deletefile.");
     println!("                      Off by default; paths outside, `..` and symlinks out");
     println!("                      are invalidfileaccess. %stdout/%stderr need no flag");
+    println!("      --bands N       render the PNG as N horizontal bands on N threads and");
+    println!("                      stitch them (1..64; PNG only). Each band runs the whole");
+    println!("                      program with /BandIndex, /BandCount and /BandBBox defined,");
+    println!("                      so it can skip work outside its rows; the result is");
+    println!("                      identical to a plain --png render unless the program");
+    println!("                      reads the clock. Steps and time limits");
+    println!("                      apply per band, --max-memory to all bands together");
     println!("      --read-root DIR let the program read files only inside DIR (repeatable):");
     println!("                      `(f) (r) file`, run, readreals, filenameforall. Reads are");
     println!("                      open by default; with this, paths outside, `..` and");

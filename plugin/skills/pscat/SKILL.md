@@ -34,6 +34,12 @@ generate | pscat --png out.png -       # `-` reads the program from stdin
 Multi-page documents number their pages: `out.png` → `out-001.png`,
 `out-002.png`, … SVG does the same; PDF is naturally multi-page.
 
+`pscat --bands N --png out.png f.ps` renders on N threads, one horizontal band
+each, and gives the same PNG bytes as a plain render. It is only faster for a
+program that reads `/BandBBox [llx lly urx ury]` (also `/BandIndex`,
+`/BandCount`) and skips work outside it, e.g. a costly `colorimage` procedure
+that computes only those rows plus one row of margin. PNG only.
+
 ## Sweep a seed or parameter (explore a design space in one run)
 
 ```sh
