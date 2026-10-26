@@ -53,6 +53,13 @@ fn data_source(obj: &Object) -> Result<ImageSource, PsError> {
     })
 }
 
+/// Sample depths the engine reads: 1, 2, 4, 8, and (#781) 12 and 16.
+/// Anything wider than 8 bits is reduced to 8 on output, in PNG, SVG and
+/// PDF alike (the output pipeline is 8-bit RGB throughout).
+fn valid_bits(bits: i64) -> bool {
+    matches!(bits, 1 | 2 | 4 | 8 | 12 | 16)
+}
+
 fn pop_dims(it: &mut Interp) -> Result<(usize, usize), PsError> {
     let h = it.pop_int()?;
     let w = it.pop_int()?;
@@ -88,7 +95,7 @@ fn image(it: &mut Interp) -> Result<(), PsError> {
     let matrix = read_matrix6(&it.pop()?)?;
     let bits = it.pop_int()?;
     let (w, h) = pop_dims(it)?;
-    if !matches!(bits, 1 | 2 | 4 | 8) {
+    if !valid_bits(bits) {
         return Err(PsError::Rangecheck);
     }
     // gs skips the matrix check when there are no samples.
@@ -137,40 +144,56 @@ fn imagemask(it: &mut Interp) -> Result<(), PsError> {
 }
 
 /// width height bits matrix datasrc(s) multi ncomp colorimage.
-/// Only the single interleaved source form (multi = false); separate
-/// per-component sources are a documented gap.
+/// With `multi` false one interleaved source; with `multi` true `ncomp`
+/// sources, one per component, pushed first component deepest (so
+/// `datasrc_red datasrc_green datasrc_blue true 3 colorimage`; #781).
 fn colorimage(it: &mut Interp) -> Result<(), PsError> {
     let ncomp = it.pop_int()?;
     let Value::Boolean(multi) = it.pop()?.value else {
         return Err(PsError::Typecheck);
     };
-    if multi {
-        return Err(PsError::Limitcheck);
-    }
     if !matches!(ncomp, 1 | 3 | 4) {
         return Err(PsError::Rangecheck);
     }
-    let source = data_source(&it.pop()?)?;
+    let mut sources = Vec::new();
+    for _ in 0..if multi { ncomp } else { 1 } {
+        sources.push(data_source(&it.pop()?)?);
+    }
+    sources.reverse();
     let matrix = read_matrix6(&it.pop()?)?;
     let bits = it.pop_int()?;
     let (w, h) = pop_dims(it)?;
-    if !matches!(bits, 1 | 2 | 4 | 8) {
+    if !valid_bits(bits) {
         return Err(PsError::Rangecheck);
     }
     if w > 0 && h > 0 {
         check_invertible(&matrix)?; // as `image`
     }
-    it.begin_image(ImageCtx::new(
-        w,
-        h,
-        bits as u32,
-        ncomp as u32,
-        default_decode(ncomp as u32),
-        matrix,
-        None,
-        ImageColor::Direct,
-        source,
+    it.begin_image(with_sources(
+        ImageCtx::new(
+            w,
+            h,
+            bits as u32,
+            ncomp as u32,
+            default_decode(ncomp as u32),
+            matrix,
+            None,
+            ImageColor::Direct,
+            ImageSource::Bytes(Vec::new()),
+        ),
+        sources,
+        multi,
     ))
+}
+
+/// Attach the data: one interleaved source, or (`multi`) one per component.
+fn with_sources(mut ctx: ImageCtx, mut sources: Vec<ImageSource>, multi: bool) -> ImageCtx {
+    if multi {
+        ctx.with_planes(sources)
+    } else {
+        ctx.source = sources.remove(0);
+        ctx
+    }
 }
 
 /// The Level 2 dict form, shared by image and imagemask.
@@ -187,7 +210,7 @@ fn dict_image(
 /// Level 3 `ImageType 3` (#739): an image gated by a 1-bit stencil.
 /// Only `InterleaveType 3` (separate DataDict and MaskDict sources) is
 /// implemented; types 1 and 2 (mask samples interleaved into the data
-/// source) raise `limitcheck`, as `colorimage` with `multi true` does.
+/// source) raise `limitcheck` (#765 tracks them).
 /// The stencil keeps its own size, Decode and ImageMatrix, so mask and
 /// image may differ in resolution; MaskDict's Decode picks the polarity
 /// as for `imagemask` (`[1 0]` paints the image where the mask sample is
@@ -243,12 +266,36 @@ fn image_ctx(it: &Interp, d: &Dict, ncomp: u32, mask: Option<bool>) -> Result<Im
     } else {
         geti("BitsPerComponent")?
     };
-    if !matches!(bits, 1 | 2 | 4 | 8) {
+    if !valid_bits(bits) {
         return Err(PsError::Rangecheck);
     }
     let matrix = read_matrix6(&d.get("ImageMatrix").ok_or(PsError::Typecheck)?)?;
     check_invertible(&matrix)?;
-    let source = data_source(&d.get("DataSource").ok_or(PsError::Typecheck)?)?;
+    // `/MultipleDataSources true` (#781): DataSource is a literal array of
+    // one source per component of the current colour space.
+    let multi = mask.is_none()
+        && match d.get("MultipleDataSources").as_ref().map(|o| &o.value) {
+            None => false,
+            Some(Value::Boolean(b)) => *b,
+            Some(_) => return Err(PsError::Typecheck),
+        };
+    let data_obj = d.get("DataSource").ok_or(PsError::Typecheck)?;
+    let sources = if multi {
+        let Value::Array(a) = &data_obj.value else {
+            return Err(PsError::Typecheck);
+        };
+        if data_obj.executable {
+            return Err(PsError::Typecheck);
+        }
+        if a.len() != ncomp as usize {
+            return Err(PsError::Rangecheck);
+        }
+        (0..a.len())
+            .map(|i| data_source(&a.get(i).ok_or(PsError::Typecheck)?))
+            .collect::<Result<Vec<_>, _>>()?
+    } else {
+        vec![data_source(&data_obj)?]
+    };
     // Color interpretation comes from the current space (masks stencil
     // the current color and ignore it). Indexed images default Decode
     // to [0, 2^bits-1] — the sample *is* an index, per the PLRM.
@@ -286,7 +333,7 @@ fn image_ctx(it: &Interp, d: &Dict, ncomp: u32, mask: Option<bool>) -> Result<Im
             d.get("Interpolate").as_ref().map(|o| &o.value),
             Some(Value::Boolean(true))
         );
-    Ok(ImageCtx::new(
+    let ctx = ImageCtx::new(
         w as usize,
         h as usize,
         bits as u32,
@@ -295,7 +342,8 @@ fn image_ctx(it: &Interp, d: &Dict, ncomp: u32, mask: Option<bool>) -> Result<Im
         matrix,
         mask,
         color,
-        source,
+        ImageSource::Bytes(Vec::new()),
     )
-    .with_interpolate(interpolate))
+    .with_interpolate(interpolate);
+    Ok(with_sources(ctx, sources, multi))
 }

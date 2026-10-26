@@ -216,12 +216,12 @@ fn image_argument_errors() {
     assert_eq!(
         it.run_str("2 2 3 [2 0 0 -2 0 2] {<00>} image"),
         Err(PsError::Rangecheck),
-        "bits must be 1/2/4/8"
+        "bits must be 1/2/4/8/12/16"
     );
     assert_eq!(
-        it.run_str("2 2 8 [2 0 0 -2 0 2] {<00>} true 3 colorimage"),
-        Err(PsError::Limitcheck),
-        "multi-source colorimage is a documented gap"
+        it.run_str("2 2 3 [2 0 0 -2 0 2] {<00>} false 1 colorimage"),
+        Err(PsError::Rangecheck),
+        "bits must be 1/2/4/8/12/16"
     );
 }
 

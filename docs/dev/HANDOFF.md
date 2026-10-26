@@ -512,8 +512,10 @@ renders eight examples in both and compares block-downsampled output).
 - Images: nearest-neighbor unless the dict has `/Interpolate true` (#730:
   bilinear on a magnified axis, sample centres at i+0.5, edges clamped,
   colour images only; PDF key and SVG `image-rendering="auto"` follow;
-  `notes/730-image-interpolate.md`). No 12-bit samples, no
-  MultipleDataSources colorimage (limitcheck). `ImageType 3` has
+  `notes/730-image-interpolate.md`). Samples are 1, 2, 4, 8, 12 or 16
+  bits, `colorimage` `multi true` and `/MultipleDataSources true` read one
+  source per component (#781, `notes/781-image-wide-samples-multi-source.md`);
+  wide samples are reduced to 8 bits in PNG, SVG and PDF alike. `ImageType 3` has
   `InterleaveType 3` only (types 1 and 2 are limitcheck) and no
   `ImageType 4` (#739, `notes/739-imagetype3-nulldevice.md`). DCTDecode buffers one
   whole JPEG (marker-aware, stops exactly at EOI); CCITTFax absent;
