@@ -1,0 +1,183 @@
+%!PS-Adobe-3.0
+%%Title: Basin and Range
+%%BoundingBox: 0 0 720 480
+%%Creator: Claude
+%%EndComments
+
+% A shaded-relief map of a country that does not exist. Every pixel of
+% the map is computed, row by row, by the data procedure of one
+% `colorimage`, from pscat's native noise operators (no library is
+% loaded):
+%
+%   `noiseseed`  fixes the noise table, so the same seed is the same map.
+%   `fbm2`       a fractal sum of gradient noise: the broad shape of land
+%                and sea, and a slow field that decides where mountains rise.
+%   `ridged2`    the same sum folded into creases and sharp crests: the
+%                mountain ranges, switched on and off by that slow field.
+%
+% The height is read off as a colour (water, shore, lowland, upland,
+% rock, snow), lit from the north-west by the slope between neighbouring
+% samples, and crossed by contour lines whose width follows the slope,
+% so they stay about one pixel wide on a plain and on a cliff.
+%
+% Band-aware: when `--bands N` defines /BandBBox, the data procedure
+% computes only the image rows that reach its band (plus two spare
+% rows: one for pixel rounding and one because each row's lighting
+% reads the row above), so the bands split the work N ways. The test is
+% made in device space, so it holds at any scale of the page: the
+% committed still is rendered at twice the size (gallery/README.md).
+% Without bands every row is computed, and the picture is the same
+% bytes either way.
+%
+% Run from the repo root:
+%
+%   pscat --page 720x480 --png basin_and_range.png gallery/basin_and_range.ps
+%   pscat --bands 4 --page 720x480 --png basin_and_range.png gallery/basin_and_range.ps
+%
+% Render time (release build, 10-core M-series laptop, median of 5
+% runs, 720x480): about 1.6 s plain, 0.6 s with --bands 4 and 0.45 s
+% with --bands 8. The 1440x960 still costs the same, since the sample
+% grid does not change with the page size.
+
+/Seed 7 def
+/W 720 def /H 480 def              % the sample grid; one sample per point
+/Sea 0.48 def                      % sea level, on a 0..1 height scale
+/NU 5.0 def                        % noise units across the map
+
+Seed noiseseed
+
+% --- the colour ramp: 256 heights, three strings (r g b) ---------------
+% Stops are [height r g b]; the ramp is built once, by linear blending.
+/stops [
+  [0.00  0.04 0.11 0.25]           % deep water
+  [0.34  0.09 0.25 0.41]
+  [0.46  0.25 0.52 0.62]           % shallows
+  [0.475 0.30 0.57 0.65]
+  [0.48  0.81 0.77 0.59]           % shore
+  [0.50  0.72 0.74 0.50]
+  [0.56  0.50 0.62 0.36]           % lowland green
+  [0.63  0.45 0.52 0.30]
+  [0.70  0.62 0.54 0.36]           % upland ochre
+  [0.78  0.53 0.45 0.38]           % rock
+  [0.88  0.72 0.68 0.64]
+  [0.95  0.96 0.96 0.97]           % snow
+  [1.00  1.00 1.00 1.00]
+] def
+/ramp [ 256 string 256 string 256 string ] def
+0 1 255 { /k exch def
+  /t k 255 div def
+  /seg 0 def
+  0 1 stops length 3 sub { /s exch def
+    stops s 1 add get 0 get t le { /seg s 1 add def } if } for
+  /A stops seg get def  /B stops seg 1 add get def
+  /f t A 0 get sub B 0 get A 0 get sub div def
+  f 0 lt { /f 0 def } if  f 1 gt { /f 1 def } if
+  0 1 2 { /c exch def
+    ramp c get k
+    B c 1 add get A c 1 add get sub f mul A c 1 add get add 255 mul cvi put
+  } for
+} for
+/pr ramp 0 get def /pg ramp 1 get def /pb ramp 2 get def
+
+% --- the height field --------------------------------------------------
+% e(u,v) in about 0..1. Broad land and sea from one fbm2; ranges from
+% ridged2, gated by a slow second field so they form belts, not a
+% blanket.
+/height {                           % u v -> e
+  /v exch def /u exch def
+  u v 5 0.5 2.0 fbm2  0.34 mul 0.50 add           % broad land and sea
+  u 0.45 mul 31.7 add v 0.45 mul 12.3 add 3 0.5 2.0 fbm2
+  1.7 mul 0.15 add                                % where the ranges are
+  dup 0 lt { pop 0 } if  dup 1 gt { pop 1 } if
+  dup mul                                         % ease the gate
+  u 1.3 mul v 1.3 mul 6 0.52 2.05 ridged2         % the crests
+  0.55 sub 0.66 mul
+  mul add
+  dup 0.8 gt { 0.8 sub 5 mul dup 1 add div 0.2 mul 0.8 add } if   % ease the peaks
+} def
+
+% --- which sample rows does this band need? -----------------------------
+% /BandBBox is in default user space of the page pscat was given; the
+% test is made in device space so it does not care that the committed
+% still is drawn at twice the size.
+matrix defaultmatrix /dm exch def
+/bandlo -1e9 def /bandhi 1e9 def
+/BandBBox where {
+  pop
+  0 BandBBox 1 get dm transform exch pop
+  0 BandBBox 3 get dm transform exch pop
+  2 copy gt { exch } if /bandhi exch def /bandlo exch def
+} if
+
+gsave
+0 0 translate 720 480 scale        % the image fills the page
+/rowpx 0 1 H div dtransform exch pop abs def
+/need {                            % does sample row j reach the band?
+  0 H j sub H div transform exch pop
+  0 H j sub 1 sub H div transform exch pop
+  2 copy gt { exch } if            % lo hi
+  bandlo rowpx 2 mul sub ge        % hi >= bandlo - 2 rows
+  exch bandhi rowpx 2 mul add le   % lo <= bandhi + 2 rows
+  and
+} def
+
+% --- the data procedure --------------------------------------------------
+/row W 3 mul string def
+/prev W array def                  % the previous row's heights
+0 1 W 1 sub { prev exch Sea put } for
+/j 0 def
+/sc NU W div def
+/b255 { cvi dup 0 lt { pop 0 } if dup 255 gt { pop 255 } if } def
+/gain 22.0 def                     % slope gain for the lighting
+
+W H 8 [W 0 0 H neg 0 H]
+{ j need {
+    /v j sc mul def
+    /left Sea def
+    0 1 W 1 sub { /i exch def
+      i sc mul v height
+      dup 0 lt { pop 0 } if  dup 1 gt { pop 1 } if
+      /e exch def
+      /dzx e left sub def  /dzy e prev i get sub def
+      prev i e put  /left e def
+      /idx e 255 mul cvi def
+      e Sea gt {
+        % lit from the north-west, with a contour every 0.04 of height
+        1 dzx dzy add gain mul add
+        e Sea 0.006 add gt {                          % not on the coast itself
+          /n e 25 mul def
+          /fr n n floor sub def
+          fr 1 fr sub 2 copy gt { exch } if pop       % distance to a line
+          dzx abs dzy abs add 25 mul 0.0001 add div   % in samples
+          1.1 exch sub dup 0 lt { pop 0 } if dup 1 gt { pop 1 } if
+          0.16 mul 1 exch sub mul
+        } if
+      } { 1 } ifelse
+      /f exch def
+      row i 3 mul
+        pr idx get f mul b255 put
+      row i 3 mul 1 add
+        pg idx get f mul b255 put
+      row i 3 mul 2 add
+        pb idx get f mul b255 put
+    } for
+  } if
+  /j j 1 add def row }
+false 3 colorimage
+grestore
+
+% --- the title plate -------------------------------------------------------
+gsave
+0.97 0.94 0.86 setrgbcolor 0.86 setalpha
+22 22 196 50 rectfill
+1 setalpha
+0.25 0.20 0.14 setrgbcolor 0.5 setlinewidth
+25 25 190 44 rectstroke
+/Palatino-Bold findfont 17 scalefont setfont
+33 47 moveto (Basin and Range) show
+/Palatino-Italic findfont 7.5 scalefont setfont
+33 33 moveto (noiseseed 7, fbm2, ridged2, contours every 0.04) show
+grestore
+0.97 0.94 0.86 setrgbcolor 2 setlinewidth
+1 1 718 478 rectstroke
+showpage
