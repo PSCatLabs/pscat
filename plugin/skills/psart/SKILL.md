@@ -81,33 +81,6 @@ name from prose.
   an octave loop in PostScript** (see "Heavy noise renders" below). artkit's `noiseinit`/`noise2`
   (rand-seeded) is unchanged, and now native too. A `--sweep-seed` also seeds
   noise, unless the program calls `noiseseed`.
-- **Terrain noise**: `x y oct gain lac offset wgain angle ridgedmf2`
-  (Musgrave's ridged multifractal: each octave `(offset-|n|)²`, weighted by
-  the previous one times `wgain`, clamped to 0..1; try `1 2`) and
-  `x y oct gain lac angle erodedfbm2` (eroded fBm: each octave divided by
-  1 + the squared gradient so far, so slopes stay smooth and detail gathers
-  on flats and crests). Here `oct` may be a real: the last octave fades in,
-  so detail can drop smoothly with distance. `angle` rotates the domain each
-  octave (about 37 degrees hides the lattice). Neither is normalized. Both
-  cost about 0.3 µs a call at 5 octaves:
-
-  ```postscript
-  %!PS-Adobe-3.0
-  3 noiseseed
-  /N 200 def /row N string def /j 0 def
-  106 196 translate 400 400 scale
-  N N 8 [N 0 0 N neg 0 N]
-  { 0 1 N 1 sub { /i exch def
-      /x i 0.03 mul def /y j 0.03 mul def
-      /oct 6.5 j N div 4 mul sub def                % fewer octaves toward the bottom
-      x y oct 0.5 2 1 2 37 ridgedmf2 0.4 mul      % oct gain lac offset wgain angle
-      x y 5 0.5 2 37 erodedfbm2 0.6 mul add       % oct gain lac angle
-      255 mul cvi dup 0 lt { pop 0 } if dup 255 gt { pop 255 } if
-      row i 3 -1 roll put } for
-    /j j 1 add def row }
-  image
-  showpage
-  ```
 - **Tiling**: `x0 y0 v1 v2 n1 n2 {x y ...} lattice` (any basis);
   `hex`/`tri` shapes; `hexgrid`/`trigrid`; `truchet` (a grid with each
   cell turned a random quarter, one motif becomes a maze). A `hex`/`tri`

@@ -815,8 +815,6 @@ fn payload_lists_native_operators_with_kind_operator() {
         "vfbm3",
         "ridged2",
         "ridged3",
-        "ridgedmf2",
-        "erodedfbm2",
         "setalpha",
         "currentalpha",
         "setblendmode",
@@ -878,7 +876,7 @@ fn noiseref_procedures_point_to_cataloged_native_operators() {
         .iter()
         .filter(|c| c.source == "lib/noiseref.ps" && c.kind == CapabilityKind::Procedure)
         .collect();
-    assert_eq!(refs.len(), 14, "the fourteen nr* twins");
+    assert_eq!(refs.len(), 12, "the twelve nr* twins");
     for c in refs {
         let stem = c.name.strip_prefix("nr").expect("nr prefix");
         // nrseed is the twin of noiseseed; every other twin drops only the prefix.
