@@ -346,6 +346,10 @@ pass `out_path`. Register it with
   `(a) file`, `renamefile` and `deletefile`; anything outside is
   `invalidfileaccess`. `(%stdout) (w) file` needs no flag. The MCP tools
   never write from PostScript: use their `out_path` instead.
+- To save or reload a big numeric array, use `array (path) writereals` and
+  `(path) n readreals` (packed binary64; add `/f32` before the operator for
+  binary32), not printing and `run`ning text: exact, and about 10x faster to
+  read. Writing needs `--allow-write DIR` like `(w) file`.
 - The interpreter targets Level 2 PostScript. If a construct misbehaves,
   compare against Ghostscript, the behavioural oracle.
 - Files the docs call `examples/...`, `gallery/...` or `docs/...` are in

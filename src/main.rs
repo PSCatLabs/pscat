@@ -1504,7 +1504,8 @@ fn print_usage() {
     println!("                      (0 = no limit). A stopped run exits non-zero with");
     println!("                      `limitexceeded (steps|time|memory)`; `stopped` can't catch it");
     println!("      --allow-write DIR  let the program write files inside DIR (repeatable):");
-    println!("                      `(DIR/f) (w) file`, `(a) file`, renamefile, deletefile.");
+    println!("                      `(DIR/f) (w) file`, `(a) file`, writereals, renamefile,");
+    println!("                      deletefile.");
     println!("                      Off by default; paths outside, `..` and symlinks out");
     println!("                      are invalidfileaccess. %stdout/%stderr need no flag");
     println!("      --lint          check the finished run for common mistakes (implies");

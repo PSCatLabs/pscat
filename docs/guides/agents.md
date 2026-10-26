@@ -155,7 +155,7 @@ false`. They are not destructive: `out_path` is confined to the output root and
 replaces only an existing render file of the same extension (see below).
 `openWorldHint` is false everywhere because no tool reaches the network.
 The PostScript itself can never write a file: the server never passes the CLI's
-`--allow-write`, so `(path) (w) file`, `renamefile` and `deletefile` fail with
+`--allow-write`, so `(path) (w) file`, `writereals`, `renamefile` and `deletefile` fail with
 `invalidfileaccess` (#740). `%stdout` writes come back as printed output.
 Reading follows the CLI's policy (any file the server's user can read), and so does
 `filenameforall`: a program can list a readable directory, not just guess names in it.
