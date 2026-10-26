@@ -83,12 +83,22 @@ even gray instead of dark. Mean luminance moves by at most 1.5 levels per page.
 
 ### Timing (guard only)
 
-- Gallery renders take the same time before and after (alpine_lake 29.8 vs
-  29.6 s, lincoln_charcoal 24.8 vs 25.0, crayon_drawing 9.0 vs 9.1).
-- A stress file with 200 page-sized fills at 300 dpi takes 0.23 vs 0.35 s.
-- One with 20,000 small discs takes 0.34 vs 0.38 s.
-- A first, dense version of the rasteriser took 5.3 s on the page-fill
-  stress file. The sparse spans and solid runs are what fixed that.
+These are pscat-only wall times with the final binary, on a busy machine
+(other agents were rendering), so expect a few seconds of noise.
+
+- Gallery pages, base vs head: lincoln_charcoal had user time 31.8 / 34.7 s
+  against 30.9 / 33.4 s over two interleaved runs. crayon_drawing took 9.5
+  vs 10.3 s, and alpine_lake 38 vs 31 s (noise).
+- Stress files at 300 dpi:
+  - 200 page-sized fills: 0.35 vs 0.45 s;
+  - 20,000 small discs: 1.44 vs 1.46 s;
+  - 200 page-sized fills under a `rectclip`: 10.4 vs 9.5 s. A clip disables
+    solid runs, so every covered pixel takes the masked path, but tiny-skia
+    was masking those pixels already.
+- A first, dense version of the rasteriser took 5.3 s on the unclipped
+  page-fill file, against 0.2 s for base. The sparse spans, the solid runs
+  and a linear row merge (a hatch row can hold thousands of spans) are what
+  fixed that.
 
 ## Tests and libraries
 
