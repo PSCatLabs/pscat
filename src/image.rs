@@ -11,6 +11,14 @@
 //! found files at found sizes don't miss the interpolation), unless the
 //! image dictionary asks for `/Interpolate true` (#730): then a magnified
 //! axis is sampled bilinearly, see [`ImageCtx::interpolate`].
+//!
+//! Samples may be 1, 2, 4, 8, 12 or 16 bits (#781) and come from one
+//! interleaved source or, for `colorimage` with `multi true` and
+//! `/MultipleDataSources true`, from one source per component
+//! ([`ImageCtx::planes`]). Whatever the depth, every output (the PNG
+//! raster, the SVG `<image>` and the PDF image XObject) is 8-bit RGB:
+//! `rgb_at` is the one place a sample becomes a colour, so a wide sample
+//! is reduced to 8 bits the same way in all three.
 
 use crate::error::PsError;
 use crate::file::FileHandle;
@@ -104,6 +112,13 @@ pub(crate) struct ImageCtx {
     /// pixels, with its own source, resolution and ImageMatrix. Fed after
     /// this image's own data (InterleaveType 3: separate sources).
     pub stencil: Option<Box<ImageCtx>>,
+    /// Separate per-component sources (`colorimage` with `multi true`, or
+    /// `/MultipleDataSources true`; #781): one single-component plane per
+    /// component, in component order (red before green before blue, cyan
+    /// first). Empty for the usual interleaved single source. When set,
+    /// this context's own `source` and `data` are unused and `sample`
+    /// reads component `c` from plane `c`.
+    pub planes: Vec<ImageCtx>,
     /// `/Interpolate true` in the image dictionary (#730). A colour image
     /// (never an `imagemask`) is then smoothed where it is magnified:
     /// the PNG raster samples bilinearly, the PDF image carries
@@ -144,6 +159,7 @@ impl ImageCtx {
             source,
             data: Vec::new(),
             stencil: None,
+            planes: Vec::new(),
             interpolate: false,
             waiting: false,
             eod: false,
@@ -152,6 +168,30 @@ impl ImageCtx {
 
     pub(crate) fn with_interpolate(mut self, on: bool) -> Self {
         self.interpolate = on;
+        self
+    }
+
+    /// Read each component from its own source (#781). The planes share
+    /// this image's size and depth; `sources` has one entry per component.
+    pub(crate) fn with_planes(mut self, sources: Vec<ImageSource>) -> Self {
+        self.planes = sources
+            .into_iter()
+            .map(|src| {
+                ImageCtx::new(
+                    self.width,
+                    self.height,
+                    self.bits,
+                    1,
+                    vec![0.0, 1.0],
+                    self.matrix,
+                    None,
+                    ImageColor::Direct,
+                    src,
+                )
+            })
+            .collect();
+        self.source = ImageSource::Bytes(Vec::new());
+        self.eod = true;
         self
     }
 
@@ -169,16 +209,21 @@ impl ImageCtx {
     }
 
     pub(crate) fn waiting(&self) -> bool {
-        self.waiting || self.stencil.as_ref().is_some_and(|s| s.waiting())
+        self.waiting
+            || self.stencil.as_ref().is_some_and(|s| s.waiting())
+            || self.planes.iter().any(|p| p.waiting)
     }
 
     /// The data-source procedure's result, handed over by the machine
     /// (to whichever of the image and its stencil asked for it).
     pub(crate) fn supply(&mut self, obj: Object) -> Result<(), PsError> {
-        if !self.waiting
-            && let Some(st) = &mut self.stencil
-        {
-            return st.supply(obj);
+        if !self.waiting {
+            if let Some(p) = self.planes.iter_mut().find(|p| p.waiting) {
+                return p.supply(obj);
+            }
+            if let Some(st) = &mut self.stencil {
+                return st.supply(obj);
+            }
         }
         self.waiting = false;
         match &obj.value {
@@ -215,7 +260,11 @@ impl ImageCtx {
                 st.drain_filters()?;
             }
         }
-        if let Some(exec) = self.fill()? {
+        if self.planes.is_empty() {
+            if let Some(exec) = self.fill()? {
+                return Ok(exec);
+            }
+        } else if let Some(exec) = self.fill_planes()? {
             return Ok(exec);
         }
         self.drain_filters()?;
@@ -261,6 +310,36 @@ impl ImageCtx {
             }
         }
         Ok(None)
+    }
+
+    /// Read the per-component planes (#781). Each round asks the plane
+    /// holding the fewest bytes (the lowest component on a tie), so row
+    /// procedures are called red, green, blue, red, ... as gs calls them.
+    /// A plane that completes has its filter chain drained at once, so the
+    /// next plane's inline `currentfile` filter starts after its EOD marker.
+    fn fill_planes(&mut self) -> Result<Option<ImageStep>, PsError> {
+        loop {
+            let open = |p: &ImageCtx| p.data.len() < p.needed() && !p.eod;
+            let Some(i) = (0..self.planes.len())
+                .filter(|&i| open(&self.planes[i]))
+                .min_by_key(|&i| self.planes[i].data.len())
+            else {
+                return Ok(None);
+            };
+            if let Some(exec) = self.planes[i].fill()? {
+                return Ok(Some(exec));
+            }
+            // Planes reading the very same file object share its position.
+            let shared = match &self.planes[i].source {
+                ImageSource::File(f) => self.planes.iter().enumerate().any(|(j, q)| {
+                    j != i && matches!(&q.source, ImageSource::File(g) if std::rc::Rc::ptr_eq(f, g))
+                }),
+                _ => false,
+            };
+            if !shared {
+                self.planes[i].drain_filters()?;
+            }
+        }
     }
 
     /// A filter source is drained to its own EOD marker — every
@@ -309,6 +388,9 @@ impl ImageCtx {
     /// One sample component, MSB-first within each byte, rows padded to
     /// byte boundaries.
     fn sample(&self, ix: usize, iy: usize, comp: usize) -> u32 {
+        if let Some(plane) = self.planes.get(comp) {
+            return plane.sample(ix, iy, 0);
+        }
         let bitpos =
             iy * self.row_bytes() * 8 + (ix * self.ncomp as usize + comp) * self.bits as usize;
         let mut v: u32 = 0;

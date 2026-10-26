@@ -1,5 +1,5 @@
 %!PS-Adobe-3.0
-%%Title: image / colorimage DataSource driver (issue #776)
+%%Title: image / colorimage DataSource driver (issues #776, #781)
 %%Pages: 4
 %%BoundingBox: 0 0 260 50
 %%SelfTestPage: 260x50
@@ -8,7 +8,7 @@
 
 % Run with:  pscat --page 260x50 --lint-strict selftest/drivers/image_sources.ps
 %
-% One of the four image_*.ps drivers (see image_formats.ps for why they exist
+% One of the five image_*.ps drivers (see image_formats.ps for why they exist
 % and how scripts/identity_check.sh picks them up). This one covers where the
 % samples come from, and the Level 1 and colorimage operand forms:
 %
@@ -16,19 +16,21 @@
 %      `currentfile` ASCIIHexDecode filter, a string-backed ASCIIHexDecode
 %      filter, a string-backed RunLengthDecode filter
 %   2. dict `image`: a string, a procedure, an inline `currentfile` filter,
-%      an ASCII85Decode filter, and `/MultipleDataSources true` (a probe)
+%      an ASCII85Decode filter, and `/MultipleDataSources true` with one
+%      string per component (#781)
 %   3. `colorimage`, one interleaved source: Gray, RGB (8 and 4 bits, the
-%      4-bit one from a procedure), CMYK, and `multi true` (a probe)
+%      4-bit one from a procedure), CMYK, and `multi true` with three
+%      `currentfile readhexstring` procedures, as older applications write
+%      it (#781): the rows follow in the order red 0, green 0, blue 0, red 1, ...
 %   4. `colorimage` from an inline filter, 1-bit RGB, 4-bit CMYK, and a
 %      colorimage drawn while the current space is DeviceGray (it ignores it)
 %
 % The inline sources read the program text that follows the line that calls
 % the helper, so each data line sits directly under its call.
 %
-% The probes are refusals today: separate colour sources (`colorimage` with
-% multi true: limitcheck; `/MultipleDataSources`: typecheck). Each is caught
-% and cleared, on a page with live images beside it. When one is implemented,
-% its cell starts to draw and the identity check reports DIFFERS.
+% Separate colour sources (`colorimage` with multi true, `/MultipleDataSources`)
+% were refusals until #781 and were pinned here as caught probes. They now draw;
+% the cells are the same ones. More multi-source forms are in image_planes.ps.
 
 /W 8 def  /H 6 def
 /_n 0 def
@@ -40,7 +42,6 @@
     2 index 3 1 roll put
   } for
 } def
-/probe { save exch mark exch stopped { } if cleartomark restore } def
 
 % A procedure DataSource over the string _data: `_rb` bytes per call, then ().
 /_row 0 def  /_rb 8 def  /_data () def
@@ -90,22 +91,23 @@
 205 4 3 { <0B 10 40 70 a0 d0 ff 30 60 90 c0 f0 20 80> /RunLengthDecode filter } L1
 showpage
 
-% ---- 2. dict image, four source forms and the multi-source probe -----------------
+% ---- 2. dict image, four source forms and the multi-source image -----------------
 /DeviceRGB setcolorspace
 5   W H { W H mul 3 mul mk } D1
 55  W H { W H mul 3 mul mk 3 W mul rowsrc } D1
 105 4 3 { currentfile /ASCIIHexDecode filter } D1
 0b 6c cd 2e 8f 19 7a db 3c 9d 27 88 e9 4a ab 35 96 f7 58 b9 43 a4 05 66 c7 51 b2 13 74 d5 5f c0 21 82 e3 6d >
 155 2 2 { (&3t3-d/Pe-OML?.~>) /ASCII85Decode filter } D1
-{ % /MultipleDataSources true with one string per component: refused today
-  205 5 translate 40 40 scale
+% three 48-byte planes, cut at different offsets from one busy string so they differ
+gsave 205 5 translate 40 40 scale
+  /_src W H mul 3 mul 2 add mk def
   8 dict begin
-    /ImageType 1 def /Width 2 def /Height 2 def /BitsPerComponent 8 def
+    /ImageType 1 def /Width W def /Height H def /BitsPerComponent 8 def
     /MultipleDataSources true def
-    /ImageMatrix [2 0 0 -2 0 2] def
-    /DataSource [ <ff 00 00 ff> <00 ff 00 ff> <00 00 ff ff> ] def
+    /ImageMatrix [W 0 0 H neg 0 H] def
+    /DataSource [ _src 0 48 getinterval _src 17 48 getinterval _src 40 48 getinterval ] def
   currentdict end image
-} probe
+grestore
 showpage
 
 % ---- 3. colorimage, single source ------------------------------------------------
@@ -113,10 +115,17 @@ showpage
 55  W H 8 3 { W H mul 3 mul mk } CI
 105 W H 4 3 { W H mul 3 mul 2 idiv mk 12 rowsrc } CI
 155 W H 8 4 { W H mul 4 mul mk } CI
-{ % separate per-component sources (multi true): refused today
-  205 5 translate 40 40 scale
-  2 2 8 [2 0 0 -2 0 2] <ff 00 00 ff> <00 ff 00 ff> <00 00 ff ff> true 3 colorimage
-} probe
+/rs 4 string def
+/rd { currentfile rs readhexstring pop } def   % one 4-byte row per call
+gsave 205 5 translate 40 40 scale
+  4 2 8 [4 0 0 -2 0 2] /rd load /rd load /rd load true 3 colorimage
+ff 80 00 40
+00 80 ff 40
+00 80 00 ff
+c0 20 80 e0
+40 e0 80 20
+20 c0 40 80
+grestore
 showpage
 
 % ---- 4. colorimage from a filter, 1 and 4 bits, over a gray current space --------

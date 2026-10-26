@@ -1,5 +1,5 @@
 %!PS-Adobe-3.0
-%%Title: image sample-format driver: Gray, RGB, CMYK, Indexed (issue #776)
+%%Title: image sample-format driver: Gray, RGB, CMYK, Indexed (issues #776, #781)
 %%Pages: 4
 %%BoundingBox: 0 0 260 50
 %%SelfTestPage: 260x50
@@ -12,23 +12,23 @@
 % colorimage, so scripts/identity_check.sh proved nothing for a change to the
 % image code (issue #776). `%%IdentityCorpus: always` makes the check render
 % this file in two-binary mode whatever --loader picked, so an image change is
-% always compared. The four image_*.ps drivers are a set:
+% always compared. The five image_*.ps drivers are a set:
 %
-%   image_formats.ps  this file: dict `image` at 1, 2, 4, 8 bits (and a
-%                     16-bit probe) in Gray, RGB, CMYK and Indexed spaces
+%   image_formats.ps  this file: dict `image` at 1, 2, 4, 8 and 16 bits in
+%                     Gray, RGB, CMYK and Indexed spaces
 %   image_sources.ps  every DataSource form, Level 1 `image`, `colorimage`
 %   image_masks.ps    `imagemask` and ImageType 3
 %   image_matrix.ps   /Interpolate, rotated and skewed matrices and CTMs
+%   image_planes.ps   separate per-component sources, 12 and 16 bits (#781)
 %
 % Samples are generated inline (no binary fixtures) by `mk`, a fixed busy byte
 % pattern, so a change in how samples are decoded or sampled shows up as a
 % pixel difference. One showpage per scenario (selftest/README.md): pages
 % 1-4 are Gray, RGB, CMYK, Indexed.
 %
-% The 16-bit cell is a probe. The engine refuses BitsPerComponent 16 today
-% (`rangecheck`); the probe catches that and clears the stack. The page still
-% has four live images next to it. When 16-bit lands, that cell starts to
-% draw and the identity check reports DIFFERS: review it with --expect-diff.
+% The last cell of each page is 16 bits a sample (#781; before that it was a
+% refusal probe, `rangecheck`). Samples wider than 8 bits are reduced to 8 on
+% output, in PNG, SVG and PDF alike.
 
 % ---- helpers ----------------------------------------------------------------
 /W 8 def  /H 6 def
@@ -63,30 +63,38 @@
   grestore
 } def
 
-% Run a drawing procedure that is expected to raise, keeping the page clean:
-% save/restore undoes any gsave left open, cleartomark any stray operand.
-/probe { save exch mark exch stopped { } if cleartomark restore } def
+% x idx16: a 16-bit Indexed cell whose indices are the low bytes (the high
+% byte is 0), so the palette is read rather than clamped at hival.
+/_s () def
+/idx16 {
+  /_x exch def
+  gsave _x 5 translate 40 40 scale
+  W H mul 2 mul mk /_s exch def
+  0 2 _s length 1 sub { _s exch 0 put } for
+  W H 16 _s dimg
+  grestore
+} def
 
 % ---- 1. Gray ------------------------------------------------------------------
 /DeviceGray setcolorspace
 5 1 1 fmt  55 2 1 fmt  105 4 1 fmt  155 8 1 fmt
-{ 205 16 1 fmt } probe
+205 16 1 fmt
 showpage
 
 % ---- 2. RGB -------------------------------------------------------------------
 /DeviceRGB setcolorspace
 5 1 3 fmt  55 2 3 fmt  105 4 3 fmt  155 8 3 fmt
-{ 205 16 3 fmt } probe
+205 16 3 fmt
 showpage
 
 % ---- 3. CMYK ------------------------------------------------------------------
 /DeviceCMYK setcolorspace
 5 1 4 fmt  55 2 4 fmt  105 4 4 fmt  155 8 4 fmt
-{ 205 16 4 fmt } probe
+205 16 4 fmt
 showpage
 
 % ---- 4. Indexed (a 256-entry RGB palette; the sample is the index) ---------------
 [/Indexed /DeviceRGB 255 768 mk] setcolorspace
 5 1 1 fmt  55 2 1 fmt  105 4 1 fmt  155 8 1 fmt
-{ 205 16 1 fmt } probe
+205 idx16
 showpage
