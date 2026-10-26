@@ -1,0 +1,150 @@
+%!PS-Adobe-3.0
+%%Title: imagemask and ImageType 3 driver (issue #776)
+%%Pages: 4
+%%BoundingBox: 0 0 260 50
+%%SelfTestPage: 260x50
+%%IdentityCorpus: always
+%%EndComments
+
+% Run with:  pscat --page 260x50 --lint-strict selftest/drivers/image_masks.ps
+%
+% One of the four image_*.ps drivers (see image_formats.ps for why they exist
+% and how scripts/identity_check.sh picks them up). This one covers stencils:
+%
+%   1. `imagemask`: operand form with polarity true and false, dict form with
+%      Decode [0 1] and [1 0], and /Interpolate true (a mask ignores it).
+%      Painted in red over a yellow page, so the unpainted cells show through.
+%   2. `imagemask` under a rotated CTM, a skewed CTM, a rotated and a skewed
+%      ImageMatrix, and a 16x16 mask under a circular clip
+%   3. ImageType 3 (InterleaveType 3): a 4x4 RGB image gated by an 8x8 mask,
+%      Decode [1 0], Decode [0 1], no Decode (paints the 1s, pinned against
+%      gs, #739), a coarser 2x2 mask, and InterleaveType 1 (a probe)
+%   4. ImageType 3 from inline `currentfile` filters (the mask's data comes
+%      first), under a rotated mask ImageMatrix, a CMYK image, an Indexed image
+%
+% The InterleaveType 1 cell is a refusal today (`limitcheck`); it is caught
+% and cleared, on a page with live images beside it.
+
+/_n 0 def
+/mk { % n -> a string of n bytes (a fixed, busy pattern)
+  /_n exch def
+  _n string
+  0 1 _n 1 sub {
+    dup dup 97 mul exch 5 idiv 41 mul add 11 add 256 mod
+    2 index 3 1 roll put
+  } for
+} def
+/probe { save exch mark exch stopped { } if cleartomark restore } def
+
+% An 8x8 disc, one byte per row, and a 16x16 one, two bytes per row.
+/disc8  <3c 7e ff ff ff ff 7e 3c> def
+/disc16 <07e0 1ff8 3ffc 7ffe 7ffe ffff ffff ffff ffff ffff ffff 7ffe 7ffe 3ffc 1ff8 07e0> def
+
+/page { 0.99 0.93 0.55 setrgbcolor 0 0 260 50 rectfill } def
+
+% ---- 1. imagemask: operand and dict forms ---------------------------------------
+page 0.8 0.1 0.1 setrgbcolor
+gsave   5 5 translate 40 40 scale 8 8 true  [8 0 0 -8 0 8] disc8 imagemask grestore
+gsave  55 5 translate 40 40 scale 8 8 false [8 0 0 -8 0 8] disc8 imagemask grestore
+gsave 105 5 translate 40 40 scale
+  << /ImageType 1 /Width 8 /Height 8 /ImageMatrix [8 0 0 -8 0 8]
+     /DataSource disc8 /BitsPerComponent 1 /Decode [0 1] >> imagemask
+grestore
+gsave 155 5 translate 40 40 scale
+  << /ImageType 1 /Width 8 /Height 8 /ImageMatrix [8 0 0 -8 0 8]
+     /DataSource disc8 /BitsPerComponent 1 /Decode [1 0] >> imagemask
+grestore
+gsave 205 5 translate 40 40 scale
+  << /ImageType 1 /Width 8 /Height 8 /ImageMatrix [8 0 0 -8 0 8]
+     /DataSource disc8 /BitsPerComponent 1 /Decode [1 0] /Interpolate true >> imagemask
+grestore
+showpage
+
+% ---- 2. imagemask: transforms ------------------------------------------------------
+page 0.1 0.2 0.7 setrgbcolor
+gsave 22 8 translate 30 rotate 30 30 scale
+  8 8 true [8 0 0 -8 0 8] disc8 imagemask
+grestore
+gsave 55 5 translate [1 0 0.5 1 0 0] concat 35 40 scale
+  8 8 true [8 0 0 -8 0 8] disc8 imagemask
+grestore
+gsave 105 5 translate 40 40 scale % a rotated ImageMatrix: not the unit idiom
+  8 8 true [5.657 5.657 -5.657 5.657 4 -1.657] disc8 imagemask
+grestore
+gsave 155 5 translate 40 40 scale % a skewed ImageMatrix
+  8 8 true [8 0 3 -8 -1.5 8] disc8 imagemask
+grestore
+gsave 205 25 translate % a 16x16 mask under a circular clip
+  newpath 0 0 20 0 360 arc clip
+  -20 -20 translate 40 40 scale
+  16 16 true [16 0 0 -16 0 16] disc16 imagemask
+grestore
+showpage
+
+% ---- 3. ImageType 3 ------------------------------------------------------------------
+% x decode-or-null mw mh msrc  -> image through disc-shaped masks
+/T3 { % x dec mw mh msrc
+  /_ms exch def /_mh exch def /_mw exch def /_dec exch def /_x exch def
+  gsave _x 5 translate 40 40 scale
+  << /ImageType 3 /InterleaveType 3
+     /DataDict << /ImageType 1 /Width 4 /Height 4 /BitsPerComponent 8
+                  /ImageMatrix [4 0 0 -4 0 4] /DataSource 48 mk >>
+     /MaskDict << /ImageType 1 /Width _mw /Height _mh /BitsPerComponent 1
+                  /ImageMatrix [_mw 0 0 _mh neg 0 _mh] /DataSource _ms >>
+  >>
+  _dec null ne { dup /MaskDict get /Decode _dec put } if
+  image
+  grestore
+} def
+/DeviceRGB setcolorspace
+5   [1 0] 8 8 disc8 T3
+55  [0 1] 8 8 disc8 T3
+105 null  8 8 disc8 T3
+155 [1 0] 2 2 <40 80> T3
+{ 205 5 translate 40 40 scale
+  << /ImageType 3 /InterleaveType 1 >> image } probe
+showpage
+
+% ---- 4. ImageType 3: filters, a rotated mask, CMYK, Indexed ---------------------------
+% The mask's source is read in full before the image's: its hex comes first.
+/DeviceRGB setcolorspace
+gsave 5 5 translate 40 40 scale
+  << /ImageType 3 /InterleaveType 3
+     /DataDict << /ImageType 1 /Width 2 /Height 2 /BitsPerComponent 8
+                  /ImageMatrix [2 0 0 -2 0 2]
+                  /DataSource currentfile /ASCIIHexDecode filter >>
+     /MaskDict << /ImageType 1 /Width 8 /Height 8 /BitsPerComponent 1
+                  /ImageMatrix [8 0 0 -8 0 8] /Decode [1 0]
+                  /DataSource currentfile /ASCIIHexDecode filter >>
+  >> image
+3c 7e ff ff ff ff 7e 3c >
+ff 20 20  20 ff 20  20 20 ff  ff ff 20 >
+grestore
+gsave 55 5 translate 40 40 scale % the mask's own matrix is rotated 45 degrees
+  << /ImageType 3 /InterleaveType 3
+     /DataDict << /ImageType 1 /Width 4 /Height 4 /BitsPerComponent 8
+                  /ImageMatrix [4 0 0 -4 0 4] /DataSource 48 mk >>
+     /MaskDict << /ImageType 1 /Width 8 /Height 8 /BitsPerComponent 1
+                  /ImageMatrix [5.657 5.657 -5.657 5.657 4 -1.657] /Decode [1 0]
+                  /DataSource <ff ff c3 c3 c3 c3 ff ff> >>
+  >> image
+grestore
+/DeviceCMYK setcolorspace
+gsave 105 5 translate 40 40 scale
+  << /ImageType 3 /InterleaveType 3
+     /DataDict << /ImageType 1 /Width 4 /Height 4 /BitsPerComponent 8
+                  /ImageMatrix [4 0 0 -4 0 4] /DataSource 64 mk >>
+     /MaskDict << /ImageType 1 /Width 8 /Height 8 /BitsPerComponent 1
+                  /ImageMatrix [8 0 0 -8 0 8] /Decode [1 0] /DataSource disc8 >>
+  >> image
+grestore
+[/Indexed /DeviceRGB 255 768 mk] setcolorspace
+gsave 155 5 translate 40 40 scale
+  << /ImageType 3 /InterleaveType 3
+     /DataDict << /ImageType 1 /Width 4 /Height 4 /BitsPerComponent 8
+                  /ImageMatrix [4 0 0 -4 0 4] /DataSource 16 mk >>
+     /MaskDict << /ImageType 1 /Width 8 /Height 8 /BitsPerComponent 1
+                  /ImageMatrix [8 0 0 -8 0 8] /Decode [1 0] /DataSource disc8 >>
+  >> image
+grestore
+showpage
