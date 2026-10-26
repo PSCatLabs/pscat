@@ -7,8 +7,10 @@
 //! part of the library.
 //!
 //! An MCP server over stdio (newline-delimited JSON-RPC 2.0) exposing
-//! six tools: `render_postscript`, `handwrite`, `chalkboard_math`,
-//! `review_sheet`, `describe_art_capabilities`, `eval_postscript`. Works with any MCP
+//! ten tools: `render_postscript`, `handwrite`, `chalkboard_math`,
+//! `review_sheet`, `describe_art_capabilities`, `eval_postscript`, and the
+//! render jobs `start_render`, `render_status`, `render_result`,
+//! `cancel_render`. Works with any MCP
 //! client — Claude Code, Codex, OpenClaw, Hermes; registration
 //! one-liners are in `docs/guides/agents.md`.
 //!
@@ -31,6 +33,22 @@
 //! not implemented: its `server/discover` probe gets "method not found",
 //! which is what tells a dual-era client to fall back to `initialize`.
 //!
+//! **Concurrency** (issues #622, #741). The main thread reads stdin and
+//! answers what never blocks itself: `initialize`, `ping`, `tools/list`,
+//! `notifications/cancelled` and the four job tools. Every other
+//! `tools/call` runs on its own thread, registered under its request id
+//! before the thread starts, so `notifications/cancelled` finds it and
+//! kills its child, and `ping` is answered during a long render. Replies
+//! go through one writer ([`Server::send`]): the whole line is written
+//! under the stdout lock, so two threads never interleave. Render jobs
+//! (`start_render` and friends) run on threads of their own, in a job table
+//! with a cap on running and kept jobs. When stdin closes, every job is
+//! cancelled, the calls already asked for finish and answer, and every
+//! thread is joined before the server exits, so no child outlives a clean
+//! shutdown; each child also gets
+//! `--exit-with-parent`, which stops it if the server is killed outright
+//! (Unix).
+//!
 //! **Bounds** (issue #568, `SECURITY.md`): every child run has a
 //! wall-clock timeout and a cap on captured output; `source`/`text` have
 //! a size cap; inline images have a byte and page cap; `out_path` is
@@ -38,11 +56,13 @@
 //! and written by rename, never by following a symlink. Nothing but JSON-RPC is ever written to stdout: diagnostics
 //! go to stderr, and child output is always captured through pipes.
 
+use std::collections::HashMap;
 use std::io::{BufRead, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Child, Command, ExitCode, Stdio};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use serde_json::{Map, Value, json};
@@ -59,6 +79,16 @@ const MAX_CHILD_OUTPUT: usize = 4 << 20;
 /// Pages returned inline by one call (more: write them with `out_path`).
 const MAX_INLINE_PAGES: usize = 20;
 
+/// Tool calls (not jobs) running at once. Each is a child of up to
+/// `--max-memory`; a call past this is refused with `busy`, not queued,
+/// since a queued call would only eat the client's own timeout.
+const MAX_CALLS: usize = 4;
+
+/// Render jobs kept at once: queued, running and finished ones whose result
+/// has not expired. A new job evicts the oldest finished one past this, and
+/// is refused with `busy` when none has finished.
+const MAX_HELD_JOBS: usize = 16;
+
 const USAGE: &str = "usage: pscat-mcp [options]
    or: pscat mcp [options]
 
@@ -67,6 +97,12 @@ An MCP server on stdin/stdout (launched by an MCP client, not by hand).
   --out-root DIR         directory out_path is confined to (default: the
                          working directory; out_path is off when that is /)
   --timeout SECS         wall-clock limit per tool call (default 60)
+  --job-timeout SECS     wall-clock limit per render job, start_render
+                         (default 3600)
+  --max-jobs N           render jobs running at once; more wait, queued
+                         (default 2)
+  --job-ttl SECS         how long a finished job's result is kept (default
+                         3600)
   --max-input-bytes N    largest source/text accepted (default 1048576)
   --max-image-bytes N    largest total of inline image bytes per call
                          (default 3750000, about 5 MB once base64-encoded)
@@ -83,12 +119,27 @@ An MCP server on stdin/stdout (launched by an MCP client, not by hand).
   -V, --version          print the version";
 
 /// The limits and the output root, fixed for the server's lifetime by
-/// whoever registered it. No tool argument can change them.
+/// whoever registered it. No tool argument can change them. Each call and
+/// job runs on its own copy, which adds that run's cancel flag and, for a
+/// job, its page counter and the job timeout.
 #[derive(Clone)]
 struct Config {
     /// Canonical output root, or why `out_path` is unavailable.
     out_root: Result<PathBuf, String>,
     timeout: Duration,
+    /// `--job-timeout`: the wall-clock limit of one render job.
+    job_timeout: Duration,
+    /// `--max-jobs`: render jobs running at once.
+    max_jobs: usize,
+    /// `--job-ttl`: how long a finished job is kept.
+    job_ttl: Duration,
+    /// This run's cancel flag: set by `notifications/cancelled`,
+    /// `cancel_render` or shutdown; `run_child` kills its child when it is.
+    /// The server's own copy holds a flag nobody sets.
+    cancel: Arc<AtomicBool>,
+    /// A job's finished pages, from the child's `--progress` lines; `None`
+    /// for a plain call.
+    progress: Option<Arc<AtomicU64>>,
     max_input: usize,
     max_image: usize,
     /// Largest page, board or sheet in device pixels (issue #711): one cap
@@ -104,6 +155,25 @@ struct Config {
 }
 
 impl Config {
+    /// The copy one tool call runs on.
+    fn for_call(&self, cancel: Arc<AtomicBool>) -> Config {
+        Config {
+            cancel,
+            ..self.clone()
+        }
+    }
+
+    /// The copy one render job runs on: the job timeout, its own flag and
+    /// page counter.
+    fn for_job(&self, cancel: Arc<AtomicBool>, progress: Arc<AtomicU64>) -> Config {
+        Config {
+            timeout: self.job_timeout,
+            cancel,
+            progress: Some(progress),
+            ..self.clone()
+        }
+    }
+
     /// The flags that put the interpreter's own limits on a child run. The
     /// time limit is `--timeout` less a margin of a quarter of it, at most
     /// 5 s (55 s of the default 60): the interpreter stops first, with a
@@ -117,12 +187,19 @@ impl Config {
         cmd.arg("--max-time").arg(format!("{secs:.3}"));
         cmd.arg("--max-steps").arg(self.max_steps.to_string());
         cmd.arg("--max-memory").arg(self.max_memory_mib.to_string());
+        // A server that is killed (no chance to cancel) takes its renders
+        // with it.
+        cmd.arg("--exit-with-parent")
+            .arg(std::process::id().to_string());
     }
 
     /// `Ok(None)`: `--help`/`--version` was handled, exit 0.
     fn from_args(args: impl Iterator<Item = String>) -> Result<Option<Config>, String> {
         let mut out_root: Option<String> = None;
         let mut timeout = 60u64;
+        let mut job_timeout = 3600u64;
+        let mut max_jobs = 2u64;
+        let mut job_ttl = 3600u64;
         let mut max_input = 1usize << 20;
         let mut max_image = 3_750_000usize;
         let mut max_pixels = DEFAULT_MAX_PIXELS;
@@ -151,6 +228,11 @@ impl Config {
                 }
                 "--out-root" => out_root = Some(value("--out-root")?),
                 "--timeout" => timeout = number("--timeout", value("--timeout")?, 1, 86_400)?,
+                "--job-timeout" => {
+                    job_timeout = number("--job-timeout", value("--job-timeout")?, 1, 86_400)?
+                }
+                "--max-jobs" => max_jobs = number("--max-jobs", value("--max-jobs")?, 1, 16)?,
+                "--job-ttl" => job_ttl = number("--job-ttl", value("--job-ttl")?, 1, 86_400)?,
                 "--max-input-bytes" => {
                     max_input =
                         number("--max-input-bytes", value("--max-input-bytes")?, 1, 1 << 30)?
@@ -192,6 +274,11 @@ impl Config {
         Ok(Some(Config {
             out_root,
             timeout: Duration::from_secs(timeout),
+            job_timeout: Duration::from_secs(job_timeout),
+            max_jobs: max_jobs as usize,
+            job_ttl: Duration::from_secs(job_ttl),
+            cancel: Arc::new(AtomicBool::new(false)),
+            progress: None,
             max_input,
             max_image,
             max_pixels,
@@ -235,13 +322,14 @@ pub fn run(args: impl Iterator<Item = String>) -> ExitCode {
     // envelope. Past this the line is dropped unread; under it, an
     // oversized `source` still gets a proper tool error on its own id.
     let max_line = cfg.max_input.saturating_mul(6).saturating_add(64 << 10);
+    let server = Arc::new(Server::new(cfg));
     let stdin = std::io::stdin();
     let mut input = stdin.lock();
     loop {
         let line = match read_line_bounded(&mut input, max_line) {
             Ok(Line::Eof) | Err(_) => break,
             Ok(Line::TooLong) => {
-                send(&error(
+                server.send(&error(
                     Value::Null,
                     -32600,
                     &format!("request line longer than {max_line} bytes; dropped"),
@@ -254,18 +342,176 @@ pub fn run(args: impl Iterator<Item = String>) -> ExitCode {
         if line.iter().all(u8::is_ascii_whitespace) {
             continue;
         }
-        if let Some(reply) = handle_message(&cfg, &line) {
-            send(&reply);
+        if let Some(reply) = handle_message(&server, &line) {
+            server.send(&reply);
         }
     }
+    server.shut_down();
     ExitCode::SUCCESS
 }
 
-fn send(reply: &Value) {
-    // serde_json escapes every control character, so one reply is one line.
-    let mut out = std::io::stdout().lock();
-    let _ = writeln!(out, "{reply}");
-    let _ = out.flush();
+/// A mutex that a panicking thread poisoned still holds consistent data
+/// here (every critical section is a few field writes), so take it anyway.
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// The server's shared state. Locks are never nested: `inflight`, `jobs`
+/// and `threads` are each taken alone, and the stdout lock only inside
+/// [`Server::send`], with nothing else held.
+struct Server {
+    cfg: Config,
+    /// Tool calls running on their own thread, by request id (its JSON
+    /// text, so `1` and `"1"` differ), with each call's cancel flag.
+    inflight: Mutex<HashMap<String, Arc<AtomicBool>>>,
+    jobs: Mutex<JobTable>,
+    /// Signalled whenever a job slot frees up or a job is cancelled, so a
+    /// queued job looks again.
+    job_wake: Condvar,
+    /// Every call and job thread not yet joined.
+    threads: Mutex<Vec<JoinHandle<()>>>,
+}
+
+impl Server {
+    fn new(cfg: Config) -> Self {
+        Server {
+            cfg,
+            inflight: Mutex::new(HashMap::new()),
+            jobs: Mutex::new(JobTable::default()),
+            job_wake: Condvar::new(),
+            threads: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Write one message. The single writer: the line is built first and
+    /// written whole under the stdout lock, so replies from several threads
+    /// never interleave. serde_json escapes every control character, so one
+    /// reply is one line.
+    fn send(&self, reply: &Value) {
+        let line = format!("{reply}\n");
+        let mut out = std::io::stdout().lock();
+        let _ = out.write_all(line.as_bytes());
+        let _ = out.flush();
+    }
+
+    /// Keep a thread's handle for the join at shutdown, dropping the ones
+    /// that have finished (their threads are gone; nothing to reap).
+    fn track(&self, handle: JoinHandle<()>) {
+        let mut threads = lock(&self.threads);
+        threads.retain(|h| !h.is_finished());
+        threads.push(handle);
+    }
+
+    /// `notifications/cancelled`: flag the call, whose `run_child` then
+    /// kills the child. An id that is not running (finished, unknown, or a
+    /// fast request answered inline) is ignored, as the spec allows.
+    fn cancel_request(&self, request_id: &Value) {
+        if let Some(flag) = lock(&self.inflight).get(&request_id.to_string()) {
+            flag.store(true, Ordering::SeqCst);
+        }
+    }
+
+    /// Run a tool call on its own thread. `Some` is an immediate reply: the
+    /// id is already running, or too many calls are.
+    fn spawn_call(self: &Arc<Self>, id: Value, tool: ToolFn, args: Value) -> Option<Value> {
+        let key = id.to_string();
+        let cancel = Arc::new(AtomicBool::new(false));
+        {
+            let mut inflight = lock(&self.inflight);
+            if inflight.contains_key(&key) {
+                return Some(error(
+                    id,
+                    -32600,
+                    "a request with this id is still running",
+                    None,
+                ));
+            }
+            if inflight.len() >= MAX_CALLS {
+                return Some(ok(
+                    id,
+                    ToolError::new(
+                        "busy",
+                        format!(
+                            "{MAX_CALLS} tool calls are already running, this server's limit; \
+                             wait for one to finish, or use start_render for a long render"
+                        ),
+                    )
+                    .with("limit_calls", json!(MAX_CALLS))
+                    .into_result(),
+                ));
+            }
+            // Registered before the thread starts, so a cancel sent right
+            // after the request always finds it.
+            inflight.insert(key.clone(), Arc::clone(&cancel));
+        }
+        let server = Arc::clone(self);
+        let reply_id = id.clone();
+        let spawned = std::thread::Builder::new()
+            .name("pscat-mcp-call".into())
+            .spawn(move || {
+                let cfg = server.cfg.for_call(Arc::clone(&cancel));
+                let outcome =
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| tool(&cfg, &args)));
+                let reply = match outcome {
+                    Ok(Ok(content)) => {
+                        ok(reply_id, json!({ "content": content, "isError": false }))
+                    }
+                    Ok(Err(e)) => ok(reply_id, e.into_result()),
+                    Err(_) => error(reply_id, -32603, "internal error: the tool panicked", None),
+                };
+                // Out of the table before the reply is written: a client
+                // may reuse an id once it has its answer (the tests do).
+                // The removal and the flag read share the lock with
+                // `cancel_request`, so a cancel either lands first (then no
+                // reply, as the spec asks) or finds nothing to cancel.
+                let cancelled = {
+                    let mut inflight = lock(&server.inflight);
+                    inflight.remove(&key);
+                    cancel.load(Ordering::SeqCst)
+                };
+                if !cancelled {
+                    server.send(&reply);
+                }
+            });
+        match spawned {
+            Ok(handle) => {
+                self.track(handle);
+                None
+            }
+            Err(e) => {
+                lock(&self.inflight).remove(&id.to_string());
+                Some(error(
+                    id,
+                    -32603,
+                    &format!("cannot start a thread: {e}"),
+                    None,
+                ))
+            }
+        }
+    }
+
+    /// Stdin closed: cancel every job, let the calls already asked for
+    /// finish and answer (each is bounded by `--timeout`; a client that
+    /// pipes one request and closes stdin still gets its reply, as it did
+    /// when requests were handled one at a time), then join every thread, so
+    /// each child is reaped and each scratch directory removed before the
+    /// process exits. A client that wants a call stopped sends
+    /// `notifications/cancelled` first.
+    fn shut_down(&self) {
+        {
+            let jobs = lock(&self.jobs);
+            for job in jobs.jobs.values() {
+                job.cancel.store(true, Ordering::SeqCst);
+            }
+            // Under the lock, so a queued job between its flag check and
+            // its wait cannot miss this.
+            self.job_wake.notify_all();
+        }
+        let threads = std::mem::take(&mut *lock(&self.threads));
+        for handle in threads {
+            let _ = handle.join();
+        }
+    }
 }
 
 enum Line {
@@ -316,8 +562,10 @@ fn read_line_bounded(r: &mut impl BufRead, max: usize) -> std::io::Result<Line> 
 }
 
 /// The reply to one line, or `None` when JSON-RPC says to stay silent
-/// (notifications, and responses to requests we never send).
-fn handle_message(cfg: &Config, line: &[u8]) -> Option<Value> {
+/// (notifications, and responses to requests we never send) or when a
+/// thread will answer (a tool call).
+fn handle_message(server: &Arc<Server>, line: &[u8]) -> Option<Value> {
+    let cfg = &server.cfg;
     let msg: Value = match serde_json::from_slice(line) {
         Ok(v) => v,
         Err(e) => {
@@ -347,7 +595,16 @@ fn handle_message(cfg: &Config, line: &[u8]) -> Option<Value> {
         return Some(error(id, -32600, "missing method", None));
     };
     let id = match obj.get("id") {
-        None => return None, // a notification
+        None => {
+            // A notification. `notifications/cancelled` stops a running
+            // call; every other one needs nothing from us.
+            if method.as_str() == Some("notifications/cancelled")
+                && let Some(request_id) = obj.get("params").and_then(|p| p.get("requestId"))
+            {
+                server.cancel_request(request_id);
+            }
+            return None;
+        }
         Some(_) => match valid_id(obj) {
             Some(id) => id,
             None => {
@@ -379,7 +636,7 @@ fn handle_message(cfg: &Config, line: &[u8]) -> Option<Value> {
         },
         "ping" => ok(id, json!({})),
         "tools/list" => ok(id, json!({ "tools": tool_list(cfg) })),
-        "tools/call" => tools_call(cfg, id, params),
+        "tools/call" => return tools_call(server, id, params),
         // `server/discover` (2026-07-28) lands here on purpose: a plain
         // "method not found" marks this as a legacy server.
         _ => error(id, -32601, &format!("method not found: {method}"), None),
@@ -446,9 +703,13 @@ fn initialize_result(cfg: &Config, params: &Value) -> Result<Value, (String, Val
              chalkboard_math writes a LaTeX formula on a chalkboard. \
              Each call is limited to {}s: this server's --timeout, 60 by default, which \
              whoever registered it can raise (up to 86400); the MCP client's own tool-call \
-             timeout can also cut a call off (Codex's default is 60 s). A page, board or sheet is limited to {} pixels. \
+             timeout can also cut a call off (Codex's default is 60 s). For a render that may \
+             take longer, use start_render: it returns a job_id at once, render_status polls \
+             it, render_result fetches the pages, cancel_render stops it; a job may run {}s. \
+             A page, board or sheet is limited to {} pixels. \
              {out_path}",
             cfg.timeout.as_secs(),
+            cfg.job_timeout.as_secs(),
             cfg.max_pixels
         ),
     }))
@@ -464,29 +725,51 @@ fn is_revision(v: &str) -> bool {
         })
 }
 
-fn tools_call(cfg: &Config, id: Value, params: &Value) -> Value {
+/// A tool that runs a child: on its own thread, cancellable.
+type ToolFn = fn(&Config, &Value) -> Result<Value, ToolError>;
+
+/// A job tool: answered inline (it only reads or writes the job table),
+/// returning the whole `tools/call` result.
+type JobToolFn = fn(&Arc<Server>, &Value) -> Result<Value, ToolError>;
+
+/// A `tools/call`: the name and arguments are checked here, so a malformed
+/// call is answered in order; a job tool is answered inline; any other tool
+/// runs on its own thread and `None` is returned.
+fn tools_call(server: &Arc<Server>, id: Value, params: &Value) -> Option<Value> {
+    enum Tool {
+        Child(ToolFn),
+        Job(JobToolFn),
+    }
     let Some(name) = params.get("name").and_then(Value::as_str) else {
-        return error(id, -32602, "tools/call needs a tool name", None);
+        return Some(error(id, -32602, "tools/call needs a tool name", None));
     };
-    let tool: fn(&Config, &Value) -> Result<Value, ToolError> = match name {
-        "render_postscript" => render_postscript,
-        "handwrite" => handwrite,
-        "chalkboard_math" => chalkboard_math,
-        "review_sheet" => review_sheet,
-        "describe_art_capabilities" => |cfg, _| describe_art_capabilities(cfg),
-        "eval_postscript" => eval_postscript,
-        other => return error(id, -32602, &format!("unknown tool: {other}"), None),
+    let tool = match name {
+        "render_postscript" => Tool::Child(render_postscript),
+        "handwrite" => Tool::Child(handwrite),
+        "chalkboard_math" => Tool::Child(chalkboard_math),
+        "review_sheet" => Tool::Child(review_sheet),
+        "describe_art_capabilities" => Tool::Child(|cfg, _| describe_art_capabilities(cfg)),
+        "eval_postscript" => Tool::Child(eval_postscript),
+        "start_render" => Tool::Job(start_render),
+        "render_status" => Tool::Job(render_status),
+        "render_result" => Tool::Job(render_result),
+        "cancel_render" => Tool::Job(cancel_render),
+        other => return Some(error(id, -32602, &format!("unknown tool: {other}"), None)),
     };
     let empty = Value::Object(Map::new());
     let args = params.get("arguments").unwrap_or(&empty);
-    let result = if args.is_object() {
-        tool(cfg, args)
-    } else {
-        Err(ToolError::invalid("arguments must be an object"))
-    };
-    match result {
-        Ok(content) => ok(id, json!({ "content": content, "isError": false })),
-        Err(e) => ok(id, e.into_result()),
+    if !args.is_object() {
+        return Some(ok(
+            id,
+            ToolError::invalid("arguments must be an object").into_result(),
+        ));
+    }
+    match tool {
+        Tool::Job(f) => Some(match f(server, args) {
+            Ok(result) => ok(id, result),
+            Err(e) => ok(id, e.into_result()),
+        }),
+        Tool::Child(f) => server.spawn_call(id, f, args.clone()),
     }
 }
 
@@ -549,18 +832,23 @@ fn image_content(png: &[u8]) -> Value {
 /// true) are the pessimistic ones, so leaving a field out is not neutral.
 /// `destructiveHint` is false even for the writers: `out_path` is confined to
 /// the output root and replaces only an existing render file of the same
-/// extension. `idempotentHint` is true everywhere: the same arguments produce
-/// the same output, and a repeated write replaces the same file. `openWorldHint`
+/// extension. `idempotentHint` is true for every tool but `start_render`
+/// (each call starts another job): the same arguments produce the same
+/// output, and a repeated write replaces the same file. `openWorldHint`
 /// is false: no tool touches the network. The hints are static per tool, so a
 /// tool whose behaviour depends on an argument (`out_path`) gets the
 /// conservative `readOnlyHint: false`. A new tool must call this and add its
 /// row to the table in `tests/mcp.rs`.
 fn annotations(title: &str, read_only: bool) -> Value {
+    annotations_with(title, read_only, true)
+}
+
+fn annotations_with(title: &str, read_only: bool, idempotent: bool) -> Value {
     json!({
         "title": title,
         "readOnlyHint": read_only,
         "destructiveHint": false,
-        "idempotentHint": true,
+        "idempotentHint": idempotent,
         "openWorldHint": false
     })
 }
@@ -576,6 +864,19 @@ fn tool_list(cfg: &Config) -> Value {
         ),
         Err(why) => format!("{why}. "),
     };
+    let render_schema = json!({
+        "type": "object",
+        "properties": {
+            "source": { "type": "string", "description": "The PostScript program" },
+            "width": { "type": "integer", "minimum": 1, "maximum": 8000, "description": "Page width in points (default 612)" },
+            "height": { "type": "integer", "minimum": 1, "maximum": 8000, "description": "Page height in points (default 792)" },
+            "dpi": { "type": "number", "minimum": 9, "maximum": 1200, "description": "Device resolution (default 72; 144 = 2x pixels)" },
+            "format": { "type": "string", "enum": ["png", "svg", "pdf"], "description": "Output format (default png)" },
+            "halftone": { "type": "boolean", "description": "Screen the raster like a mono laser printer (png only)" },
+            "out_path": { "type": "string", "description": format!("{out_path}Required for pdf. A multi-page render writes name-001.ext, name-002.ext, ...") }
+        },
+        "required": ["source"]
+    });
     let max_pixels = cfg.max_pixels;
     let max_latex = cfg.max_latex;
     let canvas = format!(
@@ -604,19 +905,7 @@ fn tool_list(cfg: &Config) -> Value {
                 file of that extension), which is why this tool is not marked read-only. The \
                 program can read any local file you can.",
                 cfg.max_image),
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "source": { "type": "string", "description": "The PostScript program" },
-                    "width": { "type": "integer", "minimum": 1, "maximum": 8000, "description": "Page width in points (default 612)" },
-                    "height": { "type": "integer", "minimum": 1, "maximum": 8000, "description": "Page height in points (default 792)" },
-                    "dpi": { "type": "number", "minimum": 9, "maximum": 1200, "description": "Device resolution (default 72; 144 = 2x pixels)" },
-                    "format": { "type": "string", "enum": ["png", "svg", "pdf"], "description": "Output format (default png)" },
-                    "halftone": { "type": "boolean", "description": "Screen the raster like a mono laser printer (png only)" },
-                    "out_path": { "type": "string", "description": format!("{out_path}Required for pdf. A multi-page render writes name-001.ext, name-002.ext, ...") }
-                },
-                "required": ["source"]
-            }
+            "inputSchema": render_schema.clone()
         },
         {
             "name": "handwrite",
@@ -788,8 +1077,62 @@ fn tool_list(cfg: &Config) -> Value {
                 },
                 "required": ["source"]
             }
+        },
+        {
+            "name": "start_render",
+            "title": "Start a render job",
+            "annotations": annotations_with("Start a render job", false, false),
+            "description": format!("Start render_postscript as a background job, for a render that \
+                may take longer than one call: same arguments, returns a job_id at once. Poll \
+                render_status(job_id) until the state is done, failed or cancelled, then \
+                render_result(job_id) returns exactly what render_postscript would (images, \
+                error text, Lint, Warnings, the file written). A job may run {}s (the server's \
+                --job-timeout) under the same step, memory and pixel limits; {} run at once \
+                and more wait queued; a finished job is kept {}s. Bad arguments are refused \
+                here, before any job starts. Writes a file only when out_path is given.",
+                cfg.job_timeout.as_secs(), cfg.max_jobs, cfg.job_ttl.as_secs()),
+            "inputSchema": render_schema
+        },
+        {
+            "name": "render_status",
+            "title": "Render job status",
+            "annotations": annotations("Render job status", true),
+            "description": "The state of a start_render job: queued, running, done, failed or \
+                cancelled, with elapsed_seconds and pages_done (pages ended by showpage so \
+                far; a single page shows 0 while it is drawn). Answers at once, even while renders run. \
+                A failed job's error is included.",
+            "inputSchema": job_id_schema("The job_id start_render returned")
+        },
+        {
+            "name": "render_result",
+            "title": "Render job result",
+            "annotations": annotations("Render job result", true),
+            "description": "The result of a finished start_render job: exactly what \
+                render_postscript returns (a failed render is an error result with its partial \
+                page, as there). A job still queued or running is a job_not_finished error; a \
+                cancelled one, cancelled. The result can be fetched again until the job expires.",
+            "inputSchema": job_id_schema("The job_id start_render returned")
+        },
+        {
+            "name": "cancel_render",
+            "title": "Cancel a render job",
+            "annotations": annotations("Cancel a render job", false),
+            "description": "Cancel a start_render job: a queued job never starts, a running one's \
+                render is stopped. Returns at once; render_status says cancelled once the render \
+                has stopped. A finished job is left as it is.",
+            "inputSchema": job_id_schema("The job_id to cancel")
         }
     ])
+}
+
+fn job_id_schema(description: &str) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "job_id": { "type": "string", "description": description }
+        },
+        "required": ["job_id"]
+    })
 }
 
 // --- argument checks ------------------------------------------------
@@ -867,12 +1210,29 @@ fn number_arg(n: f64) -> String {
 // --- the tools ------------------------------------------------------
 
 fn render_postscript(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
+    render_run(cfg, &render_plan(cfg, args)?)
+}
+
+/// A checked `render_postscript` request: everything that can be refused
+/// without running the program has been, so `start_render` can refuse it at
+/// once instead of in the job.
+struct RenderPlan {
+    source: String,
+    format: &'static str,
+    flag: &'static str,
+    width: i64,
+    height: i64,
+    dpi: Option<f64>,
+    halftone: bool,
+    dest: Option<Dest>,
+}
+
+fn render_plan(cfg: &Config, args: &Value) -> Result<RenderPlan, ToolError> {
     let source = required_text(cfg, args, "source")?;
-    let format = optional_str(args, "format")?.unwrap_or("png");
-    let flag = match format {
-        "png" => "--png",
-        "svg" => "--svg",
-        "pdf" => "--pdf",
+    let (format, flag) = match optional_str(args, "format")?.unwrap_or("png") {
+        "png" => ("png", "--png"),
+        "svg" => ("svg", "--svg"),
+        "pdf" => ("pdf", "--pdf"),
         other => {
             return Err(ToolError::invalid(format!(
                 "format must be png, svg or pdf, got {other:?}"
@@ -899,16 +1259,43 @@ fn render_postscript(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
             "pdf output needs out_path (a PDF is a file, not a chat message)",
         ));
     }
+    Ok(RenderPlan {
+        source: source.to_string(),
+        format,
+        flag,
+        width,
+        height,
+        dpi,
+        halftone,
+        dest,
+    })
+}
 
+/// Run a checked render: the child, the pages, the file and the content.
+fn render_run(cfg: &Config, plan: &RenderPlan) -> Result<Value, ToolError> {
+    let RenderPlan {
+        source,
+        format,
+        flag,
+        width,
+        height,
+        dpi,
+        halftone,
+        dest,
+    } = plan;
+    let (format, flag, dpi) = (*format, *flag, *dpi);
     let scratch = ScratchDir::new()?;
     let out = scratch.path().join(format!("page.{format}"));
     let mut cmd = Command::new(pscat_bin()?);
     cfg.interpreter_args(&mut cmd);
+    if cfg.progress.is_some() {
+        cmd.arg("--progress");
+    }
     cmd.arg("--page").arg(format!("{width}x{height}"));
     if let Some(dpi) = dpi {
         cmd.arg("--dpi").arg(number_arg(dpi));
     }
-    if halftone {
+    if *halftone {
         cmd.arg("--halftone");
     }
     cmd.arg(flag).arg(&out).arg("-").arg("--lint");
@@ -961,6 +1348,324 @@ fn render_postscript(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
     Ok(Value::Array(content))
 }
 
+// --- render jobs (#741) ----------------------------------------------
+
+/// The render jobs: queued, running and finished (until they expire).
+#[derive(Default)]
+struct JobTable {
+    jobs: HashMap<String, Job>,
+    /// Jobs holding a slot (at most `--max-jobs`).
+    running: usize,
+    /// The last job number handed out; ids are `job-N`.
+    next: u64,
+}
+
+struct Job {
+    /// Its number: the order jobs start in, and the oldest is evicted first.
+    seq: u64,
+    created: Instant,
+    finished: Option<Instant>,
+    state: JobState,
+    cancel: Arc<AtomicBool>,
+    /// Pages finished so far (the child's `--progress` lines).
+    pages: Arc<AtomicU64>,
+}
+
+enum JobState {
+    Queued,
+    Running,
+    /// The `tools/call` result `render_postscript` would have returned.
+    Done(Value),
+    /// The same, an error result (`isError: true`).
+    Failed(Value),
+    Cancelled,
+}
+
+impl JobState {
+    fn name(&self) -> &'static str {
+        match self {
+            JobState::Queued => "queued",
+            JobState::Running => "running",
+            JobState::Done(_) => "done",
+            JobState::Failed(_) => "failed",
+            JobState::Cancelled => "cancelled",
+        }
+    }
+}
+
+impl JobTable {
+    /// Drop the finished jobs older than `ttl`.
+    fn purge(&mut self, ttl: Duration) {
+        self.jobs
+            .retain(|_, j| j.finished.is_none_or(|f| f.elapsed() < ttl));
+    }
+
+    /// Record a job's end. Its slot, if it held one, is released by the
+    /// caller.
+    fn finish(&mut self, id: &str, state: JobState) {
+        if let Some(job) = self.jobs.get_mut(id) {
+            job.state = state;
+            job.finished = Some(Instant::now());
+        }
+    }
+
+    /// Whether `seq` is the oldest queued job not cancelled: jobs start in
+    /// the order they were asked for.
+    fn first_in_line(&self, seq: u64) -> bool {
+        self.jobs
+            .values()
+            .filter(|j| matches!(j.state, JobState::Queued) && !j.cancel.load(Ordering::SeqCst))
+            .all(|j| j.seq >= seq)
+    }
+}
+
+/// A job's slot, released when this is dropped: by [`JobSlot::finish`], or
+/// by unwinding if the render panicked, which records the job as failed so
+/// it never shows `running` forever.
+struct JobSlot<'a> {
+    server: &'a Server,
+    id: &'a str,
+    state: Option<JobState>,
+}
+
+impl JobSlot<'_> {
+    fn finish(mut self, state: JobState) {
+        self.state = Some(state);
+    }
+}
+
+impl Drop for JobSlot<'_> {
+    fn drop(&mut self) {
+        let state = self.state.take().unwrap_or_else(|| {
+            JobState::Failed(
+                ToolError::new("internal", "internal error: the render panicked").into_result(),
+            )
+        });
+        let mut jobs = lock(&self.server.jobs);
+        jobs.running -= 1;
+        jobs.finish(self.id, state);
+        self.server.job_wake.notify_all();
+    }
+}
+
+/// A job's thread: wait for a slot, render, record the outcome.
+fn run_job(server: Arc<Server>, id: String, plan: RenderPlan) {
+    let (cancel, pages) = {
+        let mut jobs = lock(&server.jobs);
+        let Some(job) = jobs.jobs.get(&id) else {
+            return;
+        };
+        let (seq, cancel, pages) = (job.seq, Arc::clone(&job.cancel), Arc::clone(&job.pages));
+        loop {
+            // Both looked at under the lock that `cancel_render` and
+            // shutdown notify under, so no wake-up is lost.
+            if cancel.load(Ordering::SeqCst) {
+                jobs.finish(&id, JobState::Cancelled);
+                // The next in line may be waiting on this one.
+                server.job_wake.notify_all();
+                return;
+            }
+            if jobs.running < server.cfg.max_jobs && jobs.first_in_line(seq) {
+                break;
+            }
+            jobs = server
+                .job_wake
+                .wait(jobs)
+                .unwrap_or_else(PoisonError::into_inner);
+        }
+        jobs.running += 1;
+        if let Some(job) = jobs.jobs.get_mut(&id) {
+            job.state = JobState::Running;
+        }
+        // Leaving the queue makes the next job first in line, and a slot may
+        // still be free for it: wake it, or it would wait for a job to end.
+        server.job_wake.notify_all();
+        (cancel, pages)
+    };
+    let slot = JobSlot {
+        server: &server,
+        id: &id,
+        state: None,
+    };
+    let cfg = server.cfg.for_job(cancel, pages);
+    let state = match render_run(&cfg, &plan) {
+        Ok(content) => JobState::Done(json!({ "content": content, "isError": false })),
+        Err(e) if e.kind == "cancelled" => JobState::Cancelled,
+        Err(e) => JobState::Failed(e.into_result()),
+    };
+    slot.finish(state);
+}
+
+/// A successful job-tool result: the facts as JSON text (what a model
+/// reads) and as `structuredContent` (for a client that wants fields).
+fn job_result(facts: Value) -> Value {
+    json!({
+        "content": [text_content(&facts.to_string())],
+        "structuredContent": facts,
+        "isError": false,
+    })
+}
+
+fn unknown_job(cfg: &Config, id: &str) -> ToolError {
+    ToolError::new(
+        "unknown_job",
+        format!(
+            "no job {id:?}: never started, or finished and dropped (a finished job is kept \
+             {}s, and at most {MAX_HELD_JOBS} jobs are kept)",
+            cfg.job_ttl.as_secs()
+        ),
+    )
+    .with("job_id", json!(id))
+}
+
+fn job_id(args: &Value) -> Result<&str, ToolError> {
+    optional_str(args, "job_id")?.ok_or_else(|| ToolError::invalid("job_id is required"))
+}
+
+/// What `render_status` says about a job.
+fn job_facts(id: &str, job: &Job) -> Value {
+    let end = job.finished.unwrap_or_else(Instant::now);
+    let elapsed = end.saturating_duration_since(job.created).as_secs_f64();
+    let mut facts = json!({
+        "job_id": id,
+        "state": job.state.name(),
+        "elapsed_seconds": (elapsed * 10.0).round() / 10.0,
+        "pages_done": job.pages.load(Ordering::SeqCst),
+    });
+    if job.finished.is_none() && job.cancel.load(Ordering::SeqCst) {
+        facts["cancel_requested"] = json!(true);
+    }
+    if let JobState::Failed(result) = &job.state {
+        facts["error"] = result["structuredContent"]["error"].clone();
+    }
+    facts
+}
+
+fn start_render(server: &Arc<Server>, args: &Value) -> Result<Value, ToolError> {
+    let cfg = &server.cfg;
+    // Every argument check `render_postscript` makes happens now, so a bad
+    // request is refused here, not in the job.
+    let plan = render_plan(cfg, args)?;
+    let id = {
+        let mut jobs = lock(&server.jobs);
+        jobs.purge(cfg.job_ttl);
+        if jobs.jobs.len() >= MAX_HELD_JOBS {
+            let oldest = jobs
+                .jobs
+                .iter()
+                .filter(|(_, j)| j.finished.is_some())
+                .min_by_key(|(_, j)| j.seq)
+                .map(|(k, _)| k.clone());
+            match oldest {
+                Some(k) => {
+                    jobs.jobs.remove(&k);
+                }
+                None => {
+                    return Err(ToolError::new(
+                        "busy",
+                        format!(
+                            "{MAX_HELD_JOBS} jobs are queued or running, this server's limit; \
+                             wait for one to finish or cancel one"
+                        ),
+                    )
+                    .with("limit_jobs", json!(MAX_HELD_JOBS)));
+                }
+            }
+        }
+        jobs.next += 1;
+        let seq = jobs.next;
+        let id = format!("job-{seq}");
+        jobs.jobs.insert(
+            id.clone(),
+            Job {
+                seq,
+                created: Instant::now(),
+                finished: None,
+                state: JobState::Queued,
+                cancel: Arc::new(AtomicBool::new(false)),
+                pages: Arc::new(AtomicU64::new(0)),
+            },
+        );
+        id
+    };
+    let job_server = Arc::clone(server);
+    let job = id.clone();
+    let spawned = std::thread::Builder::new()
+        .name("pscat-mcp-job".into())
+        .spawn(move || run_job(job_server, job, plan));
+    match spawned {
+        Ok(handle) => server.track(handle),
+        Err(e) => {
+            lock(&server.jobs).jobs.remove(&id);
+            return Err(ToolError::new(
+                "internal",
+                format!("cannot start a thread: {e}"),
+            ));
+        }
+    }
+    Ok(job_result(json!({
+        "job_id": id,
+        "state": "queued",
+        "job_timeout_seconds": cfg.job_timeout.as_secs(),
+        "next": "poll render_status with this job_id until its state is done, failed or \
+                 cancelled, then call render_result",
+    })))
+}
+
+fn render_status(server: &Arc<Server>, args: &Value) -> Result<Value, ToolError> {
+    let id = job_id(args)?;
+    let mut jobs = lock(&server.jobs);
+    jobs.purge(server.cfg.job_ttl);
+    let job = jobs
+        .jobs
+        .get(id)
+        .ok_or_else(|| unknown_job(&server.cfg, id))?;
+    Ok(job_result(job_facts(id, job)))
+}
+
+fn render_result(server: &Arc<Server>, args: &Value) -> Result<Value, ToolError> {
+    let id = job_id(args)?;
+    let mut jobs = lock(&server.jobs);
+    jobs.purge(server.cfg.job_ttl);
+    let job = jobs
+        .jobs
+        .get(id)
+        .ok_or_else(|| unknown_job(&server.cfg, id))?;
+    match &job.state {
+        JobState::Done(result) | JobState::Failed(result) => Ok(result.clone()),
+        JobState::Cancelled => Err(ToolError::new(
+            "cancelled",
+            format!("job {id} was cancelled; it has no result"),
+        )
+        .with("job_id", json!(id))),
+        JobState::Queued | JobState::Running => Err(ToolError::new(
+            "job_not_finished",
+            format!(
+                "job {id} is {}; poll render_status until it is done",
+                job.state.name()
+            ),
+        )
+        .with("job_id", json!(id))
+        .with("state", json!(job.state.name()))),
+    }
+}
+
+fn cancel_render(server: &Arc<Server>, args: &Value) -> Result<Value, ToolError> {
+    let id = job_id(args)?;
+    let mut jobs = lock(&server.jobs);
+    jobs.purge(server.cfg.job_ttl);
+    let job = jobs
+        .jobs
+        .get(id)
+        .ok_or_else(|| unknown_job(&server.cfg, id))?;
+    if job.finished.is_none() {
+        job.cancel.store(true, Ordering::SeqCst);
+        // Under the lock: a queued job wakes and finds its flag set.
+        server.job_wake.notify_all();
+    }
+    Ok(job_result(job_facts(id, job)))
+}
+
 fn handwrite(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
     let text = required_text(cfg, args, "text")?;
     let dest = optional_str(args, "out_path")?
@@ -990,6 +1695,10 @@ fn handwrite(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
     let mut cmd = Command::new(pscat_bin()?);
     cmd.arg("handwrite").arg("-o").arg(&out);
     cmd.arg("--max-pixels").arg(cfg.max_pixels.to_string());
+    // As `interpreter_args` gives every other child: a killed server takes
+    // this render with it.
+    cmd.arg("--exit-with-parent")
+        .arg(std::process::id().to_string());
     for (flag, key, lo, hi) in [
         ("--size", "size", 0.0, 2000.0),
         ("--jitter", "jitter", 0.0, 10_000.0),
@@ -2113,12 +2822,22 @@ struct RunOutput {
 /// call fails with a `timeout` / `output_too_large` tool error, so a
 /// runaway program costs at most one timeout and bounded memory.
 fn run_child(cfg: &Config, cmd: &mut Command, stdin: &[u8]) -> Result<RunOutput, ToolError> {
-    let mut child = cmd
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("cannot run {:?}: {e}", cmd.get_program()))?;
+    if cfg.cancel.load(Ordering::SeqCst) {
+        return Err(cancelled());
+    }
+    // One spawn at a time. Where std makes a child's pipes with `pipe()`
+    // and a separate close-on-exec step (macOS), a fork on another thread
+    // in between would inherit this child's stdin write end, and the child
+    // would never see the end of its program.
+    static SPAWN_LOCK: Mutex<()> = Mutex::new(());
+    let spawned = {
+        let _one = lock(&SPAWN_LOCK);
+        cmd.stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+    };
+    let mut child = spawned.map_err(|e| format!("cannot run {:?}: {e}", cmd.get_program()))?;
     let overflow = Arc::new(AtomicBool::new(false));
     let feeder = {
         let mut pipe = child.stdin.take().expect("piped stdin");
@@ -2129,8 +2848,12 @@ fn run_child(cfg: &Config, cmd: &mut Command, stdin: &[u8]) -> Result<RunOutput,
             let _ = pipe.write_all(&bytes);
         })
     };
-    let out = capture(child.stdout.take().expect("piped stdout"), &overflow);
-    let err = capture(child.stderr.take().expect("piped stderr"), &overflow);
+    let out = capture(child.stdout.take().expect("piped stdout"), &overflow, None);
+    let err = capture(
+        child.stderr.take().expect("piped stderr"),
+        &overflow,
+        cfg.progress.clone(),
+    );
 
     let started = Instant::now();
     let outcome = loop {
@@ -2142,11 +2865,16 @@ fn run_child(cfg: &Config, cmd: &mut Command, stdin: &[u8]) -> Result<RunOutput,
         if overflow.load(Ordering::Relaxed) {
             break Err("output".into());
         }
+        if cfg.cancel.load(Ordering::SeqCst) {
+            break Err("cancelled".into());
+        }
         if started.elapsed() >= cfg.timeout {
             break Err("timeout".into());
         }
         std::thread::sleep(Duration::from_millis(5));
     };
+    // Every way out of the loop but a reaped exit kills and reaps here, so
+    // no child is left running or as a zombie.
     if outcome.is_err() {
         kill(&mut child);
     }
@@ -2164,8 +2892,9 @@ fn run_child(cfg: &Config, cmd: &mut Command, stdin: &[u8]) -> Result<RunOutput,
         Ok(success) => Ok(RunOutput {
             success,
             stdout: text(stdout),
-            stderr: text(stderr),
+            stderr: without_progress(text(stderr)),
         }),
+        Err(why) if why == "cancelled" => Err(cancelled()),
         Err(why) if why == "timeout" => Err(ToolError::new(
             "timeout",
             format!(
@@ -2189,21 +2918,60 @@ fn run_child(cfg: &Config, cmd: &mut Command, stdin: &[u8]) -> Result<RunOutput,
     }
 }
 
+fn cancelled() -> ToolError {
+    ToolError::new("cancelled", "cancelled by the client")
+}
+
+/// The line `pscat --progress` prints as each page is finished.
+const PROGRESS_PREFIX: &str = "pscat: progress pages=";
+
+/// A child's stderr without its `--progress` lines, which are for the
+/// server, not the caller.
+fn without_progress(stderr: String) -> String {
+    if !stderr.contains(PROGRESS_PREFIX) {
+        return stderr;
+    }
+    stderr
+        .split_inclusive('\n')
+        .filter(|l| !l.starts_with(PROGRESS_PREFIX))
+        .collect()
+}
+
 /// Read a child stream on a thread, keeping at most [`MAX_CHILD_OUTPUT`]
 /// bytes; past that, flag the overflow and keep draining (so the child
-/// never blocks on a full pipe) until it is killed.
+/// never blocks on a full pipe) until it is killed. With `progress`, each
+/// `pscat: progress pages=N` line stores N there as it arrives.
 fn capture(
     mut pipe: impl Read + Send + 'static,
     overflow: &Arc<AtomicBool>,
+    progress: Option<Arc<AtomicU64>>,
 ) -> std::thread::JoinHandle<Vec<u8>> {
     let overflow = Arc::clone(overflow);
     std::thread::spawn(move || {
         let mut kept = Vec::new();
         let mut chunk = [0u8; 8192];
+        // The start of the line being read, enough to hold a progress line.
+        let mut line: Vec<u8> = Vec::new();
         loop {
             match pipe.read(&mut chunk) {
                 Ok(0) | Err(_) => break,
                 Ok(n) => {
+                    if let Some(progress) = &progress {
+                        for &b in &chunk[..n] {
+                            if b == b'\n' {
+                                if let Some(pages) = line
+                                    .strip_prefix(PROGRESS_PREFIX.as_bytes())
+                                    .and_then(|d| std::str::from_utf8(d).ok())
+                                    .and_then(|d| d.trim_end_matches('\r').parse::<u64>().ok())
+                                {
+                                    progress.store(pages, Ordering::SeqCst);
+                                }
+                                line.clear();
+                            } else if line.len() < 64 {
+                                line.push(b);
+                            }
+                        }
+                    }
                     if kept.len() + n <= MAX_CHILD_OUTPUT {
                         kept.extend_from_slice(&chunk[..n]);
                     } else {
@@ -2316,6 +3084,128 @@ fn base64(data: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    fn test_config(args: &[&str]) -> Config {
+        Config::from_args(args.iter().map(|a| a.to_string()))
+            .expect("valid flags")
+            .expect("not --help")
+    }
+
+    /// Issue #725: the last-resort kill at `--timeout`, for a child stuck
+    /// where the interpreter's own limits never look (here a child that is
+    /// not pscat at all). The bound is the counterfactual: unkilled, the
+    /// child would run its full 60 s.
+    #[cfg(unix)]
+    #[test]
+    fn the_timeout_backstop_kills_a_child_that_ignores_every_limit() {
+        let cfg = test_config(&["--timeout", "1"]);
+        let started = Instant::now();
+        let mut cmd = Command::new("sleep");
+        cmd.arg("60");
+        let err = run_child(&cfg, &mut cmd, b"").err().expect("killed");
+        assert_eq!(err.kind, "timeout", "{}", err.message);
+        assert_eq!(err.fields["limit_seconds"], 1);
+        assert!(err.message.contains("limit per call"), "{}", err.message);
+        assert!(
+            started.elapsed() < Duration::from_secs(50),
+            "killed, not waited out: {:?}",
+            started.elapsed()
+        );
+    }
+
+    /// Issue #622: a cancel flag set while the child runs kills it.
+    #[cfg(unix)]
+    #[test]
+    fn a_cancelled_run_kills_its_child() {
+        let cfg = test_config(&["--timeout", "600"]).for_call(Arc::new(AtomicBool::new(false)));
+        let flag = Arc::clone(&cfg.cancel);
+        let setter = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(200));
+            flag.store(true, Ordering::SeqCst);
+        });
+        let started = Instant::now();
+        let mut cmd = Command::new("sleep");
+        cmd.arg("60");
+        let err = run_child(&cfg, &mut cmd, b"").err().expect("cancelled");
+        setter.join().unwrap();
+        assert_eq!(err.kind, "cancelled", "{}", err.message);
+        assert!(
+            started.elapsed() < Duration::from_secs(50),
+            "killed, not waited out: {:?}",
+            started.elapsed()
+        );
+        // Already cancelled: nothing is started at all.
+        let mut cmd = Command::new("sleep");
+        cmd.arg("60");
+        assert_eq!(
+            run_child(&cfg, &mut cmd, b"").err().unwrap().kind,
+            "cancelled"
+        );
+    }
+
+    #[test]
+    fn progress_lines_are_counted_and_kept_out_of_the_stderr_returned() {
+        let progress = Arc::new(AtomicU64::new(0));
+        let overflow = Arc::new(AtomicBool::new(false));
+        let stderr = b"note: one\npscat: progress pages=1\nnote: two\npscat: progress pages=12\n";
+        // A reader that hands the bytes over a few at a time, so a line is
+        // split across reads.
+        struct Trickle(&'static [u8]);
+        impl Read for Trickle {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                let n = self.0.len().min(5).min(buf.len());
+                buf[..n].copy_from_slice(&self.0[..n]);
+                self.0 = &self.0[n..];
+                Ok(n)
+            }
+        }
+        let kept = capture(Trickle(stderr), &overflow, Some(Arc::clone(&progress)))
+            .join()
+            .unwrap();
+        assert_eq!(progress.load(Ordering::SeqCst), 12);
+        assert_eq!(
+            without_progress(String::from_utf8(kept).unwrap()),
+            "note: one\nnote: two\n"
+        );
+    }
+
+    #[test]
+    fn queued_jobs_start_in_order_and_finished_ones_expire() {
+        let job = |seq: u64, state: JobState, finished: Option<Instant>| Job {
+            seq,
+            created: Instant::now(),
+            finished,
+            state,
+            cancel: Arc::new(AtomicBool::new(false)),
+            pages: Arc::new(AtomicU64::new(0)),
+        };
+        let mut t = JobTable::default();
+        t.jobs
+            .insert("job-1".into(), job(1, JobState::Running, None));
+        t.jobs
+            .insert("job-2".into(), job(2, JobState::Queued, None));
+        t.jobs
+            .insert("job-3".into(), job(3, JobState::Queued, None));
+        assert!(t.first_in_line(2));
+        assert!(!t.first_in_line(3));
+        // A cancelled job does not hold the line up.
+        t.jobs["job-2"].cancel.store(true, Ordering::SeqCst);
+        assert!(t.first_in_line(3));
+        let long_ago = Instant::now()
+            .checked_sub(Duration::from_secs(120))
+            .expect("the clock is past two minutes");
+        t.jobs
+            .insert("job-4".into(), job(4, JobState::Cancelled, Some(long_ago)));
+        t.jobs.insert(
+            "job-5".into(),
+            job(5, JobState::Cancelled, Some(Instant::now())),
+        );
+        t.purge(Duration::from_secs(60));
+        let mut left: Vec<&str> = t.jobs.keys().map(String::as_str).collect();
+        left.sort();
+        assert_eq!(left, ["job-1", "job-2", "job-3", "job-5"]);
+    }
 
     #[test]
     fn revision_shape() {

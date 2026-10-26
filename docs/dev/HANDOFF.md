@@ -1192,7 +1192,9 @@ renders eight examples in both and compares block-downsampled output).
   cases in `tests/mcp.rs`. Only JSON-RPC on stdout. Error results carry
   `structuredContent.error` beside the text; success results never do (some
   clients show `structuredContent` instead of `content`, and that would hide
-  the image). Every tool carries all five annotation hints (#687) through the
+  the image), except the job tools' own facts (`start_render`,
+  `render_status`, `cancel_render`: JSON, no image; `render_result` returns
+  the render's result as stored). Every tool carries all five annotation hints (#687) through the
   `annotations()` helper; `tests/mcp.rs` `every_tool_has_annotations` has a
   per-tool table and fails for a tool missing from it, so a new tool states
   its `readOnlyHint` (conservative `false` when an argument such as `out_path`
@@ -1202,6 +1204,23 @@ renders eight examples in both and compares block-downsampled output).
   `type` array; Codex and Claude Code were checked for real and
   `tool_schemas_use_only_the_portable_union_shape` pins it (#712,
   `notes/712-mcp-schema-codex.md`).
+  **Concurrency and jobs (#622, #741).** The stdin thread answers
+  `initialize`, `ping`, `tools/list`, `notifications/cancelled` and the job
+  tools inline; every other `tools/call` runs on its own thread
+  (`Server::spawn_call`), registered in `inflight` *before* it starts, and
+  removed (with its cancel flag read, under the same lock as
+  `cancel_request`) *before* its reply is written: tests reuse id 100 back to
+  back. Replies go through `Server::send` only (one line under the stdout
+  lock). Each run's `Config` copy carries its cancel flag, which `run_child`
+  polls with the timeout; spawns are serialised by `SPAWN_LOCK` (macOS pipes
+  are not created close-on-exec atomically). Jobs live in `JobTable` behind
+  one mutex and the `job_wake` condvar (notify under the lock); `JobSlot`'s
+  drop releases a slot even on a panic. `shut_down` cancels every job (calls
+  in flight finish and answer) and joins every thread when stdin closes, and children get
+  `--exit-with-parent <server pid>` for a server killed outright. Locks are
+  never nested. Tests avoid elapsed-time assertions: they gate a render on a
+  FIFO and count children with `ps` (macOS `pgrep -P` hides zombies). See
+  `notes/741-mcp-async-render-jobs.md`.
   `chalkboard_math` (#688) is the pattern for a data-in tool: the program is
   generated in-process (`pscat::chalk::driver`, pure), then run in a `pscat`
   child through `run_child` with `interpreter_args`, never in the server

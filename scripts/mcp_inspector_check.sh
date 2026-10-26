@@ -44,10 +44,10 @@ check() {
         fail=1
     fi
 }
-names='["render_postscript","handwrite","chalkboard_math","review_sheet","describe_art_capabilities","eval_postscript"]'
+names='["render_postscript","handwrite","chalkboard_math","review_sheet","describe_art_capabilities","eval_postscript","start_render","render_status","render_result","cancel_render"]'
 
 json=$(run --method tools/list)
-check "tools/list names the six tools" "[.result.tools[].name] == $names" "$json"
+check "tools/list names the ten tools" "[.result.tools[].name] == $names" "$json"
 
 # --strict: the inspector's tool-schema portability check (exit 6 on an
 # error-severity problem, which run() reports).

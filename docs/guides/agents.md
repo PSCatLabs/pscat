@@ -17,7 +17,7 @@ and both work against an **installed** pscat (no checkout needed):
   the copy compiled into `pscat`. [`AGENTS.md`](../../AGENTS.md) points
   Codex at the pscat skill.
 - **MCP**: `pscat-mcp`, installed beside `pscat`, an MCP server over stdio
-  with six tools (below).
+  with ten tools (below).
 
 In Claude Code the easiest route is the **plugin**, which installs the three
 skills and registers `pscat-mcp` in one step (install pscat first; the plugin
@@ -65,6 +65,7 @@ sessions in a checkout still load them.
 | Formula or equation on a chalkboard (LaTeX in) | `chalkboard_math` | `pscat chalk` | pscat: LaTeX on a chalkboard |
 | Chalk formula inside a larger picture | `render_postscript` with `mkpath` + `dcchalk` | — | psart: references/board-math.md, references/dry-media.md |
 | Generative art (turtle, L-systems, scatter, tiling, fractals) | `render_postscript` | `pscat --png` | psart: The toolkit |
+| A render longer than one call allows (minutes, up to an hour by default) | `start_render`, then `render_status` / `render_result` | `pscat --png` | pscat: MCP |
 | Painting (oil, knife, watercolor, wet-on-wet, landscapes) | `render_postscript` | — | psart: references/paint.md |
 | Chalk, crayon, charcoal drawing | `render_postscript` | — | psart: references/dry-media.md |
 | Print looks (etching, stipple, hatch, halftone, photocopy) | `render_postscript` (`halftone` flag for screening) | `--halftone` | psart: Media and kits |
@@ -241,10 +242,15 @@ project and nowhere else.
 
 ### Raising the time limit
 
-The 60 s is a default, not a fixed limit, and three things have to allow a
-long render. A call that takes minutes (a ray-marched landscape) works over
-MCP once all three do; a job you want to poll or cancel, or one past the
-server's 24-hour cap, is the async-jobs work still open in #741.
+The 60 s is a default, not a fixed limit. For a render that takes minutes
+(a ray-marched landscape), there are two ways:
+
+- **A render job** (below): `start_render` returns at once, so no call is
+  long and no client timeout applies. Only the job's own limit
+  (`--job-timeout`, an hour by default) and the interpreter limits of step 2
+  below matter. This is the way under Codex, whose client cuts any call at
+  60 s by default.
+- **One long call**, once all three of the following allow it:
 
 1. **The server's `--timeout SECS`** (1 to 86400), the time limit above.
    Register the server with it, for example
@@ -279,7 +285,7 @@ server's 24-hour cap, is the async-jobs work still open in #741.
    - *Any other client*: look for its tool-call or request timeout.
 
 The plugins' bundled server is registered without options, so it keeps the
-60 s default. To raise it, register the server by hand as above and, so the
+60 s default per call (and the hour per job). To raise it, register the server by hand as above and, so the
 tools are not listed twice, toggle the plugin's server off in `/mcp` (Claude
 Code), or in Codex's `config.toml` set `enabled = false` under
 `[plugins."pscat@pscat".mcp_servers.pscat]` (documented by Codex for plugin
@@ -289,6 +295,69 @@ The settings above are from the Claude Code
 ([MCP](https://code.claude.com/docs/en/mcp),
 [environment variables](https://code.claude.com/docs/en/env-vars)) and Codex
 ([MCP](https://developers.openai.com/codex/mcp)) docs as of October 2026.
+
+### Render jobs
+
+For a render longer than one call may take (#741). A job is
+`render_postscript` run in the background:
+
+1. `start_render` takes `render_postscript`'s arguments and returns
+   `{"job_id": "job-1", "state": "queued", ...}` at once. Bad arguments are
+   refused here, before a job exists.
+2. `render_status` (`job_id`) answers at once, even while renders run:
+   `state` (`queued`, `running`, `done`, `failed`, `cancelled`),
+   `elapsed_seconds`, `pages_done` (pages ended by `showpage` so far; a
+   single page shows 0 while it is drawn, and a program that never calls
+   `showpage` shows 0 throughout), `cancel_requested` after a cancel, and a failed
+   job's `error`. Poll it at whatever pace suits the client.
+3. `render_result` (`job_id`) returns exactly what `render_postscript` would
+   have: the images, a `PostScript error:` block with a partial page,
+   `Lint:`, `Warnings:`, the file written. Before the job is finished it is a
+   `job_not_finished` error; for a cancelled job, `cancelled`. It can be
+   fetched again until the job expires.
+4. `cancel_render` (`job_id`) stops a queued job before it starts, or kills a
+   running one's child; `render_status` reads `cancelled` once the child is
+   gone.
+
+| Option | Default | What it bounds |
+|---|---|---|
+| `--job-timeout SECS` | 3600 | Wall-clock time per job, 1 to 86400, in place of `--timeout` (the interpreter stops it a margin before, as for a call). `--max-steps`, `--max-memory` and `--max-pixels` apply as to a call: raise `--max-steps` (or `0`) for a long render. |
+| `--max-jobs N` | 2 | Jobs running at once, 1 to 16; more wait, `queued`, and start in the order they were asked for. |
+| `--job-ttl SECS` | 3600 | How long a finished job (its result) is kept, 1 to 86400. At most 16 jobs are kept in all: a new job drops the oldest finished one, and is refused with `busy` when none has finished. |
+
+Results are held in the server's memory, and no job outlives the server:
+when stdin closes (how a client stops a stdio server) every job is
+cancelled and its child reaped before the server exits, and each child also
+stops itself if the server is killed outright (Unix; `--exit-with-parent`).
+Job ids are `job-1`, `job-2`, ... per server: guessable, which is fine for a
+local stdio server with one client. The hosted server (#689) keeps a low cap
+and does not offer jobs yet.
+
+**Calls run side by side.** Every tool call but the job tools runs on its
+own thread, so `ping` and other calls are answered during a long render, and
+`notifications/cancelled` stops that call's child (no reply is sent for a
+cancelled call, as the spec asks). At most 4 calls run at once; past that a
+call is refused with `busy`.
+
+**MCP Tasks.** The MCP spec has a native form of this: *tasks*,
+experimental in 2025-11-25 (`tools/call` with a `task` parameter, then
+`tasks/get`, `tasks/result`, `tasks/cancel`), moved in 2026-07-28 into the
+`io.modelcontextprotocol/tasks` extension (`tools/call` answered with
+`resultType: "task"` and a `taskId`, then `tasks/get`, whose `completed`
+answer carries the result, and `tasks/cancel`). As checked on 2026-10-25,
+Claude Code (2.1.304 and later, public beta) supports the extension on
+2026-07-28 connections only, and does not use the 2025-11-25 form; Codex
+(0.164.0) supports neither. pscat-mcp speaks 2025-11-25 and 2025-06-18
+(#621 tracks 2026-07-28), so it uses plain tools, which every client can
+call. Once it speaks 2026-07-28, the jobs map onto the extension directly:
+`start_render` is a `tools/call` answered with a task (`job_id` = `taskId`,
+`queued`/`running` = `working`, `done` = `completed`, `failed`, `cancelled`),
+`render_status` and `render_result` are `tasks/get`, `cancel_render` is
+`tasks/cancel`, and `--job-ttl` is `ttlMs`. Sources: the
+[2025-11-25 tasks utility](https://modelcontextprotocol.io/specification/2025-11-25/basic/utilities/tasks),
+the [2026-07-28 changelog](https://modelcontextprotocol.io/specification/2026-07-28/changelog),
+[Claude Code's MCP docs](https://code.claude.com/docs/en/mcp), and a search
+of the Codex source at `rust-v0.164.0`.
 
 ### Protocol
 
