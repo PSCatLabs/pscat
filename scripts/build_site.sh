@@ -15,13 +15,20 @@
 # and example, produced by pscat itself.
 #
 # Then check it: scripts/check_site_links.py (CI runs it after this).
+#
+# Two environment overrides, for a caller that must not share paths or nest
+# cargo (tests/site.rs, #767); both default to what CI uses:
+#   PSCAT_SITE_OUT  the output directory (default <repo>/_site). It is
+#                   deleted and recreated, so give a run its own.
+#   PSCAT_BIN       an already built pscat binary to render with; skips the
+#                   `cargo build --release` here and in build_font_gallery.sh.
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 # Point pscat at this tree's lib/ and fonts/catalog/ (src/paths.rs): a
 # release binary has no checkout heuristics, and its embedded lib/ may be
 # older than the files beside this script.
 export PSCAT_HOME="${PSCAT_HOME:-${PSCAT_ROOT:-$ROOT}}"
-OUT="$ROOT/_site"
+OUT="${PSCAT_SITE_OUT:-$ROOT/_site}"
 
 rm -rf "$OUT"
 mkdir -p "$OUT/assets/renders" "$OUT/assets/references" "$OUT/assets/learn" \
@@ -57,8 +64,10 @@ cp "$ROOT"/site/learn/*.ps "$OUT/examples/learn/"
 
 # 5. the specimens and examples that have no committed render: pscat draws
 # them here at the page size the manifest gives
-cargo build --release --manifest-path "$ROOT/Cargo.toml"
-BIN="$ROOT/target/release/pscat"
+if [ -z "${PSCAT_BIN:-}" ]; then
+  cargo build --release --manifest-path "$ROOT/Cargo.toml"
+fi
+BIN="${PSCAT_BIN:-$ROOT/target/release/pscat}"
 while read -r src page id; do
   "$BIN" --page "$page" --png "$OUT/assets/renders/$id.png" "$ROOT/$src"
 done < <(python3 "$ROOT/scripts/gallery.py" renders)

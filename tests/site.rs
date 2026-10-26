@@ -2,8 +2,17 @@
 //! complete `_site/` — pages, wasm, playground sources, renders.
 //! Skips gracefully when the wasm target isn't installed (gs-test
 //! style); the Pages workflow runs the same script in CI.
+//!
+//! Safe beside other cargo runs and other copies of this test (#767): the
+//! site is built into its own scratch directory, not the shared `_site/`
+//! (a second run deleted it mid-build), and the script renders with this
+//! test's own binary instead of nesting a `cargo build --release`. The
+//! wasm build is the one nested cargo call left; it only waits on cargo's
+//! lock. Nothing here has a timeout or reads the clock.
 
 use std::process::Command;
+
+mod common;
 
 #[test]
 fn build_site_assembles_everything() {
@@ -18,7 +27,10 @@ fn build_site_assembles_everything() {
     }
 
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let out = common::scratch_dir("site");
     let build = Command::new(root.join("scripts/build_site.sh"))
+        .env("PSCAT_SITE_OUT", &out)
+        .env("PSCAT_BIN", env!("CARGO_BIN_EXE_pscat"))
         .output()
         .expect("run build_site.sh");
     assert!(
@@ -27,7 +39,6 @@ fn build_site_assembles_everything() {
         String::from_utf8_lossy(&build.stderr)
     );
 
-    let out = root.join("_site");
     for page in [
         "index.html",
         "playground.html",
@@ -103,4 +114,6 @@ fn build_site_assembles_everything() {
         "site link check failed:\n{}",
         String::from_utf8_lossy(&check.stdout)
     );
+    // Only a passing run cleans up; a failing one leaves the site to look at.
+    let _ = std::fs::remove_dir_all(&out);
 }

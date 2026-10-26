@@ -1853,6 +1853,14 @@ renders eight examples in both and compares block-downsampled output).
   build. Change an example's output and you must change its `.out` and
   the prose around it. `playground.html?example=learn/NAME.ps` is how
   the "Try it" links open them.
+- **`tests/site.rs` builds into its own scratch dir** (#767). `build_site.sh`
+  wipes and rebuilds its output directory, so two runs in one worktree (the
+  gate beside a hand-run `cargo test`) used to delete each other's `_site/`
+  and fail with "examples no page shows". The test now sets
+  `PSCAT_SITE_OUT` (a `common::scratch_dir`) and `PSCAT_BIN` (its own
+  `CARGO_BIN_EXE_pscat`, so the script skips `cargo build --release`); both
+  default to the old behaviour for CI and the Pages workflow. Run
+  `build_site.sh` by hand with the defaults and it still writes `_site/`.
 - **`screct`/`scpath` stamp their region, and `scin` trusts the stamp**
   (#503, `notes/503-artkit-scin-region-stamp.md`). `/Checked` holds the very
   array in the region's `/Edges` (path) or `/BBox` (rect); `scin` skips its
