@@ -14,11 +14,29 @@ use crate::error::PsError;
 /// Wildcards (`*`, `?`, `\` to quote) match within the last component;
 /// a template with one in a directory part matches nothing.
 ///
+/// **Windows.** `\` is always the escape character, on every platform
+/// (PLRM), so it cannot also separate directories: write `C:/dir/*.ps`, not
+/// `C:\dir\*.ps` (each `\` quotes the next character, and the whole is one
+/// name with no directory part, which matches nothing). `/` is the separator everywhere: the template is split
+/// at its `/`s, Windows accepts them in paths, and the names come back with
+/// the `/` they were given (a drive letter and a UNC `//server/share/` form
+/// work as the directory part). Names match case-sensitively on every
+/// platform. Patterns across several directories (`*/*.ps`) are not
+/// supported, on any platform.
+///
 /// `poll` is called once per directory entry looked at, with the bytes the
 /// entry adds to the result (0 when it doesn't match), so an interpreter
 /// under execution limits can stop a listing of a huge directory.
+///
+/// Under read roots (issue #763, `crate::read_roots`) only directories
+/// inside them are listed and only names that would open there are
+/// yielded: a template with `..`, or an absolute one outside the roots,
+/// yields nothing. That is no error: the PLRM gives `filenameforall` no
+/// `invalidfileaccess`, and Ghostscript's `-dSAFER` skips files it may not
+/// open the same way.
 pub fn matching_names(
     template: &[u8],
+    roots: Option<&crate::read_roots::ReadRoots>,
     poll: &mut dyn FnMut(usize) -> Result<(), PsError>,
 ) -> Result<Vec<Vec<u8>>, PsError> {
     let Ok(template) = std::str::from_utf8(template) else {
@@ -28,6 +46,9 @@ pub fn matching_names(
     let dir_end = template[..first_wild].rfind('/').map_or(0, |i| i + 1);
     let (dir, pattern) = template.split_at(dir_end);
     if pattern.is_empty() || pattern.contains('/') {
+        return Ok(Vec::new());
+    }
+    if roots.is_some_and(|r| r.check_name(dir).is_err()) {
         return Ok(Vec::new());
     }
     let mut found = std::collections::BTreeSet::new();
@@ -56,14 +77,23 @@ pub fn matching_names(
             .collect()
     };
     for d in dirs {
+        if roots.is_some_and(|r| !r.contains_path(&d)) {
+            continue;
+        }
         let Ok(entries) = std::fs::read_dir(&d) else {
             continue;
         };
         for e in entries {
-            // Regular files, through symlinks, as `run` would read them.
+            // Regular files, through symlinks, as `run` would read them,
+            // and under read roots only where they would let it.
+            let opens = |p: &Path| match roots {
+                None => true,
+                Some(r) => matches!(r.admit(p), crate::read_roots::Admit::Open(_)),
+            };
             let name = e
                 .ok()
                 .filter(|e| std::fs::metadata(e.path()).is_ok_and(|m| m.is_file()))
+                .filter(|e| opens(&e.path()))
                 .map(|e| e.file_name());
             take(name.as_ref().and_then(|n| n.to_str()))?;
         }
@@ -137,15 +167,43 @@ mod tests {
         assert!(m("", "") && !m("", "a"));
     }
 
+    /// On Windows a template uses `/` between directories, drive letter
+    /// included, and the names come back with it (issue #762).
+    #[cfg(windows)]
+    #[test]
+    fn windows_templates_use_forward_slashes() {
+        let dir = std::env::temp_dir().join(format!("pscat-fnfa-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a.txt"), b"x").unwrap();
+        std::fs::write(dir.join("b.txt"), b"x").unwrap();
+        let base = dir.to_str().unwrap().replace('\\', "/");
+        let names =
+            matching_names(format!("{base}/*.txt").as_bytes(), None, &mut |_| Ok(())).unwrap();
+        let want: Vec<Vec<u8>> = ["a.txt", "b.txt"]
+            .iter()
+            .map(|n| format!("{base}/{n}").into_bytes())
+            .collect();
+        assert_eq!(names, want);
+        // The backslash form is the escape, so it names nothing.
+        let bs = format!("{}\\*.txt", dir.to_str().unwrap());
+        assert!(
+            matching_names(bs.as_bytes(), None, &mut |_| Ok(()))
+                .unwrap()
+                .is_empty()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn matching_names_needs_wildcards_in_the_last_component_only() {
-        let names = |t: &[u8]| matching_names(t, &mut |_| Ok(())).unwrap();
+        let names = |t: &[u8]| matching_names(t, None, &mut |_| Ok(())).unwrap();
         assert!(names(b"li*/artkit.ps").is_empty());
         assert!(names(b"lib/").is_empty());
         assert!(names(b"\xff*").is_empty());
         assert_eq!(names(b"lib/artkit.ps"), vec![b"lib/artkit.ps".to_vec()]);
         // A poll that refuses stops the listing with its error.
-        let stopped = matching_names(b"lib/*.ps", &mut |_| Err(PsError::StepsExceeded));
+        let stopped = matching_names(b"lib/*.ps", None, &mut |_| Err(PsError::StepsExceeded));
         assert_eq!(stopped, Err(PsError::StepsExceeded));
     }
 }

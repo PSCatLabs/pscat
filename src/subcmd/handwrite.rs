@@ -9,7 +9,8 @@
 //! advance invisibly rather than erroring.
 
 use super::{
-    Args, Failure, Format, library, max_pixels, measure, number, page_dim, ps_escape, render, rgb,
+    Args, Confine, Failure, Format, library, max_pixels, measure, number, page_dim, ps_escape,
+    render, rgb, take_limit_flag,
 };
 
 const USAGE: &str = r#"usage: pscat handwrite [options] "text to write"
@@ -32,6 +33,16 @@ const USAGE: &str = r#"usage: pscat handwrite [options] "text to write"
                      1..64000000 (default: no cap beyond the page limits)
       --exit-with-parent PID  stop once PID is no longer pscat's parent
                      (Unix; pscat-mcp passes its own pid)
+      --read-root DIR  let the render read files only inside DIR
+                     (repeatable; pscat-mcp passes its read roots)
+      --confine-reads  as --read-root, with no directories
+      --max-steps N  stop a program after N interpreter steps (0 = no limit)
+      --max-time SECS  stop a program after SECS of wall-clock time (0 = no limit)
+      --max-memory MIB  stop a program that grows the heap by more than MIB
+                     (0 = no limit). The limits apply to each of the two
+                     programs this runs, the measuring pass and the render, not
+                     to the pair; a stop exits non-zero with `limitexceeded`
+                     (pscat-mcp passes them)
   -h, --help         this text
 
 Newlines in the text force line breaks; blank lines are kept. A text that
@@ -54,6 +65,9 @@ struct Opts {
     halftone: bool,
     max_pixels: Option<u64>,
     exit_with_parent: Option<u32>,
+    /// `--read-root`/`--confine-reads` (issue #763) and `--max-steps`,
+    /// `--max-time`, `--max-memory` (issue #701).
+    confine: Confine,
 }
 
 pub(super) fn run(args: Args) -> Result<(), Failure> {
@@ -92,7 +106,7 @@ pub(super) fn run(args: Args) -> Result<(), Failure> {
             let mut count = lib.clone();
             count.extend(opts_dict(&opts, "792"));
             count.extend(b"HandOpts hs-linecount =\n");
-            let printed = measure(&count)?;
+            let printed = measure(&count, &opts.confine)?;
             let lines: f64 = printed.trim().parse().map_err(|_| {
                 Failure::Msg(format!(
                     "could not count lines (hs-linecount gave: {printed:?})"
@@ -119,6 +133,7 @@ pub(super) fn run(args: Args) -> Result<(), Failure> {
         opts.halftone,
         Format::Png,
         &opts.out,
+        &opts.confine,
     )
 }
 
@@ -153,6 +168,7 @@ fn parse(mut args: Args) -> Result<Option<Opts>, String> {
         halftone: false,
         max_pixels: None,
         exit_with_parent: None,
+        confine: Confine::default(),
     };
     let mut have_text = false;
     let num = |flag: &str, v: String| number(flag, &v).map(str::to_string);
@@ -182,6 +198,14 @@ fn parse(mut args: Args) -> Result<Option<Opts>, String> {
             "--exit-with-parent" => {
                 o.exit_with_parent = Some(crate::parent_pid_arg(&args.value(&arg)?)?)
             }
+            "--read-root" => {
+                let dir = args.value(&arg)?;
+                o.confine.read_roots.get_or_insert_with(Vec::new).push(dir);
+            }
+            "--confine-reads" => {
+                o.confine.read_roots.get_or_insert_with(Vec::new);
+            }
+            _ if take_limit_flag(&mut o.confine.limits, &arg, &mut args)? => {}
             "--" => {
                 // The text follows; anything after it is ignored.
                 o.text = args.next().unwrap_or_default();

@@ -77,7 +77,8 @@ name from prose.
   (value noise), `x y gnoise2d -> n dx dy`, and `x y oct gain lac fbm2`
   (also `fbm3`, `vfbm2`, `vfbm3`, `ridged2`, `ridged3`). Cheap enough for
   per-pixel terrain, clouds and domain warping. artkit's `noiseinit`/`noise2`
-  (rand-seeded) is unchanged, and now native too.
+  (rand-seeded) is unchanged, and now native too. A `--sweep-seed` also seeds
+  noise, unless the program calls `noiseseed`.
 - **Tiling**: `x0 y0 v1 v2 n1 n2 {x y ...} lattice` (any basis);
   `hex`/`tri` shapes; `hexgrid`/`trigrid`; `truchet` (a grid with each
   cell turned a random quarter, one motif becomes a maze). A `hex`/`tri`
@@ -129,6 +130,24 @@ Also in the library, documented in each file's header and in
   /Lapidary, /Circuitry, /Stitchwork, /Confetti.
 - Text as geometry: `(word) true charpath` then fill/stroke/clip it, or
   walk it with `alongpath`.
+- Pair the built-in faces on purpose: a Palatino-Italic title over
+  Helvetica captions, a Bookman-Demi headline over Times-Roman body, and
+  Courier for data labels. The `extras` pack adds display faces on top.
+
+```postscript
+%!PS-Adobe-3.0
+/Palatino-Italic findfont 36 scalefont setfont
+72 600 moveto (Tide Tables) show
+/Helvetica findfont 9 scalefont setfont
+72 580 moveto (station, date, height) show
+/Bookman-Demi findfont 14 scalefont setfont
+72 540 moveto (Low water at dawn) show
+/Times-Roman findfont 11 scalefont setfont
+72 522 moveto (The bar uncovers for two hours before the turn.) show
+/Courier findfont 10 scalefont setfont
+72 480 moveto (06:12  0.4 m  |  12:48  2.1 m) show
+showpage
+```
 
 ## Composition habits that keep pieces good
 

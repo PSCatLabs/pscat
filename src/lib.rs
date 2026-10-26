@@ -130,6 +130,10 @@ pub mod paths;
 #[doc(hidden)]
 pub mod pdf;
 #[doc(hidden)]
+pub mod profile;
+#[doc(hidden)]
+pub mod read_roots;
+#[doc(hidden)]
 pub mod repl;
 // Reads library files off disk to run their `%%SelfTest` blocks —
 // a developer/CI tool, not something the wasm playground can host.

@@ -223,7 +223,7 @@ name still exists, and every name a source file actually defines is
 either cataloged or on an explicit internal-helper allowlist. See
 docs/dev/CAPABILITIES.md for the payload shape and how to register a new
 capability (docs/archive/NOTES.md's entry has the full story). Since #94,
-files carrying `% @` tags are parsed by `build.rs` instead; see CAPABILITIES.md.
+files carrying `% @` tags are parsed by `build.rs` instead; see CAPABILITIES.md. Native pscat-extension operators are `kind: "operator"` rows (#754).
 Also done: issue
 #48, deterministic scatter and distribution primitives for artkit --
 the area-shaped counterpart to `alongpath`: `screct`/`scpath` build a
@@ -512,8 +512,10 @@ renders eight examples in both and compares block-downsampled output).
 - Images: nearest-neighbor unless the dict has `/Interpolate true` (#730:
   bilinear on a magnified axis, sample centres at i+0.5, edges clamped,
   colour images only; PDF key and SVG `image-rendering="auto"` follow;
-  `notes/730-image-interpolate.md`). No 12-bit samples, no
-  MultipleDataSources colorimage (limitcheck). `ImageType 3` has
+  `notes/730-image-interpolate.md`). Samples are 1, 2, 4, 8, 12 or 16
+  bits, `colorimage` `multi true` and `/MultipleDataSources true` read one
+  source per component (#781, `notes/781-image-wide-samples-multi-source.md`);
+  wide samples are reduced to 8 bits in PNG, SVG and PDF alike. `ImageType 3` has
   `InterleaveType 3` only (types 1 and 2 are limitcheck) and no
   `ImageType 4` (#739, `notes/739-imagetype3-nulldevice.md`). DCTDecode buffers one
   whole JPEG (marker-aware, stops exactly at EOI); CCITTFax absent;
@@ -645,10 +647,16 @@ renders eight examples in both and compares block-downsampled output).
   holds every operator bit-equal to it and pins a few exact values.
   **Changing any constant or operation order changes every seeded render
   that uses them.** The table lives in `Interp::noise_perm`, apart from
-  `rand_state`. `x y perm .permnoise2` is artkit's `noise2` formula
+  `rand_state`. `Interp::set_seed_override` (`--sweep-seed`, #753) also builds
+  it from the sweep seed (`noise_from_override`); a program's `noiseseed`
+  clears that and wins; sampling it counts as the override firing. `x y perm .permnoise2` is artkit's `noise2` formula
   computed with PostScript's int/real promotion, so artkit's `noise2`
   (now `{ Perm .permnoise2 }` when the operator exists) stays
   bit-identical, type included (`notes/734-native-noise.md`).
+  `gallery/basin_and_range.ps` (#755) is the visible example: a shaded-relief
+  map from `fbm2`/`ridged2` through a `colorimage` procedure that reads
+  `/BandBBox` in device space (so it also holds under the 2x still), and is
+  the picture where a change to the noise constants shows up (`notes/755-basin-and-range-noise-example.md`).
 - `error_report`'s `Line: N` (issue #17) is best-effort, not exact
   source attribution: no `Object` carries a source position, so it
   reports the line of the most recent token scanned directly from the
@@ -669,7 +677,8 @@ renders eight examples in both and compares block-downsampled output).
   today, and was checked against the code** (#603). A change that adds or
   removes a file, process, network or MCP capability, or a resource limit,
   must update it in the same PR; #568 added the MCP bounds and #604 the
-  interpreter limits (below). `docs/STABILITY.md` says which surfaces need a deprecation
+  interpreter limits (below), #740 and #763 the write and read roots (#772
+  brought the file current for 0.7.0). `docs/STABILITY.md` says which surfaces need a deprecation
   period. `.github/CODEOWNERS` paths are owner-merged (`SDLC.md`, "Who merges").
 
 - **Visible changes merge without the owner mid-cycle** (#674). A PR that
@@ -1172,7 +1181,9 @@ renders eight examples in both and compares block-downsampled output).
     harness bodies in `src/fuzzing.rs`, seeds and crash regressions replayed by
     `tests/fuzz_corpus.rs`, weekly in `.github/workflows/fuzz.yml`. A fixed crash's
     input goes in `fuzz/regressions/<target>/`.
-  - `--spool` and the subcommands take no limits yet (SECURITY.md says so).
+  - `--spool` and the subcommands take the limits (#701): one budget per
+    program run (`subcmd::Confine`, `take_limit_flag`, `limit_flag` in
+    `main.rs`, `window::run_spool_with_limits`, `chalk::run_with_limits`).
 - **File writing (#740).** Off by default: `Interp::set_write_roots` (CLI
   `--allow-write DIR`) names the directories, and `src/write_roots.rs` is the
   one place that decides whether a path is writable (`WriteRoots::open`,
@@ -1181,8 +1192,60 @@ renders eight examples in both and compares block-downsampled output).
   the flag: `pscat-mcp`'s children inherit the environment, and the MCP layer
   must never write from PostScript (`tests/file_write.rs` asserts it). Output
   files are `file::Sink`s; `%stdout` goes through `Interp::write_stdout` so a
-  captured stdout keeps order with `print`. Disk writes are unbuffered because
-  the CLI exits without dropping the interpreter. See `notes/740-file-writing.md`.
+  captured stdout keeps order with `print`. Disk writes are buffered (#762,
+  `file::DiskSink`, 64 KiB): the interpreter keeps weak handles to the open
+  files (`Interp::flush_outputs`, cap `MAX_OPEN_OUTPUT_FILES` = 64) and the CLI
+  flushes them on every exit path (`flush_outputs_or_report` in `main.rs`,
+  `window.rs`), because it never tears down the dictionary graph that may hold
+  an open file. A new CLI exit path must flush too; `Drop for Interp` is only the
+  backstop. `--max-write-bytes` is `Interp::set_max_write_bytes` (1 GiB with
+  `--allow-write`). See `notes/740-file-writing.md` and
+  `notes/762-file-hardening.md`.
+- **`pscat-mcp` limits from the environment (#756).** Every numeric flag has a
+  `PSCAT_MCP_<FLAG>` variable, from one table (`NUMERIC_OPTIONS` in
+  `src/mcp_server.rs`) that also holds the ranges and defaults, so the two
+  cannot drift. Env is read after the flags (so `--help` ignores it), a flag
+  wins, a bad value is a startup error. Never add a variable for
+  `--allow-read` or `--out-root` (same rule as #740); a hosted server (#689)
+  must not read these. Tests build a `Config` with an injected lookup, never
+  `std::env::set_var`. See `notes/756-mcp-env-limits.md`.
+- **`--bands N` (#736).** One PNG rendered as N horizontal bands on N threads
+  (`src/bands.rs`, a binary module), each a full run with `/BandIndex`,
+  `/BandCount`, `/BandBBox` in userdict, stitched by whole device rows. Byte
+  identity with a plain render rests on one rule: the only per-band shortcut
+  allowed is one that leaves the band's own rows exactly as a full render paints
+  them. Today that is just image rasterization (`Gfx::set_band_rows`, read in
+  `image.rs`). Never add a PostScript-visible clip or a tiny-skia mask for it. A
+  new shortcut (e.g. culling fills whose bbox misses the band) needs a provably
+  conservative bound and a run of `tests/bands.rs`. See
+  `notes/736-bands-parallel-render.md`.
+- **`--profile` (#737).** Per-procedure call counts and inclusive/exclusive time
+  on stderr (`src/profile.rs`, a `Profiler` on `Interp`). `execute_resolved` takes
+  the name a body was reached through (`via`, `NO_NAME` for `exec`/`if`) and, with
+  profiling on, `prof_call` plants a `Frame::ProfReturn` marker under the body's
+  `Proc` frame. The marker is reached after the body and its tail call (a `Proc`
+  frame is popped *before* its last element runs, so the frame itself cannot mark
+  the return), and `cleanup_unwound_frame` / `exit_loop` close it on `stop`,
+  errors, `exit` and `quit`. A call to a name already among the markers on top of
+  the exec stack plants none (tail recursion stays at constant depth; non-tail recursion overflows the exec
+  stack at about half the plain depth, since a marker takes a slot). Keep the
+  hot path as it is: the only cost off is one `profile.is_some()` in
+  `execute_resolved`'s `Array` arm, and everything else is `#[cold]`. A first
+  version that made `step_n_inner` generic, or added a second caller of
+  `execute_resolved`/`push_proc_frame`, slowed a plain `fib` run by 19%; measure
+  with `scripts/bench_compare.sh` after touching `interp.rs`. See
+  `notes/737-pscat-profile.md`.
+- **Read roots (#763).** Reads are open by default (the CLI). `Interp::set_read_roots`
+  (CLI `--read-root DIR`, `--confine-reads` for none) confines them, and
+  `src/read_roots.rs` decides: `open_confined` wraps the search order's reader so a
+  disk candidate outside the roots is skipped (the embedded `lib/` still answers) and
+  a name that only resolved outside is `invalidfileaccess`; `filenameforall` filters
+  through `ReadRoots::admit`. Every operator that reads a program-named path must go
+  through `ops::file::read_resource` (or `open_confined`), never `std::fs` directly.
+  `pscat-mcp` always passes `--confine-reads` plus its roots (cwd unless `/`,
+  `$PSCAT_HOME`, the per-user data dir, `--allow-read`) to `pscat` and `pscat
+  handwrite` children. Font lookup matches names against file stems and isn't gated.
+  See `notes/763-read-roots.md`.
 - **`writereals` / `readreals` (#735).** Packed little-endian float64 (or `/f32`) save and
   load of a numeric array, in `src/ops/realsio.rs` (module doc has the error table and the
   `/f32` rules). The writer opens through `WriteRoots::open` like `file` does, and checks every
@@ -1191,7 +1254,11 @@ renders eight examples in both and compares block-downsampled output).
   one fixed 64 KiB buffer; the reader `check_alloc`s file plus array before reading. A short file
   is `rangecheck`, not `ioerror` (the PLRM keeps `ioerror` for non-EOF failures). Tests:
   `tests/realsio.rs`, and `tests/realsio_memory.rs` (own binary, tracking allocator). See
-  `notes/735-readreals-writereals.md`.
+  `notes/735-readreals-writereals.md`. #773 added `(path) /all readreals`, `(path) offset n
+  readreals` (offset in values) and the file-object forms `array file writereals` / `file
+  n|/all readreals`, in the same module (`tests/realsio_files.rs`;
+  `notes/773-readreals-all-offset-file.md`). The bulk read is `PsFile::read_into`, which keeps
+  `consumed`/`line` exactly as `read_byte` does.
 - **`pscat sheet` composes finished renders (#693).** Unlike the subcommands above it
   builds no driver: it renders each file itself (a probe `Interp` gives every cell's
   pixel size first), lays the cells out with `contact_sheet::Layout` (pure geometry, so
@@ -1267,9 +1334,9 @@ renders eight examples in both and compares block-downsampled output).
   cap is what bounds it below the interpreter's 8000-a-side ceiling. A TeX error is mapped back from the
   child's `mk-*` offending command with `chalk::explain`. The output is
   byte-identical to `pscat chalk` and `chalk::render` (`tests/mcp.rs` pins it).
-  `review_sheet` (#708) is the pattern for a tool whose CLI twin has no limits:
-  `pscat sheet` runs its programs in-process with no step, time or memory
-  limit, so the tool does not shell out to it. It renders each cell in its
+  `review_sheet` (#708) is the pattern for a tool whose CLI twin cannot share
+  one `--timeout` across cells (`pscat sheet` takes the limits since #701, but
+  per cell, each with the whole budget), so the tool does not shell out to it. It renders each cell in its
   own child (`--page --dpi --png -` under `interpreter_args`, each child given
   what is left of the one `--timeout`) and composes the pictures in-process
   with `pscat::contact_sheet` (`Layout`, `render_text`, `blit_at`, `frame`,
@@ -1695,10 +1762,17 @@ renders eight examples in both and compares block-downsampled output).
   commit. Exit 1 = a page differs or pscat errored; exit 2 = the negative
   control rendered identically, so the pages prove nothing. Write the
   control as a tiny driver using a key only the branch has.
+  A change to the limit paths (`--max-time`/`--max-memory`/`--max-steps`,
+  #604) acts only under those flags: pass them with `--pscat-args "--max-steps
+  10000000"` (#724), which goes to the base, head and control renders alike.
   Since #303 it fits any lib change that must render identically:
   `--loader lib/<name>.ps` (repeatable, transitive through the libs built on
   it) or `--files LIST` picks the files, and multi-page output
   (`page-001.png`, ...) is compared page by page.
+  Two-binary runs (`--base-bin/--head-bin`) also always compare the
+  `selftest/drivers/image_*.ps` drivers (header `%%IdentityCorpus: always`,
+  #776), the only tracked programs that call `image`, `colorimage` and
+  `imagemask`, so an image-code change is checked whatever `--loader` was.
   **An interpreter (`src/`) change uses `--base-bin PATH --head-bin PATH`**
   (issue #335) instead of the shared binary: the base tree renders with the
   base binary (`scripts/build_base_bin.sh BASE_WORKTREE OUT`), the head tree
@@ -1765,10 +1839,17 @@ renders eight examples in both and compares block-downsampled output).
   `pscat.js` exposes the buffer as `ps.output`, which the playground
   shows. A new printing operator must use it too, or its output vanishes
   in the browser.
-- **The `--pstack-on-error` CLI dump is bounded (#703)**: it goes through
-  `object::stack_repr_bounded` with `STACK_DUMP_LIMITS`. `repr()`, `==` and
-  the `pstack` operator stay unbounded, so a program's own output can still
-  hit MCP's 4 MiB cap.
+- **Printed stack and operand output is bounded (#703, #745)**: one writer,
+  `Object::write_repr` in src/object.rs, spells every `==`-syntax value, so
+  `repr()` (unbounded but for depth 32, `UNBOUNDED_LIMITS`), `==` and
+  `pstack` (`OPERATOR_LIMITS`: depth 32, 1024 elements, 4096 bytes per
+  string/name, 16 KiB per operand; `OPERATOR_STACK_BYTES` 32 KiB across the
+  stack, then one `... truncated` line) and the `--pstack-on-error` dump
+  (`stack_repr_bounded`, `STACK_DUMP_LIMITS`) cannot drift. `stack` cuts
+  strings via `text_bounded`. `=` and `print` are deliberately not bounded
+  (a program's own text output). The undefined/offending name in an error
+  line is cut to `ERROR_NAME_LIMIT` (512) by `cap_text`. `cvs` and
+  `format_real` digits are untouched. Notes: `notes/745-bound-operator-output.md`.
 - **The npm package (`npm/`, #566) is that wasm build plus a JS API.**
   `scripts/build_npm.sh` runs `build_wasm.sh` and copies `web/pscat.js` in
   as `core.js`, so a change to the C ABI (`src/wasm.rs`) or to
@@ -1778,7 +1859,11 @@ renders eight examples in both and compares block-downsampled output).
   `test_npm_tarball.sh`). The standard 35 are compiled in (#757: the
   Liberation core plus `fonts/base35/`, `font::EMBEDDED`); fonts beyond
   them reach wasm only through `ps_add_font` (`font::register_font_bytes`),
-  keyed by font pack file stem like the disk catalog. `npm/package.json` moves in lockstep with
+  keyed by font pack file stem like the disk catalog. A pack face not added
+  that way gets the same stand-in as native (#728) and its note, worded for
+  `addFont`, goes to `Interp::font_warnings` (no stderr in wasm):
+  `ps_warnings_*` in `src/wasm.rs`, `Renderer.warnings` in npm (#750).
+  `npm/package.json` moves in lockstep with
   `Cargo.toml` (`release_stages.py bump-manifests`; a test fails if they
   differ), and the release publishes the tarball `verify` packed
   (docs/dev/RELEASING.md). Something new embedded in the wasm shows up as
@@ -1801,6 +1886,14 @@ renders eight examples in both and compares block-downsampled output).
   build. Change an example's output and you must change its `.out` and
   the prose around it. `playground.html?example=learn/NAME.ps` is how
   the "Try it" links open them.
+- **`tests/site.rs` builds into its own scratch dir** (#767). `build_site.sh`
+  wipes and rebuilds its output directory, so two runs in one worktree (the
+  gate beside a hand-run `cargo test`) used to delete each other's `_site/`
+  and fail with "examples no page shows". The test now sets
+  `PSCAT_SITE_OUT` (a `common::scratch_dir`) and `PSCAT_BIN` (its own
+  `CARGO_BIN_EXE_pscat`, so the script skips `cargo build --release`); both
+  default to the old behaviour for CI and the Pages workflow. Run
+  `build_site.sh` by hand with the defaults and it still writes `_site/`.
 - **`screct`/`scpath` stamp their region, and `scin` trusts the stamp**
   (#503, `notes/503-artkit-scin-region-stamp.md`). `/Checked` holds the very
   array in the region's `/Edges` (path) or `/BBox` (rect); `scin` skips its

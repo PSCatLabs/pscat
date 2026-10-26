@@ -67,6 +67,11 @@
 //! `docs/dev/CAPABILITIES.md` has the full rules and a `jq` filter
 //! that lists which entries carry `parameters`.
 //!
+//! Native pscat-extension operators (`gnoise2`, `setalpha`,
+//! `.sameclip`, ...; issue #754) are `kind: "operator"` rows in
+//! `ENTRIES` with `source: "systemdict"`; see `docs/dev/CAPABILITIES.md`
+//! for which operators are deliberately left out.
+//!
 //! `example` alone isn't enough to actually run something, though — a
 //! page template errors `undefined: Palettes` unless `lib/artkit.ps`
 //! is loaded first, and that dependency isn't visible from `source`
@@ -86,6 +91,13 @@ pub enum CapabilityKind {
     Palette,
     Template,
     Procedure,
+    /// A native interpreter operator: pscat's own extension to the PLRM
+    /// set, implemented in Rust and bound in `systemdict` (e.g.
+    /// `gnoise2`, `setalpha`). Not defined by any `.ps` file, so there
+    /// is nothing to `run` (`load` is empty) and `source` is
+    /// `systemdict`. Distinct from `Procedure`, a library routine loaded
+    /// from a `.ps` source. Added in #754.
+    Operator,
     /// A mutable global config variable (e.g. `/spmetal`) — not
     /// executable, just a name bound to a value that other procedures
     /// in the same source read. Distinct from `Procedure` (a fourth
@@ -103,6 +115,7 @@ impl CapabilityKind {
             CapabilityKind::Palette => "palette",
             CapabilityKind::Template => "template",
             CapabilityKind::Procedure => "procedure",
+            CapabilityKind::Operator => "operator",
             CapabilityKind::Dial => "dial",
         }
     }
@@ -225,6 +238,10 @@ const TOON: &str = "lib/styles/toon.ps";
 const HANDSCRIPT: &str = "lib/handscript.ps";
 const HANGUL: &str = "lib/hangul.ps";
 const TYPEWRITER: &str = "lib/typewriter.ps";
+const SYSTEMDICT: &str = "systemdict"; // source of a native operator (CapabilityKind::Operator)
+const BUILTIN: &str = "builtin";
+const BUILTIN_FILE: &str =
+    "builtin (needs a filesystem: absent on wasm; writing also needs --allow-write)";
 const LIB: &str = "library"; // availability: always present once its source is loaded
 
 /// Every top-level name `lib/artkit.ps` defines that is *not* cataloged
@@ -385,6 +402,183 @@ macro_rules! entry {
 }
 
 static ENTRIES: &[Entry] = &[
+    // --- Native pscat-extension operators (issue #754) -------------
+    // Deliberately NOT cataloged: PLRM operators (the catalog does not
+    // cover systemdict; this includes #740's renamefile, deletefile,
+    // filenameforall), Ghostscript-compat min/max/.min/.max, and the
+    // internal artkit hook .permnoise2. tests/capabilities.rs checks
+    // every row here is a real operator in systemdict.
+    entry!(
+        "noiseseed",
+        CapabilityKind::Operator,
+        "pscat extension. Seeds the native noise table from an integer; never touches rand. A fresh interpreter behaves as if 0 noiseseed had run. nrseed is the PostScript twin.",
+        &[],
+        SYSTEMDICT,
+        "seed noiseseed -",
+        BUILTIN
+    ),
+    entry!(
+        "gnoise2",
+        CapabilityKind::Operator,
+        "pscat extension. 2D gradient (Perlin) noise, about -0.71..0.71, deterministic and bit-identical on every platform. nrgnoise2 is the PostScript twin.",
+        &[],
+        SYSTEMDICT,
+        "x y gnoise2 n",
+        BUILTIN
+    ),
+    entry!(
+        "gnoise3",
+        CapabilityKind::Operator,
+        "pscat extension. 3D gradient (improved Perlin) noise, about -1..1. nrgnoise3 is the PostScript twin.",
+        &[],
+        SYSTEMDICT,
+        "x y z gnoise3 n",
+        BUILTIN
+    ),
+    entry!(
+        "gnoise2d",
+        CapabilityKind::Operator,
+        "pscat extension. 2D gradient noise plus its analytic gradient. nrgnoise2d is the PostScript twin.",
+        &[],
+        SYSTEMDICT,
+        "x y gnoise2d n dx dy",
+        BUILTIN
+    ),
+    entry!(
+        "vnoise2",
+        CapabilityKind::Operator,
+        "pscat extension. 2D value noise, in -0.996..0.996. nrvnoise2 is the PostScript twin.",
+        &[],
+        SYSTEMDICT,
+        "x y vnoise2 v",
+        BUILTIN
+    ),
+    entry!(
+        "vnoise3",
+        CapabilityKind::Operator,
+        "pscat extension. 3D value noise. nrvnoise3 is the PostScript twin.",
+        &[],
+        SYSTEMDICT,
+        "x y z vnoise3 v",
+        BUILTIN
+    ),
+    entry!(
+        "fbm2",
+        CapabilityKind::Operator,
+        "pscat extension. Fractal Brownian motion: oct octaves (0..32) of gnoise2, amplitude times gain and frequency times lac per octave. nrfbm2 is the PostScript twin.",
+        &[],
+        SYSTEMDICT,
+        "x y oct gain lac fbm2 v",
+        BUILTIN
+    ),
+    entry!(
+        "fbm3",
+        CapabilityKind::Operator,
+        "pscat extension. Fractal Brownian motion of gnoise3 (oct 0..32). nrfbm3 is the PostScript twin.",
+        &[],
+        SYSTEMDICT,
+        "x y z oct gain lac fbm3 v",
+        BUILTIN
+    ),
+    entry!(
+        "vfbm2",
+        CapabilityKind::Operator,
+        "pscat extension. Fractal Brownian motion of vnoise2 (oct 0..32). nrvfbm2 is the PostScript twin.",
+        &[],
+        SYSTEMDICT,
+        "x y oct gain lac vfbm2 v",
+        BUILTIN
+    ),
+    entry!(
+        "vfbm3",
+        CapabilityKind::Operator,
+        "pscat extension. Fractal Brownian motion of vnoise3 (oct 0..32). nrvfbm3 is the PostScript twin.",
+        &[],
+        SYSTEMDICT,
+        "x y z oct gain lac vfbm3 v",
+        BUILTIN
+    ),
+    entry!(
+        "ridged2",
+        CapabilityKind::Operator,
+        "pscat extension. Ridged multifractal sum of gnoise2: each octave is (1-|n|) squared (oct 0..32). nrridged2 is the PostScript twin.",
+        &[],
+        SYSTEMDICT,
+        "x y oct gain lac ridged2 v",
+        BUILTIN
+    ),
+    entry!(
+        "ridged3",
+        CapabilityKind::Operator,
+        "pscat extension. Ridged multifractal sum of gnoise3 (oct 0..32). nrridged3 is the PostScript twin.",
+        &[],
+        SYSTEMDICT,
+        "x y z oct gain lac ridged3 v",
+        BUILTIN
+    ),
+    entry!(
+        "setalpha",
+        CapabilityKind::Operator,
+        "pscat extension, not PLRM and absent from Ghostscript. Fill/stroke opacity 0..1 (clamped); part of the graphics state. Reaches fill, stroke, text and shfill, not image/imagemask. Probe with systemdict /setalpha known.",
+        &[],
+        SYSTEMDICT,
+        "a setalpha -",
+        BUILTIN
+    ),
+    entry!(
+        "currentalpha",
+        CapabilityKind::Operator,
+        "pscat extension. The current opacity set by setalpha, as a real.",
+        &[],
+        SYSTEMDICT,
+        "- currentalpha a",
+        BUILTIN
+    ),
+    entry!(
+        "setblendmode",
+        CapabilityKind::Operator,
+        "pscat extension, not PLRM and absent from Ghostscript. Blend mode for fills and strokes: /Normal (default) or /Multiply; any other name is rangecheck. Part of the graphics state.",
+        &[],
+        SYSTEMDICT,
+        "name setblendmode -",
+        BUILTIN
+    ),
+    entry!(
+        "currentblendmode",
+        CapabilityKind::Operator,
+        "pscat extension. The current blend mode name set by setblendmode.",
+        &[],
+        SYSTEMDICT,
+        "- currentblendmode name",
+        BUILTIN
+    ),
+    entry!(
+        ".sameclip",
+        CapabilityKind::Operator,
+        "pscat extension, not PLRM and absent from Ghostscript. True when the clip in force is the very clip the gstate holds (identity, not geometry). drykit probes for it with where.",
+        &[],
+        SYSTEMDICT,
+        "gstate .sameclip bool",
+        BUILTIN
+    ),
+    entry!(
+        "writereals",
+        CapabilityKind::Operator,
+        "pscat extension. Saves a numeric array as packed little-endian binary (f64 by default, /f32 optional). With a path it truncates the file and needs --allow-write; with an open output file (array file writereals) it writes at the file's position, so %stdout, append files and setfileposition work, and the bytes count against --max-write-bytes. There is no disk on wasm.",
+        &[],
+        SYSTEMDICT,
+        "array (path)|file [/f32] writereals -",
+        BUILTIN_FILE
+    ),
+    entry!(
+        "readreals",
+        CapabilityKind::Operator,
+        "pscat extension. Loads reals written by writereals (/f64 default or /f32) as an array: (path) n from the start, (path) offset n or (path) offset /all from an element offset, (path) /all to the end, or file n|/all from an open input file's position (which moves past the values). rangecheck if the file is short; limitcheck over the 16M array cap. A path follows the read policy of (path) (r) file; no filesystem on wasm.",
+        &[],
+        SYSTEMDICT,
+        "(path) [offset] n|/all [/f32] readreals array | file n|/all [/f32] readreals array",
+        BUILTIN_FILE
+    ),
     // --- Type 3 program faces (lib/fonts/, Stages 15 & 18) ---------
     entry!(
         "Neon",

@@ -100,19 +100,19 @@ fn the_five_formulas_render_as_pinned() {
     // All five re-pinned for #692 (exact-area fill coverage); the Windows
     // cases value is from that PR's windows-latest CI run.
     let pinned: [u64; 5] = [
-        0x736c0a5719284045,
-        0xb082288de068a8c9,
-        0x3ddbbd53c961e577,
+        0x0ace74c7afc6678c,
+        0xd956a77ea25618a3,
+        0xbfbcd6c67947a409,
         // The cases board comes out a few pixels different on Windows
         // (macOS and Linux agree): its C runtime's transcendental functions
         // round differently in the last place for one glyph. Both are
         // pinned, so each platform still catches a change.
         if cfg!(windows) {
-            0x906d16f4281c5605
+            0x046b029b37ff9ad5
         } else {
-            0x77d1c35a8b912166
+            0xf4e60cabdd8fe447
         },
-        0xc0e0473f8adec1d3,
+        0xd93e1e1def7fc961,
     ];
     let got: Vec<u64> = FORMULAS
         .iter()
@@ -275,6 +275,91 @@ fn the_block_is_fitted_inside_the_margins() {
         "right edge {} past the margin",
         v[2]
     );
+}
+
+/// The ghost writing never touches the formula (issue #698): the driver is
+/// run up to the board, which is when the ghosts are placed, and each
+/// placed ghost's real path box is compared with the formula's box. The
+/// board keeps a margin of 0.6 of the writing size around the maths, so a
+/// faint fragment can never pass for a superscript. Many seeds on formulas
+/// that fill the board and ones that do not; no render.
+#[test]
+fn ghost_writing_keeps_clear_of_the_formula() {
+    let cases: [(&str, &str, u32, u32, f64); 5] = [
+        ("x = 1", "x = 1", 800, 400, 64.0),
+        ("F = ma", "F = ma", 800, 400, 64.0),
+        ("f(x)", r"f(x) = \int_0^1 g(t)\,dt", 800, 400, 64.0),
+        (
+            "quadratic",
+            r"x = \frac{-b \pm \sqrt{b^2-4ac}}{2a}",
+            600,
+            300,
+            64.0,
+        ),
+        ("small", r"e^{i\pi} + 1 = 0", 400, 200, 40.0),
+    ];
+    let mut placed_total = 0;
+    for (name, tex, w, h, size) in cases {
+        for seed in 1..=12 {
+            let mut cfg = small();
+            cfg.width = w;
+            cfg.height = h;
+            cfg.size = size;
+            cfg.seed = seed;
+            let d = chalk::driver(tex, &cfg).unwrap();
+            let end = d.source.find("dcboard\n").expect("the board line");
+            let cut = d.source[..end].rfind('\n').expect("a line before it") + 1;
+            let mut src = d.source[..cut].to_string();
+            src.push_str(
+                "ckdict begin
+                 cksize =
+                 gsave newpath cklines ckox ckoy ckopts mkalign pop pathbbox grestore
+                 4 { = } repeat
+                 ckgplaced {
+                   aload pop /ckgsd exch def /ckgsz exch def
+                   gsave newpath << /Size ckgsz /Seed ckgsd /Irregular 1.3 >> mkpath
+                   pathbbox grestore 4 { = } repeat
+                 } forall end",
+            );
+            let mut it = Interp::new();
+            it.capture_stdout();
+            it.run_str(&src)
+                .unwrap_or_else(|e| panic!("{name} {seed}: {}", it.error_report(&e)));
+            let v: Vec<f64> = String::from_utf8_lossy(it.captured_stdout())
+                .split_whitespace()
+                .map(|t| t.parse().unwrap())
+                .collect();
+            // the writing's path box, printed from the top of the stack down
+            let (cksize, f) = (v[0], [v[4], v[2], v[3], v[1]]);
+            for g in v[5..].chunks(4) {
+                // `=` printed the bbox from the top of the stack down
+                let (ury, urx, lly, llx) = (g[0], g[1], g[2], g[3]);
+                let gap_x = (f[0] - urx).max(llx - f[1]).max(0.0);
+                let gap_y = (f[2] - ury).max(lly - f[3]).max(0.0);
+                let gap = gap_x.max(gap_y);
+                assert!(
+                    gap >= 0.6 * cksize,
+                    "{name} seed {seed}: a ghost at [{llx} {lly} {urx} {ury}] is {gap:.1} from \
+                     the formula {f:?} (writing size {cksize})"
+                );
+                placed_total += 1;
+            }
+        }
+    }
+    // the board is still used: most boards keep some ghosts
+    assert!(
+        placed_total >= 40,
+        "ghosts all but vanished: {placed_total}"
+    );
+}
+
+/// Writing with no ink (a bare space) has no path to measure: the ghosts
+/// fall back to the line boxes, and the board still renders (issue #698).
+#[test]
+fn a_formula_with_no_ink_still_gets_a_board() {
+    for tex in [r"\quad", "~", r"\,"] {
+        chalk::render(tex, &small(), Format::Png).unwrap_or_else(|e| panic!("{tex}: {e}"));
+    }
 }
 
 /// TeX outside the subset fails with one line naming the command or

@@ -4,7 +4,7 @@ use std::process::ExitCode;
 
 use pscat::repl::LineBuffer;
 use pscat::spool::Watcher;
-use pscat::window::{WindowOptions, run_interactive, run_spool, run_windowed};
+use pscat::window::{WindowOptions, run_interactive, run_spool_with_limits, run_windowed};
 use pscat::{Interp, Limits, gfx};
 
 // Counts live heap bytes so `--max-memory` can be enforced (issue #604). One
@@ -16,6 +16,8 @@ static ALLOC: pscat::TrackingAllocator = pscat::TrackingAllocator;
 #[path = "mcp_server.rs"]
 mod mcp_server;
 mod subcmd;
+// `--bands N` (#736).
+mod bands;
 
 /// Interpreter steps per rendered frame in the windowed modes. Named
 /// so `--selftest`'s runs-alone check can tell "the user asked for a
@@ -89,6 +91,14 @@ struct Options {
     /// `--allow-write DIR`, repeatable (issue #740): the directories a
     /// program may write files in. None by default.
     allow_write: Vec<String>,
+    /// `--max-write-bytes N` (issue #762): the most bytes a program may write
+    /// to disk files. `None` when not given, which is `DEFAULT_MAX_WRITE_BYTES`
+    /// if `--allow-write` is; `Some(None)` is `0`, no cap.
+    max_write_bytes: Option<Option<u64>>,
+    /// `--read-root DIR` (repeatable) and `--confine-reads` (issue #763):
+    /// `Some` confines the program's reads to these directories (none: only
+    /// the embedded `lib/`). `None` by default, so reads stay open.
+    read_roots: Option<Vec<String>>,
     /// `--progress` (issue #741): a headless run prints
     /// `pscat: progress pages=N` to stderr each time a page is finished,
     /// which is how pscat-mcp's `render_status` counts pages.
@@ -98,6 +108,17 @@ struct Options {
     /// killed leaves no render running behind it. The parent names itself
     /// because it can die before this process first looks.
     exit_with_parent: Option<u32>,
+    /// `--bands N` (issue #736): render N horizontal bands on N threads
+    /// and stitch them into one PNG (`bands.rs`).
+    bands: Option<u32>,
+    /// `--profile` (issue #737): a headless run reports, on stderr, each
+    /// named procedure's call count and inclusive and exclusive time.
+    profile: bool,
+    /// `--profile-top N`: rows to show (default 20; 0 = all).
+    profile_top: Option<usize>,
+    /// `--profile-json`: the same report as one line of JSON (implies
+    /// `--profile`).
+    profile_json: bool,
 }
 
 impl Options {
@@ -130,22 +151,42 @@ impl Options {
             grid: None,
             limits: Limits::none(),
             allow_write: Vec::new(),
+            max_write_bytes: None,
+            read_roots: None,
             progress: false,
             exit_with_parent: None,
+            bands: None,
+            profile: false,
+            profile_top: None,
+            profile_json: false,
         }
     }
 
-    /// Put `--max-steps`/`--max-time`/`--max-memory` and `--allow-write`
-    /// on a fresh interpreter.
+    /// Put `--max-steps`/`--max-time`/`--max-memory`, `--allow-write` and
+    /// `--read-root` on a fresh interpreter.
     fn apply_limits(&self, interp: &mut Interp) -> Result<(), String> {
         // `set_limits` refuses only when the tracking allocator is missing,
         // and this binary declares it.
         interp
             .set_limits(self.limits)
             .expect("pscat installs the tracking allocator");
+        if let Some(dirs) = &self.read_roots {
+            interp
+                .set_read_roots(dirs)
+                .map_err(|e| format!("--read-root: {e}"))?;
+        }
         interp
             .set_write_roots(&self.allow_write)
-            .map_err(|e| format!("--allow-write: {e}"))
+            .map_err(|e| format!("--allow-write: {e}"))?;
+        // A program allowed to write gets a byte cap unless it was lifted
+        // with `--max-write-bytes 0` (issue #762).
+        if !self.allow_write.is_empty() || self.max_write_bytes.is_some() {
+            interp.set_max_write_bytes(
+                self.max_write_bytes
+                    .unwrap_or(Some(DEFAULT_MAX_WRITE_BYTES)),
+            );
+        }
+        Ok(())
     }
 }
 
@@ -174,6 +215,27 @@ fn runs_alone(mode: &str, options: &Options) -> Result<(), String> {
             extra.join(" ")
         ))
     }
+}
+
+/// `--max-write-bytes`'s default when `--allow-write` is given (issue #762):
+/// 1 GiB, as the memory cap `Limits::untrusted` uses. Large enough for any
+/// gallery piece's output, small enough that a runaway loop does not fill a
+/// disk before the time it is allowed runs out.
+const DEFAULT_MAX_WRITE_BYTES: u64 = 1 << 30;
+
+/// A byte count: digits with an optional `k`, `m` or `g` (binary
+/// multiples, any case). `None` for anything else or an overflow.
+fn parse_byte_count(s: &str) -> Option<u64> {
+    let (digits, shift) = match s.as_bytes().last()?.to_ascii_lowercase() {
+        b'k' => (&s[..s.len() - 1], 10),
+        b'm' => (&s[..s.len() - 1], 20),
+        b'g' => (&s[..s.len() - 1], 30),
+        _ => (s, 0),
+    };
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    digits.parse::<u64>().ok()?.checked_mul(1 << shift)
 }
 
 fn main() -> ExitCode {
@@ -253,6 +315,15 @@ fn main() -> ExitCode {
         }
     }
 
+    if let Err(msg) = check_profile_options(&options) {
+        eprintln!("pscat: {msg}");
+        return ExitCode::FAILURE;
+    }
+
+    if let Some(count) = options.bands {
+        return bands::run(&options, count);
+    }
+
     if options.sweep_seed.is_some() || options.sweep_param.is_some() {
         if options.sweep_seed.is_some() && options.sweep_param.is_some() {
             eprintln!(
@@ -321,17 +392,14 @@ fn main() -> ExitCode {
             eprintln!("pscat: --spool runs alone (no file argument or other mode flags)");
             return ExitCode::FAILURE;
         }
-        if !options.limits.is_none() {
-            eprintln!(
-                "pscat: --max-steps/--max-time/--max-memory don't apply to --spool yet \
-                 (the spool runs each file without limits)"
-            );
-            return ExitCode::FAILURE;
-        }
         if !options.allow_write.is_empty() {
             eprintln!(
                 "pscat: --allow-write doesn't apply to --spool (spooled jobs never write files)"
             );
+            return ExitCode::FAILURE;
+        }
+        if options.read_roots.is_some() {
+            eprintln!("pscat: --read-root/--confine-reads don't apply to --spool");
             return ExitCode::FAILURE;
         }
         let watcher = match Watcher::new(std::path::Path::new(dir)) {
@@ -346,7 +414,13 @@ fn main() -> ExitCode {
             steps_per_frame: options.steps_per_frame,
             halftone: options.halftone,
         };
-        return match run_spool(watcher, options.page, options.dpi / 72.0, window_options) {
+        return match run_spool_with_limits(
+            watcher,
+            options.page,
+            options.dpi / 72.0,
+            window_options,
+            options.limits,
+        ) {
             Ok(()) => ExitCode::SUCCESS,
             Err(msg) => {
                 eprintln!("pscat: {msg}");
@@ -367,6 +441,9 @@ fn main() -> ExitCode {
     if let Err(msg) = options.apply_limits(&mut interp) {
         eprintln!("pscat: {msg}");
         return ExitCode::FAILURE;
+    }
+    if options.profile {
+        interp.enable_profile();
     }
     // The single-run paths below end the process right after the output is
     // written, so tearing down the dictionary graph (which `Drop for Interp`
@@ -501,6 +578,51 @@ fn read_source(path: &str) -> Result<Vec<u8>, String> {
     }
 }
 
+/// `--max-steps`, `--max-time` and `--max-memory` (issue #604): the three
+/// flags the flag CLI and every tool subcommand (`pscat handwrite`,
+/// `typewrite`, `photo-etch`, `chalk`, `sheet`; issue #701) take, parsed in
+/// one place so `0 = no limit` and the ranges are the same everywhere.
+/// `flag` must be one of the three ([`is_limit_flag`]).
+pub(crate) fn limit_flag(limits: &mut Limits, flag: &str, value: &str) -> Result<(), String> {
+    match flag {
+        "--max-steps" => {
+            let steps: u64 = value.parse().map_err(|_| {
+                format!(
+                    "invalid --max-steps value: {value} (expected a whole number; 0 = no limit)"
+                )
+            })?;
+            limits.max_steps = (steps > 0).then_some(steps);
+        }
+        "--max-time" => {
+            let secs: f64 = value
+                .parse()
+                .ok()
+                .filter(|s: &f64| s.is_finite() && (0.0..=31_536_000.0).contains(s))
+                .ok_or_else(|| {
+                    format!("invalid --max-time value: {value} (expected seconds; 0 = no limit)")
+                })?;
+            limits.max_time = (secs > 0.0).then(|| std::time::Duration::from_secs_f64(secs));
+        }
+        "--max-memory" => {
+            let mib: usize = value
+                .parse()
+                .ok()
+                .filter(|m| *m <= 1 << 30)
+                .ok_or_else(|| {
+                    format!("invalid --max-memory value: {value} (expected MiB; 0 = no limit)")
+                })?;
+            limits.max_memory = (mib > 0).then_some(mib << 20);
+        }
+        other => unreachable!("not a limit flag: {other}"),
+    }
+    Ok(())
+}
+
+/// Whether `arg` is one of the three flags [`limit_flag`] takes.
+pub(crate) fn is_limit_flag(arg: &str) -> bool {
+    matches!(arg, "--max-steps" | "--max-time" | "--max-memory")
+}
+
 /// `--exit-with-parent`'s value (also taken by `pscat handwrite`).
 fn parent_pid_arg(n: &str) -> Result<u32, String> {
     n.parse()
@@ -554,13 +676,78 @@ fn run_progress(interp: &mut Interp, source: &[u8]) -> Result<(), pscat::PsError
     }
 }
 
+/// `--profile` reports after a headless run of one program, so it refuses
+/// every mode that has none: the window, the REPL, sweeps, the spool, and
+/// `--bands` (each band re-runs the whole program, so a per-band profile
+/// would report N copies of the same calls; profile a plain run).
+fn check_profile_options(options: &Options) -> Result<(), String> {
+    if !options.profile {
+        if options.profile_top.is_some() {
+            return Err("--profile-top needs --profile".to_string());
+        }
+        return Ok(());
+    }
+    let others: [(bool, &str); 6] = [
+        (options.bands.is_some(), "--bands"),
+        (options.sweep_seed.is_some(), "--sweep-seed"),
+        (options.sweep_param.is_some(), "--sweep"),
+        (options.contact_sheet.is_some(), "--contact-sheet"),
+        (options.spool.is_some(), "--spool"),
+        (options.interactive, "--interactive"),
+    ];
+    if let Some((_, flag)) = others.iter().find(|(on, _)| *on) {
+        return Err(format!(
+            "--profile reports on one headless run; it doesn't combine with {flag}"
+        ));
+    }
+    if options.file.is_none() && options.eval.is_none() {
+        return Err("--profile needs a program: a file, - or -e".to_string());
+    }
+    let headless = options.headless
+        || options.eval.is_some()
+        || options.png.is_some()
+        || options.svg.is_some()
+        || options.pdf.is_some()
+        || options.lint;
+    if !headless {
+        return Err(
+            "--profile needs a headless run (add --headless, --png, --svg, --pdf or --lint)"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
+/// Print the `--profile` report to stderr (a closed stderr must not fail
+/// the run).
+fn print_profile(interp: &Interp, options: &Options) {
+    let Some(report) = interp.profile_report() else {
+        return;
+    };
+    // `--profile-top 0` is all rows; the default is 20.
+    let top = match options.profile_top {
+        Some(0) => None,
+        Some(n) => Some(n),
+        None => Some(DEFAULT_PROFILE_TOP),
+    };
+    let text = if options.profile_json {
+        format!("{}\n", report.to_json(top))
+    } else {
+        report.to_text(top)
+    };
+    let _ = io::stderr().write_all(text.as_bytes());
+}
+
+/// Rows `--profile` prints unless `--profile-top` says otherwise.
+const DEFAULT_PROFILE_TOP: usize = 20;
+
 fn run_headless(interp: &mut Interp, source: &[u8], options: &Options) -> bool {
     let run = if options.progress {
         run_progress(interp, source)
     } else {
         interp.run_source(source)
     };
-    match run {
+    let ok = match run {
         Ok(()) => true,
         Err(e) => {
             eprintln!("{}", interp.error_report(&e));
@@ -569,7 +756,15 @@ fn run_headless(interp: &mut Interp, source: &[u8], options: &Options) -> bool {
             }
             false
         }
+    };
+    // After the error report, and for a failed run too: where a program
+    // died is when you most want to know where its time went.
+    if options.profile {
+        print_profile(interp, options);
     }
+    // A failed run flushes too: what it wrote before it died is on disk.
+    let flushed = flush_outputs_or_report(interp);
+    ok && flushed
 }
 
 /// gs-style post-mortem: the operand stack, bottom to top, in `==`
@@ -577,12 +772,17 @@ fn run_headless(interp: &mut Interp, source: &[u8], options: &Options) -> bool {
 /// Bounded (#703): a huge or deeply nested operand prints a `... truncated`
 /// marker, and the header keeps the true depth.
 fn print_pstack(interp: &Interp) {
+    eprintln!("{}", pstack_text(interp));
+}
+
+/// The `Operand stack (N): ...` line [`print_pstack`] prints.
+fn pstack_text(interp: &Interp) -> String {
     let stack = interp.operand_stack();
     let text = pscat::object::stack_repr_bounded(stack, &pscat::object::STACK_DUMP_LIMITS);
     if text.is_empty() {
-        eprintln!("Operand stack ({}):", stack.len());
+        format!("Operand stack ({}):", stack.len())
     } else {
-        eprintln!("Operand stack ({}): {text}", stack.len());
+        format!("Operand stack ({}): {text}", stack.len())
     }
 }
 
@@ -629,34 +829,8 @@ fn finish_headless(
         if pages.is_empty() || gfx.has_trailing_art() {
             pages.push(&gfx.pixmap);
         }
-        // --halftone screens the raster on the way out, like a mono
-        // printer's RIP; the vector targets below stay contone.
-        let save = |page: &tiny_skia::Pixmap, path: &str| -> bool {
-            let screened;
-            let page = if options.halftone {
-                screened = pscat::halftone::screen(page);
-                &screened
-            } else {
-                page
-            };
-            if let Err(e) = page.save_png(path) {
-                eprintln!("pscat: cannot write {path}: {e}");
-                false
-            } else {
-                println!("pscat: wrote {path}");
-                true
-            }
-        };
-        if pages.len() == 1 {
-            if !save(pages[0], path) {
-                return ExitCode::FAILURE;
-            }
-        } else {
-            for (i, page) in pages.iter().enumerate() {
-                if !save(page, &numbered_path(path, i + 1)) {
-                    return ExitCode::FAILURE;
-                }
-            }
+        if !write_pngs(&pages, path, options.halftone) {
+            return ExitCode::FAILURE;
         }
     }
     if let Some(path) = &options.svg
@@ -696,6 +870,37 @@ fn finish_headless(
         ExitCode::SUCCESS
     } else {
         ExitCode::FAILURE
+    }
+}
+
+/// Write `pages` as `--png PATH` does: one page to PATH itself, several to
+/// PATH-001.png, PATH-002.png, ... False once a write fails.
+fn write_pngs(pages: &[&tiny_skia::Pixmap], path: &str, halftone: bool) -> bool {
+    // --halftone screens the raster on the way out, like a mono
+    // printer's RIP; the vector targets stay contone.
+    let save = |page: &tiny_skia::Pixmap, path: &str| -> bool {
+        let screened;
+        let page = if halftone {
+            screened = pscat::halftone::screen(page);
+            &screened
+        } else {
+            page
+        };
+        if let Err(e) = page.save_png(path) {
+            eprintln!("pscat: cannot write {path}: {e}");
+            false
+        } else {
+            println!("pscat: wrote {path}");
+            true
+        }
+    };
+    if pages.len() == 1 {
+        save(pages[0], path)
+    } else {
+        pages
+            .iter()
+            .enumerate()
+            .all(|(i, page)| save(page, &numbered_path(path, i + 1)))
     }
 }
 
@@ -940,6 +1145,10 @@ fn run_sweep(options: &Options, source: &[u8]) -> ExitCode {
                 false
             }
         };
+        // A frame's open files go to disk now, and a failure fails the sweep.
+        if !flush_outputs_or_report(&mut interp) {
+            any_failed = true;
+        }
         if matches!(axis, SweepAxis::Seed(_)) && interp.seed_override_fired() {
             seed_ever_fired = true;
         }
@@ -985,7 +1194,7 @@ fn run_sweep(options: &Options, source: &[u8]) -> ExitCode {
 
     if matches!(axis, SweepAxis::Seed(_)) && !seed_ever_fired {
         eprintln!(
-            "pscat: sweep: warning: source never called srand -- --sweep-seed had no effect, \
+            "pscat: sweep: warning: source never called srand or sampled noise -- --sweep-seed had no effect, \
              every frame is identical"
         );
     }
@@ -1393,6 +1602,17 @@ fn parse_args() -> Result<Options, String> {
             "--headless" => options.headless = true,
             "--pstack-on-error" => options.pstack_on_error = true,
             "--progress" => options.progress = true,
+            "--profile" => options.profile = true,
+            "--profile-json" => {
+                options.profile = true;
+                options.profile_json = true;
+            }
+            "--profile-top" => {
+                let n = args.next().ok_or("missing value after --profile-top")?;
+                options.profile_top = Some(n.parse().map_err(|_| {
+                    format!("invalid --profile-top value: {n} (expected a whole number; 0 = all)")
+                })?);
+            }
             "--exit-with-parent" => {
                 let n = args.next().ok_or("missing PID after --exit-with-parent")?;
                 options.exit_with_parent = Some(parent_pid_arg(&n)?);
@@ -1405,37 +1625,36 @@ fn parse_args() -> Result<Options, String> {
                     .filter(|&d: &f32| (9.0..=1200.0).contains(&d))
                     .ok_or_else(|| format!("invalid --dpi value: {n} (expected 9..1200)"))?;
             }
-            "--max-steps" => {
-                let n = args.next().ok_or("missing value after --max-steps")?;
-                let steps: u64 = n.parse().map_err(|_| {
+            flag @ ("--max-steps" | "--max-time" | "--max-memory") => {
+                let n = args
+                    .next()
+                    .ok_or_else(|| format!("missing value after {flag}"))?;
+                limit_flag(&mut options.limits, flag, &n)?;
+            }
+            "--max-write-bytes" => {
+                let n = args.next().ok_or("missing value after --max-write-bytes")?;
+                let bytes = parse_byte_count(&n).ok_or_else(|| {
                     format!(
-                        "invalid --max-steps value: {n} (expected a whole number; 0 = no limit)"
+                        "invalid --max-write-bytes value: {n} (expected bytes, or a number \
+                         with a k, m or g suffix; 0 = no limit)"
                     )
                 })?;
-                options.limits.max_steps = (steps > 0).then_some(steps);
-            }
-            "--max-time" => {
-                let n = args.next().ok_or("missing value after --max-time")?;
-                let secs: f64 = n
-                    .parse()
-                    .ok()
-                    .filter(|s: &f64| s.is_finite() && (0.0..=31_536_000.0).contains(s))
-                    .ok_or_else(|| {
-                        format!("invalid --max-time value: {n} (expected seconds; 0 = no limit)")
-                    })?;
-                options.limits.max_time =
-                    (secs > 0.0).then(|| std::time::Duration::from_secs_f64(secs));
-            }
-            "--max-memory" => {
-                let n = args.next().ok_or("missing value after --max-memory")?;
-                let mib: usize = n.parse().ok().filter(|m| *m <= 1 << 30).ok_or_else(|| {
-                    format!("invalid --max-memory value: {n} (expected MiB; 0 = no limit)")
-                })?;
-                options.limits.max_memory = (mib > 0).then_some(mib << 20);
+                options.max_write_bytes = Some((bytes > 0).then_some(bytes));
             }
             "--allow-write" => {
                 let dir = args.next().ok_or("missing directory after --allow-write")?;
                 options.allow_write.push(dir);
+            }
+            "--bands" => {
+                let n = args.next().ok_or("missing value after --bands")?;
+                options.bands = Some(bands::parse_count(&n)?);
+            }
+            "--read-root" => {
+                let dir = args.next().ok_or("missing directory after --read-root")?;
+                options.read_roots.get_or_insert_with(Vec::new).push(dir);
+            }
+            "--confine-reads" => {
+                options.read_roots.get_or_insert_with(Vec::new);
             }
             "--png" => {
                 options.png = Some(args.next().ok_or("missing path after --png")?);
@@ -1577,18 +1796,52 @@ fn print_usage() {
     println!("      --pstack-on-error  print the operand stack after an error");
     println!("      --progress      print `pscat: progress pages=N` to stderr as each page");
     println!("                      is finished (headless runs)");
+    println!("      --profile       after a headless run, print to stderr each named procedure's");
+    println!("                      call count and inclusive and exclusive wall time, sorted");
+    println!("                      by exclusive time (top 20). A procedure counts under the");
+    println!("                      name it was called through; recursion counts inclusive");
+    println!("                      time once. Slows a run (each call reads the clock twice).");
+    println!("                      Not with --bands, sweeps, --spool or the window");
+    println!("      --profile-top N rows --profile prints (0 = all)");
+    println!("      --profile-json  --profile as one line of JSON");
     println!("      --exit-with-parent PID  stop once PID is no longer pscat's parent");
     println!("                      (Unix; pscat-mcp passes its own pid to every render)");
-    println!("      --max-steps N   stop a program after N interpreter steps (0 = no limit)");
+    println!("      --max-steps N   stop a program after N interpreter steps (0 = no limit).");
+    println!("                      Reading a whole file (`file`, `run`) charges one step per KiB");
     println!("      --max-time SECS stop a program after SECS of wall-clock time (0 = no limit)");
     println!("      --max-memory MIB  stop a program that grows the heap by more than MIB");
     println!("                      (0 = no limit). A stopped run exits non-zero with");
-    println!("                      `limitexceeded (steps|time|memory)`; `stopped` can't catch it");
+    println!(
+        "                      `limitexceeded (steps|time|memory)`; `stopped` can't catch it."
+    );
+    println!("                      The limits apply to each program run: every --spool job");
+    println!("                      and sweep frame gets the whole budget, and so does every");
+    println!("                      --bands band for steps and time (the tool");
+    println!("                      subcommands, e.g. `pscat handwrite`, take them too). A job");
+    println!("                      in the window or spool runs at the window's pace, so");
+    println!("                      --max-time counts that pace, not just compute");
     println!("      --allow-write DIR  let the program write files inside DIR (repeatable):");
     println!("                      `(DIR/f) (w) file`, `(a) file`, writereals, renamefile,");
     println!("                      deletefile.");
     println!("                      Off by default; paths outside, `..` and symlinks out");
     println!("                      are invalidfileaccess. %stdout/%stderr need no flag");
+    println!("      --max-write-bytes N  with --allow-write, stop a program that writes more");
+    println!("                      than N bytes to files: N is bytes or takes a k, m or g");
+    println!("                      suffix (1g = 1 GiB, the default); 0 = no limit. The");
+    println!("                      write raises `limitcheck`, which `stopped` can catch");
+    println!("      --bands N       render the PNG as N horizontal bands on N threads and");
+    println!("                      stitch them (1..64; PNG only). Each band runs the whole");
+    println!("                      program with /BandIndex, /BandCount and /BandBBox defined,");
+    println!("                      so it can skip work outside its rows; the result is");
+    println!("                      identical to a plain --png render unless the program");
+    println!("                      reads the clock. Steps and time limits");
+    println!("                      apply per band, --max-memory to all bands together");
+    println!("      --read-root DIR let the program read files only inside DIR (repeatable):");
+    println!("                      `(f) (r) file`, run, readreals, filenameforall. Reads are");
+    println!("                      open by default; with this, paths outside, `..` and");
+    println!("                      symlinks out are invalidfileaccess (the embedded lib/");
+    println!("                      stays readable). pscat-mcp passes it to every render");
+    println!("      --confine-reads as --read-root, with no directories: only the embedded lib/");
     println!("      --lint          check the finished run for common mistakes (implies");
     println!("                      --headless); a blank page, an unbalanced gsave, stuff");
     println!("                      left on the stack — printed to stderr, doesn't affect");
@@ -1607,7 +1860,8 @@ fn print_usage() {
     println!("Sweeps (render file.ps once per value, needing --png and/or --contact-sheet):");
     println!("      --sweep-seed SPEC   reseed with each value in turn (A:B, A:B:STEP, or");
     println!("                          A,B,C); overrides every srand call, so it works on");
-    println!("                          found art unmodified");
+    println!("                          found art unmodified; also seeds noise (noiseseed)");
+    println!("                          unless the program calls noiseseed itself");
     println!("      --sweep NAME=SPEC   define /NAME to each value in turn before running;");
     println!("                          the source must look it up itself, e.g.");
     println!("                          /NAME where {{ pop NAME }} {{ 0 }} ifelse");
@@ -1622,6 +1876,28 @@ fn print_usage() {
         "  pscat sheet a.ps b.ps ...    labelled review sheet: files or sweeps at several sizes, one PNG"
     );
     println!("  pscat mcp                    the MCP server on stdin/stdout (same as pscat-mcp)");
+}
+
+/// Write out the files the program left open (issue #762), and say so when
+/// that fails: a disk-full that surfaces only now must not exit 0. Every
+/// normal exit of a run calls this; `Drop for Interp` is the backstop.
+fn flush_outputs_or_report(interp: &mut Interp) -> bool {
+    match interp.flush_outputs() {
+        Ok(()) => true,
+        Err(e) => {
+            eprintln!("pscat: could not write a file the program left open: {e}");
+            false
+        }
+    }
+}
+
+/// The REPL's end: flush, then exit success (or failure if a flush failed).
+fn repl_exit(interp: &mut Interp) -> ExitCode {
+    if flush_outputs_or_report(interp) {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
 }
 
 fn repl(interp: &mut Interp, options: &Options) -> ExitCode {
@@ -1650,7 +1926,7 @@ fn repl(interp: &mut Interp, options: &Options) -> ExitCode {
         match stdin.lock().read_line(&mut line) {
             Ok(0) => {
                 println!();
-                return ExitCode::SUCCESS;
+                return repl_exit(interp);
             }
             Ok(_) => {
                 let Some(source) = buffer.push_line(&line) else {
@@ -1663,11 +1939,12 @@ fn repl(interp: &mut Interp, options: &Options) -> ExitCode {
                     }
                 }
                 if interp.quit_requested() {
-                    return ExitCode::SUCCESS;
+                    return repl_exit(interp);
                 }
             }
             Err(e) => {
                 eprintln!("pscat: read error: {e}");
+                flush_outputs_or_report(interp);
                 return ExitCode::FAILURE;
             }
         }

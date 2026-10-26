@@ -27,7 +27,11 @@
 //!   `ps_error_*`). Fonts are per module instance and outlive `ps_begin`;
 //! - `ps_output_ptr`/`ps_output_len` — what the program has printed so
 //!   far (`=`, `==`, `stack`, `pstack`, `print`), UTF-8 as written; a
-//!   wasm32 module has no stdout, so `ps_begin` captures it (#252).
+//!   wasm32 module has no stdout, so `ps_begin` captures it (#252);
+//! - `ps_warnings_ptr`/`ps_warnings_len` — the one-line notes `findfont`
+//!   raised since `ps_begin` for pack faces it replaced with a built-in
+//!   one (what the native binary prints on stderr), UTF-8, newline-
+//!   joined, once per name (#750).
 
 use std::cell::RefCell;
 
@@ -200,6 +204,20 @@ pub extern "C" fn ps_output_ptr() -> *const u8 {
             .as_ref()
             .map_or(std::ptr::null(), |it| it.captured_stdout().as_ptr())
     })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ps_warnings_ptr() -> *const u8 {
+    INTERP.with(|s| {
+        s.borrow()
+            .as_ref()
+            .map_or(std::ptr::null(), |it| it.font_warnings().as_ptr())
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ps_warnings_len() -> usize {
+    INTERP.with(|s| s.borrow().as_ref().map_or(0, |it| it.font_warnings().len()))
 }
 
 #[unsafe(no_mangle)]

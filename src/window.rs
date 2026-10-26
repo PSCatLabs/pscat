@@ -19,9 +19,9 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{Key, NamedKey};
 use winit::window::{Window, WindowId};
 
-use crate::Interp;
 use crate::repl::LineBuffer;
 use crate::spool::Watcher;
+use crate::{Interp, Limits};
 
 const FRAME: Duration = Duration::from_millis(16);
 /// How often spool mode looks at its directory while idle. Also the
@@ -67,10 +67,13 @@ pub fn run_windowed(interp: Interp, options: WindowOptions) -> Result<(), String
     event_loop
         .run_app(&mut app)
         .map_err(|e| format!("event loop error: {e}"))?;
+    // Files the program left open go to disk before the process exits
+    // (issue #762).
+    let flushed = app.interp.flush_outputs();
     if app.had_error {
         return Err("program stopped with an error (canvas left on screen)".to_string());
     }
-    Ok(())
+    flushed.map_err(|e| format!("could not write a file the program left open: {e}"))
 }
 
 /// The `--interactive` mode: the terminal REPL and the live window at
@@ -139,7 +142,9 @@ pub fn run_interactive(
     event_loop
         .run_app(&mut app)
         .map_err(|e| format!("event loop error: {e}"))?;
-    Ok(())
+    app.interp
+        .flush_outputs()
+        .map_err(|e| format!("could not write a file the program left open: {e}"))
 }
 
 struct InteractiveState {
@@ -165,8 +170,30 @@ pub fn run_spool(
     scale: f32,
     options: WindowOptions,
 ) -> Result<(), String> {
-    let interp = Interp::with_page_scaled(page.0, page.1, scale)
+    run_spool_with_limits(watcher, page, scale, options, Limits::none())
+}
+
+/// [`run_spool`] with `limits` on every job (issue #701). Each job is one
+/// program run in a fresh interpreter, so each gets the whole budget: the
+/// step count, the clock and the heap baseline start again with the next
+/// job. A job that passes a limit is reported on stderr like any other job
+/// error (`limitexceeded (steps)`) and the spool goes on with the next.
+/// Jobs run at the window's pace (`steps_per_frame` per frame), so a time
+/// limit counts that pace, not only compute. `Err` if the limits cannot be
+/// enforced (a memory limit without the
+/// [`TrackingAllocator`](crate::TrackingAllocator) installed).
+pub fn run_spool_with_limits(
+    watcher: Watcher,
+    page: (u32, u32),
+    scale: f32,
+    options: WindowOptions,
+    limits: Limits,
+) -> Result<(), String> {
+    let mut interp = Interp::with_page_scaled(page.0, page.1, scale)
         .ok_or_else(|| format!("unusable page size {}x{}", page.0, page.1))?;
+    // Checked once here, so a limit that cannot be enforced is an error at
+    // startup rather than one skipped job after another.
+    interp.set_limits(limits).map_err(|e| e.to_string())?;
     let event_loop = EventLoop::<UserEvent>::with_user_event()
         .build()
         .map_err(|e| format!("cannot create event loop: {e}"))?;
@@ -182,6 +209,7 @@ pub fn run_spool(
             watcher,
             page,
             scale,
+            limits,
             base_title,
         }),
         interactive: None,
@@ -192,10 +220,34 @@ pub fn run_spool(
     Ok(())
 }
 
+/// Put a spool job on `slot`: a fresh interpreter with `limits`, the job's
+/// source queued. The previous job's interpreter is freed *before* the
+/// limits are set, so a memory limit counts what this job grows, not what
+/// the last one left behind.
+fn start_job(
+    slot: &mut Interp,
+    page: (u32, u32),
+    scale: f32,
+    limits: Limits,
+    source: &[u8],
+) -> Result<(), String> {
+    let fresh = Interp::with_page_scaled(page.0, page.1, scale)
+        .ok_or_else(|| format!("unusable page size {}x{}", page.0, page.1))?;
+    // Dropping the previous job's Interp frees its dictionaries
+    // (`Drop for Interp`); --spool keeps constructing fresh ones for the
+    // life of the process.
+    drop(std::mem::replace(slot, fresh));
+    slot.set_limits(limits).map_err(|e| e.to_string())?;
+    slot.begin_source(source);
+    Ok(())
+}
+
 struct SpoolState {
     watcher: Watcher,
     page: (u32, u32),
     scale: f32,
+    /// `--max-steps`/`--max-time`/`--max-memory`: each job's own budget.
+    limits: Limits,
     /// Title while idle; jobs append their file name to it.
     base_title: String,
 }
@@ -308,7 +360,7 @@ impl App {
         if self.running {
             return;
         }
-        let (page, scale, base_title) = {
+        let (page, scale, limits, base_title) = {
             let Some(spool) = &mut self.spool else { return };
             if let Err(e) = spool.watcher.poll() {
                 eprintln!(
@@ -317,7 +369,12 @@ impl App {
                 );
                 return;
             }
-            (spool.page, spool.scale, spool.base_title.clone())
+            (
+                spool.page,
+                spool.scale,
+                spool.limits,
+                spool.base_title.clone(),
+            )
         };
         loop {
             let Some(job) = self.spool.as_mut().and_then(|s| s.watcher.next_job()) else {
@@ -330,19 +387,15 @@ impl App {
                     continue; // skip this job, try the next
                 }
             };
-            let Some(mut interp) = Interp::with_page_scaled(page.0, page.1, scale) else {
-                return; // page size was validated at startup; unreachable in practice
-            };
-            interp.begin_source(&source);
+            if let Err(e) = start_job(&mut self.interp, page, scale, limits, &source) {
+                eprintln!("pscat: spool: cannot run {}: {e}", job.display());
+                continue; // skip this job, try the next
+            }
             let name = job
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_else(|| job.display().to_string());
             self.options.title = format!("{base_title} — {name}");
-            // Dropping the previous job's Interp frees its dictionaries
-            // (`Drop for Interp`); --spool keeps constructing fresh ones
-            // for the life of the process.
-            self.interp = interp;
             self.running = true;
             self.had_error = false;
             self.back = 0;
@@ -530,5 +583,87 @@ impl ApplicationHandler<UserEvent> for App {
                 event_loop.set_control_flow(ControlFlow::WaitUntil(Instant::now() + POLL));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::PsError;
+
+    /// Step `interp` until its program ends or errors, at most `cap` frames.
+    fn run_out(interp: &mut Interp) -> Result<(), PsError> {
+        for _ in 0..100_000 {
+            if !interp.step_n(1000)? {
+                return Ok(());
+            }
+        }
+        panic!("the job neither ended nor hit a limit");
+    }
+
+    #[test]
+    fn a_spool_job_runs_under_the_limits() {
+        let limits = Limits::none().with_max_steps(5_000);
+        let mut slot = Interp::with_page_scaled(100, 100, 1.0).unwrap();
+        start_job(&mut slot, (100, 100), 1.0, limits, b"{ } loop").unwrap();
+        assert_eq!(run_out(&mut slot), Err(PsError::StepsExceeded));
+        // The next job starts again from zero on a fresh interpreter, so one
+        // that fits is not charged for the runaway before it.
+        start_job(&mut slot, (100, 100), 1.0, limits, b"1 1 add pop").unwrap();
+        assert_eq!(run_out(&mut slot), Ok(()));
+        // And with no limits, the old behaviour: nothing stops a job early.
+        start_job(
+            &mut slot,
+            (100, 100),
+            1.0,
+            Limits::none(),
+            b"0 1 20000 { pop } for",
+        )
+        .unwrap();
+        assert_eq!(run_out(&mut slot), Ok(()));
+    }
+
+    #[test]
+    fn the_spool_hands_its_limits_to_each_job_it_picks_up() {
+        let dir = std::env::temp_dir().join(format!("pscat-spool-limits-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let watcher = Watcher::new(&dir).unwrap();
+        let limits = Limits::none().with_max_steps(5_000);
+        let mut app = App {
+            interp: Interp::with_page_scaled(100, 100, 1.0).unwrap(),
+            options: WindowOptions {
+                title: "t".into(),
+                steps_per_frame: 1000,
+                halftone: false,
+            },
+            view: None,
+            running: false,
+            had_error: false,
+            back: 0,
+            spool: Some(SpoolState {
+                watcher,
+                page: (100, 100),
+                scale: 1.0,
+                limits,
+                base_title: "t".into(),
+            }),
+            interactive: None,
+        };
+        std::fs::write(dir.join("loop.ps"), "{ } loop").unwrap();
+        // A new file must hold still across two polls before it is a job.
+        app.poll_spool();
+        assert!(!app.running);
+        app.poll_spool();
+        assert!(app.running, "the job should have started");
+        for _ in 0..100_000 {
+            if !app.running {
+                break;
+            }
+            app.tick();
+        }
+        assert!(!app.running, "the runaway job was never stopped");
+        assert!(app.had_error, "stopping at the limit is a job error");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

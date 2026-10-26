@@ -15,6 +15,20 @@ struct Server {
     reader: BufReader<ChildStdout>,
 }
 
+/// Every environment variable `pscat-mcp` reads for a limit (#756).
+const LIMIT_ENV_VARS: &[&str] = &[
+    "PSCAT_MCP_TIMEOUT",
+    "PSCAT_MCP_JOB_TIMEOUT",
+    "PSCAT_MCP_MAX_JOBS",
+    "PSCAT_MCP_JOB_TTL",
+    "PSCAT_MCP_MAX_INPUT_BYTES",
+    "PSCAT_MCP_MAX_IMAGE_BYTES",
+    "PSCAT_MCP_MAX_PIXELS",
+    "PSCAT_MCP_MAX_LATEX_BYTES",
+    "PSCAT_MCP_MAX_STEPS",
+    "PSCAT_MCP_MAX_MEMORY",
+];
+
 impl Server {
     /// A server whose working directory (so its default output root) is a
     /// fresh scratch directory.
@@ -34,7 +48,22 @@ impl Server {
         Self::spawn(cmd, &common::scratch_dir("mcp-sub-cwd"), &[])
     }
 
+    /// A server started with these environment variables (issue #756).
+    fn start_with_env(cwd: &Path, args: &[&str], env: &[(&str, &str)]) -> Self {
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_pscat-mcp"));
+        cmd.envs(env.iter().copied());
+        Self::spawn(cmd, cwd, args)
+    }
+
     fn spawn(mut cmd: Command, cwd: &Path, args: &[&str]) -> Self {
+        // A developer's own PSCAT_MCP_* settings must not change what a test
+        // sees; a test that wants one sets it through `start_with_env`
+        // (after this, so it is not removed).
+        for var in LIMIT_ENV_VARS {
+            if cmd.get_envs().all(|(k, _)| k != *var) {
+                cmd.env_remove(var);
+            }
+        }
         let mut child = cmd
             .args(args)
             .current_dir(cwd)
@@ -862,6 +891,193 @@ fn out_path_is_off_when_started_in_the_filesystem_root() {
     assert_eq!(result["isError"], false);
 }
 
+// --- read roots (issue #763) -------------------------------------------------
+
+/// The PostScript error `eval_postscript` reported, or "" for success.
+fn eval_error(s: &mut Server, source: &str) -> String {
+    let result = s.tool("eval_postscript", json!({ "source": source }));
+    if result["isError"] == false {
+        return String::new();
+    }
+    result["structuredContent"]["error"]["ps_error"]
+        .as_str()
+        .unwrap_or_else(|| panic!("no ps_error: {result}"))
+        .to_string()
+}
+
+#[test]
+fn reads_are_confined_to_the_working_directory_and_allow_read() {
+    let base = common::scratch_dir("mcp-read-roots");
+    let cwd = base.join("project");
+    let extra = base.join("extra");
+    let outside = base.join("outside");
+    for d in [&cwd, &extra, &outside] {
+        std::fs::create_dir_all(d).unwrap();
+    }
+    std::fs::write(cwd.join("a.ps"), "(in cwd) =").unwrap();
+    std::fs::write(extra.join("b.ps"), "(in extra) =").unwrap();
+    std::fs::write(outside.join("away.ps"), "(leaked) =").unwrap();
+    let extra_arg = extra.to_str().unwrap();
+    let mut s = Server::start_in(&cwd, &["--allow-read", extra_arg]);
+    let init = initialize(&mut s, json!("2025-11-25"));
+    let instructions = init["result"]["instructions"].as_str().unwrap();
+    assert!(instructions.contains("read roots"), "{instructions}");
+    assert!(instructions.contains("extra"), "{instructions}");
+    s.send_raw(br#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#);
+
+    let p = |d: &Path, f: &str| common::ps_path(&d.join(f));
+    // Inside: relative, absolute, and an --allow-read directory.
+    assert_eq!(eval_error(&mut s, "(a.ps) run"), "");
+    assert_eq!(
+        eval_error(&mut s, &format!("({}) run", p(&cwd, "a.ps"))),
+        ""
+    );
+    assert_eq!(
+        eval_error(&mut s, &format!("({}) run", p(&extra, "b.ps"))),
+        ""
+    );
+    // The bundled lib/ is always there.
+    assert_eq!(eval_error(&mut s, "(lib/artkit.ps) run"), "");
+    // Outside, `..`, a missing file outside, and readreals.
+    let away = p(&outside, "away.ps");
+    for src in [
+        format!("({away}) run"),
+        format!("({away}) (r) file"),
+        format!("({}) (r) file", p(&outside, "missing.ps")),
+        "(../outside/away.ps) run".to_string(),
+        format!("({away}) 1 readreals"),
+    ] {
+        assert_eq!(eval_error(&mut s, &src), "invalidfileaccess", "{src}");
+    }
+    // A symlink in the working directory pointing out.
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(outside.join("away.ps"), cwd.join("door.ps")).unwrap();
+        assert_eq!(eval_error(&mut s, "(door.ps) run"), "invalidfileaccess");
+    }
+    // filenameforall lists inside, and nothing outside.
+    let list = |s: &mut Server, template: &str| {
+        let src = format!("({template}) {{ = }} 400 string filenameforall (end) =");
+        let result = s.tool("eval_postscript", json!({ "source": src }));
+        assert_eq!(result["isError"], false, "{result}");
+        texts(&result)[0].clone()
+    };
+    let inside = list(&mut s, &p(&cwd, "*.ps"));
+    assert!(inside.contains("a.ps"), "{inside}");
+    assert!(
+        !inside.contains("door.ps"),
+        "the symlink out isn't listed: {inside}"
+    );
+    let out = list(&mut s, &p(&outside, "*"));
+    assert!(!out.contains("away"), "{out}");
+    let up = list(&mut s, "../outside/*");
+    assert!(!up.contains("away"), "{up}");
+}
+
+/// `pscat-mcp` run to completion with these arguments and environment (and no
+/// other `PSCAT_MCP_*` variable).
+fn run_server(args: &[&str], env: &[(&str, &str)]) -> std::process::Output {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_pscat-mcp"));
+    for var in LIMIT_ENV_VARS {
+        cmd.env_remove(var);
+    }
+    cmd.envs(env.iter().copied())
+        .args(args)
+        .stdin(Stdio::null())
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn an_env_var_raises_a_limit_and_a_flag_overrides_it() {
+    // Issue #756: PSCAT_MCP_MAX_STEPS is read at startup like --max-steps.
+    let cwd = common::scratch_dir("mcp-env-steps");
+    let mut s = Server::start_with_env(&cwd, &[], &[("PSCAT_MCP_MAX_STEPS", "1000000")]);
+    initialized(&mut s);
+    let result = s.tool("eval_postscript", json!({ "source": "{ } loop" }));
+    assert_eq!(error_kind(&result), "limit_exceeded", "{result}");
+    assert_eq!(
+        result["structuredContent"]["error"]["limit"], "steps",
+        "{result}"
+    );
+    // The flag wins: a loop of 5 million iterations passes under a flag of
+    // 0 (no limit) although the variable says 1 million.
+    let mut s = Server::start_with_env(
+        &cwd,
+        &["--max-steps", "0"],
+        &[("PSCAT_MCP_MAX_STEPS", "1000000")],
+    );
+    initialized(&mut s);
+    let result = s.tool(
+        "eval_postscript",
+        json!({ "source": "0 1 5000000 { pop } for (done) =" }),
+    );
+    assert_eq!(result["isError"], false, "{result}");
+}
+
+#[test]
+fn a_bad_env_var_is_a_startup_error_but_help_still_works() {
+    for (var, bad) in [
+        ("PSCAT_MCP_TIMEOUT", "soon"),
+        ("PSCAT_MCP_MAX_PIXELS", "99999999999"),
+    ] {
+        let out = run_server(&[], &[(var, bad)]);
+        assert_eq!(out.status.code(), Some(2), "{var}={bad}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains(var) && err.contains("whole number"), "{err}");
+        // `--help` is not blocked by it.
+        let out = run_server(&["--help"], &[(var, bad)]);
+        assert!(out.status.success(), "{var}={bad}");
+        assert!(String::from_utf8_lossy(&out.stdout).contains("PSCAT_MCP_"));
+    }
+}
+
+#[test]
+fn a_bad_allow_read_is_a_startup_error() {
+    let missing = common::scratch_dir("mcp-allow-read").join("nope");
+    let out = Command::new(env!("CARGO_BIN_EXE_pscat-mcp"))
+        .arg("--allow-read")
+        .arg(&missing)
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("--allow-read"));
+}
+
+#[cfg(unix)]
+#[test]
+fn the_filesystem_root_is_never_a_read_root() {
+    // Started in `/` (some desktop apps do), the working directory is not a
+    // read root, so an absolute path anywhere is refused, and a relative one
+    // finds nothing there (existing or not: no probing).
+    let mut s = Server::start_in(Path::new("/"), &[]);
+    initialized(&mut s);
+    assert_eq!(
+        eval_error(&mut s, "(/etc/hosts) (r) file"),
+        "invalidfileaccess"
+    );
+    for name in ["etc/hosts", "etc/no-such-file"] {
+        let src = format!("({name}) (r) file");
+        assert_eq!(eval_error(&mut s, &src), "undefinedfilename", "{src}");
+    }
+    assert_eq!(eval_error(&mut s, "(lib/artkit.ps) run"), "");
+}
+
+#[test]
+fn handwrite_and_chalk_still_render_under_read_roots() {
+    // A scratch working directory: the libraries come from the bundled copy.
+    let mut s = Server::start();
+    initialized(&mut s);
+    let result = s.tool("handwrite", json!({ "text": "roots", "size": 18 }));
+    assert_eq!(result["isError"], false, "{result}");
+    let result = s.tool(
+        "chalkboard_math",
+        json!({ "latex": "x", "width": 400, "height": 200, "dpi": 72 }),
+    );
+    assert_eq!(result["isError"], false, "{result}");
+}
+
 // --- resource bounds ---------------------------------------------------------
 
 #[test]
@@ -927,6 +1143,32 @@ fn step_and_memory_limits_are_server_flags() {
 }
 
 #[test]
+fn handwrite_is_bounded_by_the_step_limit_not_only_the_timeout() {
+    // Issue #701 (found by #711): `pscat handwrite` did not get the server's
+    // step, time and memory limits, so only `--timeout`'s kill bounded it. A
+    // library that never finishes stands in for `lib/handscript.ps`
+    // (`$PSCAT_LIB`, which the child inherits); the step limit must stop it
+    // long before the 60 s kill, with the structured `limit_exceeded`.
+    let dir = common::scratch_dir("mcp-handwrite-limit");
+    let lib = dir.join("runaway-lib");
+    std::fs::create_dir_all(&lib).unwrap();
+    std::fs::write(lib.join("handscript.ps"), "{ } loop\n").unwrap();
+    let mut s = Server::start_with_env(
+        &dir,
+        &["--timeout", "60", "--max-steps", "100000"],
+        &[("PSCAT_LIB", lib.to_str().unwrap())],
+    );
+    initialized(&mut s);
+    let result = s.tool("handwrite", json!({ "text": "hello" }));
+    // The 60 s kill would be a `timeout` error, so `limit_exceeded` naming
+    // the steps is what shows the interpreter's own limit stopped it.
+    assert_eq!(error_kind(&result), "limit_exceeded", "{result}");
+    let err = &result["structuredContent"]["error"];
+    assert_eq!(err["limit"], "steps", "the step limit stopped it: {err}");
+    s.ping_ok();
+}
+
+#[test]
 fn zero_turns_a_limit_off_and_the_clock_still_stops_the_program() {
     // `--timeout 6` gives the child 4.5 s (a quarter, at most 5 s, is kept
     // back for the child's start and exit), a margin wide enough for a loaded
@@ -978,13 +1220,17 @@ fn a_whole_file_read_that_never_ends_hits_the_limits_not_the_timeout_kill() {
         took < std::time::Duration::from_secs(15),
         "stopped promptly: {took:?}"
     );
-    // `/dev/zero` ends at the memory cap or the clock, whichever comes first:
-    // either way it is a limit.
+    // `/dev/zero` is outside the read roots (issue #763), so it is refused
+    // before any read; the CLI-side limit tests still read it to the cap.
     let result = s.tool(
         "eval_postscript",
         json!({ "source": "(/dev/zero) (r) file pop" }),
     );
-    assert_eq!(error_kind(&result), "limit_exceeded", "{result}");
+    assert_eq!(error_kind(&result), "postscript_error", "{result}");
+    assert_eq!(
+        result["structuredContent"]["error"]["ps_error"], "invalidfileaccess",
+        "{result}"
+    );
     s.ping_ok();
 }
 
@@ -1464,6 +1710,42 @@ fn render_postscript_returns_stderr_warnings_on_success() {
     );
 }
 
+/// `eval_postscript` returns a successful run's stderr as a `Warnings:` item
+/// after the output: the program's own `%stderr` writes, once per distinct
+/// line. A quiet run, and one that only prints, has none; a failed run keeps
+/// its stderr in the error.
+#[test]
+fn eval_postscript_returns_stderr_warnings_on_success() {
+    let mut s = Server::start();
+    initialized(&mut s);
+    let source = "(hello) = (%stderr) (w) file 3 { dup (note: careful\\n) writestring } repeat pop \
+                  3 { { 1 0 div } stopped { handleerror } if } repeat";
+    let result = s.tool("eval_postscript", json!({ "source": source }));
+    assert_eq!(result["isError"], false, "{result}");
+    let all = texts(&result);
+    assert_eq!(all[0].trim(), "hello", "{result}");
+    let warnings: Vec<_> = all.iter().filter(|t| t.starts_with("Warnings:")).collect();
+    assert_eq!(warnings.len(), 1, "{result}");
+    assert_eq!(
+        warnings[0].matches("note: careful").count(),
+        1,
+        "{}",
+        warnings[0]
+    );
+    assert_eq!(
+        warnings[0].matches("undefinedresult").count(),
+        1,
+        "{}",
+        warnings[0]
+    );
+    assert!(!warnings[0].contains("pscat:"), "{}", warnings[0]);
+
+    let result = s.tool("eval_postscript", json!({ "source": "(hi) =" }));
+    assert_eq!(texts(&result).len(), 1, "{result}");
+    let result = s.tool("eval_postscript", json!({ "source": "1 2 add" }));
+    assert_eq!(texts(&result), ["(ran clean, printed nothing)"], "{result}");
+}
+
 #[test]
 fn version_flag_prints_the_crate_version_and_exits_without_serving() {
     // A closed stdin: were the flag ignored the server would see EOF and
@@ -1525,7 +1807,7 @@ fn chalkboard_math_draws_the_pinned_board() {
     );
     let pm = tiny_skia::Pixmap::decode_png(&png).expect("decode");
     assert_eq!((pm.width(), pm.height()), (400, 200));
-    assert_eq!(fnv1a(pm.data()), 0x736c0a5719284045, "the board moved");
+    assert_eq!(fnv1a(pm.data()), 0x0ace74c7afc6678c, "the board moved");
     let cfg = pscat::chalk::Config::from_json(
         r#"{"layout": {"width": 400, "height": 200, "dpi": 72, "size": 40}, "seed": 1}"#,
     )

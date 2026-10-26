@@ -15,7 +15,7 @@
 //! after the encrypted region must remain unread until the outer
 //! scanner gets there).
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::rc::Rc;
 
@@ -60,9 +60,120 @@ enum Kind {
 pub enum Sink {
     Stdout,
     Stderr,
-    /// A disk file, written through unbuffered: the CLI ends the process
-    /// without dropping the interpreter, so nothing may sit in a buffer.
-    Disk(std::fs::File),
+    /// A disk file, buffered ([`DiskSink`]); the interpreter flushes every
+    /// open one at `showpage`, `quit`, `flush` and before a read, and the
+    /// CLI flushes them all on every exit path (issue #762).
+    Disk(DiskSink),
+}
+
+/// Bytes a [`DiskSink`] holds before it writes them out.
+const DISK_BUFFER: usize = 64 * 1024;
+
+/// A buffered disk file (issue #762). Not `BufWriter`, because
+/// `resetfile` must be able to throw the pending bytes away, and
+/// `fileposition` must know the real position, buffer included.
+///
+/// A failed write leaves a sticky error, as C's `ferror` does: the next
+/// write or flush (and so `closefile`) reports `ioerror`, so a deferred
+/// failure is not lost when the flush came from `showpage` or `quit`,
+/// which cannot raise it. `resetfile` clears it. Dropping a sink flushes
+/// it, so a file the program never closed (or dropped unreferenced) still
+/// reaches the disk.
+pub struct DiskSink {
+    file: std::fs::File,
+    buf: Vec<u8>,
+    failed: bool,
+    /// The opening interpreter's note: set when this sink is dropped with
+    /// bytes it could not write, for `Interp::flush_outputs` to report.
+    lost: Rc<Cell<bool>>,
+}
+
+impl DiskSink {
+    pub fn new(file: std::fs::File, lost: Rc<Cell<bool>>) -> Self {
+        DiskSink {
+            file,
+            buf: Vec::new(),
+            failed: false,
+            lost,
+        }
+    }
+
+    pub fn write(&mut self, bytes: &[u8]) -> Result<(), PsError> {
+        use std::io::Write;
+        if self.failed {
+            return Err(PsError::Io);
+        }
+        if self.buf.len() + bytes.len() <= DISK_BUFFER {
+            self.buf.extend_from_slice(bytes);
+            return Ok(());
+        }
+        self.flush()?;
+        if bytes.len() >= DISK_BUFFER {
+            return self.file.write_all(bytes).map_err(|_| {
+                self.failed = true;
+                PsError::Io
+            });
+        }
+        self.buf.extend_from_slice(bytes);
+        Ok(())
+    }
+
+    /// Write out what is buffered. The buffer is emptied even on failure.
+    pub fn flush(&mut self) -> Result<(), PsError> {
+        use std::io::Write;
+        if self.failed {
+            self.buf.clear();
+            return Err(PsError::Io);
+        }
+        if self.buf.is_empty() {
+            return Ok(());
+        }
+        let wrote = self.file.write_all(&self.buf);
+        self.buf.clear();
+        wrote.map_err(|_| {
+            self.failed = true;
+            PsError::Io
+        })
+    }
+
+    /// `resetfile`: drop the pending bytes and the sticky error.
+    pub fn reset(&mut self) {
+        self.buf.clear();
+        self.failed = false;
+    }
+
+    /// The position the next write lands at (after a flush).
+    fn position(&mut self) -> Result<u64, PsError> {
+        use std::io::Seek;
+        self.flush()?;
+        self.file.stream_position().map_err(|_| PsError::Io)
+    }
+
+    /// Seek to `pos`, which must lie within the file: `0..=length`, so a
+    /// seek never leaves a hole (a sparse file would cost no counted
+    /// bytes). A file opened for append still writes at its end.
+    fn seek(&mut self, pos: u64) -> Result<(), PsError> {
+        use std::io::{Seek, SeekFrom};
+        self.flush()?;
+        let len = self.file.metadata().map_err(|_| PsError::Io)?.len();
+        if pos > len {
+            return Err(PsError::Rangecheck);
+        }
+        self.file
+            .seek(SeekFrom::Start(pos))
+            .map(|_| ())
+            .map_err(|_| PsError::Io)
+    }
+}
+
+impl Drop for DiskSink {
+    fn drop(&mut self) {
+        // Nobody can be told now, so remember it: the interpreter that
+        // opened the file reports it at its final `flush_outputs`.
+        if self.flush().is_err() {
+            self.lost.set(true);
+        }
+    }
 }
 
 impl PsFile {
@@ -167,6 +278,52 @@ impl PsFile {
         Ok(b)
     }
 
+    /// Append up to `max` bytes to `buf` and return how many were added
+    /// (fewer only at end of data). `ioerror` for a closed file or an output
+    /// file. The position, byte count and line count move exactly as that
+    /// many [`Self::read_byte`] calls would move them (issue #773).
+    pub fn read_into(&mut self, buf: &mut Vec<u8>, max: usize) -> Result<usize, PsError> {
+        if self.closed {
+            return Err(PsError::Io);
+        }
+        let start = buf.len();
+        if self.is_filter() {
+            for _ in 0..max {
+                match self.read_byte()? {
+                    Some(b) => buf.push(b),
+                    None => break,
+                }
+            }
+            return Ok(buf.len() - start);
+        }
+        match &mut self.kind {
+            Kind::Bytes { data, pos } => {
+                let take = max.min(data.len() - *pos);
+                buf.extend_from_slice(&data[*pos..*pos + take]);
+                *pos += take;
+            }
+            _ => return Err(PsError::Io),
+        }
+        // The bookkeeping `read_byte` does, over the bytes just taken.
+        self.consumed += buf.len() - start;
+        for &byte in &buf[start..] {
+            match byte {
+                b'\r' => {
+                    self.line += 1;
+                    self.last_was_cr = true;
+                }
+                b'\n' => {
+                    if !self.last_was_cr {
+                        self.line += 1;
+                    }
+                    self.last_was_cr = false;
+                }
+                _ => self.last_was_cr = false,
+            }
+        }
+        Ok(buf.len() - start)
+    }
+
     pub fn peek_byte(&mut self) -> Result<Option<u8>, PsError> {
         if self.closed {
             return Ok(None);
@@ -209,6 +366,78 @@ impl PsFile {
 
     pub fn is_open(&self) -> bool {
         !self.closed
+    }
+
+    /// `fileposition`: the byte offset of the next read or write.
+    /// `ioerror` for a file that cannot be positioned (a filter, `%stdout`,
+    /// `%stderr`) and for a closed one.
+    pub fn file_position(&mut self) -> Result<u64, PsError> {
+        if self.closed {
+            return Err(PsError::Io);
+        }
+        match &mut self.kind {
+            Kind::Bytes { pos, .. } => Ok(*pos as u64),
+            Kind::Output(Some(Sink::Disk(d))) => d.position(),
+            Kind::Filter { .. } | Kind::Output(_) => Err(PsError::Io),
+        }
+    }
+
+    /// `setfileposition`: move the next read or write to `to`.
+    /// `rangecheck` for a position outside `0..=length`; `ioerror` as for
+    /// [`Self::file_position`]. The line count follows the new position.
+    pub fn set_file_position(&mut self, to: i64) -> Result<(), PsError> {
+        if self.closed {
+            return Err(PsError::Io);
+        }
+        match &mut self.kind {
+            Kind::Bytes { data, pos } => {
+                let to = usize::try_from(to)
+                    .ok()
+                    .filter(|t| *t <= data.len())
+                    .ok_or(PsError::Rangecheck)?;
+                *pos = to;
+                self.consumed = to;
+                // Recount lines up to here: CR, LF and CRLF end one each.
+                let mut line = 1;
+                let mut prev_cr = false;
+                for &b in &data[..to] {
+                    match b {
+                        b'\r' => line += 1,
+                        b'\n' if !prev_cr => line += 1,
+                        _ => {}
+                    }
+                    prev_cr = b == b'\r';
+                }
+                self.line = line;
+                self.last_was_cr = prev_cr;
+                Ok(())
+            }
+            Kind::Output(Some(Sink::Disk(d))) => {
+                d.seek(u64::try_from(to).map_err(|_| PsError::Rangecheck)?)
+            }
+            Kind::Filter { .. } | Kind::Output(_) => Err(PsError::Io),
+        }
+    }
+
+    /// `resetfile`: an output file throws away what it has buffered and
+    /// forgets a write error; an input file holds no buffer of its own
+    /// (its bytes are in memory), so nothing changes. A closed file is not
+    /// an error, as in Ghostscript.
+    pub fn reset(&mut self) {
+        if self.closed {
+            return;
+        }
+        if let Kind::Output(Some(Sink::Disk(d))) = &mut self.kind {
+            d.reset();
+        }
+    }
+
+    /// Flush a disk output file's buffer (no-op for anything else).
+    pub fn flush_disk(&mut self) -> Result<(), PsError> {
+        match self.sink_mut() {
+            Some(Sink::Disk(d)) => d.flush(),
+            _ => Ok(()),
+        }
     }
 
     /// `bytesavailable`: None means unknown (filters), per the PLRM's -1.
@@ -875,6 +1104,50 @@ mod tests {
             out.push(b);
         }
         out
+    }
+
+    #[test]
+    fn a_dropped_file_that_could_not_write_leaves_a_note() {
+        let path = std::env::temp_dir().join(format!("pscat-lost-{}", std::process::id()));
+        std::fs::write(&path, b"x").unwrap();
+        // A read-only handle: buffering succeeds, the flush at drop cannot.
+        let lost = Rc::new(Cell::new(false));
+        let mut sink = DiskSink::new(std::fs::File::open(&path).unwrap(), lost.clone());
+        sink.write(b"data").unwrap();
+        assert!(!lost.get());
+        drop(sink);
+        assert!(lost.get());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn setting_the_position_recounts_lines_and_the_consumed_count() {
+        let f = PsFile::from_bytes(b"a\r\nb\rc\nd".to_vec());
+        let at = |pos: i64| {
+            f.borrow_mut().set_file_position(pos).unwrap();
+            (f.borrow().line(), f.borrow().pos())
+        };
+        // After the CR of a CRLF pair the LF half must not count again.
+        assert_eq!(at(2), (2, 2));
+        assert_eq!(at(3), (2, 3));
+        f.borrow_mut().read_byte().unwrap();
+        assert_eq!(f.borrow().line(), 2);
+        assert_eq!(at(4), (2, 4));
+        assert_eq!(at(5), (3, 5));
+        assert_eq!(at(0), (1, 0));
+        assert_eq!(at(7), (4, 7));
+        // Reading on from a CR whose LF follows counts one line ending.
+        f.borrow_mut().set_file_position(2).unwrap();
+        assert_eq!(drain(&f), b"\nb\rc\nd");
+        assert_eq!(f.borrow().line(), 4);
+        assert_eq!(
+            f.borrow_mut().set_file_position(9),
+            Err(PsError::Rangecheck)
+        );
+        assert_eq!(
+            f.borrow_mut().set_file_position(-1),
+            Err(PsError::Rangecheck)
+        );
     }
 
     #[test]

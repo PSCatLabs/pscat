@@ -85,6 +85,12 @@
 #                         listed in LIST: one repo-relative path per line, blank
 #                         lines and `#` comments ignored, each tracked in the
 #                         branch tree. Use it for a slice no loader describes.
+#   (always on)           with --base-bin/--head-bin, every tracked
+#                         selftest/drivers/*.ps whose header has the line
+#                         `%%IdentityCorpus: always` is also compared (#776): the
+#                         image_*.ps drivers, so a change to the image code is
+#                         always checked whatever --loader picked. Not used with
+#                         a single BIN, where only the files differ between trees.
 #   --expect-diff LIST    files that are MEANT to render differently (issue #674): an
 #                         opt-in change, a new default, a deliberate fix. Same format
 #                         as --files (tracked paths, one per line, `#` comments). A
@@ -107,6 +113,15 @@
 #                         proves each tree ran its own binary.
 #   --control-page WxH    page for the control (default: its own header, else
 #                         pscat's default page).
+#   --pscat-args STR      extra pscat flags for EVERY render, both trees and the
+#                         control alike (issue #724), e.g. --pscat-args "--max-steps
+#                         10000000" (a limit high enough that the corpus still renders). A change to the limit paths (--max-time, --max-memory,
+#                         --max-steps, #604) acts only under those flags, so a control
+#                         that needs one is rendered with it too. STR is split the way
+#                         xargs splits a line: 'single' and "double" quotes group a
+#                         word, backslash escapes, and nothing is executed (no $(...)).
+#                         A bad quote is exit 64. The script owns the output and page,
+#                         so --png, --svg, --pdf, --page and --dpi in STR are exit 64.
 #   --gallery-still       also require gallery/alpine_lake.ps to equal the
 #                         committed gallery/renders/alpine_lake.png at 2x, in
 #                         each tree (needs --gallery-dpi 144).
@@ -142,12 +157,17 @@ if [ "${1:-}" = "--render-one" ]; then
     [ $# -eq 7 ] || die "--render-one takes 6 arguments"
     bin=$2; tree=$3; outdir=$4; page=$5; dpi=$6; file=$7
     mkdir -p "$outdir"
+    # --pscat-args words, one NUL-terminated word per record (written by the parent).
+    EXTRA=()
+    if [ -n "${IDCHK_PSCAT_ARGS_FILE:-}" ]; then
+        while IFS= read -r -d '' a; do EXTRA+=("$a"); done < "$IDCHK_PSCAT_ARGS_FILE"
+    fi
     set +e
     if [ "$page" != "-" ]; then
-        (cd "$tree" && "$bin" --page "$page" --dpi "$dpi" --png "$outdir/page.png" "$file") \
+        (cd "$tree" && "$bin" ${EXTRA[@]+"${EXTRA[@]}"} --page "$page" --dpi "$dpi" --png "$outdir/page.png" "$file") \
             > "$outdir/log" 2>&1
     else
-        (cd "$tree" && "$bin" --dpi "$dpi" --png "$outdir/page.png" "$file") \
+        (cd "$tree" && "$bin" ${EXTRA[@]+"${EXTRA[@]}"} --dpi "$dpi" --png "$outdir/page.png" "$file") \
             > "$outdir/log" 2>&1
     fi
     echo $? > "$outdir/rc"
@@ -164,6 +184,7 @@ CONTROL_PAGE=""
 LOADERS=""       # newline-separated --loader libs (empty = lib/paintkit.ps)
 FILES_LIST=""    # --files LIST
 EXPECT_LIST=""   # --expect-diff LIST
+PSCAT_ARGS_STR="" # --pscat-args STR (issue #724)
 GALLERY_STILL=0
 DPI=72
 GALLERY_DPI=144
@@ -183,6 +204,7 @@ while [ $# -gt 0 ]; do
         --head-bin)      [ $# -ge 2 ] || die "--head-bin needs a pscat binary"; HEAD_BIN=$2; shift 2 ;;
         --control)       [ $# -ge 2 ] || die "--control needs a file"; CONTROL=$2; shift 2 ;;
         --control-page)  [ $# -ge 2 ] || die "--control-page needs WxH"; CONTROL_PAGE=$2; shift 2 ;;
+        --pscat-args)    [ $# -ge 2 ] || die "--pscat-args needs a string of pscat flags"; PSCAT_ARGS_STR=$2; shift 2 ;;
         --gallery-still) GALLERY_STILL=1; shift ;;
         --dpi)           [ $# -ge 2 ] || die "--dpi needs a number"; DPI=$2; shift 2 ;;
         --gallery-dpi)   [ $# -ge 2 ] || die "--gallery-dpi needs a number"; GALLERY_DPI=$2; shift 2 ;;
@@ -282,6 +304,22 @@ if [ -n "$CONTROL" ]; then
     [ -f "$CONTROL" ] || die "--control file '$CONTROL' not found"
     CONTROL="$(cd "$(dirname "$CONTROL")" && pwd -P)/$(basename "$CONTROL")"
 fi
+# --pscat-args (issue #724): split the way xargs splits a line (quotes group,
+# nothing is executed), refused here before any scratch directory exists. An
+# unbalanced quote makes xargs fail. Whitespace only means no words.
+PSCAT_WORDS=""
+if [ -n "${PSCAT_ARGS_STR//[[:space:]]/}" ]; then
+    PSCAT_WORDS=$(printf '%s\n' "$PSCAT_ARGS_STR" | xargs -n 1 printf '%s\n') \
+        || die "--pscat-args '$PSCAT_ARGS_STR': unbalanced quote (quote words with ' or \")"
+    while IFS= read -r w; do
+        case "$w" in
+            --png|--svg|--pdf|--page|--dpi)
+                die "--pscat-args: $w is owned by this script (the output and page are compared); remove it" ;;
+        esac
+    done <<EOF_PSCAT_WORDS
+$PSCAT_WORDS
+EOF_PSCAT_WORDS
+fi
 if [ -z "$JOBS" ]; then
     JOBS=$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)
 fi
@@ -344,6 +382,12 @@ if [ "$made_out" -eq 0 ]; then
     OUT=$(mktemp -d "$OUT/identity_check.XXXXXX")
 fi
 mkdir -p "$OUT/base" "$OUT/head"
+# The --pscat-args words, NUL-terminated, for --render-one (it reads them back into an array).
+export IDCHK_PSCAT_ARGS_FILE="$OUT/pscat-args.nul"
+: > "$IDCHK_PSCAT_ARGS_FILE"
+if [ -n "$PSCAT_WORDS" ]; then
+    printf '%s\n' "$PSCAT_ARGS_STR" | xargs -n 1 printf '%s\0' > "$IDCHK_PSCAT_ARGS_FILE"
+fi
 
 FAILED=0
 CONTROL_FAILED=0
@@ -412,6 +456,23 @@ EOF_SET2
 $(git -C "$ROOT" ls-files -- 'examples/*.ps' 'gallery/*.ps' 'selftest/drivers/*.ps')
 EOF_LIST
 fi
+# Two binaries (a change under src/): the always-on corpus (#776). A tracked
+# selftest/drivers/*.ps whose header says `%%IdentityCorpus: always` is
+# compared whatever --loader/--files picked, since it exercises the interpreter
+# itself (the image_*.ps drivers load no lib, so no loader would find them).
+# One binary renders both trees otherwise, so a difference there could only come
+# from the files and these never differ: they join in two-binary mode only.
+if [ "$TWO_BINS" -eq 1 ]; then
+    while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        if grep -q '^%%IdentityCorpus:[[:space:]]*always' "$ROOT/$f"; then
+            printf '%s\n' "$f" >> "$FILES"
+        fi
+    done <<EOF_ALWAYS
+$(git -C "$ROOT" ls-files -- 'selftest/drivers/*.ps')
+EOF_ALWAYS
+    awk '!seen[$0]++' "$FILES" > "$FILES.u" && mv "$FILES.u" "$FILES"
+fi
 # --expect-diff files are compared even when the pick leaves them out.
 if [ -n "$FILES_PATHS" ] || [ -n "$EXPECTED" ]; then
     [ -z "$FILES_PATHS" ] || printf '%s\n' "$FILES_PATHS" >> "$FILES"
@@ -477,10 +538,12 @@ fi
 # name is encoded in OUTDIR, so xargs passes: BIN TREE OUTDIR PAGE DPI FILE.
 START=$(date +%s)
 nfiles=$(wc -l < "$COMPARE" | tr -d ' ')
+PSCAT_NOTE=""
+if [ -n "$PSCAT_WORDS" ]; then PSCAT_NOTE=" with pscat args $PSCAT_ARGS_STR"; fi
 if [ "$TWO_BINS" -eq 1 ]; then
-    echo "rendering $nfiles files x 2 trees: base with $BASE_BIN, head with $HEAD_BIN (-j $JOBS)" >&2
+    echo "rendering $nfiles files x 2 trees: base with $BASE_BIN, head with $HEAD_BIN (-j $JOBS)$PSCAT_NOTE" >&2
 else
-    echo "rendering $nfiles files x 2 trees with $BIN (-j $JOBS)" >&2
+    echo "rendering $nfiles files x 2 trees with $BIN (-j $JOBS)$PSCAT_NOTE" >&2
 fi
 xargs -0 -n 6 -P "$JOBS" "$SELF" --render-one < "$JOBLIST" \
     || die "the render driver failed (see $OUT); this is a harness error, not a difference"

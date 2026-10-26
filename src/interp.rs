@@ -25,7 +25,9 @@ use crate::gfx::{DEFAULT_PAGE, Gfx, GraphicsState};
 use crate::image::{ImageCtx, ImageStep};
 use crate::lexer::{Lexer, Token};
 use crate::limits::{Limits, LimitsError};
-use crate::object::{Dict, Num, Object, PsArray, PsString, SaveHandle, Value};
+use crate::object::{
+    Dict, ERROR_NAME_LIMIT, Num, Object, PsArray, PsString, SaveHandle, Value, cap_text,
+};
 use crate::ops;
 
 /// Generous enough for any sane program (procedure calls in tail position
@@ -36,6 +38,10 @@ const EXEC_STACK_LIMIT: usize = 10_000;
 /// Nesting cap for `{ { { ... } } }` at scan time; the scanner recurses per
 /// nesting level, so this bounds Rust stack use on malicious input.
 const PROC_NESTING_LIMIT: usize = 500;
+
+/// `execute_resolved`'s `via` for an object that was not reached through a
+/// name. No interned name has this id.
+const NO_NAME: u32 = u32::MAX;
 
 enum Frame {
     /// Tokens being scanned incrementally from program source.
@@ -76,6 +82,10 @@ enum Frame {
     /// procedure finishes, the continuation consumes its results.
     /// Holds no external state, so unwinding needs no cleanup.
     PostOp(PostOp),
+    /// `--profile` (issue #737): planted under the body of a procedure
+    /// called through a name. Reached, or unwound, it closes that call in
+    /// the profiler. Only exists while profiling.
+    ProfReturn,
 }
 
 /// One unit of work `next_item` hands the step loop. A procedure's
@@ -265,6 +275,10 @@ pub struct Interp {
     /// (issue #728), so a `save`/`restore` loop warns once per name per
     /// interpreter, not once per call.
     pub(crate) font_notes_shown: std::collections::HashSet<String>,
+    /// The notes `findfont` raised for substituted pack faces this run,
+    /// one per name, newline-joined. The wasm build has no stderr, so
+    /// the npm package reads them here (`Renderer.warnings`, issue #750).
+    pub(crate) font_warnings: String,
     /// State for `rand`/`srand`/`rrand`. Deterministic by default —
     /// reproducible art is a feature here, not a bug.
     pub(crate) rand_state: i64,
@@ -275,14 +289,20 @@ pub struct Interp {
     /// `srand` of a value `rrand` handed out under the override (a
     /// saved stream coming back, issue #202), which restores it exactly.
     /// `seed_override_fired`
-    /// records whether an override actually intercepted a call, so a
-    /// sweep over a script that never calls `srand` can be flagged
-    /// instead of silently producing identical frames.
+    /// records whether an override actually intercepted a call (or
+    /// sampled the override-seeded noise table, see `noise_from_override`),
+    /// so a sweep over a script that never calls `srand` or samples noise
+    /// can be flagged instead of silently producing identical frames.
     pub(crate) seed_override: Option<i64>,
     /// The permutation table the noise operators sample (`noiseseed`,
     /// issue #734). Separate from `rand_state`, so noise never moves a
     /// `rand` sequence.
     pub(crate) noise_perm: [u8; 256],
+    /// `noise_perm` was built from the seed override (issue #753), and the
+    /// program has not called `noiseseed` since. A program's own
+    /// `noiseseed` clears it and keeps its own table; sampling the table
+    /// while it is set counts as the override firing.
+    pub(crate) noise_from_override: bool,
     pub(crate) seed_override_fired: bool,
     /// `setpacking` flag — tracked, but packed arrays are ordinary
     /// arrays here (ops/level2.rs).
@@ -320,6 +340,24 @@ pub struct Interp {
     /// Directories the program may write files in (issue #740); empty
     /// unless `set_write_roots` was called.
     write_roots: crate::write_roots::WriteRoots,
+    /// Directories the program may read files from (issue #763); `None`
+    /// (the default) reads wherever the search order finds a file.
+    read_roots: Option<crate::read_roots::ReadRoots>,
+    /// Disk files the program has open for writing (issue #762), weakly:
+    /// a file nothing refers to any more drops, closing its descriptor and
+    /// flushing itself. Counted against [`MAX_OPEN_OUTPUT_FILES`] and
+    /// flushed together by [`Interp::flush_outputs`].
+    open_outputs: Vec<std::rc::Weak<RefCell<crate::file::PsFile>>>,
+    /// Set by a disk file dropped with bytes it could not write; shared
+    /// with each [`DiskSink`](crate::file::DiskSink) this interpreter opens.
+    lost_write: Rc<Cell<bool>>,
+    /// Bytes the program has handed to disk files so far (issue #762).
+    bytes_written: u64,
+    /// The most bytes it may hand to disk files; `None` for no cap.
+    max_write_bytes: Option<u64>,
+    /// `--profile` (issue #737): `Some` while profiling. A program that
+    /// is not profiled never looks at it per step (see `step_n`).
+    profile: Option<Box<crate::profile::Profiler>>,
     pub(crate) gfx: Gfx,
 }
 
@@ -331,6 +369,10 @@ pub const STDOUT_CAPTURE_LIMIT: usize = 64 * 1024;
 /// set: small enough to notice a runaway within milliseconds, large enough
 /// that the clock read is lost in the noise.
 const LIMITED_SLICE: usize = 512;
+
+/// The most disk files a program may have open for writing at once
+/// (issue #762); one more is `limitcheck`.
+pub const MAX_OPEN_OUTPUT_FILES: usize = 64;
 
 /// Loop iterations between looks at the limits from inside `next_item`.
 const POLL_PERIOD: u32 = 1024;
@@ -406,9 +448,11 @@ impl Interp {
             error_command: None,
             last_line: None,
             font_notes_shown: std::collections::HashSet::new(),
+            font_warnings: String::new(),
             rand_state: 1,
             seed_override: None,
             noise_perm: crate::ops::noise::perm_from_seed(0),
+            noise_from_override: false,
             seed_override_fired: false,
             packing: false,
             clock: crate::clock::Clock::start(),
@@ -422,6 +466,12 @@ impl Interp {
             mem_base: 0,
             poll_in: POLL_PERIOD,
             write_roots: Default::default(),
+            read_roots: None,
+            open_outputs: Vec::new(),
+            lost_write: Rc::new(Cell::new(false)),
+            bytes_written: 0,
+            max_write_bytes: None,
+            profile: None,
             gfx,
         })
     }
@@ -507,6 +557,132 @@ impl Interp {
     /// The write policy, for the operators that write to disk.
     pub(crate) fn write_policy(&self) -> &crate::write_roots::WriteRoots {
         &self.write_roots
+    }
+
+    /// Cap the bytes a program may write to disk files (issue #762; the
+    /// CLI's `--max-write-bytes`); `None` removes the cap, and it is off by
+    /// default. The count is for the interpreter's whole life, starts at
+    /// zero, and is the bytes handed to `write`, `writestring`,
+    /// `writehexstring` and `writereals`, so overwriting a file after
+    /// `setfileposition` counts again. A write that would pass the cap
+    /// writes nothing and raises `limitcheck`. Calling this again also
+    /// starts the count again.
+    pub fn set_max_write_bytes(&mut self, max: Option<u64>) {
+        self.max_write_bytes = max;
+        self.bytes_written = 0;
+    }
+
+    /// The write-bytes cap ([`Interp::set_max_write_bytes`]).
+    pub fn max_write_bytes(&self) -> Option<u64> {
+        self.max_write_bytes
+    }
+
+    /// Whether `n` more bytes fit under the write cap.
+    pub(crate) fn check_write_bytes(&self, n: u64) -> Result<(), PsError> {
+        match self.max_write_bytes {
+            Some(max) if self.bytes_written.saturating_add(n) > max => Err(PsError::Limitcheck),
+            _ => Ok(()),
+        }
+    }
+
+    /// Count `n` bytes against the write cap, or `limitcheck`.
+    pub(crate) fn charge_write_bytes(&mut self, n: u64) -> Result<(), PsError> {
+        self.check_write_bytes(n)?;
+        self.bytes_written = self.bytes_written.saturating_add(n);
+        Ok(())
+    }
+
+    /// Forget output files that are closed or gone, and refuse (with
+    /// `limitcheck`) another one when [`MAX_OPEN_OUTPUT_FILES`] are open.
+    /// Called before a disk file is opened, so a refusal truncates nothing.
+    pub(crate) fn check_output_slot(&mut self) -> Result<(), PsError> {
+        self.open_outputs.retain(|w| {
+            w.upgrade()
+                .is_some_and(|f| f.try_borrow().map_or(true, |f| f.is_open()))
+        });
+        if self.open_outputs.len() >= MAX_OPEN_OUTPUT_FILES {
+            return Err(PsError::Limitcheck);
+        }
+        Ok(())
+    }
+
+    /// The note a [`DiskSink`](crate::file::DiskSink) sets when it is dropped
+    /// with bytes it could not write.
+    pub(crate) fn lost_write_note(&self) -> Rc<Cell<bool>> {
+        self.lost_write.clone()
+    }
+
+    /// Track a disk output file just opened (after `check_output_slot`).
+    pub(crate) fn register_output(&mut self, f: &crate::file::FileHandle) {
+        self.open_outputs.push(Rc::downgrade(f));
+    }
+
+    /// Write out the buffered bytes of every open disk file, and report a
+    /// failure: a file whose write failed, or one that was dropped without
+    /// being closed and could not write (disk full), is `ioerror`. Every
+    /// file is flushed regardless. The `pscat` binary calls this on every
+    /// exit path, so a program that lost data exits non-zero; an embedder
+    /// that leaves files open should call it before it drops the `Interp`
+    /// (the drop flushes too, but cannot tell anyone). The note about a
+    /// dropped file is cleared by this call.
+    pub fn flush_outputs(&mut self) -> Result<(), PsError> {
+        let flushed = self.flush_files();
+        if self.lost_write.replace(false) {
+            return Err(PsError::Io);
+        }
+        flushed
+    }
+
+    /// [`Interp::flush_outputs`] for the places that cannot raise (`showpage`,
+    /// `quit`, `flush`, before a read): the bytes go out, and a failure stays
+    /// on the file (or in the dropped-file note) for the exit flush to report.
+    pub(crate) fn flush_files(&mut self) -> Result<(), PsError> {
+        let mut result = Ok(());
+        for w in &self.open_outputs {
+            if let Some(f) = w.upgrade()
+                && let Ok(mut f) = f.try_borrow_mut()
+                && let Err(e) = f.flush_disk()
+            {
+                result = Err(e);
+            }
+        }
+        result
+    }
+
+    /// Confine reads to `dirs` (issue #763; the CLI's `--read-root DIR`,
+    /// and what `pscat-mcp` always does): `(path) (r) file`, `run`,
+    /// `readreals` and `filenameforall` read and list only files that
+    /// resolve inside one of them, and refuse the rest with
+    /// `invalidfileaccess`, `..` and symlink escapes included
+    /// (`src/read_roots.rs`). The embedded copy of `lib/` stays available.
+    /// An empty slice confines reads to that embedded copy alone. Fails,
+    /// changing nothing, if a directory doesn't exist.
+    ///
+    /// ```no_run
+    /// let mut interp = pscat::Interp::new();
+    /// interp.set_read_roots(&["."])?;
+    /// assert!(interp.run_str("(/etc/hosts) (r) file").is_err());
+    /// # Ok::<(), String>(())
+    /// ```
+    pub fn set_read_roots<P: AsRef<std::path::Path>>(&mut self, dirs: &[P]) -> Result<(), String> {
+        self.read_roots = Some(crate::read_roots::ReadRoots::new(dirs)?);
+        Ok(())
+    }
+
+    /// Lift the read confinement again: reads are open, the default.
+    pub fn clear_read_roots(&mut self) {
+        self.read_roots = None;
+    }
+
+    /// The canonical read roots, or `None` when reads are open (the
+    /// default).
+    pub fn read_roots(&self) -> Option<&[std::path::PathBuf]> {
+        self.read_roots.as_ref().map(|r| r.dirs())
+    }
+
+    /// The read policy, for the operators that read from disk.
+    pub(crate) fn read_policy(&self) -> Option<&crate::read_roots::ReadRoots> {
+        self.read_roots.as_ref()
     }
 
     /// Where writing to `name` would go: a path inside the write roots, or
@@ -718,6 +894,9 @@ impl Interp {
             // Type 3 glyph contexts' graphics-state snapshot and paint
             // suppression must not leak past the show that created them.
             Frame::Show(mut ctx) => ctx.cleanup(&mut self.gfx),
+            // A profiled call unwound by `stop`, an error, `exit` or `quit`
+            // ends here.
+            Frame::ProfReturn => self.prof_exit(),
             // `begin_eexec` pushes systemdict for the encrypted stream's
             // duration, popped on normal completion via
             // `Action::PopScannerAndDict`; a scanner dropped mid-flight
@@ -939,10 +1118,11 @@ impl Interp {
             },
         };
         let command = match err {
-            PsError::Undefined(name) => name.clone(),
-            _ => self
-                .last_executed_name()
-                .unwrap_or_else(|| "--none--".to_string()),
+            PsError::Undefined(name) => cap_text(name, ERROR_NAME_LIMIT),
+            _ => self.last_executed_name().map_or_else(
+                || "--none--".to_string(),
+                |n| cap_text(&n, ERROR_NAME_LIMIT),
+            ),
         };
         match self.last_line {
             Some(line) => {
@@ -974,6 +1154,8 @@ impl Interp {
             /// An eexec source finished: it carried a systemdict push
             /// that ends with it.
             PopScannerAndDict,
+            /// A profiled call returned (`--profile`).
+            ProfExit,
         }
         loop {
             let action = {
@@ -1094,6 +1276,7 @@ impl Interp {
                     // Reached from above means the stopped procedure ran
                     // to completion without stopping.
                     Frame::StopMark => Action::PopThenPush(Object::bool(false)),
+                    Frame::ProfReturn => Action::ProfExit,
                     Frame::Show(ctx) => match ctx.step(gfx)? {
                         ShowStep::Pop => Action::Pop,
                         ShowStep::PopPushWidth(wx, wy) => {
@@ -1185,6 +1368,10 @@ impl Interp {
                         self.cleanup_unwound_frame(frame);
                     }
                 }
+                Action::ProfExit => {
+                    self.estack.pop();
+                    self.prof_exit();
+                }
             }
         }
     }
@@ -1204,6 +1391,72 @@ impl Interp {
         }
     }
 
+    /// Run procedure `body` as a call of `id`: plant a [`Frame::ProfReturn`]
+    /// below its frame and open the call in the profiler.
+    ///
+    /// A procedure whose last element calls another (or itself) drops its
+    /// frame first, so a chain of tail calls leaves a run of markers on top
+    /// of the exec stack, one per procedure in tail position. A call to a
+    /// name already in that run counts but plants no new marker, which keeps
+    /// tail recursion at constant depth, as it is without `--profile`. (The
+    /// time then belongs to the innermost open call, the last procedure of
+    /// the chain to plant a marker: with mutual tail recursion `ping` <->
+    /// `pong`, the body of both counts as `pong`'s exclusive time.)
+    ///
+    /// Each open call holds two exec-stack slots (marker and body frame),
+    /// so non-tail recursion runs out at about half the depth it does in a
+    /// plain run (`execstackoverflow`, about 5,000 levels instead of 10,000).
+    #[cold]
+    #[inline(never)]
+    fn prof_call(&mut self, id: u32, body: PsArray) -> Result<(), PsError> {
+        let run = self
+            .estack
+            .iter()
+            .rev()
+            .take_while(|f| matches!(f, Frame::ProfReturn))
+            .count();
+        let Some(p) = self.profile.as_mut() else {
+            return self.push_proc_frame(body);
+        };
+        if run > 0 && p.tail_has(run, id) {
+            p.count_only(id);
+            return self.push_proc_frame(body);
+        }
+        self.push_frame(Frame::ProfReturn)?;
+        if let Some(p) = self.profile.as_mut() {
+            p.enter(id);
+        }
+        let pushed = self.push_proc_frame(body);
+        if pushed.is_err() {
+            self.estack.pop();
+            if let Some(p) = self.profile.as_mut() {
+                p.abort_enter();
+            }
+        }
+        pushed
+    }
+
+    fn prof_exit(&mut self) {
+        if let Some(p) = self.profile.as_mut() {
+            p.exit();
+        }
+    }
+
+    /// Turn on the per-procedure profile (`pscat --profile`, issue #737)
+    /// for the programs this interpreter runs from now on. Call it before
+    /// the program starts: a call already running is not counted.
+    #[doc(hidden)]
+    pub fn enable_profile(&mut self) {
+        self.profile = Some(Box::new(crate::profile::Profiler::new()));
+    }
+
+    /// What the profile has recorded so far (finished calls only), or
+    /// `None` if [`enable_profile`](Self::enable_profile) was not called.
+    #[doc(hidden)]
+    pub fn profile_report(&self) -> Option<crate::profile::ProfileReport> {
+        self.profile.as_ref().map(|p| p.report())
+    }
+
     /// Execute the executable name with interned id `id`: look it up on
     /// the dictionary stack and run what it resolves to.
     #[inline]
@@ -1212,12 +1465,16 @@ impl Interp {
         let resolved = self
             .load_id(id)
             .ok_or_else(|| PsError::Undefined(crate::name::resolve(id).to_string()))?;
-        self.execute_resolved(resolved)
+        self.execute_resolved(resolved, id)
     }
 
     /// Execute the object a name resolved to. Unlike `execute_element`,
     /// an executable array here *runs* — this is a procedure call.
-    fn execute_resolved(&mut self, mut obj: Object) -> Result<(), PsError> {
+    ///
+    /// `via` is the name the object was reached through, or [`NO_NAME`]
+    /// (`exec`, a conditional's branch): `--profile` attributes a
+    /// procedure body to the name it ran through (#737).
+    fn execute_resolved(&mut self, mut obj: Object, via: u32) -> Result<(), PsError> {
         // A name may resolve to another executable name; follow the chain
         // with a budget so `a -> b -> a` cycles error out instead of
         // spinning forever.
@@ -1235,6 +1492,9 @@ impl Interp {
                     let Value::Array(body) = obj.value else {
                         unreachable!()
                     };
+                    if via != NO_NAME && self.profile.is_some() {
+                        return self.prof_call(via, body);
+                    }
                     return self.push_proc_frame(body);
                 }
                 // An executable string runs as source — the `(...) cvx
@@ -1311,7 +1571,7 @@ impl Interp {
     /// `exec` and the conditional operators: run an object with full
     /// executable semantics (procedures run rather than being pushed).
     pub(crate) fn exec_object(&mut self, obj: Object) -> Result<(), PsError> {
-        self.execute_resolved(obj)
+        self.execute_resolved(obj, NO_NAME)
     }
 
     /// The `token` operator on a file: one token scanned in place — the
@@ -1470,6 +1730,11 @@ impl Interp {
                 }
                 Some(Frame::Proc { .. }) => {
                     self.estack.pop();
+                }
+                // A profiled call `exit` leaves: close it.
+                Some(Frame::ProfReturn) => {
+                    self.estack.pop();
+                    self.prof_exit();
                 }
             }
         }
@@ -1768,15 +2033,34 @@ impl Interp {
     /// leaves `srand` and `rrand` alone. Also clears the fired flag, so a caller
     /// re-arming this on a fresh `Interp` starts from a clean read of
     /// [`seed_override_fired`](Self::seed_override_fired).
+    ///
+    /// The seed also builds the noise table (issue #753), as `seed
+    /// noiseseed` would, so art built on the native noise operators
+    /// varies with the sweep too. A program that calls `noiseseed`
+    /// itself keeps its own table. `None` puts the default table back,
+    /// but only while the table is still the override's.
     pub fn set_seed_override(&mut self, seed: Option<i64>) {
         self.seed_override = seed;
         self.seed_override_fired = false;
+        match seed {
+            Some(s) => {
+                self.noise_perm = crate::ops::noise::perm_from_seed(s);
+                self.noise_from_override = true;
+            }
+            None if self.noise_from_override => {
+                self.noise_perm = crate::ops::noise::perm_from_seed(0);
+                self.noise_from_override = false;
+            }
+            None => {}
+        }
     }
 
     /// Whether [`set_seed_override`](Self::set_seed_override)'s
-    /// override has actually intercepted a `srand` call since it was
-    /// set. `false` means the source never called `srand`, so the
-    /// override had no effect on this run.
+    /// override has actually taken effect since it was set: it
+    /// intercepted a `srand` call, or a noise operator sampled the table
+    /// it built (issue #753). `false` means the source never called
+    /// `srand` and never sampled override-seeded noise, so the override
+    /// had no effect on this run.
     pub fn seed_override_fired(&self) -> bool {
         self.seed_override_fired
     }
@@ -1841,6 +2125,13 @@ impl Interp {
     /// capture is off.
     pub fn captured_stdout(&self) -> &[u8] {
         self.stdout_capture.as_deref().unwrap_or(&[])
+    }
+
+    /// The one-line notes `findfont` raised for pack faces it replaced
+    /// with a built-in one, newline-joined, once per name (the lines the
+    /// native binary prints on stderr); empty when nothing was replaced.
+    pub fn font_warnings(&self) -> &str {
+        &self.font_warnings
     }
 
     /// Program output: to the capture buffer when one is on, else stdout
@@ -1941,6 +2232,9 @@ impl Interp {
 /// [`leave_dicts_to_process_exit`](Interp::leave_dicts_to_process_exit).
 impl Drop for Interp {
     fn drop(&mut self) {
+        // Before the early return below: a file kept alive by the leaked
+        // dictionary graph would otherwise never be flushed.
+        let _ = self.flush_files();
         if self.keep_dicts_on_drop {
             return;
         }

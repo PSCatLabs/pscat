@@ -34,6 +34,22 @@ generate | pscat --png out.png -       # `-` reads the program from stdin
 Multi-page documents number their pages: `out.png` → `out-001.png`,
 `out-002.png`, … SVG does the same; PDF is naturally multi-page.
 
+`pscat --bands N --png out.png f.ps` renders on N threads, one horizontal band
+each, and gives the same PNG bytes as a plain render. It is only faster for a
+program that reads `/BandBBox [llx lly urx ury]` (also `/BandIndex`,
+`/BandCount`) and skips work outside it, e.g. a costly `colorimage` procedure
+that computes only those rows plus one row of margin. PNG only.
+
+`pscat --profile --headless f.ps` (or with `--png`) prints, on stderr, each
+named procedure's call count and exclusive and inclusive wall time, slowest
+exclusive first (`--profile-top N`, `--profile-json`). Use it to find where a
+slow render went. Not with `--bands`.
+
+`pscat --profile --headless f.ps` (or with `--png`) prints, on stderr, each
+named procedure's call count and exclusive and inclusive wall time, slowest
+exclusive first (`--profile-top N`, `--profile-json`). Use it to find where a
+slow render went. Not with `--bands`.
+
 ## Sweep a seed or parameter (explore a design space in one run)
 
 ```sh
@@ -82,7 +98,9 @@ pscat sheet -o d.png --page 300x300 --dpi 72 --sweep Density=10,20,40,80 piece.p
 ```
 
 `--sweep-seed` and `--sweep NAME=` take the next file only and use the same
-grammar as the flag CLI. A `--dpi` cell is `DPI[xZOOM][@MAT]`: `@#222` (or
+grammar as the flag CLI. A seed sweep also seeds the native noise
+operators (`N noiseseed`), so noise art varies per cell; a program that calls
+`noiseseed` itself keeps its own table. A `--dpi` cell is `DPI[xZOOM][@MAT]`: `@#222` (or
 `@white`) draws the page transparent, sets it on that colour and pads it 10 px,
 to judge an icon on dark and light. `+` joins cells into one stacked column.
 `--cols N` wraps a row after N columns. Quote a `--dpi` list with `#` or `+`.
@@ -243,7 +261,7 @@ With the pack installed the real face is used and nothing changes. The Type
 ## Capabilities (structured, for agents)
 
 ```sh
-pscat --capabilities                   # fonts, palettes, templates, procedures as JSON
+pscat --capabilities                   # fonts, palettes, templates, procedures, native pscat operators as JSON
 ```
 
 The machine-readable inventory of what this build actually has: fonts,
@@ -339,7 +357,8 @@ pass `out_path`. Register it with
   page use `--dpi 144`, not `--page 1224x1584`. Canvases are capped at
   8000×8000 device pixels.
 - pscat is not a sandbox: a program can read any file you can read
-  (`(path) (r) file`), and on the command line nothing stops an infinite
+  (`(path) (r) file`; the MCP tools confine reads to the working directory,
+  the pscat data directories and `--allow-read DIR`), and on the command line nothing stops an infinite
   loop unless you ask: `--max-steps N`, `--max-time SECS` and `--max-memory
   MIB` stop a runaway with a `limitexceeded` error. Run untrusted PostScript
   as you would an untrusted script.
@@ -351,9 +370,18 @@ pass `out_path`. Register it with
 - To save or reload a big numeric array, use `array (path) writereals` and
   `(path) n readreals` (packed binary64; add `/f32` before the operator for
   binary32), not printing and `run`ning text: exact, and about 10x faster to
-  read. Writing needs `--allow-write DIR` like `(w) file`.
+  read. Writing needs `--allow-write DIR` like `(w) file`. `(path) /all
+  readreals` reads every value, `(path) 100 50 readreals` is 50 values from
+  value 100, and `array file writereals` / `file n readreals` take an open
+  file (`%stdout`, an `(a)` append file).
 - The interpreter targets Level 2 PostScript. If a construct misbehaves,
   compare against Ghostscript, the behavioural oracle.
+- `cvs` (and `=`, `==`) on a real prints the shortest digits that read back
+  exactly, up to 17 significant digits, so the text can be 24 characters
+  (`-3.3333333333333334e-301`). Ghostscript prints six. Size the string for
+  that (`30 string`), or round first. `0.38612390214204787 12 string cvs`
+  is a `rangecheck` here; rounding it to `0.386` first and then printing
+  with `30 string` gives `(0.386)`.
 - Files the docs call `examples/...`, `gallery/...` or `docs/...` are in
   the [repository](https://github.com/PSCatLabs/pscat),
   not in an install.

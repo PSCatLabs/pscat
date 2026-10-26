@@ -68,5 +68,5 @@ Net of the 148 ms array build, `writereals` is about 8 ms against 600-1100 ms fo
 110 MB of resident memory against 55 MB). The files are 8 MB against 18 MB. Both round-trips are
 exact for these values (0 mismatches in a million); text fails on `inf`.
 
-**Not done.** `fileposition`-style partial reads (a count with an offset), a `/all` count, and
-file-object forms. `SECURITY.md` still says `file` accepts only `r` (stale since #740).
+**Not done here, done in #773** (`notes/773-readreals-all-offset-file.md`): a `/all` count,
+an offset for partial reads, and the file-object forms. `SECURITY.md` still says `file` accepts only `r` (stale since #740).

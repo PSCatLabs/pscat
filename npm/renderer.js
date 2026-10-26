@@ -126,14 +126,32 @@ export class Renderer {
     return this.#ps.output;
   }
 
+  /**
+   * Notes about fonts the program asked for that were replaced since
+   * begin(): a face from a font pack (display, Korean, Japanese, Thai,
+   * typewriter) that was not given to addFont stands in as Helvetica or
+   * Courier. The same one-line note the command-line tool prints on
+   * stderr, once per face, saying what to pass to addFont; [] when
+   * nothing was replaced. Readable after a PostScriptError too.
+   */
+  get warnings() {
+    return this.#ps.warnings;
+  }
+
   /** A copy of the page as RGBA bytes, row by row from the top. */
   pixels() {
     return new Uint8ClampedArray(this.#ps.pixels().buffer);
   }
 
-  /** The page as { width, height, data, output }: data is RGBA, ImageData-shaped. */
+  /** The page as { width, height, data, output, warnings }: data is RGBA, ImageData-shaped. */
   image() {
-    return { width: this.width, height: this.height, data: this.pixels(), output: this.output };
+    return {
+      width: this.width,
+      height: this.height,
+      data: this.pixels(),
+      output: this.output,
+      warnings: this.warnings,
+    };
   }
 
   /** The page as an ImageData (browsers, workers; needs a global ImageData). */
@@ -151,7 +169,8 @@ export class Renderer {
    * Make a TrueType/OpenType font available to findfont. `name` is the
    * font pack's file stem, e.g. 'EBGaramond-Regular' (which /Garamond
    * then finds too); the face's own PostScript name also finds it.
-   * Only the Liberation faces behind the base fonts are built in.
+   * The PostScript standard 35 are built in; any other face needs this,
+   * and without it findfont substitutes (see `warnings`).
    */
   addFont(name, bytes) {
     if (typeof name !== 'string' || name === '') throw new TypeError('pscat: addFont needs a font name');

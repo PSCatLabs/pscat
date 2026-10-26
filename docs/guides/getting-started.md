@@ -30,6 +30,7 @@ cargo run -- --speed 10 file.ps           # slower (steps per frame, default 100
 cargo run -- --png out.png file.ps        # headless render to PNG
 cargo run -- --svg out.svg file.ps        # export SVG (also --pdf out.pdf)
 cargo run -- --dpi 300 --png out.png file.ps   # print-resolution rendering
+cargo run -- --bands 4 --png out.png file.ps   # render on 4 threads, 4 bands
 cargo run -- --spool jobs/                # act like a lab printer: render
                                           # each .ps/.eps dropped into jobs/
 cargo run -- --halftone file.ps           # classic 45° halftone dots, like a
@@ -65,7 +66,9 @@ More on the less obvious ones:
   once, so exploring seeds or a parameter is one command instead of many
   hand edits. It overrides every `srand` call, so found art with a hardcoded
   `N srand` line sweeps unmodified. (A restore of a value saved with `rrand`
-  puts the saved stream back instead.) `--sweep NAME=...` predefines `/NAME`
+  puts the saved stream back instead.) It also seeds the native noise
+  operators (`N noiseseed`, #753), so noise art varies per frame; a program
+  that calls `noiseseed` itself keeps its own table. `--sweep NAME=...` predefines `/NAME`
   in `userdict` for a program that reads it. `--png` writes numbered
   per-frame files; `--contact-sheet PATH` composites every frame into one
   grid PNG instead (`--grid COLSxROWS` overrides the layout). Use either or
@@ -107,8 +110,22 @@ More on the less obvious ones:
   `deletefile` work inside it; any path outside it, a `..`, or a symlink
   leading out is `invalidfileaccess`. A relative name is relative to the
   current directory. `(%stdout) (w) file` and `(%stderr) (w) file` need no
-  flag. `filenameforall` lists files where `run` would look for them.
-  `pscat-mcp` never lets a program write.
+  flag. `filenameforall` lists files where `run` would look for them
+  (`/` between directories on every platform, Windows too: `C:/dir/*.ps`;
+  `\` is the escape character). `pscat-mcp` never lets a program write.
+  Writes are buffered and flushed by `closefile`, `flushfile`, `flush`,
+  `showpage`, `quit` and at exit, even when a program never closes a file;
+  `fileposition`, `setfileposition` and `resetfile` work on files. At most 64
+  files can be open for writing, and `--max-write-bytes N` (`k`, `m`, `g`
+  suffixes; default 1g, `0` for none) stops a program that writes more than N
+  bytes: the write is a `limitcheck`.
+- **Confining reads.** Reading is open by default. `--read-root DIR`
+  (repeatable) confines `(f) (r) file`, `run`, `readreals` and
+  `filenameforall` to files inside the named directories: a path outside, a
+  `..`, a symlink leading out or `/dev/zero` is `invalidfileaccess`, and
+  `filenameforall` lists nothing outside. The embedded `lib/` still works.
+  `--confine-reads` alone allows only that. `pscat-mcp` always confines its
+  renders this way (see the [agents guide](agents.md)).
 - **Saving numeric arrays.** `array (path) writereals` writes the numbers as
   packed little-endian binary64 (8 bytes each), and `(path) n readreals` reads
   `n` of them back into a new array, bit for bit (`-0.0`, infinities and NaN
@@ -122,6 +139,95 @@ More on the less obvious ones:
   are ignored. `readreals` reads the whole file, then keeps the first `n`
   values, so for a huge file it is as costly as `(path) (r) file`. Both honour
   `--max-steps`, `--max-time` and `--max-memory`.
+
+  To read everything, give `/all` for the count: `(path) /all readreals` (a
+  `-1` is a `rangecheck`, so a count that went negative by mistake is not a
+  silent whole-file read). To read part of a file, put an offset, counted in
+  values and not bytes, before the count, as `getinterval` does:
+  `(path) 100 50 readreals` is values 100 to 149, and `(path) 100 /all
+  readreals` is value 100 to the end. An offset past the last value is a
+  `rangecheck`; a result over the 16,777,216-element array cap is a
+  `limitcheck`.
+
+  Both operators also take an open file. `array file writereals` writes at the
+  file's position, so it works with `(%stdout) (w) file`, an `(a)` append file
+  (two calls give two arrays back to back) and `setfileposition`, and it
+  counts a disk file's bytes against `--max-write-bytes`, as `writestring` does; it does not close the file, and a
+  closed or input file is an `ioerror`. `file n readreals` (or `file /all
+  readreals`) reads from an input file's position and leaves it just after
+  the values, so a file can be read in pieces, `setfileposition` (in bytes)
+  jumps, and `currentfile 4 readreals` reads binary data inline in a program.
+  A file that has fewer than `n` values left is a `rangecheck` and keeps its
+  position (a decode filter cannot say how much is left, so it has already
+  given up what it read). There is no offset form for a file: `setfileposition` is the
+  offset.
+- **Limits on every run.** `--max-steps N`, `--max-time SECS` and
+  `--max-memory MIB` (0 = no limit, the default) apply to one program run, and
+  `--spool` and the tool subcommands take them too (`pscat handwrite`,
+  `typewrite`, `photo-etch`, `chalk`, `sheet`). A stopped run exits non-zero
+  with `limitexceeded (steps|time|memory)`. The unit is the run, not the page:
+  a multi-page program is one run; each `--spool` job, `--sweep` frame
+  and `pscat sheet` cell is its own run with the whole budget (so is each
+  `--bands` band, for steps and time; memory is shared by the bands);
+  `handwrite`, `typewrite` and `photo-etch` run a measuring pass and then the
+  render and give each the full limits. Reading a whole file (`file`, `run`)
+  charges one step per KiB.
+- **Parallel bands.** `--bands N` (1 to 64) renders a PNG as N horizontal
+  bands on N threads and stitches them into one page; the PNG is byte for
+  byte the plain `--png` render. Each band is a full run of the program with
+  `/BandIndex` (0 is the top band), `/BandCount` and `/BandBBox
+  [llx lly urx ury]` (the band's area in default user space, points) defined
+  in `userdict`. A program that reads them can skip the work outside its band:
+  an expensive `colorimage` procedure computes only the image rows that reach
+  `BandBBox`, plus a row of margin. That is where the speed comes from. A
+  program that doesn't read them still renders correctly, but every band runs
+  all of it, so it takes as long as a plain render or longer; only image
+  rasterization skips the other bands' rows. Band `i` keeps device rows
+  `floor(i*H/N)` to `floor((i+1)*H/N)`. `clippath` and the rest of the
+  graphics state still see the whole page. Every page of a multi-page program
+  is banded, and every band must emit the same number of pages. PNG only: it
+  refuses `--svg`, `--pdf`, `--lint`, sweeps, `--progress`, `--profile` and
+  `--allow-write`, since every band would write the same file (or, for
+  `--profile`, report N copies of the same calls: profile a plain run). `--max-steps`
+  and `--max-time` apply to each band on its own. `--max-memory` counts the
+  whole process, so it caps all bands together, and each band holds its own
+  canvas and pages (N times the memory of a plain render). Only the top band's
+  stdout is printed, but writes to `(%stderr)` appear once per band; an error is reported once, from the first band that hit
+  it, and the stitched partial page is still written. A piece seeded from
+  `realtime` or `usertime` can tear at the seams, since the bands read
+  different clocks.
+- **Profile.** `pscat --profile prog.ps` runs the program headlessly, then
+  prints to stderr one line per procedure bound to a name: the call count,
+  the exclusive time (its own, without the named procedures it called) and
+  the inclusive time (call to return), sorted by exclusive time, 20 rows
+  (`--profile-top N`; 0 is all; `--profile-json` prints the same as one line
+  of JSON). It works with `-e`, `-`, `--png`, `--svg`, `--pdf` and `--lint`,
+  and prints after a failed run too. Rules to read it by:
+  - A procedure counts under the name it was *called through*. A body run
+    by `exec`, an `if` or `ifelse` branch, a `forall` body or a Type 3 glyph
+    has no name of its own and counts toward the procedure that ran it.
+    Rebinding a name merges both procedures into one row.
+  - Recursion counts every call, but inclusive time once per outermost call.
+  - Time inside a procedure's last element is its own, and a procedure
+    called from the last position is part of its caller's inclusive time (a
+    plain run drops the caller's frame first; the profile does not).
+  - `stop`/`stopped`, errors, `exit` and `quit` close the calls they unwind,
+    so a run that dies still reports where its time went.
+  - With mutual tail recursion (`a` ends by calling `b`, `b` by calling `a`)
+    the chain stays one call deep, as it does without `--profile`; the calls
+    are all counted, and the time goes to the last one to open a call (with
+    `ping`/`pong`, to `pong`; `ping` keeps the time before its first call).
+  - Each open call holds one more exec-stack slot than a plain call, so
+    non-tail recursion that runs about 10,000 levels deep in a plain run
+    stops with `execstackoverflow` at about 5,000 under `--profile`. The
+    report still prints.
+  - It costs time: about 55 ns per named procedure call (the clock is read
+    twice), so `fib 30` runs about a third slower and a typical piece 5%.
+    Times include that cost, so small procedures read high. Without the flag
+    the cost is one flag test per procedure call (under 3% on `fib 27`).
+  - Not with `--bands` (each band is a full run, so a merged table would be N
+    copies of the same calls), sweeps, `--spool`, `--interactive` or a
+    windowed run: it refuses them.
 - **Halftone.** `--halftone` screens the raster like a mono laser printer's
   RIP: classic dots on a 45° lattice, with coverage tracking darkness.
 

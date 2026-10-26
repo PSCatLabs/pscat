@@ -53,7 +53,10 @@
 //! wall-clock timeout and a cap on captured output; `source`/`text` have
 //! a size cap; inline images have a byte and page cap; `out_path` is
 //! confined to one output root (render extensions only, no dot-directories)
-//! and written by rename, never by following a symlink. Nothing but JSON-RPC is ever written to stdout: diagnostics
+//! and written by rename, never by following a symlink; programs read files only
+//! inside the read roots (issue #763: the working directory, the pscat data
+//! directories, `--allow-read`), passed to every child as `--confine-reads`
+//! and `--read-root`. Nothing but JSON-RPC is ever written to stdout: diagnostics
 //! go to stderr, and child output is always captured through pipes.
 
 use std::collections::HashMap;
@@ -96,6 +99,10 @@ An MCP server on stdin/stdout (launched by an MCP client, not by hand).
 
   --out-root DIR         directory out_path is confined to (default: the
                          working directory; out_path is off when that is /)
+  --allow-read DIR       also let programs read files inside DIR
+                         (repeatable); they always may in the working
+                         directory (unless that is /) and the pscat data
+                         directories ($PSCAT_HOME, the per-user one)
   --timeout SECS         wall-clock limit per tool call (default 60)
   --job-timeout SECS     wall-clock limit per render job, start_render
                          (default 3600)
@@ -116,7 +123,12 @@ An MCP server on stdin/stdout (launched by an MCP client, not by hand).
   --max-memory MIB       stop a program that grows the heap by more than MIB
                          (default 1024; 0 = no memory limit)
   -h, --help             this text
-  -V, --version          print the version";
+  -V, --version          print the version
+
+Each numeric limit above also reads an environment variable, PSCAT_MCP_ plus
+the flag in capitals with underscores (PSCAT_MCP_TIMEOUT, PSCAT_MCP_MAX_STEPS,
+PSCAT_MCP_MAX_PIXELS, ...); a flag overrides it, and a bad value stops the
+server. --allow-read and --out-root have no variable.";
 
 /// The limits and the output root, fixed for the server's lifetime by
 /// whoever registered it. No tool argument can change them. Each call and
@@ -126,6 +138,12 @@ An MCP server on stdin/stdout (launched by an MCP client, not by hand).
 struct Config {
     /// Canonical output root, or why `out_path` is unavailable.
     out_root: Result<PathBuf, String>,
+    /// Canonical directories every child's program may read from (issue
+    /// #763): the working directory (not `/`), `$PSCAT_HOME` and the
+    /// per-user data directory when they exist, and each `--allow-read`.
+    /// Always passed, so an empty list still confines reads (to the
+    /// embedded `lib/`).
+    read_roots: Vec<PathBuf>,
     timeout: Duration,
     /// `--job-timeout`: the wall-clock limit of one render job.
     job_timeout: Duration,
@@ -181,42 +199,51 @@ impl Config {
     /// kill at `--timeout` is only the backstop for a child stuck inside one
     /// long operator. The margin pays for starting the child, writing the
     /// canvas and the lint pass after the limit fires.
+    /// The exception is `handwrite`: its child runs two programs (a measuring
+    /// pass, then the render) and each gets this limit, so the two together
+    /// can reach the kill and come back as `timeout`.
     fn interpreter_args(&self, cmd: &mut Command) {
         let total = self.timeout.as_secs_f64();
         let secs = total - (total / 4.0).min(5.0);
         cmd.arg("--max-time").arg(format!("{secs:.3}"));
         cmd.arg("--max-steps").arg(self.max_steps.to_string());
         cmd.arg("--max-memory").arg(self.max_memory_mib.to_string());
+        self.read_root_args(cmd);
         // A server that is killed (no chance to cancel) takes its renders
         // with it.
         cmd.arg("--exit-with-parent")
             .arg(std::process::id().to_string());
     }
 
-    /// `Ok(None)`: `--help`/`--version` was handled, exit 0.
+    /// The flags that confine a child's reads to the read roots (issue
+    /// #763). `--confine-reads` comes first so that no roots at all still
+    /// means confined, never open. `pscat` and `pscat handwrite` take both.
+    fn read_root_args(&self, cmd: &mut Command) {
+        cmd.arg("--confine-reads");
+        for dir in &self.read_roots {
+            cmd.arg("--read-root").arg(dir);
+        }
+    }
+
+    /// `Ok(None)`: `--help`/`--version` was handled, exit 0. Numeric limits
+    /// also come from the `PSCAT_MCP_*` environment variables
+    /// ([`NUMERIC_OPTIONS`]); a flag overrides its variable.
     fn from_args(args: impl Iterator<Item = String>) -> Result<Option<Config>, String> {
+        Config::from_args_env(args, |name| std::env::var_os(name))
+    }
+
+    /// [`Config::from_args`] with the environment passed in, so a test never
+    /// reads (or sets) the process's own.
+    fn from_args_env(
+        args: impl Iterator<Item = String>,
+        env: impl Fn(&str) -> Option<std::ffi::OsString>,
+    ) -> Result<Option<Config>, String> {
         let mut out_root: Option<String> = None;
-        let mut timeout = 60u64;
-        let mut job_timeout = 3600u64;
-        let mut max_jobs = 2u64;
-        let mut job_ttl = 3600u64;
-        let mut max_input = 1usize << 20;
-        let mut max_image = 3_750_000usize;
-        let mut max_pixels = DEFAULT_MAX_PIXELS;
-        let mut max_latex = DEFAULT_MAX_LATEX_BYTES;
-        let mut max_steps = pscat::limits::UNTRUSTED_MAX_STEPS;
-        let mut max_memory_mib = (pscat::limits::UNTRUSTED_MAX_MEMORY >> 20) as u64;
+        let mut allow_read: Vec<String> = Vec::new();
+        // Numeric limits given as flags, by flag name.
+        let mut flags: HashMap<&'static str, u64> = HashMap::new();
         let mut args = args;
         while let Some(arg) = args.next() {
-            let mut value = |name: &str| args.next().ok_or_else(|| format!("{name} needs a value"));
-            let number = |name: &str, v: String, lo: u64, hi: u64| -> Result<u64, String> {
-                match v.parse::<u64>() {
-                    Ok(n) if (lo..=hi).contains(&n) => Ok(n),
-                    _ => Err(format!(
-                        "{name} must be a whole number {lo}..{hi}, got {v:?}"
-                    )),
-                }
-            };
             match arg.as_str() {
                 "-h" | "--help" => {
                     println!("{USAGE}");
@@ -226,40 +253,62 @@ impl Config {
                     println!("pscat-mcp {}", env!("CARGO_PKG_VERSION"));
                     return Ok(None);
                 }
-                "--out-root" => out_root = Some(value("--out-root")?),
-                "--timeout" => timeout = number("--timeout", value("--timeout")?, 1, 86_400)?,
-                "--job-timeout" => {
-                    job_timeout = number("--job-timeout", value("--job-timeout")?, 1, 86_400)?
+                "--out-root" => {
+                    out_root = Some(args.next().ok_or("--out-root needs a value")?);
                 }
-                "--max-jobs" => max_jobs = number("--max-jobs", value("--max-jobs")?, 1, 16)?,
-                "--job-ttl" => job_ttl = number("--job-ttl", value("--job-ttl")?, 1, 86_400)?,
-                "--max-input-bytes" => {
-                    max_input =
-                        number("--max-input-bytes", value("--max-input-bytes")?, 1, 1 << 30)?
-                            as usize
+                "--allow-read" => {
+                    allow_read.push(args.next().ok_or("--allow-read needs a value")?);
                 }
-                "--max-image-bytes" => {
-                    max_image =
-                        number("--max-image-bytes", value("--max-image-bytes")?, 1, 1 << 30)?
-                            as usize
-                }
-                "--max-pixels" => {
-                    max_pixels = number("--max-pixels", value("--max-pixels")?, 1, 64_000_000)?
-                }
-                "--max-latex-bytes" => {
-                    max_latex =
-                        number("--max-latex-bytes", value("--max-latex-bytes")?, 1, 1 << 30)?
-                            as usize
-                }
-                "--max-steps" => {
-                    max_steps = number("--max-steps", value("--max-steps")?, 0, u64::MAX)?
-                }
-                "--max-memory" => {
-                    max_memory_mib = number("--max-memory", value("--max-memory")?, 0, 1 << 30)?
-                }
-                other => return Err(format!("unknown option {other:?}")),
+                other => match NUMERIC_OPTIONS.iter().find(|o| o.flag == other) {
+                    Some(o) => {
+                        let v = args
+                            .next()
+                            .ok_or_else(|| format!("{other} needs a value"))?;
+                        flags.insert(o.flag, parse_limit(other, &v, o)?);
+                    }
+                    None => return Err(format!("unknown option {other:?}")),
+                },
             }
         }
+        // Only after the flags, so `--help` works whatever the environment
+        // holds. Every variable is checked, even one a flag overrides: a
+        // typo in a settings file should not hide behind a flag. An empty
+        // value is unset. There is no variable for `--allow-read` or
+        // `--out-root`: what the programs may read, and where `out_path`
+        // writes, is chosen only by whoever starts the server (#740, #756).
+        let mut from_env: HashMap<&'static str, u64> = HashMap::new();
+        for o in NUMERIC_OPTIONS {
+            let Some(raw) = env(o.env) else { continue };
+            let raw = raw
+                .into_string()
+                .map_err(|_| format!("{} is not valid UTF-8", o.env))?;
+            if raw.trim().is_empty() {
+                continue;
+            }
+            from_env.insert(o.flag, parse_limit(o.env, raw.trim(), o)?);
+        }
+        let limit = |flag: &str| -> u64 {
+            flags
+                .get(flag)
+                .or_else(|| from_env.get(flag))
+                .copied()
+                .unwrap_or_else(|| {
+                    NUMERIC_OPTIONS
+                        .iter()
+                        .find(|o| o.flag == flag)
+                        .map_or(0, |o| o.default)
+                })
+        };
+        let timeout = limit("--timeout");
+        let job_timeout = limit("--job-timeout");
+        let max_jobs = limit("--max-jobs");
+        let job_ttl = limit("--job-ttl");
+        let max_input = limit("--max-input-bytes") as usize;
+        let max_image = limit("--max-image-bytes") as usize;
+        let max_pixels = limit("--max-pixels");
+        let max_latex = limit("--max-latex-bytes") as usize;
+        let max_steps = limit("--max-steps");
+        let max_memory_mib = limit("--max-memory");
         let out_root = match out_root {
             Some(dir) => {
                 Ok(std::fs::canonicalize(&dir).map_err(|e| format!("--out-root {dir:?}: {e}"))?)
@@ -271,8 +320,10 @@ impl Config {
         {
             return Err(format!("--out-root {} is not a directory", root.display()));
         }
+        let read_roots = read_roots(&allow_read)?;
         Ok(Some(Config {
             out_root,
+            read_roots,
             timeout: Duration::from_secs(timeout),
             job_timeout: Duration::from_secs(job_timeout),
             max_jobs: max_jobs as usize,
@@ -287,6 +338,136 @@ impl Config {
             max_memory_mib,
         }))
     }
+}
+
+/// A numeric option of the server: its flag, the environment variable that
+/// sets the same thing (issue #756, so a plugin user can raise a limit from
+/// the client's settings without registering the server by hand), the
+/// accepted range and the default. One table, so the flag and the variable
+/// cannot disagree on a range.
+struct NumericOption {
+    flag: &'static str,
+    env: &'static str,
+    lo: u64,
+    hi: u64,
+    default: u64,
+}
+
+const fn opt(
+    flag: &'static str,
+    env: &'static str,
+    lo: u64,
+    hi: u64,
+    default: u64,
+) -> NumericOption {
+    NumericOption {
+        flag,
+        env,
+        lo,
+        hi,
+        default,
+    }
+}
+
+/// Every numeric flag, with its `PSCAT_MCP_*` variable. Deliberately absent:
+/// `--allow-read` and `--out-root`, which widen what a program can read or
+/// where files are written, and so stay flags only.
+const NUMERIC_OPTIONS: &[NumericOption] = &[
+    opt("--timeout", "PSCAT_MCP_TIMEOUT", 1, 86_400, 60),
+    opt("--job-timeout", "PSCAT_MCP_JOB_TIMEOUT", 1, 86_400, 3600),
+    opt("--max-jobs", "PSCAT_MCP_MAX_JOBS", 1, 16, 2),
+    opt("--job-ttl", "PSCAT_MCP_JOB_TTL", 1, 86_400, 3600),
+    opt(
+        "--max-input-bytes",
+        "PSCAT_MCP_MAX_INPUT_BYTES",
+        1,
+        1 << 30,
+        1 << 20,
+    ),
+    opt(
+        "--max-image-bytes",
+        "PSCAT_MCP_MAX_IMAGE_BYTES",
+        1,
+        1 << 30,
+        3_750_000,
+    ),
+    opt(
+        "--max-pixels",
+        "PSCAT_MCP_MAX_PIXELS",
+        1,
+        64_000_000,
+        DEFAULT_MAX_PIXELS,
+    ),
+    opt(
+        "--max-latex-bytes",
+        "PSCAT_MCP_MAX_LATEX_BYTES",
+        1,
+        1 << 30,
+        DEFAULT_MAX_LATEX_BYTES as u64,
+    ),
+    opt(
+        "--max-steps",
+        "PSCAT_MCP_MAX_STEPS",
+        0,
+        u64::MAX,
+        pscat::limits::UNTRUSTED_MAX_STEPS,
+    ),
+    opt(
+        "--max-memory",
+        "PSCAT_MCP_MAX_MEMORY",
+        0,
+        1 << 30,
+        (pscat::limits::UNTRUSTED_MAX_MEMORY >> 20) as u64,
+    ),
+];
+
+/// `name` is the flag or the variable, whichever the value came from.
+fn parse_limit(name: &str, v: &str, o: &NumericOption) -> Result<u64, String> {
+    match v.parse::<u64>() {
+        Ok(n) if (o.lo..=o.hi).contains(&n) => Ok(n),
+        _ => Err(format!(
+            "{name} must be a whole number {}..{}, got {v:?}",
+            o.lo, o.hi
+        )),
+    }
+}
+
+/// The read roots (issue #763; see [`Config::read_roots`]). A bad
+/// `--allow-read` is a startup error; a default directory that doesn't
+/// exist (no per-user data directory yet) is left out.
+fn read_roots(allow_read: &[String]) -> Result<Vec<PathBuf>, String> {
+    let mut roots: Vec<PathBuf> = Vec::new();
+    let mut add = |p: PathBuf| {
+        if !roots.contains(&p) {
+            roots.push(p);
+        }
+    };
+    // As for out_path: a client that starts servers in `/` (or a
+    // `PSCAT_HOME=/`) must not make the whole disk readable, so no default
+    // root is the filesystem root.
+    let mut add_default = |d: &Path| {
+        if let Ok(canon) = std::fs::canonicalize(d)
+            && canon.is_dir()
+            && canon.parent().is_some()
+        {
+            add(canon);
+        }
+    };
+    if let Ok(cwd) = std::env::current_dir() {
+        add_default(&cwd);
+    }
+    let dirs = pscat::paths::process_roots();
+    for d in [&dirs.home, &dirs.user_data].into_iter().flatten() {
+        add_default(d);
+    }
+    for d in allow_read {
+        let canon = std::fs::canonicalize(d).map_err(|e| format!("--allow-read {d:?}: {e}"))?;
+        if !canon.is_dir() {
+            return Err(format!("--allow-read {d:?} is not a directory"));
+        }
+        add(canon);
+    }
+    Ok(roots)
 }
 
 /// The working directory the client started us in (Claude Code and Codex
@@ -305,6 +486,32 @@ fn default_out_root() -> Result<PathBuf, String> {
         ));
     }
     Ok(cwd)
+}
+
+/// What the tool descriptions say about reads (issue #763); the server
+/// instructions list the actual directories ([`read_roots_note`]).
+const READS_BRIEF: &str = "Programs read files ((path) (r) file, run, filenameforall) only inside \
+    this server's read roots: its working directory, the pscat data directories and any \
+    --allow-read directory; elsewhere is invalidfileaccess. The bundled lib/ is always available.";
+
+/// The server instructions' sentence on reads, naming the read roots.
+fn read_roots_note(cfg: &Config) -> String {
+    let dirs: Vec<String> = cfg
+        .read_roots
+        .iter()
+        .map(|d| d.display().to_string())
+        .collect();
+    let dirs = if dirs.is_empty() {
+        "none (only the bundled lib/)".to_string()
+    } else {
+        dirs.join(", ")
+    };
+    format!(
+        "Programs read files ((path) (r) file, run, readreals, filenameforall) only inside \
+         these read roots: {dirs}. Anything else, `..` and symlinks out included, is \
+         invalidfileaccess; the bundled lib/ is always available. Whoever registered the \
+         server can add a directory with --allow-read DIR."
+    )
 }
 
 /// Serve MCP on stdin/stdout until stdin closes. `args` are the options
@@ -707,10 +914,11 @@ fn initialize_result(cfg: &Config, params: &Value) -> Result<Value, (String, Val
              take longer, use start_render: it returns a job_id at once, render_status polls \
              it, render_result fetches the pages, cancel_render stops it; a job may run {}s. \
              A page, board or sheet is limited to {} pixels. \
-             {out_path}",
+             {out_path} {reads}",
             cfg.timeout.as_secs(),
             cfg.job_timeout.as_secs(),
-            cfg.max_pixels
+            cfg.max_pixels,
+            reads = read_roots_note(cfg),
         ),
     }))
 }
@@ -902,8 +1110,8 @@ fn tool_list(cfg: &Config) -> Value {
                 leftover stack). {limits} {canvas} Inline images are capped at {} bytes in total \
                 and {MAX_INLINE_PAGES} pages; past that, lower dpi/size or use out_path. \
                 Writes a file only when out_path is given (then it replaces an existing render \
-                file of that extension), which is why this tool is not marked read-only. The \
-                program can read any local file you can.",
+                file of that extension), which is why this tool is not marked read-only. \
+                {READS_BRIEF}",
                 cfg.max_image),
             "inputSchema": render_schema.clone()
         },
@@ -1016,7 +1224,7 @@ fn tool_list(cfg: &Config) -> Value {
                 most {MAX_SHEET_LABEL} characters; {}s for the whole sheet (the server's --timeout; its default is 60), {} bytes of source in \
                 all; the interpreter's step, time and memory limits per cell (limit_exceeded). \
                 The inline image is capped at {} bytes: past that, lower the dpi list or use \
-                out_path. The programs can read any local file you can.",
+                out_path. {READS_BRIEF}",
                 cfg.timeout.as_secs(), cfg.max_input, cfg.max_image),
             "inputSchema": {
                 "type": "object",
@@ -1053,7 +1261,8 @@ fn tool_list(cfg: &Config) -> Value {
             "title": "List art capabilities",
             "annotations": annotations("List art capabilities", true),
             "description": "List the creative capabilities this pscat build actually has installed: fonts, \
-                Type 3 program faces, mood palettes, page templates, and artkit/style-pack procedures. \
+                Type 3 program faces, mood palettes, page templates, artkit/style-pack procedures, and \
+                native pscat operators. \
                 Structured JSON, safe to call instead of assuming names from documentation, which can \
                 drift from what's really loadable.",
             "inputSchema": {
@@ -1067,9 +1276,9 @@ fn tool_list(cfg: &Config) -> Value {
             "title": "Run PostScript",
             "annotations": annotations("Run PostScript", true),
             "description": format!("Run a PostScript program headlessly and return what it printed \
-                (=, print, pstack). On error: the standard PostScript error name, the offending \
+                (=, print, pstack), then anything the program wrote to stderr as a Warnings item. On error: the standard PostScript error name, the offending \
                 command and line, plus a gs-style operand-stack post-mortem. The debugging \
-                loop. Writes nothing, but the program can read any local file you can. {limits}"),
+                loop. Writes nothing. {READS_BRIEF} {limits}"),
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -1695,10 +1904,11 @@ fn handwrite(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
     let mut cmd = Command::new(pscat_bin()?);
     cmd.arg("handwrite").arg("-o").arg(&out);
     cmd.arg("--max-pixels").arg(cfg.max_pixels.to_string());
-    // As `interpreter_args` gives every other child: a killed server takes
-    // this render with it.
-    cmd.arg("--exit-with-parent")
-        .arg(std::process::id().to_string());
+    // The same flags every other child gets (#701): the step, time and
+    // memory limits, the read confinement, and `--exit-with-parent`. A
+    // note's two programs (the measuring pass and the render) each run under
+    // them, so `--timeout`'s hard kill stays the backstop, not the only bound.
+    cfg.interpreter_args(&mut cmd);
     for (flag, key, lo, hi) in [
         ("--size", "size", 0.0, 2000.0),
         ("--jitter", "jitter", 0.0, 10_000.0),
@@ -1733,9 +1943,10 @@ fn handwrite(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
         if let Some((w, h, _)) = pscat::limits::parse_pixel_cap_message(&run.stderr) {
             return Err(too_many_pixels(cfg, "the note", w, h));
         }
-        return Err(ToolError::new(
+        return Err(failed_run(
             "handwrite_failed",
             format!("handwrite failed:\n{}", run.stderr),
+            &run.stderr,
         ));
     }
     let pages = collect_pages(&out);
@@ -2460,7 +2671,11 @@ fn eval_postscript(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
         report.push_str("(ran clean, printed nothing)");
     }
     if run.success {
-        return Ok(Value::Array(vec![text_content(&report)]));
+        // What the program wrote to stderr (`%stderr`, a font stand-in note)
+        // follows the output as `Warnings:`, as it does for a render.
+        let mut content = vec![text_content(&report)];
+        content.extend(warnings_content(&run.stderr));
+        return Ok(Value::Array(content));
     }
     Err(failed_run("postscript_error", report, &run.stderr))
 }
@@ -2605,8 +2820,9 @@ const MAX_WARNING_CHARS: usize = 300;
 /// (`Warnings:` and the lines), or `None` when there is nothing to say: a
 /// note such as a font falling back to a built-in face (#728) exits 0, and
 /// would otherwise never reach the caller. Blank lines, `pscat: wrote ...`
-/// (the child's own receipt, which names a scratch path) and lint lines (the
-/// tools that run `--lint` report those under `Lint:`) are dropped; repeats
+/// (the child's own receipt, which names a scratch path), `pscat: progress`
+/// lines (for the server) and lint lines (the tools that run `--lint` report
+/// those under `Lint:`) are dropped; repeats
 /// are shown once, in first-seen order; at most [`MAX_WARNING_LINES`] lines
 /// of [`MAX_WARNING_CHARS`] characters each, so the reply stays bounded
 /// however chatty a program is. A failed run reports its whole stderr in the
@@ -2618,7 +2834,10 @@ fn warnings_content(stderr: &str) -> Option<Value> {
     let mut more = 0usize;
     for line in stderr.lines() {
         let line = line.trim();
-        if line.is_empty() || line.starts_with("pscat: wrote ") || line.starts_with("pscat: lint: ")
+        if line.is_empty()
+            || line.starts_with("pscat: wrote ")
+            || line.starts_with("pscat: lint: ")
+            || line.starts_with(PROGRESS_PREFIX)
         {
             continue;
         }
@@ -3087,9 +3306,168 @@ mod tests {
 
     #[cfg(unix)]
     fn test_config(args: &[&str]) -> Config {
-        Config::from_args(args.iter().map(|a| a.to_string()))
+        Config::from_args_env(args.iter().map(|a| a.to_string()), |_| None)
             .expect("valid flags")
             .expect("not --help")
+    }
+
+    /// `from_args_env` over a fixed environment (issue #756); never the
+    /// process's own, which a developer's shell may have set.
+    fn config_env(args: &[&str], env: &[(&str, &str)]) -> Result<Option<Config>, String> {
+        Config::from_args_env(args.iter().map(|a| a.to_string()), |name| {
+            env.iter()
+                .find(|(k, _)| *k == name)
+                .map(|(_, v)| std::ffi::OsString::from(*v))
+        })
+    }
+
+    #[test]
+    fn env_vars_set_limits() {
+        let cfg = config_env(
+            &[],
+            &[
+                ("PSCAT_MCP_TIMEOUT", "1800"),
+                ("PSCAT_MCP_JOB_TIMEOUT", "7200"),
+                ("PSCAT_MCP_MAX_STEPS", "0"),
+                ("PSCAT_MCP_MAX_PIXELS", "64000000"),
+                ("PSCAT_MCP_MAX_MEMORY", " 4096 "),
+                ("PSCAT_MCP_MAX_JOBS", "4"),
+            ],
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(cfg.timeout, Duration::from_secs(1800));
+        assert_eq!(cfg.job_timeout, Duration::from_secs(7200));
+        assert_eq!(cfg.max_steps, 0);
+        assert_eq!(cfg.max_pixels, 64_000_000);
+        assert_eq!(cfg.max_memory_mib, 4096);
+        assert_eq!(cfg.max_jobs, 4);
+        // Untouched options keep their defaults.
+        assert_eq!(cfg.job_ttl, Duration::from_secs(3600));
+        assert_eq!(cfg.max_input, 1 << 20);
+        assert_eq!(cfg.max_latex, DEFAULT_MAX_LATEX_BYTES);
+    }
+
+    /// The naming rule `USAGE` and the guide state: `PSCAT_MCP_` plus the flag
+    /// in capitals with underscores.
+    #[test]
+    fn env_names_follow_the_flag_names() {
+        for o in NUMERIC_OPTIONS {
+            let expect = format!(
+                "PSCAT_MCP_{}",
+                o.flag
+                    .trim_start_matches("--")
+                    .to_uppercase()
+                    .replace('-', "_")
+            );
+            assert_eq!(o.env, expect);
+        }
+    }
+
+    #[test]
+    fn defaults_without_env_match_the_documented_ones() {
+        let cfg = config_env(&[], &[]).unwrap().unwrap();
+        assert_eq!(cfg.timeout, Duration::from_secs(60));
+        assert_eq!(cfg.max_steps, pscat::limits::UNTRUSTED_MAX_STEPS);
+        assert_eq!(cfg.max_pixels, DEFAULT_MAX_PIXELS);
+        assert_eq!(cfg.max_memory_mib, 1024);
+        assert_eq!(cfg.max_image, 3_750_000);
+        assert_eq!(cfg.max_jobs, 2);
+    }
+
+    #[test]
+    fn flag_overrides_env() {
+        let cfg = config_env(
+            &["--timeout", "90", "--max-steps", "5"],
+            &[
+                ("PSCAT_MCP_TIMEOUT", "1800"),
+                ("PSCAT_MCP_MAX_STEPS", "0"),
+                ("PSCAT_MCP_MAX_PIXELS", "1000"),
+            ],
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(cfg.timeout, Duration::from_secs(90));
+        assert_eq!(cfg.max_steps, 5);
+        // No flag for this one: the variable applies.
+        assert_eq!(cfg.max_pixels, 1000);
+    }
+
+    #[test]
+    fn bad_env_is_refused_with_the_variable_named() {
+        for (var, bad) in [
+            ("PSCAT_MCP_TIMEOUT", "abc"),
+            ("PSCAT_MCP_TIMEOUT", "0"),
+            ("PSCAT_MCP_TIMEOUT", "86401"),
+            ("PSCAT_MCP_TIMEOUT", "-5"),
+            ("PSCAT_MCP_TIMEOUT", "1.5"),
+            ("PSCAT_MCP_MAX_PIXELS", "64000001"),
+            ("PSCAT_MCP_MAX_PIXELS", "0"),
+            ("PSCAT_MCP_MAX_JOBS", "17"),
+            ("PSCAT_MCP_MAX_STEPS", "lots"),
+            ("PSCAT_MCP_MAX_MEMORY", "1gb"),
+        ] {
+            let err = config_env(&[], &[(var, bad)]).err().unwrap_or_else(|| {
+                panic!("{var}={bad} should be refused");
+            });
+            assert!(
+                err.starts_with(var) && err.contains("whole number") && err.contains(bad),
+                "{err}"
+            );
+        }
+        // Checked even when a flag would override it.
+        let err = config_env(&["--timeout", "90"], &[("PSCAT_MCP_TIMEOUT", "abc")])
+            .err()
+            .expect("refused");
+        assert!(err.starts_with("PSCAT_MCP_TIMEOUT"), "{err}");
+    }
+
+    #[test]
+    fn empty_env_is_unset_and_help_ignores_env() {
+        let cfg = config_env(
+            &[],
+            &[("PSCAT_MCP_TIMEOUT", ""), ("PSCAT_MCP_MAX_STEPS", "  ")],
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(cfg.timeout, Duration::from_secs(60));
+        // `--help` and `--version` answer even with a bad variable set.
+        assert!(
+            config_env(&["--help"], &[("PSCAT_MCP_TIMEOUT", "abc")])
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            config_env(&["-V"], &[("PSCAT_MCP_TIMEOUT", "abc")])
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    /// Reads and writes stay flag-only: no variable adds a read root or
+    /// moves the output root (#740, #756).
+    #[test]
+    fn no_env_form_for_reads_or_writes() {
+        let dir = std::env::temp_dir();
+        let d = dir.to_str().unwrap();
+        let with = config_env(
+            &[],
+            &[
+                ("PSCAT_MCP_ALLOW_READ", d),
+                ("PSCAT_MCP_READ_ROOT", d),
+                ("PSCAT_MCP_OUT_ROOT", d),
+            ],
+        )
+        .unwrap()
+        .unwrap();
+        let without = config_env(&[], &[]).unwrap().unwrap();
+        assert_eq!(with.read_roots, without.read_roots);
+        assert_eq!(with.out_root, without.out_root);
+        assert!(
+            NUMERIC_OPTIONS
+                .iter()
+                .all(|o| o.flag != "--allow-read" && o.flag != "--out-root")
+        );
     }
 
     /// Issue #725: the last-resort kill at `--timeout`, for a child stuck
@@ -3244,6 +3622,22 @@ mod tests {
     }
 
     #[test]
+    fn capped_offending_name_still_parses() {
+        // The interpreter cuts a pathological name to 512 bytes plus a
+        // marker with no `; ` or ` ]%%`, so the fields stay separable (#745).
+        let mut it = pscat::Interp::new();
+        let e = it.run_str(&"n".repeat(600)).unwrap_err();
+        let line = it.error_report(&e);
+        let f = ps_error_fields(&line).unwrap();
+        assert_eq!(f["ps_error"], "undefined");
+        assert_eq!(
+            f["offending_command"],
+            format!("{} ... truncated", "n".repeat(512))
+        );
+        assert_eq!(f["line"], 1);
+    }
+
+    #[test]
     fn limit_error_line_names_the_limit() {
         let f = ps_error_fields(
             "%%[ Error: limitexceeded (steps); OffendingCommand: loop; Line: 1 ]%%",
@@ -3270,6 +3664,7 @@ mod tests {
             warnings_content("pscat: wrote /tmp/x/page.png\npscat: lint: [blank-page] x\n\n")
                 .is_none()
         );
+        assert!(warnings_content("pscat: progress pages=3\n").is_none());
         let w = warnings_content("note: a\nnote: b\nnote: a\npscat: wrote /tmp/p.png\n").unwrap();
         assert_eq!(w["text"], "Warnings:\nnote: a\nnote: b");
         let many: String = (0..30).map(|i| format!("w{i}\n")).collect();

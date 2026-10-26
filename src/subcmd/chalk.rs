@@ -7,10 +7,11 @@
 
 use std::io::Read;
 
+use pscat::Limits;
 use pscat::chalk::{self, Config, Format};
 use serde_json::{Value, json};
 
-use super::{Args, Failure, number, output_format};
+use super::{Args, Failure, number, output_format, take_limit_flag};
 
 const USAGE: &str = r#"usage: pscat chalk [options] 'LATEX'
        pscat chalk [options] -            (LaTeX from stdin)
@@ -28,6 +29,11 @@ const USAGE: &str = r#"usage: pscat chalk [options] 'LATEX'
       --dpi N         PNG resolution (default 144)
       --no-board      chalk alone on a transparent page
       --print-ps      print the generated PostScript instead of rendering
+      --max-steps N     stop the render after N interpreter steps (0 = no limit)
+      --max-time SECS   stop the render after SECS of wall-clock time (0 = no limit)
+      --max-memory MIB  stop a render that grows the heap by more than MIB
+                        (0 = no limit). The board is one run under them; a stop
+                        writes no file and exits non-zero with `limitexceeded`
   -h, --help          this text
 
 Write the LaTeX as you would in a document: single backslashes, \\ between
@@ -48,6 +54,8 @@ struct Opts {
     json: Option<String>,
     overrides: Vec<(&'static str, &'static str, Value)>,
     print_ps: bool,
+    /// `--max-steps`, `--max-time`, `--max-memory` (issue #701).
+    limits: Limits,
 }
 
 pub(super) fn run(args: Args) -> Result<(), Failure> {
@@ -104,7 +112,7 @@ pub(super) fn run(args: Args) -> Result<(), Failure> {
         super::Format::Pdf => Format::Pdf,
     };
     // Nothing is written unless the board rendered: a TeX error leaves no file.
-    let bytes = chalk::render(&latex, &cfg, format).map_err(err)?;
+    let bytes = chalk::render_with_limits(&latex, &cfg, format, opts.limits).map_err(err)?;
     std::fs::write(&opts.out, bytes)
         .map_err(|e| Failure::Msg(format!("cannot write {}: {e}", opts.out)))?;
     println!("pscat: wrote {}", opts.out);
@@ -119,6 +127,7 @@ fn parse(mut args: Args) -> Result<Option<Opts>, String> {
         json: None,
         overrides: Vec::new(),
         print_ps: false,
+        limits: Limits::none(),
     };
     let set_input = |o: &mut Opts, i: Input| {
         if o.input.is_some() {
@@ -176,6 +185,7 @@ fn parse(mut args: Args) -> Result<Option<Opts>, String> {
             }
             "--no-board" => o.overrides.push(("", "board", Value::Bool(false))),
             "--print-ps" => o.print_ps = true,
+            _ if take_limit_flag(&mut o.limits, &arg, &mut args)? => {}
             "-" => set_input(&mut o, Input::Stdin)?,
             "--" => {
                 for rest in args.remaining() {

@@ -349,70 +349,99 @@ impl Object {
         }
     }
 
-    /// Syntactic form, as the `==` operator prints it: valid PostScript
-    /// source where possible (`/name`, `(string)`, `[array]`, `{proc}`).
-    pub fn repr(&self) -> String {
-        self.repr_depth(0)
+    /// `text()` with strings and names cut to `max` bytes (then
+    /// ` ... truncated`), for `stack`. Everything else is already short.
+    pub fn text_bounded(&self, max: usize) -> String {
+        match &self.value {
+            Value::String(s) => {
+                let bytes = s.borrow_bytes();
+                let shown = &bytes[..bytes.len().min(max)];
+                let mut text = String::from_utf8_lossy(shown).into_owned();
+                if shown.len() < bytes.len() {
+                    text.push(' ');
+                    text.push_str(TRUNCATED);
+                }
+                text
+            }
+            Value::Name(n) => cap_text(n, max),
+            _ => self.text(),
+        }
     }
 
-    /// Depth-capped so pathologically nested arrays (`[[[[...`) print an
-    /// ellipsis instead of overflowing the Rust stack.
-    fn repr_depth(&self, depth: usize) -> String {
-        const MAX_REPR_DEPTH: usize = 32;
-        match &self.value {
-            Value::Integer(i) => i.to_string(),
-            Value::Real(r) => format_real(*r),
-            Value::Boolean(b) => b.to_string(),
-            Value::Mark => "-mark-".to_string(),
-            Value::Null => "null".to_string(),
-            Value::Name(n) => {
-                if self.executable {
-                    n.to_string()
-                } else {
-                    format!("/{n}")
-                }
-            }
-            Value::String(s) => format!("({})", escape_string(&s.borrow_bytes())),
-            Value::Array(a) => {
-                if depth >= MAX_REPR_DEPTH {
-                    return "...".to_string();
-                }
-                let inner: Vec<String> = (0..a.len())
-                    .map(|i| {
-                        a.get(i)
-                            .map(|o| o.repr_depth(depth + 1))
-                            .unwrap_or_default()
-                    })
-                    .collect();
-                if self.executable {
-                    format!("{{{}}}", inner.join(" "))
-                } else {
-                    format!("[{}]", inner.join(" "))
-                }
-            }
-            Value::Dict(_) => "-dict-".to_string(),
-            Value::Operator(op) => format!("--{}--", op.name),
-            Value::File(_) => "-file-".to_string(),
-            Value::Save(_) => "-save-".to_string(),
-            Value::GState(_) => "-gstate-".to_string(),
-        }
+    /// Syntactic form, as `==` prints it before its output bound: valid
+    /// PostScript source where possible (`/name`, `(string)`, `[array]`,
+    /// `{proc}`). Unbounded except for nesting depth (32), so a
+    /// pathological `[[[[...` prints `... truncated` instead of
+    /// overflowing the Rust stack. The operators print `repr_bounded`.
+    pub fn repr(&self) -> String {
+        self.repr_bounded(&UNBOUNDED_LIMITS)
+    }
+
+    /// `repr()` under `limits`. Output and work are both bounded.
+    pub fn repr_bounded(&self, limits: &DumpLimits) -> String {
+        let mut out = String::new();
+        self.write_repr(0, limits, limits.max_bytes, &mut out);
+        out
     }
 }
 
 impl Object {
-    /// `repr()` under `limits`, appended to `out`. Once `out` holds `cap`
-    /// bytes no further element is started, so the output and the work
-    /// are bounded whatever the object's size (shared arrays can hold
-    /// exponentially many leaves). True if anything was elided.
-    fn write_bounded(&self, depth: usize, lim: &DumpLimits, cap: usize, out: &mut String) -> bool {
+    /// The one place that spells an object in `==` syntax, appended to
+    /// `out`; `repr()`, `==`, `pstack` and the error dump all come here, so
+    /// they cannot drift. Once `out` holds `cap` bytes no further element
+    /// is started, so the output and the work are bounded whatever the
+    /// object's size (shared arrays can hold exponentially many leaves).
+    /// True if anything was elided.
+    fn write_repr(&self, depth: usize, lim: &DumpLimits, cap: usize, out: &mut String) -> bool {
         match &self.value {
+            Value::Integer(i) => {
+                out.push_str(&i.to_string());
+                false
+            }
+            Value::Real(r) => {
+                out.push_str(&format_real(*r));
+                false
+            }
+            Value::Boolean(b) => {
+                out.push_str(if *b { "true" } else { "false" });
+                false
+            }
+            Value::Mark => {
+                out.push_str("-mark-");
+                false
+            }
+            Value::Null => {
+                out.push_str("null");
+                false
+            }
+            Value::Dict(_) => {
+                out.push_str("-dict-");
+                false
+            }
+            Value::Operator(op) => {
+                out.push_str("--");
+                out.push_str(op.name);
+                out.push_str("--");
+                false
+            }
+            Value::File(_) => {
+                out.push_str("-file-");
+                false
+            }
+            Value::Save(_) => {
+                out.push_str("-save-");
+                false
+            }
+            Value::GState(_) => {
+                out.push_str("-gstate-");
+                false
+            }
             Value::Name(n) => {
-                let text = if self.executable {
-                    n.to_string()
+                if self.executable {
+                    push_cut(out, n, lim.max_string)
                 } else {
-                    format!("/{n}")
-                };
-                push_cut(out, &text, lim.max_string)
+                    push_cut(out, &format!("/{n}"), lim.max_string)
+                }
             }
             Value::String(s) => {
                 let bytes = s.borrow_bytes();
@@ -449,7 +478,7 @@ impl Object {
                         break;
                     }
                     if let Some(item) = a.get(i)
-                        && item.write_bounded(depth + 1, lim, cap, out)
+                        && item.write_repr(depth + 1, lim, cap, out)
                     {
                         cut = true;
                         // Budget spent inside the child: stop here, and
@@ -465,10 +494,6 @@ impl Object {
                 }
                 out.push_str(close);
                 cut
-            }
-            _ => {
-                out.push_str(&self.repr());
-                false
             }
         }
     }
@@ -596,8 +621,9 @@ pub(crate) fn escape_string(bytes: &[u8]) -> String {
     out
 }
 
-/// Bounds for the `--pstack-on-error` operand-stack dump (issue #703).
-/// `repr()` and `==` stay unbounded; only the post-mortem dump uses these.
+/// Bounds for printing an operand or the operand stack (issues #703,
+/// #745): the `--pstack-on-error` dump uses `STACK_DUMP_LIMITS`, the
+/// `==`, `pstack` and `stack` operators use `OPERATOR_LIMITS`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DumpLimits {
     /// Container nesting shown; a deeper container prints `... truncated`.
@@ -606,7 +632,7 @@ pub struct DumpLimits {
     pub max_elements: usize,
     /// Bytes of a string or name shown, cut before escaping.
     pub max_string: usize,
-    /// Approximate bytes for the whole stack dump.
+    /// Approximate bytes for the whole value (or stack dump).
     pub max_bytes: usize,
 }
 
@@ -618,7 +644,36 @@ pub const STACK_DUMP_LIMITS: DumpLimits = DumpLimits {
     max_bytes: 8192,
 };
 
-const TRUNCATED: &str = "... truncated";
+/// What `repr()` uses: no size cap, but the depth cap that keeps a
+/// pathologically nested array from overflowing the Rust stack.
+pub(crate) const UNBOUNDED_LIMITS: DumpLimits = DumpLimits {
+    max_depth: 32,
+    max_elements: usize::MAX,
+    max_string: usize::MAX,
+    max_bytes: usize::MAX,
+};
+
+/// What `==`, `pstack` and `stack` print per operand: generous (a
+/// hundreds-of-elements debugging array or a page of text prints in
+/// full), but a million-element array or a megabyte string prints a few
+/// KB ending in `... truncated`, not 4 MiB of output.
+pub const OPERATOR_LIMITS: DumpLimits = DumpLimits {
+    max_depth: 32,
+    max_elements: 1024,
+    max_string: 4096,
+    max_bytes: 16 * 1024,
+};
+
+/// Total bytes `pstack` and `stack` print across the whole stack (top
+/// first); items below the budget are elided with one `... truncated` line.
+/// Half of `STDOUT_CAPTURE_LIMIT`, so a captured run normally keeps the whole dump.
+pub(crate) const OPERATOR_STACK_BYTES: usize = 32 * 1024;
+
+/// Bytes of an offending name an error line prints.
+pub(crate) const ERROR_NAME_LIMIT: usize = 512;
+
+/// The elision marker every bounded print uses.
+pub(crate) const TRUNCATED: &str = "... truncated";
 
 /// The operand stack in `==` syntax, bottom to top, under `limits`.
 /// Elements are taken from the top down, so the newest operands survive a
@@ -632,7 +687,7 @@ pub fn stack_repr_bounded(stack: &[Object], limits: &DumpLimits) -> String {
             break;
         }
         let mut text = String::new();
-        obj.write_bounded(0, limits, limits.max_bytes - used, &mut text);
+        obj.write_repr(0, limits, limits.max_bytes - used, &mut text);
         used += text.len() + 1;
         kept.push(text);
     }
@@ -642,6 +697,14 @@ pub fn stack_repr_bounded(stack: &[Object], limits: &DumpLimits) -> String {
     }
     parts.extend(kept.into_iter().rev());
     parts.join(" ")
+}
+
+/// `text` cut at a char boundary to `max` bytes, then ` ... truncated`.
+/// The marker has no `; ` or ` ]%%`, so an error line stays parseable.
+pub(crate) fn cap_text(text: &str, max: usize) -> String {
+    let mut out = String::new();
+    push_cut(&mut out, text, max);
+    out
 }
 
 /// Push `text`, cut at a char boundary to `max` bytes; true if cut.

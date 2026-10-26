@@ -4,8 +4,8 @@
 //! user how to get a window or render headless instead. A library user
 //! with `default-features = false` gets no winit or softbuffer at all.
 
-use crate::Interp;
 use crate::spool::Watcher;
+use crate::{Interp, Limits};
 
 /// What the windowed modes would have been run with. Kept identical to
 /// `window::WindowOptions` so callers need no `cfg`.
@@ -42,6 +42,17 @@ pub fn run_spool(
     _page: (u32, u32),
     _scale: f32,
     _options: WindowOptions,
+) -> Result<(), String> {
+    Err(NO_WINDOW.to_string())
+}
+
+/// Always `Err`: `--spool` shows its jobs in the window.
+pub fn run_spool_with_limits(
+    _watcher: Watcher,
+    _page: (u32, u32),
+    _scale: f32,
+    _options: WindowOptions,
+    _limits: Limits,
 ) -> Result<(), String> {
     Err(NO_WINDOW.to_string())
 }

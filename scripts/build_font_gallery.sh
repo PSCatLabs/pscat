@@ -18,8 +18,11 @@ export PSCAT_HOME="${PSCAT_HOME:-${PSCAT_ROOT:-$ROOT}}"
 OUT=${1:?usage: build_font_gallery.sh OUTDIR}
 mkdir -p "$OUT/type3" "$OUT/catalog"
 
-cargo build --release --manifest-path "$ROOT/Cargo.toml" --quiet
-BIN="$ROOT/target/release/pscat"
+# PSCAT_BIN: an already built binary (build_site.sh passes it through, #767).
+if [ -z "${PSCAT_BIN:-}" ]; then
+  cargo build --release --manifest-path "$ROOT/Cargo.toml" --quiet
+fi
+BIN="${PSCAT_BIN:-$ROOT/target/release/pscat}"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
