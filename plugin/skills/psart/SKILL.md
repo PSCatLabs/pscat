@@ -75,8 +75,10 @@ name from prose.
 - **Noise** (native operators, no library): `seed noiseseed` (own table,
   leaves `rand` alone), `x y gnoise2`, `x y z gnoise3`, `vnoise2`/`vnoise3`
   (value noise), `x y gnoise2d -> n dx dy`, and `x y oct gain lac fbm2`
-  (also `fbm3`, `vfbm2`, `vfbm3`, `ridged2`, `ridged3`). Cheap enough for
-  per-pixel terrain, clouds and domain warping. artkit's `noiseinit`/`noise2`
+  (also `fbm3`, `vfbm2`, `vfbm3`, `ridged2`, `ridged3`; `oct` is an integer
+  0..32, `gain` and `lac` are usually 0.5 and 2). Cheap enough for
+  per-pixel terrain, clouds and domain warping: **call `fbm2`, never write
+  an octave loop in PostScript** (see "Heavy noise renders" below). artkit's `noiseinit`/`noise2`
   (rand-seeded) is unchanged, and now native too. A `--sweep-seed` also seeds
   noise, unless the program calls `noiseseed`.
 - **Tiling**: `x0 y0 v1 v2 n1 n2 {x y ...} lattice` (any basis);
@@ -89,6 +91,42 @@ name from prose.
   polygon (clockwise vertices: bumps point out); presets `/koch`,
   `/quadkoch` via `/name fgen`. `x1 y1 x2 y2 x3 y3 depth {proc} gasket` and
   `x y w h depth {proc} carpet` subdivide areas; `proc` runs in your dict.
+
+## Heavy noise renders
+
+A per-pixel render (terrain, clouds, a sky) is one `image` or `colorimage`
+whose data procedure returns a row at a time, with `fbm2` or `ridged2` for
+each pixel. If it is still slow, `pscat --bands N --png out.png piece.ps`
+renders on N threads and gives the same PNG bytes, but only when the program
+reads `/BandBBox [llx lly urx ury]` (user space; also `/BandIndex`,
+`/BandCount`) and skips the rows outside it, plus a margin of two:
+
+```postscript
+%!PS-Adobe-3.0
+7 noiseseed
+/W 400 def /H 400 def
+/lo -1e9 def /hi 1e9 def                   % rows this band needs (user y)
+/BandBBox where { pop /lo BandBBox 1 get 2 sub def /hi BandBBox 3 get 2 add def } if
+/row W string def /j 0 def
+W H scale
+W H 8 [W 0 0 H neg 0 H]
+{ H j sub dup 1 sub hi le exch lo ge and          % does row j reach the band?
+  { 0 1 W 1 sub { dup 0.012 mul j 0.012 mul 6 0.5 2 fbm2   % x y oct gain lac
+      0.5 mul 0.5 add 255 mul cvi dup 0 lt { pop 0 } if dup 255 gt { pop 255 } if
+      row 3 1 roll put } for } if
+  /j j 1 add def row }
+image
+showpage
+```
+
+Render it with `pscat --page 400x400 --png cloud.png cloud.ps`, and add
+`--bands 4` to split the rows (about twice as fast here, same bytes). `--bands`
+is command-line only: `pscat-mcp` has no such option. Over MCP a long render
+goes through `start_render` (see the `pscat` skill). An older pscat has
+no noise operators: probe `systemdict /fbm2 known`, and fall back to artkit's
+`noise2` (or update pscat). For Ghostscript, `lib/noiseref.ps` has the same
+noise as `nrfbm2` and friends. Worked example: `gallery/basin_and_range.ps`;
+detail in `docs/guides/artkit.md` in a checkout.
 
 ## Media and kits: read the reference you need
 
