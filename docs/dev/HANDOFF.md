@@ -669,7 +669,8 @@ renders eight examples in both and compares block-downsampled output).
   today, and was checked against the code** (#603). A change that adds or
   removes a file, process, network or MCP capability, or a resource limit,
   must update it in the same PR; #568 added the MCP bounds and #604 the
-  interpreter limits (below). `docs/STABILITY.md` says which surfaces need a deprecation
+  interpreter limits (below), #740 and #763 the write and read roots (#772
+  brought the file current for 0.7.0). `docs/STABILITY.md` says which surfaces need a deprecation
   period. `.github/CODEOWNERS` paths are owner-merged (`SDLC.md`, "Who merges").
 
 - **Visible changes merge without the owner mid-cycle** (#674). A PR that
