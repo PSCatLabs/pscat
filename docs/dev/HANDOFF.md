@@ -1096,6 +1096,13 @@ renders eight examples in both and compares block-downsampled output).
   visible as a 1-2% tint (`lib/drychalk.ps`'s tray had one). Overlap away
   from what must stay clean. See `notes/692-subpixel-fill-coverage.md`.
 
+- **Every paint runs tiny-skia's f32 pipeline** (`force_hq_pipeline`, #731).
+  The default lowp pipeline rounds each blend with a bias, so a stack of
+  faint layers (low `setalpha`, or sub-pixel coverage) stalled early. A new
+  `Paint` built anywhere in pscat must set the flag too, or its pixels drift
+  by a level from the rest. Storage is still 8-bit, rounded per blend (the
+  #731 part 2 float buffer is open). See `notes/731-hq-compositing-pipeline.md`.
+
 - **Transcendental math goes through `src/fmath/`, never `f64::sin` and
   friends** (#738). The platform libm rounds differently on macOS, Linux and
   wasm, and seeded noise/erosion grows that last bit into visible pixels

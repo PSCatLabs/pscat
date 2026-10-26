@@ -2867,8 +2867,23 @@ fn multiply_washes_commute_and_normal_ones_do_not() {
         let p = it.gfx().pixmap.pixel(100, 100).expect("pixel");
         (p.red(), p.green(), p.blue())
     };
-    assert_eq!(overlap("Multiply", false), overlap("Multiply", true));
-    assert_ne!(overlap("Normal", false), overlap("Normal", true));
+    // Each layer is rounded to 8 bits as it lands, so the two orders can
+    // round differently by one level (#731: tiny-skia's f32 pipeline rounds
+    // to nearest, and lowp's biased rounding happened to agree here).
+    let (m1, m2) = (overlap("Multiply", false), overlap("Multiply", true));
+    for (a, b) in [(m1.0, m2.0), (m1.1, m2.1), (m1.2, m2.2)] {
+        assert!(
+            a.abs_diff(b) <= 1,
+            "Multiply should commute: {m1:?} vs {m2:?}"
+        );
+    }
+    let (n1, n2) = (overlap("Normal", false), overlap("Normal", true));
+    let spread = [(n1.0, n2.0), (n1.1, n2.1), (n1.2, n2.2)]
+        .iter()
+        .map(|(a, b)| a.abs_diff(*b))
+        .max()
+        .unwrap_or(0);
+    assert!(spread > 1, "Normal should not commute: {n1:?} vs {n2:?}");
 }
 
 #[test]
@@ -11087,20 +11102,21 @@ fn loading_unset_is_byte_identical() {
         ("pktrowel", RTL, "/Width 50 /Coverage 0.5 /ColorJitter 0.4"),
     ];
     // Taken from the pre-slice library (origin/main at cb6ea9a).
-    // Re-pinned for #692 (exact-area fill coverage moved edge pixels).
+    // Re-pinned for #692 (exact-area fill coverage moved edge pixels), then
+    // for #731 (tiny-skia f32 pipeline: edge blends round to nearest).
     let pinned: [u64; 12] = [
-        0xcfb127bfd175b55c,
-        0x8baf2ef925b150a1,
-        0x88311e2974c2b641,
-        0xea7d90d4bba349d,
-        0xf01dfe5d6c91da59,
-        0xc35f2abf831fc28d,
-        0x635e38e08aa36293,
-        0x978944c20cd32ec9,
-        0xeb9c15228477a150,
-        0x807ee00c2643fa75,
-        0x8bcba5774915e0f2,
-        0xe85478dd5a853bc6,
+        0xd7ac1a58bc31246b,
+        0x1c54b3258a072779,
+        0x4543eb35c6262046,
+        0x75fd7021157e0d3d,
+        0xd15bce842b1387bc,
+        0x8d14a8f0789ba4f8,
+        0x78140e9faf4e5ac9,
+        0x4a7d658c5c34b2a0,
+        0xf20ef564d3bcfe0b,
+        0xf89a991835f81935,
+        0xb7d1250596be7763,
+        0x19a860afdb957f1c,
     ];
     let got: Vec<u64> = scenarios
         .iter()
@@ -12177,12 +12193,12 @@ fn a_uniform_load_under_pkwet_is_the_plain_brush_under_pkwet() {
 
 /// Test 10. Growing pkwet's frames changes neither specimen: both render
 /// to the hashes they had before the slice (origin/main at 91013c3).
-/// Both re-pinned for #692 (exact-area fill coverage).
+/// Both re-pinned for #692 (exact-area fill coverage) and #731 (f32 pipeline).
 #[test]
 fn wet_frame_slots_do_not_change_pkwet() {
     for (name, w, h, pinned) in [
-        ("paintkit_wet_demo.ps", 620, 560, 0x7b84ba1a34a6b4ccu64),
-        ("paintkit_wet_pull_demo.ps", 780, 640, 0xb04dee24bb90aec2u64),
+        ("paintkit_wet_demo.ps", 620, 560, 0xbf1de29ac6f50258u64),
+        ("paintkit_wet_pull_demo.ps", 780, 640, 0xd710397bbaa70e03u64),
     ] {
         let source = std::fs::read(format!("examples/{name}"))
             .unwrap_or_else(|e| panic!("read {name}: {e}"));
@@ -12241,17 +12257,18 @@ fn fan_loading_unset_is_byte_identical() {
         ),
     ];
     // Taken from the pre-slice library (origin/main at f1eae7d).
-    // Re-pinned for #692 (exact-area fill coverage moved edge pixels).
+    // Re-pinned for #692 (exact-area fill coverage moved edge pixels), then
+    // for #731 (tiny-skia f32 pipeline: edge blends round to nearest).
     let pinned: [u64; 9] = [
-        0x29d9c3ef1ac8a599,
-        0x2894f02e6731479b,
-        0x1ce695d04c848773,
-        0x11985c92a186f26a,
-        0x256e40e06a0e1a4e,
-        0x52271aa66ac8c859,
-        0x5d703e49b8944f65,
-        0x4d7adeeabd0b7607,
-        0xc3ef6a402f84555f,
+        0x190888b8fe7434bb,
+        0xb1e913f0c75dae75,
+        0x687fa38e24f52894,
+        0x147e637857fa85a7,
+        0xaf0df839e21a1cf9,
+        0x4fef25d37ef8e350,
+        0x9f5414f14f67173b,
+        0x486df36c95fd0565,
+        0x64dc6102c94ef2ac,
     ];
     let got: Vec<u64> = scenarios
         .iter()
@@ -12493,21 +12510,22 @@ fn dab_and_oil_unset_loading_keys_are_byte_identical() {
         ),
     ];
     // Taken from the pre-slice library (origin/main at ebebfed).
-    // Re-pinned for #692 (exact-area fill coverage moved edge pixels).
+    // Re-pinned for #692 (exact-area fill coverage moved edge pixels), then
+    // for #731 (tiny-skia f32 pipeline: edge blends round to nearest).
     let pinned: [u64; 9] = [
-        0x38f29ca8dbfc158,
-        0x55010fea06033965,
-        0x2d0644eeab96be5e,
-        0x48ca7bd1e5db8f3e,
-        0xaad2050e0fd5f129,
-        0xcb6c6cfb21784429,
-        0x31b5861b44dff73f,
-        0x28734a6e943f093b,
+        0x608dc8717057489c,
+        0x78dbd2d867a477ea,
+        0xd2e4ff5ee13d6fc6,
+        0x2fcca87b4b9da47f,
+        0x727505e8d3e8bfbf,
+        0xfd357e86461cc921,
+        0x6b08330e3edde42c,
+        0xd12a257bbb29232c,
         // The curveto/Ridges/ColorJitter oil mark. Was 0x407b12e6fb63aeef under
         // Apple's libm and glibc's (musl's gave this value already); it moved
         // when math went through src/fmath (#738), whose results are musl's on
         // every platform.
-        0xb5cdfca0ea8da12,
+        0xa692610578b5794b,
     ];
     let got: Vec<u64> = scenarios
         .iter()

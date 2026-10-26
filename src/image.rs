@@ -958,6 +958,8 @@ mod tests {
                     let to_u8 = |v: f32| (v * 255.0).round() as u8;
                     let mut paint = tiny_skia::Paint::default();
                     paint.set_color_rgba8(to_u8(r), to_u8(g), to_u8(b), to_u8(alpha));
+                    // As `Gfx::paint` builds it: the f32 pipeline (#731).
+                    paint.force_hq_pipeline = true;
                     paint.blend_mode = match blend {
                         BlendMode::Normal => tiny_skia::BlendMode::SourceOver,
                         BlendMode::Multiply => tiny_skia::BlendMode::Multiply,
@@ -967,7 +969,7 @@ mod tests {
                     blend_pixel(&mut mine, (r, g, b), alpha, blend);
                     for (a, b) in mine.iter().zip(pm.data()) {
                         assert!(
-                            a.abs_diff(*b) <= 2,
+                            a.abs_diff(*b) <= 1,
                             "{blend:?} alpha {alpha} ground {ground}: {mine:?} vs {:?}",
                             pm.data()
                         );
