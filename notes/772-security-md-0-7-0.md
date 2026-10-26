@@ -7,8 +7,11 @@ and delete operators did not exist. Its MCP section already covered the
 pixel caps (#711), concurrent calls and cancellation (#622) and the render
 jobs (#741), because #746 and #769 had updated it.
 
-Every claim added was checked against `origin/main` at `6fea90e` and by
-running a `release` build, not copied from the notes.
+Every claim added was checked against the code on `origin/main` at `6fea90e`,
+not copied from the notes; the write and read root rules, the operator list,
+the MCP default roots, `PSCAT_LIB`/`PSCAT_HOME` and the progress line were also
+reproduced with a `release` build, and the rest (wasm, `fonts install`, the
+Windows orphan caveat, scratch directories) by reading the code.
 
 ## What changed in the document
 
@@ -39,6 +42,9 @@ running a `release` build, not copied from the notes.
   stated.
 - `eval_postscript` does not return stderr on success, so a program's
   `%stderr` text is not shown there (the other tools return it as `Warnings:`).
+- The browser paragraph said `src/paths.rs` was compiled out on wasm. It is
+  not: the compiled-in `lib/` answers `(lib/artkit.ps) run` and
+  `filenameforall`. Corrected.
 - Embedded fonts (#757) change no security property beyond the licence, so the
   only edit is one sentence saying the standard 35 are found the same way.
 

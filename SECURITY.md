@@ -71,8 +71,8 @@ These are:
   PDF/SVG writers from a *crafted file* that should have been an ordinary
   PostScript error.
 - A way for the MCP server to write outside what its documentation promises
-  (it writes only the `out_path` files described below), or to run a command
-  the caller did not ask for.
+  (the `out_path` files and a private scratch directory per call, described
+  below), or to run a command the caller did not ask for.
 - A way for a page on the website's playground or `web/` demo to run script in
   the visitor's page.
 
@@ -244,10 +244,14 @@ and writes no file (`--allow-write` is refused too).
 **`pscat-mcp` is different. See the MCP section.**
 
 **In the browser** (`web/pscat.js`, the website playground), pscat is a
-WebAssembly module with no filesystem: `file` and `run` find nothing, because
-`std::fs` is unavailable on `wasm32-unknown-unknown`, and `src/paths.rs` and the
-font catalog are compiled out. A program can draw and print into the page's
-own output box; the playground sets text with `textContent` and stepped
+WebAssembly module with no filesystem: `file` and `run` read no disk file,
+because `std::fs` is unavailable on `wasm32-unknown-unknown`, and the search
+order's disk places and the font catalog are compiled out. The one thing they
+find is the copy of `lib/` compiled into the module (`(lib/artkit.ps) run`,
+and `filenameforall` lists those names), which is public library code, and
+the standard 35 faces. Every disk write is `invalidfileaccess` (there are no
+write roots to name), and `(%stdout)` writes land in the captured output. A
+program can draw and print into the page's own output box; the playground sets text with `textContent` and stepped
 execution means a runaway loop does not freeze the tab. The `run()` helper in
 `web/pscat.js` runs to completion in one call and *will* block the tab on an
 infinite loop, so a page that accepts untrusted programs should use `begin()`
@@ -348,8 +352,8 @@ done in 64 KiB chunks and the limits are looked at after each one:
   whole-file read, charged as above, and refuses before it reads when the array
   it would build passes the memory cap. `filenameforall` charges one step per
   directory entry it looks at and checks the bytes of each name it keeps, so
-  listing a huge directory stops on a limit. `writereals` polls the limits for
-  every 64 KiB it writes.
+  listing a huge directory stops on a limit. `writereals` polls the limits once
+  per 8,192 elements it writes (64 KiB as `/f64`, 32 KiB as `/f32`).
 
 Checked with: `tests/limits.rs` (`file_reads`), `tests/limits_memory.rs`,
 `tests/cli.rs` and `tests/mcp.rs`.
@@ -500,7 +504,9 @@ an installed build (October 2026, #568).
   write root: `--allow-write` is never passed, and no tool argument or server
   flag can add one. In a child, `(path) (w) file`, `renamefile`, `deletefile`
   and `writereals` on any disk path are `invalidfileaccess`. What the server
-  itself writes is the `out_path` file above, nothing else. `(%stdout)` and
+  itself writes is the `out_path` files above, and each call's private scratch
+  directory (where a render without `out_path` goes), removed after the call;
+  both are paths the server chose, never ones the PostScript program named. `(%stdout)` and
   `(%stderr)` work, since they are the child's own streams, which the server
   captures: stdout is the tool's text result (or `eval_postscript`'s output),
   capped at 4 MiB like any child stream, and stderr comes back as a bounded
@@ -514,7 +520,8 @@ an installed build (October 2026, #568).
 - **Programs read files only inside the read roots (#763).**
   `eval_postscript`, `render_postscript`, `review_sheet`, `start_render` and
   `handwrite` run arbitrary PostScript (or, for `handwrite`, trusted library
-  code), and every child gets `--confine-reads` and one `--read-root` per root
+  code), and every child that runs a program gets `--confine-reads` and one
+  `--read-root` per root
   ("Confining reads: read roots", above, has the rules). The roots are:
   - the server's **working directory** (Claude Code and Codex start it in the
     project directory), unless it is the filesystem root;
@@ -529,8 +536,10 @@ an installed build (October 2026, #568).
   are `invalidfileaccess`, `filenameforall` outside the roots yields nothing,
   and a symlink inside a root that points out is refused. The model can still
   read **every file inside the roots**, and the working directory is often a
-  whole project, so a `.env` or a key file there is readable; start the server
-  in a directory that holds nothing you would mind it reading, and add other
+  whole project, so a `.env` or a key file there is readable, and a client
+  that starts servers in your home directory makes all of it readable
+  (`~/.ssh` included; only `/` is excluded); start the server in a directory
+  that holds nothing you would mind it reading, and add other
   directories deliberately with `--allow-read DIR`.
   `PSCAT_LIB` is honoured only when it lies inside a root, and a `lib/` in the
   working directory or under `PSCAT_HOME` replaces the compiled-in copy.
@@ -631,7 +640,7 @@ an installed build (October 2026, #568).
   when the program is stuck inside one long operator. On Windows the flag is
   accepted and does nothing: an orphaned child runs on until its own time
   limit (`--timeout`, or `--job-timeout` for a job, less the margin), which
-  for a job can be most of an hour of CPU. A job's child is started with
+  for a job, by default, nearly an hour of CPU. A job's child is started with
   `--progress`, which prints `pscat: progress pages=N` to its stderr after each
   slice in which a page was finished; the server reads those lines for
   `render_status` and removes them from the stderr it returns. Job ids are
