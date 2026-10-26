@@ -1,8 +1,8 @@
-## image: setalpha and setblendmode apply to image, imagemask and colorimage (PR #PRNUM, issue #766, 2026-10-26)
+## image: setalpha and setblendmode apply to image, imagemask and colorimage (PR #830, issue #766, 2026-10-26)
 
 - **What changed / what to look at:** images and stencils now take `setalpha` and `setblendmode` (Normal, Multiply) in PNG, SVG and PDF. Each sheet is one page of `selftest/drivers/image_alpha.ps`, four rows: before (PNG), after (PNG), after (SVG in Chrome), after (PDF via Ghostscript). The three after rows should agree; the cells meant to be opaque (page 3, after grestore and initgraphics) should look like the before row.
 - **Perceptual check:** the issue has none; judged against its stated intent: "Apply them to images too, in the PNG, SVG and PDF outputs".
-- **Reviewer:** PASS, round 1 (PRLINK)
+- **Reviewer:** PASS, round 1 (https://github.com/PSCatLabs/pscat/pull/830, "Perceptual review, round 1")
 
 | page | before / after (PNG), after (SVG), after (PDF) |
 |---|---|
