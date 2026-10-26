@@ -137,7 +137,22 @@ releases. The plugin collects nothing and sends nothing anywhere.
 Each MCP call is limited to 60 s by default, a default and not a fixed
 limit: a long render needs the server's `--timeout` (up to 86400), a raised
 `--max-steps`, and the agent's own tool-call timeout raised too. The plugin's
-bundled server takes no options, so register `pscat-mcp --timeout SECS` by
+bundled server takes no options, but it reads environment variables. Under
+Claude Code, add this to `~/.claude/settings.json` (or a project's
+`.claude/settings.local.json`) and restart Claude Code:
+
+```json
+{ "env": { "PSCAT_MCP_TIMEOUT": "1800", "PSCAT_MCP_MAX_STEPS": "0" } }
+```
+
+The other limits have variables too (`PSCAT_MCP_JOB_TIMEOUT`,
+`PSCAT_MCP_MAX_PIXELS`, `PSCAT_MCP_MAX_MEMORY` and so on, named in the guide
+below); a flag overrides its variable and an invalid value stops the server
+at startup. There is deliberately no variable for `--allow-read` or
+`--out-root`: these variables set only numeric limits, none adds a read root
+or moves where `out_path` writes. Codex starts a
+plugin's server with a short fixed environment, so under Codex (or to use
+flags) register `pscat-mcp --timeout SECS` by
 hand (Claude Code: `claude mcp add`, then toggle the plugin's server off in
 `/mcp`; Codex: an `[mcp_servers.<name>]` table in `config.toml` with `args` and
 `tool_timeout_sec`, whose default is 60, and `enabled = false` under

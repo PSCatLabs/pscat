@@ -200,6 +200,23 @@ For OpenClaw, Hermes, or any other MCP client, the generic stdio config:
 
 Set by whoever registers the server; no tool argument can change them.
 
+Every numeric option below can also be set with an environment variable, so a
+plugin user can change a limit without registering the server by hand (see
+"Raising the time limit"): `PSCAT_MCP_` plus the flag name in capitals with
+underscores, for example `PSCAT_MCP_TIMEOUT`, `PSCAT_MCP_JOB_TIMEOUT`,
+`PSCAT_MCP_MAX_JOBS`, `PSCAT_MCP_JOB_TTL`, `PSCAT_MCP_MAX_INPUT_BYTES`,
+`PSCAT_MCP_MAX_IMAGE_BYTES`, `PSCAT_MCP_MAX_PIXELS`,
+`PSCAT_MCP_MAX_LATEX_BYTES`, `PSCAT_MCP_MAX_STEPS` and `PSCAT_MCP_MAX_MEMORY`.
+A variable takes the same values as its flag, and a flag overrides its
+variable. A value outside the flag's range (or not a whole number) stops the
+server at startup, naming the variable; an empty value counts as unset.
+**`--out-root` and `--allow-read` have no `PSCAT_MCP_*` variable, on
+purpose**: these variables set only numeric limits, and none adds a read root
+or moves the output root, so a settings file cannot widen file access through
+them (the same rule as for writes from PostScript, #740). Because they can
+raise the caps (or turn the step and memory limits off), set them only in
+settings you trust.
+
 | Option | Default | What it bounds |
 |---|---|---|
 | `--timeout SECS` | 60 | Wall-clock time per tool call, 1 to 86400 (the 60 is only the default; see "Raising the time limit" below). The interpreter stops a program a margin before it (a quarter of it, at most 5 s: 55 s by default; `limit_exceeded`, `limit: "time"`, and a render keeps the partial page); the child is killed at the full time, for a program stuck inside one long operator, and the call fails with `timeout`. |
@@ -269,16 +286,38 @@ The 60 s is a default, not a fixed limit. For a render that takes minutes
   60 s by default.
 - **One long call**, once all three of the following allow it:
 
-1. **The server's `--timeout SECS`** (1 to 86400), the time limit above.
-   Register the server with it, for example
-   `claude mcp add pscat -- pscat-mcp --timeout 1800 --max-steps 0`.
+1. **The server's `--timeout SECS`** (1 to 86400), the time limit above, or
+   its environment variable `PSCAT_MCP_TIMEOUT`.
+   - *With the plugin installed (Claude Code), no hand registration:* put the
+     variables in your Claude Code settings (`~/.claude/settings.json` for
+     every project, or `.claude/settings.local.json` for one) and restart Claude
+     Code, because the server reads them when it starts:
+     ```json
+     { "env": { "PSCAT_MCP_TIMEOUT": "1800", "PSCAT_MCP_MAX_STEPS": "0" } }
+     ```
+     Claude Code copies the `env` block into its own environment, and a stdio
+     MCP server inherits it (exporting the variables in the shell that starts
+     `claude` does the same). The one exception is if
+     `CLAUDE_CODE_MCP_ALLOWLIST_ENV=1` is set: Claude Code then starts stdio
+     servers with only a safe baseline environment plus the server's own
+     configured `env`, so the variables never arrive.
+   - *Registering the server by hand* takes the flags, for example
+     `claude mcp add pscat -- pscat-mcp --timeout 1800 --max-steps 0`, and a
+     flag overrides a variable.
+   - *Codex:* the plugin route does not work. Codex starts a stdio server with
+     only a short list of variables (`HOME`, `PATH`, `LANG`, `TERM`, `TMPDIR`
+     and the like) plus the `env`/`env_vars` named in that server's own
+     `config.toml` entry, and user config cannot add `env` to a plugin's
+     server (as of October 2026, from the Codex docs and its `rmcp-client`
+     source). Use a hand-registered `[mcp_servers.pscat]` with `args`, below.
    The interpreter's own stop moves with it (a quarter of it, at most 5 s,
    before `--timeout`).
 2. **The other interpreter limits.** `--max-steps` defaults to 25 billion,
    which at about 60 million steps a second is roughly seven minutes: a long
    `--timeout` alone ends in `limit_exceeded` with `limit: "steps"` long
-   before the time is up. Raise it, or `--max-steps 0` for none. A big canvas
-   may also want `--max-memory` (MiB, default 1024) and `--max-pixels`.
+   before the time is up. Raise it (`PSCAT_MCP_MAX_STEPS`), or `--max-steps 0`
+   for none. A big canvas may also want `--max-memory` (MiB, default 1024) and
+   `--max-pixels` (`PSCAT_MCP_MAX_MEMORY`, `PSCAT_MCP_MAX_PIXELS`).
 3. **The MCP client's own tool-call timeout**, which cuts a call off whatever
    the server allows:
    - *Claude Code*: `MCP_TOOL_TIMEOUT`, in milliseconds, defaults to about 28
@@ -302,7 +341,10 @@ The 60 s is a default, not a fixed limit. For a render that takes minutes
    - *Any other client*: look for its tool-call or request timeout.
 
 The plugins' bundled server is registered without options, so it keeps the
-60 s default per call (and the hour per job). To raise it, register the server by hand as above and, so the
+60 s default per call (and the hour per job) unless the `PSCAT_MCP_*`
+variables above reach it: under Claude Code, a settings `env` block does that
+with the plugin installed as it is. To use flags instead, or under Codex,
+register the server by hand as above and, so the
 tools are not listed twice, toggle the plugin's server off in `/mcp` (Claude
 Code), or in Codex's `config.toml` set `enabled = false` under
 `[plugins."pscat@pscat".mcp_servers.pscat]` (documented by Codex for plugin
