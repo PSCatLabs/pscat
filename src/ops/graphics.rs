@@ -783,6 +783,6 @@ fn scale(it: &mut Interp) -> Result<(), PsError> {
 
 fn rotate(it: &mut Interp) -> Result<(), PsError> {
     let angle = it.pop_f64()?;
-    it.gfx.concat_ctm(Transform::from_rotate(angle as f32));
+    it.gfx.concat_ctm(crate::fmath::rotation(angle as f32));
     Ok(())
 }

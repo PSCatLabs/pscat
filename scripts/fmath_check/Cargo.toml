@@ -1,0 +1,12 @@
+[package]
+name = "fmath_check"
+version = "0.0.0"
+edition = "2021"
+[dependencies]
+libm = { version = "=0.2.16", default-features = false }
+[profile.release]
+opt-level = 2
+
+# Not part of pscat's build: a throwaway harness (scripts/fmath_check.sh) that
+# compares src/fmath against the musl libm that Rust's std links on Alpine.
+[workspace]
