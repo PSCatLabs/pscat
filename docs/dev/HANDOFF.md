@@ -1066,6 +1066,17 @@ renders eight examples in both and compares block-downsampled output).
 
 ## Gotchas for the next implementer
 
+- **Fills don't use tiny-skia's anti-aliasing** (#692). `fill`, `eofill`,
+  `rectfill` and glyph fills rasterise through `src/coverage.rs`, an
+  exact-area accumulation rasteriser. Its coverage goes into a page-sized
+  mask that `Gfx::fill_coverage` composites with `fill_rect`, AA off, one
+  call per run. Fully covered runs go without the mask. tiny-skia's own path
+  AA supersamples 4x4, so a shape thinner than a quarter pixel vanished.
+  Strokes, clip masks and `shfill` still use tiny-skia's rasteriser. A
+  consequence for libraries: a 0.01 pt overlap meant to hide a seam is now
+  visible as a 1-2% tint (`lib/drychalk.ps`'s tray had one). Overlap away
+  from what must stay clean. See `notes/692-subpixel-fill-coverage.md`.
+
 - **Transcendental math goes through `src/fmath/`, never `f64::sin` and
   friends** (#738). The platform libm rounds differently on macOS, Linux and
   wasm, and seeded noise/erosion grows that last bit into visible pixels
