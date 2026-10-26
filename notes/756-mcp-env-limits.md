@@ -14,7 +14,9 @@ bad value exits 2 naming the variable.
 
 Not added, on purpose: variables for `--allow-read` and `--out-root`. They
 widen reads and move writes, and #740 keeps writes flag-only; a settings file
-or a project's `.claude/settings.json` must not be able to change them.
+or a project's `.claude/settings.json` must not be able to change them
+through these variables. (`$PSCAT_HOME` was already an environment input to
+the read roots.)
 
 How the client delivers the variables (checked October 2026):
 - Claude Code copies a settings `env` block into its own environment, and

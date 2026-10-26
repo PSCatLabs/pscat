@@ -139,7 +139,7 @@ limit: a long render needs the server's `--timeout` (up to 86400), a raised
 `--max-steps`, and the agent's own tool-call timeout raised too. The plugin's
 bundled server takes no options, but it reads environment variables. Under
 Claude Code, add this to `~/.claude/settings.json` (or a project's
-`.claude/settings.local.json`) and start a new session:
+`.claude/settings.local.json`) and restart Claude Code:
 
 ```json
 { "env": { "PSCAT_MCP_TIMEOUT": "1800", "PSCAT_MCP_MAX_STEPS": "0" } }
@@ -149,8 +149,8 @@ The other limits have variables too (`PSCAT_MCP_JOB_TIMEOUT`,
 `PSCAT_MCP_MAX_PIXELS`, `PSCAT_MCP_MAX_MEMORY` and so on, named in the guide
 below); a flag overrides its variable and an invalid value stops the server
 at startup. There is deliberately no variable for `--allow-read` or
-`--out-root`: which directories a program may read and where `out_path`
-writes stay set only by the command that starts the server. Codex starts a
+`--out-root`: these variables set only numeric limits, none adds a read root
+or moves where `out_path` writes. Codex starts a
 plugin's server with a short fixed environment, so under Codex (or to use
 flags) register `pscat-mcp --timeout SECS` by
 hand (Claude Code: `claude mcp add`, then toggle the plugin's server off in

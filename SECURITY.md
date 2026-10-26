@@ -548,13 +548,18 @@ an installed build (October 2026, #568).
   directories deliberately with `--allow-read DIR`.
   `PSCAT_LIB` is honoured only when it lies inside a root, and a `lib/` in the
   working directory or under `PSCAT_HOME` replaces the compiled-in copy.
-  There is no environment variable for `--allow-read` (or for `--out-root`,
-  #740, #756): the `PSCAT_MCP_*` variables set only numeric limits, so what a
-  program may read is never changed by a settings file or a project's
-  environment.
+  There is no `PSCAT_MCP_*` environment variable for `--allow-read` or
+  `--out-root` (#740, #756): those variables set only numeric limits, and
+  none adds a read root or moves the output root. (`$PSCAT_HOME`, above,
+  is an existing environment input to the roots.)
   The interpreter's step, time and memory limits (below) bound what a
   program does with its reads, not what it may read; the roots do that.
-- **Every call is bounded in time and memory held by the server.** The
+- **Every call is bounded in time and memory held by the server.** Each cap
+  below is a flag, and also an environment variable (`PSCAT_MCP_TIMEOUT`,
+  `PSCAT_MCP_MAX_STEPS`, ... #756; a flag overrides its variable), so whoever
+  sets the server's environment, a trusted project's committed
+  `.claude/settings.json` `env` included, can raise a cap or turn the step
+  and memory limits off. The
   interpreter's own limits are on in the child (#604): a step limit
   (`--max-steps`, default 25 billion), a heap-growth limit (`--max-memory`
   in MiB, default 1024) and a time limit of `--timeout` less a margin (a quarter, at most 5 s);

@@ -210,11 +210,12 @@ underscores, for example `PSCAT_MCP_TIMEOUT`, `PSCAT_MCP_JOB_TIMEOUT`,
 A variable takes the same values as its flag, and a flag overrides its
 variable. A value outside the flag's range (or not a whole number) stops the
 server at startup, naming the variable; an empty value counts as unset.
-**`--out-root` and `--allow-read` have no variable, on purpose**: where
-`out_path` writes and which directories programs may read are chosen only by
-the command that starts the server, never by something a settings file or a
-project's environment can quietly change (the same rule as for writes from
-PostScript, #740).
+**`--out-root` and `--allow-read` have no `PSCAT_MCP_*` variable, on
+purpose**: these variables set only numeric limits, and none adds a read root
+or moves the output root, so a settings file cannot widen file access through
+them (the same rule as for writes from PostScript, #740). Because they can
+raise the caps (or turn the step and memory limits off), set them only in
+settings you trust.
 
 | Option | Default | What it bounds |
 |---|---|---|
@@ -289,9 +290,8 @@ The 60 s is a default, not a fixed limit. For a render that takes minutes
    its environment variable `PSCAT_MCP_TIMEOUT`.
    - *With the plugin installed (Claude Code), no hand registration:* put the
      variables in your Claude Code settings (`~/.claude/settings.json` for
-     every project, or `.claude/settings.local.json` for one) and start a new
-     session (or reconnect the server in `/mcp`), because the server reads
-     them when it starts:
+     every project, or `.claude/settings.local.json` for one) and restart Claude
+     Code, because the server reads them when it starts:
      ```json
      { "env": { "PSCAT_MCP_TIMEOUT": "1800", "PSCAT_MCP_MAX_STEPS": "0" } }
      ```

@@ -3343,6 +3343,22 @@ mod tests {
         assert_eq!(cfg.max_latex, DEFAULT_MAX_LATEX_BYTES);
     }
 
+    /// The naming rule `USAGE` and the guide state: `PSCAT_MCP_` plus the flag
+    /// in capitals with underscores.
+    #[test]
+    fn env_names_follow_the_flag_names() {
+        for o in NUMERIC_OPTIONS {
+            let expect = format!(
+                "PSCAT_MCP_{}",
+                o.flag
+                    .trim_start_matches("--")
+                    .to_uppercase()
+                    .replace('-', "_")
+            );
+            assert_eq!(o.env, expect);
+        }
+    }
+
     #[test]
     fn defaults_without_env_match_the_documented_ones() {
         let cfg = config_env(&[], &[]).unwrap().unwrap();
