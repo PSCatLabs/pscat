@@ -11,7 +11,7 @@ use std::process::Command;
 
 use pscat::{Interp, Limits, PsError};
 
-/// `base/root` (holding `in.ps`) and `base/outside` (holding `secret.ps`).
+/// `base/root` (holding `in.ps`) and `base/outside` (holding `away.ps`).
 fn tree(tag: &str) -> (PathBuf, PathBuf) {
     let base = common::scratch_dir(tag);
     let root = base.join("root");
@@ -19,7 +19,7 @@ fn tree(tag: &str) -> (PathBuf, PathBuf) {
     std::fs::create_dir_all(&root).unwrap();
     std::fs::create_dir_all(&outside).unwrap();
     std::fs::write(root.join("in.ps"), "6 7 mul").unwrap();
-    std::fs::write(outside.join("secret.ps"), "(leaked)").unwrap();
+    std::fs::write(outside.join("away.ps"), "(leaked)").unwrap();
     (root, outside)
 }
 
@@ -35,12 +35,12 @@ fn check_confined(it: &mut Interp, root: &Path, outside: &Path) {
     assert_eq!(it.pop().unwrap().repr(), "42");
     it.run_str(&format!("{} (r) file pop", ps(&root.join("in.ps"))))
         .unwrap();
-    let secret = ps(&outside.join("secret.ps"));
-    let up = format!("({}/../outside/secret.ps)", common::ps_path(root));
+    let away = ps(&outside.join("away.ps"));
+    let up = format!("({}/../outside/away.ps)", common::ps_path(root));
     for src in [
-        format!("{secret} run"),
-        format!("{secret} (r) file"),
-        format!("{secret} 1 readreals"),
+        format!("{away} run"),
+        format!("{away} (r) file"),
+        format!("{away} 1 readreals"),
         format!("{up} run"),
         format!("{} (r) file", ps(&outside.join("missing.ps"))),
     ] {
@@ -80,7 +80,7 @@ fn reads_are_open_by_default() {
     let (_root, outside) = tree("rr-default");
     let mut it = Interp::with_page(50, 50).unwrap();
     assert!(it.read_roots().is_none());
-    it.run_str(&format!("{} run", ps(&outside.join("secret.ps"))))
+    it.run_str(&format!("{} run", ps(&outside.join("away.ps"))))
         .unwrap();
     assert_eq!(it.pop().unwrap().repr(), "(leaked)");
 }
@@ -94,7 +94,7 @@ fn confined_without_limits() {
     check_confined(&mut it, &root, &outside);
     // And lifted again.
     it.clear_read_roots();
-    it.run_str(&format!("{} run", ps(&outside.join("secret.ps"))))
+    it.run_str(&format!("{} run", ps(&outside.join("away.ps"))))
         .unwrap();
 }
 
@@ -114,12 +114,12 @@ fn confined_under_execution_limits() {
 #[test]
 fn symlinks_out_of_a_root_are_refused() {
     let (root, outside) = tree("rr-links");
-    std::os::unix::fs::symlink(outside.join("secret.ps"), root.join("leak.ps")).unwrap();
+    std::os::unix::fs::symlink(outside.join("away.ps"), root.join("leak.ps")).unwrap();
     std::os::unix::fs::symlink(&outside, root.join("door")).unwrap();
     std::os::unix::fs::symlink("/dev/zero", root.join("zero")).unwrap();
     let mut it = Interp::with_page(50, 50).unwrap();
     it.set_read_roots(&[&root]).unwrap();
-    for f in ["leak.ps", "door/secret.ps", "zero"] {
+    for f in ["leak.ps", "door/away.ps", "zero"] {
         let src = format!("{} (r) file", ps(&root.join(f)));
         assert_eq!(it.run_str(&src), Err(PsError::InvalidFileAccess), "{src}");
     }
@@ -166,11 +166,11 @@ fn pscat(args: &[&str]) -> (bool, String, String) {
 #[test]
 fn cli_reads_stay_open_and_read_root_confines_them() {
     let (root, outside) = tree("rr-cli");
-    let secret = format!("{} run =", ps(&outside.join("secret.ps")));
-    let (ok, stdout, _) = pscat(&["--headless", "-e", &secret]);
+    let away = format!("{} run =", ps(&outside.join("away.ps")));
+    let (ok, stdout, _) = pscat(&["--headless", "-e", &away]);
     assert!(ok && stdout.contains("leaked"), "the CLI is unchanged");
     let root_s = root.to_str().unwrap();
-    let (ok, _, stderr) = pscat(&["--read-root", root_s, "--headless", "-e", &secret]);
+    let (ok, _, stderr) = pscat(&["--read-root", root_s, "--headless", "-e", &away]);
     assert!(!ok && stderr.contains("invalidfileaccess"), "{stderr}");
     let inside = format!("{} run =", ps(&root.join("in.ps")));
     let (ok, stdout, _) = pscat(&["--read-root", root_s, "--headless", "-e", &inside]);

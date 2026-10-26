@@ -887,7 +887,7 @@ fn reads_are_confined_to_the_working_directory_and_allow_read() {
     }
     std::fs::write(cwd.join("a.ps"), "(in cwd) =").unwrap();
     std::fs::write(extra.join("b.ps"), "(in extra) =").unwrap();
-    std::fs::write(outside.join("secret.ps"), "(leaked) =").unwrap();
+    std::fs::write(outside.join("away.ps"), "(leaked) =").unwrap();
     let extra_arg = extra.to_str().unwrap();
     let mut s = Server::start_in(&cwd, &["--allow-read", extra_arg]);
     let init = initialize(&mut s, json!("2025-11-25"));
@@ -910,20 +910,20 @@ fn reads_are_confined_to_the_working_directory_and_allow_read() {
     // The bundled lib/ is always there.
     assert_eq!(eval_error(&mut s, "(lib/artkit.ps) run"), "");
     // Outside, `..`, a missing file outside, and readreals.
-    let secret = p(&outside, "secret.ps");
+    let away = p(&outside, "away.ps");
     for src in [
-        format!("({secret}) run"),
-        format!("({secret}) (r) file"),
+        format!("({away}) run"),
+        format!("({away}) (r) file"),
         format!("({}) (r) file", p(&outside, "missing.ps")),
-        "(../outside/secret.ps) run".to_string(),
-        format!("({secret}) 1 readreals"),
+        "(../outside/away.ps) run".to_string(),
+        format!("({away}) 1 readreals"),
     ] {
         assert_eq!(eval_error(&mut s, &src), "invalidfileaccess", "{src}");
     }
     // A symlink in the working directory pointing out.
     #[cfg(unix)]
     {
-        std::os::unix::fs::symlink(outside.join("secret.ps"), cwd.join("door.ps")).unwrap();
+        std::os::unix::fs::symlink(outside.join("away.ps"), cwd.join("door.ps")).unwrap();
         assert_eq!(eval_error(&mut s, "(door.ps) run"), "invalidfileaccess");
     }
     // filenameforall lists inside, and nothing outside.
@@ -940,9 +940,9 @@ fn reads_are_confined_to_the_working_directory_and_allow_read() {
         "the symlink out isn't listed: {inside}"
     );
     let out = list(&mut s, &p(&outside, "*"));
-    assert!(!out.contains("secret"), "{out}");
+    assert!(!out.contains("away"), "{out}");
     let up = list(&mut s, "../outside/*");
-    assert!(!up.contains("secret"), "{up}");
+    assert!(!up.contains("away"), "{up}");
 }
 
 #[test]

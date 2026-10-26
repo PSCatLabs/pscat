@@ -206,7 +206,7 @@ mod tests {
         fs::create_dir_all(base.join("root/sub")).unwrap();
         fs::create_dir_all(base.join("outside")).unwrap();
         fs::write(base.join("root/sub/in.txt"), b"in").unwrap();
-        fs::write(base.join("outside/secret.txt"), b"secret").unwrap();
+        fs::write(base.join("outside/other.txt"), b"other").unwrap();
         Tree {
             root: base.join("root"),
             outside: base.join("outside"),
@@ -232,7 +232,7 @@ mod tests {
     fn outside_is_refused_and_missing_outside_says_so() {
         let t = tree("outside");
         let r = roots(&t);
-        assert_eq!(r.admit(&t.outside.join("secret.txt")), Admit::Refused);
+        assert_eq!(r.admit(&t.outside.join("other.txt")), Admit::Refused);
         assert_eq!(
             r.admit(&t.outside.join("nope.txt")),
             Admit::Missing { inside: false }
@@ -265,13 +265,13 @@ mod tests {
     #[test]
     fn symlinks_out_are_refused_and_in_are_followed() {
         let t = tree("links");
-        symlink(t.outside.join("secret.txt"), t.root.join("leak.txt")).unwrap();
+        symlink(t.outside.join("other.txt"), t.root.join("leak.txt")).unwrap();
         symlink(&t.outside, t.root.join("door")).unwrap();
         symlink(t.root.join("sub/in.txt"), t.root.join("alias.txt")).unwrap();
         symlink("/dev/zero", t.root.join("zero")).unwrap();
         let r = roots(&t);
         assert_eq!(r.admit(&t.root.join("leak.txt")), Admit::Refused);
-        assert_eq!(r.admit(&t.root.join("door/secret.txt")), Admit::Refused);
+        assert_eq!(r.admit(&t.root.join("door/other.txt")), Admit::Refused);
         assert_eq!(r.admit(&t.root.join("zero")), Admit::Refused);
         assert!(matches!(r.admit(&t.root.join("alias.txt")), Admit::Open(_)));
     }
