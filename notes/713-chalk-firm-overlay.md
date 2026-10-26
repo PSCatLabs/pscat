@@ -41,12 +41,11 @@ and the share of centreline pixels under half alpha), over 12 seeds at 72 dpi:
 
 ### Result (12 seeds, `2^2 \sqrt{2}`, 72 dpi)
 
-| | effective width | gap share |
+| | effective width (before -> after) | gap share (before -> after) |
 |---|---|---|
-| radical bar, before | 1.83 | 0.39 |
-| radical bar, after | 2.08 | 0.29 |
-| radical overall | 2.42 | 0.29 -> 0.23 |
-| a digit (reference) | 2.15 | 0.34 -> 0.26 |
+| radical bar | 1.83 -> 2.08 | 0.39 -> 0.29 |
+| radical overall | 2.42 -> 2.64 | 0.29 -> 0.23 |
+| a digit (reference) | 2.15 -> 2.46 | 0.34 -> 0.26 |
 
 ### With #778 (exact-area coverage)
 
@@ -59,3 +58,7 @@ branch unchanged (bar 2.02 / 0.38 there) and the fix moves it the same way
 The superscript has no rule of its own: drychalk sees a path, not a glyph's
 size, and measuring it showed no thin ink to fix. A script-size-aware stick
 would need mathkit to tell `/Ink` the level of each atom.
+
+### Re-pinning
+
+No board pin moved (`/Firm` applies only with no board): that is the "boards look no worse" evidence. The one new pin is the overlay's. It is made of sub-pixel specks, so #778 will move it: whichever of the two PRs merges second re-pins `the_overlay_renders_as_pinned`, Windows value included.
