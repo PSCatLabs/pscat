@@ -62,6 +62,7 @@ test('a PostScript error is a PostScriptError naming the error, and the renderer
     assert.equal(e.line, 1);
     assert.equal(e.output, 'before');
     assert.match(e.report, /^%%\[ Error: undefined;/);
+    assert.deepEqual(e.warnings, []);
     return true;
   });
   assert.throws(() => r.render('1 0 div'), { errorName: 'undefinedresult' });
@@ -135,8 +136,17 @@ test('a pack face that was not added is reported in warnings, once, naming the s
   assert.deepEqual(r.render('/Palatino-Italic findfont pop /Nonesuch findfont pop', page).warnings, []);
   assert.deepEqual(r.warnings, []);
   // The notes survive a PostScript error, like the page.
-  assert.throws(() => r.render('/Bangers findfont pop bogus', page), PostScriptError);
+  let caught;
+  assert.throws(() => r.render('/Bangers findfont pop bogus', page), (e) => {
+    caught = e;
+    return e instanceof PostScriptError;
+  });
   assert.equal(r.warnings.length, 1);
+  // The error carries them too, as a snapshot a later run does not change.
+  assert.deepEqual(caught.warnings, r.warnings);
+  assert.match(caught.warnings[0], /\/Bangers .*addFont\('Bangers-Regular'/);
+  r.render('', page);
+  assert.equal(caught.warnings.length, 1);
   // With the face added there is nothing to say, and it is the real face.
   r.addFont('Bangers-Regular', await font('Bangers/Bangers-Regular.ttf'));
   const real = r.render(name, page);

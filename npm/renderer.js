@@ -11,10 +11,11 @@ const DEFAULT_PAGE = { width: 612, height: 792, dpi: 72 };
 /**
  * A PostScript error (`undefined`, `typecheck`, `stackunderflow`, ...),
  * raised by render() and step(). The renderer stays usable, and the
- * page drawn before the error is still readable.
+ * page drawn before the error, its output and its font warnings are still
+ * readable.
  */
 export class PostScriptError extends Error {
-  constructor(report, output = '') {
+  constructor(report, output = '', warnings = []) {
     const m = /Error:\s*([A-Za-z]+)/.exec(report);
     // One unambiguous run of characters, trimmed after: no backtracking
     // over the report's spaces.
@@ -32,6 +33,8 @@ export class PostScriptError extends Error {
     this.report = report;
     /** What the program printed before the error. */
     this.output = output;
+    /** Font substitution notes up to the error, as in RenderResult.warnings. */
+    this.warnings = warnings;
   }
 }
 
@@ -92,7 +95,7 @@ export class Renderer {
     const status = this.#ps.step(budget);
     if (status === 1) return true;
     if (status === 0) return false;
-    if (status === -1) throw new PostScriptError(this.#ps.error, this.#ps.output);
+    if (status === -1) throw new PostScriptError(this.#ps.error, this.#ps.output, this.#ps.warnings);
     throw new Error('pscat: step() called before begin()');
   }
 

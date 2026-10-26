@@ -1869,7 +1869,8 @@ renders eight examples in both and compares block-downsampled output).
   keyed by font pack file stem like the disk catalog. A pack face not added
   that way gets the same stand-in as native (#728) and its note, worded for
   `addFont`, goes to `Interp::font_warnings` (no stderr in wasm):
-  `ps_warnings_*` in `src/wasm.rs`, `Renderer.warnings` in npm (#750).
+  `ps_warnings_*` in `src/wasm.rs`, `Renderer.warnings` in npm (#750);
+  `PostScriptError.warnings` and `web/index.html` show them too (#804).
   `npm/package.json` moves in lockstep with
   `Cargo.toml` (`release_stages.py bump-manifests`; a test fails if they
   differ), and the release publishes the tarball `verify` packed

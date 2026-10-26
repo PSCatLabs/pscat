@@ -105,7 +105,7 @@ const page = r.render('/Bangers findfont 36 scalefont setfont 72 72 moveto (Pow!
 page.warnings;
 // ['pscat: warning: font /Bangers is in the extras font pack, which is not built into
 //   the browser build; using Helvetica. Load the real face with addFont('Bangers-Regular', bytes)']
-r.warnings; // the same list, also readable during a step() run or after a PostScriptError
+r.warnings; // the same list, also readable during a step() run; a PostScriptError carries it as `e.warnings`
 ```
 
 Names that no pack has (a typo, say) fall back to Helvetica without a note,
@@ -128,7 +128,7 @@ as Ghostscript does.
 | `imageData()` | The page as an `ImageData` (browsers and workers). |
 | `paintTo(canvas)` | Draw the page into a canvas or `OffscreenCanvas`. |
 | `addFont(name, bytes)` | Make a TrueType or OpenType font available to `findfont`. |
-| `PostScriptError` | Thrown by `render` and `step`. It has `errorName`, `command`, `line`, `report` and `output`. |
+| `PostScriptError` | Thrown by `render` and `step`. It has `errorName`, `command`, `line`, `report`, `output` and `warnings` (the font notes up to the error). |
 
 There is no file system and no clock: `usertime` and `realtime` read 0.
 The [browser guide](https://github.com/PSCatLabs/pscat/blob/main/docs/guides/browser.md)
