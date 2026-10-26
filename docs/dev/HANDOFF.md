@@ -1487,16 +1487,37 @@ renders eight examples in both and compares block-downsampled output).
 - `Interp` split-borrows fields in `next_item` (`estack`, `dstack`,
   `gfx`, `ostack`); new frame types plug in there and must decide
   their action before any stack mutation (the `Action` enum).
-- **`next_item` yields an `Item`, not an `Object`** (#323). A procedure
-  element is inspected in place with `PsArray::peek` (one borrow,
-  released before anything executes, so a `put` into the running
-  procedure still works): an executable operator comes back as its fn
-  pointer, an executable name as its interned id, and only the rest is
-  cloned. Don't turn the fetch back into `body.get(pc)`; that clone and
-  its drop were the largest cost of a bound library run. In the same
-  spirit, code holding a `PsName` must not go through `&str` (`define`,
-  `load`, `Dict::put`): that allocates and re-interns. Use
-  `define_name`, `load_id` and `put_name`.
+- **Procedure elements are dispatched by `proc_step`, not `next_item`**
+  (#323, #863). Both step loops (`step_n_inner`, `step_n_timed`) look at
+  a `Frame::Proc` on top first: the element is inspected in place with
+  `PsArray::peek` (one borrow, released before anything executes, so a
+  `put` into the running procedure still works); a literal is pushed
+  right there (numbers copied by `Object::clone_inline`), and an operator
+  or executable name comes back as a fn pointer or interned id. The frame
+  is popped as it yields its last element, before that element runs.
+  `next_item` never runs a procedure element: when a loop iteration or a
+  finished frame leaves a `Proc` on top, it returns `Item::Proc` and the
+  loop calls `proc_step` in the same step, so `step_n(1)` granularity
+  and the step limit are unchanged (`tests/dispatch_semantics.rs` pins
+  step counts and error states). Don't turn the fetch back into
+  `body.get(pc)`; that clone and its drop were the largest cost of a
+  bound library run. In the same spirit, code holding a `PsName` must not
+  go through `&str` (`define`, `load`, `Dict::put`): that allocates and
+  re-interns. Use `define_name`, `load_id` and `put_name`.
+- **Operator fast paths must succeed or defer, never fail** (#863). The
+  arithmetic and relational operators (`binary`, `div`, `relational`,
+  `eq`/`ne`) first look at the top two operands with `top2_nums` without
+  popping; two numbers (a nonzero divisor, no NaN) are combined in place
+  with `replace_top2`. Anything else runs the general path on an
+  untouched stack, which pops and checks one operand at a time, so a
+  failed `1 (a) add` still leaves `1`. A new fast path must keep that
+  shape. `Object::drop_inline` skips the out-of-line `Value` drop glue
+  for plain data; `PsArray`'s `Drop` checks the refcount inline and only
+  the last handle's teardown is out of line. Measure such changes in
+  instructions retired (`/usr/bin/time -l`), not time: two attempts that
+  looked obvious (resolving names under the dict borrow, an inline `Array`
+  arm in `clone_inline`) made the hot loop slower through inlining and
+  register pressure (`notes/863-dispatch-cost.md`).
 - Frames that hold external state (glyph contexts' graphics-state
   snapshot, paint suppression) must clean up in **three** unwind
   paths: normal pop, `do_stop`, and `unwind_all`. `ShowCtx::cleanup`
