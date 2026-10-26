@@ -74,9 +74,7 @@ newpath 60 100 moveto 500 200 550 300 300 380 curveto
   interpreter also has its own noise operators, independent of `srand`:
   `noiseseed`, `gnoise2`/`gnoise3` (gradient), `vnoise2`/`vnoise3`
   (value), `gnoise2d` (with derivatives) and the fBm sums `fbm2`, `fbm3`,
-  `vfbm2`, `vfbm3`, `ridged2`, `ridged3`, plus Musgrave's ridged multifractal
-  `ridgedmf2` and the derivative-damped `erodedfbm2` (real octave counts with
-  the last octave fading in, a per-octave domain rotation). `lib/noiseref.ps` documents the
+  `vfbm2`, `vfbm3`, `ridged2`, `ridged3`. `lib/noiseref.ps` documents the
   algorithm and reproduces every operator bit for bit in plain PostScript.
   `--sweep-seed` seeds the noise table too (as `N noiseseed`), unless the
   program calls `noiseseed` itself.

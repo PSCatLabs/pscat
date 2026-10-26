@@ -304,8 +304,6 @@ x y gnoise2 n             % gradient noise ~[-0.71,0.71]; x y z gnoise3 ~[-1,1]
 x y vnoise2 v             % value noise ~[-0.996,0.996]; x y z vnoise3
 x y gnoise2d n dx dy      % with its analytic gradient
 x y 5 0.5 2 fbm2 v        % oct gain lacunarity; fbm3 vfbm2 vfbm3 ridged2 ridged3
-x y 4.5 0.5 2 1 2 37 ridgedmf2 v   % real oct, gain lac offset wgain angle
-x y 4.5 0.5 2 37 erodedfbm2 v      % real oct, gain lac angle (derivative-damped)
 ```
 
 Native, about as cheap as an empty loop step, and bit-identical on every
