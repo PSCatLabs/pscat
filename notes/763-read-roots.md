@@ -27,9 +27,15 @@ interpreter has the capability; the MCP layer restricts what agents can do.
   `(lib/artkit.ps) run` falls through to the embedded copy when the
   exe-dir copy is outside the roots. Only if nothing answers and something
   was refused is the result `invalidfileaccess`.
-- **Missing outside is `invalidfileaccess`** for an absolute name, judged by
-  the deepest existing ancestor, so the error never says whether a file
-  outside exists. A missing file inside stays `undefinedfilename`.
+- **No existence probing.** An absolute name outside is `invalidfileaccess`
+  whether or not it exists (judged by the deepest existing ancestor). For a
+  relative name, a search-order place outside every root (exe dir, a cwd that
+  isn't a root) is skipped as if empty, so `undefinedfilename` either way;
+  only a candidate inside a root that leads out (a symlink) is
+  `invalidfileaccess`. A missing file inside stays `undefinedfilename`.
+- **No default root is `/`.** cwd, `$PSCAT_HOME` and the data dir are each
+  dropped if they canonicalise to the filesystem root; `--allow-read /` is
+  the registrant's explicit choice and is kept.
 - **`..` anywhere is refused** before lookup, as for writes, even when it
   would stay inside.
 - **The canonical path is what is read**, narrowing the check/read window to

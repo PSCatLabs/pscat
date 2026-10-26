@@ -962,17 +962,18 @@ fn a_bad_allow_read_is_a_startup_error() {
 #[test]
 fn the_filesystem_root_is_never_a_read_root() {
     // Started in `/` (some desktop apps do), the working directory is not a
-    // read root, so an absolute path anywhere is refused.
+    // read root, so an absolute path anywhere is refused, and a relative one
+    // finds nothing there (existing or not: no probing).
     let mut s = Server::start_in(Path::new("/"), &[]);
     initialized(&mut s);
     assert_eq!(
         eval_error(&mut s, "(/etc/hosts) (r) file"),
         "invalidfileaccess"
     );
-    assert_eq!(
-        eval_error(&mut s, "(etc/hosts) (r) file"),
-        "invalidfileaccess"
-    );
+    for name in ["etc/hosts", "etc/no-such-file"] {
+        let src = format!("({name}) (r) file");
+        assert_eq!(eval_error(&mut s, &src), "undefinedfilename", "{src}");
+    }
     assert_eq!(eval_error(&mut s, "(lib/artkit.ps) run"), "");
 }
 

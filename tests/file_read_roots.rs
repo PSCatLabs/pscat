@@ -43,10 +43,14 @@ fn check_confined(it: &mut Interp, root: &Path, outside: &Path) {
         format!("{secret} 1 readreals"),
         format!("{up} run"),
         format!("{} (r) file", ps(&outside.join("missing.ps"))),
-        "(/dev/zero) (r) file".to_string(),
     ] {
         assert_eq!(it.run_str(&src), Err(PsError::InvalidFileAccess), "{src}");
     }
+    #[cfg(unix)]
+    assert_eq!(
+        it.run_str("(/dev/zero) (r) file"),
+        Err(PsError::InvalidFileAccess)
+    );
     // A missing file inside is still undefinedfilename.
     assert_eq!(
         it.run_str(&format!("{} run", ps(&root.join("nope.ps")))),

@@ -16,9 +16,12 @@
 //!   a canonicalised root; the canonical path is what is read. A candidate
 //!   outside is skipped, like a missing one, so the next place (the embedded
 //!   `lib/` copy, which is not a disk read) can still answer;
-//! - a name that only resolves outside the roots is `invalidfileaccess`, and
-//!   so is an absolute name outside them that doesn't exist, so the error
-//!   never tells a program whether a file outside exists;
+//! - an absolute name outside the roots is `invalidfileaccess` whether or
+//!   not the file exists, so the error never tells a program what exists
+//!   there; a relative name is `invalidfileaccess` when a candidate inside a
+//!   root leads out (a symlink), and a search-order place outside every root
+//!   is skipped as if it were empty (`undefinedfilename` if nothing else
+//!   answers), for the same reason;
 //! - `filenameforall` lists only directories inside the roots and yields
 //!   only names that would open, so an absolute template outside them
 //!   yields nothing (Ghostscript's `-dSAFER` skips files it may not open the
@@ -146,7 +149,19 @@ pub(crate) fn open_confined(
     let gated = |p: &Path| match roots.admit(p) {
         Admit::Open(canon) => read(&canon),
         Admit::Refused => {
-            refused.set(true);
+            // A search-order place outside the roots altogether (the
+            // executable's directory, or the working directory when that
+            // isn't a root) is skipped as if empty, so a relative name
+            // can't probe what exists there; a link inside a root that
+            // leads out is a refusal.
+            let parent = match p.parent() {
+                Some(d) if d.as_os_str().is_empty() => Path::new("."),
+                Some(d) => d,
+                None => Path::new("/"),
+            };
+            if absolute || roots.contains_path(parent) {
+                refused.set(true);
+            }
             None
         }
         // A missing file outside is refused only when the program named

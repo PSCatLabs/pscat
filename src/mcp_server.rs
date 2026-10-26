@@ -327,20 +327,23 @@ fn read_roots(allow_read: &[String]) -> Result<Vec<PathBuf>, String> {
             roots.push(p);
         }
     };
-    // As for out_path: a client that starts servers in `/` must not make
-    // the whole disk readable.
-    if let Ok(cwd) = std::env::current_dir().and_then(std::fs::canonicalize)
-        && cwd.parent().is_some()
-    {
-        add(cwd);
-    }
-    let dirs = pscat::paths::process_roots();
-    for d in [&dirs.home, &dirs.user_data].into_iter().flatten() {
+    // As for out_path: a client that starts servers in `/` (or a
+    // `PSCAT_HOME=/`) must not make the whole disk readable, so no default
+    // root is the filesystem root.
+    let mut add_default = |d: &Path| {
         if let Ok(canon) = std::fs::canonicalize(d)
             && canon.is_dir()
+            && canon.parent().is_some()
         {
             add(canon);
         }
+    };
+    if let Ok(cwd) = std::env::current_dir() {
+        add_default(&cwd);
+    }
+    let dirs = pscat::paths::process_roots();
+    for d in [&dirs.home, &dirs.user_data].into_iter().flatten() {
+        add_default(d);
     }
     for d in allow_read {
         let canon = std::fs::canonicalize(d).map_err(|e| format!("--allow-read {d:?}: {e}"))?;

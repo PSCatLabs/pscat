@@ -164,7 +164,8 @@ where font packs install) when they exist, and each `--allow-read DIR`.
 `(path) (r) file`, `run`, `readreals` and image or data sources opened by name
 read only files that resolve inside one of them; anything else, a `..` anywhere in
 the name, a symlink leading out, or `/dev/zero`, is `invalidfileaccess`, and so is
-a missing file outside (the error never says whether it exists). `filenameforall`
+a missing file named by an absolute path outside (the error never says whether
+it exists). `filenameforall`
 lists only inside the roots: an absolute template elsewhere, or one with `..`,
 yields no names (no error; the PLRM gives it no `invalidfileaccess`, and
 Ghostscript's `-dSAFER` skips files it may not open the same way). The bundled
