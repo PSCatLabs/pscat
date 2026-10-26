@@ -364,7 +364,7 @@ naming the step that served it (`pscat: resource lib/artkit.ps <- embedded`).
 
 ## Where next
 
-- [Handwriting](handwriting.md): turn a string into a handwritten PNG.
+- [Handwriting](handwriting.md): turn a string into a handwriting-style PNG.
 - [Fonts](fonts.md): the font library and the 67-face catalog.
 - [artkit](artkit.md): the generative-art toolkit.
 - [All guides](README.md).
