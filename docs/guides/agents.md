@@ -131,8 +131,8 @@ PIL composite. A one-call typewriter or chart is not added yet.
   build has: fonts, Type 3 faces, palettes, page templates, procedures
   (`--capabilities` on the CLI; see
   [`docs/dev/CAPABILITIES.md`](../dev/CAPABILITIES.md)).
-- `eval_postscript` — run headlessly, get back what the program printed,
-  or the error (name, offending command, line) plus an operand-stack
+- `eval_postscript` — run headlessly, get back what the program printed
+  (plus a `Warnings:` item for anything it wrote to stderr), or the error (name, offending command, line) plus an operand-stack
   post-mortem.
 
 ### Tool annotations

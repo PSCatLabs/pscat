@@ -394,14 +394,15 @@ without the limits above:
   limit is set. Counting every step exactly means returning the executed count
   from the interpreter's inner loop; a version that did cost 1.9% in
   instructions retired on `fillkit.ps`.
-- **Limited output volume from `==`, `pstack` and `stack` only.** Each of
-  them is bounded (#745): containers nest to depth 32, an array shows 1024
-  elements, a string or name 4 KiB, one operand 16 KiB, and a whole stack
-  32 KiB, with `... truncated` marking the cut. **`=` and `print` stay
-  unbounded**, as do writes to `%stdout` and `%stderr` (printing, and counted
-  the same): on the command line a program can print as much as it likes
-  with them, bounded only by the steps and time it is allowed. The MCP server
-  caps each child stream at 4 MiB.
+- **No limit on output volume from `=` and `print`**, nor on writes to
+  `%stdout` and `%stderr` (printing, and counted the same): on the command
+  line a program can print as much as it likes with them, bounded only by
+  the steps and time it is allowed. The MCP server caps each child stream
+  at 4 MiB. `==`, `pstack` and `stack` are bounded (#745): `==` and
+  `pstack` print an operand to a nesting depth of 32, 1024 array elements,
+  4 KiB per string or name and 16 KiB in all; `stack` cuts each string or
+  name at 4 KiB; `pstack` and `stack` stop after 32 KiB for the whole
+  stack. `... truncated` marks every cut.
 - **No limit on bytes written to a write root.** The memory limit counts the
   heap, not the disk. A program that has been given `--allow-write` can fill
   that disk, bounded only by the steps and time it is allowed; one `string`
