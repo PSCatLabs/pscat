@@ -45,7 +45,7 @@ PACKDIR=$("$PSCAT" fonts list | sed -n 's/^install directory: //p')
 case "$PACKDIR/" in "$SCRATCH"/*) ;; *) fail "install directory $PACKDIR is outside the scratch HOME" ;; esac
 
 echo "==> 1. missing packs stand in as a built-in face and name the pack"
-for triple in Symbol:extras:Helvetica ZapfDingbats:extras:Helvetica Palatino-Roman:texgyre:Times-Roman NotoSansKR-Regular:cjk-thai:Helvetica; do
+for triple in Bangers:extras:Helvetica CourierPrime:extras:Courier NotoSansKR-Regular:cjk-thai:Helvetica; do
   IFS=: read -r face pack stand_in <<<"$triple"
   err=$("$PSCAT" -e "/$face findfont /FontName get ==" 2>&1 >"$SCRATCH/stdout.txt") ||
     { echo "$err" >&2; fail "/$face findfont failed with no packs"; }
@@ -55,6 +55,12 @@ for triple in Symbol:extras:Helvetica ZapfDingbats:extras:Helvetica Palatino-Rom
 done
 [[ $("$PSCAT" -e "/NoSuchFace findfont /FontName get ==") == "/Helvetica" ]] ||
   fail "an unknown non-pack name no longer substitutes"
+# The standard 35 are compiled in (issue #757): no pack, no note.
+err=$("$PSCAT" -e "/Palatino-Roman findfont /FontName get == /ZapfDingbats findfont /FontName get ==" 2>&1 >"$SCRATCH/stdout.txt") ||
+  { echo "$err" >&2; fail "a standard-35 face failed with no packs"; }
+[[ $(tr '\n' ' ' <"$SCRATCH/stdout.txt") == "/texgyrepagella-regular /D050000L " ]] ||
+  fail "Palatino-Roman/ZapfDingbats are not the compiled-in faces: $(cat "$SCRATCH/stdout.txt")"
+[[ -z "$err" ]] || { echo "$err" >&2; fail "a standard-35 face printed a note"; }
 
 echo "==> 2. a corrupted pack is refused, nothing partial left"
 cp "$PACKS"/* "$SCRATCH/bad/"
@@ -75,7 +81,7 @@ LIST=$("$PSCAT" fonts list)
 echo "$LIST"
 want=user-selected
 [[ -n "${EXPECT_PINNED:-}" ]] && want=pinned
-for pack in extras texgyre cjk-thai; do
+for pack in extras cjk-thai; do
   grep -Eq "^installed: $pack fonts-[0-9.]+ $want at .*files verified$" <<<"$LIST" ||
     fail "$pack is not installed, verified and $want"
 done
@@ -87,7 +93,7 @@ grep -q "^# font-pack extras .* $want " <<<"$FONTS" || fail "--fonts does not re
 import json, sys
 fp = json.load(sys.stdin)["font_packs"]
 names = sorted(p["name"] for p in fp["installed"])
-assert names == ["cjk-thai", "extras", "texgyre"], names
+assert names == ["cjk-thai", "extras"], names
 assert all(p["status"] == sys.argv[1] for p in fp["installed"]), fp
 assert fp["overrides"] == [], fp
 ' "$want" || fail "--capabilities font_packs is wrong"
@@ -123,12 +129,16 @@ diff -r pack checkout || fail "renders from the packs differ from renders from f
 echo "    $(ls pack | wc -l | tr -d ' ') pages from ${#EXAMPLES[@]} examples, byte-identical"
 
 echo "==> 5. remove and reinstall one pack"
-"$PSCAT" fonts remove texgyre
-[[ $("$PSCAT" -e "/Palatino-Roman findfont /FontName get ==" 2>/dev/null) == "/Times-Roman" ]] ||
-  fail "Palatino does not stand in as Times-Roman after removing texgyre"
-"$PSCAT" fonts install --from "$PACKS/font-index.json" --pack texgyre
-[[ $("$PSCAT" -e "/Palatino-Roman findfont /FontName get ==" 2>&1) != "/Times-Roman" ]] ||
-  fail "Palatino still stands in as Times-Roman after reinstalling"
+"$PSCAT" fonts remove extras
+[[ $("$PSCAT" -e "/Bangers findfont /FontName get ==" 2>/dev/null) == "/Helvetica" ]] ||
+  fail "Bangers does not stand in as Helvetica after removing extras"
+"$PSCAT" fonts install --from "$PACKS/font-index.json" --pack extras
+[[ $("$PSCAT" -e "/Bangers findfont /FontName get ==" 2>&1) != "/Helvetica" ]] ||
+  fail "Bangers still stands in as Helvetica after reinstalling"
 "$PSCAT" fonts list >/dev/null || fail "fonts list verification failed after reinstall"
+# The retired texgyre pack (issue #757): asking for it succeeds and says so.
+err=$("$PSCAT" fonts install --from "$PACKS/font-index.json" --pack texgyre 2>&1) ||
+  { echo "$err" >&2; fail "installing the retired texgyre pack failed"; }
+grep -q "texgyre font pack is retired" <<<"$err" || { echo "$err" >&2; fail "no retired-pack note"; }
 
 echo "==> font pack smoke OK"

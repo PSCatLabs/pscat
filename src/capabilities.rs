@@ -2047,20 +2047,28 @@ pub fn catalog() -> Vec<Capability> {
     for f in font::catalog_entries() {
         let (description, availability) = match f.origin {
             font::FontOrigin::Builtin => (
-                "Bundled base-13 face; resolves identically everywhere, wasm included.".to_string(),
+                "Bundled standard-35 face; resolves identically everywhere, wasm included."
+                    .to_string(),
                 "builtin",
             ),
             font::FontOrigin::Catalog => (
                 "Font-catalog face, loaded from fonts/catalog/ at findfont time.".to_string(),
                 "catalog (desktop/bundle only; absent on wasm or an incomplete install)",
             ),
-            font::FontOrigin::Alias => (
-                format!(
-                    "findfont alias for the catalog face {}.",
-                    f.alias_target.as_deref().unwrap_or("?")
-                ),
-                "catalog (desktop/bundle only; absent on wasm or an incomplete install)",
-            ),
+            font::FontOrigin::Alias => {
+                let target = f.alias_target.as_deref().unwrap_or("?");
+                if font::is_embedded_stem(target) {
+                    (
+                        format!("findfont alias for the bundled standard-35 face {target}."),
+                        "builtin",
+                    )
+                } else {
+                    (
+                        format!("findfont alias for the catalog face {target}."),
+                        "catalog (desktop/bundle only; absent on wasm or an incomplete install)",
+                    )
+                }
+            }
         };
         caps.push(Capability {
             name: f.name,

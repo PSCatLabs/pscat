@@ -31,12 +31,13 @@
 # override if the binaries get moved elsewhere. examples/ and gallery/ are
 # left out: nothing at runtime depends on them. The font catalog is not
 # bundled either: it ships as separately versioned font packs that `pscat
-# fonts install` downloads (issue #599).
+# fonts install` downloads (issue #599). The standard 35 are compiled in.
 #
 # Licences (issue #563, #602): LICENSE-MIT and LICENSE-APACHE (the code),
 # LICENSE-OFL and fonts/LICENSE (the Liberation faces and the Courier
-# Prime-derived lib/typewriter_outlines.ps compiled into the binaries),
-# THIRD_PARTY_NOTICES.md with licenses/assets.json, and the cargo-about
+# Prime-derived lib/typewriter_outlines.ps compiled into the binaries), the
+# licence files of the compiled-in TeX Gyre and URW faces under fonts/base35/
+# (issue #757; the same set scripts/build_npm.sh ships), THIRD_PARTY_NOTICES.md with licenses/assets.json, and the cargo-about
 # notices for every Rust dependency linked into the binaries.
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -99,6 +100,13 @@ for f in LICENSE-MIT LICENSE-APACHE LICENSE-OFL THIRD_PARTY_NOTICES.md; do
 done
 cp "$ROOT/licenses/assets.json" "$BUNDLE/licenses/assets.json"
 cp "$ROOT/fonts/LICENSE" "$BUNDLE/fonts/LICENSE"
+BASE35_LICENCES=()
+for f in "$ROOT"/fonts/base35/*/GUST-FONT-LICENSE.txt "$ROOT"/fonts/base35/URW-symbols/{LICENSE.md,LICENSE.OFL,PROVENANCE.md}; do
+  rel=${f#"$ROOT/"}
+  BASE35_LICENCES+=("$rel")
+  mkdir -p "$BUNDLE/$(dirname "$rel")"
+  cp "$f" "$BUNDLE/$rel"
+done
 if [[ "$WANT_NOTICES" == 1 ]]; then
   [[ -s "$NOTICES" ]] || { echo "FAIL: no dependency notices at $NOTICES" >&2; exit 1; }
   cp "$NOTICES" "$BUNDLE/THIRD_PARTY_LICENSES.html"
@@ -143,16 +151,17 @@ even then.)
 
 ## Fonts
 
-The twelve Liberation faces (Helvetica, Times, Courier) are built in.
-The rest of the catalog (Symbol, ZapfDingbats, Palatino and the other
-standard-35 faces, the display faces, Korean/Japanese/Thai) comes as
-font packs:
+All of the PostScript standard 35 are built in: Helvetica, Times and
+Courier (Liberation), Palatino, Bookman, New Century Schoolbook, Avant
+Garde, Zapf Chancery and Helvetica-Narrow (TeX Gyre), Symbol and
+ZapfDingbats (URW). The rest of the catalog (the display faces,
+Korean/Japanese/Thai) comes as font packs:
 
     pscat fonts install      # the packs this pscat release pins
     pscat fonts list
 
-A program that asks for a face from a pack that is not installed gets the
-closest built-in face (Palatino becomes Times, say) and one line on stderr
+A program that asks for a face from a pack that is not installed gets a
+built-in face (Bangers becomes Helvetica, say) and one line on stderr
 naming the pack; the render still succeeds.
 
 ## What's here
@@ -160,7 +169,7 @@ naming the pack; the render still succeeds.
 - \`pscat\`, \`pscat-mcp\` — the interpreter and its MCP server
 - \`lib/\` — artkit.ps, handscript.ps, etching.ps, the Type 3 font programs, style packs
 - \`LICENSE-MIT\`, \`LICENSE-APACHE\` — pscat's licence (MIT OR Apache-2.0, your choice)
-- \`LICENSE-OFL\`, \`fonts/LICENSE\` — the licence of the fonts compiled into pscat
+- \`LICENSE-OFL\`, \`fonts/LICENSE\`, \`fonts/base35/\` — the licences of the fonts compiled into pscat
 - \`THIRD_PARTY_NOTICES.md\`, \`licenses/assets.json\` — what else is in pscat, and under which terms
 - \`THIRD_PARTY_LICENSES.html\` — the licences of the Rust libraries linked into the binaries
 
@@ -200,7 +209,7 @@ else
   LISTING=$(tar -tzf "$ARCHIVE")
 fi
 REQUIRED=(LICENSE-MIT LICENSE-APACHE LICENSE-OFL THIRD_PARTY_NOTICES.md licenses/assets.json fonts/LICENSE
-  README.md lib/artkit.ps "pscat$EXE" "pscat-mcp$EXE")
+  "${BASE35_LICENCES[@]}" README.md lib/artkit.ps "pscat$EXE" "pscat-mcp$EXE")
 [[ "$WANT_NOTICES" == 1 ]] && REQUIRED+=(THIRD_PARTY_LICENSES.html)
 for f in "${REQUIRED[@]}"; do
   grep -qx "$NAME/$f" <<<"$LISTING" || { echo "FAIL: $NAME/$f is not in the archive" >&2; exit 1; }
@@ -252,6 +261,13 @@ OUT=$(HOME="$EMPTY_HOME" XDG_DATA_HOME="$EMPTY_HOME" APPDATA="$EMPTY_HOME" bare 
   { echo "$OUT" >&2; echo "FAIL: /Bangers stopped the run with no font packs installed" >&2; exit 1; }
 grep -q "is in the extras font pack" <<<"$OUT" ||
   { echo "$OUT" >&2; echo "FAIL: missing face did not name its font pack" >&2; exit 1; }
+# The standard 35 are compiled in (issue #757): Palatino and Symbol resolve
+# to their own faces with no pack and no note.
+# (stdout only: `bare` turns on the resource trace, which goes to stderr.)
+OUT=$(HOME="$EMPTY_HOME" XDG_DATA_HOME="$EMPTY_HOME" APPDATA="$EMPTY_HOME" bare "$PSCAT" -e '0 pop /Palatino-Roman findfont /FontName get == /Symbol findfont /FontName get ==') ||
+  { echo "$OUT" >&2; echo "FAIL: a standard-35 face stopped the run with no font packs installed" >&2; exit 1; }
+[[ "$(tr -d '\r' <<<"$OUT" | tr '\n' ' ')" == "/texgyrepagella-regular /StandardSymbolsPS " ]] ||
+  { echo "$OUT" >&2; echo "FAIL: Palatino-Roman/Symbol are not the compiled-in faces" >&2; exit 1; }
 rm -rf "$EMPTY_HOME"
 for lib in lib/artkit.ps lib/etching.ps; do
   TRACE=$(bare "$PSCAT" -e "($lib) run" 2>&1) || true

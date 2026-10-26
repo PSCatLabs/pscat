@@ -93,7 +93,7 @@ export class Renderer {
   /**
    * Make a TrueType/OpenType font available to findfont, under `name`: the
    * font pack's file stem, e.g. 'EBGaramond-Regular' (/Garamond then finds it
-   * too). Only the Liberation faces behind the base fonts are built in.
+   * too). The PostScript standard 35 are built in.
    */
   addFont(name: string, bytes: ArrayBuffer | ArrayBufferView): void;
 }

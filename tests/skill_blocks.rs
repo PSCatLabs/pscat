@@ -32,7 +32,7 @@
 //! (a debug-assertion build, which is how tests run, otherwise finds
 //! them through the crate root). `lib/` still resolves from the copy
 //! compiled into the binary, as it does for a released `pscat`. A
-//! sentinel asks for a texgyre face first and fails the test if it
+//! sentinel asks for an extras-pack face first and fails the test if it
 //! resolves, so a leaky environment cannot make the guard pass without
 //! checking anything.
 
@@ -157,19 +157,30 @@ fn skills_dir() -> PathBuf {
 
 #[test]
 fn the_environment_has_no_font_packs() {
-    // A texgyre face is in a pack. Bare, it must stand in as Times and say
-    // so; if it resolves to the real face, the checkout (or an installed
-    // pack) leaked in and the skill-block test below proves nothing.
+    // Bangers is in the extras pack. Bare, it must stand in as Helvetica
+    // and say so; if it resolves to the real face, the checkout (or an
+    // installed pack) leaked in and the skill-block test below proves
+    // nothing. Palatino and Symbol are compiled in (issue #757), so they
+    // resolve, silently, even here.
     let r = run_bare(
         "sentinel",
-        "/Palatino-Roman findfont /FontName get ==\n/Symbol findfont pop\n",
+        "/Bangers findfont /FontName get ==\n\
+         /Palatino-Roman findfont /FontName get ==\n/Symbol findfont /FontName get ==\n",
     );
     assert!(r.ok, "{}", r.stderr);
-    assert_eq!(r.stdout.trim(), "/Times-Roman", "stderr: {}", r.stderr);
-    assert!(
+    assert_eq!(
+        r.stdout.split_whitespace().collect::<Vec<_>>(),
+        [
+            "/Helvetica",
+            "/texgyrepagella-regular",
+            "/StandardSymbolsPS"
+        ],
+        "stderr: {}",
         r.stderr
-            .contains("/Palatino-Roman is in the texgyre font pack")
-            && r.stderr.contains("/Symbol is in the extras font pack"),
+    );
+    assert_eq!(r.stderr.trim().lines().count(), 1, "{}", r.stderr);
+    assert!(
+        r.stderr.contains("/Bangers is in the extras font pack"),
         "{}",
         r.stderr
     );

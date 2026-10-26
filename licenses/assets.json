@@ -1,7 +1,7 @@
 {
   "schema": "pscat-asset-licenses/1",
   "about": "Licence of every tracked file in this repository (issue #563). Entries are checked in order and the first whose paths glob matches a file applies to it ('**' matches any number of directories, '*' stays within one). THIRD_PARTY_NOTICES.md is the readable form. ships_in: crate, npm, binaries (the core packages); font-pack (the separately distributed font catalog); site (the project website); repo-only.",
-  "package_license": "(MIT OR Apache-2.0) AND OFL-1.1",
+  "package_license": "(MIT OR Apache-2.0) AND OFL-1.1 AND LPPL-1.3c",
   "entries": [
     {
       "id": "embedded-liberation",
@@ -41,19 +41,21 @@
     {
       "id": "font-URW-symbols",
       "paths": [
-        "fonts/catalog/URW-symbols/**"
+        "fonts/base35/URW-symbols/**"
       ],
       "license": "OFL-1.1",
       "copyright": "Copyright 2013,2014,2015 by (URW)++ Design & Development",
       "ships_in": [
-        "font-pack"
+        "crate",
+        "npm",
+        "binaries"
       ],
       "license_files": [
-        "fonts/catalog/URW-symbols/LICENSE.OFL",
-        "fonts/catalog/URW-symbols/LICENSE.md",
-        "fonts/catalog/URW-symbols/PROVENANCE.md"
+        "fonts/base35/URW-symbols/LICENSE.OFL",
+        "fonts/base35/URW-symbols/LICENSE.md",
+        "fonts/base35/URW-symbols/PROVENANCE.md"
       ],
-      "notes": "OFL-1.1 elected from URW++'s 2017 AGPL-3.0/LPPL-1.3c/OFL-1.1 triple licence; see fonts/catalog/URW-symbols/PROVENANCE.md."
+      "notes": "OFL-1.1 elected from URW++'s 2017 AGPL-3.0/LPPL-1.3c/OFL-1.1 triple licence; see fonts/base35/URW-symbols/PROVENANCE.md. Compiled in with include_bytes! (src/font.rs, issue #757)."
     },
     {
       "id": "font-AbrilFatface",
@@ -632,92 +634,104 @@
     {
       "id": "font-TeXGyre-adventor",
       "paths": [
-        "fonts/catalog/TeXGyre-adventor/**"
+        "fonts/base35/TeXGyre-adventor/**"
       ],
       "license": "LPPL-1.3c",
       "copyright": "Copyright 2007-2018 for TeX Gyre extensions by B. Jackowski, J.M. Nowacki, et al. (on behalf of TeX USERS GROUPS). Vietnamese characters were added by Han The Thanh.",
       "ships_in": [
-        "font-pack"
+        "crate",
+        "npm",
+        "binaries"
       ],
       "license_files": [
-        "fonts/catalog/TeXGyre-adventor/GUST-FONT-LICENSE.txt"
+        "fonts/base35/TeXGyre-adventor/GUST-FONT-LICENSE.txt"
       ],
-      "notes": "GUST Font License: LPPL-1.3c, with a request (not a legal requirement) that derived works be renamed."
+      "notes": "GUST Font License: LPPL-1.3c, with a request (not a legal requirement) that derived works be renamed. Compiled in with include_bytes! (src/font.rs, issue #757)."
     },
     {
       "id": "font-TeXGyre-bonum",
       "paths": [
-        "fonts/catalog/TeXGyre-bonum/**"
+        "fonts/base35/TeXGyre-bonum/**"
       ],
       "license": "LPPL-1.3c",
       "copyright": "Copyright 2006, 2009 for TeX Gyre extensions by B. Jackowski and J.M. Nowacki (on behalf of TeX users groups). This work is released under the GUST Font License -- see http://tug.org/fonts/licenses/GUST-FONT-LICENSE.txt for details.",
       "ships_in": [
-        "font-pack"
+        "crate",
+        "npm",
+        "binaries"
       ],
       "license_files": [
-        "fonts/catalog/TeXGyre-bonum/GUST-FONT-LICENSE.txt"
+        "fonts/base35/TeXGyre-bonum/GUST-FONT-LICENSE.txt"
       ],
-      "notes": "GUST Font License: LPPL-1.3c, with a request (not a legal requirement) that derived works be renamed."
+      "notes": "GUST Font License: LPPL-1.3c, with a request (not a legal requirement) that derived works be renamed. Compiled in with include_bytes! (src/font.rs, issue #757)."
     },
     {
       "id": "font-TeXGyre-chorus",
       "paths": [
-        "fonts/catalog/TeXGyre-chorus/**"
+        "fonts/base35/TeXGyre-chorus/**"
       ],
       "license": "LPPL-1.3c",
       "copyright": "Copyright 2006, 2009 for TeX Gyre extensions by B. Jackowski and J.M. Nowacki (on behalf of TeX users groups). This work is released under the GUST Font License -- see http://tug.org/fonts/licenses/GUST-FONT-LICENSE.txt for details.",
       "ships_in": [
-        "font-pack"
+        "crate",
+        "npm",
+        "binaries"
       ],
       "license_files": [
-        "fonts/catalog/TeXGyre-chorus/GUST-FONT-LICENSE.txt"
+        "fonts/base35/TeXGyre-chorus/GUST-FONT-LICENSE.txt"
       ],
-      "notes": "GUST Font License: LPPL-1.3c, with a request (not a legal requirement) that derived works be renamed."
+      "notes": "GUST Font License: LPPL-1.3c, with a request (not a legal requirement) that derived works be renamed. Compiled in with include_bytes! (src/font.rs, issue #757)."
     },
     {
       "id": "font-TeXGyre-heroscn",
       "paths": [
-        "fonts/catalog/TeXGyre-heroscn/**"
+        "fonts/base35/TeXGyre-heroscn/**"
       ],
       "license": "LPPL-1.3c",
       "copyright": "Copyright 2006, 2009 for TeX Gyre extensions by B. Jackowski and J.M. Nowacki (on behalf of TeX users groups). This work is released under the GUST Font License -- see http://tug.org/fonts/licenses/GUST-FONT-LICENSE.txt for details.",
       "ships_in": [
-        "font-pack"
+        "crate",
+        "npm",
+        "binaries"
       ],
       "license_files": [
-        "fonts/catalog/TeXGyre-heroscn/GUST-FONT-LICENSE.txt"
+        "fonts/base35/TeXGyre-heroscn/GUST-FONT-LICENSE.txt"
       ],
-      "notes": "GUST Font License: LPPL-1.3c, with a request (not a legal requirement) that derived works be renamed."
+      "notes": "GUST Font License: LPPL-1.3c, with a request (not a legal requirement) that derived works be renamed. Compiled in with include_bytes! (src/font.rs, issue #757)."
     },
     {
       "id": "font-TeXGyre-pagella",
       "paths": [
-        "fonts/catalog/TeXGyre-pagella/**"
+        "fonts/base35/TeXGyre-pagella/**"
       ],
       "license": "LPPL-1.3c",
       "copyright": "Copyright 2006-2018 for TeX Gyre extensions by B. Jackowski, J.M. Nowacki, et al. (on behalf of TeX USERS GROUPS). Vietnamese characters were added by Han The Thanh.",
       "ships_in": [
-        "font-pack"
+        "crate",
+        "npm",
+        "binaries"
       ],
       "license_files": [
-        "fonts/catalog/TeXGyre-pagella/GUST-FONT-LICENSE.txt"
+        "fonts/base35/TeXGyre-pagella/GUST-FONT-LICENSE.txt"
       ],
-      "notes": "GUST Font License: LPPL-1.3c, with a request (not a legal requirement) that derived works be renamed."
+      "notes": "GUST Font License: LPPL-1.3c, with a request (not a legal requirement) that derived works be renamed. Compiled in with include_bytes! (src/font.rs, issue #757)."
     },
     {
       "id": "font-TeXGyre-schola",
       "paths": [
-        "fonts/catalog/TeXGyre-schola/**"
+        "fonts/base35/TeXGyre-schola/**"
       ],
       "license": "LPPL-1.3c",
       "copyright": "Copyright 2006, 2009 for TeX Gyre extensions by B. Jackowski and J.M. Nowacki (on behalf of TeX users groups). This work is released under the GUST Font License -- see http://tug.org/fonts/licenses/GUST-FONT-LICENSE.txt for details.",
       "ships_in": [
-        "font-pack"
+        "crate",
+        "npm",
+        "binaries"
       ],
       "license_files": [
-        "fonts/catalog/TeXGyre-schola/GUST-FONT-LICENSE.txt"
+        "fonts/base35/TeXGyre-schola/GUST-FONT-LICENSE.txt"
       ],
-      "notes": "GUST Font License: LPPL-1.3c, with a request (not a legal requirement) that derived works be renamed."
+      "notes": "GUST Font License: LPPL-1.3c, with a request (not a legal requirement) that derived works be renamed. Compiled in with include_bytes! (src/font.rs, issue #757)."
     },
     {
       "id": "font-UnifrakturMaguntia",

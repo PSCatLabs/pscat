@@ -74,9 +74,11 @@ The pscat PostScript libraries are built in, so
 network requests. The [library guides](https://github.com/PSCatLabs/pscat/tree/main/docs/guides)
 describe them.
 
-The only built-in fonts are the Liberation faces behind the standard base
-fonts (Helvetica, Times, Courier and their bold and italic styles). Any
-other font is loaded with `addFont`, named by its font pack file stem:
+All of the PostScript standard 35 are built in: Helvetica, Times and
+Courier (Liberation), Palatino, Bookman, New Century Schoolbook, Avant
+Garde, Zapf Chancery and Helvetica-Narrow (TeX Gyre), and Symbol and
+ZapfDingbats (URW). Any other font is loaded with `addFont`, named by its
+font pack file stem:
 
 ```js
 const bytes = await (await fetch('/fonts/EBGaramond-Regular.ttf')).arrayBuffer();
@@ -84,8 +86,8 @@ r.addFont('EBGaramond-Regular', bytes);
 r.render('/Garamond findfont 24 scalefont setfont 72 72 moveto (Garamond) show');
 ```
 
-The aliases work as they do with installed packs (`/Garamond`,
-`/Palatino-Roman` and so on), and so does the face's own PostScript name.
+The aliases work as they do with installed packs (`/Garamond`, say), and
+so does the face's own PostScript name.
 The Korean, Japanese and Thai faces (`NotoSansKR-Regular`,
 `NotoSansJP-Regular`, `NotoSansThai-Regular`, `NanumBrushScript-Regular`)
 read their strings as UTF-8 when registered under those names. The font
@@ -117,11 +119,16 @@ has more.
 
 ## Licence
 
-`(MIT OR Apache-2.0) AND OFL-1.1`. The code is MIT or Apache-2.0, at your
-option (`LICENSE-MIT`, `LICENSE-APACHE`). The SIL Open Font License 1.1
-(`LICENSE-OFL`) covers the font data compiled into `pscat.wasm`: the
-Liberation fonts (`fonts/LICENSE`) and the typewriter outlines generated
-from Courier Prime. `THIRD_PARTY_NOTICES.md` lists every component, and
+`(MIT OR Apache-2.0) AND OFL-1.1 AND LPPL-1.3c`. The code is MIT or
+Apache-2.0, at your option (`LICENSE-MIT`, `LICENSE-APACHE`). The font data
+compiled into `pscat.wasm` keeps its own licences: the SIL Open Font
+License 1.1 (`LICENSE-OFL`) covers the Liberation fonts (`fonts/LICENSE`),
+the URW Symbol and ZapfDingbats faces (`fonts/base35/URW-symbols/`) and the
+typewriter outlines generated from Courier Prime; the GUST Font License
+(LPPL-1.3c, `fonts/base35/TeXGyre-*/GUST-FONT-LICENSE.txt`) covers the TeX
+Gyre faces behind Palatino, Bookman, New Century Schoolbook, Avant Garde,
+Zapf Chancery and Helvetica-Narrow. All of the PostScript standard 35 are
+built in. `THIRD_PARTY_NOTICES.md` lists every component, and
 `THIRD_PARTY_LICENSES.html` holds the licences of the Rust crates compiled
 into the module.
 

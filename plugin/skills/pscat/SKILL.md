@@ -207,35 +207,31 @@ pscat photo-etch --spacing 4 --angle 30 photo.jpg -o etch.svg
 pscat --fonts                          # every findfont-reachable face
 ```
 
-**A bare install has 12 faces: Helvetica, Times and Courier** (regular,
-bold, oblique/italic, bold-oblique each). Everything else is a font pack,
-installed with `pscat fonts install` (all packs) or `--pack <name>`:
+**All of the standard 35 (the LaserWriter 35) are built in**, so a bare
+install has them: Helvetica, Times and Courier; Palatino, Bookman,
+NewCenturySchlbk, AvantGarde, ZapfChancery and Helvetica-Narrow; Symbol
+and ZapfDingbats. Everything else is a font pack, installed with
+`pscat fonts install` (all packs) or `--pack <name>`:
 
 | Pack | Faces |
 |---|---|
-| `texgyre` | the rest of the LaserWriter 35: Palatino, Bookman, NewCenturySchlbk, AvantGarde, ZapfChancery, Helvetica-Narrow |
-| `extras` | Symbol and ZapfDingbats, the display families (`/EBGaramond-Regular`, `/Bangers`, `/GreatVibes-Regular`, …), Courier Prime |
+| `extras` | the display families (`/EBGaramond-Regular`, `/Bangers`, `/GreatVibes-Regular`, …), Courier Prime, Special Elite, JetBrains Mono |
 | `cjk-thai` | the Korean, Japanese and Thai faces |
 
 `pscat --fonts` lists what this install can reach. Plugin installs have no
-packs, so **design with Helvetica, Times and Courier** unless the user has
-run `pscat fonts install`. A name that is not available never fails the
+packs, so **design with the standard 35** unless the user has run
+`pscat fonts install`. A name that is not available never fails the
 render. Two cases:
 
-- **A name from a pack that is not installed** (`/Palatino-Italic`) falls
-  back to the closest built-in face, keeping weight and slant: Palatino,
-  Bookman and NewCenturySchlbk become Times; AvantGarde and
-  Helvetica-Narrow become Helvetica; ZapfChancery becomes Times-Italic;
-  the monospaced extras (Courier Prime, Special Elite, JetBrains Mono)
-  become Courier. Symbol and ZapfDingbats become Helvetica,
-  so their character codes draw plain letters, not Greek letters or
-  dingbats. The other `extras` faces and the Korean/Japanese/Thai faces
-  become Helvetica too, which cannot draw those scripts. pscat prints one
-  line on stderr per name, `pscat: warning: font /Palatino-Italic is in
-  the texgyre font pack, which is not installed; using Times-Italic. Run
-  ...` with the `pscat fonts install --pack texgyre` command, and the run
-  exits 0. Treat that line as a defect in a sketch meant to work on a bare
-  install.
+- **A name from a pack that is not installed** (`/Bangers`) falls back to
+  a built-in face, keeping weight and slant: the monospaced extras
+  (Courier Prime, Special Elite, JetBrains Mono) become Courier; the other
+  `extras` faces and the Korean/Japanese/Thai faces become Helvetica,
+  which cannot draw those scripts. pscat prints one line on stderr per
+  name, `pscat: warning: font /Bangers is in the extras font pack, which
+  is not installed; using Helvetica. Run ...` with the
+  `pscat fonts install --pack extras` command, and the run exits 0. Treat
+  that line as a defect in a sketch meant to work on a bare install.
 - **A name nothing knows** (`/NoSuchFont`) becomes Helvetica with no
   warning, so check `--fonts` before relying on a face.
 

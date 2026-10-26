@@ -299,13 +299,9 @@ fn pscat_bare(home: &Path, args: &[&str]) -> (bool, String, String) {
 fn a_missing_pack_face_stands_in_and_says_which_pack() {
     let home = common::scratch_dir("fontpack-standin");
     for (face, pack, stand_in) in [
-        ("Palatino-Italic", "texgyre", "Times-Italic"),
-        ("Bookman-Demi", "texgyre", "Times-Bold"),
-        ("NewCenturySchlbk-BoldItalic", "texgyre", "Times-BoldItalic"),
-        ("AvantGarde-DemiOblique", "texgyre", "Helvetica-BoldOblique"),
-        ("ZapfChancery", "texgyre", "Times-Italic"),
-        ("Symbol", "extras", "Helvetica"),
-        ("ZapfDingbats", "extras", "Helvetica"),
+        ("Bangers", "extras", "Helvetica"),
+        ("CourierPrime", "extras", "Courier"),
+        ("JetBrainsMono-Regular", "extras", "Courier"),
         ("NotoSansKR-Regular", "cjk-thai", "Helvetica"),
     ] {
         let (ok, out, err) = pscat_bare(
@@ -334,10 +330,64 @@ fn a_missing_pack_face_stands_in_and_says_which_pack() {
 #[test]
 fn an_available_pack_face_is_unchanged() {
     let home = common::scratch_dir("fontpack-present");
-    let (ok, out, err) = pscat(&home, &["-e", "/Palatino-Italic findfont /FontName get =="]);
+    let (ok, out, err) = pscat(&home, &["-e", "/Bangers findfont /FontName get =="]);
     assert!(ok, "{err}");
-    assert_eq!(out.trim(), "/texgyrepagella-italic");
+    assert_eq!(out.trim(), "/Bangers-Regular");
     assert!(err.is_empty(), "{err}");
+}
+
+/// Issue #757: all of the standard 35 are compiled in, so a bare install
+/// finds each one, with its own FontName and no note.
+#[test]
+fn the_standard_35_resolve_on_a_bare_install() {
+    let home = common::scratch_dir("fontpack-base35");
+    for (face, font_name) in [
+        ("Palatino-Italic", "texgyrepagella-italic"),
+        ("Bookman-Demi", "texgyrebonum-bold"),
+        ("NewCenturySchlbk-BoldItalic", "texgyreschola-bolditalic"),
+        ("AvantGarde-DemiOblique", "texgyreadventor-bolditalic"),
+        ("ZapfChancery-MediumItalic", "texgyrechorus-mediumitalic"),
+        ("Helvetica-Narrow-Bold", "texgyreheroscn-bold"),
+        ("Symbol", "StandardSymbolsPS"),
+        ("ZapfDingbats", "D050000L"),
+    ] {
+        let (ok, out, err) = pscat_bare(
+            &home,
+            &["-e", &format!("/{face} findfont /FontName get ==")],
+        );
+        assert!(ok, "{face}: {err}");
+        assert_eq!(out.trim(), format!("/{font_name}"), "{face}");
+        assert!(err.is_empty(), "{face}: {err}");
+    }
+    // They are listed as built in, on `--fonts` too.
+    let (ok, out, err) = pscat_bare(&home, &["--fonts"]);
+    assert!(ok, "{err}");
+    for name in ["texgyrepagella-regular", "StandardSymbolsPS", "D050000L"] {
+        assert!(
+            out.lines().any(|l| l == name),
+            "{name} not in --fonts:\n{out}"
+        );
+    }
+    assert!(
+        out.lines()
+            .any(|l| l == "Palatino-Roman -> texgyrepagella-regular"),
+        "{out}"
+    );
+}
+
+/// The texgyre pack is retired (issue #757): asking for it succeeds,
+/// says why, fetches nothing and installs nothing, so scripts that ran
+/// `pscat fonts install --pack texgyre` keep working.
+#[test]
+fn installing_the_retired_texgyre_pack_says_so_and_succeeds() {
+    let home = common::scratch_dir("fontpack-retired");
+    let (ok, out, err) = pscat_bare(&home, &["fonts", "install", "--pack", "texgyre"]);
+    assert!(ok, "{out}{err}");
+    assert!(
+        err.contains("the texgyre font pack is retired") && err.contains("nothing to install"),
+        "{err}"
+    );
+    assert!(!home.join("fonts/packs/texgyre").exists());
 }
 
 /// The note prints once per name per run, even when `restore` journals
@@ -349,12 +399,12 @@ fn the_stand_in_note_prints_once_per_name() {
         &home,
         &[
             "-e",
-            "1 1 5 { pop save /Palatino-Italic findfont pop /Bookman-Demi findfont pop restore } for",
+            "1 1 5 { pop save /Bangers findfont pop /CourierPrime findfont pop restore } for",
         ],
     );
     assert!(ok, "{err}");
-    assert_eq!(err.matches("/Palatino-Italic is in").count(), 1, "{err}");
-    assert_eq!(err.matches("/Bookman-Demi is in").count(), 1, "{err}");
+    assert_eq!(err.matches("/Bangers is in").count(), 1, "{err}");
+    assert_eq!(err.matches("/CourierPrime is in").count(), 1, "{err}");
 }
 
 /// The substitution is visible, so the render is pinned: text in a missing
@@ -381,11 +431,10 @@ fn a_stand_in_renders_exactly_as_the_builtin_does() {
         assert!(ok, "{face}: {err}");
         std::fs::read(png).unwrap()
     };
-    assert_eq!(render("Palatino-Italic"), render("Times-Italic"));
-    assert_eq!(render("Bookman-Demi"), render("Times-Bold"));
-    assert_eq!(render("AvantGarde-Book"), render("Helvetica"));
+    assert_eq!(render("Bangers"), render("Helvetica"));
+    assert_eq!(render("CourierPrime"), render("Courier"));
     assert_ne!(
-        render("Times-Italic"),
+        render("Courier"),
         render("Helvetica"),
         "the comparison can differ"
     );
@@ -424,25 +473,24 @@ fn sheet_still_warns_about_a_missing_cjk_pack() {
 }
 
 /// Issue #728: the font-checking libraries still refuse a face that is
-/// not really there. A Times stand-in is none of the two names they used
-/// to reject (Helvetica, Courier), so each must say so by name.
+/// not really there, a stand-in included, each by its own name.
 #[test]
 fn the_libraries_still_reject_a_stand_in_face() {
     let home = common::scratch_dir("fontpack-libs");
     for (lib, call, named) in [
         (
             "headline",
-            "(Palatino-Italic) hlfontcheck",
+            "(Bangers) hlfontcheck",
             "headline-font-not-found",
         ),
         (
             "lettering",
-            "(Bookman-Demi) ltfontcheck",
+            "(CourierPrime) ltfontcheck",
             "lettering-font-not-found",
         ),
         (
             "jersey",
-            "/ZapfChancery jyfontcheck",
+            "/PermanentMarker jyfontcheck",
             "jersey-font-not-found",
         ),
         (
@@ -464,6 +512,9 @@ fn the_libraries_still_reject_a_stand_in_face() {
         ("headline", "(Times-Italic) hlfontcheck"),
         ("lettering", "(Helvetica-Bold) ltfontcheck"),
         ("jersey", "/Courier jyfontcheck"),
+        // Compiled in since issue #757, so the real face.
+        ("headline", "(Palatino-Italic) hlfontcheck"),
+        ("jersey", "/ZapfChancery jyfontcheck"),
     ] {
         let prog = format!("(lib/{lib}.ps) run {call} clear");
         let (ok, _, err) = pscat_bare(&home, &["-e", &prog]);
@@ -506,7 +557,7 @@ fn a_pack_built_by_the_script_installs() {
         .arg(root().join("scripts/font_packs.py"))
         .args(["build", "--tag", "fonts-2026.10", "--out"])
         .arg(&out_dir)
-        .args(["--pack", "texgyre"])
+        .args(["--pack", "extras"])
         .output()
         .expect("run font_packs.py");
     assert!(
@@ -520,19 +571,30 @@ fn a_pack_built_by_the_script_installs() {
         &["fonts", "install", "--from", index.to_str().unwrap()],
     );
     assert!(ok, "{err}");
-    assert!(out.contains("installed texgyre fonts-2026.10"), "{out}");
+    assert!(out.contains("installed extras fonts-2026.10"), "{out}");
     let (ok, out, err) = pscat(&home, &["fonts", "list"]);
     assert!(ok, "{err}");
-    assert!(out.contains("27 files verified"), "{out}");
+    assert!(out.contains("80 files verified"), "{out}");
     let m: serde_json::Value = serde_json::from_slice(
-        &std::fs::read(home.join("fonts/packs/texgyre/manifest.json")).unwrap(),
+        &std::fs::read(home.join("fonts/packs/extras/manifest.json")).unwrap(),
     )
     .unwrap();
     let files = m["files"].as_array().unwrap();
-    assert!(files.iter().all(|f| f["license"] == "LPPL-1.3c"));
-    assert!(
+    let licence = |path: &str| {
         files
             .iter()
-            .any(|f| f["path"] == "TeXGyre-pagella/GUST-FONT-LICENSE.txt")
+            .find(|f| f["path"] == path)
+            .map(|f| f["license"].clone())
+    };
+    assert_eq!(licence("Bangers/OFL.txt"), Some("OFL-1.1".into()));
+    assert_eq!(
+        licence("SpecialElite/LICENSE.txt"),
+        Some("Apache-2.0".into())
+    );
+    // Compiled in since issue #757, so not in the pack.
+    assert!(
+        !files
+            .iter()
+            .any(|f| f["path"].as_str().unwrap().starts_with("URW-symbols/"))
     );
 }

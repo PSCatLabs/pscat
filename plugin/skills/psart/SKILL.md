@@ -109,20 +109,18 @@ Also in the library, documented in each file's header and in
 
 ## Type is material
 
-- A bare install, which is what plugin users have, has 12 faces:
-  Helvetica, Times and Courier. **Design with those.** The rest of the
-  LaserWriter 35 (Palatino, Bookman, NewCenturySchlbk, AvantGarde,
-  ZapfChancery) come from `pscat fonts install --pack texgyre`; Symbol,
-  ZapfDingbats and the ~35 display families (`/Bangers`,
-  `/GreatVibes-Regular`, `/PressStart2P-Regular`, …) from
-  `--pack extras`; Korean/Japanese/Thai from `--pack cjk-thai`.
-  `pscat --fonts` lists what this install can reach.
+- A bare install, which is what plugin users have, has all of the
+  standard 35 (the LaserWriter 35): Helvetica, Times, Courier, Palatino,
+  Bookman, NewCenturySchlbk, AvantGarde, ZapfChancery, Helvetica-Narrow,
+  Symbol and ZapfDingbats. **Design with those.** The ~35 display
+  families (`/Bangers`, `/GreatVibes-Regular`, `/PressStart2P-Regular`,
+  …) come from `pscat fonts install --pack extras`; Korean/Japanese/Thai
+  from `--pack cjk-thai`. `pscat --fonts` lists what this install can
+  reach.
 - Asking for a face that is not there never fails the render, in two ways:
-  a name from an uninstalled pack falls back to the closest built-in face
-  (Palatino, Bookman and NewCenturySchlbk to Times, keeping weight and
-  slant; AvantGarde to Helvetica; ZapfChancery to Times-Italic; the
-  monospaced extras to Courier; Symbol, ZapfDingbats and the display
-  faces to Helvetica) with a one-line
+  a name from an uninstalled pack falls back to a built-in face (the
+  monospaced extras to Courier, the display and CJK/Thai faces to
+  Helvetica) with a one-line
   `pscat: warning: font … is in the … font pack` on stderr; **a name
   nothing knows silently becomes Helvetica**. Either way the piece is not
   set in the face you meant, so check `--fonts`.

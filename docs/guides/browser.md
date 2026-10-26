@@ -70,8 +70,8 @@ catch (e) { if (e instanceof PostScriptError) console.log(e.errorName); } // 'un
 - `output` is what the program printed (`=`, `==`, `print`, `stack`).
 - The `lib/` libraries are embedded: `(lib/artkit.ps) run` works with no
   fetches.
-- **Fonts:** only the Liberation faces behind the base fonts (Helvetica,
-  Times, Courier) are built in. Load any other face with
+- **Fonts:** all of the PostScript standard 35 are built in (Liberation,
+  TeX Gyre and URW faces, as on native builds). Load any other face with
   `r.addFont(name, bytes)`, named by its font pack file stem, for example
   `r.addFont('EBGaramond-Regular', bytes)`; `/Garamond findfont` then finds
   it, exactly as with the installed pack. The font files are in the
@@ -84,9 +84,11 @@ catch (e) { if (e instanceof PostScriptError) console.log(e.errorName); } // 'un
   is `new URL('./pscat.wasm', import.meta.url)`; CI tests the package in
   Node, and a bundler and headless-browser test is #660 (with Vite, add
   `pscat` to `optimizeDeps.exclude`).
-- Licence: `(MIT OR Apache-2.0) AND OFL-1.1`, the crate's: the OFL covers
-  the embedded font data (Liberation, and the Courier Prime outlines in
-  `lib/typewriter_outlines.ps`). The package carries the licence texts,
+- Licence: `(MIT OR Apache-2.0) AND OFL-1.1 AND LPPL-1.3c`, the crate's:
+  the OFL covers the embedded font data (Liberation, the URW Symbol and
+  ZapfDingbats faces, and the Courier Prime outlines in
+  `lib/typewriter_outlines.ps`), and LPPL-1.3c (the GUST Font License)
+  the embedded TeX Gyre faces. The package carries the licence texts,
   `THIRD_PARTY_NOTICES.md`, and the Rust dependencies' notices
   (`THIRD_PARTY_LICENSES.html`).
 
