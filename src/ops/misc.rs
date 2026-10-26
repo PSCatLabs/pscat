@@ -196,6 +196,9 @@ fn out(it: &mut Interp, bytes: &[u8], flush: bool) -> Result<(), PsError> {
 }
 
 fn quit(it: &mut Interp) -> Result<(), PsError> {
+    // Buffered disk files go out now (issue #762); a failure is kept on the
+    // file and reported by its own `closefile`.
+    let _ = it.flush_files();
     it.quit_requested = true;
     Ok(())
 }

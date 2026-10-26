@@ -343,6 +343,18 @@ pub struct Interp {
     /// Directories the program may read files from (issue #763); `None`
     /// (the default) reads wherever the search order finds a file.
     read_roots: Option<crate::read_roots::ReadRoots>,
+    /// Disk files the program has open for writing (issue #762), weakly:
+    /// a file nothing refers to any more drops, closing its descriptor and
+    /// flushing itself. Counted against [`MAX_OPEN_OUTPUT_FILES`] and
+    /// flushed together by [`Interp::flush_outputs`].
+    open_outputs: Vec<std::rc::Weak<RefCell<crate::file::PsFile>>>,
+    /// Set by a disk file dropped with bytes it could not write; shared
+    /// with each [`DiskSink`](crate::file::DiskSink) this interpreter opens.
+    lost_write: Rc<Cell<bool>>,
+    /// Bytes the program has handed to disk files so far (issue #762).
+    bytes_written: u64,
+    /// The most bytes it may hand to disk files; `None` for no cap.
+    max_write_bytes: Option<u64>,
     /// `--profile` (issue #737): `Some` while profiling. A program that
     /// is not profiled never looks at it per step (see `step_n`).
     profile: Option<Box<crate::profile::Profiler>>,
@@ -357,6 +369,10 @@ pub const STDOUT_CAPTURE_LIMIT: usize = 64 * 1024;
 /// set: small enough to notice a runaway within milliseconds, large enough
 /// that the clock read is lost in the noise.
 const LIMITED_SLICE: usize = 512;
+
+/// The most disk files a program may have open for writing at once
+/// (issue #762); one more is `limitcheck`.
+pub const MAX_OPEN_OUTPUT_FILES: usize = 64;
 
 /// Loop iterations between looks at the limits from inside `next_item`.
 const POLL_PERIOD: u32 = 1024;
@@ -451,6 +467,10 @@ impl Interp {
             poll_in: POLL_PERIOD,
             write_roots: Default::default(),
             read_roots: None,
+            open_outputs: Vec::new(),
+            lost_write: Rc::new(Cell::new(false)),
+            bytes_written: 0,
+            max_write_bytes: None,
             profile: None,
             gfx,
         })
@@ -537,6 +557,96 @@ impl Interp {
     /// The write policy, for the operators that write to disk.
     pub(crate) fn write_policy(&self) -> &crate::write_roots::WriteRoots {
         &self.write_roots
+    }
+
+    /// Cap the bytes a program may write to disk files (issue #762; the
+    /// CLI's `--max-write-bytes`); `None` removes the cap, and it is off by
+    /// default. The count is for the interpreter's whole life, starts at
+    /// zero, and is the bytes handed to `write`, `writestring`,
+    /// `writehexstring` and `writereals`, so overwriting a file after
+    /// `setfileposition` counts again. A write that would pass the cap
+    /// writes nothing and raises `limitcheck`. Calling this again also
+    /// starts the count again.
+    pub fn set_max_write_bytes(&mut self, max: Option<u64>) {
+        self.max_write_bytes = max;
+        self.bytes_written = 0;
+    }
+
+    /// The write-bytes cap ([`Interp::set_max_write_bytes`]).
+    pub fn max_write_bytes(&self) -> Option<u64> {
+        self.max_write_bytes
+    }
+
+    /// Whether `n` more bytes fit under the write cap.
+    pub(crate) fn check_write_bytes(&self, n: u64) -> Result<(), PsError> {
+        match self.max_write_bytes {
+            Some(max) if self.bytes_written.saturating_add(n) > max => Err(PsError::Limitcheck),
+            _ => Ok(()),
+        }
+    }
+
+    /// Count `n` bytes against the write cap, or `limitcheck`.
+    pub(crate) fn charge_write_bytes(&mut self, n: u64) -> Result<(), PsError> {
+        self.check_write_bytes(n)?;
+        self.bytes_written = self.bytes_written.saturating_add(n);
+        Ok(())
+    }
+
+    /// Forget output files that are closed or gone, and refuse (with
+    /// `limitcheck`) another one when [`MAX_OPEN_OUTPUT_FILES`] are open.
+    /// Called before a disk file is opened, so a refusal truncates nothing.
+    pub(crate) fn check_output_slot(&mut self) -> Result<(), PsError> {
+        self.open_outputs.retain(|w| {
+            w.upgrade()
+                .is_some_and(|f| f.try_borrow().map_or(true, |f| f.is_open()))
+        });
+        if self.open_outputs.len() >= MAX_OPEN_OUTPUT_FILES {
+            return Err(PsError::Limitcheck);
+        }
+        Ok(())
+    }
+
+    /// The note a [`DiskSink`](crate::file::DiskSink) sets when it is dropped
+    /// with bytes it could not write.
+    pub(crate) fn lost_write_note(&self) -> Rc<Cell<bool>> {
+        self.lost_write.clone()
+    }
+
+    /// Track a disk output file just opened (after `check_output_slot`).
+    pub(crate) fn register_output(&mut self, f: &crate::file::FileHandle) {
+        self.open_outputs.push(Rc::downgrade(f));
+    }
+
+    /// Write out the buffered bytes of every open disk file, and report a
+    /// failure: a file whose write failed, or one that was dropped without
+    /// being closed and could not write (disk full), is `ioerror`. Every
+    /// file is flushed regardless. The `pscat` binary calls this on every
+    /// exit path, so a program that lost data exits non-zero; an embedder
+    /// that leaves files open should call it before it drops the `Interp`
+    /// (the drop flushes too, but cannot tell anyone). The note about a
+    /// dropped file is cleared by this call.
+    pub fn flush_outputs(&mut self) -> Result<(), PsError> {
+        let flushed = self.flush_files();
+        if self.lost_write.replace(false) {
+            return Err(PsError::Io);
+        }
+        flushed
+    }
+
+    /// [`Interp::flush_outputs`] for the places that cannot raise (`showpage`,
+    /// `quit`, `flush`, before a read): the bytes go out, and a failure stays
+    /// on the file (or in the dropped-file note) for the exit flush to report.
+    pub(crate) fn flush_files(&mut self) -> Result<(), PsError> {
+        let mut result = Ok(());
+        for w in &self.open_outputs {
+            if let Some(f) = w.upgrade()
+                && let Ok(mut f) = f.try_borrow_mut()
+                && let Err(e) = f.flush_disk()
+            {
+                result = Err(e);
+            }
+        }
+        result
     }
 
     /// Confine reads to `dirs` (issue #763; the CLI's `--read-root DIR`,
@@ -2122,6 +2232,9 @@ impl Interp {
 /// [`leave_dicts_to_process_exit`](Interp::leave_dicts_to_process_exit).
 impl Drop for Interp {
     fn drop(&mut self) {
+        // Before the early return below: a file kept alive by the leaked
+        // dictionary graph would otherwise never be flushed.
+        let _ = self.flush_files();
         if self.keep_dicts_on_drop {
             return;
         }

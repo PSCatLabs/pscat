@@ -110,8 +110,15 @@ More on the less obvious ones:
   `deletefile` work inside it; any path outside it, a `..`, or a symlink
   leading out is `invalidfileaccess`. A relative name is relative to the
   current directory. `(%stdout) (w) file` and `(%stderr) (w) file` need no
-  flag. `filenameforall` lists files where `run` would look for them.
-  `pscat-mcp` never lets a program write.
+  flag. `filenameforall` lists files where `run` would look for them
+  (`/` between directories on every platform, Windows too: `C:/dir/*.ps`;
+  `\` is the escape character). `pscat-mcp` never lets a program write.
+  Writes are buffered and flushed by `closefile`, `flushfile`, `flush`,
+  `showpage`, `quit` and at exit, even when a program never closes a file;
+  `fileposition`, `setfileposition` and `resetfile` work on files. At most 64
+  files can be open for writing, and `--max-write-bytes N` (`k`, `m`, `g`
+  suffixes; default 1g, `0` for none) stops a program that writes more than N
+  bytes: the write is a `limitcheck`.
 - **Confining reads.** Reading is open by default. `--read-root DIR`
   (repeatable) confines `(f) (r) file`, `run`, `readreals` and
   `filenameforall` to files inside the named directories: a path outside, a

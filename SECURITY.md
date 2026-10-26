@@ -42,7 +42,8 @@ vulnerabilities on their own:
 - A program that runs forever, uses all your memory, or fills the disk with
   output, where no limit was asked for. The command line and the library
   apply none unless you pass one (`--max-steps`, `--max-time`,
-  `--max-memory`), and "Limits that cannot be enforced" lists what a limit
+  `--max-memory`; for files, `--allow-write` brings a 1 GiB write cap of its
+  own, `--max-write-bytes`), and "Limits that cannot be enforced" lists what a limit
   cannot stop even when it is on. Reports of a *new* way to exhaust resources
   there are welcome as bugs, not as security reports.
 - A program that reads a file the pscat process can read, on the command line
@@ -114,7 +115,10 @@ tables in `src/ops/`, and each line below run through `pscat --headless -` (a
   disclosure too. It lists regular files only (directories are not yielded),
   in every place a relative name would be looked up, and an absolute template
   such as `(/etc/*)` lists that directory. `*` and `?` match within the last
-  path component only, and a wildcard in a directory part matches nothing.
+  path component only, and a wildcard in a directory part matches nothing
+  (`/` separates directories on every platform, Windows included; `\` is the
+  escape character everywhere, so `C:\dir\*.ps` names nothing, and
+  `C:/dir/*.ps` is the form that works).
   `(path) status` still answers `false` for any name and so does not say
   whether a file exists.
 - `run` on a file that is not PostScript fails with an error that names the
@@ -170,12 +174,13 @@ never write). `pscat-mcp` never sets a write root ("The MCP server").
   standard output (the stream `print` writes to) and standard error. Any other `%device` name (`%pipe%`, `%stdin`, `%lineedit`) is
   `undefinedfilename`.
 - The operators are `write`, `writestring`, `writehexstring`, `flush`,
-  `flushfile`, `closefile`, `renamefile`, `deletefile` and, for numbers,
+  `flushfile`, `closefile`, `fileposition`, `setfileposition`, `resetfile`,
+  `renamefile`, `deletefile` and, for numbers,
   `array (path) [/f32] writereals` and `(path) n [/f32] readreals` (packed
   little-endian binary, `/f64` by default). `writereals` opens the file as
   `(path) (w) file` does, so every check below applies, and it checks every
   element before it opens the file, so a bad array never truncates the target.
-  `fileposition`, `setfileposition`, `getenv` and `putenv` are **not defined**.
+  `getenv` and `putenv` are **not defined**.
 - The path check (`src/write_roots.rs`; the one place that decides) works on
   the name as the program gave it: a relative name is relative to the current
   directory only, never the search order for reads, so it cannot reach pscat's
@@ -201,10 +206,51 @@ never write). `pscat-mcp` never sets a write root ("The MCP server").
   process that can already write inside a root could swap a directory for a
   symlink between the check and the open. `std` has no `openat`, so this is
   accepted rather than closed.
-- Disk writes are not buffered, so a run that ends without `closefile` loses
-  nothing. **A limit that stops a long write leaves the file as short as it got**
-  (it was truncated when it was opened). A program given a write root can fill
-  that disk ("Limits that cannot be enforced").
+- **Bytes written are capped (#762).** `--max-write-bytes N` (`N` bytes, or
+  with a `k`, `m` or `g` suffix; `0` for no cap) and
+  `Interp::set_max_write_bytes` count the bytes a program hands to `write`,
+  `writestring`, `writehexstring` and `writereals`. The command line applies
+  **1 GiB when `--allow-write` is given** unless the flag says otherwise; the
+  library applies none until the embedder sets one. A write that would pass the
+  cap writes nothing and raises `limitcheck`; `writereals` checks its whole
+  size before it opens (and so truncates) the file. Unlike `--max-steps`,
+  `--max-time` and `--max-memory`, which end the run with an error `stopped`
+  cannot catch, this one is an ordinary, catchable `limitcheck`: a program that
+  catches it can only fail to write more, so the disk is still safe, and the
+  step and time limits still bound the loop. The count is for the interpreter's
+  whole life (the CLI runs one program), is of bytes handed over and not of
+  disk used (overwriting a file after `setfileposition` counts again, and an
+  `(a)` or `(w)` of an existing file does not count what was already in it), and
+  does not count `%stdout` or `%stderr`.
+- **At most 64 disk files can be open for writing at once (#762);** one more
+  `file` is `limitcheck` (and truncates nothing). A file nothing refers to any
+  more is closed by the interpreter, so the cap is on files open at once.
+- **Disk writes are buffered (#762):** 64 KiB per file, written out by
+  `flushfile`, `closefile`, `flush`, `showpage`, `quit`, by any read of a file
+  by name (so a program reads back what it wrote), and when the file goes away.
+  Every exit path of `pscat` (run, `-e`, `--png`, each `--sweep` frame, the
+  REPL, `-i` and the window) flushes the files a program left open, on an error exit too, and a failure
+  then exits non-zero (that includes a file the program dropped unclosed
+  whose last bytes could not be written); dropping an `Interp` is the last
+  resort, and cannot report anything. A failed write
+  stays on the file, and its next write or `closefile` is `ioerror`
+  (`resetfile` clears it). What can still lose buffered bytes is the process
+  ending in no way the interpreter sees: `SIGKILL`, a crash, power loss, or
+  `--exit-with-parent` firing. **A limit that stops a long write leaves the
+  file as short as it got** (it was truncated when it was opened), and a stop
+  by `--max-steps`, `--max-time` or `--max-memory` still writes out what was
+  buffered at that point. A program given a write root can fill that disk
+  within the byte cap and the steps and time it is allowed.
+- `fileposition`, `setfileposition` and `resetfile` work on a disk file being
+  written, on a file read with `(r)` (including `currentfile`) and give `ioerror`
+  for `%stdout`, `%stderr`, a decode filter or a closed file (`resetfile` on a
+  closed one does nothing). A position outside `0..=length` is `rangecheck`,
+  so a seek never leaves a hole in a file (a sparse file would dodge the byte
+  cap); a file opened with `(a)` still writes at its end. `setfileposition` on
+  an input file recounts its lines from the start, which is one step for work
+  proportional to the file's length, so a loop that rewinds `currentfile` in a
+  very large source costs more than the step count says ("Limits that cannot be
+  enforced" applies: the time limit is read between steps).
 - `(path) n readreals` follows the *read* policy (read roots, whole-file read,
   the limits), with two limits of its own: it refuses before it reads when the
   array would pass the memory limit, and `n` over the 16,777,216-element array
@@ -403,13 +449,19 @@ without the limits above:
   4 KiB per string or name and 16 KiB in all; `stack` cuts each string or
   name at 4 KiB; `pstack` and `stack` stop after 32 KiB for the whole
   stack. `... truncated` marks every cut.
-- **No limit on bytes written to a write root.** The memory limit counts the
-  heap, not the disk. A program that has been given `--allow-write` can fill
-  that disk, bounded only by the steps and time it is allowed; one `string`
-  or `array` holds at most 16,777,216 elements, so one `writereals` writes at
-  most 128 MiB (`/f64`) and one `writestring` at most 16 MiB. Name only a
-  directory you would let a program fill, and put a quota or a separate
-  volume under it if the program is a stranger's.
+- **Bytes written to a write root are capped, but only roughly (#762).** The
+  memory limit counts the heap, not the disk, so `--max-write-bytes` counts
+  them: 1 GiB by default with `--allow-write`, `0` to lift it, none in the
+  library until `Interp::set_max_write_bytes`. What it does not bound: it is
+  one program's total, so a person who runs pscat in a loop writes 1 GiB a
+  run; it counts bytes handed over, not disk used (rewriting counts again, and
+  `renamefile` and `deletefile` give nothing back); it is a catchable
+  `limitcheck`, not a stop; and nothing caps the *number* of files a program
+  creates one after another (64 at once), each of which costs an inode. One
+  `string` or `array` holds at most 16,777,216 elements, so one `writereals`
+  writes at most 128 MiB (`/f64`) and one `writestring` at most 16 MiB. Name
+  only a directory you would let a program fill up to the cap, and put a quota
+  or a separate volume under it if the program is a stranger's.
 - **No cap on total decoded bytes from filters** (`FlateDecode`,
   `LZWDecode`, `RunLengthDecode`, ...) as such. They decode as the program
   reads, so what a program keeps counts against the memory limit and what it

@@ -91,6 +91,10 @@ struct Options {
     /// `--allow-write DIR`, repeatable (issue #740): the directories a
     /// program may write files in. None by default.
     allow_write: Vec<String>,
+    /// `--max-write-bytes N` (issue #762): the most bytes a program may write
+    /// to disk files. `None` when not given, which is `DEFAULT_MAX_WRITE_BYTES`
+    /// if `--allow-write` is; `Some(None)` is `0`, no cap.
+    max_write_bytes: Option<Option<u64>>,
     /// `--read-root DIR` (repeatable) and `--confine-reads` (issue #763):
     /// `Some` confines the program's reads to these directories (none: only
     /// the embedded `lib/`). `None` by default, so reads stay open.
@@ -147,6 +151,7 @@ impl Options {
             grid: None,
             limits: Limits::none(),
             allow_write: Vec::new(),
+            max_write_bytes: None,
             read_roots: None,
             progress: false,
             exit_with_parent: None,
@@ -172,7 +177,16 @@ impl Options {
         }
         interp
             .set_write_roots(&self.allow_write)
-            .map_err(|e| format!("--allow-write: {e}"))
+            .map_err(|e| format!("--allow-write: {e}"))?;
+        // A program allowed to write gets a byte cap unless it was lifted
+        // with `--max-write-bytes 0` (issue #762).
+        if !self.allow_write.is_empty() || self.max_write_bytes.is_some() {
+            interp.set_max_write_bytes(
+                self.max_write_bytes
+                    .unwrap_or(Some(DEFAULT_MAX_WRITE_BYTES)),
+            );
+        }
+        Ok(())
     }
 }
 
@@ -201,6 +215,27 @@ fn runs_alone(mode: &str, options: &Options) -> Result<(), String> {
             extra.join(" ")
         ))
     }
+}
+
+/// `--max-write-bytes`'s default when `--allow-write` is given (issue #762):
+/// 1 GiB, as the memory cap `Limits::untrusted` uses. Large enough for any
+/// gallery piece's output, small enough that a runaway loop does not fill a
+/// disk before the time it is allowed runs out.
+const DEFAULT_MAX_WRITE_BYTES: u64 = 1 << 30;
+
+/// A byte count: digits with an optional `k`, `m` or `g` (binary
+/// multiples, any case). `None` for anything else or an overflow.
+fn parse_byte_count(s: &str) -> Option<u64> {
+    let (digits, shift) = match s.as_bytes().last()?.to_ascii_lowercase() {
+        b'k' => (&s[..s.len() - 1], 10),
+        b'm' => (&s[..s.len() - 1], 20),
+        b'g' => (&s[..s.len() - 1], 30),
+        _ => (s, 0),
+    };
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    digits.parse::<u64>().ok()?.checked_mul(1 << shift)
 }
 
 fn main() -> ExitCode {
@@ -727,7 +762,9 @@ fn run_headless(interp: &mut Interp, source: &[u8], options: &Options) -> bool {
     if options.profile {
         print_profile(interp, options);
     }
-    ok
+    // A failed run flushes too: what it wrote before it died is on disk.
+    let flushed = flush_outputs_or_report(interp);
+    ok && flushed
 }
 
 /// gs-style post-mortem: the operand stack, bottom to top, in `==`
@@ -1108,6 +1145,10 @@ fn run_sweep(options: &Options, source: &[u8]) -> ExitCode {
                 false
             }
         };
+        // A frame's open files go to disk now, and a failure fails the sweep.
+        if !flush_outputs_or_report(&mut interp) {
+            any_failed = true;
+        }
         if matches!(axis, SweepAxis::Seed(_)) && interp.seed_override_fired() {
             seed_ever_fired = true;
         }
@@ -1590,6 +1631,16 @@ fn parse_args() -> Result<Options, String> {
                     .ok_or_else(|| format!("missing value after {flag}"))?;
                 limit_flag(&mut options.limits, flag, &n)?;
             }
+            "--max-write-bytes" => {
+                let n = args.next().ok_or("missing value after --max-write-bytes")?;
+                let bytes = parse_byte_count(&n).ok_or_else(|| {
+                    format!(
+                        "invalid --max-write-bytes value: {n} (expected bytes, or a number \
+                         with a k, m or g suffix; 0 = no limit)"
+                    )
+                })?;
+                options.max_write_bytes = Some((bytes > 0).then_some(bytes));
+            }
             "--allow-write" => {
                 let dir = args.next().ok_or("missing directory after --allow-write")?;
                 options.allow_write.push(dir);
@@ -1774,6 +1825,10 @@ fn print_usage() {
     println!("                      deletefile.");
     println!("                      Off by default; paths outside, `..` and symlinks out");
     println!("                      are invalidfileaccess. %stdout/%stderr need no flag");
+    println!("      --max-write-bytes N  with --allow-write, stop a program that writes more");
+    println!("                      than N bytes to files: N is bytes or takes a k, m or g");
+    println!("                      suffix (1g = 1 GiB, the default); 0 = no limit. The");
+    println!("                      write raises `limitcheck`, which `stopped` can catch");
     println!("      --bands N       render the PNG as N horizontal bands on N threads and");
     println!("                      stitch them (1..64; PNG only). Each band runs the whole");
     println!("                      program with /BandIndex, /BandCount and /BandBBox defined,");
@@ -1823,6 +1878,28 @@ fn print_usage() {
     println!("  pscat mcp                    the MCP server on stdin/stdout (same as pscat-mcp)");
 }
 
+/// Write out the files the program left open (issue #762), and say so when
+/// that fails: a disk-full that surfaces only now must not exit 0. Every
+/// normal exit of a run calls this; `Drop for Interp` is the backstop.
+fn flush_outputs_or_report(interp: &mut Interp) -> bool {
+    match interp.flush_outputs() {
+        Ok(()) => true,
+        Err(e) => {
+            eprintln!("pscat: could not write a file the program left open: {e}");
+            false
+        }
+    }
+}
+
+/// The REPL's end: flush, then exit success (or failure if a flush failed).
+fn repl_exit(interp: &mut Interp) -> ExitCode {
+    if flush_outputs_or_report(interp) {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
+}
+
 fn repl(interp: &mut Interp, options: &Options) -> ExitCode {
     println!(
         "pscat {} — PostScript interpreter (headless canvas; graphics ops draw off-screen)",
@@ -1849,7 +1926,7 @@ fn repl(interp: &mut Interp, options: &Options) -> ExitCode {
         match stdin.lock().read_line(&mut line) {
             Ok(0) => {
                 println!();
-                return ExitCode::SUCCESS;
+                return repl_exit(interp);
             }
             Ok(_) => {
                 let Some(source) = buffer.push_line(&line) else {
@@ -1862,11 +1939,12 @@ fn repl(interp: &mut Interp, options: &Options) -> ExitCode {
                     }
                 }
                 if interp.quit_requested() {
-                    return ExitCode::SUCCESS;
+                    return repl_exit(interp);
                 }
             }
             Err(e) => {
                 eprintln!("pscat: read error: {e}");
+                flush_outputs_or_report(interp);
                 return ExitCode::FAILURE;
             }
         }
