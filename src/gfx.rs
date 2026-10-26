@@ -1737,18 +1737,26 @@ impl Gfx {
         h: usize,
         data: crate::pdf::ImageData,
         t: [f32; 6],
+        interpolate: bool,
     ) {
         let fill = self.state.rgb;
         let chain = self.state.clip.as_ref().map(|c| c.node.clone());
         if let Some(pdf) = &mut self.pdf {
-            pdf.image(w, h, data, t, fill, &chain);
+            pdf.image(w, h, data, t, fill, interpolate, &chain);
         }
     }
 
-    pub(crate) fn svg_image(&mut self, png: &[u8], w: usize, h: usize, t: [f32; 6]) {
+    pub(crate) fn svg_image(
+        &mut self,
+        png: &[u8],
+        w: usize,
+        h: usize,
+        t: [f32; 6],
+        interpolate: bool,
+    ) {
         let chain = self.state.clip.as_ref().map(|c| c.node.clone());
         if let Some(svg) = &mut self.svg {
-            svg.image(png, w, h, t, &chain);
+            svg.image(png, w, h, t, interpolate, &chain);
         }
     }
 

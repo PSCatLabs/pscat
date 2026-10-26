@@ -279,6 +279,13 @@ fn image_ctx(it: &Interp, d: &Dict, ncomp: u32, mask: Option<bool>) -> Result<Im
     // Mask polarity from Decode: [1 0] paints the 1s (≡ operand true);
     // the default [0 1] paints the 0s.
     let mask = mask.map(|_| decode.first().copied().unwrap_or(0.0) == 1.0);
+    // `/Interpolate true` (#730): smooth a magnified colour image. Only a
+    // boolean true counts; imagemask (a hard stencil) ignores it.
+    let interpolate = mask.is_none()
+        && matches!(
+            d.get("Interpolate").as_ref().map(|o| &o.value),
+            Some(Value::Boolean(true))
+        );
     Ok(ImageCtx::new(
         w as usize,
         h as usize,
@@ -289,5 +296,6 @@ fn image_ctx(it: &Interp, d: &Dict, ncomp: u32, mask: Option<bool>) -> Result<Im
         mask,
         color,
         source,
-    ))
+    )
+    .with_interpolate(interpolate))
 }

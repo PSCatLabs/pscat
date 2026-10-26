@@ -509,7 +509,10 @@ renders eight examples in both and compares block-downsampled output).
 - Type 1 hints are ignored entirely; no `/Metrics`, no CID/CFF.
 - Access control (`executeonly` etc.) is not modeled — identities.
 - Filter parameter dicts accepted and ignored; no encode filters.
-- Images: nearest-neighbor, no `/Interpolate`, no 12-bit samples, no
+- Images: nearest-neighbor unless the dict has `/Interpolate true` (#730:
+  bilinear on a magnified axis, sample centres at i+0.5, edges clamped,
+  colour images only; PDF key and SVG `image-rendering="auto"` follow;
+  `notes/730-image-interpolate.md`). No 12-bit samples, no
   MultipleDataSources colorimage (limitcheck). `ImageType 3` has
   `InterleaveType 3` only (types 1 and 2 are limitcheck) and no
   `ImageType 4` (#739, `notes/739-imagetype3-nulldevice.md`). DCTDecode buffers one
