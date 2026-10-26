@@ -55,18 +55,19 @@ which now also checks it) and the npm tarball (`build_npm.sh`'s exact file list)
 files the packs carried. URW's AGPL/LPPL texts stay in the repo only, as before.
 THIRD_PARTY_NOTICES.md has a "Standard 35 faces (compiled in)" section.
 
-**Sizes** (before → after, `7dcd6c7` → this branch, macOS arm64):
+**Sizes** (before → after, macOS arm64). First measured against `7dcd6c7`, then
+re-measured after merging `b47f23e` (#735, #758, #760, #769) for the crate and binaries:
 
 | | before | after | delta |
 |---|---|---|---|
-| `cargo package --list` | 132 files | 164 files | +32 |
-| `.crate` (verified build) | 3,364,084 B | 5,168,916 B | +1,804,832 B (+1.72 MiB) |
-| release `pscat` | 10,602,080 B | 14,058,768 B | +3,456,688 B (+3.30 MiB) |
-| release `pscat-mcp` | 9,080,288 B | 12,519,552 B | +3,439,264 B (+3.28 MiB) |
-| release archive (`.tar.gz`, both binaries) | 10,187,207 B | 13,821,468 B | +3,634,261 B |
-| `pscat.wasm` | 7,914,083 B | 11,304,816 B | +3,390,733 B |
-| npm tarball, packed | 3,528,765 B | 5,348,362 B | +1,819,597 B |
-| npm tarball, unpacked | 8,016,677 B | 11,429,126 B | +3,412,449 B |
+| `cargo package --list` | 136 files | 168 files | +32 |
+| `.crate` (verified build) | 3,400,499 B | 5,205,674 B | +1,805,175 B (+1.72 MiB) |
+| release `pscat` | 10,755,600 B | 14,194,784 B | +3,439,184 B (+3.28 MiB) |
+| release `pscat-mcp` | 9,216,576 B | 12,654,096 B | +3,437,520 B (+3.28 MiB) |
+| release archive (`.tar.gz`, both binaries; at `7dcd6c7`) | 10,187,207 B | 13,821,468 B | +3,634,261 B |
+| `pscat.wasm` (at `7dcd6c7`) | 7,914,083 B | 11,304,816 B | +3,390,733 B |
+| npm tarball, packed (at `7dcd6c7`) | 3,528,765 B | 5,348,362 B | +1,819,597 B |
+| npm tarball, unpacked (at `7dcd6c7`) | 8,016,677 B | 11,429,126 B | +3,412,449 B |
 
 Each binary carries its own copy, so the archive grows by about twice the compressed fonts.
 
