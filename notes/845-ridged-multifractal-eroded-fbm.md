@@ -36,8 +36,7 @@ They are the two octave loops at the top of fractal_clouds' profile
   (`d += n.yz; a += b * n.x / (1 + dot(d, d))`). The gradient is summed as
   sampled: no chain rule for the frequency, and no rotation into the base
   frame. `fc-eroded` co-rotates its accumulator, while the common
-  formulation does not. At angle 0 the two coincide, and the look is the
-  same. The term is `amp * (n / (1 + |d|^2))`, which shares the octave walk
+  formulation does not. At angle 0 the two coincide. The term is `amp * (n / (1 + |d|^2))`, which shares the octave walk
   with `ridgedmf2`.
 - **Real octave counts.** `full = floor(oct)` whole octaves, and a
   remainder `r` adds one more whose term is scaled by `r` (Musgrave's fBm
