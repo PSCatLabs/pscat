@@ -1145,6 +1145,10 @@ fn run_sweep(options: &Options, source: &[u8]) -> ExitCode {
                 false
             }
         };
+        // A frame's open files go to disk now, and a failure fails the sweep.
+        if !flush_outputs_or_report(&mut interp) {
+            any_failed = true;
+        }
         if matches!(axis, SweepAxis::Seed(_)) && interp.seed_override_fired() {
             seed_ever_fired = true;
         }

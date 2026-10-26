@@ -240,7 +240,10 @@ fn writehexstring(it: &mut Interp) -> Result<(), PsError> {
 /// bytes of every disk file the program has open.
 fn flush(it: &mut Interp) -> Result<(), PsError> {
     it.write_stdout(&[], true).map_err(|_| PsError::Io)?;
-    it.flush_outputs()
+    // A file whose write failed reports that from its own `closefile`, not
+    // from every `flush` in the program.
+    let _ = it.flush_outputs();
+    Ok(())
 }
 
 /// oldname newname renamefile → (both inside the write roots).

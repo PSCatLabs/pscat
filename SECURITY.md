@@ -228,8 +228,8 @@ never write). `pscat-mcp` never sets a write root ("The MCP server").
 - **Disk writes are buffered (#762):** 64 KiB per file, written out by
   `flushfile`, `closefile`, `flush`, `showpage`, `quit`, by any read of a file
   by name (so a program reads back what it wrote), and when the file goes away.
-  Every exit path of `pscat` (run, `-e`, `--png`, the REPL, `-i` and the window)
-  flushes the files a program left open, on an error exit too, and a failure
+  Every exit path of `pscat` (run, `-e`, `--png`, each `--sweep` frame, the
+  REPL, `-i` and the window) flushes the files a program left open, on an error exit too, and a failure
   then exits non-zero; dropping an `Interp` is the last resort. A failed write
   stays on the file, and its next write or `closefile` is `ioerror`
   (`resetfile` clears it). What can still lose buffered bytes is the process
@@ -244,7 +244,11 @@ never write). `pscat-mcp` never sets a write root ("The MCP server").
   for `%stdout`, `%stderr`, a decode filter or a closed file (`resetfile` on a
   closed one does nothing). A position outside `0..=length` is `rangecheck`,
   so a seek never leaves a hole in a file (a sparse file would dodge the byte
-  cap); a file opened with `(a)` still writes at its end.
+  cap); a file opened with `(a)` still writes at its end. `setfileposition` on
+  an input file recounts its lines from the start, which is one step for work
+  proportional to the file's length, so a loop that rewinds `currentfile` in a
+  very large source costs more than the step count says ("Limits that cannot be
+  enforced" applies: the time limit is read between steps).
 - `(path) n readreals` follows the *read* policy (read roots, whole-file read,
   the limits), with two limits of its own: it refuses before it reads when the
   array would pass the memory limit, and `n` over the 16,777,216-element array
