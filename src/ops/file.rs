@@ -163,7 +163,7 @@ fn writable_name(bytes: &[u8]) -> Result<&str, PsError> {
 
 /// Send bytes to an output file. Writing to an input file or a closed
 /// one is an `ioerror`.
-fn write_bytes(it: &mut Interp, f: &FileHandle, bytes: &[u8]) -> Result<(), PsError> {
+pub(super) fn write_bytes(it: &mut Interp, f: &FileHandle, bytes: &[u8]) -> Result<(), PsError> {
     use std::io::Write;
     let disk = match f.borrow_mut().sink_mut() {
         None => return Err(PsError::Io),

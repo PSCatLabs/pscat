@@ -1243,7 +1243,11 @@ renders eight examples in both and compares block-downsampled output).
   one fixed 64 KiB buffer; the reader `check_alloc`s file plus array before reading. A short file
   is `rangecheck`, not `ioerror` (the PLRM keeps `ioerror` for non-EOF failures). Tests:
   `tests/realsio.rs`, and `tests/realsio_memory.rs` (own binary, tracking allocator). See
-  `notes/735-readreals-writereals.md`.
+  `notes/735-readreals-writereals.md`. #773 added `(path) /all readreals`, `(path) offset n
+  readreals` (offset in values) and the file-object forms `array file writereals` / `file
+  n|/all readreals`, in the same module (`tests/realsio_files.rs`;
+  `notes/773-readreals-all-offset-file.md`). The bulk read is `PsFile::read_into`, which keeps
+  `consumed`/`line` exactly as `read_byte` does.
 - **`pscat sheet` composes finished renders (#693).** Unlike the subcommands above it
   builds no driver: it renders each file itself (a probe `Interp` gives every cell's
   pixel size first), lays the cells out with `contact_sheet::Layout` (pure geometry, so

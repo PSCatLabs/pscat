@@ -564,19 +564,19 @@ static ENTRIES: &[Entry] = &[
     entry!(
         "writereals",
         CapabilityKind::Operator,
-        "pscat extension. Saves a numeric array as packed little-endian binary (f64 by default, /f32 optional), truncating the file. Needs --allow-write; there is no filesystem on wasm.",
+        "pscat extension. Saves a numeric array as packed little-endian binary (f64 by default, /f32 optional). With a path it truncates the file and needs --allow-write; with an open output file (array file writereals) it writes at the file's position, so %stdout, append files and setfileposition work, and the bytes count against --max-write-bytes. There is no disk on wasm.",
         &[],
         SYSTEMDICT,
-        "array (path) [/f32] writereals -",
+        "array (path)|file [/f32] writereals -",
         BUILTIN_FILE
     ),
     entry!(
         "readreals",
         CapabilityKind::Operator,
-        "pscat extension. Loads n reals from the start of a file written by writereals (/f64 default or /f32) as an array; rangecheck if the file is short. Follows the read policy of (path) (r) file; no filesystem on wasm.",
+        "pscat extension. Loads reals written by writereals (/f64 default or /f32) as an array: (path) n from the start, (path) offset n or (path) offset /all from an element offset, (path) /all to the end, or file n|/all from an open input file's position (which moves past the values). rangecheck if the file is short; limitcheck over the 16M array cap. A path follows the read policy of (path) (r) file; no filesystem on wasm.",
         &[],
         SYSTEMDICT,
-        "(path) n [/f32] readreals array",
+        "(path) [offset] n|/all [/f32] readreals array | file n|/all [/f32] readreals array",
         BUILTIN_FILE
     ),
     // --- Type 3 program faces (lib/fonts/, Stages 15 & 18) ---------

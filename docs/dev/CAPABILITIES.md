@@ -239,7 +239,7 @@ that `/Spread` and `/Load` keep their one shared meaning.
   beyond the PLRM, as hand-written `ENTRIES` rows with `kind: "operator"`:
   the noise operators (#734), `setalpha`/`currentalpha`/`setblendmode`/
   `currentblendmode` (#47), `.sameclip` (#488) and `writereals`/
-  `readreals` (#735). Not listed: PLRM Level 1/2/3 operators (the catalog
+  `readreals` (#735, #773). Not listed: PLRM Level 1/2/3 operators (the catalog
   has no PLRM coverage; `renamefile`, `deletefile` and `filenameforall`
   from #740 are PLRM Level 2), Ghostscript-compatibility `min`/`max`/
   `.min`/`.max`, and `.permnoise2`, an internal hook for artkit's

@@ -370,7 +370,10 @@ pass `out_path`. Register it with
 - To save or reload a big numeric array, use `array (path) writereals` and
   `(path) n readreals` (packed binary64; add `/f32` before the operator for
   binary32), not printing and `run`ning text: exact, and about 10x faster to
-  read. Writing needs `--allow-write DIR` like `(w) file`.
+  read. Writing needs `--allow-write DIR` like `(w) file`. `(path) /all
+  readreals` reads every value, `(path) 100 50 readreals` is 50 values from
+  value 100, and `array file writereals` / `file n readreals` take an open
+  file (`%stdout`, an `(a)` append file).
 - The interpreter targets Level 2 PostScript. If a construct misbehaves,
   compare against Ghostscript, the behavioural oracle.
 - `cvs` (and `=`, `==`) on a real prints the shortest digits that read back
