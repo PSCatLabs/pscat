@@ -1,6 +1,6 @@
 ## render: exact-area coverage for fills, so sub-pixel shapes keep their gray (PR #778, issue #692, 2026-10-25)
 
-- **What changed / what to look at:** fills and glyphs now get exact-area anti-aliasing (`src/coverage.rs`) instead of tiny-skia's 4x4 supersampling. Shapes thinner than a pixel keep a gray proportional to their area instead of vanishing or snapping to one gray. 136 of 154 corpus pages move, mostly at edges; the stroke-only pages are identical. The PR was left for the owner to merge because it is broad this close to 0.7.0.
+- **What changed / what to look at:** fills and glyphs now get exact-area anti-aliasing (`src/coverage.rs`) instead of tiny-skia's 4x4 supersampling. Shapes thinner than a pixel keep a gray proportional to their area instead of vanishing or snapping to one gray. 137 of 173 corpus pages move, mostly at edges. The stroke-only pages and the image drivers are identical. The PR was left for the owner to merge because it is broad this close to 0.7.0.
 - **Perceptual check:** "Candidate C ..., rendered directly at 48 px, reads as a shaded cat, not stripes. A gray ramp of rules from 0.05 to 1 px looks like a smooth ramp, not two or three bands. Existing gallery renders at normal size look unchanged, or better."
 - **Reviewer:** PASS, round 1 (https://github.com/PSCatLabs/pscat/pull/778#issuecomment-6406228925)
 
