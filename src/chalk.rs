@@ -1214,7 +1214,12 @@ ckmeasure
             // /Firm: with no board the marks have no grey levels, so a
             // stroke that tires and thins over its length (the radical's
             // bar) or is small (a superscript) breaks into gaps (#713)
-            under = format!(" /Firm 1 /Under [{} {} {}]", n(rgb[0]), n(rgb[1]), n(rgb[2]));
+            under = format!(
+                " /Firm 1 /Under [{} {} {}]",
+                n(rgb[0]),
+                n(rgb[1]),
+                n(rgb[2])
+            );
         }
     }
     p.push_str(&format!("/{} dcchalkcolor\n", cfg.color));
