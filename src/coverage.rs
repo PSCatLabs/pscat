@@ -262,19 +262,31 @@ struct Merger {
 }
 
 impl Merger {
+    /// `spans` are this row's, left to right and disjoint; `open` is kept in
+    /// the same order, so one merge walk pairs them (a row of a hatch fill
+    /// can hold thousands of spans).
     fn row(&mut self, y: u32, spans: &[(u32, u32, bool)], out: &mut Vec<Run>) {
         self.next.clear();
+        let mut j = 0;
         for &(a, b, solid) in spans {
-            let y0 = match self
-                .open
-                .iter()
-                .position(|o| o.0 == a && o.1 == b && o.2 == solid)
-            {
-                Some(i) => self.open.swap_remove(i).3,
-                None => y,
+            while j < self.open.len() && self.open[j].0 < a {
+                let (x0, x1, s, y0) = self.open[j];
+                out.push(Run {
+                    rect: PixRect { x0, y0, x1, y1: y },
+                    solid: s,
+                });
+                j += 1;
+            }
+            let y0 = match self.open.get(j) {
+                Some(&(oa, ob, os, oy0)) if oa == a && ob == b && os == solid => {
+                    j += 1;
+                    oy0
+                }
+                _ => y,
             };
             self.next.push((a, b, solid, y0));
         }
+        self.open.drain(..j);
         self.finish(y, out);
         std::mem::swap(&mut self.open, &mut self.next);
     }
@@ -636,6 +648,34 @@ mod tests {
         let expected = std::f64::consts::PI * 25.3f64 * 25.3;
         assert!(
             (total / expected - 1.0).abs() < 0.003,
+            "{total} vs {expected}"
+        );
+    }
+
+    #[test]
+    fn many_spans_per_row_merge_cleanly() {
+        // One path, 300 slanted 0.3 px hatch lines plus solid blocks that
+        // come and go row by row: the merge walk must pair spans exactly.
+        let mut pb = PathBuilder::new();
+        for i in 0..300 {
+            let x = i as f32 * 2.0 + 0.4;
+            pb.move_to(x, 0.0);
+            pb.line_to(x + 0.3, 0.0);
+            pb.line_to(x + 0.3 + 0.01 * i as f32, 100.0);
+            pb.line_to(x + 0.01 * i as f32, 100.0);
+            pb.close();
+        }
+        for k in 0..10 {
+            pb.push_rect(Rect::from_xywh(k as f32 * 60.0, k as f32 * 9.0, 40.0, 30.0).unwrap());
+        }
+        let path = pb.finish().unwrap();
+        let m = render(&path, Rule::NonZero, 620, 100);
+        let total: f64 = m.data().iter().map(|&v| v as f64 / 255.0).sum();
+        // Hatch area 300 * 30 plus 10 blocks of 1200, less their overlap
+        // (each block covers 20 lines over its 30 rows): within a few percent.
+        let expected = 300.0 * 30.0 + 10.0 * 1200.0 - 10.0 * 20.0 * 0.3 * 30.0;
+        assert!(
+            (total / expected - 1.0).abs() < 0.03,
             "{total} vs {expected}"
         );
     }
