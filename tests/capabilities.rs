@@ -815,6 +815,8 @@ fn payload_lists_native_operators_with_kind_operator() {
         "vfbm3",
         "ridged2",
         "ridged3",
+        "ridgedmf2",
+        "erodedfbm2",
         "setalpha",
         "currentalpha",
         "setblendmode",

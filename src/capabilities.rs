@@ -517,6 +517,24 @@ static ENTRIES: &[Entry] = &[
         BUILTIN
     ),
     entry!(
+        "ridgedmf2",
+        CapabilityKind::Operator,
+        "pscat extension. Musgrave's ridged multifractal of gnoise2: each octave (offset-|n|) squared, weighted by the previous octave times wgain (clamped 0..1); oct is a real 0..32 whose last octave fades in; the domain rotates angle degrees per octave. nrridgedmf2 is the PostScript twin.",
+        &[],
+        SYSTEMDICT,
+        "x y oct gain lac offset wgain angle ridgedmf2 v",
+        BUILTIN
+    ),
+    entry!(
+        "erodedfbm2",
+        CapabilityKind::Operator,
+        "pscat extension. Derivative-damped (eroded) fBm of gnoise2: each octave divided by 1 + the squared length of the gradient summed so far; oct is a real 0..32 whose last octave fades in; the domain rotates angle degrees per octave. nrerodedfbm2 is the PostScript twin.",
+        &[],
+        SYSTEMDICT,
+        "x y oct gain lac angle erodedfbm2 v",
+        BUILTIN
+    ),
+    entry!(
         "setalpha",
         CapabilityKind::Operator,
         "pscat extension, not PLRM and absent from Ghostscript. Fill/stroke opacity 0..1 (clamped); part of the graphics state. Reaches fill, stroke, text, shfill, image, imagemask and colorimage. Probe with systemdict /setalpha known.",
