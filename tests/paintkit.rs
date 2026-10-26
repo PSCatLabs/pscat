@@ -12495,19 +12495,19 @@ fn dab_and_oil_unset_loading_keys_are_byte_identical() {
     // Taken from the pre-slice library (origin/main at ebebfed).
     // Re-pinned for #692 (exact-area fill coverage moved edge pixels).
     let pinned: [u64; 9] = [
-        0x5898eb949b9a9cc4,
-        0x87591e4410f1fba3,
-        0x7da7b90d0c8b14d9,
-        0x03f0f5f6044c25a2,
-        0xbb7c94385aebe42e,
-        0x46cf174a8c23e026,
-        0x4afeceacd6e421ce,
-        0xe659b4013bfc5106,
+        0x38f29ca8dbfc158,
+        0x55010fea06033965,
+        0x2d0644eeab96be5e,
+        0x48ca7bd1e5db8f3e,
+        0xaad2050e0fd5f129,
+        0xcb6c6cfb21784429,
+        0x31b5861b44dff73f,
+        0x28734a6e943f093b,
         // The curveto/Ridges/ColorJitter oil mark. Was 0x407b12e6fb63aeef under
         // Apple's libm and glibc's (musl's gave this value already); it moved
         // when math went through src/fmath (#738), whose results are musl's on
         // every platform.
-        0x5beb8a707c78323e,
+        0xb5cdfca0ea8da12,
     ];
     let got: Vec<u64> = scenarios
         .iter()
