@@ -96,7 +96,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.ref }}
           fetch-depth: 0
@@ -264,7 +264,7 @@ jobs:
       - name: Keep line endings as committed
         run: git config --global core.autocrlf false
       # Exactly the commit `verify` checked (release-manifest.json records it).
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.verify.outputs.commit }}
           persist-credentials: false
@@ -305,7 +305,7 @@ jobs:
         shell: bash
     steps:
       # Exactly the commit `verify` checked (release-manifest.json records it).
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.verify.outputs.commit }}
           persist-credentials: false
@@ -368,7 +368,7 @@ jobs:
       contents: write
     steps:
       # Exactly the commit `verify` checked (release-manifest.json records it).
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.verify.outputs.commit }}
           persist-credentials: false
@@ -409,7 +409,7 @@ jobs:
       attestations: write
     steps:
       # Exactly the commit `verify` checked (release-manifest.json records it).
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.verify.outputs.commit }}
           persist-credentials: false
