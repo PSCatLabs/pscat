@@ -5,7 +5,7 @@
 use std::process::{Command, Stdio};
 
 use pscat::Interp;
-use pscat::profile::{EdgeRow, ProfileReport, ProfileRow};
+use pscat::profile::{EdgeRow, OpRow, ProfileReport, ProfileRow};
 
 mod common;
 
@@ -26,6 +26,16 @@ fn profile_graph(src: &str) -> (Result<(), pscat::PsError>, ProfileReport) {
     let mut interp = Interp::new();
     interp.enable_profile();
     interp.enable_profile_graph();
+    let result = interp.run_str(src);
+    let report = interp.profile_report().expect("profiling is on");
+    (result, report)
+}
+
+/// Like [`profile`], timing operators too.
+fn profile_ops(src: &str) -> (Result<(), pscat::PsError>, ProfileReport) {
+    let mut interp = Interp::new();
+    interp.enable_profile();
+    interp.enable_profile_ops();
     let result = interp.run_str(src);
     let report = interp.profile_report().expect("profiling is on");
     (result, report)
@@ -725,4 +735,163 @@ fn profile_json_without_a_json_path_still_takes_a_program_file() {
     assert!(ok, "{stderr}");
     let v: serde_json::Value = serde_json::from_str(stderr.trim()).expect("JSON on stderr");
     assert_eq!(v["procedures"][0]["calls"], 3);
+}
+
+// ---------------------------------------------------------------------
+// --profile-ops (issue #799)
+// ---------------------------------------------------------------------
+
+fn op<'a>(report: &'a ProfileReport, name: &str) -> &'a OpRow {
+    report
+        .operators
+        .as_ref()
+        .expect("operators are on")
+        .iter()
+        .find(|o| o.name == name)
+        .unwrap_or_else(|| panic!("no operator {name}: {report:?}"))
+}
+
+#[test]
+fn operators_are_counted_by_name_whether_bound_or_not() {
+    // `fib` is not bound with `bind`, so its operators arrive as names; the
+    // top-level program's arrive as scanned tokens. Both are counted.
+    let (result, report) = profile_ops(
+        "/fib { dup 2 lt { } { dup 1 sub fib exch 2 sub fib add } ifelse } def
+         10 fib pop
+         /bound { dup 2 lt { } { dup 1 sub bound exch 2 sub bound add } ifelse } bind def
+         10 bound pop",
+    );
+    result.expect("runs");
+    // fib(10) makes 177 calls; each tests with `lt` and `ifelse`; 88 add.
+    assert_eq!(op(&report, "lt").calls, 2 * 177);
+    assert_eq!(op(&report, "ifelse").calls, 2 * 177);
+    assert_eq!(op(&report, "add").calls, 2 * 88);
+    assert_eq!(op(&report, "def").calls, 2);
+    assert!(
+        report
+            .operators
+            .as_ref()
+            .unwrap()
+            .iter()
+            .all(|o| o.name != "(unnamed operator)"),
+        "{report:?}"
+    );
+    let ops = report.operators.as_ref().unwrap();
+    for w in ops.windows(2) {
+        assert!(w[0].time >= w[1].time, "not sorted: {report:?}");
+    }
+}
+
+#[test]
+fn an_expensive_operator_outweighs_cheap_arithmetic() {
+    // The question from #799: `fill` against `add`.
+    let (result, report) = profile_ops(
+        "newpath 0 0 moveto 400 0 lineto 400 400 lineto 0 400 lineto closepath
+         1 1 200 { pop gsave fill grestore 4 4 add pop } for",
+    );
+    result.expect("runs");
+    let (fill, add) = (op(&report, "fill"), op(&report, "add"));
+    assert_eq!((fill.calls, add.calls), (200, 200));
+    assert!(fill.time > add.time * 10, "{report:?}");
+}
+
+#[test]
+fn an_operator_that_fails_is_still_counted_and_timed() {
+    let (result, report) = profile_ops("{ 1 0 div } stopped pop");
+    result.expect("runs");
+    assert_eq!(op(&report, "div").calls, 1);
+    assert_eq!(op(&report, "stopped").calls, 1);
+}
+
+#[test]
+fn operators_off_by_default_and_the_other_views_unchanged() {
+    let (_, plain) = profile("/a { 1 2 add pop } def a");
+    assert!(plain.operators.is_none());
+    assert!(!plain.to_text(None).contains("operators"));
+    assert!(!plain.to_json(None).contains("operators"));
+    let (_, with) = profile_ops("/a { 1 2 add pop } def a");
+    assert_eq!(row(&with, "a").calls, 1);
+    assert!(with.edges.is_none());
+}
+
+#[test]
+fn procedure_times_and_edges_still_work_with_operator_timing() {
+    let mut interp = Interp::new();
+    interp.enable_profile();
+    interp.enable_profile_graph();
+    interp.enable_profile_ops();
+    interp
+        .run_str(&format!("/c {{ {BURN} }} def /b {{ c c }} def b b"))
+        .expect("runs");
+    let report = interp.profile_report().unwrap();
+    assert_eq!(row(&report, "c").calls, 4);
+    assert_edges_add_up(&report);
+    assert_eq!(op(&report, "for").calls, 4);
+    assert_consistent(&report);
+}
+
+#[test]
+fn the_operator_text_and_json_honour_the_row_limit() {
+    let (_, report) = profile_ops("1 2 add 3 mul pop 5 6 sub pop");
+    let text = report.to_text(None);
+    assert!(text.contains("operators, 4 of 4 by time"), "{text}");
+    assert!(
+        text.contains("per call") && text.contains(" ns  add"),
+        "{text}"
+    );
+    let one = report.to_text(Some(1));
+    assert!(
+        one.contains("operators, 1 of 4") && one.contains("3 more"),
+        "{one}"
+    );
+    let v: serde_json::Value = serde_json::from_str(&report.to_json(Some(2))).expect("JSON");
+    assert_eq!(v["total_operators"], 4);
+    assert_eq!(v["operators"].as_array().unwrap().len(), 2);
+    assert!(v["operators"][0]["time_ms"].is_f64());
+    let all: serde_json::Value = serde_json::from_str(&report.to_json(None)).unwrap();
+    let add = all["operators"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|o| o["name"] == "add")
+        .expect("add");
+    assert_eq!(add["calls"], 1);
+}
+
+#[test]
+fn profile_ops_on_the_command_line_implies_profile() {
+    let (ok, stdout, stderr) = pscat(&["--profile-ops", "-e", "/a { 1 2 add pop } def a a"], "");
+    assert!(ok, "{stderr}");
+    assert!(!stdout.contains("operators"), "report belongs on stderr");
+    assert!(stderr.contains("pscat: profile"), "{stderr}");
+    assert!(
+        stderr
+            .lines()
+            .any(|l| l.contains(" 2 ") && l.trim_end().ends_with("add")),
+        "{stderr}"
+    );
+    let (_, _, plain) = pscat(&["--profile", "-e", "/a { 1 2 add pop } def a"], "");
+    assert!(!plain.contains("operators"), "{plain}");
+    let (ok, _, _) = pscat(&["--profile-ops", "--interactive"], "");
+    assert!(!ok);
+}
+
+#[test]
+fn a_run_with_operator_timing_makes_the_same_page() {
+    // Timing must not change what a program draws.
+    let src =
+        "newpath 10 10 moveto 90 10 lineto 50 90 lineto closepath 0.2 0.5 0.8 setrgbcolor fill";
+    let dir = common::scratch_dir("profile-ops-page");
+    let (plain, timed) = (dir.join("a.svg"), dir.join("b.svg"));
+    let (ok, _, e) = pscat(&["--svg", plain.to_str().unwrap(), "-e", src], "");
+    assert!(ok, "{e}");
+    let (ok, _, e) = pscat(
+        &["--profile-ops", "--svg", timed.to_str().unwrap(), "-e", src],
+        "",
+    );
+    assert!(ok, "{e}");
+    assert_eq!(
+        std::fs::read(&plain).unwrap(),
+        std::fs::read(&timed).unwrap()
+    );
 }

@@ -125,6 +125,9 @@ struct Options {
     /// `--profile-graph`: also report caller -> callee edges (implies
     /// `--profile`).
     profile_graph: bool,
+    /// `--profile-ops`: also time each built-in operator (implies
+    /// `--profile`).
+    profile_ops: bool,
 }
 
 impl Options {
@@ -167,6 +170,7 @@ impl Options {
             profile_json: false,
             profile_json_path: None,
             profile_graph: false,
+            profile_ops: false,
         }
     }
 
@@ -454,6 +458,9 @@ fn main() -> ExitCode {
         interp.enable_profile();
         if options.profile_graph {
             interp.enable_profile_graph();
+        }
+        if options.profile_ops {
+            interp.enable_profile_ops();
         }
     }
     // Refuse before the run, not after it, when the profile has nowhere to go.
@@ -1672,6 +1679,10 @@ fn parse_args() -> Result<Options, String> {
                 options.profile = true;
                 options.profile_graph = true;
             }
+            "--profile-ops" => {
+                options.profile = true;
+                options.profile_ops = true;
+            }
             "--profile-top" => {
                 let n = args.next().ok_or("missing value after --profile-top")?;
                 options.profile_top = Some(n.parse().map_err(|_| {
@@ -1870,6 +1881,11 @@ fn print_usage() {
     println!("      --profile-top N rows --profile prints (0 = all)");
     println!("      --profile-json [PATH]  --profile as one line of JSON. With a PATH ending in");
     println!("                      .json, write it there instead (needs --allow-write)");
+    println!(
+        "      --profile-ops   --profile also lists time inside each built-in operator (`fill`"
+    );
+    println!("                      against `add`...). Two clock reads per operator: a bigger");
+    println!("                      slowdown, so the procedure times inflate too");
     println!("      --profile-graph --profile also lists caller -> callee edges with the time");
     println!("                      spent along each (with --profile-top and --profile-json)");
     println!("      --exit-with-parent PID  stop once PID is no longer pscat's parent");

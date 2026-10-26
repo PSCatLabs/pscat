@@ -58,8 +58,19 @@ struct Active {
     edge: usize,
 }
 
+/// `--profile-ops`: time inside each built-in operator, by function address
+/// (the loop sees operators as bare `fn` pointers, not names).
+#[derive(Default)]
+struct OpTimes {
+    /// Address -> the names it is bound to in systemdict, joined with `/`.
+    names: HashMap<usize, String>,
+    /// Address -> (calls, nanoseconds).
+    stats: HashMap<usize, (u64, u64)>,
+}
+
 #[derive(Default)]
 pub(crate) struct Profiler {
+    ops: Option<OpTimes>,
     stats: HashMap<u32, Stat>,
     active: Vec<Active>,
     /// `--profile-graph`: record who called what. Off, the profiler does
@@ -79,6 +90,41 @@ impl Profiler {
     /// Record caller -> callee edges too (before the program runs).
     pub(crate) fn set_graph(&mut self) {
         self.graph = true;
+    }
+
+    /// Time operators too (before the program runs). `bound` is every
+    /// (name, function) pair systemdict holds, for labelling the report.
+    pub(crate) fn set_ops(&mut self, bound: impl Iterator<Item = (String, usize)>) {
+        let mut by_addr: HashMap<usize, Vec<String>> = HashMap::new();
+        for (name, addr) in bound {
+            by_addr.entry(addr).or_default().push(name);
+        }
+        let names = by_addr
+            .into_iter()
+            .map(|(addr, mut v)| {
+                v.sort();
+                v.dedup();
+                (addr, v.join("/"))
+            })
+            .collect();
+        self.ops = Some(OpTimes {
+            names,
+            stats: HashMap::new(),
+        });
+    }
+
+    #[inline]
+    pub(crate) fn ops_on(&self) -> bool {
+        self.ops.is_some()
+    }
+
+    /// One finished operator call.
+    pub(crate) fn record_op(&mut self, addr: usize, ns: u64) {
+        if let Some(o) = self.ops.as_mut() {
+            let s = o.stats.entry(addr).or_default();
+            s.0 += 1;
+            s.1 += ns;
+        }
     }
 
     /// The edge from the innermost open call (or the top level) to `callee`.
@@ -210,7 +256,33 @@ impl Profiler {
             });
             edges
         });
-        ProfileReport { rows, edges }
+        let operators = self.ops.as_ref().map(|o| {
+            let mut ops: Vec<OpRow> = o
+                .stats
+                .iter()
+                .map(|(addr, &(calls, ns))| OpRow {
+                    name: o
+                        .names
+                        .get(addr)
+                        .cloned()
+                        .unwrap_or_else(|| UNNAMED_OPERATOR.to_string()),
+                    calls,
+                    time: Duration::from_nanos(ns),
+                })
+                .collect();
+            ops.sort_by(|a, b| {
+                b.time
+                    .cmp(&a.time)
+                    .then(b.calls.cmp(&a.calls))
+                    .then_with(|| a.name.cmp(&b.name))
+            });
+            ops
+        });
+        ProfileReport {
+            rows,
+            edges,
+            operators,
+        }
     }
 }
 
@@ -241,12 +313,29 @@ pub struct EdgeRow {
     pub inclusive: Duration,
 }
 
+/// One built-in operator's line of the `--profile-ops` table.
+#[derive(Clone, Debug)]
+pub struct OpRow {
+    /// The operator's name in systemdict (`a/b` if several names are bound
+    /// to the same function).
+    pub name: String,
+    pub calls: u64,
+    /// Time inside the operator's own code, summed over its calls. Includes
+    /// the two clock reads around each call (tens of nanoseconds).
+    pub time: Duration,
+}
+
+/// The label for an operator whose function no systemdict name is bound to.
+const UNNAMED_OPERATOR: &str = "(unnamed operator)";
+
 /// The finished profile, sorted by exclusive time, longest first.
 #[derive(Clone, Debug)]
 pub struct ProfileReport {
     pub rows: Vec<ProfileRow>,
     /// The call graph, longest edge first; `None` unless it was asked for.
     pub edges: Option<Vec<EdgeRow>>,
+    /// Time per built-in operator, longest first; `None` unless asked for.
+    pub operators: Option<Vec<OpRow>>,
 }
 
 impl ProfileReport {
@@ -305,12 +394,42 @@ impl ProfileReport {
                 ));
             }
         }
+        if let Some(ops) = &self.operators {
+            let shown = top.map_or(ops.len(), |n| n.min(ops.len()));
+            out.push_str(&format!(
+                "pscat: operators, {} of {} by time\n",
+                shown,
+                ops.len()
+            ));
+            out.push_str(&format!(
+                "  {:>10}  {:>12}  {:>9}  {}\n",
+                "calls", "time", "per call", "operator"
+            ));
+            for o in &ops[..shown] {
+                let per_call = o.time.as_nanos() / u128::from(o.calls.max(1));
+                out.push_str(&format!(
+                    "  {:>10}  {:>12}  {:>6} ns  {}\n",
+                    o.calls,
+                    fmt_ms(o.time),
+                    per_call,
+                    o.name
+                ));
+            }
+            if shown < ops.len() {
+                out.push_str(&format!(
+                    "  ... {} more (--profile-top N, 0 = all)\n",
+                    ops.len() - shown
+                ));
+            }
+        }
         out
     }
 
     /// One JSON object: `{"procedures":[{"name","calls","inclusive_ms","exclusive_ms"}...],
     /// "total_procedures":N}`, plus `"edges":[{"caller" (null at the top level),"callee",
-    /// "calls","inclusive_ms"}...],"total_edges":N` with the call graph.
+    /// "calls","inclusive_ms"}...],"total_edges":N` with the call graph, and
+    /// `"operators":[{"name","calls","time_ms"}...],"total_operators":N` with
+    /// the operator times.
     pub fn to_json(&self, top: Option<usize>) -> String {
         let shown = top.map_or(self.rows.len(), |n| n.min(self.rows.len()));
         let mut out = String::from("{\"procedures\":[");
@@ -344,6 +463,22 @@ impl ProfileReport {
                 ));
             }
             out.push_str(&format!("],\"total_edges\":{}", edges.len()));
+        }
+        if let Some(ops) = &self.operators {
+            let shown = top.map_or(ops.len(), |n| n.min(ops.len()));
+            out.push_str(",\"operators\":[");
+            for (i, o) in ops[..shown].iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                out.push_str(&format!(
+                    "{{\"name\":{},\"calls\":{},\"time_ms\":{:.3}}}",
+                    json_str(&o.name),
+                    o.calls,
+                    o.time.as_secs_f64() * 1e3
+                ));
+            }
+            out.push_str(&format!("],\"total_operators\":{}", ops.len()));
         }
         out.push('}');
         out

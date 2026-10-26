@@ -201,7 +201,10 @@ More on the less obvious ones:
   the exclusive time (its own, without the named procedures it called) and
   the inclusive time (call to return), sorted by exclusive time, 20 rows
   (`--profile-top N`; 0 is all; `--profile-json` prints the same as one line
-  of JSON). It works with `-e`, `-`, `--png`, `--svg`, `--pdf` and `--lint`,
+  of JSON, and `--profile-json out.json --allow-write DIR` writes that line
+  to a file inside DIR instead, printing nothing; a path is taken only when
+  it ends in `.json`, so `--profile-json prog.ps` still profiles `prog.ps`).
+  It works with `-e`, `-`, `--png`, `--svg`, `--pdf` and `--lint`,
   and prints after a failed run too. Rules to read it by:
   - A procedure counts under the name it was *called through*. A body run
     by `exec`, an `if` or `ifelse` branch, a `forall` body or a Type 3 glyph
@@ -225,6 +228,28 @@ More on the less obvious ones:
     twice), so `fib 30` runs about a third slower and a typical piece 5%.
     Times include that cost, so small procedures read high. Without the flag
     the cost is one flag test per procedure call (under 3% on `fib 27`).
+  - `--profile-graph` adds the call graph: one line per caller -> callee pair
+    (`<top level>` for a call made outside every procedure) with the calls
+    along it and the time the callee ran when called from there, children
+    included, longest first. Calls into a callee, summed over its edges, are
+    its call count. A recursive edge (`fib -> fib`) counts its time once per
+    outermost frame, and a tail call back into a procedure already open adds
+    to the calls and adds no time (it is part of the call it continues).
+    `--profile-top` limits the edges as well, and `--profile-json` gains
+    `edges` (`caller` is `null` at the top level) and `total_edges`. About
+    10% more than `--profile` on `fib`.
+  - `--profile-ops` adds time per built-in operator, so `fill` can be weighed
+    against `add`: calls, total time and time per call, longest first
+    (`operators` and `total_operators` in the JSON). It reads the clock around
+    every operator, so a run takes about three times as long and the
+    procedure times grow too: the "per call" of a cheap operator (`add`) is
+    mostly that clock cost, about 20 ns. It times an operator's own code. `for`,
+    `if`, `repeat` and `forall` only push a frame (their bodies are timed
+    as the operators they run), and `show` and `image` do most of their work
+    afterwards, in steps the clock does not see, so they read cheap here: use
+    the procedure table for those. An operator is counted under its systemdict
+    name (`a/b` if two names share one function). Without the flag the cost
+    is nil: the operator loop is not touched.
   - Not with `--bands` (each band is a full run, so a merged table would be N
     copies of the same calls), sweeps, `--spool`, `--interactive` or a
     windowed run: it refuses them.
