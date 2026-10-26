@@ -21,9 +21,12 @@ fn limited(mib: usize) -> Interp {
 
 #[test]
 fn memory_growth_is_capped() {
-    // The allocator is counting from the start of the process.
+    // The allocator is counting. Other threads' counts can lag by up to
+    // 64 KiB each (#844), so hold something bigger than that first.
     assert!(pscat::memtrack::installed());
+    let held = vec![1u8; 1 << 20];
     assert!(pscat::memtrack::live_bytes() > 0);
+    drop(held);
 
     // One big allocation is refused before it is made.
     let mut it = limited(50);
@@ -136,4 +139,60 @@ fn memory_growth_is_capped() {
         writer.join().unwrap();
         assert_eq!(result, Ok(()));
     }
+
+    // Memory one thread allocates and another frees (issue #844: each
+    // thread folds its count in every 64 KiB). The thread exits with its
+    // allocations still unfolded, so the free shows up first; the count
+    // must stay sane, not wrap to near 2^64.
+    let before = pscat::memtrack::live_bytes();
+    let kept = std::thread::spawn(|| (0..60).map(|_| vec![7u8; 1000]).collect::<Vec<_>>())
+        .join()
+        .unwrap();
+    drop(kept);
+    let after = pscat::memtrack::live_bytes();
+    assert!(after < 1 << 40, "no wraparound: {after}");
+    assert!(
+        after.abs_diff(before) < 2 * 64 * 1024,
+        "within one batch either way: {before} -> {after}"
+    );
+
+    // A thread that folds before it exits leaves an exact count behind.
+    let before = pscat::memtrack::live_bytes();
+    let leaked = std::thread::spawn(|| {
+        let v: &'static mut [u8] = Box::leak(vec![1u8; 10_000].into_boxed_slice());
+        pscat::memtrack::fold_thread();
+        v.len()
+    })
+    .join()
+    .unwrap();
+    let grew = pscat::memtrack::live_bytes() - before;
+    assert!(
+        (leaked..leaked + 4096).contains(&grew),
+        "the leaked 10 kB is counted: {grew}"
+    );
+
+    // Frees made while a thread's thread-locals are destroyed are counted
+    // too, with `fold_at_thread_exit` (`--bands` runs every band on a fresh
+    // thread whose name interner is freed that way). Each thread here
+    // folds, then frees 20 kB as it exits; 200 of them, uncounted, would
+    // read as 4 MB.
+    thread_local! {
+        static HELD: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+    let before = pscat::memtrack::live_bytes();
+    for _ in 0..200 {
+        std::thread::spawn(|| {
+            pscat::memtrack::fold_at_thread_exit();
+            HELD.with(|h| *h.borrow_mut() = vec![3u8; 20_000]);
+            // As a band does at its end; the 20 kB is freed after this.
+            pscat::memtrack::fold_thread();
+        })
+        .join()
+        .unwrap();
+    }
+    let after = pscat::memtrack::live_bytes();
+    assert!(
+        after < before + 256 * 1024,
+        "thread-exit frees are counted: {before} -> {after}"
+    );
 }
