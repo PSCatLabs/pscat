@@ -143,9 +143,11 @@ fn the_overlay_renders_as_pinned() {
     let png = chalk::render(FORMULAS[0].1, &cfg, Format::Png).expect("overlay");
     let pm = Pixmap::decode_png(&png).expect("decode");
     assert_eq!((pm.width(), pm.height()), (400, 200));
+    // Re-pinned for #692 (exact-area fill coverage): the √ and the
+    // superscript checked over a dark page, as solid as before or fuller.
     assert_eq!(
         fnv1a(pm.data()),
-        0xfd19788cb0c52f37,
+        0xeaaa0ea3da9c764f,
         "the overlay moved: {:#x}",
         fnv1a(pm.data())
     );
