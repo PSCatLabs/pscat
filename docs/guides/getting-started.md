@@ -172,26 +172,38 @@ More on the less obvious ones:
   `handwrite`, `typewrite` and `photo-etch` run a measuring pass and then the
   render and give each the full limits. Reading a whole file (`file`, `run`)
   charges one step per KiB.
-- **Parallel bands.** `--bands N` (1 to 64) renders a PNG as N horizontal
-  bands on N threads and stitches them into one page; the PNG is byte for
-  byte the plain `--png` render. Each band is a full run of the program with
+- **Parallel bands.** `--bands N` (1 to 64) renders a PNG on N threads and
+  stitches it into one page; the PNG is byte for byte the plain `--png`
+  render. The page is cut into more horizontal bands than threads (by
+  default two per thread, none under 8 device rows; one band for
+  `--bands 1`; `--band-rows R` picks bands about R rows tall instead), and
+  each thread takes the next band from a queue when it finishes one. So a
+  scene whose cost is uneven down the page, a cheap sky over expensive
+  terrain, doesn't wait on the one thread that drew the expensive strip.
+  Each band is a full run of the program with
   `/BandIndex` (0 is the top band), `/BandCount` and `/BandBBox
   [llx lly urx ury]` (the band's area in default user space, points) defined
-  in `userdict`. A program that reads them can skip the work outside its band:
+  in `userdict`, all describing the queued band: `/BandCount` is the number
+  of bands, not threads. A program that reads them can skip the work outside its band:
   an expensive `colorimage` procedure computes only the image rows that reach
   `BandBBox`, plus a row of margin. That is where the speed comes from. A
   program that doesn't read them still renders correctly, but every band runs
-  all of it, so it takes as long as a plain render or longer; only image
-  rasterization skips the other bands' rows. Band `i` keeps device rows
-  `floor(i*H/N)` to `floor((i+1)*H/N)`. `clippath` and the rest of the
+  all of it, so with K bands it does about K times the work of a plain render
+  and is slower than one; only image rasterization skips the other bands'
+  rows. Each band also repeats the program's setup and any margin rows, which
+  is why the default doesn't cut finer. Band `i` of `K` keeps device rows
+  `floor(i*H/K)` to `floor((i+1)*H/K)`. `clippath` and the rest of the
   graphics state still see the whole page. Every page of a multi-page program
   is banded, and every band must emit the same number of pages. PNG only: it
   refuses `--svg`, `--pdf`, `--lint`, sweeps, `--progress`, `--profile` and
   `--allow-write`, since every band would write the same file (or, for
   `--profile`, report N copies of the same calls: profile a plain run). `--max-steps`
-  and `--max-time` apply to each band on its own. `--max-memory` counts the
-  whole process, so it caps all bands together, and each band holds its own
-  canvas and pages (N times the memory of a plain render). Only the top band's
+  and `--max-time` apply to each band on its own, and the first band to hit
+  any limit stops the queue: bands already running finish, no new one starts,
+  and the rows of bands that never ran are left blank in the partial page. `--max-memory` is one
+  budget for the whole render, counted from before the threads start; each
+  running thread holds its own canvas (N times a plain render's), which the
+  budget leaves out as a plain render's leaves out its one canvas. Only the top band's
   stdout is printed, but writes to `(%stderr)` appear once per band; an error is reported once, from the first band that hit
   it, and the stitched partial page is still written. A piece seeded from
   `realtime` or `usertime` can tear at the seams, since the bands read

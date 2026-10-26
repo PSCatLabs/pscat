@@ -1,0 +1,144 @@
+%!PS-Adobe-3.0
+%%Title: Bands Uneven (a --bands benchmark)
+%%BoundingBox: 0 0 320 200
+%%Creator: Claude
+%%EndComments
+
+% A test scene for `pscat --bands` (issue #844) whose cost per row is very
+% uneven, like a ray-marched landscape: a cheap sky over terrain that is
+% found by marching a ray through a noise height field for every pixel.
+% Rows just under the horizon march the farthest and cost the most; the
+% sky costs almost nothing. Equal-height bands leave the threads that got
+% the sky idle while one or two grind through the horizon, which is what
+% the band work queue fixes.
+%
+% Every pixel is computed by the data procedure of one `colorimage`, from
+% native noise (`fbm2`). Shading reads the row above, so a band computes
+% two spare rows above and below its own (one for pixel rounding, one for
+% the row above), as gallery/basin_and_range.ps does. The test is made in
+% device space, so it holds at any --dpi. A per-run setup (an 8192-entry
+% height table, built before any pixel) stands in for the tables real
+% scenes build first: every band pays it again.
+%
+%   pscat --page 320x200 --png uneven.png examples/bands_uneven.ps
+%   pscat --bands 10 --page 320x200 --png uneven.png examples/bands_uneven.ps
+%
+% The PNG is the same bytes either way.
+
+/W 320 def /H 200 def              % the sample grid
+/Hz 0.40 def                       % the horizon, a fraction down the frame
+/Eye 0.62 def                      % camera height above the zero level
+/Focal 1.1 def                     % focal length, in frame widths
+/Zmax 60 def                       % how far a ray marches before it is fog
+
+7 noiseseed
+
+% --- setup: a distance -> ridge-height table every band rebuilds --------
+/Ntab 8192 def
+/tab Ntab array def
+0 1 Ntab 1 sub { /k exch def
+  tab k  k 0.00325 mul 3.7 6 0.5 2.0 fbm2 0.25 mul  put
+} for
+/ridge {                           % z -> extra height far away
+  Zmax div Ntab 1 sub mul cvi
+  dup 0 lt { pop 0 } if dup Ntab 1 sub gt { pop Ntab 1 sub } if
+  tab exch get
+} def
+
+/height {                          % x z -> h
+  /hz exch def /hx exch def
+  hx 0.35 mul hz 0.35 mul 5 0.5 2.0 fbm2 0.55 mul
+  hz ridge hz 0.03 mul mul add
+} def
+
+% --- which sample rows does this band need? -------------------------------
+matrix defaultmatrix /dm exch def
+/bandlo -1e9 def /bandhi 1e9 def
+/BandBBox where {
+  pop
+  0 BandBBox 1 get dm transform exch pop
+  0 BandBBox 3 get dm transform exch pop
+  2 copy gt { exch } if /bandhi exch def /bandlo exch def
+} if
+
+gsave
+0 0 translate 320 200 scale        % the image fills the page
+/rowpx 0 1 H div dtransform exch pop abs def
+/need {                            % does sample row j reach the band?
+  0 H j sub H div transform exch pop
+  0 H j sub 1 sub H div transform exch pop
+  2 copy gt { exch } if
+  bandlo rowpx 2 mul sub ge
+  exch bandhi rowpx 2 mul add le
+  and
+} def
+
+/b255 { 255 mul cvi dup 0 lt { pop 0 } if dup 255 gt { pop 255 } if } def
+/row W 3 mul string def
+/prev W array def
+/j 0 def
+0 1 W 1 sub { prev exch Zmax put } for
+/put3 {                            % r g b -> (into row at i)
+  /cb exch def /cg exch def /cr exch def
+  row i 3 mul cr b255 put
+  row i 3 mul 1 add cg b255 put
+  row i 3 mul 2 add cb b255 put
+} def
+
+% one pixel below the horizon: march, then shade by distance and slope
+/ground {
+  /dy j 0.5 add H div Hz sub Focal div def          % downward slope of the ray
+  /dx i 0.5 add W div 0.5 sub Focal div def
+  /z 0.4 def /dz 0 def /hit false def
+  { z Zmax gt { exit } if
+    Eye dy z mul sub                                % the ray's height at z
+    dx z mul z height
+    lt { /hit true def exit } if
+    /dz 0.012 z 0.022 mul add def                   % longer steps farther out
+    /z z dz add def
+  } loop
+  hit {
+    % halve the last step four times, so the ground has no step contours
+    /lo z dz sub def
+    4 { /mid lo z add 0.5 mul def
+        Eye dy mid mul sub  dx mid mul mid height lt
+          { /z mid def } { /lo mid def } ifelse } repeat
+    /e dx z mul z height def
+    /slope e Eye dy z mul sub sub 40 mul def        % how far into the ground
+    /lit 0.75 prev i get z sub 0.6 mul add          % nearer than the row above
+         slope sub def
+    lit 0.35 lt { /lit 0.35 def } if lit 1.15 gt { /lit 1.15 def } if
+    /fog z Zmax div def fog 1 gt { /fog 1 def } if
+    /fog fog fog mul def
+    e 0.30 gt
+      { /cr 0.52 def /cg 0.50 def /cb 0.47 def }      % rock
+      { /cr 0.30 def /cg 0.42 def /cb 0.22 def } ifelse  % grass
+    /keep lit 1 fog sub mul def                     % the part fog leaves
+    cr keep mul fog 0.80 mul add
+    cg keep mul fog 0.84 mul add
+    cb keep mul fog 0.90 mul add
+    prev i z put
+  } {
+    prev i Zmax put
+    0.80 0.84 0.90                                  % fog at the horizon
+  } ifelse
+  put3
+} def
+
+% one sky pixel: a vertical gradient, nearly free
+/sky {
+  /t j H div Hz div def
+  0.36 0.44 t mul add  0.52 0.32 t mul add  0.78 0.12 t mul add
+  put3
+} def
+
+W H 8 [W 0 0 H neg 0 H]
+{ j need {
+    j H Hz mul lt
+      { 0 1 W 1 sub { /i exch def sky } for }
+      { 0 1 W 1 sub { /i exch def ground } for } ifelse
+  } if
+  /j j 1 add def row }
+false 3 colorimage
+grestore
+showpage

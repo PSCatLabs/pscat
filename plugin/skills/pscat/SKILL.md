@@ -34,14 +34,15 @@ generate | pscat --png out.png -       # `-` reads the program from stdin
 Multi-page documents number their pages: `out.png` → `out-001.png`,
 `out-002.png`, … SVG does the same; PDF is naturally multi-page.
 
-`pscat --bands N --png out.png f.ps` (N is 1..64) renders on N threads, one
-horizontal band each, and gives the same PNG bytes as a plain render. It is only
+`pscat --bands N --png out.png f.ps` (N is 1..64) renders on N threads, which
+take horizontal bands (2 per thread by default; `--band-rows R` for R-row
+bands) from a queue, and gives the same PNG bytes as a plain render. It is only
 faster for a program that reads `/BandBBox [llx lly urx ury]` (also `/BandIndex`,
 0 = top, and `/BandCount`) and skips work outside it, e.g. a costly `colorimage`
 procedure that computes only those rows plus a margin: the `psart` skill has a
 runnable one ("Heavy noise renders"). PNG only; it refuses `--svg`, `--pdf`,
 `--lint`, sweeps, `--profile` and `--allow-write`. `--max-steps` and `--max-time`
-apply to each band. Command line only: `pscat-mcp` has no bands.
+apply to each band. An unaware program pays for the whole run once per band. Command line only: `pscat-mcp` has no bands.
 
 `pscat --profile --headless f.ps` (or with `--png`) prints, on stderr, each
 named procedure's call count and exclusive and inclusive wall time, slowest
