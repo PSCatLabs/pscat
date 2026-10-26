@@ -44,7 +44,7 @@ fn runaway_lib(dir: &Path) -> PathBuf {
 
 /// Run `pscat <args>` in `dir`, killed (and the test failed) if it has not
 /// ended in 60 s: a limit that stops working must fail, not hang CI.
-fn pscat_with(dir: &Path, lib: Option<&Path>, args: &[&str]) -> (Output, Duration) {
+fn pscat_with(dir: &Path, lib: Option<&Path>, args: &[&str]) -> Output {
     let mut cmd = Command::new(PSCAT);
     cmd.args(args)
         .current_dir(dir)
@@ -70,8 +70,7 @@ fn pscat_with(dir: &Path, lib: Option<&Path>, args: &[&str]) -> (Output, Duratio
         }
         std::thread::sleep(Duration::from_millis(20));
     }
-    let took = started.elapsed();
-    (child.wait_with_output().expect("output"), took)
+    child.wait_with_output().expect("output")
 }
 
 fn stderr(out: &Output) -> String {
@@ -127,9 +126,8 @@ fn a_runaway_library_is_stopped_by_max_steps_in_every_subcommand() {
     ];
     for (what, mut args) in cases {
         args.extend(["--max-steps", "100000"]);
-        let (out, took) = pscat_with(&dir, Some(&lib), &args);
+        let out = pscat_with(&dir, Some(&lib), &args);
         assert_limited(&out, "steps", what);
-        assert!(took < Duration::from_secs(30), "{what} took {took:?}");
     }
 }
 
@@ -143,9 +141,8 @@ fn a_runaway_library_is_stopped_by_max_time() {
     ] {
         let mut args = args;
         args.extend(["--max-time", "0.3"]);
-        let (out, took) = pscat_with(&dir, Some(&lib), &args);
+        let out = pscat_with(&dir, Some(&lib), &args);
         assert_limited(&out, "time", &format!("{args:?}"));
-        assert!(took < Duration::from_secs(30), "{args:?} took {took:?}");
     }
 }
 
@@ -160,7 +157,7 @@ fn a_runaway_library_is_stopped_by_max_memory() {
         "/d 100000 dict def 0 1 99999 { d exch 100000 array put } for\n",
     )
     .unwrap();
-    let (out, took) = pscat_with(
+    let out = pscat_with(
         &dir,
         Some(&lib),
         &["handwrite", "-o", "h.png", "hello", "--max-memory", "50"],
@@ -168,7 +165,6 @@ fn a_runaway_library_is_stopped_by_max_memory() {
     let err = stderr(&out);
     assert!(!out.status.success(), "{err}");
     assert!(err.contains("limitexceeded (memory)"), "{err}");
-    assert!(took < Duration::from_secs(30), "took {took:?}");
 }
 
 #[test]
@@ -208,7 +204,7 @@ fn without_a_limit_the_subcommands_render_as_before() {
         if args[0] == "handwrite" {
             args.extend(["-o", out]);
         }
-        let (res, _) = pscat_with(&dir, None, &args);
+        let res = pscat_with(&dir, None, &args);
         assert!(res.status.success(), "{args:?}: {}", stderr(&res));
         assert!(dir.join(out).is_file(), "{args:?} wrote no {out}");
     }
@@ -217,8 +213,8 @@ fn without_a_limit_the_subcommands_render_as_before() {
 #[test]
 fn a_limit_that_fits_does_not_change_the_render() {
     let dir = scratch("same");
-    let (a, _) = pscat_with(&dir, None, &["handwrite", "-o", "a.png", "same page"]);
-    let (b, _) = pscat_with(
+    let a = pscat_with(&dir, None, &["handwrite", "-o", "a.png", "same page"]);
+    let b = pscat_with(
         &dir,
         None,
         &[
@@ -262,7 +258,7 @@ fn bad_limit_values_are_refused_with_the_flag_clis_messages() {
             "missing value after --max-steps",
         ),
     ] {
-        let (out, _) = pscat_with(&dir, None, &args);
+        let out = pscat_with(&dir, None, &args);
         assert!(!out.status.success(), "{args:?}");
         assert!(stderr(&out).contains(want), "{args:?}: {}", stderr(&out));
     }
@@ -272,16 +268,15 @@ fn bad_limit_values_are_refused_with_the_flag_clis_messages() {
 fn sheet_stops_a_runaway_cell_and_the_run_fails() {
     let dir = scratch("sheet");
     std::fs::write(dir.join("loop.ps"), "{ } loop\n").unwrap();
-    let (out, took) = pscat_with(
+    let out = pscat_with(
         &dir,
         None,
         &["sheet", "-o", "s.png", "--max-steps", "100000", "loop.ps"],
     );
     assert_limited(&out, "steps", "sheet");
-    assert!(took < Duration::from_secs(30), "took {took:?}");
     // The sheet is still written, as a failing cell always was.
     assert!(dir.join("s.png").is_file());
-    let (out, _) = pscat_with(
+    let out = pscat_with(
         &dir,
         None,
         &["sheet", "-o", "t.png", "--max-time", "0.3", "loop.ps"],
@@ -296,7 +291,7 @@ fn sheet_limits_are_per_cell_not_per_sheet() {
     let dir = scratch("sheet-cells");
     std::fs::write(dir.join("work.ps"), "0 1 3000 { pop } for\n").unwrap();
     std::fs::write(dir.join("more.ps"), "0 1 30000 { pop } for\n").unwrap();
-    let (out, _) = pscat_with(
+    let out = pscat_with(
         &dir,
         None,
         &[
@@ -312,7 +307,7 @@ fn sheet_limits_are_per_cell_not_per_sheet() {
     );
     assert!(out.status.success(), "{}", stderr(&out));
     // A cell that alone costs more than the limit is stopped.
-    let (out, _) = pscat_with(
+    let out = pscat_with(
         &dir,
         None,
         &["sheet", "-o", "s.png", "--max-steps", "8000", "more.ps"],

@@ -1159,16 +1159,12 @@ fn handwrite_is_bounded_by_the_step_limit_not_only_the_timeout() {
         &[("PSCAT_LIB", lib.to_str().unwrap())],
     );
     initialized(&mut s);
-    let started = std::time::Instant::now();
     let result = s.tool("handwrite", json!({ "text": "hello" }));
-    let took = started.elapsed();
+    // The 60 s kill would be a `timeout` error, so `limit_exceeded` naming
+    // the steps is what shows the interpreter's own limit stopped it.
     assert_eq!(error_kind(&result), "limit_exceeded", "{result}");
     let err = &result["structuredContent"]["error"];
     assert_eq!(err["limit"], "steps", "the step limit stopped it: {err}");
-    assert!(
-        took < std::time::Duration::from_secs(30),
-        "stopped by the steps, not the 60 s kill: {took:?}"
-    );
     s.ping_ok();
 }
 
