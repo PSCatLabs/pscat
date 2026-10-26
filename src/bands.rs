@@ -60,13 +60,14 @@ pub fn rows(index: u32, count: u32, height: u32) -> (u32, u32) {
 
 /// Refuse every combination `--bands` can't honour, before anything runs.
 fn check_options(options: &Options) -> Result<(), String> {
-    let others: [(bool, &str); 9] = [
+    let others: [(bool, &str); 10] = [
         (options.svg.is_some(), "--svg"),
         (options.pdf.is_some(), "--pdf"),
         (options.lint, "--lint"),
         (options.sweep_seed.is_some(), "--sweep-seed"),
         (options.sweep_param.is_some(), "--sweep"),
         (options.contact_sheet.is_some(), "--contact-sheet"),
+        (options.grid.is_some(), "--grid"),
         (options.spool.is_some(), "--spool"),
         (options.interactive, "--interactive"),
         (options.progress, "--progress"),

@@ -362,6 +362,10 @@ fn refuses_what_it_cannot_honour() {
             ],
             "--allow-write",
         ),
+        (
+            vec!["--bands", "2", "--png", png, "--grid", "2x2", "-e", "0"],
+            "--grid",
+        ),
         (vec!["--bands", "0", "--png", png, "-e", "0"], "1..64"),
         (vec!["--bands", "65", "--png", png, "-e", "0"], "1..64"),
         (
