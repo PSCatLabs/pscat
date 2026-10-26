@@ -567,11 +567,21 @@ thread_local! {
 /// the compiler's plain drop glue; profiling fib showed a custom
 /// `Drop for Object` taxing ~18% of the whole run (docs/archive/NOTES.md, Stage 11).
 impl Drop for PsArray {
-    #[inline]
+    /// The shared-storage check is inline, so dropping one of several
+    /// handles (a procedure frame's body, every loop iteration) costs no
+    /// call (#863); the last handle's teardown is out of line.
+    #[inline(always)]
     fn drop(&mut self) {
         if Rc::strong_count(&self.data) != 1 {
             return;
         }
+        self.teardown_last();
+    }
+}
+
+impl PsArray {
+    #[inline(never)]
+    fn teardown_last(&mut self) {
         let data = std::mem::replace(&mut self.data, EMPTY_STORE.with(Rc::clone));
         let Ok(cell) = Rc::try_unwrap(data) else {
             return;
