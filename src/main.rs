@@ -501,6 +501,12 @@ fn read_source(path: &str) -> Result<Vec<u8>, String> {
     }
 }
 
+/// `--exit-with-parent`'s value (also taken by `pscat handwrite`).
+fn parent_pid_arg(n: &str) -> Result<u32, String> {
+    n.parse()
+        .map_err(|_| format!("invalid --exit-with-parent value: {n} (expected a process id)"))
+}
+
 /// `--exit-with-parent PID`: a thread that ends the process once `parent`
 /// is no longer its parent (it died and this process was re-parented).
 /// Looked at once at the start, then twice a second, on its own thread, so
@@ -1389,9 +1395,7 @@ fn parse_args() -> Result<Options, String> {
             "--progress" => options.progress = true,
             "--exit-with-parent" => {
                 let n = args.next().ok_or("missing PID after --exit-with-parent")?;
-                options.exit_with_parent = Some(n.parse().map_err(|_| {
-                    format!("invalid --exit-with-parent value: {n} (expected a process id)")
-                })?);
+                options.exit_with_parent = Some(parent_pid_arg(&n)?);
             }
             "--dpi" => {
                 let n = args.next().ok_or("missing value after --dpi")?;
