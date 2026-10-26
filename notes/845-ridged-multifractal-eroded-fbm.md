@@ -29,9 +29,11 @@ They are the two octave loops at the top of fractal_clouds' profile
   his code. `fc-ridged` uses the unweighted one. His `weight > 0.001`
   early exit is dropped, because it makes the sum depend on a threshold.
   `fc-ridged` writes `1 - |1.6 n|`, clamped at 0, squared, with weight
-  `2 * sig`. Since `offset - |1.6n| = 1.6 (offset/1.6 - |n|)`, `offset 0.625`
-  with `wgain 5.12` (2 x 1.6^2) gives the same shape, scaled by 2.56,
-  except for the clamp at 0 (the square folds negatives back up).
+  `2 * sig` from the unweighted signal, a first amplitude of 0.5, and a
+  normalized sum. Since `offset - |1.6n| = 1.6 (offset/1.6 - |n|)`,
+  `offset 0.625` with a `wgain` near 5 approximates it, up to scale. It is
+  not exact, because of the weighted feedback, the clamp before squaring,
+  and fc's normalization.
 - **Eroded fBm** follows Quílez's widely used derivative-damped fBm
   (`d += n.yz; a += b * n.x / (1 + dot(d, d))`). The gradient is summed as
   sampled: no chain rule for the frequency, and no rotation into the base
