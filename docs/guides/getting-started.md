@@ -66,7 +66,9 @@ More on the less obvious ones:
   once, so exploring seeds or a parameter is one command instead of many
   hand edits. It overrides every `srand` call, so found art with a hardcoded
   `N srand` line sweeps unmodified. (A restore of a value saved with `rrand`
-  puts the saved stream back instead.) `--sweep NAME=...` predefines `/NAME`
+  puts the saved stream back instead.) It also seeds the native noise
+  operators (`N noiseseed`, #753), so noise art varies per frame; a program
+  that calls `noiseseed` itself keeps its own table. `--sweep NAME=...` predefines `/NAME`
   in `userdict` for a program that reads it. `--png` writes numbered
   per-frame files; `--contact-sheet PATH` composites every frame into one
   grid PNG instead (`--grid COLSxROWS` overrides the layout). Use either or

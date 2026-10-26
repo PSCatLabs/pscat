@@ -647,7 +647,9 @@ renders eight examples in both and compares block-downsampled output).
   holds every operator bit-equal to it and pins a few exact values.
   **Changing any constant or operation order changes every seeded render
   that uses them.** The table lives in `Interp::noise_perm`, apart from
-  `rand_state`. `x y perm .permnoise2` is artkit's `noise2` formula
+  `rand_state`. `Interp::set_seed_override` (`--sweep-seed`, #753) also builds
+  it from the sweep seed (`noise_from_override`); a program's `noiseseed`
+  clears that and wins; sampling it counts as the override firing. `x y perm .permnoise2` is artkit's `noise2` formula
   computed with PostScript's int/real promotion, so artkit's `noise2`
   (now `{ Perm .permnoise2 }` when the operator exists) stays
   bit-identical, type included (`notes/734-native-noise.md`).

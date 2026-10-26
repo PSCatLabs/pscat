@@ -98,7 +98,9 @@ pscat sheet -o d.png --page 300x300 --dpi 72 --sweep Density=10,20,40,80 piece.p
 ```
 
 `--sweep-seed` and `--sweep NAME=` take the next file only and use the same
-grammar as the flag CLI. A `--dpi` cell is `DPI[xZOOM][@MAT]`: `@#222` (or
+grammar as the flag CLI. A seed sweep also seeds the native noise
+operators (`N noiseseed`), so noise art varies per cell; a program that calls
+`noiseseed` itself keeps its own table. A `--dpi` cell is `DPI[xZOOM][@MAT]`: `@#222` (or
 `@white`) draws the page transparent, sets it on that colour and pads it 10 px,
 to judge an icon on dark and light. `+` joins cells into one stacked column.
 `--cols N` wraps a row after N columns. Quote a `--dpi` list with `#` or `+`.

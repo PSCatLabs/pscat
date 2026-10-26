@@ -459,6 +459,68 @@ fn a_seed_sweep_reseeds_each_cell_and_warns_when_nothing_seeds() {
     assert!(stderr.contains("never called srand"), "{stderr}");
 }
 
+/// The 100x100 px region of cell `k` in a one-row sheet of 100x100 pt
+/// pages at 72 dpi (12 px margin, 1 px border, 14 px gap; the caption is
+/// narrower than the cell, so the column is the cell's 102 px).
+fn cell_bytes(p: &Pixmap, k: u32) -> Vec<[u8; 4]> {
+    let x0 = 13 + k * (102 + 14);
+    (13..113)
+        .flat_map(|y| (x0..x0 + 100).map(move |x| (x, y)))
+        .map(|(x, y)| px(p, x, y))
+        .collect()
+}
+
+/// A 10x10 field of grey tiles from the native fBm, so the picture is the
+/// noise table and nothing else (no `srand` anywhere).
+const NOISE_FIELD: &str = "0 1 9 { /i exch def 0 1 9 { /j exch def \
+    i 0.37 mul j 0.37 mul 3 0.5 2 fbm2 0.5 add setgray \
+    i 10 mul j 10 mul 10 10 rectfill } for } for";
+
+/// Issue #753: a seed sweep also seeds the noise table, so a piece that
+/// only uses noise differs per cell, the same seed gives the same cell,
+/// and the piece's own `noiseseed` is left alone.
+#[test]
+fn a_seed_sweep_varies_noise_and_leaves_a_programs_own_noiseseed() {
+    let d = dir();
+    let noisy = write(&d, "noisy.ps", NOISE_FIELD);
+    let out = d.join("noise-seeds.png");
+    let args = |file: &str, spec: &'static str, out: &Path| -> (bool, String) {
+        let (ok, _, stderr) = sheet(&[
+            "-o",
+            out.to_str().unwrap(),
+            "--no-labels",
+            "--no-sizes",
+            "--page",
+            "100x100",
+            "--sweep-seed",
+            spec,
+            file,
+        ]);
+        (ok, stderr)
+    };
+    let (ok, stderr) = args(&noisy, "1,2,1", &out);
+    assert!(ok, "{stderr}");
+    // Noise counts as the sweep taking effect: no "never called" warning.
+    assert!(!stderr.contains("never called"), "{stderr}");
+    let p = Pixmap::load_png(&out).unwrap();
+    let (a, b, c) = (cell_bytes(&p, 0), cell_bytes(&p, 1), cell_bytes(&p, 2));
+    assert_ne!(a, b, "seeds 1 and 2 must give different noise");
+    assert_eq!(a, c, "the same seed must give the same cell");
+
+    // A program that seeds its noise itself keeps that seed in every
+    // cell, and (it never calls srand either) is told the sweep did nothing.
+    let own = write(&d, "own.ps", &format!("7 noiseseed {NOISE_FIELD}"));
+    let out = d.join("noise-own.png");
+    let (ok, stderr) = args(&own, "1,2", &out);
+    assert!(ok, "{stderr}");
+    assert!(
+        stderr.contains("never called srand or sampled noise"),
+        "{stderr}"
+    );
+    let p = Pixmap::load_png(&out).unwrap();
+    assert_eq!(cell_bytes(&p, 0), cell_bytes(&p, 1));
+}
+
 #[test]
 fn bad_input_is_refused_with_a_message() {
     let d = dir();

@@ -1153,7 +1153,7 @@ fn run_sweep(options: &Options, source: &[u8]) -> ExitCode {
 
     if matches!(axis, SweepAxis::Seed(_)) && !seed_ever_fired {
         eprintln!(
-            "pscat: sweep: warning: source never called srand -- --sweep-seed had no effect, \
+            "pscat: sweep: warning: source never called srand or sampled noise -- --sweep-seed had no effect, \
              every frame is identical"
         );
     }
@@ -1805,7 +1805,8 @@ fn print_usage() {
     println!("Sweeps (render file.ps once per value, needing --png and/or --contact-sheet):");
     println!("      --sweep-seed SPEC   reseed with each value in turn (A:B, A:B:STEP, or");
     println!("                          A,B,C); overrides every srand call, so it works on");
-    println!("                          found art unmodified");
+    println!("                          found art unmodified; also seeds noise (noiseseed)");
+    println!("                          unless the program calls noiseseed itself");
     println!("      --sweep NAME=SPEC   define /NAME to each value in turn before running;");
     println!("                          the source must look it up itself, e.g.");
     println!("                          /NAME where {{ pop NAME }} {{ 0 }} ifelse");
