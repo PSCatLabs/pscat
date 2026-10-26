@@ -21,9 +21,12 @@ fn limited(mib: usize) -> Interp {
 
 #[test]
 fn memory_growth_is_capped() {
-    // The allocator is counting from the start of the process.
+    // The allocator is counting. Other threads' counts can lag by up to
+    // 64 KiB each (#844), so hold something bigger than that first.
     assert!(pscat::memtrack::installed());
+    let held = vec![1u8; 1 << 20];
     assert!(pscat::memtrack::live_bytes() > 0);
+    drop(held);
 
     // One big allocation is refused before it is made.
     let mut it = limited(50);
