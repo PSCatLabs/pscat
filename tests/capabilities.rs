@@ -784,3 +784,113 @@ fn strokeglyphs_does_not_reuse_reserved_parameter_names() {
         "only {checked} strokeglyphs and mathkit parameters checked"
     );
 }
+
+/// Issue #754: pscat's native extension operators are cataloged with
+/// `kind: "operator"`, through the serialized payload an agent reads (not
+/// just the Rust enum), and every entry has a kind from the closed set.
+#[test]
+fn payload_lists_native_operators_with_kind_operator() {
+    let payload = capabilities::payload_json();
+    let caps = payload["capabilities"].as_array().expect("array");
+    let find = |name: &str| {
+        caps.iter()
+            .find(|c| c["name"] == name)
+            .unwrap_or_else(|| panic!("{name} missing from the catalog"))
+    };
+    let g = find("gnoise2");
+    assert_eq!(g["kind"], "operator");
+    assert_eq!(g["source"], "systemdict");
+    assert_eq!(g["load"], "");
+    assert_eq!(g["example"], "x y gnoise2 n");
+    assert!(!g["description"].as_str().unwrap().is_empty());
+    for name in [
+        "noiseseed",
+        "gnoise3",
+        "gnoise2d",
+        "vnoise2",
+        "vnoise3",
+        "fbm2",
+        "fbm3",
+        "vfbm2",
+        "vfbm3",
+        "ridged2",
+        "ridged3",
+        "setalpha",
+        "currentalpha",
+        "setblendmode",
+        "currentblendmode",
+        ".sameclip",
+        "writereals",
+        "readreals",
+    ] {
+        assert_eq!(find(name)["kind"], "operator", "{name}");
+    }
+    let kinds: BTreeSet<&str> = caps.iter().map(|c| c["kind"].as_str().unwrap()).collect();
+    let known: BTreeSet<&str> = [
+        "font",
+        "type3_face",
+        "palette",
+        "template",
+        "procedure",
+        "operator",
+        "dial",
+    ]
+    .into();
+    assert!(kinds.is_subset(&known), "unexpected kinds: {kinds:?}");
+    // The library procedures keep their kind.
+    assert_eq!(find("nrgnoise2")["kind"], "procedure");
+}
+
+/// Every cataloged operator is a real native operator in `systemdict`
+/// (not a missing name, and not a library procedure shadowing one).
+#[test]
+fn every_cataloged_operator_exists_in_systemdict() {
+    let mut it = Interp::new();
+    let ops: Vec<String> = capabilities::catalog()
+        .into_iter()
+        .filter(|c| c.kind == CapabilityKind::Operator)
+        .map(|c| c.name)
+        .collect();
+    assert!(ops.len() >= 18, "operators: {ops:?}");
+    for name in &ops {
+        it.run_str(&format!(
+            "systemdict /{name} known {{ systemdict /{name} get type /operatortype eq }} {{ false }} ifelse"
+        ))
+        .unwrap_or_else(|e| panic!("probe {name}: {}", it.error_report(&e)));
+        let top = it.operand_stack().last().expect("result").repr();
+        assert_eq!(top, "true", "{name} is not an operator in systemdict");
+    }
+}
+
+/// Every `nr*` noise reference procedure in the catalog names its native
+/// operator, and that operator is cataloged as an operator.
+#[test]
+fn noiseref_procedures_point_to_cataloged_native_operators() {
+    let caps = capabilities::catalog();
+    let operators: BTreeSet<String> = caps
+        .iter()
+        .filter(|c| c.kind == CapabilityKind::Operator)
+        .map(|c| c.name.clone())
+        .collect();
+    let refs: Vec<_> = caps
+        .iter()
+        .filter(|c| c.source == "lib/noiseref.ps" && c.kind == CapabilityKind::Procedure)
+        .collect();
+    assert_eq!(refs.len(), 12, "the twelve nr* twins");
+    for c in refs {
+        let stem = c.name.strip_prefix("nr").expect("nr prefix");
+        // nrseed is the twin of noiseseed; every other twin drops only the prefix.
+        let native = if stem == "seed" { "noiseseed" } else { stem };
+        assert!(
+            operators.contains(native),
+            "{} has no cataloged native operator {native}",
+            c.name
+        );
+        assert!(
+            c.description.contains(&format!("native {native} operator")),
+            "{}: summary must name the native operator: {}",
+            c.name,
+            c.description
+        );
+    }
+}

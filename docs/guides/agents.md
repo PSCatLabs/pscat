@@ -73,7 +73,7 @@ sessions in a checkout still load them.
 | Lettering, headlines, apparel mockups | `render_postscript` | — | psart: Media and kits |
 | Style packs (steampunk, psychedelic, sci-fi, toon), Type 3 faces | `render_postscript` | — | psart: references/styles-and-type.md |
 | Korean, Japanese, Thai text | `render_postscript` (needs the font catalog) | — | pscat: Fonts |
-| What fonts, palettes, templates, procedures exist | `describe_art_capabilities` | `pscat --capabilities`, `--fonts` | pscat: Capabilities |
+| What fonts, palettes, templates, procedures, native operators exist | `describe_art_capabilities` | `pscat --capabilities`, `--fonts` | pscat: Capabilities |
 | PDF retype | planned (#559, #560) | — | — |
 
 Task-level MCP tools are added only where agents clearly do better with
