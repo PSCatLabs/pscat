@@ -27,7 +27,7 @@ downloads the pinned GitHub release once, checks it against the release's
 `SHA256SUMS` and caches it (`~/Library/Caches/pscat/plugin` or
 `~/.cache/pscat/plugin`). The same plugin installs in the Claude desktop app
 (Customize > Plugins > Add marketplace, `PSCatLabs/pscat`), where Cowork runs
-the server on your computer:
+the server on your computer. In Claude Code:
 
 ```text
 /plugin install pscat --marketplace PSCatLabs/pscat

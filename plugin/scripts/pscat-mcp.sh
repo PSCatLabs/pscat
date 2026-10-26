@@ -128,10 +128,13 @@ lookup() {
 }
 
 # --- download and install ------------------------------------------------------
-fetch() { # fetch URL FILE
+CURL_OR_WGET=
+fetch() { # fetch URL FILE; returns curl's or wget's exit status
   if command -v curl >/dev/null 2>&1; then
+    CURL_OR_WGET=curl
     curl -fsSL --retry 2 --connect-timeout 20 -o "$2" "$1"
   elif command -v wget >/dev/null 2>&1; then
+    CURL_OR_WGET=wget
     wget -q -T 20 -O "$2" "$1"
   else
     say "neither curl nor wget is installed, so pscat cannot be downloaded"
@@ -200,9 +203,17 @@ install() {
 
   WORK=$(mktemp -d "$CACHE/$TAG/.dl.XXXXXX") || { say "cannot create a temporary directory in $CACHE/$TAG"; cleanup; return 1; }
   sums_url=$BASE_URL/$TAG/SHA256SUMS
-  if ! fetch "$sums_url" "$WORK/SHA256SUMS"; then
+  fetch "$sums_url" "$WORK/SHA256SUMS"
+  rc=$?
+  if [ "$rc" != 0 ]; then
     say "could not download $sums_url"
-    say "pscat is not installed yet and this computer seems to be offline (or GitHub is unreachable); connect and restart your agent"
+    case "$CURL_OR_WGET:$rc" in
+      curl:22|curl:37|wget:8)
+        # The server answered (HTTP error) or the file is missing: not offline.
+        say "release $TAG has no SHA256SUMS there: is the release published (not a draft), and is the tag in $PLUGIN_DIR/pscat-release right?" ;;
+      *)
+        say "pscat is not installed yet and this computer seems to be offline (or GitHub is unreachable); connect and restart your agent" ;;
+    esac
     offline_help
     cleanup
     return 1
@@ -236,12 +247,13 @@ install() {
   [ -x "$bundle/pscat-mcp" ] || { say "$asset holds no ${asset%.tar.gz}/pscat-mcp"; cleanup; return 1; }
 
   # Publish: keep the unpacked tree under a unique name and point
-  # $TAG/$TRIPLE at it with one symlink. `ln -s` fails if the name exists, so
+  # $TAG/$TRIPLE at it with one symlink. `ln -sn` fails if the name exists, so
   # two racing installers cannot both win, and a reader sees either nothing
   # or a whole bundle, never a half-unpacked one.
   keep=$(basename "$WORK")
   mv "$WORK/x" "$CACHE/$TAG/$keep.d" || { say "could not move the bundle into $CACHE/$TAG"; cleanup; return 1; }
-  if ln -s "$keep.d/${asset%.tar.gz}" "$CACHE/$TAG/$TRIPLE" 2>/dev/null; then
+  # -n: an existing link to a directory must make ln fail, not be followed.
+  if ln -sn "$keep.d/${asset%.tar.gz}" "$CACHE/$TAG/$TRIPLE" 2>/dev/null; then
     say "installed pscat $TAG in $CACHE/$TAG/$TRIPLE"
   else
     rm -rf "$CACHE/$TAG/$keep.d"
@@ -249,7 +261,7 @@ install() {
   # Stable names for people and skills: $CACHE/bin/pscat and pscat-mcp.
   mkdir -p "$CACHE/bin" 2>/dev/null
   for b in pscat pscat-mcp; do
-    ln -s "$CACHE/$TAG/$TRIPLE/$b" "$CACHE/bin/.$b.$$" 2>/dev/null &&
+    ln -sn "$CACHE/$TAG/$TRIPLE/$b" "$CACHE/bin/.$b.$$" 2>/dev/null &&
       mv -f "$CACHE/bin/.$b.$$" "$CACHE/bin/$b" 2>/dev/null
     rm -f "$CACHE/bin/.$b.$$"
   done

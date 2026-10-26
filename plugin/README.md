@@ -35,7 +35,7 @@ binaries; its MCP server entry runs a small launcher,
    if `pscat-mcp --version` is at least the version the plugin pins.
 2. **Otherwise downloads it once.** It fetches the archive for your platform
    (macOS arm64 or x86_64, Linux x86_64 or aarch64) from the GitHub release
-   named in `pscat-release` (today `v0.6.3`), about 6 MB, from
+   named in `pscat-release`, about 6 MB, from
    <https://github.com/PSCatLabs/pscat/releases>. It checks the archive
    against that release's `SHA256SUMS` and refuses it on a mismatch. Then
    it unpacks it into a per-user cache and runs it from there. It needs only

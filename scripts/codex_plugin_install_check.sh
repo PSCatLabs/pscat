@@ -73,7 +73,7 @@ extra=$(cd "$copy" 2>/dev/null && find . -mindepth 1 -maxdepth 1 ! -name skills 
 hook_cmd=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["hooks"]["SessionStart"][0]["hooks"][0]["command"])' \
     "$copy/hooks/hooks.json")
 mkdir -p "$work/home"
-offline="file://$work/no-release"
+offline="http://127.0.0.1:9"  # connection refused, like being offline
 hook_out() { CLAUDE_PLUGIN_ROOT="$copy" PATH="$1" HOME="$work/home" PSCAT_CACHE_DIR="$work/hook-cache" \
     PSCAT_RELEASE_BASE_URL="$offline" sh -c "$hook_cmd"; }
 hook_clean=/usr/bin:/bin

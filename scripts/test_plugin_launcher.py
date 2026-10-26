@@ -3,7 +3,7 @@
 
     python3 scripts/test_plugin_launcher.py
 
-No network: each test builds a fake GitHub release in a temp dir (archives for
+No network (offline is a refused connection to 127.0.0.1:9): each test builds a fake GitHub release in a temp dir (archives for
 the four Unix targets, holding a fake pscat-mcp that prints one marker line,
 and SHA256SUMS) and points the launcher at it with PSCAT_RELEASE_BASE_URL=file://.
 HOME, PATH and the cache are temp dirs too, so a real pscat on this machine is
@@ -165,17 +165,24 @@ class Launcher(unittest.TestCase):
         self.assertEqual(self.installed_dirs(), [])
 
     def test_offline_says_so(self):
-        self.base_url = "file://" + self.path("nowhere")
+        self.base_url = "http://127.0.0.1:9"  # connection refused: offline
         r = self.run_launcher()
         self.assertEqual(r.returncode, 1)
         self.assertEqual(r.stdout, "")
         self.assertIn("offline", r.stderr)
         self.assertIn("cargo install pscat", r.stderr)
 
+    def test_missing_release_is_not_called_offline(self):
+        self.pin("v9.9.12")  # the base URL works, the tag is not there
+        r = self.run_launcher()
+        self.assertEqual((r.returncode, r.stdout), (1, ""))
+        self.assertIn("is the release published", r.stderr)
+        self.assertNotIn("offline", r.stderr)
+
     def test_offline_falls_back_to_an_earlier_download(self):
         self.assertEqual(self.run_launcher("--locate").returncode, 0)
         self.pin("v9.9.10")
-        self.base_url = "file://" + self.path("nowhere")
+        self.base_url = "http://127.0.0.1:9"  # connection refused: offline
         r = self.run_launcher("y")
         self.assertEqual((r.returncode, r.stdout), (0, f"{MARKER} y\n"), r.stderr)
         self.assertIn("previously downloaded", r.stderr)

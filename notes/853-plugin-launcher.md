@@ -44,10 +44,15 @@ refuse the whole plugin. The launcher is `plugin/scripts/pscat-mcp.sh`, and
     finds `lib/` beside itself. It needs only curl or wget, tar and
     sha256sum, shasum or openssl.
   - **Offline:** a clear stderr message, and exit 1. If a previous pin's
-    download is cached, it uses that instead and warns.
+    download is cached, it uses that instead and warns. An HTTP error or a
+    missing file (curl 22/37, wget 8) is reported as "is the release
+    published (not a draft), and is the tag right?" instead, so a typo or
+    a draft rc does not send anyone to check their Wi-Fi.
 - **Concurrency.** Each installer unpacks into its own `mktemp` directory
-  inside the cache. It publishes with `ln -s <its dir> <tag>/<triple>`,
-  which fails if the name exists, so exactly one racer wins and a reader
+  inside the cache. It publishes with `ln -sn <its dir> <tag>/<triple>`,
+  which fails if the name exists (`-n` matters: without it `ln` follows an
+  existing link to a directory and succeeds inside it), so exactly one racer
+  wins and a reader
   never sees a half-unpacked tree. The losers delete their own copies. A
   `mkdir` lock with a pid file (a stale lock is cleared when its process is
   gone) only stops eight parallel starts from downloading eight times.
@@ -90,14 +95,16 @@ refuse the whole plugin. The launcher is `plugin/scripts/pscat-mcp.sh`, and
   - no top-level `bin/`, and the pin rule above.
 - **Tests:**
   - `scripts/test_plugin_launcher.py` builds a fake `file://` release (a
-    fake `pscat-mcp` that prints a marker) and covers 11 cases, under sh,
+    fake `pscat-mcp` that prints a marker) and covers 12 cases, under sh,
     dash and `bash --posix`: cold and warm start with stdout exactly the
     marker, `--locate`, eight parallel cold starts leaving one install and
     no lock, checksum mismatch installing nothing, offline, the offline
     fallback, an installed new-enough copy used (PATH, `~/.cargo/bin`,
     `PSCAT_MCP_BIN`), an old copy passed over, a stale lock, the hook's
-    three outputs, and a release-version pin. Mutating the launcher
-    (stdout noise, skipping the checksum, dropping the lock) fails it.
+    three outputs, a missing release told apart from offline, and a
+    release-version pin. Mutating the launcher (stdout noise, skipping the
+    checksum) fails it; dropping the lock fails only the lock tests, the
+    parallel test still passing on the `ln -sn` publish alone.
   - Both install checks now prove three cases through the real hosts' own
     resolution: on PATH; not on PATH, so a download from
     `scripts/fake_plugin_release.py` (the real binaries); and offline,

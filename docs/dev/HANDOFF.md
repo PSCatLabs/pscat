@@ -1428,7 +1428,7 @@ renders eight examples in both and compares block-downsampled output).
   `plugin/pscat-release` (matched by suffix in `SHA256SUMS`, so an rc's
   file names don't matter), verifies it, and publishes it into
   `~/Library/Caches/pscat/plugin` or `~/.cache/pscat/plugin` with one
-  `ln -s` (atomic; a mkdir lock only avoids duplicate downloads). stdout
+  `ln -sn` (atomic; a mkdir lock only avoids duplicate downloads). stdout
   is the MCP channel: it logs only to stderr. The SessionStart hook is the
   same script with `--hook` (it never downloads), which replaced
   `hooks/check-pscat.sh` (#684); both are held for portal review now
