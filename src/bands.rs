@@ -99,9 +99,10 @@ struct BandOutput {
     error: Option<String>,
 }
 
-/// Holds every band at the start line until all N canvases exist, so
-/// `--max-memory`'s base (taken when a band sets its limits) already counts
-/// every canvas. A `Barrier` would leave the others waiting forever if one
+/// Holds every band at a line until all N reach it. `run_band` passes two:
+/// one once every canvas exists, so `--max-memory`'s base (taken when a band
+/// sets its limits) counts all of them, and one once every band has its
+/// base, so no program's allocations escape the shared budget. A `Barrier` would leave the others waiting forever if one
 /// thread failed to spawn; `abort` releases them instead.
 struct StartGate {
     state: Mutex<(u32, bool)>,
@@ -118,7 +119,8 @@ impl StartGate {
         }
     }
 
-    /// Arrive and wait for the others. False when the render was abandoned.
+    /// Arrive and wait for the others. False when the render was abandoned
+    /// before all of them arrived; an abort after that changes nothing.
     fn arrive(&self) -> bool {
         let Ok(mut state) = self.state.lock() else {
             return false;
@@ -131,7 +133,7 @@ impl StartGate {
                 Err(_) => return false,
             };
         }
-        !state.1
+        state.0 >= self.count
     }
 
     fn abort(&self) {
@@ -141,6 +143,18 @@ impl StartGate {
         self.ready.notify_all();
     }
 }
+
+/// Aborts both gates when dropped; see `run_band`.
+struct AbortOnDrop<'a>(&'a [StartGate; 2]);
+
+impl Drop for AbortOnDrop<'_> {
+    fn drop(&mut self) {
+        self.0.iter().for_each(StartGate::abort);
+    }
+}
+
+/// Said by a band released from a gate because another band failed.
+const ABANDONED: &str = "abandoned";
 
 /// `pscat --bands N`: check the options, run the bands, stitch and write.
 pub fn run(options: &Options, count: u32) -> ExitCode {
@@ -220,21 +234,21 @@ fn render(
     count: u32,
     height: u32,
 ) -> Result<Vec<BandOutput>, String> {
-    let gate = StartGate::new(count);
+    let gates = [StartGate::new(count), StartGate::new(count)];
     std::thread::scope(|scope| {
         let mut handles = Vec::with_capacity(count as usize);
         for index in 0..count {
-            let gate = &gate;
+            let gates = &gates;
             let spawned = std::thread::Builder::new()
                 .name(format!("band-{index}"))
                 .stack_size(BAND_STACK)
                 .spawn_scoped(scope, move || {
-                    run_band(options, source, index, count, height, gate)
+                    run_band(options, source, index, count, height, gates)
                 });
             match spawned {
                 Ok(h) => handles.push(h),
                 Err(e) => {
-                    gate.abort();
+                    gates.iter().for_each(StartGate::abort);
                     return Err(format!("cannot start band thread: {e}"));
                 }
             }
@@ -242,15 +256,23 @@ fn render(
         // Join every band before looking at any result: a handle left
         // unjoined after a panic would make `scope` itself panic.
         let joined: Vec<_> = handles.into_iter().map(|h| h.join()).collect();
-        let mut outputs = Vec::with_capacity(joined.len());
-        for (i, result) in joined.into_iter().enumerate() {
-            match result {
-                Ok(Ok(out)) => outputs.push(out),
-                Ok(Err(msg)) => return Err(format!("band {}/{count}: {msg}", i + 1)),
-                Err(_) => return Err(format!("band {}/{count} crashed", i + 1)),
-            }
+        // Report the band that failed, not one it left abandoned.
+        let failure = |(i, r): (usize, &std::thread::Result<Result<BandOutput, String>>)| match r {
+            Ok(Ok(_)) => None,
+            Ok(Err(msg)) if msg == ABANDONED => None,
+            Ok(Err(msg)) => Some(format!("band {}/{count}: {msg}", i + 1)),
+            Err(_) => Some(format!("band {}/{count} crashed", i + 1)),
+        };
+        if let Some(msg) = joined.iter().enumerate().find_map(failure) {
+            return Err(msg);
         }
-        Ok(outputs)
+        joined
+            .into_iter()
+            .map(|r| match r {
+                Ok(Ok(out)) => Ok(out),
+                _ => Err("a band was abandoned".to_string()),
+            })
+            .collect()
     })
 }
 
@@ -262,13 +284,16 @@ fn run_band(
     index: u32,
     count: u32,
     height: u32,
-    gate: &StartGate,
+    gates: &[StartGate; 2],
 ) -> Result<BandOutput, String> {
+    // However this band ends (an error, a panic), release the others
+    // still waiting at a gate it never reached.
+    let _release = AbortOnDrop(gates);
     let scale = options.dpi / 72.0;
     let interp = Interp::with_page_scaled(options.page.0, options.page.1, scale);
     // Arrive whether or not the canvas was built, so no band is left waiting.
-    if !gate.arrive() {
-        return Err("abandoned".to_string());
+    if !gates[0].arrive() {
+        return Err(ABANDONED.to_string());
     }
     let mut interp = interp.ok_or("unusable page size")?;
     // The process exits right after the stitch: leave the dictionaries to
@@ -296,11 +321,17 @@ fn run_band(
         .run_source(preamble.as_bytes())
         .map_err(|e| format!("internal error defining the band names: {e}"))?;
     // Limits after the band names, so they bound the program alone, as in a
-    // plain render; still after the start gate, so the heap base counts
-    // every band's canvas.
+    // plain render; after the first gate, so the heap base counts every
+    // band's canvas.
     interp
         .set_limits(options.limits)
         .map_err(|e| format!("limits: {e}"))?;
+    // No band runs the program until every band has its base: a band that
+    // started early would put its allocations under a later band's base,
+    // out of every check.
+    if !gates[1].arrive() {
+        return Err(ABANDONED.to_string());
+    }
     let error = match interp.run_source(source) {
         Ok(()) => None,
         Err(e) => {
@@ -377,6 +408,34 @@ mod tests {
                 assert_eq!(next, height);
             }
         }
+    }
+
+    #[test]
+    fn a_gate_releases_everyone_or_aborts_the_waiters() {
+        let gate = StartGate::new(3);
+        let all = std::thread::scope(|s| {
+            let hs: Vec<_> = (0..3).map(|_| s.spawn(|| gate.arrive())).collect();
+            hs.into_iter()
+                .map(|h| h.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+        assert_eq!(all, [true; 3]);
+        gate.abort(); // after everyone arrived: changes nothing
+        assert!(gate.state.lock().unwrap().0 >= 3);
+
+        let gate = StartGate::new(3);
+        let waited = std::thread::scope(|s| {
+            let h = s.spawn(|| gate.arrive());
+            while gate.state.lock().unwrap().0 == 0 {
+                std::thread::yield_now();
+            }
+            gate.abort();
+            h.join().unwrap()
+        });
+        assert!(
+            !waited,
+            "a waiter is released, told the render was abandoned"
+        );
     }
 
     #[test]
