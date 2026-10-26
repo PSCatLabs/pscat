@@ -30,6 +30,7 @@ cargo run -- --speed 10 file.ps           # slower (steps per frame, default 100
 cargo run -- --png out.png file.ps        # headless render to PNG
 cargo run -- --svg out.svg file.ps        # export SVG (also --pdf out.pdf)
 cargo run -- --dpi 300 --png out.png file.ps   # print-resolution rendering
+cargo run -- --bands 4 --png out.png file.ps   # render on 4 threads, 4 bands
 cargo run -- --spool jobs/                # act like a lab printer: render
                                           # each .ps/.eps dropped into jobs/
 cargo run -- --halftone file.ps           # classic 45° halftone dots, like a
@@ -122,6 +123,29 @@ More on the less obvious ones:
   are ignored. `readreals` reads the whole file, then keeps the first `n`
   values, so for a huge file it is as costly as `(path) (r) file`. Both honour
   `--max-steps`, `--max-time` and `--max-memory`.
+- **Parallel bands.** `--bands N` (1 to 64) renders a PNG as N horizontal
+  bands on N threads and stitches them into one page; the PNG is byte for
+  byte the plain `--png` render. Each band is a full run of the program with
+  `/BandIndex` (0 is the top band), `/BandCount` and `/BandBBox
+  [llx lly urx ury]` (the band's area in default user space, points) defined
+  in `userdict`. A program that reads them can skip the work outside its band:
+  an expensive `colorimage` procedure computes only the image rows that reach
+  `BandBBox`, plus a row of margin. That is where the speed comes from. A
+  program that doesn't read them still renders correctly, but every band runs
+  all of it, so it takes as long as a plain render or longer; only image
+  rasterization skips the other bands' rows. Band `i` keeps device rows
+  `floor(i*H/N)` to `floor((i+1)*H/N)`. `clippath` and the rest of the
+  graphics state still see the whole page. Every page of a multi-page program
+  is banded, and every band must emit the same number of pages. PNG only: it
+  refuses `--svg`, `--pdf`, `--lint`, sweeps, `--progress` and
+  `--allow-write`, since every band would write the same file. `--max-steps`
+  and `--max-time` apply to each band on its own. `--max-memory` counts the
+  whole process, so it caps all bands together, and each band holds its own
+  canvas and pages (N times the memory of a plain render). Only the top band's
+  stdout is printed; an error is reported once, from the first band that hit
+  it, and the stitched partial page is still written. A piece seeded from
+  `realtime` or `usertime` can tear at the seams, since the bands read
+  different clocks.
 - **Halftone.** `--halftone` screens the raster like a mono laser printer's
   RIP: classic dots on a 45° lattice, with coverage tracking darkness.
 

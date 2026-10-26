@@ -1172,6 +1172,16 @@ renders eight examples in both and compares block-downsampled output).
   files are `file::Sink`s; `%stdout` goes through `Interp::write_stdout` so a
   captured stdout keeps order with `print`. Disk writes are unbuffered because
   the CLI exits without dropping the interpreter. See `notes/740-file-writing.md`.
+- **`--bands N` (#736).** One PNG rendered as N horizontal bands on N threads
+  (`src/bands.rs`, a binary module), each a full run with `/BandIndex`,
+  `/BandCount`, `/BandBBox` in userdict, stitched by whole device rows. Byte
+  identity with a plain render rests on one rule: the only per-band shortcut
+  allowed is one that leaves the band's own rows exactly as a full render paints
+  them. Today that is just image rasterization (`Gfx::set_band_rows`, read in
+  `image.rs`). Never add a PostScript-visible clip or a tiny-skia mask for it. A
+  new shortcut (e.g. culling fills whose bbox misses the band) needs a provably
+  conservative bound and a run of `tests/bands.rs`. See
+  `notes/736-bands-parallel-render.md`.
 - **`writereals` / `readreals` (#735).** Packed little-endian float64 (or `/f32`) save and
   load of a numeric array, in `src/ops/realsio.rs` (module doc has the error table and the
   `/f32` rules). The writer opens through `WriteRoots::open` like `file` does, and checks every
