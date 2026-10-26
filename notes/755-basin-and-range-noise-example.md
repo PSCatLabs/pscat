@@ -36,3 +36,6 @@ median of 5 interleaved runs after a warm-up):
 
 `cmp` of the plain and `--bands 4` PNGs is clean at both scales. The sample
 grid is fixed at 720x480, so the 2x still costs the same as 1x.
+
+Also compared plain against `--bands N` for N in 2, 3, 5, 7, 8, 16 and 64 at
+both scales (seams that do not fall on sample-row edges): all byte-identical.

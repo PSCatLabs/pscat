@@ -655,8 +655,8 @@ renders eight examples in both and compares block-downsampled output).
   bit-identical, type included (`notes/734-native-noise.md`).
   `gallery/basin_and_range.ps` (#755) is the visible example: a shaded-relief
   map from `fbm2`/`ridged2` through a `colorimage` procedure that reads
-  `/BandBBox` in device space (so it also holds under the 2x still), and so
-  the picture that shows a noise change (`notes/755-basin-and-range-noise-example.md`).
+  `/BandBBox` in device space (so it also holds under the 2x still), and is
+  the picture where a change to the noise constants shows up (`notes/755-basin-and-range-noise-example.md`).
 - `error_report`'s `Line: N` (issue #17) is best-effort, not exact
   source attribution: no `Object` carries a source position, so it
   reports the line of the most recent token scanned directly from the
