@@ -1,0 +1,253 @@
+#!/usr/bin/env python3
+"""Tests for the plugin's pscat-mcp launcher (plugin/scripts/pscat-mcp.sh, #853).
+
+    python3 scripts/test_plugin_launcher.py
+
+No network: each test builds a fake GitHub release in a temp dir (archives for
+the four Unix targets, holding a fake pscat-mcp that prints one marker line,
+and SHA256SUMS) and points the launcher at it with PSCAT_RELEASE_BASE_URL=file://.
+HOME, PATH and the cache are temp dirs too, so a real pscat on this machine is
+not seen. A real pscat in /opt/homebrew/bin or /usr/local/bin (which the
+launcher always checks) is older than the fake 9.9.9 and so is passed over.
+Each test runs under every POSIX shell found (sh, dash, bash --posix).
+"""
+import hashlib
+import io
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+import unittest
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+LAUNCHER = os.path.join(ROOT, "plugin", "scripts", "pscat-mcp.sh")
+TRIPLES = ("aarch64-apple-darwin", "x86_64-apple-darwin",
+           "aarch64-unknown-linux-musl", "x86_64-unknown-linux-musl")
+TAG = "v9.9.9-rc.1"
+VERSION = "9.9.9-rc.1"
+MARKER = "FAKE-PSCAT-MCP"
+
+SHELLS = [["sh"]]
+for extra in (["dash"], ["bash", "--posix"]):
+    if shutil.which(extra[0]):
+        SHELLS.append(extra)
+
+
+def fake_mcp(version):
+    return (f"#!/bin/sh\ncase \"$1\" in --version|-V) echo 'pscat-mcp {version}'; exit 0 ;; esac\n"
+            f"echo \"{MARKER} $*\"\n")
+
+
+class Launcher(unittest.TestCase):
+    shell = ["sh"]
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.plugin = self.path("plugin")
+        os.makedirs(self.path("plugin/scripts"))
+        shutil.copy(LAUNCHER, self.path("plugin/scripts/pscat-mcp.sh"))
+        self.pin(TAG)
+        self.release = self.path("release")
+        self.cache = self.path("cache")
+        os.makedirs(self.path("home"))
+        os.makedirs(self.path("empty"))
+        self.make_release(TAG, VERSION)
+        self.base_url = "file://" + self.release
+
+    def path(self, rel):
+        return os.path.join(self.tmp, rel)
+
+    def pin(self, tag):
+        with open(self.path("plugin/pscat-release"), "w") as f:
+            f.write("# pinned release\n" + tag + "\n")
+
+    def make_release(self, tag, version, corrupt=False):
+        d = os.path.join(self.release, tag)
+        os.makedirs(d, exist_ok=True)
+        sums = []
+        for triple in TRIPLES:
+            name = f"pscat-{version}-{triple}"
+            buf = io.BytesIO()
+            with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+                for exe, body in (("pscat-mcp", fake_mcp(version.split("-")[0])),
+                                  ("pscat", "#!/bin/sh\necho fake-pscat\n")):
+                    data = body.encode()
+                    info = tarfile.TarInfo(f"{name}/{exe}")
+                    info.size, info.mode = len(data), 0o755
+                    tar.addfile(info, io.BytesIO(data))
+                info = tarfile.TarInfo(f"{name}/lib")
+                info.type, info.mode = tarfile.DIRTYPE, 0o755
+                tar.addfile(info)
+            data = buf.getvalue()
+            with open(os.path.join(d, name + ".tar.gz"), "wb") as f:
+                f.write(data)
+            digest = hashlib.sha256(data + (b"x" if corrupt else b"")).hexdigest()
+            sums.append(f"{digest}  {name}.tar.gz\n")
+        sums.append(f"{'0' * 64}  pscat-{version}-x86_64-pc-windows-msvc.zip\n")
+        with open(os.path.join(d, "SHA256SUMS"), "w") as f:
+            f.writelines(sums)
+
+    def env(self, path_dirs=(), **extra):
+        env = {
+            "HOME": self.path("home"),
+            "PATH": ":".join([*path_dirs, "/usr/bin", "/bin", "/usr/sbin", "/sbin"]),
+            "PSCAT_CACHE_DIR": self.cache,
+            "PSCAT_RELEASE_BASE_URL": self.base_url,
+            "LANG": "C",
+        }
+        env.update(extra)
+        return env
+
+    def run_launcher(self, *args, env=None, timeout=60):
+        return subprocess.run([*self.shell, self.path("plugin/scripts/pscat-mcp.sh"), *args],
+                              env=env or self.env(), capture_output=True, text=True,
+                              timeout=timeout, stdin=subprocess.DEVNULL, cwd=self.path("empty"))
+
+    def installed_dirs(self):
+        d = os.path.join(self.cache, TAG)
+        return sorted(os.listdir(d)) if os.path.isdir(d) else []
+
+    def fake_install(self, version, name="inst"):
+        d = self.path(name)
+        os.makedirs(d)
+        for exe, body in (("pscat-mcp", fake_mcp(version)), ("pscat", "#!/bin/sh\n")):
+            p = os.path.join(d, exe)
+            with open(p, "w") as f:
+                f.write(body.replace(MARKER, "INSTALLED-" + MARKER))
+            os.chmod(p, 0o755)
+        return d
+
+    # --- the tests -------------------------------------------------------------
+
+    def test_cold_then_warm_start_keeps_stdout_clean(self):
+        r = self.run_launcher("--some-flag")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout, f"{MARKER} --some-flag\n")  # nothing but the server's own output
+        self.assertIn("downloading pscat-9.9.9-rc.1-", r.stderr)
+        self.assertTrue(os.path.islink(os.path.join(self.cache, "bin", "pscat")))
+        # Warm: the release is gone, so any fetch would fail.
+        shutil.rmtree(self.release)
+        r = self.run_launcher("x")
+        self.assertEqual((r.returncode, r.stdout, r.stderr), (0, f"{MARKER} x\n", ""))
+
+    def test_locate_prints_the_bundle_dir(self):
+        r = self.run_launcher("--locate")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        d = r.stdout.strip()
+        self.assertEqual(r.stdout.count("\n"), 1)
+        self.assertTrue(os.access(os.path.join(d, "pscat"), os.X_OK), d)
+        self.assertTrue(os.path.isdir(os.path.join(d, "lib")))
+
+    def test_parallel_cold_starts_install_once(self):
+        cmd = [*self.shell, self.path("plugin/scripts/pscat-mcp.sh"), "--locate"]
+        procs = [subprocess.Popen(cmd, env=self.env(), stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE, text=True, cwd=self.path("empty"))
+                 for _ in range(8)]
+        outs = [p.communicate(timeout=120) for p in procs]
+        self.assertEqual([p.returncode for p in procs], [0] * 8, [e for _, e in outs])
+        self.assertEqual(len({o for o, _ in outs}), 1, outs)
+        entries = self.installed_dirs()
+        self.assertEqual([e for e in entries if not e.endswith(".d")], sorted(
+            t for t in TRIPLES if any(e == t for e in entries)))
+        self.assertEqual(len([e for e in entries if e.endswith(".d")]), 1, entries)
+        self.assertFalse([e for e in os.listdir(self.cache) if e.startswith(".lock")])
+
+    def test_checksum_mismatch_installs_nothing(self):
+        self.make_release(TAG, VERSION, corrupt=True)
+        r = self.run_launcher()
+        self.assertEqual(r.returncode, 1)
+        self.assertEqual(r.stdout, "")
+        self.assertIn("checksum mismatch", r.stderr)
+        self.assertEqual(self.installed_dirs(), [])
+
+    def test_offline_says_so(self):
+        self.base_url = "file://" + self.path("nowhere")
+        r = self.run_launcher()
+        self.assertEqual(r.returncode, 1)
+        self.assertEqual(r.stdout, "")
+        self.assertIn("offline", r.stderr)
+        self.assertIn("cargo install pscat", r.stderr)
+
+    def test_offline_falls_back_to_an_earlier_download(self):
+        self.assertEqual(self.run_launcher("--locate").returncode, 0)
+        self.pin("v9.9.10")
+        self.base_url = "file://" + self.path("nowhere")
+        r = self.run_launcher("y")
+        self.assertEqual((r.returncode, r.stdout), (0, f"{MARKER} y\n"), r.stderr)
+        self.assertIn("previously downloaded", r.stderr)
+
+    def test_installed_pscat_mcp_new_enough_is_used(self):
+        inst = self.fake_install("9.9.9")
+        r = self.run_launcher("z", env=self.env([inst]))
+        self.assertEqual((r.returncode, r.stdout), (0, f"INSTALLED-{MARKER} z\n"), r.stderr)
+        self.assertFalse(os.path.exists(os.path.join(self.cache, TAG)))
+        # Also from ~/.cargo/bin, which a GUI app's PATH often lacks.
+        os.makedirs(self.path("home/.cargo"))
+        shutil.move(inst, self.path("home/.cargo/bin"))
+        r = self.run_launcher("z")
+        self.assertEqual(r.stdout, f"INSTALLED-{MARKER} z\n", r.stderr)
+        self.assertIn(".cargo/bin", r.stderr)
+        # And PSCAT_MCP_BIN.
+        other = self.fake_install("10.0.0", "other")
+        r = self.run_launcher("z", env=self.env(PSCAT_MCP_BIN=os.path.join(other, "pscat-mcp")))
+        self.assertEqual(r.stdout, f"INSTALLED-{MARKER} z\n", r.stderr)
+        self.assertIn("other/pscat-mcp", r.stderr)
+
+    def test_installed_pscat_mcp_too_old_is_passed_over(self):
+        inst = self.fake_install("0.6.3")
+        r = self.run_launcher("w", env=self.env([inst]))
+        self.assertEqual((r.returncode, r.stdout), (0, f"{MARKER} w\n"), r.stderr)
+        self.assertIn("needs pscat 9.9.9 or newer", r.stderr)
+
+    def test_stale_lock_is_cleared(self):
+        p = subprocess.Popen(["true"])
+        p.wait()
+        lock = os.path.join(self.cache, f".lock-{TAG}-")
+        for t in TRIPLES:
+            os.makedirs(lock + t)
+            with open(os.path.join(lock + t, "pid"), "w") as f:
+                f.write(f"{p.pid}\n")
+        r = self.run_launcher("--locate", timeout=30)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("stale download lock", r.stderr)
+
+    def test_hook(self):
+        def hook(env=None):
+            r = self.run_launcher("--hook", env=env)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            return json.loads(r.stdout) if r.stdout.strip() else None
+
+        out = hook()
+        self.assertIn("downloads it", out["systemMessage"])
+        self.assertIn("--locate", out["hookSpecificOutput"]["additionalContext"])
+        self.assertFalse(os.path.exists(os.path.join(self.cache, TAG)), "the hook must not download")
+        d = self.run_launcher("--locate").stdout.strip()
+        out = hook()
+        self.assertNotIn("systemMessage", out)
+        self.assertIn(d + "/pscat", out["hookSpecificOutput"]["additionalContext"])
+        self.assertIsNone(hook(self.env([self.fake_install("9.9.9")])))
+
+    def test_pin_with_release_version_matches_plain_asset_names(self):
+        self.pin("v9.9.11")
+        self.make_release("v9.9.11", "9.9.11")
+        r = self.run_launcher("v")
+        self.assertEqual((r.returncode, r.stdout), (0, f"{MARKER} v\n"), r.stderr)
+
+
+def load_tests(loader, tests, pattern):
+    suite = unittest.TestSuite()
+    for shell in SHELLS:
+        cls = type(f"Launcher_{shell[0]}", (Launcher,), {"shell": shell})
+        suite.addTests(loader.loadTestsFromTestCase(cls))
+    return suite
+
+
+if __name__ == "__main__":
+    if not (sys.platform.startswith("linux") or sys.platform == "darwin"):
+        print("skipped: the launcher is POSIX sh for macOS and Linux")
+        sys.exit(0)
+    unittest.main(verbosity=1)

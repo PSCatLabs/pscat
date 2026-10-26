@@ -1,14 +1,17 @@
 # Claude Code and Codex plugins (issue #569): the marketplaces in
 # .claude-plugin/ and .agents/plugins/, and the one plugin directory both
 # install, plugin/ (the skills as real files, the pscat-mcp server config and
-# the shared hooks/hooks.json and its script hooks/check-pscat.sh).
+# the shared hooks/hooks.json, and the pscat-mcp launcher scripts/pscat-mcp.sh
+# with its release pin pscat-release, #853).
 #
 # manifests: scripts/plugin_check.py and its tests (python3 only): the
 #   plugin's version equals Cargo.toml's, every path resolves inside the
 #   repo, skills have valid frontmatter, and nothing installed names a
 #   repo-relative path; the Codex marketplace and plugin.json/mcp.json are
 #   well formed and the plugin directory holds no symlinks (Codex skips
-#   them). A release bump that misses a plugin.json fails here.
+#   them). A release bump that misses a plugin.json fails here. Then the
+#   launcher's tests against a fake local release (no network):
+#   scripts/test_plugin_launcher.py.
 # install: a Linux clean-machine install with no Claude login. The pinned
 #   `claude` CLI validates the manifests, installs the plugin into a
 #   throwaway config from this checkout, and `claude mcp list` checks the
@@ -38,6 +41,8 @@ on:
       - "src/mcp_server.rs"
       - "scripts/plugin_check.py"
       - "scripts/test_plugin_check.py"
+      - "scripts/test_plugin_launcher.py"
+      - "scripts/fake_plugin_release.py"
       - "scripts/plugin_install_check.sh"
       - "scripts/codex_plugin_install_check.sh"
       - ".github/workflows/plugin.yml"
@@ -52,6 +57,8 @@ on:
       - "src/mcp_server.rs"
       - "scripts/plugin_check.py"
       - "scripts/test_plugin_check.py"
+      - "scripts/test_plugin_launcher.py"
+      - "scripts/fake_plugin_release.py"
       - "scripts/plugin_install_check.sh"
       - "scripts/codex_plugin_install_check.sh"
       - ".github/workflows/plugin.yml"
@@ -72,6 +79,8 @@ jobs:
         run: python3 scripts/test_plugin_check.py
       - name: Check plugin manifests
         run: python3 scripts/plugin_check.py
+      - name: Launcher tests (fake local release, no network)
+        run: python3 scripts/test_plugin_launcher.py
 
   install:
     runs-on: ubuntu-latest

@@ -20,8 +20,14 @@ and both work against an **installed** pscat (no checkout needed):
   with ten tools (below).
 
 In Claude Code the easiest route is the **plugin**, which installs the three
-skills and registers `pscat-mcp` in one step (install pscat first; the plugin
-uses the binaries on your PATH):
+skills and registers `pscat-mcp` in one step. No separate install is needed
+on macOS or Linux: the plugin's launcher (`plugin/scripts/pscat-mcp.sh`)
+uses a pscat you already have (PATH, `~/.cargo/bin`, Homebrew), and otherwise
+downloads the pinned GitHub release once, checks it against the release's
+`SHA256SUMS` and caches it (`~/Library/Caches/pscat/plugin` or
+`~/.cache/pscat/plugin`). The same plugin installs in the Claude desktop app
+(Customize > Plugins > Add marketplace, `PSCatLabs/pscat`), where Cowork runs
+the server on your computer:
 
 ```text
 /plugin install pscat --marketplace PSCatLabs/pscat

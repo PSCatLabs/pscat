@@ -93,6 +93,9 @@ class Fixture(unittest.TestCase):
         self.plugin["mcpServers"]["s"]["args"] = ["--out-root", "./out"]
         self.assertIn("path", " ".join(self.errors()))
         self.plugin["mcpServers"]["s"]["args"] = ["${CLAUDE_PLUGIN_ROOT}/x"]
+        self.mcp["mcpServers"]["s"]["args"] = ["${PLUGIN_ROOT}/x"]
+        self.assertIn("'x' is not a file", " ".join(self.errors()))
+        self.write("plugin/x", "#!/bin/sh\n")
         self.assertEqual(self.errors(), [])
 
     def test_component_path_must_exist(self):
@@ -187,8 +190,42 @@ class Fixture(unittest.TestCase):
         self.assertIn("type None", " ".join(self.errors()))
         self.mcp["mcpServers"]["s"] = {"type": "stdio", "command": "../bin/pscat-mcp"}
         self.assertIn("bare executable", " ".join(self.errors()))
-        self.mcp["mcpServers"]["s"] = {"type": "stdio", "command": "${PLUGIN_ROOT}/bin/x"}
+        self.mcp["mcpServers"]["s"] = {"type": "stdio", "command": "${PLUGIN_ROOT}/x"}
+        self.assertIn("does not expand placeholders in command", " ".join(self.errors()))
+
+    def test_each_host_its_own_placeholder(self):
+        self.write("plugin/scripts/l.sh", "#!/bin/sh\n")
+        self.plugin["mcpServers"]["s"] = {"command": "sh", "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/l.sh"]}
+        self.mcp["mcpServers"]["s"] = {"type": "stdio", "command": "sh",
+                                       "args": ["${PLUGIN_ROOT}/scripts/l.sh"]}
         self.assertEqual(self.errors(), [])
+        self.plugin["mcpServers"]["s"]["args"] = ["${PLUGIN_ROOT}/scripts/l.sh"]
+        self.assertIn("not expanded by Claude Code", " ".join(self.errors()))
+        self.plugin["mcpServers"]["s"]["args"] = ["${CLAUDE_PLUGIN_ROOT}/scripts/l.sh"]
+        self.mcp["mcpServers"]["s"]["args"] = ["${CLAUDE_PLUGIN_ROOT}/scripts/l.sh"]
+        self.assertIn("not expanded by Codex", " ".join(self.errors()))
+
+    def test_both_hosts_run_the_same_server(self):
+        self.mcp["mcpServers"]["s"] = {"type": "stdio", "command": "other"}
+        self.assertIn("keep them the same", " ".join(self.errors()))
+
+    def test_no_top_level_bin(self):
+        self.write("plugin/bin/tool", "#!/bin/sh\n")
+        self.assertIn("top-level bin/", " ".join(self.errors()))
+
+    def test_release_pin(self):
+        for tag, ok in (("v1.2.3", True), ("v1.2.4-rc.1", True), ("v1.2.3-rc.2", True),
+                        ("v1.2.4", False), ("v1.2.2-rc.1", False), ("1.2.3", False),
+                        ("v1.2.3\nv1.2.4", False)):
+            self.write("plugin/pscat-release", "# a comment\n" + tag + "\n")
+            errs = [e for e in self.errors() if "pscat-release" in e]
+            self.assertEqual(errs == [], ok, (tag, errs))
+        self.write("Cargo.toml", '[package]\nname = "x"\nversion = "1.2.4-rc.1"\n')
+        self.plugin["version"] = self.codex_plugin["version"] = "1.2.4-rc.1"
+        for tag, ok in (("v1.2.4-rc.1", True), ("v1.2.4-rc.2", True), ("v1.2.3", False)):
+            self.write("plugin/pscat-release", tag + "\n")
+            errs = [e for e in self.errors() if "pscat-release" in e]
+            self.assertEqual(errs == [], ok, (tag, errs))
 
     def test_codex_extension_paths(self):
         self.codex_plugin["extensions"] = {"com.openai": {"onboardingSkill": "./skills/none/SKILL.md"}}
