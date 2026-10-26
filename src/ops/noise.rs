@@ -11,6 +11,10 @@
 //! x y z vnoise3 v               3D value noise
 //! x y oct gain lac fbm2 v       fBm of gnoise2 (fbm3, vfbm2, vfbm3 alike)
 //! x y oct gain lac ridged2 v    ridged sum of gnoise2 (ridged3 alike)
+//! x y oct gain lac offset wgain angle ridgedmf2 v
+//!                               Musgrave's ridged multifractal (issue #845)
+//! x y oct gain lac angle erodedfbm2 v
+//!                               derivative-damped ("eroded") fBm (issue #845)
 //! x y perm .permnoise2 n        artkit's noise2 off a caller's table
 //! ```
 //!
@@ -19,8 +23,12 @@
 //! the order spelled out below and in `lib/noiseref.ps`, the PostScript
 //! reference that reproduces each operator bit for bit
 //! (`tests/noise.rs` holds the two to that). No libm transcendental, no
-//! division, no fused multiply-add: the same bits on every platform and
-//! in the WASM build.
+//! fused multiply-add: the same bits on every platform and in the WASM
+//! build. Two #845 additions stay inside that rule: `erodedfbm2` divides
+//! once per octave (IEEE division is correctly rounded, so as exact as a
+//! multiply), and the `angle` of `ridgedmf2`/`erodedfbm2` goes through
+//! `fmath::cos`/`fmath::sin` of `angle.to_radians()`, exactly what the
+//! PostScript `cos`/`sin` operators compute.
 //!
 //! **Seed.** `noiseseed` fills a private 256-entry permutation by a
 //! Fisher-Yates shuffle of 0..255 (`i` from 255 down to 1, swap `P[i]`
@@ -61,6 +69,30 @@
 //!   `n = n·n` per octave. `oct` is an integer in 0..=32.
 //! - gnoise2d's derivatives: see `gnoise2_derivs` below.
 //!
+//! **Octave walk of `ridgedmf2` and `erodedfbm2` (issue #845).** `oct` is
+//! an integer or a real in 0..=32. `full = floor(oct)` octaves count
+//! whole; a remainder `r = oct − full > 0` adds one more octave whose term
+//! is multiplied by `r`, so detail fades in as `oct` grows (Musgrave's
+//! fBm remainder). With `c = cos(angle)`, `s = sin(angle)` (degrees),
+//! `lc = lac·c`, `ls = lac·s`: `px = x, py = y`, `sum = 0, amp = 1`, and
+//! octave `k` (from 0) samples gnoise2 at `(px + k·17.3203125, py +
+//! k·11.4140625)`, then `amp = amp·gain`, `px' = (lc·px) − (ls·py)`,
+//! `py' = (ls·px) + (lc·py)`. The rotation keeps the octaves' lattices
+//! from lining up (angle 0 gives exactly `lac·px`).
+//! - ridgedmf2 (Musgrave, *Texturing & Modeling*): `w = 1` to start;
+//!   per octave `sig = offset − |n|`, `sig = sig·sig`, `sig = sig·w`,
+//!   term `t = amp·sig` (`t = t·r` for the fractional octave), `sum =
+//!   sum + t`, then `w = sig·wgain` clamped to [0, 1] (`if w > 1 then 1`,
+//!   then `if w < 0 then 0`). Musgrave's `H` is `gain = lac^−H`; his early
+//!   exit at a tiny weight is left out, so the sum is exact.
+//! - erodedfbm2 (Quílez's derivative-damped fBm): `dx = dy = 0`; per
+//!   octave `(n, gx, gy) = gnoise2d`, `dx = dx + gx`, `dy = dy + gy`,
+//!   `t = amp·(n / (1 + ((dx·dx) + (dy·dy))))` (`t = t·r` for the
+//!   fractional octave), `sum = sum + t`. The gradients are summed as
+//!   sampled, unrotated and unscaled, as in the common formulation.
+//!
+//! Neither is normalized.
+//!
 //! `.permnoise2` is artkit's `noise2` kept bit-identical, integer
 //! operands and all: it does its arithmetic with PostScript's own
 //! int/real promotion rules, so an all-integer lattice point still
@@ -84,6 +116,8 @@ pub fn install(dict: &mut Dict) {
     op(dict, "vfbm3", vfbm3);
     op(dict, "ridged2", ridged2);
     op(dict, "ridged3", ridged3);
+    op(dict, "ridgedmf2", ridgedmf2);
+    op(dict, "erodedfbm2", erodedfbm2);
     op(dict, ".permnoise2", permnoise2);
 }
 
@@ -343,6 +377,43 @@ fn gnoise2_derivs(p: &[u8; 256], x: f64, y: f64) -> Result<(f64, f64, f64), PsEr
     Ok((n, dx, dy))
 }
 
+/// `gnoise2d` without the `Num` detour, for the octave loop of
+/// `erodedfbm2`. `n` is `lerp(lerp(a, b, u), lerp(c, d, u), v)` of the
+/// same corner dots, which is gradient2's grouping for real operands (an
+/// integer gradient component `g` times a real `x` is `g as f64 * x`
+/// there too), so all three values equal `gnoise2_derivs`' bit for bit;
+/// `tests/noise.rs` holds erodedfbm2 to `nrgnoise2d`'s values.
+#[inline]
+fn g2d(p: &[u8; 256], x: f64, y: f64) -> Result<(f64, f64, f64), PsError> {
+    let (xi, xf) = lattice(x)?;
+    let (yi, yf) = lattice(y)?;
+    let (xi1, yi1) = ((xi + 1) & 255, (yi + 1) & 255);
+    let g = |i: i64, j: i64| -> Result<(f64, f64), PsError> {
+        let k = ((hash2(p, i, j)? & 7) * 2) as usize;
+        Ok((G2[k].to_f64(), G2[k + 1].to_f64()))
+    };
+    let (ga, gb, gc, gd) = (g(xi, yi)?, g(xi1, yi)?, g(xi, yi1)?, g(xi1, yi1)?);
+    let (x1, y1) = (xf - 1.0, yf - 1.0);
+    let a = (ga.0 * xf) + (ga.1 * yf);
+    let b = (gb.0 * x1) + (gb.1 * yf);
+    let c = (gc.0 * xf) + (gc.1 * y1);
+    let d = (gd.0 * x1) + (gd.1 * y1);
+    let u = fade(xf);
+    let v = fade(yf);
+    let n = lerp(lerp(a, b, u), lerp(c, d, u), v);
+    let dfade = |t: f64| ((t * t) * 30.0) * ((t - 1.0) * (t - 1.0));
+    let k1 = b - a;
+    let k2 = c - a;
+    let k3 = ((a - b) - c) + d;
+    let dx = (((ga.0 + (u * (gb.0 - ga.0))) + (v * (gc.0 - ga.0)))
+        + ((u * v) * (((ga.0 - gb.0) - gc.0) + gd.0)))
+        + (dfade(xf) * (k1 + (k3 * v)));
+    let dy = (((ga.1 + (u * (gb.1 - ga.1))) + (v * (gc.1 - ga.1)))
+        + ((u * v) * (((ga.1 - gb.1) - gc.1) + gd.1)))
+        + (dfade(yf) * (k2 + (k3 * u)));
+    Ok((n, dx, dy))
+}
+
 fn lattice(x: f64) -> Result<(i64, f64), PsError> {
     let x0 = floor_int(Num::Real(x))?;
     Ok((x0 & 255, x - x0 as f64))
@@ -544,6 +615,109 @@ fn ridged2(it: &mut Interp) -> Result<(), PsError> {
 }
 fn ridged3(it: &mut Interp) -> Result<(), PsError> {
     octaves(it, Shape::Ridged, |p, [x, y, z]| g3(p, x, y, z))
+}
+
+/// The octave walk shared by `ridgedmf2` and `erodedfbm2` (module docs):
+/// `oct` (int or real, 0..=32), `gain`, `lac` and `angle` give the count,
+/// the fractional weight of the last octave, the amplitudes and the
+/// sample points.
+struct Walk {
+    full: i64,
+    rem: f64,
+    gain: f64,
+    lc: f64,
+    ls: f64,
+}
+
+impl Walk {
+    fn new(oct: f64, gain: f64, lac: f64, angle: f64) -> Result<Walk, PsError> {
+        // `!(..)` so a NaN count is a rangecheck too.
+        if !(0.0..=MAX_OCTAVES as f64).contains(&oct) {
+            return Err(PsError::Rangecheck);
+        }
+        let full = oct.floor();
+        let rad = angle.to_radians();
+        Ok(Walk {
+            full: full as i64,
+            rem: oct - full,
+            gain,
+            lc: lac * crate::fmath::cos(rad),
+            ls: lac * crate::fmath::sin(rad),
+        })
+    }
+
+    /// Sum `term(sample x, sample y)` over the octaves (called in octave
+    /// order), each times `amp`, the fractional last one times `rem` too.
+    fn sum(
+        &self,
+        x: f64,
+        y: f64,
+        mut term: impl FnMut(f64, f64) -> Result<f64, PsError>,
+    ) -> Result<f64, PsError> {
+        let count = self.full + i64::from(self.rem > 0.0);
+        let (mut px, mut py) = (x, y);
+        let (mut sum, mut amp) = (0.0, 1.0);
+        for k in 0..count {
+            let kf = k as f64;
+            let mut t = amp * term(px + (kf * SHIFT[0]), py + (kf * SHIFT[1]))?;
+            if k == self.full {
+                t *= self.rem;
+            }
+            sum += t;
+            amp *= self.gain;
+            let nx = (self.lc * px) - (self.ls * py);
+            py = (self.ls * px) + (self.lc * py);
+            px = nx;
+        }
+        Ok(sum)
+    }
+}
+
+/// `x y oct gain lac offset wgain angle ridgedmf2 v`.
+fn ridgedmf2(it: &mut Interp) -> Result<(), PsError> {
+    sampled(it);
+    let angle = it.pop_f64()?;
+    let wgain = it.pop_f64()?;
+    let offset = it.pop_f64()?;
+    let lac = it.pop_f64()?;
+    let gain = it.pop_f64()?;
+    let oct = it.pop_f64()?;
+    let (x, y) = pop_xy(it)?;
+    let walk = Walk::new(oct, gain, lac, angle)?;
+    let p = &it.noise_perm;
+    let mut w = 1.0;
+    let v = walk.sum(x, y, |sx, sy| {
+        let mut sig = offset - g2(p, sx, sy)?.abs();
+        sig *= sig;
+        sig *= w;
+        // f64::clamp is the reference's `1.0 gt`/`0.0 lt` pair: the
+        // ranges are disjoint, -0.0 stays -0.0, and a NaN passes through.
+        w = (sig * wgain).clamp(0.0, 1.0);
+        Ok(sig)
+    })?;
+    it.push(Object::real(v));
+    Ok(())
+}
+
+/// `x y oct gain lac angle erodedfbm2 v`.
+fn erodedfbm2(it: &mut Interp) -> Result<(), PsError> {
+    sampled(it);
+    let angle = it.pop_f64()?;
+    let lac = it.pop_f64()?;
+    let gain = it.pop_f64()?;
+    let oct = it.pop_f64()?;
+    let (x, y) = pop_xy(it)?;
+    let walk = Walk::new(oct, gain, lac, angle)?;
+    let p = &it.noise_perm;
+    let (mut dx, mut dy) = (0.0, 0.0);
+    let v = walk.sum(x, y, |sx, sy| {
+        let (n, gx, gy) = g2d(p, sx, sy)?;
+        dx += gx;
+        dy += gy;
+        Ok(n / (1.0 + ((dx * dx) + (dy * dy))))
+    })?;
+    it.push(Object::real(v));
+    Ok(())
 }
 
 /// `x y perm .permnoise2 n`: artkit's `noise2` against `perm` (its

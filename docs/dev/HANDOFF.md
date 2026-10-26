@@ -643,7 +643,8 @@ renders eight examples in both and compares block-downsampled output).
   standard behaviour without it (`notes/488-sameclip.md`).
 - The noise operators (issue #734, `src/ops/noise.rs`: `noiseseed`,
   `gnoise2`/`gnoise3`, `vnoise2`/`vnoise3`, `gnoise2d`, `fbm2`/`fbm3`,
-  `vfbm2`/`vfbm3`, `ridged2`/`ridged3`) are pscat extensions with a
+  `vfbm2`/`vfbm3`, `ridged2`/`ridged3`; #845 added `ridgedmf2` and
+  `erodedfbm2`, whose octave walk is in the module header) are pscat extensions with a
   frozen algorithm: f64 add/sub/mul in a fixed order, `floor` and table
   lookups only, so every platform and WASM give the same bits.
   `lib/noiseref.ps` is the PostScript reference, and `tests/noise.rs`
