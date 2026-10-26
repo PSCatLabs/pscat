@@ -1292,13 +1292,19 @@ fn ghost_placement(cfg: &Config, w: f64, h: f64) -> String {
 /// pass (and ahead of the writing, which it measures along its path). Each spec is `[tex size seed u v [regions]]`; `ckgplaced` ends as
 /// `[tex x y size seed]` for the ghosts that found room.
 const GHOST_PLACER: &str = "\
-% the writing's box, inflated: ghosts keep outside it. The box is that of
-% the path the writing is inked along (the layout's own box, ckx0..cky1,
-% is the line boxes: the ink strays past them by a hand's wobble)
-/ckgm cksize 0.3 mul def
-gsave newpath cklines ckox ckoy ckopts mkalign pop pathbbox grestore
-/ckgfy1 exch ckgm add def /ckgfx1 exch ckgm add def
-/ckgfy0 exch ckgm sub def /ckgfx0 exch ckgm sub def
+% the writing's box, inflated: ghosts keep outside it, by 0.6 of the
+% writing size above and below and 0.9 beside it (a ghost just past the end
+% of a row reads as the row going on). The box is that of
+% the strokes actually drawn (tilt included): the path the writing is inked
+% along. Writing with no ink (a bare space) falls back to the line boxes.
+/ckgm cksize 0.6 mul def /ckgmx cksize 0.9 mul def
+gsave newpath cklines ckox ckoy ckopts mkalign pop
+{ pathbbox } stopped {
+  ckox ckx0 add ckoy cky0 add ckox ckx1 add ckoy cky1 add
+} if
+grestore
+/ckgfy1 exch ckgm add def /ckgfx1 exch ckgmx add def
+/ckgfy0 exch ckgm sub def /ckgfx0 exch ckgmx sub def
 /ckgov ckgw 0.06 mul def /ckglo ckgl cksize 0.1 mul add def
 % free regions [x0 y0 x1 y1]: top, bottom, left, right (the top and the
 % bottom may hang a little off the sides, as erased writing does)

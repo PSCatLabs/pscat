@@ -329,7 +329,7 @@ inline.
 | `chalk.width` | 0.048 × size | stroke width in points |
 | `board.tone` | `slate` | `slate`, `greenboard`, or `[r, g, b]` |
 | `board.haze` | 0.4 | the dust film, 0 (freshly washed) to 1 |
-| `board.ghosting` | 0.4 | an earlier lecture's erased writing: `false`/0 for none, `true`, or 0..1. It keeps clear of the formula (a margin of 0.3 of the writing size on every side); a board the formula fills has fewer ghosts, and may have none |
+| `board.ghosting` | 0.4 | an earlier lecture's erased writing: `false`/0 for none, `true`, or 0..1. It keeps clear of the formula (a margin of over half the writing size above and below it, most of one beside it); a board the formula fills has fewer ghosts, and may have none |
 | `board.swipes`, `.wipes`, `.smudges` | 6, 2, 3 | eraser arcs, finger wipes, dust smears |
 | `board.ledge` | 18 | the dusty band along the bottom, in points |
 | `board` | | `false` for chalk alone on a transparent page |

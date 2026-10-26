@@ -6,9 +6,7 @@ from the seed alone, in bands along the top and bottom of the board, so they
 did not know where the writing was. On a wide formula they collided on every
 seed (#555's cold reviewer read a ghost beside `f(x)` as a superscript; #699's
 agent turned `board.ghosting` off for its review images). Measured before the
-fix, ghost-only footprint against the formula's ink box, board dressing off,
-600 x 300 at size 64: 20 of 20 sweeps had ghost pixels inside the formula's
-box.
+fix (below), ghost ink sat inside the formula's box on half the small boards.
 
 ### What changed
 
@@ -18,9 +16,11 @@ box.
   driver's measuring pass, so the placing is PostScript: `GHOST_PLACER`, in
   `ckdict` just before `dcboard`.
 - The writing's box is the bbox of the path the writing is inked along
-  (`mkalign` with no `/Ink`, then `pathbbox`), not `ckx0..cky1`: those are the
-  line boxes and the ink strays past them (12-16 pt on an align at 400 x 200).
-  It is inflated by 0.3 of the writing size on every side.
+  (`mkalign` with no `/Ink`, then `pathbbox`): the strokes actually drawn, tilt
+  included, a little inside the layout's line boxes (`ckx0..cky1`). Writing with
+  no ink (`\quad`, `~`) falls back to the line boxes. It is inflated by 0.6 of
+  the writing size above and below and 0.9 beside it (round 2 of the
+  perceptual review: a ghost just past the end of a row read as the row going on).
 - The free board around it is four regions (top, bottom, left, right; top and
   bottom may hang 6% off the sides, as erased writing does; nothing goes onto
   the ledge). Each ghost tries its regions in its own order (top and bottom
@@ -41,11 +41,24 @@ box.
   the driver up to the board and compares every placed ghost's real path box
   with the writing's path box, over five formulas (`x = 1`, `F = ma`, an
   integral, the quadratic, a small-board one) x 12 seeds on three board sizes;
-  needs a gap of 0.3 of the writing size.
-- A pixel sweep (ghost-only render minus a ghost-less one, against the
-  `--no-board` render's alpha box) over 8 formulas x 20 seeds: see the PR.
-- The five pinned boards in `tests/chalk.rs` and the `chalkboard_math` pin in
-  `tests/mcp.rs` moved (the ghosts did); re-pinned.
+  needs a gap of 0.6 of the writing size.
+- A pixel sweep: the ghost footprint (board render minus the same board with
+  `ghosting: 0`, formula stripped, swipes/wipes/smudges/haze off) against the
+  formula's own bright pixels (formula board minus stripped board), 8 formulas
+  (`f(x)`, `x = 1`, `F = ma`, an integral, the quadratic, `e^{i pi}`, a sum, a
+  2-row align) x 20 seeds x 3 boards. The gap is the Chebyshev distance in px
+  at 72 dpi. Before: ghost ink inside the formula's box on 80/160 boards at
+  400 x 200 (size 40) and 17/160 at 800 x 400 (size 64). After (margins 0.6
+  above/below, 0.9 beside): 0/160 on all three boards; smallest gaps 24
+  (400 x 200), 41 (600 x 300) and 42 px (800 x 400). The cost: boards with no
+  ghost at all, 24/160 at 400 x 200, 52/160 at 600 x 300 and 0/160 at
+  800 x 400 (the wide formulas, the quadratic, the sum and the align, fill the
+  smaller boards; the swipes, wipes and smudges still make them look used).
+- Perceptual review (tier b), three rounds. Round 1 (four hand-picked
+  before/after pairs): PASS. Round 2 (20-seed contact sheets, margins 0.3 /
+  0.3): FAIL on the 400 x 200 align: ghosts just past the end of a row read as
+  the row going on, so the margins went to 0.35 / 0.9, then 0.6 / 0.9 after
+  the sheet still showed ghosts diagonal to the row ends. Round 3: PASS.
 
 ### Not done
 

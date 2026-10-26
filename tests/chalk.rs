@@ -98,9 +98,9 @@ const FORMULAS: [(&str, &str, i64); 5] = [
 #[test]
 fn the_five_formulas_render_as_pinned() {
     let pinned: [u64; 5] = [
-        0xb9c0a5c1f1bfc72d,
-        0x658dcdf1855675c1,
-        0x67d8fc5d47c67adb,
+        0x0ace74c7afc6678c,
+        0xd956a77ea25618a3,
+        0xbfbcd6c67947a409,
         // The cases board comes out a few pixels different on Windows
         // (macOS and Linux agree): its C runtime's transcendental functions
         // round differently in the last place for one glyph. Both are
@@ -108,9 +108,9 @@ fn the_five_formulas_render_as_pinned() {
         if cfg!(windows) {
             0x947a44d3fe0c77a0
         } else {
-            0x0887ec79ab468cc7
+            0xf4e60cabdd8fe447
         },
-        0x552c80b30e7a9af2,
+        0xd93e1e1def7fc961,
     ];
     let got: Vec<u64> = FORMULAS
         .iter()
@@ -278,7 +278,7 @@ fn the_block_is_fitted_inside_the_margins() {
 /// The ghost writing never touches the formula (issue #698): the driver is
 /// run up to the board, which is when the ghosts are placed, and each
 /// placed ghost's real path box is compared with the formula's box. The
-/// board keeps a margin of 0.3 of the writing size around the maths, so a
+/// board keeps a margin of 0.6 of the writing size around the maths, so a
 /// faint fragment can never pass for a superscript. Many seeds on formulas
 /// that fill the board and ones that do not; no render.
 #[test]
@@ -336,7 +336,7 @@ fn ghost_writing_keeps_clear_of_the_formula() {
                 let gap_y = (f[2] - ury).max(lly - f[3]).max(0.0);
                 let gap = gap_x.max(gap_y);
                 assert!(
-                    gap >= 0.3 * cksize,
+                    gap >= 0.6 * cksize,
                     "{name} seed {seed}: a ghost at [{llx} {lly} {urx} {ury}] is {gap:.1} from \
                      the formula {f:?} (writing size {cksize})"
                 );
@@ -349,6 +349,15 @@ fn ghost_writing_keeps_clear_of_the_formula() {
         placed_total >= 40,
         "ghosts all but vanished: {placed_total}"
     );
+}
+
+/// Writing with no ink (a bare space) has no path to measure: the ghosts
+/// fall back to the line boxes, and the board still renders (issue #698).
+#[test]
+fn a_formula_with_no_ink_still_gets_a_board() {
+    for tex in [r"\quad", "~", r"\,"] {
+        chalk::render(tex, &small(), Format::Png).unwrap_or_else(|e| panic!("{tex}: {e}"));
+    }
 }
 
 /// TeX outside the subset fails with one line naming the command or
