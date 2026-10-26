@@ -868,6 +868,13 @@ renders eight examples in both and compares block-downsampled output).
    (default `/relation`, so `align` and every other caller is unchanged); one
    row, or any other wrapper, never gets the option
    (`notes/699-chalk-gather-centred.md`).
+   #713: on the no-board overlay (touch 0.34, so grain shows) the radical's
+   long bar and small strokes broke into gaps; drychalk's `/Firm` (default 0:
+   byte-identical, `identity_check.sh --loader lib/drychalk.ps`) holds the
+   taper and lift to the last ten widths, fades the tired middle on long
+   strokes and presses short ones harder. `chalk::driver` passes `/Firm 1`
+   only with no board, so the board pins never move; the overlay has its own
+   (`notes/713-chalk-firm-overlay.md`).
    #239 shipped `lib/drycrayon.ps` (`dy-`): `dycrayon` (a core and a rim
    `dkstroke` per subpath, one wax level each), `dypaper`, the crayon box
    (`dybox`, `dycolors`, `dycolor`) and six child motions with paintkit's

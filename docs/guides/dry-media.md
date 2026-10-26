@@ -104,6 +104,9 @@ newpath 40 60 moveto 300 80 lineto
   - Each stroke lands heavy, tires in the middle and lifts thin.
   - Its weight differs a little from its neighbours'.
   - Dots are pressed, and dust falls beside every stroke.
+  - `/Firm` holds a long stroke's weight to its end and presses a short one
+    a little harder; `pscat chalk --no-board` sets it (default 0, so a board
+    and every other caller render as before).
   - With `/Tilt`, the stick lies on its side for broad underlines and
     shading: two bright edges over a granular face.
 - **`/name dcchalkcolor`** sets white or a soft yellow, pink, blue, green
