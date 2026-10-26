@@ -39,6 +39,10 @@ const EXEC_STACK_LIMIT: usize = 10_000;
 /// nesting level, so this bounds Rust stack use on malicious input.
 const PROC_NESTING_LIMIT: usize = 500;
 
+/// `execute_resolved`'s `via` for an object that was not reached through a
+/// name. No interned name has this id.
+const NO_NAME: u32 = u32::MAX;
+
 enum Frame {
     /// Tokens being scanned incrementally from program source.
     Scanner(Lexer),
@@ -78,6 +82,10 @@ enum Frame {
     /// procedure finishes, the continuation consumes its results.
     /// Holds no external state, so unwinding needs no cleanup.
     PostOp(PostOp),
+    /// `--profile` (issue #737): planted under the body of a procedure
+    /// called through a name. Reached, or unwound, it closes that call in
+    /// the profiler. Only exists while profiling.
+    ProfReturn,
 }
 
 /// One unit of work `next_item` hands the step loop. A procedure's
@@ -325,6 +333,9 @@ pub struct Interp {
     /// Directories the program may read files from (issue #763); `None`
     /// (the default) reads wherever the search order finds a file.
     read_roots: Option<crate::read_roots::ReadRoots>,
+    /// `--profile` (issue #737): `Some` while profiling. A program that
+    /// is not profiled never looks at it per step (see `step_n`).
+    profile: Option<Box<crate::profile::Profiler>>,
     pub(crate) gfx: Gfx,
 }
 
@@ -428,6 +439,7 @@ impl Interp {
             poll_in: POLL_PERIOD,
             write_roots: Default::default(),
             read_roots: None,
+            profile: None,
             gfx,
         })
     }
@@ -760,6 +772,9 @@ impl Interp {
             // Type 3 glyph contexts' graphics-state snapshot and paint
             // suppression must not leak past the show that created them.
             Frame::Show(mut ctx) => ctx.cleanup(&mut self.gfx),
+            // A profiled call unwound by `stop`, an error, `exit` or `quit`
+            // ends here.
+            Frame::ProfReturn => self.prof_exit(),
             // `begin_eexec` pushes systemdict for the encrypted stream's
             // duration, popped on normal completion via
             // `Action::PopScannerAndDict`; a scanner dropped mid-flight
@@ -1017,6 +1032,8 @@ impl Interp {
             /// An eexec source finished: it carried a systemdict push
             /// that ends with it.
             PopScannerAndDict,
+            /// A profiled call returned (`--profile`).
+            ProfExit,
         }
         loop {
             let action = {
@@ -1137,6 +1154,7 @@ impl Interp {
                     // Reached from above means the stopped procedure ran
                     // to completion without stopping.
                     Frame::StopMark => Action::PopThenPush(Object::bool(false)),
+                    Frame::ProfReturn => Action::ProfExit,
                     Frame::Show(ctx) => match ctx.step(gfx)? {
                         ShowStep::Pop => Action::Pop,
                         ShowStep::PopPushWidth(wx, wy) => {
@@ -1228,6 +1246,10 @@ impl Interp {
                         self.cleanup_unwound_frame(frame);
                     }
                 }
+                Action::ProfExit => {
+                    self.estack.pop();
+                    self.prof_exit();
+                }
             }
         }
     }
@@ -1247,6 +1269,72 @@ impl Interp {
         }
     }
 
+    /// Run procedure `body` as a call of `id`: plant a [`Frame::ProfReturn`]
+    /// below its frame and open the call in the profiler.
+    ///
+    /// A procedure whose last element calls another (or itself) drops its
+    /// frame first, so a chain of tail calls leaves a run of markers on top
+    /// of the exec stack, one per procedure in tail position. A call to a
+    /// name already in that run counts but plants no new marker, which keeps
+    /// tail recursion at constant depth, as it is without `--profile`. (The
+    /// time then belongs to the innermost open call, the last procedure of
+    /// the chain to plant a marker: with mutual tail recursion `ping` <->
+    /// `pong`, the body of both counts as `pong`'s exclusive time.)
+    ///
+    /// Each open call holds two exec-stack slots (marker and body frame),
+    /// so non-tail recursion runs out at about half the depth it does in a
+    /// plain run (`execstackoverflow`, about 5,000 levels instead of 10,000).
+    #[cold]
+    #[inline(never)]
+    fn prof_call(&mut self, id: u32, body: PsArray) -> Result<(), PsError> {
+        let run = self
+            .estack
+            .iter()
+            .rev()
+            .take_while(|f| matches!(f, Frame::ProfReturn))
+            .count();
+        let Some(p) = self.profile.as_mut() else {
+            return self.push_proc_frame(body);
+        };
+        if run > 0 && p.tail_has(run, id) {
+            p.count_only(id);
+            return self.push_proc_frame(body);
+        }
+        self.push_frame(Frame::ProfReturn)?;
+        if let Some(p) = self.profile.as_mut() {
+            p.enter(id);
+        }
+        let pushed = self.push_proc_frame(body);
+        if pushed.is_err() {
+            self.estack.pop();
+            if let Some(p) = self.profile.as_mut() {
+                p.abort_enter();
+            }
+        }
+        pushed
+    }
+
+    fn prof_exit(&mut self) {
+        if let Some(p) = self.profile.as_mut() {
+            p.exit();
+        }
+    }
+
+    /// Turn on the per-procedure profile (`pscat --profile`, issue #737)
+    /// for the programs this interpreter runs from now on. Call it before
+    /// the program starts: a call already running is not counted.
+    #[doc(hidden)]
+    pub fn enable_profile(&mut self) {
+        self.profile = Some(Box::new(crate::profile::Profiler::new()));
+    }
+
+    /// What the profile has recorded so far (finished calls only), or
+    /// `None` if [`enable_profile`](Self::enable_profile) was not called.
+    #[doc(hidden)]
+    pub fn profile_report(&self) -> Option<crate::profile::ProfileReport> {
+        self.profile.as_ref().map(|p| p.report())
+    }
+
     /// Execute the executable name with interned id `id`: look it up on
     /// the dictionary stack and run what it resolves to.
     #[inline]
@@ -1255,12 +1343,16 @@ impl Interp {
         let resolved = self
             .load_id(id)
             .ok_or_else(|| PsError::Undefined(crate::name::resolve(id).to_string()))?;
-        self.execute_resolved(resolved)
+        self.execute_resolved(resolved, id)
     }
 
     /// Execute the object a name resolved to. Unlike `execute_element`,
     /// an executable array here *runs* — this is a procedure call.
-    fn execute_resolved(&mut self, mut obj: Object) -> Result<(), PsError> {
+    ///
+    /// `via` is the name the object was reached through, or [`NO_NAME`]
+    /// (`exec`, a conditional's branch): `--profile` attributes a
+    /// procedure body to the name it ran through (#737).
+    fn execute_resolved(&mut self, mut obj: Object, via: u32) -> Result<(), PsError> {
         // A name may resolve to another executable name; follow the chain
         // with a budget so `a -> b -> a` cycles error out instead of
         // spinning forever.
@@ -1278,6 +1370,9 @@ impl Interp {
                     let Value::Array(body) = obj.value else {
                         unreachable!()
                     };
+                    if via != NO_NAME && self.profile.is_some() {
+                        return self.prof_call(via, body);
+                    }
                     return self.push_proc_frame(body);
                 }
                 // An executable string runs as source — the `(...) cvx
@@ -1354,7 +1449,7 @@ impl Interp {
     /// `exec` and the conditional operators: run an object with full
     /// executable semantics (procedures run rather than being pushed).
     pub(crate) fn exec_object(&mut self, obj: Object) -> Result<(), PsError> {
-        self.execute_resolved(obj)
+        self.execute_resolved(obj, NO_NAME)
     }
 
     /// The `token` operator on a file: one token scanned in place — the
@@ -1513,6 +1608,11 @@ impl Interp {
                 }
                 Some(Frame::Proc { .. }) => {
                     self.estack.pop();
+                }
+                // A profiled call `exit` leaves: close it.
+                Some(Frame::ProfReturn) => {
+                    self.estack.pop();
+                    self.prof_exit();
                 }
             }
         }

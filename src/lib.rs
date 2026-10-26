@@ -129,6 +129,8 @@ pub mod paths;
 #[doc(hidden)]
 pub mod pdf;
 #[doc(hidden)]
+pub mod profile;
+#[doc(hidden)]
 pub mod read_roots;
 #[doc(hidden)]
 pub mod repl;

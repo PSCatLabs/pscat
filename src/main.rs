@@ -107,6 +107,14 @@ struct Options {
     /// `--bands N` (issue #736): render N horizontal bands on N threads
     /// and stitch them into one PNG (`bands.rs`).
     bands: Option<u32>,
+    /// `--profile` (issue #737): a headless run reports, on stderr, each
+    /// named procedure's call count and inclusive and exclusive time.
+    profile: bool,
+    /// `--profile-top N`: rows to show (default 20; 0 = all).
+    profile_top: Option<usize>,
+    /// `--profile-json`: the same report as one line of JSON (implies
+    /// `--profile`).
+    profile_json: bool,
 }
 
 impl Options {
@@ -143,6 +151,9 @@ impl Options {
             progress: false,
             exit_with_parent: None,
             bands: None,
+            profile: false,
+            profile_top: None,
+            profile_json: false,
         }
     }
 
@@ -269,6 +280,11 @@ fn main() -> ExitCode {
         }
     }
 
+    if let Err(msg) = check_profile_options(&options) {
+        eprintln!("pscat: {msg}");
+        return ExitCode::FAILURE;
+    }
+
     if let Some(count) = options.bands {
         return bands::run(&options, count);
     }
@@ -391,6 +407,9 @@ fn main() -> ExitCode {
     if let Err(msg) = options.apply_limits(&mut interp) {
         eprintln!("pscat: {msg}");
         return ExitCode::FAILURE;
+    }
+    if options.profile {
+        interp.enable_profile();
     }
     // The single-run paths below end the process right after the output is
     // written, so tearing down the dictionary graph (which `Drop for Interp`
@@ -578,13 +597,78 @@ fn run_progress(interp: &mut Interp, source: &[u8]) -> Result<(), pscat::PsError
     }
 }
 
+/// `--profile` reports after a headless run of one program, so it refuses
+/// every mode that has none: the window, the REPL, sweeps, the spool, and
+/// `--bands` (each band re-runs the whole program, so a per-band profile
+/// would report N copies of the same calls; profile a plain run).
+fn check_profile_options(options: &Options) -> Result<(), String> {
+    if !options.profile {
+        if options.profile_top.is_some() {
+            return Err("--profile-top needs --profile".to_string());
+        }
+        return Ok(());
+    }
+    let others: [(bool, &str); 6] = [
+        (options.bands.is_some(), "--bands"),
+        (options.sweep_seed.is_some(), "--sweep-seed"),
+        (options.sweep_param.is_some(), "--sweep"),
+        (options.contact_sheet.is_some(), "--contact-sheet"),
+        (options.spool.is_some(), "--spool"),
+        (options.interactive, "--interactive"),
+    ];
+    if let Some((_, flag)) = others.iter().find(|(on, _)| *on) {
+        return Err(format!(
+            "--profile reports on one headless run; it doesn't combine with {flag}"
+        ));
+    }
+    if options.file.is_none() && options.eval.is_none() {
+        return Err("--profile needs a program: a file, - or -e".to_string());
+    }
+    let headless = options.headless
+        || options.eval.is_some()
+        || options.png.is_some()
+        || options.svg.is_some()
+        || options.pdf.is_some()
+        || options.lint;
+    if !headless {
+        return Err(
+            "--profile needs a headless run (add --headless, --png, --svg, --pdf or --lint)"
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
+/// Print the `--profile` report to stderr (a closed stderr must not fail
+/// the run).
+fn print_profile(interp: &Interp, options: &Options) {
+    let Some(report) = interp.profile_report() else {
+        return;
+    };
+    // `--profile-top 0` is all rows; the default is 20.
+    let top = match options.profile_top {
+        Some(0) => None,
+        Some(n) => Some(n),
+        None => Some(DEFAULT_PROFILE_TOP),
+    };
+    let text = if options.profile_json {
+        format!("{}\n", report.to_json(top))
+    } else {
+        report.to_text(top)
+    };
+    let _ = io::stderr().write_all(text.as_bytes());
+}
+
+/// Rows `--profile` prints unless `--profile-top` says otherwise.
+const DEFAULT_PROFILE_TOP: usize = 20;
+
 fn run_headless(interp: &mut Interp, source: &[u8], options: &Options) -> bool {
     let run = if options.progress {
         run_progress(interp, source)
     } else {
         interp.run_source(source)
     };
-    match run {
+    let ok = match run {
         Ok(()) => true,
         Err(e) => {
             eprintln!("{}", interp.error_report(&e));
@@ -593,7 +677,13 @@ fn run_headless(interp: &mut Interp, source: &[u8], options: &Options) -> bool {
             }
             false
         }
+    };
+    // After the error report, and for a failed run too: where a program
+    // died is when you most want to know where its time went.
+    if options.profile {
+        print_profile(interp, options);
     }
+    ok
 }
 
 /// gs-style post-mortem: the operand stack, bottom to top, in `==`
@@ -1427,6 +1517,17 @@ fn parse_args() -> Result<Options, String> {
             "--headless" => options.headless = true,
             "--pstack-on-error" => options.pstack_on_error = true,
             "--progress" => options.progress = true,
+            "--profile" => options.profile = true,
+            "--profile-json" => {
+                options.profile = true;
+                options.profile_json = true;
+            }
+            "--profile-top" => {
+                let n = args.next().ok_or("missing value after --profile-top")?;
+                options.profile_top = Some(n.parse().map_err(|_| {
+                    format!("invalid --profile-top value: {n} (expected a whole number; 0 = all)")
+                })?);
+            }
             "--exit-with-parent" => {
                 let n = args.next().ok_or("missing PID after --exit-with-parent")?;
                 options.exit_with_parent = Some(parent_pid_arg(&n)?);
@@ -1622,6 +1723,14 @@ fn print_usage() {
     println!("      --pstack-on-error  print the operand stack after an error");
     println!("      --progress      print `pscat: progress pages=N` to stderr as each page");
     println!("                      is finished (headless runs)");
+    println!("      --profile       after a headless run, print to stderr each named procedure's");
+    println!("                      call count and inclusive and exclusive wall time, sorted");
+    println!("                      by exclusive time (top 20). A procedure counts under the");
+    println!("                      name it was called through; recursion counts inclusive");
+    println!("                      time once. Slows a run (each call reads the clock twice).");
+    println!("                      Not with --bands, sweeps, --spool or the window");
+    println!("      --profile-top N rows --profile prints (0 = all)");
+    println!("      --profile-json  --profile as one line of JSON");
     println!("      --exit-with-parent PID  stop once PID is no longer pscat's parent");
     println!("                      (Unix; pscat-mcp passes its own pid to every render)");
     println!("      --max-steps N   stop a program after N interpreter steps (0 = no limit)");

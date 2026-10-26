@@ -1185,6 +1185,22 @@ renders eight examples in both and compares block-downsampled output).
   new shortcut (e.g. culling fills whose bbox misses the band) needs a provably
   conservative bound and a run of `tests/bands.rs`. See
   `notes/736-bands-parallel-render.md`.
+- **`--profile` (#737).** Per-procedure call counts and inclusive/exclusive time
+  on stderr (`src/profile.rs`, a `Profiler` on `Interp`). `execute_resolved` takes
+  the name a body was reached through (`via`, `NO_NAME` for `exec`/`if`) and, with
+  profiling on, `prof_call` plants a `Frame::ProfReturn` marker under the body's
+  `Proc` frame. The marker is reached after the body and its tail call (a `Proc`
+  frame is popped *before* its last element runs, so the frame itself cannot mark
+  the return), and `cleanup_unwound_frame` / `exit_loop` close it on `stop`,
+  errors, `exit` and `quit`. A call to a name already among the markers on top of
+  the exec stack plants none (tail recursion stays at constant depth; non-tail recursion overflows the exec
+  stack at about half the plain depth, since a marker takes a slot). Keep the
+  hot path as it is: the only cost off is one `profile.is_some()` in
+  `execute_resolved`'s `Array` arm, and everything else is `#[cold]`. A first
+  version that made `step_n_inner` generic, or added a second caller of
+  `execute_resolved`/`push_proc_frame`, slowed a plain `fib` run by 19%; measure
+  with `scripts/bench_compare.sh` after touching `interp.rs`. See
+  `notes/737-pscat-profile.md`.
 - **Read roots (#763).** Reads are open by default (the CLI). `Interp::set_read_roots`
   (CLI `--read-root DIR`, `--confine-reads` for none) confines them, and
   `src/read_roots.rs` decides: `open_confined` wraps the search order's reader so a

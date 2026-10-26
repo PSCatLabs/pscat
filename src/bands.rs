@@ -60,7 +60,7 @@ pub fn rows(index: u32, count: u32, height: u32) -> (u32, u32) {
 
 /// Refuse every combination `--bands` can't honour, before anything runs.
 fn check_options(options: &Options) -> Result<(), String> {
-    let others: [(bool, &str); 10] = [
+    let others: [(bool, &str); 11] = [
         (options.svg.is_some(), "--svg"),
         (options.pdf.is_some(), "--pdf"),
         (options.lint, "--lint"),
@@ -71,6 +71,9 @@ fn check_options(options: &Options) -> Result<(), String> {
         (options.spool.is_some(), "--spool"),
         (options.interactive, "--interactive"),
         (options.progress, "--progress"),
+        // Each band re-runs the whole program, so a per-band profile would
+        // report N copies of the same calls (#737). Profile a plain run.
+        (options.profile, "--profile"),
     ];
     if let Some((_, flag)) = others.iter().find(|(on, _)| *on) {
         return Err(format!(
