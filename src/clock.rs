@@ -26,6 +26,15 @@ impl Clock {
             .map(|d| d.as_millis() as i64)
             .unwrap_or(0)
     }
+
+    /// Monotonic nanoseconds from a process-wide zero point (the first
+    /// call): the profiler's clock (`profile.rs`).
+    pub fn mono_ns() -> u64 {
+        static ZERO: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+        ZERO.get_or_init(std::time::Instant::now)
+            .elapsed()
+            .as_nanos() as u64
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -42,6 +51,10 @@ impl Clock {
     }
 
     pub fn wall_ms() -> i64 {
+        0
+    }
+
+    pub fn mono_ns() -> u64 {
         0
     }
 }
