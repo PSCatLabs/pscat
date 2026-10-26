@@ -859,6 +859,10 @@ pub struct Gfx {
     svg: Option<Box<crate::svg::SvgRecorder>>,
     /// PDF export recorder (`--pdf`); same seams, PDF syntax.
     pdf: Option<Box<crate::pdf::PdfRecorder>>,
+    /// Scratch coverage mask for [`Gfx::fill_coverage`], page-sized and
+    /// reused across fills; only the filled path's pixel bounds are
+    /// written (and read) each time.
+    coverage: Option<tiny_skia::Mask>,
 }
 
 impl Gfx {
@@ -892,6 +896,7 @@ impl Gfx {
             svg: None,
             pdf: None,
             suppress_paint: 0,
+            coverage: None,
         })
     }
 
@@ -1135,15 +1140,43 @@ impl Gfx {
         self.painted_since_page = true;
     }
 
+    /// Paint `path` (device space) with the current paint and clip,
+    /// coverage computed analytically by [`crate::coverage`] rather than
+    /// by tiny-skia's 4x4 supersampler, so a shape thinner than a pixel
+    /// keeps a coverage proportional to its area (issue #692). The
+    /// coverage mask is composited through `fill_rect` with AA off: the
+    /// mask already holds the edge coverage, and colour, alpha and blend
+    /// still go through tiny-skia's pipeline as before.
+    fn fill_coverage(&mut self, path: &tiny_skia::Path, rule: FillRule) {
+        let (w, h) = (self.pixmap.width(), self.pixmap.height());
+        let mut cov = match self.coverage.take() {
+            Some(m) if m.width() == w && m.height() == h => m,
+            _ => match tiny_skia::Mask::new(w, h) {
+                Some(m) => m,
+                None => return,
+            },
+        };
+        let clip = self
+            .clip_mask()
+            .filter(|c| c.width() == w && c.height() == h);
+        if let Some(r) = crate::coverage::rasterize(path, rule.into(), &mut cov, clip.as_deref())
+            && let Some(rect) =
+                tiny_skia::Rect::from_ltrb(r.x0 as f32, r.y0 as f32, r.x1 as f32, r.y1 as f32)
+        {
+            let mut paint = self.paint();
+            paint.anti_alias = false;
+            self.pixmap
+                .fill_rect(rect, &paint, Transform::identity(), Some(&cov));
+        }
+        self.coverage = Some(cov);
+    }
+
     pub fn fill(&mut self, rule: FillRule) {
         if !self.painting_off()
             && let Some(path) = self.state.path.to_skia()
         {
             self.prepare_paint();
-            let paint = self.paint();
-            let mask = self.clip_mask();
-            self.pixmap
-                .fill_path(&path, &paint, rule, Transform::identity(), mask.as_deref());
+            self.fill_coverage(&path, rule);
             let comp = self.composite();
             if self.svg.is_some() {
                 let d = self.state.path.to_svg_data();
@@ -1993,15 +2026,7 @@ impl Gfx {
         }
         if let Some(p) = path.to_skia() {
             self.prepare_paint();
-            let paint = self.paint();
-            let mask = self.clip_mask();
-            self.pixmap.fill_path(
-                &p,
-                &paint,
-                FillRule::Winding,
-                Transform::identity(),
-                mask.as_deref(),
-            );
+            self.fill_coverage(&p, FillRule::Winding);
             let comp = self.composite();
             if self.svg.is_some() {
                 let d = path.to_svg_data();
