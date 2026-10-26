@@ -134,6 +134,9 @@ fn writereals(it: &mut Interp) -> Result<(), PsError> {
     // The whole write against the byte cap before the file is opened, so a
     // refusal leaves the target as it was (issue #762).
     it.check_write_bytes((len * fmt.width()) as u64)?;
+    // What an open handle still holds goes to disk before this open
+    // truncates the file (as when writes were unbuffered).
+    let _ = it.flush_outputs();
     let mut file = it
         .write_policy()
         .open(name, crate::write_roots::WriteMode::Truncate)?;

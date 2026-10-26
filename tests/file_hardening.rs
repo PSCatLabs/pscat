@@ -241,6 +241,50 @@ fn the_write_byte_cap_stops_writes_and_leaves_the_file_short() {
 }
 
 #[test]
+fn a_hex_string_over_the_cap_writes_none_of_it() {
+    let (root, mut it) = setup("fh-cap-hex");
+    let path = root.join("h.txt");
+    it.set_max_write_bytes(Some(9000));
+    // 5000 bytes are 10,000 hex digits: over the cap, in more than one
+    // internal chunk, and nothing is written.
+    it.run_str(&format!(
+        "{} (w) file /h exch def h 5000 string writehexstring",
+        ps(&path)
+    ))
+    .unwrap_err();
+    it.run_str("h flushfile h closefile").unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), b"");
+    // 4000 bytes (8000 digits) fit.
+    it.run_str(&format!(
+        "{} (w) file dup 4000 string writehexstring closefile",
+        ps(&path)
+    ))
+    .unwrap();
+    assert_eq!(std::fs::read(&path).unwrap().len(), 8000);
+}
+
+#[test]
+fn reopening_a_path_does_not_resurrect_buffered_bytes() {
+    let (root, mut it) = setup("fh-reopen");
+    let path = root.join("re.txt");
+    let f = ps(&path);
+    // The first handle's pending bytes go to disk before the second open
+    // truncates, so the file ends up as the second writer left it.
+    it.run_str(&format!(
+        "{f} (w) file /a exch def a (old old old) writestring \
+         {f} (w) file /b exch def b (new) writestring b closefile a closefile"
+    ))
+    .unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), b"new");
+    // `writereals` truncates the same way.
+    it.run_str(&format!(
+        "{f} (w) file /c exch def c (zz) writestring [1] {f} writereals c closefile"
+    ))
+    .unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), 1.0f64.to_le_bytes());
+}
+
+#[test]
 fn the_write_byte_cap_covers_writereals_before_it_opens_the_file() {
     let (root, mut it) = setup("fh-cap-reals");
     let path = root.join("r.bin");

@@ -139,6 +139,9 @@ fn file(it: &mut Interp) -> Result<(), PsError> {
             let name = writable_name(&name)?;
             // The cap is looked at first: a refused open truncates nothing.
             it.check_output_slot()?;
+            // What an open handle still holds goes to disk before this open
+            // can truncate the file, as it did when writes were unbuffered.
+            let _ = it.flush_outputs();
             disk = true;
             Sink::Disk(DiskSink::new(it.write_policy().open(name, mode)?))
         }
@@ -224,6 +227,11 @@ fn writehexstring(it: &mut Interp) -> Result<(), PsError> {
     if s.is_empty() {
         // Still an error on a closed or input file.
         return write_bytes(it, &f, &[]);
+    }
+    // A disk file's whole write against the byte cap first, so a refusal
+    // writes none of it (issue #762).
+    if matches!(f.borrow_mut().sink_mut(), Some(Sink::Disk(_))) {
+        it.check_write_bytes(2 * s.len() as u64)?;
     }
     let mut buf = [0u8; 8192];
     for chunk in s.borrow_bytes().chunks(buf.len() / 2) {
