@@ -388,3 +388,44 @@ fn singular_image_matrix_is_undefinedresult_before_any_data() {
         assert_eq!(it.run_str(bad), Err(PsError::UndefinedResult), "{bad}");
     }
 }
+
+// ---- setalpha / setblendmode reach images (#766) ---------------------------
+
+#[test]
+fn image_takes_alpha_and_resets_with_grestore() {
+    // The black checker cells at 0.5 over white are mid grey; the white
+    // cells stay white; after `grestore` the image is opaque again.
+    let it = run(&format!("gsave 0.5 setalpha {CHECKER} grestore"));
+    let (r, g, b) = pixel(&it, 30, 30);
+    assert!((126..=129).contains(&r) && r == g && g == b, "{r} {g} {b}");
+    assert_eq!(pixel(&it, 70, 30), WHITE);
+    let it = run(&format!("gsave 0.5 setalpha grestore {CHECKER}"));
+    assert_eq!(pixel(&it, 30, 30), BLACK);
+}
+
+#[test]
+fn imagemask_takes_alpha_and_multiply() {
+    // A red stencil over a cyan ground (0,255,255). At alpha 0.5 Normal
+    // gives (128,128,128); Multiply of pure red on cyan is black.
+    let ground = "0 1 1 setrgbcolor 0 0 100 100 rectfill 1 0 0 setrgbcolor";
+    let mask = "10 10 translate 80 80 scale 1 1 true [1 0 0 -1 0 1] {<80>} imagemask";
+    let it = run(&format!("{ground} 0.5 setalpha {mask}"));
+    let (r, g, b) = pixel(&it, 50, 50);
+    assert!(
+        (126..=129).contains(&r) && (126..=129).contains(&g) && (126..=129).contains(&b),
+        "{r} {g} {b}"
+    );
+    assert_eq!(pixel(&it, 5, 5), (0, 255, 255));
+    let it = run(&format!("{ground} /Multiply setblendmode {mask}"));
+    assert_eq!(pixel(&it, 50, 50), BLACK);
+}
+
+#[test]
+fn translucent_image_on_a_transparent_page_stays_translucent() {
+    let mut it = Interp::with_page(100, 100).expect("test page");
+    it.gfx_mut().set_transparent_background();
+    it.run_str(&format!("0.5 setalpha {CHECKER}"))
+        .expect("runs");
+    let p = it.gfx().pixmap.pixel(30, 30).unwrap();
+    assert!((126..=129).contains(&p.alpha()), "alpha {}", p.alpha());
+}

@@ -611,12 +611,15 @@ renders eight examples in both and compares block-downsampled output).
   `.setstrokeconstantalpha`, `setalpha` are all `where`-undefined on
   gs 10.x; gs's transparency lives inside its PDF interpreter). Two
   consequences worth knowing before touching either:
-    * **Alpha does not reach `image`/`imagemask`.** `src/image.rs`
-      blits samples straight into the pixmap rather than going through
-      `Gfx::paint()`, so a translucent `image` silently paints opaque.
-      Documented at the field, the operator, README and the tests;
-      closing it means teaching the image blitter about the graphics
-      state, not just adding a call.
+    * **Alpha reaches `image`/`imagemask`/`colorimage` since #766.**
+      `src/image.rs` blits samples straight into the pixmap rather than
+      through `Gfx::paint()`, so it composites itself: `blend_pixel`
+      (premultiplied, tiny-skia's Normal and Multiply formulas, pinned
+      by a unit test against a real tiny-skia fill). The default (alpha 1,
+      Normal) keeps the old arithmetic verbatim, so existing renders are
+      byte-identical. SVG gives the `<image>` `opacity` and the blend on
+      the outermost clip group; PDF selects the `ExtGState` before `Do`.
+      `selftest/drivers/image_alpha.ps` covers it.
     * **A program using them will not render the same under plain `gs
       file.ps`.** The verification route for alpha-bearing content is
       `--pdf` plus gs rasterizing that PDF back (`tests/pdf.rs`'s

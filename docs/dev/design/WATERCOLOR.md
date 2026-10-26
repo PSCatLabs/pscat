@@ -470,7 +470,7 @@ commutative alternative — the specimen sheet shows the same two washes
 in both orders under both modes, so the difference is visible rather
 than asserted.
 
-**Known gap this issue did not close.** Alpha and blend do not reach
+**Known gap this issue did not close (closed by #766).** Alpha and blend did not reach
 `image`/`imagemask`, which blit samples straight into the pixmap instead
 of going through `Gfx::paint()`. A translucent `image` paints opaque.
 Documented at the field, the operator, README, and HANDOFF; closing it

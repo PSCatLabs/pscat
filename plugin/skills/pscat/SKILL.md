@@ -285,8 +285,11 @@ currentalpha currentblendmode
 ```
 
 Graphics state (`gsave`/`grestore` save them, `initgraphics` resets
-them). They reach fills, strokes, text and `shfill`, **not**
-`image`/`imagemask`. Exported to SVG and PDF as well as PNG. **Not PLRM
+them). They reach fills, strokes, text, `shfill` and, since #766,
+`image`/`imagemask`/`colorimage` (an image at alpha 0.5 is half
+see-through; `Multiply` darkens what is under it; a soft-masked
+ImageType 3 multiplies its own mask by the alpha). Exported to SVG and
+PDF as well as PNG. **Not PLRM
 operators**: Ghostscript has no PostScript-level alpha, so hand someone a
 `--pdf` or `--png`, not a `.ps`, and probe with `systemdict /setalpha
 known` in code that must run in both. Also pscat-only: `gstate .sameclip

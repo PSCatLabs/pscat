@@ -434,9 +434,8 @@ fn setlinewidth(it: &mut Interp) -> Result<(), PsError> {
 /// Clamped rather than range-checked, matching how the color operators
 /// here already treat out-of-range components. Snapshotted by
 /// `gsave`/`grestore` and reset by `initgraphics`, like every other
-/// paint attribute. Reaches `fill`, `stroke`, shown text, and `shfill`;
-/// **not** `image`/`imagemask`, which blit their own samples straight
-/// into the pixmap (documented gap -- see `GraphicsState::alpha`).
+/// paint attribute. Reaches `fill`, `stroke`, shown text, `shfill` and, since
+/// #766, `image`/`imagemask`/`colorimage` (see `GraphicsState::alpha`).
 fn setalpha(it: &mut Interp) -> Result<(), PsError> {
     let a = it.pop_f64()?;
     it.gfx.state_mut().alpha = a.clamp(0.0, 1.0) as f32;

@@ -1,0 +1,113 @@
+%!PS-Adobe-3.0
+%%Title: image under setalpha and setblendmode driver (issue #766)
+%%Pages: 3
+%%BoundingBox: 0 0 260 50
+%%SelfTestPage: 260x50
+%%EndComments
+
+% Run with:  pscat --page 260x50 --lint-strict selftest/drivers/image_alpha.ps
+%
+% setalpha and setblendmode (pscat extensions, issue #47) reach `image`,
+% `colorimage` and `imagemask` in PNG, SVG and PDF output (#766). Every page
+% sits on a saturated striped ground, because white would hide Multiply and a
+% flat ground would hide the alpha. Not %%IdentityCorpus: always, on purpose:
+% the five image_*.ps drivers must stay byte-identical across the change that
+% added alpha, and a file only in the branch cannot be compared.
+%
+%   1. Normal at 0.5: `image` (RGB), `colorimage`, Gray `image`, `imagemask`,
+%      and ImageType 3 (its soft mask multiplies with the alpha, in a PDF too)
+%   2. Multiply: `image` at alpha 1, at 0.5, `imagemask`, a rotated ImageMatrix
+%   3. State: Multiply image under a circular clip (SVG puts the blend on the
+%      clip wrapper), a gsave/grestore that must leave the next image opaque,
+%      an initgraphics reset, and a 0.5 image after an opaque one on the same
+%      ground (the alpha is the image's own, not the page's)
+
+/_n 0 def
+/mk { % n -> a string of n bytes (a fixed, busy pattern)
+  /_n exch def
+  _n string
+  0 1 _n 1 sub {
+    dup dup 97 mul exch 5 idiv 41 mul add 11 add 256 mod
+    2 index 3 1 roll put
+  } for
+} def
+/disc8 <3c 7e ff ff ff ff 7e 3c> def
+
+/ground { % saturated vertical stripes, 10 points wide
+  0 10 250 {
+    dup 10 idiv 2 mod 0 eq { 0.1 0.8 0.9 } { 0.95 0.85 0.1 } ifelse
+    setrgbcolor 0 10 50 rectfill
+  } for
+} def
+
+/rgbimg { % x: a 4x4 RGB image into a 40-pt cell
+  gsave 5 translate 5 0 translate 40 40 scale
+  4 4 8 [4 0 0 -4 0 4] 48 mk false 3 colorimage
+  grestore
+} def
+
+/dimg { % x: the same, through `image` with the RGB space
+  gsave 5 translate 40 40 scale
+  /DeviceRGB setcolorspace
+  << /ImageType 1 /Width 4 /Height 4 /BitsPerComponent 8
+     /ImageMatrix [4 0 0 -4 0 4] /DataSource 48 mk /Decode [0 1 0 1 0 1] >> image
+  grestore
+} def
+
+% ---- 1. Normal at 0.5 --------------------------------------------------------------
+ground
+gsave
+0.5 setalpha
+0 dimg                                   % `image`
+50 rgbimg                                % `colorimage`
+gsave 105 5 translate 40 40 scale        % Gray `image`
+  /DeviceGray setcolorspace
+  8 8 8 [8 0 0 -8 0 8] 64 mk image
+grestore
+0.1 0.1 0.6 setrgbcolor
+gsave 155 5 translate 40 40 scale        % `imagemask`
+  8 8 true [8 0 0 -8 0 8] disc8 imagemask
+grestore
+gsave 205 5 translate 40 40 scale        % ImageType 3
+  /DeviceRGB setcolorspace
+  << /ImageType 3 /InterleaveType 3
+     /DataDict << /ImageType 1 /Width 4 /Height 4 /BitsPerComponent 8
+                  /ImageMatrix [4 0 0 -4 0 4] /DataSource 48 mk >>
+     /MaskDict << /ImageType 1 /Width 8 /Height 8 /BitsPerComponent 1
+                  /ImageMatrix [8 0 0 -8 0 8] /DataSource disc8 >> >> image
+grestore
+grestore
+showpage
+
+% ---- 2. Multiply -----------------------------------------------------------------------
+ground
+gsave
+/Multiply setblendmode
+0 dimg                                   % alpha 1
+gsave 0.5 setalpha 50 rgbimg grestore   % alpha 0.5
+0.8 0.1 0.1 setrgbcolor
+gsave 105 5 translate 40 40 scale        % `imagemask`
+  8 8 true [8 0 0 -8 0 8] disc8 imagemask
+grestore
+gsave 155 5 translate 40 40 scale        % a rotated ImageMatrix, alpha 0.7
+  0.7 setalpha
+  /DeviceRGB setcolorspace
+  4 4 8 [2.83 2.83 -2.83 2.83 2 -0.83] 48 mk false 3 colorimage
+grestore
+grestore
+showpage
+
+% ---- 3. State -------------------------------------------------------------------------------
+ground
+gsave % Multiply at 0.8 under a circular clip
+  25 25 translate newpath 0 0 20 0 360 arc clip
+  /Multiply setblendmode 0.8 setalpha
+  -20 -20 translate 40 40 scale
+  4 4 8 [4 0 0 -4 0 4] 48 mk false 3 colorimage
+grestore
+gsave 0.3 setalpha grestore              % must not leak: this image is opaque
+50 dimg
+gsave 0.4 setalpha /Multiply setblendmode initgraphics 105 dimg grestore % reset
+0.5 setalpha 155 dimg                    % a 0.5 image straddling two stripes
+1 setalpha 0 setgray
+showpage
