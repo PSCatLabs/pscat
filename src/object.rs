@@ -79,7 +79,7 @@ impl PsArray {
     /// before this returns (so `f` must not try to execute anything).
     /// The interpreter's procedure fetch uses it to avoid cloning
     /// elements it only needs to look at (#323).
-    #[inline]
+    #[inline(always)]
     pub(crate) fn peek<R>(&self, i: usize, f: impl FnOnce(&Object) -> R) -> Option<R> {
         if i < self.len {
             Some(f(&self.data.borrow()[self.off + i]))
@@ -307,6 +307,23 @@ impl Object {
 
     pub fn string(bytes: Vec<u8>) -> Self {
         Self::lit(Value::String(PsString::from_bytes(bytes)))
+    }
+
+    /// `clone`, with the numbers copied inline. The derived `clone` is an
+    /// out-of-line call that switches on the variant; the step loop and the
+    /// stack operators copy numbers far more often than anything else, so
+    /// they skip that call (#863). Same result as `clone` for every value.
+    #[inline(always)]
+    pub(crate) fn clone_inline(&self) -> Object {
+        let value = match self.value {
+            Value::Integer(i) => Value::Integer(i),
+            Value::Real(r) => Value::Real(r),
+            _ => return self.clone(),
+        };
+        Object {
+            value,
+            executable: self.executable,
+        }
     }
 
     /// The `type` operator's name for this object.
