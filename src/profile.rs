@@ -32,18 +32,41 @@ struct Stat {
     excl_ns: u64,
 }
 
+/// The caller of a call made from the top level (no procedure open).
+const ROOT: u32 = u32::MAX;
+/// `Active::edge` when the call graph is off.
+const NO_EDGE: usize = usize::MAX;
+
+/// One caller -> callee pair's running totals (`--profile-graph`).
+struct EdgeStat {
+    caller: u32,
+    callee: u32,
+    calls: u64,
+    /// Calls along this edge now open; time is added when the outermost
+    /// closes, so a recursive edge (`fib` -> `fib`) is not counted twice.
+    depth: u32,
+    incl_ns: u64,
+}
+
 /// A call in progress (one per marker frame on the exec stack, same order).
 struct Active {
     id: u32,
     start: u64,
     /// Inclusive time of the calls this one made, to subtract for exclusive.
     child_ns: u64,
+    /// Index into `Profiler::edges` of the edge this call runs along.
+    edge: usize,
 }
 
 #[derive(Default)]
 pub(crate) struct Profiler {
     stats: HashMap<u32, Stat>,
     active: Vec<Active>,
+    /// `--profile-graph`: record who called what. Off, the profiler does
+    /// no edge work at all.
+    graph: bool,
+    edge_ix: HashMap<(u32, u32), usize>,
+    edges: Vec<EdgeStat>,
 }
 
 impl Profiler {
@@ -51,6 +74,27 @@ impl Profiler {
         // Start the clock's zero point before the first reading.
         crate::clock::Clock::mono_ns();
         Self::default()
+    }
+
+    /// Record caller -> callee edges too (before the program runs).
+    pub(crate) fn set_graph(&mut self) {
+        self.graph = true;
+    }
+
+    /// The edge from the innermost open call (or the top level) to `callee`.
+    fn edge_to(&mut self, callee: u32) -> usize {
+        let caller = self.active.last().map_or(ROOT, |a| a.id);
+        let edges = &mut self.edges;
+        *self.edge_ix.entry((caller, callee)).or_insert_with(|| {
+            edges.push(EdgeStat {
+                caller,
+                callee,
+                calls: 0,
+                depth: 0,
+                incl_ns: 0,
+            });
+            edges.len() - 1
+        })
     }
 
     /// Does one of the top `k` open calls belong to `id`? Those are the
@@ -62,27 +106,45 @@ impl Profiler {
     }
 
     /// Count a call that reuses an open marker (a tail call).
+    /// The edge counts the call too, with no time of its own: the time is
+    /// part of the open call it continues.
     pub(crate) fn count_only(&mut self, id: u32) {
         self.stats.entry(id).or_default().calls += 1;
+        if self.graph {
+            let e = self.edge_to(id);
+            self.edges[e].calls += 1;
+        }
     }
 
     pub(crate) fn enter(&mut self, id: u32) {
         let s = self.stats.entry(id).or_default();
         s.calls += 1;
         s.depth += 1;
+        let edge = if self.graph {
+            let e = self.edge_to(id);
+            self.edges[e].calls += 1;
+            self.edges[e].depth += 1;
+            e
+        } else {
+            NO_EDGE
+        };
         self.active.push(Active {
             id,
             start: crate::clock::Clock::mono_ns(),
             child_ns: 0,
+            edge,
         });
     }
 
     /// Take back an `enter` whose frame could not be pushed.
     pub(crate) fn abort_enter(&mut self) {
-        if let Some(a) = self.active.pop()
-            && let Some(s) = self.stats.get_mut(&a.id)
-        {
-            s.depth -= 1;
+        if let Some(a) = self.active.pop() {
+            if let Some(s) = self.stats.get_mut(&a.id) {
+                s.depth -= 1;
+            }
+            if let Some(e) = self.edges.get_mut(a.edge) {
+                e.depth -= 1;
+            }
         }
     }
 
@@ -96,6 +158,12 @@ impl Profiler {
         s.depth = s.depth.saturating_sub(1);
         if s.depth == 0 {
             s.incl_ns += dur;
+        }
+        if let Some(e) = self.edges.get_mut(a.edge) {
+            e.depth = e.depth.saturating_sub(1);
+            if e.depth == 0 {
+                e.incl_ns += dur;
+            }
         }
         if let Some(parent) = self.active.last_mut() {
             parent.child_ns += dur;
@@ -121,7 +189,28 @@ impl Profiler {
                 .then(b.calls.cmp(&a.calls))
                 .then(a.name.cmp(&b.name))
         });
-        ProfileReport { rows }
+        let edges = self.graph.then(|| {
+            let mut edges: Vec<EdgeRow> = self
+                .edges
+                .iter()
+                .map(|e| EdgeRow {
+                    caller: (e.caller != ROOT).then(|| crate::name::resolve(e.caller).to_string()),
+                    callee: crate::name::resolve(e.callee).to_string(),
+                    calls: e.calls,
+                    inclusive: Duration::from_nanos(e.incl_ns),
+                })
+                .collect();
+            // Most time first; ties by calls, then names, never hash order.
+            edges.sort_by(|a, b| {
+                b.inclusive
+                    .cmp(&a.inclusive)
+                    .then(b.calls.cmp(&a.calls))
+                    .then_with(|| a.caller.cmp(&b.caller))
+                    .then_with(|| a.callee.cmp(&b.callee))
+            });
+            edges
+        });
+        ProfileReport { rows, edges }
     }
 }
 
@@ -137,10 +226,27 @@ pub struct ProfileRow {
     pub exclusive: Duration,
 }
 
+/// One caller -> callee line of the call graph (`--profile-graph`).
+#[derive(Clone, Debug)]
+pub struct EdgeRow {
+    /// The procedure that made the call, or `None` for the top level.
+    pub caller: Option<String>,
+    pub callee: String,
+    /// Calls along this edge. Summed over a callee's incoming edges this is
+    /// the callee's [`ProfileRow::calls`].
+    pub calls: u64,
+    /// Time the callee ran when called from `caller`, children included,
+    /// counted once per outermost recursive frame of the edge. A tail call
+    /// adds a call and no time: its time is in the call it continues.
+    pub inclusive: Duration,
+}
+
 /// The finished profile, sorted by exclusive time, longest first.
 #[derive(Clone, Debug)]
 pub struct ProfileReport {
     pub rows: Vec<ProfileRow>,
+    /// The call graph, longest edge first; `None` unless it was asked for.
+    pub edges: Option<Vec<EdgeRow>>,
 }
 
 impl ProfileReport {
@@ -172,10 +278,39 @@ impl ProfileReport {
                 self.rows.len() - shown
             ));
         }
+        if let Some(edges) = &self.edges {
+            let shown = top.map_or(edges.len(), |n| n.min(edges.len()));
+            out.push_str(&format!(
+                "pscat: call graph, {} of {} edges by inclusive time\n",
+                shown,
+                edges.len()
+            ));
+            out.push_str(&format!(
+                "  {:>10}  {:>12}  {}\n",
+                "calls", "inclusive", "caller -> callee"
+            ));
+            for e in &edges[..shown] {
+                out.push_str(&format!(
+                    "  {:>10}  {:>12}  {} -> {}\n",
+                    e.calls,
+                    fmt_ms(e.inclusive),
+                    e.caller.as_deref().unwrap_or(TOP_LEVEL),
+                    e.callee
+                ));
+            }
+            if shown < edges.len() {
+                out.push_str(&format!(
+                    "  ... {} more (--profile-top N, 0 = all)\n",
+                    edges.len() - shown
+                ));
+            }
+        }
         out
     }
 
-    /// One JSON object: `{"procedures":[{"name","calls","inclusive_ms","exclusive_ms"}...]}`.
+    /// One JSON object: `{"procedures":[{"name","calls","inclusive_ms","exclusive_ms"}...],
+    /// "total_procedures":N}`, plus `"edges":[{"caller" (null at the top level),"callee",
+    /// "calls","inclusive_ms"}...],"total_edges":N` with the call graph.
     pub fn to_json(&self, top: Option<usize>) -> String {
         let shown = top.map_or(self.rows.len(), |n| n.min(self.rows.len()));
         let mut out = String::from("{\"procedures\":[");
@@ -191,10 +326,32 @@ impl ProfileReport {
                 r.exclusive.as_secs_f64() * 1e3
             ));
         }
-        out.push_str(&format!("],\"total_procedures\":{}}}", self.rows.len()));
+        out.push_str(&format!("],\"total_procedures\":{}", self.rows.len()));
+        if let Some(edges) = &self.edges {
+            let shown = top.map_or(edges.len(), |n| n.min(edges.len()));
+            out.push_str(",\"edges\":[");
+            for (i, e) in edges[..shown].iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                let caller = e.caller.as_deref().map_or("null".to_string(), json_str);
+                out.push_str(&format!(
+                    "{{\"caller\":{},\"callee\":{},\"calls\":{},\"inclusive_ms\":{:.3}}}",
+                    caller,
+                    json_str(&e.callee),
+                    e.calls,
+                    e.inclusive.as_secs_f64() * 1e3
+                ));
+            }
+            out.push_str(&format!("],\"total_edges\":{}", edges.len()));
+        }
+        out.push('}');
         out
     }
 }
+
+/// How the text view names a call made from outside every procedure.
+const TOP_LEVEL: &str = "<top level>";
 
 fn fmt_ms(d: Duration) -> String {
     format!("{:.3} ms", d.as_secs_f64() * 1e3)

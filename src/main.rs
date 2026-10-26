@@ -119,6 +119,12 @@ struct Options {
     /// `--profile-json`: the same report as one line of JSON (implies
     /// `--profile`).
     profile_json: bool,
+    /// `--profile-json PATH`: write that JSON to PATH (through the write
+    /// roots) instead of stderr.
+    profile_json_path: Option<String>,
+    /// `--profile-graph`: also report caller -> callee edges (implies
+    /// `--profile`).
+    profile_graph: bool,
 }
 
 impl Options {
@@ -159,6 +165,8 @@ impl Options {
             profile: false,
             profile_top: None,
             profile_json: false,
+            profile_json_path: None,
+            profile_graph: false,
         }
     }
 
@@ -444,6 +452,16 @@ fn main() -> ExitCode {
     }
     if options.profile {
         interp.enable_profile();
+        if options.profile_graph {
+            interp.enable_profile_graph();
+        }
+    }
+    // Refuse before the run, not after it, when the profile has nowhere to go.
+    if let Some(path) = &options.profile_json_path
+        && let Err(e) = interp.writable_path(path)
+    {
+        eprintln!("pscat: {}", profile_json_refusal(path, &e));
+        return ExitCode::FAILURE;
     }
     // The single-run paths below end the process right after the output is
     // written, so tearing down the dictionary graph (which `Drop for Interp`
@@ -687,6 +705,9 @@ fn check_profile_options(options: &Options) -> Result<(), String> {
         }
         return Ok(());
     }
+    if options.profile_json_path.is_some() && options.allow_write.is_empty() {
+        return Err("--profile-json PATH needs --allow-write DIR (PATH must be inside it)".into());
+    }
     let others: [(bool, &str); 6] = [
         (options.bands.is_some(), "--bands"),
         (options.sweep_seed.is_some(), "--sweep-seed"),
@@ -718,11 +739,20 @@ fn check_profile_options(options: &Options) -> Result<(), String> {
     Ok(())
 }
 
+/// Why `--profile-json PATH` can't write PATH.
+fn profile_json_refusal(path: &str, e: &pscat::PsError) -> String {
+    format!(
+        "--profile-json: can't write {path} ({}): it must be inside an --allow-write directory",
+        e.name()
+    )
+}
+
 /// Print the `--profile` report to stderr (a closed stderr must not fail
-/// the run).
-fn print_profile(interp: &Interp, options: &Options) {
+/// the run), or with `--profile-json PATH` write the JSON to PATH, through
+/// the write roots, and print nothing. False if that write failed.
+fn print_profile(interp: &Interp, options: &Options) -> bool {
     let Some(report) = interp.profile_report() else {
-        return;
+        return true;
     };
     // `--profile-top 0` is all rows; the default is 20.
     let top = match options.profile_top {
@@ -730,12 +760,40 @@ fn print_profile(interp: &Interp, options: &Options) {
         Some(n) => Some(n),
         None => Some(DEFAULT_PROFILE_TOP),
     };
+    if let Some(path) = &options.profile_json_path {
+        // Resolved again here: what the program did to the directory since
+        // the check before the run (a rename, a new symlink) counts.
+        let written = interp
+            .writable_path(path)
+            .map_err(|e| profile_json_refusal(path, &e))
+            .and_then(|real| {
+                std::fs::write(&real, format!("{}\n", report.to_json(top)))
+                    .map_err(|e| format!("--profile-json: can't write {path}: {e}"))
+            });
+        return match written {
+            Ok(()) => true,
+            Err(msg) => {
+                eprintln!("pscat: {msg}");
+                false
+            }
+        };
+    }
     let text = if options.profile_json {
         format!("{}\n", report.to_json(top))
     } else {
         report.to_text(top)
     };
     let _ = io::stderr().write_all(text.as_bytes());
+    true
+}
+
+/// Whether the argument after `--profile-json` is its PATH rather than the
+/// program: it ends in `.json` (any case).
+fn is_json_path(arg: &str) -> bool {
+    !arg.starts_with('-')
+        && std::path::Path::new(arg)
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("json"))
 }
 
 /// Rows `--profile` prints unless `--profile-top` says otherwise.
@@ -759,12 +817,10 @@ fn run_headless(interp: &mut Interp, source: &[u8], options: &Options) -> bool {
     };
     // After the error report, and for a failed run too: where a program
     // died is when you most want to know where its time went.
-    if options.profile {
-        print_profile(interp, options);
-    }
+    let profiled = !options.profile || print_profile(interp, options);
     // A failed run flushes too: what it wrote before it died is on disk.
     let flushed = flush_outputs_or_report(interp);
-    ok && flushed
+    ok && flushed && profiled
 }
 
 /// gs-style post-mortem: the operand stack, bottom to top, in `==`
@@ -1568,7 +1624,7 @@ fn format_sweep_value(v: SweepValue) -> String {
 
 fn parse_args() -> Result<Options, String> {
     let mut options = Options::new();
-    let mut args = env::args().skip(1);
+    let mut args = env::args().skip(1).peekable();
     while let Some(arg) = args.next() {
         if arg.starts_with('-') && arg != "-" {
             options.seen_flags.push(arg.clone());
@@ -1606,6 +1662,15 @@ fn parse_args() -> Result<Options, String> {
             "--profile-json" => {
                 options.profile = true;
                 options.profile_json = true;
+                // The path is optional, and a program file may follow, so
+                // only an argument ending in `.json` is taken as the path.
+                if let Some(path) = args.next_if(|a| is_json_path(a)) {
+                    options.profile_json_path = Some(path);
+                }
+            }
+            "--profile-graph" => {
+                options.profile = true;
+                options.profile_graph = true;
             }
             "--profile-top" => {
                 let n = args.next().ok_or("missing value after --profile-top")?;
@@ -1803,7 +1868,10 @@ fn print_usage() {
     println!("                      time once. Slows a run (each call reads the clock twice).");
     println!("                      Not with --bands, sweeps, --spool or the window");
     println!("      --profile-top N rows --profile prints (0 = all)");
-    println!("      --profile-json  --profile as one line of JSON");
+    println!("      --profile-json [PATH]  --profile as one line of JSON. With a PATH ending in");
+    println!("                      .json, write it there instead (needs --allow-write)");
+    println!("      --profile-graph --profile also lists caller -> callee edges with the time");
+    println!("                      spent along each (with --profile-top and --profile-json)");
     println!("      --exit-with-parent PID  stop once PID is no longer pscat's parent");
     println!("                      (Unix; pscat-mcp passes its own pid to every render)");
     println!("      --max-steps N   stop a program after N interpreter steps (0 = no limit).");

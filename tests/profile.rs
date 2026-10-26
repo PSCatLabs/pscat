@@ -5,7 +5,9 @@
 use std::process::{Command, Stdio};
 
 use pscat::Interp;
-use pscat::profile::{ProfileReport, ProfileRow};
+use pscat::profile::{EdgeRow, ProfileReport, ProfileRow};
+
+mod common;
 
 const BIN: &str = env!("CARGO_BIN_EXE_pscat");
 
@@ -14,6 +16,16 @@ const BIN: &str = env!("CARGO_BIN_EXE_pscat");
 fn profile(src: &str) -> (Result<(), pscat::PsError>, ProfileReport) {
     let mut interp = Interp::new();
     interp.enable_profile();
+    let result = interp.run_str(src);
+    let report = interp.profile_report().expect("profiling is on");
+    (result, report)
+}
+
+/// Like [`profile`], with the call graph on.
+fn profile_graph(src: &str) -> (Result<(), pscat::PsError>, ProfileReport) {
+    let mut interp = Interp::new();
+    interp.enable_profile();
+    interp.enable_profile_graph();
     let result = interp.run_str(src);
     let report = interp.profile_report().expect("profiling is on");
     (result, report)
@@ -357,10 +369,360 @@ fn modes_without_a_single_headless_run_refuse_it() {
         &["--profile", "--headless"][..],
         &["--profile", "somefile.ps"][..],
         &["--profile-top", "5", "-e", "1 pop"][..],
+        &[
+            "--profile-graph",
+            "--bands",
+            "2",
+            "--png",
+            "/dev/null",
+            "-e",
+            "1 pop",
+        ][..],
+        &["--profile-graph", "--interactive"][..],
         &["--selftest", "lib/artkit.ps", "--profile"][..],
     ] {
         let (ok, _, stderr) = pscat(args, "");
         assert!(!ok, "{args:?} should be refused");
         assert!(stderr.contains("pscat:"), "{args:?}: {stderr}");
     }
+}
+
+// ---------------------------------------------------------------------
+// --profile-graph (issue #799)
+// ---------------------------------------------------------------------
+
+fn edge<'a>(report: &'a ProfileReport, caller: Option<&str>, callee: &str) -> &'a EdgeRow {
+    report
+        .edges
+        .as_ref()
+        .expect("graph is on")
+        .iter()
+        .find(|e| e.caller.as_deref() == caller && e.callee == callee)
+        .unwrap_or_else(|| panic!("no edge {caller:?} -> {callee}: {report:?}"))
+}
+
+/// Every call arrives along exactly one edge, so a callee's incoming edges
+/// (the top level included) add up to its call count.
+fn assert_edges_add_up(report: &ProfileReport) {
+    let edges = report.edges.as_ref().expect("graph is on");
+    for r in &report.rows {
+        let incoming: u64 = edges
+            .iter()
+            .filter(|e| e.callee == r.name)
+            .map(|e| e.calls)
+            .sum();
+        assert_eq!(incoming, r.calls, "{}: {report:?}", r.name);
+    }
+    assert!(
+        edges
+            .iter()
+            .all(|e| report.rows.iter().any(|r| r.name == e.callee))
+    );
+    for w in edges.windows(2) {
+        assert!(w[0].inclusive >= w[1].inclusive, "not sorted: {report:?}");
+    }
+}
+
+#[test]
+fn a_known_call_graph_gives_the_expected_edges() {
+    let (result, report) = profile_graph(&format!(
+        "/c {{ {BURN} }} def
+         /b {{ c c }} def
+         /a {{ b 1 pop b }} def
+         a a a"
+    ));
+    result.expect("runs");
+    assert_eq!(report.edges.as_ref().unwrap().len(), 3);
+    assert_eq!(edge(&report, None, "a").calls, 3);
+    assert_eq!(edge(&report, Some("a"), "b").calls, 6);
+    assert_eq!(edge(&report, Some("b"), "c").calls, 12);
+    assert_edges_add_up(&report);
+    // Time nests along the edges, and an edge's time is the callee's here
+    // (each has one caller).
+    let (top_a, a_b, b_c) = (
+        edge(&report, None, "a").inclusive,
+        edge(&report, Some("a"), "b").inclusive,
+        edge(&report, Some("b"), "c").inclusive,
+    );
+    assert!(top_a >= a_b && a_b >= b_c && b_c > std::time::Duration::ZERO);
+    assert_eq!(top_a, row(&report, "a").inclusive);
+    assert_eq!(b_c, row(&report, "c").inclusive);
+}
+
+#[test]
+fn one_callee_from_two_callers_splits_its_time_between_two_edges() {
+    let (result, report) = profile_graph(&format!(
+        "/leaf {{ {BURN} }} def
+         /x {{ leaf 1 pop }} def
+         /y {{ leaf leaf 1 pop }} def
+         x y"
+    ));
+    result.expect("runs");
+    assert_eq!(edge(&report, Some("x"), "leaf").calls, 1);
+    assert_eq!(edge(&report, Some("y"), "leaf").calls, 2);
+    assert_edges_add_up(&report);
+    let sum =
+        edge(&report, Some("x"), "leaf").inclusive + edge(&report, Some("y"), "leaf").inclusive;
+    assert_eq!(sum, row(&report, "leaf").inclusive);
+}
+
+#[test]
+fn a_tail_call_has_its_own_edge() {
+    let (result, report) = profile_graph(&format!(
+        "/heavy {{ {BURN} }} def
+         /caller {{ 1 pop heavy }} def
+         caller"
+    ));
+    result.expect("runs");
+    let e = edge(&report, Some("caller"), "heavy");
+    assert_eq!(e.calls, 1);
+    assert!(e.inclusive > std::time::Duration::ZERO);
+    assert_edges_add_up(&report);
+}
+
+#[test]
+fn recursion_counts_each_call_on_its_edge_but_the_time_once() {
+    let (result, report) = profile_graph(
+        "/fib { dup 2 lt { } { dup 1 sub fib exch 2 sub fib add } ifelse } def
+         15 fib pop",
+    );
+    result.expect("runs");
+    // fib(15) makes 1973 calls: one from the top, 1972 from itself.
+    assert_eq!(edge(&report, None, "fib").calls, 1);
+    let own = edge(&report, Some("fib"), "fib");
+    assert_eq!(own.calls, 1972);
+    assert_edges_add_up(&report);
+    // Counting every nested frame would make the self edge ~14x the run.
+    assert!(own.inclusive <= edge(&report, None, "fib").inclusive);
+}
+
+#[test]
+fn tail_recursion_counts_calls_on_the_edges_without_inventing_time() {
+    let src = "/down { dup 0 gt { 1 sub down } { pop } ifelse } def 60000 down
+               /ping { dup 0 gt { 1 sub pong } { pop } ifelse } def
+               /pong { dup 0 gt { 1 sub ping } { pop } ifelse } def
+               5000 ping";
+    let (result, report) = profile_graph(src);
+    result.expect("runs");
+    assert_eq!(edge(&report, None, "down").calls, 1);
+    assert_eq!(edge(&report, Some("down"), "down").calls, 60000);
+    assert_edges_add_up(&report);
+    let own = edge(&report, Some("down"), "down");
+    assert!(own.inclusive <= edge(&report, None, "down").inclusive);
+}
+
+#[test]
+fn unwinding_closes_the_edges_it_passes() {
+    let (result, report) = profile_graph(&format!(
+        "/g {{ {BURN} stop }} def
+         /f {{ 1 pop g }} def
+         {{ f }} stopped pop
+         /after {{ 1 }} def after pop"
+    ));
+    result.expect("runs");
+    assert_edges_add_up(&report);
+    assert!(edge(&report, Some("f"), "g").inclusive > std::time::Duration::ZERO);
+    assert!(edge(&report, None, "f").inclusive >= edge(&report, Some("f"), "g").inclusive);
+    // After the unwinding the stack of open calls is empty again.
+    assert_eq!(edge(&report, None, "after").calls, 1);
+}
+
+#[test]
+fn the_graph_is_off_unless_asked_for() {
+    let (_, plain) = profile("/a { } def a");
+    assert!(plain.edges.is_none());
+    assert!(!plain.to_text(None).contains("call graph"));
+    assert!(!plain.to_json(None).contains("edges"));
+}
+
+#[test]
+fn the_graph_text_and_json_list_the_edges_and_honour_the_row_limit() {
+    let (_, report) = profile_graph("/b { } def /a { b b } def a");
+    let text = report.to_text(None);
+    assert!(text.contains("call graph, 2 of 2 edges"), "{text}");
+    assert!(text.contains("<top level> -> a"), "{text}");
+    assert!(text.contains("a -> b"), "{text}");
+    let limited = report.to_text(Some(1));
+    assert!(limited.contains("call graph, 1 of 2 edges"), "{limited}");
+    assert!(limited.contains("1 more"), "{limited}");
+
+    let v: serde_json::Value = serde_json::from_str(&report.to_json(None)).expect("valid JSON");
+    assert_eq!(v["total_edges"], 2);
+    let edges = v["edges"].as_array().expect("edges");
+    let ab = edges.iter().find(|e| e["callee"] == "b").expect("a -> b");
+    assert_eq!(
+        (ab["caller"].as_str(), ab["calls"].as_u64()),
+        (Some("a"), Some(2))
+    );
+    let top = edges.iter().find(|e| e["callee"] == "a").expect("top -> a");
+    assert!(top["caller"].is_null());
+    assert!(top["inclusive_ms"].is_f64());
+    let v: serde_json::Value = serde_json::from_str(&report.to_json(Some(1))).unwrap();
+    assert_eq!(v["edges"].as_array().unwrap().len(), 1);
+    assert_eq!(v["total_edges"], 2);
+}
+
+#[test]
+fn profile_graph_on_the_command_line_implies_profile() {
+    let (ok, stdout, stderr) = pscat(&["--profile-graph", "-e", "/b { } def /a { b } def a"], "");
+    assert!(ok, "{stderr}");
+    assert!(!stdout.contains("call graph"), "report belongs on stderr");
+    assert!(stderr.contains("pscat: profile"), "{stderr}");
+    assert!(stderr.contains("a -> b"), "{stderr}");
+    let (_, _, json) = pscat(
+        &["--profile-json", "--profile-graph", "-e", "/a { } def a"],
+        "",
+    );
+    let v: serde_json::Value = serde_json::from_str(json.trim()).expect("one JSON line");
+    assert_eq!(v["total_edges"], 1);
+    // Without the flag the report is what it was.
+    let (_, _, plain) = pscat(&["--profile", "-e", "/a { } def a"], "");
+    assert!(!plain.contains("call graph"), "{plain}");
+}
+
+// ---------------------------------------------------------------------
+// --profile-json PATH (issue #799)
+// ---------------------------------------------------------------------
+
+const TWO_CALLS: &str = "/a { } def a a";
+
+#[test]
+fn profile_json_path_writes_the_file_inside_the_write_root() {
+    let dir = common::scratch_dir("profile-json");
+    let root = dir.to_str().unwrap();
+    let out = dir.join("p.json");
+    let (ok, _, stderr) = pscat(
+        &[
+            "--allow-write",
+            root,
+            "--profile-json",
+            out.to_str().unwrap(),
+            "-e",
+            TWO_CALLS,
+        ],
+        "",
+    );
+    assert!(ok, "{stderr}");
+    assert_eq!(stderr, "", "nothing goes to stderr when the file takes it");
+    let text = std::fs::read_to_string(&out).expect("file written");
+    assert!(text.ends_with('\n') && !text[..text.len() - 1].contains('\n'));
+    let v: serde_json::Value = serde_json::from_str(&text).expect("valid JSON");
+    assert_eq!(v["procedures"][0]["name"], "a");
+    assert_eq!(v["procedures"][0]["calls"], 2);
+
+    // The graph and the row limit carry over, and a rerun replaces the file.
+    let (ok, _, stderr) = pscat(
+        &[
+            "--allow-write",
+            root,
+            "--profile-graph",
+            "--profile-top",
+            "1",
+            "--profile-json",
+            out.to_str().unwrap(),
+            "-e",
+            "/b { } def /a { b } def a",
+        ],
+        "",
+    );
+    assert!(ok, "{stderr}");
+    let v: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&out).unwrap()).expect("valid JSON");
+    assert_eq!(v["procedures"].as_array().unwrap().len(), 1);
+    assert_eq!(v["total_edges"], 2);
+}
+
+#[test]
+fn profile_json_path_needs_a_write_root_and_runs_nothing_without_one() {
+    let dir = common::scratch_dir("profile-json-noroot");
+    let out = dir.join("p.json");
+    let (ok, stdout, stderr) = pscat(
+        &[
+            "--profile-json",
+            out.to_str().unwrap(),
+            "-e",
+            "(ran) print /a { } def a",
+        ],
+        "",
+    );
+    assert!(!ok);
+    assert!(stderr.contains("--allow-write"), "{stderr}");
+    assert_eq!(stdout, "", "the program must not run");
+    assert!(!out.exists());
+}
+
+#[test]
+fn profile_json_path_outside_the_write_root_is_refused_before_the_run() {
+    let root = common::scratch_dir("profile-json-root");
+    let elsewhere = common::scratch_dir("profile-json-elsewhere");
+    let out = elsewhere.join("p.json");
+    let (ok, stdout, stderr) = pscat(
+        &[
+            "--allow-write",
+            root.to_str().unwrap(),
+            "--profile-json",
+            out.to_str().unwrap(),
+            "-e",
+            "(ran) print /a { } def a",
+        ],
+        "",
+    );
+    assert!(!ok);
+    assert!(stderr.contains("invalidfileaccess"), "{stderr}");
+    assert_eq!(stdout, "", "the program must not run");
+    assert!(!out.exists());
+    // `..` does not get out of the root either.
+    let sneaky = format!(
+        "{}/../{}/p.json",
+        root.display(),
+        elsewhere.file_name().unwrap().to_str().unwrap()
+    );
+    let (ok, stdout, _) = pscat(
+        &[
+            "--allow-write",
+            root.to_str().unwrap(),
+            "--profile-json",
+            &sneaky,
+            "-e",
+            "(ran) print",
+        ],
+        "",
+    );
+    assert!(!ok && stdout.is_empty());
+    assert!(!out.exists());
+}
+
+#[test]
+fn profile_json_path_that_cannot_be_written_fails_the_run_and_says_why() {
+    let dir = common::scratch_dir("profile-json-dir");
+    // A directory where the file should go: allowed by the roots, not writable.
+    let out = dir.join("p.json");
+    std::fs::create_dir(&out).unwrap();
+    let (ok, _, stderr) = pscat(
+        &[
+            "--allow-write",
+            dir.to_str().unwrap(),
+            "--profile-json",
+            out.to_str().unwrap(),
+            "-e",
+            TWO_CALLS,
+        ],
+        "",
+    );
+    assert!(!ok, "a profile that can't be saved is a failed run");
+    assert!(stderr.contains("--profile-json"), "{stderr}");
+}
+
+#[test]
+fn profile_json_without_a_json_path_still_takes_a_program_file() {
+    let dir = common::scratch_dir("profile-json-prog");
+    let prog = dir.join("prog.ps");
+    std::fs::write(&prog, "/a { } def a a a").unwrap();
+    let (ok, _, stderr) = pscat(
+        &["--headless", "--profile-json", prog.to_str().unwrap()],
+        "",
+    );
+    assert!(ok, "{stderr}");
+    let v: serde_json::Value = serde_json::from_str(stderr.trim()).expect("JSON on stderr");
+    assert_eq!(v["procedures"][0]["calls"], 3);
 }

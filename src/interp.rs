@@ -1450,6 +1450,15 @@ impl Interp {
         self.profile = Some(Box::new(crate::profile::Profiler::new()));
     }
 
+    /// Also record who called whom (`--profile-graph`); call it right
+    /// after [`enable_profile`](Self::enable_profile).
+    #[doc(hidden)]
+    pub fn enable_profile_graph(&mut self) {
+        if let Some(p) = self.profile.as_mut() {
+            p.set_graph();
+        }
+    }
+
     /// What the profile has recorded so far (finished calls only), or
     /// `None` if [`enable_profile`](Self::enable_profile) was not called.
     #[doc(hidden)]
