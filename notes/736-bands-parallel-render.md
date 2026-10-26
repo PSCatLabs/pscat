@@ -43,9 +43,15 @@ PostScript error, not a crash).
 **Limits.** `--max-steps` and `--max-time` apply per band (an unaware program
 takes the same steps in each band as in a plain run, so the same limit fits).
 `--max-memory` reads the process heap counter (`memtrack`), so it caps all
-bands together. A start gate holds every band until all N canvases exist, so
-each band's heap base already includes them. It is a mutex and condvar, not a
-`Barrier`, so a failed thread spawn can release the others.
+bands together. Two gates (a mutex and condvar each, not `Barrier`s) hold the
+bands:
+- the first until all N canvases exist, so every band's heap base includes them;
+- the second until every band has set its base, so no program's allocations
+  land under a later band's base (Codex round 2).
+
+A drop guard aborts both gates however a band ends, so a failure or panic never
+leaves the others waiting. The limits go on after the band names are defined,
+so a tight `--max-steps` bounds the program alone (Codex round 1).
 
 **Evidence** (10-core Apple M-series laptop: 4 performance + 6 efficiency
 cores; wall time, median of 5 interleaved rounds after a warm-up round, pscat
