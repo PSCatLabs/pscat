@@ -278,13 +278,22 @@ Q",
         data: ImageData,
         t: [f32; 6],
         fill_rgb: (f32, f32, f32),
+        interpolate: bool,
         chain: &Chain,
     ) {
+        // `/Interpolate true` (#730): a viewer hint on the colour image
+        // only. Never on an imagemask, nor on an ImageType 3 soft mask
+        // (the raster keeps the stencil edge hard).
+        let hint = if interpolate {
+            " /Interpolate true"
+        } else {
+            ""
+        };
         // A soft mask is its own image entry (never in a page's XObject
         // resources), referenced from the main image by index.
         let (dict_extra, raw, smask): (String, Vec<u8>, Option<usize>) = match data {
             ImageData::Rgb(px) => (
-                "/ColorSpace /DeviceRGB /BitsPerComponent 8".to_string(),
+                format!("/ColorSpace /DeviceRGB /BitsPerComponent 8{hint}"),
                 px,
                 None,
             ),
@@ -308,7 +317,7 @@ Q",
                 let at = self.images.len();
                 self.images.push(mask);
                 (
-                    "/ColorSpace /DeviceRGB /BitsPerComponent 8".to_string(),
+                    format!("/ColorSpace /DeviceRGB /BitsPerComponent 8{hint}"),
                     rgb,
                     Some(at),
                 )

@@ -240,7 +240,19 @@ impl SvgRecorder {
     /// An image (or imagemask) as embedded PNG: `png` is the encoded
     /// W×H source raster, `t` the device transform mapping source
     /// pixel coordinates to device space.
-    pub(crate) fn image(&mut self, png: &[u8], w: usize, h: usize, t: [f32; 6], chain: &Chain) {
+    ///
+    /// `interpolate` (`/Interpolate true`, #730) emits
+    /// `image-rendering="auto"`, the viewer's smooth scaling; otherwise
+    /// `pixelated` keeps the hard cell edges (the SVG default would smooth).
+    pub(crate) fn image(
+        &mut self,
+        png: &[u8],
+        w: usize,
+        h: usize,
+        t: [f32; 6],
+        interpolate: bool,
+        chain: &Chain,
+    ) {
         // No blend style: `image`/`imagemask` don't go through
         // `Gfx::paint()` at all, so alpha and blend never reached them
         // in the raster either (documented gap, issue #47) -- passing
@@ -249,9 +261,10 @@ impl SvgRecorder {
         let _ = write!(
             self.body,
             "{open}<image width=\"{w}\" height=\"{h}\" preserveAspectRatio=\"none\" \
-             image-rendering=\"pixelated\" \
+             image-rendering=\"{}\" \
              transform=\"matrix({} {} {} {} {} {})\" \
              xlink:href=\"data:image/png;base64,{}\"/>{close}",
+            if interpolate { "auto" } else { "pixelated" },
             fmt_f32(t[0]),
             fmt_f32(t[1]),
             fmt_f32(t[2]),
