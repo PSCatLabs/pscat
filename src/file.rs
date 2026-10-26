@@ -1064,7 +1064,8 @@ mod tests {
         assert_eq!(at(3), (2, 3));
         f.borrow_mut().read_byte().unwrap();
         assert_eq!(f.borrow().line(), 2);
-        assert_eq!(at(4), (3, 4));
+        assert_eq!(at(4), (2, 4));
+        assert_eq!(at(5), (3, 5));
         assert_eq!(at(0), (1, 0));
         assert_eq!(at(7), (4, 7));
         // Reading on from a CR whose LF follows counts one line ending.
@@ -1072,7 +1073,7 @@ mod tests {
         assert_eq!(drain(&f), b"\nb\rc\nd");
         assert_eq!(f.borrow().line(), 4);
         assert_eq!(
-            f.borrow_mut().set_file_position(8),
+            f.borrow_mut().set_file_position(9),
             Err(PsError::Rangecheck)
         );
         assert_eq!(
