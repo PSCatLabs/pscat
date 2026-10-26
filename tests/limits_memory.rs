@@ -136,4 +136,35 @@ fn memory_growth_is_capped() {
         writer.join().unwrap();
         assert_eq!(result, Ok(()));
     }
+
+    // Memory one thread allocates and another frees (issue #844: each
+    // thread folds its count in every 64 KiB). The thread exits with its
+    // allocations still unfolded, so the free shows up first; the count
+    // must stay sane, not wrap to near 2^64.
+    let before = pscat::memtrack::live_bytes();
+    let kept = std::thread::spawn(|| (0..60).map(|_| vec![7u8; 1000]).collect::<Vec<_>>())
+        .join()
+        .unwrap();
+    drop(kept);
+    let after = pscat::memtrack::live_bytes();
+    assert!(after < 1 << 40, "no wraparound: {after}");
+    assert!(
+        after.abs_diff(before) < 2 * 64 * 1024,
+        "within one batch either way: {before} -> {after}"
+    );
+
+    // A thread that folds before it exits leaves an exact count behind.
+    let before = pscat::memtrack::live_bytes();
+    let leaked = std::thread::spawn(|| {
+        let v: &'static mut [u8] = Box::leak(vec![1u8; 10_000].into_boxed_slice());
+        pscat::memtrack::fold_thread();
+        v.len()
+    })
+    .join()
+    .unwrap();
+    let grew = pscat::memtrack::live_bytes() - before;
+    assert!(
+        (leaked..leaked + 4096).contains(&grew),
+        "the leaked 10 kB is counted: {grew}"
+    );
 }
