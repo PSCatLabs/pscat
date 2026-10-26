@@ -1160,7 +1160,7 @@ fn tool_list(cfg: &Config) -> Value {
             "title": "Run PostScript",
             "annotations": annotations("Run PostScript", true),
             "description": format!("Run a PostScript program headlessly and return what it printed \
-                (=, print, pstack). On error: the standard PostScript error name, the offending \
+                (=, print, pstack), then anything the program wrote to stderr as a Warnings item. On error: the standard PostScript error name, the offending \
                 command and line, plus a gs-style operand-stack post-mortem. The debugging \
                 loop. Writes nothing. {READS_BRIEF} {limits}"),
             "inputSchema": {
@@ -2554,7 +2554,11 @@ fn eval_postscript(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
         report.push_str("(ran clean, printed nothing)");
     }
     if run.success {
-        return Ok(Value::Array(vec![text_content(&report)]));
+        // What the program wrote to stderr (`%stderr`, a font stand-in note)
+        // follows the output as `Warnings:`, as it does for a render.
+        let mut content = vec![text_content(&report)];
+        content.extend(warnings_content(&run.stderr));
+        return Ok(Value::Array(content));
     }
     Err(failed_run("postscript_error", report, &run.stderr))
 }
@@ -2699,8 +2703,9 @@ const MAX_WARNING_CHARS: usize = 300;
 /// (`Warnings:` and the lines), or `None` when there is nothing to say: a
 /// note such as a font falling back to a built-in face (#728) exits 0, and
 /// would otherwise never reach the caller. Blank lines, `pscat: wrote ...`
-/// (the child's own receipt, which names a scratch path) and lint lines (the
-/// tools that run `--lint` report those under `Lint:`) are dropped; repeats
+/// (the child's own receipt, which names a scratch path), `pscat: progress`
+/// lines (for the server) and lint lines (the tools that run `--lint` report
+/// those under `Lint:`) are dropped; repeats
 /// are shown once, in first-seen order; at most [`MAX_WARNING_LINES`] lines
 /// of [`MAX_WARNING_CHARS`] characters each, so the reply stays bounded
 /// however chatty a program is. A failed run reports its whole stderr in the
@@ -2712,7 +2717,10 @@ fn warnings_content(stderr: &str) -> Option<Value> {
     let mut more = 0usize;
     for line in stderr.lines() {
         let line = line.trim();
-        if line.is_empty() || line.starts_with("pscat: wrote ") || line.starts_with("pscat: lint: ")
+        if line.is_empty()
+            || line.starts_with("pscat: wrote ")
+            || line.starts_with("pscat: lint: ")
+            || line.starts_with(PROGRESS_PREFIX)
         {
             continue;
         }
@@ -3380,6 +3388,7 @@ mod tests {
             warnings_content("pscat: wrote /tmp/x/page.png\npscat: lint: [blank-page] x\n\n")
                 .is_none()
         );
+        assert!(warnings_content("pscat: progress pages=3\n").is_none());
         let w = warnings_content("note: a\nnote: b\nnote: a\npscat: wrote /tmp/p.png\n").unwrap();
         assert_eq!(w["text"], "Warnings:\nnote: a\nnote: b");
         let many: String = (0..30).map(|i| format!("w{i}\n")).collect();
