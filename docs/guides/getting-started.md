@@ -249,7 +249,8 @@ More on the less obvious ones:
     afterwards, in steps the clock does not see, so they read cheap here: use
     the procedure table for those. An operator is counted under its systemdict
     name (`a/b` if two names share one function). Without the flag the cost
-    is nil: the operator loop is not touched.
+    is one check per slice of 4,096 steps, and no slowdown was measured on
+    `fib` (`notes/799-profile-followups.md`).
   - Not with `--bands` (each band is a full run, so a merged table would be N
     copies of the same calls), sweeps, `--spool`, `--interactive` or a
     windowed run: it refuses them.

@@ -1237,7 +1237,8 @@ renders eight examples in both and compares block-downsampled output).
   the exec stack plants none (tail recursion stays at constant depth; non-tail recursion overflows the exec
   stack at about half the plain depth, since a marker takes a slot). Keep the
   hot path as it is: the only cost off is one `profile.is_some()` in
-  `execute_resolved`'s `Array` arm, and everything else is `#[cold]`. A first
+  `execute_resolved`'s `Array` arm (plus, from #799, one operators-on check per
+  `step_n` slice), and everything else is `#[cold]`. A first
   version that made `step_n_inner` generic, or added a second caller of
   `execute_resolved`/`push_proc_frame`, slowed a plain `fib` run by 19%; measure
   with `scripts/bench_compare.sh` after touching `interp.rs`. See

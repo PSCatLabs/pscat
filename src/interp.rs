@@ -1007,6 +1007,7 @@ impl Interp {
         self.execute_resolved(resolved, id)
     }
 
+    // `step_n_timed` is a copy of this loop (`--profile-ops`): change both.
     fn step_n_inner(&mut self, budget: usize) -> Result<bool, PsError> {
         for _ in 0..budget {
             if self.quit_requested {
