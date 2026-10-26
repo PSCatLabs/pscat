@@ -8,7 +8,8 @@ never finished). MCP's 4 MiB cap then reported `output_too_large` instead
 of the real error.
 
 **Fix.** A bounded writer, `stack_repr_bounded` in src/object.rs, used only
-by the dump. `repr()` and `==` are unchanged.
+by the dump. (#745 later gave `==`, `pstack` and `stack` the same writer with
+larger limits: `notes/745-bound-operator-output.md`.)
 
 | Bound | Value | Behaviour when hit |
 |---|---|---|

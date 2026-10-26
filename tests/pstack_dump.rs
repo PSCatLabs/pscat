@@ -1,5 +1,6 @@
 //! Bounds on the `--pstack-on-error` operand-stack dump (issue #703).
-//! `repr()` and `==` are unchanged; these pin the bounded dump's text.
+//! These pin the bounded dump's text (`==`, `pstack` and `stack` share the
+//! printer, with their own limits: `tests/operator_output_bounds.rs`).
 
 use pscat::name;
 use pscat::object::{DumpLimits, Object, STACK_DUMP_LIMITS, Value, stack_repr_bounded};

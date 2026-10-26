@@ -25,7 +25,9 @@ use crate::gfx::{DEFAULT_PAGE, Gfx, GraphicsState};
 use crate::image::{ImageCtx, ImageStep};
 use crate::lexer::{Lexer, Token};
 use crate::limits::{Limits, LimitsError};
-use crate::object::{Dict, Num, Object, PsArray, PsString, SaveHandle, Value};
+use crate::object::{
+    Dict, ERROR_NAME_LIMIT, Num, Object, PsArray, PsString, SaveHandle, Value, cap_text,
+};
 use crate::ops;
 
 /// Generous enough for any sane program (procedure calls in tail position
@@ -979,10 +981,11 @@ impl Interp {
             },
         };
         let command = match err {
-            PsError::Undefined(name) => name.clone(),
-            _ => self
-                .last_executed_name()
-                .unwrap_or_else(|| "--none--".to_string()),
+            PsError::Undefined(name) => cap_text(name, ERROR_NAME_LIMIT),
+            _ => self.last_executed_name().map_or_else(
+                || "--none--".to_string(),
+                |n| cap_text(&n, ERROR_NAME_LIMIT),
+            ),
         };
         match self.last_line {
             Some(line) => {

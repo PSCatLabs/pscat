@@ -3,7 +3,10 @@
 
 use crate::error::PsError;
 use crate::interp::Interp;
-use crate::object::{Dict, Object, Value};
+use crate::object::{
+    Dict, ERROR_NAME_LIMIT, OPERATOR_LIMITS, OPERATOR_STACK_BYTES, Object, TRUNCATED, Value,
+    cap_text,
+};
 
 pub fn install(dict: &mut Dict) {
     use super::op;
@@ -119,8 +122,10 @@ fn handleerror(it: &mut Interp) -> Result<(), PsError> {
     let (name, command) = {
         let d = d.borrow();
         (
-            d.get("errorname").map(|o| o.text()),
-            d.get("command").map(|o| o.text()),
+            d.get("errorname")
+                .map(|o| cap_text(&o.text(), ERROR_NAME_LIMIT)),
+            d.get("command")
+                .map(|o| cap_text(&o.text(), ERROR_NAME_LIMIT)),
         )
     };
     eprintln!(
@@ -142,24 +147,34 @@ fn print_text(it: &mut Interp) -> Result<(), PsError> {
 
 fn print_syntactic(it: &mut Interp) -> Result<(), PsError> {
     let obj = it.pop()?;
-    let line = format!("{}\n", obj.repr());
+    let line = format!("{}\n", obj.repr_bounded(&OPERATOR_LIMITS));
     out(it, line.as_bytes(), false)
 }
 
 /// Print the whole stack, top first, without disturbing it (PLRM `stack`).
 /// One item at a time: a stack of many references to one big string must
-/// not be expanded into a single buffer first.
+/// not be expanded into a single buffer first. Bounded (#745): see
+/// `print_stack_bounded`.
 fn stack_dump(it: &mut Interp) -> Result<(), PsError> {
-    for i in (0..it.ostack.len()).rev() {
-        let line = format!("{}\n", it.ostack[i].text());
-        out(it, line.as_bytes(), false)?;
-    }
-    Ok(())
+    print_stack_bounded(it, |o| o.text_bounded(OPERATOR_LIMITS.max_string))
 }
 
 fn pstack_dump(it: &mut Interp) -> Result<(), PsError> {
+    print_stack_bounded(it, |o| o.repr_bounded(&OPERATOR_LIMITS))
+}
+
+/// One line per operand, top first, each rendered by `render` (already
+/// bounded per item). Stops after `OPERATOR_STACK_BYTES` with one
+/// `... truncated` line for the items below.
+fn print_stack_bounded(it: &mut Interp, render: fn(&Object) -> String) -> Result<(), PsError> {
+    let mut used = 0usize;
     for i in (0..it.ostack.len()).rev() {
-        let line = format!("{}\n", it.ostack[i].repr());
+        if used >= OPERATOR_STACK_BYTES {
+            let line = format!("{TRUNCATED}\n");
+            return out(it, line.as_bytes(), false);
+        }
+        let line = format!("{}\n", render(&it.ostack[i]));
+        used += line.len();
         out(it, line.as_bytes(), false)?;
     }
     Ok(())
