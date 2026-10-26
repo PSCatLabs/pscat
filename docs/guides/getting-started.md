@@ -144,8 +144,9 @@ More on the less obvious ones:
   `floor(i*H/N)` to `floor((i+1)*H/N)`. `clippath` and the rest of the
   graphics state still see the whole page. Every page of a multi-page program
   is banded, and every band must emit the same number of pages. PNG only: it
-  refuses `--svg`, `--pdf`, `--lint`, sweeps, `--progress` and
-  `--allow-write`, since every band would write the same file. `--max-steps`
+  refuses `--svg`, `--pdf`, `--lint`, sweeps, `--progress`, `--profile` and
+  `--allow-write`, since every band would write the same file (or, for
+  `--profile`, report N copies of the same calls: profile a plain run). `--max-steps`
   and `--max-time` apply to each band on its own. `--max-memory` counts the
   whole process, so it caps all bands together, and each band holds its own
   canvas and pages (N times the memory of a plain render). Only the top band's
@@ -153,6 +154,33 @@ More on the less obvious ones:
   it, and the stitched partial page is still written. A piece seeded from
   `realtime` or `usertime` can tear at the seams, since the bands read
   different clocks.
+- **Profile.** `pscat --profile prog.ps` runs the program headlessly, then
+  prints to stderr one line per procedure bound to a name: the call count,
+  the exclusive time (its own, without the named procedures it called) and
+  the inclusive time (call to return), sorted by exclusive time, 20 rows
+  (`--profile-top N`; 0 is all; `--profile-json` prints the same as one line
+  of JSON). It works with `-e`, `-`, `--png`, `--svg`, `--pdf` and `--lint`,
+  and prints after a failed run too. Rules to read it by:
+  - A procedure counts under the name it was *called through*. A body run
+    by `exec`, an `if` or `ifelse` branch, a `forall` body or a Type 3 glyph
+    has no name of its own and counts toward the procedure that ran it.
+    Rebinding a name merges both procedures into one row.
+  - Recursion counts every call, but inclusive time once per outermost call.
+  - Time inside a procedure's last element is its own, and a procedure
+    called from the last position is part of its caller's inclusive time (a
+    plain run drops the caller's frame first; the profile does not).
+  - `stop`/`stopped`, errors, `exit` and `quit` close the calls they unwind,
+    so a run that dies still reports where its time went.
+  - With mutual tail recursion (`a` ends by calling `b`, `b` by calling `a`)
+    the chain stays one call deep, as it does without `--profile`; the calls
+    are all counted, and the time goes to the first procedure of the chain.
+  - It costs time: about 55 ns per named procedure call (the clock is read
+    twice), so `fib 30` runs about a third slower and a typical piece 5%.
+    Times include that cost, so small procedures read high. Without the flag
+    the cost is one flag test per procedure call (under 3% on `fib 27`).
+  - Not with `--bands` (each band is a full run, so a merged table would be N
+    copies of the same calls), sweeps, `--spool`, `--interactive` or a
+    windowed run: it refuses them.
 - **Halftone.** `--halftone` screens the raster like a mono laser printer's
   RIP: classic dots on a 45° lattice, with coverage tracking darkness.
 
