@@ -248,12 +248,12 @@ fn decode(fmt: Fmt, bytes: &[u8], items: &mut Vec<Object>) {
     match fmt {
         Fmt::F64 => items.extend(
             bytes
-                .chunks_exact(8)
+                .chunks(8)
                 .map(|b| Object::real(f64::from_le_bytes(b.try_into().unwrap()))),
         ),
         Fmt::F32 => items.extend(
             bytes
-                .chunks_exact(4)
+                .chunks(4)
                 .map(|b| Object::real(f64::from(f32::from_le_bytes(b.try_into().unwrap())))),
         ),
     }
