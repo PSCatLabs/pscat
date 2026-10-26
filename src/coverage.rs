@@ -20,7 +20,10 @@
 //!
 //! That is the same quantity FreeType's rasteriser applies its fill rule
 //! to, so it is exact wherever only one region's edges cross a pixel and
-//! the usual approximation where edges of different windings share one.
+//! the usual approximation where edges of two overlapping subpaths share
+//! one, whatever their windings: two coincident half-pixel rectangles sum
+//! to 1, which even-odd paints opaque where the true answer is 0 (the 4x4
+//! supersampler resolved that case at sample resolution).
 //!
 //! The result is written into a page-sized [`tiny_skia::Mask`] over the
 //! path's pixel bounds (times the clip mask, if any). The caller

@@ -29,7 +29,9 @@ rule to the same quantity). Each edge adds its signed, winding-weighted area
 to an accumulation buffer, and a running sum along each row gives each
 pixel's coverage. Nonzero uses `min(|v|, 1)` and even-odd folds `v` modulo 2.
 It is exact wherever only one region's edges cross a pixel. Where edges of
-different windings share a pixel it makes the usual small approximation.
+two overlapping subpaths share a pixel, whatever their windings, it makes the
+usual approximation: two coincident half-pixel rectangles under `eofill` paint
+an opaque row instead of cancelling (Codex review, round 2).
 
 - **Sparse.** Only the cells an edge touched are read back and reset. A row's
   coverage is constant between them, so a large interior becomes one *solid*
@@ -64,11 +66,11 @@ gives 161 / 140 / 92, matching the after column.
 ## Scope across the corpus
 
 Two-binary `identity_check.sh` over every tracked `examples/`, `gallery/` and
-`selftest/drivers/` file (173 pages, re-measured after merging main on
-2026-10-26), with the issue's ramp as the control: 137 pages differ and 36 are
-identical. The identical pages are the stroke-only pieces (cathedral_rose,
+`selftest/drivers/` file (176 pages, re-measured after merging main up to
+56006db on 2026-10-26), with a thin-rule ramp as the control: 137 pages differ
+and 39 are identical. The identical pages are the stroke-only pieces (cathedral_rose,
 hundred_lines, silk_waves, golden_spiral, handwriting, koch_snowflake, and the
-artkit, mathkit and strokeglyphs drivers) and the 18 pages of the
+artkit, mathkit and strokeglyphs drivers) and the 21 pages of the
 `selftest/drivers/image_*.ps` drivers, since images don't go through fills.
 
 Percentage of pixels that moved by more than 16 levels:
