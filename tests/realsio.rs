@@ -181,7 +181,7 @@ fn errors() {
         format!("3 {p} writereals"),
         "[1] 5 writereals".to_string(),
         format!("{p} (3) readreals"),
-        "5 5 readreals".to_string(),
+        "5 5 5 readreals".to_string(),
     ] {
         assert_eq!(it.run_str(&src), Err(PsError::Typecheck), "{src}");
     }

@@ -139,6 +139,28 @@ More on the less obvious ones:
   are ignored. `readreals` reads the whole file, then keeps the first `n`
   values, so for a huge file it is as costly as `(path) (r) file`. Both honour
   `--max-steps`, `--max-time` and `--max-memory`.
+
+  To read everything, give `/all` for the count: `(path) /all readreals` (a
+  `-1` is a `rangecheck`, so a count that went negative by mistake is not a
+  silent whole-file read). To read part of a file, put an offset, counted in
+  values and not bytes, before the count, as `getinterval` does:
+  `(path) 100 50 readreals` is values 100 to 149, and `(path) 100 /all
+  readreals` is value 100 to the end. An offset past the last value is a
+  `rangecheck`; a result over the 16,777,216-element array cap is a
+  `limitcheck`.
+
+  Both operators also take an open file. `array file writereals` writes at the
+  file's position, so it works with `(%stdout) (w) file`, an `(a)` append file
+  (two calls give two arrays back to back) and `setfileposition`, and it
+  counts against `--max-write-bytes`; it does not close the file, and a
+  closed or input file is an `ioerror`. `file n readreals` (or `file /all
+  readreals`) reads from an input file's position and leaves it just after
+  the values, so a file can be read in pieces, `setfileposition` (in bytes)
+  jumps, and `currentfile 4 readreals` reads binary data inline in a program.
+  A file that has fewer than `n` values left is a `rangecheck` and keeps its
+  position (a decode filter cannot say how much is left, so it has already
+  given up what it read). There is no offset form for a file: `setfileposition` is the
+  offset.
 - **Limits on every run.** `--max-steps N`, `--max-time SECS` and
   `--max-memory MIB` (0 = no limit, the default) apply to one program run, and
   `--spool` and the tool subcommands take them too (`pscat handwrite`,

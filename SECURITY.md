@@ -177,9 +177,12 @@ never write). `pscat-mcp` never sets a write root ("The MCP server").
   `flushfile`, `closefile`, `fileposition`, `setfileposition`, `resetfile`,
   `renamefile`, `deletefile` and, for numbers,
   `array (path) [/f32] writereals` and `(path) n [/f32] readreals` (packed
-  little-endian binary, `/f64` by default). `writereals` opens the file as
-  `(path) (w) file` does, so every check below applies, and it checks every
-  element before it opens the file, so a bad array never truncates the target.
+  little-endian binary, `/f64` by default; `readreals` also takes `/all`, an
+  element offset, and an open input file, and `writereals` an open output
+  file). `writereals` to a path opens the file as `(path) (w) file` does, so
+  every check below applies, and it checks every element before it opens the
+  file, so a bad array never truncates the target. To a file object it writes
+  through that file, so the file's own checks and the write-bytes cap apply.
   `getenv` and `putenv` are **not defined**.
 - The path check (`src/write_roots.rs`; the one place that decides) works on
   the name as the program gave it: a relative name is relative to the current
@@ -251,10 +254,13 @@ never write). `pscat-mcp` never sets a write root ("The MCP server").
   proportional to the file's length, so a loop that rewinds `currentfile` in a
   very large source costs more than the step count says ("Limits that cannot be
   enforced" applies: the time limit is read between steps).
-- `(path) n readreals` follows the *read* policy (read roots, whole-file read,
-  the limits), with two limits of its own: it refuses before it reads when the
-  array would pass the memory limit, and `n` over the 16,777,216-element array
-  cap is `limitcheck`. A file shorter than `n` values is `rangecheck`.
+- `(path) n readreals` (and the `offset` and `/all` forms) follows the *read*
+  policy (read roots, whole-file read, the limits), with two limits of its own:
+  it refuses before it reads when the array would pass the memory limit, and a
+  count (or an `/all` result) over the 16,777,216-element array cap is
+  `limitcheck`. A file shorter than the values asked for is `rangecheck`.
+  `file n readreals` takes the values from the bytes the file already holds
+  (read under the same policy when it was opened) and obeys the same two limits.
 
 **Cannot do the rest of what a shell does.**
 

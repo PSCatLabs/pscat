@@ -278,6 +278,52 @@ impl PsFile {
         Ok(b)
     }
 
+    /// Append up to `max` bytes to `buf` and return how many were added
+    /// (fewer only at end of data). `ioerror` for a closed file or an output
+    /// file. The position, byte count and line count move exactly as that
+    /// many [`Self::read_byte`] calls would move them (issue #773).
+    pub fn read_into(&mut self, buf: &mut Vec<u8>, max: usize) -> Result<usize, PsError> {
+        if self.closed {
+            return Err(PsError::Io);
+        }
+        let start = buf.len();
+        if self.is_filter() {
+            for _ in 0..max {
+                match self.read_byte()? {
+                    Some(b) => buf.push(b),
+                    None => break,
+                }
+            }
+            return Ok(buf.len() - start);
+        }
+        match &mut self.kind {
+            Kind::Bytes { data, pos } => {
+                let take = max.min(data.len() - *pos);
+                buf.extend_from_slice(&data[*pos..*pos + take]);
+                *pos += take;
+            }
+            _ => return Err(PsError::Io),
+        }
+        // The bookkeeping `read_byte` does, over the bytes just taken.
+        self.consumed += buf.len() - start;
+        for &byte in &buf[start..] {
+            match byte {
+                b'\r' => {
+                    self.line += 1;
+                    self.last_was_cr = true;
+                }
+                b'\n' => {
+                    if !self.last_was_cr {
+                        self.line += 1;
+                    }
+                    self.last_was_cr = false;
+                }
+                _ => self.last_was_cr = false,
+            }
+        }
+        Ok(buf.len() - start)
+    }
+
     pub fn peek_byte(&mut self) -> Result<Option<u8>, PsError> {
         if self.closed {
             return Ok(None);
