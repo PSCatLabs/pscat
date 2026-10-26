@@ -30,7 +30,9 @@
 %      separate sources
 %
 % CMYK cells differ from Ghostscript by pscat's own CMYK conversion, not by
-% anything here; every other cell matches Ghostscript 10.07 pixel for pixel.
+% anything here; every other cell matches Ghostscript 10.07 pixel for pixel,
+% except the ImageType 3 cell (gs paints the left cell black, with or without
+% separate sources; notes/781-image-wide-samples-multi-source.md).
 
 /W 8 def  /H 6 def
 /_n 0 def
@@ -122,6 +124,7 @@ gsave 105 cell
   8 dict begin
     /ImageType 1 def /Width W def /Height H def /BitsPerComponent 8 def
     /MultipleDataSources true def
+    /Decode [0 255] def   % explicit, so Ghostscript agrees (it ignores the PLRM default here)
     /ImageMatrix [W 0 0 H neg 0 H] def
     /DataSource [ 0 W H mul idxplane ] def
   currentdict end image
