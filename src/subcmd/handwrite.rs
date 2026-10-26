@@ -1,4 +1,4 @@
-//! `pscat handwrite`: a string in, a handwritten PNG out (Stage 13;
+//! `pscat handwrite`: a string in, a handwriting-style PNG out (Stage 13;
 //! ported from `scripts/handwrite.sh`, issue #600).
 //!
 //! Renders the text in the /HandScript dynamic font (`lib/handscript.ps`),
@@ -14,6 +14,9 @@ use super::{
 };
 
 const USAGE: &str = r#"usage: pscat handwrite [options] "text to write"
+
+  Hand-drawn styles for notes, cards and art, not for imitating a
+  specific person's handwriting.
 
   -o, --out PATH     output PNG (default handwritten.png)
       --size N       font size in points (default 36)

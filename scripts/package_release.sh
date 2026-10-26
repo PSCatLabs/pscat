@@ -173,7 +173,7 @@ naming the pack; the render still succeeds.
 - \`THIRD_PARTY_NOTICES.md\`, \`licenses/assets.json\` — what else is in pscat, and under which terms
 - \`THIRD_PARTY_LICENSES.html\` — the licences of the Rust libraries linked into the binaries
 
-The handwritten-note, typewritten-page and photo-to-line-etching tools are
+The handwriting-style note, typewritten-page and photo-to-line-etching tools are
 subcommands of the binary: \`pscat handwrite\`, \`pscat typewrite\` and
 \`pscat photo-etch\` (add \`--help\`). They need nothing but \`pscat\`.
 

@@ -1673,7 +1673,7 @@ fn print_usage() {
     println!("      --grid COLSxROWS    grid shape for --contact-sheet (default: square-ish)");
     println!();
     println!("Subcommands (pscat SUBCOMMAND --help for each one's options):");
-    println!("  pscat handwrite \"text\"       a string in, a handwritten PNG out");
+    println!("  pscat handwrite \"text\"       a string in, a handwriting-style PNG out");
     println!("  pscat typewrite [FILE]       a text file in, a typewritten PNG/PDF out");
     println!("  pscat photo-etch photo.jpg   a JPEG in, a line engraving (PNG/SVG/PDF) out");
     println!(

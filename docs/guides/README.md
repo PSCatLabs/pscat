@@ -19,7 +19,7 @@ skimmed [artkit](artkit.md) (it is the base most of them load).
 
 - [Fonts](fonts.md): the Type 3 display faces, the typewriter and the 67-face
   catalog.
-- [Handwriting](handwriting.md): a string in, a handwritten PNG out, and the
+- [Handwriting](handwriting.md): a string in, a handwriting-style PNG out, and the
   `/HandScript` font.
 - [Lettering, headlines and apparel](lettering.md): display type with
   textured fills, headline layout, shirts and jerseys.
