@@ -342,6 +342,9 @@ pub struct Interp {
     /// flushing itself. Counted against [`MAX_OPEN_OUTPUT_FILES`] and
     /// flushed together by [`Interp::flush_outputs`].
     open_outputs: Vec<std::rc::Weak<RefCell<crate::file::PsFile>>>,
+    /// Set by a disk file dropped with bytes it could not write; shared
+    /// with each [`DiskSink`](crate::file::DiskSink) this interpreter opens.
+    lost_write: Rc<Cell<bool>>,
     /// Bytes the program has handed to disk files so far (issue #762).
     bytes_written: u64,
     /// The most bytes it may hand to disk files; `None` for no cap.
@@ -458,6 +461,7 @@ impl Interp {
             write_roots: Default::default(),
             read_roots: None,
             open_outputs: Vec::new(),
+            lost_write: Rc::new(Cell::new(false)),
             bytes_written: 0,
             max_write_bytes: None,
             profile: None,
@@ -595,6 +599,12 @@ impl Interp {
         Ok(())
     }
 
+    /// The note a [`DiskSink`](crate::file::DiskSink) sets when it is dropped
+    /// with bytes it could not write.
+    pub(crate) fn lost_write_note(&self) -> Rc<Cell<bool>> {
+        self.lost_write.clone()
+    }
+
     /// Track a disk output file just opened (after `check_output_slot`).
     pub(crate) fn register_output(&mut self, f: &crate::file::FileHandle) {
         self.open_outputs.push(Rc::downgrade(f));
@@ -610,7 +620,7 @@ impl Interp {
     /// dropped file is cleared by this call.
     pub fn flush_outputs(&mut self) -> Result<(), PsError> {
         let flushed = self.flush_files();
-        if crate::file::take_lost_write() {
+        if self.lost_write.replace(false) {
             return Err(PsError::Io);
         }
         flushed

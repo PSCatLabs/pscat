@@ -143,7 +143,8 @@ fn file(it: &mut Interp) -> Result<(), PsError> {
             // can truncate the file, as it did when writes were unbuffered.
             let _ = it.flush_files();
             disk = true;
-            Sink::Disk(DiskSink::new(it.write_policy().open(name, mode)?))
+            let opened = it.write_policy().open(name, mode)?;
+            Sink::Disk(DiskSink::new(opened, it.lost_write_note()))
         }
     };
     let f = PsFile::output(sink);

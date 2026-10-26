@@ -15,7 +15,7 @@
 //! after the encrypted region must remain unread until the outer
 //! scanner gets there).
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::rc::Rc;
 
@@ -83,14 +83,18 @@ pub struct DiskSink {
     file: std::fs::File,
     buf: Vec<u8>,
     failed: bool,
+    /// The opening interpreter's note: set when this sink is dropped with
+    /// bytes it could not write, for `Interp::flush_outputs` to report.
+    lost: Rc<Cell<bool>>,
 }
 
 impl DiskSink {
-    pub fn new(file: std::fs::File) -> Self {
+    pub fn new(file: std::fs::File, lost: Rc<Cell<bool>>) -> Self {
         DiskSink {
             file,
             buf: Vec::new(),
             failed: false,
+            lost,
         }
     }
 
@@ -164,23 +168,12 @@ impl DiskSink {
 
 impl Drop for DiskSink {
     fn drop(&mut self) {
-        // Nobody can be told now, so remember it: the final
-        // `Interp::flush_outputs` reports it (`take_lost_write`).
+        // Nobody can be told now, so remember it: the interpreter that
+        // opened the file reports it at its final `flush_outputs`.
         if self.flush().is_err() {
-            LOST_WRITE.with(|l| l.set(true));
+            self.lost.set(true);
         }
     }
-}
-
-thread_local! {
-    /// Set when a disk file was dropped with bytes it could not write.
-    static LOST_WRITE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-
-/// Whether a disk file lost bytes when it was dropped unflushed (disk
-/// full, a quota) on this thread since the last call; clears the note.
-pub fn take_lost_write() -> bool {
-    LOST_WRITE.with(|l| l.replace(false))
 }
 
 impl PsFile {
@@ -1072,12 +1065,12 @@ mod tests {
         let path = std::env::temp_dir().join(format!("pscat-lost-{}", std::process::id()));
         std::fs::write(&path, b"x").unwrap();
         // A read-only handle: buffering succeeds, the flush at drop cannot.
-        let mut sink = DiskSink::new(std::fs::File::open(&path).unwrap());
+        let lost = Rc::new(Cell::new(false));
+        let mut sink = DiskSink::new(std::fs::File::open(&path).unwrap(), lost.clone());
         sink.write(b"data").unwrap();
-        assert!(!take_lost_write());
+        assert!(!lost.get());
         drop(sink);
-        assert!(take_lost_write());
-        assert!(!take_lost_write());
+        assert!(lost.get());
         let _ = std::fs::remove_file(&path);
     }
 
