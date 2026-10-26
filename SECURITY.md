@@ -495,7 +495,7 @@ the image operators are fuzzed with
 |---|---|
 | `lexer` | the scanner, token by token |
 | `interp` | the whole interpreter, under tight limits |
-| `truetype` | a font file (TrueType, OpenType/CFF, a `.ttc` collection, a variable font) through the loader `findfont` and `addFont` use, then every glyph outline |
+| `truetype` | a font file (TrueType, OpenType/CFF, a `.ttc` collection, a variable font) through the loader `findfont` and `addFont` use, then a sample of glyph outlines and widths |
 | `type1_charstring` | one decrypted Type 1 charstring plus its subroutines and `seac` components |
 | `type1_font` | a complete Type 1 font program (`eexec`, `RD`, `definefont`), then text shown in every font it defined |
 | `filters` | ASCIIHex, ASCII85, RunLength, eexec, Flate, LZW and DCT (JPEG), alone and chained |
@@ -511,22 +511,28 @@ each every week, and on request; a crash opens an issue and uploads the
 input.
 
 What fuzzing found so far, all fixed and kept as regression inputs:
-`9223372036854775807 packedarray` aborted with `capacity overflow`; a Type 1
-font whose subroutines each call the next one twice ran 2^30 operators within
-the depth limit (42 seconds for one glyph; a charstring now has an operator
-budget); an LZW stream that never sends a clear code grew its table without
-end, about 4 KB for every 12-bit code (the table is now capped at the 4096
-codes a 12-bit code can name); a crafted progressive JPEG tripped an `assert!`
-in `zune-jpeg`'s NEON upsampler on aarch64, and a `ttf-parser`
-`debug_assert!` fires on a hostile `.ttc` header or `GSUB` table in a debug
-build (both are now caught where pscat calls them, and become an `ioerror` or
-a font that does not load). The first local runs were seven minutes per
-target; that is a smoke test, not a clean bill. Two things the fuzzing does
-not report on purpose: leaks (a program that puts a dictionary into itself
-builds a reference cycle that is never freed; LeakSanitizer is switched off,
-and that is the program's own doing, not memory unsafety) and the
-`ttf-parser`/`zune-jpeg` panics above, which the fuzz targets let through
-because pscat catches them. The harness names no write root and no read root,
+`9223372036854775807 packedarray` aborted with `capacity overflow`; a crafted
+progressive JPEG tripped an `assert!` in `zune-jpeg`'s NEON upsampler on
+aarch64 (a release-mode panic; the DCT filter now turns it into an
+`ioerror`); and three `ttf-parser` panics that exist only with debug
+assertions or overflow checks on (a `.ttc` header and a `GSUB`
+FeatureVariations count too large for the file, and a `u16` region index that
+overflows in `HVAR`), which release builds compile out. pscat now refuses the
+font or treats the width as missing instead of panicking, where it calls the
+parser (`font::parse_face`, the advance-width lookup). Reading the code for
+the targets turned up two more, fixed with unit tests: a Type 1 font whose 30
+subroutines each call the next twice runs 2^30 operators inside the call-depth
+limit (42 seconds for one glyph; a glyph now has an operator budget), and an
+LZW stream that never sends a clear code grew its table without end, about 4
+KB for every 12-bit code (the table is now capped at the 4096 codes a 12-bit
+code can name). The first local runs were seven minutes per target; that is a
+smoke test, not a clean bill. Two things the fuzzing does not report on
+purpose: leaks (a program that puts a dictionary into itself builds a
+reference cycle that is never freed; LeakSanitizer is switched off, and that
+is the program's own doing, not memory unsafety) and the `ttf-parser` and
+`zune-jpeg` panics above while pscat is catching them (the targets let those
+through; a panic in pscat's own code, or in a dependency call pscat does not
+guard, still fails the run). The harness names no write root and no read root,
 so a mutated program's disk writes are all refused, and what the write-root
 and read-root checks do on a hostile name is covered by their unit tests
 (`src/write_roots.rs`, `src/read_roots.rs`) and `tests/`, not by fuzzing.

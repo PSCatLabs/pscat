@@ -39,8 +39,8 @@ const CALL_DEPTH_LIMIT: usize = 30;
 /// Charstring operators one glyph may execute, subroutines and `seac`
 /// components included. Real glyphs run tens to a few hundred. The depth
 /// limit alone does not bound the work: a subroutine that calls itself twice
-/// is 2^30 operators at depth 30 (a hostile font found by the
-/// `type1_charstring` fuzz target, issue #704).
+/// is 2^30 operators at depth 30 (a hostile font found in review while
+/// writing the `type1_charstring` fuzz target, issue #704).
 const OP_BUDGET: usize = 100_000;
 
 pub(crate) fn run(code: &[u8], font: &FontData) -> Result<Glyph, PsError> {
@@ -363,10 +363,12 @@ impl Exec {
                         self.ps_stack.extend(args.into_iter().rev());
                     }
                 }
-                // The PostScript stack is 24 deep in the spec; the operand
-                // stack's own limit (48) is plenty here.
+                // Counter-control OtherSubrs (12, 13) leave their arguments
+                // here and nothing pops them, so a long glyph is not an error;
+                // only the newest values are ever read, so keep those.
                 if self.ps_stack.len() > 48 {
-                    return Err(PsError::InvalidFont);
+                    let extra = self.ps_stack.len() - 48;
+                    self.ps_stack.drain(..extra);
                 }
             }
             17 => {

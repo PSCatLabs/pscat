@@ -28,6 +28,6 @@ pub(crate) fn catch<T>(f: impl FnOnce() -> T) -> Option<T> {
 }
 
 /// Whether this thread is inside [`catch`].
-pub fn active() -> bool {
+pub(crate) fn active() -> bool {
     DEPTH.with(|d| d.get() > 0)
 }

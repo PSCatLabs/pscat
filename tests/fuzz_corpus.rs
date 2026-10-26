@@ -146,6 +146,7 @@ fn new_targets_survive_truncated_and_mutated_seeds() {
 /// start, and the fuzz limits are what end it (issue #702 made the
 /// whole-file read look at them as the bytes arrive). The seed must end on a
 /// limit, not on a refused path: otherwise it would prove nothing.
+#[cfg(unix)]
 #[test]
 fn a_dev_zero_seed_is_stopped_by_a_limit() {
     let seed = std::fs::read(

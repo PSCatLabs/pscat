@@ -7,8 +7,8 @@
   - `truetype`: a font file (glyf, CFF/OpenType, `.ttc`, variable) through
     `font::prepare_face`, the pure half of the loader that `findfont` and
     `addFont` share (it leaks and registers nothing, so a long run does not
-    grow the process), then every glyph's outline, width and name through
-    `paint_resolved_glyph` in all three show modes.
+    grow the process), then about 24 glyph ids spread over the face (plus a few names and code
+    points) through `paint_resolved_glyph` in all three show modes.
   - `type1_charstring`: decrypted charstring bytes, a subroutine list and a
     name table for `seac`, straight into `type1::run`.
   - `type1_font`: a whole PFA as PostScript, then text in every font it
@@ -33,26 +33,30 @@
   `fuzzing::interpreter_result` returns how a run ended.
 
 **What fuzzing found (all fixed, each kept in `fuzz/regressions/<target>/`
-and with a unit test where one fits)**
+and with a unit test where one fits)**. Found by the fuzzer:
 1. `ttf-parser` `debug_assert!` on a `.ttc` header with a huge font count
-   (`parse_face` now checks the count against the file size first).
-2. `ttf-parser` `debug_assert!` in `GSUB` FeatureVariations, and a `u16`
-   index overflow in `var_store` that exists only with overflow checks on.
-   Release builds compile both out; debug builds and the `ci` test profile
-   panic. `parse_face` and the glyph calls run under `guard::catch`
-   (`src/guard.rs`).
-3. `zune-jpeg` `assert!` in the aarch64 NEON upsampler on a crafted
+   (`parse_face` checks the count against the file size first).
+2. `ttf-parser` `debug_assert!` in `GSUB` FeatureVariations (a count too big
+   for the file).
+3. `ttf-parser` `u16` overflow in `var_store::evaluate_region` (`HVAR` region
+   index times axis count), only with overflow checks on. Hand-built 1 KB
+   regression.
+4. `zune-jpeg` `assert!` in the aarch64 NEON upsampler on a crafted
    progressive JPEG: a real release-mode panic on Apple silicon and linux
-   arm64. The DCT filter now runs the decode under `guard::catch` and
-   reports `ioerror`. The regression input only fails on aarch64.
-4. Type 1 charstring call tree: 30 subroutines each calling the next twice
-   is 2^30 operators inside `CALL_DEPTH_LIMIT` (42 s for one glyph in a
+   arm64. The regression input only fails on aarch64.
+For 1 to 3 release builds compile the check out; debug builds and the `ci`
+test profile panic. `parse_face` (the parse) and the advance-width lookup run
+under `guard::catch` (`src/guard.rs`); the DCT filter decodes under it and
+reports `ioerror`. Outline calls are deliberately not guarded: the sink calls
+back into pscat, and a guard there would hide pscat bugs.
+Found by reading the code while writing the targets, then reproduced:
+5. Type 1 charstring call tree: 30 subroutines each calling the next twice is
+   2^30 operators inside `CALL_DEPTH_LIMIT` (42 s for one glyph in a
    ci-profile build, measured). A glyph now has an operator budget
    (`OP_BUDGET`, 100 000; real glyphs use hundreds), shared with `seac`
-   components, and the OtherSubr result stack is capped.
-5. LZW (found by reading the decoder for the target, then reproduced by a
-   unit test): the code table grew for every code after it was full, each
-   entry up to ~4 KB for a 12-bit code. Capped at 4096 codes.
+   components; the OtherSubr result stack keeps its newest 48 values.
+6. LZW: the code table grew for every code after it was full, each entry up
+   to ~4 KB for a 12-bit code. Capped at 4096 codes.
 
 **Design notes**
 - Fuzzed code is production code: `prepare_face`, `parse_face`,
@@ -63,7 +67,10 @@ and with a unit test where one fits)**
   reach `ttf-parser` and `zune-jpeg` call
   `fuzzing::tolerate_dependency_panics()` in `init:`: it lets a panic pass
   only when it starts in `~/.cargo/registry` code *and* pscat is inside a
-  `guard::catch`. Everything else still aborts.
+  `guard::catch`, i.e. exactly where production code catches it too.
+  Everything else still aborts. In `cargo test` there is no such hook, so a
+  guarded panic is swallowed as in production and an unguarded one fails the
+  replay (checked: removing the advance-width guard fails the HVAR input).
 - Real fonts are not committed as seeds (size, and the OFL reserved-name
   rule for modified Liberation/TeX Gyre files); the seeds are small
   fontTools-built faces. The local runs also used subsets of

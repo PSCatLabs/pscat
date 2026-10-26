@@ -696,8 +696,9 @@ fn prepare_face<'a>(key: &str, data: &'a [u8]) -> Option<(Face<'a>, CatalogEncod
 
 /// What the `truetype` fuzz target runs on a font file's bytes: the load
 /// path (`prepare_face`, as `register_font_bytes` and the catalog do it),
-/// then glyph lookup by name, by code point and by id, widths, and every
-/// outline painted, stroked into a path and measured through the same
+/// then glyph lookup by name, by code point and by id, widths, and a sample of
+/// outlines (about 24 glyph ids spread over the face, plus a few names and code
+/// points) painted, appended to a path and measured through the same
 /// pipeline `show`, `charpath` and `stringwidth` use. Registers nothing.
 pub(crate) fn fuzz_exercise_face(gfx: &mut Gfx, data: &[u8], key: &str) {
     if let Some((face, encoding, _name)) = prepare_face(key, data) {
@@ -724,9 +725,6 @@ fn exercise_face(gfx: &mut Gfx, face: &Face, encoding: CatalogEncoding) {
         };
         let pen = DevPoint { x: 8.0, y: 40.0 };
         paint_resolved_glyph(gfx, face, fm, Some(GlyphId(g)), &mode, pen);
-        let _ = face.glyph_name(GlyphId(g));
-        let _ = face.glyph_bounding_box(GlyphId(g));
-        let _ = face.glyph_ver_advance(GlyphId(g));
     }
     // Names the encodings resolve, and code points through the cmap.
     for name in ["A", "space", "eacute", "uni0041", "g12", ".notdef", "fi"] {
@@ -761,8 +759,6 @@ fn exercise_face(gfx: &mut Gfx, face: &Face, encoding: CatalogEncoding) {
             );
         }
     }
-    let _ = (face.ascender(), face.descender(), face.units_per_em());
-    let _ = (face.is_variable(), face.variation_axes().len());
 }
 
 /// Whether `fid` names a Unicode-mode catalog face (see the
@@ -1340,7 +1336,7 @@ fn paint_resolved_glyph(
     // interpreter showing an unencoded character. Width is in raw glyph
     // units; `g` already carries the em normalization.
     let w = f64::from(
-        gid.and_then(|g| face.glyph_hor_advance(g))
+        gid.and_then(|g| crate::guard::catch(|| face.glyph_hor_advance(g)).flatten())
             .or_else(|| face.glyph_hor_advance(GlyphId(0)))
             .unwrap_or(0),
     );

@@ -152,11 +152,7 @@ pub fn truetype(data: &[u8]) {
     let Some(mut interp) = limited_interp() else {
         return;
     };
-    // Lookups and outlines in ttf-parser can panic where overflow checks are
-    // on (the fuzzer builds with them); a release build wraps and carries on.
-    // Guarded so that is a tolerated dependency panic, not a pscat crash.
-    let gfx = interp.gfx_mut();
-    let _ = crate::guard::catch(|| crate::font::fuzz_exercise_face(gfx, data, "FuzzFace"));
+    crate::font::fuzz_exercise_face(interp.gfx_mut(), data, "FuzzFace");
 }
 
 /// Output bytes read from a filter chain before the target stops: a
