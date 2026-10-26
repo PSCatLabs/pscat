@@ -56,6 +56,8 @@ struct Active {
     child_ns: u64,
     /// Index into `Profiler::edges` of the edge this call runs along.
     edge: usize,
+    /// `Profiler::current` when this call opened, to put back when it closes.
+    caller: u32,
 }
 
 /// `--profile-ops`: time inside each built-in operator, by function address
@@ -78,13 +80,21 @@ pub(crate) struct Profiler {
     graph: bool,
     edge_ix: HashMap<(u32, u32), usize>,
     edges: Vec<EdgeStat>,
+    /// The procedure whose body is running now (`ROOT` at the top level).
+    /// Not the same as the innermost marker: a tail call into a name that
+    /// already has a marker reuses it, so with `ping` <-> `pong` the marker
+    /// on top says `pong` while `ping` runs. Kept only with the graph on.
+    current: u32,
 }
 
 impl Profiler {
     pub(crate) fn new() -> Self {
         // Start the clock's zero point before the first reading.
         crate::clock::Clock::mono_ns();
-        Self::default()
+        Profiler {
+            current: ROOT,
+            ..Self::default()
+        }
     }
 
     /// Record caller -> callee edges too (before the program runs).
@@ -127,9 +137,9 @@ impl Profiler {
         }
     }
 
-    /// The edge from the innermost open call (or the top level) to `callee`.
+    /// The edge from the procedure now running (or the top level) to `callee`.
     fn edge_to(&mut self, callee: u32) -> usize {
-        let caller = self.active.last().map_or(ROOT, |a| a.id);
+        let caller = self.current;
         let edges = &mut self.edges;
         *self.edge_ix.entry((caller, callee)).or_insert_with(|| {
             edges.push(EdgeStat {
@@ -159,6 +169,7 @@ impl Profiler {
         if self.graph {
             let e = self.edge_to(id);
             self.edges[e].calls += 1;
+            self.current = id;
         }
     }
 
@@ -166,10 +177,12 @@ impl Profiler {
         let s = self.stats.entry(id).or_default();
         s.calls += 1;
         s.depth += 1;
+        let caller = self.current;
         let edge = if self.graph {
             let e = self.edge_to(id);
             self.edges[e].calls += 1;
             self.edges[e].depth += 1;
+            self.current = id;
             e
         } else {
             NO_EDGE
@@ -179,6 +192,7 @@ impl Profiler {
             start: crate::clock::Clock::mono_ns(),
             child_ns: 0,
             edge,
+            caller,
         });
     }
 
@@ -190,6 +204,7 @@ impl Profiler {
             }
             if let Some(e) = self.edges.get_mut(a.edge) {
                 e.depth -= 1;
+                self.current = a.caller;
             }
         }
     }
@@ -210,6 +225,7 @@ impl Profiler {
             if e.depth == 0 {
                 e.incl_ns += dur;
             }
+            self.current = a.caller;
         }
         if let Some(parent) = self.active.last_mut() {
             parent.child_ns += dur;

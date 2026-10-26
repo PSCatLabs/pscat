@@ -895,3 +895,44 @@ fn a_run_with_operator_timing_makes_the_same_page() {
         std::fs::read(&timed).unwrap()
     );
 }
+
+#[test]
+fn mutual_tail_recursion_attributes_each_call_to_the_procedure_that_made_it() {
+    // `pong` never calls itself; its marker is reused, but the edges follow
+    // the procedure that is running.
+    let (result, report) = profile_graph(
+        "/ping { dup 0 gt { 1 sub pong } { pop } ifelse } def
+         /pong { ping } def
+         3 ping",
+    );
+    result.expect("runs");
+    assert_eq!(edge(&report, None, "ping").calls, 1);
+    assert_eq!(edge(&report, Some("ping"), "pong").calls, 3);
+    assert_eq!(edge(&report, Some("pong"), "ping").calls, 3);
+    let edges = report.edges.as_ref().unwrap();
+    assert!(
+        edges
+            .iter()
+            .all(|e| e.caller.as_deref() != Some("pong") || e.callee != "pong"),
+        "{report:?}"
+    );
+    assert_eq!(edges.len(), 3);
+    assert_edges_add_up(&report);
+}
+
+#[test]
+fn a_call_after_a_reused_marker_comes_from_the_procedure_running_then() {
+    // After the tail chain ping -> pong -> ping, `ping` calls `leaf` (not in
+    // tail position); the edge is ping -> leaf, and after `leaf` returns the
+    // caller of the next call is `ping` again.
+    let (result, report) = profile_graph(
+        "/leaf { } def
+         /ping { dup 0 gt { 1 sub pong } { leaf leaf pop } ifelse } def
+         /pong { ping } def
+         2 ping leaf",
+    );
+    result.expect("runs");
+    assert_eq!(edge(&report, Some("ping"), "leaf").calls, 2);
+    assert_eq!(edge(&report, None, "leaf").calls, 1);
+    assert_edges_add_up(&report);
+}
