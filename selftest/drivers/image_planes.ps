@@ -46,8 +46,16 @@
 % One long busy string; the planes are cut from it at different offsets so
 % they differ. Plane k of n bytes: bytes (k*29) .. (k*29 + n).
 /_pool 300 mk def
+/_ip () def
 /plane { % k n -> string (a copy)
   exch 29 mul exch _pool 3 1 roll getinterval dup length string copy
+} def
+
+% A plane whose bytes are all in 0..3 (indices into a 4-colour palette).
+/idxplane { % k n -> string
+  plane /_ip exch def
+  0 1 _ip length 1 sub { dup _ip exch get 3 and _ip 3 1 roll put } for
+  _ip
 } def
 
 % Three row procedures with their own counters: one W-byte row per call,
@@ -115,7 +123,7 @@ gsave 105 cell
     /ImageType 1 def /Width W def /Height H def /BitsPerComponent 8 def
     /MultipleDataSources true def
     /ImageMatrix [W 0 0 H neg 0 H] def
-    /DataSource [ 0 W H mul plane ] def
+    /DataSource [ 0 W H mul idxplane ] def
   currentdict end image
 grestore
 /DeviceRGB setcolorspace
