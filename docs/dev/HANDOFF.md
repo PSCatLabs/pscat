@@ -1240,11 +1240,22 @@ renders eight examples in both and compares block-downsampled output).
   the exec stack plants none (tail recursion stays at constant depth; non-tail recursion overflows the exec
   stack at about half the plain depth, since a marker takes a slot). Keep the
   hot path as it is: the only cost off is one `profile.is_some()` in
-  `execute_resolved`'s `Array` arm, and everything else is `#[cold]`. A first
+  `execute_resolved`'s `Array` arm (plus, from #799, one operators-on check per
+  `step_n` slice), and everything else is `#[cold]`. A first
   version that made `step_n_inner` generic, or added a second caller of
   `execute_resolved`/`push_proc_frame`, slowed a plain `fib` run by 19%; measure
   with `scripts/bench_compare.sh` after touching `interp.rs`. See
-  `notes/737-pscat-profile.md`.
+  `notes/737-pscat-profile.md`. #799 added `--profile-graph` (caller -> callee
+  edges, gated by `Profiler::graph`, recorded in `enter`/`exit`/`count_only`),
+  `--profile-json PATH` (main.rs: pre-checked and written through
+  `Interp::writable_path`; the path is the next argument only if it ends in
+  `.json`), and `--profile-ops` (per-operator time: `step_n` routes to
+  `step_n_timed`, a copy of the loop, once per slice when it is on; operators
+  are bare `fn` pointers so the report maps address -> systemdict name). The
+  copy is a second caller of `next_item`/`execute_resolved`/`push_proc_frame`/
+  `recover`/`execute_element`, which is what cost 19% in #737 until those were
+  made `#[inline(always)]`; re-measure `fib` with `bench_compare.sh` if you
+  touch them. See `notes/799-profile-followups.md`.
 - **Read roots (#763).** Reads are open by default (the CLI). `Interp::set_read_roots`
   (CLI `--read-root DIR`, `--confine-reads` for none) confines them, and
   `src/read_roots.rs` decides: `open_confined` wraps the search order's reader so a

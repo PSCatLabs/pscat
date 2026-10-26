@@ -737,7 +737,13 @@ impl Interp {
         } else {
             budget
         };
-        let mut result = self.step_n_inner(budget);
+        // `--profile-ops` times every operator, in its own copy of the loop
+        // (checked once per slice, so the plain loop carries no per-step test).
+        let mut result = if self.profile.as_deref().is_some_and(|p| p.ops_on()) {
+            self.step_n_timed(budget)
+        } else {
+            self.step_n_inner(budget)
+        };
         if limited {
             result = self.after_slice(result, budget);
         }
@@ -929,6 +935,79 @@ impl Interp {
         }
     }
 
+    /// [`step_n_inner`](Self::step_n_inner) with a clock read around each
+    /// operator (`--profile-ops`). Kept as a copy of the loop, not a generic
+    /// parameter of it: the plain loop must stay exactly as the compiler
+    /// had it (#737 measured a generic version 19% slower on `fib`). The
+    /// helpers it shares with that loop are `#[inline(always)]` so the
+    /// second call site does not cost them their inlining.
+    ///
+    /// Time is taken only for operators the loop reaches by pointer or by
+    /// name. An operator's own work is what is timed: `for`, `if` and
+    /// `repeat` only push a frame (their bodies run as later steps, and
+    /// are timed there), and `show` and `image` do their work in later
+    /// frame steps of `next_item`, so they show only their set-up here.
+    #[cold]
+    #[inline(never)]
+    fn step_n_timed(&mut self, budget: usize) -> Result<bool, PsError> {
+        for _ in 0..budget {
+            if self.quit_requested {
+                return Ok(false);
+            }
+            let item = match self.next_item() {
+                Ok(None) => return Ok(false),
+                Ok(Some(item)) => item,
+                Err(e) => {
+                    self.sync_scan_line();
+                    self.recover(e)?;
+                    continue;
+                }
+            };
+            let done = match item {
+                Item::Op(func) => self.timed_op(func),
+                Item::Name(id) => self.execute_name_timed(id),
+                Item::Obj(obj) => match (&obj.value, obj.executable) {
+                    (Value::Name(n), true) => self.execute_name_timed(n.id()),
+                    (Value::Operator(op), true) => {
+                        let func = op.func;
+                        self.timed_op(func)
+                    }
+                    _ => self.execute_element(obj),
+                },
+            };
+            if let Err(e) = done {
+                self.recover(e)?;
+            }
+        }
+        Ok(!self.estack.is_empty())
+    }
+
+    #[inline(never)]
+    fn timed_op(&mut self, func: crate::object::OpFn) -> Result<(), PsError> {
+        let t0 = crate::clock::Clock::mono_ns();
+        let r = func(self);
+        let ns = crate::clock::Clock::mono_ns().saturating_sub(t0);
+        if let Some(p) = self.profile.as_mut() {
+            p.record_op(func as usize, ns);
+        }
+        r
+    }
+
+    /// `execute_name`, timing the operator if the name resolves to one.
+    fn execute_name_timed(&mut self, id: u32) -> Result<(), PsError> {
+        self.last_name = Some(id);
+        let resolved = self
+            .load_id(id)
+            .ok_or_else(|| PsError::Undefined(crate::name::resolve(id).to_string()))?;
+        if resolved.executable
+            && let Value::Operator(op) = &resolved.value
+        {
+            return self.timed_op(op.func);
+        }
+        self.execute_resolved(resolved, id)
+    }
+
+    // `step_n_timed` is a copy of this loop (`--profile-ops`): change both.
     fn step_n_inner(&mut self, budget: usize) -> Result<bool, PsError> {
         for _ in 0..budget {
             if self.quit_requested {
@@ -961,6 +1040,7 @@ impl Interp {
     /// If a `stopped` context encloses the error, record it in `$error`,
     /// unwind to the context, and push `true` — errors are catchable.
     /// Otherwise propagate; the front end reports it.
+    #[inline(always)]
     fn recover(&mut self, e: PsError) -> Result<(), PsError> {
         let command = self.error_command.take();
         // A limit error is never catchable: `stopped` would otherwise let a
@@ -1134,6 +1214,7 @@ impl Interp {
 
     /// Pull the next object to execute off the execution stack, popping
     /// exhausted frames and iterating loop frames as needed.
+    #[inline(always)]
     fn next_item(&mut self) -> Result<Option<Item>, PsError> {
         // Frame inspection and stack mutation can't overlap borrows, so
         // each pass decides on an action first, then applies it.
@@ -1380,6 +1461,7 @@ impl Interp {
     /// Only executable names and operators actually execute here; an
     /// executable array in this position is *pushed* (that's what makes
     /// `{...}` a deferred procedure), as is everything literal.
+    #[inline(always)]
     fn execute_element(&mut self, obj: Object) -> Result<(), PsError> {
         match (&obj.value, obj.executable) {
             (Value::Name(n), true) => self.execute_name(n.id()),
@@ -1450,6 +1532,34 @@ impl Interp {
         self.profile = Some(Box::new(crate::profile::Profiler::new()));
     }
 
+    /// Also record who called whom (`--profile-graph`); call it right
+    /// after [`enable_profile`](Self::enable_profile).
+    #[doc(hidden)]
+    pub fn enable_profile_graph(&mut self) {
+        if let Some(p) = self.profile.as_mut() {
+            p.set_graph();
+        }
+    }
+
+    /// Also time each built-in operator (`--profile-ops`); call it right
+    /// after [`enable_profile`](Self::enable_profile). Slows the run more
+    /// than `--profile` alone: two clock reads per operator.
+    #[doc(hidden)]
+    pub fn enable_profile_ops(&mut self) {
+        let bound: Vec<(String, usize)> = self.dstack[0]
+            .borrow()
+            .pairs()
+            .into_iter()
+            .filter_map(|(k, v)| match (&k.value, &v.value) {
+                (Value::Name(n), Value::Operator(op)) => Some((n.to_string(), op.func as usize)),
+                _ => None,
+            })
+            .collect();
+        if let Some(p) = self.profile.as_mut() {
+            p.set_ops(bound.into_iter());
+        }
+    }
+
     /// What the profile has recorded so far (finished calls only), or
     /// `None` if [`enable_profile`](Self::enable_profile) was not called.
     #[doc(hidden)]
@@ -1474,6 +1584,7 @@ impl Interp {
     /// `via` is the name the object was reached through, or [`NO_NAME`]
     /// (`exec`, a conditional's branch): `--profile` attributes a
     /// procedure body to the name it ran through (#737).
+    #[inline(always)]
     fn execute_resolved(&mut self, mut obj: Object, via: u32) -> Result<(), PsError> {
         // A name may resolve to another executable name; follow the chain
         // with a budget so `a -> b -> a` cycles error out instead of
@@ -1527,6 +1638,7 @@ impl Interp {
         }
     }
 
+    #[inline(always)]
     fn push_proc_frame(&mut self, body: PsArray) -> Result<(), PsError> {
         if body.is_empty() {
             return Ok(());
