@@ -1063,7 +1063,7 @@ fn bad_limit_values_are_refused() {
 }
 
 #[test]
-fn limits_do_not_combine_with_modes_that_cannot_honour_them() {
+fn spool_takes_the_limits_and_the_selftest_modes_refuse_them() {
     // `--spool` takes the limits since #701 (each job runs under them): the
     // run gets as far as the directory, which is missing here, so no window
     // opens, and the error is about the directory, not the flags.

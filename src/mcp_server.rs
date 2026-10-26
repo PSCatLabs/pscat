@@ -199,6 +199,9 @@ impl Config {
     /// kill at `--timeout` is only the backstop for a child stuck inside one
     /// long operator. The margin pays for starting the child, writing the
     /// canvas and the lint pass after the limit fires.
+    /// The exception is `handwrite`: its child runs two programs (a measuring
+    /// pass, then the render) and each gets this limit, so the two together
+    /// can reach the kill and come back as `timeout`.
     fn interpreter_args(&self, cmd: &mut Command) {
         let total = self.timeout.as_secs_f64();
         let secs = total - (total / 4.0).min(5.0);

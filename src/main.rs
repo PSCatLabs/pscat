@@ -1763,8 +1763,9 @@ fn print_usage() {
     println!(
         "                      `limitexceeded (steps|time|memory)`; `stopped` can't catch it."
     );
-    println!("                      The limits apply to each program run: every --spool job,");
-    println!("                      sweep frame and band gets the whole budget (the tool");
+    println!("                      The limits apply to each program run: every --spool job");
+    println!("                      and sweep frame gets the whole budget, and so does every");
+    println!("                      --bands band for steps and time (the tool");
     println!("                      subcommands, e.g. `pscat handwrite`, take them too). A job");
     println!("                      in the window or spool runs at the window's pace, so");
     println!("                      --max-time counts that pace, not just compute");

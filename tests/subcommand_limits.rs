@@ -103,6 +103,10 @@ fn a_runaway_library_is_stopped_by_max_steps_in_every_subcommand() {
     let cases: Vec<(&str, Vec<&str>)> = vec![
         ("handwrite", vec!["handwrite", "-o", "h.png", "hello"]),
         (
+            "handwrite --height",
+            vec!["handwrite", "--height", "200", "-o", "h.png", "hello"],
+        ),
+        (
             "typewrite",
             vec!["typewrite", "--text", "hi", "-o", "t.png"],
         ),
@@ -147,13 +151,13 @@ fn a_runaway_library_is_stopped_by_max_time() {
 
 #[test]
 fn a_runaway_library_is_stopped_by_max_memory() {
-    // Memory growth, not steps: the library fills an array without end.
+    // Memory growth, not steps: the library keeps every array it makes.
     let dir = scratch("memory");
     let lib = dir.join("hog-lib");
     std::fs::create_dir_all(&lib).unwrap();
     std::fs::write(
         lib.join("handscript.ps"),
-        "/a 100000 array def { /a 1000000 array def a 0 a put } loop\n",
+        "/d 100000 dict def 0 1 99999 { d exch 100000 array put } for\n",
     )
     .unwrap();
     let (out, took) = pscat_with(

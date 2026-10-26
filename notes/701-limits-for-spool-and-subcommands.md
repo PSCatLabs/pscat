@@ -7,7 +7,7 @@ subcommands (`handwrite`, `typewrite`, `photo-etch`, `chalk`, `sheet`).
 ## Per run, not per page
 
 The main CLI's unit is one interpreter run: a sweep frame, a `--bands` band
-and a `--spool` job each build a fresh `Interp` and get the whole budget
+(steps and time; `--max-memory` is shared by the bands) and a `--spool` job each build a fresh `Interp` and get the whole budget
 (`Interp::set_limits` before `begin_source`, which restarts the step count and
 the clock). The subcommands follow that:
 

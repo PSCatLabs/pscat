@@ -135,8 +135,9 @@ More on the less obvious ones:
   `--spool` and the tool subcommands take them too (`pscat handwrite`,
   `typewrite`, `photo-etch`, `chalk`, `sheet`). A stopped run exits non-zero
   with `limitexceeded (steps|time|memory)`. The unit is the run, not the page:
-  a multi-page program is one run; each `--spool` job, `--sweep` frame,
-  `--bands` band and `pscat sheet` cell is its own run with the whole budget;
+  a multi-page program is one run; each `--spool` job, `--sweep` frame
+  and `pscat sheet` cell is its own run with the whole budget (so is each
+  `--bands` band, for steps and time; memory is shared by the bands);
   `handwrite`, `typewrite` and `photo-etch` run a measuring pass and then the
   render and give each the full limits. Reading a whole file (`file`, `run`)
   charges one step per KiB.

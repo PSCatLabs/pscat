@@ -420,8 +420,8 @@ without the limits above:
   `web/pscat.js`) so a runaway does not freeze the tab.
 - **`--spool` and the tool subcommands take the limits (#701), one budget per
   program run.** Every `--spool` job, `pscat sheet` cell, `--sweep` frame and
-  `--bands` band is its own run with the whole of `--max-steps` and
-  `--max-time`; a page is not a run, so a multi-page program is one. `pscat
+  `--bands` band (steps and time; the bands share `--max-memory`) is its own
+  run with the whole of `--max-steps` and `--max-time`; a page is not a run, so a multi-page program is one. `pscat
   handwrite`, `typewrite` and `photo-etch` run two programs (a measuring pass,
   then the render) and give each the full limits, so their worst case is about
   twice `--max-time`; `pscat chalk` is one run. A spool job or a window run is
