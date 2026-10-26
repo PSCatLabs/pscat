@@ -22,7 +22,7 @@
 
 use crate::error::PsError;
 use crate::file::FileHandle;
-use crate::gfx::{Gfx, IndexedTable};
+use crate::gfx::{BlendMode, Gfx, IndexedTable};
 use crate::object::Object;
 
 /// How decoded samples become colors. `Direct` is the ncomp-driven
@@ -824,6 +824,7 @@ impl ImageCtx {
             None
         };
         let paint_rgb = gfx.rgb();
+        let comp = gfx.composite();
         let mask_data = gfx.clip_mask_data();
         let width = gfx.pixmap.width() as usize;
         let data = gfx.pixmap.data_mut();
@@ -871,6 +872,13 @@ impl ImageCtx {
                 }
                 let a = f32::from(clip) / 255.0;
                 let idx = (py as usize * width + px as usize) * 4;
+                if !comp.is_default() {
+                    // `setalpha` / `setblendmode` (#766): composite in
+                    // premultiplied space, with a real alpha channel.
+                    blend_pixel(&mut data[idx..idx + 4], rgb, a * comp.alpha, comp.blend);
+                    painted = true;
+                    continue;
+                }
                 for (ch, v) in [rgb.0, rgb.1, rgb.2].into_iter().enumerate() {
                     let src = v * 255.0;
                     let dst = f32::from(data[idx + ch]);
@@ -886,6 +894,26 @@ impl ImageCtx {
     }
 }
 
+/// Composite one source colour (straight RGB, 0..1) at coverage `sa` onto a
+/// premultiplied RGBA8 pixel, with tiny-skia's formulas for the two blend
+/// modes, so an image and a fill of the same colour agree (#766).
+/// Normal: `out = s*sa + d*(1-sa)`. Multiply: `out = s*sa*(1-da) +
+/// d*(1-sa) + s*sa*d`. Either way `out_a = sa + da*(1-sa)`.
+fn blend_pixel(px: &mut [u8], rgb: (f32, f32, f32), sa: f32, blend: BlendMode) {
+    let sa = sa.clamp(0.0, 1.0);
+    let da = f32::from(px[3]) / 255.0;
+    for (ch, v) in [rgb.0, rgb.1, rgb.2].into_iter().enumerate() {
+        let s = v * sa; // premultiplied source, 0..1
+        let d = f32::from(px[ch]) / 255.0;
+        let out = match blend {
+            BlendMode::Normal => s + d * (1.0 - sa),
+            BlendMode::Multiply => s * (1.0 - da) + d * (1.0 - sa) + s * d,
+        };
+        px[ch] = (out.clamp(0.0, 1.0) * 255.0).round() as u8;
+    }
+    px[3] = ((sa + da * (1.0 - sa)).clamp(0.0, 1.0) * 255.0).round() as u8;
+}
+
 /// The inverse of a PostScript matrix `[a b c d tx ty]`, or None when
 /// it is singular (determinant exactly zero, as gs tests it).
 pub(crate) fn invert6(m: [f64; 6]) -> Option<[f64; 6]> {
@@ -899,7 +927,42 @@ pub(crate) fn invert6(m: [f64; 6]) -> Option<[f64; 6]> {
 
 #[cfg(test)]
 mod tests {
-    use super::expansion;
+    use super::{blend_pixel, expansion};
+    use crate::gfx::BlendMode;
+
+    /// An image pixel must composite as a fill of the same colour does
+    /// (#766): same ground, same alpha, same blend, within one level.
+    #[test]
+    fn blend_pixel_matches_a_tiny_skia_fill() {
+        for blend in [BlendMode::Normal, BlendMode::Multiply] {
+            for alpha in [0.25_f32, 0.5, 0.8] {
+                for ground in [255_u8, 128] {
+                    let mut pm = tiny_skia::Pixmap::new(1, 1).unwrap();
+                    pm.fill(tiny_skia::Color::from_rgba8(30, 200, 90, ground));
+                    let mut mine = [0u8; 4];
+                    mine.copy_from_slice(pm.data());
+                    let (r, g, b) = (0.9_f32, 0.3_f32, 0.6_f32);
+                    let to_u8 = |v: f32| (v * 255.0).round() as u8;
+                    let mut paint = tiny_skia::Paint::default();
+                    paint.set_color_rgba8(to_u8(r), to_u8(g), to_u8(b), to_u8(alpha));
+                    paint.blend_mode = match blend {
+                        BlendMode::Normal => tiny_skia::BlendMode::SourceOver,
+                        BlendMode::Multiply => tiny_skia::BlendMode::Multiply,
+                    };
+                    let rect = tiny_skia::Rect::from_xywh(0.0, 0.0, 1.0, 1.0).unwrap();
+                    pm.fill_rect(rect, &paint, tiny_skia::Transform::identity(), None);
+                    blend_pixel(&mut mine, (r, g, b), alpha, blend);
+                    for (a, b) in mine.iter().zip(pm.data()) {
+                        assert!(
+                            a.abs_diff(*b) <= 2,
+                            "{blend:?} alpha {alpha} ground {ground}: {mine:?} vs {:?}",
+                            pm.data()
+                        );
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn expansion_is_capped_but_never_below_one() {

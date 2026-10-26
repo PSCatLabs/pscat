@@ -519,7 +519,7 @@ static ENTRIES: &[Entry] = &[
     entry!(
         "setalpha",
         CapabilityKind::Operator,
-        "pscat extension, not PLRM and absent from Ghostscript. Fill/stroke opacity 0..1 (clamped); part of the graphics state. Reaches fill, stroke, text and shfill, not image/imagemask. Probe with systemdict /setalpha known.",
+        "pscat extension, not PLRM and absent from Ghostscript. Fill/stroke opacity 0..1 (clamped); part of the graphics state. Reaches fill, stroke, text, shfill, image, imagemask and colorimage. Probe with systemdict /setalpha known.",
         &[],
         SYSTEMDICT,
         "a setalpha -",

@@ -720,16 +720,16 @@ pub struct GraphicsState {
     /// flatten-against-white fallback that keeps such programs usable
     /// there anyway.
     ///
-    /// Applies to `fill`, `stroke`, glyph painting (`fill_path_direct`)
-    /// and `shfill`, and is exported by both `--svg` (`fill-opacity`/
-    /// `stroke-opacity`) and `--pdf` (an `ExtGState`'s `ca`/`CA`).
-    /// **It does not apply to `image`/`imagemask`**, which blit
-    /// straight into the pixmap (`crate::image`) instead of going
-    /// through `paint()` — a documented gap, not an oversight.
+    /// Applies to `fill`, `stroke`, glyph painting (`fill_path_direct`),
+    /// `shfill` and, since #766, `image`/`imagemask`/`colorimage`
+    /// (which blit into the pixmap in `crate::image` and composite there
+    /// instead of through `paint()`). Exported by `--svg`
+    /// (`fill-opacity`/`stroke-opacity`, `opacity` on an `<image>`) and
+    /// `--pdf` (an `ExtGState`'s `ca`/`CA`).
     pub alpha: f32,
     /// Blend mode for fill/stroke compositing — `setblendmode`/
     /// `currentblendmode`, the other half of #47's contract. Same
-    /// reach and the same `image` gap as `alpha` above.
+    /// reach as `alpha` above (images included since #766).
     pub blend: BlendMode,
     /// Set implicitly by the color operators and explicitly by
     /// setcolorspace, per the PLRM; the Level 2 image dict form and
@@ -1121,7 +1121,7 @@ impl Gfx {
     }
 
     /// The current alpha/blend as the exporters want it.
-    fn composite(&self) -> Composite {
+    pub(crate) fn composite(&self) -> Composite {
         Composite {
             alpha: self.state.alpha,
             blend: self.state.blend,
@@ -1759,9 +1759,10 @@ impl Gfx {
         interpolate: bool,
     ) {
         let fill = self.state.rgb;
+        let comp = self.composite();
         let chain = self.state.clip.as_ref().map(|c| c.node.clone());
         if let Some(pdf) = &mut self.pdf {
-            pdf.image(w, h, data, t, fill, interpolate, &chain);
+            pdf.image(w, h, data, t, fill, interpolate, comp, &chain);
         }
     }
 
@@ -1773,9 +1774,10 @@ impl Gfx {
         t: [f32; 6],
         interpolate: bool,
     ) {
+        let comp = self.composite();
         let chain = self.state.clip.as_ref().map(|c| c.node.clone());
         if let Some(svg) = &mut self.svg {
-            svg.image(png, w, h, t, interpolate, &chain);
+            svg.image(png, w, h, t, interpolate, comp, &chain);
         }
     }
 
