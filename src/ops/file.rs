@@ -59,10 +59,13 @@ pub(super) fn read_resource(it: &mut Interp, name: &str) -> Result<Vec<u8>, PsEr
     if !it.limits().is_none() {
         return read_resource_limited(it, name);
     }
-    // The wasm build has no disk to poll a read of.
+    // The wasm build has no disk to read.
     #[cfg(target_arch = "wasm32")]
-    let _ = &it;
-    crate::paths::open(name)
+    let read = |_: &std::path::Path| None;
+    #[cfg(not(target_arch = "wasm32"))]
+    let read = |p: &std::path::Path| std::fs::read(p).ok();
+    // Under read roots (issue #763) only files inside them are read.
+    crate::read_roots::open_confined(it.read_policy(), name, &read)?
         .map(|r| r.bytes.into_owned())
         .ok_or(PsError::UndefinedFilename)
 }
@@ -70,6 +73,7 @@ pub(super) fn read_resource(it: &mut Interp, name: &str) -> Result<Vec<u8>, PsEr
 #[cfg(not(target_arch = "wasm32"))]
 fn read_resource_limited(it: &mut Interp, name: &str) -> Result<Vec<u8>, PsError> {
     use std::cell::RefCell;
+    let policy = it.read_policy().cloned();
     let it = RefCell::new(it);
     let stopped: RefCell<Option<PsError>> = RefCell::new(None);
     let read = |path: &std::path::Path| {
@@ -85,14 +89,14 @@ fn read_resource_limited(it: &mut Interp, name: &str) -> Result<Vec<u8>, PsError
             }
         }
     };
-    let found = crate::paths::open_with_reader(name, &read);
+    let found = crate::read_roots::open_confined(policy.as_ref(), name, &read);
     // A limit wins over whatever the search found after it: a later place
     // (the embedded copy of `lib/`) must not turn a stopped read into a
     // successful one.
     if let Some(e) = stopped.take() {
         return Err(e);
     }
-    found
+    found?
         .map(|r| r.bytes.into_owned())
         .ok_or(PsError::UndefinedFilename)
 }
@@ -243,6 +247,8 @@ fn filenameforall(it: &mut Interp) -> Result<(), PsError> {
         return Err(PsError::Typecheck);
     }
     let template = pop_ps_string(it)?.to_vec();
+    // Under read roots (issue #763) only names inside them are listed.
+    let roots = it.read_policy().cloned();
     // Under execution limits each entry looked at is a step, and each
     // match's bytes are checked against the memory cap as it is added.
     #[cfg(not(target_arch = "wasm32"))]
@@ -251,7 +257,7 @@ fn filenameforall(it: &mut Interp) -> Result<(), PsError> {
     let mut poll = |n: usize| if limited { it.poll_read(1, n) } else { Ok(()) };
     #[cfg(target_arch = "wasm32")]
     let mut poll = |_: usize| Ok(());
-    let names = crate::filenames::matching_names(&template, &mut poll)?;
+    let names = crate::filenames::matching_names(&template, roots.as_ref(), &mut poll)?;
     let names: Vec<Object> = names.into_iter().map(Object::string).collect();
     // `{ scratch copy proc exec }` over the names, with the operators
     // themselves rather than their names, so a program that redefines

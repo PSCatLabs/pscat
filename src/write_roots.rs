@@ -58,17 +58,9 @@ impl WriteRoots {
     /// Canonicalise each directory. Fails, naming the first bad one, if a
     /// directory doesn't exist or isn't a directory.
     pub fn new<P: AsRef<Path>>(dirs: &[P]) -> Result<WriteRoots, String> {
-        let mut roots = Vec::with_capacity(dirs.len());
-        for d in dirs {
-            let d = d.as_ref();
-            let canon =
-                std::fs::canonicalize(d).map_err(|e| format!("write root {}: {e}", d.display()))?;
-            if !canon.is_dir() {
-                return Err(format!("write root {}: not a directory", d.display()));
-            }
-            roots.push(canon);
-        }
-        Ok(WriteRoots { roots })
+        Ok(WriteRoots {
+            roots: canonical_dirs(dirs, "write root")?,
+        })
     }
 
     /// The canonical roots.
@@ -113,7 +105,7 @@ impl WriteRoots {
             return Err(PsError::InvalidFileAccess);
         }
         let p = Path::new(name);
-        if p.components().any(|c| matches!(c, Component::ParentDir)) {
+        if has_parent_dir(name) {
             return Err(PsError::InvalidFileAccess);
         }
         let abs = if p.is_absolute() {
@@ -262,6 +254,30 @@ impl WriteRoots {
         }
         std::fs::rename(&from, &to).map_err(io_error)
     }
+}
+
+/// Canonicalise each directory (shared with `crate::read_roots`). Fails,
+/// naming the first bad one as `<what> <dir>: ...`, if a directory doesn't
+/// exist or isn't a directory.
+pub(crate) fn canonical_dirs<P: AsRef<Path>>(dirs: &[P], what: &str) -> Result<Vec<PathBuf>, String> {
+    let mut roots = Vec::with_capacity(dirs.len());
+    for d in dirs {
+        let d = d.as_ref();
+        let canon = std::fs::canonicalize(d).map_err(|e| format!("{what} {}: {e}", d.display()))?;
+        if !canon.is_dir() {
+            return Err(format!("{what} {}: not a directory", d.display()));
+        }
+        roots.push(canon);
+    }
+    Ok(roots)
+}
+
+/// Whether a `..` component appears anywhere in `name`: refused outright by
+/// both the write and the read roots, before any lookup.
+pub(crate) fn has_parent_dir(name: &str) -> bool {
+    Path::new(name)
+        .components()
+        .any(|c| matches!(c, Component::ParentDir))
 }
 
 /// An I/O failure as a PostScript error: missing is `undefinedfilename`,

@@ -183,7 +183,7 @@ pub(super) fn run(args: Args) -> Result<(), Failure> {
     }
 
     let format = output_format(&o.out).map_err(usage)?;
-    render(&driver, (width, height), o.dpi, false, format, &o.out)
+    render(&driver, (width, height), o.dpi, false, format, &o.out, None)
 }
 
 fn parse(mut args: Args) -> Result<Option<Opts>, String> {

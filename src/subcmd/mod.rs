@@ -187,7 +187,17 @@ pub(crate) fn library(name: &str) -> Result<Vec<u8>, Failure> {
 /// interpreter, as the scripts' separate `pscat --headless` run was: the
 /// real render must not inherit its random state.
 pub(crate) fn measure(source: &[u8]) -> Result<String, Failure> {
+    measure_confined(source, None)
+}
+
+/// [`measure`], with reads confined to `read_roots` when given (issue #763,
+/// `pscat handwrite --read-root`, which pscat-mcp passes).
+pub(crate) fn measure_confined(
+    source: &[u8],
+    read_roots: Option<&[String]>,
+) -> Result<String, Failure> {
     let mut interp = Interp::new();
+    confine_reads(&mut interp, read_roots)?;
     interp.capture_stdout();
     if let Err(e) = interp.run_source(source) {
         eprintln!("{}", interp.error_report(&e));
@@ -220,10 +230,21 @@ pub(crate) fn output_format(out: &str) -> Result<Format, String> {
     }
 }
 
+/// Confine `interp`'s reads to `read_roots` when given (issue #763).
+fn confine_reads(interp: &mut Interp, read_roots: Option<&[String]>) -> Result<(), Failure> {
+    match read_roots {
+        Some(dirs) => interp
+            .set_read_roots(dirs)
+            .map_err(|e| Failure::Msg(format!("--read-root: {e}"))),
+        None => Ok(()),
+    }
+}
+
 /// Render `source` on a `page`-point canvas at `dpi` and write it to
 /// `out`, as `pscat --page WxH --dpi D [--halftone] --png|--svg|--pdf OUT
 /// file.ps` does. The file is written even after a PostScript error (a
-/// partial canvas), and the run then fails.
+/// partial canvas), and the run then fails. `read_roots` confines the
+/// program's reads (issue #763), as `pscat --read-root` does.
 pub(crate) fn render(
     source: &[u8],
     page: (u32, u32),
@@ -231,6 +252,7 @@ pub(crate) fn render(
     halftone: bool,
     format: Format,
     out: &str,
+    read_roots: Option<&[String]>,
 ) -> Result<(), Failure> {
     let mut options = Options::new();
     options.page = page;
@@ -247,6 +269,7 @@ pub(crate) fn render(
             page.0, page.1
         )));
     };
+    confine_reads(&mut interp, read_roots)?;
     match format {
         Format::Png => {}
         Format::Svg => interp.gfx_mut().enable_svg(),

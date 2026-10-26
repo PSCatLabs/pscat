@@ -155,6 +155,8 @@ pub mod window;
 #[path = "window_stub.rs"]
 pub mod window;
 #[doc(hidden)]
+pub mod read_roots;
+#[doc(hidden)]
 pub mod write_roots;
 
 pub use error::PsError;

@@ -97,7 +97,7 @@ pub(super) fn run(args: Args) -> Result<(), Failure> {
         )
         .into_bytes(),
     );
-    render(&driver, (page_w, page_h), o.dpi, false, format, &o.out)
+    render(&driver, (page_w, page_h), o.dpi, false, format, &o.out, None)
 }
 
 /// The output page: the longer side `max_dim`, the other scaled to the
