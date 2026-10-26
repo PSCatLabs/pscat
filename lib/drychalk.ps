@@ -262,8 +262,8 @@
     /dctt exch def
     dcTb
     dctt dcTlandL lt { dcTland add } if
-    dctt 0.3 gt dctt 0.75 lt and { dcband 0.5 mul sub } if
-    dctt 0.75 ge { dctt 0.75 sub 0.25 div dcTlift mul sub } if
+    dctt 0.3 gt dctt dcTl0 lt and { dcband dcTdip mul sub } if
+    dctt dcTl0 ge { dctt dcTl0 sub dcTlw div dcTlift mul sub } if
     dup 0.02 lt { pop 0.02 } if dup 1 gt { pop 1 } if
 } bind def
 
@@ -275,8 +275,8 @@
     dcpt dcTlandL lt {
         1 dcTland 1.6 mul add
     } {
-        dcpt 0.7 gt {
-            dcpt 0.7 sub 0.3 div dup sqrt mul
+        dcpt dcTt0 gt {
+            dcpt dcTt0 sub dcTtw div dup sqrt mul
             1 dcTfloor sub mul 1 exch sub
         } { 1 } ifelse
     } ifelse
@@ -302,6 +302,32 @@
       dcdcx dcda cos dcdl mul add dcdcy dcda sin dcdl mul add ]
 } bind def
 
+% -   (the pressure profile's landmarks for the stroke being recorded: where
+% the width taper and the touch lift begin, and how deep the tired middle
+% dips. By default they are fractions of the stroke, so a long stroke tires
+% and thins over most of its length. /Firm moves them toward absolute
+% lengths: the taper and lift cover at most the last ten widths, the dip
+% fades out as the stroke grows past a few dozen, and a short stroke is
+% pressed a little harder, as small writing is. A dot keeps its own profile.)
+% @internal
+/dcfirmprofile {
+    /dcTt0 0.7 def /dcTtw 0.3 def /dcTl0 0.75 def /dcTlw 0.25 def /dcTdip 0.5 def
+    dcFirm 0 gt dcdot not and {
+        /dcTtw 10 dcw mul dcL 1e-6 dcmax div 0.3 dcmin 0.3 sub dcFirm mul 0.3 add def
+        /dcTt0 1 dcTtw sub def
+        % the touch lift covers the last 5/6 of the taper, so it stays inside
+        % the stroke however long it is
+        /dcTlw dcTtw 5 mul 6 div def /dcTl0 1 dcTlw sub def
+        /dcTdip 0.5 1 dcFirm 1 1 24 dcw mul dcL 1e-6 dcmax div dcmin sub mul sub mul def
+        % pressed harder: small strokes by up to two bands, long ones by up to
+        % one and a fifth (their body is otherwise the faintest part)
+        /dcTb dcTb
+            1 dcL 36 dcw mul div sub 0 dcmax 2 mul
+            dcL 24 dcw mul sub 60 dcw mul div 0 dcmax 1 dcmin 1.2 mul add
+            dcFirm mul dcband mul add def
+    } if
+} bind def
+
 % pts -   (one subpath as one chalk stroke with the stick's tip)
 % @internal
 /dctipstroke {
@@ -318,6 +344,7 @@
     /dcTlandL dcdot { 2 } { 2.4 dcw mul dcL 1e-6 dcmax div 0.06 dcmax 0.3 dcmin } ifelse def
     /dcTlift dcLift dcband 2.5 mul mul def
     /dcTfloor 1 dcLift 0.55 mul sub def
+    dcfirmprofile
     % a dot is pressed: half the landing's extra touch for the whole dab
     % (all of it reads as a clean disc), Codex review of PR #310
     dcdot { /dcTb dcTb dcLanding 0.5 mul add def /dcTland 0 def } if
@@ -399,6 +426,7 @@
         /dcTlandL 0.08 def
         /dcTlift dcLift dcband 2 mul mul def
         /dcTfloor 1 dcLift 0.3 mul sub def
+        /dcTt0 0.7 def /dcTtw 0.3 def /dcTl0 0.75 def /dcTlw 0.25 def /dcTdip 0.5 def
         dcSo /Width dclw put
         dcSo /Touch { dctouchat } put
         dcSo /Pressure { dcpressat } put
@@ -459,6 +487,7 @@
     /dcLanding dcO /Landing 0.5 0 1 /dcchalk-landing-must-be-0-to-1 dcoptnum def
     /dcLanding dcLanding 3 mul dcband mul def
     /dcLift dcO /Lift 0.5 0 1 /dcchalk-lift-must-be-0-to-1 dcoptnum def
+    /dcFirm dcO /Firm 0 0 1 /dcchalk-firm-must-be-0-to-1 dcoptnum def
     /dcVary dcO /Vary 0.5 0 1 /dcchalk-vary-must-be-0-to-1 dcoptnum def
     /dcDust dcO /Dust 0.5 0 1 /dcchalk-dust-must-be-0-to-1 dcoptnum def
     /dcTilt dcO /Tilt 0 0 90 /dcchalk-tilt-must-be-0-to-90 dcoptnum def
@@ -563,6 +592,7 @@
 %   { << /Touch 1.5 >> dcchalk } /dcchalk-touch-must-be-0-to-1 (/Touch 1.5) mustguard
 %   { << /Landing -1 >> dcchalk } /dcchalk-landing-must-be-0-to-1 (/Landing -1) mustguard
 %   { << /Lift 2 >> dcchalk } /dcchalk-lift-must-be-0-to-1 (/Lift 2) mustguard
+%   { << /Firm 2 >> dcchalk } /dcchalk-firm-must-be-0-to-1 (/Firm 2) mustguard
 %   { << /Vary (x) >> dcchalk } /dcchalk-vary-must-be-0-to-1 (a string /Vary) mustguard
 %   { << /Dust 3 >> dcchalk } /dcchalk-dust-must-be-0-to-1 (/Dust 3) mustguard
 %   { << /Tilt 100 >> dcchalk } /dcchalk-tilt-must-be-0-to-90 (/Tilt 100) mustguard
@@ -596,6 +626,7 @@
 % @param: /Touch [0..1] Pressure of the stroke's body against the board's tooth: low breaks into specks, 1 is solid (default 0.68)
 % @param: /Landing [0..1] How much harder and wider the stroke lands than its body, and how much harder a dot is pressed (default 0.5)
 % @param: /Lift [0..1] How far the stroke fades and thins where the chalk lifts; the width tapers to a floor, never a point (default 0.5)
+% @param: /Firm [0..1] Holds the stroke's weight along its whole length and in small writing: the width taper and the lift cover at most the last ten widths however long the stroke, the tired middle fades out on long strokes, and a short stroke is pressed a little harder. 0 keeps the profile as fractions of the stroke (default 0)
 % @param: /Vary [0..1] How much each stroke's weight and width differ from the next one's, so no two strokes read stamped (default 0.5)
 % @param: /Dust [0..1] Loose chalk dust beside each stroke, falling down the board, plus a narrow halo (default 0.5)
 % @param: /Tilt [degrees] 0 writes with the tip; toward 90 the stick lies on its side and the mark widens toward /Side as parallel lanes, the edges pressing harder than the face (default 0)

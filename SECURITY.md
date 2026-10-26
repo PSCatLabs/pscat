@@ -512,12 +512,9 @@ A seed corpus is committed (`fuzz/seeds/`) and replayed by `cargo test`
 (`fuzz/regressions/`). The replay runs every input under a thirty-second
 deadline, so a hang fails the test instead of stalling CI, and checks that a
 `/dev/zero` seed and a FIFO nobody writes to end on a limit. The `fuzz`
-workflow (`.github/workflows/fuzz.yml`) runs the targets in its matrix for
-ten minutes each every week, and on request; a crash opens an issue and
-uploads the input. The matrix lists `lexer` and `interp`; the other five
-targets join it in a separate owner-merged change (workflow files are a
-CODEOWNERS path), and until then they run only in the `cargo test` replay and
-by hand.
+workflow (`.github/workflows/fuzz.yml`) runs every target for ten minutes
+each every week, and on request; a crash opens an issue and uploads the
+input.
 
 What fuzzing found so far, all fixed and kept as regression inputs:
 `9223372036854775807 packedarray` aborted with `capacity overflow`; a crafted

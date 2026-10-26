@@ -63,6 +63,12 @@ export class PostScriptError extends Error {
   readonly report: string;
   /** What the program printed before the error. */
   readonly output: string;
+  /**
+   * Font substitution notes up to the error, as in RenderResult.warnings: a
+   * face that fell back to Helvetica often explains the error that followed.
+   * A snapshot; empty when nothing was replaced.
+   */
+  readonly warnings: string[];
 }
 
 /** Anything with a 2D context to draw into: HTMLCanvasElement, OffscreenCanvas. */

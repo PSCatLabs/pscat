@@ -275,7 +275,7 @@ example before the parameter detail.
 | `printmaking.md` | `hatchkit`, `stipplekit`, `surfacekit`, `halftonekit`, `printkit`, `etching` | Hatching, stipple, halftone, the engraving, woodcut and linocut presets, and etching. |
 | `lettering.md` | `lettering`, `fillkit`, `headline`, `apparel`, `jersey` | Display lettering, GIMP-style fills, headline layout, and shirts and jerseys. **This is where the `headline.ps` snippet that `tests/headline.rs` reads moves to.** |
 | `dry-media.md` | `drykit`, `drychalk`, `drycrayon`, `drycharcoal`, `strokeglyphs` | Chalk, crayon and charcoal, and single-stroke glyphs. Mathkit (#237) is added here when it lands. |
-| `agents.md` | "For agents" (1229–1282) | The skills, `pscat-mcp`'s four tools, `--capabilities`, and how to register the server. It is canonical; `agents.html` summarizes it. |
+| `agents.md` | "For agents" (1229–1282) | The skills, `pscat-mcp`'s ten tools, `--capabilities`, and how to register the server. It is canonical; `agents.html` summarizes it. |
 | `browser.md` | "In the browser" (1196–1228) | A short page: building the wasm and the JS quick start. The full API stays on `javascript.html`. |
 
 The README's other sections go to these places:

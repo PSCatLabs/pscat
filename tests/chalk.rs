@@ -129,6 +129,28 @@ fn the_five_formulas_render_as_pinned() {
     assert_eq!(got, pinned, "a chalk board moved: {got:#x?}");
 }
 
+/// The no-board overlay (#713), pinned like the boards. It draws with
+/// drychalk's /Firm, which the boards do not, so the boards' pins above are the
+/// proof that /Firm touches nothing else. The quadratic's √ and its
+/// superscript are the glyphs the pin was made to keep solid: look at the
+/// overlay (`pscat chalk --no-board ... --width 400 --height 200 --dpi 72
+/// --size 40 --seed 1`, over a dark page) before re-pinning.
+#[test]
+fn the_overlay_renders_as_pinned() {
+    let mut cfg = small();
+    cfg.board = None;
+    cfg.seed = 1;
+    let png = chalk::render(FORMULAS[0].1, &cfg, Format::Png).expect("overlay");
+    let pm = Pixmap::decode_png(&png).expect("decode");
+    assert_eq!((pm.width(), pm.height()), (400, 200));
+    assert_eq!(
+        fnv1a(pm.data()),
+        0xfd19788cb0c52f37,
+        "the overlay moved: {:#x}",
+        fnv1a(pm.data())
+    );
+}
+
 /// Same LaTeX, config and seed: the same bytes, from two separate
 /// processes, and the CLI writes exactly what the library returns.
 #[test]

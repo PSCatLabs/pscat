@@ -611,12 +611,15 @@ renders eight examples in both and compares block-downsampled output).
   `.setstrokeconstantalpha`, `setalpha` are all `where`-undefined on
   gs 10.x; gs's transparency lives inside its PDF interpreter). Two
   consequences worth knowing before touching either:
-    * **Alpha does not reach `image`/`imagemask`.** `src/image.rs`
-      blits samples straight into the pixmap rather than going through
-      `Gfx::paint()`, so a translucent `image` silently paints opaque.
-      Documented at the field, the operator, README and the tests;
-      closing it means teaching the image blitter about the graphics
-      state, not just adding a call.
+    * **Alpha reaches `image`/`imagemask`/`colorimage` since #766.**
+      `src/image.rs` blits samples straight into the pixmap rather than
+      through `Gfx::paint()`, so it composites itself: `blend_pixel`
+      (premultiplied, tiny-skia's Normal and Multiply formulas, pinned
+      by a unit test against a real tiny-skia fill). The default (alpha 1,
+      Normal) keeps the old arithmetic verbatim, so existing renders are
+      byte-identical. SVG gives the `<image>` `opacity` and the blend on
+      the outermost clip group; PDF selects the `ExtGState` before `Do`.
+      `selftest/drivers/image_alpha.ps` covers it.
     * **A program using them will not render the same under plain `gs
       file.ps`.** The verification route for alpha-bearing content is
       `--pdf` plus gs rasterizing that PDF back (`tests/pdf.rs`'s
@@ -868,6 +871,13 @@ renders eight examples in both and compares block-downsampled output).
    (default `/relation`, so `align` and every other caller is unchanged); one
    row, or any other wrapper, never gets the option
    (`notes/699-chalk-gather-centred.md`).
+   #713: on the no-board overlay (touch 0.34, so grain shows) the radical's
+   long bar and small strokes broke into gaps; drychalk's `/Firm` (default 0:
+   byte-identical, `identity_check.sh --loader lib/drychalk.ps`) holds the
+   taper and lift to the last ten widths, fades the tired middle on long
+   strokes and presses short ones harder. `chalk::driver` passes `/Firm 1`
+   only with no board, so the board pins never move; the overlay has its own
+   (`notes/713-chalk-firm-overlay.md`).
    #239 shipped `lib/drycrayon.ps` (`dy-`): `dycrayon` (a core and a rim
    `dkstroke` per subpath, one wax level each), `dypaper`, the crayon box
    (`dybox`, `dycolors`, `dycolor`) and six child motions with paintkit's
@@ -1241,11 +1251,22 @@ renders eight examples in both and compares block-downsampled output).
   the exec stack plants none (tail recursion stays at constant depth; non-tail recursion overflows the exec
   stack at about half the plain depth, since a marker takes a slot). Keep the
   hot path as it is: the only cost off is one `profile.is_some()` in
-  `execute_resolved`'s `Array` arm, and everything else is `#[cold]`. A first
+  `execute_resolved`'s `Array` arm (plus, from #799, one operators-on check per
+  `step_n` slice), and everything else is `#[cold]`. A first
   version that made `step_n_inner` generic, or added a second caller of
   `execute_resolved`/`push_proc_frame`, slowed a plain `fib` run by 19%; measure
   with `scripts/bench_compare.sh` after touching `interp.rs`. See
-  `notes/737-pscat-profile.md`.
+  `notes/737-pscat-profile.md`. #799 added `--profile-graph` (caller -> callee
+  edges, gated by `Profiler::graph`, recorded in `enter`/`exit`/`count_only`),
+  `--profile-json PATH` (main.rs: pre-checked and written through
+  `Interp::writable_path`; the path is the next argument only if it ends in
+  `.json`), and `--profile-ops` (per-operator time: `step_n` routes to
+  `step_n_timed`, a copy of the loop, once per slice when it is on; operators
+  are bare `fn` pointers so the report maps address -> systemdict name). The
+  copy is a second caller of `next_item`/`execute_resolved`/`push_proc_frame`/
+  `recover`/`execute_element`, which is what cost 19% in #737 until those were
+  made `#[inline(always)]`; re-measure `fib` with `bench_compare.sh` if you
+  touch them. See `notes/799-profile-followups.md`.
 - **Read roots (#763).** Reads are open by default (the CLI). `Interp::set_read_roots`
   (CLI `--read-root DIR`, `--confine-reads` for none) confines them, and
   `src/read_roots.rs` decides: `open_confined` wraps the search order's reader so a
@@ -1873,7 +1894,8 @@ renders eight examples in both and compares block-downsampled output).
   keyed by font pack file stem like the disk catalog. A pack face not added
   that way gets the same stand-in as native (#728) and its note, worded for
   `addFont`, goes to `Interp::font_warnings` (no stderr in wasm):
-  `ps_warnings_*` in `src/wasm.rs`, `Renderer.warnings` in npm (#750).
+  `ps_warnings_*` in `src/wasm.rs`, `Renderer.warnings` in npm (#750);
+  `PostScriptError.warnings` and `web/index.html` show them too (#804).
   `npm/package.json` moves in lockstep with
   `Cargo.toml` (`release_stages.py bump-manifests`; a test fails if they
   differ), and the release publishes the tarball `verify` packed

@@ -65,8 +65,8 @@ catch (e) { if (e instanceof PostScriptError) console.log(e.errorName); } // 'un
   step by step. Page sizes are in points (default US Letter, 612x792) at
   `dpi` (default 72, one pixel per point). `source` is a string or bytes.
 - Errors are `PostScriptError`s with the PostScript `errorName`, the
-  offending `command`, the `line`, the full `report`, and what the
-  program printed first. The renderer stays usable afterwards.
+  offending `command`, the `line`, the full `report`, what the
+  program printed first, and the font `warnings` up to the error. The renderer stays usable afterwards.
 - `output` is what the program printed (`=`, `==`, `print`, `stack`).
 - The `lib/` libraries are embedded: `(lib/artkit.ps) run` works with no
   fetches.

@@ -312,18 +312,59 @@ fn nested_clips_declare_the_blend_only_once() {
     assert_eq!(svg.matches("mix-blend-mode").count(), 1, "{svg}");
 }
 
-/// Images never went through the paint pipeline, so they must not pick
-/// up a blend mode in SVG that the raster didn't apply.
+/// Images take `setalpha` and `setblendmode` like any other paint (#766):
+/// `opacity` on the `<image>` (`fill-opacity` does nothing there), the blend
+/// on the element when unclipped and on the outermost clip group otherwise.
 #[test]
-fn images_carry_no_blend_mode() {
+fn images_carry_alpha_and_blend() {
     let pages = svg_pages(
-        "/Multiply setblendmode
+        "/Multiply setblendmode 0.5 setalpha
          10 10 translate 80 80 scale
          2 2 8 [2 0 0 -2 0 2] {<00ff ff00>} image",
     );
     let svg = &pages[0];
+    assert!(
+        svg.contains("opacity=\"0.5\" style=\"mix-blend-mode:multiply\""),
+        "{svg}"
+    );
+    assert!(!svg.contains("fill-opacity"), "{svg}");
+}
+
+#[test]
+fn imagemask_and_clipped_image_carry_alpha_and_blend() {
+    let pages = svg_pages(
+        "0.25 setalpha 1 0 0 setrgbcolor
+         10 10 translate 80 20 scale
+         2 1 true [2 0 0 -1 0 1] {<80>} imagemask",
+    );
+    assert!(pages[0].contains("opacity=\"0.25\""), "{}", pages[0]);
+    let pages = svg_pages(
+        "/Multiply setblendmode
+         newpath 20 20 moveto 80 20 lineto 80 80 lineto 20 80 lineto closepath clip
+         10 10 translate 80 80 scale
+         2 2 8 [2 0 0 -2 0 2] {<00ff ff00>} image",
+    );
+    let svg = &pages[0];
+    assert!(
+        svg.contains("<g clip-path=\"url(#c0)\" style=\"mix-blend-mode:multiply\">"),
+        "{svg}"
+    );
+    assert_eq!(svg.matches("mix-blend-mode").count(), 1, "{svg}");
+}
+
+/// An opaque Normal image keeps the SVG it always had.
+#[test]
+fn opaque_images_carry_no_compositing_attributes() {
+    let pages = svg_pages(
+        "10 10 translate 80 80 scale
+         2 2 8 [2 0 0 -2 0 2] {<00ff ff00>} image",
+    );
+    let svg = &pages[0];
     assert!(svg.contains("<image"), "{svg}");
-    assert!(!svg.contains("mix-blend-mode"), "{svg}");
+    assert!(
+        !svg.contains("opacity") && !svg.contains("mix-blend-mode"),
+        "{svg}"
+    );
 }
 
 /// Issue #258/#261: every distinct clip gets its own `<clipPath>` def.

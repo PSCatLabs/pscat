@@ -28,6 +28,7 @@
   #speed { width: 140px; }
   #status { color: #8a90a0; margin-left: auto; white-space: nowrap; }
   #err { color: #e07a7a; white-space: pre-wrap; margin-top: 8px; max-height: 7em; overflow: auto; }
+  #warn { color: #d9b96a; white-space: pre-wrap; margin-top: 8px; max-height: 7em; overflow: auto; }
   #right {
     display: flex; align-items: center; justify-content: center;
     padding: 16px; background: #0e1013;
@@ -63,6 +64,7 @@ showpage</textarea>
     <span id="status"></span>
   </div>
   <div id="err"></div>
+  <div id="warn"></div>
 </div>
 <div id="right"><canvas id="page" width="612" height="792"></canvas></div>
 
@@ -71,6 +73,7 @@ import { Pscat } from './pscat.js';
 
 const canvas = document.getElementById('page');
 const err = document.getElementById('err');
+const warn = document.getElementById('warn');
 const status = document.getElementById('status');
 const speed = document.getElementById('speed');
 const ps = await Pscat.load();
@@ -79,6 +82,7 @@ let raf = 0;
 function start() {
   cancelAnimationFrame(raf);
   err.textContent = '';
+  warn.textContent = '';
   let steps = 0;
   try {
     ps.begin(document.getElementById('src').value, 612, 792);
@@ -90,6 +94,8 @@ function start() {
     const more = ps.step(Number(speed.value));
     steps += Number(speed.value);
     ps.paintTo(canvas);
+    // Font stand-ins (a pack face the build lacks), also on a clean run (#804).
+    warn.textContent = ps.warnings.join('\n');
     if (more === 1) {
       status.textContent = `running… ${steps.toLocaleString()} steps`;
       raf = requestAnimationFrame(frame);

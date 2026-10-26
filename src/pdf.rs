@@ -279,6 +279,7 @@ Q",
         t: [f32; 6],
         fill_rgb: (f32, f32, f32),
         interpolate: bool,
+        comp: Composite,
         chain: &Chain,
     ) {
         // `/Interpolate true` (#730): a viewer hint on the colour image
@@ -336,9 +337,12 @@ Q",
             t[0], t[1], t[2], t[3], t[4], t[5],
         ));
         self.enter_clip(chain);
+        // `ca` and `BM` apply to images and stencils alike (#766); an
+        // SMask's own alpha multiplies with `ca`. Empty for the default.
+        let gs = self.gs_ref(comp);
         let _ = writeln!(
             self.content,
-            "q {} {} {} rg {} {} {} {} {} {} cm /Im{idx} Do
+            "q {gs}{} {} {} rg {} {} {} {} {} {} cm /Im{idx} Do
 Q",
             f(fill_rgb.0),
             f(fill_rgb.1),

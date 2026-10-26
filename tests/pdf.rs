@@ -426,6 +426,35 @@ fn multiply_blending_survives_the_round_trip_through_gs() {
     assert!(mean < 6.0, "Multiply diverges through gs: mean {mean:.2}");
 }
 
+/// Images and stencils take the ExtGState too (#766); an opaque Normal one
+/// emits none.
+#[test]
+fn images_and_masks_select_the_alpha_extgstate() {
+    let (pdf, _) = pdf_and_canvas(
+        b"/Multiply setblendmode 0.4 setalpha
+          10 10 translate 80 80 scale
+          2 2 8 [2 0 0 -2 0 2] {<00ff ff00>} image",
+    );
+    let text = pdf_text(&pdf);
+    assert!(text.contains("/ca 0.4 /CA 0.4 /BM /Multiply"), "{text}");
+    assert!(text.contains("/GS0 gs "), "{text}");
+    let (pdf, _) = pdf_and_canvas(
+        b"0.6 setalpha 1 0 0 setrgbcolor 10 40 translate 80 20 scale
+          2 1 true [2 0 0 -1 0 1] {<80>} imagemask",
+    );
+    let text = pdf_text(&pdf);
+    assert!(text.contains("/ca 0.6"), "{text}");
+    let (pdf, _) = pdf_and_canvas(
+        b"10 10 translate 80 80 scale
+          2 2 8 [2 0 0 -2 0 2] {<00ff ff00>} image",
+    );
+    let text = pdf_text(&pdf);
+    assert!(
+        !text.contains("/ExtGState") && !text.contains(" gs "),
+        "{text}"
+    );
+}
+
 /// The other half of the contract: a program that never asks for
 /// either one must produce a PDF with no transparency machinery in it
 /// at all, so existing output is unchanged rather than merely
