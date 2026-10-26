@@ -396,6 +396,19 @@ impl ImageCtx {
         if let Some(plane) = self.planes.get(comp) {
             return plane.sample(ix, iy, 0);
         }
+        // Byte-aligned depths (#793): the sample is one or two whole bytes,
+        // so read them directly instead of bit by bit. Bytes past the end
+        // of `data` read as 0, exactly as the general path does.
+        if self.bits == 8 || self.bits == 16 {
+            let nbytes = self.bits as usize / 8;
+            let at = iy * self.row_bytes() + (ix * self.ncomp as usize + comp) * nbytes;
+            let byte = |i: usize| u32::from(self.data.get(at + i).copied().unwrap_or(0));
+            return if nbytes == 1 {
+                byte(0)
+            } else {
+                (byte(0) << 8) | byte(1)
+            };
+        }
         let bitpos =
             iy * self.row_bytes() * 8 + (ix * self.ncomp as usize + comp) * self.bits as usize;
         let mut v: u32 = 0;
@@ -927,7 +940,7 @@ pub(crate) fn invert6(m: [f64; 6]) -> Option<[f64; 6]> {
 
 #[cfg(test)]
 mod tests {
-    use super::{blend_pixel, expansion};
+    use super::{ImageColor, ImageCtx, ImageSource, blend_pixel, expansion};
     use crate::gfx::BlendMode;
 
     /// An image pixel must composite as a fill of the same colour does
@@ -958,6 +971,53 @@ mod tests {
                             "{blend:?} alpha {alpha} ground {ground}: {mine:?} vs {:?}",
                             pm.data()
                         );
+                    }
+                }
+            }
+        }
+    }
+
+    /// The byte-aligned fast path in `sample()` (#793) must agree with the
+    /// bit-by-bit definition at every sample, including past the end of a
+    /// short buffer (missing bytes read as 0) and with odd row padding.
+    #[test]
+    fn sample_fast_path_matches_the_bitwise_read() {
+        for bits in [1u32, 2, 4, 8, 12, 16] {
+            for ncomp in [1u32, 3, 4] {
+                let (w, h) = (5usize, 4usize);
+                let mut img = ImageCtx::new(
+                    w,
+                    h,
+                    bits,
+                    ncomp,
+                    vec![],
+                    [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+                    None,
+                    ImageColor::Direct,
+                    ImageSource::Bytes(vec![]),
+                );
+                let full = img.row_bytes() * h;
+                // Longer than needed, exact, and cut short mid-row.
+                for len in [full + 3, full, full * 2 / 3, 1, 0] {
+                    img.data = (0..len).map(|i| (i * 37 + 11) as u8).collect();
+                    for iy in 0..h + 1 {
+                        for ix in 0..w + 1 {
+                            for comp in 0..ncomp as usize {
+                                let bitpos = iy * img.row_bytes() * 8
+                                    + (ix * ncomp as usize + comp) * bits as usize;
+                                let mut want = 0u32;
+                                for i in 0..bits as usize {
+                                    let bit = bitpos + i;
+                                    let byte = img.data.get(bit / 8).copied().unwrap_or(0);
+                                    want = (want << 1) | u32::from((byte >> (7 - bit % 8)) & 1);
+                                }
+                                assert_eq!(
+                                    img.sample(ix, iy, comp),
+                                    want,
+                                    "{bits} bits, {ncomp} comps, len {len}, ({ix},{iy}) c{comp}"
+                                );
+                            }
+                        }
                     }
                 }
             }
