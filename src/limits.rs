@@ -29,7 +29,14 @@
 //! are counted between objects, so a single long-running operator (one
 //! enormous fill) finishes before the time or step limit is looked at. A
 //! whole-file read (`file`, `run`) is the exception: it looks at the limits
-//! after each 64 KiB it reads.
+//! after each 64 KiB it reads, and charges one step per KiB.
+//!
+//! Thread note for a library embedder: a whole-file read of something that is
+//! not a regular file (a FIFO, a device) runs on a helper thread, so the
+//! limits can be looked at while it blocks. When a limit fires the read is
+//! abandoned but its thread stays blocked in the kernel, so an embedder that
+//! repeatedly reads a stalled FIFO under a limit leaks one helper thread per
+//! read (`SECURITY.md` has the same note).
 //!
 //! [`Interp::begin_source`]: crate::Interp::begin_source
 

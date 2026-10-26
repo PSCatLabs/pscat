@@ -20,7 +20,8 @@
 use std::io::{IsTerminal, Read};
 
 use super::{
-    Args, Failure, dpi, library, measure, number, output_format, page_dim, ps_escape, render,
+    Args, Confine, Failure, dpi, library, measure, number, output_format, page_dim, ps_escape,
+    render, take_limit_flag,
 };
 
 const USAGE: &str = r#"usage: pscat typewrite [options] [FILE | -]      (text from FILE, stdin, or --text)
@@ -61,6 +62,14 @@ const USAGE: &str = r#"usage: pscat typewrite [options] [FILE | -]      (text fr
       --ink R,G,B       ribbon colour, components 0..1
       --ribbon F        ribbon wetness 0..1 (default 0.7)
       --dpi N           render resolution (default 72)
+
+  limits (off by default)
+      --max-steps N     stop a program after N interpreter steps (0 = no limit)
+      --max-time SECS   stop a program after SECS of wall-clock time (0 = no limit)
+      --max-memory MIB  stop a program that grows the heap by more than MIB
+                        (0 = no limit). They apply to each of the two programs
+                        this runs, the measuring pass and the render, not to the
+                        pair; a stop exits non-zero with `limitexceeded`
   -h, --help            this text
 
 Without --reflow newlines break lines; a blank line stays blank."#;
@@ -101,6 +110,8 @@ struct Opts {
     ink: Option<String>,
     ribbon: Option<String>,
     dpi: f32,
+    /// `--max-steps`, `--max-time`, `--max-memory` (issue #701).
+    confine: Confine,
 }
 
 pub(super) fn run(args: Args) -> Result<(), Failure> {
@@ -149,7 +160,7 @@ pub(super) fn run(args: Args) -> Result<(), Failure> {
         let mut fit = libs.clone();
         fit.extend(opts_dict(&o, "792"));
         fit.extend(b"TWOpts tw-pageheight =\n");
-        let printed = measure(&fit)?;
+        let printed = measure(&fit, &o.confine)?;
         let printed = printed.trim_end_matches('\n');
         if printed.is_empty() || !printed.bytes().all(|b| b.is_ascii_digit()) {
             return Err(Failure::Msg(format!(
@@ -183,7 +194,15 @@ pub(super) fn run(args: Args) -> Result<(), Failure> {
     }
 
     let format = output_format(&o.out).map_err(usage)?;
-    render(&driver, (width, height), o.dpi, false, format, &o.out, None)
+    render(
+        &driver,
+        (width, height),
+        o.dpi,
+        false,
+        format,
+        &o.out,
+        &o.confine,
+    )
 }
 
 fn parse(mut args: Args) -> Result<Option<Opts>, String> {
@@ -295,6 +314,7 @@ fn parse(mut args: Args) -> Result<Option<Opts>, String> {
             "--ink" => o.ink = Some(super::rgb(&arg, &args.value(&arg)?)?),
             "--ribbon" => o.ribbon = Some(num(&arg, args.value(&arg)?)?),
             "--dpi" => o.dpi = dpi(&args.value(&arg)?)?,
+            _ if take_limit_flag(&mut o.confine.limits, &arg, &mut args)? => {}
             "--" => only_positional = true,
             "-" => set_file(&mut o, arg)?,
             _ if arg.starts_with('-') => return Err(format!("unknown option: {arg}")),

@@ -1064,12 +1064,15 @@ fn bad_limit_values_are_refused() {
 
 #[test]
 fn limits_do_not_combine_with_modes_that_cannot_honour_them() {
-    // The spool builds its own interpreters; refusing beats ignoring.
-    let dir = tmp("limit-spool-dir");
-    std::fs::create_dir_all(&dir).unwrap();
+    // `--spool` takes the limits since #701 (each job runs under them): the
+    // run gets as far as the directory, which is missing here, so no window
+    // opens, and the error is about the directory, not the flags.
+    let dir = tmp("limit-spool-missing");
+    let _ = std::fs::remove_dir_all(&dir);
     let (ok, _out, stderr) = run(&["--spool", dir.to_str().unwrap(), "--max-steps", "9"], "");
     assert!(!ok);
-    assert!(stderr.contains("--spool"), "{stderr}");
+    assert!(stderr.contains("cannot watch"), "{stderr}");
+    assert!(!stderr.contains("--max-"), "{stderr}");
     // The self-test modes run alone.
     let (ok, _out, stderr) = run(&["--selftest", "lib/artkit.ps", "--max-steps", "9"], "");
     assert!(!ok);

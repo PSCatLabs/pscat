@@ -10,7 +10,8 @@
 //! `lib/etching.ps`'s header comment for why that is not a gap).
 
 use super::{
-    Args, Failure, dpi, library, measure, number, output_format, page_dim, ps_escape, render, rgb,
+    Args, Confine, Failure, dpi, library, measure, number, output_format, page_dim, ps_escape,
+    render, rgb, take_limit_flag,
 };
 
 const USAGE: &str = r#"usage: pscat photo-etch [options] photo.jpg
@@ -25,6 +26,12 @@ const USAGE: &str = r#"usage: pscat photo-etch [options] photo.jpg
       --ink R,G,B     stroke color, components 0..1 (default 0.08,0.07,0.05)
       --paper R,G,B   background color, components 0..1 (default 0.96,0.94,0.88)
       --dpi N         render resolution (default 72)
+      --max-steps N     stop a program after N interpreter steps (0 = no limit)
+      --max-time SECS   stop a program after SECS of wall-clock time (0 = no limit)
+      --max-memory MIB  stop a program that grows the heap by more than MIB
+                        (0 = no limit). They apply to each of the two programs
+                        this runs, the dimensions pass and the render, not to the
+                        pair; a stop exits non-zero with `limitexceeded`
   -h, --help          this text"#;
 
 struct Opts {
@@ -37,6 +44,8 @@ struct Opts {
     ink: String,
     paper: String,
     dpi: f32,
+    /// `--max-steps`, `--max-time`, `--max-memory` (issue #701).
+    confine: Confine,
 }
 
 pub(super) fn run(args: Args) -> Result<(), Failure> {
@@ -70,7 +79,7 @@ pub(super) fn run(args: Args) -> Result<(), Failure> {
     dims.extend(b"<< /Photo ");
     dims.extend(&photo);
     dims.extend(b" >> et-dims\n/n exch def /h exch def /w exch def\nw == h == n ==\n");
-    let printed = measure(&dims)?;
+    let printed = measure(&dims, &o.confine)?;
     let sizes: Vec<f64> = printed
         .split_whitespace()
         .filter_map(|t| t.parse().ok())
@@ -104,7 +113,7 @@ pub(super) fn run(args: Args) -> Result<(), Failure> {
         false,
         format,
         &o.out,
-        None,
+        &o.confine,
     )
 }
 
@@ -131,6 +140,7 @@ fn parse(mut args: Args) -> Result<Option<Opts>, String> {
         ink: "0.08 0.07 0.05".into(),
         paper: "0.96 0.94 0.88".into(),
         dpi: 72.0,
+        confine: Confine::default(),
     };
     let num = |flag: &str, v: String| number(flag, &v).map(str::to_string);
     while let Some(arg) = args.next() {
@@ -144,6 +154,7 @@ fn parse(mut args: Args) -> Result<Option<Opts>, String> {
             "--ink" => o.ink = rgb(&arg, &args.value(&arg)?)?,
             "--paper" => o.paper = rgb(&arg, &args.value(&arg)?)?,
             "--dpi" => o.dpi = dpi(&args.value(&arg)?)?,
+            _ if take_limit_flag(&mut o.confine.limits, &arg, &mut args)? => {}
             _ if arg.starts_with('-') => return Err(format!("unknown option: {arg}")),
             _ => {
                 if !o.photo.is_empty() {

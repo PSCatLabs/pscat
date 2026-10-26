@@ -1900,11 +1900,11 @@ fn handwrite(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
     let mut cmd = Command::new(pscat_bin()?);
     cmd.arg("handwrite").arg("-o").arg(&out);
     cmd.arg("--max-pixels").arg(cfg.max_pixels.to_string());
-    cfg.read_root_args(&mut cmd);
-    // As `interpreter_args` gives every other child: a killed server takes
-    // this render with it.
-    cmd.arg("--exit-with-parent")
-        .arg(std::process::id().to_string());
+    // The same flags every other child gets (#701): the step, time and
+    // memory limits, the read confinement, and `--exit-with-parent`. A
+    // note's two programs (the measuring pass and the render) each run under
+    // them, so `--timeout`'s hard kill stays the backstop, not the only bound.
+    cfg.interpreter_args(&mut cmd);
     for (flag, key, lo, hi) in [
         ("--size", "size", 0.0, 2000.0),
         ("--jitter", "jitter", 0.0, 10_000.0),
@@ -1939,9 +1939,10 @@ fn handwrite(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
         if let Some((w, h, _)) = pscat::limits::parse_pixel_cap_message(&run.stderr) {
             return Err(too_many_pixels(cfg, "the note", w, h));
         }
-        return Err(ToolError::new(
+        return Err(failed_run(
             "handwrite_failed",
             format!("handwrite failed:\n{}", run.stderr),
+            &run.stderr,
         ));
     }
     let pages = collect_pages(&out);

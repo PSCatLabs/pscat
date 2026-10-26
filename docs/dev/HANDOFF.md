@@ -1164,7 +1164,9 @@ renders eight examples in both and compares block-downsampled output).
     harness bodies in `src/fuzzing.rs`, seeds and crash regressions replayed by
     `tests/fuzz_corpus.rs`, weekly in `.github/workflows/fuzz.yml`. A fixed crash's
     input goes in `fuzz/regressions/<target>/`.
-  - `--spool` and the subcommands take no limits yet (SECURITY.md says so).
+  - `--spool` and the subcommands take the limits (#701): one budget per
+    program run (`subcmd::Confine`, `take_limit_flag`, `limit_flag` in
+    `main.rs`, `window::run_spool_with_limits`, `chalk::run_with_limits`).
 - **File writing (#740).** Off by default: `Interp::set_write_roots` (CLI
   `--allow-write DIR`) names the directories, and `src/write_roots.rs` is the
   one place that decides whether a path is writable (`WriteRoots::open`,
@@ -1304,9 +1306,9 @@ renders eight examples in both and compares block-downsampled output).
   cap is what bounds it below the interpreter's 8000-a-side ceiling. A TeX error is mapped back from the
   child's `mk-*` offending command with `chalk::explain`. The output is
   byte-identical to `pscat chalk` and `chalk::render` (`tests/mcp.rs` pins it).
-  `review_sheet` (#708) is the pattern for a tool whose CLI twin has no limits:
-  `pscat sheet` runs its programs in-process with no step, time or memory
-  limit, so the tool does not shell out to it. It renders each cell in its
+  `review_sheet` (#708) is the pattern for a tool whose CLI twin cannot share
+  one `--timeout` across cells (`pscat sheet` takes the limits since #701, but
+  per cell, each with the whole budget), so the tool does not shell out to it. It renders each cell in its
   own child (`--page --dpi --png -` under `interpreter_args`, each child given
   what is left of the one `--timeout`) and composes the pictures in-process
   with `pscat::contact_sheet` (`Layout`, `render_text`, `blit_at`, `frame`,
