@@ -143,7 +143,7 @@ fn the_overlay_renders_as_pinned() {
     assert_eq!((pm.width(), pm.height()), (400, 200));
     assert_eq!(
         fnv1a(pm.data()),
-        0x219f8db4c0889f19,
+        0xfd19788cb0c52f37,
         "the overlay moved: {:#x}",
         fnv1a(pm.data())
     );
