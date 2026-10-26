@@ -328,13 +328,12 @@ pub(crate) fn resolve(requested: &str) -> Resolved {
     if let Some(fid) = embedded_fid(requested) {
         return Resolved::found(fid);
     }
-    #[cfg(not(target_arch = "wasm32"))]
-    if let Some(pack) = missing_pack(requested) {
+    if let Some((pack, stem)) = missing_face(requested) {
         let stand_in = stand_in_for(requested);
         let fid = builtin_index(stand_in).unwrap_or(SUBSTITUTE);
         return Resolved {
             fid,
-            stand_in_note: Some(stand_in_note(requested, pack, stand_in)),
+            stand_in_note: Some(stand_in_note(requested, pack, &stem, stand_in)),
         };
     }
     Resolved::found(SUBSTITUTE)
@@ -400,8 +399,17 @@ fn wanted_stems(requested: &str) -> (&str, String) {
 /// The pack holding the face `requested` names, if any pack does.
 #[cfg(not(target_arch = "wasm32"))]
 fn missing_pack(requested: &str) -> Option<&'static str> {
+    missing_face(requested).map(|(pack, _)| pack)
+}
+
+/// The pack holding the face `requested` names and the font file stem
+/// it matched (`Bangers-Regular` for `/Bangers`): what `addFont` must
+/// be given to supply the face.
+fn missing_face(requested: &str) -> Option<(&'static str, String)> {
     let (stem, fallback) = wanted_stems(requested);
-    crate::fontpacks::pack_for_stem(stem).or_else(|| crate::fontpacks::pack_for_stem(&fallback))
+    [stem.to_string(), fallback]
+        .into_iter()
+        .find_map(|s| crate::fontpacks::pack_for_stem(&s).map(|pack| (pack, s)))
 }
 
 /// The built-in face standing in for `requested`, a name whose font
@@ -415,7 +423,6 @@ fn missing_pack(requested: &str) -> Option<&'static str> {
 ///
 /// The standard 35 never get here: all of them are compiled in
 /// (`BUILTINS` and [`EMBEDDED`], issue #757).
-#[cfg(not(target_arch = "wasm32"))]
 fn stand_in_for(requested: &str) -> &'static str {
     let (stem, _) = wanted_stems(requested);
     let stem = stem.to_ascii_lowercase();
@@ -477,12 +484,30 @@ pub(crate) fn uninstalled_pack_hint(_requested: &str) -> Option<String> {
     None
 }
 
-/// The one-line note for a face whose pack is not installed.
+/// The one-line note for a face whose pack is not installed. The wasm
+/// build has no packs to install (and no stderr): its note, which the
+/// npm package returns in `warnings` (issue #750), says to load the
+/// face with `addFont` under its file stem instead.
 #[cfg(not(target_arch = "wasm32"))]
-fn stand_in_note(requested: &str, pack: &str, stand_in: &str) -> String {
+fn stand_in_note(requested: &str, pack: &str, _stem: &str, stand_in: &str) -> String {
     format!(
         "pscat: warning: font /{requested} is in the {pack} font pack, which is not installed; \
          using {stand_in}. Run `pscat fonts install --pack {pack}` (or `pscat fonts install`) for the real face"
+    )
+}
+
+#[cfg(target_arch = "wasm32")]
+fn stand_in_note(requested: &str, pack: &str, stem: &str, stand_in: &str) -> String {
+    browser_stand_in_note(requested, pack, stem, stand_in)
+}
+
+/// The browser build's note (see [`stand_in_note`]); not target-gated so
+/// a native test can pin its wording.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+fn browser_stand_in_note(requested: &str, pack: &str, stem: &str, stand_in: &str) -> String {
+    format!(
+        "pscat: warning: font /{requested} is in the {pack} font pack, which is not built into the browser build; \
+         using {stand_in}. Load the real face with addFont('{stem}', bytes)"
     )
 }
 
@@ -1731,7 +1756,7 @@ mod tests {
         ] {
             assert_eq!(missing_pack(name), Some(pack), "{name}");
             assert_eq!(stand_in_for(name), stand_in, "{name}");
-            let note = stand_in_note(name, pack, stand_in);
+            let note = stand_in_note(name, pack, "stem", stand_in);
             assert!(
                 !note.contains('\n')
                     && note.contains(&format!("/{name} is in the {pack} font pack"))
@@ -1743,6 +1768,30 @@ mod tests {
         for name in ["Helvetica", "Courier-Bold", "NoSuchFace", "Arial"] {
             assert_eq!(missing_pack(name), None, "{name}");
         }
+    }
+
+    /// The browser build's note (issue #750): one line naming the face,
+    /// the stand-in and the `addFont` stem, with no `pscat fonts install`
+    /// advice, which a browser cannot follow.
+    #[test]
+    fn the_browser_note_says_to_use_addfont_with_the_file_stem() {
+        assert_eq!(
+            missing_face("Bangers"),
+            Some(("extras", "Bangers-Regular".to_string()))
+        );
+        assert_eq!(
+            missing_face("NotoSansKR-Regular"),
+            Some(("cjk-thai", "NotoSansKR-Regular".to_string()))
+        );
+        let note = browser_stand_in_note("Bangers", "extras", "Bangers-Regular", "Helvetica");
+        assert!(
+            !note.contains('\n')
+                && note.contains("/Bangers is in the extras font pack")
+                && note.contains("using Helvetica")
+                && note.contains("addFont('Bangers-Regular', bytes)")
+                && !note.contains("fonts install"),
+            "{note}"
+        );
     }
 
     /// All of the standard 35 resolve with no font on disk (issue #757):

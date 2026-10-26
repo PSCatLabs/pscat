@@ -133,6 +133,18 @@ export class Pscat {
     return new TextDecoder().decode(new Uint8Array(this.ex.memory.buffer, ptr, len));
   }
 
+  /**
+   * The notes findfont raised since begin() for pack faces it replaced
+   * with a built-in one (the lines the native binary prints on stderr),
+   * one string per face; [] when nothing was replaced (#750).
+   */
+  get warnings() {
+    const len = this.ex.ps_warnings_len();
+    if (len === 0) return [];
+    const ptr = this.ex.ps_warnings_ptr();
+    return new TextDecoder().decode(new Uint8Array(this.ex.memory.buffer, ptr, len)).split('\n');
+  }
+
   /** Blit the live page into a <canvas> (resizes it to match). */
   paintTo(canvas) {
     const w = this.width;
