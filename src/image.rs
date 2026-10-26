@@ -8,7 +8,9 @@
 //! buffer is complete, rasterization is one pass: every device pixel
 //! inside the image's unit-square footprint is inverse-mapped through
 //! CTM⁻¹ and the ImageMatrix to a source sample (nearest neighbor —
-//! found files at found sizes don't miss the interpolation).
+//! found files at found sizes don't miss the interpolation), unless the
+//! image dictionary asks for `/Interpolate true` (#730): then a magnified
+//! axis is sampled bilinearly, see [`ImageCtx::interpolate`].
 
 use crate::error::PsError;
 use crate::file::FileHandle;
@@ -102,6 +104,16 @@ pub(crate) struct ImageCtx {
     /// pixels, with its own source, resolution and ImageMatrix. Fed after
     /// this image's own data (InterleaveType 3: separate sources).
     pub stencil: Option<Box<ImageCtx>>,
+    /// `/Interpolate true` in the image dictionary (#730). A colour image
+    /// (never an `imagemask`) is then smoothed where it is magnified:
+    /// the PNG raster samples bilinearly, the PDF image carries
+    /// `/Interpolate true` and the SVG `<image>` drops `pixelated`.
+    /// Sample centres are at (i + 0.5, j + 0.5) in ImageMatrix space; a
+    /// point outside the outermost centres takes the edge sample (clamp,
+    /// no fade to the background). An axis shrunk to one device pixel per
+    /// sample or fewer keeps the nearest sample, so only upscaling is
+    /// smoothed (the PLRM treats the key as a hint; gs does the same).
+    pub interpolate: bool,
     waiting: bool,
     eod: bool,
 }
@@ -132,9 +144,15 @@ impl ImageCtx {
             source,
             data: Vec::new(),
             stencil: None,
+            interpolate: false,
             waiting: false,
             eod: false,
         }
+    }
+
+    pub(crate) fn with_interpolate(mut self, on: bool) -> Self {
+        self.interpolate = on;
+        self
     }
 
     pub(crate) fn with_stencil(mut self, stencil: ImageCtx) -> Self {
@@ -266,8 +284,9 @@ impl ImageCtx {
     /// The sample cell of this plane that user-space point (ux, uy) falls
     /// in (nearest neighbour: the cell containing the point), or None
     /// outside the source rectangle. The one place a point becomes a
-    /// sample position, so a smoother filter (#730 /Interpolate) has a
-    /// single seam to replace.
+    /// sample position; `/Interpolate` (#730) refines the colour of a
+    /// cell this finds in `smooth_rgb`, it never changes which points
+    /// are inside.
     fn cell_at(&self, ux: f64, uy: f64) -> Option<(usize, usize)> {
         let m = self.matrix;
         let ix = (m[0] * ux + m[2] * uy + m[4]).floor();
@@ -307,6 +326,49 @@ impl ImageCtx {
         let d0 = self.decode.get(comp * 2).copied().unwrap_or(0.0);
         let d1 = self.decode.get(comp * 2 + 1).copied().unwrap_or(1.0);
         (d0 + v * (d1 - d0)).clamp(0.0, 1.0)
+    }
+
+    /// Device pixels per source sample along the image's x and y axes,
+    /// for the sample-to-device transform `t`. Smoothing applies to an
+    /// axis where this exceeds 1 (the image is magnified).
+    fn magnified(&self, t: tiny_skia::Transform) -> (bool, bool) {
+        (
+            crate::fmath::hypotf(t.sx, t.ky) > 1.0,
+            crate::fmath::hypotf(t.kx, t.sy) > 1.0,
+        )
+    }
+
+    /// The `/Interpolate` colour at image-space point (fx, fy), which lies
+    /// in cell (ix, iy): bilinear between the four nearest sample centres
+    /// (i + 0.5, j + 0.5) on each magnified axis, the cell's own sample on
+    /// an axis that is not. Positions past the outermost centres clamp to
+    /// the edge samples.
+    fn smooth_rgb(
+        &self,
+        (fx, fy): (f64, f64),
+        (ix, iy): (usize, usize),
+        (mx, my): (bool, bool),
+    ) -> (f32, f32, f32) {
+        let axis = |on: bool, f: f64, cell: usize, n: usize| {
+            if !on {
+                return (cell, cell, 0.0f32);
+            }
+            let g = (f - 0.5).clamp(0.0, (n - 1) as f64);
+            let i0 = g.floor() as usize;
+            (i0, (i0 + 1).min(n - 1), (g - i0 as f64) as f32)
+        };
+        let (x0, x1, tx) = axis(mx, fx, ix, self.width);
+        let (y0, y1, ty) = axis(my, fy, iy, self.height);
+        let lerp = |a: (f32, f32, f32), b: (f32, f32, f32), t: f32| {
+            (
+                a.0 + (b.0 - a.0) * t,
+                a.1 + (b.1 - a.1) * t,
+                a.2 + (b.2 - a.2) * t,
+            )
+        };
+        let top = lerp(self.rgb_at(x0, y0), self.rgb_at(x1, y0), tx);
+        let bottom = lerp(self.rgb_at(x0, y1), self.rgb_at(x1, y1), tx);
+        lerp(top, bottom, ty)
     }
 
     fn rgb_at(&self, ix: usize, iy: usize) -> (f32, f32, f32) {
@@ -361,7 +423,12 @@ impl ImageCtx {
     fn composite(&self, st: &ImageCtx) -> Option<Composite> {
         let inv = invert6(self.matrix)?;
         // Samples per user unit along each axis, image vs stencil.
-        let axes = |m: &[f64; 6]| (m[0].hypot(m[1]), m[2].hypot(m[3]));
+        let axes = |m: &[f64; 6]| {
+            (
+                crate::fmath::hypot(m[0], m[1]),
+                crate::fmath::hypot(m[2], m[3]),
+            )
+        };
         let ((dx, dy), (sx, sy)) = (axes(&self.matrix), axes(&st.matrix));
         let ratio = |s: f64, d: f64| if d > 0.0 { (s / d - 1e-6).ceil() } else { 1.0 };
         let mut want = ratio(sx, dx)
@@ -392,9 +459,16 @@ impl ImageCtx {
         let mut rgba = Vec::with_capacity(w * h * 4);
         for cy in 0..h {
             for cx in 0..w {
-                let (r, g, b) = self.rgb_at(cx / k, cy / k);
                 // Centre of this raster cell in image space, then user space.
                 let (px, py) = ((cx as f64 + 0.5) / k as f64, (cy as f64 + 0.5) / k as f64);
+                let cell = (cx / k, cy / k);
+                // `/Interpolate`: the cell's colour is the bilinear one at
+                // its centre, as the PNG raster computes it.
+                let (r, g, b) = if self.interpolate {
+                    self.smooth_rgb((px, py), cell, (true, true))
+                } else {
+                    self.rgb_at(cell.0, cell.1)
+                };
                 let ux = inv[0] * px + inv[2] * py + inv[4];
                 let uy = inv[1] * px + inv[3] * py + inv[5];
                 let a = if st.stencil_passes(ux, uy) { 255 } else { 0 };
@@ -431,7 +505,7 @@ impl ImageCtx {
             }
         }
         if let Ok(png) = pm.encode_png() {
-            gfx.svg_image(&png, c.w, c.h, c.transform(t));
+            gfx.svg_image(&png, c.w, c.h, c.transform(t), self.interpolate);
         }
     }
 
@@ -498,6 +572,7 @@ impl ImageCtx {
                 self.width,
                 self.height,
                 [t.sx, t.ky, t.kx, t.sy, t.tx, t.ty],
+                self.interpolate && self.mask.is_none(),
             );
         }
     }
@@ -530,6 +605,7 @@ impl ImageCtx {
                     c.h,
                     crate::pdf::ImageData::RgbA { rgb, alpha },
                     c.transform(t),
+                    self.interpolate,
                 );
             }
             return;
@@ -557,6 +633,7 @@ impl ImageCtx {
             self.height,
             data,
             [t.sx, t.ky, t.kx, t.sy, t.tx, t.ty],
+            self.interpolate && self.mask.is_none(),
         );
     }
 
@@ -633,6 +710,25 @@ impl ImageCtx {
         let px1 = (x1.ceil() as i64).min(pw);
         let py1 = (y1.ceil() as i64).min(ph);
 
+        // `/Interpolate true` on a colour image (#730): which axes are
+        // magnified, i.e. get bilinear sampling. None keeps nearest.
+        let smooth = if self.interpolate && self.mask.is_none() {
+            let to_dev = tiny_skia::Transform::from_row(
+                m[0] as f32,
+                m[1] as f32,
+                m[2] as f32,
+                m[3] as f32,
+                m[4] as f32,
+                m[5] as f32,
+            )
+            .invert()
+            .map(|i| i.post_concat(ctm));
+            to_dev
+                .map(|t| self.magnified(t))
+                .filter(|&(mx, my)| mx || my)
+        } else {
+            None
+        };
         let paint_rgb = gfx.rgb();
         let mask_data = gfx.clip_mask_data();
         let width = gfx.pixmap.width() as usize;
@@ -664,7 +760,14 @@ impl ImageCtx {
                         }
                         (paint_rgb.0 as f32, paint_rgb.1 as f32, paint_rgb.2 as f32)
                     }
-                    None => self.rgb_at(ix, iy),
+                    None => match smooth {
+                        Some(axes) => {
+                            let fx = m[0] * ux + m[2] * uy + m[4];
+                            let fy = m[1] * ux + m[3] * uy + m[5];
+                            self.smooth_rgb((fx, fy), (ix, iy), axes)
+                        }
+                        None => self.rgb_at(ix, iy),
+                    },
                 };
                 let clip = mask_data
                     .as_ref()
