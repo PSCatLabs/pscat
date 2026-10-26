@@ -361,6 +361,12 @@ pass `out_path`. Register it with
   read. Writing needs `--allow-write DIR` like `(w) file`.
 - The interpreter targets Level 2 PostScript. If a construct misbehaves,
   compare against Ghostscript, the behavioural oracle.
+- `cvs` (and `=`, `==`) on a real prints the shortest digits that read back
+  exactly, up to 17 significant digits, so the text can be 24 characters
+  (`-3.3333333333333334e-301`). Ghostscript prints six. Size the string for
+  that (`30 string`), or round first. `0.38612390214204787 12 string cvs`
+  is a `rangecheck` here; rounding it to `0.386` first and then printing
+  with `30 string` gives `(0.386)`.
 - Files the docs call `examples/...`, `gallery/...` or `docs/...` are in
   the [repository](https://github.com/PSCatLabs/pscat),
   not in an install.
