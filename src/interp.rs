@@ -88,29 +88,15 @@ enum Frame {
     ProfReturn,
 }
 
-/// One unit of work `next_item` hands the step loop. A procedure's
-/// operators and executable names, almost every element a bound
-/// library runs, arrive as a plain fn pointer or name id: no `Object`
-/// clone, no refcount traffic, no drop (#323).
+/// What `next_item` hands the step loop.
 enum Item {
-    Op(crate::object::OpFn),
-    Name(u32),
+    /// An object scanned from source, to execute (or push).
     Obj(Object),
-}
-
-impl Item {
-    /// Decide what a procedure element is, from a borrow of it.
-    #[inline]
-    fn fetch(o: &Object) -> Item {
-        if o.executable {
-            match &o.value {
-                Value::Operator(op) => return Item::Op(op.func),
-                Value::Name(n) => return Item::Name(n.id()),
-                _ => {}
-            }
-        }
-        Item::Obj(o.clone())
-    }
+    /// A procedure frame with an element left is on top: the step loop
+    /// runs that element with [`Interp::proc_step`], in this same step
+    /// (#863). Procedure elements never pass through `next_item`'s
+    /// `Action` machinery.
+    Proc,
 }
 
 /// What [`Interp::proc_step`] did with the top of the execution stack.
@@ -977,33 +963,36 @@ impl Interp {
             if self.quit_requested {
                 return Ok(false);
             }
-            let done = match self.proc_step() {
-                ProcStep::Op(func) => self.timed_op(func),
-                ProcStep::Name(id) => self.execute_name_timed(id),
-                ProcStep::Pushed => continue,
-                ProcStep::Other => {
-                    let item = match self.next_item() {
-                        Ok(None) => return Ok(false),
-                        Ok(Some(item)) => item,
-                        Err(e) => {
-                            self.sync_scan_line();
-                            self.recover(e)?;
-                            continue;
-                        }
-                    };
-                    match item {
-                        Item::Op(func) => self.timed_op(func),
-                        Item::Name(id) => self.execute_name_timed(id),
-                        Item::Obj(obj) => match (&obj.value, obj.executable) {
+            let mut step = self.proc_step();
+            if let ProcStep::Other = step {
+                match self.next_item() {
+                    Ok(None) => return Ok(false),
+                    Ok(Some(Item::Proc)) => step = self.proc_step(),
+                    Ok(Some(Item::Obj(obj))) => {
+                        let done = match (&obj.value, obj.executable) {
                             (Value::Name(n), true) => self.execute_name_timed(n.id()),
                             (Value::Operator(op), true) => {
                                 let func = op.func;
                                 self.timed_op(func)
                             }
                             _ => self.execute_element(obj),
-                        },
+                        };
+                        if let Err(e) = done {
+                            self.recover(e)?;
+                        }
+                        continue;
+                    }
+                    Err(e) => {
+                        self.sync_scan_line();
+                        self.recover(e)?;
+                        continue;
                     }
                 }
+            }
+            let done = match step {
+                ProcStep::Op(func) => self.timed_op(func),
+                ProcStep::Name(id) => self.execute_name_timed(id),
+                ProcStep::Pushed | ProcStep::Other => continue,
             };
             if let Err(e) = done {
                 self.recover(e)?;
@@ -1044,31 +1033,34 @@ impl Interp {
                 return Ok(false);
             }
             // A procedure element (nearly every step of a bound library)
-            // is dispatched straight from the frame; everything else goes
-            // through `next_item`.
+            // is dispatched straight from the frame. Anything else goes
+            // through `next_item`, which hands back `Item::Proc` when a
+            // loop iteration (or a frame finishing) leaves a procedure on
+            // top: its first element runs in this same step, as it always
+            // has.
             let done = match self.proc_step() {
                 ProcStep::Op(func) => func(self),
                 ProcStep::Name(id) => self.execute_name(id),
                 ProcStep::Pushed => continue,
-                ProcStep::Other => {
-                    let item = match self.next_item() {
-                        Ok(None) => return Ok(false),
-                        Ok(Some(item)) => item,
-                        Err(e) => {
-                            // A scan/syntax error short-circuits out of
-                            // next_item before any Action ran, so the failing
-                            // Scanner frame is still on top with its line set.
-                            self.sync_scan_line();
-                            self.recover(e)?;
-                            continue;
-                        }
-                    };
-                    match item {
-                        Item::Op(func) => func(self),
-                        Item::Name(id) => self.execute_name(id),
-                        Item::Obj(obj) => self.execute_element(obj),
+                ProcStep::Other => match self.next_item() {
+                    Ok(None) => return Ok(false),
+                    Ok(Some(Item::Obj(obj))) => self.execute_element(obj),
+                    Ok(Some(Item::Proc)) => match self.proc_step() {
+                        ProcStep::Op(func) => func(self),
+                        ProcStep::Name(id) => self.execute_name(id),
+                        // `Other` is not reached: `next_item` checked the
+                        // frame has an element left.
+                        ProcStep::Pushed | ProcStep::Other => continue,
+                    },
+                    Err(e) => {
+                        // A scan/syntax error short-circuits out of
+                        // next_item before any Action ran, so the failing
+                        // Scanner frame is still on top with its line set.
+                        self.sync_scan_line();
+                        self.recover(e)?;
+                        continue;
                     }
-                }
+                },
             };
             if let Err(e) = done {
                 self.recover(e)?;
@@ -1302,7 +1294,6 @@ impl Interp {
         // each pass decides on an action first, then applies it.
         enum Action {
             Yield(Item),
-            PopThenYield(Item),
             Pop,
             PopThenPush(Object),
             PopThenPush2(Object, Object),
@@ -1355,25 +1346,16 @@ impl Interp {
                         }
                         Some(tok) => Action::Yield(Item::Obj(token_to_object(tok))),
                     },
-                    // The element is inspected in place (one momentary
-                    // borrow, released before it executes, so a `put`
-                    // into the running procedure still works): an
-                    // operator or executable name yields without
-                    // cloning the object (#323).
-                    Frame::Proc { body, pc } => match body.peek(*pc, Item::fetch) {
-                        None => Action::Pop,
-                        Some(o) => {
-                            *pc += 1;
-                            // Tail call: the frame is finished the moment
-                            // it yields its last element, so drop it
-                            // before executing.
-                            if *pc >= body.len() {
-                                Action::PopThenYield(o)
-                            } else {
-                                Action::Yield(o)
-                            }
+                    // The step loop runs procedure elements itself
+                    // (`proc_step`, #863). An exhausted frame is popped
+                    // as it yields its last element, so this `Pop` is
+                    // only a safeguard.
+                    Frame::Proc { body, pc } => {
+                        if *pc < body.len() {
+                            return Ok(Some(Item::Proc));
                         }
-                    },
+                        Action::Pop
+                    }
                     Frame::Repeat { body, remaining } => {
                         if *remaining <= 0 {
                             Action::Pop
@@ -1486,10 +1468,6 @@ impl Interp {
             match action {
                 Action::Yield(o) => {
                     self.sync_scan_line();
-                    return Ok(Some(o));
-                }
-                Action::PopThenYield(o) => {
-                    self.estack.pop();
                     return Ok(Some(o));
                 }
                 Action::Pop => {
