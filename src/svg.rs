@@ -244,6 +244,7 @@ impl SvgRecorder {
     /// `interpolate` (`/Interpolate true`, #730) emits
     /// `image-rendering="auto"`, the viewer's smooth scaling; otherwise
     /// `pixelated` keeps the hard cell edges (the SVG default would smooth).
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn image(
         &mut self,
         png: &[u8],
