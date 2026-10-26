@@ -49,10 +49,12 @@
 //! What can be read. The same, plus fixed-point reals and immediately
 //! evaluated names. Names with length 0 (system name table indices) and
 //! 0xFFFF (user name table) are a `syntaxerror`: pscat has neither table.
-//! Every offset and length is checked against the sequence, each slot may
-//! be decoded once (so a cyclic or shared layout is a `syntaxerror`, and a
-//! sequence cannot decode to more objects than it has bytes for), and
-//! nesting beyond [`MAX_NESTING`] is `limitcheck`.
+//! Every offset and length is checked against the sequence. A sequence
+//! decodes to at most one object per 8 bytes of its body, whichever
+//! slots they are, so an offset that points back (a cycle) or a layout that
+//! shares one array between many parents cannot multiply the input: it
+//! runs out of that budget (`syntaxerror`) long before memory does.
+//! Nesting beyond [`MAX_NESTING`] is `limitcheck`.
 
 use std::collections::VecDeque;
 
@@ -516,16 +518,24 @@ mod tests {
     }
 
     #[test]
-    fn cyclic_and_repeated_layouts_are_refused() {
+    fn cycles_and_sharing_cannot_multiply_the_input() {
         // An array whose single element is itself (offset 0 is its slot).
         let b = [0x80, 1, 0, 12, 9, 0, 0, 1, 0, 0, 0, 0];
         assert!(decode(&b, &mut |_| Ok(Object::int(0))).is_err());
-        // Two elements that both point at the same one-element array.
-        let b = [
-            0x80, 1, 0, 28, 9, 0, 0, 2, 0, 0, 0, 8, 9, 0, 0, 1, 0, 0, 0, 24, 9, 0, 0, 1, 0, 0, 0,
-            24, 1, 0, 0, 0, 0, 0, 0, 5,
-        ];
-        assert!(decode(&b, &mut |_| Ok(Object::int(0))).is_err());
+        // Two elements that both point at one array of two integers
+        // (offset 24). The body holds 5 slots, and decoding would take 7.
+        let mut b = vec![0x80, 1, 0, 44];
+        for slot in [
+            [9, 0, 0, 2, 0, 0, 0, 8],
+            [9, 0, 0, 2, 0, 0, 0, 24],
+            [9, 0, 0, 2, 0, 0, 0, 24],
+            [1, 0, 0, 0, 0, 0, 0, 5],
+            [1, 0, 0, 0, 0, 0, 0, 6],
+        ] {
+            b.extend_from_slice(&slot);
+        }
+        let err = decode(&b, &mut |_| Ok(Object::int(0))).unwrap_err();
+        assert!(err.to_string().contains("overlap"), "{err}");
     }
 
     /// Random bytes behind a valid header never panic or hang: every

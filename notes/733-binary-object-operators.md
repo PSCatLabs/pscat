@@ -42,10 +42,14 @@ bytes gs writes for 19 objects in all four formats (local only; CI has no gs).
   and immediately evaluated names (type 6) are read. Names with length 0 or 0xFFFF (system and
   user name table indices) are a `syntaxerror`.
 - **The decoder treats its input as hostile** (the scanner is a fuzz target). Every offset and
-  length is bounds-checked. Each 8-byte slot may be decoded once, so a sequence cannot decode to
-  more objects than it has bytes for, and a cycle or a shared layout is a `syntaxerror` rather
-  than a loop or an exponential blow-up. Nesting past 500 is `limitcheck` (recursion is bounded).
+  length is bounds-checked. A sequence decodes to at most one object per 8 bytes of its body (one
+  budget for the whole sequence), so a cycle or a layout that shares one array between many
+  parents runs out of budget (`syntaxerror`) rather than looping or blowing up exponentially. The
+  scanner also asks the memory limit about that much before it builds anything. Nesting past 500 is `limitcheck` (recursion is bounded).
   The lexer reads the claimed length byte by byte and never preallocates from it.
+- **Names are stored as UTF-8 text** in pscat, so a name whose bytes are not UTF-8 reads back with
+  U+FFFD in place of them and writes those bytes, which will not match gs's. That limit is pscat's
+  existing name type, not this format.
 - **A token that starts with 128 to 131 is now a sequence.** It used to start a name. A byte in
   that range inside a name is still an ordinary character (gs agrees), and the full test suite
   and selftest show no program in the repo relied on the old behaviour.

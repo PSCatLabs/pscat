@@ -979,9 +979,10 @@ impl Interp {
             /// An eexec source finished: it carried a systemdict push
             /// that ends with it.
             PopScannerAndDict,
-            /// A binary object sequence was scanned: run its top-level
-            /// objects in order, as if each had been a token (#733).
-            RunSequence(PsArray),
+            /// A binary object sequence was scanned (raw bytes): decode it
+            /// and run its top-level objects in order, as if each had been
+            /// a token (#733).
+            RunSequence(Vec<u8>),
         }
         loop {
             let action = {
@@ -1016,9 +1017,7 @@ impl Interp {
                         Some(Token::ImmediateName(n)) => {
                             Action::Yield(Item::Obj(resolve_immediate(&n, dstack)?))
                         }
-                        Some(Token::BinarySeq(bytes)) => {
-                            Action::RunSequence(PsArray::from_vec(decode_sequence(&bytes, dstack)?))
-                        }
+                        Some(Token::BinarySeq(bytes)) => Action::RunSequence(bytes),
                         Some(tok) => Action::Yield(Item::Obj(token_to_object(tok))),
                     },
                     // The element is inspected in place (one momentary
@@ -1196,7 +1195,10 @@ impl Interp {
                         self.cleanup_unwound_frame(frame);
                     }
                 }
-                Action::RunSequence(body) => self.push_proc_frame(body)?,
+                Action::RunSequence(bytes) => {
+                    let items = self.decode_sequence(&bytes)?;
+                    self.push_proc_frame(PsArray::from_vec(items))?;
+                }
             }
         }
     }
@@ -1346,6 +1348,14 @@ impl Interp {
         self.scan_one(&mut lexer)
     }
 
+    /// The top-level objects of a scanned binary object sequence (#733).
+    /// A sequence decodes to at most one object per 8 bytes, so the memory
+    /// limit is asked about that much before anything is built.
+    fn decode_sequence(&self, bytes: &[u8]) -> Result<Vec<Object>, PsError> {
+        self.check_alloc(bytes.len() / 8 * std::mem::size_of::<Object>())?;
+        decode_sequence(bytes, &self.dstack)
+    }
+
     fn scan_one(&self, lexer: &mut Lexer) -> Result<Option<(Object, usize)>, PsError> {
         let obj = match lexer.next_token()? {
             None => return Ok(None),
@@ -1354,9 +1364,7 @@ impl Interp {
             }
             Some(Token::LBrace) => scan_procedure(lexer, 0, &self.dstack)?,
             Some(Token::ImmediateName(n)) => resolve_immediate(&n, &self.dstack)?,
-            Some(Token::BinarySeq(bytes)) => {
-                Object::procedure(decode_sequence(&bytes, &self.dstack)?)
-            }
+            Some(Token::BinarySeq(bytes)) => Object::procedure(self.decode_sequence(&bytes)?),
             Some(tok) => token_to_object(tok),
         };
         Ok(Some((obj, lexer.pos())))

@@ -1184,8 +1184,9 @@ renders eight examples in both and compares block-downsampled output).
   128..=131 as `Token::BinarySeq(bytes)` and does no decoding (immediately evaluated names need
   the dictionary stack); the interpreter decodes it (`decode_sequence`) and a scanned sequence
   *runs its top-level objects as tokens* (`Action::RunSequence`, a proc frame), while `token`
-  returns the executable array. Every offset is checked, each slot decodes once (so cycles and
-  shared layouts are `syntaxerror`), nesting is capped at 500. Native formats 3/4 write as 1/2
+  returns the executable array. Every offset is checked, a sequence decodes to at most one object per 8 bytes (so cycles and
+  shared layouts run out of budget: `syntaxerror`), nesting is capped at 500, and the fuzz
+  `lexer` target decodes what the lexer frames. Native formats 3/4 write as 1/2
   (pscat is always little-endian IEEE, as Ghostscript treats it). Not done: binary tokens 132 to
   159 (single numbers, strings, system name table indices), user and system name tables. Tests:
   `tests/binobj.rs` (byte comparison against gs when installed, local only), unit tests in
