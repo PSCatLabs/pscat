@@ -690,15 +690,9 @@ fn ridgedmf2(it: &mut Interp) -> Result<(), PsError> {
         let mut sig = offset - g2(p, sx, sy)?.abs();
         sig *= sig;
         sig *= w;
-        // Comparisons, not f64::clamp: a NaN passes through as it does
-        // through the reference's `gt`/`lt`.
-        w = sig * wgain;
-        if w > 1.0 {
-            w = 1.0;
-        }
-        if w < 0.0 {
-            w = 0.0;
-        }
+        // f64::clamp is the reference's `1.0 gt`/`0.0 lt` pair: the
+        // ranges are disjoint, -0.0 stays -0.0, and a NaN passes through.
+        w = (sig * wgain).clamp(0.0, 1.0);
         Ok(sig)
     })?;
     it.push(Object::real(v));
