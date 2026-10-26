@@ -89,6 +89,10 @@ struct Options {
     /// `--allow-write DIR`, repeatable (issue #740): the directories a
     /// program may write files in. None by default.
     allow_write: Vec<String>,
+    /// `--read-root DIR` (repeatable) and `--confine-reads` (issue #763):
+    /// `Some` confines the program's reads to these directories (none: only
+    /// the embedded `lib/`). `None` by default, so reads stay open.
+    read_roots: Option<Vec<String>>,
     /// `--progress` (issue #741): a headless run prints
     /// `pscat: progress pages=N` to stderr each time a page is finished,
     /// which is how pscat-mcp's `render_status` counts pages.
@@ -130,19 +134,25 @@ impl Options {
             grid: None,
             limits: Limits::none(),
             allow_write: Vec::new(),
+            read_roots: None,
             progress: false,
             exit_with_parent: None,
         }
     }
 
-    /// Put `--max-steps`/`--max-time`/`--max-memory` and `--allow-write`
-    /// on a fresh interpreter.
+    /// Put `--max-steps`/`--max-time`/`--max-memory`, `--allow-write` and
+    /// `--read-root` on a fresh interpreter.
     fn apply_limits(&self, interp: &mut Interp) -> Result<(), String> {
         // `set_limits` refuses only when the tracking allocator is missing,
         // and this binary declares it.
         interp
             .set_limits(self.limits)
             .expect("pscat installs the tracking allocator");
+        if let Some(dirs) = &self.read_roots {
+            interp
+                .set_read_roots(dirs)
+                .map_err(|e| format!("--read-root: {e}"))?;
+        }
         interp
             .set_write_roots(&self.allow_write)
             .map_err(|e| format!("--allow-write: {e}"))
@@ -332,6 +342,10 @@ fn main() -> ExitCode {
             eprintln!(
                 "pscat: --allow-write doesn't apply to --spool (spooled jobs never write files)"
             );
+            return ExitCode::FAILURE;
+        }
+        if options.read_roots.is_some() {
+            eprintln!("pscat: --read-root/--confine-reads don't apply to --spool");
             return ExitCode::FAILURE;
         }
         let watcher = match Watcher::new(std::path::Path::new(dir)) {
@@ -1437,6 +1451,13 @@ fn parse_args() -> Result<Options, String> {
                 let dir = args.next().ok_or("missing directory after --allow-write")?;
                 options.allow_write.push(dir);
             }
+            "--read-root" => {
+                let dir = args.next().ok_or("missing directory after --read-root")?;
+                options.read_roots.get_or_insert_with(Vec::new).push(dir);
+            }
+            "--confine-reads" => {
+                options.read_roots.get_or_insert_with(Vec::new);
+            }
             "--png" => {
                 options.png = Some(args.next().ok_or("missing path after --png")?);
             }
@@ -1589,6 +1610,12 @@ fn print_usage() {
     println!("                      deletefile.");
     println!("                      Off by default; paths outside, `..` and symlinks out");
     println!("                      are invalidfileaccess. %stdout/%stderr need no flag");
+    println!("      --read-root DIR let the program read files only inside DIR (repeatable):");
+    println!("                      `(f) (r) file`, run, readreals, filenameforall. Reads are");
+    println!("                      open by default; with this, paths outside, `..` and");
+    println!("                      symlinks out are invalidfileaccess (the embedded lib/");
+    println!("                      stays readable). pscat-mcp passes it to every render");
+    println!("      --confine-reads as --read-root, with no directories: only the embedded lib/");
     println!("      --lint          check the finished run for common mistakes (implies");
     println!("                      --headless); a blank page, an unbalanced gsave, stuff");
     println!("                      left on the stack — printed to stderr, doesn't affect");
