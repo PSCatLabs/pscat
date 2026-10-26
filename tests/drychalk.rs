@@ -115,6 +115,7 @@ fn dcchalk_every_documented_parameter_changes_the_render() {
         ("Touch", "/Touch 0.4"),
         ("Landing", "/Landing 1"),
         ("Lift", "/Lift 1"),
+        ("Firm", "/Firm 1"),
         ("Vary", "/Vary 0"),
         ("Dust", "/Dust 1"),
         ("Tilt", "/Tilt 80"),
@@ -252,6 +253,43 @@ fn a_stroke_lands_heavy_and_lifts_thin() {
         "the lift ({end_w}) is not thinner than the middle ({mid_w})"
     );
     assert!(end_w > 0, "the lift ends in nothing: a point, not a floor");
+}
+
+/// #713: /Firm keeps a long stroke solid to its end and its body, where the
+/// default lift thins the last quarter of it and the middle tires. Many
+/// strokes, so one stroke's tooth can't decide it. The page is a
+/// transparent-style surface at a light touch, the case /Firm is for.
+#[test]
+fn firm_holds_a_long_stroke_to_its_end() {
+    let strokes = |extra: &str| {
+        on_board(
+            240,
+            200,
+            2.0,
+            &format!(
+                "0 1 9 {{ /k exch def newpath 20 k 18 mul 15 add moveto 220 k 18 mul 15 add \
+                 lineto << /Width 4 /Dust 0 /Vary 0 /Touch 0.34 /Seed k 100 mul {extra} >> \
+                 dcchalk }} for"
+            ),
+        )
+    };
+    let (plain, firm) = (strokes(""), strokes("/Firm 1"));
+    // the lift: device x 340..400 is 75%..90% along the stroke
+    let ground = mean(&plain, 0, 0, 20, 400);
+    let lift_plain = mean(&plain, 340, 0, 400, 400) - ground;
+    let lift_firm = mean(&firm, 340, 0, 400, 400) - ground;
+    eprintln!("lift above the ground: plain {lift_plain:.2}, firm {lift_firm:.2}");
+    assert!(
+        lift_firm > lift_plain * 1.05,
+        "/Firm's lift ({lift_firm:.2}) is no brighter than the default's ({lift_plain:.2})"
+    );
+    let body_plain = mean(&plain, 200, 0, 280, 400) - ground;
+    let body_firm = mean(&firm, 200, 0, 280, 400) - ground;
+    eprintln!("body above the ground: plain {body_plain:.2}, firm {body_firm:.2}");
+    assert!(
+        body_firm > body_plain * 1.1,
+        "/Firm's body ({body_firm:.2}) is no brighter than the default's ({body_plain:.2})"
+    );
 }
 
 /// C3: a worn stick on its side presses at the edges of its contact, so a
