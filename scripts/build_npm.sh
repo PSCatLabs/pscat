@@ -55,7 +55,15 @@ if [[ "$CARGO_VERSION" != "$NPM_VERSION" ]]; then
 fi
 
 "$ROOT/scripts/build_wasm.sh"
-cp "$ROOT/web/pscat.wasm" "$NPM/pscat.wasm"
+# Atomic, like build_wasm.sh: the temp file sits in npm/ (dotted, no `.wasm`
+# suffix) and is renamed into place; the trap removes it if the copy fails.
+NPM_WASM_TMP=""
+trap 'if [[ -n "$NPM_WASM_TMP" ]]; then rm -f "$NPM_WASM_TMP"; fi' EXIT
+NPM_WASM_TMP=$(mktemp "$NPM/.pscat.wasm.XXXXXX")
+cp "$ROOT/web/pscat.wasm" "$NPM_WASM_TMP"
+chmod a+r "$NPM_WASM_TMP"
+mv -f "$NPM_WASM_TMP" "$NPM/pscat.wasm"
+NPM_WASM_TMP=""
 cp "$ROOT/web/pscat.js" "$NPM/core.js"
 mkdir -p "$NPM/fonts" "$NPM/licenses"
 cp "$ROOT/LICENSE-MIT" "$ROOT/LICENSE-APACHE" "$ROOT/LICENSE-OFL" "$ROOT/THIRD_PARTY_NOTICES.md" "$NPM/"
