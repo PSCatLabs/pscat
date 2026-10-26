@@ -9,6 +9,7 @@
   "homepage": "https://github.com/PSCatLabs/pscat",
   "repository": "https://github.com/PSCatLabs/pscat",
   "license": "MIT OR Apache-2.0",
+  "icon": "./.claude-plugin/icon.png",
   "keywords": [
     "postscript",
     "rendering",

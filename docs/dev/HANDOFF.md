@@ -1404,6 +1404,17 @@ renders eight examples in both and compares block-downsampled output).
   #684, `notes/684-plugin-hook-script.md`).
   `scripts/codex_plugin_install_check.sh` (job `codex-install`) installs it
   with the pinned codex CLI. See `notes/569-codex-plugin.md`.
+- **The plugin icon (#683) is `plugin/.claude-plugin/icon.png`**, the
+  1024 px render of `art/logo/pscat-logo-d.ps` (command in its header;
+  512 and 48 px renders in `art/logo/renders/`). Claude's plugin.json sets
+  `icon` to it (Anthropic's directory reads that field; Claude Code
+  ignores it; it is not allowed in a marketplace entry) and Codex's
+  `extensions.com.openai.interface` points `composerIcon` and `logo` at
+  the same file. The directory takes the icon only once, at the first
+  portal save or submit, so redrawing the logo later changes the file but
+  not the listing. Never write the icon's path in backticks in the plugin
+  README or a SKILL.md: the portal holds that for review. See
+  `notes/683-plugin-icon.md`.
 - **The MCP Registry entry (#569 part c) is root `server.json`**
   (`io.github.PSCatLabs/pscat`, case-sensitive: it must match the GitHub
   owner login, the README's visible `mcp-name:` line and the OIDC grant).

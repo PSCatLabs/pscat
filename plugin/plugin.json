@@ -26,6 +26,8 @@
         "developerName": "Jerome Banks",
         "category": "Design",
         "websiteURL": "https://github.com/PSCatLabs/pscat",
+        "composerIcon": "./.claude-plugin/icon.png",
+        "logo": "./.claude-plugin/icon.png",
         "defaultPrompt": "Draw a small generative art piece in PostScript with pscat and render it to PNG."
       }
     }
