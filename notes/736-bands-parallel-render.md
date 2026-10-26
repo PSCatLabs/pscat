@@ -31,6 +31,8 @@ PostScript error, not a crash).
   would change what `clippath`/`pathbbox`-sized programs see. Fills, strokes,
   glyphs and shadings run in full in every band. That is why the stitch is
   byte-identical, anti-aliased seams included.
+- The canvas size is fixed for the run (pscat has no `setpagedevice`), so every
+  band's pages are the same size as the stitched page.
 - Multi-page: every page is banded. Bands that emit different page counts are
   an error. PNG only: `--svg`, `--pdf`, `--lint`, sweeps, `--progress` and
   `--allow-write` (every band would write the file) are refused.
@@ -45,21 +47,23 @@ bands together. A start gate holds every band until all N canvases exist, so
 each band's heap base already includes them. It is a mutex and condvar, not a
 `Barrier`, so a failed thread spawn can release the others.
 
-**Evidence** (10-core M-series laptop, 4 P-cores, median of 3, wall time, pscat
-only). A band-aware 1600x1200 fbm2 `colorimage` procedure (8 octaves) at
-280x210 pt, 150 dpi:
+**Evidence** (10-core Apple M-series laptop: 4 performance + 6 efficiency
+cores; wall time, median of 5 interleaved rounds after a warm-up round, pscat
+only). The piece is a band-aware 1600x1200 fbm2 `colorimage` procedure
+(8 octaves) at 280x210 pt, 150 dpi:
 
-| N | wall | speedup |
-|---|------|---------|
-| plain | 2.09 s | 1.00x |
-| 1 | 1.86 s | 1.12x |
-| 2 | 1.15 s | 1.82x |
-| 4 | 0.68 s | 3.08x |
-| 8 | 0.47 s | 4.41x |
+| N | wall | speedup vs plain |
+|---|------|------------------|
+| plain | 1.81 s | 1.00x |
+| 1 | 1.79 s | 1.01x |
+| 2 | 0.94 s | 1.93x |
+| 4 | 0.66 s | 2.74x |
+| 8 | 0.46 s | 3.90x |
 
-The same piece with its band check disabled (unaware): 1.80 s plain, 1.83 s at
-N=1 and 2, 2.23 s at 4, 2.95 s at 8. That is no speedup and some contention,
-as expected. Every banded PNG was byte-identical to the plain one.
+Past 4 bands the extra threads land on efficiency cores, so the curve
+flattens. The same piece with its band check disabled (unaware) gets 1.01x at
+N=1, 0.99x at 2, 0.79x at 4 and 0.61x at 8: no speedup, plus contention. Every
+banded PNG was byte-identical to the plain one.
 
 **Tests.** `tests/bands.rs` checks byte identity against the plain render for:
 - a rotated `colorimage` procedure;

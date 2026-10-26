@@ -1617,7 +1617,8 @@ fn print_usage() {
     println!("                      stitch them (1..64; PNG only). Each band runs the whole");
     println!("                      program with /BandIndex, /BandCount and /BandBBox defined,");
     println!("                      so it can skip work outside its rows; the result is");
-    println!("                      identical to a plain --png render. Steps and time limits");
+    println!("                      identical to a plain --png render unless the program");
+    println!("                      reads the clock. Steps and time limits");
     println!("                      apply per band, --max-memory to all bands together");
     println!("      --lint          check the finished run for common mistakes (implies");
     println!("                      --headless); a blank page, an unbalanced gsave, stuff");

@@ -239,9 +239,12 @@ fn render(
                 }
             }
         }
-        let mut outputs = Vec::with_capacity(handles.len());
-        for (i, handle) in handles.into_iter().enumerate() {
-            match handle.join() {
+        // Join every band before looking at any result: a handle left
+        // unjoined after a panic would make `scope` itself panic.
+        let joined: Vec<_> = handles.into_iter().map(|h| h.join()).collect();
+        let mut outputs = Vec::with_capacity(joined.len());
+        for (i, result) in joined.into_iter().enumerate() {
+            match result {
                 Ok(Ok(out)) => outputs.push(out),
                 Ok(Err(msg)) => return Err(format!("band {}/{count}: {msg}", i + 1)),
                 Err(_) => return Err(format!("band {}/{count} crashed", i + 1)),
@@ -308,10 +311,12 @@ fn run_band(
     };
     let _ = std::io::stdout().flush();
     // The pages `--png` writes, chosen as `finish_headless` chooses them.
-    let gfx = interp.gfx();
-    let mut pages: Vec<Pixmap> = gfx.pages().to_vec();
-    if pages.is_empty() || gfx.has_trailing_art() {
-        pages.push(gfx.pixmap.clone());
+    let mut pages: Vec<Pixmap> = interp.gfx().pages().to_vec();
+    if pages.is_empty() || interp.gfx().has_trailing_art() {
+        // Moved out rather than cloned: the run is over, and a band holds
+        // a whole canvas.
+        let empty = Pixmap::new(1, 1).ok_or("cannot allocate a pixmap")?;
+        pages.push(std::mem::replace(&mut interp.gfx_mut().pixmap, empty));
     }
     Ok(BandOutput { pages, error })
 }

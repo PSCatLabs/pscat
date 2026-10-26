@@ -142,7 +142,7 @@ More on the less obvious ones:
   and `--max-time` apply to each band on its own. `--max-memory` counts the
   whole process, so it caps all bands together, and each band holds its own
   canvas and pages (N times the memory of a plain render). Only the top band's
-  stdout is printed; an error is reported once, from the first band that hit
+  stdout is printed, but writes to `(%stderr)` appear once per band; an error is reported once, from the first band that hit
   it, and the stitched partial page is still written. A piece seeded from
   `realtime` or `usertime` can tear at the seams, since the bands read
   different clocks.
