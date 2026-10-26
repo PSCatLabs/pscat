@@ -653,6 +653,10 @@ renders eight examples in both and compares block-downsampled output).
   computed with PostScript's int/real promotion, so artkit's `noise2`
   (now `{ Perm .permnoise2 }` when the operator exists) stays
   bit-identical, type included (`notes/734-native-noise.md`).
+  `gallery/basin_and_range.ps` (#755) is the visible example: a shaded-relief
+  map from `fbm2`/`ridged2` through a `colorimage` procedure that reads
+  `/BandBBox` in device space (so it also holds under the 2x still), and so
+  the picture that shows a noise change (`notes/755-basin-and-range-noise-example.md`).
 - `error_report`'s `Line: N` (issue #17) is best-effort, not exact
   source attribution: no `Object` carries a source position, so it
   reports the line of the most recent token scanned directly from the
