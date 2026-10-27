@@ -128,7 +128,7 @@ fn run_cli(args: &[&std::ffi::OsStr], stdin: Option<&str>) -> std::process::Outp
             .write_all(input.as_bytes())
             .unwrap();
     }
-    child.wait_with_output().unwrap()
+    common::wait_output(child)
 }
 
 /// The CLI ends the process without tearing the interpreter down, so every

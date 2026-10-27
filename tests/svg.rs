@@ -5,6 +5,7 @@
 use pscat::Interp;
 
 mod common;
+use common::CommandDeadline as _;
 
 fn svg_pages(src: &str) -> Vec<String> {
     let mut it = Interp::with_page(100, 100).expect("test page");
@@ -408,7 +409,7 @@ fn render_svg(args: &[&str]) -> String {
         .arg("--svg")
         .arg(&out)
         .args(args)
-        .output()
+        .output_deadline()
         .expect("spawn pscat");
     assert!(
         status.status.success(),

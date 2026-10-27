@@ -26,7 +26,7 @@ fn pscat(config: &str, mode: &str, piece: &str, extra: &[&str]) -> (bool, String
         .spawn()
         .expect("spawn pscat");
     common::feed_stdin(&mut child, source.as_bytes());
-    let out = child.wait_with_output().unwrap();
+    let out = common::wait_output(child);
     (
         out.status.success(),
         String::from_utf8_lossy(&out.stdout).into_owned(),
@@ -154,7 +154,7 @@ fn a_phrase_that_cannot_fit_fails_loudly_instead_of_clipping() {
         &mut child,
         format!("/ApparelMode /draw def /ApparelPiece /Front def {cfg}").as_bytes(),
     );
-    let out = child.wait_with_output().unwrap();
+    let out = common::wait_output(child);
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("headline-run-outside-region"));
 }
@@ -182,7 +182,7 @@ fn reported_pixel_size_matches_the_render_and_manifest_escapes_controls() {
             &mut child,
             format!("/ApparelMode /{mode} def /ApparelPiece /Front def {cfg}").as_bytes(),
         );
-        let out = child.wait_with_output().unwrap();
+        let out = common::wait_output(child);
         assert!(
             out.status.success(),
             "{}",
@@ -242,7 +242,7 @@ fn manifest_names_are_valid_utf8_or_escaped() {
             &mut child,
             format!("/ApparelMode /manifest def {cfg}").as_bytes(),
         );
-        let out = child.wait_with_output().unwrap();
+        let out = common::wait_output(child);
         assert!(
             out.status.success(),
             "{}",
@@ -289,7 +289,7 @@ fn runs_cannot_escape_the_margin_or_be_empty() {
             &mut child,
             format!("/ApparelMode /{mode} def /ApparelPiece /Front def {cfg}").as_bytes(),
         );
-        let out = child.wait_with_output().unwrap();
+        let out = common::wait_output(child);
         assert!(!out.status.success(), "{mode} {runs} should fail");
         String::from_utf8_lossy(&out.stderr).into_owned()
     };
@@ -325,7 +325,7 @@ fn config_fill_options_reach_plasma_runs() {
             .expect("spawn pscat");
         let prelude = "/ApparelMode /draw def /ApparelPiece /Front def\n";
         common::feed_stdin(&mut child, format!("{prelude}{src}").as_bytes());
-        let out = child.wait_with_output().unwrap();
+        let out = common::wait_output(child);
         assert!(
             out.status.success(),
             "{}",

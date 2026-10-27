@@ -1,0 +1,569 @@
+//! Hardening after `--allow-write` (issue #762): buffered disk writes and
+//! the flush on every exit path, the open-file and write-byte caps,
+//! `fileposition`/`setfileposition`/`resetfile`, and `filenameforall` with
+//! `/` separators.
+
+mod common;
+
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+
+use pscat::{Interp, PsError};
+
+fn setup(tag: &str) -> (PathBuf, Interp) {
+    let root = common::scratch_dir(tag);
+    let mut it = Interp::with_page(50, 50).expect("page");
+    it.set_write_roots(&[&root]).expect("root exists");
+    (root, it)
+}
+
+/// A PostScript string literal for a path (no parens; `\` escaped).
+fn ps(p: &Path) -> String {
+    let s = p.to_str().unwrap();
+    assert!(!s.contains(['(', ')']), "{s}");
+    format!("({})", s.replace('\\', "\\\\"))
+}
+
+fn top(it: &mut Interp) -> String {
+    it.pop().unwrap().repr()
+}
+
+// ---- buffering and flushing -------------------------------------------------
+
+#[test]
+fn writes_are_buffered_until_a_flush() {
+    let (root, mut it) = setup("fh-buffered");
+    let path = root.join("buf.txt");
+    let f = ps(&path);
+    it.run_str(&format!("{f} (w) file /h exch def h (hello) writestring"))
+        .unwrap();
+    // Held back: nothing has reached the disk yet.
+    assert_eq!(std::fs::read(&path).unwrap(), b"");
+    // `flush` pushes every open disk file out.
+    it.run_str("flush").unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), b"hello");
+    // `flushfile` on that file, `closefile`, and `showpage` also do.
+    it.run_str("h ( one) writestring h flushfile").unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), b"hello one");
+    it.run_str("h ( two) writestring showpage").unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), b"hello one two");
+    it.run_str("h ( three) writestring h closefile").unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), b"hello one two three");
+}
+
+#[test]
+fn quit_and_a_dropped_interpreter_flush() {
+    let (root, mut it) = setup("fh-quit");
+    let f = ps(&root.join("q.txt"));
+    it.run_str(&format!("{f} (w) file (bye) writestring quit"))
+        .unwrap();
+    assert_eq!(std::fs::read(root.join("q.txt")).unwrap(), b"bye");
+
+    let (root, mut it) = setup("fh-drop");
+    let f = ps(&root.join("d.txt"));
+    it.run_str(&format!("{f} (w) file dup (kept) writestring /h exch def"))
+        .unwrap();
+    drop(it);
+    assert_eq!(std::fs::read(root.join("d.txt")).unwrap(), b"kept");
+}
+
+#[test]
+fn an_unreferenced_file_is_flushed_when_it_goes() {
+    let (root, mut it) = setup("fh-gone");
+    let f = ps(&root.join("g.txt"));
+    it.run_str(&format!("{f} (w) file (gone) writestring"))
+        .unwrap();
+    // Nothing refers to the file after the operator returns.
+    assert_eq!(std::fs::read(root.join("g.txt")).unwrap(), b"gone");
+}
+
+#[test]
+fn a_program_reads_back_what_it_wrote_without_closing() {
+    let (root, mut it) = setup("fh-readback");
+    let f = ps(&root.join("r.txt"));
+    it.run_str(&format!(
+        "{f} (w) file dup (abc) writestring pop {f} (r) file 10 string readstring"
+    ))
+    .unwrap();
+    // Fewer than 10 bytes: the substring, and `false` for "not filled".
+    assert_eq!(top(&mut it), "false");
+    assert_eq!(top(&mut it), "(abc)");
+}
+
+#[test]
+fn a_write_larger_than_the_buffer_is_whole() {
+    let (root, mut it) = setup("fh-big");
+    let f = ps(&root.join("big.bin"));
+    // 200,000 bytes in strings of 70,000 and 30,000 and one at a time.
+    it.run_str(&format!(
+        "{f} (w) file /h exch def \
+         70000 string dup 0 65 put h exch writestring \
+         h 66 write \
+         100000 string h exch writestring h closefile"
+    ))
+    .unwrap();
+    let data = std::fs::read(root.join("big.bin")).unwrap();
+    assert_eq!(data.len(), 170_001);
+    assert_eq!(data[0], 65);
+    assert_eq!(data[70_000], 66);
+}
+
+fn run_cli(args: &[&std::ffi::OsStr], stdin: Option<&str>) -> std::process::Output {
+    use std::io::Write;
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_pscat"));
+    cmd.args(args)
+        .stdin(if stdin.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = cmd.spawn().unwrap();
+    if let Some(input) = stdin {
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(input.as_bytes())
+            .unwrap();
+    }
+    common::wait_output(child).unwrap()
+}
+
+/// The CLI ends the process without tearing the interpreter down, so every
+/// exit path has to flush: a program that writes, does not close, and ends.
+#[test]
+fn the_cli_flushes_an_unclosed_file_on_every_exit_path() {
+    let root = common::scratch_dir("fh-cli");
+    let os = std::ffi::OsStr::new;
+    let allow = [os("--allow-write"), root.as_os_str()];
+    // The file is kept in userdict, which the CLI never tears down, so
+    // only an explicit flush (or the interpreter's drop) can write it.
+    let open = |name: &str| {
+        format!(
+            "{} (w) file dup (data) writestring /h exch def",
+            ps(&root.join(name))
+        )
+    };
+
+    // `-e`, the program just ends.
+    let prog = open("end.txt");
+    let out = run_cli(
+        &[allow[0], allow[1], os("--headless"), os("-e"), os(&prog)],
+        None,
+    );
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(std::fs::read(root.join("end.txt")).unwrap(), b"data");
+
+    // `quit` partway.
+    let prog = format!("{} quit 1 2 add", open("quit.txt"));
+    let out = run_cli(
+        &[allow[0], allow[1], os("--headless"), os("-e"), os(&prog)],
+        None,
+    );
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(std::fs::read(root.join("quit.txt")).unwrap(), b"data");
+
+    // An error stops the run: still flushed, exit code non-zero.
+    let prog = format!("{} 1 0 div", open("err.txt"));
+    let out = run_cli(
+        &[allow[0], allow[1], os("--headless"), os("-e"), os(&prog)],
+        None,
+    );
+    assert!(!out.status.success());
+    assert_eq!(std::fs::read(root.join("err.txt")).unwrap(), b"data");
+
+    // A program file with a PNG render.
+    let src = root.join("prog.ps");
+    std::fs::write(
+        &src,
+        format!("{} 0 0 moveto 10 10 lineto stroke", open("png.txt")),
+    )
+    .unwrap();
+    let png = root.join("o.png");
+    let out = run_cli(
+        &[
+            allow[0],
+            allow[1],
+            os("--png"),
+            png.as_os_str(),
+            src.as_os_str(),
+        ],
+        None,
+    );
+    assert!(out.status.success(), "{out:?}");
+    assert_eq!(std::fs::read(root.join("png.txt")).unwrap(), b"data");
+
+    // The REPL, ended by EOF and by `quit`.
+    for (name, end) in [("repl-eof.txt", ""), ("repl-quit.txt", "quit\n")] {
+        let line = format!("{}\n{end}", open(name));
+        let out = run_cli(&[allow[0], allow[1]], Some(&line));
+        assert!(out.status.success(), "{out:?}");
+        assert_eq!(std::fs::read(root.join(name)).unwrap(), b"data", "{name}");
+    }
+}
+
+// ---- caps ----------------------------------------------------------------
+
+#[test]
+fn the_write_byte_cap_stops_writes_and_leaves_the_file_short() {
+    let (root, mut it) = setup("fh-cap");
+    it.set_max_write_bytes(Some(10));
+    let path = root.join("c.txt");
+    let f = ps(&path);
+    it.run_str(&format!("{f} (w) file /h exch def h (123456) writestring"))
+        .unwrap();
+    // Another 6 would make 12: refused, and nothing of it is written.
+    assert_eq!(
+        it.run_str("h (abcdef) writestring"),
+        Err(PsError::Limitcheck)
+    );
+    // The rest of the allowance is still there, a byte at a time.
+    it.run_str("h 55 write h 56 write h 57 write h 48 write")
+        .unwrap();
+    assert_eq!(it.run_str("h 49 write"), Err(PsError::Limitcheck));
+    // `writehexstring` counts two bytes for each.
+    assert_eq!(
+        it.run_str("h <00> writehexstring"),
+        Err(PsError::Limitcheck)
+    );
+    // A limit error is an ordinary `limitcheck`: `stopped` catches it.
+    it.run_str("{ h (x) writestring } stopped").unwrap();
+    assert_eq!(top(&mut it), "true");
+    it.run_str("h closefile").unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), b"1234567890");
+    // Taking the cap away (or setting it again) starts afresh.
+    it.set_max_write_bytes(None);
+    it.run_str(&format!("{f} (a) file dup (more) writestring closefile"))
+        .unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), b"1234567890more");
+}
+
+#[test]
+fn a_hex_string_over_the_cap_writes_none_of_it() {
+    let (root, mut it) = setup("fh-cap-hex");
+    let path = root.join("h.txt");
+    it.set_max_write_bytes(Some(9000));
+    // 5000 bytes are 10,000 hex digits: over the cap, in more than one
+    // internal chunk, and nothing is written.
+    it.run_str(&format!(
+        "{} (w) file /h exch def h 5000 string writehexstring",
+        ps(&path)
+    ))
+    .unwrap_err();
+    it.run_str("h flushfile h closefile").unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), b"");
+    // 4000 bytes (8000 digits) fit.
+    it.run_str(&format!(
+        "{} (w) file dup 4000 string writehexstring closefile",
+        ps(&path)
+    ))
+    .unwrap();
+    assert_eq!(std::fs::read(&path).unwrap().len(), 8000);
+}
+
+#[test]
+fn reopening_a_path_does_not_resurrect_buffered_bytes() {
+    let (root, mut it) = setup("fh-reopen");
+    let path = root.join("re.txt");
+    let f = ps(&path);
+    // The first handle's pending bytes go to disk before the second open
+    // truncates, so the file ends up as the second writer left it.
+    it.run_str(&format!(
+        "{f} (w) file /a exch def a (old old old) writestring \
+         {f} (w) file /b exch def b (new) writestring b closefile a closefile"
+    ))
+    .unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), b"new");
+    // `writereals` truncates the same way.
+    it.run_str(&format!(
+        "{f} (w) file /c exch def c (zz) writestring [1] {f} writereals c closefile"
+    ))
+    .unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), 1.0f64.to_le_bytes());
+}
+
+#[test]
+fn the_write_byte_cap_covers_writereals_before_it_opens_the_file() {
+    let (root, mut it) = setup("fh-cap-reals");
+    let path = root.join("r.bin");
+    let f = ps(&path);
+    it.set_max_write_bytes(Some(40));
+    // 5 x 8 = 40 fits.
+    it.run_str(&format!("[1 2 3 4 5] {f} writereals")).unwrap();
+    assert_eq!(std::fs::read(&path).unwrap().len(), 40);
+    // No allowance left: refused up front, the target is not truncated.
+    assert_eq!(
+        it.run_str(&format!("[1] {f} writereals")),
+        Err(PsError::Limitcheck)
+    );
+    assert_eq!(std::fs::read(&path).unwrap().len(), 40);
+    // /f32 is 4 bytes a value.
+    it.set_max_write_bytes(Some(8));
+    it.run_str(&format!("[1 2] {f} /f32 writereals")).unwrap();
+    assert_eq!(std::fs::read(&path).unwrap().len(), 8);
+    assert_eq!(
+        it.run_str(&format!("[1 2 3] {f} /f32 writereals")),
+        Err(PsError::Limitcheck)
+    );
+}
+
+#[test]
+fn the_cli_caps_bytes_written() {
+    let root = common::scratch_dir("fh-cli-cap");
+    let os = std::ffi::OsStr::new;
+    let f = root.join("cap.txt");
+    let prog = format!("{} (w) file dup (0123456789) writestring closefile", ps(&f));
+    let run = |extra: &[&str]| {
+        let mut args = vec![os("--allow-write"), root.as_os_str()];
+        args.extend(extra.iter().map(|s| os(s)));
+        args.extend([os("--headless"), os("-e"), os(&prog)]);
+        run_cli(&args, None)
+    };
+    // Under the cap, as a count with a suffix, and with the default (1 GiB).
+    assert!(run(&["--max-write-bytes", "10"]).status.success());
+    assert!(run(&["--max-write-bytes", "1k"]).status.success());
+    assert!(run(&[]).status.success());
+    // Over it.
+    let out = run(&["--max-write-bytes", "9"]);
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("limitcheck"));
+    assert_eq!(std::fs::read(&f).unwrap(), b"");
+    // 0 means no cap.
+    assert!(run(&["--max-write-bytes", "0"]).status.success());
+    assert_eq!(std::fs::read(&f).unwrap(), b"0123456789");
+    // Bad values.
+    for bad in ["-1", "k", "1.5", "", "99999999999999999999", "1t"] {
+        let out = run(&["--max-write-bytes", bad]);
+        assert!(!out.status.success(), "{bad:?}");
+        assert!(
+            String::from_utf8_lossy(&out.stderr).contains("--max-write-bytes"),
+            "{bad:?}"
+        );
+    }
+    let help = run_cli(&[os("--help")], None);
+    assert!(String::from_utf8_lossy(&help.stdout).contains("--max-write-bytes N"));
+}
+
+#[test]
+fn at_most_64_output_files_are_open_at_once() {
+    let (root, mut it) = setup("fh-fds");
+    let name = |i: usize| ps(&root.join(format!("f{i}.txt")));
+    for i in 0..64 {
+        it.run_str(&format!("{} (w) file", name(i))).unwrap();
+    }
+    // 64 are open (they sit on the operand stack).
+    assert_eq!(
+        it.run_str(&format!("{} (w) file", name(64))),
+        Err(PsError::Limitcheck)
+    );
+    // The refused one truncated nothing and was never created.
+    assert!(!root.join("f64.txt").exists());
+    // Closing one makes room for exactly one.
+    it.run_str("63 index closefile").unwrap();
+    it.run_str(&format!("{} (w) file", name(64))).unwrap();
+    assert_eq!(
+        it.run_str(&format!("{} (w) file", name(65))),
+        Err(PsError::Limitcheck)
+    );
+    // The cap is on files open at once, not on files opened: an unreferenced
+    // file frees its slot, so this loop (no closefile) never hits it.
+    it.run_str("clear").unwrap();
+    for _ in 0..3 {
+        it.run_str(&format!("200 {{ {} (w) file pop }} repeat", name(0)))
+            .unwrap();
+    }
+}
+
+#[test]
+fn a_refused_open_over_the_cap_does_not_truncate_an_existing_file() {
+    let (root, mut it) = setup("fh-fds-keep");
+    let keep = root.join("keep.txt");
+    std::fs::write(&keep, b"precious").unwrap();
+    for i in 0..64 {
+        it.run_str(&format!("{} (w) file", ps(&root.join(format!("o{i}")))))
+            .unwrap();
+    }
+    assert_eq!(
+        it.run_str(&format!("{} (w) file", ps(&keep))),
+        Err(PsError::Limitcheck)
+    );
+    assert_eq!(std::fs::read(&keep).unwrap(), b"precious");
+}
+
+// ---- fileposition, setfileposition, resetfile ---------------------------------
+
+#[test]
+fn positions_of_an_input_file() {
+    let (root, mut it) = setup("fh-pos-in");
+    let path = root.join("in.txt");
+    std::fs::write(&path, b"line one\nline two\n").unwrap();
+    let f = ps(&path);
+    it.run_str(&format!(
+        "{f} (r) file /h exch def h fileposition \
+         h read pop pop h read pop pop h fileposition \
+         h 0 setfileposition h read pop pop \
+         h 5 setfileposition h 20 string readline pop h fileposition \
+         h 18 setfileposition h read \
+         h 9 setfileposition h 20 string readline pop"
+    ))
+    .unwrap();
+    // Top first: the last line, EOF at the end, where `readline` stopped,
+    // the word read from offset 5, the position after two bytes, and 0.
+    for want in ["(line two)", "false", "9", "(one)", "2", "0"] {
+        assert_eq!(top(&mut it), want);
+    }
+}
+
+#[test]
+fn input_position_errors() {
+    let (root, mut it) = setup("fh-pos-in-err");
+    let path = root.join("in.txt");
+    std::fs::write(&path, b"abc").unwrap();
+    let f = ps(&path);
+    it.run_str(&format!("{f} (r) file /h exch def")).unwrap();
+    // Past the end, and negative.
+    assert_eq!(it.run_str("h 4 setfileposition"), Err(PsError::Rangecheck));
+    assert_eq!(it.run_str("h -1 setfileposition"), Err(PsError::Rangecheck));
+    // The end itself is fine, and reads then say so.
+    it.run_str("h 3 setfileposition h read").unwrap();
+    assert_eq!(top(&mut it), "false");
+    // Wrong operand types and a missing operand.
+    assert_eq!(it.run_str("h (a) setfileposition"), Err(PsError::Typecheck));
+    assert_eq!(it.run_str("h 1.5 setfileposition"), Err(PsError::Typecheck));
+    assert_eq!(it.run_str("1 fileposition"), Err(PsError::Typecheck));
+    assert_eq!(
+        it.run_str("clear fileposition"),
+        Err(PsError::StackUnderflow)
+    );
+    assert_eq!(
+        it.run_str("clear 1 setfileposition"),
+        Err(PsError::StackUnderflow)
+    );
+    assert_eq!(it.run_str("clear 1 resetfile"), Err(PsError::Typecheck));
+    // Closed: ioerror for the position operators, nothing for `resetfile`.
+    it.run_str("h closefile").unwrap();
+    assert_eq!(it.run_str("h fileposition"), Err(PsError::Io));
+    assert_eq!(it.run_str("h 0 setfileposition"), Err(PsError::Io));
+    it.run_str("h resetfile").unwrap();
+}
+
+#[test]
+fn files_without_a_position_are_ioerror() {
+    let mut it = Interp::with_page(50, 50).unwrap();
+    for src in [
+        "(%stdout) (w) file fileposition",
+        "(%stderr) (w) file fileposition",
+        "(%stdout) (w) file 0 setfileposition",
+        "(414243) 0 setfileposition",
+    ] {
+        let r = it.run_str(src);
+        assert!(
+            matches!(r, Err(PsError::Io) | Err(PsError::Typecheck)),
+            "{src}: {r:?}"
+        );
+    }
+    // A decode filter has none.
+    assert_eq!(
+        it.run_str("(414243>) /ASCIIHexDecode filter fileposition"),
+        Err(PsError::Io)
+    );
+    assert_eq!(
+        it.run_str("(414243>) /ASCIIHexDecode filter 0 setfileposition"),
+        Err(PsError::Io)
+    );
+    // `resetfile` on them is accepted and does nothing.
+    it.run_str("(%stdout) (w) file resetfile (414243>) /ASCIIHexDecode filter resetfile")
+        .unwrap();
+}
+
+#[test]
+fn positions_of_an_output_file() {
+    let (root, mut it) = setup("fh-pos-out");
+    let path = root.join("out.txt");
+    let f = ps(&path);
+    it.run_str(&format!(
+        "{f} (w) file /h exch def h fileposition h (hello) writestring h fileposition \
+         h 2 setfileposition h (XY) writestring h fileposition \
+         h 5 setfileposition h (!) writestring h fileposition"
+    ))
+    .unwrap();
+    assert_eq!(top(&mut it), "6");
+    assert_eq!(top(&mut it), "4");
+    assert_eq!(top(&mut it), "5");
+    assert_eq!(top(&mut it), "0");
+    // Past the end would leave a hole: rangecheck (and negative).
+    assert_eq!(it.run_str("h 7 setfileposition"), Err(PsError::Rangecheck));
+    assert_eq!(it.run_str("h -1 setfileposition"), Err(PsError::Rangecheck));
+    it.run_str("h closefile").unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), b"heXYo!");
+    assert_eq!(it.run_str("h fileposition"), Err(PsError::Io));
+}
+
+#[test]
+fn an_append_file_writes_at_its_end() {
+    let (root, mut it) = setup("fh-pos-app");
+    let path = root.join("app.txt");
+    std::fs::write(&path, b"abc").unwrap();
+    let f = ps(&path);
+    it.run_str(&format!(
+        "{f} (a) file /h exch def h 0 setfileposition h (Z) writestring h closefile"
+    ))
+    .unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), b"abcZ");
+}
+
+#[test]
+fn resetfile_discards_the_buffered_bytes() {
+    let (root, mut it) = setup("fh-reset");
+    let path = root.join("reset.txt");
+    let f = ps(&path);
+    it.run_str(&format!(
+        "{f} (w) file /h exch def h (kept) writestring h flushfile \
+         h (dropped) writestring h resetfile h (+) writestring h closefile"
+    ))
+    .unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), b"kept+");
+    // An input file is unchanged by it.
+    std::fs::write(&path, b"abcdef").unwrap();
+    it.run_str(&format!(
+        "{f} (r) file /i exch def i read pop pop i resetfile i read pop pop i fileposition"
+    ))
+    .unwrap();
+    assert_eq!(top(&mut it), "2");
+}
+
+#[test]
+fn currentfile_can_be_rewound() {
+    // A program that loops by seeking back in its own source.
+    let mut it = Interp::with_page(50, 50).unwrap();
+    it.run_str(
+        "/n 0 def\n\
+         currentfile fileposition\n\
+         /n n 1 add def\n\
+         n 3 lt { dup currentfile exch setfileposition } if\n\
+         pop n",
+    )
+    .unwrap();
+    assert_eq!(top(&mut it), "3");
+}
+
+// ---- filenameforall with `/` ----------------------------------------------------
+
+#[test]
+fn filenameforall_takes_forward_slashes_in_an_absolute_template() {
+    let root = common::scratch_dir("fh-fnfa");
+    std::fs::write(root.join("a.txt"), b"x").unwrap();
+    std::fs::write(root.join("b.txt"), b"x").unwrap();
+    std::fs::write(root.join("c.dat"), b"x").unwrap();
+    // `/` on every platform, a Windows drive letter included.
+    let base = root.to_str().unwrap().replace('\\', "/");
+    assert!(!base.contains(['(', ')', '*', '?']), "{base}");
+    let mut it = Interp::with_page(50, 50).unwrap();
+    it.run_str(&format!(
+        "[ ({base}/*.txt) {{ dup length string copy }} 400 string filenameforall ]"
+    ))
+    .unwrap();
+    assert_eq!(top(&mut it), format!("[({base}/a.txt) ({base}/b.txt)]"));
+}

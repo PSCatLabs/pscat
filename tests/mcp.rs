@@ -3,6 +3,7 @@
 //! way an MCP client would.
 
 mod common;
+use common::CommandDeadline as _;
 
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
@@ -13,6 +14,8 @@ use serde_json::{Value, json};
 struct Server {
     child: Child,
     reader: BufReader<ChildStdout>,
+    /// Kills a hung server after the shared deadline (see `tests/common`).
+    watchdog: Option<common::Watchdog>,
 }
 
 /// Every environment variable `pscat-mcp` reads for a limit (#756).
@@ -74,7 +77,13 @@ impl Server {
             .spawn()
             .expect("spawn pscat-mcp");
         let reader = BufReader::new(child.stdout.take().expect("stdout"));
-        Server { child, reader }
+        // A hung server fails the test (EOF on `reader`) instead of hanging it.
+        let watchdog = Some(common::Watchdog::new(&child, common::default_deadline()));
+        Server {
+            child,
+            reader,
+            watchdog,
+        }
     }
 
     fn send_raw(&mut self, bytes: &[u8]) {
@@ -149,6 +158,7 @@ impl Server {
 
 impl Drop for Server {
     fn drop(&mut self) {
+        drop(self.watchdog.take()); // before the pid is reaped
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
@@ -985,7 +995,7 @@ fn run_server(args: &[&str], env: &[(&str, &str)]) -> std::process::Output {
     cmd.envs(env.iter().copied())
         .args(args)
         .stdin(Stdio::null())
-        .output()
+        .output_deadline()
         .unwrap()
 }
 
@@ -1040,7 +1050,7 @@ fn a_bad_allow_read_is_a_startup_error() {
         .arg("--allow-read")
         .arg(&missing)
         .stdin(Stdio::null())
-        .output()
+        .output_deadline()
         .unwrap();
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("--allow-read"));
@@ -1646,7 +1656,7 @@ fn the_cap_flags_reject_values_out_of_range() {
             .args(args)
             .current_dir(common::scratch_dir("mcp-badflag"))
             .stdin(Stdio::null())
-            .output()
+            .output_deadline()
             .expect("run pscat-mcp");
         assert!(!out.status.success(), "{args:?} must be refused");
         assert!(out.stdout.is_empty(), "{args:?}: nothing on stdout");
@@ -1757,7 +1767,7 @@ fn version_flag_prints_the_crate_version_and_exits_without_serving() {
             .arg(flag)
             .current_dir(common::scratch_dir("mcp-version"))
             .stdin(Stdio::null())
-            .output()
+            .output_deadline()
             .expect("run pscat-mcp");
         assert!(out.status.success(), "{flag} must exit 0");
         assert_eq!(String::from_utf8_lossy(&out.stdout), want, "{flag}");
@@ -1986,7 +1996,7 @@ fn cli_sheet(tag: &str, files: &[(&str, &str)], flags: &[&[&str]]) -> (Vec<u8>, 
         std::fs::write(dir.join(name), source).unwrap();
         cmd.args(*flags).arg(name);
     }
-    let out = cmd.output().expect("run pscat sheet");
+    let out = cmd.output_deadline().expect("run pscat sheet");
     (
         std::fs::read(dir.join("cli.png")).expect("the sheet"),
         out.status.success(),
@@ -2046,7 +2056,7 @@ fn review_sheet_is_byte_identical_to_pscat_sheet() {
                 "b.ps",
             ])
             .args(["--dpi", "40", "--label", "program 3", "c.ps"])
-            .output()
+            .output_deadline()
             .unwrap();
         assert!(
             out.status.success(),

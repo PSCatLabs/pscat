@@ -5,6 +5,7 @@
 //! `src/read_roots.rs`; `pscat-mcp`'s defaults are in `tests/mcp.rs`.
 
 mod common;
+use common::CommandDeadline as _;
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -154,7 +155,7 @@ fn a_root_must_exist() {
 fn pscat(args: &[&str]) -> (bool, String, String) {
     let out = Command::new(env!("CARGO_BIN_EXE_pscat"))
         .args(args)
-        .output()
+        .output_deadline()
         .expect("run pscat");
     (
         out.status.success(),

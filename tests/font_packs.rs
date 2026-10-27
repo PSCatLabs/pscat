@@ -9,6 +9,7 @@
 //! precedence tests use a face name the checkout does not have.
 
 mod common;
+use common::CommandDeadline as _;
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -42,7 +43,7 @@ fn pscat(home: &Path, args: &[&str]) -> (bool, String, String) {
         .env_remove("PSCAT_ROOT")
         .env_remove("PSCAT_LIB")
         .env_remove("APPDATA")
-        .output()
+        .output_deadline()
         .expect("run pscat");
     (
         out.status.success(),
@@ -283,7 +284,7 @@ fn pscat_bare(home: &Path, args: &[&str]) -> (bool, String, String) {
         .env_remove("PSCAT_ROOT")
         .env_remove("PSCAT_LIB")
         .env_remove("APPDATA")
-        .output()
+        .output_deadline()
         .expect("run pscat");
     (
         out.status.success(),

@@ -7,14 +7,14 @@
 //! be handed a loop through their arguments (every value is validated or
 //! escaped), so those tests stand a library in for `lib/` through
 //! `$PSCAT_LIB` whose files are `{ } loop`: a real runaway, which nothing but
-//! a limit (or the watchdog below, which fails the test instead of letting
-//! it hang) can end.
+//! a limit (or the shared child deadline in `tests/common`, which fails the
+//! test instead of letting it hang) can end.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
-use std::time::{Duration, Instant};
 
 mod common;
+use common::CommandDeadline as _;
 
 const PSCAT: &str = env!("CARGO_BIN_EXE_pscat");
 
@@ -43,7 +43,8 @@ fn runaway_lib(dir: &Path) -> PathBuf {
 }
 
 /// Run `pscat <args>` in `dir`, killed (and the test failed) if it has not
-/// ended in 60 s: a limit that stops working must fail, not hang CI.
+/// ended by the shared deadline (`common::default_deadline`): a limit that
+/// stops working must fail, not hang CI.
 fn pscat_with(dir: &Path, lib: Option<&Path>, args: &[&str]) -> Output {
     let mut cmd = Command::new(PSCAT);
     cmd.args(args)
@@ -57,20 +58,8 @@ fn pscat_with(dir: &Path, lib: Option<&Path>, args: &[&str]) -> Output {
     if let Some(lib) = lib {
         cmd.env("PSCAT_LIB", lib);
     }
-    let started = Instant::now();
-    let mut child = cmd.spawn().expect("run pscat");
-    loop {
-        if child.try_wait().expect("wait").is_some() {
-            break;
-        }
-        if started.elapsed() > Duration::from_secs(60) {
-            let _ = child.kill();
-            let _ = child.wait();
-            panic!("pscat {args:?} was not stopped by its limit within 60 s");
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
-    child.wait_with_output().expect("output")
+    // A hung child is killed (it and its descendants) and fails the test.
+    cmd.output_deadline().expect("run pscat")
 }
 
 fn stderr(out: &Output) -> String {

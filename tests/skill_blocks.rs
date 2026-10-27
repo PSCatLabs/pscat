@@ -143,7 +143,7 @@ fn run_bare(tag: &str, code: &str) -> Run {
         .unwrap()
         .write_all(code.as_bytes())
         .expect("write program");
-    let out = child.wait_with_output().expect("wait for pscat");
+    let out = common::wait_output(child);
     Run {
         ok: out.status.success(),
         stdout: String::from_utf8_lossy(&out.stdout).into_owned(),

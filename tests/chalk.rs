@@ -15,6 +15,7 @@ use pscat::chalk::{self, Config, Format};
 use tiny_skia::Pixmap;
 
 mod common;
+use common::CommandDeadline as _;
 
 const PSCAT: &str = env!("CARGO_BIN_EXE_pscat");
 
@@ -35,11 +36,14 @@ fn pscat(dir: &Path, args: &[&str], stdin: Option<&[u8]>) -> Output {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     match stdin {
-        None => cmd.stdin(Stdio::null()).output().expect("run pscat"),
+        None => cmd
+            .stdin(Stdio::null())
+            .output_deadline()
+            .expect("run pscat"),
         Some(bytes) => {
             let mut child = cmd.stdin(Stdio::piped()).spawn().expect("spawn pscat");
             common::feed_stdin(&mut child, bytes);
-            child.wait_with_output().expect("wait pscat")
+            common::wait_output(child)
         }
     }
 }

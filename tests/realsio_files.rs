@@ -3,6 +3,7 @@
 //! in `tests/realsio.rs`.
 
 mod common;
+use common::CommandDeadline as _;
 
 use std::path::{Path, PathBuf};
 
@@ -398,7 +399,7 @@ fn cli_appends_and_flushes_at_exit() {
         .arg("--allow-write")
         .arg(&root)
         .args(["--headless", "-e", &prog])
-        .output()
+        .output_deadline()
         .unwrap();
     assert!(out.status.success(), "{out:?}");
     assert_eq!(
@@ -411,7 +412,7 @@ fn cli_appends_and_flushes_at_exit() {
         .arg(&root)
         .args(["--headless", "-e"])
         .arg(format!("{p} /all readreals length =", p = ps(&f)))
-        .output()
+        .output_deadline()
         .unwrap();
     assert_eq!(String::from_utf8_lossy(&out.stdout), "4\n");
 }

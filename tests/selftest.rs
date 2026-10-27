@@ -38,6 +38,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 mod common;
+use common::CommandDeadline as _;
 
 const BIN: &str = env!("CARGO_BIN_EXE_pscat");
 
@@ -130,7 +131,7 @@ impl MutatedLib {
         );
         let out = Command::new(BIN)
             .args(["--headless", "-e", &program])
-            .output()
+            .output_deadline()
             .expect("run pscat");
         (
             out.status.success(),
@@ -154,7 +155,7 @@ fn selftest(path: &Path) -> std::process::Output {
     Command::new(BIN)
         .arg("--selftest")
         .arg(path)
-        .output()
+        .output_deadline()
         .expect("run pscat --selftest")
 }
 
@@ -687,7 +688,7 @@ fn block_discovery_agrees_with_the_parser_about_strings() {
     let listed = Command::new(BIN)
         .arg("--selftest-list")
         .arg(&file)
-        .output()
+        .output_deadline()
         .expect("run pscat --selftest-list");
     assert!(listed.status.success());
     assert!(
@@ -699,7 +700,7 @@ fn block_discovery_agrees_with_the_parser_about_strings() {
     let real = Command::new(BIN)
         .arg("--selftest-list")
         .arg(repo_root().join("lib/artkit.ps"))
-        .output()
+        .output_deadline()
         .expect("run pscat --selftest-list");
     assert!(real.status.success());
     assert!(
@@ -794,7 +795,7 @@ fn discovery_reports_a_parse_error_rather_than_no_blocks() {
     let out = Command::new(BIN)
         .arg("--selftest-list")
         .arg(&file)
-        .output()
+        .output_deadline()
         .expect("run pscat --selftest-list");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(!out.status.success(), "{stderr}");
@@ -1047,7 +1048,7 @@ fn lint_strict(path: &Path, page: &str) -> std::process::Output {
         .arg("--lint-strict")
         .arg(path)
         .current_dir(repo_root())
-        .output()
+        .output_deadline()
         .expect("run pscat --lint-strict")
 }
 
@@ -1154,7 +1155,7 @@ fn plain_lint_stays_advisory() {
     let out = Command::new(BIN)
         .arg("--lint")
         .arg(&blank)
-        .output()
+        .output_deadline()
         .expect("run pscat");
     assert!(out.status.success(), "plain --lint must not fail the run");
     assert!(
@@ -1166,7 +1167,7 @@ fn plain_lint_stays_advisory() {
     let strict = Command::new(BIN)
         .arg("--lint-strict")
         .arg(&blank)
-        .output()
+        .output_deadline()
         .expect("run pscat");
     assert!(!strict.status.success(), "--lint-strict must fail it");
 }

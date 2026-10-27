@@ -292,7 +292,7 @@ fn pscat(args: &[&str], stdin: &str) -> (bool, String, String) {
         .expect("stdin")
         .write_all(stdin.as_bytes())
         .expect("feed stdin");
-    let out = child.wait_with_output().expect("wait");
+    let out = common::wait_output(child);
     (
         out.status.success(),
         String::from_utf8_lossy(&out.stdout).into_owned(),

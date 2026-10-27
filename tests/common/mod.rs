@@ -205,3 +205,270 @@ pub fn within_cpu_budget<T>(
     );
     value
 }
+
+// ---------------------------------------------------------------------
+// Child-process deadlines (issue #841)
+//
+// A test that spawns pscat / pscat-mcp must never wait on it without a
+// deadline: a child that does not exit (a regression in the limits, or a
+// test written before the feature exists) blocks `wait_with_output()`
+// forever, and if the runner is interrupted the orphan keeps spinning
+// (one ran for 2.8 days). Every spawn in the suite goes through here.
+//
+// * `Command` extension methods stand in for `output()` / `status()`:
+//   `output_deadline()` / `status_deadline()` use `DEADLINE` (120 s, or
+//   `PSCAT_TEST_DEADLINE_SECS`), the `*_within(d)` forms take a per-call
+//   deadline. They return `io::Result` like std (a spawn error is still an
+//   `Err`); a deadline is a panic, after the child has been killed.
+// * `wait_with_deadline(child, d)` is the same for a child the test spawned
+//   itself (and fed with `feed_stdin`).
+// * `Watchdog` guards a long-lived, interactive child (the MCP server).
+//
+// On the deadline the child's descendants are killed too (pscat-mcp runs
+// every render in a pscat child of its own), found by parent pid with
+// `pgrep -P`, never by a name pattern. The child stays in the test run's
+// process group on purpose: a Ctrl-C of `cargo test` still reaches it.
+// std only, plus `libc` (already a dev-dependency) for the descendant kill.
+// ---------------------------------------------------------------------
+
+use std::process::{Child, Command, ExitStatus, Output, Stdio};
+use std::time::Instant;
+
+/// Default deadline for one child. Generous: it exists to stop a hang, not
+/// to time a render, and a loaded machine (several gates at once) is slow.
+/// `PSCAT_TEST_DEADLINE_SECS` overrides it for every call that does not
+/// pass its own.
+pub fn default_deadline() -> Duration {
+    std::env::var("PSCAT_TEST_DEADLINE_SECS")
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+        .filter(|s| s.is_finite() && *s > 0.0)
+        .map(Duration::from_secs_f64)
+        .unwrap_or(Duration::from_secs(120))
+}
+
+/// `pid` and every process below it, found with `pgrep -P` (a no-op where
+/// there is no pgrep). Parent pids only, so no other run's process matches.
+#[cfg(unix)]
+fn descendants(pid: u32) -> Vec<u32> {
+    let mut found = Vec::new();
+    let mut todo = vec![pid];
+    while let Some(p) = todo.pop() {
+        let Ok(out) = Command::new("pgrep").args(["-P", &p.to_string()]).output() else {
+            break;
+        };
+        for kid in String::from_utf8_lossy(&out.stdout)
+            .split_whitespace()
+            .filter_map(|s| s.parse::<u32>().ok())
+        {
+            found.push(kid);
+            todo.push(kid);
+        }
+    }
+    found
+}
+
+/// SIGKILL `pid` and its descendants (the descendants are listed first:
+/// once the parent dies they are re-parented and can no longer be found).
+#[cfg(unix)]
+fn kill_tree(pid: u32) {
+    let kids = descendants(pid);
+    for p in std::iter::once(pid).chain(kids) {
+        // SAFETY: plain signal send to a pid we spawned or found below it.
+        unsafe { libc::kill(p as libc::pid_t, libc::SIGKILL) };
+    }
+}
+
+#[cfg(not(unix))]
+fn kill_tree(_pid: u32) {}
+
+fn describe(cmd: &str) -> String {
+    let one_line = cmd.replace('\n', "\\n");
+    if one_line.chars().count() > 300 {
+        let head: String = one_line.chars().take(300).collect();
+        format!("{head}...")
+    } else {
+        one_line
+    }
+}
+
+/// Kill `child` (and what it spawned), reap it, and fail the test.
+fn kill_and_panic(child: &mut Child, what: &str, deadline: Duration) -> ! {
+    kill_tree(child.id());
+    let _ = child.kill();
+    let _ = child.wait();
+    panic!(
+        "child still running after its {deadline:?} deadline, killed: {}",
+        describe(what)
+    );
+}
+
+/// Poll `try_wait` until the child exits or `deadline` passes. The sleep
+/// grows with the elapsed time (1 ms up to 25 ms), so a short run is
+/// noticed within about a millisecond and a long one costs little.
+fn poll_exit(child: &mut Child, what: &str, deadline: Duration) -> ExitStatus {
+    let start = Instant::now();
+    loop {
+        if let Some(status) = child.try_wait().expect("try_wait") {
+            return status;
+        }
+        let elapsed = start.elapsed();
+        if elapsed >= deadline {
+            kill_and_panic(child, what, deadline);
+        }
+        let nap = (elapsed / 10).clamp(Duration::from_millis(1), Duration::from_millis(25));
+        std::thread::sleep(nap.min(deadline - elapsed));
+    }
+}
+
+/// Drain a pipe on its own thread so a full pipe can never stall the child.
+fn drain<R: std::io::Read + Send + 'static>(pipe: Option<R>) -> std::sync::mpsc::Receiver<Vec<u8>> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(mut p) = pipe {
+            let _ = p.read_to_end(&mut buf);
+        }
+        let _ = tx.send(buf);
+    });
+    rx
+}
+
+/// Collect a drained pipe. After a normal exit the pipe is at EOF, so this
+/// returns at once; the bound only matters if a leaked grandchild still
+/// holds the pipe open.
+fn collect(rx: std::sync::mpsc::Receiver<Vec<u8>>) -> Vec<u8> {
+    rx.recv_timeout(Duration::from_secs(10)).unwrap_or_default()
+}
+
+/// `Child::wait_with_output` with a deadline. `child` must have been spawned
+/// with whatever stdout/stderr it should have; piped ones are read on
+/// threads while the child runs. A piped stdin still in `child.stdin` is
+/// closed first (feed it with `feed_stdin` beforehand, which takes it).
+/// Panics, after killing the child, when it has not exited by `deadline`.
+pub fn wait_with_deadline(mut child: Child, deadline: Duration) -> Output {
+    wait_with_deadline_named(&mut child, "(spawned by the test)", deadline)
+}
+
+/// `wait_with_deadline(child, default_deadline())`.
+pub fn wait_output(child: Child) -> Output {
+    wait_with_deadline(child, default_deadline())
+}
+
+fn wait_with_deadline_named(child: &mut Child, what: &str, deadline: Duration) -> Output {
+    drop(child.stdin.take());
+    let out = drain(child.stdout.take());
+    let err = drain(child.stderr.take());
+    let status = poll_exit(child, what, deadline);
+    Output {
+        status,
+        stdout: collect(out),
+        stderr: collect(err),
+    }
+}
+
+/// Drop-in replacements for `Command::output` / `status` that cannot hang.
+pub trait CommandDeadline {
+    /// Like `output()` (stdin null, stdout and stderr captured), killed after
+    /// `deadline`.
+    fn output_within(&mut self, deadline: Duration) -> std::io::Result<Output>;
+    /// `output_within(default_deadline())`.
+    fn output_deadline(&mut self) -> std::io::Result<Output> {
+        self.output_within(default_deadline())
+    }
+    /// Like `output_within`, with `input` written to the child's stdin (on a
+    /// thread, then closed). A child that exits without reading it is fine.
+    fn output_with_input_within(
+        &mut self,
+        input: &[u8],
+        deadline: Duration,
+    ) -> std::io::Result<Output>;
+    /// `output_with_input_within(input, default_deadline())`.
+    fn output_with_input(&mut self, input: &[u8]) -> std::io::Result<Output> {
+        self.output_with_input_within(input, default_deadline())
+    }
+    /// Like `status()` (stdio as configured, inherited by default), killed
+    /// after `deadline`.
+    fn status_within(&mut self, deadline: Duration) -> std::io::Result<ExitStatus>;
+    /// `status_within(default_deadline())`.
+    fn status_deadline(&mut self) -> std::io::Result<ExitStatus> {
+        self.status_within(default_deadline())
+    }
+}
+
+impl CommandDeadline for Command {
+    fn output_within(&mut self, deadline: Duration) -> std::io::Result<Output> {
+        let what = format!("{self:?}");
+        self.stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut child = self.spawn()?;
+        Ok(wait_with_deadline_named(&mut child, &what, deadline))
+    }
+
+    fn output_with_input_within(
+        &mut self,
+        input: &[u8],
+        deadline: Duration,
+    ) -> std::io::Result<Output> {
+        let what = format!("{self:?}");
+        self.stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut child = self.spawn()?;
+        let mut stdin = child.stdin.take().expect("stdin is piped");
+        let input = input.to_vec();
+        // On a thread: a child that fills its stdout pipe before it has read
+        // all of a large input must not deadlock against this write. A child
+        // that exits early closes the pipe (BrokenPipe), which is its
+        // business: the caller asserts on status and stderr (issue #630).
+        std::thread::spawn(move || {
+            use std::io::Write;
+            let _ = stdin.write_all(&input);
+        });
+        Ok(wait_with_deadline_named(&mut child, &what, deadline))
+    }
+
+    fn status_within(&mut self, deadline: Duration) -> std::io::Result<ExitStatus> {
+        let what = format!("{self:?}");
+        let mut child = self.spawn()?;
+        Ok(poll_exit(&mut child, &what, deadline))
+    }
+}
+
+/// A deadline for a child the test talks to while it runs (the MCP server,
+/// whose replies are read with a blocking `read_line`). When `deadline`
+/// passes before the guard is dropped, the child and its descendants are
+/// killed: the test's pipe reads then see EOF and it fails instead of
+/// hanging. Keep the guard in the struct that owns the child and drop it
+/// before reaping the child (so a reaped pid is never signalled).
+pub struct Watchdog {
+    cancel: Option<std::sync::mpsc::Sender<()>>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Watchdog {
+    pub fn new(child: &Child, deadline: Duration) -> Watchdog {
+        let (cancel, rx) = std::sync::mpsc::channel::<()>();
+        let pid = child.id();
+        let thread = std::thread::spawn(move || {
+            if rx.recv_timeout(deadline) == Err(std::sync::mpsc::RecvTimeoutError::Timeout) {
+                eprintln!("watchdog: child {pid} still running after {deadline:?}, killing it");
+                kill_tree(pid);
+            }
+        });
+        Watchdog {
+            cancel: Some(cancel),
+            thread: Some(thread),
+        }
+    }
+}
+
+impl Drop for Watchdog {
+    fn drop(&mut self) {
+        drop(self.cancel.take()); // wakes the thread at once
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+    }
+}

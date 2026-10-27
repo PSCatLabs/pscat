@@ -16,6 +16,7 @@
 use pscat::Interp;
 
 mod common;
+use common::CommandDeadline as _;
 
 const LIBS: [&str; 2] = ["lib/typewriter_outlines.ps", "lib/typewriter.ps"];
 
@@ -454,7 +455,7 @@ fn script(args: &[&str], dir: &std::path::Path) -> std::process::Output {
         .args(args)
         .current_dir(dir)
         .stdin(std::process::Stdio::null())
-        .output()
+        .output_deadline()
         .expect("run typewrite.sh")
 }
 
