@@ -157,7 +157,7 @@ pub fn cpu_time_of<T>(f: impl FnOnce() -> T) -> (T, Duration) {
 /// The budgets are stated for `--profile ci` (optimised, 0.25-0.7 s of
 /// CPU for a render the 2 s DRYMEDIA cap covers). A plain dev-profile
 /// `cargo test` runs the same PostScript 11-18x slower (the typewriter strip up to
-/// 35x on a loaded machine), measured on the five tests that used to fail there, so the unscaled budgets failed
+/// 35x on a loaded machine), measured on the four CPU-budget tests that used to fail there, so the unscaled budgets failed
 /// deterministically, not just under load. Dev builds get the budget
 /// times this factor: the render still runs and the check still bites on
 /// a catastrophic regression (a quadratic walk, a lost early exit), it

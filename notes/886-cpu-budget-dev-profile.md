@@ -7,7 +7,9 @@ A plain `cargo test` failed `landscape_cookbook` (forest 6.6 s of 5 s),
 `--profile ci` (optimised), where the same renders take 0.03-0.5 s, and a
 dev build runs 11-18x slower (the strip test up to 35x loaded). The fifth, a child-pipe deadline in
 `block_discovery_agrees_with_the_parser_about_strings`, passes in 0.3 s on a
-quiet machine; it only missed the 60 s wall deadline on a loaded one.
+quiet machine and did not reproduce here; #881 reports it failed on a loaded
+machine without the failure text, so the 3x deadline is a precaution (it
+was not shown to be the cause).
 
 **Choice.** Scale, not skip. In an unoptimised build `within_cpu_budget`
 multiplies its absolute budget by `UNOPTIMISED_BUDGET_FACTOR` (20, above
