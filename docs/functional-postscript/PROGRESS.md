@@ -29,3 +29,21 @@
   baseline count including its own key, and executable trace-label retrieval.
   Regression tests pin each relevant behavior.
 - Next: finish rendered art comparisons, docs/skill and offline HTML validation.
+
+## Phase D — reproducible visual demonstration
+
+- `examples/functional/` contains the shared drawing vocabulary, functional and
+  imperative drivers, primitive sheet, detail and numeric benchmark.
+- Rendered seven actual local PNGs under assets/, including three colourways.
+  Visually inspected Ultraviolet, Sunprint, Blue Hour, vocabulary and detail.
+- Native regression test compares all three full RGBA buffers with imperative
+  controls and committed PNGs. Default trace/count/checksum: garden / 13 / 622.
+- New behavioral suite now 24 tests, all pass. Existing full `cargo test
+  --profile ci` passed outside sandbox; sandbox-only first failure was an
+  existing pgrep visibility control, not a functional library failure.
+- Paired five-sample CPU data in MEASUREMENTS.json identifies input hashes and
+  build/platform. Numeric safety/snapshot overhead ~5.2x; poster medians similar.
+  Driver non-comment lines: 19 functional, 24 imperative, excluding shared code.
+- `scripts/functional_demo.py render` regenerates art and hash manifest;
+  `benchmark` records raw samples and synchronizes the HTML's rounded medians.
+- Full clippy passed; all library selftests and strict rendering drivers passed.

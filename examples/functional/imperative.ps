@@ -1,0 +1,31 @@
+%!PS-Adobe-3.0
+%%Title: Chromatic Bloom — imperative control
+%%BoundingBox: 0 0 720 960
+%%Pages: 1
+%%EndComments
+% Same drawing procedures, geometry, selection, seed and call order.
+% No functional or aspect library. Changes to drawing vocabulary are shared.
+(examples/functional/common.ps) run
+/flowers 25 array def /used 0 def /checksum 0 def /calls 0 def
+0 1 24 {
+  df-site /record exch def
+  record df-visible {
+    flowers used record put /used used 1 add def
+    /checksum checksum record df-weight def
+  } if
+} for
+/flowers flowers 0 used getinterval def
+(enter garden\n) print
+df-ground
+Layer 2 ge {
+  flowers {
+    dup df-palette df-stem
+    /calls calls 1 add def
+    df-palette df-flower
+  } forall
+} if
+Layer 3 ge {df-type} if
+(leave garden\n) print
+(flowers=) print calls =
+(radius-checksum=) print checksum =
+showpage

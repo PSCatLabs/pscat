@@ -1,0 +1,28 @@
+%!PS-Adobe-3.0
+%%Title: Chromatic Bloom — Functional PostScript
+%%BoundingBox: 0 0 720 960
+%%Pages: 1
+%%EndComments
+% From repo root: pscat --page 720x960 --png bloom.png examples/functional/poster.ps
+(lib/functional.ps) run
+(lib/aspect.ps) run
+(examples/functional/common.ps) run
+
+/indices [0 1 24 {} for] def
+/flowers indices {df-site} fp-map {df-visible} fp-filter def
+/checksum flowers 0 {df-weight} fp-fold def
+/visits << /Calls 0 >> def
+
+% A preserved record flows through stem, then flower. Colour is captured data.
+/stem df-palette {df-stem} fp-curry def
+/blossom df-palette {df-flower} fp-curry visits aop-count def
+/draw {dup} /stem load fp-compose /blossom load fp-compose def
+/score {
+  df-ground
+  Layer 2 ge {flowers /draw load fp-each} if
+  Layer 3 ge {df-type} if
+} (garden) aop-trace def
+score
+(flowers=) print visits /Calls get =
+(radius-checksum=) print checksum =
+showpage

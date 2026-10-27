@@ -330,3 +330,44 @@ fn trace_treats_executable_string_labels_as_data() {
         b"enter never_execute_this\nleave never_execute_this\n"
     );
 }
+
+#[test]
+fn poster_variations_match_the_imperative_control_and_committed_renders() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut variations = Vec::new();
+    for (style, name) in ["ultraviolet", "sunprint", "blue-hour"].iter().enumerate() {
+        let mut pair = Vec::new();
+        for driver in ["poster", "imperative"] {
+            let mut it = Interp::with_page(720, 960).expect("poster page");
+            it.capture_stdout();
+            it.run_str(&format!(
+                "/Style {style} def (examples/functional/{driver}.ps) run"
+            ))
+            .unwrap_or_else(|e| panic!("{driver}/{style}: {}", it.error_report(&e)));
+            assert_eq!(it.dict_stack_len(), 2);
+            assert!(it.operand_stack().is_empty());
+            assert_eq!(
+                it.captured_stdout(),
+                b"enter garden\nleave garden\nflowers=13\nradius-checksum=622\n"
+            );
+            pair.push(it.gfx().pixmap.data().to_vec());
+        }
+        assert_eq!(
+            pair[0], pair[1],
+            "{name}: functional/imperative pixels differ"
+        );
+        let golden = tiny_skia::Pixmap::load_png(
+            root.join(format!("docs/functional-postscript/assets/{name}.png")),
+        )
+        .expect("committed poster render");
+        assert_eq!(
+            pair[0],
+            golden.data(),
+            "{name}: re-render and inspect an intentional change"
+        );
+        variations.push(pair.remove(0));
+    }
+    assert_ne!(variations[0], variations[1]);
+    assert_ne!(variations[1], variations[2]);
+    assert_ne!(variations[0], variations[2]);
+}
