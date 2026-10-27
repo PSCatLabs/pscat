@@ -10,8 +10,11 @@ names, and a name-keyed dict could come out of `forall` in another order:
 differed between a plain render and `--bands 1` (now
 `tests/bands.rs` `band_names_do_not_shift_the_programs_name_ids`, which fails
 without the fix). A program that never mentions the band names was shifted
-by 3 too; that case happened to keep its order (a shift of 3 rotates the
-table by one bucket) but is in the test as a guard.
+by 3 too; that case happened to keep its order for this dict shape, so it
+is in the PNG test only as a guard. `src/name.rs`
+`the_band_preamble_leaves_the_programs_ids_alone` checks the ids themselves
+(the next new name's id after the program, with and without the preamble),
+for both cases, and fails without the fix.
 
 ## Fix: detached interning (`src/name.rs`)
 
@@ -23,7 +26,8 @@ table by one bucket) but is in the test as a guard.
 sequential table, at the slot a plain run would have used for that name
 there, and keeps returning the detached id. Every later name then gets the
 same id as in a plain run. `lookup` and `resolve` never take the slot (they
-are not the program interning a name). The mode flag is restored by a drop
+are not the program interning a name), and neither does a repeat mention
+inside `detached` (a preamble that names a name twice). The mode flag is restored by a drop
 guard, so an error or panic inside the preamble can't leave it on.
 `bands::run_band` wraps the preamble's `run_source` in it. That's the only
 change in `bands.rs`.

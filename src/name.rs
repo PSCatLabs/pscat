@@ -113,7 +113,8 @@ impl Interner {
         }
         let (text, pending) = &mut self.detached[(id - DETACHED_BASE) as usize];
         let text = text.clone();
-        if std::mem::take(pending) {
+        // Inside `detached` a repeat mention is still the preamble's.
+        if !self.detaching && std::mem::take(pending) {
             self.by_id.push(text.clone());
         }
         PsName { id, text }
@@ -266,6 +267,51 @@ mod tests {
             assert_eq!(intern_rc("BandIndex".into()), band);
             assert_eq!(intern("c-868").id(), base + 3);
         });
+    }
+
+    #[test]
+    fn a_repeat_mention_inside_detached_takes_no_slot() {
+        on_fresh_thread(|| {
+            let base = intern("base-868").id();
+            detached(|| {
+                intern("foo-868");
+                intern("foo-868");
+            });
+            assert_eq!(intern("next-868").id(), base + 1);
+        });
+    }
+
+    /// The id the next new name gets after `program` runs in a fresh
+    /// interpreter on a fresh thread, with or without the band preamble.
+    fn next_id_after(program: &'static str, preamble: bool) -> u32 {
+        std::thread::spawn(move || {
+            let mut interp = crate::Interp::new();
+            if preamble {
+                let band = b"/BandIndex 0 def /BandCount 1 def /BandBBox [0 0 612 792] def";
+                detached(|| interp.run_source(band)).expect("preamble");
+            }
+            interp.run_source(program.as_bytes()).expect("program");
+            intern("probe-868").id()
+        })
+        .join()
+        .expect("test thread")
+    }
+
+    /// #868: a program's names get the same ids with the band preamble as
+    /// without, whether it mentions a band name partway through or never.
+    #[test]
+    fn the_band_preamble_leaves_the_programs_ids_alone() {
+        for program in [
+            "/early 1 def /BandIndex where { pop } if /later 2 def (made) cvn pop",
+            "/early 1 def /BandCount pop /BandBBox pop /BandIndex pop /later 2 def",
+            "/early 1 def /later 2 def",
+        ] {
+            assert_eq!(
+                next_id_after(program, true),
+                next_id_after(program, false),
+                "{program}"
+            );
+        }
     }
 
     #[test]
