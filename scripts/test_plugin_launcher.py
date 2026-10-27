@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Tests for the plugin's pscat-mcp launcher (plugin/scripts/pscat-mcp.sh, #853).
+"""Tests for the plugin's pscat-mcp launcher (plugin/scripts/pscat-mcp.sh, #853)
+and its entry point plugin/scripts/pscat-mcp, which the manifests and the hook
+run (#866). The Windows twin has its own tests: test_plugin_launcher_windows.py.
 
     python3 scripts/test_plugin_launcher.py
 
@@ -15,6 +17,7 @@ import hashlib
 import io
 import json
 import os
+import pathlib
 import shutil
 import subprocess
 import sys
@@ -24,6 +27,8 @@ import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LAUNCHER = os.path.join(ROOT, "plugin", "scripts", "pscat-mcp.sh")
+ENTRY = os.path.join(ROOT, "plugin", "scripts", "pscat-mcp")
+HOOKS = os.path.join(ROOT, "plugin", "hooks", "hooks.json")
 TRIPLES = ("aarch64-apple-darwin", "x86_64-apple-darwin",
            "aarch64-unknown-linux-musl", "x86_64-unknown-linux-musl")
 TAG = "v9.9.9-rc.1"
@@ -45,18 +50,19 @@ class Launcher(unittest.TestCase):
     shell = ["sh"]
 
     def setUp(self):
-        self.tmp = tempfile.mkdtemp()
+        self.tmp = tempfile.mkdtemp(prefix="pscat t\u00e9st \u0141 ")  # a space and a non-ASCII letter
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.plugin = self.path("plugin")
         os.makedirs(self.path("plugin/scripts"))
         shutil.copy(LAUNCHER, self.path("plugin/scripts/pscat-mcp.sh"))
+        shutil.copy(ENTRY, self.path("plugin/scripts/pscat-mcp"))  # keeps the exec bit
         self.pin(TAG)
         self.release = self.path("release")
         self.cache = self.path("cache")
         os.makedirs(self.path("home"))
         os.makedirs(self.path("empty"))
         self.make_release(TAG, VERSION)
-        self.base_url = "file://" + self.release
+        self.base_url = pathlib.Path(self.release).as_uri()  # percent-encoded
 
     def path(self, rel):
         return os.path.join(self.tmp, rel)
@@ -241,6 +247,30 @@ class Launcher(unittest.TestCase):
         self.assertNotIn("systemMessage", out)
         self.assertIn(d + "/pscat", out["hookSpecificOutput"]["additionalContext"])
         self.assertIsNone(hook(self.env([self.fake_install("9.9.9")])))
+
+    def test_entry_point_passes_through(self):
+        # What the manifests run (#866): exec'd directly, it hands over to
+        # pscat-mcp.sh with the arguments and stdout untouched.
+        entry = self.path("plugin/scripts/pscat-mcp")
+        r = subprocess.run([entry, "a b", "--c"], env=self.env(), capture_output=True, text=True,
+                           timeout=60, stdin=subprocess.DEVNULL, cwd=self.path("empty"))
+        self.assertEqual((r.returncode, r.stdout), (0, f"{MARKER} a b --c\n"), r.stderr)
+        r = subprocess.run([entry, "--locate"], env=self.env(), capture_output=True, text=True,
+                           timeout=60, stdin=subprocess.DEVNULL, cwd=self.path("empty"))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(os.path.isdir(os.path.join(r.stdout.strip(), "lib")))
+
+    def test_hook_command_from_hooks_json(self):
+        # The command string exactly as the agent runs it: ${CLAUDE_PLUGIN_ROOT}
+        # substituted, then given to the shell (sh -c on macOS and Linux).
+        with open(HOOKS) as f:
+            cmd = json.load(f)["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+        cmd = cmd.replace("${CLAUDE_PLUGIN_ROOT}", self.plugin)
+        r = subprocess.run([*self.shell, "-c", cmd], env=self.env(), capture_output=True,
+                           text=True, timeout=60, stdin=subprocess.DEVNULL, cwd=self.path("empty"))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("downloads it", json.loads(r.stdout)["systemMessage"])
+        self.assertFalse(os.path.exists(os.path.join(self.cache, TAG)), "the hook must not download")
 
     def test_pin_with_release_version_matches_plain_asset_names(self):
         self.pin("v9.9.11")

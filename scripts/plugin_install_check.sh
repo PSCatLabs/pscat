@@ -9,8 +9,10 @@
 # 1. `claude plugin validate --strict` on the marketplace and on plugin/skills/.
 # 2. `plugin marketplace add <this checkout>` + `plugin install pscat@pscat`.
 # 3. The installed copy holds the three skills as real files, the shared
-#    hooks/hooks.json, the launcher scripts/pscat-mcp.sh and its release pin
-#    pscat-release, and nothing else of the repo (plugin/ also carries the
+#    hooks/hooks.json, the launcher scripts/pscat-mcp.sh, its entry point
+#    scripts/pscat-mcp (executable) with the Windows twin pscat-mcp.cmd and
+#    pscat-mcp.ps1 (#866), and its release pin pscat-release, and nothing
+#    else of the repo (plugin/ also carries the
 #    Codex manifest and mcp.json; scripts/codex_plugin_install_check.sh). The
 #    hook command from the installed hooks.json is run with
 #    CLAUDE_PLUGIN_ROOT set: it says pscat will be downloaded on a PATH
@@ -58,6 +60,10 @@ for s in pscat psart psviz; do
 done
 [ -f "$copy/hooks/hooks.json" ] && ok "installed copy has hooks/hooks.json" || bad "installed copy lacks hooks/hooks.json"
 [ -f "$copy/scripts/pscat-mcp.sh" ] && ok "installed copy has scripts/pscat-mcp.sh (mode $(ls -l "$copy/scripts/pscat-mcp.sh" | cut -c1-10))" || bad "installed copy lacks scripts/pscat-mcp.sh"
+[ -x "$copy/scripts/pscat-mcp" ] && ok "installed copy has scripts/pscat-mcp, executable (mode $(ls -l "$copy/scripts/pscat-mcp" | cut -c1-10))" || bad "installed copy lacks an executable scripts/pscat-mcp"
+for f in pscat-mcp.cmd pscat-mcp.ps1; do
+    [ -f "$copy/scripts/$f" ] && ok "installed copy has scripts/$f" || bad "installed copy lacks scripts/$f"
+done
 [ -f "$copy/pscat-release" ] && ok "installed copy has pscat-release ($(grep -v '^#' "$copy/pscat-release"))" || bad "installed copy lacks pscat-release"
 extra=$(cd "$copy" && find . -mindepth 1 -maxdepth 1 ! -name skills ! -name .claude-plugin ! -name README.md \
     ! -name hooks ! -name scripts ! -name pscat-release ! -name plugin.json ! -name mcp.json)

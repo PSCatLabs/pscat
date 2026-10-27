@@ -1,8 +1,9 @@
 # Claude Code and Codex plugins (issue #569): the marketplaces in
 # .claude-plugin/ and .agents/plugins/, and the one plugin directory both
 # install, plugin/ (the skills as real files, the pscat-mcp server config and
-# the shared hooks/hooks.json, and the pscat-mcp launcher scripts/pscat-mcp.sh
-# with its release pin pscat-release, #853).
+# the shared hooks/hooks.json, and the pscat-mcp launcher: the entry point
+# scripts/pscat-mcp, scripts/pscat-mcp.sh with its release pin pscat-release,
+# #853, and the Windows twin pscat-mcp.cmd/.ps1, #866).
 #
 # manifests: scripts/plugin_check.py and its tests (python3 only): the
 #   plugin's version equals Cargo.toml's, every path resolves inside the
@@ -42,6 +43,9 @@ on:
       - "scripts/plugin_check.py"
       - "scripts/test_plugin_check.py"
       - "scripts/test_plugin_launcher.py"
+      - "scripts/test_plugin_launcher_windows.py"
+      - "scripts/plugin_install_check_windows.py"
+      - ".gitattributes"
       - "scripts/fake_plugin_release.py"
       - "scripts/plugin_install_check.sh"
       - "scripts/codex_plugin_install_check.sh"
@@ -58,6 +62,9 @@ on:
       - "scripts/plugin_check.py"
       - "scripts/test_plugin_check.py"
       - "scripts/test_plugin_launcher.py"
+      - "scripts/test_plugin_launcher_windows.py"
+      - "scripts/plugin_install_check_windows.py"
+      - ".gitattributes"
       - "scripts/fake_plugin_release.py"
       - "scripts/plugin_install_check.sh"
       - "scripts/codex_plugin_install_check.sh"
@@ -123,3 +130,32 @@ jobs:
         run: cargo build --profile ci --bin pscat --bin pscat-mcp
       - name: Install the plugin into a throwaway Codex home
         run: ./scripts/codex_plugin_install_check.sh target/ci
+
+  # The Windows twin (#866): the manifests name the extensionless
+  # scripts/pscat-mcp, which Windows hosts resolve to pscat-mcp.cmd (and that
+  # to pscat-mcp.ps1). The launcher's Windows tests against a fake release
+  # served over local HTTP, with a real pscat-mcp.exe speaking MCP through
+  # the .cmd; then the real Claude Code and Codex CLIs install the plugin
+  # and start its server (scripts/plugin_install_check_windows.py).
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master; toolchain below
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: Install the Claude Code and Codex CLIs (pinned)
+        run: npm install -g @anthropic-ai/claude-code@2.1.301 @openai/codex@0.163.0
+      - name: Build pscat and pscat-mcp
+        run: cargo build --profile ci --bin pscat --bin pscat-mcp
+      - name: Launcher tests (fake local release, no network)
+        run: python scripts/test_plugin_launcher_windows.py target/ci
+      - name: Install the plugin with Claude Code and Codex
+        run: python scripts/plugin_install_check_windows.py target/ci

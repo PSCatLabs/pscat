@@ -1,0 +1,30 @@
+#!/bin/sh
+# pscat plugin launcher entry point (issue #866). The plugin manifests and the
+# SessionStart hook run this file, scripts/pscat-mcp with no extension, so one
+# entry works on every OS:
+#
+#   macOS, Linux     the host runs this file (it needs its exec bit), which
+#                    hands over to pscat-mcp.sh, the launcher itself (#853)
+#   Windows          the host finds pscat-mcp.cmd beside it instead (Claude
+#                    Code through cross-spawn, Codex through the which crate,
+#                    PowerShell by PATHEXT), which runs pscat-mcp.ps1
+#   Git Bash, MSYS2  runs this file, which hands over to pscat-mcp.ps1
+#
+# Arguments, stdin and stdout pass through untouched (stdout is the MCP
+# channel); see pscat-mcp.sh for the modes (--locate, --hook).
+HERE=$(cd "$(dirname "$0")" 2>/dev/null && pwd -P) || HERE=$(dirname "$0")
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*)
+    ps1=$(cygpath -w "$HERE/pscat-mcp.ps1" 2>/dev/null) || ps1=$HERE/pscat-mcp.ps1
+    run_ps1() {
+      env -u PSModulePath powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$ps1" "$@" </dev/null
+    }
+    case "${1:-}" in
+      --hook|--locate) run_ps1 "$@"; exit $? ;;
+    esac
+    # The server's path, as UTF-8 (what Git Bash reads).
+    exe=$(run_ps1 --exe-utf8 | tr -d '\r') && [ -n "$exe" ] || exit 1
+    exe=$(cygpath -u "$exe" 2>/dev/null || printf '%s' "$exe")
+    exec "$exe" "$@" ;;
+esac
+exec sh "$HERE/pscat-mcp.sh" "$@"
