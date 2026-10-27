@@ -216,7 +216,7 @@ pub fn within_cpu_budget<T>(
 // (one ran for 2.8 days). Every spawn in the suite goes through here.
 //
 // * `Command` extension methods stand in for `output()` / `status()`:
-//   `output_deadline()` / `status_deadline()` use `DEADLINE` (120 s, or
+//   `output_deadline()` / `status_deadline()` use `default_deadline()` (60 s, or
 //   `PSCAT_TEST_DEADLINE_SECS`), the `*_within(d)` forms take a per-call
 //   deadline. They return `io::Result` like std (a spawn error is still an
 //   `Err`); a deadline is a panic, after the child has been killed.
@@ -229,6 +229,9 @@ pub fn within_cpu_budget<T>(
 // `pgrep -P`, never by a name pattern. The child stays in the test run's
 // process group on purpose: a Ctrl-C of `cargo test` still reaches it.
 // std only, plus `libc` (already a dev-dependency) for the descendant kill.
+// Windows: the descendant kill and `Watchdog` are no-ops there (the child
+// itself is still killed by `output_*`/`status_*`/`wait_*`); only the unix
+// runners (Linux, macOS) gate merges.
 // ---------------------------------------------------------------------
 
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
@@ -244,7 +247,7 @@ pub fn default_deadline() -> Duration {
         .and_then(|v| v.parse::<f64>().ok())
         .filter(|s| s.is_finite() && *s > 0.0)
         .map(Duration::from_secs_f64)
-        .unwrap_or(Duration::from_secs(120))
+        .unwrap_or(Duration::from_secs(60))
 }
 
 /// `pid` and every process below it, found with `pgrep -P` (a no-op where

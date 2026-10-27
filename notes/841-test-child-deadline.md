@@ -32,8 +32,8 @@ Details that matter:
 - The child stays in the runner's process group on purpose. `process_group(0)`
   would stop Ctrl-C of `cargo test` from reaching it, which is the other way
   the original leak happened.
-- Default 120 s: it exists to stop a hang, not to time a render, and gates run
-  with load averages above 30. `PSCAT_TEST_DEADLINE_SECS` overrides it.
+- Default 60 s: it exists to stop a hang, not to time a render, and gates run
+  with load averages above 30 (a slow render is far under it). `PSCAT_TEST_DEADLINE_SECS` overrides it.
 
 ## Scope
 
@@ -54,6 +54,12 @@ backgrounds the runaway proves grandchildren die too. Large stdin/stdout/stderr
 transfers prove there is no pipe deadlock. A scan test fails on a raw
 `wait_with_output()` or an undeadlined `Command::new(<pscat binary>)` `.output()`
 / `.status()`.
+
+## Windows
+
+`kill_tree` and `Watchdog` are no-ops off unix (no `pgrep`/`libc::kill`); the
+`output_*`/`status_*`/`wait_*` helpers still kill the direct child there.
+`tests/child_deadline.rs` is `#![cfg(unix)]`. Only the unix runners gate merges.
 
 ## Not solved
 

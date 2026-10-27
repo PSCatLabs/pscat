@@ -80,6 +80,8 @@ fn control_pgrep_sees_a_running_runaway() {
         .stdin(Stdio::null())
         .spawn()
         .expect("spawn pscat");
+    // Even the control must not be able to leak: kill it if this test hangs.
+    let _watchdog = common::Watchdog::new(&child, Duration::from_secs(30));
     std::thread::sleep(Duration::from_millis(300));
     assert!(child.try_wait().unwrap().is_none(), "the runaway ended");
     assert!(!alive(&marker).is_empty(), "pgrep cannot see the marker");

@@ -106,7 +106,7 @@ predates it.
   `common::wait_output(child)` replaces `wait_with_output()`, and
   `common::Watchdog::new(&child, ..)` guards an interactive child (the MCP
   `Server`). Each has a `*_within(duration)` form for a per-call deadline. The
-  default is 120 s (`PSCAT_TEST_DEADLINE_SECS` overrides it); a hang kills the
+  default is 60 s (`PSCAT_TEST_DEADLINE_SECS` overrides it); a hang kills the
   child and its descendants and fails the test with the command in the message.
   `tests/child_deadline.rs` proves it and scans for raw calls.
 - **Timing assertions in `tests/` measure CPU time, never wall time**
