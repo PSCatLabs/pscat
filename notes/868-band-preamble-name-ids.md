@@ -62,5 +62,10 @@ note on hashing userdict).
 
 ## Verification
 
-Identity corpus, two binaries (main vs this branch), plain renders
-byte-identical. Banded renders match plain at `--bands 2` and `--bands 4`.
+`scripts/identity_check.sh` with two binaries (base = main at 457cbfc, head =
+this branch), `--loader lib/artkit.ps` plus every `examples/*.ps`: 150 of 150
+page renders across 118 files identical, plain, `--bands 2` and `--bands 4`.
+The plain run has no negative control (plain behaviour is unchanged by
+design, so nothing can differ); the banded runs use the repro as the
+control, and it differs between the binaries, as it must. Banded-equals-plain
+is checked by `tests/bands.rs`.
