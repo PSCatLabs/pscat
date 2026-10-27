@@ -1546,6 +1546,11 @@ renders eight examples in both and compares block-downsampled output).
   - Recognise an operator by its registered name (`runs_operator`),
     never by `fn_addr_eq`: function addresses are not unique, and a trial
     fusion matched in the test binary but never in the release build.
+    The same rule holds everywhere: `eq`/`ne` on operators and an
+    operator as a dictionary key go by `Operator::name` too (#881,
+    `notes/881-operator-identity-by-name.md`). Several operators share one
+    function body (`readonly`/`noaccess`), so address identity was wrong
+    even in a build where addresses were stable.
   - The literal reaches the plain loop as `ProcStep::Op(proc_literal_op)`,
     with no arm of its own: a new arm in `step_n_inner` cost every element
     about 5 instructions.

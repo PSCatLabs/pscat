@@ -818,7 +818,10 @@ enum ExoticKey {
     /// Arrays/strings-as-array-likes by identity: (storage ptr, off, len).
     ArrayId(usize, usize, usize),
     DictId(usize),
-    OperatorId(usize),
+    /// An operator by the name it is registered under, never by its
+    /// function's address (#881): addresses are not unique or stable, and
+    /// operators may share one function body.
+    OperatorName(&'static str),
     FileId(usize),
     SaveId(usize),
     GStateId(usize),
@@ -849,7 +852,7 @@ fn classify_key(key: &Object) -> Result<KeyClass, PsError> {
             KeyClass::Exotic(ExoticKey::ArrayId(p, o, l))
         }
         Value::Dict(d) => KeyClass::Exotic(ExoticKey::DictId(Rc::as_ptr(d) as usize)),
-        Value::Operator(op) => KeyClass::Exotic(ExoticKey::OperatorId(op.func as usize)),
+        Value::Operator(op) => KeyClass::Exotic(ExoticKey::OperatorName(op.name)),
         Value::File(f) => KeyClass::Exotic(ExoticKey::FileId(Rc::as_ptr(f) as usize)),
         Value::Save(h) => KeyClass::Exotic(ExoticKey::SaveId(Rc::as_ptr(h) as usize)),
         Value::GState(g) => KeyClass::Exotic(ExoticKey::GStateId(Rc::as_ptr(g) as usize)),

@@ -38,7 +38,11 @@ fn objects_equal(a: &Object, b: &Object) -> bool {
         (Name(n), String(s)) | (String(s), Name(n)) => n.as_bytes() == &s.borrow_bytes()[..],
         (Array(x), Array(y)) => x.same_object(y),
         (Dict(x), Dict(y)) => Rc::ptr_eq(x, y),
-        (Operator(x), Operator(y)) => std::ptr::fn_addr_eq(x.func, y.func),
+        // By registered name, never by function address: addresses are
+        // neither unique nor stable (identical-code folding, per-profile
+        // codegen), and operators that share one function body
+        // (`readonly`/`noaccess`) are different operators (#881).
+        (Operator(x), Operator(y)) => x.name == y.name,
         (File(x), File(y)) => Rc::ptr_eq(x, y),
         (Save(x), Save(y)) => Rc::ptr_eq(x, y),
         (GState(x), GState(y)) => Rc::ptr_eq(x, y),
