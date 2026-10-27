@@ -1,0 +1,163 @@
+%!PS-Adobe-3.0
+%%Title: Functional PostScript — explicit quotations and array combinators
+%%EndComments
+% Contracts and examples: docs/functional-postscript/API.md.
+% All public names start fp-. Load in the dictionary that should own them.
+% Callbacks run in the caller's dictionary, with no private operands.
+% Captures and results are shallow: composite objects retain PS aliasing.
+
+%%SelfTest: functional-input-contracts
+% { (abc) {} fp-map } /fp-array-required (string sequence) mustguard
+% { {1 2} {} fp-map } /fp-literal-array-required (procedure sequence) mustguard
+% { [] [] fp-map } /fp-quotation-required (literal callback) mustguard
+% { [] /pop load fp-map } /fp-quotation-required (operator callback) mustguard
+% { {} [] fp-compose } /fp-quotation-required (second quotation) mustguard
+% { [] {} fp-compose } /fp-quotation-required (first quotation) mustguard
+% { 1 [] fp-curry } /fp-quotation-required (curry quotation) mustguard
+% { 1 [] fp-dip } /fp-quotation-required (dip quotation) mustguard
+% { [] [] fp-filter } /fp-quotation-required (filter quotation) mustguard
+% { [] 0 [] fp-fold } /fp-quotation-required (fold quotation) mustguard
+% { [] [] fp-each } /fp-quotation-required (each quotation) mustguard
+%%EndSelfTest
+% @internal
+/fp--array {
+  dup type dup /arraytype eq exch /packedarraytype eq or not
+    { fp-array-required } if
+  dup xcheck { fp-literal-array-required } if
+} bind def
+
+% @internal
+/fp--quote {
+  dup type dup /arraytype eq exch /packedarraytype eq or
+  1 index xcheck and not { fp-quotation-required } if
+} bind def
+
+% compose ( p q -- composed ), execution order is p then q.
+% Nested arrays preserve quotation boundaries; no copy or bind of user code.
+% @kind: Procedure
+% @summary: Compose two quotations in left-to-right execution order.
+% @example: 3 { 1 add } { 2 mul } fp-compose exec
+/fp-compose {
+  //fp--quote exec exch //fp--quote exec exch
+  2 dict begin
+  /fp.q exch def /fp.p exch def
+  [ /fp.p load /exec load /fp.q load /exec load ] cvx
+  end
+} bind def
+
+% curry ( value q -- partial ). Box the value so executable names/strings
+% remain data. Inserting such values directly in a procedure would run them.
+% @kind: Procedure
+% @summary: Capture one value explicitly and push it before calling a quotation.
+% @example: [1 2 3] 10 { add } fp-curry fp-map
+/fp-curry {
+  //fp--quote exec
+  2 dict begin
+  /fp.q exch def /fp.value exch def
+  [ /fp.value load 1 array astore /aload load /pop load
+    /fp.q load /exec load ] cvx
+  end
+} bind def
+
+% dip ( ... value q -- ... value ); value is absent while q runs.
+% @kind: Procedure
+% @summary: Execute a quotation below one temporarily hidden operand.
+% @example: 2 3 /saved { add } fp-dip
+/fp-dip {
+  //fp--quote exec exch {} //fp-curry exec
+  //fp-compose exec exec
+} bind def
+
+% State is only on the dictionary stack between callbacks. Every helper
+% closes it, including the named-guard paths in collect.
+% @internal
+/fp--prepare {
+  fp.mode /fold eq { /fp.acc load } if
+  fp.seq fp.i get
+  end
+} bind def
+
+%%SelfTest: functional-callback-contracts
+% { [1] {} fp-each } /fp-callback-stack-effect (each leaves a value) mustguard
+% { [1] {dup} fp-map } /fp-callback-stack-effect (map leaves two) mustguard
+% { [1] {pop} fp-map } /fp-callback-stack-effect (map leaves none) mustguard
+% { [1] {pop 1} fp-filter } /fp-predicate-must-return-boolean (predicate type) mustguard
+% { [1] 0 {pop pop} fp-fold } /fp-callback-stack-effect (fold loses accumulator) mustguard
+% { [1] {pop exit} fp-each } /fp-callback-exit-not-supported (exit skips collection) mustguard
+%%EndSelfTest
+% @internal
+/fp--collect {
+  count fp.base fp.mode /each eq { 0 } { 1 } ifelse add ne
+    { end fp-callback-stack-effect } if
+  fp.mode /filter eq {
+    dup type /booleantype ne { end fp-predicate-must-return-boolean } if
+    { fp.out fp.used fp.seq fp.i get put /fp.used fp.used 1 add def } if
+  } if
+  fp.mode /map eq { fp.out fp.i 3 -1 roll put } if
+  fp.mode /fold eq { /fp.acc exch def } if
+  /fp.i fp.i 1 add def
+  end
+} bind def
+
+% @internal
+/fp--finish {
+  fp.i fp.seq length ne { end fp-callback-exit-not-supported } if
+  fp.mode /map eq { fp.out } if
+  fp.mode /filter eq { fp.out 0 fp.used getinterval } if
+  fp.mode /fold eq { /fp.acc load } if
+  end
+} bind def
+
+% ( array initial q mode -- result? ). The generated loop captures a
+% per-invocation frame, so nested and repeated invocations cannot overwrite it.
+% Snapshot the sequence slots, not their contents: callback edits to the
+% original source cannot change later visitation; nested objects still alias.
+% @internal
+/fp--walk {
+  12 dict begin
+  /fp.mode exch def /fp.q exch def /fp.acc exch def
+  dup length array copy /fp.seq exch def
+  count /fp.base exch def /fp.i 0 def /fp.used 0 def
+  /fp.out fp.mode /map eq fp.mode /filter eq or
+    { fp.seq length array } { null } ifelse def
+  [ fp.seq length [
+      currentdict /begin load //fp--prepare /exec load
+      /fp.q load /exec load
+      currentdict /begin load //fp--collect /exec load
+    ] cvx /repeat load
+    currentdict /begin load //fp--finish /exec load
+  ] cvx
+  end exec
+} bind def
+
+% @kind: Procedure
+% @summary: Return a fresh shallow array of one result per input, callback x -- y.
+% @example: [1 2 3] { dup mul } fp-map
+/fp-map {
+  //fp--quote exec exch //fp--array exec exch
+  null exch /map //fp--walk exec
+} bind def
+
+% @kind: Procedure
+% @summary: Select input values in order using a callback x -- boolean.
+% @example: [1 2 3 4] { 2 mod 0 eq } fp-filter
+/fp-filter {
+  //fp--quote exec exch //fp--array exec exch
+  null exch /filter //fp--walk exec
+} bind def
+
+% @kind: Procedure
+% @summary: Left fold with an explicit identity, callback accumulator x -- accumulator.
+% @example: [1 2 3] 0 { add } fp-fold
+/fp-fold {
+  //fp--quote exec 3 -1 roll //fp--array exec 3 1 roll
+  /fold //fp--walk exec
+} bind def
+
+% @kind: Procedure
+% @summary: Visit array values in order for effects, callback x -- with balanced stack.
+% @example: [1 2 3] { = } fp-each
+/fp-each {
+  //fp--quote exec exch //fp--array exec exch
+  null exch /each //fp--walk exec
+} bind def

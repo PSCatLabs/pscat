@@ -14,3 +14,18 @@
 - Baseline `cargo build --locked`: PASS.
 - Next: implement and validate pure-PostScript primitives, decorators, then demo,
   detailed docs, skill, offline HTML and final review handoff.
+
+## Phases B/C — functional and aspect libraries
+
+- Added seven functional procedures and five explicit decorators, with existing
+  capability tags and the embedded loader; no Rust engine or dependency changes.
+- Traversals use per-call execution captures and shallow slot snapshots.
+  Rejected a self-referential frame/body layout to avoid an Rc cycle.
+- 23 Rust behavioral tests pass, including native/Ghostscript stdout agreement
+  with real packed quotations. Existing capability tests: 21/21 pass.
+- Four PS self-test blocks pass; strict-lint rendering driver is clean.
+- API.md records type, stack, mutation, errors and limitations for every API.
+- Fixed implementation mistakes during development: quotation construction order,
+  baseline count including its own key, and executable trace-label retrieval.
+  Regression tests pin each relevant behavior.
+- Next: finish rendered art comparisons, docs/skill and offline HTML validation.

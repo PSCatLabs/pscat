@@ -24,3 +24,5 @@ lib/mathkit.ps
 lib/typewriter.ps
 lib/released.ps
 lib/etching.ps
+lib/functional.ps
+lib/aspect.ps

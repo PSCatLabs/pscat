@@ -1,0 +1,19 @@
+% Same stdout in PSCat and real Ghostscript; check packed procedures too.
+true setpacking
+[1 2 3] {dup mul} fp-map ==
+[1 2 3 4] {2 mod 0 eq} fp-filter ==
+[1 2 3] 20 {sub} fp-fold ==
+[[1 2] [] [3]] {{1 add} fp-map} fp-map ==
+3 {1 add} {2 mul} fp-compose exec ==
+[1 2] 10 {add} fp-curry fp-map ==
+/undefined_capture cvx {} fp-curry exec xcheck ==
+(undefined_capture) cvx {} fp-curry exec type ==
+2 3 /saved {add} fp-dip == ==
+/owner currentdict def /total 0 def
+[1 2 3] {currentdict owner eq not {wrong_dictionary} if total add /total exch def} fp-each
+total ==
+/c << /Calls 0 >> def
+/q {2 mul} c aop-count (double) aop-trace def
+3 q == 4 q == c /Calls get ==
+3 {2 mul} {exec 1 add} aop-around exec ==
+/a [1 2 3] def a {a 1 99 put} fp-map == a ==
