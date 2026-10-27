@@ -788,7 +788,22 @@
       "license_files": [
         "LICENSE-CC0"
       ],
-      "notes": "The Keepin' It Real shirt print artwork, mocks and proofs (owner decision, #606). Dedicated to CC0 like the source programs it is rendered from. Grants no trademark rights in the pscat name or logo, and does not cover the fonts the artwork is set in."
+      "notes": "The Keepin' It Real shirt print artwork, mocks and proofs (owner decision, #606), and the pscat logo source and its renders in art/logo/ (#683). Dedicated to CC0 like the source programs it is rendered from. Grants no trademark rights in the pscat name or logo, and does not cover the fonts the artwork is set in."
+    },
+    {
+      "id": "cc0-plugin-icon",
+      "paths": [
+        "plugin/.claude-plugin/icon.png"
+      ],
+      "license": "CC0-1.0",
+      "copyright": "Jerome Banks (dedicated to the public domain)",
+      "ships_in": [
+        "repo-only"
+      ],
+      "license_files": [
+        "LICENSE-CC0"
+      ],
+      "notes": "The plugin icon: the 1024 px render of art/logo/pscat-logo-d.ps (#683), installed with the Claude Code and Codex plugins from this repository and read by Anthropic's plugin directory. Grants no trademark rights in the pscat name or logo, and does not cover the Courier-Bold (Liberation Mono Bold) glyphs it is set in."
     },
     {
       "id": "cc0-mochi-photo",
