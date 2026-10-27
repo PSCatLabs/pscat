@@ -420,8 +420,17 @@ impl App {
                 .step_n(steps)
                 .map_err(|e| self.interp.error_report(&e));
         };
-        job.call(move |interp| interp.step_n(steps).map_err(|e| interp.error_report(&e)))
-            .unwrap_or_else(|| Err("pscat: spool: the job crashed".to_string()))
+        let stepped =
+            job.call(move |interp| interp.step_n(steps).map_err(|e| interp.error_report(&e)));
+        stepped.unwrap_or_else(|| {
+            // The job's thread panicked (the hook has reported it). Drop the
+            // dead handle so the window shows the idle canvas again rather
+            // than a frame that can no longer be drawn.
+            if let Some(spool) = &mut self.spool {
+                spool.job = None;
+            }
+            Err("pscat: spool: the job crashed".to_string())
+        })
     }
 
     /// How many completed pages there are to browse.
@@ -764,6 +773,22 @@ mod tests {
         panic!("the job neither ended nor hit a limit");
     }
 
+    /// Run `f` on a thread and fail the test if it hasn't finished in 60 s,
+    /// so a job thread that stops answering fails the suite instead of
+    /// hanging it (the in-process twin of `tests/common`'s child deadlines,
+    /// #841, which unit tests can't import).
+    fn within_deadline<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
+        let (done, result) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = done.send(f());
+        });
+        match result.recv_timeout(Duration::from_secs(60)) {
+            Ok(value) => value,
+            Err(mpsc::RecvTimeoutError::Timeout) => panic!("the test did not finish in 60 s"),
+            Err(mpsc::RecvTimeoutError::Disconnected) => panic!("the test panicked"),
+        }
+    }
+
     /// Run `job` to its end or its first error.
     fn run_job_out(job: &JobThread) -> Result<(), PsError> {
         job.call(run_out).expect("the job thread is alive")
@@ -771,22 +796,24 @@ mod tests {
 
     #[test]
     fn a_spool_job_runs_under_the_limits() {
-        let limits = Limits::none().with_max_steps(5_000);
-        let start = |limits, source: &[u8]| {
-            JobThread::start((100, 100), 1.0, limits, source.to_vec()).unwrap()
-        };
-        assert_eq!(
-            run_job_out(&start(limits, b"{ } loop")),
-            Err(PsError::StepsExceeded)
-        );
-        // The next job starts again from zero on a fresh interpreter, so one
-        // that fits is not charged for the runaway before it.
-        assert_eq!(run_job_out(&start(limits, b"1 1 add pop")), Ok(()));
-        // And with no limits, the old behaviour: nothing stops a job early.
-        assert_eq!(
-            run_job_out(&start(Limits::none(), b"0 1 20000 { pop } for")),
-            Ok(())
-        );
+        within_deadline(|| {
+            let limits = Limits::none().with_max_steps(5_000);
+            let start = |limits, source: &[u8]| {
+                JobThread::start((100, 100), 1.0, limits, source.to_vec()).unwrap()
+            };
+            assert_eq!(
+                run_job_out(&start(limits, b"{ } loop")),
+                Err(PsError::StepsExceeded)
+            );
+            // The next job starts again from zero on a fresh interpreter, so one
+            // that fits is not charged for the runaway before it.
+            assert_eq!(run_job_out(&start(limits, b"1 1 add pop")), Ok(()));
+            // And with no limits, the old behaviour: nothing stops a job early.
+            assert_eq!(
+                run_job_out(&start(Limits::none(), b"0 1 20000 { pop } for")),
+                Ok(())
+            );
+        });
     }
 
     /// A job whose interpreter cannot be set up (here a memory limit with
@@ -794,9 +821,11 @@ mod tests {
     /// `start`, not a thread left waiting.
     #[test]
     fn a_job_thread_reports_a_setup_failure() {
-        let limits = Limits::none().with_max_memory(1 << 30);
-        assert!(!crate::memtrack::installed());
-        assert!(JobThread::start((100, 100), 1.0, limits, Vec::new()).is_err());
+        within_deadline(|| {
+            let limits = Limits::none().with_max_memory(1 << 30);
+            assert!(!crate::memtrack::installed());
+            assert!(JobThread::start((100, 100), 1.0, limits, Vec::new()).is_err());
+        });
     }
 
     /// Job 2 of the spool fills a dict with 40 `cvn` keys and paints a
@@ -859,51 +888,84 @@ mod tests {
     /// same file, whatever names an earlier job left behind.
     #[test]
     fn a_spool_job_renders_as_a_standalone_run() {
-        let standalone = std::thread::spawn(|| {
-            let mut interp = Interp::with_page_scaled(100, 100, 1.0).unwrap();
-            interp.begin_source(NAMES_JOB);
-            run_out(&mut interp).unwrap();
-            interp.gfx().pixmap.data().to_vec()
-        })
-        .join()
-        .unwrap();
-        let dir = std::env::temp_dir().join(format!("pscat-spool-names-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let mut app = spool_app(&dir, Limits::none());
-        spool_job(&mut app, &dir, "first.ps", REVERSE_NAMES_JOB);
-        spool_job(&mut app, &dir, "second.ps", NAMES_JOB);
-        let spooled = app
-            .job()
-            .and_then(|job| job.call(|interp| interp.gfx().pixmap.data().to_vec()))
+        within_deadline(|| {
+            let standalone = std::thread::spawn(|| {
+                let mut interp = Interp::with_page_scaled(100, 100, 1.0).unwrap();
+                interp.begin_source(NAMES_JOB);
+                run_out(&mut interp).unwrap();
+                interp.gfx().pixmap.data().to_vec()
+            })
+            .join()
             .unwrap();
-        let _ = std::fs::remove_dir_all(&dir);
-        assert!(
-            spooled == standalone,
-            "the spooled job differs from a standalone run"
-        );
+            let dir =
+                std::env::temp_dir().join(format!("pscat-spool-names-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            let mut app = spool_app(&dir, Limits::none());
+            spool_job(&mut app, &dir, "first.ps", REVERSE_NAMES_JOB);
+            spool_job(&mut app, &dir, "second.ps", NAMES_JOB);
+            let spooled = app
+                .job()
+                .and_then(|job| job.call(|interp| interp.gfx().pixmap.data().to_vec()))
+                .unwrap();
+            let _ = std::fs::remove_dir_all(&dir);
+            assert!(
+                spooled == standalone,
+                "the spooled job differs from a standalone run"
+            );
+        });
+    }
+
+    /// A job whose thread panics is that job's error: the spool drops it and
+    /// goes back to the idle canvas, ready for the next job.
+    #[test]
+    fn a_crashed_job_is_a_job_error() {
+        within_deadline(|| {
+            let dir =
+                std::env::temp_dir().join(format!("pscat-spool-crash-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            let mut app = spool_app(&dir, Limits::none());
+            std::fs::write(dir.join("job.ps"), "1 pop").unwrap();
+            app.poll_spool();
+            app.poll_spool();
+            assert!(app.running);
+            let crashed = app
+                .job()
+                .unwrap()
+                .call(|_| -> () { panic!("a deliberate test panic") });
+            assert!(crashed.is_none());
+            app.tick();
+            assert!(!app.running && app.had_error);
+            assert!(app.job().is_none(), "the dead job should be dropped");
+            spool_job(&mut app, &dir, "next.ps", b"1 pop");
+            let _ = std::fs::remove_dir_all(&dir);
+        });
     }
 
     #[test]
     fn the_spool_hands_its_limits_to_each_job_it_picks_up() {
-        let dir = std::env::temp_dir().join(format!("pscat-spool-limits-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let mut app = spool_app(&dir, Limits::none().with_max_steps(5_000));
-        std::fs::write(dir.join("loop.ps"), "{ } loop").unwrap();
-        // A new file must hold still across two polls before it is a job.
-        app.poll_spool();
-        assert!(!app.running);
-        app.poll_spool();
-        assert!(app.running, "the job should have started");
-        for _ in 0..100_000 {
-            if !app.running {
-                break;
+        within_deadline(|| {
+            let dir =
+                std::env::temp_dir().join(format!("pscat-spool-limits-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            let mut app = spool_app(&dir, Limits::none().with_max_steps(5_000));
+            std::fs::write(dir.join("loop.ps"), "{ } loop").unwrap();
+            // A new file must hold still across two polls before it is a job.
+            app.poll_spool();
+            assert!(!app.running);
+            app.poll_spool();
+            assert!(app.running, "the job should have started");
+            for _ in 0..100_000 {
+                if !app.running {
+                    break;
+                }
+                app.tick();
             }
-            app.tick();
-        }
-        assert!(!app.running, "the runaway job was never stopped");
-        assert!(app.had_error, "stopping at the limit is a job error");
-        let _ = std::fs::remove_dir_all(&dir);
+            assert!(!app.running, "the runaway job was never stopped");
+            assert!(app.had_error, "stopping at the limit is a job error");
+            let _ = std::fs::remove_dir_all(&dir);
+        });
     }
 }

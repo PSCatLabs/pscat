@@ -39,9 +39,20 @@ stays alive after it ends, so its pages can still be browsed. The window and
 `--interactive` modes keep their interpreter on the event loop's thread,
 unchanged.
 
-A panic on the job's thread was already reported by the panic hook. The next
-call returns `None`, and the spool reports the job as crashed and moves on.
-Before, a panic took down the whole window.
+A panic on the job's thread was already reported by the panic hook. The
+call returns `None`, the spool reports the job as crashed, drops the dead
+handle (so the window shows the idle canvas again) and moves on to the next
+job (`a_crashed_job_is_a_job_error`).
+
+The reused frame `Vec` lives on the main thread, so the main thread's
+allocation when the window grows during a job is counted in the shared
+heap total a `--max-memory` limit reads (as the softbuffer's own resize
+already was). It is one window-sized buffer, allocated once per size.
+
+The window tests that start a job thread run under a 60 s deadline
+(`within_deadline`), the in-process twin of `tests/common`'s child
+deadlines (#841), so a job thread that stops answering fails the suite
+rather than hanging it.
 
 ### Cost
 
