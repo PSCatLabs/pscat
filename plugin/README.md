@@ -155,9 +155,9 @@ server's tools being absent.
 
 ## Platforms
 
-macOS, Linux and Windows are tested in CI, with the real Claude Code and
-Codex command-line tools on each; Cowork is not, since it has no
-command-line form. One server entry serves every OS. Both manifests name
+Linux and Windows are tested in CI with the real Claude Code and Codex
+command-line tools, and macOS by hand with the same checks; Cowork is not,
+since it has no command-line form. One server entry serves every OS. Both manifests name
 `scripts/pscat-mcp` with no extension:
 
 - On macOS and Linux the agent runs that file, so it must keep its exec

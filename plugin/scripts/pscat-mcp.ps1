@@ -225,8 +225,14 @@ function TakeLock {
         try {
             return New-Object System.IO.FileStream($lockPath, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite,
                 [IO.FileShare]::None, 1, [IO.FileOptions]::DeleteOnClose)
-        } catch [System.IO.IOException] {
+        } catch [System.IO.IOException], [System.UnauthorizedAccessException] {
+            # Held by another installer, or (after an antivirus scan kept a
+            # handle) still pending deletion: wait. Access denied for half a
+            # minute is a cache we may not write: give up sooner.
             if (CachedDir) { return $null }
+            if ($_.Exception -is [System.UnauthorizedAccessException] -and $waited -ge 30) {
+                Say "cannot create the download lock $lockPath (access denied)"; throw
+            }
             if ($waited -eq 0) { Say 'another pscat download is running; waiting for it' }
             $waited++
             if ($waited -ge 600) { Say "gave up waiting for the download lock $lockPath"; throw }

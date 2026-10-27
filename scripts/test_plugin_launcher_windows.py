@@ -71,7 +71,9 @@ def fake_cmd(version, marker="INSTALLED-FAKE"):
 
 class WinLauncher(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.mkdtemp()
+        # A space and a non-ASCII letter, as in C:\Users\Zo\u00eb Smith: every
+        # quoting layer (cross-spawn, the .cmd's for /f, cygpath) meets both.
+        self.tmp = tempfile.mkdtemp(prefix="pscat t\u00e9st ")
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.plugin = self.path("plugin")
         os.makedirs(self.path("plugin/scripts"))
@@ -287,11 +289,13 @@ class WinLauncher(unittest.TestCase):
             f.write("@echo off\r\n")
         self.assertIsNone(hook(self.env([inst])))
 
-    def hook_command(self):
+    def hook_command(self, backslashes=False):
         with open(HOOKS) as f:
             cmd = json.load(f)["hooks"]["SessionStart"][0]["hooks"][0]["command"]
-        # Claude Code substitutes Windows paths with forward slashes.
-        return cmd.replace("${CLAUDE_PLUGIN_ROOT}", self.plugin.replace("\\", "/"))
+        # Claude Code substitutes Windows paths with forward slashes, except in
+        # a hook that runs through PowerShell, which keeps backslashes.
+        root = self.plugin if backslashes else self.plugin.replace("\\", "/")
+        return cmd.replace("${CLAUDE_PLUGIN_ROOT}", root)
 
     def test_hook_command_runs_in_powershell(self):
         # Without Git Bash, Claude Code runs a shell-form hook in PowerShell.
@@ -299,9 +303,10 @@ class WinLauncher(unittest.TestCase):
         if shutil.which("pwsh"):
             shells.append([shutil.which("pwsh"), "-NoProfile", "-Command"])
         for shell in shells:
-            r = self.run_argv([*shell, self.hook_command()])
-            self.assertEqual(r.returncode, 0, (shell, r.stderr))
-            self.assertIn("downloads it", json.loads(r.stdout)["systemMessage"], shell)
+            for backslashes in (False, True):
+                r = self.run_argv([*shell, self.hook_command(backslashes)])
+                self.assertEqual(r.returncode, 0, (shell, backslashes, r.stderr))
+                self.assertIn("downloads it", json.loads(r.stdout)["systemMessage"], shell)
 
     def git_bash_env(self):
         git_usr = os.path.join(os.path.dirname(os.path.dirname(GIT_SH)), "usr", "bin")

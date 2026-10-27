@@ -23,6 +23,7 @@ CODEX_HOME, USERPROFILE and the launcher's cache are temp dirs.
 """
 import json
 import os
+import pathlib
 import shutil
 import subprocess
 import sys
@@ -50,7 +51,10 @@ def run(argv, env, cwd, stdin=None, timeout=300):
 
 def main(bin_dir):
     bin_dir = os.path.abspath(bin_dir)
-    work = tempfile.mkdtemp()
+    # A space and a non-ASCII letter in every path the hosts and the launcher
+    # see (the marketplace copy, both configs, the cache), as in
+    # C:\Users\Zo\u00eb Smith.
+    work = tempfile.mkdtemp(prefix="pscat t\u00e9st ")
     try:
         check(bin_dir, work)
     finally:
@@ -60,6 +64,11 @@ def main(bin_dir):
 
 def check(bin_dir, work):
     proj, home = os.path.join(work, "project"), os.path.join(work, "home")
+    # Claude Code runs a local marketplace's plugin in place, so the copy's
+    # path is the one it spawns.
+    market = os.path.join(work, "market place")
+    for d in (".claude-plugin", ".agents", "plugin"):
+        shutil.copytree(os.path.join(ROOT, d), os.path.join(market, d))
     os.makedirs(proj)
     os.makedirs(home)
     sysroot = os.environ.get("SystemRoot", r"C:\Windows")
@@ -82,14 +91,14 @@ def check(bin_dir, work):
         return
 
     # --- Claude Code -----------------------------------------------------------
-    for argv in (["claude", "plugin", "marketplace", "add", ROOT], ["claude", "plugin", "install", "pscat@pscat"]):
+    for argv in (["claude", "plugin", "marketplace", "add", market], ["claude", "plugin", "install", "pscat@pscat"]):
         r = run(argv, e, proj)
         (ok if r.returncode == 0 else bad)(" ".join(argv[:3]) + ("" if r.returncode == 0 else f": {r.stdout}{r.stderr}"))
     with open(os.path.join(ROOT, "plugin", "pscat-release")) as f:
         tag = [line.strip() for line in f if line.strip() and not line.startswith("#")][0]
     subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "fake_plugin_release.py"),
                     bin_dir, os.path.join(work, "release"), tag], check=True)
-    release_url = "file:///" + os.path.join(work, "release").replace("\\", "/")
+    release_url = pathlib.Path(work, "release").as_uri()  # percent-encoded file:///C:/...
 
     def mcp_list(path, cache, url):
         r = run(["claude", "mcp", "list"], env(path, cache, url), proj)
@@ -110,7 +119,7 @@ def check(bin_dir, work):
     (ok if "Failed" in out else bad)(f"without pscat-mcp and offline the server fails to start: {out.strip()}")
 
     # --- Codex -----------------------------------------------------------------
-    for argv in (["codex", "plugin", "marketplace", "add", ROOT], ["codex", "plugin", "add", "pscat@pscat"]):
+    for argv in (["codex", "plugin", "marketplace", "add", market], ["codex", "plugin", "add", "pscat@pscat"]):
         r = run(argv, e, proj)
         (ok if r.returncode == 0 else bad)(" ".join(argv[:3]) + ("" if r.returncode == 0 else f": {r.stdout}{r.stderr}"))
     r = run(["codex", "mcp", "get", "pscat", "--json"], e, proj)

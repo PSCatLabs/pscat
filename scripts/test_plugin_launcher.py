@@ -17,6 +17,7 @@ import hashlib
 import io
 import json
 import os
+import pathlib
 import shutil
 import subprocess
 import sys
@@ -49,7 +50,7 @@ class Launcher(unittest.TestCase):
     shell = ["sh"]
 
     def setUp(self):
-        self.tmp = tempfile.mkdtemp()
+        self.tmp = tempfile.mkdtemp(prefix="pscat t\u00e9st ")  # a space and a non-ASCII letter
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.plugin = self.path("plugin")
         os.makedirs(self.path("plugin/scripts"))
@@ -61,7 +62,7 @@ class Launcher(unittest.TestCase):
         os.makedirs(self.path("home"))
         os.makedirs(self.path("empty"))
         self.make_release(TAG, VERSION)
-        self.base_url = "file://" + self.release
+        self.base_url = pathlib.Path(self.release).as_uri()  # percent-encoded
 
     def path(self, rel):
         return os.path.join(self.tmp, rel)

@@ -123,7 +123,9 @@ The prototype run on `windows-latest` (the first commit of PR #905) showed:
 - **Tests:**
   - `test_plugin_launcher.py` adds the entry point's pass-through and the
     hook string from `hooks.json`, run under sh, dash and `bash --posix`.
-  - `test_plugin_launcher_windows.py` has 16 tests on `windows-latest`.
+  - `test_plugin_launcher_windows.py` has 16 tests on `windows-latest`,
+    all in a temp directory whose name has a space and a non-ASCII letter
+    (`pscat tést …`), as the Unix tests now are too.
     Each packs the CI-built `pscat.exe`/`pscat-mcp.exe` into a fake `.zip`
     release served from a local HTTP server, so a 404 and a refused
     connection are real outcomes. Each test speaks MCP to the real server
@@ -141,7 +143,8 @@ The prototype run on `windows-latest` (the first commit of PR #905) showed:
     - the entry point under Git Bash;
     - a release-version pin.
   - `plugin_install_check_windows.py` installs the plugin with the pinned
-    Claude Code and Codex CLIs on Windows. Claude Code's `mcp list` checks
+    Claude Code and Codex CLIs on Windows, from a marketplace copy whose
+    path has a space and a non-ASCII letter. Claude Code's `mcp list` checks
     three cases: pscat on PATH connects; not on PATH, it downloads from
     `file://` and connects; offline, it fails. For Codex, the resolved
     command's `.cmd` downloads and answers `tools/list`.
@@ -164,6 +167,13 @@ macOS and Linux then exec it directly.
   then loses the server again, but nothing else changes.
 
 ## Gaps and follow-ups
+
+- The `.cmd` clears `PSModulePath`, so `pscat-mcp.exe` also starts without
+  one. pscat-mcp does not use it.
+- If a host force-kills `cmd.exe` without killing the tree, `pscat-mcp.exe`
+  could be left running. That is untested. Claude Code ends the server's
+  whole process tree on Windows (its MCP docs), and every test closes stdin,
+  the normal shutdown path.
 
 - **Codex hooks on Windows** are not exercised: a real Codex hook run needs
   the `/hooks` trust review (#654).

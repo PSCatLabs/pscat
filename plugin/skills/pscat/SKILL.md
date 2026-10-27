@@ -11,11 +11,13 @@ PostScript library (`lib/*.ps`) compiled in, so `(lib/artkit.ps) run`
 works from any directory. Check it is installed with `pscat --help`. If
 it is not on `PATH` and the pscat plugin is installed, the plugin's
 session-start note gives its full path. Or run
-`sh "${CLAUDE_PLUGIN_ROOT}/scripts/pscat-mcp.sh" --locate`, which prints
+`sh "${CLAUDE_PLUGIN_ROOT}/scripts/pscat-mcp" --locate` (in PowerShell,
+`& "${CLAUDE_PLUGIN_ROOT}/scripts/pscat-mcp.cmd" --locate`), which prints
 the directory holding `pscat` and `pscat-mcp`, downloading the plugin's
 pinned release first if needed. The plugin's download is also at
-`~/Library/Caches/pscat/plugin/bin/pscat` (macOS) or
-`~/.cache/pscat/plugin/bin/pscat` (Linux). Without the plugin, install it:
+`~/Library/Caches/pscat/plugin/bin/pscat` (macOS),
+`~/.cache/pscat/plugin/bin/pscat` (Linux) or under
+`%LOCALAPPDATA%\pscat\plugin` (Windows). Without the plugin, install it:
 a release from <https://github.com/PSCatLabs/pscat/releases>, or
 `cargo install --git https://github.com/PSCatLabs/pscat`
 (installs `pscat` and `pscat-mcp`).
