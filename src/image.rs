@@ -457,12 +457,16 @@ impl ImageCtx {
     }
 
     fn decoded(&self, ix: usize, iy: usize, comp: usize) -> f32 {
-        let v = self.sample(ix, iy, comp);
-        match &self.lut {
-            // `v` has `bits` bits, so it indexes within its component.
-            Some(lut) if comp < self.ncomp as usize => lut[(comp << self.bits) | v as usize],
-            _ => self.decode_value(comp, v),
+        self.decode_value(comp, self.sample(ix, iy, comp))
+    }
+
+    /// `decoded()` through the table: the same value, looked up.
+    fn decoded_by(&self, lut: &[f32], ix: usize, iy: usize, comp: usize) -> f32 {
+        if comp >= self.ncomp as usize {
+            return self.decoded(ix, iy, comp);
         }
+        // The sample has `bits` bits, so it indexes within its component.
+        lut[(comp << self.bits) | self.sample(ix, iy, comp) as usize]
     }
 
     /// The decoded components of an 8-bit interleaved image's cell (#835),
@@ -470,8 +474,7 @@ impl ImageCtx {
     /// the table is built, the image has one source and 1, 3 or 4
     /// components, and the whole cell lies inside the data (a short
     /// source takes the general path, where missing bytes read as 0).
-    fn fast_components(&self, ix: usize, iy: usize) -> Option<[f32; 4]> {
-        let lut = self.lut.as_deref()?;
+    fn fast_components(&self, lut: &[f32], ix: usize, iy: usize) -> Option<[f32; 4]> {
         let n = self.ncomp as usize;
         if self.bits != 8 || !self.planes.is_empty() || !matches!(n, 1 | 3 | 4) {
             return None;
@@ -542,34 +545,37 @@ impl ImageCtx {
                 return t.rgb_at(idx.min(t.hival) as usize);
             }
             ImageColor::SeparationApprox => {
-                let g = 1.0 - self.decoded(ix, iy, 0);
+                let g = 1.0
+                    - match self.lut.as_deref() {
+                        Some(lut) => self.decoded_by(lut, ix, iy, 0),
+                        None => self.decoded(ix, iy, 0),
+                    };
                 return (g, g, g);
             }
             ImageColor::Direct => {}
         }
-        if let Some(d) = self.fast_components(ix, iy) {
-            return match self.ncomp {
-                1 => (d[0], d[0], d[0]),
-                3 => (d[0], d[1], d[2]),
-                _ => cmyk_rgb(d[0], d[1], d[2], d[3]),
-            };
+        // Tested once per cell, so a depth without a table (12 or 16
+        // bits) runs exactly the direct code.
+        match self.lut.as_deref() {
+            Some(lut) => match self.fast_components(lut, ix, iy) {
+                Some(d) => self.direct_rgb(|c| d[c]),
+                None => self.direct_rgb(|c| self.decoded_by(lut, ix, iy, c)),
+            },
+            None => self.direct_rgb(|c| self.decoded(ix, iy, c)),
         }
+    }
+
+    /// Gray, RGB or (any other count) CMYK components as RGB, from the
+    /// decoded component `dec(c)`.
+    #[inline(always)]
+    fn direct_rgb(&self, dec: impl Fn(usize) -> f32) -> (f32, f32, f32) {
         match self.ncomp {
             1 => {
-                let g = self.decoded(ix, iy, 0);
+                let g = dec(0);
                 (g, g, g)
             }
-            3 => (
-                self.decoded(ix, iy, 0),
-                self.decoded(ix, iy, 1),
-                self.decoded(ix, iy, 2),
-            ),
-            _ => cmyk_rgb(
-                self.decoded(ix, iy, 0),
-                self.decoded(ix, iy, 1),
-                self.decoded(ix, iy, 2),
-                self.decoded(ix, iy, 3),
-            ),
+            3 => (dec(0), dec(1), dec(2)),
+            _ => cmyk_rgb(dec(0), dec(1), dec(2), dec(3)),
         }
     }
 

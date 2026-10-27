@@ -520,6 +520,10 @@ renders eight examples in both and compares block-downsampled output).
   `ImageType 4` (#739, `notes/739-imagetype3-nulldevice.md`). DCTDecode buffers one
   whole JPEG (marker-aware, stops exactly at EOI); CCITTFax absent;
   Adobe inverted-CMYK JPEGs untested.
+  `ImageCtx::rgb_at` is the one place a sample becomes a colour; for 8 bits
+  or fewer it reads a per-component decode table built from the same
+  expression (`decode_value`), so a speed-up there must stay bit-identical
+  (#793, #835; `notes/835-image-rgb-at-decode-table.md`).
 - errordict holds a handler per error name (#372, so `errordict /name
   get exec` re-raises), but a handler a program installs there is not
   consulted on a real error; error-time operand-stack restoration not
