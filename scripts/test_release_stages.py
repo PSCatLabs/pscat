@@ -714,6 +714,78 @@ class RepoFacts(unittest.TestCase):
             self.assertEqual([n for n, ok, _ in outcomes if not ok], [])
 
 
+class PluginPin(unittest.TestCase):
+    """`bump-manifests` sets plugin/pscat-release (#867), so a release PR,
+    rc or not, needs no hand edit and passes plugin_check.py."""
+
+    PIN = os.path.join("plugin", "pscat-release")
+    CHECK = os.path.join(rs.ROOT, "scripts", "plugin_check.py")
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="pin-")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def write_pin(self, root, text):
+        os.makedirs(os.path.join(root, "plugin"), exist_ok=True)
+        with open(os.path.join(root, self.PIN), "w", encoding="utf-8") as f:
+            f.write(text)
+
+    def read_pin(self, root):
+        with open(os.path.join(root, self.PIN), encoding="utf-8") as f:
+            return f.read()
+
+    def test_sets_the_tag_and_keeps_the_comments(self):
+        self.write_pin(self.tmp, "# the release\n# one tag\nv0.6.3\n")
+        for version in ("0.7.0-rc.1", "0.7.0"):
+            self.assertTrue(rs.set_release_pin(self.tmp, version))
+            self.assertEqual(self.read_pin(self.tmp), f"# the release\n# one tag\nv{version}\n")
+        # Already there: no write, so release.sh does not list it.
+        self.assertFalse(rs.set_release_pin(self.tmp, "0.7.0"))
+
+    def test_no_pin_file_is_left_alone(self):
+        self.assertFalse(rs.set_release_pin(self.tmp, "0.7.0"))
+        self.assertFalse(os.path.exists(os.path.join(self.tmp, self.PIN)))
+
+    def test_a_malformed_pin_halts_instead_of_guessing(self):
+        for text in ("# only comments\n", "v0.6.3\nv0.6.4\n", ""):
+            self.write_pin(self.tmp, text)
+            with self.assertRaises(SystemExit):
+                rs.set_release_pin(self.tmp, "0.7.0")
+            self.assertEqual(self.read_pin(self.tmp), text)
+
+    def test_bump_manifests_reports_the_pin(self):
+        # release.sh `git add`s exactly what bump-manifests prints.
+        with open(os.path.join(self.tmp, "Cargo.toml"), "w", encoding="utf-8") as f:
+            f.write('[package]\nname = "pscat"\nversion = "0.6.3"\n')
+        self.write_pin(self.tmp, "v0.6.3\n")
+        self.assertEqual(rs.bump_manifests(self.tmp, "0.7.0-rc.1"), ["Cargo.toml", self.PIN])
+        self.assertEqual(self.read_pin(self.tmp), "v0.7.0-rc.1\n")
+
+    def test_the_real_tree_passes_plugin_check_after_a_bump(self):
+        """The repo's own plugin tree, bumped to an rc and then to the
+        release, still passes plugin_check.py (a hand edit used to be needed:
+        the release pin must equal the crate version)."""
+        clone = os.path.join(self.tmp, "clone")
+        shutil.copytree(rs.ROOT, clone, ignore=shutil.ignore_patterns(
+            ".git", "target", "node_modules", "dist", "release-inputs"), symlinks=True)
+        for version in ("99.0.0-rc.1", "99.0.0"):
+            changed = rs.bump_manifests(clone, version)
+            self.assertIn(self.PIN, changed)
+            self.assertEqual(
+                [ln for ln in self.read_pin(clone).splitlines() if ln and not ln.startswith("#")],
+                [f"v{version}"])
+            self.assertTrue(self.read_pin(clone).startswith("#"), "the comments survive")
+            p = subprocess.run([sys.executable, self.CHECK, clone], capture_output=True, text=True)
+            self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        # Without the pin bump the same tree fails, so the check above is real.
+        self.write_pin(clone, "v0.6.3\n")
+        p = subprocess.run([sys.executable, self.CHECK, clone], capture_output=True, text=True)
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn("pscat-release", p.stdout + p.stderr)
+
+
 @unittest.skipUnless(shutil.which("git-cliff"), "git-cliff not installed")
 class ReleaseScript(unittest.TestCase):
     """scripts/release.sh --no-push in a scratch clone of this repo."""
@@ -758,6 +830,7 @@ class ReleaseScript(unittest.TestCase):
         changed = subprocess.run(["git", "-C", self.clone, "show", "--name-only", "--format=", "HEAD"],
                                  capture_output=True, text=True, check=True).stdout.split()
         self.assertIn("npm/package.json", changed)
+        self.assertIn("plugin/pscat-release", changed)
         with open(os.path.join(self.clone, "CHANGELOG.md"), encoding="utf-8") as f:
             text = f.read()
         self.assertIn("## [99.0.0]", text)
@@ -786,6 +859,8 @@ class ReleaseScript(unittest.TestCase):
         with open(os.path.join(self.clone, "npm", "package.json"), encoding="utf-8") as f:
             self.assertEqual(json.load(f)["version"], "99.0.0-rc.1")
         changed = self.git("show", "--name-only", "--format=", "HEAD").split()
+        self.assertIn("plugin/pscat-release", changed)
+        self.assertEqual(self.git("show", "HEAD:plugin/pscat-release").splitlines()[-1], "v99.0.0-rc.1")
         self.assertNotIn("CHANGELOG.md", changed)
         if before is not None:
             self.assertEqual(self.git("show", "HEAD:CHANGELOG.md"), before)

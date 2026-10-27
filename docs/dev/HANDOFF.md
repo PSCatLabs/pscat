@@ -1488,7 +1488,9 @@ renders eight examples in both and compares block-downsampled output).
   `hooks/check-pscat.sh` (#684); both are held for portal review now
   ("Scripts the validator couldn't follow"). **Never add a top-level
   `plugin/bin/`**: claude.ai and Cowork refuse the plugin. The pin must
-  equal the crate version, or name a newer pre-release for a trial. Tests:
+  equal the crate version, or name a newer pre-release for a trial;
+  `release_stages.py bump-manifests` (so `release.sh`) sets it to
+  `v<version>`, rc included (#867). Tests:
   `scripts/test_plugin_launcher.py` (fake file:// release); both install
   checks download from `scripts/fake_plugin_release.py`.
   See `notes/853-plugin-launcher.md`.

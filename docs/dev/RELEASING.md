@@ -33,7 +33,9 @@ up-to-date `main`. It refuses in these cases:
 
 It creates `release/vX.Y.Z` and sets the version in `Cargo.toml`, in pscat's
 `Cargo.lock` entry, and in every plugin, npm and MCP Registry manifest that
-exists. It prepends the release's section to `CHANGELOG.md` with
+exists. It also sets the plugin launcher's release pin, `plugin/pscat-release`,
+to `vX.Y.Z` (an rc gets `vX.Y.Z-rc.N`), so no release PR needs a hand edit
+there (#867). The pin keeps its comment lines. It prepends the release's section to `CHANGELOG.md` with
 [git-cliff](https://git-cliff.org) (`cliff.toml`), commits `release: X.Y.Z`,
 pushes, and opens the PR with the checklist. Merging the PR publishes nothing.
 
@@ -394,8 +396,8 @@ candidate built from a `0.7.0` `Cargo.toml` would ship binaries that call
 themselves 0.7.0, under the same file names as the real 0.7.0 but with
 different bytes. Testers' reports could not say which build they ran. The
 cost is that `main` carries `X.Y.Z-rc.N` (in `Cargo.toml` and in the
-plugin, npm and `server.json` manifests) until the release PR for
-`X.Y.Z`. Plugin users who install from `main` see the rc version in that
+plugin, npm and `server.json` manifests, and the plugin's release pin) until
+the release PR for `X.Y.Z`, which sets all of them to `X.Y.Z`. Plugin users who install from `main` see the rc version in that
 window. That is accurate, because the plugin's binary comes from the rc
 release.
 
@@ -430,7 +432,8 @@ pre-releases are refused.
 
    This opens the PR "release: 0.7.0-rc.1 (release candidate)", which sets
    the version in `Cargo.toml`, `Cargo.lock` and the plugin, npm and MCP
-   Registry manifests. It does not touch `CHANGELOG.md`. git-cliff is not
+   Registry manifests, and the plugin's release pin `plugin/pscat-release`
+   to `v0.7.0-rc.1` (no hand edit). It does not touch `CHANGELOG.md`. git-cliff is not
    needed for a candidate.
 2. When CI is green, merge it.
 3. Tag the merge commit and push the tag:
@@ -642,8 +645,8 @@ and `release-manifest.json` record the same digests unsigned.
 
 **The plugin stage checks the manifests; it does not change them.** The
 issue's stage 6 says "update the plugin manifests". Here `release.sh` sets
-their version in the release PR, so the merged and tagged commit already
-carries it. Nothing is pushed after the release, and the stage halts if a
+their version (and the launcher's `plugin/pscat-release` pin) in the release
+PR, so the merged and tagged commit already carries it. Nothing is pushed after the release, and the stage halts if a
 manifest disagrees. If #569's marketplace pins a release ref (a `ref:` or
 `version` that must point at the published tag), that update belongs in a
 step after `publish` that opens a PR. #569 decides.
@@ -691,8 +694,8 @@ limit, the package and the README token).
 A new channel is a new stage in `scripts/release_stages.py` (the same
 absent/same/different rule, with a fake backend and tests) and a step in
 the `publish` job. No other stage changes. `release.sh` already bumps an
-`npm/package.json`, any `.claude-plugin/*.json` and a `server.json` (MCP
-Registry) when they exist.
+`npm/package.json`, any `.claude-plugin/*.json`, a `server.json` (MCP
+Registry) and the plugin's `plugin/pscat-release` pin when they exist.
 
 ## Hotfixes
 
