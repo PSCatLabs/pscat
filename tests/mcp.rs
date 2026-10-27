@@ -3075,6 +3075,38 @@ fn start_render_with_bands_matches_a_plain_render() {
     assert!(probe(&mut s, 1) != probe(&mut s, 4), "bands 4 ran banded");
 }
 
+/// A banded render has its `Lint:` block back (#847): silent when clean (the
+/// `note:` line alone is not a finding), a block with the band note and the
+/// finding when the page looks wrong, for both tools.
+#[test]
+fn a_banded_render_has_a_lint_block_only_when_there_are_findings() {
+    let mut s = Server::start();
+    initialized(&mut s);
+    let lint_of = |s: &mut Server, tool: &str, source: &str| -> Option<String> {
+        let args = json!({ "source": source, "width": 40, "height": 40, "bands": 2 });
+        let result = if tool == "render_postscript" {
+            s.tool(tool, args)
+        } else {
+            job_result_of(s, args)
+        };
+        assert_eq!(result["isError"], false, "{result}");
+        texts(&result).into_iter().find(|t| t.starts_with("Lint:"))
+    };
+    for tool in ["render_postscript", "start_render"] {
+        let clean = lint_of(&mut s, tool, "0 0 40 40 rectfill showpage");
+        assert!(
+            clean.is_none(),
+            "{tool}: no Lint block when clean: {clean:?}"
+        );
+        let blank = lint_of(&mut s, tool, "showpage").expect("a Lint block for a blank page");
+        assert!(blank.contains("blank-page"), "{tool}: {blank}");
+        assert!(
+            blank.contains("lint: note:"),
+            "{tool} says which band: {blank}"
+        );
+    }
+}
+
 /// What `pscat --bands` would refuse is refused up front, naming `bands`:
 /// a non-PNG format, more bands than the server's `--max-bands` or the
 /// page's rows, and anything but a whole number from 1.

@@ -41,9 +41,13 @@ faster for a program that reads `/BandBBox [llx lly urx ury]` (also `/BandIndex`
 0 = top, and `/BandCount`) and skips work outside it, e.g. a costly `colorimage`
 procedure that computes only those rows plus a margin: the `psart` skill has a
 runnable one ("Heavy noise renders"). PNG only; it refuses `--svg`, `--pdf`,
-`--lint`, sweeps, `--profile` and `--allow-write`. `--max-steps` and `--max-time`
+sweeps, `--profile` and `--allow-write`. `--max-steps` and `--max-time`
 apply to each band. An unaware program pays for the whole run once per band,
 but only band 0 writes stdout and stderr; an uncaught error is reported once.
+`--lint` works with it: one report after the run and a `pscat: lint: note:` line
+saying that band 0 (the top band) was checked for page count, gsave and stack
+leaks, and the stitched page for blankness. A leak that only another band
+makes (a branch on `/BandIndex`) is not seen.
 The band names are in `userdict` and differ per band: a program that hashes,
 serialises or `forall`s `userdict` (e.g. to build a cache key) must leave
 `/BandIndex`, `/BandCount` and `/BandBBox` out, or every band computes a
@@ -348,8 +352,8 @@ returns a `job_id` at once), then **`render_status`** (`queued`, `running`, `don
 (`--job-timeout`), two at once (`--max-jobs`). Raise `--max-steps` (or `0`) too, or the step
 limit stops a long render first. Both render tools take **`bands`** (1 to the server's
 `--max-bands`, default 4): `pscat --bands N`, worth it only for a program that reads
-`/BandBBox` (above). PNG only, no `Lint:` block, and a job's `pages_done` stays 0 until it
-ends. The step and time limits apply to each band; the call's or job's wall-clock limit to the
+`/BandBBox` (above). PNG only; the `Lint:` block covers band 0 and the stitched page, and a
+job's `pages_done` stays 0 until it ends. The step and time limits apply to each band; the call's or job's wall-clock limit to the
 whole render. The
 interpreter stops a runaway
 program itself, with a `limit_exceeded` error whose `limit` field says `steps`,

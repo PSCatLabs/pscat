@@ -1017,6 +1017,23 @@ fn report_lint(
         || options.svg.is_some()
         || options.pdf.is_some();
     let findings = interp.lint_with_pages(render_checks, declared_pages);
+    print_lint(&findings, ok, options.lint_strict, None)
+}
+
+/// Print `--lint`'s verdict and findings (see [`report_lint`]) and return
+/// whether anything was found. `note`, when given, is printed first as
+/// `pscat: lint: note: ...`: `--bands` uses it to say which band it
+/// linted (#847). It is not a finding, so it never counts towards
+/// `--lint-strict`; `pscat-mcp`'s `split_lint_findings` knows the prefix.
+pub(crate) fn print_lint(
+    findings: &[pscat::lint::LintFinding],
+    ok: bool,
+    strict: bool,
+    note: Option<&str>,
+) -> bool {
+    if let Some(note) = note {
+        eprintln!("pscat: lint: {LINT_NOTE}{note}");
+    }
     if !ok {
         eprintln!(
             "pscat: lint: [{RUN_ERROR_CHECK}] the run ended in an error (see the report above), so this is not a clean run"
@@ -1028,13 +1045,13 @@ fn report_lint(
         }
         return !ok;
     }
-    for f in &findings {
+    for f in findings {
         eprintln!("pscat: lint: [{}] {}", f.check, f.message);
     }
     // The footer counts real findings only: an errored run already
     // fails on its own, so "because --lint-strict was given" would be
     // misleading for it.
-    if options.lint_strict {
+    if strict {
         eprintln!(
             "pscat: lint: {} finding(s) — failing because --lint-strict was given",
             findings.len()
@@ -1042,6 +1059,10 @@ fn report_lint(
     }
     true
 }
+
+/// What follows `pscat: lint: ` on a note line. `pscat-mcp` (a separate
+/// binary) matches the same literal, so keep the two in step.
+const LINT_NOTE: &str = "note: ";
 
 /// out.png → out-001.png (suffix before the extension).
 fn numbered_path(path: &str, n: usize) -> String {
@@ -1939,7 +1960,11 @@ fn print_usage() {
     println!("                      to hit a limit stops the queue. The band names are in");
     println!("                      userdict and differ per band: leave them out of anything");
     println!("                      that hashes or serialises userdict (a cache key) or");
-    println!("                      walks it with forall");
+    println!("                      walks it with forall. --lint works with --bands: it checks");
+    println!("                      band 0 (the top band) for page count, gsave and stack");
+    println!("                      leaks, and the stitched page for a blank one, and says so");
+    println!("                      (a program that branches on /BandIndex may leak in");
+    println!("                      another band; lint won't see it)");
     println!("      --band-rows R   with --bands, cut the page into bands about R device rows");
     println!("                      tall instead (ceil(height/R) bands of equal height)");
     println!("      --read-root DIR let the program read files only inside DIR (repeatable):");

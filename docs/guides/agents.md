@@ -443,10 +443,13 @@ for byte the one `bands: 1` gives, unless the program reads the clock.
   finish well inside the call's or job's limit.
 - **What it gives up.** PNG only: `bands` above 1 with `format` `svg` or
   `pdf` is refused (`invalid_argument`), as is a value over `--max-bands` or
-  over the page's device rows. A banded render has no `Lint:` block, and a
-  banded job's `pages_done` stays 0 until it ends: `pscat --bands` refuses
-  `--lint` and `--progress`, so the server leaves both off. Errors come back
-  as for a plain render, from the first band that failed.
+  over the page's device rows. A banded job's `pages_done` stays 0 until it
+  ends: `pscat --bands` refuses `--progress`, so the server leaves it off.
+  The `Lint:` block is there as for a plain render (#847): the server passes
+  `--lint`, which checks band 0 (page count, gsave, stack) and the stitched
+  page (blank page), and the block opens with a line saying so when there
+  is a finding. Errors come back as for a plain render, from the first band
+  that failed.
 - **No `band_rows`.** `pscat --band-rows R` is not exposed. The default split
   measured best (`notes/844-bands-work-queue.md`); a small R multiplies the
   CPU (18x at one row per band), and a large band count multiplies the
