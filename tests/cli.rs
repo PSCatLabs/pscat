@@ -932,8 +932,8 @@ fn usage_lists_the_new_flags() {
 }
 
 #[test]
-fn version_flag_prints_the_crate_version_and_exits_clean() {
-    let want = format!("pscat {}\n", env!("CARGO_PKG_VERSION"));
+fn version_flag_prints_the_build_version_and_exits_clean() {
+    let want = format!("pscat {}\n", common::built_version());
     for flag in ["--version", "-V"] {
         let (ok, out, err) = run(&[flag], "");
         assert!(ok, "{flag} must exit 0; stderr: {err}");

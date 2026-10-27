@@ -78,7 +78,9 @@ HEADLESS=0
 if [[ "$WINDOWS" == 1 ]]; then PY=$(command -v python || command -v python3); else PY=$(command -v python3 || command -v python); fi
 
 echo "==> Building pscat and pscat-mcp (release, $TARGET${FEATURES[*]:+, ${FEATURES[*]}})"
-cargo build --release --locked --target "$TARGET" ${FEATURES[@]+"${FEATURES[@]}"} --manifest-path "$ROOT/Cargo.toml"
+# PSCAT_RELEASE=1: the archive prints the plain Cargo version even from a checkout
+# with no tags or local edits (build.rs, issue #839); the check below needs that.
+PSCAT_RELEASE=1 cargo build --release --locked --target "$TARGET" ${FEATURES[@]+"${FEATURES[@]}"} --manifest-path "$ROOT/Cargo.toml"
 BIN_DIR="$ROOT/target/$TARGET/release"
 
 if [[ "$WANT_NOTICES" == 1 && -z "$NOTICES" ]]; then

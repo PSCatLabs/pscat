@@ -175,6 +175,10 @@ fn initialize(server: &mut Server, version: Value) -> Value {
 fn initialized(server: &mut Server) {
     let resp = initialize(server, json!("2025-11-25"));
     assert_eq!(resp["result"]["serverInfo"]["name"], "pscat");
+    assert_eq!(
+        resp["result"]["serverInfo"]["version"],
+        common::built_version()
+    );
     assert_eq!(resp["result"]["protocolVersion"], "2025-11-25");
     server.send_raw(br#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#);
 }
@@ -1758,10 +1762,10 @@ fn eval_postscript_returns_stderr_warnings_on_success() {
 }
 
 #[test]
-fn version_flag_prints_the_crate_version_and_exits_without_serving() {
+fn version_flag_prints_the_build_version_and_exits_without_serving() {
     // A closed stdin: were the flag ignored the server would see EOF and
     // exit with empty stdout, so the assertion fails instead of hanging.
-    let want = format!("pscat-mcp {}\n", env!("CARGO_PKG_VERSION"));
+    let want = format!("pscat-mcp {}\n", common::built_version());
     for flag in ["--version", "-V"] {
         let out = Command::new(env!("CARGO_BIN_EXE_pscat-mcp"))
             .arg(flag)

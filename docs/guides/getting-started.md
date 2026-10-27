@@ -50,7 +50,7 @@ cargo run -- -i                           # REPL + live window: watch what you t
 cargo run -- -i lib/handscript.ps         # ...with a library preloaded
 cargo run -- -e '3 4 add ='               # evaluate a snippet
 cargo run -- --allow-write cache/ f.ps    # let f.ps write files in cache/
-cargo run -- --version                    # print "pscat X.Y.Z" (also -V; pscat-mcp too)
+cargo run -- --version                    # print "pscat X.Y.Z" (also -V; pscat-mcp too); a git build adds +<commit>
 cargo test                                # language + pixel-level render tests
 ```
 

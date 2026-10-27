@@ -1741,7 +1741,7 @@ fn parse_args() -> Result<Options, String> {
                 std::process::exit(0);
             }
             "-V" | "--version" => {
-                println!("pscat {}", env!("CARGO_PKG_VERSION"));
+                println!("pscat {}", env!("PSCAT_VERSION"));
                 std::process::exit(0);
             }
             "--fonts" => {
@@ -2103,7 +2103,7 @@ fn repl_exit(interp: &mut Interp) -> ExitCode {
 fn repl(interp: &mut Interp, options: &Options) -> ExitCode {
     println!(
         "pscat {} — PostScript interpreter (headless canvas; graphics ops draw off-screen)",
-        env!("CARGO_PKG_VERSION")
+        env!("PSCAT_VERSION")
     );
     println!("Type PostScript; 'quit' or Ctrl-D exits. The prompt shows operand-stack depth.");
     let stdin = io::stdin();

@@ -260,7 +260,7 @@ impl Config {
                     return Ok(None);
                 }
                 "-V" | "--version" => {
-                    println!("pscat-mcp {}", env!("CARGO_PKG_VERSION"));
+                    println!("pscat-mcp {}", env!("PSCAT_VERSION"));
                     return Ok(None);
                 }
                 "--out-root" => {
@@ -922,7 +922,7 @@ fn initialize_result(cfg: &Config, params: &Value) -> Result<Value, (String, Val
         "serverInfo": {
             "name": "pscat",
             "title": "pscat PostScript interpreter",
-            "version": env!("CARGO_PKG_VERSION"),
+            "version": env!("PSCAT_VERSION"),
         },
         "instructions": format!(
             "Render and debug PostScript. render_postscript returns pages as PNG; \

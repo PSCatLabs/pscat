@@ -87,6 +87,7 @@
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 /// `lib/*.ps` files (and `lib/styles/*.ps`) that stay on the
 /// hand-written `capabilities.rs` `ENTRIES` table for now -- not yet
@@ -115,8 +116,150 @@ const KNOWN_TAGS: &[&str] = &[
     "kind", "summary", "example", "param", "internal", "requires",
 ];
 
+/// The version string `pscat --version`, `pscat-mcp --version` and the MCP
+/// `serverInfo` print (issue #839), exported to the crate as
+/// `env!("PSCAT_VERSION")`.
+///
+/// A release build prints exactly Cargo's version. A build from a git
+/// checkout that is not exactly a release tag appends the short commit, and
+/// `-dirty` when tracked files differ from it: `0.6.3+56006db`,
+/// `0.6.3+56006db-dirty`. So a tester's `cargo install --git ... --rev X`
+/// binary can be told from the crates.io one.
+///
+/// Everything here degrades to plain `CARGO_PKG_VERSION`, never to a build
+/// failure: no `.git` beside Cargo.toml (the crates.io tarball, a vendored
+/// copy, `cargo package`'s verify copy, a source archive, wasm builds from
+/// one of those), no `git` binary, git refusing the checkout (a
+/// "dubious ownership" sandbox), or a repository with no commits yet.
+///
+/// Release builds set `PSCAT_RELEASE=1` (scripts/package_release.sh) so the
+/// archive prints the plain version even when the checkout has no tags
+/// (`actions/checkout` at a commit fetches none) or is not clean.
+fn emit_version() {
+    println!("cargo:rerun-if-env-changed=PSCAT_RELEASE");
+    // An edit to a build input can make the tree dirty (or clean again), so
+    // the dirty flag is re-read then. `lib` and build.rs are already watched.
+    // Measured (release, bin-only edit): 2.9s -> 7.4s.
+    for input in ["src", "fonts", "Cargo.toml", "Cargo.lock"] {
+        println!("cargo:rerun-if-changed={input}");
+    }
+    let pkg = std::env::var("CARGO_PKG_VERSION").expect("CARGO_PKG_VERSION set");
+    let version = match git_version_suffix() {
+        Some(suffix) => format!("{pkg}+{suffix}"),
+        None => pkg,
+    };
+    println!("cargo:rustc-env=PSCAT_VERSION={version}");
+}
+
+/// Runs `git args` in `dir`; its trimmed stdout when it exits 0 with output.
+/// `GIT_OPTIONAL_LOCKS=0` keeps `git status` from rewriting the index under
+/// a build, and the repository-selecting variables are cleared so a parent
+/// process (a git hook, `git rebase --exec`) cannot point us at another repo.
+fn git(dir: &Path, args: &[&str]) -> Option<String> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE")
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let text = String::from_utf8(out.stdout).ok()?;
+    let text = text.trim();
+    (!text.is_empty()).then(|| text.to_string())
+}
+
+/// `Some("56006db")`, `Some("56006db-dirty")` or `Some("dirty")` (on a
+/// release tag with local edits) for a non-release git build; `None` for a
+/// release or when the commit cannot be determined.
+fn git_version_suffix() -> Option<String> {
+    if std::env::var("PSCAT_RELEASE").is_ok_and(|v| !v.is_empty() && v != "0") {
+        return None;
+    }
+    let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").ok()?);
+    // Only a repository rooted at the package itself. `git` would otherwise
+    // walk up and adopt whatever repository the package happens to sit in
+    // (~/.cargo/registry under a dotfiles repo, a vendored copy in a
+    // monorepo), stamping an unrelated commit.
+    if !manifest_dir.join(".git").exists() {
+        return None;
+    }
+    let sha = git(&manifest_dir, &["rev-parse", "--short=7", "HEAD"])?;
+    if !sha.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    // Re-run when the commit changes. Cargo treats a missing path as always
+    // stale, so name only paths that exist. HEAD and the reflog cover a new
+    // commit or checkout, refs/heads and packed-refs the branch ref, and
+    // refs/tags a tag made on HEAD.
+    if let Some(git_dir) = git(&manifest_dir, &["rev-parse", "--absolute-git-dir"]) {
+        let git_dir = PathBuf::from(git_dir);
+        let common = git(&manifest_dir, &["rev-parse", "--git-common-dir"])
+            .map(|c| manifest_dir.join(c))
+            .unwrap_or_else(|| git_dir.clone());
+        // logs/HEAD is appended on every commit, checkout and reset, which
+        // keeps a commit visible after `git gc` packed the branch ref away
+        // (HEAD and packed-refs are then unchanged by the next commit).
+        let watch = [
+            git_dir.join("HEAD"),
+            git_dir.join("logs/HEAD"),
+            common.join("packed-refs"),
+            common.join("refs/heads"),
+            common.join("refs/tags"),
+        ];
+        for path in watch.iter().filter(|p| p.exists()) {
+            println!("cargo:rerun-if-changed={}", path.display());
+        }
+    }
+    // Dirty means a build input differs from the commit: the paths watched in
+    // `emit_version` (lib and build.rs included). Not docs, not untracked files
+    // (cargo's `.cargo-ok` sits untracked in a `cargo install --git` checkout).
+    let dirty = git(
+        &manifest_dir,
+        &[
+            "status",
+            "--porcelain",
+            "--untracked-files=no",
+            "--",
+            "src",
+            "lib",
+            "fonts",
+            "build.rs",
+            "Cargo.toml",
+            "Cargo.lock",
+        ],
+    )
+    .is_some();
+    let on_release_tag = git(
+        &manifest_dir,
+        &[
+            "describe",
+            "--tags",
+            "--exact-match",
+            "--match",
+            "v[0-9]*",
+            "HEAD",
+        ],
+    )
+    .is_some();
+    match (on_release_tag, dirty) {
+        (true, false) => None,
+        (true, true) => Some("dirty".to_string()),
+        (false, false) => Some(sha),
+        (false, true) => Some(format!("{sha}-dirty")),
+    }
+}
+
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
+    emit_version();
     println!("cargo:rerun-if-changed=lib");
 
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR set");
