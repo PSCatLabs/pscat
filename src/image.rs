@@ -907,7 +907,9 @@ impl ImageCtx {
         // and `rgb_at` is a pure function of the cell. Not kept at one
         // sample per device pixel or fewer, where it would never hit.
         let memo = magnified.is_some();
-        let mut last: Option<((usize, usize), (f32, f32, f32))> = None;
+        // No cell has these coordinates (both are below the image's size).
+        let mut last_cell = (usize::MAX, usize::MAX);
+        let mut last_rgb = (0.0f32, 0.0f32, 0.0f32);
         for py in py0..py1 {
             for px in px0..px1 {
                 // Device pixel center → user space → image space.
@@ -941,14 +943,13 @@ impl ImageCtx {
                             self.smooth_rgb((fx, fy), (ix, iy), axes)
                         }
                         None if !memo => self.rgb_at(ix, iy),
-                        None => match last {
-                            Some((cell, rgb)) if cell == (ix, iy) => rgb,
-                            _ => {
-                                let rgb = self.rgb_at(ix, iy);
-                                last = Some(((ix, iy), rgb));
-                                rgb
+                        None => {
+                            if last_cell != (ix, iy) {
+                                last_cell = (ix, iy);
+                                last_rgb = self.rgb_at(ix, iy);
                             }
-                        },
+                            last_rgb
+                        }
                     },
                 };
                 let clip = mask_data

@@ -32,20 +32,26 @@ Instructions retired (`/usr/bin/time -l`, pscat only, `--page 983x983 --dpi
 
 | case | base | head |
 |---|---|---|
-| RGB 4096², file | 8.26 G | 6.93 G |
-| RGB 4096², procedure | 5.55 G | 4.19 G |
-| gray 4096², file | 4.79 G | 4.67 G |
+| RGB 4096², file | 8.29 G | 6.90 G |
+| RGB 4096², procedure | 5.54 G | 4.17 G |
+| gray 4096², file | 4.79 G | 4.65 G |
 | gray 4096², procedure | 3.88 G | 3.75 G |
-| CMYK 4096², file | 10.15 G | 8.14 G |
-| CMYK 4096², procedure | 6.54 G | 4.48 G |
-| RGB 4096², file, 0.5 setalpha + Multiply | 8.89 G | 7.54 G |
-| RGB 1024² magnified 4x, /Interpolate true | 16.24 G | 10.91 G |
+| CMYK 4096², file | 10.17 G | 8.12 G |
+| CMYK 4096², procedure | 6.53 G | 4.51 G |
+| RGB 4096², file, 0.5 setalpha + Multiply | 8.89 G | 7.51 G |
+| RGB 1024² magnified 4x, /Interpolate true | 16.25 G | 10.78 G |
 | RGB 1024² magnified 4x, /Interpolate false | 5.64 G | 3.13 G |
-| RGB 2x2 stretched over the page | 5.47 G | 2.51 G |
-| 5000 8x8 RGB images | 2.03 G | 1.37 G |
+| RGB 2x2 stretched over the page | 5.46 G | 2.50 G |
+| 5000 8x8 RGB images | 2.01 G | 1.36 G |
+| RGB 16-bit 4096², procedure (no table) | 5.89 G | 6.01 G |
+| Indexed 8-bit 4096², procedure (no table) | 4.51 G | 4.57 G |
 
 CPU seconds (`scripts/bench_compare.sh`) are in the PR. Gray gains little:
-one component was already cheap. File sources stay dominated by reading the
+one component was already cheap. Depths without a table (12, 16 bits) and
+Indexed images run the direct code, chosen once per cell; they come out about
+1 to 2% slower (16-bit, 15 renders looped: 2.58 s against 2.52 s, noise floor
+0.01 s), which turning the memo off does not change, so it is code layout
+around the larger `rgb_at`, not extra work. File sources stay dominated by reading the
 data a byte at a time (a bulk read in `fill` would be the next step; it lives
 in `src/file.rs`).
 
