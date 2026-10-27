@@ -71,9 +71,11 @@ def fake_cmd(version, marker="INSTALLED-FAKE"):
 
 class WinLauncher(unittest.TestCase):
     def setUp(self):
-        # A space and a non-ASCII letter, as in C:\Users\Zo\u00eb Smith: every
-        # quoting layer (cross-spawn, the .cmd's for /f, cygpath) meets both.
-        self.tmp = tempfile.mkdtemp(prefix="pscat t\u00e9st ")
+        # A space, an \u00e9 (in the runner's console code page, 437) and an
+        # \u0141 (not in it), as in a profile like C:\Users\\u0141ucja Zo\u00eb: every
+        # quoting layer (cross-spawn, the .cmd's for /f and its --exe handoff,
+        # cygpath) meets all three.
+        self.tmp = tempfile.mkdtemp(prefix="pscat t\u00e9st \u0141 ")
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.plugin = self.path("plugin")
         os.makedirs(self.path("plugin/scripts"))

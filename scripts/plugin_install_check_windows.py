@@ -51,10 +51,10 @@ def run(argv, env, cwd, stdin=None, timeout=300):
 
 def main(bin_dir):
     bin_dir = os.path.abspath(bin_dir)
-    # A space and a non-ASCII letter in every path the hosts and the launcher
-    # see (the marketplace copy, both configs, the cache), as in
-    # C:\Users\Zo\u00eb Smith.
-    work = tempfile.mkdtemp(prefix="pscat t\u00e9st ")
+    # A space, an \u00e9 and an \u0141 (outside the console code page) in every
+    # path the hosts and the launcher see (the marketplace copy, both
+    # configs, the cache), as in a profile like C:\Users\\u0141ucja Zo\u00eb.
+    work = tempfile.mkdtemp(prefix="pscat t\u00e9st \u0141 ")
     try:
         check(bin_dir, work)
     finally:

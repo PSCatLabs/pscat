@@ -50,7 +50,7 @@ class Launcher(unittest.TestCase):
     shell = ["sh"]
 
     def setUp(self):
-        self.tmp = tempfile.mkdtemp(prefix="pscat t\u00e9st ")  # a space and a non-ASCII letter
+        self.tmp = tempfile.mkdtemp(prefix="pscat t\u00e9st \u0141 ")  # a space and a non-ASCII letter
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.plugin = self.path("plugin")
         os.makedirs(self.path("plugin/scripts"))

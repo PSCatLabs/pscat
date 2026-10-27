@@ -111,9 +111,12 @@ function Get-McpVersion([string]$Exe) {
         $psi.RedirectStandardError = $true
         $p = [Diagnostics.Process]::Start($psi)
         $p.StandardInput.Close()
+        # Both streams read asynchronously, so a candidate that hangs with
+        # stdout open still meets the deadline.
         $err = $p.StandardError.ReadToEndAsync()
-        $out = $p.StandardOutput.ReadToEnd()
+        $outTask = $p.StandardOutput.ReadToEndAsync()
         if (-not $p.WaitForExit(30000)) { try { $p.Kill() } catch { }; return '' }
+        $out = $outTask.Result
         $null = $err.Result
         if ($out -match '(?m)^pscat-mcp ([0-9][0-9.]*[^\s]*)') { return $Matches[1] }
     } catch { }
@@ -349,6 +352,23 @@ function Ensure {
     return $false
 }
 
+# --- the --exe handoff -------------------------------------------------------------
+function ExeHandoff([string]$Path) {
+    foreach ($var in 'PSCAT_CACHE_DIR', 'LOCALAPPDATA', 'CARGO_HOME', 'USERPROFILE') {
+        $base = [Environment]::GetEnvironmentVariable($var)
+        if (-not $base) { continue }
+        $base = $base.TrimEnd('\', '/')
+        if ($Path.Length -gt $base.Length + 1 -and
+            $Path.StartsWith($base, [StringComparison]::OrdinalIgnoreCase) -and
+            ($Path[$base.Length] -eq '\' -or $Path[$base.Length] -eq '/')) {
+            $rest = $Path.Substring($base.Length + 1)
+            # Plain ASCII with nothing cmd would expand or split on.
+            if ($rest -match '^[A-Za-z0-9 ._\\/()+,=@#~-]+$') { return "$var|$rest" }
+        }
+    }
+    return "-|$Path"
+}
+
 # --- SessionStart hook -----------------------------------------------------------
 function Json-Str([string]$S) {
     $sb = New-Object System.Text.StringBuilder
@@ -400,11 +420,15 @@ switch ($mode) {
         exit 0
     }
     '--exe' {
-        # Read by pscat-mcp.cmd's `for /f`, which decodes with the console's
-        # code page, as [Console]::Out encodes.
+        # For pscat-mcp.cmd (and the sh entry point under Git Bash): VAR|REST,
+        # meaning %VAR%\REST, or -|PATH. cmd's `for /f` decodes this with the
+        # console code page, which cannot spell every user name (accented or
+        # non-Latin letters). So the user-specific start of the path travels as the name of
+        # an environment variable the caller already holds in Unicode, and
+        # only the ASCII rest as text.
         if (-not (Ensure)) { Say 'pscat-mcp is not available, so the pscat tools cannot start'; exit 1 }
         if ($script:FoundHow -ne 'cache' -and $script:FoundHow -ne 'PATH') { Say "using $($script:FoundBin)" }
-        [Console]::Out.WriteLine($script:FoundBin)
+        [Console]::Out.WriteLine((ExeHandoff $script:FoundBin))
         exit 0
     }
 }

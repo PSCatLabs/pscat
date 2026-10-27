@@ -177,8 +177,15 @@ macOS and Linux then exec it directly.
 
 - **Codex hooks on Windows** are not exercised: a real Codex hook run needs
   the `/hooks` trust review (#654).
-- A user path with characters outside the console code page (the `.cmd`
-  reads `--exe` through `for /f`) is untested.
+- `--exe` hands the server's path to the `.cmd` through `for /f`, which
+  decodes with the console code page and cannot spell every user name. So
+  `--exe` prints `VAR|REST`: the user-specific start of the path is the name
+  of an environment variable (`PSCAT_CACHE_DIR`, `LOCALAPPDATA`,
+  `CARGO_HOME`, `USERPROFILE`) that cmd already holds in Unicode, and only
+  the ASCII rest is text; `call set` expands it. The tests' paths contain
+  `Ł`, which code page 437 lacks (Codex review, round 1). A pscat-mcp on PATH
+  outside those four directories, in a directory the code page cannot
+  spell, is still passed as text and would fail.
 - Managed machines where Group Policy forbids `-ExecutionPolicy Bypass`, or
   that run PowerShell in Constrained Language mode, stop the launcher. The
   README tells those users to install the release `.zip` and put it on PATH.

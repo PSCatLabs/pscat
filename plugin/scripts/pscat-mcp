@@ -22,7 +22,13 @@ case "$(uname -s 2>/dev/null)" in
     case "${1:-}" in
       --hook|--locate) run_ps1 "$@"; exit $? ;;
     esac
-    exe=$(run_ps1 --exe | tr -d '\r') && [ -n "$exe" ] || exit 1
+    # --exe prints VAR|REST (for $VAR\REST) or -|PATH; see pscat-mcp.ps1.
+    out=$(run_ps1 --exe | tr -d '\r') && [ -n "$out" ] || exit 1
+    var=${out%%|*}
+    exe=${out#*|}
+    case "$var" in
+      PSCAT_CACHE_DIR|LOCALAPPDATA|CARGO_HOME|USERPROFILE) eval "exe=\${$var}\\\$exe" ;;
+    esac
     exe=$(cygpath -u "$exe" 2>/dev/null || printf '%s' "$exe")
     exec "$exe" "$@" ;;
 esac

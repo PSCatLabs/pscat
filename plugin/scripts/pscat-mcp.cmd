@@ -15,9 +15,25 @@ rem PowerShell 7 (a host started from pwsh) can hide its modules.
 set "PSModulePath="
 if /i "%~1"=="--hook" goto ps1
 if /i "%~1"=="--locate" goto ps1
-set "PSCAT_EXE="
-for /f "usebackq delims=" %%i in (`powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0pscat-mcp.ps1" --exe ^<NUL`) do set "PSCAT_EXE=%%i"
-if not defined PSCAT_EXE exit /b 1
+rem --exe prints an environment variable name, a bar and the rest of the
+rem path below that variable's directory (so only the ASCII rest goes
+rem through the console code page and any user name survives), or a dash,
+rem a bar and the whole path.
+set "PSCAT_BASE="
+set "PSCAT_REL="
+for /f "usebackq tokens=1,* delims=|" %%a in (`powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0pscat-mcp.ps1" --exe ^<NUL`) do (
+  set "PSCAT_BASE=%%a"
+  set "PSCAT_REL=%%b"
+)
+if not defined PSCAT_REL exit /b 1
+if not "%PSCAT_BASE%"=="-" goto based
+set "PSCAT_EXE=%PSCAT_REL%"
+goto run
+:based
+rem CALL expands the line twice: the first pass leaves the variable's
+rem reference, the second its value.
+call set "PSCAT_EXE=%%%PSCAT_BASE%%%\%PSCAT_REL%"
+:run
 "%PSCAT_EXE%" %*
 exit /b %ERRORLEVEL%
 :ps1
