@@ -253,3 +253,54 @@ fn a_child_that_ignores_stdin_is_fine() {
         .expect("run pscat");
     assert!(out.status.success());
 }
+
+/// No test file waits on a pscat child without a deadline: a raw
+/// `wait_with_output()`, or a `.output()` / `.status()` on a `Command` built
+/// from one of pscat's own binaries, fails here. Use `common::wait_output`
+/// or the `CommandDeadline` methods (`AGENTS.md`).
+#[test]
+fn no_test_waits_on_a_pscat_child_without_a_deadline() {
+    // Built from pieces so this file does not match itself.
+    let raw_wait = [".wait_with", "_output()"].concat();
+    let raw_calls = [[".out", "put()"].concat(), [".sta", "tus()"].concat()];
+    let new = ["Command::", "new("].concat();
+    let mut offenders = Vec::new();
+    for entry in std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/tests")).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_none_or(|e| e != "rs") {
+            continue;
+        }
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        if name == "child_deadline.rs" {
+            continue;
+        }
+        let src = std::fs::read_to_string(&path).unwrap();
+        for (i, line) in src.lines().enumerate() {
+            if !line.trim_start().starts_with("//") && line.contains(&raw_wait) {
+                offenders.push(format!("tests/{name}:{}: {}", i + 1, line.trim()));
+            }
+        }
+        for call in &raw_calls {
+            for (at, _) in src.match_indices(call.as_str()) {
+                // The nearest `Command::new(<program>` before the call.
+                let Some(k) = src[..at].rfind(&new) else {
+                    continue;
+                };
+                let program: String = src[k + new.len()..].chars().take(80).collect();
+                let program = program.split(')').next().unwrap_or_default();
+                if program.contains("BIN") || program.contains("PSCAT") || program.contains("pscat")
+                {
+                    let line = src[..at].matches('\n').count() + 1;
+                    offenders.push(format!(
+                        "tests/{name}:{line}: Command::new({program}){call}"
+                    ));
+                }
+            }
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "run pscat through the deadline helpers in tests/common:\n{}",
+        offenders.join("\n")
+    );
+}
