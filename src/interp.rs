@@ -43,6 +43,61 @@ const PROC_NESTING_LIMIT: usize = 500;
 /// name. No interned name has this id.
 const NO_NAME: u32 = u32::MAX;
 
+/// What a procedure literal (an executable array met in a body) runs as,
+/// so the step loop dispatches it like any operator (#864).
+#[inline(never)]
+fn proc_literal_op(it: &mut Interp) -> Result<(), PsError> {
+    it.proc_literal()
+}
+
+/// A procedure literal (an executable array met in a body).
+#[inline(always)]
+fn is_proc_literal(o: &Object) -> bool {
+    o.executable && matches!(o.value, Value::Array(_))
+}
+
+/// The body of procedure literal `o`, for a fused conditional to run.
+#[inline(always)]
+fn proc_body(o: &Object) -> Option<PsArray> {
+    match &o.value {
+        Value::Array(a) => Some(a.clone()),
+        _ => None,
+    }
+}
+
+/// Whether procedure element `o` runs the operator named `op` (#864): `Some(
+/// NO_NAME)` if it is that operator, `Some(id)` if it is the executable name
+/// `name_id` and that name resolves to the operator in `dstack` right now,
+/// `None` otherwise. Only the operator's own name is looked up, so other
+/// names cost one compare.
+#[inline(always)]
+fn runs_operator(o: &Object, dstack: &[Rc<RefCell<Dict>>], op: &str, name_id: u32) -> Option<u32> {
+    if !o.executable {
+        return None;
+    }
+    // By the operator's name, not its function's address: the same
+    // function can have several addresses, and two functions one. Every
+    // operator object carries the name it is registered under in
+    // systemdict. `op` is the name systemdict's own object carries, and
+    // any copy of that object holds the same `&'static str`: equal
+    // pointers (and lengths) mean equal names, so the fast check is never
+    // wrong, and the text compare covers any other operator object.
+    let is_op = |o: &Object| {
+        o.executable
+            && matches!(&o.value, Value::Operator(f) if std::ptr::eq(f.name, op) || f.name == op)
+    };
+    match &o.value {
+        Value::Operator(_) => is_op(o).then_some(NO_NAME),
+        Value::Name(n) if n.id() == name_id => dstack
+            .iter()
+            .rev()
+            .find_map(|d| d.borrow().get_id_ref(name_id).map(is_op))
+            .is_some_and(|b| b)
+            .then_some(name_id),
+        _ => None,
+    }
+}
+
 enum Frame {
     /// Tokens being scanned incrementally from program source.
     Scanner(Lexer),
@@ -101,12 +156,18 @@ enum Item {
 
 /// What [`Interp::proc_step`] did with the top of the execution stack.
 enum ProcStep {
-    /// A procedure element that is an operator: call it.
+    /// A procedure element that is an operator: call it. In the plain loop
+    /// a procedure literal comes as `Op(proc_literal_op)` too (#864).
     Op(crate::object::OpFn),
     /// A procedure element that is an executable name: look it up and run it.
     Name(u32),
-    /// A procedure element that is pushed (a literal, or a procedure body
-    /// met inside a procedure): already on the operand stack.
+    /// A procedure literal, to push with [`Interp::proc_literal`]: what
+    /// `proc_step::<true>` returns for one, so `--profile-ops` can tell it
+    /// from an operator. The plain loop gets it as
+    /// `Op(proc_literal_op)` (#864), so it has no arm of its own there.
+    Lit,
+    /// A procedure element that is pushed (a literal other than a
+    /// procedure body): already on the operand stack.
     Pushed,
     /// The top frame is not a procedure: take the general path.
     Other,
@@ -245,6 +306,22 @@ pub struct Interp {
     /// The most recently executed name (interned id — resolving to
     /// text only happens at error time), for `OffendingCommand`.
     last_name: Option<u32>,
+    /// The interned ids of the names `if` and `ifelse` (#864's fused
+    /// conditionals).
+    if_id: u32,
+    ifelse_id: u32,
+    /// The names systemdict's `if` and `ifelse` operator objects carry:
+    /// every copy of them (a bound body's) holds the same `&'static str`,
+    /// so [`runs_operator`] matches them by pointer before comparing text.
+    if_name: &'static str,
+    ifelse_name: &'static str,
+    /// Fused steps run (#864); see [`Interp::fused_steps`].
+    fused_steps: u64,
+    /// Steps left in the running slice after the current one (#864): a
+    /// fused run of several elements is charged here. Each step loop sets
+    /// it on entry (`step_n_timed` to zero, so it never fuses); nothing
+    /// runs a step loop from inside an operator, so it is not reentered.
+    slice_left: usize,
     /// The error most recently caught by a `stopped`, kept so that a
     /// `stop` which reaches the top level can report it the way
     /// Ghostscript's outermost job wrapper does (issue #142).
@@ -405,6 +482,11 @@ impl Interp {
         let gfx = Gfx::with_scale(pw, ph, scale)?;
         let mut system = Dict::new();
         ops::install_all(&mut system);
+        let op_name = |name: &'static str| match system.get(name).map(|o| o.value) {
+            Some(Value::Operator(op)) => op.name,
+            _ => name,
+        };
+        let (if_name, ifelse_name) = (op_name("if"), op_name("ifelse"));
         // Error machinery: $error is where recovered errors are recorded;
         // errordict holds a handler per error name, so a program can
         // re-raise a caught error with `errordict /name get exec` (issue
@@ -443,6 +525,12 @@ impl Interp {
             save_stack: Vec::new(),
             quit_requested: false,
             last_name: None,
+            if_id: crate::name::intern("if").id(),
+            if_name,
+            ifelse_name,
+            ifelse_id: crate::name::intern("ifelse").id(),
+            fused_steps: 0,
+            slice_left: 0,
             caught_error: None,
             error_command: None,
             last_line: None,
@@ -959,15 +1047,18 @@ impl Interp {
     #[cold]
     #[inline(never)]
     fn step_n_timed(&mut self, budget: usize) -> Result<bool, PsError> {
+        // No steps to spare: a procedure literal is pushed alone, never
+        // fused, so every operator is still timed and counted on its own.
+        self.slice_left = 0;
         for _ in 0..budget {
             if self.quit_requested {
                 return Ok(false);
             }
-            let mut step = self.proc_step();
+            let mut step = self.proc_step::<true>();
             if let ProcStep::Other = step {
                 match self.next_item() {
                     Ok(None) => return Ok(false),
-                    Ok(Some(Item::Proc)) => step = self.proc_step(),
+                    Ok(Some(Item::Proc)) => step = self.proc_step::<true>(),
                     Ok(Some(Item::Obj(obj))) => {
                         let done = match (&obj.value, obj.executable) {
                             (Value::Name(n), true) => self.execute_name_timed(n.id()),
@@ -990,6 +1081,9 @@ impl Interp {
                 }
             }
             let done = match step {
+                // A procedure literal is not an operator: not timed
+                // (and never fused here, `slice_left` being zero).
+                ProcStep::Lit => self.proc_literal(),
                 ProcStep::Op(func) => self.timed_op(func),
                 ProcStep::Name(id) => self.execute_name_timed(id),
                 ProcStep::Pushed | ProcStep::Other => continue,
@@ -1028,7 +1122,11 @@ impl Interp {
 
     // `step_n_timed` is a copy of this loop (`--profile-ops`): change both.
     fn step_n_inner(&mut self, budget: usize) -> Result<bool, PsError> {
-        for _ in 0..budget {
+        // An explicit count of the steps left, so a fused run of several
+        // elements (#864) can charge each of them.
+        self.slice_left = budget;
+        while self.slice_left > 0 {
+            self.slice_left -= 1;
             if self.quit_requested {
                 return Ok(false);
             }
@@ -1038,19 +1136,19 @@ impl Interp {
             // loop iteration (or a frame finishing) leaves a procedure on
             // top: its first element runs in this same step, as it always
             // has.
-            let done = match self.proc_step() {
+            let done = match self.proc_step::<false>() {
                 ProcStep::Op(func) => func(self),
                 ProcStep::Name(id) => self.execute_name(id),
-                ProcStep::Pushed => continue,
+                ProcStep::Pushed | ProcStep::Lit => continue,
                 ProcStep::Other => match self.next_item() {
                     Ok(None) => return Ok(false),
                     Ok(Some(Item::Obj(obj))) => self.execute_element(obj),
-                    Ok(Some(Item::Proc)) => match self.proc_step() {
+                    Ok(Some(Item::Proc)) => match self.proc_step::<false>() {
                         ProcStep::Op(func) => func(self),
                         ProcStep::Name(id) => self.execute_name(id),
                         // `Other` is not reached: `next_item` checked the
                         // frame has an element left.
-                        ProcStep::Pushed | ProcStep::Other => continue,
+                        ProcStep::Pushed | ProcStep::Lit | ProcStep::Other => continue,
                     },
                     Err(e) => {
                         // A scan/syntax error short-circuits out of
@@ -1079,28 +1177,44 @@ impl Interp {
     /// yields its last element, before that element runs (tail calls).
     /// `sync_scan_line` is not needed: the top frame is not a scanner.
     #[inline(always)]
-    fn proc_step(&mut self) -> ProcStep {
+    fn proc_step<const TIMED: bool>(&mut self) -> ProcStep {
         let Interp { estack, ostack, .. } = self;
         let Some(Frame::Proc { body, pc }) = estack.last_mut() else {
             return ProcStep::Other;
         };
         let i = *pc;
+        // `pc` is advanced in here, except for a procedure literal, which
+        // `proc_literal` takes from where it is; `pc` then still points
+        // inside the body, so the tail pop below is not taken.
         let Some(step) = body.peek(i, |o| {
             if o.executable {
                 match &o.value {
-                    Value::Operator(op) => return ProcStep::Op(op.func),
-                    Value::Name(n) => return ProcStep::Name(n.id()),
+                    Value::Operator(op) => {
+                        *pc = i + 1;
+                        return ProcStep::Op(op.func);
+                    }
+                    Value::Name(n) => {
+                        *pc = i + 1;
+                        return ProcStep::Name(n.id());
+                    }
+                    Value::Array(_) => {
+                        return if TIMED {
+                            ProcStep::Lit
+                        } else {
+                            ProcStep::Op(proc_literal_op)
+                        };
+                    }
                     _ => {}
                 }
             }
             ostack.push(o.clone_inline());
+            *pc = i + 1;
             ProcStep::Pushed
         }) else {
             // Not reached (an exhausted frame is popped as it yields its
             // last element), but `next_item` knows what to do with one.
             return ProcStep::Other;
         };
-        *pc = i + 1;
         if *pc >= body.len() {
             // Known to be this `Proc` frame: drop just its body, not
             // through the general frame drop glue.
@@ -1109,6 +1223,119 @@ impl Interp {
             }
         }
         step
+    }
+
+    /// The procedure literal at the top frame's `pc` (#864): push it, or
+    /// run it fused with the elements after it, as one step, when they are
+    /// `{ } if` or `{ } { } ifelse` and the operand under the literal is a
+    /// boolean ([`fused_conditional`](Self::fused_conditional)); a fused
+    /// run's extra steps are charged to `slice_left`. Never fails: a fused
+    /// run is only taken where it cannot.
+    fn proc_literal(&mut self) -> Result<(), PsError> {
+        let left = self.slice_left;
+        if left > 0
+            && let Some(Object {
+                value: Value::Boolean(c),
+                ..
+            }) = self.ostack.last()
+            && let Some(extra) = self.fused_conditional(left, *c)
+        {
+            self.slice_left -= extra;
+            return Ok(());
+        }
+        let Some(Frame::Proc { body, pc }) = self.estack.last_mut() else {
+            unreachable!("a procedure literal with no procedure frame on top")
+        };
+        let i = *pc;
+        // The body's handle copied in place, not through `Value::clone`.
+        if let Some(Some(lit)) = body.peek(i, proc_body) {
+            self.ostack.push(Object::exec(Value::Array(lit)));
+        }
+        *pc = i + 1;
+        if *pc >= body.len() {
+            // Known to be this `Proc` frame: drop just its body.
+            if let Some(Frame::Proc { body, .. }) = self.estack.pop() {
+                drop(body);
+            }
+        }
+        Ok(())
+    }
+
+    /// The procedure literal at the top frame's `pc` and the elements after
+    /// it, as one step, if they are `{ } if` or `{ } { } ifelse`; `c` is the
+    /// boolean on top of the operand stack. A fused run of `n` elements
+    /// takes `n - 1` of the `left` steps, so it runs only when that many
+    /// are left, and the step count is the same either way. Returns those
+    /// extra steps, or `None` if nothing fuses (nothing is done then).
+    ///
+    /// Nothing is compiled or remembered: the elements are read from the
+    /// body as it is now, under one borrow. That is the same as reading
+    /// them a step apart, since pushing a literal runs no code that could
+    /// change the body or the dictionaries in between. A run fuses only
+    /// where the conditional cannot fail (a boolean and procedure literals
+    /// as its operands, and room on the execution stack for the branch), so
+    /// every error is raised by unfused elements, exactly as before.
+    /// The conditional counts when it is the operator itself (a bound body)
+    /// or the name `if` or `ifelse` resolving to it now (an unbound one);
+    /// then `last_name` is set as running the name would set it.
+    #[inline(never)]
+    fn fused_conditional(&mut self, left: usize, c: bool) -> Option<usize> {
+        let Interp {
+            estack,
+            ostack,
+            dstack,
+            if_id,
+            ifelse_id,
+            if_name,
+            ifelse_name,
+            ..
+        } = self;
+        let depth = estack.len();
+        let Some(Frame::Proc { body, pc }) = estack.last_mut() else {
+            return None;
+        };
+        let i = *pc;
+        // (elements fused, the branch to run, the name it ran through)
+        let (n, branch, via) = body.with_slice(|els| {
+            let lit = els.get(i)?;
+            let next = els.get(i + 1)?;
+            if let Some(via) = runs_operator(next, dstack, if_name, *if_id) {
+                return Some((2, if c { proc_body(lit) } else { None }, via));
+            }
+            if left < 2 || !is_proc_literal(next) {
+                return None;
+            }
+            let via = runs_operator(els.get(i + 2)?, dstack, ifelse_name, *ifelse_id)?;
+            Some((3, proc_body(if c { lit } else { next }), via))
+        })?;
+        let tail = i + n >= body.len();
+        // The branch's frame goes where `if` would put it, after the tail
+        // pop. If that would overflow the execution stack, nothing fuses:
+        // the elements run one at a time and `if` raises the error.
+        let branch = branch.filter(|b| !b.is_empty());
+        if branch.is_some() && depth - usize::from(tail) >= EXEC_STACK_LIMIT {
+            return None;
+        }
+        ostack.pop();
+        *pc = i + n;
+        if tail {
+            self.estack.pop();
+        }
+        if via != NO_NAME {
+            self.last_name = Some(via);
+        }
+        self.fused_steps += 1;
+        if let Some(b) = branch {
+            self.estack.push(Frame::Proc { body: b, pc: 0 });
+        }
+        Some(n - 1)
+    }
+
+    /// The number of fused steps run so far (#864): a test's check that a
+    /// fused path was taken at all.
+    #[doc(hidden)]
+    pub fn fused_steps(&self) -> u64 {
+        self.fused_steps
     }
 
     /// If a `stopped` context encloses the error, record it in `$error`,
