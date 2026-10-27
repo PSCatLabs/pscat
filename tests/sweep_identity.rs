@@ -166,17 +166,10 @@ fn pixels(png: &[u8]) -> Vec<u8> {
 #[test]
 fn every_sheet_sweep_cell_matches_a_standalone_run() {
     let dir = common::scratch_dir("sweep-identity-sheet");
-    let cases: [(&str, String, &[(i64, i64)]); 2] = [
-        (
-            "--sweep-seed",
-            "1,2,3".to_string(),
-            &[(1, 9), (2, 9), (3, 9)],
-        ),
-        (
-            "--sweep",
-            "Shade=1,2,3".to_string(),
-            &[(1, 1), (1, 2), (1, 3)],
-        ),
+    // (flag, spec, (seed, Shade) per cell)
+    let cases = [
+        ("--sweep-seed", "1,2,3", [(1, 9), (2, 9), (3, 9)]),
+        ("--sweep", "Shade=1,2,3", [(1, 1), (1, 2), (1, 3)]),
     ];
     for (flag, spec, frames) in cases {
         // An unswept Shade keeps the program's own default of 9.
@@ -190,7 +183,7 @@ fn every_sheet_sweep_cell_matches_a_standalone_run() {
             "--page",
             "120x100",
             flag,
-            &spec,
+            spec,
             &file,
         ]);
         assert!(ok, "{flag}: {e}");
