@@ -432,7 +432,9 @@ for byte the one `bands: 1` gives, unless the program reads the clock.
 
 - **Limits.** The server's `--max-time` (derived from `--timeout` or
   `--job-timeout`) and `--max-steps` apply to **each band**; `--max-memory`
-  to all bands together. The first band to hit a limit stops the queue, so a
+  to all bands together, though not to each running band's own canvas, so
+  a banded render can hold up to `bands` canvases (each up to `--max-pixels`
+  x 4 bytes) beyond the budget. The first band to hit a limit stops the queue, so a
   runaway program still stops after about one limit's worth of time. The
   server's wall-clock kill (`--timeout` for a call, `--job-timeout` for a
   job) covers the **whole** render: with about 2 bands per thread queued,

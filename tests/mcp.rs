@@ -3104,3 +3104,38 @@ fn bands_refusals_name_the_argument() {
     );
     assert_eq!(svg["isError"], false, "{svg}");
 }
+
+/// A banded render keeps the server's bounds: the step limit stops a
+/// runaway program in every band, as in a plain render (the queue stops at
+/// the first band to hit it), and reads stay confined to the read roots
+/// (#763). Both come back as a plain render's do: the partial page plus a
+/// `PostScript error:` block.
+#[test]
+fn a_banded_render_keeps_the_limits_and_read_confinement() {
+    let mut s = Server::start_in(
+        &common::scratch_dir("mcp-bands-bounds"),
+        &["--max-steps", "200000"],
+    );
+    initialized(&mut s);
+    let mut cases = vec![("0 0 20 20 rectfill { } loop", "limitexceeded (steps)")];
+    if cfg!(unix) {
+        cases.push((
+            "0 0 20 20 rectfill (/etc/hosts) (r) file pop",
+            "invalidfileaccess",
+        ));
+    }
+    for (source, expect) in cases {
+        for bands in [1, 2] {
+            let result = s.tool(
+                "render_postscript",
+                json!({ "source": source, "width": 40, "height": 40, "bands": bands }),
+            );
+            let text = texts(&result).join("\n");
+            assert!(
+                text.contains("PostScript error:") && text.contains(expect),
+                "bands {bands}: {source}: {text}"
+            );
+            assert_eq!(images(&result).len(), 1, "the partial page: {result}");
+        }
+    }
+}

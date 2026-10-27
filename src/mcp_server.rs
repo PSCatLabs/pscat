@@ -933,17 +933,28 @@ fn initialize_result(cfg: &Config, params: &Value) -> Result<Value, (String, Val
              timeout can also cut a call off (Codex's default is 60 s). For a render that may \
              take longer, use start_render: it returns a job_id at once, render_status polls \
              it, render_result fetches the pages, cancel_render stops it; a job may run {}s. \
-             Both take bands (up to {}) to render a PNG on several threads, which pays off \
-             only for a program that reads /BandBBox and skips work outside its band. \
-             A page, board or sheet is limited to {} pixels. \
+             {bands}A page, board or sheet is limited to {} pixels. \
              {out_path} {reads}",
             cfg.timeout.as_secs(),
             cfg.job_timeout.as_secs(),
-            cfg.max_bands,
             cfg.max_pixels,
+            bands = bands_note(cfg),
             reads = read_roots_note(cfg),
         ),
     }))
+}
+
+/// The instructions' line on `bands` (#843), empty when `--max-bands 1`
+/// turns banded renders off.
+fn bands_note(cfg: &Config) -> String {
+    if cfg.max_bands < 2 {
+        return String::new();
+    }
+    format!(
+        "Both take bands (up to {}) to render a PNG on several threads, which pays off \
+         only for a program that reads /BandBBox and skips work outside its band. ",
+        cfg.max_bands
+    )
 }
 
 /// `YYYY-MM-DD`, the shape of every MCP revision identifier.
