@@ -600,15 +600,15 @@ fn the_fused_paths_are_taken_where_they_apply_and_only_there() {
         ("{ false { 1 } if } bind exec", 1),
         ("{ true { 1 } if } exec", 1),
         ("{ false { 1 } if } exec", 1),
-        ("{ true { 1 } { 2 } ifelse } bind exec", 0),
-        ("{ false { 1 } { 2 } ifelse } exec", 0),
+        ("{ true { 1 } { 2 } ifelse } bind exec", 1),
+        ("{ false { 1 } { 2 } ifelse } exec", 1),
         ("{ true { } if } bind exec", 1),
-        ("{ false { } { } ifelse } bind exec", 0),
+        ("{ false { } { } ifelse } bind exec", 1),
         (
             "/p { 3 dup 0 lt { pop 0 } if } bind def 10 { p pop } repeat",
             10,
         ),
-        ("1 1 5 { 2 mod 0 eq { 1 } { 2 } ifelse pop } bind for", 0),
+        ("1 1 5 { 2 mod 0 eq { 1 } { 2 } ifelse pop } bind for", 5),
         // Nothing fuses: not a boolean, no conditional after, a name that
         // is not `if` itself, a redefined `if`, a view that ends first,
         // or the top level (not a procedure).

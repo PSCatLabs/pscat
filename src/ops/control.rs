@@ -40,6 +40,7 @@ fn pop_bool(it: &mut Interp) -> Result<bool, PsError> {
 /// `if` and `ifelse`, for the interpreter's fused conditionals (#864) to
 /// recognise.
 pub(crate) const IF: crate::object::OpFn = ps_if;
+pub(crate) const IFELSE: crate::object::OpFn = ifelse;
 
 fn ps_if(it: &mut Interp) -> Result<(), PsError> {
     let proc = it.pop()?;

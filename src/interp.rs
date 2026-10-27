@@ -1277,8 +1277,16 @@ impl Interp {
             if let Some(via) = conditional_at(next, dstack, crate::ops::control::IF, *if_id) {
                 return Some((2, if c { proc_body(lit) } else { None }, via));
             }
-            let _ = (left, ifelse_id, is_proc_literal(next));
-            None
+            if left < 2 || !is_proc_literal(next) {
+                return None;
+            }
+            let via = conditional_at(
+                els.get(i + 2)?,
+                dstack,
+                crate::ops::control::IFELSE,
+                *ifelse_id,
+            )?;
+            Some((3, proc_body(if c { lit } else { next }), via))
         })?;
         let tail = i + n >= body.len();
         // The branch's frame goes where `if` would put it, after the tail
