@@ -1,6 +1,6 @@
 %!PS-Adobe-3.0
 %%Title: image / colorimage DataSource driver (issues #776, #781)
-%%Pages: 4
+%%Pages: 5
 %%BoundingBox: 0 0 260 50
 %%SelfTestPage: 260x50
 %%IdentityCorpus: always
@@ -24,6 +24,10 @@
 %      it (#781): the rows follow in the order red 0, green 0, blue 0, red 1, ...
 %   4. `colorimage` from an inline filter, 1-bit RGB, 4-bit CMYK, and a
 %      colorimage drawn while the current space is DeviceGray (it ignores it)
+%   5. raw `currentfile`, no filter (#896): the samples are the very bytes of
+%      the program text, and the program resumes on the byte after them, so
+%      the next call can sit on the same line as the data. Gray `image`, RGB
+%      and CMYK `colorimage`, and a dict `image`
 %
 % The inline sources read the program text that follows the line that calls
 % the helper, so each data line sits directly under its call.
@@ -135,4 +139,17 @@ showpage
 105 W H 4 4 { W H mul 2 mul mk } CI
 /DeviceGray setcolorspace 0.5 setgray
 155 W H 8 3 { W H mul 3 mul mk } CI
+showpage
+
+% ---- 5. raw currentfile (no filter): the bytes after the call are the samples ----
+/DeviceGray setcolorspace
+5   4 3 { currentfile } L1
+0Kq~#Zm4@hT!
+55  2 2 8 3 { currentfile } CI
+Gz(9b]Lk0r>W 105 2 2 8 4 { currentfile } CI
+AzazAZ09q7Q7*u}u 155 4 2 { currentfile } D1
+w3E!x9Rb
+/DeviceRGB setcolorspace
+205 2 1 { currentfile } D1
+Hello!
 showpage

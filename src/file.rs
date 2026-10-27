@@ -312,7 +312,18 @@ impl PsFile {
                         break;
                     }
                     let take = out.len().min(max - (buf.len() - start));
-                    buf.extend(out.drain(..take));
+                    if let (1, Some(b)) = (take, out.front()) {
+                        // ASCIIHex decodes one byte per pull: skip the
+                        // slice copy for a lone byte.
+                        buf.push(*b);
+                        out.pop_front();
+                    } else {
+                        let (a, b) = out.as_slices();
+                        let from_a = take.min(a.len());
+                        buf.extend_from_slice(&a[..from_a]);
+                        buf.extend_from_slice(&b[..take - from_a]);
+                        out.drain(..take);
+                    }
                 }
             }
             Kind::Output(_) => return Err(PsError::Io),
@@ -321,24 +332,21 @@ impl PsFile {
         result.map(|()| buf.len() - start)
     }
 
-    /// The bookkeeping [`Self::read_byte`] does, over bytes just handed out.
+    /// The bookkeeping [`Self::read_byte`] does, over bytes just handed out:
+    /// every CR and every LF ends a line, except the LF of a CR LF pair
+    /// (one straddling the previous read included). One pass without
+    /// branches, since it runs over every sample of an image (#896).
     fn count_read(&mut self, bytes: &[u8]) {
         self.consumed += bytes.len();
-        for &byte in bytes {
-            match byte {
-                b'\r' => {
-                    self.line += 1;
-                    self.last_was_cr = true;
-                }
-                b'\n' => {
-                    if !self.last_was_cr {
-                        self.line += 1;
-                    }
-                    self.last_was_cr = false;
-                }
-                _ => self.last_was_cr = false,
-            }
+        let mut prev_cr = self.last_was_cr;
+        let mut lines = 0;
+        for &b in bytes {
+            let cr = b == b'\r';
+            lines += usize::from(cr | (b == b'\n' && !prev_cr));
+            prev_cr = cr;
         }
+        self.line += lines;
+        self.last_was_cr = prev_cr;
     }
 
     pub fn peek_byte(&mut self) -> Result<Option<u8>, PsError> {
