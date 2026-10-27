@@ -27,36 +27,41 @@ What changed (src/image.rs only):
   pixels, and `rgb_at` is pure). At one sample per pixel or fewer it would
   never hit, so it is off there.
 
-Instructions retired (`/usr/bin/time -l`, pscat only, `--page 983x983 --dpi
-300 --headless`, a 4096x4096 device page; 8-bit, default Decode):
+Measured with pscat only, release build, `--page 983x983 --dpi 300
+--headless` (a 4096x4096 device page), default Decode. Instructions retired
+from `/usr/bin/time -l`; CPU seconds from `scripts/bench_compare.sh`, best of
+5, with the identical-binary control within 0.01 s of the base:
 
-| case | base | head |
-|---|---|---|
-| RGB 4096², file | 8.29 G | 6.90 G |
-| RGB 4096², procedure | 5.54 G | 4.17 G |
-| gray 4096², file | 4.79 G | 4.65 G |
-| gray 4096², procedure | 3.88 G | 3.75 G |
-| CMYK 4096², file | 10.17 G | 8.12 G |
-| CMYK 4096², procedure | 6.53 G | 4.51 G |
-| RGB 4096², file, 0.5 setalpha + Multiply | 8.89 G | 7.51 G |
-| RGB 1024² magnified 4x, /Interpolate true | 16.25 G | 10.78 G |
-| RGB 1024² magnified 4x, /Interpolate false | 5.64 G | 3.13 G |
-| RGB 2x2 stretched over the page | 5.46 G | 2.50 G |
-| 5000 8x8 RGB images | 2.01 G | 1.36 G |
-| RGB 16-bit 4096², procedure (no table) | 5.89 G | 6.01 G |
-| Indexed 8-bit 4096², procedure (no table) | 4.51 G | 4.57 G |
+| case | instr base | instr head | CPU base | CPU head |
+|---|---|---|---|---|
+| RGB 8-bit 4096², file | 8.26 G | 6.81 G | 0.26 | 0.23 |
+| RGB 8-bit 4096², procedure | 5.54 G | 4.08 G | 0.16 | 0.13 |
+| gray 8-bit 4096², file | 4.78 G | 4.57 G | 0.16 | 0.16 |
+| gray 8-bit 4096², procedure | 3.88 G | 3.67 G | 0.13 | 0.11 |
+| CMYK 8-bit 4096², file | 10.16 G | 8.03 G | 0.34 | 0.28 |
+| CMYK 8-bit 4096², procedure | 6.55 G | 4.41 G | 0.20 | 0.14 |
+| RGB 8-bit 4096², file, 0.5 setalpha + Multiply | 8.87 G | 7.42 G | 0.30 | 0.24 |
+| RGB 8-bit 1024² magnified 4x, /Interpolate true | 16.24 G | 10.67 G | 0.51 | 0.41 |
+| RGB 8-bit 1024² magnified 4x, /Interpolate false | 5.64 G | 3.01 G | 0.15 | 0.08 |
+| RGB 8-bit 2x2 stretched over the page | 5.46 G | 2.39 G | 0.15 | 0.06 |
+| 5000 8x8 RGB images | 2.02 G | 1.32 G | 0.06 | 0.04 |
+| RGB 16-bit 4096², procedure (no table) | 5.94 G | 5.98 G | 0.17 | 0.17 |
+| Indexed 8-bit 4096², procedure (no table) | 4.52 G | 4.49 G | 0.14 | 0.15 |
+| RGB 16-bit, 15 renders looped | | | 2.55 | 2.55 |
 
-CPU seconds (`scripts/bench_compare.sh`) are in the PR. Gray gains little:
-one component was already cheap. Depths without a table (12, 16 bits) and
-Indexed images run the direct code, chosen once per cell; they come out about
-1 to 2% slower (16-bit, 15 renders looped: 2.58 s against 2.52 s, noise floor
-0.01 s), which turning the memo off does not change, so it is code layout
-around the larger `rgb_at`, not extra work. File sources stay dominated by reading the
+Gray gains little: one component was already cheap. Depths without a table
+(12, 16 bits) and Indexed images run the direct code, chosen once per cell.
+They came out 2 to 4% slower until `rasterize` was marked `#[inline(never)]`:
+inlined into `step` (which the larger `rgb_at` allowed) the per-pixel loop
+compiled worse. Out of line they are at parity, and the table cases gain a
+little more. File sources stay dominated by reading the
 data a byte at a time (a bulk read in `fill` would be the next step; it lives
 in `src/file.rs`).
 
 Output is unchanged: unit test `decode_table_matches_the_direct_decode_bit_for_bit`
 (depths 1-8, 1-4 components, inverted/clamped/short Decode, short data,
 planes, Separation; compared with `to_bits`), the two-binary identity check,
-and SVG/PDF byte comparison. A deliberately broken head (fast-path offset +1)
-makes the image drivers differ, so the corpus reaches the new path.
+and SVG/PDF byte comparison. Three deliberately broken heads (fast-path
+offset +1; table inverted for depths under 8; memo keyed on the row only)
+each make image drivers differ, so the corpus reaches every new path. The
+memo is PNG-only (SVG and PDF never go through `rasterize`).
