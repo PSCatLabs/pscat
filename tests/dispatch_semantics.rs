@@ -1011,6 +1011,14 @@ fn uncaught_errors_in_loops_report_the_same_command_and_stack() {
             "%%[ Error: invalidexit; OffendingCommand: exit; Line: 1 ]%% | ",
         ),
         (
+            "2 { 3 { 1 0 div } repeat } repeat",
+            "%%[ Error: undefinedresult; OffendingCommand: div; Line: 1 ]%% | ",
+        ),
+        (
+            "2 { 3 { 1 0 div } bind repeat } bind repeat",
+            "%%[ Error: undefinedresult; OffendingCommand: repeat; Line: 1 ]%% | ",
+        ),
+        (
             "1 1 3 { pop exit } for 1 (a) add",
             "%%[ Error: typecheck; OffendingCommand: add; Line: 1 ]%% | 1",
         ),
