@@ -141,8 +141,12 @@ class WinLauncher(unittest.TestCase):
         return {k: v for k, v in env.items() if v is not None}
 
     def run_argv(self, argv, env=None, stdin="", timeout=180):
+        # stdout (MCP, --hook, --locate) is UTF-8; stderr comes in the console
+        # code page, so its non-ASCII letters may not survive (the asserts on
+        # it are ASCII).
         return subprocess.run(argv, env=env or self.env(), input=stdin, capture_output=True,
-                              text=True, timeout=timeout, cwd=self.path("empty"))
+                              encoding="utf-8", errors="replace", timeout=timeout,
+                              cwd=self.path("empty"))
 
     def run_cmd(self, *args, env=None, stdin="", timeout=180):
         return self.run_argv([self.path("plugin/scripts/pscat-mcp.cmd"), *args], env, stdin, timeout)
@@ -194,7 +198,8 @@ class WinLauncher(unittest.TestCase):
     def test_parallel_cold_starts_install_once(self):
         procs = [subprocess.Popen([self.path("plugin/scripts/pscat-mcp.cmd"), "--locate"],
                                   env=self.env(), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                  stdin=subprocess.DEVNULL, text=True, cwd=self.path("empty"))
+                                  stdin=subprocess.DEVNULL, encoding="utf-8", errors="replace",
+                                  cwd=self.path("empty"))
                  for _ in range(8)]
         outs = [p.communicate(timeout=300) for p in procs]
         self.assertEqual([p.returncode for p in procs], [0] * 8, [e for _, e in outs])

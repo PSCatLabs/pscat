@@ -140,8 +140,8 @@ def check(bin_dir, work):
         {"jsonrpc": "2.0", "method": "notifications/initialized"},
         {"jsonrpc": "2.0", "id": 2, "method": "tools/list"}))
     senv = {**env(clean_path, os.path.join(work, "codex-cache"), release_url), **(t.get("env") or {})}
-    p = subprocess.run([twin], input=msgs, capture_output=True, text=True, timeout=300,
-                       env=senv, cwd=t.get("cwd"))
+    p = subprocess.run([twin], input=msgs, capture_output=True, encoding="utf-8",
+                       errors="replace", timeout=300, env=senv, cwd=t.get("cwd"))
     replies = {}
     for line in p.stdout.splitlines():
         try:
