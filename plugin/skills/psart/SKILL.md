@@ -121,8 +121,8 @@ showpage
 
 Render it with `pscat --page 400x400 --png cloud.png cloud.ps`, and add
 `--bands 4` to split the rows (about twice as fast here, same bytes). `--bands`
-is command-line only: `pscat-mcp` has no such option. Over MCP a long render
-goes through `start_render` (see the `pscat` skill). An older pscat has
+works over MCP too: `render_postscript` and `start_render` take `bands`, and a
+long render goes through `start_render` (see the `pscat` skill). An older pscat has
 no noise operators: probe `systemdict /fbm2 known`, and fall back to artkit's
 `noise2` (or update pscat). For Ghostscript, `lib/noiseref.ps` has the same
 noise as `nrfbm2` and friends. Worked example: `gallery/basin_and_range.ps`;

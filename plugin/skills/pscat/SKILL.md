@@ -46,7 +46,8 @@ apply to each band. An unaware program pays for the whole run once per band.
 The band names are in `userdict` and differ per band: a program that hashes,
 serialises or `forall`s `userdict` (e.g. to build a cache key) must leave
 `/BandIndex`, `/BandCount` and `/BandBBox` out, or every band computes a
-different key (#868 is the related `forall`-order issue). Command line only: `pscat-mcp` has no bands.
+different key (#868 is the related `forall`-order issue). Over MCP, `render_postscript`
+and `start_render` take `bands` (see "MCP" below).
 
 `pscat --profile --headless f.ps` (or with `--png`) prints, on stderr, each
 named procedure's call count and exclusive and inclusive wall time, slowest
@@ -344,7 +345,11 @@ returns a `job_id` at once), then **`render_status`** (`queued`, `running`, `don
 `cancelled`, with `pages_done`) until it is finished, then **`render_result`** (exactly what
 `render_postscript` returns); **`cancel_render`** stops one. A job may run an hour by default
 (`--job-timeout`), two at once (`--max-jobs`). Raise `--max-steps` (or `0`) too, or the step
-limit stops a long render first. The
+limit stops a long render first. Both render tools take **`bands`** (1 to the server's
+`--max-bands`, default 4): `pscat --bands N`, worth it only for a program that reads
+`/BandBBox` (above). PNG only, no `Lint:` block, and a job's `pages_done` stays 0 until it
+ends. The step and time limits apply to each band; the call's or job's wall-clock limit to the
+whole render. The
 interpreter stops a runaway
 program itself, with a `limit_exceeded` error whose `limit` field says `steps`,
 `time` or `memory` (a render still returns the partial page); `stopped` cannot

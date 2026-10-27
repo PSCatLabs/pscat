@@ -753,7 +753,11 @@ an installed build (October 2026, #568).
   for a job, by default, nearly an hour of CPU. A job's child is started with
   `--progress`, which prints `pscat: progress pages=N` to its stderr after each
   slice in which a page was finished; the server reads those lines for
-  `render_status` and removes them from the stderr it returns. Job ids are
+  `render_status` and removes them from the stderr it returns. A render's
+  `bands` argument (#843) runs one child on that many threads, capped by
+  `--max-bands` (default 4, at most 64), so the most render threads at once is
+  (`--max-jobs` + 4 calls) x `--max-bands`; the step and time limits apply to
+  each band and the memory limit to all of them together. Job ids are
   sequential, which is fine for one local client and not for a shared server:
   a hosted one (#689) would need unguessable ids.
 - **Bad input gets a bounded, structured answer, and stdout stays clean.**

@@ -1261,7 +1261,11 @@ renders eight examples in both and compares block-downsampled output).
   interning can also shift `forall` order against a plain run (#868). The
   backup-task / `--band-cuts` work for the tail (#869) was measured, then
   shelved once the re-test showed the queue already beats a cost-balanced
-  split there (data on #869).
+  split there (data on #869). `pscat-mcp` exposes it as a `bands` argument on
+  `render_postscript` and `start_render` (#843), capped by `--max-bands`;
+  a banded run drops the server's `--lint` and `--progress`, which `--bands`
+  refuses. `--band-rows` is deliberately not exposed. See
+  `notes/843-mcp-bands.md`.
 - **`--profile` (#737).** Per-procedure call counts and inclusive/exclusive time
   on stderr (`src/profile.rs`, a `Profiler` on `Interp`). `execute_resolved` takes
   the name a body was reached through (`via`, `NO_NAME` for `exec`/`if`) and, with
