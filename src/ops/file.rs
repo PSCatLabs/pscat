@@ -164,12 +164,11 @@ fn writable_name(bytes: &[u8]) -> Result<&str, PsError> {
 /// Send bytes to an output file. Writing to an input file or a closed
 /// one is an `ioerror`.
 pub(super) fn write_bytes(it: &mut Interp, f: &FileHandle, bytes: &[u8]) -> Result<(), PsError> {
-    use std::io::Write;
     let disk = match f.borrow_mut().sink_mut() {
         None => return Err(PsError::Io),
         Some(Sink::Disk(_)) => true,
         Some(Sink::Stderr) => {
-            return std::io::stderr().write_all(bytes).map_err(|_| PsError::Io);
+            return it.write_stderr(bytes, false).map_err(|_| PsError::Io);
         }
         Some(Sink::Stdout) => false,
     };
@@ -187,12 +186,14 @@ pub(super) fn write_bytes(it: &mut Interp, f: &FileHandle, bytes: &[u8]) -> Resu
 
 /// Flush an output file (`flushfile` on one, and `closefile`).
 fn flush_output(it: &mut Interp, f: &FileHandle) -> Result<(), PsError> {
-    use std::io::Write;
     let mut file = f.borrow_mut();
     match file.sink_mut() {
         None => Ok(()),
         Some(Sink::Disk(d)) => d.flush(),
-        Some(Sink::Stderr) => std::io::stderr().flush().map_err(|_| PsError::Io),
+        Some(Sink::Stderr) => {
+            drop(file);
+            it.write_stderr(&[], true).map_err(|_| PsError::Io)
+        }
         Some(Sink::Stdout) => {
             drop(file);
             it.write_stdout(&[], true).map_err(|_| PsError::Io)

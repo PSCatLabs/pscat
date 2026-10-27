@@ -400,6 +400,11 @@ pub struct Interp {
     /// Set once the capture buffer has dropped output and carries the
     /// truncation note; later writes are discarded.
     stdout_truncated: bool,
+    /// When set, what the program writes to stderr (`(%stderr)` files,
+    /// `handleerror`, `findfont`'s stand-in notes) is dropped; the notes
+    /// still collect in `font_warnings`. `pscat --bands` sets it on every
+    /// band but the top one (#877).
+    quiet_stderr: bool,
     /// Caps on the running program (issue #604); `Limits::none()` unless
     /// `set_limits` was called, and then every limit check is skipped.
     limits: Limits,
@@ -547,6 +552,7 @@ impl Interp {
             keep_dicts_on_drop: false,
             stdout_capture: None,
             stdout_truncated: false,
+            quiet_stderr: false,
             limits: Limits::none(),
             steps_used: 0,
             run_clock: crate::clock::Clock::start(),
@@ -2554,6 +2560,26 @@ impl Interp {
     pub fn capture_stdout(&mut self) {
         self.stdout_capture = Some(Vec::new());
         self.stdout_truncated = false;
+    }
+
+    /// Drop what the program writes to stderr from now on: `(%stderr)`
+    /// files, `handleerror` and `findfont`'s stand-in notes, which
+    /// [`font_warnings`](Self::font_warnings) still collects. For a host
+    /// running several copies of one program (`pscat --bands`, #877).
+    pub fn quiet_stderr(&mut self) {
+        self.quiet_stderr = true;
+    }
+
+    /// Program output to stderr, unless [`quiet_stderr`](Self::quiet_stderr)
+    /// is on.
+    pub(crate) fn write_stderr(&self, bytes: &[u8], flush: bool) -> std::io::Result<()> {
+        use std::io::Write;
+        if self.quiet_stderr {
+            return Ok(());
+        }
+        let mut err = std::io::stderr();
+        err.write_all(bytes)?;
+        if flush { err.flush() } else { Ok(()) }
     }
 
     /// What has been printed since [`Interp::capture_stdout`]; empty when

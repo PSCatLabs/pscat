@@ -42,7 +42,8 @@ faster for a program that reads `/BandBBox [llx lly urx ury]` (also `/BandIndex`
 procedure that computes only those rows plus a margin: the `psart` skill has a
 runnable one ("Heavy noise renders"). PNG only; it refuses `--svg`, `--pdf`,
 `--lint`, sweeps, `--profile` and `--allow-write`. `--max-steps` and `--max-time`
-apply to each band. An unaware program pays for the whole run once per band.
+apply to each band. An unaware program pays for the whole run once per band,
+but only band 0 writes stdout and stderr; an uncaught error is reported once.
 The band names are in `userdict` and differ per band: a program that hashes,
 serialises or `forall`s `userdict` (e.g. to build a cache key) must leave
 `/BandIndex`, `/BandCount` and `/BandBBox` out, or every band computes a
