@@ -195,7 +195,8 @@ fractal_clouds' own runs were single runs with load drifting from 3 to 12.
 
 ### Follow-ups (not done)
 
-- **Pre-existing (#736): the band preamble can shift name ids.** The
+- **Fixed in #868 (`notes/868-band-preamble-name-ids.md`).** ~~Pre-existing
+  (#736): the band preamble can shift name ids.~~ The
   preamble interns `BandIndex`, `BandCount` and `BandBBox` before the
   program, so a program that first mentions one of them partway through (or
   never) gets different ids for its later names than a plain run, and a

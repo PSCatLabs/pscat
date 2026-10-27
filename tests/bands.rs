@@ -604,8 +604,8 @@ fn a_limit_stops_the_queue() {
 /// on the same worker left behind. Here the top band interns one extra name
 /// before the dictionary is built; its own rows don't show the dictionary,
 /// but on a reused thread the bottom band's `forall` order would shift.
-/// (The first line interns the band names where the band preamble does, so
-/// the plain run's ids line up with a band's.)
+/// (The first line mentions the band names: since #868 that no longer
+/// matters for the ids, see `band_names_do_not_shift_the_programs_name_ids`.)
 #[test]
 fn a_band_does_not_inherit_an_earlier_bands_names() {
     let dir = common::scratch_dir("bands-names-ids");
@@ -809,4 +809,53 @@ fn lint_with_bands_is_not_clean_after_an_error_in_any_band() {
     assert!(!err.contains("lint: clean"), "{err}");
     let report = err.find("band 3/4 failed").expect("the band's report");
     assert!(report < err.find("[run-error]").unwrap(), "{err}");
+}
+
+/// The band preamble defines `/BandIndex`, `/BandCount` and `/BandBBox`
+/// before the program runs, but it must not take name ids a plain run would
+/// give the program's own names (#868): `forall` over name keys follows the
+/// ids, so a shift reorders it. One program first mentions a band name
+/// after a name of its own (it failed before the fix: two ids shifted), one
+/// never does; each paints a 40-key dictionary in `forall` order across
+/// every band, and must match the plain render byte for byte.
+#[test]
+fn band_names_do_not_shift_the_programs_name_ids() {
+    let dir = common::scratch_dir("bands-preamble-ids");
+    let body = "/d 40 dict def
+0 1 39 { /k exch def d (key00) 5 string copy dup 3 k 10 idiv 48 add put
+         dup 4 k 10 mod 48 add put cvn k put } for
+/c 0 def
+d { exch pop 255 div setgray c 3 mul 0 3 100 rectfill /c c 1 add def } forall
+";
+    let programs = [
+        (
+            "partway",
+            format!("%!PS\n/early pop\n/BandIndex pop\n{body}showpage\n"),
+        ),
+        ("never", format!("%!PS\n{body}showpage\n")),
+    ];
+    for (tag, source) in programs {
+        let file = write_source(&dir, &format!("{tag}.ps"), &source);
+        let file = file.to_str().expect("utf-8 path");
+        let render = |name: &str, more: &[&str]| {
+            let out = dir.join(format!("{tag}-{name}.png"));
+            let mut args = vec!["--page", "120x100"];
+            args.extend(more);
+            args.extend(["--png", out.to_str().unwrap(), file]);
+            let (ok, _, e) = pscat(&args);
+            assert!(ok, "{tag}: {e}");
+            std::fs::read(out).unwrap()
+        };
+        let plain = render("plain", &[]);
+        for (name, more) in [
+            ("b1", &["--bands", "1"][..]),
+            ("b2", &["--bands", "2"][..]),
+            ("rows", &["--bands", "2", "--band-rows", "30"][..]),
+        ] {
+            assert!(
+                plain == render(name, more),
+                "{tag}: {more:?} differs from the plain render"
+            );
+        }
+    }
 }

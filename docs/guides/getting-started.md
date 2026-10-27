@@ -190,9 +190,10 @@ More on the less obvious ones:
   `forall` sees different contents in each band, so leave the three names out
   of such keys. One project's bake cache missed in every band but one for this
   reason ([#844](https://github.com/PSCatLabs/pscat/issues/844#issuecomment-6429744992)).
-  A related issue is that defining the names can change the `forall` order of
-  other name-keyed dicts against a plain run
-  ([#868](https://github.com/PSCatLabs/pscat/issues/868)). A program that reads them can skip the work outside its band:
+  Defining them doesn't change the `forall` order of the program's other
+  dicts against a plain run
+  ([#868](https://github.com/PSCatLabs/pscat/issues/868)), unless a band name
+  is itself a key there. A program that reads them can skip the work outside its band:
   an expensive `colorimage` procedure computes only the image rows that reach
   `BandBBox`, plus a row of margin. That is where the speed comes from. A
   program that doesn't read them still renders correctly, but every band runs

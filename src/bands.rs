@@ -520,8 +520,9 @@ fn run_band(
         width_pt,
         user_y(top)
     );
-    interp
-        .run_source(preamble.as_bytes())
+    // Detached, so the band names take none of the name ids a plain run
+    // gives the program's own names (`forall` order follows the ids; #868).
+    pscat::name::detached(|| interp.run_source(preamble.as_bytes()))
         .map_err(|e| format!("internal error defining the band names: {e}"))?;
     // Limits after the band names, so they bound the program alone, as in a
     // plain render. Memory is counted from the base all bands share, so the
