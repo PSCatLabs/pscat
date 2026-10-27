@@ -22,6 +22,10 @@ its key, so operators that share one function (`readonly`/`noaccess`/
 - No systemdict walk any more (`set_ops` takes no argument) and no
   `(unnamed operator)` label.
 
+`exec` of an operator object (`arr /executeonly load exec`) calls the
+function directly and is not timed, before or after this change; so the
+`next_item` arm that passes `op.name` has no PostScript route to test.
+
 ### Visible effect
 
 Rows are one per registered name, so an alias that used to share a row with
@@ -30,15 +34,20 @@ rows. The JSON shape is unchanged (`name`, `calls`, `time_ms`), and a probe
 over systemdict found no operator whose registered name differs from its key,
 so no single-name row changed its label.
 
-### Overhead (CPU seconds, best of 9/5/7, interleaved, `bench_compare.sh`)
+### Overhead (CPU seconds, minimum / median, interleaved, `bench_compare.sh`)
 
-| file | flags | base | head |
-|---|---|---|---|
-| bound `fib 27` | `--profile-ops` | 0.220 | 0.220 |
-| unbound `fib 27` | `--profile-ops` | 0.240 | 0.230 |
-| `fib 30` | `--profile-ops` | 1.340 | 1.260 |
-| `fib 30` | none | 0.310 | 0.320 |
-| `fib 30` | `--profile` | 0.500 | 0.500 |
+"control" is the base binary run again: the noise floor.
 
-With SipHash on the (address, length) key the same runs were about 12% slower
-(0.23 to 0.26 s), which is why the hasher is custom.
+| file | flags | base | head | control |
+|---|---|---|---|---|
+| bound `fib 27` | `--profile-ops` | 0.22 / 0.22 | 0.22 / 0.22 | 0.22 / 0.22 |
+| unbound `fib 27` | `--profile-ops` | 0.24 / 0.24 | 0.23 / 0.23 | 0.24 / 0.24 |
+| `fib 30` | `--profile-ops` | 1.34 / 1.36 | 1.26 / 1.37 | 1.35 / 1.38 |
+| `gallery/chalkboard_lecture.ps` | `--profile-ops` | 13.98 / 14.16 | 14.51 / 14.80 | 14.60 / 15.23 |
+| `fib 30` | none | 0.31 / 0.32 | 0.32 / 0.32 | 0.31 / 0.33 |
+| bound `fib 30` | none | 0.15 / 0.16 | 0.16 / 0.16 | 0.16 / 0.16 |
+| `fib 30` | `--profile` | 0.50 / 0.51 | 0.50 / 0.50 | 0.50 / 0.51 |
+
+Every head result is inside the control's spread: no measurable change. With
+SipHash on the (address, length) key, `fib 27` under `--profile-ops` was about
+12% slower (0.23 to 0.26 s), which is why the hasher is custom.
