@@ -581,3 +581,25 @@ impl Drop for Watchdog {
         }
     }
 }
+
+/// The version string the binaries print (build.rs, issue #839): Cargo's
+/// version, then for a build from a git checkout that is not a release tag
+/// `+<7 hex digits>`, `-dirty` if tracked files were edited, or `+dirty` on a
+/// tag with edits. Returns it after checking that shape.
+#[allow(dead_code)] // each test crate compiles this module; not all call it
+pub fn built_version() -> &'static str {
+    let version = env!("PSCAT_VERSION");
+    let rest = version
+        .strip_prefix(env!("CARGO_PKG_VERSION"))
+        .unwrap_or_else(|| panic!("{version:?} must start with the Cargo version"));
+    let ok = match rest.strip_prefix('+') {
+        None => rest.is_empty(),
+        Some("dirty") => true,
+        Some(meta) => {
+            let sha = meta.strip_suffix("-dirty").unwrap_or(meta);
+            sha.len() == 7 && sha.bytes().all(|b| b.is_ascii_hexdigit())
+        }
+    };
+    assert!(ok, "unexpected build metadata in version {version:?}");
+    version
+}

@@ -121,7 +121,7 @@ pub fn run_interactive(
     };
     println!(
         "pscat {} — interactive: type PostScript here, watch it draw in the window.",
-        env!("CARGO_PKG_VERSION")
+        env!("PSCAT_VERSION")
     );
     println!("'quit', Ctrl-D, or closing the window exits.");
     let mut app = App {
