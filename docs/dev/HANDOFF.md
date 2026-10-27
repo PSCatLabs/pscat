@@ -1265,7 +1265,10 @@ renders eight examples in both and compares block-downsampled output).
   `render_postscript` and `start_render` (#843), capped by `--max-bands`;
   a banded run drops the server's `--lint` and `--progress`, which `--bands`
   refuses. `--band-rows` is deliberately not exposed. See
-  `notes/843-mcp-bands.md`.
+  `notes/843-mcp-bands.md`. Bands above 0 also drop stderr
+  (`Interp::quiet_stderr`; every program stderr write goes through
+  `Interp::write_stderr`, so a new one must too), and their font notes are
+  printed once at the end (#877, `notes/877-bands-stderr-once.md`).
 - **`--profile` (#737).** Per-procedure call counts and inclusive/exclusive time
   on stderr (`src/profile.rs`, a `Profiler` on `Interp`). `execute_resolved` takes
   the name a body was reached through (`via`, `NO_NAME` for `exec`/`if`) and, with

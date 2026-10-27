@@ -212,8 +212,11 @@ More on the less obvious ones:
   budget for the whole render, counted from before the threads start; each
   running thread holds its own canvas (N times a plain render's), which the
   budget leaves out as a plain render's leaves out its one canvas. Only the top band's
-  stdout is printed, but writes to `(%stderr)` appear once per band; an error is reported once, from the first band that hit
-  it, and the stitched partial page is still written. A piece seeded from
+  stdout and stderr (`(%stderr)` writes, `handleerror`) are printed; an uncaught error is
+  reported once, from the first band that hit it (`band i/N failed`), and the stitched
+  partial page is still written. A font stand-in note that only a lower band raised is
+  printed once at the end; an error a program catches and reports itself in a lower band
+  only is not heard. A piece seeded from
   `realtime` or `usertime` can tear at the seams, since the bands read
   different clocks.
 - **Profile.** `pscat --profile prog.ps` runs the program headlessly, then

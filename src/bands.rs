@@ -30,6 +30,17 @@
 //! Band `i` of `K` on a canvas `H` pixels tall owns rows
 //! `floor(i*H/K) .. floor((i+1)*H/K)`.
 //!
+//! Output: only the top band (0) writes stdout and stderr, so a program
+//! that is unaware of bands prints once, not once per band. The others
+//! capture their stdout and drop their stderr (`(%stderr)` files,
+//! `handleerror`, #877). What can still reach the user from them: an
+//! uncaught error, which `run` reports once, from the first band that hit
+//! it, labelled `band i/N failed`; and a font stand-in note a lower band
+//! raised that band 0 did not, printed once at the end. A program that
+//! catches an error itself and writes about it (to `(%stderr)` or with
+//! `handleerror`) in one lower band only is not heard: that is its own
+//! output, written by a copy the page doesn't keep.
+//!
 //! Limits: `--max-steps` and `--max-time` apply to each band on its own (an
 //! unaware program takes as many steps in every band as in a single run, so
 //! the same limit fits). The first band to hit any limit stops the queue:
@@ -122,6 +133,9 @@ struct BandOutput {
     /// stops, so a runaway program is stopped after about one band's
     /// budget, not one per queued band.
     hit_limit: bool,
+    /// The font stand-in notes this band raised, one per line
+    /// (`Interp::font_warnings`).
+    font_notes: String,
 }
 
 /// How a render is cut up: `count` bands on a canvas `height` rows tall,
@@ -222,6 +236,7 @@ pub fn run(options: &Options, threads: u32) -> ExitCode {
         eprintln!("{report}");
         failed = true;
     }
+    print_font_notes(&outputs);
     let pages = match stitch(&outputs, width, height, options.transparent) {
         Ok(p) => p,
         Err(msg) => {
@@ -238,6 +253,27 @@ pub fn run(options: &Options, threads: u32) -> ExitCode {
         ExitCode::FAILURE
     } else {
         ExitCode::SUCCESS
+    }
+}
+
+/// The stand-in notes the bands other than 0 found, each once, leaving out
+/// the ones band 0 printed as it ran. Their stderr is dropped, and a
+/// band-aware program can reach a font in some bands only.
+fn print_font_notes(outputs: &[Option<BandOutput>]) {
+    let mut seen = std::collections::HashSet::new();
+    let top = outputs.first().and_then(Option::as_ref);
+    if let Some(top) = top {
+        seen.extend(top.font_notes.lines());
+    }
+    for line in outputs
+        .iter()
+        .skip(1)
+        .flatten()
+        .flat_map(|o| o.font_notes.lines())
+    {
+        if seen.insert(line) {
+            eprintln!("{line}");
+        }
     }
 }
 
@@ -406,10 +442,12 @@ fn run_band(
     let height = plan.height;
     let (top, bottom) = rows(index, plan.count, height);
     interp.gfx_mut().set_band_rows(top, bottom);
-    // Only the top band's output reaches stdout; the others' is kept in a
-    // bounded buffer and dropped, so an unaware program prints once.
+    // Only the top band's output reaches stdout and stderr; the others'
+    // stdout is kept in a bounded buffer and dropped, and their stderr is
+    // dropped, so an unaware program prints once.
     if index > 0 {
         interp.capture_stdout();
+        interp.quiet_stderr();
     }
     let width_pt = width as f32 / scale;
     let user_y = |row: u32| (height - row) as f32 / scale;
@@ -479,6 +517,7 @@ fn run_band(
         rows,
         error,
         hit_limit,
+        font_notes: interp.font_warnings().to_string(),
     })
 }
 

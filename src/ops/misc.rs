@@ -128,11 +128,12 @@ fn handleerror(it: &mut Interp) -> Result<(), PsError> {
                 .map(|o| cap_text(&o.text(), ERROR_NAME_LIMIT)),
         )
     };
-    eprintln!(
-        "%%[ Error: {}; OffendingCommand: {} ]%%",
+    let line = format!(
+        "%%[ Error: {}; OffendingCommand: {} ]%%\n",
         name.unwrap_or_else(|| "--none--".to_string()),
         command.unwrap_or_else(|| "--none--".to_string())
     );
+    let _ = it.write_stderr(line.as_bytes(), false);
     let d = d.clone();
     it.journal_dict(&d);
     d.borrow_mut().put("newerror".into(), Object::bool(false));

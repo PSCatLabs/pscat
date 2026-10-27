@@ -644,3 +644,75 @@ showpage
         "the bottom band's forall order differs from a plain run's"
     );
 }
+
+/// Run `--bands 4 --page 100x100 -e program` in an isolated home (no font
+/// packs installed, so a pack face is a stand-in with a note), returning
+/// (success, stderr). A 100-pixel page at 72 dpi makes 8 bands, so a count
+/// of one is a real check that bands above 0 are quiet.
+fn bands_stderr(tag: &str, extra: &[&str], program: &str) -> (bool, String) {
+    let home = common::scratch_dir(tag);
+    let work = home.join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    let png = home.join("s.png");
+    let out = Command::new(BIN)
+        .args(["--bands", "4", "--page", "100x100"])
+        .args(extra)
+        .args(["--png", png.to_str().unwrap(), "-e", program])
+        .current_dir(&work)
+        .env("PSCAT_HOME", &home)
+        .env("HOME", home.join("user"))
+        .env("XDG_DATA_HOME", home.join("user/data"))
+        .env("PSCAT_NO_CHECKOUT", "1")
+        .env_remove("PSCAT_ROOT")
+        .env_remove("PSCAT_LIB")
+        .env_remove("APPDATA")
+        .stdin(Stdio::null())
+        .output_deadline()
+        .expect("spawn pscat");
+    (
+        out.status.success(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+/// Only the top band writes stderr (#877): a `(%stderr)` line, which every
+/// band used to print, comes out once.
+#[test]
+fn stderr_prints_once() {
+    let (ok, err) = bands_stderr(
+        "bands-stderr",
+        &[],
+        "(%stderr) (w) file (to-stderr\\n) writestring",
+    );
+    assert!(ok, "{err}");
+    assert_eq!(err.matches("to-stderr").count(), 1, "{err}");
+}
+
+/// A stand-in font note is printed once, including one that only a lower
+/// band reached (`BandIndex 2` here), and each note once.
+#[test]
+fn font_notes_are_deduplicated() {
+    let (ok, err) = bands_stderr(
+        "bands-font-notes",
+        &[],
+        "/Bangers findfont pop BandIndex 2 eq { /CourierPrime findfont pop } if",
+    );
+    assert!(ok, "{err}");
+    assert_eq!(err.matches("/Bangers is in").count(), 1, "{err}");
+    assert_eq!(err.matches("/CourierPrime is in").count(), 1, "{err}");
+}
+
+/// An uncaught error raised in one band above 0 only is still reported,
+/// once, with its band, and fails the run.
+#[test]
+fn an_error_in_a_lower_band_is_reported_once() {
+    let (ok, err) = bands_stderr(
+        "bands-lower-error",
+        &["--band-rows", "25"],
+        "(%stderr) (w) file (to-stderr\\n) writestring BandIndex 2 eq { 1 0 div } if",
+    );
+    assert!(!ok, "the error fails the run: {err}");
+    assert_eq!(err.matches("band 3/4 failed").count(), 1, "{err}");
+    assert_eq!(err.matches("undefinedresult").count(), 1, "{err}");
+    assert_eq!(err.matches("to-stderr").count(), 1, "{err}");
+}
