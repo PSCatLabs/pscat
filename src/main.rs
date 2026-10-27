@@ -1100,9 +1100,51 @@ enum SweepAxis {
     Param(String, Vec<SweepValue>),
 }
 
+/// Stack size of a sweep frame's or sheet cell's thread: 8 MiB, the macOS
+/// main thread's, which a standalone render runs on (as `BAND_STACK` in
+/// `bands.rs` for a band).
+const FRAME_STACK: usize = 8 << 20;
+
+/// Run `f` on a thread of its own and wait for it (#891). The name
+/// interner is per thread and `forall` over name keys follows the interned
+/// ids, so each sweep frame or sheet cell starts from the empty interner a
+/// standalone render starts from, not the names an earlier frame (or the
+/// caller) left behind; bands do the same (#844). A panic in `f` is raised
+/// again here. `Err` only when the thread cannot be started.
+pub(crate) fn run_on_fresh_thread<T: Send>(f: impl FnOnce() -> T + Send) -> Result<T, String> {
+    std::thread::scope(|scope| {
+        let handle = std::thread::Builder::new()
+            .name("pscat-frame".to_string())
+            .stack_size(FRAME_STACK)
+            .spawn_scoped(scope, || {
+                // Count everything this thread frees, its thread-locals too.
+                pscat::memtrack::fold_at_thread_exit();
+                f()
+            })
+            .map_err(|e| format!("cannot start a frame thread: {e}"))?;
+        handle
+            .join()
+            .map_err(|panic| std::panic::resume_unwind(panic))
+    })
+}
+
+/// What one sweep frame hands back from its thread.
+struct SweepFrame {
+    /// The frame's last page (screened when `--halftone`).
+    page: tiny_skia::Pixmap,
+    /// The program ran to the end.
+    ok: bool,
+    /// Its open files went to disk.
+    flushed: bool,
+    /// The seed override took effect.
+    fired: bool,
+}
+
 /// Render `source` once per sweep value (issue #21). Each frame gets
-/// a fresh `Interp`, exactly like a normal single render — sweeping
-/// isn't more than looping the single-render path. Continues past a
+/// a fresh `Interp` on a fresh thread (#891), exactly like a normal
+/// single render — sweeping isn't more than looping the single-render
+/// path, and a frame is byte-identical to a standalone run of its seed
+/// or value. Continues past a
 /// per-frame PostScript error rather than aborting the whole sweep
 /// (matching this CLI's existing partial-render-on-error philosophy:
 /// `finish_headless` writes a PNG even after an error), but the
@@ -1191,62 +1233,53 @@ fn run_sweep(options: &Options, source: &[u8]) -> ExitCode {
     let mut seed_ever_fired = false;
 
     for i in 0..n {
-        let Some(mut interp) =
-            Interp::with_page_scaled(options.page.0, options.page.1, options.dpi / 72.0)
-        else {
-            eprintln!(
-                "pscat: unusable page size {}x{}",
-                options.page.0, options.page.1
-            );
-            return ExitCode::FAILURE;
-        };
-        if let Err(msg) = options.apply_limits(&mut interp) {
-            eprintln!("pscat: {msg}");
-            return ExitCode::FAILURE;
-        }
-        if options.transparent {
-            interp.gfx_mut().set_transparent_background();
-        }
         let label = match &axis {
-            SweepAxis::Seed(seeds) => {
-                interp.set_seed_override(Some(seeds[i]));
-                format!("seed={}", seeds[i])
-            }
-            SweepAxis::Param(name, values) => {
-                let text = format_sweep_value(values[i]);
-                let preamble = format!("/{name} {text} def");
-                if let Err(e) = interp.run_source(preamble.as_bytes()) {
-                    eprintln!(
-                        "pscat: sweep: internal error defining {name}: {}",
-                        interp.error_report(&e)
-                    );
-                    return ExitCode::FAILURE;
-                }
-                format!("{name}={text}")
-            }
+            SweepAxis::Seed(seeds) => format!("seed={}", seeds[i]),
+            SweepAxis::Param(name, values) => format!("{name}={}", format_sweep_value(values[i])),
         };
-
-        let ok = match interp.run_source(source) {
-            Ok(()) => true,
-            Err(e) => {
-                eprintln!("pscat: sweep: frame {}/{n} ({label}) failed:", i + 1);
-                eprintln!("{}", interp.error_report(&e));
-                if options.pstack_on_error {
-                    print_pstack(&interp);
-                }
-                any_failed = true;
-                false
+        let frame = run_on_fresh_thread(|| -> Result<SweepFrame, String> {
+            let mut interp =
+                Interp::with_page_scaled(options.page.0, options.page.1, options.dpi / 72.0)
+                    .ok_or_else(|| {
+                        format!("unusable page size {}x{}", options.page.0, options.page.1)
+                    })?;
+            options.apply_limits(&mut interp)?;
+            if options.transparent {
+                interp.gfx_mut().set_transparent_background();
             }
-        };
-        // A frame's open files go to disk now, and a failure fails the sweep.
-        if !flush_outputs_or_report(&mut interp) {
-            any_failed = true;
-        }
-        if matches!(axis, SweepAxis::Seed(_)) && interp.seed_override_fired() {
-            seed_ever_fired = true;
-        }
+            match &axis {
+                SweepAxis::Seed(seeds) => interp.set_seed_override(Some(seeds[i])),
+                SweepAxis::Param(name, values) => {
+                    let preamble = format!("/{name} {} def", format_sweep_value(values[i]));
+                    // Detached, so NAME takes the id a standalone run gives it
+                    // where the program first mentions it, and shifts none of
+                    // the program's other names (`forall` order; #868, #891).
+                    pscat::name::detached(|| interp.run_source(preamble.as_bytes())).map_err(
+                        |e| {
+                            format!(
+                                "sweep: internal error defining {name}: {}",
+                                interp.error_report(&e)
+                            )
+                        },
+                    )?;
+                }
+            }
 
-        let page = {
+            let ok = match interp.run_source(source) {
+                Ok(()) => true,
+                Err(e) => {
+                    eprintln!("pscat: sweep: frame {}/{n} ({label}) failed:", i + 1);
+                    eprintln!("{}", interp.error_report(&e));
+                    if options.pstack_on_error {
+                        print_pstack(&interp);
+                    }
+                    false
+                }
+            };
+            // A frame's open files go to disk now, and a failure fails the sweep.
+            let flushed = flush_outputs_or_report(&mut interp);
+            let fired = interp.seed_override_fired();
+
             let gfx = interp.gfx();
             let mut pages: Vec<&tiny_skia::Pixmap> = gfx.pages().iter().collect();
             if pages.is_empty() || gfx.has_trailing_art() {
@@ -1258,15 +1291,39 @@ fn run_sweep(options: &Options, source: &[u8]) -> ExitCode {
             // collapses to its final page — multi-page sweep sources
             // aren't a target use case here (documented scope cut).
             let last = pages[pages.len() - 1];
-            if options.halftone {
+            let page = if options.halftone {
                 pscat::halftone::screen(last)
             } else {
                 last.clone()
+            };
+            // This frame's Interp drops here, on its own thread, and
+            // `Drop for Interp` frees its dictionaries (they used to
+            // outlive every frame of the sweep, issues #21 and #625).
+            Ok(SweepFrame {
+                page,
+                ok,
+                flushed,
+                fired,
+            })
+        });
+        let SweepFrame {
+            page,
+            ok,
+            flushed,
+            fired,
+        } = match frame.and_then(|f| f) {
+            Ok(f) => f,
+            Err(msg) => {
+                eprintln!("pscat: {msg}");
+                return ExitCode::FAILURE;
             }
         };
-        // This frame's Interp drops at the end of the iteration, and
-        // `Drop for Interp` frees its dictionaries (they used to outlive
-        // every frame of the sweep, issues #21 and #625).
+        if !ok || !flushed {
+            any_failed = true;
+        }
+        if matches!(axis, SweepAxis::Seed(_)) && fired {
+            seed_ever_fired = true;
+        }
 
         let status = if ok { "" } else { " (failed)" };
         match &options.png {

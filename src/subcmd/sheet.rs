@@ -373,8 +373,27 @@ fn probe(page: (u32, u32), dpi: f32) -> Result<(u32, u32), Failure> {
 /// mat. `sweep` is the sweep and the index of the value this cell takes:
 /// a seed overrides `srand`, a parameter is defined before the program.
 /// `limits` (issue #701) cover this cell's program alone: a fresh
-/// interpreter, so each cell has the whole budget.
+/// interpreter, so each cell has the whole budget. Each cell runs on a
+/// thread of its own, with a fresh name interner, and the parameter is
+/// defined detached from the program's name ids, so a cell is
+/// byte-identical to a standalone render of its seed or value (#891).
 fn render_cell(
+    source: &[u8],
+    path: &str,
+    page: (u32, u32),
+    dpi: f32,
+    transparent: bool,
+    sweep: Option<(&Sweep, usize)>,
+    limits: Limits,
+) -> Result<(Pixmap, bool, bool), Failure> {
+    crate::run_on_fresh_thread(|| {
+        render_cell_here(source, path, page, dpi, transparent, sweep, limits)
+    })
+    .map_err(Failure::Msg)?
+}
+
+/// [`render_cell`] on the calling thread.
+fn render_cell_here(
     source: &[u8],
     path: &str,
     page: (u32, u32),
@@ -397,7 +416,9 @@ fn render_cell(
         Some((Sweep::Seed(seeds), i)) => interp.set_seed_override(Some(seeds[i])),
         Some((Sweep::Param(name, values), i)) => {
             let preamble = format!("/{name} {} def", format_sweep_value(values[i]));
-            if let Err(e) = interp.run_source(preamble.as_bytes()) {
+            // Detached: the name takes no id the program's own names would
+            // (`forall` order follows the ids; #868, #891).
+            if let Err(e) = pscat::name::detached(|| interp.run_source(preamble.as_bytes())) {
                 return Err(Failure::Msg(format!(
                     "{path}: could not define {name}: {}",
                     interp.error_report(&e)
