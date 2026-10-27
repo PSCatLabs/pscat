@@ -123,3 +123,63 @@ jobs:
         run: cargo build --profile ci --bin pscat --bin pscat-mcp
       - name: Install the plugin into a throwaway Codex home
         run: ./scripts/codex_plugin_install_check.sh target/ci
+
+  # PROTOTYPE (#866), removed before review: does each Windows host pick
+  # scripts/pscat-mcp.cmd for the extensionless command?
+  windows-proto:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - name: Line endings as checked out
+        run: git config core.autocrlf; file plugin/scripts/* || true
+      - name: Install the CLIs (pinned)
+        run: npm install -g @anthropic-ai/claude-code@2.1.301 @openai/codex@0.163.0
+      - name: Claude Code mcp list
+        run: |
+          set -x
+          export CLAUDE_CONFIG_DIR="$RUNNER_TEMP/claude-config"
+          mkdir -p "$CLAUDE_CONFIG_DIR" "$RUNNER_TEMP/proj"
+          repo=$(pwd -W)
+          cd "$RUNNER_TEMP/proj"
+          claude plugin validate "$repo" || true
+          claude plugin marketplace add "$repo"
+          claude plugin install pscat@pscat
+          claude mcp list || true
+          claude mcp get plugin:pscat:pscat || true
+      - name: Codex resolution
+        run: |
+          set -x
+          export CODEX_HOME="$RUNNER_TEMP/codex-home"
+          mkdir -p "$CODEX_HOME"
+          repo=$(pwd -W)
+          codex plugin marketplace add "$repo"
+          codex plugin add pscat@pscat
+          codex mcp get pscat --json || true
+      - name: Hook string under PowerShell 5.1, pwsh and Git Bash
+        run: |
+          root=$(pwd -W)/plugin
+          powershell.exe -NoProfile -Command "cd \"$root/scripts\"; ./pscat-mcp --hook" || echo "ps51 exit $?"
+          pwsh -NoProfile -Command "cd \"$root/scripts\"; ./pscat-mcp --hook" || echo "pwsh exit $?"
+          sh -c "cd \"$root/scripts\"; ./pscat-mcp --hook" || echo "sh exit $?"
+      - name: which crate (Codex's resolver) on the absolute extensionless path
+        run: |
+          cargo new -q --vcs none "$RUNNER_TEMP/w" && cd "$RUNNER_TEMP/w"
+          cargo add -q which@8
+          root=$(cd "$GITHUB_WORKSPACE" && pwd -W)/plugin/scripts/pscat-mcp
+          cat > src/main.rs <<RS
+          fn main() {
+              let p = std::path::PathBuf::from(r"$root");
+              let r = which::which_in(&p, std::env::var_os("PATH"), std::env::current_dir().unwrap());
+              println!("which_in -> {:?}", r);
+              let r = r.unwrap();
+              let out = std::process::Command::new(&r).arg("--hook").output().unwrap();
+              println!("ran: {:?} {}", out.status, String::from_utf8_lossy(&out.stdout));
+          }
+          RS
+          cargo run -q

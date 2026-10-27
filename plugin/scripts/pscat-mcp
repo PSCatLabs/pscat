@@ -1,0 +1,5 @@
+#!/bin/sh
+# PROTOTYPE (#866): which file did the host run?
+case "${1:-}" in --hook) echo '{"systemMessage": "PROTO-SH"}'; exit 0 ;; esac
+HERE=$(cd "$(dirname "$0")" && pwd)
+exec sh "$HERE/pscat-mcp.sh" "$@"
