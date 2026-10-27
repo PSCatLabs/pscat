@@ -77,10 +77,6 @@ use crate::Options;
 /// pscat runs on, extra bands only cost memory (a canvas each).
 pub const MAX_BANDS: u32 = 64;
 
-/// Each band thread's stack. The main thread gets 8 MiB on macOS and Linux,
-/// and a band runs the same interpreter a single render runs there.
-const BAND_STACK: usize = 8 << 20;
-
 /// `--bands N`'s value.
 pub fn parse_count(n: &str) -> Result<u32, String> {
     n.parse()
@@ -412,17 +408,8 @@ fn render(
                         // not the ones an earlier band left behind. A
                         // panic is that band's failure: the worker stops,
                         // and the others stop taking bands.
-                        let result = std::thread::scope(|band_scope| {
-                            std::thread::Builder::new()
-                                .name(format!("band-{index}"))
-                                .stack_size(BAND_STACK)
-                                .spawn_scoped(band_scope, || {
-                                    // Count everything this band's thread
-                                    // frees, its thread-locals included.
-                                    pscat::memtrack::fold_at_thread_exit();
-                                    run_band(options, source, band, base, queue)
-                                })
-                                .map(|h| h.join())
+                        let result = crate::join_on_fresh_thread(format!("band-{index}"), || {
+                            run_band(options, source, band, base, queue)
                         });
                         let result = match result {
                             Ok(joined) => joined,

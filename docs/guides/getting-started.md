@@ -108,7 +108,8 @@ More on the less obvious ones:
 - **The lab printer.** `--spool DIR` turns the window into the printer in the
   corner of the lab. It idles, watches the directory, and renders each
   `.ps`/`.eps` that lands there, page by page, each job in a fresh
-  interpreter.
+  interpreter on a thread of its own, so a job draws exactly as a
+  standalone run of the same file would.
 - **Writing files.** A program writes nothing to disk unless you name a
   directory with `--allow-write DIR` (repeatable). Then `(DIR/f) (w) file`
   (or `(a)` to append), `writestring`, `writehexstring`, `renamefile` and

@@ -144,7 +144,14 @@ impl Interner {
 /// run without `f` would have given it there, keeping its detached id.
 /// So the program's own names get the same ids, and `forall` over their
 /// dictionaries the same order, as in a run without `f`. Names already
-/// interned are unaffected. `--bands` defines the band names this way.
+/// interned are unaffected. `--bands` defines the band names this way, and
+/// `--sweep NAME=` its NAME.
+///
+/// A detached name itself keeps its detached id, so a dict that has it as
+/// a key can still come out of `forall` in another order than in a plain
+/// run. Moving it to its sequential id would mean re-keying every dict
+/// already holding it (nothing records which) or an id indirection on
+/// every probe; see `notes/895-spool-fresh-threads.md`.
 pub fn detached<T>(f: impl FnOnce() -> T) -> T {
     struct Restore(bool);
     impl Drop for Restore {

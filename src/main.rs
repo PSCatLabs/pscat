@@ -1100,32 +1100,44 @@ enum SweepAxis {
     Param(String, Vec<SweepValue>),
 }
 
-/// Stack size of a sweep frame's or sheet cell's thread: 8 MiB, the macOS
-/// main thread's, which a standalone render runs on (as `BAND_STACK` in
-/// `bands.rs` for a band).
-const FRAME_STACK: usize = 8 << 20;
+/// Stack size of a sweep frame's, sheet cell's or band's thread: 8 MiB,
+/// the macOS main thread's, which a standalone render runs on (as
+/// `JOB_STACK` in `window.rs` for a spool job).
+pub(crate) const FRESH_THREAD_STACK: usize = 8 << 20;
 
-/// Run `f` on a thread of its own and wait for it (#891). The name
-/// interner is per thread and `forall` over name keys follows the interned
-/// ids, so each sweep frame or sheet cell starts from the empty interner a
-/// standalone render starts from, not the names an earlier frame (or the
-/// caller) left behind; bands do the same (#844). A panic in `f` is raised
-/// again here. `Err` only when the thread cannot be started.
-pub(crate) fn run_on_fresh_thread<T: Send>(f: impl FnOnce() -> T + Send) -> Result<T, String> {
+/// Run `f` on a new thread named `name` and wait for it, handing back how
+/// it ended: `Err` from the outer result when the thread cannot be
+/// started, and the inner one when `f` panicked (#844, #891). The name
+/// interner is per thread and `forall` over name keys follows the
+/// interned ids, so the thread starts from the empty interner a
+/// standalone render starts from, not the names an earlier frame, band or
+/// the caller left behind. Bands use it directly, to turn a panic into
+/// that band's failure; [`run_on_fresh_thread`] raises it again.
+pub(crate) fn join_on_fresh_thread<T: Send>(
+    name: String,
+    f: impl FnOnce() -> T + Send,
+) -> std::io::Result<std::thread::Result<T>> {
     std::thread::scope(|scope| {
         let handle = std::thread::Builder::new()
-            .name("pscat-frame".to_string())
-            .stack_size(FRAME_STACK)
+            .name(name)
+            .stack_size(FRESH_THREAD_STACK)
             .spawn_scoped(scope, || {
                 // Count everything this thread frees, its thread-locals too.
                 pscat::memtrack::fold_at_thread_exit();
                 f()
-            })
-            .map_err(|e| format!("cannot start a frame thread: {e}"))?;
-        handle
-            .join()
-            .map_err(|panic| std::panic::resume_unwind(panic))
+            })?;
+        Ok(handle.join())
     })
+}
+
+/// Run `f` on a thread of its own and wait for it (#891), so each sweep
+/// frame or sheet cell starts from a fresh name interner (see
+/// [`join_on_fresh_thread`]). A panic in `f` is raised again here. `Err`
+/// only when the thread cannot be started.
+pub(crate) fn run_on_fresh_thread<T: Send>(f: impl FnOnce() -> T + Send) -> Result<T, String> {
+    join_on_fresh_thread("pscat-frame".to_string(), f)
+        .map_err(|e| format!("cannot start a frame thread: {e}"))?
+        .map_err(|panic| std::panic::resume_unwind(panic))
 }
 
 /// What one sweep frame hands back from its thread.

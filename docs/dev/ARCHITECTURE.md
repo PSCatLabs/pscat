@@ -137,6 +137,11 @@ canvas via softbuffer. No locks, no channels, deterministic; pause and
 slow-motion are just budget changes. The interpreter's `begin_source` +
 `step_n` API is the seam between the machine and any front end — the
 headless `--png` mode drives the identical machine to completion.
+One exception (#895): a `--spool` job's interpreter lives on a thread of
+its own (`JobThread`), so each job starts from the empty name interner a
+standalone run has. The event loop still drives it one call at a time
+(step a budget, draw the view) and waits for each reply, so it runs at the
+same pace and stays deterministic.
 
 Crates: **winit** (windowing — the standard choice), **softbuffer** (CPU
 pixel presentation), **tiny-skia** (rasterization — pure Rust and its
