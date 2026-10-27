@@ -183,9 +183,12 @@ macOS and Linux then exec it directly.
   of an environment variable (`PSCAT_CACHE_DIR`, `LOCALAPPDATA`,
   `CARGO_HOME`, `USERPROFILE`) that cmd already holds in Unicode, and only
   the ASCII rest is text; `call set` expands it. The tests' paths contain
-  `Ł`, which code page 437 lacks (Codex review, round 1). A pscat-mcp on PATH
-  outside those four directories, in a directory the code page cannot
-  spell, is still passed as text and would fail.
+  `Ł`, which code page 437 lacks (Codex review, round 1). Any other path
+  (a pscat-mcp on PATH or in `PSCAT_MCP_BIN` elsewhere) goes as itself if
+  the code page can spell it, else as its 8.3 short name; with neither, that
+  copy is passed over for the next candidate, in the end the cache (round
+  2). The installed-copy tests exercise the short-name route, since their
+  directory has `Ł` and lies outside those four variables.
 - Managed machines where Group Policy forbids `-ExecutionPolicy Bypass`, or
   that run PowerShell in Constrained Language mode, stop the launcher. The
   README tells those users to install the release `.zip` and put it on PATH.

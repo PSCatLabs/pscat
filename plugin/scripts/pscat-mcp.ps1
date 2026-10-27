@@ -128,9 +128,11 @@ $script:FoundBin = ''
 $script:FoundHow = ''
 $script:OldSeen = ''
 # TryCandidate PATH HOW: accept PATH (a pscat-mcp) if it runs and is new enough.
+$script:Unusable = @()
 function TryCandidate([string]$Path, [string]$How) {
     if ($script:FoundDir) { return }
     if (-not $Path -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) { return }
+    if ($script:Unusable -contains $Path) { return }
     $v = Get-McpVersion $Path
     if (-not $v -or -not (VersionOk $v $MinVersion)) {
         $shown = $v; if (-not $shown) { $shown = 'unknown version' }
@@ -353,6 +355,13 @@ function Ensure {
 }
 
 # --- the --exe handoff -------------------------------------------------------------
+# How --exe tells pscat-mcp.cmd which program to run: VAR|REST for %VAR%\REST,
+# or -|PATH. cmd's `for /f` decodes it with the console code page, which
+# cannot spell every path (a user name with accented or non-Latin letters,
+# say). So the user-specific start of a path travels as the name of an
+# environment variable the caller already holds in Unicode, and only an
+# ASCII rest as text. Any other path goes as itself if the code page can
+# spell it, else as its 8.3 short name (ASCII). '' if neither works.
 function ExeHandoff([string]$Path) {
     foreach ($var in 'PSCAT_CACHE_DIR', 'LOCALAPPDATA', 'CARGO_HOME', 'USERPROFILE') {
         $base = [Environment]::GetEnvironmentVariable($var)
@@ -366,7 +375,13 @@ function ExeHandoff([string]$Path) {
             if ($rest -match '^[A-Za-z0-9 ._\\/()+,=@#~-]+$') { return "$var|$rest" }
         }
     }
-    return "-|$Path"
+    $enc = [Console]::OutputEncoding
+    if ($enc.GetString($enc.GetBytes($Path)) -eq $Path) { return "-|$Path" }
+    try {
+        $short = (New-Object -ComObject Scripting.FileSystemObject).GetFile($Path).ShortPath
+        if ($short -and $enc.GetString($enc.GetBytes($short)) -eq $short) { return "-|$short" }
+    } catch { }
+    return ''
 }
 
 # --- SessionStart hook -----------------------------------------------------------
@@ -420,15 +435,23 @@ switch ($mode) {
         exit 0
     }
     '--exe' {
-        # For pscat-mcp.cmd (and the sh entry point under Git Bash): VAR|REST,
-        # meaning %VAR%\REST, or -|PATH. cmd's `for /f` decodes this with the
-        # console code page, which cannot spell every user name (accented or
-        # non-Latin letters). So the user-specific start of the path travels as the name of
-        # an environment variable the caller already holds in Unicode, and
-        # only the ASCII rest as text.
-        if (-not (Ensure)) { Say 'pscat-mcp is not available, so the pscat tools cannot start'; exit 1 }
+        # For pscat-mcp.cmd (and the sh entry point under Git Bash); see
+        # ExeHandoff. An installed copy whose path cannot be handed over is
+        # passed over for the next candidate (in the end the cache, whose
+        # path always can be).
+        while ($true) {
+            if (-not (Ensure)) { Say 'pscat-mcp is not available, so the pscat tools cannot start'; exit 1 }
+            $h = ExeHandoff $script:FoundBin
+            if ($h) { break }
+            if ($script:FoundHow -eq 'cache') {
+                Say "cmd.exe cannot be given the path $($script:FoundBin); set PSCAT_CACHE_DIR to a folder whose path has only ASCII letters"
+                exit 1
+            }
+            Say "passing over $($script:FoundBin): cmd.exe cannot be given its path (letters outside the console code page, and no 8.3 short name)"
+            $script:Unusable += $script:FoundBin
+        }
         if ($script:FoundHow -ne 'cache' -and $script:FoundHow -ne 'PATH') { Say "using $($script:FoundBin)" }
-        [Console]::Out.WriteLine((ExeHandoff $script:FoundBin))
+        [Console]::Out.WriteLine($h)
         exit 0
     }
 }
