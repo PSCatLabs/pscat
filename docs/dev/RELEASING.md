@@ -16,12 +16,18 @@ After the one-time setup below, a release is: run `scripts/release.sh X.Y.Z`,
 merge the PR it opens, push the tag, and approve the `release` environment.
 The approval is the only manual step that repeats.
 
+A **release candidate**, `vX.Y.Z-rc.N`, goes through the same steps but
+publishes only a GitHub pre-release with the binaries, for testers to try
+before anything reaches crates.io, npm or the MCP Registry. See
+[Release candidates](#release-candidates).
+
 ## The pipeline
 
 `scripts/release.sh X.Y.Z` opens the release PR. Run it from a clean,
 up-to-date `main`. It refuses in these cases:
 
-- the version is not newer than the current one;
+- the version is not newer than the current one (semver order:
+  `0.6.3` < `0.7.0-rc.1` < `0.7.0-rc.2` < `0.7.0`);
 - the tag `vX.Y.Z` already exists;
 - `src/fontpacks/pinned.rs` has `PINNED_INDEX = None` (#616).
 
@@ -40,7 +46,7 @@ run first:
 | `binaries` | Builds and checks one archive per platform (below) with `scripts/package_release.sh`. | read |
 | `assemble` | Writes `SHA256SUMS` and `release-manifest.json` (version, tag, commit, every digest). Runs the rehearsal (below) on these exact artifacts. Runs a read-only plan against the real registries, which stops a real release on a mismatch before anything is created. | read |
 | `draft` | Creates a **draft** GitHub Release with the archives, `SHA256SUMS` and `release-manifest.json`, uploading the manifest last. | `contents: write` |
-| `publish` | Runs in the **`release` environment**, so it waits for the owner's approval. It signs build-provenance attestations for every archive and the `.crate` (below), publishes the crate to crates.io (trusted publishing), then npm once `npm/package.json` exists (the exact tarball `verify` packed), then makes the GitHub Release public, then checks the plugin manifests once a `.claude-plugin/` manifest exists, then publishes `server.json` to the MCP Registry with the pinned `mcp-publisher`. | `contents: write`, `id-token: write`, `attestations: write` |
+| `publish` | Runs in the **`release` environment**, so it waits for the owner's approval. For a release candidate it runs only the GitHub pre-release and the plugin check ([Release candidates](#release-candidates)). It signs build-provenance attestations for every archive and the `.crate` (below), publishes the crate to crates.io (trusted publishing), then npm once `npm/package.json` exists (the exact tarball `verify` packed), then makes the GitHub Release public, then checks the plugin manifests once a `.claude-plugin/` manifest exists, then publishes `server.json` to the MCP Registry with the pinned `mcp-publisher`. | `contents: write`, `id-token: write`, `attestations: write` |
 | `post-publish-check` | Calls `.github/workflows/release-check.yml`: installs the release from the public channels on Linux, macOS and Windows and fails if it does not install or run (below). | `contents: read`, `attestations: read` |
 
 The draft exists before the approval prompt, so you can review it (assets,
@@ -359,6 +365,115 @@ is a command for the owner, or a settings page where no API exists.
    the Releases page, then approve the `release` environment.
 6. Run the post-release checks below.
 
+### Release candidates
+
+A release candidate puts the binaries in testers' hands before the release
+is published anywhere permanent (#854). The plugin launcher (#853)
+downloads its binary from a pinned GitHub Release, and Actions artifacts
+need a GitHub login, so a candidate has to be a public release. It is a
+GitHub **pre-release**:
+
+| | Release `vX.Y.Z` | Release candidate `vX.Y.Z-rc.N` |
+|---|---|---|
+| `Cargo.toml` and manifests | `X.Y.Z` | `X.Y.Z-rc.N` |
+| `CHANGELOG.md` | new section | unchanged |
+| Gates in `verify` (pin, quality gate, MCP Inspector, licences, crate acceptance, semver) | run | run, the same |
+| Five archives, `SHA256SUMS`, `release-manifest.json` | GitHub Release | GitHub **pre-release** |
+| Provenance attestations | yes | yes |
+| `release` environment approval | yes | yes |
+| crates.io, npm, MCP Registry | published | **never** |
+| "Latest" on the Releases page | becomes latest | **never** |
+| `post-publish-check` | archives and crate | archives only |
+
+**Why the rc version goes in `Cargo.toml`.** It is the standard Rust
+practice (cargo-release does the same), and everything in the pipeline
+keys on it. `verify` requires the tag to equal `v` + the `Cargo.toml`
+version. The archives are named `pscat-<version>-<target>`, and the
+bundle check requires `pscat --version` to print that version. A
+candidate built from a `0.7.0` `Cargo.toml` would ship binaries that call
+themselves 0.7.0, under the same file names as the real 0.7.0 but with
+different bytes. Testers' reports could not say which build they ran. The
+cost is that `main` carries `X.Y.Z-rc.N` (in `Cargo.toml` and in the
+plugin, npm and `server.json` manifests) until the release PR for
+`X.Y.Z`. Plugin users who install from `main` see the rc version in that
+window. That is accurate, because the plugin's binary comes from the rc
+release.
+
+**Why it still needs the approval.** It publishes public binaries,
+signed with the job's OIDC token, so it gets the same owner gate as a
+release. The attestations need `id-token: write`, which only the
+`release` environment's job has.
+
+**What keeps it off crates.io, npm and the MCP Registry.** There are
+three layers:
+
+- `release.yml`: the `publish` job does not mint the crates.io token, set
+  up npm or install `mcp-publisher` for a candidate. It runs only the
+  stages `version-info` names: `draft`, `publish` and `plugin`.
+- `scripts/release_stages.py` reports `crates`, `npm` and `registry` as
+  `disabled` for any `-rc.N` version, whatever stages it is given.
+- The draft is created with `prerelease=true` and `make_latest=false`, and
+  publishing sends both again. GitHub never makes a pre-release "latest".
+  A release for the tag whose prerelease flag is wrong (made or edited by
+  hand) halts the run.
+
+Only `-rc.N` (N ≥ 1) is accepted. `-beta`, `-alpha` and other semver
+pre-releases are refused.
+
+#### Cutting a release candidate (owner)
+
+1. On a clean, up-to-date `main`:
+
+   ```sh
+   scripts/release.sh 0.7.0-rc.1
+   ```
+
+   This opens the PR "release: 0.7.0-rc.1 (release candidate)", which sets
+   the version in `Cargo.toml`, `Cargo.lock` and the plugin, npm and MCP
+   Registry manifests. It does not touch `CHANGELOG.md`. git-cliff is not
+   needed for a candidate.
+2. When CI is green, merge it.
+3. Tag the merge commit and push the tag:
+
+   ```sh
+   git switch main && git pull
+   git tag -a v0.7.0-rc.1 -m "pscat 0.7.0-rc.1" && git push origin v0.7.0-rc.1
+   ```
+
+4. Watch the run (Actions → release). The summary's first line says "real
+   release candidate, GitHub pre-release only". The `assemble` job's plan
+   lists `draft`, `publish` and `plugin` only.
+5. When `draft` is done, the Releases page shows a draft marked
+   **Pre-release** with five archives, `SHA256SUMS` and
+   `release-manifest.json`. Approve the `release` environment.
+6. A good result:
+   - <https://github.com/PSCatLabs/pscat/releases/tag/v0.7.0-rc.1> is public,
+     with the **Pre-release** badge. The notes start "Release candidate for
+     0.7.0, for testing".
+   - <https://github.com/PSCatLabs/pscat/releases/latest> still redirects to
+     the last stable release (v0.6.3).
+   - The publish report says `draft` and `publish` published and `plugin`
+     skipped. `crates`, `npm` and `registry` did not run.
+   - <https://crates.io/crates/pscat> and `npm view pscat version` still
+     show the last stable version.
+   - `post-publish-check`: the four `install-archive` jobs are green, and
+     the two `install-crate` jobs are skipped.
+7. The download URLs a tester or the plugin launcher uses are:
+
+   ```
+   https://github.com/PSCatLabs/pscat/releases/download/v0.7.0-rc.1/pscat-0.7.0-rc.1-<target>.tar.gz   (.zip on Windows)
+   https://github.com/PSCatLabs/pscat/releases/download/v0.7.0-rc.1/SHA256SUMS
+   ```
+
+A fix found in testing merges to `main` as usual, then
+`scripts/release.sh 0.7.0-rc.2` and the same steps. To release, run
+`scripts/release.sh 0.7.0` from `main`, which still says `0.7.0-rc.N`.
+That is the normal release procedure above. Its `CHANGELOG.md` section
+covers everything since the last stable release, because `cliff.toml`'s
+`tag_pattern` ignores rc tags. A candidate's GitHub pre-release stays up
+afterwards, like every release (see
+[Yanking and deprecating](#yanking-and-deprecating)).
+
 ### Release checklist
 
 The same list is in the `release` issue template (`.github/ISSUE_TEMPLATE/release.yml`).
@@ -411,8 +526,9 @@ no credentials and no environment: it does what an outsider would.
   [Safe resume](#safe-resume)).
 
 A failure means a published release does not install. Nothing can be
-unpublished: fix forward with a patch release. To re-run the check for any
-published version: Actions → release-check → Run workflow (empty version =
+unpublished: fix forward with a patch release. For a release candidate it
+runs the archive checks only (the crate is not on crates.io). To re-run the check for any
+published version, X.Y.Z or X.Y.Z-rc.N: Actions → release-check → Run workflow (empty version =
 crates.io's newest; tick `attested` only for releases published with
 attestations). A pull request that edits `release-check.yml` runs it against
 crates.io's newest version. Versions before 0.6.1 have no `--version`, so the
@@ -476,7 +592,10 @@ and `release-manifest.json` record the same digests unsigned.
   read-only plan. Nothing is published.
 - **A manual dry run:** Actions → release → Run workflow, with an optional
   branch, tag or commit as `ref`. It is always a dry run. A real release
-  starts only from a pushed tag.
+  starts only from a pushed tag. To rehearse a **release candidate**, point
+  `ref` at a scratch commit made with
+  `python3 scripts/release_stages.py bump-manifests X.Y.Z-rc.N` (push that
+  as a branch, never a tag). Its rehearsal runs the rc scenarios below.
 - **The rehearsal** (`python3 scripts/release_stages.py rehearse --dist DIR
   --crate FILE`) runs these scenarios against fresh fake registries with the
   real artifacts:
@@ -489,6 +608,15 @@ and `release-manifest.json` record the same digests unsigned.
   - a different archive in a published release (halts);
   - a draft built from another commit (halts);
   - a moved tag (halts before anything is created).
+
+  For a release candidate it runs these instead:
+  - a plan that changes nothing;
+  - a GitHub pre-release that never becomes latest;
+  - a rerun that skips every stage;
+  - `crates`, `npm` and `registry` staying disabled even when asked for, with
+    a different `.crate` planted at the version;
+  - a failed publish that resumes;
+  - a draft not marked pre-release (halts).
 - **The post-publish install check** runs on a pull request that edits
   `release-check.yml`, against crates.io's newest version, and on demand
   (Actions → release-check → Run workflow).

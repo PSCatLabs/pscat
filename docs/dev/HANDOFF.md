@@ -35,7 +35,8 @@ crate, drafts the GitHub Release and publishes from the approval-gated
 different one, so a failed release resumes by re-running; since #635 the
 `publish` job signs build-provenance attestations, and since #638
 `release-check.yml` installs every published release from the public
-channels; procedure and owner setup in `docs/dev/RELEASING.md`) (since #599
+channels; since #854 a `vX.Y.Z-rc.N` tag publishes a GitHub pre-release
+only, never crates.io/npm/MCP Registry or "latest"; procedure and owner setup in `docs/dev/RELEASING.md`) (since #599
 the font catalog reaches installs as downloadable font packs on their
 own `fonts-YYYY.MM` release train: `src/fontpacks/`, `pscat fonts
 install`, `.github/workflows/release-fonts.yml`,
