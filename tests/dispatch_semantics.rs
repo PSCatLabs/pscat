@@ -857,6 +857,38 @@ const LOOP_CASES: &[(&str, &str, &str)] = &[
         "/typecheck stopped true",
     ),
     ("3 { exit } stopped", "3 true false", "3 true false"),
+    // An inner loop that is the outer body's last element: it runs with
+    // the outer body finished under it.
+    (
+        "0 2 { 3 { 1 exit } repeat } repeat",
+        "0 1 1 false",
+        "0 1 1 false",
+    ),
+    (
+        "0 2 { 1 1 3 { exit } for } repeat",
+        "0 1 1 false",
+        "0 1 1 false",
+    ),
+    (
+        "{ 2 { 3 { 1 stop } repeat } repeat } stopped",
+        "1 true false",
+        "1 true false",
+    ),
+    (
+        "2 { 3 { 1 0 div } repeat } repeat",
+        "/undefinedresult div true",
+        "/undefinedresult stopped true",
+    ),
+    (
+        "2 { [1 2] { 9 } forall } repeat",
+        "1 9 2 9 1 9 2 9 false",
+        "1 9 2 9 1 9 2 9 false",
+    ),
+    (
+        "0 2 { 2 { 1 { exit } exec } repeat } repeat",
+        "0 1 1 false",
+        "0 1 1 false",
+    ),
     // `stop` inside a loop inside a `stopped` context.
     (
         "{ 3 { 1 stop 2 } repeat } stopped 4",
@@ -1041,6 +1073,8 @@ fn a_slice_of_n_steps_ends_where_n_single_steps_do_in_every_loop() {
         "1 1 4 { 1 1 3 { 2 copy lt { pop } { exch pop } ifelse } for } bind for",
         "3 { [1 2] { { pop } exec } forall } repeat",
         "/q { exit } def 1 1 5 { dup 3 eq { q } if } for",
+        "0 3 { 2 { 1 add } repeat } repeat",
+        "0 3 { 1 1 3 { add dup 4 gt { exit } if } bind for } bind repeat",
     ];
     for src in programs {
         let singles = trace(src, 1);
