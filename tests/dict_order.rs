@@ -3,6 +3,9 @@
 //! come back in insertion order; name keys keep their deterministic
 //! (interned-id hash) order, listed before the others.
 
+mod common;
+use common::CommandDeadline as _;
+
 use pscat::Interp;
 use std::process::Command;
 
@@ -97,7 +100,10 @@ fn names_come_first_then_exotic_keys_in_insertion_order() {
 #[test]
 fn forall_order_is_identical_across_processes() {
     let run = |src: &str| {
-        let out = Command::new(BIN).args(["-e", src]).output().expect("spawn");
+        let out = Command::new(BIN)
+            .args(["-e", src])
+            .output_deadline()
+            .expect("spawn");
         assert!(
             out.status.success(),
             "{}",

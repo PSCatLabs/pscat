@@ -4,6 +4,7 @@
 //! the clean-install test relies on actually reach it.
 
 mod common;
+use common::CommandDeadline as _;
 
 use std::process::Command;
 
@@ -28,7 +29,7 @@ fn pscat_lib_overrides_the_embedded_copy() {
     let out = pscat_in(&dir)
         .env("PSCAT_LIB", &lib)
         .args(["-e", "(lib/artkit.ps) run OVERRIDE ="])
-        .output()
+        .output_deadline()
         .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
@@ -47,7 +48,7 @@ fn a_lib_dir_beside_the_program_overrides_the_embedded_copy() {
     std::fs::write(dir.join("lib/artkit.ps"), "/OVERRIDE (cwd) def\n").unwrap();
     let out = pscat_in(&dir)
         .args(["-e", "(lib/artkit.ps) run OVERRIDE ="])
-        .output()
+        .output_deadline()
         .unwrap();
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success(), "{stderr}");
@@ -72,7 +73,7 @@ fn with_no_lib_on_disk_the_embedded_copy_serves() {
         .env_remove("XDG_DATA_HOME")
         .env_remove("APPDATA")
         .args(["-e", "(lib/artkit.ps) run (lib/fonts/neon.ps) run"])
-        .output()
+        .output_deadline()
         .unwrap();
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(out.status.success(), "{stderr}");
@@ -94,7 +95,7 @@ fn a_missing_file_is_still_undefinedfilename() {
             "-e",
             "{ (lib/no_such_lib.ps) run } stopped { $error /errorname get = } if",
         ])
-        .output()
+        .output_deadline()
         .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("undefinedfilename"), "stdout: {stdout}");

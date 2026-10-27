@@ -96,6 +96,19 @@ predates it.
   directory unique per call and per process; put a file under it with
   `.join(name)`. `tests/scratch_paths.rs` fails on any other route
   (`notes/487-unique-test-scratch-paths.md`).
+- **A test that runs `pscat` or `pscat-mcp` never waits on it without a
+  deadline** (`notes/841-test-child-deadline.md`). A child that does not exit
+  (a limit that regressed, a test written before its feature) would block the
+  suite forever, and an interrupted runner leaves the orphan spinning (one ran
+  for 2.8 days). In `tests/common/mod.rs`: `cmd.output_deadline()` /
+  `cmd.status_deadline()` replace `output()` / `status()` (`use
+  common::CommandDeadline as _;`), `cmd.output_with_input(bytes)` feeds stdin,
+  `common::wait_output(child)` replaces `wait_with_output()`, and
+  `common::Watchdog::new(&child, ..)` guards an interactive child (the MCP
+  `Server`). Each has a `*_within(duration)` form for a per-call deadline. The
+  default is 60 s (`PSCAT_TEST_DEADLINE_SECS` overrides it); a hang kills the
+  child and its descendants and fails the test with the command in the message.
+  `tests/child_deadline.rs` proves it and scans for raw calls.
 - **Timing assertions in `tests/` measure CPU time, never wall time**
   (`notes/329-cpu-time-render-budget-tests.md`). Wall time includes every
   slice the scheduler gave to other processes, so with several agents or a

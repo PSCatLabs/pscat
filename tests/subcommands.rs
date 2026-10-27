@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
 mod common;
+use common::CommandDeadline as _;
 
 const PSCAT: &str = env!("CARGO_BIN_EXE_pscat");
 
@@ -29,7 +30,7 @@ fn pscat(dir: &Path, args: &[&str]) -> Output {
         .env_remove("PSCAT_ROOT")
         .env_remove("PSCAT_LIB")
         .stdin(Stdio::null())
-        .output()
+        .output_deadline()
         .expect("run pscat")
 }
 
@@ -194,7 +195,7 @@ fn typewrite_reads_stdin() {
         .spawn()
         .unwrap();
     common::feed_stdin(&mut child, b"from a pipe\n");
-    assert!(child.wait().unwrap().success());
+    assert!(common::wait_output(child).status.success());
     ok(&pscat(
         &dir,
         &["typewrite", "-o", path(&b), "--text", "from a pipe\n"],
@@ -435,7 +436,7 @@ fn the_wrapper_scripts_still_work() {
             .env("PSCAT_BIN", PSCAT)
             .current_dir(&dir)
             .stdin(Stdio::null())
-            .output()
+            .output_deadline()
             .expect("run wrapper");
         ok(&res);
         assert!(std::fs::metadata(&out).unwrap().len() > 100, "{script}");

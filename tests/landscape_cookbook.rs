@@ -13,6 +13,7 @@
 //! `COOKBOOK_WRITE_THUMBS=1 cargo test --profile ci --test landscape_cookbook`
 
 mod common;
+use common::CommandDeadline as _;
 
 use common::within_cpu_budget;
 use pscat::Interp;
@@ -157,7 +158,7 @@ fn write_thumbnails(all: &[Recipe]) {
             ])
             .arg(&out)
             .arg(&ps)
-            .status()
+            .status_deadline()
             .expect("run pscat");
         assert!(status.success(), "pscat failed on recipe {}", r.name);
     }

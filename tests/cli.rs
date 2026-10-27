@@ -24,7 +24,7 @@ fn run(args: &[&str], stdin: &str) -> (bool, String, String) {
         .spawn()
         .expect("spawn pscat");
     common::feed_stdin(&mut child, stdin.as_bytes());
-    let out = child.wait_with_output().expect("wait");
+    let out = common::wait_output(child);
     (
         out.status.success(),
         String::from_utf8_lossy(&out.stdout).into_owned(),

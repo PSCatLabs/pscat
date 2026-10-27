@@ -8,6 +8,7 @@ use std::process::{Command, Stdio};
 use tiny_skia::Pixmap;
 
 mod common;
+use common::CommandDeadline as _;
 
 const BIN: &str = env!("CARGO_BIN_EXE_pscat");
 
@@ -17,7 +18,7 @@ fn pscat(args: &[&str]) -> (bool, String, String) {
         .args(args)
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .stdin(Stdio::null())
-        .output()
+        .output_deadline()
         .expect("spawn pscat");
     (
         out.status.success(),

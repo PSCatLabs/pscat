@@ -11,6 +11,7 @@ use std::process::Command;
 use tiny_skia::Pixmap;
 
 mod common;
+use common::CommandDeadline as _;
 
 const BIN: &str = env!("CARGO_BIN_EXE_pscat");
 
@@ -29,7 +30,7 @@ fn sheet(args: &[&str]) -> (bool, String, String) {
     let out = Command::new(BIN)
         .arg("sheet")
         .args(args)
-        .output()
+        .output_deadline()
         .expect("spawn pscat");
     (
         out.status.success(),

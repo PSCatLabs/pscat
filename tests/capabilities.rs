@@ -10,6 +10,9 @@
 //!     newly added public palette/proc that nobody registered fails
 //!     here instead of just being missing from `--capabilities`.
 
+mod common;
+use common::CommandDeadline as _;
+
 use std::collections::BTreeSet;
 use std::process::Command;
 
@@ -724,7 +727,7 @@ fn cli_capabilities_flag_prints_valid_matching_json() {
     let exe = env!("CARGO_BIN_EXE_pscat");
     let out = Command::new(exe)
         .arg("--capabilities")
-        .output()
+        .output_deadline()
         .expect("run pscat --capabilities");
     assert!(
         out.status.success(),
