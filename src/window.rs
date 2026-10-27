@@ -1,14 +1,19 @@
 //! The live rendering window.
 //!
-//! Single-threaded and step-driven, as planned in `docs/dev/ARCHITECTURE.md`: the
-//! winit event loop owns the interpreter, runs a budget of interpreter
-//! steps per frame, then blits the canvas. No locks, no channels, and
-//! pausing/slowing execution is just a smaller budget.
+//! Step-driven, as planned in `docs/dev/ARCHITECTURE.md`: the winit event
+//! loop runs a budget of interpreter steps per frame, then blits the
+//! canvas, and pausing/slowing execution is just a smaller budget. The
+//! window and `--interactive` modes own their interpreter on the event
+//! loop's thread. A `--spool` job's interpreter lives on a thread of its
+//! own (#895, [`JobThread`]), so it starts from the empty name interner a
+//! standalone run starts from; the loop drives it in lockstep, one call
+//! at a time, so it still runs at the window's pace.
 
 use std::collections::VecDeque;
 use std::io::{BufRead, Write};
 use std::num::NonZeroU32;
 use std::rc::Rc;
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use softbuffer::{Context, Surface};
@@ -194,6 +199,7 @@ pub fn run_spool_with_limits(
     // Checked once here, so a limit that cannot be enforced is an error at
     // startup rather than one skipped job after another.
     interp.set_limits(limits).map_err(|e| e.to_string())?;
+    // `interp` stays as the idle canvas until the first job lands.
     let event_loop = EventLoop::<UserEvent>::with_user_event()
         .build()
         .map_err(|e| format!("cannot create event loop: {e}"))?;
@@ -211,6 +217,8 @@ pub fn run_spool_with_limits(
             scale,
             limits,
             base_title,
+            job: None,
+            frame: Vec::new(),
         }),
         interactive: None,
     };
@@ -220,26 +228,143 @@ pub fn run_spool_with_limits(
     Ok(())
 }
 
-/// Put a spool job on `slot`: a fresh interpreter with `limits`, the job's
-/// source queued. The previous job's interpreter is freed *before* the
-/// limits are set, so a memory limit counts what this job grows, not what
-/// the last one left behind.
-fn start_job(
-    slot: &mut Interp,
-    page: (u32, u32),
-    scale: f32,
-    limits: Limits,
-    source: &[u8],
-) -> Result<(), String> {
-    let fresh = Interp::with_page_scaled(page.0, page.1, scale)
-        .ok_or_else(|| format!("unusable page size {}x{}", page.0, page.1))?;
-    // Dropping the previous job's Interp frees its dictionaries
-    // (`Drop for Interp`); --spool keeps constructing fresh ones for the
-    // life of the process.
-    drop(std::mem::replace(slot, fresh));
-    slot.set_limits(limits).map_err(|e| e.to_string())?;
-    slot.begin_source(source);
-    Ok(())
+/// Each spool job's thread's stack: 8 MiB, the macOS main thread's, which
+/// a standalone render runs on (as `FRESH_THREAD_STACK` in `main.rs`).
+const JOB_STACK: usize = 8 << 20;
+
+/// A call into a job's interpreter, run on the job's thread.
+type JobCall = Box<dyn FnOnce(&mut Interp) + Send>;
+
+/// One spool job's interpreter, on a thread of its own (#895). The name
+/// interner is per thread, and `forall` over name keys follows the
+/// interned ids, so a job run on the event loop's thread after another
+/// job could draw differently from a standalone run of the same file.
+/// A fresh thread starts from the empty interner (and every other
+/// thread-local) a standalone run starts from, as sweep frames (#891) and
+/// bands (#844) do. `Interp` is `!Send`, so it is built on the job's
+/// thread and stays there; the event loop sends it calls one at a time and
+/// waits for each, so the job runs at the window's pace. Dropping the
+/// handle ends the thread and waits for it, which frees the interpreter.
+struct JobThread {
+    calls: Option<mpsc::Sender<JobCall>>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl JobThread {
+    /// Start a thread with a fresh interpreter under `limits`, `source`
+    /// queued.
+    fn start(
+        page: (u32, u32),
+        scale: f32,
+        limits: Limits,
+        source: Vec<u8>,
+    ) -> Result<Self, String> {
+        let (calls, inbox) = mpsc::channel::<JobCall>();
+        let (ready_tx, ready) = mpsc::sync_channel::<Result<(), String>>(1);
+        let thread = std::thread::Builder::new()
+            .name("pscat-spool-job".to_string())
+            .stack_size(JOB_STACK)
+            .spawn(move || {
+                // Count everything this thread frees, its thread-locals too.
+                crate::memtrack::fold_at_thread_exit();
+                let built = Interp::with_page_scaled(page.0, page.1, scale)
+                    .ok_or_else(|| format!("unusable page size {}x{}", page.0, page.1))
+                    .and_then(|mut interp| {
+                        interp.set_limits(limits).map_err(|e| e.to_string())?;
+                        Ok(interp)
+                    });
+                let mut interp = match built {
+                    Ok(interp) => interp,
+                    Err(e) => {
+                        let _ = ready_tx.send(Err(e));
+                        return;
+                    }
+                };
+                interp.begin_source(&source);
+                drop(source);
+                let _ = ready_tx.send(Ok(()));
+                for call in inbox {
+                    call(&mut interp);
+                }
+            })
+            .map_err(|e| format!("cannot start a job thread: {e}"))?;
+        let job = JobThread {
+            calls: Some(calls),
+            thread: Some(thread),
+        };
+        match ready.recv() {
+            Ok(Ok(())) => Ok(job),
+            Ok(Err(e)) => Err(e),
+            Err(_) => Err("the job thread crashed".to_string()),
+        }
+    }
+
+    /// Run `f` on the job's interpreter and wait for its result. `None` if
+    /// the thread is gone (a panic in an earlier call or in this one).
+    fn call<R: Send + 'static>(
+        &self,
+        f: impl FnOnce(&mut Interp) -> R + Send + 'static,
+    ) -> Option<R> {
+        let (reply, result) = mpsc::sync_channel(1);
+        let call: JobCall = Box::new(move |interp| {
+            let _ = reply.send(f(interp));
+        });
+        self.calls.as_ref()?.send(call).ok()?;
+        result.recv().ok()
+    }
+}
+
+impl Drop for JobThread {
+    fn drop(&mut self) {
+        // Closing the channel ends the thread's loop; joining waits until
+        // its interpreter is freed. A panic was already reported.
+        drop(self.calls.take());
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+/// Draw the page `back` pages before `interp`'s live canvas (0 = the live
+/// canvas) into a `bw`x`bh` window buffer, nearest-neighbor, screened when
+/// `halftone`, and clear the canvas's dirty flag.
+fn draw_view(
+    interp: &mut Interp,
+    back: usize,
+    halftone: bool,
+    bw: usize,
+    bh: usize,
+    out: &mut [u32],
+) {
+    let gfx = interp.gfx();
+    let pixmap = if back > 0 {
+        let pages = gfx.pages();
+        &pages[pages.len() - back]
+    } else {
+        &gfx.pixmap
+    };
+    let screened;
+    let pixmap = if halftone {
+        screened = crate::halftone::screen(pixmap);
+        &screened
+    } else {
+        pixmap
+    };
+    let (pw, ph) = (pixmap.width() as usize, pixmap.height() as usize);
+    let data = pixmap.data();
+    // Nearest-neighbor scale from the page pixmap to the physical
+    // window buffer (handles HiDPI's 2x factor adequately for now).
+    for dy in 0..bh {
+        let sy = (dy * ph / bh).min(ph - 1);
+        let row = &data[sy * pw * 4..(sy + 1) * pw * 4];
+        let out = &mut out[dy * bw..(dy + 1) * bw];
+        for (dx, px) in out.iter_mut().enumerate() {
+            let sx = (dx * pw / bw).min(pw - 1);
+            let p = &row[sx * 4..sx * 4 + 4];
+            *px = u32::from(p[0]) << 16 | u32::from(p[1]) << 8 | u32::from(p[2]);
+        }
+    }
+    interp.gfx_mut().dirty = false;
 }
 
 struct SpoolState {
@@ -250,6 +375,11 @@ struct SpoolState {
     limits: Limits,
     /// Title while idle; jobs append their file name to it.
     base_title: String,
+    /// The current (or last) job, kept after it ends so its pages can
+    /// still be browsed; replaced by the next.
+    job: Option<JobThread>,
+    /// The window-sized frame a job draws into, kept between frames.
+    frame: Vec<u32>,
 }
 
 struct View {
@@ -266,7 +396,8 @@ struct App {
     /// Page navigation (arrow keys): how many pages *back* from the
     /// live canvas is being viewed. 0 = the live canvas itself.
     back: usize,
-    /// Present in spool mode; the interpreter is replaced per job.
+    /// Present in spool mode. `interp` is the idle canvas; each job runs
+    /// in its own [`JobThread`].
     spool: Option<SpoolState>,
     /// Present in `--interactive` mode; the interpreter persists across
     /// typed chunks (state accumulates, REPL-style).
@@ -274,11 +405,38 @@ struct App {
 }
 
 impl App {
+    /// The spool's current job, if one has started.
+    fn job(&self) -> Option<&JobThread> {
+        self.spool.as_ref().and_then(|s| s.job.as_ref())
+    }
+
+    /// Run one frame's budget of the program: `Ok(true)` while it has more
+    /// to do, `Err` with the error report.
+    fn step(&mut self) -> Result<bool, String> {
+        let steps = self.options.steps_per_frame;
+        let Some(job) = self.job() else {
+            return self
+                .interp
+                .step_n(steps)
+                .map_err(|e| self.interp.error_report(&e));
+        };
+        job.call(move |interp| interp.step_n(steps).map_err(|e| interp.error_report(&e)))
+            .unwrap_or_else(|| Err("pscat: spool: the job crashed".to_string()))
+    }
+
+    /// How many completed pages there are to browse.
+    fn page_count(&self) -> usize {
+        match self.job() {
+            Some(job) => job.call(|interp| interp.gfx().pages().len()).unwrap_or(0),
+            None => self.interp.gfx().pages().len(),
+        }
+    }
+
     fn tick(&mut self) {
         if !self.running {
             return;
         }
-        match self.interp.step_n(self.options.steps_per_frame) {
+        match self.step() {
             Ok(true) => {}
             Ok(false) => {
                 // Interactive sessions don't retitle per chunk — the
@@ -289,8 +447,8 @@ impl App {
                     self.finish(" — done");
                 }
             }
-            Err(e) => {
-                eprintln!("{}", self.interp.error_report(&e));
+            Err(report) => {
+                eprintln!("{report}");
                 if self.interactive.is_some() {
                     // REPL semantics: report and keep the session.
                     self.running = false;
@@ -377,24 +535,36 @@ impl App {
             )
         };
         loop {
-            let Some(job) = self.spool.as_mut().and_then(|s| s.watcher.next_job()) else {
+            let Some(path) = self.spool.as_mut().and_then(|s| s.watcher.next_job()) else {
                 return;
             };
-            let source = match std::fs::read(&job) {
+            let source = match std::fs::read(&path) {
                 Ok(bytes) => bytes,
                 Err(e) => {
-                    eprintln!("pscat: spool: cannot read {}: {e}", job.display());
+                    eprintln!("pscat: spool: cannot read {}: {e}", path.display());
                     continue; // skip this job, try the next
                 }
             };
-            if let Err(e) = start_job(&mut self.interp, page, scale, limits, &source) {
-                eprintln!("pscat: spool: cannot run {}: {e}", job.display());
-                continue; // skip this job, try the next
+            // The last job's thread ends, and its interpreter is freed,
+            // before the next one's limits are set: a memory limit counts
+            // what this job grows, not what the last one left behind.
+            if let Some(spool) = &mut self.spool {
+                spool.job = None;
             }
-            let name = job
+            let job = match JobThread::start(page, scale, limits, source) {
+                Ok(job) => job,
+                Err(e) => {
+                    eprintln!("pscat: spool: cannot run {}: {e}", path.display());
+                    continue; // skip this job, try the next
+                }
+            };
+            if let Some(spool) = &mut self.spool {
+                spool.job = Some(job);
+            }
+            let name = path
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_else(|| job.display().to_string());
+                .unwrap_or_else(|| path.display().to_string());
             self.options.title = format!("{base_title} — {name}");
             self.running = true;
             self.had_error = false;
@@ -420,37 +590,30 @@ impl App {
             return;
         };
 
-        let gfx = self.interp.gfx();
-        let pixmap = if self.back > 0 {
-            let pages = gfx.pages();
-            &pages[pages.len() - self.back]
-        } else {
-            &gfx.pixmap
-        };
-        let screened;
-        let pixmap = if self.options.halftone {
-            screened = crate::halftone::screen(pixmap);
-            &screened
-        } else {
-            pixmap
-        };
-        let (pw, ph) = (pixmap.width() as usize, pixmap.height() as usize);
-        let data = pixmap.data();
+        let (back, halftone) = (self.back, self.options.halftone);
         let (bw, bh) = (size.width as usize, size.height as usize);
-        // Nearest-neighbor scale from the page pixmap to the physical
-        // window buffer (handles HiDPI's 2x factor adequately for now).
-        for dy in 0..bh {
-            let sy = (dy * ph / bh).min(ph - 1);
-            let row = &data[sy * pw * 4..(sy + 1) * pw * 4];
-            let out = &mut buffer[dy * bw..(dy + 1) * bw];
-            for (dx, px) in out.iter_mut().enumerate() {
-                let sx = (dx * pw / bw).min(pw - 1);
-                let p = &row[sx * 4..sx * 4 + 4];
-                *px = u32::from(p[0]) << 16 | u32::from(p[1]) << 8 | u32::from(p[2]);
+        match &mut self.spool {
+            Some(SpoolState {
+                job: Some(job),
+                frame,
+                ..
+            }) => {
+                // Drawn on the job's thread into the reused `frame`, then
+                // copied into the buffer here.
+                let mut out = std::mem::take(frame);
+                out.resize(bw * bh, 0);
+                let Some(out) = job.call(move |interp| {
+                    draw_view(interp, back, halftone, bw, bh, &mut out);
+                    out
+                }) else {
+                    return;
+                };
+                buffer.copy_from_slice(&out);
+                *frame = out;
             }
+            _ => draw_view(&mut self.interp, back, halftone, bw, bh, &mut buffer),
         }
         let _ = buffer.present();
-        self.interp.gfx_mut().dirty = false;
     }
 }
 
@@ -522,7 +685,7 @@ impl ApplicationHandler<UserEvent> for App {
                     },
                 ..
             } => {
-                let npages = self.interp.gfx().pages().len();
+                let npages = self.page_count();
                 self.back = match key {
                     NamedKey::ArrowLeft => (self.back + 1).min(npages),
                     _ => self.back.saturating_sub(1),
@@ -601,36 +764,55 @@ mod tests {
         panic!("the job neither ended nor hit a limit");
     }
 
-    #[test]
-    fn a_spool_job_runs_under_the_limits() {
-        let limits = Limits::none().with_max_steps(5_000);
-        let mut slot = Interp::with_page_scaled(100, 100, 1.0).unwrap();
-        start_job(&mut slot, (100, 100), 1.0, limits, b"{ } loop").unwrap();
-        assert_eq!(run_out(&mut slot), Err(PsError::StepsExceeded));
-        // The next job starts again from zero on a fresh interpreter, so one
-        // that fits is not charged for the runaway before it.
-        start_job(&mut slot, (100, 100), 1.0, limits, b"1 1 add pop").unwrap();
-        assert_eq!(run_out(&mut slot), Ok(()));
-        // And with no limits, the old behaviour: nothing stops a job early.
-        start_job(
-            &mut slot,
-            (100, 100),
-            1.0,
-            Limits::none(),
-            b"0 1 20000 { pop } for",
-        )
-        .unwrap();
-        assert_eq!(run_out(&mut slot), Ok(()));
+    /// Run `job` to its end or its first error.
+    fn run_job_out(job: &JobThread) -> Result<(), PsError> {
+        job.call(run_out).expect("the job thread is alive")
     }
 
     #[test]
-    fn the_spool_hands_its_limits_to_each_job_it_picks_up() {
-        let dir = std::env::temp_dir().join(format!("pscat-spool-limits-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let watcher = Watcher::new(&dir).unwrap();
+    fn a_spool_job_runs_under_the_limits() {
         let limits = Limits::none().with_max_steps(5_000);
-        let mut app = App {
+        let start = |limits, source: &[u8]| {
+            JobThread::start((100, 100), 1.0, limits, source.to_vec()).unwrap()
+        };
+        assert_eq!(
+            run_job_out(&start(limits, b"{ } loop")),
+            Err(PsError::StepsExceeded)
+        );
+        // The next job starts again from zero on a fresh interpreter, so one
+        // that fits is not charged for the runaway before it.
+        assert_eq!(run_job_out(&start(limits, b"1 1 add pop")), Ok(()));
+        // And with no limits, the old behaviour: nothing stops a job early.
+        assert_eq!(
+            run_job_out(&start(Limits::none(), b"0 1 20000 { pop } for")),
+            Ok(())
+        );
+    }
+
+    /// A job whose interpreter cannot be set up (here a memory limit with
+    /// no tracking allocator, as in the library's tests) is an error from
+    /// `start`, not a thread left waiting.
+    #[test]
+    fn a_job_thread_reports_a_setup_failure() {
+        let limits = Limits::none().with_max_memory(1 << 30);
+        assert!(!crate::memtrack::installed());
+        assert!(JobThread::start((100, 100), 1.0, limits, Vec::new()).is_err());
+    }
+
+    /// Job 2 of the spool fills a dict with 40 `cvn` keys and paints a
+    /// stripe per entry in `forall` order.
+    const NAMES_JOB: &[u8] = b"/d 40 dict def \
+        0 1 39 { /i exch def d i 10 string cvs cvn i put } for \
+        /x 0 def \
+        d { exch pop 40 div setgray x 0 2 100 rectfill /x x 2 add def } forall";
+
+    /// Job 1 interns job 2's keys in reverse order, which permutes their
+    /// ids (a uniform shift can keep the order: #868).
+    const REVERSE_NAMES_JOB: &[u8] = b"39 -1 0 { 10 string cvs cvn pop } for";
+
+    /// A spool app on `dir` with no window, 100x100 pt pages at 72 dpi.
+    fn spool_app(dir: &std::path::Path, limits: Limits) -> App {
+        App {
             interp: Interp::with_page_scaled(100, 100, 1.0).unwrap(),
             options: WindowOptions {
                 title: "t".into(),
@@ -642,14 +824,72 @@ mod tests {
             had_error: false,
             back: 0,
             spool: Some(SpoolState {
-                watcher,
+                watcher: Watcher::new(dir).unwrap(),
                 page: (100, 100),
                 scale: 1.0,
                 limits,
                 base_title: "t".into(),
+                job: None,
+                frame: Vec::new(),
             }),
             interactive: None,
-        };
+        }
+    }
+
+    /// Drop `name` with `source` into the spool's directory and run the job
+    /// it becomes to the end.
+    fn spool_job(app: &mut App, dir: &std::path::Path, name: &str, source: &[u8]) {
+        std::fs::write(dir.join(name), source).unwrap();
+        app.poll_spool();
+        app.poll_spool();
+        assert!(app.running, "{name} should have started");
+        for _ in 0..100_000 {
+            if !app.running {
+                break;
+            }
+            app.tick();
+        }
+        assert!(
+            !app.running && !app.had_error,
+            "{name} should have ended cleanly"
+        );
+    }
+
+    /// #895: a spool job renders byte for byte as a standalone run of the
+    /// same file, whatever names an earlier job left behind.
+    #[test]
+    fn a_spool_job_renders_as_a_standalone_run() {
+        let standalone = std::thread::spawn(|| {
+            let mut interp = Interp::with_page_scaled(100, 100, 1.0).unwrap();
+            interp.begin_source(NAMES_JOB);
+            run_out(&mut interp).unwrap();
+            interp.gfx().pixmap.data().to_vec()
+        })
+        .join()
+        .unwrap();
+        let dir = std::env::temp_dir().join(format!("pscat-spool-names-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut app = spool_app(&dir, Limits::none());
+        spool_job(&mut app, &dir, "first.ps", REVERSE_NAMES_JOB);
+        spool_job(&mut app, &dir, "second.ps", NAMES_JOB);
+        let spooled = app
+            .job()
+            .and_then(|job| job.call(|interp| interp.gfx().pixmap.data().to_vec()))
+            .unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            spooled == standalone,
+            "the spooled job differs from a standalone run"
+        );
+    }
+
+    #[test]
+    fn the_spool_hands_its_limits_to_each_job_it_picks_up() {
+        let dir = std::env::temp_dir().join(format!("pscat-spool-limits-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut app = spool_app(&dir, Limits::none().with_max_steps(5_000));
         std::fs::write(dir.join("loop.ps"), "{ } loop").unwrap();
         // A new file must hold still across two polls before it is a job.
         app.poll_spool();
