@@ -75,7 +75,9 @@ def benchmark(pscat, samples):
                                   ROOT / "lib/artkit.ps", ROOT / "lib/paintkit.ps"]},
               "platform": platform.platform(), "binary": call([pscat, "--version"]).stdout.strip(),
               "samples": samples, "clock": "child user + system CPU seconds; includes loading/startup",
-              "profile": "ci (optimized with debug assertions and overflow checks)", "results": {}}
+              "profile": ("ci (optimized with debug assertions and overflow checks)"
+                          if pscat.parent.name == "ci" else "external binary; build profile unknown"),
+              "results": {}}
     cases = {
         "map_fold": [
             ["--headless", "-e", f"/Functional {v} def (examples/functional/benchmark.ps) run"]

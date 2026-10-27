@@ -47,3 +47,27 @@
 - `scripts/functional_demo.py render` regenerates art and hash manifest;
   `benchmark` records raw samples and synchronizes the HTML's rounded medians.
 - Full clippy passed; all library selftests and strict rendering drivers passed.
+
+## Phases E/F/G — agent adoption and documentation
+
+- Concise skill under plugin/skills/functional-postscript; AGENTS.md explicitly
+  directs agents there. Skill blocks run on a bare embedded-library install.
+- Added full technical index, architecture/API/implementation/AOP/testing/demo/
+  agent/decision documents, engine findings and independent review handoff.
+- Offline index.html uses actual renders, inline CSS/JS, a stack walkthrough,
+  palette/layer controls, side-by-side controls and raw measured evidence.
+- Chrome 156 checked file:// at desktop 1440×1000 and mobile 390×844: all
+  images loaded, no horizontal overflow, no JS exceptions, no HTTP(S) requests.
+  Palette, intermediate-layer, step and reset controls passed. Screenshots were
+  visually inspected; paths/checks are in BROWSER-VALIDATION.json.
+- Standard-library checker validates 29 HTML local targets, 9 image elements,
+  seven PNG hashes/sizes, four metric cells, input measurement hashes and 14
+  complete Markdown/skill PostScript examples. Added as a 25th Rust test.
+- The optional system skill-creator quick_validate.py could not import PyYAML.
+  No dependency was installed. The project checker validates this skill's
+  simple frontmatter/name/description/placeholders, links and executable block.
+- Engine findings distinguish clock semantics, measured traversal overhead,
+  standard PS capture/scope hazards, diagnostics and hypothetical platform work.
+  No core changes or automatically filed issues.
+- Remaining: staged-file link/licence checks, final full gate, clean commit
+  checkpoints and feature-branch review availability.

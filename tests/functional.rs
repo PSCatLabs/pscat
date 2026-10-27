@@ -371,3 +371,22 @@ fn poster_variations_match_the_imperative_control_and_committed_renders() {
     assert_ne!(variations[1], variations[2]);
     assert_ne!(variations[0], variations[2]);
 }
+
+#[test]
+fn offline_documentation_assets_and_complete_examples_are_valid() {
+    let out = Command::new("python3")
+        .args([
+            "scripts/check_functional_docs.py",
+            "--pscat",
+            env!("CARGO_BIN_EXE_pscat"),
+        ])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output_deadline()
+        .expect("documentation checker");
+    assert!(
+        out.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
