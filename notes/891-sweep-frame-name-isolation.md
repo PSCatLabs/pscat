@@ -56,6 +56,20 @@ covers each cause on its own. A single dict whose keys follow the `/Shade`
 mention kept its order under the preamble's one-id shift, which is why the
 program has two dicts.
 
+## What "standalone" means, and what is still not identical
+
+pscat has no `-D` flag, so the standalone run for `--sweep NAME=v` is the
+program with its own default for NAME set to `v` (`/NAME where { pop } {
+/NAME v def } ifelse`), which is what the tests compare against.
+
+The swept NAME keeps its detached id (`DETACHED_BASE + k`); the sequential
+slot it reserves when the program first mentions it is a placeholder. So a
+program that puts NAME itself into a dict as a key and `forall`s it can still
+come out in another order: a probe with `d /Shade 40 put` plus 40 `cvn` keys
+differs between a standalone run and `--sweep Shade=1`. `forall` over
+`userdict` differs anyway (the sweep's userdict holds NAME). This is the
+residual #868 recorded for the band names.
+
 ## Cost
 
 A guard number, not a goal. `--sweep-seed 1:64 --contact-sheet` of a

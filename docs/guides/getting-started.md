@@ -72,8 +72,11 @@ More on the less obvious ones:
   in `userdict` for a program that reads it. `--png` writes numbered
   per-frame files; `--contact-sheet PATH` composites every frame into one
   grid PNG instead (`--grid COLSxROWS` overrides the layout). Use either or
-  both. Each frame renders exactly as a standalone run of its seed or value
-  would, pixel for pixel; so does each `pscat sheet` sweep cell (#891).
+  both. Each frame renders as a standalone run would: of its seed, or with
+  the program's own default for `/NAME` set to that value; so does each
+  `pscat sheet` sweep cell (#891). One exception: a program that puts the
+  swept name itself into a dict it `forall`s (or `forall`s `userdict`) may
+  visit that dict in another order.
   `examples/sweep_demo.ps` is the specimen. Sweeps are CLI-only; the
   `pscat-mcp` server does not expose one.
 - **Review sheets.** `pscat sheet -o sheet.png --page 384x384 --dpi 96,9
