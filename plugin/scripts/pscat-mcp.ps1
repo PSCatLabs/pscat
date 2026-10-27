@@ -82,13 +82,14 @@ if ($env:PSCAT_CACHE_DIR) {
 
 # --- version check -------------------------------------------------------------
 # VersionOk A B: true if version A (X.Y.Z, any suffix ignored) >= B.
-function VersionOk([string]$A, [string]$B) {
-    if (-not $B) { return $true }
-    $a = @(($A -replace '[-+].*$', '').Split('.') | ForEach-Object { [int]("0" + ($_ -replace '[^0-9]', '')) })
-    $b = @(($B -replace '[-+].*$', '').Split('.') | ForEach-Object { [int]("0" + ($_ -replace '[^0-9]', '')) })
+# (PowerShell names are case-insensitive: $have is not $Have's twin, $A is $a.)
+function VersionOk([string]$Have, [string]$Want) {
+    if (-not $Want) { return $true }
+    $hv = @(($Have -replace '[-+].*$', '').Split('.') | ForEach-Object { [int64]("0" + ($_ -replace '[^0-9]', '')) })
+    $wv = @(($Want -replace '[-+].*$', '').Split('.') | ForEach-Object { [int64]("0" + ($_ -replace '[^0-9]', '')) })
     for ($i = 0; $i -lt 3; $i++) {
-        $x = 0; if ($i -lt $a.Count) { $x = $a[$i] }
-        $y = 0; if ($i -lt $b.Count) { $y = $b[$i] }
+        $x = 0; if ($i -lt $hv.Count) { $x = $hv[$i] }
+        $y = 0; if ($i -lt $wv.Count) { $y = $wv[$i] }
         if ($x -gt $y) { return $true }
         if ($x -lt $y) { return $false }
     }
@@ -204,6 +205,16 @@ function Fetch([string]$Url, [string]$File) {
     return $last
 }
 
+# Lower-case hex SHA-256 of a file. .NET, not Get-FileHash: that one lives in
+# a script module that Windows PowerShell may fail to load when PSModulePath
+# names PowerShell 7's modules (a host started from pwsh, say).
+function Get-Sha256([string]$File) {
+    $sha = [Security.Cryptography.SHA256]::Create()
+    $fs = [IO.File]::OpenRead($File)
+    try { $hash = $sha.ComputeHash($fs) } finally { $fs.Dispose(); $sha.Dispose() }
+    return (($hash | ForEach-Object { $_.ToString('x2') }) -join '')
+}
+
 # Only one process downloads at a time. The lock is an optimisation: the
 # publish step below is safe without it. Windows drops the lock (and deletes
 # the file) when the process holding it exits, so it can never go stale.
@@ -273,7 +284,7 @@ function Install {
             OfflineHelp
             return $false
         }
-        $got = (Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash.ToLowerInvariant()
+        $got = Get-Sha256 $zip
         if ($got -ne $want) {
             Say "checksum mismatch for ${asset}: SHA256SUMS says $want, the download is $got; not installing it"
             return $false

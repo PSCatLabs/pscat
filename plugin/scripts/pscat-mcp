@@ -17,7 +17,7 @@ case "$(uname -s 2>/dev/null)" in
   MINGW*|MSYS*|CYGWIN*)
     ps1=$(cygpath -w "$HERE/pscat-mcp.ps1" 2>/dev/null) || ps1=$HERE/pscat-mcp.ps1
     run_ps1() {
-      powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$ps1" "$@" </dev/null
+      env -u PSModulePath powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$ps1" "$@" </dev/null
     }
     case "${1:-}" in
       --hook|--locate) run_ps1 "$@"; exit $? ;;

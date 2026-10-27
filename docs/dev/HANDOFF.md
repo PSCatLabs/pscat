@@ -1471,8 +1471,9 @@ renders eight examples in both and compares block-downsampled output).
   inside a plugin directory. The missing-pscat SessionStart hook moved from
   Claude's plugin.json to `plugin/hooks/hooks.json`, the default path both
   agents read (never declare it in a manifest too: Claude loads both).
-- **The plugin installs pscat itself (#853).** Both manifests start the
-  server as `sh <root>/scripts/pscat-mcp.sh`, where `<root>` is
+- **The plugin installs pscat itself (#853).** Both manifests started the
+  server as `sh <root>/scripts/pscat-mcp.sh` (since #866, the entry point
+  below), where `<root>` is
   `${CLAUDE_PLUGIN_ROOT}` in `.claude-plugin/plugin.json` and `${PLUGIN_ROOT}`
   in `mcp.json`, because Codex expands only the latter and only in args
   (`plugin_check.py` enforces each host's spelling and that both run the same
@@ -1492,6 +1493,22 @@ renders eight examples in both and compares block-downsampled output).
   `scripts/test_plugin_launcher.py` (fake file:// release); both install
   checks download from `scripts/fake_plugin_release.py`.
   See `notes/853-plugin-launcher.md`.
+- **Windows (#866): one entry, two launchers.** Neither host has a
+  per-platform condition, so both manifests now name the extensionless
+  `scripts/pscat-mcp` (`${CLAUDE_PLUGIN_ROOT}/scripts/pscat-mcp` for Claude
+  Code, `./scripts/pscat-mcp` for Codex). macOS/Linux exec it (a sh stub
+  that hands over to `pscat-mcp.sh`, kept byte-for-byte), so **it must stay
+  mode 100755** (`plugin_check.py` checks the index). Windows hosts resolve
+  the name through PATHEXT to `pscat-mcp.cmd`, which asks `pscat-mcp.ps1`
+  (the PowerShell 5.1 twin: same lookup, pin, SHA256SUMS, cache in
+  `%LOCALAPPDATA%\pscat\plugin` published by one directory rename, a
+  FileShare.None lock) for the exe and runs it, keeping PowerShell out of
+  stdio. The hook is `cd "${CLAUDE_PLUGIN_ROOT}/scripts"; ./pscat-mcp
+  --hook`, valid in sh, Git Bash and PowerShell. `.gitattributes` pins LF
+  for the sh files and CRLF for `.cmd`/`.ps1`. Tests:
+  `scripts/test_plugin_launcher_windows.py` and
+  `scripts/plugin_install_check_windows.py` (job `windows`). See
+  `notes/866-plugin-launcher-windows.md`.
   `plugin_check.py` also fails a plugin `.md` that writes a bundled or
   repo-relative image/font path in backticks or a code block (the
   directory checklist holds those; #848, `notes/848-plugin-no-image-paths-in-backticks.md`).

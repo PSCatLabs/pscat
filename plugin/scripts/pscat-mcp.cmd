@@ -10,6 +10,9 @@ if defined PSCAT_PLUGIN_LAUNCHER (
   echo pscat plugin: PSCAT_MCP_BIN must name pscat-mcp itself, not this launcher 1>&2
   exit /b 1
 )
+rem Windows PowerShell rebuilds its own module path; one inherited from
+rem PowerShell 7 (a host started from pwsh) can hide its modules.
+set "PSModulePath="
 if /i "%~1"=="--hook" goto ps1
 if /i "%~1"=="--locate" goto ps1
 set "PSCAT_EXE="
