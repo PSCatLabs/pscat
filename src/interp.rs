@@ -156,7 +156,8 @@ enum Item {
 
 /// What [`Interp::proc_step`] did with the top of the execution stack.
 enum ProcStep {
-    /// A procedure element that is an operator: call it.
+    /// A procedure element that is an operator: call it. In the plain loop
+    /// a procedure literal comes as `Op(proc_literal_op)` too (#864).
     Op(crate::object::OpFn),
     /// A procedure element that is an executable name: look it up and run it.
     Name(u32),
@@ -317,8 +318,9 @@ pub struct Interp {
     /// Fused steps run (#864); see [`Interp::fused_steps`].
     fused_steps: u64,
     /// Steps left in the running slice after the current one (#864): a
-    /// fused run of several elements is charged here. Zero outside
-    /// `step_n_inner`.
+    /// fused run of several elements is charged here. Each step loop sets
+    /// it on entry (`step_n_timed` to zero, so it never fuses); nothing
+    /// runs a step loop from inside an operator, so it is not reentered.
     slice_left: usize,
     /// The error most recently caught by a `stopped`, kept so that a
     /// `stop` which reaches the top level can report it the way
@@ -1226,9 +1228,9 @@ impl Interp {
     /// The procedure literal at the top frame's `pc` (#864): push it, or
     /// run it fused with the elements after it, as one step, when they are
     /// `{ } if` or `{ } { } ifelse` and the operand under the literal is a
-    /// boolean ([`fused_conditional`](Self::fused_conditional)). `left` is
-    /// the steps the slice has left after this one. Returns the extra steps
-    /// taken. Never fails: a fused run is only taken where it cannot.
+    /// boolean ([`fused_conditional`](Self::fused_conditional)); a fused
+    /// run's extra steps are charged to `slice_left`. Never fails: a fused
+    /// run is only taken where it cannot.
     fn proc_literal(&mut self) -> Result<(), PsError> {
         let left = self.slice_left;
         if left > 0

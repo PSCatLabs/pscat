@@ -1530,6 +1530,31 @@ renders eight examples in both and compares block-downsampled output).
   looked obvious (resolving names under the dict borrow, an inline `Array`
   arm in `clone_inline`) made the hot loop slower through inlining and
   register pressure (`notes/863-dispatch-cost.md`).
+- **Fused conditionals read the live body; there is no compiled form**
+  (#864). In a procedure, `{ } if` and `{ } { } ifelse` with a boolean
+  under the first literal run as one step (`Interp::proc_literal`,
+  `fused_conditional`). The elements are read from the array at that
+  moment, so `put`, `putinterval`, an aliasing `getinterval` view and
+  `restore` need no invalidation. Keep these rules if you add a fusion:
+  - Fuse only where the run cannot fail (the operand types are checked
+    first, and room on the execution stack), so every error comes from
+    the unfused elements.
+  - Charge each element to `slice_left`, and fuse only when the slice
+    has that many steps left, so `step_n(1)`, slice ends and
+    `--max-steps` count as before.
+  - Never fuse in `step_n_timed` (`--profile-ops` counts operators).
+  - Recognise an operator by its registered name (`runs_operator`),
+    never by `fn_addr_eq`: function addresses are not unique, and a trial
+    fusion matched in the test binary but never in the release build.
+  - The literal reaches the plain loop as `ProcStep::Op(proc_literal_op)`,
+    with no arm of its own: a new arm in `step_n_inner` cost every element
+    about 5 instructions.
+
+  A fusion that pulls a common literal (a literal name) out of
+  `proc_step`'s inline push costs more than it saves: `/name exch def`
+  was measured and dropped (`notes/864-fused-conditionals.md`).
+  `tests/dispatch_semantics.rs` pins every case with a positive control
+  (`Interp::fused_steps`).
 - Frames that hold external state (glyph contexts' graphics-state
   snapshot, paint suppression) must clean up in **three** unwind
   paths: normal pop, `do_stop`, and `unwind_all`. `ShowCtx::cleanup`
