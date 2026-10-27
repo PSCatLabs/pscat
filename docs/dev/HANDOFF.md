@@ -1257,8 +1257,12 @@ renders eight examples in both and compares block-downsampled output).
   plain `userdict` entries, so a program that hashes, serialises or `forall`s
   userdict sees per-band values: fractal_clouds' bake cache keyed on userdict
   and missed in every band ([#844 re-test](https://github.com/PSCatLabs/pscat/issues/844#issuecomment-6429744992)).
-  The docs tell programs to leave them out of such keys. The preamble's
-  interning can also shift `forall` order against a plain run (#868). The
+  The docs tell programs to leave them out of such keys. The preamble
+  runs inside `name::detached` (#868): its new names take ids from a separate
+  range and no sequential slot until the program first interns them, so the
+  program's own names keep a plain run's ids and `forall` order. A new
+  per-run preamble that defines names should do the same
+  (`notes/868-band-preamble-name-ids.md`). The
   backup-task / `--band-cuts` work for the tail (#869) was measured, then
   shelved once the re-test showed the queue already beats a cost-balanced
   split there (data on #869). `pscat-mcp` exposes it as a `bands` argument on

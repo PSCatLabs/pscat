@@ -82,26 +82,87 @@ impl From<&str> for PsName {
 struct Interner {
     by_text: HashMap<Rc<str>, u32>,
     by_id: Vec<Rc<str>>,
+    /// Names made inside [`detached`], by `id - DETACHED_BASE`, with
+    /// whether the program has interned them yet (`true` = not yet).
+    detached: Vec<(Rc<str>, bool)>,
+    /// Inside [`detached`]: new names take detached ids.
+    detaching: bool,
 }
+
+/// Detached ids start here, far above any sequential id and far below the
+/// `u32::MAX` sentinels other modules use.
+const DETACHED_BASE: u32 = 1 << 31;
+/// A preamble defines a handful of names; more is a bug.
+const DETACHED_CAP: usize = 1 << 16;
 
 thread_local! {
     static INTERNER: RefCell<Interner> = RefCell::new(Interner::default());
+}
+
+impl Interner {
+    /// The name for an id `by_text` already holds. A detached name the
+    /// program hasn't interned yet takes a sequential slot now, the one a
+    /// run without the preamble would give it here, so every later name
+    /// gets the id it would get in that run.
+    fn existing(&mut self, id: u32) -> PsName {
+        if id < DETACHED_BASE {
+            return PsName {
+                id,
+                text: self.by_id[id as usize].clone(),
+            };
+        }
+        let (text, pending) = &mut self.detached[(id - DETACHED_BASE) as usize];
+        let text = text.clone();
+        if std::mem::take(pending) {
+            self.by_id.push(text.clone());
+        }
+        PsName { id, text }
+    }
+
+    fn insert(&mut self, text: Rc<str>) -> PsName {
+        let id = if self.detaching {
+            assert!(
+                self.detached.len() < DETACHED_CAP,
+                "too many detached names"
+            );
+            self.detached.push((text.clone(), true));
+            DETACHED_BASE + (self.detached.len() - 1) as u32
+        } else {
+            self.by_id.push(text.clone());
+            (self.by_id.len() - 1) as u32
+        };
+        self.by_text.insert(text.clone(), id);
+        PsName { id, text }
+    }
+}
+
+/// Run `f` with name interning detached from the program's id sequence
+/// (#868). A name first interned inside `f` gets an id from a separate
+/// range and takes no sequential id, until the program itself first
+/// interns it (scanner, `cvn`, ...): then it takes the sequential slot a
+/// run without `f` would have given it there, keeping its detached id.
+/// So the program's own names get the same ids, and `forall` over their
+/// dictionaries the same order, as in a run without `f`. Names already
+/// interned are unaffected. `--bands` defines the band names this way.
+pub fn detached<T>(f: impl FnOnce() -> T) -> T {
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            INTERNER.with(|i| i.borrow_mut().detaching = self.0);
+        }
+    }
+    let _restore =
+        Restore(INTERNER.with(|i| std::mem::replace(&mut i.borrow_mut().detaching, true)));
+    f()
 }
 
 pub fn intern(s: &str) -> PsName {
     INTERNER.with(|i| {
         let mut i = i.borrow_mut();
         if let Some(&id) = i.by_text.get(s) {
-            return PsName {
-                id,
-                text: i.by_id[id as usize].clone(),
-            };
+            return i.existing(id);
         }
-        let text: Rc<str> = s.into();
-        let id = i.by_id.len() as u32;
-        i.by_id.push(text.clone());
-        i.by_text.insert(text.clone(), id);
-        PsName { id, text }
+        i.insert(s.into())
     })
 }
 
@@ -110,15 +171,9 @@ pub fn intern_rc(s: Rc<str>) -> PsName {
     INTERNER.with(|i| {
         let mut i = i.borrow_mut();
         if let Some(&id) = i.by_text.get(&*s) {
-            return PsName {
-                id,
-                text: i.by_id[id as usize].clone(),
-            };
+            return i.existing(id);
         }
-        let id = i.by_id.len() as u32;
-        i.by_id.push(s.clone());
-        i.by_text.insert(s.clone(), id);
-        PsName { id, text: s }
+        i.insert(s)
     })
 }
 
@@ -129,10 +184,17 @@ pub fn lookup(s: &str) -> Option<u32> {
 }
 
 /// Resolve an id back to a full name (for `Dict::pairs`).
+/// Never takes a detached name's sequential slot: resolving is not the
+/// program interning a name.
 pub fn resolve(id: u32) -> PsName {
-    INTERNER.with(|i| PsName {
-        id,
-        text: i.borrow().by_id[id as usize].clone(),
+    INTERNER.with(|i| {
+        let i = i.borrow();
+        let text = if id < DETACHED_BASE {
+            i.by_id[id as usize].clone()
+        } else {
+            i.detached[(id - DETACHED_BASE) as usize].0.clone()
+        };
+        PsName { id, text }
     })
 }
 
@@ -180,6 +242,43 @@ mod tests {
     fn lookup_does_not_grow() {
         assert_eq!(lookup("never-interned-xyzzy"), None);
         assert_eq!(lookup("never-interned-xyzzy"), None);
+    }
+
+    /// The interner is per thread; a fresh thread gives each test a fresh one.
+    fn on_fresh_thread(f: impl FnOnce() + Send + 'static) {
+        std::thread::spawn(f).join().expect("test thread");
+    }
+
+    #[test]
+    fn detached_names_take_no_sequential_ids() {
+        on_fresh_thread(|| {
+            let base = intern("base-868").id();
+            let band = detached(|| intern("BandIndex"));
+            assert!(band.id() >= DETACHED_BASE);
+            assert_eq!(&*resolve(band.id()), "BandIndex");
+            assert_eq!(lookup("BandIndex"), Some(band.id()));
+            // The preamble took no slot: the next name is base + 1.
+            assert_eq!(intern("a-868").id(), base + 1);
+            // The program's first mention takes the slot a plain run would
+            // (base + 2), keeping its detached id; later mentions take none.
+            assert_eq!(intern("BandIndex"), band);
+            assert_eq!(intern("BandIndex"), band);
+            assert_eq!(intern_rc("BandIndex".into()), band);
+            assert_eq!(intern("c-868").id(), base + 3);
+        });
+    }
+
+    #[test]
+    fn detached_mode_ends_on_error_and_leaves_old_names_alone() {
+        on_fresh_thread(|| {
+            let old = intern("old-868");
+            let r: Result<(), ()> = detached(|| {
+                assert_eq!(intern("old-868"), old, "already interned: unchanged");
+                Err(())
+            });
+            assert!(r.is_err());
+            assert!(intern("new-868").id() < DETACHED_BASE);
+        });
     }
 
     #[test]
