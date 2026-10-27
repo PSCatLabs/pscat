@@ -5,7 +5,7 @@
 //! canvas, and pausing/slowing execution is just a smaller budget. The
 //! window and `--interactive` modes own their interpreter on the event
 //! loop's thread. A `--spool` job's interpreter lives on a thread of its
-//! own (#895, [`JobThread`]), so it starts from the empty name interner a
+//! own (#895, `JobThread`), so it starts from the empty name interner a
 //! standalone run starts from; the loop drives it in lockstep, one call
 //! at a time, so it still runs at the window's pace.
 
