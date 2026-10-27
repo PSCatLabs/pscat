@@ -8,7 +8,9 @@
 #                                    in the MCP stdio path
 #   pscat-mcp.ps1 --locate           find or install pscat, print its directory
 #   pscat-mcp.ps1 --hook             SessionStart hook: report, never download
-#   pscat-mcp.ps1 --exe              find or install, print pscat-mcp's path
+#   pscat-mcp.ps1 --exe              find or install, tell pscat-mcp.cmd the
+#                                    path of pscat-mcp (see ExeHandoff)
+#   pscat-mcp.ps1 --exe-utf8         the same as plain UTF-8 (for Git Bash)
 #   pscat-mcp.ps1 [pscat-mcp args]   find or install, then run pscat-mcp
 #
 # Lookup, in order: $env:PSCAT_MCP_BIN, pscat-mcp on PATH, the Cargo bin
@@ -434,9 +436,16 @@ switch ($mode) {
         Out-Utf8 $script:FoundDir
         exit 0
     }
+    '--exe-utf8' {
+        # For the sh entry point under Git Bash, which reads UTF-8: the path
+        # itself, losslessly.
+        if (-not (Ensure)) { Say 'pscat-mcp is not available, so the pscat tools cannot start'; exit 1 }
+        if ($script:FoundHow -ne 'cache' -and $script:FoundHow -ne 'PATH') { Say "using $($script:FoundBin)" }
+        Out-Utf8 $script:FoundBin
+        exit 0
+    }
     '--exe' {
-        # For pscat-mcp.cmd (and the sh entry point under Git Bash); see
-        # ExeHandoff. An installed copy whose path cannot be handed over is
+        # For pscat-mcp.cmd; see ExeHandoff. An installed copy whose path cannot be handed over is
         # passed over for the next candidate (in the end the cache, whose
         # path always can be).
         while ($true) {

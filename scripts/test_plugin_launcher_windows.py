@@ -335,6 +335,17 @@ class WinLauncher(unittest.TestCase):
         self.assertIn("render_postscript", self.tools(r))
         r = self.run_argv([GIT_SH, entry, "--locate"], env=self.git_bash_env())
         self.assertSamePath(r.stdout.strip(), self.installed(), r.stderr)
+        # An installed pscat-mcp.exe outside the cache, in a directory named
+        # with non-ASCII letters: Git Bash gets its path as UTF-8 (--exe-utf8).
+        inst = self.path("inst \u00e9\u0141")
+        os.makedirs(inst)
+        shutil.copy(os.path.join(BIN_DIR, "pscat-mcp.exe"), inst)
+        git_usr = os.path.join(os.path.dirname(os.path.dirname(GIT_SH)), "usr", "bin")
+        self.stop_server()  # the cache must not be the one used
+        shutil.rmtree(os.path.join(self.cache, TAG))
+        r = self.run_argv([GIT_SH, entry], env=self.env([inst, git_usr]), stdin=MSGS)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("render_postscript", self.tools(r))
 
     def test_pin_with_release_version_matches_plain_asset_names(self):
         self.pin(f"v{VERSION}")
