@@ -65,23 +65,26 @@ fn proc_body(o: &Object) -> Option<PsArray> {
     }
 }
 
-/// Whether procedure element `o` runs the operator `op` (#864): `Some(
+/// Whether procedure element `o` runs the operator named `op` (#864): `Some(
 /// NO_NAME)` if it is that operator, `Some(id)` if it is the executable name
 /// `name_id` and that name resolves to the operator in `dstack` right now,
 /// `None` otherwise. Only the operator's own name is looked up, so other
 /// names cost one compare.
 #[inline(always)]
-fn conditional_at(
-    o: &Object,
-    dstack: &[Rc<RefCell<Dict>>],
-    op: crate::object::OpFn,
-    name_id: u32,
-) -> Option<u32> {
+fn runs_operator(o: &Object, dstack: &[Rc<RefCell<Dict>>], op: &str, name_id: u32) -> Option<u32> {
     if !o.executable {
         return None;
     }
+    // By the operator's name, not its function's address: the same
+    // function can have several addresses, and two functions one. Every
+    // operator object carries the name it is registered under in
+    // systemdict. `op` is the name systemdict's own object carries, and
+    // any copy of that object holds the same `&'static str`: equal
+    // pointers (and lengths) mean equal names, so the fast check is never
+    // wrong, and the text compare covers any other operator object.
     let is_op = |o: &Object| {
-        o.executable && matches!(&o.value, Value::Operator(f) if std::ptr::fn_addr_eq(f.func, op))
+        o.executable
+            && matches!(&o.value, Value::Operator(f) if std::ptr::eq(f.name, op) || f.name == op)
     };
     match &o.value {
         Value::Operator(_) => is_op(o).then_some(NO_NAME),
@@ -157,6 +160,11 @@ enum ProcStep {
     Op(crate::object::OpFn),
     /// A procedure element that is an executable name: look it up and run it.
     Name(u32),
+    /// A procedure literal, to push with [`Interp::proc_literal`]: what
+    /// `proc_step::<true>` returns for one, so `--profile-ops` can tell it
+    /// from an operator. The plain loop gets it as
+    /// `Op(proc_literal_op)` (#864), so it has no arm of its own there.
+    Lit,
     /// A procedure element that is pushed (a literal other than a
     /// procedure body): already on the operand stack.
     Pushed,
@@ -301,6 +309,11 @@ pub struct Interp {
     /// conditionals).
     if_id: u32,
     ifelse_id: u32,
+    /// The names systemdict's `if` and `ifelse` operator objects carry:
+    /// every copy of them (a bound body's) holds the same `&'static str`,
+    /// so [`runs_operator`] matches them by pointer before comparing text.
+    if_name: &'static str,
+    ifelse_name: &'static str,
     /// Fused steps run (#864); see [`Interp::fused_steps`].
     fused_steps: u64,
     /// Steps left in the running slice after the current one (#864): a
@@ -467,6 +480,11 @@ impl Interp {
         let gfx = Gfx::with_scale(pw, ph, scale)?;
         let mut system = Dict::new();
         ops::install_all(&mut system);
+        let op_name = |name: &'static str| match system.get(name).map(|o| o.value) {
+            Some(Value::Operator(op)) => op.name,
+            _ => name,
+        };
+        let (if_name, ifelse_name) = (op_name("if"), op_name("ifelse"));
         // Error machinery: $error is where recovered errors are recorded;
         // errordict holds a handler per error name, so a program can
         // re-raise a caught error with `errordict /name get exec` (issue
@@ -506,6 +524,8 @@ impl Interp {
             quit_requested: false,
             last_name: None,
             if_id: crate::name::intern("if").id(),
+            if_name,
+            ifelse_name,
             ifelse_id: crate::name::intern("ifelse").id(),
             fused_steps: 0,
             slice_left: 0,
@@ -1032,11 +1052,11 @@ impl Interp {
             if self.quit_requested {
                 return Ok(false);
             }
-            let mut step = self.proc_step();
+            let mut step = self.proc_step::<true>();
             if let ProcStep::Other = step {
                 match self.next_item() {
                     Ok(None) => return Ok(false),
-                    Ok(Some(Item::Proc)) => step = self.proc_step(),
+                    Ok(Some(Item::Proc)) => step = self.proc_step::<true>(),
                     Ok(Some(Item::Obj(obj))) => {
                         let done = match (&obj.value, obj.executable) {
                             (Value::Name(n), true) => self.execute_name_timed(n.id()),
@@ -1059,16 +1079,11 @@ impl Interp {
                 }
             }
             let done = match step {
-                // A procedure literal is not an operator: not timed.
-                ProcStep::Op(func)
-                    if std::ptr::fn_addr_eq(func, proc_literal_op as crate::object::OpFn) =>
-                {
-                    self.proc_literal()
-                }
+                // A procedure literal is not an operator: not timed
+                // (and never fused here, `slice_left` being zero).
+                ProcStep::Lit => self.proc_literal(),
                 ProcStep::Op(func) => self.timed_op(func),
                 ProcStep::Name(id) => self.execute_name_timed(id),
-                // No steps to spare: pushed alone, never fused, so every
-                // operator is still timed and counted on its own.
                 ProcStep::Pushed | ProcStep::Other => continue,
             };
             if let Err(e) = done {
@@ -1119,19 +1134,19 @@ impl Interp {
             // loop iteration (or a frame finishing) leaves a procedure on
             // top: its first element runs in this same step, as it always
             // has.
-            let done = match self.proc_step() {
+            let done = match self.proc_step::<false>() {
                 ProcStep::Op(func) => func(self),
                 ProcStep::Name(id) => self.execute_name(id),
-                ProcStep::Pushed => continue,
+                ProcStep::Pushed | ProcStep::Lit => continue,
                 ProcStep::Other => match self.next_item() {
                     Ok(None) => return Ok(false),
                     Ok(Some(Item::Obj(obj))) => self.execute_element(obj),
-                    Ok(Some(Item::Proc)) => match self.proc_step() {
+                    Ok(Some(Item::Proc)) => match self.proc_step::<false>() {
                         ProcStep::Op(func) => func(self),
                         ProcStep::Name(id) => self.execute_name(id),
                         // `Other` is not reached: `next_item` checked the
                         // frame has an element left.
-                        ProcStep::Pushed | ProcStep::Other => continue,
+                        ProcStep::Pushed | ProcStep::Lit | ProcStep::Other => continue,
                     },
                     Err(e) => {
                         // A scan/syntax error short-circuits out of
@@ -1160,7 +1175,7 @@ impl Interp {
     /// yields its last element, before that element runs (tail calls).
     /// `sync_scan_line` is not needed: the top frame is not a scanner.
     #[inline(always)]
-    fn proc_step(&mut self) -> ProcStep {
+    fn proc_step<const TIMED: bool>(&mut self) -> ProcStep {
         let Interp { estack, ostack, .. } = self;
         let Some(Frame::Proc { body, pc }) = estack.last_mut() else {
             return ProcStep::Other;
@@ -1180,7 +1195,13 @@ impl Interp {
                         *pc = i + 1;
                         return ProcStep::Name(n.id());
                     }
-                    Value::Array(_) => return ProcStep::Op(proc_literal_op),
+                    Value::Array(_) => {
+                        return if TIMED {
+                            ProcStep::Lit
+                        } else {
+                            ProcStep::Op(proc_literal_op)
+                        };
+                    }
                     _ => {}
                 }
             }
@@ -1263,6 +1284,8 @@ impl Interp {
             dstack,
             if_id,
             ifelse_id,
+            if_name,
+            ifelse_name,
             ..
         } = self;
         let depth = estack.len();
@@ -1274,18 +1297,13 @@ impl Interp {
         let (n, branch, via) = body.with_slice(|els| {
             let lit = els.get(i)?;
             let next = els.get(i + 1)?;
-            if let Some(via) = conditional_at(next, dstack, crate::ops::control::IF, *if_id) {
+            if let Some(via) = runs_operator(next, dstack, if_name, *if_id) {
                 return Some((2, if c { proc_body(lit) } else { None }, via));
             }
             if left < 2 || !is_proc_literal(next) {
                 return None;
             }
-            let via = conditional_at(
-                els.get(i + 2)?,
-                dstack,
-                crate::ops::control::IFELSE,
-                *ifelse_id,
-            )?;
+            let via = runs_operator(els.get(i + 2)?, dstack, ifelse_name, *ifelse_id)?;
             Some((3, proc_body(if c { lit } else { next }), via))
         })?;
         let tail = i + n >= body.len();

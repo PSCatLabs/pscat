@@ -284,6 +284,33 @@ const CASES: &[(&str, &str, &str)] = &[
         "0 8 false",
         "0 1 false",
     ),
+    // A literal name, `exch` and `def`: the "/name exch def" idiom. #864
+    // measured fusing it and did not (every other name literal paid more
+    // than this one saved); pinned for whoever tries next.
+    ("5 /v exch def v", "0 5 false", "0 5 false"),
+    ("1 2 /v exch def v", "0 1 2 false", "0 1 2 false"),
+    ("5 /v exch def 6 /v exch def v", "0 6 false", "0 6 false"),
+    (
+        "clear /v exch def",
+        "/v /stackunderflow exch true",
+        "/v /stackunderflow pre true",
+    ),
+    (
+        "/v 1 def save 5 /v exch def restore v",
+        "0 1 false",
+        "0 1 false",
+    ),
+    (
+        "1 dict begin /def { pop pop 4 } def 5 /v exch def end",
+        "0 4 false",
+        "0 false",
+    ),
+    (
+        "1 dict begin /exch { 7 } def 5 /v exch def v end",
+        "0 5 7 false",
+        "0 5 false",
+    ),
+    ("5 /v exch def /v load", "0 5 false", "0 5 false"),
     // `if` reached as a name that resolves to another name.
     (
         "/myif /if load def true { 9 } myif",
@@ -393,6 +420,8 @@ fn step_granularity_is_one_element_per_step() {
         ("{ false { 1 } { 2 } ifelse pop } bind exec", 9),
         ("{ true { } if 1 pop } bind exec", 8),
         ("3 { 2 dup 0 lt { pop 0 } if pop } bind repeat", 25),
+        ("{ 5 /v exch def } bind exec", 7),
+        ("{ 5 /v exch def v pop } exec", 8),
     ];
     let mut failures = Vec::new();
     for (src, want) in cases {
@@ -439,6 +468,8 @@ fn a_slice_of_n_steps_ends_where_n_single_steps_do() {
         "{ 1 1 6 { dup 3 lt { pop 0 } if dup 4 gt { 10 } { 20 } ifelse } for } bind exec",
         "{ 1 1 6 { dup 3 lt { pop 0 } if dup 4 gt { 10 } { 20 } ifelse } for } exec",
         "/p { dup 2 mod 0 eq { 1 add } { 3 mul } ifelse } bind def 1 8 { p } repeat",
+        "/q { /a exch def a a mul /b exch def } bind def 1 1 6 { q b } for",
+        "/q { /a exch def a a mul /b exch def } def 1 1 6 { q b } for",
     ];
     for src in programs {
         let singles = trace(src, 1);
