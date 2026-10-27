@@ -299,16 +299,14 @@ impl ImageCtx {
                     self.eod = true;
                 }
                 ImageSource::File(f) => {
+                    // One bulk read (#896), the same bytes and file state
+                    // as a `read_byte` per sample byte. A closed file reads
+                    // as end of data here, as `read_byte` has it, where
+                    // `read_into` would raise `ioerror`.
                     let want = self.needed() - self.data.len();
                     let mut f = f.borrow_mut();
-                    for _ in 0..want {
-                        match f.read_byte()? {
-                            Some(b) => self.data.push(b),
-                            None => {
-                                self.eod = true;
-                                break;
-                            }
-                        }
+                    if !f.is_open() || f.read_into(&mut self.data, want)? < want {
+                        self.eod = true;
                     }
                 }
                 ImageSource::Proc(p) => {

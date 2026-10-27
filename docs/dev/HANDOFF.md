@@ -524,6 +524,9 @@ renders eight examples in both and compares block-downsampled output).
   or fewer it reads a per-component decode table built from the same
   expression (`decode_value`), so a speed-up there must stay bit-identical
   (#793, #835; `notes/835-image-rgb-at-decode-table.md`).
+  `ImageCtx::fill` reads a file source with one `PsFile::read_into` per call
+  (#896, `notes/896-image-bulk-read.md`); the decoders under a filter still
+  pull their own input one byte at a time, so they never read past EOD.
 - errordict holds a handler per error name (#372, so `errordict /name
   get exec` re-raises), but a handler a program installs there is not
   consulted on a real error; error-time operand-stack restoration not
@@ -1347,7 +1350,8 @@ renders eight examples in both and compares block-downsampled output).
   readreals` (offset in values) and the file-object forms `array file writereals` / `file
   n|/all readreals`, in the same module (`tests/realsio_files.rs`;
   `notes/773-readreals-all-offset-file.md`). The bulk read is `PsFile::read_into`, which keeps
-  `consumed`/`line` exactly as `read_byte` does.
+  `consumed`/`line` exactly as `read_byte` does (for a filter too since #896; the `filters`
+  fuzz target reads every chain both ways and asserts they agree).
 - **`pscat sheet` composes finished renders (#693).** Unlike the subcommands above it
   builds no driver: it renders each file itself (a probe `Interp` gives every cell's
   pixel size first), lays the cells out with `contact_sheet::Layout` (pure geometry, so

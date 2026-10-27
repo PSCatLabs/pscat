@@ -163,8 +163,15 @@ const MAX_FILTER_OUTPUT: usize = 1 << 20;
 /// three bits the first decoder, the next three an optional second one
 /// reading the first's output. Decoders: ASCIIHex, ASCII85, RunLength,
 /// eexec, Flate, LZW and DCT (the JPEG marker scanner is pscat's own).
+///
+/// The chain is built twice and read two ways (#896): one `read_byte` at a
+/// time, and in bulk with `read_into`, in chunks whose size the top two
+/// bits of byte 0 pick. Both must give the same bytes, the same error, and
+/// leave every layer with the same byte and line counts (the bottom file's
+/// position included); a difference panics, so the fuzzer reports it.
 pub fn filters(data: &[u8]) {
-    use crate::file::{Decoder, PsFile};
+    use crate::error::PsError;
+    use crate::file::{Decoder, FileHandle, PsFile};
     let Some((&sel, payload)) = data.split_first() else {
         return;
     };
@@ -178,18 +185,74 @@ pub fn filters(data: &[u8]) {
         6 => Some(Decoder::dct()),
         _ => None,
     };
-    let mut file = PsFile::from_bytes(payload.to_vec());
-    let Some(first) = decoder(sel) else { return };
-    file = PsFile::filtered(file, first);
-    if let Some(second) = decoder(sel >> 3) {
-        file = PsFile::filtered(file, second);
-    }
-    for _ in 0..MAX_FILTER_OUTPUT {
-        match file.borrow_mut().read_byte() {
-            Ok(Some(_)) => {}
-            Ok(None) | Err(_) => break,
+    // Every layer, bottom (the raw bytes) first, top (what is read) last.
+    let build = || -> Option<Vec<FileHandle>> {
+        let mut layers = vec![PsFile::from_bytes(payload.to_vec())];
+        layers.push(PsFile::filtered(layers[0].clone(), decoder(sel)?));
+        if let Some(second) = decoder(sel >> 3) {
+            layers.push(PsFile::filtered(layers[1].clone(), second));
+        }
+        Some(layers)
+    };
+    let Some(by_byte) = build() else { return };
+    let Some(in_bulk) = build() else { return };
+    let top = |layers: &[FileHandle]| layers[layers.len() - 1].clone();
+
+    let (mut bytes_a, mut err_a): (Vec<u8>, Option<PsError>) = (Vec::new(), None);
+    let a = top(&by_byte);
+    while bytes_a.len() < MAX_FILTER_OUTPUT {
+        match a.borrow_mut().read_byte() {
+            Ok(Some(b)) => bytes_a.push(b),
+            Ok(None) => break,
+            Err(e) => {
+                err_a = Some(e);
+                break;
+            }
         }
     }
+
+    let base = [1usize, 7, 64, 4096][usize::from(sel >> 6)];
+    let (mut bytes_b, mut err_b): (Vec<u8>, Option<PsError>) = (Vec::new(), None);
+    let b = top(&in_bulk);
+    for round in 0.. {
+        if bytes_b.len() >= MAX_FILTER_OUTPUT {
+            break;
+        }
+        // Alternate two sizes so chunk edges fall at varied offsets.
+        let size = if round % 2 == 0 { base } else { base * 3 + 1 };
+        let want = size.min(MAX_FILTER_OUTPUT - bytes_b.len());
+        match b.borrow_mut().read_into(&mut bytes_b, want) {
+            Ok(got) if got < want => break,
+            Ok(_) => {}
+            Err(e) => {
+                err_b = Some(e);
+                break;
+            }
+        }
+    }
+
+    assert!(
+        bytes_a == bytes_b,
+        "filter output differs between byte and bulk reads"
+    );
+    assert_eq!(
+        err_a, err_b,
+        "filter error differs between byte and bulk reads"
+    );
+    for (x, y) in by_byte.iter().zip(&in_bulk) {
+        let (x, y) = (x.borrow(), y.borrow());
+        assert_eq!(
+            (x.pos(), x.line()),
+            (y.pos(), y.line()),
+            "layer counts differ"
+        );
+    }
+    let position = |layers: &[FileHandle]| layers[0].borrow_mut().file_position();
+    assert_eq!(
+        position(&by_byte),
+        position(&in_bulk),
+        "bottom file position differs"
+    );
 }
 
 /// Image data paths. A program that starts with `%!` is run as PostScript

@@ -110,6 +110,75 @@ fn file_source_reads_inline_data() {
     assert_eq!(pixel(&it, 5, 5), (0, 0, 255), "program resumed after data");
 }
 
+// ---- #896: `fill` reads a file source in bulk ----
+
+#[test]
+fn raw_currentfile_source_takes_exactly_its_bytes() {
+    // Two 8-bit samples straight from the program text ("\377\000" would
+    // need escapes, so printable bytes: 'A' is 65, 'z' 122), then the
+    // program carries on from the very next byte.
+    const SRC: &str = "10 10 translate 80 80 scale
+         2 1 8 [2 0 0 -1 0 1] currentfile image
+Az currentfile fileposition (tail) length";
+    let mut it = run(SRC);
+    assert_eq!(it.pop().expect("length").repr(), "4");
+    // `fileposition` runs once the scanner has taken the token and its
+    // delimiter, so the samples were exactly "Az" and nothing more.
+    let upto = SRC.find("fileposition").expect("token") + "fileposition ".len();
+    assert_eq!(it.pop().expect("position").repr(), upto.to_string());
+    assert_eq!(pixel(&it, 30, 50), (65, 65, 65));
+    assert_eq!(pixel(&it, 70, 50), (122, 122, 122));
+}
+
+#[test]
+fn raw_currentfile_source_running_out_renders_what_arrived() {
+    // The program ends two bytes into four samples: no error, the two
+    // delivered samples paint, the missing ones read as 0.
+    let it = run("10 10 translate 80 80 scale
+         2 2 8 [2 0 0 -2 0 2] currentfile image
+Az");
+    assert_eq!(pixel(&it, 30, 30), (65, 65, 65));
+    assert_eq!(pixel(&it, 70, 30), (122, 122, 122));
+    assert_eq!(pixel(&it, 30, 70), BLACK, "missing sample reads as 0");
+    assert_eq!(pixel(&it, 70, 70), BLACK, "missing sample reads as 0");
+}
+
+#[test]
+fn filter_ending_mid_row_renders_what_arrived() {
+    // Three of four samples, then the filter's EOD: the last reads as 0,
+    // and the program resumes after the `>`.
+    let it = run("10 10 translate 80 80 scale
+         2 2 8 [2 0 0 -2 0 2]
+         currentfile /ASCIIHexDecode filter image
+         ffffff>
+         initmatrix 0 0 1 setrgbcolor 4 setlinewidth
+         newpath 2 95 moveto 8 95 lineto stroke");
+    assert_eq!(pixel(&it, 30, 30), WHITE);
+    assert_eq!(pixel(&it, 30, 70), WHITE);
+    assert_eq!(pixel(&it, 70, 70), BLACK, "missing sample reads as 0");
+    assert_eq!(pixel(&it, 5, 5), (0, 0, 255), "program resumed after data");
+}
+
+#[test]
+fn closed_file_source_is_end_of_data_not_an_error() {
+    // A closed file reads as end of data (as `read` gives false), so the
+    // image renders with every sample 0 instead of raising `ioerror`.
+    let it = run("/F (ffff>) /ASCIIHexDecode filter def F closefile
+         10 10 translate 80 80 scale
+         2 1 8 [2 0 0 -1 0 1] F image");
+    assert_eq!(pixel(&it, 30, 50), BLACK);
+    assert_eq!(pixel(&it, 70, 50), BLACK);
+}
+
+#[test]
+fn bad_filter_data_is_ioerror() {
+    let mut it = Interp::with_page(100, 100).expect("page");
+    assert_eq!(
+        it.run_str("2 1 8 [2 0 0 -1 0 1] (ffxx>) /ASCIIHexDecode filter image"),
+        Err(PsError::Io)
+    );
+}
+
 #[test]
 fn proc_source_called_per_chunk() {
     // The proc returns one row per call; a counter proves it ran

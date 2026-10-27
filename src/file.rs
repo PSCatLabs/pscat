@@ -281,47 +281,72 @@ impl PsFile {
     /// Append up to `max` bytes to `buf` and return how many were added
     /// (fewer only at end of data). `ioerror` for a closed file or an output
     /// file. The position, byte count and line count move exactly as that
-    /// many [`Self::read_byte`] calls would move them (issue #773).
+    /// many [`Self::read_byte`] calls would move them (issue #773). A filter
+    /// copies whole runs of its decoded output at a time (issue #896); an
+    /// error from the decoder leaves the bytes read before it in `buf`,
+    /// counted, as a `read_byte` loop would.
     pub fn read_into(&mut self, buf: &mut Vec<u8>, max: usize) -> Result<usize, PsError> {
         if self.closed {
             return Err(PsError::Io);
         }
         let start = buf.len();
-        if self.is_filter() {
-            for _ in 0..max {
-                match self.read_byte()? {
-                    Some(b) => buf.push(b),
-                    None => break,
-                }
-            }
-            return Ok(buf.len() - start);
-        }
+        let mut result = Ok(());
         match &mut self.kind {
             Kind::Bytes { data, pos } => {
                 let take = max.min(data.len() - *pos);
                 buf.extend_from_slice(&data[*pos..*pos + take]);
                 *pos += take;
             }
-            _ => return Err(PsError::Io),
-        }
-        // The bookkeeping `read_byte` does, over the bytes just taken.
-        self.consumed += buf.len() - start;
-        for &byte in &buf[start..] {
-            match byte {
-                b'\r' => {
-                    self.line += 1;
-                    self.last_was_cr = true;
-                }
-                b'\n' => {
-                    if !self.last_was_cr {
-                        self.line += 1;
+            Kind::Filter {
+                source,
+                dec,
+                out,
+                eod,
+            } => {
+                while buf.len() - start < max {
+                    if let Err(e) = Self::ensure_output(source, dec, out, eod) {
+                        result = Err(e);
+                        break;
                     }
-                    self.last_was_cr = false;
+                    if out.is_empty() {
+                        break;
+                    }
+                    let take = out.len().min(max - (buf.len() - start));
+                    if let (1, Some(b)) = (take, out.front()) {
+                        // ASCIIHex decodes one byte per pull: skip the
+                        // slice copy for a lone byte.
+                        buf.push(*b);
+                        out.pop_front();
+                    } else {
+                        let (a, b) = out.as_slices();
+                        let from_a = take.min(a.len());
+                        buf.extend_from_slice(&a[..from_a]);
+                        buf.extend_from_slice(&b[..take - from_a]);
+                        out.drain(..take);
+                    }
                 }
-                _ => self.last_was_cr = false,
             }
+            Kind::Output(_) => return Err(PsError::Io),
         }
-        Ok(buf.len() - start)
+        self.count_read(&buf[start..]);
+        result.map(|()| buf.len() - start)
+    }
+
+    /// The bookkeeping [`Self::read_byte`] does, over bytes just handed out:
+    /// every CR and every LF ends a line, except the LF of a CR LF pair
+    /// (one straddling the previous read included). One pass without
+    /// branches, since it runs over every sample of an image (#896).
+    fn count_read(&mut self, bytes: &[u8]) {
+        self.consumed += bytes.len();
+        let mut prev_cr = self.last_was_cr;
+        let mut lines = 0;
+        for &b in bytes {
+            let cr = b == b'\r';
+            lines += usize::from(cr | (b == b'\n' && !prev_cr));
+            prev_cr = cr;
+        }
+        self.line += lines;
+        self.last_was_cr = prev_cr;
     }
 
     pub fn peek_byte(&mut self) -> Result<Option<u8>, PsError> {
@@ -1166,6 +1191,85 @@ mod tests {
             f.borrow_mut().set_file_position(-1),
             Err(PsError::Rangecheck)
         );
+    }
+
+    /// `read_into` against a `read_byte` loop (#896), through
+    /// [`crate::fuzzing::filters`], which builds the chain twice and panics
+    /// on any difference in bytes, error, byte and line counts or the
+    /// bottom file's position. Every committed filter seed (DCT included),
+    /// at each of the four chunk sizes, plus decoded output full of CR and
+    /// LF (so the line counts are exercised), errors after some output,
+    /// and pseudo-random bytes for every decoder pair.
+    #[test]
+    fn bulk_reads_match_byte_reads_through_every_filter() {
+        let check = |sel: u8, payload: &[u8]| {
+            for size in 0..4u8 {
+                let mut input = vec![(sel & 0x3f) | (size << 6)];
+                input.extend_from_slice(payload);
+                crate::fuzzing::filters(&input);
+            }
+        };
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fuzz");
+        let mut seeds = 0;
+        for kind in ["seeds", "regressions"] {
+            let Ok(dir) = std::fs::read_dir(root.join(kind).join("filters")) else {
+                continue;
+            };
+            for entry in dir.flatten() {
+                let data = std::fs::read(entry.path()).expect("seed");
+                if let Some((&sel, payload)) = data.split_first() {
+                    check(sel, payload);
+                    seeds += 1;
+                }
+            }
+        }
+        assert!(seeds >= 8, "filter seeds went missing");
+        // Single decoders (the second slot 7 is none): selector = code | 7 << 3.
+        let one = |code: u8| code | (7 << 3);
+        let crlf = b"0d0a0d0d0a0a 41 0a 0d 42>tail\r\n";
+        check(one(0), crlf);
+        check(one(0), b"0d0a0dzz>"); // ioerror after three bytes
+        check(one(1), b"!<N?+\"\n!<N?+~>\rrest");
+        check(
+            one(2),
+            &[3, b'\r', b'\n', b'\r', b'x', 252, b'\n', 128, b'\r'],
+        );
+        check(one(5), &lzw_pack(&[256, 13, 10, 13, 258, 259, 10, 257]));
+        {
+            use std::io::Write;
+            let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+            let text: Vec<u8> = (0..5000u32)
+                .map(|i| b"ab\r\n\rc\n"[(i % 7) as usize])
+                .collect();
+            z.write_all(&text).unwrap();
+            let mut packed = z.finish().unwrap();
+            packed.extend_from_slice(b"\nafter");
+            check(one(4), &packed);
+            packed.truncate(packed.len() / 2); // data runs out mid-stream
+            check(one(4), &packed);
+        }
+        // Hex over hex: a chain, the inner layer's lines counted too.
+        check(0, b"3044 3041 3044 3e>\n");
+        // Pseudo-random bytes for every decoder pair (xorshift, fixed seed).
+        let mut x: u32 = 0x9e37_79b9;
+        let mut next = || {
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            x
+        };
+        for sel in 0..64u8 {
+            for len in [0usize, 1, 5, 40, 700] {
+                let payload: Vec<u8> = (0..len).map(|_| next() as u8).collect();
+                check(sel, &payload);
+                // The same, as ASCII hex digits and line ends only.
+                let hexish: Vec<u8> = payload
+                    .iter()
+                    .map(|b| b"0123456789abcdef\r\n> "[usize::from(b % 20)])
+                    .collect();
+                check(sel, &hexish);
+            }
+        }
     }
 
     #[test]
