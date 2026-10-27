@@ -684,3 +684,559 @@ fn operator_timing_runs_every_conditional_on_its_own() {
     assert_eq!(calls("ifelse"), Some(5));
     assert_eq!(calls("if"), Some(5));
 }
+
+// ---------------------------------------------------------------------------
+// Loops (#875). `repeat`, `loop`, `for` and `forall` run their body from the
+// loop's own frame. These pin what the separate per-iteration procedure frame
+// gave: where `exit`, `stop` and errors leave the operand stack and `$error`,
+// the steps a loop takes, the depth at which the execution stack overflows,
+// what the profiles count, and a body changed while it runs. All were written
+// against the tree before #875 and pass on it unchanged.
+
+/// Loop programs for `caught`: the source, then what it gives unbound and
+/// bound. Each runs inside `{ ... } stopped`.
+const LOOP_CASES: &[(&str, &str, &str)] = &[
+    // `exit` at the first, a middle and the last element of the body.
+    ("0 3 { exit 1 } repeat", "0 false", "0 false"),
+    ("0 3 { 1 exit 2 } repeat", "0 1 false", "0 1 false"),
+    ("0 3 { 1 exit } repeat", "0 1 false", "0 1 false"),
+    // Through a named procedure, called last and not last.
+    (
+        "/q { exit } def 0 3 { 1 q } repeat",
+        "0 1 false",
+        "0 1 false",
+    ),
+    (
+        "/q { 7 exit 8 } def 0 3 { 1 q 2 } repeat",
+        "0 1 7 false",
+        "0 1 7 false",
+    ),
+    // Through `exec` of a procedure that ends the body.
+    ("0 { 1 { exit } exec } loop", "0 1 false", "0 1 false"),
+    ("0 { 1 { exit } exec 2 } loop", "0 1 false", "0 1 false"),
+    // From a conditional's branch, last in the body and not last.
+    ("0 { 1 true { exit } if } loop", "0 1 false", "0 1 false"),
+    (
+        "1 1 10 { dup 3 ge { exit } if } for",
+        "1 2 3 false",
+        "1 2 3 false",
+    ),
+    (
+        "1 1 10 { dup 3 ge { exit } { } ifelse 10 mul } for",
+        "10 20 3 false",
+        "10 20 3 false",
+    ),
+    (
+        "0 { 1 add dup 5 eq { exit } if } loop",
+        "5 false",
+        "5 false",
+    ),
+    // Only the inner loop ends.
+    (
+        "2 { 3 { 1 exit } repeat 2 } repeat",
+        "1 2 1 2 false",
+        "1 2 1 2 false",
+    ),
+    (
+        "1 1 2 { 1 1 3 { exit } for 5 } for",
+        "1 1 5 2 1 5 false",
+        "1 1 5 2 1 5 false",
+    ),
+    // `exit` cannot cross `stopped`: invalidexit, caught each time.
+    (
+        "3 { { exit } stopped } repeat $error /errorname get",
+        "true true true /invalidexit false",
+        "true true true /invalidexit false",
+    ),
+    (
+        "3 { { 1 exit } stopped } repeat",
+        "1 true 1 true 1 true false",
+        "1 true 1 true 1 true false",
+    ),
+    // Every kind of `forall`, and `for` with reals.
+    (
+        "[1 2 3 4] { dup 2 gt { exit } if } forall",
+        "1 2 3 false",
+        "1 2 3 false",
+    ),
+    (
+        "(abcd) { dup 98 gt { exit } if } forall",
+        "97 98 99 false",
+        "97 98 99 false",
+    ),
+    ("<< /a 1 >> { pop exit } forall", "/a false", "/a false"),
+    (
+        "0 0.5 2 { dup 1 gt { exit } if } for",
+        "0.0 0.5 1.0 1.5 false",
+        "0.0 0.5 1.0 1.5 false",
+    ),
+    (
+        "1 -1 -3 { } for 1 -1 -3 { } for",
+        "1 0 -1 -2 -3 1 0 -1 -2 -3 false",
+        "1 0 -1 -2 -3 1 0 -1 -2 -3 false",
+    ),
+    (
+        "0 1 0 { } for 0 { } repeat [] { } forall () { } forall",
+        "0 false",
+        "0 false",
+    ),
+    // Errors at the first, a middle and the last element.
+    (
+        "0 3 { nosuch 1 } repeat",
+        "0 /undefined nosuch true",
+        "0 /undefined nosuch true",
+    ),
+    (
+        "0 3 { 1 nosuch 2 } repeat",
+        "0 1 /undefined nosuch true",
+        "0 1 /undefined nosuch true",
+    ),
+    (
+        "0 3 { 1 2 nosuch } repeat",
+        "0 1 2 /undefined nosuch true",
+        "0 1 2 /undefined nosuch true",
+    ),
+    (
+        "0 3 { 1 (a) add } repeat",
+        "0 1 /typecheck add true",
+        "0 1 /typecheck stopped true",
+    ),
+    (
+        "1 1 3 { 0 div } for",
+        "/undefinedresult div true",
+        "/undefinedresult stopped true",
+    ),
+    (
+        "1 1 3 { dup 2 eq { 0 div } if } for",
+        "1 /undefinedresult div true",
+        "1 /undefinedresult stopped true",
+    ),
+    (
+        "[1 (a) 3] { 1 add } forall",
+        "2 /typecheck add true",
+        "2 /typecheck [ true",
+    ),
+    (
+        "(ab) { pop pop } forall",
+        "/stackunderflow pop true",
+        "/stackunderflow stopped true",
+    ),
+    (
+        "<< /a 1 >> { pop pop pop } forall",
+        "/stackunderflow pop true",
+        "/stackunderflow << true",
+    ),
+    (
+        "0 { 1 add dup 3 eq { pop pop } if } loop",
+        "/stackunderflow pop true",
+        "/stackunderflow stopped true",
+    ),
+    (
+        "/q { 1 1 3 { 0 div } for } def q",
+        "/undefinedresult div true",
+        "/undefinedresult q true",
+    ),
+    (
+        "2 { 2 { 1 0 idiv } repeat } repeat",
+        "/undefinedresult idiv true",
+        "/undefinedresult stopped true",
+    ),
+    (
+        "-1 { } repeat",
+        "/rangecheck repeat true",
+        "/rangecheck stopped true",
+    ),
+    (
+        "1 (a) 3 { } for",
+        "1 /typecheck for true",
+        "1 /typecheck stopped true",
+    ),
+    (
+        "5 { } forall",
+        "/typecheck forall true",
+        "/typecheck stopped true",
+    ),
+    ("3 { exit } stopped", "3 true false", "3 true false"),
+    // `stop` inside a loop inside a `stopped` context.
+    (
+        "{ 3 { 1 stop 2 } repeat } stopped 4",
+        "1 true 4 false",
+        "1 true 4 false",
+    ),
+    (
+        "{ 3 { 1 stop } repeat } stopped 4",
+        "1 true 4 false",
+        "1 true 4 false",
+    ),
+    (
+        "{ 0 { 1 add dup 3 eq { stop } if } loop } stopped 4",
+        "3 true 4 false",
+        "3 true 4 false",
+    ),
+    (
+        "{ [1 2] { { stop } loop } forall } stopped",
+        "1 true false",
+        "1 true false",
+    ),
+    // A body changed while it runs: every iteration reads it as it is now.
+    (
+        "/b { 1 /b load 0 2 index 1 add put } def 3 /b load repeat",
+        "1 2 3 false",
+        "1 2 3 false",
+    ),
+    (
+        "/b { /b load 5 8 put 0 } def 2 /b load repeat",
+        "8 8 false",
+        "8 8 false",
+    ),
+    (
+        "/a { /a load 4 7 put 1 } def 2 /a load 0 5 getinterval cvx repeat",
+        "{/a load 4 7 7 1} 4 7 7 false",
+        "{/a --load-- 4 7 7 1} 4 7 7 false",
+    ),
+    (
+        "/a [ 1 2 3 4 ] cvx def 2 /a load 1 2 getinterval repeat",
+        "2 3 2 3 false",
+        "2 3 2 3 false",
+    ),
+    (
+        "/b { 1 /b load 1 [ 9 /pop load ] putinterval 2 3 } def 2 /b load repeat",
+        "1 2 3 /typecheck putinterval true",
+        "1 2 3 /typecheck [ true",
+    ),
+    // `restore` puts back an element of the running body.
+    (
+        "/b { 1 pop /b load 0 get exch restore save } def save /b load 0 2 put 2 /b load repeat pop",
+        "2 1 false",
+        "2 1 false",
+    ),
+    (
+        "/b { 1 } def 3 { /b load } repeat",
+        "{1} {1} {1} false",
+        "{1} {1} {1} false",
+    ),
+];
+
+#[test]
+fn loops_leave_the_same_stack_and_error_after_exit_stop_and_errors() {
+    let mut failures = Vec::new();
+    for (body, want_unbound, want_bound) in LOOP_CASES {
+        for (src, want) in [
+            (format!("{{ {body} }}"), want_unbound),
+            (format!("{{ {body} }} bind"), want_bound),
+        ] {
+            let got = caught(&src);
+            if got != *want {
+                failures.push(format!("{src:?}: got {got:?}, want {want:?}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn uncaught_errors_in_loops_report_the_same_command_and_stack() {
+    let cases: &[(&str, &str)] = &[
+        (
+            "0 3 { 1 nosuch } repeat",
+            "%%[ Error: undefined; OffendingCommand: nosuch; Line: 1 ]%% | 0 1",
+        ),
+        (
+            "0 3 { 1 nosuch } bind repeat",
+            "%%[ Error: undefined; OffendingCommand: nosuch; Line: 1 ]%% | 0 1",
+        ),
+        (
+            "1 1 3 { 0 div } for",
+            "%%[ Error: undefinedresult; OffendingCommand: div; Line: 1 ]%% | ",
+        ),
+        (
+            "1 1 3 { 0 div } bind for",
+            "%%[ Error: undefinedresult; OffendingCommand: for; Line: 1 ]%% | ",
+        ),
+        (
+            "/p { 1 1 3 { 0 div } bind for } bind def p",
+            "%%[ Error: undefinedresult; OffendingCommand: p; Line: 1 ]%% | ",
+        ),
+        (
+            "[1 (a)] { 1 add } forall",
+            "%%[ Error: typecheck; OffendingCommand: add; Line: 1 ]%% | 2",
+        ),
+        (
+            "[1 (a)] { 1 add } bind forall",
+            "%%[ Error: typecheck; OffendingCommand: forall; Line: 1 ]%% | 2",
+        ),
+        (
+            "0 { 1 add dup 3 eq { pop pop } if } loop",
+            "%%[ Error: stackunderflow; OffendingCommand: pop; Line: 1 ]%% | ",
+        ),
+        ("3 { 1 exit } stopped", "ok | 3 1 true"),
+        (
+            "exit",
+            "%%[ Error: invalidexit; OffendingCommand: exit; Line: 1 ]%% | ",
+        ),
+        (
+            "{ exit } exec",
+            "%%[ Error: invalidexit; OffendingCommand: exit; Line: 1 ]%% | ",
+        ),
+        (
+            "1 1 3 { pop exit } for 1 (a) add",
+            "%%[ Error: typecheck; OffendingCommand: add; Line: 1 ]%% | 1",
+        ),
+    ];
+    let mut failures = Vec::new();
+    for (src, want) in cases {
+        let got = uncaught(src);
+        if got != *want {
+            failures.push(format!("{src:?}: got {got:?}, want {want:?}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn loop_step_counts_are_one_per_element() {
+    let cases: &[(&str, usize)] = &[
+        ("3 { } repeat", 3),
+        ("1 1 3 { } for", 5),
+        ("[1 2 3] { pop } forall", 10),
+        ("[1 2 3] { pop } bind forall", 11),
+        ("(ab) { pop } forall", 5),
+        ("<< /a 1 /b 2 >> { pop pop } forall", 12),
+        ("0 { 1 add dup 3 eq { exit } if } loop", 25),
+        ("0 { 1 add dup 3 eq { exit } if } bind loop", 26),
+        ("3 { 1 pop } repeat", 9),
+        ("2 { 2 { 1 pop } repeat } repeat", 17),
+        ("2 { 2 { 1 pop } bind repeat } bind repeat", 20),
+        ("{ 3 { 1 pop } repeat } exec", 11),
+        ("{ 3 { 1 pop } repeat 2 pop } bind exec", 14),
+        ("[1 2] { { pop } exec } forall", 12),
+        ("/q { exit } def 3 { 1 q } repeat", 9),
+        ("3 { { 1 exit } stopped pop } repeat", 18),
+        (
+            "1 1 4 { dup 2 mod 0 eq { pop } { 1 add pop } ifelse } bind for",
+            46,
+        ),
+        ("[] { } forall 0 { } repeat 1 1 0 { } for", 12),
+    ];
+    let mut failures = Vec::new();
+    for (src, want) in cases {
+        let got = single_steps(src);
+        if got != *want {
+            failures.push(format!("{src:?}: got {got}, want {want}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn a_slice_of_n_steps_ends_where_n_single_steps_do_in_every_loop() {
+    let programs = [
+        "0 5 { 1 add dup 3 mod 0 eq { 1 } { 2 } ifelse pop } repeat",
+        "0 5 { 1 add dup 3 mod 0 eq { 1 } { 2 } ifelse pop } bind repeat",
+        "0 { 1 add dup 7 eq { exit } if } loop",
+        "0 { 1 add dup 7 eq { exit } if } bind loop",
+        "[1 2 3 4 5] { 2 mod 0 eq { 7 } if } bind forall",
+        "(abcde) { 2 mod 0 eq { 7 } { 8 } ifelse } forall",
+        "<< /a 1 /b 2 /c 3 >> { pop pop } forall",
+        "1 1 4 { 1 1 3 { 2 copy lt { pop } { exch pop } ifelse } for } bind for",
+        "3 { [1 2] { { pop } exec } forall } repeat",
+        "/q { exit } def 1 1 5 { dup 3 eq { q } if } for",
+    ];
+    for src in programs {
+        let singles = trace(src, 1);
+        for b in [2, 3, 4, 5, 7] {
+            let sliced = trace(src, b);
+            let want: Vec<String> = singles
+                .iter()
+                .skip(b - 1)
+                .step_by(b)
+                .cloned()
+                .chain(std::iter::once(singles.last().unwrap().clone()))
+                .collect();
+            let n = sliced.len();
+            assert_eq!(&sliced[..n - 1], &want[..n - 1], "{src}: budget {b}");
+            assert_eq!(sliced.last(), singles.last(), "{src}: budget {b}");
+        }
+    }
+}
+
+/// The smallest `--max-steps` cap `src` passes.
+fn steps_needed(src: &str) -> u64 {
+    use pscat::Limits;
+    let passes = |max: u64| {
+        let mut it = Interp::new();
+        it.set_limits(Limits::none().with_max_steps(max))
+            .expect("limits apply");
+        it.run_str(src).is_ok()
+    };
+    let (mut lo, mut hi) = (0u64, 1u64 << 24);
+    assert!(passes(hi), "{src}: needs more than {hi} steps");
+    while lo < hi {
+        let mid = (lo + hi) / 2;
+        if passes(mid) { hi = mid } else { lo = mid + 1 }
+    }
+    lo
+}
+
+#[test]
+fn the_step_cap_counts_loops_as_before() {
+    // Pinned on the tree before #875. A loop iteration counts as a step
+    // of its own under limits, on top of its body's elements.
+    let cases: &[(&str, u64)] = &[
+        ("5000 { } repeat", 5000),
+        ("0 1 1 3000 { add } for pop", 3007),
+        ("0 1 1 3000 { add } bind for pop", 3008),
+        ("0 { 1 add dup 2500 eq { exit } if } bind loop pop", 19846),
+        ("2000 array { pop } forall", 2004),
+        ("1500 string { pop } bind forall", 1505),
+        ("50 { 50 { 1 pop } repeat } repeat", 7180),
+        (
+            "1 1 600 { dup 2 mod 0 eq { pop } { 3 mul pop } ifelse } bind for",
+            6415,
+        ),
+    ];
+    let mut failures = Vec::new();
+    for (src, want) in cases {
+        let got = steps_needed(src);
+        if got != *want {
+            failures.push(format!("{src:?}: needs {got}, want {want}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn recursion_through_loop_bodies_overflows_the_execution_stack_at_the_same_depth() {
+    // The operand count pins the depth reached: each level leaves one
+    // operand. The `{ r 0 }` variants shift the depth by one frame, so the
+    // overflow lands on a different push.
+    // (recursion, then the operand stack's top four after `{ r } stopped`
+    // and after `{ r 0 } stopped`: the `stopped` result, the operand count,
+    // `$error`'s errorname and command).
+    let cases: &[(&str, &str, &str)] = &[
+        (
+            "/r { 1 2 { r } repeat } def",
+            "true 10001 /execstackoverflow repeat",
+            "true 10000 /execstackoverflow repeat",
+        ),
+        (
+            "/r { 1 2 { r 1 } repeat } def",
+            "true 5002 /execstackoverflow r",
+            "true 5002 /execstackoverflow repeat",
+        ),
+        (
+            "/r { 1 2 { 1 r } repeat } def",
+            "true 19998 /execstackoverflow repeat",
+            "true 19996 /execstackoverflow repeat",
+        ),
+        (
+            "/r { 1 1 1 2 { pop r } for } def",
+            "true 10002 /execstackoverflow for",
+            "true 10001 /execstackoverflow for",
+        ),
+        (
+            "/r { 1 [1 2] { pop r 1 } forall } def",
+            "true 5002 /execstackoverflow r",
+            "true 5003 /execstackoverflow forall",
+        ),
+        (
+            "/r { 1 { r } loop } def",
+            "true 10001 /execstackoverflow loop",
+            "true 10000 /execstackoverflow loop",
+        ),
+        (
+            "/r { 1 { r 1 } loop } def",
+            "true 5002 /execstackoverflow r",
+            "true 5002 /execstackoverflow loop",
+        ),
+        (
+            "/r { 1 2 { true { r 1 } if } repeat } def",
+            "true 5002 /execstackoverflow r",
+            "true 5002 /execstackoverflow repeat",
+        ),
+        (
+            "/r { 1 2 { true { r } if } repeat } def",
+            "true 10001 /execstackoverflow repeat",
+            "true 10000 /execstackoverflow repeat",
+        ),
+        (
+            "/r { 1 2 { r } bind repeat } def",
+            "true 10001 /execstackoverflow repeat",
+            "true 10000 /execstackoverflow repeat",
+        ),
+        (
+            "/r { 1 2 { r 1 } bind repeat } def",
+            "true 5002 /execstackoverflow r",
+            "true 5002 /execstackoverflow repeat",
+        ),
+        (
+            "/r { 1 2 { true { r 1 } if } bind repeat } def",
+            "true 5002 /execstackoverflow r",
+            "true 5002 /execstackoverflow repeat",
+        ),
+        (
+            "/r { 1 2 { 2 { r } repeat } repeat } def",
+            "true 5002 /execstackoverflow repeat",
+            "true 5002 /execstackoverflow repeat",
+        ),
+    ];
+    let mut failures = Vec::new();
+    for (def, want_r, want_r0) in cases {
+        for (call, want) in [("{ r } stopped", want_r), ("{ r 0 } stopped", want_r0)] {
+            let src =
+                format!("{def} {call} $error /errorname get $error /command get count 3 1 roll");
+            let mut it = Interp::new();
+            it.run_str(&src).unwrap_or_else(|e| panic!("{src}: {e}"));
+            let n = it.operand_stack().len();
+            let top: Vec<String> = it.operand_stack()[n - 4..]
+                .iter()
+                .map(|o| o.repr())
+                .collect();
+            let got = top.join(" ");
+            if got != *want {
+                failures.push(format!("{src:?}: got {got:?}, want {want:?}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn the_profiles_count_calls_and_operators_in_loops_as_before() {
+    let mut it = Interp::new();
+    it.enable_profile();
+    it.run_str(
+        "/p { 1 pop } def /q { exit } def /s { 7 exit 8 } def \
+         5 { p } repeat 3 { p 2 pop } repeat { q } loop 4 { 1 s } repeat pop \
+         1 1 3 { pop p } for [1 2] { pop { q } loop p } forall",
+    )
+    .expect("runs");
+    let report = it.profile_report().expect("profiling is on");
+    let mut rows: Vec<String> = report
+        .rows
+        .iter()
+        .map(|r| format!("{} {}", r.name, r.calls))
+        .collect();
+    rows.sort();
+    assert_eq!(rows.join(", "), "p 13, q 3, s 1");
+
+    let mut it = Interp::new();
+    it.enable_profile();
+    it.enable_profile_ops();
+    it.run_str(
+        "3 { 1 2 add pop } bind repeat 1 1 4 { 2 mul pop } bind for \
+         [1 2] { pop } bind forall 0 { 1 add dup 3 eq { exit } if } bind loop pop",
+    )
+    .expect("runs");
+    let report = it.profile_report().expect("profiling is on");
+    let ops = report.operators.expect("operators are on");
+    let mut got: Vec<String> = ops
+        .iter()
+        .map(|o| format!("{} {}", o.name, o.calls))
+        .collect();
+    got.sort();
+    assert_eq!(
+        got.join(", "),
+        "] 1, add 6, bind 4, dup 3, eq 3, exit 1, for 1, forall 1, if 3, loop 1, mul 4, pop 10, repeat 1"
+    );
+}
