@@ -51,13 +51,8 @@ object.
 `tests/operator_identity.rs` pins the table above, and runs under both
 `cargo test` and `cargo test --profile ci`.
 
-### Left alone: `--profile-ops`
+### `--profile-ops` followed in #885
 
-`--profile-ops` still groups operator time by function address
-(`Interp::enable_profile_ops`, `src/profile.rs`). The hot loop sees bare
-`fn` pointers, and `set_ops` joins aliased names with `/` in the report.
-Both sides read the pointer from the same `Operator` object, so the key is
-consistent. The gap: an operator object built at another site (the
-`copy`/`exec` pair in `filenameforall`) could carry an address different
-from systemdict's, and then its time would be unlabelled. That affects a
-profile label only, never program behaviour.
+It first kept grouping operator time by function address, which merged
+`readonly`/`noaccess`/`executeonly` into one `a/b/c` row. See
+`notes/885-profile-ops-key-by-name.md`.

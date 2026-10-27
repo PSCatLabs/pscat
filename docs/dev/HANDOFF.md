@@ -1301,7 +1301,8 @@ renders eight examples in both and compares block-downsampled output).
   `Interp::writable_path`; the path is the next argument only if it ends in
   `.json`), and `--profile-ops` (per-operator time: `step_n` routes to
   `step_n_timed`, a copy of the loop, once per slice when it is on; operators
-  are bare `fn` pointers so the report maps address -> systemdict name). The
+  are bare `fn` pointers, so `proc_step::<true>` leaves the operator's name in
+  `Interp::op_name` and rows are keyed by `Operator::name`, #885). The
   copy is a second caller of `next_item`/`execute_resolved`/`push_proc_frame`/
   `recover`/`execute_element`, which is what cost 19% in #737 until those were
   made `#[inline(always)]`; re-measure `fib` with `bench_compare.sh` if you
