@@ -386,7 +386,8 @@ fn uncaught_errors_report_the_same_command_and_keep_the_same_stack() {
 }
 
 /// Steps `step_n(1)` takes to run `src` to the end: one element (or one
-/// frame transition that yields nothing) per call. Live rendering and the
+/// frame transition that yields nothing, such as up to 1024 iterations of an
+/// empty loop body, #900) per call. Live rendering and the
 /// step limit both rely on this granularity.
 fn single_steps(src: &str) -> usize {
     let mut it = Interp::new();
@@ -1281,4 +1282,82 @@ fn the_profiles_count_calls_and_operators_in_loops_as_before() {
         got.join(", "),
         "] 1, add 6, bind 4, dup 3, eq 3, exit 1, for 1, forall 1, if 3, loop 1, mul 4, pop 10, repeat 1"
     );
+}
+
+/// Run `f` on a thread and fail if it has not finished in 60 s, so a slice
+/// that never returns fails the test instead of hanging the suite (as
+/// `src/window.rs`'s `within_deadline`, #895).
+fn within_deadline<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
+    use std::sync::mpsc;
+    use std::time::Duration;
+    let (done, result) = mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = done.send(f());
+    });
+    match result.recv_timeout(Duration::from_secs(60)) {
+        Ok(value) => value,
+        Err(mpsc::RecvTimeoutError::Timeout) => panic!("a slice did not return in 60 s"),
+        Err(mpsc::RecvTimeoutError::Disconnected) => panic!("the test panicked"),
+    }
+}
+
+/// Programs whose loop runs far longer than a few slices; the empty bodies
+/// once ran every iteration inside one step, so with no limits `step_n`
+/// never returned (#900).
+const LONG_LOOPS: &[&str] = &[
+    "{ } loop",
+    "{ } bind loop",
+    "100000000 { } repeat",
+    "0 1 1000000000 { } for",
+    "0 1 1e9 { } for",
+    "10000000 string { } forall",
+    "{ { } loop } loop",
+    "{ true { } if } bind loop",
+    "{ false { } { } ifelse } loop",
+    "{ 1 pop } loop",
+];
+
+#[test]
+fn a_slice_returns_on_every_kind_of_long_loop() {
+    within_deadline(|| {
+        for timed in [false, true] {
+            for src in LONG_LOOPS {
+                let mut it = Interp::new();
+                if timed {
+                    // `--profile-ops` runs its own copy of the step loop.
+                    it.enable_profile();
+                    it.enable_profile_ops();
+                }
+                it.begin_source(src.as_bytes());
+                for _ in 0..3 {
+                    let more = it.step_n(1000).unwrap_or_else(|e| panic!("{src}: {e}"));
+                    assert!(more, "{src}: ended early (timed: {timed})");
+                }
+            }
+        }
+    });
+}
+
+#[test]
+fn a_run_of_empty_iterations_is_one_step_per_1024() {
+    // An empty body's iterations cost no steps of their own, as before #900,
+    // up to 1024 in a row; then the run pauses, at the cost of one step, so
+    // a slice always returns.
+    let cases: &[(&str, usize)] = &[
+        ("1024 { } repeat", 4),
+        ("1025 { } repeat", 4),
+        ("2000 { } repeat", 4),
+        ("4096 { } repeat", 7),
+        ("1 1 3000 { } for", 7),
+        ("1200 string { } forall", 5),
+        ("0 { 1 add dup 2000 eq { exit } if } bind loop pop", 14_006),
+    ];
+    let mut failures = Vec::new();
+    for (src, want) in cases {
+        let got = single_steps(src);
+        if got != *want {
+            failures.push(format!("{src:?}: got {got}, want {want}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

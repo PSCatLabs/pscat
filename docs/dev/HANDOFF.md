@@ -1606,6 +1606,14 @@ renders eight examples in both and compares block-downsampled output).
   `tests/dispatch_semantics.rs` (`exit`/`stop`/error unwinding, step counts,
   the `execstackoverflow` depth through loop bodies, profiles, a body
   changed mid-loop) hold for any later change to the loop frames.
+- **Every `step_n` slice is bounded, empty loop bodies included** (#900).
+  An iteration of an empty body yields nothing, so `next_item` runs a row
+  of them inside one step; after `EMPTY_RUN` (1024) it returns `Item::Proc`
+  with the loop frame on top, which both step loops take as a step that did
+  nothing. Before this, `{ } loop` with no limits never left `next_item`,
+  freezing the window and `--spool` (only `tick`'s limit poll could stop
+  it). Any new path that loops inside `next_item` without yielding needs
+  the same bound; see `notes/900-empty-loop-slices.md`.
 - Frames that hold external state (glyph contexts' graphics-state
   snapshot, paint suppression) must clean up in **three** unwind
   paths: normal pop, `do_stop`, and `unwind_all`. `ShowCtx::cleanup`
