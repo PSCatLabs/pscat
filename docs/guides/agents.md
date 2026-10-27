@@ -86,8 +86,8 @@ PIL composite. A one-call typewriter or chart is not added yet.
 ## The MCP server
 
 - `render_postscript` — source in; PNG image(s) back inline (or SVG text,
-  or a PDF written to `out_path`), with page size, `dpi` and `halftone`
-  options. Errors still return the partial render with the error text.
+  or a PDF written to `out_path`), with page size, `dpi`, `halftone` and
+  `bands` options (`bands`: see "Banded renders" below). Errors still return the partial render with the error text.
   Runs the lint pass and appends a `Lint:` block when it finds something
   (a blank page, an unbalanced `gsave`, stuff left on the stack).
   `render_postscript`, `handwrite`, `chalkboard_math`, `review_sheet` and
@@ -204,7 +204,7 @@ Every numeric option below can also be set with an environment variable, so a
 plugin user can change a limit without registering the server by hand (see
 "Raising the time limit"): `PSCAT_MCP_` plus the flag name in capitals with
 underscores, for example `PSCAT_MCP_TIMEOUT`, `PSCAT_MCP_JOB_TIMEOUT`,
-`PSCAT_MCP_MAX_JOBS`, `PSCAT_MCP_JOB_TTL`, `PSCAT_MCP_MAX_INPUT_BYTES`,
+`PSCAT_MCP_MAX_JOBS`, `PSCAT_MCP_JOB_TTL`, `PSCAT_MCP_MAX_BANDS`, `PSCAT_MCP_MAX_INPUT_BYTES`,
 `PSCAT_MCP_MAX_IMAGE_BYTES`, `PSCAT_MCP_MAX_PIXELS`,
 `PSCAT_MCP_MAX_LATEX_BYTES`, `PSCAT_MCP_MAX_STEPS` and `PSCAT_MCP_MAX_MEMORY`.
 A variable takes the same values as its flag, and a flag overrides its
@@ -382,6 +382,7 @@ For a render longer than one call may take (#741). A job is
 |---|---|---|
 | `--job-timeout SECS` | 3600 | Wall-clock time per job, 1 to 86400, in place of `--timeout` (the interpreter stops it a margin before, as for a call). `--max-steps`, `--max-memory` and `--max-pixels` apply as to a call: raise `--max-steps` (or `0`) for a long render. |
 | `--max-jobs N` | 2 | Jobs running at once, 1 to 16; more wait, `queued`, and start in the order they were asked for. |
+| `--max-bands N` | 4 | Most threads one render may ask for with `bands` (on `render_postscript` and `start_render`), 1 to 64; 1 turns banded renders off. A larger request is refused, not lowered. At most `--max-jobs` jobs plus 4 calls run at once, so the worst case is (`--max-jobs` + 4) x `--max-bands` render threads. |
 | `--job-ttl SECS` | 3600 | How long a finished job (its result) is kept, 1 to 86400. At most 16 jobs are kept in all: a new job drops the oldest finished one, and is refused with `busy` when none has finished. |
 
 Results are held in the server's memory, and no job outlives the server:
@@ -417,6 +418,39 @@ call. Once it speaks 2026-07-28, the jobs map onto the extension directly:
 the [2026-07-28 changelog](https://modelcontextprotocol.io/specification/2026-07-28/changelog),
 [Claude Code's MCP docs](https://code.claude.com/docs/en/mcp), and a search
 of the Codex source at `rust-v0.164.0`.
+
+### Banded renders
+
+`render_postscript` and `start_render` take `bands` (#843): the PNG is
+rendered as `pscat --bands N` does (see the getting-started guide), on N
+threads. The page is cut into about 2 bands per thread (none under 8 device
+rows), and each band runs the whole program with `/BandIndex`, `/BandCount`
+and `/BandBBox` defined in `userdict`. Only a program that reads `/BandBBox`
+and skips work outside its band gets faster; any other pays for the whole
+program once per band, about 2 x `bands` times the work. The image is byte
+for byte the one `bands: 1` gives, unless the program reads the clock.
+
+- **Limits.** The server's `--max-time` (derived from `--timeout` or
+  `--job-timeout`) and `--max-steps` apply to **each band**; `--max-memory`
+  to all bands together, though not to each running band's own canvas, so
+  a banded render can hold up to `bands` canvases (each up to `--max-pixels`
+  x 4 bytes) beyond the budget. The first band to hit a limit stops the queue, so a
+  runaway program still stops after about one limit's worth of time. The
+  server's wall-clock kill (`--timeout` for a call, `--job-timeout` for a
+  job) covers the **whole** render: with about 2 bands per thread queued,
+  bands that each take most of the per-band time limit can add up past it,
+  and the kill returns `timeout` with no partial page. Size such a render to
+  finish well inside the call's or job's limit.
+- **What it gives up.** PNG only: `bands` above 1 with `format` `svg` or
+  `pdf` is refused (`invalid_argument`), as is a value over `--max-bands` or
+  over the page's device rows. A banded render has no `Lint:` block, and a
+  banded job's `pages_done` stays 0 until it ends: `pscat --bands` refuses
+  `--lint` and `--progress`, so the server leaves both off. Errors come back
+  as for a plain render, from the first band that failed.
+- **No `band_rows`.** `pscat --band-rows R` is not exposed. The default split
+  measured best (`notes/844-bands-work-queue.md`); a small R multiplies the
+  CPU (18x at one row per band), and a large band count multiplies the
+  per-band step and time budgets. An agent has no measurement to tune it by.
 
 ### Protocol
 

@@ -87,6 +87,10 @@ const MAX_INLINE_PAGES: usize = 20;
 /// since a queued call would only eat the client's own timeout.
 const MAX_CALLS: usize = 4;
 
+/// `--max-bands`' default: with the default `--max-jobs 2`, two banded jobs
+/// take 8 threads, which leaves cores free on a laptop.
+const DEFAULT_MAX_BANDS: u64 = 4;
+
 /// Render jobs kept at once: queued, running and finished ones whose result
 /// has not expired. A new job evicts the oldest finished one past this, and
 /// is refused with `busy` when none has finished.
@@ -110,6 +114,9 @@ An MCP server on stdin/stdout (launched by an MCP client, not by hand).
                          (default 2)
   --job-ttl SECS         how long a finished job's result is kept (default
                          3600)
+  --max-bands N          most threads one render may ask for with bands
+                         (render_postscript, start_render; 1..64, default 4;
+                         1 turns banded rendering off)
   --max-input-bytes N    largest source/text accepted (default 1048576)
   --max-image-bytes N    largest total of inline image bytes per call
                          (default 3750000, about 5 MB once base64-encoded)
@@ -151,6 +158,9 @@ struct Config {
     max_jobs: usize,
     /// `--job-ttl`: how long a finished job is kept.
     job_ttl: Duration,
+    /// `--max-bands` (issue #843): the most threads one render's `bands`
+    /// may ask for, so a single call can't take every core.
+    max_bands: u32,
     /// This run's cancel flag: set by `notifications/cancelled`,
     /// `cancel_render` or shutdown; `run_child` kills its child when it is.
     /// The server's own copy holds a flag nobody sets.
@@ -303,6 +313,7 @@ impl Config {
         let job_timeout = limit("--job-timeout");
         let max_jobs = limit("--max-jobs");
         let job_ttl = limit("--job-ttl");
+        let max_bands = limit("--max-bands") as u32;
         let max_input = limit("--max-input-bytes") as usize;
         let max_image = limit("--max-image-bytes") as usize;
         let max_pixels = limit("--max-pixels");
@@ -328,6 +339,7 @@ impl Config {
             job_timeout: Duration::from_secs(job_timeout),
             max_jobs: max_jobs as usize,
             job_ttl: Duration::from_secs(job_ttl),
+            max_bands,
             cancel: Arc::new(AtomicBool::new(false)),
             progress: None,
             max_input,
@@ -377,6 +389,14 @@ const NUMERIC_OPTIONS: &[NumericOption] = &[
     opt("--job-timeout", "PSCAT_MCP_JOB_TIMEOUT", 1, 86_400, 3600),
     opt("--max-jobs", "PSCAT_MCP_MAX_JOBS", 1, 16, 2),
     opt("--job-ttl", "PSCAT_MCP_JOB_TTL", 1, 86_400, 3600),
+    // 64 is `pscat --bands`' own ceiling.
+    opt(
+        "--max-bands",
+        "PSCAT_MCP_MAX_BANDS",
+        1,
+        64,
+        DEFAULT_MAX_BANDS,
+    ),
     opt(
         "--max-input-bytes",
         "PSCAT_MCP_MAX_INPUT_BYTES",
@@ -913,14 +933,28 @@ fn initialize_result(cfg: &Config, params: &Value) -> Result<Value, (String, Val
              timeout can also cut a call off (Codex's default is 60 s). For a render that may \
              take longer, use start_render: it returns a job_id at once, render_status polls \
              it, render_result fetches the pages, cancel_render stops it; a job may run {}s. \
-             A page, board or sheet is limited to {} pixels. \
+             {bands}A page, board or sheet is limited to {} pixels. \
              {out_path} {reads}",
             cfg.timeout.as_secs(),
             cfg.job_timeout.as_secs(),
             cfg.max_pixels,
+            bands = bands_note(cfg),
             reads = read_roots_note(cfg),
         ),
     }))
+}
+
+/// The instructions' line on `bands` (#843), empty when `--max-bands 1`
+/// turns banded renders off.
+fn bands_note(cfg: &Config) -> String {
+    if cfg.max_bands < 2 {
+        return String::new();
+    }
+    format!(
+        "Both take bands (up to {}) to render a PNG on several threads, which pays off \
+         only for a program that reads /BandBBox and skips work outside its band. ",
+        cfg.max_bands
+    )
 }
 
 /// `YYYY-MM-DD`, the shape of every MCP revision identifier.
@@ -1081,6 +1115,7 @@ fn tool_list(cfg: &Config) -> Value {
             "dpi": { "type": "number", "minimum": 9, "maximum": 1200, "description": "Device resolution (default 72; 144 = 2x pixels)" },
             "format": { "type": "string", "enum": ["png", "svg", "pdf"], "description": "Output format (default png)" },
             "halftone": { "type": "boolean", "description": "Screen the raster like a mono laser printer (png only)" },
+            "bands": { "type": "integer", "minimum": 1, "maximum": cfg.max_bands, "description": bands_description(cfg) },
             "out_path": { "type": "string", "description": format!("{out_path}Required for pdf. A multi-page render writes name-001.ext, name-002.ext, ...") }
         },
         "required": ["source"]
@@ -1298,7 +1333,9 @@ fn tool_list(cfg: &Config) -> Value {
                 error text, Lint, Warnings, the file written). A job may run {}s (the server's \
                 --job-timeout) under the same step, memory and pixel limits; {} run at once \
                 and more wait queued; a finished job is kept {}s. Bad arguments are refused \
-                here, before any job starts. Writes a file only when out_path is given.",
+                here, before any job starts. A long render of a program that reads /BandBBox \
+                can also pass bands to use several threads. Writes a file only when out_path \
+                is given.",
                 cfg.job_timeout.as_secs(), cfg.max_jobs, cfg.job_ttl.as_secs()),
             "inputSchema": render_schema
         },
@@ -1332,6 +1369,23 @@ fn tool_list(cfg: &Config) -> Value {
             "inputSchema": job_id_schema("The job_id to cancel")
         }
     ])
+}
+
+/// The `bands` argument's description (issue #843): what it is for, the
+/// cap, and what it gives up.
+fn bands_description(cfg: &Config) -> String {
+    format!(
+        "Render the PNG on this many threads, as pscat --bands N (default 1; at most {}, \
+         this server's --max-bands). The page is cut into horizontal bands, about 2 per \
+         thread, and each band runs the whole program with /BandIndex, /BandCount and \
+         /BandBBox (its area in default user space) defined in userdict, so only a program that reads \
+         them and skips work outside its band is faster; any other costs about 2x bands \
+         times the work. The image is identical to bands 1 unless the program reads the \
+         clock. png only; no Lint block, and a job's pages_done stays 0 until it ends. \
+         Step and time limits apply to each band, the memory limit to all of them together, \
+         and the call's (or job's) wall-clock limit to the whole render.",
+        cfg.max_bands
+    )
 }
 
 fn job_id_schema(description: &str) -> Value {
@@ -1433,6 +1487,8 @@ struct RenderPlan {
     height: i64,
     dpi: Option<f64>,
     halftone: bool,
+    /// Threads for `pscat --bands` (issue #843); 1 is a plain render.
+    bands: u32,
     dest: Option<Dest>,
 }
 
@@ -1459,6 +1515,7 @@ fn render_plan(cfg: &Config, args: &Value) -> Result<RenderPlan, ToolError> {
     if !pixels_allowed(cfg, w_px, h_px) {
         return Err(too_many_pixels(cfg, "the page", w_px, h_px));
     }
+    let bands = render_bands(cfg, args, format, h_px)?;
     // Checked before rendering, so a refused path costs nothing.
     let dest = optional_str(args, "out_path")?
         .map(|p| confine(cfg, p, format))
@@ -1476,8 +1533,48 @@ fn render_plan(cfg: &Config, args: &Value) -> Result<RenderPlan, ToolError> {
         height,
         dpi,
         halftone,
+        bands,
         dest,
     })
+}
+
+/// The `bands` argument, checked against everything `pscat --bands` would
+/// refuse (`bands.rs` `check_options`) so the refusal names the argument
+/// and comes before any child or job. Of the flags it refuses, only the
+/// output format can come from a tool argument; `--lint` and `--progress`
+/// are the server's own and are left off a banded run, and no tool passes
+/// `--allow-write` or `--profile`.
+fn render_bands(cfg: &Config, args: &Value, format: &str, h_px: u64) -> Result<u32, ToolError> {
+    let bands = match args.get("bands") {
+        None | Some(Value::Null) => return Ok(1),
+        Some(v) => match v.as_u64() {
+            Some(n) if n >= 1 => n,
+            _ => {
+                return Err(ToolError::invalid(format!(
+                    "bands must be a whole number from 1 to {}, got {v}",
+                    cfg.max_bands
+                )));
+            }
+        },
+    };
+    if bands > u64::from(cfg.max_bands) {
+        return Err(ToolError::invalid(format!(
+            "bands {bands} is over this server's limit of {} (its --max-bands, which \
+             whoever registered the server can raise, up to 64)",
+            cfg.max_bands
+        )));
+    }
+    if bands > 1 && format != "png" {
+        return Err(ToolError::invalid(format!(
+            "bands renders a PNG only; leave it out (or 1) for {format}"
+        )));
+    }
+    if bands > h_px {
+        return Err(ToolError::invalid(format!(
+            "bands {bands} is more than the page's {h_px} device rows"
+        )));
+    }
+    Ok(bands as u32)
 }
 
 /// Run a checked render: the child, the pages, the file and the content.
@@ -1490,6 +1587,7 @@ fn render_run(cfg: &Config, plan: &RenderPlan) -> Result<Value, ToolError> {
         height,
         dpi,
         halftone,
+        bands,
         dest,
     } = plan;
     let (format, flag, dpi) = (*format, *flag, *dpi);
@@ -1497,8 +1595,14 @@ fn render_run(cfg: &Config, plan: &RenderPlan) -> Result<Value, ToolError> {
     let out = scratch.path().join(format!("page.{format}"));
     let mut cmd = Command::new(pscat_bin()?);
     cfg.interpreter_args(&mut cmd);
-    if cfg.progress.is_some() {
+    // `pscat --bands` refuses `--progress` and `--lint` (each band re-runs
+    // the whole program), so a banded run goes without both.
+    let banded = *bands > 1;
+    if cfg.progress.is_some() && !banded {
         cmd.arg("--progress");
+    }
+    if banded {
+        cmd.arg("--bands").arg(bands.to_string());
     }
     cmd.arg("--page").arg(format!("{width}x{height}"));
     if let Some(dpi) = dpi {
@@ -1507,7 +1611,10 @@ fn render_run(cfg: &Config, plan: &RenderPlan) -> Result<Value, ToolError> {
     if *halftone {
         cmd.arg("--halftone");
     }
-    cmd.arg(flag).arg(&out).arg("-").arg("--lint");
+    cmd.arg(flag).arg(&out).arg("-");
+    if !banded {
+        cmd.arg("--lint");
+    }
     let run = run_child(cfg, &mut cmd, source.as_bytes())?;
     let (lint_findings, other_stderr) = split_lint_findings(&run.stderr);
 
@@ -3332,6 +3439,7 @@ mod tests {
                 ("PSCAT_MCP_MAX_PIXELS", "64000000"),
                 ("PSCAT_MCP_MAX_MEMORY", " 4096 "),
                 ("PSCAT_MCP_MAX_JOBS", "4"),
+                ("PSCAT_MCP_MAX_BANDS", "16"),
             ],
         )
         .unwrap()
@@ -3342,6 +3450,7 @@ mod tests {
         assert_eq!(cfg.max_pixels, 64_000_000);
         assert_eq!(cfg.max_memory_mib, 4096);
         assert_eq!(cfg.max_jobs, 4);
+        assert_eq!(cfg.max_bands, 16);
         // Untouched options keep their defaults.
         assert_eq!(cfg.job_ttl, Duration::from_secs(3600));
         assert_eq!(cfg.max_input, 1 << 20);
@@ -3373,6 +3482,7 @@ mod tests {
         assert_eq!(cfg.max_memory_mib, 1024);
         assert_eq!(cfg.max_image, 3_750_000);
         assert_eq!(cfg.max_jobs, 2);
+        assert_eq!(cfg.max_bands, 4);
     }
 
     #[test]

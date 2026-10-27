@@ -21,6 +21,7 @@ const LIMIT_ENV_VARS: &[&str] = &[
     "PSCAT_MCP_JOB_TIMEOUT",
     "PSCAT_MCP_MAX_JOBS",
     "PSCAT_MCP_JOB_TTL",
+    "PSCAT_MCP_MAX_BANDS",
     "PSCAT_MCP_MAX_INPUT_BYTES",
     "PSCAT_MCP_MAX_IMAGE_BYTES",
     "PSCAT_MCP_MAX_PIXELS",
@@ -2987,4 +2988,154 @@ fn a_call_in_flight_at_shutdown_is_still_answered() {
         .find(|m| m["id"] == "last")
         .unwrap_or_else(|| panic!("no reply for the last call: {rest:?}"));
     assert_eq!(texts(&reply["result"]), ["bye\n"], "{reply}");
+}
+
+// --- bands (#843) ---------------------------------------------------------
+
+/// A band-aware program (`tests/bands.rs`' FBM_AWARE): an fbm2 field drawn
+/// through a colorimage procedure that computes only the image rows its band
+/// needs, one row of margin each side. No `forall` over names, so the band
+/// preamble's name ids cannot reorder anything.
+const BAND_AWARE: &str = "%!PS
+/W 120 def /H 90 def /IX 20 def /IY 15 def /IW 240 def /IH 180 def
+/rh IH H div def
+/BandBBox where
+  { pop /blo BandBBox 1 get rh sub def /bhi BandBBox 3 get rh add def }
+  { /blo -1e9 def /bhi 1e9 def } ifelse
+/row W 3 mul string def /j 0 def
+/need {
+  dup H exch sub rh mul IY add blo ge
+  exch H exch sub 1 sub rh mul IY add bhi le and } def
+IX IY translate IW IH scale
+W H 8 [W 0 0 H neg 0 H]
+{ j need {
+    0 1 W 1 sub { /i exch def
+      i 0.04 mul j 0.04 mul 5 0.5 2 fbm2 0.5 mul 0.5 add
+      dup 0 lt { pop 0 } if dup 1 gt { pop 1 } if 255 mul cvi /v exch def
+      row i 3 mul v put row i 3 mul 1 add 255 v sub put row i 3 mul 2 add v 2 idiv put
+    } for } if
+  /j j 1 add def row }
+false 3 colorimage
+";
+
+/// Run a start_render job to the end and return its result.
+fn job_result_of(s: &mut Server, arguments: Value) -> Value {
+    let job = start_job(s, arguments);
+    assert!(
+        eventually(1200, || status(s, &job)["state"] == "done"),
+        "the job finishes: {}",
+        status(s, &job)
+    );
+    s.tool("render_result", json!({ "job_id": job }))
+}
+
+/// #843's acceptance test: `start_render` with `bands: 4` renders a
+/// band-aware program to the same PNG bytes as `bands: 1` (a plain render).
+/// The control below shows the bands really ran: a program that reads
+/// `/BandCount` paints differently under bands.
+#[test]
+fn start_render_with_bands_matches_a_plain_render() {
+    let mut s = Server::start();
+    initialized(&mut s);
+    let args =
+        |bands: u64| json!({ "source": BAND_AWARE, "width": 280, "height": 210, "bands": bands });
+
+    let plain = job_result_of(&mut s, args(1));
+    let banded = job_result_of(&mut s, args(4));
+    assert_eq!(plain["isError"], false, "{plain}");
+    assert_eq!(banded["isError"], false, "{banded}");
+    let (plain, banded) = (images(&plain), images(&banded));
+    assert_eq!(plain.len(), 1);
+    assert!(plain == banded, "bands 4 differs from bands 1");
+
+    // The same through render_postscript.
+    let call = s.tool("render_postscript", args(4));
+    assert!(images(&call) == plain, "render_postscript bands 4 differs");
+
+    // Control: the flag reaches the child.
+    let probe = |s: &mut Server, bands: u64| {
+        images(&s.tool(
+            "render_postscript",
+            json!({
+                "source": "/BandCount where { pop 1 0 0 } { 0 0 1 } ifelse setrgbcolor 0 0 20 20 rectfill",
+                "width": 20, "height": 20, "bands": bands
+            }),
+        ))
+    };
+    assert!(probe(&mut s, 1) != probe(&mut s, 4), "bands 4 ran banded");
+}
+
+/// What `pscat --bands` would refuse is refused up front, naming `bands`:
+/// a non-PNG format, more bands than the server's `--max-bands` or the
+/// page's rows, and anything but a whole number from 1.
+#[test]
+fn bands_refusals_name_the_argument() {
+    let mut s = Server::start_in(&common::scratch_dir("mcp-bands"), &["--max-bands", "16"]);
+    initialized(&mut s);
+    let refused = |s: &mut Server, extra: Value| {
+        let mut args = json!({ "source": SQUARE });
+        args.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        for tool in ["render_postscript", "start_render"] {
+            let result = s.tool(tool, args.clone());
+            assert_eq!(error_kind(&result), "invalid_argument", "{tool}: {result}");
+            let text = texts(&result).join("\n");
+            assert!(text.contains("bands"), "{tool}: {text}");
+        }
+    };
+    refused(&mut s, json!({ "bands": 2, "format": "svg" }));
+    refused(&mut s, json!({ "bands": 17 }));
+    refused(&mut s, json!({ "bands": 9, "width": 8, "height": 8 }));
+    refused(&mut s, json!({ "bands": 0 }));
+    refused(&mut s, json!({ "bands": 2.5 }));
+    refused(&mut s, json!({ "bands": "2" }));
+
+    // The cap is advertised in the schema, and 1 is fine for any format.
+    let list = s.call(json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }));
+    for tool in list["result"]["tools"].as_array().unwrap() {
+        if ["render_postscript", "start_render"].contains(&tool["name"].as_str().unwrap()) {
+            assert_eq!(tool["inputSchema"]["properties"]["bands"]["maximum"], 16);
+        }
+    }
+    let svg = s.tool(
+        "render_postscript",
+        json!({ "source": SQUARE, "format": "svg", "bands": 1 }),
+    );
+    assert_eq!(svg["isError"], false, "{svg}");
+}
+
+/// A banded render keeps the server's bounds: the step limit stops a
+/// runaway program in every band, as in a plain render (the queue stops at
+/// the first band to hit it), and reads stay confined to the read roots
+/// (#763). Both come back as a plain render's do: the partial page plus a
+/// `PostScript error:` block.
+#[test]
+fn a_banded_render_keeps_the_limits_and_read_confinement() {
+    let mut s = Server::start_in(
+        &common::scratch_dir("mcp-bands-bounds"),
+        &["--max-steps", "200000"],
+    );
+    initialized(&mut s);
+    let mut cases = vec![("0 0 20 20 rectfill { } loop", "limitexceeded (steps)")];
+    if cfg!(unix) {
+        cases.push((
+            "0 0 20 20 rectfill (/etc/hosts) (r) file pop",
+            "invalidfileaccess",
+        ));
+    }
+    for (source, expect) in cases {
+        for bands in [1, 2] {
+            let result = s.tool(
+                "render_postscript",
+                json!({ "source": source, "width": 40, "height": 40, "bands": bands }),
+            );
+            let text = texts(&result).join("\n");
+            assert!(
+                text.contains("PostScript error:") && text.contains(expect),
+                "bands {bands}: {source}: {text}"
+            );
+            assert_eq!(images(&result).len(), 1, "the partial page: {result}");
+        }
+    }
 }
