@@ -151,6 +151,11 @@ class WinLauncher(unittest.TestCase):
         by_id = {m.get("id"): m for m in replies}
         return sorted(t["name"] for t in by_id.get(2, {}).get("result", {}).get("tools", []))
 
+    def assertSamePath(self, got, want, msg=None):
+        # samefile: Windows may spell one directory long or 8.3 (RUNNER~1).
+        self.assertTrue(got and os.path.exists(got) and os.path.samefile(got, want),
+                        f"{got!r} is not {want!r}" + (f": {msg}" if msg else ""))
+
     def installed(self):
         return os.path.join(self.cache, TAG, TRIPLE)
 
@@ -174,13 +179,13 @@ class WinLauncher(unittest.TestCase):
         self.assertEqual(r.stdout.count("\n"), 1, r.stdout)
         d = r.stdout.strip()
         self.assertTrue(os.path.isfile(os.path.join(d, "pscat.exe")), d)
-        self.assertEqual(os.path.normcase(d), os.path.normcase(self.installed()))
+        self.assertSamePath(d, self.installed())
 
     def test_default_cache_is_localappdata(self):
         r = self.run_cmd("--locate", env=self.env(PSCAT_CACHE_DIR=None))
         self.assertEqual(r.returncode, 0, r.stderr)
         want = os.path.join(self.path("localappdata"), "pscat", "plugin", TAG, TRIPLE)
-        self.assertEqual(os.path.normcase(r.stdout.strip()), os.path.normcase(want))
+        self.assertSamePath(r.stdout.strip(), want)
 
     def test_parallel_cold_starts_install_once(self):
         procs = [subprocess.Popen([self.path("plugin/scripts/pscat-mcp.cmd"), "--locate"],
@@ -242,7 +247,7 @@ class WinLauncher(unittest.TestCase):
         os.makedirs(cargo_bin)
         shutil.copy(os.path.join(BIN_DIR, "pscat-mcp.exe"), cargo_bin)
         r = self.run_cmd("--locate")
-        self.assertEqual(os.path.normcase(r.stdout.strip()), os.path.normcase(cargo_bin), r.stderr)
+        self.assertSamePath(r.stdout.strip(), cargo_bin, r.stderr)
 
     def test_installed_pscat_mcp_too_old_is_passed_over(self):
         inst = self.path("inst")
@@ -258,7 +263,7 @@ class WinLauncher(unittest.TestCase):
         r = self.run_cmd("--locate", timeout=120,
                          env=self.env(PSCAT_MCP_BIN=self.path("plugin/scripts/pscat-mcp.cmd")))
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(os.path.normcase(r.stdout.strip()), os.path.normcase(self.installed()))
+        self.assertSamePath(r.stdout.strip(), self.installed())
 
     def test_hook(self):
         def hook(env=None):
@@ -317,7 +322,7 @@ class WinLauncher(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("render_postscript", self.tools(r))
         r = self.run_argv([GIT_SH, entry, "--locate"], env=self.git_bash_env())
-        self.assertEqual(os.path.normcase(r.stdout.strip()), os.path.normcase(self.installed()), r.stderr)
+        self.assertSamePath(r.stdout.strip(), self.installed(), r.stderr)
 
     def test_pin_with_release_version_matches_plain_asset_names(self):
         self.pin(f"v{VERSION}")
