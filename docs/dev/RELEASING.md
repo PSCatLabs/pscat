@@ -397,7 +397,7 @@ themselves 0.7.0, under the same file names as the real 0.7.0 but with
 different bytes. Testers' reports could not say which build they ran. The
 cost is that `main` carries `X.Y.Z-rc.N` (in `Cargo.toml` and in the
 plugin, npm and `server.json` manifests, and the plugin's release pin) until
-the release PR for `X.Y.Z`, which sets all of them back to the final version. Plugin users who install from `main` see the rc version in that
+the release PR for `X.Y.Z`, which sets all of them to `X.Y.Z`. Plugin users who install from `main` see the rc version in that
 window. That is accurate, because the plugin's binary comes from the rc
 release.
 
