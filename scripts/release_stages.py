@@ -175,6 +175,10 @@ def release_stages_for(version):
     return list(PRERELEASE_STAGES if is_prerelease(version) else STAGES)
 
 
+# The plugin launcher's release pin, relative to the repo root (#853).
+PLUGIN_PIN = os.path.join("plugin", "pscat-release")
+
+
 def pinned_index(root=ROOT):
     """(tag, sha256) from src/fontpacks/pinned.rs, or None while unpinned."""
     with open(os.path.join(root, "src/fontpacks/pinned.rs"), encoding="utf-8") as f:
@@ -295,7 +299,32 @@ def bump_manifests(root, version):
     changed = ["Cargo.toml"]
     if set_lock_version(root, version):
         changed.append("Cargo.lock")
+    if set_release_pin(root, version):
+        changed.append(PLUGIN_PIN)
     return changed + bump_manifests_json_only(root, version)
+
+
+def set_release_pin(root, version):
+    """The release tag the plugin launcher downloads (#853, #867):
+    `plugin/pscat-release` is set to `v<version>`, rc included, so a release
+    PR needs no hand edit. Comments and the trailing newline are kept. A
+    tree without the file (none before #853) is left alone; returns whether
+    the file changed."""
+    path = os.path.join(root, PLUGIN_PIN)
+    if not os.path.exists(path):
+        return False
+    with open(path, encoding="utf-8") as f:
+        lines = f.readlines()
+    tags = [i for i, ln in enumerate(lines) if ln.strip() and not ln.lstrip().startswith("#")]
+    if len(tags) != 1:
+        raise SystemExit(f"{PLUGIN_PIN}: expected exactly one release tag line, found {len(tags)}")
+    new = f"v{version}\n"
+    if lines[tags[0]] == new:
+        return False
+    lines[tags[0]] = new
+    with open(path, "w", encoding="utf-8") as f:
+        f.writelines(lines)
+    return True
 
 
 def set_lock_version(root, version):

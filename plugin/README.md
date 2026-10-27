@@ -223,8 +223,8 @@ CI if any differ). Use the plugin with a pscat of the same version;
 `pscat-mcp --version` prints yours. `/plugin update pscat@pscat` picks up
 a new release in Claude Code; for Codex, see above. The release the
 launcher downloads is the tag in `pscat-release`. It equals the plugin's
-version, except during a pre-release trial, when it names the pre-release
-(for example `v0.7.0-rc.1`).
+version: the release script sets both together, so during a pre-release trial
+it names the pre-release (for example `v0.7.0-rc.1`).
 
 ## Layout
 

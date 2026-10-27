@@ -12,8 +12,9 @@
 #      first fonts-* release must be published and pinned first: #616,
 #      docs/dev/RELEASING-FONTS.md);
 #   2. creates the branch release/vX.Y.Z;
-#   3. sets the version in Cargo.toml, pscat's Cargo.lock entry, and every
-#      plugin/npm/MCP Registry manifest that exists
+#   3. sets the version in Cargo.toml, pscat's Cargo.lock entry, every
+#      plugin/npm/MCP Registry manifest that exists, and the plugin
+#      launcher's release pin plugin/pscat-release (v<version>, rc included)
 #      (`python3 scripts/release_stages.py bump-manifests`);
 #   4. prepends the release's section to CHANGELOG.md with git-cliff
 #      (cliff.toml);
@@ -121,7 +122,7 @@ The procedure is [docs/dev/RELEASING.md](docs/dev/RELEASING.md), "Release
 candidates".
 
 This PR only sets the version (Cargo.toml, Cargo.lock, the plugin/npm/MCP
-Registry manifests); a release candidate adds no CHANGELOG.md section.
+Registry manifests, and the plugin's release pin plugin/pscat-release); a release candidate adds no CHANGELOG.md section.
 **Merging publishes nothing.** After the merge, the owner pushes the tag
 \`$TAG\`. That builds the five archives and, after the \`release\`
 environment approval, publishes them as a GitHub **pre-release** only: never
@@ -144,7 +145,7 @@ Release pscat $VERSION. Opened by \`scripts/release.sh $VERSION\`. The release
 procedure is [docs/dev/RELEASING.md](docs/dev/RELEASING.md).
 
 This PR only sets the version (Cargo.toml, Cargo.lock, any plugin/npm
-manifests) and adds the CHANGELOG.md section. Edit the changelog wording here
+manifests, the plugin's release pin plugin/pscat-release) and adds the CHANGELOG.md section. Edit the changelog wording here
 if needed. **Merging publishes nothing.** After the merge, the owner pushes the
 tag \`$TAG\`, and that starts \`release.yml\`.
 
