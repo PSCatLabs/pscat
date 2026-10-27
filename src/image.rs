@@ -129,6 +129,12 @@ pub(crate) struct ImageCtx {
     /// sample or fewer keeps the nearest sample, so only upscaling is
     /// smoothed (the PLRM treats the key as a hint; gs does the same).
     pub interpolate: bool,
+    /// Decoded value of every possible sample, per component (#835):
+    /// entry `(comp << bits) | v` is [`ImageCtx::decode_value`]`(comp, v)`.
+    /// Built once the data is complete, for depths of 8 bits or fewer, so
+    /// `decoded()` is a table lookup instead of float work per pixel. The
+    /// entries are that same expression, so the output does not change.
+    lut: Option<Vec<f32>>,
     waiting: bool,
     eod: bool,
 }
@@ -161,6 +167,7 @@ impl ImageCtx {
             stencil: None,
             planes: Vec::new(),
             interpolate: false,
+            lut: None,
             waiting: false,
             eod: false,
         }
@@ -272,6 +279,7 @@ impl ImageCtx {
             st.drain_filters()?;
         }
         // Premature EOD renders what arrived; missing samples read as 0.
+        self.build_decode_lut();
         self.rasterize(gfx);
         Ok(ImageStep::Done)
     }
@@ -420,12 +428,64 @@ impl ImageCtx {
         v
     }
 
-    fn decoded(&self, ix: usize, iy: usize, comp: usize) -> f32 {
+    /// Sample value `v` of component `comp` through the Decode array,
+    /// clamped to the unit range. The one definition of a decoded sample:
+    /// the lookup table holds exactly these values.
+    fn decode_value(&self, comp: usize, v: u32) -> f32 {
         let maxval = ((1u32 << self.bits) - 1) as f32;
-        let v = self.sample(ix, iy, comp) as f32 / maxval;
+        let v = v as f32 / maxval;
         let d0 = self.decode.get(comp * 2).copied().unwrap_or(0.0);
         let d1 = self.decode.get(comp * 2 + 1).copied().unwrap_or(1.0);
         (d0 + v * (d1 - d0)).clamp(0.0, 1.0)
+    }
+
+    /// Fill [`ImageCtx::lut`] (#835) for a colour image of 8 bits or fewer
+    /// per sample. Built whatever the image's size: the per-pixel cost
+    /// scales with the device pixels painted, not the samples, so even a
+    /// 2x2 image stretched over a page pays for its table at once, and the
+    /// table is at most 4 x 256 entries.
+    fn build_decode_lut(&mut self) {
+        let entries = 1usize << self.bits;
+        if self.bits > 8 || self.mask.is_some() || matches!(self.color, ImageColor::Indexed(_)) {
+            return;
+        }
+        let lut = (0..self.ncomp as usize)
+            .flat_map(|comp| (0..entries as u32).map(move |v| (comp, v)))
+            .map(|(comp, v)| self.decode_value(comp, v))
+            .collect();
+        self.lut = Some(lut);
+    }
+
+    fn decoded(&self, ix: usize, iy: usize, comp: usize) -> f32 {
+        self.decode_value(comp, self.sample(ix, iy, comp))
+    }
+
+    /// `decoded()` through the table: the same value, looked up.
+    fn decoded_by(&self, lut: &[f32], ix: usize, iy: usize, comp: usize) -> f32 {
+        if comp >= self.ncomp as usize {
+            return self.decoded(ix, iy, comp);
+        }
+        // The sample has `bits` bits, so it indexes within its component.
+        lut[(comp << self.bits) | self.sample(ix, iy, comp) as usize]
+    }
+
+    /// The decoded components of an 8-bit interleaved image's cell (#835),
+    /// read with one offset computation and table lookups: `None` unless
+    /// the table is built, the image has one source and 1, 3 or 4
+    /// components, and the whole cell lies inside the data (a short
+    /// source takes the general path, where missing bytes read as 0).
+    fn fast_components(&self, lut: &[f32], ix: usize, iy: usize) -> Option<[f32; 4]> {
+        let n = self.ncomp as usize;
+        if self.bits != 8 || !self.planes.is_empty() || !matches!(n, 1 | 3 | 4) {
+            return None;
+        }
+        let at = iy * self.row_bytes() + ix * n;
+        let px = self.data.get(at..at + n)?;
+        let mut c = [0.0f32; 4];
+        for (i, (out, &v)) in c.iter_mut().zip(px).enumerate() {
+            *out = lut[(i << 8) | usize::from(v)];
+        }
+        Some(c)
     }
 
     /// Device pixels per source sample along the image's x and y axes,
@@ -485,32 +545,37 @@ impl ImageCtx {
                 return t.rgb_at(idx.min(t.hival) as usize);
             }
             ImageColor::SeparationApprox => {
-                let g = 1.0 - self.decoded(ix, iy, 0);
+                let g = 1.0
+                    - match self.lut.as_deref() {
+                        Some(lut) => self.decoded_by(lut, ix, iy, 0),
+                        None => self.decoded(ix, iy, 0),
+                    };
                 return (g, g, g);
             }
             ImageColor::Direct => {}
         }
+        // Tested once per cell, so a depth without a table (12 or 16
+        // bits) runs exactly the direct code.
+        match self.lut.as_deref() {
+            Some(lut) => match self.fast_components(lut, ix, iy) {
+                Some(d) => self.direct_rgb(|c| d[c]),
+                None => self.direct_rgb(|c| self.decoded_by(lut, ix, iy, c)),
+            },
+            None => self.direct_rgb(|c| self.decoded(ix, iy, c)),
+        }
+    }
+
+    /// Gray, RGB or (any other count) CMYK components as RGB, from the
+    /// decoded component `dec(c)`.
+    #[inline(always)]
+    fn direct_rgb(&self, dec: impl Fn(usize) -> f32) -> (f32, f32, f32) {
         match self.ncomp {
             1 => {
-                let g = self.decoded(ix, iy, 0);
+                let g = dec(0);
                 (g, g, g)
             }
-            3 => (
-                self.decoded(ix, iy, 0),
-                self.decoded(ix, iy, 1),
-                self.decoded(ix, iy, 2),
-            ),
-            _ => {
-                let c = self.decoded(ix, iy, 0);
-                let m = self.decoded(ix, iy, 1);
-                let y = self.decoded(ix, iy, 2);
-                let k = self.decoded(ix, iy, 3);
-                (
-                    (1.0 - c) * (1.0 - k),
-                    (1.0 - m) * (1.0 - k),
-                    (1.0 - y) * (1.0 - k),
-                )
-            }
+            3 => (dec(0), dec(1), dec(2)),
+            _ => cmyk_rgb(dec(0), dec(1), dec(2), dec(3)),
         }
     }
 
@@ -754,6 +819,9 @@ impl ImageCtx {
             })
     }
 
+    // Kept out of `step` (#835): inlined there, the per-pixel loop came out
+    // a few percent slower on depths without a decode table (16-bit, Indexed).
+    #[inline(never)]
     fn rasterize(&self, gfx: &mut Gfx) {
         if self.width == 0 || self.height == 0 || self.bits == 0 || gfx.is_null_device() {
             return; // nothing to paint, or `nulldevice` discards it (#739)
@@ -819,29 +887,32 @@ impl ImageCtx {
 
         // `/Interpolate true` on a colour image (#730): which axes are
         // magnified, i.e. get bilinear sampling. None keeps nearest.
-        let smooth = if self.interpolate && self.mask.is_none() {
-            let to_dev = tiny_skia::Transform::from_row(
-                m[0] as f32,
-                m[1] as f32,
-                m[2] as f32,
-                m[3] as f32,
-                m[4] as f32,
-                m[5] as f32,
-            )
-            .invert()
-            .map(|i| i.post_concat(ctm));
-            to_dev
-                .map(|t| self.magnified(t))
-                .filter(|&(mx, my)| mx || my)
-        } else {
-            None
-        };
+        let magnified = tiny_skia::Transform::from_row(
+            m[0] as f32,
+            m[1] as f32,
+            m[2] as f32,
+            m[3] as f32,
+            m[4] as f32,
+            m[5] as f32,
+        )
+        .invert()
+        .map(|i| self.magnified(i.post_concat(ctm)))
+        .filter(|&(mx, my)| mx || my);
+        let smooth = magnified.filter(|_| self.interpolate && self.mask.is_none());
         let paint_rgb = gfx.rgb();
         let comp = gfx.composite();
         let mask_data = gfx.clip_mask_data();
         let width = gfx.pixmap.width() as usize;
         let data = gfx.pixmap.data_mut();
         let mut painted = false;
+        // The nearest-sample colour of the last cell looked up (#835): a
+        // magnified image covers each cell with a run of device pixels,
+        // and `rgb_at` is a pure function of the cell. Not kept at one
+        // sample per device pixel or fewer, where it would never hit.
+        let memo = magnified.is_some();
+        // No cell has these coordinates (both are below the image's size).
+        let mut last_cell = (usize::MAX, usize::MAX);
+        let mut last_rgb = (0.0f32, 0.0f32, 0.0f32);
         for py in py0..py1 {
             for px in px0..px1 {
                 // Device pixel center → user space → image space.
@@ -874,7 +945,14 @@ impl ImageCtx {
                             let fy = m[1] * ux + m[3] * uy + m[5];
                             self.smooth_rgb((fx, fy), (ix, iy), axes)
                         }
-                        None => self.rgb_at(ix, iy),
+                        None if !memo => self.rgb_at(ix, iy),
+                        None => {
+                            if last_cell != (ix, iy) {
+                                last_cell = (ix, iy);
+                                last_rgb = self.rgb_at(ix, iy);
+                            }
+                            last_rgb
+                        }
                     },
                 };
                 let clip = mask_data
@@ -905,6 +983,15 @@ impl ImageCtx {
             gfx.dirty = true;
         }
     }
+}
+
+/// Decoded CMYK components as RGB: each ink times the black, inverted.
+fn cmyk_rgb(c: f32, m: f32, y: f32, k: f32) -> (f32, f32, f32) {
+    (
+        (1.0 - c) * (1.0 - k),
+        (1.0 - m) * (1.0 - k),
+        (1.0 - y) * (1.0 - k),
+    )
 }
 
 /// Composite one source colour (straight RGB, 0..1) at coverage `sa` onto a
@@ -1018,6 +1105,83 @@ mod tests {
                                     want,
                                     "{bits} bits, {ncomp} comps, len {len}, ({ix},{iy}) c{comp}"
                                 );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// The decode table and the 8-bit fast path in `rgb_at` (#835) must
+    /// give bit-for-bit the colours of the direct computation: every
+    /// depth up to 8, 1 to 4 components, odd Decode arrays (inverted,
+    /// clamped, short), short data, separate planes, and Separation tints.
+    #[test]
+    fn decode_table_matches_the_direct_decode_bit_for_bit() {
+        let decodes: [&[f32]; 5] = [
+            &[],
+            &[1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0],
+            &[-0.5, 2.0, 0.25, 0.75, 0.0, 3.0, 1.5, -1.0],
+            &[0.3, 0.9],
+            &[0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0],
+        ];
+        for bits in [1u32, 2, 4, 8] {
+            for ncomp in [1u32, 2, 3, 4] {
+                for decode in decodes {
+                    for planes in [false, true] {
+                        for sep in [false, true] {
+                            let (w, h) = (17usize, 16usize);
+                            let mk = || {
+                                let color = if sep {
+                                    ImageColor::SeparationApprox
+                                } else {
+                                    ImageColor::Direct
+                                };
+                                let mut img = ImageCtx::new(
+                                    w,
+                                    h,
+                                    bits,
+                                    ncomp,
+                                    decode.to_vec(),
+                                    [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+                                    None,
+                                    color,
+                                    ImageSource::Bytes(vec![]),
+                                );
+                                if planes {
+                                    let srcs = (0..ncomp).map(|_| ImageSource::Bytes(vec![]));
+                                    img = img.with_planes(srcs.collect());
+                                }
+                                img
+                            };
+                            let (mut direct, mut table) = (mk(), mk());
+                            let full = direct.row_bytes() * h;
+                            for len in [full, full * 2 / 3 + 1, 0] {
+                                let bytes = |salt: usize| -> Vec<u8> {
+                                    (0..len).map(|i| (i * 37 + 11 + salt * 5) as u8).collect()
+                                };
+                                for img in [&mut direct, &mut table] {
+                                    img.data = bytes(0);
+                                    for (c, p) in img.planes.iter_mut().enumerate() {
+                                        p.data = bytes(c + 1);
+                                    }
+                                }
+                                table.build_decode_lut();
+                                assert!(table.lut.is_some(), "{bits} bits: table built");
+                                let tag = format!(
+                                    "{bits} bits, {ncomp} comps, decode {decode:?}, \
+                                     planes {planes}, sep {sep}, len {len}"
+                                );
+                                for iy in 0..h {
+                                    for ix in 0..w {
+                                        let (a, b) = (direct.rgb_at(ix, iy), table.rgb_at(ix, iy));
+                                        let bits_of = |c: (f32, f32, f32)| {
+                                            [c.0.to_bits(), c.1.to_bits(), c.2.to_bits()]
+                                        };
+                                        assert_eq!(bits_of(a), bits_of(b), "{tag} ({ix},{iy})");
+                                    }
+                                }
                             }
                         }
                     }
