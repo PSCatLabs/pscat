@@ -31,7 +31,9 @@ the original vision and staged milestones are history, kept in
   optimized (the tests run PostScript through the interpreter, ~14x
   slower in a debug build) but with `debug-assertions` and
   `overflow-checks` on (`[profile.ci]` in `Cargo.toml`; output in
-  `target/ci/`). Plain `cargo test` still works, just slowly.
+  `target/ci/`). Plain `cargo test` still works, just slowly: the absolute
+  CPU budgets and the default child deadline stretch in a dev-profile build
+  (see "Timing assertions in `tests/`" below), so it passes too.
 - `cargo clippy` should be clean (or warnings explicitly justified in a
   comment) before considering a stage complete.
 - `cargo fmt` before committing.
@@ -127,6 +129,22 @@ predates it.
     both sides timed by `cpu_time_of` / `thread_cpu_time`
     (`every_walkpath_preset_refuses_a_huge_segment_count_promptly` is the
     model).
+  - **Build profile** (#886). The absolute budgets are written for the
+    optimised `ci` profile. A plain dev-profile `cargo test` runs the same
+    PostScript 11-18x slower (35x for one test under load), so `within_cpu_budget` multiplies its budget
+    by `UNOPTIMISED_BUDGET_FACTOR` (20) there, and
+    `default_deadline()` (the child-process deadline, 60 s) by 3, unless
+    `PSCAT_TEST_DEADLINE_SECS` sets it. The render still runs and the
+    assertion still catches a catastrophic regression; it just does not
+    assert an optimised-build figure on an unoptimised one. The build is
+    "unoptimised" only when the test executable sits in `target/debug/`
+    (`common::unoptimised_build()`; `cfg!(debug_assertions)` cannot tell,
+    since `[profile.ci]` keeps debug assertions on). `--profile ci`,
+    `--release`, a custom profile, or an unreadable path keep the budgets
+    exactly as written. A bound relative to a same-run baseline is
+    profile-neutral and uses `scale_budget` only. Use
+    `within_cpu_budget` for any new absolute budget, never a hand-rolled
+    `Duration` compare.
   Do not use `Instant` in a test. Negative check for a new budget test:
   `PSCAT_TEST_BUDGET_SCALE=0.001 cargo test --profile ci --test <file>
   <name>` scales every budget in the run and must make it fail (apply

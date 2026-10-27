@@ -4,7 +4,7 @@
 
 mod common;
 
-use common::{cpu_time_of, within_cpu_budget};
+use common::{cpu_time_of, within_cpu_budget, within_exact_cpu_budget};
 use std::time::Duration;
 
 /// The whole point of the switch: sleeping costs wall time, not CPU time.
@@ -48,7 +48,7 @@ fn an_idle_closure_is_within_budget() {
 #[test]
 #[should_panic(expected = "over the 0ns budget")]
 fn an_impossible_budget_fails() {
-    within_cpu_budget("spin", Duration::ZERO, 2, || {
+    within_exact_cpu_budget("spin", Duration::ZERO, 2, || {
         std::hint::black_box((0..1_000_000u64).sum::<u64>())
     });
 }
@@ -57,7 +57,7 @@ fn an_impossible_budget_fails() {
 #[test]
 fn a_slow_outlier_is_forgiven() {
     let mut calls = 0;
-    within_cpu_budget("outlier", Duration::from_millis(100), 3, || {
+    within_exact_cpu_budget("outlier", Duration::from_millis(100), 3, || {
         calls += 1;
         if calls == 1 {
             // burn well past the budget in CPU, not sleep
@@ -70,4 +70,27 @@ fn a_slow_outlier_is_forgiven() {
         }
     });
     assert_eq!(calls, 2);
+}
+
+/// The build-profile factor (issue #886): an absolute budget is stretched
+/// in an unoptimised build and exact in an optimised one (`--profile ci`,
+/// `--release`), which is what keeps the CI budgets as strict as they were.
+#[test]
+fn the_budget_is_stretched_only_in_an_unoptimised_build() {
+    let burn_250ms = || {
+        let t = common::thread_cpu_time();
+        while common::thread_cpu_time() - t < Duration::from_millis(250) {
+            std::hint::spin_loop();
+        }
+    };
+    let over = std::panic::catch_unwind(|| {
+        within_cpu_budget("burn", Duration::from_millis(100), 1, burn_250ms)
+    })
+    .is_err();
+    assert_eq!(
+        over,
+        !common::unoptimised_build(),
+        "250 ms of CPU against a 100 ms budget: fails when optimised, \
+         passes when unoptimised"
+    );
 }

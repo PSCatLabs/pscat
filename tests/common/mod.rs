@@ -151,6 +151,47 @@ pub fn cpu_time_of<T>(f: impl FnOnce() -> T) -> (T, Duration) {
     (value, thread_cpu_time().saturating_sub(t0))
 }
 
+/// How many times slower an unoptimised build is allowed to be than the
+/// optimised one the absolute budgets are written for (issue #886).
+///
+/// The budgets are stated for `--profile ci` (optimised, 0.25-0.7 s of
+/// CPU for a render the 2 s DRYMEDIA cap covers). A plain dev-profile
+/// `cargo test` runs the same PostScript 11-18x slower (the typewriter strip up to
+/// 35x on a loaded machine), measured on the four CPU-budget tests that used to fail there, so the unscaled budgets failed
+/// deterministically, not just under load. Dev builds get the budget
+/// times this factor: the render still runs and the check still bites on
+/// a catastrophic regression (a quadratic walk, a lost early exit), it
+/// just no longer asserts a figure that only holds when optimised.
+pub const UNOPTIMISED_BUDGET_FACTOR: u32 = 20;
+
+/// True when this test binary was built without optimisation, that is the
+/// dev profile (`target/debug/`): `cargo test` with no `--profile`.
+///
+/// `cfg!(debug_assertions)` cannot tell: `[profile.ci]` turns debug
+/// assertions on while staying optimised. The build profile is the
+/// directory the test executable lives in, `target/<profile>/deps/`
+/// (with a `<triple>/` level before it when cross-compiling). Only the
+/// directory named `debug` counts as unoptimised; `release`, `ci`, any
+/// custom profile, and a path that cannot be read all stay strict.
+pub fn unoptimised_build() -> bool {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| {
+            let profile_dir = exe.parent()?.parent()?;
+            Some(profile_dir.file_name()? == "debug")
+        })
+        .unwrap_or(false)
+}
+
+/// The factor an absolute budget or deadline is stretched by in this build.
+fn profile_factor() -> u32 {
+    if unoptimised_build() {
+        UNOPTIMISED_BUDGET_FACTOR
+    } else {
+        1
+    }
+}
+
 /// `PSCAT_TEST_BUDGET_SCALE` multiplies every CPU budget in the suite
 /// (default 1). Set it far below 1 (for example `0.001`) to confirm a
 /// budget test still fails when the budget is wrong: the negative check
@@ -171,7 +212,20 @@ pub fn scale_budget(budget: Duration) -> Duration {
 /// unless the best run was under it. A slow outlier costs a retry; a real
 /// regression is slow every time. Prints the per-try times so drift shows
 /// before it fails. Returns the value of the fastest run.
-pub fn within_cpu_budget<T>(
+///
+/// `budget` is an absolute figure stated for the optimised `ci` profile; an
+/// unoptimised build gets `UNOPTIMISED_BUDGET_FACTOR` times as much (issue
+/// #886). `PSCAT_TEST_BUDGET_SCALE` multiplies on top, so the negative check
+/// still fails in either profile. (`scale_budget` alone is for a bound
+/// relative to a same-run baseline, which is profile-neutral.)
+pub fn within_cpu_budget<T>(what: &str, budget: Duration, tries: usize, f: impl FnMut() -> T) -> T {
+    within_exact_cpu_budget(what, budget * profile_factor(), tries, f)
+}
+
+/// `within_cpu_budget` without the build-profile factor: `budget` is used
+/// as given (still times `PSCAT_TEST_BUDGET_SCALE`). For testing the
+/// helper's own mechanics; a render budget belongs in `within_cpu_budget`.
+pub fn within_exact_cpu_budget<T>(
     what: &str,
     budget: Duration,
     tries: usize,
@@ -237,8 +291,9 @@ pub fn within_cpu_budget<T>(
 use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::time::Instant;
 
-/// Default deadline for one child. Generous: it exists to stop a hang, not
-/// to time a render, and a loaded machine (several gates at once) is slow.
+/// Default deadline for one child (`DEFAULT_DEADLINE`, 60 s, x3 unoptimised).
+/// Generous: it exists to stop a hang, not to time a render, and a loaded
+/// machine (several gates at once) is slow.
 /// `PSCAT_TEST_DEADLINE_SECS` overrides it for every call that does not
 /// pass its own.
 pub fn default_deadline() -> Duration {
@@ -247,8 +302,15 @@ pub fn default_deadline() -> Duration {
         .and_then(|v| v.parse::<f64>().ok())
         .filter(|s| s.is_finite() && *s > 0.0)
         .map(Duration::from_secs_f64)
-        .unwrap_or(Duration::from_secs(60))
+        .unwrap_or(DEFAULT_DEADLINE * if unoptimised_build() { 3 } else { 1 })
 }
+
+/// The deadline of a call that passes none, in an optimised build. An
+/// unoptimised build gets three times as much: its child pscat is 11-18x
+/// slower, and several gates at once on one machine stretch wall time
+/// further (issue #886).
+/// An explicit `PSCAT_TEST_DEADLINE_SECS` is taken as given.
+const DEFAULT_DEADLINE: Duration = Duration::from_secs(60);
 
 /// `pid` and every process below it, found with `pgrep -P` (a no-op where
 /// there is no pgrep). Parent pids only, so no other run's process matches.
