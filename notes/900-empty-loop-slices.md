@@ -34,6 +34,17 @@ nothing. No new `Item` variant and no new arm in the hot loop.
 `push_proc_frame` keeps its own empty check for its other callers (`exec`,
 the conditionals, `ExecWith`).
 
+**Why 1024 per step, not a step per iteration.** The issue asks that every
+iteration count toward the slice. Charging each empty iteration a whole step
+would change pinned single-step counts (`3 { } repeat`, `1 1 3 { } for`, and
+the mixed `[] { } forall 0 { } repeat 1 1 0 { } for`). Under limits it would
+charge them twice, since `tick` already counts every iteration toward
+`--max-steps`. Every iteration does count toward the slice now, at 1/1024
+of a step. That is enough for the bound: at about 41 instructions per empty
+iteration, a default window frame (`steps_per_frame` 100) runs at most
+about 102k iterations, roughly 4M instructions or a millisecond. The cost
+grows with `--speed`.
+
 **What changed in step counts.** Nothing that was pinned. Up to 1024
 empty iterations in a row are still free. A longer run costs one step per
 1024 (`1024 { } repeat` 3 -> 4 single steps, `4096 { } repeat` 3 -> 7).
@@ -76,7 +87,7 @@ alone moves a row by about ±6 (#864).
 | `fib 27` | 770.5M | 761.9M |
 | `gallery/basin_and_range.ps` | 19.20G | 18.86G |
 
-Nothing got dearer. The small drops, basin_and_range's 1.8% included, are
+Every row is within the ±6 layout noise or lower. The small drops, basin_and_range's 1.8% included, are
 most likely layout: the hot loop's code did not change. The basin_and_range
 PNG is byte-identical.
 
@@ -84,6 +95,7 @@ PNG is byte-identical.
 
 `Action::ExecWith` with an empty target also loops inside `next_item`
 without yielding: `pathforall` with empty procedures, `kshow` with `{ }`,
-and an image data procedure. Each is bounded by its path, string or image,
+and an image data procedure; and `ShowStep::Again` -> `Action::Nothing`,
+a show frame working through its string. Each is bounded by its path, string or image,
 so none hangs. Bounding them as well would mean the same counter in that
 arm. `Show` and `Image` belong to the image and filter lane (#896).
