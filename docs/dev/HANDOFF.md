@@ -1563,6 +1563,17 @@ renders eight examples in both and compares block-downsampled output).
   was measured and dropped (`notes/864-fused-conditionals.md`).
   `tests/dispatch_semantics.rs` pins every case with a positive control
   (`Interp::fused_steps`).
+- **Loop bodies keep their per-iteration procedure frame** (#875,
+  measured and dropped). Running a `repeat`/`for`/`loop`/`forall` body in
+  place saves only 20–35 instructions an iteration: the `Rc` clone and the
+  frame push and pop are a small part of an iteration's cost. Every
+  variant tried moved register allocation in `step_n`'s hot loop and made
+  short loops dearer, so every real file got slower. Don't redo it
+  without a new idea for the iteration path itself; see
+  `notes/875-loop-frames-in-place.md`. Its loop pins in
+  `tests/dispatch_semantics.rs` (`exit`/`stop`/error unwinding, step counts,
+  the `execstackoverflow` depth through loop bodies, profiles, a body
+  changed mid-loop) hold for any later change to the loop frames.
 - Frames that hold external state (glyph contexts' graphics-state
   snapshot, paint suppression) must clean up in **three** unwind
   paths: normal pop, `do_stop`, and `unwind_all`. `ShowCtx::cleanup`
