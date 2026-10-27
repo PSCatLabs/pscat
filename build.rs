@@ -137,9 +137,12 @@ const KNOWN_TAGS: &[&str] = &[
 /// (`actions/checkout` at a commit fetches none) or is not clean.
 fn emit_version() {
     println!("cargo:rerun-if-env-changed=PSCAT_RELEASE");
-    // A source edit can make the tree dirty (or clean again), so the dirty
-    // flag is re-read then. Measured (release, bin-only edit): 2.9s -> 7.4s.
-    println!("cargo:rerun-if-changed=src");
+    // An edit to a build input can make the tree dirty (or clean again), so
+    // the dirty flag is re-read then. `lib` and build.rs are already watched.
+    // Measured (release, bin-only edit): 2.9s -> 7.4s.
+    for input in ["src", "fonts", "Cargo.toml", "Cargo.lock"] {
+        println!("cargo:rerun-if-changed={input}");
+    }
     let pkg = std::env::var("CARGO_PKG_VERSION").expect("CARGO_PKG_VERSION set");
     let version = match git_version_suffix() {
         Some(suffix) => format!("{pkg}+{suffix}"),
@@ -193,30 +196,57 @@ fn git_version_suffix() -> Option<String> {
         return None;
     }
     // Re-run when the commit changes. Cargo treats a missing path as always
-    // stale, so name only files that exist. HEAD and the branch ref cover a
-    // new commit or checkout; packed-refs covers `git gc`/`pack-refs`; refs/tags a tag made on HEAD.
+    // stale, so name only paths that exist. HEAD and the reflog cover a new
+    // commit or checkout, refs/heads and packed-refs the branch ref, and
+    // refs/tags a tag made on HEAD.
     if let Some(git_dir) = git(&manifest_dir, &["rev-parse", "--absolute-git-dir"]) {
         let git_dir = PathBuf::from(git_dir);
         let common = git(&manifest_dir, &["rev-parse", "--git-common-dir"])
             .map(|c| manifest_dir.join(c))
             .unwrap_or_else(|| git_dir.clone());
-        let mut watch = vec![
+        // logs/HEAD is appended on every commit, checkout and reset, which
+        // keeps a commit visible after `git gc` packed the branch ref away
+        // (HEAD and packed-refs are then unchanged by the next commit).
+        let watch = [
             git_dir.join("HEAD"),
+            git_dir.join("logs/HEAD"),
             common.join("packed-refs"),
+            common.join("refs/heads"),
             common.join("refs/tags"),
         ];
-        if let Some(r) = git(&manifest_dir, &["symbolic-ref", "-q", "HEAD"]) {
-            watch.push(common.join(r));
-        }
-        for path in watch.into_iter().filter(|p| p.exists()) {
+        for path in watch.iter().filter(|p| p.exists()) {
             println!("cargo:rerun-if-changed={}", path.display());
         }
     }
-    // Tracked files only: untracked scratch files do not change the binary.
-    let dirty = git(&manifest_dir, &["status", "--porcelain", "--untracked-files=no"]).is_some();
+    // Dirty means a build input differs from the commit: the paths watched in
+    // `emit_version` (lib and build.rs included). Not docs, not untracked files
+    // (cargo's `.cargo-ok` sits untracked in a `cargo install --git` checkout).
+    let dirty = git(
+        &manifest_dir,
+        &[
+            "status",
+            "--porcelain",
+            "--untracked-files=no",
+            "--",
+            "src",
+            "lib",
+            "fonts",
+            "build.rs",
+            "Cargo.toml",
+            "Cargo.lock",
+        ],
+    )
+    .is_some();
     let on_release_tag = git(
         &manifest_dir,
-        &["describe", "--tags", "--exact-match", "--match", "v[0-9]*", "HEAD"],
+        &[
+            "describe",
+            "--tags",
+            "--exact-match",
+            "--match",
+            "v[0-9]*",
+            "HEAD",
+        ],
     )
     .is_some();
     match (on_release_tag, dirty) {
