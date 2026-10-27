@@ -581,3 +581,75 @@ fn a_true_branch_that_overflows_the_execution_stack_fails_as_if_does() {
         assert_eq!(stack.join(" "), want, "{src}");
     }
 }
+
+/// Runs `src` to the end in slices of `budget` steps; returns the fused
+/// steps taken.
+fn fused_in(src: &str, budget: usize) -> u64 {
+    let mut it = Interp::new();
+    it.begin_source(src.as_bytes());
+    while it.step_n(budget).unwrap_or_else(|e| panic!("{src}: {e}")) {}
+    it.fused_steps()
+}
+
+#[test]
+fn the_fused_paths_are_taken_where_they_apply_and_only_there() {
+    // A positive control for every test above (#864): those tests give the
+    // same answers with fusion off, so this pins that it is on.
+    let cases: &[(&str, u64)] = &[
+        ("{ true { 1 } if } bind exec", 1),
+        ("{ false { 1 } if } bind exec", 1),
+        ("{ true { 1 } if } exec", 1),
+        ("{ false { 1 } if } exec", 1),
+        ("{ true { 1 } { 2 } ifelse } bind exec", 0),
+        ("{ false { 1 } { 2 } ifelse } exec", 0),
+        ("{ true { } if } bind exec", 1),
+        ("{ false { } { } ifelse } bind exec", 0),
+        (
+            "/p { 3 dup 0 lt { pop 0 } if } bind def 10 { p pop } repeat",
+            10,
+        ),
+        ("1 1 5 { 2 mod 0 eq { 1 } { 2 } ifelse pop } bind for", 0),
+        // Nothing fuses: not a boolean, no conditional after, a name that
+        // is not `if` itself, a redefined `if`, a view that ends first,
+        // or the top level (not a procedure).
+        ("{ 1 { 1 } if } stopped", 0),
+        ("{ true { 1 } exec } bind exec", 0),
+        ("{ true { 1 } 2 ifelse } bind exec", 0),
+        ("/myif /if load def { true { 9 } myif } exec", 0),
+        (
+            "1 dict begin /if { pop pop 7 } def { true { 1 } if } exec end",
+            0,
+        ),
+        ("{ true { 1 } if } bind 0 2 getinterval cvx exec", 0),
+        ("true { 1 } if", 0),
+    ];
+    let mut failures = Vec::new();
+    for (src, want) in cases {
+        let got = fused_in(src, 1000);
+        if got != *want {
+            failures.push(format!("{src:?}: fused {got}, want {want}"));
+        }
+        // With one step per slice nothing ever fuses: no steps to spare.
+        let single = fused_in(src, 1);
+        if single != 0 {
+            failures.push(format!("{src:?}: fused {single} with step_n(1)"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn operator_timing_runs_every_conditional_on_its_own() {
+    // `--profile-ops` times each operator, so its loop never fuses.
+    let mut it = Interp::new();
+    it.enable_profile();
+    it.enable_profile_ops();
+    it.run_str("1 1 5 { 2 mod 0 eq { 1 } { 2 } ifelse true { pop } if } bind for")
+        .expect("runs");
+    assert_eq!(it.fused_steps(), 0);
+    let report = it.profile_report().expect("profiling is on");
+    let ops = report.operators.expect("operators are on");
+    let calls = |name: &str| ops.iter().find(|o| o.name == name).map(|o| o.calls);
+    assert_eq!(calls("ifelse"), Some(5));
+    assert_eq!(calls("if"), Some(5));
+}

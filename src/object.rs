@@ -88,6 +88,13 @@ impl PsArray {
         }
     }
 
+    /// The view's elements, borrowed for the length of `f`: a look at
+    /// several neighbouring elements under one borrow (#864).
+    #[inline(always)]
+    pub(crate) fn with_slice<R>(&self, f: impl FnOnce(&[Object]) -> R) -> R {
+        f(&self.data.borrow()[self.off..self.off + self.len])
+    }
+
     pub fn put(&self, i: usize, obj: Object) -> Result<(), PsError> {
         if i >= self.len {
             return Err(PsError::Rangecheck);
