@@ -102,9 +102,37 @@ Whole files, instructions retired:
 | `gallery/chalkboard_lecture.ps` | 81.8G | 79.8G (−2.4%) |
 | `gallery/crayon_drawing.ps` | 104.9G | 102.3G (−2.5%) |
 
+#863's microbenchmark (its issue body, `ns/op` per token, the best of 3
+runs per binary, Apple M4, load about 4–8):
+
+| body | base | branch |
+|---|---:|---:|
+| empty loop iteration (not subtracted) | 19.0 | 19.0 |
+| `1.5 2.5 mul pop` | 6.0 | 5.5 |
+| `1.5 dup mul pop` | 6.6 | 6.4 |
+| `x y mul pop` | 10.0 | 9.9 |
+| `/x 1.5 def` | 10.0 | 9.8 |
+| `1 2 exch pop pop` | 5.6 | 5.0 |
+| `true {1 pop} if` | 13.25 | 11.25 |
+| smoothstep via def | 7.9 | 7.4 |
+| smoothstep on the stack | 5.55 | 5.85 |
+
+Only the `if` row moves beyond noise. CPU time on real files
+(`scripts/bench_compare.sh`, min / median, with a base-binary control):
+
+| file | base | branch | control |
+|---|---|---|---|
+| `gallery/basin_and_range.ps`, N=5 | 0.84 / 0.85 | 0.80 / 0.80 | 0.85 / 0.85 |
+| `gallery/chalkboard_lecture.ps`, N=3 | 4.26 / 4.27 | 4.11 / 4.13 | 4.27 / 4.27 |
+
+Identity: `scripts/identity_check.sh --base-bin/--head-bin` over every
+tracked `examples/`, `gallery/` and `selftest/drivers/` file (136
+files): all 177 page renders byte-identical. The two binaries' hashes
+differ (no `--control`: a pure speed change has no head-only behaviour).
+
 ### Tried and dropped
 
-- **`{ } if` alone** (commit 74d7f00): `basin_and_range` gained 3.6%,
+- **`{ } if` alone** (the `if`-only commit): `basin_and_range` gained 3.6%,
   but every `{ } { } ifelse` paid a failed look-ahead (835 → 1013), and
   the drykit boards got 1% slower. It ships only together with
   `ifelse`.
