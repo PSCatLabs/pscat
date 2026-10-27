@@ -950,6 +950,29 @@ mod tests {
         });
     }
 
+    /// #900: with no limits, a job stuck in an empty loop still hands the
+    /// event loop back after every frame, so the window keeps redrawing and
+    /// answering keys while it runs.
+    #[test]
+    fn an_endless_empty_loop_hands_back_every_frame() {
+        within_deadline(|| {
+            let dir =
+                std::env::temp_dir().join(format!("pscat-spool-empty-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            let mut app = spool_app(&dir, Limits::none());
+            std::fs::write(dir.join("loop.ps"), "{ } loop").unwrap();
+            app.poll_spool();
+            app.poll_spool();
+            assert!(app.running, "the job should have started");
+            for _ in 0..200 {
+                app.tick();
+                assert!(app.running && !app.had_error, "nothing should stop it");
+            }
+            let _ = std::fs::remove_dir_all(&dir);
+        });
+    }
+
     #[test]
     fn the_spool_hands_its_limits_to_each_job_it_picks_up() {
         within_deadline(|| {

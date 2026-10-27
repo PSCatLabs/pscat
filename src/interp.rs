@@ -150,7 +150,9 @@ enum Item {
     /// A procedure frame with an element left is on top: the step loop
     /// runs that element with [`Interp::proc_step`], in this same step
     /// (#863). Procedure elements never pass through `next_item`'s
-    /// `Action` machinery.
+    /// `Action` machinery. Also returned, with a loop frame on top, when a
+    /// run of `EMPTY_RUN` empty-body iterations pauses (#900); `proc_step`
+    /// then finds no procedure and the step does nothing more.
     Proc,
 }
 
@@ -461,6 +463,11 @@ pub const MAX_OPEN_OUTPUT_FILES: usize = 64;
 
 /// Loop iterations between looks at the limits from inside `next_item`.
 const POLL_PERIOD: u32 = 1024;
+
+/// The most iterations of an empty loop body (`{ } loop`, `1 1 1e9 { } for`)
+/// one step runs; they are free up to there, as they always were, so a short
+/// empty loop keeps its step count (#900).
+const EMPTY_RUN: u32 = 1024;
 const STDOUT_TRUNCATED: &[u8] = b"\n%% output truncated: more than 64 KB\n";
 
 impl Interp {
@@ -826,7 +833,10 @@ impl Interp {
             .push(Frame::Scanner(Lexer::main_program(src.to_vec())));
     }
 
-    /// Execute up to `budget` objects. `Ok(true)` means work remains. On
+    /// Execute up to `budget` objects. A step that executes no object, such
+    /// as a run of up to `EMPTY_RUN` iterations of an empty loop body,
+    /// counts as one, so the call always returns after bounded work (#900).
+    /// `Ok(true)` means work remains. On
     /// error (or `quit`) the execution stack is cleared — the program is
     /// aborted — but the operand stack and canvas are left for inspection.
     pub fn step_n(&mut self, budget: usize) -> Result<bool, PsError> {
@@ -921,9 +931,9 @@ impl Interp {
     }
 
     /// Called once per loop iteration, from inside `next_item`. A loop whose
-    /// body is empty (`{ } loop`, `1 1 1000000000 { } for`) never yields an
-    /// object, so it never returns to `step_n` where the limits are read;
-    /// this counts the iterations itself. One decrement and a branch per
+    /// body is empty (`{ } loop`, `1 1 1000000000 { } for`) yields no object,
+    /// so it runs up to `EMPTY_RUN` iterations before it returns to `step_n`
+    /// where the limits are read; this counts the iterations itself. One decrement and a branch per
     /// iteration; the slow part runs once per `POLL_PERIOD`.
     #[inline]
     fn tick(&mut self) -> Result<(), PsError> {
@@ -1154,8 +1164,9 @@ impl Interp {
                     Ok(Some(Item::Proc)) => match self.proc_step::<false>() {
                         ProcStep::Op(func) => func(self),
                         ProcStep::Name(id) => self.execute_name(id),
-                        // `Other` is not reached: `next_item` checked the
-                        // frame has an element left.
+                        // `Other`: a run of empty loop iterations paused
+                        // with no procedure on top (#900), a step that
+                        // did nothing.
                         ProcStep::Pushed | ProcStep::Lit | ProcStep::Other => continue,
                     },
                     Err(e) => {
@@ -1554,6 +1565,12 @@ impl Interp {
             /// A profiled call returned (`--profile`).
             ProfExit,
         }
+        // Iterations of an empty body yield nothing, so they run here, in a
+        // row, inside one step. After `EMPTY_RUN` of them the call returns
+        // `Item::Proc` with no procedure on top, which the step loops take
+        // as a step that did nothing; so `step_n` always gets back control
+        // and every slice is bounded (#900).
+        let mut empty_run = 0u32;
         loop {
             let action = {
                 // Split borrow: the scanner needs the dictionary stack
@@ -1727,17 +1744,38 @@ impl Interp {
                 }
                 Action::Iterate(body) => {
                     self.tick()?;
+                    if body.is_empty() {
+                        empty_run += 1;
+                        if empty_run == EMPTY_RUN {
+                            return Ok(Some(Item::Proc));
+                        }
+                        continue;
+                    }
                     self.push_proc_frame(body)?;
                 }
                 Action::IterateWith(v, body) => {
                     self.tick()?;
                     self.push(v);
+                    if body.is_empty() {
+                        empty_run += 1;
+                        if empty_run == EMPTY_RUN {
+                            return Ok(Some(Item::Proc));
+                        }
+                        continue;
+                    }
                     self.push_proc_frame(body)?;
                 }
                 Action::IterateWith2(a, b, body) => {
                     self.tick()?;
                     self.push(a);
                     self.push(b);
+                    if body.is_empty() {
+                        empty_run += 1;
+                        if empty_run == EMPTY_RUN {
+                            return Ok(Some(Item::Proc));
+                        }
+                        continue;
+                    }
                     self.push_proc_frame(body)?;
                 }
                 Action::ExecWith(operands, target) => {
