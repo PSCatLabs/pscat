@@ -182,6 +182,33 @@ fn the_deadline_kills_grandchildren_too() {
     assert_none_left(&marker);
 }
 
+/// The direct child exits but a descendant it backgrounded keeps running
+/// and holds the output pipes: the helper must not report success. (The
+/// shell lingers past the 200 ms descendant snapshot, so the runaway is
+/// known and killed.)
+#[test]
+fn a_descendant_outliving_the_child_fails_and_is_killed() {
+    let (marker, program) = runaway("orphan");
+    let started = Instant::now();
+    let msg = panic_message(
+        catch_unwind(AssertUnwindSafe(|| {
+            let _ = Command::new("sh")
+                .args([
+                    "-c",
+                    "\"$0\" --headless -e \"$1\" & sleep 1; exit 0",
+                    PSCAT,
+                    &program,
+                ])
+                .output_within(Duration::from_secs(30));
+        }))
+        .map(|_| ()),
+    );
+    assert!(started.elapsed() < Duration::from_secs(20), "too slow");
+    assert!(msg.contains("descendant"), "{msg}");
+    assert!(msg.contains(&marker), "message names the command: {msg}");
+    assert_none_left(&marker);
+}
+
 /// The watchdog for a long-lived, interactive child: the blocking read of
 /// its stdout sees EOF once the deadline kills it.
 #[test]

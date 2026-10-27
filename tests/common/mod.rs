@@ -285,6 +285,23 @@ fn kill_tree(pid: u32) {
 #[cfg(not(unix))]
 fn kill_tree(_pid: u32) {}
 
+#[cfg(not(unix))]
+fn descendants(_pid: u32) -> Vec<u32> {
+    Vec::new()
+}
+
+/// SIGKILL these pids (a snapshot of a child's descendants).
+#[cfg(unix)]
+fn kill_pids(pids: &[u32]) {
+    for &p in pids {
+        // SAFETY: plain signal send; the pids were descendants moments ago.
+        unsafe { libc::kill(p as libc::pid_t, libc::SIGKILL) };
+    }
+}
+
+#[cfg(not(unix))]
+fn kill_pids(_pids: &[u32]) {}
+
 fn describe(cmd: &str) -> String {
     let one_line = cmd.replace('\n', "\\n");
     if one_line.chars().count() > 300 {
@@ -309,15 +326,26 @@ fn kill_and_panic(child: &mut Child, what: &str, deadline: Duration) -> ! {
 /// Poll `try_wait` until the child exits or `deadline` passes. The sleep
 /// grows with the elapsed time (1 ms up to 25 ms), so a short run is
 /// noticed within about a millisecond and a long one costs little.
-fn poll_exit(child: &mut Child, what: &str, deadline: Duration) -> ExitStatus {
+///
+/// Returns the status and the descendants last seen alive (a snapshot taken
+/// from 200 ms on, then once a second, so a quick child pays nothing): once
+/// the child has exited its own children are re-parented and can no longer
+/// be found, but a descendant that outlives it can still hold its pipes.
+fn poll_exit(child: &mut Child, what: &str, deadline: Duration) -> (ExitStatus, Vec<u32>) {
     let start = Instant::now();
+    let mut seen = Vec::new();
+    let mut next_snapshot = Duration::from_millis(200);
     loop {
         if let Some(status) = child.try_wait().expect("try_wait") {
-            return status;
+            return (status, seen);
         }
         let elapsed = start.elapsed();
         if elapsed >= deadline {
             kill_and_panic(child, what, deadline);
+        }
+        if elapsed >= next_snapshot {
+            seen = descendants(child.id());
+            next_snapshot = elapsed + Duration::from_secs(1);
         }
         let nap = (elapsed / 10).clamp(Duration::from_millis(1), Duration::from_millis(25));
         std::thread::sleep(nap.min(deadline - elapsed));
@@ -337,11 +365,14 @@ fn drain<R: std::io::Read + Send + 'static>(pipe: Option<R>) -> std::sync::mpsc:
     rx
 }
 
-/// Collect a drained pipe. After a normal exit the pipe is at EOF, so this
-/// returns at once; the bound only matters if a leaked grandchild still
-/// holds the pipe open.
-fn collect(rx: std::sync::mpsc::Receiver<Vec<u8>>) -> Vec<u8> {
-    rx.recv_timeout(Duration::from_secs(10)).unwrap_or_default()
+/// How long a pipe may stay open after the child has exited. At EOF it
+/// returns at once; a pipe still open this long is held by a descendant that
+/// outlived the child.
+const PIPE_EOF_GRACE: Duration = Duration::from_secs(2);
+
+/// Collect a drained pipe, or `None` if it is still open after the grace.
+fn collect(rx: &std::sync::mpsc::Receiver<Vec<u8>>) -> Option<Vec<u8>> {
+    rx.recv_timeout(PIPE_EOF_GRACE).ok()
 }
 
 /// `Child::wait_with_output` with a deadline. `child` must have been spawned
@@ -362,11 +393,24 @@ fn wait_with_deadline_named(child: &mut Child, what: &str, deadline: Duration) -
     drop(child.stdin.take());
     let out = drain(child.stdout.take());
     let err = drain(child.stderr.take());
-    let status = poll_exit(child, what, deadline);
-    Output {
-        status,
-        stdout: collect(out),
-        stderr: collect(err),
+    let (status, descendants) = poll_exit(child, what, deadline);
+    match (collect(&out), collect(&err)) {
+        (Some(stdout), Some(stderr)) => Output {
+            status,
+            stdout,
+            stderr,
+        },
+        _ => {
+            // A descendant of the child holds its stdout/stderr open: the
+            // child exited, but the run is not over. Do not report success
+            // with lost output and a runaway left behind.
+            kill_pids(&descendants);
+            panic!(
+                "a descendant of the child still held its output pipes {PIPE_EOF_GRACE:?} \
+                 after the child exited (killed the ones seen: {descendants:?}): {}",
+                describe(what)
+            );
+        }
     }
 }
 
@@ -435,7 +479,7 @@ impl CommandDeadline for Command {
     fn status_within(&mut self, deadline: Duration) -> std::io::Result<ExitStatus> {
         let what = format!("{self:?}");
         let mut child = self.spawn()?;
-        Ok(poll_exit(&mut child, &what, deadline))
+        Ok(poll_exit(&mut child, &what, deadline).0)
     }
 }
 

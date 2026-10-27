@@ -55,6 +55,15 @@ transfers prove there is no pipe deadlock. A scan test fails on a raw
 `wait_with_output()` or an undeadlined `Command::new(<pscat binary>)` `.output()`
 / `.status()`.
 
+## Descendants that outlive the child (Codex review, P2)
+
+A child that exits while a backgrounded descendant still holds its stdout or
+stderr used to look like success with empty output. Now, if a pipe is not at
+EOF 2 s after the child exited, the helper kills the descendants it last saw
+(a `pgrep -P` snapshot taken from 200 ms into the run, then every second, so a
+quick child pays nothing) and fails the test. A descendant that appears and is
+orphaned within the first 200 ms is reported but cannot be found to kill.
+
 ## Windows
 
 `kill_tree` and `Watchdog` are no-ops off unix (no `pgrep`/`libc::kill`); the
