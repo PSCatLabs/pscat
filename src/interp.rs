@@ -439,6 +439,10 @@ pub struct Interp {
     /// `--profile` (issue #737): `Some` while profiling. A program that
     /// is not profiled never looks at it per step (see `step_n`).
     profile: Option<Box<crate::profile::Profiler>>,
+    /// `--profile-ops`: the name of the operator `proc_step::<true>` last
+    /// returned as `ProcStep::Op`, for `step_n_timed` to label its row with
+    /// (the step itself carries only the function). Written only there.
+    op_name: &'static str,
     pub(crate) gfx: Gfx,
 }
 
@@ -565,6 +569,7 @@ impl Interp {
             bytes_written: 0,
             max_write_bytes: None,
             profile: None,
+            op_name: "",
             gfx,
         })
     }
@@ -1068,10 +1073,7 @@ impl Interp {
                     Ok(Some(Item::Obj(obj))) => {
                         let done = match (&obj.value, obj.executable) {
                             (Value::Name(n), true) => self.execute_name_timed(n.id()),
-                            (Value::Operator(op), true) => {
-                                let func = op.func;
-                                self.timed_op(func)
-                            }
+                            (Value::Operator(op), true) => self.timed_op(op.name, op.func),
                             _ => self.execute_element(obj),
                         };
                         if let Err(e) = done {
@@ -1090,7 +1092,7 @@ impl Interp {
                 // A procedure literal is not an operator: not timed
                 // (and never fused here, `slice_left` being zero).
                 ProcStep::Lit => self.proc_literal(),
-                ProcStep::Op(func) => self.timed_op(func),
+                ProcStep::Op(func) => self.timed_op(self.op_name, func),
                 ProcStep::Name(id) => self.execute_name_timed(id),
                 ProcStep::Pushed | ProcStep::Other => continue,
             };
@@ -1102,12 +1104,12 @@ impl Interp {
     }
 
     #[inline(never)]
-    fn timed_op(&mut self, func: crate::object::OpFn) -> Result<(), PsError> {
+    fn timed_op(&mut self, name: &'static str, func: crate::object::OpFn) -> Result<(), PsError> {
         let t0 = crate::clock::Clock::mono_ns();
         let r = func(self);
         let ns = crate::clock::Clock::mono_ns().saturating_sub(t0);
         if let Some(p) = self.profile.as_mut() {
-            p.record_op(func as usize, ns);
+            p.record_op(name, ns);
         }
         r
     }
@@ -1121,7 +1123,7 @@ impl Interp {
         if resolved.executable
             && let Value::Operator(op) = &resolved.value
         {
-            return self.timed_op(op.func);
+            return self.timed_op(op.name, op.func);
         }
         self.execute_resolved(resolved, id)
     }
@@ -1184,7 +1186,12 @@ impl Interp {
     /// `sync_scan_line` is not needed: the top frame is not a scanner.
     #[inline(always)]
     fn proc_step<const TIMED: bool>(&mut self) -> ProcStep {
-        let Interp { estack, ostack, .. } = self;
+        let Interp {
+            estack,
+            ostack,
+            op_name,
+            ..
+        } = self;
         let Some(Frame::Proc { body, pc }) = estack.last_mut() else {
             return ProcStep::Other;
         };
@@ -1197,6 +1204,9 @@ impl Interp {
                 match &o.value {
                     Value::Operator(op) => {
                         *pc = i + 1;
+                        if TIMED {
+                            *op_name = op.name;
+                        }
                         return ProcStep::Op(op.func);
                     }
                     Value::Name(n) => {
@@ -1836,20 +1846,12 @@ impl Interp {
 
     /// Also time each built-in operator (`--profile-ops`); call it right
     /// after [`enable_profile`](Self::enable_profile). Slows the run more
-    /// than `--profile` alone: two clock reads per operator.
+    /// than `--profile` alone: two clock reads per operator. Rows are
+    /// keyed by `Operator::name`, as operator identity is (#881, #885).
     #[doc(hidden)]
     pub fn enable_profile_ops(&mut self) {
-        let bound: Vec<(String, usize)> = self.dstack[0]
-            .borrow()
-            .pairs()
-            .into_iter()
-            .filter_map(|(k, v)| match (&k.value, &v.value) {
-                (Value::Name(n), Value::Operator(op)) => Some((n.to_string(), op.func as usize)),
-                _ => None,
-            })
-            .collect();
         if let Some(p) = self.profile.as_mut() {
-            p.set_ops(bound.into_iter());
+            p.set_ops();
         }
     }
 

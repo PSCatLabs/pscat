@@ -783,6 +783,61 @@ fn operators_are_counted_by_name_whether_bound_or_not() {
 }
 
 #[test]
+fn operators_sharing_one_function_get_separate_rows() {
+    // #885: `readonly`/`noaccess`/`executeonly` share one function, and
+    // `rcheck`/`wcheck` another. Rows are keyed by the operator's name, so
+    // each gets its own, through every route the timed loop reaches an
+    // operator by: a scanned token at the top level, an executable name in
+    // an unbound procedure, and an operator object in a `bind` procedure.
+    let (result, report) = profile_ops(
+        "/arr [1] def
+         arr readonly pop arr executeonly pop arr noaccess pop
+         arr rcheck pop arr wcheck pop
+         /named { [1] readonly pop [1] executeonly pop [1] executeonly pop
+                  [1] rcheck pop [1] wcheck pop [1] wcheck pop } def
+         named named
+         /bound { [1] readonly pop [1] executeonly pop [1] executeonly pop
+                  [1] rcheck pop [1] wcheck pop [1] wcheck pop } bind def
+         bound bound bound",
+    );
+    result.expect("runs");
+    // top level: 1 each; `named` x2 and `bound` x3 add 1, 2 per call (readonly
+    // 1, executeonly 2) and rcheck 1, wcheck 2.
+    assert_eq!(op(&report, "readonly").calls, 1 + 2 + 3);
+    assert_eq!(op(&report, "executeonly").calls, 1 + 2 * 2 + 3 * 2);
+    assert_eq!(op(&report, "noaccess").calls, 1);
+    assert_eq!(op(&report, "rcheck").calls, 1 + 2 + 3);
+    assert_eq!(op(&report, "wcheck").calls, 1 + 2 * 2 + 3 * 2);
+    assert!(
+        report
+            .operators
+            .as_ref()
+            .unwrap()
+            .iter()
+            .all(|o| !o.name.contains('/')),
+        "{report:?}"
+    );
+}
+
+#[test]
+fn operator_rows_are_unique_by_name_and_json_keeps_its_shape() {
+    let (_, report) = profile_ops("1 2 add 3 add pop 1 2 max pop 1 2 .max pop");
+    let ops = report.operators.as_ref().unwrap();
+    let mut names: Vec<&str> = ops.iter().map(|o| o.name.as_str()).collect();
+    names.sort();
+    let before = names.len();
+    names.dedup();
+    assert_eq!(before, names.len(), "a name has two rows: {report:?}");
+    assert_eq!(op(&report, "add").calls, 2);
+    let v: serde_json::Value = serde_json::from_str(&report.to_json(None)).expect("JSON");
+    for o in v["operators"].as_array().unwrap() {
+        let mut keys: Vec<&str> = o.as_object().unwrap().keys().map(String::as_str).collect();
+        keys.sort();
+        assert_eq!(keys, ["calls", "name", "time_ms"]);
+    }
+}
+
+#[test]
 fn an_expensive_operator_outweighs_cheap_arithmetic() {
     // The question from #799: `fill` against `add`.
     let (result, report) = profile_ops(

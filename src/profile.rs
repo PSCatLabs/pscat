@@ -60,14 +60,42 @@ struct Active {
     caller: u32,
 }
 
-/// `--profile-ops`: time inside each built-in operator, by function address
-/// (the loop sees operators as bare `fn` pointers, not names).
+/// `--profile-ops`: time inside each built-in operator, by `Operator::name`
+/// (an operator is its name, #881; several share one function, so the
+/// function's address cannot tell them apart).
 #[derive(Default)]
 struct OpTimes {
-    /// Address -> the names it is bound to in systemdict, joined with `/`.
-    names: HashMap<usize, String>,
-    /// Address -> (calls, nanoseconds).
-    stats: HashMap<usize, (u64, u64)>,
+    /// The name string's (address, length) -> (name, calls, nanoseconds).
+    /// Hashing a pair of integers keeps the per-call cost near the old
+    /// function-address key's; `report` merges rows whose text is equal
+    /// (one name registered through two string literals).
+    stats: HashMap<(usize, usize), (&'static str, u64, u64), AddrHashBuilder>,
+}
+
+/// A multiply-and-add hash for the integer pairs `OpTimes` keys by: the
+/// standard SipHash costs more than the operator it times.
+#[derive(Default, Clone)]
+struct AddrHashBuilder;
+
+struct AddrHasher(u64);
+
+impl std::hash::BuildHasher for AddrHashBuilder {
+    type Hasher = AddrHasher;
+    fn build_hasher(&self) -> AddrHasher {
+        AddrHasher(0)
+    }
+}
+
+impl std::hash::Hasher for AddrHasher {
+    fn write(&mut self, _bytes: &[u8]) {
+        unreachable!("AddrHasher is for usize keys only");
+    }
+    fn write_usize(&mut self, n: usize) {
+        self.0 = (self.0.rotate_left(5) ^ n as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    }
+    fn finish(&self) -> u64 {
+        self.0 ^ (self.0 >> 32)
+    }
 }
 
 #[derive(Default)]
@@ -102,25 +130,9 @@ impl Profiler {
         self.graph = true;
     }
 
-    /// Time operators too (before the program runs). `bound` is every
-    /// (name, function) pair systemdict holds, for labelling the report.
-    pub(crate) fn set_ops(&mut self, bound: impl Iterator<Item = (String, usize)>) {
-        let mut by_addr: HashMap<usize, Vec<String>> = HashMap::new();
-        for (name, addr) in bound {
-            by_addr.entry(addr).or_default().push(name);
-        }
-        let names = by_addr
-            .into_iter()
-            .map(|(addr, mut v)| {
-                v.sort();
-                v.dedup();
-                (addr, v.join("/"))
-            })
-            .collect();
-        self.ops = Some(OpTimes {
-            names,
-            stats: HashMap::new(),
-        });
+    /// Time operators too (before the program runs).
+    pub(crate) fn set_ops(&mut self) {
+        self.ops = Some(OpTimes::default());
     }
 
     #[inline]
@@ -129,11 +141,14 @@ impl Profiler {
     }
 
     /// One finished operator call.
-    pub(crate) fn record_op(&mut self, addr: usize, ns: u64) {
+    pub(crate) fn record_op(&mut self, name: &'static str, ns: u64) {
         if let Some(o) = self.ops.as_mut() {
-            let s = o.stats.entry(addr).or_default();
-            s.0 += 1;
-            s.1 += ns;
+            let s = o
+                .stats
+                .entry((name.as_ptr() as usize, name.len()))
+                .or_insert((name, 0, 0));
+            s.1 += 1;
+            s.2 += ns;
         }
     }
 
@@ -273,15 +288,16 @@ impl Profiler {
             edges
         });
         let operators = self.ops.as_ref().map(|o| {
-            let mut ops: Vec<OpRow> = o
-                .stats
-                .iter()
-                .map(|(addr, &(calls, ns))| OpRow {
-                    name: o
-                        .names
-                        .get(addr)
-                        .cloned()
-                        .unwrap_or_else(|| UNNAMED_OPERATOR.to_string()),
+            let mut by_name: HashMap<&'static str, (u64, u64)> = HashMap::new();
+            for &(name, calls, ns) in o.stats.values() {
+                let t = by_name.entry(name).or_default();
+                t.0 += calls;
+                t.1 += ns;
+            }
+            let mut ops: Vec<OpRow> = by_name
+                .into_iter()
+                .map(|(name, (calls, ns))| OpRow {
+                    name: name.to_string(),
                     calls,
                     time: Duration::from_nanos(ns),
                 })
@@ -332,17 +348,14 @@ pub struct EdgeRow {
 /// One built-in operator's line of the `--profile-ops` table.
 #[derive(Clone, Debug)]
 pub struct OpRow {
-    /// The operator's name in systemdict (`a/b` if several names are bound
-    /// to the same function).
+    /// The operator's registered name (`Operator::name`). Operators that
+    /// share one function (`readonly`/`noaccess`) have a row each.
     pub name: String,
     pub calls: u64,
     /// Time inside the operator's own code, summed over its calls. Includes
     /// the two clock reads around each call (tens of nanoseconds).
     pub time: Duration,
 }
-
-/// The label for an operator whose function no systemdict name is bound to.
-const UNNAMED_OPERATOR: &str = "(unnamed operator)";
 
 /// The finished profile, sorted by exclusive time, longest first.
 #[derive(Clone, Debug)]

@@ -278,8 +278,9 @@ More on the less obvious ones:
     `if`, `repeat` and `forall` only push a frame (their bodies are timed
     as the operators they run), and `show` and `image` do most of their work
     afterwards, in steps the clock does not see, so they read cheap here: use
-    the procedure table for those. An operator is counted under its systemdict
-    name (`a/b` if two names share one function). Without the flag the cost
+    the procedure table for those. Each operator has its own
+    row, under its registered name (`readonly` and `executeonly` are two rows
+    although they share one function). Without the flag the cost
     is one check per slice of 4,096 steps, and no slowdown was measured on
     `fib` (`notes/799-profile-followups.md`).
   - Not with `--bands` (each band is a full run, so a merged table would be N
