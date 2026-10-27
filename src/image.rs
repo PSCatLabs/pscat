@@ -819,6 +819,9 @@ impl ImageCtx {
             })
     }
 
+    // Kept out of `step` (#835): inlined there, the per-pixel loop came out
+    // a few percent slower on depths without a decode table (16-bit, Indexed).
+    #[inline(never)]
     fn rasterize(&self, gfx: &mut Gfx) {
         if self.width == 0 || self.height == 0 || self.bits == 0 || gfx.is_null_device() {
             return; // nothing to paint, or `nulldevice` discards it (#739)
