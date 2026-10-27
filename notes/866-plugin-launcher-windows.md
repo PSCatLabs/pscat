@@ -188,7 +188,9 @@ macOS and Linux then exec it directly.
   the code page can spell it, else as its 8.3 short name; with neither, that
   copy is passed over for the next candidate, in the end the cache (round
   2). The installed-copy tests exercise the short-name route, since their
-  directory has `Ł` and lies outside those four variables.
+  directory has `Ł` and lies outside those four variables. The sh entry
+  point under Git Bash, which reads UTF-8, asks for `--exe-utf8` instead:
+  the plain path, lossless (round 3).
 - Managed machines where Group Policy forbids `-ExecutionPolicy Bypass`, or
   that run PowerShell in Constrained Language mode, stop the launcher. The
   README tells those users to install the release `.zip` and put it on PATH.
