@@ -11,12 +11,15 @@
 # 2. The installed copy sits under plugins/cache/pscat/pscat/<version> with
 #    the version from plugin/plugin.json, holds the three skills as real
 #    files (Codex skips symlinks when it copies a plugin), mcp.json,
-#    hooks/hooks.json, the launcher scripts/pscat-mcp.sh and its pin
-#    pscat-release, and nothing else of the repo. The hook command is run
+#    hooks/hooks.json, the launcher scripts/pscat-mcp.sh, its entry point
+#    scripts/pscat-mcp (executable) with the Windows twin pscat-mcp.cmd and
+#    pscat-mcp.ps1 (#866), and its pin pscat-release, and nothing else of
+#    the repo. The hook command is run
 #    with CLAUDE_PLUGIN_ROOT set (Codex sets it for compatibility): it says
 #    pscat will be downloaded on a PATH without pscat, nothing with it.
 # 3. The pscat server as Codex resolved it (`codex mcp get pscat --json`:
-#    command, args with ${PLUGIN_ROOT} expanded, env, cwd; #853) answers
+#    command, the ./scripts/pscat-mcp entry point made absolute, env, cwd;
+#    #853, #866) answers
 #    initialize and tools/list. Codex has no login-free command that starts
 #    a plugin's MCP server, so this starts that command itself and speaks the
 #    protocol directly, three ways and with no network: pscat-mcp on PATH;
@@ -55,10 +58,13 @@ for s in pscat psart psviz; do
     [ -f "$copy/skills/$s/SKILL.md" ] && ok "installed copy has skills/$s/SKILL.md" \
         || bad "installed copy lacks skills/$s/SKILL.md"
 done
-for f in plugin.json mcp.json hooks/hooks.json scripts/pscat-mcp.sh pscat-release; do
+for f in plugin.json mcp.json hooks/hooks.json scripts/pscat-mcp.sh scripts/pscat-mcp \
+    scripts/pscat-mcp.cmd scripts/pscat-mcp.ps1 pscat-release; do
     [ -f "$copy/$f" ] && ok "installed copy has $f" || bad "installed copy lacks $f"
 done
 echo "info scripts/pscat-mcp.sh mode in the Codex cache: $(ls -l "$copy/scripts/pscat-mcp.sh" 2>&1 | cut -c1-10)"
+[ -x "$copy/scripts/pscat-mcp" ] && ok "scripts/pscat-mcp is executable in the Codex cache" \
+    || bad "scripts/pscat-mcp lost its exec bit in the Codex cache"
 links=$(find "$copy" -type l 2>/dev/null)
 [ -z "$links" ] && ok "installed copy has no symlinks" || bad "symlinks in installed copy: $links"
 extra=$(cd "$copy" 2>/dev/null && find . -mindepth 1 -maxdepth 1 ! -name skills ! -name hooks \
@@ -92,11 +98,11 @@ out=$(hook_out "$bin:$hook_clean") && [ -z "$out" ] \
 if python3 - "$work/server.json" "$copy" <<'EOF'
 import json, os, sys
 t = json.load(open(sys.argv[1]))["transport"]
-assert t["command"] == "sh", t
 real = os.path.realpath  # Codex canonicalizes the root: /var -> /private/var on macOS
-assert [real(a) for a in t["args"]] == [real(sys.argv[2] + "/scripts/pscat-mcp.sh")], t
+assert real(t["command"]) == real(sys.argv[2] + "/scripts/pscat-mcp"), t
+assert not t.get("args"), t
 EOF
-then ok "Codex expands \${PLUGIN_ROOT} to the installed launcher"
+then ok "Codex resolves ./scripts/pscat-mcp to the installed entry point"
 else bad "resolved server config: $(cat "$work/server.json")"
 fi
 

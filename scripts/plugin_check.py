@@ -25,17 +25,26 @@ Claude's schema; Codex has no validator. This checks what neither does:
 - each skill directory has a SKILL.md whose frontmatter `name` matches the
   directory and has a `description`;
 - nothing the plugin installs names a repo-relative or absolute path: an MCP
-  server's `command` is a bare executable name found on the user's PATH
-  (`sh`), and its args and hook commands use no `./`, `../` or
-  absolute paths except under `${CLAUDE_PLUGIN_ROOT}` / `${PLUGIN_ROOT}`;
-  a `${...PLUGIN_ROOT}/<file>` that a server or hook names exists in the
+  server's `command` is a bare executable name found on the user's PATH, or
+  a plugin file (`${CLAUDE_PLUGIN_ROOT}/<file>` for Claude Code, a contained
+  `./<file>` for Codex), and its args and hook commands use no `./`, `../`
+  or absolute paths except under `${CLAUDE_PLUGIN_ROOT}` / `${PLUGIN_ROOT}`
+  (a hook may `cd "${CLAUDE_PLUGIN_ROOT}/<dir>"; ./<file> ...`, the one
+  form that runs in sh, Git Bash and PowerShell alike, #866); a
+  `${...PLUGIN_ROOT}/<file>` that a server or hook names exists in the
   plugin directory;
+- a plugin file that a server or hook runs as its program (#866): its exec
+  bit is set (and committed as mode 100755, when the tree is a git
+  checkout), since macOS and Linux exec it directly, and an extensionless
+  one has a `<file>.cmd` beside it, which Windows hosts run instead (they
+  resolve the extensionless name through PATHEXT);
 - each host's placeholder in each host's file (#853): Claude Code expands
   `${CLAUDE_PLUGIN_ROOT}` in `.claude-plugin/plugin.json` and `.mcp.json`
   (https://code.claude.com/docs/en/plugins-reference#environment-variables);
   Codex expands only `${PLUGIN_ROOT}` / `${PLUGIN_DATA}` in `mcp.json` args,
   env and cwd (codex-rs/codex-mcp/src/agent_plugin_config.rs). A server both
-  manifests declare runs the same command and args in both;
+  manifests declare runs the same command and args in both (the plugin
+  root spelled `${CLAUDE_PLUGIN_ROOT}/` for Claude Code, `./` for Codex);
 - no top-level `bin/` in a plugin directory: claude.ai and Cowork refuse to
   install a plugin that has one
   (https://claude.com/docs/plugins/platform-support);
@@ -52,13 +61,14 @@ Claude's schema; Codex has no validator. This checks what neither does:
 - Codex: the marketplace entry has `policy.installation`,
   `policy.authentication` and `category`, its source is a local `./` path
   inside the repo, and `mcp.json` servers declare a `type` (stdio servers a
-  bare `command`).
+  bare or contained `./` `command`).
 
 Exit 0 when clean, 1 with one line per problem otherwise.
 """
 import json
 import os
 import re
+import subprocess
 import sys
 import tomllib
 
@@ -233,6 +243,46 @@ def _plugin_file_refs(text, plugin_dir, where, errors):
             errors.append(f"{where}: {m.group(1)!r} is not a file in the plugin directory")
 
 
+def _git_mode(path):
+    """The mode git records for PATH ('100755', say), or None if untracked or no git."""
+    try:
+        out = subprocess.run(["git", "ls-files", "-s", "--", os.path.basename(path)],
+                             cwd=os.path.dirname(path), capture_output=True, text=True,
+                             timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return out.stdout.split()[0] if out.returncode == 0 and out.stdout.strip() else None
+
+
+def _check_program(path, where, errors):
+    """A plugin file a host runs as a program (#866): it must exist; macOS and
+    Linux exec it directly, so it needs its exec bit, committed; Windows hosts
+    resolve an extensionless name through PATHEXT, so it needs a .cmd twin."""
+    name = os.path.basename(path)
+    if not os.path.isfile(path):
+        errors.append(f"{where}: {name!r} is not a file in the plugin directory")
+        return
+    if os.name != "nt" and not os.access(path, os.X_OK):
+        errors.append(f"{where}: {name!r} is run directly, so it needs its exec bit (chmod +x)")
+    mode = _git_mode(path)
+    if mode is not None and mode != "100755":
+        errors.append(f"{where}: {name!r} is committed as mode {mode}; macOS and Linux exec it "
+                      "directly, so commit it as 100755 (git update-index --chmod=+x)")
+    if "." not in name and not os.path.isfile(path + ".cmd"):
+        errors.append(f"{where}: {name!r} has no {name}.cmd beside it, which Windows hosts run "
+                      "for the extensionless name")
+
+
+def _command_file(cmd, host):
+    """The plugin-relative file a server command names, or None for a bare command."""
+    m = re.match(r"\$\{(?:CLAUDE_)?PLUGIN_ROOT\}/(.+)$", cmd) if host == "claude" else None
+    if m:
+        return m.group(1)
+    if host == "codex" and cmd.startswith("./"):
+        return cmd[2:]
+    return None
+
+
 def _check_placeholders(text, host, where, errors):
     """Claude Code expands ${CLAUDE_PLUGIN_ROOT}; Codex's mcp.json only ${PLUGIN_ROOT}."""
     wrong = r"\$\{PLUGIN_(ROOT|DATA)\}" if host == "claude" else r"\$\{CLAUDE_PLUGIN_(ROOT|DATA)\}"
@@ -252,11 +302,20 @@ def _check_servers(servers, rel, errors, need_type=False, plugin_dir=None, host=
         cmd = cfg.get("command", "")
         if need_type and kind == "stdio" and not cmd:
             errors.append(f"{where}: a stdio server needs a command")
+        rel_file = _command_file(cmd, host)
         if host == "codex" and "${" in cmd:
             errors.append(f"{where}: command {cmd!r}: Codex does not expand placeholders in "
-                          "command; use a bare command and put ${PLUGIN_ROOT} in args")
-        elif cmd and ("/" in cmd or "\\" in cmd) and not re.match(r"\$\{(CLAUDE_)?PLUGIN_ROOT\}", cmd):
-            errors.append(f"{where}: command {cmd!r} must be a bare executable name")
+                          "command; use a bare command or a contained ./ path")
+        elif rel_file is not None:
+            # Codex: "a bare executable name or a contained `./` path"
+            # (agent_plugin_config.rs normalize_agent_plugin_stdio_server).
+            if ".." in rel_file.split("/") or "\\" in rel_file:
+                errors.append(f"{where}: command {cmd!r} must stay inside the plugin directory")
+            elif plugin_dir:
+                _check_program(os.path.join(plugin_dir, rel_file), f"{where}.command", errors)
+        elif cmd and ("/" in cmd or "\\" in cmd):
+            errors.append(f"{where}: command {cmd!r} must be a bare executable name or a "
+                          "plugin file")
         _check_placeholders(cmd, host, f"{where}.command", errors)
         for a in cfg.get("args", []):
             _check_paths_in(a, f"{where}.args", errors)
@@ -270,6 +329,12 @@ def _check_servers(servers, rel, errors, need_type=False, plugin_dir=None, host=
 def _default_hooks(plugin_dir):
     p = os.path.join(plugin_dir, "hooks", "hooks.json")
     return p if os.path.isfile(p) else None
+
+
+# `cd "${CLAUDE_PLUGIN_ROOT}/<dir>"; ./<file> ...`: a hook command that runs in
+# sh, Git Bash and PowerShell alike (#866). All three have `cd`; ./<file> is
+# the file itself in sh and its <file>.cmd twin in PowerShell (PATHEXT).
+CD_HOOK = re.compile(r'^cd "\$\{CLAUDE_PLUGIN_ROOT\}/([^"\s]+)"; \./([^\s/]+)(?:\s[^/]*)?$')
 
 
 def _check_hooks(plugin_dir, rel, hooks, errors):
@@ -288,6 +353,16 @@ def _check_hooks(plugin_dir, rel, hooks, errors):
             for h in g.get("hooks", []):
                 if h.get("type") == "command":
                     cmd = h.get("command", "")
+                    m = CD_HOOK.match(cmd)
+                    if m:
+                        d = os.path.join(plugin_dir, m.group(1))
+                        if ".." in m.group(1).split("/") or not os.path.isdir(d):
+                            errors.append(f"{rel}: hooks.{event}: {m.group(1)!r} is not a "
+                                          "directory in the plugin")
+                        else:
+                            _check_program(os.path.join(d, m.group(2)), f"{rel}: hooks.{event}",
+                                           errors)
+                        continue
                     _check_paths_in(cmd, f"{rel}: hooks.{event}", errors)
                     # A script named from the plugin root must ship in the plugin.
                     _plugin_file_refs(cmd, plugin_dir, f"{rel}: hooks.{event}", errors)
@@ -354,7 +429,8 @@ def _check_same_servers(plugin_dir, rel, codex_servers, errors):
 
     def norm(cfg):
         args = [re.sub(r"\$\{(CLAUDE_)?PLUGIN_ROOT\}", "${ROOT}", a) for a in cfg.get("args", [])]
-        return cfg.get("command"), args
+        cmd = re.sub(r"^(\$\{(CLAUDE_)?PLUGIN_ROOT\}|\.)/", "${ROOT}/", cfg.get("command") or "")
+        return cmd, args
 
     for name in sorted(set(claude) & set(codex_servers)):
         if norm(claude[name]) != norm(codex_servers[name]):

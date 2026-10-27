@@ -205,6 +205,36 @@ class Fixture(unittest.TestCase):
         self.mcp["mcpServers"]["s"]["args"] = ["${CLAUDE_PLUGIN_ROOT}/scripts/l.sh"]
         self.assertIn("not expanded by Codex", " ".join(self.errors()))
 
+    def test_plugin_file_as_command(self):
+        # #866: the launcher is the command itself, so one entry serves
+        # macOS/Linux (the file) and Windows (its .cmd twin).
+        self.plugin["mcpServers"]["s"] = {"command": "${CLAUDE_PLUGIN_ROOT}/scripts/l"}
+        self.mcp["mcpServers"]["s"] = {"type": "stdio", "command": "./scripts/l"}
+        self.assertIn("'l' is not a file", " ".join(self.errors()))
+        self.write("plugin/scripts/l", "#!/bin/sh\n")
+        os.chmod(os.path.join(self.root, "plugin/scripts/l"), 0o644)
+        self.assertIn("exec bit", " ".join(self.errors()))
+        os.chmod(os.path.join(self.root, "plugin/scripts/l"), 0o755)
+        self.assertIn("no l.cmd beside it", " ".join(self.errors()))
+        self.write("plugin/scripts/l.cmd", "@echo off\r\n")
+        self.assertEqual(self.errors(), [])  # and the two spellings count as the same server
+        self.mcp["mcpServers"]["s"]["command"] = "./../l"
+        self.assertIn("inside the plugin directory", " ".join(self.errors()))
+
+    def test_cd_hook_form(self):
+        cmd = 'cd "${CLAUDE_PLUGIN_ROOT}/scripts"; ./l --hook'
+        self.write("plugin/hooks/hooks.json", json.dumps({"hooks": {"SessionStart": [
+            {"hooks": [{"type": "command", "command": cmd}]}]}}))
+        self.assertIn("'scripts' is not a directory", " ".join(self.errors()))
+        self.write("plugin/scripts/l", "#!/bin/sh\n")
+        os.chmod(os.path.join(self.root, "plugin/scripts/l"), 0o755)
+        self.assertIn("no l.cmd beside it", " ".join(self.errors()))
+        self.write("plugin/scripts/l.cmd", "@echo off\r\n")
+        self.assertEqual(self.errors(), [])
+        self.write("plugin/hooks/hooks.json", json.dumps({"hooks": {"SessionStart": [
+            {"hooks": [{"type": "command", "command": cmd + " ../x"}]}]}}))
+        self.assertIn("relative or absolute path", " ".join(self.errors()))
+
     def test_both_hosts_run_the_same_server(self):
         self.mcp["mcpServers"]["s"] = {"type": "stdio", "command": "other"}
         self.assertIn("keep them the same", " ".join(self.errors()))
