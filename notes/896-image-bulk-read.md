@@ -19,8 +19,8 @@ What changed:
   position bookkeeping is one helper (`count_read`) shared by both arms.
   If the decoder fails partway, the bytes read before the error stay in
   the buffer, counted, and then the error is returned: the state a
-  `read_byte` loop leaves. `readstring` and `readhexstring` reach this
-  path through realsio's `read_into` calls (#773).
+  `read_byte` loop leaves. The only other caller is `readreals` on a file
+  (#773, src/ops/realsio.rs); `tests/realsio_files.rs` passes.
 - **The decoders are unchanged.** Each one still pulls its source a byte at
   a time, so it never reads past its EOD marker and the program resumes on
   the right byte. That is why filtered sources gain little (table below).
@@ -53,7 +53,7 @@ Checks:
   two broken heads (`Bytes` arm one byte short; `fill` over-reading 8
   bytes) rendered the whole corpus identically.
 - Two-binary identity check over the image drivers, the tracked files that
-  call `image`, `colorimage`, `imagemask` or `readstring`/`readhexstring`,
+  call `image`, `colorimage`, `imagemask`, `filter` or `readstring`/`readhexstring`,
   and the artkit, drychalk, etching, fillkit, halftonekit, hatchkit,
   lettering and released loaders: 130 of 130 page renders identical
   across 97 files. Broken heads against base, image file set:
@@ -62,6 +62,8 @@ Checks:
   `image_sources.ps` pages 1 and 2 and `postcard.ps` differ. SVG and PDF
   byte comparison over the image drivers, fillkit, postcard and
   bands_uneven: identical. The six bench renders as PNG: identical.
+- `cargo +nightly fuzz run filters` (now differential) and `image`, 150 s
+  each: 272k and 176k runs, no crashes.
 
 Measured with pscat only, release, `--page 983x983 --dpi 300 --headless`.
 The bench files were regenerated to #835's description, because its
@@ -69,4 +71,19 @@ files were scratch. CPU seconds are best of 5 from
 `scripts/bench_compare.sh`, with the identical-binary control within
 0.02 s of the base. Instructions retired come from `/usr/bin/time -l`:
 
-BENCH_TABLE
+| case | instr base | instr head | CPU base | CPU head |
+|---|---|---|---|---|
+| CMYK 8-bit 4096², raw file | 8.09 G | 4.66 G | 0.28 | 0.16 |
+| RGB 8-bit 4096², raw file | 6.85 G | 4.27 G | 0.22 | 0.15 |
+| gray 8-bit 4096², raw file | 4.58 G | 3.72 G | 0.16 | 0.13 |
+| RGB 8-bit 2048², ASCIIHexDecode | 7.03 G | 6.72 G | 0.22 | 0.21 |
+| RGB 8-bit 2048², FlateDecode | 4.13 G | 3.67 G | 0.12 | 0.10 |
+| RGB 8-bit 2048², ASCII85Decode | 5.98 G | 5.20 G | 0.19 | 0.16 |
+| ten CMYK 4096² from `(file) (r) file` | | | 2.74 | 1.46 |
+
+After the change the ten-image loop profiles as `rasterize` and `rgb_at`
+about 85%, `read_into` (the copy and the line count) about 8%. The first
+version of the line count, with three counting passes, was slower than the
+branchy loop it replaced (5.37 G against 5.05 G for CMYK). The one-pass
+branch-free loop kept here is 4.66 G. Without the single-byte fast path,
+ASCIIHex came out 4% worse than base (7.31 G).

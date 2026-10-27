@@ -131,6 +131,19 @@ Az currentfile fileposition (tail) length";
 }
 
 #[test]
+fn raw_currentfile_source_running_out_renders_what_arrived() {
+    // The program ends two bytes into four samples: no error, the two
+    // delivered samples paint, the missing ones read as 0.
+    let it = run("10 10 translate 80 80 scale
+         2 2 8 [2 0 0 -2 0 2] currentfile image
+Az");
+    assert_eq!(pixel(&it, 30, 30), (65, 65, 65));
+    assert_eq!(pixel(&it, 70, 30), (122, 122, 122));
+    assert_eq!(pixel(&it, 30, 70), BLACK, "missing sample reads as 0");
+    assert_eq!(pixel(&it, 70, 70), BLACK, "missing sample reads as 0");
+}
+
+#[test]
 fn filter_ending_mid_row_renders_what_arrived() {
     // Three of four samples, then the filter's EOD: the last reads as 0,
     // and the program resumes after the `>`.
