@@ -9,14 +9,19 @@
 # 1. `claude plugin validate --strict` on the marketplace and on plugin/skills/.
 # 2. `plugin marketplace add <this checkout>` + `plugin install pscat@pscat`.
 # 3. The installed copy holds the three skills as real files, the shared
-#    hooks/hooks.json and the hook script hooks/check-pscat.sh, and nothing
-#    else of the repo (plugin/ also carries the Codex manifest and mcp.json;
-#    scripts/codex_plugin_install_check.sh). The hook command from the
-#    installed hooks.json is run with CLAUDE_PLUGIN_ROOT set: it prints the
-#    missing-pscat message on a PATH without pscat and nothing with it.
-# 4. `claude mcp list` with only the given bin dir added to PATH: the
-#    plugin's server must connect. Then without pscat-mcp on PATH it must fail
-#    (the negative case the plugin's SessionStart hook explains).
+#    hooks/hooks.json, the launcher scripts/pscat-mcp.sh and its release pin
+#    pscat-release, and nothing else of the repo (plugin/ also carries the
+#    Codex manifest and mcp.json; scripts/codex_plugin_install_check.sh). The
+#    hook command from the installed hooks.json is run with
+#    CLAUDE_PLUGIN_ROOT set: it says pscat will be downloaded on a PATH
+#    without pscat, and nothing with it.
+# 4. `claude mcp list`, which starts the plugin's server through the
+#    launcher (#853), three ways, never touching the network: with the given
+#    bin dir on PATH it connects; without it, the launcher downloads a fake
+#    release made from the given binaries (scripts/fake_plugin_release.py,
+#    served from file://) and connects; without it and with the release
+#    unreachable, it fails. HOME and the launcher's cache are temp dirs, so
+#    a pscat in your ~/.cargo/bin is not seen.
 set -euo pipefail
 
 bin=${1:?usage: $0 path/to/bin-dir-with-pscat-mcp}
@@ -52,9 +57,10 @@ for s in pscat psart psviz; do
     fi
 done
 [ -f "$copy/hooks/hooks.json" ] && ok "installed copy has hooks/hooks.json" || bad "installed copy lacks hooks/hooks.json"
-[ -f "$copy/hooks/check-pscat.sh" ] && ok "installed copy has hooks/check-pscat.sh (mode $(ls -l "$copy/hooks/check-pscat.sh" | cut -c1-10))" || bad "installed copy lacks hooks/check-pscat.sh"
+[ -f "$copy/scripts/pscat-mcp.sh" ] && ok "installed copy has scripts/pscat-mcp.sh (mode $(ls -l "$copy/scripts/pscat-mcp.sh" | cut -c1-10))" || bad "installed copy lacks scripts/pscat-mcp.sh"
+[ -f "$copy/pscat-release" ] && ok "installed copy has pscat-release ($(grep -v '^#' "$copy/pscat-release"))" || bad "installed copy lacks pscat-release"
 extra=$(cd "$copy" && find . -mindepth 1 -maxdepth 1 ! -name skills ! -name .claude-plugin ! -name README.md \
-    ! -name hooks ! -name plugin.json ! -name mcp.json)
+    ! -name hooks ! -name scripts ! -name pscat-release ! -name plugin.json ! -name mcp.json)
 [ -z "$extra" ] && ok "installed copy holds only the plugin" || bad "installed copy has extra entries: $extra"
 "$claude" plugin details pscat@pscat
 
@@ -64,13 +70,16 @@ extra=$(cd "$copy" && find . -mindepth 1 -maxdepth 1 ! -name skills ! -name .cla
 # trust review, #654, so this stands in for it). #684.
 hook_cmd=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["hooks"]["SessionStart"][0]["hooks"][0]["command"])' \
     "$copy/hooks/hooks.json")
-hook_out() { CLAUDE_PLUGIN_ROOT="$copy" PATH="$1" sh -c "$hook_cmd"; }
+mkdir -p "$work/home"
+offline="http://127.0.0.1:9"  # connection refused, like being offline
+hook_out() { CLAUDE_PLUGIN_ROOT="$copy" PATH="$1" HOME="$work/home" PSCAT_CACHE_DIR="$work/hook-cache" \
+    PSCAT_RELEASE_BASE_URL="$offline" sh -c "$hook_cmd"; }
 hook_clean=/usr/bin:/bin
 if PATH="$hook_clean" command -v pscat-mcp >/dev/null; then
     bad "pscat-mcp is still on the stripped PATH; cannot run the hook's negative case"
 else
-    out=$(hook_out "$hook_clean") && printf '%s' "$out" | python3 -c 'import json,sys; assert "pscat-mcp" in json.load(sys.stdin)["systemMessage"]' \
-        && ok "hook without pscat on PATH prints the systemMessage" || bad "hook negative case: $out"
+    out=$(hook_out "$hook_clean") && printf '%s' "$out" | python3 -c 'import json,sys; assert "downloads it" in json.load(sys.stdin)["systemMessage"]' \
+        && ok "hook without pscat on PATH says the server will download it" || bad "hook negative case: $out"
 fi
 out=$(hook_out "$bin:$hook_clean") && [ -z "$out" ] \
     && ok "hook with pscat and pscat-mcp on PATH prints nothing" || bad "hook positive case: $out"
@@ -82,16 +91,30 @@ node=$(command -v node || true)
 [ -n "$node" ] && clean_path=$clean_path:$(dirname "$node")
 # Positive case first: Claude Code caches a failed connection for a while,
 # keyed to the server config, so a failure first could mask a success.
-out=$(PATH="$bin:$clean_path" "$claude" mcp list 2>&1 || true)
+mcp_list() { # mcp_list PATH CACHE BASE_URL
+    PATH="$1" HOME="$work/home" PSCAT_CACHE_DIR="$2" PSCAT_RELEASE_BASE_URL="$3" \
+        "$claude" mcp list 2>&1 || true
+}
+out=$(mcp_list "$bin:$clean_path" "$work/cache-unused" "$offline")
 echo "$out" | grep -q 'plugin:pscat:pscat.*Connected' \
     && ok "with pscat-mcp on PATH the server connects" || bad "mcp list: $out"
+[ ! -e "$work/cache-unused" ] && ok "with pscat-mcp on PATH nothing is downloaded" \
+    || bad "the launcher downloaded although pscat-mcp is on PATH"
 
 if PATH="$clean_path" command -v pscat-mcp >/dev/null; then
-    bad "pscat-mcp is still on the stripped PATH; cannot run the negative case"
+    bad "pscat-mcp is still on the stripped PATH; cannot run the negative cases"
 else
-    out=$(PATH="$clean_path" "$claude" mcp list 2>&1 || true)
+    tag=$(grep -v '^#' "$copy/pscat-release" | tr -d '[:space:]')
+    python3 "$repo/scripts/fake_plugin_release.py" "$bin" "$work/release" "$tag"
+    out=$(mcp_list "$clean_path" "$work/cache" "file://$work/release")
+    echo "$out" | grep -q 'plugin:pscat:pscat.*Connected' \
+        && ok "without pscat-mcp the launcher downloads the release ($tag, local) and connects" \
+        || bad "download case: $out"
+    ls "$work/cache/$tag"/*/pscat-mcp >/dev/null 2>&1 \
+        && ok "the download is cached under $tag" || bad "no cached download under $work/cache/$tag"
+    out=$(mcp_list "$clean_path" "$work/cache-offline" "$offline")
     echo "$out" | grep -q 'plugin:pscat:pscat.*Failed' \
-        && ok "without pscat-mcp the server fails to start" || bad "negative case: $out"
+        && ok "without pscat-mcp and offline the server fails to start" || bad "offline case: $out"
 fi
 
 exit $fail

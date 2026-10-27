@@ -1,7 +1,7 @@
 {
   "name": "pscat",
   "version": "0.6.3",
-  "description": "PostScript rendering, generative art and paper-ready charts with the pscat interpreter: three skills plus the pscat-mcp server. Requires pscat installed separately.",
+  "description": "PostScript rendering, generative art and paper-ready charts with the pscat interpreter: three skills plus the pscat-mcp server. Uses your installed pscat, or downloads the prebuilt one from the project's GitHub releases on first start.",
   "author": {
     "name": "Jerome Banks",
     "url": "https://github.com/jeromebanks"
@@ -20,7 +20,8 @@
   ],
   "mcpServers": {
     "pscat": {
-      "command": "pscat-mcp"
+      "command": "sh",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/pscat-mcp.sh"]
     }
   }
 }

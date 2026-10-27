@@ -1452,17 +1452,17 @@ renders eight examples in both and compares block-downsampled output).
   symlink to `../skills`, so there is one copy of the skill text). Install
   copies only `plugin/` into the user's plugin cache, following the
   symlink; a repo-root plugin would copy all 136 MB. The MCP server is
-  declared inline in plugin.json (`command: pscat-mcp`, found on PATH), not
+  declared inline in plugin.json (the launcher, #853), not
   in a root `.mcp.json`, which would also register it for every checkout
-  session. A SessionStart hook prints an install hint when `pscat` or
-  `pscat-mcp` is missing. plugin.json's `version` must equal `Cargo.toml`'s
+  session. A SessionStart hook says where pscat is, or that the server will
+  download it (#853, below). plugin.json's `version` must equal `Cargo.toml`'s
   (`scripts/plugin_check.py`, workflow `plugin`); the release script bumps
   it, and the marketplace entry carries no version. A new skill needs only
   a `plugin/skills/<name>/` directory. See `notes/569-claude-code-plugin.md`.
 - **The Codex plugin (#569 part b) is the same `plugin/` directory.** The
   marketplace is `.agents/plugins/marketplace.json`; Codex reads
   `plugin/plugin.json` (portable manifest, version = Cargo's) and
-  `plugin/mcp.json` (`type: "stdio"`, `command: pscat-mcp`); Claude Code
+  `plugin/mcp.json` (`type: "stdio"`, the launcher below); Claude Code
   ignores both. **Codex skips symlinks when it copies a plugin**, so the
   skills moved from `skills/` into `plugin/skills/` as real files (the
   old `plugin/skills -> ../skills` symlink installed zero skills in
@@ -1470,11 +1470,28 @@ renders eight examples in both and compares block-downsampled output).
   now symlinks into it, and `scripts/plugin_check.py` rejects any symlink
   inside a plugin directory. The missing-pscat SessionStart hook moved from
   Claude's plugin.json to `plugin/hooks/hooks.json`, the default path both
-  agents read (never declare it in a manifest too: Claude loads both). Its
-  logic lives in `plugin/hooks/check-pscat.sh`, run as `sh
-  "${CLAUDE_PLUGIN_ROOT}/hooks/check-pscat.sh"` (the directory portal blocks
-  an inline command in a subfolder plugin; Codex sets that variable too;
-  #684, `notes/684-plugin-hook-script.md`).
+  agents read (never declare it in a manifest too: Claude loads both).
+- **The plugin installs pscat itself (#853).** Both manifests start the
+  server as `sh <root>/scripts/pscat-mcp.sh`, where `<root>` is
+  `${CLAUDE_PLUGIN_ROOT}` in `.claude-plugin/plugin.json` and `${PLUGIN_ROOT}`
+  in `mcp.json`, because Codex expands only the latter and only in args
+  (`plugin_check.py` enforces each host's spelling and that both run the same
+  thing). The POSIX sh launcher uses an installed `pscat-mcp` (env, PATH,
+  `~/.cargo/bin`, Homebrew) if `--version` is at least the pin. Otherwise it
+  downloads the archive for the platform from the release tag in
+  `plugin/pscat-release` (matched by suffix in `SHA256SUMS`, so an rc's
+  file names don't matter), verifies it, and publishes it into
+  `~/Library/Caches/pscat/plugin` or `~/.cache/pscat/plugin` with one
+  `ln -sn` (atomic; a mkdir lock only avoids duplicate downloads). stdout
+  is the MCP channel: it logs only to stderr. The SessionStart hook is the
+  same script with `--hook` (it never downloads), which replaced
+  `hooks/check-pscat.sh` (#684); both are held for portal review now
+  ("Scripts the validator couldn't follow"). **Never add a top-level
+  `plugin/bin/`**: claude.ai and Cowork refuse the plugin. The pin must
+  equal the crate version, or name a newer pre-release for a trial. Tests:
+  `scripts/test_plugin_launcher.py` (fake file:// release); both install
+  checks download from `scripts/fake_plugin_release.py`.
+  See `notes/853-plugin-launcher.md`.
   `plugin_check.py` also fails a plugin `.md` that writes a bundled or
   repo-relative image/font path in backticks or a code block (the
   directory checklist holds those; #848, `notes/848-plugin-no-image-paths-in-backticks.md`).

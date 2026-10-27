@@ -26,8 +26,22 @@ Claude's schema; Codex has no validator. This checks what neither does:
   directory and has a `description`;
 - nothing the plugin installs names a repo-relative or absolute path: an MCP
   server's `command` is a bare executable name found on the user's PATH
-  (`pscat-mcp`), and its args and hook commands use no `./`, `../` or
+  (`sh`), and its args and hook commands use no `./`, `../` or
   absolute paths except under `${CLAUDE_PLUGIN_ROOT}` / `${PLUGIN_ROOT}`;
+  a `${...PLUGIN_ROOT}/<file>` that a server or hook names exists in the
+  plugin directory;
+- each host's placeholder in each host's file (#853): Claude Code expands
+  `${CLAUDE_PLUGIN_ROOT}` in `.claude-plugin/plugin.json` and `.mcp.json`
+  (https://code.claude.com/docs/en/plugins-reference#environment-variables);
+  Codex expands only `${PLUGIN_ROOT}` / `${PLUGIN_DATA}` in `mcp.json` args,
+  env and cwd (codex-rs/codex-mcp/src/agent_plugin_config.rs). A server both
+  manifests declare runs the same command and args in both;
+- no top-level `bin/` in a plugin directory: claude.ai and Cowork refuse to
+  install a plugin that has one
+  (https://claude.com/docs/plugins/platform-support);
+- `pscat-release`, the release the plugin's launcher downloads (#853), holds
+  one tag `vX.Y.Z` equal to the crate version, or a pre-release
+  `vX.Y.Z-rc.N` of a version not older than the crate's (a trial pin);
 - no plugin Markdown file (README, SKILL.md, references) writes the path of
   a bundled image or font in backticks or a code block, or any
   slash-containing image or font path (which points outside the bundle).
@@ -157,6 +171,38 @@ def _check_asset_paths(root, plugin_dir, errors):
                             "syntax, link a repo file by URL)")
 
 
+def _check_no_bin(root, plugin_dir, errors):
+    if os.path.isdir(os.path.join(plugin_dir, "bin")):
+        errors.append(f"{os.path.relpath(plugin_dir, root)}/bin: a top-level bin/ directory makes "
+                      "claude.ai and Cowork refuse the whole plugin; keep executables in scripts/ "
+                      "(https://claude.com/docs/plugins/platform-support)")
+
+
+def _semver(text):
+    return tuple(int(x) for x in re.split(r"[-+]", text)[0].split("."))
+
+
+def _check_release_pin(root, plugin_dir, version, errors):
+    path = os.path.join(plugin_dir, "pscat-release")
+    if not os.path.exists(path):
+        return
+    where = os.path.relpath(path, root)
+    with open(path, encoding="utf-8") as f:
+        tags = [ln.strip() for ln in f if ln.strip() and not ln.lstrip().startswith("#")]
+    m = re.fullmatch(r"v(\d+\.\d+\.\d+)(-[0-9A-Za-z.-]+)?", tags[0]) if len(tags) == 1 else None
+    if not m:
+        errors.append(f"{where}: must hold exactly one release tag such as v{version} (got {tags!r})")
+        return
+    base, pre = m.group(1), m.group(2)
+    if tags[0] == f"v{version}":
+        return
+    if pre is None and base != version:
+        errors.append(f"{where}: pins {tags[0]} but Cargo.toml is {version}; a release pin "
+                      "equals the crate version")
+    elif pre is not None and _semver(base) < _semver(version):
+        errors.append(f"{where}: pins the pre-release {tags[0]}, older than Cargo.toml {version}")
+
+
 def _check_no_symlinks(root, plugin_dir, errors):
     for dirpath, dirnames, filenames in os.walk(plugin_dir):
         for name in dirnames + filenames:
@@ -180,7 +226,24 @@ def _check_skills(plugin_dir, rel, errors):
         _check_skill(os.path.join(skills_root, d), f"{rel}/skills/{d}", errors)
 
 
-def _check_servers(servers, rel, errors, need_type=False):
+def _plugin_file_refs(text, plugin_dir, where, errors):
+    """A `${...PLUGIN_ROOT}/<file>` a server or hook names must ship in the plugin."""
+    for m in re.finditer(r"\$\{(?:CLAUDE_)?PLUGIN_ROOT\}/([^\s\x22\x27]+)", text):
+        if not os.path.isfile(os.path.join(plugin_dir, m.group(1))):
+            errors.append(f"{where}: {m.group(1)!r} is not a file in the plugin directory")
+
+
+def _check_placeholders(text, host, where, errors):
+    """Claude Code expands ${CLAUDE_PLUGIN_ROOT}; Codex's mcp.json only ${PLUGIN_ROOT}."""
+    wrong = r"\$\{PLUGIN_(ROOT|DATA)\}" if host == "claude" else r"\$\{CLAUDE_PLUGIN_(ROOT|DATA)\}"
+    m = re.search(wrong, text)
+    if m:
+        right = "${CLAUDE_PLUGIN_ROOT}" if host == "claude" else "${PLUGIN_ROOT}"
+        errors.append(f"{where}: {m.group(0)} is not expanded by "
+                      f"{'Claude Code' if host == 'claude' else 'Codex'} here; use {right}")
+
+
+def _check_servers(servers, rel, errors, need_type=False, plugin_dir=None, host="claude"):
     for name, cfg in servers.items() if isinstance(servers, dict) else []:
         where = f"{rel}: mcpServers.{name}"
         kind = cfg.get("type")
@@ -189,10 +252,19 @@ def _check_servers(servers, rel, errors, need_type=False):
         cmd = cfg.get("command", "")
         if need_type and kind == "stdio" and not cmd:
             errors.append(f"{where}: a stdio server needs a command")
-        if cmd and ("/" in cmd or "\\" in cmd) and not re.match(r"\$\{(CLAUDE_)?PLUGIN_ROOT\}", cmd):
+        if host == "codex" and "${" in cmd:
+            errors.append(f"{where}: command {cmd!r}: Codex does not expand placeholders in "
+                          "command; use a bare command and put ${PLUGIN_ROOT} in args")
+        elif cmd and ("/" in cmd or "\\" in cmd) and not re.match(r"\$\{(CLAUDE_)?PLUGIN_ROOT\}", cmd):
             errors.append(f"{where}: command {cmd!r} must be a bare executable name")
+        _check_placeholders(cmd, host, f"{where}.command", errors)
         for a in cfg.get("args", []):
             _check_paths_in(a, f"{where}.args", errors)
+            _check_placeholders(a, host, f"{where}.args", errors)
+            if plugin_dir:
+                _plugin_file_refs(a, plugin_dir, f"{where}.args", errors)
+        for v in (cfg.get("env") or {}).values():
+            _check_placeholders(str(v), host, f"{where}.env", errors)
 
 
 def _default_hooks(plugin_dir):
@@ -218,10 +290,7 @@ def _check_hooks(plugin_dir, rel, hooks, errors):
                     cmd = h.get("command", "")
                     _check_paths_in(cmd, f"{rel}: hooks.{event}", errors)
                     # A script named from the plugin root must ship in the plugin.
-                    for m in re.finditer(r"\$\{(?:CLAUDE_)?PLUGIN_ROOT\}/([^\s\x22\x27]+)", cmd):
-                        if not os.path.isfile(os.path.join(plugin_dir, m.group(1))):
-                            errors.append(f"{rel}: hooks.{event}: {m.group(1)!r} is not a file "
-                                          "in the plugin directory")
+                    _plugin_file_refs(cmd, plugin_dir, f"{rel}: hooks.{event}", errors)
 
 
 def check_plugin(root, plugin_dir, entry, version, errors):
@@ -257,13 +326,40 @@ def check_plugin(root, plugin_dir, entry, version, errors):
     if os.path.exists(os.path.join(plugin_dir, ".mcp.json")):
         servers = {**(_load(os.path.join(plugin_dir, ".mcp.json"), errors) or {})
                    .get("mcpServers", {}), **servers}
-    _check_servers(servers, rel, errors)
+    _check_servers(servers, rel, errors, plugin_dir=plugin_dir, host="claude")
+    _check_no_bin(root, plugin_dir, errors)
+    _check_release_pin(root, plugin_dir, version, errors)
 
     hooks = manifest.get("hooks")
     if hooks and _default_hooks(plugin_dir):
         errors.append(f"{rel}: plugin.json declares hooks and hooks/hooks.json exists; "
                       "Claude Code loads both (keep one)")
     _check_hooks(plugin_dir, rel, hooks, errors)
+
+
+def _check_same_servers(plugin_dir, rel, codex_servers, errors):
+    """A server in both Codex's mcp.json and Claude Code's plugin.json must run
+    the same program: same command, same args once each host's root
+    placeholder is normalized."""
+    path = os.path.join(plugin_dir, ".claude-plugin", "plugin.json")
+    if not os.path.isfile(path):
+        return
+    try:
+        with open(path, encoding="utf-8") as f:
+            claude = (json.load(f).get("mcpServers") or {})
+    except (OSError, ValueError):
+        return  # reported by check_plugin
+    if not isinstance(claude, dict) or not isinstance(codex_servers, dict):
+        return
+
+    def norm(cfg):
+        args = [re.sub(r"\$\{(CLAUDE_)?PLUGIN_ROOT\}", "${ROOT}", a) for a in cfg.get("args", [])]
+        return cfg.get("command"), args
+
+    for name in sorted(set(claude) & set(codex_servers)):
+        if norm(claude[name]) != norm(codex_servers[name]):
+            errors.append(f"{rel}: mcpServers.{name} runs {norm(claude[name])} for Claude Code "
+                          f"but {norm(codex_servers[name])} for Codex (mcp.json); keep them the same")
 
 
 POLICY_INSTALL = ("AVAILABLE", "INSTALLED_BY_DEFAULT", "NOT_AVAILABLE")
@@ -287,7 +383,9 @@ def check_codex_plugin(root, plugin_dir, entry, version, errors):
         servers = (_load(mcp, errors) or {}).get("mcpServers")
         if not servers:
             errors.append(f"{rel}/mcp.json: no mcpServers")
-        _check_servers(servers or {}, f"{rel}/mcp.json", errors, need_type=True)
+        _check_servers(servers or {}, f"{rel}/mcp.json", errors, need_type=True,
+                       plugin_dir=plugin_dir, host="codex")
+        _check_same_servers(plugin_dir, rel, servers or {}, errors)
     openai = (manifest.get("extensions") or {}).get("com.openai") or {}
     _check_hooks(plugin_dir, rel, openai.get("hooks"), errors)
     for key in ("apps", "onboardingSkill"):
