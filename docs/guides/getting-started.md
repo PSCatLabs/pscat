@@ -203,9 +203,17 @@ More on the less obvious ones:
   `floor(i*H/K)` to `floor((i+1)*H/K)`. `clippath` and the rest of the
   graphics state still see the whole page. Every page of a multi-page program
   is banded, and every band must emit the same number of pages. PNG only: it
-  refuses `--svg`, `--pdf`, `--lint`, sweeps, `--progress`, `--profile` and
+  refuses `--svg`, `--pdf`, sweeps, `--progress`, `--profile` and
   `--allow-write`, since every band would write the same file (or, for
-  `--profile`, report N copies of the same calls: profile a plain run). `--max-steps`
+  `--profile`, report N copies of the same calls: profile a plain run).
+  `--lint` and `--lint-strict` do work, and lint once, after the run, with a
+  `pscat: lint: note:` line saying so: band 0 (the top band) is checked for
+  the declared page count, unbalanced `gsave` and leftover operands, which are
+  the same in every band unless the program branches on `/BandIndex` (a leak
+  in another band only goes unseen), and the blank-page check runs on the
+  stitched page, since a band-aware program leaves its own canvas empty
+  outside its band. An error in any band makes the verdict "not clean".
+  `--max-steps`
   and `--max-time` apply to each band on its own, and the first band to hit
   any limit stops the queue: bands already running finish, no new one starts,
   and the rows of bands that never ran are left blank in the partial page. `--max-memory` is one

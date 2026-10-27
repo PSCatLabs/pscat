@@ -41,6 +41,18 @@
 //! `handleerror`) in one lower band only is not heard: that is its own
 //! output, written by a copy the page doesn't keep.
 //!
+//! Lint (#847): `--lint` and `--lint-strict` work with `--bands`. The
+//! findings are printed once, after the run, as in a plain render, with a
+//! `pscat: lint: note:` line saying what was looked at. Band 0 (the top
+//! band, whose stderr is the one kept) is linted for the declared page
+//! count, `gsave` depth and the operand and dictionary stacks: program
+//! behaviour, the same in every band unless the program branches on
+//! `/BandIndex` (a leak in another band only goes unseen). The blank-page
+//! check is the one lint reads the canvas for, and a band-aware program
+//! leaves its own canvas empty outside the band, so it runs on the
+//! stitched pages with each page's ink flag the OR across bands, which is
+//! what a plain run sees. An error in any band makes the verdict not clean.
+//!
 //! Limits: `--max-steps` and `--max-time` apply to each band on its own (an
 //! unaware program takes as many steps in every band as in a single run, so
 //! the same limit fits). The first band to hit any limit stops the queue:
@@ -86,10 +98,9 @@ pub fn rows(index: u32, count: u32, height: u32) -> (u32, u32) {
 
 /// Refuse every combination `--bands` can't honour, before anything runs.
 fn check_options(options: &Options) -> Result<(), String> {
-    let others: [(bool, &str); 11] = [
+    let others: [(bool, &str); 10] = [
         (options.svg.is_some(), "--svg"),
         (options.pdf.is_some(), "--pdf"),
-        (options.lint, "--lint"),
         (options.sweep_seed.is_some(), "--sweep-seed"),
         (options.sweep_param.is_some(), "--sweep"),
         (options.contact_sheet.is_some(), "--contact-sheet"),
@@ -136,6 +147,15 @@ struct BandOutput {
     /// The font stand-in notes this band raised, one per line
     /// (`Interp::font_warnings`).
     font_notes: String,
+    /// Per page of `rows`, whether anything was painted on it since the
+    /// previous page (the `--lint` ink flag). Every band reports it: a
+    /// band-aware program skips work outside its band, so the page's real
+    /// flag is the OR across bands.
+    had_ink: Vec<bool>,
+    /// `--lint`'s findings, from band 0 only and without the blank-page
+    /// check (`lint::check_band`); `None` for the other bands, and when
+    /// `--lint` is off.
+    lint: Option<Vec<pscat::lint::LintFinding>>,
 }
 
 /// How a render is cut up: `count` bands on a canvas `height` rows tall,
@@ -244,6 +264,19 @@ pub fn run(options: &Options, threads: u32) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    if options.lint {
+        // After the error report, so a `run-error` line's "see the report
+        // above" is true. The other bands' stderr is dropped, so lint says
+        // once, here, what it looked at.
+        let findings = banded_lint(&outputs, &pages);
+        let note = format!(
+            "--bands: the page-count, gsave and stack checks ran on band 1 of {} (the top \
+             band) only, as every band runs the same program; the blank-page check ran on the stitched page",
+            plan.count
+        );
+        let found = crate::print_lint(&findings, !failed, options.lint_strict, Some(&note));
+        failed |= found && options.lint_strict;
+    }
     let png = options
         .png
         .as_deref()
@@ -254,6 +287,35 @@ pub fn run(options: &Options, threads: u32) -> ExitCode {
     } else {
         ExitCode::SUCCESS
     }
+}
+
+/// `--lint`'s findings for a banded render (#847), in the order a plain
+/// render gives them: the blank-page check on the stitched `pages`, each
+/// page's ink flag the OR of every band's (a band-aware program skips work
+/// outside its band, so band 0's canvas, or its flag, can be empty when the
+/// page is not), then band 0's own checks (`lint::check_band`).
+fn banded_lint(outputs: &[Option<BandOutput>], pages: &[Pixmap]) -> Vec<pscat::lint::LintFinding> {
+    let ink = |k: usize| {
+        outputs
+            .iter()
+            .flatten()
+            .any(|o| o.had_ink.get(k).copied().unwrap_or(false))
+    };
+    let flagged: Vec<(&Pixmap, bool)> = pages
+        .iter()
+        .enumerate()
+        .map(|(k, page)| (page, ink(k)))
+        .collect();
+    let mut findings = pscat::lint::blank_page_findings(&flagged);
+    if let Some(top) = outputs.first().and_then(Option::as_ref)
+        && let Some(own) = &top.lint
+    {
+        findings.extend(own.iter().map(|f| pscat::lint::LintFinding {
+            check: f.check,
+            message: f.message.clone(),
+        }));
+    }
+    findings
 }
 
 /// The stand-in notes the bands other than 0 found, each once, leaving out
@@ -507,6 +569,14 @@ fn run_band(
     if rows.is_empty() || interp.gfx().has_trailing_art() {
         rows.push(take(&interp.gfx().pixmap)?);
     }
+    let had_ink = pscat::lint::pages_with_ink_flags(&interp)
+        .iter()
+        .map(|(_, ink)| *ink)
+        .collect();
+    // Lint reads the band's interpreter, which can't leave this thread, so
+    // band 0 (the top band, the only one whose stderr is kept) lints here.
+    let lint = (options.lint && index == 0)
+        .then(|| pscat::lint::check_band(&interp, &pscat::lint::scan_declared_pages(source)));
     // The last band a worker runs leaves its dictionaries to the process
     // exit, as a plain render does (`main`); earlier ones free theirs, so
     // a long queue doesn't pile up dead interpreters.
@@ -518,6 +588,8 @@ fn run_band(
         error,
         hit_limit,
         font_notes: interp.font_warnings().to_string(),
+        had_ink,
+        lint,
     })
 }
 

@@ -1263,12 +1263,22 @@ renders eight examples in both and compares block-downsampled output).
   shelved once the re-test showed the queue already beats a cost-balanced
   split there (data on #869). `pscat-mcp` exposes it as a `bands` argument on
   `render_postscript` and `start_render` (#843), capped by `--max-bands`;
-  a banded run drops the server's `--lint` and `--progress`, which `--bands`
-  refuses. `--band-rows` is deliberately not exposed. See
+  a banded run drops the server's `--progress`, which `--bands` refuses, but
+  passes `--lint` again since #847 (see below). `--band-rows` is deliberately
+  not exposed. See
   `notes/843-mcp-bands.md`. Bands above 0 also drop stderr
   (`Interp::quiet_stderr`; every program stderr write goes through
   `Interp::write_stderr`, so a new one must too), and their font notes are
   printed once at the end (#877, `notes/877-bands-stderr-once.md`).
+  `--lint`/`--lint-strict` work with `--bands` (#847, `notes/847-lint-with-bands.md`):
+  band 0 runs `lint::check_band` in its own thread (the `Interp` can't leave
+  it) and `bands.rs` runs the blank-page check on the *stitched* pages with the
+  ink flag OR'ed across bands, because a band-aware program leaves its own
+  canvas empty outside the band. The output is one report after the run
+  headed by a `pscat: lint: note:` line (not a finding, so not counted by
+  `--lint-strict`); `pscat-mcp`'s `split_lint_findings` keeps the note only
+  beside findings. A new lint check that reads the canvas must go through
+  the stitched pages, not `check_band`.
 - **`--profile` (#737).** Per-procedure call counts and inclusive/exclusive time
   on stderr (`src/profile.rs`, a `Profiler` on `Interp`). `execute_resolved` takes
   the name a body was reached through (`via`, `NO_NAME` for `exec`/`if`) and, with

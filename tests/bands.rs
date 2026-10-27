@@ -353,10 +353,6 @@ fn refuses_what_it_cannot_honour() {
     for (args, want) in [
         (vec!["--bands", "2", "--svg", "x.svg", "-e", "0"], "--svg"),
         (vec!["--bands", "2", "--pdf", "x.pdf", "-e", "0"], "--pdf"),
-        (
-            vec!["--bands", "2", "--png", png, "--lint", "-e", "0"],
-            "--lint",
-        ),
         (vec!["--bands", "2", "--headless", "-e", "0"], "needs --png"),
         (
             vec![
@@ -715,4 +711,102 @@ fn an_error_in_a_lower_band_is_reported_once() {
     assert_eq!(err.matches("band 3/4 failed").count(), 1, "{err}");
     assert_eq!(err.matches("undefinedresult").count(), 1, "{err}");
     assert_eq!(err.matches("to-stderr").count(), 1, "{err}");
+}
+
+// --- --lint with --bands (#847) -------------------------------------------
+
+/// The lint lines of a banded run's stderr.
+fn lint_lines(err: &str) -> Vec<&str> {
+    err.lines()
+        .filter(|l| l.starts_with("pscat: lint: "))
+        .collect()
+}
+
+/// How many `pscat: lint: [check]` findings of one check there are.
+fn findings(err: &str, check: &str) -> usize {
+    err.matches(&format!("pscat: lint: [{check}]")).count()
+}
+
+const PAINTS: &str = "0 0 1 setrgbcolor 0 0 100 100 rectfill";
+
+/// A clean banded program: one note saying band 0 was linted, one verdict,
+/// however many bands ran (8 here).
+#[test]
+fn lint_with_bands_prints_once_and_says_which_band() {
+    let (ok, err) = bands_stderr("bands-lint-clean", &["--lint"], PAINTS);
+    assert!(ok, "{err}");
+    assert_eq!(err.matches("pscat: lint: clean").count(), 1, "{err}");
+    let notes: Vec<_> = err.lines().filter(|l| l.contains("lint: note:")).collect();
+    assert_eq!(notes.len(), 1, "{err}");
+    assert!(notes[0].contains("band 1 of 8"), "{}", notes[0]);
+    assert_eq!(lint_lines(&err).len(), 2, "{err}");
+}
+
+/// A program that paints nothing is one `blank-page`, not one per band.
+#[test]
+fn lint_with_bands_reports_a_blank_page_once() {
+    let (ok, err) = bands_stderr("bands-lint-blank", &["--lint"], "1 1 add pop");
+    assert!(ok, "advisory lint does not fail the run: {err}");
+    assert_eq!(findings(&err, "blank-page"), 1, "{err}");
+    assert!(!err.contains("lint: clean"), "{err}");
+}
+
+/// A band-aware program paints nothing in the top band, so band 0's own
+/// canvas is empty; the page is not blank, and lint must not say so.
+#[test]
+fn lint_with_bands_judges_blankness_on_the_stitched_page() {
+    let (ok, err) = bands_stderr(
+        "bands-lint-top-empty",
+        &["--lint"],
+        &format!("BandIndex 0 gt {{ {PAINTS} }} if"),
+    );
+    assert!(ok, "{err}");
+    assert_eq!(findings(&err, "blank-page"), 0, "{err}");
+    assert!(err.contains("pscat: lint: clean"), "{err}");
+}
+
+/// The behaviour checks run on band 0 once: an unbalanced gsave, a leaked
+/// operand and a wrong `%%Pages:` count (two declared, one shown) each come
+/// out once. Plain `--lint` stays advisory (exit 0); `--lint-strict` fails
+/// the run, and its footer counts the findings, not the note.
+#[test]
+fn lint_with_bands_reports_band_zero_findings_once() {
+    let program = format!("%%Pages: 2\n{PAINTS} gsave 7 showpage");
+    let (ok, err) = bands_stderr("bands-lint-findings", &["--lint"], &program);
+    assert!(ok, "{err}");
+    for check in ["page-count", "gsave-imbalance", "stack-leak"] {
+        assert_eq!(findings(&err, check), 1, "{check}: {err}");
+    }
+    let (ok, err) = bands_stderr("bands-lint-strict", &["--lint-strict"], &program);
+    assert!(!ok, "--lint-strict fails on findings: {err}");
+    assert!(err.contains("3 finding(s)"), "{err}");
+}
+
+/// What the note admits: a program that leaks only in a band other than 0
+/// is not caught.
+#[test]
+fn lint_with_bands_does_not_see_a_leak_in_another_band() {
+    let (ok, err) = bands_stderr(
+        "bands-lint-other-band",
+        &["--lint", "--band-rows", "25"],
+        &format!("{PAINTS} BandIndex 2 eq {{ 1 2 3 }} if"),
+    );
+    assert!(ok, "{err}");
+    assert_eq!(findings(&err, "stack-leak"), 0, "{err}");
+}
+
+/// An error in a lower band only is a `run-error`, never "clean", and the
+/// report it points at is printed before lint.
+#[test]
+fn lint_with_bands_is_not_clean_after_an_error_in_any_band() {
+    let (ok, err) = bands_stderr(
+        "bands-lint-error",
+        &["--lint", "--band-rows", "25"],
+        &format!("{PAINTS} BandIndex 2 eq {{ 1 0 div }} if"),
+    );
+    assert!(!ok, "{err}");
+    assert_eq!(findings(&err, "run-error"), 1, "{err}");
+    assert!(!err.contains("lint: clean"), "{err}");
+    let report = err.find("band 3/4 failed").expect("the band's report");
+    assert!(report < err.find("[run-error]").unwrap(), "{err}");
 }

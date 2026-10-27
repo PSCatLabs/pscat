@@ -1381,7 +1381,7 @@ fn bands_description(cfg: &Config) -> String {
          /BandBBox (its area in default user space) defined in userdict, so only a program that reads \
          them and skips work outside its band is faster; any other costs about 2x bands \
          times the work. The image is identical to bands 1 unless the program reads the \
-         clock. png only; no Lint block, and a job's pages_done stays 0 until it ends. \
+         clock. png only; the Lint block covers band 0 and the stitched page, and a job's pages_done stays 0 until it ends. \
          Step and time limits apply to each band, the memory limit to all of them together, \
          and the call's (or job's) wall-clock limit to the whole render.",
         cfg.max_bands
@@ -1541,8 +1541,8 @@ fn render_plan(cfg: &Config, args: &Value) -> Result<RenderPlan, ToolError> {
 /// The `bands` argument, checked against everything `pscat --bands` would
 /// refuse (`bands.rs` `check_options`) so the refusal names the argument
 /// and comes before any child or job. Of the flags it refuses, only the
-/// output format can come from a tool argument; `--lint` and `--progress`
-/// are the server's own and are left off a banded run, and no tool passes
+/// output format can come from a tool argument; `--progress` is the
+/// server's own and is left off a banded run, and no tool passes
 /// `--allow-write` or `--profile`.
 fn render_bands(cfg: &Config, args: &Value, format: &str, h_px: u64) -> Result<u32, ToolError> {
     let bands = match args.get("bands") {
@@ -1595,8 +1595,10 @@ fn render_run(cfg: &Config, plan: &RenderPlan) -> Result<Value, ToolError> {
     let out = scratch.path().join(format!("page.{format}"));
     let mut cmd = Command::new(pscat_bin()?);
     cfg.interpreter_args(&mut cmd);
-    // `pscat --bands` refuses `--progress` and `--lint` (each band re-runs
-    // the whole program), so a banded run goes without both.
+    // `pscat --bands` refuses `--progress` (each band re-runs the whole
+    // program), so a banded run goes without it. It takes `--lint` since
+    // #847: the findings of band 0, plus a `note:` line (see
+    // `split_lint_findings`).
     let banded = *bands > 1;
     if cfg.progress.is_some() && !banded {
         cmd.arg("--progress");
@@ -1612,9 +1614,7 @@ fn render_run(cfg: &Config, plan: &RenderPlan) -> Result<Value, ToolError> {
         cmd.arg("--halftone");
     }
     cmd.arg(flag).arg(&out).arg("-");
-    if !banded {
-        cmd.arg("--lint");
-    }
+    cmd.arg("--lint");
     let run = run_child(cfg, &mut cmd, source.as_bytes())?;
     let (lint_findings, other_stderr) = split_lint_findings(&run.stderr);
 
@@ -2901,20 +2901,32 @@ fn ps_error_fields(stderr: &str) -> Option<Map<String, Value>> {
 /// with its own `PostScript error:` block for a failed run, and that
 /// block carries the report, so repeating the verdict under `Lint:`
 /// would only say the same thing twice.
+///
+/// A banded render's `pscat: lint: note: ...` line (which band was linted,
+/// #847) is not a finding: it is kept, ahead of the findings, only when
+/// there are findings for it to explain, so a clean banded render stays
+/// silent too.
 fn split_lint_findings(stderr: &str) -> (String, String) {
     const PREFIX: &str = "pscat: lint: ";
     const CLEAN: &str = "pscat: lint: clean";
     const RUN_ERROR: &str = "pscat: lint: [run-error]";
+    const NOTE: &str = "pscat: lint: note: ";
     let mut findings = Vec::new();
+    let mut notes = Vec::new();
     let mut rest = Vec::new();
     for line in stderr.lines() {
         if line == CLEAN || line.starts_with(RUN_ERROR) {
             continue;
+        } else if line.starts_with(NOTE) {
+            notes.push(line);
         } else if line.starts_with(PREFIX) {
             findings.push(line);
         } else {
             rest.push(line);
         }
+    }
+    if !findings.is_empty() {
+        findings.splice(0..0, notes);
     }
     (findings.join("\n"), rest.join("\n"))
 }
@@ -3765,6 +3777,19 @@ mod tests {
         assert_eq!(e.fields["limit"], "time");
         let e = failed_run("postscript_error", "m".into(), "%%[ Error: undefined ]%%");
         assert_eq!(e.kind, "postscript_error");
+    }
+
+    #[test]
+    fn a_banded_lint_note_is_kept_only_beside_findings() {
+        let note = "pscat: lint: note: --bands: band 1 of 8 only";
+        let (l, rest) = split_lint_findings(&format!("{note}\npscat: lint: clean\nx\n"));
+        assert_eq!((l.as_str(), rest.as_str()), ("", "x"));
+        let (l, _) = split_lint_findings(&format!(
+            "{note}\npscat: lint: [run-error] e\npscat: lint: clean\n"
+        ));
+        assert_eq!(l, "", "a note alone is not a Lint block");
+        let (l, _) = split_lint_findings(&format!("{note}\npscat: lint: [blank-page] b\n"));
+        assert_eq!(l, format!("{note}\npscat: lint: [blank-page] b"));
     }
 
     #[test]
