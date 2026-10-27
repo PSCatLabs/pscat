@@ -1262,7 +1262,12 @@ renders eight examples in both and compares block-downsampled output).
   range and no sequential slot until the program first interns them, so the
   program's own names keep a plain run's ids and `forall` order. A new
   per-run preamble that defines names should do the same
-  (`notes/868-band-preamble-name-ids.md`). The
+  (`notes/868-band-preamble-name-ids.md`). `--sweep NAME=` and `pscat sheet
+  --sweep` now do, and every sweep frame and sheet cell runs on a fresh thread
+  (`run_on_fresh_thread` in `main.rs`), so names an earlier frame made with
+  `cvn` don't shift the next frame's ids (#891,
+  `notes/891-sweep-frame-name-isolation.md`). A new loop that runs several
+  programs in one process and promises standalone output needs the same. The
   backup-task / `--band-cuts` work for the tail (#869) was measured, then
   shelved once the re-test showed the queue already beats a cost-balanced
   split there (data on #869). `pscat-mcp` exposes it as a `bands` argument on
