@@ -429,6 +429,8 @@ impl App {
             if let Some(spool) = &mut self.spool {
                 spool.job = None;
             }
+            // The idle canvas has no pages to browse back to.
+            self.back = 0;
             Err("pscat: spool: the job crashed".to_string())
         })
     }
@@ -560,6 +562,8 @@ impl App {
             if let Some(spool) = &mut self.spool {
                 spool.job = None;
             }
+            // Its pages went with it, whether or not the next job starts.
+            self.back = 0;
             let job = match JobThread::start(page, scale, limits, source) {
                 Ok(job) => job,
                 Err(e) => {
@@ -935,9 +939,12 @@ mod tests {
                 .unwrap()
                 .call(|_| -> () { panic!("a deliberate test panic") });
             assert!(crashed.is_none());
+            // Browsing a page of the job when it crashes.
+            app.back = 1;
             app.tick();
             assert!(!app.running && app.had_error);
             assert!(app.job().is_none(), "the dead job should be dropped");
+            assert_eq!(app.back, 0, "the idle canvas has no pages to browse");
             spool_job(&mut app, &dir, "next.ps", b"1 pop");
             let _ = std::fs::remove_dir_all(&dir);
         });
