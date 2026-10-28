@@ -119,13 +119,67 @@ def generate_planning(reference):
             "specifications": specifications, "plans": plans}
 
 
+def generate_correction(reference):
+    module, source_hash = load_reference(reference)
+    qr = module.QrCode
+    levels = {"L": qr.Ecc.LOW, "M": qr.Ecc.MEDIUM,
+              "Q": qr.Ecc.QUARTILE, "H": qr.Ecc.HIGH}
+    products = bytes(qr._reed_solomon_multiply(a, b) for a in range(256) for b in range(256))
+    divisors, remainders, interleaved, github = [], [], [], []
+    for degree in range(1, 31):
+        divisor = qr._reed_solomon_compute_divisor(degree)
+        divisors.append({"degree": degree, "hex": divisor.hex()})
+        for length in ((0, 53, 513, 2956) if degree == 30 else (0, 53, 513)):
+            data = bytes((i * 149 + i // 251) % 256 for i in range(length))
+            remainder = qr._reed_solomon_compute_remainder(data, divisor)
+            remainders.append({"degree": degree, "data": data.hex(), "hex": remainder.hex()})
+    for version in range(1, 41):
+        for name, level in levels.items():
+            capacity = qr._get_num_data_codewords(version, level)
+            # Non-periodic at 256 bytes: detects accidental byte-sized indexing.
+            data = bytes((i * 149 + i // 251 + version * 17 + level.ordinal * 23) % 256
+                         for i in range(capacity))
+            symbol = object.__new__(qr)
+            symbol._version, symbol._errcorlvl = version, level
+            codewords = symbol._add_ecc_and_interleave(bytearray(data))
+            fixture = {"version": version, "level": name, "capacity": capacity,
+                       "length": len(codewords),
+                       "sha256": hashlib.sha256(codewords).hexdigest()}
+            if version == 1 or (version, name) in {(5, "Q"), (7, "H"), (10, "M"), (27, "Q"), (40, "H")}:
+                fixture.update({"data": data.hex(), "hex": codewords.hex()})
+            interleaved.append(fixture)
+    for name, level in levels.items():
+        captured = []
+
+        def capture(_self, version, ecl, data, mask):
+            assert ecl is level and mask == 0
+            captured.append((version, bytes(data)))
+
+        with patch.object(qr, "__init__", capture):
+            qr.encode_segments([module.QrSegment.make_bytes(b"https://github.com/PSCatLabs/pscat")],
+                               level, 1, 40, 0, False)
+        assert len(captured) == 1
+        version, data = captured[0]
+        symbol = object.__new__(qr)
+        symbol._version, symbol._errcorlvl = version, level
+        github.append({"version": version, "level": name,
+                       "hex": symbol._add_ecc_and_interleave(bytearray(data)).hex()})
+    return {"oracle": "https://github.com/nayuki/QR-Code-generator", "revision": PIN,
+            "source_sha256": source_hash,
+            "description": "GF products in a-major order; actual RS divisor/remainder/interleaving methods. Interleave data byte i = (149*i + floor(i/251) + 17*version + 23*levelOrdinal) mod 256.",
+            "gf_products_sha256": hashlib.sha256(products).hexdigest(),
+            "divisors": divisors, "remainders": remainders,
+            "interleaved": interleaved, "github": github}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("reference", type=Path)
     parser.add_argument("--check", action="store_true", help="fail if fixtures differ")
     args = parser.parse_args()
     for filename, generator in [("qr_byte_vectors.json", generate),
-                                ("qr_planning_vectors.json", generate_planning)]:
+                                ("qr_planning_vectors.json", generate_planning),
+                                ("qr_correction_vectors.json", generate_correction)]:
         content = json.dumps(generator(args.reference), indent=2) + "\n"
         target = ROOT / "tests/data" / filename
         if args.check:

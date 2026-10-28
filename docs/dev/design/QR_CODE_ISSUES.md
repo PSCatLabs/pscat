@@ -1,12 +1,14 @@
 # QR issue queue (ready to publish)
 
-GitHub publication is blocked by connector HTTP 403 and an invalid CLI token.
+GitHub publication is blocked by connector HTTP 403 and sandbox CLI network
+restrictions. CLI credential validity has not been established outside that
+restriction; do not assume the token needs replacing from `gh auth status` alone.
 No issue number has been assigned. The owner explicitly authorized this initial
 epic/decomposition; once filed, ordinary agents propose follow-ups under the
 repository's established dispatcher policy instead of opening unrelated issues.
 
 Branch: `feature/qr-code-library`. [Architecture/sequence](QR_CODE.md).
-Local implementation checkpoints: QR-1 and QR-2A implemented/tested; QR-2B next.
+Local implementation checkpoints: QR-1, QR-2A and QR-2B implemented/tested; QR-3 next.
 These statuses do not imply published/closed GitHub issues or final PR review.
 After publication, replace local ticket IDs below with issue links and record
 the epic's dependency checklist. Keep this file while the branch is active.

@@ -101,3 +101,39 @@ through its preapproved command rule. The attempt to run `gh` outside the
 sandbox was rejected because sandbox approvals are disabled. Thus the earlier
 `gh auth status` invalid-token message is inconclusive, not evidence requiring
 the owner to replace credentials. Issue drafts/publication remain pending.
+
+## QR-2B: Reed–Solomon and block interleaving
+
+Added PostScript-generated GF(256) lookup tables (polynomial 0x11D), generator
+polynomials, parity remainders, block splitting and full interleaving. Public
+symbol/matrix/drawing API is still absent. Internal correction inputs are
+validated before private frames open and stored through literal views; all
+outputs are fresh. Existing block-layout facts are reused without another
+capacity table. Library data and correction remain ordinary PostScript.
+
+The independent oracle supplies 65,536 field products by hash, all 30 generator
+degrees, 91 remainder vectors and full-stream hashes at all 160 version/ECC
+layouts. Input pattern changes beyond byte 255, catching truncated indexes;
+selected complete hex streams cover single/equal/mixed groups and version 40
+under real Ghostscript. Fifteen QR tests and eight inline selftest blocks pass,
+including access/executable-attribute/error-frame and output-ownership checks.
+Original byte and planning fixtures regenerate unchanged. Same-family code
+review found no correctness blocker; its suggested maximum-length remainder
+success case is included. Final cross-family PR review remains outstanding and
+no merge is authorized.
+
+The exact GitHub URL additionally has independent complete-stream fixtures at
+L/M/Q/H, checking automatic planning -> byte packing -> correction/interleaving
+under both PSCat and Ghostscript. A byte stream is still not a scannable QR;
+matrix construction and masking remain the next stages.
+
+Final validation for this continuation: locked offline full `cargo test
+--profile ci` passed (exit 0), including all 38 selftest/manifest/strict-driver
+checks. The final targeted QR rerun passed all 15 tests after the extra boundary
+and GitHub pipeline cases. All-target Clippy with warnings denied, formatting,
+all three pinned fixture regenerations, eight inline blocks, links, gallery
+and licenses passed. Build/test/cache output remains on the external drive
+(about 2.3 GiB at inspection). No `src/` or Cargo dependency changes occurred.
+Checkpoints preceding this correction commit: `8e73992` executable-string fix,
+`ac638e2` capacity/version planning. Next: QR-3 function/reservation patterns and
+fixed-mask data placement, followed by metadata/mask selection and decoding.

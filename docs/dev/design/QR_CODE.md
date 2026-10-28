@@ -5,15 +5,17 @@ Status: first-session development on `feature/qr-code-library`, based on
 This is a PSCat core library and gallery enhancement. No merge to main is
 authorized for this session. The work is not yet a complete QR encoder.
 
-Implemented first slice: `lib/qr.ps`'s internal `qr--byte-data`, exact named
-argument/fit guards and selftests, independent fixture generator/corpus and
-`tests/qr.rs` behavior, Ghostscript and embedded-loader checks. The current seam
-accepts explicit capacity; it does not choose a version or ECC. No Rust engine
+Current implementation in `lib/qr.ps`: byte packing, automatic version/capacity
+planning, Reed–Solomon correction and block interleaving, with exact named
+guards, selftests, independent fixtures and native/Ghostscript/embedded-loader
+checks. Matrix construction, masks, rendering and the public API are pending.
+The original `qr--byte-data` seam accepts explicit capacity; version selection
+now lives in `qr--byte-plan`. No Rust engine
 changes or dependencies were added. A separate same-family plan review
 confirmed this slice and identified count-width and direct frame-leak tests,
 both included. Final cross-family PR review remains outstanding.
 
-Validation: locked offline CI-profile build and full repository suite passed;
+Initial checkpoint validation: locked offline CI-profile build and full repository suite passed;
 all five new QR tests (including real Ghostscript and embedded loading), two
 inline selftest blocks, reference regeneration equality, all-target Clippy with
 warnings denied, formatting, links, gallery and license checks passed. The shell
@@ -143,7 +145,33 @@ actual padded data. Real Ghostscript checks table values, selected versions,
 per-level overflow and executable/access/frame contracts. The original 98
 data fixtures regenerate unchanged. The same-family review found no algorithm
 blocker; it also discovered and prompted the preceding executable-string fix.
-Next implementation ticket is QR-2B correction/interleaving.
+QR-2B correction/interleaving follows below.
+
+### Error-correction checkpoint (QR-2B)
+
+The library builds small GF(256) exp/log lookup tables using the QR polynomial
+0x11D in ordinary PostScript. Internal `qr--rs-divisor` (degree 1–30) generates
+the high-to-low coefficients excluding the leading monic term;
+`qr--rs-remainder` returns fresh parity from readable data/divisor strings.
+`qr--interleave` takes already padded data, explicit version and level; it
+validates exact capacity, splits into short/long blocks, computes correction
+and emits fresh interleaved data then correction columns. Remainder bits are
+deliberately excluded from the byte stream. No matrix/rendering exists yet.
+
+The correction reference corpus covers all 65,536 field products, 30 divisors,
+91 remainders (including empty and maximum-length binary data), and full interleaved
+stream hashes for every version/ECC combination. Synthetic data is deliberately
+not periodic at 256 bytes, so truncated indexes are observable. Selected full
+hex streams, including mixed blocks and version 40, also match Ghostscript.
+The exact GitHub URL also matches independently generated complete codeword
+streams at all four ECC levels, under PSCat and Ghostscript. This verifies the
+data/correction pipeline, not scanning (there is still no module matrix).
+All 15 QR tests and eight inline selftest blocks pass. No new dependency or
+Rust encoder was added. Next: reserved patterns and fixed-mask matrices (QR-3).
+The full locked offline CI-profile repository suite also passed, including the
+38 selftest/manifest/strict-driver checks; all-target Clippy, formatting,
+fixture regeneration, links, gallery and license checks passed. No rendered QR
+acceptance is implied by the data-stage and correction-stage checks.
 
 Coverage: empty and binary bytes, URLs, max/max+1 capacities, versions 1/9/10/
 26/27/40, every ECC, unequal block groups, remainder bits, version BCH for >=7,
@@ -192,6 +220,10 @@ for external target output; broader cache relocation needs writable workspace
 access. Do not change tracked paths into machine-specific symlinks.
 
 GitHub issue publication failed: connector create returned HTTP 403
-(`Resource not accessible by integration`); `gh auth status` reported an invalid
-token. Issue drafts are durable and ready for an authenticated future session.
+(`Resource not accessible by integration`). The requested CLI fallback was
+attempted: `gh api`/`gh issue list` cannot connect and `git push` cannot resolve
+GitHub inside the sandbox; `git fetch` has a working preapproved rule. Outside-
+sandbox CLI access was rejected by the session approval policy. Consequently,
+the earlier `gh auth status` invalid-token message does not establish that the
+credentials need replacing. Issue drafts are durable and ready to publish.
 This is an infrastructure limitation, not an exception to verification gates.

@@ -1,6 +1,6 @@
 %!PS-Adobe-3.0
 % Native QR Model 2 library -- incremental implementation.
-% Byte-mode capacity planning and packing; this does not generate a QR symbol.
+% Byte-mode planning, packing and error correction; no matrix or rendering yet.
 % Load with (lib/qr.ps) run. No dependencies and no drawing on load.
 % Code: MIT OR Apache-2.0, as the other lib/*.ps libraries.
 %
@@ -70,6 +70,93 @@
       out i i used sub 2 mod 0 eq { 236 } { 17 } ifelse put
     } for
     out
+  end
+} bind def
+
+% Build finite-field lookup tables once, using QR's polynomial x^8+x^4+x^3+x^2+1.
+% Table construction is pure PostScript; no interpreter extension is involved.
+% @internal
+/qr--make-gf {
+  5 dict begin
+    /exps 512 string def /logs 256 string def /x 1 def
+    0 1 254 {
+      /i exch def exps i x put logs x i put
+      /x x 1 bitshift dup 256 and 0 ne { 285 xor } if def
+    } for
+    255 1 511 { /i exch def exps i exps i 255 sub get put } for
+    [exps readonly logs readonly] readonly
+  end
+} bind def
+% @internal
+/qr--gf qr--make-gf def
+
+% Trusted internal byte operands, obtained from strings. Zero has no logarithm.
+% @internal
+/qr--gf-mul {
+  2 copy 0 eq exch 0 eq or { pop pop 0 } {
+    qr--gf 1 get exch get
+    exch qr--gf 1 get exch get add
+    qr--gf 0 get exch get
+  } ifelse
+} bind def
+
+% qr--rs-divisor: degree -> fresh coefficient string (leading monic term omitted).
+%%SelfTest: qr-rs-divisor-guards
+% { 7.0 qr--rs-divisor } /qr-ecc-degree-must-be-integer (real degree) mustguard
+% { 0 qr--rs-divisor } /qr-ecc-degree-must-be-in-1-30 (zero degree) mustguard
+% { 31 qr--rs-divisor } /qr-ecc-degree-must-be-in-1-30 (large degree) mustguard
+% 1 qr--rs-divisor <01> eq (degree-one polynomial) mustbe
+% 2 128 qr--gf-mul 29 eq (QR polynomial, not AES polynomial) mustbe
+%%EndSelfTest
+% @internal
+/qr--rs-divisor {
+  dup type /integertype ne { qr-ecc-degree-must-be-integer } if
+  dup 1 lt 1 index 30 gt or { qr-ecc-degree-must-be-in-1-30 } if
+  6 dict begin
+    /degree exch def /result degree string def
+    result degree 1 sub 1 put /root 1 def
+    degree {
+      0 1 degree 1 sub {
+        /j exch def /value result j get root qr--gf-mul def
+        j degree 1 sub lt { /value value result j 1 add get xor def } if
+        result j value put
+      } for
+      /root root 2 qr--gf-mul def
+    } repeat
+    result
+  end
+} bind def
+
+% qr--rs-remainder: readable-data readable-divisor -> fresh parity string.
+%%SelfTest: qr-rs-remainder-guards
+% { () [] qr--rs-remainder } /qr-ecc-divisor-must-be-a-string (array divisor) mustguard
+% { () () qr--rs-remainder } /qr-ecc-divisor-length-must-be-in-1-30 (empty divisor) mustguard
+% { [] <01> qr--rs-remainder } /qr-data-must-be-a-string (array data) mustguard
+% { 2957 string <01> qr--rs-remainder } /qr-ecc-data-too-long (long data) mustguard
+% <010203> <01> qr--rs-remainder <00> eq (degree-one parity) mustbe
+% () cvx <01> cvx qr--rs-remainder <00> eq (executable strings stay data) mustbe
+%%EndSelfTest
+% @internal
+/qr--rs-remainder {
+  dup type /stringtype ne { qr-ecc-divisor-must-be-a-string } if
+  dup rcheck not { qr-ecc-divisor-must-be-readable } if
+  dup length dup 1 lt exch 30 gt or { qr-ecc-divisor-length-must-be-in-1-30 } if
+  1 index type /stringtype ne { qr-data-must-be-a-string } if
+  1 index rcheck not { qr-data-must-be-readable } if
+  1 index length 2956 gt { qr-ecc-data-too-long } if
+  7 dict begin
+    /divisor exch cvlit def /data exch cvlit def
+    /degree divisor length def /result degree string def
+    data {
+      /factor exch result 0 get xor def
+      result 0 result 1 degree 1 sub getinterval putinterval
+      result degree 1 sub 0 put
+      0 1 degree 1 sub {
+        /j exch def
+        result j result j get divisor j get factor qr--gf-mul xor put
+      } for
+    } forall
+    result
   end
 } bind def
 
@@ -178,5 +265,55 @@ qr--block-count readonly pop
       } if
       /version version 1 add def
     } loop
+  end
+} bind def
+
+% qr--interleave: padded-data version level -> fresh full codeword string.
+% Padded data must exactly fill the selected layout. Short blocks precede long
+% blocks; correction columns follow all data columns. Remainder bits stay out.
+%%SelfTest: qr-interleave-guards
+% { () 1 /L qr--interleave } /qr-ecc-data-length-must-match-capacity (short data) mustguard
+% { [] 1 /M qr--interleave } /qr-data-must-be-a-string (array data) mustguard
+% { 19 string 1 /X qr--interleave } /qr-level-must-be-L-M-Q-or-H (unknown ECC) mustguard
+% 19 string 1 /L qr--interleave length 26 eq (complete version-one stream) mustbe
+%%EndSelfTest
+% @internal
+/qr--interleave {
+  qr--block-spec
+  1 index type /stringtype ne { qr-data-must-be-a-string } if
+  1 index rcheck not { qr-data-must-be-readable } if
+  1 index length 1 index /DataCodewords get ne {
+    qr-ecc-data-length-must-match-capacity
+  } if
+  16 dict begin
+    /spec exch def /data exch cvlit def
+    /blocks spec /Blocks get def /ec spec /ECCodewordsPerBlock get def
+    /short spec /RawCodewords get blocks idiv ec sub def
+    /short-count blocks spec /RawCodewords get blocks mod sub def
+    /divisor ec qr--rs-divisor def
+    /parts blocks array def /parity blocks array def /offset 0 def
+    0 1 blocks 1 sub {
+      /b exch def /len short b short-count ge { 1 } { 0 } ifelse add def
+      parts b data offset len getinterval put
+      parity b parts b get divisor qr--rs-remainder put
+      /offset offset len add def
+    } for
+    /out spec /RawCodewords get string def /pos 0 def
+    0 1 short {
+      /j exch def
+      0 1 blocks 1 sub {
+        /b exch def
+        j parts b get length lt {
+          out pos parts b get j get put /pos pos 1 add def
+        } if
+      } for
+    } for
+    0 1 ec 1 sub {
+      /j exch def
+      0 1 blocks 1 sub {
+        /b exch def out pos parity b get j get put /pos pos 1 add def
+      } for
+    } for
+    out
   end
 } bind def
