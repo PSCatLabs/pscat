@@ -1,0 +1,96 @@
+%!PS-Adobe-3.0
+%%Title: Functional typography — shared glyph vocabulary
+%%EndComments
+(lib/functional.ps) run
+(lib/aspect.ps) run
+(lib/artkit.ps) run
+
+% Record: [one-byte-string baseline-x baseline-y font-size glyph-index].
+% The examples deliberately use ASCII; these are byte records, not Unicode
+% segmentation. All typography uses the bundled Helvetica-Bold outline font.
+/ty-styles [
+  << /Paper [0.055 0.075 0.13] /Ink [0.96 0.90 0.72]
+     /Shadow [0.10 0.24 0.33] /Contour [0.11 0.16 0.22]
+     /Ramp [[0.99 0.26 0.24] [1 0.68 0.22] [0.95 0.91 0.55] [0.34 0.75 0.71]] >>
+  << /Paper [0.95 0.90 0.78] /Ink [0.16 0.22 0.28]
+     /Shadow [0.77 0.36 0.28] /Contour [0.97 0.88 0.67]
+     /Ramp [[0.10 0.28 0.38] [0.17 0.47 0.52] [0.39 0.64 0.53] [0.82 0.77 0.44]] >>
+] def
+/ty-rgb { aload pop setrgbcolor } bind def
+
+% Fold state [cursor index fresh-output] is private to layout. Only the fresh
+% output array is mutated; each step returns a new small state tuple.
+/ty-place { % state [character advance] [scale baseline] -- state
+  3 dict begin /ty.ctx exch def /ty.pair exch def /ty.state exch def
+  ty.state 2 get ty.state 1 get
+    [ty.pair 0 get ty.state 0 get ty.ctx 1 get
+     ty.ctx 0 get 100 mul ty.state 1 get] put
+  [ty.state 0 get ty.pair 1 get ty.ctx 0 get mul add
+   ty.state 1 get 1 add ty.state 2 get]
+  end
+} bind def
+/ty-layout { % text x baseline width -- glyph-records
+  9 dict begin /ty.width exch def /ty.y exch def /ty.x exch def /ty.text exch def
+  gsave
+    /Helvetica-Bold findfont 100 scalefont setfont
+    /ty.pairs [0 1 ty.text length 1 sub {} for] {
+      ty.text exch 1 getinterval dup stringwidth pop 2 array astore
+    } fp-map def
+    /ty.total ty.pairs 0 {1 get add} fp-fold def
+  grestore
+  /ty.factor ty.width ty.total div def
+  ty.pairs [ty.x 0 ty.pairs length array]
+    [ty.factor ty.y] /ty-place load fp-curry fp-fold 2 get
+  end
+} bind def
+/ty-glyph-path { % record -- current glyph outline (font set here)
+  dup 3 get /Helvetica-Bold findfont exch scalefont setfont
+  newpath 0 0 moveto 0 get false charpath
+} bind def
+/ty-letter { % record style --
+  7 dict begin /ty.style exch def /ty.rec exch def
+  /ty.size ty.rec 3 get def
+  gsave
+    ty.rec 1 get ty.rec 2 get translate
+    % An offset extrusion, then a genuine glyph clip with a colour field.
+    ty.style /Shadow get ty-rgb
+    8 -1 1 {
+      gsave dup 2 mul exch -2.2 mul translate
+        ty.rec ty-glyph-path fill
+      grestore
+    } for
+    ty.rec ty-glyph-path
+    0 0 ty.size ty.size 0.85 mul ty.style /Ramp get axialsh gradfill
+    gsave
+      ty.rec ty-glyph-path clip newpath
+      ty.style /Contour get ty-rgb 0.85 setlinewidth
+      -8 4 ty.size {
+        /ty.row exch def
+        newpath -10 ty.row moveto
+        0 1 28 {
+          /ty.xx exch ty.size 28 div mul def
+          ty.xx ty.row ty.xx 2.3 mul ty.row 4 mul add
+            ty.rec 4 get 17 mul add sin 5 mul add lineto
+        } for stroke
+      } for
+    grestore
+    ty.rec ty-glyph-path ty.style /Ink get ty-rgb 1.1 setlinewidth stroke
+  grestore
+  end
+} bind def
+/ty-flat-letter { % record -- original target for observability proof
+  gsave
+    dup 1 get 1 index 2 get translate
+    ty-glyph-path fill
+  grestore
+} bind def
+/ty-bounds { % record -- [x0 y0 x1 y1] in the caller's user space
+  5 dict begin /ty.rec exch def
+  gsave
+    ty.rec ty-glyph-path pathbbox
+    /ty.y1 exch def /ty.x1 exch def /ty.y0 exch def /ty.x0 exch def
+    [ty.x0 ty.rec 1 get add ty.y0 ty.rec 2 get add
+     ty.x1 ty.rec 1 get add ty.y1 ty.rec 2 get add]
+  grestore
+  end
+} bind def

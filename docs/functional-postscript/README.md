@@ -5,7 +5,9 @@ seven functional combinators and five explicit procedure decorators. No core
 interpreter changes. Intended for reusable, deterministic ArtColony artwork.
 The work is on `feature/functional-postscript`, pending independent Opus review.
 
-Start with the [offline illustrated introduction](index.html), or give an agent
+Start with the [illustrated introduction](index.html) or the
+[live offline WASM studio](live-studio.html): edit typography and inspect an AOP
+proof using the actual interpreter in your browser. Or give an agent
 the [concise skill](../../plugin/skills/functional-postscript/SKILL.md) and
 [agent guide](AGENT-GUIDE.md). All commands below run from the repository root.
 
@@ -32,6 +34,7 @@ calls /Calls get == % 1
 | [Implementation](IMPLEMENTATION.md) | Generated quotations, state frames, snapshots and extension rules. |
 | [AOP](AOP.md) | Advice ordering, interception, tracing, counting and profiling hooks. |
 | [Testing](TESTING.md) | Automated checks, example validation, visual identity and CPU measurements. |
+| [Live WASM studio](WASM-STUDIO.md) | Typography, contracts and actual local browser rendering. |
 | [Demo](DEMO.md) | Poster source, composition pipeline, colourways and reproduction. |
 | [Agent guide](AGENT-GUIDE.md) | Effective patterns, debugging and common mistakes. |
 | [Decisions](DESIGN-DECISIONS.md) | Tradeoffs, rejected alternatives and future work. |

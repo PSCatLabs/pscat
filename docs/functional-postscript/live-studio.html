@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="description" content="A live, offline PSCat WASM studio for functional typography and aspect-oriented diagnostics. Real PostScript, rerendered in your browser.">
+<title>The live print studio · Functional PostScript</title>
+<link rel="stylesheet" href="studio.css">
+<script defer src="assets/pscat-studio-runtime.js"></script>
+<script defer src="studio.js"></script>
+</head>
+<body>
+<a class="skip" href="#studio">Skip to studio</a>
+<header><div class="nav"><a class="brand" href="index.html">pscat<span>FIELD NOTES / LIVE</span></a><nav aria-label="Documentation"><a href="index.html">The introduction</a><a href="WASM-STUDIO.md">Source &amp; architecture</a></nav></div></header>
+<main>
+<section class="opening"><span class="eyebrow">A real interpreter. A local file. A live canvas.</span><h1>The print studio<br>is <em>yours.</em></h1><p>Change the words. Switch the colour field. Watch a score become a page. This studio runs the existing PSCat WebAssembly renderer—every letter is executed as PostScript, not selected from a set of saved images.</p><div class="modes" role="group" aria-label="Choose a study"><button type="button" data-mode="terrain" aria-pressed="true">02 / Type becomes terrain</button><button type="button" data-mode="press" aria-pressed="false">03 / The observable press</button></div></section>
+<section class="studio" id="studio" aria-label="Live PostScript studio">
+<aside>
+<form id="controls">
+<div id="terrain-fields"><span class="eyebrow">The words are data</span><label for="word-a">First line</label><input id="word-a" value="WORDS" maxlength="10" autocomplete="off" spellcheck="false"><label for="word-b">Second line</label><input id="word-b" value="MAKE" maxlength="10" autocomplete="off" spellcheck="false"><label for="word-c">Third line</label><input id="word-c" value="WORLDS" maxlength="10" autocomplete="off" spellcheck="false"><p class="hint">One to ten A–Z letters per line. Character advances are measured, then each run fits the same width.</p><label for="palette">Colour field</label><select id="palette"><option value="0">Nocturne / solar contours</option><option value="1">Sunprint / tidal contours</option></select></div>
+<div id="press-fields" hidden><span class="eyebrow">The drawing stays the target</span><label for="proof-text">Proof word</label><input id="proof-text" value="SIGNAL" maxlength="10" autocomplete="off" spellcheck="false"><p class="hint">One to ten A–Z letters. Both rows use the same glyph drawing procedure.</p><label class="check"><input id="inspect" type="checkbox" checked><span>Around advice: show ink bounds and advances</span></label><label class="check"><input id="inject-fault" type="checkbox" checked><span>Inject one invalid font size</span></label><p class="hint">The before contract rejects the faulty record. Its attempt is counted; its after hook does not run.</p></div>
+<div class="actions"><button id="render" class="primary" type="submit" disabled>Render now</button><button id="watch" type="button" disabled>Watch it draw</button><button id="stop" type="button" disabled>Stop</button></div>
+<p id="status" class="status" role="status" aria-live="polite">Loading the local PSCat WASM interpreter…</p>
+<button id="download" type="button" disabled>Download the actual PNG ↓</button>
+</form>
+<div class="console"><span class="eyebrow">Actual PostScript stdout</span><pre id="stdout" aria-live="polite">Waiting for the interpreter.</pre></div>
+<p class="hint">No server or network is required. The module, API and example sources are local. Modern WebAssembly, gzip decompression and Blob-module support are required. Saved examples remain available if a browser cannot run the studio.</p>
+</aside>
+<div class="work"><div class="work-label"><span id="work-title">TYPE BECOMES TERRAIN</span><span>LIVE PSCAT / WASM</span></div><figure><img id="fallback" src="assets/type-nocturne.png" width="960" height="1200" alt="Saved PSCat render of Words Make Worlds, with dimensional, multicolour contoured glyphs on a dark field."><canvas id="canvas" width="960" height="1200" hidden role="img" aria-label="Live PSCat rendering of the configured PostScript study"></canvas><figcaption id="caption">Saved render while the local interpreter initializes.</figcaption></figure></div>
+</section>
+<section class="explanation" id="understand"><div><span class="eyebrow">What you are changing</span><h2>Typography is geometry.<br>Advice is observation.</h2></div><div id="terrain-explanation"><p><strong>Type becomes terrain.</strong> Map each character into a string and measured advance. Fold those advances to get the run width, then fold a private layout builder into glyph records. Curry a colour-field dictionary into the drawing quotation and visit the records with <code>fp-each</code>.</p><p>Each glyph becomes a real outline through <code>charpath</code>. It clips a colour gradient and contour lines; repeated offsets build the dimensional shadow. Changing the words rebuilds the measured layout. Changing the palette reuses it.</p></div><div id="press-explanation" hidden><p><strong>The observable press.</strong> The original row calls the target directly. The second row decorates it: before advice validates font size, after advice counts normal returns, around advice optionally draws measured ink bounds, and an outer counter records attempts.</p><p>With SIGNAL and the fault enabled, real execution gives seven attempts, six returns and one rejection. Turn the fault off: six, six, zero. Change the word: the counts follow its actual length. Diagnostics change the proof view, not the original target procedure.</p></div></section>
+<details class="source"><summary>Inspect the actual PostScript sent to WASM</summary><p>The shared vocabulary is inlined for this browser session; standard library <code>run</code> calls resolve from the same libraries compiled into PSCat.</p><textarea id="source" readonly rows="22" aria-label="Actual PostScript source"></textarea></details>
+<section class="reproduce"><span class="eyebrow">The same source, outside the browser</span><div class="code"><pre id="native-command">target/ci/pscat --page 960x1200 --png type.png \
+  examples/functional/type-terrain.ps</pre></div><p><a href="../../examples/functional/type-terrain.ps">Typography source</a> · <a href="../../examples/functional/observable-press.ps">AOP source</a> · <a href="WASM-STUDIO.md">Rebuild and validation</a> · <a href="assets/wasm-dependency-licenses.html">WASM dependency licences</a></p><p class="hint">Elapsed time shown by the interface is measured by the browser around execution. It is not CPU time. PostScript clocks in this WASM build return zero. Rendering is deterministic for the same controls; host elapsed time is not.</p></section>
+</main><footer><span>FUNCTIONAL POSTSCRIPT / STUDIES 02 + 03</span><a href="README.md">Technical documentation →</a></footer>
+</body></html>

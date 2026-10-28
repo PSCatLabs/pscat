@@ -1,0 +1,53 @@
+%!PS-Adobe-3.0
+%%Title: Type Becomes Terrain — functional glyph composition
+%%BoundingBox: 0 0 960 1200
+%%Pages: 1
+%%EndComments
+(examples/functional/type-common.ps) run
+/TypeStyle where {pop} {/TypeStyle 0 def} ifelse
+/WordA where {pop} {/WordA (WORDS) def} ifelse
+/WordB where {pop} {/WordB (MAKE) def} ifelse
+/WordC where {pop} {/WordC (WORLDS) def} ifelse
+/ty.style ty-styles TypeStyle get def
+/ty.count << /Calls 0 >> def
+
+% Each word is fitted from measured character advances, not equal-width cells.
+/ty.rows [[WordA 93 785 764] [WordB 93 526 764] [WordC 93 267 764]] def
+/ty.runs ty.rows {aload pop ty-layout} fp-map def
+/ty.draw ty.style {ty-letter} fp-curry ty.count aop-count def
+/ty.score {
+  ty.style /Paper get ty-rgb 0 0 960 1200 rectfill
+  gsave
+    % Sparse field lines continue the letter contours into the page ground.
+    ty.style /Shadow get ty-rgb 0.5 setlinewidth
+    90 13 1100 {
+      /ty.y exch def newpath 45 ty.y moveto
+      0 1 54 {
+        /ty.x exch 16 mul 48 add def
+        ty.x ty.y ty.x 0.6 mul ty.y 0.4 mul add sin 10 mul add lineto
+      } for stroke
+    } for
+    ty.style /Ink get ty-rgb
+    44 40 872 1120 rectstroke
+    /Courier findfont 12 scalefont setfont
+    67 1126 moveto (ARTCOLONY  /  FUNCTIONAL TYPE STUDY 02) show
+    67 1106 moveto (MEASURE. COMPOSE. REPEAT.) show
+    /Helvetica-Bold findfont 17 scalefont setfont
+    67 1030 moveto (TYPE BECOMES TERRAIN) show
+    /Courier findfont 11 scalefont setfont
+    67 1010 moveto (ONE GLYPH VOCABULARY / THREE MEASURED RUNS / TWO COLOUR FIELDS) show
+  grestore
+  ty.runs { /ty.draw load fp-each } fp-each
+  gsave
+    ty.style /Ink get ty-rgb
+    /Courier findfont 11 scalefont setfont
+    67 164 moveto (THE LETTERS ARE PATHS. THE COLOUR IS DATA.) show
+    67 145 moveto (EVERY CONTOUR IS DRAWN, NOT A TEXTURE IMAGE.) show
+    67 79 moveto (POSTSCRIPT / PSCAT / 2026) show
+    667 79 moveto (WORDS INTO WORLDS.) show
+    67 120 moveto 893 120 lineto 0.8 setlinewidth stroke
+  grestore
+} (type-terrain) aop-trace def
+ty.score
+(glyphs=) print ty.count /Calls get =
+showpage

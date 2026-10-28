@@ -4,6 +4,50 @@ Review `feature/functional-postscript` against its base `ee27313` in this
 checkout. Do not merge. Codex implemented the feature; this handoff does not
 substitute for your independent correctness and perceptual review.
 
+## Latest addition — live WASM studies (2026-10-28)
+
+The user requested more ambitious typography and AOP examples, then an actual
+WASM-rendered HTML showcase. Review remains deferred at the user's request;
+no Opus reviewer has been invoked.
+
+- Open [live-studio.html](live-studio.html) directly over file://. The real,
+  existing PSCat WASM module executes the inlined PS sources; no server/fetch/CDN
+  or substitute JavaScript drawing. Text, palette and diagnostic controls
+  actually rerender. Watch/stop/restart, stdout, source inspection and PNG export
+  are included. [Architecture/rebuilds](WASM-STUDIO.md).
+- [Type Becomes Terrain](../../examples/functional/type-terrain.ps): measured
+  character advances, fold-built glyph records, captured style dictionaries,
+  charpath-clipped gradients/contours and extrusion. Default: 15 glyphs.
+- [The Observable Press](../../examples/functional/observable-press.ps): original
+  and decorated targets, before contract, after success hook, around diagnostics
+  and outer attempt counter. Default actual counts: 7 attempts / 6 returns /
+  1 rejected probe. Changes to word/fault controls update real metrics.
+- Shared [glyph vocabulary](../../examples/functional/type-common.ps); four new
+  PNGs join the image manifest (11 total). Original poster benchmarks unchanged.
+- The committed generated runtime is approximately 7.1 MB (11.5 MB raw WASM),
+  including existing fonts. It carries the unchanged API and source/engine/API/
+  raw/gzip hashes in [studio-manifest.json](assets/studio-manifest.json).
+  Review the builder and provenance checks rather than the base64 by hand.
+  Existing engine/font and dependency licence texts are preserved.
+- Three additional Rust tests bring the feature suite to 28. All three tested
+  WASM scenes match native **full pixel buffers**, and diagnostics-disabled
+  observation preserves the original target at the same coordinates.
+- Latest full gate: **2,535 passed, 2 existing ignored, 0 failed**; build, clippy,
+  formatting and all selftests/drivers PASS. Tracked Markdown: 108 files with no
+  broken links; gallery and licence checks PASS. Offline checker validates 50
+  local HTML targets, 12 image elements, 11 render hashes and the actual payload.
+- [Live browser validation](LIVE-BROWSER-VALIDATION.json): file:// in Chrome,
+  desktop/mobile, actual text/palette/diagnostic/fault changes, count changes,
+  input rejection, watch/stop/restart, actual PNG export, no JS exceptions or
+  page HTTP(S) requests. The recorded UI hashes match current sources. The
+  browser was closed after those checks; no re-run is needed just for review.
+
+Please scrutinize the explicit controlled-mutation layout builder, byte/ASCII
+text limits (no shaping/kerning), before/after/around order, exact fixture error
+catching, coordinate-space correctness of bounds, local-module packaging and
+claimed provenance. No interpreter/API/dependency change accompanies the studies.
+See PROGRESS.md for the new commit checkpoint and validation log locations.
+
 ## Goal and scope
 
 Test whether useful functional and aspect-oriented primitives for agent-created

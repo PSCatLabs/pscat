@@ -110,3 +110,64 @@ lacked PyYAML; independent standard-library checks cover the actual skill.
 Implementation and requested deliverables are complete. Independent Claude
 Opus review remains deliberately outstanding. Start with REVIEW-HANDOFF.md;
 keep this branch active and record any subsequent reviewer findings/fixes here.
+
+## 2026-10-28 — new typography, visible AOP and a real WASM studio
+
+User requested more ambitious demos, specifically text and AOP, then a live
+WASM HTML example. Independent Opus review is explicitly deferred until later;
+no reviewer was invoked. Work stays on the existing long-running branch.
+
+- Added `type-common.ps` and `type-terrain.ps`: measured character advances,
+  fold-based run layout, configured glyph quotations, real charpath clipping,
+  contoured gradients/extrusions, two styles and actual 15-glyph observation.
+- Added `observable-press.ps`: the same target appears direct/decorated;
+  before validates, after counts returns, around optionally draws ink/advance
+  diagnostics. One isolated invalid record yields actual 7/6/1 metrics and an
+  exact named error. Word changes/fault disabling update real counts.
+- Fixed a demo bounds-coordinate error and used `load` to retrieve the captured
+  executable error name. These are standard PS hazards, not new core defects.
+- Four new PNGs join the render manifest (11 total). All strict-lint renders pass.
+- `live-studio.html` runs the existing PSCat WASM over file://. The generated
+  7.1 MB local script contains compressed module bytes, the unchanged JS API and
+  actual inlined example sources. No fetch/server/CDN/framework/dependency added.
+- `build_functional_studio.py` records payload/API/example/library/engine hashes.
+  The bundle's existing engine/font licence terms and generated Rust dependency
+  notices are preserved; the new bundle path is classified in licenses/assets.json.
+- `studio.js` configures bounded ASCII words, steps actual PS, shows real stdout,
+  downloads actual canvas PNGs, and supports watch/stop/restart. Browser elapsed
+  timing is explicitly labeled; no PS clock/CPU claims.
+- Chrome 156 file:// checks: text/palette changes, 7/6/1 vs 6/6/0 vs 6/5/1
+  counts, diagnostic overlay toggle, invalid input, stop/restart, PNG download,
+  desktop/mobile layout, no JS exceptions or HTTP(S) page requests. Screenshots
+  inspected; durable report is LIVE-BROWSER-VALIDATION.json.
+- New targeted suite: 28 tests PASS, including three new tests for metric/bounds
+  layout, four saved images and same-coordinate target identity, and full
+  native/WASM pixel equality for three actual bundled programs.
+- A first test comparing glyphs at different translated baselines saw a 1-LSB
+  anti-alias difference; replaced it with a same-coordinate direct/decorated
+  control. No rendering test was loosened to conceal an observation difference.
+- Original poster benchmark inputs/raw measurements remain unchanged.
+- Remaining: final full gate, tracked link/licence checks, checkpoint commit,
+  updated review handoff and push of this feature branch only.
+
+### Validation complete for the live studies
+
+- `cargo build --locked`: PASS.
+- `cargo test --profile ci`: 2,535 passed, 2 existing ignored, 0 failed,
+  across 113 result groups. Feature suite: all 28 PASS.
+- Clippy with `-D warnings`, formatting and all PS selftests/drivers: PASS.
+- Tracked Markdown: 108 files, zero broken links; gallery and licences: PASS.
+- Offline HTML/provenance checker: 50 local targets, 12 image elements, 11 image
+  hashes, unchanged API, decompressed WASM and matching source/engine hashes.
+- Node executes the exact committed payload for three examples; native/WASM
+  full-buffer equality and real output counters pass.
+- Browser-tested UI hashes still match current HTML/JS/CSS. The already
+  downloaded actual PNG was independently checked at 1280x960. The window was
+  closed after the successful browser run; the interrupted optional repeat was
+  not necessary and was not counted as a second run.
+- Normalized only generated licence line endings/trailing whitespace for the
+  clean diff check. A repeatable normalization command is in WASM-STUDIO.md.
+- Logs: /tmp/functional-studies-{build,full-suite,clippy,selftests}.log.
+- No changes to src/, Cargo manifests/lock or web/pscat.js. No dependency added.
+- Ready for the checkpoint commit and feature-only push; Opus review remains
+  deliberately outstanding.

@@ -103,8 +103,11 @@ need isolation. PaintKit's own path/state conventions continue to apply.
 The functional library depends only on standard PostScript operators. The
 aspect library depends only on functional.ps. The poster additionally loads
 artkit and PaintKit. The Python reproduction and verification scripts use the
-standard library. The HTML uses local images, inline CSS and small vanilla JS;
-it does not embed a second interpreter or re-render artwork in JavaScript.
+standard library. The introduction uses saved local images and vanilla JS. The additional live
+studio instantiates the **same existing PSCat interpreter** compiled to WASM,
+with its unchanged JS API and local compressed bytes; it does not reimplement
+the drawing in JavaScript. See [WASM-STUDIO](WASM-STUDIO.md) for file-URL loading,
+source inlining, size, licence provenance and native/WASM parity tests.
 No external code has been copied from the inspiration projects.
 
 See [decisions](DESIGN-DECISIONS.md) for rejected lexical dictionaries, implicit

@@ -7,7 +7,7 @@ checkpoint hashes are recorded in [PROGRESS](PROGRESS.md) and the
 
 ## Automated coverage
 
-- [tests/functional.rs](../../tests/functional.rs): 25 behavioral and documentation tests. Empty,
+- [tests/functional.rs](../../tests/functional.rs): 28 behavioral and documentation tests. Empty,
   singleton and nested arrays; order and noncommutative fold; composition
   boundaries/associativity; arbitrary executable captured data; dictionary
   lifetime vs dynamic lookup; caller `count`/`currentdict`/`def`; nesting and
@@ -21,6 +21,12 @@ checkpoint hashes are recorded in [PROGRESS](PROGRESS.md) and the
   `true setpacking` to exercise genuine packed quotations. If gs is absent the
   Rust test prints a skip; local validation used installed gs. This is semantic
   agreement on the corpus, not proof of universal interpreter compatibility.
+- Three additional study tests check measured glyph advances/page-space bounds,
+  four saved typography/AOP buffers, unchanged target pixels at the **same**
+  coordinates, fault-disable/changed-word counts, and full native/WASM equality
+  for three programs from the exact committed offline bundle. Translated proof
+  rows can differ by one anti-alias LSB due to coordinate precision, so they
+  are not used as a same-pixel-position control.
 - Four `%%SelfTest` blocks next to guards in
   [functional.ps](../../lib/functional.ps) and [aspect.ps](../../lib/aspect.ps)
   assert exact named guards, including wrong container/quotation types,
@@ -36,6 +42,9 @@ checkpoint hashes are recorded in [PROGRESS](PROGRESS.md) and the
   complete Markdown/skill PostScript examples. The Rust integration test runs
   this checker with its own PSCat binary. Browser layout/interactivity are
   separately checked in headless Chrome; no browser dependency is added to CI.
+  The checker also verifies all eleven image hashes and decompressed WASM/API,
+  example and engine-source provenance. `scripts/check_functional_studio.mjs`
+  executes the exact bundle under Node without fetching or compiling WASM.
 
 ## Commands
 
@@ -117,3 +126,21 @@ repeated, wrong-type and callback-error cases; check sentinel values and caller
 dictionary identity, not just net depth. Never use a fixed `/tmp` artifact in
 Rust integration tests. If adding a CPU budget, use the existing thread-CPU
 helpers and the negative budget-scale check specified in AGENTS.md.
+
+
+## Live studio browser checks
+
+Start an isolated Chrome with a local debugging port, then run:
+
+```sh
+node scripts/check_functional_browser.mjs 9338
+```
+
+The optional standard-library CDP script verifies actual WASM execution over
+file://, text and palette changes, diagnostic/fault toggles, changed-word counts,
+invalid-input rejection, watch/stop/restart, actual PNG download and desktop/mobile
+layout. It records current page-source hashes and results in
+[LIVE-BROWSER-VALIDATION.json](LIVE-BROWSER-VALIDATION.json). This supplements the
+original [saved-view browser report](BROWSER-VALIDATION.json). Neither browser
+is a new runtime dependency or a CI prerequisite. Source/display paths and the
+7.1 MB bundled-runtime tradeoff are documented in [WASM-STUDIO](WASM-STUDIO.md).

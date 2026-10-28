@@ -16,6 +16,12 @@ import subprocess
 ROOT = Path(__file__).resolve().parent.parent
 ASSETS = ROOT / "docs/functional-postscript/assets"
 STYLES = ("ultraviolet", "sunprint", "blue-hour")
+STUDY_RENDERS = (
+    ("type-nocturne", "960x1200", "(examples/functional/type-terrain.ps) run"),
+    ("type-sunprint", "960x1200", "/TypeStyle 1 def (examples/functional/type-terrain.ps) run"),
+    ("press-inspected", "1280x960", "(examples/functional/observable-press.ps) run"),
+    ("press-clean", "1280x960", "/Inspect false def (examples/functional/observable-press.ps) run"),
+)
 
 
 def call(argv):
@@ -49,9 +55,16 @@ def render(pscat):
         ("detail", "480x480", "(examples/functional/detail.ps) run"),
         ("ground", "720x960", "/Layer 1 def (examples/functional/poster.ps) run"),
         ("imperative", "720x960", "(examples/functional/imperative.ps) run"),
+        *STUDY_RENDERS,
     ]:
         dest = ASSETS / f"{name}.png"
-        call([pscat, "--page", page, "--lint-strict", "--png", dest, "-e", source])
+        out = call([pscat, "--page", page, "--lint-strict", "--png", dest, "-e", source])
+        if name.startswith(("type-", "press-")):
+            output = out.stdout.split("pscat: wrote ")[0]
+            expected = ("enter type-terrain\nleave type-terrain\nglyphs=15\n"
+                        if name.startswith("type-") else
+                        "enter proof\nleave proof\nattempted=7\ncompleted=6\nrejected=1\nfault=obs-font-size-must-be-number\n")
+            assert output == expected, output
         manifest.append({"file": dest.name, "page": page,
                          "sha256": hashlib.sha256(dest.read_bytes()).hexdigest()})
     (ASSETS / "render-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")

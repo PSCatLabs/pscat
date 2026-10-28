@@ -103,3 +103,15 @@ wall time, not CPU. Native `usertime` also currently uses a wall clock and
 reads zero on wasm; see [engine friction](ENGINE-FRICTION.md). For paired CPU
 measurements use the external benchmark script. A counter is deterministic;
 timing output and diagnostic trace I/O are not a reproducibility hash of art.
+
+
+## A visible proof with actual failure counts
+
+[The Observable Press](live-studio.html#press) runs the original glyph target
+beside a decorated one. Its before contract checks size, after counts returns,
+and around optionally draws measured ink bounds while preserving graphics
+state. An outer count records attempted calls, including one deliberately
+invalid size. Default SIGNAL produces actual **7 / 6 / 1** entry/return/rejection
+counts; disabling the probe or changing the word updates them. The readout is
+not a fabricated trace. The same source runs natively and in WASM with identical
+pixel buffers in the tested cases. See [source and walkthrough](WASM-STUDIO.md).

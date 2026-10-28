@@ -89,7 +89,8 @@ radius-checksum=622
 
 [assets/](assets/) contains `ultraviolet.png`, `sunprint.png`, `blue-hour.png`,
 `imperative.png` (default control), `ground.png`, `primitives.png`, `detail.png`
-and [render-manifest.json](assets/render-manifest.json) with sizes and SHA-256
+plus the four typography/AOP images documented in
+[WASM-STUDIO.md](WASM-STUDIO.md), and [render-manifest.json](assets/render-manifest.json) with sizes and SHA-256
 hashes. Full posters are 720×960, vocabulary 720×300, detail 480×480.
 
 The offline HTML lets a reader select the three pre-rendered colourways and
@@ -114,3 +115,14 @@ configured stem/blossom quotations to try another existing PaintKit mark.
 Callbacks must retain `(record -- )` and balanced graphics/dictionary state.
 Do not hide geometry/style changes inside AOP; reserve advice for observation
 and contracts. Keep shared primitives shared if measuring orchestration.
+
+
+## Further studies: live type and observable execution
+
+The [live WASM studio](live-studio.html) adds two more demanding examples:
+measured, contoured letterforms in two colour fields, and an AOP proof with
+before contracts, normal-return counters, around diagnostics and a real failure
+probe. Both run from local files without a server, can be edited through bounded
+text controls, and are rendered by the existing WASM interpreter. Their shared
+source, output, limits and rebuild commands are in [WASM-STUDIO](WASM-STUDIO.md).
+They do not change the original poster's benchmark workload or measurements.

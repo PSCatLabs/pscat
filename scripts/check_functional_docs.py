@@ -2,6 +2,8 @@
 """Validate offline Functional PostScript assets, links, metrics and PS examples."""
 import argparse
 import hashlib
+import base64
+import gzip
 from html.parser import HTMLParser
 import json
 from pathlib import Path
@@ -62,19 +64,25 @@ def examples(pscat):
 
 
 def check():
+    total_targets = total_images = 0
+    for name in ("index.html", "live-studio.html"):
+        page = Page()
+        page.feed((DOCS / name).read_text())
+        total_targets += len(page.targets)
+        total_images += len(page.images)
+        for target in page.targets:
+            path = DOCS / unquote(target.path) if target.path else DOCS / name
+            assert path.exists(), f"{name}: missing HTML target {target.geturl()}"
+            if target.fragment and path.resolve() == (DOCS / name).resolve():
+                assert target.fragment in page.ids, f"missing HTML anchor {target.fragment}"
+        for img in page.images:
+            path = DOCS / img["src"]
+            assert png_size(path) == (int(img["width"]), int(img["height"])), f"wrong image dimensions: {path}"
     html = (DOCS / "index.html").read_text()
-    page = Page()
-    page.feed(html)
-    for target in page.targets:
-        path = DOCS / unquote(target.path) if target.path else DOCS / "index.html"
-        assert path.exists(), f"missing HTML target {target.geturl()}"
-        if target.fragment and path.resolve() == (DOCS / "index.html").resolve():
-            assert target.fragment in page.ids, f"missing HTML anchor {target.fragment}"
-    for img in page.images:
-        path = DOCS / img["src"]
-        assert png_size(path) == (int(img["width"]), int(img["height"])), f"wrong image dimensions: {path}"
     manifest = json.loads((DOCS / "assets/render-manifest.json").read_text())
-    assert len(manifest) == 7, "expected three colourways, control, ground, detail, primitives"
+    expected_assets = {"ultraviolet", "sunprint", "blue-hour", "imperative", "ground", "detail", "primitives",
+                       "type-nocturne", "type-sunprint", "press-inspected", "press-clean"}
+    assert {Path(r["file"]).stem for r in manifest} == expected_assets, "render manifest missing a study"
     for record in manifest:
         path = DOCS / "assets" / record["file"]
         assert hashlib.sha256(path.read_bytes()).hexdigest() == record["sha256"], f"stale hash: {path}"
@@ -87,7 +95,28 @@ def check():
             expected = f"{metrics['median'] * 1000:.0f} ms"
             match = re.search(fr'<td data-metric="{case}\.{kind}">([^<]+)</td>', html)
             assert match and match.group(1) == expected, f"stale HTML metric {case}.{kind}, expected {expected}"
-    print(f"HTML: {len(page.targets)} local targets, {len(page.images)} images; 7 asset hashes and 4 metrics pass")
+    runtime = (DOCS / "assets/pscat-studio-runtime.js").read_text().splitlines()[1]
+    prefix = "window.PSCAT_STUDIO_BUNDLE = "
+    assert runtime.startswith(prefix) and runtime.endswith(";")
+    bundle = json.loads(runtime[len(prefix):-1])
+    metadata = json.loads((DOCS / "assets/studio-manifest.json").read_text())
+    assert bundle["manifest"] == metadata, "studio metadata differs from payload"
+    packed = base64.b64decode(bundle["wasmGzipBase64"])
+    assert hashlib.sha256(packed).hexdigest() == metadata["gzip_sha256"]
+    raw = gzip.decompress(packed)
+    assert hashlib.sha256(raw).hexdigest() == metadata["wasm_sha256"]
+    assert raw[:8] == b"\x00asm\x01\x00\x00\x00", "invalid WASM header"
+    api = (ROOT / "web/pscat.js").read_text()
+    assert bundle["apiSource"] == api, "studio API is stale"
+    assert hashlib.sha256(api.encode()).hexdigest() == metadata["api_sha256"]
+    for path, expected in {**metadata["source_sha256"], **metadata["embedded_library_sha256"], **metadata["engine_source_sha256"]}.items():
+        assert hashlib.sha256((ROOT / path).read_bytes()).hexdigest() == expected, f"stale studio input: {path}"
+    common = (ROOT / "examples/functional/type-common.ps").read_text()
+    for key, name in (("terrain", "type-terrain.ps"), ("press", "observable-press.ps")):
+        source = (ROOT / "examples/functional" / name).read_text()
+        assert bundle["programs"][key] == source.replace("(examples/functional/type-common.ps) run", common)
+    print(f"HTML: {total_targets} local targets, {total_images} images; {len(manifest)} asset hashes and 4 metrics pass")
+    print("Studio: actual WASM payload, unchanged JS API and both PostScript sources pass")
 
 
 def main():

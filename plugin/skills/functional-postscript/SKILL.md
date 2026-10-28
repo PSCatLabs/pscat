@@ -71,3 +71,6 @@ Read [API](../../../docs/functional-postscript/API.md) for edge cases,
 extending. The executable poster/control are in
 [demo](../../../docs/functional-postscript/DEMO.md); the full technical index is
 [here](../../../docs/functional-postscript/README.md).
+
+For measured glyph layout, contoured text and a real contract-failure proof, see
+[live typography and AOP](../../../docs/functional-postscript/WASM-STUDIO.md).

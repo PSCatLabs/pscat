@@ -390,3 +390,157 @@ fn offline_documentation_assets_and_complete_examples_are_valid() {
         String::from_utf8_lossy(&out.stderr)
     );
 }
+
+fn render_study(width: u32, height: u32, source: &str) -> Interp {
+    let mut it = Interp::with_page(width, height).expect("study page");
+    it.capture_stdout();
+    it.run_str(source)
+        .unwrap_or_else(|e| panic!("study: {}", it.error_report(&e)));
+    assert_eq!(it.dict_stack_len(), 2);
+    assert!(it.operand_stack().is_empty());
+    it
+}
+
+#[test]
+fn typography_layout_measures_advances_and_reports_bounds_in_page_space() {
+    assert_eq!(
+        eval(
+            "(examples/functional/type-common.ps) run
+         /r (WIDE) 60 80 400 ty-layout def
+         r length 4 eq r 0 get 1 get 60 eq
+         r 0 {dup 3 get /Helvetica-Bold findfont exch scalefont setfont
+                0 get stringwidth pop add} fp-fold 400 sub abs 0.001 lt
+         r 0 get ty-bounds dup 0 get 60 ge exch 1 get 80 ge"
+        ),
+        ["true", "true", "true", "true", "true"]
+    );
+}
+
+#[test]
+fn new_typography_and_aop_renders_match_saved_evidence_and_target_pixels() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    for (name, width, height, source, expected) in [
+        (
+            "type-nocturne",
+            960,
+            1200,
+            "(examples/functional/type-terrain.ps) run",
+            "enter type-terrain\nleave type-terrain\nglyphs=15\n",
+        ),
+        (
+            "type-sunprint",
+            960,
+            1200,
+            "/TypeStyle 1 def (examples/functional/type-terrain.ps) run",
+            "enter type-terrain\nleave type-terrain\nglyphs=15\n",
+        ),
+        (
+            "press-inspected",
+            1280,
+            960,
+            "(examples/functional/observable-press.ps) run",
+            "enter proof\nleave proof\nattempted=7\ncompleted=6\nrejected=1\nfault=obs-font-size-must-be-number\n",
+        ),
+        (
+            "press-clean",
+            1280,
+            960,
+            "/Inspect false def (examples/functional/observable-press.ps) run",
+            "enter proof\nleave proof\nattempted=7\ncompleted=6\nrejected=1\nfault=obs-font-size-must-be-number\n",
+        ),
+    ] {
+        let it = render_study(width, height, source);
+        assert_eq!(it.captured_stdout(), expected.as_bytes());
+        let golden = tiny_skia::Pixmap::load_png(
+            root.join(format!("docs/functional-postscript/assets/{name}.png")),
+        )
+        .expect("study golden");
+        assert!(
+            it.gfx().pixmap.data() == golden.data(),
+            "{name}: saved pixels differ"
+        );
+    }
+    // Compare direct/decorated calls at the same coordinates: translating a
+    // glyph between proof rows can change f32 anti-alias coverage by one LSB.
+    let mut pair = Vec::new();
+    for target in ["ty-flat-letter", "obs.mark"] {
+        let mut it = render_study(
+            1280,
+            960,
+            "/Inspect false def (examples/functional/observable-press.ps) run",
+        );
+        it.run_str(&format!(
+            "erasepage initgraphics 0.95 0.90 0.78 setrgbcolor [(G) 80 120 190 0] {target}"
+        ))
+        .expect("isolated target");
+        pair.push(it.gfx().pixmap.data().to_vec());
+    }
+    assert!(
+        pair[0] == pair[1],
+        "observation changed original target pixels"
+    );
+    let clean = render_study(
+        1280,
+        960,
+        "/Inspect false def /InjectFault false def /ProofText (DREAM) def (examples/functional/observable-press.ps) run",
+    );
+    assert_eq!(
+        clean.captured_stdout(),
+        b"enter proof\nleave proof\nattempted=5\ncompleted=5\nrejected=0\nfault=none\n"
+    );
+}
+
+#[test]
+fn committed_live_wasm_payload_matches_the_native_studies() {
+    if Command::new("node")
+        .arg("--version")
+        .output_deadline()
+        .is_err()
+    {
+        eprintln!("node unavailable: live WASM/native study comparison skipped");
+        return;
+    }
+    let scratch = common::scratch_dir("functional-live-wasm");
+    let out = Command::new("node")
+        .args(["scripts/check_functional_studio.mjs", "--out-dir"])
+        .arg(&scratch)
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output_deadline()
+        .expect("studio WASM check");
+    assert!(
+        out.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    for (name, width, height, source) in [
+        (
+            "terrain",
+            960,
+            1200,
+            "(examples/functional/type-terrain.ps) run",
+        ),
+        (
+            "press",
+            1280,
+            960,
+            "(examples/functional/observable-press.ps) run",
+        ),
+        (
+            "press-valid",
+            1280,
+            960,
+            "/Inspect false def /InjectFault false def /ProofText (DREAM) def (examples/functional/observable-press.ps) run",
+        ),
+    ] {
+        let native = render_study(width, height, source);
+        let wasm = std::fs::read(scratch.join(format!("{name}.rgba"))).expect("WASM pixels");
+        assert_eq!(wasm.len(), native.gfx().pixmap.data().len());
+        let differing = wasm
+            .iter()
+            .zip(native.gfx().pixmap.data())
+            .filter(|(a, b)| a != b)
+            .count();
+        assert_eq!(differing, 0, "{name}: WASM/native channel differences");
+    }
+}

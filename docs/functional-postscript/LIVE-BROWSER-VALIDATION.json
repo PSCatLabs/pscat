@@ -1,0 +1,37 @@
+{
+  "browser": "Chrome/156.0.8078.48",
+  "transport": "file://",
+  "checks": [
+    "real local WASM typography execution",
+    "text edit changes glyph count and canvas",
+    "palette changes rendered pixels",
+    "invalid input rejected before PS execution",
+    "AOP inspection toggle changes only diagnostic mode",
+    "fault toggle changes actual entry/return/rejection counts",
+    "changed proof text changes counts",
+    "watch / stop / restart",
+    "actual Blob PNG download",
+    "desktop 1440x1100 and mobile 390x844 without horizontal overflow",
+    "introduction links and saved images",
+    "zero JavaScript exceptions",
+    "zero page HTTP(S) requests"
+  ],
+  "screenshots": [
+    "target/functional-live-type-desktop.png",
+    "target/functional-live-press-desktop.png",
+    "target/functional-live-press-mobile.png",
+    "target/functional-live-type-mobile.png"
+  ],
+  "output": {
+    "terrain": "enter type-terrain\nleave type-terrain\nglyphs=15\n",
+    "edited": "enter type-terrain\nleave type-terrain\nglyphs=14\n",
+    "press": "enter proof\nleave proof\nattempted=7\ncompleted=6\nrejected=1\nfault=obs-font-size-must-be-number\n",
+    "changedProof": "enter proof\nleave proof\nattempted=6\ncompleted=5\nrejected=1\nfault=obs-font-size-must-be-number\n"
+  },
+  "source_sha256": {
+    "live-studio.html": "4d417e7786adcd1aac9a6cdc6650140eeb9151c0179d238d1c30b232e5011691",
+    "studio.js": "705b4594f38a7fd15963cf8ffaf93ab90285cb54b5f5e7b078ec501c9d3c5925",
+    "studio.css": "c1a93c6490d0d4f9902c514b8a64084fbdf8ee6b4540996f9929f85bcf167f73",
+    "index.html": "6db1f2b3874af13f17a754e103c9d9c88472f569ba19d7ecf5bcf4b23394cd18"
+  }
+}

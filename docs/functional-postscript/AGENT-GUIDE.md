@@ -93,3 +93,14 @@ retry. Never assume failed map returns a partial output. Same-depth caller
 stack corruption is undetectable by the runtime guard: test actual values.
 See [ENGINE-FRICTION](ENGINE-FRICTION.md) for diagnostic limits and
 [IMPLEMENTATION](IMPLEMENTATION.md) before adding a combinator.
+
+
+## Measured type and diagnostic advice
+
+For a full text-record pipeline and a before/after/around proof that catches a
+real invalid input, see [the live studies](WASM-STUDIO.md). Use built-in outline
+fonts for portable charpath geometry. Font advances are not glyph ink bounds:
+compute the latter deliberately, and remember that pathbbox is in current user
+coordinates. AOP overlays belong to diagnostics; colour/style changes remain
+explicit drawing configuration. The browser executes the same PS sources,
+with no JavaScript substitutes for glyph geometry.

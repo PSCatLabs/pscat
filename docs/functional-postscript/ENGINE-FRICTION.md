@@ -70,6 +70,24 @@ no issues have been filed automatically.
   compact copy for sparse results against its additional allocation/copy cost.
 - **Core change required:** no. Deferred until artwork demonstrates the need.
 
+### B3. An offline file-URL WASM demo carries the whole engine/font payload
+
+- **Impact:** medium download/repository size; does not change render semantics.
+- **Classification/status:** measured packaging cost, not a new runtime dependency.
+- **Reproduction:** `python3 scripts/build_functional_studio.py` compresses the
+  existing WASM module and bundles its unchanged API and example sources.
+- **Expected/actual:** about 11.5 MB raw WASM and 7.1 MB generated JS; precise
+  sizes/hashes are in `assets/studio-manifest.json`. The original picture-only
+  page does not execute this bundle.
+- **Relevant source:** existing `scripts/build_wasm.sh`, `web/pscat.js`, new
+  `scripts/build_functional_studio.py`. Real file:// execution and no page network
+  requests were checked in Chrome; native/WASM full-buffer equality is tested.
+- **Suggested improvement:** optional smaller font/library bundles could reduce
+  weight, but need explicit feature/packaging design. No size optimization was
+  attempted or performance benefit claimed.
+- **Core change required:** no for the current bundled demo; optional build
+  configuration would be a separate platform effort.
+
 ## C. Usability friction / standard-language hazards
 
 ### C1. Executable values must be boxed when captured
@@ -136,6 +154,39 @@ no issues have been filed automatically.
   plus tests of representative values. Do not call these checks a type system.
 - **Core change required:** no for an external checker; full isolation would be
   a separate language/runtime project and is outside scope.
+
+### C5. Ink bounds are reported in the current user coordinate system
+
+- **Impact:** medium for diagnostic overlay correctness.
+- **Classification/status:** confirmed standard PS behavior; a demo bug was
+  fixed, not an interpreter defect.
+- **Reproduction:** translate a local glyph origin, construct charpath, and read
+  pathbbox. The values remain local user coordinates, not global page positions.
+- **Expected/actual:** pathbbox obeys the current CTM; treating its result as page
+  coordinates after grestore places diagnostic boxes at the wrong origin.
+- **Relevant source/tests:** `ty-bounds` in `examples/functional/type-common.ps`
+  explicitly adds the record baseline to local ink bounds;
+  `typography_layout_measures_advances_and_reports_bounds_in_page_space`.
+- **Suggested improvement:** keep coordinate-space contracts in mark/diagnostic
+  APIs and verify actual overlay positions. Do not change pathbbox semantics.
+- **Core change required:** no.
+
+### C6. Normal URL-fetch WASM loading does not make a file:// demo portable
+
+- **Impact:** medium for readers opening documentation directly.
+- **Classification/status:** confirmed browser origin/loading constraint, not a
+  PSCat engine bug. The existing Pscat API already offers instantiate(bytes).
+- **Reproduction:** normal `Pscat.load()` calls fetch for a `.wasm` URL; local
+  file fetch is restricted by browsers. A server normally avoids that constraint.
+- **Expected improvement:** open a self-contained local studio with no server.
+- **Actual solution/evidence:** a classic local JS script carries compressed
+  module bytes and source; native decompression plus a Blob module loads the
+  unchanged API and calls instantiate(bytes). Chrome checks show genuine
+  rendering, actual stdout and no HTTP(S) requests. Modern browser APIs are
+  required; saved previews remain available when unsupported.
+- **Relevant source:** `scripts/build_functional_studio.py`, studio.js and
+  `LIVE-BROWSER-VALIDATION.json`; detailed rebuilds in WASM-STUDIO.md.
+- **Core change required:** no. This is packaging around an existing supported API.
 
 ## D. General platform enhancements
 

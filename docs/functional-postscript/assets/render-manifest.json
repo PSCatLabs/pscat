@@ -39,5 +39,25 @@
     "file": "imperative.png",
     "page": "720x960",
     "sha256": "f32227096a8335f00957b3c0ea9421e66c1221acff7c252b19f47c93414b233d"
+  },
+  {
+    "file": "type-nocturne.png",
+    "page": "960x1200",
+    "sha256": "f134703ecaeaf3db9779cea6a0b030ed2b12c2f93b71d58f1cd1b45bfb997454"
+  },
+  {
+    "file": "type-sunprint.png",
+    "page": "960x1200",
+    "sha256": "4b602b4c3515086e56ae05f70c98e89dfcf4afab2c7da4f9e4117a56356d10f0"
+  },
+  {
+    "file": "press-inspected.png",
+    "page": "1280x960",
+    "sha256": "9abfae623f196e10726c0274c6de8da654c90b19594b441e6c098502210ca0e3"
+  },
+  {
+    "file": "press-clean.png",
+    "page": "1280x960",
+    "sha256": "c08674fa7a4e5825224b54340f700d2682d99cd9993433607a4dc899ba7b3d16"
   }
 ]
