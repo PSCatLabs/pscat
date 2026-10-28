@@ -151,6 +151,21 @@ fn count_width_ownership_and_repeated_calls_do_not_depend_on_caller_names() {
 }
 
 #[test]
+fn executable_strings_are_packed_as_bytes_without_executing_or_changing_them() {
+    let mut it = interpreter();
+    assert_true(
+        &mut it,
+        "/dictdepth countdictstack def \
+         /executable (pop) cvx def \
+         /executable load 1 5 qr--byte-data <403706f700> eq \
+         /executable load xcheck and \
+         () cvx 1 2 qr--byte-data <4000> eq and \
+         countdictstack dictdepth eq and",
+        "executable payload is raw data",
+    );
+}
+
+#[test]
 fn ghostscript_matches_every_reference_fixture_and_access_contract() {
     // Existing repository gs tests permit an unavailable optional Ghostscript.
     // Required rendered-QR decoding later has a separate, non-skipping gate.
@@ -173,6 +188,10 @@ fn ghostscript_matches_every_reference_fixture_and_access_contract() {
     }
     src.push_str(
         "\n/dictdepth countdictstack def \
+         (pop) cvx 1 5 qr--byte-data <403706f700> eq \
+         () cvx 1 2 qr--byte-data <4000> eq and \
+         countdictstack dictdepth eq and \
+         not { (FAIL executable string/frame) = 1 .quit } if \
          { (secret) noaccess 1 19 qr--byte-data } stopped \
          $error /command get /qr-data-must-be-readable eq and \
          countdictstack dictdepth eq and \

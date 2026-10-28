@@ -67,3 +67,12 @@ version/capacity selection, then QR-2B GF(256)/Reed–Solomon correction/interle
 verified against independent codewords. Then fixed-mask matrices and first
 decoded URL, before card art. See `docs/dev/design/QR_CODE.md` for the complete
 dependency sequence, provisional API, risks and physical-print acceptance.
+
+## Follow-up: executable byte strings
+
+The QR-2A plan review found that the initial packer stored executable strings
+under a bare `data` name, so accessing the payload executed it. Real Ghostscript
+confirmed an error and leaked dictionary frame for `() cvx`. Store a literal
+view with `cvlit` instead; input bytes and the caller's executable attribute
+remain unchanged. Added native and Ghostscript regressions for executable
+empty and `pop` payloads, including direct dictionary-depth preservation.
