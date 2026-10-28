@@ -66,6 +66,25 @@ try {
   const edited = await pixels(); assert.notEqual(edited,original);
   await evaluate(`document.getElementById('palette').value='1';document.getElementById('render').click()`);
   await done(); assert.notEqual(await pixels(),edited);
+  const treatments = await evaluate(`Array.from(document.getElementById('palette').options,o=>o.value)`);
+  const fonts = await evaluate(`Array.from(document.getElementById('type-font').options,o=>o.value)`);
+  assert.equal(treatments.length,6); assert.equal(fonts.length,8);
+  const treatmentPixels = new Set();
+  for (const value of treatments) {
+    await evaluate(`document.getElementById('palette').value='${value}';document.getElementById('palette').dispatchEvent(new Event('change'))`);
+    await done(); treatmentPixels.add(await pixels());
+  }
+  assert.equal(treatmentPixels.size,6,'treatments must produce distinct actual canvases');
+  const fontPixels = new Set();
+  for (const font of fonts) {
+    await evaluate(`document.getElementById('type-font').value='${font}';document.getElementById('type-font').dispatchEvent(new Event('change'))`);
+    await done(); fontPixels.add(await pixels());
+    assert.ok(await evaluate(`document.getElementById('source').value.includes('/TypeFont /${font} def')`));
+  }
+  assert.equal(fontPixels.size,8,'font choices must change the actual render');
+  report.treatments = treatments.length; report.fonts = fonts;
+  await evaluate(`document.getElementById('palette').value='4';document.getElementById('palette').dispatchEvent(new Event('change'));document.getElementById('type-font').value='Times-BoldItalic';document.getElementById('type-font').dispatchEvent(new Event('change'))`);
+  await done(); await screenshot('functional-live-neon-desktop');
   await evaluate(`document.getElementById('word-a').value=') quit (';document.getElementById('render').click()`);
   await done('invalid');
   await evaluate(`document.getElementById('word-a').value='CODE';document.querySelector('[data-mode="press"]').click()`);
@@ -108,7 +127,7 @@ try {
   assert.equal(await evaluate(`document.querySelectorAll('a[href^="live-studio.html"]').length>=4`),true);
   assert.equal(exceptions.length,0,JSON.stringify(exceptions));
   assert.ok(requests.every(u=>/^(file:|blob:|data:)/.test(u)),JSON.stringify(requests.filter(u=>/^https?:/.test(u))));
-  report.checks = ['real local WASM typography execution','text edit changes glyph count and canvas',
+  report.checks = ['real local WASM typography execution','six distinct print treatments; automatic selection rerenders','eight bundled font choices; automatic selection rerenders','text edit changes glyph count and canvas',
     'palette changes rendered pixels','invalid input rejected before PS execution',
     'AOP inspection toggle changes only diagnostic mode','fault toggle changes actual entry/return/rejection counts',
     'changed proof text changes counts','watch / stop / restart','actual Blob PNG download',
@@ -120,4 +139,4 @@ try {
   }
   await fs.writeFile(path.join(root,'docs/functional-postscript/LIVE-BROWSER-VALIDATION.json'),JSON.stringify(report,null,2)+'\n');
   console.log(JSON.stringify(report,null,2));
-} finally { ws.close(); }
+} finally { if(process.argv.includes('--close')) await call('Browser.close'); ws.close(); }

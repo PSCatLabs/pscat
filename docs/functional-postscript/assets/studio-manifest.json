@@ -87,9 +87,9 @@
     "build.rs": "500b346d86311f9e8fcbc9e62bd59e6848fb5d64ea5760c2cb8b079314c13162"
   },
   "source_sha256": {
-    "examples/functional/type-common.ps": "bc2ead7e0069add4d5edbe059fdc8fc1caaf58c75d7c18a0b2658a355dfeb7fa",
-    "examples/functional/type-terrain.ps": "79d27701050594ffd83d80cd7e9206f7a05c12bb6c56d166bfe36c7721fee418",
-    "examples/functional/observable-press.ps": "cb89b5e915ba7ebd06968c8de2e68b7f45f15b507ccbef243f90d7be933ad35e"
+    "examples/functional/type-common.ps": "b128c323dd200228dc0b857f01006f819825ee58aee5b4bfcab43e324dd196c7",
+    "examples/functional/type-terrain.ps": "0b5ac25101c715ce31f14fc316e19354f159050b1c87e7ae9f57e2b45978f915",
+    "examples/functional/observable-press.ps": "8daf473c55db9b768af6f1baa3d07f866f17f1175b91f996929ebca588d659f7"
   },
   "embedded_library_sha256": {
     "lib/functional.ps": "abb72487c15fd22e05a24738afdf265cdd241eae2cbfbb5f823f684145043ecc",

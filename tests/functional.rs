@@ -448,6 +448,34 @@ fn new_typography_and_aop_renders_match_saved_evidence_and_target_pixels() {
             "/Inspect false def (examples/functional/observable-press.ps) run",
             "enter proof\nleave proof\nattempted=7\ncompleted=6\nrejected=1\nfault=obs-font-size-must-be-number\n",
         ),
+        (
+            "type-blueprint",
+            960,
+            1200,
+            "/TypeStyle 2 def /TypeFont /AvantGarde-Demi def (examples/functional/type-terrain.ps) run",
+            "enter type-terrain\nleave type-terrain\nglyphs=15\n",
+        ),
+        (
+            "type-risograph",
+            960,
+            1200,
+            "/TypeStyle 3 def /TypeFont /Bookman-Demi def (examples/functional/type-terrain.ps) run",
+            "enter type-terrain\nleave type-terrain\nglyphs=15\n",
+        ),
+        (
+            "type-neon",
+            960,
+            1200,
+            "/TypeStyle 4 def /TypeFont /Times-BoldItalic def (examples/functional/type-terrain.ps) run",
+            "enter type-terrain\nleave type-terrain\nglyphs=15\n",
+        ),
+        (
+            "type-opart",
+            960,
+            1200,
+            "/TypeStyle 5 def /TypeFont /Courier-Bold def (examples/functional/type-terrain.ps) run",
+            "enter type-terrain\nleave type-terrain\nglyphs=15\n",
+        ),
     ] {
         let it = render_study(width, height, source);
         assert_eq!(it.captured_stdout(), expected.as_bytes());
@@ -470,7 +498,7 @@ fn new_typography_and_aop_renders_match_saved_evidence_and_target_pixels() {
             "/Inspect false def (examples/functional/observable-press.ps) run",
         );
         it.run_str(&format!(
-            "erasepage initgraphics 0.95 0.90 0.78 setrgbcolor [(G) 80 120 190 0] {target}"
+            "erasepage initgraphics 0.95 0.90 0.78 setrgbcolor [(G) 80 120 190 0 /Helvetica-Bold] {target}"
         ))
         .expect("isolated target");
         pair.push(it.gfx().pixmap.data().to_vec());
@@ -513,27 +541,57 @@ fn committed_live_wasm_payload_matches_the_native_studies() {
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
-    for (name, width, height, source) in [
+    let mut parity_cases = vec![
         (
-            "terrain",
+            "terrain".to_string(),
             960,
             1200,
-            "(examples/functional/type-terrain.ps) run",
+            "(examples/functional/type-terrain.ps) run".to_string(),
         ),
         (
-            "press",
+            "press".to_string(),
             1280,
             960,
-            "(examples/functional/observable-press.ps) run",
+            "(examples/functional/observable-press.ps) run".to_string(),
         ),
         (
-            "press-valid",
+            "press-valid".to_string(),
             1280,
             960,
-            "/Inspect false def /InjectFault false def /ProofText (DREAM) def (examples/functional/observable-press.ps) run",
+            "/Inspect false def /InjectFault false def /ProofText (DREAM) def (examples/functional/observable-press.ps) run".to_string(),
         ),
-    ] {
-        let native = render_study(width, height, source);
+    ];
+    for style in 1..6 {
+        parity_cases.push((
+            format!("style-{style}"),
+            960,
+            1200,
+            format!("/TypeStyle {style} def (examples/functional/type-terrain.ps) run"),
+        ));
+    }
+    let fonts = [
+        "Helvetica-Bold",
+        "Helvetica-BoldOblique",
+        "Times-Bold",
+        "Times-BoldItalic",
+        "Courier-Bold",
+        "Palatino-Bold",
+        "Bookman-Demi",
+        "AvantGarde-Demi",
+    ];
+    for (i, font) in fonts.iter().enumerate().skip(1) {
+        parity_cases.push((
+            format!("font-{i}"),
+            960,
+            1200,
+            format!(
+                "/TypeFont /{font} def /TypeStyle {} def (examples/functional/type-terrain.ps) run",
+                i % 6
+            ),
+        ));
+    }
+    for (name, width, height, source) in parity_cases {
+        let native = render_study(width, height, &source);
         let wasm = std::fs::read(scratch.join(format!("{name}.rgba"))).expect("WASM pixels");
         assert_eq!(wasm.len(), native.gfx().pixmap.data().len());
         let differing = wasm
@@ -542,5 +600,38 @@ fn committed_live_wasm_payload_matches_the_native_studies() {
             .filter(|(a, b)| a != b)
             .count();
         assert_eq!(differing, 0, "{name}: WASM/native channel differences");
+    }
+}
+
+#[test]
+fn selected_fonts_are_captured_and_short_runs_fit_their_ink_boxes() {
+    let fonts = [
+        "Helvetica-Bold",
+        "Helvetica-BoldOblique",
+        "Times-Bold",
+        "Times-BoldItalic",
+        "Courier-Bold",
+        "Palatino-Bold",
+        "Bookman-Demi",
+        "AvantGarde-Demi",
+    ];
+    for font in fonts {
+        for word in ["I", "J", "Q", "WIDE", "MWMW"] {
+            let source = format!(
+                "/TypeFont /{font} def (examples/functional/type-common.ps) run
+                 /r ({word}) 93 267 764 ty-layout def
+                 r 0 get 5 get /{font} eq
+                 r {{ty-bounds aload pop
+                    477.02 le exch 857.02 le and
+                    exch 200 ge and exch 92.98 ge and}} fp-map
+                 true {{and}} fp-fold
+                 /before r 0 get ty-bounds def
+                 /TypeFont /Courier-Bold def
+                 /after r 0 get ty-bounds def
+                 [0 1 2 3] {{dup before exch get exch after exch get sub abs 0.001 lt}} fp-map
+                 true {{and}} fp-fold"
+            );
+            assert_eq!(eval(&source), ["true", "true", "true"], "{font}/{word}");
+        }
     }
 }

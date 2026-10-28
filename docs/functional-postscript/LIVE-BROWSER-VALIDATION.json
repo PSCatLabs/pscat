@@ -3,6 +3,8 @@
   "transport": "file://",
   "checks": [
     "real local WASM typography execution",
+    "six distinct print treatments; automatic selection rerenders",
+    "eight bundled font choices; automatic selection rerenders",
     "text edit changes glyph count and canvas",
     "palette changes rendered pixels",
     "invalid input rejected before PS execution",
@@ -18,6 +20,7 @@
   ],
   "screenshots": [
     "target/functional-live-type-desktop.png",
+    "target/functional-live-neon-desktop.png",
     "target/functional-live-press-desktop.png",
     "target/functional-live-press-mobile.png",
     "target/functional-live-type-mobile.png"
@@ -28,10 +31,21 @@
     "press": "enter proof\nleave proof\nattempted=7\ncompleted=6\nrejected=1\nfault=obs-font-size-must-be-number\n",
     "changedProof": "enter proof\nleave proof\nattempted=6\ncompleted=5\nrejected=1\nfault=obs-font-size-must-be-number\n"
   },
+  "treatments": 6,
+  "fonts": [
+    "Helvetica-Bold",
+    "Helvetica-BoldOblique",
+    "Times-Bold",
+    "Times-BoldItalic",
+    "Courier-Bold",
+    "Palatino-Bold",
+    "Bookman-Demi",
+    "AvantGarde-Demi"
+  ],
   "source_sha256": {
-    "live-studio.html": "4d417e7786adcd1aac9a6cdc6650140eeb9151c0179d238d1c30b232e5011691",
-    "studio.js": "705b4594f38a7fd15963cf8ffaf93ab90285cb54b5f5e7b078ec501c9d3c5925",
-    "studio.css": "c1a93c6490d0d4f9902c514b8a64084fbdf8ee6b4540996f9929f85bcf167f73",
+    "live-studio.html": "6064aef50b6766856b0ceea67330605ee335c18716d4ad4b161e049c2868facc",
+    "studio.js": "db739cd73a09bde4bbd6344c2c4fd5a1e571f98f2853c26edf8db2ab5fda4710",
+    "studio.css": "8f48e321641bd43c7ca2933e9a3757337405c569d224cc687a7f871465dea725",
     "index.html": "6db1f2b3874af13f17a754e103c9d9c88472f569ba19d7ecf5bcf4b23394cd18"
   }
 }

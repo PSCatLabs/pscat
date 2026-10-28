@@ -4,7 +4,40 @@ Review `feature/functional-postscript` against its base `ee27313` in this
 checkout. Do not merge. Codex implemented the feature; this handoff does not
 substitute for your independent correctness and perceptual review.
 
-## Latest addition — live WASM studies (2026-10-28)
+## Latest addition — print treatments and typefaces (2026-10-28)
+
+The live studio now offers six independent treatments (Nocturne, Sunprint,
+Blueprint, Risograph, Neon and Op Art) and eight bundled outline faces. Font
+selection applies to both studies; either selector rerenders actual WASM.
+No font download, dependency or engine change was added.
+
+- Glyph records capture the selected font as their sixth field. Layout measures
+  advances and ink bounds, including italic overhangs, and fits width and height.
+  Short runs are centered rather than enlarged beyond the height cap.
+- Four additional treatment/font PNGs bring the render manifest to 15 images.
+  The runtime bundle contains the updated PS sources and the same engine/API.
+- The feature suite now has 29 tests. Native/WASM equality covers 15
+  representative full buffers. The real payload also executes all 48
+  font/treatment combinations and all eight proof fonts without substitution
+  warnings. Font-layout tests cover five varied words per face and verify
+  existing records retain their captured font.
+- The saved browser report covers all six treatments and eight fonts,
+  automatic rerendering, export, AOP controls and desktop/mobile layout. Its
+  source hashes match the current UI. See [WASM-STUDIO.md](WASM-STUDIO.md) for
+  controls, contracts and reproduction commands.
+
+Give particular attention to the extent fold and captured-font record changes
+in type-common.ps. The independent review remains deferred at the user's
+request. Final validation and reboot recovery are recorded in PROGRESS.md.
+
+Final post-recovery gate: **2,536 passed, 2 existing ignored, zero failures**
+across 113 result groups, including all 29 feature tests. CI-profile build,
+clippy (`-D warnings`), formatting and all PS selftests pass. Offline checks
+validate 15 saved image hashes, the actual bundle/provenance and 14 executable
+documentation examples; 108 Markdown files have no broken links. No compiler
+warnings remain after rebuilding the disk-damaged cache. Gallery/licences pass.
+
+## Previous addition — live WASM studies (2026-10-28)
 
 The user requested more ambitious typography and AOP examples, then an actual
 WASM-rendered HTML showcase. Review remains deferred at the user's request;
@@ -32,7 +65,7 @@ no Opus reviewer has been invoked.
 - Three additional Rust tests bring the feature suite to 28. All three tested
   WASM scenes match native **full pixel buffers**, and diagnostics-disabled
   observation preserves the original target at the same coordinates.
-- Latest full gate: **2,535 passed, 2 existing ignored, 0 failed**; build, clippy,
+- Full gate at the live-studies checkpoint: **2,535 passed, 2 existing ignored, 0 failed**; build, clippy,
   formatting and all selftests/drivers PASS. Tracked Markdown: 108 files with no
   broken links; gallery and licence checks PASS. Offline checker validates 50
   local HTML targets, 12 image elements, 11 render hashes and the actual payload.

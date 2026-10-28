@@ -8,6 +8,19 @@
   let renderer, generation = 0, mode = location.hash === '#press' ? 'press' : 'terrain';
   const controls = ['render', 'watch'];
   const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
+  const treatments = [
+    'Warm colour contours and a dimensional shadow on a midnight field.',
+    'Tidal colour contours with a warm paper ground and red offset shadow.',
+    'A fine engraved grid inside blue glyphs, with pale technical linework.',
+    'Coral-to-gold colour, paper-coloured screening and a teal overprint shadow.',
+    'Layered cyan, pink and cream outlines on a midnight-purple field.',
+    'High-contrast optical waves cut through dark letterforms on ivory paper.'
+  ];
+  function fontSetup() {
+    const name = $('type-font').value;
+    if (!/^[A-Za-z][A-Za-z0-9-]*$/.test(name)) throw new Error('Choose a listed typeface.');
+    return '/TypeFont /' + name + ' def\n';
+  }
   function message(text, error = false) {
     status.textContent = text;
     status.classList.toggle('error', error);
@@ -22,12 +35,12 @@
   function configured() {
     if (mode === 'terrain') {
       const words = ['word-a', 'word-b', 'word-c'].map(word);
-      const setup = '/TypeStyle ' + Number($('palette').value) + ' def\n' +
+      const setup = fontSetup() + '/TypeStyle ' + Number($('palette').value) + ' def\n' +
         words.map((text, i) => '/Word' + 'ABC'[i] + ' ' + literal(text) + ' def').join('\n');
       return {width:960, height:1200, setup, body:window.PSCAT_STUDIO_BUNDLE.programs.terrain,
         command:"target/ci/pscat --page 960x1200 --png type.png -e\n'" + setup + "\n(examples/functional/type-terrain.ps) run'"};
     }
-    const setup = '/Inspect ' + $('inspect').checked + ' def\n/InjectFault ' + $('inject-fault').checked +
+    const setup = fontSetup() + '/Inspect ' + $('inspect').checked + ' def\n/InjectFault ' + $('inject-fault').checked +
       ' def\n/ProofText ' + literal(word('proof-text')) + ' def';
     return {width:1280, height:960, setup, body:window.PSCAT_STUDIO_BUNDLE.programs.press,
       command:"target/ci/pscat --page 1280x960 --png proof.png -e\n'" + setup + "\n(examples/functional/observable-press.ps) run'"};
@@ -37,6 +50,7 @@
     $('terrain-fields').hidden = press; $('press-fields').hidden = !press;
     $('terrain-explanation').hidden = press; $('press-explanation').hidden = !press;
     $('work-title').textContent = press ? 'THE OBSERVABLE PRESS' : 'TYPE BECOMES TERRAIN';
+    $('style-note').textContent = treatments[Number($('palette').value)];
     document.querySelectorAll('[data-mode]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.mode === mode)));
   }
   async function render(watch = false) {
@@ -90,6 +104,9 @@
   $('controls').addEventListener('submit', event => {event.preventDefault(); document.documentElement.dataset.renderState = 'running'; render();});
   $('watch').addEventListener('click', () => {document.documentElement.dataset.renderState = 'running'; render(true);});
   $('stop').addEventListener('click', stop);
+  ['type-font', 'palette'].forEach(id => $(id).addEventListener('change', () => {
+    view(); document.documentElement.dataset.renderState = 'running'; render();
+  }));
   document.querySelectorAll('[data-mode]').forEach(button => button.addEventListener('click', () => {
     ++generation; mode = button.dataset.mode; view(); document.documentElement.dataset.renderState = 'running'; render();
   }));

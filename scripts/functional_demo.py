@@ -19,6 +19,10 @@ STYLES = ("ultraviolet", "sunprint", "blue-hour")
 STUDY_RENDERS = (
     ("type-nocturne", "960x1200", "(examples/functional/type-terrain.ps) run"),
     ("type-sunprint", "960x1200", "/TypeStyle 1 def (examples/functional/type-terrain.ps) run"),
+    ("type-blueprint", "960x1200", "/TypeStyle 2 def /TypeFont /AvantGarde-Demi def (examples/functional/type-terrain.ps) run"),
+    ("type-risograph", "960x1200", "/TypeStyle 3 def /TypeFont /Bookman-Demi def (examples/functional/type-terrain.ps) run"),
+    ("type-neon", "960x1200", "/TypeStyle 4 def /TypeFont /Times-BoldItalic def (examples/functional/type-terrain.ps) run"),
+    ("type-opart", "960x1200", "/TypeStyle 5 def /TypeFont /Courier-Bold def (examples/functional/type-terrain.ps) run"),
     ("press-inspected", "1280x960", "(examples/functional/observable-press.ps) run"),
     ("press-clean", "1280x960", "/Inspect false def (examples/functional/observable-press.ps) run"),
 )

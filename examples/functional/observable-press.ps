@@ -4,6 +4,7 @@
 %%Pages: 1
 %%EndComments
 (examples/functional/type-common.ps) run
+/ty.max-height 170 def
 /Inspect where {pop} {/Inspect true def} ifelse
 /InjectFault where {pop} {/InjectFault true def} ifelse
 /ProofText where {pop} {/ProofText (SIGNAL) def} ifelse
@@ -23,7 +24,7 @@
   gsave
     0.22 0.79 0.72 setrgbcolor 1 setlinewidth
     obs.b aload pop exch 3 index sub exch 2 index sub rectstroke
-    /Helvetica-Bold findfont obs.rec 3 get scalefont setfont
+    obs.rec 5 get findfont obs.rec 3 get scalefont setfont
     /obs.advance obs.rec 0 get stringwidth pop def
     newpath obs.rec 1 get obs.rec 2 get 14 sub moveto
     obs.advance 0 rlineto stroke
@@ -56,7 +57,7 @@
   % record on failure. Catch exactly that known fixture, discard the record,
   % and retain the real error command for the visible failure readout.
   InjectFault {
-  { [(X) 0 0 (huge) 99] obs.mark } stopped {
+  { [(X) 0 0 (huge) 99 TypeFont] obs.mark } stopped {
     pop
     $error /command get dup /obs-font-size-must-be-number ne
       { unexpected-observable-press-error } if

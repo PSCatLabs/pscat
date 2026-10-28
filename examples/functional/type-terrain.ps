@@ -35,7 +35,8 @@
     /Helvetica-Bold findfont 17 scalefont setfont
     67 1030 moveto (TYPE BECOMES TERRAIN) show
     /Courier findfont 11 scalefont setfont
-    67 1010 moveto (ONE GLYPH VOCABULARY / THREE MEASURED RUNS / TWO COLOUR FIELDS) show
+    67 1010 moveto (FACE / ) show TypeFont 48 string cvs show
+    (     TREATMENT / ) show ty.style /Label get show
   grestore
   ty.runs { /ty.draw load fp-each } fp-each
   gsave

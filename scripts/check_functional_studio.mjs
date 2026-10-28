@@ -26,6 +26,12 @@ const cases = [
     setup:'/Inspect false def /InjectFault false def /ProofText (DREAM) def\n',
     output:'enter proof\nleave proof\nattempted=5\ncompleted=5\nrejected=0\nfault=none\n'}
 ];
+const fonts = ['Helvetica-Bold','Helvetica-BoldOblique','Times-Bold','Times-BoldItalic',
+               'Courier-Bold','Palatino-Bold','Bookman-Demi','AvantGarde-Demi'];
+for (let style=1;style<6;style++) cases.push({name:'style-'+style,mode:'terrain',width:960,height:1200,
+  setup:'/TypeStyle '+style+' def\n',output:cases[0].output});
+for (let i=1;i<fonts.length;i++) cases.push({name:'font-'+i,mode:'terrain',width:960,height:1200,
+  setup:'/TypeFont /'+fonts[i]+' def /TypeStyle '+(i%6)+' def\n',output:cases[0].output});
 for (const test of cases) {
   assert.equal(ps.run(test.setup + bundle.programs[test.mode], test.width, test.height), 0, ps.error);
   assert.equal(ps.output, test.output, test.name);
@@ -34,3 +40,18 @@ for (const test of cases) {
   if (outDir) await fs.writeFile(path.join(outDir, test.name + '.rgba'), ps.pixels());
   console.log(test.name + ': WASM executed; actual stdout and dimensions match');
 }
+
+// Exercise every offered font/treatment combination without writing 48 copies
+// of the canvas. Representative full buffers above are compared with native.
+for (const font of fonts) for (let style=0;style<6;style++) {
+  const setup='/TypeFont /'+font+' def /TypeStyle '+style+' def\n';
+  assert.equal(ps.run(setup+bundle.programs.terrain,960,1200),0,font+'/'+style+': '+ps.error);
+  assert.equal(ps.output,cases[0].output);
+  assert.equal(ps.warnings.length,0,font+': font stand-in');
+}
+for (const font of fonts) {
+  assert.equal(ps.run('/TypeFont /'+font+' def\n'+bundle.programs.press,1280,960),0,ps.error);
+  assert.equal(ps.output,cases[1].output);
+  assert.equal(ps.warnings.length,0,font+': proof font stand-in');
+}
+console.log('all 48 font/treatment combinations and all 8 AOP proof fonts execute without warnings');

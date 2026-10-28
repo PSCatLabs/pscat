@@ -7,7 +7,7 @@ checkpoint hashes are recorded in [PROGRESS](PROGRESS.md) and the
 
 ## Automated coverage
 
-- [tests/functional.rs](../../tests/functional.rs): 28 behavioral and documentation tests. Empty,
+- [tests/functional.rs](../../tests/functional.rs): 29 behavioral and documentation tests. Empty,
   singleton and nested arrays; order and noncommutative fold; composition
   boundaries/associativity; arbitrary executable captured data; dictionary
   lifetime vs dynamic lookup; caller `count`/`currentdict`/`def`; nesting and
@@ -22,11 +22,15 @@ checkpoint hashes are recorded in [PROGRESS](PROGRESS.md) and the
   Rust test prints a skip; local validation used installed gs. This is semantic
   agreement on the corpus, not proof of universal interpreter compatibility.
 - Three additional study tests check measured glyph advances/page-space bounds,
-  four saved typography/AOP buffers, unchanged target pixels at the **same**
+  eight saved typography/AOP buffers, unchanged target pixels at the **same**
   coordinates, fault-disable/changed-word counts, and full native/WASM equality
-  for three programs from the exact committed offline bundle. Translated proof
+  for 15 representative configurations from the exact committed offline bundle. Translated proof
   rows can differ by one anti-alias LSB due to coordinate precision, so they
   are not used as a same-pixel-position control.
+- A font-layout regression checks five short/varied words for all eight
+  bundled faces: width/height bounds, italic sidebearings and retention of the
+  captured font even if TypeFont changes later. The WASM script also exercises
+  all 48 font/treatment combinations and all eight proof fonts without warnings.
 - Four `%%SelfTest` blocks next to guards in
   [functional.ps](../../lib/functional.ps) and [aspect.ps](../../lib/aspect.ps)
   assert exact named guards, including wrong container/quotation types,
@@ -42,7 +46,7 @@ checkpoint hashes are recorded in [PROGRESS](PROGRESS.md) and the
   complete Markdown/skill PostScript examples. The Rust integration test runs
   this checker with its own PSCat binary. Browser layout/interactivity are
   separately checked in headless Chrome; no browser dependency is added to CI.
-  The checker also verifies all eleven image hashes and decompressed WASM/API,
+  The checker also verifies all fifteen image hashes and decompressed WASM/API,
   example and engine-source provenance. `scripts/check_functional_studio.mjs`
   executes the exact bundle under Node without fetching or compiling WASM.
 
@@ -137,7 +141,7 @@ node scripts/check_functional_browser.mjs 9338
 ```
 
 The optional standard-library CDP script verifies actual WASM execution over
-file://, text and palette changes, diagnostic/fault toggles, changed-word counts,
+file://, all six treatments and eight fonts, text changes, diagnostic/fault toggles, changed-word counts,
 invalid-input rejection, watch/stop/restart, actual PNG download and desktop/mobile
 layout. It records current page-source hashes and results in
 [LIVE-BROWSER-VALIDATION.json](LIVE-BROWSER-VALIDATION.json). This supplements the

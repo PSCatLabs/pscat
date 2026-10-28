@@ -12,25 +12,60 @@ The original [introduction](index.html) still includes saved, inspectable output
 [Source](../../examples/functional/type-terrain.ps), shared
 [glyph vocabulary](../../examples/functional/type-common.ps).
 
-Each word is mapped to one-byte character strings and measured advances using
-bundled Helvetica-Bold at a reference size. Fold sums advances to fit a fixed
-width. A second fold returns fresh cursor/index tuples and writes records to a
-fresh, private output array: `[character x baseline size index]`. No source text
-or incoming records are mutated. This is controlled builder mutation, not a
-claim of deep functional immutability or kerning-aware shaping.
+Each word is mapped to character strings, measured advances and ink bounds
+using the selected bundled outline face at a reference size. An extent fold
+combines advances, sidebearings, overhangs and vertical bounds. The run scales
+to fit **both** width and height and is centered when height is limiting. This
+keeps short words such as I or J from becoming oversized. The terrain cap is
+210 user units; the proof cap is 170 so its labels stay clear.
 
-`fp-curry` captures a style dictionary into `ty-letter`; nested `fp-each` visits
-the three runs and their glyphs. `charpath` supplies actual outline geometry.
-The outline clips a multistop gradient and vector contour lines. Repeated
-translated glyphs supply the extrusion. One palette value changes the whole
-colour treatment. `aop-count` observes actual glyph calls; a trace wraps the
-score. Default WORDS / MAKE / WORLDS executes 15 glyphs.
+A layout fold returns fresh cursor/index tuples and writes records into a fresh
+private output array: `[character x baseline size index font-name]`. The font is
+captured in each record; changing TypeFont later cannot silently change its
+outlines, metrics or diagnostic bounds. No incoming text/records are mutated.
+This is controlled builder mutation, not deep functional immutability or
+kerning-aware shaping.
 
-Controls rerender text and palette, or step the same program visibly. The
-interactive input is intentionally one to ten A–Z letters per line. PostScript
-strings here are bytes, not Unicode graphemes. Layout sums character advances;
-it does not implement kerning, ligatures or general language shaping. Existing
-font and charpath semantics remain unchanged. No external font packs are used.
+`fp-curry` captures a treatment dictionary into `ty-letter`; nested `fp-each`
+visits runs and glyphs. `charpath` supplies real outline geometry.
+`aop-count` observes actual glyph calls; the default WORDS / MAKE / WORLDS score
+still executes 15 glyphs.
+
+The shared **Typeface** selector applies to both studies:
+
+- Helvetica-Bold and Helvetica-BoldOblique
+- Times-Bold and Times-BoldItalic
+- Courier-Bold
+- Palatino-Bold
+- Bookman-Demi
+- AvantGarde-Demi
+
+All eight are in PSCat's bundled standard 35: no font downloads or packs. Native
+configuration is `/TypeFont /Times-BoldItalic def`, for example. The common
+vocabulary rejects faces outside this list rather than relying on substitution.
+
+Six independent **Print treatment** choices are available in terrain:
+
+| TypeStyle | Treatment | Drawing behavior |
+|---|---|---|
+| 0 | Nocturne | Solar colour contours, midnight ground and extrusion. |
+| 1 | Sunprint | Tidal contours, warm paper and a red shadow. |
+| 2 | Blueprint | Fine engraved grid inside blue glyphs, pale contours. |
+| 3 | Risograph | Coral/gold colour, paper-coloured dot screening, teal shadow. |
+| 4 | Neon | Layered cyan, pink and cream outline strokes on purple. |
+| 5 | Op Art | Black/ivory optical waves with a pale dimensional shadow. |
+
+Font and treatment selection automatically rerenders the actual PS; all 48
+combinations are exercised under WASM. These are deterministic vector marks,
+not raster textures, imported images or approximated JavaScript fonts. Preset
+PNG examples pair some treatments with different faces to show the range;
+choosing a treatment in the studio does not change the independently selected
+font. The typography's captions use fixed interface faces for consistency.
+
+Text controls remain one to ten A–Z letters per line. PS strings here are bytes,
+not Unicode graphemes. Layout uses advances and ink bounds but does not implement
+kerning, ligatures or general shaping. Existing font/charpath semantics are
+unchanged. Use Render now or Watch it draw after editing words.
 
 ### The observable press
 
@@ -90,9 +125,14 @@ target/ci/pscat --page 1280x960 --lint-strict --png clean.png \
 python3 scripts/functional_demo.py render
 ```
 
-The render script now also writes `type-nocturne.png`, `type-sunprint.png`,
-`press-inspected.png`, and `press-clean.png` under [assets/](assets/). All eleven
-saved renderings are covered by the hash manifest.
+The render script writes the six `type-*.png` treatments and two `press-*.png`
+proof views under [assets/](assets/), along with the original garden artifacts.
+All fifteen saved renderings are covered by the hash manifest. For example:
+
+```sh
+target/ci/pscat --page 960x1200 --lint-strict --png neon.png \
+  -e '/TypeStyle 4 def /TypeFont /Times-BoldItalic def (examples/functional/type-terrain.ps) run'
+```
 
 ## How file:// execution works
 
@@ -174,9 +214,12 @@ python3 -c 'from pathlib import Path; p=Path("docs/functional-postscript/assets/
 
 ## Validation scope
 
-The Node check executes actual typography, decorated/failing proof and a changed
-word with fault disabled. Native integration compares complete pixel buffers
-and stdout. Browser checks exercise text/palette changes, inspection/fault
+The Node check executes all 48 font/treatment combinations and all eight AOP
+proof fonts without substitutions. Native integration compares complete pixel
+buffers and stdout for 15 representative configurations; saved outputs and
+same-coordinate target identity have separate checks. A layout regression
+checks I, J, Q, WIDE and MWMW for all fonts, including height bounds, negative
+sidebearings and captured-font identity after TypeFont changes. Browser checks exercise text/palette changes, inspection/fault
 toggles, changed word counts, invalid input, stop/restart, desktop/mobile layout,
 PNG export and source display, with no page HTTP(S) requests. See the current
 validation record in [PROGRESS](PROGRESS.md). These checks support the included

@@ -182,3 +182,76 @@ The active human entry point is `docs/functional-postscript/live-studio.html`;
 `#press` selects the AOP study directly. Both are linked from index.html.
 The feature is complete and validated; commit/push remains confined to
 `feature/functional-postscript`. Opus review is intentionally left for later.
+
+## 2026-10-28 — six treatments and eight bundled typefaces
+
+User requested additional live-print styles and font selection. The existing
+feature branch and deferred independent-review workflow remain in force.
+
+- Added Blueprint (engraved grid), Risograph (dot screen/teal overprint), Neon
+  (layered outline strokes), and Op Art (optical waves), alongside Nocturne and
+  Sunprint. Treatment and font selectors rerender automatically through WASM.
+- Shared font selection works in both typography and AOP proof: Helvetica Bold/
+  Bold Oblique, Times Bold/Bold Italic, Courier Bold, Palatino Bold, Bookman Demi,
+  and Avant Garde Demi. All are bundled outline faces; no downloads/dependencies.
+- Glyph records now capture the font name as a sixth field. Outlines, measured
+  advances and AOP ink bounds all use that stored font. Later TypeFont changes
+  cannot silently change an existing run.
+- Layout now measures ink extents as well as advances, handles negative italic
+  sidebearings, fits both width and height, and centers height-limited short
+  words. The typography/proof height caps are 210/170 user units respectively.
+- Rebuilt the local runtime source bundle; no engine/API/module code change.
+  Regenerated the saved typography examples and added four representative
+  style/font PNGs; 15 total images are in the render manifest.
+- Targeted suite: 29 PASS. Font-layout tests cover I/J/Q/WIDE/MWMW for all eight
+  faces; 15 representative full buffers match native and WASM. All 48 font/style
+  combinations and all eight AOP proof fonts execute without substitution notes.
+- Chrome file:// validation passed six distinct treatments, eight font choices,
+  automatic rerendering, text/diagnostic/fault controls, stop/restart, PNG export,
+  desktop/mobile layout, zero JS exceptions and zero page HTTP(S) requests.
+  Screenshots inspected; current UI hashes match LIVE-BROWSER-VALIDATION.json.
+- Disk pressure interrupted one test link (rust-objcopy reported no space and
+  left an incomplete executable). Cleared only this checkout's generated dev/
+  release caches and rebuilt the test successfully; no source or user files
+  were removed and no test was weakened. Remaining checks use the existing ci
+  cache to avoid regenerating large debug artifacts on the constrained disk.
+- Remaining: full gate, tracked link/licence checks, commit and feature-only push.
+
+### Reboot recovery
+
+The Mac mini reboot interrupted the closing validation/commit step. All staged
+source, image, bundle and documentation changes survived; HEAD remained
+`e8d6cf2`. Temporary validation logs did not survive. The saved browser report
+still matches all four current UI source hashes, so that completed browser run
+is retained rather than represented as a new run.
+
+After recovery, disk space was available again. The first full-suite retry found
+cached incomplete executables left by the earlier disk failure (`drykit` could
+not execute). `cargo clean -p pscat --profile ci` removed only this checkout's
+generated package artifacts (713 files, 1.2 GiB); dependencies and source were
+retained. Rebuilding and running the gate with `-j 1` avoids the previous peak
+parallel-link disk use. This is a build-cache failure, not an interpreter defect.
+
+Offline documentation/provenance checks, all 14 executable Markdown/skill
+examples, 108 tracked Markdown files, gallery and licence checks pass after
+the reboot. Final build/suite/selftest results follow below.
+
+### Final validation after recovery
+
+- `cargo build --profile ci --locked -j 1`: PASS.
+- `cargo test --profile ci -j 1`: **2,536 passed, 2 existing ignored, 0 failed**
+  across 113 result groups, with no compiler warnings. All 29 feature tests pass,
+  including the bundled WASM matrix and 15 native/WASM pixel comparisons.
+- `cargo clippy --profile ci --all-targets -j 1 -- -D warnings`,
+  `cargo fmt --all -- --check`, and
+  `PSCAT_PROFILE=ci CARGO_BUILD_JOBS=1 ./scripts/selftest.sh`: PASS.
+- Offline checker: 50 local targets, 12 image elements, 15 render hashes,
+  four metric cells, actual payload/provenance and 14 executable examples PASS.
+- 108 tracked Markdown files: zero broken links; gallery and licences PASS.
+  Existing browser-report UI hashes match; four new saved artwork previews
+  inspected again after recovery. No additional browser run is claimed.
+- Logs: `/tmp/functional-fonts-{build,full-suite,clippy,selftests}.log`.
+- Remote fetch confirmed the feature branch had no divergent commits. Main has
+  advanced independently; no main merge/rebase or other checkout was touched.
+- No changes to core Rust, dependency manifests or the browser API. Independent
+  Opus review remains deliberately outstanding.

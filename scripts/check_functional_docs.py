@@ -81,7 +81,8 @@ def check():
     html = (DOCS / "index.html").read_text()
     manifest = json.loads((DOCS / "assets/render-manifest.json").read_text())
     expected_assets = {"ultraviolet", "sunprint", "blue-hour", "imperative", "ground", "detail", "primitives",
-                       "type-nocturne", "type-sunprint", "press-inspected", "press-clean"}
+                       "type-nocturne", "type-sunprint", "type-blueprint", "type-risograph",
+                       "type-neon", "type-opart", "press-inspected", "press-clean"}
     assert {Path(r["file"]).stem for r in manifest} == expected_assets, "render manifest missing a study"
     for record in manifest:
         path = DOCS / "assets" / record["file"]
