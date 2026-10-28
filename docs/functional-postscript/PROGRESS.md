@@ -255,3 +255,7 @@ the reboot. Final build/suite/selftest results follow below.
   advanced independently; no main merge/rebase or other checkout was touched.
 - No changes to core Rust, dependency manifests or the browser API. Independent
   Opus review remains deliberately outstanding.
+
+`c584d0f` commits the six-treatment/eight-font update and complete post-recovery
+validation evidence. The following documentation checkpoint records that hash;
+both belong exclusively to `feature/functional-postscript`.

@@ -146,7 +146,10 @@ behavior. Guards use PSCat's existing descriptive undefined-name convention.
 - `4995924` — original completed implementation handoff.
 - `6593697` — live offline WASM studio, measured typography, observable press,
   generated payload/provenance, native/WASM tests and updated documentation.
-- The final live-studio validation note follows these; inspect
+- `e8d6cf2` — completed live-studies validation record.
+- `c584d0f` — six print treatments, eight captured bundled typefaces, fitted
+  glyph layout, regenerated examples and expanded WASM/native validation.
+- The closing checkpoint note follows these; inspect
   `git log --oneline ee27313..HEAD` for the full final sequence.
 
 ## Reproduce and verify
