@@ -1,0 +1,72 @@
+%!PS-Adobe-3.0
+% Native QR Model 2 library -- incremental implementation.
+% Currently only byte-segment packing; this does not generate a QR symbol.
+% Load with (lib/qr.ps) run. No dependencies and no drawing on load.
+% Code: MIT OR Apache-2.0, as the other lib/*.ps libraries.
+%
+% qr--byte-data: readable-string version data-capacity -> fresh-string
+% Internal seam: capacity is supplied by the future version/ECC planner.
+% It is NOT checked against a version/ECC table here. Version is 1..40;
+% capacity is a positive integer <=2956 (the largest Model 2 data area).
+% Input is raw bytes; no Unicode conversion, ECI or mode optimization.
+%
+% Validate before begin: named failures must leave no private dictionary open.
+%%SelfTest: qr-byte-data-invalid-arguments
+% { () 1 19.0 qr--byte-data } /qr-data-capacity-must-be-integer (real capacity) mustguard
+% { () 1 0 qr--byte-data } /qr-data-capacity-must-be-in-1-2956 (zero capacity) mustguard
+% { () 1 2957 qr--byte-data } /qr-data-capacity-must-be-in-1-2956 (large capacity) mustguard
+% { () 1.0 19 qr--byte-data } /qr-data-version-must-be-integer (real version) mustguard
+% { () 0 19 qr--byte-data } /qr-data-version-must-be-in-1-40 (zero version) mustguard
+% { () 41 19 qr--byte-data } /qr-data-version-must-be-in-1-40 (large version) mustguard
+% { [] 1 19 qr--byte-data } /qr-data-must-be-a-string (array payload) mustguard
+% { 256 string 9 300 qr--byte-data } /qr-data-count-does-not-fit-version (8-bit count overflow) mustguard
+% { (AB) 1 3 qr--byte-data } /qr-data-does-not-fit-capacity (payload overflow) mustguard
+%%EndSelfTest
+%%SelfTest: qr-byte-data-packing
+% () 1 2 qr--byte-data <4000> eq (empty byte segment) mustbe
+% (A) 1 3 qr--byte-data <401410> eq (exact fit and terminator) mustbe
+% () 1 5 qr--byte-data <4000ec11ec> eq (alternating pad bytes) mustbe
+% <00ff> 10 5 qr--byte-data <4000200ff0> eq (16-bit count and raw bytes) mustbe
+%%EndSelfTest
+% @internal
+/qr--byte-data {
+  dup type /integertype ne { qr-data-capacity-must-be-integer } if
+  dup 1 lt 1 index 2956 gt or { qr-data-capacity-must-be-in-1-2956 } if
+  1 index type /integertype ne { qr-data-version-must-be-integer } if
+  1 index dup 1 lt exch 40 gt or { qr-data-version-must-be-in-1-40 } if
+  2 index type /stringtype ne { qr-data-must-be-a-string } if
+  2 index rcheck not { qr-data-must-be-readable } if
+  1 index 10 lt {
+    2 index length 255 gt { qr-data-count-does-not-fit-version } if
+  } if
+  2 index length 2 index 10 lt { 2 } { 3 } ifelse add
+  1 index gt { qr-data-does-not-fit-capacity } if
+
+  12 dict begin
+    /capacity exch def /version exch def /data exch def
+    /out capacity string def /n data length def
+    /header version 10 lt { 2 } { 3 } ifelse def
+    % Mode 0100 plus an 8/16-bit count leaves the stream nibble-aligned.
+    header 2 eq {
+      out 0 64 n -4 bitshift or put
+      out 1 n 15 and 4 bitshift put
+    } {
+      out 0 64 n -12 bitshift or put
+      out 1 n -4 bitshift 255 and put
+      out 2 n 15 and 4 bitshift put
+    } ifelse
+    0 1 n 1 sub {
+      /i exch def /b data i get def /at header 1 sub i add def
+      out at out at get b -4 bitshift or put
+      out at 1 add b 15 and 4 bitshift put
+    } for
+    % Four zero terminator bits complete alignment for one byte segment.
+    % The low nibble is already zero; this also completes byte alignment.
+    /used n header add def
+    used 1 capacity 1 sub {
+      /i exch def
+      out i i used sub 2 mod 0 eq { 236 } { 17 } ifelse put
+    } for
+    out
+  end
+} bind def

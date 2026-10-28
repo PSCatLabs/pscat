@@ -6,6 +6,11 @@
 > `NOTES.md`, `ROADMAP.md` and `INIT.md`, in [`docs/archive/`](../archive/README.md).
 > Per-issue notes are in [`notes/`](../../notes/README.md).
 
+On `feature/qr-code-library`, the native QR effort starts with an internal
+byte-mode data packer, not a complete symbol generator. Continue from
+[`design/QR_CODE.md`](design/QR_CODE.md) and its ready-to-publish issue queue.
+No dependency on the unmerged functional PostScript branch is introduced.
+
 Written 2026-07-13 at the completion of Stages 6–7; last updated
 2026-08-15. Stages 8–20 are all complete: spool/halftone/Gallery II
 (10), perf parity (11), handwriting (12), the handwrite tool (13),
