@@ -110,7 +110,10 @@ behavior. Guards use PSCat's existing descriptive undefined-name convention.
 - `3d54566` — functional combinators, explicit advice, API and semantic tests.
 - `4e9201b` — three-colourway poster, imperative/pixel control and CPU evidence.
 - `cf2cfeb` — offline HTML, agent skill, full technical docs and docs validation.
-- The final handoff/validation commit follows these; inspect
+- `4995924` — original completed implementation handoff.
+- `6593697` — live offline WASM studio, measured typography, observable press,
+  generated payload/provenance, native/WASM tests and updated documentation.
+- The final live-studio validation note follows these; inspect
   `git log --oneline ee27313..HEAD` for the full final sequence.
 
 ## Reproduce and verify

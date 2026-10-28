@@ -171,3 +171,14 @@ no reviewer was invoked. Work stays on the existing long-running branch.
 - No changes to src/, Cargo manifests/lock or web/pscat.js. No dependency added.
 - Ready for the checkpoint commit and feature-only push; Opus review remains
   deliberately outstanding.
+
+### Live studies checkpoint
+
+`6593697` commits the typography/AOP sources, four rendered outputs, real offline
+WASM studio, unchanged-API bundle/provenance tooling, licence records, all 28
+feature tests and documentation. The closing validation-note commit follows it.
+
+The active human entry point is `docs/functional-postscript/live-studio.html`;
+`#press` selects the AOP study directly. Both are linked from index.html.
+The feature is complete and validated; commit/push remains confined to
+`feature/functional-postscript`. Opus review is intentionally left for later.
