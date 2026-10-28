@@ -76,3 +76,28 @@ confirmed an error and leaked dictionary frame for `() cvx`. Store a literal
 view with `cvlit` instead; input bytes and the caller's executable attribute
 remain unchanged. Added native and Ghostscript regressions for executable
 empty and `pop` payloads, including direct dictionary-depth preservation.
+
+## QR-2A: all-version capacity planning
+
+Added readonly per-block ECC/count tables and a raw-module geometry calculation
+for all versions 1–40 at L/M/Q/H. `qr--block-spec` describes the layout;
+`qr--byte-plan` selects the smallest fitting version and returns layout plus
+fresh padded data, keeping requested ECC exact. Guards run before private
+frames open; executable level names are canonicalized as literal values.
+
+Pinned reference generator now also emits 160 block specifications and 504
+actual automatic plans, including every capacity boundary, zero/binary/count
+width cases and per-level oversize failures. Tests compare planned bytes by
+SHA-256, not a second version-selection implementation. Original 98 byte
+fixtures are unchanged. All ten QR behavioral/reference/Ghostscript tests and
+five inline selftest blocks passed. All ten QR tests passed again with the
+final four GS overflow assertions. Same-family code review found no blocker;
+its optional GS overflow strengthening is included. All-target Clippy and
+format/link/gallery/license checks passed at this checkpoint.
+
+CLI publication retry: `gh api` and `gh issue list` cannot connect to GitHub,
+and `git push` cannot resolve the host within the sandbox. `git fetch` works
+through its preapproved command rule. The attempt to run `gh` outside the
+sandbox was rejected because sandbox approvals are disabled. Thus the earlier
+`gh auth status` invalid-token message is inconclusive, not evidence requiring
+the owner to replace credentials. Issue drafts/publication remain pending.

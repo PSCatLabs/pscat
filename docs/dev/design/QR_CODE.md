@@ -125,6 +125,26 @@ For print geometry, DENSO WAVE documents the
 Consult ISO/IEC 18004 for normative encoding details before claiming full
 standards conformance; the initial data-stage oracle check alone is insufficient.
 
+### Capacity-planning checkpoint (QR-2A)
+
+`qr--block-spec` takes version and exact level `/L`, `/M`, `/Q` or `/H`, returning
+a fresh dictionary with `/Version`, `/Level`, `/Size`, `/RawCodewords`,
+`/RemainderBits`, `/DataCodewords`, `/ECCodewordsPerBlock` and `/Blocks`.
+Correction length is per block; raw codewords discard remainder bits.
+`qr--byte-plan` takes a readable byte string and level, selects the smallest
+fitting version and returns that layout plus fresh padded `/Data`. Neither
+procedure is a public symbol API or draws anything. Executable strings/names
+are treated as raw values using literal views, preserving caller attributes.
+
+All 160 version/ECC specifications and 504 automatic plans at capacity
+maximum-1/maximum/maximum+1 and count-width boundaries are frozen from the
+independent encoder. Normal tests compare selected versions and SHA-256 of
+actual padded data. Real Ghostscript checks table values, selected versions,
+per-level overflow and executable/access/frame contracts. The original 98
+data fixtures regenerate unchanged. The same-family review found no algorithm
+blocker; it also discovered and prompted the preceding executable-string fix.
+Next implementation ticket is QR-2B correction/interleaving.
+
 Coverage: empty and binary bytes, URLs, max/max+1 capacities, versions 1/9/10/
 26/27/40, every ECC, unequal block groups, remainder bits, version BCH for >=7,
 all masks and individual penalty rules. Cross-run PostScript under Ghostscript.

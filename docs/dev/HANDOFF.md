@@ -6,8 +6,9 @@
 > `NOTES.md`, `ROADMAP.md` and `INIT.md`, in [`docs/archive/`](../archive/README.md).
 > Per-issue notes are in [`notes/`](../../notes/README.md).
 
-On `feature/qr-code-library`, the native QR effort starts with an internal
-byte-mode data packer, not a complete symbol generator. Continue from
+On `feature/qr-code-library`, the native QR effort has byte-mode data packing,
+all-version capacity planning and automatic version selection, not a complete
+symbol generator. Continue from
 [`design/QR_CODE.md`](design/QR_CODE.md) and its ready-to-publish issue queue.
 No dependency on the unmerged functional PostScript branch is introduced.
 

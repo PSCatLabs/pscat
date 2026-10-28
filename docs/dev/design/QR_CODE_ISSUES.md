@@ -6,6 +6,8 @@ epic/decomposition; once filed, ordinary agents propose follow-ups under the
 repository's established dispatcher policy instead of opening unrelated issues.
 
 Branch: `feature/qr-code-library`. [Architecture/sequence](QR_CODE.md).
+Local implementation checkpoints: QR-1 and QR-2A implemented/tested; QR-2B next.
+These statuses do not imply published/closed GitHub issues or final PR review.
 After publication, replace local ticket IDs below with issue links and record
 the epic's dependency checklist. Keep this file while the branch is active.
 

@@ -1,6 +1,6 @@
 %!PS-Adobe-3.0
 % Native QR Model 2 library -- incremental implementation.
-% Currently only byte-segment packing; this does not generate a QR symbol.
+% Byte-mode capacity planning and packing; this does not generate a QR symbol.
 % Load with (lib/qr.ps) run. No dependencies and no drawing on load.
 % Code: MIT OR Apache-2.0, as the other lib/*.ps libraries.
 %
@@ -70,5 +70,113 @@
       out i i used sub 2 mod 0 eq { 236 } { 17 } ifelse put
     } for
     out
+  end
+} bind def
+
+% Model 2 block-layout facts (versions 1..40); independently checked against
+% pinned reference fixtures. Keep only correction/block counts, deriving data
+% capacity from symbol geometry so the planner and future interleaver agree.
+% @internal
+/qr--ecc-per-block <<
+  /L [7 10 15 20 26 18 20 24 30 18 20 24 26 30 22 24 28 30 28 28
+      28 28 30 30 26 28 30 30 30 30 30 30 30 30 30 30 30 30 30 30] readonly
+  /M [10 16 26 18 24 16 18 22 22 26 30 22 22 24 24 28 28 26 26 26
+      26 28 28 28 28 28 28 28 28 28 28 28 28 28 28 28 28 28 28 28] readonly
+  /Q [13 22 18 26 18 24 18 22 20 24 28 26 24 20 30 24 28 28 26 30
+      28 30 30 30 30 28 30 30 30 30 30 30 30 30 30 30 30 30 30 30] readonly
+  /H [17 28 22 16 22 28 26 26 24 28 24 28 22 24 24 30 28 28 26 28
+      30 24 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30 30] readonly
+>> def
+qr--ecc-per-block readonly pop
+% @internal
+/qr--block-count <<
+  /L [1 1 1 1 1 2 2 2 2 4 4 4 4 4 6 6 6 6 7 8
+      8 9 9 10 12 12 12 13 14 15 16 17 18 19 19 20 21 22 24 25] readonly
+  /M [1 1 1 2 2 4 4 4 5 5 5 8 9 9 10 10 11 13 14 16
+      17 17 18 20 21 23 25 26 28 29 31 33 35 37 38 40 43 45 47 49] readonly
+  /Q [1 1 2 2 4 4 6 6 8 8 8 10 12 16 12 17 16 18 21 20
+      23 23 25 27 29 34 34 35 38 40 43 45 48 51 53 56 59 62 65 68] readonly
+  /H [1 1 2 4 4 4 5 6 8 8 11 11 16 16 18 16 19 21 25 25
+      25 34 30 32 35 37 40 42 45 48 51 54 57 60 63 66 70 74 77 81] readonly
+>> def
+qr--block-count readonly pop
+
+% Accept executable names as values too, but never execute a stored level.
+% @internal
+/qr--check-level {
+  dup type /nametype ne { qr-level-must-be-L-M-Q-or-H } if
+  cvlit
+  qr--ecc-per-block 1 index known not { qr-level-must-be-L-M-Q-or-H } if
+} bind def
+
+% qr--block-spec: version level -> fresh-layout-dict
+% RawCodewords excludes remainder bits; ECCodewordsPerBlock is per block.
+%%SelfTest: qr-block-spec-invalid-arguments
+% { 1 /X qr--block-spec } /qr-level-must-be-L-M-Q-or-H (unknown ECC) mustguard
+% { 1 (L) qr--block-spec } /qr-level-must-be-L-M-Q-or-H (string ECC) mustguard
+% { 1.0 /M qr--block-spec } /qr-version-must-be-integer (real version) mustguard
+% { 0 /L qr--block-spec } /qr-version-must-be-in-1-40 (zero version) mustguard
+% { 41 /H qr--block-spec } /qr-version-must-be-in-1-40 (large version) mustguard
+%%EndSelfTest
+% @internal
+/qr--block-spec {
+  qr--check-level
+  1 index type /integertype ne { qr-version-must-be-integer } if
+  1 index dup 1 lt exch 40 gt or { qr-version-must-be-in-1-40 } if
+  10 dict begin
+    /level exch def /version exch def
+    /size version 4 mul 17 add def
+    % Base layout removes finder/separator/timing/format areas. Alignment
+    % intersections depend on version; version metadata consumes 36 more bits.
+    /raw version 16 mul 128 add version mul 64 add def
+    version 2 ge {
+      /centers version 7 idiv 2 add def
+      /raw raw centers 25 mul 10 sub centers mul 55 sub sub def
+      version 7 ge { /raw raw 36 sub def } if
+    } if
+    /ec qr--ecc-per-block level get version 1 sub get def
+    /blocks qr--block-count level get version 1 sub get def
+    << /Version version /Level level /Size size
+       /RawCodewords raw 8 idiv /RemainderBits raw 8 mod
+       /DataCodewords raw 8 idiv ec blocks mul sub
+       /ECCodewordsPerBlock ec /Blocks blocks >>
+  end
+} bind def
+
+% qr--byte-plan: readable-string level -> fresh-layout-dict-with-Data
+% Exact requested ECC; select the smallest fitting version, with no boosting.
+%%SelfTest: qr-byte-plan-invalid-arguments
+% { [] /M qr--byte-plan } /qr-data-must-be-a-string (array payload) mustguard
+% { () /low qr--byte-plan } /qr-level-must-be-L-M-Q-or-H (unknown ECC) mustguard
+% { 2954 string /L qr--byte-plan } /qr-data-too-long-for-level (largest overflow) mustguard
+% { 1274 string /H qr--byte-plan } /qr-data-too-long-for-level (H overflow) mustguard
+%%EndSelfTest
+%%SelfTest: qr-byte-plan-smallest-version
+% () /M qr--byte-plan /Version get 1 eq (empty segment version) mustbe
+% (https://github.com/PSCatLabs/pscat) /M qr--byte-plan /Version get 3 eq (GitHub version at M) mustbe
+% (A) cvx /L cvx qr--byte-plan /Data get length 19 eq (executable values stay data) mustbe
+%%EndSelfTest
+% @internal
+/qr--byte-plan {
+  qr--check-level
+  1 index type /stringtype ne { qr-data-must-be-a-string } if
+  1 index rcheck not { qr-data-must-be-readable } if
+  % Refuse before opening the planner frame, so ordinary caught errors do not
+  % retain scratch bindings. The version-40 bound also bounds the search loop.
+  1 index length 40 2 index qr--block-spec /DataCodewords get 3 sub gt {
+    qr-data-too-long-for-level
+  } if
+  8 dict begin
+    /level exch def /data exch cvlit def /n data length def /version 1 def
+    {
+      /spec version level qr--block-spec def
+      /header version 10 lt { 2 } { 3 } ifelse def
+      n header add spec /DataCodewords get le
+      n version 10 lt { 255 } { 65535 } ifelse le and {
+        spec /Data data version spec /DataCodewords get qr--byte-data put
+        spec exit
+      } if
+      /version version 1 add def
+    } loop
   end
 } bind def
