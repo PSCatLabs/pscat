@@ -55,6 +55,13 @@ the sandbox denies those writes. Largest observed candidate was `~/.cache/uv`
 reported an invalid token. No issues were created; complete drafts are in
 `docs/dev/design/QR_CODE_ISSUES.md`.
 
+Checkpoints: `17be393` (plan/issue queue), `0cbaef1` (tested byte-data slice).
+The working tree was clean after both. `git push -u origin
+feature/qr-code-library` then failed because the sandbox could not resolve
+`github.com`; these commits remain local. No PR was opened. Publish the existing
+branch when Git/network authentication is available; do not recreate the work
+on main. This final note is a documentation-only follow-up checkpoint.
+
 Next: publish tracking/child issues when authenticated; implement QR-2A standards
 version/capacity selection, then QR-2B GF(256)/Reed–Solomon correction/interleaving,
 verified against independent codewords. Then fixed-mask matrices and first
