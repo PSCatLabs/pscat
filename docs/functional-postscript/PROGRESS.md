@@ -71,3 +71,42 @@
   No core changes or automatically filed issues.
 - Remaining: staged-file link/licence checks, final full gate, clean commit
   checkpoints and feature-branch review availability.
+
+## Phase H — final validation, ready for independent review
+
+Checkpoints: `6271862` design; `3d54566` libraries; `4e9201b` demonstration;
+`cf2cfeb` HTML, skill, technical reference and documentation checker.
+The closing handoff commit follows them in `git log ee27313..HEAD`.
+
+Final local gate (2026-10-27):
+
+- `cargo build --locked`: PASS.
+- `cargo test --profile ci`: 2,532 passed, 2 existing ignored, 0 failed;
+  113 result groups, including all 25 new functional/documentation tests.
+- `cargo clippy --all-targets -- -D warnings`: PASS.
+- `cargo fmt --all -- --check`: PASS.
+- `PSCAT_PROFILE=ci ./scripts/selftest.sh`: all blocks/drivers PASS.
+- `python3 scripts/check_md_links.py`: 107 files, zero broken links.
+- `python3 scripts/gallery.py check`: 34 pieces / 37 specimens, PASS.
+- `python3 scripts/check_licences.py all`: PASS.
+- Default `python3 scripts/functional_demo.py render`: PASS, all PNGs reproduce
+  the committed hashes. Explicit --pscat and benchmark routes were also run.
+- `python3 scripts/check_functional_docs.py --pscat target/ci/pscat`: PASS;
+  14 executable examples, 29 HTML local targets, 9 image elements, seven asset
+  hashes/sizes, four metrics and source hashes. Skill frontmatter checked.
+- Chrome desktop/mobile checks and visual inspection: PASS; details in
+  BROWSER-VALIDATION.json. Browser closed after validation.
+- Native `--profile --profile-graph` demo: PASS; named df-flower/pkribbon each
+  counted 13, df-site 25. Timing is elapsed, not CPU.
+- No changed `src/`, Cargo.toml or Cargo.lock. No dependency added. No main
+  changes/merge, issues, PR orchestration or automated reviewer invoked.
+
+Full gate logs are session scratch files in /tmp/functional-final-*.log and
+/tmp/functional-selftests.log; committed tests, hash manifests and browser report
+are the durable evidence. Sandbox process visibility required the full-suite
+rerun outside the sandbox; no test was weakened. Optional system skill validator
+lacked PyYAML; independent standard-library checks cover the actual skill.
+
+Implementation and requested deliverables are complete. Independent Claude
+Opus review remains deliberately outstanding. Start with REVIEW-HANDOFF.md;
+keep this branch active and record any subsequent reviewer findings/fixes here.

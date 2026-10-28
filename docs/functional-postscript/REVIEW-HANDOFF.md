@@ -64,8 +64,10 @@ behavior. Guards use PSCat's existing descriptive undefined-name convention.
 
 - `6271862` — architecture/research and experimental workflow.
 - `3d54566` — functional combinators, explicit advice, API and semantic tests.
-- Later demo/documentation/validation checkpoints are recorded in PROGRESS.md;
-  inspect `git log --oneline ee27313..HEAD` for the full final sequence.
+- `4e9201b` — three-colourway poster, imperative/pixel control and CPU evidence.
+- `cf2cfeb` — offline HTML, agent skill, full technical docs and docs validation.
+- The final handoff/validation commit follows these; inspect
+  `git log --oneline ee27313..HEAD` for the full final sequence.
 
 ## Reproduce and verify
 
@@ -79,9 +81,22 @@ python3 scripts/functional_demo.py render
 python3 scripts/check_functional_docs.py --pscat target/ci/pscat
 ```
 
-Full gate: `cargo test --profile ci`, `cargo clippy --all-targets -- -D warnings`,
-`cargo fmt --all -- --check`, Markdown links, gallery manifest and licence checks.
-See TESTING.md and PROGRESS.md for actual results and environment limitations.
+Final validation on 2026-10-27:
+
+- `cargo build --locked`: PASS.
+- `cargo test --profile ci`: **2,532 passed, 2 existing ignored, 0 failed**
+  across 113 reported result groups, including all 25 new tests.
+- `cargo clippy --all-targets -- -D warnings` and formatting: PASS.
+- All library selftests and strict rendering drivers: PASS.
+- 107 tracked Markdown files: zero broken links; gallery/licences: PASS.
+- 14 complete documentation/skill PS examples, local HTML targets, image
+  hashes/dimensions, source hashes and metric cells: PASS.
+- Actual file:// browser checks at 1440×1000 / 390×844: PASS, with no JS
+  exceptions or page HTTP(S) requests. Palette/layer and stack controls work.
+- All three colourways pixel-identical to controls and committed renders;
+  art, desktop/mobile screenshots and native profiling output inspected.
+
+See TESTING.md and PROGRESS.md for methods and environment limitations.
 The existing process-deadline pgrep control requires an unrestricted process
 view on this macOS host; do not weaken it because sandboxed visibility fails.
 
