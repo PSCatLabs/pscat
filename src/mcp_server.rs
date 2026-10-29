@@ -2946,6 +2946,14 @@ fn ps_error_fields(stderr: &str) -> Option<Map<String, Value>> {
 /// block carries the report, so repeating the verdict under `Lint:`
 /// would only say the same thing twice.
 ///
+/// Every other finding is dropped too when that line is present (#942):
+/// the checks look at where the program *ended* (a page with no ink, a
+/// `gsave` or `begin` still open, values left on the stack), and an aborted
+/// run ends wherever the error hit, so each is a consequence of the error
+/// and not a flaw in the program. Reported under `Lint:` they read as a
+/// second problem ("the program never drew") next to the real one. The
+/// partly drawn page is still returned.
+///
 /// A banded render's `pscat: lint: note: ...` line (which band was linted,
 /// #847) is not a finding: it is kept, ahead of the findings, only when
 /// there are findings for it to explain, so a clean banded render stays
@@ -2958,8 +2966,11 @@ fn split_lint_findings(stderr: &str) -> (String, String) {
     let mut findings = Vec::new();
     let mut notes = Vec::new();
     let mut rest = Vec::new();
+    let mut errored = false;
     for line in stderr.lines() {
-        if line == CLEAN || line.starts_with(RUN_ERROR) {
+        if line.starts_with(RUN_ERROR) {
+            errored = true;
+        } else if line == CLEAN {
             continue;
         } else if line.starts_with(NOTE) {
             notes.push(line);
@@ -2968,6 +2979,9 @@ fn split_lint_findings(stderr: &str) -> (String, String) {
         } else {
             rest.push(line);
         }
+    }
+    if errored {
+        findings.clear();
     }
     if !findings.is_empty() {
         findings.splice(0..0, notes);
@@ -3834,6 +3848,23 @@ mod tests {
         assert_eq!(l, "", "a note alone is not a Lint block");
         let (l, _) = split_lint_findings(&format!("{note}\npscat: lint: [blank-page] b\n"));
         assert_eq!(l, format!("{note}\npscat: lint: [blank-page] b"));
+    }
+
+    #[test]
+    fn an_errored_runs_other_findings_are_consequences_and_are_dropped() {
+        // #942: the end-of-run checks mean nothing for an aborted run.
+        let (l, rest) = split_lint_findings(
+            "%%[ Error: undefinedresult ]%%\npscat: lint: [run-error] e\n\
+             pscat: lint: [blank-page] b\npscat: lint: [stack-leak] s\n\
+             pscat: lint: note: --bands: band 1 of 8 only\n",
+        );
+        assert_eq!(l, "");
+        assert_eq!(rest, "%%[ Error: undefinedresult ]%%");
+        let (l, _) = split_lint_findings("pscat: lint: [gsave-imbalance] g\n");
+        assert_eq!(
+            l, "pscat: lint: [gsave-imbalance] g",
+            "a clean-exit run keeps them"
+        );
     }
 
     #[test]
