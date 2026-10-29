@@ -602,17 +602,22 @@ fn eval_and_handwrite_errors_carry_no_lint_text() {
     for source in ["1 0 div", "(unterminated"] {
         let result = s.tool("eval_postscript", json!({ "source": source }));
         assert_eq!(result["isError"], true, "{result}");
-        let all = result.to_string();
         assert!(
-            !all.contains("lint") && !all.contains("blank-page"),
-            "{source:?}: {all}"
+            texts(&result)
+                .iter()
+                .all(|t| !t.contains("lint") && !t.contains("blank-page")),
+            "{source:?}: {result}"
         );
     }
+    // `handwrite` takes plain text, not PostScript, and does not lint: even
+    // text that would be a syntax error as a program comes back as a note.
     let result = s.tool("handwrite", json!({ "text": "(unbalanced", "seed": 1 }));
-    let all = result.to_string();
+    assert_eq!(result["isError"], false, "{result}");
     assert!(
-        !all.contains("lint") && !all.contains("blank-page"),
-        "{all}"
+        texts(&result)
+            .iter()
+            .all(|t| !t.contains("lint") && !t.contains("blank-page")),
+        "{result}"
     );
 }
 
