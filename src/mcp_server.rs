@@ -1110,8 +1110,9 @@ fn tool_list(cfg: &Config) -> Value {
         "type": "object",
         "properties": {
             "source": { "type": "string", "description": "The PostScript program" },
-            "width": { "type": "integer", "minimum": 1, "maximum": 8000, "description": "Page width in points (default 612)" },
-            "height": { "type": "integer", "minimum": 1, "maximum": 8000, "description": "Page height in points (default 792)" },
+            "width": { "type": "integer", "minimum": 1, "maximum": 8000, "description": "Page width in points. Default: an EPSF file's %%BoundingBox (see bbox), else 612" },
+            "height": { "type": "integer", "minimum": 1, "maximum": 8000, "description": "Page height in points. Default: an EPSF file's %%BoundingBox (see bbox), else 792" },
+            "bbox": { "type": "boolean", "description": "Size the page from the %%BoundingBox of any file, not only an EPSF one (%!PS-Adobe-3.0 EPSF-3.0), with its lower-left corner at the page's. Not with width/height, which always win" },
             "dpi": { "type": "number", "minimum": 9, "maximum": 1200, "description": "Device resolution (default 72; 144 = 2x pixels)" },
             "format": { "type": "string", "enum": ["png", "svg", "pdf"], "description": "Output format (default png)" },
             "halftone": { "type": "boolean", "description": "Screen the raster like a mono laser printer (png only)" },
@@ -1483,8 +1484,11 @@ struct RenderPlan {
     source: String,
     format: &'static str,
     flag: &'static str,
-    width: i64,
-    height: i64,
+    /// `Some((width, height))` for an explicit page (`--page`); `None` lets
+    /// the child take it from the source's bounding box or the default.
+    page: Option<(i64, i64)>,
+    /// `--bbox`: any file's bounding box sizes the page, not only an EPSF one.
+    bbox: bool,
     dpi: Option<f64>,
     halftone: bool,
     /// Threads for `pscat --bands` (issue #843); 1 is a plain render.
@@ -1504,14 +1508,35 @@ fn render_plan(cfg: &Config, args: &Value) -> Result<RenderPlan, ToolError> {
             )));
         }
     };
-    let width = optional_int(args, "width", 1, 8000)?.unwrap_or(612);
-    let height = optional_int(args, "height", 1, 8000)?.unwrap_or(792);
+    let width = optional_int(args, "width", 1, 8000)?;
+    let height = optional_int(args, "height", 1, 8000)?;
+    let bbox = optional_bool(args, "bbox")?.unwrap_or(false);
+    // As `pscat --page` and `--bbox` (#921): an explicit size always wins,
+    // so asking for both would silently drop one.
+    let page = match (width, height) {
+        (None, None) => None,
+        (w, h) if !bbox => Some((w.unwrap_or(612), h.unwrap_or(792))),
+        _ => {
+            return Err(ToolError::invalid(
+                "bbox sizes the page from the source; leave out width and height with it",
+            ));
+        }
+    };
+    // The page the child will draw on: the same rule `pscat` applies, so the
+    // pixel cap below checks the canvas that is really made.
+    let size = match page {
+        Some((w, h)) => (w as u32, h as u32),
+        None => match pscat::bbox::page_box(source.as_bytes(), bbox) {
+            Ok(Some(found)) => (found.width, found.height),
+            _ => pscat::gfx::DEFAULT_PAGE,
+        },
+    };
     let dpi = optional_number(args, "dpi", 9.0, 1200.0)?;
     let halftone = optional_bool(args, "halftone")?.unwrap_or(false);
     // The canvas is allocated before `--max-memory` counts, so a page over
     // the pixel cap is refused before a child starts (#711). Every format
     // draws on the same raster.
-    let (w_px, h_px) = device_pixels((width as u32, height as u32), dpi.unwrap_or(72.0) as f32);
+    let (w_px, h_px) = device_pixels(size, dpi.unwrap_or(72.0) as f32);
     if !pixels_allowed(cfg, w_px, h_px) {
         return Err(too_many_pixels(cfg, "the page", w_px, h_px));
     }
@@ -1529,8 +1554,8 @@ fn render_plan(cfg: &Config, args: &Value) -> Result<RenderPlan, ToolError> {
         source: source.to_string(),
         format,
         flag,
-        width,
-        height,
+        page,
+        bbox,
         dpi,
         halftone,
         bands,
@@ -1583,8 +1608,8 @@ fn render_run(cfg: &Config, plan: &RenderPlan) -> Result<Value, ToolError> {
         source,
         format,
         flag,
-        width,
-        height,
+        page,
+        bbox,
         dpi,
         halftone,
         bands,
@@ -1606,7 +1631,12 @@ fn render_run(cfg: &Config, plan: &RenderPlan) -> Result<Value, ToolError> {
     if banded {
         cmd.arg("--bands").arg(bands.to_string());
     }
-    cmd.arg("--page").arg(format!("{width}x{height}"));
+    if let Some((width, height)) = page {
+        cmd.arg("--page").arg(format!("{width}x{height}"));
+    }
+    if *bbox {
+        cmd.arg("--bbox");
+    }
     if let Some(dpi) = dpi {
         cmd.arg("--dpi").arg(number_arg(dpi));
     }
@@ -2762,6 +2792,9 @@ fn eval_postscript(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
     let source = required_text(cfg, args, "source")?;
     let mut cmd = Command::new(pscat_bin()?);
     cfg.interpreter_args(&mut cmd);
+    // Letter, as before #921: eval has no page arguments, and an EPSF box
+    // would size a canvas the pixel cap never checked.
+    cmd.arg("--page").arg("612x792");
     cmd.arg("--headless").arg("--pstack-on-error").arg("-");
     let run = run_child(cfg, &mut cmd, source.as_bytes())?;
     let mut report = String::new();

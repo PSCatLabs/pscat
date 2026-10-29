@@ -44,6 +44,12 @@ generate | pscat --png out.png -       # `-` reads the program from stdin
 Multi-page documents number their pages: `out.png` → `out-001.png`,
 `out-002.png`, … SVG does the same; PDF is naturally multi-page.
 
+Page size: `--page` always wins. Without it, an EPSF file (first line
+`%!PS-Adobe-3.0 EPSF-3.0`) is cropped to its `%%BoundingBox` (or
+`%%HiResBoundingBox`), with the box's lower-left corner at the page's; a
+plain `.ps` file gets 612x792 unless you pass `--bbox`. MCP: leave out
+`width`/`height` for the same rule, `bbox: true` for `--bbox`.
+
 `pscat --bands N --png out.png f.ps` (N is 1..64) renders on N threads, which
 take horizontal bands (2 per thread by default; `--band-rows R` for R-row
 bands) from a queue, and gives the same PNG bytes as a plain render. It is only

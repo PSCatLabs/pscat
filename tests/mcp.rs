@@ -3185,3 +3185,95 @@ fn a_banded_render_keeps_the_limits_and_read_confinement() {
         }
     }
 }
+
+/// #921: with no width/height, render_postscript and start_render take an
+/// EPSF file's %%BoundingBox as the page (any file's with `bbox`), and the
+/// pixel cap checks that page, not the letter default.
+#[test]
+fn render_tools_take_the_page_from_the_bounding_box() {
+    let mut s = Server::start_in(
+        &common::scratch_dir("mcp-bbox"),
+        &["--max-pixels", "300000"],
+    );
+    initialized(&mut s);
+    let plain = "%!PS-Adobe-3.0\n%%BoundingBox: 0 0 400 300\n0 0 1 setrgbcolor 0 0 400 300 rectfill showpage\n";
+    let eps = plain.replace("%!PS-Adobe-3.0\n", "%!PS-Adobe-3.0 EPSF-3.0\n");
+    let dims = |result: &Value| {
+        let png = sheet_png(result);
+        let pm = tiny_skia::Pixmap::decode_png(&png).expect("decode");
+        (pm.width(), pm.height())
+    };
+    // 400 x 300 is under the 300,000-pixel cap; letter (484,704) is not.
+    let direct = s.tool("render_postscript", json!({ "source": eps }));
+    assert_eq!(dims(&direct), (400, 300));
+    let with_bbox = s.tool(
+        "render_postscript",
+        json!({ "source": plain, "bbox": true }),
+    );
+    assert_eq!(dims(&with_bbox), (400, 300));
+    let result = s.tool("render_postscript", json!({ "source": plain }));
+    assert_eq!(error_kind(&result), "output_too_large", "{result}");
+    // And a box larger than letter is refused as itself, before any child.
+    let big = eps.replace("0 0 400 300\n0", "0 0 2000 2000\n0");
+    let result = s.tool("render_postscript", json!({ "source": big }));
+    assert_eq!(error_kind(&result), "output_too_large", "{result}");
+    assert_eq!(
+        result["structuredContent"]["error"]["width_px"], 2000,
+        "{result}"
+    );
+    // An explicit size wins, and asking for both is refused.
+    let sized = s.tool(
+        "render_postscript",
+        json!({ "source": eps, "width": 50, "height": 40 }),
+    );
+    assert_eq!(dims(&sized), (50, 40));
+    let both = s.tool(
+        "render_postscript",
+        json!({ "source": plain, "bbox": true, "width": 50 }),
+    );
+    assert_eq!(error_kind(&both), "invalid_argument", "{both}");
+    // A box that cannot be used is a warning beside the render.
+    let bad = eps.replace("0 0 400 300\n0", "0 0 abc 300\n0");
+    // (Letter at 36 dpi, 306 x 396, fits the cap.)
+    let result = s.tool("render_postscript", json!({ "source": bad, "dpi": 36 }));
+    assert_eq!(dims(&result), (306, 396));
+    assert!(
+        texts(&result)
+            .iter()
+            .any(|t| t.starts_with("Warnings:") && t.contains("ignoring the bounding box")),
+        "{result}"
+    );
+
+    let job = start_job(&mut s, json!({ "source": eps }));
+    assert!(
+        eventually(600, || status(&mut s, &job)["state"] == "done"),
+        "{}",
+        status(&mut s, &job)
+    );
+    let result = s.tool("render_result", json!({ "job_id": job }));
+    assert_eq!(
+        images(&result),
+        images(&direct),
+        "the same page as render_postscript"
+    );
+}
+
+/// #921: eval_postscript has no page arguments, so it keeps the letter page
+/// even for an EPSF source, whose box would size a canvas the pixel cap
+/// never checked.
+#[test]
+fn eval_keeps_the_letter_page_for_an_epsf_source() {
+    let mut s = Server::start_in(
+        &common::scratch_dir("mcp-eval-bbox"),
+        &["--max-pixels", "300000"],
+    );
+    initialized(&mut s);
+    let source = "%!PS-Adobe-3.0 EPSF-3.0\n%%BoundingBox: 0 0 8000 8000\n\
+                  clippath pathbbox 4 array astore ==\n";
+    let result = s.tool("eval_postscript", json!({ "source": source }));
+    assert_eq!(result["isError"], false, "{result}");
+    assert!(
+        texts(&result)[0].contains("[0.0 0.0 612.0 792.0]"),
+        "{result}"
+    );
+}
