@@ -106,3 +106,18 @@ the page device gets the old one back at its end, and `/BandBBox` follows.
 `/Orientation`, `/PageOffset`, `/BeginPage`/`/EndPage`, `/Policies`, media
 selection). `--spool` jobs keep the canvas they were given (`Explicit`), and
 the live window does not resize itself to a new page.
+
+**Restoring across page devices: the contract.** Pinned against gs 10.07.1
+(tests in `tests/pagedevice.rs`): a restore (`grestore`, `grestoreall`,
+`restore`, `setgstate`, a bottom-level `grestore`) of a state made on another
+device brings that device's size back and erases the page; on a size change
+the CTM goes to the default matrix (identity under `nulldevice`) and the clip
+is cleared, on the same size both stay; `cliprestore`'s fallback refits a
+rectangle chain as its intersection with the old page, gives an empty clip for
+a `nulldevice` level and the initial page at the bottom level; a restored
+canvas is held to `--max-memory` and pixel caps before it is made. Everything
+else in this class is best effort, deviations noted: a non-rectangular clip
+chain refits as the old page plus its paths (its `clippath` readback may not
+match gs), `clipsave` entries are dropped on a resize (gs keeps them), and a
+Type 3 glyph's restore follows the same rules without its own tests of the
+clip cases.
