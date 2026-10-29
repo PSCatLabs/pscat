@@ -540,6 +540,82 @@ fn render_of_an_errored_program_reports_the_error_once_not_a_lint_verdict() {
     );
 }
 
+/// #942: an errored run's end-of-run findings (a page with no ink, an open
+/// `gsave` or `begin`) are consequences of the error, so a render of one gets
+/// the `PostScript error:` block and the partly drawn page but no `Lint:`
+/// block, plain or banded, from either render tool.
+#[test]
+fn an_errored_render_has_no_lint_block_but_keeps_the_error_and_the_page() {
+    let mut s = Server::start();
+    initialized(&mut s);
+    let cases = [
+        ("1 0 div", "undefinedresult"),
+        ("0 0 40 40 rectfill 1 0 div showpage", "undefinedresult"),
+        ("(unterminated", "syntaxerror"),
+        (
+            "0 0 40 40 rectfill gsave 5 dict begin 1 0 div",
+            "undefinedresult",
+        ),
+        ("1 2 3 add add add", "stackunderflow"),
+    ];
+    for tool in ["render_postscript", "start_render"] {
+        for bands in [1, 2] {
+            for (source, expect) in cases {
+                let args = json!({ "source": source, "width": 40, "height": 40, "bands": bands });
+                let result = if tool == "render_postscript" {
+                    s.tool(tool, args)
+                } else {
+                    job_result_of(&mut s, args)
+                };
+                let what = format!("{tool} bands {bands} {source:?}: {result}");
+                let texts = texts(&result);
+                let err = texts
+                    .iter()
+                    .find(|t| t.starts_with("PostScript error:"))
+                    .unwrap_or_else(|| panic!("an error block, {what}"));
+                assert!(err.contains(expect), "{err} ({what})");
+                assert!(
+                    texts
+                        .iter()
+                        .all(|t| !t.starts_with("Lint:") && !t.contains("blank-page")),
+                    "no Lint block for an errored run, {what}"
+                );
+                assert!(
+                    result["content"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|c| c["type"] == "image"),
+                    "the partial page is still returned, {what}"
+                );
+            }
+        }
+    }
+}
+
+/// #942: the other tools do not lint, so an error there has no `Lint:` text
+/// to mislead either.
+#[test]
+fn eval_and_handwrite_errors_carry_no_lint_text() {
+    let mut s = Server::start();
+    initialized(&mut s);
+    for source in ["1 0 div", "(unterminated"] {
+        let result = s.tool("eval_postscript", json!({ "source": source }));
+        assert_eq!(result["isError"], true, "{result}");
+        let all = result.to_string();
+        assert!(
+            !all.contains("lint") && !all.contains("blank-page"),
+            "{source:?}: {all}"
+        );
+    }
+    let result = s.tool("handwrite", json!({ "text": "(unbalanced", "seed": 1 }));
+    let all = result.to_string();
+    assert!(
+        !all.contains("lint") && !all.contains("blank-page"),
+        "{all}"
+    );
+}
+
 #[test]
 fn render_surfaces_lint_findings_for_a_blank_page() {
     let mut s = Server::start();

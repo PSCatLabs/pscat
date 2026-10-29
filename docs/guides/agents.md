@@ -98,7 +98,10 @@ PIL composite. A one-call typewriter or chart is not added yet.
   or a PDF written to `out_path`), with page size, `dpi`, `halftone` and
   `bands` options (`bands`: see "Banded renders" below). Errors still return the partial render with the error text.
   Runs the lint pass and appends a `Lint:` block when it finds something
-  (a blank page, an unbalanced `gsave`, stuff left on the stack).
+  (a blank page, an unbalanced `gsave`, stuff left on the stack). A run that
+  ended in a PostScript error gets the `PostScript error:` block and the
+  partly drawn page but no `Lint:` block: those findings describe where the
+  run stopped, so they would only be consequences of the error (#942).
   `render_postscript`, `handwrite`, `chalkboard_math`, `review_sheet` and
   `eval_postscript` also
   return what a *successful* run wrote to stderr (a font falling back to a
