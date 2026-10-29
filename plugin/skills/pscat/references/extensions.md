@@ -9,7 +9,8 @@ capabilities inventory. Back to [SKILL.md](../SKILL.md).
 ```postscript
 0.3 setalpha              % fill/stroke opacity, 0..1
 /Multiply setblendmode    % or /Normal (the default); nothing else
-currentalpha currentblendmode
+0.8 0.3 0.2 setrgbcolor 72 72 200 200 rectfill   % draws at that alpha and blend mode
+currentalpha currentblendmode pop pop              % read them back
 ```
 
 Graphics state (`gsave`/`grestore` save them, `initgraphics` resets

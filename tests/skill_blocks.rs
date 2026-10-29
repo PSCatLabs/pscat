@@ -12,14 +12,19 @@
 //! - the font-pack stand-in note on stderr (`font ... is in the ... font
 //!   pack, which is not installed`). Since #728 a pack face no longer
 //!   raises an error, so without this check a block that only works with
-//!   `pscat fonts install` would pass.
+//!   `pscat fonts install` would pass;
+//! - a `--lint-strict` finding (#940): operands left on the stack at the
+//!   end (`stack-leak`), or a page with no ink (`blank-page`). A block an
+//!   agent copies should leave nothing behind and should draw something.
 //!
 //! ## Marking a block as partial
 //!
 //! A block that cannot run on its own (a fragment that needs the caller's
 //! path or dict, a signature listing, a file that exists only in the
 //! repository) says so in its fence: write ```` ```postscript partial ````.
-//! It is shown as a normal PostScript block and is not run. A fence with
+//! It is shown as a normal PostScript block and is not run. That is also
+//! the opt-out for a block that deliberately draws nothing (a bare library
+//! load, a listing of operators and their results). A fence with
 //! no language, or any other (`sh`, `text`), is never run, so a block that
 //! is not PostScript needs no mark. Prefer making a block runnable to
 //! marking it: the point is that what the skills show works.
@@ -118,12 +123,16 @@ struct Run {
 }
 
 /// Run `code` through `pscat --headless -` with no checkout and no font
-/// packs. `tag` only names the scratch directories.
-fn run_bare(tag: &str, code: &str) -> Run {
+/// packs. `tag` only names the scratch directories. `strict` adds
+/// `--lint-strict`, which prints a verdict line on stderr and fails the run
+/// on a stack-leak or blank-page finding.
+fn run_bare(tag: &str, code: &str, strict: bool) -> Run {
     let home = common::scratch_dir(&format!("skill-home-{tag}"));
     let work = common::scratch_dir(&format!("skill-work-{tag}"));
     let mut child = Command::new(PSCAT)
-        .args(["--headless", "-"])
+        .args(["--headless"])
+        .args(strict.then_some("--lint-strict"))
+        .arg("-")
         .current_dir(&work)
         .env("PSCAT_HOME", &home)
         .env("HOME", home.join("user"))
@@ -166,6 +175,7 @@ fn the_environment_has_no_font_packs() {
         "sentinel",
         "/Bangers findfont /FontName get ==\n\
          /Palatino-Roman findfont /FontName get ==\n/Symbol findfont /FontName get ==\n",
+        false,
     );
     assert!(r.ok, "{}", r.stderr);
     assert_eq!(
@@ -216,10 +226,15 @@ fn every_skill_postscript_block_runs_on_a_bare_install() {
     }
     let mut failures = Vec::new();
     for (n, b) in blocks.iter().enumerate() {
-        let r = run_bare(&format!("block{n}"), &b.code);
+        let r = run_bare(&format!("block{n}"), &b.code, true);
         let mut why = Vec::new();
         if !r.ok {
             why.push("exit status is not 0");
+        }
+        if r.stderr.contains("pscat: lint: [") {
+            why.push(
+                "lint finding (stack-leak or blank-page; mark a block that draws nothing partial)",
+            );
         }
         if r.stdout.contains("%%[ Error") || r.stderr.contains("%%[ Error") {
             why.push("PostScript error");
@@ -266,6 +281,20 @@ fn every_pscat_reference_file_is_linked_from_its_skill() {
             "plugin/skills/pscat/SKILL.md does not link references/{name}"
         );
     }
+}
+
+/// The strict lint is really switched on in the fence run: a program that
+/// leaves an operand behind, or shows a blank page, must fail it.
+#[test]
+fn the_fence_run_fails_on_a_stack_leak_and_a_blank_page() {
+    let leak = run_bare("lint-leak", "1 2 3\n0 0 10 10 rectfill\nshowpage\n", true);
+    assert!(!leak.ok, "{}", leak.stderr);
+    assert!(leak.stderr.contains("[stack-leak]"), "{}", leak.stderr);
+    let blank = run_bare("lint-blank", "showpage\n", true);
+    assert!(!blank.ok, "{}", blank.stderr);
+    assert!(blank.stderr.contains("[blank-page]"), "{}", blank.stderr);
+    let clean = run_bare("lint-clean", "0 0 10 10 rectfill\nshowpage\n", true);
+    assert!(clean.ok, "{}", clean.stderr);
 }
 
 #[test]
