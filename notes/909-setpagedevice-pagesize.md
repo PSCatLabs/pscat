@@ -57,7 +57,14 @@ if it is not the current one. That is an `Rc` pointer compare, so a run
 that never calls `setpagedevice` does nothing new. `setpagedevice` keeps the
 `clipsave` stack, as gs does, unless the canvas size changes: its masks were
 made for the old canvas, so a resize drops them (gs would keep them; a
-deviation). `currentpagedevice` under `nulldevice` is an empty dictionary,
+deviation). A `cliprestore` that falls back to the clip a level began with,
+when that level began on another page device, gets that clip as gs keeps it
+(`Gfx::fit_clip`): the old page's rectangle intersected with the chain's
+device-space paths, rasterised on the new canvas. A level that began under
+`nulldevice` gives back an empty clip, and the bottom level the job's initial
+page. A restore refused for memory leaves the state on the kept device's
+default CTM with no clip, and image rasterising only reads a clip mask of the
+canvas's size. `currentpagedevice` under `nulldevice` is an empty dictionary,
 as in gs.
 
 **Everything that sized a buffer from the page now takes each page's size.**
