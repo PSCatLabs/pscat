@@ -1719,17 +1719,20 @@ impl Interp {
                     // to completion without stopping.
                     Frame::StopMark => Action::PopThenPush(Object::bool(false)),
                     Frame::ProfReturn => Action::ProfExit,
-                    Frame::Show(ctx) => match {
+                    Frame::Show(ctx) => {
                         stepped_show = true;
-                        ctx.step(gfx)?
-                    } {
-                        ShowStep::Pop => Action::Pop,
-                        ShowStep::PopPushWidth(wx, wy) => {
-                            Action::PopThenPush2(Object::real(wx), Object::real(wy))
+                        let step = ctx.step(gfx)?;
+                        match step {
+                            ShowStep::Pop => Action::Pop,
+                            ShowStep::PopPushWidth(wx, wy) => {
+                                Action::PopThenPush2(Object::real(wx), Object::real(wy))
+                            }
+                            ShowStep::Exec { operands, target } => {
+                                Action::ExecWith(operands, target)
+                            }
+                            ShowStep::Again => Action::Nothing,
                         }
-                        ShowStep::Exec { operands, target } => Action::ExecWith(operands, target),
-                        ShowStep::Again => Action::Nothing,
-                    },
+                    }
                     Frame::PostOp(op) => {
                         match op {
                             PostOp::SeparationColor { alt_ncomp } => {
