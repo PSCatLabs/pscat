@@ -120,9 +120,6 @@ try_candidate() {
   FOUND_BIN=$1 # as given: PSCAT_MCP_BIN may name pscat-mcp-0.6.3, say
   FOUND_DIR=$(cd "$(dirname "$1")" && pwd -P)
   FOUND_HOW=$2
-  # Our own link on PATH (see link_on_path): report the stable directory.
-  [ "$(readlink "$1" 2>/dev/null)" = "$CACHE/bin/pscat-mcp" ] && FOUND_DIR=$CACHE/bin
-  return 0
 }
 
 # The cached copy of the pinned release, published by a symlink (see install).
@@ -148,7 +145,11 @@ publish_bin() {
 lookup() {
   FOUND_DIR=
   [ -n "${PSCAT_MCP_BIN:-}" ] && try_candidate "$PSCAT_MCP_BIN" "PSCAT_MCP_BIN"
-  p=$(command -v pscat-mcp 2>/dev/null) && try_candidate "$p" "PATH"
+  # Not our own link (see link_on_path): it names whatever release is in the
+  # cache, and only the cache branch below follows the pin (an rc would
+  # otherwise satisfy the final release's check for ever).
+  p=$(command -v pscat-mcp 2>/dev/null) &&
+    [ "$(readlink "$p" 2>/dev/null)" != "$CACHE/bin/pscat-mcp" ] && try_candidate "$p" "PATH"
   for d in "${HOME:-/nonexistent}/.cargo/bin" /opt/homebrew/bin /usr/local/bin; do
     try_candidate "$d/pscat-mcp" "$d"
   done
@@ -444,14 +445,9 @@ hook() {
     fi
     if [ "$FOUND_HOW" = cache ]; then
       link_on_path
-      if [ "$LINK_STATE" = on-path ]; then
-        ctx="pscat plugin: pscat is on PATH (linked into $LINK_DIR). If a shell still does not find it, run $FOUND_DIR/pscat (pscat-mcp is beside it)."
-      else
-        ctx="pscat plugin: the pscat command-line tool is not on PATH in this session. Run it by its full path, $FOUND_DIR/pscat (pscat-mcp is beside it)."
-      fi
-    else
-      ctx="pscat plugin: the pscat command-line tool is not on PATH in this session. Run it by its full path, $FOUND_DIR/pscat (pscat-mcp is beside it)."
+      [ "$LINK_STATE" = on-path ] && exit 0 # linked: a plain pscat works, nothing to say
     fi
+    ctx="pscat plugin: the pscat command-line tool is not on PATH in this session. Run it by its full path, $FOUND_DIR/pscat (pscat-mcp is beside it)."
     printf '{"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": %s}}\n' "$(json_str "$ctx")"
     exit 0
   fi
@@ -463,7 +459,9 @@ hook() {
     msg="pscat plugin: pscat is not installed yet. The pscat MCP server downloads it (release ${TAG:-?}, about 14 MB, checked against the release's SHA256SUMS) from $REPO_URL the first time it starts, into $CACHE. If the pscat tools do not appear, check the internet connection and restart; or install pscat yourself: cargo install pscat."
     [ -n "$OLD_SEEN" ] && msg="$msg (Found $OLD_SEEN, older than the $MIN_VERSION this plugin needs.)"
     link_on_path
-    if [ "$LINK_STATE" = on-path ]; then
+    if [ -x "$CACHE/bin/pscat" ]; then
+      ctx="pscat plugin: release ${TAG:-?} is not downloaded yet (about 14 MB, once); the earlier pscat in $CACHE/bin still works. To update it run: $launcher"
+    elif [ "$LINK_STATE" = on-path ]; then
       ctx="pscat plugin: pscat is not downloaded yet (release ${TAG:-?}, about 14 MB, once). Running pscat in a shell downloads it first (pscat is linked into $LINK_DIR). Or run: $launcher  (downloads it and prints the directory holding pscat). After that the stable path is $CACHE/bin/pscat."
     else
       ctx="pscat plugin: pscat is not downloaded yet and is not on PATH. To use the pscat command line, run: $launcher  (downloads release ${TAG:-?}, about 14 MB, once, and prints the directory holding pscat). After that the stable path is $CACHE/bin/pscat."

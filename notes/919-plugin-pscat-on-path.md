@@ -49,6 +49,11 @@ so they ship together. The Codex plugin has no launcher of its own:
   - `pscat-mcp` is only ever a symlink, never a shim: the launcher's own PATH
     lookup runs `pscat-mcp --version` and a shim there would hit the recursion
     guard.
+  - The launcher's own PATH lookup skips a `pscat-mcp` that is our link.
+    `version_ok` drops the pre-release suffix, so a cached `0.7.0-rc.2` would
+    otherwise satisfy a `v0.7.0` pin through the link and the final release
+    would never be downloaded. Only the cache branch follows the pin
+    (`test_pin_moves_from_an_rc_to_the_final_release_through_our_links`).
   - `PSCAT_NO_PATH_LINK=1` turns it off.
 - **The shim, for a fresh install.** With no cached copy the hook (which still
   never downloads, #853) leaves `~/.local/bin/pscat` as a ten-line shell script

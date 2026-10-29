@@ -373,6 +373,31 @@ class Launcher(unittest.TestCase):
         self.assertEqual(self.run_launcher("--locate").returncode, 0)
         self.assertIn(TAG, os.readlink(os.path.join(self.cache, "bin", "pscat")))
 
+    def test_pin_moves_from_an_rc_to_the_final_release_through_our_links(self):
+        d = self.local_bin()
+        env = self.env([d])
+        self.assertEqual(self.run_launcher("--locate", env=env).returncode, 0)
+        self.assertTrue(os.path.islink(self.bin_in(d, "pscat-mcp")))
+        self.pin("v9.9.9")
+        self.make_release("v9.9.9", "9.9.9")
+        r = self.run_launcher("--locate", env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("downloading pscat-9.9.9-", r.stderr)
+        self.assertIn("v9.9.9/", os.readlink(os.path.join(self.cache, "bin", "pscat")))
+        # The server start follows the pin too, and the hook stays quiet.
+        r = self.run_launcher("go", env=env)
+        self.assertEqual((r.returncode, r.stdout), (0, f"{MARKER} go\n"), r.stderr)
+        self.assertEqual(self.run_launcher("--hook", env=env).stdout, "")
+
+    def test_hook_says_so_when_only_an_earlier_release_is_cached(self):
+        d = self.local_bin()
+        env = self.env([d])
+        self.assertEqual(self.run_launcher("--locate", env=env).returncode, 0)
+        self.pin("v9.9.12")
+        out = json.loads(self.run_launcher("--hook", env=env).stdout)
+        self.assertIn("v9.9.12 is not downloaded yet", out["hookSpecificOutput"]["additionalContext"])
+        self.assertIn("earlier pscat", out["hookSpecificOutput"]["additionalContext"])
+
     def test_shim_downloads_on_first_use_then_becomes_a_link(self):
         d = self.local_bin()
         env = self.env([d])
