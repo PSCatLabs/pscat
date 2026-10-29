@@ -776,3 +776,25 @@ fn unsupported_keys_are_named_boundedly_and_a_refusal_does_not_outlive_its_progr
     assert!(out.contains("limitexceeded (memory)"), "{out}");
     assert!(out.contains("recovered"), "{out}");
 }
+
+/// Codex round 5 on PR #930: a restore refused for memory leaves a state
+/// that fits the canvas it kept, so the next program's page-sized image
+/// does not read a clip mask of another size.
+#[test]
+fn a_refused_restore_leaves_a_consistent_state() {
+    let run = pscat(
+        &["--max-memory", "20"],
+        "<< /PageSize [500 500] >> setpagedevice 10 10 100 100 rectclip /g gstate def \
+         << /PageSize [2000 2000] >> setpagedevice /s 6000000 string def g setgstate\n\
+         /str 100 string def 2000 2000 scale 100 100 8 [100 0 0 100 0 0] { str } image \
+         (ok) =\n",
+    );
+    let out = format!(
+        "{}{}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert!(out.contains("limitexceeded (memory)"), "{out}");
+    assert!(out.contains("ok"), "{out}");
+    assert!(!out.contains("panicked"), "{out}");
+}

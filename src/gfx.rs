@@ -1221,9 +1221,14 @@ impl Gfx {
         }
         let device = self.state.device.clone();
         if self.install_device(device).is_err() {
-            // No canvas for the old size: keep the current device, and
-            // make the restored state agree with it.
+            // No canvas for the old size: keep the current device, and make
+            // the restored state agree with it. Its CTM and clip were made
+            // for the other canvas, so they go back to the device's defaults
+            // (a clip mask of another size would be read out of bounds).
             self.state.device = self.device.clone();
+            self.state.ctm = self.base_ctm;
+            self.state.clip = None;
+            self.state.clip_stack.clear();
         }
     }
 
@@ -1411,7 +1416,10 @@ impl Gfx {
 
     /// Rc clone so the mask can outlive the `&mut self.pixmap` borrow.
     pub(crate) fn clip_mask_data(&self) -> Option<std::rc::Rc<tiny_skia::Mask>> {
+        // Only a mask of the canvas's size: image rasterising indexes it by
+        // the canvas's stride.
         self.clip_mask()
+            .filter(|m| m.width() == self.pixmap.width() && m.height() == self.pixmap.height())
     }
 
     fn clip_mask(&self) -> Option<std::rc::Rc<tiny_skia::Mask>> {
