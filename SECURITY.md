@@ -575,9 +575,14 @@ an installed build (October 2026, #568).
 
 - **`out_path` writes are confined to one output root.** The root is the
   directory given with `--out-root DIR` when the server is registered, or
-  else the server's working directory (Claude Code and Codex start it in the
+  else the server's working directory (Claude Code starts it in the
   project directory). If that working directory is the filesystem root,
-  `out_path` is switched off. A relative `out_path` starts at the root; an
+  `out_path` is switched off. The pscat plugin's launcher always passes
+  `--out-root` (#910): the user's `output_dir` plugin option (Claude Code),
+  `out-root` in `~/.config/pscat/plugin.conf`, the project, the working
+  directory, or pscat's per-user `renders/` directory. It never passes `/` or
+  a directory inside the installed plugin; Codex starts a plugin's server
+  inside the plugin. No environment variable names the root. A relative `out_path` starts at the root; an
   absolute one must land inside it. Refused: any `..` component, a directory
   that does not exist (the server creates none), a directory that resolves
   outside the root through a symlink, and an existing target that is not a

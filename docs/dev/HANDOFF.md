@@ -1512,6 +1512,15 @@ renders eight examples in both and compares block-downsampled output).
   `scripts/test_plugin_launcher.py` (fake file:// release); both install
   checks download from `scripts/fake_plugin_release.py`.
   See `notes/853-plugin-launcher.md`.
+  **Output root (#910):** Codex starts a plugin server with cwd
+  `${PLUGIN_ROOT}` (the installed copy), so the launcher, not the server,
+  picks `--out-root` unless the args name one: Claude Code's `output_dir`
+  userConfig (passed as the launcher-only `--plugin-out-root=`), `out-root`
+  in `~/.config/pscat/plugin.conf`, `--plugin-project-dir=${CLAUDE_PROJECT_DIR}`,
+  the cwd, then `<user data dir>/renders`; never `/` or inside the plugin.
+  The `--plugin-*=` args are Claude-only (`plugin_check.py` sets them aside
+  when comparing the two manifests). Still no env var for the root.
+  `notes/910-plugin-output-root.md`.
   `plugin_check.py` also fails a plugin `.md` that writes a bundled or
   repo-relative image/font path in backticks or a code block (the
   directory checklist holds those; #848, `notes/848-plugin-no-image-paths-in-backticks.md`).

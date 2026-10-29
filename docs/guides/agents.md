@@ -218,6 +218,19 @@ underscores, for example `PSCAT_MCP_TIMEOUT`, `PSCAT_MCP_JOB_TIMEOUT`,
 A variable takes the same values as its flag, and a flag overrides its
 variable. A value outside the flag's range (or not a whole number) stops the
 server at startup, naming the variable; an empty value counts as unset.
+**The plugin chooses the output root at launch** (#910). Hosts start the
+plugin's server in different places: Claude Code in the project, Codex inside
+the installed plugin, the Claude desktop app sometimes in `/`. So unless its
+arguments name `--out-root`, the launcher passes the first usable one of:
+Claude Code's **Render output folder** plugin option (`output_dir`), `out-root =
+DIR` in `~/.config/pscat/plugin.conf` (any host; the way to set it under
+Codex), the project Claude Code names, the working directory, and `renders/`
+in pscat's per-user data directory. A directory inside the installed plugin, or
+`/`, is never used, so nothing is written into the plugin. The server's
+instructions name the root; when the user's workspace is elsewhere the agent
+saves there and copies the file. The plugin README's "Where saved renders go"
+has the details.
+
 **`--out-root` and `--allow-read` have no `PSCAT_MCP_*` variable, on
 purpose**: these variables set only numeric limits, and none adds a read root
 or moves the output root, so a settings file cannot widen file access through
@@ -234,7 +247,7 @@ settings you trust.
 | `--max-pixels N` | 40000000 | The largest page, board or sheet in device pixels (width and height in points times dpi/72) for `render_postscript`, `handwrite`, `chalkboard_math` and `review_sheet`, checked before a canvas is allocated (`output_too_large`, with `limit_pixels`, `pixels`, `width_px`, `height_px`). 1 to 64000000; 8000 pixels a side always applies. An 8K screen or an A2 poster at 300 dpi fits the default. |
 | `--max-latex-bytes N` | 4096 | `chalkboard_math`'s `latex` size (`input_too_large`, with `limit`); about 40 rows. |
 | `--max-image-bytes N` | 3750000 | Inline image bytes per call, about 5 MB once base64-encoded; also at most 20 pages inline (`output_too_large`; a file asked for with `out_path` is still written). |
-| `--out-root DIR` | the working directory | Where `out_path` may write. Off when the server starts in `/`. |
+| `--out-root DIR` | the working directory | Where `out_path` may write. Off when the server starts in `/`. The plugin's launcher always chooses one (see below). |
 | `--allow-read DIR` | none (repeatable) | Another directory programs may read from, besides the working directory (not `/`) and the pscat data directories. A directory that doesn't exist stops the server at startup. |
 
 `chalkboard_math` checks its caps before anything runs: `latex` at most

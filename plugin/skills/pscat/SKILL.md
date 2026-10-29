@@ -375,10 +375,10 @@ interpreter stops a runaway
 program itself, with a `limit_exceeded` error whose `limit` field says `steps`,
 `time` or `memory` (a render still returns the partial page); `stopped` cannot
 catch it. `out_path` must be inside the
-server's output root (its working directory unless registered with
-`--out-root DIR`), end in the output format's extension (`.png`, `.svg`,
+server's output root (the server's instructions name it; `--out-root DIR`, which the plugin
+takes from `out-root = DIR` in `~/.config/pscat/plugin.conf`), end in the output format's extension (`.png`, `.svg`,
 `.pdf`) and not sit in a dot-directory such as `.git/`, and large inline images are refused: lower `dpi` or
-pass `out_path`. Register it with
+pass `out_path`. A workspace outside the root: save there, then `cp` the file; never decode an inline image. Register it with
 `claude mcp add pscat -- pscat-mcp` (Claude Code) or
 `codex mcp add pscat -- pscat-mcp` (Codex).
 

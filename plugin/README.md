@@ -169,6 +169,46 @@ server's tools being absent.
 **Already registered pscat-mcp by hand?** If you ran
 `codex mcp add pscat -- pscat-mcp`, remove it (`codex mcp remove pscat`).
 
+## Where saved renders go
+
+The MCP tools save a file only when asked (`out_path`), and only inside one
+directory, the server's output root, fixed when the server starts. No tool
+call can move it. The launcher picks the first of these that is an existing
+directory, is not `/`, and is not inside the installed plugin:
+
+1. **Claude Code's plugin option**: **Render output folder** (`output_dir`).
+   Set it with `/plugin configure pscat@pscat`, or in `/config`.
+2. **`out-root` in `~/.config/pscat/plugin.conf`** (under
+   `$XDG_CONFIG_HOME` if that is set). This works with every host, and it is
+   the way to set the root under Codex, which passes a plugin's server no
+   options of yours:
+
+   ```sh
+   mkdir -p ~/.config/pscat
+   echo 'out-root = ~/Documents/renders' > ~/.config/pscat/plugin.conf
+   ```
+
+   The path must be absolute or start with `~/`. The folder must already
+   exist.
+3. **The project Claude Code names** (`${CLAUDE_PROJECT_DIR}`).
+4. **The directory the host starts the server in**: the project, under
+   Claude Code.
+5. **`renders/` in pscat's per-user data directory**, which the launcher
+   creates: `~/Library/Application Support/pscat/renders` on macOS,
+   `~/.local/share/pscat/renders` on Linux. Codex starts a plugin's server
+   inside the installed plugin, and the Claude desktop app sometimes starts
+   it in `/`, so without a setting their renders go here.
+
+A setting takes effect when the server next starts, so restart the agent
+after changing it. A setting that can't be used is
+skipped with a warning in the server's log. The server tells the agent its
+output root. When the task's workspace is somewhere else, the agent saves
+there and copies the file over; set `out-root` to the workspace (or a
+folder above it) to save directly. Nothing is ever written into the plugin's
+own directory, so a read-only install works. If no directory can be used
+(no home directory), `out_path` is off. There is deliberately no environment
+variable for the output root (#756).
+
 ## Platforms
 
 macOS and Linux are tested; Windows is not. The plugin directory has no
@@ -204,8 +244,9 @@ GitHub's download host), once. The other exception is
 packs from the same releases. The plugin collects nothing and sends
 nothing anywhere.
 
-The one thing the plugin writes outside its cache is the `pscat` and
-`pscat-mcp` links described above, in `~/.local/bin` or `~/bin`.
+Outside its cache, the plugin itself writes only the `pscat` and
+`pscat-mcp` links described above, in `~/.local/bin` or `~/bin`, and creates
+the default `renders/` directory described above when it is used.
 
 Each MCP call is limited to 60 s by default, a default and not a fixed
 limit: a long render needs the server's `--timeout` (up to 86400), a raised
@@ -236,7 +277,8 @@ has the settings, including Claude Code's `MCP_TOOL_TIMEOUT` and
 
 The MCP tools run arbitrary PostScript as you. A program reads files only in
 the project directory, the pscat data directories and any `--allow-read DIR`
-the server was given; writes are confined to the project directory. See
+the server was given. A program writes no files itself; the server saves a
+render only inside the output root (see "Where saved renders go"). See
 [SECURITY.md](https://github.com/PSCatLabs/pscat/blob/main/SECURITY.md) and the
 [agents guide](https://pscatlabs.github.io/pscat/agents.html) for the server's limits and
 options.
