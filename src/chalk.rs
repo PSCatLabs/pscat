@@ -967,9 +967,13 @@ fn split_rows(s: &str) -> Vec<String> {
                         if b.get(j) == Some(&b'*') {
                             j += 1;
                         }
-                        let k = j + s[j..].len() - s[j..].trim_start_matches(' ').len();
+                        // TeX's `\\[2pt]` row spacing goes; a bracket that holds
+                        // no length is the next row's content (`\\ [x,y] = 0`, a
+                        // commutator), where LaTeX would stop with an error
+                        let k = j + s[j..].len() - s[j..].trim_start().len();
                         if b.get(k) == Some(&b'[')
                             && let Some(close) = s[k..].find(']')
+                            && is_tex_length(&s[k + 1..k + close])
                         {
                             j = k + close + 1;
                         }
@@ -1002,6 +1006,45 @@ fn split_rows(s: &str) -> Vec<String> {
     }
     rows.push(s[start..].to_string());
     rows
+}
+
+/// TeX's units of length (TeXbook p. 57), and the length registers a row
+/// break's spacing is commonly written in.
+const TEX_UNITS: [&str; 11] = ["pt", "pc", "in", "bp", "cm", "mm", "dd", "cc", "sp", "em", "ex"];
+const TEX_LENGTHS: [&str; 9] = [
+    "baselineskip",
+    "normalbaselineskip",
+    "lineskip",
+    "jot",
+    "smallskipamount",
+    "medskipamount",
+    "bigskipamount",
+    "parskip",
+    "fill",
+];
+
+/// Whether `t` (the inside of a `[...]`) reads as a TeX length: a signed
+/// number and a unit (`2pt`, `-1.5 em`, `3,5mm`, `2truept`), or an optional
+/// factor and a length register (`\baselineskip`, `0.5\jot`). Anything else,
+/// `x,y` or `\pi` among them, is not.
+fn is_tex_length(t: &str) -> bool {
+    let t = t.trim();
+    let t = t.strip_prefix(['+', '-']).unwrap_or(t).trim_start();
+    let digits = t
+        .find(|c: char| !(c.is_ascii_digit() || c == '.' || c == ','))
+        .unwrap_or(t.len());
+    let (num, rest) = t.split_at(digits);
+    let has_num = num.chars().any(|c| c.is_ascii_digit());
+    if !num.is_empty() && !has_num {
+        return false;
+    }
+    let rest = rest.trim_start();
+    if let Some(reg) = rest.strip_prefix('\\') {
+        return TEX_LENGTHS.contains(&reg.trim_end());
+    }
+    let unit = rest.to_ascii_lowercase();
+    let unit = unit.strip_prefix("true").unwrap_or(&unit).trim_start();
+    has_num && TEX_UNITS.contains(&unit.trim_end())
 }
 
 /// A PostScript string literal holding `bytes`: `\`, `(` and `)` escaped,
@@ -1450,6 +1493,20 @@ mod tests {
     fn rows_split_only_at_top_level_breaks() {
         assert_eq!(l(r"a &= b \\ c &= d"), ["a &= b", "c &= d"]);
         assert_eq!(l(r"a \\* b \\[2pt] c\\"), ["a", "b", "c"]);
+        // a bracket after `\\` is spacing only when it holds a length (#936)
+        assert_eq!(l(r"a \\ [x,y] = 0"), ["a", "[x,y] = 0"]);
+        assert_eq!(
+            l(r"i\hbar \\ [\hat{x},\hat{p}] = i\hbar"),
+            [r"i\hbar", r"[\hat{x},\hat{p}] = i\hbar"]
+        );
+        assert_eq!(l(r"a \\ [\pi] = 0"), ["a", r"[\pi] = 0"]);
+        assert_eq!(l(r"a \\[1] b"), ["a", "[1] b"]);
+        assert_eq!(l("a \\\\\n[2pt] b"), ["a", "b"]);
+        assert_eq!(l(r"a \\*[ -1.5 em ] b \\ [3,5mm] c"), ["a", "b", "c"]);
+        assert_eq!(l(r"a \\[0.5\baselineskip] b \\[\jot] c"), ["a", "b", "c"]);
+        assert_eq!(l(r"a \\[2truept] b"), ["a", "b"]);
+        // inside display delimiters too
+        assert_eq!(l(r"\[ a \\ [x,y] \]"), ["a", "[x,y]"]);
         assert_eq!(
             l(r"\begin{pmatrix} a & b \\ c & d \end{pmatrix} = M"),
             [r"\begin{pmatrix} a & b \\ c & d \end{pmatrix} = M"]

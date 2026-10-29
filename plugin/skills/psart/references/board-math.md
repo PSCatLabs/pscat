@@ -88,6 +88,9 @@ Anything else fails with a name saying what it was, for example
     `\\left[ 0, 1 \\right\)` with `\)`.
   - Keep each formula on one source line, or end the line with a
     backslash to continue the string.
+  - In `pscat chalk`, a bracket right after a `\\` row break is TeX's row
+    spacing (`\\[2pt]`, dropped) only when it holds a length; `\\ [x,y] = 0`
+    keeps its bracket. `\left[ x, y \right]` is always a bracket.
   - `x_{max}` is refused, because `max` is a command. Write `x_{\\max}`
     or `x_{\\text{max}}`.
 

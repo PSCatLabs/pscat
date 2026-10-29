@@ -238,6 +238,51 @@ fn irregular_zero_is_a_clean_untilted_layout() {
     );
 }
 
+/// Each row's width as `mkalign` lays it out, in points.
+fn row_widths(tex: &str, cfg: &Config) -> Vec<f64> {
+    let d = chalk::driver(tex, cfg).unwrap();
+    let cut = d.source.find("(lib/artkit.ps) run").expect("board half");
+    let mut src = d.source[..cut].to_string();
+    src.push_str(
+        "ckdict begin newpath cklines ckox ckoy ckopts mkalign end
+         { /Width get = } forall",
+    );
+    let mut it = Interp::new();
+    it.capture_stdout();
+    it.run_str(&src)
+        .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+    String::from_utf8_lossy(it.captured_stdout())
+        .split_whitespace()
+        .map(|t| t.parse().unwrap())
+        .collect()
+}
+
+/// A row that starts with a bracket after `\\` is written in full: the
+/// bracket is TeX's row spacing only when it holds a length (issue #936).
+/// Before the fix `[x,y]` was swallowed and the row read `= 0`.
+#[test]
+fn a_row_starting_with_a_bracket_keeps_it() {
+    let mut clean = small();
+    clean.irregular = 0.0;
+    let full = row_widths(r"a \\ [x,y] = 0", &clean);
+    let cut = row_widths(r"a \\ = 0", &clean);
+    assert_eq!(full.len(), 2);
+    assert!(
+        full[1] > 1.8 * cut[1],
+        "the bracket was swallowed: {full:?} vs {cut:?}"
+    );
+    // a real length is still spacing, never ink
+    assert_eq!(row_widths(r"a \\[2pt] = 0", &clean), cut);
+    // and the issue's commutator renders
+    let png = chalk::render(
+        r"i\hbar\partial_t\Psi = \hat{H}\Psi \\ [\hat{x},\hat{p}] = i\hbar",
+        &small(),
+        Format::Png,
+    )
+    .unwrap();
+    assert!(Pixmap::decode_png(&png).is_ok());
+}
+
 /// LaTeX centres each `gather` row on its own width (issue #699); `align`
 /// keeps its rows on one relation column, and its driver never asks for the
 /// centring.
