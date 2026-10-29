@@ -25,7 +25,9 @@ on macOS or Linux: the plugin's launcher (`plugin/scripts/pscat-mcp.sh`)
 uses a pscat you already have (PATH, `~/.cargo/bin`, Homebrew), and otherwise
 downloads the pinned GitHub release once, checks it against the release's
 `SHA256SUMS` and caches it (`~/Library/Caches/pscat/plugin` or
-`~/.cache/pscat/plugin`). The same plugin installs in the Claude desktop app
+`~/.cache/pscat/plugin`; the stable path of the command-line tool is `bin/pscat`
+there). It also links `pscat` and `pscat-mcp` into `~/.local/bin` or `~/bin`
+when that directory is already on `PATH`, so a plain `pscat` works. The same plugin installs in the Claude desktop app
 (Customize > Plugins > Add marketplace, `PSCatLabs/pscat`), where Cowork runs
 the server on your computer. In Claude Code:
 
