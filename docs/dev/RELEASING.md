@@ -590,7 +590,7 @@ Prompt 1 (the smoke prompt):
 | # | Check | Pass |
 |---|---|---|
 | a | The render succeeded | The tool call returned an image with no error and no `Lint:` block |
-| b | The image was delivered | The first completed answer shows the spiral (or, in a terminal, names the saved PNG) and has a working link to the `.ps` source, **without expanding any tool trace** |
+| b | The image was delivered | The first completed answer shows the spiral (or, in a terminal, names the saved PNG) and has a working link to the `.ps` source, **without expanding any tool trace**. Record which form you saw: embedded, link only, or neither |
 | c | No false claim | The answer does not say "rendered above" or "as you can see" unless the image is visible in the answer itself |
 | d | No base64 | No `data:` URI or base64 text in the reply |
 
