@@ -318,7 +318,7 @@ output is cut off at 64 KiB.
 | Execution stack depth | 10,000 (`execstackoverflow`) | `src/interp.rs` |
 | Procedure `{ }` nesting while scanning | 500 (`limitcheck`) | `src/interp.rs` |
 | Name-resolution cycles | detected, `limitcheck` | `src/interp.rs` |
-| Canvas size | at most 8000 x 8000 device pixels (about 256 MB), `--page` 1..8000 points, `--dpi` 9..1200 | `src/main.rs`, `src/interp.rs` |
+| Canvas size | at most 8000 x 8000 device pixels (about 256 MB), `--page` 1..8000 points, `--dpi` 9..1200; a `setpagedevice` page too (#909), and `--max-pixels N` caps it lower | `src/main.rs`, `src/interp.rs`, `src/ops/pagedevice.rs` |
 | Canvas, sheet or board size under the MCP server | at most 40,000,000 device pixels by default (`--max-pixels`, at most 64,000,000) | `src/mcp_server.rs` |
 | Captured output (browser, `capture_stdout`) | 64 KiB | `src/interp.rs` |
 | Interpreter steps per program (opt in: `--max-steps N`, `Limits::max_steps`) | none by default; MCP 25,000,000,000 | `src/interp.rs` |
@@ -780,7 +780,11 @@ an installed build (October 2026, #568).
   shares one cap, `--max-pixels` (#711, default 40,000,000, at most
   64,000,000), and answers `output_too_large` with `limit_pixels`, `pixels`,
   `width_px` and `height_px`: `render_postscript` before the child starts (the
-  page size is fixed by its arguments; a program cannot resize it), `handwrite`
+  page its arguments or the source's bounding box give), and again in the
+  child for a page the program's `setpagedevice /PageSize` asks for (#909: the
+  server passes `pscat --max-pixels`, the operator refuses a larger page with
+  `configurationerror` before allocating it, and the server answers
+  `output_too_large`), `handwrite`
   after the note's height is sized from its text and before it is drawn (the
   server passes `pscat handwrite --max-pixels`, and refuses a width over 8000
   pixels itself), `chalkboard_math` and `review_sheet` as above. An operator

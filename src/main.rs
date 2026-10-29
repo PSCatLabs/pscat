@@ -1292,10 +1292,40 @@ fn run_sweep(options: &Options, source: &[u8]) -> ExitCode {
             }
         },
     };
-    // The contact sheet is made when the first frame is in, with cells of
-    // that frame's size: the program's `setpagedevice` can size the page
-    // (#909), so the page asked for on the command line may not be it.
+    // The contact sheet's cells are the page's size, made (and so checked)
+    // before any frame renders. The program's `setpagedevice` can size the
+    // page (#909): then the sheet is made again for the first frame's size.
+    let new_sheet = |(cols, rows): (u32, u32), (w, h): (u32, u32)| {
+        pscat::contact_sheet::new_sheet(cols, rows, w, h, pscat::contact_sheet::GAP).map(|mut s| {
+            // Gaps and unused cells stay transparent too, matching the
+            // transparent frames blitted into them.
+            if options.transparent {
+                s.fill(tiny_skia::Color::TRANSPARENT);
+            }
+            (s, (w, h))
+        })
+    };
     let mut sheet: Option<(tiny_skia::Pixmap, (u32, u32))> = None;
+    if let Some(grid) = grid {
+        let Some(probe) =
+            Interp::with_page_scaled(options.page.0, options.page.1, options.dpi / 72.0)
+        else {
+            eprintln!(
+                "pscat: unusable page size {}x{}",
+                options.page.0, options.page.1
+            );
+            return ExitCode::FAILURE;
+        };
+        let cell = (probe.gfx().pixmap.width(), probe.gfx().pixmap.height());
+        drop(probe);
+        match new_sheet(grid, cell) {
+            Ok(s) => sheet = Some(s),
+            Err(msg) => {
+                eprintln!("pscat: {msg}");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
 
     let mut any_failed = false;
     let mut seed_ever_fired = false;
@@ -1402,22 +1432,11 @@ fn run_sweep(options: &Options, source: &[u8]) -> ExitCode {
             None => println!("pscat: sweep: {}/{n} {label}{status}", i + 1),
         }
         if let Some((cols, rows)) = grid {
-            if sheet.is_none() {
-                match pscat::contact_sheet::new_sheet(
-                    cols,
-                    rows,
-                    page.width(),
-                    page.height(),
-                    pscat::contact_sheet::GAP,
-                ) {
-                    Ok(mut s) => {
-                        // Gaps and unused cells stay transparent too,
-                        // matching the transparent frames blitted into them.
-                        if options.transparent {
-                            s.fill(tiny_skia::Color::TRANSPARENT);
-                        }
-                        sheet = Some((s, (page.width(), page.height())));
-                    }
+            let frame = (page.width(), page.height());
+            if i == 0 && sheet.as_ref().is_some_and(|(_, cell)| *cell != frame) {
+                drop(sheet.take());
+                match new_sheet((cols, rows), frame) {
+                    Ok(s) => sheet = Some(s),
                     Err(msg) => {
                         eprintln!("pscat: {msg}");
                         return ExitCode::FAILURE;

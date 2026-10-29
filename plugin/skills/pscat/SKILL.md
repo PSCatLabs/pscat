@@ -44,7 +44,9 @@ generate | pscat --png out.png -       # `-` reads the program from stdin
 Multi-page documents number their pages: `out.png` → `out-001.png`,
 `out-002.png`, … SVG does the same; PDF is naturally multi-page.
 
-Page size: `--page` always wins. Without it, an EPSF file (first line
+Page size: `--page` always wins. Without it, a `<< /PageSize [w h] >>
+setpagedevice` in the program sets the page (other page-device keys are
+ignored with a warning). Without that, an EPSF file (first line
 `%!PS-Adobe-3.0 EPSF-3.0`) is cropped to its `%%BoundingBox` (or
 `%%HiResBoundingBox`), with the box's lower-left corner at the page's; a
 plain `.ps` file gets 612x792 unless you pass `--bbox`. MCP: leave out
