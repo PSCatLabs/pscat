@@ -24,14 +24,7 @@ a release from <https://github.com/PSCatLabs/pscat/releases>, or
 `cargo install --git https://github.com/PSCatLabs/pscat`
 (installs `pscat` and `pscat-mcp`).
 
-**Headless on Linux.** The Linux binary the plugin downloads has no live
-window: `pscat file.ps`, `-i` and `--spool` fail there. Render to a file
-(`pscat --png out.png file.ps`); `cargo install pscat` builds the window.
-The macOS download has it.
-
-If the **pscat MCP tools** are connected (`render_postscript`,
-`eval_postscript`, `handwrite`, `chalkboard_math`, `describe_art_capabilities`), they do the
-same jobs with images returned inline; see "MCP" below.
+**Headless on Linux:** the plugin's Linux binary has no live window, so `pscat file.ps`, `-i` and `--spool` fail there; render with `pscat --png out.png file.ps` (`cargo install pscat` builds the window).
 
 ## Render a file (the common case)
 

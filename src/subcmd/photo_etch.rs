@@ -133,9 +133,13 @@ pub(super) fn run(args: Args) -> Result<(), Failure> {
 /// read, which the render reports as before.
 fn not_a_jpeg(photo: &str) -> Option<String> {
     use std::io::Read as _;
-    let mut head = [0u8; 12];
-    let n = std::fs::File::open(photo).ok()?.read(&mut head).ok()?;
-    sniff_non_jpeg(&head[..n])
+    let mut head = Vec::with_capacity(12);
+    std::fs::File::open(photo)
+        .ok()?
+        .take(12)
+        .read_to_end(&mut head)
+        .ok()?;
+    sniff_non_jpeg(&head)
 }
 
 fn sniff_non_jpeg(head: &[u8]) -> Option<String> {
