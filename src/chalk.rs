@@ -1066,6 +1066,7 @@ fn is_tex_length(t: &str) -> bool {
 fn is_tex_glue(t: &str) -> bool {
     // an e-TeX expression is spacing whatever it holds
     let head = t.trim_start();
+    let head = head.strip_prefix(['+', '-']).unwrap_or(head).trim_start();
     if head.starts_with("\\dimexpr") || head.starts_with("\\glueexpr") {
         return true;
     }
@@ -1562,6 +1563,7 @@ mod tests {
             l(r"a \\[\dimexpr 2pt+1pt\relax] b \\[\dimen0] c \\[0.5\skip12] d"),
             ["a", "b", "c", "d"]
         );
+        assert_eq!(l(r"a \\[-\dimexpr 2pt+1pt\relax] b"), ["a", "b"]);
         assert_eq!(l(r"a \\ [x_0] = 1"), ["a", "[x_0] = 1"]);
         assert_eq!(
             l(r"a \\ [\alpha, \beta] = 0"),
