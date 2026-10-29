@@ -24,6 +24,10 @@
 #    binaries (scripts/fake_plugin_release.py, file://); and not on PATH with
 #    the release unreachable, which must fail. HOME and the launcher's cache
 #    are temp dirs.
+# 4. Saving renders through that server (#910): with the installed copy
+#    read-only and as the working directory (where Codex starts it), PNG, SVG
+#    and PDF saves land in the out-root from ~/.config/pscat/plugin.conf, or
+#    with no setting in pscat's per-user renders directory; never in the copy.
 set -euo pipefail
 
 bin=${1:?usage: $0 path/to/bin-dir-with-pscat-mcp}
@@ -33,7 +37,7 @@ test -x "$bin/pscat-mcp" && test -x "$bin/pscat" || { echo "FAIL no pscat/pscat-
 codex=$(command -v codex) || { echo "FAIL codex CLI not on PATH" >&2; exit 1; }
 
 work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
+trap 'chmod -R u+w "$work" 2>/dev/null; rm -rf "$work"' EXIT
 export CODEX_HOME="$work/home"
 mkdir -p "$CODEX_HOME" "$work/project"
 cd "$work/project"
@@ -143,5 +147,68 @@ else
         ok "without pscat-mcp and offline the server fails to start"
     fi
 fi
+
+# Saving renders (#910). save_check PATH HOME ROOT: through the resolved
+# server, started in the installed copy as Codex starts it, a PNG, an SVG and
+# a PDF saved by out_path land in ROOT, the instructions name ROOT, and no
+# file appears in the copy.
+save_check() {
+    PATH="$1" HOME="$2" PSCAT_CACHE_DIR="$work/cache-unused" PSCAT_RELEASE_BASE_URL="$offline" \
+        python3 - "$work/server.json" "$3" "$copy" <<'EOF'
+import json, os, shutil, subprocess, sys
+t = json.load(open(sys.argv[1]))["transport"]
+root, copy = os.path.realpath(sys.argv[2]), sys.argv[3]
+if os.path.realpath(t.get("cwd") or "/") != os.path.realpath(copy):
+    print(f"note: Codex resolved cwd {t.get('cwd')!r}, not the installed copy")
+files = lambda: sorted(os.path.join(d, f) for d, _, fs in os.walk(copy) for f in fs)  # noqa: E731
+before = files()
+src = "newpath 10 10 moveto 50 50 lineto stroke showpage"
+msgs = [
+    {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+        "protocolVersion": "2025-06-18", "capabilities": {},
+        "clientInfo": {"name": "codex-plugin-check", "version": "0"}}},
+    {"jsonrpc": "2.0", "method": "notifications/initialized"},
+] + [{"jsonrpc": "2.0", "id": 2 + i, "method": "tools/call", "params": {
+        "name": "render_postscript", "arguments": {
+            "source": src, "width": 60, "height": 60, "format": fmt, "out_path": f"saved.{fmt}"}}}
+     for i, fmt in enumerate(("png", "svg", "pdf"))]
+stdin = "".join(json.dumps(m) + "\n" for m in msgs)
+# Codex passes a short fixed environment; a runner's XDG_CONFIG_HOME or
+# XDG_DATA_HOME would move the config file and the default directory.
+env = {k: v for k, v in os.environ.items() if not k.startswith("XDG_")}
+env.update(t.get("env") or {})
+p = subprocess.run([shutil.which(t["command"]), *t.get("args", [])], input=stdin, capture_output=True,
+                   text=True, timeout=120, env=env, cwd=copy)
+replies = {r.get("id"): r for r in map(json.loads, filter(None, p.stdout.splitlines()))}
+instr = replies.get(1, {}).get("result", {}).get("instructions", "")
+problems = []
+if f"out_path writes only inside {root}" not in instr:
+    problems.append(f"instructions do not name {root}: {instr[-400:]!r}")
+for i, (fmt, magic) in enumerate((("png", b"\x89PNG"), ("svg", b"<"), ("pdf", b"%PDF"))):
+    r = replies.get(2 + i, {}).get("result", {})
+    f = os.path.join(root, f"saved.{fmt}")
+    if r.get("isError") or not os.path.isfile(f) or not open(f, "rb").read(512).lstrip().startswith(magic):
+        problems.append(f"{fmt}: {json.dumps(r)[:300]}")
+if files() != before:
+    problems.append(f"files appeared in the installed copy: {sorted(set(files()) - set(before))}")
+print("saved png, svg, pdf in", root, "|", problems or "ok", "|", p.stderr.strip()[-300:])
+sys.exit(1 if problems else 0)
+EOF
+}
+chmod -R a-w "$copy"
+mkdir -p "$work/save-home/.config/pscat" "$work/workspace"
+printf 'out-root = %s\n' "$work/workspace" > "$work/save-home/.config/pscat/plugin.conf"
+save_check "$bin:$clean_path" "$work/save-home" "$work/workspace" \
+    && ok "read-only install: PNG, SVG and PDF saves land in the configured out-root" \
+    || bad "saves with a configured out-root"
+rm "$work/save-home/.config/pscat/plugin.conf"
+case "$(uname -s)" in
+    Darwin) renders="$work/save-home/Library/Application Support/pscat/renders" ;;
+    *) renders="$work/save-home/.local/share/pscat/renders" ;;
+esac
+save_check "$bin:$clean_path" "$work/save-home" "$renders" \
+    && ok "read-only install, no setting: the saves land in pscat's renders directory, not the plugin" \
+    || bad "saves with no out-root setting"
+chmod -R u+w "$copy"
 
 exit $fail

@@ -102,10 +102,10 @@ class Launcher(unittest.TestCase):
         env.update(extra)
         return env
 
-    def run_launcher(self, *args, env=None, timeout=60):
+    def run_launcher(self, *args, env=None, timeout=60, cwd=None):
         return subprocess.run([*self.shell, self.path("plugin/scripts/pscat-mcp.sh"), *args],
                               env=env or self.env(), capture_output=True, text=True,
-                              timeout=timeout, stdin=subprocess.DEVNULL, cwd=self.path("empty"))
+                              timeout=timeout, stdin=subprocess.DEVNULL, cwd=cwd or self.path("empty"))
 
     def installed_dirs(self):
         d = os.path.join(self.cache, TAG)
@@ -520,6 +520,131 @@ class Launcher(unittest.TestCase):
         self.make_release("v9.9.11", "9.9.11")
         r = self.run_launcher("v")
         self.assertEqual((r.returncode, r.stdout), (0, f"{MARKER} v\n"), r.stderr)
+
+    # --- the output root (#910) ------------------------------------------------
+
+    def default_renders(self):
+        home = self.path("home")
+        if sys.platform == "darwin":
+            return os.path.join(home, "Library", "Application Support", "pscat", "renders")
+        return os.path.join(home, ".local", "share", "pscat", "renders")
+
+    def conf(self, text):
+        d = self.path("home/.config/pscat")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "plugin.conf"), "w") as f:
+            f.write(text)
+
+    def read_only_plugin(self):
+        """The plugin as an installed, read-only copy; undone at cleanup."""
+        for dirpath, _, files in os.walk(self.plugin):
+            for f in files:
+                os.chmod(os.path.join(dirpath, f), 0o555)
+            os.chmod(dirpath, 0o555)
+        def undo():
+            for dirpath, _, _ in os.walk(self.plugin):
+                os.chmod(dirpath, 0o755)
+        self.addCleanup(undo)
+
+    def served_args(self, r):
+        self.assertEqual(r.returncode, 0, r.stderr)
+        lines = r.stdout.splitlines()
+        self.assertEqual(len(lines), 1, r.stdout)  # stdout stays the MCP channel
+        self.assertTrue(lines[0].startswith(MARKER), r.stdout)
+        return lines[0][len(MARKER):].strip()  # the arguments, joined by spaces
+
+    def test_out_root_never_the_installed_plugin(self):
+        # Codex starts a plugin's server in the plugin itself: the root moves to
+        # pscat's per-user renders directory, which the launcher creates, and a
+        # PSCAT_MCP_OUT_ROOT in the environment changes nothing (#756).
+        self.read_only_plugin()
+        env = self.env(PSCAT_MCP_OUT_ROOT=self.path("empty"))
+        args = self.served_args(self.run_launcher("x", env=env, cwd=self.plugin))
+        root = os.path.realpath(self.default_renders())
+        self.assertEqual(args, " ".join(["--out-root", root, "x"]))
+        self.assertTrue(os.path.isdir(root))
+        # From a subdirectory of the plugin too.
+        args = self.served_args(self.run_launcher(env=env, cwd=self.path("plugin/scripts")))
+        self.assertEqual(args, " ".join(["--out-root", root]))
+
+    def test_out_root_from_the_config_file(self):
+        self.read_only_plugin()
+        os.makedirs(self.path("home/work dir"))
+        self.conf("# pscat plugin\n  out-root = ~/elsewhere\nout-root = \"~/work dir\"  \n")
+        want = os.path.realpath(self.path("home/work dir"))
+        for cwd in (self.plugin, self.path("empty"), "/"):
+            args = self.served_args(self.run_launcher(cwd=cwd))
+            self.assertEqual(args, "--out-root " + want, cwd)
+        # XDG_CONFIG_HOME moves the file.
+        os.makedirs(self.path("xdg/pscat"))
+        with open(self.path("xdg/pscat/plugin.conf"), "w") as f:
+            f.write("out-root = " + self.path("empty") + "\n")
+        args = self.served_args(self.run_launcher(env=self.env(XDG_CONFIG_HOME=self.path("xdg")),
+                                                  cwd=self.plugin))
+        self.assertEqual(args, " ".join(["--out-root", os.path.realpath(self.path("empty"))]))
+
+    def test_unusable_settings_are_ignored_with_a_warning(self):
+        default = os.path.realpath(self.default_renders())
+        os.makedirs(self.path("home/work"))
+        for value, why in (("~/missing", "not an existing directory"),
+                           ("relative/dir", "not an absolute path"),
+                           ("/", "the filesystem root"),
+                           (self.path("plugin/scripts"), "inside the plugin")):
+            self.conf(f"out-root = {value}\n")
+            r = self.run_launcher(cwd=self.plugin)
+            self.assertEqual(self.served_args(r), " ".join(["--out-root", default]), value)
+            self.assertIn(why, r.stderr)
+            # The plugin option is checked the same way, then the file is used.
+            self.conf("out-root = ~/work\n")
+            r = self.run_launcher(f"--plugin-out-root={value}", cwd=self.plugin)
+            self.assertEqual(self.served_args(r), " ".join(["--out-root", os.path.realpath(self.path("home/work"))]))
+            self.assertIn("output_dir", r.stderr)
+
+    def test_claude_code_bindings(self):
+        # The manifest's --plugin-* arguments never reach pscat-mcp. An empty
+        # value (option unset) or a placeholder the host left as written
+        # (a host without userConfig) counts as unset.
+        os.makedirs(self.path("opt"))
+        os.makedirs(self.path("proj"))
+        opt, proj = os.path.realpath(self.path("opt")), os.path.realpath(self.path("proj"))
+        run = lambda *a, cwd="/": self.served_args(self.run_launcher(*a, cwd=cwd))  # noqa: E731
+        self.assertEqual(run(f"--plugin-out-root={opt}", f"--plugin-project-dir={proj}", "y"),
+                         " ".join(["--out-root", opt, "y"]))
+        self.assertEqual(run("--plugin-out-root=", f"--plugin-project-dir={proj}"),
+                         " ".join(["--out-root", proj]))
+        self.assertEqual(run("--plugin-out-root=${user_config.output_dir}",
+                             "--plugin-project-dir=${CLAUDE_PROJECT_DIR}", cwd=self.path("proj")),
+                         "")  # the working directory, as before
+        # The option beats the config file, which beats the project.
+        self.conf(f"out-root = {self.path('empty')}\n")
+        self.assertEqual(run(f"--plugin-out-root={opt}", f"--plugin-project-dir={proj}"),
+                         " ".join(["--out-root", opt]))
+        self.assertEqual(run("--plugin-out-root=", f"--plugin-project-dir={proj}"),
+                         " ".join(["--out-root", os.path.realpath(self.path("empty"))]))
+        os.remove(self.path("home/.config/pscat/plugin.conf"))
+        # A desktop app's project of / is not a root: the default directory is.
+        self.assertEqual(run("--plugin-out-root=", "--plugin-project-dir=/"),
+                         " ".join(["--out-root", os.path.realpath(self.default_renders())]))
+
+    def test_an_explicit_out_root_is_left_alone(self):
+        self.conf(f"out-root = {self.path('empty')}\n")
+        args = self.served_args(self.run_launcher("--out-root", "/x y", "--plugin-out-root=/z",
+                                                  cwd=self.plugin))
+        self.assertEqual(args, "--out-root /x y")
+
+    def test_no_usable_root_starts_the_server_in_root_dir(self):
+        # No HOME (so no config file and no default directory) and the plugin
+        # as the working directory: the server starts in /, where it turns
+        # out_path off, rather than write into the plugin.
+        d = self.fake_install("9.9.9")
+        with open(os.path.join(d, "pscat-mcp"), "w") as f:
+            f.write("#!/bin/sh\ncase \"$1\" in --version) echo 'pscat-mcp 9.9.9'; exit 0 ;; esac\n"
+                    "echo \"cwd=$(pwd) args=$*\"\n")
+        env = self.env(PSCAT_MCP_BIN=os.path.join(d, "pscat-mcp"))
+        del env["HOME"]
+        r = self.run_launcher("z", env=env, cwd=self.plugin)
+        self.assertEqual((r.returncode, r.stdout), (0, "cwd=/ args=z\n"), r.stderr)
+        self.assertIn("out_path is off", r.stderr)
 
 
 def load_tests(loader, tests, pattern):

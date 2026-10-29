@@ -911,7 +911,8 @@ fn initialize_result(cfg: &Config, params: &Value) -> Result<Value, (String, Val
         Ok(root) => format!(
             "out_path writes only inside {} (relative paths start there), only to a name \
              ending in the output format's extension (.png, .svg, .pdf), and never into \
-             a dot-directory.",
+             a dot-directory. If the user's workspace is outside it, write the file \
+             here and copy it there; don't decode an inline image into a file.",
             root.display()
         ),
         Err(why) => why.clone(),
