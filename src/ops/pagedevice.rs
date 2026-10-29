@@ -57,8 +57,10 @@ fn setpagedevice(it: &mut Interp) -> Result<(), PsError> {
     for (key, value) in d.borrow().pairs() {
         match &key.value {
             Value::Name(n) if &**n == "PageSize" => request = Some(value),
-            Value::Name(n) => ignored.push(format!("/{}", &**n)),
-            _ => ignored.push(key.repr()),
+            // Bounded: a key is program data, and an array key's text can
+            // be exponentially larger than the array (Codex, PR #930).
+            Value::Name(n) => ignored.push(format!("/{}", crate::object::cap_text(n, 64))),
+            _ => ignored.push(format!("a {} key", key.type_name())),
         }
     }
     let size = match request {

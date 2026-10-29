@@ -1233,7 +1233,12 @@ impl Gfx {
         self.mem_refused = false;
     }
 
-    /// A canvas was refused for the memory budget (see `mem_refused`).
+    /// Forget a refusal: a new program starts (`Interp::begin_source`).
+    pub(crate) fn clear_memory_refused(&mut self) {
+        self.mem_refused = false;
+    }
+
+    /// Whether a canvas was refused for the budget since the program began.
     pub(crate) fn memory_refused(&self) -> bool {
         self.mem_refused
     }

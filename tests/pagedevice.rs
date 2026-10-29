@@ -740,3 +740,39 @@ fn a_restored_device_is_held_to_the_memory_cap() {
     assert!(stderr.contains("limitexceeded"), "{stderr}");
     assert!(stderr.contains("memory"), "{stderr}");
 }
+
+/// Codex round 4 on PR #930: an unsupported key is named without printing
+/// it (an array key's text can be exponentially larger than the array), and
+/// a refused restore stops only its own program.
+#[test]
+fn unsupported_keys_are_named_boundedly_and_a_refusal_does_not_outlive_its_program() {
+    let run = pscat(
+        &[
+            "-e",
+            "/a [0] def 40 { /a [a a] def } repeat << a 1 >> setpagedevice",
+        ],
+        "",
+    );
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(run.status.success(), "{stderr}");
+    assert!(
+        stderr.contains("a arraytype key is not supported"),
+        "{stderr}"
+    );
+    assert!(stderr.len() < 1000, "{} bytes", stderr.len());
+
+    // The REPL runs each line as its own program.
+    let run = pscat(
+        &["--max-memory", "20"],
+        "<< /PageSize [2000 2000] >> setpagedevice /big gstate def \
+         << /PageSize [10 10] >> setpagedevice /s 15000000 string def big setgstate\n\
+         (recovered) =\n",
+    );
+    let out = format!(
+        "{}{}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert!(out.contains("limitexceeded (memory)"), "{out}");
+    assert!(out.contains("recovered"), "{out}");
+}

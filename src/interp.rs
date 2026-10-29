@@ -857,6 +857,9 @@ impl Interp {
     /// run a slice, look at the page, run the next.
     pub fn begin_source(&mut self, src: &[u8]) {
         self.quit_requested = false;
+        // A canvas the last program could not restore within the memory cap
+        // stopped that program; it does not stop this one (#909).
+        self.gfx.clear_memory_refused();
         self.last_name = None;
         self.last_line = None;
         if !self.limits.is_none() {
