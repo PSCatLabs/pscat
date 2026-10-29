@@ -7247,6 +7247,22 @@ systemdict /setalpha known /pwhasalpha exch def
     closepath
 } bind def
 
+%%SelfTest: pkpaper-rejects-too-few-operands
+%   % #932: `pkpaper` takes x y w h opts. With the dict alone it used to
+%   % underflow inside `/pvh exch def`, leaving the name /pvh on the stack
+%   % and an error that said nothing about the missing rectangle.
+%   { << /Grain 0.6 >> pkpaper }
+%   /pkpaper-needs-x-y-w-h-and-an-options-dict
+%   (an options dict with no rectangle) mustguard
+%   { 0 0 612 792 pkpaper }
+%   /pkpaper-needs-x-y-w-h-and-an-options-dict
+%   (a rectangle with no options dict) mustguard
+%
+%   % ...while the documented form still has to work.
+%   { 0 0 100 100 << /Grain 0.6 >> pkpaper }
+%   (x y w h and an options dict) mustpass
+%%EndSelfTest
+
 % @kind: Procedure
 % @summary: Lays a paper ground for watercolor: a tone fill over the given rectangle plus seeded grain speckle and fiber flecks. Paint it first; washes go over it. Uses setalpha where available and falls back to flattened tones elsewhere.
 % @example: 0 0 612 792 << /Tone [0.97 0.955 0.92] /Grain 0.6 >> pkpaper
