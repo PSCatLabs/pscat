@@ -387,6 +387,113 @@ fn typewrite_refuses_an_output_name_it_cannot_pick_a_format_for() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// `--png`, `--svg`, `--pdf` and `handwrite -o` write one format whatever the
+/// name says, so a name for another known image or document type is refused
+/// with the extension named, and nothing is written (#938). No extension and
+/// an unknown one keep working, and so do the multi-page numbered names.
+#[test]
+fn fixed_format_outputs_refuse_a_name_for_another_type() {
+    let dir = scratch("fixed-ext");
+    let ps = dir.join("two.ps");
+    std::fs::write(
+        &ps,
+        "0 0 50 50 rectfill showpage 0 0 20 20 rectfill showpage\n",
+    )
+    .unwrap();
+    for (flag, name) in [
+        ("--png", "out.jpg"),
+        ("--png", "out.JPG"),
+        ("--png", "out.gif"),
+        ("--png", "out.pdf"),
+        ("--svg", "out.png"),
+        ("--svg", "out.jpeg"),
+        ("--pdf", "out.png"),
+        ("--pdf", "out.webp"),
+    ] {
+        let res = pscat(&dir, &[flag, name, path(&ps)]);
+        assert_eq!(
+            res.status.code(),
+            Some(1),
+            "{flag} {name} should be refused"
+        );
+        let err = String::from_utf8_lossy(&res.stderr);
+        let ext = name.rsplit('.').next().unwrap();
+        assert!(
+            err.contains(&format!("{flag} writes")) && err.contains(&format!("ends in .{ext}")),
+            "{flag} {name}: {err}"
+        );
+    }
+    for (args, what) in [
+        (
+            &["handwrite", "-o", "hw.jpg", "hi"][..],
+            "handwrite -o hw.jpg",
+        ),
+        (
+            &["handwrite", "--out", "hw.svg", "hi"][..],
+            "handwrite --out hw.svg",
+        ),
+    ] {
+        let res = pscat(&dir, args);
+        assert_eq!(res.status.code(), Some(1), "{what} should be refused");
+        let err = String::from_utf8_lossy(&res.stderr);
+        assert!(err.contains("-o writes a PNG"), "{what}: {err}");
+    }
+    let left: Vec<String> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(left, ["two.ps"], "nothing may be written, found {left:?}");
+
+    // Still fine: the right extension (any case), none, and an unknown one.
+    // The two pages number from the name the user gave; a PDF is one file.
+    for (flag, name, written, magic) in [
+        ("--png", "a.PNG", "a-001.PNG", &b"\x89PNG"[..]),
+        ("--png", "noext", "noext-001", b"\x89PNG"),
+        ("--png", "out.dat", "out-001.dat", b"\x89PNG"),
+        ("--svg", "s.svg", "s-001.svg", b"<svg"),
+        ("--pdf", "d.pdf", "d.pdf", b"%PDF"),
+    ] {
+        ok(&pscat(&dir, &[flag, name, path(&ps)]));
+        let bytes = std::fs::read(dir.join(written))
+            .unwrap_or_else(|_| panic!("{flag} {name}: {written} not written"));
+        assert!(bytes.starts_with(magic), "{flag} {name}");
+    }
+    ok(&pscat(&dir, &["handwrite", "-o", "hw.PNG", "hi"]));
+    assert!(dir.join("hw.PNG").is_file());
+    ok(&pscat(&dir, &["handwrite", "-o", "hw-noext", "hi"]));
+    assert!(dir.join("hw-noext").is_file());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A photo that is not a JPEG fails with a message naming what it is, from
+/// its first bytes, not with the library's internal `et-jpeg-not-a-jpeg`
+/// (#939). A JPEG still works (the other photo-etch tests cover that).
+#[test]
+fn photo_etch_names_the_format_of_a_non_jpeg() {
+    let dir = scratch("etch-nonjpeg");
+    let cases: [(&str, &[u8], &str); 5] = [
+        ("ph.png", b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR", "a PNG"),
+        ("ph.gif", b"GIF89a\x01\0\x01\0", "a GIF"),
+        ("ph.webp", b"RIFF\x10\0\0\0WEBPVP8 ", "a WebP"),
+        ("empty.jpg", b"", "an empty file"),
+        ("notes.jpg", b"plain text, not a photo", "not a JPEG"),
+    ];
+    for (name, bytes, want) in cases {
+        std::fs::write(dir.join(name), bytes).unwrap();
+        let res = pscat(&dir, &["photo-etch", name, "-o", "out.png"]);
+        assert_eq!(res.status.code(), Some(1), "{name}");
+        let err = String::from_utf8_lossy(&res.stderr);
+        assert!(err.contains(&format!("{name} is {want}")), "{name}: {err}");
+        assert!(err.contains("only JPEG"), "{name}: {err}");
+        assert!(
+            !err.contains("et-jpeg"),
+            "{name} leaks an internal name: {err}"
+        );
+        assert!(!dir.join("out.png").exists(), "{name} wrote output");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn bad_arguments_fail_with_usage() {
     let dir = scratch("usage");

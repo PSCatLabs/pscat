@@ -1193,6 +1193,12 @@ renders eight examples in both and compares block-downsampled output).
   option. The `scripts/*.sh` of the same names are thin wrappers, and
   `pscat-mcp`'s `handwrite` runs `pscat handwrite`. See
   `notes/600-tool-subcommands.md`.
+  Output names (#938): `typewrite`, `photo-etch` and `chalk` pick the format
+  from `-o`'s extension (`subcmd::output_format`); `--png`, `--svg`, `--pdf` and
+  `handwrite -o` always write one format, so they run `subcmd::check_output_name`
+  and refuse a name for another known image or document type (no extension or
+  an unknown one still works). `photo-etch` sniffs the photo's first bytes and
+  names a non-JPEG (#939); it has no PNG input.
 - **Interpreter execution limits (#604).** `Limits` (`src/limits.rs`) via
   `Interp::set_limits`; CLI `--max-steps/--max-time/--max-memory`; on by default
   in `pscat-mcp`. The design points that are easy to break:

@@ -7,7 +7,8 @@
 //! dimensions (from its SOF marker, no decode), sizing the output page to
 //! match its aspect ratio; the real render then reads and hatches it. JPEG
 //! input only: this interpreter has no PNG decode path in PostScript (see
-//! `lib/etching.ps`'s header comment for why that is not a gap).
+//! `lib/etching.ps`'s header comment for why that is not a gap), so any other
+//! format is refused up front by its first bytes (#939).
 
 use super::{
     Args, Confine, Failure, dpi, library, measure, number, output_format, page_dim, ps_escape,
@@ -15,6 +16,8 @@ use super::{
 };
 
 const USAGE: &str = r#"usage: pscat photo-etch [options] photo.jpg
+
+  The photo must be a JPEG; a PNG or other format is refused (convert it first).
 
   -o, --out PATH     output file; format from extension: .png/.svg/.pdf
                       (default etching.png)
@@ -58,6 +61,12 @@ pub(super) fn run(args: Args) -> Result<(), Failure> {
     let format = output_format(&o.out).map_err(usage)?;
     if !std::path::Path::new(&o.photo).is_file() {
         return Err(Failure::Msg(format!("no such file: {}", o.photo)));
+    }
+    if let Some(found) = not_a_jpeg(&o.photo) {
+        return Err(Failure::Msg(format!(
+            "{} is {found}; only JPEG photos are supported (convert it to JPEG first)",
+            o.photo
+        )));
     }
     // Absolute: a relative name would be looked up by the resolver
     // (`$PSCAT_HOME` first), not against the directory the user is in.
@@ -115,6 +124,44 @@ pub(super) fn run(args: Args) -> Result<(), Failure> {
         &o.out,
         &o.confine,
     )
+}
+
+/// What a file is, when its first bytes are not a JPEG's: the library's own
+/// check (`et-scan`) fails on a PNG with an internal procedure name, which
+/// tells the user nothing. `None` for a JPEG (`FF D8`, all `et-scan` looks
+/// at, so this is never stricter than the library) or a file that cannot be
+/// read, which the render reports as before.
+fn not_a_jpeg(photo: &str) -> Option<String> {
+    use std::io::Read as _;
+    let mut head = [0u8; 12];
+    let n = std::fs::File::open(photo).ok()?.read(&mut head).ok()?;
+    sniff_non_jpeg(&head[..n])
+}
+
+fn sniff_non_jpeg(head: &[u8]) -> Option<String> {
+    if head.starts_with(&[0xFF, 0xD8]) {
+        return None;
+    }
+    let kind = if head.is_empty() {
+        "an empty file"
+    } else if head.starts_with(b"\x89PNG") {
+        "a PNG"
+    } else if head.starts_with(b"GIF8") {
+        "a GIF"
+    } else if head.starts_with(b"BM") {
+        "a BMP"
+    } else if head.starts_with(b"RIFF") && head.get(8..12) == Some(b"WEBP") {
+        "a WebP"
+    } else if head.starts_with(b"II*\0") || head.starts_with(b"MM\0*") {
+        "a TIFF"
+    } else if head.get(4..8) == Some(b"ftyp") {
+        "an ISO media file (HEIC, AVIF or similar)"
+    } else if head.starts_with(b"%PDF") {
+        "a PDF"
+    } else {
+        "not a JPEG (it does not start with the JPEG marker)"
+    };
+    Some(kind.to_string())
 }
 
 /// The output page: the longer side `max_dim`, the other scaled to the
