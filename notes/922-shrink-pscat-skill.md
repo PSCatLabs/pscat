@@ -3,7 +3,7 @@
 `plugin/skills/pscat/SKILL.md` loads in full on every request, and the common
 task (render a file) needs a few lines. It had grown to 457 lines / 3879 words
 with `--bands`, `--profile`, sheets, typewriter effects, noise, `readreals`
-and the MCP job tools. Now 237 lines / about 1940 words.
+and the MCP job tools. Now 236 lines / about 1940 words.
 
 - `SKILL.md` keeps: install and locate (#919/#920), render with the page-size
   rule (#921/#909), "Show the result to the user" (#911, unchanged, in the main
