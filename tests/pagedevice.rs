@@ -571,3 +571,91 @@ fn a_resize_past_the_memory_cap_is_refused_before_allocating() {
     assert!(stderr.contains("limitexceeded"), "{stderr}");
     assert!(stderr.contains("memory"), "{stderr}");
 }
+
+/// Codex round 1 on PR #930: a huge request under `--max-pixels` is a
+/// catchable configurationerror, not an overflow; `--max-pixels` is
+/// refused with `--spool`, which makes its own canvases.
+#[test]
+fn a_huge_request_under_a_pixel_cap_reports_without_overflow() {
+    let run = pscat(
+        &[
+            "--max-pixels",
+            "1000000",
+            "-e",
+            "{ << /PageSize [1e10 1e10] >> setpagedevice } stopped = \
+             << /PageSize [1e10 1e10] >> setpagedevice",
+        ],
+        "",
+    );
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert_eq!(stdout.trim(), "true", "{stderr}");
+    assert!(stderr.contains("configurationerror"), "{stderr}");
+    assert!(!stderr.contains("panicked"), "{stderr}");
+    let dir = common::scratch_dir("pd-spool");
+    let run = pscat(
+        &[
+            "--spool",
+            dir.to_str().expect("utf-8"),
+            "--max-pixels",
+            "1000",
+        ],
+        "",
+    );
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(!run.status.success());
+    assert!(
+        stderr.contains("--max-pixels doesn't combine with --spool"),
+        "{stderr}"
+    );
+}
+
+/// A sweep whose program sets a small page fits a sheet that the letter
+/// page at the same dpi would not.
+#[test]
+fn a_sweep_sheet_is_sized_by_the_frames_not_the_default_page() {
+    let dir = common::scratch_dir("pd-sweep-dpi");
+    let sheet = dir.join("sheet.png");
+    let run = pscat(
+        &[
+            "--dpi",
+            "300",
+            "--sweep-seed",
+            "1:8",
+            "--grid",
+            "8x1",
+            "--contact-sheet",
+            sheet.to_str().expect("utf-8"),
+            "-",
+        ],
+        "<< /PageSize [100 50] >> setpagedevice rand pop 0 0 10 10 rectfill showpage",
+    );
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(run.status.success(), "{stderr}");
+}
+
+/// A Type 3 BuildChar that sets the page device gives it back at the
+/// glyph's end, and a band's `/BandBBox` follows it back too.
+#[test]
+fn a_glyph_restored_device_refreshes_band_bbox() {
+    let out = common::scratch_dir("pd-glyph-band").join("p.png");
+    let run = pscat(
+        &[
+            "--bands",
+            "2",
+            "--png",
+            out.to_str().expect("utf-8"),
+            "-e",
+            "/F << /FontType 3 /FontMatrix [0.01 0 0 0.01 0 0] /FontBBox [0 0 100 100] \
+             /Encoding StandardEncoding /BuildChar { pop pop 100 0 0 0 100 100 setcachedevice \
+             << /PageSize [200 200] >> setpagedevice } >> definefont pop \
+             /F findfont 10 scalefont setfont 100 100 moveto (a) show BandBBox ==",
+        ],
+        "",
+    );
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(run.status.success(), "{stderr}");
+    // Band 0 of 4 (two a thread) on the letter page: rows 0..198.
+    assert!(stdout.contains("[0 594 612 792]"), "{stdout}");
+}

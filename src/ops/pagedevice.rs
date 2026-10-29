@@ -170,6 +170,8 @@ fn page_pixels(it: &Interp, size: (f64, f64)) -> Result<(u32, u32), PsError> {
         if let Some(max) = it.max_page_pixels {
             // The line the MCP server reads back to answer
             // `output_too_large` (`limits::parse_pixel_cap_message`).
+            // `as` saturates, and the message multiplies saturating, so a
+            // `/PageSize [1e10 1e10]` reports rather than overflows.
             let msg = crate::limits::pixel_cap_message(w as u64, h as u64, max);
             let _ = it.write_stderr(format!("pscat: setpagedevice: {msg}\n").as_bytes(), true);
         } else {

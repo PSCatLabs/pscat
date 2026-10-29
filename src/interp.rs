@@ -1048,7 +1048,10 @@ impl Interp {
         match frame {
             // Type 3 glyph contexts' graphics-state snapshot and paint
             // suppression must not leak past the show that created them.
-            Frame::Show(mut ctx) => ctx.cleanup(&mut self.gfx),
+            Frame::Show(mut ctx) => {
+                ctx.cleanup(&mut self.gfx);
+                self.after_device_change();
+            }
             // A profiled call unwound by `stop`, an error, `exit` or `quit`
             // ends here.
             Frame::ProfReturn => self.prof_exit(),
@@ -1603,6 +1606,9 @@ impl Interp {
         // and every slice is bounded (#900).
         let mut empty_run = 0u32;
         loop {
+            // A Type 3 glyph's end restores its graphics state, which can
+            // bring an older page device back (#909).
+            let mut stepped_show = false;
             let action = {
                 // Split borrow: the scanner needs the dictionary stack
                 // (for //immediate names), the show frame the graphics
@@ -1713,7 +1719,10 @@ impl Interp {
                     // to completion without stopping.
                     Frame::StopMark => Action::PopThenPush(Object::bool(false)),
                     Frame::ProfReturn => Action::ProfExit,
-                    Frame::Show(ctx) => match ctx.step(gfx)? {
+                    Frame::Show(ctx) => match {
+                        stepped_show = true;
+                        ctx.step(gfx)?
+                    } {
                         ShowStep::Pop => Action::Pop,
                         ShowStep::PopPushWidth(wx, wy) => {
                             Action::PopThenPush2(Object::real(wx), Object::real(wy))
@@ -1756,6 +1765,9 @@ impl Interp {
                     }
                 }
             };
+            if stepped_show {
+                self.after_device_change();
+            }
             match action {
                 Action::Yield(o) => {
                     self.sync_scan_line();

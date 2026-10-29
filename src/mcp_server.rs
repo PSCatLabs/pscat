@@ -2154,7 +2154,7 @@ fn too_many_pixels(cfg: &Config, what: &str, w: u64, h: u64) -> ToolError {
         ),
     )
     .with("limit_pixels", json!(cfg.max_pixels))
-    .with("pixels", json!(w * h))
+    .with("pixels", json!(w.saturating_mul(h)))
     .with("width_px", json!(w))
     .with("height_px", json!(h))
 }

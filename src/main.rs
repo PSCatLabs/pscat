@@ -222,20 +222,21 @@ impl Options {
     /// error when the page is too large at this dpi or over the cap.
     fn new_interp(&self) -> Result<Interp, String> {
         let (w, h) = self.page;
-        let mut interp = Interp::with_page_scaled(w, h, self.dpi / 72.0)
+        let scale = self.dpi / 72.0;
+        if let Some(max) = self.max_pixels {
+            // Checked before the canvas is made: `with_page_scaled`'s
+            // rounding, as the MCP server repeats it.
+            let px = |pt: u32| ((pt as f32 * scale).round() as u64).max(1);
+            let (pw, ph) = (px(w), px(h));
+            if pw.saturating_mul(ph) > max {
+                return Err(pscat::limits::pixel_cap_message(pw, ph, max));
+            }
+        }
+        let mut interp = Interp::with_page_scaled(w, h, scale)
             .ok_or_else(|| format!("unusable page size {w}x{h}"))?;
         let gfx = interp.gfx_mut();
         gfx.set_page_origin(self.page_origin.0, self.page_origin.1);
         gfx.set_page_size_source(self.page_source);
-        if let Some(max) = self.max_pixels {
-            let (pw, ph) = (
-                u64::from(gfx.pixmap.width()),
-                u64::from(gfx.pixmap.height()),
-            );
-            if pw * ph > max {
-                return Err(pscat::limits::pixel_cap_message(pw, ph, max));
-            }
-        }
         interp.set_max_page_pixels(self.max_pixels);
         Ok(interp)
     }
@@ -405,6 +406,11 @@ fn main() -> ExitCode {
             || options.interactive)
     {
         eprintln!("pscat: --bbox doesn't combine with --page/--spool/--interactive");
+        return ExitCode::FAILURE;
+    }
+    // A spool job's canvas is made per job by the window; it takes no cap.
+    if options.max_pixels.is_some() && options.spool.is_some() {
+        eprintln!("pscat: --max-pixels doesn't combine with --spool");
         return ExitCode::FAILURE;
     }
     if options.bbox && options.file.is_none() && options.eval.is_none() {
@@ -1306,7 +1312,11 @@ fn run_sweep(options: &Options, source: &[u8]) -> ExitCode {
         })
     };
     let mut sheet: Option<(tiny_skia::Pixmap, (u32, u32))> = None;
-    if let Some(grid) = grid {
+    // Only an explicit page is known before the frames run; any other page
+    // the program may resize, so its sheet waits for the first frame.
+    if let Some(grid) = grid
+        && options.page_source == PageSizeSource::Explicit
+    {
         let Some(probe) =
             Interp::with_page_scaled(options.page.0, options.page.1, options.dpi / 72.0)
         else {
@@ -1433,7 +1443,7 @@ fn run_sweep(options: &Options, source: &[u8]) -> ExitCode {
         }
         if let Some((cols, rows)) = grid {
             let frame = (page.width(), page.height());
-            if i == 0 && sheet.as_ref().is_some_and(|(_, cell)| *cell != frame) {
+            if sheet.is_none() || (i == 0 && sheet.as_ref().is_some_and(|(_, c)| *c != frame)) {
                 drop(sheet.take());
                 match new_sheet((cols, rows), frame) {
                     Ok(s) => sheet = Some(s),
