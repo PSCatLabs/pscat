@@ -1226,7 +1226,9 @@ impl Gfx {
             // default matrix and no clip; the rest of the restored state
             // stays (same size: all of it stays).
             if resized {
-                self.state.ctm = self.base_ctm;
+                // `base_ctm()`: identity when the restored state is on
+                // `nulldevice` (gs).
+                self.state.ctm = self.base_ctm();
                 self.state.clip = None;
             }
         } else {
@@ -1235,7 +1237,7 @@ impl Gfx {
             // for the other canvas, so they go back to the device's defaults
             // (a clip mask of another size would be read out of bounds).
             self.state.device = self.device.clone();
-            self.state.ctm = self.base_ctm;
+            self.state.ctm = self.base_ctm();
             self.state.clip = None;
             self.state.clip_stack.clear();
         }
@@ -2553,10 +2555,32 @@ impl Gfx {
             rule: FillRule::Winding,
             parent: None,
         });
-        // The mask is bounded by the old page, but the clip's own paths stay
-        // its geometry: `clippath` reports them as gs does, off-canvas or
-        // not. Only a level with no clip reports the old page itself.
-        let had_clip = !chain.is_empty();
+        // A chain of rectangles (the common case) becomes one rectangle: its
+        // intersection with the old page, the clip gs keeps. As a single
+        // clip, `clippath` reports it exactly, off this canvas or not, and
+        // the exporters and a later refit get the same bounded geometry.
+        // Any other chain keeps its paths under the old page as the root.
+        if let Some(first) = chain.first()
+            && let Some((x0, y0, x1, y1)) = Self::chain_rect_intersection(first, (fw, fh))
+        {
+            let path = if x0 < x1 && y0 < y1 {
+                Self::rect_path(x0, y0, x1, y1)
+            } else {
+                PsPath::default()
+            };
+            let mut one = tiny_skia::Mask::new(w, h)?;
+            if let Some(skia) = path.to_skia() {
+                one.fill_path(&skia, FillRule::Winding, true, Transform::identity());
+            }
+            return Some(ClipState {
+                mask: std::rc::Rc::new(one),
+                node: std::rc::Rc::new(ClipNode {
+                    path,
+                    rule: FillRule::Winding,
+                    parent: None,
+                }),
+            });
+        }
         let mut first = true;
         for link in std::iter::once(node.clone()).chain(chain.iter().rev().cloned()) {
             let mut one = tiny_skia::Mask::new(w, h)?;
@@ -2576,9 +2600,6 @@ impl Gfx {
                 rule: link.rule,
                 parent: Some(node),
             });
-        }
-        if had_clip {
-            node = chain[0].clone();
         }
         Some(ClipState {
             mask: std::rc::Rc::new(mask),

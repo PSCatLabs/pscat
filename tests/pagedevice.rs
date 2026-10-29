@@ -942,3 +942,27 @@ fn a_resized_restore_resets_the_matrix_and_clip() {
         assert_eq!(got, want, "{src}");
     }
 }
+
+/// Codex round 11 on PR #930, pinned against gs 10.07.1: an enlarged clip's
+/// geometry is bounded by its old page (what the exporters and `clippath`
+/// read), and a nulldevice state restored across a resize keeps the null
+/// device's identity matrix.
+#[test]
+fn a_refitted_clip_is_bounded_geometry_and_nulldevice_keeps_identity() {
+    let mut it = default_page();
+    assert_eq!(
+        eval(
+            &mut it,
+            "<< /PageSize [100 100] >> setpagedevice 10 10 500 500 rectclip gsave \
+             << /PageSize [200 200] >> setpagedevice cliprestore \
+             clippath pathbbox 4 array astore \
+             nulldevice gsave << /PageSize [200 200] >> setpagedevice grestore \
+             matrix currentmatrix clippath pathbbox 4 array astore"
+        ),
+        [
+            "[10.0 110.0 100.0 200.0]",
+            "[1.0 0.0 0.0 1.0 0.0 0.0]",
+            "[0.0 0.0 0.0 0.0]"
+        ]
+    );
+}
