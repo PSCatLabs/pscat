@@ -852,3 +852,17 @@ fn a_clip_restored_onto_a_larger_page_keeps_the_old_page_bounds() {
         assert_eq!(dark.last(), Some(&last), "{src}");
     }
 }
+
+/// Codex round 8 on PR #930: a level that began under `nulldevice` gives
+/// back an empty clip (gs 10.07.1 paints nothing in either case).
+#[test]
+fn a_clip_restored_from_a_nulldevice_level_is_empty() {
+    for src in [
+        "nulldevice gsave << /PageSize [200 300] >> setpagedevice cliprestore 0 0 200 300 rectfill",
+        "nulldevice gsave << >> setpagedevice cliprestore 0 0 612 792 rectfill",
+    ] {
+        let mut it = default_page();
+        it.run_str(src).expect(src);
+        assert_eq!(ink(&it.gfx().pixmap), 0, "{src}");
+    }
+}

@@ -2501,7 +2501,14 @@ impl Gfx {
             self.state.clip = None;
             return;
         };
-        let (clip, from) = (outer.clip.clone(), outer.device.px);
+        // Under `nulldevice` the level's clip was empty whatever its `clip`
+        // says: the null device has no area, a 0x0 page here.
+        let from = if outer.null_device && !self.state.null_device {
+            (0, 0)
+        } else {
+            outer.device.px
+        };
+        let clip = outer.clip.clone();
         // The level may have started on another page device (#909): the clip
         // it started with is then that device's, remade for this canvas.
         self.state.clip = self.fit_clip(clip, from);
