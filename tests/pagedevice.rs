@@ -717,3 +717,26 @@ fn the_pixel_cap_is_checked_before_sizing_probes() {
         );
     }
 }
+
+/// Codex round 3 on PR #930: a restore that brings a larger canvas back is
+/// held to `--max-memory` before the canvas is made.
+#[test]
+fn a_restored_device_is_held_to_the_memory_cap() {
+    let run = pscat(
+        &[
+            "--max-memory",
+            "20",
+            "-e",
+            "<< /PageSize [2000 2000] >> setpagedevice /big gstate def \
+             << /PageSize [10 10] >> setpagedevice /small gstate def \
+             /s 15000000 string def big setgstate small setgstate (done) =",
+        ],
+        "",
+    );
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(!run.status.success(), "{stdout}");
+    assert!(!stdout.contains("done"), "{stdout}");
+    assert!(stderr.contains("limitexceeded"), "{stderr}");
+    assert!(stderr.contains("memory"), "{stderr}");
+}

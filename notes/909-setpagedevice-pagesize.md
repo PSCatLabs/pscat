@@ -90,7 +90,9 @@ allocates anything. With `--max-pixels` it also prints
 `output_too_large` with the usual fields. The server's own check before the
 child starts still covers the first page, which the child allocates before
 the program runs. A resize is checked against `--max-memory` before the
-new canvas is allocated (`Interp::check_alloc`). A Type 3 glyph that sets
+new canvas is allocated (`Interp::check_alloc`), and so is a canvas a
+restore brings back (`Gfx`'s memory budget: the restore keeps the current
+device and the restoring operator raises `limitexceeded (memory)`). A Type 3 glyph that sets
 the page device gets the old one back at its end, and `/BandBBox` follows.
 
 **Not done.** No other page-device parameter (`/HWResolution`,

@@ -886,6 +886,12 @@ pub struct Gfx {
     /// Set when a page device is installed; [`Gfx::take_device_changed`]
     /// reads and clears it.
     device_changed: bool,
+    /// `--max-memory` as `(heap base, max bytes)`, so a canvas a restore
+    /// would bring back is refused before it is made (#909).
+    mem_budget: Option<(usize, usize)>,
+    /// A canvas was refused for the budget; the interpreter's next limits
+    /// check stops the run with `limitexceeded (memory)`.
+    mem_refused: bool,
     /// Set by anything that paints; the window loop presents and clears it.
     pub dirty: bool,
     /// Set by `showpage`; lets the front end know the program considers
@@ -967,6 +973,8 @@ impl Gfx {
             initial_device: device.clone(),
             device,
             device_changed: false,
+            mem_budget: None,
+            mem_refused: false,
             dirty: false,
             page_shown: false,
             completed: Vec::new(),
@@ -1147,6 +1155,14 @@ impl Gfx {
     ) -> Result<(), PsError> {
         let (w, h) = device.px;
         if (w, h) != (self.pixmap.width(), self.pixmap.height()) {
+            if let Some((base, max)) = self.mem_budget {
+                let bytes = w as usize * h as usize * 4;
+                let grown = crate::memtrack::live_bytes().saturating_sub(base);
+                if grown.saturating_add(bytes) > max {
+                    self.mem_refused = true;
+                    return Err(PsError::MemoryExceeded);
+                }
+            }
             self.pixmap = Pixmap::new(w, h).ok_or(PsError::ConfigurationError)?;
             self.coverage = None;
             if let Some(svg) = &mut self.svg {
@@ -1209,6 +1225,17 @@ impl Gfx {
             // make the restored state agree with it.
             self.state.device = self.device.clone();
         }
+    }
+
+    /// `(heap base, max bytes)` of the run's `--max-memory`, or `None`.
+    pub(crate) fn set_memory_budget(&mut self, budget: Option<(usize, usize)>) {
+        self.mem_budget = budget;
+        self.mem_refused = false;
+    }
+
+    /// A canvas was refused for the memory budget (see `mem_refused`).
+    pub(crate) fn memory_refused(&self) -> bool {
+        self.mem_refused
     }
 
     /// Whether a page device was installed since the last call (the

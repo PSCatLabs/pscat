@@ -646,6 +646,8 @@ impl Interp {
         }
         self.limits = limits;
         self.mem_base = crate::memtrack::live_bytes();
+        self.gfx
+            .set_memory_budget(limits.max_memory.map(|max| (self.mem_base, max)));
         self.steps_used = 0;
         self.poll_in = POLL_PERIOD;
         self.run_clock = crate::clock::Clock::start();
@@ -669,6 +671,8 @@ impl Interp {
     /// Call it after `set_limits`, which resets the base.
     pub fn set_memory_base(&mut self, base: usize) {
         self.mem_base = base;
+        self.gfx
+            .set_memory_budget(self.limits.max_memory.map(|max| (base, max)));
     }
 
     /// The limits in force ([`Limits::none`] by default).
@@ -948,6 +952,11 @@ impl Interp {
     }
 
     fn check_time_and_memory(&self) -> Result<(), PsError> {
+        // A page device a restore could not bring back within the memory
+        // cap (#909): the canvas was refused, and the run stops here.
+        if self.gfx.memory_refused() {
+            return Err(PsError::MemoryExceeded);
+        }
         if let Some(max) = self.limits.max_time
             && self.run_clock.elapsed_ms() as u128 >= max.as_millis()
         {
@@ -1770,6 +1779,7 @@ impl Interp {
             };
             if stepped_show {
                 self.after_device_change();
+                self.device_restore_result()?;
             }
             match action {
                 Action::Yield(o) => {
@@ -2454,7 +2464,7 @@ impl Interp {
         self.gfx
             .restore_glyph_snapshot(rec.gfx_depth, rec.gfx_state);
         self.after_device_change();
-        Ok(())
+        self.device_restore_result()
     }
 
     /// `vmstatus`'s save-nesting level.
@@ -2494,6 +2504,17 @@ impl Interp {
     /// a restore that brings an older one back, #909): a `--bands` run
     /// redefines `/BandBBox` for the new page, so a band-aware program
     /// reads the area its band keeps of the page it now has.
+    /// `limitexceeded (memory)` when a restore could not bring its page
+    /// device back within `--max-memory` (#909): raised by the operator
+    /// that restored, before the program goes on.
+    pub(crate) fn device_restore_result(&self) -> Result<(), PsError> {
+        if self.gfx.memory_refused() {
+            Err(PsError::MemoryExceeded)
+        } else {
+            Ok(())
+        }
+    }
+
     pub(crate) fn after_device_change(&mut self) {
         if !self.gfx.take_device_changed() {
             return;
