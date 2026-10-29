@@ -46,6 +46,11 @@ usage guide; for how to use a library, see the [guides](../guides/README.md).
 | [`design/TYPEWRITER.md`](design/TYPEWRITER.md) | `lib/typewriter.ps` (references and tools in [`design/typewriter/`](design/typewriter/)). |
 | [`design/QR_CODE.md`](design/QR_CODE.md) | Native QR library feature plan, current scope, independent verification and business-card integration. |
 
+For the QR checkpoint's independent review, use the
+[Opus handoff](design/QR_CODE_REVIEW.md), [API contracts](design/QR_CODE_API.md),
+[verification guide](design/QR_CODE_TESTING.md) and
+[draft PR body](design/QR_CODE_PR.md).
+
 ## Where new docs go
 
 - A library **design doc**: `docs/dev/design/`, with its images beside it.

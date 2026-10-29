@@ -5,6 +5,10 @@ Status: first-session development on `feature/qr-code-library`, based on
 This is a PSCat core library and gallery enhancement. No merge to main is
 authorized for this session. The work is not yet a complete QR encoder.
 
+Review package: [Opus handoff](QR_CODE_REVIEW.md),
+[implemented API](QR_CODE_API.md), [verification/reproduction](QR_CODE_TESTING.md),
+and [ready-to-publish draft PR body](QR_CODE_PR.md).
+
 Current implementation in `lib/qr.ps`: byte packing, automatic version/capacity
 planning, Reed–Solomon correction and block interleaving, with exact named
 guards, selftests, independent fixtures and native/Ghostscript/embedded-loader

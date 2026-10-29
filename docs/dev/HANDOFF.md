@@ -11,6 +11,8 @@ all-version capacity planning, automatic version selection, Reed–Solomon error
 correction and block interleaving, not a complete symbol generator. Continue from
 [`design/QR_CODE.md`](design/QR_CODE.md) and its ready-to-publish issue queue.
 No dependency on the unmerged functional PostScript branch is introduced.
+The review entry point is [`design/QR_CODE_REVIEW.md`](design/QR_CODE_REVIEW.md),
+with API/testing docs and a complete draft PR body for Opus.
 
 Written 2026-07-13 at the completion of Stages 6–7; last updated
 2026-08-15. Stages 8–20 are all complete: spool/halftone/Gallery II

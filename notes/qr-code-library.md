@@ -137,3 +137,19 @@ and licenses passed. Build/test/cache output remains on the external drive
 Checkpoints preceding this correction commit: `8e73992` executable-string fix,
 `ac638e2` capacity/version planning. Next: QR-3 function/reservation patterns and
 fixed-mask data placement, followed by metadata/mask selection and decoding.
+
+## Opus review preparation
+
+Owner explicitly requested git/gh publication and a PR suitable for Opus.
+Prepared `docs/dev/design/QR_CODE_REVIEW.md` as the scoped review entry point,
+`QR_CODE_API.md` for implemented contracts/guards/effects, `QR_CODE_TESTING.md`
+for reproducible checks/oracle provenance/coverage and limitations, and
+`QR_CODE_PR.md` as the exact draft PR body. Linked them from the design index,
+contributor index and handoff. No library, Rust, fixture or dependency change
+is part of this preparation. No Opus review is claimed as already completed.
+
+The PR explicitly covers QR-1/QR-2A/QR-2B and stays draft: matrix, metadata,
+masking, rendering, actual decoding and card artwork remain pending. Base is
+`07f054c`; implementation head is `deba699`. Publishing commands use direct
+`git push` and `gh pr create --body-file`; no fake issue numbers or PR URL are
+inserted. Initial CLI retry still cannot reach GitHub from this sandbox.
