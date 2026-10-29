@@ -1220,7 +1220,16 @@ impl Gfx {
             return;
         }
         let device = self.state.device.clone();
-        if self.install_device(device).is_err() {
+        let resized = device.px != self.device.px;
+        if self.install_device(device).is_ok() {
+            // gs 10.07.1: a device of another size comes back with the
+            // default matrix and no clip; the rest of the restored state
+            // stays (same size: all of it stays).
+            if resized {
+                self.state.ctm = self.base_ctm;
+                self.state.clip = None;
+            }
+        } else {
             // No canvas for the old size: keep the current device, and make
             // the restored state agree with it. Its CTM and clip were made
             // for the other canvas, so they go back to the device's defaults
@@ -2544,8 +2553,12 @@ impl Gfx {
             rule: FillRule::Winding,
             parent: None,
         });
+        // The mask is bounded by the old page, but the clip's own paths stay
+        // its geometry: `clippath` reports them as gs does, off-canvas or
+        // not. Only a level with no clip reports the old page itself.
+        let had_clip = !chain.is_empty();
         let mut first = true;
-        for link in std::iter::once(node.clone()).chain(chain.into_iter().rev()) {
+        for link in std::iter::once(node.clone()).chain(chain.iter().rev().cloned()) {
             let mut one = tiny_skia::Mask::new(w, h)?;
             if let Some(path) = link.path.to_skia() {
                 one.fill_path(&path, link.rule, true, Transform::identity());
@@ -2563,6 +2576,9 @@ impl Gfx {
                 rule: link.rule,
                 parent: Some(node),
             });
+        }
+        if had_clip {
+            node = chain[0].clone();
         }
         Some(ClipState {
             mask: std::rc::Rc::new(mask),

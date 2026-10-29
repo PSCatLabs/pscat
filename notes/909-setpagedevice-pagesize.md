@@ -25,7 +25,7 @@ explicit page keeps its size, and a `/PageSize` that differs gets one
 | `5 setpagedevice` | typecheck | same |
 | marks, then `setpagedevice` (even `<< >>`) | page erased | same; the marks are not a page |
 | `100 100 translate 0.5 setgray` then `setpagedevice` | CTM, gray, width reset | same (initgraphics) |
-| `gsave` or `save`, `setpagedevice`, `grestore` or `restore` | old device back, erased | same, and for `setgstate` |
+| `gsave` or `save`, `setpagedevice`, `grestore` or `restore` | old device back, erased; of another size, with the default matrix and no clip | same, and for `setgstate` |
 | `setpagedevice` then `grestore` with nothing saved | back to letter | same (the job's initial state, #505) |
 | `<< /Duplex true /Foo 3 >> setpagedevice` | ignored silently, not in `currentpagedevice` | ignored, one warning per key |
 

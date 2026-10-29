@@ -881,3 +881,64 @@ fn a_bottom_level_cliprestore_keeps_the_initial_page_bounds() {
         ["[0.0 208.0 612.0 1000.0]"]
     );
 }
+
+/// Codex round 10 on PR #930, pinned against gs 10.07.1: a restore that
+/// brings back a device of another size gives the default matrix and no
+/// clip (the rest stays); of the same size, everything stays. A clip
+/// restored onto a smaller page reads back its own geometry.
+#[test]
+fn a_resized_restore_resets_the_matrix_and_clip() {
+    let cases: [(&str, &[&str]); 4] = [
+        (
+            "10 10 20 30 rectclip 50 50 translate 0.5 setgray 3 setlinewidth gsave \
+             << /PageSize [100 200] >> setpagedevice grestore",
+            &[
+                "[1.0 0.0 0.0 -1.0 0.0 792.0]",
+                "[0.0 0.0 612.0 792.0]",
+                "0.5",
+                "3.0",
+            ],
+        ),
+        (
+            "10 10 20 30 rectclip 50 50 translate 0.5 setgray 3 setlinewidth save \
+             << /PageSize [100 200] >> setpagedevice restore",
+            &[
+                "[1.0 0.0 0.0 -1.0 0.0 792.0]",
+                "[0.0 0.0 612.0 792.0]",
+                "0.5",
+                "3.0",
+            ],
+        ),
+        (
+            "10 10 20 30 rectclip 50 50 translate 0.5 setgray 3 setlinewidth gsave \
+             << /PageSize [612 792] >> setpagedevice grestore",
+            &[
+                "[1.0 0.0 0.0 -1.0 50.0 742.0]",
+                "[-40.0 -40.0 -20.0 -10.0]",
+                "0.5",
+                "3.0",
+            ],
+        ),
+        (
+            "10 10 20 30 rectclip gsave << /PageSize [100 200] >> setpagedevice cliprestore \
+             0.5 setgray 3 setlinewidth",
+            &[
+                "[1.0 0.0 0.0 -1.0 0.0 200.0]",
+                "[10.0 -582.0 30.0 -552.0]",
+                "0.5",
+                "3.0",
+            ],
+        ),
+    ];
+    for (src, want) in cases {
+        let mut it = default_page();
+        let got = eval(
+            &mut it,
+            &format!(
+                "{src} matrix currentmatrix clippath pathbbox 4 array astore \
+                 currentgray currentlinewidth"
+            ),
+        );
+        assert_eq!(got, want, "{src}");
+    }
+}
