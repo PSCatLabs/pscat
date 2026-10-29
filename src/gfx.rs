@@ -1009,6 +1009,9 @@ impl Gfx {
     /// and the reset after `showpage` keep it. Call before the program runs.
     pub fn set_page_origin(&mut self, llx: f32, lly: f32) {
         let (dx, dy) = (llx - self.page_origin.0, lly - self.page_origin.1);
+        if dx == 0.0 && dy == 0.0 {
+            return;
+        }
         self.base_ctm = self.base_ctm.pre_translate(-dx, -dy);
         self.state.ctm = self.state.ctm.pre_translate(-dx, -dy);
         self.page_origin = (llx, lly);
