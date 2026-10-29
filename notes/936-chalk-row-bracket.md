@@ -8,8 +8,11 @@ mechanics, and the content vanished with no error.
 - `split_rows` now drops the bracket only when `is_tex_length` reads its inside
   as a length: an optional sign, a number (`.` or `,` decimal) and one of TeX's
   units (`pt pc in bp cm mm dd cc sp em ex`, any case, `true` allowed), or an
-  optional factor and a known length register (`\baselineskip`, `\jot`,
-  `\smallskipamount` ...), with optional `plus` and `minus` parts (TeX glue:
+  optional factor and a length register, recognised by TeX's naming (a name
+  ending in skip, sep, width, height, depth, indent or amount, plus `\jot`
+  and `\fill`: `\baselineskip`, `0.1\textheight`, `\arraycolsep`). A closed
+  list first; Codex (round 1) showed it turned real spacing such as
+  `\\[\abovedisplayskip]` into an error. With optional `plus` and `minus` parts (TeX glue:
   `2pt plus 1pt minus .5pt`, `0pt plus 1fil`). Everything else, `[x,y]`, `[1]` and `[\pi]` among
   them, stays as the next row's first characters.
 - No error. LaTeX stops with "Illegal unit of measure" on `\\ [x,y]`; drawing

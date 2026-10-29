@@ -1008,22 +1008,24 @@ fn split_rows(s: &str) -> Vec<String> {
     rows
 }
 
-/// TeX's units of length (TeXbook p. 57), and the length registers a row
-/// break's spacing is commonly written in.
+/// TeX's units of length (TeXbook p. 57).
 const TEX_UNITS: [&str; 11] = [
     "pt", "pc", "in", "bp", "cm", "mm", "dd", "cc", "sp", "em", "ex",
 ];
-const TEX_LENGTHS: [&str; 9] = [
-    "baselineskip",
-    "normalbaselineskip",
-    "lineskip",
-    "jot",
-    "smallskipamount",
-    "medskipamount",
-    "bigskipamount",
-    "parskip",
-    "fill",
-];
+
+/// Whether `name` (a control word, no backslash) is a TeX or LaTeX length
+/// register: plain TeX's and LaTeX's are named for what they measure
+/// (`\baselineskip`, `\abovedisplayskip`, `\arraycolsep`, `\textheight`,
+/// `\linewidth`, `\parindent`, `\medskipamount`), and `\jot` and `\fill`
+/// are the two common exceptions. No mathkit command is named so, so `\pi`
+/// or `\alpha` in a bracket stays content.
+fn is_length_register(name: &str) -> bool {
+    const ENDS: [&str; 7] = [
+        "skip", "sep", "width", "height", "depth", "indent", "amount",
+    ];
+    name.chars().all(|c| c.is_ascii_alphabetic())
+        && (matches!(name, "jot" | "fill") || ENDS.iter().any(|e| name.ends_with(e)))
+}
 
 /// Whether `t` (the inside of a `[...]`) reads as a TeX length: a signed
 /// number and a unit (`2pt`, `-1.5 em`, `3,5mm`, `2truept`), or an optional
@@ -1042,7 +1044,7 @@ fn is_tex_length(t: &str) -> bool {
     }
     let rest = rest.trim_start();
     if let Some(reg) = rest.strip_prefix('\\') {
-        return TEX_LENGTHS.contains(&reg.trim_end());
+        return is_length_register(reg.trim_end());
     }
     let unit = rest.to_ascii_lowercase();
     let unit = unit.strip_prefix("true").unwrap_or(&unit).trim_start();
@@ -1533,6 +1535,14 @@ mod tests {
         assert_eq!(l(r"a \\*[ -1.5 em ] b \\ [3,5mm] c"), ["a", "b", "c"]);
         assert_eq!(l(r"a \\[0.5\baselineskip] b \\[\jot] c"), ["a", "b", "c"]);
         assert_eq!(l(r"a \\[2truept] b"), ["a", "b"]);
+        assert_eq!(
+            l(r"a \\[\abovedisplayskip] b \\[0.1\textheight] c \\[-\arraycolsep] d"),
+            ["a", "b", "c", "d"]
+        );
+        assert_eq!(
+            l(r"a \\ [\alpha, \beta] = 0"),
+            ["a", r"[\alpha, \beta] = 0"]
+        );
         assert_eq!(
             l(r"a \\[2pt plus 1pt minus .5pt] b \\[0pt plus 1fil] c"),
             ["a", "b", "c"]
