@@ -798,3 +798,23 @@ fn a_refused_restore_leaves_a_consistent_state() {
     assert!(out.contains("ok"), "{out}");
     assert!(!out.contains("panicked"), "{out}");
 }
+
+/// Codex round 6 on PR #930: a `cliprestore` that falls back to a clip made
+/// on another page device remakes its mask for this canvas, so it still
+/// clips. gs 10.07.1 paints nothing in both cases (the second clip's
+/// device-space rectangle is off the new, shorter page).
+#[test]
+fn a_clip_restored_across_a_resize_still_clips() {
+    for src in [
+        "0 0 0 0 rectclip gsave << /PageSize [200 200] >> setpagedevice cliprestore \
+         0 0 200 200 rectfill",
+        "0 0 0 0 rectclip gsave << /PageSize [200 200] >> setpagedevice cliprestore \
+         /str 10 string def 200 200 scale 10 10 8 [10 0 0 10 0 0] { str } image",
+        "50 50 100 100 rectclip gsave << /PageSize [200 300] >> setpagedevice cliprestore \
+         0 0 300 300 rectfill",
+    ] {
+        let mut it = default_page();
+        it.run_str(src).expect(src);
+        assert_eq!(ink(&it.gfx().pixmap), 0, "{src}");
+    }
+}

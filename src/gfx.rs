@@ -2497,7 +2497,45 @@ impl Gfx {
             Some((depth, state)) if self.saved.len() <= depth => Some(state),
             _ => self.saved.last(),
         };
-        self.state.clip = outer.and_then(|s| s.clip.clone());
+        let clip = outer.and_then(|s| s.clip.clone());
+        // The level may have started on another page device (#909): its
+        // mask is then remade for this canvas from the same device-space
+        // paths, as gs keeps the clip path.
+        self.state.clip = clip.map(|c| self.fit_clip(c));
+    }
+
+    /// `clip` as a mask of the current canvas's size: itself when it is
+    /// one, else its chain's paths rasterised again on this canvas (#909).
+    fn fit_clip(&self, clip: ClipState) -> ClipState {
+        let (w, h) = (self.pixmap.width(), self.pixmap.height());
+        if clip.mask.width() == w && clip.mask.height() == h {
+            return clip;
+        }
+        let mut chain = Vec::new();
+        let mut link = Some(&clip.node);
+        while let Some(node) = link {
+            chain.push(node);
+            link = node.parent.as_ref();
+        }
+        let Some(mut mask) = tiny_skia::Mask::new(w, h) else {
+            return clip;
+        };
+        mask.data_mut().fill(255);
+        for node in chain.iter().rev() {
+            let Some(mut one) = tiny_skia::Mask::new(w, h) else {
+                return clip;
+            };
+            if let Some(path) = node.path.to_skia() {
+                one.fill_path(&path, node.rule, true, Transform::identity());
+            }
+            for (m, p) in mask.data_mut().iter_mut().zip(one.data()) {
+                *m = ((u16::from(*m) * u16::from(*p)) / 255) as u8;
+            }
+        }
+        ClipState {
+            mask: std::rc::Rc::new(mask),
+            node: clip.node,
+        }
     }
 
     /// `save` starts a new `clipsave` level (gs's `save` is a `gsave`);
