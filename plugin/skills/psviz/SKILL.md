@@ -103,6 +103,7 @@ showpage
 
 ## Paper checklist
 
+- When the user asked to see the figure, save the PNG and the `.ps` and put the PNG in the final message by absolute path, as `![title](ABSOLUTE_PNG_PATH)` plus a plain `[title.png](ABSOLUTE_PNG_PATH)` link and a link to the source, not only in a tool call and never as base64. The `pscat` skill's "Show the result to the user" has the per-host details.
 - White page (`1 1 1 setrgbcolor clippath fill`), Palatino or Helvetica labels, `showctr` for centered titles.
 - `pscat --page 612x792 --png out.png file.ps` succeeds; with a checkout and Ghostscript, `gs '--permit-file-read=lib/*' '--permit-file-read=examples/*' -I lib -dBATCH -dNOPAUSE -sDEVICE=png16m -g612x792 -o gs.png file.ps` succeeds too (or `gs -dNOSAFER -dBATCH ...` — SAFER blocks `(lib/...) run` by default; see Pitfalls).
 - Keep the figure self-contained with `%%BoundingBox` and a one-line `%%Title`.
