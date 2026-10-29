@@ -938,6 +938,13 @@ fn reads_are_confined_to_the_working_directory_and_allow_read() {
     let instructions = init["result"]["instructions"].as_str().unwrap();
     assert!(instructions.contains("read roots"), "{instructions}");
     assert!(instructions.contains("extra"), "{instructions}");
+    // The output root, and what to do when the workspace is elsewhere (#910).
+    let root = std::fs::canonicalize(&cwd).unwrap();
+    assert!(
+        instructions.contains(&format!("out_path writes only inside {}", root.display())),
+        "{instructions}"
+    );
+    assert!(instructions.contains("copy it there"), "{instructions}");
     s.send_raw(br#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#);
 
     let p = |d: &Path, f: &str| common::ps_path(&d.join(f));
