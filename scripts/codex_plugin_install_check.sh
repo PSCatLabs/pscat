@@ -173,7 +173,10 @@ msgs = [
             "source": src, "width": 60, "height": 60, "format": fmt, "out_path": f"saved.{fmt}"}}}
      for i, fmt in enumerate(("png", "svg", "pdf"))]
 stdin = "".join(json.dumps(m) + "\n" for m in msgs)
-env = {**os.environ, **(t.get("env") or {})}
+# Codex passes a short fixed environment; a runner's XDG_CONFIG_HOME or
+# XDG_DATA_HOME would move the config file and the default directory.
+env = {k: v for k, v in os.environ.items() if not k.startswith("XDG_")}
+env.update(t.get("env") or {})
 p = subprocess.run([shutil.which(t["command"]), *t.get("args", [])], input=stdin, capture_output=True,
                    text=True, timeout=120, env=env, cwd=copy)
 replies = {r.get("id"): r for r in map(json.loads, filter(None, p.stdout.splitlines()))}
