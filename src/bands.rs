@@ -195,7 +195,7 @@ pub fn parse_rows(n: &str) -> Result<u32, String> {
 }
 
 /// `pscat --bands N`: check the options, run the bands, stitch and write.
-pub fn run(options: &Options, threads: u32) -> ExitCode {
+pub fn run(options: &mut Options, threads: u32) -> ExitCode {
     if let Err(msg) = check_options(options) {
         eprintln!("pscat: {msg}");
         return ExitCode::FAILURE;
@@ -211,6 +211,8 @@ pub fn run(options: &Options, threads: u32) -> ExitCode {
         },
         (None, None) => unreachable!("check_options requires a source"),
     };
+    options.resolve_page(&source);
+    let options = &*options;
     let scale = options.dpi / 72.0;
     // The canvas size, from a probe rather than a copy of
     // `with_page_scaled`'s formula (as `run_sweep` does). Checked here, on
@@ -483,8 +485,7 @@ fn run_band(
 ) -> Result<BandOutput, String> {
     let Band { index, plan, width } = band;
     let scale = options.dpi / 72.0;
-    let mut interp = Interp::with_page_scaled(options.page.0, options.page.1, scale)
-        .ok_or("unusable page size")?;
+    let mut interp = options.new_interp().ok_or("unusable page size")?;
     if options.transparent {
         interp.gfx_mut().set_transparent_background();
     }
@@ -498,13 +499,16 @@ fn run_band(
         interp.capture_stdout();
         interp.quiet_stderr();
     }
+    // Default user space starts at the page origin, which a bounding box
+    // can move off (0, 0) (#921).
+    let (llx, lly) = interp.gfx().page_origin();
     let width_pt = width as f32 / scale;
-    let user_y = |row: u32| (height - row) as f32 / scale;
+    let user_y = |row: u32| lly + (height - row) as f32 / scale;
     let preamble = format!(
-        "/BandIndex {index} def /BandCount {} def /BandBBox [0 {} {} {}] def",
+        "/BandIndex {index} def /BandCount {} def /BandBBox [{llx} {} {} {}] def",
         plan.count,
         user_y(bottom),
-        width_pt,
+        llx + width_pt,
         user_y(top)
     );
     // Detached, so the band names take none of the name ids a plain run

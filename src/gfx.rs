@@ -27,6 +27,22 @@ use crate::font::FontState;
 /// US Letter in points — the default page when none is specified.
 pub const DEFAULT_PAGE: (u32, u32) = (612, 792);
 
+/// Where the page size came from (#921). Precedence, highest first:
+/// an explicit size (`--page`, a tool's width/height), then the program's
+/// own `setpagedevice /PageSize` (#909, not yet honoured), then the file's
+/// `%%BoundingBox`, then [`DEFAULT_PAGE`]. Kept on the device so a later
+/// `setpagedevice` can tell a size it may replace from one it must not.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PageSizeSource {
+    /// [`DEFAULT_PAGE`]: nothing chose a size.
+    #[default]
+    Default,
+    /// The file's `%%BoundingBox` or `%%HiResBoundingBox`.
+    BoundingBox,
+    /// The caller's explicit size: it always wins.
+    Explicit,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DevPoint {
     pub x: f32,
@@ -825,6 +841,10 @@ pub struct Gfx {
     /// The device CTM before any program transforms — what `initmatrix`
     /// restores and `defaultmatrix` reports.
     base_ctm: Transform,
+    /// The default user-space point at the page's lower-left corner:
+    /// `(0, 0)` unless a bounding box with another origin set the page.
+    page_origin: (f32, f32),
+    page_size_source: PageSizeSource,
     /// Set by anything that paints; the window loop presents and clears it.
     pub dirty: bool,
     /// Set by `showpage`; lets the front end know the program considers
@@ -891,6 +911,8 @@ impl Gfx {
             state: Self::initial_state(base_ctm),
             saved: Vec::new(),
             base_ctm,
+            page_origin: (0.0, 0.0),
+            page_size_source: PageSizeSource::Default,
             dirty: false,
             page_shown: false,
             completed: Vec::new(),
@@ -979,6 +1001,35 @@ impl Gfx {
 
     pub fn set_ctm(&mut self, m: Transform) {
         self.state.ctm = m;
+    }
+
+    /// Put default user-space point (`llx`, `lly`) at the page's
+    /// lower-left corner, as a bounding box with a non-zero origin asks
+    /// (#921). Part of the default matrix, so `initmatrix`, `initgraphics`
+    /// and the reset after `showpage` keep it. Call before the program runs.
+    pub fn set_page_origin(&mut self, llx: f32, lly: f32) {
+        let (dx, dy) = (llx - self.page_origin.0, lly - self.page_origin.1);
+        if dx == 0.0 && dy == 0.0 {
+            return;
+        }
+        self.base_ctm = self.base_ctm.pre_translate(-dx, -dy);
+        self.state.ctm = self.state.ctm.pre_translate(-dx, -dy);
+        self.page_origin = (llx, lly);
+    }
+
+    /// The default user-space point at the page's lower-left corner.
+    pub fn page_origin(&self) -> (f32, f32) {
+        self.page_origin
+    }
+
+    /// Record where the page size came from ([`PageSizeSource`]).
+    pub fn set_page_size_source(&mut self, source: PageSizeSource) {
+        self.page_size_source = source;
+    }
+
+    /// Where the page size came from.
+    pub fn page_size_source(&self) -> PageSizeSource {
+        self.page_size_source
     }
 
     pub fn base_ctm(&self) -> Transform {
