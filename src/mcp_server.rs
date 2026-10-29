@@ -2792,6 +2792,9 @@ fn eval_postscript(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
     let source = required_text(cfg, args, "source")?;
     let mut cmd = Command::new(pscat_bin()?);
     cfg.interpreter_args(&mut cmd);
+    // Letter, as before #921: eval has no page arguments, and an EPSF box
+    // would size a canvas the pixel cap never checked.
+    cmd.arg("--page").arg("612x792");
     cmd.arg("--headless").arg("--pstack-on-error").arg("-");
     let run = run_child(cfg, &mut cmd, source.as_bytes())?;
     let mut report = String::new();

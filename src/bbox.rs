@@ -114,10 +114,12 @@ impl<'a> Header<'a> {
     /// trailer has its own trailer earlier on.
     fn scan_trailer(source: &'a [u8]) -> Self {
         let mut header = Header::default();
+        let mut in_trailer = false;
         for line in lines(source) {
             if line.starts_with(b"%%Trailer") {
                 header = Header::default();
-            } else {
+                in_trailer = true;
+            } else if in_trailer {
                 header.take(line, true);
             }
         }
@@ -241,12 +243,13 @@ mod tests {
              showpage\n%%Trailer\n%%BoundingBox: 0 0 123 45\n%%EOF\n"
         );
         assert_eq!(page_box(eps.as_bytes(), false), Ok(pb(123, 45, 0.0, 0.0)));
-        let eps = format!("{EPSF}%%BoundingBox: (atend)\nshowpage\n");
-        assert!(
-            page_box(eps.as_bytes(), false)
-                .unwrap_err()
-                .contains("(atend)")
+        // No trailer: an embedded document's box is not the page.
+        let eps = format!(
+            "{EPSF}%%BoundingBox: (atend)\n%%BeginDocument: inner.eps\n\
+             %%BoundingBox: 0 0 9 9\n%%EndDocument\nshowpage\n"
         );
+        let err = page_box(eps.as_bytes(), false).unwrap_err();
+        assert!(err.contains("has no box in the trailer"), "{err}");
     }
 
     #[test]

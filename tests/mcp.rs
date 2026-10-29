@@ -3249,3 +3249,23 @@ fn render_tools_take_the_page_from_the_bounding_box() {
         "the same page as render_postscript"
     );
 }
+
+/// #921: eval_postscript has no page arguments, so it keeps the letter page
+/// even for an EPSF source, whose box would size a canvas the pixel cap
+/// never checked.
+#[test]
+fn eval_keeps_the_letter_page_for_an_epsf_source() {
+    let mut s = Server::start_in(
+        &common::scratch_dir("mcp-eval-bbox"),
+        &["--max-pixels", "300000"],
+    );
+    initialized(&mut s);
+    let source = "%!PS-Adobe-3.0 EPSF-3.0\n%%BoundingBox: 0 0 8000 8000\n\
+                  clippath pathbbox 4 array astore ==\n";
+    let result = s.tool("eval_postscript", json!({ "source": source }));
+    assert_eq!(result["isError"], false, "{result}");
+    assert!(
+        texts(&result)[0].contains("[0.0 0.0 612.0 792.0]"),
+        "{result}"
+    );
+}

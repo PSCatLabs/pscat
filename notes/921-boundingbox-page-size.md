@@ -71,3 +71,5 @@ the child will make.
 It does not cover `--spool`, `--interactive` preludes, `pscat sheet`, the
 `contact_sheet` MCP tool, or the subcommands, which make their own pages.
 DOS binary EPS headers (`C5D0D3C6`) are not read either.
+MCP `eval_postscript` pins `--page 612x792`. It has no page arguments,
+and an EPSF box would make a canvas the server's pixel cap never checked.

@@ -177,12 +177,15 @@ fn page_always_wins_and_refuses_bbox_beside_it() {
     assert_eq!(size(&pm), (100, 80));
     // No translation either: user (0, 0) is the page corner again.
     assert_eq!(rgb(&pm, 2, 77), (255, 255, 255));
-    let run = pscat(
-        &["--bbox", "--page", "100x80", "--png", "x.png", "-"],
-        REPRO,
-    );
+    let out = common::scratch_dir("bbox-refused").join("x.png");
+    let out = out.to_str().unwrap();
+    let run = pscat(&["--bbox", "--page", "100x80", "--png", out, "-"], REPRO);
     assert!(!run.status.success());
     assert!(String::from_utf8_lossy(&run.stderr).contains("--bbox doesn't combine"));
+    // With nothing to read a box from, --bbox would do nothing.
+    let run = pscat(&["--bbox"], "");
+    assert!(!run.status.success());
+    assert!(String::from_utf8_lossy(&run.stderr).contains("--bbox needs a file"));
 }
 
 #[test]

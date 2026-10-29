@@ -390,6 +390,10 @@ fn main() -> ExitCode {
         eprintln!("pscat: --bbox doesn't combine with --page/--spool/--interactive");
         return ExitCode::FAILURE;
     }
+    if options.bbox && options.file.is_none() && options.eval.is_none() {
+        eprintln!("pscat: --bbox needs a file, - or -e");
+        return ExitCode::FAILURE;
+    }
 
     if let Some(threads) = options.bands {
         return bands::run(&mut options, threads);
