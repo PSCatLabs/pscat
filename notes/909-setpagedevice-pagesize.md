@@ -69,9 +69,9 @@ clears the `clipsave` stack, whose masks were made for the old canvas.
   (`Interp::after_device_change`, with the same f32 arithmetic as the first
   definition). A banded render stays byte-identical to a plain one
   (`tests/pagedevice.rs`).
-- A sweep's `--contact-sheet` is still made, and its size checked, before
-  any frame renders. It is made again with the first frame's size when the
-  program sized its page. A later frame of another size is an error, where
+- A sweep's `--contact-sheet` on an explicit `--page` is still made, and its
+  size checked, before any frame renders. On any other page the program may
+  set the size, so the sheet is made with the first frame's size. A later frame of another size is an error, where
   before it would have panicked in `blit_cell`.
 - The live window (a file run or `--interactive`) follows the new canvas,
   but the window keeps the size it opened with and stretches the page to
@@ -79,14 +79,16 @@ clears the `clipsave` stack, whose masks were made for the old canvas.
 
 **Limits.** A page the program asks for is held to 8000 pixels a side, as
 `--page` is. `pscat --max-pixels N` (new) caps it lower and checks the first
-page too. Over a cap, `setpagedevice` raises `configurationerror` before it
+page too, before allocating it. It is refused with `--spool`, whose jobs make
+their own canvases. Over a cap, `setpagedevice` raises `configurationerror` before it
 allocates anything. With `--max-pixels` it also prints
 `limits::pixel_cap_message`, so the MCP server, which now passes
 `--max-pixels` to every `render_postscript`/`start_render` child, answers
 `output_too_large` with the usual fields. The server's own check before the
 child starts still covers the first page, which the child allocates before
-the program runs. A resize allocates under `--max-memory` like any other
-heap growth.
+the program runs. A resize is checked against `--max-memory` before the
+new canvas is allocated (`Interp::check_alloc`). A Type 3 glyph that sets
+the page device gets the old one back at its end, and `/BandBBox` follows.
 
 **Not done.** No other page-device parameter (`/HWResolution`,
 `/Orientation`, `/PageOffset`, `/BeginPage`/`/EndPage`, `/Policies`, media

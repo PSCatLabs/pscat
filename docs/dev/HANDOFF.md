@@ -1110,7 +1110,7 @@ renders eight examples in both and compares block-downsampled output).
   that sizes a buffer from the page must take each page's own size: the PDF
   and SVG recorders keep per-page sizes, `--bands` cuts each page by its own
   height and redefines `/BandBBox` on a resize, and a sweep's contact sheet
-  is remade for the first frame's size. `Interp::with_page*` is `Explicit`;
+  waits for the first frame unless `--page` fixed the size. `Interp::with_page*` is `Explicit`;
   only `Interp::new` and the CLI's `Options::new_interp` let a program resize.
   See `notes/909-setpagedevice-pagesize.md`.
 
