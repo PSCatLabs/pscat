@@ -112,6 +112,15 @@ fn setpagedevice(it: &mut Interp) -> Result<(), PsError> {
         );
         note_once(it, &format!("key {key}"), &line);
     }
+    // A new canvas can be a quarter of a gigabyte: refused before it is
+    // made when it would pass `--max-memory`, as `array` and `string` are.
+    if device.px != current.px {
+        let bytes = device.px.0 as usize * device.px.1 as usize * 4;
+        if let Err(e) = it.check_alloc(bytes) {
+            it.push(obj);
+            return Err(e);
+        }
+    }
     if let Err(e) = it.gfx.install_device(Rc::new(device)) {
         it.push(obj);
         return Err(e);

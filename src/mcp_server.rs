@@ -2133,9 +2133,9 @@ const DEFAULT_MAX_PIXELS: u64 = 40_000_000;
 
 /// The pixel size a page of `page` points renders at `dpi`: the interpreter's
 /// own rounding (`Interp::with_page_scaled`), repeated here so that a page
-/// over the cap is refused before any program runs. A child's PNG that comes
-/// back at another size is an internal error, so the two cannot drift apart
-/// unnoticed.
+/// over the cap is refused before any program runs. (A `render_postscript`
+/// child's page can still change size, by the program's `setpagedevice`;
+/// the child holds that page to `--max-pixels` itself, #909.)
 fn device_pixels(page: (u32, u32), dpi: f32) -> (u64, u64) {
     let px = |pt: u32| ((pt as f32 * (dpi / 72.0)).round() as u64).max(1);
     (px(page.0), px(page.1))

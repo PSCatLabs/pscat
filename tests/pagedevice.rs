@@ -553,3 +553,21 @@ fn a_sweep_contact_sheet_takes_the_frames_size() {
         pm.height()
     );
 }
+
+/// A new canvas is refused under `--max-memory` before it is allocated.
+#[test]
+fn a_resize_past_the_memory_cap_is_refused_before_allocating() {
+    let run = pscat(
+        &[
+            "--max-memory",
+            "20",
+            "-e",
+            "<< /PageSize [4000 4000] >> setpagedevice",
+        ],
+        "",
+    );
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(!run.status.success());
+    assert!(stderr.contains("limitexceeded"), "{stderr}");
+    assert!(stderr.contains("memory"), "{stderr}");
+}
