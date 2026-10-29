@@ -1943,14 +1943,14 @@ fn chalkboard_math_errors_are_one_line_and_structured() {
     let mut s = Server::start();
     initialized(&mut s);
     // TeX outside mathkit's subset: the command, named, in one line.
-    let result = s.tool("chalkboard_math", small_board(r"a \oplus b"));
+    let result = s.tool("chalkboard_math", small_board(r"a \aleph b"));
     assert_eq!(error_kind(&result), "latex_error", "{result}");
     let err = &result["structuredContent"]["error"];
     assert_eq!(err["code"], "unsupported_command");
-    assert_eq!(err["token"], r"\oplus");
+    assert_eq!(err["token"], r"\aleph");
     let text = &texts(&result)[0];
     assert!(
-        text.starts_with(r"unsupported LaTeX command \oplus"),
+        text.starts_with(r"unsupported LaTeX command \aleph"),
         "{text}"
     );
     assert!(!text.contains('\n') && !text.contains("%%["), "{text}");

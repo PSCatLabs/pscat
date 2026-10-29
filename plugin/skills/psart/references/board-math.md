@@ -62,15 +62,17 @@ Supported TeX:
 | Delimiters | `\left( ... \right)` with `( ) [ ] \{ \} \| \langle \rangle` (the characters `⟨ ⟩ ‖ ∥` typed directly work too) and `.`; `\big` `\Big` `\bigg` `\Bigg` and their `l`/`r` forms |
 | Environments | `matrix`, `pmatrix`, `bmatrix`, `Bmatrix`, `vmatrix`, `cases` (rows `\\`, cells `&`) |
 | Accents and frames | `\vec`, `\hat`, `\bar`, `\dot`, `\ddot`, `\tilde`, `\overline`, `\underline`, `\boxed` |
-| Text | `\text{...}`, `\mathrm{...}` |
+| Text and alphabets | `\text{...}`, `\mathrm{...}`; `\mathbf{...}` (letters and digits re-traced, heavier), `\mathbb{R}` (blackboard bold), `\mathcal{L}` (script); the last two take capital letters only, as in TeX |
 | Spacing | `\,` `\:` `\;` `\!` `\ ` `\quad` `\qquad` `~` (plain spaces are ignored, as in TeX) |
 | Braces and stacks | `\overbrace{...}^{label}`, `\underbrace{...}_{label}` (`\nolimits` after it: the label beside), `\overset{a}{b}`, `\underset{a}{b}`, `\stackrel{a}{b}` (a relation), `\sum_{\substack{i<m \\ j<n}}` |
 | Styles | `\displaystyle`, `\textstyle`, `\scriptstyle`, `\scriptscriptstyle`: the rest of the group in that style |
 | Negation and congruence | `\not=` (≠), `\not\in` (∉), `\not<` and any other symbol (a slash through it); `a \bmod b`, `a \equiv b \pmod{n}`, `\mod{n}`, `\pod{n}` |
-| Symbols | Greek `\alpha` ... `\Omega`, `\infty`, `\partial`, `\nabla`, `\pm`, `\times`, `\cdot`, `\le`, `\ge`, `\ne`, `\approx`, `\to`, `\Rightarrow`, `\iff`, `\in`, `\subset`, `\cup`, `\cap`, `\forall`, `\exists`, `\cdots`, ...; Unicode symbols typed directly (α ∞ ≤ ∂) |
+| Symbols | Greek `\alpha` ... `\Omega`, `\infty`, `\partial`, `\nabla`, `\hbar`, `\ell`, `\pm`, `\times`, `\cdot`, `\le`, `\ge`, `\ne`, `\approx`, `\equiv`, `\sim`, `\cong`, `\propto`, `\to`, `\mapsto`, `\Rightarrow`, `\iff`, `\in`, `\subset`, `\subseteq`, `\cup`, `\cap`, `\setminus`, `\emptyset`, `\angle`, `\triangle`, `\Re`, `\Im`, `\oplus`, `\otimes`, `\dagger`, `\cdots`, ...; Unicode symbols typed directly (α ∞ ≤ ∂ ∧ ℝ) |
+| Logic | `\forall`, `\exists`, `\nexists`, `\neg`/`\lnot`, `\wedge`/`\land`, `\vee`/`\lor`, `\Rightarrow`, `\Leftrightarrow`, `\leftrightarrow`, `\vdash`, `\nvdash`, `\models`, `\top`, `\bot`, `\therefore` |
 
-Anything else fails with a name saying what it was, for example
-`mk-unsupported-command:\oplus` or `mk-unsupported-character:@`.
+`pscat chalk --help` prints the whole list. Anything else fails with a name
+saying what it was, for example
+`mk-unsupported-command:\aleph` or `mk-unsupported-character:@`.
 
 - **`/Irregular`** (default 1) is the board hand. 0 is clean TeX, and 2 is
   hurried. It varies sizes, gaps and script heights, makes fraction bars
