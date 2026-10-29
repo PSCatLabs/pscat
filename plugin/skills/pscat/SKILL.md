@@ -86,12 +86,13 @@ in the final answer.
    changes. `out_path`'s reply says `wrote <absolute path>`; use that path.
 2. Put the image in the final message twice over, as an embed and as a plain
    link, so that a host that does not draw the embed still gives the user the
-   file, then link the source: `![a colourful spiral](/Users/me/project/spiral.png)`,
-   `[spiral.png](/Users/me/project/spiral.png)`, `[spiral.ps](/Users/me/project/spiral.ps)`.
+   file, then link the source: `![a colourful spiral](ABSOLUTE_PNG_PATH)`,
+   `[spiral.png](ABSOLUTE_PNG_PATH)`, `[spiral.ps](ABSOLUTE_PS_PATH)`, each with
+   the real absolute path in place of the placeholder.
    - **Codex desktop:** the embed with an absolute path is what showed the image in
      the v0.7.0-rc.1 trial (#911); a tool-call image alone did not.
    - **Claude desktop (Cowork and the Code tab):** save into the user's folder and
-     the plain link is the part that is documented (the Code tab opens a clicked
+     give the plain link; that part is documented (the Code tab opens a clicked
      path). Do not say the image is shown inline unless you can see that it is.
    - **Claude Code in a terminal:** it cannot draw images; say where the file is.
 3. Never paste base64 or a `data:` URI into a reply. Do not write "rendered
