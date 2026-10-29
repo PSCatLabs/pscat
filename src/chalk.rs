@@ -1044,7 +1044,16 @@ fn is_tex_length(t: &str) -> bool {
     }
     let rest = rest.trim_start();
     if let Some(reg) = rest.strip_prefix('\\') {
-        return is_length_register(reg.trim_end());
+        // `\dimen0`, `\skip12`: TeX's numbered registers
+        let reg = reg.trim_end();
+        let name = reg
+            .trim_end_matches(|c: char| c.is_ascii_digit())
+            .trim_end();
+        return if name.len() < reg.len() {
+            matches!(name, "dimen" | "skip")
+        } else {
+            is_length_register(reg)
+        };
     }
     let unit = rest.to_ascii_lowercase();
     let unit = unit.strip_prefix("true").unwrap_or(&unit).trim_start();
@@ -1052,8 +1061,14 @@ fn is_tex_length(t: &str) -> bool {
 }
 
 /// Whether `t` is a length with optional `plus` and `minus` parts
-/// (`2pt plus 1pt minus 0.5pt`, `0pt plus 1fil`), TeX's glue.
+/// (`2pt plus 1pt minus 0.5pt`, `0pt plus 1fil`), TeX's glue, or an e-TeX
+/// `\dimexpr`/`\glueexpr` expression.
 fn is_tex_glue(t: &str) -> bool {
+    // an e-TeX expression is spacing whatever it holds
+    let head = t.trim_start();
+    if head.starts_with("\\dimexpr") || head.starts_with("\\glueexpr") {
+        return true;
+    }
     let lower = t.to_ascii_lowercase();
     let cut = |key: &str| lower.find(key).unwrap_or(lower.len());
     let (plus, minus) = (cut("plus"), cut("minus"));
@@ -1543,6 +1558,11 @@ mod tests {
             l(r"a \\[\unitlength] b \\[2\fboxrule] c \\[\lineskiplimit] d"),
             ["a", "b", "c", "d"]
         );
+        assert_eq!(
+            l(r"a \\[\dimexpr 2pt+1pt\relax] b \\[\dimen0] c \\[0.5\skip12] d"),
+            ["a", "b", "c", "d"]
+        );
+        assert_eq!(l(r"a \\ [x_0] = 1"), ["a", "[x_0] = 1"]);
         assert_eq!(
             l(r"a \\ [\alpha, \beta] = 0"),
             ["a", r"[\alpha, \beta] = 0"]

@@ -13,7 +13,8 @@ mechanics, and the content vanished with no error.
   limit, plus `\jot` and `\fill`: `\baselineskip`, `0.1\textheight`, `\arraycolsep`). A closed
   list first; Codex (round 1) showed it turned real spacing such as
   `\\[\abovedisplayskip]` into an error; round 2 added the length, rule
-  and limit endings (`\unitlength`, `\fboxrule`). A register outside the
+  and limit endings (`\unitlength`, `\fboxrule`), round 3 TeX's numbered
+  registers (`\dimen0`, `\skip12`) and e-TeX's `\dimexpr`/`\glueexpr`. A register outside the
   naming (a package's own) is content, and mathkit names it. With optional `plus` and `minus` parts (TeX glue:
   `2pt plus 1pt minus .5pt`, `0pt plus 1fil`). Everything else, `[x,y]`, `[1]` and `[\pi]` among
   them, stays as the next row's first characters.
