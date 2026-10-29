@@ -66,7 +66,7 @@ DVColors   i dvcolor -> r g b
 %!PS
 (lib/dataviz.ps) run
 1 1 1 setrgbcolor clippath fill
-0 0 20 72 320 468 170 setdvframe
+0 20 72 320 468 170 setdvframe
 0.15 0.45 0.75 setrgbcolor 1.4 setlinewidth
 newpath [4 6 5 9 7 11] linechart stroke
 0.6 0.66 0.72 setrgbcolor 0.6 setlinewidth newpath 6 4 5 dvaxes stroke
@@ -77,7 +77,7 @@ showpage
 ```postscript
 %!PS
 (lib/dataviz.ps) run
-0 0 24 72 320 468 170 setdvframe
+0 24 72 320 468 170 setdvframe
 newpath [8 15 12 19] 0.22 { pop dvcolor } barchart
 newpath 4 4 5 dvaxes stroke
 showpage
@@ -89,7 +89,7 @@ showpage
 (lib/graph.ps) run
 0 -1.2 360 1.2 72 120 468 260 setframe
 newpath 4 4 6 axes stroke
-newpath 0 360 200 { dup sin } plotfn stroke
+newpath 0 360 200 { sin } plotfn stroke
 showpage
 ```
 

@@ -7258,6 +7258,10 @@ systemdict /setalpha known /pwhasalpha exch def
 % @param: /Blend [name] /Normal or /Multiply, for the grain marks (default /Normal)
 % @param: /Seed [integer] Integer seed for this ground alone, leaving the caller's rand stream untouched (default: one rand draw from the caller's stream)
 /pkpaper {
+    % x y w h opts: five operands. With fewer, `/pvh exch def` below would
+    % underflow with the name /pvh left on the stack, and the error would not
+    % say what is missing. Checked first so nothing is consumed or leaked.
+    count 5 lt { pkpaper-needs-x-y-w-h-and-an-options-dict } if
     /pvopts exch def
     /pvh exch def
     /pvw exch def
