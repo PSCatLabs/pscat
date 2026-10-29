@@ -37,9 +37,11 @@ const USAGE: &str = r#"usage: pscat chalk [options] 'LATEX'
   -h, --help          this text
 
 Write the LaTeX as you would in a document: single backslashes, \\ between
-rows, & to align them; quote it for the shell. The supported subset is
-mathkit's (the top of lib/mathkit.ps). Flags override the config. A formula
-that starts with "-" goes after "--"."#;
+rows, & to align them; quote it for the shell. A bracket right after \\ is
+TeX's row spacing (\\[2pt]) only when it holds a length; otherwise
+(\\ [x,y] = 0) it starts the next row, and \left[ ... \right] is always a
+bracket. The supported subset is mathkit's (the top of lib/mathkit.ps).
+Flags override the config. A formula that starts with "-" goes after "--"."#;
 
 enum Input {
     Arg(String),

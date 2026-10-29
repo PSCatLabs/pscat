@@ -278,7 +278,11 @@ the whole (`$...$`, `$$...$$`, `\[...\]`, `\(...\)`, or an `align`, `align*`,
 one formula with the delimiters removed. Words outside the pairs, or a
 delimiter that is never closed or closes nothing, fail with a one-line error
 naming it. Each top-level `\\` starts a row (those inside `pmatrix`,
-`cases` or `\substack{}` stay where they are), and the rows are set with
+`cases` or `\substack{}` stay where they are). A bracket right after a
+row break is TeX's row spacing (`\\[2pt]`, `\\[0.5\baselineskip]`, dropped) only
+when it holds a length; anything else (`\\ [\hat{x},\hat{p}] = i\hbar`, a
+commutator) starts the next row, where LaTeX would stop with an error. Write
+`\left[ ... \right]` to be sure of a bracket. The rows are set with
 `mkalign`: on their relations (or `&`), as `align` sets them, except inside a
 `gather`, `gather*` or `gathered` wrapper, where each row is centred on its
 own width, as LaTeX does. The supported subset is mathkit's, listed above and in full at

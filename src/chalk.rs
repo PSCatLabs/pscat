@@ -967,9 +967,13 @@ fn split_rows(s: &str) -> Vec<String> {
                         if b.get(j) == Some(&b'*') {
                             j += 1;
                         }
-                        let k = j + s[j..].len() - s[j..].trim_start_matches(' ').len();
+                        // TeX's `\\[2pt]` row spacing goes; a bracket that holds
+                        // no length is the next row's content (`\\ [x,y] = 0`, a
+                        // commutator), where LaTeX would stop with an error
+                        let k = j + s[j..].len() - s[j..].trim_start().len();
                         if b.get(k) == Some(&b'[')
                             && let Some(close) = s[k..].find(']')
+                            && is_tex_glue(&s[k + 1..k + close])
                         {
                             j = k + close + 1;
                         }
@@ -1002,6 +1006,91 @@ fn split_rows(s: &str) -> Vec<String> {
     }
     rows.push(s[start..].to_string());
     rows
+}
+
+/// TeX's units of length (TeXbook p. 57).
+const TEX_UNITS: [&str; 11] = [
+    "pt", "pc", "in", "bp", "cm", "mm", "dd", "cc", "sp", "em", "ex",
+];
+
+/// Whether `name` (a control word, no backslash) is a TeX or LaTeX length
+/// register: plain TeX's and LaTeX's are named for what they measure
+/// (`\baselineskip`, `\abovedisplayskip`, `\arraycolsep`, `\textheight`,
+/// `\linewidth`, `\parindent`, `\medskipamount`, `\unitlength`, `\fboxrule`,
+/// `\lineskiplimit`), and `\jot` and `\fill` are the two common exceptions. No mathkit command is named so, so `\pi`
+/// or `\alpha` in a bracket stays content.
+fn is_length_register(name: &str) -> bool {
+    const ENDS: [&str; 10] = [
+        "skip", "sep", "width", "height", "depth", "indent", "amount", "length", "rule", "limit",
+    ];
+    name.chars().all(|c| c.is_ascii_alphabetic())
+        && (matches!(name, "jot" | "fill") || ENDS.iter().any(|e| name.ends_with(e)))
+}
+
+/// Whether `t` (the inside of a `[...]`) reads as a TeX length: a signed
+/// number and a unit (`2pt`, `-1.5 em`, `3,5mm`, `2truept`), or an optional
+/// factor and a length register (`\baselineskip`, `0.5\jot`). Anything else,
+/// `x,y` or `\pi` among them, is not.
+fn is_tex_length(t: &str) -> bool {
+    let t = t.trim();
+    let t = t.strip_prefix(['+', '-']).unwrap_or(t).trim_start();
+    let digits = t
+        .find(|c: char| !(c.is_ascii_digit() || c == '.' || c == ','))
+        .unwrap_or(t.len());
+    let (num, rest) = t.split_at(digits);
+    let has_num = num.chars().any(|c| c.is_ascii_digit());
+    if !num.is_empty() && !has_num {
+        return false;
+    }
+    let rest = rest.trim_start();
+    if let Some(reg) = rest.strip_prefix('\\') {
+        // `\dimen0`, `\skip12`: TeX's numbered registers
+        let reg = reg.trim_end();
+        let name = reg
+            .trim_end_matches(|c: char| c.is_ascii_digit())
+            .trim_end();
+        return if name.len() < reg.len() {
+            matches!(name, "dimen" | "skip")
+        } else {
+            is_length_register(reg)
+        };
+    }
+    let unit = rest.to_ascii_lowercase();
+    let unit = unit.strip_prefix("true").unwrap_or(&unit).trim_start();
+    has_num && TEX_UNITS.contains(&unit.trim_end())
+}
+
+/// Whether `t` is a length with optional `plus` and `minus` parts
+/// (`2pt plus 1pt minus 0.5pt`, `0pt plus 1fil`), TeX's glue, or an e-TeX
+/// `\dimexpr`/`\glueexpr` expression.
+fn is_tex_glue(t: &str) -> bool {
+    // an e-TeX expression is spacing whatever it holds
+    let head = t.trim_start();
+    let head = head.strip_prefix(['+', '-']).unwrap_or(head).trim_start();
+    if head.starts_with("\\dimexpr") || head.starts_with("\\glueexpr") {
+        return true;
+    }
+    let lower = t.to_ascii_lowercase();
+    let cut = |key: &str| lower.find(key).unwrap_or(lower.len());
+    let (plus, minus) = (cut("plus"), cut("minus"));
+    let stretch = |from: usize, key: &str, to: usize| {
+        from == lower.len() || from > to || {
+            let part = &lower[from + key.len()..to];
+            is_tex_length(part) || is_fil(part)
+        }
+    };
+    is_tex_length(&lower[..plus.min(minus)])
+        && (plus == lower.len() || plus < minus)
+        && stretch(plus, "plus", minus)
+        && stretch(minus, "minus", lower.len())
+}
+
+/// `1fil`, `-2 fill`, `fill`: TeX's infinite stretch (lowercase input).
+fn is_fil(t: &str) -> bool {
+    let t = t.trim();
+    let t = t.strip_prefix(['+', '-']).unwrap_or(t);
+    let t = t.trim_start_matches(|c: char| c.is_ascii_digit() || c == '.' || c == ',');
+    matches!(t.trim(), "fil" | "fill" | "filll")
 }
 
 /// A PostScript string literal holding `bytes`: `\`, `(` and `)` escaped,
@@ -1450,6 +1539,43 @@ mod tests {
     fn rows_split_only_at_top_level_breaks() {
         assert_eq!(l(r"a &= b \\ c &= d"), ["a &= b", "c &= d"]);
         assert_eq!(l(r"a \\* b \\[2pt] c\\"), ["a", "b", "c"]);
+        // a bracket after `\\` is spacing only when it holds a length (#936)
+        assert_eq!(l(r"a \\ [x,y] = 0"), ["a", "[x,y] = 0"]);
+        assert_eq!(
+            l(r"i\hbar \\ [\hat{x},\hat{p}] = i\hbar"),
+            [r"i\hbar", r"[\hat{x},\hat{p}] = i\hbar"]
+        );
+        assert_eq!(l(r"a \\ [\pi] = 0"), ["a", r"[\pi] = 0"]);
+        assert_eq!(l(r"a \\[1] b"), ["a", "[1] b"]);
+        assert_eq!(l("a \\\\\n[2pt] b"), ["a", "b"]);
+        assert_eq!(l(r"a \\*[ -1.5 em ] b \\ [3,5mm] c"), ["a", "b", "c"]);
+        assert_eq!(l(r"a \\[0.5\baselineskip] b \\[\jot] c"), ["a", "b", "c"]);
+        assert_eq!(l(r"a \\[2truept] b"), ["a", "b"]);
+        assert_eq!(
+            l(r"a \\[\abovedisplayskip] b \\[0.1\textheight] c \\[-\arraycolsep] d"),
+            ["a", "b", "c", "d"]
+        );
+        assert_eq!(
+            l(r"a \\[\unitlength] b \\[2\fboxrule] c \\[\lineskiplimit] d"),
+            ["a", "b", "c", "d"]
+        );
+        assert_eq!(
+            l(r"a \\[\dimexpr 2pt+1pt\relax] b \\[\dimen0] c \\[0.5\skip12] d"),
+            ["a", "b", "c", "d"]
+        );
+        assert_eq!(l(r"a \\[-\dimexpr 2pt+1pt\relax] b"), ["a", "b"]);
+        assert_eq!(l(r"a \\ [x_0] = 1"), ["a", "[x_0] = 1"]);
+        assert_eq!(
+            l(r"a \\ [\alpha, \beta] = 0"),
+            ["a", r"[\alpha, \beta] = 0"]
+        );
+        assert_eq!(
+            l(r"a \\[2pt plus 1pt minus .5pt] b \\[0pt plus 1fil] c"),
+            ["a", "b", "c"]
+        );
+        assert_eq!(l(r"a \\[2pt plus x] b"), ["a", "[2pt plus x] b"]);
+        // inside display delimiters too
+        assert_eq!(l(r"\[ a \\ [x,y] \]"), ["a", "[x,y]"]);
         assert_eq!(
             l(r"\begin{pmatrix} a & b \\ c & d \end{pmatrix} = M"),
             [r"\begin{pmatrix} a & b \\ c & d \end{pmatrix} = M"]

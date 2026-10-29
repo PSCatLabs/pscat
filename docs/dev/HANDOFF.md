@@ -879,6 +879,10 @@ renders eight examples in both and compares block-downsampled output).
    (default `/relation`, so `align` and every other caller is unchanged); one
    row, or any other wrapper, never gets the option
    (`notes/699-chalk-gather-centred.md`).
+   #936: a `[...]` after a top-level `\\` is TeX's row spacing (dropped)
+   only when `chalk::is_tex_length` reads it as a length (`2pt`, `-1.5em`,
+   `0.5\baselineskip`); otherwise it is the next row's content, so a
+   commutator `\\ [x,y] = 0` survives (`notes/936-chalk-row-bracket.md`).
    #713: on the no-board overlay (touch 0.34, so grain shows) the radical's
    long bar and small strokes broke into gaps; drychalk's `/Firm` (default 0:
    byte-identical, `identity_check.sh --loader lib/drychalk.ps`) holds the
