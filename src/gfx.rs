@@ -2497,45 +2497,68 @@ impl Gfx {
             Some((depth, state)) if self.saved.len() <= depth => Some(state),
             _ => self.saved.last(),
         };
-        let clip = outer.and_then(|s| s.clip.clone());
-        // The level may have started on another page device (#909): its
-        // mask is then remade for this canvas from the same device-space
-        // paths, as gs keeps the clip path.
-        self.state.clip = clip.map(|c| self.fit_clip(c));
+        let Some(outer) = outer else {
+            self.state.clip = None;
+            return;
+        };
+        let (clip, from) = (outer.clip.clone(), outer.device.px);
+        // The level may have started on another page device (#909): the clip
+        // it started with is then that device's, remade for this canvas.
+        self.state.clip = self.fit_clip(clip, from);
     }
 
-    /// `clip` as a mask of the current canvas's size: itself when it is
-    /// one, else its chain's paths rasterised again on this canvas (#909).
-    fn fit_clip(&self, clip: ClipState) -> ClipState {
+    /// A clip made on a canvas of `from` pixels, for the current canvas
+    /// (#909). On the same size it is itself. Otherwise it is what gs
+    /// keeps: the old page's rectangle (its implicit clip) intersected with
+    /// the chain's device-space paths, rasterised again on this canvas.
+    fn fit_clip(&self, clip: Option<ClipState>, from: (u32, u32)) -> Option<ClipState> {
         let (w, h) = (self.pixmap.width(), self.pixmap.height());
-        if clip.mask.width() == w && clip.mask.height() == h {
+        if from == (w, h) {
             return clip;
         }
         let mut chain = Vec::new();
-        let mut link = Some(&clip.node);
+        let mut link = clip.as_ref().map(|c| &c.node);
         while let Some(node) = link {
-            chain.push(node);
+            chain.push(node.clone());
             link = node.parent.as_ref();
         }
-        let Some(mut mask) = tiny_skia::Mask::new(w, h) else {
-            return clip;
-        };
-        mask.data_mut().fill(255);
-        for node in chain.iter().rev() {
-            let Some(mut one) = tiny_skia::Mask::new(w, h) else {
-                return clip;
-            };
-            if let Some(path) = node.path.to_skia() {
-                one.fill_path(&path, node.rule, true, Transform::identity());
+        let mut page = PsPath::default();
+        let (fw, fh) = (from.0 as f32, from.1 as f32);
+        page.move_to(DevPoint { x: 0.0, y: 0.0 });
+        page.line_to(DevPoint { x: fw, y: 0.0 });
+        page.line_to(DevPoint { x: fw, y: fh });
+        page.line_to(DevPoint { x: 0.0, y: fh });
+        page.close();
+        let mut mask = tiny_skia::Mask::new(w, h)?;
+        let mut node = std::rc::Rc::new(ClipNode {
+            path: page,
+            rule: FillRule::Winding,
+            parent: None,
+        });
+        let mut first = true;
+        for link in std::iter::once(node.clone()).chain(chain.into_iter().rev()) {
+            let mut one = tiny_skia::Mask::new(w, h)?;
+            if let Some(path) = link.path.to_skia() {
+                one.fill_path(&path, link.rule, true, Transform::identity());
+            }
+            if first {
+                mask = one;
+                first = false;
+                continue;
             }
             for (m, p) in mask.data_mut().iter_mut().zip(one.data()) {
                 *m = ((u16::from(*m) * u16::from(*p)) / 255) as u8;
             }
+            node = std::rc::Rc::new(ClipNode {
+                path: link.path.clone(),
+                rule: link.rule,
+                parent: Some(node),
+            });
         }
-        ClipState {
+        Some(ClipState {
             mask: std::rc::Rc::new(mask),
-            node: clip.node,
-        }
+            node,
+        })
     }
 
     /// `save` starts a new `clipsave` level (gs's `save` is a `gsave`);

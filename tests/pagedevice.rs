@@ -818,3 +818,37 @@ fn a_clip_restored_across_a_resize_still_clips() {
         assert_eq!(ink(&it.gfx().pixmap), 0, "{src}");
     }
 }
+
+/// Codex round 7 on PR #930: restored onto a larger page, the clip keeps
+/// the old page's bounds. gs 10.07.1 paints 10000 pixels at (0,0)..(99,99)
+/// for the first and 8100 at (10,0)..(99,89) for the second.
+#[test]
+fn a_clip_restored_onto_a_larger_page_keeps_the_old_page_bounds() {
+    for (src, want, first, last) in [
+        (
+            "<< /PageSize [100 100] >> setpagedevice gsave \
+             << /PageSize [200 200] >> setpagedevice cliprestore 0 0 200 200 rectfill",
+            10000,
+            (0, 0),
+            (99, 99),
+        ),
+        (
+            "<< /PageSize [100 100] >> setpagedevice 10 10 500 500 rectclip gsave \
+             << /PageSize [200 200] >> setpagedevice cliprestore 0 0 200 200 rectfill",
+            8100,
+            (10, 0),
+            (99, 89),
+        ),
+    ] {
+        let mut it = default_page();
+        it.run_str(src).expect(src);
+        let pm = &it.gfx().pixmap;
+        let dark: Vec<(u32, u32)> = (0..pm.width())
+            .flat_map(|x| (0..pm.height()).map(move |y| (x, y)))
+            .filter(|&(x, y)| pm.pixel(x, y).is_some_and(|p| p.red() < 128))
+            .collect();
+        assert_eq!(dark.len(), want, "{src}");
+        assert_eq!(dark.first(), Some(&first), "{src}");
+        assert_eq!(dark.last(), Some(&last), "{src}");
+    }
+}
