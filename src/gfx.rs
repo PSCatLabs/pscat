@@ -2090,11 +2090,14 @@ impl Gfx {
         };
     }
 
-    /// Leave `nulldevice` and drop the `clipsave` entries, whose masks were
-    /// made for the previous device: `setpagedevice` (#909).
-    pub(crate) fn leave_null_device(&mut self) {
+    /// Leave `nulldevice` for the page device: `setpagedevice` (#909). The
+    /// `clipsave` entries stay, as in gs, unless `resized`: their masks
+    /// were made for the old canvas, so a new size drops them.
+    pub(crate) fn leave_null_device(&mut self, resized: bool) {
         self.state.null_device = false;
-        self.state.clip_stack.clear();
+        if resized {
+            self.state.clip_stack.clear();
+        }
     }
 
     /// The graphics state a job starts in: the device CTM, black

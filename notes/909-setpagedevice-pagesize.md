@@ -54,8 +54,11 @@ rebuilds the base CTM, and clears the ink flag and the lazy erase. After
 any restore (`grestore`, `grestoreall`, `restore`, `setgstate`, a Type 3
 glyph's restore), `Gfx::sync_device` reinstalls the restored state's device
 if it is not the current one. That is an `Rc` pointer compare, so a run
-that never calls `setpagedevice` does nothing new. `setpagedevice` also
-clears the `clipsave` stack, whose masks were made for the old canvas.
+that never calls `setpagedevice` does nothing new. `setpagedevice` keeps the
+`clipsave` stack, as gs does, unless the canvas size changes: its masks were
+made for the old canvas, so a resize drops them (gs would keep them; a
+deviation). `currentpagedevice` under `nulldevice` is an empty dictionary,
+as in gs.
 
 **Everything that sized a buffer from the page now takes each page's size.**
 

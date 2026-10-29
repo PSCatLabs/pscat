@@ -659,3 +659,61 @@ fn a_glyph_restored_device_refreshes_band_bbox() {
     // Band 0 of 4 (two a thread) on the letter page: rows 0..198.
     assert!(stdout.contains("[0 594 612 792]"), "{stdout}");
 }
+
+/// Codex round 2 on PR #930, pinned against gs 10.07.1: a same-size
+/// setpagedevice keeps the `clipsave` entries (`[10.0 20.0 40.0 60.0]` in
+/// gs), and `currentpagedevice` is empty under `nulldevice` (gs: length 0).
+#[test]
+fn clipsave_survives_a_same_size_device_and_nulldevice_has_no_page() {
+    let mut it = default_page();
+    assert_eq!(
+        eval(
+            &mut it,
+            "10 20 30 40 rectclip clipsave initclip << >> setpagedevice cliprestore \
+             clippath pathbbox 4 array astore nulldevice currentpagedevice length"
+        ),
+        ["[10.0 20.0 40.0 60.0]", "0"]
+    );
+}
+
+/// `--max-pixels` is checked before a sweep's or a banded run's sizing
+/// probe allocates the first page.
+#[test]
+fn the_pixel_cap_is_checked_before_sizing_probes() {
+    let dir = common::scratch_dir("pd-probe-cap");
+    let sheet = dir.join("sheet.png");
+    let png = dir.join("b.png");
+    for args in [
+        vec![
+            "--max-pixels",
+            "1",
+            "--page",
+            "100x100",
+            "--sweep-seed",
+            "1:2",
+            "--contact-sheet",
+            sheet.to_str().expect("utf-8"),
+            "-",
+        ],
+        vec![
+            "--max-pixels",
+            "1",
+            "--page",
+            "100x100",
+            "--bands",
+            "2",
+            "--png",
+            png.to_str().expect("utf-8"),
+            "-",
+        ],
+    ] {
+        let run = pscat(&args, "0 0 10 10 rectfill");
+        let stderr = String::from_utf8_lossy(&run.stderr);
+        assert!(!run.status.success(), "{args:?}");
+        assert_eq!(
+            pscat::limits::parse_pixel_cap_message(&stderr),
+            Some((100, 100, 1)),
+            "{args:?}: {stderr}"
+        );
+    }
+}

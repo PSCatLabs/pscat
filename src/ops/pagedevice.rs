@@ -114,7 +114,8 @@ fn setpagedevice(it: &mut Interp) -> Result<(), PsError> {
     }
     // A new canvas can be a quarter of a gigabyte: refused before it is
     // made when it would pass `--max-memory`, as `array` and `string` are.
-    if device.px != current.px {
+    let resized = device.px != current.px;
+    if resized {
         let bytes = device.px.0 as usize * device.px.1 as usize * 4;
         if let Err(e) = it.check_alloc(bytes) {
             it.push(obj);
@@ -125,17 +126,20 @@ fn setpagedevice(it: &mut Interp) -> Result<(), PsError> {
         it.push(obj);
         return Err(e);
     }
-    it.gfx.leave_null_device();
+    it.gfx.leave_null_device(resized);
     it.gfx.init_graphics();
     it.after_device_change();
     Ok(())
 }
 
-/// `- currentpagedevice dict`: a new dictionary with `/PageSize`.
+/// `- currentpagedevice dict`: a new dictionary with `/PageSize`, or an
+/// empty one under `nulldevice`, which is not a page device (gs).
 fn currentpagedevice(it: &mut Interp) -> Result<(), PsError> {
     let (w, h) = it.gfx.page_size();
     let mut dict = Dict::new();
-    dict.put("PageSize".into(), Object::array(vec![number(w), number(h)]));
+    if !it.gfx.is_null_device() {
+        dict.put("PageSize".into(), Object::array(vec![number(w), number(h)]));
+    }
     it.push(Object::lit(Value::Dict(Rc::new(std::cell::RefCell::new(
         dict,
     )))));

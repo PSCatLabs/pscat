@@ -223,6 +223,10 @@ pub fn run(options: &mut Options, threads: u32) -> ExitCode {
     // probe takes is what one band's fresh interpreter costs: the memory
     // budget leaves that much out for every worker, as a plain render's
     // budget leaves out its own interpreter.
+    if let Err(msg) = options.check_pixel_cap() {
+        eprintln!("pscat: {msg}");
+        return ExitCode::FAILURE;
+    }
     let before = pscat::memtrack::live_bytes();
     let Some(probe) = Interp::with_page_scaled(options.page.0, options.page.1, scale) else {
         eprintln!(

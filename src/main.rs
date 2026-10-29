@@ -223,15 +223,7 @@ impl Options {
     fn new_interp(&self) -> Result<Interp, String> {
         let (w, h) = self.page;
         let scale = self.dpi / 72.0;
-        if let Some(max) = self.max_pixels {
-            // Checked before the canvas is made: `with_page_scaled`'s
-            // rounding, as the MCP server repeats it.
-            let px = |pt: u32| ((pt as f32 * scale).round() as u64).max(1);
-            let (pw, ph) = (px(w), px(h));
-            if pw.saturating_mul(ph) > max {
-                return Err(pscat::limits::pixel_cap_message(pw, ph, max));
-            }
-        }
+        self.check_pixel_cap()?;
         let mut interp = Interp::with_page_scaled(w, h, scale)
             .ok_or_else(|| format!("unusable page size {w}x{h}"))?;
         let gfx = interp.gfx_mut();
@@ -239,6 +231,22 @@ impl Options {
         gfx.set_page_size_source(self.page_source);
         interp.set_max_page_pixels(self.max_pixels);
         Ok(interp)
+    }
+
+    /// `--max-pixels` against the first page, before any canvas (an
+    /// interpreter or a sizing probe) is made: `with_page_scaled`'s
+    /// rounding, as the MCP server repeats it.
+    fn check_pixel_cap(&self) -> Result<(), String> {
+        let Some(max) = self.max_pixels else {
+            return Ok(());
+        };
+        let scale = self.dpi / 72.0;
+        let px = |pt: u32| ((pt as f32 * scale).round() as u64).max(1);
+        let (pw, ph) = (px(self.page.0), px(self.page.1));
+        if pw.saturating_mul(ph) > max {
+            return Err(pscat::limits::pixel_cap_message(pw, ph, max));
+        }
+        Ok(())
     }
 
     /// Put `--max-steps`/`--max-time`/`--max-memory`, `--allow-write` and
@@ -1317,6 +1325,10 @@ fn run_sweep(options: &Options, source: &[u8]) -> ExitCode {
     if let Some(grid) = grid
         && options.page_source == PageSizeSource::Explicit
     {
+        if let Err(msg) = options.check_pixel_cap() {
+            eprintln!("pscat: {msg}");
+            return ExitCode::FAILURE;
+        }
         let Some(probe) =
             Interp::with_page_scaled(options.page.0, options.page.1, options.dpi / 72.0)
         else {
