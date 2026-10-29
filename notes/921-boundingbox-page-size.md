@@ -40,11 +40,14 @@ than silently dropped, as is `--bbox` with `--spool` or `--interactive`.
 Gallery manifests already say `page` equals the box (`scripts/gallery.py`),
 so for the 12 tracked EPSF files the CLI now draws what the gallery shows.
 
-**How it works.** `src/bbox.rs` (`page_box`) reads the header comments: the
-lines after the first, up to `%%EndComments` or the first line that is not a
-comment. Lines may end in CR, LF or CRLF. The first occurrence of each comment
-wins. `(atend)` is looked up after the last `%%Trailer`, so a document embedded
-before the trailer cannot supply it. A usable `%%HiResBoundingBox` wins, as in
+**How it works.** `src/bbox.rs` (`page_box`) reads the header comments,
+following DSC 3.0. They are the lines after the `%!` line (a `-e` snippet
+with none starts at its first line). They end at `%%EndComments` or at the
+first line that is not `%` plus a printable non-space character, so a blank
+line or a `% note` ends them too. Lines may end in CR, LF or CRLF. The first occurrence of each comment
+wins. `(atend)` is looked up after the last `%%Trailer` outside any
+`%%BeginDocument`/`%%EndDocument` block, so an embedded document's trailer
+cannot supply it. A usable `%%HiResBoundingBox` wins, as in
 gs. Each side is rounded to the nearest point, as gs does (it does not take
 the ceiling). Values may be real numbers, and the origin may be negative. A box
 that is malformed, empty, inverted, or larger than 8000 points produces a

@@ -214,3 +214,40 @@ fn dpi_scales_the_box_page() {
     );
     assert_eq!(size(&pm), (80, 60));
 }
+
+#[test]
+fn a_file_argument_and_an_eval_snippet_take_the_box_too() {
+    let dir = common::scratch_dir("bbox-file");
+    let (src, out) = (dir.join("art.eps"), dir.join("art.png"));
+    std::fs::write(
+        &src,
+        epsf("%%BoundingBox: 0 0 64 32\r\n").replace('\n', "\r\n"),
+    )
+    .unwrap();
+    let run = pscat(&["--png", out.to_str().unwrap(), src.to_str().unwrap()], "");
+    assert!(
+        run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let pm = Pixmap::decode_png(&std::fs::read(&out).unwrap()).unwrap();
+    assert_eq!(size(&pm), (64, 32));
+    // A -e snippet has no %! line; with --bbox its first line is the box.
+    let run = pscat(
+        &[
+            "--bbox",
+            "--png",
+            out.to_str().unwrap(),
+            "-e",
+            "%%BoundingBox: 10 20 110 70\nshowpage",
+        ],
+        "",
+    );
+    assert!(
+        run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let pm = Pixmap::decode_png(&std::fs::read(&out).unwrap()).unwrap();
+    assert_eq!(size(&pm), (100, 50));
+}

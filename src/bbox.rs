@@ -97,11 +97,18 @@ impl<'a> Header<'a> {
     /// occurrence of a comment wins, as the spec says for the header.
     fn scan(source: &'a [u8]) -> Self {
         let mut header = Header::default();
-        for line in lines(source).skip(1) {
-            if line.iter().all(u8::is_ascii_whitespace) {
-                continue;
-            }
-            if !line.starts_with(b"%") || line.starts_with(b"%%EndComments") {
+        let mut all = lines(source).peekable();
+        // The `%!` line is the header's first, not a comment to read; a
+        // `-e` snippet often has none.
+        if all.peek().is_some_and(|l| l.starts_with(b"%!")) {
+            all.next();
+        }
+        for line in all {
+            // DSC 3.0: the header ends at `%%EndComments` or at the first
+            // line that is not `%` followed by a printable non-space
+            // character, so a blank line or a `% note` ends it too.
+            let continues = line.len() > 1 && line[0] == b'%' && line[1].is_ascii_graphic();
+            if !continues || line.starts_with(b"%%EndComments") {
                 break;
             }
             header.take(line, false);
@@ -115,11 +122,18 @@ impl<'a> Header<'a> {
     fn scan_trailer(source: &'a [u8]) -> Self {
         let mut header = Header::default();
         let mut in_trailer = false;
+        // A document embedded between `%%BeginDocument` and `%%EndDocument`
+        // has its own trailer, which is not this file's.
+        let mut depth = 0usize;
         for line in lines(source) {
-            if line.starts_with(b"%%Trailer") {
+            if line.starts_with(b"%%BeginDocument") {
+                depth += 1;
+            } else if line.starts_with(b"%%EndDocument") {
+                depth = depth.saturating_sub(1);
+            } else if depth == 0 && line.starts_with(b"%%Trailer") {
                 header = Header::default();
                 in_trailer = true;
-            } else if in_trailer {
+            } else if depth == 0 && in_trailer {
                 header.take(line, true);
             }
         }
@@ -170,10 +184,27 @@ fn parse(value: &[u8]) -> Result<PageBox, &'static str> {
     })
 }
 
-/// `source`'s lines, ending at CR, LF or CRLF (classic Mac EPS files use
-/// CR alone). CRLF yields an empty line between, which every caller skips.
+/// `source`'s lines, each ending at CRLF, CR or LF (classic Mac EPS files
+/// use CR alone).
 fn lines(source: &[u8]) -> impl Iterator<Item = &[u8]> {
-    source.split(|&b| b == b'\n' || b == b'\r')
+    let mut rest = source;
+    std::iter::from_fn(move || {
+        if rest.is_empty() {
+            return None;
+        }
+        let end = rest
+            .iter()
+            .position(|&b| b == b'\n' || b == b'\r')
+            .unwrap_or(rest.len());
+        let line = &rest[..end];
+        let skip = match rest.get(end..end + 2) {
+            Some(b"\r\n") => 2,
+            _ if end < rest.len() => 1,
+            _ => 0,
+        };
+        rest = &rest[end + skip..];
+        Some(line)
+    })
 }
 
 fn trim(value: &[u8]) -> &[u8] {
@@ -250,12 +281,30 @@ mod tests {
         );
         let err = page_box(eps.as_bytes(), false).unwrap_err();
         assert!(err.contains("has no box in the trailer"), "{err}");
+        // Nor is the box in an embedded document's own trailer.
+        let eps = format!(
+            "{EPSF}%%BoundingBox: (atend)\n%%EndComments\n%%BeginDocument: x\n\
+             %%Trailer\n%%BoundingBox: 0 0 9 9\n%%EndDocument\nshowpage\n"
+        );
+        let err = page_box(eps.as_bytes(), false).unwrap_err();
+        assert!(err.contains("has no box in the trailer"), "{err}");
     }
 
     #[test]
     fn the_header_ends_at_code_or_endcomments() {
-        let eps = format!("{EPSF}%%Title: x\n\n%%BoundingBox: 0 0 50 60\n%%BoundingBox: 0 0 1 1\n");
+        let eps = format!("{EPSF}%%Title: x\n%%BoundingBox: 0 0 50 60\n%%BoundingBox: 0 0 1 1\n");
         assert_eq!(page_box(eps.as_bytes(), false), Ok(pb(50, 60, 0.0, 0.0)));
+        // A blank line or a `% note` ends the header (DSC 3.0).
+        for gap in ["\n", "% made by hand\n", "%\n"] {
+            let eps = format!("{EPSF}%%Title: x\n{gap}%%BoundingBox: 0 0 50 60\n");
+            assert_eq!(page_box(eps.as_bytes(), false), Ok(None), "{gap:?}");
+        }
+        // With no `%!` line (a `-e` snippet) the first line is a comment.
+        let snippet = "%%BoundingBox: 10 20 110 70\n0 0 moveto\n";
+        assert_eq!(
+            page_box(snippet.as_bytes(), true),
+            Ok(pb(100, 50, 10.0, 20.0))
+        );
         let eps = format!("{EPSF}%%EndComments\n%%BoundingBox: 0 0 50 60\n");
         assert_eq!(page_box(eps.as_bytes(), false), Ok(None));
         let eps = format!("{EPSF}newpath\n%%BoundingBox: 0 0 50 60\n");

@@ -3213,6 +3213,14 @@ fn render_tools_take_the_page_from_the_bounding_box() {
     assert_eq!(dims(&with_bbox), (400, 300));
     let result = s.tool("render_postscript", json!({ "source": plain }));
     assert_eq!(error_kind(&result), "output_too_large", "{result}");
+    // And a box larger than letter is refused as itself, before any child.
+    let big = eps.replace("0 0 400 300\n0", "0 0 2000 2000\n0");
+    let result = s.tool("render_postscript", json!({ "source": big }));
+    assert_eq!(error_kind(&result), "output_too_large", "{result}");
+    assert_eq!(
+        result["structuredContent"]["error"]["width_px"], 2000,
+        "{result}"
+    );
     // An explicit size wins, and asking for both is refused.
     let sized = s.tool(
         "render_postscript",
