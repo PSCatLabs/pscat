@@ -1010,7 +1010,9 @@ fn split_rows(s: &str) -> Vec<String> {
 
 /// TeX's units of length (TeXbook p. 57), and the length registers a row
 /// break's spacing is commonly written in.
-const TEX_UNITS: [&str; 11] = ["pt", "pc", "in", "bp", "cm", "mm", "dd", "cc", "sp", "em", "ex"];
+const TEX_UNITS: [&str; 11] = [
+    "pt", "pc", "in", "bp", "cm", "mm", "dd", "cc", "sp", "em", "ex",
+];
 const TEX_LENGTHS: [&str; 9] = [
     "baselineskip",
     "normalbaselineskip",
