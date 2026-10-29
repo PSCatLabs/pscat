@@ -8,14 +8,18 @@ description: Render, preview, and debug PostScript with the pscat interpreter â€
 
 `pscat` is a PostScript (Level 2) interpreter: one binary, with its
 PostScript library (`lib/*.ps`) compiled in, so `(lib/artkit.ps) run`
-works from any directory. Check it is installed with `pscat --help`. If
-it is not on `PATH` and the pscat plugin is installed, the plugin's
-session-start note gives its full path. Or run
-`sh "${CLAUDE_PLUGIN_ROOT}/scripts/pscat-mcp.sh" --locate`, which prints
-the directory holding `pscat` and `pscat-mcp`, downloading the plugin's
-pinned release first if needed. The plugin's download is also at
+works from any directory. Check it is installed with `pscat --help`. With
+the pscat plugin installed, `pscat` is normally on `PATH` already: the
+plugin links it into `~/.local/bin` (or `~/bin`) when that directory is on
+`PATH`. If `pscat` is not found, use the plugin's one stable path,
 `~/Library/Caches/pscat/plugin/bin/pscat` (macOS) or
-`~/.cache/pscat/plugin/bin/pscat` (Linux). Without the plugin, install it:
+`~/.cache/pscat/plugin/bin/pscat` (Linux); `pscat-mcp` is beside it. The
+plugin's session-start note names it. If that file does not exist yet, run
+`sh "${CLAUDE_PLUGIN_ROOT}/scripts/pscat-mcp.sh" --locate`: it downloads
+the plugin's pinned release, links it onto `PATH` and prints the `bin/`
+directory. The first use downloads the release (about 14 MB, a few
+seconds), so a pause then is not a hang; later runs make no request.
+Without the plugin, install it:
 a release from <https://github.com/PSCatLabs/pscat/releases>, or
 `cargo install --git https://github.com/PSCatLabs/pscat`
 (installs `pscat` and `pscat-mcp`).

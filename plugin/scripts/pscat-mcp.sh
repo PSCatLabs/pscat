@@ -3,7 +3,8 @@
 # and Codex, installing pscat first if it is missing. No Rust or Node needed.
 #
 #   sh pscat-mcp.sh [pscat-mcp args]   find or install pscat, then exec pscat-mcp
-#   sh pscat-mcp.sh --locate           find or install pscat, print its directory
+#   sh pscat-mcp.sh --locate           find or install pscat, link it onto PATH,
+#                                      print the directory holding pscat
 #   sh pscat-mcp.sh --hook             SessionStart hook: report, never download
 #
 # Lookup, in order: $PSCAT_MCP_BIN, pscat-mcp on PATH, ~/.cargo/bin,
@@ -19,6 +20,19 @@
 # a download made for Claude Code also serves Codex, and the hook can name a
 # path the skills can run. $PSCAT_RELEASE_BASE_URL replaces
 # https://github.com/PSCatLabs/pscat/releases/download (tests use file://).
+#
+# The one stable path is $CACHE/bin/pscat (and pscat-mcp beside it): symlinks
+# that always name the release in use, so the versioned directories stay an
+# implementation detail. --locate, the hook and the skills all say that path.
+#
+# PATH (issue #919): when the cached copy is in use, the launcher also links
+# pscat and pscat-mcp into ~/.local/bin or ~/bin, whichever is already on PATH
+# and writable, so a plain `pscat` works in the agent's shell. It never
+# creates a directory, never touches a system directory, and never overwrites
+# a pscat it did not make (ours: a symlink to $CACHE/bin/<name>, or the
+# marked shim below). Before the first download the hook leaves a small shim
+# as `pscat` that downloads on first use and then replaces itself with the
+# symlink. PSCAT_NO_PATH_LINK=1 turns all of this off.
 #
 # stdout is the MCP stdio channel: everything this script says goes to
 # stderr, except --locate's directory and --hook's JSON.
@@ -106,12 +120,28 @@ try_candidate() {
   FOUND_BIN=$1 # as given: PSCAT_MCP_BIN may name pscat-mcp-0.6.3, say
   FOUND_DIR=$(cd "$(dirname "$1")" && pwd -P)
   FOUND_HOW=$2
+  # Our own link on PATH (see link_on_path): report the stable directory.
+  [ "$(readlink "$1" 2>/dev/null)" = "$CACHE/bin/pscat-mcp" ] && FOUND_DIR=$CACHE/bin
+  return 0
 }
 
 # The cached copy of the pinned release, published by a symlink (see install).
 cached_dir() {
   [ -n "$TAG" ] && [ -n "$TRIPLE" ] && [ -x "$CACHE/$TAG/$TRIPLE/pscat-mcp" ] &&
     printf '%s\n' "$CACHE/$TAG/$TRIPLE"
+}
+
+# publish_bin DIR: make $CACHE/bin/pscat and pscat-mcp symlinks to DIR's. Atomic
+# (tmp link + mv) and a no-op when they already point there.
+publish_bin() {
+  mkdir -p "$CACHE/bin" 2>/dev/null || return 1
+  for b in pscat pscat-mcp; do
+    [ "$(readlink "$CACHE/bin/$b" 2>/dev/null)" = "$1/$b" ] && continue
+    ln -sn "$1/$b" "$CACHE/bin/.$b.$$" 2>/dev/null &&
+      mv -f "$CACHE/bin/.$b.$$" "$CACHE/bin/$b" 2>/dev/null
+    rm -f "$CACHE/bin/.$b.$$"
+  done
+  [ -x "$CACHE/bin/pscat" ] && [ -x "$CACHE/bin/pscat-mcp" ]
 }
 
 # lookup: set FOUND_DIR to a directory holding a usable pscat-mcp (and pscat).
@@ -123,9 +153,10 @@ lookup() {
     try_candidate "$d/pscat-mcp" "$d"
   done
   if [ -z "$FOUND_DIR" ] && d=$(cached_dir); then
-    FOUND_DIR=$d
-    FOUND_BIN=$d/pscat-mcp
+    FOUND_BIN=$d/pscat-mcp # run the real file; people and skills use bin/
     FOUND_HOW=cache
+    # bin/ must name the release just validated, not an earlier one.
+    if publish_bin "$d"; then FOUND_DIR=$CACHE/bin; else FOUND_DIR=$d; fi
   fi
   [ -n "$FOUND_DIR" ]
 }
@@ -261,16 +292,9 @@ install() {
   else
     rm -rf "$CACHE/$TAG/$keep.d"
   fi
-  # Stable names for people and skills: $CACHE/bin/pscat and pscat-mcp.
-  mkdir -p "$CACHE/bin" 2>/dev/null
-  for b in pscat pscat-mcp; do
-    ln -sn "$CACHE/$TAG/$TRIPLE/$b" "$CACHE/bin/.$b.$$" 2>/dev/null &&
-      mv -f "$CACHE/bin/.$b.$$" "$CACHE/bin/$b" 2>/dev/null
-    rm -f "$CACHE/bin/.$b.$$"
-  done
   cleanup
   trap - INT TERM HUP
-  [ -n "$(cached_dir)" ]
+  [ -n "$(cached_dir)" ] # lookup publishes bin/
 }
 
 # ensure: lookup, else install, else (offline) any earlier cached version.
@@ -279,13 +303,133 @@ ensure() {
   [ -n "$OLD_SEEN" ] && say "ignoring $OLD_SEEN: this plugin needs pscat $MIN_VERSION or newer"
   if install && lookup; then return 0; fi
   if [ -x "$CACHE/bin/pscat-mcp" ]; then
-    FOUND_DIR=$(cd "$(dirname "$(readlink "$CACHE/bin/pscat-mcp" 2>/dev/null || echo "$CACHE/bin/pscat-mcp")")" && pwd -P)
-    FOUND_BIN=$FOUND_DIR/pscat-mcp
+    FOUND_DIR=$CACHE/bin
+    FOUND_BIN=$CACHE/bin/pscat-mcp
     FOUND_HOW=cache
-    say "using the previously downloaded pscat in $FOUND_DIR instead"
+    say "using the previously downloaded pscat in $CACHE/bin instead"
     return 0
   fi
   return 1
+}
+
+# --- pscat on PATH (issue #919) ---------------------------------------------------
+SHIM_MARK='# pscat-plugin-shim'
+LINK_DIR=   # the directory pscat was linked into
+LINK_STATE= # on-path | foreign (another pscat is on PATH) | nodir | off
+
+# The first of ~/.local/bin and ~/bin that exists, is writable and is on PATH.
+# Never a system directory (a package manager owns those), never created.
+path_link_dir() {
+  [ -n "${HOME:-}" ] || return 1
+  for cand in "$HOME/.local/bin" "$HOME/bin"; do
+    [ -d "$cand" ] && [ -w "$cand" ] || continue
+    ( set -f; IFS=:
+      for e in $PATH; do [ "${e%/}" = "$cand" ] && exit 0; done
+      exit 1 ) && { printf '%s\n' "$cand"; return 0; }
+  done
+  return 1
+}
+
+# is_ours FILE NAME: FILE is a symlink to $CACHE/bin/NAME, or (pscat only) our shim.
+is_ours() {
+  if [ -L "$1" ]; then
+    [ "$(readlink "$1" 2>/dev/null)" = "$CACHE/bin/$2" ]
+  else
+    [ "$2" = pscat ] && [ -f "$1" ] && [ "$(head -c 256 "$1" 2>/dev/null | sed -n 2p)" = "$SHIM_MARK" ]
+  fi
+}
+
+sq() { printf '%s' "$1" | sed "s/'/'\\\\''/g"; } # for single-quoting in the shim
+
+# The shim stands in for pscat until the release is downloaded: the first run
+# downloads it through this launcher, then link_on_path swaps the shim for a
+# symlink. A shell script, so a pscat started before that keeps working.
+write_shim() { # write_shim FILE
+  {
+    printf '#!/bin/sh\n%s\n' "$SHIM_MARK"
+    printf '# Written by the pscat plugin. It downloads pscat on first use and then\n'
+    printf '# replaces itself with a link. Delete it if you remove the plugin.\n'
+    printf "launcher='%s'\n" "$(sq "$HERE/pscat-mcp.sh")"
+    printf "bin='%s'\n" "$(sq "$CACHE/bin/pscat")"
+    cat <<'SHIM'
+if [ ! -x "$bin" ] && [ -f "$launcher" ]; then
+  sh "$launcher" --locate >/dev/null
+fi
+if [ ! -x "$bin" ]; then
+  echo "pscat: not installed, and the pscat plugin could not download it (is the plugin still installed, and is this computer online?). Install pscat with: cargo install pscat" >&2
+  exit 127
+fi
+exec "$bin" "$@"
+SHIM
+  } > "$1"
+  chmod 755 "$1"
+}
+
+# put_link NAME TARGET: make TARGET ours: a symlink to $CACHE/bin/NAME when the
+# cached copy exists, else (pscat only) the shim. TARGET is absent or ours.
+# A new name is made with one `ln` that fails if the name appeared meanwhile;
+# an existing one of ours is replaced atomically (tmp + mv).
+put_link() {
+  n=$1
+  t=$2
+  tmp=$(dirname "$t")/.$n.$$
+  rm -f "$tmp"
+  if [ -x "$CACHE/bin/$n" ]; then
+    [ "$(readlink "$t" 2>/dev/null)" = "$CACHE/bin/$n" ] && return 0
+    if [ -e "$t" ] || [ -L "$t" ]; then
+      ln -s "$CACHE/bin/$n" "$tmp" 2>/dev/null && mv -f "$tmp" "$t" 2>/dev/null
+    else
+      ln -sn "$CACHE/bin/$n" "$t" 2>/dev/null
+    fi
+  else
+    [ "$n" = pscat ] || return 0
+    write_shim "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
+    if [ -e "$t" ] || [ -L "$t" ]; then
+      if [ -f "$t" ] && [ ! -L "$t" ] && cmp -s "$tmp" "$t"; then rm -f "$tmp"; return 0; fi
+      mv -f "$tmp" "$t" 2>/dev/null
+    else
+      ln "$tmp" "$t" 2>/dev/null
+    fi
+  fi
+  rc=$?
+  rm -f "$tmp"
+  return $rc
+}
+
+# link_on_path: make plain `pscat` and `pscat-mcp` work in a shell. Sets
+# LINK_STATE and LINK_DIR. Silent on stdout.
+link_on_path() {
+  LINK_STATE=
+  LINK_DIR=
+  [ -n "${PSCAT_NO_PATH_LINK:-}" ] && { LINK_STATE=off; return 0; }
+  have=
+  [ -x "$CACHE/bin/pscat" ] && [ -x "$CACHE/bin/pscat-mcp" ] && have=1
+  # Before the download only the shim can be made, and only where one release exists.
+  [ -n "$have" ] || { [ -n "$TRIPLE" ] && [ -n "$TAG" ]; } || return 0
+  dir=$(path_link_dir) || { LINK_STATE=nodir; return 0; }
+  LINK_DIR=$dir
+  for b in pscat pscat-mcp; do
+    [ -z "$have" ] && [ "$b" = pscat-mcp ] && continue
+    target=$dir/$b
+    found=$(command -v "$b" 2>/dev/null)
+    if [ -n "$found" ]; then
+      case "$found" in /*) ;; *) found= ;; esac # a function or alias
+    fi
+    if [ -n "$found" ]; then
+      is_ours "$found" "$b" || continue # someone else's: leave it alone
+      target=$found
+    elif [ -e "$target" ] || [ -L "$target" ]; then
+      is_ours "$target" "$b" || { LINK_STATE=foreign; continue; }
+    fi
+    if put_link "$b" "$target"; then
+      [ "$target" = "$found" ] || say "linked $b into $dir"
+    fi
+  done
+  p=$(command -v pscat 2>/dev/null)
+  if [ -z "$p" ]; then LINK_STATE=nodir
+  elif is_ours "$p" pscat; then LINK_STATE=on-path
+  else LINK_STATE=foreign
+  fi
 }
 
 # --- SessionStart hook -----------------------------------------------------------
@@ -298,7 +442,16 @@ hook() {
     if [ "$FOUND_HOW" = PATH ] && command -v pscat >/dev/null 2>&1; then
       exit 0 # the usual case: nothing to say
     fi
-    ctx="pscat plugin: the pscat command-line tool is not on PATH in this session. Run it by its full path, $FOUND_DIR/pscat (pscat-mcp is beside it)."
+    if [ "$FOUND_HOW" = cache ]; then
+      link_on_path
+      if [ "$LINK_STATE" = on-path ]; then
+        ctx="pscat plugin: pscat is on PATH (linked into $LINK_DIR). If a shell still does not find it, run $FOUND_DIR/pscat (pscat-mcp is beside it)."
+      else
+        ctx="pscat plugin: the pscat command-line tool is not on PATH in this session. Run it by its full path, $FOUND_DIR/pscat (pscat-mcp is beside it)."
+      fi
+    else
+      ctx="pscat plugin: the pscat command-line tool is not on PATH in this session. Run it by its full path, $FOUND_DIR/pscat (pscat-mcp is beside it)."
+    fi
     printf '{"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": %s}}\n' "$(json_str "$ctx")"
     exit 0
   fi
@@ -307,9 +460,14 @@ hook() {
     msg="pscat plugin: pscat / pscat-mcp not found, and there is no prebuilt pscat for $OS $ARCH, so the pscat MCP tools will not start. Install them with: cargo install pscat (or a release from $REPO_URL/releases), then restart your agent."
     ctx=$msg
   else
-    msg="pscat plugin: pscat is not installed yet. The pscat MCP server downloads it (release ${TAG:-?}, about 6 MB, checked against the release's SHA256SUMS) from $REPO_URL the first time it starts, into $CACHE. If the pscat tools do not appear, check the internet connection and restart; or install pscat yourself: cargo install pscat."
+    msg="pscat plugin: pscat is not installed yet. The pscat MCP server downloads it (release ${TAG:-?}, about 14 MB, checked against the release's SHA256SUMS) from $REPO_URL the first time it starts, into $CACHE. If the pscat tools do not appear, check the internet connection and restart; or install pscat yourself: cargo install pscat."
     [ -n "$OLD_SEEN" ] && msg="$msg (Found $OLD_SEEN, older than the $MIN_VERSION this plugin needs.)"
-    ctx="pscat plugin: pscat is not on PATH. To use the pscat command line, run: $launcher  (it downloads pscat if needed and prints the directory holding pscat and pscat-mcp), then run that directory's pscat by its full path."
+    link_on_path
+    if [ "$LINK_STATE" = on-path ]; then
+      ctx="pscat plugin: pscat is not downloaded yet (release ${TAG:-?}, about 14 MB, once). Running pscat in a shell downloads it first (pscat is linked into $LINK_DIR). Or run: $launcher  (downloads it and prints the directory holding pscat). After that the stable path is $CACHE/bin/pscat."
+    else
+      ctx="pscat plugin: pscat is not downloaded yet and is not on PATH. To use the pscat command line, run: $launcher  (downloads release ${TAG:-?}, about 14 MB, once, and prints the directory holding pscat). After that the stable path is $CACHE/bin/pscat."
+    fi
   fi
   printf '{"systemMessage": %s, "hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": %s}}\n' \
     "$(json_str "$msg")" "$(json_str "$ctx")"
@@ -320,6 +478,15 @@ case "${1:-}" in
   --hook) hook ;;
   --locate)
     ensure || exit 1
+    if [ "$FOUND_DIR" = "$CACHE/bin" ]; then
+      link_on_path
+      case "$LINK_STATE" in
+        on-path) say "pscat is on PATH (linked into $LINK_DIR); the stable path is $FOUND_DIR/pscat" ;;
+        foreign) say "another pscat is on PATH and was left alone; the plugin's copy is $FOUND_DIR/pscat" ;;
+        nodir)   say "no writable ~/.local/bin or ~/bin on PATH to link pscat into; run it as $FOUND_DIR/pscat" ;;
+        *)       say "run pscat as $FOUND_DIR/pscat" ;;
+      esac
+    fi
     printf '%s\n' "$FOUND_DIR"
     exit 0 ;;
 esac
@@ -329,5 +496,6 @@ if ! ensure; then
   exit 1
 fi
 [ "$FOUND_HOW" = cache ] || [ "$FOUND_HOW" = PATH ] || say "using $FOUND_BIN"
+[ "$FOUND_HOW" = cache ] && link_on_path
 unset PSCAT_PLUGIN_LAUNCHER
 exec "$FOUND_BIN" "$@"
