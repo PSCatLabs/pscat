@@ -349,6 +349,19 @@ class Launcher(unittest.TestCase):
         self.assertFalse(os.path.lexists(self.bin_in(d, "pscat")))
         self.assertIn("left alone", r.stderr)
 
+    def test_a_pscat_found_through_a_relative_path_entry_is_left_alone(self):
+        rel = self.path("empty/tools")
+        os.makedirs(rel)
+        p = os.path.join(rel, "pscat")
+        with open(p, "w") as f:
+            f.write("#!/bin/sh\n")
+        os.chmod(p, 0o755)
+        d = self.local_bin()
+        # The launcher runs with cwd = empty/, so "tools" is a relative PATH entry.
+        r = self.run_launcher("--locate", env=self.env([d, "tools"]))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse(os.path.lexists(self.bin_in(d, "pscat")), r.stderr)
+
     def test_our_old_link_is_refreshed_and_opt_out_works(self):
         d = self.local_bin()
         env = self.env([d], PSCAT_NO_PATH_LINK="1")

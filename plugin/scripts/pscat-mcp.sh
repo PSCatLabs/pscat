@@ -370,18 +370,21 @@ SHIM
   chmod 755 "$1"
 }
 
-# put_link NAME TARGET: make TARGET ours: a symlink to $CACHE/bin/NAME when the
-# cached copy exists, else (pscat only) the shim. TARGET is absent or ours.
-# A new name is made with one `ln` that fails if the name appeared meanwhile;
-# an existing one of ours is replaced atomically (tmp + mv).
+# put_link NAME TARGET MODE: make TARGET ours: a symlink to $CACHE/bin/NAME when
+# the cached copy exists, else (pscat only) the shim. MODE is `new` if the
+# caller saw TARGET absent, `replace` if it saw it ours. A new name is made
+# with one `ln` that fails if the name appeared meanwhile, so a file another
+# installer just created is never clobbered; one of ours is replaced
+# atomically (tmp + mv).
 put_link() {
   n=$1
   t=$2
+  mode=$3
   tmp=$(dirname "$t")/.$n.$$
   rm -f "$tmp"
   if [ -x "$CACHE/bin/$n" ]; then
     [ "$(readlink "$t" 2>/dev/null)" = "$CACHE/bin/$n" ] && return 0
-    if [ -e "$t" ] || [ -L "$t" ]; then
+    if [ "$mode" = replace ]; then
       ln -s "$CACHE/bin/$n" "$tmp" 2>/dev/null && mv -f "$tmp" "$t" 2>/dev/null
     else
       ln -sn "$CACHE/bin/$n" "$t" 2>/dev/null
@@ -389,7 +392,7 @@ put_link() {
   else
     [ "$n" = pscat ] || return 0
     write_shim "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
-    if [ -e "$t" ] || [ -L "$t" ]; then
+    if [ "$mode" = replace ]; then
       if [ -f "$t" ] && [ ! -L "$t" ] && cmp -s "$tmp" "$t"; then rm -f "$tmp"; return 0; fi
       mv -f "$tmp" "$t" 2>/dev/null
     else
@@ -416,17 +419,22 @@ link_on_path() {
   for b in pscat pscat-mcp; do
     [ -z "$have" ] && [ "$b" = pscat-mcp ] && continue
     target=$dir/$b
+    mode=new
     found=$(command -v "$b" 2>/dev/null)
-    if [ -n "$found" ]; then
-      case "$found" in /*) ;; *) found= ;; esac # a function or alias
-    fi
+    case "$found" in
+      /*) ;;
+      */*) found=$PWD/$found ;; # found through a relative PATH entry
+      *) found= ;;              # a function, alias or builtin, or nothing
+    esac
     if [ -n "$found" ]; then
       is_ours "$found" "$b" || continue # someone else's: leave it alone
       target=$found
+      mode=replace
     elif [ -e "$target" ] || [ -L "$target" ]; then
       is_ours "$target" "$b" || { LINK_STATE=foreign; continue; }
+      mode=replace
     fi
-    if put_link "$b" "$target"; then
+    if put_link "$b" "$target" "$mode"; then
       [ "$target" = "$found" ] || say "linked $b into $dir"
     fi
   done
