@@ -1483,7 +1483,16 @@ renders eight examples in both and compares block-downsampled output).
   file names don't matter), verifies it, and publishes it into
   `~/Library/Caches/pscat/plugin` or `~/.cache/pscat/plugin` with one
   `ln -sn` (atomic; a mkdir lock only avoids duplicate downloads). stdout
-  is the MCP channel: it logs only to stderr. The SessionStart hook is the
+  is the MCP channel: it logs only to stderr. **Paths (#919, #920):**
+  `$CACHE/bin/{pscat,pscat-mcp}` are the one stable path (symlinks the
+  launcher re-points to the release in use on every lookup); `--locate`,
+  the hook and the skills all name them, never the versioned directory. The
+  launcher also links both into `~/.local/bin` or `~/bin` (only if already on
+  PATH and writable; never a system dir, never overwriting a pscat that is
+  not a symlink to `$CACHE/bin/<name>` or the marked shim). Before the first
+  download the hook leaves a shim as `pscat` that downloads on first use,
+  then swaps itself for the symlink. `PSCAT_NO_PATH_LINK=1` opts out
+  (`notes/919-plugin-pscat-on-path.md`). The SessionStart hook is the
   same script with `--hook` (it never downloads), which replaced
   `hooks/check-pscat.sh` (#684); both are held for portal review now
   ("Scripts the validator couldn't follow"). **Never add a top-level

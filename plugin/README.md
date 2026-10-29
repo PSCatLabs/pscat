@@ -35,7 +35,7 @@ binaries; its MCP server entry runs a small launcher,
    if `pscat-mcp --version` is at least the version the plugin pins.
 2. **Otherwise downloads it once.** It fetches the archive for your platform
    (macOS arm64 or x86_64, Linux x86_64 or aarch64) from the GitHub release
-   named in `pscat-release`, about 6 MB, from
+   named in `pscat-release`, about 14 MB, from
    <https://github.com/PSCatLabs/pscat/releases>. It checks the archive
    against that release's `SHA256SUMS` and refuses it on a mismatch. Then
    it unpacks it into a per-user cache and runs it from there. It needs only
@@ -47,7 +47,23 @@ binaries; its MCP server entry runs a small launcher,
 The cache is `~/Library/Caches/pscat/plugin` on macOS and
 `~/.cache/pscat/plugin` on Linux (or `$XDG_CACHE_HOME/pscat/plugin`; set
 `PSCAT_CACHE_DIR` to move it). The `pscat` command-line tool is there too,
-at `bin/pscat`. Delete the directory to remove the download.
+at `bin/pscat`, the one stable path: `bin/` always names the release in
+use, whichever version is pinned. Delete the directory to remove the
+download.
+
+**`pscat` on your PATH.** So that a plain `pscat` works in an agent's shell,
+the launcher links `pscat` and `pscat-mcp` into `~/.local/bin` or `~/bin`,
+whichever is already on your `PATH` and writable (the first that is). It
+creates no directory, never touches a system directory such as
+`/usr/local/bin`, and never overwrites a `pscat` it did not make: if one
+is already on your `PATH` it leaves everything alone. Before the first
+download the link is a small shell script that downloads the release when
+you first run `pscat`, then replaces itself with a symlink. If neither
+directory is on `PATH`, nothing is linked and the hook tells Claude the
+`bin/pscat` path instead. Set `PSCAT_NO_PATH_LINK=1` to turn this off. To
+remove the links after uninstalling the plugin, delete `pscat` and
+`pscat-mcp` from that directory (they are symlinks into the cache, or the
+shell script, whose second line is `# pscat-plugin-shim`).
 
 The first start downloads before the server answers, which takes a few
 seconds on a normal connection. If your agent gives up first and lists
@@ -65,7 +81,8 @@ or put the `pscat` and `pscat-mcp` from a release archive on your
 `PATH`. A SessionStart hook (`hooks/hooks.json`, which runs the same launcher
 with `--hook`; both Claude Code and Codex read it) never downloads. When pscat
 isn't on your `PATH` it tells you whether the server will download it, and
-tells Claude the full path of the `pscat` command-line tool.
+tells Claude the stable path of the `pscat` command-line tool. When the
+cached copy is in use it also makes the `PATH` links above.
 
 ## Install in the Claude desktop app (Cowork)
 
@@ -79,6 +96,13 @@ Cowork starts the plugin's MCP server on your computer, so the launcher
 above downloads pscat on the first task (a few seconds). The plugin's
 skills also work in chat, but chat doesn't start local MCP servers
 (<https://claude.com/docs/plugins/platform-support>).
+
+In a session that runs in the cloud (Cowork or Claude Code on the web) the
+skills and the session-start hook load, but the platform table lists a local
+MCP server as loading in Cowork only "when the Cowork session runs on your
+computer", and the v0.7.0-rc.1 trial saw no `pscat-mcp` tools there. The
+skills then use the command line, which is why the launcher puts `pscat` on
+`PATH` (`notes/919-plugin-pscat-on-path.md`).
 
 ## Install in Claude Code
 
@@ -179,6 +203,9 @@ GitHub's download host), once. The other exception is
 `pscat fonts install`, which you run yourself to download optional font
 packs from the same releases. The plugin collects nothing and sends
 nothing anywhere.
+
+The one thing the plugin writes outside its cache is the `pscat` and
+`pscat-mcp` links described above, in `~/.local/bin` or `~/bin`.
 
 Each MCP call is limited to 60 s by default, a default and not a fixed
 limit: a long render needs the server's `--timeout` (up to 86400), a raised
