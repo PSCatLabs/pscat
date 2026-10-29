@@ -9,8 +9,8 @@
 //! advance invisibly rather than erroring.
 
 use super::{
-    Args, Confine, Failure, Format, library, max_pixels, measure, number, page_dim, ps_escape,
-    render, rgb, take_limit_flag,
+    Args, Confine, Failure, Format, check_output_name, library, max_pixels, measure, number,
+    page_dim, ps_escape, render, rgb, take_limit_flag,
 };
 
 const USAGE: &str = r#"usage: pscat handwrite [options] "text to write"
@@ -79,6 +79,9 @@ pub(super) fn run(args: Args) -> Result<(), Failure> {
         println!("{USAGE}");
         return Err(Failure::Done);
     };
+    // Before the library is read or anything measured: `-o` is always a PNG,
+    // so a name for another image or document type is refused (#938).
+    check_output_name("-o", &opts.out, Format::Png).map_err(usage)?;
     if let Some(parent) = opts.exit_with_parent {
         crate::exit_with_parent(parent);
     }

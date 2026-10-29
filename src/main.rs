@@ -2085,6 +2085,17 @@ fn parse_args() -> Result<Options, String> {
             }
         }
     }
+    // Before any mode runs or writes: a name for another known image or
+    // document type is refused, not written with the wrong bytes (#938).
+    for (flag, path, format) in [
+        ("--png", &options.png, subcmd::Format::Png),
+        ("--svg", &options.svg, subcmd::Format::Svg),
+        ("--pdf", &options.pdf, subcmd::Format::Pdf),
+    ] {
+        if let Some(path) = path {
+            subcmd::check_output_name(flag, path, format)?;
+        }
+    }
     Ok(options)
 }
 

@@ -62,7 +62,13 @@ pscat photo-etch photo.jpg -o etching.png      # or .svg / .pdf
 pscat photo-etch --spacing 4 --angle 30 photo.jpg -o etch.svg
 ```
 
+JPEG input only. A PNG, GIF or other format exits 1 with a message naming it;
+convert the photo to JPEG first.
+
 ## Watch it draw (needs a display)
+
+The plugin's Linux binary is headless, so none of this works there:
+render with `--png out.png` instead, or `cargo install pscat`.
 
 ```sh
 pscat file.ps                          # live window; --speed N paces it

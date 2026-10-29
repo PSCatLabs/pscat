@@ -354,7 +354,9 @@ gh attestation verify pscat-<version>-<target>.tar.gz --repo PSCatLabs/pscat
 The Linux archives are fully static (musl), so they run on any distribution,
 but they are **headless**: they render to PNG, SVG and PDF and have no live
 window, because a static binary cannot load the system's X11/Wayland
-libraries. For the window on Linux, build from source.
+libraries. For the window on Linux, build from source. In a headless build
+`pscat file.ps`, `-i` and `--spool` print an error that leads with the
+alternative, `pscat --png out.png file.ps`.
 
 `lib/` resolves automatically as long as it stays next to the `pscat` binary.
 That is the point of the bundle layout. The libraries (`lib/artkit.ps` and the
