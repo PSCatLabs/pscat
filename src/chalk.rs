@@ -973,7 +973,7 @@ fn split_rows(s: &str) -> Vec<String> {
                         let k = j + s[j..].len() - s[j..].trim_start().len();
                         if b.get(k) == Some(&b'[')
                             && let Some(close) = s[k..].find(']')
-                            && is_tex_length(&s[k + 1..k + close])
+                            && is_tex_glue(&s[k + 1..k + close])
                         {
                             j = k + close + 1;
                         }
@@ -1047,6 +1047,32 @@ fn is_tex_length(t: &str) -> bool {
     let unit = rest.to_ascii_lowercase();
     let unit = unit.strip_prefix("true").unwrap_or(&unit).trim_start();
     has_num && TEX_UNITS.contains(&unit.trim_end())
+}
+
+/// Whether `t` is a length with optional `plus` and `minus` parts
+/// (`2pt plus 1pt minus 0.5pt`, `0pt plus 1fil`), TeX's glue.
+fn is_tex_glue(t: &str) -> bool {
+    let lower = t.to_ascii_lowercase();
+    let cut = |key: &str| lower.find(key).unwrap_or(lower.len());
+    let (plus, minus) = (cut("plus"), cut("minus"));
+    let stretch = |from: usize, key: &str, to: usize| {
+        from == lower.len() || from > to || {
+            let part = &lower[from + key.len()..to];
+            is_tex_length(part) || is_fil(part)
+        }
+    };
+    is_tex_length(&lower[..plus.min(minus)])
+        && (plus == lower.len() || plus < minus)
+        && stretch(plus, "plus", minus)
+        && stretch(minus, "minus", lower.len())
+}
+
+/// `1fil`, `-2 fill`, `fill`: TeX's infinite stretch (lowercase input).
+fn is_fil(t: &str) -> bool {
+    let t = t.trim();
+    let t = t.strip_prefix(['+', '-']).unwrap_or(t);
+    let t = t.trim_start_matches(|c: char| c.is_ascii_digit() || c == '.' || c == ',');
+    matches!(t.trim(), "fil" | "fill" | "filll")
 }
 
 /// A PostScript string literal holding `bytes`: `\`, `(` and `)` escaped,
@@ -1507,6 +1533,11 @@ mod tests {
         assert_eq!(l(r"a \\*[ -1.5 em ] b \\ [3,5mm] c"), ["a", "b", "c"]);
         assert_eq!(l(r"a \\[0.5\baselineskip] b \\[\jot] c"), ["a", "b", "c"]);
         assert_eq!(l(r"a \\[2truept] b"), ["a", "b"]);
+        assert_eq!(
+            l(r"a \\[2pt plus 1pt minus .5pt] b \\[0pt plus 1fil] c"),
+            ["a", "b", "c"]
+        );
+        assert_eq!(l(r"a \\[2pt plus x] b"), ["a", "[2pt plus x] b"]);
         // inside display delimiters too
         assert_eq!(l(r"\[ a \\ [x,y] \]"), ["a", "[x,y]"]);
         assert_eq!(

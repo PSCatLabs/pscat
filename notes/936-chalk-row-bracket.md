@@ -9,7 +9,8 @@ mechanics, and the content vanished with no error.
   as a length: an optional sign, a number (`.` or `,` decimal) and one of TeX's
   units (`pt pc in bp cm mm dd cc sp em ex`, any case, `true` allowed), or an
   optional factor and a known length register (`\baselineskip`, `\jot`,
-  `\smallskipamount` ...). Everything else, `[x,y]`, `[1]` and `[\pi]` among
+  `\smallskipamount` ...), with optional `plus` and `minus` parts (TeX glue:
+  `2pt plus 1pt minus .5pt`, `0pt plus 1fil`). Everything else, `[x,y]`, `[1]` and `[\pi]` among
   them, stays as the next row's first characters.
 - No error. LaTeX stops with "Illegal unit of measure" on `\\ [x,y]`; drawing
   the intended math is friendlier, and no real spacing option is lost.
