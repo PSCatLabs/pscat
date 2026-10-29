@@ -19,7 +19,9 @@ with `unsupported LaTeX command`.
   load. Each stroke is written twice, the second 32 units right and 16 down,
   closer than a board's chalk is wide, so the pair merges into one heavier
   line. A first try at a pen-width apart read as hollow outlines next to
-  `\mathbb`. Greek and operators are unchanged, as in TeX.
+  `\mathbb`. Greek and operators are unchanged, as in TeX. The board hand's
+  letters (the curly x, so a bold x never reads as ×, and y z t n) are
+  derived too, and `\mathbf` applies the hand before the bold.
 - **`\mathbb{...}`**: `/A.bb` ... `/Z.bb`. A hand doubles a capital's stem (or
   stands a short upright in a round letter's bowl: C G O Q) about a sixth of
   an em inside it. At a pen-width and a half (the first try) ℕ ℤ ℚ ℂ read
@@ -34,7 +36,8 @@ with `unsupported LaTeX command`.
   as a bare `\max`). The alphabet is mathkit's `mkFont`, reset by
   `mkparsetop`, so a formula that stops inside `\mathbb{` never leaves the
   next one in blackboard bold (tests/mathkit.rs pins it; the test fails with
-  the reset removed).
+  the reset removed, and so does the `errors-leave-the-stacks-as-they-were`
+  selftest, which also has the new refusals as `mustguard` lines).
 - `top` and `bot` are new command names, so mathkit's bare-word check would
   have refused `x_{top}`. They are exempt: `(\top)` and `(\bot)` in a
   PostScript string lose a tab or a backspace, which the control-character

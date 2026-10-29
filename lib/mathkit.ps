@@ -684,9 +684,11 @@
   } if
   mkadv
   1 string dup 0 4 -1 roll put cvn
-  mkFont null ne { mkfontname } {
+  % the board hand's x (never ×) and friends, bold too
+  mkFont null eq mkFont (.bf) eq or {
     mkHand { mkhand 1 index known { mkhand exch get } if } if
-  } ifelse
+  } if
+  mkFont null ne { mkfontname } if
   /ord mksymatom
 } bind def
 
@@ -2593,6 +2595,12 @@
 %   { (x_{max}) 0 0 << >> mkpath } /mk-bare-word-needs-a-backslash:max
 %   (the letters of an operator name) mustguard
 %   { (x_{\\text{max}} + \\$) 0 0 << >> mkpath } /mk-unsupported-command:\$ (\$) mustguard
+%   { (\\mathbb{x}) 0 0 << >> mkpath } /mk-mathbb-takes-capital-letters:x
+%   (a lowercase letter in blackboard bold) mustguard
+%   { (\\mathcal{2}) 0 0 << >> mkpath } /mk-mathcal-takes-capital-letters:2
+%   (a digit in calligraphic) mustguard
+%   { (\\frac{\\mathbb{R x}}{2}) 0 0 << >> mkpath } /mk-mathbb-takes-capital-letters:x
+%   (a lowercase letter in blackboard bold, nested) mustguard
 %%EndSelfTest
 %
 %%SelfTest: errors-leave-the-stacks-as-they-were
@@ -2618,6 +2626,14 @@
 %   (an error inside a substack row is raised) mustbe
 %   /mkt-sentinel eq (and cuts the operand stack back past its rows) mustbe
 %   countdictstack mkt-d0 eq (and unwinds the dictionary stack) mustbe
+%   /mkt-xw (x + 1) << /Seed 3 >> mkmetrics /Width get def
+%   /mkt-sentinel
+%   { (\\frac{\\mathbf{\\mathbb{R x}}}{2}) 0 0 << >> mkpath } stopped
+%   (an error inside nested alphabets is raised) mustbe
+%   /mkt-sentinel eq (and cuts the operand stack back past the saved alphabets) mustbe
+%   countdictstack mkt-d0 eq (and unwinds the dictionary stack) mustbe
+%   (x + 1) << /Seed 3 >> mkmetrics /Width get mkt-xw eq
+%   (and the next formula is written in no alphabet) mustbe
 %   mkt-ctm-same (and keeps the CTM) mustbe
 %   /mkt-sentinel
 %   [ (a) (b) ] 0 0 << /Ink { pop newpath } >> mkalign
