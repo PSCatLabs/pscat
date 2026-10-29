@@ -29,7 +29,8 @@ and the toolkit.
    `pscat piece.ps --sweep-seed 1:12 --contact-sheet grid.png` compares
    twelve seeds in one run. To compare different programs, or one at
    several sizes (a 48 px icon beside its 512 px original), with labels:
-   `pscat sheet`, or `review_sheet` over MCP (see the `pscat` skill). A seed
+   `pscat sheet`, or `review_sheet` over MCP (see the `pscat` skill's
+   `references/sheets.md`). A seed
    sweep with `seed=7` under each cell, wrapped at a width you choose:
    `pscat sheet --sweep-seed 1:12 --cols 4 --page WxH --dpi 36 piece.ps`.
 4. Optional, if Ghostscript is installed: `gs` is the behavioural
@@ -127,7 +128,8 @@ showpage
 Render it with `pscat --page 400x400 --png cloud.png cloud.ps`, and add
 `--bands 4` to split the rows (about twice as fast here, same bytes). `--bands`
 works over MCP too: `render_postscript` and `start_render` take `bands`, and a
-long render goes through `start_render` (see the `pscat` skill). An older pscat has
+long render goes through `start_render` (see the `pscat` skill's
+`references/mcp.md`). An older pscat has
 no noise operators: probe `systemdict /fbm2 known`, and fall back to artkit's
 `noise2` (or update pscat). For Ghostscript, `lib/noiseref.ps` has the same
 noise as `nrfbm2` and friends. Worked example: `gallery/basin_and_range.ps`;

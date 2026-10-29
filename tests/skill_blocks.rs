@@ -202,10 +202,12 @@ fn every_skill_postscript_block_runs_on_a_bare_install() {
         blocks.extend(blocks_of(&rel, &text));
     }
     // The starter sketch and the pscat skill's examples must be in the run,
-    // so renaming a fence cannot quietly empty the guard.
+    // so renaming a fence cannot quietly empty the guard. The pscat skill's
+    // advanced sections live in `references/` (#922), which this test reads
+    // too, so its runnable example is named by its reference file.
     for must in [
         "plugin/skills/psart/SKILL.md",
-        "plugin/skills/pscat/SKILL.md",
+        "plugin/skills/pscat/references/extensions.md",
     ] {
         assert!(
             blocks.iter().any(|b| b.file == must),
@@ -245,6 +247,25 @@ fn every_skill_postscript_block_runs_on_a_bare_install() {
         blocks.len(),
         failures.join("\n")
     );
+}
+
+/// The pscat skill keeps only the common path in `SKILL.md` and links each
+/// advanced section's reference file (#922). A reference file nothing links
+/// to is never read, so its examples would be tested but unreachable.
+#[test]
+fn every_pscat_reference_file_is_linked_from_its_skill() {
+    let skill_dir = skills_dir().join("pscat");
+    let skill = std::fs::read_to_string(skill_dir.join("SKILL.md")).unwrap();
+    let mut refs = Vec::new();
+    markdown_under(&skill_dir.join("references"), &mut refs);
+    assert!(refs.len() >= 5, "pscat references: {refs:?}");
+    for r in refs {
+        let name = r.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(
+            skill.contains(&format!("(references/{name})")),
+            "plugin/skills/pscat/SKILL.md does not link references/{name}"
+        );
+    }
 }
 
 #[test]
