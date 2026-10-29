@@ -41,6 +41,9 @@ struct Options {
     page_origin: (f32, f32),
     /// Where `page` came from: `--page`, a bounding box, or the default.
     page_source: PageSizeSource,
+    /// `--max-pixels N` (#909): the most device pixels the page may have,
+    /// the first one and any the program's `setpagedevice` asks for.
+    max_pixels: Option<u64>,
     /// Device resolution; 72 means one pixel per point.
     dpi: f32,
     /// Write the page(s) as SVG (implies headless).
@@ -157,6 +160,7 @@ impl Options {
             bbox: false,
             page_origin: (0.0, 0.0),
             page_source: PageSizeSource::Default,
+            max_pixels: None,
             dpi: 72.0,
             svg: None,
             pdf: None,
@@ -213,14 +217,36 @@ impl Options {
     }
 
     /// A fresh interpreter on this run's page: its size at `--dpi`, the
-    /// bounding box's origin, and where the size came from. `None` when the
-    /// page is too large at this dpi.
-    fn new_interp(&self) -> Option<Interp> {
-        let mut interp = Interp::with_page_scaled(self.page.0, self.page.1, self.dpi / 72.0)?;
+    /// bounding box's origin, where the size came from, and the
+    /// `--max-pixels` cap for any page `setpagedevice` makes (#909). An
+    /// error when the page is too large at this dpi or over the cap.
+    fn new_interp(&self) -> Result<Interp, String> {
+        let (w, h) = self.page;
+        let scale = self.dpi / 72.0;
+        self.check_pixel_cap()?;
+        let mut interp = Interp::with_page_scaled(w, h, scale)
+            .ok_or_else(|| format!("unusable page size {w}x{h}"))?;
         let gfx = interp.gfx_mut();
         gfx.set_page_origin(self.page_origin.0, self.page_origin.1);
         gfx.set_page_size_source(self.page_source);
-        Some(interp)
+        interp.set_max_page_pixels(self.max_pixels);
+        Ok(interp)
+    }
+
+    /// `--max-pixels` against the first page, before any canvas (an
+    /// interpreter or a sizing probe) is made: `with_page_scaled`'s
+    /// rounding, as the MCP server repeats it.
+    fn check_pixel_cap(&self) -> Result<(), String> {
+        let Some(max) = self.max_pixels else {
+            return Ok(());
+        };
+        let scale = self.dpi / 72.0;
+        let px = |pt: u32| ((pt as f32 * scale).round() as u64).max(1);
+        let (pw, ph) = (px(self.page.0), px(self.page.1));
+        if pw.saturating_mul(ph) > max {
+            return Err(pscat::limits::pixel_cap_message(pw, ph, max));
+        }
+        Ok(())
     }
 
     /// Put `--max-steps`/`--max-time`/`--max-memory`, `--allow-write` and
@@ -390,6 +416,11 @@ fn main() -> ExitCode {
         eprintln!("pscat: --bbox doesn't combine with --page/--spool/--interactive");
         return ExitCode::FAILURE;
     }
+    // A spool job's canvas is made per job by the window; it takes no cap.
+    if options.max_pixels.is_some() && options.spool.is_some() {
+        eprintln!("pscat: --max-pixels doesn't combine with --spool");
+        return ExitCode::FAILURE;
+    }
     if options.bbox && options.file.is_none() && options.eval.is_none() {
         eprintln!("pscat: --bbox needs a file, - or -e");
         return ExitCode::FAILURE;
@@ -528,12 +559,12 @@ fn main() -> ExitCode {
     if let Some(source) = &source {
         options.resolve_page(source);
     }
-    let Some(mut interp) = options.new_interp() else {
-        eprintln!(
-            "pscat: unusable page size {}x{}",
-            options.page.0, options.page.1
-        );
-        return ExitCode::FAILURE;
+    let mut interp = match options.new_interp() {
+        Ok(interp) => interp,
+        Err(msg) => {
+            eprintln!("pscat: {msg}");
+            return ExitCode::FAILURE;
+        }
     };
     if let Err(msg) = options.apply_limits(&mut interp) {
         eprintln!("pscat: {msg}");
@@ -1256,62 +1287,67 @@ fn run_sweep(options: &Options, source: &[u8]) -> ExitCode {
         SweepAxis::Param(_, v) => v.len(),
     };
 
-    // Every frame renders at this same pixel size (a probe Interp,
-    // not a duplicated copy of with_page_scaled's point->pixel
-    // formula) -- needed up front to size the contact sheet before
-    // any frame actually runs.
-    let Some(probe) = Interp::with_page_scaled(options.page.0, options.page.1, options.dpi / 72.0)
-    else {
-        eprintln!(
-            "pscat: unusable page size {}x{}",
-            options.page.0, options.page.1
-        );
-        return ExitCode::FAILURE;
-    };
-    let (cell_w, cell_h) = (probe.gfx().pixmap.width(), probe.gfx().pixmap.height());
-    drop(probe);
-
-    let mut sheet = match &options.contact_sheet {
+    let grid = match &options.contact_sheet {
         None => None,
-        Some(_) => {
-            let (cols, rows) = match options.grid {
-                Some((c, r)) => {
-                    if (c as usize) * (r as usize) < n {
-                        eprintln!(
-                            "pscat: --grid {c}x{r} has only {} cells for {n} frames",
-                            c as usize * r as usize
-                        );
-                        return ExitCode::FAILURE;
-                    }
-                    (c, r)
-                }
-                None => {
-                    let cols = pscat::fmath::sqrt(n as f64).ceil() as u32;
-                    (cols, (n as u32).div_ceil(cols))
-                }
-            };
-            match pscat::contact_sheet::new_sheet(
-                cols,
-                rows,
-                cell_w,
-                cell_h,
-                pscat::contact_sheet::GAP,
-            ) {
-                Ok(mut s) => {
-                    // Gaps and unused cells stay transparent too, matching
-                    // the transparent frames blitted into them.
-                    if options.transparent {
-                        s.fill(tiny_skia::Color::TRANSPARENT);
-                    }
-                    Some((s, cols))
-                }
-                Err(msg) => {
-                    eprintln!("pscat: {msg}");
+        Some(_) => match options.grid {
+            Some((c, r)) => {
+                if (c as usize) * (r as usize) < n {
+                    eprintln!(
+                        "pscat: --grid {c}x{r} has only {} cells for {n} frames",
+                        c as usize * r as usize
+                    );
                     return ExitCode::FAILURE;
                 }
+                Some((c, r))
+            }
+            None => {
+                let cols = pscat::fmath::sqrt(n as f64).ceil() as u32;
+                Some((cols, (n as u32).div_ceil(cols)))
+            }
+        },
+    };
+    // The contact sheet's cells are the page's size, made (and so checked)
+    // before any frame renders. The program's `setpagedevice` can size the
+    // page (#909): then the sheet is made again for the first frame's size.
+    let new_sheet = |(cols, rows): (u32, u32), (w, h): (u32, u32)| {
+        pscat::contact_sheet::new_sheet(cols, rows, w, h, pscat::contact_sheet::GAP).map(|mut s| {
+            // Gaps and unused cells stay transparent too, matching the
+            // transparent frames blitted into them.
+            if options.transparent {
+                s.fill(tiny_skia::Color::TRANSPARENT);
+            }
+            (s, (w, h))
+        })
+    };
+    let mut sheet: Option<(tiny_skia::Pixmap, (u32, u32))> = None;
+    // Only an explicit page is known before the frames run; any other page
+    // the program may resize, so its sheet waits for the first frame.
+    if let Some(grid) = grid
+        && options.page_source == PageSizeSource::Explicit
+    {
+        if let Err(msg) = options.check_pixel_cap() {
+            eprintln!("pscat: {msg}");
+            return ExitCode::FAILURE;
+        }
+        let Some(probe) =
+            Interp::with_page_scaled(options.page.0, options.page.1, options.dpi / 72.0)
+        else {
+            eprintln!(
+                "pscat: unusable page size {}x{}",
+                options.page.0, options.page.1
+            );
+            return ExitCode::FAILURE;
+        };
+        let cell = (probe.gfx().pixmap.width(), probe.gfx().pixmap.height());
+        drop(probe);
+        match new_sheet(grid, cell) {
+            Ok(s) => sheet = Some(s),
+            Err(msg) => {
+                eprintln!("pscat: {msg}");
+                return ExitCode::FAILURE;
             }
         }
-    };
+    }
 
     let mut any_failed = false;
     let mut seed_ever_fired = false;
@@ -1322,9 +1358,7 @@ fn run_sweep(options: &Options, source: &[u8]) -> ExitCode {
             SweepAxis::Param(name, values) => format!("{name}={}", format_sweep_value(values[i])),
         };
         let frame = run_on_fresh_thread(|| -> Result<SweepFrame, String> {
-            let mut interp = options.new_interp().ok_or_else(|| {
-                format!("unusable page size {}x{}", options.page.0, options.page.1)
-            })?;
+            let mut interp = options.new_interp()?;
             options.apply_limits(&mut interp)?;
             if options.transparent {
                 interp.gfx_mut().set_transparent_background();
@@ -1419,8 +1453,33 @@ fn run_sweep(options: &Options, source: &[u8]) -> ExitCode {
             }
             None => println!("pscat: sweep: {}/{n} {label}{status}", i + 1),
         }
-        if let Some((sheet, cols)) = sheet.as_mut() {
-            pscat::contact_sheet::blit_cell(sheet, *cols, pscat::contact_sheet::GAP, i, &page);
+        if let Some((cols, rows)) = grid {
+            let frame = (page.width(), page.height());
+            if sheet.is_none() || (i == 0 && sheet.as_ref().is_some_and(|(_, c)| *c != frame)) {
+                drop(sheet.take());
+                match new_sheet((cols, rows), frame) {
+                    Ok(s) => sheet = Some(s),
+                    Err(msg) => {
+                        eprintln!("pscat: {msg}");
+                        return ExitCode::FAILURE;
+                    }
+                }
+            }
+            if let Some((sheet, cell)) = sheet.as_mut() {
+                if (page.width(), page.height()) != *cell {
+                    eprintln!(
+                        "pscat: sweep: frame {}/{n} is {}x{} pixels but the contact sheet's \
+                         cells are {}x{}; every frame must draw the same page size",
+                        i + 1,
+                        page.width(),
+                        page.height(),
+                        cell.0,
+                        cell.1
+                    );
+                    return ExitCode::FAILURE;
+                }
+                pscat::contact_sheet::blit_cell(sheet, cols, pscat::contact_sheet::GAP, i, &page);
+            }
         }
     }
 
@@ -1876,6 +1935,15 @@ fn parse_args() -> Result<Options, String> {
                     .ok_or_else(|| format!("missing value after {flag}"))?;
                 limit_flag(&mut options.limits, flag, &n)?;
             }
+            "--max-pixels" => {
+                let n = args.next().ok_or("missing value after --max-pixels")?;
+                let max: u64 = n.parse().map_err(|_| {
+                    format!(
+                        "invalid --max-pixels value: {n} (expected a whole number; 0 = no limit)"
+                    )
+                })?;
+                options.max_pixels = (max > 0).then_some(max);
+            }
             "--max-write-bytes" => {
                 let n = args.next().ok_or("missing value after --max-write-bytes")?;
                 let bytes = parse_byte_count(&n).ok_or_else(|| {
@@ -2071,6 +2139,8 @@ fn print_usage() {
     println!("      --max-steps N   stop a program after N interpreter steps (0 = no limit).");
     println!("                      Reading a whole file (`file`, `run`) charges one step per KiB");
     println!("      --max-time SECS stop a program after SECS of wall-clock time (0 = no limit)");
+    println!("      --max-pixels N  refuse a page of more than N device pixels, the first one");
+    println!("                      or one the program's setpagedevice asks for (0 = no limit)");
     println!("      --max-memory MIB  stop a program that grows the heap by more than MIB");
     println!("                      (0 = no limit). A stopped run exits non-zero with");
     println!(

@@ -3284,3 +3284,90 @@ fn eval_keeps_the_letter_page_for_an_epsf_source() {
         "{result}"
     );
 }
+
+/// #909: the issue's repro, a `setpagedevice /PageSize` preamble, renders
+/// with and without width/height, through render_postscript, start_render
+/// and bands; a page the program asks for over `--max-pixels` is
+/// `output_too_large`, checked in the child.
+#[test]
+fn render_tools_honour_a_page_size_preamble() {
+    let mut s = Server::start_in(
+        &common::scratch_dir("mcp-pagedevice"),
+        &["--max-pixels", "600000"],
+    );
+    initialized(&mut s);
+    let source = "%!PS\n<< /PageSize [640 400] >> setpagedevice\n1 0 0 setrgbcolor\n\
+                  20 20 100 100 rectfill\nshowpage";
+    let page = |result: &Value| {
+        let png = sheet_png(result);
+        tiny_skia::Pixmap::decode_png(&png).expect("decode")
+    };
+    let red_square = |pm: &tiny_skia::Pixmap| {
+        let p = pm.pixel(70, 330).expect("in bounds");
+        let w = pm.pixel(300, 200).expect("in bounds");
+        (p.red(), p.green(), p.blue()) == (255, 0, 0)
+            && (w.red(), w.green(), w.blue()) == (255, 255, 255)
+    };
+    // The issue's call: width/height agree with the preamble.
+    let sized = s.tool(
+        "render_postscript",
+        json!({ "source": source, "width": 640, "height": 400, "dpi": 72 }),
+    );
+    assert_eq!(sized["isError"], false, "{sized}");
+    let pm = page(&sized);
+    assert_eq!((pm.width(), pm.height()), (640, 400));
+    assert!(red_square(&pm), "{sized}");
+    assert!(
+        !texts(&sized)
+            .iter()
+            .any(|t| t.contains("Error") || t.starts_with("Lint")),
+        "{sized}"
+    );
+    // No width/height: the preamble sizes the page.
+    let direct = s.tool("render_postscript", json!({ "source": source }));
+    let pm = page(&direct);
+    assert_eq!((pm.width(), pm.height()), (640, 400));
+    assert!(red_square(&pm));
+    // Width/height win, with a warning that the preamble was overruled.
+    let fixed = s.tool(
+        "render_postscript",
+        json!({ "source": source, "width": 300, "height": 200 }),
+    );
+    let pm = page(&fixed);
+    assert_eq!((pm.width(), pm.height()), (300, 200));
+    assert!(
+        texts(&fixed)
+            .iter()
+            .any(|t| t.starts_with("Warnings:") && t.contains("/PageSize [640 400] ignored")),
+        "{fixed}"
+    );
+    // Bands follow the page the program sets.
+    let banded = s.tool("render_postscript", json!({ "source": source, "bands": 2 }));
+    assert_eq!(images(&banded), images(&direct), "{banded}");
+    // A job renders the same page.
+    let job = start_job(&mut s, json!({ "source": source }));
+    assert!(
+        eventually(600, || status(&mut s, &job)["state"] == "done"),
+        "{}",
+        status(&mut s, &job)
+    );
+    let result = s.tool("render_result", json!({ "job_id": job }));
+    assert_eq!(images(&result), images(&direct));
+    // Letter (484,704 pixels) fits the 600,000-pixel cap, so the server
+    // starts the child; the 1000x1000 page the program then asks for does
+    // not, and the child refuses it.
+    let big = "<< /PageSize [1000 1000] >> setpagedevice 0 0 10 10 rectfill showpage";
+    let result = s.tool("render_postscript", json!({ "source": big }));
+    assert_eq!(error_kind(&result), "output_too_large", "{result}");
+    assert_eq!(
+        result["structuredContent"]["error"]["width_px"], 1000,
+        "{result}"
+    );
+    assert_eq!(result["structuredContent"]["error"]["limit_pixels"], 600000);
+    let job = start_job(&mut s, json!({ "source": big }));
+    assert!(
+        eventually(600, || status(&mut s, &job)["state"] == "failed"),
+        "{}",
+        status(&mut s, &job)
+    );
+}

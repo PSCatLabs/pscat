@@ -88,8 +88,7 @@ pub fn parse_count(n: &str) -> Result<u32, String> {
 /// The device rows band `index` of `count` owns on a canvas `height` pixels
 /// tall: `top..bottom`.
 pub fn rows(index: u32, count: u32, height: u32) -> (u32, u32) {
-    let at = |i: u32| (u64::from(i) * u64::from(height) / u64::from(count)) as u32;
-    (at(index), at(index + 1))
+    pscat::gfx::band_rows_of(index, count, height)
 }
 
 /// Refuse every combination `--bands` can't honour, before anything runs.
@@ -133,6 +132,10 @@ struct BandOutput {
     /// Per page, the band's device rows (RGBA, premultiplied, as the
     /// page's own bytes).
     rows: Vec<Vec<u8>>,
+    /// Per page of `rows`, the page's size in device pixels: the plan's
+    /// unless the program's `setpagedevice` changed it (#909). A band keeps
+    /// its share of each page's own height.
+    sizes: Vec<(u32, u32)>,
     /// The error report (and operand stack under `--pstack-on-error`) if
     /// the run failed.
     error: Option<String>,
@@ -220,6 +223,10 @@ pub fn run(options: &mut Options, threads: u32) -> ExitCode {
     // probe takes is what one band's fresh interpreter costs: the memory
     // budget leaves that much out for every worker, as a plain render's
     // budget leaves out its own interpreter.
+    if let Err(msg) = options.check_pixel_cap() {
+        eprintln!("pscat: {msg}");
+        return ExitCode::FAILURE;
+    }
     let before = pscat::memtrack::live_bytes();
     let Some(probe) = Interp::with_page_scaled(options.page.0, options.page.1, scale) else {
         eprintln!(
@@ -255,7 +262,7 @@ pub fn run(options: &mut Options, threads: u32) -> ExitCode {
         failed = true;
     }
     print_font_notes(&outputs);
-    let pages = match stitch(&outputs, width, height, options.transparent) {
+    let pages = match stitch(&outputs, options.transparent) {
         Ok(p) => p,
         Err(msg) => {
             eprintln!("pscat: {msg}");
@@ -485,13 +492,15 @@ fn run_band(
 ) -> Result<BandOutput, String> {
     let Band { index, plan, width } = band;
     let scale = options.dpi / 72.0;
-    let mut interp = options.new_interp().ok_or("unusable page size")?;
+    let mut interp = options.new_interp()?;
     if options.transparent {
         interp.gfx_mut().set_transparent_background();
     }
     let height = plan.height;
     let (top, bottom) = rows(index, plan.count, height);
-    interp.gfx_mut().set_band_rows(top, bottom);
+    // The band's rows follow the page if `setpagedevice` resizes it, and
+    // `/BandBBox` is redefined for the new page then (#909).
+    interp.gfx_mut().set_band(index, plan.count);
     // Only the top band's output reaches stdout and stderr; the others'
     // stdout is kept in a bounded buffer and dropped, and their stderr is
     // dropped, so an unaware program prints once.
@@ -544,23 +553,22 @@ fn run_band(
     };
     let _ = std::io::stdout().flush();
     // The pages `--png` writes, chosen as `finish_headless` chooses them;
-    // only this band's rows of each are kept.
-    let span = top as usize * width as usize * 4..bottom as usize * width as usize * 4;
+    // only this band's rows of each are kept, the rows of that page's own
+    // height (a `setpagedevice` can change it, #909).
     let take = |page: &Pixmap| -> Result<Vec<u8>, String> {
+        let (top, bottom) = rows(index, plan.count, page.height());
+        let row_bytes = page.width() as usize * 4;
         page.data()
-            .get(span.clone())
+            .get(top as usize * row_bytes..bottom as usize * row_bytes)
             .map(<[u8]>::to_vec)
             .ok_or_else(|| "a band's page has the wrong size".to_string())
     };
-    let mut rows = interp
-        .gfx()
-        .pages()
-        .iter()
-        .map(take)
-        .collect::<Result<Vec<_>, _>>()?;
-    if rows.is_empty() || interp.gfx().has_trailing_art() {
-        rows.push(take(&interp.gfx().pixmap)?);
+    let mut kept: Vec<&Pixmap> = interp.gfx().pages().iter().collect();
+    if kept.is_empty() || interp.gfx().has_trailing_art() {
+        kept.push(&interp.gfx().pixmap);
     }
+    let sizes = kept.iter().map(|p| (p.width(), p.height())).collect();
+    let rows = kept.into_iter().map(take).collect::<Result<Vec<_>, _>>()?;
     let had_ink = pscat::lint::pages_with_ink_flags(&interp)
         .iter()
         .map(|(_, ink)| *ink)
@@ -577,6 +585,7 @@ fn run_band(
     }
     Ok(BandOutput {
         rows,
+        sizes,
         error,
         hit_limit,
         font_notes: interp.font_warnings().to_string(),
@@ -588,12 +597,7 @@ fn run_band(
 /// Page `k` of the result is band `i`'s rows of its page `k`, in band
 /// `i`'s rows. A band that never ran (the queue stopped at a limit) leaves
 /// its rows blank: the page background, white or `transparent`.
-fn stitch(
-    outputs: &[Option<BandOutput>],
-    width: u32,
-    height: u32,
-    transparent: bool,
-) -> Result<Vec<Pixmap>, String> {
+fn stitch(outputs: &[Option<BandOutput>], transparent: bool) -> Result<Vec<Pixmap>, String> {
     let count = outputs.len() as u32;
     let ran = || {
         outputs
@@ -601,7 +605,8 @@ fn stitch(
             .enumerate()
             .filter_map(|(i, o)| Some((i, o.as_ref()?)))
     };
-    let pages = ran().next().map_or(0, |(_, o)| o.rows.len());
+    let sizes = ran().next().map_or(&[][..], |(_, o)| &o.sizes[..]);
+    let pages = sizes.len();
     if let Some((i, o)) = ran().find(|(_, o)| o.rows.len() != pages) {
         return Err(format!(
             "band {}/{count} produced {} page(s) but the first band produced {pages}; \
@@ -610,9 +615,19 @@ fn stitch(
             o.rows.len()
         ));
     }
-    let row_bytes = width as usize * 4;
+    if let Some((i, _)) = ran().find(|(_, o)| o.sizes != sizes) {
+        return Err(format!(
+            "band {}/{count} drew its pages at other sizes than the first band; \
+             a banded program must emit the same pages in every band",
+            i + 1
+        ));
+    }
     (0..pages)
         .map(|k| {
+            // Each page at its own size: `setpagedevice` can change it
+            // between pages (#909).
+            let (width, height) = sizes[k];
+            let row_bytes = width as usize * 4;
             let mut page = Pixmap::new(width, height).ok_or("cannot allocate the page")?;
             if !transparent {
                 page.fill(tiny_skia::Color::WHITE);

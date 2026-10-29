@@ -1093,14 +1093,26 @@ renders eight examples in both and compares block-downsampled output).
 
 ## Gotchas for the next implementer
 
-- **The page size has a precedence** (#921): `--page` (MCP `width`/`height`) >
-  `setpagedevice /PageSize` (#909, pending) > `%%BoundingBox` > letter. The
+- **The page size has a precedence** (#921, #909): `--page` (MCP
+  `width`/`height`, any `Interp::with_page` caller) > `setpagedevice
+  /PageSize` > `%%BoundingBox` > letter. The
   box is read for an EPSF header by default, and for any header with
   `--bbox`. A box origin other than (0, 0) moves the device's base CTM
   (`Gfx::set_page_origin`), and `Gfx::page_size_source` says which rule chose
   the size. Code that makes a CLI interpreter goes through
   `Options::new_interp` after `Options::resolve_page`. See
   `notes/921-boundingbox-page-size.md`.
+- **The page can change size mid-job** (#909, `src/ops/pagedevice.rs`).
+  `setpagedevice` installs a new `PageDevice` (`Gfx::install_device`: new
+  canvas, erased, base CTM rebuilt), and the graphics state holds the device
+  it was made under, so `grestore`/`restore`/`setgstate` and a bottom
+  `grestore` bring an older one back (`Gfx::sync_device`), as in gs. Anything
+  that sizes a buffer from the page must take each page's own size: the PDF
+  and SVG recorders keep per-page sizes, `--bands` cuts each page by its own
+  height and redefines `/BandBBox` on a resize, and a sweep's contact sheet
+  waits for the first frame unless `--page` fixed the size. `Interp::with_page*` is `Explicit`;
+  only `Interp::new` and the CLI's `Options::new_interp` let a program resize.
+  See `notes/909-setpagedevice-pagesize.md`.
 
 - **Fills don't use tiny-skia's anti-aliasing** (#692). `fill`, `eofill`,
   `rectfill` and glyph fills rasterise through `src/coverage.rs`, an

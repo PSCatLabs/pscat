@@ -312,6 +312,7 @@ fn gsave(it: &mut Interp) -> Result<(), PsError> {
 /// that save's restore), or to the bottom when no save is live.
 fn grestoreall(it: &mut Interp) -> Result<(), PsError> {
     it.do_grestoreall();
+    it.device_restore_result()?;
     Ok(())
 }
 
@@ -355,6 +356,10 @@ fn setgstate(it: &mut Interp) -> Result<(), PsError> {
         return Err(PsError::Typecheck);
     };
     *it.gfx.state_mut() = g.borrow().clone();
+    // A gstate made under another page device brings it back (#909).
+    it.gfx.sync_device();
+    it.after_device_change();
+    it.device_restore_result()?;
     Ok(())
 }
 
@@ -381,6 +386,7 @@ fn sameclip(it: &mut Interp) -> Result<(), PsError> {
 /// initial state (Ghostscript's behaviour, #505).
 fn grestore(it: &mut Interp) -> Result<(), PsError> {
     it.do_grestore();
+    it.device_restore_result()?;
     Ok(())
 }
 
