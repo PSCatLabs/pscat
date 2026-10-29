@@ -9,14 +9,16 @@ mechanics, and the content vanished with no error.
   as a length: an optional sign, a number (`.` or `,` decimal) and one of TeX's
   units (`pt pc in bp cm mm dd cc sp em ex`, any case, `true` allowed), or an
   optional factor and a length register, recognised by TeX's naming (a name
-  ending in skip, sep, width, height, depth, indent or amount, plus `\jot`
-  and `\fill`: `\baselineskip`, `0.1\textheight`, `\arraycolsep`). A closed
+  ending in skip, sep, width, height, depth, indent, amount, length, rule or
+  limit, plus `\jot` and `\fill`: `\baselineskip`, `0.1\textheight`, `\arraycolsep`). A closed
   list first; Codex (round 1) showed it turned real spacing such as
-  `\\[\abovedisplayskip]` into an error. With optional `plus` and `minus` parts (TeX glue:
+  `\\[\abovedisplayskip]` into an error; round 2 added the length, rule
+  and limit endings (`\unitlength`, `\fboxrule`). A register outside the
+  naming (a package's own) is content, and mathkit names it. With optional `plus` and `minus` parts (TeX glue:
   `2pt plus 1pt minus .5pt`, `0pt plus 1fil`). Everything else, `[x,y]`, `[1]` and `[\pi]` among
   them, stays as the next row's first characters.
 - No error. LaTeX stops with "Illegal unit of measure" on `\\ [x,y]`; drawing
-  the intended math is friendlier, and no real spacing option is lost.
+  the intended math is friendlier, and the standard spacing options still work.
 - Whitespace (newlines too) between `\\` and the bracket is skipped, as TeX
   skips it.
 - Not changed: inside `pmatrix`/`cases`/`\substack`, mathkit splits the rows

@@ -1016,12 +1016,12 @@ const TEX_UNITS: [&str; 11] = [
 /// Whether `name` (a control word, no backslash) is a TeX or LaTeX length
 /// register: plain TeX's and LaTeX's are named for what they measure
 /// (`\baselineskip`, `\abovedisplayskip`, `\arraycolsep`, `\textheight`,
-/// `\linewidth`, `\parindent`, `\medskipamount`), and `\jot` and `\fill`
-/// are the two common exceptions. No mathkit command is named so, so `\pi`
+/// `\linewidth`, `\parindent`, `\medskipamount`, `\unitlength`, `\fboxrule`,
+/// `\lineskiplimit`), and `\jot` and `\fill` are the two common exceptions. No mathkit command is named so, so `\pi`
 /// or `\alpha` in a bracket stays content.
 fn is_length_register(name: &str) -> bool {
-    const ENDS: [&str; 7] = [
-        "skip", "sep", "width", "height", "depth", "indent", "amount",
+    const ENDS: [&str; 10] = [
+        "skip", "sep", "width", "height", "depth", "indent", "amount", "length", "rule", "limit",
     ];
     name.chars().all(|c| c.is_ascii_alphabetic())
         && (matches!(name, "jot" | "fill") || ENDS.iter().any(|e| name.ends_with(e)))
@@ -1537,6 +1537,10 @@ mod tests {
         assert_eq!(l(r"a \\[2truept] b"), ["a", "b"]);
         assert_eq!(
             l(r"a \\[\abovedisplayskip] b \\[0.1\textheight] c \\[-\arraycolsep] d"),
+            ["a", "b", "c", "d"]
+        );
+        assert_eq!(
+            l(r"a \\[\unitlength] b \\[2\fboxrule] c \\[\lineskiplimit] d"),
             ["a", "b", "c", "d"]
         );
         assert_eq!(
