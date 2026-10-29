@@ -485,6 +485,26 @@ class Launcher(unittest.TestCase):
         self.assertEqual((run.returncode, run.stdout), (0, "installed-pscat\n"), run.stderr)
         self.assertFalse(os.path.exists(os.path.join(self.cache, TAG)), "nothing needed downloading")
 
+    def test_cache_bin_on_path_does_not_block_the_pin_moving(self):
+        self.assertEqual(self.run_launcher("--locate").returncode, 0)
+        self.pin("v9.9.9")
+        self.make_release("v9.9.9", "9.9.9")
+        binp = os.path.join(self.cache, "bin")
+        r = self.run_launcher("--locate", env=self.env([binp]))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("downloading pscat-9.9.9-", r.stderr)
+        # A trailing slash on the cache dir is the same cache.
+        c = self.env(PSCAT_CACHE_DIR=self.cache + "/")
+        self.assertEqual(self.run_launcher("--locate", env=c).stdout.strip(), binp)
+
+    def test_shim_next_to_a_pscat_mcp_does_not_loop(self):
+        d = self.local_bin()
+        self.assertEqual(self.run_launcher("--hook", env=self.env([d])).returncode, 0)
+        inst = self.fake_install("9.9.9", "home/.local/inst")
+        shutil.copy(os.path.join(inst, "pscat-mcp"), self.bin_in(d, "pscat-mcp"))
+        run = subprocess.run([self.bin_in(d, "pscat")], env=self.env([d]), capture_output=True, text=True, timeout=20)
+        self.assertEqual(run.returncode, 127, run.stderr)
+
     def test_shim_survives_a_quote_in_the_plugin_path(self):
         q = self.path("it's here")
         shutil.copytree(self.path("plugin"), q)

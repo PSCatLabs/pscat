@@ -86,6 +86,9 @@ elif [ "$OS" = Darwin ]; then
 else
   CACHE=${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}/pscat/plugin
 fi
+# Absolute and without a trailing slash: links are compared by exact text.
+case "$CACHE" in /*) ;; *) CACHE=$PWD/$CACHE ;; esac
+while :; do case "$CACHE" in */) CACHE=${CACHE%/} ;; *) break ;; esac; done
 
 # --- version check -------------------------------------------------------------
 # version_ok A B: true if version A (X.Y.Z, any suffix ignored) >= B.
@@ -145,6 +148,11 @@ publish_bin() {
     [ -x "$CACHE/bin/pscat" ] && [ -x "$CACHE/bin/pscat-mcp" ]
 }
 
+# our_bin FILE: FILE is in $CACHE/bin, or a link to it (see link_on_path).
+our_bin() {
+  [ "$(dirname "$1")" = "$CACHE/bin" ] || [ "$(readlink "$1" 2>/dev/null)" = "$CACHE/bin/pscat-mcp" ]
+}
+
 # lookup: set FOUND_DIR to a directory holding a usable pscat-mcp (and pscat).
 lookup() {
   FOUND_DIR=
@@ -152,8 +160,7 @@ lookup() {
   # Not our own link (see link_on_path): it names whatever release is in the
   # cache, and only the cache branch below follows the pin (an rc would
   # otherwise satisfy the final release's check for ever).
-  p=$(command -v pscat-mcp 2>/dev/null) &&
-    [ "$(readlink "$p" 2>/dev/null)" != "$CACHE/bin/pscat-mcp" ] && try_candidate "$p" "PATH"
+  p=$(command -v pscat-mcp 2>/dev/null) && ! our_bin "$p" && try_candidate "$p" "PATH"
   for d in "${HOME:-/nonexistent}/.cargo/bin" /opt/homebrew/bin /usr/local/bin; do
     try_candidate "$d/pscat-mcp" "$d"
   done
@@ -362,7 +369,11 @@ if [ -x "$bin" ]; then exec "$bin" "$@"; fi
 # and prints the directory holding it.
 dir=
 [ -f "$launcher" ] && dir=$(sh "$launcher" --locate)
-if [ -n "$dir" ] && [ -x "$dir/pscat" ]; then exec "$dir/pscat" "$@"; fi
+SHIM
+    # Never run a shim (a pscat-mcp found beside this one would loop for ever).
+    # shellcheck disable=SC2016 # the shim expands these, not us
+    printf 'if [ -n "$dir" ] && [ -x "$dir/pscat" ] && [ "$(head -c 256 "$dir/pscat" | sed -n 2p)" != %s ]; then exec "$dir/pscat" "$@"; fi\n' "'$SHIM_MARK'"
+    cat <<'SHIM'
 echo "pscat: not installed, and the pscat plugin could not download it (is the plugin still installed, and is this computer online?). Install pscat with: cargo install pscat" >&2
 exit 127
 SHIM
@@ -459,11 +470,15 @@ hook() {
       link_on_path
       [ "$LINK_STATE" = on-path ] && exit 0 # linked: a plain pscat works, nothing to say
     fi
-    ctx="pscat plugin: the pscat command-line tool is not on PATH in this session. Run it by its full path, $FOUND_DIR/pscat (pscat-mcp is beside it)."
+    if [ "$LINK_STATE" = foreign ]; then
+      ctx="pscat plugin: a different pscat is on PATH and was left alone. The plugin's copy is $FOUND_DIR/pscat (pscat-mcp is beside it)."
+    else
+      ctx="pscat plugin: the pscat command-line tool is not on PATH in this session. Run it by its full path, $FOUND_DIR/pscat (pscat-mcp is beside it)."
+    fi
     printf '{"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": %s}}\n' "$(json_str "$ctx")"
     exit 0
   fi
-  launcher="sh '$HERE/pscat-mcp.sh' --locate"
+  launcher="sh '$(sq "$HERE/pscat-mcp.sh")' --locate"
   if [ -z "$TRIPLE" ]; then
     msg="pscat plugin: pscat / pscat-mcp not found, and there is no prebuilt pscat for $OS $ARCH, so the pscat MCP tools will not start. Install them with: cargo install pscat (or a release from $REPO_URL/releases), then restart your agent."
     ctx=$msg

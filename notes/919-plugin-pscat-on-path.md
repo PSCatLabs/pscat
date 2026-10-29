@@ -67,6 +67,18 @@ so they ship together. The Codex plugin has no launcher of its own:
   If the plugin is gone and the cache is empty it prints a clear message and
   exits 127. This is what makes "`pscat --help` works in the first shell
   command" true on a fresh install.
+- **Review rounds.** Codex rounds 1 to 3 each found a real P2 (shim ignoring a
+  later cargo install; `publish_bin` passing an unwritable old `bin/`; a
+  clobber race and relative PATH hits), all fixed with tests. Round 4 and 5
+  returned "Reviewer failed to output a response", so a blank-context Claude
+  `Agent` reviewed instead (same-family fallback, not policy). It found: the
+  "skip our own link" guard missed `$CACHE/bin` itself on PATH and a cache dir
+  spelled with a trailing slash (`CACHE` is now absolute with no trailing slash,
+  and `our_bin` also matches by directory); a shim beside a user's `pscat-mcp`
+  looped (the shim now never execs a file with the shim marker); the hook's
+  launcher command now escapes `'`; and the hook says so when a different
+  pscat is on PATH. Known and left: a shim remains (and runs `--locate` each
+  call) if the real pscat later comes from cargo.
 - **Hook text.** The not-installed message gives the size (about 14 MB, once)
   and the stable path that will exist afterwards, and keeps the phrase
   "downloads it" that `plugin_install_check.sh` and
