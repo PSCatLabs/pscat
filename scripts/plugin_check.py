@@ -34,8 +34,10 @@ Claude's schema; Codex has no validator. This checks what neither does:
   `${CLAUDE_PLUGIN_ROOT}` in `.claude-plugin/plugin.json` and `.mcp.json`
   (https://code.claude.com/docs/en/plugins-reference#environment-variables);
   Codex expands only `${PLUGIN_ROOT}` / `${PLUGIN_DATA}` in `mcp.json` args,
-  env and cwd (codex-rs/codex-mcp/src/agent_plugin_config.rs). A server both
-  manifests declare runs the same command and args in both;
+  env and cwd (codex-rs/codex-mcp/src/agent_plugin_config.rs), not Claude
+  Code's `${CLAUDE_PROJECT_DIR}` or `${user_config.KEY}`. A server both
+  manifests declare runs the same command and args in both, apart from the
+  launcher's `--plugin-NAME=VALUE` host bindings (#910);
 - no top-level `bin/` in a plugin directory: claude.ai and Cowork refuse to
   install a plugin that has one
   (https://claude.com/docs/plugins/platform-support);
@@ -235,7 +237,8 @@ def _plugin_file_refs(text, plugin_dir, where, errors):
 
 def _check_placeholders(text, host, where, errors):
     """Claude Code expands ${CLAUDE_PLUGIN_ROOT}; Codex's mcp.json only ${PLUGIN_ROOT}."""
-    wrong = r"\$\{PLUGIN_(ROOT|DATA)\}" if host == "claude" else r"\$\{CLAUDE_PLUGIN_(ROOT|DATA)\}"
+    wrong = (r"\$\{PLUGIN_(ROOT|DATA)\}" if host == "claude"
+             else r"\$\{(CLAUDE_PLUGIN_(ROOT|DATA)|CLAUDE_PROJECT_DIR|user_config\.\w+)\}")
     m = re.search(wrong, text)
     if m:
         right = "${CLAUDE_PLUGIN_ROOT}" if host == "claude" else "${PLUGIN_ROOT}"
@@ -340,7 +343,8 @@ def check_plugin(root, plugin_dir, entry, version, errors):
 def _check_same_servers(plugin_dir, rel, codex_servers, errors):
     """A server in both Codex's mcp.json and Claude Code's plugin.json must run
     the same program: same command, same args once each host's root
-    placeholder is normalized."""
+    placeholder is normalized and the launcher's `--plugin-NAME=VALUE` host
+    bindings are set aside."""
     path = os.path.join(plugin_dir, ".claude-plugin", "plugin.json")
     if not os.path.isfile(path):
         return
@@ -353,7 +357,11 @@ def _check_same_servers(plugin_dir, rel, codex_servers, errors):
         return
 
     def norm(cfg):
-        args = [re.sub(r"\$\{(CLAUDE_)?PLUGIN_ROOT\}", "${ROOT}", a) for a in cfg.get("args", [])]
+        # `--plugin-NAME=VALUE` arguments are the launcher's host bindings
+        # (#910: Claude Code's userConfig and project directory), which only
+        # one host can expand; the launcher drops them before pscat-mcp.
+        args = [re.sub(r"\$\{(CLAUDE_)?PLUGIN_ROOT\}", "${ROOT}", a) for a in cfg.get("args", [])
+                if not re.match(r"--plugin-[a-z-]+=", a)]
         return cfg.get("command"), args
 
     for name in sorted(set(claude) & set(codex_servers)):

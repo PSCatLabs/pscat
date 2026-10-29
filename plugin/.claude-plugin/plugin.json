@@ -22,8 +22,18 @@
     "pscat": {
       "command": "sh",
       "args": [
-        "${CLAUDE_PLUGIN_ROOT}/scripts/pscat-mcp.sh"
+        "${CLAUDE_PLUGIN_ROOT}/scripts/pscat-mcp.sh",
+        "--plugin-out-root=${user_config.output_dir}",
+        "--plugin-project-dir=${CLAUDE_PROJECT_DIR}"
       ]
+    }
+  },
+  "userConfig": {
+    "output_dir": {
+      "type": "directory",
+      "title": "Render output folder",
+      "description": "Where the pscat tools may save PNG, SVG and PDF files (out_path). Leave empty to use the project directory. The folder must exist. Applies after the server restarts.",
+      "default": ""
     }
   }
 }

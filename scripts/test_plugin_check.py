@@ -209,6 +209,24 @@ class Fixture(unittest.TestCase):
         self.mcp["mcpServers"]["s"] = {"type": "stdio", "command": "other"}
         self.assertIn("keep them the same", " ".join(self.errors()))
 
+    def test_launcher_host_bindings_are_claude_only(self):
+        # #910: Claude Code passes its userConfig and project directory to the
+        # launcher as --plugin-NAME=VALUE; Codex expands neither.
+        self.write("plugin/scripts/l.sh", "#!/bin/sh\n")
+        self.plugin["mcpServers"]["s"] = {"command": "sh", "args": [
+            "${CLAUDE_PLUGIN_ROOT}/scripts/l.sh", "--plugin-out-root=${user_config.output_dir}",
+            "--plugin-project-dir=${CLAUDE_PROJECT_DIR}"]}
+        self.mcp["mcpServers"]["s"] = {"type": "stdio", "command": "sh",
+                                       "args": ["${PLUGIN_ROOT}/scripts/l.sh"]}
+        self.assertEqual(self.errors(), [])
+        self.mcp["mcpServers"]["s"]["args"].append("--plugin-out-root=${user_config.output_dir}")
+        self.assertIn("not expanded by Codex", " ".join(self.errors()))
+        self.mcp["mcpServers"]["s"]["args"][-1] = "--plugin-project-dir=${CLAUDE_PROJECT_DIR}"
+        self.assertIn("not expanded by Codex", " ".join(self.errors()))
+        # Any other extra argument still makes the two servers differ.
+        self.mcp["mcpServers"]["s"]["args"][-1] = "--timeout"
+        self.assertIn("keep them the same", " ".join(self.errors()))
+
     def test_no_top_level_bin(self):
         self.write("plugin/bin/tool", "#!/bin/sh\n")
         self.assertIn("top-level bin/", " ".join(self.errors()))

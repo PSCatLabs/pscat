@@ -499,6 +499,93 @@ hook() {
   exit 0
 }
 
+# --- output root (issue #910) -----------------------------------------------------
+# Where the server's out_path may write: one directory, chosen here at
+# registration, never by a tool call. Hosts start the server in different
+# places: Claude Code in the project, Codex in the installed plugin itself
+# (${PLUGIN_ROOT} is a plugin server's default cwd there), the Claude desktop
+# app sometimes in /. So, unless the arguments already hold --out-root, the
+# first usable of:
+#   1. --plugin-out-root=DIR: Claude Code's `output_dir` plugin option
+#      (userConfig in .claude-plugin/plugin.json);
+#   2. `out-root = DIR` in ~/.config/pscat/plugin.conf ($XDG_CONFIG_HOME if
+#      set): every host, and the only way under Codex, whose plugin servers
+#      take no user arguments;
+#   3. --plugin-project-dir=DIR: the project Claude Code names
+#      (${CLAUDE_PROJECT_DIR} in the manifest);
+#   4. the working directory, which the server takes by default anyway;
+#   5. renders/ in pscat's per-user data directory, created if need be.
+# Usable: an absolute path (or ~/...) to an existing directory that is not /
+# and not inside this plugin, so nothing is ever written into the installed
+# bundle. The launcher-only --plugin-* arguments are not passed on. If none is
+# usable the server starts in / and out_path is off. No environment variable
+# names the root (#756), and the server's checks on each out_path (#627) are
+# unchanged.
+CONF_FILE=${XDG_CONFIG_HOME:-${HOME:-/nonexistent}/.config}/pscat/plugin.conf
+
+# usable_root VALUE [WHAT]: print VALUE as a canonical directory if it may be
+# the output root. WHAT names the setting in the warning; without it, quiet.
+usable_root() {
+  v=$1
+  # shellcheck disable=SC2016,SC2088 # literal ${ and ~/ are what is matched
+  case "$v" in
+    ''|*'${'*) return 1 ;; # unset, or a placeholder the host left unexpanded
+    '~') v=${HOME:-} ;;
+    '~/'*) v=${HOME:-}/${v#'~/'} ;;
+  esac
+  why=
+  case "$v" in
+    /*) d=$(cd "$v" 2>/dev/null && pwd -P) || why="not an existing directory" ;;
+    *) why="not an absolute path" ;;
+  esac
+  if [ -z "$why" ]; then
+    if [ "$d" = / ]; then
+      why="the filesystem root"
+    else
+      case "$d/" in "$PLUGIN_DIR"/*) why="inside the plugin's own directory" ;; esac
+    fi
+  fi
+  if [ -n "$why" ]; then
+    [ -n "${2:-}" ] && say "ignoring $2 $1: $why"
+    return 1
+  fi
+  printf '%s\n' "$d"
+}
+
+# The value of the last `out-root = VALUE` line in the config file.
+conf_out_root() {
+  [ -r "$CONF_FILE" ] || return 0
+  sed -n 's/^[[:space:]]*out-root[[:space:]]*=[[:space:]]*//p' "$CONF_FILE" |
+    sed 's/[[:space:]]*$//; s/^"\(.*\)"$/\1/' | tail -n 1
+}
+
+# renders/ in pscat's per-user data directory (src/paths.rs, user_data_dir).
+default_root() {
+  [ -n "${HOME:-}" ] || return 1
+  if [ "$OS" = Darwin ]; then
+    d="$HOME/Library/Application Support/pscat/renders"
+  else
+    d=${XDG_DATA_HOME:-$HOME/.local/share}/pscat/renders
+  fi
+  mkdir -p "$d" 2>/dev/null || { say "cannot create $d for renders"; return 1; }
+  usable_root "$d" "the default output directory"
+}
+
+# choose_out_root: set OUT_ROOT, or leave it empty to keep the working
+# directory; OUT_ROOT_NONE when no directory at all is usable.
+OUT_ROOT=
+OUT_ROOT_NONE=
+choose_out_root() {
+  OUT_ROOT=$(usable_root "$PLUGIN_OUT_ROOT" "the plugin's output_dir setting") && return 0
+  OUT_ROOT=$(usable_root "$(conf_out_root)" "out-root in $CONF_FILE") && return 0
+  OUT_ROOT=$(usable_root "$PLUGIN_PROJECT_DIR") && return 0
+  OUT_ROOT=
+  usable_root "$(pwd)" >/dev/null && return 0
+  OUT_ROOT=$(default_root) && return 0
+  OUT_ROOT=
+  OUT_ROOT_NONE=1
+}
+
 case "${1:-}" in
   --hook) hook ;;
   --locate)
@@ -516,11 +603,39 @@ case "${1:-}" in
     exit 0 ;;
 esac
 
+# Take the launcher-only --plugin-* arguments out; note an explicit --out-root.
+PLUGIN_OUT_ROOT=
+PLUGIN_PROJECT_DIR=
+HAVE_OUT_ROOT=
+n=$#
+while [ "$n" -gt 0 ]; do
+  a=$1
+  shift
+  n=$((n - 1))
+  case "$a" in
+    --plugin-out-root=*) PLUGIN_OUT_ROOT=${a#*=} ;;
+    --plugin-project-dir=*) PLUGIN_PROJECT_DIR=${a#*=} ;;
+    *)
+      [ "$a" = --out-root ] && HAVE_OUT_ROOT=1
+      set -- "$@" "$a" ;;
+  esac
+done
+
 if ! ensure; then
   say "pscat-mcp is not available, so the pscat tools cannot start"
   exit 1
 fi
 [ "$FOUND_HOW" = cache ] || [ "$FOUND_HOW" = PATH ] || say "using $FOUND_BIN"
 [ "$FOUND_HOW" = cache ] && link_on_path
+if [ -z "$HAVE_OUT_ROOT" ]; then
+  choose_out_root
+  if [ -n "$OUT_ROOT" ]; then
+    set -- --out-root "$OUT_ROOT" "$@"
+  elif [ -n "$OUT_ROOT_NONE" ]; then
+    say "no usable output directory, so out_path is off; set out-root in $CONF_FILE"
+    case "$FOUND_BIN" in /*) ;; *) FOUND_BIN=$(pwd)/$FOUND_BIN ;; esac
+    cd / || exit 1 # the server turns out_path off when started in /
+  fi
+fi
 unset PSCAT_PLUGIN_LAUNCHER
 exec "$FOUND_BIN" "$@"
