@@ -138,7 +138,11 @@ publish_bin() {
       mv -f "$CACHE/bin/.$b.$$" "$CACHE/bin/$b" 2>/dev/null
     rm -f "$CACHE/bin/.$b.$$"
   done
-  [ -x "$CACHE/bin/pscat" ] && [ -x "$CACHE/bin/pscat-mcp" ]
+  # Both must name DIR now: an unwritable bin/ left pointing at an earlier
+  # release must not pass for this one.
+  [ "$(readlink "$CACHE/bin/pscat" 2>/dev/null)" = "$1/pscat" ] &&
+    [ "$(readlink "$CACHE/bin/pscat-mcp" 2>/dev/null)" = "$1/pscat-mcp" ] &&
+    [ -x "$CACHE/bin/pscat" ] && [ -x "$CACHE/bin/pscat-mcp" ]
 }
 
 # lookup: set FOUND_DIR to a directory holding a usable pscat-mcp (and pscat).

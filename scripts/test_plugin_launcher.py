@@ -373,6 +373,21 @@ class Launcher(unittest.TestCase):
         self.assertEqual(self.run_launcher("--locate").returncode, 0)
         self.assertIn(TAG, os.readlink(os.path.join(self.cache, "bin", "pscat")))
 
+    def test_unwritable_bin_dir_does_not_pass_off_an_earlier_release(self):
+        if os.geteuid() == 0:
+            self.skipTest("root can write anywhere")
+        self.assertEqual(self.run_launcher("--locate").returncode, 0)
+        self.pin("v9.9.11")
+        self.make_release("v9.9.11", "9.9.11")
+        binp = os.path.join(self.cache, "bin")
+        os.chmod(binp, 0o555)
+        self.addCleanup(os.chmod, binp, 0o755)
+        r = self.run_launcher("--locate")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        # bin/ still names the old release, so the new one is reported by its own directory.
+        self.assertIn("v9.9.11", r.stdout)
+        self.assertNotEqual(r.stdout.strip(), binp)
+
     def test_pin_moves_from_an_rc_to_the_final_release_through_our_links(self):
         d = self.local_bin()
         env = self.env([d])
