@@ -25,7 +25,9 @@ Ghostscript.
 Every flag, with the most useful ones first:
 
 ```sh
-cargo run -- --page 500x500 file.ps       # canvas size (default 612x792)
+cargo run -- --page 500x500 file.ps       # canvas size (default: an EPSF file's
+                                          # %%BoundingBox, else 612x792)
+cargo run -- --bbox --png out.png file.ps # any file's %%BoundingBox is the page
 cargo run -- --speed 10 file.ps           # slower (steps per frame, default 100)
 cargo run -- --png out.png file.ps        # headless render to PNG
 cargo run -- --svg out.svg file.ps        # export SVG (also --pdf out.pdf)

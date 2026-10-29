@@ -2,10 +2,11 @@ use std::env;
 use std::io::{self, BufRead, Write};
 use std::process::ExitCode;
 
+use pscat::gfx::{self, PageSizeSource};
 use pscat::repl::LineBuffer;
 use pscat::spool::Watcher;
 use pscat::window::{WindowOptions, run_interactive, run_spool_with_limits, run_windowed};
-use pscat::{Interp, Limits, gfx};
+use pscat::{Interp, Limits};
 
 // Counts live heap bytes so `--max-memory` can be enforced (issue #604). A
 // thread-local add per allocation or free, folded into one shared count
@@ -32,6 +33,14 @@ struct Options {
     png: Option<String>,
     steps_per_frame: usize,
     page: (u32, u32),
+    /// `--bbox` (#921): take the page from the `%%BoundingBox` of any file,
+    /// not only an EPSF one.
+    bbox: bool,
+    /// The default user-space point at the page's lower-left corner: a
+    /// bounding box's lower-left, else `(0, 0)`.
+    page_origin: (f32, f32),
+    /// Where `page` came from: `--page`, a bounding box, or the default.
+    page_source: PageSizeSource,
     /// Device resolution; 72 means one pixel per point.
     dpi: f32,
     /// Write the page(s) as SVG (implies headless).
@@ -145,6 +154,9 @@ impl Options {
             png: None,
             steps_per_frame: DEFAULT_STEPS_PER_FRAME,
             page: gfx::DEFAULT_PAGE,
+            bbox: false,
+            page_origin: (0.0, 0.0),
+            page_source: PageSizeSource::Default,
             dpi: 72.0,
             svg: None,
             pdf: None,
@@ -177,6 +189,38 @@ impl Options {
             profile_graph: false,
             profile_ops: false,
         }
+    }
+
+    /// Take the page from `source`'s bounding box unless `--page` set it
+    /// (#921): an EPSF file's box always, any file's with `--bbox`. A box
+    /// that cannot be used is a warning, and the page stays as it was.
+    fn resolve_page(&mut self, source: &[u8]) {
+        if self.page_source == PageSizeSource::Explicit {
+            return;
+        }
+        match pscat::bbox::page_box(source, self.bbox) {
+            Ok(Some(found)) => {
+                self.page = (found.width, found.height);
+                self.page_origin = (found.llx, found.lly);
+                self.page_source = PageSizeSource::BoundingBox;
+            }
+            Ok(None) => {}
+            Err(why) => eprintln!(
+                "pscat: warning: ignoring the bounding box ({why}); using a {}x{} page",
+                self.page.0, self.page.1
+            ),
+        }
+    }
+
+    /// A fresh interpreter on this run's page: its size at `--dpi`, the
+    /// bounding box's origin, and where the size came from. `None` when the
+    /// page is too large at this dpi.
+    fn new_interp(&self) -> Option<Interp> {
+        let mut interp = Interp::with_page_scaled(self.page.0, self.page.1, self.dpi / 72.0)?;
+        let gfx = interp.gfx_mut();
+        gfx.set_page_origin(self.page_origin.0, self.page_origin.1);
+        gfx.set_page_size_source(self.page_source);
+        Some(interp)
     }
 
     /// Put `--max-steps`/`--max-time`/`--max-memory`, `--allow-write` and
@@ -271,7 +315,7 @@ fn main() -> ExitCode {
     if let Some(code) = subcmd::dispatch(env::args().skip(1)) {
         return code;
     }
-    let options = match parse_args() {
+    let mut options = match parse_args() {
         Ok(o) => o,
         Err(msg) => {
             eprintln!("pscat: {msg}");
@@ -336,9 +380,19 @@ fn main() -> ExitCode {
         eprintln!("pscat: {msg}");
         return ExitCode::FAILURE;
     }
+    // `--bbox` only chooses a page, and `--page` always wins (#921); a
+    // window or spool run has no single file to take a box from.
+    if options.bbox
+        && (options.page_source == PageSizeSource::Explicit
+            || options.spool.is_some()
+            || options.interactive)
+    {
+        eprintln!("pscat: --bbox doesn't combine with --page/--spool/--interactive");
+        return ExitCode::FAILURE;
+    }
 
     if let Some(threads) = options.bands {
-        return bands::run(&options, threads);
+        return bands::run(&mut options, threads);
     }
     if options.band_rows.is_some() {
         eprintln!("pscat: --band-rows needs --bands");
@@ -386,7 +440,10 @@ fn main() -> ExitCode {
         // Interp below -- see read_source's doc comment for why.
         let path = options.file.as_deref().expect("checked above");
         return match read_source(path) {
-            Ok(source) => run_sweep(&options, &source),
+            Ok(source) => {
+                options.resolve_page(&source);
+                run_sweep(&options, &source)
+            }
             Err(e) => {
                 eprintln!("pscat: {e}");
                 ExitCode::FAILURE
@@ -450,9 +507,24 @@ fn main() -> ExitCode {
         };
     }
 
-    let Some(mut interp) =
-        Interp::with_page_scaled(options.page.0, options.page.1, options.dpi / 72.0)
-    else {
+    // The program is read before the interpreter is made, because its
+    // bounding box can choose the page (#921). An `--interactive` prelude is
+    // read below: the window keeps the page it was given.
+    let source = match (&options.eval, &options.file) {
+        (Some(expr), _) => Some(expr.as_bytes().to_vec()),
+        (None, Some(path)) if !options.interactive => match read_source(path) {
+            Ok(source) => Some(source),
+            Err(e) => {
+                eprintln!("pscat: {e}");
+                return ExitCode::FAILURE;
+            }
+        },
+        _ => None,
+    };
+    if let Some(source) = &source {
+        options.resolve_page(source);
+    }
+    let Some(mut interp) = options.new_interp() else {
         eprintln!(
             "pscat: unusable page size {}x{}",
             options.page.0, options.page.1
@@ -547,12 +619,8 @@ fn main() -> ExitCode {
     let Some(path) = &options.file else {
         return repl(&mut interp, &options);
     };
-    let source = match read_source(path) {
-        Ok(source) => source,
-        Err(e) => {
-            eprintln!("pscat: {e}");
-            return ExitCode::FAILURE;
-        }
+    let Some(source) = source else {
+        unreachable!("a file run's source was read above");
     };
 
     if options.pdf.is_some() {
@@ -1250,11 +1318,9 @@ fn run_sweep(options: &Options, source: &[u8]) -> ExitCode {
             SweepAxis::Param(name, values) => format!("{name}={}", format_sweep_value(values[i])),
         };
         let frame = run_on_fresh_thread(|| -> Result<SweepFrame, String> {
-            let mut interp =
-                Interp::with_page_scaled(options.page.0, options.page.1, options.dpi / 72.0)
-                    .ok_or_else(|| {
-                        format!("unusable page size {}x{}", options.page.0, options.page.1)
-                    })?;
+            let mut interp = options.new_interp().ok_or_else(|| {
+                format!("unusable page size {}x{}", options.page.0, options.page.1)
+            })?;
             options.apply_limits(&mut interp)?;
             if options.transparent {
                 interp.gfx_mut().set_transparent_background();
@@ -1891,7 +1957,9 @@ fn parse_args() -> Result<Options, String> {
                     return Err(format!("--page dimensions must be 1..8000, got {spec}"));
                 }
                 options.page = (w, h);
+                options.page_source = PageSizeSource::Explicit;
             }
+            "--bbox" => options.bbox = true,
             "--sweep-seed" => {
                 let spec = args.next().ok_or("missing SPEC after --sweep-seed")?;
                 options.sweep_seed = Some(parse_seed_spec(&spec)?);
@@ -1963,7 +2031,10 @@ fn print_usage() {
     println!("      --headless      run the file without a window");
     println!("      --png PATH      write the final canvas as a PNG (implies --headless)");
     println!("      --speed N       interpreter steps per frame (default 100)");
-    println!("      --page WxH      canvas size in points (default 612x792, US Letter)");
+    println!("      --page WxH      canvas size in points (default: an EPSF file's %%BoundingBox,");
+    println!("                      else 612x792, US Letter); always wins");
+    println!("      --bbox          take the page from any file's %%BoundingBox, not only an EPSF");
+    println!("                      file's (%!PS-Adobe-3.0 EPSF-3.0)");
     println!("      --svg PATH      write the page(s) as SVG (implies --headless)");
     println!("      --pdf PATH      write the document as PDF (implies --headless)");
     println!("      --dpi N         device resolution (default 72 = 1 pixel per point)");
