@@ -866,3 +866,18 @@ fn a_clip_restored_from_a_nulldevice_level_is_empty() {
         assert_eq!(ink(&it.gfx().pixmap), 0, "{src}");
     }
 }
+
+/// Codex round 9 on PR #930: a `cliprestore` with no level above it gives
+/// back the job's initial page as the clip (gs: `[0 208 612 1000]`).
+#[test]
+fn a_bottom_level_cliprestore_keeps_the_initial_page_bounds() {
+    let mut it = default_page();
+    assert_eq!(
+        eval(
+            &mut it,
+            "<< /PageSize [1000 1000] >> setpagedevice cliprestore \
+             clippath pathbbox 4 array astore"
+        ),
+        ["[0.0 208.0 612.0 1000.0]"]
+    );
+}

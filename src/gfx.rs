@@ -2498,7 +2498,9 @@ impl Gfx {
             _ => self.saved.last(),
         };
         let Some(outer) = outer else {
-            self.state.clip = None;
+            // The bottom level: the job's initial state, with no clip, on
+            // the device the job started on.
+            self.state.clip = self.fit_clip(None, self.initial_device.px);
             return;
         };
         // Under `nulldevice` the level's clip was empty whatever its `clip`
