@@ -16,6 +16,7 @@ pub mod logic;
 pub mod matrix;
 pub mod misc;
 pub mod noise;
+pub mod pagedevice;
 pub mod realsio;
 pub mod shading;
 pub mod stack;
@@ -52,6 +53,7 @@ pub fn install_all(dict: &mut Dict) {
     level2::install(dict);
     shading::install(dict);
     noise::install(dict);
+    pagedevice::install(dict);
 
     // Constants: executing a name bound to a literal object pushes the
     // object, which is exactly the behavior `true`, `mark`, etc. need —

@@ -410,6 +410,12 @@ pub struct Interp {
     /// Caps on the running program (issue #604); `Limits::none()` unless
     /// `set_limits` was called, and then every limit check is skipped.
     limits: Limits,
+    /// The most device pixels a page `setpagedevice` makes may have
+    /// (`--max-pixels`, #909); `None` leaves only the 8000-a-side ceiling.
+    pub(crate) max_page_pixels: Option<u64>,
+    /// `setpagedevice` keys already warned about as unsupported, and
+    /// whether an explicit page's refusal was noted (#909): each once.
+    pub(crate) page_device_notes: std::collections::HashSet<String>,
     /// Steps run by the current program (`begin_source` zeroes it).
     steps_used: u64,
     /// Starts when the current program does; read only when `limits` has a
@@ -472,14 +478,23 @@ const STDOUT_TRUNCATED: &[u8] = b"\n%% output truncated: more than 64 KB\n";
 
 impl Interp {
     /// An interpreter with a US Letter page (612x792 points) at 72 dpi.
+    /// Nothing chose that size, so a program's `setpagedevice /PageSize`
+    /// may replace it ([`PageSizeSource::Default`](crate::gfx::PageSizeSource)).
     pub fn new() -> Self {
         // The default page size is a nonzero constant; this cannot fail.
-        Self::with_page(DEFAULT_PAGE.0, DEFAULT_PAGE.1).expect("default page size is valid")
+        let mut interp =
+            Self::with_page(DEFAULT_PAGE.0, DEFAULT_PAGE.1).expect("default page size is valid");
+        interp
+            .gfx
+            .set_page_size_source(crate::gfx::PageSizeSource::Default);
+        interp
     }
 
     /// An interpreter with a `width`x`height`-point page at 72 dpi (one
     /// pixel per point). `None` if the size is unusable: zero, or more than
-    /// 8000 pixels on a side.
+    /// 8000 pixels on a side. The caller chose the size, so it is
+    /// [`PageSizeSource::Explicit`](crate::gfx::PageSizeSource): a program's
+    /// `setpagedevice` cannot change it (#909).
     pub fn with_page(width: u32, height: u32) -> Option<Self> {
         Self::with_page_scaled(width, height, 1.0)
     }
@@ -487,6 +502,9 @@ impl Interp {
     /// A page of `width`x`height` *points* rendered at `scale` device
     /// pixels per point: `scale` is dpi / 72, so 2.0 renders at 144 dpi.
     /// `None` if the page is more than 8000 pixels on a side at that scale.
+    /// Explicit, like [`with_page`](Self::with_page); a host that wants the
+    /// program's `setpagedevice` to size the page sets another source with
+    /// [`Gfx::set_page_size_source`](crate::gfx::Gfx::set_page_size_source).
     pub fn with_page_scaled(width: u32, height: u32, scale: f32) -> Option<Self> {
         let px = |points: u32| ((points as f32 * scale).round() as u32).max(1);
         let (pw, ph) = (px(width), px(height));
@@ -495,7 +513,9 @@ impl Interp {
         if pw > 8000 || ph > 8000 {
             return None;
         }
-        let gfx = Gfx::with_scale(pw, ph, scale)?;
+        let mut gfx = Gfx::with_scale(pw, ph, scale)?;
+        gfx.set_page_points(f64::from(width), f64::from(height));
+        gfx.set_page_size_source(crate::gfx::PageSizeSource::Explicit);
         let mut system = Dict::new();
         ops::install_all(&mut system);
         let op_name = |name: &'static str| match system.get(name).map(|o| o.value) {
@@ -565,6 +585,8 @@ impl Interp {
             stdout_truncated: false,
             quiet_stderr: false,
             limits: Limits::none(),
+            max_page_pixels: None,
+            page_device_notes: std::collections::HashSet::new(),
             steps_used: 0,
             run_clock: crate::clock::Clock::start(),
             mem_base: 0,
@@ -628,6 +650,15 @@ impl Interp {
         self.poll_in = POLL_PERIOD;
         self.run_clock = crate::clock::Clock::start();
         Ok(())
+    }
+
+    /// Cap the pages `setpagedevice` may make at `max` device pixels
+    /// (`pscat --max-pixels`, #909); `None` (the default) leaves only the
+    /// 8000-pixels-a-side ceiling every page has. A larger `/PageSize` is a
+    /// `configurationerror`, with a stderr line saying why. The page the
+    /// interpreter was made with is the host's to check.
+    pub fn set_max_page_pixels(&mut self, max: Option<u64>) {
+        self.max_page_pixels = max;
     }
 
     /// Count the memory cap's heap growth from `base` bytes (a
@@ -2407,6 +2438,7 @@ impl Interp {
         // pinned against gs (`save gsave gsave 5 setlinewidth restore`).
         self.gfx
             .restore_glyph_snapshot(rec.gfx_depth, rec.gfx_state);
+        self.after_device_change();
         Ok(())
     }
 
@@ -2429,6 +2461,7 @@ impl Interp {
         // gs's grestoreall ends in a fresh gsave level, so no clipsave
         // entries survive it (#494).
         self.gfx.clear_clip_stack();
+        self.after_device_change();
     }
 
     /// `grestore` (#505): at the innermost save's boundary it restores
@@ -2439,6 +2472,45 @@ impl Interp {
             .last()
             .map(|rec| (rec.gfx_depth, &*rec.gfx_state));
         self.gfx.grestore_at(boundary);
+        self.after_device_change();
+    }
+
+    /// After anything that can install a page device (`setpagedevice`, or
+    /// a restore that brings an older one back, #909): a `--bands` run
+    /// redefines `/BandBBox` for the new page, so a band-aware program
+    /// reads the area its band keeps of the page it now has.
+    pub(crate) fn after_device_change(&mut self) {
+        if !self.gfx.take_device_changed() {
+            return;
+        }
+        let Some((index, count)) = self.gfx.band() else {
+            return;
+        };
+        let (w, h) = (self.gfx.pixmap.width(), self.gfx.pixmap.height());
+        let (top, bottom) = crate::gfx::band_rows_of(index, count, h);
+        let scale = self.gfx.scale();
+        let (llx, lly) = self.gfx.page_origin();
+        // The same f32 arithmetic, and the same numbers once printed and
+        // scanned, as the `/BandBBox` `pscat --bands` defines first.
+        let user_y = |row: u32| lly + (h - row) as f32 / scale;
+        let number = |v: f32| {
+            let text = format!("{v}");
+            match text.parse::<i64>() {
+                Ok(i) => Object::int(i),
+                Err(_) => Object::real(text.parse().unwrap_or(f64::from(v))),
+            }
+        };
+        let bbox = Object::array(vec![
+            number(llx),
+            number(user_y(bottom)),
+            number(llx + w as f32 / scale),
+            number(user_y(top)),
+        ]);
+        let user = self.dstack[1].clone();
+        self.journal_dict(&user);
+        // Detached, as the band names were first defined (#868).
+        let key = crate::name::detached(|| crate::name::intern("BandBBox"));
+        user.borrow_mut().put_name(&key, bbox);
     }
 
     /// `cliprestore` (#494): this needs the innermost save's snapshot,

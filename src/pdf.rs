@@ -57,6 +57,9 @@ pub struct PdfRecorder {
     content: String,
     /// Finished pages' content streams.
     pages: Vec<String>,
+    /// Parallel to `pages`: each finished page's size, since
+    /// `setpagedevice` can change it between pages (#909).
+    page_sizes: Vec<(u32, u32)>,
     /// Image XObjects (raw stream bytes, already entity-complete),
     /// document-global; pages reference them by index.
     images: Vec<PdfImage>,
@@ -90,6 +93,7 @@ impl PdfRecorder {
             height,
             content: String::new(),
             pages: Vec::new(),
+            page_sizes: Vec::new(),
             images: Vec::new(),
             page_images: Vec::new(),
             current_images: Vec::new(),
@@ -390,8 +394,16 @@ Q",
         self.current_gstates.clear();
     }
 
+    /// The page size from now on (`setpagedevice`, #909); finished pages
+    /// keep theirs.
+    pub(crate) fn set_size(&mut self, width: u32, height: u32) {
+        self.width = width;
+        self.height = height;
+    }
+
     pub(crate) fn end_page(&mut self) {
         self.pages.push(self.snapshot());
+        self.page_sizes.push((self.width, self.height));
         self.page_images.push(self.current_images.clone());
         self.page_gstates.push(self.current_gstates.clone());
     }
@@ -401,8 +413,10 @@ Q",
         let mut pages = self.pages.clone();
         let mut page_images = self.page_images.clone();
         let mut page_gstates = self.page_gstates.clone();
+        let mut page_sizes = self.page_sizes.clone();
         if pages.is_empty() || trailing_art {
             pages.push(self.snapshot());
+            page_sizes.push((self.width, self.height));
             page_images.push(self.current_images.clone());
             page_gstates.push(self.current_gstates.clone());
         }
@@ -421,10 +435,11 @@ Q",
             .into_bytes(),
         );
         let image_base = 3 + npages * 2;
-        for (i, ((content, imgs), gss)) in pages
+        for (i, (((content, imgs), gss), &(width, height))) in pages
             .iter()
             .zip(&page_images)
             .zip(&page_gstates)
+            .zip(&page_sizes)
             .enumerate()
         {
             let xobjects: Vec<String> = imgs
@@ -456,8 +471,8 @@ Q",
                 format!(
                     "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {} {}]{resources} \
                      /Contents {} 0 R >>",
-                    self.width,
-                    self.height,
+                    width,
+                    height,
                     3 + i * 2 + 1,
                 )
                 .into_bytes(),
@@ -468,7 +483,7 @@ Q",
             // deflated; issue #244). The `cm` prefix is part of the
             // compressed stream. If the encoder ever failed (it can't
             // on a `Vec` sink) the stream is written plain instead.
-            let prefix = format!("1 0 0 -1 0 {} cm\n", self.height);
+            let prefix = format!("1 0 0 -1 0 {height} cm\n");
             let mut stream = match deflate(&[prefix.as_bytes(), content.as_bytes()]) {
                 Some(z) => {
                     let mut st =

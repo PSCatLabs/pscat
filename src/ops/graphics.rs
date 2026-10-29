@@ -355,6 +355,9 @@ fn setgstate(it: &mut Interp) -> Result<(), PsError> {
         return Err(PsError::Typecheck);
     };
     *it.gfx.state_mut() = g.borrow().clone();
+    // A gstate made under another page device brings it back (#909).
+    it.gfx.sync_device();
+    it.after_device_change();
     Ok(())
 }
 

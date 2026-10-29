@@ -1110,8 +1110,8 @@ fn tool_list(cfg: &Config) -> Value {
         "type": "object",
         "properties": {
             "source": { "type": "string", "description": "The PostScript program" },
-            "width": { "type": "integer", "minimum": 1, "maximum": 8000, "description": "Page width in points. Default: an EPSF file's %%BoundingBox (see bbox), else 612" },
-            "height": { "type": "integer", "minimum": 1, "maximum": 8000, "description": "Page height in points. Default: an EPSF file's %%BoundingBox (see bbox), else 792" },
+            "width": { "type": "integer", "minimum": 1, "maximum": 8000, "description": "Page width in points; overrides the program's setpagedevice /PageSize. Default: that /PageSize, else an EPSF file's %%BoundingBox (see bbox), else 612" },
+            "height": { "type": "integer", "minimum": 1, "maximum": 8000, "description": "Page height in points; overrides the program's setpagedevice /PageSize. Default: that /PageSize, else an EPSF file's %%BoundingBox (see bbox), else 792" },
             "bbox": { "type": "boolean", "description": "Size the page from the %%BoundingBox of any file, not only an EPSF one (%!PS-Adobe-3.0 EPSF-3.0), with its lower-left corner at the page's. Not with width/height, which always win" },
             "dpi": { "type": "number", "minimum": 9, "maximum": 1200, "description": "Device resolution (default 72; 144 = 2x pixels)" },
             "format": { "type": "string", "enum": ["png", "svg", "pdf"], "description": "Output format (default png)" },
@@ -1522,8 +1522,10 @@ fn render_plan(cfg: &Config, args: &Value) -> Result<RenderPlan, ToolError> {
             ));
         }
     };
-    // The page the child will draw on: the same rule `pscat` applies, so the
-    // pixel cap below checks the canvas that is really made.
+    // The page the child starts on: the same rule `pscat` applies, so the
+    // pixel cap below checks the canvas that is really made. A program's
+    // `setpagedevice` can change it later (#909); the child gets
+    // `--max-pixels` for that (`render_run`).
     let size = match page {
         Some((w, h)) => (w as u32, h as u32),
         None => match pscat::bbox::page_box(source.as_bytes(), bbox) {
@@ -1643,9 +1645,17 @@ fn render_run(cfg: &Config, plan: &RenderPlan) -> Result<Value, ToolError> {
     if *halftone {
         cmd.arg("--halftone");
     }
+    // A page the program's `setpagedevice` asks for is held to the same cap
+    // as the first one, in the child (#909).
+    cmd.arg("--max-pixels").arg(cfg.max_pixels.to_string());
     cmd.arg(flag).arg(&out).arg("-");
     cmd.arg("--lint");
     let run = run_child(cfg, &mut cmd, source.as_bytes())?;
+    if !run.success
+        && let Some((w, h, _)) = pscat::limits::parse_pixel_cap_message(&run.stderr)
+    {
+        return Err(too_many_pixels(cfg, "the page", w, h));
+    }
     let (lint_findings, other_stderr) = split_lint_findings(&run.stderr);
 
     let pages = collect_pages(&out);

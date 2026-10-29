@@ -70,6 +70,11 @@ pub enum PsError {
     /// `findresource` found no resource with that name (`undefinedresource`).
     #[error("undefinedresource")]
     UndefinedResource,
+    /// `setpagedevice` cannot make the page asked for: a malformed or
+    /// unusable `/PageSize`, or one over the page limits
+    /// (`configurationerror`, as Ghostscript raises for it; #909).
+    #[error("configurationerror")]
+    ConfigurationError,
     /// The program ran more steps than [`Limits::max_steps`](crate::Limits::max_steps)
     /// allows (`limitexceeded`; see [`limit`](Self::limit)). Unlike every error
     /// above, a program **cannot catch this one**: `stopped` does not see it, so
@@ -134,6 +139,7 @@ impl PsError {
             PsError::Io => "ioerror",
             PsError::InvalidRestore => "invalidrestore",
             PsError::UndefinedResource => "undefinedresource",
+            PsError::ConfigurationError => "configurationerror",
             PsError::StepsExceeded | PsError::TimeExceeded | PsError::MemoryExceeded => {
                 "limitexceeded"
             }
@@ -171,6 +177,7 @@ impl PsError {
             "ioerror" => PsError::Io,
             "invalidrestore" => PsError::InvalidRestore,
             "undefinedresource" => PsError::UndefinedResource,
+            "configurationerror" => PsError::ConfigurationError,
             // Not here: `limitexceeded` is never caught, so `$error` never
             // holds it and there is nothing to rebuild.
             _ => return None,
@@ -208,6 +215,7 @@ mod tests {
             PsError::Io => PsError::Io,
             PsError::InvalidRestore => PsError::InvalidRestore,
             PsError::UndefinedResource => PsError::UndefinedResource,
+            PsError::ConfigurationError => PsError::ConfigurationError,
             PsError::StepsExceeded => PsError::StepsExceeded,
             PsError::TimeExceeded => PsError::TimeExceeded,
             PsError::MemoryExceeded => PsError::MemoryExceeded,
@@ -237,6 +245,7 @@ mod tests {
             PsError::Io,
             PsError::InvalidRestore,
             PsError::UndefinedResource,
+            PsError::ConfigurationError,
         ] {
             // Routing through the exhaustive match is what ties this
             // list to the enum: a new variant stops it compiling.
@@ -299,6 +308,7 @@ mod tests {
             PsError::Io,
             PsError::InvalidRestore,
             PsError::UndefinedResource,
+            PsError::ConfigurationError,
         ] {
             let e = sample_of(&e);
             assert!(
