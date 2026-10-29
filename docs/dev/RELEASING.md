@@ -572,6 +572,37 @@ downloaded by a browser is quarantined: `xattr -d com.apple.quarantine pscat
 pscat-mcp`. Write down anything the README did not tell you, and fix the
 README.
 
+### Plugin desktop smoke check
+
+Before a plugin release, run this in a **fresh chat** on each local desktop
+host the release targets (Codex desktop, the Claude desktop app's Cowork and
+Code tab, Claude Code in a terminal), with the plugin installed. It tests what
+the user sees, not what the tool returned (#911). Claude.ai cloud sessions are
+not a target. The per-release Cowork and Chat list that #908 plans will grow
+from this section.
+
+Prompt 1 (the smoke prompt):
+
+> Use pscat's render_postscript tool to draw a colorful spiral on a 640×400
+> page. Show the rendered image here and save the PostScript source so we can
+> revise it.
+
+| # | Check | Pass |
+|---|---|---|
+| a | The render succeeded | The tool call returned an image with no error and no `Lint:` block |
+| b | The image was delivered | The first completed answer shows the spiral (or, in a terminal, names the saved PNG) and has a working link to the `.ps` source, **without expanding any tool trace** |
+| c | No false claim | The answer does not say "rendered above" or "as you can see" unless the image is visible in the answer itself |
+| d | No base64 | No `data:` URI or base64 text in the reply |
+
+Prompt 2, sent only if (b) failed, word for word:
+
+> yeah I don't see it though .. Can you show me?
+
+It passes if the agent puts the saved file in the answer (embedded or as a
+path link) from the existing file, without re-rendering and without repeating
+the claim. Record the host, its version, the plugin version and a screenshot of
+the final chat surface; a returned-image byte count is not evidence.
+
 ### Verifying a release
 
 Every archive and `.crate` released after #635 carries a signed SLSA build

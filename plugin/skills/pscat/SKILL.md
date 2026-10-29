@@ -72,6 +72,32 @@ procedure shows up as "0 of 0", so add `--profile-ops` for time per built-in
 operator (`fbm2` against `mul`; about 3x slower) or move the work into a named
 procedure. `--profile-graph` adds caller -> callee edges. Not with `--bands`.
 
+## Show the result to the user
+
+A render that succeeded is not an image the user has seen. A picture returned
+inside a tool call (an MCP image block, a file you viewed yourself) usually shows
+only in the tool trace, which hosts collapse; the user reads your final message.
+When they asked to see something, the final message must contain it. Check two
+things separately: the render worked (exit 0, clean `Lint:`), and the image is
+in the final answer.
+
+1. Save the PNG where the user can open it (the project or working folder), by
+   `--png` or `out_path`, and keep the source `.ps` beside it when they may want
+   changes. `out_path`'s reply says `wrote <absolute path>`; use that path.
+2. Put the absolute path in the final message, with the source as a link:
+   `![a colourful spiral](/Users/me/project/spiral.png)` and
+   `[spiral.ps](/Users/me/project/spiral.ps)`.
+   - **Codex desktop:** the `![](absolute path)` form is what showed the image in
+     the v0.7.0-rc.1 trial (#911); a tool-call image alone did not.
+   - **Claude desktop (Cowork and the Code tab):** save into the user's folder and
+     give the absolute path as a link (the Code tab opens a clicked path).
+     Do not say the image is shown inline unless you can see that it is.
+   - **Claude Code in a terminal:** it cannot draw images; say where the file is.
+3. Never paste base64 or a `data:` URI into a reply. Do not write "rendered
+   above" or "as you can see" unless the final message carries the image or path.
+4. If the user says they cannot see it, do not re-render or repeat the claim:
+   confirm the saved file exists, then put it in the answer as in step 2.
+
 ## Sweep a seed or parameter (explore a design space in one run)
 
 ```sh

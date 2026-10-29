@@ -19,6 +19,11 @@ and the toolkit.
 2. `pscat --page WxH --png out.png piece.ps` — then **look at the
    PNG**. Really look: composition, color, balance, whether the idea
    reads. (Over MCP: `render_postscript` returns the PNG inline.)
+   Looking is not showing: a picture inside a tool call usually does not reach
+   the user. When they asked to see the piece, save the PNG and the `.ps`, and put
+   the PNG's absolute path in your final message as `![title](/abs/path.png)`
+   plus a link to the source (never base64). The `pscat` skill's "Show the result
+   to the user" has the per-host details.
 3. Refine and re-render. Small seeds, big differences: `N srand` at
    the top makes every run reproducible (same seed, same picture).
    `pscat piece.ps --sweep-seed 1:12 --contact-sheet grid.png` compares
