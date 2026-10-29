@@ -353,14 +353,14 @@ write_shim() { # write_shim FILE
     printf "launcher='%s'\n" "$(sq "$HERE/pscat-mcp.sh")"
     printf "bin='%s'\n" "$(sq "$CACHE/bin/pscat")"
     cat <<'SHIM'
-if [ ! -x "$bin" ] && [ -f "$launcher" ]; then
-  sh "$launcher" --locate >/dev/null
-fi
-if [ ! -x "$bin" ]; then
-  echo "pscat: not installed, and the pscat plugin could not download it (is the plugin still installed, and is this computer online?). Install pscat with: cargo install pscat" >&2
-  exit 127
-fi
-exec "$bin" "$@"
+if [ -x "$bin" ]; then exec "$bin" "$@"; fi
+# --locate downloads if needed, or finds a pscat installed since (cargo, say),
+# and prints the directory holding it.
+dir=
+[ -f "$launcher" ] && dir=$(sh "$launcher" --locate)
+if [ -n "$dir" ] && [ -x "$dir/pscat" ]; then exec "$dir/pscat" "$@"; fi
+echo "pscat: not installed, and the pscat plugin could not download it (is the plugin still installed, and is this computer online?). Install pscat with: cargo install pscat" >&2
+exit 127
 SHIM
   } > "$1"
   chmod 755 "$1"

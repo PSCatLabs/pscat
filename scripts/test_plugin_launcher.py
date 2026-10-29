@@ -446,6 +446,17 @@ class Launcher(unittest.TestCase):
         self.assertEqual(self.run_launcher("--hook", env=self.env([d, other])).returncode, 0)
         self.assertFalse(os.path.lexists(shim))
 
+    def test_shim_runs_a_pscat_installed_later_elsewhere(self):
+        d = self.local_bin()
+        self.assertEqual(self.run_launcher("--hook", env=self.env([d])).returncode, 0)
+        inst = self.fake_install("9.9.9")
+        with open(os.path.join(inst, "pscat"), "w") as f:
+            f.write("#!/bin/sh\necho installed-pscat\n")
+        run = subprocess.run([self.bin_in(d, "pscat")], env=self.env([d, inst]), capture_output=True,
+                             text=True, timeout=60)
+        self.assertEqual((run.returncode, run.stdout), (0, "installed-pscat\n"), run.stderr)
+        self.assertFalse(os.path.exists(os.path.join(self.cache, TAG)), "nothing needed downloading")
+
     def test_shim_survives_a_quote_in_the_plugin_path(self):
         q = self.path("it's here")
         shutil.copytree(self.path("plugin"), q)

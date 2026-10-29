@@ -58,7 +58,9 @@ so they ship together. The Codex plugin has no launcher of its own:
 - **The shim, for a fresh install.** With no cached copy the hook (which still
   never downloads, #853) leaves `~/.local/bin/pscat` as a ten-line shell script
   that runs the launcher's `--locate` (download messages on stderr), then execs
-  `$CACHE/bin/pscat`. The launcher's `link_on_path` replaces the shim with the
+  the `pscat` in the directory `--locate` printed: `$CACHE/bin`, or wherever a
+  pscat installed since (cargo, say) was found (Codex round 1: a shim that
+  assumed the cache would exit 127 although a usable install existed). The launcher's `link_on_path` replaces the shim with the
   symlink as soon as the cache exists, so the shim only exists before the first
   download. The shim names the launcher by absolute path and the hook rewrites
   it when the plugin directory changes (a version bump or sync moves it).
