@@ -1467,6 +1467,13 @@ renders eight examples in both and compares block-downsampled output).
   holds the repo-development skills plus symlinks to those three, so a
   checkout's Claude Code sessions still load them. psart keeps a short
   `SKILL.md` and puts each medium in `references/`; add new media there.
+  pscat does the same since #922: `SKILL.md` is the common path (install,
+  render, show the result, debug and lint, fonts, pitfalls, an index) and
+  `references/` holds bands/profile, sheets, handwriting and chalk, typewriter,
+  extensions and MCP details. `tests/skill_blocks.rs` runs the code fences in the
+  reference files too, and fails on a reference file `SKILL.md` does not link.
+  The skill loads in full on every request, so put new material in a reference
+  file and add one index line to `SKILL.md`.
 - **The Claude Code plugin (#569).** The marketplace is
   `.claude-plugin/marketplace.json` at the repo root; the plugin is
   `plugin/` (`.claude-plugin/plugin.json`, a README, and `skills` as a

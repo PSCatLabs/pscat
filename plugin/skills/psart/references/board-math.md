@@ -6,7 +6,7 @@ installed pscat does not include them. Every `(lib/...) run` works anywhere:
 the library is compiled into `pscat`.
 
 A single formula on a plain board needs no PostScript: `pscat chalk
-'x = \frac{1}{2}' -o board.png` (single backslashes; see the pscat skill),
+'x = \frac{1}{2}' -o board.png` (single backslashes; see the pscat skill's `references/handwriting-chalk.md`),
 or the MCP tool `chalkboard_math` when it is connected.
 Use mathkit directly for a composed piece: several formulas, words,
 annotations, a board of your own.

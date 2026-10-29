@@ -8,7 +8,8 @@ and both work against an **installed** pscat (no checkout needed):
   reachable as `skills/` in a checkout), one directory
   per skill, each with a `SKILL.md` (Claude Code's skill format; any agent
   can read it). [`pscat`](../../plugin/skills/pscat/SKILL.md) is the tool
-  reference, [`psart`](../../plugin/skills/psart/SKILL.md) the render-look-refine
+  reference (the common path, with `references/` for sweeps and sheets, handwriting
+  and chalk, typewriter pages, `--bands`/`--profile`, extensions and MCP details), [`psart`](../../plugin/skills/psart/SKILL.md) the render-look-refine
   loop for art (a short page plus `references/` for paint, dry media,
   board math and style packs, read only when needed), and
   [`psviz`](../../plugin/skills/psviz/SKILL.md) paper-ready charts. They call the

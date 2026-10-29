@@ -213,8 +213,8 @@ predates it.
 
 If you're an agent that just needs to *run* PostScript — render a
 file, debug one, generate a handwriting-style note — read
-`plugin/skills/pscat/SKILL.md`: it has the command recipes and
-pitfalls in one page, regardless of which agent runtime you are.
+`plugin/skills/pscat/SKILL.md`: it has the common-path command recipes and
+pitfalls (advanced sections in its `references/`), regardless of which agent runtime you are.
 MCP-wired agents can use `pscat-mcp` instead (`docs/guides/agents.md`).
 
 <!-- sdlcify:managed:start -->
