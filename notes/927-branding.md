@@ -45,6 +45,8 @@ and no speed, memory or large-document claims until #929 publishes numbers.
   page size, `pscat --page 612x580 --dpi 144 --png
   art/brand/renders/certificate.png examples/template_certificate.ps`. It is
   the document half of the README, site and org-profile pairs.
+  Re-rendered, with the social preview, after #954 fixed `pgcertificate`'s
+  spacing (PR #956), which is what the first perceptual review had failed.
 - The document specimen: Field Notes reads as a journal page (art), and
   `examples/dataviz_paper.ps` has captions that collide with its bars, so
   the plain, crisply typeset certificate won.
