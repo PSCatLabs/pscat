@@ -473,3 +473,24 @@ fn certificate_long_content_stays_inside_and_clear_of_the_title() {
         runs[0]
     );
 }
+
+#[test]
+fn certificate_long_citation_shrinks_before_it_is_cut() {
+    // The first #954 layout used one citation size and cut a 600-character
+    // body the old layout had held whole. The size steps must hold it.
+    let sentence = "This citation is one of many identical repeated sentences. ";
+    let mut it = fresh(CERT_W + 2 * MARGIN, CERT_H + 2 * MARGIN);
+    it.run_str(&format!(
+        "{MARGIN} {MARGIN} {CERT_W} {CERT_H} << /Awardee (Ada Lovelace) /Body ({}) \
+         /Presenter (C. Babbage) /Date (1843) >> pgcertificate",
+        sentence.repeat(10)
+    ))
+    .unwrap_or_else(|e| panic!("pgcertificate failed: {}", it.error_report(&e)));
+    let stack = it.operand_stack();
+    assert_eq!(stack.len(), 1, "expected exactly one leftover string");
+    assert_eq!(
+        stack[0].repr(),
+        "()",
+        "a 600-character citation must fit whole"
+    );
+}

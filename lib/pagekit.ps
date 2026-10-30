@@ -171,11 +171,9 @@ Palettes /marigold [[0.18 0.08 0.20] [0.38 0.14 0.30] [0.62 0.30 0.28]
     /peTS peH 0.06 mul def      % title
     /peCS peH 0.032 mul def     % "This certifies that"
     /peAS peH 0.09 mul def      % awardee
-    /peBS peH 0.033 mul def     % citation
-    /peLead peH 0.05 mul def    % citation leading
     /peNS peH 0.03 mul def      % signer names
     /peKS peH 0.024 mul def     % signature captions
-    /peMin peH 0.05 mul def     % smallest gap between groups
+    /peMin peH 0.06 mul def     % smallest gap between groups
 
     % Title and awardee shrink to fit their width (pgzfitmax's rule:
     % shrink only, never enlarge). Their fitted sizes are worked out here,
@@ -205,12 +203,22 @@ Palettes /marigold [[0.18 0.08 0.20] [0.38 0.14 0.30] [0.62 0.30 0.28]
     /peCluster peCS 0.66 mul peCapToAw add peAS 0.66 mul add def
     /peSpace peTitleY peNamesTop sub def
 
-    % citation lines, clamped to what fits with every gap at its minimum
-    /Times-Roman findfont peBS scalefont setfont
-    /peBodyW peW 0.66 mul def
-    /peLines peBody peBodyW tfwrap length def
-    /peRoom peSpace peCluster sub peMin 3 mul sub peBS 0.66 mul sub def
-    /peMaxLines peRoom 0 lt { 0 } { peRoom peLead div floor cvi 1 add } ifelse def
+    % citation size: the largest of four steps (size, leading, measure)
+    % whose wrapped lines all fit with every gap at its minimum. The first
+    % is sized for a README thumbnail; the later ones trade size for room,
+    % the last (0.023h on 0.78w) holding more than the pre-#954 layout did,
+    % so a long citation shrinks before any of it is cut. Past the last
+    % step the line count is clamped and the rest is the leftover.
+    /peLines 0 def
+    [ [0.033 0.050 0.66] [0.029 0.044 0.72] [0.026 0.039 0.76] [0.023 0.035 0.78] ] {
+        aload pop
+        /peBodyW exch peW mul def /peLead exch peH mul def /peBS exch peH mul def
+        /Times-Roman findfont peBS scalefont setfont
+        /peLines peBody peBodyW tfwrap length def
+        /peRoom peSpace peCluster sub peMin 3 mul sub peBS 0.66 mul sub def
+        /peMaxLines peRoom 0 lt { 0 } { peRoom peLead div floor cvi 1 add } ifelse def
+        peLines peMaxLines le { exit } if
+    } forall
     peLines peMaxLines gt { /peLines peMaxLines def } if
 
     peLines 0 gt {

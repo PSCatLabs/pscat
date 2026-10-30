@@ -33,20 +33,23 @@ What changed (interface unchanged: same keys, same leftover contract):
   is now worked out before anything is placed, so a long, shrunk name
   gets a slot sized to its real ink instead of floating in its nominal
   one.
-- **Sizes for README width.** The citation went from 0.026h to 0.033h on a
-  0.05h leading, "This certifies that" from 0.024h to 0.032h, the names
-  from 0.02h to 0.03h, and the captions to 0.024h italic. At about
-  380 px wide the old 0.02h captions were about 6 px tall. The citation
-  measure narrowed from 0.76w to 0.66w, about 60 characters a line at
-  the specimen's size, which also avoids the specimen's one-word last
-  line.
+- **Sizes for README width, stepping down for long copy.** At about 380 px
+  wide the old 0.02h captions were about 6 px tall, so "This certifies
+  that" went from 0.024h to 0.032h, the names from 0.02h to 0.03h, and the
+  captions to 0.024h italic. The citation takes the largest of four steps
+  (size / leading / measure: 0.033h/0.05h/0.66w, 0.029h/0.044h/0.72w,
+  0.026h/0.039h/0.76w, 0.023h/0.035h/0.78w) whose wrapped lines all fit
+  at the minimum gaps. The specimen's two sentences get the first step,
+  about 60 characters a line, which also avoids its old one-word last
+  line. A long citation shrinks before any of it is cut.
 
-**Capacity tradeoff.** Larger type and a narrower measure hold less text.
-At 532x500 a 600-character citation used to fit whole; now 408
-characters fit (about seven lines), and the rest is returned as leftover,
-as the contract already says. Certificate citations are a sentence or
-two, so this is the right trade for a document that has to read at
-thumbnail size.
+**Capacity.** The first version of this fix used one size only. That
+held 408 characters of a test body at 532x500, against the old layout's
+684, so the first perceptual review failed it for cutting a citation
+that used to fit. With the steps, a 532x500 certificate holds 899
+characters before anything goes to the leftover. The minimum gap went
+from 0.05h to 0.06h after the same review found an overflowing citation
+crowding the awardee and the names.
 
 Cap height and descender are Times' own proportions (0.66 and 0.22 of
 the size), not measured per glyph. That is close enough for spacing, and
