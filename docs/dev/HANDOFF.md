@@ -170,7 +170,9 @@ review caught before any template code existed -- artkit's `fitfont`
 enlarging as well as shrinking, and two of artkit's mood palettes not
 actually being ordered dark-to-light despite looking like they were --
 and one real implementation bug `--lint` caught on the first rendered
-example, a copy-paste-misaligned `tfblock` call in `pgletter`). Also
+example, a copy-paste-misaligned `tfblock` call in `pgletter`;
+`pgcertificate`'s spacing is laid out by measured ink since #954,
+`notes/954-pgcertificate-spacing.md`). Also
 done: issue #19, noise and flow-field procedures for artkit —
 `noiseinit`/`noise2` (2D gradient/Perlin noise off a `srand`-shuffled
 permutation table), `curl2` (turns any `{x y -> n}` scalar field into
