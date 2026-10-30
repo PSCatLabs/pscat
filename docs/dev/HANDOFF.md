@@ -883,6 +883,10 @@ renders eight examples in both and compares block-downsampled output).
    only when `chalk::is_tex_length` reads it as a length (`2pt`, `-1.5em`,
    `0.5\baselineskip`); otherwise it is the next row's content, so a
    commutator `\\ [x,y] = 0` survives (`notes/936-chalk-row-bracket.md`).
+   #950: the same rule for the `\\` left inside `pmatrix`/`cases`/`\substack`
+   (`chalk::drop_row_break_options`, Rust side, before mathkit sees the
+   row): the spacing and `*` go, consumed, not honoured. A direct `mkpath`
+   caller still gets `[2pt]` as ink (`notes/950-chalk-matrix-row-spacing.md`).
    #934/#935: logic, set and geometry symbols (∧ ∨ ⊢ ⊬ ⊨ ⊤ ↔ ∄ ⊕ ⊗ † ‡ ∅ ∠
    △ ≅ ℜ ℑ) and `\mathbf`/`\mathbb`/`\mathcal`: strokeglyphs' `/x.bf` (each
    stroke re-traced, derived at load), `/R.bb` (a doubled stem from

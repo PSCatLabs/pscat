@@ -37,7 +37,7 @@ Raw LaTeX with **single** backslashes (unlike mathkit from PostScript),
 `\\` between rows, `&` to align; `$...$` or an `align` wrapper is fine.
 Deterministic per `--seed`. The block is shrunk to fit the board and centred.
 TeX outside mathkit's subset fails with one line naming it
-(`unsupported LaTeX command \oplus`) and writes nothing. `--config FILE` /
+(`unsupported LaTeX command \aleph`) and writes nothing. `--config FILE` /
 `--json TEXT` take the JSON config (`layout`, `chalk`, `board` or
 `"board": false`, `seed`); `pscat chalk --help` and the dry-media guide list
 every key. `--print-ps` prints the generated PostScript.

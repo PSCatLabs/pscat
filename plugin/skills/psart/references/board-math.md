@@ -92,7 +92,9 @@ saying what it was, for example
     backslash to continue the string.
   - In `pscat chalk`, a bracket right after a `\\` row break is TeX's row
     spacing (`\\[2pt]`, dropped) only when it holds a length; `\\ [x,y] = 0`
-    keeps its bracket. `\left[ x, y \right]` is always a bracket.
+    keeps its bracket. `\left[ x, y \right]` is always a bracket. The same
+    rule holds inside `pmatrix` and `cases`. mkpath called from PostScript
+    has no such rule: write no `[2pt]` after `\\\\`, or it is drawn.
   - `x_{max}` is refused, because `max` is a command. Write `x_{\\max}`
     or `x_{\\text{max}}`.
 
