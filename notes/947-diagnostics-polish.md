@@ -30,5 +30,5 @@ Four follow-ups from the 0.7.0-rc.1 QA fixes (#943, #944, #946). No render chang
   refuses a missing or unknown extension, where the CLI keeps those working for existing scripts). New test
   names (`.jpg`, `.JPEG`, `.gif`, `.webp`, `.ps`, `.eps`) pin the agreement.
 
-Deferred: skill and guide text that still says lint prints findings after an error (psart/pscat skills
-and `docs/guides`) sits outside this ticket's lane; see the PR for the list.
+Skill and guide text about `[run-error]` (pscat skill, getting-started) says only that an errored run
+prints that line, which is still true; nothing there needed a change.
