@@ -1,12 +1,33 @@
 # pscat
 
-pscat is a PostScript interpreter written in Rust. PostScript is a programming
-language for drawing pages; pscat runs your program and shows the picture as it
-is drawn, in a live window, or renders it to PNG, SVG or PDF. It also runs in a
-browser tab, and it ships with PostScript libraries for making art:
-generative patterns, paint and watercolor, printmaking, lettering, charts and
-more. It was built for fun, not as a Ghostscript replacement, though it aims
-for broad PostScript coverage over time.
+<p>
+  <a href="art/logo/pscat-logo-d.ps"><img src="art/logo/renders/pscat-logo-d-512.png" width="96" align="left" alt="The pscat logo: a cream sheet of paper with cat ears and a turned-down corner, with %! as its face, on a gold square"/></a>
+  <b>PostScript for precision and imagination.</b><br/>
+  <sub>The logo is drawn by pscat from <a href="art/logo/pscat-logo-d.ps">its PostScript source</a>.</sub>
+</p>
+<br clear="left"/>
+
+pscat is a modern PostScript interpreter written in Rust for reliable document
+rendering and creative graphics. It renders PostScript and EPS to PNG, SVG and
+PDF from the command line, as an embeddable Rust library, in the browser via
+WebAssembly, or through MCP for AI agents.
+
+- **Documents:** letters, certificates, invitations and posters from page
+  templates, charts and plots for papers, typewritten memos, and multi-page PDFs.
+- **Art:** generative patterns, watercolor and oil paint, printmaking,
+  handwriting, chalkboards and display type.
+
+pscat aims to replace Ghostscript for most PostScript work, and uses Ghostscript
+as its correctness reference: test expectations are pinned against
+Ghostscript's output. It can also show a program drawing, stroke by stroke, in
+a live window or in a browser tab.
+
+<p>
+  <img src="art/brand/renders/certificate.png" width="42%" alt="A certificate of achievement for Ada Lovelace, typeset in serif type inside a double rule on cream paper, from the pagekit certificate template"/>
+  <a href="https://pscatlabs.github.io/pscat/gallery-evening-stream.html"><img src="gallery/renders/evening_stream.png" width="54%" alt="Evening Stream, an autumn evening with a glowing sky, a stream tumbling over a small fall between dark banks, autumn trees and a cabin with a lit window"/></a>
+</p>
+
+<sub>Both drawn by pscat: <a href="examples/template_certificate.ps">a certificate</a> from the page templates, and <a href="gallery/evening_stream.ps">Evening Stream</a>, painted with the paint library.</sub>
 
 **[pscatlabs.github.io/pscat](https://pscatlabs.github.io/pscat/)** has the docs, the full gallery, a specimen of every font,
 and a live playground that runs the interpreter in your browser, no install.
