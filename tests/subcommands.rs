@@ -465,6 +465,64 @@ fn fixed_format_outputs_refuse_a_name_for_another_type() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// `--contact-sheet PATH` and `pscat sheet -o` are always PNG, so they take
+/// the same name rule as `--png` (#938, #947): another known type is refused
+/// with the extension named and nothing is written; the right extension (any
+/// case), none and an unknown one still work.
+#[test]
+fn sheet_outputs_refuse_a_name_for_another_type() {
+    let dir = scratch("sheet-ext");
+    let ps = dir.join("sq.ps");
+    std::fs::write(&ps, "0 0 50 50 rectfill showpage\n").unwrap();
+    for name in ["cs.jpg", "cs.SVG", "cs.pdf", "cs.webp"] {
+        let res = pscat(
+            &dir,
+            &["--sweep-seed", "1:2", "--contact-sheet", name, path(&ps)],
+        );
+        assert_eq!(res.status.code(), Some(1), "--contact-sheet {name}");
+        let err = String::from_utf8_lossy(&res.stderr);
+        let ext = name.rsplit('.').next().unwrap();
+        assert!(
+            err.contains("--contact-sheet writes a PNG")
+                && err.contains(&format!("ends in .{ext}")),
+            "--contact-sheet {name}: {err}"
+        );
+    }
+    for (flag, name) in [("-o", "sh.jpg"), ("--out", "sh.svg"), ("-o", "sh.PDF")] {
+        let res = pscat(&dir, &["sheet", flag, name, path(&ps)]);
+        assert_eq!(res.status.code(), Some(1), "sheet {flag} {name}");
+        let err = String::from_utf8_lossy(&res.stderr);
+        let ext = name.rsplit('.').next().unwrap();
+        assert!(
+            err.contains("-o writes a PNG") && err.contains(&format!("ends in .{ext}")),
+            "sheet {flag} {name}: {err}"
+        );
+    }
+    let left: Vec<String> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(left, ["sq.ps"], "nothing may be written, found {left:?}");
+
+    for name in ["cs.PNG", "cs-noext", "cs.dat"] {
+        ok(&pscat(
+            &dir,
+            &["--sweep-seed", "1:2", "--contact-sheet", name, path(&ps)],
+        ));
+        let bytes = std::fs::read(dir.join(name)).unwrap_or_else(|_| panic!("{name} not written"));
+        assert!(bytes.starts_with(b"\x89PNG"), "{name}");
+    }
+    for name in ["sh.PNG", "sh-noext", "sh.dat"] {
+        ok(&pscat(
+            &dir,
+            &["sheet", "-o", name, "--page", "40x40", path(&ps)],
+        ));
+        let bytes = std::fs::read(dir.join(name)).unwrap_or_else(|_| panic!("{name} not written"));
+        assert!(bytes.starts_with(b"\x89PNG"), "sheet {name}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A photo that is not a JPEG fails with a message naming what it is, from
 /// its first bytes, not with the library's internal `et-jpeg-not-a-jpeg`
 /// (#939). A JPEG still works (the other photo-etch tests cover that).

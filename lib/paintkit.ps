@@ -638,6 +638,9 @@
 % @param: /EndCap [name] /round, /flat, or /pointed; any other value is rejected (default /round)
 % @param: /Jitter [points] Seeded edge displacement amount, deterministic under the caller's own N srand (default 0)
 /pkribbon {
+    % Needs its options dict: with an empty stack the `exch def` below would
+    % underflow and leave a name on the stack, naming no missing operand (#947).
+    count 1 lt { pkribbon-needs-an-options-dict } if
     /pkopts exch def
     % Value options (/Width here, and /Pitch/StartTaper/EndTaper/Jitter/
     % StartCap/EndCap below) must not themselves be executable: binding
@@ -934,6 +937,9 @@
 % @param: /EndCap [name] /round, /flat, or /pointed, forwarded to pkribbon (default /round)
 % @param: /Jitter [points] Seeded edge displacement amount, forwarded to pkribbon (default 0)
 /pknib {
+    % Needs its options dict: with an empty stack the `exch def` below would
+    % underflow and leave a name on the stack, naming no missing operand (#947).
+    count 1 lt { pknib-needs-an-options-dict } if
     /pnopts exch def
 
     % One flag per subpath, from pkscanclosed, which is also the
@@ -1168,6 +1174,9 @@
 % @param: /ColorJitter [0..1] magnitude of small per-bristle color variation around the color active when pkdry is called (default 0.06)
 % @param: /Touch [0..1] How hard the brush presses into the shared canvas set by pkcanvas, which must be called first: below 1 the bristles land only on the weave's knuckles that stand proud enough for that pressure to reach, lower is lighter and 0 deposits nothing; 1 is full contact, identical to leaving it unset. Composes with /Load and /Dropout and takes no rand draws (default unset)
 /pkdry {
+    % Needs its options dict: with an empty stack the `exch def` below would
+    % underflow and leave a name on the stack, naming no missing operand (#947).
+    count 1 lt { pkdry-needs-an-options-dict } if
     /pbopts exch def
 
     /pbwidth pbopts /Width 6 pkgetdef def
@@ -1689,6 +1698,9 @@
 % @param: /StartBurst [0..1] extra particles pooled at each subpath's first stop (trigger dwell) (default 0)
 % @param: /EndBurst [0..1] extra particles pooled at each subpath's last stop (trigger dwell) (default 0)
 /pkspray {
+    % Needs its options dict: with an empty stack the `exch def` below would
+    % underflow and leave a name on the stack, naming no missing operand (#947).
+    count 1 lt { pkspray-needs-an-options-dict } if
     /pzopts exch def
 
     % Validation runs unconditionally, before any walking, even for an
@@ -2044,6 +2056,9 @@
 % @param: /HighlightColor [rgb array] the color the highlight ridge mixes toward, instead of white; /Highlight still sets how far; a bare pigment name such as /titaniumwhite stands for that pigment, and a pigmix spec goes through pigcolor (default unset: toward white)
 % @param: /ShadowColor [rgb array] the color the shadow ridge mixes toward, instead of black; /Shadow still sets how far; a bare pigment name such as /titaniumwhite stands for that pigment, and a pigmix spec goes through pigcolor (default unset: toward black)
 /pkoil {
+    % Needs its options dict: with an empty stack the `exch def` below would
+    % underflow and leave a name on the stack, naming no missing operand (#947).
+    count 1 lt { pkoil-needs-an-options-dict } if
     /poopts exch def
     /poWidth poopts /Width 14 pkgetdef def
     /poWidth load xcheck { pkoil-width-must-not-be-a-procedure } if
@@ -2592,6 +2607,9 @@
 % @param: /Light [degrees] with /Colors, the direction the light comes from, counterclockwise from +x in user space: each subpath puts the first color on the side facing the light, whichever way it travels (default unset: the first color stays on the left of the travel)
 % @param: /Touch [0..1] How hard the blade presses into the shared canvas set by pkcanvas, which must be called first: below 1 the mark lands only on the weave's knuckles that stand proud enough for that pressure to reach, lower is lighter and 0 deposits nothing; 1 is full contact, identical to leaving it unset. Takes no rand draws (default unset)
 /pktrowel {
+    % Needs its options dict: with an empty stack the `exch def` below would
+    % underflow and leave a name on the stack, naming no missing operand (#947).
+    count 1 lt { pktrowel-needs-an-options-dict } if
     /ptopts exch def
     /ptWidth ptopts /Width 24 pkgetdef def
     /ptWidth load xcheck { pktrowel-width-must-not-be-a-procedure } if
@@ -2962,6 +2980,9 @@
 % @param: /Colors [array of rgb arrays] 1 to 8 loaded colors across the blade, as in pktrowel (default unset)
 % @param: /Touch [0..1] How hard the blade presses into the canvas set by pkcanvas, as in pktrowel (default unset)
 /pktrowelplane {
+    % Needs its options dict: with an empty stack the `exch def` below would
+    % underflow and leave a name on the stack, naming no missing operand (#947).
+    count 1 lt { pktrowelplane-needs-an-options-dict } if
     /tplopts exch def
     /tplWidth tplopts /Width 24 pkgetdef def
     /tplWidth load xcheck { pktrowelplane-width-must-not-be-a-procedure } if
@@ -3727,6 +3748,9 @@
 % @param: /Light [degrees] with /Colors, the direction the light comes from, counterclockwise from +x in user space: each subpath puts the first color on the side facing the light, whichever way it travels; a pressed fan is never flipped (default unset: the first color stays on the left of the travel)
 % @param: /Touch [0..1] How hard the fan presses into the shared canvas set by pkcanvas, which must be called first: below 1 the bristles land only on the weave's knuckles that stand proud enough for that pressure to reach, lower is lighter and 0 deposits nothing; 1 is full contact, identical to leaving it unset. Composes with /Load and /Dropout and takes no rand draws (default unset)
 /pkfan {
+    % Needs its options dict: with an empty stack the `exch def` below would
+    % underflow and leave a name on the stack, naming no missing operand (#947).
+    count 1 lt { pkfan-needs-an-options-dict } if
     /pfopts exch def
     /pfWidth pfopts /Width 30 pkgetdef def
     /pfWidth load xcheck { pkfan-width-must-not-be-a-procedure } if
@@ -4367,6 +4391,9 @@
 % @param: /Light [degrees] with /Colors, the direction the light comes from, counterclockwise from +x in user space: each subpath puts the first color on the side facing the light, whichever way it travels (default unset: the first color stays on the left of the travel)
 % @param: /Touch [0..1] How hard the brush presses into the shared canvas set by pkcanvas, which must be called first: below 1 the band lands only on the weave's knuckles that stand proud enough for that pressure to reach, lower is lighter and 0 deposits nothing; 1 is full contact, identical to leaving it unset. Composes with /Charge and /Depletion and takes no rand draws (default unset)
 /pkbroad {
+    % Needs its options dict: with an empty stack the `exch def` below would
+    % underflow and leave a name on the stack, naming no missing operand (#947).
+    count 1 lt { pkbroad-needs-an-options-dict } if
     /pmopts exch def
     /pmWidth pmopts /Width 40 pkgetdef def
     /pmWidth load xcheck { pkbroad-width-must-not-be-a-procedure } if
@@ -4981,6 +5008,9 @@
 % @param: /ColorJitter [0..1] one small tint shift per subpath -- one dip of the brush is one tint (default 0.05)
 % @param: /Touch [0..1] How hard the tip presses into the shared canvas set by pkcanvas, which must be called first: below 1 the line lands only on the weave's knuckles that stand proud enough for that pressure to reach, lower is lighter and 0 deposits nothing; 1 is full contact, identical to leaving it unset. Composes with /Charge and /Depletion and takes no rand draws (default unset)
 /pkliner {
+    % Needs its options dict: with an empty stack the `exch def` below would
+    % underflow and leave a name on the stack, naming no missing operand (#947).
+    count 1 lt { pkliner-needs-an-options-dict } if
     /pqopts exch def
     /pqWidth pqopts /Width 2.4 pkgetdef def
     /pqWidth load xcheck { pkliner-width-must-not-be-a-procedure } if
@@ -6230,6 +6260,9 @@
 % @param: /Smooth [0..1] With /Direction only: how smoothly the across-wobble changes from pass to pass. 0 draws each pass's wobble independently, so neighbouring passes sit up to /Stretch's reach apart and a pull's side edges stagger in steps (the default, exactly as before); toward 1 each pass keeps more of the one before it (per side, for a sweep), so the edge wanders slowly instead, as far as 1, where every pass keeps the first draw, so the whole pull shears one way. The wobble's size is still /Stretch's; 0.8 to 0.9 reads as a slowly drifting edge, with far fewer steps, on a pull of about 30 passes. It takes the same one draw per pass either way, so it never re-rolls a later mark (default 0)
 % @param: /OneSided [boolean] With /Direction only: true puts every pass on the +Direction side (a pull down, a lift up); false alternates sides, a sweep both ways (default false)
 /pkwet {
+    % Needs a-procedure and an options dict: with fewer operands the `exch def`
+    % below would underflow and leave a name on the stack (#947).
+    count 2 lt { pkwet-needs-a-procedure-and-an-options-dict } if
     /pqopts exch def
     /pqproc exch def
     /pqproc load xcheck
@@ -6941,6 +6974,9 @@ systemdict /setalpha known /pwhasalpha exch def
 % @param: /Pitch [points] Boundary sampling pitch; must be > 0 (default the path's own perimeter/180, clamped to 0.6..4)
 % @param: /Seed [integer] Integer seed for this wash alone, leaving the caller's rand stream untouched (default: one rand draw from the caller's stream)
 /pkwash {
+    % Needs its options dict: with an empty stack the `exch def` below would
+    % underflow and leave a name on the stack, naming no missing operand (#947).
+    count 1 lt { pkwash-needs-an-options-dict } if
     /pwopts exch def
 
     % Validation runs unconditionally, before the path is looked at --
@@ -7695,6 +7731,9 @@ systemdict /setalpha known /pwhasalpha exch def
 % @param: /HighlightColor [rgb array] the color the lighter dabs on the lit side mix toward, instead of white; /Highlight still sets how far; a bare pigment name such as /titaniumwhite stands for that pigment, and a pigmix spec goes through pigcolor (default unset: toward white)
 % @param: /ShadowColor [rgb array] the color the darker underlayer mixes toward, instead of black; /Shadow still sets how far; a bare pigment name such as /titaniumwhite stands for that pigment, and a pigmix spec goes through pigcolor (default unset: toward black)
 /pkdab {
+    % Needs its options dict: with an empty stack the `exch def` below would
+    % underflow and leave a name on the stack, naming no missing operand (#947).
+    count 1 lt { pkdab-needs-an-options-dict } if
     /pdopts exch def
     /pdsize pdopts /Size 6 pkgetdef def
     /pdsize load xcheck { pkdab-size-must-not-be-a-procedure } if
@@ -9444,6 +9483,9 @@ systemdict /setalpha known /pwhasalpha exch def
 % @param: /LengthJitter [fraction of /Length] 0..1 how far each stroke's length varies around /Length (default 0.3)
 % @param: /Bow [fraction of stroke length] 0..0.5 sideways bend of each stroke as a fraction of its length; 0 is straight (default 0)
 /pkcrisscross {
+    % Needs a-region and an options dict: with fewer operands the `exch def`
+    % below would underflow and leave a name on the stack (#947).
+    count 2 lt { pkcrisscross-needs-a-region-and-an-options-dict } if
     /mxopts exch def /mxreg exch def
     mxreg mhisregion not { pkcrisscross-needs-a-region } if
     /mxcount mxopts /Count 40 pkgetdef def
@@ -9520,6 +9562,9 @@ systemdict /setalpha known /pwhasalpha exch def
 % @param: /Reach [fraction of the region's depth along the light] With /Light, how deep the lit band reaches in from the edge facing the light, > 0 and <= 1; the depth is the length of the line through the region's bounding box centre in the light's direction, so 0.3 lights about the outer 30% of a round mass, and a band stays in proportion when the region is resized (default 0.3)
 % @param: /Feather [0..1] With /Light, how much of /Reach is a graded border: circles in the inner /Feather part of the band thin out toward the shadow instead of stopping on a hard line; 0 is a hard edge (default 0.5)
 /pkscumblein {
+    % Needs a-region and an options dict: with fewer operands the `exch def`
+    % below would underflow and leave a name on the stack (#947).
+    count 2 lt { pkscumblein-needs-a-region-and-an-options-dict } if
     /mcopts exch def /mcreg exch def
     mcreg mhisregion not { pkscumblein-needs-a-region } if
     /mccount mcopts /Count 60 pkgetdef def
@@ -9614,6 +9659,9 @@ systemdict /setalpha known /pwhasalpha exch def
 % @param: /RadiusJitter [fraction of /Radius] 0..1 how far each loop's radius varies around /Radius; blended smoothly between loops (default 0.3)
 % @param: /Squash [ratio] Radius across the line as a fraction of the radius along it, > 0 and <= 1 (default 1)
 /pkscumble {
+    % Needs its options dict: with an empty stack the `exch def` below would
+    % underflow and leave a name on the stack, naming no missing operand (#947).
+    count 1 lt { pkscumble-needs-an-options-dict } if
     /msopts exch def
     /msrad msopts /Radius 4 pkgetdef def
     /msrad load xcheck { pkscumble-radius-must-not-be-a-procedure } if
@@ -9686,6 +9734,9 @@ systemdict /setalpha known /pwhasalpha exch def
 % @param: /Scatter [points] Random offset of each tap from the spine, in points; must be >= 0 (default 3)
 % @param: /LengthJitter [fraction of /Length] 0..1 how far each stab's length varies around /Length (default 0.5)
 /pktap {
+    % Needs its options dict: with an empty stack the `exch def` below would
+    % underflow and leave a name on the stack, naming no missing operand (#947).
+    count 1 lt { pktap-needs-an-options-dict } if
     /mtopts exch def
     /mtspacing mtopts /Spacing 8 pkgetdef def
     /mtspacing load xcheck { pktap-spacing-must-not-be-a-procedure } if
@@ -9737,6 +9788,9 @@ systemdict /setalpha known /pwhasalpha exch def
 % @param: /Bow [fraction of stroke length] 0..0.5 sideways bend of each pull as a fraction of its length, to either side at random; 0 is straight (default 0)
 % @param: /Scatter [points] Random offset of each stroke's start from the spine, in points, to either side across it (along its normal; /Wander already slides starts along it); must be >= 0. Unset, every start lies exactly on the spine; set (even to 0) it draws one more random value per stroke (default unset)
 /pkpull {
+    % Needs its options dict: with an empty stack the `exch def` below would
+    % underflow and leave a name on the stack, naming no missing operand (#947).
+    count 1 lt { pkpull-needs-an-options-dict } if
     /mpopts exch def
     /mplen mpopts /Length 30 pkgetdef def
     /mplen load xcheck { pkpull-length-must-not-be-a-procedure } if
@@ -9844,6 +9898,9 @@ systemdict /setalpha known /pwhasalpha exch def
 % @param: /AmpJitter [fraction of /Amplitude] 0..1 how far each peak's height varies around /Amplitude (default 0.3)
 % @param: /WaveJitter [0..1] how far each peak slides along the spine from its even slot (default 0.2)
 /pkzigzag {
+    % Needs its options dict: with an empty stack the `exch def` below would
+    % underflow and leave a name on the stack, naming no missing operand (#947).
+    count 1 lt { pkzigzag-needs-an-options-dict } if
     /mzopts exch def
     /mzamp mzopts /Amplitude 6 pkgetdef def
     /mzamp load xcheck { pkzigzag-amplitude-must-not-be-a-procedure } if
@@ -10423,6 +10480,9 @@ systemdict /setalpha known /pwhasalpha exch def
 % @param: /CrispSeed [0..1] where the crisp stretches fall: they depend only on this seed and the arc length along each subpath, so two calls with one seed leave the same stretches crisp at any spacing; pkbrushedge gives both its passes one seed this way (default one draw from frnd, taken whether or not the key is given)
 % @param: /Outward [degrees] For an open subpath only: the direction that is out of the mass, counterclockwise from +x in user space; each open subpath brushes out on whichever side of it faces this way. Closed subpaths ignore it (default 90, up)
 /pkfeather {
+    % Needs its options dict: with an empty stack the `exch def` below would
+    % underflow and leave a name on the stack, naming no missing operand (#947).
+    count 1 lt { pkfeather-needs-an-options-dict } if
     /mfopts exch def
     /mfopts load type /dicttype ne { pkfeather-needs-an-options-dict } if
     /mftoward mfopts /Toward /out pkgetdef def
@@ -10892,6 +10952,9 @@ systemdict /setalpha known /pwhasalpha exch def
 % @param: /InLength [fraction of /Length] the inward strokes' length as a fraction of the outward ones'; must be > 0. Each inward stroke covers the stretch of the normal an outward one does (its /Overlap is mirrored), so most of it lies outside the mass and only its tip cuts in (default 1)
 % @param: /InSpacing [multiple of /Spacing] the inward strokes' spacing as a multiple of the outward ones'; must be > 0. Sparser cuts nick the edge; as dense as the outward strokes, they rule a pale band just inside it (default 2)
 /pkbrushedge {
+    % Needs its options dict: with an empty stack the `exch def` below would
+    % underflow and leave a name on the stack, naming no missing operand (#947).
+    count 1 lt { pkbrushedge-needs-an-options-dict } if
     /peopts0 exch def
     /peopts0 load type /dicttype ne { pkbrushedge-needs-an-options-dict } if
     peopts0 /Toward known { pkbrushedge-sets-toward-itself } if
@@ -11425,6 +11488,9 @@ systemdict /setalpha known /pwhasalpha exch def
 % @param: /Mottle [points] Scale of the slow variation in how proud the weave stands, in canvas-space points; must be > 0. Larger gives broader patches of catch and miss (default Weave*8)
 % @param: /Relief [0..1] How much the slow mottle, rather than each knuckle's own random height, decides which knuckles stand proud: 0 is an even speckled weave, 1 is all patches (default 0.7)
 /pkcanvas {
+    % Needs its options dict: with an empty stack the `exch def` below would
+    % underflow and leave a name on the stack, naming no missing operand (#947).
+    count 1 lt { pkcanvas-needs-an-options-dict } if
     /pjopts exch def
 
     % Every guard runs before any state is written, so a rejected call
@@ -11470,3 +11536,82 @@ systemdict /setalpha known /pwhasalpha exch def
     userdict /pjR pjsrelief put
     userdict /pjmemo 1024 dict put
 } bind def
+
+%%SelfTest: presets-reject-too-few-operands
+%   % #947 (after #932): every preset and motion takes an options dict, some
+%   % a procedure or region first. Called with too few operands each used to
+%   % underflow in its first `exch def`, leaving that name on the stack and
+%   % saying nothing about what was missing. Each now names its operands
+%   % before it consumes anything. The stack is empty here, so the dict-only
+%   % form of a two-operand call is the one that checks the count of two.
+%   { pkribbon }
+%   /pkribbon-needs-an-options-dict
+%   (no operands at all to pkribbon) mustguard
+%   { pknib }
+%   /pknib-needs-an-options-dict
+%   (no operands at all to pknib) mustguard
+%   { pkdry }
+%   /pkdry-needs-an-options-dict
+%   (no operands at all to pkdry) mustguard
+%   { pkspray }
+%   /pkspray-needs-an-options-dict
+%   (no operands at all to pkspray) mustguard
+%   { pkoil }
+%   /pkoil-needs-an-options-dict
+%   (no operands at all to pkoil) mustguard
+%   { pktrowel }
+%   /pktrowel-needs-an-options-dict
+%   (no operands at all to pktrowel) mustguard
+%   { pktrowelplane }
+%   /pktrowelplane-needs-an-options-dict
+%   (no operands at all to pktrowelplane) mustguard
+%   { pkfan }
+%   /pkfan-needs-an-options-dict
+%   (no operands at all to pkfan) mustguard
+%   { pkbroad }
+%   /pkbroad-needs-an-options-dict
+%   (no operands at all to pkbroad) mustguard
+%   { pkliner }
+%   /pkliner-needs-an-options-dict
+%   (no operands at all to pkliner) mustguard
+%   { pkwash }
+%   /pkwash-needs-an-options-dict
+%   (no operands at all to pkwash) mustguard
+%   { pkdab }
+%   /pkdab-needs-an-options-dict
+%   (no operands at all to pkdab) mustguard
+%   { pkscumble }
+%   /pkscumble-needs-an-options-dict
+%   (no operands at all to pkscumble) mustguard
+%   { pktap }
+%   /pktap-needs-an-options-dict
+%   (no operands at all to pktap) mustguard
+%   { pkpull }
+%   /pkpull-needs-an-options-dict
+%   (no operands at all to pkpull) mustguard
+%   { pkzigzag }
+%   /pkzigzag-needs-an-options-dict
+%   (no operands at all to pkzigzag) mustguard
+%   { pkfeather }
+%   /pkfeather-needs-an-options-dict
+%   (no operands at all to pkfeather) mustguard
+%   { pkbrushedge }
+%   /pkbrushedge-needs-an-options-dict
+%   (no operands at all to pkbrushedge) mustguard
+%   { pkcanvas }
+%   /pkcanvas-needs-an-options-dict
+%   (no operands at all to pkcanvas) mustguard
+%   { << >> pkwet }
+%   /pkwet-needs-a-procedure-and-an-options-dict
+%   (pkwet with only an options dict) mustguard
+%   { << >> pkcrisscross }
+%   /pkcrisscross-needs-a-region-and-an-options-dict
+%   (pkcrisscross with only an options dict) mustguard
+%   { << >> pkscumblein }
+%   /pkscumblein-needs-a-region-and-an-options-dict
+%   (pkscumblein with only an options dict) mustguard
+%
+%   % ...while a documented call still works.
+%   { newpath 0 0 moveto 40 0 lineto << /Width 6 >> pkribbon }
+%   (a path and an options dict to pkribbon) mustpass
+%%EndSelfTest

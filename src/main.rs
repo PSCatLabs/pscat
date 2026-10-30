@@ -1086,11 +1086,11 @@ const RUN_ERROR_CHECK: &str = "run-error";
 
 /// `--lint`: print findings to stderr, one per line, prefixed
 /// `pscat: lint:` so a caller can grep for them (or, for `pscat-mcp`,
-/// parse them back out of the child's stderr). Runs regardless of `ok`
-/// — a blank page after a crash is exactly the kind of thing lint
-/// should still surface. Returns whether anything was found, which is
-/// what `--lint-strict` turns into a non-zero exit; plain `--lint`
-/// stays advisory, as it has been since issue #17.
+/// parse them back out of the child's stderr). Returns whether anything
+/// was found, which is what `--lint-strict` turns into a non-zero exit;
+/// plain `--lint` stays advisory, as it has been since issue #17. After
+/// an error (`ok` false) it prints the `run-error` line and no findings:
+/// they would be consequences of the abort, not of the program (#947).
 ///
 /// `ok` is whether the program ran to the end. An errored run is never
 /// "clean" (issue #369): the verdict line used to say so right under the
@@ -1141,6 +1141,11 @@ pub(crate) fn print_lint(
         eprintln!(
             "pscat: lint: [{RUN_ERROR_CHECK}] the run ended in an error (see the report above), so this is not a clean run"
         );
+        // Every other check reads end-of-run state, so after an abort it
+        // reports the abort (a blank page, an unbalanced gsave, a leaked
+        // dict), not the program (#947, as `pscat-mcp` since #942). The
+        // errored run fails on its own, whatever `--lint-strict` says.
+        return true;
     }
     if findings.is_empty() {
         if ok {
@@ -2091,6 +2096,12 @@ fn parse_args() -> Result<Options, String> {
         ("--png", &options.png, subcmd::Format::Png),
         ("--svg", &options.svg, subcmd::Format::Svg),
         ("--pdf", &options.pdf, subcmd::Format::Pdf),
+        // Always a PNG, whatever the name (#947).
+        (
+            "--contact-sheet",
+            &options.contact_sheet,
+            subcmd::Format::Png,
+        ),
     ] {
         if let Some(path) = path {
             subcmd::check_output_name(flag, path, format)?;

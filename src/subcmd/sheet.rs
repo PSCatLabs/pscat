@@ -21,7 +21,7 @@ use pscat::contact_sheet::{self as sheet, CellSize, Layout, PackedRow};
 use pscat::{Interp, Limits};
 use tiny_skia::Pixmap;
 
-use super::{Args, Failure, dpi, page_dim, take_limit_flag};
+use super::{Args, Failure, Format, check_output_name, dpi, page_dim, take_limit_flag};
 use crate::{SweepValue, format_sweep_value, parse_seed_spec, parse_sweep_spec};
 
 const USAGE: &str = r#"usage: pscat sheet [options] FILE.ps [FILE.ps ...]
@@ -186,6 +186,9 @@ pub(super) fn run(args: Args) -> Result<(), Failure> {
         println!("{USAGE}");
         return Err(Failure::Done);
     };
+    // The sheet is always a PNG: a name for another image or document type
+    // is refused before anything renders or is written (#938, #947).
+    check_output_name("-o", &opts.out, Format::Png).map_err(usage)?;
     if opts.entries.is_empty() {
         return Err(usage("no files given".into()));
     }

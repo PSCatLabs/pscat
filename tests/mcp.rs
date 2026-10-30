@@ -805,6 +805,15 @@ fn out_path_needs_the_extension_of_the_output_format() {
         ".png",
         "x.",
         "x.pdf",
+        // The CLI refuses these by name (`check_output_name`, #938); the
+        // server refuses every name without its own extension, so it agrees
+        // with that rule and is stricter on top (#947).
+        "x.jpg",
+        "x.JPEG",
+        "x.gif",
+        "x.webp",
+        "x.ps",
+        "x.eps",
     ] {
         let result = render_to(&mut s, bad);
         assert_refused_with_extension(&result, ".png");
