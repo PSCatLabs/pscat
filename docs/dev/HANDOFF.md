@@ -883,6 +883,13 @@ renders eight examples in both and compares block-downsampled output).
    only when `chalk::is_tex_length` reads it as a length (`2pt`, `-1.5em`,
    `0.5\baselineskip`); otherwise it is the next row's content, so a
    commutator `\\ [x,y] = 0` survives (`notes/936-chalk-row-bracket.md`).
+   #934/#935: logic, set and geometry symbols (∧ ∨ ⊢ ⊬ ⊨ ⊤ ↔ ∄ ⊕ ⊗ † ‡ ∅ ∠
+   △ ≅ ℜ ℑ) and `\mathbf`/`\mathbb`/`\mathcal`: strokeglyphs' `/x.bf` (each
+   stroke re-traced, derived at load), `/R.bb` (a doubled stem from
+   `sgbbextra`) and authored `/L.cal`; mathkit's alphabet is `mkFont`, reset
+   per formula by `mkparsetop`. `pscat chalk --help` prints the subset
+   (`SUBSET`, checked against `mkcmds` by tests/chalk.rs)
+   (`notes/934-chalk-logic-symbols-math-alphabets.md`).
    #713: on the no-board overlay (touch 0.34, so grain shows) the radical's
    long bar and small strokes broke into gaps; drychalk's `/Firm` (default 0:
    byte-identical, `identity_check.sh --loader lib/drychalk.ps`) holds the

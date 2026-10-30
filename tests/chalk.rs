@@ -444,8 +444,8 @@ fn unsupported_input_fails_with_the_named_error() {
     let dir = scratch("errors");
     for (tex, says, code) in [
         (
-            r"a \oplus b",
-            r"unsupported LaTeX command \oplus",
+            r"a \aleph b",
+            r"unsupported LaTeX command \aleph",
             "unsupported_command",
         ),
         ("a @ b", "unsupported character: @", "unsupported_character"),
@@ -501,6 +501,48 @@ fn separate_inline_pairs_render_as_one_formula() {
         let png = chalk::render(tex, &small(), Format::Png).unwrap();
         assert_eq!(png, bare, "{tex}: not the board of `a + b`");
     }
+}
+
+/// `pscat chalk --help` lists the LaTeX it knows (issue #934): every
+/// control word it names is a command mathkit's table has, so the list
+/// never promises one that fails.
+#[test]
+fn help_lists_only_supported_commands() {
+    let dir = scratch("help");
+    let out = pscat(&dir, &["chalk", "--help"], None);
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    let list = &text[text.find("Supported LaTeX").expect("the subset in --help")..];
+    let mut words: Vec<&str> = list
+        .split('\\')
+        .skip(1)
+        .map(|w| {
+            w.split(|c: char| !c.is_ascii_alphabetic())
+                .next()
+                .unwrap_or("")
+        })
+        .filter(|w| !w.is_empty())
+        .collect();
+    words.sort_unstable();
+    words.dedup();
+    assert!(words.len() > 100, "too few commands listed: {words:?}");
+    // handled by the parser itself, not the command table
+    let parser = ["right", "end"];
+    let src: String = words
+        .iter()
+        .filter(|w| !parser.contains(w))
+        .map(|w| format!("mkcmds /{w} known not {{ ({w}) = }} if\n"))
+        .collect();
+    let mut it = Interp::new();
+    it.capture_stdout();
+    it.run_str(&format!(
+        "(lib/handscript.ps) run (lib/strokeglyphs.ps) run (lib/mathkit.ps) run\n{src}"
+    ))
+    .unwrap_or_else(|e| panic!("{}", it.error_report(&e)));
+    let missing = String::from_utf8_lossy(it.captured_stdout()).into_owned();
+    assert!(
+        missing.is_empty(),
+        "--help lists unknown commands: {missing}"
+    );
 }
 
 /// Single-backslash LaTeX works end to end: the commands whose first

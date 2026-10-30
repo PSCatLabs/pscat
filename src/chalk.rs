@@ -184,7 +184,7 @@ pub enum ChalkError {
     /// The TeX is outside mathkit's subset or malformed. `kind` is
     /// mathkit's error without its `mk-` prefix (`unsupported-command`,
     /// `unsupported-character`, `missing-argument`, ...), `token` what it
-    /// named (`\oplus`, `@`; empty if nothing).
+    /// named (`\aleph`, `@`; empty if nothing).
     Latex {
         /// mathkit's error name, without `mk-`.
         kind: String,
@@ -217,7 +217,7 @@ impl fmt::Display for ChalkError {
             ChalkError::Latex { kind, token } => match kind.as_str() {
                 "unsupported-command" => write!(
                     f,
-                    "unsupported LaTeX command {token} (the supported subset is listed at the top of lib/mathkit.ps)"
+                    "unsupported LaTeX command {token} (`pscat chalk --help` lists the supported subset)"
                 ),
                 "unsupported-character" => {
                     write!(f, "unsupported character: {token}")?;
@@ -1832,11 +1832,11 @@ mod tests {
 
     #[test]
     fn mathkit_errors_become_named_latex_errors() {
-        let e = explain(&PsError::Undefined(r"mk-unsupported-command:\oplus".into())).unwrap();
+        let e = explain(&PsError::Undefined(r"mk-unsupported-command:\aleph".into())).unwrap();
         assert_eq!(e.code(), "unsupported_command");
         assert!(
             e.to_string()
-                .starts_with(r"unsupported LaTeX command \oplus")
+                .starts_with(r"unsupported LaTeX command \aleph")
         );
         let e = explain(&PsError::Undefined("mk-unsupported-character:@".into())).unwrap();
         assert_eq!(e.to_string(), "unsupported character: @");

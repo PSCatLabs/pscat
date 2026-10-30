@@ -57,6 +57,13 @@
 %                                 \text{}, \mathrm{} and \operatorname{} it is
 %                                 the raised text asterisk, as TeX sets it
 %   \hbar \ell \iota \upsilon \Upsilon \langle \rangle \|  letters, brackets
+%   \wedge \land \vee \lor \oplus \otimes \dagger \ddagger   binary operators
+%   \vdash \nvdash \models \leftrightarrow \cong            relations
+%   \top \bot \nexists \emptyset \varnothing \angle \triangle \Re \Im
+%                                 symbols (issues #934, #935)
+%   \mathbf{...}                  letters and digits re-traced, heavier
+%   \mathbb{R} \mathcal{L}        blackboard bold, script capitals (capital
+%                                 letters only, as in TeX)
 %   \varphi \vartheta \varkappa \varrho \varpi \varsigma   variant Greek;
 %   \epsilon is the lunate ϵ and \varepsilon the three-shaped ε, as in TeX
 %   (before issue #366 both drew the three-shaped one)
@@ -77,7 +84,7 @@
 %                                 as TeX gather sets its rows (the default,
 %                                 /relation, is align's: on the & or relation)
 % Anything else fails with an undefined name that says what it was:
-% `mk-unsupported-command:\oplus`, `mk-unsupported-character:@`, and so
+% `mk-unsupported-command:\aleph`, `mk-unsupported-character:@`, and so
 % on. Nothing is dropped silently. `$` is ignored, so ($x^2$) works.
 %
 % --- Layout ---------------------------------------------------------
@@ -210,6 +217,18 @@
   /substack [/do /mkcsubstack]
   /not [/do /mkcnot] /bmod [/do /mkcbmod] /pmod [/do /mkcpmod]
   /mod [/do /mkcmod] /pod [/do /mkcpod]
+  % logic, sets and geometry (issues #934, #935)
+  /wedge [/sym /logicaland] /land [/sym /logicaland]
+  /vee [/sym /logicalor] /lor [/sym /logicalor]
+  /vdash [/sym /turnstile] /nvdash [/sym /notturnstile] /models [/sym /models]
+  /top [/sym /uptack] /bot [/sym /perpendicular /ord]
+  /leftrightarrow [/sym /arrowboth] /nexists [/sym /notexistential]
+  /oplus [/sym /circleplus] /otimes [/sym /circlemultiply]
+  /dagger [/sym /dagger] /ddagger [/sym /daggerdbl]
+  /emptyset [/sym /emptyset] /varnothing [/sym /emptyset]
+  /angle [/sym /angle] /triangle [/sym /triangle] /cong [/sym /congruent]
+  /Re [/sym /Rfractur] /Im [/sym /Ifractur]
+  /mathbf [/do /mkcfont] /mathbb [/do /mkcfont] /mathcal [/do /mkcfont]
 >> def
 
 % Printable ASCII that is not a letter or digit -> [glyph class]. The
@@ -639,7 +658,11 @@
     mk-control-character:write-each-TeX-backslash-as-\\
   } if
   dup 128 ge { mkutf8 } {
-    dup 48 ge 1 index 57 le and { mkadv mkdigits exch 48 sub get /ord mksymatom } {
+    dup 48 ge 1 index 57 le and {
+      mkadv mkdigits exch 48 sub get
+      mkFont null ne { mkfontname } if
+      /ord mksymatom
+    } {
       dup mkisletter { mkletter } {
         mkascii 1 index known { mkadv mkascii exch get aload pop mksymatom } {
           mkadv 1 string dup 0 4 -1 roll put
@@ -654,12 +677,51 @@
 % byte -> atom
 % @internal
 /mkletter {
-  mkpos 0 eq { true } { mksrc mkpos 1 sub get mkisletter not } ifelse
-  { mkbareword } if
+  % inside \mathbf{} and friends a run of letters is letters (\mathbf{max})
+  mkFont null eq {
+    mkpos 0 eq { true } { mksrc mkpos 1 sub get mkisletter not } ifelse
+    { mkbareword } if
+  } if
   mkadv
   1 string dup 0 4 -1 roll put cvn
-  mkHand { mkhand 1 index known { mkhand exch get } if } if
+  % the board hand's x (never ×) and friends, bold too
+  mkFont null eq mkFont (.bf) eq or {
+    mkHand { mkhand 1 index known { mkhand exch get } if } if
+  } if
+  mkFont null ne { mkfontname } if
   /ord mksymatom
+} bind def
+
+% name -> name   a letter or digit in the alphabet \mathbf, \mathbb or
+% \mathcal chose (strokeglyphs' /x.bf, /R.bb, /L.cal); blackboard bold and
+% calligraphic have capitals only, as in TeX
+% @internal
+/mkfontname {
+  64 string cvs dup mkFont mkcat cvn
+  sgtab 1 index known { exch pop } {
+    pop pop
+    mkFont (.bb) eq { (mk-mathbb-takes-capital-letters:) } {
+      (mk-mathcal-takes-capital-letters:) } ifelse
+    % the character just read, not its glyph name (1, not one)
+    mksrc mkpos 1 sub 1 getinterval mkfail
+  } ifelse
+} bind def
+
+% (cmd) -> atom   \mathbf{...}, \mathbb{...}, \mathcal{...}: the argument
+% with its letters (and, for \mathbf, digits) in that alphabet; Greek,
+% operators and the rest as they are, as TeX sets them. The previous
+% alphabet comes back after the argument, so they nest.
+% @internal
+/mkcfont {
+  /mkfc exch def
+  mkFont
+  /mkFont mkfc (mathbf) eq { (.bf) } {
+    mkfc (mathbb) eq { (.bb) } { (.cal) } ifelse
+  } ifelse mkset
+  (\\) mkfc mkcat mkarg
+  exch /mkFont exch mkset
+  /mkfl exch def
+  << /T /group /L mkfl /C /ord /K mknewk >>
 } bind def
 
 % - -> -   A run of letters that is a supported command lost its
@@ -672,6 +734,10 @@
   /mkpos mkbw0 mkset
   mkcmds mkbw cvn known
   mkbw length 3 ge mkbw (pi) eq or mkbw (mu) eq or mkbw (xi) eq or and
+  % (\top) and (\bot) lose a tab or a backspace, not just the backslash,
+  % and the control-character check names those; bare, they are words
+  % (x_{top}, E_{bot})
+  mkbw (top) ne mkbw (bot) ne and and
   { (mk-bare-word-needs-a-backslash:) mkbw mkfail } if
 } bind def
 
@@ -1105,6 +1171,8 @@
   /mklen mksrc length mkset
   /mkpos 0 mkset
   /mkK 0 mkset
+  % no alphabet carries over from a formula that stopped inside \mathbf{
+  /mkFont null mkset
   mkscratch /mkgmslant known not { /mkgmslant null mkset } if
   mkgmslant mkSlant ne { /mkgm 64 dict mkset /mkgmslant mkSlant mkset } if
   /top mkparse pop
@@ -2492,12 +2560,12 @@
 %   /mk-control-character:write-each-TeX-backslash-as-\\ (a form feed from \f) mustguard
 %   { (\\iiiint f) 0 0 << >> mkpath } /mk-unsupported-command:\iiiint (\iiiint) mustguard
 %   { (a @ b) 0 0 << >> mkpath } /mk-unsupported-character:@ (an at sign) mustguard
-%   { (⊕) 0 0 << >> mkpath } /mk-unsupported-character:⊕ (a circled plus) mustguard
+%   { (⊛) 0 0 << >> mkpath } /mk-unsupported-character:⊛ (a circled asterisk) mustguard
 %   { (\\left< x \\right>) 0 0 << >> mkpath } (mk-unsupported-delimiter:<) cvn
 %   (an angle bracket delimiter) mustguard
 %   { (\\left\\lceil x \\right.) 0 0 << >> mkpath } /mk-unsupported-delimiter:\lceil
 %   (\lceil) mustguard
-%   { (\\oplus) 0 0 << >> mkpath } /mk-unsupported-command:\oplus (\oplus) mustguard
+%   { (\\aleph) 0 0 << >> mkpath } /mk-unsupported-command:\aleph (\aleph) mustguard
 %   { (\\begin{array} x \\end{array}) 0 0 << >> mkpath }
 %   /mk-unsupported-environment:array (the array environment) mustguard
 %   { (x^) 0 0 << >> mkpath } /mk-missing-argument:^ (a superscript with nothing) mustguard
@@ -2527,6 +2595,12 @@
 %   { (x_{max}) 0 0 << >> mkpath } /mk-bare-word-needs-a-backslash:max
 %   (the letters of an operator name) mustguard
 %   { (x_{\\text{max}} + \\$) 0 0 << >> mkpath } /mk-unsupported-command:\$ (\$) mustguard
+%   { (\\mathbb{x}) 0 0 << >> mkpath } /mk-mathbb-takes-capital-letters:x
+%   (a lowercase letter in blackboard bold) mustguard
+%   { (\\mathcal{2}) 0 0 << >> mkpath } /mk-mathcal-takes-capital-letters:2
+%   (a digit in calligraphic) mustguard
+%   { (\\frac{\\mathbb{R x}}{2}) 0 0 << >> mkpath } /mk-mathbb-takes-capital-letters:x
+%   (a lowercase letter in blackboard bold, nested) mustguard
 %%EndSelfTest
 %
 %%SelfTest: errors-leave-the-stacks-as-they-were
@@ -2538,7 +2612,7 @@
 %     true 0 1 5 { dup mkt-m0 exch get exch matrix currentmatrix exch get eq and } for
 %   } def
 %   /mkt-sentinel
-%   { (\\frac{\\left[ \\begin{pmatrix} a & \\oplus}{b}) 0 0 << >> mkpath } stopped
+%   { (\\frac{\\left[ \\begin{pmatrix} a & \\aleph}{b}) 0 0 << >> mkpath } stopped
 %   (an error deep inside nested groups is raised) mustbe
 %   /mkt-sentinel eq (the operand stack is cut back to the call, no further) mustbe
 %   countdictstack mkt-d0 eq (the dictionary stack is unwound) mustbe
@@ -2548,10 +2622,18 @@
 %   /mkt-sentinel eq (and cuts the operand stack back to the call) mustbe
 %   countdictstack mkt-d0 eq (and unwinds the dictionary stack) mustbe
 %   /mkt-sentinel
-%   { (\\sum_{\\substack{a \\\\ \\oplus}} x) 0 0 << >> mkpath } stopped
+%   { (\\sum_{\\substack{a \\\\ \\aleph}} x) 0 0 << >> mkpath } stopped
 %   (an error inside a substack row is raised) mustbe
 %   /mkt-sentinel eq (and cuts the operand stack back past its rows) mustbe
 %   countdictstack mkt-d0 eq (and unwinds the dictionary stack) mustbe
+%   /mkt-xw (x + 1) << /Seed 3 >> mkmetrics /Width get def
+%   /mkt-sentinel
+%   { (\\frac{\\mathbf{\\mathbb{R x}}}{2}) 0 0 << >> mkpath } stopped
+%   (an error inside nested alphabets is raised) mustbe
+%   /mkt-sentinel eq (and cuts the operand stack back past the saved alphabets) mustbe
+%   countdictstack mkt-d0 eq (and unwinds the dictionary stack) mustbe
+%   (x + 1) << /Seed 3 >> mkmetrics /Width get mkt-xw eq
+%   (and the next formula is written in no alphabet) mustbe
 %   mkt-ctm-same (and keeps the CTM) mustbe
 %   /mkt-sentinel
 %   [ (a) (b) ] 0 0 << /Ink { pop newpath } >> mkalign
@@ -2567,9 +2649,9 @@
 %   % a mathkit call nested in /Ink fails: the outer call still unwinds to
 %   % its own depths, not the inner one's
 %   /mkt-sentinel
-%   { [ (a) (b) ] 100 100 << /Ink { pop 30 rotate 7 7 (\\oplus) 0 0 << >> mkpath } >> mkalign }
+%   { [ (a) (b) ] 100 100 << /Ink { pop 30 rotate 7 7 (\\aleph) 0 0 << >> mkpath } >> mkalign }
 %   stopped (a nested error is raised) mustbe
-%   $error /command get (mk-unsupported-command:\\oplus) cvn eq
+%   $error /command get (mk-unsupported-command:\\aleph) cvn eq
 %   (it names the nested guard) mustbe
 %   /mkt-sentinel eq (the outer call cuts the operand stack back to its own base) mustbe
 %   countdictstack mkt-d0 eq (and the dictionary stack to its own depth) mustbe

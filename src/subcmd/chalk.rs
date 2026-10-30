@@ -40,8 +40,43 @@ Write the LaTeX as you would in a document: single backslashes, \\ between
 rows, & to align them; quote it for the shell. A bracket right after \\ is
 TeX's row spacing (\\[2pt]) only when it holds a length; otherwise
 (\\ [x,y] = 0) it starts the next row, and \left[ ... \right] is always a
-bracket. The supported subset is mathkit's (the top of lib/mathkit.ps).
-Flags override the config. A formula that starts with "-" goes after "--"."#;
+bracket. Flags override the config. A formula that starts with "-" goes after
+"--". `pscat chalk --help` also lists the LaTeX it knows."#;
+
+/// The LaTeX `pscat chalk` knows (mathkit's subset), printed by `--help`
+/// only, so a usage error stays short. An installed pscat has no
+/// lib/mathkit.ps to read (issue #934).
+const SUBSET: &str = r#"Supported LaTeX (anything else fails with one line naming it):
+  scripts       x^2  x_i  x_i^2  f'
+  fractions     \frac \dfrac \tfrac \binom \sqrt{x} \sqrt[n]{x}
+  big operators \sum \prod \int \iint \iiint \oint \limits \nolimits
+  names         \lim \max \min \sup \inf \det \gcd \Pr \sin \cos \tan \log
+                \ln \exp ... \operatorname{...}
+  delimiters    \left( ... \right) with ( ) [ ] \{ \} | \| \langle \rangle .
+                \big \Big \bigg \Bigg (and their l and r forms)
+  environments  matrix pmatrix bmatrix Bmatrix vmatrix cases; the whole input
+                may sit in align, gather, equation, $...$, \[...\] ...
+  accents       \vec \hat \bar \dot \ddot \tilde \overline \underline \boxed
+  braces        \overbrace{}^{} \underbrace{}_{} \overset \underset \stackrel
+                \substack
+  text, fonts   \text{} \mathrm{} \mathbf{} \mathbb{} \mathcal{} (the last
+                two: capital letters only)
+  spacing       \, \: \; \! \  \quad \qquad ~
+  styles        \displaystyle \textstyle \scriptstyle \scriptscriptstyle
+  Greek         \alpha ... \omega  \Gamma ... \Omega  \varphi \vartheta
+                \varepsilon \varrho \varpi \varsigma \varkappa
+  relations     = < > \le \ge \ne \approx \equiv \sim \simeq \cong \propto
+                \in \notin \subset \subseteq \supset \supseteq \perp
+                \parallel \mid \to \gets \mapsto \Rightarrow \Leftrightarrow
+                \iff \leftrightarrow \vdash \nvdash \models \not
+  operators     + - \pm \mp \times \div \cdot \circ \ast \star \setminus
+                \cup \cap \oplus \otimes \wedge \land \vee \lor \dagger
+                \ddagger \bmod \pmod \mod \pod
+  logic         \forall \exists \nexists \neg \lnot \top \bot \therefore
+                \because
+  symbols       \infty \partial \nabla \hbar \ell \emptyset \varnothing
+                \angle \triangle \Re \Im \prime \ldots \cdots
+  Unicode       Greek and math symbols typed directly (α ∞ ≤ ∂ ∧ ℝ ...)"#;
 
 enum Input {
     Arg(String),
@@ -63,7 +98,7 @@ struct Opts {
 pub(super) fn run(args: Args) -> Result<(), Failure> {
     let usage = |m: String| Failure::Usage(m, USAGE);
     let Some(opts) = parse(args).map_err(usage)? else {
-        println!("{USAGE}");
+        println!("{USAGE}\n\n{SUBSET}");
         return Err(Failure::Done);
     };
     let latex = match opts.input {
