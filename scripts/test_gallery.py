@@ -162,6 +162,8 @@ class GalleryManifest(unittest.TestCase):
                 (site / name).write_text(site_pages.apply_shell(body, partials, name), encoding="utf-8")
             for f in ("style.css", "pscat.js", "pscat.wasm", "source-viewer.js"):
                 (site / f).write_text("")
+            (site / "assets/brand").mkdir(parents=True, exist_ok=True)  # the favicon (#927)
+            (site / "assets/brand/pscat-logo-d-48.png").write_bytes(b"")
             problems, _ = check_site_links.check(site, SCRIPTS.parent)
             self.assertEqual(problems, [])
 
