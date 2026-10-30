@@ -610,7 +610,8 @@ const DROPPED: [&str; 3] = ["\\nonumber", "\\notag", "\\label"];
 /// wrappers (`$...$`, `\[...\]`, `\(...\)`, one pair or several; an
 /// `align`/`gather`/... environment around the whole) and labels removed, split at top-level `\\` row breaks (not
 /// those inside braces or inside an environment such as `pmatrix` or
-/// `cases`). Blank rows are dropped; none left is [`ChalkError::Empty`].
+/// `cases`). A `*` or a `[length]` after a row break goes at both levels.
+/// Blank rows are dropped; none left is [`ChalkError::Empty`].
 pub fn lines(latex: &str) -> Result<Vec<String>, ChalkError> {
     layout(latex).map(|(rows, _)| rows)
 }

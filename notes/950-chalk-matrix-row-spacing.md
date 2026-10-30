@@ -19,7 +19,8 @@ itself and drew the bracket as text.
   length into mathkit and a PostScript-side reading of it.
 - A bracket that holds no length stays the row's content (`\\ [x,y] & c`),
   as before. A nested `\\*` now drops its `*` as the top level does; before,
-  mathkit drew it. No tracked file used one.
+  mathkit drew it. No tracked file used one (`git grep -F '\\*'`). A
+  `\\[2pt]` inside `\text{...}` loses its bracket the same way; unlikely.
 - Only `pscat chalk` and the `chalkboard_math` MCP tool get this (both go
   through `chalk::driver`). Calling mathkit's `mkpath` from PostScript, a
   `[2pt]` after `\\\\` is still drawn; psart's `board-math.md` says so.
