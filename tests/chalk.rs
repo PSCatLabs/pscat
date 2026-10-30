@@ -283,6 +283,39 @@ fn a_row_starting_with_a_bracket_keeps_it() {
     assert!(Pixmap::decode_png(&png).is_ok());
 }
 
+/// Inside a matrix or `cases`, `\\[4pt]` is row spacing too, never ink
+/// (issue #950): the board is the one without it, byte for byte. A bracket
+/// that holds no length stays the row's content there as well.
+#[test]
+fn row_spacing_inside_a_matrix_draws_nothing() {
+    let spaced = concat!(
+        r"A = \begin{pmatrix} \frac{1}{2} & 0 \\[4pt] 0 & 1 \end{pmatrix}, \quad ",
+        r"|x| = \begin{cases} x & x \ge 0 \\*[0.5\baselineskip] -x & x < 0 \end{cases}"
+    );
+    let plain = concat!(
+        r"A = \begin{pmatrix} \frac{1}{2} & 0 \\ 0 & 1 \end{pmatrix}, \quad ",
+        r"|x| = \begin{cases} x & x \ge 0 \\ -x & x < 0 \end{cases}"
+    );
+    let cfg = small();
+    let (a, b) = (
+        chalk::driver(spaced, &cfg).unwrap(),
+        chalk::driver(plain, &cfg).unwrap(),
+    );
+    assert!(a.source == b.source, "the spacing changed the board");
+    assert_eq!(
+        chalk::render(spaced, &cfg, Format::Png).unwrap(),
+        chalk::render(plain, &cfg, Format::Png).unwrap()
+    );
+    let mut clean = small();
+    clean.irregular = 0.0;
+    let full = row_widths(r"\begin{bmatrix} a & b \\ [x,y] & c \end{bmatrix}", &clean);
+    let cut = row_widths(r"\begin{bmatrix} a & b \\ & c \end{bmatrix}", &clean);
+    assert!(
+        full[0] > cut[0],
+        "the bracket was swallowed: {full:?} vs {cut:?}"
+    );
+}
+
 /// LaTeX centres each `gather` row on its own width (issue #699); `align`
 /// keeps its rows on one relation column, and its driver never asks for the
 /// centring.

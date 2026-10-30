@@ -37,11 +37,12 @@ const USAGE: &str = r#"usage: pscat chalk [options] 'LATEX'
   -h, --help          this text
 
 Write the LaTeX as you would in a document: single backslashes, \\ between
-rows, & to align them; quote it for the shell. A bracket right after \\ is
-TeX's row spacing (\\[2pt]) only when it holds a length; otherwise
-(\\ [x,y] = 0) it starts the next row, and \left[ ... \right] is always a
-bracket. Flags override the config. A formula that starts with "-" goes after
-"--". `pscat chalk --help` also lists the LaTeX it knows."#;
+rows, & to align them; quote it for the shell. A bracket right after \\
+(in a pmatrix or cases too) is TeX's row spacing (\\[2pt], dropped) only
+when it holds a length; otherwise (\\ [x,y] = 0) it starts the next row,
+and \left[ ... \right] is always a bracket. Flags override the config. A
+formula that starts with "-" goes after "--". `pscat chalk --help` also
+lists the LaTeX it knows."#;
 
 /// The LaTeX `pscat chalk` knows (mathkit's subset), printed by `--help`
 /// only, so a usage error stays short. An installed pscat has no

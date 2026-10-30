@@ -24,7 +24,8 @@ mechanics, and the content vanished with no error.
   skips it.
 - Not changed: inside `pmatrix`/`cases`/`\substack`, mathkit splits the rows
   itself and never drops a bracket, so `[x,y]` was already safe there; a real
-  `\\[2pt]` there draws `[2pt]` as text (a follow-up if anyone hits it).
+  `\\[2pt]` there drew `[2pt]` as text until #950
+  (`notes/950-chalk-matrix-row-spacing.md`).
 - Docs: `pscat chalk --help`, `docs/guides/dry-media.md`, psart's
   `board-math.md` mention the rule and `\left[ ... \right]`.
 - Tests: unit cases in `src/chalk.rs`; `tests/chalk.rs`

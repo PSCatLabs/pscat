@@ -610,7 +610,8 @@ const DROPPED: [&str; 3] = ["\\nonumber", "\\notag", "\\label"];
 /// wrappers (`$...$`, `\[...\]`, `\(...\)`, one pair or several; an
 /// `align`/`gather`/... environment around the whole) and labels removed, split at top-level `\\` row breaks (not
 /// those inside braces or inside an environment such as `pmatrix` or
-/// `cases`). Blank rows are dropped; none left is [`ChalkError::Empty`].
+/// `cases`). A `*` or a `[length]` after a row break goes at both levels.
+/// Blank rows are dropped; none left is [`ChalkError::Empty`].
 pub fn lines(latex: &str) -> Result<Vec<String>, ChalkError> {
     layout(latex).map(|(rows, _)| rows)
 }
@@ -665,7 +666,7 @@ fn layout(latex: &str) -> Result<(Vec<String>, RowAlign), ChalkError> {
     }
     let rows: Vec<String> = split_rows(&s)
         .into_iter()
-        .map(|r| r.trim().to_string())
+        .map(|r| drop_row_break_options(r.trim()))
         .filter(|r| !r.is_empty())
         .collect();
     if rows.is_empty() {
@@ -963,20 +964,7 @@ fn split_rows(s: &str) -> Vec<String> {
                 if b.get(i + 1) == Some(&b'\\') {
                     if braces == 0 && envs == 0 {
                         rows.push(s[start..i].to_string());
-                        let mut j = i + 2;
-                        if b.get(j) == Some(&b'*') {
-                            j += 1;
-                        }
-                        // TeX's `\\[2pt]` row spacing goes; a bracket that holds
-                        // no length is the next row's content (`\\ [x,y] = 0`, a
-                        // commutator), where LaTeX would stop with an error
-                        let k = j + s[j..].len() - s[j..].trim_start().len();
-                        if b.get(k) == Some(&b'[')
-                            && let Some(close) = s[k..].find(']')
-                            && is_tex_glue(&s[k + 1..k + close])
-                        {
-                            j = k + close + 1;
-                        }
+                        let j = row_break_options_end(s, i + 2);
                         start = j;
                         i = j;
                         continue;
@@ -1006,6 +994,55 @@ fn split_rows(s: &str) -> Vec<String> {
     }
     rows.push(s[start..].to_string());
     rows
+}
+
+/// Where the options of a `\\` row break end, given `j` just past the two
+/// backslashes: a `*`, then TeX's `[2pt]` row spacing. A bracket that holds
+/// no length is the next row's content (`\\ [x,y] = 0`, a commutator), where
+/// LaTeX would stop with an error, so it is left where it is.
+fn row_break_options_end(s: &str, mut j: usize) -> usize {
+    let b = s.as_bytes();
+    if b.get(j) == Some(&b'*') {
+        j += 1;
+    }
+    let k = j + s[j..].len() - s[j..].trim_start().len();
+    if b.get(k) == Some(&b'[')
+        && let Some(close) = s[k..].find(']')
+        && is_tex_glue(&s[k + 1..k + close])
+    {
+        j = k + close + 1;
+    }
+    j
+}
+
+/// A row with the options dropped from the `\\` breaks left in it, those
+/// inside `pmatrix`, `cases` or `\substack{}` that mathkit splits itself
+/// (issue #950): `\\[2pt]` and `\\*` become `\\`, as at the top level. The
+/// spacing is not honoured there either; mathkit spaces the rows by their
+/// content.
+fn drop_row_break_options(row: &str) -> String {
+    let b = row.as_bytes();
+    let mut out = String::with_capacity(row.len());
+    let mut last = 0;
+    let mut i = 0;
+    while i + 1 < b.len() {
+        if b[i] != b'\\' {
+            i += 1;
+            continue;
+        }
+        if b[i + 1] == b'\\' {
+            let j = row_break_options_end(row, i + 2);
+            out.push_str(&row[last..i + 2]);
+            last = j;
+            i = j;
+            continue;
+        }
+        // a control word or symbol: its first byte is never a break (a
+        // multi-byte character's later bytes are never a backslash)
+        i += 2;
+    }
+    out.push_str(&row[last..]);
+    out
 }
 
 /// TeX's units of length (TeXbook p. 57).
@@ -1590,6 +1627,36 @@ mod tests {
         );
         // escaped braces are not grouping
         assert_eq!(l(r"\{ a \\ b \}"), [r"\{ a", r"b \}"]);
+    }
+
+    #[test]
+    fn row_spacing_inside_matrices_goes_too() {
+        // the same rule as at the top level (issue #950)
+        assert_eq!(
+            l(r"\begin{pmatrix} a & b \\[4pt] c & d \end{pmatrix}"),
+            [r"\begin{pmatrix} a & b \\ c & d \end{pmatrix}"]
+        );
+        assert_eq!(
+            l(r"f = \begin{cases} 1 \\*[0.5\baselineskip] 0 \\* 2 \end{cases} \\[2pt] g"),
+            [r"f = \begin{cases} 1 \\ 0 \\ 2 \end{cases}", "g"]
+        );
+        assert_eq!(
+            l(r"\sum_{\substack{i<m \\ [2pt] j<n}} a"),
+            [r"\sum_{\substack{i<m \\ j<n}} a"]
+        );
+        // a bracket that holds no length is the next row's content
+        assert_eq!(
+            l(r"\begin{bmatrix} a \\ [x,y] \\[1] \\[\pi] \end{bmatrix}"),
+            [r"\begin{bmatrix} a \\ [x,y] \\[1] \\[\pi] \end{bmatrix}"]
+        );
+        // an unclosed bracket, a control word, a row break at the very end
+        assert_eq!(
+            l(r"\begin{vmatrix} a \\[2pt \end{vmatrix}"),
+            [r"\begin{vmatrix} a \\[2pt \end{vmatrix}"]
+        );
+        assert_eq!(drop_row_break_options(r"\alpha\\[2pt]"), r"\alpha\\");
+        assert_eq!(drop_row_break_options(r"é\\[2pt]ü \,"), r"é\\ü \,");
+        assert_eq!(drop_row_break_options("\\"), "\\");
     }
 
     #[test]
