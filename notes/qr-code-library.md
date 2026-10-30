@@ -153,3 +153,16 @@ masking, rendering, actual decoding and card artwork remain pending. Base is
 `07f054c`; implementation head is `deba699`. Publishing commands use direct
 `git push` and `gh pr create --body-file`; no fake issue numbers or PR URL are
 inserted. Initial CLI retry still cannot reach GitHub from this sandbox.
+
+## Owner-run publication script
+
+Added `scripts/publish_qr_pr.sh` at the owner's request to finish publication
+from their network-enabled terminal. It checks the clean feature branch,
+expected origin and GitHub authentication, then pushes and creates or updates
+the draft PR using the prepared body. It refuses an existing non-draft PR,
+never force-pushes or merges, and can resume after a partial failure. Updated
+the review handoff with the single command. No QR implementation changes.
+Validation: Bash syntax/help, six mocked CLI paths (create, update, dirty tree,
+API failure, push failure and existing non-draft), Markdown links, license
+checks and diff whitespace passed. No live publication was attempted by this
+script in the restricted session.

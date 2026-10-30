@@ -6,7 +6,7 @@ has yet been run or recorded; this document prepares that independent review.
 
 Base: `07f054c19d7045281a667e185b9bfc74f3cde29e` (main at branch creation).
 Last implementation commit: `deba699b4dd221176056f37d05761a55c8126c45`.
-Subsequent preparation changes are documentation only. Record the actual
+Subsequent preparation changes are documentation and publication tooling. Record the actual
 checked-out/reviewed head in the review, and inspect the complete PR diff.
 
 ## Review scope
@@ -104,17 +104,19 @@ same feature branch, with the review record linked from the eventual PR.
 
 ## Publish through git and gh
 
-Run from this checkout when CLI network access is available. Check for an
-existing PR before creating one; update its body if one already exists.
-No browser, connector, auto-merge or branch replacement is required.
+Run the [publication script](../../../scripts/publish_qr_pr.sh) from this
+checkout in a terminal with network access and authenticated `gh`:
 
 ```sh
-git status --short --branch
-git push -u origin feature/qr-code-library
-gh pr list --repo PSCatLabs/pscat --head feature/qr-code-library --state open
-gh pr create --repo PSCatLabs/pscat --draft --base main --head feature/qr-code-library --title "Native PostScript QR data and correction pipeline" --body-file docs/dev/design/QR_CODE_PR.md
-gh pr view feature/qr-code-library --repo PSCatLabs/pscat --json url,headRefOid,isDraft
+bash scripts/publish_qr_pr.sh
 ```
+
+It requires a clean committed feature branch and the expected origin, checks
+authentication and existing PRs, pushes without force, then creates the draft
+or updates the existing draft's title/body. It prints the URL and head SHA.
+It stops on errors and can be rerun after a partial failure. An existing PR
+that is already ready for review requires manual inspection before updating.
+It does not create issues, commit changes or merge anything.
 
 The PR stays draft for this incomplete feature and the requested Opus review.
 After creation, inspect the actual PR checks; no remote green-CI result is

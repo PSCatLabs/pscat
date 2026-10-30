@@ -13,7 +13,7 @@ foundation so it can receive independent Opus review before matrix work begins.
 - Adds guards/selftests, 15 integration tests and pinned independent reference
   fixtures. Executable byte strings remain raw data and preserve caller state.
 - Includes implementation contracts, reproducible verification, a phased issue
-  queue and a dedicated Opus review handoff.
+  queue, a dedicated Opus review handoff and a git/gh publication script.
 
 **Draft / do not merge:** matrix construction, format/version metadata, masks,
 vector rendering, the public API, actual image decoding and the two-sided card
@@ -34,7 +34,7 @@ has been completed yet.
 
 Base: `07f054c19d7045281a667e185b9bfc74f3cde29e`.
 Last implementation commit: `deba699b4dd221176056f37d05761a55c8126c45`.
-Documentation-only preparation commits follow it.
+Documentation and publication-tooling preparation commits follow it.
 
 ## Test evidence
 
