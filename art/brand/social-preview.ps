@@ -1,0 +1,118 @@
+%!PS-Adobe-3.0
+%%Title: pscat social preview (logo, tagline, a document and a painting)
+%%BoundingBox: 0 0 1280 640
+%%EndComments
+% Render (from the repo root, so the programs below resolve; GitHub's
+% social preview is 1280x640 px, so the page is 1280x640 pt at 72 dpi):
+%   pscat --page 1280x640 --dpi 72 --png art/brand/renders/social-preview.png art/brand/social-preview.ps
+% The certificate the README and site pair with a painting is the same
+% example cropped by page size:
+%   pscat --page 612x580 --dpi 144 --png art/brand/renders/certificate.png examples/template_certificate.ps
+%
+% The repository's social preview (#927). Nothing here is a pasted image:
+% the logo, the certificate and the painting are the repo's own PostScript
+% programs, each run inside a clipped, scaled card, so every pixel is drawn
+% by pscat. The two cards are the two halves of the pitch: precise documents
+% (examples/template_certificate.ps, lib/pagekit.ps) and expressive art
+% (gallery/evening_stream.ps, lib/paintkit.ps).
+% CC0 1.0 (see LICENSE-CC0): dedicated to the public domain. CC0 grants
+% no trademark rights in the pscat name or logo.
+
+/W 1280 def /H 640 def
+
+% the logo's own colours (art/logo/pscat-logo-d.ps)
+/gold  { 0.910 0.718 0.188 setrgbcolor } def
+/cream { 0.984 0.965 0.918 setrgbcolor } def
+/ink   { 0.110 0.106 0.118 setrgbcolor } def
+/muted { 0.700 0.680 0.640 setrgbcolor } def
+
+ink 0 0 W H rectfill
+
+% Run a program into a card: the source rectangle bx by bw bh of FILE is
+% scaled to fill x y w h. The program runs under save/restore with
+% showpage stubbed, so its definitions and its page end stay inside it.
+/runcard {  % x y w h bx by bw bh file
+  10 dict begin
+  /f exch def /bh exch def /bw exch def /by exch def /bx exch def
+  /h exch def /w exch def /y exch def /x exch def
+  gsave
+    x y translate
+    newpath 0 0 w h rectclip
+    w bw div h bh div scale
+    bx neg by neg translate
+    f                     % leave the name on the stack and close this
+  end                     % dict, so the program defines into userdict
+  userdict /RunCardSave save put   % in a dict: a program may clear the stack
+  userdict /showpage {} put
+  run
+  userdict /RunCardSave get restore
+  grestore
+} def
+
+% a thin frame around a card, drawn after it
+/frame {  % x y w h
+  gsave cream 0.6 setlinewidth rectstroke grestore
+} def
+
+% centred and letter-spaced labels
+/ctr { % string x y
+  moveto dup stringwidth pop 2 div neg 0 rmoveto show
+} def
+/spacedctr { % string x y track: centred, with track points between letters
+  /tr exch def /yy exch def /xx exch def /ss exch def
+  ss stringwidth pop ss length 1 sub tr mul add   % the spaced width
+  xx exch 2 div sub yy moveto
+  ss { ( ) dup 0 4 -1 roll put show tr 0 rmoveto } forall
+} def
+
+% ---- left column: the logo, the name and the tagline ----
+
+/logoX 72 def /logoY 372 def /logoS 168 def
+logoX logoY logoS logoS 0 0 384 384 (art/logo/pscat-logo-d.ps) runcard
+
+cream
+/Courier-Bold findfont 92 scalefont setfont
+logoX logoS add 24 add logoY 52 add moveto (pscat) show
+
+gold
+/Helvetica-Bold findfont 38 scalefont setfont
+logoX 292 moveto (PostScript for precision) show
+logoX 246 moveto (and imagination.) show
+
+cream
+/Helvetica findfont 19 scalefont setfont
+logoX 188 moveto (Renders PostScript and EPS to PNG, SVG and PDF) show
+muted
+logoX 160 moveto (Command line  \267  Rust crate  \267  WebAssembly  \267  MCP) show
+
+% ---- right column: a document and a painting ----
+
+/cardY 206 def /cardH 222 def
+/docW cardH 532 mul 500 div def          % the certificate's own aspect
+/artW cardH 760 mul 560 div def          % Evening Stream's page
+/gapX 28 def
+/artX W 72 sub artW sub def
+/docX artX gapX sub docW sub def
+
+docX cardY docW cardH 40 40 532 500 (examples/template_certificate.ps) runcard
+artX cardY artW cardH 0 0 760 560 (gallery/evening_stream.ps) runcard
+docX cardY docW cardH frame
+artX cardY artW cardH frame
+
+gold
+/Helvetica-Bold findfont 17 scalefont setfont
+(DOCUMENTS) docX docW 2 div add cardY cardH add 20 add 3 spacedctr
+(ART) artX artW 2 div add cardY cardH add 20 add 3 spacedctr
+
+muted
+/Helvetica findfont 15 scalefont setfont
+(A certificate from lib/pagekit.ps) docX docW 2 div add cardY 26 sub ctr
+(Evening Stream, painted with lib/paintkit.ps) artX artW 2 div add cardY 26 sub ctr
+
+% ---- footer ----
+cream
+/Helvetica findfont 17 scalefont setfont
+(Every pixel of this image is drawn by pscat from PostScript.   github.com/PSCatLabs/pscat)
+W 2 div 48 ctr
+
+showpage

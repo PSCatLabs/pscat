@@ -30,6 +30,8 @@ def build(tmp, pages, extra_files=("style.css", "pscat.js", "pscat.wasm")):
     site.mkdir()
     for f in extra_files:
         (site / f).write_text("")
+    (site / "assets/brand").mkdir(parents=True)  # the favicon every page links (#927)
+    (site / "assets/brand/pscat-logo-d-48.png").write_bytes(b"")
     for name, (key, body) in pages.items():
         (site / name).write_text(PAGE % (key, body))
     partials = site_pages.load_partials(PARTIALS)

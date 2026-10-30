@@ -255,6 +255,9 @@ html.dialog-open { overflow: hidden; }
   background: var(--stage);
 }
 .landing-hero figcaption { color: var(--dim); font-size: 14px; padding-top: 8px; }
+.landing-hero figure .pair { display: grid; grid-template-columns: 42fr 54fr; gap: 10px; align-items: start; }
+.landing-hero .brandline { display: flex; align-items: center; gap: 12px; color: var(--dim); font-size: 14px; margin: 0 0 14px; }
+.landing-hero .brandline img { display: block; border-radius: 8px; }
 
 .cta { display: flex; flex-wrap: wrap; gap: 10px; margin: 0; }
 .cta a {

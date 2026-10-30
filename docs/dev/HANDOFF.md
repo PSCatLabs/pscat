@@ -1568,6 +1568,18 @@ renders eight examples in both and compares block-downsampled output).
   directory checklist holds those; #848, `notes/848-plugin-no-image-paths-in-backticks.md`).
   `scripts/codex_plugin_install_check.sh` (job `codex-install`) installs it
   with the pinned codex CLI. See `notes/569-codex-plugin.md`.
+- **The tagline is "PostScript for precision and imagination." (#927)**,
+  and every public description leads with it: `Cargo.toml`, `npm/package.json`,
+  `server.json` (100-character limit, tested), the plugin manifests, the README
+  opening and the site's title, meta and hero. Documents and art are equal
+  halves; the live window is a feature, not the headline. Say pscat aims to
+  replace Ghostscript for most work and uses it as its correctness reference;
+  no speed or memory claims until #929's benchmarks. The social preview is
+  `art/brand/social-preview.ps` (it runs the logo, a certificate and Evening
+  Stream in cards, so no pixel is pasted); `build_site.sh` copies it and the
+  logo into `_site/assets/brand/` for `og:image` and the favicon. The org
+  profile draft is `docs/brand/org-profile-README.md`. See
+  `notes/927-branding.md`.
 - **The plugin icon (#683) is `plugin/.claude-plugin/icon.png`**, the
   1024 px render of `art/logo/pscat-logo-d.ps` (command in its header;
   512 and 48 px renders in `art/logo/renders/`). Claude's plugin.json sets

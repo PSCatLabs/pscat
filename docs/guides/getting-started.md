@@ -1,8 +1,9 @@
 # Getting started
 
-pscat is a PostScript interpreter that draws as it runs. This guide covers
-building it, installing a ready-made bundle, and the command-line flags you
-will use most. If PostScript itself is new to you, skim the
+pscat is a PostScript interpreter that renders documents and art to PNG,
+SVG and PDF, and can show a program drawing in a live window as it runs.
+This guide covers building it, installing a ready-made bundle, and the
+command-line flags you will use most. If PostScript itself is new to you, skim the
 [site](https://pscatlabs.github.io/pscat/) first; every
 example below is a plain `.ps` text file.
 
