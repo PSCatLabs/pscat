@@ -217,6 +217,11 @@ file, debug one, generate a handwriting-style note — read
 pitfalls (advanced sections in its `references/`), regardless of which agent runtime you are.
 MCP-wired agents can use `pscat-mcp` instead (`docs/guides/agents.md`).
 
+For reusable higher-order artwork or explicit procedure instrumentation, read
+[`plugin/skills/functional-postscript/SKILL.md`](plugin/skills/functional-postscript/SKILL.md).
+The experimental library's contracts, rendered demo and maintenance reference
+are indexed in [`docs/functional-postscript/`](docs/functional-postscript/README.md).
+
 <!-- sdlcify:managed:start -->
 ## SDLC
 

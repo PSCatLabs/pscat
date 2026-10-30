@@ -119,6 +119,7 @@ Everything else is in [`docs/guides/`](docs/guides/README.md):
 - [Printmaking and etching](docs/guides/printmaking.md) and [dry media](docs/guides/dry-media.md)
 - [Lettering, headlines and apparel](docs/guides/lettering.md)
 - [Charts and plots](docs/guides/charts.md)
+- [Functional PostScript](docs/functional-postscript/README.md): experimental composition and procedure advice, with a reproducible concert-poster walkthrough.
 
 ## For AI agents
 

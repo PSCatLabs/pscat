@@ -26,6 +26,9 @@ skimmed [artkit](artkit.md) (it is the base most of them load).
 
 ## Making art
 
+- [Functional PostScript](../functional-postscript/README.md): experimental
+  array combinators, explicit capture and procedure instrumentation, with a
+  three-colourway concert poster and offline illustrated introduction.
 - [artkit](artkit.md): the generative-art toolkit (randomness, palettes,
   turtle graphics, L-systems, path brushes, tilings, fractals, flow fields,
   scatter).

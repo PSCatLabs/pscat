@@ -1,0 +1,20 @@
+%!PS-Adobe-3.0
+%%Title: Map + fold dispatch comparison, no rendering
+%%EndComments
+% Compare with /Functional true or false; both allocate the mapped output.
+(lib/functional.ps) run
+/Functional where {pop} {/Functional true def} ifelse
+/values [0 1 999 {} for] def
+100 {
+  Functional {
+    values {dup mul} fp-map 0 {add} fp-fold
+  } {
+    /mapped values length array def
+    0 1 values length 1 sub {
+      /i exch def mapped i values i get dup mul put
+    } for
+    0 mapped {add} forall
+  } ifelse
+  /result exch def
+} repeat
+result = % 332833500

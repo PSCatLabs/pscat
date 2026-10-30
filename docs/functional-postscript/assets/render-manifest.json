@@ -1,0 +1,83 @@
+[
+  {
+    "file": "ultraviolet.png",
+    "style": 0,
+    "page": "720x960",
+    "sha256": "f32227096a8335f00957b3c0ea9421e66c1221acff7c252b19f47c93414b233d",
+    "stdout": "enter garden\nleave garden\nflowers=13\nradius-checksum=622\npscat: wrote /Users/jeromebanks/dev/postscript_interpreter/codex/functional_ps/docs/functional-postscript/assets/ultraviolet.png\n"
+  },
+  {
+    "file": "sunprint.png",
+    "style": 1,
+    "page": "720x960",
+    "sha256": "21c35e4df1946263d4744973250734c1ab9b554c6a5519c0182c1484914a08b9",
+    "stdout": "enter garden\nleave garden\nflowers=13\nradius-checksum=622\npscat: wrote /Users/jeromebanks/dev/postscript_interpreter/codex/functional_ps/docs/functional-postscript/assets/sunprint.png\n"
+  },
+  {
+    "file": "blue-hour.png",
+    "style": 2,
+    "page": "720x960",
+    "sha256": "6a79ef170ab55781a4d68d3b82b11cea102b715ef218063343ad2b2896111106",
+    "stdout": "enter garden\nleave garden\nflowers=13\nradius-checksum=622\npscat: wrote /Users/jeromebanks/dev/postscript_interpreter/codex/functional_ps/docs/functional-postscript/assets/blue-hour.png\n"
+  },
+  {
+    "file": "primitives.png",
+    "page": "720x300",
+    "sha256": "dc10de5d16035eaf341637b426f0148e775f0127e8320a89f3271de14623debb"
+  },
+  {
+    "file": "detail.png",
+    "page": "480x480",
+    "sha256": "31f894487c815b5f42c563704bf98631c981457381801999969a2648d60a38e4"
+  },
+  {
+    "file": "ground.png",
+    "page": "720x960",
+    "sha256": "3c6a0ccde631acb16e00a74769eb8e31c5aac8cf5d91a7e1690c0eac7b2933a2"
+  },
+  {
+    "file": "imperative.png",
+    "page": "720x960",
+    "sha256": "f32227096a8335f00957b3c0ea9421e66c1221acff7c252b19f47c93414b233d"
+  },
+  {
+    "file": "type-nocturne.png",
+    "page": "960x1200",
+    "sha256": "5c84ba1236e32718d6182f13a5006806748802d94ed2f23710b817d5694b7227"
+  },
+  {
+    "file": "type-sunprint.png",
+    "page": "960x1200",
+    "sha256": "1876cac65ac9b667eb8c9402c8721bd2d1ba7c7a5500140a06ff30bf73674893"
+  },
+  {
+    "file": "type-blueprint.png",
+    "page": "960x1200",
+    "sha256": "13eb1358ee95c82034c29d130d556b92f04fd7186c5c25fa1164a924291ee831"
+  },
+  {
+    "file": "type-risograph.png",
+    "page": "960x1200",
+    "sha256": "259e177479a0ad2cc6a6f625282a6314733f36d5c72c9049f09d9fc40a9d9f49"
+  },
+  {
+    "file": "type-neon.png",
+    "page": "960x1200",
+    "sha256": "cc7c4e33e2ec00eb19d7b629384b6f5456f67d6e2c2c476d76fe339131b23711"
+  },
+  {
+    "file": "type-opart.png",
+    "page": "960x1200",
+    "sha256": "f2c589088ed6ec5cbb968b7eb43ed4d60d93ea3b23ff5a5b3c6281c94d2d0558"
+  },
+  {
+    "file": "press-inspected.png",
+    "page": "1280x960",
+    "sha256": "9abfae623f196e10726c0274c6de8da654c90b19594b441e6c098502210ca0e3"
+  },
+  {
+    "file": "press-clean.png",
+    "page": "1280x960",
+    "sha256": "c08674fa7a4e5825224b54340f700d2682d99cd9993433607a4dc899ba7b3d16"
+  }
+]

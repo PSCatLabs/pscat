@@ -1,0 +1,174 @@
+%!PS-Adobe-3.0
+%%Title: Functional typography — shared glyph vocabulary
+%%EndComments
+(lib/functional.ps) run
+(lib/aspect.ps) run
+(lib/artkit.ps) run
+
+% Record: [one-byte-string baseline-x baseline-y size index font-name].
+% Fonts are captured as data, so later TypeFont changes cannot alter a run.
+% These examples deliberately use ASCII bytes, not Unicode segmentation.
+/ty-fonts [ /Helvetica-Bold /Helvetica-BoldOblique /Times-Bold /Times-BoldItalic
+            /Courier-Bold /Palatino-Bold /Bookman-Demi /AvantGarde-Demi ] def
+/TypeFont where {pop} {/TypeFont /Helvetica-Bold def} ifelse
+/ty.font-ok false def
+ty-fonts { TypeFont eq { /ty.font-ok true def } if } forall
+ty.font-ok not { ty-font-must-be-a-listed-bundled-outline-face } if
+/ty.max-height 210 def
+
+/ty-styles [
+  << /Label (NOCTURNE) /Treatment /contour
+     /Paper [0.055 0.075 0.13] /Ink [0.96 0.90 0.72]
+     /Shadow [0.10 0.24 0.33] /Contour [0.11 0.16 0.22]
+     /Ramp [[0.99 0.26 0.24] [1 0.68 0.22] [0.95 0.91 0.55] [0.34 0.75 0.71]] >>
+  << /Label (SUNPRINT) /Treatment /contour
+     /Paper [0.95 0.90 0.78] /Ink [0.16 0.22 0.28]
+     /Shadow [0.77 0.36 0.28] /Contour [0.97 0.88 0.67]
+     /Ramp [[0.10 0.28 0.38] [0.17 0.47 0.52] [0.39 0.64 0.53] [0.82 0.77 0.44]] >>
+  << /Label (BLUEPRINT) /Treatment /blueprint
+     /Paper [0.025 0.10 0.24] /Ink [0.80 0.94 0.98]
+     /Shadow [0.035 0.18 0.37] /Contour [0.64 0.85 0.95]
+     /Ramp [[0.04 0.19 0.39] [0.07 0.32 0.52] [0.17 0.50 0.64]] >>
+  << /Label (RISOGRAPH) /Treatment /riso
+     /Paper [0.97 0.89 0.73] /Ink [0.36 0.14 0.21]
+     /Shadow [0.12 0.48 0.47] /Contour [0.99 0.91 0.75]
+     /Ramp [[0.77 0.10 0.25] [0.96 0.30 0.24] [1 0.62 0.23]] >>
+  << /Label (NEON) /Treatment /neon
+     /Paper [0.035 0.025 0.10] /Ink [0.98 0.43 0.79]
+     /Shadow [0.24 0.08 0.35] /Contour [1 0.91 0.78]
+     /Ramp [[0.19 0.76 0.83] [0.59 0.29 0.90] [0.98 0.43 0.79]] >>
+  << /Label (OP ART) /Treatment /opart
+     /Paper [0.965 0.95 0.88] /Ink [0.035 0.045 0.075]
+     /Shadow [0.76 0.76 0.69] /Contour [0.98 0.97 0.91]
+     /Ramp [[0.035 0.045 0.075] [0.035 0.045 0.075]] >>
+] def
+/ty-rgb { aload pop setrgbcolor } bind def
+
+% Pair: [character advance ink-left ink-bottom ink-right ink-top].
+% Extent fold state: [cursor min-x min-y max-x max-y]. Include the baseline
+% and the advance box, as well as italic overhangs and negative sidebearings.
+/ty-extent {
+  2 dict begin /ty.pair exch def /ty.ext exch def
+  [ty.ext 0 get ty.pair 1 get add
+   ty.ext 1 get ty.ext 0 get ty.pair 2 get add min
+   ty.ext 2 get ty.pair 3 get min
+   ty.ext 3 get ty.ext 0 get ty.pair 4 get add max
+   ty.ext 4 get ty.pair 5 get max]
+  end
+} bind def
+
+% Only the fresh output array is mutated; each step returns a fresh state.
+/ty-place { % state pair [scale baseline font] -- state
+  3 dict begin /ty.ctx exch def /ty.pair exch def /ty.state exch def
+  ty.state 2 get ty.state 1 get
+    [ty.pair 0 get ty.state 0 get ty.ctx 1 get
+     ty.ctx 0 get 100 mul ty.state 1 get ty.ctx 2 get] put
+  [ty.state 0 get ty.pair 1 get ty.ctx 0 get mul add
+   ty.state 1 get 1 add ty.state 2 get]
+  end
+} bind def
+/ty-layout { % text x baseline width -- glyph-records
+  16 dict begin /ty.width exch def /ty.y exch def /ty.x exch def /ty.text exch def
+  gsave
+    TypeFont findfont 100 scalefont setfont
+    /ty.pairs [0 1 ty.text length 1 sub {} for] {
+      ty.text exch 1 getinterval /ty.char exch def
+      [ty.char ty.char stringwidth pop
+       gsave newpath 0 0 moveto ty.char false charpath pathbbox grestore]
+    } fp-map def
+    /ty.ext ty.pairs [0 0 0 0 0] {ty-extent} fp-fold def
+  grestore
+  /ty.run-width ty.ext 0 get ty.ext 3 get max ty.ext 1 get sub def
+  /ty.run-height ty.ext 4 get ty.ext 2 get sub def
+  /ty.factor ty.width ty.run-width div ty.max-height ty.run-height div min def
+  /ty.start ty.x ty.width ty.run-width ty.factor mul sub 2 div add
+    ty.ext 1 get ty.factor mul sub def
+  ty.pairs [ty.start 0 ty.pairs length array]
+    [ty.factor ty.y TypeFont] /ty-place load fp-curry fp-fold 2 get
+  end
+} bind def
+/ty-glyph-path { % record -- outline in local user space
+  dup 5 get findfont 1 index 3 get scalefont setfont
+  newpath 0 0 moveto 0 get false charpath
+} bind def
+
+% Pattern helpers run only inside ty-letter's owned dictionary and glyph clip.
+/ty-contours {
+  ty.style /Contour get ty-rgb
+  /ty.op ty.style /Treatment get /opart eq def
+  ty.op {2.3} {0.85} ifelse setlinewidth
+  ty.y0 ty.op {7} {4} ifelse ty.y1 {
+    /ty.row exch def
+    newpath ty.x0 ty.row moveto
+    0 1 28 {
+      /ty.xx exch ty.x1 ty.x0 sub 28 div mul ty.x0 add def
+      ty.xx ty.row ty.xx ty.op {3.5} {2.3} ifelse mul ty.row 4 mul add
+        ty.rec 4 get 17 mul add sin ty.op {8} {5} ifelse mul add lineto
+    } for stroke
+  } for
+} bind def
+/ty-grid {
+  ty.style /Contour get ty-rgb 0.45 setlinewidth
+  ty.x0 9 ty.x1 {newpath dup ty.y0 moveto ty.y1 lineto stroke} for
+  ty.y0 9 ty.y1 {newpath dup ty.x0 exch moveto ty.x1 exch lineto stroke} for
+} bind def
+/ty-screen {
+  ty.style /Contour get ty-rgb
+  ty.y0 7 ty.y1 {
+    /ty.row exch def
+    ty.x0 7 ty.x1 {
+      newpath ty.row 0.85 0 360 arc fill
+    } for
+  } for
+} bind def
+/ty-neon {
+  ty.rec ty-glyph-path ty.style /Paper get ty-rgb fill
+  ty.rec ty-glyph-path ty.style /Shadow get ty-rgb 12 setlinewidth stroke
+  ty.rec ty-glyph-path ty.style /Ramp get 0 get ty-rgb 6 setlinewidth stroke
+  ty.rec ty-glyph-path ty.style /Ink get ty-rgb 2.5 setlinewidth stroke
+  ty.rec ty-glyph-path ty.style /Contour get ty-rgb 0.65 setlinewidth stroke
+} bind def
+/ty-letter { % record style --
+  14 dict begin /ty.style exch def /ty.rec exch def
+  /ty.size ty.rec 3 get def
+  gsave
+    ty.rec 1 get ty.rec 2 get translate
+    ty.style /Treatment get /neon eq { ty-neon } {
+      ty.style /Shadow get ty-rgb
+      ty.style /Treatment get /blueprint eq {3} {8} ifelse -1 1 {
+        gsave dup 2 mul exch -2.2 mul translate
+          ty.rec ty-glyph-path fill
+        grestore
+      } for
+      ty.rec ty-glyph-path
+      0 0 ty.size ty.size 0.85 mul ty.style /Ramp get axialsh gradfill
+      gsave
+        ty.rec ty-glyph-path pathbbox
+        /ty.y1 exch 8 add def /ty.x1 exch 10 add def
+        /ty.y0 exch 8 sub def /ty.x0 exch 10 sub def
+        clip newpath
+        ty.style /Treatment get /blueprint eq {ty-grid} {
+          ty.style /Treatment get /riso eq {ty-screen} {ty-contours} ifelse
+        } ifelse
+      grestore
+      ty.rec ty-glyph-path ty.style /Ink get ty-rgb 1.1 setlinewidth stroke
+    } ifelse
+  grestore
+  end
+} bind def
+/ty-flat-letter { % record -- original target for observability proof
+  gsave
+    dup 1 get 1 index 2 get translate
+    ty-glyph-path fill
+  grestore
+} bind def
+/ty-bounds { % record -- [x0 y0 x1 y1] in the caller's user space
+  5 dict begin /ty.rec exch def
+  gsave
+    ty.rec ty-glyph-path pathbbox
+    /ty.y1 exch def /ty.x1 exch def /ty.y0 exch def /ty.x0 exch def
+    [ty.x0 ty.rec 1 get add ty.y0 ty.rec 2 get add
+     ty.x1 ty.rec 1 get add ty.y1 ty.rec 2 get add]
+  grestore
+  end
+} bind def

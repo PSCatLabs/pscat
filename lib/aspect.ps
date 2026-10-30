@@ -1,0 +1,86 @@
+%!PS-Adobe-3.0
+%%Title: Functional PostScript — explicit procedure advice
+%%EndComments
+% @requires: (lib/functional.ps) run
+% Load functional.ps first. Wrappers capture targets; they never change a
+% dictionary binding automatically. Advice shares the target's operand and
+% graphics state and must obey the published contract. No finally semantics.
+
+% @kind: Procedure
+% @summary: Return a wrapper that runs advice before the captured target.
+% @example: { 2 mul } { (enter\n) print } aop-before
+/aop-before { exch //fp-compose exec } bind def
+
+% After means normal return only. Errors and stop bypass advice.
+% @kind: Procedure
+% @summary: Return a wrapper that runs advice after normal target return.
+% @example: { 2 mul } { (leave\n) print } aop-after
+/aop-after { //fp-compose exec } bind def
+
+% Around advice receives the target as one additional data operand. `exec`
+% is its explicit proceed. Advice may skip, replace, or repeat the target.
+% @kind: Procedure
+% @summary: Capture a target quotation for advice to invoke explicitly with exec.
+% @example: { 2 mul } { exec 1 add } aop-around
+/aop-around {
+  //fp--quote exec exch //fp--quote exec exch //fp-curry exec
+} bind def
+
+%%SelfTest: aspect-counter-contracts
+% { {} 1 aop-count } /aop-counter-dictionary-required (counter type) mustguard
+% { {} <<>> aop-count } /aop-counter-Calls-required (missing count) mustguard
+% { {} << /Calls 0.5 >> aop-count } /aop-counter-Calls-nonnegative-integer-required (count type) mustguard
+% { {} << /Calls -1 >> aop-count } /aop-counter-Calls-nonnegative-integer-required (negative count) mustguard
+% { [] << /Calls 0 >> aop-count } /fp-quotation-required (target type) mustguard
+%%EndSelfTest
+% @internal
+/aop--counter {
+  dup type /dicttype ne { aop-counter-dictionary-required } if
+  dup /Calls known not { aop-counter-Calls-required } if
+  dup /Calls get dup type /integertype ne
+    { aop-counter-Calls-nonnegative-integer-required } if
+  0 lt { aop-counter-Calls-nonnegative-integer-required } if
+} bind def
+
+% Validate each invocation too, because the caller owns the dictionary.
+% Count attempts, including target errors, and never consume target arguments.
+% @internal
+/aop--tick {
+  //aop--counter exec
+  dup /Calls 2 copy get 1 add put pop
+} bind def
+
+% @kind: Procedure
+% @summary: Count attempted target entries in an explicit mutable /Calls dictionary.
+% @example: { 2 mul } << /Calls 0 >> aop-count
+/aop-count {
+  //aop--counter exec exch //fp--quote exec exch
+  //aop--tick //fp-curry exec //aop-before exec
+} bind def
+
+% Trace labels are strings, captured by reference. Output goes through normal
+% PostScript print, so native and wasm stdout capture both see it.
+% @internal
+/aop--enter { (enter ) print print (\n) print } bind def
+% @internal
+/aop--leave { (leave ) print print (\n) print } bind def
+
+%%SelfTest: aspect-trace-contracts
+% { {} /label aop-trace } /aop-trace-string-required (trace label) mustguard
+% { [] (label) aop-trace } /fp-quotation-required (trace target) mustguard
+% { [] {} aop-before } /fp-quotation-required (before target) mustguard
+% { {} [] aop-after } /fp-quotation-required (after advice) mustguard
+% { [] {} aop-around } /fp-quotation-required (around target) mustguard
+%%EndSelfTest
+% @kind: Procedure
+% @summary: Print enter and normal-return leave lines around a captured quotation.
+% @example: 3 { 2 mul } (double) aop-trace exec
+/aop-trace {
+  dup type /stringtype ne { aop-trace-string-required } if
+  exch //fp--quote exec exch
+  2 dict begin
+  /aop.label exch def /aop.target exch def
+  /aop.target load /aop.label load //aop--enter //fp-curry exec //aop-before exec
+  /aop.label load //aop--leave //fp-curry exec //aop-after exec
+  end
+} bind def
