@@ -258,3 +258,218 @@ fn ghostscript_accepts_pagekit() {
         .expect("run gs");
     assert!(status.success(), "gs rejected pagekit");
 }
+
+// --- pgcertificate layout (#954) -------------------------------------------
+//
+// The certificate's spacing failed a perceptual review: the title nearly
+// touched the inner rule, the signer names floated far above their rules
+// while the captions under them touched, and a short citation left one
+// large empty band above the signatures. These tests pin each of those
+// by scanning rows of ink. The certificate is drawn at 20,20 with a
+// 500 pt height on a 72 dpi page, so 1 px = 1 pt and every 0.01h is 5 px.
+
+const CERT_W: u32 = 532;
+const CERT_H: u32 = 500;
+const MARGIN: u32 = 20;
+
+fn certificate(dict: &str) -> Interp {
+    let mut it = fresh(CERT_W + 2 * MARGIN, CERT_H + 2 * MARGIN);
+    it.run_str(&format!(
+        "{MARGIN} {MARGIN} {CERT_W} {CERT_H} << {dict} >> pgcertificate pop"
+    ))
+    .unwrap_or_else(|e| panic!("pgcertificate failed: {}", it.error_report(&e)));
+    it
+}
+
+fn dark(it: &Interp, x: u32, y: u32) -> bool {
+    let p = it.gfx().pixmap.pixel(x, y).expect("pixel in range");
+    0.3 * p.red() as f32 + 0.59 * p.green() as f32 + 0.11 * (p.blue() as f32) < 180.0
+}
+
+/// Dark pixels in device row `y` between columns `x0..x1`.
+fn row_ink(it: &Interp, y: u32, x0: u32, x1: u32) -> u32 {
+    (x0..x1).filter(|&x| dark(it, x, y)).count() as u32
+}
+
+/// Device x of a fraction of the certificate's width.
+fn cx(frac: f32) -> u32 {
+    MARGIN + (CERT_W as f32 * frac) as u32
+}
+
+/// Inner rule rows: the frame inset is 0.05 * min(w, h) = 25 pt. Rows are
+/// counted down from the top of the page.
+fn inner_top_row() -> u32 {
+    MARGIN + 25
+}
+fn inner_bottom_row() -> u32 {
+    MARGIN + CERT_H - 25
+}
+
+/// Rows strictly inside the inner rule, scanned over `x0..x1`: true where
+/// the row holds ink. The rule's own 2 px stroke is skipped at each end.
+fn ink_rows(it: &Interp, x0: u32, x1: u32) -> Vec<(u32, bool)> {
+    (inner_top_row() + 3..inner_bottom_row() - 2)
+        .map(|y| (y, row_ink(it, y, x0, x1) > 0))
+        .collect()
+}
+
+/// Lengths of the blank runs between inked rows (the runs touching the
+/// inner rule at either end are the frame padding, returned separately).
+fn blank_runs(rows: &[(u32, bool)]) -> (u32, Vec<u32>, u32) {
+    let first = rows.iter().position(|r| r.1).expect("some ink");
+    let last = rows.iter().rposition(|r| r.1).expect("some ink");
+    let mut runs = Vec::new();
+    let mut run = 0;
+    for r in &rows[first..=last] {
+        if r.1 {
+            if run > 0 {
+                runs.push(run);
+            }
+            run = 0;
+        } else {
+            run += 1;
+        }
+    }
+    (first as u32, runs, (rows.len() - 1 - last) as u32)
+}
+
+const SPECIMEN: &str = "/Title (Certificate of Achievement) /Awardee (Ada Lovelace) \
+     /Body (In recognition of outstanding contributions to the analytical engine and \
+     the founding of computer programming as a discipline.) \
+     /Presenter (C. Babbage) /Date (1843-10-12)";
+
+#[test]
+fn certificate_title_clears_the_inner_rule() {
+    // Was 0.02h (10 px); the fix sets 0.07h. Ask for at least 0.05h.
+    for dict in [
+        SPECIMEN,
+        "",
+        "/Title (A Very Long Title That Has To Shrink To Fit The Width Of The Certificate)",
+    ] {
+        let it = certificate(dict);
+        let (top_pad, _, _) = blank_runs(&ink_rows(&it, cx(0.15), cx(0.85)));
+        assert!(
+            top_pad >= 25,
+            "title ink starts {top_pad} px under the inner rule, want >= 25 (0.05h) for {dict:?}"
+        );
+    }
+}
+
+/// The left signature rule's row: the row in the rule's column span that
+/// is almost fully dark.
+fn left_rule_row(it: &Interp) -> u32 {
+    let (x0, x1) = (cx(0.12) + 2, cx(0.40) - 2);
+    (inner_top_row() + 3..inner_bottom_row() - 2)
+        .rev()
+        .find(|&y| row_ink(it, y, x0, x1) * 10 >= (x1 - x0) * 9)
+        .expect("a signature rule")
+}
+
+#[test]
+fn certificate_names_sit_on_their_rules_and_captions_clear_them() {
+    // "C. Babbage" has a descender, the hardest case for the name side.
+    let it = certificate(SPECIMEN);
+    let rule = left_rule_row(&it);
+    let (x0, x1) = (cx(0.12), cx(0.40));
+    let ink = |y: u32| row_ink(&it, y, x0, x1) > 0;
+    // The rule is 1-2 px thick; step past it.
+    let first_above = (2..60)
+        .find(|&d| ink(rule - d))
+        .expect("name ink above the rule");
+    let first_below = (2..60)
+        .find(|&d| ink(rule + d))
+        .expect("caption ink below the rule");
+    assert!(
+        (3..=12).contains(&first_above),
+        "name ink should sit 3-12 px above its rule (close, not touching); got {first_above}"
+    );
+    assert!(
+        first_below >= 7,
+        "the caption under a rule must leave a clear gap; its ink starts {first_below} px below"
+    );
+}
+
+#[test]
+fn certificate_gaps_are_balanced() {
+    // The three gaps (title / name cluster / citation / signatures) share
+    // the free space, so no one blank band dwarfs the rest: before #954 a
+    // two-line citation left ~150 px above the signatures against ~45 px
+    // for the next biggest gap. Holds with a short, a long-ish and no
+    // citation.
+    for body in [
+        "/Body (For excellence.)",
+        "/Body (In recognition of outstanding contributions to the analytical engine \
+         and the founding of computer programming as a discipline. With thanks.)",
+        "",
+    ] {
+        let it = certificate(&format!(
+            "/Awardee (Ada Lovelace) /Presenter (C. Babbage) /Date (1843) {body}"
+        ));
+        // Across the signature columns too, so the band above the names
+        // counts; the small rule-to-caption gaps rank below the big three.
+        let (_, mut runs, _) = blank_runs(&ink_rows(&it, cx(0.15), cx(0.85)));
+        runs.sort_unstable_by(|a, b| b.cmp(a));
+        assert!(
+            runs.len() >= 2,
+            "expected several blank bands, got {runs:?}"
+        );
+        assert!(
+            runs[0] * 10 <= runs[1] * 16,
+            "largest blank band {} px vs next {} px: unbalanced for {body:?} ({runs:?})",
+            runs[0],
+            runs[1]
+        );
+    }
+}
+
+#[test]
+fn certificate_long_content_stays_inside_and_clear_of_the_title() {
+    let sentence = "This citation is one of many identical repeated sentences. ";
+    let it = certificate(&format!(
+        "/Title (Certificate of Distinguished Service and Extraordinary Merit in Computing) \
+         /Awardee (Augusta Ada King, Countess of Lovelace and Baroness Wentworth) \
+         /Body ({}\\nA second paragraph after a newline.) \
+         /Presenter (Charles Babbage, Lucasian Professor of Mathematics, Cambridge) \
+         /Date (Thursday the twelfth of October, eighteen forty-three)",
+        sentence.repeat(20)
+    ));
+    // Nothing outside the certificate's own rectangle, give or take the
+    // outer rule's own stroke, which is centred on the edge (pagekit does
+    // not clip; see its header).
+    let (pw, ph) = (CERT_W + 2 * MARGIN, CERT_H + 2 * MARGIN);
+    let (lo, hi_x, hi_y) = (MARGIN - 2, MARGIN + CERT_W + 2, MARGIN + CERT_H + 2);
+    for y in 0..ph {
+        for x in 0..pw {
+            let inside = (lo..hi_x).contains(&x) && (lo..hi_y).contains(&y);
+            assert!(
+                inside || !dark(&it, x, y),
+                "ink outside the certificate at {x},{y}"
+            );
+        }
+    }
+    // Nothing between the two rules (the 25 px border band), in the middle
+    // columns where only text could stray.
+    for y in MARGIN + 3..inner_top_row() - 2 {
+        assert_eq!(
+            row_ink(&it, y, cx(0.1), cx(0.9)),
+            0,
+            "ink in the top border band, row {y}"
+        );
+    }
+    for y in inner_bottom_row() + 3..MARGIN + CERT_H - 3 {
+        assert_eq!(
+            row_ink(&it, y, cx(0.1), cx(0.9)),
+            0,
+            "ink in the bottom border band, row {y}"
+        );
+    }
+    // An overflowing citation holds every gap at its minimum (0.05h = 25 px
+    // from baseline to cap top, so well over 15 px of blank ink-to-ink):
+    // the awardee cluster is never pushed up into the title.
+    let (_, runs, _) = blank_runs(&ink_rows(&it, cx(0.15), cx(0.85)));
+    assert!(
+        runs[0] >= 15,
+        "title and caption are {} px apart with an overflowing citation; want >= 15 ({runs:?})",
+        runs[0]
+    );
+}

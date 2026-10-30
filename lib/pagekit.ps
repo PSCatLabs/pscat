@@ -115,9 +115,30 @@ Palettes /marigold [[0.18 0.08 0.20] [0.38 0.14 0.30] [0.62 0.30 0.28]
 % --- pgcertificate -------------------------------------------------------
 % Formal award: cream background inside a double rule, title, "this
 % certifies that" caption, a large fitted awardee name, a flowed
-% citation, and a two-column presenter/date signature line pair fixed
-% at the bottom (independent of how much of the citation the body flow
-% consumed -- signature placement should not drift with copy length).
+% citation, and a two-column presenter/date signature block fixed at
+% the bottom (independent of how much citation there is -- signature
+% placement should not drift with copy length).
+%
+% Vertical rhythm (#954). Title and signature block are anchored to the
+% inner rule with fixed padding; everything between them is laid out by
+% measured ink, not by fixed fractions of h, so a two-line citation
+% does not leave one large empty band above the signatures. The middle
+% holds two groups -- the caption+awardee cluster and the citation --
+% separated from the title, from each other and from the signer names
+% by three gaps. Each gap is measured from the upper element's baseline
+% to the lower element's cap top, starts at a minimum, and the space
+% left over is shared equally between the three. The citation's line
+% count comes from tfwrap (the same tflinebreak tfflow uses, so the two
+% agree), clamped to what fits at the minimum gaps; what does not fit
+% comes back as the leftover, as before. With no citation the slot
+% collapses and the cluster sits midway between title and names.
+% Cap height and descender are Times' own proportions (about 0.66 and
+% 0.22 of the size), close enough for spacing.
+%
+% Signature block: each signer name is centred over its rule a little
+% above it, each caption centred under it with a clear gap, the way a
+% printed certificate sets them. Sizes are chosen to stay legible when
+% the page is shown at about 380 px wide (a README thumbnail).
 
 /pgcertificate {
     /peDict exch def
@@ -142,59 +163,109 @@ Palettes /marigold [[0.18 0.08 0.20] [0.38 0.14 0.30] [0.62 0.30 0.28]
     peH 0.004 mul setlinewidth
     peX peY peW peH peInset pgframe
 
-    % title
-    pePal 0 get aload pop setrgbcolor
-    /Times-Bold findfont peH 0.06 mul scalefont setfont
     /peCX peX peW 2 div add def
-    /peTitleY peY peH add peInset sub peH 0.06 mul sub def
-    peTitle dup peW 0.72 mul pgzfitmax peCX peTitleY showctr
+    /peTop peY peH add peInset sub def          % inner rule, top
+    /peBot peY peInset add def                  % inner rule, bottom
 
-    % caption
-    /Times-Italic findfont peH 0.024 mul scalefont setfont
-    /peCapY peTitleY peH 0.05 mul sub def
+    % sizes, all from h
+    /peTS peH 0.06 mul def      % title
+    /peCS peH 0.032 mul def     % "This certifies that"
+    /peAS peH 0.09 mul def      % awardee
+    /peBS peH 0.033 mul def     % citation
+    /peLead peH 0.05 mul def    % citation leading
+    /peNS peH 0.03 mul def      % signer names
+    /peKS peH 0.024 mul def     % signature captions
+    /peMin peH 0.05 mul def     % smallest gap between groups
+
+    % Title and awardee shrink to fit their width (pgzfitmax's rule:
+    % shrink only, never enlarge). Their fitted sizes are worked out here,
+    % before anything is placed, so a long, shrunk name gets a slot sized
+    % to its real ink instead of floating in its nominal one.
+    /Times-Bold findfont peTS scalefont setfont
+    peTitle stringwidth pop peW 0.72 mul 2 copy gt
+        { exch div /peTS exch peTS mul def } { pop pop } ifelse
+    /Times-BoldItalic findfont peAS scalefont setfont
+    peAwardee stringwidth pop peW 0.68 mul 2 copy gt
+        { exch div /peAS exch peAS mul def } { pop pop } ifelse
+
+    % title: cap top a clear 0.07h below the inner rule
+    pePal 0 get aload pop setrgbcolor
+    /Times-Bold findfont peTS scalefont setfont
+    /peTitleY peTop peH 0.07 mul sub peTS 0.66 mul sub def
+    peTitle peCX peTitleY showctr
+
+    % signature block, bottom up: caption baseline, rule, name baseline
+    /peKY peBot peH 0.06 mul add def
+    /peSigY peKY peKS 0.66 mul add peH 0.022 mul add def
+    /peNY peSigY peH 0.016 mul add def
+    /peNamesTop peNY peNS 0.66 mul add def
+
+    % the middle: cluster height (caption cap top to awardee baseline)
+    /peCapToAw peH 0.035 mul def
+    /peCluster peCS 0.66 mul peCapToAw add peAS 0.66 mul add def
+    /peSpace peTitleY peNamesTop sub def
+
+    % citation lines, clamped to what fits with every gap at its minimum
+    /Times-Roman findfont peBS scalefont setfont
+    /peBodyW peW 0.66 mul def
+    /peLines peBody peBodyW tfwrap length def
+    /peRoom peSpace peCluster sub peMin 3 mul sub peBS 0.66 mul sub def
+    /peMaxLines peRoom 0 lt { 0 } { peRoom peLead div floor cvi 1 add } ifelse def
+    peLines peMaxLines gt { /peLines peMaxLines def } if
+
+    peLines 0 gt {
+        /peCit peBS 0.66 mul peLines 1 sub peLead mul add def
+        /peGap peSpace peCluster sub peCit sub 3 div def
+    } {
+        /peCit 0 def
+        /peGap peSpace peCluster sub 2 div def
+    } ifelse
+
+    % caption + awardee
+    /Times-Italic findfont peCS scalefont setfont
+    /peCapY peTitleY peGap sub peCS 0.66 mul sub def
     (This certifies that) peCX peCapY showctr
 
-    % awardee
     pePal 1 get aload pop setrgbcolor
-    /Times-BoldItalic findfont peH 0.09 mul scalefont setfont
-    /peAwardeeY peCapY peH 0.11 mul sub def
-    peAwardee dup peW 0.68 mul pgzfitmax peCX peAwardeeY showctr
+    /Times-BoldItalic findfont peAS scalefont setfont
+    /peAwardeeY peCapY peCapToAw sub peAS 0.66 mul sub def
+    peAwardee peCX peAwardeeY showctr
 
-    % citation body, flowed in the band above the signature area
+    % citation: a box that holds exactly peLines baselines, the first one
+    % peGap below the awardee; the text past them is the leftover
     pePal 0 get aload pop setrgbcolor
-    /Times-Roman findfont peH 0.026 mul scalefont setfont
-    /peBandBottom peY peInset add peH 0.16 mul add def
-    /peBodyTop peAwardeeY peH 0.09 mul sub def
-    peX peW 0.12 mul add peBandBottom peW 0.76 mul peBodyTop peBandBottom sub
-    peH 0.045 mul /center peBody tfblock
+    /Times-Roman findfont peBS scalefont setfont
+    /peFirstY peAwardeeY peGap sub peBS 0.66 mul sub def
+    /peBoxBot peFirstY peLines 1 sub peLead mul sub peLead 0.5 mul sub def
+    peLines 0 gt {
+        peCX peBodyW 2 div sub peBoxBot
+        peBodyW peFirstY peLead add peBoxBot sub
+        peLead /center peBody tfblock
+    } {
+        peBody
+    } ifelse
     /peLeftover exch def
 
-    % signature lines: presenter (left third), date (right third).
-    % Presenter/Date are agent-supplied and could be arbitrarily long,
-    % so each is fitmax'd to its own column width before it's shown --
-    % same discipline as Title/Awardee above, just for a narrower
-    % target. The two fixed captions never vary in length, so they're
-    % not a genuine instance of the same risk and are left unfitted.
+    % rules: presenter (left), date (right)
     pePal 0 get aload pop setrgbcolor
     peH 0.0025 mul setlinewidth
-    /peSigY peY peInset add peH 0.09 mul add def
-    /Times-Roman findfont peH 0.02 mul scalefont setfont
+    newpath
     peX peW 0.12 mul add peSigY moveto
     peX peW 0.40 mul add peSigY lineto stroke
     peX peW 0.60 mul add peSigY moveto
     peX peW 0.88 mul add peSigY lineto stroke
 
-    /Times-Roman findfont peH 0.02 mul scalefont setfont
-    pePresenter peW 0.26 mul pgzfitmax
-    pePresenter peX peW 0.12 mul add peSigY peH 0.03 mul add moveto show
+    % names, centred over their rules and fitted to the rule width.
+    % Presenter/Date are agent-supplied and could be arbitrarily long;
+    % the two fixed captions never vary in length, so they stay unfitted.
+    /Times-Roman findfont peNS scalefont setfont
+    pePresenter dup peW 0.28 mul pgzfitmax peX peW 0.26 mul add peNY showctr
+    /Times-Roman findfont peNS scalefont setfont
+    peDate dup peW 0.28 mul pgzfitmax peX peW 0.74 mul add peNY showctr
 
-    /Times-Roman findfont peH 0.02 mul scalefont setfont
-    peDate peW 0.26 mul pgzfitmax
-    peDate peX peW 0.60 mul add peSigY peH 0.03 mul add moveto show
-
-    /Times-Roman findfont peH 0.02 mul scalefont setfont
-    (Presenter) peX peW 0.26 mul add peSigY peH 0.015 mul sub showctr
-    (Date) peX peW 0.74 mul add peSigY peH 0.015 mul sub showctr
+    /Times-Italic findfont peKS scalefont setfont
+    (Presenter) peX peW 0.26 mul add peKY showctr
+    (Date) peX peW 0.74 mul add peKY showctr
 
     grestore
     peLeftover
