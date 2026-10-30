@@ -1,7 +1,7 @@
 {
   "name": "pscat",
   "version": "0.7.0-rc.1",
-  "description": "PostScript rendering, generative art and paper-ready charts with the pscat interpreter: three skills plus the pscat-mcp server. Uses your installed pscat, or downloads the prebuilt one from the project's GitHub releases on first start.",
+  "description": "PostScript for precision and imagination: render documents, charts and generative art to PNG, SVG and PDF with the pscat interpreter. Three skills plus the pscat-mcp server. Uses your installed pscat, or downloads the prebuilt one from the project's GitHub releases on first start.",
   "author": {
     "name": "Jerome Banks",
     "url": "https://github.com/jeromebanks"
