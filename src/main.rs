@@ -1134,9 +1134,6 @@ pub(crate) fn print_lint(
     strict: bool,
     note: Option<&str>,
 ) -> bool {
-    if let Some(note) = note {
-        eprintln!("pscat: lint: {LINT_NOTE}{note}");
-    }
     if !ok {
         eprintln!(
             "pscat: lint: [{RUN_ERROR_CHECK}] the run ended in an error (see the report above), so this is not a clean run"
@@ -1144,21 +1141,21 @@ pub(crate) fn print_lint(
         // Every other check reads end-of-run state, so after an abort it
         // reports the abort (a blank page, an unbalanced gsave, a leaked
         // dict), not the program (#947, as `pscat-mcp` since #942). The
-        // errored run fails on its own, whatever `--lint-strict` says.
+        // note explains findings and there are none, so it is left out
+        // too. The errored run fails on its own, whatever `--lint-strict`
+        // says.
         return true;
     }
+    if let Some(note) = note {
+        eprintln!("pscat: lint: {LINT_NOTE}{note}");
+    }
     if findings.is_empty() {
-        if ok {
-            eprintln!("pscat: lint: clean");
-        }
-        return !ok;
+        eprintln!("pscat: lint: clean");
+        return false;
     }
     for f in findings {
         eprintln!("pscat: lint: [{}] {}", f.check, f.message);
     }
-    // The footer counts real findings only: an errored run already
-    // fails on its own, so "because --lint-strict was given" would be
-    // misleading for it.
     if strict {
         eprintln!(
             "pscat: lint: {} finding(s) — failing because --lint-strict was given",

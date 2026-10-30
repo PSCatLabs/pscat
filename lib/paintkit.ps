@@ -8069,6 +8069,9 @@ systemdict /setalpha known /pwhasalpha exch def
 % @summary: Mix pigments like paint. Takes a flat array of name-and-weight pairs, [ /phthaloblue 1 /alizarin 1 ], and returns r g b like mix3. An entry may be a literal [r g b] array in place of a name (a plain colour, strength 1). Weights are parts, not fractions, and a zero weight is left out. Blue and yellow give green, blue and crimson violet; white tints instead of just lightening. A single pigment comes back exactly.
 % @example: [ /sapgreen 3 /cadmiumyellow 1 ] pigmix setrgbcolor
 /pigmix {
+    % With an empty stack the `exch def` below would underflow and leave a name
+    % on the stack (#947).
+    count 1 lt { pigmix-needs-an-array } if
     /pgms exch def
     % `load`, not the name: naming a procedure would run it.
     /pgms load xcheck { pigmix-needs-an-array } if
@@ -8113,6 +8116,9 @@ systemdict /setalpha known /pwhasalpha exch def
 % @summary: A tint: the pigment (or [r g b] colour) with t parts titanium white, t from 0 (the pigment) to 1 (white). Not a lerp: how fast a colour lightens depends on the pigment, and the tint loses saturation as it lightens.
 % @example: /phthaloblue 0.25 pigtint setrgbcolor
 /pigtint {
+    % Needs a pigment and an amount: fewer would underflow in the `exch def`
+    % below and leave a name on the stack (#947).
+    count 2 lt { pigtint-needs-a-pigment-and-an-amount } if
     /pgmt exch def /pgmp exch def
     /pgmt load xcheck { pigtint-amount-must-not-be-a-procedure } if
     /pgmp load xcheck { pigtint-pigment-must-not-be-a-procedure } if
@@ -8125,6 +8131,9 @@ systemdict /setalpha known /pwhasalpha exch def
 % @summary: A shade: the pigment (or [r g b] colour) with t parts midnight black, t from 0 (the pigment) to 1 (black). Black has strength 1, so t 0.1 already goes deep; shade with a dark brown or blue instead of black for a richer dark.
 % @example: /sapgreen 0.1 pigshade setrgbcolor
 /pigshade {
+    % Needs a pigment and an amount: fewer would underflow in the `exch def`
+    % below and leave a name on the stack (#947).
+    count 2 lt { pigshade-needs-a-pigment-and-an-amount } if
     /pgmt exch def /pgmp exch def
     /pgmt load xcheck { pigshade-amount-must-not-be-a-procedure } if
     /pgmp load xcheck { pigshade-pigment-must-not-be-a-procedure } if
@@ -8145,6 +8154,8 @@ systemdict /setalpha known /pwhasalpha exch def
 % @summary: A whole /Colors list from pigments. Takes an array whose entries are pigment names, pigmix specs or plain [r g b] arrays, and returns the array of rgb arrays a preset's /Colors wants. A list of bare names needs no wrapper (/Colors takes names itself); pigcolors is for lists that include pigmix specs.
 % @example: << /Colors [ /sapgreen [ /sapgreen 1 /cadmiumyellow 1 ] ] pigcolors >> pkfan
 /pigcolors {
+    % As pigmix: no operand would leave a name on the stack (#947).
+    count 1 lt { pigcolors-needs-an-array } if
     /pgmsrc exch def
     /pgmsrc load xcheck { pigcolors-needs-an-array } if
     /pgmsrc load type /arraytype ne { pigcolors-needs-an-array } if
@@ -11610,6 +11621,18 @@ systemdict /setalpha known /pwhasalpha exch def
 %   { << >> pkscumblein }
 %   /pkscumblein-needs-a-region-and-an-options-dict
 %   (pkscumblein with only an options dict) mustguard
+%   { pigmix }
+%   /pigmix-needs-an-array
+%   (no operand to pigmix) mustguard
+%   { pigcolors }
+%   /pigcolors-needs-an-array
+%   (no operand to pigcolors) mustguard
+%   { /alizarin pigtint }
+%   /pigtint-needs-a-pigment-and-an-amount
+%   (a pigment with no amount to pigtint) mustguard
+%   { /alizarin pigshade }
+%   /pigshade-needs-a-pigment-and-an-amount
+%   (a pigment with no amount to pigshade) mustguard
 %
 %   % ...while a documented call still works.
 %   { newpath 0 0 moveto 40 0 lineto << /Width 6 >> pkribbon }
