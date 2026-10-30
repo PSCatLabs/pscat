@@ -128,14 +128,56 @@ fn lint_strict_footer_counts_real_findings_not_the_run_error() {
     let (ok, _out, stderr) = run(&["--lint-strict", "-e", "pop"], "");
     assert!(!ok);
     assert!(!stderr.contains("because --lint-strict"), "{stderr}");
-    // Error plus a real finding (the blank page): footer says 1, not 2.
+    // An error plus what its abort left behind (the blank page): the abort
+    // is not counted either, so there is still no footer (#947).
     let (ok, _out, stderr) = run(&["--lint-strict", "-"], "pop\nshowpage");
+    assert!(!ok);
+    assert!(stderr.contains("pscat: lint: [run-error]"), "{stderr}");
+    assert!(!stderr.contains("because --lint-strict"), "{stderr}");
+    // A real finding in a run that did not error still gets the footer.
+    let (ok, _out, stderr) = run(&["--lint-strict", "-"], "showpage");
     assert!(!ok);
     assert!(stderr.contains("pscat: lint: [blank-page]"), "{stderr}");
     assert!(
         stderr.contains("pscat: lint: 1 finding(s) \u{2014} failing because --lint-strict"),
         "{stderr}"
     );
+}
+
+/// #947: after an error every other end-of-run check reports the abort, not
+/// the program, so `--lint` says only `[run-error]` (as `pscat-mcp` does
+/// since #942). The same programs without the error are still flagged.
+#[test]
+fn lint_after_an_error_reports_no_consequence_findings() {
+    for src in [
+        "1 0 div",
+        "pop showpage",
+        "gsave 5 dict begin 1 0 div",
+        "1 2 3 1 0 div",
+        "(unterminated",
+    ] {
+        for flag in ["--lint", "--lint-strict"] {
+            let (ok, _out, stderr) = run(&[flag, "-"], src);
+            assert!(!ok, "{src}: an errored run exits non-zero: {stderr}");
+            assert!(
+                stderr.contains("pscat: lint: [run-error]"),
+                "{src}: {stderr}"
+            );
+            for check in ["blank-page", "gsave-imbalance", "dict-leak", "stack-leak"] {
+                assert!(
+                    !stderr.contains(&format!("[{check}]")),
+                    "{flag} {src}: [{check}] is a consequence of the error: {stderr}"
+                );
+            }
+            assert!(!stderr.contains("lint: clean"), "{src}: {stderr}");
+        }
+    }
+    // Without the error, the real findings are still reported.
+    let (_ok, _out, stderr) = run(&["--lint", "-"], "gsave 5 dict begin showpage");
+    assert!(stderr.contains("[gsave-imbalance]"), "{stderr}");
+    assert!(stderr.contains("[dict-leak]"), "{stderr}");
+    let (_ok, _out, stderr) = run(&["--lint", "-"], "showpage");
+    assert!(stderr.contains("[blank-page]"), "{stderr}");
 }
 
 #[test]

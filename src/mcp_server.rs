@@ -2952,7 +2952,8 @@ fn ps_error_fields(stderr: &str) -> Option<Map<String, Value>> {
 /// run ends wherever the error hit, so each is a consequence of the error
 /// and not a flaw in the program. Reported under `Lint:` they read as a
 /// second problem ("the program never drew") next to the real one. The
-/// partly drawn page is still returned.
+/// partly drawn page is still returned. The CLI's `--lint` follows the same
+/// rule since #947, so this drop is a safety net for the child's output.
 ///
 /// A banded render's `pscat: lint: note: ...` line (which band was linted,
 /// #847) is not a finding: it is kept, ahead of the findings, only when
