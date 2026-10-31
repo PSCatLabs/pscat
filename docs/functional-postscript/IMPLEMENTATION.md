@@ -41,23 +41,26 @@ when the library loads; this is the repository's existing `bind` convention.
 
 ## Traversal implementation
 
-All four collection procedures validate inputs and call `fp--walk` with
-`(array initial quotation mode)`. Private mode is `/map`, `/filter`, `/fold`,
-or `/each`; it is not a public option. `fp--walk` allocates a fresh frame:
+All collection procedures validate inputs and call `fp--walk` with
+`(array initial quotation kind)`. The private kind is `/map`, `/mapi`,
+`/filter`, `/fold` or `/each`; it is not a public option. `fp--walk` looks the
+kind up once in `fp--plans`, which gives a specialized prepare, collect and
+finish helper plus the result count and whether an output array is needed.
+The per-element path therefore never compares the kind; that dispatch was
+about half of the traversal overhead. `fp--walk` allocates a fresh frame:
 
 | Slot | Meaning |
 |---|---|
-| fp.mode | one of the four internal literal names |
 | fp.q | caller quotation, never invoked by lookup |
 | fp.acc | fold accumulator, arbitrary PS value |
 | fp.seq | fresh shallow snapshot of source slots |
-| fp.base | caller operand depth after all API operands were consumed |
+| fp.expect | caller operand depth after all API operands were consumed, plus the kind's result count |
 | fp.i | current snapshot index |
 | fp.used | filter's selected count |
 | fp.out | fresh output array for map/filter, otherwise null |
 
-`count /fp.base exch def` deliberately measures before pushing the key. The
-apparently simpler `/fp.base count def` includes that key in the baseline.
+`count ... /fp.expect exch def` deliberately measures before pushing the key.
+The apparently simpler `/fp.expect count def` includes that key in the baseline.
 
 The returned-and-immediately-executed program is structurally:
 
@@ -69,14 +72,15 @@ The returned-and-immediately-executed program is structurally:
 ```
 
 Every word shown above as an operator/helper is a captured object, not a
-run-time helper-name lookup. `fp--prepare`, `fp--collect` and `fp--finish` end
-the frame they receive. `fp--prepare` pushes only callback inputs, then ends.
-`fp--collect` checks actual depth against base + (0 for each, 1 otherwise).
+run-time helper-name lookup. The `fp--prep-*`, `fp--collect-*` and
+`fp--finish-*` helpers end the frame they receive. Prepare pushes only callback
+inputs (the element; the index too for `/mapi`; the accumulator first for fold),
+then ends. Collect checks actual depth against fp.expect.
 For filter it then checks the result type, consumes the boolean, and copies
 the *snapshotted input value* if selected. For map it stores the output, for
 fold it updates fp.acc, and for each it just advances the cursor.
 
-`fp--finish` rejects incomplete iteration (callback `exit` skipped collection),
+Finish rejects incomplete iteration (callback `exit` skipped collection),
 returns the correct result and closes the frame. Do not keep the loop in a
 frame slot: the loop already references frame and a reciprocal reference would
 create a never-freed cycle under `Rc`. The frame has no reference to either

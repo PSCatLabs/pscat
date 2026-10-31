@@ -46,7 +46,7 @@ An executable array encountered directly in a procedure pushes as data;
 `exec` or name resolution invokes it. This distinction lets constructors put
 user procedures inside a new executable array without invoking them early.
 
-`load` retrieves a procedure as data. Immediate lookup (`//fp--prepare`) embeds
+`load` retrieves a procedure as data. Immediate lookup (`//fp--prep-item`) embeds
 an existing helper in a new library definition. Native `bind` resolves native
 operator names at library-load time. User quotations supplied later are never
 bound or rewritten by this library. Arbitrary remaining names inside them

@@ -26,8 +26,8 @@ def build(skip_wasm):
     if not skip_wasm:
         subprocess.run([str(ROOT / "scripts/build_wasm.sh")], cwd=ROOT, check=True, timeout=240)
     wasm = (ROOT / "web/pscat.wasm").read_bytes()
-    api = (ROOT / "web/pscat.js").read_text()
-    sources = {name: (ROOT / "examples/functional" / name).read_text() for name in SOURCES}
+    api = (ROOT / "web/pscat.js").read_text(encoding="utf-8")
+    sources = {name: (ROOT / "examples/functional" / name).read_text(encoding="utf-8") for name in SOURCES}
     include = "(examples/functional/type-common.ps) run"
     programs = {}
     for key, name in (("terrain", "type-terrain.ps"), ("press", "observable-press.ps")):
@@ -39,9 +39,7 @@ def build(skip_wasm):
         "wasm_sha256": sha(wasm), "wasm_bytes": len(wasm),
         "gzip_sha256": sha(compressed), "gzip_bytes": len(compressed),
         "api_sha256": sha(api.encode()),
-        "engine_source_sha256": {str(p.relative_to(ROOT)): sha(p.read_bytes())
-                                 for p in sorted((ROOT / "src").rglob("*.rs"))
-                                 + [ROOT / "Cargo.toml", ROOT / "Cargo.lock", ROOT / "build.rs"]},
+        "engine_source_sha256": engine_hashes(),
         "source_sha256": {f"examples/functional/{name}": sha(text.encode())
                           for name, text in sources.items()},
         "embedded_library_sha256": {f"lib/{name}": sha((ROOT / "lib" / name).read_bytes())
@@ -66,12 +64,40 @@ def build(skip_wasm):
     return await Pscat.instantiate(bytes);
   } finally { URL.revokeObjectURL(url); }
 };
-''')
-    (ASSETS / "studio-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+''', encoding="utf-8")
+    (ASSETS / "studio-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     print(f"Offline studio: {len(wasm):,} WASM bytes -> {out.stat().st_size:,} JS bytes; two actual PS programs")
+
+
+def engine_hashes():
+    return {str(p.relative_to(ROOT)): sha(p.read_bytes())
+            for p in sorted((ROOT / "src").rglob("*.rs"))
+            + [ROOT / "Cargo.toml", ROOT / "Cargo.lock", ROOT / "build.rs"]}
+
+
+def check():
+    """Report inputs that changed since the committed payload was built."""
+    manifest = json.loads((ASSETS / "studio-manifest.json").read_text(encoding="utf-8"))
+    recorded = {**manifest["engine_source_sha256"], **manifest["source_sha256"],
+                **manifest["embedded_library_sha256"], "web/pscat.js": manifest["api_sha256"]}
+    current = {**engine_hashes(), "web/pscat.js": sha((ROOT / "web/pscat.js").read_bytes())}
+    for path in recorded:
+        if path not in current:
+            current[path] = sha((ROOT / path).read_bytes()) if (ROOT / path).exists() else None
+    stale = sorted(path for path in recorded.keys() | current.keys()
+                   if recorded.get(path) != current.get(path))
+    for path in stale:
+        print(f"stale studio input: {path}")
+    if stale:
+        print("Rebuild with scripts/build_functional_studio.py, then rerun the functional tests.")
+        raise SystemExit(1)
+    print("Offline studio payload matches the current engine, API and sources.")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--skip-wasm-build", action="store_true", help="use an already built web/pscat.wasm")
-    build(parser.parse_args().skip_wasm_build)
+    parser.add_argument("--check", action="store_true",
+                        help="report inputs changed since the committed payload was built; build nothing")
+    args = parser.parse_args()
+    check() if args.check else build(args.skip_wasm_build)

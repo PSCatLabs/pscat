@@ -127,7 +127,7 @@ previous callback side effects in place; no partial array is returned.
 `( ... array predicate -- ... selected )`, `predicate: ( ... x -- ... bool )`.
 
 Stable selection of the original snapshotted values, not predicate outputs.
-All-pass and empty results are fresh arrays. Predicates run once per value.
+All-pass and empty results are fresh, exactly sized arrays. Predicates run once per value.
 
 ```postscript
 (lib/functional.ps) run
@@ -170,6 +170,84 @@ Empty input does nothing; the sequence slots are still snapshotted.
 No collection result. Guards: common contracts and callback depth. Graphics
 changes from q remain unless q uses its own balanced `gsave`/`grestore`.
 
+### fp-map-indexed
+
+`( ... array q -- ... results )`, `q: ( ... x i -- ... y )`.
+
+`fp-map` with the zero-based index pushed above each element, for marks whose
+position or colour depends on their place in the sequence. Same contracts,
+snapshot and guards as `fp-map`.
+
+```postscript
+(lib/functional.ps) run
+[10 20 30] {mul} fp-map-indexed == % [0 20 60]
+```
+
+### fp-range
+
+`( n -- array )`: a fresh literal array `[0 1 ... n-1]`; `0 fp-range` is `[]`.
+Raises `fp-range-count-must-be-nonnegative-integer` for anything else.
+
+```postscript
+(lib/functional.ps) run
+5 fp-range {dup mul} fp-map == % [0 1 4 9 16]
+```
+
+### fp-zip and fp-map2
+
+`( a b -- pairs )` and `( ... a b q -- ... results )`, `q: ( ... x y -- ... z )`.
+
+Zip builds fresh two-element arrays `[a_i b_i]`; the elements alias. Lengths
+must match (`fp-zip-equal-lengths-required`): silent truncation hides bugs in
+generated art. `fp-map2` zips and then maps `{aload pop q}`, so it inherits
+fp-map's callback contracts and depth check.
+
+```postscript
+(lib/functional.ps) run
+[1 2] [(a) (b)] fp-zip == % [[1 (a)] [2 (b)]]
+[5 6] [1 2] {sub} fp-map2 == % [4 4]
+```
+
+### fp-sort-by and fp-sort
+
+`( array key -- sorted )`, `key: ( ... x -- ... number|string )`, and
+`( array -- sorted )`.
+
+Stable ascending sort into a fresh array; the input is not reordered. Keys are
+computed **once per element** through `fp-map`, so user code never runs inside
+the merge and no private frame is open when a key quotation errors. All keys
+must be numbers, or all strings (`fp-sort-keys-must-be-all-numbers-or-all-strings`).
+Sort descending with a negated numeric key. `fp-sort` is `{} fp-sort-by`.
+
+```postscript
+(lib/functional.ps) run
+[3 1 2] fp-sort == % [1 2 3]
+[(pear) (fig) (apple)] {length} fp-sort-by == % [(fig) (pear) (apple)]
+[[2 /back] [0 /front] [1 /mid]] {0 get neg} fp-sort-by == % back, mid, front
+```
+
+### fp-keep
+
+`( ... x q -- ... x )` with `q: ( ... x -- ... )`: run q on x, then push the
+same x again. Factor's `keep`. The usual shape for one record feeding several
+drawing steps: `{/stem load fp-keep flower}`.
+
+```postscript
+(lib/functional.ps) run
+[1 2 3] {length} fp-keep == == % [1 2 3], then 3
+```
+
+### fp-field
+
+`( key -- getter )`, `getter: ( container -- value )`. Builds `{key get}` with
+the key boxed like `fp-curry`, so it works with any dictionary key or array
+index. Prefer dictionary records with named fields over positional arrays.
+
+```postscript
+(lib/functional.ps) run
+[<< /r 2 >> << /r 5 >>] /r fp-field fp-map == % [2 5]
+```
+
 ## Aspect procedures
 
 Advice runs on the same operand/dictionary/graphics state as the target.
@@ -186,6 +264,7 @@ interception and error behavior see [AOP.md](AOP.md).
 | `aop-around` | `target advice -- decorated` | push target **as data**, call advice | No constructor mutation; quotation guards. Advice owns proceed via `exec`, including skipping/repeating it. |
 | `aop-count` | `target counter -- decorated` | increment `/Calls`, then target | Mutates the supplied dict on invocation, including failed target entries. Constructor validates only. Counter guards run again at entry. |
 | `aop-trace` | `target label -- decorated` | print `enter label`, target, print `leave label` | No state mutation beyond stdout; string label aliases. Leave line on normal return only. |
+| `aop-wrap-def` | `/name decorator --` | `decorator: ( target -- wrapper )` runs once, now | Defines `/name` in the **current** dictionary, like `def`. Operators are wrapped as `{op}` first. Guards `aop-wrap-def-name-required`, `aop-wrap-def-name-undefined`, `fp-quotation-required`. |
 
 Counter must be a dictionary with `/Calls` a nonnegative integer. Other keys
 are preserved. Guards are `aop-counter-dictionary-required`,
