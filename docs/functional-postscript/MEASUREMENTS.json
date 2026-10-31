@@ -1,5 +1,5 @@
 {
-  "source_revision": "a29da2a14af959fd1020e09446c2a1d295be0395",
+  "source_revision": "4f108415d9cc9dda1c2cd47541f723a030c1a0b0",
   "input_sha256": {
     "examples/functional/benchmark.ps": "0b245f2cc7617d9dad6cc4f51d91c0f447d8560f5fc6442ddeadea1652128f06",
     "examples/functional/common.ps": "d72d1754c5c66d138f2822d103648d14173d031f1c77c4d0811c311263e9f55b",
@@ -10,13 +10,13 @@
     "examples/functional/primitives.ps": "c8ee9394e7600895d8b22f765da89d50f536f4d2f4474d319689e736a887c90d",
     "examples/functional/type-common.ps": "b128c323dd200228dc0b857f01006f819825ee58aee5b4bfcab43e324dd196c7",
     "examples/functional/type-terrain.ps": "0b5ac25101c715ce31f14fc316e19354f159050b1c87e7ae9f57e2b45978f915",
-    "lib/functional.ps": "b28f3a3b3cfd8064ae13b3911bebeb422c499779bf1dc1333e8caafeb2502425",
+    "lib/functional.ps": "016be8a2bb7bd9a9239cb4daed9f41d078053923a51896f9166c593a5f7928d3",
     "lib/aspect.ps": "cea231e5a806ce24d98ba267a710d601fdd0187566543cc0de37035965b00847",
     "lib/artkit.ps": "1fb38bc129283e0ee4f52ff875fbc38e28daf5aad1271f276b66201b9ba034aa",
     "lib/paintkit.ps": "2c901df87aee699767a92863a6e4962e9ed82931d13fdaadc3829359845a7804"
   },
   "platform": "macOS-15.7.7-arm64-arm-64bit",
-  "binary": "pscat 0.6.3+a29da2a-dirty",
+  "binary": "pscat 0.6.3+4f10841-dirty",
   "samples": 5,
   "clock": "child user + system CPU seconds; includes loading/startup",
   "profile": "ci (optimized with debug assertions and overflow checks)",
@@ -24,49 +24,49 @@
     "map_fold": {
       "functional": {
         "cpu_seconds": [
-          0.137292,
-          0.117224,
-          0.11846599999999997,
-          0.11863900000000004,
-          0.11738899999999997
+          0.06483499999999999,
+          0.06517300000000002,
+          0.06547299999999999,
+          0.06656100000000002,
+          0.06533900000000001
         ],
-        "median": 0.11846599999999997,
-        "minimum": 0.117224
+        "median": 0.06533900000000001,
+        "minimum": 0.06483499999999999
       },
       "imperative": {
         "cpu_seconds": [
-          0.021735000000000018,
-          0.021756000000000022,
-          0.02182199999999998,
-          0.022854999999999986,
-          0.022669999999999982
+          0.02196199999999999,
+          0.02193599999999999,
+          0.02169899999999996,
+          0.02196399999999999,
+          0.021547999999999953
         ],
-        "median": 0.02182199999999998,
-        "minimum": 0.021735000000000018
+        "median": 0.02193599999999999,
+        "minimum": 0.021547999999999953
       }
     },
     "poster": {
       "functional": {
         "cpu_seconds": [
-          0.02856400000000012,
-          0.025668999999999977,
-          0.025228999999999883,
-          0.025702999999999906,
-          0.02597200000000001
+          0.025092000000000003,
+          0.02577999999999995,
+          0.025909000000000043,
+          0.025029000000000017,
+          0.026078000000000025
         ],
-        "median": 0.025702999999999906,
-        "minimum": 0.025228999999999883
+        "median": 0.02577999999999995,
+        "minimum": 0.025029000000000017
       },
       "imperative": {
         "cpu_seconds": [
-          0.025519000000000007,
-          0.025192000000000055,
-          0.025060000000000048,
-          0.024667000000000078,
-          0.025436000000000028
+          0.024988000000000007,
+          0.025742999999999912,
+          0.025602000000000034,
+          0.025993000000000037,
+          0.02549199999999998
         ],
-        "median": 0.025192000000000055,
-        "minimum": 0.024667000000000078
+        "median": 0.025602000000000034,
+        "minimum": 0.024988000000000007
       }
     }
   },
