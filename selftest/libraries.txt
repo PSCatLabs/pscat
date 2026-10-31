@@ -26,3 +26,4 @@ lib/released.ps
 lib/etching.ps
 lib/functional.ps
 lib/aspect.ps
+lib/warp.ps

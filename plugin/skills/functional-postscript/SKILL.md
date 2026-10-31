@@ -80,5 +80,13 @@ extending. The executable poster/control are in
 [demo](../../../docs/functional-postscript/DEMO.md); the full technical index is
 [here](../../../docs/functional-postscript/README.md).
 
+To bend shapes (lens, swirl, ripple, polar, perspective), or to run an
+unmodified program so everything it paints is warped, load
+`(lib/warp.ps) run` after both libraries: `(file.ps) warp step wp-run`.
+Warps are `( x y -- x' y' )` quotations and compose with `fp-compose`.
+Inside a decorated scope, operator names refer to the decorated versions, so a
+decorator that needs the real operator must capture it with `bind` or
+`systemdict /name get`.
+
 For measured glyph layout, contoured text and a real contract-failure proof, see
 [live typography and AOP](../../../docs/functional-postscript/WASM-STUDIO.md).

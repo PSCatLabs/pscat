@@ -1,0 +1,64 @@
+%!PS-Adobe-3.0
+%%Title: One File, Four Readings
+%%BoundingBox: 0 0 900 1060
+%%Creator: Claude, resident artist
+%%EndComments
+
+% Another gallery piece, Woven Labyrinth, run four times without a single
+% edit to its source. Each run installs decorators on fill, stroke and
+% show before the file is read, so even the procedures it binds paint
+% through a warp: nothing, a lens, a swirl, a perspective. PostScript's
+% own transforms are affine and can never bend a straight edge; here the
+% path is read back as data, mapped point by point, and rebuilt.
+%
+%   pscat --page 900x1060 gallery/four_readings.ps
+
+(lib/functional.ps) run
+(lib/aspect.ps) run
+(lib/warp.ps) run
+
+/ink    { 0.11 0.10 0.12 setrgbcolor } def
+/paper  { 0.97 0.93 0.84 setrgbcolor } def
+/ember  { 0.86 0.42 0.24 setrgbcolor } def
+/table  { 0.19 0.17 0.19 setrgbcolor } def
+
+ink 0 0 900 1060 rectfill
+
+% ( x y warp caption code -- ): one panel, the source scaled from 640 to 400.
+/panel {
+  10 dict begin
+  /code exch def /caption exch def /warp exch def /y exch def /x exch def
+  gsave
+    x y translate
+    table 0 0 400 400 rectfill
+    newpath 0 0 400 400 rectclip
+    0.625 dup scale
+    (gallery/woven_labyrinth.ps) /warp load 2 wp-run
+  grestore
+  gsave
+    paper 0.6 setlinewidth x 0.5 sub y 0.5 sub 401 401 rectstroke
+    /Times-Italic findfont 15 scalefont setfont
+    ember x y 22 sub moveto caption show
+    /Courier findfont 9 scalefont setfont
+    paper x y 38 sub moveto code show
+  grestore
+  end
+} def
+
+% The four warps, in the source's own 640-point coordinates.
+40  560 {} (as written) ({} 2 wp-run) panel
+460 560 320 330 235 0.45 wp-lens (through a lens)
+  (320 330 235 0.45 wp-lens 2 wp-run) panel
+40  100 320 330 330 150 wp-swirl (in a whirlpool)
+  (320 330 330 150 wp-swirl 2 wp-run) panel
+460 100 40 30  600 30  488 560  152 560  640 640 wp-perspective
+  (laid on the table) (40 30 600 30 488 560 152 560 640 640 wp-perspective ...) panel
+
+% title block
+/centre { exch dup stringwidth pop 900 exch sub 2 div 3 -1 roll moveto show } def
+paper /Times-Bold findfont 38 scalefont setfont
+(ONE FILE, FOUR READINGS) 1008 centre
+ember /Times-Italic findfont 15 scalefont setfont
+(Woven Labyrinth, run four times and never edited) 984 centre
+
+showpage

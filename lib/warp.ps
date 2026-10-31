@@ -1,0 +1,303 @@
+%!PS-Adobe-3.0
+%%Title: Warp — non-affine path transforms and decorated drawing
+%%EndComments
+% @requires: (lib/functional.ps) run (lib/aspect.ps) run
+% PostScript's CTM is affine: it can scale, rotate and shear, never bend.
+% This library treats a path as data, maps a point warp ( x y -- x' y' )
+% over it with fp-map, and rebuilds it, so straight edges really curve.
+% Warps are ordinary quotations: fp-compose chains them, and the scoped
+% runner decorates fill/stroke/show so an unmodified program draws through
+% a warp. All public names start wp-. Contracts: docs/functional-postscript/WARP.md.
+%
+% Path records: [/m x y] moveto, [/l x y] lineto, [/z] closepath. Curves
+% are flattened first; long lines are subdivided so the warp can bend them.
+
+%%SelfTest: warp-contracts
+% { [] 0 wp-subdivide } /wp-step-must-be-positive (zero step) mustguard
+% { [] (2) wp-subdivide } /wp-step-must-be-positive (string step) mustguard
+% { [] wp-lift } /fp-quotation-required (lift needs a warp) mustguard
+% { (missing.ps) 5 wp-run-decorated } /wp-decorators-must-be-dictionary (decorator type) mustguard
+%%EndSelfTest
+
+% ( dict body -- warp ): a warp that opens its own scratch dictionary, so
+% the names it uses never land in the drawing program's dictionaries.
+% @internal
+/wp--closure {
+  [ 3 1 roll /begin load exch /exec load /end load ] cvx
+} bind def
+
+% @kind: Procedure
+% @summary: Return the current path, flattened, as [/m x y] [/l x y] [/z] records.
+% @example: newpath 0 0 moveto 10 0 lineto wp-path
+/wp-path {
+  flattenpath
+  [ {/m 3 1 roll 3 array astore} {/l 3 1 roll 3 array astore}
+    {} {[/z]} pathforall ]
+} bind def
+
+% Closing edges become explicit lines, so they bend too.
+% @kind: Procedure
+% @summary: Split every edge into steps no longer than step user units.
+% @example: newpath 0 0 moveto 10 0 lineto wp-path 2 wp-subdivide
+/wp-subdivide {
+  dup type dup /integertype ne exch /realtype ne and
+    { wp-step-must-be-positive } if
+  dup 0 le { wp-step-must-be-positive } if
+  12 dict begin
+  /step exch def /px 0 def /py 0 def /sx 0 def /sy 0 def
+  /line-to {
+    /y1 exch def /x1 exch def
+    /n x1 px sub dup mul y1 py sub dup mul add sqrt step div ceiling cvi 1 max def
+    1 1 n {
+      n div /t exch def
+      /l px x1 px sub t mul add py y1 py sub t mul add 3 array astore
+    } for
+    /px x1 def /py y1 def
+  } def
+  [ exch {
+      dup 0 get
+      dup /m eq {
+        pop dup aload pop /py exch def /px exch def pop /sy py def /sx px def
+      } {
+        /l eq { aload pop 3 -1 roll pop line-to } { sx sy line-to } ifelse
+      } ifelse
+  } forall ]
+  end
+} bind def
+
+% @kind: Procedure
+% @summary: Lift a point warp x y -- x' y' to a callback that maps one path record.
+% @example: {exch} wp-lift
+/wp-lift {
+  //fp--quote exec
+  { exch dup 0 get /z eq { exch pop }
+      { aload pop 4 -1 roll exec 3 array astore } ifelse } //fp-curry exec
+} bind def
+
+% @kind: Procedure
+% @summary: Append path records to the current path.
+% @example: [[/m 0 0] [/l 10 0]] wp-emit
+/wp-emit {
+  { dup 0 get /z eq { pop closepath }
+      { aload pop 3 -1 roll /m eq { moveto } { lineto } ifelse } ifelse
+  } //fp-each exec
+} bind def
+
+% @kind: Procedure
+% @summary: Replace the current path with its image under a warp, subdividing to step.
+% @example: newpath 0 0 moveto 100 0 lineto {1 index 3 div sin 5 mul add} 4 wp-warppath
+/wp-warppath {
+  exch //wp-lift exec exch
+  //wp-path exec exch //wp-subdivide exec exch //fp-map exec
+  newpath //wp-emit exec
+} bind def
+
+% @kind: Procedure
+% @summary: Turn a point warp into a path transform, records -- records, for wp-run-path.
+% @example: {exch} wp-points
+/wp-points { //wp-lift exec {//fp-map exec} //fp-curry exec } bind def
+
+% ---- Warps: each constructor returns a quotation ( x y -- x' y' ) ----
+
+% @kind: Procedure
+% @summary: Warp that translates by dx dy; compose it to place a shape before bending it.
+% @example: 3 4 10 20 wp-shift exec
+/wp-shift {
+  2 array astore { aload pop 3 -1 roll add 3 1 roll add exch } //fp-curry exec
+} bind def
+
+% @kind: Procedure
+% @summary: Warp that scales about the origin by sx sy.
+% @example: 3 4 2 0.5 wp-scale exec
+/wp-scale {
+  2 array astore { aload pop 3 -1 roll mul 3 1 roll mul exch } //fp-curry exec
+} bind def
+
+% x runs along the arc (degrees-per-unit, clockwise from 12 o'clock at
+% x = 0); y runs outward from radius r0. Straight text becomes a ring.
+% @kind: Procedure
+% @summary: Warp a horizontal strip onto a ring around cx cy, starting at radius r0.
+% @example: 0 0 300 300 100 0.5 wp-polar exec
+/wp-polar {
+  8 dict begin /k exch def /r0 exch def /cy exch def /cx exch def currentdict end
+  { /y exch def k mul 90 exch sub /a exch def
+    r0 y add dup a cos mul cx add exch a sin mul cy add } //wp--closure exec
+} bind def
+
+% @kind: Procedure
+% @summary: Warp that displaces y by amplitude times the sine of x over a wavelength.
+% @example: 25 0 8 100 wp-ripple exec
+/wp-ripple {
+  2 array astore
+  { aload pop 3 index exch div 360 mul sin mul add } //fp-curry exec
+} bind def
+
+% Magnifies (strength > 0) or pinches (< 0) inside radius r; identity outside.
+% @kind: Procedure
+% @summary: Warp that bulges or pinches the disc of radius r around cx cy.
+% @example: 110 100 100 100 50 0.5 wp-lens exec
+/wp-lens {
+  10 dict begin /s exch def /r exch def /cy exch def /cx exch def currentdict end
+  { cy sub /dy exch def cx sub /dx exch def
+    /d dx dup mul dy dup mul add sqrt def
+    d r lt { 1 d r div dup mul sub s mul 1 add } { 1 } ifelse
+    dup dx mul cx add exch dy mul cy add } //wp--closure exec
+} bind def
+
+% Rotation falls from degrees at the centre to zero at radius r.
+% @kind: Procedure
+% @summary: Warp that twists the disc of radius r around cx cy by up to degrees.
+% @example: 110 100 100 100 50 90 wp-swirl exec
+/wp-swirl {
+  10 dict begin /deg exch def /r exch def /cy exch def /cx exch def currentdict end
+  { cy sub /dy exch def cx sub /dx exch def
+    /d dx dup mul dy dup mul add sqrt def
+    /a d r lt { 1 d r div sub dup mul deg mul } { 0 } ifelse def
+    dx a cos mul dy a sin mul sub cx add
+    dx a sin mul dy a cos mul add cy add } //wp--closure exec
+} bind def
+
+% Projective map from the rectangle 0 0 w h onto the quadrilateral
+% (x0 y0) (x1 y1) (x2 y2) (x3 y3), counter-clockwise from bottom left
+% (Heckbert's square-to-quad). Parallel lines meet at vanishing points:
+% no CTM can do this.
+% @kind: Procedure
+% @summary: Warp the rectangle 0 0 w h onto any four-cornered quadrilateral in perspective.
+% @example: 50 50 0 0 100 0 90 80 10 80 100 100 wp-perspective exec
+/wp-perspective {
+  24 dict begin
+  /h exch def /w exch def
+  /y3 exch def /x3 exch def /y2 exch def /x2 exch def
+  /y1 exch def /x1 exch def /y0 exch def /x0 exch def
+  /sx x0 x1 sub x2 add x3 sub def /sy y0 y1 sub y2 add y3 sub def
+  /dx1 x1 x2 sub def /dx2 x3 x2 sub def /dy1 y1 y2 sub def /dy2 y3 y2 sub def
+  /det dx1 dy2 mul dx2 dy1 mul sub def
+  sx abs 1e-9 lt sy abs 1e-9 lt and det abs 1e-12 lt or
+    { /g 0 def /hh 0 def }
+    { /g sx dy2 mul dx2 sy mul sub det div def
+      /hh dx1 sy mul sx dy1 mul sub det div def } ifelse
+  /a x1 x0 sub g x1 mul add def /b x3 x0 sub hh x3 mul add def
+  /d y1 y0 sub g y1 mul add def /e y3 y0 sub hh y3 mul add def
+  currentdict end
+  { h div /v exch def w div /u exch def
+    /q g u mul hh v mul add 1 add def
+    a u mul b v mul add x0 add q div
+    d u mul e v mul add y0 add q div } //wp--closure exec
+} bind def
+
+% The inverse of wp-polar, as a path transform: angle clockwise from
+% 12 o'clock becomes x (k units per degree), radius becomes y. Applied one
+% path at a time, so a shape that straddles 12 o'clock is kept whole on
+% the side of its first point instead of being torn across the page.
+% @kind: Procedure
+% @summary: Path transform that unrolls rings around cx cy into straight horizontal bands.
+% @example: 0 0 1 wp-unroll
+/wp-unroll {
+  12 dict begin
+  /k exch def /cy exch def /cx exch def /turn k 360 mul def
+  currentdict end
+  dup
+  { /y exch cy sub def /x exch cx sub def
+    90 y x atan sub dup 360 div floor 360 mul sub k mul
+    x dup mul y dup mul add sqrt } //wp--closure exec //wp-points exec
+  exch
+  { /recs exch def /x0 null def
+    [ recs {
+        dup 0 get /z ne {
+          aload pop /y exch def /x exch def
+          x0 null eq { /x0 x def } if
+          x x0 sub turn 2 div gt { /x x turn sub def } if
+          x x0 sub turn 2 div neg lt { /x x turn add def } if
+          x y 3 array astore
+        } if
+    } forall ] } //wp--closure exec
+  //fp-compose exec
+} bind def
+
+% ---- Running an unmodified program through decorators ----
+
+% ( transform step base -- ): rebuild the current path under a path
+% transform, in the base coordinate space captured when the run began,
+% then restore the CTM.
+% @internal
+/wp--rebuild {
+  matrix currentmatrix 4 1 roll setmatrix
+  //wp-path exec exch //wp-subdivide exec exch exec
+  newpath //wp-emit exec
+  setmatrix
+} bind def
+
+% ( x y w h -- ): a rectangle as a closed path, for the rect operators.
+% @internal
+/wp--rect {
+  4 2 roll moveto 1 index 0 rlineto 0 exch rlineto neg 0 rlineto closepath
+} bind def
+
+% ( transform step -- decorators ), transform: ( records -- records ).
+% Each decorator ( target -- wrapper ) turns an operator into one that
+% paints the transformed path. Strokes are outlined
+% first with strokepath, so line weight and dashes bend with the shape;
+% text is drawn as glyph outlines. Images and smooth shadings pass through
+% unwarped; the array forms of rectfill, rectstroke and rectclip are not
+% supported.
+% @kind: Procedure
+% @summary: Build decorators that make fill, stroke, show and clip draw through a path transform.
+% @example: {} 4 wp-decorators
+/wp-decorators {
+  matrix currentmatrix //wp--rebuild /exec load 5 array astore cvx
+  % prefix: { warp step base rebuild } -- run it to warp the current path
+  8 dict begin /prefix exch def /realfill systemdict /fill get def
+  % operators that consume or clip the current path keep their own target
+  [ /fill /eofill /clip /eoclip ] {
+    [ /prefix load /exch load //fp-compose /exec load ] cvx def
+  } forall
+  /stroke [ /pop load
+    [ /strokepath load /prefix load /exec load /realfill load ] cvx ] cvx def
+  /rectfill [ /pop load
+    [ /gsave load /newpath load //wp--rect /exec load
+      /prefix load /exec load /realfill load /grestore load ] cvx ] cvx def
+  /rectstroke [ /pop load
+    [ /gsave load /newpath load //wp--rect /exec load /strokepath load
+      /prefix load /exec load /realfill load /grestore load ] cvx ] cvx def
+  % rectclip: like clip, but it starts from a fresh path and leaves none
+  /rectclip [ /pop load
+    [ /newpath load //wp--rect /exec load /prefix load /exec load
+      systemdict /clip get /newpath load ] cvx ] cvx def
+  % show: glyph outlines filled through the warp; the current point still
+  % advances as if the string had been shown.
+  /show [ /pop load
+    [ /currentpoint load /newpath load /moveto load true /charpath load
+      /currentpoint load /prefix load /exec load /realfill load
+      /moveto load ] cvx ] cvx def
+  currentdict /prefix undef currentdict /realfill undef
+  currentdict end
+} bind def
+
+% Decorators are ( target -- wrapper ) quotations keyed by operator name,
+% installed with aop-wrap-def in a fresh scope dictionary before the
+% program is read, so even procedures the program binds see them.
+% showpage, copypage and erasepage do nothing inside the scope. The
+% program is a file name, or a procedure to execute in the same scope.
+% @kind: Procedure
+% @summary: Run a PostScript file or procedure with operator decorators installed for its whole run.
+% @example: (gallery/golden_bloom.ps) << /fill {} >> wp-run-decorated
+/wp-run-decorated {
+  dup type /dicttype ne { wp-decorators-must-be-dictionary } if
+  countdictstack 3 1 roll
+  64 dict begin
+  { //aop-wrap-def exec } forall
+  /showpage {} def /copypage {} def /erasepage {} def
+  { dup type /stringtype eq { run } { exec } ifelse } stopped
+  { countdictstack exch sub { end } repeat stop }
+  { countdictstack exch sub { end } repeat } ifelse
+} bind def
+
+% @kind: Procedure
+% @summary: Run a PostScript file so everything it paints passes through a path transform.
+% @example: (gallery/golden_bloom.ps) 350 350 1 wp-unroll 3 wp-run-path
+/wp-run-path { //wp-decorators exec //wp-run-decorated exec } bind def
+
+% @kind: Procedure
+% @summary: Run a PostScript file so everything it paints is bent by a point warp.
+% @example: (gallery/golden_bloom.ps) 350 350 300 0.4 wp-lens 3 wp-run
+/wp-run { exch //wp-points exec exch //wp-run-path exec } bind def

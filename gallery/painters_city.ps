@@ -1,0 +1,186 @@
+%!PS-Adobe-3.0
+%%Title: Painter's City
+%%BoundingBox: 0 0 1000 760
+%%Creator: Claude, resident artist
+%%EndComments
+
+% A night city of 196 towers in true perspective, drawn with no depth
+% buffer: PostScript paints over what it painted before, so the towers are
+% sorted far to near with fp-sort-by and simply painted in that order (the
+% painter's algorithm). Each tower is a record; fp-map builds them and
+% projects their corners, fp-filter keeps only the walls that face the
+% camera, and lit windows are scattered by a seeded generator, denser
+% higher up. Sorting whole towers by distance is exact for a gapped grid.
+%
+%   pscat --page 1000x760 gallery/painters_city.ps
+
+(lib/functional.ps) run
+
+7 srand
+/unit { rand 16#7fffffff div } def
+
+% ---- camera ----
+/N 14 def                          % towers per side
+/theta 33 def /phi 27 def /dist 30 def /focal 1150 def
+/cx 500 def /cy 300 def            % screen centre of the projection
+% ( x y z -- u v ): world to screen. Rotate about the vertical axis, tilt
+% down by phi, divide by depth.
+/project {
+  /pz exch def /py exch def /px exch def
+  /rx px theta cos mul py theta sin mul sub def
+  /ry px theta sin mul py theta cos mul add def
+  /d ry phi cos mul pz phi sin mul sub dist add def
+  rx focal mul d div cx add
+  ry phi sin mul pz phi cos mul add focal mul d div cy add
+} def
+% depth of a world point, for sorting
+/depth { /pz exch def /py exch def /px exch def
+  px theta sin mul py theta cos mul add phi cos mul pz phi sin mul sub } def
+% camera position in world coordinates, for facing tests
+/cam-x 0 def /cam-y 0 def /cam-z 0 def
+{
+  % C = -dist * forward, forward rotated back into world axes
+  /fy phi cos def /fz phi sin neg def
+  /cam-x dist neg fy mul theta sin mul def
+  /cam-y dist neg fy mul theta cos mul def
+  /cam-z dist neg fz mul def
+} exec
+
+% ---- the city as data ----
+% tower record: [ x0 y0 x1 y1 height ]
+/height { % i j -- h : a downtown peak, two ridges, and noise
+  /j exch def /i exch def
+  /gx i N 1 sub 2 div sub def /gy j N 1 sub 2 div sub def
+  /r2 gx dup mul gy dup mul add def
+  r2 -18 div 2.718 exch exp 7.5 mul
+  gx 0.9 mul sin 0.6 mul add gy 1.3 mul cos 0.5 mul add
+  unit unit mul 3.2 mul add 0.6 add
+} def
+/towers
+  N N mul fp-range {
+    dup N idiv exch N mod                       % i j
+    2 copy height /h exch def
+    /j exch def /i exch def
+    /x0 i N 2 div sub 0.14 add def /y0 j N 2 div sub 0.14 add def
+    [ x0 y0 x0 0.72 add y0 0.72 add h ]
+  } fp-map
+def
+
+% walls of a tower: [ ax ay bx by nx ny ] from corner a to corner b,
+% with outward normal n
+/walls { % tower -- [walls]
+  aload pop pop /y1 exch def /x1 exch def /y0 exch def /x0 exch def
+  [ [ x0 y0 x1 y0 0 -1 ] [ x1 y0 x1 y1 1 0 ] [ x1 y1 x0 y1 0 1 ] [ x0 y1 x0 y0 -1 0 ] ]
+} def
+% a wall faces the camera when the camera is on its outward side
+/facing { % wall -- bool
+  aload pop /ny exch def /nx exch def pop pop /ay exch def /ax exch def
+  cam-x ax sub nx mul cam-y ay sub ny mul add 0 gt
+} def
+
+% ---- painting ----
+% sky colour at height y: deep navy overhead to a violet city glow low down
+/sky-at { % y -- r g b
+  760 div 1 exch sub dup dup mul /t exch def pop
+  t 0.30 mul 0.015 add t 0.12 mul 0.025 add t 0.22 mul 0.09 add
+} def
+/sky {
+  0 4 760 { dup sky-at setrgbcolor 0 exch 1000 5 rectfill } for
+  % moon: a crescent, the bite filled with the sky behind it
+  0.98 0.95 0.84 setrgbcolor newpath 815 640 30 0 360 arc fill
+  648 sky-at setrgbcolor newpath 802 648 27 0 360 arc fill
+  1 1 1 setrgbcolor
+  1 1 160 { pop unit 1000 mul unit 330 mul 430 add newpath 2 copy moveto unit 0.9 mul 0.2 add 0 360 arc fill } for
+} def
+
+/quad { % x0 y0 z0 x1 y1 z1 x2 y2 z2 x3 y3 z3 --
+  12 array astore /q exch def
+  newpath q 0 get q 1 get q 2 get project moveto
+  q 3 get q 4 get q 5 get project lineto
+  q 6 get q 7 get q 8 get project lineto
+  q 9 get q 10 get q 11 get project lineto closepath
+} def
+
+/ground {
+  0.035 0.045 0.10 setrgbcolor
+  /a N 2 div 0.5 add def
+  a neg a neg 0  a a neg 0  a a 0  a neg a 0 quad fill
+  % streets glow between the blocks
+  0.95 0.55 0.20 setrgbcolor 0.6 setlinewidth
+  0 1 N {
+    /s exch N 2 div sub 0.07 sub def
+    newpath s N 2 div neg 0.5 sub 0 project moveto s N 2 div 0.5 add 0 project lineto stroke
+    newpath N 2 div neg 0.5 sub s 0 project moveto N 2 div 0.5 add s 0 project lineto stroke
+  } for
+} def
+
+% ( r g b -- r' g' b' ): fade toward the haze by the tower's distance
+/haze {
+  /hb exch def /hg exch def /hr exch def /a fog 0.55 mul def
+  hr 1 a sub mul 0.24 a mul add
+  hg 1 a sub mul 0.16 a mul add
+  hb 1 a sub mul 0.33 a mul add
+} def
+/wall-colour { % wall -- : moonlight from the right, ambient blue
+  aload pop /ny exch def /nx exch def pop pop pop pop
+  /lit nx 0.3 mul ny -0.9 mul add 0 max def
+  lit 0.22 mul 0.05 add lit 0.21 mul 0.065 add lit 0.27 mul 0.15 add haze setrgbcolor
+} def
+
+/windows { % wall height --
+  /h exch def aload pop pop pop /by exch def /bx exch def /ay exch def /ax exch def
+  /floors h 0.32 div cvi def
+  0 1 floors 1 sub {
+    /f exch def
+    0 1 2 {
+      /c exch def
+      unit f floors div 0.35 mul 0.30 add lt {
+        unit 0.12 mul 0.88 add dup 0.78 mul 0.40 unit 0.2 mul add setrgbcolor
+        /s0 c 3 div 0.06 add def /s1 c 1 add 3 div 0.06 sub def
+        /z0 f 0.32 mul 0.10 add def /z1 z0 0.17 add def
+        ax bx ax sub s0 mul add ay by ay sub s0 mul add z0
+        ax bx ax sub s1 mul add ay by ay sub s1 mul add z0
+        ax bx ax sub s1 mul add ay by ay sub s1 mul add z1
+        ax bx ax sub s0 mul add ay by ay sub s0 mul add z1
+        quad fill
+      } if
+    } for
+  } for
+} def
+
+/tower { % record --
+  dup 4 get /th exch def
+  dup aload pop pop 3 -1 roll add 2 div 3 1 roll add 2 div exch 0 depth
+  dmin sub dmax dmin sub div /fog exch def
+  dup walls { facing } fp-filter
+  {
+    dup wall-colour
+    dup aload pop pop pop /by exch def /bx exch def /ay exch def /ax exch def
+    ax ay 0 bx by 0 bx by th ax ay th quad fill
+    th windows
+  } fp-each
+  aload pop pop /y1 exch def /x1 exch def /y0 exch def /x0 exch def
+  0.13 0.15 0.27 haze setrgbcolor
+  x0 y0 th x1 y0 th x1 y1 th x0 y1 th quad fill
+  0.30 0.33 0.50 haze setrgbcolor 0.4 setlinewidth
+  x0 y0 th x1 y0 th x1 y1 th x0 y1 th quad stroke
+} def
+
+% the depth range, to scale the haze
+/dmin N 2 div neg dup 0 depth def /dmax N 2 div dup 0 depth def
+dmin dmax gt { /dmin dmax /dmax dmin def def } if
+sky
+ground
+% far to near: the key is how far the tower's centre is from the camera
+towers {
+  aload pop pop /y1 exch def /x1 exch def /y0 exch def /x0 exch def
+  x0 x1 add 2 div y0 y1 add 2 div 0 depth neg
+} fp-sort-by
+{ tower } fp-each
+
+% caption
+0.85 0.82 0.74 setrgbcolor
+/Times-Italic findfont 13 scalefont setfont
+40 34 moveto (Painter's City: 196 towers, sorted far to near with fp-sort-by and painted in that order) show
+
+showpage

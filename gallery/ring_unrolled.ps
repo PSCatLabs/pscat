@@ -1,0 +1,83 @@
+%!PS-Adobe-3.0
+%%Title: Ring of Type, Unrolled
+%%BoundingBox: 0 0 1000 1040
+%%Creator: Claude, resident artist
+%%EndComments
+
+% Ring of Type sets one sentence glyph by glyph around eleven rings. Here
+% that file runs twice, unmodified. Above, as written. Below, every glyph
+% it shows is read back as an outline and passed through the inverse of a
+% polar map: the angle clockwise from twelve o'clock becomes the
+% horizontal axis and the radius becomes height. The rings straighten into
+% lines of type. Inner rings stretch, because a small glyph on a small
+% ring spans more degrees, and the ampersand at the centre, which spans
+% every angle, is pulled out into a ribbon along the floor.
+%
+%   pscat --page 1000x1040 gallery/ring_unrolled.ps
+
+(lib/functional.ps) run
+(lib/aspect.ps) run
+(lib/warp.ps) run
+
+/paper { 0.975 0.955 0.915 setrgbcolor } def
+/ink   { 0.17 0.15 0.20 setrgbcolor } def
+/rule  { 0.62 0.55 0.50 setrgbcolor } def
+
+paper 0 0 1000 1040 rectfill
+
+% ---- above: the file as written, at 0.6 scale ----
+gsave
+  290 548 translate 0.6 dup scale
+  (gallery/ring_of_type.ps) {} 3 wp-run
+grestore
+
+% ---- below: unrolled. 0 to 360 degrees across 900 points; radius up. ----
+/strip-x 50 def /strip-y 60 def /per-degree 2.5 def /lift 1.2 def
+% ( dx -- transform ): unroll, stretch the radius, then place the strip,
+% offset by dx. The strip is a cylinder cut at twelve o'clock: shapes that
+% straddle the cut are kept whole, so the strip is drawn three times, a
+% full turn apart, and clipped, and whatever crosses the cut reappears at
+% the other end.
+/unrolled {
+  strip-x add strip-y wp-shift 1 lift wp-scale exch fp-compose wp-points
+  350 350 per-degree wp-unroll exch fp-compose
+} def
+gsave
+  newpath strip-x strip-y 20 sub 360 per-degree mul 380 lift mul rectclip
+  [ 360 per-degree mul neg 0 360 per-degree mul ] {
+    gsave (gallery/ring_of_type.ps) exch unrolled 2 wp-run-path grestore
+  } forall
+grestore
+
+% ---- the plate's scale: degrees along the floor, radius up the side ----
+/Helvetica findfont 8 scalefont setfont
+rule 0.5 setlinewidth
+0 30 360 {
+  /d exch def
+  /x d per-degree mul strip-x add def
+  x strip-y 6 sub moveto 0 -6 rlineto stroke
+  x strip-y 22 sub moveto
+  d 10 string cvs dup stringwidth pop 2 div neg 0 rmoveto show
+} for
+strip-x strip-y 6 sub moveto 900 0 rlineto stroke
+0 50 350 {
+  /r exch def
+  /y r lift mul strip-y add def
+  strip-x 8 sub y moveto -6 0 rlineto stroke
+  strip-x 16 sub y 3 sub moveto
+  r 10 string cvs dup stringwidth pop neg 0 rmoveto show
+} for
+strip-x 8 sub strip-y moveto 0 350 lift mul rlineto stroke
+
+% captions
+/centre { exch dup stringwidth pop 1000 exch sub 2 div 3 -1 roll moveto show } def
+ink /Times-Bold findfont 30 scalefont setfont
+(RING OF TYPE, UNROLLED) 990 centre
+/Times-Italic findfont 13 scalefont setfont
+rule (one file, unmodified: as written, and with every glyph read back through an inverse polar map) 968 centre
+/Helvetica findfont 8 scalefont setfont
+(DEGREES CLOCKWISE FROM TWELVE O'CLOCK) 18 centre
+gsave 22 strip-y 175 lift mul add translate 90 rotate
+  (RADIUS) dup stringwidth pop 2 div neg 0 moveto show grestore
+
+showpage
