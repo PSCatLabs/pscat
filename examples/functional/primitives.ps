@@ -6,9 +6,9 @@
 (lib/functional.ps) run
 (examples/functional/common.ps) run
 df-palette 0 df-color 0 0 720 300 rectfill
-[[[120 155 92 15 0] df-palettes 0 get]
- [[360 155 92 15 0] df-palettes 1 get]
- [[600 155 92 15 0] df-palettes 2 get]]
+[[<< /X 120 /Y 155 /Radius 92 /Angle 15 >> df-palettes 0 get]
+ [<< /X 360 /Y 155 /Radius 92 /Angle 15 >> df-palettes 1 get]
+ [<< /X 600 /Y 155 /Radius 92 /Angle 15 >> df-palettes 2 get]]
 { aload pop df-flower } fp-each
 df-palette 1 df-color /Courier findfont 11 scalefont setfont
 (ULTRAVIOLET) 120 30 showctr

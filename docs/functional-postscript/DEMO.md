@@ -17,11 +17,11 @@ There are three colourways: Ultraviolet, Sunprint, Blue Hour. All pictures in
 | [benchmark.ps](../../examples/functional/benchmark.ps) | Numeric map/fold control, no art rendering. |
 | [functional_demo.py](../../scripts/functional_demo.py) | Render all artifacts and run paired CPU measurements. |
 
-The index array contains 0 through 24. `df-site` maps indices 0..23 onto an
-ellipse, with radius/angle/colour-index derived deterministically from index.
-Index 24 is the central flower. A record is `[x y radius angle colour-index]`.
-`df-visible` selects colour-index zero, so 12 peripheral flowers plus the
-central flower remain. `df-weight` adds radii: the selected sum is 622.
+`25 fp-range` gives the indices 0 through 24. `df-site` maps indices 0..23
+onto an ellipse, with radius and angle derived deterministically from index.
+Index 24 is the central flower. A record is a dictionary
+`<< /X /Y /Radius /Angle /Visible >>`; only even indices are visible, and
+`/Visible fp-field fp-filter` keeps 12 peripheral flowers plus the central one. `df-weight` adds radii: the selected sum is 622.
 Geometry needs no randomness. Ground flecks use the explicitly reset seed
 314159; all three colourways use the same draw order and RNG consumption.
 
@@ -30,11 +30,11 @@ The chosen palette configures two quotations with curry:
 ```text
 stem       ( record -- )
 blossom    ( record -- ), decorated with visits aop-count
-{dup} + stem + blossom => draw ( record -- )
+{/stem load fp-keep blossom} => draw ( record -- )
 flowers + draw => fp-each
 ```
 
-`{dup}` then stem leaves the preserved record; blossom consumes it. The whole
+`fp-keep` runs stem on the record and then pushes it again; blossom consumes it. The whole
 score is traced as `(garden)`. An iteration therefore draws one stem and one
 flower and increments visits once. The artistic primitives own their local
 dictionaries and balanced graphics saves; functional callbacks do not add a
@@ -103,7 +103,7 @@ The ground is always Ultraviolet, and the UI says so when selected.
 The imperative control shares drawing helpers to isolate orchestration; it
 manages output slots, selection count, checksum, trace and count explicitly.
 It can reuse the same helpers and produce equally good artwork. The drivers
-have 19 vs 24 non-comment/nonblank lines, excluding shared helpers and the new
+have 18 vs 24 non-comment/nonblank lines, excluding shared helpers and the new
 libraries. This small count is descriptive, not evidence of general maintainability.
 The Rust demo test asserts all three full pixel buffers match and compares
 against committed PNGs. [Testing](TESTING.md) describes CPU observations.
