@@ -238,7 +238,8 @@
 % paints the transformed path. Strokes are outlined
 % first with strokepath, so line weight and dashes bend with the shape;
 % text is drawn as glyph outlines. Images and smooth shadings pass through
-% unwarped; the array forms of rectfill and rectstroke are not supported.
+% unwarped; the array forms of rectfill, rectstroke and rectclip are not
+% supported.
 % @kind: Procedure
 % @summary: Build decorators that make fill, stroke, show and clip draw through a path transform.
 % @example: {} 4 wp-decorators
@@ -258,6 +259,10 @@
   /rectstroke [ /pop load
     [ /gsave load /newpath load //wp--rect /exec load /strokepath load
       /prefix load /exec load /realfill load /grestore load ] cvx ] cvx def
+  % rectclip: like clip, but it starts from a fresh path and leaves none
+  /rectclip [ /pop load
+    [ /newpath load //wp--rect /exec load /prefix load /exec load
+      systemdict /clip get /newpath load ] cvx ] cvx def
   % show: glyph outlines filled through the warp; the current point still
   % advances as if the string had been shown.
   /show [ /pop load

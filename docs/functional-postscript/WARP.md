@@ -91,8 +91,8 @@ name:
   the real operator.
 - `stroke` first converts the stroke to its outline with `strokepath`, so
   line weight and dashes bend with the shape, then fills that.
-- `rectfill` and `rectstroke` do the same for rectangles, with the operator
-  given four numbers.
+- `rectfill`, `rectstroke` and `rectclip` do the same for rectangles, with
+  the operator given four numbers.
 - `show` draws the string's glyph outlines (`charpath`) through the warp
   and leaves the current point where `show` would.
 
@@ -121,8 +121,9 @@ forever.
 ## Limits
 
 - Images, `shfill` and other smooth shadings pass through unwarped.
-- The array forms of `rectfill` and `rectstroke` are not decorated, and
-  neither are `ashow`, `widthshow`, `kshow`, `xshow` or `glyphshow`.
+- The array forms of `rectfill`, `rectstroke` and `rectclip` are not
+  decorated, and neither are `ashow`, `widthshow`, `kshow`, `xshow` or
+  `glyphshow`.
 - A program that fetches operators straight from `systemdict`, or that
   `initmatrix`/`setmatrix`es away the placement, escapes the warp.
 - Flattening makes curves into short lines. `setflat` controls how fine
