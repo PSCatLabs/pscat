@@ -958,6 +958,44 @@
       "alt": "The Cathedral Rose string-art pattern traced in thin white lines on a blue engineering blueprint with a dashed grid and a title block, the sheet lying in perspective on a brown drafting table",
       "blurb": "Cathedral Rose, unmodified, redrawn as an engineer's blueprint lying on a drafting table.",
       "technique": "The original file runs inside a scope where its colour operators do nothing, its line widths are pinned to a hairline, every fill is traced as an outline and every letter is drawn as its outline. Every path, the grid and the title block included, then goes through a perspective map that tips the sheet onto the table. A perspective map keeps straight lines straight, so here the edges need no extra points."
+    },
+    {
+      "tags": [],
+      "featured": false,
+      "playground": false,
+      "added": "2026-10-31",
+      "id": "family_tree",
+      "title": "Family Tree",
+      "category": "transforms",
+      "libraries": [
+        "functional"
+      ],
+      "source": "gallery/family_tree.ps",
+      "render": "gallery/renders/family_tree.png",
+      "page": "1000x1100",
+      "speed": 400,
+      "alt": "A naturalist's plate of fourteen flowers in round dishes joined by family lines: an orange five-petalled founder and a blue spiky founder at the top, four children below and eight grandchildren at the bottom mixing their petal shapes, colours and dotted rings, with the code of three genomes printed at the foot",
+      "blurb": "Fourteen flowers bred from two drawing procedures, their code crossed and mutated as data.",
+      "technique": "Each flower's genome is a list of small PostScript procedures for its colours, symmetry, petal outline, inner layer, dot ring and heart. Breeding treats that code as data: crossover walks two parents' procedures side by side and takes each number from one or the other where their shapes match, or a whole procedure where they do not, and mutation nudges some of the real numbers. Integers such as loop bounds and angles are never changed, so every child is still a program that runs. The printed genomes are the actual procedures, read back."
+    },
+    {
+      "tags": [],
+      "featured": false,
+      "playground": false,
+      "added": "2026-10-31",
+      "id": "painters_city",
+      "title": "Painter's City",
+      "category": "transforms",
+      "libraries": [
+        "functional"
+      ],
+      "source": "gallery/painters_city.ps",
+      "render": "gallery/renders/painters_city.png",
+      "page": "1000x760",
+      "speed": 600,
+      "alt": "A night city of 196 dark towers with warm lit windows rising to a downtown peak, seen in perspective on a grid of glowing streets under a starry violet sky and a crescent moon",
+      "blurb": "196 towers in true perspective, sorted far to near and painted in that order.",
+      "technique": "PostScript has no depth buffer: each shape simply paints over what was already there. So the towers are sorted by their distance from the camera and drawn farthest first, the painter's algorithm. Each tower is a record; the walls that face away from the camera are filtered out, the rest are lit by a moon from one side and fade toward the haze with distance, and lit windows grow denser on the higher floors."
     }
   ],
   "groups": [

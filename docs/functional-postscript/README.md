@@ -33,6 +33,7 @@ calls /Calls get == % 1
 | [Architecture](ARCHITECTURE.md) | Integration boundaries, execution model and data flow. |
 | [Implementation](IMPLEMENTATION.md) | Generated quotations, state frames, snapshots and extension rules. |
 | [AOP](AOP.md) | Advice ordering, interception, tracing, counting and profiling hooks. |
+| [Warp](WARP.md) | Non-affine path warps, path transforms, and running unmodified programs through them. |
 | [Testing](TESTING.md) | Automated checks, example validation, visual identity and CPU measurements. |
 | [Live WASM studio](WASM-STUDIO.md) | Typography, contracts and actual local browser rendering. |
 | [Demo](DEMO.md) | Poster source, composition pipeline, colourways and reproduction. |
