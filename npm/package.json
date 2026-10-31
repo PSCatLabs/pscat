@@ -1,6 +1,6 @@
 {
   "name": "pscat",
-  "version": "0.7.0-rc.1",
+  "version": "0.7.0-rc.2",
   "description": "PostScript for precision and imagination, in WebAssembly: render PostScript documents and art to pixels in the browser or Node, step by step if you like",
   "keywords": [
     "postscript",

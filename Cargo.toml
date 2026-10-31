@@ -1,6 +1,6 @@
 [package]
 name = "pscat"
-version = "0.7.0-rc.1"
+version = "0.7.0-rc.2"
 edition = "2024"
 description = "PostScript for precision and imagination: a PostScript and EPS interpreter that renders documents and art to PNG, SVG and PDF"
 # The code is MIT OR Apache-2.0. The OFL-1.1 term covers only the font data
