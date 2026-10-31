@@ -76,3 +76,13 @@ showpage
 
 Errors are `undefined` with the guard name; `--pstack-on-error` shows the
 stack.
+
+## Bending shapes (lib/warp.ps)
+
+To bend shapes (lens, swirl, ripple, polar, perspective), or to run an
+unmodified program so everything it paints is warped, load
+`(lib/warp.ps) run` after both libraries: `(file.ps) warp step wp-run`.
+Warps are `( x y -- x' y' )` quotations and compose with `fp-compose`. Inside a
+decorated scope, operator names refer to the decorated versions, so a decorator
+that needs the real operator must capture it with `bind` or
+`systemdict /name get`. Details: `docs/functional-postscript/WARP.md`.

@@ -1,0 +1,225 @@
+%!PS-Adobe-3.0
+%%Title: Family Tree
+%%BoundingBox: 0 0 1000 1100
+%%Creator: Claude, resident artist
+%%EndComments
+
+% Fourteen flowers bred from two. Each flower's genome is a list of
+% PostScript procedures (palette, symmetry, petal outline, inner layer,
+% ornament, heart), and breeding works on that code as data. Crossover
+% zips two parents' procedures element by element wherever their shapes
+% match and otherwise takes a whole gene from one of them; mutation maps
+% over a procedure, nudging some of its real numbers. Integers are
+% structure (loop bounds, angles, operand counts) and are never touched,
+% so every child is still a program that runs. Each flower is drawn
+% under stopped anyway; a broken child would be drawn as a stillborn ring.
+% The genomes printed at the foot are the actual procedures, read back.
+%
+%   pscat --page 1000x1100 gallery/family_tree.ps
+
+(lib/functional.ps) run
+
+/Seed where { pop } { /Seed 7 def } ifelse
+Seed srand
+/coin { rand 16#3fffffff gt } def          % the high bit: an LCG's low bit alternates
+/unit { rand 16#7fffffff div } def          % 0 .. 1
+
+% ---- breeding: code is data ----
+
+% ( code q -- code' ): map q over every leaf of a procedure, recursing
+% into nested procedures and keeping each array's executable attribute.
+/code-map {
+  3 dict begin /q exch def dup xcheck /exe exch def
+  cvlit { dup type /arraytype eq { /q load code-map } { q } ifelse } fp-map
+  exe { cvx } if
+  end
+} def
+
+% Mutation: about half the reals move by up to a fifth.
+/mutate {
+  { dup type /realtype eq
+      { coin { unit 0.5 sub 0.4 mul 1 add mul } if } if } code-map
+} def
+
+% ( a b -- bool ): same length and, slot by slot, the same kind of thing
+% (numbers with numbers, equal names, arrays with arrays).
+/kind {
+  dup type dup /integertype eq exch /realtype eq or { pop /number } {
+    dup type /arraytype eq { pop /array } { } ifelse
+  } ifelse
+} def
+/same-shape {
+  2 copy type /arraytype eq exch type /arraytype eq and {
+    2 copy length exch length eq {
+      cvlit exch cvlit exch { kind exch kind eq } fp-map2 true { and } fp-fold
+    } { pop pop false } ifelse
+  } { pop pop false } ifelse
+} def
+
+% ( a b -- child ): elementwise where the shapes agree, else one parent's
+% whole gene. Each real is taken from one parent or the other.
+/cross {
+  2 copy same-shape {
+    1 index xcheck 3 1 roll
+    cvlit exch cvlit exch {
+      1 index type /arraytype eq { cross } {
+        1 index type /realtype eq { coin { pop } { exch pop } ifelse } { pop } ifelse
+      } ifelse
+    } fp-map2
+    exch { cvx } if
+  } { coin { pop } { exch pop } ifelse } ifelse
+} def
+
+/breed { cross mutate } def
+
+% ---- the two founders ----
+% genome: [ palette symmetry petal layers ornament heart ]
+/founder-a [
+  { 0.03 0.78 0.96 }
+  { 5.0 }
+  { 0 0 moveto 27.0 24.0 31.0 62.0 0 88.0 curveto
+    -31.0 62.0 -27.0 24.0 0 0 curveto }
+  { 0.58 0.5 }
+  { 48.0 3.4 12.0 }
+  { 0 0 15.0 0 360 arc }
+] def
+/founder-b [
+  { 0.57 0.62 0.86 }
+  { 11.0 }
+  { 0 0 moveto 8.0 46.0 lineto 0 94.0 lineto -8.0 46.0 lineto closepath }
+  { 0.7 0.5 }
+  { 30.0 2.2 22.0 }
+  { 0 1 7 { 360 7 div mul dup cos 13.0 mul exch sin 13.0 mul
+      2 index 0 eq { moveto } { lineto } ifelse pop } for closepath }
+] def
+
+% ---- drawing one organism ----
+/hsb { 3 -1 roll dup floor sub 3 1 roll sethsbcolor } def   % hue wraps round
+/organism { % genome --
+  24 dict begin
+  aload pop
+  /heart exch def /orn exch def /layers exch def /petal exch def
+  /sym exch def /pal exch def
+  pal /bb exch def /ss exch def /hh exch def
+  /n sym cvi 3 max 18 min def
+  layers /rot exch def /inner exch def
+  /ring { % hue-shift brightness-scale --
+    /bs exch def /hs exch def
+    0 1 n 1 sub {
+      /k exch def
+      gsave
+        k 360 mul n div rotate newpath petal
+        gsave hh hs add ss bb bs mul hsb fill grestore
+        hh hs add ss 0.7 mul bb 0.42 mul hsb 0.7 setlinewidth stroke
+      grestore
+    } for
+  } def
+  0 1 ring
+  gsave inner dup scale rot 360 mul n div rotate 0.07 1.06 ring grestore
+  orn /dots exch cvi 3 max def /dr exch def /rr exch def
+  hh 0.5 add ss 0.9 mul bb hsb
+  0 1 dots 1 sub {
+    360 mul dots div dup cos rr mul exch sin rr mul
+    newpath dr 0 360 arc fill
+  } for
+  newpath heart hh 0.5 add ss bb 0.8 mul hsb gsave fill grestore
+  hh 0.5 add ss bb 0.4 mul hsb 0.6 setlinewidth stroke
+  end
+} def
+
+/sepia { 0.36 0.27 0.20 setrgbcolor } def
+% ( genome x y scale label -- ): one specimen in its dish
+/specimen {
+  10 dict begin
+  /label exch def /s exch def /y exch def /x exch def /g exch def
+  gsave
+    x y translate s dup scale
+    0.985 0.965 0.92 setrgbcolor newpath 0 0 104 0 360 arc fill
+    sepia 0.8 s div setlinewidth newpath 0 0 104 0 360 arc stroke
+    gsave
+      newpath 0 0 103 0 360 arc clip
+      mark countdictstack /depth exch def
+      { g organism } stopped {
+        countdictstack depth sub { end } repeat cleartomark
+        sepia [4 4] 0 setdash newpath 0 0 40 0 360 arc stroke
+      } { cleartomark } ifelse
+    grestore
+  grestore
+  sepia /Times-Italic findfont 11 scalefont setfont
+  label dup stringwidth pop 2 div neg x add y 104 s mul sub 15 sub moveto show
+  end
+} def
+
+% ---- three generations ----
+/gen1 [ 1 1 4 { pop founder-a founder-b breed } for ] def
+/pairs [ [0 1] [1 0] [1 2] [2 1] [2 3] [3 2] [3 0] [0 3] ] def
+/gen2 pairs { aload pop gen1 exch get exch gen1 exch get exch breed } fp-map def
+
+/xs1 [ 165 388 612 835 ] def
+/xs2 8 fp-range { 118 mul 87 add } fp-map def
+/y0 852 def /y1 585 def /y2 322 def
+
+% lineage lines first, under the dishes
+/tie { % x1 y1 x2 y2 --
+  4 dict begin /y2 exch def /x2 exch def /y1 exch def /x1 exch def
+  newpath x1 y1 moveto x1 y1 y2 sub 0.5 mul y2 add x2 y1 y2 sub 0.5 mul y2 add x2 y2 curveto
+  stroke end
+} def
+0.985 0.965 0.92 setrgbcolor 0 0 1000 1100 rectfill
+gsave
+  0.70 0.62 0.52 setrgbcolor 0.6 setlinewidth
+  xs1 { dup 330 y0 92 sub 3 -1 roll y1 75 add tie 670 y0 92 sub 3 -1 roll y1 75 add tie } fp-each
+  0 1 7 {
+    /i exch def
+    pairs i get aload pop
+    xs1 exch get y1 75 sub xs2 i get y2 52 add tie
+    xs1 exch get y1 75 sub xs2 i get y2 52 add tie
+  } for
+grestore
+
+founder-a 330 y0 0.88 (founder A) specimen
+founder-b 670 y0 0.88 (founder B) specimen
+/labels1 [ (child no. 1) (child no. 2) (child no. 3) (child no. 4) ] def
+/labels2 [ (no. 1) (no. 2) (no. 3) (no. 4) (no. 5) (no. 6) (no. 7) (no. 8) ] def
+0 1 3 { /i exch def gen1 i get xs1 i get y1 0.72 labels1 i get specimen } for
+0 1 7 { /i exch def gen2 i get xs2 i get y2 0.5 labels2 i get specimen } for
+
+% ---- the code, read back ----
+% ( obj -- tokens... ): display tokens for an object, recursively
+/fmt {
+  dup type /realtype eq { 100 mul round 100 div 12 string cvs } {
+  dup type /integertype eq { 12 string cvs } {
+  dup type /arraytype eq {
+    dup xcheck { ({) exch { fmt } forall (}) } { ([) exch { fmt } forall (]) } ifelse
+  } {
+  dup type /nametype eq {
+    dup xcheck { 40 string cvs } { 40 string cvs dup length 1 add string
+      dup 0 (/) putinterval dup 1 4 -1 roll putinterval } ifelse
+  } { pop (?) } ifelse } ifelse } ifelse } ifelse
+} def
+% ( genome x y width title -- ): set the genome's tokens in lines
+/listing {
+  10 dict begin
+  /title exch def /w exch def /y exch def /x exch def
+  [ exch cvlit { fmt } forall ] /toks exch def
+  sepia /Times-Italic findfont 11 scalefont setfont x y moveto title show
+  /Courier findfont 7.6 scalefont setfont
+  /cx x def /cy y 13 sub def
+  toks {
+    dup stringwidth pop 4.3 add cx add x w add gt { /cx x def /cy cy 9 sub def } if
+    cx cy moveto dup show stringwidth pop 4.3 add cx add /cx exch def
+  } forall
+  end
+} def
+founder-a 40 140 290 (genome of founder A) listing
+founder-b 360 140 290 (genome of founder B) listing
+gen2 5 get 680 140 290 (genome of grandchild no. 6, as bred) listing
+
+% title
+sepia /Times-Bold findfont 34 scalefont setfont
+(FAMILY TREE) dup stringwidth pop 1000 exch sub 2 div 1050 moveto show
+/Times-Italic findfont 14 scalefont setfont
+(fourteen flowers bred from two procedures: their code crossed and mutated as data)
+dup stringwidth pop 1000 exch sub 2 div 1026 moveto show
+
+showpage
