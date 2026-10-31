@@ -40,6 +40,11 @@
    "id": "drawing",
    "title": "Drawing (dry media)",
    "blurb": "Chalk, crayon and charcoal on slate and toothed paper."
+  },
+  {
+   "id": "transforms",
+   "title": "Programs about programs",
+   "blurb": "PostScript code is data. These pieces read other programs' paths back, bend them and redraw them, or breed new drawings from old ones."
   }
  ],
  "libraries": {
@@ -134,6 +139,18 @@
   "qr": {
    "title": "qr",
    "guide": "docs/guides/qr-codes.md"
+  },
+  "functional": {
+   "title": "functional",
+   "guide": "docs/functional-postscript/README.md"
+  },
+  "aspect": {
+   "title": "aspect",
+   "guide": "docs/functional-postscript/README.md"
+  },
+  "warp": {
+   "title": "warp",
+   "guide": "docs/functional-postscript/WARP.md"
   }
  },
  "pieces": [
@@ -1002,6 +1019,69 @@
     "render_caption": "The photograph made from it, with pscat's exact layer laid back on at the same coordinates.",
     "text": "The image model is good at light and surfaces; pscat is exact. Here pscat decides the composition first, so it knows where every summit, the hut and the empty areas are before the photograph exists, and its labels, route, chart and QR code land where the layout says."
    }
+  },
+  {
+   "tags": [],
+   "featured": false,
+   "playground": false,
+   "added": "2026-10-31",
+   "id": "four_readings",
+   "title": "One File, Four Readings",
+   "category": "transforms",
+   "libraries": [
+    "aspect",
+    "functional",
+    "warp"
+   ],
+   "source": "gallery/four_readings.ps",
+   "render": "gallery/renders/four_readings.png",
+   "page": "900x1060",
+   "speed": 600,
+   "alt": "Four copies of the Woven Labyrinth quilt of orange and navy triangles on a dark page: one flat, one bulging through a lens, one twisted into a whirlpool, one lying in perspective on a table",
+   "blurb": "Another gallery piece run four times, never edited, through a lens, a whirlpool and a perspective.",
+   "technique": "Before the file is read, its fill, stroke and show operators are replaced by versions that read the current path back as points, move every point, and draw the result. Because the replacements are in place before the program defines its own procedures, even procedures it binds draw through them. PostScript's own transforms only scale, rotate and shear, so straight edges stay straight; reading the path as data is what lets them bend."
+  },
+  {
+   "tags": [],
+   "featured": false,
+   "playground": false,
+   "added": "2026-10-31",
+   "id": "ring_unrolled",
+   "title": "Ring of Type, Unrolled",
+   "category": "transforms",
+   "libraries": [
+    "aspect",
+    "functional",
+    "warp"
+   ],
+   "source": "gallery/ring_unrolled.ps",
+   "render": "gallery/renders/ring_unrolled.png",
+   "page": "1000x1040",
+   "speed": 600,
+   "alt": "Above, the Ring of Type piece: a sentence set around eleven shrinking rings. Below, the same rings straightened into eleven lines of type, the inner lines stretched wide and the central ampersand pulled into a ribbon along the bottom, with degree and radius scales",
+   "blurb": "Ring of Type, untouched, with every glyph read back through an inverse polar map.",
+   "technique": "Each glyph the original program shows is turned into its outline and every point is moved: the angle clockwise from twelve o'clock becomes the horizontal position and the distance from the centre becomes the height. The rings straighten into lines. The inner lines stretch because a small letter on a small ring spans more degrees. The strip is a cylinder cut at twelve o'clock, so it is drawn three times a full turn apart and clipped, and letters that cross the cut wrap round to the other end."
+  },
+  {
+   "tags": [],
+   "featured": false,
+   "playground": false,
+   "added": "2026-10-31",
+   "id": "blueprint_rose",
+   "title": "Blueprint of a Rose",
+   "category": "transforms",
+   "libraries": [
+    "aspect",
+    "functional",
+    "warp"
+   ],
+   "source": "gallery/blueprint_rose.ps",
+   "render": "gallery/renders/blueprint_rose.png",
+   "page": "1000x760",
+   "speed": 600,
+   "alt": "The Cathedral Rose string-art pattern traced in thin white lines on a blue engineering blueprint with a dashed grid and a title block, the sheet lying in perspective on a brown drafting table",
+   "blurb": "Cathedral Rose, unmodified, redrawn as an engineer's blueprint lying on a drafting table.",
+   "technique": "The original file runs inside a scope where its colour operators do nothing, its line widths are pinned to a hairline, every fill is traced as an outline and every letter is drawn as its outline. Every path, the grid and the title block included, then goes through a perspective map that tips the sheet onto the table. A perspective map keeps straight lines straight, so here the edges need no extra points."
   }
  ],
  "groups": [
