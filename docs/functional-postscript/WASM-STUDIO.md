@@ -184,10 +184,22 @@ The builder reuses `scripts/build_wasm.sh`; it does not change the WASM API.
 The generated payload is committed for immediate offline use. Do not edit it
 by hand. [studio-manifest.json](assets/studio-manifest.json) records raw/gzip
 module hashes, sizes, original API and example/library source hashes. The docs
-checker verifies decompression, the WASM header, source/API identity, and exact
-inlining. Rebuild whenever its relevant source changes. A Rust integration test
-executes the exact payload under Node and compares full output pixels against
-the native programs; no WASM compiler is needed merely to run that test.
+checker verifies decompression, the WASM header, the embedded API's recorded
+hash, and exact inlining of the current example sources. It pins hashes only
+for inputs this feature owns (`examples/functional/`, `lib/functional.ps`,
+`lib/aspect.ps`); engine, `web/pscat.js` and shared-library hashes are
+provenance, because main changes them independently. Rebuild whenever a
+feature-owned source changes. To see whether the engine has moved on since the
+payload was built:
+
+```sh
+python3 scripts/build_functional_studio.py --check
+```
+
+A Rust integration test executes the exact payload under Node and compares
+full output pixels against the native programs whenever that check passes; it
+skips with a note once the payload predates the engine. No WASM compiler is
+needed merely to run that test.
 
 The module retains PSCat's existing combined licence expression:
 `(MIT OR Apache-2.0) AND OFL-1.1 AND LPPL-1.3c`. See
