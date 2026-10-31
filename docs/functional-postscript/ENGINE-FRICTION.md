@@ -31,7 +31,7 @@ no issues have been filed automatically.
 
 ## B. Performance bottlenecks and library costs
 
-### B1. Guarded traversals cost about 5.4× in the map/fold microbenchmark
+### B1. Guarded traversals cost about 3× in the map/fold microbenchmark
 
 - **Impact:** high if used in tight numeric inner loops; small in this poster.
 - **Classification/status:** measured library overhead, not an identified engine
@@ -44,12 +44,14 @@ no issues have been filed automatically.
 - **Actual/evidence:** [raw samples](MEASUREMENTS.json), including platform,
   build, medians and source hashes. Both numeric paths print 332833500. Poster
   paths both print 13/622 and have pixel-identity coverage.
-- **Relevant source:** `lib/functional.ps::fp--walk`, `fp--prepare`,
-  `fp--collect`; `examples/functional/benchmark.ps`; execution in
+- **Relevant source:** `lib/functional.ps::fp--walk`, `fp--plans`; `examples/functional/benchmark.ps`; execution in
   `src/interp.rs` and dictionary access in `src/ops/dict.rs`.
 - **Suggested improvement:** retain imperative/native loops for hot paths;
   investigate optional fusion or cheaper frame access only after attribution.
-  Dispatch vs lookup vs allocation has **not** been separately measured.
+  Per-element kind dispatch was measured at about half the overhead and has
+  been removed (5.4× to 3×). The remainder is the two frame `begin`/`end`
+  pairs, name lookups and the depth check; a native traversal frame would
+  remove most of it.
 - **Core change required:** no for library fusion; possibly for a separately
   justified dispatch optimization. No native combinators are proposed now.
 
@@ -64,7 +66,7 @@ no issues have been filed automatically.
 - **Expected/actual:** stable visitation even when callbacks edit source slots;
   private snapshot plus output capacity. The API promises freshness, not compact
   backing allocation. Empty result does not retain source values.
-- **Relevant source/tests:** `fp--walk`, `fp--finish`, `src/object.rs::PsArray`;
+- **Relevant source/tests:** `fp--walk`, `fp--finish-filter`, `src/object.rs::PsArray`;
   `input_slots_are_snapshotted_but_nested_objects_alias`.
 - **Suggested improvement:** measure large-collection heap use; consider a final
   compact copy for sparse results against its additional allocation/copy cost.
@@ -148,7 +150,7 @@ no issues have been filed automatically.
   77, replaces it with 99, and returns `[1]`. Net depth is valid.
 - **Expected/actual:** depth checking accepts it, as documented; the library
   cannot infer value identity or arbitrary alias side effects.
-- **Relevant source:** `fp--collect`; callback-contract tests use actual
+- **Relevant source:** `fp--collect-*`; callback-contract tests use actual
   sentinels and `currentdict`, not only stack length.
 - **Suggested improvement:** optional agent linting from declared stack effects
   plus tests of representative values. Do not call these checks a type system.
