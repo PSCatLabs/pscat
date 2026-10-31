@@ -1,9 +1,9 @@
 {
   "format": "pscat-functional-studio/1",
-  "wasm_sha256": "6efad75ab228372b58f33b1cfac1d01afd98dfe6031e117f29f14c4d11291661",
-  "wasm_bytes": 11484880,
-  "gzip_sha256": "d83c29e1bcd945514594e2f2df530e9adb50502df25e77e665f9343491ad1624",
-  "gzip_bytes": 5322661,
+  "wasm_sha256": "4bef9782fb481e1208f73b1866c76222aa1678e045ca33aecb1dcebdd06c38c0",
+  "wasm_bytes": 11490971,
+  "gzip_sha256": "799c5148dc4adeb946bc3bea773e032c338409cbe4796dd7fa80eda05eb314e9",
+  "gzip_bytes": 5324765,
   "api_sha256": "7b7059815d3e72675bc16bfaaeb6a9eb3405f97d65250a4d1ae5a10c9662ae3d",
   "engine_source_sha256": {
     "src/bands.rs": "5009691a3a6c00d6dec8a5017b967b04b3c7525ee242e18a77aac30cecb2cfb6",
@@ -92,8 +92,8 @@
     "examples/functional/observable-press.ps": "8daf473c55db9b768af6f1baa3d07f866f17f1175b91f996929ebca588d659f7"
   },
   "embedded_library_sha256": {
-    "lib/functional.ps": "abb72487c15fd22e05a24738afdf265cdd241eae2cbfbb5f823f684145043ecc",
-    "lib/aspect.ps": "c7dfdba0275cf6134d627f3e49a3618fed06340c9907856391f341e70302a8c5",
+    "lib/functional.ps": "b28f3a3b3cfd8064ae13b3911bebeb422c499779bf1dc1333e8caafeb2502425",
+    "lib/aspect.ps": "cea231e5a806ce24d98ba267a710d601fdd0187566543cc0de37035965b00847",
     "lib/artkit.ps": "1fb38bc129283e0ee4f52ff875fbc38e28daf5aad1271f276b66201b9ba034aa"
   },
   "license": "(MIT OR Apache-2.0) AND OFL-1.1 AND LPPL-1.3c"
