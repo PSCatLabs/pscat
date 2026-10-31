@@ -73,7 +73,7 @@
 % @internal
 /fp--prepare {
   fp.mode /fold eq { /fp.acc load } if
-  fp.seq fp.i get
+  fp.seq fp.i get fp.index { fp.i } if
   end
 } bind def
 
@@ -103,7 +103,7 @@
 /fp--finish {
   fp.i fp.seq length ne { end fp-callback-exit-not-supported } if
   fp.mode /map eq { fp.out } if
-  fp.mode /filter eq { fp.out 0 fp.used getinterval } if
+  fp.mode /filter eq { fp.out 0 fp.used getinterval fp.used array copy } if
   fp.mode /fold eq { /fp.acc load } if
   end
 } bind def
@@ -116,6 +116,7 @@
 /fp--walk {
   12 dict begin
   /fp.mode exch def /fp.q exch def /fp.acc exch def
+  /fp.index fp.mode /mapi eq def fp.index { /fp.mode /map def } if
   dup length array copy /fp.seq exch def
   count /fp.base exch def /fp.i 0 def /fp.used 0 def
   /fp.out fp.mode /map eq fp.mode /filter eq or
@@ -136,6 +137,14 @@
 /fp-map {
   //fp--quote exec exch //fp--array exec exch
   null exch /map //fp--walk exec
+} bind def
+
+% @kind: Procedure
+% @summary: Like fp-map, but the callback also receives the index, x i -- y.
+% @example: [10 20 30] { mul } fp-map-indexed
+/fp-map-indexed {
+  //fp--quote exec exch //fp--array exec exch
+  null exch /mapi //fp--walk exec
 } bind def
 
 % @kind: Procedure
@@ -161,3 +170,117 @@
   //fp--quote exec exch //fp--array exec exch
   null exch /each //fp--walk exec
 } bind def
+
+% keep ( ... x q -- ... x ): q consumes x, then the same x returns on top.
+% @kind: Procedure
+% @summary: Run a quotation on a value, then push that value again.
+% @example: [1 2] { length } fp-keep
+/fp-keep {
+  //fp--quote exec exch dup 3 -1 roll //fp-dip exec
+} bind def
+
+% field ( key -- q ), q: ( container -- value ). The key is boxed like curry.
+% @kind: Procedure
+% @summary: Build a getter quotation for one dictionary key or array index.
+% @example: [<< /r 2 >> << /r 5 >>] /r fp-field fp-map
+/fp-field { {get} //fp-curry exec } bind def
+
+%%SelfTest: functional-range-zip-sort-contracts
+% { 1.5 fp-range } /fp-range-count-must-be-nonnegative-integer (real count) mustguard
+% { -1 fp-range } /fp-range-count-must-be-nonnegative-integer (negative count) mustguard
+% { [1] [1 2] fp-zip } /fp-zip-equal-lengths-required (length mismatch) mustguard
+% { [1] (a) fp-zip } /fp-array-required (string second) mustguard
+% { [1] [2] [] fp-map2 } /fp-quotation-required (map2 quotation) mustguard
+% { [1 (a)] fp-sort } /fp-sort-keys-must-be-all-numbers-or-all-strings (mixed keys) mustguard
+% { [[1]] fp-sort } /fp-sort-keys-must-be-all-numbers-or-all-strings (array key) mustguard
+% { [1] [] fp-sort-by } /fp-quotation-required (sort-by quotation) mustguard
+%%EndSelfTest
+% @kind: Procedure
+% @summary: Return a fresh array of the integers 0 through n-1.
+% @example: 5 fp-range
+/fp-range {
+  dup type /integertype ne { fp-range-count-must-be-nonnegative-integer } if
+  dup 0 lt { fp-range-count-must-be-nonnegative-integer } if
+  [ exch 1 sub 0 1 3 -1 roll {} for ]
+} bind def
+
+% zip ( a b -- pairs ). Lengths must match; a silent truncation hides bugs.
+% @kind: Procedure
+% @summary: Pair equal-length arrays element by element into two-element arrays.
+% @example: [1 2] [(a) (b)] fp-zip
+/fp-zip {
+  //fp--array exec exch //fp--array exec exch
+  2 copy length exch length ne { fp-zip-equal-lengths-required } if
+  2 dict begin /fp.b exch def /fp.a exch def
+  [ 0 1 fp.a length 1 sub {
+      dup fp.a exch get exch fp.b exch get 2 array astore
+  } for ]
+  end
+} bind def
+
+% map2 ( a b q -- results ), q: ( ... x y -- ... z ).
+% @kind: Procedure
+% @summary: Map a two-input callback over equal-length arrays in order.
+% @example: [1 2] [10 20] { add } fp-map2
+/fp-map2 {
+  //fp--quote exec 3 1 roll //fp-zip exec
+  exch {aload pop} exch //fp-compose exec //fp-map exec
+} bind def
+
+% ( key -- class|null ): /number, /string, or null for anything unsortable.
+% @internal
+/fp--key-class {
+  dup type /stringtype eq { pop /string } {
+    type dup /integertype eq exch /realtype eq or { /number } { null } ifelse
+  } ifelse
+} bind def
+
+% sort-by ( array key-q -- sorted ), key-q: ( x -- number|string ).
+% Keys are computed once through fp-map, so user code never runs inside the
+% merge and the private frame cannot leak. Keys are type-checked up front
+% for the same reason; lt then cannot fail. Stable bottom-up merge sort.
+% @kind: Procedure
+% @summary: Stable ascending sort by a computed number or string key.
+% @example: [(pear) (fig) (apple)] { length } fp-sort-by
+/fp-sort-by {
+  //fp--quote exec exch //fp--array exec
+  dup length array copy exch 1 index exch //fp-map exec
+  dup length 0 gt {
+    dup 0 get //fp--key-class exec
+    dup null eq { fp-sort-keys-must-be-all-numbers-or-all-strings } if
+    1 index {
+      //fp--key-class exec 1 index ne
+        { fp-sort-keys-must-be-all-numbers-or-all-strings } if
+    } forall
+    pop
+  } if
+  12 dict begin
+  /fp.keys exch def /fp.seq exch def /fp.n fp.keys length def
+  /fp.src fp.n //fp-range exec def /fp.dst fp.n array def /fp.w 1 def
+  { fp.w fp.n ge { exit } if
+    0 fp.w 2 mul fp.n 1 sub {
+      /fp.lo exch def
+      /fp.mid fp.lo fp.w add fp.n 2 copy gt { exch } if pop def
+      /fp.hi fp.lo fp.w 2 mul add fp.n 2 copy gt { exch } if pop def
+      /fp.i fp.lo def /fp.j fp.mid def
+      fp.lo 1 fp.hi 1 sub {
+        fp.i fp.mid lt {
+          fp.j fp.hi ge { true } {
+            fp.keys fp.src fp.j get get fp.keys fp.src fp.i get get lt not
+          } ifelse
+        } { false } ifelse
+        { fp.dst exch fp.src fp.i get put /fp.i fp.i 1 add def }
+        { fp.dst exch fp.src fp.j get put /fp.j fp.j 1 add def } ifelse
+      } for
+    } for
+    fp.src fp.dst /fp.src exch def /fp.dst exch def
+    /fp.w fp.w 2 mul def
+  } loop
+  [ fp.src { fp.seq exch get } forall ]
+  end
+} bind def
+
+% @kind: Procedure
+% @summary: Stable ascending sort of an array of numbers or of strings.
+% @example: [3 1 2] fp-sort
+/fp-sort { {} //fp-sort-by exec } bind def

@@ -45,9 +45,11 @@ blossom     ( record -- )
 draw        ( record -- )
 ```
 
-`{dup}` composed with a configured consuming stem creates stem-step. Composing
-that with a configured blossom creates draw. This is exactly the poster's
-pipeline. It is easier to change one configured step than repeat palette,
+`/stem load fp-keep` turns a configured consuming stem into stem-step; following
+it with a configured blossom gives draw, `{/stem load fp-keep blossom}`. This is
+exactly the poster's pipeline. Make records dictionaries (`<< /X 1 /Y 2 >>`)
+and read them with `get` or `fp-field`; positional arrays make every reader
+remember which index meant what. It is easier to change one configured step than repeat palette,
 counter and drawing setup throughout a layout loop. The imperative control
 shows that the same graphics helpers are reusable in either style.
 

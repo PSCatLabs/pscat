@@ -23,6 +23,12 @@ procedure; `draw` calls it. Call returned quotations with `exec`.
 | `p q fp-compose` | quotation executing p then q |
 | `value q fp-curry` | quotation pushing captured value then calling q |
 | `value q fp-dip` | execute q below value, then restore value |
+| `value q fp-keep` | run q on value, then push value again |
+| `array q fp-map-indexed` | like map; q `( x i -- y )` |
+| `n fp-range` | `[0 ... n-1]` |
+| `a b fp-zip` / `a b q fp-map2` | pairs / q `( x y -- z )`; equal lengths |
+| `array key fp-sort-by` / `array fp-sort` | stable sort; key `( x -- num/string )` |
+| `key fp-field` | getter `( dict -- value )`; use dict records |
 
 Capture config/palettes as data; this is not lexical scope. Names inside user
 quotations remain dynamic. Array traversals snapshot slots; nested composites
@@ -55,8 +61,10 @@ No finally, automatic weaving, global operator replacement or rollback.
 Bound operators and previously captured targets bypass later name redefinitions.
 Use `--profile` for native timing; library advice supplies hooks, not a new clock.
 
-For a mark consuming a record, compose `{dup}` with a configured consuming stem
-and then a configured blossom. This makes `(record -- record)` then `(record -- )`.
+Make records dictionaries with named fields, not positional arrays. For a
+mark consuming a record in several steps, keep it: `{/stem load fp-keep blossom}`.
+`/name {decorator} aop-wrap-def` re-points a name (or operator) in the
+current dictionary only.
 Keep `gsave newpath ... grestore` inside marks that should isolate graphics.
 
 On errors, inspect `--pstack-on-error` and `$error /command`; validation guards

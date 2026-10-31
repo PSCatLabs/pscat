@@ -168,6 +168,104 @@ fn callback_errors_propagate_without_private_dictionary_leaks() {
 }
 
 #[test]
+fn added_callbacks_propagate_errors_without_private_dictionary_leaks() {
+    for src in [
+        "[1] {pop pop missing_callback} fp-map-indexed",
+        "[1] [2] {pop pop missing_callback} fp-map2",
+        "[1 2] {pop missing_callback} fp-sort-by",
+        "[1] {pop missing_callback} fp-keep",
+    ] {
+        let mut it = interpreter();
+        assert!(
+            matches!(it.run_str(src), Err(PsError::Undefined(_))),
+            "{src}"
+        );
+        assert_eq!(it.dict_stack_len(), 2, "{src}");
+    }
+}
+
+#[test]
+fn range_indexed_map_zip_and_map2() {
+    assert_eq!(
+        eval(
+            "0 fp-range 4 fp-range [10 20 30] {mul} fp-map-indexed [/a /b] [1 2] fp-zip [5 6] [1 2] {sub} fp-map2"
+        ),
+        ["[]", "[0 1 2 3]", "[0 20 60]", "[[/a 1] [/b 2]]", "[4 4]"]
+    );
+    // Callbacks see the caller prefix plus their published inputs only.
+    assert_eq!(
+        eval("77 [9] {count 3 eq {add} {bad_depth} ifelse} fp-map-indexed"),
+        ["77", "[9]"]
+    );
+    assert_eq!(
+        eval("[7 8] {exch pop} fp-map-indexed"),
+        ["[0 1]"],
+        "index arrives on top of the element"
+    );
+    // Zip pairs are fresh arrays holding the original (aliased) objects.
+    assert_eq!(
+        eval("/c [0] def [c] [{x}] fp-zip 0 get aload pop exch c eq exch xcheck"),
+        ["true", "true"]
+    );
+}
+
+#[test]
+fn sort_is_stable_and_never_runs_keys_as_code() {
+    assert_eq!(
+        eval(
+            "[5 3.5 9 -1 3.5 0] fp-sort [(pear) (fig) (apple)] fp-sort [] fp-sort [[3 /a] [1 /b] [3 /c] [1 /d]] {0 get} fp-sort-by"
+        ),
+        [
+            "[-1 0 3.5 3.5 5 9]",
+            "[(apple) (fig) (pear)]",
+            "[]",
+            "[[1 /b] [1 /d] [3 /a] [3 /c]]"
+        ]
+    );
+    assert_eq!(
+        eval("/calls 0 def [4 1 3 2 5] {/calls calls 1 add def neg} fp-sort-by calls"),
+        ["[5 4 3 2 1]", "5"],
+        "one key call per element, none inside the merge"
+    );
+    assert_eq!(
+        eval("[{x} /y cvx (z) cvx] {pop 0} fp-sort-by length"),
+        ["3"]
+    );
+    // The input array is not reordered.
+    assert_eq!(eval("/a [2 1] def a fp-sort pop a"), ["[2 1]"]);
+}
+
+#[test]
+fn keep_and_field_build_record_pipelines() {
+    assert_eq!(
+        eval(
+            "[1 2 3] {length} fp-keep [<< /r 2 >> << /r 5 >>] /r fp-field fp-map [[7 8]] 1 fp-field fp-map"
+        ),
+        ["3", "[1 2 3]", "[2 5]", "[8]"]
+    );
+    // fp-field boxes its key, so an executable name is looked up, not run.
+    assert_eq!(eval("<< /k 1 >> /k cvx fp-field exec"), ["1"]);
+}
+
+#[test]
+fn wrap_def_decorates_procedures_and_operators_in_currentdict() {
+    assert_eq!(
+        eval(
+            "/sq {dup mul} def /sq {(sq) aop-trace} aop-wrap-def 3 sq /c << /Calls 0 >> def 1 dict begin /add {c aop-count} aop-wrap-def 1 2 add end 3 4 add c /Calls get"
+        ),
+        ["9", "3", "7", "1"],
+        "operator wrapper shadows only while its dictionary is open"
+    );
+    let it = run("/sq {dup mul} def /sq {(sq) aop-trace} aop-wrap-def 2 sq pop");
+    assert_eq!(it.captured_stdout(), b"enter sq\nleave sq\n");
+    // systemdict keeps the real operator.
+    assert_eq!(
+        eval("/c << /Calls 0 >> def /add {c aop-count} aop-wrap-def systemdict /add get type"),
+        ["operatortype"]
+    );
+}
+
+#[test]
 fn callbacks_can_catch_their_own_errors_or_stop_outward() {
     assert_eq!(eval("[1] {pop {missing} stopped} fp-map"), ["[true]"]);
     assert_eq!(

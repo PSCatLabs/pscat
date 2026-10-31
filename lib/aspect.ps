@@ -84,3 +84,24 @@
   /aop.label load //aop--leave //fp-curry exec //aop-after exec
   end
 } bind def
+
+%%SelfTest: aspect-wrap-def-contracts
+% { (name) {} aop-wrap-def } /aop-wrap-def-name-required (string name) mustguard
+% { /aop-no-such-name {} aop-wrap-def } /aop-wrap-def-name-undefined (unknown name) mustguard
+% { /aop-wrap-def [] aop-wrap-def } /fp-quotation-required (decorator type) mustguard
+% { /aop-wrap-def {pop 1} aop-wrap-def } /fp-quotation-required (decorator result) mustguard
+%%EndSelfTest
+% The one opt-in rebinding: ( /name decorator -- ), decorator: ( target -- wrapper ).
+% Defines the wrapper in the *current* dictionary, like def, so it shadows
+% rather than edits the original binding; systemdict is never written.
+% Operators are wrapped as {op}. Callers bound earlier keep the old target.
+% @kind: Procedure
+% @summary: Replace a name's current meaning with a decorated version, in currentdict.
+% @example: /square {dup mul} def /square {(square) aop-trace} aop-wrap-def 3 square
+/aop-wrap-def {
+  //fp--quote exec
+  1 index type /nametype ne { aop-wrap-def-name-required } if
+  1 index where { pop } { aop-wrap-def-name-undefined } ifelse
+  1 index load dup type /operatortype eq { 1 array astore cvx } if
+  //fp--quote exec exch exec //fp--quote exec def
+} bind def

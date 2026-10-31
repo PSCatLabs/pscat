@@ -109,7 +109,7 @@ Benchmarking requires Unix `resource`; rendering and the libraries do not.
 The numeric workload maps squares of 1,000 integers and folds their sum 100
 times. Both paths allocate a mapped array and print 332833500; the functional
 path additionally snapshots and checks each callback. Observed median CPU is
-roughly 5.2× the imperative control. The full poster timings are similar at
+roughly 5.4× the imperative control. The full poster timings are similar at
 the measured scale; no performance advantage is claimed. The HTML displays
 rounded medians from the raw report. Tiny differences between poster medians
 are not treated as significant or generalizable. Frequency/load, platform,

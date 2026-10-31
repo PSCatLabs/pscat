@@ -31,7 +31,7 @@ no issues have been filed automatically.
 
 ## B. Performance bottlenecks and library costs
 
-### B1. Guarded traversals cost about 5.2× in the map/fold microbenchmark
+### B1. Guarded traversals cost about 5.4× in the map/fold microbenchmark
 
 - **Impact:** high if used in tight numeric inner loops; small in this poster.
 - **Classification/status:** measured library overhead, not an identified engine
