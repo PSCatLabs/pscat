@@ -1,1274 +1,1354 @@
 {
- "_comment": "The gallery manifest: the single list of what the site, the README highlights and gallery/show.sh show. New pieces add an entry here; nobody edits gallery.html by hand. See gallery/README.md and scripts/gallery.py.",
- "categories": [
-  {
-   "id": "geometry",
-   "title": "Geometry and fractals",
-   "blurb": "Pictures that fall out of a formula: roses, spirals, tilings and fractals."
-  },
-  {
-   "id": "generative",
-   "title": "Generative and L-systems",
-   "blurb": "Rules and random numbers that grow into plants, fabrics and fields."
-  },
-  {
-   "id": "painting",
-   "title": "Painting",
-   "blurb": "Brush strokes with bristle, loaded paint, wet edges and paper underneath."
-  },
-  {
-   "id": "printmaking",
-   "title": "Printmaking and etching",
-   "blurb": "Halftone dots, hatching and relief cuts: pictures made of marks."
-  },
-  {
-   "id": "lettering",
-   "title": "Lettering and type",
-   "blurb": "Text set glyph by glyph, flowed into shapes, or written by hand."
-  },
-  {
-   "id": "dataviz",
-   "title": "Data visualization",
-   "blurb": "Charts and surfaces drawn as clean vector figures."
-  },
-  {
-   "id": "apparel",
-   "title": "Apparel and design",
-   "blurb": "Print artwork for shirts and jerseys."
-  },
-  {
-   "id": "drawing",
-   "title": "Drawing (dry media)",
-   "blurb": "Chalk, crayon and charcoal on slate and toothed paper."
-  }
- ],
- "libraries": {
-  "artkit": {
-   "title": "artkit",
-   "guide": "docs/guides/artkit.md"
-  },
-  "paintkit": {
-   "title": "paintkit",
-   "guide": "docs/guides/painting.md"
-  },
-  "dataviz": {
-   "title": "dataviz",
-   "guide": "docs/guides/charts.md"
-  },
-  "handscript": {
-   "title": "handscript",
-   "guide": "docs/guides/handwriting.md"
-  },
-  "drykit": {
-   "title": "drykit",
-   "guide": "docs/guides/dry-media.md"
-  },
-  "drychalk": {
-   "title": "drychalk",
-   "guide": "docs/guides/dry-media.md"
-  },
-  "drycrayon": {
-   "title": "drycrayon",
-   "guide": "docs/guides/dry-media.md"
-  },
-  "drycharcoal": {
-   "title": "drycharcoal",
-   "guide": "docs/guides/dry-media.md"
-  },
-  "mathkit": {
-   "title": "mathkit",
-   "guide": "docs/guides/dry-media.md"
-  },
-  "strokeglyphs": {
-   "title": "strokeglyphs",
-   "guide": "docs/guides/dry-media.md"
-  },
-  "etching": {
-   "title": "etching",
-   "guide": "docs/guides/printmaking.md"
-  },
-  "hatchkit": {
-   "title": "hatchkit",
-   "guide": "docs/guides/printmaking.md"
-  },
-  "halftonekit": {
-   "title": "halftonekit",
-   "guide": "docs/guides/printmaking.md"
-  },
-  "printkit": {
-   "title": "printkit",
-   "guide": "docs/guides/printmaking.md"
-  },
-  "surfacekit": {
-   "title": "surfacekit",
-   "guide": "docs/guides/printmaking.md"
-  },
-  "lettering": {
-   "title": "lettering",
-   "guide": "docs/guides/lettering.md"
-  },
-  "fillkit": {
-   "title": "fillkit",
-   "guide": "docs/guides/lettering.md"
-  },
-  "headline": {
-   "title": "headline",
-   "guide": "docs/guides/lettering.md"
-  },
-  "jersey": {
-   "title": "jersey",
-   "guide": "docs/guides/lettering.md"
-  },
-  "typewriter": {
-   "title": "typewriter",
-   "guide": "docs/guides/fonts.md"
-  },
-  "typewriter_outlines": {
-   "title": "typewriter_outlines",
-   "guide": "docs/guides/fonts.md"
-  },
-  "released": {
-   "title": "released",
-   "guide": "docs/guides/fonts.md"
-  }
- },
- "pieces": [
-  {
-   "id": "golden_bloom",
-   "title": "Golden Bloom",
-   "category": "geometry",
-   "tags": [],
-   "libraries": [],
-   "featured": false,
-   "playground": true,
-   "added": "2026-07-12",
-   "source": "gallery/golden_bloom.ps",
-   "render": "gallery/renders/golden_bloom.png",
-   "page": "700x700",
-   "speed": 150,
-   "alt": "Golden Bloom, a disc of 1,300 glowing dots spiralling out from a small gold centre through orange and red to pink and magenta at the rim, on a dark ground",
-   "blurb": "Phyllotaxis: 1,300 florets at the golden angle, spaced like a sunflower.",
-   "technique": "Each floret sits at the golden angle (about 137.5 degrees) from the last, at a distance that grows with the square root of its number. That one rule packs the disc evenly and produces the interlocking spirals found in sunflowers and pine cones."
-  },
-  {
-   "id": "cathedral_rose",
-   "title": "Cathedral Rose",
-   "category": "geometry",
-   "tags": [],
-   "libraries": [],
-   "featured": true,
-   "playground": true,
-   "added": "2026-07-12",
-   "source": "gallery/cathedral_rose.ps",
-   "render": "gallery/renders/cathedral_rose.png",
-   "page": "700x700",
-   "speed": 60,
-   "alt": "Cathedral Rose, a lace-like rosette woven from straight red and gold chords inside a gold ring on a dark purple ground",
-   "blurb": "A Maurer rose: straight chords walking a six-petal curve in 71 and 97 degree strides.",
-   "technique": "A Maurer rose joins points on the rose curve r = sin 6θ with straight lines, stepping a fixed number of degrees each time. Two walks, one in 71 degree strides and one in 97, are layered; the straight lines alone weave the lace."
-  },
-  {
-   "id": "ember_tree",
-   "title": "Ember Tree",
-   "category": "generative",
-   "tags": [],
-   "libraries": [],
-   "featured": false,
-   "playground": true,
-   "added": "2026-07-12",
-   "source": "gallery/ember_tree.ps",
-   "render": "gallery/renders/ember_tree.png",
-   "page": "620x820",
-   "speed": 400,
-   "alt": "Ember Tree, a tree with a spreading crown of golden leaf clusters in front of a large glowing sun setting on a dusk sky that fades from deep blue to red",
-   "blurb": "Recursive branching from a seeded random generator, a banded dusk sky and layered sun glow.",
-   "technique": "Every branch splits into shorter ones, with the angle and length of each drawn from a small random-number generator the piece carries itself (a linear congruential generator, so the picture is the same every time). The sky is a stack of colour bands and the sun a disc with a layered glow."
-  },
-  {
-   "id": "fern",
-   "title": "Fern, After Barnsley",
-   "category": "geometry",
-   "tags": [],
-   "libraries": [],
-   "featured": false,
-   "playground": true,
-   "added": "2026-07-12",
-   "source": "gallery/fern.ps",
-   "render": "gallery/renders/fern.png",
-   "page": "620x800",
-   "speed": 3000,
-   "alt": "A green fern frond made of tens of thousands of tiny dots, shown on a dark background",
-   "blurb": "The chaos game: 48,000 points over four affine maps, with no outline drawn.",
-   "technique": "Michael Barnsley's fern is built by picking one of four simple transformations at random, over and over, and plotting where the point lands. After 48,000 plots a frond appears, though no line of it was drawn. Change the seed and the same fern grows from different dots."
-  },
-  {
-   "id": "silk_waves",
-   "title": "Silk Waves",
-   "category": "generative",
-   "tags": [],
-   "libraries": [],
-   "featured": false,
-   "playground": true,
-   "added": "2026-07-12",
-   "source": "gallery/silk_waves.ps",
-   "render": "gallery/renders/silk_waves.png",
-   "page": "700x480",
-   "speed": 150,
-   "alt": "Silk Waves, sixty-six thin threads rippling across a dark page, shading from violet at the top to teal at the bottom, with a few white threads",
-   "blurb": "Sixty-six threads displaced by two interfering sine waves.",
-   "technique": "Each thread is one long curve. Two sine waves with different wavelengths push every thread sideways by a different amount along its length, and where the waves reinforce each other the threads gather into silk-like folds."
-  },
-  {
-   "id": "frost_mandala",
-   "title": "Frost Mandala",
-   "category": "geometry",
-   "tags": [],
-   "libraries": [],
-   "featured": false,
-   "playground": true,
-   "added": "2026-07-12",
-   "source": "gallery/frost_mandala.ps",
-   "render": "gallery/renders/frost_mandala.png",
-   "page": "700x700",
-   "speed": 150,
-   "alt": "Frost Mandala, a six-fold pattern of fine overlapping circle outlines in pale blue and teal on a near-black ground, with faint rays",
-   "blurb": "Six-fold circle recursion with an 11 degree twist per generation, over 1,555 circles.",
-   "technique": "One circle spawns six smaller circles around its rim, each of which does the same, and every generation is twisted by 11 degrees. The result is a snowflake-like mandala built from more than fifteen hundred circles."
-  },
-  {
-   "id": "ring_of_type",
-   "title": "Ring of Type",
-   "category": "lettering",
-   "tags": [],
-   "libraries": [],
-   "featured": true,
-   "playground": true,
-   "added": "2026-07-13",
-   "source": "gallery/ring_of_type.ps",
-   "render": "gallery/renders/ring_of_type.png",
-   "page": "700x700",
-   "speed": 200,
-   "alt": "Ring of Type, a sentence repeated around eleven concentric rings that shrink toward a large ampersand at the centre",
-   "blurb": "One sentence set glyph by glyph around eleven shrinking rings.",
-   "technique": "Each letter is placed and rotated individually around a circle, using the width of each letter (`stringwidth`) to space it. The ampersand in the middle is drawn from the outline of the character itself (`charpath`), so it can be stroked and filled like any other shape."
-  },
-  {
-   "id": "hundred_lines",
-   "title": "Hundred Lines",
-   "category": "lettering",
-   "tags": [
-    "handwriting",
-    "chalk"
-   ],
-   "libraries": [],
-   "featured": false,
-   "playground": true,
-   "added": "2026-07-17",
-   "source": "gallery/hundred_lines.ps",
-   "render": "gallery/renders/hundred_lines.png",
-   "page": "560x620",
-   "speed": 250,
-   "alt": "Hundred Lines, a chalkboard covered in the same sentence written by hand nine times, each line a little more ragged",
-   "blurb": "A chalkboard on which the same sentence is handwritten nine times, and no two letters match.",
-   "technique": "The HandScript font draws every letter as a fresh handwritten stroke, so no two copies of the same letter are alike. This piece reuses it wholesale and turns two knobs the font leaves alone: the jitter and the pen width are overridden for each line, so the writing gets sloppier from the first line to the last."
-  },
-  {
-   "id": "hortus",
-   "title": "Hortus Machinalis",
-   "category": "generative",
-   "tags": [],
-   "libraries": [],
-   "featured": true,
-   "playground": true,
-   "added": "2026-07-19",
-   "source": "gallery/hortus.ps",
-   "render": "gallery/renders/hortus.png",
-   "page": "620x800",
-   "speed": 600,
-   "alt": "Hortus Machinalis, a herbarium plate with three branching plants labelled in Latin-style captions on cream paper",
-   "blurb": "A herbarium plate: three L-system plants grown by turtle, with blossoms stamped along each stem.",
-   "technique": "Three plants are grown from short rewriting rules (L-systems) that a turtle follows to draw stems. Dried blossoms are then stamped along each plant's own path by walking it with `pathforall` at even spacing, and the labels are set in Palatino, as a plate deserves."
-  },
-  {
-   "id": "woven_labyrinth",
-   "title": "Woven Labyrinth",
-   "category": "geometry",
-   "tags": [],
-   "libraries": [],
-   "featured": false,
-   "playground": true,
-   "added": "2026-08-01",
-   "source": "gallery/woven_labyrinth.ps",
-   "render": "gallery/renders/woven_labyrinth.png",
-   "page": "640x640",
-   "speed": 400,
-   "alt": "Woven Labyrinth, a square grid of tiles, each split corner to corner into one orange and one navy triangle, under a title and a double frame",
-   "blurb": "Truchet's 1704 two-triangle tile, randomly quarter-turned 256 times, chains into a flowing quilt.",
-   "technique": "Sébastien Truchet's 1704 tile is a square split corner to corner into two contrasting triangles. Each of 256 copies is turned by a random quarter turn, and because the diagonals meet from tile to tile, the single motif chains into a continuous, flowing labyrinth. The program carries its own copy of artkit's `truchet`."
-  },
-  {
-   "id": "infinite_descent",
-   "title": "Infinite Descent",
-   "category": "geometry",
-   "tags": [],
-   "libraries": [],
-   "featured": false,
-   "playground": true,
-   "added": "2026-08-02",
-   "source": "gallery/infinite_descent.ps",
-   "render": "gallery/renders/infinite_descent.png",
-   "page": "640x640",
-   "speed": 500,
-   "alt": "Infinite Descent, a disc tiled with heptagons that shrink toward the rim, coloured in rings from dark navy at the centre through purple to orange-red at the edge",
-   "blurb": "A hyperbolic tessellation: one heptagon reflected across its own edges, four generations deep.",
-   "technique": "A single heptagon is reflected across each of its edges, and the copies across theirs, for four generations. The tiles are drawn on the Poincaré disc, where the hyperbolic plane's infinite tiling shrinks toward the rim; 232 tiles are coloured in rings by generation. It uses artkit's `httile`."
-  },
-  {
-   "id": "recursive_peaks",
-   "title": "Recursive Peaks",
-   "category": "geometry",
-   "tags": [
-    "landscape"
-   ],
-   "libraries": [
-    "artkit"
-   ],
-   "featured": false,
-   "playground": false,
-   "added": "2026-08-03",
-   "source": "gallery/recursive_peaks.ps",
-   "render": "gallery/renders/recursive_peaks.png",
-   "page": "640x640",
-   "speed": 400,
-   "alt": "Recursive Peaks, three mountains made of nested triangles shaded from white tips to grey, under a night sky of cyan and pink stars and three fractal snowflake outlines",
-   "blurb": "A night mountain range built entirely from artkit's fractals: nested-triangle peaks, a carpet-pattern starfield and snowflake curves.",
-   "technique": "The peaks are triangles subdivided with `gasket` and shaded by altitude, the sparse starfield comes from `carpet`, and the snowflakes overhead are `edgepoly` Koch and quadratic Koch curves. Everything is a fractal from artkit's fractals section."
-  },
-  {
-   "id": "ripple_range",
-   "title": "Ripple Range",
-   "category": "dataviz",
-   "tags": [
-    "geometry"
-   ],
-   "libraries": [],
-   "featured": true,
-   "playground": true,
-   "issue": 13,
-   "added": "2026-08-03",
-   "source": "gallery/ripple_range.ps",
-   "render": "gallery/renders/ripple_range.png",
-   "page": "680x560",
-   "speed": 500,
-   "alt": "Ripple Range, a three-dimensional surface drawn as stacked ridges that shade from orange at the back to blue at the front, with a pale dip where the ripples meet",
-   "blurb": "Two decaying ripples summed into a height field and drawn as a 3D surface.",
-   "technique": "Two ripple sources, each fading with distance, are added into a height field. The surface is swept row by row under `graph.ps`'s `project3` camera, each row a filled ridge that hides the ones behind it, painted back to front (the painter's algorithm)."
-  },
-  {
-   "id": "field_notes",
-   "title": "Field Notes",
-   "category": "dataviz",
-   "tags": [
-    "lettering",
-    "handwriting"
-   ],
-   "libraries": [
-    "dataviz",
-    "handscript"
-   ],
-   "featured": false,
-   "playground": false,
-   "issue": 14,
-   "added": "2026-08-07",
-   "source": "gallery/field_notes.ps",
-   "render": "gallery/renders/field_notes.png",
-   "page": "700x600",
-   "speed": 400,
-   "alt": "Field Notes, a naturalist's journal page with a bar chart and line chart sharing one axis, and a donut chart with a hand-lettered legend",
-   "blurb": "A marsh census set as a field journal: bar and line charts on one axis, a donut chart, handwritten labels.",
-   "technique": "`dataviz.ps`'s `barchart` and `linechart` share one category axis, plotting weekly sightings against a temperature trend. A species-mix donut chart has a hand-drawn legend, and all of the lettering is in the HandScript font."
-  },
-  {
-   "id": "compositors_proof",
-   "title": "The Compositor's Proof",
-   "category": "lettering",
-   "tags": [
-    "layout"
-   ],
-   "libraries": [
-    "artkit"
-   ],
-   "featured": false,
-   "playground": false,
-   "issue": 16,
-   "added": "2026-08-07",
-   "source": "gallery/compositors_proof.ps",
-   "render": "gallery/renders/compositors_proof.png",
-   "page": "620x760",
-   "speed": 400,
-   "alt": "The Compositor's Proof, a printer's proof sheet with a motto set in a circle, a justified paragraph and a two-column colophon",
-   "blurb": "A printer's proof sheet showing artkit's paragraph flow: a round medallion, a justified block, two columns.",
-   "technique": "A motto is set inside a round medallion with `tfflow` and a hand-written circle boundary procedure. A body paragraph is justified with `tfblock`, and a two-column colophon set with `tfcols` genuinely spills from the first column into the second."
-  },
-  {
-   "id": "lodestone",
-   "title": "Lodestone",
-   "category": "generative",
-   "tags": [],
-   "libraries": [
-    "artkit"
-   ],
-   "featured": false,
-   "playground": false,
-   "issue": 19,
-   "added": "2026-08-14",
-   "source": "gallery/lodestone.ps",
-   "render": "gallery/renders/lodestone.png",
-   "page": "640x640",
-   "speed": 1200,
-   "alt": "Lodestone, hundreds of short dark strokes (iron filings) curling in loops around a dark rock on a pale tan ground, like the field lines of a magnet",
-   "blurb": "1,400 iron filings tracing a flow field around a rock, like the field lines of a magnet.",
-   "technique": "Each filing is traced through a flow field with `advect`. The field comes from `curl2` applied to a hand-composed potential, coherent `noise2` texture plus a radial term, whose perpendicular gradient curls a purely radial field into the concentric loops real filings make around a magnet."
-  },
-  {
-   "id": "plum_branch",
-   "title": "Plum Branch in Ink",
-   "category": "painting",
-   "tags": [],
-   "libraries": [
-    "artkit",
-    "paintkit"
-   ],
-   "featured": false,
-   "playground": false,
-   "issue": 40,
-   "added": "2026-08-22",
-   "source": "gallery/plum_branch.ps",
-   "render": "gallery/renders/plum_branch.png",
-   "page": "700x900",
-   "speed": 300,
-   "alt": "Plum Branch in Ink, a sumi-e ink painting of a plum branch with blossoms, grass and a soft wash behind",
-   "blurb": "A sumi-e plum branch in which width is everything: each stroke narrows to a brush-lifted point.",
-   "technique": "Every stroke in the picture (trunk, forking branches, grass at the foot, even the background wash) is one centre line walked by artkit's `walkpath` and filled by paintkit's `pkribbon`. A pressure curve narrows each branch to a point, the grass blades taper independently at each end, and jitter gives the loaded-ink edge."
-  },
-  {
-   "id": "flying_white_reeds",
-   "title": "Flying White: Reeds at Dusk",
-   "category": "painting",
-   "tags": [
-    "landscape"
-   ],
-   "libraries": [
-    "artkit",
-    "paintkit"
-   ],
-   "featured": false,
-   "playground": false,
-   "issue": 80,
-   "added": "2026-08-22",
-   "source": "gallery/flying_white_reeds.ps",
-   "render": "gallery/renders/flying_white_reeds.png",
-   "page": "700x460",
-   "speed": 400,
-   "alt": "Flying White, a dusk wetland with reeds in dry-brush strokes, a broken reflection in the water and thin mist in the sky",
-   "blurb": "A wetland at dusk in dry brush: reeds that run dry toward their tips, a broken reflection, thin mist.",
-   "technique": "Built around paintkit's `pkdry` dry-bristle brush. Each reed stalk is a loaded base and a drier, more broken tip sharing an endpoint; the water carries a broken reflection and the sky a thin dry-brush mist. The same primitive is used at three scales, over a banded dusk gradient from `mix3`."
-  },
-  {
-   "id": "fugitive_pigments",
-   "title": "Fugitive Pigments",
-   "category": "painting",
-   "tags": [
-    "lettering"
-   ],
-   "libraries": [
-    "artkit",
-    "paintkit"
-   ],
-   "featured": false,
-   "playground": false,
-   "issue": 84,
-   "added": "2026-08-24",
-   "source": "gallery/fugitive_pigments.ps",
-   "render": "gallery/renders/fugitive_pigments.png",
-   "page": "620x1000",
-   "speed": 600,
-   "alt": "Fugitive Pigments, a poetry broadside with a spray-stencilled title, a starry night sky above reeds and a moon with a halo",
-   "blurb": "A poetry broadside: an original poem under a spray-stencilled title, illustrated entirely with paintkit brushes.",
-   "technique": "The poem is about impermanence, typeset in Palatino under a title spray-stencilled through its own `charpath` outline. The illustration is all paintkit brushes: the Milky Way is `pkspray` cloud and star dust along two shared curves, the moon wears a spray halo, the reeds are `pknib` tapers with spray-dab seed heads, and the field is `pkdry` broken texture."
-  },
-  {
-   "id": "mochi_denim_blue",
-   "title": "Mochi in Denim Blue",
-   "category": "painting",
-   "tags": [
-    "portrait",
-    "reference study"
-   ],
-   "libraries": [
-    "artkit",
-    "paintkit"
-   ],
-   "featured": false,
-   "playground": false,
-   "issue": 100,
-   "added": "2026-08-27",
-   "source": "gallery/mochi_denim_blue.ps",
-   "render": "gallery/renders/mochi_denim_blue.png",
-   "page": "720x900",
-   "speed": 900,
-   "alt": "Mochi in Denim Blue, an oil-painting style portrait of a golden Pomeranian with upright ears against a denim-blue canvas",
-   "blurb": "A portrait study of a Pomeranian in broad oil strokes against a scraped denim-blue canvas.",
-   "technique": "A close-cropped study made from a photograph. Broad overlapping `pkoil` masses model the orange-sable dog, `pkdry` breaks the silhouette into a furry edge, and selectively crisp eyes and nose hold the likeness. The result is an interpretation, not a traced copy.",
-   "reference": {
-    "file": "gallery/references/mochi.jpg",
-    "alt": "Original close-up photograph of Mochi, a golden Pomeranian",
-    "caption": "The face, markings, expression and denim setting that the painting keeps.",
-    "render_caption": "pkoil block-in and fur planes, pkdry contour breakup, deterministic seed 27.",
-    "text": "This piece begins with a real photograph rather than a geometric system. The interpretation keeps Mochi's upright ears, orange-sable and cream markings, enormous reflected eyes, compact dark nose and denim-blue setting. It trades individual hairs and clothing folds for directional loaded-brush masses and cross-woven canvas marks; the aim is a recognizable oil study, not a traced copy or a claim of physical pigment simulation."
-   }
-  },
-  {
-   "id": "first_rain",
-   "title": "First Rain",
-   "category": "painting",
-   "tags": [
-    "landscape"
-   ],
-   "libraries": [
-    "artkit",
-    "paintkit"
-   ],
-   "featured": false,
-   "playground": false,
-   "issue": 47,
-   "added": "2026-08-28",
-   "source": "gallery/first_rain.ps",
-   "render": "gallery/renders/first_rain.png",
-   "page": "760x560",
-   "speed": 500,
-   "alt": "First Rain, a river valley in layered watercolour washes with five receding ridges and a veil of rain",
-   "blurb": "A river valley in layered watercolour, palest and wettest first, each ridge darker and drier.",
-   "technique": "paintkit's `pkwash` over a `pkpaper` ground, painted the way a watercolour is: the palest, wettest washes first, then five receding ridges, each darker, drier and tighter than the one behind it. Every colour is composited by the renderer over the paint already down rather than guessed in advance. The rain veil is a wash with its edge pooling turned off, and the reeds are `pkribbon` drawn under the same wash."
-  },
-  {
-   "id": "firefly_census",
-   "title": "Firefly Census",
-   "category": "generative",
-   "tags": [
-    "landscape"
-   ],
-   "libraries": [
-    "artkit"
-   ],
-   "featured": false,
-   "playground": false,
-   "issue": 48,
-   "added": "2026-08-30",
-   "source": "gallery/firefly_census.ps",
-   "render": "gallery/renders/firefly_census.png",
-   "page": "640x800",
-   "speed": 700,
-   "alt": "Firefly Census, a summer meadow after dark with a starry sky, a stippled hill, tall grass and glowing fireflies",
-   "blurb": "A meadow after dark in which every mark is placed by artkit's scatter, and none by hand.",
-   "technique": "The star field is a weight procedure (a Milky Way band times coherent `noise2`), the hill's stipple is scattered into the silhouette's own outline captured with `scpath`, the meadow is minimum-spaced grass anchors whose height and tone come from their own height on the page, and the fireflies are two passes over one seed: halos first, then cores, so every core lands inside its own halo."
-  },
-  {
-   "id": "basin_and_range",
-   "title": "Basin and Range",
-   "category": "generative",
-   "tags": [
-    "landscape"
-   ],
-   "libraries": [],
-   "featured": false,
-   "playground": true,
-   "issue": 755,
-   "added": "2026-10-25",
-   "source": "gallery/basin_and_range.ps",
-   "render": "gallery/renders/basin_and_range.png",
-   "page": "720x480",
-   "speed": 200,
-   "alt": "Basin and Range, a shaded-relief map of an invented land: blue seas and lakes, pale shores, green lowlands with faint contour lines, and brown and white mountain ranges lit from the north-west",
-   "blurb": "A shaded-relief map of a country that does not exist, every pixel computed from pscat's native noise.",
-   "technique": "One `colorimage` data procedure computes each row of the map. Heights are `fbm2` for the broad shape of land and sea, plus `ridged2` for the mountain crests, switched on by a slow second `fbm2` so the ranges form belts. Each height is looked up in a colour ramp (water, shore, lowland, upland, rock, snow), lit from the north-west by the slope to the neighbouring samples, and crossed by anti-aliased contour lines. `noiseseed` fixes the table, so the same seed draws the same map. The program reads `/BandBBox` when `pscat --bands N` defines it and computes only the rows its band shows: about 1.6 seconds plain, 0.6 with `--bands 4`, the same pixels either way."
-  },
-  {
-   "id": "out_of_register",
-   "title": "Out of Register",
-   "category": "printmaking",
-   "tags": [],
-   "libraries": [
-    "halftonekit"
-   ],
-   "featured": false,
-   "playground": false,
-   "issue": 126,
-   "added": "2026-09-03",
-   "source": "gallery/out_of_register.ps",
-   "render": "gallery/renders/out_of_register.png",
-   "page": "720x900",
-   "speed": 400,
-   "alt": "Out of Register, a three-colour risograph-style sunset made of halftone dots in teal and orange with dark line ridges, printed slightly misaligned",
-   "blurb": "A three-plate risograph sunset, misregistered on purpose: every tone is a halftone dot.",
-   "technique": "Every tonal mark is a halftonekit cell, and none is placed by hand. A teal dot plate (sky and water, at 15 degrees), an orange dot plate (the sun's halo and a horizon band, at 75 degrees) and a dark line plate (two ridges shaded by height, at 45 degrees) are each shifted a few units, so the dot lattice moves while the image stays. The flat sun core, the registration crosshairs, the colour bars and the letterpress title are all there too."
-  },
-  {
-   "id": "nightfall_triptych",
-   "title": "Nightfall, Three Cuts",
-   "category": "printmaking",
-   "tags": [
-    "landscape"
-   ],
-   "libraries": [
-    "artkit",
-    "hatchkit",
-    "printkit",
-    "surfacekit"
-   ],
-   "featured": true,
-   "playground": false,
-   "issue": 52,
-   "added": "2026-09-04",
-   "source": "gallery/nightfall_triptych.ps",
-   "render": "gallery/renders/nightfall_triptych.png",
-   "page": "640x480",
-   "speed": 400,
-   "alt": "Nightfall, Three Cuts, a moonlit ridge over water in three print styles: engraved sky and water, woodcut mountains and linocut reeds",
-   "blurb": "A moonlit ridge over water in three print styles at once: engraving, woodcut and linocut.",
-   "technique": "printkit's three presets are used together in one scene rather than as three separate samples. Sky and water are the engraving preset's fine crosshatch at two angles, the mountains are the woodcut preset's grain-following breakup, and the foreground reeds are the linocut preset's bolder, simpler marks. Each silhouette is filled solid ink first, then its own preset runs a second time over the same path in a lighter colour, giving the carved-through-to-the-paper look of gouged wood or lino."
-  },
-  {
-   "id": "keepin_it_real",
-   "title": "Keepin' it Real",
-   "category": "apparel",
-   "tags": [
-    "lettering"
-   ],
-   "libraries": [
-    "artkit",
-    "fillkit",
-    "headline",
-    "lettering"
-   ],
-   "featured": false,
-   "playground": false,
-   "issue": 147,
-   "added": "2026-09-29",
-   "source": "gallery/keepin_it_real.ps",
-   "render": "gallery/renders/keepin_it_real.png",
-   "page": "720x900",
-   "speed": 500,
-   "alt": "Keepin' it Real, a shirt front lettered twice in fat groovy faces with green, blue and red plasma fills, above a typewriter punchline for the back",
-   "blurb": "A recreated shirt front in two groovy faces, filled with GIMP-style plasma, over a typewriter punchline.",
-   "technique": "The shirt front is set in both groovy faces, Bagel Fat One (the chosen one) and Chewy, with the same composition, seed and palette, and filled with fillkit's plasma through lettering's `/plasma` treatment. The words `I'm` and `Keepin' it` tuck against the `ea` of `Real` through headline's `hllayout`, and the back's typewriter punchline sits below."
-  },
-  {
-   "id": "varsity_backs",
-   "title": "Varsity Backs",
-   "category": "apparel",
-   "tags": [
-    "lettering"
-   ],
-   "libraries": [
-    "artkit",
-    "jersey"
-   ],
-   "featured": false,
-   "playground": false,
-   "issue": 167,
-   "added": "2026-09-30",
-   "source": "gallery/varsity_backs.ps",
-   "render": "gallery/renders/varsity_backs.png",
-   "page": "1050x660",
-   "speed": 600,
-   "alt": "Varsity Backs, two team jerseys seen from behind, cardinal-and-gold and navy-and-white, with arched names over large numbers",
-   "blurb": "Two team jerseys seen from behind, with arched names over large layered-outline numbers.",
-   "technique": "Each jersey carries `lib/jersey.ps`'s arched name over a large number with classic layered lettering: a white or gold fill, a thin contrasting inner outline and a dark outer one, with tracked capitals on the arch. The garment itself (mesh fabric, rib collar, yoke, side panels, sleeve and hem stripes, size tag, hanger) is drawn in the piece rather than in the library; the library only sizes the lettering for a print rectangle."
-  },
-  {
-   "id": "alpine_lake",
-   "title": "Alpine Lake",
-   "category": "painting",
-   "tags": [
-    "landscape"
-   ],
-   "libraries": [
-    "artkit",
-    "paintkit"
-   ],
-   "featured": true,
-   "playground": false,
-   "issue": 118,
-   "added": "2026-10-08",
-   "source": "gallery/alpine_lake.ps",
-   "render": "gallery/renders/alpine_lake.png",
-   "page": "760x560",
-   "speed": 600,
-   "alt": "Alpine Lake, snow-capped peaks reflected in a still lake under a criss-cross brushed sky, with evergreens in the foreground",
-   "blurb": "A snow-capped range over a still lake, painted wet-on-wet from paintkit's brushes alone.",
-   "technique": "Painted back to front from paintkit's brushes, with no landscape helper. The sky is laid out with `pkcrisscross` and painted with `pkbroad`; spray clouds and mist are softened into the paint beneath by `pkwet`, and the far range wears banks of haze lifted both ways by a directional `pkwet`; snow comes from `pktrowel` and the shadow planes from `pktrowelplane`, both clipped to each ridge; a far forest is tapped in with `pkdab`; evergreens are `pkfan`; trunks, grass and water lines are `pkliner`. The reflection replays the same self-seeded marks upside down, one single-colour part at a time, each pulled straight down with a directional `pkwet` and then grazed across."
-  },
-  {
-   "id": "chalkboard_lecture",
-   "title": "Lecture 14",
-   "category": "drawing",
-   "tags": [
-    "chalk",
-    "math"
-   ],
-   "libraries": [
-    "artkit",
-    "drychalk",
-    "drykit",
-    "handscript",
-    "mathkit",
-    "paintkit",
-    "strokeglyphs"
-   ],
-   "featured": false,
-   "playground": false,
-   "issue": 238,
-   "added": "2026-10-14",
-   "source": "gallery/chalkboard_lecture.ps",
-   "render": "gallery/renders/chalkboard_lecture.png",
-   "page": "1440x850",
-   "speed": 600,
-   "alt": "Lecture 14, a slate chalkboard after a lecture deriving Euler's formula from the Taylor series, with braces naming the terms, a boxed result, a unit-circle sketch and erased ghost writing",
-   "blurb": "A chalkboard as the professor left it: Euler's formula derived step by step from the Taylor series, braced, starred and boxed in yellow.",
-   "technique": "Three sliding slate panels carry one derivation. The Taylor series are recalled with braces under the first terms naming the n each comes from, and the powers of i set in two columns with a rule mod 4. Then x = iθ is substituted, the = where the signs flip starred and answered in pink, and the series regrouped, a blue brace under each bracket naming it cos θ or sin θ, before the result is boxed twice in yellow. A freehand unit circle, the quarter turns tabled in wandering columns, and Euler's identity circled finish it. The formulas are `lib/mathkit.ps` layouts (`\\underbrace`, `\\overset`, `\\pmod`, aligned columns with `/ColumnWander`, and `mkbrace`) inked with `lib/drychalk.ps`'s `dcchalk`, on `dcboard` panels that still carry the last lecture (the Gaussian integral and a bell curve) as ghost writing under eraser swipes. The hand leans further and loosens panel by panel."
-  },
-  {
-   "id": "crayon_drawing",
-   "title": "My Family and Our House",
-   "category": "drawing",
-   "tags": [
-    "crayon"
-   ],
-   "libraries": [
-    "artkit",
-    "drycrayon",
-    "drykit",
-    "handscript",
-    "paintkit",
-    "strokeglyphs"
-   ],
-   "featured": false,
-   "playground": false,
-   "issue": 240,
-   "added": "2026-10-14",
-   "source": "gallery/crayon_drawing.ps",
-   "render": "gallery/renders/crayon_drawing.png",
-   "page": "792x612",
-   "speed": 400,
-   "alt": "My Family and Our House, a young child's crayon drawing: a red house, four stick figures, a smiling sun and blue sky band, and the name Josie",
-   "blurb": "A six-year-old's crayon drawing on printer paper: a house, a family of stick figures and an oversized sun.",
-   "technique": "Built the way a child builds one, from `lib/drycrayon.ps` on drykit's toothed surface. The sky is a band of blue scribble across the top and the grass a band along the bottom, both laid in side-by-side patches that run past their edges and leave white seams. A sun far too big, a red house with a brown roof, a path, an apple tree, flowers, birds, a smoking chimney and four stick figures about as tall as the house follow, and the name is set in strokeglyphs capitals with a backward S, each letter its own size and lean. Outlines go on last. The paths come from `dywobble`, `dyscribble`, `dyloop`, `dyrays`, `dygrass` and `dyfigure`, inked by `dycrayon` in the colours of a 16-crayon box."
-  },
-  {
-   "id": "lincoln_charcoal",
-   "title": "Study after Berger, 1864",
-   "category": "drawing",
-   "tags": [
-    "portrait",
-    "reference study"
-   ],
-   "libraries": [
-    "artkit",
-    "drycharcoal",
-    "drykit",
-    "etching",
-    "hatchkit",
-    "paintkit"
-   ],
-   "featured": false,
-   "playground": false,
-   "issue": 242,
-   "added": "2026-10-14",
-   "source": "gallery/lincoln_charcoal.ps",
-   "render": "gallery/renders/lincoln_charcoal.png",
-   "page": "480x600",
-   "speed": 3000,
-   "alt": "Study after Berger, 1864, a charcoal portrait of Abraham Lincoln drawn as an art student would, with the coat and background left unfinished",
-   "blurb": "An art student's charcoal portrait of Lincoln, drawn to the tones of an 1864 photograph.",
-   "technique": "`lib/etching.ps`'s `et-tonemap` reads the photograph into a 240 by 300 grid of darkness, and drycharcoal draws to it in a student's order on drykit's drawing paper: faint `dhsketch` construction lines (head oval, centre line, brow, eye, nose and mouth lines, shoulders), `dhsmudge` stump tone inside the dark masses, `dhhatch` to the photo's values (fine and short in the face, finer still at the features, looser vine strokes in the coat), compressed-charcoal and pencil accents at the brows, eyes, nose and mouth, and hard-eraser `dhlift` streaks in the hair and on the lapel. The coat and the ground fade out raggedly, as in a real study.",
-   "reference": {
-    "file": "gallery/references/lincoln_berger_1864.jpg",
-    "alt": "Anthony Berger's 1864 photograph of Abraham Lincoln, head and shoulders",
-    "caption": "Anthony Berger, 9 February 1864 (Library of Congress, public domain).",
-    "render_caption": "et-tonemap reads the photo; drycharcoal hatches, smudges and lifts to it.",
-    "text": "This piece starts from a photograph, but reads it as data: every hatch, smudge and lift is drawn to the grid of darkness taken from the 1864 portrait, the way a student works from a photo pinned beside the easel. The reference is a 480 by 600 greyscale crop of the head and shoulders from Anthony Berger's photograph of Abraham Lincoln, taken at Mathew Brady's Washington gallery on 9 February 1864 (Ostendorf O-91). Source: the Library of Congress print, via Wikimedia Commons, [File:Abraham Lincoln O-91 by Berger, 1864.png](https://commons.wikimedia.org/wiki/File:Abraham_Lincoln_O-91_by_Berger,_1864.png). It is in the public domain (a US work published before 1929, and marked public domain by Commons and the Library of Congress)."
-   }
-  },
-  {
-   "id": "evening_stream",
-   "title": "Evening Stream",
-   "category": "painting",
-   "tags": [
-    "landscape"
-   ],
-   "libraries": [
-    "artkit",
-    "paintkit"
-   ],
-   "featured": false,
-   "playground": false,
-   "issue": 187,
-   "added": "2026-10-14",
-   "source": "gallery/evening_stream.ps",
-   "render": "gallery/renders/evening_stream.png",
-   "page": "760x560",
-   "speed": 600,
-   "alt": "Evening Stream, an autumn evening with a glowing sky, a stream tumbling over a small fall between dark banks, autumn trees and a cabin with a lit window",
-   "blurb": "An autumn evening: a stream comes out of the sunset glow, over a little fall, past a cabin with its lamp lit.",
-   "technique": "Painted on one shared canvas (`pkcanvas`) with the newer paintkit tools and no landscape helper. A criss-cross sky comes from a broad brush loaded with two neighbouring sky colours; clouds are scumbled in tiny circles (`pkscumblein`) and lit along their lumpy undersides by the same brush's `/Light`, as from the glow below; a cloud's body is worked wet into the sky with `pkwet /PerFill`, which asks the sky's own colour at each stroke's place, so the body's top edge settles into the darker sky above it; a backlit wood is tapped in with `pktap` and a loaded `pkdab`, its reflection pulled down whole by one directional `pkwet`. Autumn trees take warm highlights and cool shadows, evergreens a fan loaded dark and lit with `/Light`, the rocks and cabin come from a palette knife, a `pkpull` fall and grass finish the bank, and `pkzigzag` light on the water is caught on the canvas weave. The stream's banks, its head, the far shore and the near banks' rims are brushed with `pkbrushedge`, so no big mass keeps a ruled vector edge: the far shore and the banks carry the meadow's own light to the edge (a procedural `/Mass`, lit under the glow and plain toward the viewer), and a near bank cuts the stream back in exactly where the stream runs behind it (a region list for `/Under`)."
-  },
-  {
-   "id": "released_memo",
-   "title": "Released in Part",
-   "category": "lettering",
-   "tags": [
-    "typewriter",
-    "document"
-   ],
-   "libraries": [
-    "artkit",
-    "handscript",
-    "released",
-    "surfacekit",
-    "typewriter",
-    "typewriter_outlines"
-   ],
-   "featured": false,
-   "playground": false,
-   "issue": 215,
-   "added": "2026-10-14",
-   "source": "gallery/released_memo.ps",
-   "render": "gallery/renders/released_memo.png",
-   "page": "612x792",
-   "speed": 1200,
-   "alt": "Released in Part, a typed 1962 office memorandum on a twice-photocopied page: an office-use-only marking at the head and foot ruled through by a reviewer's pen, a memo header, six numbered paragraphs with a strikeover, an x-out and underlined words, two names covered by marker bars with an exemption code beside each, a received date stamp, a records-review box stamp with handwritten initials and date, a released-in-part stamp, a document number, a paper clip, punch holes, and handwritten initials and a note",
-   "blurb": "A typed 1962 memo about two lost cans of aerial film, its marking ruled through, its names blacked out, stamped and photocopied twice for release decades later.",
-   "technique": "Typed with `tw-type` on the `/Typewriter` font: an elite manual (`/Pitch 12`) at an even hand (`/Wear 1.0 /MachineWear 0.4 /StrikeWear 0.5 /Ribbon 0.75`, as *The Man from 2026* settled), so every strike is its own (the weave shows through the ink, edges feather, the `q` key's counter is clogged, a few letters land high or light) and no word fades. The memo header, the tab stops, a strikeover (`<o>was|were</o>`), an x-out, underscores and the redactions (`<r>..</r>`, drawn by `rel-redact` as marker bars) are markup in one text string; then `tw-set` types the office-use-only marking at the head and foot on the same frame, and a reviewer's ruled pen lines strike it out. `rel-page` wraps it all: aged and folded paper, two punch holes, a gem clip, the scanner's tilt and lamp, then two photocopy generations, which turn the paper to a grey haze with grain, add specks and the lid's shadow, give every mark a soft fringe, and erode the type's thin horizontals a little (`/Copies 0.35` keeps its counters open). The stamps (received, records review, released in part, the exemption codes and the document number) and the handwritten initials, date and note (`lib/handscript.ps`) are marks on the page, so the copier copies them. The office, people, project, review board and exemption codes are invented."
-  },
-  {
-   "id": "time_traveler_memo",
-   "title": "The Man from 2026",
-   "category": "lettering",
-   "tags": [
-    "typewriter",
-    "document"
-   ],
-   "libraries": [
-    "artkit",
-    "handscript",
-    "released",
-    "surfacekit",
-    "typewriter",
-    "typewriter_outlines"
-   ],
-   "featured": false,
-   "playground": false,
-   "issue": 590,
-   "added": "2026-10-15",
-   "source": "gallery/time_traveler_memo.ps",
-   "render": "gallery/renders/time_traveler_memo.png",
-   "page": "612x1008",
-   "speed": 1200,
-   "alt": "The Man from 2026, a typed 1962 TOP SECRET memorandum for the record on aged legal paper: red typed classification lines at the head and foot, a control number and copy line, a registry stamp, a paper clip and punch holes, numbered paragraphs with x-outs and a strikeover, a signature block and distribution list, a regrading box and handwritten initials and a margin note",
-   "blurb": "A TOP SECRET memorandum of 1962 that was never released: an interviewing officer's flat account of a man who says he came from 2026 and built his time machine by talking to another machine.",
-   "technique": "Typed with `tw-type` on the `/Typewriter` font, an elite manual struck at an even hand (`/StrikeWear 0.5`, so the darkness varies without whole letters fading out; every strike is still its own: the weave in the ink, feathered edges, a few light or high letters, the `e` clogged on this machine). The memo-for-the-record header, tab stops, two x-outs, a strikeover (`<o>offcie|office</o>`) and an underscore are markup in one text string. The same machine then types the control lines in black and, with its ribbon lifted to the red half (`tw-set` with a red `/Ink`, and a `/Bleed` from above that puts the black half into the tops of a few letters), the classification at the head and foot of the sheet. `rel-page` with `/Generation 0` makes it the ribbon original, never copied: aged legal paper, two punch holes, a gem clip, the scanner's tilt and lamp. The registry stamp, a regrading box, the routing initials and the margin note (`lib/handscript.ps`) are marks over the page. The office, people and places are invented; the only real names are in the man's own testimony."
-  }
- ],
- "groups": [
-  {
-   "id": "styles",
-   "title": "Style packs",
-   "guide": "docs/guides/style-packs-and-templates.md",
-   "blurb": "Four motif libraries in lib/styles/, layered on the generative-art toolkit artkit. Each pack adds three palettes and a drawer of motifs. These specimen posters are examples/style_*.ps, 620 by 800 and deterministic."
-  },
-  {
-   "id": "templates",
-   "title": "Page templates",
-   "guide": "docs/guides/style-packs-and-templates.md",
-   "blurb": "lib/pagekit.ps builds whole pages from a content dictionary: a title, a body, a signoff. A sparse or even empty dictionary still renders a complete page, and long copy shrinks or flows to fit instead of overrunning. Each specimen is examples/template_*.ps at 612 by 792."
-  },
-  {
-   "id": "lettering",
-   "title": "Lettering and apparel",
-   "guide": "docs/guides/lettering.md",
-   "blurb": "Display lettering from glyph outlines, GIMP-style fills, headline composition, jersey numbers and apparel print templates."
-  },
-  {
-   "id": "dry",
-   "title": "Dry media",
-   "guide": "docs/guides/dry-media.md",
-   "blurb": "Chalk, crayon and charcoal on toothed surfaces, plus the stroke-skeleton letters and TeX-style mathematics that go on a board."
-  },
-  {
-   "id": "charts",
-   "title": "Charts and figures",
-   "guide": "docs/guides/charts.md",
-   "blurb": "Paper-ready figures from graph.ps and dataviz.ps: function plots, bar, line and pie charts as plain vector pages."
-  },
-  {
-   "id": "fonts",
-   "title": "Fonts and handwriting",
-   "guide": "docs/guides/fonts.md",
-   "blurb": "The Type 3 display faces in lib/fonts/ draw every glyph with a program, so the letterforms can do things outlines cannot. fonts/catalog/ adds 60 open outline faces loaded at findfont time. The Fonts page shows every face individually."
-  },
-  {
-   "id": "classic",
-   "title": "Classic examples",
-   "guide": "docs/guides/getting-started.md",
-   "blurb": "The demo files that grew up with the interpreter: fractals that draw themselves, and test pages written the way real-world files are."
-  },
-  {
-   "id": "type3",
-   "title": "Type 3 fonts",
-   "guide": "docs/guides/fonts.md",
-   "blurb": "Fonts where every glyph is a PostScript program."
-  }
- ],
- "specimens": [
-  {
-   "id": "specimen_steampunk",
-   "group": "styles",
-   "title": "steampunk.ps",
-   "alt": "Aether & Brass, a steampunk specimen poster",
-   "blurb": "Gears, rivets, flanged pipework, pressure gauges and riveted plate frames, in the /brass /verdigris /boiler palettes.",
-   "source": "examples/style_steampunk.ps",
-   "render": "lib/styles/specimen_steampunk.png"
-  },
-  {
-   "id": "specimen_psychedelic",
-   "group": "styles",
-   "title": "psychedelic.ps",
-   "alt": "Turn On The Sun, a psychedelic specimen poster",
-   "blurb": "Sunburst rays, wobble-ring blobs, spirals, kaleidoscope repeats and hue-wheel colour, in the /acid /blacklight /sherbet palettes.",
-   "source": "examples/style_psychedelic.ps",
-   "render": "lib/styles/specimen_psychedelic.png"
-  },
-  {
-   "id": "specimen_scifi",
-   "group": "styles",
-   "title": "scifi.ps",
-   "alt": "Outer Reaches, a sci-fi specimen poster",
-   "blurb": "Starfields, a ringed planet, HUD chrome, hex shields and the synthwave grid floor, in the /void /hologram /synthwave palettes.",
-   "source": "examples/style_scifi.ps",
-   "render": "lib/styles/specimen_scifi.png"
-  },
-  {
-   "id": "specimen_toon",
-   "group": "styles",
-   "title": "toon.ps",
-   "alt": "Splat!, a toon specimen poster",
-   "blurb": "Cel-shaded flats under fat ink, speech bubbles, action bursts and dripping title slabs, in the /saturday /latenight /pastelpop palettes.",
-   "source": "examples/style_toon.ps",
-   "render": "lib/styles/specimen_toon.png"
-  },
-  {
-   "id": "template_card",
-   "group": "templates",
-   "title": "pgcard",
-   "alt": "A greeting card rendered by pgcard",
-   "blurb": "A tinted rounded panel with a centred title, a flowed message and a signoff tucked into the corner.",
-   "source": "examples/template_card.ps",
-   "page": "612x792"
-  },
-  {
-   "id": "template_letter",
-   "group": "templates",
-   "title": "pgletter",
-   "alt": "A letter rendered by pgletter",
-   "blurb": "A plain page: header rule, date, salutation, flowed body and reserved signature space.",
-   "source": "examples/template_letter.ps",
-   "page": "612x792"
-  },
-  {
-   "id": "template_certificate",
-   "group": "templates",
-   "title": "pgcertificate",
-   "alt": "A certificate rendered by pgcertificate",
-   "blurb": "A double-ruled cream certificate with a shrink-to-fit awardee name and a two-column presenter and date line.",
-   "source": "examples/template_certificate.ps",
-   "page": "612x792"
-  },
-  {
-   "id": "template_invitation",
-   "group": "templates",
-   "title": "pginvitation",
-   "alt": "An invitation rendered by pginvitation",
-   "blurb": "A tinted bordered panel with a large event title, a when, where and host block, and RSVP-style body copy.",
-   "source": "examples/template_invitation.ps",
-   "page": "612x792"
-  },
-  {
-   "id": "template_poster",
-   "group": "templates",
-   "title": "pgposter",
-   "alt": "A poster rendered by pgposter",
-   "blurb": "A full-bleed headline sized to the page width, an italic tagline, a large flowed body and a footer line.",
-   "source": "examples/template_poster.ps",
-   "page": "612x792"
-  },
-  {
-   "id": "lettering",
-   "group": "lettering",
-   "title": "lettering.ps",
-   "alt": "Keepin' It Real, a display lettering specimen",
-   "blurb": "Groovy display lettering from outline text: charpath clipped to a multicolour interior (solid, transition, patches, mottled, worn) with a dark contour, seeded and deterministic.",
-   "source": "examples/lettering.ps",
-   "page": "900x900"
-  },
-  {
-   "id": "fillkit",
-   "group": "lettering",
-   "title": "fillkit.ps",
-   "alt": "A specimen of GIMP-style fills: plasma, solid noise, difference clouds and gradient shapes",
-   "blurb": "GIMP's plasma, solid noise, difference clouds, conical, spiral and square gradients and grain as seeded, clip-friendly fills, also usable as lettering treatments.",
-   "source": "examples/fillkit.ps",
-   "page": "900x900"
-  },
-  {
-   "id": "headline",
-   "group": "lettering",
-   "title": "headline.ps",
-   "alt": "Keepin' It Real, a headline composition specimen",
-   "blurb": "Headline composition from measured glyph ink: one dominant word, supporting phrases tucked against individual letters, and clearance checks that fail loudly instead of clipping.",
-   "source": "examples/headline.ps",
-   "page": "900x900"
-  },
-  {
-   "id": "jersey",
-   "group": "lettering",
-   "title": "jersey.ps",
-   "alt": "A jersey specimen with arched team names over player numbers, in light and dark garment colours",
-   "blurb": "An arched team name over a dominant player number, ink-centred, outlined and fitted to a print rectangle, rejecting impossible geometry by name.",
-   "source": "examples/jersey.ps",
-   "page": "900x1200"
-  },
-  {
-   "id": "apparel_shirt",
-   "group": "lettering",
-   "title": "apparel.ps",
-   "alt": "An apparel template proof sheet with front, back and two sleeve print areas",
-   "blurb": "A two-sided apparel graphic template: front, back and optional sleeve artwork from one configuration, each its own print area, exported transparent with a manifest (proof sheet shown).",
-   "source": "examples/apparel_shirt.ps",
-   "page": "1400x760"
-  },
-  {
-   "id": "drykit_specimen",
-   "group": "dry",
-   "title": "drykit.ps",
-   "alt": "A drykit specimen: chalk, charcoal and crayon strokes at three pressures and three tilts on five surfaces",
-   "blurb": "A dry stick across a toothed surface: chalk on slate and green board, charcoal on newsprint and drawing paper, crayon on construction paper, at three pressures and three tilts, with the gaps streaking along the direction of travel.",
-   "source": "examples/drykit_specimen.ps",
-   "page": "840x1000"
-  },
-  {
-   "id": "drychalk_specimen",
-   "group": "dry",
-   "title": "drychalk.ps",
-   "alt": "A drychalk specimen: handwriting in chalk on a dressed green board and a slate",
-   "blurb": "Chalk on a board: strokes that land heavy, tire and lift thin, dust beside them, side-of-chalk underlines, soft coloured chalk, and boards dressed with erased writing and eraser swipes.",
-   "source": "examples/drychalk_specimen.ps",
-   "page": "840x1080"
-  },
-  {
-   "id": "drycrayon_specimen",
-   "group": "dry",
-   "title": "drycrayon.ps",
-   "alt": "A drycrayon specimen: sixteen crayon colours at three pressures, repeated passes, tip wear, layering and scribble fills",
-   "blurb": "Wax crayon on paper: the 16-crayon box at three pressures, coverage building with each pass, a new point against a worn flat, one colour laid over another, and scribble fills that go past the lines.",
-   "source": "examples/drycrayon_specimen.ps",
-   "page": "840x1000"
-  },
-  {
-   "id": "drycrayon_motion_demo",
-   "group": "dry",
-   "title": "drycrayon motions",
-   "alt": "Crayon motions: wobbly lines, scribble fill, unclosed loops, stick and tadpole figures, a sun with rays and grass",
-   "blurb": "A child's ways of moving a crayon, as path builders: shaky overshooting lines, back-and-forth scribble fill, circles that do not close, stick figures, sun rays and grass.",
-   "source": "examples/drycrayon_motion_demo.ps",
-   "page": "840x760"
-  },
-  {
-   "id": "drycharcoal_specimen",
-   "group": "dry",
-   "title": "drycharcoal.ps",
-   "alt": "A drycharcoal specimen: vine, compressed and pencil strokes, value scales, a hatched sphere, a lifted mass and a construction sketch",
-   "blurb": "Charcoal on drykit: vine, compressed and pencil grades, value scales by hatching and by smudging, a hatched sphere, stump smudge, kneaded and hard-eraser lifts, and construction lines under a drawing.",
-   "source": "examples/drycharcoal_specimen.ps",
-   "page": "720x490"
-  },
-  {
-   "id": "strokeglyphs",
-   "group": "dry",
-   "title": "Stroke glyphs",
-   "alt": "A specimen of stroke-skeleton letters, Greek, operators and growing delimiters",
-   "blurb": "Skeleton letters, Greek, operators and growing delimiters for board mathematics, as paths for any pen to follow (lib/strokeglyphs.ps).",
-   "source": "examples/strokeglyphs.ps",
-   "page": "900x1600"
-  },
-  {
-   "id": "mathkit_specimen",
-   "group": "dry",
-   "title": "mathkit.ps",
-   "alt": "A mathkit specimen: well-known formulas written as stroke skeletons, and a derivation in chalk on a green board",
-   "blurb": "TeX-subset mathematics laid out with TeX's box model as stroke skeletons: fractions, roots, sums and integrals, matrices and accents, written with a lecturer's irregularity, and an aligned derivation in chalk.",
-   "source": "examples/mathkit_specimen.ps",
-   "page": "1000x1960"
-  },
-  {
-   "id": "mathkit_structures",
-   "group": "dry",
-   "title": "mathkit structures",
-   "alt": "A mathkit specimen of TeX structures: braces with labels, stacked limits, negation and modular arithmetic, style switches mid-formula, and aligned columns in pen and in chalk on a board",
-   "blurb": "More TeX structures as stroke skeletons: over- and underbraces with labels, stacked limits, negation, style switches mid-formula, and aligned columns, in pen and in chalk.",
-   "source": "examples/mathkit_structures.ps",
-   "page": "1000x1320"
-  },
-  {
-   "id": "mathkit_columns_braces",
-   "group": "dry",
-   "title": "mathkit columns and braces",
-   "alt": "A mathkit specimen: congruences with mod and pod, brace labels beside the brace, aligned columns that drift down the lines like a hand, alignat coefficients, and hand-drawn braces marking spans of formulas on a chalk board",
-   "blurb": "Congruences with \\mod and \\pod, brace labels set beside, align columns that wander down the lines as a hand does, alignat, and mkbrace, a hand-drawn brace between two points for marking a span on a board.",
-   "source": "examples/mathkit_columns_braces.ps",
-   "page": "1000x1180"
-  },
-  {
-   "id": "graph_paper",
-   "group": "charts",
-   "title": "graph.ps",
-   "alt": "A paper figure: a framed function plot with axes and labels",
-   "blurb": "A single framed plotfn figure with axes and labels, the way a paper wants it.",
-   "source": "examples/graph_paper.ps",
-   "page": "612x792"
-  },
-  {
-   "id": "dataviz_paper",
-   "group": "charts",
-   "title": "dataviz.ps",
-   "alt": "A paper figure with a bar chart, a line chart and a pie chart",
-   "blurb": "Bar, line and pie charts on one plain, paper-ready page.",
-   "source": "examples/dataviz_paper.ps",
-   "page": "612x792"
-  },
-  {
-   "id": "font_library",
-   "group": "fonts",
-   "title": "The specimen poster",
-   "alt": "The Type 3 font library specimen poster",
-   "blurb": "/Neon (glow by overdraw), /Marquee (bulbs, glints, burnouts), /Constellation (star charts) and /Lapidary (chiselled stone).",
-   "source": "examples/font_library.ps",
-   "render": "lib/fonts/specimen.png"
-  },
-  {
-   "id": "font_library2",
-   "group": "fonts",
-   "title": "The second folio",
-   "alt": "The Type 3 font library specimen, second folio",
-   "blurb": "/Circuitry (copper traces, pads and vias), /Stitchwork (cross-stitch on the 45 degree grid) and /Confetti (a thrown handful, still falling).",
-   "source": "examples/font_library2.ps",
-   "render": "lib/fonts/specimen2.png"
-  },
-  {
-   "id": "handwriting",
-   "group": "fonts",
-   "title": "/HandScript",
-   "alt": "A handwritten letter set in the HandScript font",
-   "blurb": "Dynamic handwriting: jittered strokes, a wandering baseline and varying pen pressure, so no two letters ever match.",
-   "source": "examples/handwriting.ps",
-   "page": "612x792",
-   "playground": true
-  },
-  {
-   "id": "font_catalog1",
-   "group": "fonts",
-   "title": "The Standard Thirty-Five",
-   "alt": "The standard 35 fonts specimen",
-   "blurb": "Every classic name (Palatino, Bookman, Avant Garde, Zapf Chancery, Symbol, Dingbats) resolved to an open font.",
-   "source": "examples/font_catalog.ps",
-   "render": "fonts/catalog/specimen-1.png"
-  },
-  {
-   "id": "font_catalog2",
-   "group": "fonts",
-   "title": "The Catalog",
-   "alt": "The font catalog specimen",
-   "blurb": "A face for every occasion: 35 families across serif, sans, slab, script, blackletter, western, horror, pixel, sci-fi and more.",
-   "source": "examples/font_catalog.ps",
-   "render": "fonts/catalog/specimen-2.png"
-  },
-  {
-   "id": "sierpinski",
-   "group": "classic",
-   "title": "Sierpinski triangle",
-   "alt": "The Sierpinski triangle",
-   "blurb": "The original watch-it-draw demo: recursive subdivision.",
-   "source": "examples/sierpinski.ps",
-   "page": "500x500",
-   "playground": true
-  },
-  {
-   "id": "koch_snowflake",
-   "group": "classic",
-   "title": "Koch snowflake",
-   "alt": "The Koch snowflake",
-   "blurb": "Recursive edge replacement.",
-   "source": "examples/koch_snowflake.ps",
-   "page": "500x500",
-   "playground": true
-  },
-  {
-   "id": "golden_spiral",
-   "group": "classic",
-   "title": "Golden spiral",
-   "alt": "A golden spiral",
-   "blurb": "Fibonacci arcs and a radial burst.",
-   "source": "examples/golden_spiral.ps",
-   "page": "500x500",
-   "playground": true
-  },
-  {
-   "id": "testcard",
-   "group": "classic",
-   "title": "Test card",
-   "alt": "A test card",
-   "blurb": "Written like a found file, shortcut prolog and all; renders identically in Ghostscript.",
-   "source": "examples/testcard.ps",
-   "page": "612x792",
-   "playground": true
-  },
-  {
-   "id": "specimen",
-   "group": "classic",
-   "title": "Type specimen",
-   "alt": "A type specimen",
-   "blurb": "The base fonts through the full operator set.",
-   "source": "examples/specimen.ps",
-   "page": "612x792",
-   "playground": true
-  },
-  {
-   "id": "postcard",
-   "group": "classic",
-   "title": "Postcard",
-   "alt": "A postcard",
-   "blurb": "Files, filters and sampled images, inline in one page.",
-   "source": "examples/postcard.ps",
-   "page": "612x792"
-  },
-  {
-   "id": "type3_ransom",
-   "group": "type3",
-   "title": "Ransom note",
-   "alt": "A ransom note in mismatched cut-out letters",
-   "blurb": "Type 3 fonts where every glyph is invented fresh at show time.",
-   "source": "examples/type3_ransom.ps",
-   "page": "612x792"
-  }
- ]
+  "_comment": "The gallery manifest: the single list of what the site, the README highlights and gallery/show.sh show. New pieces add an entry here; nobody edits gallery.html by hand. See gallery/README.md and scripts/gallery.py.",
+  "categories": [
+    {
+      "id": "geometry",
+      "title": "Geometry and fractals",
+      "blurb": "Pictures that fall out of a formula: roses, spirals, tilings and fractals."
+    },
+    {
+      "id": "generative",
+      "title": "Generative and L-systems",
+      "blurb": "Rules and random numbers that grow into plants, fabrics and fields."
+    },
+    {
+      "id": "painting",
+      "title": "Painting",
+      "blurb": "Brush strokes with bristle, loaded paint, wet edges and paper underneath."
+    },
+    {
+      "id": "printmaking",
+      "title": "Printmaking and etching",
+      "blurb": "Halftone dots, hatching and relief cuts: pictures made of marks."
+    },
+    {
+      "id": "lettering",
+      "title": "Lettering and type",
+      "blurb": "Text set glyph by glyph, flowed into shapes, or written by hand."
+    },
+    {
+      "id": "dataviz",
+      "title": "Data visualization",
+      "blurb": "Charts and surfaces drawn as clean vector figures."
+    },
+    {
+      "id": "apparel",
+      "title": "Apparel and design",
+      "blurb": "Print artwork for shirts and jerseys."
+    },
+    {
+      "id": "drawing",
+      "title": "Drawing (dry media)",
+      "blurb": "Chalk, crayon and charcoal on slate and toothed paper."
+    },
+    {
+      "id": "transforms",
+      "title": "Programs about programs",
+      "blurb": "PostScript code is data. These pieces read other programs' paths back, bend them and redraw them, or breed new drawings from old ones."
+    }
+  ],
+  "libraries": {
+    "artkit": {
+      "title": "artkit",
+      "guide": "docs/guides/artkit.md"
+    },
+    "paintkit": {
+      "title": "paintkit",
+      "guide": "docs/guides/painting.md"
+    },
+    "dataviz": {
+      "title": "dataviz",
+      "guide": "docs/guides/charts.md"
+    },
+    "handscript": {
+      "title": "handscript",
+      "guide": "docs/guides/handwriting.md"
+    },
+    "drykit": {
+      "title": "drykit",
+      "guide": "docs/guides/dry-media.md"
+    },
+    "drychalk": {
+      "title": "drychalk",
+      "guide": "docs/guides/dry-media.md"
+    },
+    "drycrayon": {
+      "title": "drycrayon",
+      "guide": "docs/guides/dry-media.md"
+    },
+    "drycharcoal": {
+      "title": "drycharcoal",
+      "guide": "docs/guides/dry-media.md"
+    },
+    "mathkit": {
+      "title": "mathkit",
+      "guide": "docs/guides/dry-media.md"
+    },
+    "strokeglyphs": {
+      "title": "strokeglyphs",
+      "guide": "docs/guides/dry-media.md"
+    },
+    "etching": {
+      "title": "etching",
+      "guide": "docs/guides/printmaking.md"
+    },
+    "hatchkit": {
+      "title": "hatchkit",
+      "guide": "docs/guides/printmaking.md"
+    },
+    "halftonekit": {
+      "title": "halftonekit",
+      "guide": "docs/guides/printmaking.md"
+    },
+    "printkit": {
+      "title": "printkit",
+      "guide": "docs/guides/printmaking.md"
+    },
+    "surfacekit": {
+      "title": "surfacekit",
+      "guide": "docs/guides/printmaking.md"
+    },
+    "lettering": {
+      "title": "lettering",
+      "guide": "docs/guides/lettering.md"
+    },
+    "fillkit": {
+      "title": "fillkit",
+      "guide": "docs/guides/lettering.md"
+    },
+    "headline": {
+      "title": "headline",
+      "guide": "docs/guides/lettering.md"
+    },
+    "jersey": {
+      "title": "jersey",
+      "guide": "docs/guides/lettering.md"
+    },
+    "typewriter": {
+      "title": "typewriter",
+      "guide": "docs/guides/fonts.md"
+    },
+    "typewriter_outlines": {
+      "title": "typewriter_outlines",
+      "guide": "docs/guides/fonts.md"
+    },
+    "released": {
+      "title": "released",
+      "guide": "docs/guides/fonts.md"
+    },
+    "functional": {
+      "title": "functional",
+      "guide": "docs/functional-postscript/README.md"
+    },
+    "aspect": {
+      "title": "aspect",
+      "guide": "docs/functional-postscript/README.md"
+    },
+    "warp": {
+      "title": "warp",
+      "guide": "docs/functional-postscript/WARP.md"
+    }
+  },
+  "pieces": [
+    {
+      "id": "golden_bloom",
+      "title": "Golden Bloom",
+      "category": "geometry",
+      "tags": [],
+      "libraries": [],
+      "featured": false,
+      "playground": true,
+      "added": "2026-07-12",
+      "source": "gallery/golden_bloom.ps",
+      "render": "gallery/renders/golden_bloom.png",
+      "page": "700x700",
+      "speed": 150,
+      "alt": "Golden Bloom, a disc of 1,300 glowing dots spiralling out from a small gold centre through orange and red to pink and magenta at the rim, on a dark ground",
+      "blurb": "Phyllotaxis: 1,300 florets at the golden angle, spaced like a sunflower.",
+      "technique": "Each floret sits at the golden angle (about 137.5 degrees) from the last, at a distance that grows with the square root of its number. That one rule packs the disc evenly and produces the interlocking spirals found in sunflowers and pine cones."
+    },
+    {
+      "id": "cathedral_rose",
+      "title": "Cathedral Rose",
+      "category": "geometry",
+      "tags": [],
+      "libraries": [],
+      "featured": true,
+      "playground": true,
+      "added": "2026-07-12",
+      "source": "gallery/cathedral_rose.ps",
+      "render": "gallery/renders/cathedral_rose.png",
+      "page": "700x700",
+      "speed": 60,
+      "alt": "Cathedral Rose, a lace-like rosette woven from straight red and gold chords inside a gold ring on a dark purple ground",
+      "blurb": "A Maurer rose: straight chords walking a six-petal curve in 71 and 97 degree strides.",
+      "technique": "A Maurer rose joins points on the rose curve r = sin 6θ with straight lines, stepping a fixed number of degrees each time. Two walks, one in 71 degree strides and one in 97, are layered; the straight lines alone weave the lace."
+    },
+    {
+      "id": "ember_tree",
+      "title": "Ember Tree",
+      "category": "generative",
+      "tags": [],
+      "libraries": [],
+      "featured": false,
+      "playground": true,
+      "added": "2026-07-12",
+      "source": "gallery/ember_tree.ps",
+      "render": "gallery/renders/ember_tree.png",
+      "page": "620x820",
+      "speed": 400,
+      "alt": "Ember Tree, a tree with a spreading crown of golden leaf clusters in front of a large glowing sun setting on a dusk sky that fades from deep blue to red",
+      "blurb": "Recursive branching from a seeded random generator, a banded dusk sky and layered sun glow.",
+      "technique": "Every branch splits into shorter ones, with the angle and length of each drawn from a small random-number generator the piece carries itself (a linear congruential generator, so the picture is the same every time). The sky is a stack of colour bands and the sun a disc with a layered glow."
+    },
+    {
+      "id": "fern",
+      "title": "Fern, After Barnsley",
+      "category": "geometry",
+      "tags": [],
+      "libraries": [],
+      "featured": false,
+      "playground": true,
+      "added": "2026-07-12",
+      "source": "gallery/fern.ps",
+      "render": "gallery/renders/fern.png",
+      "page": "620x800",
+      "speed": 3000,
+      "alt": "A green fern frond made of tens of thousands of tiny dots, shown on a dark background",
+      "blurb": "The chaos game: 48,000 points over four affine maps, with no outline drawn.",
+      "technique": "Michael Barnsley's fern is built by picking one of four simple transformations at random, over and over, and plotting where the point lands. After 48,000 plots a frond appears, though no line of it was drawn. Change the seed and the same fern grows from different dots."
+    },
+    {
+      "id": "silk_waves",
+      "title": "Silk Waves",
+      "category": "generative",
+      "tags": [],
+      "libraries": [],
+      "featured": false,
+      "playground": true,
+      "added": "2026-07-12",
+      "source": "gallery/silk_waves.ps",
+      "render": "gallery/renders/silk_waves.png",
+      "page": "700x480",
+      "speed": 150,
+      "alt": "Silk Waves, sixty-six thin threads rippling across a dark page, shading from violet at the top to teal at the bottom, with a few white threads",
+      "blurb": "Sixty-six threads displaced by two interfering sine waves.",
+      "technique": "Each thread is one long curve. Two sine waves with different wavelengths push every thread sideways by a different amount along its length, and where the waves reinforce each other the threads gather into silk-like folds."
+    },
+    {
+      "id": "frost_mandala",
+      "title": "Frost Mandala",
+      "category": "geometry",
+      "tags": [],
+      "libraries": [],
+      "featured": false,
+      "playground": true,
+      "added": "2026-07-12",
+      "source": "gallery/frost_mandala.ps",
+      "render": "gallery/renders/frost_mandala.png",
+      "page": "700x700",
+      "speed": 150,
+      "alt": "Frost Mandala, a six-fold pattern of fine overlapping circle outlines in pale blue and teal on a near-black ground, with faint rays",
+      "blurb": "Six-fold circle recursion with an 11 degree twist per generation, over 1,555 circles.",
+      "technique": "One circle spawns six smaller circles around its rim, each of which does the same, and every generation is twisted by 11 degrees. The result is a snowflake-like mandala built from more than fifteen hundred circles."
+    },
+    {
+      "id": "ring_of_type",
+      "title": "Ring of Type",
+      "category": "lettering",
+      "tags": [],
+      "libraries": [],
+      "featured": true,
+      "playground": true,
+      "added": "2026-07-13",
+      "source": "gallery/ring_of_type.ps",
+      "render": "gallery/renders/ring_of_type.png",
+      "page": "700x700",
+      "speed": 200,
+      "alt": "Ring of Type, a sentence repeated around eleven concentric rings that shrink toward a large ampersand at the centre",
+      "blurb": "One sentence set glyph by glyph around eleven shrinking rings.",
+      "technique": "Each letter is placed and rotated individually around a circle, using the width of each letter (`stringwidth`) to space it. The ampersand in the middle is drawn from the outline of the character itself (`charpath`), so it can be stroked and filled like any other shape."
+    },
+    {
+      "id": "hundred_lines",
+      "title": "Hundred Lines",
+      "category": "lettering",
+      "tags": [
+        "handwriting",
+        "chalk"
+      ],
+      "libraries": [],
+      "featured": false,
+      "playground": true,
+      "added": "2026-07-17",
+      "source": "gallery/hundred_lines.ps",
+      "render": "gallery/renders/hundred_lines.png",
+      "page": "560x620",
+      "speed": 250,
+      "alt": "Hundred Lines, a chalkboard covered in the same sentence written by hand nine times, each line a little more ragged",
+      "blurb": "A chalkboard on which the same sentence is handwritten nine times, and no two letters match.",
+      "technique": "The HandScript font draws every letter as a fresh handwritten stroke, so no two copies of the same letter are alike. This piece reuses it wholesale and turns two knobs the font leaves alone: the jitter and the pen width are overridden for each line, so the writing gets sloppier from the first line to the last."
+    },
+    {
+      "id": "hortus",
+      "title": "Hortus Machinalis",
+      "category": "generative",
+      "tags": [],
+      "libraries": [],
+      "featured": true,
+      "playground": true,
+      "added": "2026-07-19",
+      "source": "gallery/hortus.ps",
+      "render": "gallery/renders/hortus.png",
+      "page": "620x800",
+      "speed": 600,
+      "alt": "Hortus Machinalis, a herbarium plate with three branching plants labelled in Latin-style captions on cream paper",
+      "blurb": "A herbarium plate: three L-system plants grown by turtle, with blossoms stamped along each stem.",
+      "technique": "Three plants are grown from short rewriting rules (L-systems) that a turtle follows to draw stems. Dried blossoms are then stamped along each plant's own path by walking it with `pathforall` at even spacing, and the labels are set in Palatino, as a plate deserves."
+    },
+    {
+      "id": "woven_labyrinth",
+      "title": "Woven Labyrinth",
+      "category": "geometry",
+      "tags": [],
+      "libraries": [],
+      "featured": false,
+      "playground": true,
+      "added": "2026-08-01",
+      "source": "gallery/woven_labyrinth.ps",
+      "render": "gallery/renders/woven_labyrinth.png",
+      "page": "640x640",
+      "speed": 400,
+      "alt": "Woven Labyrinth, a square grid of tiles, each split corner to corner into one orange and one navy triangle, under a title and a double frame",
+      "blurb": "Truchet's 1704 two-triangle tile, randomly quarter-turned 256 times, chains into a flowing quilt.",
+      "technique": "Sébastien Truchet's 1704 tile is a square split corner to corner into two contrasting triangles. Each of 256 copies is turned by a random quarter turn, and because the diagonals meet from tile to tile, the single motif chains into a continuous, flowing labyrinth. The program carries its own copy of artkit's `truchet`."
+    },
+    {
+      "id": "infinite_descent",
+      "title": "Infinite Descent",
+      "category": "geometry",
+      "tags": [],
+      "libraries": [],
+      "featured": false,
+      "playground": true,
+      "added": "2026-08-02",
+      "source": "gallery/infinite_descent.ps",
+      "render": "gallery/renders/infinite_descent.png",
+      "page": "640x640",
+      "speed": 500,
+      "alt": "Infinite Descent, a disc tiled with heptagons that shrink toward the rim, coloured in rings from dark navy at the centre through purple to orange-red at the edge",
+      "blurb": "A hyperbolic tessellation: one heptagon reflected across its own edges, four generations deep.",
+      "technique": "A single heptagon is reflected across each of its edges, and the copies across theirs, for four generations. The tiles are drawn on the Poincaré disc, where the hyperbolic plane's infinite tiling shrinks toward the rim; 232 tiles are coloured in rings by generation. It uses artkit's `httile`."
+    },
+    {
+      "id": "recursive_peaks",
+      "title": "Recursive Peaks",
+      "category": "geometry",
+      "tags": [
+        "landscape"
+      ],
+      "libraries": [
+        "artkit"
+      ],
+      "featured": false,
+      "playground": false,
+      "added": "2026-08-03",
+      "source": "gallery/recursive_peaks.ps",
+      "render": "gallery/renders/recursive_peaks.png",
+      "page": "640x640",
+      "speed": 400,
+      "alt": "Recursive Peaks, three mountains made of nested triangles shaded from white tips to grey, under a night sky of cyan and pink stars and three fractal snowflake outlines",
+      "blurb": "A night mountain range built entirely from artkit's fractals: nested-triangle peaks, a carpet-pattern starfield and snowflake curves.",
+      "technique": "The peaks are triangles subdivided with `gasket` and shaded by altitude, the sparse starfield comes from `carpet`, and the snowflakes overhead are `edgepoly` Koch and quadratic Koch curves. Everything is a fractal from artkit's fractals section."
+    },
+    {
+      "id": "ripple_range",
+      "title": "Ripple Range",
+      "category": "dataviz",
+      "tags": [
+        "geometry"
+      ],
+      "libraries": [],
+      "featured": true,
+      "playground": true,
+      "issue": 13,
+      "added": "2026-08-03",
+      "source": "gallery/ripple_range.ps",
+      "render": "gallery/renders/ripple_range.png",
+      "page": "680x560",
+      "speed": 500,
+      "alt": "Ripple Range, a three-dimensional surface drawn as stacked ridges that shade from orange at the back to blue at the front, with a pale dip where the ripples meet",
+      "blurb": "Two decaying ripples summed into a height field and drawn as a 3D surface.",
+      "technique": "Two ripple sources, each fading with distance, are added into a height field. The surface is swept row by row under `graph.ps`'s `project3` camera, each row a filled ridge that hides the ones behind it, painted back to front (the painter's algorithm)."
+    },
+    {
+      "id": "field_notes",
+      "title": "Field Notes",
+      "category": "dataviz",
+      "tags": [
+        "lettering",
+        "handwriting"
+      ],
+      "libraries": [
+        "dataviz",
+        "handscript"
+      ],
+      "featured": false,
+      "playground": false,
+      "issue": 14,
+      "added": "2026-08-07",
+      "source": "gallery/field_notes.ps",
+      "render": "gallery/renders/field_notes.png",
+      "page": "700x600",
+      "speed": 400,
+      "alt": "Field Notes, a naturalist's journal page with a bar chart and line chart sharing one axis, and a donut chart with a hand-lettered legend",
+      "blurb": "A marsh census set as a field journal: bar and line charts on one axis, a donut chart, handwritten labels.",
+      "technique": "`dataviz.ps`'s `barchart` and `linechart` share one category axis, plotting weekly sightings against a temperature trend. A species-mix donut chart has a hand-drawn legend, and all of the lettering is in the HandScript font."
+    },
+    {
+      "id": "compositors_proof",
+      "title": "The Compositor's Proof",
+      "category": "lettering",
+      "tags": [
+        "layout"
+      ],
+      "libraries": [
+        "artkit"
+      ],
+      "featured": false,
+      "playground": false,
+      "issue": 16,
+      "added": "2026-08-07",
+      "source": "gallery/compositors_proof.ps",
+      "render": "gallery/renders/compositors_proof.png",
+      "page": "620x760",
+      "speed": 400,
+      "alt": "The Compositor's Proof, a printer's proof sheet with a motto set in a circle, a justified paragraph and a two-column colophon",
+      "blurb": "A printer's proof sheet showing artkit's paragraph flow: a round medallion, a justified block, two columns.",
+      "technique": "A motto is set inside a round medallion with `tfflow` and a hand-written circle boundary procedure. A body paragraph is justified with `tfblock`, and a two-column colophon set with `tfcols` genuinely spills from the first column into the second."
+    },
+    {
+      "id": "lodestone",
+      "title": "Lodestone",
+      "category": "generative",
+      "tags": [],
+      "libraries": [
+        "artkit"
+      ],
+      "featured": false,
+      "playground": false,
+      "issue": 19,
+      "added": "2026-08-14",
+      "source": "gallery/lodestone.ps",
+      "render": "gallery/renders/lodestone.png",
+      "page": "640x640",
+      "speed": 1200,
+      "alt": "Lodestone, hundreds of short dark strokes (iron filings) curling in loops around a dark rock on a pale tan ground, like the field lines of a magnet",
+      "blurb": "1,400 iron filings tracing a flow field around a rock, like the field lines of a magnet.",
+      "technique": "Each filing is traced through a flow field with `advect`. The field comes from `curl2` applied to a hand-composed potential, coherent `noise2` texture plus a radial term, whose perpendicular gradient curls a purely radial field into the concentric loops real filings make around a magnet."
+    },
+    {
+      "id": "plum_branch",
+      "title": "Plum Branch in Ink",
+      "category": "painting",
+      "tags": [],
+      "libraries": [
+        "artkit",
+        "paintkit"
+      ],
+      "featured": false,
+      "playground": false,
+      "issue": 40,
+      "added": "2026-08-22",
+      "source": "gallery/plum_branch.ps",
+      "render": "gallery/renders/plum_branch.png",
+      "page": "700x900",
+      "speed": 300,
+      "alt": "Plum Branch in Ink, a sumi-e ink painting of a plum branch with blossoms, grass and a soft wash behind",
+      "blurb": "A sumi-e plum branch in which width is everything: each stroke narrows to a brush-lifted point.",
+      "technique": "Every stroke in the picture (trunk, forking branches, grass at the foot, even the background wash) is one centre line walked by artkit's `walkpath` and filled by paintkit's `pkribbon`. A pressure curve narrows each branch to a point, the grass blades taper independently at each end, and jitter gives the loaded-ink edge."
+    },
+    {
+      "id": "flying_white_reeds",
+      "title": "Flying White: Reeds at Dusk",
+      "category": "painting",
+      "tags": [
+        "landscape"
+      ],
+      "libraries": [
+        "artkit",
+        "paintkit"
+      ],
+      "featured": false,
+      "playground": false,
+      "issue": 80,
+      "added": "2026-08-22",
+      "source": "gallery/flying_white_reeds.ps",
+      "render": "gallery/renders/flying_white_reeds.png",
+      "page": "700x460",
+      "speed": 400,
+      "alt": "Flying White, a dusk wetland with reeds in dry-brush strokes, a broken reflection in the water and thin mist in the sky",
+      "blurb": "A wetland at dusk in dry brush: reeds that run dry toward their tips, a broken reflection, thin mist.",
+      "technique": "Built around paintkit's `pkdry` dry-bristle brush. Each reed stalk is a loaded base and a drier, more broken tip sharing an endpoint; the water carries a broken reflection and the sky a thin dry-brush mist. The same primitive is used at three scales, over a banded dusk gradient from `mix3`."
+    },
+    {
+      "id": "fugitive_pigments",
+      "title": "Fugitive Pigments",
+      "category": "painting",
+      "tags": [
+        "lettering"
+      ],
+      "libraries": [
+        "artkit",
+        "paintkit"
+      ],
+      "featured": false,
+      "playground": false,
+      "issue": 84,
+      "added": "2026-08-24",
+      "source": "gallery/fugitive_pigments.ps",
+      "render": "gallery/renders/fugitive_pigments.png",
+      "page": "620x1000",
+      "speed": 600,
+      "alt": "Fugitive Pigments, a poetry broadside with a spray-stencilled title, a starry night sky above reeds and a moon with a halo",
+      "blurb": "A poetry broadside: an original poem under a spray-stencilled title, illustrated entirely with paintkit brushes.",
+      "technique": "The poem is about impermanence, typeset in Palatino under a title spray-stencilled through its own `charpath` outline. The illustration is all paintkit brushes: the Milky Way is `pkspray` cloud and star dust along two shared curves, the moon wears a spray halo, the reeds are `pknib` tapers with spray-dab seed heads, and the field is `pkdry` broken texture."
+    },
+    {
+      "id": "mochi_denim_blue",
+      "title": "Mochi in Denim Blue",
+      "category": "painting",
+      "tags": [
+        "portrait",
+        "reference study"
+      ],
+      "libraries": [
+        "artkit",
+        "paintkit"
+      ],
+      "featured": false,
+      "playground": false,
+      "issue": 100,
+      "added": "2026-08-27",
+      "source": "gallery/mochi_denim_blue.ps",
+      "render": "gallery/renders/mochi_denim_blue.png",
+      "page": "720x900",
+      "speed": 900,
+      "alt": "Mochi in Denim Blue, an oil-painting style portrait of a golden Pomeranian with upright ears against a denim-blue canvas",
+      "blurb": "A portrait study of a Pomeranian in broad oil strokes against a scraped denim-blue canvas.",
+      "technique": "A close-cropped study made from a photograph. Broad overlapping `pkoil` masses model the orange-sable dog, `pkdry` breaks the silhouette into a furry edge, and selectively crisp eyes and nose hold the likeness. The result is an interpretation, not a traced copy.",
+      "reference": {
+        "file": "gallery/references/mochi.jpg",
+        "alt": "Original close-up photograph of Mochi, a golden Pomeranian",
+        "caption": "The face, markings, expression and denim setting that the painting keeps.",
+        "render_caption": "pkoil block-in and fur planes, pkdry contour breakup, deterministic seed 27.",
+        "text": "This piece begins with a real photograph rather than a geometric system. The interpretation keeps Mochi's upright ears, orange-sable and cream markings, enormous reflected eyes, compact dark nose and denim-blue setting. It trades individual hairs and clothing folds for directional loaded-brush masses and cross-woven canvas marks; the aim is a recognizable oil study, not a traced copy or a claim of physical pigment simulation."
+      }
+    },
+    {
+      "id": "first_rain",
+      "title": "First Rain",
+      "category": "painting",
+      "tags": [
+        "landscape"
+      ],
+      "libraries": [
+        "artkit",
+        "paintkit"
+      ],
+      "featured": false,
+      "playground": false,
+      "issue": 47,
+      "added": "2026-08-28",
+      "source": "gallery/first_rain.ps",
+      "render": "gallery/renders/first_rain.png",
+      "page": "760x560",
+      "speed": 500,
+      "alt": "First Rain, a river valley in layered watercolour washes with five receding ridges and a veil of rain",
+      "blurb": "A river valley in layered watercolour, palest and wettest first, each ridge darker and drier.",
+      "technique": "paintkit's `pkwash` over a `pkpaper` ground, painted the way a watercolour is: the palest, wettest washes first, then five receding ridges, each darker, drier and tighter than the one behind it. Every colour is composited by the renderer over the paint already down rather than guessed in advance. The rain veil is a wash with its edge pooling turned off, and the reeds are `pkribbon` drawn under the same wash."
+    },
+    {
+      "id": "firefly_census",
+      "title": "Firefly Census",
+      "category": "generative",
+      "tags": [
+        "landscape"
+      ],
+      "libraries": [
+        "artkit"
+      ],
+      "featured": false,
+      "playground": false,
+      "issue": 48,
+      "added": "2026-08-30",
+      "source": "gallery/firefly_census.ps",
+      "render": "gallery/renders/firefly_census.png",
+      "page": "640x800",
+      "speed": 700,
+      "alt": "Firefly Census, a summer meadow after dark with a starry sky, a stippled hill, tall grass and glowing fireflies",
+      "blurb": "A meadow after dark in which every mark is placed by artkit's scatter, and none by hand.",
+      "technique": "The star field is a weight procedure (a Milky Way band times coherent `noise2`), the hill's stipple is scattered into the silhouette's own outline captured with `scpath`, the meadow is minimum-spaced grass anchors whose height and tone come from their own height on the page, and the fireflies are two passes over one seed: halos first, then cores, so every core lands inside its own halo."
+    },
+    {
+      "id": "basin_and_range",
+      "title": "Basin and Range",
+      "category": "generative",
+      "tags": [
+        "landscape"
+      ],
+      "libraries": [],
+      "featured": false,
+      "playground": true,
+      "issue": 755,
+      "added": "2026-10-25",
+      "source": "gallery/basin_and_range.ps",
+      "render": "gallery/renders/basin_and_range.png",
+      "page": "720x480",
+      "speed": 200,
+      "alt": "Basin and Range, a shaded-relief map of an invented land: blue seas and lakes, pale shores, green lowlands with faint contour lines, and brown and white mountain ranges lit from the north-west",
+      "blurb": "A shaded-relief map of a country that does not exist, every pixel computed from pscat's native noise.",
+      "technique": "One `colorimage` data procedure computes each row of the map. Heights are `fbm2` for the broad shape of land and sea, plus `ridged2` for the mountain crests, switched on by a slow second `fbm2` so the ranges form belts. Each height is looked up in a colour ramp (water, shore, lowland, upland, rock, snow), lit from the north-west by the slope to the neighbouring samples, and crossed by anti-aliased contour lines. `noiseseed` fixes the table, so the same seed draws the same map. The program reads `/BandBBox` when `pscat --bands N` defines it and computes only the rows its band shows: about 1.6 seconds plain, 0.6 with `--bands 4`, the same pixels either way."
+    },
+    {
+      "id": "out_of_register",
+      "title": "Out of Register",
+      "category": "printmaking",
+      "tags": [],
+      "libraries": [
+        "halftonekit"
+      ],
+      "featured": false,
+      "playground": false,
+      "issue": 126,
+      "added": "2026-09-03",
+      "source": "gallery/out_of_register.ps",
+      "render": "gallery/renders/out_of_register.png",
+      "page": "720x900",
+      "speed": 400,
+      "alt": "Out of Register, a three-colour risograph-style sunset made of halftone dots in teal and orange with dark line ridges, printed slightly misaligned",
+      "blurb": "A three-plate risograph sunset, misregistered on purpose: every tone is a halftone dot.",
+      "technique": "Every tonal mark is a halftonekit cell, and none is placed by hand. A teal dot plate (sky and water, at 15 degrees), an orange dot plate (the sun's halo and a horizon band, at 75 degrees) and a dark line plate (two ridges shaded by height, at 45 degrees) are each shifted a few units, so the dot lattice moves while the image stays. The flat sun core, the registration crosshairs, the colour bars and the letterpress title are all there too."
+    },
+    {
+      "id": "nightfall_triptych",
+      "title": "Nightfall, Three Cuts",
+      "category": "printmaking",
+      "tags": [
+        "landscape"
+      ],
+      "libraries": [
+        "artkit",
+        "hatchkit",
+        "printkit",
+        "surfacekit"
+      ],
+      "featured": true,
+      "playground": false,
+      "issue": 52,
+      "added": "2026-09-04",
+      "source": "gallery/nightfall_triptych.ps",
+      "render": "gallery/renders/nightfall_triptych.png",
+      "page": "640x480",
+      "speed": 400,
+      "alt": "Nightfall, Three Cuts, a moonlit ridge over water in three print styles: engraved sky and water, woodcut mountains and linocut reeds",
+      "blurb": "A moonlit ridge over water in three print styles at once: engraving, woodcut and linocut.",
+      "technique": "printkit's three presets are used together in one scene rather than as three separate samples. Sky and water are the engraving preset's fine crosshatch at two angles, the mountains are the woodcut preset's grain-following breakup, and the foreground reeds are the linocut preset's bolder, simpler marks. Each silhouette is filled solid ink first, then its own preset runs a second time over the same path in a lighter colour, giving the carved-through-to-the-paper look of gouged wood or lino."
+    },
+    {
+      "id": "keepin_it_real",
+      "title": "Keepin' it Real",
+      "category": "apparel",
+      "tags": [
+        "lettering"
+      ],
+      "libraries": [
+        "artkit",
+        "fillkit",
+        "headline",
+        "lettering"
+      ],
+      "featured": false,
+      "playground": false,
+      "issue": 147,
+      "added": "2026-09-29",
+      "source": "gallery/keepin_it_real.ps",
+      "render": "gallery/renders/keepin_it_real.png",
+      "page": "720x900",
+      "speed": 500,
+      "alt": "Keepin' it Real, a shirt front lettered twice in fat groovy faces with green, blue and red plasma fills, above a typewriter punchline for the back",
+      "blurb": "A recreated shirt front in two groovy faces, filled with GIMP-style plasma, over a typewriter punchline.",
+      "technique": "The shirt front is set in both groovy faces, Bagel Fat One (the chosen one) and Chewy, with the same composition, seed and palette, and filled with fillkit's plasma through lettering's `/plasma` treatment. The words `I'm` and `Keepin' it` tuck against the `ea` of `Real` through headline's `hllayout`, and the back's typewriter punchline sits below."
+    },
+    {
+      "id": "varsity_backs",
+      "title": "Varsity Backs",
+      "category": "apparel",
+      "tags": [
+        "lettering"
+      ],
+      "libraries": [
+        "artkit",
+        "jersey"
+      ],
+      "featured": false,
+      "playground": false,
+      "issue": 167,
+      "added": "2026-09-30",
+      "source": "gallery/varsity_backs.ps",
+      "render": "gallery/renders/varsity_backs.png",
+      "page": "1050x660",
+      "speed": 600,
+      "alt": "Varsity Backs, two team jerseys seen from behind, cardinal-and-gold and navy-and-white, with arched names over large numbers",
+      "blurb": "Two team jerseys seen from behind, with arched names over large layered-outline numbers.",
+      "technique": "Each jersey carries `lib/jersey.ps`'s arched name over a large number with classic layered lettering: a white or gold fill, a thin contrasting inner outline and a dark outer one, with tracked capitals on the arch. The garment itself (mesh fabric, rib collar, yoke, side panels, sleeve and hem stripes, size tag, hanger) is drawn in the piece rather than in the library; the library only sizes the lettering for a print rectangle."
+    },
+    {
+      "id": "alpine_lake",
+      "title": "Alpine Lake",
+      "category": "painting",
+      "tags": [
+        "landscape"
+      ],
+      "libraries": [
+        "artkit",
+        "paintkit"
+      ],
+      "featured": true,
+      "playground": false,
+      "issue": 118,
+      "added": "2026-10-08",
+      "source": "gallery/alpine_lake.ps",
+      "render": "gallery/renders/alpine_lake.png",
+      "page": "760x560",
+      "speed": 600,
+      "alt": "Alpine Lake, snow-capped peaks reflected in a still lake under a criss-cross brushed sky, with evergreens in the foreground",
+      "blurb": "A snow-capped range over a still lake, painted wet-on-wet from paintkit's brushes alone.",
+      "technique": "Painted back to front from paintkit's brushes, with no landscape helper. The sky is laid out with `pkcrisscross` and painted with `pkbroad`; spray clouds and mist are softened into the paint beneath by `pkwet`, and the far range wears banks of haze lifted both ways by a directional `pkwet`; snow comes from `pktrowel` and the shadow planes from `pktrowelplane`, both clipped to each ridge; a far forest is tapped in with `pkdab`; evergreens are `pkfan`; trunks, grass and water lines are `pkliner`. The reflection replays the same self-seeded marks upside down, one single-colour part at a time, each pulled straight down with a directional `pkwet` and then grazed across."
+    },
+    {
+      "id": "chalkboard_lecture",
+      "title": "Lecture 14",
+      "category": "drawing",
+      "tags": [
+        "chalk",
+        "math"
+      ],
+      "libraries": [
+        "artkit",
+        "drychalk",
+        "drykit",
+        "handscript",
+        "mathkit",
+        "paintkit",
+        "strokeglyphs"
+      ],
+      "featured": false,
+      "playground": false,
+      "issue": 238,
+      "added": "2026-10-14",
+      "source": "gallery/chalkboard_lecture.ps",
+      "render": "gallery/renders/chalkboard_lecture.png",
+      "page": "1440x850",
+      "speed": 600,
+      "alt": "Lecture 14, a slate chalkboard after a lecture deriving Euler's formula from the Taylor series, with braces naming the terms, a boxed result, a unit-circle sketch and erased ghost writing",
+      "blurb": "A chalkboard as the professor left it: Euler's formula derived step by step from the Taylor series, braced, starred and boxed in yellow.",
+      "technique": "Three sliding slate panels carry one derivation. The Taylor series are recalled with braces under the first terms naming the n each comes from, and the powers of i set in two columns with a rule mod 4. Then x = iθ is substituted, the = where the signs flip starred and answered in pink, and the series regrouped, a blue brace under each bracket naming it cos θ or sin θ, before the result is boxed twice in yellow. A freehand unit circle, the quarter turns tabled in wandering columns, and Euler's identity circled finish it. The formulas are `lib/mathkit.ps` layouts (`\\underbrace`, `\\overset`, `\\pmod`, aligned columns with `/ColumnWander`, and `mkbrace`) inked with `lib/drychalk.ps`'s `dcchalk`, on `dcboard` panels that still carry the last lecture (the Gaussian integral and a bell curve) as ghost writing under eraser swipes. The hand leans further and loosens panel by panel."
+    },
+    {
+      "id": "crayon_drawing",
+      "title": "My Family and Our House",
+      "category": "drawing",
+      "tags": [
+        "crayon"
+      ],
+      "libraries": [
+        "artkit",
+        "drycrayon",
+        "drykit",
+        "handscript",
+        "paintkit",
+        "strokeglyphs"
+      ],
+      "featured": false,
+      "playground": false,
+      "issue": 240,
+      "added": "2026-10-14",
+      "source": "gallery/crayon_drawing.ps",
+      "render": "gallery/renders/crayon_drawing.png",
+      "page": "792x612",
+      "speed": 400,
+      "alt": "My Family and Our House, a young child's crayon drawing: a red house, four stick figures, a smiling sun and blue sky band, and the name Josie",
+      "blurb": "A six-year-old's crayon drawing on printer paper: a house, a family of stick figures and an oversized sun.",
+      "technique": "Built the way a child builds one, from `lib/drycrayon.ps` on drykit's toothed surface. The sky is a band of blue scribble across the top and the grass a band along the bottom, both laid in side-by-side patches that run past their edges and leave white seams. A sun far too big, a red house with a brown roof, a path, an apple tree, flowers, birds, a smoking chimney and four stick figures about as tall as the house follow, and the name is set in strokeglyphs capitals with a backward S, each letter its own size and lean. Outlines go on last. The paths come from `dywobble`, `dyscribble`, `dyloop`, `dyrays`, `dygrass` and `dyfigure`, inked by `dycrayon` in the colours of a 16-crayon box."
+    },
+    {
+      "id": "lincoln_charcoal",
+      "title": "Study after Berger, 1864",
+      "category": "drawing",
+      "tags": [
+        "portrait",
+        "reference study"
+      ],
+      "libraries": [
+        "artkit",
+        "drycharcoal",
+        "drykit",
+        "etching",
+        "hatchkit",
+        "paintkit"
+      ],
+      "featured": false,
+      "playground": false,
+      "issue": 242,
+      "added": "2026-10-14",
+      "source": "gallery/lincoln_charcoal.ps",
+      "render": "gallery/renders/lincoln_charcoal.png",
+      "page": "480x600",
+      "speed": 3000,
+      "alt": "Study after Berger, 1864, a charcoal portrait of Abraham Lincoln drawn as an art student would, with the coat and background left unfinished",
+      "blurb": "An art student's charcoal portrait of Lincoln, drawn to the tones of an 1864 photograph.",
+      "technique": "`lib/etching.ps`'s `et-tonemap` reads the photograph into a 240 by 300 grid of darkness, and drycharcoal draws to it in a student's order on drykit's drawing paper: faint `dhsketch` construction lines (head oval, centre line, brow, eye, nose and mouth lines, shoulders), `dhsmudge` stump tone inside the dark masses, `dhhatch` to the photo's values (fine and short in the face, finer still at the features, looser vine strokes in the coat), compressed-charcoal and pencil accents at the brows, eyes, nose and mouth, and hard-eraser `dhlift` streaks in the hair and on the lapel. The coat and the ground fade out raggedly, as in a real study.",
+      "reference": {
+        "file": "gallery/references/lincoln_berger_1864.jpg",
+        "alt": "Anthony Berger's 1864 photograph of Abraham Lincoln, head and shoulders",
+        "caption": "Anthony Berger, 9 February 1864 (Library of Congress, public domain).",
+        "render_caption": "et-tonemap reads the photo; drycharcoal hatches, smudges and lifts to it.",
+        "text": "This piece starts from a photograph, but reads it as data: every hatch, smudge and lift is drawn to the grid of darkness taken from the 1864 portrait, the way a student works from a photo pinned beside the easel. The reference is a 480 by 600 greyscale crop of the head and shoulders from Anthony Berger's photograph of Abraham Lincoln, taken at Mathew Brady's Washington gallery on 9 February 1864 (Ostendorf O-91). Source: the Library of Congress print, via Wikimedia Commons, [File:Abraham Lincoln O-91 by Berger, 1864.png](https://commons.wikimedia.org/wiki/File:Abraham_Lincoln_O-91_by_Berger,_1864.png). It is in the public domain (a US work published before 1929, and marked public domain by Commons and the Library of Congress)."
+      }
+    },
+    {
+      "id": "evening_stream",
+      "title": "Evening Stream",
+      "category": "painting",
+      "tags": [
+        "landscape"
+      ],
+      "libraries": [
+        "artkit",
+        "paintkit"
+      ],
+      "featured": false,
+      "playground": false,
+      "issue": 187,
+      "added": "2026-10-14",
+      "source": "gallery/evening_stream.ps",
+      "render": "gallery/renders/evening_stream.png",
+      "page": "760x560",
+      "speed": 600,
+      "alt": "Evening Stream, an autumn evening with a glowing sky, a stream tumbling over a small fall between dark banks, autumn trees and a cabin with a lit window",
+      "blurb": "An autumn evening: a stream comes out of the sunset glow, over a little fall, past a cabin with its lamp lit.",
+      "technique": "Painted on one shared canvas (`pkcanvas`) with the newer paintkit tools and no landscape helper. A criss-cross sky comes from a broad brush loaded with two neighbouring sky colours; clouds are scumbled in tiny circles (`pkscumblein`) and lit along their lumpy undersides by the same brush's `/Light`, as from the glow below; a cloud's body is worked wet into the sky with `pkwet /PerFill`, which asks the sky's own colour at each stroke's place, so the body's top edge settles into the darker sky above it; a backlit wood is tapped in with `pktap` and a loaded `pkdab`, its reflection pulled down whole by one directional `pkwet`. Autumn trees take warm highlights and cool shadows, evergreens a fan loaded dark and lit with `/Light`, the rocks and cabin come from a palette knife, a `pkpull` fall and grass finish the bank, and `pkzigzag` light on the water is caught on the canvas weave. The stream's banks, its head, the far shore and the near banks' rims are brushed with `pkbrushedge`, so no big mass keeps a ruled vector edge: the far shore and the banks carry the meadow's own light to the edge (a procedural `/Mass`, lit under the glow and plain toward the viewer), and a near bank cuts the stream back in exactly where the stream runs behind it (a region list for `/Under`)."
+    },
+    {
+      "id": "released_memo",
+      "title": "Released in Part",
+      "category": "lettering",
+      "tags": [
+        "typewriter",
+        "document"
+      ],
+      "libraries": [
+        "artkit",
+        "handscript",
+        "released",
+        "surfacekit",
+        "typewriter",
+        "typewriter_outlines"
+      ],
+      "featured": false,
+      "playground": false,
+      "issue": 215,
+      "added": "2026-10-14",
+      "source": "gallery/released_memo.ps",
+      "render": "gallery/renders/released_memo.png",
+      "page": "612x792",
+      "speed": 1200,
+      "alt": "Released in Part, a typed 1962 office memorandum on a twice-photocopied page: an office-use-only marking at the head and foot ruled through by a reviewer's pen, a memo header, six numbered paragraphs with a strikeover, an x-out and underlined words, two names covered by marker bars with an exemption code beside each, a received date stamp, a records-review box stamp with handwritten initials and date, a released-in-part stamp, a document number, a paper clip, punch holes, and handwritten initials and a note",
+      "blurb": "A typed 1962 memo about two lost cans of aerial film, its marking ruled through, its names blacked out, stamped and photocopied twice for release decades later.",
+      "technique": "Typed with `tw-type` on the `/Typewriter` font: an elite manual (`/Pitch 12`) at an even hand (`/Wear 1.0 /MachineWear 0.4 /StrikeWear 0.5 /Ribbon 0.75`, as *The Man from 2026* settled), so every strike is its own (the weave shows through the ink, edges feather, the `q` key's counter is clogged, a few letters land high or light) and no word fades. The memo header, the tab stops, a strikeover (`<o>was|were</o>`), an x-out, underscores and the redactions (`<r>..</r>`, drawn by `rel-redact` as marker bars) are markup in one text string; then `tw-set` types the office-use-only marking at the head and foot on the same frame, and a reviewer's ruled pen lines strike it out. `rel-page` wraps it all: aged and folded paper, two punch holes, a gem clip, the scanner's tilt and lamp, then two photocopy generations, which turn the paper to a grey haze with grain, add specks and the lid's shadow, give every mark a soft fringe, and erode the type's thin horizontals a little (`/Copies 0.35` keeps its counters open). The stamps (received, records review, released in part, the exemption codes and the document number) and the handwritten initials, date and note (`lib/handscript.ps`) are marks on the page, so the copier copies them. The office, people, project, review board and exemption codes are invented."
+    },
+    {
+      "id": "time_traveler_memo",
+      "title": "The Man from 2026",
+      "category": "lettering",
+      "tags": [
+        "typewriter",
+        "document"
+      ],
+      "libraries": [
+        "artkit",
+        "handscript",
+        "released",
+        "surfacekit",
+        "typewriter",
+        "typewriter_outlines"
+      ],
+      "featured": false,
+      "playground": false,
+      "issue": 590,
+      "added": "2026-10-15",
+      "source": "gallery/time_traveler_memo.ps",
+      "render": "gallery/renders/time_traveler_memo.png",
+      "page": "612x1008",
+      "speed": 1200,
+      "alt": "The Man from 2026, a typed 1962 TOP SECRET memorandum for the record on aged legal paper: red typed classification lines at the head and foot, a control number and copy line, a registry stamp, a paper clip and punch holes, numbered paragraphs with x-outs and a strikeover, a signature block and distribution list, a regrading box and handwritten initials and a margin note",
+      "blurb": "A TOP SECRET memorandum of 1962 that was never released: an interviewing officer's flat account of a man who says he came from 2026 and built his time machine by talking to another machine.",
+      "technique": "Typed with `tw-type` on the `/Typewriter` font, an elite manual struck at an even hand (`/StrikeWear 0.5`, so the darkness varies without whole letters fading out; every strike is still its own: the weave in the ink, feathered edges, a few light or high letters, the `e` clogged on this machine). The memo-for-the-record header, tab stops, two x-outs, a strikeover (`<o>offcie|office</o>`) and an underscore are markup in one text string. The same machine then types the control lines in black and, with its ribbon lifted to the red half (`tw-set` with a red `/Ink`, and a `/Bleed` from above that puts the black half into the tops of a few letters), the classification at the head and foot of the sheet. `rel-page` with `/Generation 0` makes it the ribbon original, never copied: aged legal paper, two punch holes, a gem clip, the scanner's tilt and lamp. The registry stamp, a regrading box, the routing initials and the margin note (`lib/handscript.ps`) are marks over the page. The office, people and places are invented; the only real names are in the man's own testimony."
+    },
+    {
+      "tags": [],
+      "featured": false,
+      "playground": false,
+      "added": "2026-10-31",
+      "id": "four_readings",
+      "title": "One File, Four Readings",
+      "category": "transforms",
+      "libraries": [
+        "aspect",
+        "functional",
+        "warp"
+      ],
+      "source": "gallery/four_readings.ps",
+      "render": "gallery/renders/four_readings.png",
+      "page": "900x1060",
+      "speed": 600,
+      "alt": "Four copies of the Woven Labyrinth quilt of orange and navy triangles on a dark page: one flat, one bulging through a lens, one twisted into a whirlpool, one lying in perspective on a table",
+      "blurb": "Another gallery piece run four times, never edited, through a lens, a whirlpool and a perspective.",
+      "technique": "Before the file is read, its fill, stroke and show operators are replaced by versions that read the current path back as points, move every point, and draw the result. Because the replacements are in place before the program defines its own procedures, even procedures it binds draw through them. PostScript's own transforms only scale, rotate and shear, so straight edges stay straight; reading the path as data is what lets them bend."
+    },
+    {
+      "tags": [],
+      "featured": false,
+      "playground": false,
+      "added": "2026-10-31",
+      "id": "ring_unrolled",
+      "title": "Ring of Type, Unrolled",
+      "category": "transforms",
+      "libraries": [
+        "aspect",
+        "functional",
+        "warp"
+      ],
+      "source": "gallery/ring_unrolled.ps",
+      "render": "gallery/renders/ring_unrolled.png",
+      "page": "1000x1040",
+      "speed": 600,
+      "alt": "Above, the Ring of Type piece: a sentence set around eleven shrinking rings. Below, the same rings straightened into eleven lines of type, the inner lines stretched wide and the central ampersand pulled into a ribbon along the bottom, with degree and radius scales",
+      "blurb": "Ring of Type, untouched, with every glyph read back through an inverse polar map.",
+      "technique": "Each glyph the original program shows is turned into its outline and every point is moved: the angle clockwise from twelve o'clock becomes the horizontal position and the distance from the centre becomes the height. The rings straighten into lines. The inner lines stretch because a small letter on a small ring spans more degrees. The strip is a cylinder cut at twelve o'clock, so it is drawn three times a full turn apart and clipped, and letters that cross the cut wrap round to the other end."
+    },
+    {
+      "tags": [],
+      "featured": false,
+      "playground": false,
+      "added": "2026-10-31",
+      "id": "blueprint_rose",
+      "title": "Blueprint of a Rose",
+      "category": "transforms",
+      "libraries": [
+        "aspect",
+        "functional",
+        "warp"
+      ],
+      "source": "gallery/blueprint_rose.ps",
+      "render": "gallery/renders/blueprint_rose.png",
+      "page": "1000x760",
+      "speed": 600,
+      "alt": "The Cathedral Rose string-art pattern traced in thin white lines on a blue engineering blueprint with a dashed grid and a title block, the sheet lying in perspective on a brown drafting table",
+      "blurb": "Cathedral Rose, unmodified, redrawn as an engineer's blueprint lying on a drafting table.",
+      "technique": "The original file runs inside a scope where its colour operators do nothing, its line widths are pinned to a hairline, every fill is traced as an outline and every letter is drawn as its outline. Every path, the grid and the title block included, then goes through a perspective map that tips the sheet onto the table. A perspective map keeps straight lines straight, so here the edges need no extra points."
+    }
+  ],
+  "groups": [
+    {
+      "id": "styles",
+      "title": "Style packs",
+      "guide": "docs/guides/style-packs-and-templates.md",
+      "blurb": "Four motif libraries in lib/styles/, layered on the generative-art toolkit artkit. Each pack adds three palettes and a drawer of motifs. These specimen posters are examples/style_*.ps, 620 by 800 and deterministic."
+    },
+    {
+      "id": "templates",
+      "title": "Page templates",
+      "guide": "docs/guides/style-packs-and-templates.md",
+      "blurb": "lib/pagekit.ps builds whole pages from a content dictionary: a title, a body, a signoff. A sparse or even empty dictionary still renders a complete page, and long copy shrinks or flows to fit instead of overrunning. Each specimen is examples/template_*.ps at 612 by 792."
+    },
+    {
+      "id": "lettering",
+      "title": "Lettering and apparel",
+      "guide": "docs/guides/lettering.md",
+      "blurb": "Display lettering from glyph outlines, GIMP-style fills, headline composition, jersey numbers and apparel print templates."
+    },
+    {
+      "id": "dry",
+      "title": "Dry media",
+      "guide": "docs/guides/dry-media.md",
+      "blurb": "Chalk, crayon and charcoal on toothed surfaces, plus the stroke-skeleton letters and TeX-style mathematics that go on a board."
+    },
+    {
+      "id": "charts",
+      "title": "Charts and figures",
+      "guide": "docs/guides/charts.md",
+      "blurb": "Paper-ready figures from graph.ps and dataviz.ps: function plots, bar, line and pie charts as plain vector pages."
+    },
+    {
+      "id": "fonts",
+      "title": "Fonts and handwriting",
+      "guide": "docs/guides/fonts.md",
+      "blurb": "The Type 3 display faces in lib/fonts/ draw every glyph with a program, so the letterforms can do things outlines cannot. fonts/catalog/ adds 60 open outline faces loaded at findfont time. The Fonts page shows every face individually."
+    },
+    {
+      "id": "classic",
+      "title": "Classic examples",
+      "guide": "docs/guides/getting-started.md",
+      "blurb": "The demo files that grew up with the interpreter: fractals that draw themselves, and test pages written the way real-world files are."
+    },
+    {
+      "id": "type3",
+      "title": "Type 3 fonts",
+      "guide": "docs/guides/fonts.md",
+      "blurb": "Fonts where every glyph is a PostScript program."
+    }
+  ],
+  "specimens": [
+    {
+      "id": "specimen_steampunk",
+      "group": "styles",
+      "title": "steampunk.ps",
+      "alt": "Aether & Brass, a steampunk specimen poster",
+      "blurb": "Gears, rivets, flanged pipework, pressure gauges and riveted plate frames, in the /brass /verdigris /boiler palettes.",
+      "source": "examples/style_steampunk.ps",
+      "render": "lib/styles/specimen_steampunk.png"
+    },
+    {
+      "id": "specimen_psychedelic",
+      "group": "styles",
+      "title": "psychedelic.ps",
+      "alt": "Turn On The Sun, a psychedelic specimen poster",
+      "blurb": "Sunburst rays, wobble-ring blobs, spirals, kaleidoscope repeats and hue-wheel colour, in the /acid /blacklight /sherbet palettes.",
+      "source": "examples/style_psychedelic.ps",
+      "render": "lib/styles/specimen_psychedelic.png"
+    },
+    {
+      "id": "specimen_scifi",
+      "group": "styles",
+      "title": "scifi.ps",
+      "alt": "Outer Reaches, a sci-fi specimen poster",
+      "blurb": "Starfields, a ringed planet, HUD chrome, hex shields and the synthwave grid floor, in the /void /hologram /synthwave palettes.",
+      "source": "examples/style_scifi.ps",
+      "render": "lib/styles/specimen_scifi.png"
+    },
+    {
+      "id": "specimen_toon",
+      "group": "styles",
+      "title": "toon.ps",
+      "alt": "Splat!, a toon specimen poster",
+      "blurb": "Cel-shaded flats under fat ink, speech bubbles, action bursts and dripping title slabs, in the /saturday /latenight /pastelpop palettes.",
+      "source": "examples/style_toon.ps",
+      "render": "lib/styles/specimen_toon.png"
+    },
+    {
+      "id": "template_card",
+      "group": "templates",
+      "title": "pgcard",
+      "alt": "A greeting card rendered by pgcard",
+      "blurb": "A tinted rounded panel with a centred title, a flowed message and a signoff tucked into the corner.",
+      "source": "examples/template_card.ps",
+      "page": "612x792"
+    },
+    {
+      "id": "template_letter",
+      "group": "templates",
+      "title": "pgletter",
+      "alt": "A letter rendered by pgletter",
+      "blurb": "A plain page: header rule, date, salutation, flowed body and reserved signature space.",
+      "source": "examples/template_letter.ps",
+      "page": "612x792"
+    },
+    {
+      "id": "template_certificate",
+      "group": "templates",
+      "title": "pgcertificate",
+      "alt": "A certificate rendered by pgcertificate",
+      "blurb": "A double-ruled cream certificate with a shrink-to-fit awardee name and a two-column presenter and date line.",
+      "source": "examples/template_certificate.ps",
+      "page": "612x792"
+    },
+    {
+      "id": "template_invitation",
+      "group": "templates",
+      "title": "pginvitation",
+      "alt": "An invitation rendered by pginvitation",
+      "blurb": "A tinted bordered panel with a large event title, a when, where and host block, and RSVP-style body copy.",
+      "source": "examples/template_invitation.ps",
+      "page": "612x792"
+    },
+    {
+      "id": "template_poster",
+      "group": "templates",
+      "title": "pgposter",
+      "alt": "A poster rendered by pgposter",
+      "blurb": "A full-bleed headline sized to the page width, an italic tagline, a large flowed body and a footer line.",
+      "source": "examples/template_poster.ps",
+      "page": "612x792"
+    },
+    {
+      "id": "lettering",
+      "group": "lettering",
+      "title": "lettering.ps",
+      "alt": "Keepin' It Real, a display lettering specimen",
+      "blurb": "Groovy display lettering from outline text: charpath clipped to a multicolour interior (solid, transition, patches, mottled, worn) with a dark contour, seeded and deterministic.",
+      "source": "examples/lettering.ps",
+      "page": "900x900"
+    },
+    {
+      "id": "fillkit",
+      "group": "lettering",
+      "title": "fillkit.ps",
+      "alt": "A specimen of GIMP-style fills: plasma, solid noise, difference clouds and gradient shapes",
+      "blurb": "GIMP's plasma, solid noise, difference clouds, conical, spiral and square gradients and grain as seeded, clip-friendly fills, also usable as lettering treatments.",
+      "source": "examples/fillkit.ps",
+      "page": "900x900"
+    },
+    {
+      "id": "headline",
+      "group": "lettering",
+      "title": "headline.ps",
+      "alt": "Keepin' It Real, a headline composition specimen",
+      "blurb": "Headline composition from measured glyph ink: one dominant word, supporting phrases tucked against individual letters, and clearance checks that fail loudly instead of clipping.",
+      "source": "examples/headline.ps",
+      "page": "900x900"
+    },
+    {
+      "id": "jersey",
+      "group": "lettering",
+      "title": "jersey.ps",
+      "alt": "A jersey specimen with arched team names over player numbers, in light and dark garment colours",
+      "blurb": "An arched team name over a dominant player number, ink-centred, outlined and fitted to a print rectangle, rejecting impossible geometry by name.",
+      "source": "examples/jersey.ps",
+      "page": "900x1200"
+    },
+    {
+      "id": "apparel_shirt",
+      "group": "lettering",
+      "title": "apparel.ps",
+      "alt": "An apparel template proof sheet with front, back and two sleeve print areas",
+      "blurb": "A two-sided apparel graphic template: front, back and optional sleeve artwork from one configuration, each its own print area, exported transparent with a manifest (proof sheet shown).",
+      "source": "examples/apparel_shirt.ps",
+      "page": "1400x760"
+    },
+    {
+      "id": "drykit_specimen",
+      "group": "dry",
+      "title": "drykit.ps",
+      "alt": "A drykit specimen: chalk, charcoal and crayon strokes at three pressures and three tilts on five surfaces",
+      "blurb": "A dry stick across a toothed surface: chalk on slate and green board, charcoal on newsprint and drawing paper, crayon on construction paper, at three pressures and three tilts, with the gaps streaking along the direction of travel.",
+      "source": "examples/drykit_specimen.ps",
+      "page": "840x1000"
+    },
+    {
+      "id": "drychalk_specimen",
+      "group": "dry",
+      "title": "drychalk.ps",
+      "alt": "A drychalk specimen: handwriting in chalk on a dressed green board and a slate",
+      "blurb": "Chalk on a board: strokes that land heavy, tire and lift thin, dust beside them, side-of-chalk underlines, soft coloured chalk, and boards dressed with erased writing and eraser swipes.",
+      "source": "examples/drychalk_specimen.ps",
+      "page": "840x1080"
+    },
+    {
+      "id": "drycrayon_specimen",
+      "group": "dry",
+      "title": "drycrayon.ps",
+      "alt": "A drycrayon specimen: sixteen crayon colours at three pressures, repeated passes, tip wear, layering and scribble fills",
+      "blurb": "Wax crayon on paper: the 16-crayon box at three pressures, coverage building with each pass, a new point against a worn flat, one colour laid over another, and scribble fills that go past the lines.",
+      "source": "examples/drycrayon_specimen.ps",
+      "page": "840x1000"
+    },
+    {
+      "id": "drycrayon_motion_demo",
+      "group": "dry",
+      "title": "drycrayon motions",
+      "alt": "Crayon motions: wobbly lines, scribble fill, unclosed loops, stick and tadpole figures, a sun with rays and grass",
+      "blurb": "A child's ways of moving a crayon, as path builders: shaky overshooting lines, back-and-forth scribble fill, circles that do not close, stick figures, sun rays and grass.",
+      "source": "examples/drycrayon_motion_demo.ps",
+      "page": "840x760"
+    },
+    {
+      "id": "drycharcoal_specimen",
+      "group": "dry",
+      "title": "drycharcoal.ps",
+      "alt": "A drycharcoal specimen: vine, compressed and pencil strokes, value scales, a hatched sphere, a lifted mass and a construction sketch",
+      "blurb": "Charcoal on drykit: vine, compressed and pencil grades, value scales by hatching and by smudging, a hatched sphere, stump smudge, kneaded and hard-eraser lifts, and construction lines under a drawing.",
+      "source": "examples/drycharcoal_specimen.ps",
+      "page": "720x490"
+    },
+    {
+      "id": "strokeglyphs",
+      "group": "dry",
+      "title": "Stroke glyphs",
+      "alt": "A specimen of stroke-skeleton letters, Greek, operators and growing delimiters",
+      "blurb": "Skeleton letters, Greek, operators and growing delimiters for board mathematics, as paths for any pen to follow (lib/strokeglyphs.ps).",
+      "source": "examples/strokeglyphs.ps",
+      "page": "900x1600"
+    },
+    {
+      "id": "mathkit_specimen",
+      "group": "dry",
+      "title": "mathkit.ps",
+      "alt": "A mathkit specimen: well-known formulas written as stroke skeletons, and a derivation in chalk on a green board",
+      "blurb": "TeX-subset mathematics laid out with TeX's box model as stroke skeletons: fractions, roots, sums and integrals, matrices and accents, written with a lecturer's irregularity, and an aligned derivation in chalk.",
+      "source": "examples/mathkit_specimen.ps",
+      "page": "1000x1960"
+    },
+    {
+      "id": "mathkit_structures",
+      "group": "dry",
+      "title": "mathkit structures",
+      "alt": "A mathkit specimen of TeX structures: braces with labels, stacked limits, negation and modular arithmetic, style switches mid-formula, and aligned columns in pen and in chalk on a board",
+      "blurb": "More TeX structures as stroke skeletons: over- and underbraces with labels, stacked limits, negation, style switches mid-formula, and aligned columns, in pen and in chalk.",
+      "source": "examples/mathkit_structures.ps",
+      "page": "1000x1320"
+    },
+    {
+      "id": "mathkit_columns_braces",
+      "group": "dry",
+      "title": "mathkit columns and braces",
+      "alt": "A mathkit specimen: congruences with mod and pod, brace labels beside the brace, aligned columns that drift down the lines like a hand, alignat coefficients, and hand-drawn braces marking spans of formulas on a chalk board",
+      "blurb": "Congruences with \\mod and \\pod, brace labels set beside, align columns that wander down the lines as a hand does, alignat, and mkbrace, a hand-drawn brace between two points for marking a span on a board.",
+      "source": "examples/mathkit_columns_braces.ps",
+      "page": "1000x1180"
+    },
+    {
+      "id": "graph_paper",
+      "group": "charts",
+      "title": "graph.ps",
+      "alt": "A paper figure: a framed function plot with axes and labels",
+      "blurb": "A single framed plotfn figure with axes and labels, the way a paper wants it.",
+      "source": "examples/graph_paper.ps",
+      "page": "612x792"
+    },
+    {
+      "id": "dataviz_paper",
+      "group": "charts",
+      "title": "dataviz.ps",
+      "alt": "A paper figure with a bar chart, a line chart and a pie chart",
+      "blurb": "Bar, line and pie charts on one plain, paper-ready page.",
+      "source": "examples/dataviz_paper.ps",
+      "page": "612x792"
+    },
+    {
+      "id": "font_library",
+      "group": "fonts",
+      "title": "The specimen poster",
+      "alt": "The Type 3 font library specimen poster",
+      "blurb": "/Neon (glow by overdraw), /Marquee (bulbs, glints, burnouts), /Constellation (star charts) and /Lapidary (chiselled stone).",
+      "source": "examples/font_library.ps",
+      "render": "lib/fonts/specimen.png"
+    },
+    {
+      "id": "font_library2",
+      "group": "fonts",
+      "title": "The second folio",
+      "alt": "The Type 3 font library specimen, second folio",
+      "blurb": "/Circuitry (copper traces, pads and vias), /Stitchwork (cross-stitch on the 45 degree grid) and /Confetti (a thrown handful, still falling).",
+      "source": "examples/font_library2.ps",
+      "render": "lib/fonts/specimen2.png"
+    },
+    {
+      "id": "handwriting",
+      "group": "fonts",
+      "title": "/HandScript",
+      "alt": "A handwritten letter set in the HandScript font",
+      "blurb": "Dynamic handwriting: jittered strokes, a wandering baseline and varying pen pressure, so no two letters ever match.",
+      "source": "examples/handwriting.ps",
+      "page": "612x792",
+      "playground": true
+    },
+    {
+      "id": "font_catalog1",
+      "group": "fonts",
+      "title": "The Standard Thirty-Five",
+      "alt": "The standard 35 fonts specimen",
+      "blurb": "Every classic name (Palatino, Bookman, Avant Garde, Zapf Chancery, Symbol, Dingbats) resolved to an open font.",
+      "source": "examples/font_catalog.ps",
+      "render": "fonts/catalog/specimen-1.png"
+    },
+    {
+      "id": "font_catalog2",
+      "group": "fonts",
+      "title": "The Catalog",
+      "alt": "The font catalog specimen",
+      "blurb": "A face for every occasion: 35 families across serif, sans, slab, script, blackletter, western, horror, pixel, sci-fi and more.",
+      "source": "examples/font_catalog.ps",
+      "render": "fonts/catalog/specimen-2.png"
+    },
+    {
+      "id": "sierpinski",
+      "group": "classic",
+      "title": "Sierpinski triangle",
+      "alt": "The Sierpinski triangle",
+      "blurb": "The original watch-it-draw demo: recursive subdivision.",
+      "source": "examples/sierpinski.ps",
+      "page": "500x500",
+      "playground": true
+    },
+    {
+      "id": "koch_snowflake",
+      "group": "classic",
+      "title": "Koch snowflake",
+      "alt": "The Koch snowflake",
+      "blurb": "Recursive edge replacement.",
+      "source": "examples/koch_snowflake.ps",
+      "page": "500x500",
+      "playground": true
+    },
+    {
+      "id": "golden_spiral",
+      "group": "classic",
+      "title": "Golden spiral",
+      "alt": "A golden spiral",
+      "blurb": "Fibonacci arcs and a radial burst.",
+      "source": "examples/golden_spiral.ps",
+      "page": "500x500",
+      "playground": true
+    },
+    {
+      "id": "testcard",
+      "group": "classic",
+      "title": "Test card",
+      "alt": "A test card",
+      "blurb": "Written like a found file, shortcut prolog and all; renders identically in Ghostscript.",
+      "source": "examples/testcard.ps",
+      "page": "612x792",
+      "playground": true
+    },
+    {
+      "id": "specimen",
+      "group": "classic",
+      "title": "Type specimen",
+      "alt": "A type specimen",
+      "blurb": "The base fonts through the full operator set.",
+      "source": "examples/specimen.ps",
+      "page": "612x792",
+      "playground": true
+    },
+    {
+      "id": "postcard",
+      "group": "classic",
+      "title": "Postcard",
+      "alt": "A postcard",
+      "blurb": "Files, filters and sampled images, inline in one page.",
+      "source": "examples/postcard.ps",
+      "page": "612x792"
+    },
+    {
+      "id": "type3_ransom",
+      "group": "type3",
+      "title": "Ransom note",
+      "alt": "A ransom note in mismatched cut-out letters",
+      "blurb": "Type 3 fonts where every glyph is invented fresh at show time.",
+      "source": "examples/type3_ransom.ps",
+      "page": "612x792"
+    }
+  ]
 }

@@ -1,0 +1,102 @@
+%!PS-Adobe-3.0
+%%Title: Blueprint of a Rose
+%%BoundingBox: 0 0 1000 760
+%%Creator: Claude, resident artist
+%%EndComments
+
+% Cathedral Rose, another gallery piece, redrawn as an engineer's
+% blueprint and laid on a drafting table, without one edit to its source.
+% The file runs inside a scope where the colour operators do nothing, the
+% line width is pinned to a hairline, every fill is traced as an outline,
+% every glyph is drawn as its outline, and every path, the grid and the
+% title block included, passes through a perspective warp. Decorators
+% are just quotations: the warp's own stroke wrapper is reused to build
+% the outline fill.
+%
+%   pscat --page 1000x760 gallery/blueprint_rose.ps
+
+(lib/functional.ps) run
+(lib/aspect.ps) run
+(lib/warp.ps) run
+
+% ---- the drafting table ----
+0.23 0.17 0.13 setrgbcolor 0 0 1000 760 rectfill
+0 1 37 {
+  /i exch def
+  i 7 mul sin 0.012 mul 0.25 add i 13 mul cos 0.010 mul 0.19 add 0.14 setrgbcolor
+  0 i 20.5 mul 1000 20.5 rectfill
+} for
+
+% The sheet is 900 by 640 in its own units; this warp lays it on the table.
+/sheet-w 900 def /sheet-h 640 def
+/persp 150 70  880 120  760 690  95 640  sheet-w sheet-h wp-perspective def
+
+% shadow, then the blueprint paper itself, filled through the warp
+gsave
+  0.10 0.07 0.06 setrgbcolor
+  newpath -12 -18 moveto sheet-w -12 lineto sheet-w sheet-h -18 add lineto
+  -12 sheet-h -18 add lineto closepath
+  /persp load 1e5 wp-warppath fill
+  0.07 0.24 0.47 setrgbcolor
+  newpath 0 0 moveto sheet-w 0 lineto sheet-w sheet-h lineto 0 sheet-h lineto closepath
+  /persp load 1e5 wp-warppath fill
+grestore
+
+% ---- blueprint decorators ----
+% A perspective map keeps straight lines straight, so edges need no
+% subdivision: a step longer than the sheet keeps just the corners.
+/decs /persp load wp-points 1e5 wp-decorators def
+/through-stroke {} decs /stroke get exec def       % the warp's stroke wrapper
+% Bound now, before the scope exists: inside it, setlinewidth names the
+% decorated version, and a decorator calling that would call itself.
+/hairline { 0.45 setlinewidth [] 0 setdash } bind def
+% fills become traced outlines; text is set as outlines too
+/outline-fill [ /pop load
+  [ /gsave load /hairline load /exec load /through-stroke load /exec load /grestore load /newpath load ] cvx
+] cvx def
+decs /fill /outline-fill load put
+decs /eofill /outline-fill load put
+decs /show [ /pop load
+  [ /currentpoint load /newpath load /moveto load true /charpath load
+    /currentpoint load /gsave load /hairline load /exec load /through-stroke load /exec load
+    /grestore load /newpath load /moveto load ] cvx ] cvx put
+% colour and weight belong to the blueprint now
+decs /setrgbcolor { pop {pop pop pop} } put
+decs /sethsbcolor { pop {pop pop pop} } put
+decs /setgray { pop {pop} } put
+decs /setcmykcolor { pop {pop pop pop pop} } put
+decs /setlinewidth { pop {pop //hairline exec} } bind put
+
+0.86 0.93 1.0 setrgbcolor
+{
+  % the grid, faint
+  gsave
+    0.3 setlinewidth [2 3] 0 setdash
+    20 20 sheet-w 20 sub { /x exch def x 14 moveto x sheet-h 14 sub lineto stroke } for
+    20 20 sheet-h 20 sub { /y exch def 14 y moveto sheet-w 14 sub y lineto stroke } for
+  grestore
+  % the borders
+  1.6 systemdict /setlinewidth get exec
+  14 14 sheet-w 28 sub sheet-h 28 sub rectstroke
+  % the drawing, unmodified
+  gsave
+    newpath 15 15 sheet-w 30 sub sheet-h 30 sub rectclip
+    52 34 translate 0.82 dup scale (gallery/cathedral_rose.ps) run
+  grestore
+  % the title block
+  /Helvetica-Bold findfont 16 scalefont setfont
+  680 98 moveto 200 0 rlineto 0 120 rlineto -200 0 rlineto closepath stroke
+  680 158 moveto 200 0 rlineto stroke
+  680 128 moveto 200 0 rlineto stroke
+  780 98 moveto 0 30 rlineto stroke
+  692 182 moveto (CATHEDRAL ROSE) show
+  /Helvetica findfont 9 scalefont setfont
+  692 166 moveto (MAURER ROSE, n = 6, d = 71 AND 97) show
+  692 142 moveto (DRAWN BY) show 692 133 moveto (wp-run-decorated) show
+  792 142 moveto (SOURCE) show 792 133 moveto (UNMODIFIED) show
+  692 108 moveto (SCALE 1 : 1) show 792 108 moveto (SHEET 1 OF 1) show
+  /Helvetica findfont 12 scalefont setfont
+  680 72 moveto (gallery/cathedral_rose.ps) show
+} decs wp-run-decorated
+
+showpage
