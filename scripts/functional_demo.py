@@ -71,7 +71,7 @@ def render(pscat):
             assert output == expected, output
         manifest.append({"file": dest.name, "page": page,
                          "sha256": hashlib.sha256(dest.read_bytes()).hexdigest()})
-    (ASSETS / "render-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    (ASSETS / "render-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
 
 def benchmark(pscat, samples):
@@ -117,21 +117,21 @@ def benchmark(pscat, samples):
             for name, values in zip(("functional", "imperative"), timings)
         }
     for name in ("poster", "imperative"):
-        lines = (ROOT / f"examples/functional/{name}.ps").read_text().splitlines()
+        lines = (ROOT / f"examples/functional/{name}.ps").read_text(encoding="utf-8").splitlines()
         report.setdefault("driver_noncomment_lines", {})[name] = sum(
             bool(line.strip()) and not line.lstrip().startswith("%") for line in lines)
     output = ROOT / "docs/functional-postscript/MEASUREMENTS.json"
-    output.write_text(json.dumps(report, indent=2) + "\n")
+    output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     html = ROOT / "docs/functional-postscript/index.html"
     if html.exists():
-        text = html.read_text()
+        text = html.read_text(encoding="utf-8")
         for case, values in report["results"].items():
             for kind, metrics in values.items():
                 key = re.escape(f"{case}.{kind}")
                 value = f"{metrics['median'] * 1000:.0f} ms"
                 text = re.sub(fr'(<td data-metric="{key}">)[^<]+(</td>)',
                               lambda m: m[1] + value + m[2], text)
-        html.write_text(text)
+        html.write_text(text, encoding="utf-8")
     print(json.dumps(report, indent=2))
 
 
