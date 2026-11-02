@@ -19,7 +19,8 @@ python3 scripts/check_md_links.py
 python3 scripts/gallery.py check
 python3 scripts/check_licences.py all
 python3 scripts/codeowners_check.py --base origin/main
-gh pr view 957 --json body --jq .body > "$TMPDIR/qr-pr-body.md" && test -s "$TMPDIR/qr-pr-body.md" && python3 scripts/pr_body_lint.py "$TMPDIR/qr-pr-body.md" --git-range origin/main..HEAD  # lint accepts empty stdin, so fetch and check first
+# pr_body_lint.py accepts empty stdin, so fetch to a file and check it first.
+body=$(mktemp "${TMPDIR:-/tmp}/qr-pr-body.XXXXXX") && gh pr view 957 --json body --jq .body > "$body" && test -s "$body" && python3 scripts/pr_body_lint.py "$body" --git-range origin/main..HEAD
 ```
 
 Normal Rust tests use checked-in JSON and need no network, oracle checkout,
