@@ -9,7 +9,7 @@
 > In progress: `lib/qr.ps` is an internal (`qr--`), incomplete native QR
 > library. It covers byte-mode data, all-version planning and Reed–Solomon
 > interleaving, but no matrix, masks or drawing yet. Continue from
-> [`design/QR_CODE.md`](design/QR_CODE.md) and its issue queue.
+> [`design/QR_CODE.md`](design/QR_CODE.md) and epic #966.
 
 Written 2026-07-13 at the completion of Stages 6–7; last updated
 2026-08-15. Stages 8–20 are all complete: spool/halftone/Gallery II

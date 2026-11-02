@@ -37,10 +37,10 @@ and planned boundaries support adding them correctly.
    [planning](../../../tests/data/qr_planning_vectors.json) and
    [correction](../../../tests/data/qr_correction_vectors.json) vectors.
 5. [Issue/dependency queue](QR_CODE_ISSUES.md),
-   [development notes](../../../notes/qr-code-library.md), and the full diff.
+   [development notes](../../../notes/966-qr-code-library.md), and the full diff.
 
-The issue queue has local IDs because publication has been blocked. Do not
-invent issue or PR numbers. The separate functional PostScript branch was
+The issue queue is filed as epic #966 with tickets #967–#974; this checkpoint
+implements #967–#969. The separate functional PostScript branch was
 inspected but is neither merged nor copied; the QR code has no dependency on it.
 
 ## Questions for the review
@@ -107,5 +107,5 @@ same feature branch, with the review record linked from the eventual PR.
 The checkpoint is published as draft PR
 [#957](https://github.com/PSCatLabs/pscat/pull/957). Its body is the live
 record; edit it with `gh pr edit 957 --body-file …`, rather than keeping a copy
-in the tree. The PR stays draft while the feature is incomplete. Once the
-issue queue is filed, replace its local ticket IDs with real issue links.
+in the tree. The PR stays draft while the feature is incomplete. It is part of
+epic #966 and closes #967, #968 and #969.
