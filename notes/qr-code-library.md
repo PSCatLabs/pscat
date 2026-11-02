@@ -166,3 +166,11 @@ Validation: Bash syntax/help, six mocked CLI paths (create, update, dirty tree,
 API failure, push failure and existing non-draft), Markdown links, license
 checks and diff whitespace passed. No live publication was attempted by this
 script in the restricted session.
+
+## Review follow-up: publication scaffolding removed
+
+Draft PR #957 now exists, so the one-shot `scripts/publish_qr_pr.sh` and the
+in-tree PR body `docs/dev/design/QR_CODE_PR.md` were removed, along with the
+links to them. The live PR body is the record. The HANDOFF.md entry was
+reworded so it stays true once merged to `main`. No library, test or fixture
+changes.

@@ -5,14 +5,11 @@
 > [`README.md`](README.md)) in `docs/dev/`, and history, including the frozen
 > `NOTES.md`, `ROADMAP.md` and `INIT.md`, in [`docs/archive/`](../archive/README.md).
 > Per-issue notes are in [`notes/`](../../notes/README.md).
-
-On `feature/qr-code-library`, the native QR effort has byte-mode data packing,
-all-version capacity planning, automatic version selection, Reed–Solomon error
-correction and block interleaving, not a complete symbol generator. Continue from
-[`design/QR_CODE.md`](design/QR_CODE.md) and its ready-to-publish issue queue.
-No dependency on the unmerged functional PostScript branch is introduced.
-The review entry point is [`design/QR_CODE_REVIEW.md`](design/QR_CODE_REVIEW.md),
-with API/testing docs and a complete draft PR body for Opus.
+>
+> In progress: `lib/qr.ps` is an internal (`qr--`), incomplete native QR
+> library. It covers byte-mode data, all-version planning and Reed–Solomon
+> interleaving, but no matrix, masks or drawing yet. Continue from
+> [`design/QR_CODE.md`](design/QR_CODE.md) and its issue queue.
 
 Written 2026-07-13 at the completion of Stages 6–7; last updated
 2026-08-15. Stages 8–20 are all complete: spool/halftone/Gallery II

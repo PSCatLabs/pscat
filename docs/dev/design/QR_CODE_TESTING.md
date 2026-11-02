@@ -19,7 +19,7 @@ python3 scripts/check_md_links.py
 python3 scripts/gallery.py check
 python3 scripts/check_licences.py all
 python3 scripts/codeowners_check.py --base origin/main
-python3 scripts/pr_body_lint.py docs/dev/design/QR_CODE_PR.md --git-range origin/main..HEAD
+gh pr view 957 --json body --jq .body | python3 scripts/pr_body_lint.py - --git-range origin/main..HEAD
 ```
 
 Normal Rust tests use checked-in JSON and need no network, oracle checkout,

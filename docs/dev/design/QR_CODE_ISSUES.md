@@ -1,9 +1,8 @@
 # QR issue queue (ready to publish)
 
-GitHub publication is blocked by connector HTTP 403 and sandbox CLI network
-restrictions. CLI credential validity has not been established outside that
-restriction; do not assume the token needs replacing from `gh auth status` alone.
-No issue number has been assigned. The owner explicitly authorized this initial
+Not yet filed. Publication was blocked when this queue was written; the
+checkpoint has since been published as draft PR #957, so the owner can file
+these with `gh issue create`. No issue number has been assigned. The owner explicitly authorized this initial
 epic/decomposition; once filed, ordinary agents propose follow-ups under the
 repository's established dispatcher policy instead of opening unrelated issues.
 

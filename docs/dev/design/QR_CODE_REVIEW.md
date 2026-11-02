@@ -102,23 +102,10 @@ future-stage requirements. A clean checkpoint review does not approve a merge
 or complete the full feature. Fixes should be separate tested commits on this
 same feature branch, with the review record linked from the eventual PR.
 
-## Publish through git and gh
+## Pull request
 
-Run the [publication script](../../../scripts/publish_qr_pr.sh) from this
-checkout in a terminal with network access and authenticated `gh`:
-
-```sh
-bash scripts/publish_qr_pr.sh
-```
-
-It requires a clean committed feature branch and the expected origin, checks
-authentication and existing PRs, pushes without force, then creates the draft
-or updates the existing draft's title/body. It prints the URL and head SHA.
-It stops on errors and can be rerun after a partial failure. An existing PR
-that is already ready for review requires manual inspection before updating.
-It does not create issues, commit changes or merge anything.
-
-The PR stays draft for this incomplete feature and the requested Opus review.
-After creation, inspect the actual PR checks; no remote green-CI result is
-claimed before observing it. The ready-to-file issue queue remains separate;
-replace local ticket IDs with real issue links only after publication succeeds.
+The checkpoint is published as draft PR
+[#957](https://github.com/PSCatLabs/pscat/pull/957). Its body is the live
+record; edit it with `gh pr edit 957 --body-file …`, rather than keeping a copy
+in the tree. The PR stays draft while the feature is incomplete. Once the
+issue queue is filed, replace its local ticket IDs with real issue links.
