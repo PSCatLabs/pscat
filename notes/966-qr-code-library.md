@@ -1,4 +1,4 @@
-## Native QR library, initial slice (issue publication blocked, 2026-10-28)
+## Native QR library, initial slice (issue #966, 2026-10-28)
 
 Owner requested a long-running native PostScript QR feature and procedural
 business card. Branch `feature/qr-code-library` starts at main `07f054c`.

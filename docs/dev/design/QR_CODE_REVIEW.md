@@ -1,8 +1,10 @@
 # Opus review handoff: native QR data/correction checkpoint
 
 Review target: repository `PSCatLabs/pscat`, branch `feature/qr-code-library`.
-This is a draft, incomplete feature checkpoint. Do not merge it. No Opus review
-has yet been run or recorded; this document prepares that independent review.
+This is a draft, incomplete feature checkpoint. Do not merge it. The
+checkpoint review of head `5d0d705` is recorded on #957
+([review](https://github.com/PSCatLabs/pscat/pull/957#pullrequestreview-5743891246)):
+no blocking finding. Reuse this handoff for reviews of later stages.
 
 Base: `07f054c19d7045281a667e185b9bfc74f3cde29e` (main at branch creation).
 Last implementation commit: `deba699b4dd221176056f37d05761a55c8126c45`.
@@ -70,10 +72,9 @@ inspected but is neither merged nor copied; the QR code has no dependency on it.
 Use the [verification guide](QR_CODE_TESTING.md). At minimum, build and run the
 15-test QR integration suite plus `--selftest lib/qr.ps` under PSCat and the
 actual Ghostscript cases. Full repository tests, Clippy, formatting, fixture
-regeneration, links, gallery and licenses passed locally. Remote CI has not
-been observed, and the shell selftest wrapper had a sandbox Cargo-lock denial;
-its underlying 38 manifest/strict-driver checks passed through Rust. Do not
-convert that limitation into a claim that the wrapper passed.
+regeneration, links, gallery and licenses passed locally. Remote CI on #957
+passed (2590 tests), and the shell selftest wrapper, initially blocked by a
+sandbox Cargo-lock denial, passed at `5d0d705` during the checkpoint review.
 
 For a source review without running tests, explicitly say tests were not run.
 If Ghostscript is absent, say so; green optional tests do not prove portability.
