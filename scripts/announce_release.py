@@ -199,6 +199,9 @@ def cmd_send(a):
         raise SystemExit(f"--send needs --confirm {tag} (the draft's tag typed back).")
     if not user:
         raise SystemExit("Set PSCAT_SMTP_USER to the sending account.")
+    # The tag must name a published release: catches a typo that would dodge
+    # the duplicate check, and a draft written before the release is out.
+    release_info(tag, allow_prerelease=True)
     host = os.environ.get("PSCAT_SMTP_HOST", "smtp.gmail.com")
     port = int(os.environ.get("PSCAT_SMTP_PORT", "587"))
     smtp_send(msg, user, smtp_password(user), host, port)

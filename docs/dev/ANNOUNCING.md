@@ -28,6 +28,12 @@ release is announced to a given address only once.
 
    Elsewhere (or in CI later), set `PSCAT_SMTP_PASSWORD` instead.
 
+4. **Checking delivery.** Gmail usually hides the copy of your own post
+   that the group sends back, so the announcement may never appear in your
+   inbox. Confirm it in the group's archive on groups.google.com, not by
+   resending. `PSCAT_SMTP_FROM` works only if that address is a Gmail
+   "Send mail as" alias of the account; otherwise Gmail rewrites From.
+
 Never commit credentials. The sender address lives only in your
 environment.
 
@@ -54,7 +60,8 @@ python3 scripts/announce_release.py send --draft draft.txt --send --confirm v0.7
 ```
 
 A draft file is `Subject:` and `Tag:` lines, a blank line, and a plain-text
-body. `--confirm` must repeat the draft's tag. `info` defaults to the
+body. `--confirm` must repeat the draft's tag, and a real send checks that the
+tag is a published GitHub release. `info` defaults to the
 latest stable release and refuses pre-releases and drafts unless told
 otherwise.
 

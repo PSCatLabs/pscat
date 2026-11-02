@@ -35,8 +35,11 @@ class Base(unittest.TestCase):
         os.environ.pop("PSCAT_ANNOUNCE_TO", None)
         self.smtp = mock.patch.object(ar, "smtp_send")
         self.sent = self.smtp.start()
+        self.gh = mock.patch.object(ar, "release_info", return_value={})
+        self.rel = self.gh.start()
 
     def tearDown(self):
+        self.gh.stop()
         self.smtp.stop()
         self.env.stop()
         self.tmp.cleanup()
@@ -101,6 +104,12 @@ class Send(Base):
         # The rehearsal does not block the real send.
         self.run_main("send", "--draft", self.draft, "--send", "--confirm", "v0.7.0")
         self.assertEqual(self.sent.call_count, 2)
+
+    def test_send_checks_tag_is_published(self):
+        self.rel.side_effect = SystemExit("no such release")
+        with self.assertRaises(SystemExit):
+            self.run_main("send", "--draft", self.draft, "--send", "--confirm", "v0.7.0")
+        self.sent.assert_not_called()
 
     def test_recipient_override(self):
         os.environ["PSCAT_ANNOUNCE_TO"] = "env@example.invalid"
