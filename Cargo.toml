@@ -135,10 +135,13 @@ sha2 = "0.11.1"
 # tests/qr.rs also rasterizes PSCat's SVG and PDF exports with independent
 # pure-Rust renderers before decoding them (issue #972): resvg for SVG and
 # hayro for PDF. Compiled in for the same reason, so those checks cannot skip.
-# hayro is held at 0.5.0: 0.7 and later need rustc 1.92, above our
-# rust-version. No default features: the QR exports have no text or images.
+# hayro is held at 0.4.0: 0.5 and later make flate2 use its zlib-rs backend,
+# and a dev-dependency's features reach the pscat binary the tests run, so
+# pscat's own PNG/PDF compression would change under test (tests/mcp.rs
+# caught it); 0.7 and later also need rustc 1.92, above our rust-version.
+# No default features: the QR exports have no text or images.
 [dev-dependencies]
-hayro = { version = "=0.5.0", default-features = false }
+hayro = { version = "=0.4.0", default-features = false }
 resvg = { version = "=0.49.0", default-features = false }
 rqrr = { version = "=0.11.0", default-features = false }
 

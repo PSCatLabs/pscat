@@ -263,7 +263,7 @@ mutant that fills each run separately leaves grey seams there and fails.
 
 Exports: for the GitHub URL at L/M/Q/H (4 px/module), the same URL at a
 fractional pitch, and a version-10 payload with a forced mask, the PNG, SVG
-and PDF exports are each rasterized (pscat; resvg 0.49.0; hayro 0.5.0, both
+and PDF exports are each rasterized (pscat; resvg 0.49.0; hayro 0.4.0, both
 pure-Rust dev-dependencies) and checked module by module with row 0 at the
 top, over the whole quiet zone, for seams, and by `rqrr` decoding the exact
 text, version, mask and level. The catalog's own `load` and `example` lines

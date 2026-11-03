@@ -2009,28 +2009,30 @@ fn raster_svg(bytes: &[u8], scale: f32) -> Grey {
     grey_tiny(&pixmap)
 }
 
-/// hayro, an independent pure-Rust PDF rasterizer.
+/// hayro, an independent pure-Rust PDF rasterizer. It paints the page white
+/// first; its pixels are premultiplied, so un-premultiply before compositing.
 fn raster_pdf(bytes: &[u8], scale: f32) -> Grey {
-    let pdf =
-        hayro::hayro_syntax::Pdf::new(std::sync::Arc::new(bytes.to_vec())).expect("parse PDF");
+    let pdf = hayro::Pdf::new(std::sync::Arc::new(bytes.to_vec())).expect("parse PDF");
     let page = &pdf.pages()[0];
     let pixmap = hayro::render(
         page,
-        &hayro::hayro_interpret::InterpreterSettings::default(),
+        &hayro::InterpreterSettings::default(),
         &hayro::RenderSettings {
             x_scale: scale,
             y_scale: scale,
-            bg_color: hayro::vello_cpu::color::palette::css::WHITE,
             ..Default::default()
         },
     );
     let width = pixmap.width() as usize;
     grey_of(
         width,
-        pixmap
-            .take_unpremultiplied()
-            .into_iter()
-            .map(|p| [p.r, p.g, p.b, p.a]),
+        pixmap.take_u8().chunks_exact(4).map(|p| {
+            let un = |c: u8| match p[3] {
+                0 => 0,
+                a => ((u32::from(c) * 255 + u32::from(a) / 2) / u32::from(a)).min(255) as u8,
+            };
+            [un(p[0]), un(p[1]), un(p[2]), p[3]]
+        }),
     )
 }
 

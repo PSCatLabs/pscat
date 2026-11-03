@@ -32,10 +32,17 @@ caller must have a current point, so they have a path, and the dark `fill`
 would otherwise paint it.
 
 **Exports.** Two test-only, owner-approved dev-dependencies: `resvg` 0.49.0
-(SVG) and `hayro` 0.5.0 (PDF), both pure Rust, MIT OR Apache-2.0, no
-default features. hayro 0.7 and later need rustc 1.92 and the MSRV is 1.88,
-so 0.5.0 is the newest that passes the `msrv` job. 59 new crates, all
-dev-only. No existing package changed version, and `cargo deny` passes. The
+(SVG) and `hayro` 0.4.0 (PDF), both pure Rust (MIT OR Apache-2.0 and
+Apache-2.0), no default features. Cargo unifies a dev-dependency's features
+into the pscat binary that integration tests run. hayro-syntax 0.5 and later
+turn on flate2's `zlib-rs` backend, which changed pscat's own PNG output
+under test: a `tests/mcp.rs` 100-byte inline limit saw 107 bytes. hayro
+0.4's hayro-syntax uses flate2's `rust_backend`, the same as pscat. 0.7 and
+later also need rustc 1.92, above the 1.88 MSRV. With 0.4 the only extra
+features on pscat's normal dependencies are inert ones (bytemuck
+`min_const_generics`, hashbrown `default-hasher`/`inline-more`, log `std`,
+strict-num `approx-eq`/`float-cmp`, syn extras). No existing package changed
+version, and `cargo deny` passes. The
 export test checks every module centre with row 0 at the top, the quiet
 zone, the seam pixel on every dark-dark edge, and an `rqrr` decode of the
 exact text, version, mask and level, for PNG, resvg and hayro rasters.

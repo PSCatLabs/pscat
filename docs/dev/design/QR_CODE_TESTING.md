@@ -141,8 +141,11 @@ fixture oracle.
 each case with `pscat --png`, `--svg` and `--pdf` (one unique
 `common::scratch_dir` per child, the standard child deadline) and rasterizes
 the SVG with [`resvg`](https://crates.io/crates/resvg) 0.49.0 and the PDF with
-[`hayro`](https://crates.io/crates/hayro) 0.5.0 (both MIT OR Apache-2.0, pure
-Rust, no default features; hayro is held below 0.7, which needs rustc 1.92).
+[`hayro`](https://crates.io/crates/hayro) 0.4.0 (resvg MIT OR Apache-2.0,
+hayro 0.4 Apache-2.0; pure Rust, no default features). hayro is held at 0.4:
+0.5 and later switch flate2 to zlib-rs, which through feature unification
+changes the compression of the pscat binary the tests run (a `tests/mcp.rs`
+inline-size limit failed), and 0.7 and later need rustc 1.92.
 Neither shares code with pscat's rasterizer. For each raster it checks:
 
 - every module centre against `/Modules`, mapping row 0 to the top of the
