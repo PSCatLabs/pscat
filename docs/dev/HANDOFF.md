@@ -6,10 +6,15 @@
 > `NOTES.md`, `ROADMAP.md` and `INIT.md`, in [`docs/archive/`](../archive/README.md).
 > Per-issue notes are in [`notes/`](../../notes/README.md).
 >
-> In progress: `lib/qr.ps` is an internal (`qr--`), incomplete native QR
-> library. It covers byte-mode data, all-version planning and Reed–Solomon
-> interleaving, but no matrix, masks or drawing yet. Continue from
-> [`design/QR_CODE.md`](design/QR_CODE.md) and epic #966.
+> In progress: `lib/qr.ps` is a native QR Model 2 encoder (byte mode,
+> versions 1–40, levels L/M/Q/H, automatic or forced masks) with a public
+> `qrencode`/`qrdraw` vector API ([guide](../guides/qr-codes.md)). Every
+> version and level is checked against an independent encoder, and its
+> PNG, SVG and PDF exports, drawn on the pixel grid, decode with two
+> independent decoders
+> ([testing](design/QR_CODE_TESTING.md)). The printable gallery card
+> (#974) remains. Continue from [`design/QR_CODE.md`](design/QR_CODE.md)
+> and epic #966.
 
 Written 2026-07-13 at the completion of Stages 6–7; last updated
 2026-08-15. Stages 8–20 are all complete: spool/halftone/Gallery II

@@ -3,8 +3,10 @@
 //! independent renderers (resvg, hayro) and read back by an independent decoder (rqrr).
 
 mod common;
+mod qr_support;
 use common::CommandDeadline as _;
 use pscat::{Interp, Value};
+use qr_support::{Grey, raster_pdf, raster_png, raster_svg};
 use sha2::{Digest, Sha256};
 use std::process::Command;
 
@@ -1953,88 +1955,6 @@ fn export(case: &ExportCase, c: &Chosen, flag: &str, ext: &str) -> Vec<u8> {
         String::from_utf8_lossy(&out.stderr)
     );
     std::fs::read(&out_path).unwrap_or_else(|e| panic!("{}: {e}", context(case, c, "read export")))
-}
-
-/// A greyscale raster composited onto white: transparent reads as light.
-struct Grey {
-    width: usize,
-    height: usize,
-    px: Vec<u8>,
-}
-
-fn grey_of(width: usize, rgba: impl Iterator<Item = [u8; 4]>) -> Grey {
-    let px: Vec<u8> = rgba
-        .map(|[r, g, b, a]| {
-            let a = u32::from(a);
-            let luma = (u32::from(r) * 299 + u32::from(g) * 587 + u32::from(b) * 114) / 1000;
-            ((luma * a + 255 * (255 - a)) / 255) as u8
-        })
-        .collect();
-    Grey {
-        width,
-        height: px.len() / width,
-        px,
-    }
-}
-
-fn grey_tiny(pixmap: &tiny_skia::Pixmap) -> Grey {
-    grey_of(
-        pixmap.width() as usize,
-        pixmap.pixels().iter().map(|p| {
-            let c = p.demultiply();
-            [c.red(), c.green(), c.blue(), c.alpha()]
-        }),
-    )
-}
-
-fn raster_png(bytes: &[u8]) -> Grey {
-    grey_tiny(&tiny_skia::Pixmap::decode_png(bytes).expect("pscat PNG"))
-}
-
-/// resvg, an independent SVG renderer (no code shared with pscat's rasterizer).
-fn raster_svg(bytes: &[u8], scale: f32) -> Grey {
-    let tree =
-        resvg::usvg::Tree::from_data(bytes, &resvg::usvg::Options::default()).expect("parse SVG");
-    let size = tree.size();
-    let mut pixmap = resvg::tiny_skia::Pixmap::new(
-        (size.width() * scale).round() as u32,
-        (size.height() * scale).round() as u32,
-    )
-    .expect("SVG pixmap");
-    resvg::render(
-        &tree,
-        resvg::tiny_skia::Transform::from_scale(scale, scale),
-        &mut pixmap.as_mut(),
-    );
-    grey_tiny(&pixmap)
-}
-
-/// hayro, an independent pure-Rust PDF rasterizer. It paints the page white
-/// first; its pixels are premultiplied, so un-premultiply before compositing.
-fn raster_pdf(bytes: &[u8], scale: f32) -> Grey {
-    let pdf = hayro::Pdf::new(std::sync::Arc::new(bytes.to_vec())).expect("parse PDF");
-    let page = &pdf.pages()[0];
-    let pixmap = hayro::render(
-        page,
-        &hayro::InterpreterSettings::default(),
-        &hayro::RenderSettings {
-            x_scale: scale,
-            y_scale: scale,
-            ..Default::default()
-        },
-    );
-    let width = pixmap.width() as usize;
-    let bytes = pixmap.take_u8();
-    grey_of(
-        width,
-        bytes.as_chunks::<4>().0.iter().map(|p| {
-            let un = |c: u8| match p[3] {
-                0 => 0,
-                a => ((u32::from(c) * 255 + u32::from(a) / 2) / u32::from(a)).min(255) as u8,
-            };
-            [un(p[0]), un(p[1]), un(p[2]), p[3]]
-        }),
-    )
 }
 
 /// Every module centre matches `/Modules` with row 0 at the top of the raster,

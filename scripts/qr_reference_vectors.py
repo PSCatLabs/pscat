@@ -544,6 +544,106 @@ def generate_mask(reference):
             "github": github, "tie": tie, "penalties": penalties}
 
 
+def corpus_bytes(length, version, ordinal):
+    """Binary corpus payload: every byte value, NUL and 0x80-0xFF included, and
+    not periodic at 256 bytes, so a truncated index is observable."""
+    return bytes((i * 149 + i // 251 + version * 7 + ordinal * 41) % 256 for i in range(length))
+
+
+# Payloads real callers encode: URLs of several lengths and raw UTF-8 text.
+CORPUS_TEXTS = [
+    ("url-short", b"https://x.co"),
+    ("url-github", b"https://github.com/PSCatLabs/pscat"),
+    ("url-query", b"https://pscatlabs.github.io/pscat/guides/qr-codes.html?utm_source=card"
+                  b"&utm_medium=print&utm_campaign=launch&ref=" + b"0123456789abcdef" * 12),
+    ("url-long", b"https://example.com/archive/" + b"/".join(
+        b"segment-%03d" % i for i in range(96)) + b"?q=" + b"x" * 40),
+    ("utf8", "https://example.com/café/日本/ไทย?ß=✓".encode()),
+]
+
+
+def generate_corpus(reference):
+    module, source_hash = load_reference(reference)
+    qr, segment = module.QrCode, module.QrSegment
+    levels = {"L": qr.Ecc.LOW, "M": qr.Ecc.MEDIUM,
+              "Q": qr.Ecc.QUARTILE, "H": qr.Ecc.HIGH}
+    original_draw, original_score = qr._draw_codewords, qr._get_penalty_score
+
+    def encode(payload, level, mask):
+        """The oracle's real automatic-version encoder: its complete codeword
+        stream, its own trial scores (automatic mask) and its finished grid."""
+        record = {"penalties": []}
+
+        def draw(self, allcodewords):
+            record["codewords"] = bytes(allcodewords)
+            original_draw(self, allcodewords)
+
+        def score(self):
+            result = original_score(self)
+            record["penalties"].append(result)
+            return result
+
+        with patch.object(qr, "_draw_codewords", draw), \
+                patch.object(qr, "_get_penalty_score", score):
+            try:
+                symbol = qr.encode_segments([segment.make_bytes(payload)], level,
+                                            1, 40, mask, False)
+            except module.DataTooLongError:
+                return {"version": None}
+        fixture = {"version": symbol.get_version(), "mask": symbol.get_mask(),
+                   "codewords_sha256": hashlib.sha256(record["codewords"]).hexdigest(),
+                   "final_sha256": grid_sha256(symbol._modules)}
+        if mask == -1:
+            assert len(record["penalties"]) == 8
+            fixture["penalties"] = record["penalties"]
+        return fixture
+
+    boundaries = []
+    for name, level in levels.items():
+        for version in range(1, 41):
+            capacity = qr._get_num_data_codewords(version, level)
+            maximum = capacity - (2 if version < 10 else 3)
+            # Exactly full at its version with a forced mask, so every cell
+            # has a whole-symbol fixed-mask oracle grid; then one byte more
+            # with automatic masking, which must move up a version (or
+            # overflow at 40).
+            full = corpus_bytes(maximum, version, level.ordinal)
+            over = corpus_bytes(maximum + 1, version, level.ordinal)
+            mask = (version + level.ordinal) % 8
+            at_max = encode(full, level, mask)
+            assert at_max["version"] == version and at_max["mask"] == mask
+            beyond = encode(over, level, -1)
+            if version == 40:
+                assert beyond["version"] is None
+            else:
+                assert beyond["version"] > version
+            boundaries.append({"version": version, "level": name, "maximum": maximum,
+                               "payload_sha256": hashlib.sha256(full).hexdigest(),
+                               "forced_mask": mask, "max": at_max, "over": beyond})
+
+    texts = []
+    for label, payload in CORPUS_TEXTS:
+        for name, level in levels.items():
+            fixture = encode(payload, level, -1)
+            fixture.update({"name": label, "level": name, "payload": payload.hex()})
+            texts.append(fixture)
+
+    return {"oracle": "https://github.com/nayuki/QR-Code-generator", "revision": PIN,
+            "source_sha256": source_hash,
+            "description": ("Boundary corpus (#973): for every version and level, one BYTE "
+                            "segment of exactly the version's maximum byte count, byte i = "
+                            "(149*i + floor(i/251) + 7*version + 41*levelOrdinal) mod 256, "
+                            "encoded by the oracle's real encode_segments (versions 1-40, ECC "
+                            "boost disabled) at forced mask (version + levelOrdinal) mod 8; "
+                            "then the same formula one byte longer with automatic mask. "
+                            "Texts: the listed payloads, automatic version and mask. "
+                            "codewords_sha256: the complete interleaved stream passed to "
+                            "_draw_codewords; final_sha256: the finished grid, metadata "
+                            "included, one 0/1 byte per cell; penalties: the eight "
+                            "_get_penalty_score trials."),
+            "boundaries": boundaries, "texts": texts}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("reference", type=Path)
@@ -553,7 +653,8 @@ def main():
                                 ("qr_planning_vectors.json", generate_planning),
                                 ("qr_correction_vectors.json", generate_correction),
                                 ("qr_matrix_vectors.json", generate_matrix),
-                                ("qr_mask_vectors.json", generate_mask)]:
+                                ("qr_mask_vectors.json", generate_mask),
+                                ("qr_corpus_vectors.json", generate_corpus)]:
         content = json.dumps(generator(args.reference), indent=2) + "\n"
         target = ROOT / "tests/data" / filename
         if args.check:

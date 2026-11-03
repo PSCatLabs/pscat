@@ -130,6 +130,30 @@ they were. It takes its two operands and leaves nothing.
 - For print, a common rule of thumb is at least about 0.3 mm (0.85 pt) per
   module for close-range phone scanning. Larger is safer. `/Level /Q` or `/H` buys tolerance for
   wear and smudging at the cost of a larger version.
+- For a PNG meant for screens, make each module a whole number of pixels,
+  starting on the pixel grid: at `--dpi 72`, a whole-point `/ModuleSize`
+  and a whole-point `moveto`. In the test corpus, every symbol on the pixel
+  grid was read by at least one of the two reference decoders, nearly all by
+  both. At fractional pitches (module edges inside pixels) they miss many
+  large, dense symbols, even though the pixels are exactly right.
+- Keep payloads short. A short URL gives a small version with large modules
+  at a given size, which scans more easily than a dense high version.
+
+## Print size
+
+PDF pages are in points, so a PDF prints at its true size. For a PNG, pick
+the dpi when rendering: the print size is the pixel count divided by that
+dpi. A 3.5 × 2 inch card at 300 dpi:
+
+```sh
+pscat --page 252x144 --dpi 300 --png card.png card.ps   # 1050 x 600 pixels
+pscat --page 252x144 --pdf card.pdf card.ps             # 3.5 x 2 in
+```
+
+Tell the print dialog 300 dpi (the PNG does not record it). SVG
+`width`/`height` are in points without a unit, so a browser shows them as
+CSS pixels (96 per inch), three quarters of the true size. For print, use
+the PDF.
 
 ## Errors
 
@@ -163,6 +187,11 @@ The encoder is checked against frozen output from an independent encoder
 The test suite renders symbols through `pscat --png`, `--svg` and `--pdf`.
 It rasterizes the SVG with resvg and the PDF with hayro, two renderers
 that share no code with pscat, and checks every module and the quiet zone.
-Then the independent `rqrr` decoder must read back the exact text, version,
-mask and level. The details are in
+Then two independent decoders, `rqrr` (from quirc) and `rxing` (from ZXing),
+must read back the exact bytes, and the version, mask, level and data
+codewords where each reports them. Every version from 1 to 40 at every
+level, at its exact capacity and one byte past it, matches the reference
+encoder's codewords and finished matrix. The tests also check physical page
+sizes, the 300 dpi print recipe, the quiet zone and every module edge pixel
+by pixel at several scales. The details are in
 [`docs/dev/design/QR_CODE_TESTING.md`](../dev/design/QR_CODE_TESTING.md).
