@@ -451,7 +451,7 @@ impl SvgRecorder {
         format!(
             "<svg xmlns=\"http://www.w3.org/2000/svg\" \
              xmlns:xlink=\"http://www.w3.org/1999/xlink\" \
-             width=\"{w}\" height=\"{h}\" viewBox=\"0 0 {w} {h}\">\
+             width=\"{w}pt\" height=\"{h}pt\" viewBox=\"0 0 {w} {h}\">\
              {backdrop}{defs}{body}</svg>\n",
             backdrop = if self.transparent {
                 String::new()

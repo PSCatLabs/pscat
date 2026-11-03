@@ -49,10 +49,16 @@ pub fn raster_png(bytes: &[u8]) -> Grey {
     grey_tiny(&tiny_skia::Pixmap::decode_png(bytes).expect("pscat PNG"))
 }
 
-/// resvg, an independent SVG renderer, at `scale` device pixels per SVG unit.
+/// resvg, an independent SVG renderer, at `scale` device pixels per point.
+/// pscat's SVG root carries `pt` units (#981); usvg converts them to pixels
+/// at its `dpi` (96 by default, which would make a 252pt page 336 px), so
+/// parse at 72 dpi to keep 1 pt = 1 px before `scale`.
 pub fn raster_svg(bytes: &[u8], scale: f32) -> Grey {
-    let tree =
-        resvg::usvg::Tree::from_data(bytes, &resvg::usvg::Options::default()).expect("parse SVG");
+    let options = resvg::usvg::Options {
+        dpi: 72.0,
+        ..Default::default()
+    };
+    let tree = resvg::usvg::Tree::from_data(bytes, &options).expect("parse SVG");
     let size = tree.size();
     let mut pixmap = resvg::tiny_skia::Pixmap::new(
         (size.width() * scale).round() as u32,
