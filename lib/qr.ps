@@ -1,6 +1,7 @@
 %!PS-Adobe-3.0
 % Native QR Model 2 library -- incremental implementation.
-% Byte-mode planning, packing and error correction; no matrix or rendering yet.
+% Byte-mode planning, packing, error correction and fixed-mask matrix
+% construction; no format/version BCH bits, mask selection or rendering yet.
 % Load with (lib/qr.ps) run. No dependencies and no drawing on load.
 % Code: MIT OR Apache-2.0, as the other lib/*.ps libraries.
 %
@@ -196,6 +197,21 @@ qr--block-count readonly pop
   qr--ecc-per-block 1 index known not { qr-level-must-be-L-M-Q-or-H } if
 } bind def
 
+% Trusted integer version 1..40 -> data-area module count, remainder bits
+% included. Shared by the layout planner and matrix placement so the two can
+% never disagree about how many codeword bits a symbol holds.
+% Base layout removes finder/separator/timing/format areas. Alignment
+% intersections depend on version; version metadata consumes 36 more bits.
+% @internal
+/qr--raw-modules {
+  dup dup 16 mul 128 add mul 64 add exch
+  dup 2 ge {
+    dup 7 idiv 2 add dup 25 mul 10 sub mul 55 sub
+    3 -1 roll exch sub exch
+    7 ge { 36 sub } if
+  } { pop } ifelse
+} bind def
+
 % qr--block-spec: version level -> fresh-layout-dict
 % RawCodewords excludes remainder bits; ECCodewordsPerBlock is per block.
 %%SelfTest: qr-block-spec-invalid-arguments
@@ -213,14 +229,7 @@ qr--block-count readonly pop
   10 dict begin
     /level exch def /version exch def
     /size version 4 mul 17 add def
-    % Base layout removes finder/separator/timing/format areas. Alignment
-    % intersections depend on version; version metadata consumes 36 more bits.
-    /raw version 16 mul 128 add version mul 64 add def
-    version 2 ge {
-      /centers version 7 idiv 2 add def
-      /raw raw centers 25 mul 10 sub centers mul 55 sub sub def
-      version 7 ge { /raw raw 36 sub def } if
-    } if
+    /raw version qr--raw-modules def
     /ec qr--ecc-per-block level get version 1 sub get def
     /blocks qr--block-count level get version 1 sub get def
     << /Version version /Level level /Size size
@@ -315,5 +324,227 @@ qr--block-count readonly pop
       } for
     } for
     out
+  end
+} bind def
+
+% ---- Matrix construction (QR-3) ----
+%
+% Internal matrix: << /Version v /Size s /Cells string /Mask null|0..7 >>.
+% /Cells holds s*s bytes, row-major from the top-left module: x is the column,
+% y the row, index y*s+x, no quiet zone. Each byte is a set of flags:
+%   1 dark, 2 function (never placed or masked), 4 metadata (format/version
+%   cells, reserved light here; the BCH stage writes them).
+% So data cells are 0/1, fixed patterns 2/3 (the dark module is 3) and
+% unwritten metadata 6. Bytes keep a v40 grid at 31 KB and make mask trials
+% cheap string copies; the public API converts to booleans.
+
+% Validate before any frame opens, mirroring qr--block-spec's version guards.
+% @internal
+/qr--check-version {
+  dup type /integertype ne { qr-version-must-be-integer } if
+  dup dup 1 lt exch 40 gt or { qr-version-must-be-in-1-40 } if
+} bind def
+
+% qr--alignment-centers: version -> fresh ascending array of row/column centers.
+% Evenly spaced from the far side, step rounded up to even, then 6; this
+% reproduces ISO/IEC 18004 Annex E, including version 32's irregular gap.
+%%SelfTest: qr-alignment-centers
+% 1 qr--alignment-centers length 0 eq (version one has none) mustbe
+% 2 qr--alignment-centers aload pop 18 eq exch 6 eq and (version two) mustbe
+% 7 qr--alignment-centers aload pop 38 eq exch 22 eq and exch 6 eq and (version seven) mustbe
+% 32 qr--alignment-centers 1 get 34 eq (version 32 irregular step) mustbe
+% 40 qr--alignment-centers dup length 7 eq exch 6 get 170 eq and (version forty) mustbe
+% { 0 qr--alignment-centers } /qr-version-must-be-in-1-40 (zero version) mustguard
+% { 2.0 qr--alignment-centers } /qr-version-must-be-integer (real version) mustguard
+%%EndSelfTest
+% @internal
+/qr--alignment-centers {
+  qr--check-version
+  dup 1 eq { pop [] } {
+    6 dict begin
+      /version exch def /n version 7 idiv 2 add def
+      /size version 4 mul 17 add def
+      /step version 8 mul n 3 mul add 5 add n 4 mul 4 sub idiv 2 mul def
+      /out n array def out 0 6 put
+      1 1 n 1 sub { /i exch def out n i sub size 7 sub i 1 sub step mul sub put } for
+      out
+    end
+  } ifelse
+} bind def
+
+% qr--function-matrix: version -> fresh unmasked matrix with every function
+% module and metadata reservation set and all data cells light (0).
+%%SelfTest: qr-function-matrix
+% 1 qr--function-matrix /Cells get length 441 eq (version one grid) mustbe
+% 1 qr--function-matrix /Cells get 13 21 mul 8 add get 3 eq (dark module) mustbe
+% 1 qr--function-matrix /Cells get 8 21 mul 8 add get 6 eq (format reservation) mustbe
+% 7 qr--function-matrix /Cells get 34 get 6 eq (version reservation) mustbe
+% 1 qr--function-matrix /Mask get null eq (unmasked) mustbe
+% { 41 qr--function-matrix } /qr-version-must-be-in-1-40 (large version) mustguard
+%%EndSelfTest
+% @internal
+/qr--function-matrix {
+  qr--check-version
+  12 dict begin
+    /version exch def /size version 4 mul 17 add def
+    /cells size dup mul string def
+    % x y value -> -, writing one cell flag byte.
+    /cell { 3 1 roll size mul add exch cells 3 1 roll put } def
+    0 1 size 1 sub {
+      /i exch def /v i 2 mod 0 eq { 3 } { 2 } ifelse def
+      6 i v cell i 6 v cell
+    } for
+    % Finder centers; the 9x9 square includes the light separator ring and
+    % is clipped at the symbol edge.
+    [[3 3] [size 4 sub 3] [3 size 4 sub]] {
+      aload pop /cy exch def /cx exch def
+      -4 1 4 { /dy exch def
+        -4 1 4 { /dx exch def
+          /x cx dx add def /y cy dy add def
+          x 0 ge x size lt and y 0 ge and y size lt and {
+            /d dx abs dy abs 2 copy lt { exch } if pop def
+            x y d 2 eq d 4 eq or { 2 } { 3 } ifelse cell
+          } if
+        } for
+      } for
+    } forall
+    /centers version qr--alignment-centers def /last centers length 1 sub def
+    0 1 last { /i exch def
+      0 1 last { /j exch def
+        % Skip the three corners occupied by finder patterns.
+        i 0 eq j 0 eq and i 0 eq j last eq and or i last eq j 0 eq and or not {
+          -2 1 2 { /dy exch def
+            -2 1 2 { /dx exch def
+              /d dx abs dy abs 2 copy lt { exch } if pop def
+              centers i get dx add centers j get dy add
+              d 1 eq { 2 } { 3 } ifelse cell
+            } for
+          } for
+        } if
+      } for
+    } for
+    % Format information: two 15-cell copies around the finders.
+    0 1 5 { 8 exch 6 cell } for
+    8 7 6 cell 8 8 6 cell 7 8 6 cell
+    0 1 5 { 8 6 cell } for
+    0 1 7 { size 1 sub exch sub 8 6 cell } for
+    size 7 sub 1 size 1 sub { 8 exch 6 cell } for
+    8 size 8 sub 3 cell
+    % Version information (v>=7): two 6x3 blocks beside the far finders.
+    version 7 ge {
+      0 1 5 { /b exch def
+        size 11 sub 1 size 9 sub { /a exch def a b 6 cell b a 6 cell } for
+      } for
+    } if
+    << /Version version /Size size /Cells cells /Mask null >>
+  end
+} bind def
+
+% qr--matrix: codewords version -> fresh unmasked matrix with every codeword
+% bit placed. Codewords are the complete interleaved stream (qr--interleave's
+% output). Bits go most significant first in the two-column zigzag, upward
+% from the bottom-right, skipping function cells and the vertical timing
+% column. Remainder cells (0-7) stay light data cells and are still masked.
+%%SelfTest: qr-matrix-guards
+% { () 1 qr--matrix } /qr-codewords-length-must-match-version (empty stream) mustguard
+% { 27 string 1 qr--matrix } /qr-codewords-length-must-match-version (long stream) mustguard
+% { [] 1 qr--matrix } /qr-codewords-must-be-a-string (array stream) mustguard
+% { 26 string 1.0 qr--matrix } /qr-version-must-be-integer (real version) mustguard
+% { 26 string 0 qr--matrix } /qr-version-must-be-in-1-40 (zero version) mustguard
+%%EndSelfTest
+%%SelfTest: qr-matrix-placement
+% 26 string 1 qr--matrix /Cells get 440 get 0 eq (light first bit) mustbe
+% 26 string dup 0 128 put 1 qr--matrix /Cells get 440 get 1 eq (first bit bottom right) mustbe
+% 26 string dup 0 64 put 1 qr--matrix /Cells get 439 get 1 eq (second bit left of first) mustbe
+% 26 string cvx 1 qr--matrix /Size get 21 eq (executable stream is data) mustbe
+%%EndSelfTest
+% @internal
+/qr--matrix {
+  qr--check-version
+  1 index type /stringtype ne { qr-codewords-must-be-a-string } if
+  1 index rcheck not { qr-codewords-must-be-readable } if
+  1 index length 1 index qr--raw-modules 8 idiv ne {
+    qr-codewords-length-must-match-version
+  } if
+  qr--function-matrix
+  12 dict begin
+    /m exch def /data exch cvlit def
+    /cells m /Cells get def /size m /Size get def
+    /nbits data length 8 mul def /i 0 def
+    size 1 sub -2 1 { /right exch def
+      right 6 le { /right right 1 sub def } if
+      /upward right 1 add 2 and 0 eq def
+      0 1 size 1 sub { /vert exch def
+        /row upward { size 1 sub vert sub } { vert } ifelse size mul def
+        0 1 1 { /j exch def /at row right add j sub def
+          cells at get 2 and 0 eq i nbits lt and {
+            cells at data i -3 bitshift get i 7 and 7 sub bitshift 1 and put
+            /i i 1 add def
+          } if
+        } for
+      } for
+    } for
+    m
+  end
+} bind def
+
+% Mask predicates, indexed by mask number, with x the column and y the row.
+% Each leaves 0 exactly where a data cell is inverted.
+% @internal
+/qr--mask-predicates [
+  { x y add 2 mod } bind
+  { y 2 mod } bind
+  { x 3 mod } bind
+  { x y add 3 mod } bind
+  { x 3 idiv y 2 idiv add 2 mod } bind
+  { x y mul dup 2 mod exch 3 mod add } bind
+  { x y mul dup 2 mod exch 3 mod add 2 mod } bind
+  { x y add 2 mod x y mul 3 mod add 2 mod } bind
+] def
+
+% Shape check shared by matrix consumers; leaves the matrix on the stack.
+% @internal
+/qr--check-matrix {
+  dup type /dicttype ne { qr-matrix-must-be-a-matrix } if
+  dup /Version known 1 index /Size known and
+  1 index /Cells known and 1 index /Mask known and not { qr-matrix-must-be-a-matrix } if
+  dup /Version get dup type /integertype eq { dup 1 ge exch 40 le and } { pop false } ifelse
+  not { qr-matrix-must-be-a-matrix } if
+  dup /Size get 1 index /Version get 4 mul 17 add ne { qr-matrix-must-be-a-matrix } if
+  dup /Cells get dup type /stringtype eq {
+    length 1 index /Size get dup mul eq
+  } { pop false } ifelse
+  not { qr-matrix-must-be-a-matrix } if
+  dup /Cells get rcheck not { qr-matrix-must-be-a-matrix } if
+} bind def
+
+% qr--apply-mask: unmasked-matrix mask -> fresh matrix with that one mask
+% applied to every non-function cell and /Mask set. The input is unchanged.
+% Re-masking is refused: masks are XORs, so a second one silently corrupts.
+%%SelfTest: qr-apply-mask
+% { 1 qr--function-matrix 8 qr--apply-mask } /qr-mask-must-be-in-0-7 (large mask) mustguard
+% { 1 qr--function-matrix -1 qr--apply-mask } /qr-mask-must-be-in-0-7 (negative mask) mustguard
+% { 1 qr--function-matrix 1.0 qr--apply-mask } /qr-mask-must-be-integer (real mask) mustguard
+% { 1 dict 0 qr--apply-mask } /qr-matrix-must-be-a-matrix (empty dictionary) mustguard
+% { 1 qr--function-matrix 0 qr--apply-mask 1 qr--apply-mask } /qr-matrix-already-masked (double mask) mustguard
+% 1 qr--function-matrix 0 qr--apply-mask /Cells get 440 get 1 eq (mask 0 inverts even sum) mustbe
+% 1 qr--function-matrix 1 qr--apply-mask /Cells get 439 get 1 eq (mask 1 inverts even rows) mustbe
+% 1 qr--function-matrix 7 qr--apply-mask /Mask get 7 eq (mask recorded) mustbe
+%%EndSelfTest
+% @internal
+/qr--apply-mask {
+  dup type /integertype ne { qr-mask-must-be-integer } if
+  dup dup 0 lt exch 7 gt or { qr-mask-must-be-in-0-7 } if
+  1 index qr--check-matrix /Mask get null ne { qr-matrix-already-masked } if
+  10 dict begin
+    /mask exch def /src exch def /size src /Size get def
+    /cells src /Cells get dup length string copy def
+    /test qr--mask-predicates mask get def
+    0 1 size 1 sub { /y exch def
+      0 1 size 1 sub { /x exch def /at y size mul x add def
+        cells at get 2 and 0 eq { test 0 eq { cells at cells at get 1 xor put } if } if
+      } for
+    } for
+    << /Version src /Version get /Size size /Cells cells /Mask mask >>
   end
 } bind def
