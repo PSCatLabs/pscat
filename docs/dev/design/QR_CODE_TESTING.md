@@ -2,7 +2,8 @@
 
 Scope: [implemented data/correction/matrix API](QR_CODE_API.md): data and
 correction through commit `deba699`, plus matrix construction (#970) and
-metadata, penalties, mask selection and the first decode proof (#971). The
+metadata, penalties, mask selection and the first decode proof (#971), plus
+the public `qrencode`/`qrdraw` API and its PNG/SVG/PDF export checks (#972). The
 [Opus handoff](QR_CODE_REVIEW.md) gives the review scope and expected report.
 
 ## Reproduce normal checks
@@ -25,8 +26,9 @@ body=$(mktemp "${TMPDIR:-/tmp}/qr-pr-body.XXXXXX") && gh pr view 957 --json body
 ```
 
 Normal Rust tests use checked-in JSON and need no network, oracle checkout or
-pip package. The one test-only dependency is the `rqrr` QR decoder (#971), a
-Rust dev-dependency that Cargo builds into the test binary. `--offline` can be added to Cargo commands if
+pip package. The test-only dependencies are Rust dev-dependencies that Cargo
+builds into the test binary: the `rqrr` QR decoder (#971), and the `resvg`
+SVG and `hayro` PDF rasterizers (#972), all pinned exactly. `--offline` can be added to Cargo commands if
 the existing dependencies are cached. Existing standard-35 fonts are embedded;
 no optional font pack is required. Review `git status` after checks.
 
@@ -133,6 +135,44 @@ has no skip path: if it cannot decode, the suite fails. `rqrr` is a separate
 implementation (based on quirc); it shares no code with `lib/qr.ps` or the
 fixture oracle.
 
+## Export proof (#972)
+
+`png_svg_and_pdf_exports_keep_the_matrix_and_quiet_zone_and_decode` renders
+each case with `pscat --png`, `--svg` and `--pdf` (one unique
+`common::scratch_dir` per child, the standard child deadline) and rasterizes
+the SVG with [`resvg`](https://crates.io/crates/resvg) 0.49.0 and the PDF with
+[`hayro`](https://crates.io/crates/hayro) 0.5.0 (both MIT OR Apache-2.0, pure
+Rust, no default features; hayro is held below 0.7, which needs rustc 1.92).
+Neither shares code with pscat's rasterizer. For each raster it checks:
+
+- every module centre against `/Modules`, mapping row 0 to the top of the
+  raster (a flipped symbol still decodes, so decoding alone would not catch
+  it), and every quiet-zone module light;
+- the pixel straddling each edge between two dark modules is black (≤ 8):
+  the whole symbol is one path filled once, so these read exactly 0, while
+  filling runs separately leaves grey seams at a fractional pitch;
+- `rqrr` finds exactly one symbol and decodes the exact text, version, mask
+  and level.
+
+Cases: the GitHub URL at L/M/Q/H at 4 px/module; at M with a 2.9 pt module,
+3.3 pt origin and 1.3x scale (3.77 px/module, nothing on the pixel grid); a
+139-byte URL forced to version 10 (version-information blocks), level Q,
+mask 5, at 5.7 px/module. Failures name the fixture, version, level, mask,
+pitch, export and failing stage, e.g. `github-M-fractional v3 M mask 0 (2.9
+pt/module, x1.3): PNG: seam below (0, 2), grey 61`. The decoder and both
+rasterizers are compiled in, so this test cannot skip. `rqrr` (quirc-based)
+fails to find a version-10 symbol at about 4 px/module in any of the three
+rasters, so that case uses 5.7 px/module; this is a decoder limit, not a
+rendering fault, and #973's corpus should add a second decoder.
+
+`svg_export_is_one_light_square_and_one_path_of_run_rectangles` checks the
+vector geometry: one light path, one dark path whose subpaths equal the
+symbol's horizontal dark runs. `light_null_leaves_the_surface_below_unpainted`
+checks `/Light null`. `tagged_capabilities_run_from_the_embedded_distribution`
+reads `qrencode`/`qrdraw` from `pscat --capabilities`, runs their `load` and
+`example` lines in an empty directory with `PSCAT_NO_CHECKOUT=1`, asserts the
+`lib/qr.ps <- embedded` trace and decodes the example's PNG.
+
 ## Behavioral and portability assertions
 
 The [Rust tests](../../../tests/qr.rs) also check input immutability, fresh
@@ -150,10 +190,10 @@ are both pinned.
 
 ## What remains unverified
 
-Complete symbols exist and one PNG render per level decodes with one
-independent decoder, at one scale. There is no public drawing API, SVG/PDF QR
-export, multi-scale or rasterized-vector decode, multi-decoder corpus,
-physical-card sizing check or card artwork. No claim of complete ISO/IEC 18004
+The public API draws symbols whose PNG, SVG and PDF exports decode with one
+independent decoder at two pitches (#972). There is no all-version decode
+sweep, multi-decoder corpus, physical-card sizing check or card artwork
+(#973, #974). No claim of complete ISO/IEC 18004
 conformance or scanner reliability is made. Later decode tests must, like
 #971's, fail if the decoder is unavailable; they must not inherit the
 optional-Ghostscript skip convention.

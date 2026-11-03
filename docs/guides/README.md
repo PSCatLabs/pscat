@@ -43,3 +43,8 @@ skimmed [artkit](artkit.md) (it is the base most of them load).
 
 - [Charts and plots](charts.md): function plots, surfaces and bar, line, pie
   and scatter charts.
+
+## QR codes
+
+- [QR codes](qr-codes.md): encode a URL or other text as a QR symbol and
+  draw it as vector geometry that scans from PNG, SVG and PDF.

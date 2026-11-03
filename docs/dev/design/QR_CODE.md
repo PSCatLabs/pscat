@@ -15,8 +15,9 @@ planning, Reed–Solomon correction and block interleaving, and (#970) function
 patterns, zigzag placement and forced masks, and (#971) format/version BCH
 metadata, the four penalty rules and automatic mask selection, giving complete
 symbols that an independent decoder reads back, with exact named guards,
-selftests, independent fixtures and native/Ghostscript/embedded-loader checks.
-The public API and drawing (#972) are pending.
+selftests, independent fixtures and native/Ghostscript/embedded-loader checks,
+and (#972) the public `qrencode`/`qrdraw` API with vector drawing, whose PNG,
+SVG and PDF exports are rasterized and decoded independently.
 The original `qr--byte-data` seam accepts explicit capacity; version selection
 now lives in `qr--byte-plan`. No Rust engine changes or runtime dependencies
 were added; #971 adds one test-only dev-dependency, the `rqrr` decoder. A separate same-family plan review
@@ -56,14 +57,21 @@ files only if size/maintenance justifies it; metadata `@requires` does not
 execute a load chain. No QR interpreter operator, Rust encoder, package or
 service is needed. Rust integration tests may inspect output or invoke tools.
 
-Proposed interface (not implemented yet):
+Implemented interface (#972; [contract](QR_CODE_API.md#public-api-qrencode-and-qrdraw),
+[guide](../../guides/qr-codes.md)):
 
 ```postscript
 (lib/qr.ps) run
+18 18 moveto
 (https://github.com/PSCatLabs/pscat) << /Level /M >> qrencode
-/symbol exch def
-symbol 18 18 90 << /Foreground [0 0 0] /Background [1 1 1] >> qrdraw
+<< /Side 90 /Dark [0 0 0] /Light [1 1 1] >> qrdraw
 ```
+
+Two departures from the first proposal below: `qrdraw` draws at the current
+point instead of taking `x y side` operands, with the size in its options
+(`/ModuleSize` or `/Side`), and the colors are `/Dark` and `/Light`, the
+standard's own terms, rather than `/Foreground`/`/Background`. `/Modules` is
+an array of row arrays. The original proposal follows for the record.
 
 `qrencode`: payload string and options -> dictionary with `/Version`, `/Level`,
 `/Mask`, `/Size` and `/Modules`. Modules are row-major booleans, top-left origin;
@@ -240,6 +248,28 @@ decodes to exactly `https://github.com/PSCatLabs/pscat` at all four levels
 with the independent `rqrr` decoder, which also reports the expected version,
 mask and level. This is the first scan proof; SVG/PDF and multi-scale decoding
 are later work (#972, #973).
+
+### Public API checkpoint (QR-5, #972)
+
+`qrencode` and `qrdraw` are the public, catalog-tagged procedures
+([contract](QR_CODE_API.md#public-api-qrencode-and-qrdraw)). Every argument is
+checked on the operand stack before a frame, `gsave` or path change, so named
+failures leave the dictionary stack and graphics state alone. `qrdraw` fills
+one path of run rectangles whose corners are all `origin + k * module`, so
+touching modules share exact edges: the seam pixel between two dark modules
+reads 0 (black) in pscat's PNG, resvg's SVG raster and hayro's PDF raster,
+including at a fractional 3.77 px/module pitch with a fractional origin. A
+mutant that fills each run separately leaves grey seams there and fails.
+
+Exports: for the GitHub URL at L/M/Q/H (4 px/module), the same URL at a
+fractional pitch, and a version-10 payload with a forced mask, the PNG, SVG
+and PDF exports are each rasterized (pscat; resvg 0.49.0; hayro 0.5.0, both
+pure-Rust dev-dependencies) and checked module by module with row 0 at the
+top, over the whole quiet zone, for seams, and by `rqrr` decoding the exact
+text, version, mask and level. The catalog's own `load` and `example` lines
+run from the embedded copy with the checkout hidden, and the skill's QR
+block runs on a bare install. Ghostscript reproduces `/Modules` and the
+state contract. A v40 symbol encodes and draws in about 0.5 s in PSCat.
 
 ## Business card target
 

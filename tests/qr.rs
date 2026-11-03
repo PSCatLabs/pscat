@@ -1,5 +1,6 @@
-//! QR data, correction, matrix, mask-selection and decode regression tests. Frozen fixtures come from an independent,
-//! pinned encoder, not a second implementation of our packing algorithm.
+//! QR data, correction, matrix, mask-selection, public-API and export regression tests. Frozen fixtures come from an
+//! independent, pinned encoder, not a second implementation of our packing algorithm; exports are rasterized by
+//! independent renderers (resvg, hayro) and read back by an independent decoder (rqrr).
 
 mod common;
 use common::CommandDeadline as _;
