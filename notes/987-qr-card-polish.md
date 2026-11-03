@@ -23,15 +23,17 @@ header comment says so. The tests are unchanged.
 **Front: one lockup.** The first front set a 64 pt tile and a 38 pt wordmark
 whose top sat well below the tile's, and the wordmark ended at x 210 against
 a rule that runs to 234, so the top right read empty. The front now aligns
-three edges, measured from the faces' outlines (`charpath pathbbox`, in the
-source's comment):
+three edges, measured as ink from a 1000 pt raster (the outline's
+`pathbbox` reaches the t's advance, not its ink, and set the wordmark 4 pt
+short of the rule in the first try; the perceptual reviewer caught it):
 
 - the tile is 70 pt, at (18, 52);
-- Courier-Bold "pscat" at 45 pt from x 99: its ink runs from 102.1 (over the
-  tagline's first stroke) to 234, the rule's right end, and from baseline 92
-  the t tops out at 122, level with the tile's top;
-- the tagline is 13 pt Palatino Italic (was 11), its last baseline on the
-  tile's bottom edge.
+- Courier-Bold "pscat" at 46.5 pt from x 98.9: its ink (x 68 to 2906 per
+  1000) runs from 102.1, over the tagline's first stroke, to 234, the
+  rule's right end, and from baseline 91 the t tops out at 122, level with
+  the tile's top;
+- the tagline is 13 pt Palatino Italic (was 11) on 15 pt leading, its last
+  baseline on the tile's bottom edge.
 
 The block sits 22 pt under the top trim and 19 pt above the rule. The back
 is byte-identical (300 dpi PNG compared), so the QR is untouched.

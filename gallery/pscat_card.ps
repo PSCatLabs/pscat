@@ -99,18 +99,19 @@
 
 % The front is one lockup: the 70 pt tile, the wordmark and the tagline
 % share its top and bottom edges, and the wordmark runs out to the rule's
-% right end. The numbers come from the faces' outlines (charpath
-% pathbbox, per 1000 units of the em): the ink of Courier-Bold "pscat"
-% spans x 68 to 3000 and y -208 to 666 (the t's top), and Palatino-Italic
-% "PostScript" starts its ink at x 9. So at 45 pt, drawn from x 99, the
-% wordmark's ink runs from 102.1 (over the tagline's first stroke) to 234
-% (the rule's end), and from baseline 92 its t tops out at 122, level
-% with the tile; the tagline's last baseline sits on the tile's bottom, 52.
+% right end. The numbers are the faces' ink, measured from a 1000 pt
+% raster (per 1000 units of the em; the advance widths would overshoot):
+% Courier-Bold "pscat" inks x 68 to 2906 and y -208 to 666 (the t's top),
+% and Palatino-Italic "P" starts its ink at x 9. So at 46.5 pt, drawn from
+% x 98.9, the wordmark's ink runs from 102.1 (over the tagline's first
+% stroke) to 234 (the rule's end), and from baseline 91 its t tops out at
+% 122, level with the tile; the tagline's last baseline sits on the tile's
+% bottom, 52.
 /front {
   gsave
   18 52 70 logo
-  ink /Courier-Bold 45 (pscat) 99 92 setline
-  /Palatino-Italic 13 (PostScript for precision) 102 67.5 setline
+  ink /Courier-Bold 46.5 (pscat) 98.9 91 setline
+  /Palatino-Italic 13 (PostScript for precision) 102 67 setline
   /Palatino-Italic 13 (and imagination.) 102 52 setline
   mustard 18 31.5 216 1.2 rectfill
   navy /Helvetica-Bold findfont 9 scalefont setfont
