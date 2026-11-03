@@ -3043,6 +3043,7 @@ mod tests {
     ///   cargo test --release watercolor_prototype_b_alpha_sample -- --ignored
     #[test]
     #[ignore = "writes docs/dev/design/watercolor_prototypes/approach_b_alpha_ext.png; issue #46 spike prototype, not a regression test"]
+    #[allow(clippy::disallowed_methods)] // a design-doc image, not pscat output
     fn watercolor_prototype_b_alpha_sample() {
         let mut gfx = Gfx::new(620, 620).expect("620x620 pixmap");
 

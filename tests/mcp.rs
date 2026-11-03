@@ -2904,7 +2904,9 @@ fn jobs_past_the_running_cap_queue_and_can_be_cancelled_there() {
 fn job_tools_refuse_bad_arguments_and_unknown_jobs_at_once() {
     let mut s = Server::start_in(
         &common::scratch_dir("mcp-job-args"),
-        &["--max-image-bytes", "100"],
+        // A blank 20 x 20 page is 116 bytes with its pHYs chunk (#982); the
+        // noisy 100 x 100 page below is far over any cap this small.
+        &["--max-image-bytes", "150"],
     );
     initialized(&mut s);
     // `render_postscript`'s checks run before a job exists.
@@ -3460,4 +3462,70 @@ fn render_tools_honour_a_page_size_preamble() {
         "{}",
         status(&mut s, &job)
     );
+}
+
+/// #982: every PNG the server hands back records its resolution in a `pHYs`
+/// chunk: render_postscript and start_render at the default and at
+/// `dpi: 300`, handwrite, review_sheet and chalkboard_math (its own 144 dpi
+/// default) alike, whether the PNG comes back inline or goes to `out_path`.
+#[test]
+fn every_png_the_server_returns_records_its_resolution() {
+    let root = common::scratch_dir("mcp-phys");
+    let mut s = Server::start_in(&root, &[]);
+    initialized(&mut s);
+    let inline = |result: &Value| -> Vec<u8> {
+        assert_eq!(result["isError"], false, "{result}");
+        unbase64(&images(result)[0])
+    };
+    let phys = |png: &[u8]| common::png_phys(png);
+
+    let mut args = json!({ "source": "0 0 40 40 rectfill showpage", "width": 40, "height": 40 });
+    assert_eq!(
+        phys(&inline(&s.tool("render_postscript", args.clone()))),
+        (2835, 2835, 1)
+    );
+    assert_eq!(
+        phys(&inline(&job_result_of(&mut s, args.clone()))),
+        (2835, 2835, 1)
+    );
+    args["dpi"] = json!(300);
+    assert_eq!(
+        phys(&inline(&s.tool("render_postscript", args.clone()))),
+        (11811, 11811, 1)
+    );
+    assert_eq!(
+        phys(&inline(&job_result_of(&mut s, args.clone()))),
+        (11811, 11811, 1)
+    );
+    args["bands"] = json!(2);
+    assert_eq!(
+        phys(&inline(&s.tool("render_postscript", args.clone()))),
+        (11811, 11811, 1)
+    );
+    args["out_path"] = json!("rendered.png");
+    assert_eq!(s.tool("render_postscript", args)["isError"], false);
+    assert_eq!(
+        phys(&std::fs::read(root.join("rendered.png")).unwrap()),
+        (11811, 11811, 1)
+    );
+
+    let note = s.tool(
+        "handwrite",
+        json!({ "text": "hi", "size": 24, "seed": 3, "dpi": 300 }),
+    );
+    assert_eq!(phys(&inline(&note)), (11811, 11811, 1));
+
+    // A chalkboard defaults to 144 dpi.
+    let board = s.tool(
+        "chalkboard_math",
+        json!({ "latex": "x^2", "width": 200, "height": 100 }),
+    );
+    assert_eq!(phys(&inline(&board)), (5669, 5669, 1));
+
+    // A sheet mixes cells of any dpi: nominal 72.
+    let sheet = s.tool(
+        "review_sheet",
+        json!({ "entries": [{ "source": "0 0 20 20 rectfill showpage", "width": 40, "height": 40 }], "dpi": [72, 144] }),
+    );
+    assert_eq!(phys(&sheet_png(&sheet)), (2835, 2835, 1));
 }

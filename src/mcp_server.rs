@@ -2752,8 +2752,8 @@ fn review_sheet(cfg: &Config, args: &Value) -> Result<Value, ToolError> {
         }
     }
     let sheet_png = scratch.path().join("sheet.png");
-    out.save_png(&sheet_png)
-        .map_err(|e| format!("write the sheet: {e}"))?;
+    // A sheet mixes cells of any dpi: nominal 72 dpi, as `pscat sheet`.
+    pscat::png::save(&out, 1.0, &sheet_png).map_err(|e| format!("write the sheet: {e}"))?;
     drop(out);
     let pages = [sheet_png];
     let written = match &dest {
