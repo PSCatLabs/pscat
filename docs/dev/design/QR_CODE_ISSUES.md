@@ -8,7 +8,7 @@ unrelated issues.
 
 Branch: `feature/qr-code-library`. [Architecture/sequence](QR_CODE.md).
 #967, #968 and #969 (QR-1, QR-2A, QR-2B) are implemented in draft PR #957;
-#970 (QR-3) is next.
+#970 (QR-3) is implemented on this branch; #971 (QR-4) is next.
 
 | ID | Issue | Title | Depends on |
 |---|---|---|---|
@@ -66,7 +66,8 @@ this initial effort. Complete only after tests, docs and independent review.
 
 ## QR-4 (#971) — masks and working symbol
 
-- All eight mask predicates applied only to data cells.
+- All eight mask predicates applied only to data cells (`qr--apply-mask`,
+  landed in #970 for the fixed-mask oracle comparison; #971 reuses it).
 - Correct format/version BCH placement for each ECC/mask.
 - Four penalty rules with targeted edge cases and deterministic tie breaking.
 - Minimal vector proof produced by PSCat independently decodes the GitHub URL

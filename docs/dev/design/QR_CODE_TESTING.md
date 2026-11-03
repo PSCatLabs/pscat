@@ -1,7 +1,7 @@
 # QR checkpoint verification
 
-Scope: [implemented data/correction API](QR_CODE_API.md) through implementation
-commit `deba699`, plus the subsequent review documentation. The
+Scope: [implemented data/correction/matrix API](QR_CODE_API.md): data and
+correction through commit `deba699`, plus matrix construction (#970). The
 [Opus handoff](QR_CODE_REVIEW.md) gives the review scope and expected report.
 
 ## Reproduce normal checks
@@ -40,9 +40,9 @@ committed. The oracle checkout is also on that external drive.
 |---|---|
 | Locked CI-profile build | Passed. |
 | Full locked offline CI-profile repository suite | Passed, exit 0. |
-| Final QR integration suite | 15 tests passed; no failed or ignored QR tests. |
+| Final QR integration suite | 15 tests passed; no failed or ignored QR tests. #970 adds seven (22 total), all passing with Ghostscript present. |
 | Real Ghostscript portability/reference checks | Executed and passed on the Mac, not skipped. |
-| Inline `--selftest lib/qr.ps` | Eight blocks passed. |
+| Inline `--selftest lib/qr.ps` | Eight blocks passed; 13 after #970. |
 | Manifest/strict-driver suite | All 38 `tests/selftest.rs` checks passed in the full run. |
 | All-target Clippy, warnings denied | Passed. |
 | Formatting, Markdown links, gallery manifest, licenses | Passed. |
@@ -79,6 +79,7 @@ regenerate their own expected outputs.
 | [Byte vectors](../../../tests/data/qr_byte_vectors.json) | 98 empty, maximum binary and GitHub URL cases at selected versions, every ECC; captures real padded data before matrix construction. |
 | [Planning vectors](../../../tests/data/qr_planning_vectors.json) | All 160 layouts plus 504 automatic selections at maximum-1/maximum/maximum+1, short and count-width cases; expected versions come from actual automatic encoding, with padded-data SHA-256. |
 | [Correction vectors](../../../tests/data/qr_correction_vectors.json) | All 65,536 field products by hash; 30 divisors, 91 remainders, all 160 interleaved-layout hashes, nine full hex streams, and four complete GitHub URL streams. |
+| [Matrix vectors](../../../tests/data/qr_matrix_vectors.json) | Alignment centers and function/metadata/fixed-pattern grids for all 40 versions (full grids at 1, 2, 7, 10, 27, 40); placement at eight versions unmasked and under all eight masks; nine end-to-end symbols including unequal blocks; the GitHub URL at L/M/Q/H. Captured from the oracle's real constructor at a fixed mask. |
 
 Byte/planning generation explicitly constructs one BYTE segment, including for
 empty input, fixes ECC with boosting disabled and captures the constructor
@@ -92,6 +93,18 @@ Interleave inputs use `(149*i + floor(i/251) + 17*version + 23*levelOrdinal)
 mod 256`. They are deliberately not periodic every 256 bytes, exposing truncated
 indexes. Long data and unequal block groups are included. Both all-short and
 mixed groups are covered.
+
+Matrix generation runs the oracle's real constructor with a fixed mask and
+records its own intermediate grids: the function grid and fixed values when it
+calls `_draw_codewords`, and the module grid before and after `_apply_mask`.
+Metadata cells are those written by its format/version routines, except the
+one cell dark for every level and mask (the dark module), found empirically
+across 32 runs per version. Format/version cells are cleared to light in the
+compared grids until #971 computes their BCH bits. Placement fixtures inject
+`(149*i + floor(i/251) + 31*version) mod 256` codewords in place of the
+oracle's correction output, so a placement failure cannot be a correction
+failure. Full grids are stored packed (one bit per cell, row-major) where a
+mismatch should name the cell; the rest are SHA-256 of one byte per cell.
 
 ## Behavioral and portability assertions
 
@@ -110,10 +123,12 @@ are both pinned.
 
 ## What remains unverified
 
-No QR matrix or render exists. There is no independent decoding result, quiet-
+Matrices are built and masked, but carry no format/version BCH bits yet, so
+none is a complete symbol. No render exists. There is no independent decoding result, quiet-
 zone proof, SVG/PDF/PNG QR export, physical-card sizing check or card artwork.
 No claim of complete ISO/IEC 18004 conformance or scanner reliability is made.
-The current stage verifies data encoding and correction only. Future required
+The current stages verify data encoding, correction, matrix placement and
+forced masks only. Future required
 decode tests must fail if the decoder is unavailable; they must not inherit
 the optional-Ghostscript skip convention.
 
