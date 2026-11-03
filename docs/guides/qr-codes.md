@@ -17,12 +17,35 @@ That draws a 148-point square (29 modules plus a 4-module quiet zone on
 each side, 4 points per module) with its lower-left corner at (72, 72).
 `pscat --png`, `--svg` and `--pdf` export the same geometry.
 
+![Four QR symbols for the pscat repository URL: black on white, navy on cream at level H, CMYK blue, and black on a green ground with no light paint](qr/specimen.png)
+
+The four symbols above, all `/Side 140`, come from this program
+(`pscat --page 640x210 --dpi 144 --png specimen.png specimen.ps`):
+
+```postscript
+(lib/qr.ps) run
+/url (https://github.com/PSCatLabs/pscat) def
+/Helvetica findfont 9 scalefont setfont
+/label { 0.25 setgray moveto show } def
+0.96 0.95 0.92 setrgbcolor clippath fill
+20 50 moveto url << >> qrencode << /Side 140 >> qrdraw
+(defaults: /M, black on white) 20 32 label
+175 50 moveto url << /Level /H >> qrencode
+  << /Side 140 /Dark [0.1 0.15 0.35] /Light [1 0.97 0.9] >> qrdraw
+(/Level /H, navy on cream) 175 32 label
+330 50 moveto url << >> qrencode << /Side 140 /Dark [1 0.6 0 0.2] /Light [0 0 0.05 0] >> qrdraw
+(CMYK colors) 330 32 label
+0.85 0.9 0.8 setrgbcolor 485 50 140 140 rectfill
+485 50 moveto url << >> qrencode << /Side 140 /Light null >> qrdraw
+(/Light null: the ground shows) 485 32 label
+```
+
 ## Encode: `payload opts qrencode -> symbol`
 
 `payload` is a string of raw bytes. Plain ASCII, such as a URL, works as
-it is. pscat does no Unicode conversion and writes no ECI header, so for
-non-ASCII text, pass UTF-8 bytes and expect most scanners to guess the
-encoding. Every symbol uses byte mode.
+it is. Every symbol uses byte mode. pscat does no Unicode conversion and
+writes no ECI header: non-ASCII text goes in as whatever bytes the string
+holds, so pass UTF-8 bytes.
 
 | Option | Value | Default |
 |---|---|---|
@@ -85,9 +108,10 @@ What `qrdraw` paints:
 2. One filled path holding one rectangle per horizontal run of dark modules.
 
 Every corner is `origin + k * module` for a whole number `k`, so
-neighboring modules share their edges exactly. Because the runs are one
-path filled once, no hairline gaps appear between modules at any scale or
-resolution, in PNG, SVG or PDF. For the crispest PNG, choose a module size
+neighboring modules share their edges exactly, and the runs are one path
+filled once. So no hairline gap opens between touching modules: the test
+suite checks this pixel by pixel at a fractional scale in pscat's PNG and
+in independent renderings of its SVG and PDF. For the crispest PNG, choose a module size
 that is a whole number of device pixels (`--dpi 72` makes 1 point 1 pixel)
 and an origin on the pixel grid.
 

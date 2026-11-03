@@ -1016,8 +1016,8 @@ qr--level-bits readonly pop
 % @kind: Procedure
 % @summary: Draw a qrencode symbol as vector geometry with the lower-left corner of its quiet zone at the current point: a light square (unless /Light is null), then one filled path holding one rectangle per horizontal run of dark modules, with every edge shared exactly by its neighbors, so no hairline gaps appear at any scale. Exactly one of /ModuleSize and /Side is required. The caller's graphics state, path, current point and dictionary stack are unchanged; arguments are checked first, with named errors (qr-quiet-zone-must-be-at-least-4, qr-dark-must-be-darker-than-light, ...).
 % @example: 72 72 moveto (https://github.com/PSCatLabs/pscat) << >> qrencode << /ModuleSize 4 >> qrdraw
-% @param: /ModuleSize [points] Side of one module; the whole drawing is (Size + 2 * QuietZone) * ModuleSize square (default null)
-% @param: /Side [points] Side of the whole drawing, quiet zone included; the module size is derived from it (default null)
+% @param: /ModuleSize [points] Side of one module; the whole drawing is (Size + 2 * QuietZone) * ModuleSize square. Give this or /Side, not both
+% @param: /Side [points] Side of the whole drawing, quiet zone included; the module size is derived from it. Give this or /ModuleSize, not both
 % @param: /QuietZone [count] Light margin in modules on every side, at least 4 as the standard requires (default 4)
 % @param: /Dark [0..1 or array of 0..1] Dark-module color: a gray level, or [gray], [r g b] or [c m y k] (default 0)
 % @param: /Light [0..1 or array of 0..1] Light-module and quiet-zone color, same forms as /Dark and lighter than it; null paints nothing, leaving the surface below to show through (default 1)

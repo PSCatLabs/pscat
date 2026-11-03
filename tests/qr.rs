@@ -2313,6 +2313,8 @@ fn tagged_capabilities_run_from_the_embedded_distribution() {
         // Run the catalog's own load + example in an empty directory, with the
         // checkout hidden, so it can only resolve from the embedded copy.
         let dir = common::scratch_dir(&format!("qr-capability-{name}"));
+        // An empty home too, so no installed user-data lib/ can shadow it.
+        let home = common::scratch_dir(&format!("qr-capability-home-{name}"));
         let png = dir.join("example.png");
         let ps = dir.join("example.ps");
         std::fs::write(
@@ -2327,6 +2329,9 @@ fn tagged_capabilities_run_from_the_embedded_distribution() {
             .env_remove("PSCAT_LIB")
             .env("PSCAT_NO_CHECKOUT", "1")
             .env("PSCAT_TRACE_RESOURCES", "1")
+            .env("HOME", &home)
+            .env("XDG_DATA_HOME", &home)
+            .env("APPDATA", &home)
             .args(["--page", "300x300", "--dpi", "72", "--png"])
             .arg(&png)
             .arg(&ps)
