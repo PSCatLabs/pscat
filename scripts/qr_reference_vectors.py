@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regenerate offline QR data and matrix fixtures with a separately checked-out Nayuki oracle.
+"""Regenerate offline QR data, matrix and mask fixtures with a separately checked-out Nayuki oracle.
 
 Not used by normal tests. No network access or third-party package installation.
 Usage: python3 scripts/qr_reference_vectors.py /path/to/QR-Code-generator
@@ -359,6 +359,191 @@ def generate_matrix(reference):
             "symbols": symbols, "github": github}
 
 
+def penalty_grids():
+    """Hand-built edge cases for the four penalty rules, plus seeded noise.
+
+    Each row spec is a run string: D dark, L light; unspecified cells are light.
+    """
+    def blank(size):
+        return [[False] * size for _ in range(size)]
+
+    def put_row(grid, y, spec):
+        for x, ch in enumerate(spec.replace(" ", "")):
+            grid[y][x] = ch == "D"
+        return grid
+
+    def transpose(grid):
+        return [list(row) for row in zip(*grid)]
+
+    finder = "DLDDDLD"
+    rows = {
+        "finder-left-edge": finder,
+        "finder-right-edge": "L" * 14 + finder,
+        "finder-four-light-both-sides": "D LLLL " + finder + " LLLL D",
+        "finder-three-light-both-sides": "D LLL " + finder + " LLL D",
+        "finder-four-light-left-one-right": "D LLLL " + finder + " L D",
+        "finder-four-light-right-one-left": "D L " + finder + " LLLL D",
+        "finder-four-light-left-none-right": "D LLLL " + finder + "D",
+        "finder-scaled-two": "DDLLDDDDDDLLDD LLLLLLL",
+        "finder-scaled-two-short-light": "DD LLLLL DDLLDDDDDDLLDD",
+        "finder-wrong-centre": "D LLLL DLDDLD LLLL D",
+        "finder-dark-edge-left": "D" + "L" * 4 + finder,
+        "runs-five-six-seven": "DDDDD L DDDDDD L DDDDDDD",
+        "run-four": "DDDD L DDDD L DDDD",
+    }
+    cases = []
+    for name, spec in rows.items():
+        assert len(spec.replace(" ", "")) <= 21, name
+        cases.append((name, put_row(blank(21), 10, spec)))
+    cases.append(("finder-vertical-top-edge", transpose(put_row(blank(21), 3, finder))))
+    cases.append(("finder-vertical-both-sides",
+                  transpose(put_row(blank(21), 0, rows["finder-four-light-both-sides"]))))
+    cases.append(("all-light", blank(21)))
+    cases.append(("all-dark", [[True] * 21 for _ in range(21)]))
+    cases.append(("checkerboard", [[(x + y) % 2 == 0 for x in range(21)] for y in range(21)]))
+    cases.append(("two-by-two-blocks", [[(x // 2 + y // 2) % 2 == 0 for x in range(21)]
+                                        for y in range(21)]))
+    cases.append(("three-by-three-block", [[2 <= x <= 4 and 2 <= y <= 4 for x in range(21)]
+                                           for y in range(21)]))
+    # Dark shares around the N4 band edges (441 cells: 45% = 198.45, 55% = 242.55).
+    state = 12345
+
+    def rand():
+        nonlocal state
+        state = (state * 1103515245 + 12345) % (1 << 31)
+        return state
+
+    for dark in (154, 176, 177, 198, 199, 220, 221, 242, 243):
+        order = sorted(range(441), key=lambda i: (rand(), i))
+        chosen = set(order[:dark])
+        cases.append((f"balance-{dark}-dark",
+                      [[(y * 21 + x) in chosen for x in range(21)] for y in range(21)]))
+    for size in (21, 25, 45):
+        cases.append((f"noise-{size}", [[(rand() >> 16) & 1 == 1 for _ in range(size)]
+                                        for _ in range(size)]))
+    return cases
+
+
+def generate_mask(reference):
+    module, source_hash = load_reference(reference)
+    qr = module.QrCode
+    levels = {"L": qr.Ecc.LOW, "M": qr.Ecc.MEDIUM,
+              "Q": qr.Ecc.QUARTILE, "H": qr.Ecc.HIGH}
+    set_module = qr._set_function_module
+
+    def bare(version, level=qr.Ecc.LOW):
+        symbol = object.__new__(qr)
+        symbol._version, symbol._size, symbol._errcorlvl = version, version * 4 + 17, level
+        symbol._modules = [[False] * symbol._size for _ in range(symbol._size)]
+        symbol._isfunction = [[False] * symbol._size for _ in range(symbol._size)]
+        return symbol
+
+    def calls(method, symbol, *args):
+        """(x, y, dark) for every module the oracle routine writes, in order."""
+        out = []
+
+        def record(self, x, y, isdark):
+            out.append((x, y, bool(isdark)))
+            set_module(self, x, y, isdark)
+
+        with patch.object(qr, "_set_function_module", record):
+            method(symbol, *args)
+        return out
+
+    # Format words: bit i is the oracle's i-th write; the second copy repeats it.
+    formats = []
+    for name, level in levels.items():
+        for mask in range(8):
+            written = calls(qr._draw_format_bits, bare(1, level), mask)
+            assert len(written) == 31 and written[30] == (8, 21 - 8, True)
+            bits = [dark for _, _, dark in written]
+            assert bits[:15] == bits[15:30]
+            formats.append({"level": name, "mask": mask,
+                            "bits": sum(b << i for i, b in enumerate(bits[:15]))})
+    versions = []
+    for version in range(7, 41):
+        written = calls(qr._draw_version, bare(version))
+        assert len(written) == 36
+        bits = [dark for _, _, dark in written[0::2]]
+        assert bits == [dark for _, _, dark in written[1::2]]
+        versions.append({"version": version,
+                         "bits": sum(b << i for i, b in enumerate(bits))})
+
+    original_score = qr._get_penalty_score
+
+    def automatic(build):
+        """Run a real automatic-mask construction, recording each trial score."""
+        scores = []
+
+        def score(self):
+            result = original_score(self)
+            scores.append(result)
+            return result
+
+        with patch.object(qr, "_get_penalty_score", score):
+            symbol = build()
+        assert len(scores) == 8
+        assert symbol.get_mask() == scores.index(min(scores))
+        return {"version": symbol.get_version(), "mask": symbol.get_mask(),
+                "penalties": scores, "final": grid_hex(symbol._modules)}
+
+    symbols = []
+    for version in (1, 2, 7, 10, 27, 40):
+        for name, level in levels.items():
+            capacity = qr._get_num_data_codewords(version, level)
+            data = bytes((i * 149 + i // 251 + version * 17 + level.ordinal * 23) % 256
+                         for i in range(capacity))
+            fixture = automatic(lambda: qr(version, level, data, -1))
+            fixture["level"] = name
+            symbols.append(fixture)
+
+    url = b"https://github.com/PSCatLabs/pscat"
+
+    def encode(payload, level):
+        return automatic(lambda: qr.encode_segments(
+            [module.QrSegment.make_bytes(payload)], level, 1, 40, -1, False))
+
+    github = []
+    for name, level in levels.items():
+        fixture = encode(url, level)
+        fixture["level"] = name
+        github.append(fixture)
+
+    # A real tie: the first short payload whose lowest score two masks share,
+    # neither of them mask 0, so a wrong first candidate cannot pass by luck.
+    tie = None
+    for i in range(10000):
+        payload = f"pscat-{i}".encode()
+        fixture = encode(payload, qr.Ecc.MEDIUM)
+        best = min(fixture["penalties"])
+        if fixture["penalties"].count(best) > 1 and fixture["penalties"][0] != best:
+            fixture.update({"level": "M", "payload": payload.hex()})
+            tie = fixture
+            break
+    assert tie is not None
+
+    penalties = []
+    for label, grid in penalty_grids():
+        symbol = object.__new__(qr)
+        symbol._size, symbol._modules = len(grid), grid
+        penalties.append({"name": label, "size": len(grid), "grid": grid_hex(grid),
+                          "penalty": original_score(symbol)})
+
+    return {"oracle": "https://github.com/nayuki/QR-Code-generator", "revision": PIN,
+            "source_sha256": source_hash,
+            "description": ("Format/version words: bit i is the i-th module written by the "
+                            "oracle's _draw_format_bits/_draw_version on a bare symbol. Symbols: "
+                            "the real constructor with automatic mask (-1); penalties are its "
+                            "eight _get_penalty_score results in trial order, final the finished "
+                            "module grid (metadata included). Symbol data as in the correction "
+                            "vectors; GitHub and tie payloads go through encode_segments with "
+                            "one BYTE segment and ECC boost disabled. Penalty grids: the "
+                            "oracle's _get_penalty_score on hand-built grids. Grid hex as in "
+                            "the matrix vectors."),
+            "formats": formats, "versions": versions, "symbols": symbols,
+            "github": github, "tie": tie, "penalties": penalties}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("reference", type=Path)
@@ -367,7 +552,8 @@ def main():
     for filename, generator in [("qr_byte_vectors.json", generate),
                                 ("qr_planning_vectors.json", generate_planning),
                                 ("qr_correction_vectors.json", generate_correction),
-                                ("qr_matrix_vectors.json", generate_matrix)]:
+                                ("qr_matrix_vectors.json", generate_matrix),
+                                ("qr_mask_vectors.json", generate_mask)]:
         content = json.dumps(generator(args.reference), indent=2) + "\n"
         target = ROOT / "tests/data" / filename
         if args.check:

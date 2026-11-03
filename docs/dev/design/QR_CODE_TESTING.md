@@ -1,7 +1,8 @@
 # QR checkpoint verification
 
 Scope: [implemented data/correction/matrix API](QR_CODE_API.md): data and
-correction through commit `deba699`, plus matrix construction (#970). The
+correction through commit `deba699`, plus matrix construction (#970) and
+metadata, penalties, mask selection and the first decode proof (#971). The
 [Opus handoff](QR_CODE_REVIEW.md) gives the review scope and expected report.
 
 ## Reproduce normal checks
@@ -23,8 +24,9 @@ python3 scripts/codeowners_check.py --base origin/main
 body=$(mktemp "${TMPDIR:-/tmp}/qr-pr-body.XXXXXX") && gh pr view 957 --json body --jq .body > "$body" && test -s "$body" && python3 scripts/pr_body_lint.py "$body" --git-range origin/main..HEAD
 ```
 
-Normal Rust tests use checked-in JSON and need no network, oracle checkout,
-pip package or new dependency. `--offline` can be added to Cargo commands if
+Normal Rust tests use checked-in JSON and need no network, oracle checkout or
+pip package. The one test-only dependency is the `rqrr` QR decoder (#971), a
+Rust dev-dependency that Cargo builds into the test binary. `--offline` can be added to Cargo commands if
 the existing dependencies are cached. Existing standard-35 fonts are embedded;
 no optional font pack is required. Review `git status` after checks.
 
@@ -40,9 +42,9 @@ committed. The oracle checkout is also on that external drive.
 |---|---|
 | Locked CI-profile build | Passed. |
 | Full locked offline CI-profile repository suite | Passed, exit 0. |
-| Final QR integration suite | 15 tests passed; no failed or ignored QR tests. #970 adds seven (22 total), all passing with Ghostscript present. |
+| Final QR integration suite | 15 tests passed; no failed or ignored QR tests. #970 adds seven (22 total), #971 seven more (29), all passing with Ghostscript present. |
 | Real Ghostscript portability/reference checks | Executed and passed on the Mac, not skipped. |
-| Inline `--selftest lib/qr.ps` | Eight blocks passed; 13 after #970. |
+| Inline `--selftest lib/qr.ps` | Eight blocks passed; 13 after #970, 21 after #971. |
 | Manifest/strict-driver suite | All 38 `tests/selftest.rs` checks passed in the full run. |
 | All-target Clippy, warnings denied | Passed. |
 | Formatting, Markdown links, gallery manifest, licenses | Passed. |
@@ -106,6 +108,32 @@ oracle's correction output, so a placement failure cannot be a correction
 failure. Full grids are stored packed (one bit per cell, row-major) where a
 mismatch should name the cell; the rest are SHA-256 of one byte per cell.
 
+| [Mask vectors](../../../tests/data/qr_mask_vectors.json) | All 32 format and 34 version words; automatic-mask symbols at versions 1, 2, 7, 10, 27 and 40 for every level, the GitHub URL at L/M/Q/H and a real tie (masks 1 and 5) with the oracle's eight trial scores, chosen mask and full final grid; 32 hand-built and seeded penalty grids. |
+
+Mask generation (#971) reads format/version words from the order the oracle's
+own `_draw_format_bits`/`_draw_version` write modules on a bare symbol (bit
+`i` is the `i`-th write; the second copy must repeat it). Symbols run the real
+constructor with automatic masking while a wrapper records each
+`_get_penalty_score` result, so the scores are the oracle's own trials. Final
+grids are the finished module grid, metadata included, with no clearing.
+Penalty grids are scored by calling the oracle's `_get_penalty_score` on a
+bare object: finder-like runs at the left/right/top edges, with four, three,
+one and no light modules beside them, both-sides double counts, a doubled
+scale, a wrong centre, runs of four to seven, 2×2 blocks, dark counts on both
+sides of every N4 band edge, and seeded noise.
+
+## Decode proof
+
+`rendered_github_symbols_decode_independently_at_every_level` renders the
+GitHub URL with `pscat --png`: an opaque white page, a four-module quiet zone,
+four device pixels per module at 72 dpi. It loads the PNG, composites it onto
+white, and decodes it with [`rqrr`](https://crates.io/crates/rqrr) 0.11.0
+(`default-features = false`, MIT OR Apache-2.0 and ISC). It asserts the exact text, version, mask and format
+level at L/M/Q/H. The decoder is compiled into the test binary, so this test
+has no skip path: if it cannot decode, the suite fails. `rqrr` is a separate
+implementation (a port of quirc); it shares no code with `lib/qr.ps` or the
+fixture oracle.
+
 ## Behavioral and portability assertions
 
 The [Rust tests](../../../tests/qr.rs) also check input immutability, fresh
@@ -123,14 +151,13 @@ are both pinned.
 
 ## What remains unverified
 
-Matrices are built and masked, but carry no format/version BCH bits yet, so
-none is a complete symbol. No render exists. There is no independent decoding result, quiet-
-zone proof, SVG/PDF/PNG QR export, physical-card sizing check or card artwork.
-No claim of complete ISO/IEC 18004 conformance or scanner reliability is made.
-The current stages verify data encoding, correction, matrix placement and
-forced masks only. Future required
-decode tests must fail if the decoder is unavailable; they must not inherit
-the optional-Ghostscript skip convention.
+Complete symbols exist and one PNG render per level decodes with one
+independent decoder, at one scale. There is no public drawing API, SVG/PDF QR
+export, multi-scale or rasterized-vector decode, multi-decoder corpus,
+physical-card sizing check or card artwork. No claim of complete ISO/IEC 18004
+conformance or scanner reliability is made. Later decode tests must, like
+#971's, fail if the decoder is unavailable; they must not inherit the
+optional-Ghostscript skip convention.
 
 Remote CI on #957 passed, but that alone does not prove Ghostscript
 portability (see above). Normative standards checks remain outstanding, and

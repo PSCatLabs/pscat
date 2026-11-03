@@ -1,4 +1,4 @@
-//! QR data, correction and matrix regression tests. Frozen fixtures come from an independent,
+//! QR data, correction, matrix, mask-selection and decode regression tests. Frozen fixtures come from an independent,
 //! pinned encoder, not a second implementation of our packing algorithm.
 
 mod common;
@@ -12,6 +12,8 @@ const VECTORS: &str = include_str!("data/qr_byte_vectors.json");
 const PLANNING: &str = include_str!("data/qr_planning_vectors.json");
 const CORRECTION: &str = include_str!("data/qr_correction_vectors.json");
 const MATRIX: &str = include_str!("data/qr_matrix_vectors.json");
+const MASKS: &str = include_str!("data/qr_mask_vectors.json");
+const GITHUB_URL: &str = "https://github.com/PSCatLabs/pscat";
 
 fn interpreter() -> Interp {
     let mut it = Interp::with_page(8, 8).expect("small test page");
@@ -1164,5 +1166,500 @@ fn ghostscript_builds_the_same_matrices_and_guards() {
             .map(|i| u8::from_str_radix(&line[2 * i..2 * i + 2], 16).expect("gs hex"))
             .collect();
         assert_plane(&plane(&cells, 0), full, *size, label);
+    }
+}
+
+// ---- Metadata, penalties, mask selection and decoding (QR-4, #971) ----
+
+fn mask_vectors() -> serde_json::Value {
+    serde_json::from_str(MASKS).expect("mask vectors")
+}
+
+fn penalty_list(f: &serde_json::Value) -> String {
+    let scores: Vec<String> = f["penalties"]
+        .as_array()
+        .expect("penalties")
+        .iter()
+        .map(|p| p.to_string())
+        .collect();
+    format!("[{}]", scores.join(" "))
+}
+
+/// PostScript comparing an 8-score array on the stack with the fixture's.
+fn penalties_equal(f: &serde_json::Value) -> String {
+    format!(
+        "/got exch def /want {} def true 0 1 7 {{ /i exch def got i get want i get eq and }} for",
+        penalty_list(f)
+    )
+}
+
+/// A bare matrix dictionary over a fixture grid, for penalty scoring.
+fn grid_matrix(f: &serde_json::Value) -> String {
+    let size = f["size"].as_u64().expect("size") as usize;
+    let cells = unpack_hex(f["grid"].as_str().expect("grid"), size * size);
+    format!(
+        "<< /Version {} /Size {size} /Cells <{}> /Mask null >>",
+        (size - 17) / 4,
+        hex(&cells)
+    )
+}
+
+/// Check a finished symbol's fields, its metadata flags and its whole grid.
+fn assert_symbol(it: &mut Interp, f: &serde_json::Value, level: &str, label: &str) {
+    let version = f["version"].as_u64().expect("version");
+    let size = version as usize * 4 + 17;
+    assert_true(
+        it,
+        &format!(
+            "sym /Version get {version} eq sym /Size get {size} eq and \
+             sym /Level get /{level} eq and sym /Mask get {} eq and",
+            f["mask"]
+        ),
+        &format!("{label}: version/level/mask"),
+    );
+    let cells = cells_of(it, "sym", label);
+    assert!(
+        cells.iter().all(|c| matches!(c, 0 | 1 | 2 | 3 | 6 | 7)),
+        "{label}: unexpected cell flags"
+    );
+    assert_plane(
+        &plane(&cells, 0),
+        f["final"].as_str().expect("final"),
+        size,
+        label,
+    );
+}
+
+#[test]
+fn format_and_version_words_match_the_reference_bch_codes() {
+    let data = mask_vectors();
+    let formats = data["formats"].as_array().expect("formats");
+    let versions = data["versions"].as_array().expect("versions");
+    assert_eq!((formats.len(), versions.len()), (32, 34));
+    let mut it = interpreter();
+    for f in formats {
+        assert_true(
+            &mut it,
+            &format!(
+                "/{} {} qr--format-bits {} eq",
+                f["level"].as_str().expect("level"),
+                f["mask"],
+                f["bits"]
+            ),
+            &format!("format {f}"),
+        );
+    }
+    for f in versions {
+        assert_true(
+            &mut it,
+            &format!("{} qr--version-bits {} eq", f["version"], f["bits"]),
+            &format!("version {f}"),
+        );
+    }
+}
+
+#[test]
+fn penalty_rules_match_reference_on_edge_case_grids() {
+    let data = mask_vectors();
+    let grids = data["penalties"].as_array().expect("penalty grids");
+    let names: Vec<&str> = grids
+        .iter()
+        .map(|g| g["name"].as_str().expect("name"))
+        .collect();
+    for required in [
+        "finder-left-edge",
+        "finder-right-edge",
+        "finder-four-light-both-sides",
+        "finder-three-light-both-sides",
+        "finder-vertical-top-edge",
+        "runs-five-six-seven",
+        "two-by-two-blocks",
+        "balance-198-dark",
+        "balance-243-dark",
+    ] {
+        assert!(names.contains(&required), "penalty corpus lost {required}");
+    }
+    let mut it = interpreter();
+    for g in grids {
+        it.run_str(&format!("{} qr--penalty", grid_matrix(g)))
+            .unwrap_or_else(|e| panic!("{}: {}", g["name"], it.error_report(&e)));
+        let got = it.operand_stack()[0].repr();
+        it.run_str("pop").expect("pop score");
+        assert_eq!(got, g["penalty"].to_string(), "penalty {}", g["name"]);
+    }
+}
+
+#[test]
+fn automatic_masks_match_reference_grids_scores_and_metadata() {
+    let data = mask_vectors();
+    let symbols = data["symbols"].as_array().expect("symbols");
+    assert_eq!(symbols.len(), 24);
+    let mut it = interpreter();
+    for f in symbols {
+        let version = f["version"].as_u64().expect("version");
+        let level = f["level"].as_str().expect("level");
+        let label = format!("auto v{version}-{level}");
+        it.run_str(&format!(
+            "{} /m data {version} /{level} qr--interleave {version} qr--matrix def \
+             /sym data {version} /{level} qr--codeword-symbol def",
+            symbol_data_source(version, level)
+        ))
+        .unwrap_or_else(|e| panic!("{label}: {}", it.error_report(&e)));
+        assert_true(
+            &mut it,
+            &format!("m /{level} qr--mask-penalties {}", penalties_equal(f)),
+            &format!("{label}: per-mask penalties"),
+        );
+        assert_symbol(&mut it, f, level, &label);
+    }
+}
+
+#[test]
+fn github_url_symbols_and_a_real_tie_match_reference_selection() {
+    let data = mask_vectors();
+    let mut it = interpreter();
+    let github = data["github"].as_array().expect("GitHub symbols");
+    assert_eq!(github.len(), 4);
+    let tie = &data["tie"];
+    let scores: Vec<u64> = tie["penalties"]
+        .as_array()
+        .expect("tie scores")
+        .iter()
+        .map(|p| p.as_u64().expect("score"))
+        .collect();
+    let best = *scores.iter().min().expect("scores");
+    assert!(
+        scores.iter().filter(|&&s| s == best).count() > 1 && scores[0] != best,
+        "tie fixture is not a tie away from mask 0"
+    );
+    let cases: Vec<(String, &serde_json::Value)> = github
+        .iter()
+        .map(|f| (hex(GITHUB_URL.as_bytes()), f))
+        .chain([(tie["payload"].as_str().expect("payload").to_string(), tie)])
+        .collect();
+    for (payload, f) in cases {
+        let level = f["level"].as_str().expect("level");
+        let label = format!("<{payload}> at {level}");
+        it.run_str(&format!(
+            "/plan <{payload}> /{level} qr--byte-plan def \
+             /m plan /Data get plan /Version get /{level} qr--interleave plan /Version get qr--matrix def \
+             /sym <{payload}> /{level} qr--symbol def"
+        ))
+        .unwrap_or_else(|e| panic!("{label}: {}", it.error_report(&e)));
+        assert_true(
+            &mut it,
+            &format!("m /{level} qr--mask-penalties {}", penalties_equal(f)),
+            &format!("{label}: per-mask penalties"),
+        );
+        assert_symbol(&mut it, f, level, &label);
+    }
+}
+
+#[test]
+fn metadata_and_selection_guards_preserve_frames_and_inputs() {
+    let mut it = interpreter();
+    for (src, name) in [
+        ("/M 8 qr--format-bits", "qr-mask-must-be-in-0-7"),
+        ("/M -1 qr--format-bits", "qr-mask-must-be-in-0-7"),
+        ("/M (0) qr--format-bits", "qr-mask-must-be-integer"),
+        ("/m 0 qr--format-bits", "qr-level-must-be-L-M-Q-or-H"),
+        ("6 qr--version-bits", "qr-version-bits-need-version-7-40"),
+        ("41 qr--version-bits", "qr-version-must-be-in-1-40"),
+        ("7.0 qr--version-bits", "qr-version-must-be-integer"),
+        (
+            "1 qr--function-matrix /M qr--draw-metadata",
+            "qr-matrix-must-be-masked",
+        ),
+        (
+            "<< /Version 1 /Size 21 /Cells 441 string /Mask 8 >> /M qr--draw-metadata",
+            "qr-matrix-must-be-a-matrix",
+        ),
+        (
+            "1 qr--function-matrix 0 qr--apply-mask /X qr--draw-metadata",
+            "qr-level-must-be-L-M-Q-or-H",
+        ),
+        ("[] qr--penalty", "qr-matrix-must-be-a-matrix"),
+        (
+            "1 qr--function-matrix 2 qr--apply-mask /M qr--mask-penalties",
+            "qr-matrix-already-masked",
+        ),
+        (
+            "[1 2 3] qr--best-mask",
+            "qr-penalties-must-be-eight-integers",
+        ),
+        (
+            "[1 2 3 4 5 6 7 (8)] qr--best-mask",
+            "qr-penalties-must-be-eight-integers",
+        ),
+        (
+            "1 qr--function-matrix 0 qr--apply-mask /M qr--finish",
+            "qr-matrix-already-masked",
+        ),
+        (
+            "19 string 1 /W qr--codeword-symbol",
+            "qr-level-must-be-L-M-Q-or-H",
+        ),
+        (
+            "18 string 1 /L qr--codeword-symbol",
+            "qr-ecc-data-length-must-match-capacity",
+        ),
+        ("3000 string /L qr--symbol", "qr-data-too-long-for-level"),
+    ] {
+        assert_true(
+            &mut it,
+            &format!(
+                "/dictdepth countdictstack def mark {{ {src} }} stopped \
+                 $error /command get /{name} eq and \
+                 countdictstack dictdepth eq and /guard-ok exch def cleartomark guard-ok"
+            ),
+            src,
+        );
+    }
+    // Inputs stay unchanged, results are fresh, caller names cannot leak in,
+    // and an executable payload is encoded as data.
+    assert_true(
+        &mut it,
+        "/dictdepth countdictstack def \
+         /tone 9 def /len 9 def /score 9 def /bits 9 def /level /H def /push { 1 } def \
+         /m0 26 string 1 qr--matrix def /before m0 /Cells get dup length string copy def \
+         /masked m0 3 qr--apply-mask def /mbefore masked /Cells get dup length string copy def \
+         /a masked /L qr--draw-metadata def /b masked /L qr--draw-metadata def \
+         a /Cells get 8 0 put b /Cells get 8 get 6 ge \
+         masked /Cells get mbefore eq and masked /Level known not and \
+         /s1 m0 /M qr--finish def /s2 m0 /M qr--finish def \
+         s1 /Cells get s2 /Cells get eq and \
+         m0 /Cells get before eq and m0 /Mask get null eq and \
+         a /Mask get 3 eq and a /Level get /L eq and \
+         /x1 (pop) cvx /M qr--symbol def x1 /Version get 1 eq and \
+         tone 9 eq len 9 eq and score 9 eq and bits 9 eq and level /H eq and /push load exec 1 eq and and \
+         countdictstack dictdepth eq and",
+        "metadata/selection ownership and caller state",
+    );
+    assert!(
+        it.gfx().pixmap.pixels().iter().all(|p| p.red() == 255),
+        "selection stage drew on the page"
+    );
+    assert!(!it.gfx().page_shown);
+}
+
+#[test]
+fn ghostscript_selects_the_same_masks_scores_and_grids() {
+    if Command::new("gs")
+        .arg("--version")
+        .output_deadline()
+        .is_err()
+    {
+        eprintln!("gs unavailable; QR mask-selection portability check not run");
+        return;
+    }
+    let data = mask_vectors();
+    let mut src = String::from(LIB);
+    src.push_str("\n/out (%stdout) (w) file def /emit { /Cells get out exch writehexstring out (\\n) writestring } def\n");
+    for f in data["formats"].as_array().expect("formats") {
+        src.push_str(&format!(
+            "\n/{} {} qr--format-bits {} ne {{ (FAIL format) = 1 .quit }} if\n",
+            f["level"].as_str().expect("level"),
+            f["mask"],
+            f["bits"]
+        ));
+    }
+    for f in data["versions"].as_array().expect("versions") {
+        src.push_str(&format!(
+            "\n{} qr--version-bits {} ne {{ (FAIL version {}) = 1 .quit }} if\n",
+            f["version"], f["bits"], f["version"]
+        ));
+    }
+    for g in data["penalties"].as_array().expect("penalties") {
+        src.push_str(&format!(
+            "\n{} qr--penalty {} ne {{ (FAIL penalty {}) = 1 .quit }} if\n",
+            grid_matrix(g),
+            g["penalty"],
+            g["name"].as_str().expect("name")
+        ));
+    }
+    let mut expected: Vec<(String, usize, String)> = Vec::new();
+    for f in data["symbols"].as_array().expect("symbols") {
+        let version = f["version"].as_u64().expect("version");
+        let level = f["level"].as_str().expect("level");
+        if ![1, 7, 27].contains(&version) {
+            continue;
+        }
+        src.push_str(&format!(
+            "\n{} data {version} /{level} qr--interleave {version} qr--matrix /{level} qr--mask-penalties \
+             {} not {{ (FAIL penalties v{version} {level}) = 1 .quit }} if \
+             data {version} /{level} qr--codeword-symbol emit\n",
+            symbol_data_source(version, level),
+            penalties_equal(f)
+        ));
+        expected.push((
+            format!("gs auto v{version}-{level}"),
+            version as usize * 4 + 17,
+            f["final"].as_str().expect("final").into(),
+        ));
+    }
+    let tie = &data["tie"];
+    let github_hex = hex(GITHUB_URL.as_bytes());
+    for (payload, f) in data["github"]
+        .as_array()
+        .expect("GitHub")
+        .iter()
+        .map(|f| (github_hex.as_str(), f))
+        .chain([(tie["payload"].as_str().expect("payload"), tie)])
+    {
+        src.push_str(&format!(
+            "\n<{payload}> /{} qr--symbol dup /Mask get {} ne {{ (FAIL mask) = 1 .quit }} if emit\n",
+            f["level"].as_str().expect("level"),
+            f["mask"]
+        ));
+        expected.push((
+            format!("gs <{payload}> {}", f["level"]),
+            f["version"].as_u64().expect("version") as usize * 4 + 17,
+            f["final"].as_str().expect("final").into(),
+        ));
+    }
+    for (code, name) in [
+        (
+            "1 qr--function-matrix /M qr--draw-metadata",
+            "qr-matrix-must-be-masked",
+        ),
+        ("(x) noaccess /M qr--symbol", "qr-data-must-be-readable"),
+        (
+            "[0 0 0 0 0 0 0 0.5] qr--best-mask",
+            "qr-penalties-must-be-eight-integers",
+        ),
+    ] {
+        src.push_str(&format!(
+            "\n/dictdepth countdictstack def mark {{ {code} }} stopped \
+             $error /command get /{name} eq and countdictstack dictdepth eq and \
+             not {{ (FAIL guard/frame {name}) = 1 .quit }} if cleartomark\n"
+        ));
+    }
+    src.push_str("\n(QR-MASK-PASS) =\n");
+    let out = Command::new("gs")
+        .args(["-q", "-dNODISPLAY", "-dBATCH", "-dNOPAUSE", "-"])
+        .output_with_input(src.as_bytes())
+        .expect("run Ghostscript mask selection");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "{stdout} {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert_eq!(lines.len(), expected.len() + 1, "{stdout}");
+    assert_eq!(lines[expected.len()], "QR-MASK-PASS");
+    for (line, (label, size, full)) in lines.iter().zip(&expected) {
+        let cells: Vec<u8> = (0..line.len() / 2)
+            .map(|i| u8::from_str_radix(&line[2 * i..2 * i + 2], 16).expect("gs hex"))
+            .collect();
+        assert_plane(&plane(&cells, 0), full, *size, label);
+    }
+}
+
+/// Pixels per module in the decode proof: whole device pixels at 72 dpi, so
+/// adjacent modules meet without anti-aliased seams.
+const MODULE_PX: usize = 4;
+
+/// Render `payload` at `level` through the pscat CLI's PNG path: an opaque
+/// white page, a four-module quiet zone, one filled square per dark module.
+fn render_symbol_png(payload: &str, level: &str, size: usize) -> tiny_skia::Pixmap {
+    let side = (size + 8) * MODULE_PX;
+    let program = format!(
+        "(lib/qr.ps) run\n\
+         /sym ({payload}) /{level} qr--symbol def\n\
+         /n sym /Size get def /c sym /Cells get def /k {MODULE_PX} def\n\
+         n {size} ne {{ (unexpected symbol size) = quit }} if\n\
+         1 setgray clippath fill 0 setgray\n\
+         0 1 n 1 sub {{ /y exch def 0 1 n 1 sub {{ /x exch def\n\
+           c y n mul x add get 1 and 1 eq {{ x 4 add k mul n 3 add y sub k mul k k rectfill }} if\n\
+         }} for }} for\n"
+    );
+    let dir = common::scratch_dir(&format!("qr-decode-{level}"));
+    let ps = dir.join("symbol.ps");
+    let png = dir.join("symbol.png");
+    std::fs::write(&ps, program).expect("write symbol program");
+    let out = Command::new(env!("CARGO_BIN_EXE_pscat"))
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .args([
+            "--page",
+            &format!("{side}x{side}"),
+            "--dpi",
+            "72",
+            "--png",
+            png.to_str().expect("utf-8 path"),
+            ps.to_str().expect("utf-8 path"),
+        ])
+        .output_deadline()
+        .expect("run pscat");
+    assert!(
+        out.status.success(),
+        "pscat render failed: {} {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let pixmap = tiny_skia::Pixmap::load_png(&png).expect("rendered PNG");
+    assert_eq!(
+        (pixmap.width() as usize, pixmap.height() as usize),
+        (side, side)
+    );
+    pixmap
+}
+
+#[test]
+fn rendered_github_symbols_decode_independently_at_every_level() {
+    // The decoder is a compiled-in dev-dependency: this test has no skip
+    // path, so a missing or failing decoder fails the suite (QR_CODE_TESTING.md).
+    let data = mask_vectors();
+    for f in data["github"].as_array().expect("GitHub symbols") {
+        let level = f["level"].as_str().expect("level");
+        let version = f["version"].as_u64().expect("version") as usize;
+        let size = version * 4 + 17;
+        let pixmap = render_symbol_png(GITHUB_URL, level, size);
+        let width = pixmap.width() as usize;
+        // Composite onto white: a transparent pixel must read as light.
+        let grey: Vec<u8> = pixmap
+            .pixels()
+            .iter()
+            .map(|p| {
+                let c = p.demultiply();
+                let a = u32::from(c.alpha());
+                let luma = (u32::from(c.red()) * 299
+                    + u32::from(c.green()) * 587
+                    + u32::from(c.blue()) * 114)
+                    / 1000;
+                ((luma * a + 255 * (255 - a)) / 255) as u8
+            })
+            .collect();
+        // The quiet zone really is light and the finder corner really is dark.
+        let q = 4 * MODULE_PX;
+        assert!(
+            grey[0] > 200 && grey[(q - 1) * width + q - 1] > 200,
+            "{level}: quiet zone"
+        );
+        assert!(grey[(q + 1) * width + q + 1] < 60, "{level}: finder corner");
+        let mut image =
+            rqrr::PreparedImage::prepare_from_greyscale(width, grey.len() / width, |x, y| {
+                grey[y * width + x]
+            });
+        let grids = image.detect_grids();
+        assert_eq!(grids.len(), 1, "{level}: expected exactly one symbol");
+        let (meta, content) = grids[0]
+            .decode()
+            .unwrap_or_else(|e| panic!("{level}: decode failed: {e:?}"));
+        assert_eq!(content, GITHUB_URL, "{level}: decoded text");
+        assert_eq!(meta.version.0, version, "{level}: decoded version");
+        assert_eq!(
+            u64::from(meta.mask),
+            f["mask"].as_u64().expect("mask"),
+            "{level}: decoded mask"
+        );
+        let format_level = match level {
+            "L" => 1,
+            "M" => 0,
+            "Q" => 3,
+            "H" => 2,
+            _ => unreachable!(),
+        };
+        assert_eq!(meta.ecc_level, format_level, "{level}: decoded ECC level");
     }
 }
