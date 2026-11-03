@@ -662,7 +662,8 @@ qr--level-bits readonly pop
 %   N4  10 per full 5% step the dark share lies outside 45%..55%.
 % Every cell counts, function and metadata cells included.
 %%SelfTest: qr-penalty
-% 1 qr--function-matrix 0 qr--apply-mask qr--penalty 0 gt (masked matrix scores) mustbe
+% << /Version 1 /Size 21 /Cells 441 string /Mask null >> qr--penalty 2088 eq (all light: N1 21x2x19, N2 400x3, N4 90) mustbe
+% << /Version 1 /Size 21 /Cells 441 string 0 1 440 { 1 index exch dup 2 mod put } for /Mask null >> qr--penalty 0 eq (alternating cells score nothing) mustbe
 % { 1 dict qr--penalty } /qr-matrix-must-be-a-matrix (empty dictionary) mustguard
 %%EndSelfTest
 % @internal
@@ -771,6 +772,7 @@ qr--level-bits readonly pop
 % << /Version /Level /Size /Cells /Mask >>.
 %%SelfTest: qr-finish
 % 26 string 1 qr--matrix /M qr--finish /Mask get type /integertype eq (mask chosen) mustbe
+% 26 string 1 qr--matrix dup /M qr--mask-penalties qr--best-mask exch /M qr--finish /Mask get eq (finish takes the best mask) mustbe
 %%EndSelfTest
 % @internal
 /qr--finish {

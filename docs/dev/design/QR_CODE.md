@@ -214,7 +214,9 @@ reserved modules, top/bottom orientation, BCH placement, penalty edge cases and
 quiet-zone sizing. Bound work by version <=40, symbol <=177 modules per side,
 and byte capacity <=2953 for a single byte segment. No global scratch or
 caller callbacks are needed; validate before opening private frames, and test
-operand/dictionary/graphics stack preservation on success and named failures.
+operand/dictionary/graphics stack preservation on success and dictionary
+stack preservation on named failures (operand rollback after a failure is not
+promised; see the API's validation section).
 
 ### Mask-selection checkpoint (QR-4, #971)
 

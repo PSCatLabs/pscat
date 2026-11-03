@@ -82,6 +82,7 @@ regenerate their own expected outputs.
 | [Planning vectors](../../../tests/data/qr_planning_vectors.json) | All 160 layouts plus 504 automatic selections at maximum-1/maximum/maximum+1, short and count-width cases; expected versions come from actual automatic encoding, with padded-data SHA-256. |
 | [Correction vectors](../../../tests/data/qr_correction_vectors.json) | All 65,536 field products by hash; 30 divisors, 91 remainders, all 160 interleaved-layout hashes, nine full hex streams, and four complete GitHub URL streams. |
 | [Matrix vectors](../../../tests/data/qr_matrix_vectors.json) | Alignment centers and function/metadata/fixed-pattern grids for all 40 versions (full grids at 1, 2, 7, 10, 27, 40); placement at eight versions unmasked and under all eight masks; nine end-to-end symbols including unequal blocks; the GitHub URL at L/M/Q/H. Captured from the oracle's real constructor at a fixed mask. |
+| [Mask vectors](../../../tests/data/qr_mask_vectors.json) | All 32 format and 34 version words; automatic-mask symbols at versions 1, 2, 7, 10, 27 and 40 for every level, the GitHub URL at L/M/Q/H and a real tie (masks 1 and 5) with the oracle's eight trial scores, chosen mask and full final grid; 32 hand-built and seeded penalty grids. |
 
 Byte/planning generation explicitly constructs one BYTE segment, including for
 empty input, fixes ECC with boosting disabled and captures the constructor
@@ -107,8 +108,6 @@ compared grids until #971 computes their BCH bits. Placement fixtures inject
 oracle's correction output, so a placement failure cannot be a correction
 failure. Full grids are stored packed (one bit per cell, row-major) where a
 mismatch should name the cell; the rest are SHA-256 of one byte per cell.
-
-| [Mask vectors](../../../tests/data/qr_mask_vectors.json) | All 32 format and 34 version words; automatic-mask symbols at versions 1, 2, 7, 10, 27 and 40 for every level, the GitHub URL at L/M/Q/H and a real tie (masks 1 and 5) with the oracle's eight trial scores, chosen mask and full final grid; 32 hand-built and seeded penalty grids. |
 
 Mask generation (#971) reads format/version words from the order the oracle's
 own `_draw_format_bits`/`_draw_version` write modules on a bare symbol (bit
