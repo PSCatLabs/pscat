@@ -2024,9 +2024,10 @@ fn raster_pdf(bytes: &[u8], scale: f32) -> Grey {
         },
     );
     let width = pixmap.width() as usize;
+    let bytes = pixmap.take_u8();
     grey_of(
         width,
-        pixmap.take_u8().chunks_exact(4).map(|p| {
+        bytes.as_chunks::<4>().0.iter().map(|p| {
             let un = |c: u8| match p[3] {
                 0 => 0,
                 a => ((u32::from(c) * 255 + u32::from(a) / 2) / u32::from(a)).min(255) as u8,
