@@ -1,7 +1,7 @@
 # QR data/correction/matrix API reference
 
 This documents the implemented internal stages (data and correction through
-`deba699`, matrix construction from #970), not a released public QR API. All procedure names below are internal and may change before merge.
+`deba699`, matrix construction from #970, metadata and mask selection from #971), not a released public QR API. All procedure names below are internal and may change before merge.
 Start with the [review handoff](QR_CODE_REVIEW.md),
 [design/roadmap](QR_CODE.md), and [verification guide](QR_CODE_TESTING.md).
 
@@ -16,8 +16,10 @@ length =                   % 70: complete data/correction codewords
 
 This program emits numbers, not a QR image. There is no `qrencode` or `qrdraw`
 implementation yet. The [matrix stage](#matrix-construction) places these
-codewords and applies a caller-chosen mask, but format/version BCH bits, mask
-selection, quiet zone, rendering and scanning are still pending (#971, #972).
+codewords and applies a caller-chosen mask; the
+[selection stage](#metadata-penalties-and-mask-selection) (#971) writes
+format/version bits and picks the mask, giving a complete symbol. Quiet zone,
+drawing and the public API are #972.
 
 ## Data conventions and effects
 
@@ -51,6 +53,15 @@ Calls use private dictionary frames and invoke no caller callbacks.
 | `qr--function-matrix` | `version -> matrix` | Fresh unmasked matrix with function patterns and metadata reservations; every data cell light. |
 | `qr--matrix` | `codewords version -> matrix` | Requires exactly the version's `/RawCodewords` bytes (level-independent). Places them and returns a fresh unmasked matrix. |
 | `qr--apply-mask` | `matrix mask -> matrix` | Unmasked matrix, mask integer 0–7. Fresh copy with that mask applied to data cells and `/Mask` set; the input is unchanged. |
+| `qr--format-bits` | `level mask -> integer` | 15-bit format word, bit 0 least significant. |
+| `qr--version-bits` | `version -> integer` | 18-bit version word; versions 7–40 only. |
+| `qr--draw-metadata` | `matrix level -> matrix` | Masked matrix. Fresh copy with format (and, v7+, version) bits written and `/Level` added. |
+| `qr--penalty` | `matrix -> integer` | Mask-selection score of every cell's dark bit. |
+| `qr--mask-penalties` | `matrix level -> scores` | Unmasked matrix. Fresh array of the eight scores, mask 0 first. |
+| `qr--best-mask` | `scores -> mask` | Eight integers; index of the lowest, the lowest index on a tie. |
+| `qr--finish` | `matrix level -> symbol` | Unmasked matrix. Best mask applied, metadata written. |
+| `qr--codeword-symbol` | `padded-data version level -> symbol` | Fixed version: interleave, place, finish. |
+| `qr--symbol` | `payload level -> symbol` | Smallest fitting version at that level, automatic mask. |
 
 `qr--byte-data` writes mode `0100`, an 8-bit count for versions 1–9 or 16-bit
 count for versions 10–40, raw bytes, four zero terminator bits and alternating
@@ -94,9 +105,9 @@ separators (9x9 squares clipped at the edge); alignment patterns at every pair
 of centers except the three finder corners; the dark module; two 15-cell
 format copies (row 8 and column 8 beside the finders) and, for version 7 and
 up, two 6x3 version blocks (columns `Size-11`..`Size-9` of rows 0–5 and the
-transpose). The BCH stage (#971) writes the metadata cells: it should `or`
-its bits into those bytes, keeping the `4` flag, so later stages can still
-tell metadata from fixed patterns.
+transpose). The BCH stage (#971) writes each metadata cell as `6` or `7`,
+keeping the `4` flag, so later stages can still tell metadata from fixed
+patterns.
 
 `qr--matrix` places bits most significant first, in two-column strips from the
 right edge, alternating up and down starting upward at the bottom-right,
@@ -120,6 +131,38 @@ the row; a data cell is inverted where the predicate is zero:
 It refuses an already-masked matrix: masks are XORs, so a second mask would
 silently corrupt the symbol. Mask selection (#971) applies each candidate to
 the same unmasked matrix and scores the fresh copies.
+
+## Metadata, penalties and mask selection
+
+```postscript
+(https://github.com/PSCatLabs/pscat) /M qr--symbol /symbol exch def
+symbol /Version get =   % 3
+symbol /Mask get =      % 0, the oracle's choice too
+```
+
+A symbol is a matrix with `/Level` added: `<< /Version /Level /Size /Cells
+/Mask >>`. Its format and version cells hold `6` (light) or `7` (dark): the
+metadata flag stays set, so later stages still tell metadata from fixed
+patterns. Cell flags in a finished symbol are therefore 0, 1, 2, 3, 6 or 7.
+
+Format word: the level code (L `01`, M `00`, Q `11`, H `10`) and three mask
+bits, then a ten-bit BCH remainder over `0x537`, XOR `0x5412`. Bit `i` goes to
+(8, i) for i < 6, (8, 7), (8, 8), (7, 8), then (14 − i, 8) for i ≥ 9 (column,
+row); the second copy is (Size − 1 − i, 8) for i < 8 and (8, Size − 15 + i) for
+i ≥ 8. Version word (v7+): the six version bits then a twelve-bit remainder
+over `0x1F25`; bit `i` goes to (Size − 11 + i mod 3, i div 3) and its transpose.
+
+`qr--penalty` follows the reference encoder (Nayuki), which the fixtures pin:
+
+| Rule | Score |
+|---|---|
+| N1 | Each row/column run of 5+ equal modules: 3, plus 1 per module past 5. |
+| N2 | Each 2×2 block of equal modules (overlapping blocks all count): 3. |
+| N3 | Each dark 1:1:3:1:1 run with ≥ 4 units of light on one side and ≥ 1 unit on the other, once per qualifying side: 40. Lines count as padded with `Size` light modules at both ends. |
+| N4 | 10 per whole 5% the dark share lies outside 45–55%. |
+
+Each mask is scored with its own format bits drawn, as the encoder does.
+Selection keeps the first strictly lower score, so ties go to the lowest mask.
 
 ## Layout fields
 
@@ -157,6 +200,7 @@ general unwinder for allocation errors, interpreter limits or changed helpers.
 | Correction input length | `qr-ecc-data-too-long`, `qr-ecc-data-length-must-match-capacity` |
 | Matrix codewords | `qr-codewords-must-be-a-string`, `qr-codewords-must-be-readable`, `qr-codewords-length-must-match-version` (version guards as layout) |
 | Masking | `qr-mask-must-be-integer`, `qr-mask-must-be-in-0-7`, `qr-matrix-must-be-a-matrix` (not a dictionary with integer `/Version` 1–40, matching `/Size`, readable `Size * Size` `/Cells` and `/Mask`), `qr-matrix-already-masked` |
+| Metadata/selection | `qr-matrix-must-be-masked`, `qr-version-bits-need-version-7-40`, `qr-penalties-must-be-eight-integers` (mask, level and matrix guards as above) |
 
 If multiple arguments are invalid, the first checked argument determines the
 error. This is an internal contract; no cross-procedure validation ordering is
@@ -174,6 +218,7 @@ and `qr--block-count` store the standards block-layout facts.
 `qr--raw-modules` (trusted version -> data-area module count, remainder bits
 included) is shared by `qr--block-spec` and `qr--matrix`. `qr--check-version`
 and `qr--check-matrix` are argument guards; `qr--mask-predicates` is the mask
-table. These names are
+table. `qr--level-bits` maps levels to format codes; `qr--check-masked` guards
+a masked matrix. These names are
 implementation details, not rendering or extension hooks. The tables use
 standard PostScript `readonly`; this is not a new security boundary in PSCat.

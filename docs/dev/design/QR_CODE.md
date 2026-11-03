@@ -12,13 +12,14 @@ The checkpoint is draft PR
 
 Current implementation in `lib/qr.ps`: byte packing, automatic version/capacity
 planning, Reed–Solomon correction and block interleaving, and (#970) function
-patterns, zigzag placement and forced masks, with exact named guards,
+patterns, zigzag placement and forced masks, and (#971) format/version BCH
+metadata, the four penalty rules and automatic mask selection, giving complete
+symbols that an independent decoder reads back, with exact named guards,
 selftests, independent fixtures and native/Ghostscript/embedded-loader checks.
-Format/version BCH bits, mask selection, rendering and the public API are
-pending.
+The public API and drawing (#972) are pending.
 The original `qr--byte-data` seam accepts explicit capacity; version selection
-now lives in `qr--byte-plan`. No Rust engine
-changes or dependencies were added. A separate same-family plan review
+now lives in `qr--byte-plan`. No Rust engine changes or runtime dependencies
+were added; #971 adds one test-only dev-dependency, the `rqrr` decoder. A separate same-family plan review
 confirmed this slice and identified count-width and direct frame-leak tests,
 both included. Final cross-family PR review remains outstanding.
 
@@ -213,7 +214,32 @@ reserved modules, top/bottom orientation, BCH placement, penalty edge cases and
 quiet-zone sizing. Bound work by version <=40, symbol <=177 modules per side,
 and byte capacity <=2953 for a single byte segment. No global scratch or
 caller callbacks are needed; validate before opening private frames, and test
-operand/dictionary/graphics stack preservation on success and named failures.
+operand/dictionary/graphics stack preservation on success and dictionary
+stack preservation on named failures (operand rollback after a failure is not
+promised; see the API's validation section).
+
+### Mask-selection checkpoint (QR-4, #971)
+
+`qr--format-bits` and `qr--version-bits` compute the BCH(15,5) format word
+(XOR `0x5412`) and BCH(18,6) version word; `qr--draw-metadata` writes both
+format copies and both version blocks into the metadata cells of a masked
+matrix. `qr--penalty` scores a grid with the reference encoder's four rules
+(including its light-border convention for finder-like runs at the edge);
+`qr--mask-penalties` scores all eight masks with their format bits drawn,
+`qr--best-mask` takes the lowest (lowest mask number on a tie), and
+`qr--finish`, `qr--codeword-symbol` and `qr--symbol` assemble complete symbols
+([API](QR_CODE_API.md#metadata-penalties-and-mask-selection)).
+
+All 32 format words and 34 version words, the oracle's eight trial scores and
+its chosen mask, and the whole final grid are pinned for versions 1, 2, 7, 10,
+27 and 40 at every level, for the GitHub URL at L/M/Q/H, and for a real
+oracle tie away from mask 0. Thirty-two hand-built and seeded grids pin each
+penalty rule's edges. Ghostscript reproduces the words, scores, grids and
+guards. A `pscat --png` render of the GitHub URL with a four-module quiet zone
+decodes to exactly `https://github.com/PSCatLabs/pscat` at all four levels
+with the independent `rqrr` decoder, which also reports the expected version,
+mask and level. This is the first scan proof; SVG/PDF and multi-scale decoding
+are later work (#972, #973).
 
 ## Business card target
 

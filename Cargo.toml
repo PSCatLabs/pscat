@@ -127,6 +127,13 @@ winit = { version = "0.30.13", optional = true }
 ruzstd = { version = "0.9.1", default-features = false, features = ["std"] }
 sha2 = "0.11.1"
 
+# tests/qr.rs decodes PSCat's own rendered QR symbols with an independent
+# pure-Rust reader (issue #971). Compiled into the test binary, so the decode
+# check can never skip for want of a decoder. No `img` feature: the test feeds
+# it greyscale pixels from tiny-skia's PNG loader, so no image crate comes in.
+[dev-dependencies]
+rqrr = { version = "=0.11.0", default-features = false }
+
 # tests/common's CPU-time clock (issue #329); already in the tree through
 # winit and friends in a default build. A dev-dependency, so a library user
 # never sees it.
