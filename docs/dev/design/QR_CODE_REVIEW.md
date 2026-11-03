@@ -33,6 +33,15 @@ Its PR targets this branch; review it against the
 [matrix API](QR_CODE_API.md#matrix-construction) and the representation choice
 that #971 and #972 build on.
 
+Later stage: #971 (QR-4) adds BCH format/version metadata, the four penalty
+rules, automatic mask selection and complete internal symbols
+(`qr--draw-metadata`, `qr--penalty`, `qr--finish`, `qr--symbol`), with
+oracle-captured [mask fixtures](../../../tests/data/qr_mask_vectors.json) and
+the first independent decode of a PSCat render
+([selection API](QR_CODE_API.md#metadata-penalties-and-mask-selection),
+[decode proof](QR_CODE_TESTING.md#decode-proof)). It adds the test-only
+`rqrr` dev-dependency.
+
 ## Read in this order
 
 1. [Design and remaining sequence](QR_CODE.md), then

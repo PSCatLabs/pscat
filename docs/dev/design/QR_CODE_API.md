@@ -105,9 +105,9 @@ separators (9x9 squares clipped at the edge); alignment patterns at every pair
 of centers except the three finder corners; the dark module; two 15-cell
 format copies (row 8 and column 8 beside the finders) and, for version 7 and
 up, two 6x3 version blocks (columns `Size-11`..`Size-9` of rows 0–5 and the
-transpose). The BCH stage (#971) writes the metadata cells: it should `or`
-its bits into those bytes, keeping the `4` flag, so later stages can still
-tell metadata from fixed patterns.
+transpose). The BCH stage (#971) writes each metadata cell as `6` or `7`,
+keeping the `4` flag, so later stages can still tell metadata from fixed
+patterns.
 
 `qr--matrix` places bits most significant first, in two-column strips from the
 right edge, alternating up and down starting upward at the bottom-right,

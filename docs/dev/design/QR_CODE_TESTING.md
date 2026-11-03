@@ -131,7 +131,7 @@ white, and decodes it with [`rqrr`](https://crates.io/crates/rqrr) 0.11.0
 (`default-features = false`, MIT OR Apache-2.0 and ISC). It asserts the exact text, version, mask and format
 level at L/M/Q/H. The decoder is compiled into the test binary, so this test
 has no skip path: if it cannot decode, the suite fails. `rqrr` is a separate
-implementation (a port of quirc); it shares no code with `lib/qr.ps` or the
+implementation (based on quirc); it shares no code with `lib/qr.ps` or the
 fixture oracle.
 
 ## Behavioral and portability assertions
