@@ -300,7 +300,7 @@ the gallery presentation: PDF can carry both sides; SVG/PNG need explicit side
 outputs plus a gallery proof. Each exported side must preserve physical units;
 PNG at 300 dpi is 1050×600 pixels and needs an explicit print-size recipe.
 
-Design direction: restrained ink/navy, warm white, a typographic PSCat front
+Design direction: restrained ink/navy on white, a typographic PSCat front
 and a clear invitation to explore programmable graphics on the reverse.
 Aim for a >=0.8 inch high-contrast QR including its quiet zone, exact size
 checked after version selection; keep text >=9 pt and critical art >=9 pt
@@ -315,6 +315,15 @@ draws the gallery still, both sides on one sheet. The still is rendered at
 300 dpi so the 1.68 pt (7 px) modules stay on whole pixels. The symbol is
 level H, version 4, 0.96 in with its quiet zone, and nothing is printed
 within 9 pt of the trim. Checks: [verification](QR_CODE_TESTING.md#the-gallery-business-card-974).
+
+The brief first said "warm white" as well as "white edges/no bleed". #987
+settled it for white: the program leaves the paper unprinted, and a warm
+white comes from the stock (a natural or cream card), not from ink. A flat
+tint would need a bleed, or a tint held inside the 9 pt inset would leave a
+white frame that a slightly off trim makes visibly uneven, and a tint under
+the QR code would lower its contrast. #987 also made the front one lockup:
+the wordmark's ink tops out level with the logo tile and ends at the rule's
+right end, which fills the top right that the first layout left empty.
 
 ## Session infrastructure
 

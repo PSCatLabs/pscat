@@ -30,6 +30,10 @@
 %
 % Nothing is printed within 9 pt (1/8 in) of the trim, and the paper is
 % left white, so the card needs no bleed. Every letter is 9 pt or larger.
+% For a warm white, print it on a warm-white (natural or cream) stock
+% rather than inking a tint: a flat tint needs a bleed, or leaves a white
+% frame that a trim off by 1/32 in makes visibly uneven, and a tint under
+% the QR code would cut its contrast.
 %
 % Ghostscript runs it too (it reads lib/qr.ps):
 %   gs -dNOSAFER -dDEVICEWIDTHPOINTS=252 -dDEVICEHEIGHTPOINTS=144 \
@@ -93,12 +97,22 @@
 
 % ---------------------------------------------------------------- front
 
+% The front is one lockup: the 70 pt tile, the wordmark and the tagline
+% share its top and bottom edges, and the wordmark runs out to the rule's
+% right end. The numbers are the faces' ink, measured from a 1000 pt
+% raster (per 1000 units of the em; the advance widths would overshoot):
+% Courier-Bold "pscat" inks x 68 to 2906 and y -208 to 666 (the t's top),
+% and Palatino-Italic "P" starts its ink at x 9. So at 46.5 pt, drawn from
+% x 98.9, the wordmark's ink runs from 102.1 (over the tagline's first
+% stroke) to 234 (the rule's end), and from baseline 91 its t tops out at
+% 122, level with the tile; the tagline's last baseline sits on the tile's
+% bottom, 52.
 /front {
   gsave
-  18 50 64 logo
-  ink /Courier-Bold 38 (pscat) 96 84 setline
-  /Palatino-Italic 11 (PostScript for precision) 97 63 setline
-  /Palatino-Italic 11 (and imagination.) 97 50 setline
+  18 52 70 logo
+  ink /Courier-Bold 46.5 (pscat) 98.9 91 setline
+  /Palatino-Italic 13 (PostScript for precision) 102 67 setline
+  /Palatino-Italic 13 (and imagination.) 102 52 setline
   mustard 18 31.5 216 1.2 rectfill
   navy /Helvetica-Bold findfont 9 scalefont setfont
   18 16 moveto 1.2 0 (PSCatLabs) ashow
