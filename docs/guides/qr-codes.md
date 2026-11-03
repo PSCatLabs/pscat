@@ -155,6 +155,31 @@ Tell the print dialog 300 dpi (the PNG does not record it). SVG
 CSS pixels (96 per inch), three quarters of the true size. For print, use
 the PDF.
 
+### A worked example: the gallery business card
+
+[`gallery/pscat_card.ps`](../../gallery/pscat_card.ps) is a two-sided
+3.5 × 2 inch card with this repository's QR code on the back. It shows the
+recipe end to end:
+
+- **Both sides from one file.** It draws the front, `showpage`, then the back,
+  `showpage`. The PDF holds both pages. `--png card.png` and `--svg card.svg`
+  write `card-001` (front) and `card-002` (back).
+- **On the pixel grid at print resolution.** `/ModuleSize 1.68` is exactly 7
+  pixels at 300 dpi, and the symbol's corner is at (171.12, 37.44), both
+  multiples of 0.24 pt (one 300 dpi pixel). So every module edge in the
+  300 dpi PNG is a pixel edge.
+- **A free upgrade in level.** The 34-byte URL fills version 4 exactly at
+  `/Level /H`, the same version `/Q` needs. So H costs no size: 41 modules
+  with the quiet zone, 0.96 in.
+- **A margin instead of bleed.** Nothing is printed within 9 pt (1/8 in) of
+  the trim, so the card needs no bleed, and the URL is printed in text beside
+  the symbol.
+
+```sh
+pscat --page 252x144 --pdf card.pdf gallery/pscat_card.ps
+pscat --page 252x144 --dpi 300 --png card.png gallery/pscat_card.ps
+```
+
 ## Errors
 
 Every argument is checked before anything is drawn, so an error leaves the

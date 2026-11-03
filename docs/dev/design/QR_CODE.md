@@ -309,6 +309,13 @@ printer-specific bleed/imposition recipe only if needed. Proof actual exported
 pages at card size before gallery registration. No raster art or promotional
 claims beyond what PSCat currently does.
 
+Implemented in #974 as `gallery/pscat_card.ps`. The PDF carries both sides,
+and PNG/SVG write `-001` (front) and `-002` (back). A `/CardProof` prelude
+draws the gallery still, both sides on one sheet. The still is rendered at
+300 dpi so the 1.68 pt (7 px) modules stay on whole pixels. The symbol is
+level H, version 4, 0.96 in with its quiet zone, and nothing is printed
+within 9 pt of the trim. Checks: [verification](QR_CODE_TESTING.md#the-gallery-business-card-974).
+
 ## Session infrastructure
 
 The Mac rebooted after the first clone hit disk exhaustion. The root checkout
