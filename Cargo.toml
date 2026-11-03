@@ -144,6 +144,7 @@ sha2 = "0.11.1"
 hayro = { version = "=0.4.0", default-features = false }
 resvg = { version = "=0.49.0", default-features = false }
 rqrr = { version = "=0.11.0", default-features = false }
+rxing = { version = "=0.9.3", default-features = false, features = ["qrcode", "decoders", "encoding_rs"] }
 
 # tests/common's CPU-time clock (issue #329); already in the tree through
 # winit and friends in a default build. A dev-dependency, so a library user
