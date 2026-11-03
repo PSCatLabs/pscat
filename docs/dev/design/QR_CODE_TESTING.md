@@ -19,7 +19,8 @@ python3 scripts/check_md_links.py
 python3 scripts/gallery.py check
 python3 scripts/check_licences.py all
 python3 scripts/codeowners_check.py --base origin/main
-python3 scripts/pr_body_lint.py docs/dev/design/QR_CODE_PR.md --git-range origin/main..HEAD
+# pr_body_lint.py accepts empty stdin, so fetch to a file and check it first.
+body=$(mktemp "${TMPDIR:-/tmp}/qr-pr-body.XXXXXX") && gh pr view 957 --json body --jq .body > "$body" && test -s "$body" && python3 scripts/pr_body_lint.py "$body" --git-range origin/main..HEAD
 ```
 
 Normal Rust tests use checked-in JSON and need no network, oracle checkout,
@@ -46,8 +47,8 @@ committed. The oracle checkout is also on that external drive.
 | All-target Clippy, warnings denied | Passed. |
 | Formatting, Markdown links, gallery manifest, licenses | Passed. |
 | Three independent fixture regenerations | Matched the committed files. |
-| Shell `scripts/selftest.sh` wrapper | Its Cargo build-lock access was sandbox-denied; do not report this wrapper as passed. Underlying manifested-library and strict-driver checks passed in Rust. |
-| Remote PR CI | Not observed: publication is currently blocked by CLI network access. |
+| Shell `scripts/selftest.sh` wrapper | Initially sandbox-denied (Cargo build lock); later passed at `5d0d705` in the [checkpoint review](https://github.com/PSCatLabs/pscat/pull/957#pullrequestreview-5743891246). |
+| Remote PR CI | Observed on #957: `cargo test` 2590 passed, 0 failed ([run 41146962880](https://github.com/PSCatLabs/pscat/actions/runs/41146962880)). Whether CI's macOS runner had `gs` is not shown, since passing tests' skip messages are captured. |
 
 The Rust Ghostscript tests follow existing repository convention: they return
 early if `gs` cannot be launched. Therefore a green suite on a machine without
@@ -116,7 +117,7 @@ The current stage verifies data encoding and correction only. Future required
 decode tests must fail if the decoder is unavailable; they must not inherit
 the optional-Ghostscript skip convention.
 
-Cross-platform, headless-package, MSRV, crate/publishing and full remote CI
-results have not been observed for this branch. Existing CI should supply
-those results after publication. Normative standards checks and independent
-cross-family review remain outstanding before any merge.
+Remote CI on #957 passed, but that alone does not prove Ghostscript
+portability (see above). Normative standards checks remain outstanding, and
+each later stage (#970–#974) needs its own independent review before any merge
+to `main`.

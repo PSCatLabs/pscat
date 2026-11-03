@@ -5,9 +5,10 @@ Status: first-session development on `feature/qr-code-library`, based on
 This is a PSCat core library and gallery enhancement. No merge to main is
 authorized for this session. The work is not yet a complete QR encoder.
 
-Review package: [Opus handoff](QR_CODE_REVIEW.md),
-[implemented API](QR_CODE_API.md), [verification/reproduction](QR_CODE_TESTING.md),
-and [ready-to-publish draft PR body](QR_CODE_PR.md).
+Review package: [review handoff](QR_CODE_REVIEW.md),
+[implemented API](QR_CODE_API.md) and [verification/reproduction](QR_CODE_TESTING.md).
+The checkpoint is draft PR
+[#957](https://github.com/PSCatLabs/pscat/pull/957).
 
 Current implementation in `lib/qr.ps`: byte packing, automatic version/capacity
 planning, Reed–Solomon correction and block interleaving, with exact named
@@ -223,11 +224,12 @@ about 1 GiB, Library/Caches about 11 GiB. Use the authorized Cargo invocation
 for external target output; broader cache relocation needs writable workspace
 access. Do not change tracked paths into machine-specific symlinks.
 
-GitHub issue publication failed: connector create returned HTTP 403
+On 2026-10-28 (history), GitHub issue publication failed: connector create returned HTTP 403
 (`Resource not accessible by integration`). The requested CLI fallback was
 attempted: `gh api`/`gh issue list` cannot connect and `git push` cannot resolve
 GitHub inside the sandbox; `git fetch` has a working preapproved rule. Outside-
 sandbox CLI access was rejected by the session approval policy. Consequently,
 the earlier `gh auth status` invalid-token message does not establish that the
-credentials need replacing. Issue drafts are durable and ready to publish.
+credentials need replacing. This was later resolved: the checkpoint is draft PR
+#957 and the queue is filed as epic #966 with tickets #967–#974.
 This is an infrastructure limitation, not an exception to verification gates.

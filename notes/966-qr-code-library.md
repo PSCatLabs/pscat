@@ -1,9 +1,9 @@
-## Native QR library, initial slice (issue publication blocked, 2026-10-28)
+## Native QR library, initial slice (issue #966, 2026-10-28)
 
 Owner requested a long-running native PostScript QR feature and procedural
 business card. Branch `feature/qr-code-library` starts at main `07f054c`.
-No other feature work was merged or copied. Rename this note with the eventual
-tracking issue number after publishing the ready-to-file issue queue.
+No other feature work was merged or copied. The queue was later filed as epic
+#966 (tickets #967–#974), and this note was renamed to match.
 
 Discovery covered README/AGENTS/contribution/SDLC, architecture/handoff,
 library embedding and capability tags, selftests/Rust integration, exporters,
@@ -166,3 +166,18 @@ Validation: Bash syntax/help, six mocked CLI paths (create, update, dirty tree,
 API failure, push failure and existing non-draft), Markdown links, license
 checks and diff whitespace passed. No live publication was attempted by this
 script in the restricted session.
+
+## Review follow-up: publication scaffolding removed
+
+Draft PR #957 now exists, so the one-shot `scripts/publish_qr_pr.sh` and the
+in-tree PR body `docs/dev/design/QR_CODE_PR.md` were removed, along with the
+links to them. The live PR body is the record. The HANDOFF.md entry was
+reworded so it stays true once merged to `main`. No library, test or fixture
+changes.
+
+## Issues filed
+
+Filed the queue as epic #966 with tickets #967–#974. #967, #968 and #969
+(QR-1, QR-2A, QR-2B) are implemented here; #957's body now closes them.
+`QR_CODE_ISSUES.md` maps each local QR-n ID to its issue number, and this note
+was renamed to `966-qr-code-library.md`, following the `notes/` convention.

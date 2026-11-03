@@ -47,9 +47,8 @@ usage guide; for how to use a library, see the [guides](../guides/README.md).
 | [`design/QR_CODE.md`](design/QR_CODE.md) | Native QR library feature plan, current scope, independent verification and business-card integration. |
 
 For the QR checkpoint's independent review, use the
-[Opus handoff](design/QR_CODE_REVIEW.md), [API contracts](design/QR_CODE_API.md),
-[verification guide](design/QR_CODE_TESTING.md) and
-[draft PR body](design/QR_CODE_PR.md).
+[review handoff](design/QR_CODE_REVIEW.md), [API contracts](design/QR_CODE_API.md)
+and [verification guide](design/QR_CODE_TESTING.md).
 
 ## Where new docs go
 
