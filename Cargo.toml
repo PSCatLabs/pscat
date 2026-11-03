@@ -140,6 +140,15 @@ sha2 = "0.11.1"
 # pscat's own PNG/PDF compression would change under test (tests/mcp.rs
 # caught it); 0.7 and later also need rustc 1.92, above our rust-version.
 # No default features: the QR exports have no text or images.
+#
+# tests/qr_corpus.rs (issue #973) reads every rendered symbol with a second,
+# unrelated decoder too: rxing, a pure-Rust port of ZXing (rqrr is a quirc
+# port). Only its QR reader: `qrcode` + `decoders`, and `encoding_rs`,
+# without which its QR decoder panics (`no_character_set_support` is
+# unimplemented). No image crate. Its features reaching pscat's own
+# dependencies are inert (num-traits `i128`, simdutf8 `public_imp`/NEON);
+# pscat binaries built with and without it rendered the artkit/paintkit
+# corpus byte-identically (identity_check.sh, 120 pages).
 [dev-dependencies]
 hayro = { version = "=0.4.0", default-features = false }
 resvg = { version = "=0.49.0", default-features = false }

@@ -8,7 +8,7 @@ unrelated issues.
 
 Branch: `feature/qr-code-library`. [Architecture/sequence](QR_CODE.md).
 #967, #968 and #969 (QR-1, QR-2A, QR-2B) are implemented in draft PR #957;
-#970 (QR-3), #971 (QR-4) and #972 (QR-5) are implemented on this branch; #973 (QR-6) is next.
+#970 (QR-3), #971 (QR-4), #972 (QR-5) and #973 (QR-6) are implemented on this branch; #974 (QR-7) is next.
 
 | ID | Issue | Title | Depends on |
 |---|---|---|---|

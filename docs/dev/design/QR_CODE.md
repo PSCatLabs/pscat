@@ -17,7 +17,9 @@ metadata, the four penalty rules and automatic mask selection, giving complete
 symbols that an independent decoder reads back, with exact named guards,
 selftests, independent fixtures and native/Ghostscript/embedded-loader checks,
 and (#972) the public `qrencode`/`qrdraw` API with vector drawing, whose PNG,
-SVG and PDF exports are rasterized and decoded independently.
+SVG and PDF exports are rasterized and decoded independently, and (#973) an
+all-version/all-level boundary corpus against the oracle and a rendered
+decode corpus read by two unrelated decoders.
 The original `qr--byte-data` seam accepts explicit capacity; version selection
 now lives in `qr--byte-plan`. No Rust engine changes or runtime dependencies
 were added; #971 adds one test-only dev-dependency, the `rqrr` decoder. A separate same-family plan review
@@ -270,6 +272,25 @@ text, version, mask and level. The catalog's own `load` and `example` lines
 run from the embedded copy with the checkout hidden, and the skill's QR
 block runs on a bare install. Ghostscript reproduces `/Modules` and the
 state contract. A v40 symbol encodes and draws in about 0.5 s in PSCat.
+
+### Boundary and decode corpus (QR-6, #973)
+
+All 160 version/level cells are compared with the oracle in the default
+suite. The binary payload of exactly the byte capacity at a forced mask
+gives codewords and the whole finished grid. One byte more, with automatic
+masking, gives the next version, codewords, mask and grid, or overflow at
+40. Fixed-version overflow and URL/UTF-8 texts are covered too, and every
+call runs in a long-lived interpreter (repeated calls). A second decoder,
+rxing (a ZXing port), joins rqrr (a quirc port). Every rendered raster is
+first checked pixel by pixel: each pixel wholly inside one area has that
+area's exact grey, which pins the quiet zone and every module edge.
+Physical checks cover the 252 × 144 pt card's PDF MediaBox, its SVG size and
+the 300 dpi 1050 × 600 PNG recipe with an exact 0.8 in symbol. An ignored
+sweep renders all 160 symbols at seven pitches: every one decodes with both
+decoders at 2 px/module on the pixel grid, but at fractional pitches the
+decoders miss many dense symbols. That is a decoder limit, recorded per
+decoder in [verification](QR_CODE_TESTING.md#decode-corpus-and-per-decoder-results-973).
+No encoder bug was found; `lib/qr.ps` is unchanged.
 
 ## Business card target
 

@@ -96,8 +96,8 @@ pub fn raster_pdf(bytes: &[u8], scale: f32) -> Grey {
     )
 }
 
-/// The format-information code of an ECC level (ISO/IEC 18004 Table 12):
-/// what both decoders report.
+/// The two-bit format-information code of an ECC level (L 01, M 00, Q 11,
+/// H 10, ISO/IEC 18004): what both decoders report.
 pub fn level_code(level: &str) -> u16 {
     match level {
         "L" => 1,

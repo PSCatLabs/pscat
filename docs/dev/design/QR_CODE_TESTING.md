@@ -3,7 +3,8 @@
 Scope: [implemented data/correction/matrix API](QR_CODE_API.md): data and
 correction through commit `deba699`, plus matrix construction (#970) and
 metadata, penalties, mask selection and the first decode proof (#971), plus
-the public `qrencode`/`qrdraw` API and its PNG/SVG/PDF export checks (#972). The
+the public `qrencode`/`qrdraw` API and its PNG/SVG/PDF export checks (#972), plus
+the all-version boundary corpus, second decoder and physical checks (#973). The
 [Opus handoff](QR_CODE_REVIEW.md) gives the review scope and expected report.
 
 ## Reproduce normal checks
@@ -13,6 +14,9 @@ From the repository root, with stable Rust, Python 3 and optional Ghostscript:
 ```sh
 cargo build --locked --profile ci
 cargo test --locked --profile ci --test qr
+cargo test --locked --profile ci --test qr_corpus
+# The exhaustive render/decode sweep (#973), about 20 s on 8 threads:
+cargo test --locked --profile ci --test qr_corpus -- --ignored --nocapture
 cargo test --locked --profile ci
 cargo clippy --all-targets -- -D warnings
 cargo fmt --all -- --check
@@ -27,8 +31,9 @@ body=$(mktemp "${TMPDIR:-/tmp}/qr-pr-body.XXXXXX") && gh pr view 957 --json body
 
 Normal Rust tests use checked-in JSON and need no network, oracle checkout or
 pip package. The test-only dependencies are Rust dev-dependencies that Cargo
-builds into the test binary: the `rqrr` QR decoder (#971), and the `resvg`
-SVG and `hayro` PDF rasterizers (#972), all pinned exactly. `--offline` can be added to Cargo commands if
+builds into the test binary: the `rqrr` QR decoder (#971), the `resvg`
+SVG and `hayro` PDF rasterizers (#972) and the `rxing` QR decoder (#973), all
+pinned exactly. `--offline` can be added to Cargo commands if
 the existing dependencies are cached. Existing standard-35 fonts are embedded;
 no optional font pack is required. Review `git status` after checks.
 
@@ -84,6 +89,7 @@ regenerate their own expected outputs.
 | [Planning vectors](../../../tests/data/qr_planning_vectors.json) | All 160 layouts plus 504 automatic selections at maximum-1/maximum/maximum+1, short and count-width cases; expected versions come from actual automatic encoding, with padded-data SHA-256. |
 | [Correction vectors](../../../tests/data/qr_correction_vectors.json) | All 65,536 field products by hash; 30 divisors, 91 remainders, all 160 interleaved-layout hashes, nine full hex streams, and four complete GitHub URL streams. |
 | [Matrix vectors](../../../tests/data/qr_matrix_vectors.json) | Alignment centers and function/metadata/fixed-pattern grids for all 40 versions (full grids at 1, 2, 7, 10, 27, 40); placement at eight versions unmasked and under all eight masks; nine end-to-end symbols including unequal blocks; the GitHub URL at L/M/Q/H. Captured from the oracle's real constructor at a fixed mask. |
+| [Corpus vectors](../../../tests/data/qr_corpus_vectors.json) (#973) | All 160 version/level cells: a binary payload of exactly the version's byte capacity at a forced mask (the oracle's complete codeword stream and finished grid), and one byte more with automatic masking (the next version, or overflow at 40; codewords, the eight trial scores, chosen mask, grid). Five URL/UTF-8 texts at L/M/Q/H. Hashes only. |
 | [Mask vectors](../../../tests/data/qr_mask_vectors.json) | All 32 format and 34 version words; automatic-mask symbols at versions 1, 2, 7, 10, 27 and 40 for every level, the GitHub URL at L/M/Q/H and a real tie (masks 1 and 5) with the oracle's eight trial scores, chosen mask and full final grid; 32 hand-built and seeded penalty grids. |
 
 Byte/planning generation explicitly constructs one BYTE segment, including for
@@ -176,6 +182,153 @@ reads `qrencode`/`qrdraw` from `pscat --capabilities`, runs their `load` and
 `example` lines in an empty directory with `PSCAT_NO_CHECKOUT=1`, asserts the
 `lib/qr.ps <- embedded` trace and decodes the example's PNG.
 
+## Boundary corpus (#973)
+
+[`tests/qr_corpus.rs`](../../../tests/qr_corpus.rs) covers every version 1–40 at
+every level in the default suite, with no rendering. For each cell the corpus
+payload is a binary byte string of exactly the version's byte-mode capacity
+(byte `i` = `(149i + ⌊i/251⌋ + 7v + 41·ordinal) mod 256`: every byte value,
+NUL and 0x80–0xFF included, not periodic at 256). Its SHA-256 is pinned too,
+so the Rust copy of the formula cannot drift from the generator's. Per cell:
+
+- the planner picks that version, and the interleaved codeword stream
+  matches the oracle's (`codewords_sha256`, captured at its
+  `_draw_codewords`);
+- `qrencode` at the forced mask `(v + ordinal) mod 8` gives the oracle's whole
+  finished grid, metadata included: a fixed-mask full-matrix comparison for
+  all 160 layouts, beyond #970/#971's six versions;
+- one byte more moves to the oracle's next version with its codewords, chosen
+  mask and grid (a mismatch prints both sides' eight penalties), or raises
+  `qr-data-too-long-for-level` at version 40;
+- that byte-longer payload at a fixed `/Version v` raises
+  `qr-data-too-long-for-version`.
+
+All 40 versions of one level run in one interpreter, which checks the
+dictionary depth after each, and re-encodes the first symbol at the end
+(repeated calls). One `#[test]` per level runs them in parallel. URLs (12,
+34, 304 and 1,222 bytes, the last reaching version 40 at H) and a raw UTF-8
+URL with Latin, CJK and Thai text match the oracle with automatic version and
+mask. A table of invalid options (lower-case, long, numeric and null levels,
+negative/real/string/boolean versions, real and name masks, non-dict
+options, non-string payloads) and each level's v40 overflow (at +1 and +1000
+bytes) raise named errors without leaving a frame. The 255-byte count-width
+edge is checked as well. The fixtures regenerate byte-identically, as do the
+five earlier files.
+
+## Decode corpus and per-decoder results (#973)
+
+A second decoder joins rqrr: [`rxing`](https://crates.io/crates/rxing) 0.9.3,
+a pure-Rust port of ZXing (Apache-2.0, MSRV 1.85), with only its QR reader
+(`qrcode`, `decoders`, `encoding_rs`). rqrr ports quirc, so the two share
+no detector, sampler or Reed–Solomon code. They read different fields, and
+each check asserts only what that decoder reports. rqrr reports the payload
+(read through its byte writer, not its UTF-8 API), version, mask and level.
+rxing reports the payload (its byte-segment metadata, not its
+charset-guessed text), the level and the corrected data codewords, which
+must equal the encoder's padded data. Both run without a pure-barcode hint,
+so their finder detectors locate the symbol. The shared rasterizers and
+decoders live in [`tests/qr_support`](../../../tests/qr_support/mod.rs).
+
+Before decoding, each raster is checked pixel by pixel. A pixel lying wholly
+inside one kind of area (page, light square, dark modules, possibly spanning
+several modules of that kind) must have that area's exact grey (±8).
+Only pixels that straddle an edge between areas may be grey. This
+pins the quiet-zone width, every module edge and seam-free dark runs at any
+pitch, in pscat's PNG and in resvg's and hayro's rasters. pscat's PNG rounds
+the page to whole pixels (in `f32`) with y = 0 on the bottom pixel edge;
+resvg and hayro map the page exactly. The check follows each convention.
+
+Default suite (`rendered_subset_decodes_with_both_independent_decoders`, about
+4 s): versions 1, 2, 6, 7, 9, 10, 14, 21, 27 and 40 across the four levels,
+which covers the version-information (6/7) and count-width (9/10) boundaries and
+unequal block groups. Each is rendered at 2 and 3 px/module on the pixel grid
+and at 3.77 px/module from a fractional origin, through all three exports.
+Both decoders must read every pixel-aligned raster. At the fractional pitch,
+the test lists the 24 (symbol, export, decoder) misses it expects
+(`FRACTIONAL_MISSES`). Each miss must still fail, so a decoder upgrade that
+changes the table fails the test.
+
+Exhaustive sweep (`--ignored`): all 160 capacity symbols at seven pitches,
+2,080 rasters and 4,160 decodes, in 22.7 s on 8 threads (Apple M-series, `ci`
+profile). Every raster passed the pixel check. It fails if either decoder
+misses a symbol at 2 px/module on the pixel grid, or if both miss a
+pixel-aligned raster. Measured results (symbols read, of 160):
+
+| px/module | grid | export | rqrr | rxing |
+|---|---|---|---|---|
+| 2.00 | aligned | PNG, SVG, PDF | 160 each | 160 each |
+| 3.00 | aligned | PNG, SVG, PDF | 160 each | 156 each (v20-M, v24-H, v31-Q, v37-L) |
+| 4.00 | aligned | PNG | 160 | 153 |
+| 2.60 | fractional | PNG | 0 | 102 |
+| 3.77 | fractional | PNG / SVG / PDF | 76 / 86 / 82 | 102 / 99 / 128 |
+| 4.50 | fractional | PNG | 68 | 132 |
+| 5.70 | fractional | PNG | 152 | 153 |
+
+Every symbol is read by both decoders at 2 px/module on the pixel grid, and
+by rqrr at every whole-pixel pitch. Misses happen only in the decoders: the
+rasters are pixel-exact, three unrelated rasterizers agree, and
+thresholding the fractional rasters to pure black and white changes which
+symbols each decoder misses, without fixing them. Both decoders sample a
+grid estimated from the finder patterns, and when module edges fall inside
+pixels, large dense symbols (high versions, full capacity) are where that
+estimate fails. rqrr is the weaker at small fractional pitches; rxing has a
+few whole-pixel misses. So this is the
+practical guidance: a raster (PNG) meant for screens should use a whole
+number of device pixels per module on the pixel grid; print at printer
+resolution has many pixels per module. This generalizes #972's note that
+rqrr missed the version-10 case at about 4 px/module fractional.
+
+## Physical size, print recipe, quiet zone and module edges (#973)
+
+- `card_exports_keep_physical_size_and_the_300_dpi_print_recipe`: a 3.5 × 2 in
+  card (252 × 144 pt) with a mid-grey backdrop and a 0.8 in (`/Side 57.6`)
+  GitHub symbol at (180, 72). The PDF MediaBox is `[0 0 252 144]`, and the SVG
+  is `width="252" height="144" viewBox="0 0 252 144"`. The print recipe
+  `pscat --page 252x144 --dpi 300 --png card.png card.ps` gives 1050 × 600
+  pixels. In all three rasters at 300 dpi, the light square is exactly
+  pixels 750–989 × 60–299 (0.8 in = 240 px), pixel-checked and decoded by both
+  decoders.
+- `quiet_zone_and_module_edges_land_exactly_at_every_scale`: the GitHub URL
+  at Q with quiet zones of 4, 5 and 6 on a grey backdrop, at 1, 2, 3, 3.54,
+  3.77, 4.17 and 6.8 px/module (whole and fractional origins). The 0.85 pt
+  (0.3 mm) print rule of thumb at 300 dpi is one of them. Every raster in all
+  three exports is pixel-checked; from 2 px/module up, both decoders read it.
+  A quiet zone below 4 is refused (`qr-quiet-zone-must-be-at-least-4`, the
+  #972 guards).
+
+## Standards references
+
+- ISO/IEC 18004:2015, *QR Code bar code symbology specification*: the
+  normative source for Model 2 versions and capacities, error correction
+  blocks, format and version information, alignment pattern positions,
+  masking and penalty rules and the four-module quiet zone. The library and these
+  tests were not checked clause by clause against the purchased text.
+  The tables are verified against the independent oracle, and the oracle
+  follows the standard.
+- DENSO WAVE, [QR code size and quiet zone](https://www.qrcode.com/en/howto/code.html)
+  (module sizing, four-module margin).
+- Oracle: [Nayuki QR-Code-generator](https://github.com/nayuki/QR-Code-generator)
+  at the pinned revision above. Decoders: rqrr 0.11.0 (quirc lineage) and
+  rxing 0.9.3 (ZXing lineage).
+
+## Limitations
+
+- Byte mode only, one segment, no ECI. Numeric, alphanumeric and kanji
+  modes, mode mixing, Structured Append and Micro QR are out of scope.
+- Conformance is shown by agreement with one independent encoder plus two
+  decoders, not by a certification test suite. No scanner (phone camera)
+  reliability is claimed. The decoders' misses at fractional pitches above
+  are a reminder that cameras differ.
+- The SVG has no physical unit: `width`/`height` are user units (points)
+  without `pt`, so an SVG consumer at 96 px/in shows a 252-unit card at 2.625
+  in, not 3.5 in. Print from the PDF, which is exact, or scale the SVG by 4/3.
+  The PNG carries no `pHYs` resolution chunk: its print size is its pixel
+  count divided by the dpi it was rendered at, which the print dialog must
+  be told.
+- The suite's QR tests take about 12 s of wall time (`ci` profile, about 45 s of
+  CPU across four parallel level tests). An unoptimized `cargo test` is many
+  times slower.
+
 ## Behavioral and portability assertions
 
 The [Rust tests](../../../tests/qr.rs) also check input immutability, fresh
@@ -193,10 +346,9 @@ are both pinned.
 
 ## What remains unverified
 
-The public API draws symbols whose PNG, SVG and PDF exports decode with one
-independent decoder at two pitches (#972). There is no all-version decode
-sweep, multi-decoder corpus, physical-card sizing check or card artwork
-(#973, #974). No claim of complete ISO/IEC 18004
+Every version and level matches the oracle, and the rendered corpus decodes
+with two independent decoders (#973). Card artwork is #974. No claim of
+complete ISO/IEC 18004
 conformance or scanner reliability is made. Later decode tests must, like
 #971's, fail if the decoder is unavailable; they must not inherit the
 optional-Ghostscript skip convention.
