@@ -38,6 +38,12 @@ mkdir -p "$OUT/assets/renders" "$OUT/assets/references" "$OUT/assets/learn" \
 # 1. the authored pages (the shell is applied in the last step)
 cp "$ROOT"/site/*.html "$ROOT"/site/style.css "$ROOT"/site/source-viewer.js "$OUT/"
 cp "$ROOT"/lib/graph.ps "$ROOT"/lib/dataviz.ps "$OUT/lib/"
+# the brand images (#927): the logo (favicon and home page), the social
+# preview (og:image) and the certificate the home page pairs with a painting
+mkdir -p "$OUT/assets/brand"
+cp "$ROOT"/art/logo/renders/pscat-logo-d-512.png "$ROOT"/art/logo/renders/pscat-logo-d-48.png \
+   "$ROOT"/art/brand/renders/social-preview.png "$ROOT"/art/brand/renders/certificate.png \
+   "$OUT/assets/brand/"
 
 # 2. the browser build
 "$ROOT/scripts/build_wasm.sh"

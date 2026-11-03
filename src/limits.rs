@@ -176,7 +176,7 @@ pub enum LimitsError {
 pub fn pixel_cap_message(w: u64, h: u64, limit: u64) -> String {
     format!(
         "output too large: {w}x{h} pixels ({}); at most 8000 a side and --max-pixels {limit}",
-        w * h
+        w.saturating_mul(h)
     )
 }
 

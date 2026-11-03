@@ -23,7 +23,8 @@ Orientation tag, so a portrait phone photo sizes and
 renders right-side up rather than sideways. Draws with ordinary
 `moveto`/`lineto`/`stroke`, so it renders to `--png`/`--svg`/`--pdf`
 alike. `pscat photo-etch` wraps it end to end (photo path in, PNG/
-SVG/PDF out — no PostScript required); `examples/etching_demo.ps` is a
+SVG/PDF out — no PostScript required; a JPEG photo only, and any other
+format exits 1 with a message naming it); `examples/etching_demo.ps` is a
 specimen sheet.
 `et-tonemap` returns the photo's tones as data instead: a
 grid of box-averaged darkness, row 0 at the top. The charcoal portrait

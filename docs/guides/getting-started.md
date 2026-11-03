@@ -1,8 +1,9 @@
 # Getting started
 
-pscat is a PostScript interpreter that draws as it runs. This guide covers
-building it, installing a ready-made bundle, and the command-line flags you
-will use most. If PostScript itself is new to you, skim the
+pscat is a PostScript interpreter that renders documents and art to PNG,
+SVG and PDF, and can show a program drawing in a live window as it runs.
+This guide covers building it, installing a ready-made bundle, and the
+command-line flags you will use most. If PostScript itself is new to you, skim the
 [site](https://pscatlabs.github.io/pscat/) first; every
 example below is a plain `.ps` text file.
 
@@ -25,7 +26,10 @@ Ghostscript.
 Every flag, with the most useful ones first:
 
 ```sh
-cargo run -- --page 500x500 file.ps       # canvas size (default 612x792)
+cargo run -- --page 500x500 file.ps       # canvas size; always wins (default: the
+                                          # program's setpagedevice /PageSize, else
+                                          # an EPSF file's %%BoundingBox, else 612x792)
+cargo run -- --bbox --png out.png file.ps # any file's %%BoundingBox is the page
 cargo run -- --speed 10 file.ps           # slower (steps per frame, default 100)
 cargo run -- --png out.png file.ps        # headless render to PNG
 cargo run -- --svg out.svg file.ps        # export SVG (also --pdf out.pdf)
@@ -351,7 +355,9 @@ gh attestation verify pscat-<version>-<target>.tar.gz --repo PSCatLabs/pscat
 The Linux archives are fully static (musl), so they run on any distribution,
 but they are **headless**: they render to PNG, SVG and PDF and have no live
 window, because a static binary cannot load the system's X11/Wayland
-libraries. For the window on Linux, build from source.
+libraries. For the window on Linux, build from source. In a headless build
+`pscat file.ps`, `-i` and `--spool` print an error that leads with the
+alternative, `pscat --png out.png file.ps`.
 
 `lib/` resolves automatically as long as it stays next to the `pscat` binary.
 That is the point of the bundle layout. The libraries (`lib/artkit.ps` and the

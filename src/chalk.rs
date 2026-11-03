@@ -184,7 +184,7 @@ pub enum ChalkError {
     /// The TeX is outside mathkit's subset or malformed. `kind` is
     /// mathkit's error without its `mk-` prefix (`unsupported-command`,
     /// `unsupported-character`, `missing-argument`, ...), `token` what it
-    /// named (`\oplus`, `@`; empty if nothing).
+    /// named (`\aleph`, `@`; empty if nothing).
     Latex {
         /// mathkit's error name, without `mk-`.
         kind: String,
@@ -217,7 +217,7 @@ impl fmt::Display for ChalkError {
             ChalkError::Latex { kind, token } => match kind.as_str() {
                 "unsupported-command" => write!(
                     f,
-                    "unsupported LaTeX command {token} (the supported subset is listed at the top of lib/mathkit.ps)"
+                    "unsupported LaTeX command {token} (`pscat chalk --help` lists the supported subset)"
                 ),
                 "unsupported-character" => {
                     write!(f, "unsupported character: {token}")?;
@@ -610,7 +610,8 @@ const DROPPED: [&str; 3] = ["\\nonumber", "\\notag", "\\label"];
 /// wrappers (`$...$`, `\[...\]`, `\(...\)`, one pair or several; an
 /// `align`/`gather`/... environment around the whole) and labels removed, split at top-level `\\` row breaks (not
 /// those inside braces or inside an environment such as `pmatrix` or
-/// `cases`). Blank rows are dropped; none left is [`ChalkError::Empty`].
+/// `cases`). A `*` or a `[length]` after a row break goes at both levels.
+/// Blank rows are dropped; none left is [`ChalkError::Empty`].
 pub fn lines(latex: &str) -> Result<Vec<String>, ChalkError> {
     layout(latex).map(|(rows, _)| rows)
 }
@@ -665,7 +666,7 @@ fn layout(latex: &str) -> Result<(Vec<String>, RowAlign), ChalkError> {
     }
     let rows: Vec<String> = split_rows(&s)
         .into_iter()
-        .map(|r| r.trim().to_string())
+        .map(|r| drop_row_break_options(r.trim()))
         .filter(|r| !r.is_empty())
         .collect();
     if rows.is_empty() {
@@ -963,16 +964,7 @@ fn split_rows(s: &str) -> Vec<String> {
                 if b.get(i + 1) == Some(&b'\\') {
                     if braces == 0 && envs == 0 {
                         rows.push(s[start..i].to_string());
-                        let mut j = i + 2;
-                        if b.get(j) == Some(&b'*') {
-                            j += 1;
-                        }
-                        let k = j + s[j..].len() - s[j..].trim_start_matches(' ').len();
-                        if b.get(k) == Some(&b'[')
-                            && let Some(close) = s[k..].find(']')
-                        {
-                            j = k + close + 1;
-                        }
+                        let j = row_break_options_end(s, i + 2);
                         start = j;
                         i = j;
                         continue;
@@ -1002,6 +994,140 @@ fn split_rows(s: &str) -> Vec<String> {
     }
     rows.push(s[start..].to_string());
     rows
+}
+
+/// Where the options of a `\\` row break end, given `j` just past the two
+/// backslashes: a `*`, then TeX's `[2pt]` row spacing. A bracket that holds
+/// no length is the next row's content (`\\ [x,y] = 0`, a commutator), where
+/// LaTeX would stop with an error, so it is left where it is.
+fn row_break_options_end(s: &str, mut j: usize) -> usize {
+    let b = s.as_bytes();
+    if b.get(j) == Some(&b'*') {
+        j += 1;
+    }
+    let k = j + s[j..].len() - s[j..].trim_start().len();
+    if b.get(k) == Some(&b'[')
+        && let Some(close) = s[k..].find(']')
+        && is_tex_glue(&s[k + 1..k + close])
+    {
+        j = k + close + 1;
+    }
+    j
+}
+
+/// A row with the options dropped from the `\\` breaks left in it, those
+/// inside `pmatrix`, `cases` or `\substack{}` that mathkit splits itself
+/// (issue #950): `\\[2pt]` and `\\*` become `\\`, as at the top level. The
+/// spacing is not honoured there either; mathkit spaces the rows by their
+/// content.
+fn drop_row_break_options(row: &str) -> String {
+    let b = row.as_bytes();
+    let mut out = String::with_capacity(row.len());
+    let mut last = 0;
+    let mut i = 0;
+    while i + 1 < b.len() {
+        if b[i] != b'\\' {
+            i += 1;
+            continue;
+        }
+        if b[i + 1] == b'\\' {
+            let j = row_break_options_end(row, i + 2);
+            out.push_str(&row[last..i + 2]);
+            last = j;
+            i = j;
+            continue;
+        }
+        // a control word or symbol: its first byte is never a break (a
+        // multi-byte character's later bytes are never a backslash)
+        i += 2;
+    }
+    out.push_str(&row[last..]);
+    out
+}
+
+/// TeX's units of length (TeXbook p. 57).
+const TEX_UNITS: [&str; 11] = [
+    "pt", "pc", "in", "bp", "cm", "mm", "dd", "cc", "sp", "em", "ex",
+];
+
+/// Whether `name` (a control word, no backslash) is a TeX or LaTeX length
+/// register: plain TeX's and LaTeX's are named for what they measure
+/// (`\baselineskip`, `\abovedisplayskip`, `\arraycolsep`, `\textheight`,
+/// `\linewidth`, `\parindent`, `\medskipamount`, `\unitlength`, `\fboxrule`,
+/// `\lineskiplimit`), and `\jot` and `\fill` are the two common exceptions. No mathkit command is named so, so `\pi`
+/// or `\alpha` in a bracket stays content.
+fn is_length_register(name: &str) -> bool {
+    const ENDS: [&str; 10] = [
+        "skip", "sep", "width", "height", "depth", "indent", "amount", "length", "rule", "limit",
+    ];
+    name.chars().all(|c| c.is_ascii_alphabetic())
+        && (matches!(name, "jot" | "fill") || ENDS.iter().any(|e| name.ends_with(e)))
+}
+
+/// Whether `t` (the inside of a `[...]`) reads as a TeX length: a signed
+/// number and a unit (`2pt`, `-1.5 em`, `3,5mm`, `2truept`), or an optional
+/// factor and a length register (`\baselineskip`, `0.5\jot`). Anything else,
+/// `x,y` or `\pi` among them, is not.
+fn is_tex_length(t: &str) -> bool {
+    let t = t.trim();
+    let t = t.strip_prefix(['+', '-']).unwrap_or(t).trim_start();
+    let digits = t
+        .find(|c: char| !(c.is_ascii_digit() || c == '.' || c == ','))
+        .unwrap_or(t.len());
+    let (num, rest) = t.split_at(digits);
+    let has_num = num.chars().any(|c| c.is_ascii_digit());
+    if !num.is_empty() && !has_num {
+        return false;
+    }
+    let rest = rest.trim_start();
+    if let Some(reg) = rest.strip_prefix('\\') {
+        // `\dimen0`, `\skip12`: TeX's numbered registers
+        let reg = reg.trim_end();
+        let name = reg
+            .trim_end_matches(|c: char| c.is_ascii_digit())
+            .trim_end();
+        return if name.len() < reg.len() {
+            matches!(name, "dimen" | "skip")
+        } else {
+            is_length_register(reg)
+        };
+    }
+    let unit = rest.to_ascii_lowercase();
+    let unit = unit.strip_prefix("true").unwrap_or(&unit).trim_start();
+    has_num && TEX_UNITS.contains(&unit.trim_end())
+}
+
+/// Whether `t` is a length with optional `plus` and `minus` parts
+/// (`2pt plus 1pt minus 0.5pt`, `0pt plus 1fil`), TeX's glue, or an e-TeX
+/// `\dimexpr`/`\glueexpr` expression.
+fn is_tex_glue(t: &str) -> bool {
+    // an e-TeX expression is spacing whatever it holds
+    let head = t.trim_start();
+    let head = head.strip_prefix(['+', '-']).unwrap_or(head).trim_start();
+    if head.starts_with("\\dimexpr") || head.starts_with("\\glueexpr") {
+        return true;
+    }
+    let lower = t.to_ascii_lowercase();
+    let cut = |key: &str| lower.find(key).unwrap_or(lower.len());
+    let (plus, minus) = (cut("plus"), cut("minus"));
+    let stretch = |from: usize, key: &str, to: usize| {
+        from == lower.len() || from > to || {
+            let part = &lower[from + key.len()..to];
+            is_tex_length(part) || is_fil(part)
+        }
+    };
+    is_tex_length(&lower[..plus.min(minus)])
+        && (plus == lower.len() || plus < minus)
+        && stretch(plus, "plus", minus)
+        && stretch(minus, "minus", lower.len())
+}
+
+/// `1fil`, `-2 fill`, `fill`: TeX's infinite stretch (lowercase input).
+fn is_fil(t: &str) -> bool {
+    let t = t.trim();
+    let t = t.strip_prefix(['+', '-']).unwrap_or(t);
+    let t = t.trim_start_matches(|c: char| c.is_ascii_digit() || c == '.' || c == ',');
+    matches!(t.trim(), "fil" | "fill" | "filll")
 }
 
 /// A PostScript string literal holding `bytes`: `\`, `(` and `)` escaped,
@@ -1450,6 +1576,43 @@ mod tests {
     fn rows_split_only_at_top_level_breaks() {
         assert_eq!(l(r"a &= b \\ c &= d"), ["a &= b", "c &= d"]);
         assert_eq!(l(r"a \\* b \\[2pt] c\\"), ["a", "b", "c"]);
+        // a bracket after `\\` is spacing only when it holds a length (#936)
+        assert_eq!(l(r"a \\ [x,y] = 0"), ["a", "[x,y] = 0"]);
+        assert_eq!(
+            l(r"i\hbar \\ [\hat{x},\hat{p}] = i\hbar"),
+            [r"i\hbar", r"[\hat{x},\hat{p}] = i\hbar"]
+        );
+        assert_eq!(l(r"a \\ [\pi] = 0"), ["a", r"[\pi] = 0"]);
+        assert_eq!(l(r"a \\[1] b"), ["a", "[1] b"]);
+        assert_eq!(l("a \\\\\n[2pt] b"), ["a", "b"]);
+        assert_eq!(l(r"a \\*[ -1.5 em ] b \\ [3,5mm] c"), ["a", "b", "c"]);
+        assert_eq!(l(r"a \\[0.5\baselineskip] b \\[\jot] c"), ["a", "b", "c"]);
+        assert_eq!(l(r"a \\[2truept] b"), ["a", "b"]);
+        assert_eq!(
+            l(r"a \\[\abovedisplayskip] b \\[0.1\textheight] c \\[-\arraycolsep] d"),
+            ["a", "b", "c", "d"]
+        );
+        assert_eq!(
+            l(r"a \\[\unitlength] b \\[2\fboxrule] c \\[\lineskiplimit] d"),
+            ["a", "b", "c", "d"]
+        );
+        assert_eq!(
+            l(r"a \\[\dimexpr 2pt+1pt\relax] b \\[\dimen0] c \\[0.5\skip12] d"),
+            ["a", "b", "c", "d"]
+        );
+        assert_eq!(l(r"a \\[-\dimexpr 2pt+1pt\relax] b"), ["a", "b"]);
+        assert_eq!(l(r"a \\ [x_0] = 1"), ["a", "[x_0] = 1"]);
+        assert_eq!(
+            l(r"a \\ [\alpha, \beta] = 0"),
+            ["a", r"[\alpha, \beta] = 0"]
+        );
+        assert_eq!(
+            l(r"a \\[2pt plus 1pt minus .5pt] b \\[0pt plus 1fil] c"),
+            ["a", "b", "c"]
+        );
+        assert_eq!(l(r"a \\[2pt plus x] b"), ["a", "[2pt plus x] b"]);
+        // inside display delimiters too
+        assert_eq!(l(r"\[ a \\ [x,y] \]"), ["a", "[x,y]"]);
         assert_eq!(
             l(r"\begin{pmatrix} a & b \\ c & d \end{pmatrix} = M"),
             [r"\begin{pmatrix} a & b \\ c & d \end{pmatrix} = M"]
@@ -1464,6 +1627,36 @@ mod tests {
         );
         // escaped braces are not grouping
         assert_eq!(l(r"\{ a \\ b \}"), [r"\{ a", r"b \}"]);
+    }
+
+    #[test]
+    fn row_spacing_inside_matrices_goes_too() {
+        // the same rule as at the top level (issue #950)
+        assert_eq!(
+            l(r"\begin{pmatrix} a & b \\[4pt] c & d \end{pmatrix}"),
+            [r"\begin{pmatrix} a & b \\ c & d \end{pmatrix}"]
+        );
+        assert_eq!(
+            l(r"f = \begin{cases} 1 \\*[0.5\baselineskip] 0 \\* 2 \end{cases} \\[2pt] g"),
+            [r"f = \begin{cases} 1 \\ 0 \\ 2 \end{cases}", "g"]
+        );
+        assert_eq!(
+            l(r"\sum_{\substack{i<m \\ [2pt] j<n}} a"),
+            [r"\sum_{\substack{i<m \\ j<n}} a"]
+        );
+        // a bracket that holds no length is the next row's content
+        assert_eq!(
+            l(r"\begin{bmatrix} a \\ [x,y] \\[1] \\[\pi] \end{bmatrix}"),
+            [r"\begin{bmatrix} a \\ [x,y] \\[1] \\[\pi] \end{bmatrix}"]
+        );
+        // an unclosed bracket, a control word, a row break at the very end
+        assert_eq!(
+            l(r"\begin{vmatrix} a \\[2pt \end{vmatrix}"),
+            [r"\begin{vmatrix} a \\[2pt \end{vmatrix}"]
+        );
+        assert_eq!(drop_row_break_options(r"\alpha\\[2pt]"), r"\alpha\\");
+        assert_eq!(drop_row_break_options(r"é\\[2pt]ü \,"), r"é\\ü \,");
+        assert_eq!(drop_row_break_options("\\"), "\\");
     }
 
     #[test]
@@ -1706,11 +1899,11 @@ mod tests {
 
     #[test]
     fn mathkit_errors_become_named_latex_errors() {
-        let e = explain(&PsError::Undefined(r"mk-unsupported-command:\oplus".into())).unwrap();
+        let e = explain(&PsError::Undefined(r"mk-unsupported-command:\aleph".into())).unwrap();
         assert_eq!(e.code(), "unsupported_command");
         assert!(
             e.to_string()
-                .starts_with(r"unsupported LaTeX command \oplus")
+                .starts_with(r"unsupported LaTeX command \aleph")
         );
         let e = explain(&PsError::Undefined("mk-unsupported-character:@".into())).unwrap();
         assert_eq!(e.to_string(), "unsupported character: @");

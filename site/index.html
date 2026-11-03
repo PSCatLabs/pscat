@@ -2,19 +2,38 @@
 <html lang="en">
 <head>
 <!--@head-->
-<title>pscat — watch PostScript draw</title>
-<meta name="description" content="pscat is a PostScript interpreter written in Rust: run a program and watch the picture draw itself, in a window, in your browser, or as PNG, SVG and PDF.">
+<title>pscat: PostScript for precision and imagination</title>
+<meta name="description" content="pscat is a modern PostScript interpreter written in Rust for reliable document rendering and creative graphics: PostScript and EPS to PNG, SVG and PDF, from the command line, a Rust library, the browser or an AI agent.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="pscat">
+<meta property="og:title" content="pscat: PostScript for precision and imagination">
+<meta property="og:description" content="pscat is a modern PostScript interpreter written in Rust for reliable document rendering and creative graphics: PostScript and EPS to PNG, SVG and PDF, from the command line, a Rust library, the browser or an AI agent.">
+<meta property="og:url" content="https://pscatlabs.github.io/pscat/">
+<meta property="og:image" content="https://pscatlabs.github.io/pscat/assets/brand/social-preview.png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="640">
+<meta property="og:image:alt" content="The pscat logo and tagline beside a typeset certificate and a painted landscape, all drawn by pscat">
+<meta name="twitter:card" content="summary_large_image">
 </head>
 <body>
 <!--@header home-->
 <main class="wide">
   <section class="landing-hero">
     <div class="copy">
-      <h1>Watch PostScript draw itself.</h1>
-      <p class="lede">PostScript is the language printers once spoke: a page is
-      a program that draws it. <b>pscat</b> is a PostScript interpreter written
-      in Rust. Run a program and the picture appears stroke by stroke, in a
-      window, in your browser tab, or as a PNG, SVG or PDF.</p>
+      <p class="brandline"><a href="https://github.com/PSCatLabs/pscat/blob/main/art/logo/pscat-logo-d.ps"><img src="assets/brand/pscat-logo-d-512.png" width="64" height="64"
+        alt="The pscat logo: a sheet of paper with cat ears and %! as its face"></a>
+        <span>The logo is drawn by pscat from
+        <a href="https://github.com/PSCatLabs/pscat/blob/main/art/logo/pscat-logo-d.ps">its PostScript source</a>.</span></p>
+      <h1>PostScript for precision and imagination.</h1>
+      <p class="lede"><b>pscat</b> is a modern PostScript interpreter written in
+      Rust for reliable document rendering and creative graphics. It renders
+      PostScript and EPS to PNG, SVG and PDF from the command line, as an
+      embeddable Rust library, in the browser via WebAssembly, or through MCP
+      for AI agents.</p>
+      <p class="lede">Typeset letters, certificates, charts and multi-page PDFs;
+      paint watercolors, cut prints and write on chalkboards. You can also
+      watch a program draw, stroke by stroke, in a live window or right here in
+      your browser.</p>
       <p class="cta">
         <a class="primary" href="gallery.html">See the gallery</a>
         <a href="learn.html">Learn PostScript</a>
@@ -22,15 +41,26 @@
       </p>
     </div>
     <figure>
-      <img src="assets/renders/evening_stream.png" width="1520" height="1120"
-           alt="Evening Stream: a purple dusk sky over a cabin, autumn trees and a winding stream, painted in layered strokes">
-      <figcaption>Evening Stream, a wet-on-wet landscape. Every stroke is
-      PostScript: the source is <code>gallery/evening_stream.ps</code>.</figcaption>
+      <div class="pair">
+        <img src="assets/brand/certificate.png" width="1224" height="1160"
+             alt="A certificate of achievement for Ada Lovelace, typeset in serif type inside a double rule on cream paper">
+        <img src="assets/renders/evening_stream.png" width="1520" height="1120"
+             alt="Evening Stream: a purple dusk sky over a cabin, autumn trees and a winding stream, painted in layered strokes">
+      </div>
+      <figcaption>A document and a painting, both drawn by pscat: a certificate
+      from the page templates (<code>examples/template_certificate.ps</code>)
+      and Evening Stream, a wet-on-wet landscape
+      (<code>gallery/evening_stream.ps</code>).</figcaption>
     </figure>
   </section>
 
   <h2>What you can make with it</h2>
   <div class="cards">
+    <div class="card"><div class="body"><b>Documents</b>
+      <span>Letters, certificates, invitations, cards and posters from page
+      templates, typewritten memos, and multi-page PDFs with their title and
+      author set. See the
+      <a href="https://github.com/PSCatLabs/pscat/blob/main/docs/guides/style-packs-and-templates.md">templates guide</a>.</span></div></div>
     <div class="card"><div class="body"><b>Generative art</b>
       <span>Turtle graphics, L-systems, noise and flow fields, plus brushes
       that behave like watercolor, chalk, charcoal and ink. The
@@ -113,8 +143,10 @@ cargo run --release -- -i                                      # REPL + live win
   <p>I used to write raw PostScript by hand in college and send it straight
   to a LaserWriter. This is a from-scratch Rust interpreter built to relive
   that: watching a hand-written recursive program draw itself, live, without
-  depending on a decades-old C codebase to do it. It is not a Ghostscript
-  replacement, and it is happy to be checked against Ghostscript.</p>
+  depending on a decades-old C codebase to do it. It has grown since: pscat
+  now aims to replace Ghostscript for most PostScript work, and uses
+  Ghostscript as its correctness reference, with test expectations pinned
+  against Ghostscript's output.</p>
 </main>
 <!--@footer-->
 </body>

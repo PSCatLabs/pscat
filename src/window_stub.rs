@@ -18,9 +18,12 @@ pub struct WindowOptions {
     pub halftone: bool,
 }
 
-const NO_WINDOW: &str = "this pscat was built without the `window` feature, so it has no live \
-     window; render headless with --png/--svg/--pdf (or --headless), or reinstall with the \
-     default features (`cargo install pscat`)";
+// Leads with what to type instead: a reader of the plugin's headless binary
+// came to render something, and `cargo install` is the long way round.
+const NO_WINDOW: &str = "render to a file instead: `pscat --png out.png file.ps` (or --svg / \
+     --pdf, or --headless to just run it). This pscat was built without the `window` feature, \
+     so it has no live window, `-i` or `--spool`; for those, `cargo install pscat` builds one \
+     with the default features";
 
 /// Always `Err`: there is no window in this build.
 pub fn run_windowed(_interp: Interp, _options: WindowOptions) -> Result<(), String> {

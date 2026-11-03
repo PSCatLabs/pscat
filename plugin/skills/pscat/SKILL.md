@@ -8,21 +8,23 @@ description: Render, preview, and debug PostScript with the pscat interpreter �
 
 `pscat` is a PostScript (Level 2) interpreter: one binary, with its
 PostScript library (`lib/*.ps`) compiled in, so `(lib/artkit.ps) run`
-works from any directory. Check it is installed with `pscat --help`. If
-it is not on `PATH` and the pscat plugin is installed, the plugin's
-session-start note gives its full path. Or run
-`sh "${CLAUDE_PLUGIN_ROOT}/scripts/pscat-mcp.sh" --locate`, which prints
-the directory holding `pscat` and `pscat-mcp`, downloading the plugin's
-pinned release first if needed. The plugin's download is also at
+works from any directory. Check it is installed with `pscat --help`. With
+the pscat plugin installed, `pscat` is normally on `PATH` already: the
+plugin links it into `~/.local/bin` (or `~/bin`) when that directory is on
+`PATH`. If `pscat` is not found, use the plugin's one stable path,
 `~/Library/Caches/pscat/plugin/bin/pscat` (macOS) or
-`~/.cache/pscat/plugin/bin/pscat` (Linux). Without the plugin, install it:
+`~/.cache/pscat/plugin/bin/pscat` (Linux); `pscat-mcp` is beside it. The
+plugin's session-start note names it. If that file does not exist yet, run
+`sh "${CLAUDE_PLUGIN_ROOT}/scripts/pscat-mcp.sh" --locate`: it downloads
+the plugin's pinned release, links it onto `PATH` and prints the `bin/`
+directory. The first use downloads the release (about 14 MB, a few
+seconds), so a pause then is not a hang; later runs make no request.
+Without the plugin, install it:
 a release from <https://github.com/PSCatLabs/pscat/releases>, or
 `cargo install --git https://github.com/PSCatLabs/pscat`
 (installs `pscat` and `pscat-mcp`).
 
-If the **pscat MCP tools** are connected (`render_postscript`,
-`eval_postscript`, `handwrite`, `chalkboard_math`, `describe_art_capabilities`), they do the
-same jobs with images returned inline; see "MCP" below.
+**Headless on Linux:** the plugin's Linux binary has no live window, so `pscat file.ps`, `-i` and `--spool` fail there; render with `pscat --png out.png file.ps` (`cargo install pscat` builds the window).
 
 ## Render a file (the common case)
 
@@ -40,97 +42,45 @@ generate | pscat --png out.png -       # `-` reads the program from stdin
 Multi-page documents number their pages: `out.png` → `out-001.png`,
 `out-002.png`, … SVG does the same; PDF is naturally multi-page.
 
-`pscat --bands N --png out.png f.ps` (N is 1..64) renders on N threads, which
-take horizontal bands (2 per thread by default; `--band-rows R` for R-row
-bands) from a queue, and gives the same PNG bytes as a plain render. It is only
-faster for a program that reads `/BandBBox [llx lly urx ury]` (also `/BandIndex`,
-0 = top, and `/BandCount`) and skips work outside it, e.g. a costly `colorimage`
-procedure that computes only those rows plus a margin: the `psart` skill has a
-runnable one ("Heavy noise renders"). PNG only; it refuses `--svg`, `--pdf`,
-sweeps, `--profile` and `--allow-write`. `--max-steps` and `--max-time`
-apply to each band. An unaware program pays for the whole run once per band,
-but only band 0 writes stdout and stderr; an uncaught error is reported once.
-`--lint` works with it: one report after the run and a `pscat: lint: note:` line
-saying that band 0 (the top band) was checked for page count, gsave and stack
-leaks, and the stitched page for blankness. A leak that only another band
-makes (a branch on `/BandIndex`) is not seen.
-The band names are in `userdict` and differ per band: a program that hashes,
-serialises or `forall`s `userdict` (e.g. to build a cache key) must leave
-`/BandIndex`, `/BandCount` and `/BandBBox` out, or every band computes a
-different key (#868 is the related `forall`-order issue). Over MCP, `render_postscript`
-and `start_render` take `bands` (see "MCP" below).
+Page size: `--page` always wins. Without it, a `<< /PageSize [w h] >>
+setpagedevice` in the program sets the page (other page-device keys are
+ignored with a warning). Without that, an EPSF file (first line
+`%!PS-Adobe-3.0 EPSF-3.0`) is cropped to its `%%BoundingBox` (or
+`%%HiResBoundingBox`), with the box's lower-left corner at the page's; a
+plain `.ps` file gets 612x792 unless you pass `--bbox`. MCP: leave out
+`width`/`height` for the same rule, `bbox: true` for `--bbox`.
 
-`pscat --profile --headless f.ps` (or with `--png`) prints, on stderr, each
-named procedure's call count and exclusive and inclusive wall time, slowest
-exclusive first (`--profile-top N`, `--profile-json`). Use it to find where a
-slow render went. It lists only named procedures: work in an anonymous data
-procedure shows up as "0 of 0", so add `--profile-ops` for time per built-in
-operator (`fbm2` against `mul`; about 3x slower) or move the work into a named
-procedure. `--profile-graph` adds caller -> callee edges. Not with `--bands`.
+Slow render? `--profile` shows where the time goes and `--bands N` splits it
+over threads: [references/bands-profile.md](references/bands-profile.md).
 
-## Sweep a seed or parameter (explore a design space in one run)
+## Show the result to the user
 
-```sh
-# Reseeds every `srand` call: works on found art unmodified.
-pscat file.ps --sweep-seed 1:12 --contact-sheet grid.png
+A render that succeeded is not an image the user has seen. A picture returned
+inside a tool call (an MCP image block, a file you viewed yourself) usually shows
+only in the tool trace, which hosts collapse; the user reads your final message.
+When they asked to see something, the final message must contain it. Check two
+things separately: the render worked (exit 0, clean `Lint:`), and the image is
+in the final answer.
 
-# Predefines /NAME to each value in turn; the source opts in with
-# `/NAME where { pop NAME } { default } ifelse`.
-pscat file.ps --sweep Density=10,20,40,80 --contact-sheet grid.png
-```
+1. Save the PNG where the user can open it (the project or working folder), by
+   `--png` or `out_path`, and keep the source `.ps` beside it when they may want
+   changes. `out_path`'s reply says `wrote <absolute path>`; use that path.
+2. Put the image in the final message twice over, as an embed and as a plain
+   link, so that a host that does not draw the embed still gives the user the
+   file, then link the source: `![a colourful spiral](ABSOLUTE_PNG_PATH)`,
+   `[spiral.png](ABSOLUTE_PNG_PATH)`, `[spiral.ps](ABSOLUTE_PS_PATH)`, each with
+   the real absolute path in place of the placeholder.
+   - **Codex desktop:** the embed with an absolute path is what showed the image in
+     the v0.7.0-rc.1 trial (#911); a tool-call image alone did not.
+   - **Claude desktop (Cowork and the Code tab):** save into the user's folder and
+     give the plain link; that part is documented (the Code tab opens a clicked
+     path). Do not say the image is shown inline unless you can see that it is.
+   - **Claude Code in a terminal:** it cannot draw images; say where the file is.
+3. Never paste base64 or a `data:` URI into a reply. Do not write "rendered
+   above" or "as you can see" unless the final message carries the image or path.
+4. If the user says they cannot see it, do not re-render or repeat the claim:
+   confirm the saved file exists, then put it in the answer as in step 2.
 
-One sweep axis per run, `A:B` / `A:B:STEP` / `A,B,C`, at most 64 frames.
-Needs `--png` (numbered frames) and/or `--contact-sheet PATH` (one grid
-PNG; `--grid COLSxROWS` sets the layout). A frame that errors still
-writes its partial canvas; the exit code is nonzero if any frame failed.
-
-## Build a labelled review sheet (several files, several sizes)
-
-`--contact-sheet` is for one program's same-size sweep frames. To compare
-different files, or one file at different sizes (logo candidates at 512 px
-and 48 px, say), with names under them, use `pscat sheet` instead of reaching
-for PIL:
-
-```sh
-pscat sheet -o sheet.png --page 384x384 --dpi 96,9,9x4 \
-    --label "A: one-line cat" a.ps --label "B: drawing board" b.ps
-```
-
-Each file is a row; each entry in `--dpi` is a cell in it, drawn at its own
-true pixel size and centred in its column, with the row label above and a
-`512x512 px` caption below. `9x4` adds the 9 dpi render again enlarged 4x with
-no smoothing, to read a small icon pixel by pixel. `--page` and `--dpi` apply
-to the files after them, so one sheet can mix page sizes. `--no-labels` and
-`--no-sizes` drop the text; the sheet is at most 8000 px a side. An erroring
-file is still drawn, as far as it got, and the exit code is nonzero.
-
-Sweeps, mats, stacks and wrapping (all in the one command):
-
-```sh
-# logo candidates: 96 dpi, then a column of the 9 dpi render and its dark-mat copy
-pscat sheet -o logos.png --page 384x384 --dpi '96,9+9@#222' a.ps b.ps
-# twelve seeds of one piece, labelled seed=1 .. seed=12, four to a line
-pscat sheet -o seeds.png --page 640x640 --dpi 36 --cols 4 --sweep-seed 1:12 piece.ps
-# a parameter sweep, labelled Density=10 and so on
-pscat sheet -o d.png --page 300x300 --dpi 72 --sweep Density=10,20,40,80 piece.ps
-```
-
-`--sweep-seed` and `--sweep NAME=` take the next file only and use the same
-grammar as the flag CLI. A seed sweep also seeds the native noise
-operators (`N noiseseed`), so noise art varies per cell; a program that calls
-`noiseseed` itself keeps its own table. A `--dpi` cell is `DPI[xZOOM][@MAT]`: `@#222` (or
-`@white`) draws the page transparent, sets it on that colour and pads it 10 px,
-to judge an icon on dark and light. `+` joins cells into one stacked column.
-`--cols N` wraps a row after N columns. Quote a `--dpi` list with `#` or `+`.
-
-With only the MCP server connected, call `review_sheet` instead: the programs
-go inline as `entries: [{source, label, width, height, dpi}]` (never file
-names), `dpi` is a list of cells, each a number or `{"dpi": 9, "zoom": 4}`, and
-`width`, `height` and `dpi` at the top level are the defaults for entries that
-give none. The sheet comes back as one PNG, the same bytes the CLI writes;
-`labels: false` and `sizes: false` drop the text. A failing program is drawn as
-far as it got, with its error beside the image. At most 32 cells and 40 million
-pixels; each cell runs under the server's interpreter limits.
 
 ## Debug a program
 
@@ -153,89 +103,9 @@ Findings print to stderr as `pscat: lint: [check] message` (or
 `pscat: lint: clean`); the exit code is unchanged (`--lint-strict` makes
 findings fail). A run that errored prints `pscat: lint: [run-error]`.
 
-## Handwriting-style notes (string → PNG)
-
-pscat's handwriting is a set of hand-drawn styles for notes, cards and art.
-It isn't meant for imitating a specific person's handwriting or presenting
-writing as someone else's. If a request asks for a named or real person's
-hand, or for a document that passes as written by someone, decline that part
-and offer a generic hand instead (the default /HandScript, another `--seed`).
-
-```sh
-pscat handwrite "meet me at the bandshell at nine" -o note.png
-pscat handwrite --paper ruled --size 30 --seed 7 "text"
-pscat handwrite --ink 0.4,0.1,0.1 --jitter 24 "shakier, redder"
-```
-
-The /HandScript dynamic font, a natural, hand-drawn script: jittered strokes, no two letters alike,
-reproducible per `--seed`. Word-wraps and auto-sizes the height.
-**Lowercase only**: input is lowercased, and characters outside a–z 0–9
-`.,-'!?` advance invisibly. `pscat handwrite --help` lists every option.
-From PostScript: `(lib/handscript.ps) run` (one options dict; see its
-header).
-
-## LaTeX on a chalkboard (formula → PNG/SVG/PDF)
-
-```sh
-pscat chalk 'x = \frac{-b \pm \sqrt{b^2-4ac}}{2a}' -o board.png
-pscat chalk 'f(x) &= (x+1)^2 \\ &= x^2 + 2x + 1' --seed 7 --color yellow -o derivation.png
-pscat chalk --file eq.tex --json '{"board": {"tone": "greenboard"}}' -o eq.png
-pscat chalk 'e^{i\pi} + 1 = 0' --no-board -o overlay.png    # transparent, chalk only
-```
-
-Raw LaTeX with **single** backslashes (unlike mathkit from PostScript),
-`\\` between rows, `&` to align; `$...$` or an `align` wrapper is fine.
-Deterministic per `--seed`. The block is shrunk to fit the board and centred.
-TeX outside mathkit's subset fails with one line naming it
-(`unsupported LaTeX command \oplus`) and writes nothing. `--config FILE` /
-`--json TEXT` take the JSON config (`layout`, `chalk`, `board` or
-`"board": false`, `seed`); `pscat chalk --help` and the dry-media guide list
-every key. `--print-ps` prints the generated PostScript.
-
-With the MCP tools connected, use **`chalkboard_math`** for a chalkboard or
-an equation on a board: `{"latex": "x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}", "seed": 7}`
-(JSON escaping only; the LaTeX itself has single backslashes) returns the
-PNG inline. The same keys as flat arguments (`size`, `color`, `board` or
-`false`, `ghosting`, `width`/`height`, `dpi`, ...), `config` for the rest; a
-TeX error is a one-line `latex_error` naming the command.
-
-## Typewritten pages (text → PNG/PDF)
-
-`-o` takes `.png`, `.svg` or `.pdf` (format by extension; anything else is an
-error). SVG pages are large (~40 KB a character): prefer PNG or PDF.
-
-```sh
-pscat typewrite letter.txt -o letter.png
-pscat typewrite --text "Dear Sir," -o short.png
-pscat typewrite --reflow --spacing 2 --page-numbers bottom -o draft.pdf draft.txt
-pscat typewrite --memo-to "All Staff" --memo-from "Records" \
-    --memo-subject "Carbon copies" --memo-date "Oct 14, 1962" --height fit -o memo.png body.txt
-```
-
-The /Typewriter font: per-key quirks, carriage drift, per-strike
-variation, ribbon ink; word wrap, tab stops, `--spacing`, `--indent`, a
-memo header. Markup in the text: `<u>underlined</u>`, `<x>crossed
-out</x>`, `<o>old|new</o>`, `<r>redacted</r>`. Same `--machine`/`--seed`,
-same page. `--height fit` sizes the page to the text; longer text makes
-more pages. Non-ASCII becomes ASCII or `?`. `--ps out.ps` writes a driver
-that also runs in Ghostscript (`gs -dNOSAFER`). From PostScript:
-`(lib/typewriter_outlines.ps) run (lib/typewriter.ps) run` then
-`<< /Text (...) /Memo << /To (...) >> /Seed 3 >> tw-type showpage`.
-
-A "released document" look (aged paper, scan skew, photocopy
-generations, stamps, redaction bars, margin notes, staples, punch holes):
-`lib/released.ps` after artkit and surfacekit (and handscript for notes):
-`{ << /Text (...<r>name</r>...) /Redactor { rel-redact } >> tw-type } <<
-/Age 0.6 /Generation 3 /Stamps [ << /Lines [ (RECEIVED) (14 MAR 1964) ] /X
-462 /Y 700 >> ] >> rel-page showpage`. Every effect is optional, off at 0,
-and seeded. Invent stamps and names; never reproduce real seals.
-
-## Photo → engraving
-
-```sh
-pscat photo-etch photo.jpg -o etching.png      # or .svg / .pdf
-pscat photo-etch --spacing 4 --angle 30 photo.jpg -o etch.svg
-```
+Seed and parameter sweeps (`--sweep-seed 1:12 --contact-sheet grid.png`) and
+labelled side-by-side sheets of several files or sizes (`pscat sheet`):
+[references/sheets.md](references/sheets.md).
 
 ## Fonts
 
@@ -276,6 +146,10 @@ With the pack installed the real face is used and nothing changes. The Type
 `(lib/fonts/neon.ps) run` (/Neon, /Marquee, /Constellation, /Lapidary,
 /Circuitry, /Stitchwork, /Confetti).
 
+`pscat --capabilities` prints the machine-readable inventory of what this build
+has (fonts, palettes, templates, procedures, native operators) as JSON; prefer
+it over guessing a name from prose, this file included.
+
 ## QR codes (lib/qr.ps)
 
 ```postscript
@@ -293,101 +167,54 @@ excluded. `qrdraw` options: `/QuietZone` (default and minimum 4), `/Dark`,
 background). It keeps the caller's graphics state and path. Byte mode only:
 raw bytes, no Unicode/ECI. Full reference: `docs/guides/qr-codes.md`.
 
-## Capabilities (structured, for agents)
+## What else pscat makes (read the file when the task calls for it)
 
-```sh
-pscat --capabilities                   # fonts, palettes, templates, procedures, native pscat operators as JSON
-```
+Each line says when to open which reference file in `references/`.
 
-The machine-readable inventory of what this build actually has: fonts,
-Type 3 faces, artkit's palettes, `lib/pagekit.ps`'s templates, and the
-library's major procedures with their parameters, plus `pscat_version`.
-Prefer it over guessing a name from prose (this file included).
-
-## More skills
-
+- **Notes, cards, lettering in a hand-drawn script** (`pscat handwrite "text" -o
+  note.png`; lowercase only) and **a formula on a chalkboard** (`pscat chalk
+  'x = \frac{1}{2}' -o board.png`, single backslashes):
+  [references/handwriting-chalk.md](references/handwriting-chalk.md). The
+  handwriting is for generic hands only: it is not for imitating a named or real
+  person's handwriting or passing writing off as someone else's. Decline that part
+  of a request and offer a generic hand (the default /HandScript, another `--seed`).
+- **Typed letters, memos, pages, an aged "released document"** (`pscat typewrite
+  letter.txt -o letter.png`):
+  [references/typewriter.md](references/typewriter.md).
+- **Seed or parameter sweeps, contact sheets, labelled review sheets** comparing
+  files or sizes (`pscat sheet`, `review_sheet`):
+  [references/sheets.md](references/sheets.md).
+- **A slow render** (`--profile`, `--bands`):
+  [references/bands-profile.md](references/bands-profile.md).
+- **pscat-only operators and small tools**: `setalpha` / `setblendmode`,
+  native noise (`gnoise2`, `fbm2`, ...), `writereals` / `readreals` for big
+  arrays, `pscat photo-etch` (photo to engraving), the live window (`pscat
+  file.ps`, `-i`, `--spool`), the `--capabilities` inventory:
+  [references/extensions.md](references/extensions.md).
+- **MCP details**: render jobs, time limits, `bands`, the `limit_exceeded`
+  error, registering the server:
+  [references/mcp.md](references/mcp.md).
 - **Art** (palettes, turtle, L-systems, brushes, paint and dry media,
   chalkboards, TeX on a board): the `psart` skill.
 - **Charts and plots for papers** (`lib/dataviz.ps`, `lib/graph.ps`): the
   `psviz` skill.
-
-## Translucency: setalpha / setblendmode (pscat extensions)
-
-```postscript
-0.3 setalpha              % fill/stroke opacity, 0..1
-/Multiply setblendmode    % or /Normal (the default); nothing else
-currentalpha currentblendmode
-```
-
-Graphics state (`gsave`/`grestore` save them, `initgraphics` resets
-them). They reach fills, strokes, text, `shfill` and, since #766,
-`image`/`imagemask`/`colorimage` (an image at alpha 0.5 is half
-see-through; `Multiply` darkens what is under it; a soft-masked
-ImageType 3 multiplies its own mask by the alpha). Exported to SVG and
-PDF as well as PNG. **Not PLRM
-operators**: Ghostscript has no PostScript-level alpha, so hand someone a
-`--pdf` or `--png`, not a `.ps`, and probe with `systemdict /setalpha
-known` in code that must run in both. Also pscat-only: `gstate .sameclip
-bool` (is the clip in force the one the gstate captured).
-
-## Noise: gnoise2 / fbm2 / ... (pscat extensions)
-
-```postscript partial
-42 noiseseed              % own table; never touches rand (default: 0)
-x y gnoise2 n             % gradient noise ~[-0.71,0.71]; x y z gnoise3 ~[-1,1]
-x y vnoise2 v             % value noise ~[-0.996,0.996]; x y z vnoise3
-x y gnoise2d n dx dy      % with its analytic gradient
-x y 5 0.5 2 fbm2 v        % oct gain lacunarity; fbm3 vfbm2 vfbm3 ridged2 ridged3
-```
-
-Native, about as cheap as an empty loop step, and bit-identical on every
-platform. `lib/noiseref.ps` (`nrgnoise2` ...) is the same algorithm in
-PostScript for Ghostscript-bound code; probe with `systemdict /gnoise2
-known`. artkit's `noise2` already runs natively.
-
-## Watch it draw (needs a display)
-
-```sh
-pscat file.ps                          # live window; --speed N paces it
-pscat -i                               # REPL + window: type, watch it draw
-pscat --spool DIR                      # render every .ps that lands in DIR
-```
-
-Arrow keys browse completed pages in any window mode. `--spool` runs
-whatever lands in `DIR`: only point it at a directory you trust.
 
 ## MCP
 
 `pscat-mcp` (installed beside `pscat`) serves ten tools over stdio:
 `render_postscript` (source → PNG images inline, or SVG text, or a PDF
 written to `out_path`; adds a `Lint:` block when the page looks wrong),
-`eval_postscript` (what the program printed, or the error with the
-offending command and line), `handwrite`, `chalkboard_math` (LaTeX → a
-chalkboard PNG; above), `review_sheet` (the review sheet above, from inline
-programs: byte for byte what `pscat sheet` writes) and
-`describe_art_capabilities`, plus render jobs for anything slow.
-Each call has a time limit (60 s by default; whoever registers the server raises it with
-`pscat-mcp --timeout SECS`, and the client's own tool timeout must allow it too). A render
-that may take longer goes through **`start_render`** (same arguments as `render_postscript`,
-returns a `job_id` at once), then **`render_status`** (`queued`, `running`, `done`, `failed`,
-`cancelled`, with `pages_done`) until it is finished, then **`render_result`** (exactly what
-`render_postscript` returns); **`cancel_render`** stops one. A job may run an hour by default
-(`--job-timeout`), two at once (`--max-jobs`). Raise `--max-steps` (or `0`) too, or the step
-limit stops a long render first. Both render tools take **`bands`** (1 to the server's
-`--max-bands`, default 4): `pscat --bands N`, worth it only for a program that reads
-`/BandBBox` (above). PNG only; the `Lint:` block covers band 0 and the stitched page, and a
-job's `pages_done` stays 0 until it ends. The step and time limits apply to each band; the call's or job's wall-clock limit to the
-whole render. The
-interpreter stops a runaway
-program itself, with a `limit_exceeded` error whose `limit` field says `steps`,
-`time` or `memory` (a render still returns the partial page); `stopped` cannot
-catch it. `out_path` must be inside the
-server's output root (its working directory unless registered with
-`--out-root DIR`), end in the output format's extension (`.png`, `.svg`,
-`.pdf`) and not sit in a dot-directory such as `.git/`, and large inline images are refused: lower `dpi` or
-pass `out_path`. Register it with
-`claude mcp add pscat -- pscat-mcp` (Claude Code) or
-`codex mcp add pscat -- pscat-mcp` (Codex).
+`eval_postscript`, `handwrite`, `chalkboard_math` (LaTeX → a chalkboard PNG),
+`review_sheet`, `describe_art_capabilities`, plus render jobs for anything slow
+(`start_render`, `render_status`, `render_result`, `cancel_render`; each call
+has a 60 s limit by default). `out_path` must be inside the server's output
+root (the server's instructions name it; `--out-root DIR`, which the plugin
+takes from `out-root = DIR` in `~/.config/pscat/plugin.conf`), end in the output
+format's extension (`.png`, `.svg`, `.pdf`) and not sit in a dot-directory such
+as `.git/`, and large inline images are refused: lower `dpi` or pass `out_path`.
+A workspace outside the root: save there, then `cp` the file; never decode an
+inline image. Jobs, limits, `bands` and registering the server:
+[references/mcp.md](references/mcp.md).
 
 ## Pitfalls
 
@@ -409,18 +236,6 @@ pass `out_path`. Register it with
   `(a) file`, `renamefile` and `deletefile`; anything outside is
   `invalidfileaccess`. `(%stdout) (w) file` needs no flag. The MCP tools
   never write from PostScript: use their `out_path` instead.
-- To save or reload a big numeric array, use `array (path) writereals` and
-  `(path) n readreals` (packed binary64; add `/f32` before the operator for
-  binary32), not printing and `run`ning text: exact, and about 10x faster to
-  read. Writing needs `--allow-write DIR` like `(w) file`. `(path) /all
-  readreals` reads every value, `(path) 100 50 readreals` is 50 values from
-  value 100, and `array file writereals` / `file n readreals` take an open
-  file (`%stdout`, an `(a)` append file). With `pscat --allow-write out f.ps`:
-
-  ```postscript partial
-  [ 0 1 99 { 0.1 mul dup 5 0.5 2 fbm2 } for ] (out/field.bin) /f32 writereals
-  (out/field.bin) /all /f32 readreals length =      % 100
-  ```
 - The interpreter targets Level 2 PostScript. If a construct misbehaves,
   compare against Ghostscript, the behavioural oracle.
 - `cvs` (and `=`, `==`) on a real prints the shortest digits that read back
@@ -432,3 +247,5 @@ pass `out_path`. Register it with
 - Files the docs call `examples/...`, `gallery/...` or `docs/...` are in
   the [repository](https://github.com/PSCatLabs/pscat),
   not in an install.
+- Big numeric arrays: use `writereals` / `readreals`, not printed text
+  ([references/extensions.md](references/extensions.md)).

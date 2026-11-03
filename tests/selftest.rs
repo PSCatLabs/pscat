@@ -1090,8 +1090,16 @@ fn rows_9_11_12_a_scenario_that_renders_blank_fails_strict_lint() {
     let dir = Scratch::new("blank-driver");
     let file = dir.path().join("paintkit.ps");
     // `pop` consumes the option dict and paints nothing: the same
-    // shape a genuinely blank-rendering defect produces.
-    std::fs::write(&file, text.replace(target, "pop")).expect("write");
+    // shape a genuinely blank-rendering defect produces. The dict stays
+    // in the source so the run completes: it used to be replaced along
+    // with the call, which underflowed `pop`, and the test passed on the
+    // `blank-page` that lint printed after that error. Lint no longer
+    // reports consequences of an error (#947), so the run must be clean.
+    std::fs::write(
+        &file,
+        text.replace(target, &target.replace("pkribbon", "pop")),
+    )
+    .expect("write");
 
     let out = lint_strict(&file, &driver_page(&text));
     let stderr = String::from_utf8_lossy(&out.stderr);

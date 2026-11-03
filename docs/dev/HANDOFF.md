@@ -183,7 +183,9 @@ review caught before any template code existed -- artkit's `fitfont`
 enlarging as well as shrinking, and two of artkit's mood palettes not
 actually being ordered dark-to-light despite looking like they were --
 and one real implementation bug `--lint` caught on the first rendered
-example, a copy-paste-misaligned `tfblock` call in `pgletter`). Also
+example, a copy-paste-misaligned `tfblock` call in `pgletter`;
+`pgcertificate`'s spacing is laid out by measured ink since #954,
+`notes/954-pgcertificate-spacing.md`). Also
 done: issue #19, noise and flow-field procedures for artkit —
 `noiseinit`/`noise2` (2D gradient/Perlin noise off a `srand`-shuffled
 permutation table), `curl2` (turns any `{x y -> n}` scalar field into
@@ -892,6 +894,21 @@ renders eight examples in both and compares block-downsampled output).
    (default `/relation`, so `align` and every other caller is unchanged); one
    row, or any other wrapper, never gets the option
    (`notes/699-chalk-gather-centred.md`).
+   #936: a `[...]` after a top-level `\\` is TeX's row spacing (dropped)
+   only when `chalk::is_tex_length` reads it as a length (`2pt`, `-1.5em`,
+   `0.5\baselineskip`); otherwise it is the next row's content, so a
+   commutator `\\ [x,y] = 0` survives (`notes/936-chalk-row-bracket.md`).
+   #950: the same rule for the `\\` left inside `pmatrix`/`cases`/`\substack`
+   (`chalk::drop_row_break_options`, Rust side, before mathkit sees the
+   row): the spacing and `*` go, consumed, not honoured. A direct `mkpath`
+   caller still gets `[2pt]` as ink (`notes/950-chalk-matrix-row-spacing.md`).
+   #934/#935: logic, set and geometry symbols (∧ ∨ ⊢ ⊬ ⊨ ⊤ ↔ ∄ ⊕ ⊗ † ‡ ∅ ∠
+   △ ≅ ℜ ℑ) and `\mathbf`/`\mathbb`/`\mathcal`: strokeglyphs' `/x.bf` (each
+   stroke re-traced, derived at load), `/R.bb` (a doubled stem from
+   `sgbbextra`) and authored `/L.cal`; mathkit's alphabet is `mkFont`, reset
+   per formula by `mkparsetop`. `pscat chalk --help` prints the subset
+   (`SUBSET`, checked against `mkcmds` by tests/chalk.rs)
+   (`notes/934-chalk-logic-symbols-math-alphabets.md`).
    #713: on the no-board overlay (touch 0.34, so grain shows) the radical's
    long bar and small strokes broke into gaps; drychalk's `/Firm` (default 0:
    byte-identical, `identity_check.sh --loader lib/drychalk.ps`) holds the
@@ -1106,6 +1123,27 @@ renders eight examples in both and compares block-downsampled output).
 
 ## Gotchas for the next implementer
 
+- **The page size has a precedence** (#921, #909): `--page` (MCP
+  `width`/`height`, any `Interp::with_page` caller) > `setpagedevice
+  /PageSize` > `%%BoundingBox` > letter. The
+  box is read for an EPSF header by default, and for any header with
+  `--bbox`. A box origin other than (0, 0) moves the device's base CTM
+  (`Gfx::set_page_origin`), and `Gfx::page_size_source` says which rule chose
+  the size. Code that makes a CLI interpreter goes through
+  `Options::new_interp` after `Options::resolve_page`. See
+  `notes/921-boundingbox-page-size.md`.
+- **The page can change size mid-job** (#909, `src/ops/pagedevice.rs`).
+  `setpagedevice` installs a new `PageDevice` (`Gfx::install_device`: new
+  canvas, erased, base CTM rebuilt), and the graphics state holds the device
+  it was made under, so `grestore`/`restore`/`setgstate` and a bottom
+  `grestore` bring an older one back (`Gfx::sync_device`), as in gs. Anything
+  that sizes a buffer from the page must take each page's own size: the PDF
+  and SVG recorders keep per-page sizes, `--bands` cuts each page by its own
+  height and redefines `/BandBBox` on a resize, and a sweep's contact sheet
+  waits for the first frame unless `--page` fixed the size. `Interp::with_page*` is `Explicit`;
+  only `Interp::new` and the CLI's `Options::new_interp` let a program resize.
+  See `notes/909-setpagedevice-pagesize.md`.
+
 - **Fills don't use tiny-skia's anti-aliasing** (#692). `fill`, `eofill`,
   `rectfill` and glyph fills rasterise through `src/coverage.rs`, an
   exact-area accumulation rasteriser. Its coverage goes into a page-sized
@@ -1185,6 +1223,12 @@ renders eight examples in both and compares block-downsampled output).
   option. The `scripts/*.sh` of the same names are thin wrappers, and
   `pscat-mcp`'s `handwrite` runs `pscat handwrite`. See
   `notes/600-tool-subcommands.md`.
+  Output names (#938): `typewrite`, `photo-etch` and `chalk` pick the format
+  from `-o`'s extension (`subcmd::output_format`); `--png`, `--svg`, `--pdf` and
+  `handwrite -o` always write one format, so they run `subcmd::check_output_name`
+  and refuse a name for another known image or document type (no extension or
+  an unknown one still works). `photo-etch` sniffs the photo's first bytes and
+  names a non-JPEG (#939); it has no PNG input.
 - **Interpreter execution limits (#604).** `Limits` (`src/limits.rs`) via
   `Interp::set_limits`; CLI `--max-steps/--max-time/--max-memory`; on by default
   in `pscat-mcp`. The design points that are easy to break:
@@ -1459,6 +1503,13 @@ renders eight examples in both and compares block-downsampled output).
   holds the repo-development skills plus symlinks to those three, so a
   checkout's Claude Code sessions still load them. psart keeps a short
   `SKILL.md` and puts each medium in `references/`; add new media there.
+  pscat does the same since #922: `SKILL.md` is the common path (install,
+  render, show the result, debug and lint, fonts, pitfalls, an index) and
+  `references/` holds bands/profile, sheets, handwriting and chalk, typewriter,
+  extensions and MCP details. `tests/skill_blocks.rs` runs the code fences in the
+  reference files too, and fails on a reference file `SKILL.md` does not link.
+  The skill loads in full on every request, so put new material in a reference
+  file and add one index line to `SKILL.md`.
 - **The Claude Code plugin (#569).** The marketplace is
   `.claude-plugin/marketplace.json` at the repo root; the plugin is
   `plugin/` (`.claude-plugin/plugin.json`, a README, and `skills` as a
@@ -1496,7 +1547,16 @@ renders eight examples in both and compares block-downsampled output).
   file names don't matter), verifies it, and publishes it into
   `~/Library/Caches/pscat/plugin` or `~/.cache/pscat/plugin` with one
   `ln -sn` (atomic; a mkdir lock only avoids duplicate downloads). stdout
-  is the MCP channel: it logs only to stderr. The SessionStart hook is the
+  is the MCP channel: it logs only to stderr. **Paths (#919, #920):**
+  `$CACHE/bin/{pscat,pscat-mcp}` are the one stable path (symlinks the
+  launcher re-points to the release in use on every lookup); `--locate`,
+  the hook and the skills all name them, never the versioned directory. The
+  launcher also links both into `~/.local/bin` or `~/bin` (only if already on
+  PATH and writable; never a system dir, never overwriting a pscat that is
+  not a symlink to `$CACHE/bin/<name>` or the marked shim). Before the first
+  download the hook leaves a shim as `pscat` that downloads on first use,
+  then swaps itself for the symlink. `PSCAT_NO_PATH_LINK=1` opts out
+  (`notes/919-plugin-pscat-on-path.md`). The SessionStart hook is the
   same script with `--hook` (it never downloads), which replaced
   `hooks/check-pscat.sh` (#684); both are held for portal review now
   ("Scripts the validator couldn't follow"). **Never add a top-level
@@ -1507,11 +1567,32 @@ renders eight examples in both and compares block-downsampled output).
   `scripts/test_plugin_launcher.py` (fake file:// release); both install
   checks download from `scripts/fake_plugin_release.py`.
   See `notes/853-plugin-launcher.md`.
+  **Output root (#910):** Codex starts a plugin server with cwd
+  `${PLUGIN_ROOT}` (the installed copy), so the launcher, not the server,
+  picks `--out-root` unless the args name one: Claude Code's `output_dir`
+  userConfig (passed as the launcher-only `--plugin-out-root=`), `out-root`
+  in `~/.config/pscat/plugin.conf`, `--plugin-project-dir=${CLAUDE_PROJECT_DIR}`,
+  the cwd, then `<user data dir>/renders`; never `/` or inside the plugin.
+  The `--plugin-*=` args are Claude-only (`plugin_check.py` sets them aside
+  when comparing the two manifests). Still no env var for the root.
+  `notes/910-plugin-output-root.md`.
   `plugin_check.py` also fails a plugin `.md` that writes a bundled or
   repo-relative image/font path in backticks or a code block (the
   directory checklist holds those; #848, `notes/848-plugin-no-image-paths-in-backticks.md`).
   `scripts/codex_plugin_install_check.sh` (job `codex-install`) installs it
   with the pinned codex CLI. See `notes/569-codex-plugin.md`.
+- **The tagline is "PostScript for precision and imagination." (#927)**,
+  and every public description leads with it: `Cargo.toml`, `npm/package.json`,
+  `server.json` (100-character limit, tested), the plugin manifests, the README
+  opening and the site's title, meta and hero. Documents and art are equal
+  halves; the live window is a feature, not the headline. Say pscat aims to
+  replace Ghostscript for most work and uses it as its correctness reference;
+  no speed or memory claims until #929's benchmarks. The social preview is
+  `art/brand/social-preview.ps` (it runs the logo, a certificate and Evening
+  Stream in cards, so no pixel is pasted); `build_site.sh` copies it and the
+  logo into `_site/assets/brand/` for `og:image` and the favicon. The org
+  profile draft is `docs/brand/org-profile-README.md`. See
+  `notes/927-branding.md`.
 - **The plugin icon (#683) is `plugin/.claude-plugin/icon.png`**, the
   1024 px render of `art/logo/pscat-logo-d.ps` (command in its header;
   512 and 48 px renders in `art/logo/renders/`). Claude's plugin.json sets

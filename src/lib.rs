@@ -89,6 +89,8 @@ pub mod page;
 // integration tests can reach it. `#[doc(hidden)]` keeps it out of the docs
 // and out of cargo-semver-checks' view of the API (issue #565).
 #[doc(hidden)]
+pub mod bbox;
+#[doc(hidden)]
 pub mod capabilities;
 #[doc(hidden)]
 pub mod chalk;

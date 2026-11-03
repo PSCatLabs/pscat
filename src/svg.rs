@@ -432,6 +432,13 @@ impl SvgRecorder {
         );
     }
 
+    /// The page size from now on (`setpagedevice`, #909); finished pages
+    /// keep theirs.
+    pub(crate) fn set_size(&mut self, width: u32, height: u32) {
+        self.width = width;
+        self.height = height;
+    }
+
     /// The lazy showpage erase (or an explicit erasepage): the new
     /// page starts blank.
     pub(crate) fn erase(&mut self) {

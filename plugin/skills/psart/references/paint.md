@@ -5,7 +5,7 @@ Paths such as `examples/...`, `gallery/...` and `docs/...` name files in the
 installed pscat does not include them. Every `(lib/...) run` works anywhere:
 the library is compiled into `pscat`.
 
-```postscript
+```postscript partial
 (lib/artkit.ps) run
 (lib/paintkit.ps) run
 ```
@@ -125,6 +125,17 @@ Which tool to pick:
   alpha output with `pscat --pdf`, not `gs file.ps`. `pkpaper` is a
   watercolor ground only; for paper, canvas or print surfaces in
   general use `lib/surfacekit.ps`.
+
+  `pkpaper` takes the rectangle it covers first, then its options dict:
+  `x y w h << ... >> pkpaper`. Call it with only the dict and it stops
+  with an error naming the missing rectangle.
+
+  ```postscript
+  (lib/artkit.ps) run
+  (lib/paintkit.ps) run
+  0 0 612 792 << /Tone [0.97 0.955 0.92] /Grain 0.6 >> pkpaper   % x y w h opts
+  showpage
+  ```
 - **`pkwet`** — not a brush: a *softener* that wraps any of the above.
   It re-runs your mark-drawing proc several times, each pass nudged
   further off the path and mixed further toward `/Under`, the color you

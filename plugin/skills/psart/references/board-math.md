@@ -6,7 +6,7 @@ installed pscat does not include them. Every `(lib/...) run` works anywhere:
 the library is compiled into `pscat`.
 
 A single formula on a plain board needs no PostScript: `pscat chalk
-'x = \frac{1}{2}' -o board.png` (single backslashes; see the pscat skill),
+'x = \frac{1}{2}' -o board.png` (single backslashes; see the pscat skill's `references/handwriting-chalk.md`),
 or the MCP tool `chalkboard_math` when it is connected.
 Use mathkit directly for a composed piece: several formulas, words,
 annotations, a board of your own.
@@ -62,15 +62,17 @@ Supported TeX:
 | Delimiters | `\left( ... \right)` with `( ) [ ] \{ \} \| \langle \rangle` (the characters `⟨ ⟩ ‖ ∥` typed directly work too) and `.`; `\big` `\Big` `\bigg` `\Bigg` and their `l`/`r` forms |
 | Environments | `matrix`, `pmatrix`, `bmatrix`, `Bmatrix`, `vmatrix`, `cases` (rows `\\`, cells `&`) |
 | Accents and frames | `\vec`, `\hat`, `\bar`, `\dot`, `\ddot`, `\tilde`, `\overline`, `\underline`, `\boxed` |
-| Text | `\text{...}`, `\mathrm{...}` |
+| Text and alphabets | `\text{...}`, `\mathrm{...}`; `\mathbf{...}` (letters and digits re-traced, heavier), `\mathbb{R}` (blackboard bold), `\mathcal{L}` (script); the last two take capital letters only, as in TeX |
 | Spacing | `\,` `\:` `\;` `\!` `\ ` `\quad` `\qquad` `~` (plain spaces are ignored, as in TeX) |
 | Braces and stacks | `\overbrace{...}^{label}`, `\underbrace{...}_{label}` (`\nolimits` after it: the label beside), `\overset{a}{b}`, `\underset{a}{b}`, `\stackrel{a}{b}` (a relation), `\sum_{\substack{i<m \\ j<n}}` |
 | Styles | `\displaystyle`, `\textstyle`, `\scriptstyle`, `\scriptscriptstyle`: the rest of the group in that style |
 | Negation and congruence | `\not=` (≠), `\not\in` (∉), `\not<` and any other symbol (a slash through it); `a \bmod b`, `a \equiv b \pmod{n}`, `\mod{n}`, `\pod{n}` |
-| Symbols | Greek `\alpha` ... `\Omega`, `\infty`, `\partial`, `\nabla`, `\pm`, `\times`, `\cdot`, `\le`, `\ge`, `\ne`, `\approx`, `\to`, `\Rightarrow`, `\iff`, `\in`, `\subset`, `\cup`, `\cap`, `\forall`, `\exists`, `\cdots`, ...; Unicode symbols typed directly (α ∞ ≤ ∂) |
+| Symbols | Greek `\alpha` ... `\Omega`, `\infty`, `\partial`, `\nabla`, `\hbar`, `\ell`, `\pm`, `\times`, `\cdot`, `\le`, `\ge`, `\ne`, `\approx`, `\equiv`, `\sim`, `\cong`, `\propto`, `\to`, `\mapsto`, `\Rightarrow`, `\iff`, `\in`, `\subset`, `\subseteq`, `\cup`, `\cap`, `\setminus`, `\emptyset`, `\angle`, `\triangle`, `\Re`, `\Im`, `\oplus`, `\otimes`, `\dagger`, `\cdots`, ...; Unicode symbols typed directly (α ∞ ≤ ∂ ∧ ℝ) |
+| Logic | `\forall`, `\exists`, `\nexists`, `\neg`/`\lnot`, `\wedge`/`\land`, `\vee`/`\lor`, `\Rightarrow`, `\Leftrightarrow`, `\leftrightarrow`, `\vdash`, `\nvdash`, `\models`, `\top`, `\bot`, `\therefore` |
 
-Anything else fails with a name saying what it was, for example
-`mk-unsupported-command:\oplus` or `mk-unsupported-character:@`.
+`pscat chalk --help` prints the whole list. Anything else fails with a name
+saying what it was, for example
+`mk-unsupported-command:\aleph` or `mk-unsupported-character:@`.
 
 - **`/Irregular`** (default 1) is the board hand. 0 is clean TeX, and 2 is
   hurried. It varies sizes, gaps and script heights, makes fraction bars
@@ -88,6 +90,11 @@ Anything else fails with a name saying what it was, for example
     `\\left[ 0, 1 \\right\)` with `\)`.
   - Keep each formula on one source line, or end the line with a
     backslash to continue the string.
+  - In `pscat chalk`, a bracket right after a `\\` row break is TeX's row
+    spacing (`\\[2pt]`, dropped) only when it holds a length; `\\ [x,y] = 0`
+    keeps its bracket. `\left[ x, y \right]` is always a bracket. The same
+    rule holds inside `pmatrix` and `cases`. mkpath called from PostScript
+    has no such rule: write no `[2pt]` after `\\\\`, or it is drawn.
   - `x_{max}` is refused, because `max` is a command. Write `x_{\\max}`
     or `x_{\\text{max}}`.
 
