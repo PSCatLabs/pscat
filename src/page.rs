@@ -20,6 +20,8 @@ use std::path::Path;
 #[derive(Clone)]
 pub struct Page {
     pixmap: tiny_skia::Pixmap,
+    /// Device pixels per point (dpi / 72), recorded in the PNG's `pHYs`.
+    scale: f32,
 }
 
 impl std::fmt::Debug for Page {
@@ -32,8 +34,8 @@ impl std::fmt::Debug for Page {
 }
 
 impl Page {
-    pub(crate) fn new(pixmap: tiny_skia::Pixmap) -> Self {
-        Page { pixmap }
+    pub(crate) fn new(pixmap: tiny_skia::Pixmap, scale: f32) -> Self {
+        Page { pixmap, scale }
     }
 
     /// Width in device pixels.
@@ -58,9 +60,11 @@ impl Page {
     }
 
     /// The page encoded as a PNG file, byte for byte what `pscat --png`
-    /// writes for the same page (without `--halftone`).
+    /// writes for the same page (without `--halftone`). The file records
+    /// the page's resolution in a `pHYs` chunk, so a 300 dpi page prints at
+    /// its true size.
     pub fn to_png(&self) -> std::io::Result<Vec<u8>> {
-        self.pixmap.encode_png().map_err(std::io::Error::other)
+        crate::png::encode(&self.pixmap, self.scale)
     }
 
     /// Write the page to `path` as a PNG (see [`to_png`](Self::to_png)).

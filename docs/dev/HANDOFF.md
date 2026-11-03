@@ -1302,6 +1302,18 @@ renders eight examples in both and compares block-downsampled output).
   `--allow-read` or `--out-root` (same rule as #740); a hosted server (#689)
   must not read these. Tests build a `Config` with an injected lookup, never
   `std::env::set_var`. See `notes/756-mcp-env-limits.md`.
+- **PNGs record their resolution (#982).** Every PNG pscat writes goes through
+  `src/png.rs`, which splices one `pHYs` chunk (unit 1, round(dpi / 0.0254)
+  pixels per metre, both axes) in before the first `IDAT` of tiny-skia's output.
+  `IDAT` is untouched, so decoded pixels never change. Never call
+  `Pixmap::save_png` / `encode_png` for a file pscat writes: `clippy.toml` bans
+  them, and an SVG-embedded image is the one allowed exception. A `Page` carries
+  its scale (dpi / 72), the CLI passes `Options::scale()`, and composite sheets
+  (`pscat sheet`, `review_sheet`) mix dpis so they record a nominal 72. A PNG
+  made before #982 has no chunk: `scripts/identity_check.sh` ignores `pHYs` when it
+  compares the committed gallery still, and a base-versus-head byte comparison
+  across that change needs the chunk stripped from the head files. See
+  `notes/982-png-phys.md`.
 - **`--bands N` (#736).** One PNG rendered as N horizontal bands on N threads
   (`src/bands.rs`, a binary module), each a full run with `/BandIndex`,
   `/BandCount`, `/BandBBox` in userdict, stitched by whole device rows. Byte

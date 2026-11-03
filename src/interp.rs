@@ -2782,10 +2782,10 @@ impl Interp {
             .pages()
             .iter()
             .cloned()
-            .map(crate::Page::new)
+            .map(|pixmap| crate::Page::new(pixmap, self.gfx.scale()))
             .collect();
         if pages.is_empty() || self.gfx.has_trailing_art() {
-            pages.push(crate::Page::new(self.gfx.pixmap.clone()));
+            pages.push(crate::Page::new(self.gfx.pixmap.clone(), self.gfx.scale()));
         }
         pages
     }
