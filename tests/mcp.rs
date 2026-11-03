@@ -2904,7 +2904,9 @@ fn jobs_past_the_running_cap_queue_and_can_be_cancelled_there() {
 fn job_tools_refuse_bad_arguments_and_unknown_jobs_at_once() {
     let mut s = Server::start_in(
         &common::scratch_dir("mcp-job-args"),
-        &["--max-image-bytes", "100"],
+        // A blank 20 x 20 page is 116 bytes with its pHYs chunk (#982); the
+        // noisy 100 x 100 page below is far over any cap this small.
+        &["--max-image-bytes", "150"],
     );
     initialized(&mut s);
     // `render_postscript`'s checks run before a job exists.
