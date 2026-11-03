@@ -59,8 +59,11 @@ appears between them in any rasterizer. The caller's graphics state, path,
 current point, dictionary stack and remaining operands are unchanged.
 Colors: arrays are copied with `aload` into fresh literal arrays, and a
 procedure is refused, so no caller value is ever executed. With a light
-color, the dark color's luminance (Rec. 601 weights; CMYK through the PLRM's
-RGB conversion) must be lower.
+color, the dark color's luminance (Rec. 601 weights) must be lower. CMYK is
+weighed both ways it is commonly turned into RGB, the PLRM's additive
+`1 - min(1, c + k)` (Ghostscript) and pscat's multiplicative
+`(1 - c)(1 - k)`, and must be darker under both: a PDF keeps CMYK and the
+viewer converts it, so neither alone says what a reader will see.
 
 Public failures:
 

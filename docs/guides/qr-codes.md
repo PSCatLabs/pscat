@@ -151,7 +151,7 @@ named `undefined` errors, like the other pscat libraries:
 | `qr-module-size-must-be-a-positive-number`, `qr-side-must-be-a-positive-number` | Bad size. |
 | `qr-quiet-zone-must-be-an-integer`, `qr-quiet-zone-must-be-at-least-4` | Bad `/QuietZone`. |
 | `qr-dark-must-be-a-color`, `qr-light-must-be-a-color-or-null` | Bad color. |
-| `qr-dark-must-be-darker-than-light` | `/Dark` is as light as `/Light` or lighter. |
+| `qr-dark-must-be-darker-than-light` | `/Dark` is as light as `/Light` or lighter. A CMYK color has no single brightness (Ghostscript adds `k` to each ink, pscat multiplies), so it must be darker both ways. |
 | `qr-draw-needs-a-current-point` | No `moveto` before `qrdraw`. |
 
 After an error, operands may remain on the stack.

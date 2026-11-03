@@ -849,18 +849,33 @@ qr--level-bits readonly pop
   dup type /arraytype eq { [ exch aload pop ] } { [ exch ] } ifelse
 } bind def
 
-% color-array -> luminance 0..1, CMYK through the PLRM's RGB conversion.
+% color-array additive? -> luminance 0..1 (Rec. 601 weights). CMYK has no
+% single RGB meaning: the PLRM (and Ghostscript) convert it additively,
+% 1-min(1,c+k), pscat multiplicatively, (1-c)(1-k), and a PDF viewer through
+% its own profile. qrdraw therefore weighs CMYK both ways.
 % @internal
 /qr--luma {
-  dup length 1 eq { 0 get } {
-    dup length 3 eq { aload pop } {
-      aload pop
-      % c m y k -> 1-min(1,c+k) 1-min(1,m+k) 1-min(1,y+k)
-      4 1 roll 3 { 3 index add dup 1 gt { pop 1 } if 1 exch sub 3 1 roll } repeat
+  exch dup length 1 eq { 0 get exch pop } {
+    dup length 3 eq { aload pop 4 -1 roll pop } {
+      aload pop 5 -1 roll {
+        % c m y k -> 1-min(1,c+k) 1-min(1,m+k) 1-min(1,y+k)
+        4 1 roll 3 { 3 index add dup 1 gt { pop 1 } if 1 exch sub 3 1 roll } repeat
+      } {
+        % c m y k -> (1-c)(1-k) (1-m)(1-k) (1-y)(1-k)
+        4 1 roll 3 { 1 exch sub 3 index 1 exch sub mul 3 1 roll } repeat
+      } ifelse
       4 -1 roll pop
     } ifelse
     0.114 mul exch 0.587 mul add exch 0.299 mul add
   } ifelse
+} bind def
+
+% dark-array light-array -> dark-array light-array bool: true unless the
+% dark color is darker under both CMYK conversions.
+% @internal
+/qr--not-darker {
+  1 index true qr--luma 1 index true qr--luma ge
+  2 index false qr--luma 2 index false qr--luma ge or
 } bind def
 
 % color-array -> -, set as the current color.
@@ -1005,12 +1020,17 @@ qr--level-bits readonly pop
 % { 0 0 moveto (A) << >> qrencode << /ModuleSize 1 /Dark { 0 } >> qrdraw } /qr-dark-must-be-a-color (procedure dark) mustguard
 % { 0 0 moveto (A) << >> qrencode << /ModuleSize 1 /Dark 1 /Light 0 >> qrdraw } /qr-dark-must-be-darker-than-light (inverted) mustguard
 % { 0 0 moveto (A) << >> qrencode << /ModuleSize 1 /Dark [0 0 0 0] /Light [0 0 0 1] >> qrdraw } /qr-dark-must-be-darker-than-light (CMYK black light) mustguard
+% { 0 0 moveto (A) << >> qrencode << /ModuleSize 1 /Dark 0.1 /Light [0.5 0.5 0.5 0.5] >> qrdraw } /qr-dark-must-be-darker-than-light (CMYK light black when added) mustguard
+% { 0 0 moveto (A) << >> qrencode << /ModuleSize 1 /Dark [0.5 0.5 0.5 0.5] /Light 0.2 >> qrdraw } /qr-dark-must-be-darker-than-light (CMYK dark lighter when multiplied) mustguard
 % { newpath (A) << >> qrencode << /ModuleSize 1 >> qrdraw } /qr-draw-needs-a-current-point (no current point) mustguard
 %%EndSelfTest
 %%SelfTest: qrdraw-preserves-state
 % 0.2 0.4 0.6 setrgbcolor 3 setlinewidth 10 20 moveto 30 40 lineto (A) << >> qrencode << /ModuleSize 2 >> qrdraw currentpoint 40 eq exch 30 eq and (current point kept) mustbe
 % 0.2 0.4 0.6 setrgbcolor 10 20 moveto (A) << >> qrencode << /Side 58 /Dark [1 0 0 0] /Light null >> qrdraw currentrgbcolor 0.6 eq exch 0.4 eq and exch 0.2 eq and (color kept) mustbe
 % 3 setlinewidth 10 20 moveto (A) << >> qrencode << /ModuleSize 2 /QuietZone 6 >> qrdraw currentlinewidth 3 eq (line width kept) mustbe
+% [0.5 0.5 0.5 0.5] false qr--luma 0.25 sub abs 1e-6 lt (multiplicative CMYK) mustbe
+% [0.5 0.5 0.5 0.5] true qr--luma 0 eq (additive CMYK) mustbe
+% [0.2 0.4 0.6] true qr--luma 0.2 0.299 mul 0.4 0.587 mul add 0.6 0.114 mul add sub abs 1e-6 lt (RGB weights) mustbe
 % 10 20 moveto 30 40 lineto (A) << >> qrencode << /ModuleSize 2 >> qrdraw pathbbox 40 eq exch 30 eq and exch 20 eq and exch 10 eq and (path kept) mustbe
 %%EndSelfTest
 % @kind: Procedure
@@ -1058,7 +1078,7 @@ qr--level-bits readonly pop
   3 index /Light 1 qr--opt dup null ne {
     qr--color-ok not { qr-light-must-be-a-color-or-null } if
     qr--color-array
-    1 index qr--luma 1 index qr--luma ge { qr-dark-must-be-darker-than-light } if
+    qr--not-darker { qr-dark-must-be-darker-than-light } if
   } if
   % symbol opts quiet module dark light
   { currentpoint } stopped { qr-draw-needs-a-current-point } if
