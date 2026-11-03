@@ -1,4 +1,4 @@
-//! Data-stage QR regression tests. Frozen fixtures come from an independent,
+//! QR data, correction and matrix regression tests. Frozen fixtures come from an independent,
 //! pinned encoder, not a second implementation of our packing algorithm.
 
 mod common;
@@ -11,6 +11,7 @@ const LIB: &str = include_str!("../lib/qr.ps");
 const VECTORS: &str = include_str!("data/qr_byte_vectors.json");
 const PLANNING: &str = include_str!("data/qr_planning_vectors.json");
 const CORRECTION: &str = include_str!("data/qr_correction_vectors.json");
+const MATRIX: &str = include_str!("data/qr_matrix_vectors.json");
 
 fn interpreter() -> Interp {
     let mut it = Interp::with_page(8, 8).expect("small test page");
@@ -688,4 +689,480 @@ fn ghostscript_matches_capacity_tables_and_boundary_plan_versions() {
         String::from_utf8_lossy(&out.stdout).trim(),
         "QR-PLANNING-PASS"
     );
+}
+
+// ---- Matrix construction (QR-3, #970) ----
+
+fn matrix_vectors() -> serde_json::Value {
+    serde_json::from_str(MATRIX).expect("matrix vectors")
+}
+
+/// One flag bit of every `/Cells` byte, as a 0/1-per-cell row-major grid.
+fn plane(cells: &[u8], bit: u8) -> Vec<u8> {
+    cells.iter().map(|c| (c >> bit) & 1).collect()
+}
+
+fn unpack_hex(hex: &str, cells: usize) -> Vec<u8> {
+    (0..cells)
+        .map(|i| {
+            let byte = u8::from_str_radix(&hex[i / 8 * 2..i / 8 * 2 + 2], 16).expect("fixture hex");
+            (byte >> (7 - i % 8)) & 1
+        })
+        .collect()
+}
+
+/// Compare a grid with a packed fixture, naming the first differing cell.
+fn assert_plane(grid: &[u8], hex: &str, size: usize, label: &str) {
+    assert_eq!(grid.len(), size * size, "{label}: grid length");
+    let expected = unpack_hex(hex, size * size);
+    if let Some(i) = (0..grid.len()).find(|&i| grid[i] != expected[i]) {
+        panic!(
+            "{label}: first mismatch at column {}, row {}: got {}, expected {}",
+            i % size,
+            i / size,
+            grid[i],
+            expected[i]
+        );
+    }
+}
+
+fn cells_of(it: &mut Interp, src: &str, label: &str) -> Vec<u8> {
+    it.run_str(&format!("{src} /Cells get"))
+        .unwrap_or_else(|e| panic!("{label}: {}", it.error_report(&e)));
+    pop_string(it, label)
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn placement_codewords(version: u64, count: usize) -> Vec<u8> {
+    (0..count as u64)
+        .map(|i| ((i * 149 + i / 251 + version * 31) % 256) as u8)
+        .collect()
+}
+
+fn level_ordinal(level: &str) -> u64 {
+    match level {
+        "L" => 0,
+        "M" => 1,
+        "Q" => 2,
+        "H" => 3,
+        _ => panic!("fixture level {level}"),
+    }
+}
+
+fn symbol_data_source(version: u64, level: &str) -> String {
+    let ordinal = level_ordinal(level);
+    format!(
+        "/spec {version} /{level} qr--block-spec def /capacity spec /DataCodewords get def \
+         /data capacity string def 0 1 capacity 1 sub {{ /i exch def \
+         data i i 149 mul i 251 idiv add {version} 17 mul add {ordinal} 23 mul add 256 mod put \
+         }} for"
+    )
+}
+
+#[test]
+fn alignment_centers_match_independent_reference_for_every_version() {
+    let data = matrix_vectors();
+    let centers = data["alignment"].as_array().expect("alignment");
+    assert_eq!(centers.len(), 40);
+    let mut it = interpreter();
+    for (index, expected) in centers.iter().enumerate() {
+        let version = index + 1;
+        let expected = expected.as_array().expect("centers");
+        let mut src = format!(
+            "/c {version} qr--alignment-centers def c length {} eq",
+            expected.len()
+        );
+        for (k, value) in expected.iter().enumerate() {
+            src.push_str(&format!(" c {k} get {value} eq and"));
+        }
+        assert_true(&mut it, &src, &format!("alignment centers v{version}"));
+    }
+}
+
+#[test]
+fn function_patterns_and_reservations_match_reference_for_every_version() {
+    let data = matrix_vectors();
+    let layouts = data["layouts"].as_array().expect("layouts");
+    assert_eq!(layouts.len(), 40);
+    let mut it = interpreter();
+    for layout in layouts {
+        let version = layout["version"].as_u64().expect("version");
+        let size = layout["size"].as_u64().expect("size") as usize;
+        let label = format!("function matrix v{version}");
+        let cells = cells_of(&mut it, &format!("{version} qr--function-matrix"), &label);
+        assert_eq!(cells.len(), size * size, "{label}: cell count");
+        assert!(
+            cells.iter().all(|c| matches!(c, 0 | 2 | 3 | 6)),
+            "{label}: unexpected cell flags"
+        );
+        for (bit, field) in [(1, "function"), (2, "metadata"), (0, "fixed")] {
+            let grid = plane(&cells, bit);
+            if let Some(full) = layout[field].as_str() {
+                assert_plane(&grid, full, size, &format!("{label} {field}"));
+            }
+            assert_eq!(
+                digest_hex(&grid),
+                layout[&format!("{field}_sha256")].as_str().expect("digest"),
+                "{label}: {field} grid"
+            );
+        }
+        // Reservation invariant: the free cells are exactly the layout's
+        // codeword bits plus remainder bits, at every version.
+        let free = cells.iter().filter(|c| *c & 2 == 0).count() as u64;
+        assert_eq!(free, layout["data_cells"].as_u64().expect("data cells"));
+        assert_true(
+            &mut it,
+            &format!(
+                "/spec {version} /M qr--block-spec def \
+                 spec /RawCodewords get 8 mul spec /RemainderBits get add {free} eq"
+            ),
+            &format!("{label}: free cells match block layout"),
+        );
+    }
+}
+
+#[test]
+fn zigzag_placement_matches_reference_before_and_after_every_forced_mask() {
+    let data = matrix_vectors();
+    let placements = data["placements"].as_array().expect("placements");
+    let layouts = data["layouts"].as_array().expect("layouts");
+    assert!(
+        placements
+            .iter()
+            .any(|p| p["remainder_bits"].as_u64() == Some(7)),
+        "placement corpus lost its remainder-bit versions"
+    );
+    let versions: Vec<u64> = placements
+        .iter()
+        .map(|p| p["version"].as_u64().expect("version"))
+        .collect();
+    for required in [1, 2, 7, 10, 27, 40] {
+        assert!(versions.contains(&required), "missing version {required}");
+    }
+    let mut it = interpreter();
+    for p in placements {
+        let version = p["version"].as_u64().expect("version");
+        let layout = &layouts[version as usize - 1];
+        let size = layout["size"].as_u64().expect("size") as usize;
+        let count = layout["data_cells"].as_u64().expect("data cells") as usize / 8;
+        let codewords = placement_codewords(version, count);
+        assert_eq!(
+            digest_hex(&codewords),
+            p["codewords_sha256"].as_str().expect("digest"),
+            "v{version}: placement codeword formula drifted from the fixture"
+        );
+        let label = format!("placement v{version}");
+        it.run_str(&format!(
+            "/m <{}> {version} qr--matrix def",
+            hex(&codewords)
+        ))
+        .unwrap_or_else(|e| panic!("{label}: {}", it.error_report(&e)));
+        let unmasked = cells_of(&mut it, "m", &label);
+        assert_plane(
+            &plane(&unmasked, 0),
+            p["unmasked"].as_str().expect("unmasked"),
+            size,
+            &format!("{label} unmasked"),
+        );
+        let shown = p["shown_mask"].as_u64().expect("shown mask");
+        for (mask, digest) in p["mask_sha256"]
+            .as_array()
+            .expect("mask digests")
+            .iter()
+            .enumerate()
+        {
+            let masked = cells_of(&mut it, &format!("m {mask} qr--apply-mask"), &label);
+            let grid = plane(&masked, 0);
+            if mask as u64 == shown {
+                assert_plane(
+                    &grid,
+                    p["masked"].as_str().expect("masked"),
+                    size,
+                    &format!("{label} mask {mask}"),
+                );
+            }
+            assert_eq!(
+                digest_hex(&grid),
+                digest.as_str().expect("digest"),
+                "{label} mask {mask}"
+            );
+            assert_eq!(
+                plane(&masked, 1),
+                plane(&unmasked, 1),
+                "{label} mask {mask}: masking changed the function flags"
+            );
+        }
+        assert_eq!(
+            cells_of(&mut it, "m", &label),
+            unmasked,
+            "{label}: masking mutated its input"
+        );
+        assert_true(&mut it, "m /Mask get null eq", &label);
+    }
+}
+
+#[test]
+fn padded_data_corrects_places_and_masks_like_the_reference_symbol() {
+    let data = matrix_vectors();
+    let symbols = data["symbols"].as_array().expect("symbols");
+    assert!(
+        symbols
+            .iter()
+            .any(|s| s["unequal_blocks"].as_bool() == Some(true)),
+        "symbol corpus lost its unequal-block cases"
+    );
+    let layouts = data["layouts"].as_array().expect("layouts");
+    let mut it = interpreter();
+    for s in symbols {
+        let version = s["version"].as_u64().expect("version");
+        let level = s["level"].as_str().expect("level");
+        let mask = s["mask"].as_u64().expect("mask");
+        let size = layouts[version as usize - 1]["size"]
+            .as_u64()
+            .expect("size") as usize;
+        let label = format!("symbol v{version}-{level} mask {mask}");
+        it.run_str(&format!(
+            "{} /codewords data {version} /{level} qr--interleave def codewords",
+            symbol_data_source(version, level)
+        ))
+        .unwrap_or_else(|e| panic!("{label}: {}", it.error_report(&e)));
+        let codewords = pop_string(&mut it, &label);
+        assert_eq!(
+            digest_hex(&codewords),
+            s["codewords_sha256"].as_str().expect("digest"),
+            "{label}: codewords"
+        );
+        let cells = cells_of(
+            &mut it,
+            &format!("codewords {version} qr--matrix {mask} qr--apply-mask"),
+            &label,
+        );
+        let grid = plane(&cells, 0);
+        if let Some(full) = s["masked"].as_str() {
+            assert_plane(&grid, full, size, &label);
+        }
+        assert_eq!(
+            digest_hex(&grid),
+            s["masked_sha256"].as_str().expect("digest"),
+            "{label}"
+        );
+    }
+}
+
+fn github_matrix_source(f: &serde_json::Value) -> String {
+    format!(
+        "/plan (https://github.com/PSCatLabs/pscat) /{} qr--byte-plan def \
+         plan /Data get plan /Version get plan /Level get qr--interleave \
+         plan /Version get qr--matrix {} qr--apply-mask",
+        f["level"].as_str().expect("level"),
+        f["mask"]
+    )
+}
+
+#[test]
+fn github_url_matrices_match_reference_at_every_level() {
+    let data = matrix_vectors();
+    let cases = data["github"].as_array().expect("GitHub matrices");
+    assert_eq!(cases.len(), 4);
+    let mut it = interpreter();
+    for f in cases {
+        let version = f["version"].as_u64().expect("version") as usize;
+        let label = format!("GitHub {} matrix", f["level"]);
+        let cells = cells_of(&mut it, &github_matrix_source(f), &label);
+        assert_plane(
+            &plane(&cells, 0),
+            f["masked"].as_str().expect("masked"),
+            version * 4 + 17,
+            &label,
+        );
+    }
+}
+
+#[test]
+fn matrix_guards_preserve_frames_and_outputs_are_fresh() {
+    let mut it = interpreter();
+    for (src, name) in [
+        ("0 qr--alignment-centers", "qr-version-must-be-in-1-40"),
+        ("41 qr--function-matrix", "qr-version-must-be-in-1-40"),
+        ("(1) qr--function-matrix", "qr-version-must-be-integer"),
+        ("26 string 1.0 qr--matrix", "qr-version-must-be-integer"),
+        ("26 string 41 qr--matrix", "qr-version-must-be-in-1-40"),
+        ("[] 1 qr--matrix", "qr-codewords-must-be-a-string"),
+        (
+            "25 string 1 qr--matrix",
+            "qr-codewords-length-must-match-version",
+        ),
+        (
+            "43 string 2 qr--matrix",
+            "qr-codewords-length-must-match-version",
+        ),
+        (
+            "1 qr--function-matrix 8 qr--apply-mask",
+            "qr-mask-must-be-in-0-7",
+        ),
+        (
+            "1 qr--function-matrix -1 qr--apply-mask",
+            "qr-mask-must-be-in-0-7",
+        ),
+        (
+            "1 qr--function-matrix /a qr--apply-mask",
+            "qr-mask-must-be-integer",
+        ),
+        ("[] 0 qr--apply-mask", "qr-matrix-must-be-a-matrix"),
+        (
+            "<< /Version 1 /Size 21 /Mask null >> 0 qr--apply-mask",
+            "qr-matrix-must-be-a-matrix",
+        ),
+        (
+            "<< /Version 1 /Size 21 /Cells 440 string /Mask null >> 0 qr--apply-mask",
+            "qr-matrix-must-be-a-matrix",
+        ),
+        (
+            "<< /Version 2 /Size 21 /Cells 441 string /Mask null >> 0 qr--apply-mask",
+            "qr-matrix-must-be-a-matrix",
+        ),
+        (
+            "1 qr--function-matrix 3 qr--apply-mask 3 qr--apply-mask",
+            "qr-matrix-already-masked",
+        ),
+    ] {
+        assert_true(
+            &mut it,
+            &format!(
+                "/dictdepth countdictstack def mark {{ {src} }} stopped \
+                 $error /command get /{name} eq and \
+                 countdictstack dictdepth eq and /guard-ok exch def cleartomark guard-ok"
+            ),
+            src,
+        );
+    }
+    // Caller bindings with the private frame's names cannot leak in, an
+    // executable stream is placed as data, and every result is fresh.
+    assert_true(
+        &mut it,
+        "/dictdepth countdictstack def \
+         /cells (caller) def /size 3 def /x 9 def /y 9 def /test { 1 } def /cell 0 def \
+         /stream 26 string cvx def /stream load 0 255 put \
+         /a /stream load 1 qr--matrix def /b /stream load 1 qr--matrix def \
+         a /Cells get 440 0 put b /Cells get 440 get 1 eq \
+         /c 1 qr--function-matrix def /d 1 qr--function-matrix def \
+         c /Cells get 0 0 put d /Cells get 0 get 3 eq and \
+         /e 1 qr--alignment-centers def e length 0 eq and \
+         /f 2 qr--alignment-centers def f 0 99 put 2 qr--alignment-centers 0 get 6 eq and \
+         /stream load xcheck and /stream load 0 get 255 eq and \
+         cells (caller) eq size 3 eq and x 9 eq and y 9 eq and /cell load 0 eq and and \
+         countdictstack dictdepth eq and",
+        "matrix ownership and caller state",
+    );
+    assert!(
+        it.gfx().pixmap.pixels().iter().all(|p| p.red() == 255),
+        "matrix stage drew on the page"
+    );
+    assert!(!it.gfx().page_shown);
+}
+
+#[test]
+fn ghostscript_builds_the_same_matrices_and_guards() {
+    if Command::new("gs")
+        .arg("--version")
+        .output_deadline()
+        .is_err()
+    {
+        eprintln!("gs unavailable; QR matrix portability check not run");
+        return;
+    }
+    let data = matrix_vectors();
+    let layouts = data["layouts"].as_array().expect("layouts");
+    let mut src = String::from(LIB);
+    src.push_str("\n/out (%stdout) (w) file def /emit { /Cells get out exch writehexstring out (\\n) writestring } def\n");
+    // Each emitted line pairs with its expected packed grid, in order.
+    let mut expected: Vec<(String, usize, String)> = Vec::new();
+    for p in data["placements"].as_array().expect("placements") {
+        let version = p["version"].as_u64().expect("version");
+        if ![1, 2, 7, 27].contains(&version) {
+            continue;
+        }
+        let layout = &layouts[version as usize - 1];
+        let size = layout["size"].as_u64().expect("size") as usize;
+        let count = layout["data_cells"].as_u64().expect("data cells") as usize / 8;
+        src.push_str(&format!(
+            "\n/m <{}> {version} qr--matrix def m emit m {} qr--apply-mask emit\n",
+            hex(&placement_codewords(version, count)),
+            p["shown_mask"]
+        ));
+        let label = format!("gs placement v{version}");
+        expected.push((
+            label.clone(),
+            size,
+            p["unmasked"].as_str().expect("u").into(),
+        ));
+        expected.push((label, size, p["masked"].as_str().expect("m").into()));
+    }
+    for s in data["symbols"].as_array().expect("symbols") {
+        if let Some(full) = s["masked"].as_str() {
+            let version = s["version"].as_u64().expect("version");
+            let level = s["level"].as_str().expect("level");
+            src.push_str(&format!(
+                "\n{} data {version} /{level} qr--interleave {version} qr--matrix {} qr--apply-mask emit\n",
+                symbol_data_source(version, level),
+                s["mask"]
+            ));
+            expected.push((
+                format!("gs symbol v{version}-{level}"),
+                version as usize * 4 + 17,
+                full.into(),
+            ));
+        }
+    }
+    for f in data["github"].as_array().expect("GitHub") {
+        src.push_str(&format!("\n{} emit\n", github_matrix_source(f)));
+        expected.push((
+            format!("gs GitHub {}", f["level"]),
+            f["version"].as_u64().expect("version") as usize * 4 + 17,
+            f["masked"].as_str().expect("masked").into(),
+        ));
+    }
+    for (code, name) in [
+        (
+            "26 string noaccess 1 qr--matrix",
+            "qr-codewords-must-be-readable",
+        ),
+        (
+            "1 qr--function-matrix 0 qr--apply-mask 0 qr--apply-mask",
+            "qr-matrix-already-masked",
+        ),
+        (
+            "1 qr--function-matrix 9 qr--apply-mask",
+            "qr-mask-must-be-in-0-7",
+        ),
+    ] {
+        src.push_str(&format!(
+            "\n/dictdepth countdictstack def mark {{ {code} }} stopped \
+             $error /command get /{name} eq and countdictstack dictdepth eq and \
+             not {{ (FAIL guard/frame {name}) = 1 .quit }} if cleartomark\n"
+        ));
+    }
+    src.push_str("\n(QR-MATRIX-PASS) =\n");
+    let out = Command::new("gs")
+        .args(["-q", "-dNODISPLAY", "-dBATCH", "-dNOPAUSE", "-"])
+        .output_with_input(src.as_bytes())
+        .expect("run Ghostscript matrix");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "{stdout} {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert_eq!(lines.len(), expected.len() + 1, "{stdout}");
+    assert_eq!(lines[expected.len()], "QR-MATRIX-PASS");
+    for (line, (label, size, full)) in lines.iter().zip(&expected) {
+        let cells: Vec<u8> = (0..line.len() / 2)
+            .map(|i| u8::from_str_radix(&line[2 * i..2 * i + 2], 16).expect("gs hex"))
+            .collect();
+        assert_plane(&plane(&cells, 0), full, *size, label);
+    }
 }

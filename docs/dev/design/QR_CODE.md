@@ -11,9 +11,11 @@ The checkpoint is draft PR
 [#957](https://github.com/PSCatLabs/pscat/pull/957).
 
 Current implementation in `lib/qr.ps`: byte packing, automatic version/capacity
-planning, Reed–Solomon correction and block interleaving, with exact named
-guards, selftests, independent fixtures and native/Ghostscript/embedded-loader
-checks. Matrix construction, masks, rendering and the public API are pending.
+planning, Reed–Solomon correction and block interleaving, and (#970) function
+patterns, zigzag placement and forced masks, with exact named guards,
+selftests, independent fixtures and native/Ghostscript/embedded-loader checks.
+Format/version BCH bits, mask selection, rendering and the public API are
+pending.
 The original `qr--byte-data` seam accepts explicit capacity; version selection
 now lives in `qr--byte-plan`. No Rust engine
 changes or dependencies were added. A separate same-family plan review
@@ -177,6 +179,27 @@ The full locked offline CI-profile repository suite also passed, including the
 38 selftest/manifest/strict-driver checks; all-target Clippy, formatting,
 fixture regeneration, links, gallery and license checks passed. No rendered QR
 acceptance is implied by the data-stage and correction-stage checks.
+
+### Matrix checkpoint (QR-3, #970)
+
+`qr--function-matrix` builds every function module and reservation for a
+version; `qr--matrix` places a complete interleaved codeword stream in the
+standard zigzag; `qr--apply-mask` applies one forced mask 0–7 to a fresh copy.
+The representation is a byte-per-cell `/Cells` string with dark, function and
+metadata flags ([API](QR_CODE_API.md#matrix-construction)). Format and version
+cells are reserved light; their BCH bits, penalty scoring and automatic mask
+selection are #971. All eight mask predicates landed here, since a fixed-mask
+oracle comparison needs them.
+
+Matrix fixtures come from the pinned oracle's real constructor at a fixed mask,
+captured at its `_draw_codewords` and `_apply_mask` calls; no grid is produced
+by our algorithm. All 40 versions are pinned for alignment centers and for the
+function, metadata and fixed-pattern grids (full grids at versions 1, 2, 7, 10,
+27 and 40); placement at versions 1, 2, 5, 7, 10, 14, 27 and 40 is pinned
+unmasked and under all eight masks, with injected codewords so placement does
+not depend on correction. Nine end-to-end symbols (including unequal-block
+layouts and version 40) and the GitHub URL at L/M/Q/H go data -> correction ->
+matrix -> mask. Ghostscript reproduces selected full grids and guards.
 
 Coverage: empty and binary bytes, URLs, max/max+1 capacities, versions 1/9/10/
 26/27/40, every ECC, unequal block groups, remainder bits, version BCH for >=7,

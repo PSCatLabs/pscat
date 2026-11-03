@@ -1,7 +1,7 @@
-# QR data/correction API reference
+# QR data/correction/matrix API reference
 
-This documents the implemented checkpoint at `deba699`, not a released public
-QR API. All procedure names below are internal and may change before merge.
+This documents the implemented internal stages (data and correction through
+`deba699`, matrix construction from #970), not a released public QR API. All procedure names below are internal and may change before merge.
 Start with the [review handoff](QR_CODE_REVIEW.md),
 [design/roadmap](QR_CODE.md), and [verification guide](QR_CODE_TESTING.md).
 
@@ -15,8 +15,9 @@ length =                   % 70: complete data/correction codewords
 ```
 
 This program emits numbers, not a QR image. There is no `qrencode` or `qrdraw`
-implementation yet. No matrix, finder patterns, format/version bits, masks,
-quiet zone, rendering or scan result should be inferred from these bytes.
+implementation yet. The [matrix stage](#matrix-construction) places these
+codewords and applies a caller-chosen mask, but format/version BCH bits, mask
+selection, quiet zone, rendering and scanning are still pending (#971, #972).
 
 ## Data conventions and effects
 
@@ -46,6 +47,10 @@ Calls use private dictionary frames and invoke no caller callbacks.
 | `qr--rs-divisor` | `degree -> coefficients` | Integer degree 1–30, the QR correction range. High-to-low coefficients excluding the leading monic coefficient. |
 | `qr--rs-remainder` | `data divisor -> parity` | Readable data up to 2956 bytes; readable divisor of 1–30 bytes. Returns fresh parity of the divisor's length, including all-zero parity for empty data. |
 | `qr--interleave` | `padded-data version level -> codewords` | Requires exactly `/DataCodewords` bytes. Splits blocks, calculates correction and interleaves data columns then parity columns. Returns `/RawCodewords` bytes. |
+| `qr--alignment-centers` | `version -> centers` | Fresh ascending array of alignment row/column centers; empty for version 1. |
+| `qr--function-matrix` | `version -> matrix` | Fresh unmasked matrix with function patterns and metadata reservations; every data cell light. |
+| `qr--matrix` | `codewords version -> matrix` | Requires exactly the version's `/RawCodewords` bytes (level-independent). Places them and returns a fresh unmasked matrix. |
+| `qr--apply-mask` | `matrix mask -> matrix` | Unmasked matrix, mask integer 0–7. Fresh copy with that mask applied to data cells and `/Mask` set; the input is unchanged. |
 
 `qr--byte-data` writes mode `0100`, an 8-bit count for versions 1–9 or 16-bit
 count for versions 10–40, raw bytes, four zero terminator bits and alternating
@@ -57,6 +62,64 @@ capacity seam is intentionally separate from standards capacity selection.
 those bits in the module-placement stage. Short blocks precede long blocks;
 only long blocks contribute to the extra data column. Correction columns always
 contain one byte per block, with no synthetic short-block pad byte emitted.
+
+## Matrix construction
+
+```postscript
+/plan (https://github.com/PSCatLabs/pscat) /M qr--byte-plan def
+plan /Data get plan /Version get plan /Level get qr--interleave
+plan /Version get qr--matrix          % unmasked: function patterns + data
+2 qr--apply-mask /symbol exch def     % forced mask 2
+symbol /Cells get length =           % 841 = 29 * 29
+```
+
+The internal matrix is a fresh dictionary:
+
+| Field | Meaning |
+|---|---|
+| `/Version` | Integer 1–40. |
+| `/Size` | Side in modules, `17 + 4 * Version`; no quiet zone. |
+| `/Cells` | Mutable string of `Size * Size` bytes, row-major from the top-left module: index `y * Size + x`, `x` the column (left to right), `y` the row (top to bottom). |
+| `/Mask` | `null` until `qr--apply-mask`, then the applied mask 0–7. |
+
+Each `/Cells` byte is a set of flags: `1` dark, `2` function (never placed or
+masked), `4` metadata. Data cells are therefore `0`/`1`; fixed patterns are
+`2`/`3`; unwritten format/version metadata cells are `6` (reserved, light).
+The dark module at column 8, row `Size - 8` is a fixed pattern (`3`), not
+metadata. `/Cells` is named so it cannot be confused with the public API's
+planned boolean `/Modules`; #972 converts.
+
+Function patterns: timing row and column 6; three finders with their light
+separators (9x9 squares clipped at the edge); alignment patterns at every pair
+of centers except the three finder corners; the dark module; two 15-cell
+format copies (row 8 and column 8 beside the finders) and, for version 7 and
+up, two 6x3 version blocks (columns `Size-11`..`Size-9` of rows 0–5 and the
+transpose). The BCH stage (#971) writes the metadata cells: it should `or`
+its bits into those bytes, keeping the `4` flag, so later stages can still
+tell metadata from fixed patterns.
+
+`qr--matrix` places bits most significant first, in two-column strips from the
+right edge, alternating up and down starting upward at the bottom-right,
+skipping function cells and the whole of column 6. Remainder cells (0–7 per
+version) stay light data cells, and masks apply to them like any data cell.
+
+`qr--apply-mask` uses the standard predicates, with `x` the column and `y`
+the row; a data cell is inverted where the predicate is zero:
+
+| Mask | Predicate |
+|---|---|
+| 0 | `(x + y) mod 2` |
+| 1 | `y mod 2` |
+| 2 | `x mod 3` |
+| 3 | `(x + y) mod 3` |
+| 4 | `(x div 3 + y div 2) mod 2` |
+| 5 | `(x y) mod 2 + (x y) mod 3` |
+| 6 | `((x y) mod 2 + (x y) mod 3) mod 2` |
+| 7 | `((x + y) mod 2 + (x y) mod 3) mod 2` |
+
+It refuses an already-masked matrix: masks are XORs, so a second mask would
+silently corrupt the symbol. Mask selection (#971) applies each candidate to
+the same unmasked matrix and scores the fresh copies.
 
 ## Layout fields
 
@@ -92,6 +155,8 @@ general unwinder for allocation errors, interpreter limits or changed helpers.
 | Correction degree | `qr-ecc-degree-must-be-integer`, `qr-ecc-degree-must-be-in-1-30` |
 | Correction divisor | `qr-ecc-divisor-must-be-a-string`, `qr-ecc-divisor-must-be-readable`, `qr-ecc-divisor-length-must-be-in-1-30` |
 | Correction input length | `qr-ecc-data-too-long`, `qr-ecc-data-length-must-match-capacity` |
+| Matrix codewords | `qr-codewords-must-be-a-string`, `qr-codewords-must-be-readable`, `qr-codewords-length-must-match-version` (version guards as layout) |
+| Masking | `qr-mask-must-be-integer`, `qr-mask-must-be-in-0-7`, `qr-matrix-must-be-a-matrix` (not a dictionary with integer `/Version` 1–40, matching `/Size`, readable `Size * Size` `/Cells` and `/Mask`), `qr-matrix-already-masked` |
 
 If multiple arguments are invalid, the first checked argument determines the
 error. This is an internal contract; no cross-procedure validation ordering is
@@ -105,6 +170,10 @@ in GF(256), primitive polynomial `0x11D`, generator 2. Its hot path deliberately
 does not validate arbitrary caller objects. Zero operands are handled before
 logarithm lookup. `qr--make-gf` builds exp/log tables; `qr--gf` stores them.
 `qr--check-level` validates and literalizes an ECC name. `qr--ecc-per-block`
-and `qr--block-count` store the standards block-layout facts. These names are
+and `qr--block-count` store the standards block-layout facts.
+`qr--raw-modules` (trusted version -> data-area module count, remainder bits
+included) is shared by `qr--block-spec` and `qr--matrix`. `qr--check-version`
+and `qr--check-matrix` are argument guards; `qr--mask-predicates` is the mask
+table. These names are
 implementation details, not rendering or extension hooks. The tables use
 standard PostScript `readonly`; this is not a new security boundary in PSCat.

@@ -26,6 +26,13 @@ SVG/PDF/PNG QR exports and the card are explicitly pending. Their absence is
 not a regression in this checkpoint; assess whether the current implementation
 and planned boundaries support adding them correctly.
 
+Later stage: #970 (QR-3) adds function patterns, zigzag placement and forced
+masks (`qr--function-matrix`, `qr--matrix`, `qr--apply-mask`) with
+oracle-captured [matrix fixtures](../../../tests/data/qr_matrix_vectors.json).
+Its PR targets this branch; review it against the
+[matrix API](QR_CODE_API.md#matrix-construction) and the representation choice
+that #971 and #972 build on.
+
 ## Read in this order
 
 1. [Design and remaining sequence](QR_CODE.md), then
