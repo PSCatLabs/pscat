@@ -290,7 +290,7 @@ rqrr missed the version-10 case at about 4 px/module fractional.
 - `card_exports_keep_physical_size_and_the_300_dpi_print_recipe`: a 3.5 × 2 in
   card (252 × 144 pt) with a mid-grey backdrop and a 0.8 in (`/Side 57.6`)
   GitHub symbol at (180, 72). The PDF MediaBox is `[0 0 252 144]`, and the SVG
-  is `width="252" height="144" viewBox="0 0 252 144"`. The print recipe
+  is `width="252pt" height="144pt" viewBox="0 0 252 144"`. The print recipe
   `pscat --page 252x144 --dpi 300 --png card.png card.ps` gives 1050 × 600
   pixels. In all three rasters at 300 dpi, the light square is exactly
   pixels 750–989 × 60–299 (0.8 in = 240 px), pixel-checked and decoded by both

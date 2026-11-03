@@ -274,7 +274,7 @@ fn every_export_has_two_card_sized_sides_and_the_back_scans() {
         let svg = read(&svg_dir.join(format!("card-{n:03}.svg")));
         let svg_text = String::from_utf8_lossy(&svg);
         assert!(
-            svg_text.contains("width=\"252\" height=\"144\" viewBox=\"0 0 252 144\""),
+            svg_text.contains("width=\"252pt\" height=\"144pt\" viewBox=\"0 0 252 144\""),
             "SVG {side_name}: not 252 x 144 user units (points)"
         );
         assert!(

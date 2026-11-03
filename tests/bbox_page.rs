@@ -199,7 +199,7 @@ fn svg_and_pdf_take_the_box_page() {
         assert!(run.status.success(), "{flag}");
     }
     let svg = std::fs::read_to_string(&svg).unwrap();
-    assert!(svg.contains(r#"width="400" height="300""#), "{svg}");
+    assert!(svg.contains(r#"width="400pt" height="300pt""#), "{svg}");
     assert!(svg.contains(r#"d="M0 300L400 300L400 0L0 0Z""#), "{svg}");
     let pdf = String::from_utf8_lossy(&std::fs::read(&pdf).unwrap()).into_owned();
     assert!(pdf.contains("/MediaBox [0 0 400 300]"), "{pdf}");

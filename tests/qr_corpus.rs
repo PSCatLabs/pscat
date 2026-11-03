@@ -917,7 +917,7 @@ fn card_exports_keep_physical_size_and_the_300_dpi_print_recipe() {
     let svg = render(&program, 252, 144, "--svg", 72.0, "card");
     assert!(
         String::from_utf8_lossy(&svg)
-            .contains("width=\"252\" height=\"144\" viewBox=\"0 0 252 144\""),
+            .contains("width=\"252pt\" height=\"144pt\" viewBox=\"0 0 252 144\""),
         "SVG size is not the card in user units (points)"
     );
     let scale = 300.0 / 72.0;
