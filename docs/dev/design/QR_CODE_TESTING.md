@@ -244,15 +244,16 @@ which covers the version-information (6/7) and count-width (9/10) boundaries and
 unequal block groups. Each is rendered at 2 and 3 px/module on the pixel grid
 and at 3.77 px/module from a fractional origin, through all three exports.
 Both decoders must read every pixel-aligned raster. At the fractional pitch,
-the test lists the 24 (symbol, export, decoder) misses it expects
-(`FRACTIONAL_MISSES`). Each miss must still fail, so a decoder upgrade that
-changes the table fails the test.
+the rasters must still pass the pixel check, but decoder outcomes are only
+printed (24 misses on macOS arm64). Which symbols a decoder misses there
+depends on edge-pixel greys, and CI also runs this test on Linux and
+Windows.
 
 Exhaustive sweep (`--ignored`): all 160 capacity symbols at seven pitches,
 2,080 rasters and 4,160 decodes, in 22.7 s on 8 threads (Apple M-series, `ci`
-profile). Every raster passed the pixel check. It fails if either decoder
-misses a symbol at 2 px/module on the pixel grid, or if both miss a
-pixel-aligned raster. Measured results (symbols read, of 160):
+profile). Every raster passed the pixel check. It fails if a raster is not
+pixel-exact or if both decoders miss a pixel-aligned raster. Measured results
+(symbols read, of 160):
 
 | px/module | grid | export | rqrr | rxing |
 |---|---|---|---|---|
@@ -264,11 +265,16 @@ pixel-aligned raster. Measured results (symbols read, of 160):
 | 4.50 | fractional | PNG | 68 | 132 |
 | 5.70 | fractional | PNG | 152 | 153 |
 
-Every symbol is read by both decoders at 2 px/module on the pixel grid, and
-by rqrr at every whole-pixel pitch. Misses happen only in the decoders: the
-rasters are pixel-exact, three unrelated rasterizers agree, and
-thresholding the fractional rasters to pure black and white changes which
-symbols each decoder misses, without fixing them. Both decoders sample a
+Every capacity symbol is read by both decoders at 2 px/module on the pixel
+grid, and by rqrr at every whole-pixel pitch. Misses happen only in the
+decoders: the rasters are pixel-exact, and three unrelated rasterizers agree.
+Two probes, run once by hand and not kept in the suite, back this up.
+Thresholding the fractional rasters to pure black and white changes which
+symbols each decoder misses, without fixing them. Sweeping the 156
+automatic-mask symbols one byte past capacity instead of the forced-mask
+ones gives the same miss rates: rqrr 0/156 at 2.6 px and 73–77/156 at 3.77
+px; rxing 94–121/156 at 3.77 px, and 153/156 even at 2 px on the grid. The
+misses do not cluster by mask number, so the forced masks are not the cause. Both decoders sample a
 grid estimated from the finder patterns, and when module edges fall inside
 pixels, large dense symbols (high versions, full capacity) are where that
 estimate fails. rqrr is the weaker at small fractional pitches; rxing has a

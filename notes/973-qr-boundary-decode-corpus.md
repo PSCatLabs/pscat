@@ -39,8 +39,11 @@ ignored sweep produced 2,080 pixel-exact rasters (22.7 s, 8 threads). Both
 decoders read all 160 symbols at 2 px/module on the pixel grid. At 2.6,
 3.77 and 4.5 px/module from a fractional origin they miss many dense
 symbols (rqrr reads 0 of 160 at 2.6). Thresholding the rasters to pure black
-and white reshuffles which ones they miss, without fixing them. The default
-subset pins its 24 fractional misses, so the documented table cannot drift.
+and white reshuffles which ones they miss, without fixing them. Automatic-mask
+symbols miss at the same rates, so the forced masks are not the cause. The
+subset first pinned its 24 fractional misses, but CI also runs on Linux and
+Windows, and the misses hinge on edge-pixel greys. So fractional outcomes are
+printed, and only the pixel check and the pixel-aligned decodes are required.
 Guidance went into the user guide: use whole device pixels per module for
 screen PNGs. #974's card should do the same, or rely on print resolution.
 

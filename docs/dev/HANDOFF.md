@@ -10,7 +10,8 @@
 > versions 1–40, levels L/M/Q/H, automatic or forced masks) with a public
 > `qrencode`/`qrdraw` vector API ([guide](../guides/qr-codes.md)). Every
 > version and level is checked against an independent encoder, and its
-> PNG, SVG and PDF exports decode with two independent decoders
+> PNG, SVG and PDF exports, drawn on the pixel grid, decode with two
+> independent decoders
 > ([testing](design/QR_CODE_TESTING.md)). The printable gallery card
 > (#974) remains. Continue from [`design/QR_CODE.md`](design/QR_CODE.md)
 > and epic #966.

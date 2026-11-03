@@ -179,6 +179,8 @@ pub fn read_rxing(g: &Grey) -> Result<Read, String> {
     })
 }
 
+/// A decoder: a raster in, what it read (or why it failed) out.
+pub type Decoder = fn(&Grey) -> Result<Read, String>;
+
 /// The two independent decoders, by name, for per-decoder diagnostics.
-pub const DECODERS: [(&str, fn(&Grey) -> Result<Read, String>); 2] =
-    [("rqrr", read_rqrr), ("rxing", read_rxing)];
+pub const DECODERS: [(&str, Decoder); 2] = [("rqrr", read_rqrr), ("rxing", read_rxing)];

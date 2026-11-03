@@ -132,10 +132,10 @@ they were. It takes its two operands and leaves nothing.
   wear and smudging at the cost of a larger version.
 - For a PNG meant for screens, make each module a whole number of pixels,
   starting on the pixel grid: at `--dpi 72`, a whole-point `/ModuleSize`
-  and a whole-point `moveto`. In the test corpus, both reference decoders read
-  every symbol at 2 pixels per module on the grid. At fractional pitches
-  (module edges inside pixels) they miss many large, dense symbols, even
-  though the pixels are exactly right.
+  and a whole-point `moveto`. In the test corpus, every symbol on the pixel
+  grid was read by at least one of the two reference decoders, nearly all by
+  both. At fractional pitches (module edges inside pixels) they miss many
+  large, dense symbols, even though the pixels are exactly right.
 - Keep payloads short. A short URL gives a small version with large modules
   at a given size, which scans more easily than a dense high version.
 
