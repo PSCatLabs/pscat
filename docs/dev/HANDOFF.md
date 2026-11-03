@@ -12,9 +12,12 @@
 > version and level is checked against an independent encoder, and its
 > PNG, SVG and PDF exports, drawn on the pixel grid, decode with two
 > independent decoders
-> ([testing](design/QR_CODE_TESTING.md)). The printable gallery card
-> (#974) remains. Continue from [`design/QR_CODE.md`](design/QR_CODE.md)
-> and epic #966.
+> ([testing](design/QR_CODE_TESTING.md)). The gallery's two-sided printable
+> business card, `gallery/pscat_card.ps` (#974), carries the repository URL.
+> Its exported sides decode and are size-checked in `tests/qr_card.rs`.
+> Gotcha: its still is rendered at 300 dpi, not 2x, so the QR stays on whole
+> pixels (command in its header). Continue from
+> [`design/QR_CODE.md`](design/QR_CODE.md) and epic #966.
 
 Written 2026-07-13 at the completion of Stages 6–7; last updated
 2026-08-15. Stages 8–20 are all complete: spool/halftone/Gallery II

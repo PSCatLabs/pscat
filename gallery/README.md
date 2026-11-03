@@ -109,12 +109,13 @@ Charts and surfaces drawn as clean vector figures.
 
 ### Apparel and design
 
-Print artwork for shirts and jerseys.
+Print artwork for shirts, jerseys and a business card.
 
 | Piece | File | How it is made |
 |---|---|---|
 | [Keepin' it Real](https://pscatlabs.github.io/pscat/gallery-keepin-it-real.html) | [`keepin_it_real.ps`](keepin_it_real.ps) | The shirt front is set in both groovy faces, Bagel Fat One (the chosen one) and Chewy, with the same composition, seed and palette, and filled with fillkit's plasma through lettering's `/plasma` treatment. The words `I'm` and `Keepin' it` tuck against the `ea` of `Real` through headline's `hllayout`, and the back's typewriter punchline sits below. |
 | [Varsity Backs](https://pscatlabs.github.io/pscat/gallery-varsity-backs.html) | [`varsity_backs.ps`](varsity_backs.ps) | Each jersey carries `lib/jersey.ps`'s arched name over a large number with classic layered lettering: a white or gold fill, a thin contrasting inner outline and a dark outer one, with tracked capitals on the arch. The garment itself (mesh fabric, rib collar, yoke, side panels, sleeve and hem stripes, size tag, hanger) is drawn in the piece rather than in the library; the library only sizes the lettering for a print rectangle. |
+| [The Program Card](https://pscatlabs.github.io/pscat/gallery-pscat-card.html) | [`pscat_card.ps`](pscat_card.ps) | One source draws both 3.5 by 2 inch sides as two pages, so the PDF export carries the front and back at their true size and the PNG and SVG exports write one file per side. The logo is redrawn as paths, the type is set in Courier, Palatino and Helvetica from the standard 35 fonts, and the QR code for the repository is encoded and drawn by `lib/qr.ps` as vector squares. Its modules are 1.68 points, exactly 7 pixels at 300 dpi, so a print PNG puts every module edge on a pixel edge; this proof of both sides is rendered at that resolution for the same reason. Nothing is printed within an eighth of an inch of the trim, so the card needs no bleed. |
 
 ### Drawing (dry media)
 

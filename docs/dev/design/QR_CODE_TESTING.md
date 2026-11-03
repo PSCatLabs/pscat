@@ -15,6 +15,7 @@ From the repository root, with stable Rust, Python 3 and optional Ghostscript:
 cargo build --locked --profile ci
 cargo test --locked --profile ci --test qr
 cargo test --locked --profile ci --test qr_corpus
+cargo test --locked --profile ci --test qr_card
 # The exhaustive render/decode sweep (#973), about 20 s on 8 threads:
 cargo test --locked --profile ci --test qr_corpus -- --ignored --nocapture
 cargo test --locked --profile ci
@@ -302,6 +303,35 @@ rqrr missed the version-10 case at about 4 px/module fractional.
   A quiet zone below 4 is refused (`qr-quiet-zone-must-be-at-least-4`, the
   #972 guards).
 
+## The gallery business card (#974)
+
+`tests/qr_card.rs` checks `gallery/pscat_card.ps`, the two-sided card, through
+what a user exports, not a test program:
+
+- `every_export_has_two_card_sized_sides_and_the_back_scans`. The card is
+  exported through `--pdf` (two `/MediaBox [0 0 252 144]` pages,
+  `--lint-strict` clean, no image XObject), `--svg` (`card-001.svg` and
+  `card-002.svg`, 252 × 144, no `<image>`) and `--png --dpi 300`
+  (`card-001.png` and `card-002.png`, 1050 × 600). Each side of each export is
+  rasterized at 300 dpi: pscat's PNG, the SVG through resvg, each PDF page
+  through hayro (`qr_support::raster_pdf_page`). Then:
+  - every pixel within 9 pt of the trim is paper white;
+  - on the back, every pixel of the 41 × 41-module drawing, quiet zone
+    included, is exactly its module's light or navy, since 1.68 pt modules
+    at (171.12, 37.44) pt are 7 whole pixels;
+  - on the back, both decoders read the exact URL at level H (rqrr: version
+    4);
+  - on the front, neither decoder finds a symbol.
+- `the_gallery_still_is_a_scannable_proof_of_both_sides`: the committed proof
+  still (1250 × 1500 px at 300 dpi) gets the same pixel check at the back's
+  proof offset (24, 24) pt. Both decoders read it, and rqrr finds exactly one
+  symbol.
+- `the_card_uses_base_35_fonts_at_9_pt_or_more_and_no_images`. The card is
+  run with `findfont`, every show operator and the image operators wrapped
+  to report each use. Every face must be one of the LaserWriter 35 (compiled
+  in, so no font pack). Every show's em, through the font matrix and the CTM,
+  must be at least 9 pt. Nothing may paint a raster.
+
 ## Standards references
 
 - ISO/IEC 18004:2015, *QR Code bar code symbology specification*: the
@@ -353,7 +383,7 @@ are both pinned.
 ## What remains unverified
 
 Every version and level matches the oracle, and the rendered corpus decodes
-with two independent decoders (#973). Card artwork is #974. No claim of
+with two independent decoders (#973). The card's exports decode too (#974). No claim of
 complete ISO/IEC 18004
 conformance or scanner reliability is made. Later decode tests must, like
 #971's, fail if the decoder is unavailable; they must not inherit the

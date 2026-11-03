@@ -1,9 +1,9 @@
 //! Rasterizers and decoders shared by the QR integration tests (`tests/qr.rs`,
-//! `tests/qr_corpus.rs`). Every one is an independent implementation: resvg
-//! and hayro share no code with pscat's rasterizer, and the two decoders
-//! share none with `lib/qr.ps`, the fixture oracle or each other (rqrr is a
-//! port of quirc, rxing of ZXing). All are compiled-in dev-dependencies, so
-//! nothing that uses them can skip for want of a tool.
+//! `tests/qr_corpus.rs`, `tests/qr_card.rs`). Every one is an independent
+//! implementation: resvg and hayro share no code with pscat's rasterizer, and
+//! the two decoders share none with `lib/qr.ps`, the fixture oracle or each
+//! other (rqrr is a port of quirc, rxing of ZXing). All are compiled-in
+//! dev-dependencies, so nothing that uses them can skip for want of a tool.
 #![allow(dead_code)] // each test crate that mounts this module uses a subset
 
 /// A greyscale raster composited onto white: transparent reads as light.
@@ -71,8 +71,19 @@ pub fn raster_svg(bytes: &[u8], scale: f32) -> Grey {
 /// per point. It paints the page white first; its pixels are premultiplied,
 /// so un-premultiply before compositing.
 pub fn raster_pdf(bytes: &[u8], scale: f32) -> Grey {
+    raster_pdf_page(bytes, scale, 0)
+}
+
+/// [`raster_pdf`] for page `index` (0-based) of a multi-page PDF.
+pub fn raster_pdf_page(bytes: &[u8], scale: f32, index: usize) -> Grey {
     let pdf = hayro::Pdf::new(std::sync::Arc::new(bytes.to_vec())).expect("parse PDF");
-    let page = &pdf.pages()[0];
+    let pages = pdf.pages();
+    assert!(
+        index < pages.len(),
+        "PDF has {} pages, no page {index}",
+        pages.len()
+    );
+    let page = &pages[index];
     let pixmap = hayro::render(
         page,
         &hayro::InterpreterSettings::default(),

@@ -34,7 +34,7 @@
   {
    "id": "apparel",
    "title": "Apparel and design",
-   "blurb": "Print artwork for shirts and jerseys."
+   "blurb": "Print artwork for shirts, jerseys and a business card."
   },
   {
    "id": "drawing",
@@ -130,6 +130,10 @@
   "released": {
    "title": "released",
    "guide": "docs/guides/fonts.md"
+  },
+  "qr": {
+   "title": "qr",
+   "guide": "docs/guides/qr-codes.md"
   }
  },
  "pieces": [
@@ -685,6 +689,28 @@
    "alt": "Varsity Backs, two team jerseys seen from behind, cardinal-and-gold and navy-and-white, with arched names over large numbers",
    "blurb": "Two team jerseys seen from behind, with arched names over large layered-outline numbers.",
    "technique": "Each jersey carries `lib/jersey.ps`'s arched name over a large number with classic layered lettering: a white or gold fill, a thin contrasting inner outline and a dark outer one, with tracked capitals on the arch. The garment itself (mesh fabric, rib collar, yoke, side panels, sleeve and hem stripes, size tag, hanger) is drawn in the piece rather than in the library; the library only sizes the lettering for a print rectangle."
+  },
+  {
+   "id": "pscat_card",
+   "title": "The Program Card",
+   "category": "apparel",
+   "tags": [
+    "lettering"
+   ],
+   "libraries": [
+    "qr"
+   ],
+   "featured": false,
+   "playground": false,
+   "issue": 974,
+   "added": "2026-11-02",
+   "source": "gallery/pscat_card.ps",
+   "render": "gallery/renders/pscat_card.png",
+   "page": "252x144",
+   "speed": 100,
+   "alt": "The Program Card, a proof of a two-sided business card: the front has the cat-eared %! logo on a mustard tile, the word pscat and the tagline PostScript for precision and imagination; the back says This card is a program, with the repository address and a navy QR code",
+   "blurb": "A two-sided business card for pscat, ready to print, whose QR code is drawn by the same program as the type.",
+   "technique": "One source draws both 3.5 by 2 inch sides as two pages, so the PDF export carries the front and back at their true size and the PNG and SVG exports write one file per side. The logo is redrawn as paths, the type is set in Courier, Palatino and Helvetica from the standard 35 fonts, and the QR code for the repository is encoded and drawn by `lib/qr.ps` as vector squares. Its modules are 1.68 points, exactly 7 pixels at 300 dpi, so a print PNG puts every module edge on a pixel edge; this proof of both sides is rendered at that resolution for the same reason. Nothing is printed within an eighth of an inch of the trim, so the card needs no bleed."
   },
   {
    "id": "alpine_lake",
