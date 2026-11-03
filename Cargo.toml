@@ -132,7 +132,7 @@ sha2 = "0.11.1"
 # check can never skip for want of a decoder. No `img` feature: the test feeds
 # it greyscale pixels from tiny-skia's PNG loader, so no image crate comes in.
 [dev-dependencies]
-rqrr = { version = "0.11.0", default-features = false }
+rqrr = { version = "=0.11.0", default-features = false }
 
 # tests/common's CPU-time clock (issue #329); already in the tree through
 # winit and friends in a default build. A dev-dependency, so a library user
