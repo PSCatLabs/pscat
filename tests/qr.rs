@@ -702,19 +702,6 @@ fn plane(cells: &[u8], bit: u8) -> Vec<u8> {
     cells.iter().map(|c| (c >> bit) & 1).collect()
 }
 
-/// The fixture's packed form: one bit per cell, MSB first, zero-padded.
-fn plane_hex(grid: &[u8]) -> String {
-    grid.chunks(8)
-        .map(|chunk| {
-            let byte = chunk
-                .iter()
-                .enumerate()
-                .fold(0u8, |acc, (k, bit)| acc | (bit << (7 - k)));
-            format!("{byte:02x}")
-        })
-        .collect()
-}
-
 fn unpack_hex(hex: &str, cells: usize) -> Vec<u8> {
     (0..cells)
         .map(|i| {
@@ -726,6 +713,7 @@ fn unpack_hex(hex: &str, cells: usize) -> Vec<u8> {
 
 /// Compare a grid with a packed fixture, naming the first differing cell.
 fn assert_plane(grid: &[u8], hex: &str, size: usize, label: &str) {
+    assert_eq!(grid.len(), size * size, "{label}: grid length");
     let expected = unpack_hex(hex, size * size);
     if let Some(i) = (0..grid.len()).find(|&i| grid[i] != expected[i]) {
         panic!(
@@ -736,7 +724,6 @@ fn assert_plane(grid: &[u8], hex: &str, size: usize, label: &str) {
             expected[i]
         );
     }
-    assert_eq!(grid.len(), size * size, "{label}: grid length");
 }
 
 fn cells_of(it: &mut Interp, src: &str, label: &str) -> Vec<u8> {

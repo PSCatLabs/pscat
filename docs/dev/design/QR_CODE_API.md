@@ -119,8 +119,7 @@ the row; a data cell is inverted where the predicate is zero:
 
 It refuses an already-masked matrix: masks are XORs, so a second mask would
 silently corrupt the symbol. Mask selection (#971) applies each candidate to
-the same unmasked matrix and scores the fresh copies; for a v40 symbol,
-placement plus all eight masks takes about 0.1 s in PSCat.
+the same unmasked matrix and scores the fresh copies.
 
 ## Layout fields
 
