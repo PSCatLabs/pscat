@@ -1,7 +1,11 @@
-# QR data/correction/matrix API reference
+# QR API reference
 
-This documents the implemented internal stages (data and correction through
-`deba699`, matrix construction from #970, metadata and mask selection from #971), not a released public QR API. All procedure names below are internal and may change before merge.
+The public procedures are `qrencode` and `qrdraw` (#972); their user guide is
+[`docs/guides/qr-codes.md`](../../guides/qr-codes.md) and their contract is
+[below](#public-api-qrencode-and-qrdraw). Everything else here documents the
+internal stages (data and correction through `deba699`, matrix construction
+from #970, metadata and mask selection from #971). Those `qr--` names are
+internal and may change.
 Start with the [review handoff](QR_CODE_REVIEW.md),
 [design/roadmap](QR_CODE.md), and [verification guide](QR_CODE_TESTING.md).
 
@@ -14,12 +18,68 @@ plan /Data get plan /Version get plan /Level get qr--interleave
 length =                   % 70: complete data/correction codewords
 ```
 
-This program emits numbers, not a QR image. There is no `qrencode` or `qrdraw`
-implementation yet. The [matrix stage](#matrix-construction) places these
-codewords and applies a caller-chosen mask; the
-[selection stage](#metadata-penalties-and-mask-selection) (#971) writes
-format/version bits and picks the mask, giving a complete symbol. Quiet zone,
-drawing and the public API are #972.
+This program emits numbers, not a QR image. The
+[matrix stage](#matrix-construction) places these codewords and applies a
+caller-chosen mask; the [selection stage](#metadata-penalties-and-mask-selection)
+(#971) writes format/version bits and picks the mask, giving a complete
+symbol; the [public API](#public-api-qrencode-and-qrdraw) (#972) wraps it and
+draws it.
+
+## Public API: qrencode and qrdraw
+
+```postscript
+(lib/qr.ps) run
+72 72 moveto
+(https://github.com/PSCatLabs/pscat) << /Level /M >> qrencode
+<< /ModuleSize 4 >> qrdraw
+```
+
+| Procedure | Stack effect | Contract |
+|---|---|---|
+| `qrencode` | `payload opts -> symbol` | Options `/Level` (default `/M`, exact), `/Version` (1–40 fixed, or `null` = smallest fitting), `/Mask` (0–7 forced, or `null` = lowest penalty). Absent keys take the default; keys it does not know are ignored, as in the other libraries, so one dict can serve both procedures. |
+| `qrdraw` | `symbol opts -> -` | Lower-left corner of the quiet zone at the current point. Exactly one of `/ModuleSize` or `/Side` (points; `/Side` includes the quiet zone); `/QuietZone` integer ≥ 4 (default 4); `/Dark` (default 0) and `/Light` (default 1, or `null` for no light paint), each a gray number or a literal array of 1, 3 or 4 components in 0..1. |
+
+A public symbol is a fresh dictionary of exactly five keys:
+`<< /Version /Level /Mask /Size /Modules >>`. `/Modules` is an array of `Size`
+row arrays, the top row first, each of `Size` booleans, the leftmost module
+first, `true` dark; the quiet zone is excluded. Every array is new and
+unshared: the caller may keep or change them, and a later call is not
+affected. `/Cells` (the internal byte grid) is not exposed. `qrdraw` reads
+only `/Size` and `/Modules`, so an edited matrix draws as edited; it checks
+that `/Size` is a real symbol side (21–177, `17 + 4v`) and that `/Modules` has
+that many rows of that many booleans.
+
+Effects. `qrencode` has none beyond its result. `qrdraw` checks every
+argument first, then runs `gsave newpath`, paints the light square
+(unless `/Light` is null), builds one path with one rectangle per maximal
+horizontal run of dark modules and fills it once, then `grestore`. Every
+corner is `origin + k * module` for an integer `k`, computed by one
+expression, so touching modules share bit-identical edges and no seam
+appears between them in any rasterizer. The caller's graphics state, path,
+current point, dictionary stack and remaining operands are unchanged.
+Colors: arrays are copied with `aload` into fresh literal arrays, and a
+procedure is refused, so no caller value is ever executed. With a light
+color, the dark color's luminance (Rec. 601 weights) must be lower. CMYK is
+weighed both ways it is commonly turned into RGB, the PLRM's additive
+`1 - min(1, c + k)` (Ghostscript) and pscat's multiplicative
+`(1 - c)(1 - k)`, and must be darker under both: a PDF keeps CMYK and the
+viewer converts it, so neither alone says what a reader will see.
+
+Public failures:
+
+| Category | Guard names |
+|---|---|
+| Options | `qr-options-must-be-a-dict` |
+| Encode | the level, version, mask and payload guards below, plus `qr-data-too-long-for-version` (payload does not fit a fixed `/Version`) |
+| Symbol | `qr-symbol-must-be-a-qr-symbol` |
+| Size | `qr-draw-needs-modulesize-or-side`, `qr-draw-takes-modulesize-or-side-not-both`, `qr-module-size-must-be-a-positive-number`, `qr-side-must-be-a-positive-number` |
+| Quiet zone | `qr-quiet-zone-must-be-an-integer`, `qr-quiet-zone-must-be-at-least-4` |
+| Colors | `qr-dark-must-be-a-color`, `qr-light-must-be-a-color-or-null`, `qr-dark-must-be-darker-than-light` |
+| Position | `qr-draw-needs-a-current-point` |
+
+Both procedures are tagged for the capability catalog (`pscat --capabilities`,
+the MCP `describe_art_capabilities` tool), with a `/`-key parameter row per
+option.
 
 ## Data conventions and effects
 
@@ -219,6 +279,10 @@ and `qr--block-count` store the standards block-layout facts.
 included) is shared by `qr--block-spec` and `qr--matrix`. `qr--check-version`
 and `qr--check-matrix` are argument guards; `qr--mask-predicates` is the mask
 table. `qr--level-bits` maps levels to format codes; `qr--check-masked` guards
-a masked matrix. These names are
+a masked matrix. For the public API (#972): `qr--opt` reads an option with a
+default, `qr--color-ok`/`qr--color-array`/`qr--luma`/`qr--setcolor` check,
+copy, weigh and set colors, `qr--encode` builds a checked symbol,
+`qr--public` converts `/Cells` to `/Modules`, `qr--check-symbol` guards a
+public symbol and `qr--draw` paints a checked one. These names are
 implementation details, not rendering or extension hooks. The tables use
 standard PostScript `readonly`; this is not a new security boundary in PSCat.

@@ -1,10 +1,13 @@
 %!PS-Adobe-3.0
-% Native QR Model 2 library -- incremental implementation.
-% Byte-mode planning, packing, error correction, matrix construction,
-% format/version metadata and automatic mask selection (complete symbols);
-% no drawing or public qrencode/qrdraw API yet.
+% Native QR Model 2 library: byte-mode data, versions 1-40, all four
+% error-correction levels, automatic or forced masks, vector drawing.
 % Load with (lib/qr.ps) run. No dependencies and no drawing on load.
 % Code: MIT OR Apache-2.0, as the other lib/*.ps libraries.
+%
+% Public API (docs/guides/qr-codes.md):
+%   payload opts qrencode -> symbol   << /Version /Level /Mask /Size /Modules >>
+%   symbol opts qrdraw -              draws at the current point
+% Everything named qr--* is internal and may change.
 %
 % qr--byte-data: readable-string version data-capacity -> fresh-string
 % Internal seam: capacity is supplied by the future version/ECC planner.
@@ -802,4 +805,324 @@ qr--level-bits readonly pop
 /qr--symbol {
   qr--byte-plan
   dup /Data get exch dup /Version get exch /Level get qr--codeword-symbol
+} bind def
+
+% ---- Public interface: qrencode and qrdraw (QR-5) ----
+%
+% A public symbol is a fresh dictionary the caller owns:
+%   << /Version 1..40 /Level /L|/M|/Q|/H /Mask 0..7 /Size n /Modules rows >>
+% /Modules is an array of n rows, the top row first; each row is an array of
+% n booleans, the leftmost module first, true for a dark module. The quiet
+% zone is not included. The arrays are mutable and shared with nothing.
+% Every argument is checked before a private frame or gsave opens, so a
+% named failure leaves the dictionary stack and graphics state alone.
+
+% opts key default -> value: the option, or default when it is absent.
+% get never executes, so a procedure value arrives as a value.
+% @internal
+/qr--opt {
+  2 index 2 index known { pop get } { exch pop exch pop } ifelse
+} bind def
+
+% any -> any bool: a number in 0..1, or a literal array of 1, 3 or 4 of
+% them. A procedure is refused, not taken for an array.
+% @internal
+/qr--color-ok {
+  dup type dup /integertype eq exch /realtype eq or {
+    dup dup 0 ge exch 1 le and
+  } {
+    dup type /arraytype eq 1 index xcheck not and {
+      dup length dup 1 eq exch dup 3 eq exch 4 eq or or {
+        true 1 index {
+          dup type dup /integertype eq exch /realtype eq or {
+            dup 0 ge exch 1 le and
+          } { pop false } ifelse and
+        } forall
+      } { false } ifelse
+    } { false } ifelse
+  } ifelse
+} bind def
+
+% Checked color -> fresh literal array of 1 (gray), 3 (RGB) or 4 (CMYK).
+% @internal
+/qr--color-array {
+  dup type /arraytype eq { [ exch aload pop ] } { [ exch ] } ifelse
+} bind def
+
+% color-array additive? -> luminance 0..1 (Rec. 601 weights). CMYK has no
+% single RGB meaning: the PLRM (and Ghostscript) convert it additively,
+% 1-min(1,c+k), pscat multiplicatively, (1-c)(1-k), and a PDF viewer through
+% its own profile. qrdraw therefore weighs CMYK both ways.
+% @internal
+/qr--luma {
+  exch dup length 1 eq { 0 get exch pop } {
+    dup length 3 eq { aload pop 4 -1 roll pop } {
+      aload pop 5 -1 roll {
+        % c m y k -> 1-min(1,c+k) 1-min(1,m+k) 1-min(1,y+k)
+        4 1 roll 3 { 3 index add dup 1 gt { pop 1 } if 1 exch sub 3 1 roll } repeat
+      } {
+        % c m y k -> (1-c)(1-k) (1-m)(1-k) (1-y)(1-k)
+        4 1 roll 3 { 1 exch sub 3 index 1 exch sub mul 3 1 roll } repeat
+      } ifelse
+      4 -1 roll pop
+    } ifelse
+    0.114 mul exch 0.587 mul add exch 0.299 mul add
+  } ifelse
+} bind def
+
+% dark-array light-array -> dark-array light-array bool: true unless the
+% dark color is darker under both CMYK conversions.
+% @internal
+/qr--not-darker {
+  1 index true qr--luma 1 index true qr--luma ge
+  2 index false qr--luma 2 index false qr--luma ge or
+} bind def
+
+% color-array -> -, set as the current color.
+% @internal
+/qr--setcolor {
+  dup length 1 eq { aload pop setgray } {
+    dup length 3 eq { aload pop setrgbcolor } { aload pop setcmykcolor } ifelse
+  } ifelse
+} bind def
+
+% qrencode: payload opts -> symbol
+%%SelfTest: qrencode-invalid-arguments
+% { (A) [] qrencode } /qr-options-must-be-a-dict (array options) mustguard
+% { (A) << /Level /X >> qrencode } /qr-level-must-be-L-M-Q-or-H (unknown level) mustguard
+% { (A) << /Level (M) >> qrencode } /qr-level-must-be-L-M-Q-or-H (string level) mustguard
+% { (A) << /Version 41 >> qrencode } /qr-version-must-be-in-1-40 (large version) mustguard
+% { (A) << /Version 2.0 >> qrencode } /qr-version-must-be-integer (real version) mustguard
+% { (A) << /Mask 8 >> qrencode } /qr-mask-must-be-in-0-7 (large mask) mustguard
+% { (A) << /Mask (0) >> qrencode } /qr-mask-must-be-integer (string mask) mustguard
+% { [] << >> qrencode } /qr-data-must-be-a-string (array payload) mustguard
+% { 18 string << /Level /H /Version 1 >> qrencode } /qr-data-too-long-for-version (version one at H) mustguard
+% { 1274 string << /Level /H >> qrencode } /qr-data-too-long-for-level (H overflow) mustguard
+%%EndSelfTest
+%%SelfTest: qrencode-symbols
+% (https://github.com/PSCatLabs/pscat) << >> qrencode /Version get 3 eq (smallest version at default M) mustbe
+% (https://github.com/PSCatLabs/pscat) << >> qrencode /Level get /M eq (default level M) mustbe
+% (https://github.com/PSCatLabs/pscat) << /Level /H >> qrencode /Version get 4 eq (H needs version four) mustbe
+% (A) << /Version 5 >> qrencode /Size get 37 eq (fixed version) mustbe
+% (A) << /Mask 6 >> qrencode /Mask get 6 eq (forced mask) mustbe
+% (A) << /Version null /Mask null >> qrencode /Version get 1 eq (null means automatic) mustbe
+% (A) << >> qrencode /Modules get dup length 21 eq exch 0 get length 21 eq and (21 rows of 21) mustbe
+% (A) << >> qrencode /Modules get 0 get dup 0 get exch 6 get and (finder top row dark) mustbe
+% (A) << >> qrencode /Modules get 7 get 0 get not (separator light) mustbe
+% (A) << >> qrencode /Modules get 6 get dup 8 get exch 9 get not and (timing row alternates) mustbe
+% (A) << >> qrencode /Modules get 13 get 8 get (dark module above the bottom-left finder) mustbe
+%%EndSelfTest
+% @kind: Procedure
+% @summary: Encode a byte string as a QR Model 2 symbol (byte mode, versions 1-40) and return a fresh dictionary << /Version /Level /Mask /Size /Modules >>. /Modules is an array of /Size rows, top row first, each an array of /Size booleans, leftmost first, true for dark; it excludes the quiet zone and is the caller's to keep or change. Strings are raw bytes (no Unicode conversion or ECI). Raises named errors such as qr-data-too-long-for-level.
+% @example: (https://github.com/PSCatLabs/pscat) << /Level /M >> qrencode /Size get =
+% @param: /Level [name] Error-correction level /L, /M, /Q or /H, used exactly as given, never raised (default /M)
+% @param: /Version [integer] Fixed version 1..40, raising qr-data-too-long-for-version if the payload does not fit; null picks the smallest version that fits (default null)
+% @param: /Mask [integer] Forced data mask 0..7; null picks the lowest-penalty mask, as the standard requires (default null)
+/qrencode {
+  dup type /dicttype ne { qr-options-must-be-a-dict } if
+  dup /Level /M qr--opt qr--check-level
+  1 index /Version null qr--opt dup null ne { qr--check-version } if
+  2 index /Mask null qr--opt dup null ne {
+    dup type /integertype ne { qr-mask-must-be-integer } if
+    dup dup 0 lt exch 7 gt or { qr-mask-must-be-in-0-7 } if
+  } if
+  4 -1 roll pop
+  % payload level version mask
+  3 index type /stringtype ne { qr-data-must-be-a-string } if
+  3 index rcheck not { qr-data-must-be-readable } if
+  1 index null eq {
+    3 index length 40 4 index qr--block-spec /DataCodewords get 3 sub gt {
+      qr-data-too-long-for-level
+    } if
+  } {
+    % Byte header plus payload must fit the fixed version. Versions 1-9 hold
+    % at most 230 data bytes, so their 8-bit count can never overflow here.
+    3 index length 2 index 10 lt { 2 } { 3 } ifelse add
+    2 index 4 index qr--block-spec /DataCodewords get gt {
+      qr-data-too-long-for-version
+    } if
+  } ifelse
+  qr--encode
+} bind def
+
+% qr--encode: payload level version|null mask|null -> public symbol (checked).
+% @internal
+/qr--encode {
+  10 dict begin
+    /mask exch def /ver exch def /level exch def /data exch cvlit def
+    ver null eq {
+      /plan data level qr--byte-plan def
+      /ver plan /Version get def /padded plan /Data get def
+    } {
+      /padded data ver ver level qr--block-spec /DataCodewords get qr--byte-data def
+    } ifelse
+    /grid padded ver level qr--interleave ver qr--matrix def
+    mask null eq { grid level qr--finish } {
+      grid mask qr--apply-mask level qr--draw-metadata
+    } ifelse
+    qr--public
+  end
+} bind def
+
+% qr--public: internal symbol -> public symbol with boolean /Modules rows.
+% @internal
+/qr--public {
+  8 dict begin
+    /src exch def /n src /Size get def /cells src /Cells get def
+    /rows n array def
+    0 1 n 1 sub { /y exch def
+      /row n array def
+      0 1 n 1 sub { /x exch def row x cells y n mul x add get 1 and 1 eq put } for
+      rows y row put
+    } for
+    << /Version src /Version get /Level src /Level get /Mask src /Mask get
+       /Size n /Modules rows >>
+  end
+} bind def
+
+% Public-symbol shape check; leaves the symbol. qrdraw reads only /Size and
+% /Modules, so a symbol whose modules the caller edited still draws.
+% @internal
+/qr--check-symbol {
+  dup type /dicttype ne { qr-symbol-must-be-a-qr-symbol } if
+  dup /Size known 1 index /Modules known and not { qr-symbol-must-be-a-qr-symbol } if
+  dup /Size get dup type /integertype eq {
+    dup 21 ge exch dup 177 le exch 17 sub 4 mod 0 eq and and
+  } { pop false } ifelse
+  not { qr-symbol-must-be-a-qr-symbol } if
+  dup /Modules get dup type /arraytype eq {
+    length 1 index /Size get eq
+  } { pop false } ifelse
+  not { qr-symbol-must-be-a-qr-symbol } if
+  dup /Size get 1 index /Modules get {
+    dup type /arraytype ne { qr-symbol-must-be-a-qr-symbol } if
+    dup length 2 index ne { qr-symbol-must-be-a-qr-symbol } if
+    { type /booleantype ne { qr-symbol-must-be-a-qr-symbol } if } forall
+  } forall
+  pop
+} bind def
+
+% qrdraw: symbol opts -> -
+%%SelfTest: qrdraw-invalid-arguments
+% { 0 0 moveto (A) << >> qrencode [] qrdraw } /qr-options-must-be-a-dict (array options) mustguard
+% { 0 0 moveto << /Size 21 >> << /ModuleSize 1 >> qrdraw } /qr-symbol-must-be-a-qr-symbol (no modules) mustguard
+% { 0 0 moveto << /Size 22 /Modules [] >> << /ModuleSize 1 >> qrdraw } /qr-symbol-must-be-a-qr-symbol (impossible size) mustguard
+% { 0 0 moveto (A) << >> qrencode dup /Modules get 3 get 3 0 put << /ModuleSize 1 >> qrdraw } /qr-symbol-must-be-a-qr-symbol (non-boolean module) mustguard
+% { 0 0 moveto (A) << >> qrencode << >> qrdraw } /qr-draw-needs-modulesize-or-side (no size) mustguard
+% { 0 0 moveto (A) << >> qrencode << /ModuleSize 1 /Side 29 >> qrdraw } /qr-draw-takes-modulesize-or-side-not-both (both sizes) mustguard
+% { 0 0 moveto (A) << >> qrencode << /ModuleSize 0 >> qrdraw } /qr-module-size-must-be-a-positive-number (zero module) mustguard
+% { 0 0 moveto (A) << >> qrencode << /Side (1) >> qrdraw } /qr-side-must-be-a-positive-number (string side) mustguard
+% { 0 0 moveto (A) << >> qrencode << /ModuleSize 1 /QuietZone 3 >> qrdraw } /qr-quiet-zone-must-be-at-least-4 (thin quiet zone) mustguard
+% { 0 0 moveto (A) << >> qrencode << /ModuleSize 1 /QuietZone 4.0 >> qrdraw } /qr-quiet-zone-must-be-an-integer (real quiet zone) mustguard
+% { 0 0 moveto (A) << >> qrencode << /ModuleSize 1 /Dark [0 0] >> qrdraw } /qr-dark-must-be-a-color (two components) mustguard
+% { 0 0 moveto (A) << >> qrencode << /ModuleSize 1 /Dark 1.5 >> qrdraw } /qr-dark-must-be-a-color (gray out of range) mustguard
+% { 0 0 moveto (A) << >> qrencode << /ModuleSize 1 /Light /white >> qrdraw } /qr-light-must-be-a-color-or-null (name light) mustguard
+% { 0 0 moveto (A) << >> qrencode << /ModuleSize 1 /Dark { 0 } >> qrdraw } /qr-dark-must-be-a-color (procedure dark) mustguard
+% { 0 0 moveto (A) << >> qrencode << /ModuleSize 1 /Dark 1 /Light 0 >> qrdraw } /qr-dark-must-be-darker-than-light (inverted) mustguard
+% { 0 0 moveto (A) << >> qrencode << /ModuleSize 1 /Dark [0 0 0 0] /Light [0 0 0 1] >> qrdraw } /qr-dark-must-be-darker-than-light (CMYK black light) mustguard
+% { 0 0 moveto (A) << >> qrencode << /ModuleSize 1 /Dark 0.1 /Light [0.5 0.5 0.5 0.5] >> qrdraw } /qr-dark-must-be-darker-than-light (CMYK light black when added) mustguard
+% { 0 0 moveto (A) << >> qrencode << /ModuleSize 1 /Dark [0.5 0.5 0.5 0.5] /Light 0.2 >> qrdraw } /qr-dark-must-be-darker-than-light (CMYK dark lighter when multiplied) mustguard
+% { newpath (A) << >> qrencode << /ModuleSize 1 >> qrdraw } /qr-draw-needs-a-current-point (no current point) mustguard
+%%EndSelfTest
+%%SelfTest: qrdraw-preserves-state
+% 0.2 0.4 0.6 setrgbcolor 3 setlinewidth 10 20 moveto 30 40 lineto (A) << >> qrencode << /ModuleSize 2 >> qrdraw currentpoint 40 eq exch 30 eq and (current point kept) mustbe
+% 0.2 0.4 0.6 setrgbcolor 10 20 moveto (A) << >> qrencode << /Side 58 /Dark [1 0 0 0] /Light null >> qrdraw currentrgbcolor 0.6 eq exch 0.4 eq and exch 0.2 eq and (color kept) mustbe
+% 3 setlinewidth 10 20 moveto (A) << >> qrencode << /ModuleSize 2 /QuietZone 6 >> qrdraw currentlinewidth 3 eq (line width kept) mustbe
+% [0.5 0.5 0.5 0.5] false qr--luma 0.25 sub abs 1e-6 lt (multiplicative CMYK) mustbe
+% [0.5 0.5 0.5 0.5] true qr--luma 0 eq (additive CMYK) mustbe
+% [0.2 0.4 0.6] true qr--luma 0.2 0.299 mul 0.4 0.587 mul add 0.6 0.114 mul add sub abs 1e-6 lt (RGB weights) mustbe
+% 10 20 moveto 30 40 lineto (A) << >> qrencode << /ModuleSize 2 >> qrdraw pathbbox 40 eq exch 30 eq and exch 20 eq and exch 10 eq and (path kept) mustbe
+%%EndSelfTest
+% @kind: Procedure
+% @summary: Draw a qrencode symbol as vector geometry with the lower-left corner of its quiet zone at the current point: a light square (unless /Light is null), then one filled path holding one rectangle per horizontal run of dark modules, with every edge shared exactly by its neighbors, so no hairline gaps appear at any scale. Exactly one of /ModuleSize and /Side is required. The caller's graphics state, path, current point and dictionary stack are unchanged; arguments are checked first, with named errors (qr-quiet-zone-must-be-at-least-4, qr-dark-must-be-darker-than-light, ...).
+% @example: 72 72 moveto (https://github.com/PSCatLabs/pscat) << >> qrencode << /ModuleSize 4 >> qrdraw
+% @param: /ModuleSize [points] Side of one module; the whole drawing is (Size + 2 * QuietZone) * ModuleSize square. Give this or /Side, not both
+% @param: /Side [points] Side of the whole drawing, quiet zone included; the module size is derived from it. Give this or /ModuleSize, not both
+% @param: /QuietZone [count] Light margin in modules on every side, at least 4 as the standard requires (default 4)
+% @param: /Dark [0..1 or array of 0..1] Dark-module color: a gray level, or [gray], [r g b] or [c m y k] (default 0)
+% @param: /Light [0..1 or array of 0..1] Light-module and quiet-zone color, same forms as /Dark and lighter than it; null paints nothing, leaving the surface below to show through (default 1)
+/qrdraw {
+  dup type /dicttype ne { qr-options-must-be-a-dict } if
+  1 index qr--check-symbol pop
+  % symbol opts
+  dup /ModuleSize known 1 index /Side known and {
+    qr-draw-takes-modulesize-or-side-not-both
+  } if
+  dup /ModuleSize known {
+    dup /ModuleSize get
+    dup type dup /integertype ne exch /realtype ne and {
+      qr-module-size-must-be-a-positive-number
+    } if
+    dup 0 le { qr-module-size-must-be-a-positive-number } if
+  } {
+    dup /Side known not { qr-draw-needs-modulesize-or-side } if
+    dup /Side get
+    dup type dup /integertype ne exch /realtype ne and {
+      qr-side-must-be-a-positive-number
+    } if
+    dup 0 le { qr-side-must-be-a-positive-number } if
+  } ifelse
+  % symbol opts length
+  1 index /QuietZone 4 qr--opt
+  dup type /integertype ne { qr-quiet-zone-must-be-an-integer } if
+  dup 4 lt { qr-quiet-zone-must-be-at-least-4 } if
+  % symbol opts length quiet
+  2 index /ModuleSize known not {
+    % A /Side was given: module = side / (Size + 2 * quiet).
+    exch 1 index 2 mul 4 index /Size get add div exch
+  } if
+  exch
+  % symbol opts quiet module
+  2 index /Dark 0 qr--opt qr--color-ok not { qr-dark-must-be-a-color } if
+  qr--color-array
+  3 index /Light 1 qr--opt dup null ne {
+    qr--color-ok not { qr-light-must-be-a-color-or-null } if
+    qr--color-array
+    qr--not-darker { qr-dark-must-be-darker-than-light } if
+  } if
+  % symbol opts quiet module dark light
+  { currentpoint } stopped { qr-draw-needs-a-current-point } if
+  7 -1 roll pop
+  qr--draw
+} bind def
+
+% qr--draw: symbol quiet module dark light x0 y0 -> - (checked arguments).
+% Every corner is origin + k * module for an integer k, computed by one
+% expression, so modules that touch share bit-identical edges, and all dark
+% runs are one path filled once: no seams between neighbors at any scale.
+% @internal
+/qr--draw {
+  gsave newpath
+  16 dict begin
+    /y0 exch def /x0 exch def /light exch def /dark exch def
+    /unit exch def /quiet exch def /sym exch def
+    /n sym /Size get def /rows sym /Modules get cvlit def
+    /far n quiet 2 mul add def
+    % k -> user-space coordinate of edge k.
+    /ex { unit mul x0 add } def
+    /ey { unit mul y0 add } def
+    light null ne {
+      light qr--setcolor
+      0 ex 0 ey moveto far ex 0 ey lineto far ex far ey lineto 0 ex far ey lineto
+      closepath fill
+    } if
+    0 1 n 1 sub { /r exch def
+      /row rows r get cvlit def
+      % Row r (0 at the top) spans edges bot..bot+1, counted from the bottom.
+      /bot quiet n add 1 sub r sub def
+      /yb bot ey def /yt bot 1 add ey def
+      /c 0 def
+      {
+        c n ge { exit } if
+        row c get {
+          /c0 c def
+          { c n ge { exit } if row c get not { exit } if /c c 1 add def } loop
+          /xa c0 quiet add ex def /xb c quiet add ex def
+          xa yb moveto xb yb lineto xb yt lineto xa yt lineto closepath
+        } { /c c 1 add def } ifelse
+      } loop
+    } for
+    dark qr--setcolor fill
+  end
+  grestore
 } bind def

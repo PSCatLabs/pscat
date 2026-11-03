@@ -276,6 +276,23 @@ With the pack installed the real face is used and nothing changes. The Type
 `(lib/fonts/neon.ps) run` (/Neon, /Marquee, /Constellation, /Lapidary,
 /Circuitry, /Stitchwork, /Confetti).
 
+## QR codes (lib/qr.ps)
+
+```postscript
+(lib/qr.ps) run
+72 72 moveto                                  % lower-left of the quiet zone
+(https://github.com/PSCatLabs/pscat) << /Level /M >> qrencode
+<< /ModuleSize 4 >> qrdraw                    % or /Side 57.6 (whole square, pt)
+showpage
+```
+
+`qrencode` returns `<< /Version /Level /Mask /Size /Modules >>`: `/Modules`
+is `Size` rows, top row first, of `Size` booleans (true = dark), quiet zone
+excluded. `qrdraw` options: `/QuietZone` (default and minimum 4), `/Dark`,
+`/Light` (gray, `[r g b]` or `[c m y k]`; `/Light null` paints no
+background). It keeps the caller's graphics state and path. Byte mode only:
+raw bytes, no Unicode/ECI. Full reference: `docs/guides/qr-codes.md`.
+
 ## Capabilities (structured, for agents)
 
 ```sh

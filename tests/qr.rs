@@ -1,5 +1,6 @@
-//! QR data, correction, matrix, mask-selection and decode regression tests. Frozen fixtures come from an independent,
-//! pinned encoder, not a second implementation of our packing algorithm.
+//! QR data, correction, matrix, mask-selection, public-API and export regression tests. Frozen fixtures come from an
+//! independent, pinned encoder, not a second implementation of our packing algorithm; exports are rasterized by
+//! independent renderers (resvg, hayro) and read back by an independent decoder (rqrr).
 
 mod common;
 use common::CommandDeadline as _;
@@ -1662,4 +1663,747 @@ fn rendered_github_symbols_decode_independently_at_every_level() {
         };
         assert_eq!(meta.ecc_level, format_level, "{level}: decoded ECC level");
     }
+}
+
+// ---- Public API: qrencode / qrdraw and their exports (#972) ----
+
+/// PostScript that turns the public symbol `sym` into one 0/1 byte per module,
+/// row-major from the top-left, so tests read `/Modules` exactly as a caller
+/// would, without going through the internal `/Cells`.
+const MODULE_BYTES: &str = "/qs sym /Size get def /qo qs qs mul string def \
+     0 1 qs 1 sub { /qy exch def sym /Modules get qy get \
+       0 1 qs 1 sub { /qx exch def dup qx get { qo qy qs mul qx add 1 put } if } for pop \
+     } for qo";
+
+fn public_modules(it: &mut Interp, encode: &str, label: &str) -> Vec<u8> {
+    it.run_str(&format!("/sym {encode} def {MODULE_BYTES}"))
+        .unwrap_or_else(|e| panic!("{label}: {}", it.error_report(&e)));
+    pop_string(it, label)
+}
+
+#[test]
+fn qrencode_matches_the_reference_symbols_at_every_level() {
+    let data = mask_vectors();
+    let mut it = interpreter();
+    for f in data["github"].as_array().expect("GitHub symbols") {
+        let level = f["level"].as_str().expect("level");
+        let version = f["version"].as_u64().expect("version");
+        let size = version as usize * 4 + 17;
+        let label = format!("github v{version} {level} mask {}: qrencode", f["mask"]);
+        let modules = public_modules(
+            &mut it,
+            &format!("({GITHUB_URL}) << /Level /{level} >> qrencode"),
+            &label,
+        );
+        assert_plane(&modules, f["final"].as_str().expect("final"), size, &label);
+        assert_true(
+            &mut it,
+            &format!(
+                "sym /Version get {version} eq sym /Size get {size} eq and \
+                 sym /Level get /{level} eq and sym /Mask get {} eq and \
+                 sym length 5 eq and",
+                f["mask"]
+            ),
+            &format!("{label}: fields"),
+        );
+    }
+}
+
+#[test]
+fn forced_version_and_mask_follow_the_internal_pipeline() {
+    let mut it = interpreter();
+    for (version, level, mask) in [(1, "L", 3), (5, "M", 6), (7, "Q", 0), (12, "H", 7)] {
+        let label = format!("forced v{version} {level} mask {mask}");
+        let modules = public_modules(
+            &mut it,
+            &format!("(pscat) << /Level /{level} /Version {version} /Mask {mask} >> qrencode"),
+            &label,
+        );
+        let cells = cells_of(
+            &mut it,
+            &format!(
+                "(pscat) {version} {version} /{level} qr--block-spec /DataCodewords get \
+                 qr--byte-data {version} /{level} qr--interleave {version} qr--matrix \
+                 {mask} qr--apply-mask /{level} qr--draw-metadata"
+            ),
+            &label,
+        );
+        assert_eq!(modules, plane(&cells, 0), "{label}: modules");
+        assert_true(
+            &mut it,
+            &format!("sym /Version get {version} eq sym /Mask get {mask} eq and"),
+            &label,
+        );
+    }
+}
+
+#[test]
+fn modules_are_top_row_first_fresh_and_owned_by_the_caller() {
+    let mut it = interpreter();
+    // Orientation: finders at top-left, top-right and bottom-left, none at
+    // bottom-right; separators light; the dark module at column 8, row
+    // Size-8. Then ownership: editing one symbol leaves a second call alone.
+    assert_true(
+        &mut it,
+        "/url (https://github.com/PSCatLabs/pscat) def \
+         /a url << >> qrencode def /b url << >> qrencode def \
+         /m a /Modules get def \
+         m 0 get 0 get m 0 get 28 get and m 28 get 0 get and \
+         m 22 get 22 get and m 22 get 21 get not and m 21 get 22 get not and \
+         m 7 get 0 get not and m 0 get 7 get not and \
+         m 21 get 8 get and \
+         m 0 get 0 false put m 0 get 0 get not and b /Modules get 0 get 0 get and \
+         a /Modules get b /Modules get ne and \
+         a /Modules get 0 get b /Modules get 0 get ne and \
+         url (https://github.com/PSCatLabs/pscat) eq and",
+        "orientation and ownership",
+    );
+    // Executable payloads and names are data, never run.
+    assert_true(
+        &mut it,
+        "(pop) cvx << /Level /M cvx >> qrencode /Version get 1 eq",
+        "executable payload and level",
+    );
+}
+
+/// `src` must raise `name`, with the dictionary stack as it was. Leftover
+/// operands are cleared: rollback after a failure is not promised.
+fn public_guard(it: &mut Interp, src: &str, name: &str) {
+    assert_true(
+        it,
+        &format!(
+            "/qdepth countdictstack def mark {{ {src} }} stopped \
+             $error /command get /{name} eq and countdictstack qdepth eq and \
+             /qok exch def cleartomark qok"
+        ),
+        &format!("{name}: {src}"),
+    );
+}
+
+#[test]
+fn public_guards_name_the_bad_argument_and_open_no_frame() {
+    let mut it = interpreter();
+    for (src, name) in [
+        ("(A) 5 qrencode", "qr-options-must-be-a-dict"),
+        (
+            "(A) << /Level /Z >> qrencode",
+            "qr-level-must-be-L-M-Q-or-H",
+        ),
+        (
+            "(A) << /Version 0 >> qrencode",
+            "qr-version-must-be-in-1-40",
+        ),
+        ("(A) << /Mask -1 >> qrencode", "qr-mask-must-be-in-0-7"),
+        ("5 << >> qrencode", "qr-data-must-be-a-string"),
+        (
+            "2332 string << /Level /M >> qrencode",
+            "qr-data-too-long-for-level",
+        ),
+        (
+            "17 string << /Version 1 /Level /M >> qrencode",
+            "qr-data-too-long-for-version",
+        ),
+        (
+            "0 0 moveto 5 << /ModuleSize 1 >> qrdraw",
+            "qr-symbol-must-be-a-qr-symbol",
+        ),
+        (
+            "0 0 moveto << /Size 21 /Modules [ 21 { [ 20 { true } repeat ] } repeat ] >> \
+             << /ModuleSize 1 >> qrdraw",
+            "qr-symbol-must-be-a-qr-symbol",
+        ),
+        (
+            "0 0 moveto (A) << >> qrencode << /Side -3 >> qrdraw",
+            "qr-side-must-be-a-positive-number",
+        ),
+        (
+            "0 0 moveto (A) << >> qrencode << /ModuleSize 2 /QuietZone 2 >> qrdraw",
+            "qr-quiet-zone-must-be-at-least-4",
+        ),
+        (
+            "0 0 moveto (A) << >> qrencode << /ModuleSize 2 /Dark { 0 } >> qrdraw",
+            "qr-dark-must-be-a-color",
+        ),
+        (
+            "0 0 moveto (A) << >> qrencode << /ModuleSize 2 /Dark [0.9] /Light [0.8] >> qrdraw",
+            "qr-dark-must-be-darker-than-light",
+        ),
+        (
+            "newpath (A) << >> qrencode << /ModuleSize 2 >> qrdraw",
+            "qr-draw-needs-a-current-point",
+        ),
+    ] {
+        public_guard(&mut it, src, name);
+    }
+}
+
+#[test]
+fn qrdraw_keeps_the_callers_graphics_state_path_and_stacks() {
+    let mut it = interpreter();
+    // A real path with segments (not a lone moveto): an unguarded fill in
+    // qrdraw would paint it and consume it.
+    assert_true(
+        &mut it,
+        "/sym (https://github.com/PSCatLabs/pscat) << /Level /Q >> qrencode def \
+         2 3 translate 0.5 0.25 0.125 setrgbcolor 2.5 setlinewidth \
+         10 10 moveto 50 10 lineto 50 30 lineto \
+         matrix currentmatrix /before exch def countdictstack /depth exch def \
+         count /ops exch def \
+         sym << /Side 100 /QuietZone 5 /Dark [0 0 0 1] /Light [0 0.02 0.05 0] >> qrdraw \
+         count ops eq countdictstack depth eq and \
+         currentpoint 30 eq exch 50 eq and and \
+         pathbbox 30 eq exch 50 eq and exch 10 eq and exch 10 eq and and \
+         currentrgbcolor 0.125 eq exch 0.25 eq and exch 0.5 eq and and \
+         currentlinewidth 2.5 eq and \
+         matrix currentmatrix before eq { true } { \
+           true 0 1 5 { dup matrix currentmatrix exch get exch before exch get eq and } for \
+         } ifelse and",
+        "state after qrdraw",
+    );
+}
+
+// --- Exporters: PNG, SVG and PDF rasterized and decoded independently ---
+
+/// One export case. Lengths are in points; `scale` is device pixels per point
+/// for all three exports, so `module * scale` is the module's pixel size.
+struct ExportCase {
+    fixture: &'static str,
+    payload: String,
+    encode: String,
+    module: f64,
+    origin: f64,
+    scale: f32,
+}
+
+/// What qrencode chose, read back so every diagnostic names it.
+struct Chosen {
+    version: usize,
+    level: String,
+    mask: u64,
+    size: usize,
+    modules: Vec<u8>,
+}
+
+impl ExportCase {
+    fn side(&self, size: usize) -> f64 {
+        (size + 8) as f64 * self.module
+    }
+    fn page(&self, size: usize) -> u32 {
+        (self.side(size) + 2.0 * self.origin).ceil() as u32
+    }
+}
+
+fn chosen(case: &ExportCase) -> Chosen {
+    let mut it = interpreter();
+    let modules = public_modules(&mut it, &case.encode, case.fixture);
+    it.run_str("sym /Version get sym /Level get sym /Mask get sym /Size get")
+        .expect("symbol fields");
+    let stack: Vec<String> = it.operand_stack().iter().map(|o| o.repr()).collect();
+    Chosen {
+        version: stack[0].parse().expect("version"),
+        level: stack[1].trim_start_matches('/').to_string(),
+        mask: stack[2].parse().expect("mask"),
+        size: stack[3].parse().expect("size"),
+        modules,
+    }
+}
+
+fn context(case: &ExportCase, c: &Chosen, stage: &str) -> String {
+    format!(
+        "{} v{} {} mask {} ({} pt/module, x{}): {stage}",
+        case.fixture, c.version, c.level, c.mask, case.module, case.scale
+    )
+}
+
+/// Render the case with `pscat` into `flag` (`--png`, `--svg` or `--pdf`) in a
+/// fresh scratch directory, with the standard child deadline.
+fn export(case: &ExportCase, c: &Chosen, flag: &str, ext: &str) -> Vec<u8> {
+    let dir = common::scratch_dir(&format!("qr-export-{}", case.fixture));
+    let ps = dir.join("symbol.ps");
+    let out_path = dir.join(format!("symbol.{ext}"));
+    std::fs::write(
+        &ps,
+        format!(
+            "(lib/qr.ps) run\n/sym {} def\n{} {} moveto sym << /ModuleSize {} >> qrdraw\n",
+            case.encode, case.origin, case.origin, case.module
+        ),
+    )
+    .expect("write program");
+    let page = case.page(c.size);
+    let dpi = format!("{}", 72.0 * case.scale);
+    let mut args = vec!["--page".to_string(), format!("{page}x{page}")];
+    if flag == "--png" {
+        args.extend(["--dpi".to_string(), dpi]);
+    }
+    args.extend([
+        flag.to_string(),
+        out_path.to_str().expect("utf-8").to_string(),
+        ps.to_str().expect("utf-8").to_string(),
+    ]);
+    let out = Command::new(env!("CARGO_BIN_EXE_pscat"))
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .args(&args)
+        .output_deadline()
+        .unwrap_or_else(|e| panic!("{}: {e}", context(case, c, &format!("run pscat {flag}"))));
+    assert!(
+        out.status.success(),
+        "{}: {} {}",
+        context(case, c, &format!("pscat {flag}")),
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    std::fs::read(&out_path).unwrap_or_else(|e| panic!("{}: {e}", context(case, c, "read export")))
+}
+
+/// A greyscale raster composited onto white: transparent reads as light.
+struct Grey {
+    width: usize,
+    height: usize,
+    px: Vec<u8>,
+}
+
+fn grey_of(width: usize, rgba: impl Iterator<Item = [u8; 4]>) -> Grey {
+    let px: Vec<u8> = rgba
+        .map(|[r, g, b, a]| {
+            let a = u32::from(a);
+            let luma = (u32::from(r) * 299 + u32::from(g) * 587 + u32::from(b) * 114) / 1000;
+            ((luma * a + 255 * (255 - a)) / 255) as u8
+        })
+        .collect();
+    Grey {
+        width,
+        height: px.len() / width,
+        px,
+    }
+}
+
+fn grey_tiny(pixmap: &tiny_skia::Pixmap) -> Grey {
+    grey_of(
+        pixmap.width() as usize,
+        pixmap.pixels().iter().map(|p| {
+            let c = p.demultiply();
+            [c.red(), c.green(), c.blue(), c.alpha()]
+        }),
+    )
+}
+
+fn raster_png(bytes: &[u8]) -> Grey {
+    grey_tiny(&tiny_skia::Pixmap::decode_png(bytes).expect("pscat PNG"))
+}
+
+/// resvg, an independent SVG renderer (no code shared with pscat's rasterizer).
+fn raster_svg(bytes: &[u8], scale: f32) -> Grey {
+    let tree =
+        resvg::usvg::Tree::from_data(bytes, &resvg::usvg::Options::default()).expect("parse SVG");
+    let size = tree.size();
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(
+        (size.width() * scale).round() as u32,
+        (size.height() * scale).round() as u32,
+    )
+    .expect("SVG pixmap");
+    resvg::render(
+        &tree,
+        resvg::tiny_skia::Transform::from_scale(scale, scale),
+        &mut pixmap.as_mut(),
+    );
+    grey_tiny(&pixmap)
+}
+
+/// hayro, an independent pure-Rust PDF rasterizer. It paints the page white
+/// first; its pixels are premultiplied, so un-premultiply before compositing.
+fn raster_pdf(bytes: &[u8], scale: f32) -> Grey {
+    let pdf = hayro::Pdf::new(std::sync::Arc::new(bytes.to_vec())).expect("parse PDF");
+    let page = &pdf.pages()[0];
+    let pixmap = hayro::render(
+        page,
+        &hayro::InterpreterSettings::default(),
+        &hayro::RenderSettings {
+            x_scale: scale,
+            y_scale: scale,
+            ..Default::default()
+        },
+    );
+    let width = pixmap.width() as usize;
+    let bytes = pixmap.take_u8();
+    grey_of(
+        width,
+        bytes.as_chunks::<4>().0.iter().map(|p| {
+            let un = |c: u8| match p[3] {
+                0 => 0,
+                a => ((u32::from(c) * 255 + u32::from(a) / 2) / u32::from(a)).min(255) as u8,
+            };
+            [un(p[0]), un(p[1]), un(p[2]), p[3]]
+        }),
+    )
+}
+
+/// Every module centre matches `/Modules` with row 0 at the top of the raster,
+/// the whole quiet zone is light, no dark-dark edge shows a light seam, and
+/// an independent decoder reads back the exact payload, version, mask and
+/// level.
+fn assert_export(case: &ExportCase, c: &Chosen, g: &Grey, export: &str) {
+    let ctx = |stage: &str| context(case, c, &format!("{export}: {stage}"));
+    let page_pt = f64::from(case.page(c.size));
+    let s = f64::from(case.scale);
+    // Writers round or floor a fractional page edge: allow one pixel.
+    let expect = page_pt * s;
+    assert!(
+        g.width == g.height && (g.width as f64 - expect).abs() <= 1.0,
+        "{}",
+        ctx(&format!(
+            "raster {}x{}, expected about {expect}",
+            g.width, g.height
+        ))
+    );
+    let n = c.size as i64;
+    // Device pixel of user point (x, y): y is flipped, PostScript is y-up.
+    let at = |x: f64, y: f64| -> u8 {
+        let px = (x * s).floor() as usize;
+        let py = ((page_pt - y) * s).floor() as usize;
+        g.px[py * g.width + px]
+    };
+    // Module (col, row) in quiet-zone coordinates, row 0 at the top.
+    let centre = |col: i64, row: i64| -> (f64, f64) {
+        (
+            case.origin + (col + 4) as f64 * case.module + case.module / 2.0,
+            case.origin + (n + 3 - row) as f64 * case.module + case.module / 2.0,
+        )
+    };
+    let dark = |col: i64, row: i64| -> bool {
+        (0..n).contains(&col) && (0..n).contains(&row) && c.modules[(row * n + col) as usize] == 1
+    };
+    for row in -4..n + 4 {
+        for col in -4..n + 4 {
+            let (x, y) = centre(col, row);
+            let v = at(x, y);
+            if dark(col, row) {
+                assert!(
+                    v < 60,
+                    "{}",
+                    ctx(&format!("module ({col}, {row}) should be dark, grey {v}"))
+                );
+            } else {
+                let what = if (0..n).contains(&col) && (0..n).contains(&row) {
+                    "module"
+                } else {
+                    "quiet zone"
+                };
+                assert!(
+                    v > 195,
+                    "{}",
+                    ctx(&format!("{what} ({col}, {row}) should be light, grey {v}"))
+                );
+            }
+        }
+    }
+    // Seams: the pixel straddling each edge between two dark modules must be
+    // as dark as the modules. One path filled once reads 0 in all three
+    // rasterizers; filling each run on its own leaves grey ~60 seams at the
+    // fractional pitch, which a loose "dark" threshold would miss.
+    for row in 0..n {
+        for col in 0..n {
+            if !dark(col, row) {
+                continue;
+            }
+            let (x, y) = centre(col, row);
+            if dark(col + 1, row) {
+                let v = at(x + case.module / 2.0, y);
+                assert!(
+                    v <= 8,
+                    "{}",
+                    ctx(&format!("seam right of ({col}, {row}), grey {v}"))
+                );
+            }
+            if dark(col, row + 1) {
+                let v = at(x, y - case.module / 2.0);
+                assert!(
+                    v <= 8,
+                    "{}",
+                    ctx(&format!("seam below ({col}, {row}), grey {v}"))
+                );
+            }
+        }
+    }
+    let mut image = rqrr::PreparedImage::prepare_from_greyscale(g.width, g.height, |x, y| {
+        g.px[y * g.width + x]
+    });
+    let grids = image.detect_grids();
+    assert_eq!(grids.len(), 1, "{}", ctx("detect exactly one symbol"));
+    let (meta, content) = grids[0]
+        .decode()
+        .unwrap_or_else(|e| panic!("{}: {e:?}", ctx("decode")));
+    assert_eq!(content, case.payload, "{}", ctx("decoded text"));
+    assert_eq!(meta.version.0, c.version, "{}", ctx("decoded version"));
+    assert_eq!(u64::from(meta.mask), c.mask, "{}", ctx("decoded mask"));
+    let format_level = match c.level.as_str() {
+        "L" => 1,
+        "M" => 0,
+        "Q" => 3,
+        "H" => 2,
+        other => panic!("level {other}"),
+    };
+    assert_eq!(meta.ecc_level, format_level, "{}", ctx("decoded ECC level"));
+}
+
+fn export_cases() -> Vec<ExportCase> {
+    let mut cases: Vec<ExportCase> = ["L", "M", "Q", "H"]
+        .into_iter()
+        .map(|level| ExportCase {
+            fixture: match level {
+                "L" => "github-L",
+                "M" => "github-M",
+                "Q" => "github-Q",
+                _ => "github-H",
+            },
+            payload: GITHUB_URL.to_string(),
+            encode: format!("({GITHUB_URL}) << /Level /{level} >> qrencode"),
+            module: 4.0,
+            origin: 0.0,
+            scale: 1.0,
+        })
+        .collect();
+    // Fractional module pitch and origin in device pixels: seams show here.
+    cases.push(ExportCase {
+        fixture: "github-M-fractional",
+        payload: GITHUB_URL.to_string(),
+        encode: format!("({GITHUB_URL}) << >> qrencode"),
+        module: 2.9,
+        origin: 3.3,
+        scale: 1.3,
+    });
+    // Version 10 (version-information blocks) with a forced mask.
+    let long = format!(
+        "{GITHUB_URL}/blob/main/docs/guides/qr-codes.md?{}",
+        "q".repeat(70)
+    );
+    cases.push(ExportCase {
+        fixture: "long-v10-mask5",
+        encode: format!("({long}) << /Level /Q /Version 10 /Mask 5 >> qrencode"),
+        payload: long,
+        module: 3.0,
+        origin: 1.7,
+        scale: 1.9,
+    });
+    cases
+}
+
+#[test]
+fn png_svg_and_pdf_exports_keep_the_matrix_and_quiet_zone_and_decode() {
+    // resvg, hayro and rqrr are compiled-in dev-dependencies: nothing here
+    // can skip for want of a tool, so a broken export fails the suite.
+    for case in export_cases() {
+        let c = chosen(&case);
+        assert_eq!(c.size, c.version * 4 + 17, "{}", context(&case, &c, "size"));
+        let png = export(&case, &c, "--png", "png");
+        assert_export(&case, &c, &raster_png(&png), "PNG");
+        let svg = export(&case, &c, "--svg", "svg");
+        assert_export(&case, &c, &raster_svg(&svg, case.scale), "SVG via resvg");
+        let pdf = export(&case, &c, "--pdf", "pdf");
+        assert_export(&case, &c, &raster_pdf(&pdf, case.scale), "PDF via hayro");
+    }
+}
+
+/// Number of maximal horizontal runs of dark modules.
+fn dark_runs(modules: &[u8], n: usize) -> usize {
+    (0..n)
+        .map(|row| {
+            (0..n)
+                .filter(|&col| {
+                    modules[row * n + col] == 1 && (col == 0 || modules[row * n + col - 1] == 0)
+                })
+                .count()
+        })
+        .sum()
+}
+
+#[test]
+fn svg_export_is_one_light_square_and_one_path_of_run_rectangles() {
+    let case = &export_cases()[1];
+    let c = chosen(case);
+    let svg = String::from_utf8(export(case, &c, "--svg", "svg")).expect("utf-8 SVG");
+    let dark: Vec<&str> = svg
+        .split("<path ")
+        .skip(1)
+        .filter(|p| p.contains("fill=\"#000000\""))
+        .collect();
+    assert_eq!(dark.len(), 1, "{}", context(case, &c, "one dark fill"));
+    let subpaths = dark[0].matches('M').count();
+    assert_eq!(
+        subpaths,
+        dark_runs(&c.modules, c.size),
+        "{}",
+        context(case, &c, "one rectangle per horizontal run")
+    );
+    let light = svg
+        .split("<path ")
+        .skip(1)
+        .filter(|p| p.contains("fill=\"#ffffff\""))
+        .count();
+    assert_eq!(light, 1, "{}", context(case, &c, "one light square"));
+}
+
+#[test]
+fn light_null_leaves_the_surface_below_unpainted() {
+    let dir = common::scratch_dir("qr-light-null");
+    let ps = dir.join("symbol.ps");
+    let png = dir.join("symbol.png");
+    std::fs::write(
+        &ps,
+        format!(
+            "(lib/qr.ps) run 1 0.9 0.8 setrgbcolor clippath fill\n\
+             0 0 moveto ({GITHUB_URL}) << >> qrencode << /ModuleSize 4 /Light null >> qrdraw\n"
+        ),
+    )
+    .expect("write program");
+    let out = Command::new(env!("CARGO_BIN_EXE_pscat"))
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .args(["--page", "148x148", "--dpi", "72", "--png"])
+        .arg(&png)
+        .arg(&ps)
+        .output_deadline()
+        .expect("run pscat");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let pixmap = tiny_skia::Pixmap::load_png(&png).expect("PNG");
+    let at = |x: u32, y: u32| pixmap.pixel(x, y).expect("pixel").demultiply();
+    // Quiet zone and a light module show the page color; a finder is dark.
+    for (x, y) in [(2, 2), (8, 140), (16 + 4 * 7 + 2, 16 + 2)] {
+        let p = at(x, y);
+        assert_eq!(
+            (p.red(), p.green(), p.blue()),
+            (255, 230, 204),
+            "light at ({x}, {y})"
+        );
+    }
+    let p = at(18, 18);
+    assert_eq!((p.red(), p.green(), p.blue()), (0, 0, 0), "finder");
+}
+
+#[test]
+fn tagged_capabilities_run_from_the_embedded_distribution() {
+    let out = Command::new(env!("CARGO_BIN_EXE_pscat"))
+        .arg("--capabilities")
+        .output_deadline()
+        .expect("pscat --capabilities");
+    assert!(out.status.success());
+    let payload: serde_json::Value = serde_json::from_slice(&out.stdout).expect("JSON");
+    let caps = payload["capabilities"].as_array().expect("capabilities");
+    for (name, params) in [
+        ("qrencode", &["Level", "Version", "Mask"][..]),
+        (
+            "qrdraw",
+            &["ModuleSize", "Side", "QuietZone", "Dark", "Light"][..],
+        ),
+    ] {
+        let cap = caps
+            .iter()
+            .find(|c| c["name"] == name)
+            .unwrap_or_else(|| panic!("{name} is not in --capabilities"));
+        assert_eq!(cap["kind"], "procedure", "{name}");
+        assert_eq!(cap["source"], "lib/qr.ps", "{name}");
+        let load = cap["load"].as_str().expect("load");
+        assert_eq!(load, "(lib/qr.ps) run", "{name}");
+        let got: Vec<&str> = cap["parameters"]
+            .as_array()
+            .expect("parameters")
+            .iter()
+            .map(|p| p["name"].as_str().expect("parameter name"))
+            .collect();
+        assert_eq!(got, params, "{name} parameters");
+        // Run the catalog's own load + example in an empty directory, with the
+        // checkout hidden, so it can only resolve from the embedded copy.
+        let dir = common::scratch_dir(&format!("qr-capability-{name}"));
+        // An empty home too, so no installed user-data lib/ can shadow it.
+        let home = common::scratch_dir(&format!("qr-capability-home-{name}"));
+        let png = dir.join("example.png");
+        let ps = dir.join("example.ps");
+        std::fs::write(
+            &ps,
+            format!("{load}\n{}\n", cap["example"].as_str().expect("example")),
+        )
+        .expect("write example");
+        let run = Command::new(env!("CARGO_BIN_EXE_pscat"))
+            .current_dir(&dir)
+            .env_remove("PSCAT_HOME")
+            .env_remove("PSCAT_ROOT")
+            .env_remove("PSCAT_LIB")
+            .env("PSCAT_NO_CHECKOUT", "1")
+            .env("PSCAT_TRACE_RESOURCES", "1")
+            .env("HOME", &home)
+            .env("XDG_DATA_HOME", &home)
+            .env("APPDATA", &home)
+            .args(["--page", "300x300", "--dpi", "72", "--png"])
+            .arg(&png)
+            .arg(&ps)
+            .output_deadline()
+            .expect("run example");
+        let stderr = String::from_utf8_lossy(&run.stderr);
+        assert!(run.status.success(), "{name} example failed: {stderr}");
+        assert!(
+            stderr.contains("lib/qr.ps <- embedded"),
+            "{name}: lib/qr.ps did not resolve from the embedded copy: {stderr}"
+        );
+        if name == "qrdraw" {
+            let g = raster_png(&std::fs::read(&png).expect("example PNG"));
+            let mut image =
+                rqrr::PreparedImage::prepare_from_greyscale(g.width, g.height, |x, y| {
+                    g.px[y * g.width + x]
+                });
+            let grids = image.detect_grids();
+            assert_eq!(grids.len(), 1, "qrdraw example: one symbol");
+            let (_, content) = grids[0].decode().expect("decode qrdraw example");
+            assert_eq!(content, GITHUB_URL, "qrdraw example text");
+        }
+    }
+}
+
+#[test]
+fn ghostscript_encodes_and_draws_the_same_symbol() {
+    // Optional portability check, like the other gs tests: the required
+    // decode checks above do not depend on Ghostscript.
+    if Command::new("gs")
+        .arg("--version")
+        .output_deadline()
+        .is_err()
+    {
+        eprintln!("gs unavailable; QR public-API portability check not run");
+        return;
+    }
+    let mut it = interpreter();
+    let expected = public_modules(
+        &mut it,
+        &format!("({GITHUB_URL}) << /Level /Q >> qrencode"),
+        "pscat",
+    );
+    let src = format!(
+        "{LIB}\n/sym ({GITHUB_URL}) << /Level /Q >> qrencode def {MODULE_BYTES} \
+         (MODULES:) print dup {{ 48 add (_) dup 0 4 -1 roll put print }} forall () = pop \
+         /qdepth countdictstack def mark {{ (A) << /Level /Z >> qrencode }} stopped \
+         $error /command get /qr-level-must-be-L-M-Q-or-H eq and countdictstack qdepth eq and \
+         /qok exch def cleartomark qok not {{ (FAIL guard) = 1 .quit }} if \
+         0.5 setgray 10 10 moveto 20 20 lineto \
+         sym << /ModuleSize 3 >> qrdraw \
+         currentgray 0.5 eq currentpoint 20 eq exch 20 eq and and count 1 eq and \
+         not {{ (FAIL state) = 1 .quit }} if (QR-GS-PASS) =\n"
+    );
+    let out = Command::new("gs")
+        .args(["-q", "-dNODISPLAY", "-dBATCH", "-dNOPAUSE", "-"])
+        .output_with_input(src.as_bytes())
+        .expect("run Ghostscript");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "Ghostscript: {stdout} {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let line = stdout
+        .lines()
+        .find_map(|l| l.strip_prefix("MODULES:"))
+        .expect("module line");
+    let got: Vec<u8> = line.bytes().map(|b| b - b'0').collect();
+    assert_eq!(got, expected, "Ghostscript modules differ");
+    assert!(stdout.contains("QR-GS-PASS"), "{stdout}");
 }
