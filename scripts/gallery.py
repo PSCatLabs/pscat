@@ -35,7 +35,7 @@ scripts/site_pages.py (the last step of build_site.sh) gives them the shared she
 """
 import html
 import json
-import os
+import posixpath
 import re
 import shutil
 import struct
@@ -318,7 +318,7 @@ def table_md(m):
         for p in ps:
             f = Path(p["source"]).name
             # the table lives in gallery/, so a source elsewhere (examples/) links up and over
-            link = os.path.relpath(p["source"], "gallery")
+            link = posixpath.relpath(p["source"], "gallery")  # posix: the same table on Windows
             out.append("| [%s](%s/%s) | [`%s`](%s) | %s |" % (
                 p["title"], SITE_URL, piece_page(p["id"]), f, link, p["technique"].replace("|", "\\|")))
         out.append("")
