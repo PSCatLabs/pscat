@@ -1,5 +1,10 @@
 # Independent Claude Opus review handoff
 
+> **Historical.** This is the brief Codex wrote for the review. The review
+> was done and the libraries merged in PR #923 for 0.7.0; see
+> `notes/923-functional-postscript.md` for what changed in review. The
+> user-facing guide is [docs/guides/functional.md](../guides/functional.md).
+
 Review `feature/functional-postscript` against its base `ee27313` in this
 checkout. Do not merge. Codex implemented the feature; this handoff does not
 substitute for your independent correctness and perceptual review.

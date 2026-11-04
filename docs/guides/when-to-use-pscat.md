@@ -225,7 +225,9 @@ one short file can do.
   in another language.
 - **Libraries are procedures.** artkit, the paint and dry media, `dataviz`
   and `graph`, the page templates, the QR encoder and the chalk math are
-  PostScript procedures your program calls, not files you copy from.
+  PostScript procedures your program calls, not files you copy from. Even
+  higher-order code works: [Functional PostScript](functional.md) maps,
+  filters and folds lists of records into marks.
 - **One program, three outputs.** The same program renders to PNG, vector PDF
   and SVG (`--png`, `--pdf`, `--svg`). pscat writes SVG, so picking it does
   not rule SVG out: it is another route to SVG, not a rival. (A dense

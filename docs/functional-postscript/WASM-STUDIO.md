@@ -176,16 +176,25 @@ PostScript clocks in WASM still read zero.
 python3 scripts/build_functional_studio.py
 # Or reuse a just-built module:
 python3 scripts/build_functional_studio.py --skip-wasm-build
-node scripts/check_functional_studio.mjs
-python3 scripts/check_functional_docs.py --pscat target/ci/pscat
+python3 scripts/check_functional_docs.py --pscat target/ci/pscat --provenance
+cargo test --profile ci --test functional -- --ignored
 ```
+
+**The committed payload and PNGs are a frozen snapshot.** They were built at
+the commit that made them and are not rebuilt when the engine changes, so
+the staleness checks above (`--provenance`, which hashes engine, library and
+example sources, and the two `#[ignore]`d tests, which compare saved PNGs and
+the WASM bundle with today's native renders) run by hand when the studio is
+rebuilt, never in CI. An unrelated engine change must not turn `main` red.
+The default `cargo test` still checks that the payload matches its own
+manifest, that every HTML target and image exists, and that every example runs.
 
 The builder reuses `scripts/build_wasm.sh`; it does not change the WASM API.
 The generated payload is committed for immediate offline use. Do not edit it
 by hand. [studio-manifest.json](assets/studio-manifest.json) records raw/gzip
 module hashes, sizes, original API and example/library source hashes. The docs
 checker verifies decompression, the WASM header, source/API identity, and exact
-inlining. Rebuild whenever its relevant source changes. A Rust integration test
+inlining. The ignored Rust test `committed_live_wasm_payload_matches_the_native_studies`
 executes the exact payload under Node and compares full output pixels against
 the native programs; no WASM compiler is needed merely to run that test.
 

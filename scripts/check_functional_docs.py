@@ -47,7 +47,8 @@ def png_size(path):
 
 
 def examples(pscat):
-    files = sorted(DOCS.glob("*.md")) + [ROOT / "plugin/skills/functional-postscript/SKILL.md"]
+    files = sorted(DOCS.glob("*.md")) + [ROOT / "docs/guides/functional.md",
+                                         ROOT / "plugin/skills/functional-postscript/SKILL.md"]
     count = 0
     for path in files:
         text = path.read_text()
@@ -89,8 +90,6 @@ def check():
         assert hashlib.sha256(path.read_bytes()).hexdigest() == record["sha256"], f"stale hash: {path}"
         assert png_size(path) == tuple(map(int, record["page"].split("x")))
     report = json.loads((DOCS / "MEASUREMENTS.json").read_text())
-    for path, expected in report["input_sha256"].items():
-        assert hashlib.sha256((ROOT / path).read_bytes()).hexdigest() == expected, f"stale measured source: {path}"
     for case, values in report["results"].items():
         for kind, metrics in values.items():
             expected = f"{metrics['median'] * 1000:.0f} ms"
@@ -107,22 +106,36 @@ def check():
     raw = gzip.decompress(packed)
     assert hashlib.sha256(raw).hexdigest() == metadata["wasm_sha256"]
     assert raw[:8] == b"\x00asm\x01\x00\x00\x00", "invalid WASM header"
+    assert hashlib.sha256(bundle["apiSource"].encode()).hexdigest() == metadata["api_sha256"]
+    print(f"HTML: {total_targets} local targets, {total_images} images; {len(manifest)} asset hashes and 4 metrics pass")
+    print("Studio: WASM payload matches its own manifest")
+    return bundle, metadata, report
+
+
+def provenance(bundle, metadata, report):
+    """Rebuild-time staleness checks: the frozen evidence against today's sources.
+
+    These hash engine, library and example files that unrelated PRs change, so
+    they run only with --provenance (WASM-STUDIO.md), never from cargo test.
+    """
+    for path, expected in report["input_sha256"].items():
+        assert hashlib.sha256((ROOT / path).read_bytes()).hexdigest() == expected, f"stale measured source: {path}"
     api = (ROOT / "web/pscat.js").read_text()
     assert bundle["apiSource"] == api, "studio API is stale"
-    assert hashlib.sha256(api.encode()).hexdigest() == metadata["api_sha256"]
     for path, expected in {**metadata["source_sha256"], **metadata["embedded_library_sha256"], **metadata["engine_source_sha256"]}.items():
         assert hashlib.sha256((ROOT / path).read_bytes()).hexdigest() == expected, f"stale studio input: {path}"
     common = (ROOT / "examples/functional/type-common.ps").read_text()
     for key, name in (("terrain", "type-terrain.ps"), ("press", "observable-press.ps")):
         source = (ROOT / "examples/functional" / name).read_text()
         assert bundle["programs"][key] == source.replace("(examples/functional/type-common.ps) run", common)
-    print(f"HTML: {total_targets} local targets, {total_images} images; {len(manifest)} asset hashes and 4 metrics pass")
-    print("Studio: actual WASM payload, unchanged JS API and both PostScript sources pass")
+    print("Provenance: measured sources, JS API, engine sources and both PostScript programs are current")
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pscat", required=True, type=Path)
+    parser.add_argument("--provenance", action="store_true",
+                        help="also check the frozen evidence against today's engine, library and example sources")
     args = parser.parse_args()
     skill = (ROOT / "plugin/skills/functional-postscript/SKILL.md").read_text()
     front = skill.split("---", 2)
@@ -130,7 +143,9 @@ def main():
     fields = dict(line.split(":", 1) for line in front[1].strip().splitlines())
     assert fields["name"].strip() == "functional-postscript"
     assert fields["description"].strip() and not any(x in skill for x in ("TODO", "[insert", "[TODO"))
-    check()
+    frozen = check()
+    if args.provenance:
+        provenance(*frozen)
     count = examples(args.pscat.resolve())
     print(f"PostScript: {count} complete Markdown/skill examples pass")
 

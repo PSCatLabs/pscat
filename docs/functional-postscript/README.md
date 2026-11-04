@@ -1,15 +1,22 @@
-# Functional PostScript
+# Functional PostScript: design notes
 
-An experimental, dependency-free pair of PostScript libraries for PSCat:
-seven functional combinators and five explicit procedure decorators. No core
-interpreter changes. Intended for reusable, deterministic ArtColony artwork.
-The work is on `feature/functional-postscript`, pending independent Opus review.
+**To use the library, read the guide: [Functional PostScript](../guides/functional.md).**
+This folder is the design record behind it, for people and agents who want to
+dig: how `lib/functional.ps` and `lib/aspect.ps` were built, the contracts in
+full, the test evidence and the engine friction found along the way.
 
-Start with the [illustrated introduction](index.html) or the
-[live offline WASM studio](live-studio.html): edit typography and inspect an AOP
-proof using the actual interpreter in your browser. Or give an agent
-the [concise skill](../../plugin/skills/functional-postscript/SKILL.md) and
-[agent guide](AGENT-GUIDE.md). All commands below run from the repository root.
+The libraries began as an experiment (Codex-built, 2026-10-27/28) in writing
+seven functional combinators and five explicit procedure decorators in plain
+PostScript, with no interpreter changes, for reusable, deterministic
+agent-made art. An independent review merged them in PR #923 for 0.7.0
+(`notes/923-functional-postscript.md`). Pages below that describe a review
+still to come, or a branch not yet merged, are the record of that time.
+
+The [illustrated introduction](index.html) and the
+[live offline WASM studio](live-studio.html) open straight from a checkout.
+The studio runs a WASM build of pscat frozen at the commit that made it
+([WASM-STUDIO.md](WASM-STUDIO.md) says how to rebuild it). All commands below
+run from the repository root.
 
 ```sh
 cargo build --profile ci --locked
@@ -39,7 +46,7 @@ calls /Calls get == % 1
 | [Agent guide](AGENT-GUIDE.md) | Effective patterns, debugging and common mistakes. |
 | [Decisions](DESIGN-DECISIONS.md) | Tradeoffs, rejected alternatives and future work. |
 | [Engine friction](ENGINE-FRICTION.md) | Prioritized bugs, limits, usability findings and enhancements. |
-| [Review handoff](REVIEW-HANDOFF.md) | Independent Claude Opus review entry point. |
+| [Review handoff](REVIEW-HANDOFF.md) | The brief for the independent review (historical). |
 | [Progress](PROGRESS.md) | Session checkpoints, commands and validation status. |
 | [Initial design](DESIGN.md) | Phase A scope and primary research references. |
 

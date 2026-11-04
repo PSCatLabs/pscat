@@ -1,6 +1,7 @@
-# Guide for ArtColony and coding agents
+# Patterns for coding agents
 
-Start with the [skill](../../plugin/skills/functional-postscript/SKILL.md), then
+Start with the [guide](../guides/functional.md) or the
+[skill](../../plugin/skills/functional-postscript/SKILL.md), then
 read [API](API.md) when a contract matters. This is normal PostScript with a
 small higher-order library. Do not invent lexical scope or port another
 language's syntax.

@@ -46,8 +46,11 @@ checkpoint hashes are recorded in [PROGRESS](PROGRESS.md) and the
   complete Markdown/skill PostScript examples. The Rust integration test runs
   this checker with its own PSCat binary. Browser layout/interactivity are
   separately checked in headless Chrome; no browser dependency is added to CI.
-  The checker also verifies all fifteen image hashes and decompressed WASM/API,
-  example and engine-source provenance. `scripts/check_functional_studio.mjs`
+  The checker also verifies all fifteen image hashes and the decompressed WASM
+  against its manifest. With `--provenance` it also checks the frozen evidence
+  against today's API, example and engine sources; that mode, and the two
+  `#[ignore]`d saved-PNG and WASM-parity tests, are rebuild-time checks only
+  ([WASM-STUDIO.md](WASM-STUDIO.md)). `scripts/check_functional_studio.mjs`
   executes the exact bundle under Node without fetching or compiling WASM.
 
 ## Commands

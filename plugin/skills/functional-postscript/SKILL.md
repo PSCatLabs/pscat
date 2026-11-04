@@ -1,76 +1,66 @@
 ---
 name: functional-postscript
-description: Compose reusable PSCat graphics with array combinators, explicit value capture, and procedure advice. Use when authoring or maintaining Functional PostScript artwork or instrumentation; ordinary rendering alone uses the pscat skill.
+description: Write pscat PostScript in a data-in, marks-out style with lib/functional.ps (fp-map, fp-filter, fp-fold, fp-each, fp-compose, fp-curry, fp-dip) and wrap procedures with lib/aspect.ps (aop-before, aop-after, aop-around, aop-count, aop-trace). Use when a piece is built from a list of records, or when you want to count or trace calls to a drawing procedure. Plain rendering uses the pscat skill; art libraries use psart.
 ---
+<!-- Contributors: tests/skill_blocks.rs runs every postscript code fence under plugin/skills on a bare install and fails on any error. A fragment that cannot run alone is fenced as "postscript partial". -->
 
 # Functional PostScript
 
-For agent-authored artwork, separate record data, transforms and drawing marks.
-Load `(lib/functional.ps) run`, then `(lib/aspect.ps) run` for instrumentation.
-These libraries ship with this feature's PSCat build; released binaries from
-before this feature do not include them. No engine extension is needed.
+Both libraries are compiled into `pscat` 0.7.0 and later; load them with
+`(lib/functional.ps) run` and then, if you need wrappers,
+`(lib/aspect.ps) run`. The guide is `docs/guides/functional.md`.
 
-Stack top is on the right; `...` is an untouched prefix. Quotations are `{...}`,
-collections are literal arrays `[...]`. Use `/draw load` to pass a named
-procedure; `draw` calls it. Call returned quotations with `exec`.
+## The calls
 
-| Call | Effect / callback |
-|---|---|
-| `array q fp-map` | fresh array; q `( x -- y )` |
-| `array q fp-filter` | selected original values; q `( x -- bool )` |
-| `array initial q fp-fold` | left fold; q `( acc x -- acc )` |
-| `array q fp-each` | ordered effects; q `( x -- )` |
-| `p q fp-compose` | quotation executing p then q |
-| `value q fp-curry` | quotation pushing captured value then calling q |
-| `value q fp-dip` | execute q below value, then restore value |
+Collections are literal arrays `[...]`; callbacks are procedures `{...}`.
 
-Capture config/palettes as data; this is not lexical scope. Names inside user
-quotations remain dynamic. Array traversals snapshot slots; nested composites
-and captured objects still alias. Callbacks run in your current dictionary
-without hidden stack operands. They must preserve the prefix and balance their
-own dictionary/graphics state. Net operand depth is checked, not value identity.
-Use native loops for tiny fixed patterns and hot inner loops.
+| Call | Gives | Callback |
+|---|---|---|
+| `array q fp-map` | new array | `( x -- y )` |
+| `array q fp-filter` | new array of accepted elements | `( x -- bool )` |
+| `array init q fp-fold` | left fold | `( acc x -- acc )` |
+| `array q fp-each` | nothing; for drawing | `( x -- )` |
+| `p q fp-compose` | procedure: p then q | |
+| `value q fp-curry` | procedure: push value, run q | |
+| `value q fp-dip` | runs q under value, restores value | |
+| `target advice aop-before` / `aop-after` | procedure with advice before / after | |
+| `target advice aop-around` | advice gets target as data, `exec` runs it | |
+| `target counter aop-count` | bumps `counter /Calls`, runs target | |
+| `target (label) aop-trace` | prints `enter label` / `leave label` | |
+
+## The pattern
+
+Make records, select, then draw each with a curried mark. Count the marks to
+check the piece drew what you meant.
 
 ```postscript
 (lib/functional.ps) run
 (lib/aspect.ps) run
-/dot { % x rgb --
-  gsave aload pop setrgbcolor 50 translate
-  newpath 0 0 8 0 360 arc fill grestore
+/dot {                                % [x y r] rgb --
+  gsave aload pop setrgbcolor aload pop newpath 0 360 arc fill grestore
 } def
-/calls << /Calls 0 >> def
-/mark [0.7 0.2 0.5] /dot load fp-curry calls aop-count def
-[20 45 70] /mark load fp-each
-calls /Calls get == % 3
+/recs [0 1 5 {} for] {dup 15 mul 12 add exch 3 mod 2 mul 4 add 50 exch 3 array astore} fp-map def
+/n << /Calls 0 >> def
+/mark [0.8 0.3 0.2] /dot load fp-curry n aop-count def
+recs {2 get 5 gt} fp-filter /mark load fp-each
+n /Calls get ==                       % 4
 showpage
 ```
 
-AOP constructors return quotations: `target advice aop-before` runs advice then
-target; `aop-after` runs advice after **normal return only**; `aop-around` gives
-advice a target quotation as an extra input (`exec` is proceed).
-`target counter aop-count` increments a writable dictionary's nonnegative integer
-`/Calls` before entry. `target (label) aop-trace` prints enter/normal-return leave.
-Observation advice must preserve actual stack values and graphics state.
-No finally, automatic weaving, global operator replacement or rollback.
-Bound operators and previously captured targets bypass later name redefinitions.
-Use `--profile` for native timing; library advice supplies hooks, not a new clock.
+## Mistakes to avoid
 
-For a mark consuming a record, compose `{dup}` with a configured consuming stem
-and then a configured blossom. This makes `(record -- record)` then `(record -- )`.
-Keep `gsave newpath ... grestore` inside marks that should isolate graphics.
+- Pass a named procedure as `/name load`; a bare `name` runs it.
+- `{1 2 3}` is not a collection (`fp-literal-array-required`); `[add]` is
+  not a callback (`fp-quotation-required`), write `{add}`.
+- The callback must leave exactly its result: `fp-callback-stack-effect`
+  means one too many or too few. Filters must return a boolean (`0 gt`, not
+  a number).
+- Do not `exit` out of `fp-each`; filter first. `stop` passes through.
+- Curry captures a value, not a scope; names still resolve when run.
+- Drawing callbacks own their `gsave` ... `grestore`.
+- `aop-after` runs only on normal return; there is no finally.
+- For a few fixed petals or a hot inner loop, a plain `for` is clearer and
+  faster.
 
-On errors, inspect `--pstack-on-error` and `$error /command`; validation guards
-are descriptive `/undefined` names. Test callbacks alone with a sentinel.
-Do not use `exit` to escape a traversal; filter records instead. `stop` propagates.
-Run `--lint-strict` on complete art and exact guard self-tests on libraries.
-
-Read [API](../../../docs/functional-postscript/API.md) for edge cases,
-[agent guide](../../../docs/functional-postscript/AGENT-GUIDE.md) for patterns,
-[AOP](../../../docs/functional-postscript/AOP.md) for interception limits, and
-[implementation](../../../docs/functional-postscript/IMPLEMENTATION.md) before
-extending. The executable poster/control are in
-[demo](../../../docs/functional-postscript/DEMO.md); the full technical index is
-[here](../../../docs/functional-postscript/README.md).
-
-For measured glyph layout, contoured text and a real contract-failure proof, see
-[live typography and AOP](../../../docs/functional-postscript/WASM-STUDIO.md).
+Errors are `undefined` with the guard name; `--pstack-on-error` shows the
+stack.

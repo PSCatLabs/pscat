@@ -31,9 +31,6 @@ skimmed [artkit](artkit.md) (it is the base most of them load).
 
 ## Making art
 
-- [Functional PostScript](../functional-postscript/README.md): experimental
-  array combinators, explicit capture and procedure instrumentation, with a
-  three-colourway concert poster and offline illustrated introduction.
 - [artkit](artkit.md): the generative-art toolkit (randomness, palettes,
   turtle graphics, L-systems, path brushes, tilings, fractals, flow fields,
   scatter).
@@ -46,6 +43,8 @@ skimmed [artkit](artkit.md) (it is the base most of them load).
   halftone, woodcut and linocut.
 - [Dry media](dry-media.md): chalk, crayon, charcoal, single-stroke glyphs and
   TeX math as chalk.
+- [Functional PostScript](functional.md): map, filter and fold over lists of
+  records, composed procedures, and wrappers that count or trace calls.
 
 ## Charts
 
