@@ -31,7 +31,26 @@
 //! - `ps_warnings_ptr`/`ps_warnings_len` — the one-line notes `findfont`
 //!   raised since `ps_begin` for pack faces it replaced with a built-in
 //!   one (what the native binary prints on stderr), UTF-8, newline-
-//!   joined, once per name (#750).
+//!   joined, once per name (#750);
+//! - `ps_begin_vector(src, len, w, h, scale, flags)` — `ps_begin_scaled`
+//!   that also records the page(s) as SVG (`flags` bit 0) and/or PDF
+//!   (bit 1), with the same recorders as `pscat --svg`/`--pdf`, so the
+//!   bytes equal the CLI's for the same program, page and dpi (#1003).
+//!   With PDF on, the source's `%%Title:`/`%%For:` become the PDF's
+//!   `/Info`, as the CLI does for a file. -1 also for an unknown flag bit;
+//! - `ps_svg_count()` — SVG pages so far (0 when not recording);
+//! - `ps_svg(page)` / `ps_pdf()` — finish SVG page `page` (from 0) / the
+//!   PDF document into the vector buffer: 0 = ok, -1 = not recorded (or
+//!   page out of range), -2 = no program begun. Callable mid-run: the
+//!   document so far, like `ps_pixels`;
+//! - `ps_vector_ptr`/`ps_vector_len` — that buffer; valid until the next
+//!   `ps_svg`, `ps_pdf` or begin, so copy it out first.
+//!
+//! The vector exports started as PSCatLabs/print-shop's adapter patch
+//! (`patches/pscat-vector-wasm.patch` there), which recorded both formats
+//! on every run and returned the SVG pages as JSON; here recording is
+//! opt-in, so a pixels-only page pays nothing, and pages come back one at
+//! a time as raw bytes.
 
 use std::cell::RefCell;
 
@@ -40,7 +59,17 @@ use crate::Interp;
 thread_local! {
     static INTERP: RefCell<Option<Interp>> = const { RefCell::new(None) };
     static ERROR: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
+    /// The last `ps_svg`/`ps_pdf` result.
+    static VECTOR: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
+    /// The finished SVG pages, kept between `ps_svg` calls: finishing is
+    /// per document, so reading N pages one by one would otherwise finish
+    /// all of them N times. Cleared whenever the program can draw again.
+    static SVG_PAGES: RefCell<Option<Vec<String>>> = const { RefCell::new(None) };
 }
+
+/// `ps_begin_vector` flag bits.
+const RECORD_SVG: u32 = 1;
+const RECORD_PDF: u32 = 2;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn ps_alloc(len: usize) -> *mut u8 {
@@ -93,11 +122,45 @@ pub unsafe extern "C" fn ps_begin_scaled(
     0
 }
 
+/// # Safety
+/// Same contract as [`ps_begin`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn ps_begin_vector(
+    src: *const u8,
+    len: usize,
+    w: u32,
+    h: u32,
+    scale: f32,
+    flags: u32,
+) -> i32 {
+    if flags & !(RECORD_SVG | RECORD_PDF) != 0 || !(scale.is_finite() && scale > 0.0) {
+        return -1;
+    }
+    let source = unsafe { std::slice::from_raw_parts(src, len) }.to_vec();
+    let Some(mut it) = Interp::with_page_scaled(w, h, scale) else {
+        return -1;
+    };
+    // The CLI's order (src/main.rs): recorders on before the program runs,
+    // then the DSC title/author for the PDF's /Info.
+    if flags & RECORD_SVG != 0 {
+        it.enable_svg();
+    }
+    if flags & RECORD_PDF != 0 {
+        it.enable_pdf();
+        let (title, author) = crate::pdf::scan_document_info(&source);
+        it.gfx_mut().set_pdf_info(title, author);
+    }
+    install(it, &source);
+    0
+}
+
 fn install(mut it: Interp, source: &[u8]) {
     it.capture_stdout();
     it.begin_source(source);
     INTERP.with(|s| *s.borrow_mut() = Some(it));
     ERROR.with(|e| e.borrow_mut().clear());
+    VECTOR.with(|v| *v.borrow_mut() = Vec::new());
+    SVG_PAGES.with(|p| *p.borrow_mut() = None);
 }
 
 /// # Safety
@@ -131,6 +194,7 @@ pub extern "C" fn ps_step(budget: i32) -> i32 {
         let Some(it) = slot.as_mut() else {
             return -2;
         };
+        SVG_PAGES.with(|p| *p.borrow_mut() = None);
         match it.step_n(budget.max(0) as usize) {
             Ok(true) => 1,
             Ok(false) => 0,
@@ -227,4 +291,65 @@ pub extern "C" fn ps_output_len() -> usize {
             .as_ref()
             .map_or(0, |it| it.captured_stdout().len())
     })
+}
+
+/// Run `f` on the finished SVG pages (finishing them once per change);
+/// `None` when no program has begun, `Some(None)` when SVG is not recorded.
+fn with_svg_pages<R>(f: impl FnOnce(Option<&[String]>) -> R) -> Option<R> {
+    INTERP.with(|s| {
+        let slot = s.borrow();
+        let it = slot.as_ref()?;
+        Some(SVG_PAGES.with(|p| {
+            let mut cache = p.borrow_mut();
+            if cache.is_none() {
+                *cache = it.svg_pages();
+            }
+            f(cache.as_deref())
+        }))
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ps_svg_count() -> u32 {
+    with_svg_pages(|pages| pages.map_or(0, |p| p.len() as u32)).unwrap_or(0)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ps_svg(page: u32) -> i32 {
+    let found = with_svg_pages(|pages| {
+        pages
+            .and_then(|p| p.get(page as usize))
+            .map(|svg| svg.as_bytes().to_vec())
+    });
+    match found {
+        None => -2,
+        Some(None) => -1,
+        Some(Some(bytes)) => {
+            VECTOR.with(|v| *v.borrow_mut() = bytes);
+            0
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ps_pdf() -> i32 {
+    let doc = INTERP.with(|s| s.borrow().as_ref().map(Interp::pdf_document));
+    match doc {
+        None => -2,
+        Some(None) => -1,
+        Some(Some(bytes)) => {
+            VECTOR.with(|v| *v.borrow_mut() = bytes);
+            0
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ps_vector_ptr() -> *const u8 {
+    VECTOR.with(|v| v.borrow().as_ptr())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn ps_vector_len() -> usize {
+    VECTOR.with(|v| v.borrow().len())
 }

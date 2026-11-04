@@ -1,8 +1,8 @@
 # pscat
 
 A PostScript interpreter compiled to WebAssembly. Render PostScript to
-pixels in a browser or in Node, all at once or step by step so you can
-watch the program draw. It is the engine behind the
+pixels, SVG or PDF in a browser or in Node, all at once or step by step so
+you can watch the program draw. It is the engine behind the
 [pscat playground](https://pscatlabs.github.io/pscat/playground.html), and
 the same interpreter as the [`pscat` crate and command-line tool](https://github.com/PSCatLabs/pscat).
 
@@ -45,6 +45,21 @@ for (const _ of r.frames(source, { width: 612, height: 792, budget: 300 })) {
 `frames()` runs `budget` PostScript objects per iteration. To drive it
 yourself, call `r.begin(source, options)` and then `r.step(budget)` until
 it returns `false`.
+
+## SVG and PDF
+
+```js
+r.render(source, { width: 612, height: 792, svg: true, pdf: true });
+const pages = r.svgPages();   // ['<svg ...', ...], one per page
+const doc = r.pdf();          // Uint8Array: the whole document
+```
+
+Recording is off unless you ask for it. The bytes are the ones the
+`pscat` command-line tool writes with `--svg` and `--pdf` for the same
+program, page size and dpi, and the same program gives the same bytes
+every time. Like the command line, SVG and PDF are sized in device pixels,
+so keep the default 72 dpi for a print-size page. A `%%Title:` or `%%For:`
+comment becomes the PDF's title or author.
 
 ## Errors
 
@@ -116,7 +131,7 @@ as Ghostscript does.
 | | |
 |---|---|
 | `createRenderer({ wasm }?)` | Load the interpreter and return a `Renderer`. Each one is a separate interpreter. `wasm` overrides where the module comes from: a URL, a `Response`, bytes or a `WebAssembly.Module` (in Node, also a file path). By default it is the package's `pscat.wasm`, found through `new URL('./pscat.wasm', import.meta.url)`. Bundlers that rewrite that pattern handle it; if yours does not (Vite's dependency pre-bundling, for one: add `pscat` to `optimizeDeps.exclude`), pass `wasm` the module's URL. |
-| `render(source, { width, height, dpi }?)` | Run a program to completion on a fresh page and return `{ width, height, data, output, warnings }`. `source` is a string or a `Uint8Array`. The page is in points (default 612x792, US Letter) at `dpi` (default 72, one pixel per point). |
+| `render(source, { width, height, dpi, svg, pdf }?)` | Run a program to completion on a fresh page and return `{ width, height, data, output, warnings }`. `source` is a string or a `Uint8Array`. The page is in points (default 612x792, US Letter) at `dpi` (default 72, one pixel per point). `svg: true` / `pdf: true` also record it as SVG / PDF. |
 | `begin(source, options?)` | Queue a program on a fresh page. |
 | `step(budget = 5000)` | Run up to `budget` objects. Returns `true` while there is more to do. |
 | `frames(source, { budget, ...page }?)` | A generator of `begin` plus one `step` per iteration. |
@@ -125,6 +140,8 @@ as Ghostscript does.
 | `pixels()` | A copy of the page as RGBA bytes. |
 | `warnings` | Notes about pack faces that were replaced since `begin` (an array of strings, empty when none). |
 | `image()` | `{ width, height, data, output, warnings }` for the page as it is now. |
+| `svg(page = 0)`, `svgPages()` | SVG page `page` (from 0) as a string, or every page in order. Needs `svg: true`. |
+| `pdf()` | The whole document as PDF bytes (`Uint8Array`). Needs `pdf: true`. |
 | `imageData()` | The page as an `ImageData` (browsers and workers). |
 | `paintTo(canvas)` | Draw the page into a canvas or `OffscreenCanvas`. |
 | `addFont(name, bytes)` | Make a TrueType or OpenType font available to `findfont`. |

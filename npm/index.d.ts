@@ -25,8 +25,16 @@ export interface PageOptions {
   width?: number;
   /** Page height in points. Default 792 (US Letter). */
   height?: number;
-  /** Device resolution. Default 72, one pixel per point. */
+  /**
+   * Device resolution. Default 72, one pixel per point. SVG and PDF are
+   * sized in device pixels as on the command line, so keep 72 for a
+   * print-size vector page.
+   */
   dpi?: number;
+  /** Also record the run as SVG, read with svg() / svgPages(). Default false. */
+  svg?: boolean;
+  /** Also record the run as PDF, read with pdf(). Default false. */
+  pdf?: boolean;
 }
 
 export interface FrameOptions extends PageOptions {
@@ -101,6 +109,19 @@ export class Renderer {
   pixels(): Uint8ClampedArray;
   /** The page as width, height, RGBA data, output and warnings. */
   image(): RenderResult;
+  /**
+   * SVG page `page` (from 0): the bytes `pscat --svg` writes for the same
+   * program, page size and dpi. Needs a program begun with { svg: true };
+   * throws RangeError for a page the document does not have.
+   */
+  svg(page?: number): string;
+  /** Every SVG page in order. Needs { svg: true }. */
+  svgPages(): string[];
+  /**
+   * The whole document as one PDF: the bytes `pscat --pdf` writes for the
+   * same program, page size and dpi. Needs { pdf: true }.
+   */
+  pdf(): Uint8Array;
   /** The page as an ImageData (needs a global ImageData: browsers, workers). */
   imageData(): ImageData;
   /** Draw the page into a canvas, resizing it to the page. */

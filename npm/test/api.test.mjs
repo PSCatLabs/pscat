@@ -91,6 +91,60 @@ test('the stepped API ends on the same page render() draws', async () => {
   assert.deepEqual(r.pixels(), full.data);
 });
 
+test('svg and pdf: the run recorded as vector pages, repeatable, opt-in', async () => {
+  // Byte equality with `pscat --svg`/`--pdf` is checked in tests/wasm.rs.
+  const r = await createRenderer();
+  const doc = '%%Title: Two pages\n0 0 1 setrgbcolor 10 10 50 30 rectfill showpage\n'
+    + '/Helvetica findfont 12 scalefont setfont 10 40 moveto (two) show showpage';
+  const page = { width: 100, height: 80, svg: true, pdf: true };
+  const img = r.render(doc, page);
+  assert.equal(img.width, 100);
+  const svgs = r.svgPages();
+  assert.equal(svgs.length, 2);
+  for (const svg of svgs) assert.match(svg, /^<svg [^>]*width="100pt" height="80pt"/);
+  assert.match(svgs[0], /fill="#0000ff"/);
+  assert.equal(r.svg(1), svgs[1]);
+  assert.equal(r.svg(), svgs[0]);
+  assert.throws(() => r.svg(2), RangeError);
+  assert.throws(() => r.svg(-1), RangeError);
+  const pdf = r.pdf();
+  assert.ok(pdf instanceof Uint8Array);
+  const text = new TextDecoder('latin1').decode(pdf);
+  assert.ok(text.startsWith('%PDF-'));
+  assert.equal(text.match(/\/Type \/Page\b/g).length, 2);
+  assert.match(text, /\/Title \(Two pages\)/);
+  // The same program again gives the same bytes.
+  r.render(doc, page);
+  assert.deepEqual(r.svgPages(), svgs);
+  assert.deepEqual(r.pdf(), pdf);
+  // Only what was asked for is recorded.
+  r.render(doc, { width: 100, height: 80, svg: true });
+  assert.equal(r.svgPages().length, 2);
+  assert.throws(() => r.pdf(), /pdf: true/);
+  r.render(doc, { width: 100, height: 80 });
+  assert.throws(() => r.svg(), /svg: true/);
+  assert.throws(() => r.svgPages(), /svg: true/);
+  assert.throws(() => r.render('', { svg: 'yes' }), TypeError);
+});
+
+test('svg and pdf mid-run show the document so far, then the finished one', async () => {
+  const r = await createRenderer();
+  const doc = '0 1 199 { dup 2 mul 0 moveto 0 100 rlineto stroke pop } for';
+  const page = { width: 400, height: 100, svg: true, pdf: true };
+  r.render(doc, page);
+  const [full, fullPdf] = [r.svgPages(), r.pdf()];
+  r.begin(doc, page);
+  for (let i = 0; i < 5; i++) r.step(40);
+  const partial = r.svgPages();
+  const partialPdf = r.pdf();
+  assert.equal(partial.length, 1);
+  assert.ok(partial[0].length < full[0].length, 'mid-run SVG should be partial');
+  assert.notDeepEqual(partialPdf, fullPdf);
+  while (r.step(1000));
+  assert.deepEqual(r.svgPages(), full);
+  assert.deepEqual(r.pdf(), fullPdf);
+});
+
 test('the libraries in lib/ are embedded', async () => {
   const r = await createRenderer();
   const img = r.render('(lib/artkit.ps) run /frnd where { pop (ok) print } if', { width: 10, height: 10 });

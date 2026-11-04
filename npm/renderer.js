@@ -50,12 +50,19 @@ function pageOf(options = {}) {
     }
   }
   if (!Number.isFinite(dpi) || dpi <= 0) throw new RangeError(`pscat: dpi must be a positive number, got ${dpi}`);
-  return { width, height, scale: dpi / 72 };
+  for (const k of ['svg', 'pdf']) {
+    if (options[k] !== undefined && typeof options[k] !== 'boolean') {
+      throw new TypeError(`pscat: ${k} must be true or false, got ${options[k]}`);
+    }
+  }
+  return { width, height, scale: dpi / 72, record: { svg: options.svg === true, pdf: options.pdf === true } };
 }
 
 /** One interpreter in its own WebAssembly instance. Make one with createRenderer(). */
 export class Renderer {
   #ps;
+  // What the current program records besides pixels: { svg, pdf }.
+  #record = { svg: false, pdf: false };
 
   /** @internal Use createRenderer(). */
   constructor(core) {
@@ -78,8 +85,10 @@ export class Renderer {
     if (typeof source !== 'string' && !(source instanceof Uint8Array)) {
       throw new TypeError('pscat: the program must be a string or a Uint8Array');
     }
-    const { width, height, scale } = pageOf(options);
-    this.#ps.begin(source, width, height, scale);
+    const { width, height, scale, record } = pageOf(options);
+    this.#record = { svg: false, pdf: false };
+    this.#ps.begin(source, width, height, scale, record);
+    this.#record = record;
   }
 
   /**
@@ -155,6 +164,37 @@ export class Renderer {
       output: this.output,
       warnings: this.warnings,
     };
+  }
+
+  /**
+   * SVG page `page` (from 0) as a string: the bytes `pscat --svg` writes
+   * for the same program, page size and dpi. Needs begin()/render() with
+   * { svg: true }. Mid-run (between step() calls) it is the page so far.
+   */
+  svg(page = 0) {
+    if (!this.#record.svg) throw new Error('pscat: svg() needs a program begun with { svg: true }');
+    if (!Number.isInteger(page) || page < 0 || page >= this.#ps.svgCount()) {
+      throw new RangeError(`pscat: no SVG page ${page} (the document has ${this.#ps.svgCount()})`);
+    }
+    return this.#ps.svg(page);
+  }
+
+  /** Every SVG page, in order, as svg(page) returns each. Needs { svg: true }. */
+  svgPages() {
+    if (!this.#record.svg) throw new Error('pscat: svgPages() needs a program begun with { svg: true }');
+    const pages = [];
+    for (let i = 0, n = this.#ps.svgCount(); i < n; i++) pages.push(this.#ps.svg(i));
+    return pages;
+  }
+
+  /**
+   * The whole document as one PDF, a page per page: the bytes `pscat --pdf`
+   * writes for the same program, page size and dpi (a %%Title: or %%For:
+   * comment becomes the document's title or author). Needs { pdf: true }.
+   */
+  pdf() {
+    if (!this.#record.pdf) throw new Error('pscat: pdf() needs a program begun with { pdf: true }');
+    return this.#ps.pdf();
   }
 
   /** The page as an ImageData (browsers, workers; needs a global ImageData). */

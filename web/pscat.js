@@ -21,6 +21,10 @@
 // Works in node too (no canvas there — use pixels()/width/height):
 //   const ps = await Pscat.instantiate(fs.readFileSync('pscat.wasm'));
 //
+// SVG and PDF, byte for byte what `pscat --svg`/`--pdf` writes (#1003):
+//   ps.run(source, 612, 792, 1, { svg: true, pdf: true });
+//   const pages = ps.svgCount();  const first = ps.svg(0);  const doc = ps.pdf();
+//
 // The npm package (npm/, #566) ships this file as its core.js and wraps
 // it in the documented createRenderer() API.
 
@@ -44,14 +48,18 @@ export class Pscat {
   /**
    * Queue a program (a string, or the bytes of one) on a fresh
    * width x height point page, at `scale` device pixels per point
-   * (dpi / 72). Throws on unusable page sizes.
+   * (dpi / 72). `record.svg` / `record.pdf` also record the run as
+   * SVG / PDF, read with svg() / pdf(). Throws on unusable page sizes.
    */
-  begin(source, width = 612, height = 792, scale = 1) {
+  begin(source, width = 612, height = 792, scale = 1, record = {}) {
     const bytes = typeof source === 'string' ? new TextEncoder().encode(source) : source;
+    const flags = (record.svg ? 1 : 0) | (record.pdf ? 2 : 0);
     const ptr = this.#copyIn(bytes);
-    const rc = scale === 1
-      ? this.ex.ps_begin(ptr, bytes.length, width, height)
-      : this.ex.ps_begin_scaled(ptr, bytes.length, width, height, scale);
+    const rc = flags !== 0
+      ? this.ex.ps_begin_vector(ptr, bytes.length, width, height, scale, flags)
+      : scale === 1
+        ? this.ex.ps_begin(ptr, bytes.length, width, height)
+        : this.ex.ps_begin_scaled(ptr, bytes.length, width, height, scale);
     this.ex.ps_dealloc(ptr, bytes.length);
     if (rc !== 0) throw new RangeError(`pscat: unusable page size ${width}x${height} at scale ${scale}`);
   }
@@ -89,8 +97,8 @@ export class Pscat {
   }
 
   /** begin + run to completion. Returns 0, or -1 with .error set. */
-  run(source, width = 612, height = 792, scale = 1) {
-    this.begin(source, width, height, scale);
+  run(source, width = 612, height = 792, scale = 1, record = {}) {
+    this.begin(source, width, height, scale, record);
     let status;
     do {
       status = this.step(1 << 16);
@@ -143,6 +151,31 @@ export class Pscat {
     if (len === 0) return [];
     const ptr = this.ex.ps_warnings_ptr();
     return new TextDecoder().decode(new Uint8Array(this.ex.memory.buffer, ptr, len)).split('\n');
+  }
+
+  /** SVG pages recorded so far (0 unless begun with record.svg). */
+  svgCount() {
+    return this.ex.ps_svg_count();
+  }
+
+  /**
+   * SVG page `page` (from 0) as a string, or null when SVG is not being
+   * recorded or there is no such page. Mid-run it is the page so far.
+   */
+  svg(page = 0) {
+    if (this.ex.ps_svg(page) !== 0) return null;
+    return new TextDecoder().decode(this.#vector());
+  }
+
+  /** The whole document as PDF bytes, or null unless begun with record.pdf. */
+  pdf() {
+    if (this.ex.ps_pdf() !== 0) return null;
+    return this.#vector().slice();
+  }
+
+  // The module's vector buffer, valid until the next ps_svg/ps_pdf/begin.
+  #vector() {
+    return new Uint8Array(this.ex.memory.buffer, this.ex.ps_vector_ptr(), this.ex.ps_vector_len());
   }
 
   /** Blit the live page into a <canvas> (resizes it to match). */
