@@ -127,6 +127,24 @@ test('svg and pdf: the run recorded as vector pages, repeatable, opt-in', async 
   assert.throws(() => r.render('', { svg: 'yes' }), TypeError);
 });
 
+test('svg and pdf mid-run show the document so far, then the finished one', async () => {
+  const r = await createRenderer();
+  const doc = '0 1 199 { dup 2 mul 0 moveto 0 100 rlineto stroke pop } for';
+  const page = { width: 400, height: 100, svg: true, pdf: true };
+  r.render(doc, page);
+  const [full, fullPdf] = [r.svgPages(), r.pdf()];
+  r.begin(doc, page);
+  for (let i = 0; i < 5; i++) r.step(40);
+  const partial = r.svgPages();
+  const partialPdf = r.pdf();
+  assert.equal(partial.length, 1);
+  assert.ok(partial[0].length < full[0].length, 'mid-run SVG should be partial');
+  assert.notDeepEqual(partialPdf, fullPdf);
+  while (r.step(1000));
+  assert.deepEqual(r.svgPages(), full);
+  assert.deepEqual(r.pdf(), fullPdf);
+});
+
 test('the libraries in lib/ are embedded', async () => {
   const r = await createRenderer();
   const img = r.render('(lib/artkit.ps) run /frnd where { pop (ok) print } if', { width: 10, height: 10 });
