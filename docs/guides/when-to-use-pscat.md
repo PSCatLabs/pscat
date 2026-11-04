@@ -347,7 +347,8 @@ pscat sets the exact layer on top (type, a QR code, a formula, a chart, the
 frame) and writes the print-ready PDF. pscat can also read a JPEG photo and
 turn it into an engraving ([Printmaking](printmaking.md)).
 
-A worked hybrid example, with a side-by-side comparison of the image model
-alone, pscat alone and the two together, is planned in
-[issue #995](https://github.com/PSCatLabs/pscat/issues/995). Its guide will
-be `docs/guides/pscat-with-image-models.md`.
+[pscat with an image model](pscat-with-image-models.md) has two worked hybrid
+examples, an A4 talk poster and a café menu, each with a side-by-side
+comparison of the image model alone, pscat alone and the two together, and
+the facts checked under each: whether the QR code decodes, whether the text is
+spelled right, whether the numbers are right.

@@ -1,0 +1,226 @@
+%!PS-Adobe-3.0
+%%Title: Why Is the Sky Blue? (a hybrid poster: image model + pscat)
+%%BoundingBox: 0 0 595 842
+%%EndComments
+
+% An A4 poster for a public talk, made in two layers:
+%
+%   1. The atmosphere: examples/hybrid/sky_talk_bg.jpg, an oil-painted
+%      evening sky made once by an image model (the prompt is in
+%      examples/hybrid/README.md) and then frozen. Nothing in it is exact,
+%      and nothing needs to be.
+%   2. The exact layer, everything below: the type, the Rayleigh formula,
+%      a bar chart whose numbers this program computes from that formula,
+%      and a QR code that lib/qr.ps encodes and draws as vector squares.
+%
+% Change the copy, the chart or the layout here and re-render: the painted
+% layer stays as it is, so iterating on the poster never asks the image
+% model for anything again.
+%
+% Render from the repository root (the program reads the JPEG by a
+% relative path):
+%   pscat --page 595x842 --pdf sky_talk.pdf examples/hybrid/sky_talk.ps
+%   pscat --page 595x842 --dpi 144 --png sky_talk.png examples/hybrid/sky_talk.ps
+% The PDF is A4 at its true size; the type, chart and QR code stay vector,
+% and the painting is embedded at its own 1024 x 1536 pixels (about
+% 125 pixels per inch across the page, plenty for a soft painted sky).
+%
+% Defining /PscatOnly true before the program swaps the painting for a
+% sky that paintkit paints (the "pscat alone" panel of the comparison in
+% docs/guides/pscat-with-image-models.md); the exact layer is unchanged:
+%   { echo '/PscatOnly true def'; cat examples/hybrid/sky_talk.ps; } | \
+%     pscat --page 595x842 --dpi 144 --png sky_pscat.png -
+%
+% The talk, the speaker and the library are invented.
+% CC0 1.0 (see LICENSE-CC0). The background image was made by OpenAI's
+% image model; examples/hybrid/README.md says where it came from and how
+% it is licensed.
+
+(lib/qr.ps) run
+
+/PscatOnly where { pop } { /PscatOnly false def } ifelse
+
+/PW 595 def /PH 842 def
+/URL (https://pscatlabs.github.io/pscat/hybrid.html) def
+
+% ---------------------------------------------------------------- fonts
+% Latin-1 for the multiplication sign and the middle dot.
+/latin1 { % /New /Base -
+  findfont dup length dict copy dup /Encoding ISOLatin1Encoding put definefont pop
+} def
+/Title-L1 /Palatino-Bold latin1
+/Body-L1 /Palatino-Roman latin1
+/Ital-L1 /Palatino-Italic latin1
+/Sans-L1 /Helvetica latin1
+/SansB-L1 /Helvetica-Bold latin1
+/font { exch findfont exch scalefont setfont } def
+
+/white { 1 1 1 setrgbcolor } def
+/cream { 1 0.96 0.88 setrgbcolor } def
+/rshow { dup stringwidth pop neg 0 rmoveto show } def
+/cat { % (a) (b) -> (ab)
+  1 index length 1 index length add string
+  dup 0 4 index putinterval dup 3 index length 3 index putinterval 3 1 roll pop pop } def
+/cshow { dup stringwidth pop 2 div neg 0 rmoveto show } def
+
+% ------------------------------------------------------------- the layer
+PscatOnly {
+  % pscat alone: a sky painted with paintkit (the landscape cookbook's sky,
+  % water and cloud recipes), the same horizon line as the painting.
+  (lib/artkit.ps) run
+  (lib/paintkit.ps) run
+  5 srand
+  /WL 152 def
+  /HORIZON [ /cadmiumyellow 1 /titaniumwhite 3 /alizarin 0.45 ] pigcolor def
+  /MID [ /alizarin 0.35 /phthaloblue 0.55 /titaniumwhite 3.5 ] pigcolor def
+  /ZENITH [ /phthaloblue 1 /titaniumwhite 0.6 ] pigcolor def
+  /skyat { WL sub PH WL sub div 0 max 1 min /skt exch def
+    skt 0.4 lt { HORIZON MID skt 0.4 div 0.8 exp mix3 }
+               { MID ZENITH skt 0.4 sub 0.6 div 0.7 exp mix3 } ifelse } def
+  WL 2 PH { /sky_y exch def sky_y skyat setrgbcolor 0 sky_y PW 4 rectfill } for
+  WL 30 PH { /sky_y exch def [ sky_y 15 add skyat ] /sky_c exch def
+    0 sky_y PW 30 screct
+    << /Count 7 /Length 70 /Angle 30 /Lean 6 /LengthJitter 0.2 >> pkcrisscross
+    << /Width 34 /Charge 0.7 /Depletion 0.8 /Edge 0.3 /ColorMix 1
+       /Colors [ [ sky_c 1.03 shade ] [ sky_c 0.97 shade ] ] >> pkbroad } for
+  % two clouds with form, lit from the glow below
+  /lump { /cb_h exch def /cb_w exch def /cb_y exch def /cb_x exch def
+    newpath cb_x cb_y moveto
+    cb_x cb_w 0.1 mul add cb_y cb_h 0.9 mul add  cb_x cb_w 0.3 mul add cb_y cb_h 1.1 mul add
+    cb_x cb_w 0.42 mul add cb_y cb_h 0.8 mul add curveto
+    cb_x cb_w 0.55 mul add cb_y cb_h 1.35 mul add  cb_x cb_w 0.8 mul add cb_y cb_h 1.05 mul add
+    cb_x cb_w 0.84 mul add cb_y cb_h 0.5 mul add curveto
+    cb_x cb_w 0.95 mul add cb_y cb_h 0.5 mul add  cb_x cb_w 1.02 mul add cb_y cb_h 0.2 mul add
+    cb_x cb_w add cb_y curveto
+    cb_x cb_w 0.6 mul add cb_y cb_h 0.1 mul sub  cb_x cb_w 0.3 mul add cb_y cb_h 0.3 mul sub
+    cb_x cb_y curveto closepath } def
+  /form { srand /fm_w exch def /fm_y exch def /fm_x exch def
+    /fm_h fm_w 0.28 mul def  /fm_r fm_w 0.04 mul def
+    /fm_under [ fm_y fm_h 2 div add skyat ] def
+    /fm_body [ 0.64 0.53 0.68 ] def  /fm_lit [ 0.93 0.72 0.62 ] def
+    /fm_n fm_w fm_h mul 1.4 mul fm_r dup mul 3.14 mul div cvi def
+    { fm_x fm_y fm_w fm_h lump scpath
+      << /Count fm_n /Radius fm_r /Squash 0.7 >> pkscumblein
+      << /Width fm_r 2.4 mul /Charge 0.75 /Depletion 0.1 /Edge 0.4 /ColorMix 0.8
+         /Colors [ [ fm_body 1.1 shade ] [ fm_body 0.9 shade ] ] >> pkbroad }
+    << /Soft 0.8 /Under fm_under >> pkwet
+    { fm_x fm_y fm_w fm_h lump scpath
+      << /Count fm_n 2 mul /Radius fm_r /Squash 0.7 /Light 250 /Reach 0.4 /Feather 0.9 >> pkscumblein
+      << /Width fm_r 2.4 mul /Charge 0.75 /Depletion 0.1 /Edge 0.4 /ColorMix 0.8
+         /Colors [ [ fm_body fm_lit 0.35 mix3 ] [ fm_body fm_lit 0.5 mix3 ] ] >> pkbroad
+      fm_x fm_y fm_w fm_h lump scpath
+      << /Count fm_n 4 mul /Radius fm_r 0.6 mul /Squash 0.7 /Light 250 /Reach 0.22 /Feather 1 >> pkscumblein
+      << /Width fm_r 1.5 mul /Charge 0.8 /Depletion 0.1 /Edge 0.4 /ColorMix 0.8
+         /Colors [ [ fm_lit fm_under 0.2 mix3 ] [ fm_lit fm_body 0.2 mix3 ] ] >> pkbroad }
+    << /Soft 0.6 /Under fm_body >> pkwet } def
+  80 300 260 2 form
+  380 270 150 4 form
+  % the sea: the sky mirrored and darkened, with broken horizontal pulls
+  /SEA [ 0.22 0.27 0.42 ] def
+  /seaat { WL exch sub WL div 0 max 1 min /st exch def
+    [ WL st 1.5 mul 0.3 add PH WL sub mul add skyat ] SEA st 0.5 mul 0.45 add mix3 } def
+  WL 2 sub -2 0 { /wt_y exch def [ wt_y seaat ] 0.8 shade setrgbcolor 0 wt_y PW 4 rectfill } for
+  WL 4 sub -9 0 { /wt_y exch def
+    [ wt_y seaat ] 0.72 shade setrgbcolor
+    /wt_x PW chance 80 sub def
+    newpath wt_x wt_y moveto wt_x 120 add 80 chance add wt_y 1.5 frnd mul add lineto
+    << /Width 8 /Charge 0.3 /Depletion 0.9 /Edge 0.3 >> pkbroad } for
+  % the headland on the right, as in the painting
+  [ 0.24 0.20 0.30 ] aload pop setrgbcolor
+  newpath 200 WL moveto 230 WL 6 add 260 WL 9 add 300 WL 12 add curveto
+  340 WL 22 add 380 WL 24 add 430 WL 30 add curveto
+  480 WL 36 add 520 WL 33 add 560 WL 38 add curveto
+  580 WL 40 add 600 WL 41 add PW 10 add WL 42 add curveto PW 10 add WL lineto closepath fill
+} {
+  % the hybrid: the frozen painting, scaled to cover the page width and
+  % aligned to the bottom edge (its open sky runs off the top).
+  gsave
+    0 0 PW PH rectclip
+    /BgW 1024 def /BgH 1536 def
+    PW PW BgW div BgH mul scale
+    /DeviceRGB setcolorspace
+    << /ImageType 1 /Width BgW /Height BgH /BitsPerComponent 8
+       /Decode [0 1 0 1 0 1] /ImageMatrix [BgW 0 0 BgH neg 0 BgH]
+       /DataSource (examples/hybrid/sky_talk_bg.jpg) (r) file /DCTDecode filter
+    >> image
+  grestore
+} ifelse
+
+% ------------------------------------------------------------ the title
+white
+/Title-L1 66 font
+44 744 moveto (Why Is the) show
+44 676 moveto (Sky Blue?) show
+/Ital-L1 21 font
+46 636 moveto (A free public talk on light, air and colour) show
+/Body-L1 15 font
+46 610 moveto (Dr. Imogen Hartley, atmospheric physicist) show
+
+% ------------------------------------------- the formula and the chart
+% Rayleigh: scattered intensity goes as one over the fourth power of the
+% wavelength. The bars are (700 / lambda)^4, computed here, so the chart
+% and its labels cannot disagree with the formula.
+/formula { % x y -
+  moveto
+  /Times-Italic 38 font (I) show
+  /Symbol 38 font ( \265 ) show
+  /Times-Roman 38 font (1/) show
+  /Symbol 38 font (l) show
+  /Times-Roman 22 font 0 16 rmoveto (4) show
+} def
+white
+/Sans-L1 10 font
+46 552 moveto (Rayleigh scattering) show
+46 508 formula
+
+/bars [ % nm  r g b  (each bar in the colour of its light)
+  [ 400 0.62 0.45 1.00 ]
+  [ 450 0.40 0.62 1.00 ]
+  [ 500 0.35 0.88 0.85 ]
+  [ 550 0.66 0.92 0.36 ]
+  [ 600 1.00 0.74 0.30 ]
+  [ 700 1.00 0.42 0.34 ]
+] def
+/ratio { 700 exch div dup mul dup mul } def      % nm -> (700/nm)^4
+/fmt1 { % x -> (x.x), rounded to one decimal
+  10 mul round cvi dup 10 idiv 3 string cvs exch 10 mod 1 string cvs
+  /fr exch def /in exch def
+  in length 2 add string
+  dup 0 in putinterval dup in length (.) putinterval
+  dup in length 1 add fr putinterval } def
+
+/CX 300 def /CY 470 def /CW 250 def /CH 66 def     % the chart's box
+/bw 26 def
+/pitch CW bars length div def
+white /Sans-L1 10 font
+CX 552 moveto (Scattering relative to red light \(700 nm\)) show
+0 1 bars length 1 sub {
+  /i exch def
+  bars i get aload pop /cb exch def /cg exch def /cr exch def /nm exch def
+  /x CX i pitch mul add pitch bw sub 2 div add def
+  /h nm ratio 9.4 div CH mul def
+  cr cg cb setrgbcolor x CY bw h rectfill
+  white /SansB-L1 9.5 font
+  x bw 2 div add CY h add 4 add moveto nm ratio fmt1 (\327) cat cshow
+  /Sans-L1 8.5 font
+  x bw 2 div add CY 12 sub moveto nm 3 string cvs ( nm) cat cshow
+} for
+0.8 setlinewidth white
+newpath CX CY moveto CX CW add CY lineto stroke
+
+% ------------------------------------------------- when, where, the QR
+white
+/Title-L1 22 font
+46 104 moveto (Thursday 3 December 2026 \267 7:30 pm) show
+/Body-L1 16 font
+46 80 moveto (Harbourside Library, Lecture Room 2) show
+
+% The URL is 44 bytes: version 5 at level H. 2-point modules put every
+% module edge on a pixel edge at 72 and 144 dpi (the origin is on whole
+% points too), and the light quiet zone is painted, cream on the dark sea.
+/QX 461 def /QY 36 def
+QX QY moveto URL << /Level /H >> qrencode
+<< /ModuleSize 2 /Dark [0.08 0.12 0.30] /Light [1 0.96 0.88] >> qrdraw
+cream /Ital-L1 12 font
+QX 90 add QY 100 add moveto (Scan: how this poster was made) rshow
+showpage

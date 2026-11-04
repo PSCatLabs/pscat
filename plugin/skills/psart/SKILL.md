@@ -201,6 +201,33 @@ Also in the library, documented in each file's header and in
 showpage
 ```
 
+## With an image model: paint once, compose in pscat
+
+If you (or the user) also have an image tool, split the work: the image model
+paints the atmosphere, pscat sets everything exact on top. A prompt that works:
+
+> Generate a background with <image tool>: a painterly evening sky, portrait
+> 2:3, open sky in the top third, no text, letters or logos. Save it as a JPEG
+> and keep it; do not regenerate it. Then compose the poster in pscat: draw the
+> JPEG to cover the page, and set the title, the details and a QR code on top.
+
+Then iterate on the pscat layer only. pscat reads JPEG, not PNG, through
+`/DCTDecode`; give the image its pixel size:
+
+```postscript partial
+gsave 0 0 595 842 rectclip  595 595 1024 div 1536 mul scale
+/DeviceRGB setcolorspace
+<< /ImageType 1 /Width 1024 /Height 1536 /BitsPerComponent 8 /Decode [0 1 0 1 0 1]
+   /ImageMatrix [1024 0 0 -1536 0 1536]
+   /DataSource (background.jpg) (r) file /DCTDecode filter >> image
+grestore
+% now the exact layer: type, a chart, (lib/qr.ps) run ... qrencode ... qrdraw
+```
+
+Paint the QR code's quiet zone (`/Light` a light colour) so it scans over the
+painting. [pscat with an image model](https://github.com/PSCatLabs/pscat/blob/main/docs/guides/pscat-with-image-models.md)
+has two worked examples and a comparison with the image model alone.
+
 ## Composition habits that keep pieces good
 
 - Pick a palette and stay in it; one accent color earns more than six.

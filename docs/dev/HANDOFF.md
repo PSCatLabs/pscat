@@ -721,7 +721,17 @@ renders eight examples in both and compares block-downsampled output).
   table (keep the rows identical), and README, AGENTS.md, CLAUDE.md and the
   plugin skills only point to it. Every pscat claim in it traces to a shipped
   feature (`notes/994-when-to-use-pscat.md`); update it when a capability it
-  names changes, and link the hybrid guide from it when #995 lands.
+  names changes. Its "Combining them" section links the hybrid guide.
+
+- **The hybrid guide states checked facts, pinned by a test** (#995).
+  `docs/guides/pscat-with-image-models.md` (site: `site/hybrid.html`) compares
+  an image model alone, pscat alone and the two together on two examples in
+  `examples/hybrid/`. `tests/hybrid.rs` decodes every pscat QR code (PNG and
+  PDF), checks the painted copy string by string, and pins that the image
+  model's own QR codes do not decode. The image-model JPEGs are frozen
+  assets with their prompts in `examples/hybrid/README.md`: do not regenerate
+  them to change a poster; edit the pscat layer. If one is ever replaced,
+  re-check the facts on the comparison sheets (`compare_*.ps`) and the guide.
 
 - **gs is the oracle.** Every semantics question in Stages 5–7 was
   settled by running the snippet in gs first and pinning the answer in

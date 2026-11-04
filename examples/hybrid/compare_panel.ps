@@ -1,0 +1,58 @@
+%!PS
+% One panel of a three-way comparison sheet: (a) the image model alone,
+% (b) pscat alone, (c) the hybrid, each with the facts checked about it
+% typeset underneath. Run by compare_sky_talk.ps and compare_menu_card.ps,
+% which define the example and its facts; /Panel (1, 2 or 3) comes from
+% `pscat sheet --sweep Panel=1,2,3`. Run from the repository root.
+
+/cmp-strip 190 def                    % the height of the facts strip
+
+% A row of the strip: a mark (/ok, /no or /note), then the text.
+/cmp-fact { % /mark (text) -
+  exch
+  dup /ok eq { 0.10 0.50 0.20 setrgbcolor /ZapfDingbats 15 selectfont (4) show } if
+  dup /no eq { 0.75 0.12 0.10 setrgbcolor /ZapfDingbats 15 selectfont (8) show } if
+  /note eq { 0.35 setgray /ZapfDingbats 15 selectfont (l) show } if
+  ( ) show
+  0.12 setgray /Helvetica 15 selectfont show
+} def
+
+/cmp-panel { % (heading) [ [/mark (text)] ... ] { draw the poster } -
+  /cmp-draw exch def /cmp-facts exch def /cmp-head exch def
+  % the poster, above the strip
+  gsave 0 cmp-strip translate
+    0 0 PageW PageH rectclip
+    % the example ends with showpage: make it a no-op while it runs
+    userdict /showpage {} put cmp-draw userdict /showpage undef
+  grestore
+  % the strip
+  1 setgray 0 0 PageW cmp-strip rectfill
+  0.75 setgray 0.8 setlinewidth newpath 0 cmp-strip moveto PageW cmp-strip lineto stroke
+  0.05 setgray /Helvetica-Bold 19 selectfont
+  18 cmp-strip 32 sub moveto cmp-head show
+  /cmp-y cmp-strip 62 sub def
+  cmp-facts {
+    18 cmp-y moveto aload pop cmp-fact
+    /cmp-y cmp-y 27 sub def
+  } forall
+} def
+
+Panel 1 eq {
+  ((a) The image model alone) FactsA {
+    gsave
+      0 PageH ModelH ModelW div PageW mul sub 2 div translate
+      PageW ModelH ModelW div PageW mul scale
+      /DeviceRGB setcolorspace
+      << /ImageType 1 /Width ModelW /Height ModelH /BitsPerComponent 8
+         /Decode [0 1 0 1 0 1] /ImageMatrix [ModelW 0 0 ModelH neg 0 ModelH]
+         /DataSource ModelJPEG (r) file /DCTDecode filter >> image
+    grestore
+  } cmp-panel
+} if
+Panel 2 eq {
+  ((b) pscat alone) FactsB { /PscatOnly true def Example run } cmp-panel
+} if
+Panel 3 eq {
+  ((c) The hybrid: image model + pscat) FactsC { /PscatOnly false def Example run } cmp-panel
+} if
+showpage
