@@ -35,9 +35,12 @@ keeps value entirely off the operand stack until q returns.
 Constructors may use scratch dictionaries because they do not call user code.
 Never replace `/fp.q load` or `/aop.label load` with bare names: a procedure or
 executable string reached through a name executes instead of becoming data.
-Native operators in generated arrays are inserted with `/name load` while
-library helpers themselves are bound. Standard operators must be in force
-when the library loads; this is the repository's existing `bind` convention.
+Native operators in generated arrays come from `fp--ops`, an array of
+systemdict operators captured once at load (`//fp--ops 0 get` is `exec`).
+Do not go back to `/exec load`: it resolves at construction time and picks
+up a user redefinition, so even a faithful `/pop {pop} bind def` would be
+pushed as data (fixed in review, PR #923). Library helpers themselves are
+bound.
 
 ## Traversal implementation
 

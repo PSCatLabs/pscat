@@ -83,11 +83,12 @@ run outside that sandbox rather than weakening the test.
 
 ## Visual evidence
 
-`poster_variations_match_the_imperative_control_and_committed_renders` compares
-complete RGBA buffers between drivers at 720×960 and committed colourway PNGs.
-It also verifies stack cleanup and the printed 13/622 invariants, and asserts
-all three variants differ. This catches orchestration differences and asset
-drift. It does not replace inspecting the poster for legibility/composition.
+`poster_variations_match_the_imperative_control` compares complete RGBA
+buffers between the two drivers at 720×960 in the same run. It also verifies
+stack cleanup and the printed 13/622 invariants, and asserts all three
+variants differ. The `#[ignore]`d `saved_showcase_pngs_match_current_renders`
+compares today's renders with the committed PNGs when the showcase is rebuilt
+([WASM-STUDIO.md](WASM-STUDIO.md)). It does not replace inspecting the poster for legibility/composition.
 The default poster, all colourways, primitive sheet and detail were visually
 inspected during implementation; independent perceptual assessment remains for
 Opus. Rerender with `python3 scripts/functional_demo.py render` only for an

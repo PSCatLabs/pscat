@@ -50,8 +50,9 @@ showpage
 ## Mistakes to avoid
 
 - Pass a named procedure as `/name load`; a bare `name` runs it.
-- `{1 2 3}` is not a collection (`fp-literal-array-required`); `[add]` is
-  not a callback (`fp-quotation-required`), write `{add}`.
+- `{1 2 3}` is not a collection (`fp-literal-array-required`); an array or
+  an operator is not a callback (`fp-quotation-required`): write `{add}`,
+  not `/add load`.
 - The callback must leave exactly its result: `fp-callback-stack-effect`
   means one too many or too few. Filters must return a boolean (`0 gt`, not
   a number).
