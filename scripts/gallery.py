@@ -620,7 +620,7 @@ def main(argv):
                 print("%s %s %s" % (s["source"], s["page"], s["id"]))
     elif cmd == "list":
         for p in m["pieces"]:
-            print("%s\t%s\t%d" % (p["id"], p["page"], p["speed"]))
+            print("%s\t%s\t%d\t%s" % (p["id"], p["page"], p["speed"], p["source"]))
     return 0
 
 
