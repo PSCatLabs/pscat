@@ -398,18 +398,17 @@ refine the template; after that every document is a deterministic CPU render,
 data in and pages out, on a laptop, a server or the user's own browser. A
 browser app such as print-shop costs nothing to serve beyond static files.
 
-To put a number on it, we timed pscat on print-shop's own jobs (its Classic
-Bistro menu template and its business card, compiled from print-shop's
-code, with the one helper library its templates load from its pinned
-branch), on an Apple M4 Mac mini with 16 GB under macOS 15.7, on 2026-11-04,
-one process at a time:
+To put a number on it, we timed pscat `main` on print-shop's own jobs, as
+print-shop's code compiles them and unmodified: its Classic Bistro menu
+template and its business card. We ran them on an Apple M4 Mac mini with
+16 GB under macOS 15.7, on 2026-11-04, one process at a time:
 
 | Job | Native `pscat --pdf` | Native, PDF and SVG | WebAssembly in Node 24, PDF and SVG |
 |---|---|---|---|
 | Business card, 2 sides | about 9 ms | about 10 ms | about 9 ms |
-| 40-item menu, 3 pages | about 0.15 s | about 0.2 s | about 0.27 s |
-| 500-item menu, 32 pages | about 1.9 s | about 2.4 s | about 3.4 s |
-| 1000 personalized cards, one after another | about 9 s | about 11 s | about 9 s |
+| 40-item menu, 3 pages | about 0.15 s | about 0.2 s | about 0.26 s |
+| 500-item menu, 32 pages | about 1.9 s | about 2.4 s | about 3.5 s |
+| 1000 personalized cards, one after another | about 10 s | about 11 s | about 9 s |
 
 Each figure is a median of 20 runs (the batch row is one run of 1000). The
 native times include starting the process; the WebAssembly times are runs in
