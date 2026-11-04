@@ -12,7 +12,9 @@ docs/dev/ANNOUNCING.md has the setup. Standard library only.
                            [--send --confirm TAG] [--force]
       Send FILE. Its first line is "Subject: ...", then a blank line, then the
       plain-text body; a "Tag: vX.Y.Z" line before the blank line names the
-      release. Without --send this is a dry run: it prints the message and
+      release. An optional "Html: FILE" line (relative to the draft) adds an
+      HTML version: the e-mail goes out as multipart/alternative, with the
+      plain text as the fallback. Without --send this is a dry run: it prints the message and
       sends nothing. --send needs --confirm with the tag typed back.
       --test-to sends to a test address and never marks the release announced.
 
@@ -119,7 +121,23 @@ def parse_draft(text):
     return headers, body.strip() + "\n"
 
 
-def build_message(sender, to, subject, body):
+def read_html(draft_path, headers):
+    """Return the HTML named by the draft's Html: header, or None."""
+    name = headers.get("html")
+    if not name:
+        return None
+    path = os.path.join(os.path.dirname(os.path.abspath(draft_path)), name)
+    try:
+        with open(path, encoding="utf-8") as f:
+            html = f.read()
+    except FileNotFoundError:
+        raise SystemExit(f"the draft's Html: file was not found: {path}")
+    if "<html" not in html.lower():
+        raise SystemExit(f"{path} does not look like an HTML document (no <html> tag)")
+    return html
+
+
+def build_message(sender, to, subject, body, html=None):
     msg = EmailMessage()
     msg["From"] = sender
     msg["To"] = to
@@ -127,6 +145,8 @@ def build_message(sender, to, subject, body):
     msg["Date"] = formatdate(localtime=True)
     msg["Message-ID"] = make_msgid(domain=sender.rpartition("@")[2] or None)
     msg.set_content(body)
+    if html is not None:
+        msg.add_alternative(html, subtype="html")
     return msg
 
 
@@ -170,6 +190,7 @@ def cmd_info(a):
 def cmd_send(a):
     with open(a.draft, encoding="utf-8") as f:
         headers, body = parse_draft(f.read())
+    html = read_html(a.draft, headers)
     tag = headers["tag"]
     test = a.test_to is not None
     to = a.test_to or a.to or os.environ.get("PSCAT_ANNOUNCE_TO") or DEFAULT_TO
@@ -185,12 +206,14 @@ def cmd_send(a):
 
     user = os.environ.get("PSCAT_SMTP_USER", "")
     sender = os.environ.get("PSCAT_SMTP_FROM") or user or "unset@example.invalid"
-    msg = build_message(sender, to, headers["subject"], body)
+    msg = build_message(sender, to, headers["subject"], body, html)
 
     if not a.send:
         print(f"DRY RUN: nothing sent. Log: {path}\n")
         for k in ("From", "To", "Subject", "Message-ID"):
             print(f"{k}: {msg[k]}")
+        if html is not None:
+            print(f"HTML part: {headers['html']} ({len(html.encode())} bytes); open it in a browser to preview")
         print()
         print(body, end="")
         return 0

@@ -111,6 +111,39 @@ class Send(Base):
             self.run_main("send", "--draft", self.draft, "--send", "--confirm", "v0.7.0")
         self.sent.assert_not_called()
 
+    def test_html_part_makes_multipart_alternative(self):
+        with open(os.path.join(self.tmp.name, "a.html"), "w") as f:
+            f.write("<!doctype html><html><body><p>Hello <b>list</b>.</p></body></html>")
+        with open(self.draft, "w") as f:
+            f.write(DRAFT.replace("Tag: v0.7.0\n", "Tag: v0.7.0\nHtml: a.html\n"))
+        with redirect_stdout(io.StringIO()) as out:
+            ar.main(["send", "--draft", self.draft])
+        self.assertIn("HTML part: a.html", out.getvalue())
+        with redirect_stdout(io.StringIO()):
+            ar.main(["send", "--draft", self.draft, "--send", "--confirm", "v0.7.0"])
+        msg = self.sent.call_args[0][0]
+        self.assertEqual(msg.get_content_type(), "multipart/alternative")
+        types = [p.get_content_type() for p in msg.iter_parts()]
+        self.assertEqual(types, ["text/plain", "text/html"])
+        self.assertIn("Hello list.", msg.get_body(("plain",)).get_content())
+        self.assertIn("<b>list</b>", msg.get_body(("html",)).get_content())
+
+    def test_html_file_missing_or_not_html(self):
+        with open(self.draft, "w") as f:
+            f.write(DRAFT.replace("Tag: v0.7.0\n", "Tag: v0.7.0\nHtml: nope.html\n"))
+        with self.assertRaises(SystemExit):
+            ar.main(["send", "--draft", self.draft])
+        with open(os.path.join(self.tmp.name, "nope.html"), "w") as f:
+            f.write("just text")
+        with self.assertRaises(SystemExit):
+            ar.main(["send", "--draft", self.draft])
+        self.sent.assert_not_called()
+
+    def test_plain_only_stays_single_part(self):
+        with redirect_stdout(io.StringIO()):
+            ar.main(["send", "--draft", self.draft, "--send", "--confirm", "v0.7.0"])
+        self.assertEqual(self.sent.call_args[0][0].get_content_type(), "text/plain")
+
     def test_recipient_override(self):
         os.environ["PSCAT_ANNOUNCE_TO"] = "env@example.invalid"
         _, out = self.run_main("send", "--draft", self.draft)

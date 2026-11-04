@@ -21,7 +21,11 @@ python3 scripts/announce_release.py info --tag v0.7.0     # a specific one
 ```
 
 It refuses pre-releases (`-rc.N`) unless `--allow-prerelease` is passed;
-ask the user before announcing a release candidate. A `note:` on stderr
+ask the user before announcing a release candidate. A candidate has no
+CHANGELOG section: its GitHub notes are boilerplate, so draft from
+`git log --no-merges <last stable tag>..<rc tag>` and the PRs it cites,
+and say plainly that it is a pre-release for testing (plugin and GitHub
+downloads only; crates.io and npm stay on the last stable). A `note:` on stderr
 means the tag was already announced: say so and stop unless the user wants
 a resend.
 
@@ -31,16 +35,37 @@ entry is unclear, `gh pr view <N>` for the PR it cites.
 
 ## 2. Draft
 
-Write the draft to a file in the session scratchpad (not the repo):
+Write two files to the session scratchpad (not the repo): the draft,
+and the HTML version beside it.
 
 ```
 Subject: pscat 0.7.0: <the one or two headline changes>
 Tag: v0.7.0
+Html: announce.html
 
-<body>
+<plain-text body>
 ```
 
-Body, plain text (Google Groups shows it as-is; no Markdown tables or HTML):
+The e-mail goes out as multipart/alternative: mail clients show the HTML,
+and the plain text is the fallback (and what some readers of the group's
+digest see). Both say the same thing.
+
+**HTML** (`announce.html`): copy [template.html](template.html) and fill
+every `{{...}}`. It carries the branding (logo, "PostScript for precision
+and imagination", the site's light palette), install steps for each host
+and a block of example prompts. Keep its e-mail rules (in the file's top
+comment): tables, inline styles, absolute `https` image URLs only — the
+site (`https://pscatlabs.github.io/pscat/assets/...`) or
+`https://raw.githubusercontent.com/PSCatLabs/pscat/main/...` — checked
+with `curl -sI` before use. Pick the three strip images and 4–6 prompts to
+show the range (a practical document, a QR code, a chalkboard formula, a
+painting, a chart, handwriting), weighted to what this release added. A
+prompt must work on a fresh plugin install and in one turn; if unsure,
+try it with the MCP tools first. Install steps: only channels this
+release ships (a candidate has no `cargo install`/npm line).
+
+**Plain text** (Google Groups' archive and plain-text readers show it
+as-is; no Markdown tables or HTML):
 
 - One opening paragraph: what pscat is, in the README's voice — "PostScript
   for precision and imagination", practical documents and creative art —
@@ -56,13 +81,17 @@ Body, plain text (Google Groups shows it as-is; no Markdown tables or HTML):
   getting-started guide link.
 - The release URL from `info`, then a one-line sign-off.
 
-Keep it under ~300 words. No hype words, no emoji. Don't invent features:
+Keep the plain text under ~350 words, the HTML's prose to about the same.
+No hype words, no emoji. Don't invent features:
 every claim must trace to a CHANGELOG entry or PR.
 
 ## 3. Review
 
-Show the user the complete subject, recipient and body (print the draft
-file verbatim), plus the dry run:
+Show the user the complete subject, recipient and plain-text body (print
+the draft file verbatim), and give them the HTML to look at: render it to
+a PNG (`npx playwright screenshot --full-page file://<path> out.png`, or
+the Playwright MCP tools) and show the image, and give the absolute path
+of the `.html` so they can open it in a browser. Then the dry run:
 
 ```sh
 python3 scripts/announce_release.py send --draft <file>

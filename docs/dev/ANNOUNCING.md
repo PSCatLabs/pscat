@@ -59,8 +59,13 @@ python3 scripts/announce_release.py send --draft draft.txt --test-to me@example.
 python3 scripts/announce_release.py send --draft draft.txt --send --confirm v0.7.0
 ```
 
-A draft file is `Subject:` and `Tag:` lines, a blank line, and a plain-text
-body. `--confirm` must repeat the draft's tag, and a real send checks that the
+A draft file is `Subject:` and `Tag:` lines, an optional `Html:` line
+naming an HTML file next to the draft, a blank line, and a plain-text body.
+With `Html:` the e-mail is multipart/alternative (HTML, with the plain text
+as the fallback). The skill's HTML starts from
+`.claude/skills/announce-release/template.html`, which uses only hosted
+images and inline styles so that Gmail and Google Groups show it as
+designed. `--confirm` must repeat the draft's tag, and a real send checks that the
 tag is a published GitHub release. `info` defaults to the
 latest stable release and refuses pre-releases and drafts unless told
 otherwise.
