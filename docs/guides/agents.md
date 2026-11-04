@@ -20,6 +20,10 @@ and both work against an **installed** pscat (no checkout needed):
 - **MCP**: `pscat-mcp`, installed beside `pscat`, an MCP server over stdio
   with ten tools (below).
 
+Which tool to pick for a picture (pscat, an image model, or an LLM's own
+SVG or matplotlib), and how pscat lets a model with no image output of its
+own draw and look at real pictures: [When to use pscat](when-to-use-pscat.md).
+
 In Claude Code the easiest route is the **plugin**, which installs the three
 skills and registers `pscat-mcp` in one step. No separate install is needed
 on macOS or Linux: the plugin's launcher (`plugin/scripts/pscat-mcp.sh`)

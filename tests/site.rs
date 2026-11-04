@@ -47,6 +47,7 @@ fn build_site_assembles_everything() {
         "extending.html",
         "javascript.html",
         "agents.html",
+        "when-to-use.html",
         "guides.html",
         "contribute.html",
         "learn.html",
