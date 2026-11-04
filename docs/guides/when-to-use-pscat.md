@@ -83,8 +83,8 @@ for you:
   models such as FLUX and Stable Diffusion take a seed, but the same image
   also needs the same weights, sampler, software and often hardware. The
   output is the image itself, not something you can diff or hand-edit.
-- **Cost and setup.** A hosted model costs money per image and needs a
-  network connection. A local open-weights model is free per image but wants
+- **Cost and setup.** A hosted model is usually paid per image or by
+  subscription, and needs a network connection. A local open-weights model is free per image but wants
   a capable GPU and a large download.
 
 ## Where pscat is the better choice
@@ -227,7 +227,9 @@ one short file can do.
   PostScript procedures your program calls, not files you copy from.
 - **One program, three outputs.** The same program renders to PNG, vector PDF
   and SVG (`--png`, `--pdf`, `--svg`). pscat writes SVG, so picking it does
-  not rule SVG out: it is another route to SVG, not a rival.
+  not rule SVG out: it is another route to SVG, not a rival. (A dense
+  painting or chalkboard makes a large SVG, every mark its own element;
+  prefer PNG or PDF for those.)
 - **Documents and print are native.** `showpage` ends a page, and `--pdf`
   writes the whole multi-page document with its title and author. HTML gets
   to paper through a browser's print path.
@@ -242,8 +244,10 @@ Where SVG and HTML are the better choice:
 
 ## A deterministic workflow
 
-A pscat render is a function of the program and its seed: with the same pscat,
-the same input gives the same pixels on every run. pscat also does its own
+A pscat render is a function of the program and its seed: with the same pscat
+version and the same installed font packs, the same input gives the same
+pixels on every run. (A face from a font pack that is not installed renders
+with a stand-in font, so install the same packs everywhere.) pscat also does its own
 math rather than each platform's, so a seeded render matches on macOS, Linux
 and in the browser build (rarely, a thin curve can differ by a pixel or two;
 see [artkit](artkit.md)). Asking an image model twice for the same prompt
@@ -255,7 +259,8 @@ That makes a pscat picture behave like code:
 - **Testable.** A render can be checked in CI. pscat's own test suite pins
   rendered output and asserts that seeded libraries are deterministic.
 - **Cacheable and reproducible.** The source and seed identify the image.
-  Keep them, and the same pscat version renders it again later, unchanged.
+  Keep them, and the same pscat version, with the same font packs, renders it
+  again later, unchanged.
 - **Cheap to repeat.** An LLM can write the program once; rendering it again,
   or a hundred variations of it, needs no model call at all.
 
@@ -283,7 +288,7 @@ or API call; the site's
 | Many variations of one design | pscat | `--sweep-seed` and `pscat sheet` |
 | Thousands of rule-generated marks (patterns, L-systems, tilings) | pscat | Loops, recursion and seeded random numbers are in the language; SVG lists every element |
 | Interactive, animated or reflowing web content | SVG, HTML and CSS | The DOM, CSS layout, scripting and accessibility |
-| An image that must be regenerated identically, in CI or later | pscat (pin the version) | Same program, seed and version, same pixels; no model call |
+| An image that must be regenerated identically, in CI or later | pscat (pin the version and font packs) | Same program, seed, version and fonts, same pixels; no model call |
 | Rendering inside a web page, no server or GPU | pscat's WebAssembly build, or SVG | Both render client-side |
 | Offline, no GPU, no per-image cost | pscat | One CPU binary, MIT or Apache-2.0 |
 

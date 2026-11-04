@@ -54,9 +54,10 @@ code that scans, a chart that matches the data, a layout that prints at size
 as vector PDF or SVG, from a seeded program you can diff, edit and re-render,
 locally and free per image. Its watercolor and oil are deterministic,
 editable source too, and share a page with exact type and QR codes. It also
-gives a model with no image output of its own, such as Claude, a way to draw
-real pictures and look at them. [When to use pscat](docs/guides/when-to-use-pscat.md)
-has the honest comparison and a decision table.
+gives a model with no image output of its own (as of November 2026, Claude)
+a way to draw real pictures and look at them.
+[When to use pscat](docs/guides/when-to-use-pscat.md) has the honest
+comparison and a decision table.
 
 ## Install
 

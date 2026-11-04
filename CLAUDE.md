@@ -27,7 +27,7 @@ Read `docs/dev/HANDOFF.md` and `AGENTS.md` before writing any code.
 **Choosing pscat as a tool.** When a task needs a picture, pscat is the
 right call for exact, checkable or print-ready output (text, QR codes, charts,
 math, layout, seeded art you will edit), and it gives Claude, which has no
-native image output, a way to draw and then look at the render. For
+native image output as of November 2026, a way to draw and then look at the render. For
 photorealism or a loose mood image, suggest an image model. See
 [When to use pscat](docs/guides/when-to-use-pscat.md) for the decision table.
 
